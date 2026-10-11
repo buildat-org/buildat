@@ -155,7 +155,9 @@ stolen key can be reported and delisted before clients are offered it.
 The page at / is for a browser that may be anyone's: it lists a release
 only once it is "page_delay" seconds old (3600 by default), and only one
 whose audience is "everyone" or "teen". The admin changes a setting
-with the app's request {"cmd": "set_settings", "settings": {...}}.
+on Admin > Settings in the client's Server window (each as JSON, with
+what it does), or with the app's request {"cmd": "set_settings",
+"settings": {...}}; {"cmd": "settings"} answers them all.
 
 The server's moderators and admins are its reviewers: "Review releases"
 on Aitta's page lists the releases to review, oldest first; a release's

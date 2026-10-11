@@ -2091,6 +2091,16 @@ struct Module: public interface::Module, public moderation::Host
 			log_i(MODULE, "%s: %s %s", cs(name), cs(cmd), cs(id));
 			return json::Value(true);
 		}
+		// [AITTA_SETTINGS_PAGE] Every setting, the defaults under the
+		// stored ones, for the admin's Settings page
+		if(cmd == "settings"){
+			if(!admin)
+				throw Exception("only the admin reads settings");
+			json::Value r = default_settings();
+			for(json::Iterator it(m_settings); it.valid(); it.next())
+				r.set(it.key(), it.value());
+			return r;
+		}
 		// Settings by name, each one default_settings has
 		if(cmd == "set_settings"){
 			if(!admin)

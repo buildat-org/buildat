@@ -361,6 +361,52 @@ statements_page = function()
 	end)
 end
 
+-- **The admin's Settings** ([AITTA_SETTINGS_PAGE]): each setting's JSON,
+-- as on Starport's; what each does from main.cpp's default_settings()
+local admin = false
+local NOTES = {
+	licences = "The licences a release may name (SPDX ids).",
+	max_size = "The largest upload, in bytes.",
+	update_delay = "Seconds before a package's next release is listed.",
+	page_delay = "Seconds a release is listed before the page at / shows it.",
+	public_url = "This Aitta's address as its pages give it in the " ..
+			"commands; \"\" for the request's own host.",
+	play_url = "The play server's page a serverless package's \"Play in " ..
+			"the browser\" opens, <play_url>/#run=<author>/<name>; \"\" " ..
+			"for no link.",
+	app_hosting_provider = "A hosting provider's address: each app's " ..
+			"\"Host at <domain>\" link, <provider>?aitta=<this>&package=" ..
+			"<author>/<name>; \"\" for none.",
+	anon_weight = "What an anonymous report weighs.",
+	key_weight = "What a report with the client's report key weighs.",
+	thresholds = "Reported past \"hide\", a release is out of the list " ..
+			"until a moderator looks; past \"delist\", delisted. By reason.",
+}
+local function settings_page()
+	req("settings", nil, function(set)
+		local page = accounts.server_open("Settings")
+		if message then
+			text(page, message, YELLOW)
+			log:info("aitta: message " .. message)
+			message = nil
+		end
+		for k in pairs(set) do
+			log:info("aitta: settings row " .. k)
+		end
+		accounts.settings_rows(page, set, NOTES, function(k, v)
+			req("set_settings", {settings = {[k] = v}}, function()
+				message = k .. " saved."
+				log:info("aitta: setting " .. k .. " saved")
+				settings_page()
+			end)
+		end, function(k, err)
+			message = k .. ": " .. tostring(err)
+			settings_page()
+		end)
+		log:info("aitta: settings page")
+	end)
+end
+
 -- In builtin/accounts' Server window ([SERVER_ADMIN_PAGE]), an entry
 -- before its Account, Accounts and Health
 home = function()
@@ -376,6 +422,10 @@ home = function()
 		-- Another entry chosen meanwhile, or the question shown
 		if not accounts.frame or accounts.server_current() ~= "aitta" then
 			return
+		end
+		if me.admin ~= admin then
+			admin = me.admin
+			accounts.server_sidebar()
 		end
 		local page = accounts.server_open("Aitta, as " .. tostring(me.account))
 		if message then
@@ -477,6 +527,9 @@ end
 
 accounts.server_menu = function(add)
 	add(nil, "Aitta", "aitta", home)
+	if admin then
+		add("Admin", "Settings", "settings", settings_page)
+	end
 end
 -- Its accounts are in the window; no corner button ([ACCOUNT_BUTTON])
 accounts.no_account_button()

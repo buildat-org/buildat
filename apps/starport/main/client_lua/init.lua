@@ -27,9 +27,6 @@ if type(accounts) ~= "table" then
 	error("starport: could not load accounts.lua: " .. tostring(accounts_err))
 end
 
--- JSON out; in is buildat.parse_json
-local encode = require("buildat/extension/network").write_json
-
 --
 -- Requests
 --
@@ -824,37 +821,15 @@ end
 settings_page = function()
 	req("settings", {}, function(set)
 		local w = open("Settings", settings_page)
-		text(w, "Each value is JSON; Enter in a field saves it.", GREY)
-		local keys = {}
-		for k in pairs(set) do
-			keys[#keys + 1] = k
-		end
-		table.sort(keys)
-		local l = list(w)
-		for _, k in ipairs(keys) do
-			local r = l.row()
-			local name = text(r, k)
-			name:SetWordwrap(false)
-			name.minWidth = 160
-			local e = r:CreateChild("LineEdit")
-			e:SetStyleAuto()
-			e.minHeight = 26
-			e.minWidth = 420
-			e.textSelectable = true
-			e.textCopyable = true
-			e:SetText(encode(set[k]))
-			magic.SubscribeToEvent(e, "TextFinished", function()
-				local v, err = buildat.parse_json(e:GetText())
-				if v == nil and e:GetText() ~= "null" then
-					message = k .. ": " .. s(err)
-					return settings_page()
-				end
-				req("set_settings", {settings = {[k] = v}}, function()
-					message = k .. " saved."
-					settings_page()
-				end)
+		accounts.settings_rows(w, set, nil, function(k, v)
+			req("set_settings", {settings = {[k] = v}}, function()
+				message = k .. " saved."
+				settings_page()
 			end)
-		end
+		end, function(k, err)
+			message = k .. ": " .. s(err)
+			settings_page()
+		end)
 	end)
 end
 

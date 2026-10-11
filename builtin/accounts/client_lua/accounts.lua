@@ -1084,6 +1084,43 @@ end)
 local draft = nil
 local DIM = magic.Color(rgb("dim"))
 
+-- **A server's settings as rows** ([AITTA_SETTINGS_PAGE]): Starport's and
+-- Aitta's Settings page. Each setting of `set` by name with its JSON in a
+-- field, `notes[name]` a dim line under it; Enter gives save(name, value),
+-- or bad(name, error) for a text that is not JSON.
+function M.settings_rows(page, set, notes, save, bad)
+	local encode = require("buildat/extension/network").write_json
+	page_text(page, "Each value is JSON; Enter in a field saves it.", DIM)
+	local keys = {}
+	for k in pairs(set) do
+		keys[#keys + 1] = k
+	end
+	table.sort(keys)
+	for _, k in ipairs(keys) do
+		local r = row(page)
+		local name = page_text(r, k)
+		name:SetWordwrap(false)
+		name.minWidth = 160
+		local e = r:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.minHeight = 26
+		e.minWidth = 420
+		e.textSelectable = true
+		e.textCopyable = true
+		e:SetText(encode(set[k]))
+		magic.SubscribeToEvent(e, "TextFinished", function()
+			local v, err = buildat.parse_json(e:GetText())
+			if v == nil and e:GetText() ~= "null" then
+				return bad(k, err)
+			end
+			save(k, v)
+		end)
+		if notes and notes[k] then
+			page_text(page, notes[k], DIM)
+		end
+	end
+end
+
 local chat_list = nil
 -- The width a line of the chat wraps to: the page's less its margins and
 -- the list's scroll bar
