@@ -770,6 +770,19 @@ buildat.sub_packet("accounts:login_result", function(data)
 			end
 		end
 	end
+	-- A scripted client's ntfy requests, "cmd [url]" a line each
+	-- (<env>_NTFY)
+	local ntfy = buildat.get_env((opts.env or "BUILDAT_JOIN") .. "_NTFY")
+	if ntfy and ntfy ~= "" and not M.ntfy_sent then
+		M.ntfy_sent = true
+		for l in ntfy:gmatch("[^\n]+") do
+			local cmd, url = l:match("^(%S+)%s*(.*)$")
+			if cmd then
+				buildat.send_packet("accounts:ntfy", cereal.binary_output(
+						{cmd, url}, {"array", "string"}))
+			end
+		end
+	end
 	if M.on_joined then
 		M.on_joined(M.name)
 	end
@@ -1252,6 +1265,110 @@ M.totp_page = function(back)
 	totp_page(back)
 end
 
+-- **Pushes to one's phone** ([ADMIN_NOTIFY]): a Steward's or the Host's
+-- ntfy topic URL, which reports and the server's trouble are POSTed to.
+-- The server suggests a topic of its own making, a new one per server;
+-- the ntfy app subscribes to it by the link or its QR code. ask: the
+-- question after a login, above the rest until it is answered.
+local ntfy_page
+local ntfy_state = {url = "", suggest = "", note = "", may = "0"}
+local function ntfy_send(cmd, url)
+	buildat.send_packet("accounts:ntfy", cereal.binary_output({cmd, url or ""},
+			{"array", "string"}))
+end
+ntfy_page = function(back)
+	local w = open_page("ntfy", "Pushes to your phone (ntfy)", back)
+	local st = ntfy_state
+	if st.ask then
+		page_text(w, "Get a push on your phone for reports and the " ..
+				"server's trouble? It goes through ntfy, an app for " ..
+				"Android and iOS; nothing is sent until you add it.")
+		local r = row(w)
+		button(r, "Add now", function()
+			st.ask = false
+			ntfy_page(back)
+		end, true)
+		button(r, "Later", function()
+			ntfy_send("later")
+			M.server_close()
+		end)
+		button(r, "Don't add", function()
+			ntfy_send("never")
+			M.server_close()
+		end)
+		page_text(w, "Don't add: not asked again. It stays in My account.",
+				DIM)
+		return
+	end
+	if st.note ~= "" then
+		page_text(w, st.note, WARN)
+	end
+	if st.may ~= "1" then
+		if back then
+			button(w, "Back", go_back)
+		end
+		return
+	end
+	page_text(w, st.url ~= "" and "On: reports and the server's trouble " ..
+			"are pushed to this ntfy topic, at most one push in 5 minutes." or
+			"Off. Subscribe to this topic in the ntfy app, then Save. It is " ..
+			"made for you on this server; the part before the topic is the " ..
+			"ntfy server, ntfy.sh or your own.")
+	page_text(w, "A push says what happened and how many are open, never " ..
+			"who or what: anyone who knows a topic's name can read it.", DIM)
+	-- A line of its own each: the whole address shows
+	local function line(label, text)
+		page_text(w, label)
+		local e = w:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.minHeight = 26
+		e.textSelectable = true
+		e.textCopyable = true
+		e:SetText(text)
+		e.cursorPosition = 0
+		return e
+	end
+	local addr = st.url ~= "" and st.url or st.suggest
+	local e = line("Address", addr)
+	local sub = addr:gsub("^https://", "ntfy://")
+	line("Subscribe in the ntfy app (or scan the code)", sub)
+	qr_image(w, sub)
+	local r = row(w)
+	button(r, "Save", function()
+		ntfy_send("set", e:GetText())
+	end, true)
+	if st.url ~= "" then
+		button(r, "Test", function() ntfy_send("test") end)
+		button(r, "Turn off", function() ntfy_send("set", "") end)
+	end
+	if back then
+		button(r, "Back", go_back)
+	end
+end
+M.ntfy_page = function(back)
+	ntfy_state.note = ""
+	ntfy_send("status")
+	ntfy_page(back)
+end
+buildat.sub_packet("accounts:ntfy_result", function(data)
+	local v = cereal.binary_input(data, {"array", "string"})
+	ntfy_state.url, ntfy_state.suggest = v[1] or "", v[2] or ""
+	ntfy_state.note, ntfy_state.may = v[3] or "", v[4] or "0"
+	log:info("accounts: ntfy: url=" .. ntfy_state.url .. " suggest=" ..
+			ntfy_state.suggest .. " note=" .. ntfy_state.note)
+	if page_kind == "ntfy" then
+		ntfy_page(page_back)
+	end
+end)
+-- After a login, a Steward or the Host without one: the Server window at
+-- the question
+buildat.sub_packet("accounts:ntfy_ask", function(data)
+	ntfy_state = {url = "", suggest = cereal.binary_input(data, TEXT).text,
+		note = "", may = "1", ask = true}
+	log:info("accounts: ntfy asked: " .. ntfy_state.suggest)
+	M.server_window("ntfy", function() end)
+end)
+
 -- **My account** (user, 2026-10-02): what a user does with their own
 -- account, in one page, so that a game's menu has one button for it
 -- ("My account...") and guidance that names these buttons is right in
@@ -1272,6 +1389,9 @@ account_page = function(back, message)
 	local here = function() account_page(back) end
 	button(w, "Change password...", function() passwd_page(here) end)
 	button(w, "Two-step login...", function() M.totp_page(here) end)
+	if M.users and M.users.level >= 30 then
+		button(w, "Notify me by ntfy...", function() M.ntfy_page(here) end)
+	end
 	-- [STARPORT] 10g: this account the one a Starport ID logs in as
 	if M.hello.starport == 1 then
 		page_text(w, "A linked Starport ID logs in as this account.", DIM)
@@ -2637,6 +2757,16 @@ local function server_entries()
 	add("Mine", "Account", "account", function()
 		account_page(top_back())
 	end)
+	-- [ADMIN_NOTIFY] A Steward's or the Host's (the users list says so)
+	if M.users and M.users.level >= 30 then
+		add("Mine", "Pushes (ntfy)", "ntfy", function()
+			if ntfy_state.ask then
+				ntfy_page(top_back())
+			else
+				M.ntfy_page(top_back())
+			end
+		end)
+	end
 	if M.hello and M.hello["local"] == 1 then
 		add("Mine", "Open to LAN", "lan", function()
 			local w = M.server_open("Open to LAN")

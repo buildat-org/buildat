@@ -168,6 +168,13 @@ namespace accounts
 		// Server window, 2 GB unless set: past it an app takes no more from
 		// an untrusted account (below LV_MEMBER)
 		virtual uint64_t storage_budget() = 0;
+		// [ADMIN_NOTIFY] A push to the ntfy address of each account at
+		// min_level or above that set one: text as "Hearth: a new report,
+		// 3 open", and a link to the page. At most one a person per 5
+		// minutes, the rest counted into the next. No reporter, name or
+		// message text in it: a topic is readable by whoever knows it.
+		virtual void notify(int min_level, const ss_ &text,
+				const ss_ &link = "") = 0;
 	};
 
 	inline bool access(interface::Server *server,

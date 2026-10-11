@@ -106,6 +106,9 @@ int main(int argc, char *argv[])
 	// shorter for a check
 	if(getenv("BUILDAT_TOTP_WAIT_S"))
 		config.set("totp_wait_s", ss_(getenv("BUILDAT_TOTP_WAIT_S")));
+	// [ADMIN_NOTIFY]: the ntfy pushes' window, seconds; shorter for a check
+	if(getenv("BUILDAT_NTFY_BATCH_S"))
+		config.set("ntfy_batch_s", ss_(getenv("BUILDAT_NTFY_BATCH_S")));
 	if(getenv("BUILDAT_LAN_ANNOUNCE"))
 		config.set("lan_announce", ss_(getenv("BUILDAT_LAN_ANNOUNCE")));
 	for(int i = 1; i < argc; i++){

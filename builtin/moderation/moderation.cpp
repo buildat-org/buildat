@@ -2,6 +2,7 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 // [MODERATION_MODULE]: builtin/moderation/api.h says what this is.
 #include "moderation/api.h"
+#include "accounts/api.h"
 #include "core/log.h"
 #include "interface/os.h"
 #include "interface/sha256.h"
@@ -74,6 +75,15 @@ struct Module: public interface::Module, public Interface
 		put(h, "reports", jstr(rep, "id"), rep);
 		if(jstr(rep, "state") != "open")
 			return;
+		// [ADMIN_NOTIFY] The moderators' phones: the count, nothing of it
+		int open = 0;
+		for(const ss_ &id : keys(h, "reports"))
+			if(jstr(load(h, "reports", id), "state") == "open")
+				open++;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			a->notify(accounts::LV_MODERATOR, h->name()+": a new report, "+
+					std::to_string(open)+" open");
+		});
 		const ss_ gid = jstr(rep, "group");
 		json::Value g = load(h, "groups", gid);
 		if(!g.is_object() || jstr(g, "state") != "open")

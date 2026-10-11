@@ -2350,6 +2350,19 @@ struct Module: public interface::Module
 		return lv >= LV_MEMBER && jint(t, "hidden") == 0 ? lv : LV_NEW;
 	}
 
+	// [ADMIN_NOTIFY] The moderators' phones told of a new entry in the
+	// queue: what kind and how many are open, nothing of it
+	void push_queue(const ss_ &what)
+	{
+		Q o(m_db, "SELECT count(*) FROM reports WHERE state = 'open'");
+		const int64_t open = o.step() ? o.i(0) : 0;
+		const ss_ base = jstr(setting("public_url"), "url");
+		accounts::access(m_server, [&](accounts::Interface *a){
+			a->notify(LV_MODERATOR, "Hearth: "+what+", "+itos(open)+" open",
+					base);
+		});
+	}
+
 	// [TRUST_LADDER] A message held: hidden from all but its author, and
 	// in the queue for a helper's approval
 	void hold(int64_t message_id, const ss_ &author)
@@ -2358,6 +2371,7 @@ struct Module: public interface::Module
 		Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
 				"VALUES('held', ?, ?, '', ?)");
 		i.b(message_id).b(author).b(now_s()).step();
+		push_queue("a message held");
 	}
 
 	// [TRUST_LADDER] `name` trusted, or no longer, by `by`; an approval is
@@ -3196,6 +3210,7 @@ struct Module: public interface::Module
 				Q i(m_db, "INSERT INTO reports(kind, message, by, reason, time) "
 						"VALUES('domain', ?, ?, ?, ?)");
 				i.b(t.i(3)).b(name).b(host).b(now_s()).step();
+				push_queue("a link's domain to look at");
 			}
 			return json::Value(false);
 		}
@@ -3804,6 +3819,7 @@ struct Module: public interface::Module
 			i.b(cmd).b(id).b(name).b(reason).b(now_s()).b(appeal ? ss_() : bin)
 					.b((int64_t)(appeal ? 0 : weight)).step();
 			const int64_t report_id = sqlite3_last_insert_rowid(m_db);
+			push_queue(appeal ? "a new appeal" : "a new report");
 			// A network's reports once, at their highest; a helper's or
 			// above's message is only queued
 			Q w(m_db, "SELECT ifnull(sum(w), 0) FROM (SELECT max(weight) AS w "

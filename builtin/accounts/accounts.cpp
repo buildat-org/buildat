@@ -583,6 +583,8 @@ struct Module: public interface::Module, public Interface
 
 	~Module()
 	{
+		if(m_store)
+			m_store->remove("running");
 		if(m_save){
 			storage::access(m_server, [&](storage::Interface *istorage){
 				istorage->close(m_save);
@@ -665,7 +667,8 @@ struct Module: public interface::Module, public Interface
 				"accounts:get_hello", "accounts:login",
 				"accounts:admin", "accounts:passwd", "accounts:logout",
 				"accounts:totp", "accounts:link_starport",
-				"accounts:unlink_starport", "accounts:open_lan"})
+				"accounts:unlink_starport", "accounts:open_lan",
+				"accounts:ntfy"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -689,6 +692,8 @@ struct Module: public interface::Module, public Interface
 		EVENT_TYPEN("network:packet_received/accounts:passwd", on_passwd,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:logout", on_logout,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:ntfy", on_ntfy,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:totp", on_totp,
 				network::Packet)
@@ -737,6 +742,15 @@ struct Module: public interface::Module, public Interface
 			return;
 		}
 		m_store = m_save->store("accounts");
+		// [ADMIN_NOTIFY] Left by a run that did not get to its end
+		// simplified: a module that throws stops the server cleanly, so
+		// this is a process killed or crashed; a failed save shows here
+		// only as that, through the module it stopped
+		ss_ running;
+		if(m_store->get("running", running))
+			notify(LV_ADMIN, m_server->get_app_id()+": started again after "
+					"a crash", "");
+		m_store->set("running", "1");
 		migrate_levels();
 		migrate_links();
 		load_access();
@@ -909,6 +923,9 @@ struct Module: public interface::Module, public Interface
 			m_store->set("level/"+name, itos(lv));
 		if(lv >= LV_MEMBER)
 			m_store->remove("untrusted/"+name);
+		// [ADMIN_NOTIFY] No pushes below a Steward
+		if(lv < LV_MODERATOR)
+			m_store->remove("ntfy/"+name);
 		if(!by.empty())
 			log_i(MODULE, "%s set the level of %s to %i", cs(by), cs(name), lv);
 		privs_changed(name);
@@ -1869,6 +1886,7 @@ struct Module: public interface::Module, public Interface
 			send(packet.sender, "accounts:link_result", pack(link_note));
 		m_server->emit_event("accounts:login", new Login(packet.sender, name));
 		send_users_to_staff();
+		ntfy_ask(packet.sender, name);
 	}
 
 	// The admin's
@@ -2397,6 +2415,233 @@ struct Module: public interface::Module, public Interface
 		send(packet.sender, "accounts:totp_result", pack(r));
 	}
 
+	// -- Pushes by ntfy ([ADMIN_NOTIFY])
+	//
+	// A Steward's or the Host's own ntfy topic URL, set on My account:
+	// reports and the server's trouble are POSTed there as plain text, and
+	// the ntfy app puts them on their phone. Nothing is sent anywhere until
+	// someone sets one. No content goes: a topic on ntfy.sh is readable by
+	// anyone who knows its name, so a push says what happened and the open
+	// count, never who or what was reported.
+	//
+	// The store: ntfy/<name> the URL, ntfy_topic/<name> the one suggested
+	// (made once, so the page and its QR code stay the same), ntfy_ask/<name>
+	// "never" when the login's question was answered so.
+
+	// One person's pushes: at most one a window (ntfy_batch_s, 5 min),
+	// the rest counted and said in one at the window's end
+	struct NtfyBatch {
+		int64_t sent_us = 0;
+		int held = 0;
+		ss_ last;
+	};
+	std::map<ss_, NtfyBatch> m_ntfy_batch;
+	// The tests' answers, from their threads, sent to who asked on a tick
+	std::shared_ptr<MailResults> m_ntfy_results =
+			std::make_shared<MailResults>();
+	bool m_disk_said = false;
+	int64_t m_disk_checked_us = 0;
+
+	static ss_ ntfy_url_problem(const ss_ &url)
+	{
+		if(url.compare(0, 8, "https://") != 0)
+			return "An https:// address, please";
+		if(url.size() > 300)
+			return "Too long";
+		const size_t slash = url.find('/', 8);
+		if(slash == ss_::npos || slash == 8 || slash + 1 >= url.size())
+			return "The server and the topic: https://ntfy.sh/<topic>";
+		for(unsigned char c : url)
+			if(c <= ' ' || c >= 127 || c == '"' || c == '\\')
+				return "No spaces or odd characters in it";
+		return "";
+	}
+
+	ss_ ntfy_get(const char *kind, const ss_ &name)
+	{
+		ss_ v;
+		return m_store && m_store->get(kind+name, v) ? v : ss_();
+	}
+
+	// A topic of 128 random bits on ntfy.sh, the same until it is used
+	ss_ ntfy_suggest(const ss_ &name)
+	{
+		ss_ s = ntfy_get("ntfy_topic/", name);
+		if(s.empty()){
+			std::random_device rd;
+			ss_ bits(16, '\0');
+			for(char &c : bits)
+				c = (char)(rd() & 0xff);
+			s = "https://ntfy.sh/buildat-"+interface::sha256::hex(bits);
+			m_store->set("ntfy_topic/"+name, s);
+		}
+		return s;
+	}
+
+	// The POST, on a thread; a failure is logged, not tried again.
+	// peer: who asked for a test, told how it went
+	void ntfy_post(const ss_ &url, const ss_ &text, PeerId peer = 0)
+	{
+		std::shared_ptr<MailResults> results = m_ntfy_results;
+		std::thread([=](){
+			ss_ error;
+			try {
+				interface::http_post(url, text, "text/plain; charset=utf-8");
+			} catch(std::exception &e){
+				error = e.what();
+				log_w(MODULE, "ntfy: the push to %s failed: %s", cs(url),
+						e.what());
+			}
+			if(peer){
+				std::lock_guard<std::mutex> lock(results->m);
+				results->r.push_back({peer, error.empty() ? ss_("Sent: "
+						"it should be on your phone now.") : "Not sent: "+error});
+			}
+		}).detach();
+	}
+
+	void ntfy_send(const ss_ &name, const ss_ &text)
+	{
+		const ss_ url = ntfy_get("ntfy/", name);
+		if(url.empty())
+			return;
+		log_i(MODULE, "ntfy: to %s: %s", cs(name), cs(text));
+		ntfy_post(url, text);
+	}
+
+	int64_t ntfy_window_us()
+	{
+		return atoll(m_server->get_config().get<ss_>("ntfy_batch_s").c_str()) *
+				1000000;
+	}
+
+	void notify(int min_level, const ss_ &text, const ss_ &link)
+	{
+		if(!m_store)
+			return;
+		const ss_ body = text+(link.empty() ? ss_() : "\n"+link);
+		const int64_t now = interface::os::time_us();
+		for(const ss_ &key : m_store->list("ntfy/")){
+			const ss_ name = key.substr(5);
+			if(level(name) < min_level)
+				continue;
+			NtfyBatch &b = m_ntfy_batch[name];
+			if(b.sent_us == 0 || now - b.sent_us >= ntfy_window_us()){
+				b.sent_us = now;
+				b.held = 0;
+				ntfy_send(name, body);
+			} else {
+				b.held++;
+				b.last = body;
+			}
+		}
+	}
+
+	void ntfy_tick()
+	{
+		const int64_t now = interface::os::time_us();
+		for(auto &kv : m_ntfy_batch){
+			NtfyBatch &b = kv.second;
+			if(b.held == 0 || now - b.sent_us < ntfy_window_us())
+				continue;
+			ntfy_send(kv.first, itos(b.held)+" more since the last push; "
+					"the latest: "+b.last);
+			b.sent_us = now;
+			b.held = 0;
+		}
+		std::vector<std::pair<PeerId, ss_>> r;
+		{
+			std::lock_guard<std::mutex> lock(m_ntfy_results->m);
+			r.swap(m_ntfy_results->r);
+		}
+		for(auto &x : r)
+			if(m_peers.count(x.first))
+				send_ntfy(x.first, m_peers[x.first].name, x.second);
+		// The disk: once at 90% of --max-disk-mb, again after under 80%
+		if(now - m_disk_checked_us < 60000000)
+			return;
+		m_disk_checked_us = now;
+		int64_t used = 0, limit = 0;
+		storage::access(m_server, [&](storage::Interface *s){
+			used = s->used_bytes();
+			limit = s->limit_bytes();
+		});
+		if(limit <= 0)
+			return;
+		if(!m_disk_said && used >= limit / 10 * 9){
+			m_disk_said = true;
+			notify(LV_ADMIN, m_server->get_app_id()+": "+
+					itos(used / 1000000)+" MB of the disk's "+
+					itos(limit / 1000000)+" written", "");
+		} else if(m_disk_said && used < limit / 10 * 8){
+			m_disk_said = false;
+		}
+	}
+
+	// accounts:ntfy_result {url, suggestion, note, "1" when one may have it}
+	void send_ntfy(PeerId peer, const ss_ &name, const ss_ &note)
+	{
+		const bool may = level(name) >= LV_MODERATOR;
+		send(peer, "accounts:ntfy_result", pack(sv_<ss_>{
+				may ? ntfy_get("ntfy/", name) : ss_(),
+				may ? ntfy_suggest(name) : ss_(), note, may ? "1" : "0"}));
+	}
+
+	// accounts:ntfy {cmd, url}: "status"; "set" (an empty url takes it
+	// off); "test"; "later" and "never", the login's question answered
+	void on_ntfy(const network::Packet &packet)
+	{
+		auto it = m_peers.find(packet.sender);
+		sv_<ss_> q;
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				!unpack(packet.data, q) || q.empty())
+			return;
+		const ss_ name = it->second.name;
+		const ss_ cmd = q[0], url = q.size() > 1 ? q[1] : ss_();
+		if(level(name) < LV_MODERATOR && cmd != "status")
+			return send_ntfy(packet.sender, name, "Only for a "+
+					level_name(LV_MODERATOR)+" or the "+level_name(LV_ADMIN));
+		ss_ note;
+		if(cmd == "set" && url.empty()){
+			m_store->remove("ntfy/"+name);
+			log_i(MODULE, "%s took their ntfy address off", cs(name));
+			note = "Off: no pushes.";
+		} else if(cmd == "set"){
+			note = ntfy_url_problem(url);
+			if(note.empty()){
+				m_store->set("ntfy/"+name, url);
+				log_i(MODULE, "%s set an ntfy address", cs(name));
+				note = "Saved. Test sends one push.";
+			}
+		} else if(cmd == "test"){
+			const ss_ to = ntfy_get("ntfy/", name);
+			if(to.empty())
+				note = "Save an address first";
+			else {
+				log_i(MODULE, "ntfy: a test push to %s", cs(name));
+				return ntfy_post(to, m_server->get_app_id()+": a test push "
+						"for "+name, packet.sender);
+			}
+		} else if(cmd == "later" || cmd == "never"){
+			if(cmd == "never")
+				m_store->set("ntfy_ask/"+name, "never");
+			log_i(MODULE, "%s answered the ntfy question: %s", cs(name),
+					cs(cmd));
+			return;
+		}
+		send_ntfy(packet.sender, name, note);
+	}
+
+	// After a login: a Steward or the Host without an address is asked,
+	// unless they said never
+	void ntfy_ask(PeerId peer, const ss_ &name)
+	{
+		if(level(name) < LV_MODERATOR || !ntfy_get("ntfy/", name).empty() ||
+				ntfy_get("ntfy_ask/", name) == "never")
+			return;
+		send(peer, "accounts:ntfy_ask", pack(ntfy_suggest(name)));
+	}
+
 	// -- What a Starport (apps/starport) asks of its own server's accounts
 	// ([STARPORT] 10): a Starport ID is an account here
 
@@ -2577,6 +2822,7 @@ struct Module: public interface::Module, public Interface
 	void on_tick(const interface::TickEvent &)
 	{
 		stats_sample();
+		ntfy_tick();
 		std::vector<std::pair<PeerId, ss_>> r;
 		{
 			std::lock_guard<std::mutex> lock(m_mail_results->m);
