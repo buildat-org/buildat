@@ -2597,12 +2597,53 @@ local function place_the_unplaced(dtime)
 	end
 end
 
+-- Where a client that is still loading will be put ([JOIN_WHEN_LOADED]):
+-- name -> {pos, look}, told to the client at once, while the player is not
+-- in the world. __add_player() puts them there, without a second search for
+-- the spawn.
+local placing = {}
+
+function core.__place_player(name)
+	if players[name] or placing[name] then
+		return
+	end
+	local saved = saved_players[name]
+	local p = {look = {h = 0, v = 0}}
+	if type(saved) == "table" and type(saved.pos) == "table" then
+		p.pos = {x = tonumber(saved.pos.x) or 0,
+				y = tonumber(saved.pos.y) or 0,
+				z = tonumber(saved.pos.z) or 0}
+		if type(saved.look) == "table" then
+			p.look = {h = tonumber(saved.look.h) or 0,
+					v = tonumber(saved.look.v) or 0}
+		end
+	elseif saved == nil then
+		local pos, known = find_spawn_pos()
+		-- Nowhere to stand yet: nothing said, as in __add_player()
+		if not known then
+			return
+		end
+		p.pos = pos
+	else
+		return
+	end
+	placing[name] = p
+	if __send_player_pos then
+		__send_player_pos(name, p.pos.x, p.pos.y, p.pos.z, 0, p.look.h, p.look.v)
+	end
+end
+
 -- What the module calls when a client arrives and leaves. The name is the
 -- client's, and it is what everything about a player is keyed by.
 function core.__add_player(name)
 	if players[name] then
 		return
 	end
+	-- simplified: where the client was told it is, not where it says it
+	-- went since: it stands still while it loads, and its word is not
+	-- held down (hold_down()) until there is a player to hold
+	local early = placing[name]
+	placing[name] = nil
 	local id = next_id
 	next_id = id + 1
 	local ref = new_ref(PlayerRef_proto, id)
@@ -2664,7 +2705,9 @@ function core.__add_player(name)
 	-- callback reads the player it is given, and in Luanti that player has
 	-- come out of the database by then
 	local new_here = saved_players[name] == nil
-	if new_here then
+	if new_here and early then
+		o.pos, o.spawn_known = early.pos, true
+	elseif new_here then
 		o.pos, o.spawn_known = find_spawn_pos()
 	end
 	restore_player(o, saved_players[name])
@@ -2751,6 +2794,7 @@ function core.__remove_player(name)
 	if core.__admins then
 		core.__admins[name] = nil
 	end
+	placing[name] = nil
 	local id = players[name]
 	if id == nil then
 		return

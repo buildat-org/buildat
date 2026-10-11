@@ -3780,6 +3780,18 @@ struct Module: public interface::Module, public luanti::Interface
 	// by. The callbacks a mod registers for a join and a leave run here.
 	void add_player(const ss_ &name, size_t peer)
 	{
+		place_peer(name, peer);
+		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
+	}
+
+	void place_player(const ss_ &name, size_t peer)
+	{
+		place_peer(name, peer);
+		node_action("core.__place_player(\""+lua_quoted(name)+"\") return true");
+	}
+
+	void place_peer(const ss_ &name, size_t peer)
+	{
 		m_player_peers[name] = peer;
 		m_peer_players[peer] = name;
 		// At the origin until the client says otherwise, which is where a
@@ -3787,7 +3799,6 @@ struct Module: public interface::Module, public luanti::Interface
 		// from the moment they are one
 		if(!m_player_pos.count(name))
 			m_player_pos[name] = pv::Vector3DInt32(0, 0, 0);
-		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
 	void set_admin(const ss_ &name, bool admin)

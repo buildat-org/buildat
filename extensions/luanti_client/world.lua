@@ -3793,6 +3793,37 @@ function M.new(magic, buildat, log, options)
 		return dirty_count
 	end
 
+	-- Whether the blocks within r blocks of a position in nodes are drawn,
+	-- and how many are waiting for a mesh: the client's loading panel stays
+	-- until they are ([JOIN_WHEN_LOADED]). Not all of them come -- Luanti's
+	-- server leaves out the ones it reckons occluded -- so "drawn" is the
+	-- player's own block in, none near waiting, and one further out come:
+	-- the server sends the nearest first.
+	function self:drawn_around(x, y, z, r)
+		local bx = math.floor(x / BLOCKSIZE)
+		local by = math.floor(y / BLOCKSIZE)
+		local bz = math.floor(z / BLOCKSIZE)
+		local function far(b)
+			return math.max(math.abs(b.x - bx), math.abs(b.y - by),
+					math.abs(b.z - bz)) > r
+		end
+		local waiting = 0
+		for key in pairs(dirty) do
+			if not far(blocks[key]) then
+				waiting = waiting + 1
+			end
+		end
+		if waiting > 0 or not blocks[block_key(bx, by, bz)] then
+			return false, waiting
+		end
+		for _, b in pairs(blocks) do
+			if far(b) then
+				return true, 0
+			end
+		end
+		return false, 0
+	end
+
 	-- Where the camera is and which way it looks, in Luanti's terms: pitch is
 	-- degrees positive looking down and yaw is degrees counterclockwise from
 	-- +Z seen from above.

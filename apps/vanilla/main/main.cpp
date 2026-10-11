@@ -151,6 +151,13 @@ struct Module: public interface::Module
 	// Who has joined, by the account name their player has
 	std::map<network::PeerInfo::Id, ss_> m_names;
 	std::set<network::PeerInfo::Id> m_join_sent;
+	// [JOIN_WHEN_LOADED]: placed and loading, by the seconds waited; and in
+	// the world, which the client's main:world_in or WORLD_IN_LIMIT does
+	std::map<network::PeerInfo::Id, float> m_loading;
+	std::set<network::PeerInfo::Id> m_in_world;
+	// Past the loading screen's own 60 s after the first chunk, which a
+	// slow link reaches only after the scene's megabytes
+	static constexpr float WORLD_IN_LIMIT = 180;
 
 	void init()
 	{
@@ -205,7 +212,7 @@ struct Module: public interface::Module
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
 				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
 				"stop_world", "trim", "export", "export_part", "import_begin",
-				"import_data", "transfer_cancel"})
+				"import_data", "transfer_cancel", "world_in"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -317,6 +324,8 @@ struct Module: public interface::Module
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:where", on_where,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:world_in", on_world_in,
+				network::Packet)
 		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
 		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
@@ -374,6 +383,8 @@ struct Module: public interface::Module
 			m_named_peer = 0;
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
+		m_loading.erase(old_client.info.id);
+		m_in_world.erase(old_client.info.id);
 		// A transfer cut off leaves nothing behind
 		if(m_transfer.peer == old_client.info.id){
 			log_i(MODULE, "The transfer's client left; its files removed");
@@ -497,7 +508,7 @@ struct Module: public interface::Module
 	// A player's packets are a joined player's
 	bool joined(network::PeerInfo::Id peer)
 	{
-		return !m_public || m_names.count(peer);
+		return (!m_public || m_names.count(peer)) && m_in_world.count(peer);
 	}
 
 	// In through the join: the world when there is one; else the world
@@ -563,7 +574,7 @@ struct Module: public interface::Module
 	void on_accounts_privs(const accounts::Login &login)
 	{
 		send_account(login.peer);
-		if(!m_public || !m_scene || !m_shown_world.count(login.peer))
+		if(!m_public || !m_scene || !m_in_world.count(login.peer))
 			return;
 		const bool admin = is_admin(login.peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -623,7 +634,12 @@ struct Module: public interface::Module
 
 	void on_where(const network::Packet &packet)
 	{
-		if(!joined(packet.sender))
+		// From the placement on, while loading too: it is what the world
+		// loads round ([JOIN_WHEN_LOADED]); the module moves nobody who is
+		// not in it yet
+		if(!m_in_world.count(packet.sender) && !m_loading.count(packet.sender))
+			return;
+		if(m_public && !m_names.count(packet.sender))
 			return;
 		Where w;
 		try {
@@ -675,6 +691,16 @@ struct Module: public interface::Module
 			}
 		}
 		poll_contentdb();
+		for(auto it = m_loading.begin(); it != m_loading.end();){
+			const network::PeerInfo::Id peer = it->first;
+			it->second += event.dtime;
+			++it;
+			if(m_loading[peer] >= WORLD_IN_LIMIT){
+				log_i(MODULE, "Client %u: no main:world_in in %.0f s; put in",
+						(unsigned)peer, (double)WORLD_IN_LIMIT);
+				put_in_world(peer);
+			}
+		}
 		m_where_timer += event.dtime;
 		if(m_where_timer < 0.2f)
 			return;
@@ -4480,6 +4506,28 @@ struct Module: public interface::Module
 		});
 	}
 
+	// The client's loading screen has ended (load_wait_end()): the player
+	// goes in, seen and hit and their game's join callbacks run
+	void on_world_in(const network::Packet &packet)
+	{
+		if(!m_loading.count(packet.sender))
+			return;
+		log_i(MODULE, "Client %u: main:world_in", (unsigned)packet.sender);
+		put_in_world(packet.sender);
+	}
+
+	void put_in_world(network::PeerInfo::Id peer)
+	{
+		m_loading.erase(peer);
+		m_in_world.insert(peer);
+		const bool admin = m_public && is_admin(peer);
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->add_player(player_name_of(peer), peer);
+			if(admin)
+				i->set_admin(player_name_of(peer), true);
+		});
+	}
+
 	void show_world_to(network::PeerInfo::Id peer)
 	{
 		// Once per peer: files_transmitted comes again after every batch
@@ -4501,13 +4549,13 @@ struct Module: public interface::Module
 		// the scene brings voxelworld's registry, megabytes that over a
 		// slow link held the placement -- and the client's input -- for
 		// minutes ([NET_SIM]'s link cell)
-		const bool admin = m_public && is_admin(peer);
 		send_account(peer);
+		// Placed only: in the world once the client has it loaded
+		// ([JOIN_WHEN_LOADED]), see on_world_in()
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->add_player(player_name_of(peer), peer);
-			if(admin)
-				i->set_admin(player_name_of(peer), true);
+			i->place_player(player_name_of(peer), peer);
 		});
+		m_loading[peer] = 0;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->assign_scene_to_peer(m_scene, peer);
 		});

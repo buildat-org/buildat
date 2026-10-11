@@ -151,6 +151,12 @@ namespace luanti
 		// one. The angles are radians, horizontal measured the way
 		// core.get_look_horizontal() means it.
 		virtual void add_player(const ss_ &name, size_t peer) = 0;
+		// Before add_player(): the client is told where it will be (the
+		// spawn, or where the last run left the player) and the world loads
+		// round there, but the player is not in it -- no object, no join
+		// callbacks -- until add_player() ([JOIN_WHEN_LOADED]).
+		// remove_player() before that leaves nothing behind.
+		virtual void place_player(const ss_ &name, size_t peer) = 0;
 		// A server admin has every privilege ([VANILLA_PUBLIC] 3); said
 		// again whenever that changes. After luanti:game_loaded.
 		virtual void set_admin(const ss_ &name, bool admin) = 0;

@@ -572,8 +572,15 @@ local function show_client(host, port, name, password, mode, origin)
 		-- placeholders is not the game -- so a panel covers it and says how
 		-- far along it is, and the registry is free to spend the frame.
 		local loading = true
+		-- And then the world round the player ([JOIN_WHEN_LOADED]): the
+		-- panel stays until the blocks within 2 of them are drawn, or 60 s
+		-- after the first block came, as vanilla's loading screen
+		local world_wait = false
+		local first_block_us = nil
+		local WORLD_WAIT_S = 60
 
 		client.on_block = function(block)
+			first_block_us = first_block_us or buildat.get_time_us()
 			view:set_block(block)
 		end
 
@@ -994,10 +1001,7 @@ local function show_client(host, port, name, password, mode, origin)
 			if loading then
 				loading = false
 				log:info("loading done")
-				if loading_panel then
-					loading_panel:Remove()
-					loading_panel = nil
-				end
+				world_wait = true
 				-- The minimap at the top right, official's own whether or
 				-- not the game adds one, under the minimap HUD flag; V
 				-- walks its modes ([EXT_HUD_PARITY]). The shared module,
@@ -2196,7 +2200,7 @@ local function show_client(host, port, name, password, mode, origin)
 		end
 
 		local function update_hud()
-			local on = show_hud and not loading
+			local on = show_hud and not loading and not world_wait
 			-- Nothing of the player's own while the loading panel is up: the
 			-- panel is behind the rest of the UI, so a hotbar would float on
 			-- top of it. F1 takes it away as well, crosshair and all, which
@@ -2711,7 +2715,8 @@ local function show_client(host, port, name, password, mode, origin)
 							"a screen over the game" or "back in the game")
 				end
 			end
-			if form_on() or chat_input or screen_above then
+			-- And behind the loading panel, which is a world not drawn yet
+			if form_on() or chat_input or screen_above or loading_panel then
 				lock.was, lock.unlocked_s = false, 0
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
@@ -3066,6 +3071,7 @@ local function show_client(host, port, name, password, mode, origin)
 			view:update(dtime, client.state == "ready" and DROP_DISTANCE or nil)
 			if view.minimap then
 				view.minimap.view.visible = show_hud and not loading and
+						not world_wait and
 						luanti_hud.has_flag(hud_flags, luanti_hud.FLAG.minimap)
 						and luanti_hud.minimap.MODES[view.minimap.mode].nodes > 0
 				view.minimap:follow(view.camera_node.worldPosition, dtime)
@@ -3095,6 +3101,32 @@ local function show_client(host, port, name, password, mode, origin)
 						(announced ~= nil or not loading)
 				if settled or waited > MEDIA_WAIT_S then
 					rebuild_registry()
+				end
+			end
+			if world_wait then
+				local drawn, waiting = false, nil
+				if client.state == "ready" then
+					drawn, waiting = view:drawn_around(avatar.x, avatar.y,
+							avatar.z, 2)
+				end
+				local waited = first_block_us and
+						(buildat.get_time_us() - first_block_us) / 1000000 or 0
+				if drawn or waited >= WORLD_WAIT_S then
+					world_wait = false
+					log:info("loading: the world is in, "..(drawn and
+							"drawn round the player" or
+							string.format("%.0f s after the first block", waited)))
+					if loading_panel then
+						loading_panel:Remove()
+						loading_panel = nil
+					end
+				elseif loading_panel then
+					loading_text.text = "Loading "..host..":"..port..
+							"\n\nthe world: "..(waiting and
+							waiting.." blocks round you to draw" or
+							"waiting for the spawn")
+					loading_panel.width = magic.ui.root.width
+					loading_panel.height = magic.ui.root.height
 				end
 			end
 			if loading and loading_panel then

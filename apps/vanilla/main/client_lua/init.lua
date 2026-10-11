@@ -1242,6 +1242,9 @@ local function load_wait_end()
 	load_wait.screen:Remove()
 	load_wait = nil
 	log:info("load: the world is in")
+	-- And the player into it: until now they were only placed
+	-- ([JOIN_WHEN_LOADED])
+	buildat.send_packet("main:world_in", "")
 	if leave_button then
 		leave_button:Remove()
 		leave_button = nil
