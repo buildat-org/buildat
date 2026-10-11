@@ -364,12 +364,18 @@ end
 -- In builtin/accounts' Server window ([SERVER_ADMIN_PAGE]), an entry
 -- before its Account, Accounts and Health
 home = function()
+	-- The window at once, not at the reply: the ntfy question at a login
+	-- comes between, and is shown in it ([NTFY_ASK_OVER_GAME])
+	if not accounts.frame then
+		-- Its × "Exit to launcher?" from a launcher ([STARPORT_CLOSE])
+		return accounts.server_window("aitta", nil,
+				accounts.can_exit and accounts.can_exit() and
+				accounts.ask_exit or nil)
+	end
 	req("me", nil, function(me)
-		if not accounts.frame then
-			-- Its × "Exit to launcher?" from a launcher ([STARPORT_CLOSE])
-			return accounts.server_window("aitta", nil,
-					accounts.can_exit and accounts.can_exit() and
-					accounts.ask_exit or nil)
+		-- Another entry chosen meanwhile, or the question shown
+		if not accounts.frame or accounts.server_current() ~= "aitta" then
+			return
 		end
 		local page = accounts.server_open("Aitta, as " .. tostring(me.account))
 		if message then

@@ -99,11 +99,25 @@ end
 -- a tap
 local WEB = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local fullscreen = nil
+-- [NTFY_ASK_OVER_GAME]: builtin's Server window up unasked (the ntfy
+-- question after a login) holds the world as this menu's pages do, its
+-- Escape the window's Back; let go when it closes
+local unasked = false
 magic.SubscribeToEvent("Update", function()
 	if pending then
 		local fn = pending
 		pending = nil
 		fn()
+	end
+	if accounts.frame and not luanti.held() then
+		unasked = true
+		luanti.hold(function() accounts.back() end, nil, WEB)
+	elseif unasked and not accounts.frame then
+		unasked = false
+		if luanti.held() and not window then
+			luanti.hold(nil)
+			magic.ui:SetFocusElement(nil)
+		end
 	end
 	local want = not luanti.held()
 	if WEB and want ~= fullscreen then

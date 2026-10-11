@@ -141,7 +141,7 @@ local ban_page
 -- The Server window ([SERVER_ADMIN_PAGE]), below; its state and the
 -- functions the pages above it call
 local sw = {}
-local draw_sidebar, server_element, server_close, sidebar_need
+local draw_sidebar, server_element, server_close, sidebar_need, server_entries
 local health_page, health_capture
 -- The Starport panel open: "starports", "listing" or "ids"
 local starport_page, sp_panel
@@ -1292,13 +1292,22 @@ ntfy_page = function(back)
 			st.ask = false
 			ntfy_page(back)
 		end, true)
+		-- Answered: the window closed if a game opened it, else (an
+		-- app's own) its first entry
+		local function done()
+			if sw.on_close then
+				M.server_close()
+			else
+				M.server_show(server_entries()[1].items[1].key)
+			end
+		end
 		button(r, "Later", function()
 			ntfy_send("later")
-			M.server_close()
+			done()
 		end)
 		button(r, "Don't add", function()
 			ntfy_send("never")
-			M.server_close()
+			done()
 		end)
 		page_text(w, "Don't add: not asked again. It stays in My account.",
 				DIM)
@@ -1366,11 +1375,24 @@ buildat.sub_packet("accounts:ntfy_result", function(data)
 end)
 -- After a login, a Steward or the Host without one: the Server window at
 -- the question
+local function ntfy_ask(suggest)
+	ntfy_state = {url = "", suggest = suggest, note = "", may = "1", ask = true}
+	log:info("accounts: ntfy asked: " .. suggest)
+	-- A window up already (an app's own, or one a game opened) is shown
+	-- the question as it is, its on_close kept ([NTFY_ASK_OVER_GAME])
+	if sw.frame then
+		M.server_show("ntfy")
+	else
+		M.server_window("ntfy", function() end)
+	end
+end
 buildat.sub_packet("accounts:ntfy_ask", function(data)
-	ntfy_state = {url = "", suggest = cereal.binary_input(data, TEXT).text,
-		note = "", may = "1", ask = true}
-	log:info("accounts: ntfy asked: " .. ntfy_state.suggest)
-	M.server_window("ntfy", function() end)
+	ntfy_ask(cereal.binary_input(data, TEXT).text)
+end)
+-- A check's `event ntfy_ask`: the question as the server puts it, at any
+-- time, over whatever the app has up ([NTFY_ASK_OVER_GAME])
+magic.SubscribeToEvent("command_seq:ntfy_ask", function()
+	ntfy_ask("https://ntfy.sh/buildat-check")
 end)
 
 -- **My account** (user, 2026-10-02): what a user does with their own
@@ -2743,7 +2765,7 @@ local function top_back()
 	return sw.on_close and function() server_close() end or nil
 end
 
-local function server_entries()
+server_entries = function()
 	local list, by = {}, {}
 	local function add(header, label, key, draw, count)
 		local h = header or ""

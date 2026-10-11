@@ -88,6 +88,9 @@ mapfile -t cmds < <(
 	echo "keypress Return"; echo "delay 3000"; echo "event scan"
 	# Show the file, Bind on...
 	tabs 1; echo "keypress Return"; echo "delay 15000"
+	# The admin's ntfy question first, in the Aitta's window: Later, back
+	# to the Aitta's page ([NTFY_ASK_OVER_GAME])
+	echo "mouse_pos 437 134"; echo "mouse_click left"; echo "delay 2500"
 	echo "shot bind.png"; echo "event scan"
 	# The Aitta's page: Bind, then Back to the launcher
 	echo "mouse_pos 422 177"; echo "mouse_click left"; echo "delay 2500"
