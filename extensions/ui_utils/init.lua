@@ -1304,6 +1304,7 @@ local drops = {} -- live dropdowns
 local drops_update, drops_sub -- below
 local drop_serial = 0
 local drop_labels = {} -- by the dropdown's name: {label, row, fill, width}
+local drop_was = {} -- by the dropdown's name: its popup up last frame
 function M.safe.dropdown(parent, choices, current, on_choose, options)
 	options = options or {}
 	local h = options.height or 28
@@ -1485,6 +1486,11 @@ drops_update = function()
 	for _, d in ipairs(drops) do
 		if not gone(d) then
 			kept[#kept + 1] = d
+			-- Said as it changes, for a check that taps them ([TAP_DROPDOWN])
+			if (drop_was[d:GetName()] or false) ~= d.showPopup then
+				drop_was[d:GetName()] = d.showPopup
+				log:info(d:GetName() .. (d.showPopup and " open" or " closed"))
+			end
 			if d.showPopup then
 				open = true
 				-- Opened by a click, the press gives the focus back to

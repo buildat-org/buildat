@@ -355,14 +355,18 @@ bool Menu::FilterPopupImplicitAttributes(XMLElement& dest) const
 void Menu::HandlePressedReleased(StringHash eventType, VariantMap& eventData)
 {
     // If this menu shows a sublevel popup, react to button press. Else react to release
+    // buildat [TAP_DROPDOWN]: a touch reacts to the release either way, as a
+    // button's tap does: a drag begun on it in a ScrollView disables it
+    // before the lift, and opens nothing
+    bool touch = GetSubsystem<UI>()->IsUsingTouchInput();
     if (eventType == E_PRESSED)
     {
-        if (!popup_)
+        if (!popup_ || touch)
             return;
     }
     if (eventType == E_RELEASED)
     {
-        if (popup_)
+        if (popup_ && !touch)
             return;
     }
 

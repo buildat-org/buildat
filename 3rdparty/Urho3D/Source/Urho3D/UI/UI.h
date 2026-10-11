@@ -201,6 +201,8 @@ public:
 
     /// Return whether a drag is in progress.
     bool IsDragging() const { return dragConfirmedCount_ > 0; };
+    /// buildat: whether the last pointer input was a touch.
+    bool IsUsingTouchInput() const { return usingTouchInput_; }
 
     /// Return current UI scale.
     float GetScale() const { return uiScale_; }
