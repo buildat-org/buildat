@@ -102,6 +102,9 @@ grep -aq 'ai: {"error":"for the reviewers[^"]*","id":1,"ok":false' "$t/plain.log
 cat > "$t/pt.cmds" <<C
 delay 4000
 event join 127.0.0.1:$P
+wait_log 30000 accounts: ntfy asked
+delay 500
+click Button "Later"
 wait_log 30000 aitta: row
 click Button "Review releases"
 wait_log 10000 aitta: review list unreviewed: 1

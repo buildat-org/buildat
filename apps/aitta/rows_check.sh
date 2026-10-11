@@ -49,7 +49,11 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/$name" ||
 	fail "publish"
 
+# The ntfy question at the admin's second login, over the page
 cat > "$t/rows.cmds" <<C
+wait_log 30000 accounts: ntfy asked
+delay 500
+click Button "Later"
 wait_log 30000 aitta: row
 delay 1500
 screenshot $t/listed.png
