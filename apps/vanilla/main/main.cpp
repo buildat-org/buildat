@@ -974,7 +974,16 @@ struct Module: public interface::Module
 		}
 		sv_<ss_> flat;
 		sv_<ss_> saves;
+		sv_<ss_> sizes;
+		// [DISK_LIMIT_SHOWN] What the app has written against
+		// --max-disk-mb, for the line under the list: used, limit (0 for
+		// none), saves, shared, cache, in bytes
+		sv_<ss_> disk;
 		storage::access(m_server, [&](storage::Interface *istorage){
+			const storage::Usage u = istorage->usage();
+			for(int64_t v : {u.total(), istorage->limit_bytes(), u.saves,
+					u.shared, u.cache})
+				disk.push_back(itos(v));
 			sv_<storage::SaveInfo> infos = istorage->list();
 			// The one played last is the one most likely wanted next
 			std::sort(infos.begin(), infos.end(),
@@ -983,13 +992,16 @@ struct Module: public interface::Module
 			});
 			// _server is builtin/accounts', and _ is not a world's
 			for(const storage::SaveInfo &info : infos)
-				if(!info.name.empty() && info.name[0] != '_')
+				if(!info.name.empty() && info.name[0] != '_'){
 					saves.push_back(info.name);
+					sizes.push_back(itos(info.bytes));
+				}
 		});
 		flat.push_back(itos(saves.size()));
-		for(const ss_ &name : saves){
-			flat.push_back(name);
-			flat.push_back(gameid_of_save(name));
+		for(size_t i = 0; i < saves.size(); i++){
+			flat.push_back(saves[i]);
+			flat.push_back(gameid_of_save(saves[i]));
+			flat.push_back(sizes[i]);
 		}
 		for(const ss_ &id : list_apps())
 			flat.push_back(id);
@@ -1016,8 +1028,14 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(mos);
 			ar(mapgens);
 		}
+		std::ostringstream dos(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(dos);
+			ar(disk);
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "main:game_mapgens", mos.str());
+			inetwork->send(packet.sender, "main:disk", dos.str());
 			inetwork->send(packet.sender, "main:saves", os.str());
 		});
 	}
@@ -3317,8 +3335,9 @@ struct Module: public interface::Module
 			// answers to a script's own request: main:account and
 			// main:join_title follow the run_script that starts their
 			// reader, and ahead of it they would find nobody.
-			for(const char *name : {"main:menu", "main:saves", "main:save_info",
-					"main:imports", "main:settings", "main:progress",
+			for(const char *name : {"main:menu", "main:disk", "main:saves",
+					"main:save_info", "main:imports", "main:settings",
+					"main:progress",
 					"main:contentdb_list", "main:menu_message",
 					"main:menu_error", "main:game_mapgens"})
 				inetwork->declare(name,

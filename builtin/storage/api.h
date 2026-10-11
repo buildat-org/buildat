@@ -70,6 +70,8 @@ namespace storage
 	{
 		ss_ name;
 		int64_t modified_us = 0;
+		// On disk: an open save by its live pages, as Save::bytes()
+		int64_t bytes = 0;
 	};
 
 	struct Interface

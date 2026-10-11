@@ -40,6 +40,14 @@ local page = 1
 -- What the last save list said, so that a screen that goes back to it does
 -- not have to ask the server again
 local last_saves, last_save_games = {}, {}
+-- [DISK_LIMIT_SHOWN] Each save's bytes on disk, by name, and main:disk's
+-- numbers: used, limit (0 for none), saves, shared, cache
+local save_bytes = {}
+local disk = nil
+-- Whole MB, 1000000 bytes: --max-disk-mb's unit
+local function mb(bytes)
+	return string.format("%d MB", math.floor((bytes + 500000) / 1000000))
+end
 -- What is out there to import, as main:imports last said: each entry is
 -- {id or name, title or gameid, "installed" or "", size, the root it is in}
 local import_games, import_worlds = {}, {}
@@ -340,6 +348,9 @@ function draw(saves, save_games)
 				-- save, and saying so is more use than hiding it
 				label = label .. "  -- no such game"
 			end
+			if save_bytes[name] then
+				label = label .. "   " .. mb(save_bytes[name])
+			end
 			items[#items + 1] = {label = label, name = name}
 		end
 	end
@@ -406,6 +417,20 @@ function draw(saves, save_games)
 		local none = left:CreateChild("Text")
 		none:SetStyleAuto()
 		none:SetText(#items == 0 and "No saves yet" or "Nothing matches")
+	end
+	-- Under a limit only: a player's own local game has none
+	if disk and disk[2] > 0 then
+		local line = left:CreateChild("Text")
+		line:SetStyleAuto()
+		line:SetName("DiskLine")
+		line:SetWordwrap(true)
+		line:SetFixedWidth(fit(520))
+		line:SetText("Disk: " .. mb(disk[1]) .. " of " ..
+				mb(disk[2]) .. " (worlds " .. mb(disk[3]) .. ", games " ..
+				mb(disk[4]) .. ", cache " .. mb(disk[5]) .. ")")
+		if disk[1] >= disk[2] then
+			line:SetColor(magic.Color(rgb("error")))
+		end
 	end
 
 	-- One button rather than one per game: which game is a choice, and it
@@ -1416,6 +1441,15 @@ buildat.sub_packet("main:save_info", function(data)
 	end
 end)
 
+buildat.sub_packet("main:disk", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	disk = {}
+	for i = 1, 5 do
+		disk[i] = tonumber(values[i]) or 0
+	end
+	log:info("menu: disk " .. disk[1] .. " of " .. disk[2])
+end)
+
 buildat.sub_packet("main:saves", function(data)
 	if done then
 		return
@@ -1424,12 +1458,14 @@ buildat.sub_packet("main:saves", function(data)
 	local n = tonumber(values[1]) or 0
 	local saves = {}
 	local save_games = {}
+	save_bytes = {}
 	for i = 1, n do
-		saves[i] = values[i * 2] or ""
-		save_games[i] = values[i * 2 + 1] or ""
+		saves[i] = values[i * 3 - 1] or ""
+		save_games[i] = values[i * 3] or ""
+		save_bytes[saves[i]] = tonumber(values[i * 3 + 1])
 	end
 	games = {}
-	for i = n * 2 + 2, #values do
+	for i = n * 3 + 2, #values do
 		games[#games + 1] = values[i]
 	end
 	log:info("menu: " .. #saves .. " saves, " .. #games .. " games")

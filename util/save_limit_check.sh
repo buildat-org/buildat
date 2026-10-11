@@ -12,7 +12,9 @@
 #      MB over 90%, since a trim goes to 90% of the limit.
 #   1. A ContentDB install bigger than the room left (a local server
 #      answering ContentDB's API with a zip 1 MB over it) is refused and
-#      leaves nothing behind.
+#      leaves nothing behind. Before it, on a server with no world
+#      started, the log's start line names the limit and the world list
+#      at the boot is sent it in bytes ([DISK_LIMIT_SHOWN]).
 #   2. A client on: past x 220 its chat command places a node at x 160
 #      (altered). Past 2000 the walk waits while the section at x 2000 is
 #      hashed and a timer digs a hole in it; past 2600 while a timer pours
@@ -156,7 +158,7 @@ L
 server() # log, then the server's own arguments
 {
 	local log=$1; shift
-	BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=w \
+	BUILDAT_LUANTI_GAME=${GAME-minimal} BUILDAT_LUANTI_SAVE=${SAVE-w} \
 		BUILDAT_LUANTI_LUA="$t/u/shared/fixture.lua" \
 		start_server "$log" "STATUS Listening" 120 auto bin/buildat_server \
 		-u launcher=1 -A 127.0.0.1 -m ../apps/vanilla -D "$t/u" -C "$t/c" -l 4 "$@" ||
@@ -183,6 +185,21 @@ first=$(kb "$t/s0.log" | tail -1)
 limit=$(( (first * 1024 + 500000) * 10 / 9 / 1000000 + 1 ))
 room=$(( limit * 1000000 - first * 1024 ))
 echo "ok: the first start takes $first kB; the limit is $limit MB, $room bytes left"
+
+# A server with the limit and no world started: the start line, and the
+# world list the client is shown at the boot
+GAME= SAVE= server "$t/sw.log" --max-disk-mb $limit
+wait_for_log "$t/sw.log" "storage : max_disk_mb" 30
+grep -aEq "storage : max_disk_mb $limit: [0-9]+ MB written \(saves [0-9]+ MB, games and shared [0-9]+ MB, cache [0-9]+ MB\)" "$t/sw.log" ||
+	fail "the start line: $(grep -a "max_disk_mb" "$t/sw.log" | head -1)"
+# The world list's Disk line: main:disk's limit is the option's MB
+printf 'wait_log 30000 menu: disk\ndelay 1500\nscreenshot %s\nquit\n' "$t/worlds.png" > "$t/w.cmds"
+timeout 90 bin/buildat -C "$t/cc" -D "$t/uc" -s 127.0.0.1:"$SERVER_PORT" \
+	-w 640x400 -u 1 -l 3 -o sound_mute=1 -c @"$t/w.cmds" > "$t/worlds.log" 2>&1
+grep -aEq "menu: disk [0-9]+ of ${limit}000000$" "$t/worlds.log" ||
+	fail "main:disk: $(grep -a "menu: disk" "$t/worlds.log") ($t/worlds.log)"
+echo "ok: the start line says max_disk_mb $limit, and main:disk the same"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 
 # 1.
 mkdir -p "$t/m/api/packages/a/big/releases"

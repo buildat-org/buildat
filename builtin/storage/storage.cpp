@@ -445,6 +445,7 @@ struct Module: public interface::Module, public Interface
 	Usage m_usage;
 	int64_t m_saves_measured_us = 0, m_rest_measured_us = 0;
 	bool m_over = false;
+	bool m_said_limit = false;
 
 	ss_ app_user_path()
 	{
@@ -491,10 +492,23 @@ struct Module: public interface::Module, public Interface
 	void on_tick()
 	{
 		const int64_t now = interface::os::time_us();
-		if(now - m_saves_measured_us < 10000000)
+		// On the first tick even when whoever asked usage() first has
+		// measured already: the start line comes at the start
+		const bool first = !m_said_limit;
+		if(!first && now - m_saves_measured_us < 10000000)
 			return;
-		measure(false);
+		m_said_limit = true;
+		measure(first);
 		const int64_t used = m_usage.total(), limit = limit_bytes();
+		// Whole MB, 1000000 bytes: the option's own unit
+		auto mb = [](int64_t b){ return (long long)((b + 500000) / 1000000); };
+		if(first && limit > 0)
+			log_i(MODULE, "max_disk_mb %lld: %lld MB written (saves %lld MB, "
+					"games and shared %lld MB, cache %lld MB)", mb(limit),
+					mb(used), mb(m_usage.saves), mb(m_usage.shared),
+					mb(m_usage.cache));
+		else if(first)
+			log_i(MODULE, "max_disk_mb: none");
 		log_v(MODULE, "saves: %lld kB, shared %lld kB, cache %lld kB, of %lld kB",
 				(long long)(m_usage.saves / 1024),
 				(long long)(m_usage.shared / 1024),
@@ -503,12 +517,12 @@ struct Module: public interface::Module, public Interface
 			return;
 		if(used >= limit){
 			if(!m_over)
-				log_w(MODULE, "%lld kB written, over the limit of %lld kB",
-						(long long)(used / 1024), (long long)(limit / 1024));
+				log_w(MODULE, "%lld MB written, over the limit of %lld MB",
+						mb(used), mb(limit));
 			m_over = true;
 		} else if(m_over && used < limit / 10 * 9){
-			log_i(MODULE, "%lld kB written, under 90%% of the limit again",
-					(long long)(used / 1024));
+			log_i(MODULE, "%lld MB written, under 90%% of the limit again",
+					mb(used));
 			m_over = false;
 		}
 		if(m_over)
@@ -766,6 +780,11 @@ struct Module: public interface::Module, public Interface
 			SaveInfo info;
 			info.name = n.name;
 			info.modified_us = file_modified_us(db);
+			const ss_ path = m_saves_path+"/"+n.name;
+			info.bytes = (int64_t)interface::fs::directory_tree_size(path);
+			for(const up_<CSave> &save : m_open)
+				if(save->m_path == path)
+					info.bytes = save->bytes();
 			result.push_back(info);
 		}
 		return result;
