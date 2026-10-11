@@ -450,6 +450,23 @@ struct KeptLogin
 };
 static const int64_t KEEP_US = 90LL * 24 * 3600 * 1000000;
 
+// **A login waiting on its TOTP code** ([LOGIN_UNLOADED]), stored as
+// totp_wait/<the token's sha256>: the password was right, and the token
+// stands for it with a code for totp_wait_s, three codes at most. The
+// client keeps it, so a tab the browser unloaded while its user was in
+// the authenticator app comes back to the code.
+struct TotpWait
+{
+	ss_ name;
+	int64_t expires_us = 0;
+	ss_ hash;
+	int32_t tries = 0;
+	template<class Archive>
+	void serialize(Archive &archive){
+		archive(name, expires_us, hash, tries);
+	}
+};
+
 struct AdminRequest
 {
 	ss_ cmd;
@@ -1489,6 +1506,10 @@ struct Module: public interface::Module, public Interface
 		// the name: who a client says it is means nothing before it has
 		// logged in, and a name's wait was anyone's to keep its owner out
 		const int64_t now = interface::os::wall_us();
+		// [LOGIN_UNLOADED]: a TOTP wait's record, and whether this login
+		// was one
+		ss_ wait_data;
+		bool waited = false;
 		const ss_ bin = network::address_bin(peer.address);
 		const int64_t wait = failure_wait(m_address_failures, bin, now);
 		if(wait > 0 && !local){
@@ -1564,6 +1585,33 @@ struct Module: public interface::Module, public Interface
 				log_i(MODULE, "%s claimed the server with the setup code",
 						cs(name));
 			}
+		} else if(!cred.token.empty() && m_store->get("totp_wait/"+
+				interface::sha256::hex(interface::sha256::calculate(
+				cred.token)), wait_data)){
+			const ss_ key = "totp_wait/"+interface::sha256::hex(
+					interface::sha256::calculate(cred.token));
+			TotpWait tw;
+			if(!unpack(wait_data, tw) || tw.name != name ||
+					tw.expires_us < now || !get_account(name, account) ||
+					tw.hash != account.hash){
+				// Not counted: an old token is no guess
+				m_store->remove(key);
+				return reply("The wait for the code has ended: log in again");
+			}
+			// A client come back to its code page asks whether it waits
+			if(cred.totp.empty())
+				return reply("TOTP: enter the code from your "
+						"authenticator app");
+			if(!check_totp(name, cred.totp)){
+				if(++tw.tries >= 3){
+					m_store->remove(key);
+					return fail("Three wrong codes: log in again");
+				}
+				m_store->set(key, pack(tw));
+				return fail("TOTP: wrong code");
+			}
+			m_store->remove(key);
+			waited = true;
 		} else if(!cred.token.empty()){
 			KeptLogin kept;
 			ss_ data;
@@ -1584,9 +1632,20 @@ struct Module: public interface::Module, public Interface
 				return fail("Wrong password");
 			if(!local && totp_on(name)){
 				// Said so, not counted: the client asks for the code
-				if(cred.totp.empty())
+				// With a token that stands for the password while the
+				// code is fetched
+				if(cred.totp.empty()){
+					token = random_code(32);
+					TotpWait tw;
+					tw.name = name;
+					tw.expires_us = now + 1000000LL * atoi(m_server->
+							get_config().get<ss_>("totp_wait_s").c_str());
+					tw.hash = account.hash;
+					m_store->set("totp_wait/"+interface::sha256::hex(
+							interface::sha256::calculate(token)), pack(tw));
 					return reply("TOTP: enter the code from your "
 							"authenticator app");
+				}
 				if(!check_totp(name, cred.totp))
 					return fail("TOTP: wrong code");
 			}
@@ -1683,7 +1742,7 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		update_setup_code();
-		if(cred.keep && !local && cred.token.empty()){
+		if(cred.keep && !local && (cred.token.empty() || waited)){
 			token = random_code(32);
 			KeptLogin kept;
 			kept.name = name;

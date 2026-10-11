@@ -1986,6 +1986,13 @@ function M.define(dst, util)
 	util.wc("UIElement", {
 		inherited_from_by_wrapper = dst.Animatable,
 		instance = {
+			-- A string the engine reads off the element: a LineEdit's
+			-- "autocomplete", what it is for, to a browser ([LOGIN_UNLOADED])
+			SetVar = util.wrap_function({"UIElement", "string", "string"},
+				function(self, name, value)
+					self:SetVar(StringHash(name), Variant(value))
+				end
+			),
 			CreateChild = util.wrap_function({"UIElement", "string",
 					{"string", "__nil"}},
 				function(self, element_type, name)

@@ -166,6 +166,20 @@ local token_tried = false
 -- The last login sent, for the TOTP code it may turn out to need
 local last_login = nil
 
+-- What a field is for, for a browser's password manager: the web client
+-- gives it to the page's input as its autocomplete ([LOGIN_UNLOADED])
+local function purpose(e, what)
+	e:SetVar("autocomplete", what)
+end
+
+-- **A login waiting on its TOTP code** ([LOGIN_UNLOADED]): the server's
+-- token for it is kept in the client's storage at once, so a page the
+-- browser unloaded while its user was in the authenticator app comes back
+-- to the code page; the password is never kept
+local function totp_wait()
+	return buildat.storage_read("totp_wait") or ""
+end
+
 -- [ID_AUTO_JOIN]: the next join here asks, not the Starport ID
 local function forget_id_here()
 	local ok, starport = pcall(require, "buildat/extension/starport")
@@ -244,10 +258,15 @@ local function show_totp(error_text)
 	e:SetStyleAuto()
 	e.minHeight = 26
 	e.textSelectable = true
+	purpose(e, "one-time-code")
 	if error_text and error_text ~= "" then
 		page_text(w, error_text, magic.Color(rgb("error")))
 	end
 	local function go()
+		if totp_wait() ~= "" then
+			return send_login(M.name or "", "", "", totp_wait(),
+					buildat.storage_read("keep") == "1", e:GetText())
+		end
 		local l = last_login
 		send_login(l[1], l[2], l[3], l[4], l[5], e:GetText(), l[6], l[7])
 	end
@@ -330,6 +349,11 @@ local function show_login(error_text)
 	local default = buildat.get_preference("default_username")
 	local name = field(buildat.storage_read("name") or
 			(default ~= "User" and default) or "", false)
+	purpose(name, "username")
+	-- Kept as it is typed: a page unloaded meanwhile comes back with it
+	magic.SubscribeToEvent(name, "TextChanged", function()
+		buildat.storage_write("name", name:GetText())
+	end)
 	if is_local then
 		-- The saves are on this machine: no password to ask
 		label("On this computer: no password needed")
@@ -339,6 +363,7 @@ local function show_login(error_text)
 		-- password typed twice
 		label("Password")
 		password = field("", true)
+		purpose(password, "current-password")
 		if not buildat.connection_encrypted() then
 			local warn = label("The password is sent unencrypted: use a " ..
 					"trusted network")
@@ -457,6 +482,9 @@ function show_create(error_text)
 	local password = field("", true)
 	label("Password again")
 	local password2 = field("", true)
+	purpose(name, "username")
+	purpose(password, "new-password")
+	purpose(password2, "new-password")
 	-- The server's first admin claims it with the code in the server's log;
 	-- while registration is closed a new account needs an invite
 	local code = nil
@@ -555,6 +583,12 @@ buildat.sub_packet("accounts:hello", function(data)
 				buildat.get_env(env .. "_KEEP") == "1",
 				buildat.get_env(env .. "_TOTP") or "", "",
 				buildat.get_env(env .. "_CREATE") == "1")
+	elseif totp_wait() ~= "" then
+		-- Back at the code, if the server still waits for it
+		M.name = buildat.storage_read("name") or ""
+		log:info("Asking whether the login as " .. M.name .. " waits for its code")
+		send_login(M.name, "", "", totp_wait(),
+				buildat.storage_read("keep") == "1")
 	elseif token ~= "" and not token_tried then
 		token_tried = true
 		M.name = buildat.storage_read("name") or ""
@@ -597,7 +631,14 @@ buildat.sub_packet("accounts:login_result", function(data)
 		if token_tried then
 			buildat.storage_write("token", "")
 		end
-		if err:sub(1, 5) == "TOTP:" and last_login then
+		-- The wait kept for a code until it is used or ended
+		if r.token ~= "" and err:sub(1, 5) == "TOTP:" then
+			buildat.storage_write("totp_wait", r.token)
+			buildat.storage_write("name", M.name or "")
+		elseif err:sub(1, 5) ~= "TOTP:" then
+			buildat.storage_write("totp_wait", "")
+		end
+		if err:sub(1, 5) == "TOTP:" and (last_login or totp_wait() ~= "") then
 			show_totp(err == "TOTP: enter the code from your authenticator "..
 					"app" and "" or err:sub(7))
 			return
@@ -626,6 +667,7 @@ buildat.sub_packet("accounts:login_result", function(data)
 		show_login(err)
 		return
 	end
+	buildat.storage_write("totp_wait", "")
 	if r.token ~= "" then
 		buildat.storage_write("token", r.token)
 		-- A Starport ID's name comes from the server

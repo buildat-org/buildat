@@ -18,6 +18,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 #text, #password { position: fixed; display: none; margin: 0; padding: 0; border: 0;
 	resize: none; overflow: hidden; white-space: pre; opacity: 0;
 	font-size: 16px; pointer-events: none; }
+/* A login form's name for a password manager ([LOGIN_UNLOADED]) */
+#username { position: fixed; left: 0; top: 0; width: 1px; height: 1px;
+	margin: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
 #status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
 	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
 </style>
@@ -26,7 +29,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
 <textarea id="text" autocomplete="off" autocorrect="off" autocapitalize="off"
 	spellcheck="false" tabindex="-1"></textarea>
+<form id="login" onsubmit="return false">
+<input id="username" autocomplete="username" tabindex="-1">
 <input id="password" type="password" autocomplete="off" tabindex="-1">
+</form>
 <div id="status">Loading...</div>
 <script>
 (function(){
@@ -250,18 +256,35 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 					console.warn('IndexedDB read: ' + err);
 				Module.removeRunDependency('idbfs');
 			});
-			var syncing = false;
+			var syncing = false, again = false;
 			function save(){
-				if(syncing)
+				if(syncing){
+					again = true;
 					return;
+				}
 				syncing = true;
+				again = false;
 				FS.syncfs(false, function(err){
 					syncing = false;
 					if(err)
 						console.warn('IndexedDB write: ' + err);
+					if(again)
+						save();
 				});
 			}
 			setInterval(save, 5000);
+			// **A game's storage written is saved at once** ([LOGIN_UNLOADED]):
+			// a login's TOTP wait and the name typed, for a tab the browser
+			// unloads while its user is in another app
+			var close = FS.close;
+			FS.close = function(stream){
+				var wrote = stream && (stream.flags & 3) &&
+						/^\/buildat\/user\//.test(stream.path || '');
+				var r = close.apply(this, arguments);
+				if(wrote)
+					save();
+				return r;
+			};
 			document.addEventListener('visibilitychange', function(){
 				if(document.visibilityState === 'hidden')
 					save();
@@ -375,6 +398,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	//                      multi-line field, [HEARTH_TRACKER])
 	//   "s<start>,<len>"   select
 	//   "e"                Enter (a touchscreen keyboard's)
+	//   "u<text>"          the login's name field is now this: the
+	//                      password manager filled the form's name
+	// A field's purpose is its input's autocomplete ([LOGIN_UNLOADED]);
+	// a password's input is in a form with the name beside it.
 	// Indices there are characters, here UTF-16. A desktop's typing never
 	// reaches the stand-in: SDL takes its keypress and prevents it.
 	// **The pointer lock asked for in the click itself** (user, Firefox):
@@ -419,6 +446,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	}, {passive: false});
 	var ta = document.getElementById('text');
 	var pw = document.getElementById('password');
+	var un = document.getElementById('username');
+	un.addEventListener('input', function(){ actions.push('u' + un.value); });
 	var el = ta, active = false, composing = false, actions = [];
 	function units(s, chars){ return Array.from(s).slice(0, chars).join('').length; }
 	function chars(s, u){ return Array.from(s.slice(0, u)).length; }
@@ -435,7 +464,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	}
 	window.buildatText = {
 		take: function(){ return actions.length ? actions.shift() : null; },
-		sync: function(x, y, w, h, text, start, len, editable, secret, multi){
+		sync: function(x, y, w, h, text, start, len, editable, secret, multi,
+				purpose, user){
 			if(x === null){
 				if(active){
 					active = false;
@@ -470,6 +500,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 				el.focus({preventScroll: true});
 			el.readOnly = !editable;
 			el.dataset.multi = multi ? '1' : '';
+			if(el.getAttribute('autocomplete') !== (purpose || 'off'))
+				el.setAttribute('autocomplete', purpose || 'off');
+			if(secret && user !== null && un.value !== user &&
+					document.activeElement !== un)
+				un.value = user;
 			// Setting the value would end an IME's composition
 			if(composing)
 				return;

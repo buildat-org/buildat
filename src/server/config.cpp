@@ -40,6 +40,8 @@ Config::Config()
 	set_default("owner_token", "");
 	// <user>/first_admin's line, read by main() ([FIRST_ADMIN])
 	set_default("first_admin", "");
+	// [LOGIN_UNLOADED]: seconds a right password waits for its TOTP code
+	set_default("totp_wait_s", "300");
 	// [SERVER_CAPS]: the operator's --max-players, --max-view-range
 	// (voxels) and --max-disk-mb ([SAVE_LIMIT]; --max-world-mb its old
 	// name); "0" is none

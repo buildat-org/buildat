@@ -326,6 +326,22 @@ static ss_ preferences_path()
 }
 
 #ifdef __EMSCRIPTEN__
+// The name field beside a password field ([LOGIN_UNLOADED]): the LineEdit
+// marked "username" in the same window, for the page's login form
+static magic::LineEdit *web_username_field(magic::UIElement *e)
+{
+	while(e->GetParent() && e->GetParent()->GetParent())
+		e = e->GetParent();
+	magic::PODVector<magic::UIElement*> all;
+	e->GetChildren(all, true);
+	for(magic::UIElement *c : all){
+		if(c->GetType() == magic::LineEdit::GetTypeStatic() &&
+				c->GetVar("autocomplete").GetString() == "username")
+			return static_cast<magic::LineEdit*>(c);
+	}
+	return nullptr;
+}
+
 // The page's hidden stand-in follows the focused LineEdit ([WEB_KEYS] steps
 // 2 and 4, src/client/web/index.html): its place, text and selection, and
 // whether it is a password's. The browser's IME, a touchscreen's keyboard,
@@ -336,6 +352,8 @@ static ss_ preferences_path()
 //                      multi-line field)
 //   "s<start>,<len>"   select
 //   "e"                Enter, from a touchscreen's keyboard
+//   "u<text>"          the name field beside a password is this: a
+//                      password manager filled the page's login form
 // Positions are in characters.
 static void web_text_sync(magic::UI *ui)
 {
@@ -358,6 +376,10 @@ static void web_text_sync(magic::UI *ui)
 			e->GetTextElement()->ClearSelection();
 		} else if(e && a[0] == 'i'){
 			e->OnTextInput(magic::String(a + 1));
+		} else if(e && a[0] == 'u'){
+			// The page's name input filled by a password manager
+			if(magic::LineEdit *u = web_username_field(e))
+				u->SetText(magic::String(a + 1));
 		} else if(e && a[0] == 'e'){
 			// A touchscreen keyboard's Enter: the field's own, which is
 			// what finishes it (TextFinished)
@@ -384,13 +406,18 @@ static void web_text_sync(magic::UI *ui)
 	// A password's stand-in is a password input: never copied, and a phone's
 	// keyboard does not suggest it
 	bool secret = !e->IsTextCopyable() || e->GetEchoCharacter();
+	// What it is for, and a password's name beside it, for a password
+	// manager ([LOGIN_UNLOADED])
+	const magic::String purpose = e->GetVar("autocomplete").GetString();
+	magic::LineEdit *u = secret ? web_username_field(e) : nullptr;
 	EM_ASM({
 		if(window.buildatText)
 			buildatText.sync($0, $1, $2, $3, UTF8ToString($4), $5, $6, $7, $8,
-					$9);
+					$9, UTF8ToString($10), $11 ? UTF8ToString($11) : null);
 	}, p.x_ * k, p.y_ * k, size.x_ * k, size.y_ * k, e->GetText().CString(),
 			start, len, e->IsEditable() ? 1 : 0, secret ? 1 : 0,
-			e->IsMultiLine() ? 1 : 0);
+			e->IsMultiLine() ? 1 : 0, purpose.CString(),
+			u ? u->GetText().CString() : nullptr);
 }
 #endif
 

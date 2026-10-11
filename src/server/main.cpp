@@ -102,6 +102,10 @@ int main(int argc, char *argv[])
 		unsetenv("BUILDAT_OWNER_TOKEN");
 #endif
 	}
+	// [LOGIN_UNLOADED]: how long a login waits for its TOTP code, seconds;
+	// shorter for a check
+	if(getenv("BUILDAT_TOTP_WAIT_S"))
+		config.set("totp_wait_s", ss_(getenv("BUILDAT_TOTP_WAIT_S")));
 	if(getenv("BUILDAT_LAN_ANNOUNCE"))
 		config.set("lan_announce", ss_(getenv("BUILDAT_LAN_ANNOUNCE")));
 	for(int i = 1; i < argc; i++){
