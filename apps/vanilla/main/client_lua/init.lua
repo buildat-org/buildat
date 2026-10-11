@@ -4500,17 +4500,32 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	-- Luanti's touch_interaction_style: tap (at the finger) unless the
 	-- player chose the crosshair
 	keys.touch_crosshair = buildat.storage_read("touch_crosshair") == "1"
+	-- Luanti's touchscreen_sensitivity ([TOUCH_LOOK_SETTING]).
+	-- simplified: steps in a dropdown, as every other row, not a slider
+	keys.touch.sensitivity =
+			tonumber(buildat.storage_read("touch_sensitivity") or "") or 0.2
+	local SENSITIVITIES = {0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1}
 	keys.settings_sections = {{title = "Touch", draw = function(_, ui)
 		ui.toggle("Interaction at the crosshair", keys.touch_crosshair,
 				function(on)
 			keys.touch_crosshair = on
 			buildat.storage_write("touch_crosshair", on and "1" or "")
 		end)
+		local list = {}
+		for i, v in ipairs(SENSITIVITIES) do
+			list[i] = {tostring(v), v}
+		end
+		ui.dropdown("Look sensitivity", list, keys.touch.sensitivity,
+				function(v)
+			keys.touch.sensitivity = v
+			buildat.storage_write("touch_sensitivity", tostring(v))
+			log:info("touch look sensitivity " .. v)
+		end)
 	end}}
 	-- And Luanti's Android autojump: a node's step is walked up without
 	-- the Jump button
 	player.autojump = true
-	log:info("touch controls on")
+	log:info("touch controls on, look sensitivity " .. keys.touch.sensitivity)
 end
 
 buildat.send_packet("main:get_settings", "")

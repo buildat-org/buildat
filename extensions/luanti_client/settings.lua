@@ -48,7 +48,9 @@ M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
 		shoulder = 0, name = random_name(), address = "localhost:30000",
 		-- What was typed in the server list's filter last time: a player
 		-- filters for the same server every time ([BOX_PLAYTEST_2] 13b)
-		server_filter = "", keys = {}}
+		server_filter = "", keys = {},
+		-- Luanti's touchscreen_sensitivity ([TOUCH_LOOK_SETTING])
+		touch_sensitivity = 0.2}
 
 -- The bindings table, for the screen's "Key bindings..." row; init.lua
 -- sets it
@@ -134,6 +136,30 @@ function M.remember_server_name(host, port, name)
 	log:info("player name " .. name .. (ok and " kept for " or " not kept for ") .. uri)
 end
 
+-- **Look sensitivity on a touchscreen** ([TOUCH_LOOK_SETTING]): a row
+-- of the settings screen and the pause menu while the touch controls are
+-- up (M.touch, res/touch.lua's, set by init.lua), and applied to them.
+-- simplified: steps in a dropdown, as every other row, not Luanti's slider
+M.SENSITIVITIES = {0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1}
+function M.add_sensitivity(menu, s)
+	if not M.touch then
+		return
+	end
+	local list = {}
+	for i, v in ipairs(M.SENSITIVITIES) do
+		list[i] = {tostring(v), v}
+	end
+	menu:add_dropdown("Look sensitivity", list, s.touch_sensitivity,
+			function(v)
+		s.touch_sensitivity = v
+		M.save(s)
+		if M.touch then
+			M.touch.sensitivity = v
+		end
+		log:info("touch look sensitivity " .. v)
+	end)
+end
+
 local MODES = {"unlit", "shadows", "pbr"}
 local RANGES = {60, 120, 200, 300, 400}
 
@@ -189,6 +215,7 @@ function M.show()
 		s.view_range = v
 		save()
 	end)
+	M.add_sensitivity(menu, s)
 	rows.bob = menu:add("", function()
 		s.view_bobbing = s.view_bobbing ~= 0 and 0 or 1
 		save()
@@ -281,6 +308,7 @@ function M.show_pause(o)
 		M.save(s)
 		o.view:set_far_clip(v)
 	end)
+	M.add_sensitivity(menu, s)
 	menu:add("Settings...", function()
 		close()
 		M.show()

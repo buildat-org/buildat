@@ -45,17 +45,17 @@ local log = buildat.Logger("luanti/touch")
 local LONG_TAP_US = 400000
 local THRESHOLD = 20
 -- Degrees the view turns for a UI pixel: Luanti's touchscreen_sensitivity
--- (0.2) times its 6, over the display's density, which a UI pixel already
--- is. simplified: Luanti's field of view factor (1 at 72 degrees) is not
--- applied.
-local TURN = 0.2 * 6
+-- (T.sensitivity, 0.2 unless the client sets the player's
+-- [TOUCH_LOOK_SETTING]) times its 6, over the display's density, which a
+-- UI pixel already is. simplified: Luanti's field of view factor (1 at 72
+-- degrees) is not applied.
 -- How far the stick is pushed for the full speed: Luanti's button size,
 -- 65 at a density of 1
 local STICK = 65
 local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 
 return function(o)
-	local T = {held = {}, dig = false, yaw = 0, pitch = 0}
+	local T = {held = {}, dig = false, yaw = 0, pitch = 0, sensitivity = 0.2}
 	local fingers = {}
 	local buttons = {}
 	local more = nil
@@ -309,8 +309,9 @@ return function(o)
 			return
 		end
 		local _, _, sc = screen()
-		T.yaw = T.yaw + data:GetInt("DX") / sc * TURN
-		T.pitch = T.pitch + data:GetInt("DY") / sc * TURN
+		local turn = T.sensitivity * 6
+		T.yaw = T.yaw + data:GetInt("DX") / sc * turn
+		T.pitch = T.pitch + data:GetInt("DY") / sc * turn
 		T.aim = {x = ux, y = uy}
 		if (ux - f.ux0) ^ 2 + (uy - f.uy0) ^ 2 > THRESHOLD ^ 2 then
 			f.moved = true

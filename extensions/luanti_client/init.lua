@@ -3670,6 +3670,7 @@ local function show_client(host, port, name, password, mode, origin)
 					return declutter
 				end,
 			})
+			settings.touch.sensitivity = settings.load().touch_sensitivity
 			-- And Luanti's Android autojump
 			avatar.autojump = true
 			-- The session hid the pointer before these were here
