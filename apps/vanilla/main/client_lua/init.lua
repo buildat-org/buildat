@@ -3850,6 +3850,8 @@ local function update_dig(dt, playing)
 	-- SDL makes of it: the touch controls say when a dig is held
 	local holding = playing and (keys.touch and keys.touch.dig or
 			not keys.touch and magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT))
+	-- What swings the hand, wherever it points ([DIG_SWING_SOUND])
+	WIELD.holding = holding
 	hit_wait = math.max(0, hit_wait - dt)
 	if not holding then
 		hit_wait = 0
@@ -3876,10 +3878,17 @@ local function update_dig(dt, playing)
 	end
 	if dig == nil or dig.p ~= pointed_p then
 		local name = node_name_at(pointed_p)
+		-- And the group the dig goes by, which a "__group" dig sound is
+		-- named after
+		local time, group = nil, nil
+		if name then
+			time, group = luanti.dig_time(name, wield_index)
+		end
 		dig = {
 			p = pointed_p,
 			name = name,
-			time = name and luanti.dig_time(name, wield_index) or nil,
+			time = time,
+			group = group,
 			elapsed = 0,
 		}
 		-- A mod's on_punch runs on the way in, whether or not the node can
@@ -4478,13 +4487,30 @@ function frame_peak.update(dt)
 	end
 	if WIELD.motion then
 		-- The swing's phase: official's camera advances it at 3.5 swings a
-		-- second while digging (Camera::step, m_digging_anim), whatever the
-		-- dig takes; one swing per dig was a stone by hand swung once in
-		-- seconds (user). simplified: a released button stops it mid-swing
-		-- where official finishes the swing.
-		local digging_now = dig ~= nil and dig.time ~= nil
-		WIELD.dig_phase = digging_now and ((WIELD.dig_phase or 0) + dt * 3.5) % 1
-				or 0
+		-- second while the dig button is held, at a node or at nothing
+		-- (Camera::step, m_digging_anim), whatever the dig takes -- one
+		-- swing per dig was a stone by hand swung once in seconds (user)
+		-- -- and a swing started is finished after the button lets go. As
+		-- it crosses 0.15 the dig and use sounds play
+		-- (SoundMaker::cameraPunchLeft; [DIG_SWING_SOUND]).
+		local was = WIELD.dig_phase or 0
+		local digging_now = WIELD.holding or was > 0
+		if digging_now then
+			local now = was + dt * 3.5
+			if was < 0.15 and now >= 0.15 then
+				local diggable = dig ~= nil and dig.time ~= nil and not dig.done
+				local held = parse_stack(hotbar_stacks[wield_index])
+				local d, u = luanti.swing_sound(diggable and dig.name or nil,
+						diggable and dig.group or nil, held and held.name or "",
+						pointed_p ~= nil or pointed_obj ~= nil,
+						player.x, player.y, player.z)
+				log:debug(string.format("swing: at %.2f, dig %s, use %s", now,
+						tostring(d), tostring(u)))
+			end
+			WIELD.dig_phase = now >= 1 and 0 or now
+		else
+			WIELD.dig_phase = 0
+		end
 		local speed_xz = math.sqrt(player.vx * player.vx + player.vz * player.vz)
 		local flying = player.fly_active or player.fly
 		local m = WIELD.motion:update(dt, {

@@ -101,6 +101,26 @@ local function read_item(serialize, r, protocol)
 	end
 	-- How far this item reaches; a negative value means the game's default
 	def.range = r:f32()
+	-- The sounds of a swing at something and at nothing, past what is
+	-- skipped to them ([DIG_SWING_SOUND]); an older server's item ends
+	-- before, and has none
+	pcall(function()
+		r:string()  -- palette_image
+		r:skip(4)   -- color
+		read_image(r, protocol)  -- inventory_overlay
+		read_image(r, protocol)  -- wield_overlay
+		r:string()  -- short_description
+		if protocol <= 43 then
+			r:u8()  -- place_param2
+		end
+		for _, key in ipairs({"sound_use", "sound_use_air"}) do
+			local sound = {name = r:string()}
+			sound.gain = r:f32()
+			sound.pitch = r:f32()
+			r:f32()  -- fade
+			def[key] = sound
+		end
+	end)
 	return def
 end
 
@@ -159,8 +179,9 @@ function M.parse(serialize, data, log, protocol)
 	return items, count, aliases
 end
 
--- dig_time(node_groups, caps) -> seconds, or nil for a node these
--- capabilities cannot dig
+-- dig_time(node_groups, caps) -> seconds and the group it went by
+-- (official's main_group, which a "__group" dig sound is named after), or
+-- nil for a node these capabilities cannot dig
 --
 -- Luanti's getDigParams(), without the wear: the fastest group the tool has
 -- that the node is rated in, with the level difference taken into account.
@@ -172,13 +193,13 @@ function M.dig_time(node_groups, caps)
 	if not caps.groupcaps.dig_immediate then
 		local immediate = node_groups.dig_immediate
 		if immediate == 2 then
-			return 0.5
+			return 0.5, "dig_immediate"
 		elseif immediate == 3 then
-			return 0
+			return 0, "dig_immediate"
 		end
 	end
 	local level = node_groups.level or 0
-	local best = nil
+	local best, main = nil, nil
 	for name, cap in pairs(caps.groupcaps) do
 		local leveldiff = cap.maxlevel - level
 		if leveldiff >= 0 then
@@ -189,12 +210,12 @@ function M.dig_time(node_groups, caps)
 					time = time / leveldiff
 				end
 				if not best or time < best then
-					best = time
+					best, main = time, name
 				end
 			end
 		end
 	end
-	return best
+	return best, main
 end
 
 return M

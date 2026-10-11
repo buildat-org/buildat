@@ -933,6 +933,11 @@ local function show_client(host, port, name, password, mode, origin)
 		local pointed_object = nil
 		local dig = nil
 		local digging = false
+		-- The client's own sounds ([DIG_SWING_SOUND]): the swing's phase,
+		-- 3.5 a second while the dig button is held and finished after
+		-- (official's Camera::step), a count for their ids, and where the
+		-- last footstep was
+		local own = {phase = 0, n = 0, foot = nil}
 		-- 1 first person, 2 third from behind, 3 third from the front
 		local camera_mode = 1
 		local zoom_held = false
@@ -1687,6 +1692,47 @@ local function show_client(host, port, name, password, mode, origin)
 			view:set_crack(dig.under, crack_texture(index))
 		end
 
+		-- A sound of the client's own, as official's client plays it: a
+		-- footstep, a swing's and a dug node's, which the server leaves
+		-- out for the player who made them. Through the server's sounds'
+		-- own path, so a group is a random file of it. pos nil is in the
+		-- player's head.
+		local function own_sound(sound, pos, gain)
+			if not sound or sound.name == "" or not client.on_play_sound then
+				return nil
+			end
+			own.n = own.n + 1
+			client.on_play_sound("own:"..own.n, {name = sound.name,
+					gain = gain or sound.gain, pitch = sound.pitch,
+					location = pos and sounds.POSITION or
+							sounds.LOCAL,
+					pos = pos or {0, 0, 0}, object_id = 0, fade = 0})
+			return sound.name
+		end
+
+		-- The swing crossing 0.15 (SoundMaker::cameraPunchLeft): the dug
+		-- node's dig sound, "__group" being default_dig_<the group the dig
+		-- goes by> at 0.5, and the wielded item's use sound at something,
+		-- its use_air one at nothing
+		local function swing_sound()
+			local d = nil
+			if dig and dig.time and not dig.done and dig.def then
+				local sd = dig.def.sound_dig
+				if sd and sd.name == "__group" then
+					d = dig.group and own_sound({name = "default_dig_"..dig.group,
+							pitch = 1}, nil, 0.5)
+				else
+					d = own_sound(sd)
+				end
+			end
+			local held = wielded()
+			local idef = item_defs and item_defs[held and held.name or ""]
+			local u = idef and own_sound((pointed_under or pointed_object) and
+					idef.sound_use or idef.sound_use_air)
+			log:debug(string.format("swing: at %.2f, dig %s, use %s",
+					own.phase, tostring(d), tostring(u)))
+		end
+
 		local function update_dig(dtime)
 			if form_on() then
 				-- A form has the mouse; nothing is pointed at behind it
@@ -1763,13 +1809,16 @@ local function show_client(host, port, name, password, mode, origin)
 					dig.under[2] ~= pointed_under[2] or
 					dig.under[3] ~= pointed_under[3] then
 				local def = node_def_at(pointed_under)
+				-- nil when what the player is holding cannot dig this at
+				-- all, and then nothing is ever completed: the server would
+				-- refuse it as digging the undiggable
+				local time, group = nil, nil
+				if def then
+					time, group = itemdef.dig_time(def.groups, dig_capabilities())
+				end
 				dig = {
 					under = pointed_under, above = pointed_above, elapsed = 0,
-					-- nil when what the player is holding cannot dig this at
-					-- all, and then nothing is ever completed: the server
-					-- would refuse it as digging the undiggable
-					time = def and itemdef.dig_time(def.groups,
-							dig_capabilities()) or nil,
+					time = time, group = group, def = def,
 					name = def and def.name or "?",
 				}
 				client:interact(luanti.INTERACT_START_DIGGING,
@@ -1789,6 +1838,8 @@ local function show_client(host, port, name, password, mode, origin)
 						above = dig.above})
 				dig.done = true
 				predict_dig(dig.under)
+				local dug = dig.def and own_sound(dig.def.sound_dug, dig.under)
+				log:info("dug "..dig.name..": "..tostring(dug))
 			end
 			update_crack()
 		end
@@ -2841,6 +2892,28 @@ local function show_client(host, port, name, password, mode, origin)
 			client:set_position(x, y, z, pitch, yaw)
 			client:set_motion(avatar.vx, avatar.vy, avatar.vz, keys)
 			local speed_xz = math.sqrt(avatar.vx * avatar.vx + avatar.vz * avatar.vz)
+			-- The swing, and its sounds as it crosses 0.15
+			if digging or own.phase > 0 then
+				local was = own.phase
+				own.phase = own.phase + dtime * 3.5
+				if was < 0.15 and own.phase >= 0.15 then
+					swing_sound()
+				end
+				if own.phase >= 1 then
+					own.phase = 0
+				end
+			end
+			-- A footstep a stride, on what is under the feet
+			if avatar.on_ground and speed_xz > 1 and (not own.foot or
+					(x - own.foot[1]) ^ 2 + (z - own.foot[2]) ^ 2 > 1.9 ^ 2) then
+				own.foot = {x, z}
+				local under = view:node_at(math.floor(x + 0.5),
+						math.floor(y - 0.5), math.floor(z + 0.5))
+				local fdef = under and node_defs and node_defs[under]
+				local f = fdef and own_sound(fdef.sound_footstep)
+				log:debug("footstep on "..tostring(fdef and fdef.name)..": "..
+						tostring(f))
+			end
 			local m = motion:update(dtime, {
 				walking = speed_xz > 1 and avatar.on_ground,
 				swimming = avatar.in_liquid and
@@ -2848,7 +2921,8 @@ local function show_client(host, port, name, password, mode, origin)
 				climbing = avatar.climbing and math.abs(avatar.vy) > 1,
 				flying = avatar.fly_active or avatar.fly,
 				speed = math.sqrt(speed_xz * speed_xz + avatar.vy * avatar.vy),
-				digging = digging,
+				digging = digging or own.phase > 0,
+				dig_anim = own.phase,
 			})
 			-- Sideways along the camera's right, and up; Luanti's yaw is
 			-- counterclockwise from +Z seen from above

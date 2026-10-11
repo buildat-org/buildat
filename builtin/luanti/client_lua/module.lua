@@ -1575,6 +1575,12 @@ local node_footsteps = {}
 -- client's to play or nobody's.
 local node_dug = {}
 local node_placed = {}
+-- And the swing's ([DIG_SWING_SOUND]): a node's dig sound (false for one
+-- that is silent on purpose; "__group:<group>" the default's by group),
+-- and an item's use sound at something and at nothing
+local node_dig = {}
+local item_use = {}
+local item_use_air = {}
 local action_sound_n = 0
 local FOOTSTEP_STRIDE = 1.9
 local footstep_at = nil
@@ -1670,6 +1676,38 @@ end
 
 function M.place_sound(node_name, x, y, z)
 	return action_sound("place", node_placed, node_name, x, y, z)
+end
+
+-- swing_sound(node_name, main_group, item_name, pointing, x, y, z) -> the
+-- dig file, the use file, each nil for none. Official's
+-- SoundMaker::cameraPunchLeft, played as the swing crosses 0.15: the dug
+-- node's dig sound (node_name nil when no diggable node is being dug), its
+-- "__group" by the group the dig went by when it says nothing, and the
+-- wielded item's sound_use at something, sound_use_air at nothing. Both in
+-- the player's head, as official's.
+function M.swing_sound(node_name, main_group, item_name, pointing, x, y, z)
+	if object_scene == nil then
+		return nil, nil
+	end
+	local played = {}
+	local dig = nil
+	if node_name then
+		dig = node_dig[node_name]
+		if dig == nil and main_group then
+			dig = node_dig["__group:" .. main_group]
+		end
+	end
+	local use = (pointing and item_use or item_use_air)[item_name or ""]
+	for i, spec in ipairs({dig or false, use or false}) do
+		if spec and #spec.files > 0 then
+			action_sound_n = action_sound_n + 1
+			local file = spec.files[math.random(#spec.files)]
+			play_sound("swing:" .. action_sound_n, file, spec.gain, spec.pitch,
+					false, 0, "local", x, y, z, "0", 32)
+			played[i] = file
+		end
+	end
+	return played[1], played[2]
 end
 
 -- The fades, the sounds that follow an object, and the nodes of the ones
@@ -3296,20 +3334,21 @@ function M.dig_capabilities(wield_index)
 end
 
 -- How long the wielded item takes on this node, or nil for a node it cannot
--- dig at all. Luanti's getDigParams(): the group that digs it fastest wins,
--- a tool whose maxlevel is more than one above the node's level is faster
--- still, and dig_immediate is a fixed time.
+-- dig at all, and the group it went by (official's main_group, which a
+-- "__group" dig sound is named after). Luanti's getDigParams(): the group
+-- that digs it fastest wins, a tool whose maxlevel is more than one above
+-- the node's level is faster still, and dig_immediate is a fixed time.
 local function dig_time_with(caps, groups)
 	if not caps.groupcaps.dig_immediate then
 		local immediate = groups.dig_immediate
 		if immediate == 2 then
-			return 0.5
+			return 0.5, "dig_immediate"
 		elseif immediate == 3 then
-			return 0
+			return 0, "dig_immediate"
 		end
 	end
 	local level = groups.level or 0
-	local best = nil
+	local best, main = nil, nil
 	for name, cap in pairs(caps.groupcaps) do
 		local leveldiff = cap.maxlevel - level
 		if leveldiff >= 0 then
@@ -3320,12 +3359,12 @@ local function dig_time_with(caps, groups)
 					time = time / leveldiff
 				end
 				if best == nil or time < best then
-					best = time
+					best, main = time, name
 				end
 			end
 		end
 	end
-	return best
+	return best, main
 end
 
 function M.dig_time(node_name, wield_index)
@@ -3334,9 +3373,9 @@ function M.dig_time(node_name, wield_index)
 	if caps == nil or groups == nil then
 		return nil
 	end
-	local best = dig_time_with(caps, groups)
+	local best, main = dig_time_with(caps, groups)
 	if best ~= nil then
-		return best
+		return best, main
 	end
 	-- A tool that cannot dig this node digs it as the hand would
 	-- (Game::handleDigging: "If not diggable, try hand digging (in case
@@ -3764,6 +3803,18 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 				buildable_to = string.find(flags, "b", 1, true) ~= nil,
 				placed_param2 = string.find(flags, "p", 1, true) ~= nil,
 				walkable = string.find(flags, "w", 1, true) ~= nil,
+			}
+		elseif fields[1] == "h" or fields[1] == "u" or fields[1] == "v" then
+			local files = {}
+			for f in string.gmatch(fields[5] or "", "[^,]+") do
+				files[#files + 1] = f
+			end
+			local into = fields[1] == "h" and node_dig or
+					fields[1] == "u" and item_use or item_use_air
+			into[fields[2]] = {
+				gain = tonumber(fields[3]) or 1.0,
+				pitch = tonumber(fields[4]) or 1.0,
+				files = files,
 			}
 		elseif fields[1] == "g" or fields[1] == "q" then
 			-- What it sounds like dug and placed, the same shape as the

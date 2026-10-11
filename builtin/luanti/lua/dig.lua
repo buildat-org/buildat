@@ -387,28 +387,63 @@ function core.__dig_props()
 	--   g <name> <gain> <pitch> <file>,...          dug
 	--   q <name> <gain> <pitch> <file>,...          placed
 	--
+	-- **And the swing's** ([DIG_SWING_SOUND]): official's client plays
+	-- the node's dig sound and the wielded item's use sound as each
+	-- swing crosses 0.15 (Camera::step, SoundMaker::cameraPunchLeft).
+	--
+	--   h <name> <gain> <pitch> <file>,...          dig; no files is silent
+	--   h __group:<group> 0.5 1 <file>,...          "__group"'s, by the dig's
+	--                                               main group
+	--   u <item> <gain> <pitch> <file>,...          sound_use
+	--   v <item> <gain> <pitch> <file>,...          sound_use_air
+	--
+	-- A node with no h record digs to "__group", which is Luanti's default
+	-- for sounds.dig: default_dig_<the group the dig went by>, at 0.5.
+	--
 	-- "g" and not "d": "d" is the dig prediction's own record above, and
 	-- a second meaning for it parsed as a prediction with a gain where
 	-- its node name should be (2026-09-25, an hour of "0 with a dug
 	-- sound" while the client read them as predictions).
-	local sound_kinds = {{"s", "footstep"}, {"g", "dug"}, {"q", "place"}}
+	local function sound_record(kind, name, spec)
+		if type(spec) == "string" then
+			spec = {name = spec}
+		end
+		if type(spec) ~= "table" or type(spec.name) ~= "string" or
+				not __luanti_sound_files then
+			return
+		end
+		local files = spec.name ~= "" and __luanti_sound_files(spec.name)
+		if type(files) ~= "table" or #files == 0 then
+			-- Silence said on purpose is the dig's to know, since none
+			-- at all is "__group"
+			if kind == "h" then
+				out[#out + 1] = "h\t" .. name .. "\t0\t1\t"
+			end
+			return
+		end
+		out[#out + 1] = kind .. "\t" .. name .. "\t" ..
+				tostring(tonumber(spec.gain) or 1.0) .. "\t" ..
+				tostring(tonumber(spec.pitch) or 1.0) .. "\t" ..
+				table.concat(files, ",")
+	end
+	local sound_kinds = {{"s", "footstep"}, {"g", "dug"}, {"q", "place"},
+			{"h", "dig"}}
 	for name, def in pairs(core.registered_nodes) do
 		for _, kind in ipairs(sound_kinds) do
 			local spec = type(def.sounds) == "table" and def.sounds[kind[2]]
-			if type(spec) == "string" then
-				spec = {name = spec}
-			end
-			if type(spec) == "table" and type(spec.name) == "string" and
-					spec.name ~= "" and __luanti_sound_files then
-				local files = __luanti_sound_files(spec.name)
-				if type(files) == "table" and #files > 0 then
-					out[#out + 1] = kind[1] .. "\t" .. name .. "\t" ..
-							tostring(tonumber(spec.gain) or 1.0) .. "\t" ..
-							tostring(tonumber(spec.pitch) or 1.0) .. "\t" ..
-							table.concat(files, ",")
-				end
+			if not (kind[1] == "h" and (spec == "__group" or
+					type(spec) == "table" and spec.name == "__group")) then
+				sound_record(kind[1], name, spec)
 			end
 		end
+	end
+	for group in pairs(rated) do
+		sound_record("h", "__group:" .. group,
+				{name = "default_dig_" .. group, gain = 0.5})
+	end
+	for name, def in pairs(core.registered_items) do
+		sound_record("u", name, def.sound_use)
+		sound_record("v", name, def.sound_use_air)
 	end
 	for name, def in pairs(core.registered_nodes) do
 		local groups = def.groups
@@ -546,6 +581,23 @@ function core.__dig_node(pos, digger)
 			not core.__may_interact(digger, pos) then
 		core.swap_node(pos, node)
 		return false
+	end
+	-- What official's server refuses: a node that neither what is in hand
+	-- nor the hand digs (Server::handleCommand_Interact) -- air among
+	-- them, which a client digs when a chunk sent before its dig showed
+	-- it the node again
+	if digger and digger.get_wielded_item then
+		local groups = (core.registered_nodes[node.name] or {}).groups or {}
+		local stack = digger:get_wielded_item()
+		local inv = digger.get_inventory and digger:get_inventory()
+		local hand = inv and inv:get_stack("hand", 1) or ItemStack("")
+		if not core.get_dig_params(groups, stack:get_tool_capabilities(),
+					stack:get_wear()).diggable and
+				not core.get_dig_params(groups,
+					hand:get_tool_capabilities()).diggable then
+			core.swap_node(pos, node)
+			return false
+		end
 	end
 	local dug = core.node_dig(pos, node, digger) and true or false
 	-- The node as it is now goes back to the clients whatever happened,

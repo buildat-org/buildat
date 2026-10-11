@@ -282,12 +282,14 @@ local function read_node(r)
 	def.collision_box = read_node_box(r)
 
 	-- Three sounds, each a name and three floats, and two legacy flags.
-	-- Read and dropped: what is wanted is what comes after them.
-	for _ = 1, 3 do
-		r:string()   -- name
-		r:f32()      -- gain
-		r:f32()      -- pitch
+	-- The client's own to play, as official's: a footstep, the swing's dig
+	-- sound and the dug one ([DIG_SWING_SOUND])
+	for _, key in ipairs({"sound_footstep", "sound_dig", "sound_dug"}) do
+		local sound = {name = r:string()}
+		sound.gain = r:f32()
+		sound.pitch = r:f32()
 		r:f32()      -- fade
+		def[key] = sound
 	end
 	r:u8()  -- legacy_facedir_simple
 	r:u8()  -- legacy_wallmounted
