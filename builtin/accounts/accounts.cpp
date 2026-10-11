@@ -1352,6 +1352,10 @@ struct Module: public interface::Module, public Interface
 		} else if(kind == "code" && arg.size() >= 8 && arg.size() <= 100 &&
 				rest.empty()){
 			m_setup_code = upper(arg);
+			// Kept until an admin exists: the file is gone once read, and
+			// a restart before the admin's join lost the code
+			// ([FIRST_ADMIN_KEPT])
+			m_store->set("access/setup_code", m_setup_code);
 			log_w(MODULE, "The server has no admin. The first to join with "
 					"the setup code from first_admin becomes it.");
 		} else {
@@ -1378,10 +1382,21 @@ struct Module: public interface::Module, public Interface
 	{
 		if(admin_count() > 0){
 			m_setup_code.clear();
+			ss_ kept;
+			if(m_store->get("access/setup_code", kept))
+				m_store->remove("access/setup_code");
 			return;
 		}
 		if(!m_setup_code.empty())
 			return;
+		// first_admin's code from an earlier start
+		ss_ kept;
+		if(m_store->get("access/setup_code", kept) && !kept.empty()){
+			m_setup_code = kept;
+			log_w(MODULE, "The server has no admin. The first to join with "
+					"the setup code from first_admin becomes it.");
+			return;
+		}
 		m_setup_code = random_code(8);
 		log_w(MODULE, "The server has no admin. The first to join with the "
 				"setup code %s becomes it.", cs(m_setup_code));

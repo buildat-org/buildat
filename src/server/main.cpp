@@ -382,9 +382,13 @@ int main(int argc, char *argv[])
 		// [FIRST_ADMIN]: the admin's file <user>/first_admin, one line, read
 		// here, where the box does not hide the user path's top level, and
 		// removed, as it can hold a password; the accounts module applies it
-		// to a server with no admin
+		// to a server with no admin. Left alone by --compile-only, which
+		// starts no accounts and would use it up before the start that
+		// does ([FIRST_ADMIN_KEPT])
 		const ss_ path = config.get<ss_>("user_path")+"/first_admin";
-		std::ifstream f(path);
+		std::ifstream f;
+		if(!config.get<bool>("compile_only"))
+			f.open(path);
 		ss_ line;
 		if(std::getline(f, line)){
 			f.close();
