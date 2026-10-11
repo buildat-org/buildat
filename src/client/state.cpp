@@ -401,7 +401,9 @@ struct CState: public State
 
 		bool ok = m_pipe || m_socket->connect_fd(address, port);
 		if(ok && m_wss){
-			const ss_ why = m_wss->start(address, port,
+			// BUILDAT_CA_FILE: a check's own CA, as for HTTP (impl/http.cpp)
+			const char *ca = getenv("BUILDAT_CA_FILE");
+			const ss_ why = m_wss->start(address, port, ca ? ss_(ca) :
 					g_client_config.get<ss_>("share_path")+
 					"/client/extensions/network/ca-bundle.pem");
 			if(!why.empty()){

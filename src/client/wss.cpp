@@ -1,6 +1,8 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #include "client/wss.h"
+#include "core/log.h"
+#include <c55/os.h> // get_timeofday_us()
 #include "interface/tcpsocket.h"
 #include <mbedtls/ssl.h>
 #include <mbedtls/ctr_drbg.h>
@@ -15,6 +17,8 @@
 #else
 	#include <sys/socket.h>
 #endif
+
+#define MODULE "__wss"
 
 namespace client {
 
@@ -50,6 +54,9 @@ struct CWss: public Wss
 	// What has come of the server's frames and is not a whole one yet
 	ss_ m_in;
 	bool m_unread = false;
+	// The second's reading, for the log
+	size_t m_bytes = 0, m_records = 0, m_inside = 0;
+	int64_t m_said_us = 0;
 
 	CWss(interface::TCPSocket *socket): m_socket(socket)
 	{
@@ -200,24 +207,47 @@ struct CWss: public Wss
 		return send_frame(2, data);
 	}
 
+	// **Every record there is, up to a megabyte** ([JOIN_DRAIN], user
+	// 2026-10-11: a 21 MB start came at 330 KB/s): a read of one record,
+	// 16 KB at most, nearly always ends inside a frame of a world's
+	// packets, and a read that gave nothing ended the update's reading --
+	// a record an update
 	int read(ss_ &out, ss_ *why)
 	{
 		char buf[100000];
-		const int r = mbedtls_ssl_read(&m_ssl, (unsigned char*)buf, sizeof buf);
-		// What came with the upgrade's answer is framed too
-		m_unread = false;
-		if(r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
-			return deframe(out, why);
-		if(r == 0 || r == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY){
-			*why = "the server closed the connection";
-			return -1;
+		size_t took = 0;
+		while(took < 1000000){
+			const int r = mbedtls_ssl_read(&m_ssl, (unsigned char*)buf,
+					sizeof buf);
+			// What came with the upgrade's answer is framed too
+			m_unread = false;
+			if(r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
+				break;
+			if(r == 0 || r == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY){
+				*why = "the server closed the connection";
+				return -1;
+			}
+			if(r < 0){
+				*why = "TLS: "+tls_error(r);
+				return -1;
+			}
+			m_in.append(buf, r);
+			took += r;
+			m_records++;
 		}
-		if(r < 0){
-			*why = "TLS: "+tls_error(r);
-			return -1;
+		const int n = deframe(out, why);
+		// What came, once a second while it comes
+		m_bytes += took;
+		if(n == 0 && took > 0)
+			m_inside++;
+		const int64_t now = get_timeofday_us();
+		if(m_bytes > 0 && now - m_said_us >= 1000000){
+			log_v(MODULE, "TLS: %zu bytes in %zu records, %zu reads ended "
+					"inside a frame", m_bytes, m_records, m_inside);
+			m_said_us = now;
+			m_bytes = m_records = m_inside = 0;
 		}
-		m_in.append(buf, r);
-		return deframe(out, why);
+		return n;
 	}
 
 	// The whole frames of m_in: a binary one's payload onto `out`
