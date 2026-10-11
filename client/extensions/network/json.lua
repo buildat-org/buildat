@@ -228,7 +228,10 @@ local function write_number(value)
 	if value == math.floor(value) and math.abs(value) < 2 ^ 53 then
 		return string.format("%.0f", value)
 	end
-	return string.format("%.17g", value)
+	-- The shortest of the two that reads back the same: 0.1, not
+	-- 0.10000000000000001
+	local short = string.format("%.15g", value)
+	return tonumber(short) == value and short or string.format("%.17g", value)
 end
 
 local write_value
