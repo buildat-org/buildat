@@ -166,6 +166,13 @@ local token_tried = false
 -- The last login sent, for the TOTP code it may turn out to need
 local last_login = nil
 
+-- The ID token of a login that links it to the account ([ID_CLAIM_ACCOUNT]:
+-- a name and a token both), or nil
+local function claim_token()
+	local l = last_login
+	return l and (l[1] or "") ~= "" and (l[6] or "") ~= "" and l[6] or nil
+end
+
 -- What a field is for, for a browser's password manager: the web client
 -- gives it to the page's input as its autocomplete ([LOGIN_UNLOADED])
 local function purpose(e, what)
@@ -270,7 +277,8 @@ local function show_totp(error_text)
 	local function go()
 		if totp_wait() ~= "" then
 			return send_login(M.name or "", "", "", totp_wait(),
-					buildat.storage_read("keep") == "1", e:GetText())
+					buildat.storage_read("keep") == "1", e:GetText(),
+					claim_token())
 		end
 		local l = last_login
 		send_login(l[1], l[2], l[3], l[4], l[5], e:GetText(), l[6], l[7])
@@ -288,8 +296,57 @@ local function show_totp(error_text)
 end
 
 local show_create -- [ACCOUNT_CREATE]: defined after show_login
+local show_login
 
-local function show_login(error_text)
+-- **"That's my account"** ([ID_CLAIM_ACCOUNT]): a Starport ID whose name
+-- here is an account of this server's links to it by one login with the
+-- account's password; `token` is the refused login's ID token, sent with
+-- the password (and the code the server asks after)
+-- simplified: the name is a label, not a field, so a password manager on
+-- the web gets no name with the password
+local function show_claim(name, token, error_text)
+	M.close()
+	local w = page_window(380)
+	window = w
+	page_text(w, "Log in to " .. name .. " to link your Starport ID")
+	page_text(w, "Password")
+	local e = w:CreateChild("LineEdit")
+	e:SetStyleAuto()
+	e.minHeight = 26
+	e.textCopyable = false
+	e.textSelectable = true
+	e.echoCharacter = string.byte("*")
+	purpose(e, "current-password")
+	if error_text and error_text ~= "" then
+		page_text(w, error_text, magic.Color(rgb("error")))
+	end
+	local function go()
+		M.name = name
+		send_login(name, e:GetText(), "", nil,
+				buildat.storage_read("keep") == "1", "", token)
+	end
+	magic.SubscribeToEvent(e, "TextFinished", go)
+	local r = w:CreateChild("UIElement")
+	r:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	for _, b in ipairs({{"Join", go}, {"Back", function() show_login(nil) end}}) do
+		local bb = r:CreateChild("Button")
+		if b[1] == "Join" then
+			main_style(bb)
+		else
+			bb:SetStyleAuto()
+		end
+		bb.minHeight = 30
+		bb:SetFocusMode(magic.FM_FOCUSABLE)
+		local bt = bb:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt:SetText(b[1])
+		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(bb, "Released", b[2])
+	end
+	e:SetFocus(true)
+end
+
+show_login = function(error_text)
 	M.close()
 	local is_local = M.hello["local"] == 1
 	local w = page_window(380)
@@ -573,10 +630,14 @@ buildat.sub_packet("accounts:hello", function(data)
 	local auto_name = buildat.get_env(env .. "_NAME")
 	-- A Starport ID's token, as a check gets one from the Starport's API
 	local auto_starport = buildat.get_env(env .. "_STARPORT")
+	-- With a name and a password too, "That's my account"'s login
 	if auto_starport and auto_starport ~= "" and not M.auto_tried then
 		M.auto_tried = true
-		send_login("", "", buildat.get_env(env .. "_CODE") or "", nil,
-				buildat.get_env(env .. "_KEEP") == "1", "", auto_starport)
+		M.name = auto_name
+		send_login(auto_name or "", buildat.get_env(env .. "_PASSWORD") or "",
+				buildat.get_env(env .. "_CODE") or "", nil,
+				buildat.get_env(env .. "_KEEP") == "1",
+				buildat.get_env(env .. "_TOTP") or "", auto_starport)
 		return
 	end
 	local token = buildat.storage_read("token") or ""
@@ -655,7 +716,12 @@ buildat.sub_packet("accounts:login_result", function(data)
 			local ok, starport = pcall(require, "buildat/extension/starport")
 			if ok and starport.id_token_here then
 				local code, keep = last_login[3], last_login[5]
+				local refused = last_login[6]
+				local name = err:match("^The name (%S+) is taken")
 				starport.id_token_here(function(token, why)
+					if why == "mine" and name then
+						return show_claim(name, refused)
+					end
 					if not token then
 						return show_login(why ~= "cancelled" and why or nil)
 					end
@@ -663,11 +729,15 @@ buildat.sub_packet("accounts:login_result", function(data)
 				end, "The name you have in this community is taken here by "..
 						"an account of this server. Pick another; it is kept "..
 						"for this community on the Starport. If that account "..
-						"is yours, cancel instead: log in with its password, "..
-						"and link your ID to it in My account..., Link a "..
-						"Starport ID...; then your ID logs in as it.")
+						"is yours, choose \"That's my account\" and log in "..
+						"with its password: your ID is linked to it, and logs "..
+						"in as it from then on.")
 				return
 			end
+		end
+		-- A wrong password of "That's my account" asks again there
+		if claim_token() then
+			return show_claim(last_login[1], claim_token(), err)
 		end
 		show_login(err)
 		return
@@ -763,9 +833,26 @@ end)
 
 buildat.sub_packet("accounts:link_result", function(data)
 	local text = cereal.binary_input(data, TEXT).text
+	text = text == "" and "The Starport ID is linked: it logs in as this "..
+			"account now" or text
+	log:info("link result: " .. text)
 	if page_kind == "account" then
-		account_page(page_back, text == "" and "The Starport ID is linked: "..
-				"it logs in as this account now" or text)
+		account_page(page_back, text)
+	else
+		notice(text)
+	end
+end)
+
+-- The Starports this account has IDs linked from ([ID_CLAIM_ACCOUNT] 5)
+M.links = {}
+buildat.sub_packet("accounts:links", function(data)
+	M.links = {}
+	for l in cereal.binary_input(data, TEXT).text:gmatch("[^\n]+") do
+		M.links[#M.links + 1] = l
+	end
+	log:info("linked Starport IDs: " .. table.concat(M.links, " "))
+	if page_kind == "account" then
+		account_page(page_back)
 	end
 end)
 
@@ -1188,6 +1275,16 @@ account_page = function(back, message)
 	-- [STARPORT] 10g: this account the one a Starport ID logs in as
 	if M.hello.starport == 1 then
 		page_text(w, "A linked Starport ID logs in as this account.", DIM)
+		-- One per Starport ([ID_CLAIM_ACCOUNT] 5)
+		for _, l in ipairs(M.links) do
+			local r = row(w)
+			local t = page_text(r, "Linked: an ID of " .. l)
+			t:SetWordwrap(false)
+			local b = button(r, "Unlink", function()
+				buildat.send_packet("accounts:unlink_starport", l)
+			end)
+			b:SetFixedWidth(b.minWidth)
+		end
 		button(w, "Link a Starport ID...", function()
 			local ok, starport = pcall(require, "buildat/extension/starport")
 			if not ok or not starport.id_token_here then

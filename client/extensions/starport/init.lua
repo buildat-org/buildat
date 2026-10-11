@@ -2092,6 +2092,13 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 				"page, then Open"
 	end
 	add_button(rr, "Open", open)
+	-- [ID_CLAIM_ACCOUNT]: the account by that name is the user's own
+	if rename_reason then
+		add_button(rr, "That's my account", close_and(root, function()
+			web_wait = nil
+			cb(nil, "mine")
+		end))
+	end
 	add_button(rr, "Cancel", close_and(root, function()
 		web_wait = nil
 		cb(nil, "cancelled")
@@ -2119,7 +2126,8 @@ end
 -- 10c); cb(token) or cb(nil, why). The name used in the server's
 -- community is asked the first time, in this side's own dialog; with
 -- rename_reason, a new one is asked first, the reason shown (the server
--- has an account of its own by the name the ID had there)
+-- has an account of its own by the name the ID had there), with "That's
+-- my account" beside, which answers cb(nil, "mine")
 function M.safe.id_token_here(cb, rename_reason)
 	local address = here_address()
 	if not address then
@@ -2230,6 +2238,12 @@ function M.safe.id_token_here(cb, rename_reason)
 				uistack.main:pop(root)
 				ask(n, rename)
 			end)
+			-- [ID_CLAIM_ACCOUNT]: the account by that name is the user's own
+			if rename_reason then
+				add_button(rr, "That's my account", close_and(root, function()
+					cb(nil, "mine")
+				end))
+			end
 			add_button(rr, "Cancel", close_and(root, function()
 				cb(nil, "cancelled")
 			end))

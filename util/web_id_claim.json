@@ -1,0 +1,23 @@
+[
+ ["nav", "${URL}index.html"],
+ ["waitlog", "hello: Starport IDs taken", 90],
+ ["wait", 3000],
+ ["click", 600, 235],
+ ["wait", 4000],
+ ["window", 1],
+ ["wait", 2000],
+ ["eval", "document.getElementById('name').value = 'webid3', document.getElementById('password').value = 'secret1', document.getElementById('login').requestSubmit()"],
+ ["wait", 2000],
+ ["eval", "document.getElementById('allow').requestSubmit()"],
+ ["window", 0],
+ ["waitlog", "Login refused: The name admin is taken", 30],
+ ["wait", 1500],
+ ["click", 600, 565],
+ ["wait", 1500],
+ ["shot", "${OUT}/09_claim.png"],
+ ["type", "adminpass1"],
+ ["key", "Enter"],
+ ["waitlog", "link result: The Starport ID is linked", 30],
+ ["wait", 1000],
+ ["shot", "${OUT}/10_linked.png"]
+]

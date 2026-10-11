@@ -16,9 +16,11 @@
 # Host). Then the ID's own page, /id, in the same browser: logged in still,
 # its sessions, and "Log out everywhere else" leaving this one. Then an ID
 # whose name in the community is a local account's: the refusal logged,
-# the reason shown, another name picked in the Starport's window.
+# the reason shown, another name picked in the Starport's window; and
+# another such ID's "That's my account" with the account's password,
+# which joins as the account and links the ID ([ID_CLAIM_ACCOUNT]).
 # Needs web/ from util/build_web.sh.
-#   util/web_id_window_check.sh [steps.json [rename_steps.json]]
+#   util/web_id_window_check.sh [steps.json [rename_steps.json [claim_steps.json]]]
 set -u
 . "$(dirname "$0")/check_paths.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -155,4 +157,23 @@ grep -q "Starport ID login of admin from .* refused: The name admin is taken" \
 	"$tmp/h.log" || fail "the refusal is not logged ($tmp/h.log)"
 grep -aq "Joined as other" "$tmp/drive2/page.log" ||
 	fail "the ID did not join by another name ($tmp/drive2/page.log)"
-echo "PASS: a web client signs in by the Starport's window, and by another name where its own is taken"
+# A third ID by the admin's name: "That's my account" and the admin's
+# password
+python3 - "$SP" "$id" <<'PY' || fail "the third ID"
+import json, sys, time, urllib.request
+B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+def call(w, **k):
+    return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
+s = call("register", name="webid3", password="secret1",
+        birth_year=time.gmtime().tm_year - 40)["result"]["session"]
+r = call("token", session=s, listing=sys.argv[2], name="admin")
+assert r["ok"], r
+PY
+WEB_DRIVE_URL="http://127.0.0.1:$AN/" "$here/util/web_drive.sh" firefox hearth \
+	"${3:-$here/util/web_id_claim.json}" "$tmp/drive3" > "$tmp/drive3.txt" 2>&1 ||
+	fail "the claim drive ($tmp/drive3.txt, $tmp/drive3)"
+grep -aq "Joined as admin" "$tmp/drive3/page.log" ||
+	fail "\"That's my account\" did not join ($tmp/drive3/page.log)"
+grep -q "admin linked a Starport ID of 127.0.0.1" "$tmp/h.log" ||
+	fail "the ID not linked ($tmp/h.log)"
+echo "PASS: a web client signs in by the Starport's window, by another name where its own is taken, and by \"That's my account\" with the account's password"
