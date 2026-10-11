@@ -2149,8 +2149,29 @@ buildat.safe.take_screenshot          = __buildat_take_screenshot
 -- server's plans; it gets the file the user picks.
 -- Files are at most 64 MiB. See l_save_file() in src/client/app.cpp.
 buildat.safe.save_file                = __buildat_save_file
+-- **A file a part at a time** ([WORLD_TRIM_MOVE]), for one more than a
+-- string or a packet holds:
+--   save_file_parts(name) -> a writer, or nil and why not: w.add(data) ->
+--       true, or nil and why (the parts dropped); w.finish() -> the path
+--       ("" for a download), or nil and why; w.cancel() drops the parts
+--   pick_file(accept, true): picked_file() then gives name, reader, with
+--       reader.size and reader.read(offset, len) -> the bytes from offset,
+--       at most len (16 MiB); reader.close() when done
+buildat.safe.save_file_parts = function(name)
+	local id, why = __buildat_save_part_begin(tostring(name))
+	if not id then
+		return nil, why
+	end
+	return {
+		add = function(data) return __buildat_save_part_add(id, data) end,
+		finish = function() return __buildat_save_part_end(id, true) end,
+		cancel = function() __buildat_save_part_end(id, false) end,
+	}
+end
 local picked_export = nil
-buildat.safe.pick_file = function(accept)
+local picked_parts = false
+buildat.safe.pick_file = function(accept, parts)
+	picked_parts = parts == true
 	if __buildat_pick_file(accept) then
 		return true
 	end
@@ -2158,7 +2179,7 @@ buildat.safe.pick_file = function(accept)
 	__buildat_require_extension("network").pick_export(
 			type(accept) == "string" and accept or "", function(name, data)
 		picked_export = {name, data}
-	end)
+	end, nil, nil, picked_parts)
 	return true
 end
 buildat.safe.picked_file = function()
@@ -2167,7 +2188,20 @@ buildat.safe.picked_file = function()
 		picked_export = nil
 		return p[1], p[2]
 	end
-	return __buildat_picked_file()
+	if not picked_parts then
+		return __buildat_picked_file()
+	end
+	-- The web's: kept by the page and read from there
+	local _, size, name = __buildat_picked_part(0, 0)
+	if not name then
+		return nil
+	end
+	picked_parts = false
+	return name, {size = size,
+		read = function(offset, len)
+			return (__buildat_picked_part(offset, len))
+		end,
+		close = function() __buildat_picked_part(-1) end}
 end
 -- dump_meshes([atlas_json], [node]): node, a sandboxed Node, dumps what is
 -- under it rather than the replicated scene

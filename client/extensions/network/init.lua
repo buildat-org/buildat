@@ -376,10 +376,12 @@ end
 -- window of its own. Beside the network dialog for its guard. cb(name,
 -- data), or cb(nil, why); accept is the end of a file's name (".fpplan"),
 -- "" for any.
+-- parts: cb(name, reader) instead, reader.size and reader.read(offset,
+-- len) over the file ([WORLD_TRIM_MOVE]: one larger than a string holds).
 -- simplified: at most MAX_ROWS rows a folder, in name order; a folder of
 -- more wants a search field
 local MAX_ROWS = 300
-function M.pick_export(accept, cb, dir, back)
+function M.pick_export(accept, cb, dir, back, parts)
 	local exports = __buildat_get_path("user") .. "/exports"
 	dir = dir or exports
 	-- What had the focus, which has it again once the picker is gone
@@ -415,13 +417,26 @@ function M.pick_export(accept, cb, dir, back)
 		guard.stop()
 		close_dialog(root)
 		if to then
-			return M.pick_export(accept, cb, to, back)
+			return M.pick_export(accept, cb, to, back, parts)
 		end
 		pcall(function() back:SetFocus(true) end)
 		if not name then
 			return cb(nil, "no file picked")
 		end
 		local data, why
+		if parts then
+			local d = dir ~= exports and dir or nil
+			log:info("The user picked "..name.." to read in parts")
+			local none, size = __buildat_read_exported_part(name, d, 0, 0)
+			if not none then
+				return cb(nil, size)
+			end
+			return cb(name, {size = size,
+				read = function(offset, len)
+					return (__buildat_read_exported_part(name, d, offset, len))
+				end,
+				close = function() end})
+		end
 		if dir == exports then
 			log:info("The user picked "..name.." from the exports")
 			data, why = __buildat_read_exported(name)
@@ -480,8 +495,10 @@ function M.pick_export(accept, cb, dir, back)
 		add_text("(none" .. (accept ~= "" and " ending in " .. accept or "") ..
 				")")
 	else
-		local view = ui_utils.list_view(menu.window, width, math.min(
-				#rows * 30, math.floor(magic.ui.root.height * 0.6)),
+		-- fit() takes the list's own height under this: a guess of a
+		-- row's left the last of six rows out of view
+		local view = ui_utils.list_view(menu.window, width,
+				math.floor(magic.ui.root.height * 0.6),
 				{wheel = 40, follow_focus = true})
 		view.list:SetName(PICKER_LIST)
 		for i = 1, math.min(#rows, MAX_ROWS) do

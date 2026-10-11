@@ -739,7 +739,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		picked: null,
 		save: function(name, bytes){
 			var a = document.createElement('a');
-			a.href = URL.createObjectURL(new Blob([bytes]));
+			// bytes, or the parts of one file ([WORLD_TRIM_MOVE])
+			a.href = URL.createObjectURL(new Blob(Array.isArray(bytes) ?
+					bytes : [bytes]));
 			a.download = name;
 			document.body.appendChild(a);
 			a.click();

@@ -13,6 +13,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstring>
+#include <zlib.h>
 #define MODULE "zip"
 
 namespace interface {
@@ -101,8 +102,12 @@ static ss_ entry_data(const ss_ &d, const RawEntry &e)
 	if(start + e.compressed_size > d.size())
 		throw Exception("zip: "+e.entry.name+" runs past the end");
 	const ss_ raw = d.substr(start, e.compressed_size);
-	if(e.method == 0)
+	if(e.method == 0){
+		if(raw.size() != e.entry.size)
+			throw Exception("zip: "+e.entry.name+" is stored as "+
+					itos(raw.size())+" bytes and says "+itos(e.entry.size));
 		return raw;
+	}
 	std::istringstream is(raw, std::ios::binary);
 	std::ostringstream os(std::ios::binary);
 	// No more than the entry says it is: a few kilobytes of deflate made
@@ -153,7 +158,8 @@ sv_<ZipEntry> zip_list(const ss_ &zip_path)
 	return out;
 }
 
-size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir)
+size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir,
+		uint64_t max_total)
 {
 	static bool checked = false;
 	if(!checked){
@@ -172,19 +178,17 @@ size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir)
 	const sv_<RawEntry> entries = read_directory(d);
 	// Every name checked before one byte is written, so a bad archive
 	// leaves nothing half done
-	// And what they come to, which a disk is filled with otherwise
-	// simplified: 2 GiB, past any game ContentDB has; a size per caller
-	// is the upgrade the day one needs more
-	static const uint64_t MAX_TOTAL = (uint64_t)2 * 1024 * 1024 * 1024;
+	// And what they come to, which a disk is filled with otherwise: 2 GiB
+	// by default, past any game ContentDB has
 	uint64_t total = 0;
 	for(const RawEntry &e : entries){
 		if(!name_is_safe(e.entry.name))
 			throw Exception("zip: "+e.entry.name+" would leave "+into_dir);
 		total += e.entry.size;
 	}
-	if(total > MAX_TOTAL)
+	if(total > max_total)
 		throw Exception("zip: "+itos((int64_t)total)+" bytes unpacked is "
-				"more than an archive here may be");
+				"more than the "+itos((int64_t)max_total)+" there is room for");
 	size_t files = 0;
 	for(const RawEntry &e : entries){
 		const ss_ path = into_dir+"/"+e.entry.name;
@@ -214,6 +218,75 @@ static void append_u32(ss_ &s, uint32_t v)
 {
 	append_u16(s, v & 0xffff); append_u16(s, v >> 16);
 }
+void zip_write(const ss_ &zip_path, const sv_<std::pair<ss_, ss_>> &files)
+{
+	std::ofstream out(zip_path, std::ios::binary | std::ios::trunc);
+	if(!out.good())
+		throw Exception("zip: cannot write "+zip_path);
+	ss_ dir;
+	uint64_t at = 0;
+	sv_<char> buf(1 << 20);
+	for(const auto &f : files){
+		std::ifstream in(f.second, std::ios::binary);
+		if(!in.good())
+			throw Exception("zip: cannot read "+f.second);
+		in.seekg(0, std::ios::end);
+		const uint64_t size = (uint64_t)in.tellg();
+		in.seekg(0);
+		if(size >= 0xffffffffu || at + size + 30 + f.first.size() >= 0xffffffffu)
+			throw Exception("zip: "+f.second+" takes the archive past 4 GiB");
+		// The CRC goes in the header before the data: a first read for it
+		uLong crc = crc32(0, Z_NULL, 0);
+		for(uint64_t left = size; left > 0; ){
+			const size_t n = (size_t)std::min<uint64_t>(left, buf.size());
+			in.read(buf.data(), n);
+			if((size_t)in.gcount() != n)
+				throw Exception("zip: "+f.second+" changed while read");
+			crc = crc32(crc, (const Bytef*)buf.data(), n);
+			left -= n;
+		}
+		ss_ local;
+		append_u32(local, 0x04034b50); append_u16(local, 20);
+		append_u16(local, 0); append_u16(local, 0);
+		append_u32(local, 0); append_u32(local, crc);
+		append_u32(local, size); append_u32(local, size);
+		append_u16(local, f.first.size()); append_u16(local, 0);
+		local += f.first;
+		out.write(local.data(), local.size());
+		in.clear();
+		in.seekg(0);
+		for(uint64_t left = size; left > 0; ){
+			const size_t n = (size_t)std::min<uint64_t>(left, buf.size());
+			in.read(buf.data(), n);
+			if((size_t)in.gcount() != n)
+				throw Exception("zip: "+f.second+" changed while read");
+			out.write(buf.data(), n);
+			left -= n;
+		}
+		ss_ c;
+		append_u32(c, 0x02014b50); append_u16(c, 20); append_u16(c, 20);
+		append_u16(c, 0); append_u16(c, 0);
+		append_u32(c, 0); append_u32(c, crc);
+		append_u32(c, size); append_u32(c, size);
+		append_u16(c, f.first.size()); append_u16(c, 0); append_u16(c, 0);
+		append_u16(c, 0); append_u16(c, 0); append_u32(c, 0);
+		append_u32(c, at);
+		dir += c + f.first;
+		at += local.size() + size;
+	}
+	if(files.size() >= 0xffff || at + dir.size() >= 0xffffffffu)
+		throw Exception("zip: more than an archive without zip64 holds");
+	ss_ eocd;
+	append_u32(eocd, 0x06054b50); append_u16(eocd, 0); append_u16(eocd, 0);
+	append_u16(eocd, files.size()); append_u16(eocd, files.size());
+	append_u32(eocd, dir.size()); append_u32(eocd, at);
+	append_u16(eocd, 0);
+	out.write(dir.data(), dir.size());
+	out.write(eocd.data(), eocd.size());
+	if(!out.good())
+		throw Exception("zip: could not write "+zip_path);
+}
+
 static ss_ make_zip(const sv_<std::pair<ss_, ss_>> &files, bool deflate)
 {
 	ss_ body, dir;
@@ -277,6 +350,20 @@ static void self_check(const ss_ &base)
 		if(read_file(dir+"/game/mods/a/init.lua") != files[2].second ||
 				read_file(dir+"/game/game.conf") != files[1].second)
 			throw Exception("zip self_check: a file came out changed");
+	}
+	// zip_write's archive reads back the same
+	{
+		const ss_ a = dir+".a", b = dir+".b";
+		std::ofstream(a, std::ios::binary) << ss_(70000, 'q');
+		std::ofstream(b, std::ios::binary) << "gameid = x\n";
+		zip_write(zip, {{"w/save.sqlite", a}, {"w/world.mt", b}});
+		if(zip_extract(zip, dir) != 2 ||
+				read_file(dir+"/w/save.sqlite") != ss_(70000, 'q') ||
+				read_file(dir+"/w/world.mt") != "gameid = x\n")
+			throw Exception("zip self_check: zip_write's archive is not "
+					"what went in");
+		fs::remove_all(a);
+		fs::remove_all(b);
 	}
 	{
 		std::ofstream f(zip, std::ios::binary | std::ios::trunc);

@@ -1,0 +1,194 @@
+#!/bin/bash
+# tier: full
+# cost: ~5 min (2026-10-11)
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua src/impl/zip.cpp src/client/app_lua.h client/api.lua client/extensions/network/init.lua
+# [WORLD_TRIM_MOVE] 3-5: a world out as a zip and in again, through the
+# launcher's world menu (the native client; its picker is the client's
+# own). Vanilla on the minimal game, the server at --max-disk-mb 300.
+#   0. A world, wt, with a player's build (a node a chat command placed).
+#   1. Export wt: a zip in the client's exports, which Python's zipfile
+#      reads whole. Import it: saved as wt_2, its store the same rows as
+#      wt's. Bad zips refused, nothing kept: a "../" entry, one whose
+#      header says more than the room, one whose stored entry holds more
+#      than its header says, and a Luanti world of the leveldb backend
+#      (with the --migrate hint). A zipped Luanti world (sqlite3) imported
+#      and started.
+#   2. wt_2 started: the build is there.
+#   3. One transfer at a time: a client over a slow link (util/netsim.py)
+#      importing a 10 MB zip; a second client's export meanwhile refused;
+#      the first leaves mid-way, and the server's transfer folder is gone
+#      with no save made.
+# simplified: native only; the web's download of the parts and its picked
+# file read in parts are not driven.
+#   util/world_move_check.sh
+set -u
+. "$(dirname "$0")/check_paths.sh"
+here=$(cd "$(dirname "$0")/.." && pwd)
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+check_tmp world_move; t=$CHECK_TMP
+trap check_cleanup EXIT
+d=$t/s
+saves=$d/apps/vanilla/saves
+mkdir -p "$saves/wt/luanti" "$d/shared" "$t/nu/exports"
+echo "enable_damage = false" > "$saves/wt/luanti/world.mt"
+cat > "$d/shared/fixture.lua" <<'L'
+local M = {x = 3, y = 2, z = 0}
+core.register_on_joinplayer(function(player)
+	local name = player:get_player_name()
+	player:set_physics_override({gravity = 0, speed = 0})
+	core.after(2, function()
+		core.emerge_area(M, M, function(_, _, left)
+			if left == 0 then core.chat_send_player(name, "wm: ready") end
+		end)
+	end)
+end)
+core.register_chatcommand("mark", {func = function()
+	core.set_node(M, {name = "floor:marker"})
+	return true, "wm: marked"
+end})
+core.register_chatcommand("look", {func = function()
+	core.log("action", "wm: at the mark " .. core.get_node(M).name)
+	return true, "wm: looked"
+end})
+L
+serve(){
+	local log=$1 kv rc; shift
+	for kv in "$@"; do export "$kv"; done
+	start_server "$log" "STATUS Listening" 180 auto "$here/Build/bin/buildat_server" \
+		-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3 \
+		--max-disk-mb 300
+	rc=$?
+	for kv in "$@"; do unset "${kv%%=*}"; done
+	[ $rc = 0 ] || fail "the server ($log)"
+}
+stop(){ kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
+# client <log> <cmds> [port]
+client(){
+	run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
+		-D "$t/nu" -s 127.0.0.1:${3:-$SERVER_PORT} -w 1100x900 -u 1 -l 3 \
+		-o sound_mute=1 -c @"$2"
+}
+chat(){ printf 'keypress T\ndelay 700\ntext %s\ndelay 300\nkeypress Return\nwait_log 20000 wm: %s\ndelay 500\n' "$1" "$2"; }
+
+# 0
+serve "$t/0.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt \
+	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua"
+{ echo "wait_log 120000 wm: ready"; chat /mark marked; chat /look looked; echo quit; } > "$t/0.cmds"
+client "$t/0c.log" "$t/0.cmds"
+stop
+grep -aq "wm: at the mark floor:marker" "$t/0.log" || fail "no build in wt ($t/0.log)"
+
+# 1: the zips to import, in the client's exports
+python3 - "$t/nu/exports" <<'PY'
+import io, sqlite3, struct, sys, tempfile, zipfile, os
+out = sys.argv[1]
+def luanti_world(backend):
+    db = tempfile.mktemp()
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE blocks (pos INT PRIMARY KEY, data BLOB)")
+    c.commit(); c.close()
+    data = open(db, "rb").read(); os.remove(db)
+    return {"lw/world.mt": "gameid = minimal\nbackend = %s\n" % backend,
+            "lw/map.sqlite": data}
+def write(name, files, method=zipfile.ZIP_STORED):
+    with zipfile.ZipFile(out + "/" + name, "w", method) as z:
+        for n, d in files.items():
+            z.writestr(n, d)
+write("lw.zip", luanti_world("sqlite3"))
+write("leveldb.zip", luanti_world("leveldb"))
+write("escape.zip", {"../escape.txt": "out"})
+# Sizes patched in both headers: the local one at 22, the directory's at 24
+def patched(name, files, size):
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w", zipfile.ZIP_STORED) as z:
+        for n, d in files.items():
+            z.writestr(n, d)
+    d = bytearray(b.getvalue())
+    d[22:26] = struct.pack("<I", size)
+    c = d.find(b"PK\x01\x02")
+    d[c + 24:c + 28] = struct.pack("<I", size)
+    open(out + "/" + name, "wb").write(bytes(d))
+patched("room.zip", {"x/world.mt": "gameid = minimal\n"}, 4000000000)
+patched("less.zip", {"x/world.mt": "gameid = minimal\n" + "#" * 1000}, 17)
+PY
+imp(){ # imp <file> <what the log says after>
+	printf 'click Button "Import a world from a zip..."\ndelay 1500\nclick Button "%s"\nwait_log 60000 %s\ndelay 800\n' "$1" "$2"
+}
+ok(){ printf 'click Button "Ok"\ndelay 1500\n'; }
+serve "$t/1.log"
+{
+	echo "wait_log 60000 menu: 1 saves"; echo "delay 1000"
+	echo 'click Button "wt*"'; echo "delay 800"
+	echo 'click Button "Export..."'; echo "wait_log 60000 menu: Exported wt to"; echo "delay 500"; ok
+	imp wt.buildat.zip "menu: Imported wt_2"; echo "delay 1500"
+	imp escape.zip "failed:"; ok
+	imp room.zip "failed:"; ok
+	imp less.zip "failed:"; ok
+	imp leveldb.zip "failed:"; ok
+	imp lw.zip "menu: done; the world is up"
+	echo "delay 1000"; echo quit
+} > "$t/1.cmds"
+client "$t/1c.log" "$t/1.cmds"
+stop
+grep -a "menu: \(Exported\|Imported\|Importing\|import\|export\)\|failed:" "$t/1c.log" | sed 's/.*menu: /menu: /' | cut -c 1-220
+grep -a "Command sequence failed" "$t/1c.log" && fail "the drive ($t/1c.log)"
+python3 - "$t/nu/exports/wt.buildat.zip" "$saves/wt/save.sqlite" "$saves/wt_2/save.sqlite" <<'PY' || fail "the export and its import"
+import sqlite3, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+bad = z.testzip()
+assert bad is None, "%s does not read" % bad
+names = z.namelist()
+print("the export: " + ", ".join(names))
+assert "wt/save.sqlite" in names and "wt/luanti/world.mt" in names
+def rows(p):
+    c = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
+    return list(c.iterdump())
+a, b = rows(sys.argv[2]), rows(sys.argv[3])
+print("wt and wt_2: %d and %d rows of dump" % (len(a), len(b)))
+assert a == b, "the stores differ"
+PY
+for want in "would leave" "room for" "is stored as" "luanti --migrate sqlite3"; do
+	grep -a "menu: Importing .* failed:" "$t/1c.log" | grep -aq -- "$want" ||
+		fail "no refusal saying \"$want\" ($t/1c.log)"
+done
+got=$(ls "$saves" | LC_ALL=C sort | tr '\n' ' ')
+echo "the saves: $got"
+[ "$got" = "_server lw wt wt_2 " ] || fail "the saves: $got"
+[ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left: $(ls -R "$t/c/apps/vanilla/vanilla_transfer")"
+[ -n "$(find "$t" -name escape.txt)" ] && fail "the ../ entry landed"
+echo "ok: exported, imported as wt_2 alike; the bad zips refused with nothing kept; a Luanti world imported and started"
+
+# 2
+serve "$t/2.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt_2 \
+	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua"
+{ echo "wait_log 120000 wm: ready"; chat /look looked; echo quit; } > "$t/2.cmds"
+client "$t/2c.log" "$t/2.cmds"
+stop
+grep -aq "wm: at the mark floor:marker" "$t/2.log" || fail "no build in wt_2 ($t/2.log)"
+echo "ok: the build in wt_2"
+
+# 3
+head -c 10000000 /dev/urandom > "$t/blob"
+(cd "$t" && python3 -c 'import zipfile; z = zipfile.ZipFile("nu/exports/big.zip", "w"); z.write("blob", "big/blob")')
+serve "$t/3.log"
+LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
+	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
+CHECK_PIDS+=($!)
+sleep 1
+printf 'wait_log 60000 menu: 3 saves\ndelay 1000\nclick Button "Import a world from a zip..."\ndelay 1500\nclick Button "big.zip"\nwait_log 30000 menu: import big.zip\ndelay 25000\nquit\n' > "$t/3a.cmds"
+client "$t/3a.log" "$t/3a.cmds" "$LINK" &
+a=$!
+wait_for_log "$t/3.log" "Importing big.zip" 120 || fail "no import began ($t/3.log)"
+printf 'wait_log 60000 menu: 3 saves\ndelay 1000\nclick Button "wt*"\ndelay 800\nclick Button "Export..."\nwait_log 30000 Another transfer\ndelay 500\nquit\n' > "$t/3b.cmds"
+run_client 60 "$t/3b.log" timeout 120 "$here/Build/bin/buildat" -C "$t/nc2" \
+	-D "$t/nu2" -s 127.0.0.1:$SERVER_PORT -w 1100x900 -u 1 -l 3 -o sound_mute=1 -c @"$t/3b.cmds"
+grep -aq "menu: Another transfer is running: an import" "$t/3b.log" ||
+	fail "the second transfer was not refused ($t/3b.log)"
+wait $a
+wait_for_log "$t/3.log" "The transfer's client left" 30 || fail "the leaving was not seen ($t/3.log)"
+grep -a "Importing big\|The transfer\|Another transfer" "$t/3.log" | cut -c 30- | head -5
+[ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left"
+[ -e "$saves/big" ] && fail "a save was made of half a zip"
+stop
+echo "PASS: a world exported and imported alike, its build there; a Luanti world zipped in; bad zips refused with nothing kept; one transfer at a time, and one cut off leaves nothing"

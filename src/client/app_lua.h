@@ -2744,6 +2744,229 @@
 #endif
 	}
 
+	// **A file a part at a time** ([WORLD_TRIM_MOVE]): an exported world is
+	// more than one Lua string or one packet holds. save_part_begin(name)
+	// -> an id, the name taken as save_file() takes it;
+	// save_part_add(id, data) -> true; save_part_end(id, keep) -> the path
+	// ("" on the web) when kept, the parts dropped when not; nil and why
+	// not on a failure, which drops the parts too. On native the parts go
+	// into <name>.part beside where it lands; on the web the page holds
+	// them and offers one Blob of them as the download.
+	// simplified: a run's worth is 16 files and 16 GiB, as save_file's
+	// limits for whole files
+	struct SavePart {
+		ss_ path;
+		up_<std::ofstream> os;
+	};
+	static sm_<int, SavePart>& save_parts()
+	{
+		static sm_<int, SavePart> parts;
+		return parts;
+	}
+	static uint64_t& part_bytes()
+	{
+		static uint64_t n = 0;
+		return n;
+	}
+	static int l_save_part_begin(lua_State *L)
+	{
+		const ss_ name = user_file_name(luaL_checkstring(L, 1));
+		static int s_next = 0;
+		if(s_next >= 16){
+			lua_pushnil(L);
+			lua_pushstring(L, "16 files saved in parts already in this run");
+			return 2;
+		}
+		const int id = ++s_next;
+#ifdef __EMSCRIPTEN__
+		EM_ASM({
+			buildatFiles.parts = buildatFiles.parts || {};
+			buildatFiles.parts[$0] = {name: UTF8ToString($1), chunks: []};
+		}, id, name.c_str());
+		save_parts()[id] = SavePart();
+#else
+		const ss_ dir = exports_dir();
+		interface::fs::create_directories(dir);
+		const size_t dot = name.find_last_of('.');
+		const ss_ stem = dot == ss_::npos ? name : name.substr(0, dot);
+		const ss_ ext = dot == ss_::npos ? "" : name.substr(dot);
+		ss_ path = dir+"/"+name;
+		for(int i = 2; interface::fs::path_exists(path) ||
+				interface::fs::path_exists(path+".part"); i++)
+			path = dir+"/"+stem+"_"+itos(i)+ext;
+		SavePart &part = save_parts()[id];
+		part.path = path;
+		part.os.reset(new std::ofstream(path+".part", std::ios::binary));
+		if(!part.os->good()){
+			save_parts().erase(id);
+			lua_pushnil(L);
+			lua_pushstring(L, ("could not write "+path+".part").c_str());
+			return 2;
+		}
+#endif
+		lua_pushinteger(L, id);
+		return 1;
+	}
+	static void drop_save_part(int id)
+	{
+		auto it = save_parts().find(id);
+		if(it == save_parts().end())
+			return;
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ delete buildatFiles.parts[$0]; }, id);
+#else
+		it->second.os.reset();
+		interface::fs::remove_all(it->second.path+".part");
+#endif
+		save_parts().erase(it);
+	}
+	static int l_save_part_add(lua_State *L)
+	{
+		const int id = (int)luaL_checkinteger(L, 1);
+		size_t len = 0;
+		const char *data = luaL_checklstring(L, 2, &len);
+		auto it = save_parts().find(id);
+		const char *why = it == save_parts().end() ? "no such file" :
+				part_bytes() + len > (uint64_t)16 * 1024 * 1024 * 1024 ?
+				"16 GiB saved in parts already in this run" : nullptr;
+		if(!why){
+			part_bytes() += len;
+#ifdef __EMSCRIPTEN__
+			EM_ASM({
+				buildatFiles.parts[$0].chunks.push(HEAPU8.slice($1, $1 + $2));
+			}, id, data, len);
+#else
+			it->second.os->write(data, len);
+			if(!it->second.os->good())
+				why = "could not write the file";
+#endif
+		}
+		if(why){
+			drop_save_part(id);
+			lua_pushnil(L);
+			lua_pushstring(L, why);
+			return 2;
+		}
+		lua_pushboolean(L, 1);
+		return 1;
+	}
+	static int l_save_part_end(lua_State *L)
+	{
+		const int id = (int)luaL_checkinteger(L, 1);
+		const bool keep = lua_toboolean(L, 2);
+		auto it = save_parts().find(id);
+		if(it == save_parts().end() || !keep){
+			drop_save_part(id);
+			lua_pushnil(L);
+			lua_pushstring(L, keep ? "no such file" : "dropped");
+			return 2;
+		}
+#ifdef __EMSCRIPTEN__
+		EM_ASM({
+			var p = buildatFiles.parts[$0];
+			delete buildatFiles.parts[$0];
+			buildatFiles.save(p.name, p.chunks);
+		}, id);
+		save_parts().erase(it);
+		lua_pushstring(L, "");
+		return 1;
+#else
+		const ss_ path = it->second.path;
+		it->second.os->close();
+		const bool ok = !it->second.os->fail() &&
+				std::rename((path+".part").c_str(), path.c_str()) == 0;
+		if(!ok){
+			drop_save_part(id);
+			lua_pushnil(L);
+			lua_pushstring(L, ("could not write "+path).c_str());
+			return 2;
+		}
+		save_parts().erase(it);
+		lua_pushlstring(L, path.c_str(), path.size());
+		return 1;
+#endif
+	}
+
+	// read_exported_part(name, dir, offset, len) -> the bytes of that file
+	// from offset, at most len (16 MiB), and its size; or nil and why not.
+	// read_exported()'s rule for name and dir (dir nil: the exports), and
+	// trusted only as it is: a game gets a reader of the one file the user
+	// picked (client/api.lua)
+	static int l_read_exported_part(lua_State *L)
+	{
+		const ss_ name = luaL_checkstring(L, 1);
+		const ss_ dir = luaL_optstring(L, 2, "");
+		const lua_Number offset = luaL_checknumber(L, 3);
+		const lua_Number len = luaL_checknumber(L, 4);
+		const ss_ path = (dir.empty() ? exports_dir() : dir)+"/"+name;
+		if((dir.empty() ? name != user_file_name(name) : name.empty() ||
+				name.find_first_of("/\\") != ss_::npos || name == "..") ||
+				!interface::fs::path_exists(path) || offset < 0 || len < 0 ||
+				len > 16 * 1024 * 1024){
+			lua_pushnil(L);
+			lua_pushstring(L, "no such file, or a part out of range");
+			return 2;
+		}
+		std::ifstream is(path, std::ios::binary);
+		is.seekg(0, std::ios::end);
+		const int64_t size = is.tellg();
+		if(size <= 0){
+			lua_pushnil(L);
+			lua_pushstring(L, "not a file, or an empty one");
+			return 2;
+		}
+		ss_ data;
+		if((int64_t)offset < size){
+			data.resize((size_t)std::min<int64_t>((int64_t)len,
+					size - (int64_t)offset));
+			is.seekg((int64_t)offset);
+			is.read(&data[0], data.size());
+			data.resize(std::max<std::streamsize>(is.gcount(), 0));
+		}
+		lua_pushlstring(L, data.data(), data.size());
+		lua_pushnumber(L, (lua_Number)size);
+		return 2;
+	}
+
+	// picked_part(offset, len) -> the web's picked file from offset, at
+	// most len (16 MiB), its size and name, the file kept for the next
+	// part; nil when none is picked. picked_part(-1) lets it go.
+	static int l_picked_part(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		const lua_Number offset = luaL_checknumber(L, 1);
+		const lua_Number len = luaL_optnumber(L, 2, 0);
+		if(offset < 0){
+			EM_ASM({ buildatFiles.picked = null; });
+			return 0;
+		}
+		const double size = EM_ASM_DOUBLE({
+			var p = window.buildatFiles && buildatFiles.picked;
+			return p ? p.data.length : -1;
+		});
+		if(size < 0 || len < 0 || len > 16 * 1024 * 1024){
+			lua_pushnil(L);
+			return 1;
+		}
+		const size_t n = (size_t)std::max(0.0, std::min((double)len,
+				size - offset));
+		ss_ data(n, '\0');
+		char *name = (char*)EM_ASM_PTR({
+			var p = buildatFiles.picked;
+			HEAPU8.set(p.data.subarray($1, $1 + $2), $0);
+			return stringToNewUTF8(p.name);
+		}, n ? &data[0] : nullptr, (double)offset, n);
+		lua_pushlstring(L, data.data(), data.size());
+		lua_pushnumber(L, size);
+		lua_pushstring(L, name);
+		free(name);
+		return 3;
+#else
+		lua_pushnil(L);
+		return 1;
+#endif
+	}
+
 	// dump_meshes([atlas_json]) -> the file name it was saved under, or nil
 	// and why not. The optional string is written as <stem>_atlas.json
 	// beside the dump: the atlas registry's own account of which resource

@@ -460,6 +460,11 @@ function draw(saves, save_games)
 		waiting("Looking in the import folder...")
 		buildat.send_packet("main:get_imports", "")
 	end
+	-- [WORLD_TRIM_MOVE] A zipped Buildat save or Luanti world, from this
+	-- computer to the server
+	under:add("Import a world from a zip...", function()
+		M.import_zip()
+	end)
 	if public then
 		-- A game from ContentDB is on the server for everyone, where an
 		-- import is from this computer's Luanti
@@ -572,6 +577,11 @@ function draw(saves, save_games)
 			waiting("Reading " .. selected_save .. "...")
 			buildat.send_packet("main:trim", cereal.binary_output(
 					{selected_save, "info"}, {"array", "string"}))
+		end
+	end, fit(420))
+	button_on(menu, right, "Export...", function()
+		if selected_save then
+			M.export(selected_save)
 		end
 	end, fit(420))
 	-- [WORLD_TXP]
@@ -1753,6 +1763,116 @@ local function draw_trim(flat)
 	end)
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
+-- [WORLD_TRIM_MOVE] A world out as a zip and one in, a part at a time
+-- (the server's on_export and on_import_begin say how)
+local PART = 1024 * 1024
+local exporting, importing = nil, nil
+local function transfer_line(verb, name, done, size)
+	local text = verb .. " " .. name .. ": " .. mb(done) .. " of " .. mb(size)
+	if waiting_text then
+		waiting_text:SetText(text)
+	end
+end
+local function send_strings(name, values)
+	buildat.send_packet(name, cereal.binary_output(values, {"array", "string"}))
+end
+local function import_over()
+	if importing then
+		importing.reader.close()
+		importing = nil
+	end
+	exporting = nil
+end
+M.export = function(save)
+	waiting("Making a zip of " .. save .. "...")
+	send_strings("main:export", {save})
+end
+buildat.sub_packet("main:export_ready", function(data)
+	local v = cereal.binary_input(data, {"array", "string"})
+	local w, why = buildat.save_file_parts(v[1] .. ".buildat.zip")
+	log:info("menu: export " .. v[1] .. ", " .. v[2] .. " bytes")
+	if not w then
+		send_strings("main:transfer_cancel", {})
+		ui_utils.show_message_dialog("Exporting " .. v[1] .. ": " ..
+				tostring(why), function() end)
+		return
+	end
+	exporting = {save = v[1], size = tonumber(v[2]), w = w}
+	transfer_line("Exporting", v[1], 0, exporting.size)
+	send_strings("main:export_part", {"0"})
+end)
+buildat.sub_packet("main:export_data", function(data)
+	local e = exporting
+	if not e then
+		return
+	end
+	local v = cereal.binary_input(data, {"array", "string"})
+	local ok, why = e.w.add(v[2])
+	local next = tonumber(v[1]) + #v[2]
+	local text
+	if not ok then
+		send_strings("main:transfer_cancel", {})
+		text = "Exporting " .. e.save .. " failed: " .. tostring(why)
+	elseif next < e.size then
+		transfer_line("Exporting", e.save, next, e.size)
+		send_strings("main:export_part", {tostring(next)})
+		return
+	else
+		local path
+		path, why = e.w.finish()
+		text = path == "" and e.save .. " downloaded" or path and
+				"Exported " .. e.save .. " to " .. path or
+				"Exporting " .. e.save .. " failed: " .. tostring(why)
+	end
+	exporting = nil
+	log:info("menu: " .. text)
+	if done or M.trim_only then
+		return
+	end
+	ui_utils.show_message_dialog(text, function()
+		buildat.send_packet("main:get_saves", "")
+	end)
+end)
+M.import_zip = function()
+	if not buildat.pick_file(".zip", true) then
+		return
+	end
+	-- The list's own root, polled once the picker is gone from over it
+	root:SubscribeToStackEvent("Update", function()
+		local name, reader = buildat.picked_file()
+		if not name then
+			if reader then
+				log:info("menu: import: " .. tostring(reader))
+				buildat.send_packet("main:get_saves", "")
+			end
+			return
+		end
+		importing = {name = name, reader = reader}
+		log:info("menu: import " .. name .. ", " .. reader.size .. " bytes")
+		waiting("Importing " .. name .. "...")
+		send_strings("main:import_begin", {name, string.format("%d", reader.size)})
+	end)
+end
+buildat.sub_packet("main:import_next", function(data)
+	local i = importing
+	if not i then
+		return
+	end
+	local offset = tonumber(cereal.binary_input(data, {"array", "string"})[1])
+	local part = i.reader.read(offset, PART)
+	if not part or #part == 0 then
+		send_strings("main:transfer_cancel", {})
+		import_over()
+		ui_utils.show_message_dialog("Importing " .. i.name .. ": the file " ..
+				"could not be read", function()
+			buildat.send_packet("main:get_saves", "")
+		end)
+		return
+	end
+	transfer_line("Importing", i.name, offset + #part, i.reader.size)
+	send_strings("main:import_data", {string.format("%d", offset), part})
+end)
+
 -- The trim page alone, over the running world: the launcher's own game's
 -- pause menu has no world menu
 M.trim = function(save)
@@ -1948,6 +2068,7 @@ end)
 -- News, not an error: the list it changed is asked for again and the
 -- line shown over it for a moment
 buildat.sub_packet("main:menu_message", function(data)
+	import_over()
 	if done then
 		return
 	end
@@ -1958,6 +2079,7 @@ buildat.sub_packet("main:menu_message", function(data)
 end)
 
 buildat.sub_packet("main:menu_error", function(data)
+	import_over()
 	if done then
 		return
 	end
@@ -1989,6 +2111,8 @@ buildat.sub_packet("main:menu_done", function()
 	if M.trim_only then
 		return
 	end
+	-- A Luanti world from a zip starts once it is in
+	import_over()
 	creating = nil
 	log:info("menu: done; the world is up")
 	done = true

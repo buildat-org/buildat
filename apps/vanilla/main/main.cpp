@@ -204,7 +204,8 @@ struct Module: public interface::Module
 				"network:packet_received/main:contentdb_install"));
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
 				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
-				"stop_world", "trim"})
+				"stop_world", "trim", "export", "export_part", "import_begin",
+				"import_data", "transfer_cancel"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -286,6 +287,16 @@ struct Module: public interface::Module
 				on_stop_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:trim", on_trim,
 				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:export", on_export,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:export_part",
+				on_export_part, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:import_begin",
+				on_import_begin, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:import_data",
+				on_import_data, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:transfer_cancel",
+				on_transfer_cancel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_world_txp",
 				on_get_world_txp, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_world_txp",
@@ -363,6 +374,11 @@ struct Module: public interface::Module
 			m_named_peer = 0;
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
+		// A transfer cut off leaves nothing behind
+		if(m_transfer.peer == old_client.info.id){
+			log_i(MODULE, "The transfer's client left; its files removed");
+			end_transfer();
+		}
 		m_chat_bucket.erase(old_client.info.id);
 	}
 
@@ -1830,6 +1846,329 @@ struct Module: public interface::Module
 		send_trim_info(packet.sender, save, itos(n)+" sections forgotten; "+
 				mb_text(have)+" to "+mb_text(after)+"."+skipped+(err.empty() ?
 				ss_() : " Not compacted: "+err));
+	}
+
+	// [WORLD_TRIM_MOVE] 3-5: a world out as a zip and one in, in parts:
+	// a world is more than a packet or a client's string holds. One at a
+	// time, its files in one folder of the cache that is emptied when it
+	// ends, whichever way (and at a start, after a server that stopped
+	// mid-way).
+	//   export: main:export {save} -> main:export_ready {save, bytes}; then
+	//     main:export_part {offset} -> main:export_data {offset, bytes}
+	//   import: main:import_begin {name, bytes} -> main:import_next
+	//     {offset}; main:import_data {offset, bytes} -> import_next, and
+	//     after the last a menu message or error
+	// simplified: the copy and the zip are made on the server's thread; a
+	// large world holds the game while they are made, as compacting does
+	struct Transfer {
+		network::PeerInfo::Id peer = 0;
+		bool import = false;
+		ss_ name;
+		int64_t size = 0, done = 0;
+	};
+	Transfer m_transfer;
+	enum { TRANSFER_PART = 1024 * 1024 };
+	ss_ transfer_dir()
+	{
+		return m_server->get_config().get<ss_>("cache_path")+"/vanilla_transfer";
+	}
+	void end_transfer()
+	{
+		interface::fs::remove_all(transfer_dir());
+		m_transfer = Transfer();
+	}
+	bool transfer_free(network::PeerInfo::Id peer)
+	{
+		if(m_transfer.peer == 0)
+			return true;
+		menu_error(peer, "Another transfer is running: "+ss_(m_transfer.import ?
+				"an import" : "an export of "+m_transfer.name)+". Try again "
+				"once it is done.");
+		return false;
+	}
+	// Every file under dir, the archive's names under prefix
+	static void list_files(const ss_ &dir, const ss_ &prefix,
+			sv_<std::pair<ss_, ss_>> &out)
+	{
+		for(const auto &n : interface::fs::list_directory(dir)){
+			if(n.is_directory)
+				list_files(dir+"/"+n.name, prefix+n.name+"/", out);
+			else
+				out.push_back({prefix+n.name, dir+"/"+n.name});
+		}
+	}
+	void on_export(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender) || !transfer_free(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		ss_ path;
+		if(values.empty() || !save_dir(values[0], path))
+			return menu_error(packet.sender, "No such save");
+		const ss_ save = values[0];
+		const ss_ dir = transfer_dir();
+		interface::fs::remove_all(dir);
+		interface::fs::create_directories(dir+"/store");
+		// The store as of now, consistent: the running world saved first
+		// and copied by SQLite, not the live file and its WAL
+		const ss_ copy = dir+"/store/save.sqlite";
+		ss_ err;
+		const int64_t t0 = interface::os::time_us();
+		if(save == m_world_name && m_scene && m_world_save){
+			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+				w->save();
+			});
+			err = m_world_save->copy_to(copy);
+		} else {
+			storage::access(m_server, [&](storage::Interface *i){
+				storage::Save *s = i->open(save);
+				err = s ? s->copy_to(copy) : "cannot open it";
+				if(s)
+					i->close(s);
+			});
+		}
+		sv_<std::pair<ss_, ss_>> files{{save+"/save.sqlite", copy}};
+		sv_<std::pair<ss_, ss_>> rest;
+		list_files(path, save+"/", rest);
+		for(const auto &f : rest){
+			const ss_ &n = f.first;
+			// The store is the copy; its journal files are the live one's
+			if(n == save+"/save.sqlite" || n.find(".sqlite-") != ss_::npos ||
+					n.find(".sqlite.") != ss_::npos)
+				continue;
+			files.push_back(f);
+		}
+		const ss_ zip = dir+"/export.zip";
+		if(err.empty()){
+			try {
+				interface::zip_write(zip, files);
+			} catch(std::exception &e){
+				err = e.what();
+			}
+		}
+		interface::fs::remove_all(dir+"/store");
+		if(!err.empty()){
+			end_transfer();
+			return menu_error(packet.sender, "Exporting "+save+" failed: "+err);
+		}
+		m_transfer.peer = packet.sender;
+		m_transfer.name = save;
+		m_transfer.size = interface::fs::file_size(zip);
+		log_i(MODULE, "Exporting %s: %zu files, %lld kB, made in %d ms",
+				cs(save), files.size(), (long long)(m_transfer.size / 1024),
+				(int)((interface::os::time_us() - t0) / 1000));
+		send_strings(packet.sender, "main:export_ready",
+				{save, itos(m_transfer.size)});
+	}
+	void on_export_part(const network::Packet &packet)
+	{
+		if(m_transfer.import || m_transfer.peer != packet.sender)
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.empty())
+			return;
+		const int64_t offset = atoll(values[0].c_str());
+		if(offset < 0 || offset >= m_transfer.size)
+			return;
+		ss_ data((size_t)std::min<int64_t>(TRANSFER_PART, m_transfer.size - offset), '\0');
+		std::ifstream is(transfer_dir()+"/export.zip", std::ios::binary);
+		is.seekg(offset);
+		is.read(&data[0], data.size());
+		if((size_t)is.gcount() != data.size()){
+			end_transfer();
+			return menu_error(packet.sender, "The export's file went away");
+		}
+		send_strings(packet.sender, "main:export_data", {itos(offset), data});
+		if(offset + (int64_t)data.size() >= m_transfer.size){
+			log_i(MODULE, "Exported %s", cs(m_transfer.name));
+			end_transfer();
+		}
+	}
+	void on_import_begin(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender) || !transfer_free(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.size() < 2)
+			return;
+		const int64_t size = atoll(values[1].c_str());
+		const ss_ full = no_room(size);
+		if(size <= 0 || !full.empty())
+			return menu_error(packet.sender, size <= 0 ? ss_("An empty file") :
+					full+"; the zip is "+mb_text(size)+". Delete a world or "
+					"a game first.");
+		// The save's name from the file's: letters, digits, _ and -
+		ss_ name;
+		for(char c : values[0].substr(0, values[0].find('.')))
+			if(isalnum((unsigned char)c) || c == '_' || c == '-')
+				name += c;
+		if(name.compare(0, 1, "_") == 0 || name.empty())
+			name = "imported"+name;
+		const ss_ dir = transfer_dir();
+		interface::fs::remove_all(dir);
+		interface::fs::create_directories(dir);
+		std::ofstream(dir+"/import.zip", std::ios::binary);
+		m_transfer.peer = packet.sender;
+		m_transfer.import = true;
+		m_transfer.name = name.substr(0, 60);
+		m_transfer.size = size;
+		log_i(MODULE, "Importing %s: %lld kB coming", cs(values[0]),
+				(long long)(size / 1024));
+		send_strings(packet.sender, "main:import_next", {"0"});
+	}
+	void on_import_data(const network::Packet &packet)
+	{
+		if(!m_transfer.import || m_transfer.peer != packet.sender)
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.size() < 2 || atoll(values[0].c_str()) != m_transfer.done ||
+				values[1].empty() || m_transfer.done +
+				(int64_t)values[1].size() > m_transfer.size){
+			end_transfer();
+			return menu_error(packet.sender, "The import's parts came out "
+					"of order; nothing was kept");
+		}
+		{
+			std::ofstream os(transfer_dir()+"/import.zip",
+					std::ios::binary | std::ios::app);
+			os.write(values[1].data(), values[1].size());
+		}
+		m_transfer.done += values[1].size();
+		if(m_transfer.done < m_transfer.size){
+			send_strings(packet.sender, "main:import_next",
+					{itos(m_transfer.done)});
+			return;
+		}
+		const ss_ err = finish_import(packet.sender);
+		end_transfer();
+		if(!err.empty())
+			menu_error(packet.sender, "Importing "+m_transfer_last+" failed: "+
+					err+". Nothing was kept.");
+	}
+	ss_ m_transfer_last;
+	// main:transfer_cancel: the client could not write or read its side
+	void on_transfer_cancel(const network::Packet &packet)
+	{
+		if(m_transfer.peer != packet.sender)
+			return;
+		log_i(MODULE, "The client cancelled the transfer of %s",
+				cs(m_transfer.name));
+		end_transfer();
+	}
+	// The zip in: what it is, and it put where that goes. An error's text
+	// or "" once done; the caller empties the folder either way
+	ss_ finish_import(network::PeerInfo::Id peer)
+	{
+		const ss_ dir = transfer_dir(), zip = dir+"/import.zip";
+		m_transfer_last = m_transfer.name;
+		int64_t room = 0;
+		storage::access(m_server, [&](storage::Interface *i){
+			room = i->room_bytes();
+		});
+		// What the headers say it comes to, against the room; and the
+		// extraction holds each entry to what it says and the whole to
+		// the room, whatever they said
+		uint64_t declared = 0;
+		try {
+			for(const auto &e : interface::zip_list(zip))
+				declared += e.size;
+			if((int64_t)declared > room)
+				return "it unpacks to "+mb_text(declared)+", and there is "
+						"room for "+mb_text(room);
+			interface::zip_extract(zip, dir+"/x", (uint64_t)room);
+		} catch(std::exception &e){
+			return e.what();
+		}
+		interface::fs::remove_all(zip);
+		// A Buildat save's save.sqlite or a Luanti world's world.mt, at the
+		// top or one folder down
+		ss_ root = dir+"/x";
+		auto is_world = [](const ss_ &p){
+			return interface::fs::path_exists(p+"/save.sqlite") ||
+					interface::fs::path_exists(p+"/world.mt");
+		};
+		if(!is_world(root)){
+			const auto top = interface::fs::list_directory(root);
+			if(top.size() != 1 || !top[0].is_directory ||
+					!is_world(root+"/"+top[0].name))
+				return "no save.sqlite or world.mt at its top or one folder "
+						"down: neither a Buildat save nor a Luanti world";
+			root += "/"+top[0].name;
+		}
+		const bool buildat_save = interface::fs::path_exists(root+"/save.sqlite");
+		const ss_ name = free_save_name(m_transfer.name);
+		if(name.empty())
+			return "no free name for "+m_transfer.name;
+		if(!buildat_save){
+			// A Luanti world, of the backend that is read
+			const auto mt = read_world_mt(root+"/world.mt");
+			const auto it = mt.find("backend");
+			const ss_ backend = it == mt.end() ? "sqlite3" : it->second;
+			if(backend != "sqlite3")
+				return "it is a Luanti world of the "+backend+" backend; "
+						"only sqlite3 is read. Official Luanti converts it: "
+						"luanti --migrate sqlite3 --world <path>";
+			if(!interface::fs::path_exists(root+"/map.sqlite"))
+				return "it is a Luanti world with no map.sqlite";
+			const ss_ err = import_luanti_world(peer, root, m_transfer.name,
+					name);
+			return err;
+		}
+		// A Buildat save: moved in, opened once to see it reads
+		const ss_ to = m_server->get_config().get<ss_>("user_path")+"/apps/"+
+				m_server->get_app_id()+"/saves/"+name;
+		for(const auto &n : interface::fs::list_directory(root))
+			if(n.name.find(".sqlite-") != ss_::npos)
+				interface::fs::remove_all(root+"/"+n.name);
+		if(std::rename(root.c_str(), to.c_str()) != 0){
+			// Another file system: copied
+			size_t done = 0;
+			ss_ err;
+			if(!copy_tree(root, to, done, 0, peer, err)){
+				interface::fs::remove_all(to);
+				return "could not move it into the saves: "+err;
+			}
+		}
+		ss_ gameid;
+		storage::access(m_server, [&](storage::Interface *i){
+			try {
+				storage::Save *s = i->open(name);
+				if(s){
+					s->store("main")->get("gameid", gameid);
+					i->close(s);
+				}
+			} catch(std::exception &e){
+				log_w(MODULE, "import: %s: %s", cs(name), e.what());
+			}
+		});
+		if(gameid.empty()){
+			interface::fs::remove_all(to);
+			return "its store does not read as a Buildat save";
+		}
+		storage::access(m_server, [&](storage::Interface *i){ i->remeasure(); });
+		menu_message(peer, "Imported "+name+" (game "+gameid+")"+
+				(find_game(gameid).empty() ? "; the game is not installed" : ""));
+		return "";
+	}
+	// name, or name_2, _3... where no save is
+	ss_ free_save_name(const ss_ &name)
+	{
+		ss_ path;
+		for(int i = 1; i < 1000; i++){
+			const ss_ n = i == 1 ? name : name+"_"+itos(i);
+			bool valid = false;
+			storage::access(m_server, [&](storage::Interface *istorage){
+				valid = istorage->valid_name(n);
+			});
+			if(!valid)
+				return "";
+			path.clear();
+			if(!save_dir(n, path) && !interface::fs::path_exists(
+					m_server->get_config().get<ss_>("user_path")+"/apps/"+
+					m_server->get_app_id()+"/saves/"+n))
+				return n;
+		}
+		return "";
 	}
 
 	// main:set_perf_settings {name, key, value, ...}
@@ -3921,33 +4260,36 @@ struct Module: public interface::Module
 		if(values.size() < 2)
 			return;
 		const ss_ world_name = values[0];
-		const ss_ save_name = values[1];
 		const ss_ from = find_importable_world(world_name);
 		if(from.empty()){
 			menu_error(packet.sender, "There is no world called "+world_name+
 					" to import");
 			return;
 		}
+		const ss_ err = import_luanti_world(packet.sender, from, world_name,
+				values[1]);
+		if(!err.empty())
+			menu_error(packet.sender, err);
+	}
+	// A Luanti world's folder into a new save, and the world started: the
+	// import folder's and a zip's ([WORLD_TRIM_MOVE]). An error's text, or
+	// "" once it is under way.
+	ss_ import_luanti_world(network::PeerInfo::Id peer, const ss_ &from,
+			const ss_ &world_name, const ss_ &save_name)
+	{
 		const ss_ gameid = read_gameid(from);
-		if(find_game(gameid).empty()){
-			menu_error(packet.sender, world_name+" wants the game "+gameid+
-					", which is not installed. Import that first.");
-			return;
-		}
+		if(find_game(gameid).empty())
+			return world_name+" wants the game "+gameid+", which is not "
+					"installed. Import that first.";
 		bool valid = false;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			valid = istorage->valid_name(save_name);
 		});
-		if(!valid){
-			menu_error(packet.sender, "\""+save_name+"\" is not a name a "
-					"save can have");
-			return;
-		}
+		if(!valid)
+			return "\""+save_name+"\" is not a name a save can have";
 		const ss_ full = no_room();
-		if(!full.empty()){
-			menu_error(packet.sender, full+". Delete a world or a game first.");
-			return;
-		}
+		if(!full.empty())
+			return full+". Delete a world or a game first.";
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->create(save_name);
@@ -3956,14 +4298,12 @@ struct Module: public interface::Module
 				istorage->close(save);
 			}
 		});
-		if(!save){
-			menu_error(packet.sender, "There is already a save called "+
-					save_name);
-			return;
-		}
+		if(!save)
+			return "There is already a save called "+save_name;
 		log_i(MODULE, "Importing world %s from %s into save %s",
 				cs(world_name), cs(from), cs(save_name));
-		start_world(gameid, save_name, packet.sender, from);
+		start_world(gameid, save_name, peer, from);
+		return "";
 	}
 
 	// Opening one that is there, and making one that is not. Split on
@@ -4274,6 +4614,8 @@ struct Module: public interface::Module
 	// runs what the environment says, which is what every check here does.
 	void on_start()
 	{
+		// A transfer a stopped server was in the middle of
+		end_transfer();
 		m_public = launch_param("launcher") != "1";
 		if(m_public)
 			log_i(MODULE, "A public server: clients join by account, and the "
