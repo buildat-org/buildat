@@ -127,6 +127,27 @@ local PREFERENCES = {
 		values = {"hide", "show"},
 		show = function(v) return v == "hide" and "hidden" or "shown" end,
 	},
+	-- The screen's orientation while the page is fullscreen
+	-- ([SCREEN_ORIENTATION]); the web client's only. note() is said under
+	-- the row.
+	{
+		name = "screen_orientation",
+		label = "Screen orientation",
+		web = true,
+		values = {"auto", "landscape", "portrait"},
+		show = function(v)
+			return ({auto = "Auto", landscape = "Landscape",
+					portrait = "Portrait"})[v]
+		end,
+		note = function()
+			if api.get_preference("screen_orientation_error") then
+				return "Not supported by this browser"
+			elseif api.get_preference("screen_orientation") ~= "auto" and
+					api.get_preference("web_address_bar") == "show" then
+				return "Held only with the address bar hidden"
+			end
+		end,
+	},
 	-- The web client's frame rate while unfocused or idle
 	{
 		name = "web_idle_fps",
@@ -312,6 +333,12 @@ function M.show()
 			-- The press is the dropdown's own; this only puts it in the
 			-- arrows' order
 			menu:add(drop, function() end)
+			local note = pref.note and pref.note()
+			if note then
+				local t = menu.window:CreateChild("Text")
+				t:SetStyleAuto()
+				t.text = note
+			end
 		end
 	end
 
@@ -380,7 +407,7 @@ end
 local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
-		"ui_size", "web_address_bar", "web_idle_fps"}},
+		"ui_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
 }
 local CLIENT_KEYS_SHOWN = {fullscreen = "Fullscreen", screenshot = "Screenshot"}
 local game = nil
@@ -531,6 +558,10 @@ function M.show_game(o, app_key, extra)
 						log:warning(pref.name .. ": " .. tostring(err))
 					end
 				end)
+				local note = pref.note and pref.note()
+				if note then
+					text(w, note, "dim")
+				end
 			end
 		end)
 		for _, pref in ipairs(rows) do

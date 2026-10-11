@@ -1155,6 +1155,7 @@
 				// Only where it does something
 				"web_idle_fps",
 				"web_address_bar",
+				"screen_orientation",
 #endif
 				nullptr};
 		return names;
@@ -1224,6 +1225,19 @@
 					o.graphics.web_address_bar.c_str() :
 					EM_ASM_INT({ return Module['buildatHideBarByDefault'](); }) ?
 					"hide" : "show");
+		else if(name == "screen_orientation")
+			lua_pushstring(L, o.graphics.screen_orientation.c_str());
+		// Not a preference: why the page's last lock was refused, or nil
+		else if(name == "screen_orientation_error"){
+			char *e = (char*)EM_ASM_PTR({
+				var e = Module['buildatOrientationError'];
+				return e ? stringToNewUTF8(e) : 0;
+			});
+			if(!e)
+				return 0;
+			lua_pushstring(L, e);
+			free(e);
+		}
 #endif
 		else if(name == "multisampling")
 			lua_pushinteger(L, o.graphics.multisampling);

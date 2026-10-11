@@ -175,9 +175,48 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	function hide_by_default(){
 		return coarse && Math.min(screen.width, screen.height) < 600;
 	}
+	// **The screen's orientation** ([SCREEN_ORIENTATION]):
+	// buildatOrientation is "auto", "landscape" or "portrait". A browser
+	// holds a lock only while the page is fullscreen (Chrome for Android)
+	// or not at all (iOS Safari), so it is asked again at every entry, and
+	// while one is set the page stays fullscreen over a game's menu too,
+	// or the screen would turn back mid-menu. buildatOrientationError is
+	// why the last lock was refused.
+	function orientation(){
+		var o = Module.buildatOrientation;
+		return o === 'landscape' || o === 'portrait' ? o : '';
+	}
+	var orientation_said = null;
+	// What was asked since fullscreen was last entered
+	var orientation_applied = null;
+	function apply_orientation(){
+		var o = orientation();
+		var so = screen.orientation;
+		if(!document.fullscreenElement || !so || !so.lock)
+			return;
+		orientation_applied = o;
+		console.log('orientation: ' + (o ? 'lock ' + o : 'unlock'));
+		if(!o){
+			try { so.unlock(); } catch(e){}
+			return;
+		}
+		so.lock(o).then(function(){
+			Module.buildatOrientationError = null;
+		}, function(e){
+			Module.buildatOrientationError = String(e && e.message || e);
+			if(orientation_said !== Module.buildatOrientationError){
+				orientation_said = Module.buildatOrientationError;
+				console.log('orientation: the lock refused: ' + orientation_said);
+			}
+		});
+	}
+	document.addEventListener('fullscreenchange', function(){
+		orientation_applied = null;
+		apply_orientation();
+	});
 	function sync_fullscreen(){
 		var pref = Module.buildatAddressBar;
-		var want = Module.buildatFullscreen &&
+		var want = (Module.buildatFullscreen || orientation() !== '') &&
 				(pref ? pref === 'hide' : hide_by_default());
 		var el = document.documentElement;
 		try {
@@ -189,6 +228,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 					document.exitFullscreen)
 				document.exitFullscreen().catch(function(){});
 		} catch(e){}
+		// A change while fullscreen
+		if(document.fullscreenElement && orientation_applied !== orientation())
+			apply_orientation();
 	}
 	// Entering takes a gesture: a tap, or a click where "hide" was chosen
 	// on a desktop

@@ -1980,6 +1980,19 @@ buildat.safe.set_web_address_bar = function(v)
 	end
 	return __buildat_set_preference("web_address_bar", v)
 end
+-- **The screen's orientation on the web** ([SCREEN_ORIENTATION]): a
+-- game's pause menu switches it. get_screen_orientation() -> "auto",
+-- "landscape" or "portrait", nil natively; set_screen_orientation(v) ->
+-- true, or false and why. The page holds it while it is fullscreen.
+buildat.safe.get_screen_orientation = function()
+	return __buildat_get_preference("screen_orientation")
+end
+buildat.safe.set_screen_orientation = function(v)
+	if v ~= "auto" and v ~= "landscape" and v ~= "portrait" then
+		return false, "set_screen_orientation: auto, landscape or portrait"
+	end
+	return __buildat_set_preference("screen_orientation", v)
+end
 -- **The render scale, the other preference a game may set** (user,
 -- 2026-09-30): the web client has no launcher to reach Engine settings
 -- through, so a game's own settings carry it. What the game gets to set

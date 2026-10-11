@@ -468,6 +468,14 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->graphics.web_address_bar = value;
 			continue;
 		}
+		if(key == "screen_orientation"){
+			if(value != "auto" && value != "landscape" && value != "portrait"){
+				*error = "screen_orientation: auto, landscape or portrait";
+				return false;
+			}
+			opt->graphics.screen_orientation = value;
+			continue;
+		}
 		if(key == "default_username"){
 			bool ok = !value.empty() && value.size() <= 20;
 			for(char c : value)
@@ -773,6 +781,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jus = o.get("ui_size");
 	const json::Value &jui = o.get("launch_ui");
 	const json::Value &jwa = o.get("web_address_bar");
+	const json::Value &jso = o.get("screen_orientation");
 	const json::Value &jdu = o.get("default_username");
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
@@ -830,6 +839,9 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	if(jwa.is_string() && !jwa.as_string().empty())
 		items += ss_()+(items.empty()?"":",")+"web_address_bar="+
 				jwa.as_string();
+	if(jso.is_string())
+		items += ss_()+(items.empty()?"":",")+"screen_orientation="+
+				jso.as_string();
 	if(jdu.is_string())
 		items += ss_()+(items.empty()?"":",")+"default_username="+
 				jdu.as_string();
@@ -898,6 +910,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("web_idle_fps", opt.graphics.web_idle_fps);
 	if(!opt.graphics.web_address_bar.empty())
 		o.set("web_address_bar", opt.graphics.web_address_bar);
+	o.set("screen_orientation", opt.graphics.screen_orientation);
 	o.set("multisampling", opt.graphics.multisampling);
 	o.set("sound_volume_db", opt.sound_volume_db);
 	o.set("sound_mute", opt.sound_mute);
@@ -3664,15 +3677,17 @@ struct CApp: public App, public magic::Application
 		m_preferred_image->SetSize(ui->GetRoot()->GetSize());
 	}
 
-	// The preference to the page, whose sync_fullscreen reads it
-	// ([WEB_ADDRESS_BAR]); nothing natively
+	// The preferences to the page, whose sync_fullscreen reads them
+	// ([WEB_ADDRESS_BAR], [SCREEN_ORIENTATION]); nothing natively
 	void push_web_address_bar()
 	{
 #ifdef __EMSCRIPTEN__
 		EM_ASM({
 			Module['buildatAddressBar'] = UTF8ToString($0);
+			Module['buildatOrientation'] = UTF8ToString($1);
 			Module['buildatSyncFullscreen']();
-		}, m_options.graphics.web_address_bar.c_str());
+		}, m_options.graphics.web_address_bar.c_str(),
+				m_options.graphics.screen_orientation.c_str());
 #endif
 	}
 
@@ -3726,7 +3741,8 @@ struct CApp: public App, public magic::Application
 		}
 		if(g.render_scale != b.render_scale)
 			apply_preferred_viewports();
-		if(g.web_address_bar != b.web_address_bar)
+		if(g.web_address_bar != b.web_address_bar ||
+				g.screen_orientation != b.screen_orientation)
 			push_web_address_bar();
 		if(m_options.ui_size != before.ui_size ||
 				m_options.ui_size_auto != before.ui_size_auto)

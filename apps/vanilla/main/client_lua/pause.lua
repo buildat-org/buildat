@@ -198,6 +198,23 @@ open = function()
 				((buildat.storage_read("view_range") or "") == "" and
 				" (default)" or ""), fill = true, none = tostring(view.current())})
 	end
+	-- **The screen's orientation** on a touchscreen's web page
+	-- ([SCREEN_ORIENTATION]): the pick's tap is the gesture the page's
+	-- fullscreen entry, and so the lock, needs
+	local turn = buildat.get_screen_orientation and
+			buildat.get_screen_orientation()
+	if o.keys.touch and turn then
+		local names = {Auto = "auto", Landscape = "landscape",
+				Portrait = "portrait"}
+		local shown = {auto = "Auto", landscape = "Landscape",
+				portrait = "Portrait"}
+		ui_utils.dropdown(w, {"Auto", "Landscape", "Portrait"}, shown[turn],
+				function(v)
+			local ok, err = buildat.set_screen_orientation(names[v])
+			log:info("pause: screen orientation " .. names[v] ..
+					(ok and "" or ": " .. tostring(err)))
+		end, {label = "Screen orientation", fill = true})
+	end
 	if account.public then
 		-- My account... local or not ([ACCOUNT_BUTTON]); the way to
 		-- Accounts... is through it now (account_page's own button)

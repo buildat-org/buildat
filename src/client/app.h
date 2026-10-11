@@ -67,6 +67,9 @@ namespace app
 		// ([WEB_ADDRESS_BAR]): "hide" or "show"; empty is the device's
 		// default, hidden on a small touchscreen, which the page decides
 		ss_ web_address_bar;
+		// The screen's orientation on the web page while it is fullscreen
+		// ([SCREEN_ORIENTATION]): "auto", "landscape" or "portrait"
+		ss_ screen_orientation = "auto";
 		// Set by -w: the size came from the command line, so it is not
 		// remembered across runs and the saved size is left alone
 		bool size_forced = false;
