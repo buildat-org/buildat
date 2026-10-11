@@ -81,7 +81,9 @@ return function(ctx)
 	magic.SubscribeToEvent("command_seq:scan_volume", function(event_type, event_data)
 		local param = event_data:GetString("Param") or ""
 		local r, label, extra = param:match("^(%d+)%s*(%S*)%s*(%S*)")
-		local with_light = extra == "light"
+		-- "light" adds the sky light's lines, "lamp" the lamp light's
+		local with_light = extra == "light" or extra == "lamp"
+		local light_of = extra == "lamp" and "light_lamp_of" or "light_sky_of"
 		r = math.max(1, math.min(8, tonumber(r) or 4))
 		if label == nil or label == "" then
 			label = "volume"
@@ -99,7 +101,7 @@ return function(ctx)
 				for x = fx0 - r, fx0 + r do
 					local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
 					local name = v ~= nil and ctx.node_name_at(buildat.Vector3(x, y, z)) or nil
-					lrow[#lrow + 1] = v ~= nil and tostring(reg:light_sky_of(v)) or "-"
+					lrow[#lrow + 1] = v ~= nil and tostring(reg[light_of](reg, v)) or "-"
 					local i = 0
 					if name ~= nil and name ~= "air" then
 						i = index[name]
