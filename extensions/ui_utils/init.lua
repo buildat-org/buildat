@@ -595,7 +595,8 @@ function M.safe.keyboard_page(win)
 			arrange(page)
 			local labels = {}
 			for _, e in ipairs(page.items) do
-				labels[#labels + 1] = label_of(e)
+				-- The focused one marked, for a check
+				labels[#labels + 1] = (e:HasFocus() and "*" or "") .. label_of(e)
 			end
 			log:verbose("keyboard_page: " .. table.concat(labels, "|"))
 		elseif shown(win) and (dirty or stale(page)) then

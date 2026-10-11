@@ -1084,6 +1084,25 @@
 		return 1;
 	}
 
+	// keyboard_height() -> the on-screen keyboard's height in UI pixels,
+	// 0 with none up and on a native client ([CHAT_FIELD_TOUCH]). The web
+	// page reads it (buildatKeyboard in src/client/web/index.html).
+	static int l_keyboard_height(lua_State *L)
+	{
+		int h = 0;
+#ifdef __EMSCRIPTEN__
+		h = EM_ASM_INT({
+			return window.buildatKeyboard ? buildatKeyboard.height() : 0;
+		});
+#endif
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		magic::UI *ui = self->GetSubsystem<magic::UI>();
+		lua_pushinteger(L, (int)(h / (ui ? ui->GetScale() : 1.0f)));
+		return 1;
+	}
+
 	// viewport_generation() -> number: how many times anybody has set
 	// the preferred viewports in this run ([LAUNCH_WORLD]). A launch UI
 	// records it when a launch commits and watches for it to change,

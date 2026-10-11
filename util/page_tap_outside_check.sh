@@ -113,16 +113,16 @@ after(){ # server log, client log
 	grep -ao "pause: a press off the .*" "$2" | sed 's/pause: //'
 }
 # 1000x500, UI scale 1: the touch controls' Chat at (850, 94), the chat's
-# log at (500, 250), outside it at (900, 250), the marker at (638, 267)
+# log at (500, 100), outside it at (900, 300), the marker at (638, 267)
 server "$t/n"
 client touch BUILDAT_TOUCH=1 <<C
 wait_log 120000 chat: page_tap: ready
 delay 3000
 tap 850 94
 delay 1500
-tap 500 250
+tap 500 100
 delay 1500
-tap 900 250
+tap 900 300
 delay 1500
 tap 638 267
 delay 2000
@@ -146,10 +146,10 @@ keypress Escape
 delay 1500
 click Button "Chat..."
 delay 1500
-mouse_pos 500 250
+mouse_pos 500 100
 mouse_click left
 delay 1000
-mouse_pos 900 250
+mouse_pos 900 300
 mouse_click left
 delay 1500
 mouse_click left
@@ -165,7 +165,7 @@ if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buil
 	exit 0
 fi
 # Chrome at 1000x500 CSS pixels and a density of 1; the web's UI is
-# smaller: Chat at (907, 59), outside the chat at (960, 250). The taps wait
+# smaller: Chat at (907, 59), outside the chat at (960, 300). The taps wait
 # for the client's world as touch_parity_check.sh's do
 cat > "$t/web.json" <<'J'
 [
@@ -175,8 +175,8 @@ cat > "$t/web.json" <<'J'
  ["wait", 5000],
  ["tap", 907, 59], ["wait", 1500],
  ["shot", "${OUT}/web_chat.png"],
- ["tap", 500, 250], ["wait", 1500],
- ["tap", 960, 250], ["wait", 1500],
+ ["tap", 500, 100], ["wait", 1500],
+ ["tap", 960, 300], ["wait", 1500],
  ["tap", 638, 267], ["wait", 2000],
  ["shot", "${OUT}/web_end.png"]
 ]

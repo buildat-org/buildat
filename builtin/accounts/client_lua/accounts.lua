@@ -203,8 +203,9 @@ M.send_login = send_login
 local page_windows = {}
 
 -- A window of the join: `width` wide, or the screen's width less a margin
--- on a narrow one ([FP_TOUCH] 2), and its texts wrap to it
-local function page_window(width)
+-- on a narrow one ([FP_TOUCH] 2), and its texts wrap to it. `top`: at the
+-- screen's top, its full width less the margin ([CHAT_FIELD_TOUCH])
+local function page_window(width, top)
 	local w = magic.ui.root:CreateChild("Window")
 	-- Its own style, for a game whose root has none (vanilla's world); what
 	-- is in it finds the style through it
@@ -214,7 +215,11 @@ local function page_window(width)
 	-- Over a game's HUD, such as the Luanti hotbar (priority 10)
 	w.priority = 100
 	w:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(16, 16, 16, 16))
-	w:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	w:SetAlignment(magic.HA_CENTER, top and magic.VA_TOP or magic.VA_CENTER)
+	if top then
+		w:SetPosition(0, 8)
+		width = magic.ui.root.width
+	end
 	w:SetFixedWidth(math.min(width, magic.ui.root.width - 16))
 	-- By the keyboard, every page of it ([MENU_KEYS])
 	ui_utils.keyboard_page(w)
@@ -1005,16 +1010,18 @@ function M.close_page()
 	end
 end
 
--- `help`, a function, puts a Help button at the title's right
-local function open_page(kind, title, back, width, help)
+-- `help`, a function, puts a Help button at the title's right; a nil
+-- title puts none. `top`: page_window's.
+local function open_page(kind, title, back, width, help, top)
 	drop_page()
 	page_kind, page_back = kind, back
 	-- In the Server window while it is up; else an app with a window of
 	-- its own for its pages sets M.page_parent(width) to give what a page
 	-- is drawn into
 	M.page = sw.frame and server_element() or M.page_parent and
-			M.page_parent(width or 560) or page_window(width or 560)
-	if help then
+			M.page_parent(width or 560) or page_window(width or 560, top)
+	if not title then
+	elseif help then
 		local r = M.page:CreateChild("UIElement")
 		r:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(0, 0, 0, 0))
 		local t = page_text(r, title)
@@ -2972,10 +2979,40 @@ function M.chat_add(line, key, old)
 	end
 end
 
-function M.chat_page(back)
+-- [CHAT_FIELD_TOUCH]: the screen's top half, as Luanti's chat console. A
+-- keyboard over more than the lower half (a phone on its side) has the
+-- field row first, with no title; the page is made again as the screen or
+-- the keyboard changes, the field's text kept.
+function M.chat_page(back, draft)
 	local key, list = chat_channel()
 	chat_relabel = nil
-	local w = open_page("chat", "Chat", back)
+	local root = magic.ui.root
+	local rw, rh = root.width, root.height
+	local tall = buildat.keyboard_height() > rh / 2
+	local w = open_page("chat", not tall and "Chat" or nil, back, nil, nil, true)
+	local e
+	local function field_row()
+		local r = row(w)
+		e = r:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.minHeight = 28
+		e.textCopyable = true
+		e.textSelectable = true
+		e:SetText(draft or "")
+		local function send()
+			local text = e:GetText()
+			if text ~= "" and M.chat_send then
+				M.chat_send(text, key)
+			end
+			e:SetText("")
+		end
+		magic.SubscribeToEvent(e, "TextFinished", send)
+		local b = button(r, "Send", send)
+		b:SetFixedWidth(b.minWidth)
+	end
+	if tall then
+		field_row()
+	end
 	chat_width = math.max(100, w.width - 32 - 28)
 	if key ~= nil then
 		chat_unread[key] = nil
@@ -3008,39 +3045,43 @@ function M.chat_page(back)
 			if buildat.storage_write then
 				buildat.storage_write("chat_channel", by_label[l])
 			end
-			M.chat_page(back)
+			M.chat_page(back, e and e:GetText())
 		end)
 		b:SetFixedWidth(math.max(118, math.min(300, w.width - 180)))
 	end
 	chat_list = w:CreateChild("ListView")
 	chat_list:SetStyleAuto()
-	chat_list:SetFixedHeight(math.max(120,
-			math.floor(magic.ui.root.height * 0.5)))
+	chat_list:SetFixedHeight(40)
 	for _, line in ipairs(key == nil and M.chat_lines or chat_by[key] or {}) do
 		chat_row(line)
 	end
-	local r = row(w)
-	local e = r:CreateChild("LineEdit")
-	e:SetStyleAuto()
-	e.minHeight = 28
-	e.textCopyable = true
-	e.textSelectable = true
-	local function send()
-		local text = e:GetText()
-		if text ~= "" and M.chat_send then
-			M.chat_send(text, key)
-		end
-		e:SetText("")
+	if not tall then
+		field_row()
 	end
-	magic.SubscribeToEvent(e, "TextFinished", send)
-	local b = button(r, "Send", send)
-	b:SetFixedWidth(b.minWidth)
 	button(w, "Back", go_back)
+	-- The log takes what the rest leaves of half the screen (8 above it)
+	chat_list:SetFixedHeight(math.max(40, 40 + math.floor(rh / 2) - 8 - w.height))
 	chat_to_end()
-	-- A touchscreen's keyboard would cover the log: it opens on a tap
-	if buildat.get_env("BUILDAT_TOUCH") ~= "1" then
-		e:SetFocus(true)
-	end
+	e:SetFocus(true)
+	local sub, told
+	sub = magic.SubscribeToEvent("Update", function()
+		if M.page ~= w then
+			magic.UnsubscribeFromEvent("Update", sub)
+			return
+		end
+		-- Where it is, a frame on, for a check
+		if not told then
+			told = true
+			log:info(string.format("chat page: y %d to %d of %d, the field row %s",
+					w.screenPosition.y, w.screenPosition.y + w.height, rh,
+					tall and "first" or "last"))
+		end
+		if root.width ~= rw or root.height ~= rh or
+				(buildat.keyboard_height() > root.height / 2) ~= tall then
+			magic.UnsubscribeFromEvent("Update", sub)
+			M.chat_page(back, e:GetText())
+		end
+	end)
 end
 
 -- [ACCOUNT_BUTTON]: a way into the account page the app does not have to

@@ -460,6 +460,24 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		if(e.touches.length > 1)
 			e.preventDefault();
 	}, {passive: false});
+	// **The on-screen keyboard's height** in the canvas's pixels, which the
+	// client reads (keyboard_height(), [CHAT_FIELD_TOUCH]): Chromium's
+	// virtualKeyboard, which with overlaysContent leaves the page its size
+	// under the keyboard, else what the visual viewport lost. `test`, set by
+	// a check, stands in for a keyboard.
+	if(navigator.virtualKeyboard)
+		navigator.virtualKeyboard.overlaysContent = true;
+	window.buildatKeyboard = {
+		test: null,
+		height: function(){
+			var h = this.test;
+			if(h === null && navigator.virtualKeyboard)
+				h = navigator.virtualKeyboard.boundingRect.height;
+			else if(h === null && window.visualViewport)
+				h = Math.max(0, innerHeight - visualViewport.height);
+			return Math.round((h || 0) * canvas.height / canvas.clientHeight);
+		},
+	};
 	var ta = document.getElementById('text');
 	var pw = document.getElementById('password');
 	var un = document.getElementById('username');

@@ -2025,6 +2025,9 @@ end
 buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.logical_size  = __buildat_logical_size
+-- keyboard_height() -> the on-screen keyboard's height in UI pixels, 0 with
+-- none (a native client)
+buildat.safe.keyboard_height = __buildat_keyboard_height
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
