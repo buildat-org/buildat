@@ -265,7 +265,9 @@ end
 local pressed_off = false
 local function off_menu(x, y)
 	local w = window or (luanti.held() and accounts.page)
-	if not w or ui_utils.dropdown_open() then
+	-- The Server window, whose sidebar is off its page, has its own test
+	-- ([SERVER_WINDOW_CLICK])
+	if not w or ui_utils.dropdown_open() or (not window and accounts.frame) then
 		return false
 	end
 	local p, s = w.screenPosition, w.size
