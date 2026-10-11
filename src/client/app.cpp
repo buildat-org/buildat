@@ -2329,6 +2329,14 @@ struct CApp: public App, public magic::Application
 
 		apply_ui_scale();
 
+#ifndef __EMSCRIPTEN__
+		// [OS_CLIPBOARD] A field's Ctrl+C and Ctrl+V go through the OS
+		// clipboard and not a copy Urho3D keeps of its own. The paste is
+		// read on the C++ side into the focused field; the sandbox still
+		// has no way to read the clipboard (safe_classes.lua).
+		GetSubsystem<magic::UI>()->SetUseSystemClipboard(true);
+#endif
+
 #ifdef __EMSCRIPTEN__
 		// Text input only while a text field has focus ([WEB_KEYS]): SDL
 		// starts it with the window, and LineEdit turns it on and off with
