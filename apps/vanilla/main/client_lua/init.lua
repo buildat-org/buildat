@@ -1142,8 +1142,13 @@ wait_text:SetText("Loading the world...")
 wait_text.horizontalAlignment = magic.HA_CENTER
 wait_text.verticalAlignment = magic.VA_CENTER
 wait_text:SetPosition(0, 0)
+-- [LOAD_SHOWN]: said again once a second (frame_peak.note), with the
+-- sections near the player drawn of those there are once it is placed, and
+-- the seconds, so that the line changes while the server sends nothing
+local load_wait = {t = 0, next = 1, total = 0}
 voxelworld.sub_geometry_update(function(node)
 	wait_text:SetText("")
+	load_wait = nil
 end)
 -- The forms' font sizes rasterized now, under the loading line
 -- ([FORMSPEC_FRAME]); the first inventory then draws in a frame
@@ -2681,6 +2686,23 @@ function frame_peak.note(dt)
 			frame_peak.settled_said = (w.to_mesh > 0 or undrawn > 0) and 0 or 1
 			log:info(string.format("settle: %d to mesh, %d chunks in scene, %d undrawn within 2",
 					w.to_mesh, w.chunks, undrawn))
+		end
+	end
+	if load_wait then
+		load_wait.t = load_wait.t + dt
+		if load_wait.t >= load_wait.next then
+			load_wait.next = math.floor(load_wait.t) + 1
+			local s = "Loading the world"
+			if player_placed then
+				local undrawn = voxelworld.undrawn_around(
+						buildat.Vector3(player.x, player.y, player.z), 2)
+				load_wait.total = math.max(load_wait.total, undrawn)
+				if load_wait.total > 0 then
+					s = s .. ": " .. (load_wait.total - undrawn) .. " of " ..
+							load_wait.total
+				end
+			end
+			wait_text:SetText(string.format("%s... %d s", s, load_wait.t))
 		end
 	end
 	frame_peak.frames = (frame_peak.frames or 0) + 1

@@ -84,10 +84,11 @@ static ss_ unpack_packet(const ss_ &data)
 
 struct CState;
 
-// **The cached files are read and hashed on a worker** ([CLIENT_FRAME]).
+// **The cached files are looked up on a worker** ([CLIENT_FRAME]).
 // A game announces thousands of them and this is the only thing in a join
-// that is pure disk and arithmetic; what it hands back to the main thread
-// is which of them have to be asked for and which were already there.
+// that is pure disk (it was hashing too, [LOAD_SHOWN]); what it hands back
+// to the main thread is which of them have to be asked for and which were
+// already there.
 struct CheckAnnouncedTask: public interface::thread_pool::Task
 {
 	CState *state;
@@ -144,6 +145,11 @@ struct CState: public State
 	// first scripts are sent after, and a script ran before the file it
 	// loads was in ([VL_INV_PARITY])
 	sv_<ss_> m_held_scripts;
+	// [LOAD_SHOWN]: the connection's first scripts are seconds of one frame
+	// on a phone, so they wait m_script_frames frames for the status line
+	// saying so to be drawn first
+	bool m_scripts_started = false;
+	int m_script_frames = 0;
 	// And what came after it for the handlers it starts, kept in order
 	// until it has run: a game's packets with nobody to take them were lost
 	std::deque<std::pair<ss_, ss_>> m_deferred;
@@ -294,6 +300,8 @@ struct CState: public State
 		m_file_hashes.clear();
 		m_waiting_files.clear();
 		m_held_scripts.clear();
+		m_scripts_started = false;
+		m_script_frames = 0;
 		m_deferred.clear();
 		m_tell_after_all_files_transferred_requested = false;
 		m_connected = false;
@@ -309,6 +317,10 @@ struct CState: public State
 	{
 		if(m_disconnected)
 			return;
+		if(m_script_frames > 0 && --m_script_frames == 0){
+			m_scripts_started = true;
+			run_held_scripts();
+		}
 		// The worker owns the socket while a connect runs
 		if(m_connect_result.load() == 0 && m_connect_thread.joinable())
 			return;
@@ -526,16 +538,21 @@ struct CState: public State
 		if(left != 0 && left % 100 != 0 && left != m_files_asked)
 			return;
 		const size_t got = m_files_asked - left;
+		set_status(left == 0 ? ss_() : "Downloading the game: "+
+				itos((int)got)+" of "+itos((int)m_files_asked)+" files");
+		if(left != 0)
+			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
+	}
+
+	// The web page's status line ([LOAD_SHOWN]); natively the log has it
+	void set_status(const ss_ &text)
+	{
 #ifdef __EMSCRIPTEN__
-		const ss_ text = left == 0 ? ss_() : "Downloading the game: "+
-				itos((int)got)+" of "+itos((int)m_files_asked)+" files";
 		EM_ASM({
 			if(Module.setStatus)
 				Module.setStatus(UTF8ToString($0));
 		}, text.c_str());
 #endif
-		if(left != 0)
-			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
 	}
 
 	void run_held_scripts()
@@ -543,12 +560,21 @@ struct CState: public State
 		if(!m_waiting_files.empty() || m_announce_checking ||
 				m_held_scripts.empty())
 			return;
+		// update() calls this again when the frames are counted down
+		if(!m_scripts_started){
+			if(m_script_frames == 0){
+				set_status("Starting the game...");
+				m_script_frames = 2;
+			}
+			return;
+		}
 		sv_<ss_> scripts;
 		scripts.swap(m_held_scripts);
 		for(const ss_ &script : scripts){
 			if(m_app)
 				m_app->run_script(script);
 		}
+		set_status("");
 		// Ahead of what has been read since, in the order they came
 		for(auto it = m_deferred.rbegin(); it != m_deferred.rend(); ++it){
 			m_parsed_bytes += it->second.size();
@@ -568,17 +594,27 @@ struct CState: public State
 		}
 		if(m_waiting_files.empty())
 			m_files_asked = 0;
-		for(const auto &pair : task.wanted)
-			m_waiting_files.insert(std::get<0>(pair));
-		m_files_asked += task.wanted.size();
+		// [LOAD_SHOWN]: not what an earlier announce's request still waits
+		// for. A server announces its files at the connect and a module's
+		// again as it loads them (the Luanti media, thousands), all before
+		// the first arrives, and each was sent twice: on a phone a minute
+		// of a status line that did not move.
+		// simplified: a file changed between the two comes as it is now,
+		// under the hash its packet says
+		sv_<std::tuple<ss_, ss_>> wanted;
+		for(const auto &pair : task.wanted){
+			if(m_waiting_files.insert(std::get<0>(pair)).second)
+				wanted.push_back(pair);
+		}
+		m_files_asked += wanted.size();
 		show_file_progress();
-		log_i(MODULE, "%zu of %zu announced files are cached",
-				task.cached.size(), task.files.size());
-		if(!task.wanted.empty()){
+		log_i(MODULE, "%zu of %zu announced files are cached, %zu asked for",
+				task.cached.size(), task.files.size(), wanted.size());
+		if(!wanted.empty()){
 			std::ostringstream os(std::ios::binary);
 			{
 				cereal::PortableBinaryOutputArchive ar(os);
-				ar(task.wanted);
+				ar(wanted);
 			}
 			send_packet("core:request_files", os.str());
 		}
@@ -616,10 +652,8 @@ struct CState: public State
 			const ss_ hash = interface::sha1::calculate(content);
 			const ss_ path = m_remote_cache_path+"/"+
 					interface::sha1::hex(hash);
-			{
-				std::ofstream of(path, std::ios::binary);
-				of<<content;
-			}
+			// Whole or not at all: CheckAnnouncedTask takes it as it is
+			interface::fs::write_file(path, content);
 			m_file_hashes[np.first] = hash;
 			m_app->file_updated_in_cache(np.first, hash, path);
 		}
@@ -882,10 +916,11 @@ void CState::setup_packet_handlers()
 	{
 		log_i(MODULE, "Asked to run script:\n----\n%s\n----", cs(data));
 		if(!m_waiting_files.empty() || m_announce_checking ||
-				!m_held_scripts.empty()){
+				!m_held_scripts.empty() || !m_scripts_started){
 			log_i(MODULE, "The script waits for %zu files still coming",
 					m_waiting_files.size());
 			m_held_scripts.push_back(data);
+			run_held_scripts();
 			return;
 		}
 		if(m_app)
@@ -1005,8 +1040,10 @@ void CState::setup_packet_handlers()
 			ss_ file_hash_hex = interface::sha1::hex(file_hash);
 			ss_ path = m_remote_cache_path+"/"+file_hash_hex;
 			log_d(MODULE, "Saving %s to %s", cs(file_name), cs(path));
-			std::ofstream of(path, std::ios::binary);
-			of<<file_content;
+			// Whole or not at all: CheckAnnouncedTask takes it as it is
+			if(!interface::fs::write_file(path, file_content))
+				log_w(MODULE, "Could not save \"%s\" to %s", cs(file_name),
+						cs(path));
 			// Let Lua resource wrapper know that this happened so it can
 			// update the copy made for Urho3D's resource cache
 			m_app->file_updated_in_cache(file_name, file_hash, path);
@@ -1222,21 +1259,14 @@ bool CheckAnnouncedTask::thread()
 		const ss_ &file_name = std::get<0>(pair);
 		const ss_ &file_hash = std::get<1>(pair);
 		const ss_ path = cache_path+"/"+interface::sha1::hex(file_hash);
-		std::ifstream ifs(path, std::ios::binary);
-		bool cached_is_ok = false;
-		if(ifs.good()){
-			std::string content((std::istreambuf_iterator<char>(ifs)),
-					std::istreambuf_iterator<char>());
-			const ss_ content_hash = interface::sha1::calculate(content);
-			if(content_hash == file_hash){
-				cached_is_ok = true;
-			} else {
-				// Our copy is broken, re-request it
-				log_i(MODULE, "%s %s: Our copy is broken (has hash %s)",
-						cs(interface::sha1::hex(file_hash)), cs(file_name),
-						cs(interface::sha1::hex(content_hash)));
-			}
-		}
+		// [LOAD_SHOWN]: there, not read and hashed again. A file is saved
+		// under its hash only after its content was checked against it, and
+		// whole (fs::write_file); hashing them all was 975 ms natively, and
+		// on the web, where there is no worker, a phone's black screen of
+		// 15 s at each join.
+		// simplified: a copy changed on the disk afterwards is used as it
+		// is; deleting the cache directory is the way out
+		const bool cached_is_ok = interface::fs::path_exists(path);
 		if(cached_is_ok)
 			cached.push_back(std::make_tuple(file_name, file_hash, path));
 		else

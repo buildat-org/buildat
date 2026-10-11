@@ -52,6 +52,13 @@
 //                           while a stack is carried (Chrome only)
 //   ["viewport", w, h]      the page that size from here on, as a phone's
 //                           on-screen keyboard makes it (Chrome only)
+//   ["cpu", rate]           the page's CPU that many times slower, as a
+//                           phone's (Chrome only)
+//   ["watch", regex, s, ms] until a console line from here on matches, the
+//                           page as drawn taken every 500 ms: says each
+//                           #status text and each stretch over ms where
+//                           neither it nor the screen changed, and fails
+//                           after the match if there was one (Chrome only)
 // ${NAME} in a string is a --var's value. The page's console goes to the
 // log, a line each. Exits 1 when a step fails.
 "use strict";
@@ -360,6 +367,15 @@ async function chrome() {
 					touchPoints: []});
 		},
 		viewport: (w, h) => metrics(w, h),
+		cpu: rate => c.send("Emulation.setCPUThrottlingRate", {rate}),
+		// The screen and #status, for watch
+		look: async () => {
+			const r = await c.send("Page.captureScreenshot", {format: "png"});
+			const st = await c.send("Runtime.evaluate", {expression:
+					"(document.getElementById('status') || {}).textContent || ''",
+					returnByValue: true});
+			return {png: r.data, status: st.result.value};
+		},
 		shot: async p => {
 			const r = await c.send("Page.captureScreenshot", {format: "png"});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
@@ -400,6 +416,42 @@ async function chrome() {
 						throw new Error("no console line matched /" + a + "/");
 					await new Promise(r => setTimeout(r, 200));
 				}
+			} else if (op === "watch") {
+				const re = new RegExp(a);
+				const until = Date.now() + (c || 60) * 1000, still = args[2];
+				const t0 = Date.now(), at = () => ((Date.now() - t0) / 1000).toFixed(1);
+				let last = null, since = Date.now(), status = null, over = 0;
+				cursor = lines.length;
+				const stretch = () => {
+					const ms = Date.now() - since;
+					if (ms > still) {
+						over++;
+						console.log(`watch: still ${(ms / 1000).toFixed(1)} s to ${at()} s` +
+								` (status "${status}")`);
+					}
+				};
+				for (;;) {
+					const l = await b.ops.look();
+					if (l.status !== status)
+						console.log(`watch: ${at()} s "${l.status}"`);
+					if (last === null || l.png !== last || l.status !== status) {
+						stretch();
+						since = Date.now();
+					}
+					last = l.png;
+					status = l.status;
+					const i = lines.findIndex((l, k) => k >= cursor && re.test(l));
+					if (i >= 0) {
+						cursor = i + 1;
+						stretch();
+						break;
+					}
+					if (Date.now() > until)
+						throw new Error("no console line matched /" + a + "/");
+					await new Promise(r => setTimeout(r, 500));
+				}
+				if (over)
+					throw new Error(`${over} stretches over ${still} ms with nothing changed`);
 			} else if (b.ops[op]) {
 				await b.ops[op](...args);
 			} else {

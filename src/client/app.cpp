@@ -3309,6 +3309,19 @@ struct CApp: public App, public magic::Application
 		// worldgen, and the stack says what this thread was doing;
 		// [BOX_PLAYTEST_2] 12)
 		interface::debug::watchdog_alive(g_watchdog_seconds);
+#ifdef __EMSCRIPTEN__
+		// The page's "Starting the engine..." ends at the first frame
+		// ([LOAD_SHOWN]); what a join does next says its own
+		static bool started = false;
+		if(!started){
+			started = true;
+			EM_ASM({
+				Module.buildatUp = 1;
+				if(Module.setStatus)
+					Module.setStatus('');
+			});
+		}
+#endif
 		if(g_watchdog_hooked.exchange(false))
 			lua_sethook(L, nullptr, 0, 0);
 #ifdef __EMSCRIPTEN__

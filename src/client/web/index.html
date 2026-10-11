@@ -38,6 +38,22 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 (function(){
 	var status = document.getElementById('status');
 	var canvas = document.getElementById('canvas');
+	// **The start says what it is doing** ([LOAD_SHOWN]): a line that
+	// stays 2 s gets its seconds, once a second, while the page runs
+	var shown = '', shown_at = 0;
+	function set_status(t){
+		// Emscripten's own empty line, when its download is done, is the
+		// engine starting: the client's first frame says so (buildatUp)
+		if(t === '' && !Module.buildatUp)
+			t = 'Starting the engine...';
+		status.textContent = shown = t;
+		shown_at = Date.now();
+	}
+	setInterval(function(){
+		var s = Math.floor((Date.now() - shown_at) / 1000);
+		if(shown && s >= 2 && status.textContent.indexOf(shown) === 0)
+			status.textContent = shown + ' ' + s + ' s';
+	}, 1000);
 	var https = location.protocol === 'https:';
 	// The server that served this page; behind a reverse proxy the port is
 	// the page's, 443 or 80 when the address has none
@@ -314,8 +330,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		buildatInputAt: Date.now(),
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },
-		setStatus: function(t){ status.textContent = t; },
-		onRuntimeInitialized: function(){ status.textContent = ''; },
+		setStatus: set_status,
+		onRuntimeInitialized: function(){ set_status(''); },
 		onAbort: function(what){
 			status.textContent = 'The client stopped: ' + what +
 				'\nReload the page to start again.';
