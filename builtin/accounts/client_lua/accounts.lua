@@ -373,6 +373,30 @@ show_login = function(error_text)
 			(hash and hash ~= "" and ("-" .. hash) or ""))
 	-- Declared here for the Starport ID's button, made before them
 	local password, code, keep, sb = nil, nil, nil, nil
+	-- [KEEP_ON_TOP] Kept logged in or not, chosen first: it is for
+	-- either way in below
+	if not is_local then
+		keep = {on = buildat.storage_read("keep") == "1"}
+		local kb = w:CreateChild("Button")
+		kb:SetStyleAuto()
+		kb.minHeight = 30
+		local kt = kb:CreateChild("Text")
+		kt:SetStyleAuto()
+		kt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		local function draw_keep()
+			kt:SetText((keep.on and "[x] " or "[ ] ") .. "Keep me logged in")
+		end
+		-- **By the keyboard too** (user, 2026-10-01): Tab reaches it after
+		-- the fields, and a focused button is pressed by Space or Enter
+		kb:SetFocusMode(magic.FM_FOCUSABLE)
+		draw_keep()
+		-- Written at once: the Starport ID's way in keeps it too
+		magic.SubscribeToEvent(kb, "Released", function()
+			keep.on = not keep.on
+			buildat.storage_write("keep", keep.on and "1" or "0")
+			draw_keep()
+		end)
+	end
 	-- [STARPORT] 10c: a Starport ID in place of an account here; the
 	-- token comes from the client's own Starport extension, which asks
 	-- the Starport, so the password never comes here
@@ -431,26 +455,6 @@ show_login = function(error_text)
 					"trusted network")
 			warn:SetColor(magic.Color(rgb("warn")))
 		end
-	end
-	if not is_local then
-		keep = {on = buildat.storage_read("keep") == "1"}
-		local kb = w:CreateChild("Button")
-		kb:SetStyleAuto()
-		kb.minHeight = 30
-		local kt = kb:CreateChild("Text")
-		kt:SetStyleAuto()
-		kt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		local function draw_keep()
-			kt:SetText((keep.on and "[x] " or "[ ] ") .. "Keep me logged in")
-		end
-		-- **By the keyboard too** (user, 2026-10-01): Tab reaches it after
-		-- the fields, and a focused button is pressed by Space or Enter
-		kb:SetFocusMode(magic.FM_FOCUSABLE)
-		draw_keep()
-		magic.SubscribeToEvent(kb, "Released", function()
-			keep.on = not keep.on
-			draw_keep()
-		end)
 	end
 	if error_text then
 		local e = label(error_text)
