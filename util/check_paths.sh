@@ -7,7 +7,9 @@
 #
 #   . "$(dirname "$0")/../util/check_paths.sh"
 _check_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-export BUILDAT_USER_PATH="$_check_root/local/check/user"
+# CHECK_USER_PATH another, for a run beside one that holds the checks' own
+# (a script that refuses to start next to a running buildat looks only there)
+export BUILDAT_USER_PATH="${CHECK_USER_PATH:-$_check_root/local/check/user}"
 export BUILDAT_CACHE_PATH="$_check_root/local/check/cache"
 mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
 # The Luanti games and textures the checks play, from the desk's user path:
@@ -19,8 +21,12 @@ mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
 for _d in games texture_packs textures; do
 	[ -d "$_check_root/user/shared/vanilla/$_d" ] &&
 		[ ! -e "$BUILDAT_USER_PATH/shared/vanilla/$_d" ] &&
-		cp -al "$_check_root/user/shared/vanilla/$_d" \
-			"$BUILDAT_USER_PATH/shared/vanilla/$_d"
+		{ cp -al "$_check_root/user/shared/vanilla/$_d" \
+			"$BUILDAT_USER_PATH/shared/vanilla/$_d" 2>/dev/null || {
+		# Across file systems (a CHECK_USER_PATH in /tmp): copied
+		rm -rf "$BUILDAT_USER_PATH/shared/vanilla/$_d"
+		cp -r "$_check_root/user/shared/vanilla/$_d" \
+			"$BUILDAT_USER_PATH/shared/vanilla/$_d"; }; }
 done
 unset _d
 

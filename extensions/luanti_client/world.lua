@@ -1512,6 +1512,12 @@ function M.new(magic, buildat, log, options)
 
 	-- Puts the scene's lights on the light-giving voxels nearest the camera.
 	local function place_lights()
+		-- None on the pbr path: its baked lamp term is the torch's light
+		-- there, in the sky's units, where these at 0.1 to 0.4 in the
+		-- display's were nothing but a redraw each ([TORCH_LIGHT])
+		if pbr then
+			return
+		end
 		local p = camera_node.position
 		local reach = 60
 		local best = {}

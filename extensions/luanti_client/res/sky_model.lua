@@ -351,7 +351,16 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		-- 0.47 and both falloffs nearer; snow untouched. The shade's blue
 		-- lags its red (0.5 against 0.66): the ground's hue is the next
 		-- rung. probes_ground_075_kept.txt beside the dome tables.
-		bounce = 0.15, lamp = 8, dome = 1.2, ground = {r = 0.75, g = 0.66, b = 0.45}, -- doubled 2026-09-19 with groundSeen cubed,
+		-- lamp 8 -> 1.5 ([TORCH_LIGHT], 2026-10-11) with the falloff
+		-- counted from a torch's level: 1.5, 0.41, 0.14 at one, three and
+		-- six nodes from a torch, where 8 over the old distance from
+		-- fifteen gave 1.45, 0.37, 0.12 on the open faces the user saw
+		-- lit right. A glowstone's own faces drop from 8 to 1.5. vp8's
+		-- lamp_wall reads 2.8/4.2/7.3 of the render at 1, 2.2/3.5/6.7 at
+		-- 0.3, 1.2/2.0/3.9 at 0.1, grey at all three: its ceiling has a
+		-- nibble of a few, round the ledge, so no lamp level fits it
+		-- ([LAMP_REF]'s finding, 2026-09-18).
+		bounce = 0.15, lamp = 1.5, dome = 1.2, ground = {r = 0.75, g = 0.66, b = 0.45}, -- doubled 2026-09-19 with groundSeen cubed,
 		-- the transmitted light through a leaf, over Lambert through its
 		-- colour ([PBR_FIT] 3b, canopy_dawn)
 		translucency = 1.0,

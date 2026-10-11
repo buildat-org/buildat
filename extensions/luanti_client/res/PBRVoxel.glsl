@@ -428,21 +428,27 @@ void VS()
             // The lamp's falloff computed from the nibble, not stepped
             // with it: Luanti's lamp light drops one level a node, and
             // fourteen levels at full lit vp7's deep wall ten times the
-            // render's from a glowstone five nodes off; the nibble says
-            // where the lamp is and how strong, the inverse square says
-            // the rest ([LAMP_REF], [SHADE_NIBBLE]'s list). The level is
-            // the vertex r over its local shade, the distance fifteen less
-            // the level, one node at the lamp's own face.
-            float lampLevel = isPacked ? iColor.r / max(iColor.b, 0.05) : 0.0;
-            float lampDist = max(15.0 - 15.0 * lampLevel, 1.0);
-            // And nothing at a level of nought: the inverse square alone
-            // left a lamp's 1/225 on every face in the world, a floor
-            // five times the moonlight that lit the 02:00 snow field like
-            // an afternoon once the lamp term reached the shader
-            // ([PBR_FIT], 2026-09-20)
+            // render's from a glowstone five nodes off ([LAMP_REF]). The
+            // vertex r is the level alone, smoothed over the corner's open
+            // voxels, with no shade on it: the mesher's rays put out a
+            // torch in any room narrower than their reach and lit only
+            // the spots that saw out ([TORCH_LIGHT], user 2026-10-11). The
+            // distance is counted from a torch's level, not from fifteen:
+            // a torch's own faces (11) full, nothing at a level of nought.
+            // One over the distance less its value at twelve, not the
+            // inverse square: the nibble is the flood's path, which goes
+            // round what a ray would not, and the square left a torch dark
+            // at half its reach; less the tail, as a step at nought left a
+            // lamp's floor on every face in the world (the 02:00 snow
+            // field lit like an afternoon, [PBR_FIT] 2026-09-20).
+            // simplified: the nibble does not say the source's level, so
+            // a glowstone (14) reads full for three nodes; a source's level
+            // in the vertex is the upgrade.
+            float lampLevel = isPacked ? 15.0 * iColor.r : 0.0;
+            float lampDist = clamp(12.0 - lampLevel, 1.0, 12.0);
             vec3 baked = isPacked ?
-                cLampLight * iColor.b * step(0.03, lampLevel) /
-                    (lampDist * lampDist) : iColor.rgb;
+                cLampLight * max(1.0 / lampDist - 1.0 / 12.0, 0.0) *
+                    (12.0 / 11.0) : iColor.rgb;
             float shade = isPacked ? iColor.b : 1.0;
             // The ground a wall faces is lit or it is not, and the base
             // pass has no shadow map to say which; what it has is how

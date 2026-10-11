@@ -1086,7 +1086,29 @@ static void face_vertex_colors(VoxelVolume &volume,
 			if(local_ao < SHADE_FLOOR)
 				local_ao = SHADE_FLOOR;
 			float local = local_ao * FACE_SHADE[face_id] / 1.15f;
-			out[i] = Color(lamp_shade, under ? 0.0f : terrain,
+			// The lamp's level alone, the shader's falloff takes it from
+			// there: the rays put out every torch in a room narrower than
+			// their reach, and lit only the spots that saw out
+			// ([TORCH_LIGHT]). Smoothed as Luanti's corners are, over the
+			// open voxels around the vertex -- the diagonal not past two
+			// solid sides -- so the light has no step a node.
+			float lamp_sum = lamp_f;
+			int lamp_n = 1;
+			const pv::Vector3DInt32 around[3] = {
+				front_p + du, front_p + dv, front_p + du + dv};
+			for(int k = 0; k < 3; k++){
+				if(k == 2 && s1 && s2)
+					break;
+				if(k == 0 ? s1 : k == 1 ? s2 :
+						occludes(volume, voxel_reg, fmt, around[k]))
+					continue;
+				VoxelSample a = volume.sample_at(around[k]);
+				if(fmt.undefined(a))
+					continue;
+				lamp_sum += fmt.lamp_f(a);
+				lamp_n++;
+			}
+			out[i] = Color(lamp_sum / lamp_n, under ? 0.0f : terrain,
 					local > 1.0f ? 1.0f : local,
 					sky_alpha(sky_f, sky_shade, true)).ToUInt();
 			continue;
@@ -2152,7 +2174,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 						// takes the terrain, the local shade does not
 						color = SHADOW_KINDS ? Color(terrain, 1.0f, 1.0f,
 								sky_alpha(sky_f, shade * terrain, true)).ToUInt() :
-							packed_alpha ? Color(lamp_f * shade, terrain,
+							packed_alpha ? Color(lamp_f, terrain,
 								shade / 1.15f > 1.0f ? 1.0f : shade / 1.15f,
 								sky_alpha(sky_f, shade * terrain, true)).ToUInt() : Color(
 								BOUNCE_COLOR.r_ * bshade +

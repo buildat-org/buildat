@@ -832,15 +832,15 @@ function M.light_color(x, y, z, no_sun)
 	-- mesher packs beside it and an object has no reading of: taken as
 	-- the nibble again, an open place's), the bounce where the shaped
 	-- nibble (the knee at 2..11) says the sky does not reach, a lamp by
-	-- its inverse square of the nibble's distance. simplified: no ground
-	-- term and no normal (a side sees half the sky); level 2 is where a
-	-- normal takes its share.
+	-- its falloff over the nibble's distance from a torch's level.
+	-- simplified: no ground term and no normal (a side sees half the
+	-- sky); level 2 is where a normal takes its share.
 	local t = math.max(0, math.min(1, (sky - 2 / 15) / (9 / 15)))
 	local shaped = t * t * (3 - 2 * t)
 	local share = sky * sky
 	local bounce = (0.15 + sky) * (1 - shaped) * sky
-	local d = math.max(15 - 15 * lamp, 1)
-	local lit = lamp > 0 and 1 / (d * d) or 0
+	local d = math.max(math.min(12 - 15 * lamp, 12), 1)
+	local lit = (1 / d - 1 / 12) * 12 / 11
 	-- The pbr path decodes its texel (pow 2.2) and an unlit object does
 	-- not: a mid texel (0.5) is 0.44 of itself decoded, and the object is
 	-- scaled by that so a mid tone sits level with the world's.

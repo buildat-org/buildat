@@ -2053,9 +2053,10 @@ local function update_sky(dt)
 				(c.g * k + ga * gc.g) * PHYS.bounce,
 				(c.b * k + ga * gc.b) * PHYS.bounce)
 		-- A lamp at full in the sky's units: PHYS.lamp, in the glowstone's
-		-- own orange, fitted to the render's LAMP_RADIANCE on the ceiling
-		-- above it ([LAMP_REF], lamp_wall). simplified: one level and one
-		-- colour for every light source; a torch is not a glowstone.
+		-- own orange, at a torch's own faces ([TORCH_LIGHT]; sky_model.lua
+		-- says why not at [LAMP_REF]'s lamp_wall). simplified: one level
+		-- and one colour for every light source; a torch is not a
+		-- glowstone.
 		voxel_shading.set_lamp_light(PHYS.lamp * 1.0, PHYS.lamp * 0.6,
 				PHYS.lamp * 0.3)
 		-- The same three for the objects and the hand, drawn unlit in
