@@ -1165,6 +1165,42 @@ local function collision_boxes(def)
 	return out
 end
 
+-- What a pointing ray stops at and the frame is drawn round
+-- ([VL_RAIL_BOXES]): the selection_box, or a nodebox's node_box when there
+-- is none (Luanti's register.lua). A "fixed" box as given, for the registry
+-- to turn by the facing; a "wallmounted" one as the boxes of each wall, a
+-- wallmounted direction before each six, when the param2 says the wall --
+-- else the boxes param2 0 has. nil is the cube. simplified: "leveled" and
+-- "connected" are the cube.
+local function selection_boxes(name, def)
+	local sb = def and def.selection_box
+	if sb == nil and def and def.drawtype == "nodebox" then
+		sb = def.node_box
+	end
+	if type(sb) ~= "table" then
+		return nil
+	end
+	local out = {}
+	if sb.type == "fixed" then
+		flatten_boxes(sb.fixed, out)
+	elseif sb.type == "wallmounted" then
+		local walls = def.paramtype2 == "wallmounted" or
+				def.paramtype2 == "colorwallmounted"
+		for w = 0, walls and 5 or 0 do
+			flatten_boxes(core.get_node_boxes("selection_box",
+					{x = 0, y = 0, z = 0}, {name = name, param2 = w}), out,
+					walls and w or nil)
+		end
+		if walls and #out > 0 then
+			return nil, out
+		end
+	end
+	if #out == 0 then
+		return nil
+	end
+	return out
+end
+
 -- A "connected" node box, as the mesher's tagged quads: the fixed boxes
 -- untagged, and each connect_* set tagged with the direction it needs a
 -- neighbour in -- the same tag a fence's bars carry (1 +y, 2 -y, 3 +x, 4
@@ -1288,6 +1324,7 @@ function core.__voxel_defs()
 		local name = core.__content_names[id]
 		local def = name and core.registered_nodes[name] or nil
 		local drawtype = def and def.drawtype or "normal"
+		local sel_box, sel_walls = selection_boxes(name, def)
 		-- Whether light gets past this node, which in Luanti is a separate
 		-- thing from whether it is drawn: glass has faces and lets the sun
 		-- through. buildat used to have one test for both; see
@@ -1349,6 +1386,8 @@ function core.__voxel_defs()
 			tile_frames = tile_frame_aspects(six_tile_defs(def, is_liquid)),
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
 			collision_box = collision_boxes(def),
+			selection_box = sel_box,
+			selection_box_wall = sel_walls,
 			node_box_connected = (drawtype == "nodebox") and
 					node_boxes_connected(def) or nil,
 			node_box_connects = (drawtype == "nodebox") and

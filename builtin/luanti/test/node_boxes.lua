@@ -1,15 +1,15 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 -- core.get_node_boxes() against Luanti's own rotations, without a world:
--- the function's span is cut out of lua/bootstrap.lua (between its BEGIN
+-- the function's span is cut out of lua/stubs.lua (between its BEGIN
 -- and END marks) and run over a few made-up nodes.
 --
 --   lua builtin/luanti/test/node_boxes.lua
 local dir = arg[0]:match("^(.*)/[^/]*$") or "."
-local f = assert(io.open(dir .. "/../lua/bootstrap.lua"))
+local f = assert(io.open(dir .. "/../lua/stubs.lua"))
 local src = f:read("*a")
 f:close()
 local span = src:match("%-%- BEGIN get_node_boxes.-\n(.-)%-%- END get_node_boxes")
-assert(span, "the BEGIN/END get_node_boxes marks are gone from bootstrap.lua")
+assert(span, "the BEGIN/END get_node_boxes marks are gone from stubs.lua")
 
 core = {}
 core.registered_nodes = {
@@ -57,3 +57,32 @@ world["1,0,0"] = {name = "t:fence", param2 = 0}
 local fb = core.get_node_boxes("node_box", p, {name = "t:fence", param2 = 0})
 assert(#fb == 2 and eq(fb[2], {0.125, 0, 0, 0.5, 0.2, 0.1}), #fb)
 print("get_node_boxes: ok")
+
+-- core.raycast() goes by the selection boxes ([VL_RAIL_BOXES]): a ray over
+-- a rail's plate points at the stone behind it, one down onto the plate at
+-- the rail with the node above as its above
+core.registered_nodes["t:rail"] = {drawtype = "mesh",
+	selection_box = {type = "fixed", fixed = {-0.5, -0.5, -0.5, 0.5, -0.5 + 1/16, 0.5}}}
+core.registered_nodes.air = {drawtype = "airlike", pointable = false}
+world = {["0,0,0"] = {name = "t:rail", param2 = 0}, ["0,0,1"] = {name = "t:stone", param2 = 0}}
+vector = {new = function(a, b, c)
+	if type(a) == "table" then return {x = a.x, y = a.y, z = a.z} end
+	return {x = a, y = b, z = c}
+end}
+function core.get_objects_inside_radius() return {} end
+dofile(dir .. "/../lua/raycast.lua")
+local function first(p1, p2)
+	for hit in core.raycast(p1, p2, false, false) do
+		return hit
+	end
+end
+local h = first({x = 0, y = 0, z = -2}, {x = 0, y = 0, z = 3})
+assert(h and h.under.z == 1 and h.above.z == 0, "the ray over the rail: " .. (h and h.under.x..","..h.under.y..","..h.under.z or "nil"))
+h = first({x = 0.1, y = 2, z = 0.1}, {x = 0.1, y = -2, z = 0.1})
+assert(h and h.under.z == 0 and h.under.y == 0 and h.above.y == 1 and
+		math.abs(h.intersection_point.y - (-0.5 + 1/16)) < 1e-6, "the ray down")
+-- From the side, low enough to meet the plate: the rail, above the node
+-- the ray came from
+h = first({x = 0, y = -0.47, z = -2}, {x = 0, y = -0.47, z = 3})
+assert(h and h.under.z == 0 and h.above.z == -1, "the ray along the plate")
+print("raycast: ok")

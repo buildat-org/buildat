@@ -472,6 +472,12 @@
 			table_numbers(L, "node_box", boxes);
 			sv_<float> collision_boxes;
 			table_numbers(L, "collision_box", collision_boxes);
+			// What is pointed at: fixed boxes turned by the facing like
+			// the collision boxes, or a wallmounted node's own per wall,
+			// seven numbers a box with the wallmounted direction first
+			sv_<float> selection_boxes, selection_walls;
+			table_numbers(L, "selection_box", selection_boxes);
+			table_numbers(L, "selection_box_wall", selection_walls);
 			sv_<float> connected_boxes;
 			table_numbers(L, "node_box_connected", connected_boxes);
 			const ss_ connects = table_string(L, "node_box_connects");
@@ -667,6 +673,17 @@
 				// the definition's own
 				if(walkable && !empty && d != 0)
 					turn_boxes(collision_boxes, d, var.collision_boxes);
+				if(!selection_walls.empty()){
+					// 6 and 7 are the ceiling and the floor turned
+					const float w = (float)(i == 6 ? 0 : i == 7 ? 1 : i);
+					for(size_t b = 0; b + 7 <= selection_walls.size(); b += 7)
+						if(selection_walls[b] == w)
+							var.selection_boxes.insert(var.selection_boxes.end(),
+									&selection_walls[b + 1],
+									&selection_walls[b + 7]);
+				} else if(d != 0){
+					turn_boxes(selection_boxes, d, var.selection_boxes);
+				}
 				facing_variants.push_back(var);
 			}
 
@@ -777,6 +794,7 @@
 			vdef.climbable = climbable;
 			if(walkable && !empty)
 				turn_boxes(collision_boxes, 0, vdef.collision_boxes);
+			turn_boxes(selection_boxes, 0, vdef.selection_boxes);
 			vdef.move_resistance = (uint8_t)(move_resistance < 0 ? 0 :
 					(move_resistance > 255 ? 255 : move_resistance));
 			vdef.bouncy = (uint8_t)(bouncy < 0 ? 0 : (bouncy > 255 ? 255 : bouncy));

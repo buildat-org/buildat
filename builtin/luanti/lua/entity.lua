@@ -2865,10 +2865,29 @@ end
 -- of updates, or without noclip whose body is inside a walkable node, is
 -- put back at the last position that was fine. Water, ladders and the
 -- like are not the ground but are not flying either.
-local function node_walkable(p)
+-- Inside a walkable node: the body (the default player box, less a
+-- margin a client's float leaves) in one of the node's collision boxes, so
+-- that standing on a rail's plate, a slab or a stair is not
+-- ([VL_RAIL_BOXES]); a node with no box of its own the whole cube
+local BODY_R, BODY_H, BODY_M = 0.3, 1.7, 0.05
+local function body_in_node(p, x, y, z)
 	local n = core.get_node_or_nil(p)
 	local def = n and core.registered_nodes[n.name]
-	return def ~= nil and def.walkable ~= false
+	if def == nil or def.walkable == false then
+		return false
+	end
+	local boxes = core.get_node_boxes("collision_box", p, n)
+	if #boxes == 0 then
+		boxes = {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}
+	end
+	for _, b in ipairs(boxes) do
+		if x + BODY_R - BODY_M > p.x + b[1] and x - BODY_R + BODY_M < p.x + b[4] and
+				y + BODY_H - BODY_M > p.y + b[2] and y + BODY_M < p.y + b[5] and
+				z + BODY_R - BODY_M > p.z + b[3] and z - BODY_R + BODY_M < p.z + b[6] then
+			return true
+		end
+	end
+	return false
 end
 local function node_holds(p)
 	local n = core.get_node_or_nil(p)
@@ -2891,8 +2910,8 @@ local function hold_down(o, x, y, z)
 		return false
 	end
 	local feet = {x = math.floor(x + 0.5), y = math.floor(y + 0.5), z = math.floor(z + 0.5)}
-	local inside = node_walkable(feet) or
-			node_walkable({x = feet.x, y = feet.y + 1, z = feet.z})
+	local inside = body_in_node(feet, x, y, z) or
+			body_in_node({x = feet.x, y = feet.y + 1, z = feet.z}, x, y, z)
 	if not privs.noclip and inside and o.good_pos then
 		return true
 	end

@@ -3400,49 +3400,77 @@ local POINT_STEP = 0.1
 
 local pointed_p = nil
 local pointed_above = nil
+-- The pointed node's selection boxes, nil for the cube
+local pointed_boxes = nil
 -- An object in front of that node, which takes the pointing from it: hit
 -- rather than dug, and framed by its own box ([OBJECT_SELECTION_BOX])
 local pointed_obj = nil
 local pointed_node = scene:CreateChild("pointed")
+-- frame_boxes(boxes): the frame drawn round these boxes, {{x0, y0, z0, x1,
+-- y1, z1}, ...} about the node's position, each as official draws each of
+-- a node's selection boxes ([VL_RAIL_BOXES]). Built again only when the
+-- boxes change.
+local frame_boxes
 do
-	-- Four thin strips around the top face, drawn on every face of the
-	-- voxel by the six turns below: a wireframe box, the way apps/digger
-	-- draws one
+	-- Four thin strips along the edges of each face of each box: a
+	-- wireframe box, the way apps/digger draws one
 	local geometry = pointed_node:CreateComponent("CustomGeometry")
-	geometry:BeginGeometry(0, magic.TRIANGLE_LIST)
-	geometry:SetNumGeometries(1)
-	local c = magic.Color(0.10, 0.10, 0.10)
-	local function quad(a, b, cc, d)
-		for _, v in ipairs({a, b, cc, cc, d, a}) do
-			geometry:DefineVertex(v)
-			geometry:DefineColor(c)
-		end
-	end
-	local o = 0.504    -- Just outside the voxel, so it does not z-fight
-	local t = 1.0 / 16 -- How thick a strip is
-	-- One face's four strips, turned onto each of the six faces
-	local function face(turn)
-		local function v(x, y, z)
-			return magic.Vector3(turn(x, y, z))
-		end
-		quad(v(-o, o, o - t), v(o, o, o - t), v(o, o, o), v(-o, o, o))
-		quad(v(-o, o, -o), v(o, o, -o), v(o, o, -o + t), v(-o, o, -o + t))
-		quad(v(o - t, o, -o + t), v(o, o, -o + t), v(o, o, o - t),
-				v(o - t, o, o - t))
-		quad(v(-o, o, -o + t), v(-o + t, o, -o + t), v(-o + t, o, o - t),
-				v(-o, o, o - t))
-	end
-	face(function(x, y, z) return x, y, z end)
-	face(function(x, y, z) return x, -y, -z end)
-	face(function(x, y, z) return y, x, z end)
-	face(function(x, y, z) return -y, -x, z end)
-	face(function(x, y, z) return x, z, y end)
-	face(function(x, y, z) return x, -z, -y end)
-	geometry:Commit()
 	local material = magic.Material.new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
 			"Techniques/NoTextureVColMultiply.xml"))
-	geometry:SetMaterial(0, material)
+	local c = magic.Color(0.10, 0.10, 0.10)
+	local drawn = nil
+	frame_boxes = function(boxes)
+		local key = {}
+		for _, b in ipairs(boxes) do
+			key[#key + 1] = string.format("%.3f,%.3f,%.3f,%.3f,%.3f,%.3f",
+					b[1], b[2], b[3], b[4], b[5], b[6])
+		end
+		key = table.concat(key, ";")
+		if key == drawn then
+			return
+		end
+		drawn = key
+		geometry:BeginGeometry(0, magic.TRIANGLE_LIST)
+		geometry:SetNumGeometries(1)
+		-- Both windings, since the faces below are not all turned the
+		-- same way round
+		local function quad(a, b, cc, d)
+			for _, v in ipairs({a, b, cc, cc, d, a, a, d, cc, cc, b, a}) do
+				geometry:DefineVertex(v)
+				geometry:DefineColor(c)
+			end
+		end
+		for _, box in ipairs(boxes) do
+			-- Just outside the box, so it does not z-fight
+			local l = {box[1] - 0.004, box[2] - 0.004, box[3] - 0.004}
+			local h = {box[4] + 0.004, box[5] + 0.004, box[6] + 0.004}
+			for ax = 1, 3 do
+				local u, w = ax % 3 + 1, (ax + 1) % 3 + 1
+				-- A strip is 1/16 thick, and thinner on a thin box
+				local tu = math.min(1.0 / 16, (h[u] - l[u]) / 3)
+				local tw = math.min(1.0 / 16, (h[w] - l[w]) / 3)
+				for _, s in ipairs({l[ax], h[ax]}) do
+					local function v(pu, pw)
+						local q = {}
+						q[ax], q[u], q[w] = s, pu, pw
+						return magic.Vector3(q[1], q[2], q[3])
+					end
+					quad(v(l[u], l[w]), v(l[u] + tu, l[w]), v(l[u] + tu, h[w]),
+							v(l[u], h[w]))
+					quad(v(h[u] - tu, l[w]), v(h[u], l[w]), v(h[u], h[w]),
+							v(h[u] - tu, h[w]))
+					quad(v(l[u], l[w]), v(h[u], l[w]), v(h[u], l[w] + tw),
+							v(l[u], l[w] + tw))
+					quad(v(l[u], h[w] - tw), v(h[u], h[w] - tw), v(h[u], h[w]),
+							v(l[u], h[w]))
+				end
+			end
+		end
+		geometry:Commit()
+		geometry:SetMaterial(0, material)
+	end
+	frame_boxes({{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}})
 	pointed_node.enabled = false
 end
 
@@ -3505,12 +3533,49 @@ local function find_pointed_voxel()
 			-- pointable = false node (water in most games, decor) as
 			-- through the void, and stops with nothing pointed at
 			-- "blocking" (2)
-			local solid, def = voxel_is_solid(voxelworld.get_static_voxel(p))
+			local v = voxelworld.get_static_voxel(p)
+			local solid, def = voxel_is_solid(v)
 			if solid and def.pointable ~= 0 then
 				if def.pointable == 2 then
 					return nil, nil
 				end
-				return p, last or p
+				-- Its selection boxes when it has them ([VL_RAIL_BOXES]):
+				-- the nearest one the ray meets, and the node beyond the
+				-- face it meets is the above, as official's; a ray that
+				-- meets none goes on to what is behind
+				local boxes = voxelworld.get_voxel_registry():selection_boxes_of(v)
+				if not boxes then
+					return p, last or p
+				end
+				local best, normal = range, nil
+				for _, b in ipairs(boxes) do
+					local t0, t1, n = 0, best, nil
+					for ax, k in ipairs({"x", "y", "z"}) do
+						local o, d = p0[k] - p[k], dir[k]
+						if math.abs(d) < 1e-9 then
+							if o < b[ax] or o > b[ax + 3] then
+								t0 = math.huge
+							end
+						else
+							local a1, a2 = (b[ax] - o) / d, (b[ax + 3] - o) / d
+							if a1 > a2 then
+								a1, a2 = a2, a1
+							end
+							if a1 > t0 then
+								t0, n = a1, {0, 0, 0}
+								n[ax] = d < 0 and 1 or -1
+							end
+							t1 = math.min(t1, a2)
+						end
+					end
+					if t0 <= t1 and t0 < best then
+						best, normal = t0, n or {0, 0, 0}
+					end
+				end
+				if normal then
+					return p, p + buildat.Vector3(normal[1], normal[2], normal[3]),
+							boxes
+				end
 			end
 			last = p
 		end
@@ -4246,7 +4311,7 @@ function frame_peak.update(dt)
 		end
 	end
 
-	pointed_p, pointed_above = find_pointed_voxel()
+	pointed_p, pointed_above, pointed_boxes = find_pointed_voxel()
 	-- A body that came off the world, when the ray reaches it first
 	-- ([BODY_INTERACT]): its voxel's region position stands in for the
 	-- map's, and the dig and the place below send it as they send any
@@ -4259,12 +4324,11 @@ function frame_peak.update(dt)
 		local bp, babove = luanti.pointed_body(eye.x, eye.y, eye.z,
 				dir.x, dir.y, dir.z, reach)
 		if bp then
-			pointed_p, pointed_above = bp, babove
+			pointed_p, pointed_above, pointed_boxes = bp, babove, nil
 		end
 	end
 	-- An object nearer than the node is what is pointed at, and the frame
-	-- goes around its selection box, scaled from the voxel's
-	-- simplified: the frame's bars scale with it, thicker on a big box
+	-- goes around its selection box
 	do
 		local eye = camera_node.worldPosition
 		local dir = keys.point_dir()
@@ -4286,15 +4350,14 @@ function frame_peak.update(dt)
 		lo, hi = luanti.object_box(pointed_obj)
 	end
 	if lo then
-		pointed_node.position = magic.Vector3((lo[1] + hi[1]) / 2,
-				(lo[2] + hi[2]) / 2, (lo[3] + hi[3]) / 2)
-		pointed_node.scale = magic.Vector3(math.max(0.05, hi[1] - lo[1]),
-				math.max(0.05, hi[2] - lo[2]), math.max(0.05, hi[3] - lo[3]))
+		local x, y, z = (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2, (hi[3] - lo[3]) / 2
+		pointed_node.position = magic.Vector3(lo[1] + x, lo[2] + y, lo[3] + z)
+		frame_boxes({{-x, -y, -z, x, y, z}})
 		pointed_node.enabled = true
 	elseif pointed_p then
 		pointed_node.position = magic.Vector3.from_buildat(
 				luanti.body_world(pointed_p) or pointed_p)
-		pointed_node.scale = magic.Vector3(1, 1, 1)
+		frame_boxes(pointed_boxes or {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}})
 		pointed_node.enabled = true
 	else
 		pointed_node.enabled = false

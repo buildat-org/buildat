@@ -23,7 +23,9 @@ trap check_cleanup EXIT
 d=$t/s
 mkdir -p "$d/apps/vanilla/saves/tl/luanti" "$d/shared"
 cat > "$d/shared/fixture.lua" <<'L'
-core.register_node(":tl:wall", {tiles = {"[fill:16x16:#808080"}})
+-- Not pointable: the crosshair's frame on the floor would cross the
+-- column the corridor is measured down
+core.register_node(":tl:wall", {tiles = {"[fill:16x16:#808080"}, pointable = false})
 core.register_node(":tl:torch", {drawtype = "airlike", paramtype = "light",
 	sunlight_propagates = true, walkable = false, pointable = false,
 	light_source = 12})

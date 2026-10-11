@@ -126,6 +126,9 @@ namespace interface
 		// What stops the player, as VoxelDefinition::collision_boxes; empty
 		// for the definition's own
 		sv_<float> collision_boxes;
+		// What is pointed at, as VoxelDefinition::selection_boxes; empty
+		// for the definition's own
+		sv_<float> selection_boxes;
 	};
 
 	struct VoxelDefinition
@@ -290,6 +293,9 @@ namespace interface
 		// A variant can have its own; see VoxelVariant. Only the client's
 		// physics reads it ([VL_STAIRS]).
 		sv_<float> collision_boxes;
+		// What a pointing ray stops at and the frame is drawn round, the
+		// same way; empty is the cube ([VL_RAIL_BOXES])
+		sv_<float> selection_boxes;
 		// How much this voxel holds a body back, 0 for not at all. Luanti's
 		// own move_resistance, which defaults to liquid_viscosity: water is
 		// 1 and lava is 7, and a game can put it on anything. The client's

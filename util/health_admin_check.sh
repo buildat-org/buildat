@@ -18,6 +18,7 @@ trap check_cleanup EXIT
 serve(){
 	start_server "$1" "STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
 		-m "$here/apps/vanilla" -D "$t/srv" -C "$t/cache" -l 3 || fail "the server ($1)"
+	CHECK_PIDS+=($SERVER_PID)
 }
 admin(){ curl -s -m 5 "http://127.0.0.1:$SERVER_PORT/health" |
 	python3 -c 'import json, sys; print(json.load(sys.stdin).get("admin"))'; }

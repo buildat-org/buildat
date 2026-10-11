@@ -17,15 +17,12 @@
 --
 -- simplified, and each is a rung rather than a hole:
 --
---  * **a node is its whole cube**, not its selection boxes. A ray that
---    passes over a slab's empty top half points at the slab. The upgrade
---    path is the same box list the mesher already gets from
---    VoxelDefinition.shape.
+--  * **a node is its selection boxes** (core.get_node_boxes), each
+--    tested only while the ray is in the node's own cell: a box reaching
+--    out of its cube is cut there ([VL_RAIL_BOXES]).
 --  * **an object is its selection box, axis-aligned**, and its rotation is
 --    not applied.
---  * **intersection_point and intersection_normal** are the face the ray
---    entered by, which is right for a cube and approximate for anything
---    else; box_id is not answered at all.
+--  * **box_id** is not answered.
 
 local M = {}
 
@@ -182,7 +179,8 @@ function Raycast:next()
 			return nil
 		else
 			local x, y, z = self.x, self.y, self.z
-			local name = core.get_node({x = x, y = y, z = z}).name
+			local node = core.get_node({x = x, y = y, z = z})
+			local name = node.name
 			local def = core.registered_nodes[name]
 			local liquid = def and def.liquidtype and
 					def.liquidtype ~= "none" or false
@@ -192,17 +190,35 @@ function Raycast:next()
 				self.done = true
 				return nil
 			elseif pointable and (self.liquids or not liquid) then
-				local at = {x = self.pos1.x + self.dx * self.t,
-						y = self.pos1.y + self.dy * self.t,
-						z = self.pos1.z + self.dz * self.t}
-				local d = self.axis == "x" and self.dx or
-						self.axis == "y" and self.dy or self.dz
-				hit = {type = "node", under = vector.new(x, y, z),
-						above = vector.new(self.above.x, self.above.y,
-								self.above.z),
-						intersection_point = vector.new(at.x, at.y, at.z),
-						intersection_normal = vector.new(
-								normal_of(self.axis, d or 0))}
+				-- The nearest of its selection boxes, which Luanti's above
+				-- is the face of: the node on the other side of it
+				local boxes = core.get_node_boxes("selection_box",
+						{x = x, y = y, z = z}, node)
+				if #boxes == 0 then
+					boxes = {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}}
+				end
+				local best, axis = nil, nil
+				for _, b in ipairs(boxes) do
+					local t, a = box_entry(self.pos1.x, self.pos1.y,
+							self.pos1.z, self.dx, self.dy, self.dz,
+							{x + b[1], y + b[2], z + b[3],
+							x + b[4], y + b[5], z + b[6]}, self.length)
+					if t ~= nil and (best == nil or t < best) then
+						best, axis = t, a
+					end
+				end
+				if best ~= nil then
+					local at = {x = self.pos1.x + self.dx * best,
+							y = self.pos1.y + self.dy * best,
+							z = self.pos1.z + self.dz * best}
+					local d = axis == "x" and self.dx or
+							axis == "y" and self.dy or self.dz
+					local n = normal_of(axis, d or 0)
+					hit = {type = "node", under = vector.new(x, y, z),
+							above = vector.new(x + n.x, y + n.y, z + n.z),
+							intersection_point = vector.new(at.x, at.y, at.z),
+							intersection_normal = vector.new(n)}
+				end
 			end
 			-- On to the next node whatever this one was
 			self:advance()
@@ -215,7 +231,6 @@ end
 
 -- One step of Amanatides and Woo: the axis whose next boundary is nearest
 function Raycast:advance()
-	self.above = {x = self.x, y = self.y, z = self.z}
 	if self.tmax_x < self.tmax_y and self.tmax_x < self.tmax_z then
 		self.t = self.tmax_x
 		self.x = self.x + self.step_x
@@ -254,7 +269,6 @@ function core.raycast(pos1, pos2, objects, liquids, pointabilities)
 	self.x = math.floor(p1.x + 0.5)
 	self.y = math.floor(p1.y + 0.5)
 	self.z = math.floor(p1.z + 0.5)
-	self.above = {x = self.x, y = self.y, z = self.z}
 	local function setup(o, d, node)
 		if math.abs(d) < 1e-12 then
 			return 0, math.huge, math.huge

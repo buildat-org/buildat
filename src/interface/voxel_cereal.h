@@ -38,19 +38,22 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, VoxelVariant &v)
 	{
-		uint8_t version = 3;
+		uint8_t version = 4;
 		archive(version, v.shape, v.color, v.liquid_top, v.textures);
 		for(size_t i = 0; i < 6; i++)
 			archive(v.tile_order[i], v.tile_turns[i]);
 		// Version 3 added what stops the player ([VL_STAIRS])
 		if(version >= 3)
 			archive(v.collision_boxes);
+		// Version 4 added what is pointed at ([VL_RAIL_BOXES])
+		if(version >= 4)
+			archive(v.selection_boxes);
 	}
 
 	template<class Archive>
 			void serialize(Archive &archive, VoxelDefinition &v)
 	{
-		uint8_t version = 24;
+		uint8_t version = 25;
 		archive(
 				version,
 				v.name,
@@ -154,6 +157,10 @@ namespace interface
 		// ([VL_STAIRS])
 		if(version >= 24){
 			archive(v.collision_boxes);
+		}
+		// Version 25 added what is pointed at ([VL_RAIL_BOXES])
+		if(version >= 25){
+			archive(v.selection_boxes);
 		}
 	}
 
