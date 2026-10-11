@@ -1,12 +1,15 @@
 #!/bin/bash
 # tier: quick
-# cost: ~15 s (2026-10-11)
-# covers: src/client/app.cpp
+# cost: ~1 min (2026-10-11)
+# covers: src/client/app.cpp 3rdparty/Urho3D/Source/ThirdParty/SDL/src/video/x11/SDL_x11clipboard.c
 # [OS_CLIPBOARD]: a text field's Ctrl+V reads the OS clipboard and its
 # Ctrl+C writes it. On a headless weston of its own (the user's clipboard
 # is not touched), through its Xwayland: xclip puts "A1" on the
 # clipboard, the client pastes it into the launcher's port field, types
 # Z, selects all and copies, and the clipboard then reads "A1Z". Skips without weston and xclip.
+# [PASTE_PRIMARY]: with the clipboard empty (no owner, or owned with "")
+# the primary selection is pasted; with both holding text, the
+# clipboard's; with neither, nothing and no hang; and the copy is on both.
 # simplified: X11 only. Headless weston has no seat, so on its Wayland
 # neither wl-copy nor SDL gets a clipboard; a Wayland leg wants a
 # compositor with one (weston's x11 backend, or the user's session).
@@ -50,25 +53,42 @@ keyup ctrl
 delay 6000
 quit
 C
-# The copy is read while the client still owns the clipboard
-drive(){ # name, get command, env...
-	local name=$1 get=$2; shift 2
+# The copy is read while the client still owns the clipboard; each drive
+# starts with neither selection owned (the last client owned both, and
+# left)
+drive(){ # name, the text the copy should be, get command, env...
+	local name=$1 want=$2 get=$3; shift 3
 	env "$@" timeout 60 Build/bin/buildat -D "$t/cl_$name" -w 800x600 -l 3 \
 		-o sound_mute=1 -o launch_ui=launch_menu \
 		-a extension/launch_menu/connect -c @"$t/cmds" > "$t/$name.log" 2>&1 &
-	local pid=$! got=
+	local pid=$! got= primary=
 	CHECK_PIDS+=($pid)
 	for i in $(seq 100); do
 		got=$($get 2>/dev/null)
-		[ "$got" = A1Z ] && break
+		if [ "$got" = "$want" ]; then
+			primary=$(DISPLAY=$d xclip -selection primary -o 2>/dev/null)
+			break
+		fi
 		sleep 0.1
 		kill -0 $pid 2>/dev/null || break
 	done
 	wait $pid
-	[ "$got" = A1Z ] || fail "$name: the clipboard reads \"$got\", not A1Z ($t/$name.log)"
+	[ "$got" = "$want" ] || fail "$name: the clipboard reads \"$got\", not $want ($t/$name.log)"
+	[ "$primary" = "$want" ] || fail "$name: the primary selection reads \"$primary\" ($t/$name.log)"
 	echo "ok: $name"
 }
-DISPLAY=$d xclip -selection clipboard <<< "A1" -r
-drive x11 "env DISPLAY=$d xclip -selection clipboard -o" DISPLAY=$d \
-	WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11
-echo "PASS: Ctrl+V pastes the OS clipboard in and Ctrl+C copies out (X11)"
+x11(){ drive "$@" "env DISPLAY=$d xclip -selection clipboard -o" DISPLAY=$d \
+	WAYLAND_DISPLAY= SDL_VIDEODRIVER=x11; }
+clip(){ DISPLAY=$d xclip -selection "$1" <<< "$2" -r; }
+clip clipboard A1
+x11 x11 A1Z
+x11 neither Z
+clip primary P1
+x11 primary P1Z
+printf "" | DISPLAY=$d xclip -selection clipboard
+clip primary P2
+x11 empty_clipboard P2Z
+clip clipboard A3
+clip primary P3
+x11 both A3Z
+echo "PASS: Ctrl+V pastes the OS clipboard in, else the primary selection, and Ctrl+C copies out (X11)"

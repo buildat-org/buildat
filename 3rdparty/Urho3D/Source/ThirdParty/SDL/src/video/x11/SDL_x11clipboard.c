@@ -88,8 +88,12 @@ X11_SetClipboardText(_THIS, const char *text)
     return 0;
 }
 
-char *
-X11_GetClipboardText(_THIS)
+/* Buildat [PASTE_PRIMARY]: one selection's text, or NULL when it gives
+   none. reset_on_timeout: the CLIPBOARD read's old way out of an owner
+   that never answers, taking both selections with ""; PRIMARY's read must
+   not, or a slow owner loses its selection to an empty one. */
+static char *
+GetSelectionText(_THIS, Atom which, SDL_bool reset_on_timeout)
 {
     SDL_VideoData *videodata = (SDL_VideoData *) _this->driverdata;
     Display *display = videodata->display;
@@ -105,19 +109,17 @@ X11_GetClipboardText(_THIS)
     char *text;
     Uint32 waitStart;
     Uint32 waitElapsed;
-    Atom XA_CLIPBOARD = X11_XInternAtom(display, "CLIPBOARD", 0);
-    if (XA_CLIPBOARD == None) {
-        SDL_SetError("Couldn't access X clipboard");
-        return SDL_strdup("");
-    }
 
     text = NULL;
 
     /* Get the window that holds the selection */
     window = GetWindow(_this);
     format = TEXT_FORMAT;
-    owner = X11_XGetSelectionOwner(display, XA_CLIPBOARD);
+    owner = X11_XGetSelectionOwner(display, which);
     if (owner == None) {
+        if (which == XA_PRIMARY) {
+            return NULL;
+        }
         /* Fall back to ancient X10 cut-buffers which do not support UTF8 strings*/
         owner = DefaultRootWindow(display);
         selection = XA_CUT_BUFFER0;
@@ -129,7 +131,7 @@ X11_GetClipboardText(_THIS)
         /* Request that the selection owner copy the data to our window */
         owner = window;
         selection = X11_XInternAtom(display, "SDL_SELECTION", False);
-        X11_XConvertSelection(display, XA_CLIPBOARD, format, selection, owner,
+        X11_XConvertSelection(display, which, format, selection, owner,
             CurrentTime);
 
         /* When using synergy on Linux and when data has been put in the clipboard
@@ -146,8 +148,10 @@ X11_GetClipboardText(_THIS)
                 SDL_SetError("Clipboard timeout");
                 /* We need to set the clipboard text so that next time we won't
                    timeout, otherwise we will hang on every call to this function. */
-                X11_SetClipboardText(_this, "");
-                return SDL_strdup("");
+                if (reset_on_timeout) {
+                    X11_SetClipboardText(_this, "");
+                }
+                return NULL;
             }
         }
     }
@@ -164,7 +168,27 @@ X11_GetClipboardText(_THIS)
         }
         X11_XFree(src);
     }
+    return text;
+}
 
+char *
+X11_GetClipboardText(_THIS)
+{
+    Display *display = ((SDL_VideoData *) _this->driverdata)->display;
+    char *text;
+    Atom XA_CLIPBOARD = X11_XInternAtom(display, "CLIPBOARD", 0);
+    if (XA_CLIPBOARD == None) {
+        SDL_SetError("Couldn't access X clipboard");
+        return SDL_strdup("");
+    }
+
+    text = GetSelectionText(_this, XA_CLIPBOARD, SDL_TRUE);
+    /* Buildat [PASTE_PRIMARY]: nothing on the clipboard, the primary
+       selection's */
+    if (!text || !text[0]) {
+        SDL_free(text);
+        text = GetSelectionText(_this, XA_PRIMARY, SDL_FALSE);
+    }
     if (!text) {
         text = SDL_strdup("");
     }
