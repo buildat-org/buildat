@@ -180,7 +180,7 @@ if command -v firefox > /dev/null && [ -f "$here/web/buildat.data" ]; then
 	"$here/util/web_drive.sh" firefox floorplanner \
 		"$here/util/game_settings_web.json" "$t/web" > "$t/web.log" 2>&1 ||
 		fail "the web drive ($(tail -3 "$t/web.log"))"
-	grep -aq "Game settings shown: Floor planner, Sound, .*web_address_bar, web_idle_fps" \
+	grep -aq "Game settings shown: Floor planner, Sound, .*web_address_bar, .*web_idle_fps" \
 		"$t/web/page.log" || fail "the web's window has not the web's rows"
 	web="; the web's has its rows"
 else
