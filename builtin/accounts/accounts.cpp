@@ -2633,11 +2633,15 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// After a login: a Steward or the Host without an address is asked,
-	// unless they said never
+	// unless they said never. Not on a server the launcher started that
+	// is not open to the LAN: only this machine reaches it, so nobody is
+	// there to report anything (it came up over the pause menu of the
+	// owner's own floor plan).
 	void ntfy_ask(PeerId peer, const ss_ &name)
 	{
 		if(level(name) < LV_MODERATOR || !ntfy_get("ntfy/", name).empty() ||
-				ntfy_get("ntfy_ask/", name) == "never")
+				ntfy_get("ntfy_ask/", name) == "never" ||
+				(m_launched && !m_lan_open))
 			return;
 		send(peer, "accounts:ntfy_ask", pack(ntfy_suggest(name)));
 	}
