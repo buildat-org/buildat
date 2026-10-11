@@ -2,39 +2,56 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- **Touch controls** (user, 2026-09-30), official Luanti's
--- (src/gui/touchcontrols.cpp) with its crosshair mode (touch_use_crosshair):
--- - a finger put down at the lower left is a stick where it landed, and
---   walks;
+-- (src/gui/touchcontrols.cpp) by its defaults ([TOUCH_PARITY]):
+-- - a finger put down in the left third is a stick centred where it
+--   landed, analog: how far it is pushed is how fast one walks;
 -- - any other finger turns the view;
--- - a tap places or uses, and a finger held still digs, at the crosshair;
+-- - a tap places or uses, and a finger held still digs, at the finger
+--   (touch_interaction_style = tap; aim says where), or the other way
+--   round for an item whose touch_interaction says so (short_dig);
 -- - Jump and Sneak at the lower right are held;
 -- - Menu, Inventory, Chat and More along the top, More opening the rest:
 --   drop, fly, fast, noclip, the camera and the minimap;
--- - a tap on the hotbar picks the slot.
+-- - a tap on the hotbar picks the slot;
+-- - on an open form one finger is the left button, its press, its moves
+--   and its lift, and a second finger's tap is a right click where the
+--   first is (GUIModalMenu::preprocessEvent).
 -- One copy for both Luanti clients ([LC_TOUCH]): luanti_client loads it
 -- from its res/, vanilla as luanti/touch.lua (serve_shared_lua). The client
--- reads what this holds: held[action] is key_down()'s, dig is the
--- left button's, and yaw and pitch are degrees to turn, taken each frame.
+-- reads what this holds: held[action] is key_down()'s (the stick's four
+-- directions among them), dig is the left button's, yaw and pitch are
+-- degrees to turn, taken each frame, stick is {x, y} (right and down,
+-- 0..1 long) while a stick is held, and aim is the UI point of the last
+-- finger on the world, for a client that points there.
 --
--- simplified: the stick is digital (the four walk keys), where Luanti's is
--- analog; the dig and place are at the crosshair rather than at the tapped
--- point; a hotbar of more than one row is tapped as one.
+-- simplified: a hotbar of more than one row is tapped as one.
 --
 --   touch = <this file>(o)
 -- o: on_key(key), BIND, pause(), place(), set_wield(i), inventory(),
 --    chat(), hotbar() -> count, slot_size, margin, form_open(),
---    form_click(x, y) (a tap on an open form, in UI pixels), clutter()
+--    form_press(x, y), form_move(x, y), form_release(x, y) and
+--    form_right(x, y): a finger on an open form, in UI pixels;
+--    short_dig() (optional: a short tap digs and a long one places, the
+--    wielded item's touch_interaction for what is pointed at), clutter()
 --    (optional: the chat's Declutter toggled, -> whether it is on; a
 --    "Clutter" button in More, and T.show_clutter(on) for its look)
 local magic = require("buildat/extension/urho3d")
 local log = buildat.Logger("luanti/touch")
 
 -- How long a finger is held still before it digs, and how far it may move
--- and still be a tap: Luanti's touch_long_tap_delay and its tap slop
+-- and still be a tap: Luanti's touch_long_tap_delay and
+-- touchscreen_threshold, the latter in UI pixels (Luanti's are the
+-- screen's, which a phone's density makes about the same)
 local LONG_TAP_US = 400000
-local SLOP = 12
--- Degrees the view turns for a drag across the screen's width
-local TURN = 180
+local THRESHOLD = 20
+-- Degrees the view turns for a UI pixel: Luanti's touchscreen_sensitivity
+-- (0.2) times its 6, over the display's density, which a UI pixel already
+-- is. simplified: Luanti's field of view factor (1 at 72 degrees) is not
+-- applied.
+local TURN = 0.2 * 6
+-- How far the stick is pushed for the full speed: Luanti's button size,
+-- 65 at a density of 1
+local STICK = 65
 local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
 
 return function(o)
@@ -148,7 +165,7 @@ return function(o)
 
 	-- The stick's base and knob, where the finger landed
 	local base = magic.ui.root:CreateChild("BorderImage")
-	base:SetFixedSize(120, 120)
+	base:SetFixedSize(STICK * 2, STICK * 2)
 	base.color = magic.Color(1, 1, 1, 0.15)
 	base.priority = 49
 	base.visible = false
@@ -186,16 +203,37 @@ return function(o)
 		return nil
 	end
 
+	-- Luanti's: nothing within the threshold, the full speed at STICK and
+	-- no more past it (virtual_joystick_triggers_aux1 is off)
 	local function stick_to(f, ux, uy)
-		local r = 50
-		local dx = math.max(-1, math.min(1, (ux - f.ux0) / r))
-		local dy = math.max(-1, math.min(1, (uy - f.uy0) / r))
-		T.held.forward = dy < -0.3 or nil
-		T.held.back = dy > 0.3 or nil
-		T.held.left = dx < -0.3 or nil
-		T.held.right = dx > 0.3 or nil
-		knob:SetPosition(math.floor(f.ux0 + dx * r - 24),
-				math.floor(f.uy0 + dy * r - 24))
+		local dx, dy = ux - f.ux0, uy - f.uy0
+		local d = math.sqrt(dx * dx + dy * dy)
+		local k = d > THRESHOLD and 1 / math.max(d, STICK) or 0
+		T.stick = {x = dx * k, y = dy * k}
+		-- The four keys too, for what reads keys (the server's controls,
+		-- luanti_client's walk)
+		T.held.forward = T.stick.y < -0.3 or nil
+		T.held.back = T.stick.y > 0.3 or nil
+		T.held.left = T.stick.x < -0.3 or nil
+		T.held.right = T.stick.x > 0.3 or nil
+		local m = math.min(d, STICK) / math.max(d, 1)
+		knob:SetPosition(math.floor(f.ux0 + dx * m - 24),
+				math.floor(f.uy0 + dy * m - 24))
+	end
+
+	-- A tap's or a long press's action: a place, or a dig as short as a
+	-- click (dig_until), or one held while the finger is
+	local function tap_action(long, f)
+		local short_dig = o.short_dig ~= nil and o.short_dig() == true
+		if long == short_dig then
+			o.place()
+		elseif long then
+			f.digging = true
+			T.dig = true
+		else
+			T.dig = true
+			T.dig_until = buildat.get_time_us() + 100000
+		end
 	end
 
 	local function ui_point(x, y)
@@ -207,16 +245,28 @@ return function(o)
 	local on_touchbegin = magic.SubscribeToEvent("TouchBegin", function(_, data)
 		local id = data:GetInt("TouchID")
 		local ux, uy = ui_point(data:GetInt("X"), data:GetInt("Y"))
-		local f = {ux0 = ux, uy0 = uy, t0 = buildat.get_time_us()}
-		fingers[id] = f
-		if o.form_open() or over_buttons(ux, uy) then
-			f.ui = true
-			-- A form of Luanti's is clicked where the finger lands: the UI
-			-- sends no click of a finger's (UIMouseClick is the mouse's),
-			-- and a tap outside the form closes it
-			if o.form_open() then
-				o.form_click(ux, uy)
+		local f = {id = id, ux0 = ux, uy0 = uy, ux = ux, uy = uy,
+				t0 = buildat.get_time_us()}
+		if o.form_open() then
+			-- A form of Luanti's has the finger as the left button: the UI
+			-- sends no click of a finger's (UIMouseClick is the mouse's).
+			-- One already on it makes this the second, a right click at
+			-- the first's point when it lifts.
+			for _, g in pairs(fingers) do
+				if g.form and not g.second then
+					f.second = g
+				end
 			end
+			fingers[id] = f
+			f.form = true
+			if not f.second then
+				o.form_press(ux, uy)
+			end
+			return
+		end
+		fingers[id] = f
+		if over_buttons(ux, uy) then
+			f.ui = true
 			return
 		end
 		local slot = hotbar_slot(ux, uy)
@@ -230,30 +280,39 @@ return function(o)
 		for _, g in pairs(fingers) do
 			stick_taken = stick_taken or g.stick
 		end
-		if not stick_taken and ux < w * 0.45 and uy > h * 0.5 then
+		if not stick_taken and ux < w / 3 then
 			f.stick = true
-			base:SetPosition(math.floor(ux - 60), math.floor(uy - 60))
+			base:SetPosition(math.floor(ux - STICK), math.floor(uy - STICK))
 			base.visible, knob.visible = true, true
 			stick_to(f, ux, uy)
 			return
 		end
 		f.look = true
+		T.aim = {x = ux, y = uy}
 	end)
 
 	local on_touchmove = magic.SubscribeToEvent("TouchMove", function(_, data)
 		local f = fingers[data:GetInt("TouchID")]
-		if not f or f.ui then
+		if not f or f.ui or f.second then
 			return
 		end
 		local ux, uy = ui_point(data:GetInt("X"), data:GetInt("Y"))
+		f.ux, f.uy = ux, uy
+		if f.form then
+			if o.form_open() then
+				o.form_move(ux, uy)
+			end
+			return
+		end
 		if f.stick then
 			stick_to(f, ux, uy)
 			return
 		end
-		local w, _, sc = screen()
-		T.yaw = T.yaw + data:GetInt("DX") / sc / w * TURN
-		T.pitch = T.pitch + data:GetInt("DY") / sc / w * TURN
-		if math.abs(ux - f.ux0) > SLOP or math.abs(uy - f.uy0) > SLOP then
+		local _, _, sc = screen()
+		T.yaw = T.yaw + data:GetInt("DX") / sc * TURN
+		T.pitch = T.pitch + data:GetInt("DY") / sc * TURN
+		T.aim = {x = ux, y = uy}
+		if (ux - f.ux0) ^ 2 + (uy - f.uy0) ^ 2 > THRESHOLD ^ 2 then
 			f.moved = true
 		end
 	end)
@@ -265,22 +324,34 @@ return function(o)
 		if not f then
 			return
 		end
-		if f.stick then
+		if f.second then
+			-- Over the form still, with the first finger still down
+			if o.form_open() and fingers[f.second.id] == f.second then
+				o.form_right(f.second.ux, f.second.uy)
+			end
+		elseif f.form then
+			if o.form_open() then
+				local ux, uy = ui_point(data:GetInt("X"), data:GetInt("Y"))
+				o.form_release(ux, uy)
+			end
+		elseif f.stick then
 			T.held.forward, T.held.back = nil, nil
 			T.held.left, T.held.right = nil, nil
+			T.stick = nil
 			base.visible, knob.visible = false, false
 		elseif f.look then
 			if f.digging then
 				T.dig = false
-			elseif not f.moved and not o.form_open() then
-				o.place()
+			elseif not f.moved and not f.long and not o.form_open() then
+				tap_action(false, f)
 			end
 		end
 		-- A held button whose release was never seen (the finger slid
 		-- off it) is let go with the last finger
 		if next(fingers) == nil then
 			T.held.jump, T.held.sneak = nil, nil
-			T.dig = false
+			-- A short tap's dig ends on its own
+			T.dig = T.dig_until ~= nil
 		end
 	end)
 
@@ -290,11 +361,14 @@ return function(o)
 	local on_update = magic.SubscribeToEvent("Update", function()
 		local now = buildat.get_time_us()
 		for _, f in pairs(fingers) do
-			if f.look and not f.moved and not f.digging and
+			if f.look and not f.moved and not f.long and
 					now - f.t0 > LONG_TAP_US then
-				f.digging = true
-				T.dig = true
+				f.long = true
+				tap_action(true, f)
 			end
+		end
+		if T.dig_until and now >= T.dig_until then
+			T.dig, T.dig_until = false, nil
 		end
 		local want = not o.form_open()
 		if want ~= shown then

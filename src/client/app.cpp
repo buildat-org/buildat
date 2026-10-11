@@ -2401,12 +2401,16 @@ struct CApp: public App, public magic::Application
 		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
 		// The mouse as a finger under BUILDAT_TOUCH=1, for a person trying
 		// the touch UI by hand; a scripted run keeps its mouse and has
-		// finger_* for touches ([HEARTH_USABILITY])
+		// finger_* for touches ([HEARTH_USABILITY]). Not on the web: its
+		// fingers are real, and SDL's mouse made from each one became a
+		// second finger ([TOUCH_PARITY])
+#ifndef __EMSCRIPTEN__
 		{
 			const char *touch = getenv("BUILDAT_TOUCH");
 			if(touch && touch[0] == '1' && !m_command_seq_active)
 				GetSubsystem<magic::Input>()->SetTouchEmulation(true);
 		}
+#endif
 
 		boot_launcher();
 

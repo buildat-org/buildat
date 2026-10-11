@@ -3100,7 +3100,8 @@ local function draw_hud(elements, flags)
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
 	hud_r.root.visible = hud_shown
-	crosshair.visible = hud_shown and luanti.hud_flag("crosshair")
+	crosshair.visible = hud_shown and luanti.hud_flag("crosshair") and
+			not (keys.touch and not keys.touch_crosshair)
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
 	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
 	draw_hotbar()
@@ -3248,9 +3249,33 @@ end
 -- How far it reaches is what the player is holding reaches: Luanti's
 -- getToolRange(), which luanti.dig_range() answers, bounded by what this
 -- march can afford.
+-- Where the pointing ray goes: the camera's way, or on a touchscreen in
+-- Luanti's tap style through the last finger on the world
+-- ([TOUCH_PARITY]; Luanti's getShootline). simplified: the view bobbing's
+-- roll is left out of the finger's ray.
+keys.point_dir = function()
+	local t = keys.touch
+	if not t or not t.aim or keys.touch_crosshair then
+		return camera_node.worldDirection
+	end
+	local w, h = magic.ui.root.width, magic.ui.root.height
+	local th = math.tan(math.rad(((camera and camera.fov) or CAMERA_FOV) / 2))
+	-- The finger's point on a plane a unit ahead, turned by the pitch and
+	-- then the yaw as the camera's rotation is
+	local a = (2 * t.aim.x / w - 1) * th * w / h
+	local b = (1 - 2 * t.aim.y / h) * th
+	local p, y = math.rad(pitch), math.rad(yaw)
+	local y1 = b * math.cos(p) - math.sin(p)
+	local z1 = b * math.sin(p) + math.cos(p)
+	local x2 = a * math.cos(y) + z1 * math.sin(y)
+	local z2 = z1 * math.cos(y) - a * math.sin(y)
+	local l = math.sqrt(x2 * x2 + y1 * y1 + z2 * z2)
+	return magic.Vector3(x2 / l, y1 / l, z2 / l)
+end
+
 local function find_pointed_voxel()
 	local p0 = buildat.Vector3(camera_node.worldPosition)
-	local dir = buildat.Vector3(camera_node.worldDirection)
+	local dir = buildat.Vector3(keys.point_dir())
 	local last = nil
 	local range = math.min(POINT_RANGE, luanti.dig_range(wield_index))
 	for i = 1, math.floor(range / POINT_STEP) do
@@ -4008,7 +4033,7 @@ function frame_peak.update(dt)
 	-- map's, and the dig and the place below send it as they send any
 	do
 		local eye = camera_node.worldPosition
-		local dir = camera_node.worldDirection
+		local dir = keys.point_dir()
 		local reach = pointed_p and (buildat.Vector3(eye.x, eye.y, eye.z) -
 				pointed_p):length() or
 				math.min(POINT_RANGE, luanti.dig_range(wield_index))
@@ -4023,13 +4048,19 @@ function frame_peak.update(dt)
 	-- simplified: the frame's bars scale with it, thicker on a big box
 	do
 		local eye = camera_node.worldPosition
-		local dir = camera_node.worldDirection
+		local dir = keys.point_dir()
 		local reach = math.min(POINT_RANGE, luanti.dig_range(wield_index))
 		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
 				dir.x, dir.y, dir.z, reach)
 		pointed_obj = id and (pointed_p == nil or distance <
 				(buildat.Vector3(eye.x, eye.y, eye.z) - pointed_p):length()) and
 				id or nil
+	end
+	-- A finger's place, at what this frame points at: a tap's begin and
+	-- end can come in one frame, before the ray went through it
+	if keys.touch_place then
+		keys.touch_place = nil
+		keys.place_now()
 	end
 	local lo, hi = nil, nil
 	if pointed_obj then
@@ -4097,10 +4128,18 @@ function frame_peak.update(dt)
 			wish.x = wish.x + x
 			wish.z = wish.z + z
 		end
-		if key_down("forward") then walk(fx, fz) end
-		if key_down("back") then walk(-fx, -fz) end
-		if key_down("right") then walk(fz, -fx) end
-		if key_down("left") then walk(-fz, fx) end
+		local stick = keys.touch and keys.touch.stick
+		if stick and (stick.x ~= 0 or stick.y ~= 0) then
+			-- Luanti's analog stick: its direction, and its length
+			-- (0..1) the speed
+			walk(-stick.y * fx + stick.x * fz, -stick.y * fz - stick.x * fx)
+			wish.speed = math.sqrt(stick.x * stick.x + stick.y * stick.y)
+		else
+			if key_down("forward") then walk(fx, fz) end
+			if key_down("back") then walk(-fx, -fz) end
+			if key_down("right") then walk(fz, -fx) end
+			if key_down("left") then walk(-fz, fx) end
+		end
 		wish.jump = key_down("jump")
 		wish.sneak = key_down("sneak")
 		-- The modes as official's LocalPlayer has them ([FLY_MODES]):
@@ -4378,7 +4417,7 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		on_key = keys.on_key,
 		BIND = BIND,
 		pause = open_pause_menu,
-		place = keys.place_now,
+		place = function() keys.touch_place = true end,
 		set_wield = set_wield,
 		inventory = function() keys.on_key(BIND.inventory.key) end,
 		chat = function() keys.open_chat() end,
@@ -4387,12 +4426,37 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
 		end,
 		form_open = luanti.form_open,
-		form_click = function(x, y)
-			if luanti.form_window() then
-				luanti.click(x, y, "left")
-			end
+		-- The finger as the mouse's left button on a form: the press
+		-- picks up, the moves carry (and drag a scrollbar's thumb), the
+		-- lift puts down, a second finger's tap is a right click
+		form_press = function(x, y)
+			luanti.hover(x, y, true)
+			luanti.click(x, y, "left", true)
+		end,
+		form_move = function(x, y) luanti.hover(x, y, true) end,
+		form_release = function(x, y)
+			luanti.hover(x, y, false)
+			luanti.release("left")
+		end,
+		form_right = function(x, y) luanti.click(x, y, "right", true) end,
+		-- The wielded item's touch_interaction for what is pointed at
+		short_dig = function()
+			local held = parse_stack(hotbar_stacks[wield_index])
+			return luanti.short_dig(held and held.name or "",
+					pointed_obj and "object" or pointed_p and "node" or
+					"nothing")
 		end,
 	})
+	-- Luanti's touch_interaction_style: tap (at the finger) unless the
+	-- player chose the crosshair
+	keys.touch_crosshair = buildat.storage_read("touch_crosshair") == "1"
+	keys.settings_sections = {{title = "Touch", draw = function(_, ui)
+		ui.toggle("Interaction at the crosshair", keys.touch_crosshair,
+				function(on)
+			keys.touch_crosshair = on
+			buildat.storage_write("touch_crosshair", on and "1" or "")
+		end)
+	end}}
 	-- And Luanti's Android autojump: a node's step is walked up without
 	-- the Jump button
 	player.autojump = true

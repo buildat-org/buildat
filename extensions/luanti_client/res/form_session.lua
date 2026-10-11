@@ -50,6 +50,7 @@ function M.new(env)
 	local tooltip_over, tooltip_wait = nil, 0
 	local key_cb = nil
 	local last_click = nil -- {x, y, button, us}, for the double click
+	local last_outside = nil -- {x, y, us}, a finger's first tap off the form
 	local held_element, held_key, held_size = nil, nil, 32
 
 	local function form_fields()
@@ -366,8 +367,9 @@ function M.new(env)
 
 	-- A click at x, y in the root's coordinates, with "left", "right" or
 	-- "middle". Returns whether the form took it, so that one that was not
-	-- on a form still digs.
-	function self:click(x, y, button)
+	-- on a form still digs. touch: a finger's, which closes the form off it
+	-- only as the second of a double tap.
+	function self:click(x, y, button, touch)
 		local form = self.form
 		if not form or not form.drawn then
 			return false
@@ -504,7 +506,18 @@ function M.new(env)
 		end
 		-- **Outside it, the form closes** as Luanti's does, unless it says
 		-- allow_close[false] (a death screen): on a touchscreen that is the
-		-- one way out, having no Escape (user, 2026-09-30)
+		-- one way out, having no Escape (user, 2026-09-30). A finger's
+		-- closes it on a double tap, Luanti's (GUIModalMenu: 400 ms, 30 px):
+		-- one tap that missed a slot is not a way out ([TOUCH_PARITY]).
+		if touch then
+			local first = last_outside
+			last_outside = {x, y, now}
+			if not (first and now - first[3] < 400000 and
+					(x - first[1]) ^ 2 + (y - first[2]) ^ 2 < 900) then
+				return true
+			end
+			last_outside = nil
+		end
 		if not form.spec:find("allow_close%[false%]") then
 			self:close(true)
 		end

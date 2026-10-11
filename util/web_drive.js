@@ -26,7 +26,9 @@
 //                           pointer, so a "mouse" step there goes first or
 //                           the UI looks for what is under the old one
 //   ["tap", x, y]           a finger's touch there and up again
-//   ["hold", x, y, ms]      a finger held still there for ms (Firefox only)
+//   ["tap", x, y, n]        n taps there with nothing awaited between,
+//                           a double tap in time (Chrome only)
+//   ["hold", x, y, ms]      a finger held still there for ms
 //   ["drag", x0, y0, x1, y1, "touch"]
 //                           the left button (or a finger) down at x0, y0,
 //                           moved to x1, y1 over half a second, and up
@@ -43,6 +45,11 @@
 //                           two fingers down at a and b, moved together to
 //                           their second places over half a second, and up:
 //                           a pinch, a two-finger scroll (Chrome only)
+//   ["carry", ax0, ay0, ax1, ay1, bx, by, ax2, ay2]
+//                           a finger down at a0 and moved to a1, a second
+//                           one tapped at b while it is there, the first
+//                           moved on to a2 and up: Luanti's right click
+//                           while a stack is carried (Chrome only)
 //   ["viewport", w, h]      the page that size from here on, as a phone's
 //                           on-screen keyboard makes it (Chrome only)
 // ${NAME} in a string is a --var's value. The page's console goes to the
@@ -292,16 +299,48 @@ async function chrome() {
 				x, y}),
 		wheel: (x, y, dy) => c.send("Input.dispatchMouseEvent", {
 				type: "mouseWheel", x, y, deltaX: 0, deltaY: dy}),
-		tap: async (x, y) => {
-			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
-					touchPoints: [{x, y}]});
-			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
-					touchPoints: []});
-		},
+		tap: (x, y, n = 1) => Promise.all(Array.from({length: n}, () => [
+			c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: [{x, y}]}),
+			c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: []})]).flat()),
 		file: p => {
 			if (!fs.existsSync(p))
 				throw new Error("no file " + p);
 			file = p;
+		},
+		hold: async (x, y, ms) => {
+			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: [{x, y}]});
+			await new Promise(r => setTimeout(r, ms));
+			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: []});
+		},
+		carry: async (ax0, ay0, ax1, ay1, bx, by, ax2, ay2) => {
+			const move = async (x0, y0, x1, y1, extra) => {
+				for (let i = 1; i <= 5; i++) {
+					await new Promise(r => setTimeout(r, 50));
+					await c.send("Input.dispatchTouchEvent", {type: "touchMove",
+							touchPoints: [{x: x0 + (x1 - x0) * i / 5,
+								y: y0 + (y1 - y0) * i / 5, id: 1}, ...extra]});
+				}
+			};
+			const a1 = {x: ax1, y: ay1, id: 1};
+			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: [{x: ax0, y: ay0, id: 1}]});
+			await move(ax0, ay0, ax1, ay1, []);
+			await new Promise(r => setTimeout(r, 300));
+			await c.send("Input.dispatchTouchEvent", {type: "touchStart",
+					touchPoints: [a1, {x: bx, y: by, id: 2}]});
+			await new Promise(r => setTimeout(r, 100));
+			// touchEnd's points are the ones that lift
+			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: [{x: bx, y: by, id: 2}]});
+			await new Promise(r => setTimeout(r, 500));
+			await move(ax1, ay1, ax2, ay2, []);
+			await new Promise(r => setTimeout(r, 300));
+			await c.send("Input.dispatchTouchEvent", {type: "touchEnd",
+					touchPoints: []});
 		},
 		// One finger; a mouse drag is not here yet
 		drag: (x0, y0, x1, y1) => ops.fingers(x0, y0, null, null, x1, y1),

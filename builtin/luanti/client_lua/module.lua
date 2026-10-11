@@ -2974,6 +2974,8 @@ local node_post_effect = {}
 -- What a client predicts the server will do with a dig or a place of the
 -- named item ([PREDICTION]); a "d" record of luanti:dig_props
 local predictions = {}
+-- A short tap digs with these, by what is pointed at (M.short_dig)
+local touch_modes = {}
 
 local function split_tab(s)
 	local fields = {}
@@ -3079,6 +3081,14 @@ end
 -- placed_param2, walkable}. See core.__dig_props().
 function M.prediction(name)
 	return predictions[name]
+end
+
+-- Whether a short tap digs (and a long one places) with this item in hand,
+-- pointed at kind: "nothing", "node" or "object" ([TOUCH_PARITY]; the
+-- item's touch_interaction, dig.lua's t record)
+function M.short_dig(name, kind)
+	local i = kind == "nothing" and 1 or kind == "node" and 2 or 3
+	return (touch_modes[name] or "lls"):sub(i, i) == "s"
 end
 
 function M.post_effect_of(node_name)
@@ -3488,9 +3498,9 @@ end
 
 -- A click, from whoever is reading the mouse: "left", "right" or
 -- "middle". Returns whether the form took it, so that a click that was not
--- on one still digs.
-function M.click(x, y, button)
-	return S():click(x, y, button)
+-- on one still digs. touch: a finger's (form_session's click).
+function M.click(x, y, button, touch)
+	return S():click(x, y, button, touch)
 end
 
 -- Escape closes it, which is the player closing it
@@ -3565,6 +3575,8 @@ startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
 		elseif fields[1] == "n" then
 			parse_node_record(fields)
 			nodes = nodes + 1
+		elseif fields[1] == "t" then
+			touch_modes[fields[2]] = fields[3]
 		elseif fields[1] == "d" then
 			preds = preds + 1
 			local flags = fields[5] or ""

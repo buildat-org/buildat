@@ -3621,11 +3621,28 @@ local function show_client(host, port, name, password, mode, origin)
 				-- The chat line is a form to the fingers: a tap on its
 				-- boxes (Send, Cancel, Declutter), no look and no place
 				form_open = function() return form_on() or chat_input ~= nil end,
-				form_click = function(x, y)
+				form_press = function(x, y)
 					if chat_input then
 						chat_click(x, y)
 					else
-						session:click(x, y, "left")
+						session:hover(x, y, true)
+						session:click(x, y, "left", true)
+					end
+				end,
+				form_move = function(x, y)
+					if not chat_input then
+						session:hover(x, y, true)
+					end
+				end,
+				form_release = function(x, y)
+					if not chat_input then
+						session:hover(x, y, false)
+						session:release("left")
+					end
+				end,
+				form_right = function(x, y)
+					if not chat_input then
+						session:click(x, y, "right", true)
 					end
 				end,
 				clutter = function()

@@ -298,6 +298,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 
 	-- One step of the player's own physics. wish is what the keys say:
 	--   x, z    the direction to walk in, in world coordinates, any length
+	--   speed   optional, 0..1 of the speed: a touchscreen's analog stick
 	--   jump    up, and out of the water
 	--   sneak   down when flying, slower on the ground
 	--   fast    the fast speed and the fast acceleration
@@ -394,8 +395,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local len = math.sqrt(wish.x * wish.x + wish.z * wish.z)
 		local target_x, target_z = 0, 0
 		if len > 0 then
-			target_x = wish.x / len * speed
-			target_z = wish.z / len * speed
+			local h = speed * math.min(1, wish.speed or 1)
+			target_x = wish.x / len * h
+			target_z = wish.z / len * h
 		end
 		-- Which acceleration, as applyControl() picks it: the air's when
 		-- off the ground with nothing holding the player (or at the

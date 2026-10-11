@@ -168,7 +168,8 @@ open = function()
 	if buildat.show_game_settings then
 		accounts.page_button(w, "Settings...", function()
 			page(function()
-				buildat.show_game_settings{on_close = function()
+				buildat.show_game_settings{sections = o.keys.settings_sections,
+						on_close = function()
 					o.keys.declare()
 					later(open)
 				end}

@@ -262,6 +262,7 @@ end
 --      <group>:<maxlevel>:<uses>:<rating>=<time>,<rating>=<time> ...
 --   n <name> <group>=<rating>,<group>=<rating>
 --   d <name> <node_placement_prediction> <node_dig_prediction> <flags>
+--   t <name> <modes>
 --
 -- The d record is what a client predicts with ([PREDICTION]): the item's
 -- placement prediction (Luanti's default, the item's own node for a node
@@ -272,6 +273,12 @@ end
 -- works out from the look, which is left to the server) and "w"
 -- (walkable, which is not predicted into the player's own box). Items whose
 -- record would say nothing -- no node, no prediction -- have none.
+--
+-- The t record is the item's touch_interaction ([TOUCH_PARITY]), resolved
+-- as Luanti's client resolves "user": three letters for pointed_nothing,
+-- pointed_node and pointed_object, "l" a long tap digs and a short one
+-- places, "s" the other way round. Only an item that differs from "lls"
+-- (no touch_interaction and no on_use) has one.
 --
 -- An item with no tool_capabilities has an empty fourth field and no
 -- groupcap fields after it, which is what says it has none: the hand's are
@@ -324,6 +331,22 @@ function core.__dig_props()
 			end
 		end
 		out[#out + 1] = table.concat(fields, "\t")
+	end
+	for name, def in pairs(core.registered_items) do
+		local ti = def.touch_interaction
+		local modes = ""
+		for _, kind in ipairs({"nothing", "node", "object"}) do
+			local m = type(ti) == "table" and ti["pointed_" .. kind] or ti
+			if m ~= "long_dig_short_place" and m ~= "short_dig_long_place" then
+				-- "user": a punch by a short tap, for an item that punches
+				m = kind == "object" and def.on_use == nil and
+						"short_dig_long_place" or "long_dig_short_place"
+			end
+			modes = modes .. m:sub(1, 1)
+		end
+		if modes ~= "lls" then
+			out[#out + 1] = "t\t" .. name .. "\t" .. modes
+		end
 	end
 	local placed_param2 = {facedir = true, wallmounted = true,
 			colorfacedir = true, colorwallmounted = true, ["4dir"] = true,
