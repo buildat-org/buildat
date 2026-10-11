@@ -161,6 +161,27 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			.forEach(function(e){
 		window.addEventListener(e, input, {capture: true, passive: true});
 	});
+	// **A turn's new size** ([ROTATE_ASPECT]): SDL reads the canvas's CSS
+	// size at the window's resize, and on a phone the resize of a turn can
+	// come before the page is laid out again: the old size was read, the
+	// drawing buffer kept it stretched to the new shape, and nothing came
+	// after. So once laid out, the window is told again (SDL does nothing
+	// for a size it has).
+	function resize_again(){
+		requestAnimationFrame(function(){
+			requestAnimationFrame(function(){
+				window.dispatchEvent(new Event('resize'));
+			});
+		});
+		setTimeout(function(){ window.dispatchEvent(new Event('resize')); }, 300);
+	}
+	window.addEventListener('orientationchange', resize_again);
+	if(screen.orientation && screen.orientation.addEventListener)
+		screen.orientation.addEventListener('change', resize_again);
+	window.addEventListener('resize', function(e){
+		if(e.isTrusted)
+			resize_again();
+	});
 	// **Fullscreen on a touchscreen while the game wants it** (user,
 	// 2026-09-30): a phone browser's address bar covers a page that does
 	// not scroll, and only fullscreen puts it away. A game says when, with
