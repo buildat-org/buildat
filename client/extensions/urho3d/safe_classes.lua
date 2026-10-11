@@ -2970,6 +2970,10 @@ function M.define(dst, util)
 				end),
 			IsMouseVisible = util.self_function("IsMouseVisible", {"boolean"},
 					{"Input"}),
+			-- Whether the pointer is held: on the web the browser's lock
+			-- ([WEB_LOCK_LOST])
+			IsMouseLocked = util.self_function("IsMouseLocked", {"boolean"},
+					{"Input"}),
 			-- A key's name and back, for a bindings file a person can read
 			-- ([KEY_BINDINGS])
 			GetKeyName = util.self_function("GetKeyName", {"string"}, {"Input", "number"}),

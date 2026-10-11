@@ -302,6 +302,33 @@ do
 				reason or "set_mouse_in_world")
 		keys.web_lock(enable)
 	end
+	-- **A lost lock pauses** ([WEB_LOCK_LOST], user, 2026-10-11: a form
+	-- closed by Escape let go of the mouse and the view spun): on the web
+	-- the mouse turns the view only while the browser holds the pointer,
+	-- and when the world has the mouse with no lock and nothing is up over
+	-- it, the pause menu opens, whose Continue or a click off it is the
+	-- click a lock is granted for. Lost: at once; asked for and not given
+	-- (a form closed by Escape asks, and the browser refuses): in 0.5 s.
+	-- simplified: the refusal is waited out, not read from the request's
+	-- promise
+	keys.mouse_held = function()
+		return not web or keys.touch ~= nil or magic.input:IsMouseLocked()
+	end
+	local was_locked, unlocked_s = false, 0
+	magic.SubscribeToEvent("Update", function(_, d)
+		if not web or keys.touch or not mouse_in_world or luanti.form_open() or
+				luanti.held() or magic.input:IsMouseLocked() then
+			was_locked, unlocked_s = magic.input:IsMouseLocked(), 0
+			return
+		end
+		unlocked_s = unlocked_s + d:GetFloat("TimeStep")
+		if was_locked or unlocked_s > 0.5 then
+			log:info("the pointer lock is not held: paused (" ..
+					(was_locked and "lost" or "not given") .. ")")
+			was_locked, unlocked_s = false, 0
+			keys.open_pause()
+		end
+	end)
 	magic.SubscribeToEvent("Update", function()
 		local open = luanti.form_open()
 		if open == was_open then
@@ -4128,7 +4155,8 @@ function frame_peak.update(dt)
 	local playing = (mouse_in_world or keys.touch) and
 			not luanti.form_open() and chat_input == nil
 	if playing then
-		local dmouse = magic.input:GetMouseMove()
+		local dmouse = keys.mouse_held() and magic.input:GetMouseMove() or
+				{x = 0, y = 0}
 		if keys.touch then
 			dmouse = {x = 0, y = 0}
 			yaw, pitch = yaw + keys.touch.yaw, pitch + keys.touch.pitch

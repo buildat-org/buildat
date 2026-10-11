@@ -904,6 +904,11 @@ local function show_client(host, port, name, password, mode, origin)
 						magic.MM_RELATIVE or magic.MM_ABSOLUTE)
 			end
 		end
+		-- **A lost lock pauses** ([WEB_LOCK_LOST], as vanilla's): on the web
+		-- the mouse turns the view only while the browser holds the
+		-- pointer, and with no lock and nothing over the game the pause
+		-- menu opens; lost: at once, asked for and not given: in 0.5 s
+		local lock = {was = false, unlocked_s = 0}
 		-- Whether the form was drawn with a texture that had not arrived
 		local form_missed = false
 
@@ -2697,6 +2702,7 @@ local function show_client(host, port, name, password, mode, origin)
 				end
 			end
 			if form_on() or chat_input or screen_above then
+				lock.was, lock.unlocked_s = false, 0
 				client:set_position(avatar.x, avatar.y, avatar.z)
 				client:set_motion(0, 0, 0, 0)
 				-- A drag on what is over the game turns nothing later
@@ -2706,6 +2712,21 @@ local function show_client(host, port, name, password, mode, origin)
 				return
 			end
 			local dmouse = magic.input:GetMouseMove()
+			if web and not settings.touch then
+				local held = magic.input:IsMouseLocked()
+				if held then
+					lock.was, lock.unlocked_s = true, 0
+				else
+					dmouse = {x = 0, y = 0}
+					lock.unlocked_s = lock.unlocked_s + dtime
+					if lock.was or lock.unlocked_s > 0.5 then
+						log:info("the pointer lock is not held: paused (" ..
+								(lock.was and "lost" or "not given") .. ")")
+						lock.was, lock.unlocked_s = false, 0
+						open_pause_menu()
+					end
+				end
+			end
 			-- A touchscreen's finger turns the head (res/touch.lua), in
 			-- degrees; the mouse SDL makes of it does not
 			local touch = settings.touch
