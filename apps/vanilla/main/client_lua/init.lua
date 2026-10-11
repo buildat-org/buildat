@@ -1184,6 +1184,7 @@ local leave_button = nil
 local function load_wait_end()
 	wait_text:SetText("")
 	load_wait = nil
+	log:info("load: the world is in")
 	if leave_button then
 		leave_button:Remove()
 		leave_button = nil

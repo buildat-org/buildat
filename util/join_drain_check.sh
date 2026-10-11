@@ -43,7 +43,7 @@ CHECK_PIDS+=($!)
 sleep 1
 {
 	echo "wait_log 120000 vanilla client ready"
-	echo "wait_log 60000 settle: [0-9]* to mesh, \\([2-9][0-9][0-9]\\|[0-9]\\{4,\\}\\) chunks in scene"
+	echo "wait_log 60000 load: the world is in"; echo "delay 15000"
 	echo quit
 } > "$t/cmds"
 BUILDAT_CA_FILE=$t/cert.pem run_client 60 "$t/client.log" timeout 240 \

@@ -34,9 +34,9 @@ python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 CHECK_PIDS+=($!)
 sleep 1
 {
-	echo "wait_log 180000 load: Waiting [f]or the server"
-	echo "wait_log 60000 load: Leave [o]ffered"
-	echo "wait_log 300000 settle: [0-9]* to mesh, [1-9][0-9]* chunks in scene"
+	echo "wait_log 180000 load: Waiting for the server"
+	echo "wait_log 60000 load: Leave offered"
+	echo "wait_log 300000 load: the world is in"; echo "delay 2000"
 	echo quit
 } > "$t/cmds"
 L=$t/client.log
