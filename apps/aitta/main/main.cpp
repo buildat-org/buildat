@@ -625,13 +625,14 @@ struct Module: public interface::Module, public moderation::Host
 					url_encode(pkg))+"\" rel=\"nofollow noopener\">Host at "+
 					html(domain)+"</a>");
 		}
+		// [AITTA_HTML_FOLDS] Each on a line of its own
 		ss_ o;
 		for(const ss_ &x : out)
-			o += (o.empty() ? "" : " ")+x;
+			o += (o.empty() ? "" : "<br>")+x;
 		return o;
 	}
 
-	// links: outside_links()'s, by the files' links
+	// links: outside_links()'s, under the files' links
 	static ss_ release_box(const json::Value &rel, bool latest,
 			const ss_ &links = "")
 	{
@@ -661,8 +662,6 @@ struct Module: public interface::Module, public moderation::Host
 				html(jstr(rel, "license_media"))+"</span><br>"
 				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
 				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
-		if(!links.empty())
-			b += " "+links;
 		// Its discussion at its home Hearth, as the client's "Discuss"
 		const ss_ home = jstr(rel, "home_hearth");
 		if(home.compare(0, 8, "https://") == 0 ||
@@ -670,6 +669,9 @@ struct Module: public interface::Module, public moderation::Host
 			b += " <a href=\""+html(home.back() == '/' ? home.substr(0,
 					home.size() - 1) : home)+"/p/"+html(pkg)+"\" "
 					"rel=\"nofollow noopener\">Discuss</a>";
+		// [AITTA_HTML_FOLDS] Under the files' links, a line each
+		if(!links.empty())
+			b += "<br>"+links;
 		return b+"</div>\n";
 	}
 
@@ -817,9 +819,10 @@ struct Module: public interface::Module, public moderation::Host
 					html(want)+" &lt;port&gt; &lt;user dir&gt;</pre><pre>"+
 					html(vers)+"</pre></div></details>\n";
 			// [AITTA_REPORTS] A report from the web: anonymous, so it
-			// weighs little alone
-			ss_ f = "<h2>Report</h2><form method=\"post\" action=\""
-					"/api/aitta/report\"><p><select name=\"release\">";
+			// weighs little alone. [AITTA_HTML_FOLDS] Folded: a visitor is
+			// seldom here to report
+			ss_ f = "<details><summary>Report</summary><form method=\"post\" "
+					"action=\"/api/aitta/report\"><p><select name=\"release\">";
 			for(const json::Value &rel : rels)
 				if(pkg(rel) == want)
 					f += "<option>"+html(pkg(rel)+"/"+jstr(rel, "version"))+
@@ -834,7 +837,7 @@ struct Module: public interface::Module, public moderation::Host
 			f += "</select></p><p><textarea name=\"text\" maxlength=\"2000\" "
 					"rows=\"3\" cols=\"60\" placeholder=\"What is wrong "
 					"(optional)\"></textarea></p><p><button>Send the report"
-					"</button></p></form>\n";
+					"</button></p></form></details>\n";
 			// [PACKAGE_MEDIA] The newest's icon by the heading;
 			// [AITTA_PACKAGE_PAGE] its description, its screenshot and
 			// the page's, each a link to the image, the page's text

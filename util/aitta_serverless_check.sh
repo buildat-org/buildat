@@ -17,7 +17,8 @@
 #      app_hosting_provider = https://host.example/new set, the apps'
 #      boxes and pages link "Host at host.example" with this Aitta's
 #      address and the package, URL-encoded, nofollow, after Play in the
-#      browser; the extension's do not.
+#      browser on a line of its own; the extension's do not. The package
+#      page's Report folded in a closed <details> ([AITTA_HTML_FOLDS]).
 #
 #   util/aitta_serverless_check.sh
 set -u
@@ -139,11 +140,17 @@ for name in ("sl", "other"):
 assert "Host at" not in boxes["tester/ext"]
 sl = boxes["tester/sl"]
 assert sl.index("Play in the browser") < sl.index("Host at"), "not after Play"
+# [AITTA_HTML_FOLDS] A line each, the first under the files' links
+assert "Play in the browser</a><br><a href=\"https://host.example/" in sl, sl
+assert ".sig</a><br><a" in sl, sl
 h, i = page.index("</h1>"), page.index("<h2>Install</h2>")
 l = link % (sys.argv[4], "other")
 assert 0 <= page.find(l, h) < page.index('<div class="box">'), "not under the heading"
 assert 0 <= page.find(l, i) < page.index("<details>", i), "not first under Install"
 assert "Host at" not in epage
+# The Report form folded, closed
+r = page.index("<details><summary>Report</summary><form")
+assert page.index("</form></details>", r) > r
 EOF
 echo "ok: Host at, on the apps only, only when set"
 echo "PASS"

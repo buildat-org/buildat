@@ -182,7 +182,7 @@ order = ["</b> 1.0.2 ", "<details><summary>Older releases (2)</summary>",
 	"Apps from Aitta (unreviewed): shown", "</details>",
 	"<details><summary>On a dedicated server</summary>",
 	"bin/buildat aitta install " + self + " tester/pt &lt;user dir&gt;",
-	"tester/pt@1.0.0", "</details>", "<h2>Report</h2>"]
+	"tester/pt@1.0.0", "</details>", "<details><summary>Report</summary><form", "</form></details>"]
 at = 0
 for x in order:
 	i = s.find(x, at)
