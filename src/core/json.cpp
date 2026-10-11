@@ -475,9 +475,14 @@ std::string json::Value::stringify(int flags) const {
 				f = 0.0;
 			else if(std::isinf(f))
 				f = (f >= 0) ?  DBL_MAX : DBL_MIN;
-			// Convert to string
+			// Convert to string. A whole number (a time in ms, which the
+			// parser reads as a double past int32) exactly: six digits
+			// would round Aitta's page time up past the next page's
 			std::ostringstream os(std::ios::binary);
-			os<<value.f;
+			if(f == std::floor(f) && std::fabs(f) < 9007199254740992.0)
+				os<<(int64_t)f;
+			else
+				os<<f;
 			return os.str();
 		}
 	case T_STRING:
