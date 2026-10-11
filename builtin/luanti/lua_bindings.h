@@ -190,6 +190,9 @@
 		luaL_checktype(L, 7, LUA_TTABLE);
 		const bool has_p1 = !lua_isnoneornil(L, 8);
 		const bool has_p2 = !lua_isnoneornil(L, 9);
+		// write_to_map(false): the param1 is the light, a 0 included
+		// ([WIELDLIGHT_STALE]); see voxelworld's set_volume()
+		const bool exact_light = has_p1 && lua_toboolean(L, 10);
 		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2] ||
 				!box_ok(p[0], p[1], p[2], p[3], p[4], p[5]))
 			return 0;
@@ -259,7 +262,7 @@
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
 			world->set_cause(self->m_by_player ? "a player" : "");
-			world->set_volume(vol, true);
+			world->set_volume(vol, true, exact_light);
 			world->set_cause("");
 		});
 		return 0;

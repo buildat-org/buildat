@@ -54,6 +54,27 @@ function VoxelManipRef:read_from_map(p1, p2)
 	return self.emin, self.emax
 end
 
+-- Luanti 5.13's: the box cleared and resized, every node `node` or
+-- ignore. vl_wieldlight moves its manipulator this way to the player's
+-- new place after a jump of more than 16 voxels; without it the mod
+-- stopped there on every step and its light stayed where it had been.
+function VoxelManipRef:initialize(p1, p2, node)
+	local x1, y1, z1, x2, y2, z2 = sorted_box(p1, p2)
+	self.emin = {x = x1, y = y1, z = z1}
+	self.emax = {x = x2, y = y2, z = z2}
+	self.ystride = x2 - x1 + 1
+	self.zstride = (x2 - x1 + 1) * (y2 - y1 + 1)
+	local id = node and core.get_content_id(node.name) or core.CONTENT_IGNORE
+	local p1v, p2v = node and node.param1 or 0, node and node.param2 or 0
+	local ids, param1, param2 = {}, {}, {}
+	for i = 1, self.zstride * (z2 - z1 + 1) do
+		ids[i], param1[i], param2[i] = id, p1v, p2v
+	end
+	self.ids, self.param1, self.param2 = ids, param1, param2
+	self.modified = false
+	return self.emin, self.emax
+end
+
 function VoxelManipRef:get_emerged_area()
 	return self.emin, self.emax
 end
@@ -142,9 +163,14 @@ function VoxelManipRef:write_to_map(light)
 	if self.emin == nil then
 		return
 	end
+	-- Told not to light it, the light written is the mod's own work and
+	-- is taken as it is, its 0s too ([WIELDLIGHT_STALE]) -- unless
+	-- calc_lighting() asked for the box to be lit after, as VoxeLibre's
+	-- mapgen does before its write_to_map(false)
 	__luanti_set_region_data(self.emin.x, self.emin.y, self.emin.z,
 			self.emax.x, self.emax.y, self.emax.z,
-			self.ids, self.param1, self.param2)
+			self.ids, self.param1, self.param2,
+			light == false and self.relight == nil)
 	self.modified = false
 	-- What calc_lighting() asked for, now that there is terrain to work it
 	-- out from. Luanti's own write_to_map(light) does the same thing when

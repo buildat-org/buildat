@@ -337,8 +337,17 @@ namespace voxelworld
 		// A voxel that is undefined in the volume is skipped, so a caller
 		// can still leave holes, and create_missing_sections works the same
 		// way it does below.
+		//
+		// exact_light: the volume's light is the light, a 0 included, and
+		// nothing is seeded for it -- a Luanti mod's write_to_map(false),
+		// whose param1 is its own work ([WIELDLIGHT_STALE]: vl_wieldlight
+		// takes its torch's light back by writing 0s, which without this
+		// meant "no light given" and left the old light). The voxels that
+		// block light beside a changed one wear their neighbours' light
+		// again after it (see "Skylight" in lighting.h).
 		virtual void set_volume(const VoxelVolume &volume,
-				bool create_missing_sections = false) = 0;
+				bool create_missing_sections = false,
+				bool exact_light = false) = 0;
 
 		// Write a generated volume into the world, by priority per voxel: a
 		// voxel that has not been generated yet (VOXELTYPEID_UNDEFINED) takes

@@ -1,15 +1,19 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~4 min (2026-10-11)
+# cost: ~5 min (2026-10-11)
 # covers: builtin/voxelworld/voxelworld.cpp builtin/voxelworld/lighting.h builtin/luanti/lua_bindings.h
 # [WIELDLIGHT_STALE]: VoxeLibre's wielded torch walked back and forth in
-# a sealed room at night, glowstone set and dug beside it, leaves the lamp
-# light where core.fix_light() puts it: wieldlight_stale.lua says how many
-# voxels of the room, its walls included, differ, with the torch put away
-# and again with the glowstone dug; and the client's lamp light around
-# the player (scan_volume's "lamp") is the server's. It passed on
-# 2026-10-11, the user's glitch not reproduced this way.
+# a sealed tunnel underground at night, 118 voxels each way along chunks'
+# and sections' edges, facing backwards, glowstone set and dug beside it,
+# leaves the lamp light where core.fix_light() puts it:
+# wieldlight_stale.lua says how many voxels of the tunnel, its walls
+# included, differ, with the torch put away and again with the glowstone
+# dug; and the client's lamp light around the player (scan_volume's
+# "lamp") is the server's. The client's screenshots along the walk are
+# kept for a person to look at, in $WS_SHOTS (default
+# /tmp/wieldlight_stale_shots/<time>). The first run, a 22-voxel room in
+# the air, passed on 2026-10-11, the user's glitch not reproduced.
 # Needs mineclone2 in the desk's games.
 #   builtin/luanti/test/wieldlight_stale.sh
 set -u
@@ -31,10 +35,19 @@ BUILDAT_LUANTI_LUA="$t/srv/shared/fixture.lua" start_server "$t/srv.log" \
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/srv" -C "$t/srv.cache" -l 3 ||
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-{ echo "wait_log 300000 chat: ws: done"; echo "delay 3000"
-	echo "event scan_volume 8 ws lamp"; echo "delay 3000"; echo quit; } > "$t/cmds"
+shots=${WS_SHOTS:-/tmp/wieldlight_stale_shots/$(date +%Y%m%d_%H%M%S)}
+mkdir -p "$shots"
+{
+	for n in $(seq 59 59 708) away dug; do
+		echo "wait_log 300000 chat: ws: shot $n"; echo "delay 100"
+		echo "screenshot $shots/shot_$n.png"
+	done
+	# "ws: done" comes in the tick of "shot dug", before the shot is taken
+	echo "delay 3000"
+	echo "event scan_volume 8 ws lamp"; echo "delay 3000"; echo quit
+} > "$t/cmds"
 run_client 60 "$t/client.log" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
-	-D "$t/nu" -s "127.0.0.1:$SERVER_PORT" -w 640x360 -l 3 -o sound_mute=1 \
+	-D "$t/nu" -s "127.0.0.1:$SERVER_PORT" -w 960x540 -l 3 -o sound_mute=1 \
 	-c @"$t/cmds"
 grep -a "ws: " "$t/srv.log" | grep -v "ws: lamp" | sed 's/.*ws: /ws: /'
 grep -aq "ws: done" "$t/srv.log" || fail "the run never got to its end ($t/srv.log)"
@@ -65,4 +78,5 @@ for k, a in srv.items():
 print("the client's lamp light: %d of %d voxels differ%s" % (n, 17 ** 3, first and ", first " + first or ""))
 sys.exit(1 if n else 0)
 PY
+echo "the screenshots: $(ls "$shots" | wc -l) in $shots"
 echo "PASS: the wielded torch walked and glowstone set and dug leave the light as fix_light makes it, and the client has it"

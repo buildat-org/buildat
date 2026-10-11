@@ -3446,9 +3446,11 @@ struct CInstance: public voxelworld::Instance
 	// The same walk that overwrites instead, which is what everything that
 	// is not a generator wants: an importer, a VoxelManip, a mod putting a
 	// building down.
-	void set_volume(const VoxelVolume &volume, bool create_missing_sections)
+	void set_volume(const VoxelVolume &volume, bool create_missing_sections,
+			bool exact_light)
 	{
-		write_volume(volume, create_missing_sections, true);
+		write_volume(volume, create_missing_sections, true, nullptr,
+				exact_light);
 	}
 
 	// overwrite tells the two apart: with it every defined voxel of the
@@ -3457,8 +3459,10 @@ struct CInstance: public voxelworld::Instance
 	// way, so a caller can leave holes.
 	void write_volume(const VoxelVolume &volume,
 			bool create_missing_sections, bool overwrite,
-			const pv::Region *owned = nullptr)
+			const pv::Region *owned = nullptr, bool exact_light = false)
 	{
+		// exact_light: where the light changed, for the blockers beside
+		std::vector<pv::Vector3DInt32> light_changed;
 		const pv::Region region = volume.getEnclosingRegion();
 		auto rlc = region.getLowerCorner();
 		auto ruc = region.getUpperCorner();
@@ -3607,6 +3611,25 @@ struct CInstance: public voxelworld::Instance
 				// arrives lit. See set_voxel() above.
 				for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
 					const LightField lf = (LightField)f;
+					if(m_light_maintained[lf] && exact_light){
+						// A change of what the voxel is still floods; the
+						// light is the writer's
+						if(voxel_transmits_light(dst_v) !=
+								voxel_transmits_light(src_v) ||
+								(lf == LIGHT_LAMP &&
+								voxel_light_source(dst_v) !=
+								voxel_light_source(src_v))){
+							if(!m_light_deferred) m_light_seeds[lf].push_back(
+									SkylightSeed{pv::Vector3DInt32(x, y, z),
+									get_light(old, lf),
+									voxel_transmits_light(dst_v),
+									(uint8_t)(lf == LIGHT_LAMP ?
+									voxel_light_source(dst_v) : 0), false});
+						} else if(get_light(nv, lf) != get_light(old, lf)){
+							light_changed.push_back(pv::Vector3DInt32(x, y, z));
+						}
+						continue;
+					}
 					if(!m_light_maintained[lf] || get_light(nv, lf) != 0)
 						continue;
 					if(!on_volume_face && get_light(old, lf) == 0 &&
@@ -3673,7 +3696,8 @@ struct CInstance: public voxelworld::Instance
 					fx1 = owned->getUpperCorner().getX();
 				row_owned = fx0 <= fx1;
 			}
-			if(y == rlc.getY() || y == ruc.getY() ||
+			// An exact write's light is the walk's: what changed is noted
+			if(exact_light || y == rlc.getY() || y == ruc.getY() ||
 					z == rlc.getZ() || z == ruc.getZ()){
 				row_owned = false;
 			} else {
@@ -3761,6 +3785,27 @@ struct CInstance: public voxelworld::Instance
 				s->arrived = true;
 				s->awaiting = false;
 				s->generated = true;
+			}
+		}
+		// The voxels that block light beside a changed one, and the changed
+		// ones themselves, wear the brightest light beside them again: the
+		// writer's light is the air's, and what it wrote into a blocker is
+		// what it read there
+		if(!light_changed.empty()){
+			for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++){
+				if(!m_light_maintained[f])
+					continue;
+				m_light_running = (LightField)f;
+				m_light_buf = nullptr;
+				m_light_section = nullptr;
+				for(const pv::Vector3DInt32 &p : light_changed){
+					light_blocker_from_neighbours(p);
+					for(size_t k = 0; k < 6; k++)
+						light_blocker_from_neighbours(pv::Vector3DInt32(
+								p.getX() + LIGHT_OFF[k][0],
+								p.getY() + LIGHT_OFF[k][1],
+								p.getZ() + LIGHT_OFF[k][2]));
+				}
 			}
 		}
 		maintain_maximum_buffer_limit();
