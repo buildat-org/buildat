@@ -809,23 +809,66 @@ function M.set_light_units(ambient, bounce, lamp, sun)
 			lamp = lamp, sun = sun} or nil
 end
 
--- The flat colour at a position, or nil where no voxel is loaded (the
--- caller keeps what it had: a full-bright guess lit caves). no_sun leaves
--- the sun out, for a lit model that has the sun's light of its own.
+-- The flat colour at a position, and the sky and lamp levels it is from,
+-- or nil where no voxel is loaded (the caller keeps what it had: a
+-- full-bright guess lit caves). no_sun leaves the sun out, for a lit
+-- model that has the sun's light of its own.
 M.PBR_TEXEL_K = 0.44
-function M.light_color(x, y, z, no_sun)
-	local v = voxelworld.get_static_voxel(buildat.Vector3(
-			math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5)))
+-- Voxel id -> whether it stops a player, which here stands for stopping
+-- light. simplified: glass and leaves count as blockers, and a place in
+-- one is lit from beside it, which is its own light or a level under it.
+local solid_ids = {count = -1}
+local function solid(reg, v)
+	if solid_ids.count ~= reg:get_count() then
+		solid_ids = {count = reg:get_count()}
+	end
+	local id = reg:id_of(v)
+	local s = solid_ids[id]
+	if s == nil then
+		local def = reg:get_by_id(id)
+		s = def ~= nil and def.physically_solid or false
+		solid_ids[id] = s
+	end
+	return s
+end
+local BESIDE = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1},
+		{0, 0, -1}}
+
+-- settle: the light as the flood leaves it, read from the open voxels
+-- beside it as well, a level under theirs (sunlight full straight down).
+-- A voxel just dug arrives as air with no light and is relit a second
+-- or more later ([DROP_LIGHT_FIRST]), and a solid one holds a light of
+-- its own; both read so without settle.
+function M.light_color(x, y, z, no_sun, settle)
+	local px, py, pz = math.floor(x + 0.5), math.floor(y + 0.5),
+			math.floor(z + 0.5)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(px, py, pz))
 	if v == nil then
 		return nil
 	end
 	local reg = voxelworld.get_voxel_registry()
-	local sky = reg:light_sky_of(v) / 15
-	local lamp = reg:light_lamp_of(v) / 15
+	local sky, lamp = reg:light_sky_of(v), reg:light_lamp_of(v)
+	local blocked = solid(reg, v)
+	if settle or blocked then
+		if blocked then
+			sky, lamp = 0, 0
+		end
+		for _, d in ipairs(BESIDE) do
+			local w = voxelworld.get_static_voxel(buildat.Vector3(
+					px + d[1], py + d[2], pz + d[3]))
+			if w ~= nil and not solid(reg, w) then
+				local s = reg:light_sky_of(w)
+				sky = math.max(sky, (d[2] == 1 and s == 15) and 15 or s - 1)
+				lamp = math.max(lamp, reg:light_lamp_of(w) - 1)
+			end
+		end
+	end
+	local levels_sky, levels_lamp = sky, lamp
+	sky, lamp = sky / 15, lamp / 15
 	local u = M.light_units
 	if u == nil then
 		local k = 0.28 + 0.72 * math.max(sky * M.daylight, lamp)
-		return magic.Color(k, k, k, 1.0)
+		return magic.Color(k, k, k, 1.0), levels_sky, levels_lamp
 	end
 	-- PBRVoxel.glsl's vertex terms for a face with no sun: the ambient by
 	-- the sky share (the nibble times the face's local shade, which the
@@ -859,7 +902,8 @@ function M.light_color(x, y, z, no_sun)
 	local h = 0.5
 	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
 			k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
-			k * (a.b * share + b.b * bounce + l.b * lit + h * s.b), 1.0)
+			k * (a.b * share + b.b * bounce + l.b * lit + h * s.b), 1.0),
+			levels_sky, levels_lamp
 end
 
 -- Set on an object's materials when it moves (and when the day turns; the
@@ -870,7 +914,7 @@ local function light_object(have, x, y, z)
 		return
 	end
 	local box = have.box or {1, 1, 1}
-	local c = M.light_color(x, y + box[2] / 2, z)
+	local c, sky, lamp = M.light_color(x, y + box[2] / 2, z, false, have.new)
 	if c == nil then
 		return
 	end
@@ -880,6 +924,8 @@ local function light_object(have, x, y, z)
 		return
 	end
 	have.lit = c
+	log:verbose(string.format("luanti: object %s lit at %.1f,%.1f,%.1f sky %d lamp %d",
+			have.id, x, y, z, sky, lamp))
 	for _, m in ipairs(have.materials) do
 		m:SetShaderParameter("MatDiffColor", c)
 	end
@@ -932,7 +978,7 @@ local function object_node(id)
 			(buildat.get_time_us() - t0)
 	object_nodes[id] = {node = node, drawn_as = drawn_as, mesh = look.mesh, frame = look.frame,
 			texture = look.texture, look = look, materials = materials or {},
-			lit = nil}
+			lit = nil, born = buildat.get_time_us(), id = id}
 	return node
 end
 
@@ -1306,10 +1352,18 @@ local function place_object(id, v, i)
 	-- packet for 75 objects). One object in LIGHT_TURNS a packet, in
 	-- turn, so every one of them is re-lit within about two seconds and
 	-- no packet pays for more than a few.
-	if not posed and object_nodes[id] and object_same(object_last[id], v, i)
+	-- A new one, for its first second, every packet and settled
+	-- (M.light_color): a drop lands where a node was just dug
+	local have = object_nodes[id]
+	if have and have.born then
+		have.new = buildat.get_time_us() - have.born < 1000000
+		have.born = have.new and have.born or nil
+	end
+	if not posed and have and object_same(object_last[id], v, i)
 			and id ~= M.self_id then
-		if ((i - 1) / 13 + object_light_turn) % LIGHT_TURNS == 0 then
-			light_object(object_nodes[id], v[i + 1], v[i + 2], v[i + 3])
+		if have.new or
+				((i - 1) / 13 + object_light_turn) % LIGHT_TURNS == 0 then
+			light_object(have, v[i + 1], v[i + 2], v[i + 3])
 		end
 		return
 	end
@@ -1318,7 +1372,11 @@ local function place_object(id, v, i)
 		-- Out of this packet's budget; the next one places it
 		return
 	end
-	local have = object_nodes[id]
+	if object_nodes[id] ~= have then
+		-- Made just now
+		have = object_nodes[id]
+		have.new = true
+	end
 	-- The packet's place is the collision box's middle, which is where a
 	-- box scaled to it goes; a model and a sprite are drawn at the
 	-- position itself, as Luanti draws them ([OBJECT_SELECTION_BOX]):
