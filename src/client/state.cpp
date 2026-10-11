@@ -538,8 +538,12 @@ struct CState: public State
 		if(left != 0 && left % 100 != 0 && left != m_files_asked)
 			return;
 		const size_t got = m_files_asked - left;
-		set_status(left == 0 ? ss_() : "Downloading the game: "+
-				itos((int)got)+" of "+itos((int)m_files_asked)+" files");
+		// Not over the game once it runs: a file a module announces then
+		// waits behind the map, and the line stood over the world
+		// ("0 of 1 files", a minute)
+		if(!m_scripts_started)
+			set_status(left == 0 ? ss_() : "Downloading the game: "+
+					itos((int)got)+" of "+itos((int)m_files_asked)+" files");
 		if(left != 0)
 			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
 	}
