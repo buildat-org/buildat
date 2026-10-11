@@ -759,25 +759,21 @@ local HOTBAR_MAX = 32
 local WHITE = luanti.texture("[fill:1x1:#ffffffff")
 
 -- Luanti's own m_scale_factor, which every size and offset a HUD element
--- carries is multiplied by before it is drawn: Luanti's is the user's
--- hud_scaling times the display density, and its numbers are screen pixels.
--- This UI is not in screen pixels -- magic.ui.root is 1920 wide on a 1280
--- window -- so this is the conversion, and it is what keeps a HUD the same
--- number of screen pixels Luanti would have drawn it.
+-- carries is multiplied by before it is drawn, in this UI's units: the
+-- hotbar's, so the HUD stays against it ([HUD_DENSITY])
+local hotbar_ui = nil
 local function hud_scale()
-	-- Over the frame's width, which is the window's -- or the logical
-	-- size a scripted client keeps whatever the window does
-	-- ([SEQ_FIXED_SIZE]); over the window there, the hotbar shrank as
-	-- the window grew
-	local fw = buildat.logical_size()
-	return magic.ui.root.width / math.max(1, fw or magic.graphics.width)
+	if not hotbar_ui then
+		return magic.ui.root.width / math.max(1,
+				buildat.logical_size() or magic.graphics.width)
+	end
+	return hotbar_ui:scale()
 end
 
 -- The row itself is luanti/hotbar.lua, the drawing both Luanti clients
 -- share ([EXT_HOTBAR]); this file feeds it and keeps what is drawn beside
 -- it. metrics is its three numbers, for the rest of the HUD; SLOT is a
 -- slot's size, for the line of text that sits a slot and a bit above it.
-local hotbar_ui = nil
 local hotbar_metrics = nil
 -- Defined below, where the picture cache is; the hotbar's own texture
 -- lookup is this and it is made before it
@@ -4441,18 +4437,22 @@ end)
 -- player picks ([HOTBAR_LAYERS]). A new UI scale is a new root size with
 -- no ScreenMode (a phone's join fitting the scale down: the hotbar halfway
 -- up, [WEB_QUARTER_VIEW]), so the root's size is what is watched.
-local laid_out_w, laid_out_h = nil, nil
+-- The HUD's elements are placed against the screen and at the hotbar's
+-- scale, which the width and the game's slot count change
+-- ([HUD_DENSITY]), so the HUD is drawn again too.
+local laid_out_w, laid_out_h, laid_out_scale = nil, nil, nil
 magic.SubscribeToEvent("Update", function()
 	local w, h = magic.ui.root.width, magic.ui.root.height
-	if w == laid_out_w and h == laid_out_h then
+	local scale = hud_scale()
+	if w == laid_out_w and h == laid_out_h and scale == laid_out_scale then
 		return
 	end
-	laid_out_w, laid_out_h = w, h
+	laid_out_w, laid_out_h, laid_out_scale = w, h, scale
 	if hotbar_ui then
 		hotbar_ui:relayout()
 	end
 	hud_r.root.size = magic.IntVector2(w, h)
-	draw_hotbar()
+	draw_hud(hud_elements)
 end)
 
 -- **Touch controls** on a touchscreen (luanti/touch.lua, luanti_client's

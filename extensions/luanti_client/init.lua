@@ -2072,13 +2072,10 @@ local function show_client(host, port, name, password, mode, origin)
 		-- counted as not drawn; view.minimap is official's own
 		local game_hud = luanti_hud.draw.new(magic, log, {
 			hud = luanti_hud, formspec = formspec, parent = magic.ui.root,
-			-- What a screen pixel is in this UI's units, which is what
-			-- Luanti multiplies a HUD element's sizes and offsets by
-			-- ([EXT_HOTBAR])
-			scale = function()
-				return magic.ui.root.width / math.max(1,
-						buildat.logical_size() or magic.graphics.width)
-			end,
+			-- Luanti's m_scale_factor in this UI's units, which it
+			-- multiplies a HUD element's sizes and offsets by: the
+			-- hotbar's, so the HUD stays against it ([HUD_DENSITY])
+			scale = function() return hotbar_row:scale() end,
 			texture = hud_texture,
 			font = magic.cache:GetResource("Font", buildat.font_mono),
 			font_size = 14,
@@ -2231,9 +2228,11 @@ local function show_client(host, port, name, password, mode, origin)
 			end
 
 			-- The game's own elements, built again when the server changed
-			-- any of them or the window changed size
+			-- any of them, the window changed size or the hotbar's scale
+			-- changed with the slot count ([HUD_DENSITY])
 			local ui_root = magic.ui.root
-			local size = ui_root.width.."x"..ui_root.height
+			local size = ui_root.width.."x"..ui_root.height.." "..
+					hotbar_row:scale()
 			if game_hud_stale or size ~= game_hud_size then
 				game_hud_stale = false
 				game_hud_size = size

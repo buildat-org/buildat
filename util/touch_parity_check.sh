@@ -150,9 +150,9 @@ want(){ # log, line, what
 
 # Natively. Window pixels at 1000x500, UI scale 1: the marker at
 # (638, 267), hotbar slots 1 and 3 at (305, 467), (417, 467), the stick in
-# the left third; the inventory's main row 1 at y 257 and row 2 at 298,
-# columns from x 349 by 41.6, the craft grid's first row at y 121 from x
-# 473, the preview at (640, 159)
+# the left third; the inventory's main row 1 at y 259 and row 2 at 317,
+# columns from x 288 by 58.5, the craft grid's first row at y 70 from x
+# 463, the preview at (697, 124)
 drag(){ # x0 y0 x1 y1
 	echo "finger_down 1 $1 $2"; echo "delay 150"
 	for i in 1 2 3 4 5; do
@@ -175,16 +175,16 @@ stick(){ # dy: down from (150, 300) for 2 s
 	stick 32
 	stick 100
 	echo "tap 748 94"; echo "delay 2000"
-	drag 349 257 390 298
-	echo "tap 390 298"; echo "delay 800"; echo "tap 432 257"; echo "delay 1500"
-	echo "finger_down 1 432 257"; echo "delay 150"
-	echo "finger_move 1 432 280"; echo "delay 60"; echo "finger_move 1 432 298"; echo "delay 300"
+	drag 288 259 346 317
+	echo "tap 346 317"; echo "delay 800"; echo "tap 404 259"; echo "delay 1500"
+	echo "finger_down 1 404 259"; echo "delay 150"
+	echo "finger_move 1 404 288"; echo "delay 60"; echo "finger_move 1 404 317"; echo "delay 300"
 	echo "finger_down 2 800 400"; echo "delay 100"; echo "finger_up 2"; echo "delay 800"
-	echo "finger_move 1 452 298"; echo "delay 60"; echo "finger_move 1 473 298"; echo "delay 300"
+	echo "finger_move 1 433 317"; echo "delay 60"; echo "finger_move 1 463 317"; echo "delay 300"
 	echo "finger_up 1"; echo "delay 1500"
-	drag 432 298 473 121
-	drag 390 257 515 121
-	echo "tap 640 159"; echo "delay 800"; echo "tap 515 257"; echo "delay 1500"
+	drag 404 317 463 70
+	drag 346 259 521 70
+	echo "tap 697 124"; echo "delay 800"; echo "tap 522 259"; echo "delay 1500"
 	echo "tap 150 150"; echo "delay 1500"
 	echo "tap 150 150"; echo "delay 150"; echo "tap 150 150"; echo "delay 1500"
 	echo "screenshot $t/native_end.png"
@@ -229,10 +229,11 @@ echo "ok: native: the hotbar, the place and dig at the finger, the stick ($half 
 
 # The web, in Chrome: headless Firefox draws no voxels of vanilla's
 # (a WebGL warning, "Vertex fetch requires 144", 2026-10-11).
-# CSS pixels at 800x400 and a density of 2: the marker at (510, 213),
-# hotbar slots 1 and 3 at (302, 384), (358, 384); the inventory's main
-# row 1 at y 205 and row 2 at 238, columns from x 280 by 33.3, the craft
-# grid's first row at y 97 from x 379, the preview at (512, 128)
+# CSS pixels at 800x400 and a density of 2 (the HUD and the forms at it,
+# [HUD_DENSITY]): the marker at (510, 213), hotbar slots 1 and 3 at
+# (204, 368), (316, 368); the inventory's main row 1 at y 206 and row 2
+# at 254, columns from x 231 by 46.8, the craft grid's first row at y 56
+# from x 371, the preview at (558, 99)
 # The taps wait for the client's world, not only the server's ready: its
 # first data can sit behind the map for over a minute, and the world is
 # meshed again when it comes (2026-10-11)
@@ -246,16 +247,16 @@ cat > "$t/web.json" <<'J'
  ["waitlog", "touch_parity: ready", 240],
  ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 240],
  ["wait", 5000],
- ["tap", 358, 384], ["wait", 1000], ["tap", 302, 384], ["wait", 1000],
+ ["tap", 316, 368], ["wait", 1000], ["tap", 204, 368], ["wait", 1000],
  ["tap", 510, 213], ["wait", 1500],
  ["hold", 510, 213, 4000], ["wait", 1500],
  ["tap", 673, 47], ["wait", 2000],
- ["drag", 280, 205, 313, 238, "touch"], ["wait", 1500],
- ["tap", 313, 238], ["wait", 800], ["tap", 346, 205], ["wait", 1500],
- ["carry", 346, 205, 346, 238, 700, 300, 379, 238], ["wait", 1500],
- ["drag", 346, 238, 379, 97, "touch"], ["wait", 1500],
- ["drag", 313, 205, 412, 97, "touch"], ["wait", 1500],
- ["tap", 512, 128], ["wait", 800], ["tap", 412, 205], ["wait", 1500],
+ ["drag", 231, 206, 278, 254, "touch"], ["wait", 1500],
+ ["tap", 278, 254], ["wait", 800], ["tap", 324, 206], ["wait", 1500],
+ ["carry", 324, 206, 324, 254, 700, 300, 371, 254], ["wait", 1500],
+ ["drag", 324, 254, 371, 56, "touch"], ["wait", 1500],
+ ["drag", 278, 206, 418, 56, "touch"], ["wait", 1500],
+ ["tap", 558, 99], ["wait", 800], ["tap", 418, 206], ["wait", 1500],
  ["tap", 100, 100], ["wait", 1500],
  ["tap", 100, 100, 2], ["wait", 1500],
  ["shot", "${OUT}/web_end.png"]

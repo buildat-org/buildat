@@ -240,6 +240,9 @@ function M.new(magic, log, ctx)
 			return
 		end
 		x0, y0 = math.floor(x0), math.floor(y0)
+		say_once(("statbar %s %d %d %d"):format(n.text, x0, x1, sw),
+				("hud: statbar %s from %d to %d of %d"):format(n.text, x0,
+						math.floor(x1), sw))
 		local row = root:CreateChild("UIElement")
 		row:SetPosition(x0, y0)
 		row.size = magic.IntVector2(math.floor(x1) - x0, math.floor(y1) - y0)

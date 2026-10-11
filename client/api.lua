@@ -2028,6 +2028,8 @@ buildat.safe.logical_size  = __buildat_logical_size
 -- keyboard_height() -> the on-screen keyboard's height in UI pixels, 0 with
 -- none (a native client)
 buildat.safe.keyboard_height = __buildat_keyboard_height
+-- display_density() -> device pixels per CSS pixel on the web, 1 natively
+buildat.safe.display_density = __buildat_display_density
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono

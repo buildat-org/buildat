@@ -23,6 +23,7 @@
 -- how a texture modifier expression is composed is each client's own.
 --   h:draw{list =, wield =, count =, image =, selected_image =, shown =}
 --   h:metrics() -> imagesize, padding, slot_size, margin
+--   h:scale() -> the HUD's scale, Luanti's m_scale_factor in this UI's units
 --   h:destroy()
 local M = {}
 
@@ -36,15 +37,12 @@ M.MAX = 32
 -- density and the user's hud_scaling, its padding is a twelfth of that, and
 -- a slot is the picture with padding on both sides. **The window size is not
 -- in it**: the hotbar is a fixed size on the screen and does not grow with
--- the window.
+-- the window -- except that here it is capped to the width ([HUD_DENSITY]):
+-- the row, always one (Luanti splits a wide one in two; Buildat's upright
+-- screens would split most), fits the screen less its margins, however many
+-- slots the game shows. Every HUD element is drawn at the same scale, so a
+-- game's hotbar picture and statbars stay against the slots.
 local IMAGE_SIZE = 48
--- hud_hotbar_max_width's default. Past this share of the window the row
--- splits in two, the first half above the second, which is what a game that
--- asks for a lot of slots hits.
---
--- simplified: the setting itself is the game's and does not cross to the
--- client yet, so this is Luanti's default rather than what the game said.
-local MAX_WIDTH = 1.0
 
 function M.new(o)
 	local magic, buildat, log = o.magic, o.buildat, o.log
@@ -52,6 +50,8 @@ function M.new(o)
 	local max = o.max or M.MAX
 	local parent = o.parent or magic.ui.root
 	local slots = {}
+	-- The game's slot count as last drawn, which the cap to the width is of
+	local shown_count = 8
 
 	-- Luanti's own m_scale_factor, which every size and offset a HUD element
 	-- carries is multiplied by before it is drawn: Luanti's is the user's
@@ -59,19 +59,31 @@ function M.new(o)
 	-- pixels. This UI is not in screen pixels -- magic.ui.root is 1920 wide
 	-- on a 1280 window -- so this is the conversion, and it is what keeps
 	-- the row the same number of screen pixels Luanti would have drawn.
+	-- Returns the scale and whether the width capped it.
 	local function hud_scale()
 		-- Over the frame's width, which is the window's -- or the logical
 		-- size a scripted client keeps whatever the window does
 		-- ([SEQ_FIXED_SIZE]); over the window there, the hotbar shrank as
 		-- the window grew
 		local fw = buildat.logical_size()
-		return magic.ui.root.width / math.max(1, fw or magic.graphics.width)
+		local want = magic.ui.root.width / math.max(1,
+				fw or magic.graphics.width) * buildat.display_density()
+		-- The row and the picture behind it are (56 n + 4) scaled pixels,
+		-- and the margin of 4 each side
+		local cap = magic.ui.root.width / (shown_count * 56 + 12)
+		return math.min(want, cap), cap < want
+	end
+
+	function h:scale()
+		return (hud_scale())
 	end
 
 	-- The three numbers everything below is drawn from, in this UI's units
 	function h:metrics()
-		local per_pixel = hud_scale()
-		local imagesize = math.floor(IMAGE_SIZE * per_pixel + 0.5)
+		local per_pixel, capped = hud_scale()
+		-- Rounded down where it fits the width, or the rounding would not
+		local imagesize = math.floor(IMAGE_SIZE * per_pixel +
+				(capped and 0 or 0.5))
 		local padding = math.floor(imagesize / 12)
 		-- And how far above the bottom of the screen it sits: Luanti's
 		-- default hotbar element is at (0.5, 1) with an offset of four
@@ -93,18 +105,14 @@ function M.new(o)
 	root.priority = o.priority or 10
 	h.root = root
 
-	-- One per row, because Luanti draws the hotbar image once per row
-	-- rather than once per slot; behind the slots by priority
-	local backgrounds = {}
-	for r = 1, 2 do
-		local bg = root:CreateChild("BorderImage")
-		bg.priority = 0
-		bg.horizontalAlignment = magic.HA_CENTER
-		bg.verticalAlignment = magic.VA_BOTTOM
-		bg.blendMode = magic.BLEND_ALPHA
-		bg.visible = false
-		backgrounds[r] = bg
-	end
+	-- Luanti draws the hotbar image once over the row rather than once per
+	-- slot; behind the slots by priority
+	local background = root:CreateChild("BorderImage")
+	background.priority = 0
+	background.horizontalAlignment = magic.HA_CENTER
+	background.verticalAlignment = magic.VA_BOTTOM
+	background.blendMode = magic.BLEND_ALPHA
+	background.visible = false
 	for i = 1, max do
 		local frame = root:CreateChild("UIElement")
 		frame.priority = 1
@@ -180,53 +188,51 @@ function M.new(o)
 		local wield = state.wield or 1
 		local shown = state.shown ~= false
 		local n = math.max(1, math.min(max, state.count or 8))
+		shown_count = n
 		local imagesize, padding, slot_size, margin = h:metrics()
-		-- Luanti splits the row in two when it would be wider than this
-		-- share of the window, the first half above the second
-		local upper = 0
-		if (n * slot_size) / magic.ui.root.width > MAX_WIDTH then
-			upper = math.floor(n / 2)
-		end
-		local rows = {
-			{first = upper + 1, last = n, y = 0},
-			{first = 1, last = upper, y = imagesize + padding},
-		}
-		-- The picture the game puts behind a row, half a padding proud of
+		-- The picture the game puts behind the row, half a padding proud of
 		-- it on every side, which is where Luanti's own hud.cpp puts it --
 		-- one image stretched over the row rather than one per slot
 		local bg = o.texture(state.image)
 		local selected = o.texture(state.selected_image)
-		local at_row, at_x = {}, {}
-		for r, row in ipairs(rows) do
-			local count = row.last - row.first + 1
-			local row_width = count * slot_size
-			local element = backgrounds[r]
-			if bg and count > 0 then
-				element.texture = bg
-				element.size = magic.IntVector2(
-						math.floor(row_width + padding),
-						math.floor(slot_size + padding))
-				-- Half a padding proud of the slots on every side, which is
-				-- what hud.cpp draws it as
-				element:SetPosition(0,
-						-math.floor(margin + row.y - padding / 2))
-			end
-			element.visible = shown and bg ~= nil and count > 0
-			for i = row.first, row.last do
-				at_row[i] = row
-				-- A centred element's position is where its own centre
-				-- goes, so the half slot is what puts the row's left edge
-				-- on the left edge of the picture behind it
-				at_x[i] = math.floor(-row_width / 2 +
-						(i - row.first) * slot_size + slot_size / 2)
-			end
+		local row_width = n * slot_size
+		if bg then
+			background.texture = bg
+			background.size = magic.IntVector2(
+					math.floor(row_width + padding),
+					math.floor(slot_size + padding))
+			background:SetPosition(0, -math.floor(margin - padding / 2))
+		end
+		background.visible = shown and bg ~= nil
+		-- Said as it changes, in the frame's pixels
+		local f = (buildat.logical_size() or magic.graphics.width) /
+				magic.ui.root.width
+		local said = ("hotbar: %d slots, picture %d, row %d to %d, " ..
+				"background %d to %d, of %d"):format(n,
+				math.floor(imagesize * f + 0.5),
+				math.floor((root.width - row_width) / 2 * f + 0.5),
+				math.floor((root.width + row_width) / 2 * f + 0.5),
+				math.floor((root.width - row_width - padding) / 2 * f + 0.5),
+				math.floor((root.width + row_width + padding) / 2 * f + 0.5),
+				math.floor(root.width * f + 0.5))
+		if said ~= h.said then
+			h.said = said
+			log:info(said)
+		end
+		local at_x = {}
+		for i = 1, n do
+			-- A centred element's position is where its own centre goes,
+			-- so the half slot is what puts the row's left edge on the
+			-- left edge of the picture behind it
+			at_x[i] = math.floor(-row_width / 2 + (i - 1) * slot_size +
+					slot_size / 2)
 		end
 		for i = 1, max do
 			local slot = slots[i]
 			slot.frame.visible = shown and i <= n
 			if i <= n then
 				slot.frame.size = magic.IntVector2(slot_size, slot_size)
-				slot.frame:SetPosition(at_x[i], -(margin + at_row[i].y))
+				slot.frame:SetPosition(at_x[i], -margin)
 				-- The game's mark is the item's own square grown by two
 				-- paddings on every side, which is bigger than the slot:
 				-- see drawItem() in Luanti's hud.cpp

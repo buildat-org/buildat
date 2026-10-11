@@ -1301,8 +1301,8 @@ do
 	assert(ds[1] == 14.25 and ds[2] == 7.275 and ds.fixed,
 			"formspec: size with fixed_size")
 	-- Luanti's fixed slot, 0.5555 x 96 pixels, whatever the screen
-	local fl = formspec.layout(ds, true, 3000, 3000, 2)
-	assert(math.abs(fl.imgsize - 0.5555 * 96 * 2) < 1e-6,
+	local fl = formspec.layout(ds, true, 3000, 3000, 1, 2)
+	assert(fl.imgsize == math.floor(0.5555 * 96 * 2),
 			"formspec: a fixed_size form's slot")
 end
 assert(real == false, "formspec: no formspec_version means the old units")
@@ -1345,19 +1345,30 @@ assert(formspec.strip_escapes("\27(T@mcl_inventory)Search Items\27E") ==
 -- The layout arithmetic, against Luanti's own: with real coordinates a slot
 -- is one unit, and the form is as big as its size says
 local l = formspec.layout({10, 10}, true, 1000, 1000)
-assert(l.imgsize == 1000 / 15, "formspec: imgsize is capped per slot")
+assert(l.imgsize == math.floor(1000 / 15),
+		"formspec: imgsize is capped per slot, in whole pixels")
+-- But never under Luanti's fixed slot at the density, unless the screen is
+-- too small for it ([HUD_DENSITY]): a phone's 2.75
+local dense = formspec.layout({6, 6}, true, 1080, 2400, 1, 2.75)
+assert(dense.imgsize == math.floor(0.5555 * 96 * 2.75),
+		"formspec: the at-least slot at a density, "..dense.imgsize)
+local narrow = formspec.layout({14.25, 7.275, fixed = true}, true, 1080,
+		2400, 1, 2.75)
+assert(narrow.width <= 1080 * 0.9 and narrow.width > 1080 * 0.9 - 14.25,
+		"formspec: a fixed_size form fits an upright phone, "..narrow.width)
 assert(l.slot == l.imgsize and l.slot_step == l.imgsize * 1.25,
 		"formspec: a real-coordinate slot and its step")
 assert(l.origin[1] == 0, "formspec: real coordinates have no padding")
 -- A form too big for the screen is shrunk to fit it
 local big = formspec.layout({40, 10}, true, 1000, 1000)
-assert(math.abs(big.width - 900) < 1e-6,
+assert(big.width <= 900 and big.width > 900 - 40,
 		"formspec: a wide form is "..big.width.." across")
 -- The old units are a slot plus its spacing, and a position has padding added
 local old_units = formspec.layout({10, 10}, false, 1000, 1000)
-assert(old_units.slot_step == old_units.imgsize * 1.25,
-		"formspec: the old spacing")
-assert(old_units.origin[1] == old_units.imgsize * 3 / 8,
+-- of the slot's fraction, which Luanti's whole-pixel imgsize drops
+local use = old_units.slot_step / 1.25
+assert(old_units.imgsize == math.floor(use), "formspec: the old spacing")
+assert(old_units.origin[1] == math.floor(use * 3 / 8),
 		"formspec: the old padding")
 
 print("formspec: ok")

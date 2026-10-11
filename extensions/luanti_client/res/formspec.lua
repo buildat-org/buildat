@@ -36,21 +36,28 @@ local M = {}
 -- says which it is by its formspec_version, or by real_coordinates[].
 M.PADDING = 0.05
 
--- units_per_px: the screen's units per pixel, for a fixed_size form (size[]'s
--- third field), whose slot is Luanti's getFixedImgsize(): 0.5555 x 96 DPI
--- pixels. simplified: Luanti's gui_scaling and display density taken as 1,
--- and its touch_gui exception (no lock) left out.
-function M.layout(size, real_coordinates, screen_w, screen_h, units_per_px)
+-- units_per_px: the screen's units per pixel; density: the display's
+-- ([HUD_DENSITY]). Luanti's fixed slot, getFixedImgsize(), is 0.5555 x 96
+-- pixels times the density: a fixed_size form's (size[]'s third field)
+-- slot, and the least any other form's is. Either is capped to fit the
+-- screen, which Luanti's fixed_size is not: an upright phone's form is not
+-- wider than it. The slot is whole pixels, as Luanti's imgsize is: in real
+-- coordinates everything is placed by it, in the old ones the spacing is
+-- of the fraction.
+-- simplified: Luanti's gui_scaling taken as 1, and its touch_gui exception
+-- (no lock) left out.
+function M.layout(size, real_coordinates, screen_w, screen_h, units_per_px,
+		density)
+	local upp = units_per_px or 1
 	local pw = screen_w * (1 - M.PADDING * 2)
 	local ph = screen_h * (1 - M.PADDING * 2)
-	local prefer = math.min(screen_w, screen_h) / 15
-	if size.fixed then
-		local fixed = 0.5555 * 96 * (units_per_px or 1)
-		pw, ph, prefer = math.huge, math.huge, fixed
-	end
+	local fixed = 0.5555 * 96 * (density or 1) * upp
+	local prefer = size.fixed and fixed or
+			math.max(math.min(screen_w, screen_h) / 15, fixed)
+	local function whole(x) return math.floor(x / upp) * upp end
 	local imgsize
 	if real_coordinates then
-		imgsize = math.min(prefer, pw / size[1], ph / size[2])
+		imgsize = whole(math.min(prefer, pw / size[1], ph / size[2]))
 		return {
 			imgsize = imgsize,
 			-- Where an element's x,y lands, and how big its w,h is
@@ -63,18 +70,20 @@ function M.layout(size, real_coordinates, screen_w, screen_h, units_per_px)
 			height = size[2] * imgsize,
 		}
 	end
-	imgsize = math.min(prefer,
+	local use = math.min(prefer,
 			pw / (5 / 4 * (0.5 + size[1])),
 			ph / (15 / 13 * (0.85 + size[2])))
-	local sx, sy = imgsize * 5 / 4, imgsize * 15 / 13
+	imgsize = whole(use)
+	local sx, sy = use * 5 / 4, use * 15 / 13
+	local pad = whole(use * 3 / 8)
 	return {
 		imgsize = imgsize,
 		scale = {sx, sy},
-		origin = {imgsize * 3 / 8, imgsize * 3 / 8},
+		origin = {pad, pad},
 		slot = imgsize,
 		slot_step = sx,
-		width = size[1] * sx + imgsize * 3 / 4,
-		height = size[2] * sy + imgsize * 3 / 4,
+		width = size[1] * sx + pad * 2,
+		height = size[2] * sy + pad * 2,
 	}
 end
 

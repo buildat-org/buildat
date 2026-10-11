@@ -1103,6 +1103,20 @@
 		return 1;
 	}
 
+	// display_density() -> device pixels per CSS pixel on the web
+	// (devicePixelRatio), 1 natively ([HUD_DENSITY]).
+	// simplified: natively 1; a desktop's reported DPI is often wrong. A
+	// native mobile build would read the platform's.
+	static int l_display_density(lua_State *L)
+	{
+		double d = 1;
+#ifdef __EMSCRIPTEN__
+		d = EM_ASM_DOUBLE({ return window.devicePixelRatio || 1; });
+#endif
+		lua_pushnumber(L, d > 0 ? d : 1);
+		return 1;
+	}
+
 	// viewport_generation() -> number: how many times anybody has set
 	// the preferred viewports in this run ([LAUNCH_WORLD]). A launch UI
 	// records it when a launch commits and watches for it to change,
