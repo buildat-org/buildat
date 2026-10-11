@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-11)
-# covers: extensions/luanti_client/res/touch.lua extensions/luanti_client/res/form_session.lua builtin/luanti/lua/dig.lua apps/vanilla/main/client_lua/player.lua
+# cost: ~5 min (2026-10-11)
+# covers: src/client/app.cpp extensions/luanti_client/res/touch.lua extensions/luanti_client/res/form_session.lua builtin/luanti/lua/dig.lua apps/vanilla/main/client_lua/player.lua
 # [TOUCH_PARITY]: vanilla on a touchscreen as Luanti's Android client, on
 # the minimal game, by finger. A fixture puts the player on a platform in
 # the air facing a wall with a marker in it right of the centre, gives the
@@ -17,9 +17,10 @@
 #     let go, stone and marker dragged into the craft grid craft sand,
 #     taken by a tap and put by a tap;
 #   - a single tap outside the inventory keeps it, a double tap closes it.
-# The web client (Firefox as a phone, util/web_drive.sh's TOUCH=1; skipped
-# without it or web/): the inventory's drag and tap-and-tap, the hotbar's
-# tap, the place at the finger and the double tap out.
+# The web client (Chrome as a phone, util/web_drive.sh's TOUCH=1; skipped
+# without it or web/): the inventory's drag, tap-and-tap and second finger,
+# the craft, the hotbar's tap, the place and dig at the finger and the
+# double tap out.
 #   util/touch_parity_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
