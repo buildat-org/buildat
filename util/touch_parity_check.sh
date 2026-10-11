@@ -16,11 +16,14 @@
 #     finger tapped puts one where the first is and the rest where it is
 #     let go, stone and marker dragged into the craft grid craft sand,
 #     taken by a tap and put by a tap;
-#   - a single tap outside the inventory keeps it, a double tap closes it.
+#   - a tap outside the inventory with a stack in hand lets the stack go
+#     (vanilla has no drop: back to its slot) and keeps the inventory,
+#     which still moves a stack by two taps; one tap outside with nothing
+#     in hand closes it ([FORM_TAP_CLOSE]).
 # The web client (Chrome as a phone, util/web_drive.sh's TOUCH=1; skipped
 # without it or web/): the inventory's drag, tap-and-tap and second finger,
 # the craft, the hotbar's tap, the place and dig at the finger and the
-# double tap out.
+# taps outside.
 #   util/touch_parity_check.sh
 set -u
 . "$(dirname "$0")/check_paths.sh"
@@ -185,8 +188,9 @@ stick(){ # dy: down from (150, 300) for 2 s
 	drag 404 317 463 70
 	drag 346 259 521 70
 	echo "tap 697 124"; echo "delay 800"; echo "tap 522 259"; echo "delay 1500"
+	echo "tap 522 259"; echo "delay 800"; echo "tap 150 150"; echo "delay 1500"
+	echo "tap 463 317"; echo "delay 800"; echo "tap 288 259"; echo "delay 1500"
 	echo "tap 150 150"; echo "delay 1500"
-	echo "tap 150 150"; echo "delay 150"; echo "tap 150 150"; echo "delay 1500"
 	echo "screenshot $t/native_end.png"
 	echo quit
 } > "$t/native.cmds"
@@ -207,6 +211,7 @@ want $L "main2=markerx6 main3=stonex9 main11=stonex1 |" "the second finger's tap
 want $L "main2=markerx6 main11=stonex1 main12=stonex9 |" "the drag let go after it"
 want $L "main12=stonex9 | craft1=stonex1 craft2=markerx6 |" "the drags into the craft grid"
 want $L "main5=sandx1 main12=stonex9 | craft2=markerx5 |" "the craft, taken and put by taps"
+want $L "state: main1=stonex9 main5=sandx1 | craft2=markerx5 |" "the taps moving a stack after the tap outside"
 n=$(states $L | grep -c "inventory closed")
 [ "$n" = 1 ] || fail "the taps outside closed the inventory $n times, not once"
 # The stick: the distance walked in each push, from the positions
@@ -225,7 +230,7 @@ print(*("%.1f" % r for r in runs[-2:]))')
 [ -n "${full:-}" ] || fail "the stick did not walk twice ($half)"
 python3 -c "import sys; r = $half / $full; sys.exit(0 if 0.35 < r < 0.65 and $full > 5 else 1)" ||
 	fail "the stick: half way walked $half, fully $full"
-echo "ok: native: the hotbar, the place and dig at the finger, the stick ($half and $full nodes), the inventory by finger, the double tap out"
+echo "ok: native: the hotbar, the place and dig at the finger, the stick ($half and $full nodes), the inventory by finger, the taps outside"
 
 # The web, in Chrome: headless Firefox draws no voxels of vanilla's
 # (a WebGL warning, "Vertex fetch requires 144", 2026-10-11).
@@ -257,8 +262,9 @@ cat > "$t/web.json" <<'J'
  ["drag", 324, 254, 371, 56, "touch"], ["wait", 1500],
  ["drag", 278, 206, 418, 56, "touch"], ["wait", 1500],
  ["tap", 558, 99], ["wait", 800], ["tap", 418, 206], ["wait", 1500],
+ ["tap", 418, 206], ["wait", 800], ["tap", 100, 100], ["wait", 1500],
+ ["tap", 371, 254], ["wait", 800], ["tap", 231, 206], ["wait", 1500],
  ["tap", 100, 100], ["wait", 1500],
- ["tap", 100, 100, 2], ["wait", 1500],
  ["shot", "${OUT}/web_end.png"]
 ]
 J
@@ -276,6 +282,7 @@ want $L "main2=markerx6 main3=stonex10 |" "web: the tap and the tap"
 want $L "main2=markerx6 main3=stonex9 main11=stonex1 |" "web: the second finger's tap"
 want $L "main2=markerx6 main11=stonex1 main12=stonex9 |" "web: the drag let go after it"
 want $L "main5=sandx1 main12=stonex9 | craft2=markerx5 |" "web: the craft"
+want $L "state: main1=stonex9 main5=sandx1 | craft2=markerx5 |" "web: the taps moving a stack after the tap outside"
 n=$(states $L | grep -c "inventory closed")
 [ "$n" = 1 ] || fail "web: the taps outside closed the inventory $n times, not once"
-echo "PASS: native and the web: the hotbar, the place and dig at the finger, the inventory by finger, the double tap out; natively the stick"
+echo "PASS: native and the web: the hotbar, the place and dig at the finger, the inventory by finger, the taps outside; natively the stick"

@@ -4481,14 +4481,14 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		-- lift puts down, a second finger's tap is a right click
 		form_press = function(x, y)
 			luanti.hover(x, y, true)
-			luanti.click(x, y, "left", true)
+			luanti.click(x, y, "left")
 		end,
 		form_move = function(x, y) luanti.hover(x, y, true) end,
 		form_release = function(x, y)
 			luanti.hover(x, y, false)
 			luanti.release("left")
 		end,
-		form_right = function(x, y) luanti.click(x, y, "right", true) end,
+		form_right = function(x, y) luanti.click(x, y, "right") end,
 		-- The wielded item's touch_interaction for what is pointed at
 		short_dig = function()
 			local held = parse_stack(hotbar_stacks[wield_index])

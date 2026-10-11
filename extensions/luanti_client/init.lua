@@ -3646,7 +3646,7 @@ local function show_client(host, port, name, password, mode, origin)
 						chat_click(x, y)
 					else
 						session:hover(x, y, true)
-						session:click(x, y, "left", true)
+						session:click(x, y, "left")
 					end
 				end,
 				form_move = function(x, y)
@@ -3662,7 +3662,7 @@ local function show_client(host, port, name, password, mode, origin)
 				end,
 				form_right = function(x, y)
 					if not chat_input then
-						session:click(x, y, "right", true)
+						session:click(x, y, "right")
 					end
 				end,
 				clutter = function()

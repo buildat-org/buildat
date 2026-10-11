@@ -3498,9 +3498,9 @@ end
 
 -- A click, from whoever is reading the mouse: "left", "right" or
 -- "middle". Returns whether the form took it, so that a click that was not
--- on one still digs. touch: a finger's (form_session's click).
-function M.click(x, y, button, touch)
-	return S():click(x, y, button, touch)
+-- on one still digs.
+function M.click(x, y, button)
+	return S():click(x, y, button)
 end
 
 -- Escape closes it, which is the player closing it
