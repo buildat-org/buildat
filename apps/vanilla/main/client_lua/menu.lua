@@ -185,6 +185,9 @@ end)(buildat.run_script_file("main/keys.lua"))
 -- ContentDB's games ([CONTENTDB]): the server fetches, this asks and draws
 local ask_contentdb, draw_contentdb
 local contentdb_query = ""
+-- [WORLD_MODS] What the page lists: "game", or "mod" for contentdb_game's
+-- mods (the world's whose Mods... opened it)
+local contentdb_kind, contentdb_game = "game", ""
 -- And the name field of a new save, which the one-game list goes to
 local draw_new_save_name
 
@@ -544,6 +547,14 @@ function draw(saves, save_games)
 					cereal.binary_output({selected_save}, {"array", "string"}))
 		end
 	end, fit(420))
+	-- [WORLD_MODS]
+	button_on(menu, right, "Mods...", function()
+		if selected_save then
+			waiting("Reading the mods of " .. selected_save .. "...")
+			buildat.send_packet("main:get_world_mods",
+					cereal.binary_output({selected_save}, {"array", "string"}))
+		end
+	end, fit(420))
 	button_on(menu, right, "Play", function()
 		if selected_save then
 			play(selected_save)
@@ -765,11 +776,15 @@ end
 -- message when the game is in place (it shows on the grid as an imported
 -- game does). simplified: no thumbnails yet, and the first page only --
 -- the query narrows it.
-function ask_contentdb(query)
+-- kind and gameid: mods for that game ([WORLD_MODS]); left out, games
+function ask_contentdb(query, kind, gameid)
 	contentdb_query = query
+	contentdb_kind = kind or "game"
+	contentdb_game = gameid or ""
 	waiting("Asking ContentDB...")
 	buildat.send_packet("main:contentdb_query",
-			cereal.binary_output({query}, {"array", "string"}))
+			cereal.binary_output({query, contentdb_kind, contentdb_game},
+			{"array", "string"}))
 end
 
 -- The pictures the rows wait for, by client file name; the server names
@@ -777,13 +792,16 @@ end
 local pictures = {}
 
 function draw_contentdb(flat)
-	local menu = import_menu("ContentDB: games" ..
+	local mods = contentdb_kind == "mod"
+	local menu = import_menu("ContentDB: " .. (mods and ("mods for " ..
+			contentdb_game) or "games") ..
 			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
 	if public then
 		-- [VANILLA_PUBLIC] 7: a game's mods are Lua that runs on the server
 		local warn = menu.window:CreateChild("Text")
 		warn:SetStyleAuto()
-		warn:SetText("A game's mods run on this server: " ..
+		warn:SetText(mods and "A mod runs on this server: install only " ..
+				"mods you trust." or "A game's mods run on this server: " ..
 				"install only games you trust.")
 		warn:SetColor(magic.Color(rgb("warn")))
 	end
@@ -796,7 +814,8 @@ function draw_contentdb(flat)
 	edit.enabled = true
 	edit:SetText(contentdb_query)
 	menu:add("Search", function()
-		ask_contentdb((edit:GetText():gsub("^%s+", ""):gsub("%s+$", "")))
+		ask_contentdb((edit:GetText():gsub("^%s+", ""):gsub("%s+$", "")),
+				contentdb_kind, contentdb_game)
 	end)
 	-- A row a game in a list that scrolls ([CONTENTDB_LIST]): the picture,
 	-- the title and author over the description, left-aligned and
@@ -859,10 +878,12 @@ function draw_contentdb(flat)
 		menu:add(button, function()
 			waiting("Fetching " .. name .. "...")
 			buildat.send_packet("main:contentdb_install",
-					cereal.binary_output({author, name}, {"array", "string"}))
+					cereal.binary_output(mods and {author, name, "mod",
+					contentdb_game} or {author, name}, {"array", "string"}))
 		end)
 		list:AddItem(row)
 	end
+	log:info("menu: ContentDB " .. contentdb_kind .. "s: " .. n .. " rows")
 	if n == 0 then
 		local none = menu.window:CreateChild("Text")
 		none:SetStyleAuto()
@@ -895,6 +916,33 @@ function draw_contentdb(flat)
 	end
 	back_to_saves(menu, "contentdb")
 end
+
+-- [WORLD_MODS] A mod that needs more than the game and the installed mods
+-- give: {author, name, gameid, then author, name of each}, asked once
+buildat.sub_packet("main:contentdb_deps", function(data)
+	if done then
+		return
+	end
+	local v = cereal.binary_input(data, {"array", "string"})
+	local names = {}
+	for i = 4, #v - 1, 2 do
+		names[#names + 1] = v[i + 1] .. " by " .. v[i]
+	end
+	log:info("menu: " .. v[2] .. " needs " .. table.concat(names, ", "))
+	ui_utils.show_confirm_dialog(v[2] .. " needs what this server does not " ..
+			"have: " .. table.concat(names, ", ") .. ". Install them with it?",
+			function()
+		waiting("Fetching " .. v[2] .. "...")
+		local out = {v[1], v[2], "mod", v[3], "confirmed"}
+		for i = 4, #v do
+			out[#out + 1] = v[i]
+		end
+		buildat.send_packet("main:contentdb_install",
+				cereal.binary_output(out, {"array", "string"}))
+	end, function()
+		buildat.send_packet("main:get_saves", "")
+	end, "Install all")
+end)
 
 buildat.sub_packet("main:contentdb_picture", function(data)
 	local file = cereal.binary_input(data, {"array", "string"})[1]
@@ -1390,6 +1438,106 @@ buildat.sub_packet("main:perf_settings", function(data)
 	game_settings.changed = {}
 	game_settings.filter = ""
 	draw_game_settings(flat, true)
+end)
+
+-- [WORLD_MODS] A world's mods: every installed mod with a toggle, a
+-- modpack as a row of its own over its mods (its toggle turns them all),
+-- one world.mt turns on that is not installed shown missing with a way to
+-- ContentDB, and Remove for what no world uses. A change takes effect at
+-- the world's next start.
+local function draw_world_mods(flat)
+	local save, note, gameid, restart = flat[1], flat[2], flat[3], flat[4]
+	local menu = import_menu(save .. ": mods")
+	local t = menu.window:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetWordwrap(true)
+	t:SetFixedWidth(fit(860))
+	t:SetText(note ~= "" and note or "Turned on here, a mod runs when the " ..
+			"world starts. It is Lua that runs on the server.")
+	local function send(name, packet, on)
+		waiting("Saving...")
+		buildat.send_packet(packet, cereal.binary_output({save, name, on},
+				{"array", "string"}))
+	end
+	local list = menu.window:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedSize(fit(860), math.min(460,
+			math.floor(magic.ui.root.height * 0.5)))
+	local row_w = fit(860) - 40
+	local n = 0
+	for i = 5, #flat - 3, 4 do
+		local name, pack, state, deps = flat[i], flat[i + 1], flat[i + 2],
+				flat[i + 3]
+		n = n + 1
+		local row = list.contentElement:CreateChild("UIElement")
+		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(4, 2, 4, 2))
+		row:SetFixedWidth(row_w)
+		local indent = (pack ~= "" and state ~= "pack") and "      " or ""
+		if state == "missing" then
+			local label = row:CreateChild("Text")
+			label:SetStyleAuto()
+			label:SetFixedWidth(row_w - 230)
+			label:SetText(name .. "  -- missing: turned on, not installed")
+			label:SetColor(magic.Color(rgb("error")))
+			button_on(menu, row, "Get from ContentDB", function()
+				ask_contentdb(name, "mod", gameid)
+			end, 210)
+		else
+			local text = state == "pack" and (name .. "  (modpack)") or
+					((state == "1" and "[x] " or "[ ] ") .. name ..
+					(deps ~= "" and ("  -- needs " .. deps) or ""))
+			button_on(menu, row, indent .. text, function()
+				if state == "pack" then
+					-- The pack on unless every mod in it is on already
+					local all = true
+					for j = 5, #flat - 3, 4 do
+						if flat[j + 1] == name and flat[j + 2] == "0" then
+							all = false
+						end
+					end
+					send(name, "main:set_world_mods", all and "0" or "1")
+				else
+					send(name, "main:set_world_mods", state == "1" and "0" or "1")
+				end
+			end, row_w - 150)
+			if pack == "" or state == "pack" then
+				button_on(menu, row, "Remove", function()
+					ui_utils.show_confirm_dialog("Move " .. name ..
+							" off the server, to its trash?", function()
+						send(name, "main:remove_mod", "")
+					end, function() end, "Remove")
+				end, 130)
+			end
+		end
+		list:AddItem(row)
+	end
+	if n == 0 then
+		local none = menu.window:CreateChild("Text")
+		none:SetStyleAuto()
+		none:SetText("No mods installed on this server")
+	end
+	menu:add("Get mods from ContentDB...", function()
+		ask_contentdb("", "mod", gameid)
+	end)
+	if restart == "1" then
+		menu:add("Restart the world now", function()
+			buildat.send_packet("main:restart_world",
+					cereal.binary_output({save}, {"array", "string"}))
+		end)
+	end
+	menu:add("< back", function()
+		draw(last_saves, last_save_games)
+	end)
+	magic.input:SetMouseVisible(true, "a menu screen")
+end
+buildat.sub_packet("main:world_mods", function(data)
+	if done then
+		return
+	end
+	local flat = cereal.binary_input(data, {"array", "string"})
+	log:info("menu: world mods of " .. tostring(flat[1]) .. ": " ..
+			tostring(flat[2]) .. " | " .. table.concat(flat, ",", 5))
+	draw_world_mods(flat)
 end)
 
 buildat.sub_packet("main:save_info", function(data)

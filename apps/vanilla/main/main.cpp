@@ -201,6 +201,10 @@ struct Module: public interface::Module
 				"network:packet_received/main:contentdb_query"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:contentdb_install"));
+		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
+				"restart_world"})
+			m_server->sub_event(this, Event::t(
+					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_game"));
 		m_server->sub_event(this, Event::t(
@@ -268,6 +272,14 @@ struct Module: public interface::Module
 				on_contentdb_query, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:contentdb_install",
 				on_contentdb_install, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_world_mods",
+				on_get_world_mods, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_world_mods",
+				on_set_world_mods, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:remove_mod",
+				on_remove_mod, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:restart_world",
+				on_restart_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_game",
 				on_import_game, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_world",
@@ -2024,10 +2036,20 @@ struct Module: public interface::Module
 	// extracts it under luanti/games/<name>, the way an import lands.
 	static const char *CONTENTDB;
 	struct Job : public interface::ThreadedThing {
-		enum Kind { LIST, INSTALL, PICTURE } kind;
+		enum Kind { LIST, INSTALL, PICTURE, DEPS } kind;
 		network::PeerInfo::Id peer;
-		ss_ q; // LIST: the query; INSTALL: author/name; PICTURE: the url
-		ss_ name; // INSTALL: the game's directory; PICTURE: the client file
+		// LIST: the query; INSTALL, DEPS: author/name; PICTURE: the url
+		ss_ q;
+		// INSTALL: the directory; PICTURE: the client file; LIST: the game
+		// whose mods are listed, as ContentDB's author/name or a gameid to
+		// look up ([WORLD_MODS])
+		ss_ name;
+		// LIST, INSTALL: "game" or "mod"; DEPS, INSTALL: the world's game
+		ss_ type = "game", gameid;
+		// DEPS: the mod names already there, the game's and the server's;
+		// the packages picked for the rest, author/name
+		std::set<ss_> provided;
+		sv_<ss_> picks;
 		ss_ zip_path, into_dir;
 		ss_ result, error;
 		// INSTALL: what it may take ([SAVE_LIMIT]), and what to say past it
@@ -2046,10 +2068,17 @@ struct Module: public interface::Module
 				if(kind == LIST){
 					// Twenty, the most downloaded first: the whole list is
 					// hundreds and the screen has no pages yet (the search
-					// field narrows it)
+					// field narrows it). Mods for a game only, by the API's
+					// game filter, which wants the game's package name: a
+					// gameid not installed from ContentDB is looked up
+					ss_ game = name;
+					if(!game.empty() && game.find('/') == ss_::npos)
+						game = find_package(game);
 					result = interface::http_get(ss_(CONTENTDB)+
-							"/api/packages/?type=game&limit=20&sort=downloads"
-							"&order=desc&q="+q);
+							"/api/packages/?type="+type+"&limit=20&sort=downloads"
+							"&order=desc&q="+q+(game.empty() ? "" : "&game="+game));
+				} else if(kind == DEPS){
+					resolve_deps();
 				} else if(kind == PICTURE){
 					// A picture already fetched is not fetched again; the
 					// cache path is the download's ([CONTENTDB_LIST])
@@ -2095,6 +2124,119 @@ struct Module: public interface::Module
 		{
 			error = "the fetch crashed";
 			done = true;
+		}
+		// A game's package for its gameid: the type=game search's row of
+		// that exact name, or ""
+		static ss_ find_package(const ss_ &gameid)
+		{
+			const ss_ json = interface::http_get(ss_(CONTENTDB)+
+					"/api/packages/?type=game&q="+gameid);
+			const sajson::document doc =
+					sajson::parse(sajson::dynamic_allocation(),
+					sajson::string(json.c_str(), json.size()));
+			if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY)
+				return "";
+			for(size_t i = 0; i < doc.get_root().get_length(); i++){
+				sajson::value r = doc.get_root().get_array_element(i);
+				if(r.get_type() != sajson::TYPE_OBJECT)
+					continue;
+				ss_ author, name;
+				for(size_t j = 0; j < r.get_length(); j++){
+					sajson::value v = r.get_object_value(j);
+					if(v.get_type() != sajson::TYPE_STRING)
+						continue;
+					if(r.get_object_key(j).as_string() == "author")
+						author = v.as_string();
+					else if(r.get_object_key(j).as_string() == "name")
+						name = v.as_string();
+				}
+				if(name == gameid && !author.empty())
+					return author+"/"+name;
+			}
+			return "";
+		}
+		// [WORLD_MODS] The hard dependencies of q that nothing provides, a
+		// package picked for each, and theirs in turn. The API's answer
+		// is keyed by package and holds the ones it would pick too; one
+		// picked here that it does not hold is asked for. A package of
+		// the dependency's name is picked first, by q's author before
+		// others, else ContentDB's first; one with none is an error.
+		void resolve_deps()
+		{
+			struct Dep { ss_ name; sv_<ss_> packages; };
+			std::map<ss_, sv_<Dep>> known;
+			auto fetch = [&](const ss_ &pkg){
+				const ss_ json = interface::http_get(ss_(CONTENTDB)+
+						"/api/packages/"+pkg+"/dependencies/?only_hard=1");
+				const sajson::document doc =
+						sajson::parse(sajson::dynamic_allocation(),
+						sajson::string(json.c_str(), json.size()));
+				if(!doc.is_valid() ||
+						doc.get_root().get_type() != sajson::TYPE_OBJECT)
+					throw Exception("ContentDB's dependencies of "+pkg+
+							" are not readable");
+				sajson::value root = doc.get_root();
+				for(size_t i = 0; i < root.get_length(); i++){
+					sv_<Dep> &deps = known[root.get_object_key(i).as_string()];
+					deps.clear();
+					sajson::value list = root.get_object_value(i);
+					if(list.get_type() != sajson::TYPE_ARRAY)
+						continue;
+					for(size_t j = 0; j < list.get_length(); j++){
+						sajson::value d = list.get_array_element(j);
+						if(d.get_type() != sajson::TYPE_OBJECT)
+							continue;
+						Dep dep;
+						bool optional = false;
+						for(size_t k = 0; k < d.get_length(); k++){
+							const ss_ key = d.get_object_key(k).as_string();
+							sajson::value v = d.get_object_value(k);
+							if(key == "name" && v.get_type() == sajson::TYPE_STRING)
+								dep.name = v.as_string();
+							else if(key == "is_optional")
+								optional = v.get_type() == sajson::TYPE_TRUE;
+							else if(key == "packages" &&
+									v.get_type() == sajson::TYPE_ARRAY){
+								for(size_t m = 0; m < v.get_length(); m++)
+									if(v.get_array_element(m).get_type() ==
+											sajson::TYPE_STRING)
+										dep.packages.push_back(
+												v.get_array_element(m).as_string());
+							}
+						}
+						if(!optional && !dep.name.empty())
+							deps.push_back(dep);
+					}
+				}
+				if(!known.count(pkg))
+					known[pkg];
+			};
+			const ss_ author = q.substr(0, q.find('/'));
+			sv_<ss_> queue{q};
+			for(size_t at = 0; at < queue.size(); at++){
+				const ss_ pkg = queue[at];
+				if(!known.count(pkg))
+					fetch(pkg);
+				for(const Dep &dep : known[pkg]){
+					if(provided.count(dep.name))
+						continue;
+					if(dep.packages.empty())
+						throw Exception(dep.name+", which "+pkg.substr(
+								pkg.find('/') + 1)+" needs, is not on ContentDB");
+					ss_ pick;
+					for(int pass = 0; pass < 2 && pick.empty(); pass++)
+						for(const ss_ &p : dep.packages)
+							if(pick.empty() && p.substr(p.find('/') + 1) ==
+									dep.name && (pass == 1 ||
+									p.substr(0, p.find('/')) == author))
+								pick = p;
+					if(pick.empty())
+						pick = dep.packages[0];
+					provided.insert(dep.name);
+					picks.push_back(pick);
+					queue.push_back(pick);
+				}
+			}
 		}
 		// The releases list is newest first; "url" is the zip, absolute
 		// or site-relative
@@ -2165,7 +2307,27 @@ struct Module: public interface::Module
 		job->kind = Job::LIST;
 		job->peer = packet.sender;
 		job->q = url_encode(values.empty() ? "" : values[0].substr(0, 200));
+		// [WORLD_MODS] {query, "mod", gameid}: mods, for that game when it
+		// is installed here, by the package it came from if ContentDB's
+		if(values.size() >= 3 && values[1] == "mod"){
+			job->type = "mod";
+			const ss_ game = find_game(values[2]);
+			if(!game.empty()){
+				std::ifstream f(game+"/.buildat_source");
+				ss_ source;
+				std::getline(f, source);
+				job->name = source.compare(0, 10, "contentdb:") == 0 ?
+						url_encode_path(source.substr(10)) : values[2];
+			}
+		}
 		start_job(job);
+	}
+	// author/name, each half encoded
+	static ss_ url_encode_path(const ss_ &s)
+	{
+		const size_t slash = s.find('/');
+		return slash == ss_::npos ? url_encode(s) :
+				url_encode(s.substr(0, slash))+"/"+url_encode(s.substr(slash + 1));
 	}
 
 	void on_contentdb_install(const network::Packet &packet)
@@ -2183,11 +2345,65 @@ struct Module: public interface::Module
 		}
 		if(values.size() < 2)
 			return;
+		// [WORLD_MODS] {author, name, "mod", gameid}: what it needs is
+		// asked about first; {..., "confirmed", author, name, ...}
+		// installs it and those
+		if(values.size() >= 4 && values[2] == "mod"){
+			if(values.size() == 4){
+				mod_install_ask(packet.sender, values[0], values[1], values[3]);
+				return;
+			}
+			for(size_t i = 5; i + 1 < values.size(); i += 2)
+				contentdb_install(packet.sender, values[i], values[i + 1], "mod");
+			contentdb_install(packet.sender, values[0], values[1], "mod");
+			return;
+		}
 		contentdb_install(packet.sender, values[0], values[1]);
 	}
 
+	// A ContentDB name is a directory: letters, digits, _ and - only
+	static bool contentdb_name_ok(const ss_ &v)
+	{
+		if(v.empty())
+			return false;
+		for(char c : v)
+			if(!isalnum((unsigned char)c) && c != '_' && c != '-')
+				return false;
+		return true;
+	}
+
+	// The mod's hard dependencies that neither the world's game nor an
+	// installed mod gives, found on a thread; poll_contentdb() asks the
+	// client about them, or installs at once when there are none
+	void mod_install_ask(network::PeerInfo::Id peer, const ss_ &author,
+			const ss_ &name, const ss_ &gameid)
+	{
+		if(!contentdb_name_ok(author) || !contentdb_name_ok(name)){
+			menu_error(peer, "Not a ContentDB name: "+author+"/"+name);
+			return;
+		}
+		if(interface::fs::path_exists(mods_path()+"/"+name)){
+			menu_error(peer, name+" is already installed");
+			return;
+		}
+		Job *job = new Job();
+		job->kind = Job::DEPS;
+		job->peer = peer;
+		job->q = author+"/"+name;
+		job->gameid = gameid;
+		sv_<ModInfo> mods;
+		const ss_ game = find_game(gameid);
+		if(!game.empty())
+			scan_mods(game+"/mods", "", mods);
+		scan_mods(mods_path(), "", mods);
+		for(const ModInfo &m : mods)
+			job->provided.insert(m.name);
+		send_progress(peer, "Asking ContentDB what "+name+" needs...");
+		start_job(job);
+	}
+
 	void contentdb_install(network::PeerInfo::Id peer, const ss_ &author,
-			const ss_ &name)
+			const ss_ &name, const ss_ &type = "game")
 	{
 		// Who asked, as the packet's handler had it
 		const network::Packet packet(peer, "", "");
@@ -2200,7 +2416,8 @@ struct Module: public interface::Module
 				}
 			}
 		}
-		const ss_ to = luanti_path()+"/games/"+name;
+		const ss_ to = (type == "mod" ? mods_path() :
+				luanti_path()+"/games")+"/"+name;
 		if(interface::fs::path_exists(to)){
 			menu_error(packet.sender, name+" is already installed. Remove "+
 					where(to)+" yourself if you mean to replace it.");
@@ -2216,6 +2433,7 @@ struct Module: public interface::Module
 		job->peer = packet.sender;
 		job->q = author+"/"+name;
 		job->name = name;
+		job->type = type;
 		storage::access(m_server, [&](storage::Interface *i){
 			job->room = i->room_bytes();
 		});
@@ -2224,7 +2442,9 @@ struct Module: public interface::Module
 				"/luanti/contentdb";
 		interface::fs::create_directories(cache);
 		job->zip_path = cache+"/"+author+"_"+name+".zip";
-		job->into_dir = to+".installing";
+		// A mod's outside mods/, where the loader would find it half done
+		job->into_dir = type == "mod" ? luanti_path()+"/mods.installing/"+
+				name : to+".installing";
 		send_progress(packet.sender, "Fetching "+name+"...");
 		start_job(job);
 	}
@@ -2278,6 +2498,26 @@ struct Module: public interface::Module
 				send_contentdb_list(job->peer, job->result);
 				continue;
 			}
+			if(job->kind == Job::DEPS){
+				const size_t slash = job->q.find('/');
+				const ss_ author = job->q.substr(0, slash),
+						name = job->q.substr(slash + 1);
+				if(job->picks.empty()){
+					contentdb_install(job->peer, author, name, "mod");
+					continue;
+				}
+				// The question, with the picks: {author, name, gameid,
+				// author, name, ...}
+				sv_<ss_> flat{author, name, job->gameid};
+				for(const ss_ &p : job->picks){
+					flat.push_back(p.substr(0, p.find('/')));
+					flat.push_back(p.substr(p.find('/') + 1));
+				}
+				log_i(MODULE, "contentdb: %s needs %zu more", cs(job->q),
+						job->picks.size());
+				send_strings(job->peer, "main:contentdb_deps", flat);
+				continue;
+			}
 			if(job->kind == Job::PICTURE){
 				// The file to every client, the name to the one that asked:
 				// its row asks the cache for it until it has arrived
@@ -2295,7 +2535,8 @@ struct Module: public interface::Module
 				continue;
 			}
 			// The zip's one top-level directory is the game; renamed into
-			// place, and the game shows on the grid as an imported one does
+			// place, and the game shows on the grid as an imported one does.
+			// A mod's zip may hold the mod at its top ([WORLD_MODS])
 			ss_ top;
 			size_t tops = 0;
 			for(const auto &n : interface::fs::list_directory(job->into_dir)){
@@ -2306,18 +2547,27 @@ struct Module: public interface::Module
 					tops++;
 				}
 			}
-			const ss_ to = luanti_path()+"/games/"+job->name;
-			const ss_ from = tops == 1 ? job->into_dir+"/"+top : job->into_dir;
+			const ss_ to = (job->type == "mod" ? mods_path() :
+					luanti_path()+"/games")+"/"+job->name;
+			const bool at_top = interface::fs::path_exists(job->into_dir+
+					"/init.lua") || interface::fs::path_exists(job->into_dir+
+					"/modpack.conf") || interface::fs::path_exists(job->into_dir+
+					"/game.conf");
+			const ss_ from = tops == 1 && !at_top ? job->into_dir+"/"+top :
+					job->into_dir;
+			interface::fs::create_directories(interface::fs::strip_file_name(to));
 			if(rename(from.c_str(), to.c_str()) != 0){
 				menu_error(job->peer, "Installing "+job->name+" failed: cannot "
 						"rename "+where(from));
 				continue;
 			}
-			interface::fs::remove_all(job->into_dir);
+			if(from != job->into_dir)
+				interface::fs::remove_all(job->into_dir);
 			// Where it came from, for the client's Discuss to name the game
 			// to a Hearth ([OVERLAY_DISCUSS])
 			std::ofstream(to+"/.buildat_source") << "contentdb:" << job->q;
-			log_i(MODULE, "Installed game %s from ContentDB", cs(job->name));
+			log_i(MODULE, "Installed %s %s from ContentDB", cs(job->type),
+					cs(job->name));
 			storage::access(m_server, [&](storage::Interface *i){
 				i->remeasure();
 			});
@@ -2392,6 +2642,314 @@ struct Module: public interface::Module
 			job->zip_path = cache+"/"+flat[i]+"_"+flat[i + 1]+".png";
 			start_job(job);
 		}
+	}
+
+	void send_strings(network::PeerInfo::Id peer, const ss_ &name,
+			const sv_<ss_> &values)
+	{
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, name, os.str());
+		});
+	}
+
+	// [WORLD_MODS] The server's mods, under luanti/mods as the games are
+	// under luanti/games, and each world's choice of them in its world.mt
+	// as Luanti writes it: load_mod_<name> = true or false. The luanti
+	// module's modloader.lua loads the chosen ones.
+	ss_ mods_path()
+	{
+		return luanti_path()+"/mods";
+	}
+	struct ModInfo {
+		ss_ name, pack, dir; // pack: the modpack's directory name, or ""
+		sv_<ss_> depends;
+	};
+	// Every mod under path as modlist.lua finds them: a directory with an
+	// init.lua is a mod, named by its mod.conf; any other is looked into.
+	// simplified: a multi-line depends in mod.conf is read as its first
+	// line (modlist.lua reads it whole, and loads by that)
+	static void scan_mods(const ss_ &path, const ss_ &pack,
+			sv_<ModInfo> &out, int depth = 0)
+	{
+		if(depth > 3)
+			return;
+		for(const auto &n : interface::fs::list_directory(path)){
+			if(!n.is_directory || n.name.empty() || n.name[0] == '.')
+				continue;
+			const ss_ dir = path+"/"+n.name;
+			if(!interface::fs::path_exists(dir+"/init.lua")){
+				scan_mods(dir, depth == 0 ? n.name : pack, out, depth + 1);
+				continue;
+			}
+			std::map<ss_, ss_> conf = read_world_mt(dir+"/mod.conf");
+			ModInfo m;
+			m.name = conf.count("name") ? conf["name"] : n.name;
+			m.pack = pack;
+			m.dir = dir;
+			ss_ deps = conf["depends"];
+			if(!conf.count("depends") && !conf.count("optional_depends")){
+				std::ifstream f(dir+"/depends.txt");
+				ss_ line;
+				while(std::getline(f, line))
+					if(line.find('?') == ss_::npos)
+						deps += ","+line;
+			}
+			std::istringstream is(deps);
+			ss_ d;
+			while(std::getline(is, d, ',')){
+				const size_t a = d.find_first_not_of(" \t\r");
+				const size_t b = d.find_last_not_of(" \t\r");
+				if(a != ss_::npos)
+					m.depends.push_back(d.substr(a, b - a + 1));
+			}
+			if(mod_name_ok(m.name))
+				out.push_back(m);
+		}
+	}
+	static bool mod_name_ok(const ss_ &name)
+	{
+		return !name.empty() && name.find_first_not_of(
+				"abcdefghijklmnopqrstuvwxyz0123456789_") == ss_::npos;
+	}
+	// The worlds whose world.mt turns the mod on
+	sv_<ss_> worlds_enabling(const ss_ &mod)
+	{
+		sv_<ss_> out;
+		sv_<storage::SaveInfo> infos;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			infos = istorage->list();
+		});
+		for(const storage::SaveInfo &info : infos){
+			ss_ path;
+			if(info.name.empty() || info.name[0] == '_' ||
+					!save_dir(info.name, path))
+				continue;
+			if(read_world_mt(path+"/luanti/world.mt")["load_mod_"+mod] == "true")
+				out.push_back(info.name);
+		}
+		return out;
+	}
+	// main:world_mods {save, note, gameid, whether "Restart now" is
+	// offered, then per row: name, modpack ("" for none, the pack's own
+	// row has its own name), state ("1" on, "0" off, "pack", "missing"),
+	// the hard dependencies the game does not give, comma-separated}
+	void send_world_mods(network::PeerInfo::Id peer, const ss_ &save,
+			const ss_ &note)
+	{
+		ss_ path, gameid;
+		if(!save_dir(save, path, &gameid)){
+			send_strings(peer, "main:world_mods", {save, "No such world.",
+					"", "0"});
+			return;
+		}
+		std::map<ss_, ss_> mt = read_world_mt(path+"/luanti/world.mt");
+		std::set<ss_> game_mods;
+		{
+			sv_<ModInfo> g;
+			const ss_ game = find_game(gameid);
+			if(!game.empty())
+				scan_mods(game+"/mods", "", g);
+			for(const ModInfo &m : g)
+				game_mods.insert(m.name);
+		}
+		sv_<ModInfo> mods;
+		scan_mods(mods_path(), "", mods);
+		std::sort(mods.begin(), mods.end(), [](const ModInfo &a,
+				const ModInfo &b){
+			return (a.pack.empty() ? a.name : a.pack+"/"+a.name) <
+					(b.pack.empty() ? b.name : b.pack+"/"+b.name);
+		});
+		sv_<ss_> flat{save, note, gameid, m_public && save == m_world_name ?
+				"1" : "0"};
+		std::set<ss_> installed;
+		ss_ pack;
+		for(const ModInfo &m : mods){
+			installed.insert(m.name);
+			if(!m.pack.empty() && m.pack != pack)
+				for(const ss_ &v : {m.pack, m.pack, ss_("pack"), ss_()})
+					flat.push_back(v);
+			pack = m.pack;
+			ss_ deps;
+			for(const ss_ &d : m.depends)
+				if(!game_mods.count(d))
+					deps += (deps.empty() ? "" : ",")+d;
+			for(const ss_ &v : {m.name, m.pack,
+					ss_(mt["load_mod_"+m.name] == "true" ? "1" : "0"), deps})
+				flat.push_back(v);
+		}
+		for(const auto &kv : mt){
+			if(kv.first.compare(0, 9, "load_mod_") != 0 || kv.second != "true")
+				continue;
+			const ss_ name = kv.first.substr(9);
+			if(!installed.count(name) && !game_mods.count(name))
+				for(const ss_ &v : {name, ss_(), ss_("missing"), ss_()})
+					flat.push_back(v);
+		}
+		send_strings(peer, "main:world_mods", flat);
+	}
+	// What keeps a world's mods from loading: one with a game mod's name,
+	// or a hard dependency nothing gives. "" when they load (a cycle is
+	// left to modlist.lua to say).
+	ss_ world_mods_problem(const ss_ &game_path, const ss_ &save_path)
+	{
+		sv_<ModInfo> game, extra, installed;
+		scan_mods(game_path+"/mods", "", game);
+		scan_mods(save_path+"/luanti/worldmods", "", extra);
+		scan_mods(mods_path(), "", installed);
+		std::map<ss_, ss_> mt = read_world_mt(save_path+"/luanti/world.mt");
+		for(const ModInfo &m : installed)
+			if(mt["load_mod_"+m.name] == "true")
+				extra.push_back(m);
+		std::set<ss_> names;
+		for(const ModInfo &m : game)
+			names.insert(m.name);
+		for(const ModInfo &m : extra)
+			if(names.count(m.name))
+				return "the mod "+m.name+" has the name of one of the game's";
+		for(const ModInfo &m : extra)
+			names.insert(m.name);
+		ss_ out;
+		for(const ModInfo &m : extra)
+			for(const ss_ &d : m.depends)
+				if(!names.count(d))
+					out += (out.empty() ? "" : "; ")+m.name+" needs "+d;
+		return out.empty() ? "" : "its mods cannot load: "+out+
+				", not installed or not turned on (Mods...)";
+	}
+	// main:get_world_mods {save}
+	void on_get_world_mods(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(!values.empty())
+			send_world_mods(packet.sender, values[0], "");
+	}
+	// main:set_world_mods {save, name, "1" or "0"}: a modpack's name turns
+	// its every mod; turning one on turns on the installed mods it needs,
+	// and one it needs that is not installed is said and nothing changes
+	void on_set_world_mods(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		ss_ path, gameid;
+		if(values.size() < 3 || !save_dir(values[0], path, &gameid))
+			return;
+		const bool on = values[2] == "1";
+		sv_<ModInfo> mods, game;
+		scan_mods(mods_path(), "", mods);
+		if(!find_game(gameid).empty())
+			scan_mods(find_game(gameid)+"/mods", "", game);
+		std::set<ss_> game_mods;
+		for(const ModInfo &m : game)
+			game_mods.insert(m.name);
+		std::map<ss_, ss_> set;
+		sv_<ss_> todo;
+		for(const ModInfo &m : mods)
+			if(m.name == values[1] || m.pack == values[1])
+				todo.push_back(m.name);
+		ss_ also, missing;
+		for(size_t i = 0; i < todo.size(); i++){
+			if(set.count("load_mod_"+todo[i]))
+				continue;
+			set["load_mod_"+todo[i]] = on ? "true" : "false";
+			if(i > 0)
+				also += (also.empty() ? "" : ", ")+todo[i];
+			if(!on)
+				continue;
+			for(const ModInfo &m : mods){
+				if(m.name != todo[i])
+					continue;
+				for(const ss_ &d : m.depends){
+					bool have = game_mods.count(d) > 0;
+					for(const ModInfo &o : mods)
+						if(o.name == d){
+							have = true;
+							todo.push_back(d);
+						}
+					if(!have)
+						missing += (missing.empty() ? "" : ", ")+d;
+				}
+			}
+		}
+		if(todo.empty())
+			return send_world_mods(packet.sender, values[0], values[1]+
+					" is not installed.");
+		if(!missing.empty())
+			return send_world_mods(packet.sender, values[0], values[1]+
+					" needs "+missing+", not installed here. Nothing changed.");
+		write_world_mt(path+"/luanti/world.mt", set);
+		log_i(MODULE, "%s: mod %s %s%s", cs(values[0]), cs(values[1]),
+				on ? "on" : "off", also.empty() ? "" : cs(", and "+also));
+		send_world_mods(packet.sender, values[0], ss_(on ? "On" : "Off")+
+				": "+values[1]+(also.empty() ? "" : ", with "+also)+
+				". It takes effect at the world's next start.");
+	}
+	// main:remove_mod {save, name}: a mod or modpack under luanti/mods to
+	// its trash, when no world turns it on
+	void on_remove_mod(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.size() < 2)
+			return;
+		sv_<ModInfo> mods;
+		scan_mods(mods_path(), "", mods);
+		ss_ dir, users;
+		for(const ModInfo &m : mods){
+			if(m.name != values[1] && m.pack != values[1])
+				continue;
+			dir = m.pack.empty() ? m.dir : mods_path()+"/"+m.pack;
+			for(const ss_ &w : worlds_enabling(m.name))
+				users += (users.find(w) != ss_::npos ? "" :
+						ss_(users.empty() ? "" : ", ")+w);
+		}
+		if(dir.empty())
+			return send_world_mods(packet.sender, values[0], values[1]+
+					" is not installed.");
+		if(!users.empty())
+			return send_world_mods(packet.sender, values[0], values[1]+
+					" is not removed: on in "+users+".");
+		const ss_ trash = luanti_path()+"/trash";
+		interface::fs::create_directories(trash);
+		time_t now = time(NULL);
+		char date[32];
+		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
+		const ss_ to = trash+"/mod_"+values[1]+"-"+date;
+		if(rename(dir.c_str(), to.c_str()) != 0)
+			return send_world_mods(packet.sender, values[0], "Could not move "+
+					where(dir)+" to "+where(to));
+		log_i(MODULE, "Mod %s moved to %s", cs(values[1]), cs(to));
+		send_world_mods(packet.sender, values[0], values[1]+
+				" moved to the trash.");
+	}
+	// main:restart_world {save}: the running world of a public server
+	// started again, as switch_world() does another
+	// simplified: a launcher's own game is left and played again; a
+	// restart of its process waits for [VANILLA_STOP]
+	void on_restart_world(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.empty() || !m_public || values[0] != m_world_name)
+			return;
+		log_i(MODULE, "%s restarts the world %s", cs(m_names[packet.sender]),
+				cs(m_world_name));
+		if(m_scene){
+			luanti::access(m_server, [&](luanti::Interface *i){
+				i->chat_send("", "The server restarts the world: join "
+						"again in a moment");
+			});
+		}
+		m_restart_in = 1.5f;
 	}
 
 	void on_get_settings(const network::Packet &packet)
@@ -3418,10 +3976,7 @@ struct Module: public interface::Module
 				menu_error(peer, "A world is already starting");
 			return;
 		}
-		ss_ game_path = find_game(gameid);
-		if(game_path.empty()){
-			ss_ message = "World "+world_name+" wants game "+gameid+
-					", which is not in "+where(luanti_path()+"/games");
+		auto refuse = [&](const ss_ &message){
 			// A public server waits for an admin rather than exiting,
 			// which its runner would take as a crash to restart
 			if(peer == 0 && m_public){
@@ -3433,7 +3988,23 @@ struct Module: public interface::Module
 				return;
 			}
 			menu_error(peer, message);
+		};
+		ss_ game_path = find_game(gameid);
+		if(game_path.empty()){
+			refuse("World "+world_name+" wants game "+gameid+
+					", which is not in "+where(luanti_path()+"/games"));
 			return;
+		}
+		// [WORLD_MODS] A world whose mods cannot load does not start, and
+		// the menu says why, as Luanti refuses it
+		{
+			ss_ save_path;
+			const ss_ problem = save_dir(world_name, save_path) ?
+					world_mods_problem(game_path, save_path) : "";
+			if(!problem.empty()){
+				refuse(world_name+": "+problem);
+				return;
+			}
 		}
 		m_starting = true;
 		m_world_name = world_name;
@@ -3551,6 +4122,26 @@ struct Module: public interface::Module
 		const ss_ import_from = !import_world_from.empty() ?
 				import_world_from :
 				ss_(env_import && env_import[0] ? env_import : "");
+		// [WORLD_MODS] An imported world's choice of mods and its own
+		// worldmods/ come with it, on its first start here
+		if(!import_from.empty()){
+			const ss_ wm = save->path()+"/luanti/worldmods";
+			size_t done = 0;
+			ss_ error;
+			if(interface::fs::path_exists(import_from+"/worldmods") &&
+					!interface::fs::path_exists(wm) &&
+					!copy_tree(import_from+"/worldmods", wm, done, 0, peer,
+					error))
+				log_w(MODULE, "The world's mods: %s", cs(error));
+			const ss_ mt_path = save->path()+"/luanti/world.mt";
+			std::map<ss_, ss_> mine = read_world_mt(mt_path), set;
+			for(const auto &kv : read_world_mt(import_from+"/world.mt"))
+				if(kv.first.compare(0, 9, "load_mod_") == 0 &&
+						!mine.count(kv.first))
+					set[kv.first] = kv.second;
+			if(!set.empty())
+				write_world_mt(mt_path, set);
+		}
 		luanti::access(m_server, [&](luanti::Interface *i){
 			// What the server is doing, to whoever is waiting for the world:
 			// a game of 220 mods takes minutes, and "Creating <name>..."
@@ -3584,6 +4175,9 @@ struct Module: public interface::Module
 			// ([VANILLA_PUBLIC] 3)
 			if(m_public)
 				i->load_lua("core.__public = true", "vanilla_public");
+			// The mods world.mt's load_mod_ lines choose from ([WORLD_MODS])
+			i->load_lua("core.__luanti_mods_path = [==["+mods_path()+"]==]",
+					"vanilla_mods");
 			apply_default_preset(save->path());
 			i->run_game(game_path, save);
 		});

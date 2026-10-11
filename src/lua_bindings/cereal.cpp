@@ -249,21 +249,16 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 			throw Exception("array requires parameter table");
 		lua_rawgeti(L, type_L, 2);
 		int array_type_L = lua_gettop(L);
-		// Loop through array items
-		uint64_t num_entries = 0;
-		lua_pushnil(L);
-		while(lua_next(L, value_L) != 0){
-			lua_pop(L, 1); // Continue iterating by popping table value
-			num_entries++;
-		}
+		// 1..n in order: lua_next walks a table's hash part in no order,
+		// and a list grown by t[#t + 1] past its constructor is partly
+		// there ([WORLD_MODS]: a dependency's author and name swapped)
+		const uint64_t num_entries = lua_objlen(L, value_L);
 		ar(num_entries);
-		lua_pushnil(L);
-		int i = 1;
-		while(lua_next(L, value_L) != 0){
-			log_t(MODULE, "array[%i]", i);
+		for(uint64_t i = 1; i <= num_entries; i++){
+			log_t(MODULE, "array[%i]", (int)i);
+			lua_rawgeti(L, value_L, (int)i);
 			binary_output_write_value(L, -1, array_type_L, ar);
-			lua_pop(L, 1); // Continue iterating by popping table value
-			i++;
+			lua_pop(L, 1);
 		}
 		lua_pop(L, 1); // array_type_L
 		// value_result_table_L is left on stack

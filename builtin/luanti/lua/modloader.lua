@@ -3,11 +3,8 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
--- Finds the game's mods, puts them in dependency order, and runs them.
---
--- Not here: world mods, global mods and load_mod_* in world.mt. A world under
--- cache/luanti is a world for running a game, not for installing mods into;
--- when that changes this is where it goes.
+-- Finds the game's mods, the world's and the ones world.mt enables, puts
+-- them in dependency order, and runs them.
 
 local game_path = __luanti_game_path
 local read_file = core.__read_file
@@ -98,6 +95,54 @@ modlist.set_read_file(read_file)
 do
 	local game_conf = modlist.parse_conf(read_file(game_path .. "/game.conf"))
 	local mods = modlist.scan_mods(game_path .. "/mods")
+	-- [WORLD_MODS] After the game's, as Luanti adds them: every mod in the
+	-- world's worldmods/, then each one under the server's mods directory
+	-- (core.__luanti_mods_path, vanilla's) that world.mt's load_mod_<name>
+	-- turns on. One with a game mod's name is refused, as Luanti refuses
+	-- it; a second of a name already added is left out.
+	-- simplified: an enabled mod that is not installed is a warning, not a
+	-- refusal -- the world's Mods menu shows it missing
+	local have = {}
+	for _, mod in ipairs(mods) do
+		have[mod.name] = "game"
+	end
+	local function add(list, from)
+		for _, mod in ipairs(list) do
+			if have[mod.name] == "game" then
+				error("The " .. from .. " mod " .. mod.name ..
+						" has the name of one of the game's mods")
+			elseif have[mod.name] then
+				core.log("warning", "The " .. from .. " mod " .. mod.name ..
+						" is left out: one of that name is already loaded")
+			else
+				have[mod.name] = from
+				mods[#mods + 1] = mod
+			end
+		end
+	end
+	add(modlist.scan_mods(__luanti_world_path .. "/worldmods"), "world's")
+	local enabled = {}
+	for _, key in ipairs(core.settings:get_names()) do
+		local name = key:match("^load_mod_(.+)$")
+		if name and core.settings:get_bool(key, false) then
+			enabled[name] = true
+		end
+	end
+	local chosen = {}
+	for _, mod in ipairs(core.__luanti_mods_path and
+			modlist.scan_mods(core.__luanti_mods_path) or {}) do
+		if enabled[mod.name] then
+			chosen[#chosen + 1] = mod
+			enabled[mod.name] = nil
+		end
+	end
+	add(chosen, "enabled")
+	for name in pairs(enabled) do
+		if not have[name] then
+			core.log("warning", "world.mt enables the mod " .. name ..
+					", which is not installed")
+		end
+	end
 	local ordered = modlist.order_mods(mods, game_conf.first_mod, game_conf.last_mod)
 
 	for _, mod in ipairs(ordered) do
