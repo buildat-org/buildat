@@ -466,6 +466,17 @@ function draw(saves, save_games)
 		under:add("Get a game from ContentDB...", function()
 			ask_contentdb("")
 		end)
+		-- [VANILLA_STOP] The players are held in a menu of their own until
+		-- an admin starts a world again
+		if public == "public_running" then
+			under:add("Stop the world...", function()
+				ui_utils.show_confirm_dialog("Stop the world? Everyone is " ..
+						"held until an admin starts one again.", function()
+					waiting("Stopping...")
+					buildat.send_packet("main:stop_world", "")
+				end, function() end, "Stop")
+			end)
+		end
 	else
 		under:add("Import a game from Luanti...", function()
 			ask_for_imports("games")

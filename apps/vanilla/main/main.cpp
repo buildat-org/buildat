@@ -203,7 +203,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:contentdb_install"));
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
-				"restart_world", "get_world_txp", "set_world_txp", "remove_txp"})
+				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
+				"stop_world"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -281,6 +282,8 @@ struct Module: public interface::Module
 				on_remove_mod, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:restart_world",
 				on_restart_world, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:stop_world",
+				on_stop_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_world_txp",
 				on_get_world_txp, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_world_txp",
@@ -428,12 +431,21 @@ struct Module: public interface::Module
 		return is_world_name(name) ? name : "";
 	}
 
-	void write_public_world(const ss_ &name)
+	// note: [VANILLA_STOP] who stopped it, on the line after an empty name
+	void write_public_world(const ss_ &name, const ss_ &note = "")
 	{
 		interface::fs::create_directories(
 				interface::fs::strip_file_name(public_world_file()));
 		std::ofstream f(public_world_file());
-		f<<name<<"\n";
+		f<<name<<"\n"<<note<<"\n";
+	}
+	ss_ read_stop_note()
+	{
+		std::ifstream f(public_world_file());
+		ss_ name, note;
+		std::getline(f, name);
+		std::getline(f, note);
+		return name.empty() ? note : "";
 	}
 
 	// Another world, by restarting: everyone is told, the choice is kept
@@ -491,8 +503,11 @@ struct Module: public interface::Module
 			});
 			return;
 		}
-		sv_<ss_> values{"No world is running on this server yet: an admin "
-				"chooses one. You are in as soon as they have."};
+		const ss_ note = read_stop_note();
+		sv_<ss_> values{note.empty() ? "No world is running on this server "
+				"yet: an admin chooses one. You are in as soon as they have." :
+				note+". No world is running: you are in as soon as an admin "
+				"starts one."};
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
@@ -632,8 +647,14 @@ struct Module: public interface::Module
 	{
 		if(m_restart_in >= 0){
 			m_restart_in -= event.dtime;
-			if(m_restart_in < 0)
+			if(m_restart_in < 0){
+				// The goodbye then says it restarts, and the clients wait
+				// it out and join again (builtin/network's on_shutdown)
+				std::ofstream(m_server->get_config().get<ss_>("user_path")+
+						"/apps/"+m_server->get_app_id()+"/shutdown_reason")<<
+						"the world changes\n";
 				m_server->shutdown(RESTART_STATUS, "switching the world");
+			}
 		}
 		poll_contentdb();
 		m_where_timer += event.dtime;
@@ -719,6 +740,20 @@ struct Module: public interface::Module
 				return;
 			}
 			b.first += 1;
+		}
+		// [VANILLA_STOP] No game running: the line to everyone in, as
+		// Luanti says one
+		if(!m_scene){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(sv_<ss_>{"<"+player_name_of(packet.sender)+"> "+message});
+			}
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(const auto &kv : m_names)
+					inetwork->send(kv.first, "main:chat_line", os.str());
+			});
+			return;
 		}
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->chat_message(player_name_of(packet.sender), message);
@@ -3154,10 +3189,28 @@ struct Module: public interface::Module
 				cs(m_world_name));
 		if(m_scene){
 			luanti::access(m_server, [&](luanti::Interface *i){
-				i->chat_send("", "The server restarts the world: join "
-						"again in a moment");
+				i->chat_send("", m_names[packet.sender]+" restarts the "
+						"server's world: back in a moment");
 			});
 		}
+		m_restart_in = 1.5f;
+	}
+	// [VANILLA_STOP] main:stop_world: a public server's world stopped by
+	// an admin. Everyone told, the world saved by the restart that leaves
+	// the server with none, as at a first boot; an admin starts one
+	// from the world menu, and the users are held until then.
+	// simplified: no world loaded for maintenance while stopped (the trim
+	// works on the running world); a launcher's own game is left instead
+	void on_stop_world(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender) || !m_public || !m_scene)
+			return;
+		const ss_ who = m_names[packet.sender];
+		log_i(MODULE, "%s stops the world %s", cs(who), cs(m_world_name));
+		luanti::access(m_server, [&](luanti::Interface *i){
+			i->chat_send("", who+" stops the server's world");
+		});
+		write_public_world("", "Stopped by an admin ("+who+")");
 		m_restart_in = 1.5f;
 	}
 
