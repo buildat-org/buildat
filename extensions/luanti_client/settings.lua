@@ -50,7 +50,9 @@ M.DEFAULTS = {mode = "unlit", view_range = 120, view_bobbing = 1,
 		-- filters for the same server every time ([BOX_PLAYTEST_2] 13b)
 		server_filter = "", keys = {},
 		-- Luanti's touchscreen_sensitivity ([TOUCH_LOOK_SETTING])
-		touch_sensitivity = 0.2}
+		touch_sensitivity = 0.2,
+		-- F5's level, 0 off, 1 basic, 2 full ([DEBUG_INFO_SETTING])
+		debug_info = 0}
 
 -- The bindings table, for the screen's "Key bindings..." row; init.lua
 -- sets it
@@ -216,6 +218,11 @@ function M.show()
 		save()
 	end)
 	M.add_sensitivity(menu, s)
+	menu:add_dropdown("Debug info (F5)", {{"Off", 0}, {"Basic", 1},
+			{"Full", 2}}, s.debug_info, function(v)
+		s.debug_info = v
+		save()
+	end)
 	rows.bob = menu:add("", function()
 		s.view_bobbing = s.view_bobbing ~= 0 and 0 or 1
 		save()

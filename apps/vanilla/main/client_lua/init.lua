@@ -2683,9 +2683,17 @@ detail_text.verticalAlignment = magic.VA_TOP
 detail_text:SetPosition(8, 8)
 -- 0 nothing, 1 the two blocks official Luanti's own first debug level shows,
 -- 2 everything. F5 cycles it; see [STATUS_LEVELS]. Starts at 1, so the row
--- is up without a key press -- [STATUS_DEFAULT].
-local detail_level = 1
+-- is up without a key press -- [STATUS_DEFAULT]. The level is kept on this
+-- client for this server, F5's and the settings' ([DEBUG_INFO_SETTING])
+local detail_level = tonumber(buildat.storage_read("debug_info") or "") or 1
 detail_text.visible = detail_level > 0
+keys.set_detail = function(level)
+	detail_level = level
+	detail_text.visible = level > 0
+	buildat.storage_write("debug_info", tostring(level))
+	log:info("debug info: " .. level)
+end
+log:info("debug info at start: " .. detail_level)
 
 -- Luanti's yaw, from the launcher's. The launcher measures from +Z towards
 -- +X, the way Urho does; Luanti measures from +Z towards -X, so the number
@@ -4081,8 +4089,7 @@ keys.on_key = function(key)
 		-- Cycled rather than toggled, the way Luanti's own F5 is, and what a
 		-- player coming from it expects: nothing, short, everything. See
 		-- [STATUS_LEVELS].
-		detail_level = (detail_level + 1) % 3
-		detail_text.visible = detail_level > 0
+		keys.set_detail((detail_level + 1) % 3)
 		detail_timer = 1
 		if detail_text.visible then
 			-- In the log as well as on the screen, and the same string: a
@@ -4630,6 +4637,10 @@ keys.settings_sections = {{title = "View", draw = function(_, ui)
 	ui.toggle("Over the shoulder", v.third_person_shoulder == "1",
 			function(on)
 		keys.set_view("third_person_shoulder", on and "1" or "0")
+	end)
+	ui.dropdown("Debug info (F5)", {{"Off", "0"}, {"Basic", "1"},
+			{"Full", "2"}}, tostring(detail_level), function(l)
+		keys.set_detail(tonumber(l))
 	end)
 end}}
 -- A window that changed size -- fullscreen toggled, the window dragged --

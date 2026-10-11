@@ -477,8 +477,11 @@ local function show_client(host, port, name, password, mode, origin)
 	local show_chat = true
 	-- F5's levels, as the module's ([EXT_HUD_PARITY]): 0 nothing, 1 the
 	-- one-line row (the mode and where the player is, in official's
-	-- words), 2 the whole block
-	local show_debug = 0
+	-- words), 2 the whole block. Kept in the settings, F5's and the
+	-- screen's ([DEBUG_INFO_SETTING])
+	local show_debug = settings.load().debug_info
+	status_text.visible = show_debug > 0
+	log:info("debug info at start: " .. show_debug)
 
 	-- A connect that fails before there is a session: said in a dialog
 	-- and back to the connect screen, as a session that fails later is
@@ -3598,6 +3601,9 @@ local function show_client(host, port, name, password, mode, origin)
 			if key == BIND.debug.key then
 				show_debug = (show_debug + 1) % 3
 				status_text.visible = show_debug > 0
+				local kept = settings.load()
+				kept.debug_info = show_debug
+				settings.save(kept)
 				-- In the log as well, as vanilla's: a check reads the text
 				if show_debug > 0 then
 					set_counters()
