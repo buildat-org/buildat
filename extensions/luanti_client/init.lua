@@ -2590,6 +2590,11 @@ local function show_client(host, port, name, password, mode, origin)
 			local reflections = sky_vis and string.format(
 					" | sky %.2f up over %d blocks", sky_vis, sky_blocks) or ""
 
+			-- Where the player is and looks, as official Luanti shows it:
+			-- with the debug privilege or the game's basic_debug HUD flag,
+			-- which is on until a game turns it off ([DEBUG_INFO_PRIV])
+			local placed = (client.privileges and client.privileges.debug) or
+					math.floor((client.hud_flags or 511) / 128) % 2 == 1
 			-- Level 1 is one line and stays one line, as the module's:
 			-- what makes a picture a picture of what it claims to be.
 			-- Official's yaw is counter-clockwise from +Z and its pitch
@@ -2600,19 +2605,19 @@ local function show_client(host, port, name, password, mode, origin)
 						(yaw >= 135 and yaw < 225) and "South -Z" or
 						(yaw >= 225 and yaw < 315) and "East +X" or "North +Z"
 				status_text.text = string.format(
-						"luanti_client | %s:%d | %s | %s%s | (%.1f, %.1f, %.1f)"..
+						"luanti_client | %s:%d | %s | %s%s",
+						host, port, SETTINGS.mode, client.state, condition)..
+						(placed and string.format(" | (%.1f, %.1f, %.1f)"..
 						" | yaw: %.1f\194\176 %s | pitch: %.1f\194\176",
-						host, port, SETTINGS.mode, client.state, condition,
 						avatar.x, avatar.y, avatar.z, yaw, cardinal,
-						-(client.pitch or 0))
+						-(client.pitch or 0)) or "")
 				return
 			end
 			-- Two lines rather than one: one line of this does not fit on a
 			-- screen and what runs off the edge is the half that changes
 			status_text.text = table.concat(lines, "\n").."\n"..
 					string.format(
-					"%s%s | %.1f, %.1f, %.1f %s"..
-					" | looking %.0f down, %.0f round"..
+					"%s%s%s %s%s"..
 					" | %d: %s | %s\n"..
 					"%d objects | blocks: %d received,"..
 					" %d in scene, %d to mesh | %d us to hand over"..
@@ -2620,11 +2625,14 @@ local function show_client(host, port, name, password, mode, origin)
 					" | %d param2 pairs | %d hud | %d sounds"..
 					" | %d particles"..
 					" | media: %d files, %d to come%s",
-					client.state, condition, avatar.x, avatar.y, avatar.z,
+					client.state, condition,
+					placed and string.format(" | %.1f, %.1f, %.1f",
+							avatar.x, avatar.y, avatar.z) or " |",
 					avatar.fly and "flying" or
 							(avatar.in_liquid and "swimming" or
 							(avatar.on_ground and "on ground" or "falling")),
-					client.pitch or 0, client.yaw or 0,
+					placed and string.format(" | looking %.0f down, %.0f round",
+							client.pitch or 0, client.yaw or 0) or "",
 					wield_index, holding,
 					pointed,
 					view:object_count(),
@@ -3590,6 +3598,11 @@ local function show_client(host, port, name, password, mode, origin)
 			if key == BIND.debug.key then
 				show_debug = (show_debug + 1) % 3
 				status_text.visible = show_debug > 0
+				-- In the log as well, as vanilla's: a check reads the text
+				if show_debug > 0 then
+					set_counters()
+					log:info("F5: "..status_text.text:gsub("\n", " | "))
+				end
 			end
 			if key == BIND.minimap.key and view.minimap then
 				add_chat(view.minimap:next_mode())

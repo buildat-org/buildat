@@ -2901,15 +2901,19 @@ local function status_lines(level)
 	-- does not name it is the failure the position and the seed are there to
 	-- prevent: one that cannot be told from a shot of something else.
 	local rmode = info.mode or "pbr"
-	local place = string.format(
-			"(%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
+	-- Where the player is and looks, and the seed, as official Luanti
+	-- shows them: with the debug privilege or the game's basic_debug HUD
+	-- flag, which is on until a game turns it off ([DEBUG_INFO_PRIV])
+	local placed = luanti.privs.debug or luanti.hud_flag("basic_debug")
+	local place = placed and string.format(
+			" | (%.1f, %.1f, %.1f) | yaw: %.1f\194\176 %s" ..
 			" | pitch: %.1f\194\176 | seed: %s",
 			player.x, player.y, player.z,
 			lyaw, cardinal,
 			-- Luanti's pitch is positive looking up, where the launcher's
 			-- own is positive looking down as Urho's euler angle is
 			-pitch,
-			info.seed ~= "" and info.seed or "?")
+			info.seed ~= "" and info.seed or "?") or ""
 	-- **Level 1 is one line and stays one line.** It exists so a reference
 	-- run can carry a row without burying the thing being photographed, and
 	-- that is a standing constraint rather than a detail: it carries what
@@ -2933,7 +2937,7 @@ local function status_lines(level)
 	-- The build, so that one look at a shot says which it is
 	-- ([BOX_PLAYTEST_4] 1): b/<version>, where "buildat" stood
 	local first = "b/" .. buildat.version() .. " | " .. game .. " | " ..
-			rmode .. " | " .. step .. " | " .. frame .. " | " .. place
+			rmode .. " | " .. step .. " | " .. frame .. place
 	if level == 1 then
 		return first
 	end
@@ -2951,14 +2955,15 @@ local function status_lines(level)
 			frame_peak.phase ~= "" and
 					(" | frame " .. frame_peak.phase) or ""),
 		string.format(
-			"%s | fov %.0f | speed %.1f, %.1f, %.1f | chunk %d, %d, %d%s",
+			"%s | fov %.0f | speed %.1f, %.1f, %.1f%s%s",
 			-- What the camera is actually at, not what this game asked
 			-- for: a game's set_fov() changes it, and an FOV that does
 			-- not match the shot it is compared against is one of the
 			-- three most expensive findings this programme has had
 			mode, (camera and camera.fov) or CAMERA_FOV,
 			player.vx, player.vy, player.vz,
-			chunk_p.x, chunk_p.y, chunk_p.z,
+			placed and string.format(" | chunk %d, %d, %d",
+					chunk_p.x, chunk_p.y, chunk_p.z) or "",
 			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)"),
 		string.format("%02d:%02d | sun %.2f up, %.0f%% day",
 			math.floor((time_of_day or 0) * 24),
