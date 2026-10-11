@@ -4548,8 +4548,55 @@ end
 -- first ask for the whole of the native default
 sky_now.set_range(keys.view.current())
 
+-- **The player's own view settings** ([VANILLA_PLAYER_SETTINGS], user
+-- 2026-10-11: a player on somebody's server could not change them): the
+-- game settings window's View section, kept on this client for this
+-- server as the view range is, each as "view_<row's name>". One set wins
+-- over the server's row of the same name, which stays the default. The
+-- render mode is read at join (luanti/module.lua's get_world_info).
+-- simplified: per server, as buildat.storage is; and on the launcher's
+-- own game a choice here wins over its "Luanti settings" too
+keys.view_rows = {render_mode = "pbr", lod_detail = "full",
+		view_bobbing_amount = "1", third_person_shoulder = "0"}
+-- What can be applied without a rejoin, at once
+keys.apply_view = function(row)
+	local lod = row:match("^lod_detail=(%a+)$")
+	if lod then
+		sky_now.set_lod_detail(lod)
+	end
+	local bob = row:match("^view_bobbing_amount=([%d.]+)$")
+	if bob and WIELD.motion then
+		WIELD.motion.amount = tonumber(bob) or 1
+	end
+	-- The back view centred or over the shoulder ([OVER_SHOULDER])
+	local shoulder = row:match("^third_person_shoulder=([01])$")
+	if shoulder then
+		WIELD.shoulder = shoulder == "1"
+	end
+end
+keys.set_view = function(name, value)
+	buildat.storage_write("view_" .. name, value)
+	keys.view_rows[name] = value
+	keys.apply_view(name .. "=" .. value)
+	log:info("view: " .. name .. " = " .. value)
+end
+
 buildat.sub_packet("main:settings", function(data)
 	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
+	for i, row in ipairs(list) do
+		local name = row:match("^([%w_]+)=")
+		if name and keys.view_rows[name] then
+			local own = buildat.storage_read("view_" .. name) or ""
+			if own ~= "" then
+				list[i] = name .. "=" .. own
+			end
+			keys.view_rows[name] = list[i]:match("=(.*)$")
+		end
+	end
+	local v = keys.view_rows
+	log:info(string.format("view settings: render %s, distant %s, " ..
+			"bobbing %s, shoulder %s", v.render_mode, v.lod_detail,
+			v.view_bobbing_amount, v.third_person_shoulder))
 	keys.apply(list)
 	keys.view.web = nil
 	for _, row in ipairs(list) do
@@ -4564,21 +4611,27 @@ buildat.sub_packet("main:settings", function(data)
 			keys.view.ceiling = tonumber(n)
 			sky_now.set_range(keys.view.current())
 		end
-		local lod = row:match("^lod_detail=(%a+)$")
-		if lod then
-			sky_now.set_lod_detail(lod)
-		end
-		local bob = row:match("^view_bobbing_amount=([%d.]+)$")
-		if bob and WIELD.motion then
-			WIELD.motion.amount = tonumber(bob) or 1
-		end
-		-- The back view centred or over the shoulder ([OVER_SHOULDER])
-		local shoulder = row:match("^third_person_shoulder=([01])$")
-		if shoulder then
-			WIELD.shoulder = shoulder == "1"
-		end
+		keys.apply_view(row)
 	end
 end)
+
+keys.settings_sections = {{title = "View", draw = function(_, ui)
+	local v = keys.view_rows
+	ui.dropdown("Render mode (next join)", {{"PBR", "pbr"},
+			{"Shadows", "shadows"}, {"Unlit", "unlit"}}, v.render_mode,
+			function(m) keys.set_view("render_mode", m) end)
+	ui.dropdown("Distant terrain detail", {{"Full", "full"},
+			{"Reduced past half range", "half"},
+			{"Reduced past a third", "third"}}, v.lod_detail,
+			function(d) keys.set_view("lod_detail", d) end)
+	ui.toggle("View bobbing", v.view_bobbing_amount ~= "0", function(on)
+		keys.set_view("view_bobbing_amount", on and "1" or "0")
+	end)
+	ui.toggle("Over the shoulder", v.third_person_shoulder == "1",
+			function(on)
+		keys.set_view("third_person_shoulder", on and "1" or "0")
+	end)
+end}}
 -- A window that changed size -- fullscreen toggled, the window dragged --
 -- leaves the screen-sized containers the wrong size, and what is centred or
 -- bottom-aligned inside them lands wherever that size says. Both are put
@@ -4654,7 +4707,8 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	keys.touch.sensitivity =
 			tonumber(buildat.storage_read("touch_sensitivity") or "") or 0.2
 	local SENSITIVITIES = {0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1}
-	keys.settings_sections = {{title = "Touch", draw = function(_, ui)
+	keys.settings_sections[#keys.settings_sections + 1] = {title = "Touch",
+			draw = function(_, ui)
 		ui.toggle("Interaction at the crosshair", keys.touch_crosshair,
 				function(on)
 			keys.touch_crosshair = on
@@ -4670,7 +4724,7 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 			buildat.storage_write("touch_sensitivity", tostring(v))
 			log:info("touch look sensitivity " .. v)
 		end)
-	end}}
+	end}
 	-- And Luanti's Android autojump: a node's step is walked up without
 	-- the Jump button
 	player.autojump = true

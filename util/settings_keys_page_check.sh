@@ -105,6 +105,9 @@ click Button "Settings..."
 wait_log 5000 Game settings shown
 delay 1000
 screenshot $t/settings.png
+mouse_pos 550 300
+$(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
+delay 500
 click Button "Key bindings..."
 wait_log 5000 Game keys shown
 delay 500
@@ -139,7 +142,7 @@ grep -a "Game keys\|Game settings shown" "$t/vc.log" | cut -c 30- | cut -c 1-200
 grep -a "Command sequence failed" "$t/vc.log" && fail "the drive ($t/vc.log)"
 grep -a "keyboard_page: .*Continue playing" "$t/vc.log" | grep -aq "Key bindings" &&
 	fail "the pause menu has its own Key bindings ($t/vc.log)"
-grep -aq "Game settings shown: Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
+grep -aq "Game settings shown: View, Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
 	fail "the settings window ($t/vc.log)"
 lines "Game keys" "$t/vc.log" > "$t/v.lines"
 python3 - "$t/v.lines" <<'PY' || fail "the game's keys page ($t/vc.log)"

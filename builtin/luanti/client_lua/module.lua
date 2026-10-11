@@ -4113,8 +4113,11 @@ end)
 -- process, the same variable extensions/luanti_client reads -- and the
 -- server's environment is the default for a client that says nothing. That
 -- is what lets one server serve a client in each mode; see [PROBE_CYCLE].
+-- Without the variable, what the player chose in vanilla's View settings
+-- for this server ([VANILLA_PLAYER_SETTINGS])
 buildat.send_packet("luanti:get_world_info",
-		buildat.get_env("BUILDAT_LUANTI_PBR") or "")
+		buildat.get_env("BUILDAT_LUANTI_PBR") or
+		buildat.storage_read("view_render_mode") or "")
 buildat.send_packet("luanti:get_translations", "")
 
 local ok_bodies, err_bodies, bodies =

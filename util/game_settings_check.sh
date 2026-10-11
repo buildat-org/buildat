@@ -178,7 +178,7 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=gsworld start_server "$t/v.log" 
 pids="$SERVER_PID"
 client -C "$t/cvc" -D "$t/uvc" -s 127.0.0.1:"$SERVER_PORT" \
 	-c @"$t/v.cmds" > "$t/vc.log" 2>&1
-grep -aq "Game settings shown: Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
+grep -aq "Game settings shown: View, Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
 	fail "vanilla's Settings... ($(grep -a "Game settings shown\|Command seq" "$t/vc.log" | tail -2))"
 kill $pids; pids=
 
