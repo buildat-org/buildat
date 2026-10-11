@@ -17,6 +17,9 @@ local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local luanti = require("buildat/module/luanti")
 local ui_utils = require("buildat/extension/ui_utils")
+local log = buildat.Logger("vanilla")
+local uistack = require("buildat/extension/uistack")
+uistack = uistack.safe or uistack
 
 local _, err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then
@@ -234,29 +237,40 @@ open = function()
 	end
 end
 
--- A click off the menu is Continue; not on a page it made way for. On the
--- release, so that the world does not take the mouse with a button held
--- down and start digging with it.
+-- A click or a tap off the menu is Continue, and off an account page it
+-- made way for (the chat, My account) that page's Back, as its Escape
+-- ([PAGE_TAP_OUTSIDE]); a press off a dropdown's popup closes only that.
+-- The key editor, the world menu and the settings are uistack screens,
+-- whose tap on nothing is Back already ([TAP_BACK]). The UI's press, one
+-- for a finger or a mouse (a finger's made-up mouse is not one); acted on
+-- at the release, so that the world does not take the mouse with a button
+-- held down and start digging with it.
 local pressed_off = false
-local function off_menu()
-	if not window then
+local function off_menu(x, y)
+	local w = window or (luanti.held() and accounts.page)
+	if not w or ui_utils.dropdown_open() then
 		return false
 	end
-	local sc = magic.ui.scale
-	local m = magic.input:GetMousePosition()
-	local ux, uy = m.x / sc, m.y / sc
-	local p, s = window.screenPosition, window.size
-	return ux < p.x or uy < p.y or ux >= p.x + s.x or uy >= p.y + s.y
+	local p, s = w.screenPosition, w.size
+	return x < p.x or y < p.y or x >= p.x + s.x or y >= p.y + s.y
 end
-magic.SubscribeToEvent("MouseButtonDown", function()
-	pressed_off = off_menu()
+magic.SubscribeToEvent("UIMouseClick", function(_, d)
+	pressed_off = off_menu(d:GetInt("X"), d:GetInt("Y"))
 end)
-magic.SubscribeToEvent("MouseButtonUp", function()
-	if pressed_off and off_menu() then
-		close()
+-- A finger on the web lifts as a touch and as its mouse: the first one
+local function released()
+	if pressed_off then
+		pressed_off = false
+		log:info("pause: a press off the " .. (window and "menu" or "page"))
+		if window then
+			close()
+		else
+			uistack.press_back()
+		end
 	end
-	pressed_off = false
-end)
+end
+magic.SubscribeToEvent("MouseButtonUp", released)
+magic.SubscribeToEvent("TouchEnd", released)
 
 return function(options)
 	o = options
