@@ -1181,14 +1181,73 @@ local load_wait = {t = 0, next = 1, total = 0}
 -- simplified: no total; the server learns a node's size only as it sends
 -- it
 local leave_button = nil
+-- **A screen of its own** ([LOADING_SCREEN], user 2026-10-11): the world
+-- is not drawn while it loads -- Buildat's dark colour over it, and one of
+-- the game's menu/background*.png that the server picked at random,
+-- scaled to cover and centred -- and the HUD, walking and mouse look wait
+-- with it. Under all else on the UI, so the line, Leave, the chat and the
+-- pause menu are over it.
+-- simplified: the scene is still rendered under the screen
+load_wait.screen = magic.ui.root:CreateChild("BorderImage")
+load_wait.screen.priority = -100
+load_wait.screen.color = magic.Color(0x15 / 255, 0x15 / 255, 0x1a / 255)
+function load_wait.fit()
+	local w, h = magic.ui.root.width, magic.ui.root.height
+	load_wait.screen:SetFixedSize(w, h)
+	-- The line with "N of M" and the megabytes in it fits a narrow window
+	local size = w < 1000 and 16 or 24
+	if load_wait.font ~= size then
+		load_wait.font = size
+		wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono),
+				size)
+	end
+	local p = load_wait.pic
+	if p then
+		local k = math.max(w / p.w, h / p.h)
+		p.el:SetFixedSize(math.ceil(p.w * k), math.ceil(p.h * k))
+	end
+end
+load_wait.fit()
+buildat.sub_packet("main:loading_picture", function(data)
+	local got = cereal.binary_input(data, {"array", "string"})
+	if not load_wait or #got < 2 then
+		log:info("load: no loading picture")
+		return
+	end
+	-- simplified: compose_image decodes and writes the PNG again, about
+	-- a second for VoxeLibre's 2 MB ones with the screen standing still;
+	-- a plain write under the cache for served code would skip it
+	local dir = buildat.get_cache_path() .. "/vanilla_res"
+	local resource = "vanilla_loading/" .. buildat.hex(buildat.sha1(got[2])) ..
+			".png"
+	local ok, w, h = pcall(buildat.compose_image, {
+		ops = {{op = "blit", src_data = got[2]}},
+		write = dir .. "/" .. resource,
+	})
+	if not ok then
+		log:warning("load: the picture " .. got[1] .. ": " .. tostring(w))
+		return
+	end
+	buildat.add_resource_dir(dir)
+	local el = load_wait.screen:CreateChild("BorderImage")
+	el.texture = magic.cache:GetResource("Texture2D", resource)
+	el.imageRect = magic.IntRect(0, 0, w, h)
+	el:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	load_wait.pic = {el = el, w = w, h = h}
+	load_wait.fit()
+	log:info(string.format("load: the picture %s, %dx%d", got[1], w, h))
+end)
 local function load_wait_end()
 	wait_text:SetText("")
+	load_wait.screen:Remove()
 	load_wait = nil
 	log:info("load: the world is in")
 	if leave_button then
 		leave_button:Remove()
 		leave_button = nil
 	end
+	keys.redraw_hud()
+	keys.take_world()
 end
 local function load_wait_line(s)
 	local got, quiet = (buildat.received or function() end)()
@@ -1226,9 +1285,11 @@ local function load_wait_line(s)
 	return string.format("%s -- %.1f MB%s... %d s", s, got / 1e6,
 			rate and string.format(", %d KB/s", rate / 1000) or "", load_wait.t)
 end
+-- It ends once the player is placed and the chunks within 2 of them are
+-- drawn, or 60 s after the first chunk (the per-frame block below)
 voxelworld.sub_geometry_update(function(node)
-	if load_wait then
-		load_wait_end()
+	if load_wait and not load_wait.first then
+		load_wait.first = load_wait.t
 	end
 end)
 -- The forms' font sizes rasterized now, under the loading line
@@ -2579,6 +2640,19 @@ luanti.sub_player_pos(function(p)
 	end
 	if not player_placed then
 		player_placed = true
+		if not load_wait then
+			keys.take_world()
+		end
+	end
+	log:info("the server put the player at " ..
+			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
+			string.format(" looking %.0f, %.0f", yaw, pitch))
+end)
+-- The mouse into the world once the player is placed and the world is in
+-- (load_wait_end)
+keys.take_world = function()
+	if player_placed and not keys.world_taken then
+		keys.world_taken = true
 		-- **On the web the game starts paused** (user, 2026-09-30): a
 		-- browser locks the pointer only for a click, and taking the
 		-- mouse without one left a view that spun with a mouse the game
@@ -2591,10 +2665,7 @@ luanti.sub_player_pos(function(p)
 		end
 		set_mouse_in_world(true, "the first placement")
 	end
-	log:info("the server put the player at " ..
-			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
-			string.format(" looking %.0f, %.0f", yaw, pitch))
-end)
+end
 
 -- What F5 shows: the two lines official Luanti's own status row shows, in
 -- its units and its order, and buildat's own facts under them. The shape is
@@ -2772,6 +2843,14 @@ function frame_peak.note(dt)
 	end
 	if load_wait then
 		load_wait.t = load_wait.t + dt
+		load_wait.fit()
+		if load_wait.first and (load_wait.t - load_wait.first >= 60 or
+				player_placed and voxelworld.undrawn_around(
+				buildat.Vector3(player.x, player.y, player.z), 2) == 0) then
+			load_wait_end()
+		end
+	end
+	if load_wait then
 		if load_wait.t >= load_wait.next then
 			load_wait.next = math.floor(load_wait.t) + 1
 			local s = "Loading the world"
@@ -3208,11 +3287,13 @@ local function draw_hud(elements, flags)
 	--
 	-- The game can take the client's own away, and what it draws instead is
 	-- these elements; see luanti.hud_flag()
-	hud_r.root.visible = hud_shown
-	crosshair.visible = hud_shown and luanti.hud_flag("crosshair") and
+	-- Nothing of it on the loading screen
+	local shown = hud_shown and not load_wait
+	hud_r.root.visible = shown
+	crosshair.visible = shown and luanti.hud_flag("crosshair") and
 			not (keys.touch and not keys.touch_crosshair)
 	chat_block.visible = chat_shown and luanti.hud_flag("chat")
-	hotbar_shown = hud_shown and luanti.hud_flag("hotbar")
+	hotbar_shown = shown and luanti.hud_flag("hotbar")
 	draw_hotbar()
 	wielded_text.visible = hotbar_shown
 	hud_r:draw(elements)
@@ -3220,13 +3301,15 @@ local function draw_hud(elements, flags)
 	-- top right whether or not the game adds a minimap element, under the
 	-- minimap HUD flag, and V walks its modes; here the same element as a
 	-- game's, 128 Luanti pixels, hidden while the mode is "off"
-	if #hud_r.minimaps == 0 and hud_shown then
+	if #hud_r.minimaps == 0 and shown then
 		hud_r:draw_one({type = "minimap", pos = "1,0", offset = "-10,10",
 				align = "-1,1", size = "128,128"})
 	end
 end
 
 luanti.sub_hud(draw_hud)
+keys.redraw_hud = function() draw_hud(hud_elements) end
+keys.redraw_hud()
 
 -- The game's set_lighting(): shadows.intensity is how dark a shadow is,
 -- 1 being black, and Urho's shadowIntensity is the other way round -- how
@@ -3739,7 +3822,7 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	-- A form on the screen is clicked through UIMouseClick below, which is
 	-- what says where the click landed; what is behind it is not what was
 	-- clicked on. A touchscreen's finger is its own (luanti/touch.lua).
-	if luanti.form_open() or keys.touch then
+	if luanti.form_open() or keys.touch or load_wait then
 		return
 	end
 	if button == magic.MOUSEB_RIGHT then
@@ -3919,7 +4002,7 @@ keys.on_key = function(key)
 		-- every alt-tab out, so nothing wanted it back after ([FOCUS_LOG],
 		-- the playtest of 2026-09-21 18:54)
 		if not (magic.input:GetKeyDown(magic.KEY_LALT) or
-				magic.input:GetKeyDown(magic.KEY_RALT)) then
+				magic.input:GetKeyDown(magic.KEY_RALT) or load_wait) then
 			set_mouse_in_world(not mouse_in_world, "the mouse key")
 		end
 	elseif key == BIND.drop.key then
@@ -4044,7 +4127,7 @@ local function control_bits()
 	-- line is being typed, or Tab put it there, and the keys are that
 	-- window's rather than the player's
 	if not (mouse_in_world or keys.touch) or luanti.form_open() or
-			chat_input ~= nil then
+			chat_input ~= nil or load_wait then
 		return 0
 	end
 	local bits = 0
@@ -4215,7 +4298,7 @@ function frame_peak.update(dt)
 	-- -- it is the pointer. A touchscreen has no pointer to put anywhere:
 	-- a finger turns the head (luanti/touch.lua), in degrees
 	local playing = (mouse_in_world or keys.touch) and
-			not luanti.form_open() and chat_input == nil
+			not luanti.form_open() and chat_input == nil and not load_wait
 	if playing then
 		local dmouse = keys.mouse_held() and magic.input:GetMouseMove() or
 				{x = 0, y = 0}

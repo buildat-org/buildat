@@ -37,6 +37,7 @@
 #include <set>
 #include <sstream>
 #include <algorithm>
+#include <random>
 #include <functional>
 #include <cmath>
 #include <cereal/archives/portable_binary.hpp>
@@ -543,6 +544,44 @@ struct Module: public interface::Module
 	// Only the newest matters anyway, which is what makes keeping it right
 	// rather than merely cheap: a position is a heartbeat, like the tick
 	// src/server/state.cpp coalesces for the same reason.
+	// The loading screen's picture ([LOADING_SCREEN]): one of the running
+	// game's menu/background.png and background.<n>.png, at random each
+	// join, its name and bytes; none for a game without one. Sent behind
+	// the script and ahead of the world, so that it is there from the start
+	void send_loading_picture(network::PeerInfo::Id peer)
+	{
+		const ss_ game_path = find_game(gameid_of_save(m_world_name));
+		const ss_ dir = game_path+"/menu";
+		sv_<ss_> names;
+		for(const auto &n : game_path.empty() ? sv_<interface::fs::Node>() :
+				interface::fs::list_directory(dir)){
+			if(!n.is_directory && n.name.compare(0, 10, "background") == 0 &&
+					n.name.size() >= 14 &&
+					n.name.compare(n.name.size() - 4, 4, ".png") == 0)
+				names.push_back(n.name);
+		}
+		sv_<ss_> values;
+		if(!names.empty()){
+			std::sort(names.begin(), names.end());
+			const ss_ name = names[std::random_device()() % names.size()];
+			std::ifstream f(dir+"/"+name, std::ios::binary);
+			std::ostringstream data;
+			data << f.rdbuf();
+			if(f.is_open() && !data.str().empty())
+				values = {name, data.str()};
+			log_i(MODULE, "loading picture: %s of %zu (%zu bytes)", cs(name),
+					names.size(), values.empty() ? 0 : values[1].size());
+		}
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(values);
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "main:loading_picture", os.str());
+		});
+	}
+
 	void on_where(const network::Packet &packet)
 	{
 		if(!joined(packet.sender))
@@ -3749,6 +3788,7 @@ struct Module: public interface::Module
 			inetwork->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
+		send_loading_picture(peer);
 		// The player before the scene: the placement goes out ordered
 		// behind the script that subscribes to it ([PLAYER_POS_RACE]), and
 		// the scene brings voxelworld's registry, megabytes that over a
