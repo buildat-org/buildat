@@ -203,7 +203,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:contentdb_install"));
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
-				"restart_world"})
+				"restart_world", "get_world_txp", "set_world_txp", "remove_txp"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -281,6 +281,12 @@ struct Module: public interface::Module
 				on_remove_mod, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:restart_world",
 				on_restart_world, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:get_world_txp",
+				on_get_world_txp, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:set_world_txp",
+				on_set_world_txp, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:remove_txp",
+				on_remove_txp, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_game",
 				on_import_game, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_world",
@@ -2083,7 +2089,7 @@ struct Module: public interface::Module
 		// whose mods are listed, as ContentDB's author/name or a gameid to
 		// look up ([WORLD_MODS])
 		ss_ name;
-		// LIST, INSTALL: "game" or "mod"; DEPS, INSTALL: the world's game
+		// LIST, INSTALL: "game", "mod" or "txp"; DEPS, INSTALL: the world's game
 		ss_ type = "game", gameid;
 		// DEPS: the mod names already there, the game's and the server's;
 		// the packages picked for the rest, author/name
@@ -2359,6 +2365,9 @@ struct Module: public interface::Module
 						url_encode_path(source.substr(10)) : values[2];
 			}
 		}
+		// [WORLD_TXP] {query, "txp"}: texture packs, for any game
+		if(values.size() >= 2 && values[1] == "txp")
+			job->type = "txp";
 		start_job(job);
 	}
 	// author/name, each half encoded
@@ -2397,7 +2406,9 @@ struct Module: public interface::Module
 			contentdb_install(packet.sender, values[0], values[1], "mod");
 			return;
 		}
-		contentdb_install(packet.sender, values[0], values[1]);
+		// [WORLD_TXP] {author, name, "txp"}
+		contentdb_install(packet.sender, values[0], values[1],
+				values.size() >= 3 && values[2] == "txp" ? "txp" : "game");
 	}
 
 	// A ContentDB name is a directory: letters, digits, _ and - only
@@ -2455,8 +2466,7 @@ struct Module: public interface::Module
 				}
 			}
 		}
-		const ss_ to = (type == "mod" ? mods_path() :
-				luanti_path()+"/games")+"/"+name;
+		const ss_ to = install_root(type)+"/"+name;
 		if(interface::fs::path_exists(to)){
 			menu_error(packet.sender, name+" is already installed. Remove "+
 					where(to)+" yourself if you mean to replace it.");
@@ -2483,7 +2493,8 @@ struct Module: public interface::Module
 		job->zip_path = cache+"/"+author+"_"+name+".zip";
 		// A mod's outside mods/, where the loader would find it half done
 		job->into_dir = type == "mod" ? luanti_path()+"/mods.installing/"+
-				name : to+".installing";
+				name : type == "txp" ? luanti_path()+
+				"/texture_packs.installing/"+name : to+".installing";
 		send_progress(packet.sender, "Fetching "+name+"...");
 		start_job(job);
 	}
@@ -2586,12 +2597,12 @@ struct Module: public interface::Module
 					tops++;
 				}
 			}
-			const ss_ to = (job->type == "mod" ? mods_path() :
-					luanti_path()+"/games")+"/"+job->name;
+			const ss_ to = install_root(job->type)+"/"+job->name;
 			const bool at_top = interface::fs::path_exists(job->into_dir+
 					"/init.lua") || interface::fs::path_exists(job->into_dir+
 					"/modpack.conf") || interface::fs::path_exists(job->into_dir+
-					"/game.conf");
+					"/game.conf") || interface::fs::path_exists(job->into_dir+
+					"/texture_pack.conf");
 			const ss_ from = tops == 1 && !at_top ? job->into_dir+"/"+top :
 					job->into_dir;
 			interface::fs::create_directories(interface::fs::strip_file_name(to));
@@ -2694,6 +2705,125 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, name, os.str());
 		});
+	}
+
+	// Where ContentDB's installs of a type go
+	ss_ install_root(const ss_ &type)
+	{
+		return type == "mod" ? mods_path() : type == "txp" ? txp_path() :
+				luanti_path()+"/games";
+	}
+
+	// [WORLD_TXP] The server's texture packs, under luanti/texture_packs,
+	// and each world's one of them in its world.mt as
+	// buildat_texture_pack; the luanti module serves that one's files in
+	// place of the game's (builtin/luanti/media.h)
+	ss_ txp_path()
+	{
+		return luanti_path()+"/texture_packs";
+	}
+	sv_<ss_> worlds_with_txp(const ss_ &name)
+	{
+		sv_<ss_> out;
+		sv_<storage::SaveInfo> infos;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			infos = istorage->list();
+		});
+		for(const storage::SaveInfo &info : infos){
+			ss_ path;
+			if(info.name.empty() || info.name[0] == '_' ||
+					!save_dir(info.name, path))
+				continue;
+			if(read_world_mt(path+"/luanti/world.mt")["buildat_texture_pack"] ==
+					name)
+				out.push_back(info.name);
+		}
+		return out;
+	}
+	// main:world_txp {save, note, the world's pack ("" none), whether
+	// "Restart now" is offered, then the installed packs' names}
+	void send_world_txp(network::PeerInfo::Id peer, const ss_ &save,
+			const ss_ &note)
+	{
+		ss_ path;
+		if(!save_dir(save, path)){
+			send_strings(peer, "main:world_txp", {save, "No such world.",
+					"", "0"});
+			return;
+		}
+		sv_<ss_> flat{save, note,
+				read_world_mt(path+"/luanti/world.mt")["buildat_texture_pack"],
+				m_public && save == m_world_name ? "1" : "0"};
+		sv_<ss_> names;
+		for(const auto &n : interface::fs::list_directory(txp_path()))
+			if(n.is_directory && contentdb_name_ok(n.name))
+				names.push_back(n.name);
+		std::sort(names.begin(), names.end());
+		flat.insert(flat.end(), names.begin(), names.end());
+		send_strings(peer, "main:world_txp", flat);
+	}
+	// main:get_world_txp {save}
+	void on_get_world_txp(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(!values.empty())
+			send_world_txp(packet.sender, values[0], "");
+	}
+	// main:set_world_txp {save, name or "" for none}: from the world's
+	// next start, as a mod
+	void on_set_world_txp(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		ss_ path;
+		if(values.size() < 2 || !save_dir(values[0], path))
+			return;
+		const ss_ &name = values[1];
+		if(!name.empty() && (!contentdb_name_ok(name) ||
+				!interface::fs::path_exists(txp_path()+"/"+name)))
+			return send_world_txp(packet.sender, values[0], name+
+					" is not installed.");
+		write_world_mt(path+"/luanti/world.mt",
+				{{"buildat_texture_pack", name}});
+		log_i(MODULE, "World %s: texture pack %s", cs(values[0]),
+				cs(name.empty() ? "none" : name));
+		send_world_txp(packet.sender, values[0], (name.empty() ?
+				ss_("No texture pack") : name)+" from the world's next start.");
+	}
+	// main:remove_txp {save, name}: to the trash, as a mod; not while a
+	// world has it
+	void on_remove_txp(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.size() < 2 || !contentdb_name_ok(values[1]))
+			return;
+		const ss_ dir = txp_path()+"/"+values[1];
+		if(!interface::fs::path_exists(dir))
+			return send_world_txp(packet.sender, values[0], values[1]+
+					" is not installed.");
+		ss_ users;
+		for(const ss_ &w : worlds_with_txp(values[1]))
+			users += (users.empty() ? "" : ", ")+w;
+		if(!users.empty())
+			return send_world_txp(packet.sender, values[0], values[1]+
+					" is not removed: the texture pack of "+users+".");
+		const ss_ trash = luanti_path()+"/trash";
+		interface::fs::create_directories(trash);
+		time_t now = time(NULL);
+		char date[32];
+		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
+		const ss_ to = trash+"/txp_"+values[1]+"-"+date;
+		if(rename(dir.c_str(), to.c_str()) != 0)
+			return send_world_txp(packet.sender, values[0], "Could not move "+
+					where(dir)+" to "+where(to));
+		log_i(MODULE, "Texture pack %s moved to %s", cs(values[1]), cs(to));
+		send_world_txp(packet.sender, values[0], values[1]+
+				" moved to the trash.");
 	}
 
 	// [WORLD_MODS] The server's mods, under luanti/mods as the games are

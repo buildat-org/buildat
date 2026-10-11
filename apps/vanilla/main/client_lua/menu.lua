@@ -555,6 +555,14 @@ function draw(saves, save_games)
 					cereal.binary_output({selected_save}, {"array", "string"}))
 		end
 	end, fit(420))
+	-- [WORLD_TXP]
+	button_on(menu, right, "Texture pack...", function()
+		if selected_save then
+			waiting("Reading the texture pack of " .. selected_save .. "...")
+			buildat.send_packet("main:get_world_txp",
+					cereal.binary_output({selected_save}, {"array", "string"}))
+		end
+	end, fit(420))
 	button_on(menu, right, "Play", function()
 		if selected_save then
 			play(selected_save)
@@ -799,10 +807,11 @@ local pictures = {}
 
 function draw_contentdb(flat)
 	local mods = contentdb_kind == "mod"
+	local txp = contentdb_kind == "txp"
 	local menu = import_menu("ContentDB: " .. (mods and ("mods for " ..
-			contentdb_game) or "games") ..
+			contentdb_game) or txp and "texture packs" or "games") ..
 			(contentdb_query ~= "" and (" matching \"" .. contentdb_query .. "\"") or ""))
-	if public then
+	if public and not txp then
 		-- [VANILLA_PUBLIC] 7: a game's mods are Lua that runs on the server
 		local warn = menu.window:CreateChild("Text")
 		warn:SetStyleAuto()
@@ -885,7 +894,8 @@ function draw_contentdb(flat)
 			waiting("Fetching " .. name .. "...")
 			buildat.send_packet("main:contentdb_install",
 					cereal.binary_output(mods and {author, name, "mod",
-					contentdb_game} or {author, name}, {"array", "string"}))
+					contentdb_game} or txp and {author, name, "txp"} or
+					{author, name}, {"array", "string"}))
 		end)
 		list:AddItem(row)
 	end
@@ -1558,6 +1568,76 @@ buildat.sub_packet("main:world_mods", function(data)
 	log:info("menu: world mods of " .. tostring(flat[1]) .. ": " ..
 			tostring(flat[2]) .. " | " .. table.concat(flat, ",", 5))
 	draw_world_mods(flat)
+end)
+
+-- [WORLD_TXP] A world's texture pack: None or one of the installed packs
+-- (Luanti's one at a time), Remove for what no world uses. From the
+-- world's next start.
+local function draw_world_txp(flat)
+	local save, note, chosen, restart = flat[1], flat[2], flat[3], flat[4]
+	local menu = import_menu(save .. ": texture pack")
+	local t = menu.window:CreateChild("Text")
+	t:SetStyleAuto()
+	t:SetWordwrap(true)
+	t:SetFixedWidth(fit(860))
+	t:SetText(note ~= "" and note or "The pack's images, models and sounds " ..
+			"in place of the game's, from the world's next start. A pack's " ..
+			"override.txt is not applied.")
+	local function send(packet, name)
+		waiting("Saving...")
+		buildat.send_packet(packet, cereal.binary_output({save, name},
+				{"array", "string"}))
+	end
+	local list = menu.window:CreateChild("ListView")
+	list:SetStyleAuto()
+	list:SetFixedSize(fit(860), math.min(460,
+			math.floor(magic.ui.root.height * 0.5)))
+	local row_w = fit(860) - 40
+	local function row_of(name)
+		local row = list.contentElement:CreateChild("UIElement")
+		row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(4, 2, 4, 2))
+		row:SetFixedWidth(row_w)
+		button_on(menu, row, (chosen == name and "(o) " or "( ) ") ..
+				(name == "" and "None: the game's own" or name), function()
+			send("main:set_world_txp", name)
+		end, row_w - 150)
+		if name ~= "" then
+			button_on(menu, row, "Remove", function()
+				ui_utils.show_confirm_dialog("Move " .. name ..
+						" off the server, to its trash?", function()
+					send("main:remove_txp", name)
+				end, function() end, "Remove")
+			end, 130)
+		end
+		list:AddItem(row)
+	end
+	row_of("")
+	for i = 5, #flat do
+		row_of(flat[i])
+	end
+	menu:add("Get texture packs from ContentDB...", function()
+		ask_contentdb("", "txp")
+	end)
+	if restart == "1" then
+		menu:add("Restart the world now", function()
+			buildat.send_packet("main:restart_world",
+					cereal.binary_output({save}, {"array", "string"}))
+		end)
+	end
+	menu:add("< back", function()
+		draw(last_saves, last_save_games)
+	end)
+	magic.input:SetMouseVisible(true, "a menu screen")
+end
+buildat.sub_packet("main:world_txp", function(data)
+	if done then
+		return
+	end
+	local flat = cereal.binary_input(data, {"array", "string"})
+	log:info("menu: world texture pack of " .. tostring(flat[1]) .. ": " ..
+			tostring(flat[3]) .. " | " .. tostring(flat[2]) .. " | " ..
+			table.concat(flat, ",", 5))
+	draw_world_txp(flat)
 end)
 
 buildat.sub_packet("main:save_info", function(data)

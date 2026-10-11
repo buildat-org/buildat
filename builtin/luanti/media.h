@@ -61,30 +61,31 @@
 		return module_path()+"/textures/base/pack";
 	}
 
-	// The player's own texture packs: every directory under
-	// user/shared/vanilla/texture_packs, by name. They go in front of everything
-	// else, because first-one-wins is the rule below and a pack's whole
-	// point is to override what the game ships -- including the LabPBR
-	// sidecars the atlas reads ([VOXEL_MATERIALS] layer 2, whose upgrade
-	// path this is: a pack put its maps among a game's mods until now).
+	// The world's texture pack ([WORLD_TXP]): the one world.mt names as
+	// buildat_texture_pack, a directory under
+	// user/shared/vanilla/texture_packs, where vanilla installs them. It
+	// goes in front of everything else, because first-one-wins is the rule
+	// below and a pack's whole point is to override what the game ships --
+	// including the LabPBR sidecars the atlas reads ([VOXEL_MATERIALS]
+	// layer 2). None named, none served: a pack is the admin's choice for
+	// the world, not every installed one at once.
+	// simplified: its override.txt is not applied (vanilla's menu says so)
 	void collect_texture_packs(sv_<ss_> &dirs)
 	{
-		const ss_ root = m_server->get_config().get<ss_>("user_path")+
-				"/shared/vanilla/texture_packs";
-		if(!interface::fs::path_exists(root))
+		const ss_ name = setting_string("buildat_texture_pack");
+		if(name.empty())
 			return;
-		sv_<ss_> names;
-		for(const interface::fs::Node &n :
-				interface::fs::list_directory(root)){
-			if(n.name == "." || n.name == ".." || !n.is_directory)
-				continue;
-			names.push_back(n.name);
+		const ss_ path = m_server->get_config().get<ss_>("user_path")+
+				"/shared/vanilla/texture_packs/"+name;
+		// A directory's name, as vanilla writes it: no path in it
+		if(name.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != ss_::npos ||
+				!interface::fs::path_exists(path)){
+			log_w(MODULE, "texture pack %s: not installed", cs(name));
+			return;
 		}
-		std::sort(names.begin(), names.end());
-		for(const ss_ &name : names){
-			recursive_dirs(root+"/"+name, dirs, 0);
-			log_i(MODULE, "texture pack: %s", cs(name));
-		}
+		recursive_dirs(path, dirs, 0);
+		log_i(MODULE, "texture pack: %s", cs(name));
 	}
 
 	void serve_game_media(const ss_ &game_path)

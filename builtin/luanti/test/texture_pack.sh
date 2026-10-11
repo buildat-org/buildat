@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
-# user/shared/vanilla/texture_packs wins over what the game ships. The runner writes
+# user/shared/vanilla/texture_packs, chosen in the world's world.mt
+# ([WORLD_TXP]), wins over what the game ships. The runner writes
 # a pack of one magenta stone texture, stands the player on camera.lua's
 # stone floor and reads how much of the floor is magenta; the pack is
 # removed after (it refuses to run if one of that name is already there).
@@ -29,6 +30,10 @@ from PIL import Image
 Image.new("RGB", (16, 16), (255, 0, 255)).save(sys.argv[1] + "/default_stone.png")
 PY
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+# [WORLD_TXP] a world's pack is its world.mt's choice
+mkdir -p "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti"
+echo "buildat_texture_pack = buildat_check_pack" \
+	> "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/camera.lua" \
 	start_server "$out/srv.log" "Mods loaded" 400 29784 \
