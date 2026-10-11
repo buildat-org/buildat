@@ -1397,7 +1397,13 @@ struct Module: public interface::Module, public Interface
 	// public server the first to connect would otherwise be its admin
 	void update_setup_code()
 	{
-		if(admin_count() > 0){
+		// And /health's "admin" ([HEALTH_ADMIN]): a host's panel shows the
+		// setup code until it is used
+		const bool admin = admin_count() > 0;
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->set_has_admin(admin);
+		});
+		if(admin){
 			m_setup_code.clear();
 			ss_ kept;
 			if(m_store->get("access/setup_code", kept))

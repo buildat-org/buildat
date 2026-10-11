@@ -342,6 +342,9 @@ namespace network
 		// players, tick_gap_ms_avg and _max over the last minute,
 		// memory_bytes, as JSON
 		virtual ss_ health_json() = 0;
+		// [HEALTH_ADMIN] whether any account has the admin priv, as
+		// /health's "admin"; left out until accounts says
+		virtual void set_has_admin(bool admin) = 0;
 	};
 
 	inline bool access(interface::Server *server,

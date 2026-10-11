@@ -561,6 +561,8 @@ struct Module: public interface::Module, public network::Interface
 	sv_<std::thread> m_deflaters;
 	std::set<ss_> m_claimed_paths;
 	bool m_page_has_no_game = false;
+	// -1 until accounts says (a server without it says nothing)
+	int m_has_admin = -1;
 	// [PLAY_LINKS] set_ws_origins(): who gave them -> the origins
 	sm_<ss_, sv_<ss_>> m_ws_origins;
 	// [FAVICON] an app's override of /favicon.ico, served from memory; ""
@@ -844,6 +846,8 @@ struct Module: public interface::Module, public network::Interface
 		v.set("tick_gap_ms_avg", h.tick_gap_ms_avg);
 		v.set("tick_gap_ms_max", h.tick_gap_ms_max);
 		v.set("memory_bytes", h.memory_bytes);
+		if(m_has_admin >= 0)
+			v.set("admin", json::Value(m_has_admin > 0));
 		return v.stringify();
 	}
 
@@ -2145,6 +2149,11 @@ struct Module: public interface::Module, public network::Interface
 	void set_page_has_no_game()
 	{
 		m_page_has_no_game = true;
+	}
+
+	void set_has_admin(bool admin)
+	{
+		m_has_admin = admin ? 1 : 0;
 	}
 
 	bool ws_claimed(const ss_ &target)
