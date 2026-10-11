@@ -1191,6 +1191,13 @@ local leave_button = nil
 load_wait.screen = magic.ui.root:CreateChild("BorderImage")
 load_wait.screen.priority = -100
 load_wait.screen.color = magic.Color(0x15 / 255, 0x15 / 255, 0x1a / 255)
+-- The line on a dark box over the picture ([LOADING_PIC_FIT]), a little
+-- larger than the text; over the picture, which is made later, by its
+-- priority
+load_wait.box = load_wait.screen:CreateChild("BorderImage")
+load_wait.box.color = magic.Color(0, 0, 0, 0.6)
+load_wait.box.priority = 1
+load_wait.box:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 function load_wait.fit()
 	local w, h = magic.ui.root.width, magic.ui.root.height
 	load_wait.screen:SetFixedSize(w, h)
@@ -1201,10 +1208,21 @@ function load_wait.fit()
 		wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono),
 				size)
 	end
+	local box = load_wait.box
+	box.visible = wait_text.text ~= ""
+	box:SetFixedSize(wait_text.width + size, wait_text.height + size / 2)
+	-- **Not larger than the window** ([LOADING_PIC_FIT], user 2026-10-11):
+	-- the client's fit lowers the UI scale for an element past the root,
+	-- so the element is the root's size and its imageRect the centred
+	-- part of the picture in the root's proportions
 	local p = load_wait.pic
 	if p then
 		local k = math.max(w / p.w, h / p.h)
-		p.el:SetFixedSize(math.ceil(p.w * k), math.ceil(p.h * k))
+		local cw, ch = w / k, h / k
+		local x0, y0 = math.floor((p.w - cw) / 2), math.floor((p.h - ch) / 2)
+		p.el:SetFixedSize(w, h)
+		p.el.imageRect = magic.IntRect(x0, y0, x0 + math.floor(cw + 0.5),
+				y0 + math.floor(ch + 0.5))
 	end
 end
 load_wait.fit()
@@ -1231,7 +1249,6 @@ buildat.sub_packet("main:loading_picture", function(data)
 	buildat.add_resource_dir(dir)
 	local el = load_wait.screen:CreateChild("BorderImage")
 	el.texture = magic.cache:GetResource("Texture2D", resource)
-	el.imageRect = magic.IntRect(0, 0, w, h)
 	el:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	load_wait.pic = {el = el, w = w, h = h}
 	load_wait.fit()

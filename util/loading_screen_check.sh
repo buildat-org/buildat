@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~4 min (2026-10-11)
+# cost: ~5 min (2026-10-11)
 # covers: apps/vanilla/main/client_lua/init.lua apps/vanilla/main/main.cpp
 # [LOADING_SCREEN]: while the world loads, vanilla shows a screen of its
 # own: one of the game's menu/background*.png at random, scaled to cover,
@@ -8,7 +8,10 @@
 # the chunks near the player are drawn. Vanilla on VoxeLibre, the native
 # client:
 #   1. a join straight to the server (the game's media into the client's
-#      cache): a picture chosen and shown;
+#      cache): a picture chosen and shown; again in a window wider than
+#      the picture and one taller ([LOADING_PIC_FIT]): covered and
+#      centred, not stretched, and the UI scale while it shows the one
+#      after it;
 #   2. a join over a link of 300 KB/s (util/netsim.py): the screenshot is
 #      the chosen picture, covered and centred; W held and the mouse moved
 #      while it shows move nothing (F5's place and yaw); "N of M" moves;
@@ -34,13 +37,49 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=ls start_server "$t/srv.log" 
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 client(){ run_client 60 "$1" timeout 400 "$here/Build/bin/buildat" -C "$t/nc" \
-	-D "$t/nu" -w 800x450 -l 3 -o sound_mute=1 "${@:2}"; }
+	-D "$t/nu" -w ${WIN:-800x450} -l 3 -o sound_mute=1 "${@:2}"; }
+# covered <screenshot> <picture> <from> <to> ...: how far the screenshot is
+# from the picture scaled to cover and centred, on the rows from..to
+# (fractions of the height)
+cat > "$t/covered.py" <<'PY'
+import sys
+import numpy as np
+from PIL import Image
+shot = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(float)
+h, w = shot.shape[:2]
+src = Image.open(sys.argv[2]).convert("RGB")
+k = max(w / src.width, h / src.height)
+sw, sh = round(src.width * k), round(src.height * k)
+want = np.asarray(src.resize((sw, sh), Image.BILINEAR)).astype(float)
+want = want[(sh - h) // 2:(sh - h) // 2 + h, (sw - w) // 2:(sw - w) // 2 + w]
+rows = [r for a, b in zip(sys.argv[3::2], sys.argv[4::2])
+        for r in range(int(float(a) * h), int(float(b) * h))]
+print("%.1f" % np.abs(shot[rows] - want[rows]).mean())
+PY
 
 # 1
 printf "wait_log 300000 load: the world is in\nquit\n" > "$t/1.cmds"
 client "$t/1.log" -s "127.0.0.1:$SERVER_PORT" -c @"$t/1.cmds"
 grep -aq "vanilla : load: the picture background[.0-9]*png, 1920x1080" "$t/1.log" ||
 	fail "no picture on the first join ($t/1.log)"
+for WIN in 1000x450 900x600; do
+	printf 'wait_log 120000 load: the picture\ndelay 500\nscreenshot %s\nwait_log 300000 load: the world is in\ndelay 1500\nquit\n' \
+		"$t/1_$WIN.png" > "$t/1_$WIN.cmds"
+	WIN=$WIN client "$t/1_$WIN.log" -s "127.0.0.1:$SERVER_PORT" -c @"$t/1_$WIN.cmds"
+	pic=$(grep -aoP "vanilla : load: the picture \K\S+(?=,)" "$t/1_$WIN.log" | head -1)
+	[ -n "$pic" ] || fail "no picture at $WIN ($t/1_$WIN.log)"
+	# Away from the loading line in the middle
+	off=$(python3 "$t/covered.py" "$t/1_$WIN.png" "$G/menu/$pic" 0.05 0.4 0.6 0.95)
+	# The UI scale from the picture on: one line at most, the screen's and
+	# the world's alike
+	scales=$(sed -n '/vanilla : load: the picture/,$p' "$t/1_$WIN.log" |
+		grep -aoP "UI scale.*" | sort -u)
+	echo "$WIN: $pic off by $off; ${scales:-no UI scale change after the picture}"
+	python3 -c "import sys; sys.exit(float(sys.argv[1]) >= 12)" "$off" ||
+		fail "the screen at $WIN is not $pic covered: off by $off ($t/1_$WIN.png)"
+	[ "$(echo "$scales" | grep -c .)" -le 1 ] ||
+		fail "the UI scale changed while the picture showed at $WIN: $scales"
+done
 
 # 2
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
@@ -141,6 +180,6 @@ dark = (np.abs(a - [0x15, 0x15, 0x1a]).max(axis=2) <= 3).mean()
 print("the dark colour on %.0f%% of the screen" % (dark * 100))
 assert dark > 0.8
 PY
-grep -ac "loading picture: background" "$t/srv.log" | grep -qx 2 ||
-	fail "not two pictures chosen ($t/srv.log)"
-echo "PASS: a game's background on the loading screen, covered; nothing moves while it shows, and W walks after; a game without one: the dark colour"
+grep -ac "loading picture: background" "$t/srv.log" | grep -qx 4 ||
+	fail "not four pictures chosen, one per VoxeLibre join ($t/srv.log)"
+echo "PASS: a game's background on the loading screen, covered, the UI scale unmoved by it; nothing moves while it shows, and W walks after; a game without one: the dark colour"
