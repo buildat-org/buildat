@@ -2781,7 +2781,8 @@
 #ifdef __EMSCRIPTEN__
 		EM_ASM({
 			buildatFiles.parts = buildatFiles.parts || {};
-			buildatFiles.parts[$0] = {name: UTF8ToString($1), chunks: []};
+			// In parentheses: a comma between braces splits the macro
+			buildatFiles.parts[$0] = ({name: UTF8ToString($1), chunks: []});
 		}, id, name.c_str());
 		save_parts()[id] = SavePart();
 #else
