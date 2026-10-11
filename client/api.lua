@@ -585,6 +585,7 @@ __buildat_served_overrides = {
 	launch_save = refused("launch_save"),
 	join_server = refused("join_server"),
 	show_engine_settings = refused("show_engine_settings"),
+	show_key_settings = refused("show_key_settings"),
 	log_path = function() return nil end,
 	open_log_folder = refused("open_log_folder"),
 	recent_errors = function() return nil end,
@@ -1509,6 +1510,12 @@ buildat.safe.show_engine_settings = function()
 	launch_grid.screens("preferences.lua").show()
 	return true
 end
+-- launch_menu's Keys screen, which is preferences.lua's for the game
+-- settings window's keys page to be the same ([SETTINGS_KEYS_PAGE])
+buildat.safe.show_key_settings = function()
+	launch_grid.screens("preferences.lua").show_keys()
+	return true
+end
 -- [LOG_REACH] for Settings' "Logs and errors": the log's path ("" with
 -- none, the web's), the folder it is in opened by the system's file
 -- manager (on the user's own click; the path is the native side's), and
@@ -1847,6 +1854,17 @@ buildat.safe.show_game_settings = function(o)
 	game_settings.show_game({on_close = o.on_close,
 		sections = type(o.sections) == "table" and o.sections or nil},
 		served_key_app(), extra)
+	return true
+end
+-- show_game_keys{on_close = f}: the window's keys page alone, for a game
+-- whose own menu offers its keys ([SETTINGS_KEYS_PAGE]); on_close as
+-- show_game_settings'
+buildat.safe.show_game_keys = function(o)
+	if type(o) ~= "table" then
+		return false, "show_game_keys{on_close =}"
+	end
+	game_settings = game_settings or launch_grid.screens("preferences.lua")
+	game_settings.show_game_keys({on_close = o.on_close}, served_key_app())
 	return true
 end
 buildat.safe.add_game_settings_section = function(name, section)

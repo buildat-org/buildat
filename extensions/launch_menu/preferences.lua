@@ -395,6 +395,249 @@ function M.show()
 	end)
 end
 
+-- **The keys** ([LAUNCH_MENU_V2] step 3): the client's own, the shared
+-- names (most used first), and every app that declared its keys, each
+-- action with its key and where that comes from. Enter on a row and then
+-- a key binds it; Backspace on a row puts it back -- a shared name to
+-- each app's own, an app's action to the shared or default key, a
+-- client key to its default -- and Delete unbinds a client key (not the
+-- overlay's, which the client refuses), giving it to the apps.
+-- **One page for the launcher's Keys screen and a game's**
+-- ([SETTINGS_KEYS_PAGE]): a game's is its own actions, the client's
+-- Fullscreen and Screenshot, and Defaults. A key bound, reset or unbound
+-- changes the rows' keys in place, so the view and the selection stay.
+-- simplified: one list, not the plan's two tabs; a key the client keeps
+-- cannot be captured here (no script hears it), so two client keys are
+-- swapped through a free one.
+local CLIENT_KEY_LABEL = {overlay = "Trusted overlay on and off",
+	profiler = "The engine's profiler (Ctrl: physics geometry)",
+	fullscreen = "Fullscreen on and off",
+	screenshot = "A screenshot (Ctrl: the sandbox scan)"}
+local CLIENT_KEYS_SHOWN = {fullscreen = "Fullscreen", screenshot = "Screenshot"}
+-- A shared name's glyph, and so an app's action under it ([GLYPH_ICONS])
+local KEY_GLYPH = {["move.forward"] = "↑", ["move.back"] = "↓",
+	["move.left"] = "←", ["move.right"] = "→",
+	jump = "⮝", sneak = "⮟", sprint = "⇛"}
+
+-- The page's rows from the key store: {header = s}, or {label, glyph,
+-- badge, set(key), reset(), unbind() or nil}, or {label, badge, run()}
+-- for one pressed rather than bound. app_key: that app's page.
+local function key_rows(store, app_key)
+	local out = {}
+	local function row(label, key, note, set, reset, unbind, glyph)
+		out[#out + 1] = {label = label, glyph = glyph,
+			badge = (key or "-") .. (note and "   " .. note or ""),
+			set = set, reset = reset, unbind = unbind}
+	end
+	local function client()
+		out[#out + 1] = {header = "This client's"}
+		for _, c in ipairs(store.client) do
+			if not app_key or CLIENT_KEYS_SHOWN[c.which] then
+				row(CLIENT_KEY_LABEL[c.which] or c.which,
+						c.key ~= "" and c.key or nil,
+						c.key ~= c.default and "(default " .. c.default .. ")" or nil,
+						function(k) return api.set_client_key(c.which, k) end,
+						function() return api.set_client_key(c.which, c.default) end,
+						function() return api.set_client_key(c.which, nil) end)
+			end
+		end
+	end
+	if not app_key then
+		client()
+		-- The shared names, by how many apps use them
+		local users = {}
+		for _, a in ipairs(store.apps) do
+			for _, e in ipairs(a.actions) do
+				if e.shared then users[e.shared] = (users[e.shared] or 0) + 1 end
+			end
+		end
+		local names = {}
+		for i, n in ipairs(store.shared_names) do names[i] = n end
+		table.sort(names, function(x, y)
+			if (users[x] or 0) ~= (users[y] or 0) then
+				return (users[x] or 0) > (users[y] or 0)
+			end
+			return x < y
+		end)
+		out[#out + 1] = {header = "Shared, for every app that has not its own"}
+		for _, n in ipairs(names) do
+			row(n, store.shared[n], store.shared[n] == nil and
+					"each app's own, used by " .. (users[n] or 0) or
+					"used by " .. (users[n] or 0),
+					function(k) return api.set_shared_key(n, k) end,
+					function() return api.set_shared_key(n, nil) end, nil,
+					KEY_GLYPH[n])
+		end
+	end
+	for _, a in ipairs(store.apps) do
+		if #a.actions > 0 and (not app_key or a.id == app_key) then
+			out[#out + 1] = {header = a.label .. "   (" .. a.id .. ")"}
+			for _, e in ipairs(a.actions) do
+				row(e.label, e.key, e.from == "shared" and "shared " ..
+						e.shared or e.from == "app" and "this app's" or nil,
+						function(k) return api.set_app_keys(a.id, {[e.id] = k}) end,
+						function()
+							return api.set_app_keys(a.id, {[e.id] = false})
+						end, nil, KEY_GLYPH[e.shared])
+			end
+			if app_key then
+				out[#out + 1] = {label = "Defaults", badge = "every key of " ..
+						a.label .. " as it came", run = function()
+					local all = {}
+					for _, e in ipairs(a.actions) do all[e.id] = false end
+					return api.set_app_keys(a.id, all)
+				end}
+			end
+		end
+	end
+	if app_key then
+		client()
+	end
+	return out
+end
+
+-- The page in parent: a list_view, its wheel scrolling it, and a line
+-- under it. page.items are {button, action} for a menu; page:key(key)
+-- takes a key the menu does not (the bound one, Backspace, Delete, and
+-- Escape while one is waited for) and answers whether it did; page.log
+-- is what the log says first.
+local function key_page(parent, width, height, app_key, options)
+	options = options or {}
+	local view = ui_utils.list_view(parent, width, height,
+			{wheel = 40, follow_focus = options.follow_focus})
+	local rows, headers = {}, {}
+	for _, r in ipairs(key_rows(api.key_store(), app_key)) do
+		if r.header then
+			view:header(r.header)
+			headers[#headers + 1] = r.header
+		else
+			local b, _, badge = view:row({label = r.label, glyph = r.glyph},
+					r.badge)
+			r.button, r.badge_text = b, badge
+			rows[#rows + 1] = r
+		end
+	end
+	view:fit()
+	local line = parent:CreateChild("Text")
+	line:SetStyleAuto()
+	line:SetFontSize(13)
+	line.color = magic.Color(ui_utils.rgb("dim"))
+	line:SetFixedHeight(20)
+	local page = {view = view, rows = rows, headers = headers, items = {},
+		log = options.log or "launch_menu"}
+	local function selected()
+		for _, r in ipairs(rows) do
+			if r.button:HasFocus() then return r end
+		end
+		return nil
+	end
+	-- After a change, every row's key read again where it is: a shared
+	-- key changes the rows under it
+	local function changed(what)
+		local i = 0
+		for _, r in ipairs(key_rows(api.key_store(), app_key)) do
+			if not r.header then
+				i = i + 1
+				if rows[i] then rows[i].badge_text.text = r.badge end
+			end
+		end
+		local sel = selected()
+		-- What a check reads: the view and the selection as they were
+		log:info(string.format("%s: %s; the view at %d, %s selected",
+				page.log, what, -view.list.position.y,
+				sel and sel.label or "none"))
+	end
+	local listening = nil
+	-- The Enter that started a capture reaches the page's key after the
+	-- button pressed itself on it; that one is not the key
+	local enter_down = nil
+	for i, r in ipairs(rows) do
+		page.items[i] = {button = r.button, action = function()
+			if r.run then
+				local ok, why = r.run()
+				changed(r.label .. (ok and "" or ": " .. tostring(why)))
+				return
+			end
+			listening = r
+			enter_down = magic.input:GetKeyDown(magic.KEY_RETURN) and
+					magic.KEY_RETURN or
+					magic.input:GetKeyDown(magic.KEY_KP_ENTER) and
+					magic.KEY_KP_ENTER or nil
+			line.text = "Press a key for \"" .. r.label ..
+					"\" (Escape leaves it)"
+		end}
+	end
+	function page:key(key)
+		if listening and key == enter_down then
+			enter_down = nil
+			return true
+		end
+		if listening then
+			local r = listening
+			listening = nil
+			line.text = ""
+			if key ~= KEY_ESCAPE then
+				local name = magic.input:GetKeyName(key)
+				local ok, why = r.set(name)
+				changed(r.label .. " = " .. name ..
+						(ok and "" or ": " .. tostring(why)))
+			end
+			return true
+		end
+		local r = selected()
+		if key == magic.KEY_BACKSPACE and r and r.reset then
+			r.reset()
+			changed(r.label .. " reset")
+			return true
+		end
+		if key == magic.KEY_DELETE and r and r.unbind then
+			local ok, why = r.unbind()
+			if ok then
+				changed(r.label .. " unbound")
+			else
+				line.text = tostring(why)
+			end
+			return true
+		end
+		return false
+	end
+	function page:waiting() return listening ~= nil end
+	return page
+end
+
+-- The launcher's Keys screen (launch_menu's Settings, Controls)
+function M.show_keys()
+	local root = uistack.main:push({desc = "launch_menu keys"})
+	root.defaultStyle = magic.cache:GetResource("XMLFile",
+			"launch_menu/res/main_style.xml")
+	local width = math.min(magic.ui.root.width - 40, 760)
+	local window = root:CreateChild("Window")
+	window:SetStyleAuto()
+	window:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))
+	window:SetAlignment(magic.HA_LEFT, magic.VA_CENTER)
+	window:SetFixedWidth(width)
+	local heading = window:CreateChild("Text")
+	heading:SetStyleAuto()
+	heading.text = "Keys   (Enter and a key binds; Backspace resets)"
+	heading:SetFontSize(20)
+	heading.color = magic.Color(ui_utils.rgb("dim"))
+	ui_utils.close_glyph(root, window)
+	local page = key_page(window, width - 32, magic.ui.root.height - 200)
+	local nav = ui_utils.bind_button_menu(root, page.items, function(key)
+		if page:key(key) then
+			return true
+		end
+		if key == KEY_ESCAPE then
+			uistack.main:pop(root)
+			return true
+		end
+	end, {wheel = false})
+	nav:on_change(function(button, sel)
+		if sel then page.view:show(button) end
+	end)
+	log:info("launch_menu: keys, " .. #page.rows .. " rows")
+end
+
 --
 -- **A game's settings** ([GAME_SETTINGS], user 2026-10-09):
 -- buildat.show_game_settings{} (client/api.lua) draws this over the game.
@@ -409,7 +652,6 @@ local GAME_ROWS = {
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
 		"ui_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
 }
-local CLIENT_KEYS_SHOWN = {fullscreen = "Fullscreen", screenshot = "Screenshot"}
 local game = nil
 
 local function game_close(silent)
@@ -500,6 +742,10 @@ function M.show_game(o, app_key, extra)
 
 	local shown = {}
 	local function section(t, draw)
+		-- The keys' page alone (show_game_keys) has none
+		if o.keys_only then
+			return
+		end
 		shown[#shown + 1] = t
 		text(page, t, nil, 17)
 		local w = page:CreateChild("UIElement")
@@ -569,51 +815,31 @@ function M.show_game(o, app_key, extra)
 		end
 	end
 
-	-- **Keys**: a row picked says "Press a key..." and the next key binds
-	-- it; Escape leaves it, Backspace puts the default back. The game
-	-- reads its keys again in on_close.
-	local store = api.key_store and api.key_store()
-	local acts = {}
-	for _, a in ipairs(store and store.apps or {}) do
-		if a.id == app_key then acts = a.actions end
-	end
-	local capture = nil
-	shown[#shown + 1] = #acts .. " of the game's keys"
-	section("Keys", function(w, ui)
-		local function row(label, key, set)
-			local b
-			b = button(w, label .. ": " .. (key ~= "" and key or "none"),
-					function()
-				capture = {set = set, redraw = ui.redraw}
-				b:GetChild(0).text = label .. ": press a key..."
-			end)
-		end
-		store = api.key_store()
-		for _, a in ipairs(store.apps) do
-			if a.id == app_key then acts = a.actions end
-		end
-		for _, e in ipairs(acts) do
-			row(e.label, e.key or "", function(name)
-				api.set_app_keys(app_key, {[e.id] = name or false})
-			end)
-		end
-		for _, c in ipairs(store.client) do
-			if CLIENT_KEYS_SHOWN[c.which] then
-				row(CLIENT_KEYS_SHOWN[c.which], c.key or "", function(name)
-					api.set_client_key(c.which, name or c.default)
-				end)
+	-- **Keys**: a line and the button that opens them, as a page in this
+	-- window ([SETTINGS_KEYS_PAGE]); Back comes back to this page as it
+	-- was. The game reads its keys again in on_close.
+	local function key_count()
+		local store = api.key_store and api.key_store()
+		for _, a in ipairs(store and store.apps or {}) do
+			if a.id == app_key then
+				local n = 0
+				for _, e in ipairs(a.actions) do
+					if e.key and e.key ~= "" then n = n + 1 end
+				end
+				return #a.actions, n
 			end
 		end
-		if #acts > 0 then
-			button(w, "Defaults", function()
-				local all = {}
-				for _, e in ipairs(acts) do all[e.id] = false end
-				api.set_app_keys(app_key, all)
-				ui.redraw()
-			end)
-		end
+		return 0, 0
+	end
+	local acts = key_count()
+	shown[#shown + 1] = acts .. " of the game's keys"
+	local keys_button = nil
+	section("Keys", function(w, ui)
+		local all, bound = key_count()
+		ui.text(bound .. " of the game's " .. all ..
+				" keys bound, and the client's Fullscreen and Screenshot", "dim")
+		keys_button = ui.button("Key bindings...", function() g.open_keys() end)
 	end)
-
 	for _, sec in ipairs(extra or {}) do
 		section(tostring(sec.title), sec.draw)
 	end
@@ -642,6 +868,40 @@ function M.show_game(o, app_key, extra)
 		end)
 	end)
 
+	-- The keys' page in place of the settings, Back to them
+	function g.open_keys()
+		view.visible = false
+		title.text = "Keys"
+		local box = win:CreateChild("UIElement")
+		box:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+		local hint = text(box, "Enter and a key binds; Backspace resets", "dim")
+		hint:SetFixedHeight(20)
+		local page = key_page(box, inner, win.height - 150, app_key,
+				{follow_focus = true, log = "Game keys"})
+		for _, item in ipairs(page.items) do
+			magic.SubscribeToEvent(item.button, "Released", item.action)
+		end
+		local back = button(box, "Back", function() g.close_keys() end)
+		g.keys = {box = box, page = page}
+		ui_utils.keyboard_page(box)
+		if page.rows[1] then page.rows[1].button:SetFocus(true) end
+		log:info("Game keys shown: " .. #page.rows .. " rows under " ..
+				table.concat(page.headers, ", "))
+	end
+	function g.close_keys()
+		if not g.keys then return end
+		g.keys.box:Remove()
+		g.keys = nil
+		log:info("Game keys closed")
+		if o.keys_only then
+			game_close()
+			return
+		end
+		view.visible = true
+		title.text = "Settings"
+		if keys_button then keys_button:SetFocus(true) end
+	end
+
 	ui_utils.keyboard_page(win)
 	-- simplified: not the key that opened it again (the Escape that
 	-- closed a window it went away for); a frame's time rather than a frame
@@ -651,24 +911,29 @@ function M.show_game(o, app_key, extra)
 		if api.get_time_us() - opened < 100000 then
 			return
 		end
-		if capture then
-			local c = capture
-			capture = nil
-			if key == magic.KEY_BACKSPACE then
-				c.set(nil)
-			elseif key ~= KEY_ESCAPE and
-					(magic.input:GetKeyName(key) or "") ~= "" then
-				c.set(magic.input:GetKeyName(key))
+		if g.keys then
+			if not g.keys.page:key(key) and key == KEY_ESCAPE then
+				g.close_keys()
 			end
-			c.redraw()
 			return
 		end
 		if key == KEY_ESCAPE and not ui_utils.dropdown_open() then
 			game_close()
 		end
 	end)
+	if o.keys_only then
+		g.open_keys()
+		return
+	end
 	-- What a check reads
 	log:info("Game settings shown: " .. table.concat(shown, ", "))
+end
+
+-- The keys' page alone, in the same window ([SETTINGS_KEYS_PAGE]: a
+-- game's own menu has a "Key bindings..." of its own); Back and Escape
+-- close it, and o.on_close is where the game reads its keys again
+function M.show_game_keys(o, app_key)
+	M.show_game({on_close = o.on_close, keys_only = true}, app_key)
 end
 
 -- Closed by the game (it left, or its own key)

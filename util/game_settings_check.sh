@@ -7,7 +7,8 @@
 #   1. A client-only dev app made here opens it with a section of its own
 #      and one whose draw fails: the failure is said in the section and the
 #      rest is drawn. Its own row, the frame limit and its declared key
-#      are changed; Escape closes it, the key is read again in on_close
+#      (on the keys' page, [SETTINGS_KEYS_PAGE]) are changed; Escape
+#      closes it, the key is read again in on_close
 #      and works in the game; after a restart the key and the row are as
 #      set (a -c run saves no preferences, so the frame limit is not).
 #   2. Floor planner's Client settings... is the window, its rows the first
@@ -85,9 +86,15 @@ delay 500
 keypress Down
 keypress Return
 delay 500
-click Button "Jump: Space"
+click Button "Key bindings..."
+wait_log 5000 Game keys shown
+delay 500
+click Button "Jump"
 delay 300
 keypress J
+delay 500
+keypress Escape
+wait_log 5000 Game keys closed
 delay 500
 keypress Escape
 wait_log 5000 gscheck: closed

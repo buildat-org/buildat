@@ -158,16 +158,12 @@ open = function()
 	-- menu whose only way back is a key nobody was told about is a menu
 	-- that traps people
 	accounts.page_button(w, "Continue playing", close, true)
-	accounts.page_button(w, "Key bindings", function()
-		page(function()
-			o.keys.draw(function() later(open) end)
-		end)
-	end)
 	accounts.page_button(w, "Chat...", function()
 		page(function() accounts.chat_page(open) end, open)
 	end)
 	-- The engine's settings, the keys and the logs: the client's window
-	-- ([GAME_SETTINGS]), over the world; the keys read again after it
+	-- ([GAME_SETTINGS]), over the world; the keys read again after it.
+	-- The keys are reached by it alone ([SETTINGS_KEYS_PAGE])
 	if buildat.show_game_settings then
 		accounts.page_button(w, "Settings...", function()
 			page(function()

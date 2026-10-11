@@ -928,8 +928,9 @@ local function logs()
 	end)
 end
 
--- **Settings**, one tree: each part once
-local controls
+-- **Settings**, one tree: each part once. The Keys screen is
+-- preferences.lua's (api.show_key_settings), the game settings window's
+-- keys page being the same.
 settings = function()
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local root, window = screen("launch_menu settings", width,
@@ -958,7 +959,7 @@ settings = function()
 			view:header(section)
 			row({label = "Keys", glyph = "⌨", description = "Every app's keys, the " ..
 					"shared ones that bind them all at once, and the " ..
-					"client's own."}, function() controls(1) end)
+					"client's own."}, function() api.show_key_settings() end)
 		elseif by_section[section] then
 			view:header(section)
 			for _, e in ipairs(by_section[section]) do row(e, e.run) end
@@ -981,153 +982,6 @@ settings = function()
 			desc.text = item.entry.description or ""
 		end
 	end)
-end
-
--- **The keys** ([LAUNCH_MENU_V2] step 3): the client's own, the shared
--- names (most used first), and every app that declared its keys, each
--- action with its key and where that comes from. Enter on a row and then
--- a key binds it; Backspace on a row puts it back -- a shared name to
--- each app's own, an app's action to the shared or default key, a
--- client key to its default -- and Delete unbinds a client key (not the
--- overlay's, which the client refuses), giving it to the apps.
--- simplified: one list, not the plan's two tabs; a key the client keeps
--- cannot be captured here (no script hears it), so two client keys are
--- swapped through a free one.
-local CLIENT_KEY_LABEL = {overlay = "Trusted overlay on and off",
-	profiler = "The engine's profiler (Ctrl: physics geometry)",
-	fullscreen = "Fullscreen on and off",
-	screenshot = "A screenshot (Ctrl: the sandbox scan)"}
--- A shared name's glyph, and so an app's action under it ([GLYPH_ICONS])
-local KEY_GLYPH = {["move.forward"] = "↑", ["move.back"] = "↓",
-	["move.left"] = "←", ["move.right"] = "→",
-	jump = "⮝", sneak = "⮟", sprint = "⇛"}
-controls = function(focus)
-	local store = api.key_store()
-	local width = math.min(magic.ui.root.width - 40, 760)
-	local root, window = screen("launch_menu keys", width,
-			"Keys   (Enter and a key binds; Backspace resets)", "")
-	local view = ui_utils.list_view(window, width - 32,
-			magic.ui.root.height - 200)
-	local rows = {}
-	local function row(label, key, note, set, reset, unbind, glyph)
-		rows[#rows + 1] = {button = view:row({label = label, glyph = glyph},
-				(key or "-") .. (note and "   " .. note or "")),
-			set = set, reset = reset, unbind = unbind, label = label}
-	end
-	view:header("This client's")
-	for _, c in ipairs(store.client) do
-		row(CLIENT_KEY_LABEL[c.which] or c.which, c.key ~= "" and c.key or nil,
-				c.key ~= c.default and "(default " .. c.default .. ")" or nil,
-				function(k) return api.set_client_key(c.which, k) end,
-				function() return api.set_client_key(c.which, c.default) end,
-				function() return api.set_client_key(c.which, nil) end)
-	end
-	-- The shared names, by how many apps use them
-	local users = {}
-	for _, a in ipairs(store.apps) do
-		for _, e in ipairs(a.actions) do
-			if e.shared then users[e.shared] = (users[e.shared] or 0) + 1 end
-		end
-	end
-	local names = {}
-	for i, n in ipairs(store.shared_names) do names[i] = n end
-	table.sort(names, function(x, y)
-		if (users[x] or 0) ~= (users[y] or 0) then
-			return (users[x] or 0) > (users[y] or 0)
-		end
-		return x < y
-	end)
-	view:header("Shared, for every app that has not its own")
-	for _, n in ipairs(names) do
-		row(n, store.shared[n], store.shared[n] == nil and
-				"each app's own, used by " .. (users[n] or 0) or
-				"used by " .. (users[n] or 0),
-				function(k) return api.set_shared_key(n, k) end,
-				function() return api.set_shared_key(n, nil) end, nil, KEY_GLYPH[n])
-	end
-	for _, a in ipairs(store.apps) do
-		if #a.actions > 0 then
-			view:header(a.label .. "   (" .. a.id .. ")")
-			for _, e in ipairs(a.actions) do
-				row(e.label, e.key, e.from == "shared" and "shared " ..
-						e.shared or e.from == "app" and "this app's" or nil,
-						function(k) return api.set_app_keys(a.id, {[e.id] = k}) end,
-						function()
-							return api.set_app_keys(a.id, {[e.id] = false})
-						end, nil, KEY_GLYPH[e.shared])
-			end
-		end
-	end
-	view:fit()
-	local line = text(window, "", 13, "dim")
-	line:SetFixedHeight(20)
-	local listening = nil
-	-- The Enter that started a capture reaches the screen's handler after
-	-- the button pressed itself on it; that one is not the key
-	local enter_down = nil
-	local selected = 1
-	local function redraw()
-		uistack.main:pop(root)
-		controls(selected)
-	end
-	local items = {}
-	for i, r in ipairs(rows) do
-		items[i] = {button = r.button, action = function()
-			listening = r
-			enter_down = magic.input:GetKeyDown(magic.KEY_RETURN) and
-					magic.KEY_RETURN or
-					magic.input:GetKeyDown(magic.KEY_KP_ENTER) and
-					magic.KEY_KP_ENTER or nil
-			line.text = "Press a key for \"" .. r.label ..
-					"\" (Escape leaves it)"
-		end}
-	end
-	local nav = ui_utils.bind_button_menu(root, items, function(key)
-		if listening and key == enter_down then
-			enter_down = nil
-			return true
-		end
-		if listening then
-			local r = listening
-			listening = nil
-			if key ~= KEY_ESCAPE then
-				local name = magic.input:GetKeyName(key)
-				local ok, why = r.set(name)
-				log:info("launch_menu: " .. r.label .. " = " .. name ..
-						(ok and "" or ": " .. tostring(why)))
-				redraw()
-			else
-				line.text = ""
-			end
-			return true
-		end
-		local r = rows[selected]
-		if key == KEY_BACKSPACE and r then
-			r.reset()
-			log:info("launch_menu: " .. r.label .. " reset")
-			redraw()
-			return true
-		end
-		if key == magic.KEY_DELETE and r and r.unbind then
-			local ok, why = r.unbind()
-			log:info("launch_menu: " .. r.label .. " unbound" ..
-					(ok and "" or ": " .. tostring(why)))
-			if ok then redraw() else line.text = tostring(why) end
-			return true
-		end
-		if key == KEY_ESCAPE then
-			uistack.main:pop(root)
-			return true
-		end
-	end)
-	nav:on_change(function(button, sel, index)
-		if sel and index then
-			selected = index
-			view:show(button)
-		end
-	end)
-	if rows[focus] then rows[focus].button:SetFocus(true) end
-	log:info("launch_menu: keys, " .. #rows .. " rows")
 end
 
 -- launch_action is -a's kind/name/id, run over Home as picking it would

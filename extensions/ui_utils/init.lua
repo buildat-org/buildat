@@ -276,6 +276,22 @@ local function button_menu_nav(root, options)
 		sync()
 	end
 
+	-- **After the wheel a hover is the mouse's only once it moves**
+	-- ([SETTINGS_KEYS_PAGE]): a list the wheel scrolls passes its rows
+	-- under a still mouse, and that walked the selection
+	local wheeled_at = nil
+	local function mouse_moved()
+		if not wheeled_at then
+			return true
+		end
+		local p = magic.input:GetMousePosition()
+		if p.x == wheeled_at.x and p.y == wheeled_at.y then
+			return false
+		end
+		wheeled_at = nil
+		return true
+	end
+
 	local nav = {}
 
 	function nav:add(button, action)
@@ -294,7 +310,7 @@ local function button_menu_nav(root, options)
 		end)
 		magic.SubscribeToEvent(button, "HoverBegin",
 		function(self, event_type, event_data)
-			if not typing() then
+			if not typing() and mouse_moved() then
 				select_i(i)
 				by_mouse = true
 			end
@@ -303,7 +319,8 @@ local function button_menu_nav(root, options)
 		function(self, event_type, event_data)
 			-- Not under a screen pushed over this one: the focus is that
 			-- screen's (a click that opened it ends the hover too)
-			if not by_mouse or gone(root) or not root.visible then
+			if not by_mouse or gone(root) or not root.visible or
+					not mouse_moved() then
 				return
 			end
 			sync()
@@ -427,8 +444,12 @@ local function button_menu_nav(root, options)
 	-- ([LAUNCH_GRID]). **Its step grows with the list**
 	-- ([MENU_FAST_SCROLL]): a row a click up to 20 rows, two up to 40,
 	-- so any list is crossed in 10 to 20 clicks.
+	-- options.wheel = false: the wheel is the screen's, a list_view's
+	-- that scrolls the view and leaves the selection
 	root:SubscribeToStackEvent("MouseWheel", function(event_type, event_data)
-		if #items == 0 or drop_open then
+		local p = magic.input:GetMousePosition()
+		wheeled_at = {x = p.x, y = p.y}
+		if #items == 0 or drop_open or (options and options.wheel == false) then
 			return
 		end
 		by_mouse = false
@@ -853,8 +874,8 @@ end
 -- Bind up/down/enter and hover selection to existing buttons on a uistack
 -- root. Each item is {button, action} or {button=..., action=...}.
 -- Subscribes Released on the buttons; don't also subscribe Released.
--- Returns a handle with :add(button, action) and :on_key(fn). options as
--- button_menu_nav's.
+-- Returns a handle with :add(button, action) and :on_key(fn). options:
+-- wheel = false leaves the wheel alone.
 function M.safe.bind_button_menu(root, items, on_other_key, options)
 	local nav = button_menu_nav(root, options)
 	if items then
@@ -983,18 +1004,18 @@ local function list_view_rows(view, list, width, options)
 		label:SetName("ButtonText")
 		label:SetFixedWidth(math.floor(width * (options.label_share or 0.62)))
 		label:SetAlignment(HA_LEFT, VA_CENTER)
-		text(b, badge or e.badge or "", 12, "dim"):SetAlignment(HA_LEFT,
-				VA_CENTER)
+		local bt = text(b, badge or e.badge or "", 12, "dim")
+		bt:SetAlignment(HA_LEFT, VA_CENTER)
 		-- e.mark = {glyph, colour name}: a glyph at the right of the
 		-- label's column ([HEARTH_NEW_MARKS]), returned for the caller to
-		-- change
+		-- change; and the badge's Text, for one that changes in place
+		local m = nil
 		if e.mark then
-			local m = text(label, e.mark[1], nil, e.mark[2])
+			m = text(label, e.mark[1], nil, e.mark[2])
 			m:SetAlignment(HA_RIGHT, VA_CENTER)
 			m.position = magic.IntVector2(-4, 0)
-			return b, m
 		end
-		return b
+		return b, m, bt
 	end
 end
 
@@ -1011,7 +1032,8 @@ end
 --   view:row(e, badge)           a Button: e.icon (a texture, or none;
 --                                else e.glyph, a character of the font,
 --                                dim in its place), e.label, and badge
---                                (or e.badge) dim after
+--                                (or e.badge) dim after; returns it, the
+--                                e.mark Text and the badge's Text
 --   view:fit()                   lays the rows out; again after adding more
 --   view:show(e)                 scrolls so that e is in view
 --   view:scroll(dy)              by dy pixels, clamped; math.huge: the end

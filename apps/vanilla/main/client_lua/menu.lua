@@ -705,16 +705,22 @@ function draw_settings(paths)
 		buildat.send_packet("main:set_settings",
 				cereal.binary_output(list, {"array", "string"}))
 	end
-	-- The key bindings editor, keys.lua's screen over the client's key
-	-- store; back asks for the settings again
+	-- The keys: the client's page of them, as the pause menu's Settings
+	-- window has ([SETTINGS_KEYS_PAGE]); keys.lua's own editor on a client
+	-- without it. Back asks for the settings again.
 	menu:add("Key bindings...", function()
 		close()
 		keys_open = true
-		keys_editor.draw(function()
+		local function back()
 			keys_open = false
 			buildat.send_packet("main:get_settings", "")
 			waiting("Loading settings...")
-		end)
+		end
+		if buildat.show_game_keys then
+			buildat.show_game_keys{on_close = back}
+		else
+			keys_editor.draw(back)
+		end
 	end)
 	local function resend()
 		local list = {}
