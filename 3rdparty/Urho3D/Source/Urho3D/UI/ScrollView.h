@@ -188,6 +188,13 @@ private:
     void HandleTouchMove(StringHash eventType, VariantMap& eventData);
     /// Handle the scroll smoothing.
     void ScrollSmooth(float timeStep);
+
+    /// buildat [TOUCH_SCROLL_ON_BUTTONS], at the class's end: the last touch
+    /// began inside the view on nothing that takes a drag of its own, so it
+    /// scrolls the view whatever has the focus
+    bool touchOwned_ = false;
+    /// Where it began, in UI coordinates
+    IntVector2 touchStart_;
 };
 
 }

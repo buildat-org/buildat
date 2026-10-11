@@ -27,6 +27,7 @@
 #include "../UI/BorderImage.h"
 #include "../UI/ScrollBar.h"
 #include "../UI/ScrollView.h"
+#include "../UI/LineEdit.h"
 #include "../UI/Slider.h"
 #include "../UI/UI.h"
 #include "../UI/UIEvents.h"
@@ -55,10 +56,10 @@ ScrollView::ScrollView(Context* context) :
     scrollSnapEpsilon_(M_EPSILON),
     scrollTouchDown_(false),
     barScrolling_(false),
-    autoDisableChildren_(false),
+    autoDisableChildren_(true),
     scrollChildrenDisable_(false),
     touchDistanceSum_(0.0f),
-    autoDisableThreshold_(25.0f)
+    autoDisableThreshold_(8.0f)
 {
     clipChildren_ = true;
     SetEnabled(true);
@@ -105,8 +106,8 @@ void ScrollView::RegisterObject(Context* context)
     URHO3D_ACCESSOR_ATTRIBUTE("Auto Show/Hide Scrollbars", GetScrollBarsAutoVisible, SetScrollBarsAutoVisible, bool, true, AM_FILE);
     URHO3D_ACCESSOR_ATTRIBUTE("Scroll Deceleration", GetScrollDeceleration, SetScrollDeceleration, float, 30.0f, AM_FILE);
     URHO3D_ACCESSOR_ATTRIBUTE("Scroll Snap Epsilon", GetScrollSnapEpsilon, SetScrollSnapEpsilon, float, M_EPSILON, AM_FILE);
-    URHO3D_ACCESSOR_ATTRIBUTE("Auto Disable Children", GetAutoDisableChildren, SetAutoDisableChildren, bool, false, AM_FILE);
-    URHO3D_ACCESSOR_ATTRIBUTE("Auto Disable Threshold", GetAutoDisableThreshold, SetAutoDisableThreshold, float, 25.0f, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Auto Disable Children", GetAutoDisableChildren, SetAutoDisableChildren, bool, true, AM_FILE);
+    URHO3D_ACCESSOR_ATTRIBUTE("Auto Disable Threshold", GetAutoDisableThreshold, SetAutoDisableThreshold, float, 8.0f, AM_FILE);
 }
 
 void ScrollView::Update(float timeStep)
@@ -118,7 +119,9 @@ void ScrollView::Update(float timeStep)
     // Check if we should not scroll:
     // - ScrollView is not visible, is not enabled, or doesn't have focus
     // - The element being dragged is not a child of the ScrollView, or is one of our scrollbars
-    if (!IsVisible() || !IsEnabled() || !HasFocus())
+    // buildat [TOUCH_SCROLL_ON_BUTTONS]: or the touch is this view's, which
+    // a button it began on has taken the focus from
+    if (!IsVisible() || !IsEnabled() || !(HasFocus() || touchOwned_))
     {
         touchScrollSpeed_ = Vector2::ZERO;
         touchScrollSpeedMax_ = Vector2::ZERO;
@@ -536,8 +539,10 @@ void ScrollView::HandleTouchMove(StringHash eventType, VariantMap& eventData)
     {
         scrollTouchDown_ = true;
         // Take new scrolling speed if it's faster than the current accumulated value
-        float dX = (float)-eventData[P_DX].GetInt();
-        float dY = (float)-eventData[P_DY].GetInt();
+        // buildat: in UI coordinates, which the view's position is in
+        float scale = GetSubsystem<UI>()->GetScale();
+        float dX = (float)-eventData[P_DX].GetInt() / scale;
+        float dY = (float)-eventData[P_DY].GetInt() / scale;
 
         if (Abs(dX) > Abs(touchScrollSpeed_.x_))
             touchScrollSpeed_.x_ = dX;
@@ -545,7 +550,11 @@ void ScrollView::HandleTouchMove(StringHash eventType, VariantMap& eventData)
             touchScrollSpeed_.y_ = dY;
 
         // Auto disable children
-        touchDistanceSum_ += dX * dX + dY * dY;
+        // buildat: past the threshold from where the touch began, in UI
+        // pixels; it was the sum of the moves' squares
+        float fx = eventData[P_X].GetInt() / scale - touchStart_.x_;
+        float fy = eventData[P_Y].GetInt() / scale - touchStart_.y_;
+        touchDistanceSum_ = sqrtf(fx * fx + fy * fy);
         if (autoDisableChildren_ && touchDistanceSum_ >= autoDisableThreshold_)
         {
             if (visible_ && !scrollChildrenDisable_)
@@ -560,16 +569,24 @@ void ScrollView::HandleTouchMove(StringHash eventType, VariantMap& eventData)
     }
     else if (eventType == E_TOUCHBEGIN)
     {
-        int X = eventData[P_X].GetInt();
-        int Y = eventData[P_Y].GetInt();
-        IntVector2 pos = IntVector2(X, Y);
-
-        // Prevent conflict between touch scroll and scrollbar scroll
-        if (horizontalScrollBar_->IsVisible() && horizontalScrollBar_->IsInsideCombined(pos, true))
-            barScrolling_ = true;
-
-        if (verticalScrollBar_->IsVisible() && verticalScrollBar_->IsInsideCombined(pos, true))
-            barScrolling_ = true;
+        // buildat [TOUCH_SCROLL_ON_BUTTONS]: the touch is this view's when it
+        // begins inside it on anything but what takes a drag of its own (a
+        // slider, a scroll bar -- the view's own too -- or a text field);
+        // a touch anywhere else leaves it alone. In UI coordinates, as the
+        // UI's own touch handling has them: tested as they came, a touch
+        // on the page of a scaled UI could count as on a bar.
+        UI* ui = GetSubsystem<UI>();
+        float scale = ui->GetScale();
+        IntVector2 pos((int)(eventData[P_X].GetInt() / scale), (int)(eventData[P_Y].GetInt() / scale));
+        touchStart_ = pos;
+        touchDistanceSum_ = 0.0f;
+        touchOwned_ = IsVisibleEffective() && IsInsideCombined(pos, true);
+        for (UIElement* e = touchOwned_ ? ui->GetElementAt(pos) : nullptr; e && e != this; e = e->GetParent())
+        {
+            if (e->IsInstanceOf<Slider>() || e->IsInstanceOf<ScrollBar>() || e->IsInstanceOf<LineEdit>())
+                touchOwned_ = false;
+        }
+        barScrolling_ = !touchOwned_;
 
         // Stop the smooth scrolling
         touchScrollSpeed_ = Vector2::ZERO;

@@ -449,3 +449,23 @@ its popup on each press: a tap opened it and closed it again. Input sets
 IsTouchMouseEvent() while it sends such a button event, and the UI's mouse
 button handlers skip it; the touch handlers take the tap. Games still see
 the button. touchMouseEvent_ is appended at the class's end.
+
+A drag in a scroll view scrolls it from anywhere ([TOUCH_SCROLL_ON_BUTTONS])
+-----------------------------------------------------------------------------
+Source/Urho3D/UI/ScrollView.{cpp,h}
+
+A finger's drag that began on a button in a ScrollView did not scroll it:
+the button took the focus, and Update() scrolled only a view that had it.
+One begun on the page often did not either: the touch's position was
+tested against the scroll bars in window pixels, and on a scaled UI (the
+web's device pixels) a point on the page fell on a bar in UI coordinates,
+which turned the drag off. A touch is now taken in UI coordinates, and
+it is the view's (touchOwned_) when it begins inside the view on anything
+but a Slider, a ScrollBar (the view's own bars too) or a LineEdit, whose
+drags stay theirs; such a touch scrolls whatever has the focus, and a
+touch outside the view leaves it alone. The scroll speed is in UI pixels.
+autoDisableChildren is on by default, and its threshold is 8 UI pixels
+from where the touch began (it was a sum of the moves' squares, 25): past
+it the view's children are disabled until the finger lifts, so the button
+a drag began on is not pressed; a tap still presses it. touchOwned_ and
+touchStart_ are appended at the class's end. util/touch_scroll_check.sh.
