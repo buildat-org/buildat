@@ -204,7 +204,7 @@ struct Module: public interface::Module
 				"network:packet_received/main:contentdb_install"));
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
 				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
-				"stop_world"})
+				"stop_world", "trim"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -284,6 +284,8 @@ struct Module: public interface::Module
 				on_restart_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:stop_world",
 				on_stop_world, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:trim", on_trim,
+				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_world_txp",
 				on_get_world_txp, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:set_world_txp",
@@ -1646,6 +1648,188 @@ struct Module: public interface::Module
 				"%lld kB written", n, cs(m_world_name),
 				(long long)(event.usage.total() / 1024),
 				(long long)(event.limit / 1024));
+	}
+
+	// [WORLD_TRIM_MOVE] 2: trimming the running world from the world menu.
+	// main:trim {save, verb, ...}: "info"; "ask" or "do", then "size" and
+	// the target in MB, or "box", two corners' x y z and "1" to take the
+	// player builds outside too. "ask" answers main:trim_ask {save, what
+	// would go, then the request again}; "info" and "do" main:trim_info
+	// {save, note, bytes, sections, altered, the default box's six}.
+	// simplified: the running world alone (a save no game has open would
+	// want voxelworld without a scene); the size's order is the furthest
+	// from the origin first, picked here rather than by trim_to()
+	struct TrimPick {
+		sv_<pv::Vector3DInt16> list;
+		int64_t bytes = 0;
+		size_t altered = 0, loaded = 0;
+	};
+	static TrimPick trim_pick(const sv_<voxelworld::SectionStat> &stats,
+			const pv::Vector3DInt16 &size, const sv_<ss_> &req,
+			int64_t have)
+	{
+		TrimPick out;
+		set_<uint64_t> altered;
+		auto key = [](int x, int y, int z){
+			return ((uint64_t)(uint16_t)x << 32) | ((uint64_t)(uint16_t)y << 16) |
+					(uint64_t)(uint16_t)z;
+		};
+		for(const auto &st : stats)
+			if(st.altered)
+				altered.insert(key(st.p.getX(), st.p.getY(), st.p.getZ()));
+		auto near_altered = [&](const pv::Vector3DInt16 &p){
+			for(int dz = -1; dz <= 1; dz++)
+			for(int dy = -1; dy <= 1; dy++)
+			for(int dx = -1; dx <= 1; dx++)
+				if(altered.count(key(p.getX() + dx, p.getY() + dy, p.getZ() + dz)))
+					return true;
+			return false;
+		};
+		if(req.size() >= 2 && req[0] == "size"){
+			const int64_t target = (int64_t)(atof(req[1].c_str()) * 1000000);
+			sv_<const voxelworld::SectionStat*> c;
+			for(const auto &st : stats){
+				if(!st.generated || st.altered || near_altered(st.p))
+					continue;
+				if(st.loaded){
+					out.loaded++;
+					continue;
+				}
+				c.push_back(&st);
+			}
+			auto d2 = [&](const voxelworld::SectionStat *st){
+				const double x = (st->p.getX() + 0.5) * size.getX(),
+						y = (st->p.getY() + 0.5) * size.getY(),
+						z = (st->p.getZ() + 0.5) * size.getZ();
+				return x * x + y * y + z * z;
+			};
+			std::sort(c.begin(), c.end(), [&](const voxelworld::SectionStat *a,
+					const voxelworld::SectionStat *b){ return d2(a) > d2(b); });
+			for(const auto *st : c){
+				if(have - out.bytes <= target)
+					break;
+				out.list.push_back(st->p);
+				out.bytes += st->bytes;
+			}
+		} else if(req.size() >= 8 && req[0] == "box"){
+			int b[6];
+			for(int i = 0; i < 6; i++)
+				b[i] = atoi(req[1 + i].c_str());
+			const bool builds = req[7] == "1";
+			for(const auto &st : stats){
+				bool inside = true;
+				for(int a = 0; a < 3; a++){
+					const int s0 = (a == 0 ? st.p.getX() : a == 1 ? st.p.getY() :
+							st.p.getZ()) * (a == 0 ? size.getX() : a == 1 ?
+							size.getY() : size.getZ());
+					const int s1 = s0 + (a == 0 ? size.getX() : a == 1 ?
+							size.getY() : size.getZ()) - 1;
+					if(s1 < std::min(b[a], b[a + 3]) || s0 > std::max(b[a], b[a + 3]))
+						inside = false;
+				}
+				if(inside || !st.generated || (st.altered && !builds))
+					continue;
+				if(st.loaded){
+					out.loaded++;
+					continue;
+				}
+				out.list.push_back(st.p);
+				out.bytes += st.bytes;
+				if(st.altered)
+					out.altered++;
+			}
+		}
+		return out;
+	}
+	static ss_ mb_text(int64_t bytes)
+	{
+		char buf[32];
+		snprintf(buf, sizeof buf, "%.1f MB", bytes / 1000000.0);
+		return buf;
+	}
+	void send_trim_info(network::PeerInfo::Id peer, const ss_ &save,
+			const ss_ &note)
+	{
+		if(!m_scene || !m_world_save || save != m_world_name){
+			send_strings(peer, "main:trim_info", {save, "Trimming works on "
+					"the world running: start "+save+" first."});
+			return;
+		}
+		sv_<voxelworld::SectionStat> stats;
+		pv::Vector3DInt16 size(16, 16, 16);
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			stats = w->section_stats();
+			size = w->get_section_size_voxels();
+		});
+		// The default box: every altered section and one section round it
+		int lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0};
+		size_t altered = 0;
+		for(const auto &st : stats){
+			if(!st.altered)
+				continue;
+			const int p[3] = {st.p.getX(), st.p.getY(), st.p.getZ()};
+			for(int a = 0; a < 3; a++){
+				lo[a] = altered == 0 ? p[a] : std::min(lo[a], p[a]);
+				hi[a] = altered == 0 ? p[a] : std::max(hi[a], p[a]);
+			}
+			altered++;
+		}
+		const int sz[3] = {size.getX(), size.getY(), size.getZ()};
+		sv_<ss_> flat{save, note, itos(m_world_save->bytes()),
+				itos(stats.size()), itos(altered)};
+		for(int a = 0; a < 3; a++)
+			flat.push_back(itos((lo[a] - 1) * sz[a]));
+		for(int a = 0; a < 3; a++)
+			flat.push_back(itos((hi[a] + 2) * sz[a] - 1));
+		send_strings(peer, "main:trim_info", flat);
+	}
+	void on_trim(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		const sv_<ss_> values = read_packet_strings(packet);
+		if(values.size() < 2)
+			return;
+		const ss_ &save = values[0], &verb = values[1];
+		if(verb == "info" || !m_scene || !m_world_save || save != m_world_name)
+			return send_trim_info(packet.sender, save, "");
+		const sv_<ss_> req(values.begin() + 2, values.end());
+		const int64_t have = m_world_save->bytes();
+		TrimPick pick;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			pick = trim_pick(w->section_stats(), w->get_section_size_voxels(),
+					req, have);
+		});
+		const ss_ skipped = pick.loaded == 0 ? ss_() : " "+itos(pick.loaded)+
+				" loaded for players are kept.";
+		if(verb == "ask"){
+			sv_<ss_> flat{save, pick.list.empty() ? "Nothing to forget."+
+					skipped : itos(pick.list.size())+" sections would be "
+					"forgotten, about "+mb_text(pick.bytes)+(pick.altered ?
+					", "+itos(pick.altered)+" of them with player builds" :
+					ss_())+"; generated again if visited."+skipped};
+			flat.insert(flat.end(), req.begin(), req.end());
+			send_strings(packet.sender, "main:trim_ask", flat);
+			return;
+		}
+		if(verb != "do")
+			return;
+		size_t n = 0;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			n = w->forget_sections(pick.list);
+		});
+		const int64_t t0 = interface::os::time_us();
+		const ss_ err = m_world_save->compact();
+		const int64_t after = m_world_save->bytes();
+		log_i(MODULE, "%s trims %s: %zu sections forgotten, %lld kB to %lld kB, "
+				"compacted in %d ms%s", cs(m_names[packet.sender].empty() ?
+				ss_("the owner") : m_names[packet.sender]), cs(save), n,
+				(long long)(have / 1024), (long long)(after / 1024),
+				(int)((interface::os::time_us() - t0) / 1000),
+				err.empty() ? "" : cs(": "+err));
+		send_trim_info(packet.sender, save, itos(n)+" sections forgotten; "+
+				mb_text(have)+" to "+mb_text(after)+"."+skipped+(err.empty() ?
+				ss_() : " Not compacted: "+err));
 	}
 
 	// main:set_perf_settings {name, key, value, ...}

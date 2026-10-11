@@ -258,6 +258,32 @@ struct CSave: public Save
 		return live + (int64_t)interface::fs::directory_tree_size(m_path) -
 				(int64_t)interface::fs::file_size(m_path+"/save.sqlite");
 	}
+
+	// Under the mutex, so voxelworld's writes wait for it rather than
+	// meeting a locked database
+	ss_ vacuum(const ss_ &sql)
+	{
+		interface::MutexScope ms(m_mutex);
+		if(!m_db)
+			return "no database";
+		if(m_batch_depth > 0)
+			return "a transaction is open";
+		try {
+			exec(sql.c_str());
+			exec("PRAGMA wal_checkpoint(TRUNCATE)");
+		} catch(std::exception &e){
+			return e.what();
+		}
+		return "";
+	}
+	ss_ compact(){ return vacuum("VACUUM"); }
+	ss_ copy_to(const ss_ &file)
+	{
+		ss_ quoted;
+		for(char c : file)
+			quoted += c == '\'' ? ss_("''") : ss_(1, c);
+		return vacuum("VACUUM INTO '"+quoted+"'");
+	}
 };
 
 bool CStore::get(const ss_ &key, ss_ &value_out)

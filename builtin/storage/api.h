@@ -45,6 +45,12 @@ namespace storage
 		// next writes refill before it grows; a VACUUM gives it back, needing
 		// the space twice while it runs.
 		virtual int64_t bytes() = 0;
+		// [WORLD_TRIM_MOVE] VACUUM: the file shrinks to its live pages, and
+		// the writes wait meanwhile, seconds on a large save. "" or why not
+		virtual ss_ compact() = 0;
+		// A consistent copy of the database into file, which must not
+		// exist (VACUUM INTO), for an export. "" or why not
+		virtual ss_ copy_to(const ss_ &file) = 0;
 	};
 
 	// [SAVE_LIMIT] What the app has written, by the directories its box lets

@@ -125,7 +125,8 @@ end
 
 -- The admin's world menu over the world: the world list, a new world and
 -- ContentDB, as at the boot
-local function worlds()
+-- trim: a save's name, for the trim page alone ([WORLD_TRIM_MOVE])
+local function worlds(trim)
 	page(function()
 		local _, err2, menu = buildat.run_script_file("main/menu.lua")
 		if type(menu) ~= "table" then
@@ -134,6 +135,9 @@ local function worlds()
 		end
 		menu.back = function()
 			later(function() luanti.hold(nil) end)
+		end
+		if type(trim) == "string" then
+			menu.trim(trim)
 		end
 	end)
 end
@@ -239,6 +243,13 @@ open = function()
 	end
 	if not account.public and account.is_local then
 		accounts.lan_row(w)
+		-- [WORLD_TRIM_MOVE] The trim works on the running world, and the
+		-- launcher's own game has no world menu over it
+		if account.world ~= "" then
+			accounts.page_button(w, "Trim this world...", function()
+				worlds(account.world)
+			end)
+		end
 	end
 	-- A browser tab has no launcher to leave to, and is closed as a tab
 	-- (only the web page sets BUILDAT_PAGE_HTTPS)

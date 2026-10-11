@@ -566,6 +566,14 @@ function draw(saves, save_games)
 					cereal.binary_output({selected_save}, {"array", "string"}))
 		end
 	end, fit(420))
+	-- [WORLD_TRIM_MOVE]
+	button_on(menu, right, "Trim...", function()
+		if selected_save then
+			waiting("Reading " .. selected_save .. "...")
+			buildat.send_packet("main:trim", cereal.binary_output(
+					{selected_save, "info"}, {"array", "string"}))
+		end
+	end, fit(420))
 	-- [WORLD_TXP]
 	button_on(menu, right, "Texture pack...", function()
 		if selected_save then
@@ -1651,6 +1659,141 @@ buildat.sub_packet("main:world_txp", function(data)
 	draw_world_txp(flat)
 end)
 
+-- [WORLD_TRIM_MOVE] 2: the running world trimmed, to a size (the
+-- sections furthest from the origin first, no player builds) or to a box
+-- in node coordinates (filled with the player builds and a section round
+-- them); what would go is asked first, then forgotten and compacted
+local function draw_trim(flat)
+	local save, note = flat[1], flat[2]
+	local menu = import_menu(save .. ": trim")
+	local function line(text, color)
+		local t = menu.window:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetWordwrap(true)
+		t:SetFixedWidth(fit(860))
+		t:SetText(text)
+		if color then
+			t:SetColor(magic.Color(rgb(color)))
+		end
+	end
+	local function edit(text)
+		local e = menu.window:CreateChild("LineEdit")
+		e:SetStyleAuto()
+		e.textCopyable = true
+		e.textSelectable = true
+		e.minHeight = 26
+		e:SetText(text)
+		return e
+	end
+	local function ask(req)
+		waiting("Counting...")
+		local out = {save, "ask"}
+		for _, v in ipairs(req) do
+			out[#out + 1] = v
+		end
+		buildat.send_packet("main:trim", cereal.binary_output(out,
+				{"array", "string"}))
+	end
+	if note ~= "" then
+		line(note, #flat < 3 and "warn" or nil)
+	end
+	if #flat >= 11 then
+		line("On disk " .. mb(tonumber(flat[3])) .. ", " .. flat[4] ..
+				" sections, " .. flat[5] .. " with player builds.")
+		line("To a size: the sections furthest from the origin go first; " ..
+				"none with player builds or next to one. Target in MB:")
+		local size = edit("")
+		menu:add("Trim to this size...", function()
+			local n = tonumber(size:GetText())
+			if n and n >= 0 then
+				ask({"size", tostring(n)})
+			end
+		end)
+		line("To a box: every section outside it goes. Two corners, x y z:")
+		local c1 = edit(flat[6] .. " " .. flat[7] .. " " .. flat[8])
+		local c2 = edit(flat[9] .. " " .. flat[10] .. " " .. flat[11])
+		local builds = false
+		local toggle
+		toggle = button_on(menu, menu.window, "[ ] Also player builds outside",
+				function()
+			builds = not builds
+			toggle:GetChild("ButtonText", true):SetText((builds and "[x]" or
+					"[ ]") .. " Also player builds outside")
+		end, fit(860))
+		menu:add("Trim to this box...", function()
+			local req = {"box"}
+			for _, e in ipairs({c1, c2}) do
+				for v in e:GetText():gmatch("-?%d+") do
+					req[#req + 1] = v
+				end
+			end
+			if #req == 7 then
+				req[8] = builds and "1" or "0"
+				ask(req)
+			end
+		end)
+	end
+	-- Opened by itself over the world (M.trim), back is to the world
+	local function back()
+		if M.trim_only then
+			close()
+			if M.back then
+				M.back()
+			end
+		else
+			draw(last_saves, last_save_games)
+		end
+	end
+	menu:add("< back", back)
+	menu:on_key(function(key)
+		if key == magic.KEY_ESCAPE and magic.input:GetKeyPress(key) then
+			back()
+			return true
+		end
+	end)
+	magic.input:SetMouseVisible(true, "a menu screen")
+end
+-- The trim page alone, over the running world: the launcher's own game's
+-- pause menu has no world menu
+M.trim = function(save)
+	M.trim_only = true
+	-- The answer to get_saves may have come already
+	done = false
+	waiting("Reading " .. save .. "...")
+	buildat.send_packet("main:trim", cereal.binary_output({save, "info"},
+			{"array", "string"}))
+end
+buildat.sub_packet("main:trim_info", function(data)
+	if done then
+		return
+	end
+	local flat = cereal.binary_input(data, {"array", "string"})
+	log:info("menu: trim " .. table.concat(flat, " | "))
+	draw_trim(flat)
+end)
+buildat.sub_packet("main:trim_ask", function(data)
+	if done then
+		return
+	end
+	local v = cereal.binary_input(data, {"array", "string"})
+	log:info("menu: trim asks: " .. tostring(v[2]))
+	local again = function()
+		buildat.send_packet("main:trim", cereal.binary_output({v[1], "info"},
+				{"array", "string"}))
+	end
+	ui_utils.show_confirm_dialog(v[2] .. " Compacting the save afterwards " ..
+			"holds the world still while it runs, seconds or more on a " ..
+			"large one.", function()
+		waiting("Forgetting and compacting...")
+		local out = {v[1], "do"}
+		for i = 3, #v do
+			out[#out + 1] = v[i]
+		end
+		buildat.send_packet("main:trim", cereal.binary_output(out,
+				{"array", "string"}))
+	end, again, "Trim")
+end)
+
 buildat.sub_packet("main:save_info", function(data)
 	if done or not panel then
 		return
@@ -1710,7 +1853,7 @@ buildat.sub_packet("main:disk", function(data)
 end)
 
 buildat.sub_packet("main:saves", function(data)
-	if done then
+	if done or M.trim_only then
 		return
 	end
 	local values = cereal.binary_input(data, {"array", "string"})
@@ -1841,6 +1984,11 @@ end)
 
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
+	-- The answer to the get_saves below, over the world: the trim page
+	-- stays
+	if M.trim_only then
+		return
+	end
 	creating = nil
 	log:info("menu: done; the world is up")
 	done = true
