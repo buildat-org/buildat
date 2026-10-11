@@ -12,7 +12,10 @@
 #   4. With AITTA, from a release made from this tree: installs and serves
 #      it as tester.pt (/health); 1.0.1 published, it is installed,
 #      compiled and the server restarted onto it, a save under
-#      apps/tester.pt kept.
+#      apps/tester.pt kept. A build host that offers nothing (404) is
+#      asked for the release's build with aitta= and version=1.0.0, the
+#      install before it, and for 1.0.1's ([BUILDS_AITTA_ASK]); the
+#      stand-ins started with no log yet print no error.
 #   5. Restarted without AITTA, 1.0.2 published: stays on 1.0.1.
 #   6. The page with the three ([AITTA_INSTALL_HELP]): 1.0.2 outside a
 #      fold, the two others in a closed "Older releases (2)"; Install
@@ -85,7 +88,7 @@ grep -q "bin/buildat aitta install http://127.0.0.1:$P tester/pt " "$t/page" &&
 echo "ok: the page's commands"
 
 # A release of this tree, served as GitHub's list would be
-HP=$((P + 1)) SP=$((P + 2))
+HP=$((P + 1)) SP=$((P + 2)) BP=$((P + 3))
 r="$t/rel/buildat-0.0.1-check-linux-x86_64-web-precompiled"
 mkdir -p "$r/apps"
 for e in 3rdparty Build builtin client extensions src VERSION web util; do
@@ -109,8 +112,23 @@ out=$("${serve[@]}" 2>&1)
 	fail "not refused: $out"
 echo "ok: refused with the install command"
 
-# 4. Following the Aitta
-setsid env AITTA=127.0.0.1:$P "${serve[@]}" > "$t/serve.log" 2>&1 &
+# 4. Following the Aitta, with a build host that logs its asks and
+# offers nothing
+setsid python3 -c '
+import sys, urllib.parse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+	def do_GET(self):
+		q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+		print("ask", sorted(q.items()), flush=True)
+		self.send_response(404)
+		self.send_header("Content-Length", "0")
+		self.end_headers()
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+' $BP > "$t/builds.log" 2>&1 &
+groups+=($!)
+setsid env AITTA=127.0.0.1:$P BUILDS_URL="http://127.0.0.1:$BP/build" \
+	"${serve[@]}" > "$t/serve.log" 2>&1 &
 groups+=($!)
 wait_for_log "$slog" "Listening at" 300 || fail "1.0.0 did not start ($t/serve.log)"
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health"
@@ -128,6 +146,14 @@ done
 pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
 [ "$(cat "$t/u1/apps/tester.pt/save.txt")" = kept ] || fail "the save lost"
 echo "ok: 1.0.1 installed, compiled and restarted onto, the save kept"
+grep -q "('aitta', '127.0.0.1:$P').*('release', 'buildat-0.0.1-.*('version', '1.0.0')" \
+	"$t/builds.log" || fail "the release's ask without the version ($t/builds.log)"
+grep -q "('version', '1.0.1')" "$t/builds.log" || fail "1.0.1's ask ($t/builds.log)"
+grep -q "No such file" "$t/serve.log" && fail "an error said ($t/serve.log)"
+[ "$(grep -n "installing tester/pt" "$t/serve.log" | head -1 | cut -d: -f1)" -lt \
+	"$(grep -n "asked BUILDS_URL for tester/pt 1.0.0" "$t/serve.log" | head -1 | cut -d: -f1)" ] ||
+	fail "asked before the install ($t/serve.log)"
+echo "ok: the build host asked with the Aitta and the version, the install first"
 
 # 5. Without AITTA
 kill -- -"${groups[-1]}"

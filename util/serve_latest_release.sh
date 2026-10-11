@@ -309,7 +309,7 @@ standin_start(){ # i [the page's text]
 	command -v python3 >/dev/null || return
 	python3 -c "$STANDIN_PY" "${ports[$i]}" ${2:+"$2"} 2>/dev/null &
 	standins[$i]=$!
-	standin_from[$i]=$(wc -l < "$base/server-${ids[$i]}-${ports[$i]}.log" 2>/dev/null || echo 0)
+	standin_from[$i]=$(wc -l 2>/dev/null < "$base/server-${ids[$i]}-${ports[$i]}.log" || echo 0)
 	say "a stand-in answers on port ${ports[$i]} until ${games[$i]} is back"
 }
 
@@ -523,10 +523,15 @@ prepare(){ # i release version
 # The release being built onto every server: each once its modules are in
 # (or at once without a build host); every one compiled makes it pending
 build_release(){
-	local i r v=${building#buildat-}
+	local i r v=${building#buildat-} ver
 	for i in "${!games[@]}"; do
 		[ -n "${built[$i]:-}" ] && continue
-		prepare "$i" "$building" ""
+		# An Aitta app's ask says its version, installed first if it is
+		# not: without one the host took it for a release app it does
+		# not know ([BUILDS_AITTA_ASK])
+		ver=""
+		case ${games[$i]} in */*) ver=$(app_path "$i" "$building"); ver=${ver##*/} ;; esac
+		prepare "$i" "$building" "$ver"
 		r=$?
 		if [ "$r" = 2 ]; then
 			[ -z "$current" ] && [ -z "${standins[$i]:-}" ] &&
@@ -606,7 +611,7 @@ restart(){
 	withdrawn[$i]=""
 	rm -f "${users[$i]}/apps/${ids[$i]}/shutdown_reason"
 	local log="$base/server-${ids[$i]}-${ports[$i]}.log" from n
-	from=$(wc -l < "$log" 2>/dev/null || echo 0)
+	from=$(wc -l 2>/dev/null < "$log" || echo 0)
 	standin_start "$i"
 	if start "$i"; then
 		for n in $(seq 600); do
