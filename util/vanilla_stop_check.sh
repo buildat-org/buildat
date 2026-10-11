@@ -30,10 +30,14 @@ echo "enable_damage = false" >> "$d/apps/vanilla/saves/w/luanti/world.mt"
 echo w > "$d/apps/vanilla/public_world"
 # The public server, started again on 20
 PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-( while :; do
+# The loop's kill takes the server with it: one left running outlives the check
+( s=; trap 'kill $s 2>/dev/null; exit' TERM; while :; do
 	"$here/Build/bin/buildat_server" -A 127.0.0.1 -P $PORT -m "$here/apps/vanilla" \
-		-D "$d" -C "$t/c" -l 3 >> "$t/srv.log" 2>&1
-	[ $? = 20 ] || break
+		-D "$d" -C "$t/c" -l 3 >> "$t/srv.log" 2>&1 &
+	s=$!; wait $s; st=$?
+	# A TERM wakes wait before the server ends
+	while kill -0 $s 2>/dev/null; do wait $s; st=$?; done
+	[ $st = 20 ] || break
 	echo "=== restart" >> "$t/srv.log"
 done ) &
 CHECK_PIDS+=($!)
