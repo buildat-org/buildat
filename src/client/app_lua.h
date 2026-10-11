@@ -1107,6 +1107,25 @@
 	// (devicePixelRatio), 1 natively ([HUD_DENSITY]).
 	// simplified: natively 1; a desktop's reported DPI is often wrong. A
 	// native mobile build would read the platform's.
+	// received() -> the bytes read from the server since the connect, and
+	// the seconds since the last came (nil before any, or with no server)
+	// ([JOIN_PROGRESS])
+	static int l_received(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		size_t bytes = 0;
+		int64_t last_us = 0;
+		if(self->m_state)
+			self->m_state->get_received(&bytes, &last_us);
+		lua_pushnumber(L, (double)bytes);
+		if(last_us == 0)
+			return 1;
+		lua_pushnumber(L, (get_timeofday_us() - last_us) / 1e6);
+		return 2;
+	}
+
 	static int l_display_density(lua_State *L)
 	{
 		double d = 1;

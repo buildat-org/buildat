@@ -171,6 +171,9 @@ struct CState: public State
 	static const int64_t SILENCE_US = 30000000;
 	bool m_keepalive_seen = false;
 	int64_t m_last_data_us = 0;
+	// [JOIN_PROGRESS]'s: what came, and when it last did
+	size_t m_received_bytes = 0;
+	int64_t m_received_us = 0;
 	// **And the server hears from this end** ([PEER_TIMEOUT], user
 	// 2026-10-04): the same empty packet when nothing has gone for this
 	// long, so that the server can drop a peer silent for 60 s (a crashed
@@ -308,6 +311,8 @@ struct CState: public State
 		m_disconnected = false;
 		m_keepalive_seen = false;
 		m_last_data_us = 0;
+		m_received_bytes = 0;
+		m_received_us = 0;
 		m_last_send_us = 0;
 		m_backlog_said = 0;
 		m_backlog_said_us = 0;
@@ -644,6 +649,12 @@ struct CState: public State
 		return path;
 	}
 
+	void get_received(size_t *bytes, int64_t *last_us)
+	{
+		*bytes = m_received_bytes;
+		*last_us = m_received_us;
+	}
+
 	void add_local_files(const sv_<std::pair<ss_, ss_>> &name_paths)
 	{
 		m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
@@ -703,7 +714,8 @@ struct CState: public State
 				lost_connection(why);
 			if(n <= 0)
 				return false;
-			m_last_data_us = get_timeofday_us();
+			m_last_data_us = m_received_us = get_timeofday_us();
+			m_received_bytes += got.size();
 			m_socket_buffer.append(got);
 			return !m_disconnected;
 		}
@@ -721,7 +733,8 @@ struct CState: public State
 			return false;
 		}
 		log_d(MODULE, "Received %zu bytes", r);
-		m_last_data_us = get_timeofday_us();
+		m_last_data_us = m_received_us = get_timeofday_us();
+		m_received_bytes += r;
 		m_socket_buffer.append(buf, r);
 		return !m_disconnected;
 	}

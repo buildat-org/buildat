@@ -1161,6 +1161,9 @@ magic.ui:SetFocusElement(nil)
 -- Mods load for several seconds before there is anything to draw, and what is
 -- on the screen until then is sky
 local wait_text = hud_text(24)
+-- The chat's, and the loading line's Leave's
+local CHAT_STYLE = magic.cache:GetResource("XMLFile",
+		"launch_menu/res/main_style.xml")
 wait_text:SetText("Loading the world...")
 wait_text.horizontalAlignment = magic.HA_CENTER
 wait_text.verticalAlignment = magic.VA_CENTER
@@ -1169,9 +1172,63 @@ wait_text:SetPosition(0, 0)
 -- sections near the player drawn of those there are once it is placed, and
 -- the seconds, so that the line changes while the server sends nothing
 local load_wait = {t = 0, next = 1, total = 0}
-voxelworld.sub_geometry_update(function(node)
+-- **And what comes** ([JOIN_PROGRESS], user 2026-10-11: "0 of 125" stood
+-- still while 21 MB came, and the join was given up): the megabytes read
+-- and their rate; nothing for 10 s says so, and from 20 s a native client
+-- gets Leave under it (a browser tab is closed as a tab); at 30 s the
+-- client leaves by itself (state.cpp's SILENCE_US). A client with no
+-- buildat.received() says what it did.
+-- simplified: no total; the server learns a node's size only as it sends
+-- it
+local leave_button = nil
+local function load_wait_end()
 	wait_text:SetText("")
 	load_wait = nil
+	if leave_button then
+		leave_button:Remove()
+		leave_button = nil
+	end
+end
+local function load_wait_line(s)
+	local got, quiet = (buildat.received or function() end)()
+	if not got then
+		return string.format("%s... %d s", s, load_wait.t)
+	end
+	-- The rate from the line before: the first would count the game's files
+	local rate = load_wait.at and
+			(got - load_wait.got) / (load_wait.t - load_wait.at)
+	load_wait.got, load_wait.at = got, load_wait.t
+	local want_leave = quiet and quiet >= 20 and
+			buildat.get_env("BUILDAT_PAGE_HTTPS") == nil
+	if want_leave and not leave_button then
+		leave_button = magic.ui.root:CreateChild("Button")
+		leave_button.defaultStyle = CHAT_STYLE
+		leave_button:SetStyleAuto()
+		leave_button:SetFixedSize(100, 28)
+		leave_button:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		leave_button:SetPosition(0, 40)
+		local label = leave_button:CreateChild("Text")
+		label:SetStyleAuto()
+		label:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		label.text = "Leave"
+		magic.SubscribeToEvent(leave_button, "Released", function()
+			buildat.leave()
+		end)
+		log:info("load: Leave offered")
+	elseif not want_leave and leave_button then
+		leave_button:Remove()
+		leave_button = nil
+	end
+	if quiet and quiet >= 10 then
+		return string.format("Waiting for the server... %d s", quiet)
+	end
+	return string.format("%s -- %.1f MB%s... %d s", s, got / 1e6,
+			rate and string.format(", %d KB/s", rate / 1000) or "", load_wait.t)
+end
+voxelworld.sub_geometry_update(function(node)
+	if load_wait then
+		load_wait_end()
+	end
 end)
 -- The forms' font sizes rasterized now, under the loading line
 -- ([FORMSPEC_FRAME]); the first inventory then draws in a frame
@@ -2725,7 +2782,9 @@ function frame_peak.note(dt)
 							load_wait.total
 				end
 			end
-			wait_text:SetText(string.format("%s... %d s", s, load_wait.t))
+			local line = load_wait_line(s)
+			wait_text:SetText(line)
+			log:info("load: " .. line)
 		end
 	end
 	frame_peak.frames = (frame_peak.frames or 0) + 1
@@ -2943,8 +3002,6 @@ end
 -- server's: the module runs the callbacks, the vendored builtin runs the
 -- commands, and what comes back arrives as luanti:chat.
 local CHAT_LINES = 8
-local CHAT_STYLE = magic.cache:GetResource("XMLFile",
-		"launch_menu/res/main_style.xml")
 
 -- A block of lines rather than one Text with newlines in it, because a line
 -- is drawn in as many pieces as it has colours in it

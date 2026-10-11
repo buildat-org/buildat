@@ -45,6 +45,9 @@ namespace client
 		// the names a server announces. Throws on a file it cannot read.
 		virtual void add_local_files(
 				const sv_<std::pair<ss_, ss_>> &name_paths) = 0;
+		// [JOIN_PROGRESS]: the bytes read from the server since the
+		// connect, and when the last came (get_timeofday_us(); 0 before)
+		virtual void get_received(size_t *bytes, int64_t *last_us) = 0;
 	};
 
 	State* createState(sp_<app::App> app);

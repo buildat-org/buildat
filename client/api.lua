@@ -2043,6 +2043,9 @@ buildat.safe.logical_size  = __buildat_logical_size
 buildat.safe.keyboard_height = __buildat_keyboard_height
 -- display_density() -> device pixels per CSS pixel on the web, 1 natively
 buildat.safe.display_density = __buildat_display_density
+-- received() -> the bytes read from the server since the connect, and the
+-- seconds since the last came (nil before any) ([JOIN_PROGRESS])
+buildat.safe.received = __buildat_received
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
