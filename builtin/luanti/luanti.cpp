@@ -3620,6 +3620,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_nest_3d", l_nest_3d);
 		set_global_cfunction("__luanti_send_particles", l_send_particles);
 		set_global_cfunction("__luanti_send_sky", l_send_sky);
+		set_global_cfunction("__luanti_send_lights", l_send_lights);
 		set_global_cfunction("__luanti_send_time", l_send_time);
 		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
 		set_global_cfunction("__luanti_request_shutdown", l_request_shutdown);

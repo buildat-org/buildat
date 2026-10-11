@@ -1109,6 +1109,28 @@
 		return 0;
 	}
 
+	// [BUILDAT_WIELD_LIGHT] Every dynamic light, as the flat list
+	// lua/buildat_api.lua builds
+	static int l_send_lights(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t name_len = 0;
+		const char *name_p = luaL_checklstring(L, 1, &name_len);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		sv_<ss_> flat;
+		const size_t n = lua_objlen(L, 2);
+		for(size_t i = 0; i < n; i++){
+			lua_rawgeti(L, 2, (int)i + 1);
+			size_t len = 0;
+			const char *p = lua_tolstring(L, -1, &len);
+			flat.push_back(ss_(p ? p : "", p ? len : 0));
+			lua_pop(L, 1);
+		}
+		self->send_to_player(ss_(name_p ? name_p : "", name_len),
+				"luanti:lights", flat);
+		return 0;
+	}
+
 	// A line of chat to one player, or to everyone when the name is empty
 	// __luanti_request_shutdown(message): the server stops, the message in
 	// its reason; core.request_shutdown's delay and reconnect are Lua's

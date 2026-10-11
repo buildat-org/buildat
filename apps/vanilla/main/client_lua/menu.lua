@@ -1483,9 +1483,22 @@ local function draw_world_mods(flat)
 				ask_contentdb(name, "mod", gameid)
 			end, 210)
 		else
-			local text = state == "pack" and (name .. "  (modpack)") or
-					((state == "1" and "[x] " or "[ ] ") .. name ..
-					(deps ~= "" and ("  -- needs " .. deps) or ""))
+			-- A mod that comes with Buildat ("b1", "b0"): its deps is the
+			-- game's or the world's own wield light it replaces
+			local builtin = state == "b1" or state == "b0"
+			local text
+			if state == "pack" then
+				text = name .. "  (modpack)"
+			elseif builtin then
+				text = (state == "b1" and "[x] " or "[ ] ") .. name ..
+						"  -- comes with Buildat" .. (deps == "" and "" or
+						state == "b1" and ("; " .. deps .. " light the map no more") or
+						("; recommended: " .. deps .. " light the map, and the " ..
+						"map is lit again at every step"))
+			else
+				text = (state == "1" and "[x] " or "[ ] ") .. name ..
+						(deps ~= "" and ("  -- needs " .. deps) or "")
+			end
 			button_on(menu, row, indent .. text, function()
 				if state == "pack" then
 					-- The pack on unless every mod in it is on already
@@ -1497,10 +1510,11 @@ local function draw_world_mods(flat)
 					end
 					send(name, "main:set_world_mods", all and "0" or "1")
 				else
-					send(name, "main:set_world_mods", state == "1" and "0" or "1")
+					send(name, "main:set_world_mods",
+							(state == "1" or state == "b1") and "0" or "1")
 				end
 			end, row_w - 150)
-			if pack == "" or state == "pack" then
+			if (pack == "" or state == "pack") and not builtin then
 				button_on(menu, row, "Remove", function()
 					ui_utils.show_confirm_dialog("Move " .. name ..
 							" off the server, to its trash?", function()

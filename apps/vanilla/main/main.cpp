@@ -2395,7 +2395,7 @@ struct Module: public interface::Module
 		const ss_ game = find_game(gameid);
 		if(!game.empty())
 			scan_mods(game+"/mods", "", mods);
-		scan_mods(mods_path(), "", mods);
+		scan_all_mods(mods);
 		for(const ModInfo &m : mods)
 			job->provided.insert(m.name);
 		send_progress(peer, "Asking ContentDB what "+name+" needs...");
@@ -2668,7 +2668,28 @@ struct Module: public interface::Module
 	struct ModInfo {
 		ss_ name, pack, dir; // pack: the modpack's directory name, or ""
 		sv_<ss_> depends;
+		bool builtin = false; // comes with Buildat
 	};
+	// The mods that come with Buildat ([BUILDAT_WIELD_LIGHT]), then the
+	// installed ones: what a world can turn on, as modloader.lua loads them
+	void scan_all_mods(sv_<ModInfo> &out)
+	{
+		const size_t from = out.size();
+		scan_mods(m_server->get_module_path("luanti")+"/mods", "", out);
+		for(size_t i = from; i < out.size(); i++)
+			out[i].builtin = true;
+		scan_mods(mods_path(), "", out);
+	}
+	// The wield lights that write the map's light, which wield_light
+	// replaces: a world with one is recommended wield_light
+	static bool writes_wield_light(const ss_ &mod)
+	{
+		for(const char *n : {"vl_wieldlight", "mcl_wieldlight", "wielded_light",
+				"cozylights", "illumination", "tph_wielditem", "nc_api_active"})
+			if(mod == n)
+				return true;
+		return false;
+	}
 	// Every mod under path as modlist.lua finds them: a directory with an
 	// init.lua is a mod, named by its mod.conf; any other is looked into.
 	// simplified: a multi-line depends in mod.conf is read as its first
@@ -2758,7 +2779,7 @@ struct Module: public interface::Module
 				game_mods.insert(m.name);
 		}
 		sv_<ModInfo> mods;
-		scan_mods(mods_path(), "", mods);
+		scan_all_mods(mods);
 		std::sort(mods.begin(), mods.end(), [](const ModInfo &a,
 				const ModInfo &b){
 			return (a.pack.empty() ? a.name : a.pack+"/"+a.name) <
@@ -2766,10 +2787,29 @@ struct Module: public interface::Module
 		});
 		sv_<ss_> flat{save, note, gameid, m_public && save == m_world_name ?
 				"1" : "0"};
+		// The game's or a turned-on mod's own wield light, for the row of
+		// the one that replaces it
+		ss_ wield;
+		for(const ss_ &n : game_mods)
+			if(writes_wield_light(n))
+				wield += (wield.empty() ? "" : ", ")+n;
+		for(const ModInfo &m : mods)
+			if(writes_wield_light(m.name) && mt["load_mod_"+m.name] == "true")
+				wield += (wield.empty() ? "" : ", ")+m.name;
 		std::set<ss_> installed;
 		ss_ pack;
 		for(const ModInfo &m : mods){
 			installed.insert(m.name);
+			// A builtin row: state "b1" or "b0", and in place of its
+			// dependencies what it is recommended for
+			if(m.builtin){
+				const bool on = mt["load_mod_"+m.name] == "true";
+				for(const ss_ &v : {m.name, ss_(), ss_(on ? "b1" : "b0"),
+						ss_(m.name == "wield_light" && !wield.empty() ?
+						wield : "")})
+					flat.push_back(v);
+				continue;
+			}
 			if(!m.pack.empty() && m.pack != pack)
 				for(const ss_ &v : {m.pack, m.pack, ss_("pack"), ss_()})
 					flat.push_back(v);
@@ -2800,7 +2840,7 @@ struct Module: public interface::Module
 		sv_<ModInfo> game, extra, installed;
 		scan_mods(game_path+"/mods", "", game);
 		scan_mods(save_path+"/luanti/worldmods", "", extra);
-		scan_mods(mods_path(), "", installed);
+		scan_all_mods(installed);
 		std::map<ss_, ss_> mt = read_world_mt(save_path+"/luanti/world.mt");
 		for(const ModInfo &m : installed)
 			if(mt["load_mod_"+m.name] == "true")
@@ -2843,7 +2883,7 @@ struct Module: public interface::Module
 			return;
 		const bool on = values[2] == "1";
 		sv_<ModInfo> mods, game;
-		scan_mods(mods_path(), "", mods);
+		scan_all_mods(mods);
 		if(!find_game(gameid).empty())
 			scan_mods(find_game(gameid)+"/mods", "", game);
 		std::set<ss_> game_mods;

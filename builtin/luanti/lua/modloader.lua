@@ -128,15 +128,31 @@ do
 			enabled[name] = true
 		end
 	end
+	-- The mods that come with Buildat ([BUILDAT_WIELD_LIGHT]) first, then
+	-- the installed ones
 	local chosen = {}
-	for _, mod in ipairs(core.__luanti_mods_path and
-			modlist.scan_mods(core.__luanti_mods_path) or {}) do
-		if enabled[mod.name] then
-			chosen[#chosen + 1] = mod
-			enabled[mod.name] = nil
+	for _, path in ipairs({__luanti_module_path .. "/mods",
+			core.__luanti_mods_path}) do
+		for _, mod in ipairs(modlist.scan_mods(path)) do
+			if enabled[mod.name] then
+				chosen[#chosen + 1] = mod
+				enabled[mod.name] = nil
+			end
 		end
 	end
 	add(chosen, "enabled")
+	-- wield_light gives the light these give by writing the map's, and
+	-- they read their settings as they load. Defaults, so a world that
+	-- sets one keeps its own and nothing is written into world.mt.
+	if have.wield_light then
+		local defaults = core.settings.defaults
+		if have.vl_wieldlight and defaults then
+			defaults.enable_vl_wieldlight = "false"
+		end
+		if have.cozylights and defaults then
+			defaults.cozylights_wielded_light_radius = "-1"
+		end
+	end
 	for name in pairs(enabled) do
 		if not have[name] then
 			core.log("warning", "world.mt enables the mod " .. name ..

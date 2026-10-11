@@ -4195,6 +4195,8 @@ function frame_peak.update(dt)
 	luanti.update_sounds(dt)
 	luanti.update_particles(dt, magic.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
+	luanti.update_lights(dt, magic.Vector3(player.x,
+			player.y + player_physics.EYE_HEIGHT, player.z))
 
 	-- Until the server has said where the player is there is no player:
 	-- what is on the screen is the overview the camera started at
