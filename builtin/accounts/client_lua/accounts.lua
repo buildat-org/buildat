@@ -60,9 +60,11 @@ local USERS = {"object",
 			{"id_only", "byte"}, {"level", "int32_t"},
 			-- [FP_ABUSE] 5: what the apps keep for it
 			{"storage", "string"}}}},
+	-- Invite and AccessSettings are the stored records ([COMPAT_BREAK_07])
 	{"invites", {"array", {"object", {"code", "string"},
-			{"privs", {"array", "string"}}, {"by", "string"}}}},
-	{"access", {"object", {"open_registration", "byte"}}},
+			{"invite", {"record", 1, 0, {"object",
+			{"privs", {"array", "string"}}, {"by", "string"}}}}}}},
+	{"access", {"record", 1, 0, {"object", {"open_registration", "byte"}}}},
 	{"bans", {"array", {"object", {"name", "string"}, {"address", "string"}}}},
 	-- [STARPORT] 10g: Starport IDs off, anyone or approved; those waiting
 	{"starport_ids", "string"},
@@ -1727,7 +1729,7 @@ users_page = function(back)
 	end
 	for _, inv in ipairs(u.invites) do
 		local r = row(item())
-		page_text(r, inv.code .. "  (" .. inv.by .. ")"):SetWordwrap(false)
+		page_text(r, inv.code .. "  (" .. inv.invite.by .. ")"):SetWordwrap(false)
 		button(r, "Delete", function() M.admin("uninvite", inv.code) end)
 	end
 	-- [VANILLA_PUBLIC] 4: a ban is of the account, and of where it joined
