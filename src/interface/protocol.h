@@ -80,6 +80,58 @@ namespace interface
 		return h;
 	}
 
+	// **The file transfer**: core:announce_files is a list of FileHash,
+	// core:request_files the same list back, core:file_contents a list of
+	// FileContent. The server's two go after a compression byte
+	// (PACKET_PLAIN or PACKET_ZSTD).
+	static const uint8_t HASH_SHA1 = 1;
+	static const char PACKET_PLAIN = 0;
+	static const char PACKET_ZSTD = 1;
+
+	struct FileHash
+	{
+		ss_ name;
+		ss_ hash;
+	};
+
+	struct FileContent
+	{
+		ss_ name;
+		ss_ hash;
+		ss_ content;
+	};
+
+	template<class Archive>
+			void file_hash_algorithm(Archive &ar, const ss_ &name)
+	{
+		uint8_t algorithm = HASH_SHA1;
+		ar(algorithm);
+		if(algorithm != HASH_SHA1)
+			throw RecordError(ss_()+"\""+name.substr(0, 100)+"\" is hashed "
+					"by algorithm "+itos((int64_t)algorithm)+
+					", which this does not know");
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, FileHash &v)
+	{
+		Record<Archive> r(archive, "FileHash", 1, 0);
+		r.ar(v.name);
+		file_hash_algorithm(r.ar, v.name);
+		r.ar(v.hash);
+		r.end();
+	}
+
+	template<class Archive>
+			void serialize(Archive &archive, FileContent &v)
+	{
+		Record<Archive> r(archive, "FileContent", 1, 0);
+		r.ar(v.name);
+		file_hash_algorithm(r.ar, v.name);
+		r.ar(v.hash, v.content);
+		r.end();
+	}
+
 	// Empty when this end plays with theirs; otherwise why not, for a
 	// player: theirs is "the server" or "the client"
 	static inline ss_ hello_refusal(const Hello &h, const ss_ &theirs)

@@ -1,16 +1,17 @@
 #!/bin/bash
 # tier: quick
 # cost: ~5s (2026-10-12)
-# covers: src/interface/record.h
+# covers: src/interface/record.h src/interface/protocol.h
 # [COMPAT_BREAK_07] 8b: a record with a field added at its end read by the
-# reader before it; another major refused.
+# reader before it; another major refused; a file hashed by an algorithm
+# this does not know refused.
 #   util/record_check.sh
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 trap 'rm -rf "${t:?}"' EXIT
 cat > "$t/c.cpp" <<'CPP'
-#include "interface/record.h"
+#include "interface/protocol.h"
 #include <cassert>
 using namespace interface;
 struct Old { uint32_t a = 0; ss_ b; };
@@ -61,9 +62,25 @@ int main()
 	bool refused = false;
 	try { through<Next, Old>(x); } catch(RecordError &e){ refused = true; }
 	assert(refused);
+	// A file hashed by an algorithm this does not know: the byte after
+	// the name
+	FileHash f; f.name = "zz.png"; f.hash = "h";
+	std::ostringstream os(std::ios::binary);
+	{ cereal::PortableBinaryOutputArchive ar(os); ar(f); }
+	ss_ d = os.str();
+	size_t at = d.find("zz.png") + 6;
+	assert(d[at] == HASH_SHA1);
+	d[at] = 2;
+	refused = false;
+	try {
+		std::istringstream is(d, std::ios::binary);
+		cereal::PortableBinaryInputArchive ar(is);
+		ar(f);
+	} catch(RecordError &e){ refused = true; }
+	assert(refused);
 	return 0;
 }
 CPP
 c++ -std=c++11 -I"$here/src" -I"$here" -I"$here/3rdparty/cereal/include" \
 	"$t/c.cpp" -o "$t/c" && "$t/c"
-echo "PASS: a record's added tail skipped by an older reader; another major refused"
+echo "PASS: a record's added tail skipped by an older reader; another major refused; an unknown file hash refused"

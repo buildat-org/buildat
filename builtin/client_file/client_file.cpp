@@ -9,6 +9,7 @@
 #include "interface/file_watch.h"
 #include "interface/fs.h"
 #include "interface/compress.h"
+#include "interface/protocol.h"
 #include "interface/thread.h"
 #include "interface/select_handler.h"
 #include "client_file/api.h"
@@ -60,17 +61,14 @@ static const size_t FILE_BUNCH_SIZE = 5000;
 // larger than the data: the smaller of the two is sent and the client is
 // told which it got. Trying costs one pass over the bytes and saves a game's
 // worth of bandwidth on the half of it that does compress.
-static const char PACKET_PLAIN = 0;
-static const char PACKET_ZSTD = 1;
-
 static ss_ pack_packet(const ss_ &body)
 {
 	std::ostringstream os(std::ios::binary);
 	interface::compress_zstd(body, os);
 	ss_ compressed = os.str();
 	if(compressed.size() + 1 >= body.size() + 1)
-		return ss_(1, PACKET_PLAIN) + body;
-	return ss_(1, PACKET_ZSTD) + compressed;
+		return ss_(1, interface::PACKET_PLAIN) + body;
+	return ss_(1, interface::PACKET_ZSTD) + compressed;
 }
 
 static bool read_whole_file(const ss_ &path, ss_ &content_out)
@@ -216,7 +214,7 @@ struct Module: public interface::Module, public client_file::Interface
 	// at connect is thousands of packets. Luanti's TOCLIENT_ANNOUNCE_MEDIA is
 	// the same one packet.
 	void announce_files(network::PeerInfo::Id peer,
-			const sv_<std::tuple<ss_, ss_>> &files)
+			const sv_<interface::FileHash> &files)
 	{
 		std::ostringstream os(std::ios::binary);
 		{
@@ -316,11 +314,11 @@ struct Module: public interface::Module, public client_file::Interface
 		log_v(MODULE, "Announcing %zu files to new client %zu", m_files.size(),
 				client_connected.info.id);
 
-		sv_<std::tuple<ss_, ss_>> files;
+		sv_<interface::FileHash> files;
 		files.reserve(m_files.size());
 		for(auto &pair : m_files){
 			const FileInfo &info = *pair.second.get();
-			files.push_back(std::tuple<ss_, ss_>(info.name, info.hash));
+			files.push_back(interface::FileHash{info.name, info.hash});
 		}
 		announce_files(client_connected.info.id, files);
 		network::access(m_server, [&](network::Interface *inetwork){
@@ -330,7 +328,7 @@ struct Module: public interface::Module, public client_file::Interface
 	}
 
 	void send_bunch(network::PeerInfo::Id peer,
-			const sv_<std::tuple<ss_, ss_, ss_>> &bunch)
+			const sv_<interface::FileContent> &bunch)
 	{
 		if(bunch.empty())
 			return;
@@ -350,7 +348,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 	void on_request_files(const network::Packet &packet)
 	{
-		sv_<std::tuple<ss_, ss_>> requested;
+		sv_<interface::FileHash> requested;
 		std::istringstream is(packet.data, std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
@@ -359,12 +357,11 @@ struct Module: public interface::Module, public client_file::Interface
 		log_v(MODULE, "%zu files requested by peer %zu", requested.size(),
 				packet.sender);
 
-		// name, hash, content
-		sv_<std::tuple<ss_, ss_, ss_>> bunch;
+		sv_<interface::FileContent> bunch;
 		size_t bunch_size = 0;
-		for(const auto &pair : requested){
-			const ss_ &file_name = std::get<0>(pair);
-			const ss_ &file_hash = std::get<1>(pair);
+		for(const interface::FileHash &f : requested){
+			const ss_ &file_name = f.name;
+			const ss_ &file_hash = f.hash;
 			auto it = m_files.find(file_name);
 			if(it == m_files.end()){
 				log_w(MODULE, "Requested file does not exist: \"%s\"",
@@ -392,8 +389,8 @@ struct Module: public interface::Module, public client_file::Interface
 			// the announce and the request -- and hashing every file again on
 			// every request is what a large game would pay for it.
 			bunch_size += content.size();
-			bunch.push_back(std::tuple<ss_, ss_, ss_>(
-					info.name, info.hash, content));
+			bunch.push_back(interface::FileContent{info.name, info.hash,
+					content});
 			if(bunch_size >= FILE_BUNCH_SIZE){
 				send_bunch(packet.sender, bunch);
 				bunch.clear();
@@ -462,7 +459,7 @@ struct Module: public interface::Module, public client_file::Interface
 		// goes out in at connect.
 		if(!announce)
 			return true;
-		sv_<std::tuple<ss_, ss_>> files{std::tuple<ss_, ss_>(name, hash)};
+		sv_<interface::FileHash> files{interface::FileHash{name, hash}};
 		announce_to_all(files);
 		return true;
 	}
@@ -470,7 +467,7 @@ struct Module: public interface::Module, public client_file::Interface
 	// A batch announced after connect ends with client_file:files_transmitted
 	// for the peer, as the connect's does, so a module can hold what
 	// needs the files until they are in (luanti's texture modifiers)
-	void announce_to_all(const sv_<std::tuple<ss_, ss_>> &files,
+	void announce_to_all(const sv_<interface::FileHash> &files,
 			bool tell_when_done = false)
 	{
 		sv_<network::PeerInfo::Id> peers;
@@ -492,7 +489,7 @@ struct Module: public interface::Module, public client_file::Interface
 	// development switch, and a game's media is not what it is for)
 	void add_file_paths(const sv_<std::pair<ss_, ss_>> &name_paths)
 	{
-		sv_<std::tuple<ss_, ss_>> changed;
+		sv_<interface::FileHash> changed;
 		for(const auto &np : name_paths){
 			ss_ content;
 			if(!read_whole_file(np.second, content)){
@@ -501,8 +498,8 @@ struct Module: public interface::Module, public client_file::Interface
 				continue;
 			}
 			if(set_file(np.first, content, np.second, false))
-				changed.push_back(std::tuple<ss_, ss_>(np.first,
-						m_files[np.first]->hash));
+				changed.push_back(interface::FileHash{np.first,
+						m_files[np.first]->hash});
 			m_server->add_file_path(np.first, np.second);
 		}
 		if(!changed.empty())

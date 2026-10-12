@@ -202,6 +202,15 @@ fields as one byte string (interface::Record, src/interface/record.h). A
 newer minor only adds fields at the end, which an older reader skips;
 another major is refused.
 
+**Files** (builtin/client_file): the server announces every file's name and
+hash in one core:announce_files, the client asks for what it has not
+cached in one core:request_files, and the contents come in
+core:file_contents of about 5 KB each. The records are FileHash and
+FileContent (src/interface/protocol.h), whose hash is SHA-1, said by an
+algorithm byte. The server's packets start with a compression byte, plain
+or zstd. An algorithm or compression the client does not know ends the
+join with a message.
+
 Core uses cereal's portable binary serialization, except for low-level
 packet streaming. A queue per peer with
 one send policy is what exists; channels with a policy each, and the

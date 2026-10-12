@@ -76,8 +76,12 @@ static ss_ unpack_packet(const ss_ &data)
 {
 	if(data.empty())
 		return data;
-	if(data[0] == 0)
+	if(data[0] == interface::PACKET_PLAIN)
 		return data.substr(1);
+	if(data[0] != interface::PACKET_ZSTD)
+		throw interface::RecordError("The server compressed its files by a "
+				"method "+itos((int64_t)(uint8_t)data[0])+
+				" this does not know");
 	std::ostringstream os(std::ios::binary);
 	interface::decompress_zstd(data.substr(1), os);
 	return os.str();
@@ -617,10 +621,11 @@ struct CState: public State
 		// of a status line that did not move.
 		// simplified: a file changed between the two comes as it is now,
 		// under the hash its packet says
-		sv_<std::tuple<ss_, ss_>> wanted;
+		sv_<interface::FileHash> wanted;
 		for(const auto &pair : task.wanted){
 			if(m_waiting_files.insert(std::get<0>(pair)).second)
-				wanted.push_back(pair);
+				wanted.push_back(interface::FileHash{std::get<0>(pair),
+						std::get<1>(pair)});
 		}
 		m_files_asked += wanted.size();
 		show_file_progress();
@@ -837,6 +842,10 @@ struct CState: public State
 			}
 			try {
 				handle_packet(p.first, p.second);
+			} catch(interface::RecordError &e){
+				// Another major of a record, or a hash or a compression
+				// this does not know: the join cannot go on
+				lost_connection(e.what());
 			} catch(std::exception &e){
 				log_w(MODULE, "Exception on handling packet: %s", e.what());
 			}
@@ -868,6 +877,8 @@ struct CState: public State
 			m_parsed.pop_front();
 			m_parsed_bytes -= p.second.size();
 			dispatch(p);
+			if(m_disconnected)
+				break;
 			// **An announce stops the drain** until it has been checked:
 			// what follows it -- a run_script -- expects its files asked
 			// for. The guard in update() is a frame late for packets read
@@ -1022,12 +1033,15 @@ void CState::setup_packet_handlers()
 	m_packet_handlers["core:announce_files"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		sv_<std::tuple<ss_, ss_>> files;
+		sv_<interface::FileHash> announced;
 		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(files);
+			ar(announced);
 		}
+		sv_<std::tuple<ss_, ss_>> files;
+		for(interface::FileHash &f : announced)
+			files.emplace_back(std::move(f.name), std::move(f.hash));
 		log_v(MODULE, "Server announces %zu files", files.size());
 		// Our own server: say so, once per connection, with the token it
 		// was started with. The server's first packet is this one, so the
@@ -1084,16 +1098,16 @@ void CState::setup_packet_handlers()
 	m_packet_handlers["core:file_contents"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		sv_<std::tuple<ss_, ss_, ss_>> files;
+		sv_<interface::FileContent> files;
 		std::istringstream is(unpack_packet(data), std::ios::binary);
 		{
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(files);
 		}
-		for(const auto &entry : files){
-			const ss_ &file_name = std::get<0>(entry);
-			const ss_ &file_hash = std::get<1>(entry);
-			const ss_ &file_content = std::get<2>(entry);
+		for(const interface::FileContent &entry : files){
+			const ss_ &file_name = entry.name;
+			const ss_ &file_hash = entry.hash;
+			const ss_ &file_content = entry.content;
 			if(m_waiting_files.count(file_name) == 0){
 				log_w(MODULE, "Received file was not requested: %s %s",
 						cs(interface::sha1::hex(file_hash)), cs(file_name));
