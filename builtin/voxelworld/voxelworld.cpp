@@ -22,7 +22,6 @@
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/server_config.h"
-#include "interface/compress.h"
 #include <cstring>
 #include <set>
 #include <PolyVoxCore/RawVolume.h>
@@ -623,19 +622,14 @@ struct CInstance: public voxelworld::Instance
 	// it, as far out as its client asked for. replicate calls this from its
 	// own sync, so it reaches into nothing and holds only m_send_mutex.
 	//
-	// A node this world did not make, or a peer whose position nobody
-	// declared, is none of this filter's business and passes.
+	// A node this world did not make passes; so does every chunk to a peer
+	// that has said its distance and whose position nobody declared.
 	bool peer_wants_node(replicate::PeerId peer, uint node_id)
 	{
 		std::lock_guard<std::mutex> lock(m_send_mutex);
 		auto it = m_chunk_node_chunk_p.find(node_id);
 		if(it == m_chunk_node_chunk_p.end())
 			return true;
-		auto pit = m_peer_points.find(peer);
-		if(pit == m_peer_points.end())
-			return true;
-		const voxelworld::LoadPoint &lp = pit->second;
-		int radius = lp.load_xz;
 		auto rit = m_peer_send_radius.find(peer);
 		// A peer that has not said how much it wants wants nothing yet:
 		// the client says 0 until its game's textures are composed
@@ -643,8 +637,19 @@ struct CInstance: public voxelworld::Instance
 		// peer (the launcher's client joins before the world exists) was
 		// dropped, so the world streamed and was meshed with no textures
 		// ([FIRST_RUN]). It says its distance again when ready.
+		// Ahead of the load point: luanti declares it when the player
+		// joins, after the client's voxelworld:init, and until then every
+		// chunk passed -- hundreds of them ahead of voxelworld:ready, all
+		// noted in its one frame, ten seconds at a phone's CPU. The 30 MB
+		// registry packet in the send buffer had held them back until
+		// [REGISTRY_FILE] made it a file.
 		if(rit == m_peer_send_radius.end())
 			return false;
+		auto pit = m_peer_points.find(peer);
+		if(pit == m_peer_points.end())
+			return true;
+		const voxelworld::LoadPoint &lp = pit->second;
+		int radius = lp.load_xz;
 		if(rit->second < radius)
 			radius = rit->second;
 		pv::Vector3DInt16 sp = container_coord16(it->second,
@@ -1178,13 +1183,9 @@ struct CInstance: public voxelworld::Instance
 		client_file::access(m_server, [&](client_file::Interface *ifile){
 			ifile->add_file_content(REGISTRY_FILE, data);
 		});
-		if(!m_registry_served){
-			std::ostringstream os(std::ios::binary);
-			interface::compress_zstd(data, os);
-			log_i(MODULE, "The voxel registry served as %s: %zu bytes, "
-					"%zu with zstd", REGISTRY_FILE, data.size(),
-					os.str().size());
-		}
+		if(!m_registry_served)
+			log_i(MODULE, "The voxel registry served as %s: %zu bytes",
+					REGISTRY_FILE, data.size());
 		m_registry_served = true;
 		return true;
 	}

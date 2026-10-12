@@ -4,11 +4,11 @@
 # covers: builtin/voxelworld/voxelworld.cpp builtin/voxelworld/client_lua/module.lua
 # [REGISTRY_FILE]: the voxel registry is a file of client_file's.
 #   1. Vanilla on VoxeLibre, a join with an empty cache: the server says
-#      the file's size and its zstd size; the client reads the registry
-#      from the served file. A second join with that cache asks for no
-#      file and reads it again; the time from the announce to the world
-#      in is said (2.7 s on the desk, 2026-10-12, a second of it the
-#      loading picture's decode).
+#      the file's size; the client reads the registry from the served
+#      file. A second join with that cache asks for no file and reads it
+#      again; the time from the announce to the world in is said (2.7 s
+#      on the desk, 2026-10-12, before [LOADING_PIC_DECODE] took a second
+#      off it).
 #   2. aggregate_look with a voxel type added 8 s after a client joined (a
 #      dirty registry): the joined client reads the file again, larger.
 #   util/registry_file_check.sh
@@ -30,7 +30,9 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=rf start_server "$t/srv.log" 
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/srv" -C "$t/srv.cache" -l 3 ||
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf "wait_log 300000 load: the world is in\nquit\n" > "$t/cmds"
+# The delay: the player's join changes luanti's object_props file; quit
+# before it came, the second join asks for it
+printf "wait_log 300000 load: the world is in\ndelay 3000\nquit\n" > "$t/cmds"
 for n in 1 2; do
 	run_client 60 "$t/$n.log" timeout 300 "$b" -C "$t/c" -D "$t/u" -w 800x450 -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$t/cmds"
@@ -39,7 +41,7 @@ for n in 1 2; do
 		fail "join $n: the registry not from the file ($t/$n.log)"
 done
 grep -a "The voxel registry served as" "$t/srv.log" | sed 's/.*voxelwor: //'
-grep -aq "The voxel registry served as voxelworld/voxel_registry.bin: [0-9]* bytes, [0-9]* with zstd" "$t/srv.log" ||
+grep -aq "The voxel registry served as voxelworld/voxel_registry.bin: [0-9]* bytes" "$t/srv.log" ||
 	fail "no size said ($t/srv.log)"
 grep -aq "announced files are cached, [1-9][0-9]* asked for" "$t/1.log" || fail "join 1 asked for nothing ($t/1.log)"
 grep -aq "announced files are cached, 0 asked for" "$t/2.log" || fail "join 2 asked for files ($t/2.log)"

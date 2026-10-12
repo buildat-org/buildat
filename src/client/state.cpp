@@ -714,11 +714,15 @@ struct CState: public State
 	{
 		ss_ file_hash;
 		ss_ path = get_file_path(name, &file_hash);
-		std::ifstream f(path);
+		std::ifstream f(path, std::ios::binary | std::ios::ate);
 		if(!f.good())
 			throw Exception(ss_()+"Could not open file: "+path);
-		std::string file_content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
+		// In one read of its size: through a stream iterator VoxeLibre's
+		// 30 MB voxel registry was seconds on the web ([REGISTRY_FILE])
+		ss_ file_content((size_t)f.tellg(), '\0');
+		f.seekg(0);
+		if(!f.read(&file_content[0], file_content.size()))
+			throw Exception(ss_()+"Could not read file: "+path);
 		ss_ file_hash2 = interface::sha1::calculate(file_content);
 		if(file_hash != file_hash2){
 			log_e(MODULE, "Opened file differs in hash: \"%s\": "

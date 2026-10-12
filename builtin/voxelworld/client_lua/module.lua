@@ -269,10 +269,14 @@ end)
 -- server's run_script: at join, ahead of voxelworld:ready, and again when
 -- it changes. The script runs once the file is in.
 function M.registry_from_file()
+	local t0 = buildat.get_time_us()
 	local data = buildat.get_file_content("voxelworld/voxel_registry.bin")
+	local t1 = buildat.get_time_us()
 	voxel_reg:deserialize(data)
-	log:info(string.format("the voxel registry from the served file, %d bytes",
-			#data))
+	log:info(string.format("the voxel registry from the served file, %d bytes"..
+			" (read %d ms, deserialized %d ms)", #data,
+			math.floor((t1 - t0) / 1000),
+			math.floor((buildat.get_time_us() - t1) / 1000)))
 end
 
 buildat.sub_packet("voxelworld:ready", function(data)
