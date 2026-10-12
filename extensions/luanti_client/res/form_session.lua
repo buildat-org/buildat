@@ -152,6 +152,15 @@ function M.new(env)
 
 	function self:draw()
 		local form = self.form
+		-- What the player typed into a field, kept where the new spec's
+		-- default for it is the old one's: a game redrawing its form (a
+		-- page turned, [CREATIVE_PAGES]) does not wipe a search
+		local typed = {}
+		for _, f in ipairs(form.drawn and form.drawn.fields or {}) do
+			if f.edit and f.edit:GetText() ~= f.value then
+				typed[f.name] = {value = f.value, text = f.edit:GetText()}
+			end
+		end
 		if form.drawn then
 			unhook()
 			form.drawn.window:Remove()
@@ -174,6 +183,10 @@ function M.new(env)
 		form.drawn = ui:show(root, elements, layout, w, h, form.state)
 		local typeable = false
 		for _, f in ipairs(form.drawn.fields or {}) do
+			local t = typed[f.name]
+			if f.edit and t and t.value == f.value then
+				f.edit:SetText(t.text)
+			end
 			if f.edit then
 				typeable = true
 				local name = f.name

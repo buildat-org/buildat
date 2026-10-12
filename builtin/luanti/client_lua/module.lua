@@ -3617,9 +3617,8 @@ function M.update_tooltip(dtime)
 	S():frame(dtime)
 end
 
--- Only a form that has a model in it: drawing one again is cheap but it
--- takes what the player typed in a field with it, and every other form on
--- the screen when a model arrives is somebody else's
+-- Only a form that has a model in it: drawing one again is cheap, and
+-- every other form on the screen when a model arrives is somebody else's
 -- A form's model[] or an item drawn as a mesh's shape
 form_model_arrived = function()
 	if current_form() then
@@ -3756,6 +3755,7 @@ function M.open_player_inventory()
 		return
 	end
 	show_form("", player_spec)
+	current_form().source = "inventory"
 end
 
 -- A form of the client's own: the game describes it the way a server would
@@ -3838,6 +3838,13 @@ end)
 buildat.sub_packet("luanti:player_formspec", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	player_spec = values[1] or ""
+	-- The open inventory too: this is how a game turns its own page, as
+	-- VoxeLibre's creative one does ([CREATIVE_PAGES])
+	local form = current_form()
+	if form and form.source == "inventory" and player_spec ~= "" then
+		form.spec = player_spec
+		session:redraw()
+	end
 end)
 
 startup_packet("luanti:dig_props", "luanti_data/dig_props.bin", function(data)
