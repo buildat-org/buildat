@@ -16,6 +16,7 @@
 #include "interface/block.h"
 #include "interface/voxel_volume.h"
 #include "interface/voxel_cereal.h"
+#include "interface/voxel_cereal_legacy.h"
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
 #include "interface/polyvox_std.h"
@@ -2677,11 +2678,20 @@ struct CInstance: public voxelworld::Instance
 			cereal::PortableBinaryInputArchive ar(is);
 			uint8_t version = 0;
 			ar(version);
-			if(version != 1)
+			if(version == 2){
+				ar(m_save_names);
+			} else if(version == 1){
+				// 0.6's (voxel_cereal_legacy.h); written again as 2
+				interface::legacy06::read_vector(ar, m_save_names,
+						[](interface::legacy06::In &a, interface::VoxelName &n){
+					interface::legacy06::read(a, n);
+				});
+				m_save_names_dirty = true;
+			} else {
 				throw Exception(ss_()+"voxelworld: the name table of world \""+
 						m_world_name+"\" is version "+itos(version)+
-						" and this build writes 1");
-			ar(m_save_names);
+						" and this build writes 2");
+			}
 		}
 		// Save id 0 is VOXELTYPEID_UNDEFINED under every format, and is not
 		// a name
@@ -2738,7 +2748,7 @@ struct CInstance: public voxelworld::Instance
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar((uint8_t)1, m_save_names);
+			ar((uint8_t)2, m_save_names);
 		}
 		m_store->set(names_key(), os.str());
 		m_save_names_dirty = false;
@@ -2898,18 +2908,31 @@ struct CInstance: public voxelworld::Instance
 	{
 		m_save_formats.clear();
 		m_write_format = 0;
+		bool legacy_formats = false;
 		ss_ data;
 		if(m_store->get(formats_key(), data)){
 			std::istringstream is(data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
 			uint8_t version = 0;
 			ar(version);
-			if(version != 1)
+			if(version == 2){
+				ar(m_save_formats);
+			} else if(version == 1){
+				// 0.6's (voxel_cereal_legacy.h); written again as 2 below
+				interface::legacy06::read_vector(ar, m_save_formats,
+						[](interface::legacy06::In &a,
+								interface::VoxelFormat &f){
+					interface::legacy06::read(a, f);
+				});
+				legacy_formats = true;
+			} else {
 				throw Exception(ss_()+"voxelworld: the format table of world "
 						"\""+m_world_name+"\" is version "+itos(version)+
-						" and this build writes 1");
-			ar(m_save_formats);
+						" and this build writes 2");
+			}
 		}
+		if(legacy_formats)
+			save_format_table();
 		const interface::VoxelFormat &format = m_voxel_reg->get_format();
 		for(size_t i = 0; i < m_save_formats.size(); i++){
 			if(m_save_formats[i] == format){
@@ -2933,7 +2956,7 @@ struct CInstance: public voxelworld::Instance
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar((uint8_t)1, m_save_formats);
+			ar((uint8_t)2, m_save_formats);
 		}
 		m_store->set(formats_key(), os.str());
 	}

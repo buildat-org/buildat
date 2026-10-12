@@ -6,6 +6,7 @@
 #include "core/log.h"
 #include "interface/os.h"
 #include "interface/voxel_cereal.h"
+#include "interface/voxel_cereal_legacy.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <mutex>
@@ -1035,7 +1036,7 @@ void VoxelRegistry::serialize(std::ostream &os)
 	VoxelFormat format = get_format();
 	VoxelSelector look = get_look_selector();
 	cereal::PortableBinaryOutputArchive archive(os);
-	archive((uint8_t)2, format, defs, look);
+	archive((uint8_t)3, format, defs, look);
 }
 
 void VoxelRegistry::deserialize(std::istream &is)
@@ -1046,11 +1047,18 @@ void VoxelRegistry::deserialize(std::istream &is)
 	VoxelSelector look;
 	cereal::PortableBinaryInputArchive archive(is);
 	archive(version);
-	if(version != 2)
-		throw Exception(ss_()+"VoxelRegistry::deserialize(): version "+
-				itos(version)+" is not 2; the other end is a different "
-				"build of buildat");
-	archive(format, defs, look);
+	if(version == 3){
+		archive(format, defs, look);
+	} else if(version == 2){
+		// 0.6's, in a saved world (voxel_cereal_legacy.h)
+		legacy06::read(archive, format);
+		legacy06::read_vector(archive, defs,
+				[](legacy06::In &a, VoxelDefinition &d){ legacy06::read(a, d); });
+		legacy06::read(archive, look);
+	} else {
+		throw Exception(ss_()+"VoxelRegistry::deserialize(): format "+
+				itos(version)+", where this reads 3 (and 0.6's 2)");
+	}
 	clear();
 	set_format(format);
 	// In one go: a registry arriving over the network is thousands of
