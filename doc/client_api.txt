@@ -47,6 +47,9 @@ buildat.last_arrival() -> nil, or {t, kind, ...}
   "file" with name, "chunk" with x, y, z (its chunk coordinates) or "other"
   with what (the packet's name). A packet counts once it is whole, and an
   "other" one does not replace a file or a chunk less than a second old.
+buildat.received() -> bytes, seconds
+- The bytes read from the server since the connect, and the seconds since
+  the last came (nil before any) ([JOIN_PROGRESS]).
 buildat.in_flight() -> nil, or {name, have, size}
 - What is arriving and not yet whole ([LOAD_IN_FLIGHT]): a packet part-read
   (its name, "" for an unknown type; its bytes so far and its length), or
@@ -81,6 +84,10 @@ buildat.get_ui_scale() -> number
 buildat.logical_size() -> w, h
 - The frame a scan's and a command sequence's pixels are in: the -w size in a
   scripted client ([SEQ_FIXED_SIZE]), the window otherwise
+buildat.keyboard_height() -> the on-screen keyboard's height in UI pixels,
+  0 with none (a native client)
+buildat.display_density() -> device pixels per CSS pixel on the web, 1
+  natively
 
 buildat.get_preferred_render_scale() -> number
 - The fraction of the window size the user asked 3D viewports to be rendered
@@ -147,6 +154,11 @@ buildat.set_web_address_bar("hide" or "show") -> ok, err
   hidden on a small touchscreen (a coarse pointer, a screen's short side
   under 600 CSS pixels), shown elsewhere. Entering fullscreen waits for a
   tap or a click.
+buildat.get_screen_orientation() -> "auto", "landscape" or "portrait", nil
+  natively
+buildat.set_screen_orientation(v) -> true, or false and why
+- The screen's orientation on the web, from a pause menu
+  ([SCREEN_ORIENTATION]); the page holds it while it is fullscreen.
 
 buildat.take_screenshot() -> file name, or nil and why not
 - Into <user>/screenshots, named by the date and time. The caller says when
@@ -154,6 +166,13 @@ buildat.take_screenshot() -> file name, or nil and why not
   the end of the frame; the name is reserved before this returns.
 buildat.save_file(name, data) -> the path it went to ("" for a download),
   or nil and why not
+buildat.save_file_parts(name) -> a writer, or nil and why not
+- A file a part at a time, for one more than a string holds
+  ([WORLD_TRIM_MOVE]): w.add(data) -> true, or nil and why (the parts
+  dropped); w.finish() -> the path ("" for a download), or nil and why;
+  w.cancel() drops the parts. pick_file(accept, true) reads one the same
+  way: picked_file() then gives name, reader, with reader.size,
+  reader.read(offset, len) (at most 16 MiB) and reader.close().
 buildat.exported_files() -> {name, ...}
 buildat.read_exported(name) -> data, or nil and why not
 buildat.pick_file([accept]) -> true
@@ -327,6 +346,12 @@ buildat.list_apps() -> {{name, size, kind}, ...}, the apps under apps/
 buildat.list_launchers() -> {{kind, name, path, launcher = bool}, ...}
 - Every app, builtin and extension in the tree, for the launch grid
   ([LAUNCH_GRID]); launcher says whether it has a launcher/init.lua.
+
+buildat.serverless_play(id) -> true, or false and why
+- An app's client half with no server ([SERVERLESS_PLAY]): its files from
+  its directory, the launcher's placeholder under it so that leave_app
+  takes it down, its client_mains run with buildat.serverless() true. id as
+  list_apps() names it. The launcher's Play.
 
 buildat.start_local_server(app [, launch]) -> ok, error
 - Starts buildat_server as a child on a free port with -m apps/<app>, and
@@ -537,6 +562,9 @@ buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
 - last_launched is unix seconds, and absent for a key that never was, so a
   launch UI can sort by recency without keeping a list of its own
   ([LAUNCH_API]). The list is <user>/launch_history.csv, the newest 200.
+buildat.safe.save_actions(app) -> {{key, label, description}, ...}
+- What the app's launcher does to one of its saves ([SAVE_CONTEXT_MENU]),
+  for launch(key, save); none of them a tile.
 buildat.safe.launch(key) -> true, or false and why
 - Run one of them. The key is looked up in the table the trusted side built,
   so a sandbox can name nothing that is not on the grid. The key and the
@@ -569,6 +597,12 @@ buildat.safe.join_server(address) -> true, or false and why
   a leave pops. For a launch UI that is not launch_menu.
 buildat.safe.show_engine_settings() -> true
 - The launch menu's Engine settings screen, pushed on the main UI stack.
+buildat.safe.show_key_settings() -> true
+- The launch menu's Keys screen, the same as the game settings window's
+  keys page ([SETTINGS_KEYS_PAGE]).
+buildat.safe.show_game_keys{on_close = f} -> true, or false and why
+- The game settings window's keys page alone, for a game whose own menu
+  offers its keys; on_close as show_game_settings'.
 buildat.safe.show_game_settings{on_close = f, sections = {...}}
 - The client's settings window over the game, the one settings menu a game
   opens from its own ([GAME_SETTINGS]): the game's sections, then Sound,
@@ -702,7 +736,8 @@ buildat.safe.client_api_text() -> this document, or nil
 - For a launch UI that shows it beside a console. One named file, read-only.
 buildat.safe.storage_read(name) -> data or nil
 buildat.safe.storage_write(name, data) -> true, or false and why
-- One directory per launch extension under the user path. A name is one file,
+- One directory per launch extension, <user>/extensions/<extension> (0.6's
+  <user>/<extension> is moved there on first use). A name is one file,
   not a path; there is a size limit, and 64 names a directory at most.
 - App code a server sent gets the same two as buildat.storage_read and
   buildat.storage_write, kept per server like a web page's localStorage:
@@ -910,10 +945,10 @@ Cursor:DefineShape(shape, image, rect, hot_spot)
   collector. An image with no name is refused for that reason.
 
 LineEdit.multiLine, UIElement:IsMultiLine()
-- The fork's multi-line LineEdit (magic.txt): Enter breaks the line,
+- The fork's multi-line LineEdit (doc/magic.txt): Enter breaks the line,
   Ctrl+Enter sends TextFinished, the text wraps. ui_utils' keyboard_page
   asks IsMultiLine() of the focus and leaves Up and Down to such a field.
-- Every field has the common editor keys ([TEXT_KEYS], magic.txt):
+- Every field has the common editor keys ([TEXT_KEYS], doc/magic.txt):
   Ctrl+A, Ctrl+Left/Right by word, Alt+Backspace and Ctrl+Backspace back a
   word, Ctrl+Delete forward, a double-click a word, a triple-click all (in a
   multi-line field the line).
@@ -1972,7 +2007,7 @@ magic.INSIDE:
 magic.INTERSECTS: 
 magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
-magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
+magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseLocked, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
 magic.IntVector3: Length, from_buildat, x, y, z
@@ -2559,7 +2594,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, focusElement, root, scale
-magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVisible, WheelTakenAt, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 

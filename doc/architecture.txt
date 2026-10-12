@@ -57,8 +57,11 @@ the C++ modules themselves.
 
 The engine loads builtin/loader first. It loads all other modules.
 
-C++ modules can use the core/ and interface/ headers. Everything else is
-considered unstable.
+The public C++ API is src/core/, src/interface/ and the builtin modules'
+api.h files (server_api.txt), versioned by the engine API a module's
+meta.json names: a change that breaks a module raises it. Magic's headers
+and the other third-party ones on the include path are not part of it;
+they change with any release.
 
 C++ modules are run in threads, and everything they can officially access is
 thread-safe.
@@ -77,6 +80,7 @@ Metainformation: meta.json
 -------------------------
 Example:
 {
+	"engine_api": 2,
 	"cxxflags": "",
 	"ldflags": "-lsasl2",
 	"dependencies": [
@@ -88,7 +92,9 @@ Example:
 	],
 }
 
-Any fields can be left out. The minimum meta.json content is an empty object {}.
+An app's module says engine_api, the engine API it is written for; the
+rest can be left out, and a key the loader does not know is refused
+(server_api.txt).
 
 Extension structure
 -------------------
@@ -245,3 +251,22 @@ builtin/voxel_shading. Chunk data crosses the network as a node attribute,
 compressed, replicated by builtin/replicate.
 
 The 2014 design notes this section used to carry are in git history.
+
+Environment variables
+---------------------
+The supported ones, kept from version to version as an option is:
+- BUILDAT_USER_PATH, BUILDAT_CACHE_PATH: the user and cache directories,
+  over the defaults (-D and -C over these).
+- BUILDAT_RENDER_MODE: unlit, shadows or pbr, over the launcher's setting.
+- BUILDAT_JOIN_NAME, _PASSWORD, _CODE, _TOTP, _STARPORT and _CREATE: a
+  scripted client's login (builtin/accounts/client_lua/accounts.lua).
+- BUILDAT_PIPE=1: an unboxed server takes its client by a pipe too.
+- BUILDAT_CONNECT_PORTS, BUILDAT_LAN_ANNOUNCE: the server's
+  --connect-ports and --lan-announce.
+- BUILDAT_STARPORT_MANAGED: the managed starport.json's path.
+- BUILDAT_LUANTI_*: builtin/luanti's own (luanti_module.txt).
+
+Buildat sets BUILDAT_OWNER_TOKEN, BUILDAT_RUN, BUILDAT_OPEN,
+BUILDAT_PAGE_HTTPS and BUILDAT_TOUCH for its own processes. Every other
+BUILDAT_* a source reads is a check's or a developer's knob, which a
+release may change or drop without a word.
