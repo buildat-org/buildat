@@ -4488,7 +4488,7 @@ function frame_peak.update(dt)
 
 	update_detail(dt)
 	luanti.update_tooltip(dt)
-	luanti.update_sounds(dt)
+	luanti.update_sounds(dt, camera_node.worldPosition)
 	luanti.update_particles(dt, magic.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 	luanti.update_lights(dt, magic.Vector3(player.x,

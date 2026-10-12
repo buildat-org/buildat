@@ -1523,10 +1523,23 @@ end)
 -- verbatim; what is different is the shape of the message, which is this
 -- module's own -- see lua/sound.lua.
 
--- How far a positioned sound carries. Luanti leaves this to OpenAL's
--- defaults, which are in its own units; these are nodes.
-local SOUND_NEAR = 2.0
+-- A positioned sound at Luanti's gain ([SOUND_GAIN_LUANTI]): three
+-- times the asked one, over the distance from 1 node out (OpenAL's
+-- inverse distance, clamped), never over 1 (AL_MAX_GAIN) -- the world
+-- against the music as in Luanti. Urho3D's own attenuation is off (near
+-- and far beyond any world), its panning kept.
+-- One table: the main chunk is at Lua's 200 locals. ear: where the
+-- listener was at the last update.
+local snd = {NO_ATTENUATION = 1e9, ear = nil}
 local handle_sounds = {}
+
+function snd.heard(entry)
+	if not entry.positional or not snd.ear then
+		return entry.gain
+	end
+	local d = (entry.node.position - snd.ear):Length()
+	return math.min(1, 3 * entry.gain / math.max(d, 1))
+end
 
 local function stop_sound(handle)
 	local entry = handle_sounds[handle]
@@ -1559,12 +1572,12 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 		local at = follows and object_nodes[follows]
 		node.position = at and at.node.position or magic.Vector3(x, y, z)
 		source = node:CreateComponent("SoundSource3D")
-		source.nearDistance = SOUND_NEAR
-		source.farDistance = far
+		source.nearDistance = snd.NO_ATTENUATION
+		source.farDistance = snd.NO_ATTENUATION
 	end
 	source.soundType = magic.SOUND_EFFECT
-	local entry = {node = node, source = source, gain = gain,
-			started = false, object_id = follows}
+	local entry = {node = node, source = source, started = false,
+			object_id = follows, positional = location ~= "local"}
 	-- A fade on the packet means it starts silent and comes up to the gain
 	-- it asked for
 	if fade > 0 then
@@ -1572,12 +1585,14 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 		entry.step = fade
 		gain = 0
 	end
-	source.gain = gain
+	entry.gain = gain
+	source.gain = snd.heard(entry)
 	if pitch > 0 and pitch ~= 1 then
 		source.frequency = sound.frequency * pitch
 	end
 	source:Play(sound)
-	log:debug("luanti:sound: " .. name .. " gain " .. gain .. " " .. location)
+	log:debug(string.format("luanti:sound: %s gain %.3f %s heard at %.3f",
+			name, gain, location, source.gain))
 	stop_sound(handle)
 	handle_sounds[handle] = entry
 end
@@ -1662,8 +1677,9 @@ end
 -- The player's own dig and place, which the server does not send them:
 -- item.lua's node_dig and item_place call sound_play with
 -- exclude_player = the player who did it, since official Luanti's client
--- plays its own. At the place rather than in the head, unlike a
--- footstep: a dig is a thing over there.
+-- plays its own. In the head at the spec's gain, as its SoundMaker plays
+-- them ([SOUND_GAIN_LUANTI]); at the place they were a distance model's
+-- third of Luanti's.
 local action_said = {}
 
 local function action_sound(which, table_of, node_name, x, y, z)
@@ -1684,7 +1700,7 @@ local function action_sound(which, table_of, node_name, x, y, z)
 	action_sound_n = action_sound_n + 1
 	local file = spec.files[math.random(#spec.files)]
 	play_sound(which .. ":" .. action_sound_n, file, spec.gain, spec.pitch,
-			false, 0, "pos", x, y, z, "0", 32)
+			false, 0, "local", x, y, z, "0", 32)
 	-- Once a node at info and the rest at debug, as a footstep says it:
 	-- a session digs hundreds of nodes and what a reader wants is which
 	-- kinds have been heard from
@@ -1742,7 +1758,9 @@ end
 
 -- The fades, the sounds that follow an object, and the nodes of the ones
 -- that have finished. The game calls this every frame.
-function M.update_sounds(dtime)
+-- ear: where the listener is, for the positioned sounds' gain
+function M.update_sounds(dtime, ear)
+	snd.ear = ear or snd.ear
 	for handle, entry in pairs(handle_sounds) do
 		local follow = entry.object_id and object_nodes[entry.object_id]
 		if follow then
@@ -1752,7 +1770,6 @@ function M.update_sounds(dtime)
 			local gain, done = fade_step(entry.gain, entry.target, entry.step,
 					dtime)
 			entry.gain = gain
-			entry.source.gain = gain
 			if done then
 				entry.target = nil
 				if gain <= 0 then
@@ -1763,6 +1780,7 @@ function M.update_sounds(dtime)
 		-- Not on the frame it started: a source has not been mixed yet and
 		-- says it is not playing
 		if handle_sounds[handle] then
+			entry.source.gain = snd.heard(entry)
 			if entry.started and not entry.source.playing then
 				stop_sound(handle)
 			end
