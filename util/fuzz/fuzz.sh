@@ -51,6 +51,9 @@ declare -A srcs=(
 	# over the library (sound_fuzz.cpp)
 	[sound]="3rdparty/Urho3D/Source/Urho3D/Audio/Sound.cpp 3rdparty/Urho3D/Source/Urho3D/Audio/OggVorbisSoundStream.cpp"
 	[markup]="src/impl/markup.cpp"
+	# The hello, the file transfer's records and served Lua's cereal reader
+	# (record_fuzz.cpp), LuaJIT from the Urho3D library
+	[record]="src/lua_bindings/cereal.cpp src/lua_bindings/util.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp"
 	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
 	# from its CMakeLists; no Urho3D needed
 	[font]=""
@@ -85,6 +88,7 @@ declare -A libs=(
 	[xml]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[sound]="-L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[markup]="-I$here/3rdparty/md4c"
+	[record]="-I$here/3rdparty/Urho3D/Source/ThirdParty/LuaJIT/src -L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[font]="-I$here/$ft/include -lz"
 )
 # Urho3D's own defines and include paths for the files compiled from it;
