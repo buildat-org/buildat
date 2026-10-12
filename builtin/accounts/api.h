@@ -14,7 +14,8 @@
 // lets it in:
 // - The accounts are in the server's own save, "_server" (a game leaves
 //   saves beginning with _ out of its lists), store "accounts".
-// - A password is PBKDF2-HMAC-SHA256 with a salt of its own.
+// - A password is PBKDF2-HMAC-SHA256 with a salt of its own; the
+//   account record names the derivation and its iteration count.
 // - A server with no admin prints a setup code; the first to join with it
 //   is the admin. A new account needs an invite from an admin, unless
 //   registration is open, which it is by default only on a server the

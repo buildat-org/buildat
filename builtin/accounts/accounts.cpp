@@ -14,6 +14,7 @@
 #include "interface/sha256.h"
 #include "interface/sha1.h"
 #include "interface/os.h"
+#include "interface/record.h"
 #include "interface/http.h"
 #include "interface/fs.h"
 #include "interface/tcpsocket.h"
@@ -244,15 +245,40 @@ static void stats_self_check()
 		throw Exception("accounts: statistics self-check failed: "+d.str());
 }
 
+// **The stored records** ([COMPAT_BREAK_07] 8b): records 1.0
+// (interface/record.h); 0.6's had no header and are rewritten once by
+// migrate_records().
+static const char *KDF_PBKDF2_SHA256 = "pbkdf2-sha256";
+
 struct Account
 {
+	// The password's derivation and its cost, so that either can change
+	// without the accounts made before
+	ss_ kdf = KDF_PBKDF2_SHA256;
+	uint32_t iterations = PBKDF2_ITERATIONS;
 	ss_ salt;
 	ss_ hash;
 	sv_<ss_> privs;
 
 	template<class Archive>
 	void serialize(Archive &archive){
+		interface::Record<Archive> r(archive, "Account", 1, 0);
+		r.ar(kdf, iterations, salt, hash, privs);
+		r.end();
+	}
+	template<class Archive>
+	void serialize_06(Archive &archive){
 		archive(salt, hash, privs);
+	}
+	bool password_is(const ss_ &password) const {
+		if(kdf != KDF_PBKDF2_SHA256 || iterations == 0 ||
+				iterations > 10000000){
+			log_w(MODULE, "An account's password is derived by \"%s\", %u "
+					"iterations, which this does not check", cs(kdf),
+					iterations);
+			return false;
+		}
+		return pbkdf2_sha256(password, salt, (int)iterations) == hash;
 	}
 	bool has(const ss_ &priv) const {
 		for(const ss_ &p : privs)
@@ -269,6 +295,12 @@ struct AccessSettings
 
 	template<class Archive>
 	void serialize(Archive &archive){
+		interface::Record<Archive> r(archive, "AccessSettings", 1, 0);
+		r.ar(open_registration);
+		r.end();
+	}
+	template<class Archive>
+	void serialize_06(Archive &archive){
 		archive(open_registration);
 	}
 };
@@ -281,6 +313,12 @@ struct Invite
 
 	template<class Archive>
 	void serialize(Archive &archive){
+		interface::Record<Archive> r(archive, "Invite", 1, 0);
+		r.ar(privs, by);
+		r.end();
+	}
+	template<class Archive>
+	void serialize_06(Archive &archive){
 		archive(privs, by);
 	}
 };
@@ -293,6 +331,12 @@ struct Ban
 
 	template<class Archive>
 	void serialize(Archive &archive){
+		interface::Record<Archive> r(archive, "Ban", 1, 0);
+		r.ar(address, by);
+		r.end();
+	}
+	template<class Archive>
+	void serialize_06(Archive &archive){
 		archive(address, by);
 	}
 };
@@ -751,6 +795,7 @@ struct Module: public interface::Module, public Interface
 			notify(LV_ADMIN, m_server->get_app_id()+": started again after "
 					"a crash", "");
 		m_store->set("running", "1");
+		migrate_records();
 		migrate_levels();
 		migrate_links();
 		load_access();
@@ -938,6 +983,46 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [TRUST_LADDER] 0.6.73 saved the levels as privileges
+	// [COMPAT_BREAK_07] 8b: a 0.6 store's records, which had no header,
+	// rewritten as records once; "format" says it was done. One that does
+	// not read is left as it is, unreadable as before.
+	// simplified: kept until the next break, then a 0.6 store is refused
+	template<class T>
+	void migrate_prefix(const ss_ &prefix)
+	{
+		for(const ss_ &key : m_store->list(prefix)){
+			ss_ data;
+			if(!m_store->get(key, data))
+				continue;
+			T v;
+			try {
+				std::istringstream is(data, std::ios::binary);
+				cereal::PortableBinaryInputArchive ar(is);
+				v.serialize_06(ar);
+			} catch(std::exception &e){
+				log_e(MODULE, "%s does not decode as 0.6 wrote it; kept as "
+						"it is", cs(key));
+				continue;
+			}
+			m_store->set(key, pack(v));
+		}
+	}
+
+	void migrate_records()
+	{
+		ss_ format;
+		if(m_store->get("format", format) && format == "2")
+			return;
+		m_store->batch([&](){
+			migrate_prefix<Account>("auth/");
+			migrate_prefix<Invite>("invite/");
+			migrate_prefix<Ban>("ban/");
+			migrate_prefix<AccessSettings>("access/settings");
+			m_store->set("format", "2");
+		});
+		log_i(MODULE, "The accounts are records now (format 2)");
+	}
+
 	void migrate_levels()
 	{
 		for(const ss_ &key : m_store->list("auth/")){
@@ -1339,7 +1424,8 @@ struct Module: public interface::Module, public Interface
 		account.salt.resize(16);
 		for(char &c : account.salt)
 			c = (char)(rd() & 0xff);
-		account.hash = pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS);
+		account.hash = pbkdf2_sha256(password, account.salt,
+				(int)account.iterations);
 		account.privs = privs;
 		return account;
 	}
@@ -1774,8 +1860,7 @@ struct Module: public interface::Module, public Interface
 			kept.expires_us = now + KEEP_US;
 			m_store->set(key, pack(kept));
 		} else if(get_account(name, account)){
-			if(!local && pbkdf2_sha256(password, account.salt,
-					PBKDF2_ITERATIONS) != account.hash)
+			if(!local && !account.password_is(password))
 				return fail("Wrong password");
 			if(!local && totp_on(name)){
 				// Said so, not counted: the client asks for the code
@@ -2224,8 +2309,7 @@ struct Module: public interface::Module, public Interface
 		const int64_t now = interface::os::wall_us();
 		if(failure_wait(m_name_failures, name, now) > 0)
 			return result("Too many failed attempts; wait and try again");
-		if(pbkdf2_sha256(pw.first, account.salt, PBKDF2_ITERATIONS) !=
-				account.hash){
+		if(!account.password_is(pw.first)){
 			note_failure(m_name_failures, name, now);
 			log_i(MODULE, "%s: a password change with a wrong password",
 					cs(name));
@@ -3173,8 +3257,7 @@ struct Module: public interface::Module, public Interface
 	{
 		Account account;
 		return get_account(name, account) && password.size() <= 100 &&
-				pbkdf2_sha256(password, account.salt, PBKDF2_ITERATIONS) ==
-				account.hash;
+				account.password_is(password);
 	}
 
 	ss_ set_password(const ss_ &name, const ss_ &password)
