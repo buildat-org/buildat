@@ -1464,7 +1464,6 @@ local function snapshot_player(o)
 		look = {h = o.look.h, v = o.look.v},
 		hp = o.hp,
 		breath = o.breath,
-		wield_index = o.wield_index,
 		fields = fields,
 		inventory = lists,
 	}
@@ -1488,7 +1487,9 @@ local function restore_player(o, saved)
 	end
 	o.hp = tonumber(saved.hp) or o.hp
 	o.breath = tonumber(saved.breath) or o.breath
-	o.wield_index = tonumber(saved.wield_index) or o.wield_index
+	-- Not the held slot: a join starts at 1 as Luanti's does, and the
+	-- client says its own at once; a restored one was held until the
+	-- first change, the light of a torch with it ([WIELD_SLOT_JOIN])
 	for k, v in pairs(saved.fields or {}) do
 		o.meta.fields[k] = v
 	end
@@ -2454,8 +2455,8 @@ function core.__check_players()
 			"check_players: the position did not come back")
 	assert(to.look.h == 0.5 and to.look.v == -0.25,
 			"check_players: the look did not come back")
-	assert(to.hp == 7 and to.breath == 3 and to.wield_index == 4,
-			"check_players: hp, breath or the wielded slot did not come back")
+	assert(to.hp == 7 and to.breath == 3 and to.wield_index == 1,
+			"check_players: hp or breath did not come back, or the slot did")
 	assert(to.meta.fields.greeting == "hello",
 			"check_players: the metadata did not come back")
 	assert(to.inventory:get_stack("main", 1):to_string() == "__check_item 3",

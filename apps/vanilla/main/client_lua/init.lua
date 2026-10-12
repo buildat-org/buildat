@@ -1388,6 +1388,10 @@ local function load_wait_end()
 	-- And the player into it: until now they were only placed
 	-- ([JOIN_WHEN_LOADED])
 	buildat.send_packet("main:world_in", "")
+	-- The slot shown: the server's player starts at 1, this client's may
+	-- not ([WIELD_SLOT_JOIN])
+	buildat.send_packet("main:wield",
+			cereal.binary_output({tostring(wield_index)}, {"array", "string"}))
 	keys.redraw_hud()
 	keys.take_world()
 end
