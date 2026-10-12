@@ -561,11 +561,25 @@ local function storage_path(name, domain)
 	if not storage_moved[domain] then
 		storage_moved[domain] = true
 		-- 0.6 kept it at user/<extension>/ ([COMPAT_BREAK_07] 8i); moved
-		-- once. A rename fails, and leaves both, when the new one has files
-		if not storage_not_moved[domain] then
-			__buildat_create_directories(__buildat_get_path("user") ..
-					"/extensions")
-			os.rename(__buildat_get_path("user") .. "/" .. domain, dir)
+		-- once. With both there, the new one is used and the old one left
+		local old = __buildat_get_path("user") .. "/" .. domain
+		if not storage_not_moved[domain] and
+				__buildat_count_files(old) > 0 then
+			if __buildat_count_files(dir) > 0 then
+				log:warning("storage: " .. old .. " is 0.6's and " .. dir ..
+						" is there too; " .. dir .. " is used, " .. old ..
+						" left as it is")
+			else
+				__buildat_create_directories(__buildat_get_path("user") ..
+						"/extensions")
+				local ok, err = os.rename(old, dir)
+				if ok then
+					log:info("storage: moved 0.6's " .. old .. " to " .. dir)
+				else
+					log:warning("storage: could not move 0.6's " .. old ..
+							" to " .. dir .. ": " .. tostring(err))
+				end
+			end
 		end
 	end
 	return dir .. "/" .. name, dir
