@@ -2072,11 +2072,12 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					const interface::VoxelQuad &quad = quads[quad_i];
 					// A quad that belongs to one direction is drawn only
 					// when that direction connects, and one that belongs to
-					// standing alone only when none of them does
+					// standing alone only when none of them does; one past
+					// 7 this does not know is drawn always, as 0
 					if(quad.connect_dir == 7){
 						if(faces != 0)
 							continue;
-					} else if(quad.connect_dir != 0 &&
+					} else if(quad.connect_dir != 0 && quad.connect_dir < 7 &&
 							!(faces & (1u << (quad.connect_dir - 1)))){
 						continue;
 					}

@@ -28,6 +28,7 @@ namespace interface
 		bool operator==(const VoxelName &other) const;
 	};
 
+	// Stored as its number; one this does not know draws as ON_EDGE
 	enum class FaceDrawType {
 		NEVER = 0,
 		ALWAYS = 1,
@@ -61,6 +62,7 @@ namespace interface
 		//   1...6 only when the neighbour in that direction connects, the
 		//         faces in their usual order, so 1 is +Y and 6 is -Z
 		//   7     only when none of the six connects
+		//   8...  drawn always, as 0 (a value this does not know)
 		// What wants it is a fence, which is a post plus a rail per
 		// direction that has something to reach, and a pane, which is a
 		// short post when it stands alone. See connect_group below for what
@@ -86,7 +88,9 @@ namespace interface
 		// Quads of the voxel's own instead of the definition's; empty for
 		// the definition's own shape. See VoxelDefinition::shape.
 		sv_<VoxelQuad> shape;
+		// Which tile each face wears; one past 5 is the face's own
 		uint8_t tile_order[6] = {0, 1, 2, 3, 4, 5};
+		// Quarter turns, taken modulo 4
 		uint8_t tile_turns[6] = {};
 		// Textures of the variant's own, indexed the way a tile is
 		// everywhere else: 0...5 are the voxel's six faces and 6 and over
@@ -150,7 +154,7 @@ namespace interface
 		// unchanged and pays no indirection.
 		sv_<AtlasSegmentDefinition> extra_textures;
 		// Quarter turns anticlockwise to give each face's texture inside the
-		// face, 0...3. What wants this is a voxel that faces a direction: the
+		// face, 0...3, taken modulo 4. What wants this is a voxel that faces a direction: the
 		// texture of the top of a turned cube is turned with it, and the same
 		// texture is shared with the cube that is not turned, so the turn
 		// belongs to the face rather than to the atlas segment.
