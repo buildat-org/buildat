@@ -615,7 +615,7 @@ struct Module: public interface::Module, public replicate::Interface
 				component->AddReplicationState(&component_state);
 
 				magic::VectorBuffer buf;
-				buf.WriteNetID(component->GetID());
+				buf.WriteNetID(node->GetID());
 				buf.WriteStringHash(component->GetType());
 				buf.WriteNetID(component->GetID());
 				component->WriteInitialDeltaUpdate(buf, 0);

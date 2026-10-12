@@ -88,6 +88,27 @@ static ss_ unpack_packet(const ss_ &data)
 }
 
 
+// Only components that draw, sound, collide or hold the scene: a component
+// is made by the type hash the server sends and its network attributes
+// applied, and a LuaScriptInstance's script file runs in the client's own
+// Lua state, outside the sandbox ([SECURITY_RUN_1])
+static bool replicable(magic::StringHash type)
+{
+	static const std::set<magic::StringHash> s = []{
+		std::set<magic::StringHash> s;
+		for(const char *n : {"Octree", "PhysicsWorld", "Zone",
+				"Light", "Camera", "StaticModel", "AnimatedModel",
+				"AnimationController", "StaticModelGroup",
+				"CustomGeometry", "BillboardSet", "ParticleEmitter",
+				"RibbonTrail", "DecalSet", "Text3D", "Skybox",
+				"Terrain", "RigidBody", "CollisionShape", "Constraint",
+				"SoundSource", "SoundSource3D", "SmoothedTransform"})
+			s.insert(magic::StringHash(n));
+		return s;
+	}();
+	return s.count(type) != 0;
+}
+
 struct CState;
 
 // **The cached files are looked up on a worker** ([CLIENT_FRAME]).
@@ -174,10 +195,10 @@ struct CState: public State
 	// **A connection that died without closing** (user, 2026-09-30: the
 	// web client froze, saying nothing): a server that sends
 	// network:keepalive to an idle peer is heard from every few seconds,
-	// so nothing at all for this long is a dead link. Only once one has
-	// come: an older server sends none, and an idle one was quiet.
+	// so nothing at all for this long is a dead link. Once it has said
+	// hello: a connection nothing was sent on yet (the web page's launcher)
+	// hears nothing until it says its own
 	static const int64_t SILENCE_US = 30000000;
-	bool m_keepalive_seen = false;
 	int64_t m_last_data_us = 0;
 	// [JOIN_PROGRESS]'s: what came, and when it last did
 	size_t m_received_bytes = 0;
@@ -318,7 +339,6 @@ struct CState: public State
 		m_tell_after_all_files_transferred_requested = false;
 		m_connected = false;
 		m_disconnected = false;
-		m_keepalive_seen = false;
 		m_last_data_us = 0;
 		m_received_bytes = 0;
 		m_received_us = 0;
@@ -359,7 +379,7 @@ struct CState: public State
 		const int64_t now = get_timeofday_us();
 		if(m_last_data_us == 0 || backlog_bytes() >= READ_AHEAD_BYTES)
 			m_last_data_us = now;
-		if(m_keepalive_seen && now - m_last_data_us >= SILENCE_US){
+		if(m_hello_seen && now - m_last_data_us >= SILENCE_US){
 			lost_connection(ss_()+"nothing from the server in "+
 					itos(SILENCE_US / 1000000)+" s");
 			return;
@@ -953,10 +973,7 @@ struct CState: public State
 void CState::setup_packet_handlers()
 {
 	m_packet_handlers["network:keepalive"] =
-			[this](const ss_ &packet_name, const ss_ &data)
-	{
-		m_keepalive_seen = true;
-	};
+			[](const ss_ &packet_name, const ss_ &data){};
 
 	m_packet_handlers["network:goodbye"] =
 			[this](const ss_ &packet_name, const ss_ &data)
@@ -1208,25 +1225,9 @@ void CState::setup_packet_handlers()
 
 			auto type = msg.ReadStringHash();
 			uint c_id = msg.ReadNetID();
-			// Only components that draw, sound, collide or hold the scene:
-			// a component is made by the type hash the server sends and
-			// its network attributes applied, and a LuaScriptInstance's
-			// script file runs in the client's own Lua state, outside the
-			// sandbox ([SECURITY_RUN_1]). The rest of the node is not
-			// readable past a refused one, so the node ends there.
-			static const std::set<magic::StringHash> replicable = []{
-				std::set<magic::StringHash> s;
-				for(const char *n : {"Octree", "PhysicsWorld", "Zone",
-						"Light", "Camera", "StaticModel", "AnimatedModel",
-						"AnimationController", "StaticModelGroup",
-						"CustomGeometry", "BillboardSet", "ParticleEmitter",
-						"RibbonTrail", "DecalSet", "Text3D", "Skybox",
-						"Terrain", "RigidBody", "CollisionShape", "Constraint",
-						"SoundSource", "SoundSource3D", "SmoothedTransform"})
-					s.insert(magic::StringHash(n));
-				return s;
-			}();
-			if(!replicable.count(type)){
+			// The rest of the node is not readable past a refused one, so
+			// the node ends there
+			if(!replicable(type)){
 				log_w(MODULE, "replicate:create_node: component type %s is"
 						" not one a server may create; node %i ends there",
 						type.ToString().CString(), node_id);
@@ -1259,10 +1260,38 @@ void CState::setup_packet_handlers()
 		lua_bindings::replicate::on_node_created(L, node_id);
 	};
 
+	// A component added to a node the client has
 	m_packet_handlers["replicate:create_component"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w("TODO: %s", cs(packet_name));
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint node_id = msg.ReadNetID();
+		auto type = msg.ReadStringHash();
+		uint c_id = msg.ReadNetID();
+		Node *node = scene->GetNode(node_id);
+		if(!node){
+			log_w(MODULE, "Out-of-order component %i ignored for node %i",
+					c_id, node_id);
+			return;
+		}
+		if(!replicable(type)){
+			log_w(MODULE, "replicate:create_component: component type %s is"
+					" not one a server may create", type.ToString().CString());
+			return;
+		}
+		Component *c = scene->GetComponent(c_id);
+		if(!c || c->GetType() != type || c->GetNode() != node){
+			if(c)
+				c->Remove();
+			c = node->CreateComponent(type, magic::REPLICATED, c_id);
+			if(!c){
+				log_e(MODULE, "Could not create component %i", c_id);
+				return;
+			}
+		}
+		c->ReadDeltaUpdate(msg);
+		c->ApplyAttributes();
 	};
 
 	m_packet_handlers["replicate:latest_node_data"] =
@@ -1325,8 +1354,17 @@ void CState::setup_packet_handlers()
 	m_packet_handlers["replicate:component_delta_update"] =
 			[this](const ss_ &packet_name, const ss_ &data)
 	{
-		log_w(MODULE, "TODO: %s", cs(packet_name));
-		// Note: Network/Connection.cpp would NOT buffer this
+		magic::Scene *scene = m_app->get_scene();
+		magic::MemoryBuffer msg(data.c_str(), data.size());
+		uint c_id = msg.ReadNetID();
+		Component *c = scene->GetComponent(c_id);
+		if(c){
+			c->ReadDeltaUpdate(msg);
+			c->ApplyAttributes();
+		} else {
+			log_w(MODULE, "Out-of-order component data ignored for %i", c_id);
+			// Note: Network/Connection.cpp would NOT buffer this
+		}
 	};
 
 	m_packet_handlers["replicate:remove_node"] =

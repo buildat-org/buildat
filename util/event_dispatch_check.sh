@@ -2,7 +2,7 @@
 # tier: quick
 # cost: ~2s (2026-10-08)
 # covers: src/interface/event.h
-# [REWORK_FIXES]: EVENT_TYPE given no parameter throws "Missing parameter",
+# [REWORK_FIXES]: EVENT_TYPEN given no parameter throws "Missing parameter",
 # where it built the exception and dropped it, so the handler was skipped
 # without a word.
 #   util/event_dispatch_check.sh

@@ -45,7 +45,7 @@ struct Module: public interface::Module
 	void event(const Event::Type &type, const Event::Private *p)
 	{
 		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPE(m_EventType_test1_thing, on_thing, Thing)
+		EVENT_DISPATCH_TYPE(m_EventType_test1_thing, on_thing, Thing)
 		EVENT_TYPEN("network:client_connected", on_client_connected,
 				network::NewClient)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,

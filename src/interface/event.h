@@ -20,8 +20,6 @@
 					  "::" #handler " (expected " #param_type ")"); \
 		return; \
 	}
-#define EVENT_VOID EVENT_DISPATCH_VOID
-#define EVENT_TYPE EVENT_DISPATCH_TYPE
 // The name's type looked up once a site: the name is a literal, and a type
 // is never freed
 #define EVENT_VOIDN(name, handler) { \
