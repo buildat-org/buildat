@@ -172,11 +172,17 @@ void PacketStream::input(InputBuffer &socket_buffer,
 			if(f.count != count || !f.parts[index].empty())
 				continue;
 			f.bytes += data.size() - 11;
-			if(f.bytes > m_max_packet_bytes){
+			// All the unfinished ones together: eight of them each under
+			// the limit held eight times it ([SECURITY_RUN_5])
+			size_t all = 0;
+			for(const auto &pair : m_incoming_fragments)
+				all += pair.second.bytes;
+			if(all > m_max_packet_bytes){
 				m_incoming_fragments.erase(id);
 				throw UnknownPacketReceived("A fragmented "+fname+
 						" over the "+itos((int64_t)m_max_packet_bytes)+
-						" bytes this stream takes");
+						" bytes this stream takes, with the fragments "
+						"of the others unfinished");
 			}
 			f.parts[index] = data.substr(11);
 			f.have++;
@@ -366,6 +372,28 @@ static void self_check()
 		if(!refused)
 			throw Exception("packet_stream self_check: fragments over the "
 					"limit were taken");
+		// Two unfinished, each under the limit and over it together
+		PacketStream w5, r5;
+		r5.m_max_packet_bytes = PacketStream::FRAGMENT_BYTES * 3 + 100;
+		sv_<ss_> a5, c5;
+		w5.output("test:frag", ss_(PacketStream::FRAGMENT_BYTES * 3, 'a'),
+				[&](const ss_ &d, bool){ a5.push_back(d); }, true);
+		w5.output("test:frag", ss_(PacketStream::FRAGMENT_BYTES * 3, 'c'),
+				[&](const ss_ &d, bool){ c5.push_back(d); }, true);
+		InputBuffer b5;
+		for(size_t i = 0; i + 1 < a5.size(); i++)
+			b5.append(a5[i]);
+		for(size_t i = 0; i + 1 < c5.size(); i++)
+			b5.append(c5[i]);
+		refused = false;
+		try {
+			r5.input(b5, [&](const ss_&, const ss_&){});
+		} catch(UnknownPacketReceived &e){
+			refused = true;
+		}
+		if(!refused)
+			throw Exception("packet_stream self_check: unfinished fragments "
+					"over the limit together were taken");
 	}
 
 	// Past 127, which is where a signed char used to turn the type number in
