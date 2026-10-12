@@ -18,5 +18,11 @@ return function(ctx)
 		description = "Browse and install games from content.luanti.org",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "contentdb"}}
+		end},
+	-- On a save, not a tile ([SAVE_CONTEXT_MENU]): its worlds screen with
+	-- that world selected
+	{id = "world_options", label = "World options...", for_save = true,
+		run = function(save)
+			ctx.launch{app = "vanilla", params = {menu = "worlds", world = save}}
 		end}}
 end

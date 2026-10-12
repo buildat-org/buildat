@@ -1094,8 +1094,13 @@ struct Module: public interface::Module
 			ss_ menu = launch_param("menu");
 			if(menu == "worlds"){
 				ss_ game = launch_param("luanti_game");
+				// One world's options, from a launcher's menu on its save
+				// ([SAVE_CONTEXT_MENU])
+				ss_ world = launch_param("world");
 				if(game != "")
 					menu += ":"+game;
+				else if(is_world_name(world))
+					menu = "world:"+world;
 			}
 			if(menu != ""){
 				network::access(m_server, [&](network::Interface *inetwork){

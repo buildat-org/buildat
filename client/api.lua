@@ -291,6 +291,7 @@ end
 -- `ctx.launch` already ([LAUNCH_GRID]), so this is one step further
 -- out, not a new reach.
 local launch_runs = {}
+local save_runs = {} -- [SAVE_CONTEXT_MENU] key -> launch_grid.for_save's
 local launch_grid = dofile(__buildat_get_path("share") ..
 		"/client/launch_grid.lua")
 
@@ -401,6 +402,10 @@ buildat.safe.launch_actions = function()
 	launch_note_installed(actions)
 	local history = launch_history_read()
 	launch_runs = {}
+	save_runs = {}
+	for _, a in ipairs(launch_grid.for_save) do
+		save_runs["save_action/" .. a.app .. "/" .. a.id] = a
+	end
 	for i, a in ipairs(actions) do
 		local key = tostring(a.from) .. "/" .. tostring(a.id or i)
 		launch_runs[key] = a.run
@@ -421,12 +426,41 @@ buildat.safe.launch_actions = function()
 	end
 	return out
 end
--- launch(key): run one of them. The key is looked up in the table the
--- trusted side built, so a sandbox cannot name anything that is not on
--- the grid, and it never hands a function across.
-buildat.safe.launch = function(key)
+-- save_actions(app) -> what the app's launcher does to one of its saves
+-- ([SAVE_CONTEXT_MENU]): {{key, label, description}}, for launch(key,
+-- save); none of them a tile
+buildat.safe.save_actions = function(app)
+	if next(save_runs) == nil then
+		buildat.safe.launch_actions()
+	end
+	local out = {}
+	for key, a in pairs(save_runs) do
+		if a.app == app then
+			out[#out + 1] = {key = key, label = a.label,
+				description = a.description}
+		end
+	end
+	table.sort(out, function(x, y) return x.key < y.key end)
+	return out
+end
+-- launch(key[, save]): run one of them. The key is looked up in the table
+-- the trusted side built, so a sandbox cannot name anything that is not
+-- on the grid, and it never hands a function across. A save action's
+-- save is one list_saves(app) answers, as launch_save's.
+buildat.safe.launch = function(key, save)
 	if type(key) ~= "string" then
 		return false, "launch(key): a string from launch_actions()"
+	end
+	local sa = save_runs[key]
+	if sa then
+		for _, sv in ipairs(__buildat_list_saves(sa.app)) do
+			if sv.name == save then
+				sa.run(save)
+				return true
+			end
+		end
+		return false, "launch(" .. key .. "): no save " .. tostring(save) ..
+				" of " .. sa.app
 	end
 	local run = launch_runs[key]
 	if not run then

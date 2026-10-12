@@ -297,8 +297,14 @@ local function feedback_target(source)
 	return hearth_target(home, author, name, version, key)
 end
 
+-- [SAVE_CONTEXT_MENU] An app's actions on one of its saves, a launcher's
+-- `for_save = true`: {app, id, label, description, run(save)}, rebuilt
+-- with the tiles and none of them a tile
+M.for_save = {}
+
 function M.actions(log)
 	local out = {}
+	M.for_save = {}
 	local app_sizes = {}
 	for _, g in ipairs(buildat.list_apps() or {}) do
 		app_sizes[g.name] = tonumber(g.size)
@@ -417,6 +423,23 @@ function M.actions(log)
 			elseif a.id ~= nil and seen[a.id] then
 				log:warning("launcher "..from..": duplicate id "..
 						tostring(a.id).."; first wins")
+			elseif a.for_save then
+				-- simplified: an app's own (kind "app") only; an installed
+				-- release's saves are under its versioned name
+				if a.id ~= nil then seen[a.id] = true end
+				if source.kind == "app" then
+					local run = a.run
+					M.for_save[#M.for_save + 1] = {app = source.name,
+						id = tostring(a.id or i), label = a.label,
+						description = type(a.description) == "string" and
+								a.description or nil,
+						run = function(save)
+							local ok, err = pcall(run, save)
+							if not ok then
+								log:warning("launcher "..from..": "..tostring(err))
+							end
+						end}
+				end
 			else
 				if a.id ~= nil then seen[a.id] = true end
 				local icon = ICON_FALLBACK

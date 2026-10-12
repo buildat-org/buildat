@@ -79,6 +79,8 @@ buildat.sub_packet("main:menu", function(data)
 	local game = data:match("^worlds:(.+)$")
 	if data:match("^public") then
 		public = data
+	elseif data:match("^world:") then
+		M.world_wanted = data:sub(7)
 	elseif game then
 		menu_game = game
 		menu_wanted = nil
@@ -284,7 +286,11 @@ local running_world = ""
 local changed_worlds = {}
 buildat.sub_packet("main:running_world", function(data)
 	running_world = data
-	if not selected_save and data ~= "" then
+	-- [SAVE_CONTEXT_MENU] A launch for one world's options selects it
+	if M.world_wanted then
+		selected_save, M.world_wanted = M.world_wanted, nil
+		log:info("menu: the world " .. selected_save .. " selected for its options")
+	elseif not selected_save and data ~= "" then
 		selected_save = data
 		log:info("menu: the running world " .. data .. " selected")
 	end

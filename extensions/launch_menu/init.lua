@@ -348,10 +348,19 @@ local function gather()
 			local parent = app_label[sv.app] or sv.app
 			local last = math.max(sv.last_launched or 0, sv.modified and
 					math.floor(sv.modified / 1000000) or 0)
+			-- And the app's own actions on it ([SAVE_CONTEXT_MENU]): in its
+			-- panel and on a right click on its row
+			local actions = {}
+			for _, a in ipairs(api.save_actions(sv.app)) do
+				actions[#actions + 1] = {label = a.label, run = function()
+					stale = true
+					warn_if(api.launch(a.key, sv.name))
+				end}
+			end
 			add({label = sv.name, kind = "save", badge = parent,
 				icon = icon_of["app/" .. sv.app],
 				description = "Continue this save of " .. parent .. ".",
-				last = last > 0 and last or nil,
+				last = last > 0 and last or nil, actions = actions,
 				run = function()
 					warn_if(api.launch_save(sv.app, sv.name))
 				end})
@@ -518,6 +527,28 @@ local function spaced(query)
 end
 
 local browse, settings
+
+-- [SAVE_CONTEXT_MENU] An entry's actions at x, y: Continue and the app's
+-- own, and Cancel, which Escape and a press beside it are
+local function context_menu(e, x, y)
+	log:info("launch_menu: the actions of " .. e.label)
+	local root = uistack.main:push({desc = "the actions of " .. e.label})
+	local menu = ui_utils.vertical_menu(root)
+	for _, a in ipairs(e.actions) do
+		menu:add(a.label, function()
+			uistack.main:pop(root)
+			log:info("launch_menu: " .. a.label .. " on " .. e.label)
+			a.run()
+		end)
+	end
+	menu:add("Cancel", function() uistack.main:pop(root) end)
+	local w = menu.window
+	w:SetAlignment(HA_LEFT, magic.VA_TOP)
+	w:SetPosition(math.max(0, math.min(x, root.width - w.width)),
+			math.max(0, math.min(y, root.height - w.height)))
+end
+-- How long a finger is held on a save's row for its actions
+local LONG_PRESS_US = 600000
 
 local function home(query)
 	local t0 = api.get_time_us()
@@ -867,6 +898,50 @@ browse = function(kind, query, by, filter, focus_filter)
 		end
 	end)
 	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
+	-- [SAVE_CONTEXT_MENU] A save's actions by a right click on its row, or
+	-- a finger held on it. The click carries the UI's coordinates; a
+	-- touch's own are the screen's, so it only says that a finger is down.
+	if kind == "save" then
+		local function row_at(x, y)
+			for _, item in ipairs(items) do
+				local p, sz = item.button.screenPosition, item.button.size
+				if x >= p.x and y >= p.y and x < p.x + sz.x and y < p.y + sz.y then
+					return item
+				end
+			end
+			return nil
+		end
+		local touching, held, moved = false, nil, 0
+		root:SubscribeToStackEvent("TouchBegin", function()
+			touching, moved = true, 0
+		end)
+		root:SubscribeToStackEvent("TouchMove", function(_, d)
+			moved = moved + math.abs(d:GetInt("DX")) + math.abs(d:GetInt("DY"))
+			if moved > 20 then held = nil end
+		end)
+		root:SubscribeToStackEvent("TouchEnd", function()
+			touching, held = false, nil
+		end)
+		root:SubscribeToStackEvent("MouseButtonUp", function() held = nil end)
+		root:SubscribeToStackEvent("UIMouseClick", function(_, d)
+			local x, y = d:GetInt("X"), d:GetInt("Y")
+			local item = row_at(x, y)
+			if not item then return end
+			if d:GetInt("Button") == magic.MOUSEB_RIGHT then
+				context_menu(item.entry, x, y)
+			else
+				held = {item = item, x = x, y = y, us = api.get_time_us()}
+			end
+		end)
+		root:SubscribeToStackEvent("Update", function()
+			if held and touching and
+					api.get_time_us() - held.us >= LONG_PRESS_US then
+				local h = held
+				held = nil
+				context_menu(h.item.entry, h.x, h.y)
+			end
+		end)
+	end
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if not (selected and item) or item == current then return end
