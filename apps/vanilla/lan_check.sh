@@ -29,22 +29,29 @@ for i in $(seq 1 120); do
 	sleep 1
 done
 python3 - "$port" "$token" > "$out/client.log" 2>&1 <<'PY'
-import socket, subprocess, sys, time
+import socket, struct, subprocess, sys, time
 port, token = int(sys.argv[1]), sys.argv[2].encode()
 def listening():
     lines = subprocess.run(["ss", "-ltn"], capture_output=True,
             text=True).stdout.split("\n")
     return " ".join(l.split()[3] for l in lines[1:]
             if len(l.split()) > 3 and l.split()[3].endswith(":%d" % port))
+# [u16 type][u8 flags][u32 size]; the first packet each way is core:hello
+# (util/fuzz/proto_fuzz.py's)
 def packet(t, data):
-    return bytes([t & 255, t >> 8]) + len(data).to_bytes(4, "little") + data
+    return struct.pack("<HBI", t, 0, len(data)) + data
+def hello():
+    v = b"0.7.0"
+    body = b"\1" + struct.pack("<IIQ", 1, 1, len(v)) + v + \
+            struct.pack("<IQ", 2, 0)
+    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
 def define(t, name):
     n = name.encode()
     return packet(0, bytes([t & 255, t >> 8]) +
             len(n).to_bytes(4, "little") + n)
 def peer(send_token):
     s = socket.create_connection(("127.0.0.1", port))
-    out = define(100, "accounts:owner_token") + define(101, "accounts:open_lan")
+    out = hello() + define(100, "accounts:owner_token") + define(101, "accounts:open_lan")
     if send_token is not None:
         out += packet(100, send_token)
     s.sendall(out)

@@ -46,7 +46,7 @@ for w in Server "This client"; do
 done
 
 # The page's title field has the focus; the message field clicked
-client 'delay 5000\nclick Button "Help"\ndelay 2000
+client 'delay 5000\nkeypress Escape\ndelay 500\nclick Button "Help"\ndelay 2000
 click Button "New thread..."\ndelay 2000\ntext My title\ndelay 300
 mouse_pos 450 200\nmouse_click left\ndelay 300\ntext first line
 keypress Return\ntext second line\ndelay 2500\nquit\n' \

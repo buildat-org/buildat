@@ -97,7 +97,7 @@ hearth(){ # log requests commands [env...]
 hearth "$t/setup.log" '{"cmd":"new_topic","name":"Keys"}
 {"cmd":"new_thread","topic":1,"title":"Keys","body":"first"}' 'delay 6000\nquit\n'
 grep -aq '"id":1001,.*"ok":true' "$t/setup.log" || fail "the thread: $(grep -a 'hr: ' "$t/setup.log" | head -2)"
-m='delay 6000\ntext one two  x\nkeypress Backspace\nkeypress Return\ntext three four\ndelay 300\nevent scan m1\n'
+m='wait_log 20000 accounts: ntfy asked\ndelay 1500\nkeypress Escape\ndelay 500\nmouse_pos 290 180\nmouse_click left\ndelay 200\ntext one two  x\nkeypress Backspace\nkeypress Return\ntext three four\ndelay 300\nevent scan m1\n'
 m+="$(ctrl A)event scan m2\nmouse_pos 290 201\ndelay 300\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan m3\n"
 m+='keypress Home\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan m4\n'
 m+="$(ctrl Z)event scan m5\n"

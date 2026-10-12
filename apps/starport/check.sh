@@ -128,7 +128,7 @@ echo "ok: the reporter sees the report rejected"
 fleet=$(grep -o '"code":"[0-9a-f]*","description":"","id":"[0-9a-f]*"' \
 	"$tmp/cl.log" | head -1 | sed 's/"code":"\([0-9a-f]*\)".*"id":"\([0-9a-f]*\)"/\2:\1/')
 [ -n "$fleet" ] || fail "no fleet made (cl.log)"
-sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\", \"login\": \"both\"/" \
+sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\", \"ids\": \"anyone\"/" \
 	"$tmp/an/apps/floorplanner/starport.json" \
 	> "$tmp/an2/apps/floorplanner/starport.json"
 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \

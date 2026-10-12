@@ -71,7 +71,7 @@ text: after'
 grep -aq "Lua runtime error" "$t/view.log" && fail "a Lua error in the view"
 
 # 3. "Code block" in the reply field, Ctrl+Enter sends
-client "$t/reply.log" "" 'delay 6000\ntext see:\ndelay 200\nclick Button "Code block"\ndelay 300\ntext ls -l\ndelay 200\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\ndelay 2000\nquit\n' \
+client "$t/reply.log" "" 'delay 6000\nkeypress Escape\ndelay 500\nmouse_pos 450 325\nmouse_click left\ndelay 200\ntext see:\ndelay 200\nclick Button "Code block"\ndelay 300\ntext ls -l\ndelay 200\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\ndelay 2000\nquit\n' \
 	BUILDAT_HEARTH_OPEN=1
 curl -s "http://127.0.0.1:$P/t/1" > "$t/page"
 grep -qPz '<p>see:</p>\n<pre><code>ls -l\n</code></pre>' "$t/page" ||
