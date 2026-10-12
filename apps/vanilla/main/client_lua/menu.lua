@@ -279,6 +279,9 @@ local panel = nil
 -- [WORLDS_SELECTED] The world the server runs ("" for none), said before
 -- each save list: the screen opens with it selected
 local running_world = ""
+-- [WORLD_RELOAD_APPLY] The worlds whose options this menu has sent: the
+-- running one, changed, is reloaded by its Play
+local changed_worlds = {}
 buildat.sub_packet("main:running_world", function(data)
 	running_world = data
 	if not selected_save and data ~= "" then
@@ -396,11 +399,16 @@ function draw(saves, save_games)
 		buildat.send_packet("main:save_info",
 				cereal.binary_output({name}, {"array", "string"}))
 	end
+	-- Play, or what it does to the running world when it was changed
+	local function play_label()
+		return M.back and not public and selected_save == running_world and
+				changed_worlds[selected_save] and "Reload world to apply" or "Play"
+	end
 	local function play(name)
 		-- [PAUSE_WORLDS_LOCAL] Over a launcher's running game: the running
 		-- world is the game again, another one the launcher's to open
 		if M.back and not public then
-			if name == running_world then
+			if name == running_world and not changed_worlds[name] then
 				done = true
 				close()
 				M.back()
@@ -573,6 +581,8 @@ function draw(saves, save_games)
 				end
 				local f = panel.flags
 				f[key] = not f[key]
+				changed_worlds[selected_save] = true
+				panel.play:GetChild("ButtonText"):SetText(play_label())
 				buildat.send_packet("main:set_world_flags",
 						cereal.binary_output({selected_save,
 						f.creative_mode and "true" or "false",
@@ -626,7 +636,7 @@ function draw(saves, save_games)
 						cereal.binary_output({selected_save}, {"array", "string"}))
 			end
 		end, fit(420))
-		button_on(menu, right, "Play", function()
+		panel.play = button_on(menu, right, play_label(), function()
 			if selected_save then
 				play(selected_save)
 			end
@@ -1496,6 +1506,7 @@ local function draw_game_settings(flat, perf)
 				out[#out + 1] = v
 			end
 			waiting("Saving the settings of " .. save .. "...")
+			changed_worlds[save] = true
 			buildat.send_packet(perf and "main:set_perf_settings" or
 					"main:set_game_settings",
 					cereal.binary_output(out, {"array", "string"}))
@@ -1539,6 +1550,7 @@ local function draw_world_mods(flat)
 			"world starts. It is Lua that runs on the server.")
 	local function send(name, packet, on)
 		waiting("Saving...")
+		changed_worlds[save] = true
 		buildat.send_packet(packet, cereal.binary_output({save, name, on},
 				{"array", "string"}))
 	end
@@ -1652,6 +1664,7 @@ local function draw_world_txp(flat)
 			"override.txt is not applied.")
 	local function send(packet, name)
 		waiting("Saving...")
+		changed_worlds[save] = true
 		buildat.send_packet(packet, cereal.binary_output({save, name},
 				{"array", "string"}))
 	end
