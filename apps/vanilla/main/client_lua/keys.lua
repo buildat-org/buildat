@@ -10,8 +10,6 @@
 -- declare_keys), the player's for every server. Key names are Urho3D's;
 -- the mouse's buttons and wheel are not bindable.
 local magic = require("buildat/extension/urho3d")
-local uistack = require("buildat/extension/uistack")
-local ui_utils = require("buildat/extension/ui_utils")
 local cereal = require("buildat/extension/cereal")
 local log = buildat.Logger("vanilla/keys")
 
@@ -164,22 +162,6 @@ function M.own_rows(list)
 		out[#out + 1] = row
 	end
 	return out
-end
-
-local function save()
-	editor.store(nil, M.BINDINGS, bindable)
-end
-
--- The editor is the one both clients share, luanti_client/res/key_editor.lua,
--- served by the module as luanti/key_editor.lua; on_back is what the back
--- row does: the settings screen, or the pause menu
-function M.draw(on_back)
-	if editor == nil then
-		return nil
-	end
-	return editor.draw{magic = magic, uistack = uistack, ui_utils = ui_utils,
-			bindings = M.BINDINGS, bindable = bindable, save = save,
-			on_back = on_back}
 end
 
 return M

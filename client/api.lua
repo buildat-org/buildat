@@ -923,18 +923,6 @@ buildat.safe.offer_playtest = function(o)
 	end)
 	return true
 end
--- discussed_server() -> {name, address, subject, title} or nil, once: the
--- Hearth's side of the above, for a Hearth from before discussed()
-buildat.safe.discussed_server = function()
-	local f = feedback
-	if not (f and f.server) then
-		return nil
-	end
-	feedback = nil
-	local s = f.server
-	return {name = s.name, address = s.address, subject = s.subject,
-		title = s.title}
-end
 
 -- **The overlay's Discuss in a game** ([OVERLAY_DISCUSS]): the server
 -- and the game, whichever are known, and the Hearth offers the choice.
