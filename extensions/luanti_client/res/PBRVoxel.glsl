@@ -868,7 +868,11 @@ void PS()
         #elif defined(SPOTLIGHT)
             atten = GetAttenSpot(normal, vWorldPos.xyz, lightDir);
         #else
-            atten = GetAttenPoint(normal, vWorldPos.xyz, lightDir);
+            // The light's ramp texture, not GetAttenPoint's fixed curve
+            // (a quarter at the middle, gone well before the range): the
+            // held and placed lights' ramp is the baked lamp term's own
+            // falloff ([WIELD_LIGHT_LOOK], res/light_ramp.png)
+            atten = GetDiffuse(normal, vWorldPos.xyz, lightDir);
         #endif
 
         float shadow = 1.0;

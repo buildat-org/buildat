@@ -10,5 +10,5 @@
     <pass name="litalpha" vs="luanti_client/res/VoxelUnlitShadow"
             ps="luanti_client/res/VoxelUnlitShadow"
             vsdefines="TRANSLUCENT" psdefines="TRANSLUCENT"
-            depthwrite="false" blend="multiply" cull="none" />
+            depthwrite="false" blend="premulalpha" cull="none" />
 </technique>

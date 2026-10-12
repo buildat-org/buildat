@@ -5,7 +5,9 @@
      additive light pass instead, which is what a game with point lights in an
      unlit world wants. This one is the parity path: official Luanti with its
      dynamic shadows on darkens what the sun cannot see and leaves the rest of
-     the baked light alone, and an additive pass cannot do that. See
+     the baked light alone, and an additive pass cannot do that. A point
+     light (a held torch) adds through the same pass: premulalpha, see
+     VoxelUnlitShadow.glsl ([WIELD_LIGHT_LOOK]). See
      [NON_PBR], "Which path owes parity", in doc/plan/rendering_plan.md.
 
      The shadow pass is what makes this geometry cast into the map as well as
@@ -14,6 +16,6 @@
     <pass name="base" />
     <pass name="light" vs="luanti_client/res/VoxelUnlitShadow"
             ps="luanti_client/res/VoxelUnlitShadow"
-            depthtest="equal" depthwrite="false" blend="multiply" />
+            depthtest="equal" depthwrite="false" blend="premulalpha" />
     <pass name="shadow" vs="Shadow" ps="Shadow" />
 </technique>

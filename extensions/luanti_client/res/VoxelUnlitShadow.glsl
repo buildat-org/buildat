@@ -14,14 +14,20 @@
 // It runs as the technique's light pass, once per light in the scene. The
 // Luanti launcher puts two there, the sun and the moon, and only one of them
 // is ever enabled -- whichever is above the horizon -- so nothing is darkened
-// twice. A game that adds point lights to an unlit world wants
-// res/VoxelUnlit.xml instead, whose light pass adds rather than multiplies.
+// twice.
+//
+// **And a point light adds** ([WIELD_LIGHT_LOOK]: a held torch). One pass
+// has one blend, so it is premultiplied alpha, src + dst * (1 - src.a): the
+// sun writes no colour and its darkening as the alpha, 1 - k, which leaves
+// dst * k as the multiply did; a point light writes its light as the
+// colour and 0 as the alpha, which adds it as LitSolid's pass would.
 
 #include "Uniforms.glsl"
 #include "Samplers.glsl"
 #include "Transform.glsl"
 #include "ScreenPos.glsl"
 #include "Lighting.glsl"
+#include "Fog.glsl"
 
 varying vec4 vWorldPos;
 varying vec3 vNormal;
@@ -32,9 +38,7 @@ varying vec3 vNormal;
 // shadowed, the bed's is left. simplified: the bed's share under a
 // shadowed water is still darkened a little (1 - a of the way), which a
 // second render target would avoid.
-#ifdef TRANSLUCENT
-    varying vec2 vTexCoord;
-#endif
+varying vec2 vTexCoord;
 #ifdef PERPIXEL
     #ifdef SHADOW
         #ifndef GL_ES
@@ -59,9 +63,7 @@ void VS()
     gl_Position = GetClipPos(worldPos);
     vNormal = GetWorldNormal(modelMatrix);
     vWorldPos = vec4(worldPos, GetDepth(gl_Position));
-    #ifdef TRANSLUCENT
-        vTexCoord = iTexCoord;
-    #endif
+    vTexCoord = iTexCoord;
     #ifdef PERPIXEL
         #ifdef SHADOW
             vec4 projWorldPos = vec4(worldPos, 1.0);
@@ -73,6 +75,18 @@ void VS()
 
 void PS()
 {
+    #if defined(PERPIXEL) && !defined(DIRLIGHT)
+        vec4 diffColor = cMatDiffColor * texture2D(sDiffMap, vTexCoord);
+        vec3 lightDir;
+        float diff = GetDiffuse(normalize(vNormal), vWorldPos.xyz, lightDir);
+        vec3 lit = diffColor.rgb * cLightColor.rgb * diff *
+                GetFogFactor(vWorldPos.w);
+        #ifdef TRANSLUCENT
+            lit *= diffColor.a;
+        #endif
+        gl_FragColor = vec4(lit, 0.0);
+        return;
+    #endif
     float k = 1.0;
     #if defined(PERPIXEL) && defined(SHADOW)
         k = GetShadow(vShadowPos, vWorldPos.w);
@@ -90,5 +104,5 @@ void PS()
     #ifdef TRANSLUCENT
         k = mix(1.0, k, texture2D(sDiffMap, vTexCoord).a);
     #endif
-    gl_FragColor = vec4(k, k, k, 1.0);
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0 - k);
 }
