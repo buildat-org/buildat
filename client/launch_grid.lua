@@ -75,17 +75,17 @@ local function menu_actions()
 	}
 	-- [AITTA_REVIEW]: where the filters (under Starport's lock) hide
 	-- unreviewed content, the tile lists reviewed releases only
-	local ok, starport = pcall(require, "buildat/extension/starport")
-	if ok and type(starport) == "table" then
+	local ok, aitta = pcall(require, "buildat/extension/aitta")
+	if ok and type(aitta) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil and
 					"Play apps others made that run in the browser" or
 					"Install apps others made: " ..
-					(starport.safe.aitta_shown() and "reviewed or not" or
+					(aitta.safe.aitta_shown() and "reviewed or not" or
 					"reviewed ones") .. ", each in the server's sandbox",
 			-- "Discuss" on a release: its home Hearth, at the package's place
-			run = function() starport.safe.open_aitta(function(rel)
+			run = function() aitta.safe.open_aitta(function(rel)
 				local home = hearth_target(rel.home_hearth,
 						tostring(rel.author), tostring(rel.name),
 						tostring(rel.version), tostring(rel.key))
@@ -386,15 +386,15 @@ function M.actions(log)
 			local aitta = (read(".aitta_from") or ""):match("^(https?://%S+)")
 			local author, name, version = source.name:gsub("^review:", ""):
 					match("^([%w_]+)%.([%w_]+)@(.+)$")
-			local ok, starport = pcall(require, "buildat/extension/starport")
-			if aitta and author and ok and type(starport) == "table" then
+			local ok, aitta_ext = pcall(require, "buildat/extension/aitta")
+			if aitta and author and ok and type(aitta_ext) == "table" then
 				actions[#actions + 1] = {id = "report",
 					label = tostring(actions[1].label) .. " " .. version ..
 							": report...",
 					description = "Report this release to " .. aitta,
 					category = "action",
 					run = function()
-						starport.report_release(aitta, author .. "/" .. name ..
+						aitta_ext.report_release(aitta, author .. "/" .. name ..
 								"/" .. version)
 					end}
 			end

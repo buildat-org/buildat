@@ -7,14 +7,14 @@
 -- settings screen, opened by the menu= param. The games' tiles and the
 -- import tiles are builtin/luanti's, one per installed game.
 return function(ctx)
-	return {{id = "settings", label = "Luanti settings", icon = "luanti.png",
+	return {{id = "settings", label = "Luanti settings", icon = "grass_block.png",
 		order = 192,
 		description = "The render mode, the view, the keys",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "settings"}}
 		end},
 	-- ContentDB's games, fetched and installed by the server ([CONTENTDB])
-	{id = "contentdb", label = "ContentDB", icon = "luanti.png", order = 193,
+	{id = "contentdb", label = "ContentDB", icon = "grass_block.png", order = 193,
 		description = "Browse and install games from content.luanti.org",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "contentdb"}}

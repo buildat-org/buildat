@@ -275,7 +275,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	end
 	local root = uistack.main:push({desc="network permission dialog"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "launch_menu/res/main_style.xml")
+			"XMLFile", "ui_utils/res/style.xml")
 	-- Over whatever a server draws (a join window is at 100): the user has
 	-- to see what they are asked
 	root.priority = 1000
@@ -389,7 +389,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 	back = back or magic.ui.focusElement
 	local root = uistack.main:push({desc="file picker"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "launch_menu/res/main_style.xml")
+			"XMLFile", "ui_utils/res/style.xml")
 	root.priority = 1000
 	local width = math.min(560, magic.ui.root.width - 40)
 	local menu = ui_utils.vertical_menu(root, {min_width = width})

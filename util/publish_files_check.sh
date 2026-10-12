@@ -1,13 +1,14 @@
 #!/bin/bash
 # tier: full
 # cost: 30s (2026-10-09)
-# covers: client/extensions/starport/publish.lua
+# covers: client/extensions/aitta/publish.lua
 # [PUBLISH_FILES]: the publish page's "Goes in" files, every one, a line
 # each, in a list the wheel scrolls. A copy of Genvaders with 50 more files
 # in a scratch user directory, its page 2, the wheel a page at a time:
-# every file is read inside the list in some scan (a scan leaves out what
-# is below the screen), the last one at the end, and Pack and publish is
-# under the list in the window. Screenshots in $t (KEEP_TMP=1 keeps it).
+# every file but aitta_page/ (which pack leaves out) is read inside the list
+# in some scan (a scan leaves out what is below the screen), the last one
+# at the end, and Pack and publish is under the list in the window.
+# Screenshots in $t (KEEP_TMP=1 keeps it).
 #
 #   util/publish_files_check.sh
 set -u
@@ -24,7 +25,7 @@ cp -r "$here/user/dev_apps/genvaders" "$a" 2>/dev/null ||
 rm -rf "$a/.git"
 mkdir -p "$a/many"
 for i in $(seq -w 1 50); do echo x > "$a/many/f$i.txt"; done
-want=$(cd "$a" && find . -type f ! -path '*/.*' | wc -l)
+want=$(cd "$a" && find . -type f ! -path '*/.*' ! -path './aitta_page/*' | wc -l)
 # A page of the list at a time: 4 wheel clicks of 44 px are its 8 rows
 cat > "$t/p.cmds" <<C
 delay 4000
@@ -47,13 +48,13 @@ timeout 90 bin/buildat -o launch_ui=launch_menu -w 1100x900 -l 3 \
 grep -aq "Command sequence complete" "$t/log" ||
 	fail "the drive ($(grep -a "Command seq\|rror" "$t/log" | tail -2))"
 # The list: 8 rows of 22 px from where the first file is before a scroll
-first=$(cd "$a" && find . -type f ! -path '*/.*' | sed 's|^\./||' | LC_ALL=C sort | head -1)
+first=$(cd "$a" && find . -type f ! -path '*/.*' ! -path './aitta_page/*' | sed 's|^\./||' | LC_ALL=C sort | head -1)
 top=$(awk -v s="text \"$first\"" '/^scan scan: ui +Text at/ && index($0, s){split($6, p, ","); print p[2]; exit}' "$t/log")
 [ -n "$top" ] || fail "no row for $first"
 # Every name seen inside the list in some scan
 seen=$(awk -v top="$top" '/^scan scan: ui +Text at/{split($6, p, ",")
 	if(p[2] >= top && p[2] < top + 8 * 22){sub(/.*text "/, ""); sub(/"$/, ""); print}}' "$t/log" | LC_ALL=C sort -u)
-missing=$(cd "$a" && find . -type f ! -path '*/.*' | sed 's|^\./||' | LC_ALL=C sort | LC_ALL=C comm -23 - <(echo "$seen" | LC_ALL=C sort))
+missing=$(cd "$a" && find . -type f ! -path '*/.*' ! -path './aitta_page/*' | sed 's|^\./||' | LC_ALL=C sort | LC_ALL=C comm -23 - <(echo "$seen" | LC_ALL=C sort))
 [ -z "$missing" ] || fail "not read in the list: $(echo $missing | head -c 300)"
 # The last scan's last file, inside the list
 last=$(awk '/^scan scan: ui +Text at .* text "many\/f50.txt"/{split($6, p, ","); y = p[2]} END{print y}' "$t/log")

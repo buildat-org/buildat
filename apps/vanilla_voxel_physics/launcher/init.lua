@@ -20,7 +20,7 @@ return function(ctx)
 		return {}
 	end
 	return {{id = "voxel_physics", label = "Voxel physics sample",
-		icon = "luanti.png", order = 150,
+		icon = "grass_block.png", order = 150,
 		description = "vanilla with undermine's voxel physics, on " .. game,
 		run = function()
 			ctx.launch{app = "vanilla_voxel_physics",

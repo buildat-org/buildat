@@ -80,7 +80,7 @@ function M.draw(o)
 	local root = uistack.main:push({desc = "key bindings"})
 	-- Over a game's HUD, such as the Luanti hotbar (priority 10)
 	root.priority = 100
-	root.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(10, 10, 10, 10))

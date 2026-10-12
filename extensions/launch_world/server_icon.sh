@@ -23,7 +23,7 @@ trap 'kill $srv $sp $an 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" ||
 fail(){ echo "FAIL: $*"; exit 1; }
 P=29881
 mkdir -p "$t/srv/apps/digger" "$t/cl"
-cp "$here/apps/vanilla/launcher/luanti.png" "$t/srv/apps/digger/server_icon.png"
+cp "$here/apps/vanilla/launcher/grass_block.png" "$t/srv/apps/digger/server_icon.png"
 cd "$here/Build"
 bin/buildat_server -m ../apps/digger -D "$t/srv" -P $P -l 3 > "$t/srv.log" 2>&1 &
 srv=$!
@@ -88,7 +88,7 @@ list | grep -q "\"icon\":\"$isha\"" ||
 	fail "the listing has no icon ($(list | head -c 300); $(grep -a "Starport\|icon" "$t/an.log" | tail -2))"
 curl -s -m 5 "127.0.0.1:$SP/api/icon/$isha" | sha256sum | grep -q "^$isha" ||
 	fail "/api/icon does not serve it"
-big=$(od -An -v -tx1 "$here/apps/vanilla/launcher/luanti.png" | tr -d ' \n')
+big=$(od -An -v -tx1 "$here/apps/vanilla/launcher/grass_block.png" | tr -d ' \n')
 curl -s -m 5 -X POST "127.0.0.1:$SP/api/announce" -d "{\"port\": 1, \"unlisted\": true,
 	\"kind\": \"app\", \"audience\": \"everyone\", \"access\": \"open\",
 	\"icon\": \"$big\"}" | grep -q '"error":"icon: ' ||

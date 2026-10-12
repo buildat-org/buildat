@@ -98,7 +98,7 @@ end
 
 function show_stuff()
 	local root = ui_stack:push({desc="uitest root"})
-	root.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	root.defaultStyle = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()

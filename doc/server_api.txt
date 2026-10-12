@@ -332,10 +332,10 @@ both is the variant's, and the variant is its own app everywhere else
 (its tile, its saves). apps/vanilla_voxel_physics is one.
 
 builtin/main_context/api.h -- main_context::Interface: the server-side
-Urho3D context and its scenes. get_context(), create_scene() ->
+Magic context and its scenes. get_context(), create_scene() ->
 SceneReference (an opaque pointer every scene-taking module uses),
 find_scene(name), check_scene, delete_scene (SceneDeleted event),
-sub_magic_event(scene, event, ...) for a scene's Urho3D events.
+sub_magic_event(scene, event, ...) for a scene's Magic events.
 
 builtin/network/api.h -- network::Interface: send(peer, name, data),
 list_peers(), set_send_policy(policy, max_queue_bytes, grace_us) --

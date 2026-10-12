@@ -242,11 +242,10 @@ escapes ("\u{...}", "\x41", "\z"; write the UTF-8 character or a decimal
 byte escape). A native build checks both (luac51 -p and
 util/lua51_escapes.cmake) and fails at the file and line.
 
-Urho3D
-------
-Urho3D's namespace should generally be aliased to be "magic".
-
-The bundled copy is patched. See urho3d_fork.txt before updating it.
+Magic
+-----
+The engine is Magic, Buildat's fork of Urho3D 1.7.1 (magic.txt); code names
+it `magic`, not Urho3D. See magic.txt before patching it.
 
 
 Menu screens

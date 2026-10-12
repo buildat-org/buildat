@@ -744,7 +744,7 @@ local function check_compose_image()
 	-- alpha channel, and the vendored copy is patched to report the channel
 	-- count the buffer then has -- without that patch the image is read at
 	-- the wrong stride and comes out as coloured stripes. See
-	-- doc/urho3d_fork.txt.
+	-- doc/magic.txt.
 	local trns = compose("trns", {ops = {
 		{op = "blit", src = "luanti_client/res/trns_test.png"},
 	}})

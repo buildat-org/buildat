@@ -12,10 +12,12 @@ local FM_NOTFOCUSABLE, HA_CENTER, HA_LEFT, HA_RIGHT, KEY_DOWN,
 	magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
 local dump = buildat.dump
 local uistack = require("buildat/extension/uistack")
+-- res/style.xml is all of buildat's UI's style, its atlas res/style.png
+-- drawn by util/style_atlas.py
 local M = {safe = {}}
 
 -- **The menus' colours** ([MENU_BRAND], c_quiet, src/interface/web_brand.h):
--- what a menu colours by hand rather than through main_style.xml. Numbers,
+-- what a menu colours by hand rather than through res/style.xml. Numbers,
 -- not Colors -- a sandbox's property takes only its own -- and through a
 -- function, as the sandbox's view of a table unpacks as empty:
 -- magic.Color(ui_utils.rgb("error")). text, dim and focus are the style's.
@@ -925,7 +927,7 @@ function M.safe.vertical_menu(root, options)
 	-- has its own style keeps it.
 	if not root.defaultStyle then
 		root.defaultStyle = magic.cache:GetResource("XMLFile",
-				options.style or "launch_menu/res/main_style.xml")
+				options.style or "ui_utils/res/style.xml")
 	end
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
@@ -1315,7 +1317,7 @@ local message_handle = nil
 -- **One dropdown for every choice of one** ([UI_DROPDOWN], user
 -- 2026-10-09), launch_menu's filter's look: the "▼" at its right end,
 -- the row under the pointer highlighted and the chosen one less
--- (main_style.xml's button and button-line greys). choices are
+-- (style.xml's button and button-line greys). choices are
 -- {label, value} (a plain string is both), current a value;
 -- on_choose(value, index) on a pick of another. options: width (the
 -- longest choice's, at least min_width), height (28), label (a text
@@ -1650,7 +1652,7 @@ end
 
 function M.safe.show_notice(text, copy, color)
 	local t = magic.ui.root:CreateChild("UIElement")
-	t.defaultStyle = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	t.defaultStyle = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 	t:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
 	t:SetAlignment(HA_CENTER, VA_TOP)
 	t:SetPosition(0, 40 + 28 * #notices)
@@ -1713,7 +1715,7 @@ end
 function M.safe.menu_button(parent, before, opts)
 	local box = parent:CreateChild("UIElement")
 	box.defaultStyle = magic.cache:GetResource("XMLFile",
-			"launch_menu/res/main_style.xml")
+			"ui_utils/res/style.xml")
 	box:SetAlignment(HA_RIGHT, magic.VA_BOTTOM)
 	box:SetFixedSize(80, 30)
 	box:SetPosition(-10, -10)
@@ -1769,7 +1771,7 @@ function M.safe.show_message_dialog(message, on_close, copy)
 
 	local root = uistack.main:push({desc="show_message_dialog"})
 
-	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -1870,7 +1872,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 		root.priority = options.priority
 	end
 
-	local style = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	local style = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -1948,7 +1950,7 @@ function M.safe.show_notification(text, duration_s)
 
 	local window = magic.ui.root:CreateChild("Window")
 	window.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "launch_menu/res/main_style.xml")
+			"XMLFile", "ui_utils/res/style.xml")
 	window:SetStyleAuto()
 	window:SetName("show_notification window")
 	window:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))

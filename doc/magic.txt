@@ -1,8 +1,10 @@
-The bundled Urho3D, and how it differs from upstream
-====================================================
-3rdparty/Urho3D is official Urho3D 1.7.1 with the changes below. They are not
-upstream and will not survive an update of the bundled copy unless carried
-over. Keep this list current when patching further.
+Magic
+=====
+Magic is Buildat's fork of Urho3D 1.7.1 (MIT), in 3rdparty/Urho3D. Scripts
+reach it as `magic` (Lua) and C++ as `namespace magic`; the engine's own
+namespace, include paths and CMake targets are still Urho3D's. Below is what
+it carries that Urho3D 1.7.1 does not. Keep this list current when patching
+further.
 
 "git log -- 3rdparty/Urho3D" is the authoritative history; the commit hashes
 here are where to read the actual diff.

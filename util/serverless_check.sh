@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-10)
-# covers: src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/extensions/starport/init.lua extensions/launch_menu/screens.lua
+# covers: src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua extensions/launch_menu/screens.lua
 # [SERVERLESS_PLAY]: an app's client half with no server, natively, by
 # BUILDAT_RUN. A small app (client_main, a texture in client_data):
 #   1. As dev:sl: buildat.serverless() true, a packet sent twice said

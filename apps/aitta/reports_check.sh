@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 90s (2026-10-09)
-# covers: apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua client/extensions/starport/init.lua client/launch_grid.lua
+# covers: apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua client/launch_grid.lua
 # [AITTA_REPORTS]: a local Aitta with its admin, a second moderator (mod2)
 # and an author (author1, bound to tester); tester/pk and tester/pk2
 # published, pk installed on a launcher.

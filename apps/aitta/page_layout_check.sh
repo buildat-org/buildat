@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-10)
-# covers: client/extensions/starport/init.lua
+# covers: client/extensions/aitta/init.lua
 # [AITTA_PAGE_LAYOUT]: a local Aitta with 14 packages, more than fit, one
 # with a long name and description. The launcher's "Apps from Aitta":
 #   1. Every package is a row; the wheel over the list reaches the last;
@@ -95,6 +95,10 @@ for l in sys.stdin:
 			win = (x, y, x + w, y + h)
 			if x < 0 or y < 0 or x + w > frame[0] or y + h > frame[1]:
 				bad.append("the window " + str(win) + " in " + str(frame))
+		continue
+	# The close glyph sits on the corner of the window, its text box over
+	# the edge ([CLOSE_GLYPH])
+	if "text \"×\"" in l:
 		continue
 	if depth <= 7 and w and h and (x < win[0] - 1 or y < win[1] - 1 or
 			x + w > win[2] + 1 or y + h > win[3] + 1):

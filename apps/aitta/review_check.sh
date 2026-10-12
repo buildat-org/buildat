@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 70s (2026-10-09)
-# covers: apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua client/extensions/starport/init.lua client/launch_grid.lua src/client/app_lua.h src/impl/aitta.cpp
+# covers: apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua client/launch_grid.lua src/client/app_lua.h src/impl/aitta.cpp
 # [AITTA_REVIEW]: a local Aitta with an admin (a reviewer) and a plain
 # account; tester/pt (apps/minigame) published as 1.0.0, 1.0.1 (a file
 # changed, one added) and 1.0.2.

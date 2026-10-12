@@ -100,7 +100,7 @@ local room = api.run_extension_file("room.lua")
 -- trusted side, where it is looked up rather than called across.
 local GAMES, FLOOR_ACTIONS = {}, {}
 -- **An icon two things share is not a mark** (2026-09-24): the Luanti
--- launcher gives every entry it offers `icon = "luanti.png"`, so
+-- launcher gives every entry it offers `icon = "grass_block.png"`, so
 -- VoxeLibre, devtest, realtest, "Import a Luanti game" and twenty more all
 -- drew the same picture -- and a mark's whole job is to tell one orb
 -- from another. Counted here and read where the mark is made: an icon
@@ -1567,7 +1567,7 @@ local function mark_texture(mark, icon, one_bit, invert, slot)
 	-- **The grid's fallback is not a mark, and neither is an icon two
 	-- things share.** `launch_grid` hands out `buildat_logo.png` for
 	-- anything whose launcher names no icon, and the Luanti launcher
-	-- hands out `luanti.png` for every game it offers -- one picture
+	-- hands out `grass_block.png` for every game it offers -- one picture
 	-- worn by twenty-three orbs. A picture generated from the name
 	-- tells them apart, which is the whole job of a mark.
 	if icon == "buildat_logo.png" or shared_icons[icon] then

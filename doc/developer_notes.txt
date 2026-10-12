@@ -1,18 +1,18 @@
 Developer notes
 ===============
 Small things worth knowing when working on the engine itself. Conventions
-are in conventions.txt; the bundled Urho3D's patches in urho3d_fork.txt.
+are in conventions.txt; Magic's changes to Urho3D in magic.txt.
 
-Urho3D: scene replication
--------------------------
+Magic: scene replication
+------------------------
 Always pass LOCAL or REPLICATED as the CreateMode to Node::CreateChild() and
 Node::CreateComponent(). Leaving it to the default causes wrong replication
 at a point far from the call.
 
-Urho3D: the "magic" alias
--------------------------
-Urho3D's namespace is aliased to "magic" in buildat's C++ and Lua; a
-symbol named magic.X is Urho3D::X.
+Magic and Urho3D
+----------------
+Magic is the fork's name (magic.txt); inside it the namespace is still
+Urho3D's, so magic.X in Lua and magic::X in C++ is Urho3D::X.
 
 Profiling the client under callgrind
 ------------------------------------

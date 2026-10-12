@@ -10,13 +10,13 @@
 return function(ctx)
 	local out = {
 		{id = "connect", label = "Join a Luanti server",
-			icon = "luanti.png", order = 20, network = "Luanti",
+			icon = "grass_block.png", order = 20, network = "Luanti",
 			description = "By its address, or from Luanti's server list",
 			run = function() ctx.launch{extension = "luanti_client"} end},
 		-- The client's own settings ([EXT_SETTINGS]): a trusted screen on
 		-- the stack, no server behind it
 		{id = "settings", label = "Luanti client settings",
-			icon = "luanti.png", order = 191,
+			icon = "grass_block.png", order = 191,
 			description = "Render mode, view range, view bobbing, name",
 			run = function()
 				ctx.launch{extension = "luanti_client", params = {menu = "settings"}}
@@ -32,7 +32,7 @@ return function(ctx)
 		if address and a.accepted then
 			out[#out + 1] = {
 				id = "s_" .. address:gsub("[^%w%.%-]", "_"),
-				label = address, icon = "luanti.png", category = "server",
+				label = address, icon = "grass_block.png", category = "server",
 				network = "Luanti",
 				order = 290,
 				description = address .. (a.name ~= "" and "   as " ..

@@ -865,7 +865,7 @@ end
 -- **A reviewer's playtest** ([AITTA_REVIEW]): offer_playtest{release =
 -- "author/name/version", ticket =, sha256 =}, from an Aitta's review page,
 -- leaves to the launcher, which asks the player in its own dialog
--- (client/extensions/starport playtest()) before it fetches the release by
+-- (client/extensions/aitta playtest()) before it fetches the release by
 -- the ticket from the Aitta this client is on and installs it apart. The
 -- page only offers: nothing is installed without the yes. -> true, or
 -- false and why
@@ -896,7 +896,7 @@ buildat.safe.offer_playtest = function(o)
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		magic.UnsubscribeFromEvent("Update", sub)
-		require("buildat/extension/starport").playtest(offer, function(app)
+		require("buildat/extension/aitta").playtest(offer, function(app)
 			launch_grid.screens().start_local_app(app, "")
 		end)
 	end)
@@ -1590,10 +1590,10 @@ buildat.serverless_play = function(id)
 end
 -- BUILDAT_RUN, from src/client/app.cpp once the launch UI is up: an app id
 -- as list_apps() names it played at once, or <author>/<name> from the
--- Aittas (client/extensions/starport)
+-- Aittas (client/extensions/aitta)
 function __buildat_run_serverless(what)
 	if what:match("^[%w_]+/[%w_]+$") then
-		require("buildat/extension/starport").run_serverless(what)
+		require("buildat/extension/aitta").run_serverless(what)
 		return
 	end
 	local ok, why = buildat.serverless_play(what)

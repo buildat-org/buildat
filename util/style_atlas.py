@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# [MENU_BRAND]: draws extensions/launch_menu/res/main_style.png in c_quiet
+# [MENU_BRAND]: draws extensions/ui_utils/res/style.png in c_quiet
 # (src/interface/web_brand.h) over the cells of the old grey atlas.
-# Cells main_style.xml names get their own fill and border; the rest (arrows,
+# Cells style.xml names get their own fill and border; the rest (arrows,
 # toolbar, cursors) keep their shapes, their greys tinted toward the brand's.
 # Run from the repository root; it rewrites the PNG in place.
 from PIL import Image, ImageDraw
 
-PATH = "extensions/launch_menu/res/main_style.png"
+PATH = "extensions/ui_utils/res/style.png"
 FIELD = (21, 21, 26)       # #15151a
 PANEL = (35, 35, 44)       # #23232c
 LINE = (58, 58, 72)        # #3a3a48

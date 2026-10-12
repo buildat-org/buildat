@@ -156,7 +156,7 @@ Luanti with buildat bolted to the side.
                         `lua builtin/luanti/lua/test.lua`.
 
 Lua 5.1 comes with io and os, so reading files, splitting paths and running
-chunks all happen in Lua. The Lua itself is Urho3D's, which buildat_server
+chunks all happen in Lua. The Lua itself is Magic's, which buildat_server
 already links; the module needs no build step of its own, which the plan
 expected it to.
 

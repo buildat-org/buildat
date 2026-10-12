@@ -1161,7 +1161,7 @@ magic.ui:SetFocusElement(nil)
 
 -- The chat's
 local CHAT_STYLE = magic.cache:GetResource("XMLFile",
-		"launch_menu/res/main_style.xml")
+		"ui_utils/res/style.xml")
 -- [LOAD_SHOWN]: said again every 0.5 s ([LOADING_STRIPES]), with the
 -- whole seconds, so that the line changes while the server sends nothing
 -- **And what comes** ([JOIN_PROGRESS], user 2026-10-11: "0 of 125" stood

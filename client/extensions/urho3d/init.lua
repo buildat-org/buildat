@@ -1181,7 +1181,7 @@ local function rebuild_web_rows(hearths, sp)
 		local r = ui.root:CreateChild("UIElement")
 		r:SetName("__trusted_hidden_id_" .. #id_rows + 1)
 		r.defaultStyle = cache:GetResource("XMLFile",
-				"launch_menu/res/main_style.xml")
+				"ui_utils/res/style.xml")
 		r.priority = 2001
 		r:SetLayout(LM_HORIZONTAL, 8, IntRect(0, 0, 0, 0))
 		r:SetAlignment(HA_RIGHT, VA_TOP)
@@ -1331,7 +1331,7 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 		trust_sample = ui.root:CreateChild("UIElement")
 		trust_sample:SetName("__trusted_hidden_trust_color")
 		trust_sample.defaultStyle = cache:GetResource("XMLFile",
-				"launch_menu/res/main_style.xml")
+				"ui_utils/res/style.xml")
 		trust_sample:SetLayout(LM_HORIZONTAL, 6, IntRect(0, 0, 0, 0))
 		trust_sample:SetAlignment(HA_RIGHT, VA_TOP)
 		trust_sample:SetPosition(-8, 8)

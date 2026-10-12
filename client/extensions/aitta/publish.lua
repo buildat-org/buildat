@@ -1,4 +1,4 @@
--- Buildat: client/extensions/starport/publish.lua
+-- Buildat: client/extensions/aitta/publish.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -449,8 +449,8 @@ page_publish = function(message)
 				local sub
 				sub = magic.SubscribeToEvent("Update", function()
 					magic.UnsubscribeFromEvent("Update", sub)
-					if #M.logged_in_ids() > 0 then
-						M.join_with_id(address)
+					if #h.starport.logged_in_ids() > 0 then
+						h.starport.join_with_id(address)
 					else
 						buildat.safe.join_server(address)
 					end

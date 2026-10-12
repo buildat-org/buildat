@@ -20,7 +20,7 @@ return function(ctx)
 			-- own size** ([LAUNCH_API]): without the category these
 			-- twenty-two were "an action with no opinion" and a launch UI
 			-- could not tell VoxeLibre from "Import a Luanti world", and without
-			-- the icon they all drew luanti.png, which the room's mark
+			-- the icon they all drew grass_block.png, which the room's mark
 			-- rule reads as no icon at all. g.icon is already resolved --
 			-- the game's menu/icon.png, copied under the cache and
 			-- namespaced by family and name -- so it is passed through
@@ -28,7 +28,7 @@ return function(ctx)
 			-- directory.
 			out[#out + 1] = {
 				id = name, label = PRETTY[name] or name,
-				icon = g.icon or "luanti.png",
+				icon = g.icon or "grass_block.png",
 				resolved_icon = g.icon ~= nil,
 				category = "game", significance = g.size,
 				description = "Luanti game " .. name, order = 100 + i,
@@ -48,13 +48,13 @@ return function(ctx)
 	-- shows the families apart -- the room puts tools on its terminal --
 	-- had no way to tell these from a game without reading their names.
 	out[#out + 1] = {id = "import_game", label = "Import a Luanti game",
-		icon = "luanti.png", order = 190, category = "tool",
+		icon = "grass_block.png", order = 190, category = "tool",
 		description = "Copy a game from a Luanti installation",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "import_game"}}
 		end}
 	out[#out + 1] = {id = "import_world", label = "Import a Luanti world",
-		icon = "luanti.png", order = 191, category = "tool",
+		icon = "grass_block.png", order = 191, category = "tool",
 		description = "Copy a world from a Luanti installation",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "import_world"}}

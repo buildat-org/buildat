@@ -9,7 +9,7 @@ local log = buildat.Logger("floorplanner")
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 
-local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+local STYLE = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 magic.ui.root.defaultStyle = STYLE
 -- Light enough to load again by itself when a phone's browser dropped it in
 -- the background (src/client/web/index.html)

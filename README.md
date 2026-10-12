@@ -73,8 +73,8 @@ Further reading:
   ID: what is opt-in, and what a Starport holds
 * [doc/hearth.txt](doc/hearth.txt) -- apps/hearth, a forum: its HTML
   face, the client's requests, its limits, its variables and its check
-* [doc/urho3d_fork.txt](doc/urho3d_fork.txt) -- what the bundled Urho3D
-  carries that upstream does not
+* [doc/magic.txt](doc/magic.txt) -- Magic, Buildat's fork of Urho3D 1.7.1:
+  what it carries that Urho3D does not
 * [doc/developer_notes.txt](doc/developer_notes.txt) -- small things worth
   knowing when working on the engine
 * [doc/whynot.txt](doc/whynot.txt) -- decisions against, and why
@@ -85,7 +85,7 @@ Buildat Linux How-To
 Install dependencies
 ----------------------
 
-	$ # A compiler and cmake, plus the X, sound and GL headers Urho3D needs
+	$ # A compiler and cmake, plus the X, sound and GL headers Magic needs
 	$ sudo apt-get install build-essential cmake \
 	        libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
 	        libcurl4-openssl-dev
@@ -99,7 +99,8 @@ compiles app modules as it loads them. It looks for `c++` in PATH.
 Build
 -------
 
-Urho3D 1.7.1 is bundled in `3rdparty/Urho3D` and is configured/built as part of
+Magic, Buildat's fork of Urho3D 1.7.1 (doc/magic.txt), is bundled in
+`3rdparty/Urho3D` and is configured/built as part of
 this project (shared library, Lua, safe Lua). `-DURHO3D_LIB_TYPE=SHARED` is
 required for the module interface.
 

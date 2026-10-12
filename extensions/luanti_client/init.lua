@@ -358,7 +358,7 @@ local function show_client(host, port, name, password, mode, origin)
 	-- Held rather than read back off the element: the sandbox hands out no
 	-- resource it did not just wrap
 	local style = magic.cache:GetResource(
-			"XMLFile", "launch_menu/res/main_style.xml")
+			"XMLFile", "ui_utils/res/style.xml")
 	root.defaultStyle = style
 
 	-- Text in the top left corner rather than a window: the world is behind
@@ -3812,7 +3812,7 @@ end
 show_connect_dialog = function(address, name)
 	local root = uistack.main:push({desc="luanti_client connect"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "launch_menu/res/main_style.xml")
+			"XMLFile", "ui_utils/res/style.xml")
 
 	-- **launch_menu's Servers layout** (playtest, 2026-10-07): a
 	-- title, the source and the filter, the list, and beside it the

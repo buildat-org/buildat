@@ -52,7 +52,7 @@ local THRESHOLD = 20
 -- How far the stick is pushed for the full speed: Luanti's button size,
 -- 65 at a density of 1
 local STICK = 65
-local STYLE = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+local STYLE = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 
 return function(o)
 	local T = {held = {}, dig = false, yaw = 0, pitch = 0, sensitivity = 0.2}

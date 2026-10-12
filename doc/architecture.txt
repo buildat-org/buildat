@@ -8,7 +8,7 @@ A small engine and platform for networked 3D apps and games. License: Apache 2.0
 
 Client
 ------
-Built using Urho3D.
+Built using Magic, Buildat's fork of Urho3D (magic.txt).
 
 Module code is transfered from the server and run in a safe Lua sandbox.
 
@@ -31,7 +31,7 @@ element is drawn under the client's own dialogs.
 
 Server
 ------
-Built using C++, with suitable parts from Urho3D, with most functionality in
+Built using C++, with suitable parts from Magic, with most functionality in
 runtime-compiled C++ modules.
 
 Module structure

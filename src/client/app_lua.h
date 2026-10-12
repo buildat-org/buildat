@@ -377,7 +377,7 @@
 	}
 
 	// **The publish screen's file work** ([AITTA_PUBLISH_UI]), trusted
-	// only (client/extensions/starport/publish.lua). aitta_dev(op, ...):
+	// only (client/extensions/aitta/publish.lua). aitta_dev(op, ...):
 	//   "list"                  {{name, kind, path}} of <user>/dev_apps
 	//   "new", name, kind       a minimal app or extension there -> its
 	//                           path, or nil and why

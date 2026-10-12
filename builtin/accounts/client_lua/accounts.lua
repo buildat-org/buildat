@@ -217,7 +217,7 @@ local function page_window(width, top)
 	-- Its own style, for a game whose root has none (vanilla's world); what
 	-- is in it finds the style through it
 	w.defaultStyle = magic.cache:GetResource("XMLFile",
-			"launch_menu/res/main_style.xml")
+			"ui_utils/res/style.xml")
 	w:SetStyleAuto()
 	-- Over a game's HUD, such as the Luanti hotbar (priority 10)
 	w.priority = 100
@@ -3393,7 +3393,7 @@ show_account_button = function()
 	local b = magic.ui.root:CreateChild("Button")
 	-- Its own style, like page_window, for a game whose root has none
 	b.defaultStyle = magic.cache:GetResource("XMLFile",
-			"launch_menu/res/main_style.xml")
+			"ui_utils/res/style.xml")
 	b:SetStyleAuto()
 	b.minHeight = 28
 	b.priority = 100

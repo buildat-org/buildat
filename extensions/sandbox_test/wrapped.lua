@@ -138,7 +138,7 @@ end
 -- XMLElement (2026-09-25): a document out of the resource cache walked
 -- -- the root, its children, an attribute and a number
 do
-	local f = magic.cache:GetResource("XMLFile", "launch_menu/res/main_style.xml")
+	local f = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 	assert(f, "the style file is in the cache")
 	local root = f:GetRoot()
 	assert(root:NotNull() and not root:IsNull(), "the root is there")
