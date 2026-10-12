@@ -7,7 +7,8 @@
 # listed on two Starports (a Starport is its host name: 127.0.0.1 and
 # localhost), accounts erin and finn (finn with TOTP, the RFC
 # 6238 test secret), IDs made by the Starports' API; scripted clients:
-#   - erin's ID logs in: refused, the name taken;
+#   - erin's ID logs in: refused, the name taken; an ID named client42
+#     refused, the name a client's placeholder;
 #   - erin with a wrong password and the ID: refused, nothing linked;
 #   - erin with the password and the ID: joined, linked; the ID alone then
 #     joins as erin; the admin's password with erin's ID: refused, the ID
@@ -96,7 +97,7 @@ PY
 hearth "$t/h2.log"
 # The IDs' tokens: erin's and finn's on the first Starport, erin's on the
 # second
-read -r tok_a tok_c tok_b < <(python3 - "$SP1" "$SP2" "$t/h/apps/hearth/starport_claim.txt" <<'PY'
+read -r tok_a tok_c tok_b tok_d < <(python3 - "$SP1" "$SP2" "$t/h/apps/hearth/starport_claim.txt" <<'PY'
 import json, sys, time, urllib.request
 by = {l.split()[0]: l.split()[2] for l in open(sys.argv[3]) if l.strip() and not l.startswith("#")}
 ids = [by["http://127.0.0.1:" + sys.argv[1]], by["http://localhost:" + sys.argv[2]]]
@@ -105,7 +106,8 @@ def call(sp, w, **k):
             (sp, w), json.dumps(k).encode()).read())
 out = []
 for sp, listing, user, name in ((sys.argv[1], ids[0], "ida", "erin"),
-        (sys.argv[1], ids[0], "idc", "finn"), (sys.argv[2], ids[1], "idb", "erin")):
+        (sys.argv[1], ids[0], "idc", "finn"), (sys.argv[2], ids[1], "idb", "erin"),
+        (sys.argv[1], ids[0], "idd", "client42")):
     r = call(sp, "register", name=user, password="secret1",
             birth_year=time.gmtime().tm_year - 40)
     assert r["ok"], r
@@ -115,9 +117,12 @@ for sp, listing, user, name in ((sys.argv[1], ids[0], "ida", "erin"),
 print(" ".join(out))
 PY
 )
-[ -n "${tok_b:-}" ] || fail "the IDs' tokens ($t/h/apps/hearth/starport_claim.txt)"
+[ -n "${tok_d:-}" ] || fail "the IDs' tokens ($t/h/apps/hearth/starport_claim.txt)"
 join id_a BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a "Login refused: The name erin is taken on this server"
+# [SECURITY_RUN_5] A client's placeholder name is no ID's account either
+join id_d BUILDAT_HEARTH_STARPORT=$tok_d
+has id_d 'Login refused: "client42" is kept for a client'
 join wrong BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=wrongpass1 \
 	BUILDAT_HEARTH_STARPORT=$tok_a
 has wrong "Login refused: Wrong password"

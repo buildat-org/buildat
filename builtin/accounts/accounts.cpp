@@ -1807,6 +1807,10 @@ struct Module: public interface::Module, public Interface
 					return refused("This Starport ID's account here is gone; "
 							"ask an admin");
 			} else {
+				if(reserved_name(name))
+					return refused("\""+name+"\" is kept for a client that "
+							"has not logged in: pick another name for this "
+							"community on the Starport");
 				if(exists(name))
 					return refused("The name "+name+" is taken on this server "
 							"by an account of its own: pick another for "

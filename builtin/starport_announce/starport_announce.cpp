@@ -805,11 +805,13 @@ struct Module: public interface::Module, public Interface
 
 	// -- [STARPORT] 10c
 
-	// The host of a Starport's url
+	// The host of a Starport's url; an IPv6 literal whole, brackets and all
 	static ss_ host_of(const ss_ &url)
 	{
 		const size_t s = url.find("://");
 		ss_ host = s == ss_::npos ? url : url.substr(s + 3);
+		if(!host.empty() && host[0] == '[')
+			return host.substr(0, host.find(']') + 1);
 		return host.substr(0, host.find_first_of(":/"));
 	}
 
