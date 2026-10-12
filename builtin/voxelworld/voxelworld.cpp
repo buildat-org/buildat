@@ -22,6 +22,7 @@
 #include "interface/os.h"
 #include "interface/fs.h"
 #include "interface/server_config.h"
+#include "interface/compress.h"
 #include <cstring>
 #include <set>
 #include <PolyVoxCore/RawVolume.h>
@@ -277,6 +278,8 @@ struct CInstance: public voxelworld::Instance
 
 	// Clients that are ready to receive things (by peer id)
 	set_<int> m_clients_initialized;
+	// [REGISTRY_FILE] Whether the registry's file has been served yet
+	bool m_registry_served = false;
 
 	// Accessing any of these outside of Server::access_scene is disallowed
 	sp_<interface::AtlasRegistry> m_atlas_reg;
@@ -1146,13 +1149,44 @@ struct CInstance: public voxelworld::Instance
 			ar(m_chunk_size_voxels);
 			ar(m_section_size_chunks);
 		}
+		// The registry is a file of client_file's ([REGISTRY_FILE]): cached
+		// by its hash, so a join that has it transfers none of it
+		// (VoxeLibre's is 30 MB). The script that reads it waits for the
+		// files still coming, and ready waits for the script: nothing is
+		// meshed before the registry is in.
+		serve_voxel_registry();
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "voxelworld:init", os.str());
-			inetwork->send(peer, "voxelworld:voxel_registry",
-					m_voxel_reg->serialize());
+			inetwork->send(peer, "core:run_script", REGISTRY_SCRIPT);
 			inetwork->send(peer, "voxelworld:ready", "");
 		});
 		m_clients_initialized.insert(peer);
+	}
+
+	static constexpr const char *REGISTRY_FILE = "voxelworld/voxel_registry.bin";
+	static constexpr const char *REGISTRY_SCRIPT =
+			"require(\"buildat/module/voxelworld\").registry_from_file()";
+
+	// The file served again when the registry changed; false when it had
+	// not. Replacing it announces it to every connected client.
+	bool serve_voxel_registry()
+	{
+		if(m_registry_served && !m_voxel_reg->is_dirty())
+			return false;
+		m_voxel_reg->clear_dirty();
+		const ss_ data = m_voxel_reg->serialize();
+		client_file::access(m_server, [&](client_file::Interface *ifile){
+			ifile->add_file_content(REGISTRY_FILE, data);
+		});
+		if(!m_registry_served){
+			std::ostringstream os(std::ios::binary);
+			interface::compress_zstd(data, os);
+			log_i(MODULE, "The voxel registry served as %s: %zu bytes, "
+					"%zu with zstd", REGISTRY_FILE, data.size(),
+					os.str().size());
+		}
+		m_registry_served = true;
+		return true;
 	}
 
 	void unload_node(Scene *scene, uint node_id)
@@ -1176,23 +1210,20 @@ struct CInstance: public voxelworld::Instance
 		n->Remove();
 	}
 
+	// A changed registry's file to the joined clients, read again as it
+	// arrives ([REGISTRY_FILE]). With nobody joined it waits for the next
+	// join: a client in the menu would fetch every version of a game's
+	// loading.
+	// NOTE: This probably really only supports additions
 	void send_voxel_registry_if_dirty()
 	{
-		// Send updated voxel registry if needed
-		// NOTE: This probably really only supports additions
-		if(m_voxel_reg->is_dirty()){
-			m_voxel_reg->clear_dirty();
-			log_v(MODULE, "Sending updated voxel registry to peers");
-
-			ss_ voxel_reg_data = m_voxel_reg->serialize();
-
-			network::access(m_server, [&](network::Interface *inetwork){
-				for(auto &peer: m_clients_initialized){
-					inetwork->send(peer, "voxelworld:voxel_registry",
-							voxel_reg_data);
-				}
-			});
-		}
+		if(m_clients_initialized.empty() || !serve_voxel_registry())
+			return;
+		log_v(MODULE, "Sending updated voxel registry to peers");
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &peer: m_clients_initialized)
+				inetwork->send(peer, "core:run_script", REGISTRY_SCRIPT);
+		});
 	}
 
 	// Get section if exists

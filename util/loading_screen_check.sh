@@ -12,14 +12,15 @@
 #      the picture and one taller ([LOADING_PIC_FIT]): covered and
 #      centred, not stretched, and the UI scale while it shows the one
 #      after it;
-#   2. a join over a link of 300 KB/s (util/netsim.py): the screenshot is
+#   2. a join over a link of 300 KB/s (util/netsim.py), stopped for 8 s
+#      at the first "load: last" line: the screenshot is
 #      the chosen picture, covered and centred; W held and the mouse moved
 #      while it shows move nothing (F5's place and yaw); the line has no
 #      "N of M" and the screen ends at the player's own chunk, well before
 #      its 60 s after the first ([LOAD_OWN_CHUNK]); after "load: the world is in", W or A walks;
 #   3. the minimal game, which has no menu/: the dark colour alone;
 #   4. [LOADING_STRIPES]: in 2's screenshot at a "load: last" line, and
-#      in 4, a join over the 3 MB/s link stopped for 25 s at its first
+#      in 4, a join over the 300 KB/s link stopped for 25 s at its first
 #      line: two full-width stripes of the brand page colour round a
 #      line-high gap in the middle, the second 1.5 times as tall; the line
 #      amber on the first, the glyph white and the name cyan on the
@@ -117,7 +118,9 @@ python3 "$here/util/netsim.py" --listen "$FAST" --to "127.0.0.1:$SERVER_PORT" \
 CHECK_PIDS+=($!)
 sleep 1
 for WIN in 1000x450 900x600; do
-	printf 'wait_log 120000 load: the picture\ndelay 500\nscreenshot %s\nwait_log 300000 load: the world is in\ndelay 1500\nquit\n' \
+	# Soon: the screen ends well under a second after the picture since
+	# [REGISTRY_FILE]
+	printf 'wait_log 120000 load: the picture\ndelay 100\nscreenshot %s\nwait_log 300000 load: the world is in\ndelay 1500\nquit\n' \
 		"$t/1_$WIN.png" > "$t/1_$WIN.cmds"
 	WIN=$WIN client "$t/1_$WIN.log" -s "127.0.0.1:$FAST" -c @"$t/1_$WIN.cmds"
 	pic=$(grep -aoP "vanilla : load: the picture \K\S+(?=,)" "$t/1_$WIN.log" | head -1)
@@ -142,10 +145,9 @@ python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 CHECK_PIDS+=($!)
 sleep 1
 cat > "$t/2.cmds" <<C
-wait_log 120000 load: the picture
-delay 300
-screenshot $t/screen.png
-wait_log 120000 load: Loading the world
+wait_log 120000 load: last
+delay 200
+screenshot $t/last.png
 keypress F5
 mouse_pos 400 225
 keydown W
@@ -157,9 +159,9 @@ keyup W
 keypress F5
 keypress F5
 keypress F5
-wait_log 300000 load: last
-delay 200
-screenshot $t/last.png
+wait_log 120000 load: the picture
+delay 100
+screenshot $t/screen.png
 wait_log 300000 load: the world is in
 delay 1500
 screenshot $t/world.png
@@ -175,7 +177,17 @@ keypress F5
 delay 500
 quit
 C
+# Since [REGISTRY_FILE] the world can be in half a second after the
+# picture: the link stopped at the first line, the picture still coming,
+# keeps the screen up for the stripes and the keys; a stop once the
+# picture shows is too late, what follows it already in the socket
+linkpid=$(pgrep -f "[n]etsim.py --listen $LINK ")
+[ -n "$linkpid" ] || fail "the 300 KB/s link is not there"
+( until grep -aq "vanilla : load: last " "$t/2.log" 2>/dev/null; do sleep 0.1; done
+	kill -STOP $linkpid; sleep 8; kill -CONT $linkpid ) &
+CHECK_PIDS+=($!)
 client "$t/2.log" -s "127.0.0.1:$LINK" -c @"$t/2.cmds"
+kill -CONT $linkpid 2>/dev/null
 grep -a "vanilla : load: \|loading picture" "$t/2.log" "$t/srv.log" | sed 's/.*: load: /load: /;s/.*I main *: //' | sed -n '1,4p;$p'
 python3 "$t/stripes.py" "$t/last.png" || fail "the stripes ($t/last.png)"
 python3 - "$t" "$G/menu" <<'PY' || fail "the loading screen ($t/2.log)"
@@ -219,16 +231,19 @@ assert abs(c[0] - b[0]) + abs(c[2] - b[2]) > 1, "W and A did not walk after the 
 # chunk, well before the 60 s
 lines = [l for l in log if "vanilla : load: Loading the world" in l]
 assert lines and not [l for l in lines if " of " in l], lines[:3]
-# From the voxel registry, 30 MB that at 300 KB/s comes in long after the
-# first chunks and before which nothing is meshed: 10 s seen (2026-10-12)
+# From the voxel registry, before which nothing is meshed, or the picture,
+# the later: the registry is a cached file since [REGISTRY_FILE]. After
+# the picture, up to 3 MB of the game's palettes, texmods and object
+# properties (10 s at this rate) before the own chunk
 def secs(l):
     h, m, x = l.split()[2].split(":")
     return int(h) * 3600 + int(m) * 60 + float(x)
-reg = [secs(l) for l in log if "voxelwor: the voxel registry," in l]
+reg = [secs(l) for l in log if "voxelwor: the voxel registry" in l]
 assert reg, "no voxel registry"
-took = secs(log[end]) - reg[0]
-print("the screen ended %.1f s after the voxel registry came" % took)
-assert took < 20, "the screen stood %.1f s after the voxel registry came" % took
+shown = [secs(l) for l in log if "vanilla : load: the picture" in l]
+took = secs(log[end]) - max(reg[0], shown[0])
+print("the screen ended %.1f s after the voxel registry and the picture came" % took)
+assert took < 20, "the screen stood %.1f s after the registry and the picture" % took
 # [LOADING_STRIPES] A line every 0.5 s
 ts = [secs(l) for l in log if "vanilla : load: last " in l]
 gaps = sorted(b - a for a, b in zip(ts, ts[1:]))
@@ -261,21 +276,22 @@ print("the dark colour on %.0f%% of the screen" % (dark * 100))
 assert dark > 0.8
 PY
 
-# 4: the 3 MB/s link stopped for 25 s at the first line, 5 s short of the
-# client's own leave
-fastpid=$(pgrep -f "[n]etsim.py --listen $FAST ")
-[ -n "$fastpid" ] || fail "the 3 MB/s link is gone"
+# 4: the 300 KB/s link stopped for 25 s at the first line, 5 s short of
+# the client's own leave. Not the 3 MB/s one since [REGISTRY_FILE]: with a
+# warm cache all up to the own chunk is in the socket by the first line.
+linkpid=$(pgrep -f "[n]etsim.py --listen $LINK ")
+[ -n "$linkpid" ] || fail "the 300 KB/s link is gone"
 cat > "$t/4.cmds" <<C
 wait_log 120000 Waiting for the server... 20 s
 screenshot $t/stall.png
 wait_log 300000 load: the world is in
 quit
 C
-( until grep -aq "vanilla : load: last " "$t/4.log" 2>/dev/null; do sleep 0.1; done
-	kill -STOP $fastpid; sleep 25; kill -CONT $fastpid ) &
+( until grep -aq "vanilla : load: Loading the world" "$t/4.log" 2>/dev/null; do sleep 0.1; done
+	kill -STOP $linkpid; sleep 25; kill -CONT $linkpid ) &
 CHECK_PIDS+=($!)
-client "$t/4.log" -s "127.0.0.1:$FAST" -c @"$t/4.cmds"
-kill -CONT $fastpid 2>/dev/null
+client "$t/4.log" -s "127.0.0.1:$LINK" -c @"$t/4.cmds"
+kill -CONT $linkpid 2>/dev/null
 grep -aq "vanilla : load: the world is in" "$t/4.log" ||
 	fail "the world not in after the stop ($t/4.log)"
 grep -aq "Leave offered" "$t/4.log" && fail "Leave offered ($t/4.log)"

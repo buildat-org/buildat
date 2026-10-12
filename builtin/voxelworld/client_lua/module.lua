@@ -257,11 +257,23 @@ buildat.sub_packet("voxelworld:init", function(data)
 			M.streaming_allowed and tostring(math.floor(M.send_distance)) or "0")
 end)
 
+-- simplified: kept for a server from before [REGISTRY_FILE], which sends
+-- the registry as this packet; drop it with the next engine_api
 buildat.sub_packet("voxelworld:voxel_registry", function(data)
 	voxel_reg:deserialize(data)
 	-- Nothing is meshed before it: what a slow join waits on first
 	log:info(string.format("the voxel registry, %d bytes", #data))
 end)
+
+-- [REGISTRY_FILE] The registry from the file the server serves, by the
+-- server's run_script: at join, ahead of voxelworld:ready, and again when
+-- it changes. The script runs once the file is in.
+function M.registry_from_file()
+	local data = buildat.get_file_content("voxelworld/voxel_registry.bin")
+	voxel_reg:deserialize(data)
+	log:info(string.format("the voxel registry from the served file, %d bytes",
+			#data))
+end
 
 buildat.sub_packet("voxelworld:ready", function(data)
 	sub_events()

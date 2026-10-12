@@ -4,9 +4,10 @@
 # covers: src/impl/packet_stream.cpp src/client/state.cpp src/client/app_lua.h apps/vanilla/main/client_lua/init.lua
 # [LOAD_IN_FLIGHT]: the loading screen's second stripe says what is
 # arriving when nothing has been whole for half a second.
-#   1. Vanilla on VoxeLibre over a 3 MB/s link (util/netsim.py): "load:
-#      last flight voxelworld:voxel_registry" lines with its bytes growing,
-#      and lines of what is whole again after them.
+#   1. Vanilla on VoxeLibre over a 300 KB/s link (util/netsim.py): "load:
+#      last flight <packet>" lines, the first packet's bytes growing (the
+#      loading picture, 1 MB, 2026-10-12), and lines of what is whole again
+#      after them.
 #   2. The minimal game, joined directly: no flight line.
 # simplified: native only; the web's socket feeds the same buffer
 # (state.cpp's read_socket()).
@@ -37,23 +38,26 @@ client(){ run_client 60 "$1" timeout 400 "$here/Build/bin/buildat" -C "$t/$2.c" 
 serve mineclone2 vl
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
-	--delay 0 --rate 24000 > "$t/netsim.log" 2>&1 &
+	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
 CHECK_PIDS+=($!)
 sleep 1
 client "$t/vl.log" vl "127.0.0.1:$LINK"
 grep -aq "load: the world is in" "$t/vl.log" || fail "VoxeLibre not loaded ($t/vl.log)"
 grep -a "vanilla : load: last" "$t/vl.log" | sed 's/.*load: last //' | uniq -c | cut -c1-120 | head -20
-python3 - "$t/vl.log" <<'PY' || fail "the registry in flight ($t/vl.log)"
+python3 - "$t/vl.log" <<'PY' || fail "the packet in flight ($t/vl.log)"
 import re, sys
 lines = [l.split("load: last ", 1)[1].strip()
          for l in open(sys.argv[1], errors="replace") if "vanilla : load: last " in l]
-reg = [(i, float(m.group(1))) for i, l in enumerate(lines)
-       for m in [re.match(r"flight voxelworld:voxel_registry  ([0-9.]+) of", l)] if m]
-assert len(reg) >= 2, "%d registry lines" % len(reg)
-mb = [v for _, v in reg]
+fl = [(i, m.group(1), float(m.group(2))) for i, l in enumerate(lines)
+      for m in [re.match(r"flight (\S+)  ([0-9.]+) of", l)] if m]
+assert fl, "no flight line"
+name = fl[0][1]
+one = [(i, v) for i, n, v in fl if n == name]
+assert len(one) >= 2, "%d lines of %s" % (len(one), name)
+mb = [v for _, v in one]
 assert mb == sorted(mb) and mb[-1] > mb[0], "not growing: %s" % mb
-assert any(not l.startswith("flight") for l in lines[reg[-1][0] + 1:]), "nothing whole after it"
-print("ok: the registry in flight on %d lines, %.1f to %.1f MB" % (len(mb), mb[0], mb[-1]))
+assert any(not l.startswith("flight") for l in lines[one[-1][0] + 1:]), "nothing whole after it"
+print("ok: %s in flight on %d lines, %.2f to %.2f MB" % (name, len(mb), mb[0], mb[-1]))
 PY
 
 # 2.
