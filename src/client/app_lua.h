@@ -2163,9 +2163,13 @@
 		// image stayed, and the launcher's grid came up over the last
 		// frame of the world: driven, the picture two seconds after the
 		// leave was the same picture, to the pixel.
-		self->drop_preferred_texture();
+		// The renderer's own viewports go too ([LEAVE_VIEWPORTS],
+		// 2026-10-12): at a render scale of 1 they are set on the renderer
+		// directly, and the left game's scene went on being drawn under
+		// the menu, frozen. The n == 0 apply drops the texture as well.
 		self->m_preferred_viewports.clear();
 		self->m_preferred_rects.clear();
+		self->apply_preferred_viewports();
 		self->forget_game_ui();
 		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_reset_sandbox");
 		if(lua_isfunction(L, -1))
