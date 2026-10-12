@@ -831,10 +831,11 @@ struct Module: public interface::Module, public Interface
 				account.has("admin");
 	}
 
+	// An unreadable record too: its name is not free ([SEC_ACCOUNT_UNREADABLE])
 	bool exists(const ss_ &name)
 	{
-		Account account;
-		return !name.empty() && get_account(name, account);
+		ss_ data;
+		return !name.empty() && m_store && m_store->get("auth/"+name, data);
 	}
 
 	bool check_kept(const ss_ &name, const ss_ &token)
@@ -1216,8 +1217,12 @@ struct Module: public interface::Module, public Interface
 		for(const ss_ &key : m_store->list("ban/")){
 			ss_ data;
 			Ban b;
-			if(m_store->get(key, data) && unpack(data, b))
+			// An unreadable one is listed too: it is in force
+			if(m_store->get(key, data)){
+				if(!unpack(data, b))
+					b = Ban();
 				out.push_back(std::make_pair(key.substr(4), b.address));
+			}
 		}
 		return out;
 	}
@@ -1247,11 +1252,26 @@ struct Module: public interface::Module, public Interface
 
 	// Accounts
 
+	// False for a record that does not decode as for none; exists() and
+	// unreadable() tell them apart
 	bool get_account(const ss_ &name, Account &account)
 	{
 		ss_ data;
-		return m_store && m_store->get("auth/"+name, data) &&
-				unpack(data, account);
+		if(!(m_store && m_store->get("auth/"+name, data)))
+			return false;
+		if(unpack(data, account))
+			return true;
+		log_e(MODULE, "auth/%s does not decode; refused and kept as it is",
+				cs(name));
+		return false;
+	}
+
+	// [SEC_ACCOUNT_UNREADABLE]: there but not decoded (another build's
+	// record): never written over as a free name
+	bool unreadable(const ss_ &name)
+	{
+		Account account;
+		return exists(name) && !get_account(name, account);
 	}
 
 	void set_account(const ss_ &name, const Account &account)
@@ -1387,7 +1407,11 @@ struct Module: public interface::Module, public Interface
 		int n = 0;
 		for(const ss_ &key : m_store->list("auth/")){
 			Account account;
-			if(get_account(key.substr(5), account) && account.has("admin"))
+			// One unreadable may be an admin's: counted, so that its server
+			// is not taken as having none and given to the next local
+			// login or setup code ([SEC_ACCOUNT_UNREADABLE]); is_admin()
+			// of it is false
+			if(!get_account(key.substr(5), account) || account.has("admin"))
 				n++;
 		}
 		return n;
@@ -1785,6 +1809,9 @@ struct Module: public interface::Module, public Interface
 		} else {
 			// [ACCOUNT_CREATE]: a plain login does not make an account; a
 			// mistyped name is refused as unknown. Local still auto-creates.
+			if(unreadable(name))
+				return reply("The account \""+name+"\" could not be read on "
+						"this server; ask its admin");
 			if(!local && !cred.create)
 				return reply("There is no account named \""+name+"\". Use "
 						"\"Create a new account\" to make one.");
@@ -2085,7 +2112,7 @@ struct Module: public interface::Module, public Interface
 			if(!valid_name(r.name) || reserved_name(r.name))
 				return result("A name is 1 to 20 letters, digits, _ or -, "
 						"and not client<digits>");
-			if(exists)
+			if(exists || unreadable(r.name))
 				return result("There is an account "+r.name+" already");
 			if(r.arg.size() < MIN_PASSWORD || r.arg.size() > 100)
 				return result("A password is "+itos((int)MIN_PASSWORD)+
