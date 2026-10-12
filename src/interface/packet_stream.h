@@ -138,6 +138,14 @@ namespace interface
 				std::function<void(const ss_&name, const ss_&data)> cb,
 				int64_t budget_us = 0);
 
+		// [LOAD_IN_FLIGHT] What is arriving and not yet whole: a packet
+		// whose header is in socket_buffer and whose body is not all there,
+		// or else the fragment sequence furthest along. False when nothing
+		// is; an unknown type gives an empty name. size is a fragment
+		// sequence's full count of fragments' worth, a little over.
+		bool in_flight(const InputBuffer &socket_buffer, ss_ *name,
+				size_t *have, size_t *size);
+
 		// The callback is told whether what it is given may be thrown away
 		// when a peer is behind: a payload may, and the
 		// core:define_packet_type that names a type may never. The type is

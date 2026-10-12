@@ -41,6 +41,10 @@ buildat.last_arrival() -> nil, or {t, kind, ...}
   "file" with name, "chunk" with x, y, z (its chunk coordinates) or "other"
   with what (the packet's name). A packet counts once it is whole, and an
   "other" one does not replace a file or a chunk less than a second old.
+buildat.in_flight() -> nil, or {name, have, size}
+- What is arriving and not yet whole ([LOAD_IN_FLIGHT]): a packet part-read
+  (its name, "" for an unknown type; its bytes so far and its length), or
+  a large payload whose fragments are coming (size then a little over).
 
 buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes

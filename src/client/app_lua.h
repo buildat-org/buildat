@@ -1173,6 +1173,28 @@
 		return 1;
 	}
 
+	// in_flight() -> nil, or {name, have, size}: the packet arriving and
+	// not yet whole, its bytes so far and its length ([LOAD_IN_FLIGHT]);
+	// name "" for a type not known
+	static int l_in_flight(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		ss_ name;
+		size_t have = 0, size = 0;
+		if(!self->m_state || !self->m_state->get_in_flight(&name, &have, &size))
+			return 0;
+		lua_newtable(L);
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_setfield(L, -2, "name");
+		lua_pushnumber(L, (double)have);
+		lua_setfield(L, -2, "have");
+		lua_pushnumber(L, (double)size);
+		lua_setfield(L, -2, "size");
+		return 1;
+	}
+
 	static int l_display_density(lua_State *L)
 	{
 		double d = 1;

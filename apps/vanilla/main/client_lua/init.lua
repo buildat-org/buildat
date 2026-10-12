@@ -1277,6 +1277,11 @@ local function load_wait_show(a)
 	elseif a.kind == "chunk" then
 		name = string.format("chunk %d, %d, %d", a.x, a.y, a.z)
 		tex = glyph("globe")
+	elseif a.kind == "flight" then
+		-- in_flight()'s, a file's transfer packet as any ([LOAD_IN_FLIGHT])
+		name = string.format("%s  %.1f of %.1f MB",
+				a.name ~= "" and a.name or "?", a.have / 1e6, a.size / 1e6)
+		tex = glyph("page")
 	else
 		name = a.what
 		tex = glyph("page")
@@ -2985,6 +2990,14 @@ function frame_peak.note(dt)
 			wait_text:SetText(line)
 			log:info("load: " .. line)
 			local a = (buildat.last_arrival or function() end)()
+			-- Nothing whole for half a second: what is coming instead
+			-- ([LOAD_IN_FLIGHT]), a 30 MB registry said as it arrives
+			local f = a and buildat.get_time_us() - a.t > 500000 and
+					buildat.in_flight and buildat.in_flight()
+			if f then
+				a = {kind = "flight", name = f.name, have = f.have,
+					size = f.size}
+			end
 			if a then
 				log:info(string.format("load: last %s %s", a.kind,
 						load_wait_show(a)))

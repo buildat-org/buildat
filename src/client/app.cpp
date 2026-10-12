@@ -2556,6 +2556,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(display_density)
 		DEF_BUILDAT_FUNC(received)
 		DEF_BUILDAT_FUNC(last_arrival)
+		DEF_BUILDAT_FUNC(in_flight)
 		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 		DEF_BUILDAT_FUNC(viewport_generation)

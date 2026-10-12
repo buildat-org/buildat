@@ -60,6 +60,8 @@ namespace client
 		// connect, and when the last came (get_timeofday_us(); 0 before)
 		virtual void get_received(size_t *bytes, int64_t *last_us) = 0;
 		virtual Arrival get_last_arrival() = 0;
+		// [LOAD_IN_FLIGHT] PacketStream::in_flight() on what has been read
+		virtual bool get_in_flight(ss_ *name, size_t *have, size_t *size) = 0;
 	};
 
 	State* createState(sp_<app::App> app);

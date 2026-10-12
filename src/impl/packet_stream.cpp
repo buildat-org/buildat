@@ -22,6 +22,35 @@ static ss_ hex_of(const char *p, size_t n)
 
 static void self_check();
 
+bool PacketStream::in_flight(const InputBuffer &socket_buffer, ss_ *name,
+		size_t *have, size_t *size)
+{
+	if(socket_buffer.size() >= 6){
+		const unsigned char *b = (const unsigned char*)socket_buffer.begin();
+		const size_t type = b[0] | b[1]<<8;
+		const size_t n = b[2] | b[3]<<8 | b[4]<<16 | (size_t)b[5]<<24;
+		auto it = m_incoming_types.m_names.find(type);
+		const ss_ tname = it != m_incoming_types.m_names.end() ? it->second : "";
+		// A fragment's own 64 kB says little: its sequence is below
+		if(socket_buffer.size() < 6 + n && tname != "core:fragment"){
+			*name = tname;
+			*have = socket_buffer.size() - 6;
+			*size = n;
+			return true;
+		}
+	}
+	const Fragments *best = nullptr;
+	for(const auto &pair : m_incoming_fragments)
+		if(!best || pair.second.bytes > best->bytes)
+			best = &pair.second;
+	if(!best)
+		return false;
+	*name = best->name;
+	*have = best->bytes;
+	*size = best->count * FRAGMENT_BYTES;
+	return true;
+}
+
 void PacketStream::input(InputBuffer &socket_buffer,
 		std::function<void(const ss_&name, const ss_&data)> cb,
 		int64_t budget_us)
@@ -371,6 +400,7 @@ static void self_check()
 			throw Exception(ss_()+"packet_stream self_check: bulk is a "
 					"definition and three fragments, not "+
 					itos((int64_t)packets)+" packets");
+		const size_t big_end = s3.size();
 		w3.output("test:small", "s", write3);
 		sv_<std::pair<ss_, ss_>> got3;
 		InputBuffer b3;
@@ -382,6 +412,33 @@ static void self_check()
 				got3[0].second != big || got3[1].second != "s")
 			throw Exception("packet_stream self_check: bulk did not come "
 					"back whole");
+		// [LOAD_IN_FLIGHT] Part of it read: the sequence, two fragments in;
+		// a whole packet part-read: its own name and bytes; all of it: none
+		PacketStream r4, w5, r5;
+		InputBuffer b4, b5;
+		ss_ name;
+		size_t have = 0, size = 0;
+		b4.append(s3.substr(0, big_end - 20));
+		r4.input(b4, [&](const ss_&, const ss_&){});
+		if(!r4.in_flight(b4, &name, &have, &size) || name != "test:big" ||
+				have != PacketStream::FRAGMENT_BYTES * 2 ||
+				size != PacketStream::FRAGMENT_BYTES * 3)
+			throw Exception("packet_stream self_check: a sequence in "
+					"flight was not said");
+		ss_ s5;
+		w5.output("test:whole", big, [&](const ss_ &d, bool){ s5 += d; },
+				false);
+		b5.append(s5.substr(0, s5.size() - 10));
+		r5.input(b5, [&](const ss_&, const ss_&){});
+		if(!r5.in_flight(b5, &name, &have, &size) || name != "test:whole" ||
+				have != big.size() - 10 || size != big.size())
+			throw Exception("packet_stream self_check: a packet in flight "
+					"was not said");
+		b5.append(s5.substr(s5.size() - 10));
+		r5.input(b5, [&](const ss_&, const ss_&){});
+		if(r5.in_flight(b5, &name, &have, &size))
+			throw Exception("packet_stream self_check: a whole packet "
+					"still in flight");
 	}
 
 	// A type nobody defined: what a stream read at the wrong offset looks

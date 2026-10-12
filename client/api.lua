@@ -2138,6 +2138,9 @@ buildat.safe.received = __buildat_received
 -- clock), kind = "file" (name) | "chunk" (x, y, z) | "other" (what)}; an
 -- "other" does not hide a file or chunk for a second ([LOADING_STRIPES])
 buildat.safe.last_arrival = __buildat_last_arrival
+-- in_flight() -> nil, or {name, have, size}: the packet arriving and not
+-- yet whole ([LOAD_IN_FLIGHT])
+buildat.safe.in_flight = __buildat_in_flight
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono

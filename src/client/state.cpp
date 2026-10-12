@@ -663,6 +663,11 @@ struct CState: public State
 		return m_last_arrival;
 	}
 
+	bool get_in_flight(ss_ *name, size_t *have, size_t *size)
+	{
+		return m_packet_stream.in_flight(m_socket_buffer, name, have, size);
+	}
+
 	void arrived(const ss_ &kind, const ss_ &name)
 	{
 		m_last_arrival = Arrival();
