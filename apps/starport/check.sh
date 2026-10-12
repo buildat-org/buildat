@@ -11,6 +11,8 @@
 #      reporter's key asks and gets the outcome.
 #   4. The admin makes a fleet; a second server with the fleet's line in
 #      its starport.json is served in it without anyone claiming it.
+#      A newer Buildat's announce of it (raw, its id and secret) with an
+#      unknown kind and key: listed as "other", the key passed on.
 #   5. A Starport ID: an adult's year is not kept, a child needs consent,
 #      and the ID's token logs in to the fleet's server, whose account is
 #      linked to it.
@@ -161,6 +163,38 @@ s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
 assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
 " || fail "the fleet's server is not served in the fleet (sp.log, an2.log)"
 echo "ok: a server joined the fleet by its config line"
+# 4b ([COMPAT_CHECKS]): a newer Buildat's announce, raw with the listing's
+# id and secret: an unknown kind is listed as "other", an unknown key
+# passed on in the list. Then the server's own announce (its config
+# touched) puts the listing back as it was
+python3 - "$SP" "$AN2" "$tmp/an2/apps/floorplanner" <<'PY' ||
+import json, sys, urllib.request
+sp, port, d = sys.argv[1:]
+B = "http://127.0.0.1:%s/api/v1/" % sp
+st = list(json.load(open(d + "/starport_state.json")).values())[0]
+b = json.load(open(d + "/starport.json"))
+for k in ("starports", "ids"):
+    b.pop(k, None)
+b.update(id=st["id"], secret=st["secret"], port=int(port), login="both",
+        kind="warp", warp_speed=9)
+a = json.loads(urllib.request.urlopen(B + "announce", json.dumps(b).encode()).read())
+assert a.get("ok"), a
+s = [x for x in json.loads(urllib.request.urlopen(B + "list").read())["servers"]
+        if x["name"] == "Check main"]
+assert s and s[0]["kind"] == "other" and s[0]["warp_speed"] == 9, s
+PY
+	fail "a newer announce's kind and key (sp.log)"
+echo " " >> "$tmp/an2/apps/floorplanner/starport.json"
+back=
+for _ in $(seq 30); do
+	api "localhost:$SP/api/v1/list" | python3 -c 'import json, sys
+s = [x for x in json.load(sys.stdin)["servers"] if x["name"] == "Check main"]
+sys.exit(0 if s and s[0]["kind"] != "other" and "warp_speed" not in s[0] else 1)' &&
+		{ back=1; break; }
+	sleep 1
+done
+[ -n "$back" ] || fail "the server's own announce did not put the listing back"
+echo "ok: a newer announce's kind listed as \"other\", its unknown key passed on"
 # 10g: access from the Accounts settings, not the file's "open": invite
 # only (a server the launcher did not start), with IDs or without
 api "localhost:$SP/api/v1/list" | python3 -c "

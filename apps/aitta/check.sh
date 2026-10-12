@@ -1,12 +1,14 @@
 #!/bin/bash
-# tier: full
-# cost: 1 min (a first run compiles the app, 2026-10-03)
+# tier: quick
+# cost: ~25 s (2026-10-13)
 # covers: apps/aitta/** src/impl/aitta.cpp src/client/main.cpp
 # [AITTA_MVP] step 2: **Aitta takes a signed release and serves it**. The
 # admin joins (the setup code), binds the author name "tester" to a key;
 #   1. a key bound to nobody cannot start an upload;
 #   2. tester's release is published, listed (with its home Hearth and
-#      changelog), downloaded and installed;
+#      changelog), downloaded and installed; a key a newer Buildat added
+#      is kept, and a kind it added (zipped and signed by the check, as
+#      pack refuses one) is listed as "other" with its manifest whole;
 #   3. a licence the instance does not take, and a manifest whose author
 #      is not the key's, are refused;
 #   4. the admin delists it: off the list, and its archive not served;
@@ -75,9 +77,7 @@ cmp -s "$t/dl.zip" "$zip" || fail "the archive served is not the one published"
 "$b" aitta install "$t/dl.zip" "$t/user" > /dev/null 2>&1 ||
 	fail "the downloaded release did not install"
 
-# A key a newer Buildat added is kept in the release's manifest.
-# simplified: a newer kind ("other" in the list) is not driven: pack
-# refuses a kind it does not know
+# A key a newer Buildat added is kept in the release's manifest
 manifest tester 1.3.0 MIT ' "colour": "blue",'
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.3.0"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
@@ -86,6 +86,41 @@ curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
 r = [r for r in json.load(sys.stdin)["releases"] if r["version"] == "1.3.0"][0]
 assert r["manifest"]["colour"] == "blue", r' ||
 	fail "the newer key was not kept"
+# A newer Buildat's kind, with a key of its own ([COMPAT_CHECKS]): pack
+# refuses a kind it does not know, so the archive is zipped and signed
+# here (the .sig as write_signed() makes it) and sent by publish, which
+# checks nothing: taken, listed as "other", the manifest passed on whole
+manifest tester 1.4.0 MIT ' "kind": "warp", "warp_speed": 9,'
+python3 - "$t/app" "$t/key" "$t/raw/tester-demo-1.4.0" <<'PY' || fail "the raw release"
+import hashlib, io, json, os, sys, zipfile
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+app, keyfile, base = sys.argv[1:]
+z = io.BytesIO()
+with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as f:
+    for d, _, names in os.walk(app):
+        for n in names:
+            p = os.path.join(d, n)
+            f.write(p, os.path.relpath(p, app))
+z = z.getvalue()
+k = ec.derive_private_key(int(open(keyfile).read().split()[1], 16), ec.SECP256R1())
+sha = hashlib.sha256(z).hexdigest()
+h = hashlib.sha256(("aitta-release-1\n" + sha).encode()).digest()
+pub = k.public_key().public_bytes(serialization.Encoding.X962,
+        serialization.PublicFormat.UncompressedPoint).hex()
+sig = k.sign(h, ec.ECDSA(utils.Prehashed(hashes.SHA256()))).hex()
+os.makedirs(os.path.dirname(base), exist_ok=True)
+open(base + ".zip", "wb").write(z)
+open(base + ".sig", "w").write(json.dumps({"format": "aitta-release-1",
+        "sha256": sha, "key": pub, "signature": sig}) + "\n")
+PY
+out=$("$b" aitta publish "$t/raw/tester-demo-1.4.0.zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester/demo/1.4.0" || fail "publish 1.4.0 (kind warp): $out"
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
+r = [r for r in json.load(sys.stdin)["releases"] if r["version"] == "1.4.0"][0]
+assert r["kind"] == "other", r
+assert r["manifest"]["kind"] == "warp" and r["manifest"]["warp_speed"] == 9, r' ||
+	fail "the unknown kind is not listed as \"other\" with its manifest whole"
 
 # 3. A licence not taken; an author not the key's
 manifest tester 1.1.0 Proprietary
