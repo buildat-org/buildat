@@ -1546,14 +1546,21 @@ function core.get_mod_storage()
 	end
 	local dir = world_path .. "/mod_storage"
 	local path = dir .. "/" .. modname
-	local fields = {}
+	-- {v = 1, fields = {...}}; 0.6 wrote the fields bare. One this cannot
+	-- read is never written over: its mod runs on what it sets this run
+	local fields, readable = {}, true
 	local data = read_file(path)
 	if data then
 		local ok, loaded = pcall(core.deserialize, data, true)
-		if ok and type(loaded) == "table" then
+		if ok and type(loaded) == "table" and loaded.v == nil then
 			fields = loaded
+		elseif ok and type(loaded) == "table" and loaded.v == 1 and
+				type(loaded.fields) == "table" then
+			fields = loaded.fields
 		else
-			core.log("error", "Cannot read mod storage of " .. modname)
+			readable = false
+			core.log("error", "Cannot read mod storage of " .. modname ..
+					" (a newer Buildat's, or broken); it is not written")
 		end
 	end
 	local storage = core.__new_metadata(fields)
@@ -1562,8 +1569,11 @@ function core.get_mod_storage()
 	-- then crashes the server has still set it
 	storage.set_string = function(self, key, value)
 		set_string(self, key, value)
-		core.mkdir(dir)
-		core.safe_file_write(path, core.serialize(self.fields))
+		if readable then
+			core.mkdir(dir)
+			core.safe_file_write(path, core.serialize({v = 1,
+					fields = self.fields}))
+		end
 	end
 	mod_storages[modname] = storage
 	return storage

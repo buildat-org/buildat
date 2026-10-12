@@ -956,6 +956,10 @@ struct Module: public interface::Module, public luanti::Interface
 	bool m_had_node_meta = false;
 	// The same for the players; a world nobody has been in stays that way
 	bool m_had_players = false;
+	// [COMPAT_BREAK_07] 8h: a players row or a clock this cannot read (a
+	// newer Buildat's) is kept rather than written over
+	bool m_players_unreadable = false;
+	bool m_clock_unreadable = false;
 	// Which client a player is, so that what is sent to one has somewhere to
 	// go, and which player a client is, for what comes back. Whoever names a
 	// player says which peer it is; see add_player().
@@ -1514,9 +1518,11 @@ struct Module: public interface::Module, public luanti::Interface
 			cereal::PortableBinaryInputArchive ar(is);
 			uint8_t version = 0;
 			ar(version);
+			// A newer one is kept as it is, not reset to noon
 			if(version != 1){
-				log_w(MODULE, "The save's clock is version %i and this build "
-						"writes 1; the world starts at noon", (int)version);
+				log_e(MODULE, "The save's clock is version %i and this build "
+						"reads 1; it is not written over", (int)version);
+				m_clock_unreadable = true;
 				return;
 			}
 			ar(time_of_day, game_time, day_count);
@@ -1773,7 +1779,7 @@ struct Module: public interface::Module, public luanti::Interface
 	// what one row is.
 	void save_players()
 	{
-		if(!m_store || !m_lua)
+		if(!m_store || !m_lua || m_players_unreadable)
 			return;
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
@@ -1814,9 +1820,13 @@ struct Module: public interface::Module, public luanti::Interface
 		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "__load_players");
 		lua_pushlstring(L, data.c_str(), data.size());
-		if(lua_pcall(L, 1, 1, 0) != 0){
-			log_w(MODULE, "__load_players(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		// One this cannot read is kept as it is: the next checkpoint
+		// would otherwise drop every player not online
+		if(lua_pcall(L, 1, 1, 0) != 0 || lua_isnil(L, -1)){
+			log_e(MODULE, "The save's players cannot be read (%s); they are "
+					"not written over", lua_isstring(L, -1) ?
+					lua_tostring(L, -1) : "a newer Buildat's, or broken");
+			m_players_unreadable = true;
 			lua_settop(L, base);
 			return;
 		}
@@ -1828,7 +1838,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 	void save_clock()
 	{
-		if(!m_store || !m_lua)
+		if(!m_store || !m_lua || m_clock_unreadable)
 			return;
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;

@@ -1436,6 +1436,13 @@ struct CInstance: public voxelworld::Instance
 			r.day = d;
 			return r;
 		}
+		// A newer Buildat's index ("i2 ..."): kept whole, never generated
+		// over or trimmed. simplified: the save's format stamp refuses a
+		// newer save before this; kept, not refused, should one get here
+		if(v.size() >= 2 && v[0] == 'i' && isdigit((unsigned char)v[1])){
+			r.generated = true;
+			return r;
+		}
 		r.generated = (v == "1");
 		return r;
 	}
@@ -1526,6 +1533,8 @@ struct CInstance: public voxelworld::Instance
 		check(r.generated && r.altered && r.day == -1);
 		r = parse_index_row("0");
 		check(!r.generated && r.altered);
+		r = parse_index_row("i2 1 0 5 6 7");
+		check(r.generated && r.altered);
 		// Along x: 0 altered; 1 plain but beside 0, kept; 3 plain, visited
 		// day 5; 5 plain, day 2; 7 altered, day 1; 9 plain but loaded; 11
 		// plain, day 2, nearer 9 than 5 is

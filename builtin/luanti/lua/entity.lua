@@ -1521,13 +1521,16 @@ function core.__save_players()
 		out[name] = saved
 		n = n + 1
 	end
-	return core.serialize({players = out, auth = core.__auth_entries}), n
+	return core.serialize({v = 1, players = out, auth = core.__auth_entries}), n
 end
 
+-- The number read, or nil for a row this cannot read (a newer Buildat's,
+-- or broken), which luanti.cpp then never writes over
 function core.__load_players(data)
 	local t = core.deserialize(data)
-	if type(t) ~= "table" then
-		return 0
+	-- 0.6's had no v and is 1's shape
+	if type(t) ~= "table" or (t.v or 1) ~= 1 then
+		return nil
 	end
 	local n = 0
 	for name, saved in pairs(t.players or {}) do

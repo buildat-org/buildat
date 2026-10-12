@@ -11,6 +11,7 @@
 #include "interface/os.h"
 #include "core/json.h"
 #include <sqlite3.h>
+#include "core/version.h"
 #include <fstream>
 #include <sys/stat.h>
 #include <cstdio>
@@ -36,6 +37,9 @@ static const char *SCHEMA =
 		"CREATE TABLE IF NOT EXISTS store ("
 		"store TEXT NOT NULL, key TEXT NOT NULL, value BLOB,"
 		" PRIMARY KEY(store, key))";
+
+// PRAGMA user_version; raised when a save's layout changes
+static const int SAVE_FORMAT = 1;
 
 struct CSave;
 
@@ -191,6 +195,25 @@ struct CSave: public Save
 		// BEGIN IMMEDIATE failed 3 milliseconds after another connection to
 		// the same save was opened.
 		sqlite3_busy_timeout(m_db, 5000);
+		// **The save's format** ([COMPAT_BREAK_07] 8h): PRAGMA user_version,
+		// 1 since 0.7; a newer one is refused before anything is written,
+		// and the version that last opened it is a row of "__save"
+		int format = 0;
+		{
+			sqlite3_stmt *st = nullptr;
+			check(m_db, sqlite3_prepare_v2(m_db, "PRAGMA user_version", -1,
+					&st, nullptr), "user_version");
+			if(sqlite3_step(st) == SQLITE_ROW)
+				format = sqlite3_column_int(st, 0);
+			sqlite3_finalize(st);
+		}
+		if(format > SAVE_FORMAT){
+			sqlite3_close(m_db);
+			m_db = nullptr;
+			throw SqliteError("The save "+path+" was written by a newer "
+					"Buildat (save format "+itos(format)+"; this one, "+
+					BUILDAT_VERSION+", reads "+itos(SAVE_FORMAT)+")");
+		}
 		// A save that a crash interrupted is worth more than the milliseconds
 		// a rollback journal would save, and WAL is what lets a reader and a
 		// writer overlap at all
@@ -201,6 +224,19 @@ struct CSave: public Save
 		exec("PRAGMA journal_size_limit=1048576");
 		exec("PRAGMA foreign_keys=ON");
 		exec(SCHEMA);
+		if(format < SAVE_FORMAT)
+			exec(("PRAGMA user_version="+itos(SAVE_FORMAT)).c_str());
+		// Written only when it changes: the launcher opens every save to
+		// read it, and an open alone leaves the file as it was
+		sqlite3_stmt *st = nullptr;
+		check(m_db, sqlite3_prepare_v2(m_db, "INSERT OR REPLACE INTO store"
+				" SELECT '__save', 'version', ?1 WHERE NOT EXISTS (SELECT 1"
+				" FROM store WHERE store = '__save' AND key = 'version' AND"
+				" value = ?1)", -1, &st, nullptr), "stamp");
+		sqlite3_bind_text(st, 1, BUILDAT_VERSION, -1, SQLITE_STATIC);
+		const int stamped = sqlite3_step(st);
+		sqlite3_finalize(st);
+		check(m_db, stamped, "stamp");
 	}
 	~CSave()
 	{
