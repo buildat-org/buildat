@@ -1126,6 +1126,38 @@
 		return 2;
 	}
 
+	// last_arrival() -> nil before anything came, else {t, kind, name |
+	// x, y, z | what}: the last file, chunk or other packet from the
+	// server, t on get_time_us()'s clock ([LOADING_STRIPES])
+	static int l_last_arrival(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		if(!self->m_state)
+			return 0;
+		client::Arrival a = self->m_state->get_last_arrival();
+		if(a.kind.empty())
+			return 0;
+		lua_newtable(L);
+		lua_pushnumber(L, (double)a.t);
+		lua_setfield(L, -2, "t");
+		lua_pushstring(L, a.kind.c_str());
+		lua_setfield(L, -2, "kind");
+		if(a.kind == "chunk"){
+			lua_pushinteger(L, a.x);
+			lua_setfield(L, -2, "x");
+			lua_pushinteger(L, a.y);
+			lua_setfield(L, -2, "y");
+			lua_pushinteger(L, a.z);
+			lua_setfield(L, -2, "z");
+		} else {
+			lua_pushlstring(L, a.name.c_str(), a.name.size());
+			lua_setfield(L, -2, a.kind == "file" ? "name" : "what");
+		}
+		return 1;
+	}
+
 	static int l_display_density(lua_State *L)
 	{
 		double d = 1;

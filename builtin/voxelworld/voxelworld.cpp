@@ -511,6 +511,10 @@ struct CInstance: public voxelworld::Instance
 					[this](replicate::PeerId peer, uint node_id){
 				return peer_wants_node(peer, node_id);
 			});
+			irep->set_node_priority(m_scene_ref,
+					[this](replicate::PeerId peer, uint node_id){
+				return node_priority(peer, node_id);
+			});
 		});
 
 		// Find peers that already are on the scene and iniitalize them
@@ -530,6 +534,7 @@ struct CInstance: public voxelworld::Instance
 		// The filter holds this; it must not outlive it
 		replicate::access(m_server, [&](replicate::Interface *irep){
 			irep->set_node_filter(m_scene_ref, nullptr);
+			irep->set_node_priority(m_scene_ref, nullptr);
 		});
 	}
 
@@ -645,6 +650,27 @@ struct CInstance: public voxelworld::Instance
 		return dist(sp.getX(), c.getX()) <= radius &&
 				dist(sp.getZ(), c.getZ()) <= radius &&
 				dist(sp.getY(), c.getY()) <= lp.load_y;
+	}
+
+	// [LOAD_OWN_CHUNK] A chunk's squared distance in voxels from the peer's
+	// load point, its centre's: the nearest are synced first. A node this
+	// world did not make, or a peer with no point, goes before all of them.
+	float node_priority(replicate::PeerId peer, uint node_id)
+	{
+		std::lock_guard<std::mutex> lock(m_send_mutex);
+		auto it = m_chunk_node_chunk_p.find(node_id);
+		if(it == m_chunk_node_chunk_p.end())
+			return -1.0f;
+		auto pit = m_peer_points.find(peer);
+		if(pit == m_peer_points.end())
+			return -1.0f;
+		const pv::Vector3DInt32 &c = it->second;
+		const auto &s = m_chunk_size_voxels;
+		const auto &p = pit->second.p;
+		float dx = c.getX() * s.getX() + s.getX() / 2 - p.getX();
+		float dy = c.getY() * s.getY() + s.getY() / 2 - p.getY();
+		float dz = c.getZ() * s.getZ() + s.getZ() / 2 - p.getZ();
+		return dx * dx + dy * dy + dz * dz;
 	}
 
 	// The client says how much world it wants; what it gets is that or the

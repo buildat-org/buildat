@@ -72,6 +72,14 @@ namespace replicate
 		virtual void set_node_filter(main_context::SceneReference scene_ref,
 				std::function<bool(PeerId peer, uint node_id)> filter) = 0;
 
+		// Which of a peer's dirty nodes are synced first: the smallest
+		// number. A streaming world gives the distance from the peer, so
+		// that what it stands in comes before the rest over a slow link
+		// ([LOAD_OWN_CHUNK]). Asked during the sync, as the filter is, and
+		// as bound by the same rule. Pass nullptr to drop it.
+		virtual void set_node_priority(main_context::SceneReference scene_ref,
+				std::function<float(PeerId peer, uint node_id)> priority) = 0;
+
 		// Ask the filter about this peer's nodes again: it answers from
 		// where the peer is, and nothing else here knows that it moved.
 		virtual void refresh_peer_nodes(

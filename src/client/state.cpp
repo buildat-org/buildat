@@ -17,6 +17,7 @@
 #include <c55/string_util.h>
 #include <c55/os.h> // get_timeofday_us()
 #include <cstdlib>
+#include <cstdio>
 #include <mutex>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -174,6 +175,7 @@ struct CState: public State
 	// [JOIN_PROGRESS]'s: what came, and when it last did
 	size_t m_received_bytes = 0;
 	int64_t m_received_us = 0;
+	Arrival m_last_arrival;
 	// **And the server hears from this end** ([PEER_TIMEOUT], user
 	// 2026-10-04): the same empty packet when nothing has gone for this
 	// long, so that the server can drop a peer silent for 60 s (a crashed
@@ -313,6 +315,7 @@ struct CState: public State
 		m_last_data_us = 0;
 		m_received_bytes = 0;
 		m_received_us = 0;
+		m_last_arrival = Arrival();
 		m_last_send_us = 0;
 		m_backlog_said = 0;
 		m_backlog_said_us = 0;
@@ -655,6 +658,32 @@ struct CState: public State
 		*last_us = m_received_us;
 	}
 
+	Arrival get_last_arrival()
+	{
+		return m_last_arrival;
+	}
+
+	void arrived(const ss_ &kind, const ss_ &name)
+	{
+		m_last_arrival = Arrival();
+		m_last_arrival.t = get_timeofday_us();
+		m_last_arrival.kind = kind;
+		m_last_arrival.name = name;
+	}
+
+	// A chunk's node is "static_(x, y, z)" (voxelworld's create_chunk_node)
+	void node_arrived(Node *node)
+	{
+		int x, y, z;
+		if(sscanf(node->GetName().CString(), "static_(%d, %d, %d)",
+				&x, &y, &z) != 3)
+			return;
+		arrived("chunk", "");
+		m_last_arrival.x = x;
+		m_last_arrival.y = y;
+		m_last_arrival.z = z;
+	}
+
 	void add_local_files(const sv_<std::pair<ss_, ss_>> &name_paths)
 	{
 		m_remote_cache_path = g_client_config.get<ss_>("cache_path")+
@@ -858,6 +887,14 @@ struct CState: public State
 
 	void handle_packet_(const ss_ &packet_name, const ss_ &data)
 	{
+		// The connection's own (keepalives) are not something that came,
+		// and another packet does not hide a file or a chunk for a second:
+		// a Luanti world's object packets come every tick. The handlers
+		// below say what a file or a chunk was.
+		if(packet_name.compare(0, 8, "network:") != 0 &&
+				(m_last_arrival.kind == "" || m_last_arrival.kind == "other" ||
+				get_timeofday_us() - m_last_arrival.t > 1000000))
+			arrived("other", packet_name);
 		auto it = m_packet_handlers.find(packet_name);
 		if(it == m_packet_handlers.end()){
 			// Pass forward
@@ -1031,6 +1068,7 @@ void CState::setup_packet_handlers()
 				continue;
 			}
 			m_waiting_files.erase(file_name);
+			arrived("file", file_name);
 			show_file_progress();
 			// The server does not hash what it reads off disk before sending
 			// it, so this is the check that a file is what it was announced
@@ -1103,6 +1141,7 @@ void CState::setup_packet_handlers()
 		}
 		// Read initial attributes
 		node->ReadDeltaUpdate(msg);
+		node_arrived(node);
 		// Skip transition to first position
 		SmoothedTransform *transform = node->GetComponent<SmoothedTransform>();
 		if(transform)
@@ -1190,6 +1229,7 @@ void CState::setup_packet_handlers()
 		if(node){
 			log_d(MODULE, "Updating node %i (LatestDataUpdate)", node_id);
 			node->ReadLatestDataUpdate(msg);
+			node_arrived(node);
 		} else {
 			log_w(MODULE, "Out-of-order node data ignored for %i", node_id);
 			// Note: Network/Connection.cpp would buffer this
@@ -1223,6 +1263,7 @@ void CState::setup_packet_handlers()
 		if(node){
 			log_d(MODULE, "Updating node %i (DeltaUpdate)", node_id);
 			node->ReadDeltaUpdate(msg);
+			node_arrived(node);
 			uint num_vars = msg.ReadVLE();
 			while(num_vars && !msg.IsEof()){
 				auto key = msg.ReadStringHash();

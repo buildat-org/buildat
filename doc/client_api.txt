@@ -36,6 +36,11 @@ buildat.version -> string, the client's version and hash
 buildat.get_time_us() -> microseconds, a monotonic clock
 buildat.get_local_time() -> day of the year (1..366), hour, minute, second
 - The user's wall clock, in their time zone.
+buildat.last_arrival() -> nil, or {t, kind, ...}
+- The last thing received from the server: t on get_time_us()'s clock, kind
+  "file" with name, "chunk" with x, y, z (its chunk coordinates) or "other"
+  with what (the packet's name). A packet counts once it is whole, and an
+  "other" one does not replace a file or a chunk less than a second old.
 
 buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes

@@ -10,6 +10,7 @@
 #include "interface/os.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
+#include <algorithm>
 #include "interface/magic_event.h"
 #include <Object.h>
 #include <Context.h>
@@ -73,6 +74,10 @@ struct Module: public interface::Module, public replicate::Interface
 	// what every scene did before there was a filter.
 	sm_<main_context::SceneReference,
 			std::function<bool(PeerId, uint)>> m_node_filters;
+	// Per scene: which of a peer's dirty nodes go first; see
+	// set_node_priority()
+	sm_<main_context::SceneReference,
+			std::function<float(PeerId, uint)>> m_node_priorities;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -277,13 +282,30 @@ struct Module: public interface::Module, public replicate::Interface
 				// next tick, which is what the set is for; the world arrives
 				// over a few more ticks and nothing waits seconds.
 				//
-				// simplified: a node that is dirty because it *changed* --
-				// a dug voxel -- waits behind however many are merely new,
-				// the same way the client's own mesh queue does. A priority
-				// class is the fix if that ever shows.
+				// [LOAD_OWN_CHUNK] In the scene's priority order when it has
+				// one: a world's chunks nearest the peer first, so that the
+				// one it stands in is not somewhere in 40 MB of the rest
+				// over a slow link. simplified: a node that is dirty because
+				// it *changed* -- a dug voxel -- goes by the same order.
 				static const int64_t SYNC_BUDGET_US = 20000;
+				sv_<uint> order;
+				auto prit = m_node_priorities.find(ps.scene_ref);
+				if(prit != m_node_priorities.end()){
+					sv_<std::pair<float, uint>> by;
+					by.reserve(nodes_to_process.Size());
+					for(auto it = nodes_to_process.Begin();
+							it != nodes_to_process.End(); ++it)
+						by.emplace_back(prit->second(ps.peer_id, *it), *it);
+					std::sort(by.begin(), by.end());
+					for(auto &x : by)
+						order.push_back(x.second);
+				}
+				size_t next = 0;
 				while(!nodes_to_process.Empty()){
-					uint node_id = nodes_to_process.Front();
+					// A node already taken as another's dependency is
+					// skipped by sync_node itself
+					uint node_id = next < order.size() ? order[next++] :
+							nodes_to_process.Front();
 					sync_node(ps.peer_id, node_id, nodes_to_process, scene,
 							ps.scene_state);
 					n_nodes++;
@@ -726,6 +748,15 @@ struct Module: public interface::Module, public replicate::Interface
 			m_node_filters.erase(scene_ref);
 	}
 
+	void set_node_priority(main_context::SceneReference scene_ref,
+			std::function<float(PeerId, uint)> priority)
+	{
+		if(priority)
+			m_node_priorities[scene_ref] = priority;
+		else
+			m_node_priorities.erase(scene_ref);
+	}
+
 	// Every node of the scene goes back into the peer's dirty set, so that
 	// the next sync asks the filter about each of them: the ones it has and
 	// should not, and the ones it should have and does not.
@@ -783,6 +814,17 @@ struct Module: public interface::Module, public replicate::Interface
 				// NOTE: This can be called multiple times; only the first call
 				//       will do anything as it clears the marked-for-update lists
 				n->PrepareNetworkUpdate();
+
+				// [LOAD_OWN_CHUNK] A node new to the peer goes with the rest
+				// of its dirty set, in the scene's priority order and behind
+				// its backpressure: a world being loaded round a joining
+				// player committed 20 MB of chunks this way, in commit
+				// order, and the one the player stood in came last
+				if(ps.scene_state.nodeStates_.Find(node_id) ==
+						ps.scene_state.nodeStates_.End()){
+					ps.scene_state.dirtyNodes_.Insert(node_id);
+					continue;
+				}
 
 				magic::HashSet<uint> nodes_to_process;
 				nodes_to_process.Insert(node_id);

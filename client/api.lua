@@ -2064,6 +2064,10 @@ buildat.safe.display_density = __buildat_display_density
 -- received() -> the bytes read from the server since the connect, and the
 -- seconds since the last came (nil before any) ([JOIN_PROGRESS])
 buildat.safe.received = __buildat_received
+-- last_arrival() -> nil before anything came, else {t (get_time_us()'s
+-- clock), kind = "file" (name) | "chunk" (x, y, z) | "other" (what)}; an
+-- "other" does not hide a file or chunk for a second ([LOADING_STRIPES])
+buildat.safe.last_arrival = __buildat_last_arrival
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono

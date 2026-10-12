@@ -259,6 +259,8 @@ end)
 
 buildat.sub_packet("voxelworld:voxel_registry", function(data)
 	voxel_reg:deserialize(data)
+	-- Nothing is meshed before it: what a slow join waits on first
+	log:info(string.format("the voxel registry, %d bytes", #data))
 end)
 
 buildat.sub_packet("voxelworld:ready", function(data)

@@ -573,8 +573,9 @@ local function show_client(host, port, name, password, mode, origin)
 		-- far along it is, and the registry is free to spend the frame.
 		local loading = true
 		-- And then the world round the player ([JOIN_WHEN_LOADED]): the
-		-- panel stays until the blocks within 2 of them are drawn, or 60 s
-		-- after the first block came, as vanilla's loading screen
+		-- panel stays until the block they are in is drawn ([LOAD_OWN_CHUNK]:
+		-- not the ones round it), or 60 s after the first block came, as
+		-- vanilla's loading screen
 		local world_wait = false
 		local first_block_us = nil
 		local WORLD_WAIT_S = 60
@@ -3181,7 +3182,7 @@ local function show_client(host, port, name, password, mode, origin)
 				local drawn, waiting = false, nil
 				if client.state == "ready" then
 					drawn, waiting = view:drawn_around(avatar.x, avatar.y,
-							avatar.z, 2)
+							avatar.z, 0)
 				end
 				local waited = first_block_us and
 						(buildat.get_time_us() - first_block_us) / 1000000 or 0
@@ -3197,7 +3198,7 @@ local function show_client(host, port, name, password, mode, origin)
 				elseif loading_panel then
 					loading_text.text = "Loading "..host..":"..port..
 							"\n\nthe world: "..(waiting and
-							waiting.." blocks round you to draw" or
+							"drawing the block you are in" or
 							"waiting for the spawn")
 					loading_panel.width = magic.ui.root.width
 					loading_panel.height = magic.ui.root.height

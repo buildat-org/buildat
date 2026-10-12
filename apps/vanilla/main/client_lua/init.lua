@@ -1161,26 +1161,24 @@ magic.ui:SetFocusElement(nil)
 -- Mods load for several seconds before there is anything to draw, and what is
 -- on the screen until then is sky
 local wait_text = hud_text(24)
--- The chat's, and the loading line's Leave's
+-- The chat's
 local CHAT_STYLE = magic.cache:GetResource("XMLFile",
 		"launch_menu/res/main_style.xml")
 wait_text:SetText("Loading the world...")
 wait_text.horizontalAlignment = magic.HA_CENTER
 wait_text.verticalAlignment = magic.VA_CENTER
 wait_text:SetPosition(0, 0)
--- [LOAD_SHOWN]: said again once a second (frame_peak.note), with the
--- sections near the player drawn of those there are once it is placed, and
--- the seconds, so that the line changes while the server sends nothing
-local load_wait = {t = 0, next = 1, total = 0}
+-- [LOAD_SHOWN]: said again every 0.5 s ([LOADING_STRIPES]), with the
+-- whole seconds, so that the line changes while the server sends nothing
+local load_wait = {t = 0, next = 0.5}
 -- **And what comes** ([JOIN_PROGRESS], user 2026-10-11: "0 of 125" stood
 -- still while 21 MB came, and the join was given up): the megabytes read
--- and their rate; nothing for 10 s says so, and from 20 s a native client
--- gets Leave under it (a browser tab is closed as a tab); at 30 s the
--- client leaves by itself (state.cpp's SILENCE_US). A client with no
+-- and their rate; nothing for 10 s says so; at 30 s the client leaves by
+-- itself (state.cpp's SILENCE_US). No Leave button ([LOADING_STRIPES],
+-- user 2026-10-12): the pause menu leaves. A client with no
 -- buildat.received() says what it did.
 -- simplified: no total; the server learns a node's size only as it sends
 -- it
-local leave_button = nil
 -- **A screen of its own** ([LOADING_SCREEN], user 2026-10-11): the world
 -- is not drawn while it loads -- Buildat's dark colour over it, and one of
 -- the game's menu/background*.png that the server picked at random,
@@ -1191,26 +1189,150 @@ local leave_button = nil
 load_wait.screen = magic.ui.root:CreateChild("BorderImage")
 load_wait.screen.priority = -100
 load_wait.screen.color = magic.Color(0x15 / 255, 0x15 / 255, 0x1a / 255)
--- The line on a dark box over the picture ([LOADING_PIC_FIT]), a little
--- larger than the text; over the picture, which is made later, by its
--- priority
+-- **Two stripes** ([LOADING_STRIPES], user 2026-10-12), over the
+-- picture, which is made later, by their priority: the line in amber on
+-- one across the width, and under it, a line's height lower, a taller one
+-- with the last thing that came, its icon and its name in cyan (a file
+-- browser's entry), the pair centred
+local BRAND_PAGE = magic.Color(0x1b / 255, 0x1b / 255, 0x22 / 255)
+wait_text:SetColor(magic.Color(1, 0x9e / 255, 0x1f / 255))
 load_wait.box = load_wait.screen:CreateChild("BorderImage")
-load_wait.box.color = magic.Color(0, 0, 0, 0.6)
+load_wait.box.color = BRAND_PAGE
 load_wait.box.priority = 1
-load_wait.box:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+load_wait.last = load_wait.screen:CreateChild("BorderImage")
+load_wait.last.color = BRAND_PAGE
+load_wait.last.priority = 1
+load_wait.last.visible = false
+load_wait.pair = load_wait.last:CreateChild("UIElement")
+load_wait.pair:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+load_wait.icon = load_wait.pair:CreateChild("BorderImage")
+load_wait.icon.verticalAlignment = magic.VA_CENTER
+load_wait.name = load_wait.pair:CreateChild("Text")
+load_wait.name.verticalAlignment = magic.VA_CENTER
+load_wait.name:SetColor(magic.Color(0x26 / 255, 0xd9 / 255, 1))
+-- The glyphs, 16x16 pixel art written once under the cache: nothing the
+-- game must have, and no font has them
+local GLYPHS = {
+	note = {
+		"................", "......#########.", "......#########.",
+		"......##.....##.", "......##.....##.", "......##.....##.",
+		"......##.....##.", "......##.....##.", "......##.....##.",
+		"......##.....##.", "...####...#####.", "..#####..######.",
+		"..#####..######.", "...###....####..", "................",
+		"................"},
+	cube = {
+		"................", "......#########.", ".....#.......##.",
+		"....#.......#.#.", "...#.......#..#.", "..#########...#.",
+		"..#.......#...#.", "..#.......#...#.", "..#.......#...#.",
+		"..#.......#...#.", "..#.......#..#..", "..#.......#.#...",
+		"..#.......##....", "..#########.....", "................",
+		"................"},
+	page = {
+		"................", "...#######......", "...#.....##.....",
+		"...#.....#.#....", "...#.....####...", "...#........#...",
+		"...#.####...#...", "...#........#...", "...#.#####..#...",
+		"...#........#...", "...#.####...#...", "...#........#...",
+		"...#.#####..#...", "...#........#...", "...##########...",
+		"................"},
+	globe = {
+		"................", "......####......", "....##.##.##....",
+		"...#..#..#..#...", "..#..#....#..#..", "..#..#....#..#..",
+		".##############.", ".#...#....#...#.", ".#...#....#...#.",
+		".##############.", "..#..#....#..#..", "..#..#....#..#..",
+		"...#..#..#..#...", "....##.##.##....", "......####......",
+		"................"},
+}
+local function glyph(name)
+	local resource = "vanilla_loading/glyph_" .. name .. ".png"
+	if not load_wait.glyphs_written then
+		load_wait.glyphs_written = true
+		local dir = buildat.get_cache_path() .. "/vanilla_res"
+		for n, rows in pairs(GLYPHS) do
+			local ops = {}
+			for y, row in ipairs(rows) do
+				for x0, x1 in row:gmatch("()#+()") do
+					ops[#ops + 1] = {op = "fill", color = {255, 255, 255, 255},
+							at = {x0 - 1, y - 1}, size = {x1 - x0, 1}}
+				end
+			end
+			buildat.compose_image({size = {16, 16}, ops = ops,
+					write = dir .. "/vanilla_loading/glyph_" .. n .. ".png"})
+		end
+		buildat.add_resource_dir(dir)
+	end
+	return magic.cache:GetResource("Texture2D", resource)
+end
+-- What last_arrival() said, on stripe two: a PNG's own picture, else the
+-- glyph of its kind
+local function load_wait_show(a)
+	local tex, name = nil, nil
+	if a.kind == "file" then
+		name = a.name
+		local ext = (a.name:match("%.(%w+)$") or ""):lower()
+		if ext == "png" then
+			tex = magic.cache:GetResource("Texture2D", a.name)
+		end
+		tex = tex or glyph(ext == "ogg" and "note" or
+				(ext == "obj" or ext == "b3d" or ext == "x") and "cube" or "page")
+	elseif a.kind == "chunk" then
+		name = string.format("chunk %d, %d, %d", a.x, a.y, a.z)
+		tex = glyph("globe")
+	else
+		name = a.what
+		tex = glyph("page")
+	end
+	if tex then
+		tex.filterMode = magic.FILTER_NEAREST
+	end
+	-- Kept beside: the sandbox's texture getter raises on none
+	load_wait.icon_tex = tex
+	if tex then
+		load_wait.icon.texture = tex
+	end
+	load_wait.name:SetText(name)
+	load_wait.last.visible = true
+	load_wait.fit()
+	return name
+end
 function load_wait.fit()
 	local w, h = magic.ui.root.width, magic.ui.root.height
 	load_wait.screen:SetFixedSize(w, h)
-	-- The line with "N of M" and the megabytes in it fits a narrow window
-	local size = w < 1000 and 16 or 24
+	-- The F5 info's size (user 2026-10-12), which fits a narrow window
+	local size = 13
 	if load_wait.font ~= size then
 		load_wait.font = size
-		wait_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono),
-				size)
+		local font = magic.cache:GetResource("Font", buildat.font_mono)
+		wait_text:SetFont(font, size)
+		load_wait.name:SetFont(font, size)
 	end
+	-- Stripe one right above the gap, which is a line's height centred on
+	-- the screen, and stripe two right below it, 1.5 times as tall
+	local lh = wait_text.height > 0 and wait_text.height or size
+	local h1 = lh + math.floor(size / 2)
+	local h2 = math.floor(h1 * 1.5)
+	local top = math.floor(h / 2 - lh / 2) - h1
 	local box = load_wait.box
 	box.visible = wait_text.text ~= ""
-	box:SetFixedSize(wait_text.width + size, wait_text.height + size / 2)
+	box:SetFixedSize(w, h1)
+	box:SetPosition(0, top)
+	wait_text:SetPosition(0, top + math.floor(h1 / 2) - math.floor(h / 2))
+	load_wait.last:SetFixedSize(w, h2)
+	load_wait.last:SetPosition(0, top + h1 + lh)
+	-- The icon as tall as the stripe allows; a picture kept to its
+	-- proportions in that square
+	local side = h2 - math.floor(size / 2)
+	local iw, ih = side, side
+	local tex = load_wait.icon_tex
+	if tex and tex.width > 0 and tex.height > 0 then
+		local k = side / math.max(tex.width, tex.height)
+		iw, ih = math.floor(tex.width * k + 0.5), math.floor(tex.height * k + 0.5)
+		load_wait.icon.imageRect = magic.IntRect(0, 0, tex.width, tex.height)
+	end
+	load_wait.icon:SetFixedSize(iw, ih)
+	load_wait.icon:SetPosition(math.floor((side - iw) / 2), 0)
+	load_wait.name:SetPosition(side + math.floor(size / 2), 0)
+	load_wait.pair:SetFixedSize(side + math.floor(size / 2) +
+			load_wait.name.width, h2)
 	-- **Not larger than the window** ([LOADING_PIC_FIT], user 2026-10-11):
 	-- the client's fit lowers the UI scale for an element past the root,
 	-- so the element is the root's size and its imageRect the centred
@@ -1262,48 +1384,24 @@ local function load_wait_end()
 	-- And the player into it: until now they were only placed
 	-- ([JOIN_WHEN_LOADED])
 	buildat.send_packet("main:world_in", "")
-	if leave_button then
-		leave_button:Remove()
-		leave_button = nil
-	end
 	keys.redraw_hud()
 	keys.take_world()
 end
 local function load_wait_line(s)
 	local got, quiet = (buildat.received or function() end)()
+	local secs = math.floor(load_wait.t)
 	if not got then
-		return string.format("%s... %d s", s, load_wait.t)
+		return string.format("%s... %d s", s, secs)
 	end
 	-- The rate from the line before: the first would count the game's files
 	local rate = load_wait.at and
 			(got - load_wait.got) / (load_wait.t - load_wait.at)
 	load_wait.got, load_wait.at = got, load_wait.t
-	local want_leave = quiet and quiet >= 20 and
-			buildat.get_env("BUILDAT_PAGE_HTTPS") == nil
-	if want_leave and not leave_button then
-		leave_button = magic.ui.root:CreateChild("Button")
-		leave_button.defaultStyle = CHAT_STYLE
-		leave_button:SetStyleAuto()
-		leave_button:SetFixedSize(100, 28)
-		leave_button:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		leave_button:SetPosition(0, 40)
-		local label = leave_button:CreateChild("Text")
-		label:SetStyleAuto()
-		label:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		label.text = "Leave"
-		magic.SubscribeToEvent(leave_button, "Released", function()
-			buildat.leave()
-		end)
-		log:info("load: Leave offered")
-	elseif not want_leave and leave_button then
-		leave_button:Remove()
-		leave_button = nil
-	end
 	if quiet and quiet >= 10 then
 		return string.format("Waiting for the server... %d s", quiet)
 	end
 	return string.format("%s -- %.1f MB%s... %d s", s, got / 1e6,
-			rate and string.format(", %d KB/s", rate / 1000) or "", load_wait.t)
+			rate and string.format(", %d KB/s", rate / 1000) or "", secs)
 end
 -- It ends once the player is placed and the chunks within 2 of them are
 -- drawn, or 60 s after the first chunk (the per-frame block below)
@@ -2872,28 +2970,25 @@ function frame_peak.note(dt)
 	if load_wait then
 		load_wait.t = load_wait.t + dt
 		load_wait.fit()
+		-- [LOAD_OWN_CHUNK] The chunk the player is in, not the 125 round
+		-- it: the rest comes in under play (a phone sat at 40 of 125)
 		if load_wait.first and (load_wait.t - load_wait.first >= 60 or
 				player_placed and voxelworld.undrawn_around(
-				buildat.Vector3(player.x, player.y, player.z), 2) == 0) then
+				buildat.Vector3(player.x, player.y, player.z), 0) == 0) then
 			load_wait_end()
 		end
 	end
 	if load_wait then
 		if load_wait.t >= load_wait.next then
-			load_wait.next = math.floor(load_wait.t) + 1
-			local s = "Loading the world"
-			if player_placed then
-				local undrawn = voxelworld.undrawn_around(
-						buildat.Vector3(player.x, player.y, player.z), 2)
-				load_wait.total = math.max(load_wait.total, undrawn)
-				if load_wait.total > 0 then
-					s = s .. ": " .. (load_wait.total - undrawn) .. " of " ..
-							load_wait.total
-				end
-			end
-			local line = load_wait_line(s)
+			load_wait.next = math.floor(load_wait.t * 2) / 2 + 0.5
+			local line = load_wait_line("Loading the world")
 			wait_text:SetText(line)
 			log:info("load: " .. line)
+			local a = (buildat.last_arrival or function() end)()
+			if a then
+				log:info(string.format("load: last %s %s", a.kind,
+						load_wait_show(a)))
+			end
 		end
 	end
 	frame_peak.frames = (frame_peak.frames or 0) + 1
@@ -3069,9 +3164,12 @@ local function status_lines(level)
 			-- three most expensive findings this programme has had
 			mode, (camera and camera.fov) or CAMERA_FOV,
 			player.vx, player.vy, player.vz,
-			placed and string.format(" | chunk %d, %d, %d",
+			-- No chunk_p before voxelworld knows its chunk size (F5 while
+			-- the game's files still come)
+			placed and chunk_p and string.format(" | chunk %d, %d, %d",
 					chunk_p.x, chunk_p.y, chunk_p.z) or "",
-			voxelworld.chunk_has_physics(chunk_p) and "" or " (no physics)"),
+			(not chunk_p or voxelworld.chunk_has_physics(chunk_p)) and "" or
+					" (no physics)"),
 		string.format("%02d:%02d | sun %.2f up, %.0f%% day",
 			math.floor((time_of_day or 0) * 24),
 			math.floor(((time_of_day or 0) * 24 % 1) * 60),

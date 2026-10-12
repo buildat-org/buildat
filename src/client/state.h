@@ -14,6 +14,17 @@ namespace client
 {
 	typedef size_t PacketType;
 
+	// [LOADING_STRIPES]: the last thing received from the server. kind is
+	// "" before anything, "file" (name), "chunk" (x, y, z, its chunk
+	// coordinates) or "other" (name, the packet's)
+	struct Arrival
+	{
+		int64_t t = 0; // get_timeofday_us()
+		ss_ kind;
+		ss_ name;
+		int x = 0, y = 0, z = 0;
+	};
+
 	struct State
 	{
 		virtual ~State(){}
@@ -48,6 +59,7 @@ namespace client
 		// [JOIN_PROGRESS]: the bytes read from the server since the
 		// connect, and when the last came (get_timeofday_us(); 0 before)
 		virtual void get_received(size_t *bytes, int64_t *last_us) = 0;
+		virtual Arrival get_last_arrival() = 0;
 	};
 
 	State* createState(sp_<app::App> app);
