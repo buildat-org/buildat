@@ -184,6 +184,19 @@ struct Module: public interface::Module, public Interface
 				said("fp.example.org/x?y") != "bad" ||
 				said("fp.example.org:99999") != "bad")
 			throw Exception("starport_announce: public_address self-check");
+		// [STARPORT_LOGIN_REFUSED]: here, at load, so that the server stops
+		// before core:start and nothing listens
+		{
+			const ss_ path = m_server->get_config().get<ss_>("user_path")+
+					"/apps/"+m_server->get_app_id()+"/starport.json";
+			json::json_error_t err;
+			const json::Value c = json::load_string(
+					read_file(path).c_str(), &err);
+			if(c.is_object() && !c.get("login").is_undefined()){
+				m_server->shutdown(1, login_refused(path));
+				return;
+			}
+		}
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("network:http_request"));
@@ -218,6 +231,15 @@ struct Module: public interface::Module, public Interface
 	}
 
 	ss_ config_path(){ return m_dir+"/starport.json"; }
+	// 0.6's "login" is refused since 0.7 ([COMPAT_BREAK_07],
+	// [STARPORT_LOGIN_REFUSED]), with "ids" beside it too: read as nothing,
+	// a fleet would run without IDs after an upgrade
+	static ss_ login_refused(const ss_ &path)
+	{
+		return path+": \"login\" is 0.6's and is refused since 0.7; "
+				"replace it with \"ids\": \"anyone\" or \"approved\" "
+				"(Starport IDs on), or remove it (IDs off)";
+	}
 
 	// [APP_CATEGORY] the listing's kind when starport.json names none: the
 	// app's own, main/meta.json's "kind"; one Starport does not know it
@@ -334,12 +356,15 @@ struct Module: public interface::Module, public Interface
 				m_config_text = text;
 				return;
 			}
-			// 0.6's "login" is not read since 0.7 ([COMPAT_BREAK_07]): said,
-			// so that IDs going off on an upgrade is not silent
-			if(c.get("login").is_string() && c.get("ids").is_undefined())
-				log_w(MODULE, "%s: \"login\" is not read any more; IDs are "
-						"off until it says \"ids\": \"anyone\" or "
-						"\"approved\"", cs(config_path()));
+			// An edit that brings 0.6's "login" back is not taken in; at
+			// start, init() stopped the server for it
+			if(!c.get("login").is_undefined()){
+				log_e(MODULE, "%s; kept as it was",
+						cs(login_refused(config_path())));
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_config_text = text;
+				return;
+			}
 		}
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -903,7 +928,6 @@ struct Module: public interface::Module, public Interface
 						(urls_of(c).size() > 1 ? " and others" : "");
 		}
 		c.set("ids", mode);
-		c.del_key("login");
 		const ss_ why = write_config(c);
 		return why.empty() ? note : why;
 	}

@@ -32,6 +32,9 @@
 #  11. mod reverses the appeal; with a low threshold a new key's report
 #      hides the listing at once, with a statement; mod upholds it as a
 #      delist, and the reporter's key sees it upheld ([MODERATION_MODULE]).
+#  12. First: a starport.json with 0.6's "login", alone or beside "ids",
+#      stops the server before it listens, naming "login" and "ids"
+#      ([STARPORT_LOGIN_REFUSED]); 4's has "ids" alone and starts.
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
@@ -63,6 +66,20 @@ cat > "$tmp/an/apps/floorplanner/starport.json" <<EOF
   "gambling": "no", "personal_data": "no"}}
 EOF
 cd "$here"
+# 12
+for v in '"login": "both"' '"login": "both", "ids": "anyone"'; do
+	mkdir -p "$tmp/lr/apps/floorplanner"
+	echo "{\"starports\": [\"http://127.0.0.1:$SP\"], $v}" \
+		> "$tmp/lr/apps/floorplanner/starport.json"
+	timeout 120 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/lr" \
+		-P $AN2 -l 3 > "$tmp/lr.log" 2>&1
+	rc=$?
+	[ $rc = 1 ] || fail "{$v}: exit $rc, not 1 (lr.log)"
+	grep -aq "STATUS Listening" "$tmp/lr.log" && fail "{$v}: it listened (lr.log)"
+	grep -aq '"login" is 0.6.s .*"ids"' "$tmp/lr.log" ||
+		fail "{$v}: the reason does not name \"login\" and \"ids\" (lr.log)"
+done
+echo "ok: \"login\" refused before listening, alone and beside \"ids\""
 start_server "$tmp/sp.log" "setup code" 120 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
 	fail "the Starport did not start (sp.log)"
