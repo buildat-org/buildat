@@ -2527,6 +2527,11 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			(narrow and 250 or 0))
 	local root, w = open_window("aitta", width)
 	local function reopen(m, q, f, b, c)
+		-- A call left over from a page already replaced does nothing
+		-- ([AITTA_FILTER_POP])
+		if uistack.main.stack[#uistack.main.stack] ~= root then
+			return
+		end
 		uistack.main:pop(root)
 		aitta_page(m, q, on_discuss, f, b, c)
 	end

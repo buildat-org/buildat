@@ -510,6 +510,11 @@ end
 local refocus = nil
 -- The one whose closing was told on this frame
 local closed_now = nil
+-- **A pick's on_choose, run on the next frame** ([AITTA_FILTER_POP]): for
+-- the same reason. A page the pick drew again, popped inside the pick,
+-- was popped from under the modal root and put back by the closing, its
+-- dropdown live over the page drawn in its place
+local picked = nil
 
 -- The pages that took the keys, newest last: only the newest one still
 -- shown answers, so a page over another does not share its keys
@@ -1458,10 +1463,13 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 		local i = data:GetInt("Selection") + 1
 		if i ~= index and values[i] ~= nil then
 			index = i
-			on_choose(values[i], i)
-			-- Moved on purpose (a page drawn again, a field to fill)
-			if gone(drop) or not drop:HasFocus() then
-				refocus = nil
+			picked = function()
+				local had = drop:HasFocus()
+				on_choose(values[i], i)
+				-- Moved on purpose (a page drawn again, a field to fill)
+				if gone(drop) or drop:HasFocus() ~= had then
+					refocus = nil
+				end
 			end
 		end
 	end)
@@ -1496,6 +1504,11 @@ end
 drops_update = function()
 	escape_taken = false
 	closed_now = nil
+	local pick = picked
+	picked = nil
+	if pick then
+		pick()
+	end
 	if refocus and not gone(refocus) and refocus.visible then
 		refocus:SetFocus(true)
 	end
