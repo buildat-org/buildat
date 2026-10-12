@@ -12,7 +12,7 @@
 // delist.
 //
 // The HTTP API, under /api/v1/aitta/ on the server's port, JSON out, a
-// refusal {"ok": false, "error": ...} with status 200:
+// refusal {"ok": false, "code": ..., "error": ...} with status 200:
 //   GET  list                       the listed releases, and "delisted":
 //                                   those out of it, each with why
 //   GET  info?key=<public key>      the licences taken here, and the
@@ -303,6 +303,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		json::Value v = json::object();
 		v.set("ok", false);
+		v.set("code", "refused");
 		v.set("error", why);
 		respond(r, v);
 	}
@@ -1183,10 +1184,19 @@ struct Module: public interface::Module, public moderation::Host
 				"license_code", "license_media", "home_hearth", "changelog",
 				"audience"})
 			rel.set(k, jstr(m, k));
+		// A newer Buildat's audience is listed as the strictest, its kind
+		// as "other", which no client installs; the manifest is kept whole
+		// for one that knows them
+		const ss_ aud = jstr(m, "audience");
+		if(!aud.empty() && aud != "everyone" && aud != "teen")
+			rel.set("audience", "adult");
+		rel.set("manifest", m);
 		rel.set("engine_api", m.get("engine_api"));
 		// [SERVERLESS_PLAY] Its client half runs with no server: Play
 		rel.set("serverless", m.get("serverless").as_boolean());
-		rel.set("kind", interface::aitta::kind_of(m));
+		const ss_ kind = jstr(m, "kind");
+		rel.set("kind", kind.empty() || kind == "app" || kind == "extension" ?
+				interface::aitta::kind_of(m) : "other");
 		interface::fs::create_directories(m_archives+"/media");
 		for(const auto &x : media){
 			const ss_ h = interface::sha256::hex(
@@ -1967,8 +1977,10 @@ struct Module: public interface::Module, public moderation::Host
 		res.set("ok", error.empty());
 		if(error.empty())
 			res.set("result", result);
-		else
+		else {
+			res.set("code", "refused");
 			res.set("error", error);
+		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->send(packet.sender, "ai:res", res.stringify());
 		});

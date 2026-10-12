@@ -37,7 +37,7 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 mkdir -p "$t/ai/apps/aitta"
 cat > "$t/ai/apps/aitta/starport.json" <<J
 {"starports": ["http://127.0.0.1:$SP"], "name": "Shop <script>alert(1)</script>",
- "login": "both", "kind": "app", "audience": "everyone", "access": "auto",
+ "ids": "anyone", "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
@@ -79,16 +79,16 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind ($t/cl_a.log)"
 mkdir -p "$t/demo/main" "$t/demo/launcher"
 echo 'int x;' > "$t/demo/main/main.cpp"
 echo "return function(ctx) return {} end" > "$t/demo/launcher/init.lua"
-printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 2,
+printf '{"author": "tester", "name": "demo", "version": "1.0.0", "engine_api": 2,
 	"license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a <script>alert(2)</script> check", "audience": "teen",
 	"home_hearth": "http://127.0.0.1:1/"}\n' > "$t/demo/meta.json"
 zip=$(Build/bin/buildat aitta pack "$t/demo" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
-Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/demo/1.0" ||
+Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/demo/1.0.0" ||
 	fail "publish"
 sed -i 's/"demo"/"grown"/; s/"teen"/"adult"/' "$t/demo/meta.json"
 zip=$(Build/bin/buildat aitta pack "$t/demo" "$t/key" "$t/out" 2>/dev/null) || fail "pack grown"
-Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/grown/1.0" ||
+Build/bin/buildat aitta publish "$zip" 127.0.0.1:$AI 2>&1 | grep -q "listed: tester/grown/1.0.0" ||
 	fail "publish grown"
 grep -q "Nothing is published here yet" <<< "$(page $AI/)" ||
 	fail "Aitta's / shows a release listed less than an hour ago"

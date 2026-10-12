@@ -60,11 +60,12 @@ namespace interface
 		// not. builtin: one Buildat comes with, which says no engine_api
 		ss_ module_meta_refusal(const json::Value &v, bool builtin);
 
-		// The manifest's fields checked; "" or why not. any_engine_api: an
-		// Aitta's, which keeps releases for every engine and leaves it to
-		// the client to say which it runs; otherwise "engine_api" is in
-		// this engine's range
-		ss_ check_manifest(const json::Value &m, bool any_engine_api = false);
+		// The manifest's fields checked; "" or why not. service: an
+		// Aitta's, which keeps releases for every engine and of a kind or
+		// audience a newer Buildat added, and leaves it to the client to
+		// say which it runs; otherwise "engine_api" is in this engine's
+		// range and the kind and audience are ones it knows
+		ss_ check_manifest(const json::Value &m, bool service = false);
 
 		// [PACKAGE_MEDIA] A package's image checked by its header: which
 		// "icon", a square PNG of 256 px a side and 64 KB at most, or
@@ -93,6 +94,9 @@ namespace interface
 		// extension, run in the client's sandbox under the name
 		// "<author>__<name>"
 		ss_ kind_of(const json::Value &m);
+
+		// A SemVer 2.0 version, 40 characters at most
+		bool semver_ok(const ss_ &v);
 
 		// What pack() puts in the archive: every file under dir, '/'
 		// separated, the names starting with '.' and aitta_page/ (the

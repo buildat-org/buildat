@@ -190,6 +190,30 @@ grep -q "Joined as grownup" "$tmp/cl2.log" &&
 	grep -q "grownup claimed the server with the setup code" "$tmp/an2.log" ||
 	fail "the token did not log in as the first admin (cl2.log, an2.log)"
 echo "ok: the ID's token logged in to the fleet's server, its first admin"
+# [COMPAT_BREAK_07] 8g: a token of 0.6's format, and a site's, refused
+read -r old site < <(python3 - "$token" "$tmp/an2/apps/floorplanner/starport_state.json" <<'PY'
+import base64, hashlib, hmac, json, sys
+sec = list(json.load(open(sys.argv[2])).values())[0]["secret"]
+p = sys.argv[1].split(".")[0]
+v = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+def sign(v, prefix):
+    q = base64.urlsafe_b64encode(json.dumps(v).encode()).decode().rstrip("=")
+    return q + "." + hmac.new(bytes.fromhex(sec), prefix + q.encode(),
+            hashlib.sha256).hexdigest()
+print(sign({k: v[k] for k in ("sub", "name", "listing", "exp")}, b""),
+        sign(dict(v, typ="site"), b"buildat-token-1\n"))
+PY
+)
+for x in "old:The token is not from a Starport this server is on" \
+		"site:Not a token for a server"; do
+	[ "${x%%:*}" = old ] && tok=$old || tok=$site
+	BUILDAT_FP_STARPORT=$tok timeout 90 Build/bin/buildat -o launch_ui=launch_menu \
+		-D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+		> "$tmp/cl2_${x%%:*}.log" 2>&1
+	grep -q "Login refused: ${x#*:}" "$tmp/cl2_${x%%:*}.log" ||
+		fail "the ${x%%:*} token was not refused (cl2_${x%%:*}.log)"
+done
+echo "ok: a token of the old format and a site's token refused by the server"
 
 # 6: as the first server would announce a ban it reported
 python3 - "$SP" "$tmp/an/apps/floorplanner" "$id" > "$tmp/ban.json" <<'PY' ||
@@ -206,13 +230,23 @@ st = list(json.load(open(sys.argv[2] + "/starport_state.json")).values())[0]
 del conf["starports"]
 conf.update(app="floorplanner", version="x", port=29642, players=0,
 		id=st["id"], secret=st["secret"],
-		bans=[{"sub": sub, "reason": "harassment"}])
+		bans=[{"sub": sub, "reason": "harassment"}],
+		kind="museum", colour="blue")
 r = json.loads(urllib.request.urlopen(B + "announce",
 		json.dumps(conf).encode()).read())
 assert r["ok"], r
+# [COMPAT_BREAK_07] 8d: a newer server's kind is "other", its unknown key
+# passed on; a refusal has a code; the unversioned path asks for an upgrade
+x = [x for x in call("list")["servers"] if x["id"] == st["id"]][0]
+assert x["kind"] == "other" and x["colour"] == "blue", x
+r = json.loads(urllib.request.urlopen(B + "announce",
+		json.dumps(conf).encode()).read())
+assert not r["ok"] and r["code"] == "too_often", r
+r = json.loads(urllib.request.urlopen(B.replace("/v1/", "/") + "list").read())
+assert not r["ok"] and r["code"] == "upgrade_required", r
 print(json.dumps({"listing": st["id"]}))
 PY
-	fail "announcing a ban"
+	fail "announcing a ban, a newer kind and key"
 printf 'delay 8000\nquit\n' > "$tmp/cmds3.txt"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS='{"cmd":"blocklist_create","name":"Check list"}' \
@@ -229,7 +263,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"blocklist_publish\",\"list\":\"$list\",\"scope\":\"l
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 grep -q '"id":"id:grown|harassment"' "$tmp/cl3.log" ||
 	fail "the ban is not in the queue as a report about the ID (cl3.log)"
-echo "ok: a reported ban is in the queue, about the ID"
+echo "ok: a reported ban is in the queue, about the ID; a newer kind listed as other, its unknown key passed on, codes too_often and upgrade_required"
 # The fleet's server learns the list at its next announce: its start
 kill "${pids[-1]}"
 wait "${pids[-1]}" 2>/dev/null

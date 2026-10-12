@@ -54,7 +54,7 @@ echo "ok: /api/v1/list carries the play page"
 # A Hearth listed there
 mkdir -p "$tmp/he/apps/hearth"
 cat > "$tmp/he/apps/hearth/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Linked hearth", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Linked hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",

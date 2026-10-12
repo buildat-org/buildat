@@ -2322,8 +2322,10 @@ struct Module: public interface::Module
 		res.set("ok", error.empty());
 		if(error.empty())
 			res.set("result", result);
-		else
+		else {
+			res.set("code", "refused");
 			res.set("error", error);
+		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->send(packet.sender, "hr:res", res.stringify());
 		});

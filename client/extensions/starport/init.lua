@@ -184,14 +184,12 @@ local function load_state()
 	state.keys = type(state.keys) == "table" and state.keys or {}
 	state.receipts = type(state.receipts) == "table" and state.receipts or {}
 	state.pin = state.pin or ""
-	-- [STARPORT_RECOMMENDS]: the Aittas, a list since one `aitta`; those
-	-- removed or not taken when offered; and what each Starport
-	-- recommends, by Starport: {hearth =, aittas = {...}}
+	-- [STARPORT_RECOMMENDS]: the Aittas; those removed or not taken when
+	-- offered; and what each Starport recommends, by Starport:
+	-- {hearth =, aittas = {...}}
 	if type(state.aittas) ~= "table" then
-		state.aittas = {type(state.aitta) == "string" and state.aitta or
-				DEFAULT_AITTA}
+		state.aittas = {DEFAULT_AITTA}
 	end
-	state.aitta = nil
 	state.ignored_aittas = type(state.ignored_aittas) == "table" and
 			state.ignored_aittas or {}
 	state.recommends = type(state.recommends) == "table" and
@@ -238,9 +236,7 @@ local function effective()
 			filters[k] = v
 		end
 	end
-	-- The managed file's "aittas", or its "aitta" of before the list
-	local m_aittas = type(m.aittas) == "table" and m.aittas or
-			type(m.aitta) == "string" and {m.aitta} or nil
+	local m_aittas = type(m.aittas) == "table" and m.aittas or nil
 	return {
 		starports = starports,
 		filters = filters,
@@ -1014,27 +1010,68 @@ end
 -- the version the user said "Not now" to is in the state
 local newer = nil
 
--- Version strings compared by their numbers: -1, 0 or 1
-local function version_cmp(a, b)
-	local pa, pb = {}, {}
-	for n in tostring(a):gmatch("%d+") do pa[#pa + 1] = tonumber(n) end
-	for n in tostring(b):gmatch("%d+") do pb[#pb + 1] = tonumber(n) end
+-- SemVer 2.0 precedence ([COMPAT_BREAK_07] 8k): -1, 0 or 1, nil when
+-- either is not a SemVer version; the +build part is not compared
+local function semver_parse(v)
+	local ma, mi, pa, rest = tostring(v):gsub("%+.*$", ""):match(
+			"^(%d+)%.(%d+)%.(%d+)(.*)$")
+	if not ma or (rest ~= "" and rest:sub(1, 1) ~= "-") then
+		return nil
+	end
+	local pre = {}
+	for id in rest:sub(2):gmatch("[^.]+") do
+		pre[#pre + 1] = tonumber(id) or id
+	end
+	return {tonumber(ma), tonumber(mi), tonumber(pa)}, pre
+end
+function M.semver_cmp(a, b)
+	local ca, pa = semver_parse(a)
+	local cb, pb = semver_parse(b)
+	if not ca or not cb then
+		return nil
+	end
+	for i = 1, 3 do
+		if ca[i] ~= cb[i] then
+			return ca[i] < cb[i] and -1 or 1
+		end
+	end
+	-- A pre-release is before its release
+	if (#pa == 0) ~= (#pb == 0) then
+		return #pa == 0 and 1 or -1
+	end
 	for i = 1, math.max(#pa, #pb) do
-		local x, y = pa[i] or 0, pb[i] or 0
+		local x, y = pa[i], pb[i]
+		if x == nil or y == nil then
+			return x == nil and -1 or 1
+		end
 		if x ~= y then
+			-- Numbers before words
+			if type(x) ~= type(y) then
+				return type(x) == "number" and -1 or 1
+			end
 			return x < y and -1 or 1
 		end
 	end
 	return 0
 end
-assert(version_cmp("0.6.10", "0.6.9") == 1 and version_cmp("0.6", "0.6.0") == 0
-		and version_cmp("0.6.89", "1.0.0") == -1)
+local version_cmp = M.semver_cmp
+assert(version_cmp("0.6.10", "0.6.9") == 1 and
+		version_cmp("0.6.89", "1.0.0") == -1 and
+		version_cmp("1.0.0-alpha", "1.0.0") == -1 and
+		version_cmp("1.0.0-alpha", "1.0.0-alpha.1") == -1 and
+		version_cmp("1.0.0-alpha.1", "1.0.0-alpha.beta") == -1 and
+		version_cmp("1.0.0-beta.2", "1.0.0-beta.11") == -1 and
+		version_cmp("1.0.0+a", "1.0.0+b") == 0 and
+		version_cmp("0.6", "0.6.0") == nil)
 
 note_version = function(url, v)
 	if type(v) ~= "table" or type(v.version) ~= "string" or
-			not v.version:match("^%d[%d%.]*$") or
-			version_cmp(v.version, buildat.version()) <= 0 or
-			(newer and version_cmp(v.version, newer.version) <= 0) then
+			(version_cmp(v.version, buildat.version()) or 0) <= 0 or
+			-- A pre-release only to a client that runs one.
+			-- simplified: no setting asks for them on a release
+			(v.version:find("-", 1, true) and
+			not buildat.version():find("-", 1, true)) or
+			(newer and (version_cmp(v.version, newer.version) or 0) <= 0) then
 		return
 	end
 	-- This platform's link when the adapter gave one
@@ -1444,7 +1481,7 @@ local function id_call(url, what, body, cb)
 			cb(nil, tostring(err or "no answer"), true)
 		elseif not v.ok then
 			-- A session that ended is forgotten here too
-			if v.error == "session" then
+			if v.code == "session" then
 				load_state().ids[url] = nil
 				save_state()
 			end

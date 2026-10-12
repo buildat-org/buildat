@@ -43,7 +43,7 @@ done
 mkdir -p "$t/h/apps/hearth"
 cat > "$t/h/apps/hearth/starport.json" <<J
 {"starports": ["http://127.0.0.1:$SP1", "http://localhost:$SP2"],
- "name": "Claim hearth", "login": "both",
+ "name": "Claim hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",

@@ -6,8 +6,9 @@
 // (client/extensions/starport); moderators, operators and the admin use it by
 // joining it (client_lua/init.lua).
 //
-// The HTTP API, under /api/ on the server's port (network:http_request),
-// JSON in and out, a refusal an {"ok": false, "error": ...} with status 200:
+// The HTTP API, under /api/v1/ on the server's port (network:http_request),
+// JSON in and out, a refusal an {"ok": false, "code": ..., "error": ...}
+// with status 200:
 //   POST /api/v1/announce       a server's announce ([STARPORT] 2)
 //   GET|POST /api/v1/list       the listings this instance serves ([STARPORT] 4)
 //   POST /api/v1/report         a report ([STARPORT] 5)
@@ -36,6 +37,7 @@
 #include "core/json.h"
 #include "core/version.h"
 #include "interface/os.h"
+#include "interface/aitta.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/server_config.h"
@@ -171,6 +173,22 @@ static int reason_severity(const ss_ &reason)
 	return it == s.end() ? 10 : it->second;
 }
 
+// A category's value: one a newer Buildat added is taken as a word and
+// listed as "other" (normalized in api_announce)
+static bool word_ok(const ss_ &v)
+{
+	return !v.empty() && v.size() <= 24 && v.find_first_not_of(
+			"abcdefghijklmnopqrstuvwxyz0123456789_-") == ss_::npos;
+}
+
+// The announce's keys this reads; the rest, a newer Buildat's, are kept as
+// the listing's "extra" and passed on in the list
+static const std::initializer_list<const char*> ANNOUNCE_KEYS = {"name",
+		"description", "kind", "audience", "access", "login", "signup_url",
+		"descriptors", "tags", "languages", "region", "address", "unlisted",
+		"port", "icon", "tls", "app", "version", "package", "game", "players",
+		"players_max", "updating", "bans", "id", "secret", "fleet", "pool"};
+
 // "" when the announce's categories are whole and right, else why not
 static ss_ check_categories(const json::Value &b)
 {
@@ -187,15 +205,16 @@ static ss_ check_categories(const json::Value &b)
 		return "name: 1 to 60 characters";
 	if(jstr(b, "description").size() > 500)
 		return "description: at most 500 characters";
-	if(!missing(jstr(b, "kind")) && !in_set(jstr(b, "kind"), KINDS))
+	if(!missing(jstr(b, "kind")) && !word_ok(jstr(b, "kind")))
 		return "kind: world, arena, app or other";
-	if(!missing(jstr(b, "audience")) && !in_set(jstr(b, "audience"), AUDIENCES))
+	if(!missing(jstr(b, "audience")) && !word_ok(jstr(b, "audience")))
 		return "audience: everyone, teen or adult";
-	if(!in_set(jstr(b, "access"), ACCESSES))
+	// An access or login this does not know is kept: a client that does
+	// not know it either leaves the listing out
+	if(!word_ok(jstr(b, "access")))
 		return "access: open, invite, starport, password or external";
 	// How people log in: its own accounts, Starport IDs, or both (10c)
-	const ss_ login = jstr(b, "login", "local");
-	if(!in_set(login, {"local", "starport", "both"}))
+	if(!word_ok(jstr(b, "login", "local")))
 		return "login: local, starport or both";
 	// An account made somewhere else first: where ([STARPORT] 3)
 	const ss_ signup = jstr(b, "signup_url");
@@ -216,8 +235,7 @@ static ss_ check_categories(const json::Value &b)
 		// 3: categories are versioned)
 		if(d.get(pair.first).is_undefined() || missing(v))
 			continue;
-		if(std::find(pair.second.begin(), pair.second.end(), v) ==
-				pair.second.end())
+		if(!word_ok(v))
 			return "descriptors."+pair.first+": one of "+dump(pair.second);
 	}
 	const json::Value &tags = b.get("tags");
@@ -365,11 +383,9 @@ static bool version_link(const json::Value &v)
 static json::Value version_answer(const json::Value &a, ss_ *why)
 {
 	const ss_ v = a.get("version").is_string() ? a.get("version").as_string() : "";
-	bool ok = !v.empty() && v.size() <= 32 && isdigit((unsigned char)v[0]);
-	for(char c : v)
-		ok = ok && (isdigit((unsigned char)c) || c == '.');
-	if(!ok){
-		*why = "no \"version\" of digits and dots";
+	// A pre-release too: the client offers it only to who asks
+	if(!interface::aitta::semver_ok(v)){
+		*why = "no \"version\" that is SemVer 2.0";
 		return json::Value();
 	}
 	if(!version_link(a.get("url"))){
@@ -591,43 +607,6 @@ struct Module: public interface::Module, public moderation::Host
 			m_settings = default_settings();
 			put("settings", "settings", m_settings);
 		}
-		// [SERVER_ADMIN_PAGE]: the mail server is the server's now, set on
-		// the Server window's Health page; this Starport's own, from
-		// before, goes there once
-		const json::Value old_smtp = m_settings.get("smtp");
-		if(old_smtp.is_object()){
-			bool taken = false;
-			accounts::access(m_server, [&](accounts::Interface *a){
-				taken = a->offer_smtp(jstr(old_smtp, "url"),
-						jstr(old_smtp, "from"), jstr(old_smtp, "user"),
-						jstr(old_smtp, "password"));
-			});
-			if(taken){
-				json::Value next = m_settings.deepcopy();
-				next.del_key("smtp");
-				m_settings = next;
-				put("settings", "settings", m_settings);
-			}
-		}
-		// [SHARED_HELPERS]: the moderators' list, from before, onto
-		// accounts' levels once
-		const json::Value old_mods = m_settings.get("moderators");
-		if(!old_mods.is_undefined()){
-			for(unsigned i = 0; old_mods.is_array() && i < old_mods.size(); i++){
-				const ss_ n = old_mods.at(i).is_string() ?
-						old_mods.at(i).as_string() : "";
-				if(!n.empty() && !is_moderator(n))
-					accounts::access(m_server, [&](accounts::Interface *a){
-						const ss_ why = a->set_level(n, accounts::LV_MODERATOR);
-						log_i(MODULE, "moderator %s: %s", cs(n),
-								why.empty() ? "a Steward now" : cs(why));
-					});
-			}
-			json::Value next = m_settings.deepcopy();
-			next.del_key("moderators");
-			m_settings = next;
-			put("settings", "settings", m_settings);
-		}
 		network::access(m_server, [&](network::Interface *iface){
 			iface->claim_http_path("/authorize");
 			iface->claim_http_path("/id");
@@ -653,10 +632,13 @@ struct Module: public interface::Module, public moderation::Host
 					v.stringify(), "Access-Control-Allow-Origin: *\r\n");
 		});
 	}
-	void refuse(const network::HttpRequest &r, const ss_ &why)
+	// code is for a program to match, error for a person to read
+	void refuse(const network::HttpRequest &r, const ss_ &why,
+			const ss_ &code = "refused")
 	{
 		json::Value v = json::object();
 		v.set("ok", false);
+		v.set("code", code);
 		v.set("error", why);
 		respond(r, 200, v);
 	}
@@ -808,12 +790,12 @@ struct Module: public interface::Module, public moderation::Host
 		const int64_t t = now_s();
 		if(!id.empty()){
 			if(!m_rates.ok("announce", id, 1, 20)){
-				refuse(r, "announced too often");
+				refuse(r, "announced too often", "too_often");
 				return;
 			}
 			l = load("listings", id);
 			if(!l.is_object() || !same(jstr(l, "secret"), jstr(b, "secret"))){
-				refuse(r, "no such listing, or not its secret");
+				refuse(r, "no such listing, or not its secret", "no_listing");
 				return;
 			}
 		} else {
@@ -862,6 +844,12 @@ struct Module: public interface::Module, public moderation::Host
 		for(const char *k : {"kind", "audience"})
 			if(jstr(l, k) == "?")
 				l.set(k, "");
+		// A newer Buildat's kind is "other"; its audience the strictest
+		if(!jstr(l, "kind").empty() && !in_set(jstr(l, "kind"), KINDS))
+			l.set("kind", "other");
+		if(!jstr(l, "audience").empty() &&
+				!in_set(jstr(l, "audience"), AUDIENCES))
+			l.set("audience", "adult");
 		if(jstr(l, "name").empty() || jstr(l, "name") == "?")
 			l.set("name", host);
 		l.set("login", jstr(b, "login", "local"));
@@ -873,9 +861,17 @@ struct Module: public interface::Module, public moderation::Host
 				b.get("descriptors").deepcopy() : json::object();
 		for(const auto &pair : DESCRIPTORS)
 			if(desc.get(pair.first).is_undefined() ||
-					jstr(desc, pair.first.c_str()) == "?")
+					std::find(pair.second.begin(), pair.second.end(),
+					jstr(desc, pair.first.c_str())) == pair.second.end())
 				desc.set(pair.first, "unknown");
 		l.set("descriptors", desc);
+		json::Value extra = json::object();
+		for(json::Iterator it(b); it.valid(); it.next())
+			if(!in_set(it.key(), ANNOUNCE_KEYS))
+				extra.set(it.key(), it.value());
+		// simplified: past 4 KB the unknown keys are dropped, not refused
+		l.set("extra", extra.stringify().size() <= 4096 ? extra :
+				json::object());
 		l.set("tags", b.get("tags").is_array() ? b.get("tags") : json::array());
 		l.set("languages", b.get("languages").is_array() ? b.get("languages") :
 				json::array());
@@ -1010,7 +1006,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		json::Value l = load("listings", jstr(b, "id"));
 		if(!l.is_object() || !same(jstr(l, "secret"), jstr(b, "secret"))){
-			refuse(r, "no such listing, or not its secret");
+			refuse(r, "no such listing, or not its secret", "no_listing");
 			return;
 		}
 		l.set("withdrawn", true);
@@ -1111,7 +1107,8 @@ struct Module: public interface::Module, public moderation::Host
 		j.url = ss_(l.get("tls").is_true() ? "https://" : "http://")+host+":"+
 				itos(jint(l, "port"))+
 				"/api/v1/starport/challenge?listing="+j.listing+"&nonce="+nonce;
-		j.expect = hex(interface::sha256::hmac(unhex(jstr(l, "secret")), nonce));
+		j.expect = hex(interface::sha256::hmac(unhex(jstr(l, "secret")),
+				"buildat-challenge-1\n"+nonce));
 		{
 			std::lock_guard<std::mutex> lock(m_vmutex);
 			// One thread checks them in turn, each up to http_get's two
@@ -1267,7 +1264,7 @@ struct Module: public interface::Module, public moderation::Host
 	void api_list(const network::HttpRequest &r, const json::Value &b)
 	{
 		if(!m_rates.ok("list", network::address_key(r.address), 60, 60)){
-			refuse(r, "listed too often");
+			refuse(r, "listed too often", "too_often");
 			return;
 		}
 		const ss_ key = jstr(b, "key");
@@ -1308,6 +1305,9 @@ struct Module: public interface::Module, public moderation::Host
 			for(const char *k : {"kind", "audience", "access", "descriptors"})
 				s.set(k, e.get(k));
 			s.set("restricted", st != "listed");
+			for(json::Iterator it(l.get("extra")); it.valid(); it.next())
+				if(s.get(it.key()).is_undefined())
+					s.set(it.key(), it.value());
 			if(jint(l, "updating_until") > now_s())
 				s.set("updating", true);
 			const ss_ fid = jstr(l, "fleet");
@@ -1714,7 +1714,7 @@ struct Module: public interface::Module, public moderation::Host
 		// Up to a hundred lookups a request, and nobody needs to log in
 		if(!m_rates.ok("report_status", network::address_key(r.address),
 				30, 60)){
-			refuse(r, "asked too often");
+			refuse(r, "asked too often", "too_often");
 			return;
 		}
 		const ss_ key = jstr(b, "key");
@@ -1749,7 +1749,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		// Every report read, for anyone: once a few seconds an address
 		if(!m_rates.ok("transparency", network::address_key(r.address), 10, 60)){
-			refuse(r, "asked too often");
+			refuse(r, "asked too often", "too_often");
 			return;
 		}
 		respond(r, 200, transparency());
@@ -2253,6 +2253,7 @@ struct Module: public interface::Module, public moderation::Host
 			v.set("result", result);
 		} else {
 			v.set("ok", false);
+			v.set("code", error == "session" ? "session" : "refused");
 			v.set("error", error);
 		}
 		respond(r, 200, v);
@@ -2574,7 +2575,13 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		// 10d: which ID a server's report of this identity is about
 		put("subs", scope+"|"+sub_of(name, scope), json::Value(name));
+		// The format is public (doc/starport.txt): v, typ and aud say what
+		// it is and for whom, listing or site the same as aud
 		json::Value p = json::object();
+		p.set("v", 1);
+		p.set("typ", site ? "site" : "server");
+		p.set("iss", jstr(m_settings, "name"));
+		p.set("aud", jstr(l, "id"));
 		p.set("sub", sub_of(name, scope));
 		p.set("name", shown);
 		p.set(site ? "site" : "listing", jstr(l, "id"));
@@ -2584,7 +2591,7 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ payload = base64url(p.stringify());
 		json::Value out = json::object();
 		out.set("token", payload+"."+hex(interface::sha256::hmac(
-				unhex(jstr(l, "secret")), payload)));
+				unhex(jstr(l, "secret")), "buildat-token-1\n"+payload)));
 		out.set(site ? "site" : "listing", jstr(l, "id"));
 		out.set("name", shown);
 		out.set("exp", jint(p, "exp"));
@@ -2818,6 +2825,7 @@ struct Module: public interface::Module, public moderation::Host
 			res.set("result", result);
 		} else {
 			res.set("ok", false);
+			res.set("code", "refused");
 			res.set("error", error);
 		}
 		network::access(m_server, [&](network::Interface *iface){
@@ -3131,7 +3139,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(!l.is_object())
 			throw Exception("no such listing");
 		const ss_ code = hex(interface::sha256::hmac(unhex(jstr(l, "secret")),
-				"claim")).substr(0, 16);
+				"buildat-claim-1\n")).substr(0, 16);
 		if(!same(code, jstr(q, "code")))
 			throw Exception("not its claim code");
 		// A server with a new key: its old listing's record comes along

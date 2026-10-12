@@ -63,7 +63,7 @@ code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 listed() { # app port address
 	mkdir -p "$tmp/$1/apps/$1"
 	cat > "$tmp/$1/apps/$1/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Play $1", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Play $1", "ids": "anyone",
  "address": "$3", "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",

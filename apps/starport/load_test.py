@@ -124,7 +124,8 @@ class Challenge(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         s = secrets.get(q.get("listing", [""])[0], "")
         out = json.dumps({"response": hmac.new(bytes.fromhex(s),
-            q.get("nonce", [""])[0].encode(), hashlib.sha256).hexdigest()})
+            b"buildat-challenge-1\n" + q.get("nonce", [""])[0].encode(),
+            hashlib.sha256).hexdigest()})
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()

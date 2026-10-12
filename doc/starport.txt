@@ -41,13 +41,19 @@ run their own. The official one is https://starport.buildat.org.
   visitor logs in there and allows, and the site's window gets
   `{buildat_starport_token, name, site}` by postMessage, to the site's
   origin only. The token is `<payload>.<hmac>`: payload the base64url
-  (no padding) of `{"sub", "name", "site", "exp"}`, hmac the hex of
-  HMAC-SHA256 over the payload's text with the secret's bytes (the
-  secret is hex). The site's server checks the hmac, the site id and
-  `exp` (a unix time), and knows the visitor by `sub`, which is the
+  (no padding) of `{"v": 1, "typ": "site", "iss", "aud", "site", "sub",
+  "name", "exp"}` (aud and site the site's id, iss the Starport's name),
+  hmac the hex of HMAC-SHA256 over `buildat-token-1\n` and the payload's
+  text with the secret's bytes (the secret is hex). The site's server
+  checks the hmac, v, typ, the site id and `exp` (a unix time), and
+  knows the visitor by `sub`, which is the
   same on every visit and different on any other site, server or
   fleet; the name is one the visitor picks for the site. A new secret
-  makes the old tokens fail.
+  makes the old tokens fail. A server's token is the same with typ
+  "server" and listing in place of site, and a server takes no other
+  typ. A sub is per listing or fleet: a server that joins or leaves a
+  fleet sees its players under new subs, and their accounts there under
+  the old ones are left behind.
 - A Starport ID holds a name, a password hash and, if given, a recovery
   e-mail. It is deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old
@@ -107,3 +113,12 @@ run their own. The official one is https://starport.buildat.org.
   `/api/v1/list` and the answer to an announce carry it as "play"; a listed
   server lets that page's WebSocket in while the Starport lists it, and
   `/authorize` takes its origin as if it were in `web_clients`.
+- The HTTP API is under `/api/v1/`; a path without `/v1/` answers
+  `{"ok": false, "code": "upgrade_required", ...}`. A refusal is `{"ok":
+  false, "code": ..., "error": ...}`: code for a program to match
+  ("refused", "too_often", "no_listing", "session"), error for a person.
+  A newer server's announce is taken: a kind this Starport does not know
+  is listed as "other", an audience as "adult", a descriptor's value as
+  "unknown"; an access or login word is listed as it is, and a client
+  that does not know it leaves the listing out. The announce's keys this
+  does not read (4 KB at most) are passed on in `/api/v1/list`.

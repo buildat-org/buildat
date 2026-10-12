@@ -12,9 +12,10 @@
 //   announces carry them.
 // - The challenge: the Starport asks /api/v1/starport/challenge on this
 //   server's own port (network:http_request) with a nonce, and the answer
-//   is HMAC-SHA256(secret, nonce): the server at the address holds the
+//   is HMAC-SHA256(secret, "buildat-challenge-1\n"+nonce): the server at
+//   the address holds the
 //   listing's secret.
-// - The claim code, HMAC(secret, "claim"), cut short, is what the operator
+// - The claim code, HMAC(secret, "buildat-claim-1\n"), cut short, is what the operator
 //   takes to their Starport account to claim the listing ([STARPORT] 2a):
 //   in the log and in starport_claim.txt, which only the server's admin
 //   can read.
@@ -219,14 +220,15 @@ struct Module: public interface::Module, public Interface
 	ss_ config_path(){ return m_dir+"/starport.json"; }
 
 	// [APP_CATEGORY] the listing's kind when starport.json names none: the
-	// app's own, main/meta.json's "kind", the local-only ones as "other"
+	// app's own, main/meta.json's "kind"; one Starport does not know it
+	// lists as "other"
 	ss_ app_kind()
 	{
 		json::Value m = json::load_string(read_file(
 				m_server->get_module_path("main")+"/meta.json").c_str());
 		const ss_ k = m.get("kind").is_string() ? m.get("kind").as_string() :
 				"";
-		return k == "world" || k == "arena" || k == "app" ? k : "other";
+		return k.empty() ? "other" : k;
 	}
 
 	json::Value config()
@@ -332,6 +334,12 @@ struct Module: public interface::Module, public Interface
 				m_config_text = text;
 				return;
 			}
+			// 0.6's "login" is not read since 0.7 ([COMPAT_BREAK_07]): said,
+			// so that IDs going off on an upgrade is not silent
+			if(c.get("login").is_string() && c.get("ids").is_undefined())
+				log_w(MODULE, "%s: \"login\" is not read any more; IDs are "
+						"off until it says \"ids\": \"anyone\" or "
+						"\"approved\"", cs(config_path()));
 		}
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -443,7 +451,7 @@ struct Module: public interface::Module, public Interface
 	static ss_ claim_code(const Listing &l)
 	{
 		return interface::sha256::hex(
-				interface::sha256::hmac(l.secret, "claim")).substr(0, 16);
+				interface::sha256::hmac(l.secret, "buildat-claim-1\n")).substr(0, 16);
 	}
 
 	void run()
@@ -709,20 +717,22 @@ struct Module: public interface::Module, public Interface
 		if(!v.is_object() || !v.get("ok").is_true()){
 			const ss_ why = v.is_object() && v.get("error").is_string() ?
 					v.get("error").as_string() : answer.substr(0, 200);
+			const ss_ code = v.is_object() && v.get("code").is_string() ?
+					v.get("code").as_string() : "";
 			log_w(MODULE, "Announce to %s refused: %s", cs(url), cs(why));
-			if(why != "announced too often")
+			if(code != "too_often")
 				let_play_page_in(url, json::Value());
 			std::lock_guard<std::mutex> lock(m_mutex);
 			m_status[url] = "refused: "+why;
 			// The Starport dropped the listing (30 days unheard, or its
 			// data lost): listed anew shortly, with a new claim code,
 			// rather than refused forever
-			if(why == "no such listing, or not its secret" &&
+			if(code == "no_listing" &&
 					m_listings.erase(url)){
 				save_state();
 				return false;
 			}
-			return why != "announced too often";
+			return code != "too_often";
 		}
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -798,7 +808,6 @@ struct Module: public interface::Module, public Interface
 		return ids_mode_of(c) != "off" ? "starport" : "invite";
 	}
 
-	// "ids", or what an older file's "login" meant
 	static ss_ ids_mode_of(const json::Value &c)
 	{
 		if(!is_on(c))
@@ -807,11 +816,7 @@ struct Module: public interface::Module, public Interface
 		if(ids.is_string() && (ids.as_string() == "anyone" ||
 				ids.as_string() == "approved"))
 			return ids.as_string();
-		if(ids.is_string())
-			return "off";
-		const json::Value &login = c.get("login");
-		return login.is_string() && (login.as_string() == "starport" ||
-				login.as_string() == "both") ? "anyone" : "off";
+		return "off";
 	}
 
 	ss_ ids_mode()
@@ -1038,7 +1043,8 @@ struct Module: public interface::Module, public Interface
 			std::lock_guard<std::mutex> lock(m_mutex);
 			for(auto &pair : m_listings){
 				const ss_ want = interface::sha256::hex(
-						interface::sha256::hmac(pair.second.secret, payload));
+						interface::sha256::hmac(pair.second.secret,
+						"buildat-token-1\n"+payload));
 				// Compared in full whatever matches: an early-out compare
 				// says by its time how much of a guess was right
 				unsigned char d = want.size() == sig.size() ? 0 : 1;
@@ -1054,10 +1060,18 @@ struct Module: public interface::Module, public Interface
 			return "The token is not from a Starport this server is on";
 		const json::Value p = json::load_string(unbase64url(payload).c_str());
 		if(!p.is_object() || !p.get("sub").is_string() ||
-				!p.get("name").is_string())
+				!p.get("name").is_string() || !p.get("v").is_integer())
 			return "A malformed token";
-		if(p.get("listing").is_string() &&
-				p.get("listing").as_string() != listing)
+		if(p.get("v").as_integer() != 1)
+			return "A token this version of Buildat cannot read";
+		// A site's token is not a server's, and one for another listing
+		// on the same secret is not this one's
+		if(!p.get("typ").is_string() || p.get("typ").as_string() != "server")
+			return "Not a token for a server";
+		if(!p.get("listing").is_string() ||
+				p.get("listing").as_string() != listing ||
+				!p.get("aud").is_string() ||
+				p.get("aud").as_string() != listing)
 			return "The token is for another server";
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
@@ -1089,9 +1103,8 @@ struct Module: public interface::Module, public Interface
 		const ss_ id = r.param("listing");
 		const ss_ nonce = r.param("nonce");
 		// Only the nonce a Starport sends: 32 lowercase hex digits. The
-		// same secret signs the claim code (HMAC of "claim") and Starport
-		// ID tokens (HMAC of a base64url payload), and neither is ever
-		// that shape -- an answer to any string was both, for anyone.
+		// same secret signs the claim code and Starport ID tokens, each
+		// HMAC input with its own prefix.
 		const bool nonce_ok = nonce.size() == 32 &&
 				nonce.find_first_not_of("0123456789abcdef") == ss_::npos;
 		ss_ response;
@@ -1100,7 +1113,8 @@ struct Module: public interface::Module, public Interface
 			for(auto &pair : m_listings){
 				if(pair.second.id == id && !id.empty())
 					response = interface::sha256::hex(
-							interface::sha256::hmac(pair.second.secret, nonce));
+							interface::sha256::hmac(pair.second.secret,
+							"buildat-challenge-1\n"+nonce));
 			}
 		}
 		const int status = response.empty() || nonce.empty() ? 404 : 200;

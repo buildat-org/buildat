@@ -33,7 +33,7 @@ start_server "$tmp/sp.log" "setup code" 120 $SP \
 pids+=($SERVER_PID)
 mkdir -p "$tmp/f/apps/floorplanner"
 cat > "$tmp/f/apps/floorplanner/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Web house", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Web house", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "open",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "none",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",

@@ -68,9 +68,11 @@ def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 def check(token, site):
     p, mac = token.split(".")
-    want = hmac.new(bytes.fromhex(site["secret"]), p.encode(), hashlib.sha256).hexdigest()
+    want = hmac.new(bytes.fromhex(site["secret"]), b"buildat-token-1\n" +
+            p.encode(), hashlib.sha256).hexdigest()
     assert hmac.compare_digest(mac, want), "the hmac"
     v = json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))
+    assert v["v"] == 1 and v["typ"] == "site" and v["aud"] == site["id"], v
     assert v["site"] == site["id"] and v["exp"] > time.time(), v
     return v
 r = call("authorize_info", site=sites[0]["id"], web=True)
@@ -123,7 +125,8 @@ python3 - "$tok" "$secret" "$sub" <<'PY' || fail "the page's token"
 import sys, json, hmac, hashlib, base64
 tok, secret, sub = sys.argv[1:4]
 p, mac = tok.split(".")
-assert mac == hmac.new(bytes.fromhex(secret), p.encode(), hashlib.sha256).hexdigest()
+assert mac == hmac.new(bytes.fromhex(secret), b"buildat-token-1\n" + p.encode(),
+        hashlib.sha256).hexdigest()
 assert json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["sub"] == sub
 PY
 echo "ok: the site's page got the token from the Starport's window ($t/01_authorize.png)"

@@ -171,7 +171,7 @@ sp 10.0.0.1 id/login '{"name":"u3","password":"upass1234"}' | grep -q '"ok":true
 	fail "another /24 held back by 10.6.0.0/24's wrong logins"
 # The first listing claimed by the Starport's admin
 scode=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
-ccode=$(python3 -c 'import hmac,hashlib,sys; print(hmac.new(bytes.fromhex(sys.argv[1]), b"claim", hashlib.sha256).hexdigest()[:16])' "${lsecrets[0]}")
+ccode=$(python3 -c 'import hmac,hashlib,sys; print(hmac.new(bytes.fromhex(sys.argv[1]), b"buildat-claim-1\n", hashlib.sha256).hexdigest()[:16])' "${lsecrets[0]}")
 printf 'delay 6000\nquit\n' > "$t/cmds_sp"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$scode \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
@@ -236,7 +236,7 @@ echo "ok: day 0 on Hearth"
 b="$here/Build/bin/buildat"
 mkdir -p "$t/app/main"
 echo 'int x;' > "$t/app/main/main.cpp"
-printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 2,
+printf '{"author": "tester", "name": "demo", "version": "1.0.0", "engine_api": 2,
 	"license_code": "MIT", "license_media": "CC0-1.0", "description": "sim",
 	"audience": "everyone"}\n' > "$t/app/meta.json"
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
@@ -248,7 +248,7 @@ BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/
 	-o sound_mute=1 -s 127.0.0.1:$AP -c @"$t/cmds_ai" > "$t/ai.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/ai.log" || fail "the Aitta bind (ai.log)"
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/rel" 2>/dev/null) || fail "pack"
-"$b" aitta publish "$zip" 127.0.0.1:$AP 2>&1 | grep -q "listed: tester/demo/1.0" || fail "publish"
+"$b" aitta publish "$zip" 127.0.0.1:$AP 2>&1 | grep -q "listed: tester/demo/1.0.0" || fail "publish"
 curl -s "http://127.0.0.1:$AP/" | grep -q "demo" && fail "the release on the public page at once"
 echo "ok: day 0 on Aitta"
 
@@ -321,7 +321,7 @@ for i in 1 2 3 4 5; do
 done
 advance $((7 * D))
 sleep 2
-grep -aq "file [0-9]* deleted, unused" "$t/hearth.log" || fail "the unused file not deleted after 183 days (hearth.log)"
+grep -aqE "file [0-9]* deleted, unused|files no message names deleted" "$t/hearth.log" || fail "the unused file not deleted after 183 days (hearth.log)"
 listed "$hid" || fail "Hearth's listing gone by 183 days"
 sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}" | grep -q '"ok":true' &&
 	fail "a session unused since day 31 on day 183"

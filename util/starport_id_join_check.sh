@@ -4,7 +4,7 @@
 # covers: apps/hearth/main/meta.json apps/aitta/main/meta.json builtin/starport_announce/**
 # [STARPORT_PAGE_WAITS]: Hearth and Aitta answer their admin's Starport page
 # and take a Starport ID. For each: a Starport, the app listed on it by
-# starport.json with IDs on ("login": "both"), the listing claimed by the
+# starport.json with IDs on ("ids": "anyone"), the listing claimed by the
 # Starport's admin, an ID's token for it, and a join with that token and
 # the app's setup code -- the ID becomes the app's first admin. The page's
 # packet is starport_announce's; an app that does not depend on it waits
@@ -40,7 +40,7 @@ for app in ${@:-hearth aitta}; do
 	d=$tmp/$app
 	mkdir -p "$d/apps/$app"
 	cat > "$d/apps/$app/starport.json" <<EOF
-{"starports": ["http://127.0.0.1:$SP"], "name": "Check $app", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check $app", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
@@ -66,7 +66,7 @@ EOF
 		fail "$app: the claim ($tmp/sp_$app.log)"
 	token=$(python3 - "$SP" "$id" "$app" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 r = call("id/register", name="id" + sys.argv[3], password="secret1",

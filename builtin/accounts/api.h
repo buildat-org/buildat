@@ -146,11 +146,6 @@ namespace accounts
 		// thread, so it holds only copies.
 		virtual void mail(const ss_ &to, const ss_ &subject, const ss_ &text,
 				std::function<void(const ss_ &error)> done) = 0;
-		// An app's own SMTP setting from before, taken when the server has
-		// none (Starport's, once). True when the server has one now, so the
-		// app's can go.
-		virtual bool offer_smtp(const ss_ &url, const ss_ &from,
-				const ss_ &user, const ss_ &password) = 0;
 		// [TRUST_LADDER] An account's trust level, a number (LV_*): the
 		// admin's is LV_ADMIN; the others' are saved, and go with the
 		// account. LV_MEMBER and up is trusted, which frees its place in

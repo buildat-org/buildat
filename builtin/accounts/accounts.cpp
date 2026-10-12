@@ -2877,24 +2877,6 @@ struct Module: public interface::Module, public Interface
 		}).detach();
 	}
 
-	bool offer_smtp(const ss_ &url, const ss_ &from, const ss_ &user,
-			const ss_ &password)
-	{
-		if(!m_store)
-			return false;
-		if(url.empty() || !jstr(smtp(), "url").empty())
-			return true;
-		json::Value v = json::object();
-		v.set("url", url);
-		v.set("from", from);
-		v.set("user", user);
-		v.set("password", password);
-		m_store->set("smtp", v.stringify());
-		log_i(MODULE, "The mail server %s taken over as the server's",
-				cs(url));
-		return true;
-	}
-
 	// arg: {"url", "from", "user", "password"}; an empty password keeps
 	// the one set, so that the page never has it
 	ss_ set_smtp(const ss_ &arg, const ss_ &by)

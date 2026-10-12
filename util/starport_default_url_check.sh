@@ -83,7 +83,7 @@ echo "ok: announced unlisted to the default Starport at the admin's https addres
 
 token=$(python3 - "$SP" "$id" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 r = call("id/register", name="defid", password="secret1",
@@ -106,7 +106,7 @@ echo "ok: an ID joined"
 # included
 python3 - "$SP" "$ANTLS" <<'PY' || fail "a look-alike listing's token ($tmp/sp.log)"
 import json, sys, time, urllib.request, urllib.error
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     try:
         return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())

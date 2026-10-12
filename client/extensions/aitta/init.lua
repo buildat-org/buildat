@@ -175,7 +175,18 @@ local function cannot_run(rel)
 		return "made for an older Buildat"
 	elseif api > __buildat_aitta_dev("engine_api") then
 		return "needs a newer Buildat"
+	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" then
+		return "a kind of package this Buildat does not know"
 	end
+end
+
+-- By SemVer; by the time an Aitta listed it for a version that is not one
+local function newer_release(rel, old)
+	local c = starport.semver_cmp(rel.version, old.version)
+	if c then
+		return c > 0
+	end
+	return (tonumber(rel.time) or 0) > (tonumber(old.time) or 0)
 end
 
 -- An installed release's client half started with no server, the pages
@@ -544,8 +555,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					local runs = not cannot_run(rel)
 					local old_runs = old and not cannot_run(old)
 					if not old or (runs and not old_runs) or
-							(runs == old_runs and (tonumber(rel.time) or 0) >
-							(tonumber(old.time) or 0)) then
+							(runs == old_runs and newer_release(rel, old)) then
 						newest[k] = rel
 					end
 				end
@@ -655,7 +665,6 @@ end
 -- newest serverless release of it on the Aittas in the settings,
 -- installed if it is not (the signature checked) and played. With no
 -- answer from them, an installed version of it is played.
--- simplified: the newest by the time an Aitta listed it, as the list's
 function M.run_serverless(key)
 	local ui = require("buildat/extension/ui_utils").safe
 	local e = effective()
@@ -706,8 +715,7 @@ function M.run_serverless(key)
 							tostring(rel.author) .. "/" ..
 							tostring(rel.name) == key and
 							(e.filters.unreviewed or rel.review == "reviewed")
-							and (not best or (tonumber(rel.time) or 0) >
-							(tonumber(best.time) or 0)) then
+							and (not best or newer_release(rel, best)) then
 						rel.aitta = a
 						best = rel
 					end

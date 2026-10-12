@@ -31,7 +31,7 @@ CHECK_PIDS+=($SERVER_PID)
 SP=$SERVER_PORT
 mkdir -p "$t/he/apps/hearth"
 cat > "$t/he/apps/hearth/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
@@ -69,7 +69,7 @@ grep -aq "Joined as admin" "$t/adm.log" ||
 # The user's client: an ID signed in, the Starport's address accepted
 session=$(python3 - "$SP" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 r = json.loads(urllib.request.urlopen(B + "id/register", json.dumps(dict(
     name="reader", password="secret1",
     birth_year=time.gmtime().tm_year - 40)).encode()).read())

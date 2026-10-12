@@ -34,17 +34,17 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 mkdir -p "$t/app/main"
 echo 'int x;' > "$t/app/main/main.cpp"
 echo "the changes" > "$t/app/CHANGELOG.md"
-manifest(){ # author version licence
-	printf '{"author": "%s", "name": "demo", "version": "%s",
+manifest(){ # author version licence [more keys]
+	printf '{"author": "%s", "name": "demo", "version": "%s",%s
 		"engine_api": 2, "license_code": "%s", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "https://forum.example",
-		"changelog": "CHANGELOG.md"}\n' "$1" "$2" "$3" > "$t/app/meta.json"
+		"changelog": "CHANGELOG.md"}\n' "$1" "$2" "${4:-}" "$3" > "$t/app/meta.json"
 }
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 "$b" aitta keygen "$t/stranger" > /dev/null 2>&1 || fail "keygen 2"
 
 # 1. Before any key is bound
-manifest tester 1.0 MIT
+manifest tester 1.0.0 MIT
 zip=$("$b" aitta pack "$t/app" "$t/stranger" "$t/s" 2>/dev/null) || fail "pack"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1) &&
 	fail "an unbound key published: $out"
@@ -61,11 +61,11 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/cl.log" ||
 	fail "the bind did not go through ($(grep -a 'ai:' "$t/cl.log" | head -2))"
 
 # 2. Published, listed, downloaded, installed
-zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.0"
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.0.0"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
-echo "$out" | grep -q "listed: tester/demo/1.0" || fail "publish 1.0: $out"
+echo "$out" | grep -q "listed: tester/demo/1.0.0" || fail "publish 1.0.0: $out"
 list=$(curl -s "http://127.0.0.1:$P/api/v1/aitta/list")
-echo "$list" | grep -q '"version":"1.0"' || fail "1.0 is not listed: $list"
+echo "$list" | grep -q '"version":"1.0.0"' || fail "1.0.0 is not listed: $list"
 echo "$list" | grep -q '"changelog":"CHANGELOG.md","delisted":false,.*"home_hearth":"https://forum.example"' ||
 	fail "the home Hearth and the changelog are not listed: $list"
 sha=$(sha256sum "$zip" | cut -d' ' -f1)
@@ -75,25 +75,37 @@ cmp -s "$t/dl.zip" "$zip" || fail "the archive served is not the one published"
 "$b" aitta install "$t/dl.zip" "$t/user" > /dev/null 2>&1 ||
 	fail "the downloaded release did not install"
 
+# A key a newer Buildat added is kept in the release's manifest.
+# simplified: a newer kind ("other" in the list) is not driven: pack
+# refuses a kind it does not know
+manifest tester 1.3.0 MIT ' "colour": "blue",'
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.3.0"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester/demo/1.3.0" || fail "publish 1.3.0: $out"
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
+r = [r for r in json.load(sys.stdin)["releases"] if r["version"] == "1.3.0"][0]
+assert r["manifest"]["colour"] == "blue", r' ||
+	fail "the newer key was not kept"
+
 # 3. A licence not taken; an author not the key's
-manifest tester 1.1 Proprietary
-zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.1"
+manifest tester 1.1.0 Proprietary
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.1.0"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "not one this instance takes" ||
 	fail "a proprietary licence was not refused"
-manifest someone 1.2 MIT
-zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2"
+manifest someone 1.2.0 MIT
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2.0"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "bound to the author" ||
 	fail "another author's manifest was not refused"
 
 # 4. Delisted
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
-BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0"}' \
+BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0.0"}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
 # The releases, not the "delisted" beside them ([AITTA_REPORTS])
 curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
-sys.exit(0 if any(r["version"] == "1.0" for r in json.load(sys.stdin)["releases"]) else 1)' &&
+sys.exit(0 if any(r["version"] == "1.0.0" for r in json.load(sys.stdin)["releases"]) else 1)' &&
 	fail "a delisted release is listed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' \
 	"http://127.0.0.1:$P/api/v1/aitta/archive/$sha.zip")" = 404 ] ||
@@ -104,4 +116,4 @@ sys.exit(0 if any(r["version"] == "1.0" for r in json.load(sys.stdin)["releases"
 curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/v1/aitta/info"; done) |
 	grep -q "too many requests from your network" ||
 	fail "490 reads in a row were not limited"
-echo "PASS: bound, published, listed, installed; an unbound key, a licence, another author refused; delisted; reads limited"
+echo "PASS: bound, published, listed, installed; a newer key kept; an unbound key, a licence, another author refused; delisted; reads limited"

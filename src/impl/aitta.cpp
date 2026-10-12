@@ -184,6 +184,42 @@ static bool plain_name(const ss_ &s, bool dots)
 	return true;
 }
 
+// SemVer 2.0 ([COMPAT_BREAK_07] 8k): MAJOR.MINOR.PATCH, numbers without a
+// leading zero, then -pre.release and +build, dot-separated identifiers of
+// 0-9A-Za-z-, a numeric one of the prerelease without a leading zero
+bool semver_ok(const ss_ &v)
+{
+	if(!plain_name(v, true))
+		return false;
+	const size_t plus = v.find('+');
+	const ss_ build = plus == ss_::npos ? "" : v.substr(plus + 1);
+	const ss_ head = v.substr(0, plus);
+	const size_t dash = head.find('-');
+	const ss_ core = head.substr(0, dash);
+	const ss_ pre = dash == ss_::npos ? "" : head.substr(dash + 1);
+	auto ids = [](const ss_ &s, bool numeric_only, bool no_lead_zero){
+		size_t n = 0;
+		for(size_t a = 0; a <= s.size(); n++){
+			size_t b = s.find('.', a);
+			if(b == ss_::npos)
+				b = s.size();
+			const ss_ id = s.substr(a, b - a);
+			const bool num = !id.empty() &&
+					id.find_first_not_of("0123456789") == ss_::npos;
+			if(id.empty() || id.find_first_not_of("0123456789"
+					"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-") !=
+					ss_::npos || (numeric_only && !num) ||
+					(no_lead_zero && num && id.size() > 1 && id[0] == '0'))
+				return (size_t)0;
+			a = b + 1;
+		}
+		return n;
+	};
+	return ids(core, true, true) == 3 &&
+			(dash == ss_::npos || ids(pre, false, true) > 0) &&
+			(plus == ss_::npos || ids(build, false, false) > 0);
+}
+
 // An http(s) address with no space, quote or angle bracket in it
 static bool address_ok(const ss_ &a)
 {
@@ -255,7 +291,7 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 	return why.empty() ? "" : "meta.json: "+why;
 }
 
-ss_ check_manifest(const json::Value &m, bool any_engine_api)
+ss_ check_manifest(const json::Value &m, bool service)
 {
 	if(!m.is_object())
 		return "meta.json is not an object";
@@ -267,12 +303,12 @@ ss_ check_manifest(const json::Value &m, bool any_engine_api)
 		return "\"author\": 1 to 40 of a-z, 0-9 and _";
 	if(!plain_name(str("name"), false))
 		return "\"name\": 1 to 40 of a-z, 0-9 and _";
-	if(!plain_name(str("version"), true))
-		return "\"version\": 1 to 40 of letters, digits, . - + and _";
+	if(!semver_ok(str("version")))
+		return "\"version\": a SemVer 2.0 version, like 1.0.0 or 1.0.0-beta.1";
 	const json::Value &api = m.get("engine_api");
 	if(!api.is_integer() || api.as_integer() < 1)
 		return "\"engine_api\": the engine API it is written against, 1 or more";
-	if(!any_engine_api && !engine_api_refusal(api.as_integer()).empty())
+	if(!service && !engine_api_refusal(api.as_integer()).empty())
 		return engine_api_refusal(api.as_integer());
 	if(str("license_code").empty() || str("license_media").empty())
 		return "\"license_code\" and \"license_media\": its licences";
@@ -291,12 +327,18 @@ ss_ check_manifest(const json::Value &m, bool any_engine_api)
 			return ss_("\"")+k+"\": a path inside the archive, like icon.png";
 	// [FRONT_PAGES]: who it suits; a browser's page at / lists only
 	// "everyone" and "teen"
-	const json::Value &aud = m.get("audience");
-	if(!aud.is_undefined() && str("audience") != "everyone" &&
-			str("audience") != "teen" && str("audience") != "adult")
+	// A newer Buildat's word, to a service: a word
+	auto known = [&](const char *k, std::initializer_list<const char*> set){
+		if(m.get(k).is_undefined())
+			return true;
+		for(const char *x : set)
+			if(str(k) == x)
+				return true;
+		return service && plain_name(str(k), false);
+	};
+	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	const json::Value &kind = m.get("kind");
-	if(!kind.is_undefined() && str("kind") != "app" && str("kind") != "extension")
+	if(!known("kind", {"app", "extension"}))
 		return "\"kind\": \"app\" or \"extension\"";
 	// An extension's name in the client is "<author>__<name>", which has to
 	// split one way only

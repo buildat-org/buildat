@@ -191,19 +191,19 @@ releases") and appeals there, once a statement; another moderator than
 the one who acted decides. A delisted release installed in a client is noted on its tile
 when the launcher next fetches that Aitta's list.
 
-    GET  /api/v1/aitta/list                      the listed releases, JSON, and
+    GET  /api/v1/aitta/list                   the listed releases, JSON, and
                                               the delisted ones with why;
                                               ?serverless=1 those only
-    POST /api/v1/aitta/report                    {release (or <author>/<name>
+    POST /api/v1/aitta/report                 {release (or <author>/<name>
                                               for its page), reason, text,
                                               key}
-    POST /api/v1/aitta/report_status             {key, receipts}: outcomes
+    POST /api/v1/aitta/report_status          {key, receipts}: outcomes
     GET  /api/v1/aitta/archive/<sha256>.zip|.sig a listed release's files
-    GET  /api/v1/aitta/media/<sha256>            a listed release's icon or
+    GET  /api/v1/aitta/media/<sha256>         a listed release's icon or
                                               screenshot, image/png or
                                               image/jpeg by its bytes, or a
                                               shown page's screenshot
-    GET  /api/v1/aitta/info?key=<public key>     {ok, licences, author}: the
+    GET  /api/v1/aitta/info?key=<public key>  {ok, licences, author}: the
                                               author the key is bound to
     GET  /                                    a page of each package's latest
                                               release, for a browser
@@ -212,6 +212,12 @@ when the launcher next fetches that Aitta's list.
                                               folded), then Install: "On
                                               the client" and "On a
                                               dedicated server", folded
+
+A refusal is {"ok": false, "code": ..., "error": ...}: code for a program
+to match ("refused"; "upgrade_required" for a path without /v1/), error
+for a person. A manifest's key this Aitta does not know is kept in the
+release's "manifest"; a kind it does not know is listed as "other", which
+no client installs, and an audience it does not know as "adult".
 
 Every API answer has Access-Control-Allow-Origin: *, so a play page on
 another origin fetches the list and the archives. A serverless release

@@ -51,7 +51,7 @@ code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 # Once the Starport listens, or the Hearth's first announce is lost
 mkdir -p "$tmp/he/apps/hearth"
 cat > "$tmp/he/apps/hearth/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
@@ -75,7 +75,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"e
 # session for the client
 read -r boss session < <(python3 - "$SP" "$id" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     r = json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
     assert r["ok"], r
@@ -117,10 +117,10 @@ client_dir "$tmp/out" 0
 pause() { # dir log listed extra_cmds...
 	local d=$1 log=$2 listed=$3
 	shift 3
-	rm -f "$d/serverlist/serverlist.csv"
+	rm -f "$d/extensions/serverlist/serverlist.csv"
 	if [ -n "$listed" ]; then
-		mkdir -p "$d/serverlist"
-		printf '127.0.0.1:%s|%s|0|devtest\n' $LU "$listed" > "$d/serverlist/serverlist.csv"
+		mkdir -p "$d/extensions/serverlist"
+		printf '127.0.0.1:%s|%s|0|devtest\n' $LU "$listed" > "$d/extensions/serverlist/serverlist.csv"
 	fi
 	{
 		echo "delay 3000"

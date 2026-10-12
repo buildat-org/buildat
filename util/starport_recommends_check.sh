@@ -32,7 +32,7 @@ Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
 pids+=($!)
 mkdir -p "$tmp/he/apps/hearth"
 cat > "$tmp/he/apps/hearth/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
@@ -62,7 +62,7 @@ grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.
 # Starport's host accepted, the first Aitta known only by the old "aitta"
 session=$(python3 - "$SP" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 r = json.loads(urllib.request.urlopen(B + "id/register", json.dumps(dict(
     name="reader", password="secret1",
     birth_year=time.gmtime().tm_year - 40)).encode()).read())
@@ -72,7 +72,7 @@ PY
 ) || fail "the ID API"
 mkdir -p "$tmp/cl"
 cat > "$tmp/cl/starport.json" <<EOF
-{"starports": ["http://127.0.0.1:$SP"], "aitta": "https://aitta.buildat.org",
+{"starports": ["http://127.0.0.1:$SP"], "aittas": ["https://aitta.buildat.org"],
  "ids": {"http://127.0.0.1:$SP": {"session": "$session", "name": "reader"}}}
 EOF
 printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","Starport","%s","%s","","",""\n' \

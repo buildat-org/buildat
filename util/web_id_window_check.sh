@@ -43,7 +43,7 @@ start_server "$tmp/sp.log" "setup code" 120 $SP \
 pids+=($SERVER_PID)
 mkdir -p "$tmp/h/apps/hearth"
 cat > "$tmp/h/apps/hearth/starport.json" <<J
-{"starports": ["http://127.0.0.1:$SP"], "name": "Web hearth", "login": "both",
+{"starports": ["http://127.0.0.1:$SP"], "name": "Web hearth", "ids": "anyone",
  "kind": "app", "audience": "everyone", "access": "auto",
  "descriptors": {"violence": "none", "chat": "moderated", "ugc": "moderated",
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
