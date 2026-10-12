@@ -141,9 +141,9 @@ It is built separately, with
 
 It builds in `Build-web/` and writes `web/`, which the server serves from by
 default; `buildat_server -W <dir>` serves another. Behind an https reverse
-proxy the page connects over wss. The page takes more arguments after `?`
-in its address (`?-l 4` for a verbose log), but only `-l`, `-u` and `-o`:
-a link is anybody's to write. The server accepts a WebSocket only from its
+proxy the page connects over wss. Its address takes `?log=4` for a verbose
+log, `scale=` for the UI scale and `pref=<key>=<value>` (repeatable), and
+nothing else of the command line: a link is anybody's to write. The server accepts a WebSocket only from its
 own page's origin.
 
 Play

@@ -16,7 +16,8 @@ set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 a=
-trap '[ -n "$a" ] && kill $a 2>/dev/null; rm -rf "$t"' EXIT
+o=
+trap '[ -n "$a" ] && kill $a 2>/dev/null; [ -n "$o" ] && kill $o 2>/dev/null; rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 cd "$here/Build"
 
@@ -30,7 +31,9 @@ for _ in $(seq 60); do
 	[ -s "$t/cache/local_server.pid" ] && break
 	sleep 1
 done
-read -r server client < "$t/cache/local_server.pid" ||
+pf=$t/cache/local_server.pid
+server=$(sed -n 's/^server=//p' "$pf"); client=$(sed -n 's/^client=//p' "$pf")
+[ -n "$server" ] && [ -n "$client" ] && grep -q '^v=1$' "$pf" ||
 	fail "A wrote no pidfile ($(tail -3 "$t/a.log"))"
 # $a is timeout's; the client is its child
 [ "$(ps -o ppid= -p "$client" | tr -d ' ')" = "$a" ] ||
@@ -41,6 +44,28 @@ timeout 60 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ub" -w 640x
 grep -q "Adopted leftover" "$t/b.log" && fail "B adopted A's server"
 kill -0 "$server" || fail "B's quit stopped A's server"
 
+# 1b. An orphaned server ([COMPAT_BREAK_07] 8i) is adopted by a client of
+# its own version only. A client's own dies with it here (PDEATHSIG), so
+# the orphan is a server started apart and the pidfile is written for it
+kill "$a" 2>/dev/null; wait "$a" 2>/dev/null; a=
+setsid bin/buildat_server -m ../apps/digger -D "$t/uo" -C "$t/co" -P 29866 -l 2 \
+	> "$t/o.log" 2>&1 &
+server=$!; o=$server
+sleep 2
+kill -0 "$server" || fail "the orphan did not start ($(tail -3 "$t/o.log"))"
+printf 'v=1\nversion=0.0.1\nserver=%s\nclient=0\napp=digger\nport=29866\n' \
+	"$server" > "$pf"
+timeout 60 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ub" -w 640x360 -l 3 \
+	-o sound_mute=1 -c @"$t/short" > "$t/b2.log" 2>&1
+grep -q "Adopted leftover" "$t/b2.log" && fail "another version's server was adopted"
+kill -0 "$server" || fail "another version's server was stopped"
+sed -i "s/^version=.*/version=$(sed -n 's/.*buildat \([^ ]*\) (.*/\1/p' "$t/b2.log" | head -1)/" "$pf"
+timeout 60 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ub" -w 640x360 -l 3 \
+	-o sound_mute=1 -c @"$t/short" > "$t/b3.log" 2>&1
+grep -q "Adopted leftover local server pid $server" "$t/b3.log" ||
+	fail "its own version's orphaned server was not adopted (b3.log)"
+kill "$server" 2>/dev/null
+
 # 2
 log=$(ls -d "$here"/Build/cache 2>/dev/null || echo "${XDG_CACHE_HOME:-$HOME/.cache}/buildat")/buildat.log
 before=$(stat -c %Y "$log" 2>/dev/null)
@@ -48,4 +73,4 @@ timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/uc" -w 640x360 -l 3 -o so
 	-c @"$t/short" > "$t/c.log" 2>&1
 [ "$(stat -c %Y "$log" 2>/dev/null)" = "$before" ] ||
 	fail "a scripted client wrote $log"
-echo "PASS: B left A's server running; a scripted client kept out of the default cache"
+echo "PASS: B left A's server running; an orphaned one adopted by its own version only; a scripted client kept out of the default cache"

@@ -63,7 +63,7 @@ BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME
 	-o sound_mute=1 -c @"$t/cmds" > "$t/cl.log" 2>&1
 grep -aq 'menu "ui_stack_[0-9_.]*: luanti_client pause"' "$t/cl.log" ||
 	fail "no pause menu after Escape"
-grep -aq '"view_range" : 200' "$t/cl/luanti_client/settings.json" 2>/dev/null ||
+grep -aq '"view_range" : 200' "$t/cl/extensions/luanti_client/settings.json" 2>/dev/null ||
 	fail "the view range was not picked"
 grep -a 'scan scan: menu' "$t/cl.log" | tail -1 | grep -q '"ui_stack_[0-9_.]*: luanti_client"' ||
 	fail "Escape did not close the pause menu"

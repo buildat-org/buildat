@@ -5,6 +5,7 @@
 // The local server the client starts, stops and adopts, and its state,
 // which outlives a CApp reboot; included by app.cpp ([SPLITS]: moved out
 // as it was).
+#include "core/version.h"
 
 // Survives CApp reboot so disconnect can kill the server we started.
 static interface::process::Handle g_local_server;
@@ -125,8 +126,11 @@ static void write_pidfile()
 	FILE *f = fopen(pidfile_path().c_str(), "w");
 	if(!f)
 		return;
-	// The server, and the client that started it ([SERVER_ADOPTED])
-	fprintf(f, "%ld %ld\n", (long)g_local_server.impl, (long)getpid());
+	// The server, and the client that started it ([SERVER_ADOPTED]), as
+	// key=value lines ([COMPAT_BREAK_07] 8i)
+	fprintf(f, "v=1\nversion=%s\nserver=%ld\nclient=%ld\napp=%s\nport=%s\n",
+			BUILDAT_VERSION, (long)g_local_server.impl, (long)getpid(),
+			g_local_server_app.c_str(), g_local_server_port.c_str());
 	fclose(f);
 #endif
 }
@@ -157,12 +161,33 @@ static void adopt_pidfile()
 	if(!f)
 		return;
 	long pid = 0, client = 0;
-	if(fscanf(f, "%ld %ld", &pid, &client) < 1 || pid <= 0){
-		fclose(f);
+	ss_ v, version;
+	char line[256];
+	while(fgets(line, sizeof line, f)){
+		ss_ l(line);
+		const size_t eq = l.find('=');
+		if(eq == ss_::npos)
+			continue;
+		const ss_ key = l.substr(0, eq), value = l.substr(eq + 1,
+				l.find_first_of("\r\n") - eq - 1);
+		if(key == "v")
+			v = value;
+		else if(key == "version")
+			version = value;
+		else if(key == "server")
+			pid = atol(value.c_str());
+		else if(key == "client")
+			client = atol(value.c_str());
+	}
+	fclose(f);
+	// Another version's server (0.6's file is "<server> <client>") is left
+	// to its own client
+	if(v != "1" || version != BUILDAT_VERSION)
+		return;
+	if(pid <= 0){
 		clear_pidfile();
 		return;
 	}
-	fclose(f);
 	// Another client's server, while that client runs, is that client's to
 	// stop: a scripted client quitting beside a person's launcher stopped
 	// the person's game ([SERVER_ADOPTED]). Only a server whose client is

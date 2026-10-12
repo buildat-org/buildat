@@ -532,6 +532,10 @@ local function storage_domain()
 	return calling_extension(4)
 end
 
+-- The user dir's own directories, which no extension's storage was
+local storage_not_moved = {apps = true, servers = true, installed = true,
+	shared = true, screenshots = true, exports = true, extensions = true}
+local storage_moved = {}
 local function storage_path(name, domain)
 	if type(name) ~= "string" or not name:match("^[%w_%-%.]+$") or
 			name:find("%.%.") then
@@ -553,8 +557,18 @@ local function storage_path(name, domain)
 	if not domain:match("^[%w_]+$") then
 		return nil, "storage: the launch extension has an odd name"
 	end
-	return __buildat_get_path("user") .. "/" .. domain .. "/" .. name,
-			__buildat_get_path("user") .. "/" .. domain
+	local dir = __buildat_get_path("user") .. "/extensions/" .. domain
+	if not storage_moved[domain] then
+		storage_moved[domain] = true
+		-- 0.6 kept it at user/<extension>/ ([COMPAT_BREAK_07] 8i); moved
+		-- once. A rename fails, and leaves both, when the new one has files
+		if not storage_not_moved[domain] then
+			__buildat_create_directories(__buildat_get_path("user") ..
+					"/extensions")
+			os.rename(__buildat_get_path("user") .. "/" .. domain, dir)
+		end
+	end
+	return dir .. "/" .. name, dir
 end
 local function storage_read_in(name, domain)
 	local path = storage_path(name, domain)

@@ -172,8 +172,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// [PLAY_LINKS] the play page's ?server=host:port, a Starport's link:
 	// the launch menu joins it if a Starport in its settings lists it.
 	// Only that shape is taken; the client checks it again.
+	var query = new URLSearchParams(location.search);
 	var join = null;
-	var jm = /^\?server=([A-Za-z0-9.\-]{1,253}:[0-9]{1,5})$/.exec(location.search);
+	var jm = /^([A-Za-z0-9.\-]{1,253}:[0-9]{1,5})$/.exec(query.get('server') || '');
 	if(!server && jm)
 		join = jm[1];
 	// [HEARTH_OPEN_HERE] #open=<a page's path>, as a web page's "in the
@@ -201,20 +202,20 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		else
 			console.log('Not taken from the address: ' + location.hash);
 	}
-	// After ? come more arguments, space separated: ?-l 4 for a verbose
-	// log. **The log level, the UI scale and the preferences only**
-	// ([SECURITY_RUN_1]): a link is anybody's to write, and with every
-	// flag a link to a real server's page ran its command sequence --
-	// keys and text in the user's session, typed into an admin's chat --
-	// or connected to another server inside this one's origin
-	var extra = decodeURIComponent(location.search.substring(1))
-			.split(' ').filter(function(a){ return a; });
-	for(var i = 0; i + 1 < extra.length; i += 2){
-		if(['-l', '-u', '-o'].indexOf(extra[i]) >= 0)
-			args.push(extra[i], extra[i + 1]);
-		else
-			console.log('Not taken from the address: ' + extra[i]);
-	}
+	// The query's key=value pairs ([COMPAT_BREAK_07] 8i): ?log=4 for a
+	// verbose log, scale=<UI scale>, pref=<key>=<value> (any number).
+	// **These only** ([SECURITY_RUN_1]): a link is anybody's to write, and
+	// with every flag a link to a real server's page ran its command
+	// sequence -- keys and text in the user's session, typed into an
+	// admin's chat -- or connected to another server inside this one's
+	// origin. No command-line flag passes through.
+	var flags = {log: '-l', scale: '-u', pref: '-o'};
+	query.forEach(function(value, key){
+		if(flags.hasOwnProperty(key))
+			args.push(flags[key], value);
+		else if(key !== 'server')
+			console.log('Not taken from the address: ' + key);
+	});
 	// **Back in by itself** (user, 2026-09-30): a phone's browser drops
 	// the connection of a page that has been in the background for some
 	// seconds (Vivaldi on Android, another app in front). A disconnect after

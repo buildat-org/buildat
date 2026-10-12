@@ -89,7 +89,7 @@ fi
 # 400x800 CSS pixels: the touch controls' Chat at (325, 47)
 cat > "$t/web.json" <<'J'
 [
- ["nav", "${URL}?-l%204"],
+ ["nav", "${URL}?log=4"],
  ["waitlog", "chat: chat_top: ready", 240], ["wait", 3000],
  ["tap", 325, 47], ["wait", 1500],
  ["type", "hello"], ["wait", 500],
