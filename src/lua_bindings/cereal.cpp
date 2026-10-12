@@ -32,11 +32,10 @@ static constexpr auto known_types =
 		"byte, int16_t, int32_t, double, array, unordered_map, object, record";
 
 // {"record", major, minor, type}: an interface::Record's major and minor,
-// then its type in a byte string. Read, another major is refused and a
-// tail written by a newer minor skipped.
-// simplified: an older minor's record, with fewer fields at its end, does
-// not read; a minor that reads both is for when served Lua keeps records
-// across versions (it reads what its own server writes today)
+// then its type in a byte string. Read, another major is refused, a tail
+// written by a newer minor skipped, and an older minor's record, its type
+// an object with fewer fields at its end, read with the ones it lacks at
+// their type's zero value (0, "", {}; an object's fields each the same)
 static void record_params(lua_State *L, int type_L, uint8_t &major,
 		uint8_t &minor)
 {
@@ -91,6 +90,45 @@ static void push_scalar(lua_State *L, ScalarType type,
 		ss_ v; ar(v); lua_pushlstring(L, v.c_str(), v.size()); break; }
 	default:
 		throw Exception("push_scalar(): not a scalar type");
+	}
+}
+
+// A type's zero value on top of the stack: what a field an older minor's
+// record lacks reads as
+static void push_default(lua_State *L, int type_L)
+{
+	if(type_L < 0) type_L = lua_gettop(L) + type_L + 1;
+	ss_ t;
+	if(lua_istable(L, type_L)){
+		lua_rawgeti(L, type_L, 1);
+		t = lua_tocppstring(L, -1);
+		lua_pop(L, 1);
+	} else {
+		t = lua_tocppstring(L, type_L);
+	}
+	if(t == "string"){
+		lua_pushliteral(L, "");
+	} else if(t == "array" || t == "unordered_map"){
+		lua_newtable(L);
+	} else if(t == "object"){
+		lua_newtable(L);
+		const int result_L = lua_gettop(L);
+		const size_t n = lua_objlen(L, type_L);
+		for(size_t i = 2; i <= n; i++){
+			lua_rawgeti(L, type_L, (int)i);
+			lua_rawgeti(L, -1, 1); // name
+			lua_rawgeti(L, -2, 2); // type
+			push_default(L, -1);
+			lua_remove(L, -2); // the type
+			lua_rawset(L, result_L);
+			lua_pop(L, 1); // the field definition
+		}
+	} else if(t == "record"){
+		lua_rawgeti(L, type_L, 4);
+		push_default(L, -1);
+		lua_remove(L, -2);
+	} else {
+		lua_pushinteger(L, 0);
 	}
 }
 
@@ -223,8 +261,34 @@ static void binary_input_read_value(lua_State *L, int type_L,
 		interface::Record<cereal::PortableBinaryInputArchive> r(ar,
 				"Lua", major, minor);
 		lua_rawgeti(L, type_L, 4);
-		binary_input_read_value(L, -1, r.ar);
-		lua_remove(L, -2); // the type; the value is left on stack
+		const int inner_L = lua_gettop(L);
+		bool object = false;
+		if(lua_istable(L, inner_L)){
+			lua_rawgeti(L, inner_L, 1);
+			object = lua_tocppstring(L, -1) == "object";
+			lua_pop(L, 1);
+		}
+		if(r.minor < minor && object){
+			// An older minor's: its fields while the body has bytes
+			lua_newtable(L);
+			const int result_L = lua_gettop(L);
+			const size_t n = lua_objlen(L, inner_L);
+			for(size_t i = 2; i <= n; i++){
+				lua_rawgeti(L, inner_L, (int)i);
+				lua_rawgeti(L, -1, 1); // name
+				lua_rawgeti(L, -2, 2); // type
+				if(r.is.peek() == std::char_traits<char>::eof())
+					push_default(L, -1);
+				else
+					binary_input_read_value(L, -1, r.ar);
+				lua_remove(L, -2); // the type
+				lua_rawset(L, result_L);
+				lua_pop(L, 1); // the field definition
+			}
+		} else {
+			binary_input_read_value(L, inner_L, r.ar);
+		}
+		lua_remove(L, inner_L); // the value is left on stack
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
 				"; known types are "+known_types);

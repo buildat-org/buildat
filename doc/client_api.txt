@@ -823,7 +823,9 @@ Example usage (by using an object as the base structure for value):
 A record, as a C++ interface::Record writes it (doc/architecture.txt):
 	{"record", major, minor, type}
 read, another major is an error and the fields a newer minor added at the
-end are skipped.
+end are skipped. An older minor's record, its type an object, reads with
+the fields it lacks at its end at their type's zero value: 0, "", {} for
+an array or a map, and an object's (or a record's) fields each the same.
 
 urho3d (magic)
 --------------
