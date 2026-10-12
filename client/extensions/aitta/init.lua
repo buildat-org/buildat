@@ -542,7 +542,9 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				if type(rel) == "table" and (not only_reviewed or
 						rel.review == "reviewed") and
 						(rel.serverless == true or not ON_WEB) then
-					rel.aitta = rel.aitta or a
+					-- The Aitta it came from, never the list's own word: a list
+					-- naming another address sent this client's fetches there
+					rel.aitta = a
 					local k = tostring(rel.author) .. "/" .. tostring(rel.name)
 					log:info("aitta page: " .. k .. " " ..
 							tostring(rel.version) .. " " ..

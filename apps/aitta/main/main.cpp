@@ -90,6 +90,9 @@ static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 // simplified: per network; many networks get many times it
 static const int READS_A_MINUTE = 240;
 static const int UPLOADS_A_MINUTE = 30;
+// [SECURITY_RUN_5] A release's meta.json, kept whole in its record and
+// handed out by list and release: Starport keeps 4 KB of unknown keys
+static const size_t MANIFEST_MAX = 16 * 1024;
 
 // An author name: what a manifest's "author" may be
 static bool plain_name(const ss_ &s)
@@ -1029,6 +1032,16 @@ struct Module: public interface::Module, public moderation::Host
 		ok(r);
 	}
 
+	// What an upload may come to unpacked: four times the archive's
+	// largest. simplified: a guess at a package's ratio; an archive of
+	// text past it is refused, and the setting is the way up
+	uint64_t unpacked_max()
+	{
+		const json::Value &max = m_settings.get("max_size");
+		return (uint64_t)4 * (max.is_number() && max.as_number() > 0 ?
+				(uint64_t)max.as_number() : (uint64_t)50 * 1000 * 1000);
+	}
+
 	// [AITTA_LUA51] What of a release's client-side Lua (a client_lua
 	// directory's, or an extension's every file) the web client's Lua 5.1
 	// will not load: luac51's parse error and LuaJIT's \x, \z and \u{
@@ -1118,8 +1131,14 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value m;
 		try {
 			interface::fs::create_directories(dir);
-			interface::zip_extract(zip, dir);
-			m = json::load_string(read_file(dir+"/meta.json").c_str());
+			interface::zip_extract(zip, dir, unpacked_max());
+			// The manifest is kept whole and handed out in every list: a
+			// manifest's size, not the archive's
+			const ss_ mt = read_file(dir+"/meta.json");
+			if(mt.size() > MANIFEST_MAX)
+				throw Exception("meta.json: more than "+
+						itos((int64_t)MANIFEST_MAX / 1024)+" KiB");
+			m = json::load_string(mt.c_str());
 		} catch(std::exception &e){
 			interface::fs::remove_all(dir);
 			interface::fs::remove_all(zip);
@@ -1265,7 +1284,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(!write_file(zip, u.data))
 				throw Exception("cannot store it");
 			interface::fs::create_directories(dir);
-			interface::zip_extract(zip, dir);
+			interface::zip_extract(zip, dir, unpacked_max());
 			p = json::load_string(read_file(dir+"/page.json").c_str());
 			// The names check_page() takes: none leaves the directory
 			const json::Value &sl = p.get("screenshots");

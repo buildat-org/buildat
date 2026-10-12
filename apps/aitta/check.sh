@@ -122,6 +122,13 @@ assert r["kind"] == "other", r
 assert r["manifest"]["kind"] == "warp" and r["manifest"]["warp_speed"] == 9, r' ||
 	fail "the unknown kind is not listed as \"other\" with its manifest whole"
 
+# A manifest over 16 KiB is refused: it is kept whole and handed out in
+# every list ([SECURITY_RUN_5])
+manifest tester 1.5.0 MIT " \"pad\": \"$(head -c 17000 /dev/zero | tr '\0' x)\","
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.5.0"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "more than 16 KiB" || fail "a 17 KB manifest: $out"
+
 # 3. A licence not taken; an author not the key's
 manifest tester 1.1.0 Proprietary
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.1.0"
