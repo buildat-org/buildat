@@ -258,8 +258,18 @@
 			ss_ name = text(st, 2);
 			if(name == "")
 				name = "main";
+			// A list is made with this many slots in one Lua table, outside
+			// a pcall: a crafted world's 2^31 stopped the world's start
+			// with nothing logged ([SECURITY_RUN_5])
+			// simplified: 1024, past any list a game keeps on a player
+			const int size = sqlite3_column_int(st, 3);
+			if(size < 0 || size > 1024){
+				log_w(MODULE, "import_world(): %s's list %s has %i slots; "
+						"left out", cs(who), cs(name), size);
+				return;
+			}
 			list_names[who][sqlite3_column_int(st, 1)] = name;
-			it->second.list_sizes[name] = sqlite3_column_int(st, 3);
+			it->second.list_sizes[name] = size;
 		});
 		query("SELECT player, inv_id, slot_id, item"
 				" FROM player_inventory_items", [&](sqlite3_stmt *st){

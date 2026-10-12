@@ -11,8 +11,9 @@
 #      wt's. Bad zips refused, nothing kept: a "../" entry, one whose
 #      header says more than the room, one whose stored entry holds more
 #      than its header says, and a Luanti world of the leveldb backend
-#      (with the --migrate hint). A zipped Luanti world (sqlite3) imported
-#      and started.
+#      (with the --migrate hint), a save with a trigger of its own. A
+#      zipped Luanti world (sqlite3) imported and started, a player's
+#      list of 2^31-1 slots in it left out.
 #   2. wt_2 started: the build is there.
 #   3. One transfer at a time: a client over a slow link (util/netsim.py)
 #      importing a 10 MB zip; a second client's export meanwhile refused;
@@ -79,17 +80,31 @@ stop
 grep -aq "wm: at the mark floor:marker" "$t/0.log" || fail "no build in wt ($t/0.log)"
 
 # 1: the zips to import, in the client's exports
-python3 - "$t/nu/exports" <<'PY'
+python3 - "$t/nu/exports" "$saves/wt/save.sqlite" <<'PY'
 import io, sqlite3, struct, sys, tempfile, zipfile, os
 out = sys.argv[1]
-def luanti_world(backend):
+def db_of(sql, *rows):
     db = tempfile.mktemp()
     c = sqlite3.connect(db)
-    c.execute("CREATE TABLE blocks (pos INT PRIMARY KEY, data BLOB)")
+    c.executescript(sql)
+    for r in rows:
+        c.execute(*r)
     c.commit(); c.close()
     data = open(db, "rb").read(); os.remove(db)
-    return {"lw/world.mt": "gameid = minimal\nbackend = %s\n" % backend,
-            "lw/map.sqlite": data}
+    return data
+# A player whose main list says 2^31-1 slots ([SECURITY_RUN_5]): left out,
+# the world comes up
+players = db_of("""
+CREATE TABLE player (name VARCHAR(60) NOT NULL, pitch NUMERIC(11,4) NOT NULL, yaw NUMERIC(11,4) NOT NULL, posX NUMERIC(11,4) NOT NULL, posY NUMERIC(11,4) NOT NULL, posZ NUMERIC(11,4) NOT NULL, hp INT NOT NULL, breath INT NOT NULL, creation_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, modification_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (name));
+CREATE TABLE player_metadata (player VARCHAR(60) NOT NULL, metadata VARCHAR(256) NOT NULL, value TEXT, PRIMARY KEY(player, metadata));
+CREATE TABLE player_inventories (player VARCHAR(60) NOT NULL, inv_id INT NOT NULL, inv_width INT NOT NULL, inv_name TEXT NOT NULL DEFAULT '', inv_size INT NOT NULL, PRIMARY KEY(player, inv_id));
+CREATE TABLE player_inventory_items (player VARCHAR(60) NOT NULL, inv_id INT NOT NULL, slot_id INT NOT NULL, item TEXT NOT NULL DEFAULT '', PRIMARY KEY(player, inv_id, slot_id));
+""", ("INSERT INTO player (name,pitch,yaw,posX,posY,posZ,hp,breath) VALUES ('ann',0,0,0,100,0,20,10)",),
+    ("INSERT INTO player_inventories VALUES ('ann',0,0,'main',2147483647)",))
+def luanti_world(backend):
+    return {"lw/world.mt": "gameid = minimal\nbackend = %s\nplayer_backend = sqlite3\n" % backend,
+            "lw/map.sqlite": db_of("CREATE TABLE blocks (pos INT PRIMARY KEY, data BLOB)"),
+            "lw/players.sqlite": players}
 def write(name, files, method=zipfile.ZIP_STORED):
     with zipfile.ZipFile(out + "/" + name, "w", method) as z:
         for n, d in files.items():
@@ -97,6 +112,15 @@ def write(name, files, method=zipfile.ZIP_STORED):
 write("lw.zip", luanti_world("sqlite3"))
 write("leveldb.zip", luanti_world("leveldb"))
 write("escape.zip", {"../escape.txt": "out"})
+# wt's save with a trigger of its own, which would run at every write
+tg = tempfile.mktemp()
+a = sqlite3.connect("file:%s?mode=ro" % sys.argv[2], uri=True)
+b = sqlite3.connect(tg); a.backup(b); a.close()
+b.execute("CREATE TRIGGER grow AFTER INSERT ON store BEGIN SELECT 1; END")
+b.commit(); b.close()
+write("trigger.zip", {"tg/save.sqlite": open(tg, "rb").read(),
+        "tg/luanti/world.mt": "gameid = minimal\n"})
+os.remove(tg)
 # Sizes patched in both headers: the local one at 22, the directory's at 24
 def patched(name, files, size):
     b = io.BytesIO()
@@ -122,6 +146,7 @@ serve "$t/1.log"
 	echo 'click Button "Export..."'; echo "wait_log 60000 menu: Exported wt to"; echo "delay 500"; ok
 	imp wt.buildat.zip "menu: Imported wt_2"; echo "delay 1500"
 	imp escape.zip "failed:"; ok
+	imp trigger.zip "failed:"; ok
 	imp room.zip "failed:"; ok
 	imp less.zip "failed:"; ok
 	imp leveldb.zip "failed:"; ok
@@ -147,10 +172,13 @@ a, b = rows(sys.argv[2]), rows(sys.argv[3])
 print("wt and wt_2: %d and %d rows of dump" % (len(a), len(b)))
 assert a == b, "the stores differ"
 PY
-for want in "would leave" "room for" "is stored as" "luanti --migrate sqlite3"; do
+for want in "would leave" "room for" "is stored as" "luanti --migrate sqlite3" \
+		"trigger.*does not read as a Buildat save"; do
 	grep -a "menu: Importing .* failed:" "$t/1c.log" | grep -aq -- "$want" ||
 		fail "no refusal saying \"$want\" ($t/1c.log)"
 done
+grep -aq "ann's list main has 2147483647 slots; left out" "$t/1.log" ||
+	fail "the 2^31-1 slot list was not left out ($t/1.log)"
 got=$(ls "$saves" | LC_ALL=C sort | tr '\n' ' ')
 echo "the saves: $got"
 [ "$got" = "_server lw wt wt_2 " ] || fail "the saves: $got"

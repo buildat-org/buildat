@@ -214,6 +214,23 @@ struct CSave: public Save
 					"Buildat (save format "+itos(format)+"; this one, "+
 					BUILDAT_VERSION+", reads "+itos(SAVE_FORMAT)+")");
 		}
+		// A save is its store table and nothing else: a trigger or a view
+		// in one that came from elsewhere (a world's zip) runs its own SQL
+		// at every write -- a blob a row fills the disk ([SECURITY_RUN_5])
+		{
+			sqlite3_stmt *st = nullptr;
+			check(m_db, sqlite3_prepare_v2(m_db, "SELECT name FROM"
+					" sqlite_master WHERE type IN ('trigger', 'view')", -1,
+					&st, nullptr), "schema");
+			const bool extra = sqlite3_step(st) == SQLITE_ROW;
+			sqlite3_finalize(st);
+			if(extra){
+				sqlite3_close(m_db);
+				m_db = nullptr;
+				throw SqliteError("The save "+path+" has a trigger or a "
+						"view, which no save Buildat writes has");
+			}
+		}
 		// A save that a crash interrupted is worth more than the milliseconds
 		// a rollback journal would save, and WAL is what lets a reader and a
 		// writer overlap at all

@@ -2134,6 +2134,20 @@ struct Module: public interface::Module
 			root += "/"+top[0].name;
 		}
 		const bool buildat_save = interface::fs::path_exists(root+"/save.sqlite");
+		// A world's own mods are code the server runs with all of its reach
+		// -- the accounts store among it -- and a public server's admin is
+		// not whoever owns the machine: a zip's are left out there
+		// ([SECURITY_RUN_5]). The Mods menu's ContentDB ones stay.
+		// simplified: left out, not offered; a confirm naming them is the
+		// upgrade if an admin needs one
+		if(m_public){
+			for(const ss_ &p : {root+"/luanti/worldmods", root+"/worldmods"}){
+				if(interface::fs::path_exists(p)){
+					log_w(MODULE, "import: the zip's world mods left out");
+					interface::fs::remove_all(p);
+				}
+			}
+		}
 		const ss_ name = free_save_name(m_transfer.name);
 		if(name.empty())
 			return "no free name for "+m_transfer.name;
