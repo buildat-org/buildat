@@ -263,12 +263,15 @@ static int l_image_set_data(lua_State *L)
 	return 0;
 }
 
-// image_load_data(image, data: string) -> whether it was read
+// image_load_data(image, data: string[, max_side]) -> whether it was read
 // **A PNG or a JPEG from its bytes** ([HEARTH_ATTACHMENTS]): a picture a
 // server sends at run time, as Hearth's thumbnails, not a resource of the
-// cache. At most 1 MiB, and 1024 pixels a side once read; the decoder
-// is the one every texture a server sends goes through, its 8192 a side
-// the cap on what a small file may unpack to.
+// cache. max_side is 1024 unless said, 4096 at most, and the file is at
+// most max_side squared bytes (1 MiB at 1024). A PNG says its size in its
+// header and is refused from that before the decode; a JPEG is checked
+// once read, the decoder's 8192 a side the cap on what it may unpack to.
+// The 4096 is for vanilla's loading picture ([LOADING_PIC_DECODE]), a
+// 2 MB 1920x1080 PNG.
 static int l_image_load_data(lua_State *L)
 {
 	tolua_Error tolua_err;
@@ -277,13 +280,24 @@ static int l_image_load_data(lua_State *L)
 	const char *data = lua_tolstring(L, 2, &len);
 	if(!data)
 		throw Exception("image_load_data: data must be a string");
-	bool ok = len >= 4 && len <= 1024 * 1024 &&
-			(memcmp(data, "\x89PNG", 4) == 0 ||
-			memcmp(data, "\xff\xd8\xff", 3) == 0);
+	lua_Integer max_side = luaL_optinteger(L, 3, 1024);
+	if(max_side < 1 || max_side > 4096)
+		throw Exception("image_load_data: max_side is 1 to 4096");
+	const unsigned char *u = (const unsigned char*)data;
+	auto be32 = [&](size_t i){
+		return (uint32_t)u[i] << 24 | (uint32_t)u[i+1] << 16 |
+				(uint32_t)u[i+2] << 8 | (uint32_t)u[i+3];
+	};
+	bool png = len >= 24 && memcmp(data, "\x89PNG", 4) == 0;
+	bool ok = len <= (size_t)(max_side * max_side) && (png ||
+			(len >= 4 && memcmp(data, "\xff\xd8\xff", 3) == 0));
+	// IHDR's width and height, bytes 16 to 23
+	if(ok && png)
+		ok = be32(16) <= (uint32_t)max_side && be32(20) <= (uint32_t)max_side;
 	if(ok){
 		MemoryBuffer buf(data, (unsigned)len);
-		ok = image->Load(buf) && image->GetWidth() <= 1024 &&
-				image->GetHeight() <= 1024;
+		ok = image->Load(buf) && image->GetWidth() <= max_side &&
+				image->GetHeight() <= max_side;
 	}
 	lua_pushboolean(L, ok);
 	return 1;

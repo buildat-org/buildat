@@ -589,10 +589,12 @@ Safe.image_set_data = wrap_function({"Image", "number", "number", "number",
 end)
 
 -- **A PNG or JPEG from its bytes** ([HEARTH_ATTACHMENTS]), as a server
--- sends a picture at run time: false for anything else, over 1 MiB or
--- over 1024 pixels a side
-Safe.image_load_data = wrap_function({"Image", "string"}, function(image, data)
-	return __buildat_image_load_data(image, data)
+-- sends a picture at run time: false for anything else, over max_side
+-- pixels a side (1024 unless said, 4096 at most) or over max_side squared
+-- bytes
+Safe.image_load_data = wrap_function({"Image", "string", {"number", "__nil"}},
+		function(image, data, max_side)
+	return __buildat_image_load_data(image, data, max_side)
 end)
 
 -- The viewports the user's graphics preferences are applied to, as against

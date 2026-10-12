@@ -1359,27 +1359,26 @@ buildat.sub_packet("main:loading_picture", function(data)
 		log:info("load: no loading picture")
 		return
 	end
-	-- simplified: compose_image decodes and writes the PNG again, about
-	-- a second for VoxeLibre's 2 MB ones with the screen standing still;
-	-- a plain write under the cache for served code would skip it
-	local dir = buildat.get_cache_path() .. "/vanilla_res"
-	local resource = "vanilla_loading/" .. buildat.hex(buildat.sha1(got[2])) ..
-			".png"
-	local ok, w, h = pcall(buildat.compose_image, {
-		ops = {{op = "blit", src_data = got[2]}},
-		write = dir .. "/" .. resource,
-	})
-	if not ok then
-		log:warning("load: the picture " .. got[1] .. ": " .. tostring(w))
+	-- Decoded once into a texture, no file ([LOADING_PIC_DECODE]):
+	-- compose_image's decode and PNG write was a second for VoxeLibre's
+	-- 2 MB ones with the screen standing still
+	local t0 = buildat.get_time_us()
+	local img = magic.Image:new()
+	if not magic.image_load_data(img, got[2], 4096) then
+		log:warning("load: the picture " .. got[1] .. " not read (" ..
+				#got[2] .. " bytes; a PNG or JPEG, 4096 a side at most)")
 		return
 	end
-	buildat.add_resource_dir(dir)
+	local w, h = img.width, img.height
+	local tex = magic.Texture2D:new()
+	tex:SetData(img)
 	local el = load_wait.screen:CreateChild("BorderImage")
-	el.texture = magic.cache:GetResource("Texture2D", resource)
+	el.texture = tex
 	el:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	load_wait.pic = {el = el, w = w, h = h}
+	load_wait.pic = {el = el, w = w, h = h, tex = tex}
 	load_wait.fit()
-	log:info(string.format("load: the picture %s, %dx%d", got[1], w, h))
+	log:info(string.format("load: the picture %s, %dx%d in %d ms", got[1], w,
+			h, math.floor((buildat.get_time_us() - t0) / 1000)))
 end)
 local function load_wait_end()
 	wait_text:SetText("")
