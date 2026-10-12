@@ -295,10 +295,11 @@ local function gather()
 		icon_of[a.from] = icon_of[a.from] or a.icon
 	end
 	for _, a in ipairs(actions) do
-		-- Locally started things need a local server, which a page has not
+		-- Locally started things need a local server, which a page has not.
+		-- Apps from Aitta stays: it lists the serverless ones there
+		-- ([AITTA_ON_WEB])
 		if not (web and (a.kind ~= "extension" or
-				a.key == "extension/launch_menu/local" or
-				a.key == "extension/launch_menu/aitta")) and
+				a.key == "extension/launch_menu/local")) and
 				-- Its lists are this menu's Apps and Servers
 				a.key ~= "extension/launch_menu/local" then
 			local cat = a.category or "action"

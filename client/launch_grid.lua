@@ -79,7 +79,9 @@ local function menu_actions()
 	if ok and type(starport) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
-			description = "Install apps others made: " ..
+			description = __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil and
+					"Play apps others made that run in the browser" or
+					"Install apps others made: " ..
 					(starport.safe.aitta_shown() and "reviewed or not" or
 					"reviewed ones") .. ", each in the server's sandbox",
 			-- "Discuss" on a release: its home Hearth, at the package's place
