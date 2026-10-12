@@ -171,7 +171,10 @@ stick(){ # dy: down from (150, 300) for 2 s
 	echo "finger_up 1"; echo "delay 1500"
 }
 {
-	echo "wait_log 120000 chat: touch_parity: ready"; echo "delay 3000"
+	echo "wait_log 120000 chat: touch_parity: ready"
+	# The client's world round the player too: the loading screen ends at
+	# the player's own chunk ([LOAD_OWN_CHUNK]), the marker's may come after
+	echo "wait_log 120000 , 0 undrawn within 2"; echo "delay 3000"
 	echo "tap 417 467"; echo "delay 1000"; echo "tap 305 467"; echo "delay 1000"
 	echo "tap 638 267"; echo "delay 1500"
 	echo "finger_down 1 638 267"; echo "delay 4000"; echo "finger_up 1"; echo "delay 1500"
