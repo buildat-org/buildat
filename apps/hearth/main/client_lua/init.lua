@@ -406,13 +406,12 @@ local base_top = nil
 -- [HEARTH_CLOSE] "Exit to launcher?", from the × and Escape at the top;
 -- only where leave() goes to a launcher (not the web page's /app)
 local function can_exit()
-	return buildat.can_leave_to_launcher and buildat.can_leave_to_launcher()
+	return buildat.can_leave_to_launcher()
 end
 -- [HEARTH_WEB_BACK] On the web page the dialog is "Leave Hearth?", the
 -- browser's Back at the top reaching it as Escape; Leave goes to the page
--- before and keeps the login (a page left, not a Log out). A client from
--- before leave_web_page has none of it.
-local on_web = buildat.leave_web_page and buildat.leave_web_page(false) ~= nil
+-- before and keeps the login (a page left, not a Log out)
+local on_web = buildat.leave_web_page(false) ~= nil
 local function ask_exit()
 	local root = uistack.main:push({desc = "hearth exit"})
 	-- Over the frame, a page window's 100
@@ -1573,13 +1572,9 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 end)
 -- [PLAYTEST_1008] The browser's Back is Escape while the handler above has
 -- a page to go back from (the web page's depth, [TAP_BACK]), and on the
--- web at the top too, to "Leave Hearth?" ([HEARTH_WEB_BACK]). A client
--- from before set_back_depth_extra has none.
+-- web at the top too, to "Leave Hearth?" ([HEARTH_WEB_BACK])
 local back_extra = nil
 magic.SubscribeToEvent("Update", function()
-	if not buildat.set_back_depth_extra then
-		return
-	end
 	local n = frame and frame.visible and (accounts.page or on_web or
 			(area.visible and (#history > 0 or narrow or
 			section ~= "home"))) and 1 or 0
@@ -1602,8 +1597,7 @@ local state_loaded = false
 local state_at = 0
 magic.SubscribeToEvent("Update", function()
 	local t = buildat.get_time_us()
-	if not state_dirty or t - state_at < 1000000 or not state_loaded or
-			not buildat.storage_write then
+	if not state_dirty or t - state_at < 1000000 or not state_loaded then
 		return
 	end
 	state_dirty, state_at = false, t
@@ -1640,7 +1634,7 @@ local function load_state()
 		return nil
 	end
 	state_loaded = true
-	local raw = buildat.storage_read and buildat.storage_read(STATE)
+	local raw = buildat.storage_read(STATE)
 	local st = raw and buildat.parse_json(raw)
 	if type(st) ~= "table" or st.account ~= me.account then
 		return nil
@@ -2571,13 +2565,8 @@ accounts.on_joined = function()
 			-- came here with the app's package and versions, which start the
 			-- message and go with the thread as its subject
 			local f = buildat.feedback()
-			-- [OVERLAY_DISCUSS] or [DISCUSS_SERVER]; a client from before
-			-- them has neither
-			local dd = buildat.discussed and buildat.discussed()
-			if not dd and buildat.discussed_server then
-				local ds = buildat.discussed_server()
-				dd = ds and {server = ds}
-			end
+			-- [OVERLAY_DISCUSS] or [DISCUSS_SERVER]
+			local dd = buildat.discussed()
 			if dd then
 				if scripted then
 					log:info("hr discuss: " .. encode(dd))

@@ -41,12 +41,10 @@ local function draw_wait()
 		close_wait()
 		accounts.chat_page(back)
 	end)
-	if buildat.show_game_settings then
-		accounts.page_button(w, "Settings...", function()
-			close_wait()
-			buildat.show_game_settings{on_close = back}
-		end)
-	end
+	accounts.page_button(w, "Settings...", function()
+		close_wait()
+		buildat.show_game_settings{on_close = back}
+	end)
 	accounts.page_button(w, "My account...", function()
 		close_wait()
 		accounts.account_page(back)

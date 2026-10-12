@@ -25,18 +25,7 @@ local log = buildat.Logger("accounts")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
--- simplified: a client before 0.6.48 has no rgb and no SetStyle (this
--- file is the server's, sent to any client): it gets the old colours and
--- the plain button. Drop when old clients are refused.
-local rgb = (ui_utils.safe or ui_utils).rgb or function(name)
-	return unpack(({warn = {1, 0.8, 0.4}, error = {1, 0.4, 0.4},
-			dim = {0.7, 0.7, 0.7}})[name])
-end
-local function main_style(b)
-	if not pcall(function() b:SetStyle("PrimaryButton") end) then
-		b:SetStyleAuto()
-	end
-end
+local rgb = (ui_utils.safe or ui_utils).rgb
 
 local M = {
 	hello = {},
@@ -285,7 +274,7 @@ local function show_totp(error_text)
 	end
 	magic.SubscribeToEvent(e, "TextFinished", go)
 	local b = w:CreateChild("Button")
-	main_style(b)
+	b:SetStyle("PrimaryButton")
 	b.minHeight = 30
 	local bt = b:CreateChild("Text")
 	bt:SetStyleAuto()
@@ -331,7 +320,7 @@ local function show_claim(name, token, error_text)
 	for _, b in ipairs({{"Join", go}, {"Back", function() show_login(nil) end}}) do
 		local bb = r:CreateChild("Button")
 		if b[1] == "Join" then
-			main_style(bb)
+			bb:SetStyle("PrimaryButton")
 		else
 			bb:SetStyleAuto()
 		end
@@ -461,7 +450,7 @@ show_login = function(error_text)
 		e:SetColor(magic.Color(rgb("error")))
 	end
 	local button = w:CreateChild("Button")
-	main_style(button)
+	button:SetStyle("PrimaryButton")
 	button.minHeight = 30
 	local bt = button:CreateChild("Text")
 	bt:SetStyleAuto()
@@ -583,7 +572,7 @@ function show_create(error_text)
 		send_login(n, pw, code and code:GetText() or "", nil, nil, "", "", true)
 	end
 	local button = w:CreateChild("Button")
-	main_style(button)
+	button:SetStyle("PrimaryButton")
 	button.minHeight = 30
 	button:SetFocusMode(magic.FM_FOCUSABLE)
 	local bt = button:CreateChild("Text")
@@ -877,11 +866,8 @@ buildat.sub_packet("accounts:kicked", function(data)
 	local text = cereal.binary_input(data, TEXT).text
 	notice(text)
 	-- [LEAVE_WITH_REASON]: the server drops the connection next, and the
-	-- client's leave to the launcher says this (a client before 0.6.67
-	-- has no set_leave_reason and shuts down on the drop)
-	if buildat.set_leave_reason then
-		buildat.set_leave_reason(text)
-	end
+	-- client's leave to the launcher says this
+	buildat.set_leave_reason(text)
 	if M.on_kicked then
 		M.on_kicked(text)
 	end
@@ -919,8 +905,7 @@ end
 -- logging out. Only where leave() goes to a launcher (can_exit): on the
 -- web page or a client started with -s there is nothing to exit to
 function M.can_exit()
-	return buildat.can_leave_to_launcher ~= nil and
-			buildat.can_leave_to_launcher() == true
+	return buildat.can_leave_to_launcher() == true
 end
 function M.ask_exit()
 	M.asking_exit = true
@@ -953,7 +938,7 @@ end
 -- main: the screen's one main button, amber ([MENU_BRAND])
 local function button(parent, text, on_click, main)
 	local b = parent:CreateChild("Button")
-	if main then main_style(b) else b:SetStyleAuto() end
+	if main then b:SetStyle("PrimaryButton") else b:SetStyleAuto() end
 	b.minHeight = 28
 	local t = b:CreateChild("Text")
 	t:SetStyleAuto()
@@ -1047,28 +1032,26 @@ end
 
 -- **Server, in the game's settings window** ([GAME_SETTINGS]): Open to
 -- LAN for the owner, and the Server window, which comes back to it
-if buildat.add_game_settings_section then
-	buildat.add_game_settings_section("accounts", {title = "Server",
-			draw = function(w, ui)
-		if M.hello and M.hello["local"] == 1 then
-			M.lan_row(w)
-		end
-		ui.button("Server...", function()
-			ui.away(function(back)
-				M.server_window(nil, back)
-				-- Its Escape is its own here: the game opened the settings
-				local sub
-				sub = magic.SubscribeToEvent("KeyDown", function(_, data)
-					if not M.frame then
-						magic.UnsubscribeFromEvent("KeyDown", sub)
-					elseif data:GetInt("Key") == magic.KEY_ESCAPE then
-						M.back()
-					end
-				end)
+buildat.add_game_settings_section("accounts", {title = "Server",
+		draw = function(w, ui)
+	if M.hello and M.hello["local"] == 1 then
+		M.lan_row(w)
+	end
+	ui.button("Server...", function()
+		ui.away(function(back)
+			M.server_window(nil, back)
+			-- Its Escape is its own here: the game opened the settings
+			local sub
+			sub = magic.SubscribeToEvent("KeyDown", function(_, data)
+				if not M.frame then
+					magic.UnsubscribeFromEvent("KeyDown", sub)
+				elseif data:GetInt("Key") == magic.KEY_ESCAPE then
+					M.back()
+				end
 			end)
 		end)
-	end})
-end
+	end)
+end})
 
 buildat.sub_packet("accounts:lan", function(data)
 	M.lan = data
@@ -2691,8 +2674,8 @@ health_page = function(back)
 	end
 
 	head("Address")
-	local addr = buildat.server_address and buildat.server_address() or "?"
-	local tls = buildat.connection_encrypted and buildat.connection_encrypted()
+	local addr = buildat.server_address() or "?"
+	local tls = buildat.connection_encrypted()
 	page_text(w, "Reached at " .. tostring(addr) .. (tls and ", under TLS" or
 			", not encrypted"))
 	page_text(w, "Public address: " .. (admin_public_address() or
@@ -2922,10 +2905,6 @@ draw_sidebar = function()
 			end)
 		end
 	end
-	-- A client before [CLOSE_GLYPH] has no ×: the sidebar's Close
-	if sw.on_close and not (ui_utils.safe or ui_utils).close_glyph then
-		side_button("Close", nil, function() server_close() end)
-	end
 	-- [SERVER_VERSION]: the server's Buildat and this client's, read-only
 	-- fields to copy into a ticket
 	local version, hash = buildat.version()
@@ -2939,9 +2918,8 @@ draw_sidebar = function()
 		e.editable = false
 		e.textCopyable = true
 		e.textSelectable = true
-		-- Small enough for "0.6.75-ea7eb9e33-dirty" in the sidebar; a
-		-- client before textElement has the default size
-		pcall(function() e.textElement:SetFontSize(9) end)
+		-- Small enough for "0.6.75-ea7eb9e33-dirty" in the sidebar
+		e.textElement:SetFontSize(9)
 		e:SetText(v[2])
 		e.cursorPosition = 0
 		-- Once a window, for a check: the scan does not see this window
@@ -3005,17 +2983,15 @@ local function build_frame()
 	-- [STARPORT_UI_KEYS]: Up and Down in the sidebar or the page, Right
 	-- and Left between them
 	local columns = (ui_utils.safe or ui_utils).keyboard_columns
-	if columns then
-		columns(f, sw.sidebar, sw.view)
-	end
+	columns(f, sw.sidebar, sw.view)
 	if sw.narrow then
 		sw.view.visible = false
 	end
 	-- Not on the stack, so its own on_close ([CLOSE_GLYPH])
 	local glyph = (ui_utils.safe or ui_utils).close_glyph
-	if sw.on_close and glyph then
+	if sw.on_close then
 		glyph(root, f, function() server_close() end)
-	elseif sw.on_exit and glyph then
+	elseif sw.on_exit then
 		-- An app's own window: the × is its on_exit ([STARPORT_CLOSE])
 		glyph(root, f, function() sw.on_exit() end)
 	end
@@ -3217,7 +3193,7 @@ local function chat_channel()
 	if #list == 0 then
 		return nil, list
 	end
-	local saved = buildat.storage_read and buildat.storage_read("chat_channel")
+	local saved = buildat.storage_read("chat_channel")
 	for _, c in ipairs(list) do
 		if c.key == saved then
 			return c.key, list
@@ -3332,9 +3308,7 @@ function M.chat_page(back, draft)
 		chat_relabel()
 		local b = dropdown(row(w), "Chat in", labels, labels.current,
 				function(l)
-			if buildat.storage_write then
-				buildat.storage_write("chat_channel", by_label[l])
-			end
+			buildat.storage_write("chat_channel", by_label[l])
 			M.chat_page(back, e and e:GetText())
 		end)
 		b:SetFixedWidth(math.max(118, math.min(300, w.width - 180)))

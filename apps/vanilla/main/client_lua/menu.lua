@@ -14,18 +14,7 @@ local log = buildat.Logger("vanilla")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
--- simplified: a client before 0.6.48 has no rgb and no SetStyle (this
--- file is the app's, sent to any client): it gets the old colours and
--- the plain button. Drop when old clients are refused.
-local rgb = (ui_utils.safe or ui_utils).rgb or function(name)
-	return unpack(({warn = {1, 0.8, 0.4}, error = {1, 0.4, 0.4},
-			dim = {0.7, 0.7, 0.7}})[name])
-end
-local function main_style(b)
-	if not pcall(function() b:SetStyle("PrimaryButton") end) then
-		b:SetStyleAuto()
-	end
-end
+local rgb = (ui_utils.safe or ui_utils).rgb
 local uistack = require("buildat/extension/uistack")
 
 local root = nil
@@ -301,7 +290,7 @@ end)
 -- main: the screen's main button, amber ([MENU_BRAND])
 local function button_on(menu, parent, label, action, width, main)
 	local b = parent:CreateChild("Button")
-	if main then main_style(b) else b:SetStyleAuto() end
+	if main then b:SetStyle("PrimaryButton") else b:SetStyleAuto() end
 	b:SetName("Button")
 	b:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
 	-- A fixed height, not the column's share of what is left: a vertical
@@ -796,8 +785,7 @@ function draw_settings(paths)
 				cereal.binary_output(list, {"array", "string"}))
 	end
 	-- The keys: the client's page of them, as the pause menu's Settings
-	-- window has ([SETTINGS_KEYS_PAGE]); keys.lua's own editor on a client
-	-- without it. Back asks for the settings again.
+	-- window has ([SETTINGS_KEYS_PAGE]). Back asks for the settings again.
 	menu:add("Key bindings...", function()
 		close()
 		keys_open = true
@@ -806,11 +794,7 @@ function draw_settings(paths)
 			buildat.send_packet("main:get_settings", "")
 			waiting("Loading settings...")
 		end
-		if buildat.show_game_keys then
-			buildat.show_game_keys{on_close = back}
-		else
-			keys_editor.draw(back)
-		end
+		buildat.show_game_keys{on_close = back}
 	end)
 	local function resend()
 		local list = {}

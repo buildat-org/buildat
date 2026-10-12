@@ -2738,7 +2738,6 @@ function frame_peak.note(dt)
 		-- so a table five seconds later has lost the frame. Its Max
 		-- column is the slow frame's.
 		if wall >= 0.2 and accounted < wall * 1000000 * 0.5 and
-				buildat.profiler_data and
 				(frame_peak.table_at or 0) + 5 < buildat.get_time_us() / 1e6 then
 			frame_peak.table_at = buildat.get_time_us() / 1e6
 			-- Depth 5, not 4: the per-packet-type block
@@ -4634,7 +4633,7 @@ end
 
 buildat.sub_packet("main:settings", function(data)
 	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
-	keys.view_local = buildat.connected_locally and buildat.connected_locally()
+	keys.view_local = buildat.connected_locally()
 	for i, row in ipairs(list) do
 		local name = row:match("^([%w_]+)=")
 		if name and keys.view_rows[name] then

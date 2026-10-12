@@ -30,9 +30,8 @@ local req = accounts.requester("ai", function(why)
 	home()
 end, (buildat.get_env("BUILDAT_AITTA_REQS") or "") ~= "")
 -- **From the launcher's publish screen** ([AITTA_PUBLISH_UI]): the
--- author name and key it made, to fill the form with; a client from
--- before it has no aitta_bind
-local offer = buildat.aitta_bind and buildat.aitta_bind()
+-- author name and key it made, to fill the form with
+local offer = buildat.aitta_bind()
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
 local GREY = magic.Color(0.7, 0.7, 0.7)
@@ -147,10 +146,6 @@ review_page = function(id)
 				"Diff (no reviewed version before)", function() diff_page(id) end)
 		button(top, "Playtest", function()
 			req("playtest", {release = id}, function(t)
-				if not buildat.offer_playtest then
-					message = "This client cannot playtest: update it"
-					return review_page(id)
-				end
 				log:info("aitta: playtest " .. id)
 				buildat.offer_playtest{release = id, ticket = t.ticket,
 						sha256 = t.sha256}

@@ -387,7 +387,7 @@ do
 
 	-- **The client's settings window** ([GAME_SETTINGS]) with these rows as
 	-- its first section; the sound, the render scale and the UI size are
-	-- the window's. A client before it: these rows on a page of their own.
+	-- the window's.
 	local client_settings_page
 	local function client_rows(w, again)
 		local angles = {}
@@ -468,17 +468,11 @@ do
 		end)
 	end
 	client_settings_page = function()
-		if buildat.show_game_settings then
-			close_pause()
-			buildat.show_game_settings{on_close = open_pause, sections = {
-				{title = "Floor planner", draw = function(w, ui)
-					client_rows(w, ui.redraw)
-				end}}}
-			return
-		end
-		local w = dialog("Client settings")
-		client_rows(w, client_settings_page)
-		panel.button(w, "Back", function() open_pause() end)
+		close_pause()
+		buildat.show_game_settings{on_close = open_pause, sections = {
+			{title = "Floor planner", draw = function(w, ui)
+				client_rows(w, ui.redraw)
+			end}}}
 	end
 
 	-- **A copy of the plan** ([FP_COPY]): under a name no plan has, which

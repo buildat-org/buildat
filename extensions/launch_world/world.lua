@@ -19,16 +19,11 @@
 local api = buildat.safe or buildat
 local log = buildat.Logger("launch_world")
 
--- **The room's debug knobs** (`BUILDAT_LAUNCH_*`), through one reader.
--- Reading the client's environment is a trusted reach and not one a
--- launch extension gets ([LAUNCH_SANDBOX]): sandboxed, this answers
--- nothing and every knob falls back to its default, which is what a
+-- **The room's debug knobs** (`BUILDAT_LAUNCH_*`), through one reader;
+-- an unset one is "" and falls back to its default, which is what a
 -- player sees in any case. The knobs are for the checks and for the
 -- next person measuring this room.
 local function env(name)
-	if not buildat.get_env then
-		return ""
-	end
 	return buildat.get_env(name) or ""
 end
 -- **The light, as an options round** ([LAUNCH_WORLD] stage 3, the light;

@@ -54,8 +54,8 @@ buildat.sub_packet("main:account", function(data)
 	account = {public = v[1] == "1", admin = v[2] == "1", world = v[3] or "",
 			is_local = v[4] == "1"}
 	-- The world's game, for the client's Discuss in its overlay
-	-- ([OVERLAY_DISCUSS]); a client from before it has no such verb
-	if buildat.set_running_game and (v[5] or "") ~= "" then
+	-- ([OVERLAY_DISCUSS])
+	if (v[5] or "") ~= "" then
 		buildat.set_running_game({game = v[5]})
 	end
 	o.keys.public = account.public
@@ -181,17 +181,15 @@ open = function()
 	-- The engine's settings, the keys and the logs: the client's window
 	-- ([GAME_SETTINGS]), over the world; the keys read again after it.
 	-- The keys are reached by it alone ([SETTINGS_KEYS_PAGE])
-	if buildat.show_game_settings then
-		accounts.page_button(w, "Settings...", function()
-			page(function()
-				buildat.show_game_settings{sections = o.keys.settings_sections,
-						on_close = function()
-					o.keys.declare()
-					later(open)
-				end}
-			end)
+	accounts.page_button(w, "Settings...", function()
+		page(function()
+			buildat.show_game_settings{sections = o.keys.settings_sections,
+					on_close = function()
+				o.keys.declare()
+				later(open)
+			end}
 		end)
-	end
+	end)
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
 	-- this client for this server, never over what the server allows
 	-- (keys.view in init.lua). A web client starts lower, and a fast one
@@ -214,8 +212,7 @@ open = function()
 	-- **The screen's orientation** on a touchscreen's web page
 	-- ([SCREEN_ORIENTATION]): the pick's tap is the gesture the page's
 	-- fullscreen entry, and so the lock, needs
-	local turn = buildat.get_screen_orientation and
-			buildat.get_screen_orientation()
+	local turn = buildat.get_screen_orientation()
 	if o.keys.touch and turn then
 		local names = {Auto = "auto", Landscape = "landscape",
 				Portrait = "portrait"}
@@ -247,8 +244,8 @@ open = function()
 	end
 	-- [DISCUSS_SERVER]: a server a Starport lists, its thread on a Hearth.
 	-- The client decides where it goes and what it says, and whether there
-	-- is somewhere (a client from before it has neither verb)
-	if buildat.can_discuss_this_server and buildat.can_discuss_this_server() then
+	-- is somewhere
+	if buildat.can_discuss_this_server() then
 		accounts.page_button(w, "Discuss (leave server)", function()
 			close()
 			buildat.discuss_this_server()

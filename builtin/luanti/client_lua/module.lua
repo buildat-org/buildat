@@ -344,7 +344,7 @@ local texmods_done = false
 -- game adds while it runs.
 local function startup_packet(name, file, fn)
 	buildat.sub_packet(name, fn)
-	local blob = buildat.get_file_content and buildat.get_file_content(file)
+	local blob = buildat.get_file_content(file)
 	if blob then
 		log:info(name .. ": from the served file, " .. #blob .. " bytes")
 		fn(blob)
@@ -4075,8 +4075,7 @@ end)
 -- file is here by the time this runs. The request stays for what a game adds
 -- later, and the handler skips what is composed already.
 do
-	local blob = buildat.get_file_content and
-			buildat.get_file_content("luanti_data/texmods.bin")
+	local blob = buildat.get_file_content("luanti_data/texmods.bin")
 	if blob then
 		log:info("luanti:texmods: from the served file, " .. #blob .. " bytes")
 		texmods_from_data(blob)
@@ -4209,7 +4208,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		name = "ERROR " .. tostring(err)
 	end
 	local mesh = ""
-	if refshot_dump and buildat.dump_meshes then
+	if refshot_dump then
 		-- With the atlas registry's account of which resource owns which
 		-- tile, written beside the dump as <stem>_atlas.json
 		local reg = voxelworld.get_atlas_registry()
@@ -4253,7 +4252,7 @@ end)
 -- for this server ([VANILLA_PLAYER_SETTINGS]); on the client's own local
 -- server nothing, so that the server reads settings.json's
 -- ([VIEW_SETTINGS_LOCAL])
-local is_local = buildat.connected_locally and buildat.connected_locally()
+local is_local = buildat.connected_locally()
 buildat.send_packet("luanti:get_world_info",
 		buildat.get_env("BUILDAT_RENDER_MODE") or
 		(not is_local and buildat.storage_read("view_render_mode")) or "")

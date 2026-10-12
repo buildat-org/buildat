@@ -22,8 +22,7 @@ local of_type, node_pos, over_ui, snapped_point = E.of_type, E.node_pos, E.over_
 -- objects' outlines and the doors' and windows' symbols, as a line list on
 -- a node, made again when the plan, the zoom, the cut or the floor edited
 -- change. Drawn a frame at a time as before during a drag that moves
--- things without a rebuild (not a box selection's), and on a client without
--- set_line_geometry.
+-- things without a rebuild (not a box selection's).
 local plan_lines_node = scene:CreateChild("PlanLines")
 -- And the grid, over three times the view each way, made again when the
 -- view leaves that or the step changes
@@ -117,42 +116,31 @@ local function draw_overlay()
 		-- camera looks straight down, so the height shows nowhere else
 		local gy = 0.03
 		local g = M.grid_cache
-		if buildat.set_line_geometry then
-			if not (g and g.step == step and x0 >= g.x0 and x1 <= g.x1 and
-					z0 >= g.z0 and z1 <= g.z1) then
-				local dx, dz = x1 - x0, z1 - z0
-				g = {step = step, x0 = x0 - dx, x1 = x1 + dx, z0 = z0 - dz,
-						z1 = z1 + dz}
-				M.grid_cache = g
-				local out = {}
-				local function add(ax, az, bx, bz, c)
-					local k = #out
-					out[k + 1], out[k + 2], out[k + 3] = W(ax), gy, W(az)
-					out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, 1
-					out[k + 8], out[k + 9], out[k + 10] = W(bx), gy, W(bz)
-					out[k + 11], out[k + 12], out[k + 13], out[k + 14] = c.r, c.g, c.b, 1
-				end
-				for gx = math.floor(g.x0 / step) * step, g.x1, step do
-					add(gx, g.z0, gx, g.z1, gx % 1000 == 0 and major or fine)
-				end
-				for gz = math.floor(g.z0 / step) * step, g.z1, step do
-					add(g.x0, gz, g.x1, gz, gz % 1000 == 0 and major or fine)
-				end
-				buildat.set_line_geometry(grid_node, out)
-				grid_node:GetComponent("CustomGeometry"):SetMaterial(0,
-						flat_material)
+		if not (g and g.step == step and x0 >= g.x0 and x1 <= g.x1 and
+				z0 >= g.z0 and z1 <= g.z1) then
+			local dx, dz = x1 - x0, z1 - z0
+			g = {step = step, x0 = x0 - dx, x1 = x1 + dx, z0 = z0 - dz,
+					z1 = z1 + dz}
+			M.grid_cache = g
+			local out = {}
+			local function add(ax, az, bx, bz, c)
+				local k = #out
+				out[k + 1], out[k + 2], out[k + 3] = W(ax), gy, W(az)
+				out[k + 4], out[k + 5], out[k + 6], out[k + 7] = c.r, c.g, c.b, 1
+				out[k + 8], out[k + 9], out[k + 10] = W(bx), gy, W(bz)
+				out[k + 11], out[k + 12], out[k + 13], out[k + 14] = c.r, c.g, c.b, 1
 			end
-			grid_node.enabled = true
-		else
-			for gx = math.floor(x0 / step) * step, x1, step do
-				debug:AddLine(P(gx, z0, gy), P(gx, z1, gy),
-						gx % 1000 == 0 and major or fine, true)
+			for gx = math.floor(g.x0 / step) * step, g.x1, step do
+				add(gx, g.z0, gx, g.z1, gx % 1000 == 0 and major or fine)
 			end
-			for gz = math.floor(z0 / step) * step, z1, step do
-				debug:AddLine(P(x0, gz, gy), P(x1, gz, gy),
-						gz % 1000 == 0 and major or fine, true)
+			for gz = math.floor(g.z0 / step) * step, g.z1, step do
+				add(g.x0, gz, g.x1, gz, gz % 1000 == 0 and major or fine)
 			end
+			buildat.set_line_geometry(grid_node, out)
+			grid_node:GetComponent("CustomGeometry"):SetMaterial(0,
+					flat_material)
 		end
+		grid_node.enabled = true
 		-- **The branch point's ghost** ([FP_GHOST]): its walls' outlines
 		-- and its rooms' edges on this layout (matched by id), one faded
 		-- colour, just over the floors so the plan's own walls cover it;
@@ -204,30 +192,23 @@ local function draw_overlay()
 			end
 			local col = magic.Color(0.25, 0.4, 0.9, 0.55)
 			local gy = 0.035
-			if buildat.set_line_geometry then
-				if not M.ghost_built then
-					M.ghost_built = true
-					local out = {}
-					for _, sg in ipairs(M.ghost_segs) do
-						for j = 0, 1 do
-							local k = #out
-							out[k + 1], out[k + 2], out[k + 3] =
-									W(sg[1 + 2 * j]), gy, W(sg[2 + 2 * j])
-							out[k + 4], out[k + 5], out[k + 6], out[k + 7] =
-									col.r, col.g, col.b, col.a
-						end
-					end
-					buildat.set_line_geometry(ghost_node, out)
-					ghost_node:GetComponent("CustomGeometry"):SetMaterial(0,
-							flat_material)
-				end
-				ghost_node.enabled = true
-			else
+			if not M.ghost_built then
+				M.ghost_built = true
+				local out = {}
 				for _, sg in ipairs(M.ghost_segs) do
-					debug:AddLine(P(sg[1], sg[2], gy), P(sg[3], sg[4], gy), col,
-							true)
+					for j = 0, 1 do
+						local k = #out
+						out[k + 1], out[k + 2], out[k + 3] =
+								W(sg[1 + 2 * j]), gy, W(sg[2 + 2 * j])
+						out[k + 4], out[k + 5], out[k + 6], out[k + 7] =
+								col.r, col.g, col.b, col.a
+					end
 				end
+				buildat.set_line_geometry(ghost_node, out)
+				ghost_node:GetComponent("CustomGeometry"):SetMaterial(0,
+						flat_material)
 			end
+			ghost_node.enabled = true
 		end
 		-- The rooms' names and areas
 		for id, r in pairs(E.room_data) do
@@ -255,7 +236,7 @@ local function draw_overlay()
 				end
 			end
 		end
-		if buildat.set_line_geometry and not (S.drag and S.drag.kind ~= "box") then
+		if not (S.drag and S.drag.kind ~= "box") then
 			local key = M.build_gen .. ":" .. mm_per_px() .. ":" .. cut ..
 					":" .. tostring(S.layout) .. ":" .. S.plan_look
 			if key ~= M.plan_lines_key then
@@ -283,7 +264,7 @@ local function draw_overlay()
 	-- nothing is dragged ([FRAME_WORK]): a wall's outline three times over
 	-- was some 60 sandboxed lines, over a millisecond a frame
 	local sel_out, sel_kept
-	if buildat.set_line_geometry and S.view == "2d" and not S.drag then
+	if S.view == "2d" and not S.drag then
 		local ks = {}
 		for id, kind in pairs(S.sel) do
 			ks[#ks + 1] = id .. kind

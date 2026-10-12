@@ -129,16 +129,9 @@ end
 local PENTA = {0, 2, 4, 7, 9, 12, 14, 16}
 
 -- A block's samples into its buffer at once ([FRAME_WORK]: a WriteShort()
--- is a sandboxed call each, ~70% of a block's time); one at a time on a
--- client without write_shorts
+-- is a sandboxed call each, ~70% of a block's time)
 local function write_block(buf, out)
-	if buildat.write_shorts then
-		return buildat.write_shorts(buf, out)
-	end
-	buf:Clear()
-	for i = 1, #out do
-		buf:WriteShort(math.floor(out[i]))
-	end
+	return buildat.write_shorts(buf, out)
 end
 
 function M.new(magic, log, style)

@@ -41,7 +41,7 @@ local FORMSPEC_API_VERSION = 8
 -- an operator reading a player list sees "buildat 0.4.19 luanti_client"
 -- rather than a bare name and knows what is connecting
 local VERSION = {major = 5, minor = 17, patch = 0,
-		hash = "buildat "..(buildat.version and buildat.version() or "?")..
+		hash = "buildat "..buildat.version()..
 				" luanti_client"}
 
 -- The language the player reads, which a game asks for through
