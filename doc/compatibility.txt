@@ -1,0 +1,186 @@
+Compatibility: what stays the same between versions
+===================================================
+The rules Buildat keeps from 0.7 on, for app and server authors as much as
+for the engine's own. A change that cannot keep them is a break, made
+deliberately on its own branch and released as a minor
+(doc/plan/compatibility_plan.md says how). 0.7 is the first such break,
+from 0.6.
+
+Versions
+--------
+The engine and apps are versioned by SemVer 2.0: MAJOR.MINOR.PATCH, an
+optional -pre-release and +build (interface::aitta::semver_ok;
+client/extensions/starport's semver_cmp for precedence).
+- A patch release only adds: anything new on the wire is behind a feature
+  name in the hello (below), so an older patch of the same minor still
+  plays with it.
+- A minor may break: it may raise the protocol minimum, the engine API
+  minimum and a save's format.
+- A pre-release (1.2.0-rc.1) is offered as an update only to a client
+  that runs a pre-release itself.
+
+The connection
+--------------
+The first packet each way is core:hello (src/interface/protocol.h): a
+record "hello" 1.0 of {protocol_min, protocol_max, version, api, features}.
+- **One protocol number per minor**: 0.7 is protocol 1, and runs 1..1.
+  The number covers everything on the wire, Magic's replicated attributes
+  included.
+- **Feature names** say what a patch added. 0.7.0 has none. Served Lua
+  asks with buildat.has(name), and reads the engine API as buildat.api
+  (client_api.txt), rather than testing for a function.
+- **The framing** is [u16 type][u8 flags][u32 size], then the payload. No
+  flag is defined; a reader refuses one it does not know.
+- **Another minor** is refused at the hello: when the protocol ranges do
+  not overlap, the server sends network:goodbye with the reason ("The
+  client runs Buildat X, which is older than this one (Y) plays with", or
+  newer) and the client shows it. A 0.6 client, whose framing has no flags
+  byte, is told in its own framing to update Buildat and is dropped after
+  10 s; a 0.7 client on a 0.6 server says the server did not say hello
+  and may run a Buildat older than 0.7.
+- **Scene replication** is not translated between versions: a mismatch is
+  refused at the hello, not rewritten.
+
+Records
+-------
+Data that crosses the network or is saved is a record: its major and
+minor version (a byte each), then its fields as one byte string (a u64
+length first).
+- A newer minor only adds fields at the end; a reader skips the tail it
+  does not know.
+- An older minor is read: C++ asks r.minor for what is there, and Lua
+  reads the fields it lacks at their type's zero value.
+- Another major is refused with an error, not read from the wrong offset.
+
+In C++ (interface::Record, src/interface/record.h), in a serialize():
+
+    Record<Archive> r(archive, "Example", 1, 1);
+    r.ar(v.name, v.count);
+    if(r.minor >= 1) r.ar(v.added_in_1);
+    r.end();
+
+Writing, r.minor is the current minor; reading, the one that was written.
+
+In Lua (cereal, client_api.txt), the same record as a type:
+
+    local t = {"record", 1, 1, {"object",
+        {"name", "string"}, {"count", "byte"},
+        {"added_in_1", "int32_t"}}}
+    local data = cereal.binary_output(value, t)
+    local value = cereal.binary_input(data, t)
+
+A 1.0 record read with t has added_in_1 = 0.
+
+Apps
+----
+Every module of an app says the engine API it is written against in its
+meta.json: {"engine_api": 2}. 0.7 runs engine API 2..2
+(interface::aitta::ENGINE_API_MIN, ENGINE_API).
+- A module outside that range, without engine_api, or with a meta.json
+  key the loader does not know is refused at load, with the reason.
+- An app module named like one of Buildat's builtin/ modules is refused.
+- What a break renames is not aliased: an app written for the old name
+  raises its engine_api and uses the new one.
+- To republish for 0.7: set "engine_api": 2 in meta.json and in each
+  module's meta.json, update what the app uses to the 0.7 API
+  (server_api.txt, client_api.txt), and pack and publish it as a new
+  version (aitta.txt).
+- An Aitta keeps every release whatever its engine_api. A client lists a
+  package's newest release that it runs; one it runs none of is shown
+  as "made for an older Buildat" or "needs a newer Buildat", with nothing
+  to install.
+
+Services
+--------
+Starport, Aitta and Hearth answer under /api/v1/. A path under /api/
+without v1 (a client before 0.7) gets {"ok": false, "code":
+"upgrade_required", "error": "This needs a newer Buildat: update it"}.
+- An error carries a `code` beside the human `error`: refused,
+  too_often, no_listing, session, upgrade_required. A client acts on the
+  code and shows the error.
+- An enum value the service does not know is kept and shown as "other"
+  (a listing's kind) or the safe default (an unknown audience is
+  "adult").
+- Unknown fields are kept and passed on: a Starport keeps an announce's
+  unknown keys (4 KB at most) and lists them; an Aitta keeps a release's
+  whole manifest.
+
+Tokens
+------
+A Starport ID token is a base64url JSON payload, ".", and an HMAC-SHA256
+of it in hex, keyed by the listing's secret. The payload has v (1), typ
+("server" or "site"), iss (the Starport's name), aud (the listing or
+site id), sub, name and exp. A server takes only v 1, typ "server" and
+its own aud. Each HMAC has its domain as a prefix, so one cannot stand
+for another: "buildat-token-1\n" (a token), "buildat-challenge-1\n" (a
+login challenge), "buildat-claim-1\n" (a listing's claim). In 0.7, sub is
+per listing, or per fleet for a fleet's listings: the same ID is a
+different sub on two servers that are not one fleet.
+
+Saves and settings
+------------------
+- save.sqlite is stamped with its format: PRAGMA user_version, 1 since
+  0.7, and the version that last opened it in the "__save" store's
+  "version" row. A save of a newer format is refused before anything is
+  written ("The save ... was written by a newer Buildat (save format N;
+  this one, X, reads 1)"). Only save.sqlite is stamped, not the user
+  directory.
+- The user directory as 0.7 lays it out: a launch extension's storage is
+  user/extensions/<extension>/; the pidfile and the web client's URL
+  file are key=value lines.
+- The accounts store is format "2".
+
+Environment variables
+---------------------
+The supported BUILDAT_* variables are listed in architecture.txt
+("Environment variables") and kept from version to version as an option
+is. Every other BUILDAT_* a source reads is a check's or a developer's
+knob, which a release may change or drop without a word.
+
+C++
+---
+The public C++ API is src/core/, src/interface/ and the builtin modules'
+api.h files (server_api.txt). Its names are kept within a minor; a change
+that breaks a module raises the engine API. Magic's headers and the other
+third-party ones on the include path are not part of it and change with
+any release.
+
+What 0.7 still reads of 0.6's
+-----------------------------
+Read once, converted, and dropped at the next break:
+- in a save: accounts' old levels and links (then accounts format "2"),
+  node_meta, the voxel name table seeded from the saved registry,
+  headerless chunk rows, bare "1"/"0" marks, sound_volume, the room's
+  !sound rows, the old key rows, Hearth's added columns; the save is then
+  stamped format 1;
+- the 0.6 voxel registry, name and format tables (voxel_cereal_legacy.h);
+- a launch extension's storage at user/<extension>/, moved to
+  user/extensions/<extension>/ on its first use (kept as it is when the
+  new one is there too, and said in the log);
+- the Luanti players row and mod storage without "v", rewritten with it;
+- a pidfile in 0.6's "<server> <client>" form, left alone.
+
+Kept beyond the next break: voxel volume formats 2 and 3. A save stamped
+format 1 can still hold chunks of a world saved before 0.6.37 and not
+rewritten since; dropping them would strand those chunks.
+
+Upgrading a server from 0.6
+---------------------------
+- The server and its players' clients move together: a 0.6 client
+  cannot join a 0.7 server, nor a 0.7 client a 0.6 one.
+- starport.json's "login" is refused: a server with it stops at start,
+  saying so. Replace "login": "both" or "starport" with "ids": "anyone"
+  (or "approved", where an operator approves each ID); remove "login":
+  "local", which is Starport IDs off. An edit at runtime with "login" is
+  logged and not taken.
+- Every installed package is republished at engine_api 2 (Apps, above);
+  one that is not is refused at load.
+- The save is migrated on its first start and stamped. 0.6 does not
+  read the stamp and is not made to read what 0.7 wrote: keep a copy of
+  the save to go back.
+- **An operator locked out**: when the save has admins but no admin
+  account this Buildat can read (one written by a newer Buildat), the
+  server logs which, once a start, and is not offered to be claimed. To
+  get back in, run the Buildat that wrote the account, or stop the server
+  and delete that row (store "accounts", key "auth/<name>") from
+  save.sqlite; the next start offers the server to be claimed.

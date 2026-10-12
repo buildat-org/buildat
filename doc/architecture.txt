@@ -205,8 +205,9 @@ everything on the wire, Magic's replicated attributes included.
 
 **Records**: a cereal record is its major and minor version, then its
 fields as one byte string (interface::Record, src/interface/record.h). A
-newer minor only adds fields at the end, which an older reader skips;
-another major is refused.
+newer minor only adds fields at the end, which an older reader skips; an
+older minor is read with what it has; another major is refused. The rule,
+with an example of each, is in compatibility.txt.
 
 **Files** (builtin/client_file): the server announces every file's name and
 hash in one core:announce_files, the client asks for what it has not

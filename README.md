@@ -67,6 +67,8 @@ Further reading:
   app running inside buildat_server, and how it is checked
 * [doc/luanti_client.txt](doc/luanti_client.txt) -- extensions/luanti_client:
   playing on a real Luanti server over its own protocol
+* [doc/compatibility.txt](doc/compatibility.txt) -- what stays the same
+  between versions, and upgrading a server from 0.6
 * [doc/aitta.txt](doc/aitta.txt) -- an app packed, signed, published to an
   Aitta registry (apps/aitta) and installed
 * [doc/starport.txt](doc/starport.txt) -- the server list and the Starport
