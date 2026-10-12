@@ -7,7 +7,8 @@
 # this does not know refused. With a display, the Lua cereal binding's
 # "record" in a serverless app: the same bytes as C++ writes, a newer
 # minor's tail skipped, an older minor's read with its added field at
-# its zero value, another major refused.
+# its zero value, another major refused, a field definition or a value
+# that is not a table an error ([SECURITY_RUN_5]).
 #   util/record_check.sh
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -132,19 +133,37 @@ local n = cereal.binary_input(unhex("OLD_HEX"),
 		t(1, 1, {{"a", "int32_t"}, {"b", "string"}, {"c", "int32_t"}}))
 local w = cereal.binary_output({r = {a = 3, b = "y"}, after = 42},
 		t(1, 0, {{"a", "int32_t"}, {"b", "string"}}))
+-- [SECURITY_RUN_5] A field definition or a value of the wrong kind is a
+-- Lua error, not read as a table
+local old_hex = unhex("OLD_HEX")
+local bad = 0
+for _, c in ipairs({
+	{cereal.binary_input, d, {"object", "notatable"}},
+	{cereal.binary_output, {x = 1}, {"object", 5}},
+	{cereal.binary_input, old_hex, t(1, 1, {{"a", "int32_t"}, {"b", "string"}, "c"})},
+	{cereal.binary_input, old_hex, t(1, 1, {{"a", "int32_t"}, {"b", "string"},
+			{"c", {"object", "bad"}}})},
+	{cereal.binary_output, {a = "s"}, {"object", {"a", {"array", "byte"}}}},
+	{cereal.binary_output, {a = 5},
+			{"object", {"a", {"unordered_map", "int32_t", "int32_t"}}}},
+	{cereal.binary_output, {a = "s"}, {"object", {"a", {"object", {"x", "byte"}}}}},
+}) do
+	if not pcall(c[1], c[2], c[3]) then bad = bad + 1 end
+end
+local nil_ok = pcall(cereal.binary_output, {}, {"object", {"a", {"array", "byte"}}})
 log:info("lr: " .. hex(d) .. " " .. o.r.a .. o.r.b .. tostring(o.r.c) ..
 		o.after .. " " .. tostring(ok) .. " " .. n.r.a .. n.r.b .. n.r.c ..
-		n.after .. " " .. hex(w))
+		n.after .. " " .. hex(w) .. " " .. bad .. " " .. tostring(nil_ok))
 L
 	sed -i "s/OLD_HEX/$want_old/" "$app/main/client_lua/init.lua"
 	printf 'delay 3000\nquit\n' > "$t/cmds"
 	(cd "$here/Build" && BUILDAT_RUN=dev:lr timeout 60 bin/buildat \
 		-o launch_ui=launch_menu -D "$t/u" -w 640x480 -l 3 -o sound_mute=1 \
-		-c @"$t/cmds" > "$t/lua.log" 2>&1)
+		-c @"$t/cmds" > "$t/lua.log" 2>&1) || true
 	got=$(grep -aoP 'lr: \K.*' "$t/lua.log" | head -1)
-	w="$want 7xnil42 false 3y042 $want_old"
+	w="$want 7xnil42 false 3y042 $want_old 7 true"
 	[ "$got" = "$w" ] ||
 		{ echo "FAIL: Lua's record: \"$got\", not \"$w\""; exit 1; }
-	lua_part="; Lua's the same, an older minor read with its added field at 0"
+	lua_part="; Lua's the same, an older minor read with its added field at 0, a malformed type or value an error"
 fi
 echo "PASS: a record's added tail skipped by an older reader; another major refused; an unknown file hash refused$lua_part"

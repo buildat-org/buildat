@@ -31,6 +31,22 @@ namespace lua_bindings {
 static constexpr auto known_types =
 		"byte, int16_t, int32_t, double, array, unordered_map, object, record";
 
+// A field definition is {name, type}: lua_rawgeti() on anything else reads
+// it as a table, and the type list comes from sandboxed code
+static void check_field_def(lua_State *L, int idx)
+{
+	if(!lua_istable(L, idx))
+		throw Exception("an object field requires {name, type}");
+}
+
+// The same for a value written as an array, a map or an object: its
+// elements are read raw
+static void check_value_table(lua_State *L, int idx, const char *what)
+{
+	if(!lua_istable(L, idx))
+		throw Exception(ss_()+what+" value is not a table");
+}
+
 // {"record", major, minor, type}: an interface::Record's major and minor,
 // then its type in a byte string. Read, another major is refused, a tail
 // written by a newer minor skipped, and an older minor's record, its type
@@ -116,6 +132,7 @@ static void push_default(lua_State *L, int type_L)
 		const size_t n = lua_objlen(L, type_L);
 		for(size_t i = 2; i <= n; i++){
 			lua_rawgeti(L, type_L, (int)i);
+			check_field_def(L, -1);
 			lua_rawgeti(L, -1, 1); // name
 			lua_rawgeti(L, -2, 2); // type
 			push_default(L, -1);
@@ -242,6 +259,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			if(field_i != 0){
 				log_t(MODULE, "object field %zu", field_i);
 				int field_def_L = lua_gettop(L);
+				check_field_def(L, field_def_L);
 				lua_rawgeti(L, field_def_L, 1); // name
 				lua_rawgeti(L, field_def_L, 2); // type
 				log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -2));
@@ -275,6 +293,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			const size_t n = lua_objlen(L, inner_L);
 			for(size_t i = 2; i <= n; i++){
 				lua_rawgeti(L, inner_L, (int)i);
+				check_field_def(L, -1);
 				lua_rawgeti(L, -1, 1); // name
 				lua_rawgeti(L, -2, 2); // type
 				if(r.is.peek() == std::char_traits<char>::eof())
@@ -340,6 +359,9 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 	} else if(outfield_type == "array"){
 		if(!has_table)
 			throw Exception("array requires parameter table");
+		// nil is an empty array, as it always wrote
+		if(!lua_isnil(L, value_L))
+			check_value_table(L, value_L, "array");
 		lua_rawgeti(L, type_L, 2);
 		int array_type_L = lua_gettop(L);
 		// 1..n in order: lua_next walks a table's hash part in no order,
@@ -358,6 +380,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 	} else if(outfield_type == "unordered_map"){
 		if(!has_table)
 			throw Exception("unordered_map requires parameter table");
+		check_value_table(L, value_L, "unordered_map");
 		lua_rawgeti(L, type_L, 2);
 		int map_key_type_L = lua_gettop(L);
 		lua_rawgeti(L, type_L, 3);
@@ -385,6 +408,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 	} else if(outfield_type == "object"){
 		if(!has_table)
 			throw Exception("object requires parameter table");
+		check_value_table(L, value_L, "object");
 		// Loop through object fields
 		size_t field_i = 0;
 		lua_pushnil(L);
@@ -392,6 +416,7 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 			if(field_i != 0){
 				log_t(MODULE, "object field %zu", field_i);
 				int field_def_L = lua_gettop(L);
+				check_field_def(L, field_def_L);
 				lua_rawgeti(L, field_def_L, 2); // type
 				lua_rawgeti(L, field_def_L, 1); // name
 				log_t(MODULE, " = object[\"%s\"]", lua_tostring(L, -1));
