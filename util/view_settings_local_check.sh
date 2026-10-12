@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-12)
+# cost: ~2.5 min (2026-10-12)
 # covers: apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua client/api.lua
 # [VIEW_SETTINGS_LOCAL]: the render mode in vanilla's View settings.
 #   1. A launcher's game (save vs, the minimal game), settings.json saying
@@ -30,8 +30,9 @@ echo '{"render_mode": "pbr", "view_range": "90", "distant_detail": "half"}' > "$
 mkdir -p "$d/apps/vanilla/client"
 printf unlit > "$d/apps/vanilla/client/view_render_mode"
 # mode <m>: View's render mode one step down, from the pause menu (at
-# 1100x600, the row vanilla_player_settings_check found)
-mode(){ printf 'keypress Escape\ndelay 1000\nclick Button "Settings..."\nwait_log 5000 Game settings shown\ndelay 1000\nclick DropDownList "▼" 668 120\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 120000 drawing the world %s\ndelay 3000\n' "$1"; }
+# 1100x600, the row vanilla_player_settings_check found); 15 s in the
+# game after, past the old server's 10 s stop ([REJOIN_KILLS_SERVER])
+mode(){ printf 'keypress Escape\ndelay 1000\nclick Button "Settings..."\nwait_log 5000 Game settings shown\ndelay 1000\nclick DropDownList "▼" 668 120\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 120000 drawing the world %s\ndelay 15000\n' "$1"; }
 json(){ python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$F" "$1"; }
 
 # 1.
@@ -42,6 +43,11 @@ json(){ python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.arg
 } > "$t/1.cmds"
 timeout 400 "$here/Build/bin/buildat" -o launch_ui=launch_menu -D "$d" -C "$t/c1" \
 	-w 1100x600 -l 3 -o sound_mute=1 -c @"$t/1.cmds" > "$t/1.log" 2>&1
+# The quit stops the last server; a kill or a disconnect before it is a
+# rejoin's
+sed '/Command sequence complete/q' "$t/1.log" |
+	grep -a "did not stop in 10 s\|SIGKILL\|Disconnected from server" &&
+	fail "a rejoin's server killed or left ($t/1.log)"
 for p in $(pgrep -f "[b]uildat_server .*-D $d"); do kill $p; done
 grep -a "luanti:world_info: \|view: \|Starting local server\|Command sequence" "$t/1.log" | cut -c1-160
 grep -aq "Command sequence complete" "$t/1.log" || fail "the drive ($t/1.log)"

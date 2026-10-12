@@ -890,6 +890,9 @@
 			lua_pushstring(L, "Previous local server is still running");
 			return 2;
 		}
+		// The old one is gone; a stop still pending across frames would
+		// force-kill the new one 10 s on ([REJOIN_KILLS_SERVER])
+		g_stopping_server = false;
 		g_local_server.impl = 0;
 		clear_pidfile();
 
