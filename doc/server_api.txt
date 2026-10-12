@@ -277,7 +277,7 @@ get_by_name, get_all, get_count; set_format / get_format; set_look_selector
 id), VoxelFormat (the planes and the roles: VoxelField {plane, shift,
 width} for id, light_sky, light_lamp, param, color and the modifiers;
 plane_bits, plane_count, plane_of_name, id_of, light_pair,
-surface_modifiers, validate; the legacy() and luanti() formats),
+surface_modifiers, validate; the default_cut() and luanti() formats),
 VoxelSample. voxel_format_self_test(). The Lua side of the same is in
 doc/client_api.txt under "Miscellaneous".
 
@@ -629,7 +629,7 @@ interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, li
 interface/thread.h: ThreadedThing, ~ThreadedThing, run, on_crash, Thread, ~Thread, set_name, start, is_running, request_stop, stop_requested, join, get_name, ref_backtraces, set_caller_thread, get_caller_thread, get_current_thread, createThread, ThreadLocalKey, set, get
 interface/thread_pool.h: Task, ~Task, pre, thread, post, ThreadPool, ~ThreadPool, add_task, start, request_stop, join, run_post, createThreadPool
 interface/urho3d_cereal.h: save, load
-interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, legacy, luanti, id_of, light_pair, surface_modifiers, any_surface_modifier, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, get_id, getMSB, get_skylight, set_skylight, get_lamplight, set_lamplight
+interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, default_cut, luanti, id_of, light_pair, surface_modifiers, any_surface_modifier, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, get_id, getMSB, get_skylight, set_skylight, get_lamplight, set_lamplight
 interface/voxel_cereal.h: serialize, r, save, load
 interface/voxel_cereal_legacy.h: In, read_vector, read
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test

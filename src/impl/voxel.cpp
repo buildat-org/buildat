@@ -63,7 +63,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<VoxelDefinition> m_defs;
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
-	VoxelFormat m_format = VoxelFormat::legacy();
+	VoxelFormat m_format = VoxelFormat::default_cut();
 	// What add_plane() was asked for, appended again to every format set
 	sv_<VoxelPlane> m_added_planes;
 	// How a voxel's definition is found; the default is the id role
@@ -825,7 +825,7 @@ bool voxel_selector_self_test()
 	// A clause on a field nothing bound never holds, so a rule wearing one
 	// is dead rather than always true
 	{
-		VoxelFormat f = VoxelFormat::legacy();
+		VoxelFormat f = VoxelFormat::default_cut();
 		VoxelSelector s;
 		s.kind = VoxelSelector::RULES;
 		s.fallback = 7;
@@ -879,17 +879,17 @@ bool voxel_format_self_test()
 	}
 
 	ss_ why;
-	assert(VoxelFormat::legacy().validate(&why));
+	assert(VoxelFormat::default_cut().validate(&why));
 	assert(VoxelFormat::luanti().validate(&why));
 
 	// The ways a format can be wrong
 	{
-		VoxelFormat f = VoxelFormat::legacy();
+		VoxelFormat f = VoxelFormat::default_cut();
 		f.param = f.id; // overlaps
 		assert(!f.validate(&why));
 	}
 	{
-		VoxelFormat f = VoxelFormat::legacy();
+		VoxelFormat f = VoxelFormat::default_cut();
 		f.param = VoxelField{0, 28, 8}; // past the end of the plane
 		assert(!f.validate(&why));
 	}
@@ -924,7 +924,7 @@ bool voxel_format_self_test()
 	// Planes: a format has one 32-bit one unless it says otherwise, a named
 	// one belongs to a module, and a field lives inside its own plane
 	{
-		VoxelFormat f = VoxelFormat::legacy();
+		VoxelFormat f = VoxelFormat::default_cut();
 		assert(f.plane_count() == 1);
 		assert(f.plane_bits(0) == 32);
 		assert(f.plane_of_name("mod:heat") == -1);
@@ -988,9 +988,9 @@ bool voxel_format_self_test()
 		assert(!f.validate(&why));
 	}
 
-	// legacy() through the format is VoxelInstance's own hardcoded cut
+	// default_cut() through the format is VoxelInstance's own hardcoded cut
 	{
-		VoxelFormat f = VoxelFormat::legacy();
+		VoxelFormat f = VoxelFormat::default_cut();
 		for(uint32_t word : {0u, 0xffffffffu, 0x12345678u, 0xdeadbeefu,
 				0x000fffffu, 0xf0f0f0f0u, 0x00000001u, 0x0badf00du}){
 			VoxelInstance v(word);

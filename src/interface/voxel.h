@@ -568,7 +568,7 @@ namespace interface
 	// volume plus its world's registry is self-describing, and nothing that
 	// takes a volume needs to take a format as well.
 	//
-	// The default is legacy(), which is the cut the engine had before this
+	// The default is default_cut(), which is the cut the engine had before this
 	// existed, bit for bit. A game that says nothing keeps it.
 	struct VoxelFormat
 	{
@@ -684,7 +684,7 @@ namespace interface
 		};
 		static const sv_<Role>& roles();
 
-		static VoxelFormat legacy()
+		static VoxelFormat default_cut()
 		{
 			VoxelFormat f;
 			f.id = VoxelField{0, 0, 21};
@@ -754,7 +754,7 @@ namespace interface
 
 	// Asserts the invariants of VoxelField and VoxelFormat: the accessors
 	// round-trip, the built-in formats validate, malformed ones do not, and
-	// legacy() read through a format agrees with VoxelInstance's own
+	// default_cut() read through a format agrees with VoxelInstance's own
 	// hardcoded cut. Runs once, from createVoxelRegistry().
 	bool voxel_format_self_test();
 
@@ -779,7 +779,7 @@ namespace interface
 		virtual VoxelTypeId num_voxels() = 0;
 
 		// How a voxel word is cut up; see VoxelFormat. The default is
-		// VoxelFormat::legacy().
+		// VoxelFormat::default_cut().
 		//
 		// set_format() may only be called while the registry holds no voxel
 		// definitions, which in practice means before a world generates

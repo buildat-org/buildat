@@ -537,7 +537,7 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 	// voxel registry, which is where its format lives; without one the
 	// default format applies, which is what every game had before formats
 	// existed.
-	interface::VoxelFormat format = interface::VoxelFormat::legacy();
+	interface::VoxelFormat format = interface::VoxelFormat::default_cut();
 	{
 		luabind::object o = args["registry"];
 		if(o){
