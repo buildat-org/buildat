@@ -271,13 +271,13 @@
 		// See [RENDER_MODES] in doc/plan/rendering_plan.md.
 		//
 		// The client asks for its own -- the packet carries what its
-		// BUILDAT_LUANTI_PBR says, through buildat.get_env() -- and the
+		// BUILDAT_RENDER_MODE says, through buildat.get_env() -- and the
 		// server's environment is the default for one that says nothing,
 		// so one server can serve a client in each mode ([PROBE_CYCLE]).
 		// An unset variable on both means this client's own default, which
 		// is pbr. The numbers keep working for whatever already passes
 		// them: 0 was the unlit path before either had a name.
-		const char *mode = getenv("BUILDAT_LUANTI_PBR");
+		const char *mode = getenv("BUILDAT_RENDER_MODE");
 		ss_ m = !asked_mode.empty() ? asked_mode :
 				(mode != nullptr) ? ss_(mode) : ss_("");
 		// Neither side saying: the launcher game's setting
@@ -292,7 +292,7 @@
 				m != "pbr_debug_shadows" && m != "pbr_debug_light" &&
 				m != "pbr_debug_nibbles" && m != "pbr_debug_ground" &&
 				m != "pbr_debug_skyamb" && m != "pbr_debug_baked"){
-			log_w(MODULE, "BUILDAT_LUANTI_PBR=\"%s\" is not a mode; "
+			log_w(MODULE, "BUILDAT_RENDER_MODE=\"%s\" is not a mode; "
 					"drawing pbr. Wanted unlit, shadows, pbr, "
 					"pbr_debug_shadows, pbr_debug_light, "
 					"pbr_debug_nibbles, pbr_debug_ground, "

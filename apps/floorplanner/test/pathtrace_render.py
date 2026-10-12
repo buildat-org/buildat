@@ -34,7 +34,7 @@ from mathutils import Matrix, Vector
 
 LUM = np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
 RES = (1200, 800)
-# LuantiSky.glsl's
+# SkyDome.glsl's
 HAZE_DEPTH = 0.25
 
 
@@ -83,7 +83,7 @@ def add_camera(pos, dire, fov):
 
 
 def sky_image(top, hor):
-	"""LuantiSky.glsl's physical gradient by elevation, as an
+	"""SkyDome.glsl's physical gradient by elevation, as an
 	equirectangular image: it does not turn with the azimuth"""
 	w, h = 8, 1024
 	top, hor = np.array(top), np.array(hor)
@@ -160,7 +160,7 @@ def main():
 
 	# The sun: the client's irradiance (its Lambert has the 1/pi in the
 	# brightness, so this is W/m2 as Cycles takes it), its colour at
-	# luminance one, the disc LuantiSky draws (daylight.lua's SUN_HALF)
+	# luminance one, the disc SkyDome draws (daylight.lua's SUN_HALF)
 	sc = meta["sun_color"]
 	m = max(sc)
 	ld = bpy.data.lights.new("sun", "SUN")

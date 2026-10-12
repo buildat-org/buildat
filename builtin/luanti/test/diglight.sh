@@ -68,7 +68,7 @@ screenshot $out/stair_${MODE}_t155_pit.png
 delay 2000
 quit
 CMDS
-BUILDAT_LUANTI_PBR="$MODE" bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+BUILDAT_RENDER_MODE="$MODE" bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
 sleep 2
 kill -INT "$srv" 2>/dev/null

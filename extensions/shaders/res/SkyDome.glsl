@@ -1,6 +1,5 @@
-// The sky a Luanti world stands under, on a skybox: a gradient from the
-// horizon to the zenith, the sun and the moon, the stars at night and a flat
-// layer of cloud.
+// The sky, on a skybox: a gradient from the horizon to the zenith, the sun
+// and the moon, the stars at night and a flat layer of cloud.
 //
 // What time of day it is is not worked out here. The client hands in the
 // colours -- Luanti's own sky colours, picked and dimmed the way its
@@ -333,7 +332,7 @@ void PS()
         // band is a radiance and not a colour. Mixed towards the sun's
         // tint at a fixed value it was a white patch on a black sky; an
         // orange at a few times the sky's own level dims as the sky
-        // does. The share of orange is vanilla's (luanti_sky.dusk_tint():
+        // does. The share of orange is vanilla's (sky_dome.dusk_tint():
         // none at 18:40, all of it from 19:30), so with the sun high -- the
         // probed 05:45 among those hours -- it is the band it was.
         float dusk = cDuskBand.x > 0.0 ? cDuskBand.z : 0.0;

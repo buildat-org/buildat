@@ -2486,7 +2486,7 @@ struct Module: public interface::Module
 
 	// The launcher's settings, in the user path beside luanti/games and
 	// luanti/worlds ([LAUNCH_GRID]): {"render_mode": "pbr", ...}, the mode
-	// a session draws in when BUILDAT_LUANTI_PBR says nothing (read by
+	// a session draws in when BUILDAT_RENDER_MODE says nothing (read by
 	// builtin/luanti where the variable is), the view and the keys. Written
 	// by hand and read with sajson. On the wire one list of "key=value"
 	// strings. An old file's "import_paths" is ignored

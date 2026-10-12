@@ -1,4 +1,4 @@
-// Buildat: luanti_client/res/LuantiTonemap.glsl
+// Buildat: luanti_client/res/TonemapACES.glsl
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //

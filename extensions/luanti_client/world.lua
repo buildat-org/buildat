@@ -487,7 +487,7 @@ function M.new(magic, buildat, log, options)
 	-- night does not draw it back at noon
 	local daylight_time = nil
 
-	-- The sky itself: a skybox drawn by res/LuantiSky.glsl,
+	-- The sky itself: a skybox drawn by res/SkyDome.glsl,
 	-- which is handed the colours and the sun's direction from here.
 	local sky_node = scene:CreateChild("Sky")
 	local sky_material = nil
@@ -496,7 +496,7 @@ function M.new(magic, buildat, log, options)
 		skybox:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 		sky_material = magic.Material.new()
 		sky_material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"luanti_client/res/LuantiSky.xml"))
+				"shaders/res/SkyDome.xml"))
 		skybox.material = sky_material
 	end
 
@@ -853,7 +853,7 @@ function M.new(magic, buildat, log, options)
 		-- apps/vanilla/main/client_lua/init.lua for where each number
 		-- was picked.
 		rp:Append(magic.cache:GetResource("XMLFile",
-				"luanti_client/res/LuantiAutoExposure.xml"))
+				"shaders/res/AutoExposureMean.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile",
 				"PostProcess/BloomHDR.xml"))
 		rp:Append(magic.cache:GetResource("XMLFile",

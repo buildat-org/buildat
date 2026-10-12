@@ -2,7 +2,7 @@
 -- **The sky's model, one copy for both Luanti clients** ([LUANTI_SHARED]):
 -- when the sun and the moon are up, where the sun is, when its light goes
 -- red, and the light before dawn. In Luanti's own units of the day,
--- 0...24000. The extension's world.lua and apps/vanilla's luanti_sky.lua
+-- 0...24000. The extension's world.lua and apps/vanilla's sky_dome.lua
 -- each draw a sky from it; the module's client gets it as
 -- luanti/sky_model.lua (serve_shared_lua).
 local M = {}
@@ -12,7 +12,7 @@ local M = {}
 M.MOON_HALF = 0.048
 
 -- How many stars a game asks for when it says nothing, and how many of the
--- star grid's cells hold one at that count. **The grid is LuantiSky.glsl's
+-- star grid's cells hold one at that count. **The grid is SkyDome.glsl's
 -- own**, two faces of STAR_GRID squared cells, which is about a quarter of a
 -- million -- so a thousand stars is four thousandths of them, and a game
 -- asking for more gets more in proportion.
@@ -366,7 +366,7 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		translucency = 1.0,
 		-- how bright a thin noon cloud is against the sky's zenith patch:
 		-- picked by the user off a ladder of 1.5 to 20 ([CLOUD_LIGHT],
-		-- 2026-09-19); BUILDAT_LUANTI_CLOUD_N overrides
+		-- 2026-09-19); BUILDAT_SKY_CLOUD_N overrides
 		cloud_n = 8,
 		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
 		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)

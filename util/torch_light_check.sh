@@ -77,7 +77,7 @@ core.register_on_joinplayer(function(player)
 end)
 L
 echo "enable_damage = false" > "$d/apps/vanilla/saves/tl/luanti/world.mt"
-BUILDAT_LUANTI_PBR=pbr_debug_baked BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=tl \
+BUILDAT_RENDER_MODE=pbr_debug_baked BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=tl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
@@ -89,7 +89,7 @@ CHECK_PIDS+=($SERVER_PID)
 	done
 	echo "delay 500"; echo quit
 } > "$t/cmds"
-BUILDAT_LUANTI_PBR=pbr_debug_baked BUILDAT_LUANTI_LINEAR=1 \
+BUILDAT_RENDER_MODE=pbr_debug_baked BUILDAT_VOXEL_LINEAR=1 \
 	run_client 60 "$t/client.log" timeout 240 "$here/Build/bin/buildat" \
 	-C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 640x360 -u 1 -l 3 \
 	-o sound_mute=1 -c @"$t/cmds"

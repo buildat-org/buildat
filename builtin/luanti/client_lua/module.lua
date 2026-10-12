@@ -4245,7 +4245,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	refshot_token = nil
 end)
 
--- The mode is this client's to ask for -- BUILDAT_LUANTI_PBR on its own
+-- The mode is this client's to ask for -- BUILDAT_RENDER_MODE on its own
 -- process, the same variable extensions/luanti_client reads -- and the
 -- server's environment is the default for a client that says nothing. That
 -- is what lets one server serve a client in each mode; see [PROBE_CYCLE].
@@ -4255,7 +4255,7 @@ end)
 -- ([VIEW_SETTINGS_LOCAL])
 local is_local = buildat.connected_locally and buildat.connected_locally()
 buildat.send_packet("luanti:get_world_info",
-		buildat.get_env("BUILDAT_LUANTI_PBR") or
+		buildat.get_env("BUILDAT_RENDER_MODE") or
 		(not is_local and buildat.storage_read("view_render_mode")) or "")
 buildat.send_packet("luanti:get_translations", "")
 

@@ -614,10 +614,10 @@ static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
 // and flowing alike, so the flow's own dip still reads against the source.
 static const float LIQUID_SAG = 1.0f / 8.0f;
 
-static const bool PBR_MODE = getenv("BUILDAT_LUANTI_PBR") != nullptr && (
-		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr" ||
-		ss_(getenv("BUILDAT_LUANTI_PBR")) == "1" ||
-		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows");
+static const bool PBR_MODE = getenv("BUILDAT_RENDER_MODE") != nullptr && (
+		ss_(getenv("BUILDAT_RENDER_MODE")) == "pbr" ||
+		ss_(getenv("BUILDAT_RENDER_MODE")) == "1" ||
+		ss_(getenv("BUILDAT_RENDER_MODE")) == "pbr_debug_shadows");
 
 // How much of that occlusion the bounce term takes. Occlusion is a statement
 // about how much of the sky a corner can see, which is the wrong question to
@@ -906,7 +906,7 @@ static float terrain_sky(const HorizonMap *horizon,
 	return weight > 0 ? sum / weight : 1.0f;
 }
 
-// The pbr_debug_shadows render mode -- BUILDAT_LUANTI_PBR on this client's
+// The pbr_debug_shadows render mode -- BUILDAT_RENDER_MODE on this client's
 // process, the same variable the mode is asked with ([RENDER_MODES]) -- is
 // the shadow-kind diagnostic ([PBR_FIT] 2c). Each occlusion term goes into
 // its own channel of the vertex colour instead of into the shade -- the
@@ -916,8 +916,8 @@ static float terrain_sky(const HorizonMap *horizon,
 // lost between here and the frame. Read here because the mesher runs in
 // the client and the sandbox has no getenv.
 // simplified: the custom-shape path (plants, stairs) is not coloured.
-static const bool SHADOW_KINDS = getenv("BUILDAT_LUANTI_PBR") != nullptr &&
-		ss_(getenv("BUILDAT_LUANTI_PBR")) == "pbr_debug_shadows";
+static const bool SHADOW_KINDS = getenv("BUILDAT_RENDER_MODE") != nullptr &&
+		ss_(getenv("BUILDAT_RENDER_MODE")) == "pbr_debug_shadows";
 
 static void face_vertex_colors(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt,

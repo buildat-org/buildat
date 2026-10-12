@@ -1,7 +1,0 @@
-<!-- The ACES tonemap, [PBR_FIT] term 4; see LuantiTonemap.glsl -->
-<renderpath>
-    <command type="quad" enabled="true" tag="TonemapACES" vs="luanti_client/res/LuantiTonemap" ps="luanti_client/res/LuantiTonemap" output="viewport">
-        <parameter name="TonemapExposureBias" value="1.0" />
-        <texture unit="diffuse" name="viewport" />
-    </command>
-</renderpath>

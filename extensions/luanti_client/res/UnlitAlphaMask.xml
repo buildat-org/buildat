@@ -1,7 +1,12 @@
-<!-- A texture as it is, with texels below half alpha discarded: what a thing
-     that is not part of the voxel world is drawn with. Luanti's own entities
-     are drawn unlit too, and their textures are full of holes.
--->
+<!-- A texture as it is, with texels below half alpha discarded: Urho3D's
+     Unlit with the texture's alpha cutting holes rather than being ignored
+     or blended through. What is not part of the voxel world is drawn with
+     it in both Luanti clients: entities, whose textures are full of holes,
+     and an item's picture -- a plant, a tool, a sapling -- opaque where the
+     picture is and not there at all where it is not, which is what
+     use_texture_alpha = "clip" means for a node. CoreData has DiffUnlit
+     (alpha ignored, so the holes are black) and DiffUnlitAlpha (blended,
+     so a picture that is mostly holes is a ghost), and neither is this. -->
 <technique vs="Unlit" ps="Unlit" psdefines="DIFFMAP ALPHAMASK">
     <pass name="base" />
 </technique>

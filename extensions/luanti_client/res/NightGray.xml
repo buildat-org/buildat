@@ -1,7 +1,7 @@
 <!-- Light below an absolute level shown gray ([NIGHT_GRAY]); see
-     LuantiNightGray.glsl. Appended before the auto-exposure. -->
+     NightGray.glsl. Appended before the auto-exposure. -->
 <renderpath>
-    <command type="quad" tag="NightGray" vs="luanti_client/res/LuantiNightGray" ps="luanti_client/res/LuantiNightGray" output="viewport">
+    <command type="quad" tag="NightGray" vs="luanti_client/res/NightGray" ps="luanti_client/res/NightGray" output="viewport">
         <parameter name="NightGray" value="0.0003 0.003" />
         <texture unit="diffuse" name="viewport" />
     </command>

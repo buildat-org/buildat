@@ -1,14 +1,13 @@
--- Buildat: vanilla/client_lua/luanti_sky.lua
+-- Buildat: vanilla/client_lua/sky_dome.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- The sky, drawn by Luanti's own shader rather than buildat's.
+-- The sky, drawn by `extensions/shaders/res/SkyDome.glsl` rather than
+-- builtin/voxel_shading's skybox.
 --
--- `extensions/luanti_client/res/LuantiSky.glsl` is the sky the other Luanti
--- client draws, and this is the second consumer of it -- the same
--- arrangement the world's shaders are already in, one set shared by both
--- clients with `builtin/voxel_shading` left to the nine games that want
--- buildat's look. See [SHADER_HOME] in doc/plan/master_plan.md.
+-- The same shader draws extensions/luanti_client's sky and the
+-- floorplanner's: a gradient, the sun and the moon, the stars, the dawn
+-- glow, the dusk band, the treeline and a flat cloud layer.
 --
 -- **What this is not** is a new sky. The launcher works out what colour the
 -- sky is at this hour, how far the sun has got and how many stars are out,
@@ -25,7 +24,7 @@ local magic = require("buildat/extension/urho3d")
 local M = {}
 
 -- How fast the cloud layer drifts. Luanti's own default is two nodes a
--- second; LuantiSky counts in its own units and says so.
+-- second; SkyDome counts in its own units and says so.
 local CLOUD_WIND = {x = 0.004, y = 0.0}
 -- How far past white the sun's disc is drawn, which is what makes it read as
 -- a light rather than a white circle. The extension's own value.
@@ -133,7 +132,7 @@ local function dusk_shape(u)
 end
 
 -- The share of orange in the band round the sun: none at 18:40, all of it
--- from 19:30 on (LuantiSky's cDuskBand.z)
+-- from 19:30 on (SkyDome's cDuskBand.z)
 function M.dusk_tint(height)
 	return dusk_shape((M.DUSK_FROM - height) / (M.DUSK_FROM - M.DUSK_PEAK))
 end
@@ -159,13 +158,13 @@ assert(M.dusk_tint(0.2) == 0 and M.dusk_tint(-0.3) == 1, "the tint's ends")
 
 
 function M.new(scene, sun_dir, defaults)
-	local node = scene:CreateChild("LuantiSky")
+	local node = scene:CreateChild("SkyDome")
 	local box = node:CreateComponent("Skybox")
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 	local material = magic.Material:new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"luanti_client/res/LuantiSky.xml"))
-	-- LuantiSky.xml says cull="none" itself, unlike Urho3D's own skybox
+			"shaders/res/SkyDome.xml"))
+	-- SkyDome.xml says cull="none" itself, unlike Urho3D's own skybox
 	-- technique; a box seen from the inside is entirely back-facing, and a
 	-- material that does not say so draws nothing at all.
 	box.material = material
@@ -314,7 +313,7 @@ function M.new(scene, sun_dir, defaults)
 	end
 
 	-- The game's own picture of it, or nil for the shader's painted square.
-	-- LuantiSky reads the sun's from sDiffMap and the moon's from
+	-- SkyDome reads the sun's from sDiffMap and the moon's from
 	-- sNormalMap -- two units because a material has no third one this
 	-- needs.
 	-- The disc at a radiance, for the pbr path; zero is Luanti's square
@@ -348,7 +347,7 @@ function M.new(scene, sun_dir, defaults)
 
 	-- **Where the two skies disagree.** builtin/voxel_shading folds how many
 	-- stars there are and how visible they are into one density, and takes a
-	-- size; LuantiSky keeps the two apart and has no size. So the count goes
+	-- size; SkyDome keeps the two apart and has no size. So the count goes
 	-- to the density and the night ramp goes to the fade, which is the
 	-- better shape: stars come out rather than appearing one by one.
 	function self:set_star_look(density, color, fade)

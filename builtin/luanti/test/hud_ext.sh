@@ -67,7 +67,7 @@ screenshot $out/f5_level2.png
 delay 500
 quit
 CMDS
-BUILDAT_LUANTI_PBR="${MODE:-unlit}" BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
+BUILDAT_RENDER_MODE="${MODE:-unlit}" BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
 	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1

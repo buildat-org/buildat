@@ -819,7 +819,7 @@ function draw_settings(paths)
 		end
 		send(list)
 	end
-	-- The mode a session draws in, unless BUILDAT_LUANTI_PBR says
+	-- The mode a session draws in, unless BUILDAT_RENDER_MODE says
 	-- otherwise ([RENDER_MODES])
 	menu:add_dropdown("Render mode (the next session's)",
 			{"pbr", "shadows", "unlit"}, mode, function(m)

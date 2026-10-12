@@ -39,7 +39,7 @@ export BUILDAT_LUANTI_NO_SPOTS=1
 # And no tonemap curve on pbr: the render's PNG is the metered frame
 # clipped, and the probes compare linear to linear until the fit's last
 # term ([PBR_FIT]) has a curve to compare. The parity modes have none.
-export BUILDAT_LUANTI_LINEAR=1
+export BUILDAT_VOXEL_LINEAR=1
 built=$(mktemp -d /tmp/refshots_build.XXXXXX)
 "$me/build.sh" "$built" || exit 2
 . "$built/env.sh"
@@ -441,7 +441,7 @@ if [ "$CLIENT" = "extension" ]; then
 	cmds=$(mktemp /tmp/refshots_ext.XXXXXX.txt)
 	{ echo "delay 1800000"; echo "quit"; } > "$cmds"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ref \
-		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR="$MODE" \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_RENDER_MODE="$MODE" \
 		"$here/Build/bin/buildat" -m luanti_client -w "${REFSHOT_W}x$REFSHOT_H" -l 3 \
 		-c @"$cmds" > /tmp/refshots_ext.log 2>&1 &
 	cli=$!

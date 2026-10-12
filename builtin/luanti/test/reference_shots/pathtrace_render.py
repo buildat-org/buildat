@@ -132,7 +132,7 @@ def clear_scene():
 			do_recursive=True)
 
 
-# Luanti's own sun path, out of luanti_sky.sun_direction() in the launcher:
+# Luanti's own sun path, out of sky_dome.sun_direction() in the launcher:
 # the sun rises at -X, crosses the zenith and sets at +X in the plane of
 # file-space X and Y, which is Blender's XZ -- then tilted out of it about
 # X by set.lua's orbit_tilt, the same rotation the launcher applies, so

@@ -56,9 +56,9 @@ voxel_shading.use_sun_gate(true)
 -- stays theirs -- it is still what chooses between these eight and what
 -- pushes their parameters, and the .glsl behind them is the extension's.
 -- See [SHADER_HOME] in doc/plan/master_plan.md.
--- BUILDAT_LUANTI_ABLATE=gate: the sun-gated four replaced by the plain
+-- BUILDAT_VANILLA_ABLATE=gate: the sun-gated four replaced by the plain
 -- four, so the nibble never gates the sun -- a fit's ablation ([PBR_FIT])
-local gated = not (buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("gate")
+local gated = not (buildat.get_env("BUILDAT_VANILLA_ABLATE") or ""):find("gate")
 voxel_shading.use_technique_set({
 	plain = "luanti_client/res/LuantiVoxel.xml",
 	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
@@ -118,11 +118,11 @@ if not ok_sky or type(skybox) ~= "table" then
 end
 
 -- And the sky itself, which is Luanti's own shader rather than buildat's;
--- see the header of luanti_sky.lua
-local ok_lsky, err_lsky, luanti_sky =
-		buildat.run_script_file("main/luanti_sky.lua")
-if not ok_lsky or type(luanti_sky) ~= "table" then
-	error("vanilla: could not load luanti_sky.lua: " ..
+-- see the header of sky_dome.lua
+local ok_lsky, err_lsky, sky_dome =
+		buildat.run_script_file("main/sky_dome.lua")
+if not ok_lsky or type(sky_dome) ~= "table" then
+	error("vanilla: could not load sky_dome.lua: " ..
 			tostring(err_lsky))
 end
 
@@ -198,7 +198,7 @@ local MOON_BRIGHTNESS = 1.0
 -- [PBR_FIT] term 1: the pbr path's sun, sky and moon in the path-traced
 -- reference's units, one copy for both Luanti clients: PHYS in
 -- res/sky_model.lua ([LC_PBR_PARITY]). What is vanilla's alone is below.
-local PHYS = luanti_sky.PHYS
+local PHYS = sky_dome.PHYS
 function PHYS.sun_color(height)
 	return magic.Color(PHYS.sun_rgb(height))
 end
@@ -381,7 +381,7 @@ do
 	-- hill in front of the player was lit like noon and the ground beyond
 	-- it was black, with a hard edge, because the two were on different
 	-- zones. One is enough above; the number leaves room for a game's own.
-	zone.priority = tonumber(buildat.get_env("BUILDAT_LUANTI_ZONE_PRIO") or "")
+	zone.priority = tonumber(buildat.get_env("BUILDAT_VANILLA_ZONE_PRIO") or "")
 			or 1
 	zone.override = true
 	-- What the voxel shader reflects; without it its IBL term samples
@@ -453,7 +453,7 @@ end
 -- return", so the ones this file used to call become no-ops of their own
 -- accord, and what it still owns -- the voxel materials, the reflections'
 -- own cube map, set_sky_light() and set_sky_tint() -- is untouched.
-local world_sky = luanti_sky.new(scene, SUN_DIR,
+local world_sky = sky_dome.new(scene, SUN_DIR,
 		voxel_shading.sky_defaults)
 
 -- What the world reflects on the pbr path: the sky as it is drawn, into
@@ -534,9 +534,9 @@ do
 	-- the scene's radiance in the reference's units ([NIGHT_GRAY]).
 	-- (0.0003, 0.003) is the user's pick off the second ladder (2026-09-21):
 	-- the caves whole, the night with a trace of green; in the xml. Off
-	-- under BUILDAT_LUANTI_LINEAR, where the probes read linear light.
+	-- under BUILDAT_VOXEL_LINEAR, where the probes read linear light.
 	rp:Append(magic.cache:GetResource("XMLFile",
-			"luanti_client/res/LuantiNightGray.xml"))
+			"luanti_client/res/NightGray.xml"))
 	-- **[NIGHT_GRAY], as picked**: the gray is the voxel shader's, keyed
 	-- on the light a face gets rather than on the radiance the frame
 	-- reads, full gray at the cave floor's own luminance and colour
@@ -549,14 +549,14 @@ do
 	-- than stone lit at three times it -- and two grays over one frame
 	-- would compound.
 	--
-	-- BUILDAT_LUANTI_GRAY_BY_LIGHT=<top> moves the ramp's top and 0
+	-- BUILDAT_VANILLA_GRAY_BY_LIGHT=<top> moves the ramp's top and 0
 	-- turns the shader's gray off, which is how the ladders are shot;
-	-- BUILDAT_LUANTI_NIGHT_GRAY="<L0> <L1>" moves the frame pass's two
+	-- BUILDAT_VANILLA_NIGHT_GRAY="<L0> <L1>" moves the frame pass's two
 	-- levels and "off" turns it off. With the shader's gray on, the
 	-- pass is off whatever it says.
 	local by_light = tonumber(
-			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "") or 1.5
-	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
+			buildat.get_env("BUILDAT_VANILLA_GRAY_BY_LIGHT") or "") or 1.5
+	local gray_env = buildat.get_env("BUILDAT_VANILLA_NIGHT_GRAY") or ""
 	-- **The pass stays on unless it is asked off** (2026-09-26): taking
 	-- it out of the pbr path took the night with it -- vp4 at 20:30 went
 	-- from a mean of 8 to 109 -- so it is doing something the metered
@@ -565,38 +565,38 @@ do
 	-- pass's own range is a hundredth of that.
 	local gray_off = gray_env == "off"
 	rp:SetEnabled("NightGray", not gray_off and
-			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+			buildat.get_env("BUILDAT_VOXEL_LINEAR") ~= "1")
 	local l0, l1 = gray_env:match("^([%d.]+)%s+([%d.]+)$")
 	if l0 then
 		rp:SetShaderParameter("NightGray",
 				magic.Vector2(tonumber(l0), tonumber(l1)))
 	end
-	-- Under the same gate as the pass: BUILDAT_LUANTI_LINEAR is the probes'
+	-- Under the same gate as the pass: BUILDAT_VOXEL_LINEAR is the probes'
 	-- own frame and a gray in it would corrupt what they read.
 	voxel_shading.set_gray_by_light(
-			buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1" and by_light)
+			buildat.get_env("BUILDAT_VOXEL_LINEAR") ~= "1" and by_light)
 	rp:Append(magic.cache:GetResource("XMLFile",
-			"luanti_client/res/LuantiAutoExposure.xml"))
+			"shaders/res/AutoExposureMean.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
 	-- The curve: Urho's per-channel Uncharted2, picked by the user off the
 	-- pair for its range in caves ([PBR_FIT] term 4, 2026-09-20); ACES
-	-- (luanti_client/res/LuantiTonemap) behind BUILDAT_LUANTI_TONEMAP=aces
-	local tonemap = buildat.get_env("BUILDAT_LUANTI_TONEMAP") or "uncharted2"
+	-- (luanti_client/res/TonemapACES) behind BUILDAT_VANILLA_TONEMAP=aces
+	local tonemap = buildat.get_env("BUILDAT_VANILLA_TONEMAP") or "uncharted2"
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
-			"luanti_client/res/LuantiTonemap.xml"))
+			"luanti_client/res/TonemapACES.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"PostProcess/GammaCorrection.xml"))
 	rp:SetEnabled("TonemapReinhardEq3", false)
-	-- BUILDAT_LUANTI_LINEAR=1: the metered frame clipped, no curve, which
+	-- BUILDAT_VOXEL_LINEAR=1: the metered frame clipped, no curve, which
 	-- is what the path-traced reference's PNGs are; the reference runners
 	-- set it so the fit's probes read linear against linear ([PBR_FIT])
-	local curve = buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1"
+	local curve = buildat.get_env("BUILDAT_VOXEL_LINEAR") ~= "1"
 	rp:SetEnabled("TonemapUncharted2", curve and tonemap ~= "aces")
 	rp:SetEnabled("TonemapACES", curve and tonemap == "aces")
 	-- and no bloom either: the render has none, and a bright pass blurred
 	-- over a probe crop is a white the crop did not earn
-	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_LUANTI_LINEAR") ~= "1")
+	rp:SetEnabled("BloomHDR", buildat.get_env("BUILDAT_VOXEL_LINEAR") ~= "1")
 	-- The bloom's threshold is against the exposed frame, so it sits where
 	-- that frame clips (the tonemap's shoulder starts above 1.0), and the
 	-- stock 40% mix is a haze over a whole daylight picture; 15% was a
@@ -618,7 +618,7 @@ do
 	-- the key free, a term turned off re-exposes everything else
 	local key = tonumber(buildat.get_env("BUILDAT_LUANTI_KEY") or "")
 	if key then AUTO_EXPOSURE.lum_range = {key, key} end
-	-- BUILDAT_LUANTI_ADAPT=<rate>: the adaptation rate, for a run that
+	-- BUILDAT_VANILLA_ADAPT=<rate>: the adaptation rate, for a run that
 	-- asks whether the meter had settled. **Read before the rate is set
 	-- on the path**, or it reached the shader only after an
 	-- exposure_reset put it back (2026-09-24) -- so a run asking for an
@@ -626,7 +626,7 @@ do
 	-- adaptation had reached by then, which on a slow machine is a
 	-- different picture.
 	AUTO_EXPOSURE.adapt_rate = tonumber(
-			buildat.get_env("BUILDAT_LUANTI_ADAPT") or "") or
+			buildat.get_env("BUILDAT_VANILLA_ADAPT") or "") or
 			AUTO_EXPOSURE.adapt_rate
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	rp:SetShaderParameter("AutoExposureLumRange",
@@ -882,7 +882,7 @@ local wield_material = magic.Material.new()
 -- it are black, and drawn blended a picture that is mostly holes is a ghost.
 -- See builtin/luanti's client_data, which is where the technique is.
 wield_material:SetTechnique(0, magic.cache:GetResource("Technique",
-		"luanti/UnlitAlphaMask.xml"))
+		"luanti_client/res/UnlitAlphaMask.xml"))
 wield_model:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 wield_model.material = wield_material
 -- Where a hand is: official's numbers ([WIELD_MESH] 4, camera.cpp
@@ -955,7 +955,7 @@ function WIELD.set_lit(sh, lit)
 	sh.lit = lit
 	for _, m in ipairs(sh.materials) do
 		m:SetTechnique(0, magic.cache:GetResource("Technique", lit and
-				"luanti/PBRLitAlphaMask.xml" or "luanti/UnlitAlphaMask.xml"))
+				"luanti/PBRLitAlphaMask.xml" or "luanti_client/res/UnlitAlphaMask.xml"))
 		m:SetShaderParameter("Roughness", 1.0)
 		m:SetShaderParameter("Metallic", 0.0)
 	end
@@ -1302,14 +1302,14 @@ luanti.sub_world_info(function(info)
 	if mode == "pbr" then
 		return
 	end
-	log:info("BUILDAT_LUANTI_PBR=" .. mode .. ": drawing the world " .. mode)
+	log:info("BUILDAT_RENDER_MODE=" .. mode .. ": drawing the world " .. mode)
 	-- pbr_debug_shadows: pbr's path with the shadow-kind diagnostic on
 	-- ([PBR_FIT] 2c). The mesher, which runs in this client and reads the
 	-- same variable, colours each occlusion term into its own channel --
 	-- terrain red, corners green, rays blue -- and the shader draws the
 	-- vertex colour as it is; the sun and the moon go out (see the
 	-- ablation) and the key is pinned at middle grey so a full term reads
-	-- as one. BUILDAT_LUANTI_LINEAR=1 beside it, or the curve is on it.
+	-- as one. BUILDAT_VOXEL_LINEAR=1 beside it, or the curve is on it.
 	if mode == "pbr_debug_shadows" then
 		sky_now.debug_shadows = true
 		voxel_shading.set_shadow_kinds(true)
@@ -1323,7 +1323,7 @@ luanti.sub_world_info(function(info)
 	-- lamp -- with no albedo and no sun: the light a "the shadows are not
 	-- lit" report is about, and what the gray keys on. `nibbles` is what
 	-- the mesher wrote: the flood's share in red, the sky share it becomes
-	-- in green, the shade in blue. Both want BUILDAT_LUANTI_LINEAR=1
+	-- in green, the shade in blue. Both want BUILDAT_VOXEL_LINEAR=1
 	-- beside them, or the curve and the meter are on the reading; the key
 	-- is pinned so that one on the screen is one in the sky's units.
 	-- pbr_debug_skyamb / pbr_debug_baked are `light`'s two halves, and
@@ -1469,7 +1469,7 @@ local function indoors_of(k)
 end
 
 -- The moon has a colour of its own in the sky shader now, so nothing here
--- needs one; see set_moon_look() in luanti_sky.lua
+-- needs one; see set_moon_look() in sky_dome.lua
 -- A picture of a sun is drawn as itself: the colour multiplies it, so
 -- anything but white would tint the game's own art
 local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
@@ -1478,11 +1478,11 @@ local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 -- frame and a get_env is a sandbox call ([FRAME_WORK]). One table, the
 -- chunk being at Lua 5.1's two hundred locals.
 local SKY_ENV = {
-	ablate = buildat.get_env("BUILDAT_LUANTI_ABLATE") or "",
+	ablate = buildat.get_env("BUILDAT_VANILLA_ABLATE") or "",
 	translucency = tonumber(
-			buildat.get_env("BUILDAT_LUANTI_TRANSLUCENCY") or ""),
-	light_log = buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1",
-	cloud_n = tonumber(buildat.get_env("BUILDAT_LUANTI_CLOUD_N") or ""),
+			buildat.get_env("BUILDAT_VOXEL_TRANSLUCENCY") or ""),
+	light_log = buildat.get_env("BUILDAT_VANILLA_LIGHT_LOG") == "1",
+	cloud_n = tonumber(buildat.get_env("BUILDAT_SKY_CLOUD_N") or ""),
 }
 
 -- The sky at this hour: dark at night, the game's own colour by day, and the
@@ -1584,7 +1584,7 @@ local function apply_sky_of_hour(force)
 				b = to.b - horizon_now.b}
 	end
 	if sky_now.unlit then
-		world_sky:set_parity_band(luanti_sky.DUSK_BAND, math.min(1, 2 * hb),
+		world_sky:set_parity_band(sky_dome.DUSK_BAND, math.min(1, 2 * hb),
 				glow)
 	end
 	if not sky_now.unlit then
@@ -1621,7 +1621,7 @@ local function apply_sky_of_hour(force)
 	-- What the sun shines with now: its own colour, going red while it is
 	-- crossing the horizon, which is where that colour belongs. It does not
 	-- blend towards the moon any more -- the moon is a light of its own and
-	-- has its own colour. The window is luanti_sky.sun_tint_share(), where
+	-- has its own colour. The window is sky_dome.sun_tint_share(), where
 	-- the check is.
 	--
 	-- The colour is the game's own where it gave one, which is Luanti's
@@ -1633,9 +1633,9 @@ local function apply_sky_of_hour(force)
 	-- Luanti's classic tinting, which goes through the tonemaps this sky
 	-- has nowhere to put -- the drawing half of [SKY_LEFTOVERS] -- so both
 	-- modes use the two colours, which is what was hardcoded before.
-	local share = luanti_sky.sun_tint_share(sky_now.daylight)
+	local share = sky_dome.sun_tint_share(sky_now.daylight)
 	sky_lights.sun.color = blend(PHYS.SUN_COLOR,
-			game_sky.sun_tint or luanti_sky.SUN_TINT, share)
+			game_sky.sun_tint or sky_dome.SUN_TINT, share)
 	if not sky_now.unlit then
 		-- pbr: the sun's colour from its elevation, not a tint at a
 		-- clock (PHYS.sun_color). simplified: no ozone, no aerosol; the
@@ -1660,7 +1660,7 @@ local function apply_sky_of_hour(force)
 	-- blue is the parity modes' look, and the night probe read pbr's snow
 	-- blue against the render's warm ([NIGHT_LIGHT], 2026-09-20)
 	sky_lights.moon.color = sky_now.unlit and blend(PHYS.MOON_COLOR,
-			game_sky.moon_tint or luanti_sky.MOON_TINT, share) or
+			game_sky.moon_tint or sky_dome.MOON_TINT, share) or
 			magic.Color(1.0, 0.86, 0.70)
 
 	-- The sun and the moon are two bodies, drawn at once: the shader puts
@@ -1690,7 +1690,7 @@ local function apply_sky_of_hour(force)
 
 	-- The stars come out as the light goes: Luanti's day_opacity is zero by
 	-- default, which is a sky with none in it until the sun is down
-	local count = game_sky.star_count or luanti_sky.STARS_DEFAULT
+	local count = game_sky.star_count or sky_dome.STARS_DEFAULT
 	-- How many cells of the sky's grid have a star in them. The grid is a
 	-- quarter of a million cells, not the ten thousand this used to divide
 	-- by, so a game's thousand stars was putting **twenty-five times** that
@@ -1698,11 +1698,11 @@ local function apply_sky_of_hour(force)
 	-- three times brighter than official Luanti's. A game that hides its
 	-- stars has none.
 	local density = (game_sky.stars_visible ~= false) and
-			math.min(0.5, luanti_sky.STAR_DENSITY_DEFAULT * count /
-					luanti_sky.STARS_DEFAULT) or 0
+			math.min(0.5, sky_dome.STAR_DENSITY_DEFAULT * count /
+					sky_dome.STARS_DEFAULT) or 0
 	-- The count and the night ramp go to different parameters here, which
-	-- is what LuantiSky keeps apart and buildat's sky folded together; see
-	-- set_star_look() in luanti_sky.lua
+	-- is what SkyDome keeps apart and buildat's sky folded together; see
+	-- set_star_look() in sky_dome.lua
 	world_sky:set_star_look(density, game_sky.star_color, (1 - t) * (1 - t))
 
 	-- What a direction that cannot see the sky is drawn as: Luanti's indoors
@@ -1772,13 +1772,13 @@ local function apply_sky_of_hour(force)
 		local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi
 		local sc = PHYS.sun_color(h)
 		-- And the dusk glow is sky light too: what a cloud gets of it is
-		-- the dome's mean of LuantiSky's glow term, (1 - y)^2 over the
+		-- the dome's mean of SkyDome's glow term, (1 - y)^2 over the
 		-- hemisphere (a third) times away + (1 - away) of a quarter for
 		-- cos^2 towards the sun.
-		local gm = luanti_sky.dawn_glow(sky_now.height or 0) *
-				luanti_sky.DUSK_SKY *
-				(luanti_sky.DUSK_AWAY + (1 - luanti_sky.DUSK_AWAY) / 4) / 3
-		local gc = luanti_sky.DAWN_COLOR
+		local gm = sky_dome.dawn_glow(sky_now.height or 0) *
+				sky_dome.DUSK_SKY *
+				(sky_dome.DUSK_AWAY + (1 - sky_dome.DUSK_AWAY) / 4) / 3
+		local gc = sky_dome.DAWN_COLOR
 		world_sky:set_cloud_lit(
 				{r = albedo.r * e * sc.r, g = albedo.g * e * sc.g,
 					b = albedo.b * e * sc.b},
@@ -1820,12 +1820,12 @@ local function update_sky(dt)
 	-- light is on in (moon_amount()), so it is never on a day sky
 	-- ([MOON_BY_DAY])
 	local moon_half = (game_sky.moon_visible ~= false and
-			luanti_sky.moon_amount(daylight) > 0) and
-			luanti_sky.MOON_HALF * (game_sky.moon_scale or 1) or 0
+			sky_dome.moon_amount(daylight) > 0) and
+			sky_dome.MOON_HALF * (game_sky.moon_scale or 1) or 0
 	sky_now.moon_half = moon_half
 	world_sky:set_moon_look(moon_half)
 
-	-- Where the sun is. Luanti's own stretched day, out of luanti_sky, and
+	-- Where the sun is. Luanti's own stretched day, out of sky_dome, and
 	-- with it the clocks the two lights fade on. The tilt out of the
 	-- vertical plane is this game's own, so that noon does not light every
 	-- face of a cube the same way.
@@ -1836,13 +1836,13 @@ local function update_sky(dt)
 	-- held still a step at a time. How bright, what colour and whether it is
 	-- up stay smooth.
 	-- How far the orbit is tilted, and who decided; see
-	-- luanti_sky.orbit_tilt(). The one vector it produces is the light's and
+	-- sky_dome.orbit_tilt(). The one vector it produces is the light's and
 	-- the drawn sun's both.
-	local tilt = luanti_sky.orbit_tilt(game_sky.body_orbit_tilt,
+	local tilt = sky_dome.orbit_tilt(game_sky.body_orbit_tilt,
 			(luanti.world_info() or {}).orbit_tilt)
 	local sx, sy, sz =
-			luanti_sky.sun_direction(luanti_sky.stepped_time(daylight), tilt)
-	local mx, smooth_sy, mz = luanti_sky.sun_direction(daylight, tilt)
+			sky_dome.sun_direction(sky_dome.stepped_time(daylight), tilt)
+	local mx, smooth_sy, mz = sky_dome.sun_direction(daylight, tilt)
 	local height = smooth_sy
 	-- The light travels the other way, which is what a Light's direction is.
 	-- **Nothing else is done to it**: the sun is drawn from the same orbit
@@ -1876,7 +1876,7 @@ local function update_sky(dt)
 	-- This is art and not astronomy, the way Luanti's own ratio is: a dark
 	-- dawn is dull to play in. luanti_client's half of it is in
 	-- daynight_ratio().
-	predawn_now = luanti_sky.predawn(height)
+	predawn_now = sky_dome.predawn(height)
 	sun_height_now, day_factor_now = height, math.max(day, predawn_now)
 	day = math.max(day, predawn_now)
 	if luanti.day_night_override then
@@ -1896,9 +1896,9 @@ local function update_sky(dt)
 	-- the sun (apply_sky_of_hour()), and the fog and the clouds, which
 	-- are one colour, take the two half and half (user, 2026-10-06).
 	sky_now.hb = sky_now.unlit and
-			luanti_sky.horizon_blend(time_of_day or 0.5) or 0
+			sky_dome.horizon_blend(time_of_day or 0.5) or 0
 	if sky_now.hb > 0 then
-		local sun, moon = luanti_sky.point_colors(sky_now.lit, game_sky)
+		local sun, moon = sky_dome.point_colors(sky_now.lit, game_sky)
 		sky_now.point = {sun = sun, moon = moon, mid = {
 				r = (sun.r + moon.r) / 2, g = (sun.g + moon.g) / 2,
 				b = (sun.b + moon.b) / 2}}
@@ -1916,10 +1916,10 @@ local function update_sky(dt)
 	-- moon's disc to keep it out of the crops while its moonlit ground
 	-- stays -- the light went with the disc and the night probe read the
 	-- moon as absent ([NIGHT_LIGHT], 2026-09-20)
-	local up = luanti_sky.sun_amount(daylight) *
-			luanti_sky.above_horizon(smooth_sy) * through_cloud
-	local moon_up = luanti_sky.moon_amount(daylight) *
-			luanti_sky.above_horizon(-smooth_sy) * through_cloud
+	local up = sky_dome.sun_amount(daylight) *
+			sky_dome.above_horizon(smooth_sy) * through_cloud
+	local moon_up = sky_dome.moon_amount(daylight) *
+			sky_dome.above_horizon(-smooth_sy) * through_cloud
 	-- A light below the horizon is taken out of the scene rather than
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
@@ -1935,7 +1935,7 @@ local function update_sky(dt)
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = sky_now.unlit and SUN_BRIGHTNESS * up or
 				PHYS.sun(height)
-		-- BUILDAT_LUANTI_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
+		-- BUILDAT_VANILLA_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
 		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
 		local abl0 = SKY_ENV.ablate
 		if sky_now.debug_shadows then abl0 = abl0 .. ",sun,moon" end
@@ -1951,7 +1951,7 @@ local function update_sky(dt)
 	if sky_now.moon_on ~= sky_lights.moon_node.enabled then
 		sky_now.moon_on = sky_lights.moon_node.enabled
 		log:info(string.format("moon light %s: amount %.2f, elevation %.2f, cloud %.2f, visible %s, disc %.3f",
-				sky_now.moon_on and "on" or "off", luanti_sky.moon_amount(daylight),
+				sky_now.moon_on and "on" or "off", sky_dome.moon_amount(daylight),
 				-smooth_sy, game_sky.cloud_cover or 0, tostring(game_sky.moon_visible),
 				moon_half))
 	end
@@ -2020,12 +2020,12 @@ local function update_sky(dt)
 		-- to the three ambient terms in its orange -- each of which the
 		-- shader gates by the face's sky, so a sealed chamber keeps its
 		-- dark; never into the cave floor
-		local glow = luanti_sky.dawn_glow(height)
-		local gc = luanti_sky.DAWN_COLOR
-		local ga = glow * luanti_sky.DAWN_AMBIENT
-		local gs = glow * luanti_sky.DUSK_SKY
+		local glow = sky_dome.dawn_glow(height)
+		local gc = sky_dome.DAWN_COLOR
+		local ga = glow * sky_dome.DAWN_AMBIENT
+		local gs = glow * sky_dome.DUSK_SKY
 		world_sky:set_dawn_glow(gs * gc.r, gs * gc.g, gs * gc.b,
-				luanti_sky.dusk_tint(height))
+				sky_dome.dusk_tint(height))
 		zone.ambientColor = magic.Color(c.r * k + ga * gc.r,
 				c.g * k + ga * gc.g, c.b * k + ga * gc.b)
 		-- And what a face the sky does not reach gets instead: light off
@@ -2114,7 +2114,7 @@ local function update_sky(dt)
 		voxel_shading.set_chamber_light(chamber)
 		cave_ambient_now = chamber
 		-- **Every term of the light, said out loud** under
-		-- BUILDAT_LUANTI_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
+		-- BUILDAT_VANILLA_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
 		-- ambient a face with the whole sky gets, the bounce and the
 		-- ground in the same units, the cave floor and the two per-frame
 		-- camera readings that scale them. Read beside the

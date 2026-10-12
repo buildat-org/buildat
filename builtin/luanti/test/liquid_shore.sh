@@ -21,7 +21,7 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_PBR=unlit \
+	BUILDAT_RENDER_MODE=unlit \
 	BUILDAT_LUANTI_LUA="$me/liquid_shore.lua" \
 	start_server "$out/srv.log" "Mods loaded" 400 29788 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \

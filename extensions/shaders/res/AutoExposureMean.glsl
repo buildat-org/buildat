@@ -1,4 +1,4 @@
-// Buildat: extensions/luanti_client/res/LuantiAutoExposure.glsl
+// Buildat: extensions/shaders/res/AutoExposureMean.glsl
 // Urho3D's CoreData/Shaders/GLSL/AutoExposure.glsl (MIT) with one line
 // changed: the key is the scene's geometric mean, not its fourth root.
 #include "Uniforms.glsl"

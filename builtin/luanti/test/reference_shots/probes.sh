@@ -202,7 +202,7 @@ linear_rgb() {   # file crop -> "r g b" in linear light
 # The fit's ratios are read off the render's EXR where it is there: its
 # metered PNG clips the sunlit snow (34 in the sky's units, exposed past
 # 1), and a ratio against a clipped top is a floor. The pbr side is its
-# PNG; its own clipping is what BUILDAT_LUANTI_LINEAR's frame shows.
+# PNG; its own clipping is what BUILDAT_VOXEL_LINEAR's frame shows.
 fit_file_of() {   # set pic -> path
 	local f="$shots/$1/cycles_$2_none.exr"
 	case "$1" in

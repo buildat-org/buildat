@@ -9,7 +9,7 @@
 -- for reflections; the render path that makes the frame an eye's. The
 -- numbers are apps/vanilla's pbr path's (PHYS in its init.lua, fitted
 -- against a path-traced reference), and the sky is
--- extensions/luanti_client's LuantiSky, which both Luanti clients draw.
+-- extensions/shaders' SkyDome, which both Luanti clients draw too.
 --
 --   local daylight = buildat.run_script_file("main/daylight.lua")
 local magic = require("buildat/extension/urho3d")
@@ -244,7 +244,7 @@ end
 -- The sky, drawn and reflected
 --
 local SUN_HALF = 0.04
--- A skybox with LuantiSky and the cube the plan's surfaces reflect.
+-- A skybox with SkyDome and the cube the plan's surfaces reflect.
 -- sky:set(toward, h, light) each time the hour moves; sky:show(on).
 function M.new_sky(scene)
 	local node = scene:CreateChild("Sky")
@@ -252,7 +252,7 @@ function M.new_sky(scene)
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 	local mat = magic.Material:new()
 	mat:SetTechnique(0, magic.cache:GetResource("Technique",
-			"luanti_client/res/LuantiSky.xml"))
+			"shaders/res/SkyDome.xml"))
 	box.material = mat
 	-- Every uniform the shader reads: an unset one reads as zero
 	local V = magic.Vector3
@@ -281,7 +281,7 @@ function M.new_sky(scene)
 		-- clear sky's, which is all zenith from 22 degrees up.
 		-- simplified: the shader's gradient, not CIE's exactly (at 30
 		-- degrees 0.71 of the way to the zenith, not 0.5); the upgrade is
-		-- the formula in LuantiSky.glsl behind a parameter
+		-- the formula in SkyDome.glsl behind a parameter
 		local oc = light.overcast
 		-- The cube again by the real sun: an overcast dome brightens with it
 		self.want = string.format("%.3f %.3f %.3f %s", tx, ty, tz, tostring(oc))
@@ -327,7 +327,7 @@ function M.pbr_render_path(rp)
 	local function add(file)
 		rp:Append(magic.cache:GetResource("XMLFile", file))
 	end
-	add("luanti_client/res/LuantiAutoExposure.xml")
+	add("shaders/res/AutoExposureMean.xml")
 	add("PostProcess/BloomHDR.xml")
 	-- The light's colour adapted to and Khronos PBR Neutral, not vanilla's
 	-- Uncharted2, whose shoulder is for its caves (user, 2026-10-01)

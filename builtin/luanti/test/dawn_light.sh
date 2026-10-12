@@ -28,7 +28,7 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 # as it is rather than the meter's answer to it. The mode is the server's to
 # say, which is why it is here and not on the clients.
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_PBR=unlit \
+	BUILDAT_RENDER_MODE=unlit \
 	BUILDAT_LUANTI_LUA="$me/dawn_light.lua" \
 	start_server "$out/srv.log" "Mods loaded" 400 29786 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
@@ -65,7 +65,7 @@ shoot() { # <tag> <extra env>
 	# light itself settling after the fixture moves the clock. It
 	# stays.
 	# A run that has stopped logging is taken down rather than waited out
-	run_client 60 "$out/cli_$tag.log" env BUILDAT_LUANTI_ADAPT=1000000 $2 \
+	run_client 60 "$out/cli_$tag.log" env BUILDAT_VANILLA_ADAPT=1000000 $2 \
 		bin/buildat -s localhost:29786 -w 640x480 -l 3 -c @"$cmds"
 }
 # The fixture's clock starts on each join, so each client gets the whole

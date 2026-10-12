@@ -13,7 +13,7 @@
 # unlit against official_unlit, shadows against official_shadows, pbr
 # against the path-traced set. See [RENDER_MODES] in
 # doc/plan/rendering_plan.md. **Several modes share one server**: the mode
-# is the client's to ask for (BUILDAT_LUANTI_PBR on the client's process),
+# is the client's to ask for (BUILDAT_RENDER_MODE on the client's process),
 # so `unlit shadows pbr` boots VoxeLibre once and runs three clients against
 # it, which is the ten-minute round of [PROBE_CYCLE] rather than the
 # thirty-minute one. The sets land in $REFSHOT_SHOTS_DIR/module_<mode>_r<RANGE>.
@@ -53,10 +53,10 @@ export BUILDAT_LUANTI_NO_SPOTS=1
 # And no tonemap curve on pbr: the render's PNG is the metered frame
 # clipped, and the probes compare linear to linear until the fit's last
 # term ([PBR_FIT]) has a curve to compare. The parity modes have none.
-# BUILDAT_LUANTI_LINEAR=0 on the command line shoots the graded frame
+# BUILDAT_VOXEL_LINEAR=0 on the command line shoots the graded frame
 # instead (curve and bloom on), which is what a grade check looks at
 # ([BLOOM_PLACE]); such a set goes under REFSHOT_SHOTS_DIR, not the fit's.
-export BUILDAT_LUANTI_LINEAR="${BUILDAT_LUANTI_LINEAR:-1}"
+export BUILDAT_VOXEL_LINEAR="${BUILDAT_VOXEL_LINEAR:-1}"
 # And full detail to the end of the range: the server's default "half"
 # meshes the far half from a downsampled volume, which has no water in it
 # and coarsens the distant buildings -- a set of the light, not of the LOD
@@ -129,7 +129,7 @@ mkdir -p "$BUILDAT_USER_PATH/shared/vanilla"
 cp "$fixture" "$boxed_fixture"
 BUILDAT_LUANTI_ORBIT_TILT="${BUILDAT_LUANTI_ORBIT_TILT:-$tilt}" \
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_LUANTI_PBR="$first_mode" \
+	BUILDAT_LUANTI_IMPORT="$world" BUILDAT_RENDER_MODE="$first_mode" \
 	BUILDAT_VOXELWORLD_KEEP_LOADED=1 \
 	BUILDAT_LUANTI_LUA="$boxed_fixture" \
 	BUILDAT_VIEW_RANGE="$RANGE" BUILDAT_VIEW_BOBBING=0 \
@@ -178,7 +178,7 @@ mkdir -p "$out"
 	env | grep '^BUILDAT_LUANTI_' | sort
 } > "$out/taken.txt"
 from=$(wc -l < "$tmp/srv.log")
-BUILDAT_LUANTI_PBR="$mode" \
+BUILDAT_RENDER_MODE="$mode" \
 bin/buildat -s "localhost:$port" -w "${REFSHOT_W}x$REFSHOT_H" -l "${CLIENT_LOG_LEVEL:-3}" -c @"$tmp/cmds.txt" \
 	> "$tmp/cli_$mode.log" 2>&1 &
 cli=$!

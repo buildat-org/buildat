@@ -180,7 +180,7 @@ uniform vec3 cGroundLight;
 uniform float cPackedSky;
 // The shadow-kind diagnostic: the vertex colour drawn as it is, no albedo,
 // no ambient -- the mesher has put one occlusion term in each channel
-// (BUILDAT_LUANTI_SHADOW_KINDS). Set per material by
+// (BUILDAT_VOXEL_SHADOW_KINDS). Set per material by
 // voxel_shading.set_shadow_kinds(). Unset reads as 0.
 uniform float cShadowKinds;
 

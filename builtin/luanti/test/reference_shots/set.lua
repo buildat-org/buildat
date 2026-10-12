@@ -18,7 +18,7 @@ rawset(_G, "REFSET", {
 	range = 150,
 
 	-- How far the sun's orbit is tilted, in degrees, for the pbr set and
-	-- its render: the client's own default (luanti_sky.OWN_ORBIT_TILT),
+	-- its render: the client's own default (sky_dome.OWN_ORBIT_TILT),
 	-- since pbr is measured against the render and an axis-aligned sun
 	-- lights one face of a block and leaves a corner probe degenerate.
 	-- The parity modes take zero, since official Luanti does not tilt.

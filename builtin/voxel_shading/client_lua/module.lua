@@ -808,7 +808,7 @@ end
 -- ([PBR_FIT], [LOD_LIGHT]'s finding). The plain path keeps white.
 -- The transmitted light's level through a translucent surface, over
 -- Lambert through the leaf's colour squared ([PBR_FIT] 3b); the launcher
--- sets it from the fit, BUILDAT_LUANTI_TRANSLUCENCY overrides
+-- sets it from the fit, BUILDAT_VOXEL_TRANSLUCENCY overrides
 function M.set_translucency_gain(k)
 	translucency_gain = math.max(0, k)
 	declare_countdown = 0
@@ -871,7 +871,7 @@ function M.set_packed_sky(on)
 end
 
 -- The shadow-kind diagnostic: the vertex colour drawn as the mesher wrote
--- it under BUILDAT_LUANTI_SHADOW_KINDS, one occlusion term per channel,
+-- it under BUILDAT_VOXEL_SHADOW_KINDS, one occlusion term per channel,
 -- no albedo, no ambient. See [PBR_FIT] 2c.
 --
 -- **Three settings, not two** ([UNDERGROUND_LIGHT]'s playtest fault):
@@ -882,7 +882,7 @@ end
 --                shadows are unlit" report is about;
 --   3            what the nibbles say: the flood's share in red, the sky
 --                share it becomes in green, the mesher's shade in blue.
--- Read the picture with BUILDAT_LUANTI_LINEAR=1 and a pinned key, or the
+-- Read the picture with BUILDAT_VOXEL_LINEAR=1 and a pinned key, or the
 -- curve is on the numbers.
 function M.set_shadow_kinds(on)
 	shadow_kinds = type(on) == "number" and on or (on and 1.0 or 0.0)

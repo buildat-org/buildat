@@ -129,7 +129,7 @@ run_vanilla(){
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
 	cmds "$o" > "$o/cmds.txt"
-	BUILDAT_LUANTI_LIGHT_LOG=1 BUILDAT_LUANTI_PBR=pbr timeout 330 \
+	BUILDAT_VANILLA_LIGHT_LOG=1 BUILDAT_RENDER_MODE=pbr timeout 330 \
 		bin/buildat -s localhost:29797 \
 		-w 1280x720 -l 3 -o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill -INT "$srv" 2>/dev/null
@@ -157,7 +157,7 @@ run_ext(){
 	sleep 3
 	cmds "$o" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=pp \
-		BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_PBR=pbr timeout 330 \
+		BUILDAT_LUANTI_CONNECT=1 BUILDAT_RENDER_MODE=pbr timeout 330 \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
 		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
 	kill "$srv" 2>/dev/null

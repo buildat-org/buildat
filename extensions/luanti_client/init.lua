@@ -100,7 +100,7 @@ local DEFAULT_NAME = buildat.get_env("BUILDAT_LUANTI_NAME") or SETTINGS.name
 -- variable with the same answers, its own default being pbr -- see
 -- [RENDER_MODES] in doc/plan/rendering_plan.md.
 local DEFAULT_MODE = (function()
-	local v = buildat.get_env("BUILDAT_LUANTI_PBR") or ""
+	local v = buildat.get_env("BUILDAT_RENDER_MODE") or ""
 	if v == "" then
 		return SETTINGS.mode
 	elseif v == "0" then
@@ -110,7 +110,7 @@ local DEFAULT_MODE = (function()
 	elseif v == "unlit" or v == "shadows" or v == "pbr" then
 		return v
 	end
-	log:warning("BUILDAT_LUANTI_PBR=\"" .. v .. "\" is not a mode; " ..
+	log:warning("BUILDAT_RENDER_MODE=\"" .. v .. "\" is not a mode; " ..
 			"drawing unlit. Wanted unlit, shadows or pbr")
 	return "unlit"
 end)()
