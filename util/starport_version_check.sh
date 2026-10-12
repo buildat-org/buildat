@@ -3,7 +3,7 @@
 # cost: 75s (2026-10-09)
 # covers: client/extensions/starport/init.lua apps/starport/main/main.cpp util/starport_version_github.py src/client/app_lua.h src/impl/linux/process.cpp extensions/launch_menu/init.lua
 # [VERSION_CHECK]: a Starport whose version adapter says 0.9.0 carries it
-# in /api/list, filtered (a bad platform left out); the launcher shows the
+# in /api/v1/list, filtered (a bad platform left out); the launcher shows the
 # notice, "Not now" is kept across a restart, a newer version (0.9.1) is
 # told again, and "Download" hands the platform's link to the system's
 # opener (an xdg-open of this check's own on PATH).
@@ -40,19 +40,19 @@ A
 		>> "$tmp/sp.log" 2>&1 &
 	pid=$!
 	for _ in $(seq 120); do
-		curl -s -m 2 "localhost:$SP/api/list" | grep -q "\"version\":{.*$1" && return
+		curl -s -m 2 "localhost:$SP/api/v1/list" | grep -q "\"version\":{.*$1" && return
 		sleep 1
 	done
-	fail "/api/list has no version $1 (sp.log)"
+	fail "/api/v1/list has no version $1 (sp.log)"
 }
 starport 0.9.0
-curl -s -m 10 "localhost:$SP/api/list" | python3 -c '
+curl -s -m 10 "localhost:$SP/api/v1/list" | python3 -c '
 import json, sys
 v = json.load(sys.stdin)["version"]
 assert v == {"version": "0.9.0", "url": "https://example.org/releases",
 	"platforms": {"linux": {"url": "https://example.org/linux-0.9.0.tar.gz"}}}, v
-' || fail "/api/list's version not as filtered"
-echo "ok: /api/list carries the adapter's answer, filtered"
+' || fail "/api/v1/list's version not as filtered"
+echo "ok: /api/v1/list carries the adapter's answer, filtered"
 
 mkdir -p "$tmp/cl" "$tmp/bin"
 echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > "$tmp/cl/starport.json"

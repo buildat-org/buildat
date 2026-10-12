@@ -11,7 +11,7 @@
 // builtin/moderation, the author told and able to appeal. The admin can
 // delist.
 //
-// The HTTP API, under /api/aitta/ on the server's port, JSON out, a
+// The HTTP API, under /api/v1/aitta/ on the server's port, JSON out, a
 // refusal {"ok": false, "error": ...} with status 200:
 //   GET  list                       the listed releases, and "delisted":
 //                                   those out of it, each with why
@@ -324,7 +324,7 @@ struct Module: public interface::Module, public moderation::Host
 
 	void on_http(const network::HttpRequest &r)
 	{
-		const ss_ base = "/api/aitta/";
+		const ss_ base = "/api/v1/aitta/";
 		const bool page = r.path == "/" || r.path.compare(0, 3, "/p/") == 0 ||
 				r.path.compare(0, 7, "/brand/") == 0;
 		if(!page && r.path.compare(0, base.size(), base) != 0)
@@ -643,7 +643,7 @@ struct Module: public interface::Module, public moderation::Host
 		// [PACKAGE_MEDIA] Its icon before the name
 		const ss_ icon = jstr(rel, "icon");
 		ss_ b = "<div class=\"box\">"+(is_hex(icon, 64) ? "<img src=\""
-				"/api/aitta/media/"+icon+"\" alt=\"\" width=\"32\" height=\"32\" "
+				"/api/v1/aitta/media/"+icon+"\" alt=\"\" width=\"32\" height=\"32\" "
 				"style=\"vertical-align:middle\"> " : "")+"<b>"+(latest ?
 				"<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
@@ -660,8 +660,8 @@ struct Module: public interface::Module, public moderation::Host
 		b += "<br><span class=\"meta\">Licence: code "+
 				html(jstr(rel, "license_code"))+", media "+
 				html(jstr(rel, "license_media"))+"</span><br>"
-				"<a href=\"/api/aitta/archive/"+html(sha)+".zip\">.zip</a> "
-				"<a href=\"/api/aitta/archive/"+html(sha)+".sig\">.sig</a>";
+				"<a href=\"/api/v1/aitta/archive/"+html(sha)+".zip\">.zip</a> "
+				"<a href=\"/api/v1/aitta/archive/"+html(sha)+".sig\">.sig</a>";
 		// Its discussion at its home Hearth, as the client's "Discuss"
 		const ss_ home = jstr(rel, "home_hearth");
 		if(home.compare(0, 8, "https://") == 0 ||
@@ -822,7 +822,7 @@ struct Module: public interface::Module, public moderation::Host
 			// weighs little alone. [AITTA_HTML_FOLDS] Folded: a visitor is
 			// seldom here to report
 			ss_ f = "<details><summary>Report</summary><form method=\"post\" "
-					"action=\"/api/aitta/report\"><p><select name=\"release\">";
+					"action=\"/api/v1/aitta/report\"><p><select name=\"release\">";
 			for(const json::Value &rel : rels)
 				if(pkg(rel) == want)
 					f += "<option>"+html(pkg(rel)+"/"+jstr(rel, "version"))+
@@ -850,15 +850,15 @@ struct Module: public interface::Module, public moderation::Host
 				if(ps.at(i).is_string() && is_hex(ps.at(i).as_string(), 64))
 					shots.push_back(ps.at(i).as_string());
 			ss_ head = "<h1>"+(is_hex(icon, 64) ? "<img src=\""
-					"/api/aitta/media/"+icon+"\" alt=\"\" width=\"48\" "
+					"/api/v1/aitta/media/"+icon+"\" alt=\"\" width=\"48\" "
 					"height=\"48\" style=\"vertical-align:middle\"> " : "")+
 					html(want)+"</h1><p>"+html(jstr(*mine[0], "description"))+
 					"</p>\n";
 			if(!shots.empty()){
 				head += "<p class=\"shots\">";
 				for(const ss_ &h : shots)
-					head += "<a href=\"/api/aitta/media/"+h+"\"><img src=\""
-							"/api/aitta/media/"+h+"\" alt=\"A screenshot\" "
+					head += "<a href=\"/api/v1/aitta/media/"+h+"\"><img src=\""
+							"/api/v1/aitta/media/"+h+"\" alt=\"A screenshot\" "
 							"style=\"max-width:100%;max-height:180px;"
 							"margin:0 6px 6px 0\"></a>";
 				head += "</p>\n";
@@ -1148,7 +1148,7 @@ struct Module: public interface::Module, public moderation::Host
 			interface::fs::remove_all(zip);
 			refuse(r, why);
 		};
-		const ss_ why = interface::aitta::check_manifest(m);
+		const ss_ why = interface::aitta::check_manifest(m, true);
 		if(!why.empty())
 			return drop("meta.json: "+why);
 		if(!changelog_there)

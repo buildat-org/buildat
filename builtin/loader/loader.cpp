@@ -7,6 +7,7 @@
 #include "interface/event.h"
 #include "interface/module_info.h"
 #include "interface/os.h"
+#include "interface/aitta.h"
 #include "loader/api.h"
 #include "network/api.h"
 #include "client_file/api.h"
@@ -417,6 +418,13 @@ struct Module: public interface::Module, public loader::Interface
 				m_server->shutdown(1, reason);
 				return nullptr;
 			}
+			const ss_ why = interface::aitta::module_meta_refusal(meta_v,
+					base_path == m_server->get_builtin_modules_path());
+			if(!why.empty()){
+				log_e(MODULE, "Module %s: %s", cs(name), cs(why));
+				m_server->shutdown(1, "loader: module "+name+": "+why);
+				return nullptr;
+			}
 			// meta.json is valid; read information
 			interface::ModuleInfo &info = m_module_info[name];
 			info.name = name;
@@ -442,7 +450,7 @@ struct Module: public interface::Module, public loader::Interface
 		for(const ss_ &game_path : game_paths)
 		for(const interface::fs::Node &n :
 				interface::fs::list_directory(game_path)){
-			if(n.name == "__loader" || !n.is_directory)
+			if(!n.is_directory)
 				continue;
 			// This is a module if it contains a file named "meta.json"
 			ss_ module_path = game_path+"/"+n.name;
@@ -452,6 +460,15 @@ struct Module: public interface::Module, public loader::Interface
 				log_t(MODULE, "No meta.json; \"%s\" is not a module",
 						cs(n.name));
 				continue;
+			}
+			// **A builtin's name is the engine's** ([COMPAT_BREAK_07] 8c):
+			// an app's module of that name replaced it, and the modules
+			// that use it took the app's for the builtin's interface
+			if(interface::fs::path_exists(builtin+"/"+n.name+"/meta.json")){
+				m_server->shutdown(1, "loader: the app's module \""+n.name+
+						"\" has the name of a module Buildat comes with; "
+						"rename it");
+				return;
 			}
 			// Is a module
 			log_t(MODULE, "Requirement from main module path: \"%s\"", cs(n.name));

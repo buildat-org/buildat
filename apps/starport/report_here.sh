@@ -79,7 +79,7 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D $tmp/cl -w 800x600 -l 3 -s 127.0.0.1:$SP -c @$tmp/cmds.txt > $tmp/cl.log 2>&1
-curl -s 127.0.0.1:$SP/api/list | python3 -c "import json,sys; print('listed:', [(s['host'],s['port'],s.get('tls')) for s in json.load(sys.stdin)['servers']])"
+curl -s 127.0.0.1:$SP/api/v1/list | python3 -c "import json,sys; print('listed:', [(s['host'],s['port'],s.get('tls')) for s in json.load(sys.stdin)['servers']])"
 # The player's client: this Starport only, accepted
 now=$(date +%s)
 echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > $tmp/fc/starport.json

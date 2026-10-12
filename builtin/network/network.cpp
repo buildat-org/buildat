@@ -1376,6 +1376,18 @@ struct Module: public interface::Module, public network::Interface
 		// upgrade below must get it, not the page. /api/ is never upgraded.
 		const bool ws_upgrade =
 				web::lower(headers["upgrade"]).find("websocket") != ss_::npos;
+		// **The API is versioned** ([COMPAT_BREAK_07] 8d): /api/v1/...;
+		// an /api/ path without it is a client before 0.7, told so in the
+		// APIs' own answer, which a 0.6 client shows as the error
+		if(target.compare(0, 5, "/api/") == 0 &&
+				target.compare(0, 8, "/api/v1/") != 0){
+			peer.closing = true;
+			const ss_ body = "{\"ok\":false,\"code\":\"upgrade_required\","
+					"\"error\":\"This needs a newer Buildat: update it\"}";
+			peer.queue_raw(web::response("200 OK", "application/json",
+					body.size(), "Access-Control-Allow-Origin: *\r\n") + body);
+			return true;
+		}
 		if(target.compare(0, 5, "/api/") == 0 ||
 				(claimed(target) && !ws_upgrade)){
 			peer.api_waiting = true;

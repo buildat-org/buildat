@@ -98,8 +98,8 @@ lua_part=""
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -x "$here/Build/bin/buildat" ]; then
 	app=$t/u/dev_apps/lr
 	mkdir -p "$app/main/client_lua"
-	echo '{"kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
-	printf '{"author": "tester", "name": "lr", "version": "1.0.0", "engine_api": 1,
+	echo '{"engine_api": 2, "kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
+	printf '{"author": "tester", "name": "lr", "version": "1.0.0", "engine_api": 2,
 		"audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "record_check", "serverless": true}\n' > "$app/meta.json"
 	cat > "$app/main/client_lua/init.lua" <<'L'

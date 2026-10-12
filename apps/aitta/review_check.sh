@@ -57,7 +57,7 @@ mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
-		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a review check"}\n' "$1" > "$t/app/meta.json"
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/pt" ||
@@ -88,11 +88,11 @@ ticket=$(echo "$pt" | grep -o '"ticket":"[0-9a-f]*"' | cut -d'"' -f4)
 sha=$(echo "$pt" | grep -o '"sha256":"[0-9a-f]*"' | cut -d'"' -f4)
 [ -n "$ticket" ] && [ -n "$sha" ] || fail "no ticket: $pt"
 st(){ curl -s -o /dev/null -w '%{http_code}' "$1"; }
-[ "$(st "$A/api/aitta/archive/$sha.zip")" = 404 ] ||
+[ "$(st "$A/api/v1/aitta/archive/$sha.zip")" = 404 ] ||
 	fail "the delisted release without a ticket"
-[ "$(st "$A/api/aitta/archive/$sha.zip?ticket=$ticket")" = 200 ] ||
+[ "$(st "$A/api/v1/aitta/archive/$sha.zip?ticket=$ticket")" = 200 ] ||
 	fail "the ticket's fetch"
-[ "$(st "$A/api/aitta/archive/$sha.zip?ticket=$ticket")" = 404 ] ||
+[ "$(st "$A/api/v1/aitta/archive/$sha.zip?ticket=$ticket")" = 404 ] ||
 	fail "the ticket's second fetch"
 reqs plain "$t/plain.log" '{"cmd":"playtest","release":"tester/pt/1.0.1"}'
 grep -aq 'ai: {"error":"for the reviewers[^"]*","id":1,"ok":false' "$t/plain.log" ||

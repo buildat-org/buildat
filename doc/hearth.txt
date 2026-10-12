@@ -108,7 +108,7 @@ prefix. A hidden message shows "Hidden by a moderator: <statement>" and
 not its text; a thread whose first message is hidden is hidden with it,
 title too, and gone from the portal, its topic and search.
 
-/api/discussed is for another site's "Discussed today" line (the
+/api/v1/discussed is for another site's "Discussed today" line (the
 project's front page): JSON {span: "today" | "this week" | "this month",
 message: {id, author, created, excerpt, url, thread: {id, title, url},
 topic: {id, name, url}}}, or {} when a month has fewer than two to pick

@@ -31,7 +31,7 @@ cd "$here/Build"
 SP=https://starport.buildat.org
 # Reach the Starport first; a network-less run would read as the very failure
 # this checks for, so skip instead of failing.
-curl -sS -o /dev/null --max-time 8 "$SP/api/list" ||
+curl -sS -o /dev/null --max-time 8 "$SP/api/v1/list" ||
 	{ echo "SKIP: $SP not reachable"; exit 0; }
 
 t=$(mktemp -d)
@@ -46,6 +46,7 @@ app="$t/relay_test"
 mkdir -p "$app/main/client_lua"
 cat > "$app/main/meta.json" <<'EOF'
 {
+	"engine_api": 2,
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},
@@ -99,11 +100,11 @@ local network = require("buildat/extension/network")
 local SP = "$SP"
 local total = 6
 local n, fails = 0, 0
--- /api/id/token with no session answers {ok=false,error="session"} (a 200);
+-- /api/v1/id/token with no session answers {ok=false,error="session"} (a 200);
 -- what matters is that each back-to-back call gets its own answer, not a
 -- relay error left by the one before it.
 local function fire(i)
-	network.http_post(SP .. "/api/id/token",
+	network.http_post(SP .. "/api/v1/id/token",
 		network.write_json({session = "", listing = false,
 			address = "relaytest", name = "x"}),
 		function(body, err)

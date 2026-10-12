@@ -2,7 +2,7 @@
 # [VERSION_CHECK]: Starport's version adapter for GitHub releases, the one
 # the official instance uses. Copy it to <user>/apps/starport/version_adapter
 # (executable); Starport runs it at the start and hourly and carries what it
-# prints in /api/list. It prints the newest release by its tag's number --
+# prints in /api/v1/list. It prints the newest release by its tag's number --
 # the releases are listed, as GitHub's "latest" skips prereleases, and the
 # older ones are prereleases:
 #   {"version": "0.6.90", "url": <its page>,

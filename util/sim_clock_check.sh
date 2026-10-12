@@ -94,7 +94,7 @@ advance(){
 H=3600 D=86400
 
 # Starport: sp <address> <call> <json>
-sp(){ curl -s -m 10 -H "X-Forwarded-For: $1" -d "$3" "http://127.0.0.1:$SP/api/$2"; }
+sp(){ curl -s -m 10 -H "X-Forwarded-For: $1" -d "$3" "http://127.0.0.1:$SP/api/v1/$2"; }
 # listed <id>: whether the Starport has it (a report without a reason is
 # refused, and first for a listing it does not have)
 probe=0
@@ -236,7 +236,7 @@ echo "ok: day 0 on Hearth"
 b="$here/Build/bin/buildat"
 mkdir -p "$t/app/main"
 echo 'int x;' > "$t/app/main/main.cpp"
-printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 1,
+printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 2,
 	"license_code": "MIT", "license_media": "CC0-1.0", "description": "sim",
 	"audience": "everyone"}\n' > "$t/app/meta.json"
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"

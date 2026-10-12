@@ -21,8 +21,8 @@ b="$here/Build/bin/buildat"
 app=$t/u/dev_apps/sl
 mkdir -p "$app/main/client_lua" "$app/main/client_data"
 cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" "$app/main/client_data/dot.png"
-echo '{"kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
-printf '{"author": "tester", "name": "sl", "version": "1.0.0", "engine_api": 1,
+echo '{"engine_api": 2, "kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
+printf '{"author": "tester", "name": "sl", "version": "1.0.0", "engine_api": 2,
 	"audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a serverless check", "serverless": true}\n' > "$app/meta.json"
 cat > "$app/main/client_lua/init.lua" <<'L'

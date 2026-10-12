@@ -86,19 +86,19 @@ echo "ok: listed as $id and verified"
 # The challenge signs a Starport's nonce and nothing else: the same secret
 # makes the claim code and ID tokens ([SECURITY_RUN_1])
 [ "$(api -o /dev/null -w '%{http_code}' \
-	"localhost:$AN/api/starport/challenge?listing=$id&nonce=claim")" = 404 ] ||
+	"localhost:$AN/api/v1/starport/challenge?listing=$id&nonce=claim")" = 404 ] ||
 	fail "the challenge answered for the nonce \"claim\""
 
-api "localhost:$SP/api/list" | grep -q "\"$id\"" &&
+api "localhost:$SP/api/v1/list" | grep -q "\"$id\"" &&
 	fail "an unclaimed listing was served"
 echo "ok: unclaimed, not served"
 # A port out of int64's range is refused, not cast ([REWORK_FIXES])
-api -d '{"unlisted":true,"access":"open","port":1e300}' "localhost:$SP/api/announce" |
+api -d '{"unlisted":true,"access":"open","port":1e300}' "localhost:$SP/api/v1/announce" |
 	grep -q '"port: 1 to 65535"' || fail "a port of 1e300 was not refused"
 
 key=$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 receipt=$(api -d "{\"listing\":\"$id\",\"reason\":\"spam\",\"key\":\"$key\"}" \
-	"localhost:$SP/api/report" | python3 -c \
+	"localhost:$SP/api/v1/report" | python3 -c \
 	"import json,sys; print(json.load(sys.stdin)['receipt'])") ||
 	fail "no receipt for a report"
 echo "ok: report receipt $receipt"
@@ -116,12 +116,12 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":
 n=$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl.log")
 [ "$n" -ge 5 ] || fail "$n of 5 commands went through (cl.log)"
 
-api "localhost:$SP/api/list" | grep -q "\"$id\"" ||
+api "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 	fail "the claimed listing is not served"
 echo "ok: claimed and served"
 
 api -d "{\"key\":\"$key\",\"receipts\":[\"$receipt\"]}" \
-	"localhost:$SP/api/report_status" | grep -q '"state":"rejected"' ||
+	"localhost:$SP/api/v1/report_status" | grep -q '"state":"rejected"' ||
 	fail "the reporter does not see the outcome"
 echo "ok: the reporter sees the report rejected"
 
@@ -138,7 +138,7 @@ for _ in $(seq 120); do
 	[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge 2 ] && break
 	sleep 1
 done
-api "localhost:$SP/api/list" | python3 -c "
+api "localhost:$SP/api/v1/list" | python3 -c "
 import json, sys
 s = [x for x in json.load(sys.stdin)['servers'] if x['name'] == 'Check main']
 assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', s
@@ -146,7 +146,7 @@ assert s and s[0]['fleet']['name'] == 'Check fleet' and s[0]['pool'] == 'main', 
 echo "ok: a server joined the fleet by its config line"
 # 10g: access from the Accounts settings, not the file's "open": invite
 # only (a server the launcher did not start), with IDs or without
-api "localhost:$SP/api/list" | python3 -c "
+api "localhost:$SP/api/v1/list" | python3 -c "
 import json, sys
 a = {x['name']: x['access'] for x in json.load(sys.stdin)['servers']}
 assert a.get('Check main') == 'starport' and a.get('Check house') == 'invite', a
@@ -155,7 +155,7 @@ echo "ok: access from the Accounts settings: starport, invite"
 
 token=$(python3 - "$SP" <<'PY'
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 y = time.gmtime().tm_year
@@ -194,7 +194,7 @@ echo "ok: the ID's token logged in to the fleet's server, its first admin"
 # 6: as the first server would announce a ban it reported
 python3 - "$SP" "$tmp/an/apps/floorplanner" "$id" > "$tmp/ban.json" <<'PY' ||
 import base64, json, sys, urllib.request
-B = "http://127.0.0.1:%s/api/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 s = call("id/login", name="grown", password="secret1")["result"]["session"]
@@ -207,7 +207,7 @@ del conf["starports"]
 conf.update(app="floorplanner", version="x", port=29642, players=0,
 		id=st["id"], secret=st["secret"],
 		bans=[{"sub": sub, "reason": "harassment"}])
-r = json.loads(urllib.request.urlopen(B.replace("/api/", "/api/announce"),
+r = json.loads(urllib.request.urlopen(B + "announce",
 		json.dumps(conf).encode()).read())
 assert r["ok"], r
 print(json.dumps({"listing": st["id"]}))
@@ -254,15 +254,15 @@ c.pop("login", None)
 json.dump(c, open(sys.argv[1], "w"))
 PY
 for _ in $(seq 30); do
-	api "localhost:$SP/api/list" | grep -q '"Check main"' || break
+	api "localhost:$SP/api/v1/list" | grep -q '"Check main"' || break
 	sleep 1
 done
-api "localhost:$SP/api/list" | grep -q '"Check main"' &&
+api "localhost:$SP/api/v1/list" | grep -q '"Check main"' &&
 	fail "an unlisted server is still in the list"
 echo "ok: unlisted, out of the list, by the watched file alone"
 tokens=$(python3 - "$SP" "$AN2" <<'PY'
 import json, sys, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 out = []
@@ -289,10 +289,10 @@ c["starports"] = []
 json.dump(c, open(sys.argv[1], "w"))
 PY
 for _ in $(seq 30); do
-	api "localhost:$SP/api/list" | grep -q '"Check house"' || break
+	api "localhost:$SP/api/v1/list" | grep -q '"Check house"' || break
 	sleep 1
 done
-api "localhost:$SP/api/list" | grep -q '"Check house"' &&
+api "localhost:$SP/api/v1/list" | grep -q '"Check house"' &&
 	fail "a removed Starport still lists the server"
 grep -q "Withdrawn from" "$tmp/an.log" ||
 	fail "no withdrawal in an.log"
@@ -352,7 +352,7 @@ sp_reqs mod modpass1234 "{\"cmd\":\"decide_appeal\",\"appeal\":\"$ap\",\"outcome
 sp_reqs admin checkpass '{"cmd":"set_settings","settings":{"thresholds":{"default":{"hide":0.005,"delist":8}}}}' cl14.log
 key2=$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 receipt2=$(api -d "{\"listing\":\"$id\",\"reason\":\"scam\",\"key\":\"$key2\"}" \
-	"localhost:$SP/api/report" | python3 -c \
+	"localhost:$SP/api/v1/report" | python3 -c \
 	"import json,sys; print(json.load(sys.stdin)['receipt'])") ||
 	fail "no receipt for the second report"
 sp_reqs admin checkpass '{"cmd":"me"}' cl15.log
@@ -377,7 +377,7 @@ status, st = mine("cl17.log")
 assert status == "delisted" and ("delist", "mod") in st, (status, st)
 PY
 api -d "{\"key\":\"$key2\",\"receipts\":[\"$receipt2\"]}" \
-	"localhost:$SP/api/report_status" | grep -q '"state":"upheld"' ||
+	"localhost:$SP/api/v1/report_status" | grep -q '"state":"upheld"' ||
 	fail "the second reporter does not see the report upheld"
 echo "ok: an appeal reversed, a report past a threshold hides, the moderator's uphold delists"
 # 10

@@ -58,11 +58,11 @@ read -r _ _ id _ < <(grep -v "^#" "$tmp/h/apps/hearth/starport_claim.txt")
 
 curl -si "localhost:$SP/authorize?listing=$id" | grep -qi "^X-Frame-Options: DENY" ||
 	fail "/authorize may be framed"
-curl -si -X POST -d '{}' "localhost:$SP/api/list" |
+curl -si -X POST -d '{}' "localhost:$SP/api/v1/list" |
 	grep -qi "^Access-Control-Allow-Origin: \*" || fail "no CORS on the API"
 python3 - "$SP" "$id" "$AN" <<'PY' || fail "the ID API"
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 own = "http://127.0.0.1:" + sys.argv[3]
@@ -142,7 +142,7 @@ grep -aq "Joined as webname" "$tmp/drive/page.log" ||
 # is the admin's)
 python3 - "$SP" "$id" <<'PY' || fail "the second ID"
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 s = call("register", name="webid2", password="secret1",
@@ -161,7 +161,7 @@ grep -aq "Joined as other" "$tmp/drive2/page.log" ||
 # password
 python3 - "$SP" "$id" <<'PY' || fail "the third ID"
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())
 s = call("register", name="webid3", password="secret1",

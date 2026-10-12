@@ -78,7 +78,7 @@ run their own. The official one is https://starport.buildat.org.
   the Steward level ([TRUST_LADDER]), set by the "level" request as
   Hearth's are.
 - `recommended_hearth` (an http(s) address) and `recommended_aittas` (a
-  list of them) come to clients in `/api/list` and an ID's "me". A
+  list of them) come to clients in `/api/v1/list` and an ID's "me". A
   logged-in ID's line in the launcher's overlay gets "Discuss", which
   joins that Hearth; it is also the home Hearth of a package whose
   manifest names none. Aittas the client has on neither its list nor its
@@ -90,7 +90,7 @@ run their own. The official one is https://starport.buildat.org.
   that an admin's web login cannot run commands -- is run at the start
   and hourly, given 60 s, and prints one JSON object:
   `{"version": "0.6.90", "url": "https://...", "platforms": {"linux":
-  {"url": ...}, "win64": {"url": ...}}}`. `/api/list` carries it as
+  {"url": ...}, "win64": {"url": ...}}}`. `/api/v1/list` carries it as
   "version", https links only; a failed run keeps the last good answer
   and logs why. `util/starport_version_github.py` is the one for GitHub
   releases. A native client newer than its own shows a notice on the
@@ -104,6 +104,6 @@ run their own. The official one is https://starport.buildat.org.
   links each TLS server to `<play_url>/?server=host:port`; the page joins
   it if a Starport in its own settings lists that address, with TLS on
   an https page, and otherwise stays on the launcher and says why.
-  `/api/list` and the answer to an announce carry it as "play"; a listed
+  `/api/v1/list` and the answer to an announce carry it as "play"; a listed
   server lets that page's WebSocket in while the Starport lists it, and
   `/authorize` takes its origin as if it were in `web_clients`.

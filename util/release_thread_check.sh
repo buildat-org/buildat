@@ -61,7 +61,7 @@ publish(){ # name home [version]
 		run = function() ctx.launch{} end}} end" > "$t/$1/launcher/init.lua"
 	printf '# %s\r\n\r\n- the first **release** of %s\r\n' "$v" "$1" > "$t/$1/CHANGELOG.md"
 	printf '{"author": "tester", "name": "%s", "version": "'$v'",
-		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "%s",
 		"changelog": "CHANGELOG.md"}\n' "$1" "$2" > "$t/$1/meta.json"
 	local zip
@@ -73,7 +73,7 @@ publish(){ # name home [version]
 zips=
 publish demo "http://127.0.0.1:$H/"
 publish elsewhere "https://forum.example"
-curl -s "http://127.0.0.1:$A/api/aitta/release?id=tester/demo/1.0" |
+curl -s "http://127.0.0.1:$A/api/v1/aitta/release?id=tester/demo/1.0" |
 	grep -q 'first \*\*release\*\* of demo' || fail "Aitta does not serve the changelog"
 
 # Hearth: the admin sets the sources

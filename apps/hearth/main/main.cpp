@@ -15,7 +15,7 @@
 //   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
 //   /p/<author>/<name>  a package's place: the threads about it
 //   /brand/<file>    the pages' font and logo ([HTML_BRAND])
-//   /api/discussed   one recent message as JSON, open to any site
+//   /api/v1/discussed   one recent message as JSON, open to any site
 //                    ([HEARTH_DISCUSSED_API]); see discussed()
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
@@ -557,7 +557,7 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/discussed"};
+		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/v1/discussed"};
 
 // Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): accounts' levels, spaced so
 // one added later goes between two; compared with >=, never ==. Saved as
@@ -624,7 +624,7 @@ struct Module: public interface::Module
 	std::set<network::PeerId> m_joined;
 	// Searches and pages per address (or account) a minute
 	network::RateTable m_searches;
-	// /api/discussed's pick and when it was made
+	// /api/v1/discussed's pick and when it was made
 	json::Value m_discussed;
 	int64_t m_discussed_at = -1;
 	ss_ m_discussed_path;
@@ -1101,7 +1101,7 @@ struct Module: public interface::Module
 			json::Value list;
 			try {
 				list = json::load_string(
-						interface::http_get(base+"/api/list").c_str());
+						interface::http_get(base+"/api/v1/list").c_str());
 			} catch(std::exception &e){
 				log_w(MODULE, "The servers of %s: %s", cs(base), e.what());
 				continue;
@@ -1150,7 +1150,7 @@ struct Module: public interface::Module
 			json::Value list;
 			try {
 				list = json::load_string(
-						interface::http_get(base+"/api/aitta/list").c_str());
+						interface::http_get(base+"/api/v1/aitta/list").c_str());
 			} catch(std::exception &e){
 				log_w(MODULE, "Releases from %s: %s", cs(base), e.what());
 				continue;
@@ -1177,7 +1177,7 @@ struct Module: public interface::Module
 					continue;
 				try {
 					const json::Value one = json::load_string(
-							interface::http_get(base+"/api/aitta/release?id="+
+							interface::http_get(base+"/api/v1/aitta/release?id="+
 							id).c_str());
 					const json::Value &r = one.get("release");
 					if(!one.get("ok").is_true() || !r.is_object() ||
@@ -2030,7 +2030,7 @@ struct Module: public interface::Module
 				!allowed("page "+from, PAGES_A_MINUTE))
 			return respond(r, 429, page("Hearth", "<p>Too many requests "
 					"from this address; try again in a minute.</p>"));
-		if(r.path == "/api/discussed"){
+		if(r.path == "/api/v1/discussed"){
 			if(r.method != "GET")
 				return respond(r, 405, "{}", "application/json");
 			const ss_ body = discussed(r.host).stringify();
@@ -2553,7 +2553,7 @@ struct Module: public interface::Module
 		return out.substr(0, cut)+"\u2026";
 	}
 
-	// [HEARTH_DISCUSSED_API] GET /api/discussed, for www.buildat.org's
+	// [HEARTH_DISCUSSED_API] GET /api/v1/discussed, for www.buildat.org's
 	// "Discussed today" line: of the shortest of a day, a week and a month
 	// that has two or more, one message at random -- visible, in a visible
 	// thread, not empty as text, by a member (LV_MEMBER, the trust ladder)
@@ -2746,7 +2746,7 @@ struct Module: public interface::Module
 	// and the search index
 	void set_hidden(int64_t message_id, int hidden, const ss_ &reason)
 	{
-		// /api/discussed's pick may be this message ([SECURITY_RUN_4])
+		// /api/v1/discussed's pick may be this message ([SECURITY_RUN_4])
 		m_discussed_at = -1;
 		Q m(m_db, "SELECT m.thread, m.body, t.title, (SELECT min(id) FROM "
 				"messages WHERE thread = m.thread) FROM messages m JOIN threads t "
@@ -3449,7 +3449,7 @@ struct Module: public interface::Module
 			return json::Value(true);
 		}
 		if(cmd == "public_url"){
-			// [HEARTH_DISCUSSED_API]: the base of /api/discussed's links,
+			// [HEARTH_DISCUSSED_API]: the base of /api/v1/discussed's links,
 			// as the public reaches this Hearth; "" for the request's Host
 			if(!admin)
 				throw Exception("only the "+level_name(LV_ADMIN)+" sets the public address");

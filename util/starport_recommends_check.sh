@@ -3,7 +3,7 @@
 # cost: 90s (2026-10-07)
 # covers: client/extensions/starport/init.lua apps/starport/main/main.cpp
 # [STARPORT_RECOMMENDS]: a Starport with a recommended Hearth and Aittas
-# serves them in /api/list and an ID's "me"; a launcher whose ID is logged
+# serves them in /api/v1/list and an ID's "me"; a launcher whose ID is logged
 # in there is offered the Aittas it lacks at the start, and the answer
 # lands: "Add" adds the checked one and ignores the unchecked one, and
 # a restart offers neither again. "Discuss" on the ID's line joins the
@@ -52,9 +52,9 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"recommended_hearth\":\"http://127.0.0.1:$HE\",\"recommended_aittas\":[\"$A1\",\"$A2\"]}}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
-curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"recommends\":.*$A2" ||
-	fail "/api/list has no recommends ($tmp/admin.log)"
-echo "ok: /api/list carries the recommendations"
+curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"recommends\":.*$A2" ||
+	fail "/api/v1/list has no recommends ($tmp/admin.log)"
+echo "ok: /api/v1/list carries the recommendations"
 for _ in $(seq 120); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
 grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.log)"
 

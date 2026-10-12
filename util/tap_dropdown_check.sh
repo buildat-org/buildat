@@ -27,8 +27,8 @@ check_tmp tap_dropdown; t=$CHECK_TMP
 trap check_cleanup EXIT
 a=$t/app/tdrop
 mkdir -p "$a/main/client_lua"
-echo '{"kind": "app", "name": "tdrop", "version": "0.1.0", "engine_api": 1}' > "$a/meta.json"
-echo '{"disable_cpp": true, "client_main": "init.lua", "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}' > "$a/main/meta.json"
+echo '{"kind": "app", "name": "tdrop", "version": "0.1.0", "engine_api": 2}' > "$a/meta.json"
+echo '{"engine_api": 2, "disable_cpp": true, "client_main": "init.lua", "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}' > "$a/main/meta.json"
 cat > "$a/main/client_lua/init.lua" <<'L'
 local log = buildat.Logger("tdrop")
 local magic = require("buildat/extension/urho3d")

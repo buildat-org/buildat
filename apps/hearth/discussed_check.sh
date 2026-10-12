@@ -2,7 +2,7 @@
 # tier: quick
 # cost: ~100 s (2026-10-08)
 # covers: apps/hearth/main/main.cpp
-# [HEARTH_DISCUSSED_API]: GET /api/discussed. Empty first ({}). Then bob, a
+# [HEARTH_DISCUSSED_API]: GET /api/v1/discussed. Empty first ({}). Then bob, a
 # member, writes two days ago and today; carol, a new account, twice today;
 # eve, a helper, today, and that one hidden. Neither carol's nor eve's
 # counts, so today has one and the week two: span "this week", a message of
@@ -17,7 +17,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hearth_discussed; t=$CHECK_TMP
 P=29887
-API=http://127.0.0.1:$P/api/discussed
+API=http://127.0.0.1:$P/api/v1/discussed
 
 cd "$here/Build"
 start_server "$t/srv.log" "setup code" 120 $P \
@@ -115,4 +115,4 @@ in=$(curl -s "http://127.0.0.1:$P/m/$last" | grep -o 'In <a href="[^"]*"' | cut 
 case "$in" in /t/1\?after=*"#m$last") ;; *) fail "/m/$last's thread link is $in" ;; esac
 curl -s "http://127.0.0.1:$P${in%#*}" | grep -q "id=\"m$last\"" ||
 	fail "$in is not the page with the message"
-echo "PASS: /api/discussed: this week's pick, a member's, plain, its links open at it, CORS"
+echo "PASS: /api/v1/discussed: this week's pick, a member's, plain, its links open at it, CORS"

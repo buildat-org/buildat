@@ -42,7 +42,7 @@ mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
-		"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a delist check"}\n' "$1" > "$t/app/meta.json"
 	echo "// $1" >> "$t/app/main/main.cpp"
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1"

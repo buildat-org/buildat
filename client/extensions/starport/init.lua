@@ -269,7 +269,7 @@ local function add_aitta(url)
 	table.insert(s.aittas, url)
 end
 
--- [STARPORT_RECOMMENDS]: what a Starport answered in /api/list or an ID's
+-- [STARPORT_RECOMMENDS]: what a Starport answered in /api/v1/list or an ID's
 -- "me", kept; set below, with the dialog that offers it
 local note_recommends
 local note_version
@@ -434,7 +434,7 @@ local function poll_receipts()
 		end
 	end
 	for url, ids in pairs(by_url) do
-		network.http_post(url .. "/api/report_status", network.write_json(
+		network.http_post(url .. "/api/v1/report_status", network.write_json(
 				{key = key_for(url), receipts = ids}), function(body)
 			local v = body and network.parse_json(body)
 			if type(v) ~= "table" or type(v.reports) ~= "table" then
@@ -467,7 +467,7 @@ local function accepted(url, fresh)
 end
 
 -- **A listing's icon** ([SERVER_ICONS]): its hash in the list, the PNG
--- at /api/icon/<hash>, fetched once into the cache's server_icons/ where
+-- at /api/v1/icon/<hash>, fetched once into the cache's server_icons/ where
 -- the handshake's go, checked there the same way; the lobby's floor
 -- wears it. One that does not hash to its name is not kept.
 local ICON_DIR = __buildat_get_path("cache") .. "/server_icons/"
@@ -481,7 +481,7 @@ local function fetch_icons(url, servers)
 			f:close()
 		elseif sha and not icon_asked[sha] then
 			icon_asked[sha] = true
-			network.http_get(url .. "/api/icon/" .. sha, function(body)
+			network.http_get(url .. "/api/v1/icon/" .. sha, function(body)
 				local got = body and __buildat_keep_server_icon(body)
 				if got ~= sha then
 					log:warning("Starport " .. url .. ": icon " .. sha ..
@@ -633,10 +633,10 @@ function M.safe.fetch(cb, ask, extra)
 		end
 		local options = {description = "Starport (server list)"}
 		if e.send_key then
-			network.http_post(url .. "/api/list", network.write_json(
+			network.http_post(url .. "/api/v1/list", network.write_json(
 					{key = key_for(url)}), got, options)
 		else
-			network.http_get(url .. "/api/list", got, options)
+			network.http_get(url .. "/api/v1/list", got, options)
 		end
 	end
 end
@@ -1430,14 +1430,14 @@ end
 
 --
 -- **Starport ID** ([STARPORT] 10): logging in, registering and the account,
--- over the Starport's HTTPS API (POST /api/id/<call>). The password goes to
+-- over the Starport's HTTPS API (POST /api/v1/id/<call>). The password goes to
 -- the Starport only; a server gets a token for itself (id_token_here).
 --
 
 -- cb(result) or cb(nil, why, unreachable): unreachable when the Starport
 -- did not answer at all
 local function id_call(url, what, body, cb)
-	network.http_post(url .. "/api/id/" .. what, network.write_json(body),
+	network.http_post(url .. "/api/v1/id/" .. what, network.write_json(body),
 			function(answer, err)
 		local v = answer and network.parse_json(answer)
 		if type(v) ~= "table" then
@@ -2445,7 +2445,7 @@ local function open_report_row(row)
 			if s.send_key then
 				body.key = key_for(url)
 			end
-			network.http_post(url .. "/api/report", network.write_json(body),
+			network.http_post(url .. "/api/v1/report", network.write_json(body),
 					function(answer, err)
 				local v = answer and network.parse_json(answer)
 				if type(v) == "table" and v.ok then

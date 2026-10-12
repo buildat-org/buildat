@@ -52,7 +52,7 @@ publish(){
 	cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 	printf 'local a = 1\n%s\n' "$4" > "$t/app/main/client_lua/extra.lua"
 	printf '{"author": "tester", "name": "%s", "version": "%s", "serverless": %s,
-		"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a serverless check"}\n' "$1" "$2" "$3" > "$t/app/meta.json"
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1 $2"
 	"$b" aitta publish "$zip" 127.0.0.1:$P > "$t/pub.out" 2>&1
@@ -80,7 +80,7 @@ echo "ok: in one with a server, listed with a warning"
 publish sl 1.0.0 true '-- clean'
 grep -q "listed: tester/sl/1.0.0" "$t/pub.out" && ! grep -q warning "$t/pub.out" ||
 	fail "a clean serverless release: $(cat "$t/pub.out")"
-curl -s "http://127.0.0.1:$P/api/aitta/list?serverless=1" > "$t/list"
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list?serverless=1" > "$t/list"
 grep -q '"name": *"sl"' "$t/list" && ! grep -q '"name": *"other"' "$t/list" ||
 	fail "?serverless=1: $(cat "$t/list")"
 echo "ok: listed; ?serverless=1 has it alone"
@@ -113,7 +113,7 @@ echo "ok: the pages' links"
 mkdir -p "$t/ext"
 echo 'local M = {}; return M' > "$t/ext/init.lua"
 printf '{"author": "tester", "name": "ext", "version": "1.0.0", "kind": "extension",
-	"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+	"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "an extension"}\n' > "$t/ext/meta.json"
 zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>/dev/null) || fail "pack ext"
 "$b" aitta publish "$zip" 127.0.0.1:$P | grep -q "listed: tester/ext" || fail "publish ext"

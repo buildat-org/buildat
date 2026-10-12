@@ -19,8 +19,8 @@ check_tmp touch_scroll; t=$CHECK_TMP
 trap check_cleanup EXIT
 a=$t/u/dev_apps/tsdrag
 mkdir -p "$a/launcher" "$a/main/client_lua"
-echo '{"kind": "app", "name": "tsdrag", "version": "0.1.0", "engine_api": 1}' > "$a/meta.json"
-echo '{"disable_cpp": true, "client_main": "init.lua", "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}' > "$a/main/meta.json"
+echo '{"kind": "app", "name": "tsdrag", "version": "0.1.0", "engine_api": 2}' > "$a/meta.json"
+echo '{"engine_api": 2, "disable_cpp": true, "client_main": "init.lua", "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}' > "$a/main/meta.json"
 echo 'return function(ctx) return {{id = "play", label = "tsdrag", run = function() ctx.launch{app = "tsdrag"} end}} end' > "$a/launcher/init.lua"
 cat > "$a/main/client_lua/init.lua" <<'L'
 local log = buildat.Logger("tsdrag")

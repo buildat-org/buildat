@@ -62,7 +62,7 @@ echo "ok: two sites registered, a bad origin refused"
 
 python3 - "$SP" "$t/sites.json" "$WP" <<'PY' || fail "the ID API"
 import json, sys, time, hmac, hashlib, base64, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 sites = [json.loads(l)["result"] for l in open(sys.argv[2])]
 def call(w, **k):
     return json.loads(urllib.request.urlopen(B + w, json.dumps(k).encode()).read())

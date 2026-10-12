@@ -31,7 +31,7 @@ name=a_rather_long_package_name_for_the_rows
 mkdir -p "$t/app/main"
 echo 'int x;' > "$t/app/main/main.cpp"
 printf '{"author": "tester", "name": "%s", "version": "1.0.0",
-	"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+	"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a check",
 	"home_hearth": "https://forum.example/a/very/long/path/to/the/thread/of/this/package"}\n' \
 	"$name" > "$t/app/meta.json"

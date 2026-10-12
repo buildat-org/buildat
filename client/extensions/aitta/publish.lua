@@ -14,7 +14,7 @@
 -- Picks named in the plan: a dev app's tile has the badge "Dev" and its
 -- saves under its name, as a bundled app's; "New..." writes the few files
 -- itself rather than copying a template; whether a key is bound is asked
--- of the Aitta (GET /api/aitta/info?key=).
+-- of the Aitta (GET /api/v1/aitta/info?key=).
 return function(h)
 local M, network, magic, uistack = h.M, h.network, h.magic, h.uistack
 local open_window, add_text, add_label, add_row, add_button, add_edit,
@@ -60,8 +60,10 @@ local function read_meta(name)
 	return type(m) == "table" and m or {}
 end
 
+-- The package's own engine_api, which its author bumps when it is ported;
+-- this client's only where it says none
 local function write_meta(name, m)
-	m.engine_api = __buildat_aitta_dev("engine_api")
+	m.engine_api = m.engine_api or __buildat_aitta_dev("engine_api")
 	local text = assert(network.write_json(m, true))
 	local f, err = io.open(USER .. "/dev_apps/" .. name .. "/meta.json", "wb")
 	if not f then
@@ -218,7 +220,7 @@ page_package = function(message)
 	m.version = m.version or "0.1.0"
 	m.audience = m.audience or "everyone"
 	m.kind = entry.kind
-	m.engine_api = __buildat_aitta_dev("engine_api")
+	m.engine_api = m.engine_api or __buildat_aitta_dev("engine_api")
 	local licences = st.info[st.aitta or aittas()[1] or ""] and
 			st.info[st.aitta or aittas()[1]].licences or LICENCES
 	local why_of = {}
@@ -305,7 +307,7 @@ end
 -- What the chosen Aitta says of the key: its licences and whom the key is
 -- bound to; nil while asking, {error =} for an Aitta without the call
 local function ask_info(url, pub, done)
-	network.http_get(url .. "/api/aitta/info?key=" .. pub, function(body, err)
+	network.http_get(url .. "/api/v1/aitta/info?key=" .. pub, function(body, err)
 		local v = body and network.parse_json(body)
 		if type(v) == "table" and v.ok then
 			st.info[url] = {licences = type(v.licences) == "table" and
@@ -335,7 +337,7 @@ local function upload(url, zip_path, done)
 	if not zip or type(sv) ~= "table" then
 		return done(nil, "cannot read " .. zip_path)
 	end
-	local base = url .. "/api/aitta/"
+	local base = url .. "/api/v1/aitta/"
 	local function call(what, body, next_step)
 		network.http_post(base .. what, body, function(got, err)
 			local v = got and network.parse_json(got)

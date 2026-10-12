@@ -1,4 +1,5 @@
 {
+	"engine_api": 2,
 	"kind": "check",
 	"disable_cpp": true,
 	"client_main": "init.lua",

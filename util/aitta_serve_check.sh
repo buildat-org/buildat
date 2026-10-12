@@ -53,7 +53,7 @@ mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
-		"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a serve check"}\n' "$1" > "$t/app/meta.json"
 	# A change, so that each version's compile is real
 	echo "// $1" >> "$t/app/main/main.cpp"

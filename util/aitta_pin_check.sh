@@ -18,7 +18,7 @@ trap 'rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 
 mkdir -p "$t/app/main" "$t/user"
-echo '{"dependencies": [{"module": "storage"}]}' > "$t/app/main/meta.json"
+echo '{"engine_api": 2, "dependencies": [{"module": "storage"}]}' > "$t/app/main/meta.json"
 cat > "$t/app/main/main.cpp" <<'EOF'
 #include "core/log.h"
 #include "interface/module.h"
@@ -59,7 +59,7 @@ EOF
 "$b" aitta keygen "$t/key" > /dev/null || fail "keygen"
 for v in 1.0 1.1; do
 	printf '{"author": "tester", "name": "pin", "version": "%s",
-		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0"}\n' \
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0"}\n' \
 		"$v" > "$t/app/meta.json"
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $v"
 	"$b" aitta install "$zip" "$t/user" > /dev/null 2>&1 || fail "install $v"

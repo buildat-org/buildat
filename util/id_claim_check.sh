@@ -101,7 +101,7 @@ import json, sys, time, urllib.request
 by = {l.split()[0]: l.split()[2] for l in open(sys.argv[3]) if l.strip() and not l.startswith("#")}
 ids = [by["http://127.0.0.1:" + sys.argv[1]], by["http://localhost:" + sys.argv[2]]]
 def call(sp, w, **k):
-    return json.loads(urllib.request.urlopen("http://127.0.0.1:%s/api/id/%s" %
+    return json.loads(urllib.request.urlopen("http://127.0.0.1:%s/api/v1/id/%s" %
             (sp, w), json.dumps(k).encode()).read())
 out = []
 for sp, listing, user, name in ((sys.argv[1], ids[0], "ida", "erin"),

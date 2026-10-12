@@ -62,7 +62,7 @@ EOF
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 		timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 		-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_$app.log" 2>&1
-	curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"$id\"" ||
+	curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 		fail "$app: the claim ($tmp/sp_$app.log)"
 	token=$(python3 - "$SP" "$id" "$app" <<'PY'
 import json, sys, time, urllib.request

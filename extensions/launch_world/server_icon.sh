@@ -79,17 +79,17 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"e
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_sp" -w 640x360 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$SP -c @"$t/cmds" > "$t/cl_sp.log" 2>&1
-list(){ curl -s -m 5 "127.0.0.1:$SP/api/list"; }
+list(){ curl -s -m 5 "127.0.0.1:$SP/api/v1/list"; }
 for _ in $(seq 180); do
 	list | grep -q "\"icon\":\"$isha\"" && break
 	sleep 1
 done
 list | grep -q "\"icon\":\"$isha\"" ||
 	fail "the listing has no icon ($(list | head -c 300); $(grep -a "Starport\|icon" "$t/an.log" | tail -2))"
-curl -s -m 5 "127.0.0.1:$SP/api/icon/$isha" | sha256sum | grep -q "^$isha" ||
-	fail "/api/icon does not serve it"
+curl -s -m 5 "127.0.0.1:$SP/api/v1/icon/$isha" | sha256sum | grep -q "^$isha" ||
+	fail "/api/v1/icon does not serve it"
 big=$(od -An -v -tx1 "$here/apps/vanilla/launcher/grass_block.png" | tr -d ' \n')
-curl -s -m 5 -X POST "127.0.0.1:$SP/api/announce" -d "{\"port\": 1, \"unlisted\": true,
+curl -s -m 5 -X POST "127.0.0.1:$SP/api/v1/announce" -d "{\"port\": 1, \"unlisted\": true,
 	\"kind\": \"app\", \"audience\": \"everyone\", \"access\": \"open\",
 	\"icon\": \"$big\"}" | grep -q '"error":"icon: ' ||
 	fail "an announce with a 120-pixel icon was taken"

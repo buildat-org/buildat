@@ -42,7 +42,7 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 printf '{"author": "tester", "name": "sl", "version": "1.0.0", "serverless": true,
-	"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+	"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a settings check"}\n' > "$t/app/meta.json"
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/sl" || fail "publish"

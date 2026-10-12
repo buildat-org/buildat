@@ -36,7 +36,7 @@ echo 'int x;' > "$t/app/main/main.cpp"
 echo "the changes" > "$t/app/CHANGELOG.md"
 manifest(){ # author version licence
 	printf '{"author": "%s", "name": "demo", "version": "%s",
-		"engine_api": 1, "license_code": "%s", "license_media": "CC0-1.0",
+		"engine_api": 2, "license_code": "%s", "license_media": "CC0-1.0",
 		"description": "a check", "home_hearth": "https://forum.example",
 		"changelog": "CHANGELOG.md"}\n' "$1" "$2" "$3" > "$t/app/meta.json"
 }
@@ -64,13 +64,13 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/cl.log" ||
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.0"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "listed: tester/demo/1.0" || fail "publish 1.0: $out"
-list=$(curl -s "http://127.0.0.1:$P/api/aitta/list")
+list=$(curl -s "http://127.0.0.1:$P/api/v1/aitta/list")
 echo "$list" | grep -q '"version":"1.0"' || fail "1.0 is not listed: $list"
 echo "$list" | grep -q '"changelog":"CHANGELOG.md","delisted":false,.*"home_hearth":"https://forum.example"' ||
 	fail "the home Hearth and the changelog are not listed: $list"
 sha=$(sha256sum "$zip" | cut -d' ' -f1)
-curl -s -o "$t/dl.zip" "http://127.0.0.1:$P/api/aitta/archive/$sha.zip"
-curl -s -o "$t/dl.sig" "http://127.0.0.1:$P/api/aitta/archive/$sha.sig"
+curl -s -o "$t/dl.zip" "http://127.0.0.1:$P/api/v1/aitta/archive/$sha.zip"
+curl -s -o "$t/dl.sig" "http://127.0.0.1:$P/api/v1/aitta/archive/$sha.sig"
 cmp -s "$t/dl.zip" "$zip" || fail "the archive served is not the one published"
 "$b" aitta install "$t/dl.zip" "$t/user" > /dev/null 2>&1 ||
 	fail "the downloaded release did not install"
@@ -92,16 +92,16 @@ BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0"}' \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
 # The releases, not the "delisted" beside them ([AITTA_REPORTS])
-curl -s "http://127.0.0.1:$P/api/aitta/list" | python3 -c 'import json,sys
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
 sys.exit(0 if any(r["version"] == "1.0" for r in json.load(sys.stdin)["releases"]) else 1)' &&
 	fail "a delisted release is listed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' \
-	"http://127.0.0.1:$P/api/aitta/archive/$sha.zip")" = 404 ] ||
+	"http://127.0.0.1:$P/api/v1/aitta/archive/$sha.zip")" = 404 ] ||
 	fail "a delisted release's archive is served"
 
 # 5. 240 reads a minute a network ([REWORK_FIXES]): 490 cannot all fit in
 # the minutes they span, whichever minute boundary falls among them
-curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/aitta/info"; done) |
+curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/v1/aitta/info"; done) |
 	grep -q "too many requests from your network" ||
 	fail "490 reads in a row were not limited"
 echo "PASS: bound, published, listed, installed; an unbound key, a licence, another author refused; delisted; reads limited"

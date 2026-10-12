@@ -104,7 +104,7 @@ static int aitta_main(int argc, char *argv[])
 				base = "http://"+base;
 			while(!base.empty() && base.back() == '/')
 				base.pop_back();
-			base += "/api/aitta/";
+			base += "/api/v1/aitta/";
 			auto read_all = [](const ss_ &path){
 				std::ifstream f(path, std::ios::binary);
 				if(!f.good())
@@ -157,7 +157,7 @@ static int aitta_main(int argc, char *argv[])
 					version = at == ss_::npos ? "" : want.substr(at + 1);
 			json::json_error_t e;
 			const json::Value list = json::load_string(interface::http_get(
-					base+"/api/aitta/list").c_str(), &e).get("releases");
+					base+"/api/v1/aitta/list").c_str(), &e).get("releases");
 			json::Value pick;
 			bool found = false;
 			ss_ versions;
@@ -205,7 +205,7 @@ static int aitta_main(int argc, char *argv[])
 			const ss_ tmp = user+"/.aitta-"+sha;
 			for(const char *ext : {".zip", ".sig"}){
 				std::ofstream f(tmp+ext, std::ios::binary);
-				f<<interface::http_get(base+"/api/aitta/archive/"+sha+ext);
+				f<<interface::http_get(base+"/api/v1/aitta/archive/"+sha+ext);
 				if(!f.good())
 					throw Exception("cannot write "+tmp+ext);
 			}

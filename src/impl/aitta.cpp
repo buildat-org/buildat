@@ -221,7 +221,41 @@ static bool archive_path_ok(const ss_ &p)
 	return !part_start;
 }
 
-ss_ check_manifest(const json::Value &m)
+// **The app contract** ([COMPAT_BREAK_07] 8c): "" when a module's
+// meta.json is one this loads, else why not. An app's module says the
+// engine API it is written for; a builtin is the engine's own. A key this
+// does not know is refused rather than ignored, so that a misspelt one or
+// one a newer Buildat added says so.
+ss_ module_meta_refusal(const json::Value &v, bool builtin)
+{
+	if(!v.is_object())
+		return "meta.json is not an object";
+	static const char *known[] = {"engine_api", "kind", "comment",
+		"client_main", "disable_cpp", "dependencies", "reverse_dependencies",
+		"cxxflags", "ldflags", "cxxflags_windows", "ldflags_windows",
+		"cxxflags_linux", "ldflags_linux"};
+	for(json::Iterator it(v); it.valid(); it.next()){
+		const ss_ key = it.key();
+		bool ok = false;
+		for(const char *k : known)
+			ok = ok || key == k;
+		if(!ok)
+			return "meta.json: \""+key.substr(0, 40)+"\" is not a key this "
+					"Buildat knows";
+	}
+	const json::Value &api = v.get("engine_api");
+	if(builtin && api.is_undefined())
+		return "";
+	if(!api.is_integer())
+		return "meta.json: \"engine_api\": the engine API it is written for "
+				"is missing; this Buildat runs "+
+				itos(ENGINE_API_MIN)+"-"+
+				itos(ENGINE_API);
+	const ss_ why = engine_api_refusal(api.as_integer());
+	return why.empty() ? "" : "meta.json: "+why;
+}
+
+ss_ check_manifest(const json::Value &m, bool any_engine_api)
 {
 	if(!m.is_object())
 		return "meta.json is not an object";
@@ -238,9 +272,8 @@ ss_ check_manifest(const json::Value &m)
 	const json::Value &api = m.get("engine_api");
 	if(!api.is_integer() || api.as_integer() < 1)
 		return "\"engine_api\": the engine API it is written against, 1 or more";
-	if(api.as_integer() > ENGINE_API)
-		return "it needs engine API "+itos((int)api.as_integer())+
-				" and this engine has "+itos(ENGINE_API);
+	if(!any_engine_api && !engine_api_refusal(api.as_integer()).empty())
+		return engine_api_refusal(api.as_integer());
 	if(str("license_code").empty() || str("license_media").empty())
 		return "\"license_code\" and \"license_media\": its licences";
 	if(str("description").size() > 300)

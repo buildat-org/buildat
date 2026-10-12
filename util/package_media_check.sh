@@ -7,7 +7,7 @@
 #      one with a 64 px icon and a JPEG screenshot, and one whose PNG
 #      screenshot is named shot.jpg.
 #   2. Both published to a local Aitta: the list's entries carry the
-#      hashes, /api/aitta/media/<hash> the same bytes as image/jpeg or
+#      hashes, /api/v1/aitta/media/<hash> the same bytes as image/jpeg or
 #      image/png (by the bytes, not the name), nosniff; an unknown hash
 #      404. The list page's box and the package page have the img tags.
 #   3. The client: the first installed, its grid tile with the icon (the
@@ -57,7 +57,7 @@ pack(){
 		cp -r "$here/apps/minigame/main" "$here/apps/minigame/launcher" "$t/app/"
 	cp "$t/$2" "$t/app/icon.png"; cp "$t/$3" "$t/app/$4"
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
-		"engine_api": 1, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a media check", "icon": "icon.png", "screenshot": "%s"}\n' \
 		"$1" "$4" > "$t/app/meta.json"
 	"$b" aitta pack "$t/app" "$t/key" "$t/out" 2>&1
@@ -95,7 +95,7 @@ for z in "$z1" "$z2"; do
 	"$b" aitta publish "$z" 127.0.0.1:$P > "$t/pub.out" 2>&1
 	grep -q "listed: tester/" "$t/pub.out" || fail "publish: $(cat "$t/pub.out")"
 done
-curl -s "$A/api/aitta/list" > "$t/list"
+curl -s "$A/api/v1/aitta/list" > "$t/list"
 curl -s "$A/" > "$t/front"
 curl -s "$A/p/tester/m1" > "$t/page"
 python3 - "$t" "$A" <<'EOF' || fail "the list or media ($t/list)"
@@ -110,20 +110,20 @@ for name, (icon, shot, typ) in want.items():
 	r = rels[name]
 	assert r["icon"] == sha(icon) and r["screenshot"] == sha(shot), r
 	for h, f, ty in ((r["icon"], icon, "image/png"), (r["screenshot"], shot, typ)):
-		a = urllib.request.urlopen(A + "/api/aitta/media/" + h)
+		a = urllib.request.urlopen(A + "/api/v1/aitta/media/" + h)
 		assert a.read() == open(t + "/" + f, "rb").read(), f
 		assert a.headers["Content-Type"] == ty, (f, a.headers["Content-Type"])
 		assert a.headers["X-Content-Type-Options"] == "nosniff"
 try:
-	urllib.request.urlopen(A + "/api/aitta/media/" + "0" * 64)
+	urllib.request.urlopen(A + "/api/v1/aitta/media/" + "0" * 64)
 	assert False, "an unknown hash served"
 except urllib.error.HTTPError as e:
 	assert e.code == 404
 front, page = open(t + "/front").read(), open(t + "/page").read()
-img = '<img src="/api/aitta/media/' + rels["m1"]["icon"] + '"'
+img = '<img src="/api/v1/aitta/media/' + rels["m1"]["icon"] + '"'
 assert img in front, "no icon in the list page's box"
 assert img in page[:page.index("</h1>")], "no icon in the heading"
-assert '<img src="/api/aitta/media/' + rels["m1"]["screenshot"] + '"' in page, "no screenshot"
+assert '<img src="/api/v1/aitta/media/' + rels["m1"]["screenshot"] + '"' in page, "no screenshot"
 open(t + "/icon_hash", "w").write(rels["m1"]["icon"])
 EOF
 echo "ok: listed with the hashes, served the same bytes by their type; the pages' img tags"
@@ -207,7 +207,7 @@ assert order == sorted(order), order
 assert "<b>bold" not in s
 assert '<option value="tester/m1">The page</option>' in s
 for f in ("pdir/a.png", "pdir/b.jpg"):
-	assert urllib.request.urlopen(A + "/api/aitta/media/" + sha(f)).read() == \
+	assert urllib.request.urlopen(A + "/api/v1/aitta/media/" + sha(f)).read() == \
 		open(t + "/" + f, "rb").read(), f
 EOF2
 "$b" aitta keygen "$t/key2" > /dev/null 2>&1
@@ -218,7 +218,7 @@ EOF2
 out=$("$b" aitta publish "$t/old-page.zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "as new as this or newer" || fail "an older page: $out"
 echo "ok: aitta page: the package page in order, escaped, linked; another key and an older page refused"
-curl -s -d "release=tester/m1&reason=spam&text=ads" "$A/api/aitta/report" | grep -q "Sent" ||
+curl -s -d "release=tester/m1&reason=spam&text=ads" "$A/api/v1/aitta/report" | grep -q "Sent" ||
 	fail "the page's report"
 reqs "$t/decide.log" \
 	'{"cmd":"mod_decide","group":"tester/m1|spam","decision":"uphold","action":"delist","text":"ads"}'
@@ -229,7 +229,7 @@ grep -q "Second paragraph" "$t/page.html" && fail "the delisted page's text show
 grep -q "$(sha256sum < "$t/pdir/a.png" | cut -d' ' -f1)" "$t/page.html" &&
 	fail "the delisted page's screenshot shown"
 grep -q '<div class="box">' "$t/page.html" || fail "the release went with the page"
-curl -s -o /dev/null -w '%{http_code}' "$A/api/aitta/media/$(sha256sum < "$t/pdir/a.png" | cut -d' ' -f1)" |
+curl -s -o /dev/null -w '%{http_code}' "$A/api/v1/aitta/media/$(sha256sum < "$t/pdir/a.png" | cut -d' ' -f1)" |
 	grep -q 404 || fail "the delisted page's screenshot served"
 echo "Third." > "$t/pdir/description.txt"
 "$b" aitta page 127.0.0.1:$P tester/m1 "$t/pdir" "$t/key" 2>&1 | grep -q "waits for a moderator" ||

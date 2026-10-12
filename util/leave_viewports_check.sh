@@ -17,12 +17,12 @@ check_tmp leave_viewports; t=$CHECK_TMP
 a=$t/u/dev_apps/redfield
 mkdir -p "$a/main/client_lua" "$a/launcher"
 cat > "$a/meta.json" <<J
-{"author": "tester", "name": "redfield", "version": "0.1.0", "engine_api": 1,
+{"author": "tester", "name": "redfield", "version": "0.1.0", "engine_api": 2,
 	"kind": "app", "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a red field"}
 J
 cat > "$a/main/meta.json" <<J
-{"disable_cpp": true, "client_main": "init.lua", "dependencies": [
+{"engine_api": 2, "disable_cpp": true, "client_main": "init.lua", "dependencies": [
 	{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}
 J
 echo 'return function(ctx) return {{id = "play", label = "redfield",

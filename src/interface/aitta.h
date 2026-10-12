@@ -16,10 +16,26 @@ namespace interface
 	// doc/plan/aitta_plan.md), and signing is deterministic (RFC 6979).
 	namespace aitta
 	{
-		// The engine API an app's C++ is written against. **Bumped when a
-		// change in src/interface breaks modules**; an app whose manifest
-		// says more than this is not installed.
-		static const int ENGINE_API = 1;
+		// The engine API an app is written against, its modules' and its
+		// manifest's "engine_api". **Bumped when a change in src/interface
+		// or the served Lua API breaks apps**; this engine runs
+		// ENGINE_API_MIN...ENGINE_API, and an app outside that is refused
+		// at load and not installed. 0.7 is 2 ([COMPAT_BREAK_07] 8c).
+		static const int ENGINE_API_MIN = 2;
+		static const int ENGINE_API = 2;
+		// "" when this engine runs api, else why not, for a player
+		static inline ss_ engine_api_refusal(int64_t api)
+		{
+			if(api < ENGINE_API_MIN)
+				return "it is made for an older Buildat (engine API "+
+						itos(api)+"; this one runs "+itos(ENGINE_API_MIN)+
+						"-"+itos(ENGINE_API)+")";
+			if(api > ENGINE_API)
+				return "it needs a newer Buildat (engine API "+itos(api)+
+						"; this one runs "+itos(ENGINE_API_MIN)+"-"+
+						itos(ENGINE_API)+")";
+			return "";
+		}
 
 		// A new key: the file's text, and its public half as hex
 		void keygen(ss_ &key_file_text, ss_ &public_hex);
@@ -40,8 +56,15 @@ namespace interface
 		bool verify_hash(const ss_ &public_hex, const ss_ &sha256_hex,
 				const ss_ &signature_hex, const char *format = RELEASE_FORMAT);
 
-		// The manifest's fields checked; "" or why not
-		ss_ check_manifest(const json::Value &m);
+		// A module's meta.json checked ([COMPAT_BREAK_07] 8c): "" or why
+		// not. builtin: one Buildat comes with, which says no engine_api
+		ss_ module_meta_refusal(const json::Value &v, bool builtin);
+
+		// The manifest's fields checked; "" or why not. any_engine_api: an
+		// Aitta's, which keeps releases for every engine and leaves it to
+		// the client to say which it runs; otherwise "engine_api" is in
+		// this engine's range
+		ss_ check_manifest(const json::Value &m, bool any_engine_api = false);
 
 		// [PACKAGE_MEDIA] A package's image checked by its header: which
 		// "icon", a square PNG of 256 px a side and 64 KB at most, or

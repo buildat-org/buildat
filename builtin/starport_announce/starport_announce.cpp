@@ -10,7 +10,7 @@
 // - A listing is an id and a secret the Starport gives at the first
 //   announce, kept in starport_state.json beside the config; later
 //   announces carry them.
-// - The challenge: the Starport asks /api/starport/challenge on this
+// - The challenge: the Starport asks /api/v1/starport/challenge on this
 //   server's own port (network:http_request) with a nonce, and the answer
 //   is HMAC-SHA256(secret, nonce): the server at the address holds the
 //   listing's secret.
@@ -593,7 +593,7 @@ struct Module: public interface::Module, public Interface
 			m_blocked.erase(url);
 		}
 		try {
-			interface::http_post(url+"/api/delist", body.stringify());
+			interface::http_post(url+"/api/v1/delist", body.stringify());
 			log_i(MODULE, "Withdrawn from %s", cs(url));
 		} catch(std::exception &e){
 			log_w(MODULE, "Withdrawing from %s: %s", cs(url), e.what());
@@ -696,7 +696,7 @@ struct Module: public interface::Module, public Interface
 			// the announce came from; over IPv4, as when servers listened
 			// on IPv4 alone, so that a listing is not an IPv6 address an
 			// IPv4 player cannot reach ([DUAL_STACK])
-			answer = interface::http_post(url+"/api/announce",
+			answer = interface::http_post(url+"/api/v1/announce",
 					body.stringify(), "application/json", nullptr,
 					!body.get("address").is_string());
 		} catch(std::exception &e){
@@ -1084,7 +1084,7 @@ struct Module: public interface::Module, public Interface
 
 	void on_http_request(const network::HttpRequest &r)
 	{
-		if(r.path != "/api/starport/challenge")
+		if(r.path != "/api/v1/starport/challenge")
 			return;
 		const ss_ id = r.param("listing");
 		const ss_ nonce = r.param("nonce");

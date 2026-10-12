@@ -55,7 +55,7 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"e
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
-curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"$id\"" ||
+curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 	fail "the claim ($tmp/sp_admin.log)"
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/f.log" | tail -1 | cut -d' ' -f3)
 BUILDAT_FP_NAME=webop BUILDAT_FP_PASSWORD=webpass123 BUILDAT_FP_CREATE=1 \

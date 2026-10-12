@@ -124,7 +124,7 @@ function keep(s){
 	} catch(e){}
 }
 async function call(what, body){
-	const r = await fetch("/api/id/" + what, {method: "POST",
+	const r = await fetch("/api/v1/id/" + what, {method: "POST",
 		headers: {"Content-Type": "text/plain"}, body: JSON.stringify(body)});
 	const v = await r.json();
 	if(!v.ok) throw new Error(v.error);

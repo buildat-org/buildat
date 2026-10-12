@@ -67,7 +67,7 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds" > "$t/sp_admin.log" 2>&1
-page $SP/api/list | grep -q "Shop <script>" || fail "the claim ($t/sp_admin.log)"
+page $SP/api/v1/list | grep -q "Shop <script>" || fail "the claim ($t/sp_admin.log)"
 Build/bin/buildat aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 ca=$(grep -ao "setup code [A-Z0-9]*" "$t/ai.log" | cut -d' ' -f3)
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
@@ -79,7 +79,7 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind ($t/cl_a.log)"
 mkdir -p "$t/demo/main" "$t/demo/launcher"
 echo 'int x;' > "$t/demo/main/main.cpp"
 echo "return function(ctx) return {} end" > "$t/demo/launcher/init.lua"
-printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 1,
+printf '{"author": "tester", "name": "demo", "version": "1.0", "engine_api": 2,
 	"license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a <script>alert(2)</script> check", "audience": "teen",
 	"home_hearth": "http://127.0.0.1:1/"}\n' > "$t/demo/meta.json"
@@ -103,7 +103,7 @@ grep -q "<script>" <<< "$p" && fail "Aitta's / runs a release's <script>"
 grep -q "a &lt;script&gt;alert(2)&lt;/script&gt; check" <<< "$p" ||
 	fail "Aitta's / does not show the release as text: $p"
 grep -q 'href="/p/tester/demo"' <<< "$p" || fail "no link to the package's page"
-grep -q '/api/aitta/archive/[0-9a-f]*\.zip' <<< "$p" || fail "no .zip link"
+grep -q '/api/v1/aitta/archive/[0-9a-f]*\.zip' <<< "$p" || fail "no .zip link"
 grep -q 'http://127.0.0.1:1/p/tester/demo" rel="nofollow noopener">Discuss' <<< "$p" ||
 	fail "no Discuss link to the home Hearth"
 grep -q "tester/grown" <<< "$p" && fail "Aitta's / lists an adult release"

@@ -44,7 +44,7 @@ publish(){ # name description
 	mkdir -p "$d"
 	cp -r ../apps/minigame/main ../apps/minigame/launcher "$d/"
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
-		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "%s"}\n' "$1" "$2" > "$d/meta.json"
 	zip=$("$b" aitta pack "$d" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/$1" ||

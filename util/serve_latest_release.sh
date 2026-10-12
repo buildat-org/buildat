@@ -708,7 +708,7 @@ stop_all(){
 delisted_why(){
 	local u=$AITTA
 	case $u in http://*|https://*) ;; *) u=http://$u ;; esac
-	curl -s -m 20 "${u%/}/api/aitta/list" | python3 -c '
+	curl -s -m 20 "${u%/}/api/v1/aitta/list" | python3 -c '
 import json, sys
 try:
 	d = json.load(sys.stdin)

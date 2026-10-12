@@ -7,9 +7,9 @@
 #   apps/starport/load_test.py ids 100,1000,20000
 #       registrations, ID logins and tokens at each count of IDs
 #   apps/starport/load_test.py listings 100,1000,5000
-#       new listings, announces again and /api/list at each count
+#       new listings, announces again and /api/v1/list at each count
 #   apps/starport/load_test.py mixed 1000
-#       /api/list's latency while ID logins run, with 1000 IDs
+#       /api/v1/list's latency while ID logins run, with 1000 IDs
 #
 # Each client address is a fake one in X-Forwarded-For (loopback is a
 # trusted proxy by default), so the per-address limits don't cap the
@@ -148,14 +148,14 @@ def announce_body(i, lid=None):
     return b
 
 def new_listing(i):
-    r = call("/api/announce", announce_body(i))
+    r = call("/api/v1/announce", announce_body(i))
     if r.get("ok"):
         secrets[r["id"]] = r["secret"]
         listing_ids.append(r["id"])
     return ok_or_error(r)
 
 def reannounce(lid):
-    return ok_or_error(call("/api/announce", announce_body(0, lid)))
+    return ok_or_error(call("/api/v1/announce", announce_body(0, lid)))
 
 def grow_listings(count):
     if count > len(listing_ids):
@@ -166,7 +166,7 @@ def grow_listings(count):
 
 names, sessions, logins = [], {}, {}
 def register(name):
-    r = call("/api/id/register", {"name": name, "password": "pass-" + name,
+    r = call("/api/v1/id/register", {"name": name, "password": "pass-" + name,
                                   "adult": True})
     if r.get("ok"):
         sessions[name] = r["result"]["session"]
@@ -174,13 +174,13 @@ def register(name):
     return ok_or_error(r)
 
 def login(name):
-    r = call("/api/id/login", {"name": name, "password": "pass-" + name})
+    r = call("/api/v1/id/login", {"name": name, "password": "pass-" + name})
     if r.get("ok"):
         sessions[name] = r["result"]["session"]
     return ok_or_error(r)
 
 def token(name):
-    return ok_or_error(call("/api/id/token", {
+    return ok_or_error(call("/api/v1/id/token", {
         "session": sessions[name], "listing": random.choice(listing_ids),
         "name": name}))
 
@@ -205,10 +205,10 @@ def list_latency(label):
     ms = []
     for _ in range(20):
         t = time.time()
-        call("/api/list")
+        call("/api/v1/list")
         ms.append((time.time() - t) * 1000)
     ms.sort()
-    print("%-26s /api/list p50 %.1f ms, max %.1f ms" % (label, ms[10],
+    print("%-26s /api/v1/list p50 %.1f ms, max %.1f ms" % (label, ms[10],
                                                          ms[-1]), flush=True)
 
 # -- The modes
@@ -229,7 +229,7 @@ def listings(levels):
         run("announce @%d listings" % len(listing_ids), list(listing_ids),
             reannounce)
         run("list @%d listings" % len(listing_ids), list(range(50)),
-            lambda _: ok_or_error(call("/api/list")))
+            lambda _: ok_or_error(call("/api/v1/list")))
 
 def mixed(levels):
     grow_listings(50)

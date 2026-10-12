@@ -384,6 +384,7 @@
 	//   "check", json[, name]   why the manifest is refused, or ""; with
 	//                           the dev package's name, its images too
 	//   "engine_api"            the engine API a manifest says
+	//   "engine_api_min"        the oldest this engine runs
 	//   "keygen", author        <user>/aitta_keys/<author>.key made ->
 	//                           the public key, or nil and why
 	//   "public", author        that key's public half, or nil
@@ -488,7 +489,9 @@
 							arg+"\",\n\trun = function() ctx.launch{app = \""+arg+
 							"\"} end}} end\n");
 					write_text(dir+"/main/meta.json",
-							"{\n\t\"disable_cpp\": true,\n"
+							"{\n\t\"engine_api\": "+
+							itos(interface::aitta::ENGINE_API)+",\n"
+							"\t\"disable_cpp\": true,\n"
 							"\t\"client_main\": \"init.lua\",\n"
 							"\t\"dependencies\": [\n"
 							"\t\t{\"module\": \"network\"},\n"
@@ -526,6 +529,10 @@
 			}
 			if(op == "engine_api"){
 				lua_pushinteger(L, interface::aitta::ENGINE_API);
+				return 1;
+			}
+			if(op == "engine_api_min"){
+				lua_pushinteger(L, interface::aitta::ENGINE_API_MIN);
 				return 1;
 			}
 			if(op == "keygen" || op == "public"){
@@ -2125,6 +2132,12 @@
 			json::json_error_t err;
 			const json::Value meta = json::load_file(
 					(md+"/meta.json").c_str(), &err);
+			const ss_ why = interface::aitta::module_meta_refusal(meta, false);
+			if(!why.empty()){
+				lua_pushnil(L);
+				lua_pushstring(L, (id+": module "+m+": "+why).c_str());
+				return 2;
+			}
 			if(meta.get("client_main").is_string())
 				mains.push_back(m+"/"+meta.get("client_main").as_string());
 		}

@@ -92,7 +92,7 @@ local function aitta_report(aitta, id)
 		local body = {release = id, reason = reason, text = text:GetText()}
 		body.key = starport.report_key(aitta)
 		status.text = "Sending..."
-		network.http_post(aitta .. "/api/aitta/report", network.write_json(body),
+		network.http_post(aitta .. "/api/v1/aitta/report", network.write_json(body),
 				function(answer, err)
 			local v = answer and network.parse_json(answer)
 			if type(v) == "table" and v.ok then
@@ -166,6 +166,18 @@ local AITTA_FILTERS = {"All", "Installed", "Updates", "Not installed"}
 -- Apps from Aitta lists the serverless ones, with Play only
 local ON_WEB = GetPlatform() == "Web"
 
+-- **A release this client runs** ([COMPAT_BREAK_07] 8c): nil, or why not
+-- for a player. A package's newest is the newest it runs; one it runs none
+-- of is shown with this and nothing to install or play.
+local function cannot_run(rel)
+	local api = tonumber(rel.engine_api) or 0
+	if api < __buildat_aitta_dev("engine_api_min") then
+		return "made for an older Buildat"
+	elseif api > __buildat_aitta_dev("engine_api") then
+		return "needs a newer Buildat"
+	end
+end
+
 -- An installed release's client half started with no server, the pages
 -- over the launcher taken down first
 local function play_installed(key, version)
@@ -204,7 +216,7 @@ local function aitta_media(rel, which, got)
 	end
 	if not media_asked[h] then
 		media_asked[h] = true
-		network.http_get(tostring(rel.aitta) .. "/api/aitta/media/" .. h,
+		network.http_get(tostring(rel.aitta) .. "/api/v1/aitta/media/" .. h,
 				function(body, err)
 			local name, why = nil, err
 			if body then
@@ -307,7 +319,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	end
 	local function install(p, play)
 		local rel, k = p.rel, p.key
-		local base = rel.aitta .. "/api/aitta/archive/" .. tostring(rel.sha256)
+		local base = rel.aitta .. "/api/v1/aitta/archive/" .. tostring(rel.sha256)
 		say("Fetching " .. k .. "...")
 		local options = {description = "Aitta (install)"}
 		network.http_get(base .. ".sig", function(sig, err1)
@@ -359,6 +371,10 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		if rel.description and rel.description ~= "" then
 			ptext(tostring(rel.description))
 		end
+		local why_not = cannot_run(rel)
+		if why_not then
+			ptext("Not for this Buildat: it is " .. why_not .. ".", WARN)
+		end
 		-- Its screenshot, the panel's width at most and 200 high
 		local shot = aitta_media(rel, "screenshot", function()
 			if selected == p and is_open(root) then
@@ -383,7 +399,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		local actions = add_row(panel)
 		-- [SERVERLESS_PLAY] Play: installed first where it is not; on the
 		-- web, with no server to install onto, only Play
-		if rel.serverless == true then
+		if rel.serverless == true and not why_not then
 			add_button(actions, "Play", function()
 				if st == "Installed" then
 					play_installed(p.key, rel.version)
@@ -392,7 +408,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				end
 			end, true, true)
 		end
-		if not ON_WEB then
+		if not ON_WEB and not why_not then
 			add_button(actions, st == "Installed" and "Installed" or
 					st == "Updates" and "Update" or "Install",
 					function() install(p) end, st ~= "Installed",
@@ -415,7 +431,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		pview:fit()
 		reseal(panel)
 		local id = p.key .. "/" .. tostring(rel.version)
-		network.http_get(rel.aitta .. "/api/aitta/release?id=" .. id,
+		network.http_get(rel.aitta .. "/api/v1/aitta/release?id=" .. id,
 				function(body)
 			local v = body and network.parse_json(body)
 			if selected == p and type(v) == "table" and
@@ -457,7 +473,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 						end
 					end)},
 					tostring(p.rel.version) ..
-					(st == "Installed" and ", installed" or
+					(cannot_run(p.rel) and ", not for this Buildat" or
+					st == "Installed" and ", installed" or
 					st == "Updates" and ", update" or "") ..
 					-- The panel says it where a row has no room
 					((p.rel.review == "reviewed" or narrow) and "" or
@@ -474,7 +491,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				local enter = magic.input:GetKeyDown(magic.KEY_RETURN) or
 						magic.input:GetKeyDown(magic.KEY_KP_ENTER)
 				if (enter or t - (last_click[p] or 0) < 500000) and
-						state(p) ~= "Installed" then
+						state(p) ~= "Installed" and not cannot_run(p.rel) then
 					install(p)
 				elseif selected ~= p then
 					fill(p)
@@ -523,8 +540,12 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					if not newest[k] then
 						order[#order + 1] = k
 					end
-					if not newest[k] or (tonumber(rel.time) or 0) >
-							(tonumber(newest[k].time) or 0) then
+					local old = newest[k]
+					local runs = not cannot_run(rel)
+					local old_runs = old and not cannot_run(old)
+					if not old or (runs and not old_runs) or
+							(runs == old_runs and (tonumber(rel.time) or 0) >
+							(tonumber(old.time) or 0)) then
 						newest[k] = rel
 					end
 				end
@@ -543,7 +564,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 	end
 	for _, a in ipairs(e.aittas) do
-		network.http_get(a .. "/api/aitta/list", function(body, err)
+		network.http_get(a .. "/api/v1/aitta/list", function(body, err)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and v.ok and type(v.releases) == "table" then
 				lists[a] = v.releases
@@ -593,7 +614,7 @@ function M.playtest(offer, start)
 			"? Not reviewed. It is installed apart, under your user " ..
 			"folder's review/, and runs in the server's sandbox.", function()
 		log:info("playtest: yes, " .. id)
-		local base = offer.aitta .. "/api/aitta/archive/" .. offer.sha256
+		local base = offer.aitta .. "/api/v1/aitta/archive/" .. offer.sha256
 		local function failed(why)
 			log:warning("playtest: " .. id .. ": " .. tostring(why))
 			ui.show_message_dialog("Not installed: " .. tostring(why))
@@ -649,7 +670,7 @@ function M.run_serverless(key)
 			return play_installed(key, best.version)
 		end
 		if best then
-			local base = best.aitta .. "/api/aitta/archive/" ..
+			local base = best.aitta .. "/api/v1/aitta/archive/" ..
 					tostring(best.sha256)
 			local options = {description = "Aitta (install)"}
 			network.http_get(base .. ".sig", function(sig, e1)
@@ -676,11 +697,12 @@ function M.run_serverless(key)
 				"no Aitta in the settings lists it as playable with no server")
 	end
 	for _, a in ipairs(e.aittas) do
-		network.http_get(a .. "/api/aitta/list", function(body, err)
+		network.http_get(a .. "/api/v1/aitta/list", function(body, err)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and type(v.releases) == "table" then
 				for _, rel in ipairs(v.releases) do
 					if type(rel) == "table" and rel.serverless == true and
+							not cannot_run(rel) and
 							tostring(rel.author) .. "/" ..
 							tostring(rel.name) == key and
 							(e.filters.unreviewed or rel.review == "reviewed")

@@ -53,7 +53,7 @@ reqs(){ # who log requests...
 		-w 800x600 -l 3 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$log" 2>&1
 }
 ans(){ grep -a "ai: {\"id\":$2,\"ok\":true" "$1"; }
-listed(){ curl -s "$A/api/aitta/list" | python3 -c 'import json,sys
+listed(){ curl -s "$A/api/v1/aitta/list" | python3 -c 'import json,sys
 sys.exit(0 if any(r["name"] == sys.argv[1] for r in json.load(sys.stdin)["releases"]) else 1)' "$1"; }
 
 BUILDAT_AITTA_ADMIN="$(printf 'add author1 authpass12\nadd mod2 modpass123\nlevel mod2 30')" \
@@ -67,7 +67,7 @@ mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
-		"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "a reports check"}\n' "$1" > "$t/app/meta.json"
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$P > "$t/publish_$1.log" 2>&1
@@ -82,9 +82,9 @@ publish pk2; grep -q "listed: tester/pk2" "$t/publish_pk2.log" || fail "publish 
 # 1. The reports
 key=$(printf '%064d' 7)
 curl -s -X POST -d '{"release":"tester/pk/1.0.0","reason":"broken","text":"anonymous"}' \
-	"$A/api/aitta/report" | grep -q '"ok":true' || fail "the anonymous report"
+	"$A/api/v1/aitta/report" | grep -q '"ok":true' || fail "the anonymous report"
 curl -s -X POST --data-urlencode "release=tester/pk2/1.0.0" -d reason=other \
-	--data-urlencode "text=from the web" "$A/api/aitta/report" |
+	--data-urlencode "text=from the web" "$A/api/v1/aitta/report" |
 	grep -q "Sent; a moderator will look" || fail "the web form's report"
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
 cat > "$t/report.cmds" <<C
@@ -117,7 +117,7 @@ mine "aitta report: sent tester/pk/1.0.0 broken" "$t/report.log" > /dev/null ||
 	fail "the launcher's report ($(grep -a "aitta report\|Command seq\|click" "$t/report.log" | tail -3))"
 # And one by a key the check knows, for its receipt's outcome
 receipt=$(curl -s -X POST -d "{\"release\":\"tester/pk/1.0.0\",\"reason\":\"broken\",\"key\":\"$key\"}" \
-	"$A/api/aitta/report" | grep -o '"receipt":"[0-9a-f]*"' | cut -d'"' -f4)
+	"$A/api/v1/aitta/report" | grep -o '"receipt":"[0-9a-f]*"' | cut -d'"' -f4)
 [ -n "$receipt" ] || fail "the keyed report"
 listed pk && fail "pk still listed past the hide threshold"
 gid='tester/pk/1.0.0|broken'
@@ -133,7 +133,7 @@ ans "$t/queue.log" 1 | grep -q 'tester/pk2/1.0.0|other' || fail "no web report i
 reqs admin "$t/decide.log" \
 	"{\"cmd\":\"mod_decide\",\"group\":\"$gid\",\"decision\":\"uphold\",\"action\":\"delist\",\"text\":\"it does not start\"}"
 ans "$t/decide.log" 1 > /dev/null || fail "the uphold: $(grep -a 'ai: ' "$t/decide.log")"
-curl -s "$A/api/aitta/list" | grep -q '"why":"broken: it does not start"' ||
+curl -s "$A/api/v1/aitta/list" | grep -q '"why":"broken: it does not start"' ||
 	fail "no why in the list's delisted"
 
 # 3. The launcher's tile note, while delisted
@@ -194,7 +194,7 @@ ans "$t/again.log" 2 | grep -q '"action":"relisted"[^}]*"reason":"the admin' &&
 	ans "$t/again.log" 2 | grep -q '"action":"delisted"[^}]*"reason":"the admin' ||
 	fail "no statement of the admin's delist and relist: $(ans "$t/again.log" 2 | head -c 600)"
 curl -s -X POST -d "{\"key\":\"$key\",\"receipts\":[\"$receipt\"]}" \
-	"$A/api/aitta/report_status" | grep -q '"state":"upheld"' ||
+	"$A/api/v1/aitta/report_status" | grep -q '"state":"upheld"' ||
 	fail "the receipt's outcome"
 
 # 4. A bar

@@ -75,8 +75,13 @@ namespace interface
 		virtual sv_<ss_> get_loaded_modules() = 0;
 		virtual bool access_module(const ss_ &module_name, // Always returns true
 				std::function<void(interface::Module*)> cb) = 0;
-		/*virtual bool access_module_optional(const ss_ &module_name, TODO
-				std::function<void(interface::Module*)> cb) = 0;*/
+		// False, and cb not called, when the module is not loaded
+		bool access_module_optional(const ss_ &module_name,
+				std::function<void(interface::Module*)> cb){
+			if(!has_module(module_name))
+				return false;
+			return access_module(module_name, cb);
+		}
 
 		virtual void sub_event(struct Module *module, const Event::Type &type) = 0;
 		virtual void emit_event(Event event) = 0;

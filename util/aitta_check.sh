@@ -30,7 +30,7 @@ manifest(){ # version engine_api name
 "$b" aitta keygen "$t/key" 2>/dev/null && fail "keygen overwrote a key"
 "$b" aitta keygen "$t/key2" > /dev/null || fail "keygen 2"
 
-manifest 1.0 1
+manifest 1.0 2
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack"
 [ "$zip" = "$t/out/tester-demo-1.0.zip" ] || fail "pack wrote $zip"
 grep -q "$(cat "$t/pub")" "$t/out/tester-demo-1.0.sig" || fail "the .sig has another key"
@@ -45,7 +45,7 @@ cmp -s "$t/out/tester-demo-1.0.sig" "$t/again/tester-demo-1.0.sig" ||
 "$b" aitta install "$zip" "$t/user" 2>/dev/null && fail "installed the same version twice"
 
 # A byte changed in the archive
-manifest 1.1 1
+manifest 1.1 2
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack 1.1"
 cp "$zip" "$t/tampered.zip"; cp "${zip%.zip}.sig" "$t/tampered.sig"
 printf 'X' | dd of="$t/tampered.zip" bs=1 seek=40 conv=notrunc 2>/dev/null
@@ -57,19 +57,22 @@ sed -i "s/\"sha256\": *\"[0-9a-f]*\"/\"sha256\":\"$h\"/" "$t/tampered.sig"
 "$b" aitta install "$zip" "$t/user" > /dev/null || fail "install 1.1 beside 1.0"
 
 # Another author's key for the same author/name
-manifest 1.2 1
+manifest 1.2 2
 zip=$("$b" aitta pack "$t/app" "$t/key2" "$t/out") || fail "pack 1.2"
 "$b" aitta install "$zip" "$t/user" 2>/dev/null && fail "installed under another key"
 
 # An engine API this engine does not have; a name that is a path
 manifest 1.3 999
 "$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null && fail "packed engine API 999"
-manifest 1.4 1 "../evil"
+manifest 1.3 1
+why=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>&1) && fail "packed engine API 1"
+echo "$why" | grep -q "older Buildat" || fail "engine API 1: $why"
+manifest 1.4 2 "../evil"
 "$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null && fail "packed a name with a path"
 
 # The optional home Hearth and changelog: an address, and a file that is there
 extra(){ # fields
-	manifest 1.5 1
+	manifest 1.5 2
 	sed -i "s|\"description\"|$1, \"description\"|" "$t/app/meta.json"
 }
 extra '"home_hearth": "forum.example", "changelog": "CHANGELOG.md"'
@@ -91,7 +94,7 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack with the fields"
 mkdir -p "$t/ext"
 ext(){ # version name [kind]
 	printf '{"author": "tester", "name": "%s", "version": "%s",
-		"kind": "%s", "engine_api": 1, "license_code": "MIT",
+		"kind": "%s", "engine_api": 2, "license_code": "MIT",
 		"license_media": "CC0-1.0", "description": "a check"}\n' \
 		"$2" "$1" "${3:-extension}" > "$t/ext/meta.json"
 }
@@ -138,4 +141,4 @@ if [ "${AITTA_CHECK_CLIENT:-1}" = 1 ]; then
 fi
 
 [ -z "$(ls -A "$t/user/installed" | grep incoming)" ] || fail "an .incoming directory was left"
-echo "PASS: packed, signed and installed; tampering, another key, a newer engine API and a path name refused; an extension installed over its old version and booted sandboxed"
+echo "PASS: packed, signed and installed; tampering, another key, a newer and an older engine API and a path name refused; an extension installed over its old version and booted sandboxed"

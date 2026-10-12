@@ -93,12 +93,12 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="$reqs" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
-list=$(curl -s -m 10 "localhost:$SP/api/list")
+list=$(curl -s -m 10 "localhost:$SP/api/v1/list")
 echo "$list" | grep -q "Play hearth" && echo "$list" | grep -q "Play aitta" ||
 	fail "the claims ($tmp/sp_admin.log)"
 python3 - "$SP" <<'PY' || fail "the ID API"
 import json, sys, time, urllib.request
-B = "http://127.0.0.1:%s/api/id/" % sys.argv[1]
+B = "http://127.0.0.1:%s/api/v1/id/" % sys.argv[1]
 r = json.loads(urllib.request.urlopen(B + "register", json.dumps(dict(
         name="playid", password="secret1",
         birth_year=time.gmtime().tm_year - 40)).encode()).read())

@@ -66,10 +66,16 @@ network:packet_received/* event: a client's packet the handler cannot read
 is dropped and logged, the first ten and then one line every ten seconds
 with how many went unsaid.
 
-meta.json: {"cxxflags": "", "ldflags": "", "dependencies": [{"module":
-"network"}, {"module": "x", "optional": true}], "reverse_dependencies":
-[...], "disable_cpp": false, "client_main": "init.lua"}. Any field may be
-left out; {} is the minimum. A dependency is loaded first; a reverse
+meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
+"dependencies": [{"module": "network"}, {"module": "x", "optional":
+true}], "reverse_dependencies": [...], "disable_cpp": false,
+"client_main": "init.lua", "kind": "app"}. An app's module must say
+engine_api, the engine API it is written for (interface::aitta::
+ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
+{"engine_api": 2} is the minimum. A key the loader does not know
+(besides those, cxxflags_/ldflags_ with _windows or _linux, and
+"comment") is refused at load with the reason, as is an app module named
+like one of Buildat's (builtin/). A dependency is loaded first; a reverse
 dependency is loaded after this module and says the other may use this
 one. disable_cpp is a module with client halves only. client_main names a
 script in the module's client_lua/ that the engine runs once on each
@@ -86,6 +92,8 @@ interface/server.h -- interface::Server, the one object a module holds
   STATUS lines how many are coming ([START_PROGRESS])
 - access_module(name, cb): the only way to another module; always returns
   true (a missing module is an error)
+- access_module_optional(name, cb): the same, but false and cb not called
+  when the module is not loaded
 - sub_event(module, type), emit_event(Event) and the two templates
   emit_event(type) / emit_event(type, new PrivateT(...)): the private is
   owned by the event

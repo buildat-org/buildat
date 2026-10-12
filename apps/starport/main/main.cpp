@@ -8,13 +8,13 @@
 //
 // The HTTP API, under /api/ on the server's port (network:http_request),
 // JSON in and out, a refusal an {"ok": false, "error": ...} with status 200:
-//   POST /api/announce       a server's announce ([STARPORT] 2)
-//   GET|POST /api/list       the listings this instance serves ([STARPORT] 4)
-//   POST /api/report         a report ([STARPORT] 5)
-//   POST /api/report_status  a reporter's receipts' outcomes
-//   GET /api/transparency    the numbers ([STARPORT] 6)
-//   GET /api/icon/<sha256>   a listing's icon, a PNG ([SERVER_ICONS])
-//   POST /api/id/<call>      a Starport ID's calls ([STARPORT] 10)
+//   POST /api/v1/announce       a server's announce ([STARPORT] 2)
+//   GET|POST /api/v1/list       the listings this instance serves ([STARPORT] 4)
+//   POST /api/v1/report         a report ([STARPORT] 5)
+//   POST /api/v1/report_status  a reporter's receipts' outcomes
+//   GET /api/v1/transparency    the numbers ([STARPORT] 6)
+//   GET /api/v1/icon/<sha256>   a listing's icon, a PNG ([SERVER_ICONS])
+//   POST /api/v1/id/<call>      a Starport ID's calls ([STARPORT] 10)
 //   GET /authorize, GET /id  the pages a web client signs in by and an
 //                            ID's settings are on ([WEB_ID_TRUST]);
 //                            /authorize?site=<id> a website's sign-in
@@ -310,7 +310,7 @@ static json::Value default_settings()
 	s.set("recommended_hearth", "");
 	s.set("recommended_aittas", json::array());
 	// [PLAY_LINKS]: the play page ("https://play.example.org"; "" for
-	// none) the page at / links each TLS server to, which /api/list hands
+	// none) the page at / links each TLS server to, which /api/v1/list hands
 	// clients and an announce's answer hands each listed server, so that
 	// it lets the page's WebSocket in; it is one of web_clients too
 	s.set("play_url", "");
@@ -359,7 +359,7 @@ static bool version_link(const json::Value &v)
 	return true;
 }
 
-// The adapter's answer as /api/list carries it, or undefined and why:
+// The adapter's answer as /api/v1/list carries it, or undefined and why:
 // {version = "0.6.89", url, platforms = {linux = {url}, ...}}, no other
 // keys; a platform that is not a short name or has no good url is left out
 static json::Value version_answer(const json::Value &a, ss_ *why)
@@ -399,7 +399,7 @@ static json::Value version_answer(const json::Value &a, ss_ *why)
 
 struct VerifyJob {
 	ss_ listing;
-	ss_ url;      // http://host:port/api/starport/challenge?...
+	ss_ url;      // http://host:port/api/v1/starport/challenge?...
 	ss_ expect;   // the hex HMAC
 };
 struct VerifyResult {
@@ -480,7 +480,7 @@ struct Module: public interface::Module, public moderation::Host
 
 	storage::Store* store(const char *name){ return m_save->store(name); }
 
-	// [DB_INDEXES]: the listings parsed once and kept, as /api/list, the
+	// [DB_INDEXES]: the listings parsed once and kept, as /api/v1/list, the
 	// front page and every announce read all of them. Written through put()
 	// and listing_remove() only.
 	std::map<ss_, json::Value> m_listings;
@@ -538,7 +538,7 @@ struct Module: public interface::Module, public moderation::Host
 	}
 	double setting_num(const char *k){ return setting(k).as_number(); }
 
-	// [STARPORT_RECOMMENDS], as /api/list and an ID's "me" carry it
+	// [STARPORT_RECOMMENDS], as /api/v1/list and an ID's "me" carry it
 	json::Value recommends()
 	{
 		json::Value v = json::object();
@@ -678,22 +678,22 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		if(r.path == "/" && r.method == "GET")
 			front_page(r);
-		else if(r.path == "/api/announce" && r.method == "POST")
+		else if(r.path == "/api/v1/announce" && r.method == "POST")
 			api_announce(r, body);
-		else if(r.path == "/api/delist" && r.method == "POST")
+		else if(r.path == "/api/v1/delist" && r.method == "POST")
 			api_delist(r, body);
-		else if(r.path == "/api/list")
+		else if(r.path == "/api/v1/list")
 			api_list(r, body);
-		else if(r.path == "/api/report" && r.method == "POST")
+		else if(r.path == "/api/v1/report" && r.method == "POST")
 			api_report(r, body);
-		else if(r.path == "/api/report_status" && r.method == "POST")
+		else if(r.path == "/api/v1/report_status" && r.method == "POST")
 			api_report_status(r, body);
-		else if(r.path.compare(0, 8, "/api/id/") == 0 && r.method == "POST")
+		else if(r.path.compare(0, 11, "/api/v1/id/") == 0 && r.method == "POST")
 			api_id(r, body);
-		else if(r.path == "/api/transparency")
+		else if(r.path == "/api/v1/transparency")
 			api_transparency(r);
-		else if(r.path.compare(0, 10, "/api/icon/") == 0 && r.method == "GET")
-			api_icon(r, r.path.substr(10));
+		else if(r.path.compare(0, 13, "/api/v1/icon/") == 0 && r.method == "GET")
+			api_icon(r, r.path.substr(13));
 		else if((r.path == "/authorize" || r.path == "/id") &&
 				r.method == "GET"){
 			// Never in a frame: its Allow would be clicked through one
@@ -705,7 +705,7 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		else if(r.method == "GET" && network::serve_brand(m_server, r))
 			return;
-		else if(r.path.compare(0, 14, "/api/starport/") == 0)
+		else if(r.path.compare(0, 17, "/api/v1/starport/") == 0)
 			return; // builtin/starport_announce's, were this listed itself
 		else {
 			json::Value v = json::object();
@@ -779,7 +779,7 @@ struct Module: public interface::Module, public moderation::Host
 			return;
 		}
 		// [SERVER_ICONS] The server's icon, in hex: a PNG of 64 pixels a
-		// side or less, kept by its hash and served at /api/icon/<hash>.
+		// side or less, kept by its hash and served at /api/v1/icon/<hash>.
 		// It is the listing's content and goes with it.
 		// simplified: an icon no listing names any more stays in the store
 		ss_ icon_sha;
@@ -1110,7 +1110,7 @@ struct Module: public interface::Module, public moderation::Host
 		j.listing = jstr(l, "id");
 		j.url = ss_(l.get("tls").is_true() ? "https://" : "http://")+host+":"+
 				itos(jint(l, "port"))+
-				"/api/starport/challenge?listing="+j.listing+"&nonce="+nonce;
+				"/api/v1/starport/challenge?listing="+j.listing+"&nonce="+nonce;
 		j.expect = hex(interface::sha256::hmac(unhex(jstr(l, "secret")), nonce));
 		{
 			std::lock_guard<std::mutex> lock(m_vmutex);
@@ -1284,7 +1284,7 @@ struct Module: public interface::Module, public moderation::Host
 		respond(r, 200, v);
 	}
 
-	// What /api/list hands out: the listed servers, and those hidden from
+	// What /api/v1/list hands out: the listed servers, and those hidden from
 	// filtered views marked restricted
 	json::Value listed_servers()
 	{
@@ -1818,7 +1818,7 @@ struct Module: public interface::Module, public moderation::Host
 		using interface::web_brand::cut;
 		ss_ b = "<div class=\"box\">";
 		if(!jstr(s, "icon").empty())
-			b += "<img class=\"icon\" src=\"/api/icon/"+html(jstr(s, "icon"))+
+			b += "<img class=\"icon\" src=\"/api/v1/icon/"+html(jstr(s, "icon"))+
 					"\" width=\"48\" height=\"48\" alt=\"\">";
 		const ss_ host = jstr(s, "host");
 		const int64_t port = jint(s, "port");
@@ -1999,7 +1999,7 @@ struct Module: public interface::Module, public moderation::Host
 				"; the median time to decide a report: "+(median == 0 ?
 				ss_("none decided yet") : median < 7200 ?
 				itos(median / 60)+" minutes" : itos(median / 3600)+" hours")+
-				". <a href=\"/api/transparency\">The numbers</a>.</p>\n"
+				". <a href=\"/api/v1/transparency\">The numbers</a>.</p>\n"
 				"<h2>Privacy</h2><p>This page sets no cookies and loads nothing "
 				"from elsewhere. A Starport ID keeps a name, a password and "
 				"what you choose to add; <a href=\"/id\">the ID page</a> shows "
@@ -2230,7 +2230,7 @@ struct Module: public interface::Module, public moderation::Host
 
 	void api_id(const network::HttpRequest &r, const json::Value &b)
 	{
-		const ss_ what = r.path.substr(8);
+		const ss_ what = r.path.substr(11);
 		json::Value result;
 		ss_ error;
 		try {

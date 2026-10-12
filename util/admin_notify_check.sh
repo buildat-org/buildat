@@ -152,13 +152,13 @@ grep -aq "note=Saved" "$t/aadmin.log" || fail "Aitta's admin's address ($t/aadmi
 mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
 printf '{"author": "tester", "name": "pk", "version": "1.0.0",
-	"engine_api": 1, "license_code": "MIT", "license_media": "CC0-1.0",
+	"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "an ntfy check"}\n' > "$t/app/meta.json"
 zip=$("$b" aitta pack "$t/app" "$t/akey" "$t/out" 2>/dev/null) || fail "pack"
 "$b" aitta publish "$zip" 127.0.0.1:$AP > "$t/publish.log" 2>&1
 grep -q "listed: tester/pk" "$t/publish.log" || fail "publish ($t/publish.log)"
 curl -s -X POST -d '{"release":"tester/pk/1.0.0","reason":"broken","text":"zzsecrettext"}' \
-	"http://127.0.0.1:$AP/api/aitta/report" | grep -q '"ok":true' || fail "the report"
+	"http://127.0.0.1:$AP/api/v1/aitta/report" | grep -q '"ok":true' || fail "the report"
 for _ in $(seq 20); do [ -n "$(posts /aitta)" ] && break; sleep 0.5; done
 [ "$(posts /aitta)" = "Aitta: a new report, 1 open" ] || fail "Aitta's push: '$(posts /aitta)'"
 echo "PASS: reports pushed to the moderators' ntfy topics, batched, without content; the login's question"

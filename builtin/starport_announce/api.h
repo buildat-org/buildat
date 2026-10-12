@@ -52,9 +52,7 @@ namespace starport_announce
 	inline bool access(interface::Server *server,
 			std::function<void(starport_announce::Interface*)> cb)
 	{
-		if(!server->has_module("starport_announce"))
-			return false;
-		return server->access_module("starport_announce",
+		return server->access_module_optional("starport_announce",
 				[&](interface::Module *module){
 			cb((starport_announce::Interface*)module->check_interface());
 		});

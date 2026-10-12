@@ -2,7 +2,7 @@
 # tier: full
 # cost: 60s (2026-10-07)
 # covers: apps/starport/main/main.cpp apps/hearth/main/main.cpp builtin/starport_announce/starport_announce.cpp builtin/network/network.cpp extensions/launch_menu/screens.lua src/client/app.cpp
-# [PLAY_LINKS]: a Starport with a play_url hands it out in /api/list and
+# [PLAY_LINKS]: a Starport with a play_url hands it out in /api/v1/list and
 # in its answer to an announce; the listed server then lets that page's
 # WebSocket in, and no other page's. A client given BUILDAT_JOIN (the
 # play page's ?server=) joins a server a Starport lists, not one it does
@@ -47,9 +47,9 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"p
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
-curl -s -m 10 "localhost:$SP/api/list" | grep -q "\"play\":\"$PLAY\"" ||
-	fail "/api/list has no play ($tmp/admin.log)"
-echo "ok: /api/list carries the play page"
+curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"play\":\"$PLAY\"" ||
+	fail "/api/v1/list has no play ($tmp/admin.log)"
+echo "ok: /api/v1/list carries the play page"
 
 # A Hearth listed there
 mkdir -p "$tmp/he/apps/hearth"
@@ -73,7 +73,7 @@ BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS="{\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin2.log" 2>&1
-curl -s -m 10 "localhost:$SP/api/list" | grep -q "Linked hearth" ||
+curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "Linked hearth" ||
 	fail "the claim ($tmp/admin2.log)"
 ws() { # origin -> the status line
 	curl -s -i -m 3 -H "Connection: Upgrade" -H "Upgrade: websocket" \
@@ -124,13 +124,13 @@ done
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_REQS="$reqs" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin3.log" 2>&1
-l=$(curl -s -m 10 "localhost:$SP/api/list")
+l=$(curl -s -m 10 "localhost:$SP/api/v1/list")
 grep -q '"package":"someone/some_app"' <<< "$l" || fail "the app's package not listed: $l"
 grep -q '"game":"contentdb:someone/tgame"' <<< "$l" || fail "the world's game not listed: $l"
 echo "ok: an app's package and a world's game listed"
-mkdir -p "$tmp/fa/api/aitta"
+mkdir -p "$tmp/fa/api/v1/aitta"
 echo '{"ok":true,"releases":[{"author":"someone","name":"some_app","version":"1.0","key":"abc","home_hearth":""}]}' \
-	> "$tmp/fa/api/aitta/list"
+	> "$tmp/fa/api/v1/aitta/list"
 python3 -m http.server -b 127.0.0.1 -d "$tmp/fa" $FA > "$tmp/fa.log" 2>&1 &
 pids+=($!)
 

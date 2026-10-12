@@ -1,4 +1,5 @@
 {
+	"engine_api": 2,
 	"kind": "world",
 	"client_main": "init.lua",
 	"dependencies": [
