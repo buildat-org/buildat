@@ -828,6 +828,15 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		return up_<VoxelVolume>();
 	};
 
+	// A saved format is read from the save as it is: a plane past what a
+	// VoxelSample holds would index the arrays below out of bounds
+	ss_ fmt_why;
+	if(!from_format.validate(&fmt_why))
+		return fail("the format a saved chunk is tagged with is not a valid "
+				"one: "+fmt_why);
+	if(!to_format.validate(&fmt_why))
+		return fail("this world's format is not valid: "+fmt_why);
+
 	const sv_<VoxelPlane> &fp = from.planes();
 	const sv_<VoxelPlane> &tp = to_format.planes;
 	if(fp != from_format.planes)

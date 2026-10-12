@@ -1017,6 +1017,25 @@ bool voxel_format_self_test()
 		assert(f.param.get(word) == 0x5e);
 	}
 
+	// [SECURITY_RUN_5] A saved format that does not validate is refused by
+	// migrate_volume(), not read past a VoxelSample's planes: a role on
+	// plane 200, and a plane named at index 9 of ten
+	{
+		const VoxelFormat to = VoxelFormat::default_cut();
+		const pv::Region r(pv::Vector3DInt32(0, 0, 0), pv::Vector3DInt32(1, 1, 1));
+		VoxelFormat a = to;
+		a.id = VoxelField{200, 0, 21};
+		VoxelFormat b;
+		b.planes.push_back(VoxelPlane{"", 32});
+		for(int i = 1; i < 10; i++)
+			b.planes.push_back(VoxelPlane{"p"+itos(i), 8});
+		VoxelFormat to_b = to;
+		to_b.planes.push_back(VoxelPlane{"p9", 8});
+		ss_ why;
+		assert(!migrate_volume(VoxelVolume(r, a.planes), a, to, &why));
+		assert(!migrate_volume(VoxelVolume(r, b.planes), b, to_b, &why));
+	}
+
 	return true;
 }
 
