@@ -179,10 +179,31 @@ player's start ([UI_UAF] in the master plan).
 
 Network protocol
 ----------------
-(Type, length, data) tuples on TCP, one ordered stream per peer. A
-name->type registry gives packet names their numeric types; types 0...99 are
-reserved for initialization. Core uses cereal's portable binary
-serialization, except for low-level packet streaming. A queue per peer with
+(Type, flags, length, data) tuples on TCP, one ordered stream per peer: a
+packet is [u16 type][u8 flags][u32 length], little endian, then its data
+(src/impl/packet_stream.cpp). No flag is defined yet; a reader refuses one
+it does not know. A name->type registry gives packet names their numeric
+types, each defined on the wire (core:define_packet_type, type 0) before
+its first packet; types 0...99 are reserved: 1 is core:fragment, 2
+core:hello.
+
+**The hello** (src/interface/protocol.h): the first packet each way is
+core:hello -- the protocol range, the engine version, the engine API and
+the feature names. A server and a client play together when their protocol
+ranges overlap; otherwise the server says network:goodbye with the reason,
+which the client shows, and a 0.6 client, whose framing has no flags byte,
+is told in its own. **One protocol number per minor release** (0.7 is 1):
+a patch release only adds, behind a feature name that served Lua asks for
+with buildat.has(name); a minor may raise the minimum. The number covers
+everything on the wire, Magic's replicated attributes included.
+
+**Records**: a cereal record is its major and minor version, then its
+fields as one byte string (interface::Record, src/interface/record.h). A
+newer minor only adds fields at the end, which an older reader skips;
+another major is refused.
+
+Core uses cereal's portable binary serialization, except for low-level
+packet streaming. A queue per peer with
 one send policy is what exists; channels with a policy each, and the
 transport after TCP (ENet with a Noise handshake), are designed, not built. A peer that sends nothing for 60 s is dropped,
 so a client with nothing to say sends network:keepalive. A game on the LAN

@@ -48,6 +48,10 @@ namespace interface
 			auto it = m_types.find(name);
 			if(it != m_types.end())
 				return it->second;
+			// The wire has 16 bits for it ([COMPAT_BREAK_07] 8f): past them
+			// the number wrapped onto a type already in use
+			if(m_next_type > 0xffff)
+				throw Exception("Out of packet types at "+name);
 			PacketType type = m_next_type++;
 			m_types[name] = type;
 			m_names[type] = name;
@@ -122,11 +126,19 @@ namespace interface
 		};
 		sm_<uint32_t, Fragments> m_incoming_fragments;
 
+		// [u16 type][u8 flags][u32 size], then the payload. No flag is
+		// defined; a reader refuses one it does not know.
+		static const size_t HEADER_BYTES = 7;
+
+		// Types 0-2 are known to both ends without a definition; core:hello
+		// is the first packet each way (interface/protocol.h)
 		PacketStream(){
 			m_outgoing_types.set(0, "core:define_packet_type");
 			m_incoming_types.set(0, "core:define_packet_type");
 			m_outgoing_types.set(1, "core:fragment");
 			m_incoming_types.set(1, "core:fragment");
+			m_outgoing_types.set(2, "core:hello");
+			m_incoming_types.set(2, "core:hello");
 		}
 
 		// budget_us: stop after a packet whose handling took the total
@@ -156,12 +168,6 @@ namespace interface
 				std::function<void(ss_ &&packet_data, bool droppable)> cb,
 				bool droppable = true);
 
-		// Only the definition of a type, sent now rather than before its
-		// first packet: the native client says this first on connecting,
-		// which tells the server's network module that it is not a
-		// browser without the quiet wait ([WEB_CLIENT]).
-		void define(const ss_ &name,
-				std::function<void(ss_ &&packet_data, bool droppable)> cb);
 
 	private:
 		void send_new_types(

@@ -40,11 +40,11 @@ with open(out_path, "wb") as out:
                 break
             up.sendall(d)
             buf += d
-            while len(buf) >= 6:
-                t, size = struct.unpack("<HI", buf[:6])
-                if len(buf) < 6 + size:
+            while len(buf) >= 7:
+                t, flags, size = struct.unpack("<HBI", buf[:7])
+                if len(buf) < 7 + size:
                     break
-                data, buf = buf[6:6 + size], buf[6 + size:]
+                data, buf = buf[7:7 + size], buf[7 + size:]
                 if t == 0:
                     # A definition: the type number and its name
                     i, nl = struct.unpack("<HI", data[:6])

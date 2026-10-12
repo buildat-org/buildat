@@ -12,6 +12,7 @@
 #include "interface/event.h"
 #include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
+#include "interface/protocol.h"
 #include "interface/thread.h"
 #include "interface/os.h"
 #include "interface/select_handler.h"
@@ -243,10 +244,23 @@ struct Peer
 	bool api_waiting = false;
 	// disconnect()'s: dropped by then even if the peer does not read
 	int64_t close_by_us = 0;
+	// A refused peer is kept open this long after its goodbye: a 0.6
+	// client that reads the goodbye and the end of the stream in one go
+	// takes the end first and says only that the server closed it, and it
+	// first reads once its window is up, seconds after connecting
+	int64_t linger_until_us = 0;
+	// [COMPAT_BREAK_07] 8a: a game peer is the game's once its core:hello
+	// has come and plays with this end's
+	bool hello_seen = false;
+	// This end's, said once the peer's first byte has come: an older
+	// client is told why it cannot play in its own framing instead
+	bool hello_sent = false;
 
 	bool game() const {
 		return kind == Kind::Native || kind == Kind::WebSocket;
 	}
+	// A game peer the game has heard of
+	bool playing() const { return game() && hello_seen; }
 
 	// What has been handed to this peer and has not gone down the socket
 	// yet, because the socket does not block any more: a peer that is not
@@ -672,7 +686,7 @@ struct Module: public interface::Module, public network::Interface
 				(reason.empty() ? ss_() : ": "+reason) :
 				"0The server is shutting down";
 		for(auto &pair : m_peers){
-			if(pair.second.game())
+			if(pair.second.game() && pair.second.hello_sent)
 				send_u(pair.second, "network:goodbye", data);
 		}
 		// simplified: up to a second for a peer that is behind to take it;
@@ -730,7 +744,7 @@ struct Module: public interface::Module, public network::Interface
 			return;
 		log_i(MODULE, "Notice to every client: %s", cs(text));
 		for(auto &pair : m_peers){
-			if(pair.second.game())
+			if(pair.second.playing())
 				send_u(pair.second, "network:notice", text);
 		}
 	}
@@ -1025,6 +1039,8 @@ struct Module: public interface::Module, public network::Interface
 			if(std::find(websocket_peers.begin(), websocket_peers.end(),
 					peer_id) != websocket_peers.end())
 				m_peers[peer_id].kind = Peer::Kind::WebSocket;
+			m_peers[peer_id].hello_seen = true;
+			m_peers[peer_id].hello_sent = true;
 		}
 	}
 
@@ -1199,13 +1215,71 @@ struct Module: public interface::Module, public network::Interface
 		peer.kind = Peer::Kind::Native;
 		peer.socket_buffer.append(peer.http_request);
 		peer.http_request.clear();
-		emit_connected(peer);
 		input_packets(peer);
 	}
 
+	// The peer's core:hello, its first packet: the game hears of the peer
+	// if the two play together, and otherwise the peer is told why not
+	void take_hello(Peer &peer, const ss_ &data)
+	{
+		ss_ refusal;
+		try {
+			const interface::Hello h = interface::hello_of(data);
+			log_v(MODULE, "Peer %zu: Buildat %s, protocol %u-%u", peer.id,
+					cs(h.version), h.protocol_min, h.protocol_max);
+			refusal = interface::hello_refusal(h, "client");
+		} catch(interface::RecordError &e){
+			refusal = e.what();
+		}
+		if(!refusal.empty()){
+			log_i(MODULE, "Peer %zu refused: %s", peer.id, cs(refusal));
+			send_u(peer, "network:goodbye", "0"+refusal);
+			peer.closing = true;
+			peer.linger_until_us = interface::os::time_us() + 10000000;
+			return;
+		}
+		peer.hello_seen = true;
+		emit_connected(peer);
+	}
+
+	// **A client from before the hello** (0.6): its first packet is a
+	// core:define_packet_type in the framing without the flags byte. It is
+	// told why in that framing -- the definition of network:goodbye, then
+	// it -- which every 0.6 client since [SERVE_UPDATE_SMOOTH] shows.
+	void refuse_old_client(Peer &peer)
+	{
+		auto packet = [](unsigned type, const ss_ &data){
+			ss_ p;
+			p += (char)(type & 0xff);
+			p += (char)(type>>8 & 0xff);
+			for(int i = 0; i < 4; i++)
+				p += (char)(data.size()>>(8 * i) & 0xff);
+			return p + data;
+		};
+		const ss_ name = "network:goodbye";
+		ss_ def;
+		def += (char)100;
+		def += (char)0;
+		for(int i = 0; i < 4; i++)
+			def += (char)(name.size()>>(8 * i) & 0xff);
+		def += name;
+		const ss_ out = packet(0, def) + packet(100, ss_("0")+
+				"The server runs Buildat "+BUILDAT_VERSION+", newer than this "
+				"client plays with: update Buildat to join it");
+		log_i(MODULE, "Peer %zu: a client from before 0.7; refused",
+				peer.id);
+		peer.enqueue("network:goodbye", peer.kind == Peer::Kind::WebSocket ?
+				web::frame(2, out) : ss_(out), false, false, true);
+		flush_peer(peer);
+		peer.socket_buffer.clear();
+		peer.closing = true;
+		peer.linger_until_us = interface::os::time_us() + 10000000;
+	}
+
 	// Whether the peer is to be kept. The native protocol's first bytes are
-	// a packet's type, and the first packet is core:define_packet_type,
-	// type 0: they never read as "GET " (which as a type is 0x4547).
+	// a packet's type, and the first packet is core:hello, type 2 (before
+	// 0.7 core:define_packet_type, type 0): they never read as "GET "
+	// (which as a type is 0x4547).
 	bool sniff(Peer &peer)
 	{
 		// "POST " as well, for an app's API ([STARPORT]): its first byte is
@@ -1361,7 +1435,6 @@ struct Module: public interface::Module, public network::Interface
 				return deframe(peer);
 			}
 			peer.kind = Peer::Kind::WebSocket;
-			emit_connected(peer);
 			return deframe(peer);
 		}
 
@@ -1594,9 +1667,30 @@ struct Module: public interface::Module, public network::Interface
 
 	void input_packets(Peer &peer)
 	{
+		if(!peer.hello_sent){
+			if(peer.socket_buffer.empty())
+				return;
+			peer.hello_sent = true;
+			// Type 0's first byte, where a hello's is 2
+			if(peer.socket_buffer.begin()[0] == 0){
+				refuse_old_client(peer);
+				return;
+			}
+			send_u(peer, "core:hello",
+					interface::hello_data(interface::Hello::own()));
+		}
 		try {
 			peer.packet_stream.input(peer.socket_buffer,
 			[&](const ss_ &name, const ss_ &data){
+				if(peer.closing)
+					return;
+				if(!peer.hello_seen){
+					if(name != "core:hello")
+						throw interface::UnknownPacketReceived(
+								name+" before a hello");
+					take_hello(peer, data);
+					return;
+				}
 				if(name == "network:backlog"){
 					peer.client_backlog = data.size() <= 10 &&
 							data.find_first_not_of("0123456789") == ss_::npos ?
@@ -1711,7 +1805,8 @@ struct Module: public interface::Module, public network::Interface
 		}
 		if(keep)
 			flush_peer(peer);
-		if(!keep || (peer.closing && peer.out_pending() == 0)){
+		if(!keep || (peer.closing && peer.out_pending() == 0 &&
+				interface::os::time_us() >= peer.linger_until_us)){
 			if(!keep)
 				log_i(MODULE, "Peer %zu from %s: bad request; dropping it",
 						peer.id, cs(peer.socket->get_remote_address()));
@@ -1782,7 +1877,7 @@ struct Module: public interface::Module, public network::Interface
 				silent.push_back(peer.id);
 				continue;
 			}
-			if(peer.game() && !peer.closing && (!peer.keepalive_sent ||
+			if(peer.playing() && !peer.closing && (!peer.keepalive_sent ||
 					now - peer.last_send_us >= KEEPALIVE_US)){
 				peer.keepalive_sent = true;
 				send_u(peer, "network:keepalive", "");
@@ -1811,7 +1906,8 @@ struct Module: public interface::Module, public network::Interface
 			Peer &peer = pair.second;
 			const int64_t now = interface::os::time_us();
 			flush_peer(peer);
-			if(peer.closing && (peer.out_pending() == 0 ||
+			if(peer.closing && ((peer.out_pending() == 0 &&
+					now >= peer.linger_until_us) ||
 					(peer.close_by_us != 0 && now >= peer.close_by_us))){
 				to_drop.push_back(peer.id);
 				continue;
@@ -1853,7 +1949,8 @@ struct Module: public interface::Module, public network::Interface
 		if(it == m_peers.end())
 			return;
 		Peer &peer = it->second;
-		if(peer.game() || peer.kind == Peer::Kind::RawWebSocket){
+		// The game heard of a game peer only once its hello came
+		if(peer.playing() || peer.kind == Peer::Kind::RawWebSocket){
 			PeerInfo pinfo;
 			pinfo.id = peer.id;
 			pinfo.address = peer.address();
@@ -1920,7 +2017,7 @@ struct Module: public interface::Module, public network::Interface
 	{
 		// Grab Peer (which contains socket)
 		auto it = m_peers.find(recipient);
-		if(it == m_peers.end() || !it->second.game()){
+		if(it == m_peers.end() || !it->second.playing()){
 			log_w(MODULE, "network::send(): Peer %i doesn't exist",
 					recipient);
 			return;
@@ -2108,7 +2205,7 @@ struct Module: public interface::Module, public network::Interface
 			int told = 0;
 			for(auto &pair : m_peers){
 				Peer &peer = pair.second;
-				if(peer.socket->fd() < 0 && peer.game() &&
+				if(peer.socket->fd() < 0 && peer.playing() &&
 						peer.socket->get_remote_address() == "127.0.0.1"){
 					send_u(peer, "core:lan_relay", address+" "+port);
 					told++;
@@ -2276,7 +2373,7 @@ struct Module: public interface::Module, public network::Interface
 		sv_<PeerInfo::Id> result;
 		for(auto &pair : m_peers){
 			Peer &peer = pair.second;
-			if(peer.game())
+			if(peer.playing())
 				result.push_back(peer.id);
 		}
 		return result;

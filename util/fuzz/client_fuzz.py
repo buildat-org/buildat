@@ -27,8 +27,15 @@ NAMES = ["core:announce_files", "core:file_contents", "core:run_script",
         "replicate:node_delta_update", "replicate:remove_component",
         "replicate:remove_node"]
 
+# [u16 type][u8 flags][u32 size]; the first packet each way is core:hello
 def packet(t, data):
-    return struct.pack("<HI", t, len(data)) + data
+    return struct.pack("<HBI", t, 0, len(data)) + data
+
+def hello():
+    v = b"0.7.0"
+    body = b"\1" + struct.pack("<IIQ", 1, 1, len(v)) + v + \
+            struct.pack("<IQ", 2, 0)
+    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
 
 def u64(n):
     return struct.pack("<Q", n)
@@ -107,6 +114,7 @@ while True:
     c.setblocking(False)
     types, nxt = {}, 100
     end = time.time() + seconds
+    c.sendall(hello())
     try:
         while time.time() < end:
             try:

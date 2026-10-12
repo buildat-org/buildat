@@ -31,7 +31,13 @@ buildat.Logger(module_name) -> object
 	:verbose(message)
 	:debug(message)
 
-buildat.version -> string, the client's version and hash
+buildat.version() -> the client's version, its git hash
+buildat.api -> the engine API this client is (an app's meta.json
+  "engine_api")
+buildat.has(name) -> bool
+- Whether this client has a protocol feature a patch release added
+  (src/interface/protocol.h; doc/architecture.txt, the hello). Served code
+  asks this rather than testing for a function.
 
 buildat.get_time_us() -> microseconds, a monotonic clock
 buildat.get_local_time() -> day of the year (1..366), hour, minute, second

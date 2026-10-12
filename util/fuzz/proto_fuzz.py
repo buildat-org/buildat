@@ -49,8 +49,15 @@ if os.environ.get("CORPUS"):
             seen.add(name)
             firsts.append((name, data))
 
+# [u16 type][u8 flags][u32 size]; the first packet each way is core:hello
 def packet(t, data):
-    return struct.pack("<HI", t, len(data)) + data
+    return struct.pack("<HBI", t, 0, len(data)) + data
+
+def hello():
+    v = b"0.7.0"
+    body = b"\1" + struct.pack("<IIQ", 1, 1, len(v)) + v + \
+            struct.pack("<IQ", 2, 0)
+    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
 
 def define(t, name):
     n = name.encode()
@@ -189,6 +196,7 @@ class Conn:
         self.s.setblocking(False)
         self.types = {}
         self.next = 100
+        self.s.sendall(hello())
         if words:
             # A local peer's login takes any new name and no password
             self.send("accounts:login", bytes([1]) +

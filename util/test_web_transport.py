@@ -2,7 +2,7 @@
 # Checks a running server's one port for HTTP, WebSocket and the native
 # protocol ([WEB_CLIENT]). Usage: util/test_web_transport.py host:port
 # The web directory needs index.html for the 200 check.
-import asyncio, socket, sys, urllib.error, urllib.request
+import asyncio, socket, struct, sys, urllib.error, urllib.request
 import websockets
 
 host, port = sys.argv[1].rsplit(":", 1)
@@ -14,11 +14,20 @@ def status(path):
     except urllib.error.HTTPError as e:
         return e.code
 
-# A packet header is type (u16 le) and size (u32 le); the server's first
-# packet on connect is core:define_packet_type, type 0
+# A packet header is type (u16 le), flags (u8) and size (u32 le); the first
+# packet each way is core:hello, type 2, a record (interface/protocol.h)
 def first_type(data):
-    assert len(data) >= 6, data
+    assert len(data) >= 7, data
     return data[0] | data[1] << 8
+
+def packet(t, data):
+    return struct.pack("<HBI", t, 0, len(data)) + data
+
+def hello(pmin=1, pmax=1):
+    v = b"0.7.0"
+    body = b"\1" + struct.pack("<IIQ", pmin, pmax, len(v)) + v + \
+            struct.pack("<IQ", 2, 0)
+    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
 
 assert status("/index.html") == 200, "index.html"
 assert status("/?x=1") == 200, "/ with a query"
@@ -45,13 +54,14 @@ async def ws():
     async with websockets.connect(f"ws://{host}:{port}/",
             subprotocols=["binary"], max_size=None) as c:
         assert c.subprotocol == "binary", c.subprotocol
+        await c.send(hello())
         data = await asyncio.wait_for(c.recv(), 5)
-        assert isinstance(data, bytes) and first_type(data) == 0, data[:16]
+        assert isinstance(data, bytes) and first_type(data) == 2, data[:16]
         # A core:define_packet_type over 64 KiB (a 64 bit frame length),
         # sent as a message of three frames; harmless to the game
         name = b"test:" + b"x" * 70000
         body = bytes([200, 0]) + len(name).to_bytes(4, "little") + name
-        pkt = bytes([0, 0]) + len(body).to_bytes(4, "little") + body
+        pkt = packet(0, body)
         await c.send([pkt[:3], pkt[3:10], pkt[10:]])
         await asyncio.wait_for(await c.ping(), 5)
         print("websocket ok:", len(data), "bytes, pong")
@@ -75,12 +85,41 @@ assert data.startswith(b"HTTP/1.1 200"), data
 s.close()
 print("quiet then GET ok")
 
-# A native client speaks first, with a packet type definition
+# A native client speaks first, with its hello, and is answered with one
 s = socket.create_connection((host, int(port)), timeout=5)
-name = b"test:native"
-body = bytes([201, 0]) + len(name).to_bytes(4, "little") + name
-s.sendall(bytes([0, 0]) + len(body).to_bytes(4, "little") + body)
+s.sendall(hello())
 data = s.recv(65536)
-assert first_type(data) == 0, data[:16]
+assert first_type(data) == 2, data[:16]
 s.close()
 print("native ok:", len(data), "bytes")
+
+# A client of another protocol is told why, in a network:goodbye
+s = socket.create_connection((host, int(port)), timeout=5)
+s.sendall(hello(9, 9))
+data = b""
+while True:
+    d = s.recv(65536)
+    if not d:
+        break
+    data += d
+assert b"network:goodbye" in data and b"newer than this one" in data, data
+s.close()
+print("another protocol refused")
+
+# A 0.6 client, whose first packet is a definition in the framing before
+# the flags byte, is told why in that framing
+s = socket.create_connection((host, int(port)), timeout=5)
+name = b"core:request_files"
+body = bytes([100, 0]) + len(name).to_bytes(4, "little") + name
+s.sendall(bytes([0, 0]) + len(body).to_bytes(4, "little") + body)
+data = b""
+while True:
+    d = s.recv(65536)
+    if not d:
+        break
+    data += d
+assert data[:2] == bytes([0, 0]) and b"network:goodbye" in data, data[:40]
+n = 6 + int.from_bytes(data[2:6], "little")
+assert data[n:n + 2] == bytes([100, 0]) and b"update Buildat" in data[n:], data
+s.close()
+print("a 0.6 client refused in its own framing")

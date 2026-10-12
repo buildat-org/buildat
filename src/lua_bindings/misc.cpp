@@ -5,6 +5,7 @@
 #include "core/log.h"
 #include "core/version.h"
 #include "interface/fs.h"
+#include "interface/protocol.h"
 #include <c55/os.h>
 #define MODULE "lua_bindings"
 
@@ -123,6 +124,19 @@ static int l_version(lua_State *L)
 	return 2;
 }
 
+// protocol() -> the engine API, and the protocol's feature names as a set
+// ([COMPAT_BREAK_07] 8a): served Lua's buildat.api and buildat.has()
+static int l_protocol(lua_State *L)
+{
+	lua_pushinteger(L, interface::aitta::ENGINE_API);
+	lua_newtable(L);
+	for(const ss_ &name : interface::protocol_features()){
+		lua_pushboolean(L, 1);
+		lua_setfield(L, -2, name.c_str());
+	}
+	return 2;
+}
+
 void init_misc(lua_State *L)
 {
 #define DEF_BUILDAT_FUNC(name){ \
@@ -136,6 +150,7 @@ void init_misc(lua_State *L)
 	DEF_BUILDAT_FUNC(get_time_us)
 	DEF_BUILDAT_FUNC(get_local_time)
 	DEF_BUILDAT_FUNC(version)
+	DEF_BUILDAT_FUNC(protocol)
 }
 
 } // namespace lua_bindingss

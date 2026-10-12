@@ -37,6 +37,13 @@ buildat.local_server_log_tail = __buildat_local_server_log_tail
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
 buildat.version           = __buildat_version
+-- [COMPAT_BREAK_07] 8a: the engine API, and has(name) for what a patch
+-- release added to the protocol behind a name (interface/protocol.h)
+local protocol_features
+buildat.api, protocol_features = __buildat_protocol()
+function buildat.has(name)
+	return protocol_features[name] == true
+end
 buildat.sha1              = __buildat_sha1
 buildat.sha256            = __buildat_sha256
 buildat.qr_code           = __buildat_qr_code
@@ -2191,6 +2198,8 @@ buildat.safe.font_mono     = buildat.font_mono
 buildat.safe.get_time_us   = __buildat_get_time_us
 buildat.safe.get_local_time = __buildat_get_local_time
 buildat.safe.version       = __buildat_version
+buildat.safe.api           = buildat.api
+buildat.safe.has           = buildat.has
 buildat.safe.sha1          = __buildat_sha1
 buildat.safe.sha256        = __buildat_sha256
 -- qr_code(text) -> the QR code's modules as a string of "0" and "1", row

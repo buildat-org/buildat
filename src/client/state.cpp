@@ -8,6 +8,7 @@
 #include "interface/tcpsocket.h"
 #include "interface/address.h"
 #include "interface/packet_stream.h"
+#include "interface/protocol.h"
 #include "interface/sha1.h"
 #include "interface/fs.h"
 #include "interface/os.h"
@@ -164,6 +165,8 @@ struct CState: public State
 	// [SERVE_UPDATE_SMOOTH] 4: the server's network:goodbye, said in place
 	// of the connection's end: "1" when it restarts, then why
 	ss_ m_goodbye;
+	// [COMPAT_BREAK_07] 8a: the server's core:hello, its first packet
+	bool m_hello_seen = false;
 	// **A connection that died without closing** (user, 2026-09-30: the
 	// web client froze, saying nothing): a server that sends
 	// network:keepalive to an idle peer is heard from every few seconds,
@@ -392,7 +395,12 @@ struct CState: public State
 			return;
 		m_disconnected = true;
 		const bool restarting = !m_goodbye.empty() && m_goodbye[0] == '1';
-		const ss_ why = m_goodbye.empty() ? reason : m_goodbye.substr(1);
+		// A server from before the hello reads this client's as a packet it
+		// does not know, and drops it, or says its own first, which this
+		// cannot read
+		const ss_ why = !m_goodbye.empty() ? m_goodbye.substr(1) :
+				m_hello_seen ? reason : "The server did not say hello ("+
+				reason+"): it may run a Buildat older than 0.7";
 		log_w(MODULE, "Disconnected from server: %s", cs(why));
 		if(m_app)
 			m_app->lost_connection(why, restarting);
@@ -428,14 +436,11 @@ struct CState: public State
 			m_connected = true;
 			// Speak first, so that the server's network module knows this
 			// for a native client at once instead of after its quiet wait
-			// for a browser's request ([WEB_CLIENT]). The definition of the
-			// client's first packet is what it would send anyway. On the
+			// for a browser's request ([WEB_CLIENT]): the hello. On the
 			// connect worker this is safe for the reason m_socket is: the
 			// main thread keeps off until the result is stored.
-			m_packet_stream.define("core:request_files",
-					[&](const ss_ &packet_data, bool droppable){
-				send_raw(packet_data);
-			});
+			send_packet("core:hello",
+					interface::hello_data(interface::Hello::own()));
 		} else {
 			log_i(MODULE, "client::State: Connect failed (%s:%s)",
 					cs(address), cs(port));
@@ -764,6 +769,8 @@ struct CState: public State
 			return false;
 		}
 		if(r == 0){
+			// What came before the end first: a refusal's goodbye
+			handle_socket_buffer();
 			lost_connection("the server closed the connection");
 			return false;
 		}
@@ -793,6 +800,21 @@ struct CState: public State
 		try {
 			m_packet_stream.input(m_socket_buffer,
 			[&](const ss_ &name, const ss_ &data){
+				if(!m_hello_seen){
+					// The server's hello first, or it is not one this plays
+					// with; the goodbye it sends after says why
+					if(name != "core:hello")
+						throw interface::UnknownPacketReceived(
+								name+" before a hello");
+					const interface::Hello h = interface::hello_of(data);
+					m_hello_seen = true;
+					log_i(MODULE, "The server: Buildat %s, protocol %u-%u",
+							cs(h.version), h.protocol_min, h.protocol_max);
+					const ss_ refusal = interface::hello_refusal(h, "server");
+					if(!refusal.empty())
+						throw interface::RecordError(refusal);
+					return;
+				}
 				m_parsed.emplace_back(name, data);
 				m_parsed_bytes += data.size();
 			});
@@ -800,6 +822,10 @@ struct CState: public State
 			m_socket_buffer.clear();
 			lost_connection(ss_()+"the server sent something this cannot "
 					"read: "+e.what());
+			return;
+		} catch(interface::RecordError &e){
+			m_socket_buffer.clear();
+			lost_connection(e.what());
 			return;
 		}
 		auto dispatch = [&](std::pair<ss_, ss_> &p){

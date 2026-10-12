@@ -25,16 +25,17 @@ static void self_check();
 bool PacketStream::in_flight(const InputBuffer &socket_buffer, ss_ *name,
 		size_t *have, size_t *size)
 {
-	if(socket_buffer.size() >= 6){
+	if(socket_buffer.size() >= HEADER_BYTES){
 		const unsigned char *b = (const unsigned char*)socket_buffer.begin();
 		const size_t type = b[0] | b[1]<<8;
-		const size_t n = b[2] | b[3]<<8 | b[4]<<16 | (size_t)b[5]<<24;
+		const size_t n = b[3] | b[4]<<8 | b[5]<<16 | (size_t)b[6]<<24;
 		auto it = m_incoming_types.m_names.find(type);
 		const ss_ tname = it != m_incoming_types.m_names.end() ? it->second : "";
 		// A fragment's own 64 kB says little: its sequence is below
-		if(socket_buffer.size() < 6 + n && tname != "core:fragment"){
+		if(socket_buffer.size() < HEADER_BYTES + n &&
+				tname != "core:fragment"){
 			*name = tname;
-			*have = socket_buffer.size() - 6;
+			*have = socket_buffer.size() - HEADER_BYTES;
 			*size = n;
 			return true;
 		}
@@ -64,17 +65,25 @@ void PacketStream::input(InputBuffer &socket_buffer,
 		self_check();
 	}
 	for(;;){
-		if(socket_buffer.size() < 6)
+		if(socket_buffer.size() < HEADER_BYTES)
 			return;
 		const char *b = socket_buffer.begin();
 		size_t type =
 				(b[0] & 0xff)<<0 |
 				(b[1] & 0xff)<<8;
+		const unsigned flags = b[2] & 0xff;
 		size_t size =
-				(b[2] & 0xff)<<0 |
-				(b[3] & 0xff)<<8 |
-				(b[4] & 0xff)<<16 |
-				(size_t)(b[5] & 0xff)<<24;
+				(b[3] & 0xff)<<0 |
+				(b[4] & 0xff)<<8 |
+				(b[5] & 0xff)<<16 |
+				(size_t)(b[6] & 0xff)<<24;
+		// None is defined yet ([COMPAT_BREAK_07] 8f): one that is, is a
+		// newer peer's, and what it changes cannot be read here
+		if(flags != 0){
+			throw UnknownPacketReceived("A packet with flags "+
+					hex_of(b + 2, 1)+", which this does not know (at byte "+
+					itos((int64_t)m_input_offset)+")");
+		}
 		//log_d(MODULE, "size=%zu", size);
 		if(size > m_max_packet_bytes){
 			throw UnknownPacketReceived("A packet of "+itos((int64_t)size)+
@@ -82,17 +91,17 @@ void PacketStream::input(InputBuffer &socket_buffer,
 					" this stream takes (at byte "+
 					itos((int64_t)m_input_offset)+")");
 		}
-		if(socket_buffer.size() < 6 + size)
+		if(socket_buffer.size() < HEADER_BYTES + size)
 			return;
-		char header[6];
-		for(size_t i = 0; i < 6; i++)
+		char header[HEADER_BYTES];
+		for(size_t i = 0; i < HEADER_BYTES; i++)
 			header[i] = b[i];
 		log_d(MODULE, "Received full packet; type=%zu, "
-				"length=6+%zu", type, size);
-		ss_ data(b + 6, size);
-		socket_buffer.at += 6 + size;
+				"length=%zu+%zu", type, HEADER_BYTES, size);
+		ss_ data(b + HEADER_BYTES, size);
+		socket_buffer.at += HEADER_BYTES + size;
 		const uint64_t packet_at = m_input_offset;
-		m_input_offset += 6 + size;
+		m_input_offset += HEADER_BYTES + size;
 
 		ss_ name;
 		try {
@@ -105,7 +114,7 @@ void PacketStream::input(InputBuffer &socket_buffer,
 			// a length; a length in the megabytes is the giveaway.
 			throw UnknownPacketReceived(ss_()+e.what()+" (at byte "+
 					itos((int64_t)packet_at)+" of the stream, header "+
-					hex_of(header, 6)+", payload "+itos((int64_t)size)+
+					hex_of(header, HEADER_BYTES)+", payload "+itos((int64_t)size)+
 					" bytes: "+hex_of(data.c_str(),
 					data.size() < 16 ? data.size() : 16)+")");
 		}
@@ -136,14 +145,19 @@ void PacketStream::input(InputBuffer &socket_buffer,
 		}
 
 		if(name == "core:fragment"){
-			// [u32 id][u16 index][u16 count][u16 type][bytes]
-			if(data.size() < 10)
+			// [u32 id][u16 index][u16 count][u16 type][u8 flags][bytes]
+			if(data.size() < 11)
 				continue;
 			const unsigned char *d = (const unsigned char*)data.c_str();
 			uint32_t id = d[0] | d[1]<<8 | d[2]<<16 | (uint32_t)d[3]<<24;
 			size_t index = d[4] | d[5]<<8;
 			size_t count = d[6] | d[7]<<8;
 			PacketType ptype = d[8] | d[9]<<8;
+			if(d[10] != 0){
+				throw UnknownPacketReceived("A fragment with flags "+
+						hex_of(data.c_str() + 10, 1)+", which this does not "
+						"know");
+			}
 			if(count == 0 || index >= count)
 				continue;
 			// The name first: an unknown one throws, and must not leave an
@@ -157,14 +171,14 @@ void PacketStream::input(InputBuffer &socket_buffer,
 			}
 			if(f.count != count || !f.parts[index].empty())
 				continue;
-			f.bytes += data.size() - 10;
+			f.bytes += data.size() - 11;
 			if(f.bytes > m_max_packet_bytes){
 				m_incoming_fragments.erase(id);
 				throw UnknownPacketReceived("A fragmented "+fname+
 						" over the "+itos((int64_t)m_max_packet_bytes)+
 						" bytes this stream takes");
 			}
-			f.parts[index] = data.substr(10);
+			f.parts[index] = data.substr(11);
 			f.have++;
 			if(f.have < f.count){
 				// A sequence a sender's drop policy cut short never
@@ -194,13 +208,6 @@ void PacketStream::input(InputBuffer &socket_buffer,
 		if(budget_us > 0 && get_timeofday_us() - started_us >= budget_us)
 			return;
 	}
-}
-
-void PacketStream::define(const ss_ &name,
-		std::function<void(ss_ &&packet_data, bool droppable)> cb)
-{
-	m_outgoing_types.get(name);
-	send_new_types(cb);
 }
 
 void PacketStream::send_new_types(
@@ -261,6 +268,7 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 			frag += (char)((count>>8) & 0xff);
 			frag += (char)((type>>0) & 0xff);
 			frag += (char)((type>>8) & 0xff);
+			frag += (char)0; // flags
 			frag += data.substr(i * FRAGMENT_BYTES, FRAGMENT_BYTES);
 			output("core:fragment", frag, cb, true);
 		}
@@ -271,6 +279,7 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 	std::ostringstream os(std::ios::binary);
 	os<<(char)((type>>0) & 0xff);
 	os<<(char)((type>>8) & 0xff);
+	os<<(char)0; // flags
 	os<<(char)((data.size()>>0) & 0xff);
 	os<<(char)((data.size()>>8) & 0xff);
 	os<<(char)((data.size()>>16) & 0xff);
@@ -444,7 +453,7 @@ static void self_check()
 	// A type nobody defined: what a stream read at the wrong offset looks
 	// like, and the message has to say where rather than only which number
 	InputBuffer bad;
-	const char raw[] = {(char)200, 0, 1, 0, 0, 0, (char)0x78};
+	const char raw[] = {(char)200, 0, 0, 1, 0, 0, 0, (char)0x78};
 	bad.append(raw, sizeof raw);
 	try {
 		r.input(bad, [&](const ss_ &name, const ss_ &data){});
@@ -454,6 +463,24 @@ static void self_check()
 		if(ss_(e.what()).find("at byte") == ss_::npos)
 			throw Exception(ss_()+"packet_stream self_check: the complaint "
 					"does not say where: "+e.what());
+	}
+
+	// A flag this does not know, on a type it does: refused, not read
+	// ([COMPAT_BREAK_07] 8f)
+	{
+		PacketStream r6;
+		InputBuffer b6;
+		const char raw6[] = {2, 0, 4, 1, 0, 0, 0, (char)0x78};
+		b6.append(raw6, sizeof raw6);
+		bool refused = false;
+		try {
+			r6.input(b6, [&](const ss_&, const ss_&){});
+		} catch(UnknownPacketReceived &e){
+			refused = ss_(e.what()).find("flags") != ss_::npos;
+		}
+		if(!refused)
+			throw Exception("packet_stream self_check: an unknown flag "
+					"was not refused");
 	}
 }
 
