@@ -237,6 +237,11 @@ end
 -- replaces it by name.
 function __buildat_reset_sandbox()
 	__buildat_reset_packet_subs()
+	-- The join's loading screen, if it is still up ([JOIN_STRIPES])
+	local ui_utils = __buildat_loaded_extension("ui_utils")
+	if ui_utils then
+		pcall(ui_utils.safe.join_screen, "left")
+	end
 	for name, _ in pairs(package.loaded) do
 		if string.match(name, '^buildat/module/') then
 			package.loaded[name] = nil

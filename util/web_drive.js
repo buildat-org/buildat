@@ -56,7 +56,7 @@
 //                           phone's (Chrome only)
 //   ["watch", regex, s, ms] until a console line from here on matches, the
 //                           page as drawn taken every 500 ms: says each
-//                           #status text and each stretch over ms where
+//                           #status text (the loading stripe's while up) and each stretch over ms where
 //                           neither it nor the screen changed, and fails
 //                           after the match if there was one (Chrome only)
 // ${NAME} in a string is a --var's value. The page's console goes to the
@@ -368,11 +368,16 @@ async function chrome() {
 		},
 		viewport: (w, h) => metrics(w, h),
 		cpu: rate => c.send("Emulation.setCPUThrottlingRate", {rate}),
-		// The screen and #status, for watch
+		// The screen and #status, or the loading stripe's line while it is
+		// up ([JOIN_STRIPES]), for watch
 		look: async () => {
 			const r = await c.send("Page.captureScreenshot", {format: "png"});
 			const st = await c.send("Runtime.evaluate", {expression:
-					"(document.getElementById('status') || {}).textContent || ''",
+					"(function(){ var l = document.getElementById('load');" +
+					" if(l && l.style.display !== 'none') return" +
+					" document.getElementById('load1').textContent;" +
+					" return (document.getElementById('status') || {})" +
+					".textContent || ''; })()",
 					returnByValue: true});
 			return {png: r.data, status: st.result.value};
 		},

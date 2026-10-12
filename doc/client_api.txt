@@ -1205,6 +1205,22 @@ copy(text)
 show_notification(text, duration_s)
 - A small non-modal notice in the top right corner, gone after duration_s
   (2 seconds by default)
+load_screen() -> screen
+- The loading screen ([JOIN_STRIPES]): Buildat's dark colour and two
+  stripes, the line in amber and under it what came last, its icon and
+  name in cyan. The client opens it for a join's file download; this takes
+  the one that is up (a new one if none is), so a game's own loading goes
+  on from it with no frame between. One no game took closes when the
+  game's scripts have run. screen.line(text) sets the line;
+  screen.wait_line(what[, phase[, no_mb]]) makes one ("what -- X MB, Y
+  KB/s... n s", the seconds since the phase began, "Waiting for the
+  server..." after 10 s of nothing); screen.arrival() -> kind, name shows
+  last_arrival() (or in_flight() when nothing whole came for half a
+  second) and says it; screen.picture(data) -> w, h, or nil and why: a PNG
+  or JPEG over the dark, covering it; screen.close().
+join_screen(what, got, total)
+- The client's own: what = "files" (got of total), "starting", "done" or
+  "left".
 bind_button_menu(root, items, on_other_key) -> nav
 - Up/down/enter and hover selection over existing buttons on a uistack root;
   items are {button, action}. Returns a handle with :add(button, action) and
@@ -2577,5 +2593,5 @@ extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.skycube: new
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, keyboard_columns, keyboard_page, list_view, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

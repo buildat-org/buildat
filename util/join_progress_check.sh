@@ -8,7 +8,8 @@
 #   - the line's megabytes rise at least every 2 s while the world comes;
 #   - the server stopped (SIGSTOP) mid-join for 25 s: "Waiting for the
 #     server" within 13 s (10 s, the line once a second and the last
-#     bytes on the way), and Leave offered from 20 s;
+#     bytes on the way); no Leave since [LOADING_STRIPES]
+#     (loading_screen_check's);
 #   - the server going on: the world comes and the line goes.
 # simplified: native only; the web client reads the same state.cpp count.
 # Needs mineclone2 in the desk's games.
@@ -63,15 +64,13 @@ def at(line):
     h, m, s = re.search(r" (\d\d):(\d\d):(\d\d\.\d+) ", line).groups()
     return datetime.datetime.combine(day, datetime.time()).timestamp() + \
         int(h) * 3600 + int(m) * 60 + float(s)
-mb, waiting, leave = [], None, None
+mb, waiting = [], None
 for l in open(sys.argv[1], errors="replace"):
     m = re.search(r"load: Loading the world.* -- ([\d.]+) MB", l)
     if m and at(l) < stopped:
         mb.append((at(l), float(m.group(1))))
     if "vanilla : load: Waiting for the server" in l and waiting is None:
         waiting = at(l)
-    if "vanilla : load: Leave offered" in l and leave is None:
-        leave = at(l)
 # Rising at least every 2 s, up to the stop
 last_t, last_v = mb[0]
 for t, v in mb[1:]:
@@ -80,9 +79,8 @@ for t, v in mb[1:]:
     assert t - last_t <= 2.5, "the megabytes stood at %.1f for %.1f s" % (v, t - last_t)
 print("the megabytes rose to %.1f in %d lines" % (mb[-1][1], len(mb)))
 assert waiting and waiting - stopped <= 13, "waiting %s s after the stop" % (waiting and waiting - stopped)
-assert leave and leave - stopped >= 19, "Leave %s s after the stop" % (leave and leave - stopped)
-print("waiting %.1f s and Leave %.1f s after the stop" % (waiting - stopped, leave - stopped))
+print("waiting %.1f s after the stop" % (waiting - stopped))
 PY
 grep -aqE "settle: [0-9]+ to mesh, [1-9][0-9]* chunks in scene" "$L" ||
 	fail "no world after the server went on ($L)"
-echo "PASS: the loading line's megabytes rise while the world comes; a stopped server reads as waiting, then Leave; the world comes after"
+echo "PASS: the loading line's megabytes rise while the world comes; a stopped server reads as waiting; the world comes after"

@@ -21,6 +21,16 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 /* A login form's name for a password manager ([LOGIN_UNLOADED]) */
 #username { position: fixed; left: 0; top: 0; width: 1px; height: 1px;
 	margin: 0; padding: 0; border: 0; opacity: 0; pointer-events: none; }
+/* [JOIN_STRIPES] the page's own wait, as the client's loading screen */
+@font-face { font-family: 'Overpass Mono'; src: url(Fonts/OverpassMono-Regular.ttf); }
+#load { position: fixed; left: 0; top: 0; right: 0; bottom: 0; background: #15151a;
+	pointer-events: none; font-family: 'Overpass Mono', monospace; }
+#load div { position: absolute; left: 0; right: 0; background: #1b1b22;
+	display: flex; align-items: center; justify-content: center; white-space: pre;
+	overflow: hidden; }
+#load1 { color: #ff9e1f; }
+#load2 { color: #26d9ff; }
+#load canvas { image-rendering: pixelated; }
 #status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
 	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
 </style>
@@ -33,27 +43,117 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 <input id="username" autocomplete="username" tabindex="-1">
 <input id="password" type="password" autocomplete="off" tabindex="-1">
 </form>
-<div id="status">Loading...</div>
+<div id="load"><div id="load1"></div><div id="load2"><canvas width="16"
+	height="16"></canvas><span></span></div></div>
+<div id="status"></div>
 <script>
 (function(){
 	var status = document.getElementById('status');
 	var canvas = document.getElementById('canvas');
-	// **The start says what it is doing** ([LOAD_SHOWN]): a line that
-	// stays 2 s gets its seconds, once a second, while the page runs
-	var shown = '', shown_at = 0;
+	// **The start says what it is doing** ([LOAD_SHOWN]) **in the client's
+	// stripes** ([JOIN_STRIPES], user 2026-10-12): the line and its seconds
+	// on stripe one, what is coming on stripe two, at the places and sizes
+	// of the client's loading screen (ui_utils' load_fit()) at its
+	// automatic UI scale (app.cpp's apply_ui_scale()). The engine's first
+	// frame draws its own over the same places and these go.
+	// simplified: a UI scale the user set is in the saved files, read after
+	// these downloads; the stripes change size at the first frame then
+	var load = document.getElementById('load');
+	var load1 = document.getElementById('load1');
+	var load2 = document.getElementById('load2');
+	var load_name = load2.lastChild, glyph = load2.firstChild;
+	// The page glyph's rows, ui_utils' GLYPHS.page
+	(function(){
+		var rows = ['................', '...#######......', '...#.....##.....',
+			'...#.....#.#....', '...#.....####...', '...#........#...',
+			'...#.####...#...', '...#........#...', '...#.#####..#...',
+			'...#........#...', '...#.####...#...', '...#........#...',
+			'...#.#####..#...', '...#........#...', '...##########...',
+			'................'];
+		var g = glyph.getContext('2d');
+		g.fillStyle = '#fff';
+		for(var y = 0; y < 16; y++)
+			for(var x = 0; x < 16; x++)
+				if(rows[y][x] === '#')
+					g.fillRect(x, y, 1, 1);
+	})();
+	// The UI scale in CSS pixels: UI_REF_SHORT 1080, snapped to a whole
+	// one 8% under to 12% over; at least 1, half again for a finger, and
+	// a short side of UI_MIN_SHORT 400 kept
+	function css_scale(){
+		var short = Math.min(window.innerWidth, window.innerHeight);
+		var s = short / 1080, n = Math.floor(s + 0.5);
+		if(n >= 1 && s >= n * 0.92 && s <= n * 1.12)
+			s = n;
+		s = Math.max(s, 1);
+		if(window.matchMedia && matchMedia('(pointer: coarse)').matches)
+			s *= 1.5;
+		return Math.min(s, short / 400);
+	}
+	// A Text's line at 13 UI pixels, as the client's font face makes it
+	// (Urho3D's FontFaceFreeType): the pixels per em of 13 points at 96
+	// DPI at the device's scale, and Overpass Mono's OS/2 win ascent and
+	// descent (2316 + 756 of 2000 units) over that, in UI pixels again
+	function line_h(size, dev){
+		var ppem = Math.floor((Math.floor(size * dev * 64) * 96 / 72 + 32) / 64);
+		return Math.floor(3072 * ppem / 2000 / dev + 0.5);
+	}
+	function stripes(){
+		var k = css_scale();
+		var h = Math.floor(window.innerHeight / k), size = 13;
+		var lh = line_h(size, k * (window.devicePixelRatio || 1));
+		var h1 = lh + Math.floor(size / 2);
+		var h2 = Math.floor(h1 * 1.5);
+		var top = Math.floor(h / 2 - lh / 2) - h1;
+		var side = h2 - Math.floor(size / 2);
+		// Urho's font size is in points at 96 DPI
+		load.style.fontSize = (size * 96 / 72 * k) + 'px';
+		load1.style.top = (top * k) + 'px';
+		load1.style.height = (h1 * k) + 'px';
+		load2.style.top = ((top + h1 + lh) * k) + 'px';
+		load2.style.height = (h2 * k) + 'px';
+		load2.style.visibility = load_name.textContent ? '' : 'hidden';
+		glyph.style.width = glyph.style.height = (side * k) + 'px';
+		glyph.style.marginRight = (Math.floor(size / 2) * k) + 'px';
+	}
+	window.addEventListener('resize', stripes);
+	var shown = '', shown_at = Date.now();
 	function set_status(t){
 		// Emscripten's own empty line, when its download is done, is the
-		// engine starting: the client's first frame says so (buildatUp)
-		if(t === '' && !Module.buildatUp)
-			t = 'Starting the engine...';
-		status.textContent = shown = t;
-		shown_at = Date.now();
+		// engine starting: the client's first frame says so (buildatUp),
+		// and the client's screen is up from there
+		if(t === '' && Module.buildatUp){
+			load.style.display = 'none';
+			return;
+		}
+		// Emscripten's data download, "Downloading data... (a/b)"
+		var m = /\((\d+)\/(\d+)\)/.exec(t);
+		if(m)
+			return coming('buildat.data', +m[1], +m[2]);
+		if(t === '' || /^Running/.test(t))
+			t = 'Starting the engine';
+		if(t !== shown)
+			shown_at = Date.now();
+		shown = t.replace(/\.+$/, '');
+		tick();
 	}
-	setInterval(function(){
-		var s = Math.floor((Date.now() - shown_at) / 1000);
-		if(shown && s >= 2 && status.textContent.indexOf(shown) === 0)
-			status.textContent = shown + ' ' + s + ' s';
-	}, 1000);
+	// coming(name, have, size): stripe two; size 0 when not known
+	function coming(name, have, size){
+		load_name.textContent = name + '  ' + (have / 1e6).toFixed(1) +
+			(size ? ' of ' + (size / 1e6).toFixed(1) : '') + ' MB';
+		if(shown !== 'Loading the client'){
+			shown = 'Loading the client';
+			shown_at = Date.now();
+		}
+		tick();
+	}
+	function tick(){
+		load1.textContent = shown + '... ' +
+			Math.floor((Date.now() - shown_at) / 1000) + ' s';
+		stripes();
+	}
+	setInterval(tick, 500);
+	set_status('Loading the client');
 	var https = location.protocol === 'https:';
 	// The server that served this page; behind a reverse proxy the port is
 	// the page's, 443 or 80 when the address has none
@@ -330,6 +430,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/cache');
 			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/user');
 			Module.addRunDependency('idbfs');
+			set_status('Reading the saved files');
 			FS.syncfs(true, function(err){
 				if(err)
 					console.warn('IndexedDB read: ' + err);
@@ -394,8 +495,38 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		print: function(t){ console.log(t); },
 		printErr: function(t){ console.warn(t); },
 		setStatus: set_status,
+		// buildat.wasm read as a stream, for stripe two; the size a
+		// compressed answer has is not the file's, so then none
+		instantiateWasm: function(imports, done){
+			fetch('buildat.wasm').then(function(r){
+				if(!r.ok)
+					throw new Error('buildat.wasm: ' + r.status);
+				var size = r.headers.get('Content-Encoding') ? 0 :
+						+r.headers.get('Content-Length') || 0;
+				var reader = r.body.getReader(), parts = [], have = 0;
+				function read(){
+					return reader.read().then(function(c){
+						if(c.done)
+							return new Blob(parts).arrayBuffer();
+						parts.push(c.value);
+						have += c.value.length;
+						coming('buildat.wasm', have, size);
+						return read();
+					});
+				}
+				return read();
+			}).then(function(bytes){
+				return WebAssembly.instantiate(bytes, imports);
+			}).then(function(r){
+				done(r.instance, r.module);
+			}, function(e){
+				Module.onAbort(String(e));
+			});
+			return {};
+		},
 		onRuntimeInitialized: function(){ set_status(''); },
 		onAbort: function(what){
+			load.style.display = 'none';
 			status.textContent = 'The client stopped: ' + what +
 				'\nReload the page to start again.';
 		},
@@ -404,6 +535,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		// said it restarts ([SERVE_UPDATE_SMOOTH] 6)
 		onDisconnected: function(reason, restarting){
 			disconnected = true;
+			load.style.display = 'none';
 			// Gone while the page was away, or noticed just after it came
 			// back (a page in the background does not run): the browser's
 			// doing. Away, back() reloads it on the return.

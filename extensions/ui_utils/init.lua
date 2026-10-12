@@ -2066,5 +2066,328 @@ function M.safe.scan_ui(label, element, depth, out)
 	end
 end
 
+--
+-- The loading screen ([JOIN_STRIPES], user 2026-10-12)
+--
+-- Buildat's dark colour over the window and two stripes: the line in amber
+-- across the width, and under it, a line's height lower and 1.5 times as
+-- tall, the last thing that came, its icon and name in cyan (a file
+-- browser's entry), the pair centred. The client opens it at a join's
+-- first announce of files (__buildat_join_screen) and says what the wait
+-- is at; a game's code takes the one that is up with load_screen() and
+-- goes on with its own lines and picture, so there is no frame between
+-- the two. One nobody took closes when the game's scripts have run.
+-- **The page's stripes** (src/client/web/index.html) are at the same
+-- places and sizes: what fit() does here, its stripes() does there.
+local load = nil
+local BRAND_PAGE = {0x1b / 255, 0x1b / 255, 0x22 / 255}
+-- The glyphs, 16x16 pixel art written once under the cache: nothing a
+-- game must have, and no font has them. index.html draws the same rows.
+local GLYPHS = {
+	note = {
+		"................", "......#########.", "......#########.",
+		"......##.....##.", "......##.....##.", "......##.....##.",
+		"......##.....##.", "......##.....##.", "......##.....##.",
+		"......##.....##.", "...####...#####.", "..#####..######.",
+		"..#####..######.", "...###....####..", "................",
+		"................"},
+	cube = {
+		"................", "......#########.", ".....#.......##.",
+		"....#.......#.#.", "...#.......#..#.", "..#########...#.",
+		"..#.......#...#.", "..#.......#...#.", "..#.......#...#.",
+		"..#.......#...#.", "..#.......#..#..", "..#.......#.#...",
+		"..#.......##....", "..#########.....", "................",
+		"................"},
+	page = {
+		"................", "...#######......", "...#.....##.....",
+		"...#.....#.#....", "...#.....####...", "...#........#...",
+		"...#.####...#...", "...#........#...", "...#.#####..#...",
+		"...#........#...", "...#.####...#...", "...#........#...",
+		"...#.#####..#...", "...#........#...", "...##########...",
+		"................"},
+	globe = {
+		"................", "......####......", "....##.##.##....",
+		"...#..#..#..#...", "..#..#....#..#..", "..#..#....#..#..",
+		".##############.", ".#...#....#...#.", ".#...#....#...#.",
+		".##############.", "..#..#....#..#..", "..#..#....#..#..",
+		"...#..#..#..#...", "....##.##.##....", "......####......",
+		"................"},
+}
+local glyphs_written = false
+local function glyph(name)
+	if not glyphs_written then
+		glyphs_written = true
+		local dir = buildat.get_cache_path() .. "/ui_utils_res"
+		for n, rows in pairs(GLYPHS) do
+			local ops = {}
+			for y, row in ipairs(rows) do
+				for x0, x1 in row:gmatch("()#+()") do
+					ops[#ops + 1] = {op = "fill", color = {255, 255, 255, 255},
+							at = {x0 - 1, y - 1}, size = {x1 - x0, 1}}
+				end
+			end
+			buildat.compose_image({size = {16, 16}, ops = ops,
+					write = dir .. "/load_glyphs/" .. n .. ".png"})
+		end
+		buildat.add_resource_dir(dir)
+	end
+	return magic.cache:GetResource("Texture2D", "load_glyphs/" .. name .. ".png")
+end
+
+local function load_fit(s)
+	local w, h = magic.ui.root.width, magic.ui.root.height
+	s.screen:SetFixedSize(w, h)
+	-- The F5 info's size (user 2026-10-12), which fits a narrow window
+	local size = 13
+	if not s.font then
+		s.font = magic.cache:GetResource("Font", buildat.font_mono)
+		s.text:SetFont(s.font, size)
+		s.name:SetFont(s.font, size)
+	end
+	-- Stripe one right above the gap, which is a line's height centred on
+	-- the screen, and stripe two right below it, 1.5 times as tall
+	local lh = s.text.height > 0 and s.text.height or size
+	local h1 = lh + math.floor(size / 2)
+	local h2 = math.floor(h1 * 1.5)
+	local top = math.floor(h / 2 - lh / 2) - h1
+	s.box.visible = s.text.text ~= ""
+	s.box:SetFixedSize(w, h1)
+	s.box:SetPosition(0, top)
+	s.last:SetFixedSize(w, h2)
+	s.last:SetPosition(0, top + h1 + lh)
+	-- The icon as tall as the stripe allows; a picture kept to its
+	-- proportions in that square
+	local side = h2 - math.floor(size / 2)
+	local iw, ih = side, side
+	local tex = s.icon_tex
+	if tex and tex.width > 0 and tex.height > 0 then
+		local k = side / math.max(tex.width, tex.height)
+		iw, ih = math.floor(tex.width * k + 0.5), math.floor(tex.height * k + 0.5)
+		s.icon.imageRect = magic.IntRect(0, 0, tex.width, tex.height)
+	end
+	s.icon:SetFixedSize(iw, ih)
+	s.icon:SetPosition(math.floor((side - iw) / 2), 0)
+	s.name:SetPosition(side + math.floor(size / 2), 0)
+	s.pair:SetFixedSize(side + math.floor(size / 2) + s.name.width, h2)
+	-- **Not larger than the window** ([LOADING_PIC_FIT], user 2026-10-11):
+	-- the client's fit lowers the UI scale for an element past the root,
+	-- so the element is the root's size and its imageRect the centred
+	-- part of the picture in the root's proportions
+	local p = s.pic
+	if p then
+		local k = math.max(w / p.w, h / p.h)
+		local cw, ch = w / k, h / k
+		local x0, y0 = math.floor((p.w - cw) / 2), math.floor((p.h - ch) / 2)
+		p.el:SetFixedSize(w, h)
+		p.el.imageRect = magic.IntRect(x0, y0, x0 + math.floor(cw + 0.5),
+				y0 + math.floor(ch + 0.5))
+	end
+end
+
+local function load_open()
+	local s = {}
+	-- Under all else on the UI, so a game's chat and pause menu are over it
+	-- simplified: the scene is still rendered under the screen
+	s.screen = magic.ui.root:CreateChild("BorderImage")
+	s.screen.priority = -100
+	s.screen.color = magic.Color(0x15 / 255, 0x15 / 255, 0x1a / 255)
+	s.box = s.screen:CreateChild("BorderImage")
+	s.box.color = magic.Color(unpack(BRAND_PAGE))
+	s.box.priority = 1
+	s.text = s.box:CreateChild("Text")
+	s.text:SetAlignment(HA_CENTER, VA_CENTER)
+	s.text:SetColor(magic.Color(unpack(colors.main)))
+	s.last = s.screen:CreateChild("BorderImage")
+	s.last.color = magic.Color(unpack(BRAND_PAGE))
+	s.last.priority = 1
+	s.last.visible = false
+	s.pair = s.last:CreateChild("UIElement")
+	s.pair:SetAlignment(HA_CENTER, VA_CENTER)
+	s.icon = s.pair:CreateChild("BorderImage")
+	s.icon.verticalAlignment = VA_CENTER
+	s.name = s.pair:CreateChild("Text")
+	s.name.verticalAlignment = VA_CENTER
+	s.name:SetColor(magic.Color(unpack(colors.focus)))
+	s.update = magic.SubscribeToEvent("Update", function()
+		load_fit(s)
+	end)
+	local api = {}
+	-- line(text): stripe one
+	function api.line(text)
+		s.text:SetText(text)
+		load_fit(s)
+	end
+	-- wait_line(what[, phase[, no_mb]]) -> "what -- X MB, Y KB/s... n s":
+	-- the bytes read since the connect (unless no_mb), their rate since
+	-- the last call, and the seconds since the phase (what, unless given)
+	-- began; "Waiting for the server... n s" when nothing came for 10 s
+	-- ([JOIN_PROGRESS])
+	-- simplified: no total; the server learns a node's size only as it
+	-- sends it
+	function api.wait_line(what, phase, no_mb)
+		phase = phase or what
+		local now = buildat.get_time_us() / 1e6
+		if s.phase ~= phase then
+			s.phase, s.phase_t, s.at = phase, now, nil
+		end
+		local secs = math.floor(now - s.phase_t)
+		local got, quiet = (buildat.received or function() end)()
+		if not got then
+			return string.format("%s... %d s", what, secs)
+		end
+		-- The rate from the line before: the first would count what came
+		-- before the phase
+		local rate = s.at and now > s.at and (got - s.got) / (now - s.at)
+		s.got, s.at = got, now
+		if quiet and quiet >= 10 then
+			return string.format("Waiting for the server... %d s", quiet)
+		end
+		local mb = not no_mb and string.format("%.1f MB", got / 1e6)
+		rate = rate and string.format("%d KB/s", rate / 1000)
+		local parts = (mb and rate) and mb .. ", " .. rate or mb or rate
+		return string.format("%s%s... %d s", what,
+				parts and " -- " .. parts or "", secs)
+	end
+	-- arrival() -> kind, name: stripe two from what came last
+	-- (last_arrival()), or what is coming when nothing whole came for
+	-- half a second ([LOAD_IN_FLIGHT]); nil before anything
+	function api.arrival()
+		local a = (buildat.last_arrival or function() end)()
+		if not a then
+			return nil
+		end
+		local f = buildat.get_time_us() - a.t > 500000 and
+				buildat.in_flight and buildat.in_flight()
+		if f then
+			a = {kind = "flight", name = f.name, have = f.have, size = f.size}
+		end
+		local tex, name = nil, nil
+		if a.kind == "file" then
+			name = a.name
+			local ext = (a.name:match("%.(%w+)$") or ""):lower()
+			if ext == "png" then
+				tex = magic.cache:GetResource("Texture2D", a.name)
+			end
+			tex = tex or glyph(ext == "ogg" and "note" or
+					(ext == "obj" or ext == "b3d" or ext == "x") and "cube" or
+					"page")
+		elseif a.kind == "chunk" then
+			name = string.format("chunk %d, %d, %d", a.x, a.y, a.z)
+			tex = glyph("globe")
+		elseif a.kind == "flight" then
+			name = string.format("%s  %.1f of %.1f MB",
+					a.name ~= "" and a.name or "?", a.have / 1e6, a.size / 1e6)
+			tex = glyph("page")
+		else
+			name = a.what
+			tex = glyph("page")
+		end
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+			s.icon.texture = tex
+		end
+		-- Kept beside: the sandbox's texture getter raises on none
+		s.icon_tex = tex
+		s.name:SetText(name)
+		s.last.visible = true
+		load_fit(s)
+		return a.kind, name
+	end
+	-- picture(data) -> w, h, or nil and why: a PNG or JPEG over the dark,
+	-- scaled to cover and centred, under the stripes. Decoded once into a
+	-- texture, no file ([LOADING_PIC_DECODE]).
+	function api.picture(data)
+		local img = magic.Image:new()
+		if not magic.image_load_data(img, data, 4096) then
+			return nil, #data .. " bytes; a PNG or JPEG, 4096 a side at most"
+		end
+		local tex = magic.Texture2D:new()
+		tex:SetData(img)
+		if s.pic then
+			s.pic.el:Remove()
+		end
+		local el = s.screen:CreateChild("BorderImage")
+		el.texture = tex
+		el:SetAlignment(HA_CENTER, VA_CENTER)
+		s.pic = {el = el, w = img.width, h = img.height, tex = tex}
+		load_fit(s)
+		return img.width, img.height
+	end
+	function api.close()
+		if load ~= s then
+			return
+		end
+		load = nil
+		magic.UnsubscribeFromEvent("Update", s.update)
+		s.screen:Remove()
+		log:info("load screen: closed")
+	end
+	s.api = api
+	load_fit(s)
+	return s
+end
+
+-- load_screen() -> the loading screen up, taken over: {line, wait_line,
+-- arrival, picture, close}; a new one if none is
+function M.safe.load_screen()
+	if not load then
+		load = load_open()
+		log:info("load screen: made by the game")
+	elseif not load.taken then
+		log:info("load screen: taken over by the game")
+	end
+	load.taken = true
+	return load.api
+end
+
+-- The client's join ([JOIN_STRIPES]): what = "files" with got of total,
+-- "starting" when the scripts are about to run, "done" after they ran
+-- (closing a screen the game did not take), "left" on leaving.
+-- simplified: said again only every 100 files; the seconds and stripe two
+-- by the screen's own half second
+function M.safe.join_screen(what, got, total)
+	if what == "left" or what == "done" then
+		if load and (what == "left" or not load.taken) then
+			load.api.close()
+		end
+		return
+	end
+	if not load then
+		load = load_open()
+		log:info("load screen: made for the join")
+		load.join_tick = magic.SubscribeToEvent("Update", function()
+			local s = load
+			if not s or s.taken then
+				return
+			end
+			local t = buildat.get_time_us()
+			if t < (s.join_next or 0) then
+				return
+			end
+			s.join_next = t + 500000
+			-- No MB beside the files: the line fits a phone's 400 pixels
+			local line = s.api.wait_line(s.join_what or "Joining",
+					s.join_phase, s.join_phase == "files")
+			s.api.line(line)
+			local kind, name = s.api.arrival()
+			log:info("join: " .. line .. (kind and " | last " .. kind ..
+					" " .. name or ""))
+		end)
+		local s = load
+		local close = s.api.close
+		s.api.close = function()
+			magic.UnsubscribeFromEvent("Update", s.join_tick)
+			close()
+		end
+	end
+	if what == "files" then
+		load.join_what = string.format("Files %d of %d", got, total)
+		load.join_phase = "files"
+	elseif what == "starting" then
+		load.join_what, load.join_phase = "Starting the game", nil
+	end
+	load.join_next = 0
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

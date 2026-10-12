@@ -540,8 +540,8 @@ struct CState: public State
 	// the rest are asked for. See CheckAnnouncedTask.
 	// **What the wait for the files is at** (user, 2026-09-30): a game of
 	// thousands of files is a minute on a phone of a screen nothing draws
-	// on, since nothing runs until they are in. The web page's status line
-	// says how far it is; natively it is the log's.
+	// on, since nothing runs until they are in. The client's loading
+	// screen says how far it is ([JOIN_STRIPES]), on both builds.
 	void show_file_progress()
 	{
 		const size_t left = m_waiting_files.size();
@@ -551,22 +551,19 @@ struct CState: public State
 		// Not over the game once it runs: a file a module announces then
 		// waits behind the map, and the line stood over the world
 		// ("0 of 1 files", a minute)
-		if(!m_scripts_started)
-			set_status(left == 0 ? ss_() : "Downloading the game: "+
-					itos((int)got)+" of "+itos((int)m_files_asked)+" files");
+		if(!m_scripts_started && left != 0)
+			join_screen("'files', "+itos((int)got)+", "+
+					itos((int)m_files_asked));
 		if(left != 0)
 			log_v(MODULE, "files: %zu of %zu", got, m_files_asked);
 	}
 
-	// The web page's status line ([LOAD_SHOWN]); natively the log has it
-	void set_status(const ss_ &text)
+	// The client's loading screen (ui_utils' join_screen, through
+	// client/api.lua); args is the Lua argument list
+	void join_screen(const ss_ &args)
 	{
-#ifdef __EMSCRIPTEN__
-		EM_ASM({
-			if(Module.setStatus)
-				Module.setStatus(UTF8ToString($0));
-		}, text.c_str());
-#endif
+		if(m_app)
+			m_app->run_script_no_sandbox("__buildat_join_screen("+args+")");
 	}
 
 	void run_held_scripts()
@@ -577,7 +574,7 @@ struct CState: public State
 		// update() calls this again when the frames are counted down
 		if(!m_scripts_started){
 			if(m_script_frames == 0){
-				set_status("Starting the game...");
+				join_screen("'starting'");
 				m_script_frames = 2;
 			}
 			return;
@@ -588,7 +585,7 @@ struct CState: public State
 			if(m_app)
 				m_app->run_script(script);
 		}
-		set_status("");
+		join_screen("'done'");
 		// Ahead of what has been read since, in the order they came
 		for(auto it = m_deferred.rbegin(); it != m_deferred.rend(); ++it){
 			m_parsed_bytes += it->second.size();

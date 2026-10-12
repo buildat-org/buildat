@@ -469,6 +469,9 @@ static const std::pair<ss_, ss_>* web_file(const ss_ &target)
 		// [FAVICON] in the list so an app claiming "/" does not take it;
 		// its default file lives beside the logo, not in the web client dir
 		{"/favicon.ico", {"favicon.png", "image/png"}},
+		// [JOIN_STRIPES] the page's loading stripes in the client's font
+		{"/Fonts/OverpassMono-Regular.ttf",
+				{"Fonts/OverpassMono-Regular.ttf", "font/ttf"}},
 	};
 	auto it = files.find(target);
 	return it == files.end() ? nullptr : &it->second;
@@ -1380,8 +1383,9 @@ struct Module: public interface::Module, public network::Interface
 			return true;
 		}
 		// The default favicon lives beside the logo (always installed),
-		// not in the optional web client dir
-		const ss_ base = target == "/favicon.ico" ?
+		// not in the optional web client dir; the font beside it
+		const ss_ base = target == "/favicon.ico" ||
+				target == "/Fonts/OverpassMono-Regular.ttf" ?
 				m_server->get_config().get<ss_>("share_path")+"/client/data" :
 				web_client_path();
 		const ss_ path = base+"/"+wf_name->first;

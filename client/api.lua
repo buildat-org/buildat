@@ -2175,6 +2175,16 @@ buildat.safe.last_arrival = __buildat_last_arrival
 -- in_flight() -> nil, or {name, have, size}: the packet arriving and not
 -- yet whole ([LOAD_IN_FLIGHT])
 buildat.safe.in_flight = __buildat_in_flight
+-- The join's loading screen ([JOIN_STRIPES]): state.cpp says what the wait
+-- for the game's files is at, and ui_utils draws it. An error in it is
+-- the log's, not the client's end.
+function __buildat_join_screen(what, got, total)
+	local ui_utils = __buildat_require_extension("ui_utils")
+	local ok, err = pcall(ui_utils.safe.join_screen, what, got, total)
+	if not ok then
+		log:error("join screen: " .. tostring(err))
+	end
+end
 buildat.safe.get_preferred_render_scale = __buildat_get_preferred_render_scale
 buildat.safe.font_sans     = buildat.font_sans
 buildat.safe.font_mono     = buildat.font_mono
