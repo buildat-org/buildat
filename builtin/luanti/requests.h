@@ -299,6 +299,12 @@
 					"pbr_debug_skyamb or pbr_debug_baked", cs(m));
 			m = "pbr";
 		}
+		// Kept for the step peak's resends ([VIEW_SETTINGS_LOCAL]): a mode
+		// read from settings.json is the session's, and a later write to
+		// it must not switch a session that has started drawing
+		auto kept = m_peer_mode.find(peer);
+		if(kept != m_peer_mode.end())
+			kept->second = m;
 		flat.push_back(m);
 		// How far this client tilts the sun and the moon's orbit when the
 		// game has no opinion, in degrees. A game that sets body_orbit_tilt

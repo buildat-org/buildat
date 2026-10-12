@@ -3,7 +3,7 @@
 # cost: ~3 min (2026-10-11)
 # covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua apps/vanilla/main/client_lua/pause.lua builtin/storage/storage.cpp
 # [WORLD_TRIM_MOVE] 1: trimming the running world from the launcher's own
-# game (the pause menu's "Trim this world..."). Vanilla on the minimal
+# game (the pause menu's Worlds..., Trim...). Vanilla on the minimal
 # game; a fixture emerges a strip x -1100..1100 and the client's chat
 # command places a node at x 1000 (a player build), out of view.
 #   1. To a size of 0 MB: sections go, the file shrinks, the build stays;
@@ -67,7 +67,7 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 chat(){ printf 'keypress T\ndelay 700\ntext %s\ndelay 300\nkeypress Return\nwait_log 40000 wt: %s\ndelay 500\n' "$1" "$2"; }
-open_trim(){ printf 'keypress Escape\ndelay 1500\nclick Button "Trim this world..."\nwait_log 10000 menu: trim \ndelay 800\n'; }
+open_trim(){ printf 'keypress Escape\ndelay 1500\nclick Button "Worlds..."\nwait_log 10000 menu: the running world wt selected\ndelay 1500\nclick Button "Trim..."\nwait_log 10000 menu: trim \ndelay 800\n'; }
 trim(){ printf 'delay 300\nclick Button "Trim to this %s..."\nwait_log 30000 menu: trim asks\ndelay 800\nclick Button "Trim"\nwait_log 60000 sections forgotten;\ndelay 800\n' "$1"; }
 client(){ run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 	-D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 1000x600 -u 1 -l 3 -o sound_mute=1 -c @"$2"; }
@@ -77,7 +77,7 @@ client(){ run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 	echo "delay 40000"
 	open_trim; printf 'click LineEdit "*"\ndelay 300\ntext 0\ndelay 300\n'; trim size
 	trim box; echo "screenshot $t/trim.png"
-	echo "keypress Escape"; echo "delay 1000"; chat /look looked; echo quit
+	printf 'keypress Escape\ndelay 1000\nkeypress Escape\ndelay 1000\n'; chat /look looked; echo quit
 } > "$t/1.cmds"
 client "$t/1.log" "$t/1.cmds"
 grep -a "menu: trim\|wt: at\|trims wt" "$t/1.log" "$t/srv.log" | sed 's/.*\(menu: \|main *: \|wt: \)/\1/' | cut -c 1-200
@@ -109,7 +109,7 @@ edit(){ printf 'click LineEdit "%s"\ndelay 300\nkeypress End\n' "$1"; for _ in $
 	echo "wait_log 120000 wt: ready"; echo "delay 40000"
 	open_trim; edit "$c1" "0 0 0"; edit "$c2" "1 1 1"
 	echo 'click Button "[ ] Also player builds outside"'; echo "delay 500"
-	trim box; echo "keypress Escape"; echo "delay 1000"; chat /look looked; echo quit
+	trim box; printf 'keypress Escape\ndelay 1000\nkeypress Escape\ndelay 1000\n'; chat /look looked; echo quit
 } > "$t/2.cmds"
 client "$t/2.log" "$t/2.cmds"
 grep -a "menu: trim asks\|wt: at\|trims wt" "$t/2.log" "$t/srv.log" | tail -3 | sed 's/.*\(menu: \|main *: \|wt: \)/\1/' | cut -c 1-200

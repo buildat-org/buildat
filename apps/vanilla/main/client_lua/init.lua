@@ -4724,6 +4724,14 @@ function frame_peak.update(dt)
 end
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
+	-- Out of the packet handler that asked for it: a leave and a connect
+	-- inside the old connection's packet loop left the new one silent.
+	-- Nothing after it: the game's UI is gone with the leave
+	if keys.rejoin_due then
+		keys.rejoin_due = nil
+		keys.rejoin()
+		return
+	end
 	frame_peak.note(dt)
 	local t0 = buildat.get_time_us()
 	frame_peak.update(dt)
@@ -4768,8 +4776,10 @@ sky_now.set_range(keys.view.current())
 -- server as the view range is, each as "view_<row's name>". One set wins
 -- over the server's row of the same name, which stays the default. The
 -- render mode is read at join (luanti/module.lua's get_world_info).
--- simplified: per server, as buildat.storage is; and on the launcher's
--- own game a choice here wins over its "Luanti settings" too
+-- **On the client's own local server they are settings.json's**
+-- ([VIEW_SETTINGS_LOCAL]): the launcher's "Luanti settings" and these
+-- show and set the same values, the server's whole list sent back with
+-- the row changed.
 keys.view_rows = {render_mode = "pbr", lod_detail = "full",
 		view_bobbing_amount = "1", third_person_shoulder = "0"}
 -- What can be applied without a rejoin, at once
@@ -4789,18 +4799,42 @@ keys.apply_view = function(row)
 	end
 end
 keys.set_view = function(name, value)
-	buildat.storage_write("view_" .. name, value)
+	if keys.view_local then
+		local list = {}
+		for _, row in ipairs(keys.settings or {}) do
+			if not row:match("^" .. name .. "=") then
+				list[#list + 1] = row
+			end
+		end
+		list[#list + 1] = name .. "=" .. value
+		keys.settings = list
+		buildat.send_packet("main:set_settings",
+				cereal.binary_output(list, {"array", "string"}))
+	else
+		buildat.storage_write("view_" .. name, value)
+	end
 	keys.view_rows[name] = value
 	keys.apply_view(name .. "=" .. value)
 	log:info("view: " .. name .. " = " .. value)
 end
 
+keys.rejoin = function(later)
+	local why = keys.rejoin_why
+	if not later then
+		keys.rejoin_why = nil
+	end
+	local ok, err = buildat.rejoin(why, keys.world, later)
+	log:info("view: rejoin: " .. tostring(ok) .. " " .. tostring(err))
+end
+
 buildat.sub_packet("main:settings", function(data)
 	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
+	keys.view_local = buildat.connected_locally and buildat.connected_locally()
 	for i, row in ipairs(list) do
 		local name = row:match("^([%w_]+)=")
 		if name and keys.view_rows[name] then
-			local own = buildat.storage_read("view_" .. name) or ""
+			local own = not keys.view_local and
+					buildat.storage_read("view_" .. name) or ""
 			if own ~= "" then
 				list[i] = name .. "=" .. own
 			end
@@ -4827,13 +4861,26 @@ buildat.sub_packet("main:settings", function(data)
 		end
 		keys.apply_view(row)
 	end
+	if keys.rejoin_why then
+		keys.rejoin_due = true
+	end
 end)
 
 keys.settings_sections = {{title = "View", draw = function(_, ui)
 	local v = keys.view_rows
-	ui.dropdown("Render mode (next join)", {{"PBR", "pbr"},
+	-- Fixed for a session: a new one is a rejoin
+	ui.dropdown("Render mode", {{"PBR", "pbr"},
 			{"Shadows", "shadows"}, {"Unlit", "unlit"}}, v.render_mode,
-			function(m) keys.set_view("render_mode", m) end)
+			function(m)
+		if m == v.render_mode then
+			return
+		end
+		keys.set_view("render_mode", m)
+		keys.rejoin_why = "Rejoining for the render mode " .. m .. "..."
+		-- A local server's write is in once its list comes back: armed
+		-- now, on the click, and run by the main:settings handler
+		keys.rejoin(keys.view_local)
+	end)
 	ui.dropdown("Distant terrain detail", {{"Full", "full"},
 			{"Reduced past half range", "half"},
 			{"Reduced past a third", "third"}}, v.lod_detail,

@@ -661,8 +661,10 @@ local function game_close(silent)
 	local g = game
 	game = nil
 	magic.UnsubscribeFromEvent("KeyDown", g.key_sub)
-	g.backdrop:Remove()
-	g.win:Remove()
+	-- A leave with the window open took them already: forget_game_ui()
+	-- runs before the sandbox reset that closes it ([VIEW_SETTINGS_LOCAL])
+	pcall(function() g.backdrop:Remove() end)
+	pcall(function() g.win:Remove() end)
 	if not silent and g.o.on_close then
 		g.o.on_close()
 	end

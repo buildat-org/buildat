@@ -538,6 +538,21 @@ buildat.safe.launch_save(app, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk. It goes in the launch history
   as "save/<app>/<name>".
+  From a server's code ([PAUSE_WORLDS_LOCAL]): only for the app of the local
+  server the client is connected to (app nil is that one), only right after
+  the user's own key or click; the game is left first.
+buildat.safe.connected_locally() -> bool
+- Whether the server joined is the local one this client started
+  ([VIEW_SETTINGS_LOCAL]): its settings are the user's own.
+buildat.safe.rejoin(why, save, later) -> true, or false and why
+- The game joined again, only right after the user's own key or click:
+  on the local server this client started, the save named opened again
+  through the launcher (launch_save, as from a server's code: leaving
+  stops that server); on another, the launcher's reconnect to the address
+  in use with why on its wait. Vanilla's render mode ([VIEW_SETTINGS_LOCAL]).
+  later, on the local server: armed on the click and run by the next
+  call within 30 s (any arguments), for a game that waits for its server
+  to answer a write first.
 buildat.safe.join_server(address) -> true, or false and why
 - Join a server through the launch menu's connecting screen: the local server
   stopped, the wait shown, a failure a dialog, and on success the placeholder
@@ -688,10 +703,11 @@ buildat.safe.storage_write(name, data) -> true, or false and why
   sandbox.lua's __buildat_run_served_code, api.lua's
   __buildat_served_overrides) rather than being told by the calling frame,
   which a tail call leaves out: there set_preference, start_local_server,
-  stop_local_server, launch, launch_save, join_server,
+  stop_local_server, launch, join_server,
   show_engine_settings, set_shared_key, set_client_key, set_launch_ui,
   compose_launch_ui, open_log_folder and cache_write refuse, cache_read,
   key_store, log_path and recent_errors answer nil, declare_keys and set_app_keys are the server's own app's,
+  launch_save is the local server's own app's (see above),
   and storage is the server's.
 buildat.safe.cache_read(name) -> data or nil
 buildat.safe.cache_write(name, data) -> true, or false and why

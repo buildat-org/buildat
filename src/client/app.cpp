@@ -2505,6 +2505,7 @@ struct CApp: public App, public magic::Application
 		// Not in the web client, which has no folder to open: an app
 		// leaves its button out there ([LUANTI_IMPORT_FOLDER])
 		DEF_BUILDAT_FUNC(open_import_folder)
+		DEF_BUILDAT_FUNC(local_game)
 #endif
 		DEF_BUILDAT_FUNC(start_local_server)
 		DEF_BUILDAT_FUNC(list_launchers)

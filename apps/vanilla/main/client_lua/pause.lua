@@ -59,6 +59,8 @@ buildat.sub_packet("main:account", function(data)
 		buildat.set_running_game({game = v[5]})
 	end
 	o.keys.public = account.public
+	-- The save a render mode's rejoin opens again ([VIEW_SETTINGS_LOCAL])
+	o.keys.world = account.world
 	-- A menu up before this came (the web starts paused) is missing what
 	-- the account adds to it
 	if window then
@@ -140,7 +142,7 @@ end
 -- The admin's world menu over the world: the world list, a new world and
 -- ContentDB, as at the boot
 -- trim: a save's name, for the trim page alone ([WORLD_TRIM_MOVE])
-local function worlds(trim)
+local function worlds()
 	page(function()
 		local _, err2, menu = buildat.run_script_file("main/menu.lua")
 		if type(menu) ~= "table" then
@@ -149,9 +151,6 @@ local function worlds(trim)
 		end
 		menu.back = function()
 			later(function() luanti.hold(nil) end)
-		end
-		if type(trim) == "string" then
-			menu.trim(trim)
 		end
 	end)
 end
@@ -257,12 +256,10 @@ open = function()
 	end
 	if not account.public and account.is_local then
 		accounts.lan_row(w)
-		-- [WORLD_TRIM_MOVE] The trim works on the running world, and the
-		-- launcher's own game has no world menu over it
+		-- [PAUSE_WORLDS_LOCAL] The world menu over the running world: its
+		-- Trim is the one "Trim this world..." was ([WORLD_TRIM_MOVE])
 		if account.world ~= "" then
-			accounts.page_button(w, "Trim this world...", function()
-				worlds(account.world)
-			end)
+			accounts.page_button(w, "Worlds...", worlds)
 		end
 	end
 	-- A browser tab has no launcher to leave to, and is closed as a tab

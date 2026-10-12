@@ -276,6 +276,16 @@ end
 -- by the main:save_info answer ([WORLD_LIST])
 local selected_save = nil
 local panel = nil
+-- [WORLDS_SELECTED] The world the server runs ("" for none), said before
+-- each save list: the screen opens with it selected
+local running_world = ""
+buildat.sub_packet("main:running_world", function(data)
+	running_world = data
+	if not selected_save and data ~= "" then
+		selected_save = data
+		log:info("menu: the running world " .. data .. " selected")
+	end
+end)
 
 -- A menu button under any parent, registered with the menu's keyboard
 -- walk: the same shape ui_utils' menu:add(label) makes on its own window
@@ -387,6 +397,23 @@ function draw(saves, save_games)
 				cereal.binary_output({name}, {"array", "string"}))
 	end
 	local function play(name)
+		-- [PAUSE_WORLDS_LOCAL] Over a launcher's running game: the running
+		-- world is the game again, another one the launcher's to open
+		if M.back and not public then
+			if name == running_world then
+				done = true
+				close()
+				M.back()
+				return
+			end
+			local ok, err = buildat.launch_save(nil, name)
+			log:info("menu: launch_save " .. name .. ": " ..
+					tostring(ok) .. " " .. tostring(err))
+			if not ok then
+				ui_utils.show_message_dialog(tostring(err))
+			end
+			return
+		end
 		-- The menu is done choosing; a launch UI that paused something
 		-- for it can carry on ([LAUNCH_API])
 		buildat.launch_loading("world")
@@ -410,6 +437,10 @@ function draw(saves, save_games)
 		menu:add(row, function()
 			if selected_save == item.name then
 				play(item.name)
+			elseif not selected_save then
+				-- The right column is drawn only for a selection
+				selected_save = item.name
+				draw(saves, save_games)
 			else
 				select(item.name)
 			end
@@ -494,7 +525,7 @@ function draw(saves, save_games)
 	-- launcher's grid ([MENU_CONTEXT]); a client that came straight to this
 	-- server leaves it instead
 	local function back()
-		if public == "public_running" then
+		if public == "public_running" or M.back then
 			done = true
 			close()
 			if M.back then
@@ -519,98 +550,104 @@ function draw(saves, save_games)
 	head:SetText(selected_save or (narrow() and "Pick a world above" or
 			"Pick a world on the left"))
 	panel.head = head
-	-- On a narrow screen the glance is one line that wraps, so that the
-	-- screen fits a phone's height
-	for k = 1, narrow() and 1 or 7 do
-		local line = right:CreateChild("Text")
-		line:SetStyleAuto()
-		line:SetText("")
-		line:SetTextAlignment(magic.HA_LEFT)
-		if narrow() then
-			line:SetWordwrap(true)
-			line:SetFixedWidth(fit(420))
+	-- [WORLDS_SELECTED] Nothing more without a selection: no glance, no
+	-- flags, no buttons, and nothing for the keyboard walk to stop on
+	if selected_save then
+		-- On a narrow screen the glance is one line that wraps, so that the
+		-- screen fits a phone's height
+		for k = 1, narrow() and 1 or 7 do
+			local line = right:CreateChild("Text")
+			line:SetStyleAuto()
+			line:SetText("")
+			line:SetTextAlignment(magic.HA_LEFT)
+			if narrow() then
+				line:SetWordwrap(true)
+				line:SetFixedWidth(fit(420))
+			end
+			panel.lines[k] = line
 		end
-		panel.lines[k] = line
-	end
-	local function flag_row(key, label)
-		local b = button_on(menu, right, "[ ] " .. label, function()
-			if not selected_save or panel.flags[key] == nil then
+		local function flag_row(key, label)
+			local b = button_on(menu, right, "[ ] " .. label, function()
+				if not selected_save or panel.flags[key] == nil then
+					return
+				end
+				local f = panel.flags
+				f[key] = not f[key]
+				buildat.send_packet("main:set_world_flags",
+						cereal.binary_output({selected_save,
+						f.creative_mode and "true" or "false",
+						f.enable_damage and "true" or "false"}, {"array", "string"}))
+			end, fit(420))
+			panel[key] = {button = b, label = label}
+		end
+		flag_row("creative_mode", "Creative mode")
+		flag_row("enable_damage", "Enable damage")
+		button_on(menu, right, "Game settings...", function()
+			if selected_save then
+				waiting("Reading the settings of " .. selected_save .. "...")
+				buildat.send_packet("main:get_game_settings",
+						cereal.binary_output({selected_save}, {"array", "string"}))
+			end
+		end, fit(420))
+		-- [SERVER_PRESETS] the same form, of what the world costs its server
+		button_on(menu, right, "Server performance...", function()
+			if selected_save then
+				waiting("Reading the settings of " .. selected_save .. "...")
+				buildat.send_packet("main:get_perf_settings",
+						cereal.binary_output({selected_save}, {"array", "string"}))
+			end
+		end, fit(420))
+		-- [WORLD_MODS]
+		button_on(menu, right, "Mods...", function()
+			if selected_save then
+				waiting("Reading the mods of " .. selected_save .. "...")
+				buildat.send_packet("main:get_world_mods",
+						cereal.binary_output({selected_save}, {"array", "string"}))
+			end
+		end, fit(420))
+		-- [WORLD_TRIM_MOVE]
+		button_on(menu, right, "Trim...", function()
+			if selected_save then
+				waiting("Reading " .. selected_save .. "...")
+				buildat.send_packet("main:trim", cereal.binary_output(
+						{selected_save, "info"}, {"array", "string"}))
+			end
+		end, fit(420))
+		button_on(menu, right, "Export...", function()
+			if selected_save then
+				M.export(selected_save)
+			end
+		end, fit(420))
+		-- [WORLD_TXP]
+		button_on(menu, right, "Texture pack...", function()
+			if selected_save then
+				waiting("Reading the texture pack of " .. selected_save .. "...")
+				buildat.send_packet("main:get_world_txp",
+						cereal.binary_output({selected_save}, {"array", "string"}))
+			end
+		end, fit(420))
+		button_on(menu, right, "Play", function()
+			if selected_save then
+				play(selected_save)
+			end
+		end, fit(420), true)
+		button_on(menu, right, "Delete...", function()
+			local name = selected_save
+			if not name then
 				return
 			end
-			local f = panel.flags
-			f[key] = not f[key]
-			buildat.send_packet("main:set_world_flags",
-					cereal.binary_output({selected_save,
-					f.creative_mode and "true" or "false",
-					f.enable_damage and "true" or "false"}, {"array", "string"}))
+			ui_utils.show_confirm_dialog("Move the world \"" .. name ..
+					"\" to the trash?", function()
+				selected_save = nil
+				waiting("Moving " .. name .. " to the trash...")
+				buildat.send_packet("main:delete",
+						cereal.binary_output({name}, {"array", "string"}))
+			end, function() end, "Move to the trash")
 		end, fit(420))
-		panel[key] = {button = b, label = label}
-	end
-	flag_row("creative_mode", "Creative mode")
-	flag_row("enable_damage", "Enable damage")
-	button_on(menu, right, "Game settings...", function()
-		if selected_save then
-			waiting("Reading the settings of " .. selected_save .. "...")
-			buildat.send_packet("main:get_game_settings",
-					cereal.binary_output({selected_save}, {"array", "string"}))
-		end
-	end, fit(420))
-	-- [SERVER_PRESETS] the same form, of what the world costs its server
-	button_on(menu, right, "Server performance...", function()
-		if selected_save then
-			waiting("Reading the settings of " .. selected_save .. "...")
-			buildat.send_packet("main:get_perf_settings",
-					cereal.binary_output({selected_save}, {"array", "string"}))
-		end
-	end, fit(420))
-	-- [WORLD_MODS]
-	button_on(menu, right, "Mods...", function()
-		if selected_save then
-			waiting("Reading the mods of " .. selected_save .. "...")
-			buildat.send_packet("main:get_world_mods",
-					cereal.binary_output({selected_save}, {"array", "string"}))
-		end
-	end, fit(420))
-	-- [WORLD_TRIM_MOVE]
-	button_on(menu, right, "Trim...", function()
-		if selected_save then
-			waiting("Reading " .. selected_save .. "...")
-			buildat.send_packet("main:trim", cereal.binary_output(
-					{selected_save, "info"}, {"array", "string"}))
-		end
-	end, fit(420))
-	button_on(menu, right, "Export...", function()
-		if selected_save then
-			M.export(selected_save)
-		end
-	end, fit(420))
-	-- [WORLD_TXP]
-	button_on(menu, right, "Texture pack...", function()
-		if selected_save then
-			waiting("Reading the texture pack of " .. selected_save .. "...")
-			buildat.send_packet("main:get_world_txp",
-					cereal.binary_output({selected_save}, {"array", "string"}))
-		end
-	end, fit(420))
-	button_on(menu, right, "Play", function()
-		if selected_save then
-			play(selected_save)
-		end
-	end, fit(420), true)
-	button_on(menu, right, "Delete...", function()
-		local name = selected_save
-		if not name then
-			return
-		end
-		ui_utils.show_confirm_dialog("Move the world \"" .. name ..
-				"\" to the trash?", function()
-			selected_save = nil
-			waiting("Moving " .. name .. " to the trash...")
-			buildat.send_packet("main:delete",
-					cereal.binary_output({name}, {"array", "string"}))
-		end, function() end, "Move to the trash")
-	end, fit(420))
-	if selected_save then
+		-- The selected row in view and in focus, and its glance asked for
+		local row = row_buttons[selected_save]
+		list:SetSelection(list:FindItem(row))
+		row:SetFocus(true)
 		select(selected_save)
 	end
 
@@ -1087,7 +1124,8 @@ function draw_new_save_name(gameid, state)
 		mapgen = name
 	end)
 	-- Over a running world a new one is only made ([VANILLA_PUBLIC] 5)
-	menu:add(public == "public_running" and "Create" or "Create and play",
+	menu:add((public == "public_running" or M.back) and "Create" or
+			"Create and play",
 			function()
 		local name = edit:GetText()
 		local seed = seed_edit:GetText()
@@ -1743,16 +1781,8 @@ local function draw_trim(flat)
 			end
 		end)
 	end
-	-- Opened by itself over the world (M.trim), back is to the world
 	local function back()
-		if M.trim_only then
-			close()
-			if M.back then
-				M.back()
-			end
-		else
-			draw(last_saves, last_save_games)
-		end
+		draw(last_saves, last_save_games)
 	end
 	menu:add("< back", back)
 	menu:on_key(function(key)
@@ -1826,7 +1856,7 @@ buildat.sub_packet("main:export_data", function(data)
 	end
 	exporting = nil
 	log:info("menu: " .. text)
-	if done or M.trim_only then
+	if done then
 		return
 	end
 	ui_utils.show_message_dialog(text, function()
@@ -1873,16 +1903,6 @@ buildat.sub_packet("main:import_next", function(data)
 	send_strings("main:import_data", {string.format("%d", offset), part})
 end)
 
--- The trim page alone, over the running world: the launcher's own game's
--- pause menu has no world menu
-M.trim = function(save)
-	M.trim_only = true
-	-- The answer to get_saves may have come already
-	done = false
-	waiting("Reading " .. save .. "...")
-	buildat.send_packet("main:trim", cereal.binary_output({save, "info"},
-			{"array", "string"}))
-end
 buildat.sub_packet("main:trim_info", function(data)
 	if done then
 		return
@@ -1973,7 +1993,7 @@ buildat.sub_packet("main:disk", function(data)
 end)
 
 buildat.sub_packet("main:saves", function(data)
-	if done or M.trim_only then
+	if done then
 		return
 	end
 	local values = cereal.binary_input(data, {"array", "string"})
@@ -2106,11 +2126,6 @@ end)
 
 -- The world is up and main/init.lua is what draws from here on
 buildat.sub_packet("main:menu_done", function()
-	-- The answer to the get_saves below, over the world: the trim page
-	-- stays
-	if M.trim_only then
-		return
-	end
 	-- A Luanti world from a zip starts once it is in
 	import_over()
 	creating = nil

@@ -4165,10 +4165,13 @@ end)
 -- server's environment is the default for a client that says nothing. That
 -- is what lets one server serve a client in each mode; see [PROBE_CYCLE].
 -- Without the variable, what the player chose in vanilla's View settings
--- for this server ([VANILLA_PLAYER_SETTINGS])
+-- for this server ([VANILLA_PLAYER_SETTINGS]); on the client's own local
+-- server nothing, so that the server reads settings.json's
+-- ([VIEW_SETTINGS_LOCAL])
+local is_local = buildat.connected_locally and buildat.connected_locally()
 buildat.send_packet("luanti:get_world_info",
 		buildat.get_env("BUILDAT_LUANTI_PBR") or
-		buildat.storage_read("view_render_mode") or "")
+		(not is_local and buildat.storage_read("view_render_mode")) or "")
 buildat.send_packet("luanti:get_translations", "")
 
 local ok_bodies, err_bodies, bodies =

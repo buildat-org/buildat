@@ -13,6 +13,8 @@ static ss_ g_local_server_port;
 // The game the local server was started with, for the storage of the game
 // code it serves
 static ss_ g_local_server_app;
+// The game id it was started with, as start_local_server() got it
+static ss_ g_local_server_game;
 // [SERVERLESS_PLAY] The app whose client half runs with no server, its
 // storage's name as a local server's (server_app_id), or ""
 static ss_ g_serverless_app;

@@ -58,7 +58,7 @@ for want in "view: render_mode = unlit" "distant terrain: third" \
 done
 
 # 2 and 3
-printf "wait_log 120000 load: the world is in\ndelay 1000\nquit\n" > "$t/j.cmds"
+printf "wait_log 120000 load: the world is in\nwait_log 60000 luanti:world_info: \ndelay 1000\nquit\n" > "$t/j.cmds"
 client "$t/2.log" a "$t/j.cmds"
 client "$t/3.log" b "$t/j.cmds"
 echo "A again: $(view "$t/2.log")"

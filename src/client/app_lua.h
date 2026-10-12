@@ -688,6 +688,20 @@
 	// app may call it (on the user's click), for its own local server only.
 	// simplified: one fixed subdirectory per app; an app-chosen name under
 	// its shared directory is the upgrade, when a second app wants one.
+	// [PAUSE_WORLDS_LOCAL] The game id of the local server the client is
+	// connected to, or nil for any other server
+	static int l_local_game(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		const ss_ address = self->m_state ? self->m_state->get_address() : "";
+		if(address.empty() || !connected_locally(address))
+			return 0;
+		lua_pushstring(L, g_local_server_game.c_str());
+		return 1;
+	}
+
 	static int l_open_import_folder(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -901,6 +915,7 @@
 
 		game_path = interface::fs::get_absolute_path(game_path);
 		g_local_server_app = server_app_id(game);
+		g_local_server_game = game;
 		g_local_server_port = pick_free_local_port();
 		log_i(MODULE, "Starting local server on port %s", cs(g_local_server_port));
 		{

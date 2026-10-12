@@ -1068,9 +1068,12 @@ struct Module: public interface::Module
 		// save says itself which game it needs.
 		{
 			ss_ save = launch_param("save");
-			if(save != "" && m_launched_param_save)
+			// [PAUSE_WORLDS_LOCAL] One from a player in the world is the
+			// pause menu's Worlds..., which lists them
+			if(save != "" && m_launched_param_save &&
+					!m_in_world.count(packet.sender))
 				return;
-			if(save != ""){
+			if(save != "" && !m_launched_param_save){
 				ss_ gameid = gameid_of_save(save);
 				if(gameid == ""){
 					log_w(MODULE, "untrusted_launch: save %s does not say"
@@ -1172,6 +1175,10 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "main:game_mapgens", mos.str());
 			inetwork->send(packet.sender, "main:disk", dos.str());
+			// [WORLDS_SELECTED] The world running, "" for none: the menu
+			// selects it
+			inetwork->send(packet.sender, "main:running_world",
+					m_starting ? m_world_name : ss_());
 			inetwork->send(packet.sender, "main:saves", os.str());
 		});
 	}
@@ -4462,8 +4469,9 @@ struct Module: public interface::Module
 			return;
 		}
 		// While a world runs, one world at a time: made, and run by
-		// switching to it
-		if(m_public && m_starting){
+		// switching to it (a launcher's game: by the launcher, through
+		// its menu's Play, [PAUSE_WORLDS_LOCAL])
+		if(m_starting){
 			menu_message(packet.sender, "The world "+name+" was made: run it "
 					"to switch to it");
 			return;
@@ -4538,8 +4546,12 @@ struct Module: public interface::Module
 			return;
 		network::access(m_server, [&](network::Interface *inetwork){
 			// The menu takes itself away first: it is a script of its own
-			// and has no other way of knowing that it is done with
-			inetwork->send(peer, "main:menu_done", "");
+			// and has no other way of knowing that it is done with. One
+			// that came straight into a running world has none, and the
+			// packet, held for a subscriber, would close the one the pause
+			// menu's Worlds... opens later ([PAUSE_WORLDS_LOCAL])
+			if(m_shown_menu.count(peer))
+				inetwork->send(peer, "main:menu_done", "");
 			inetwork->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
@@ -4730,7 +4742,8 @@ struct Module: public interface::Module
 			// answers to a script's own request: main:account and
 			// main:join_title follow the run_script that starts their
 			// reader, and ahead of it they would find nobody.
-			for(const char *name : {"main:menu", "main:disk", "main:saves",
+			for(const char *name : {"main:menu", "main:disk",
+					"main:running_world", "main:saves",
 					"main:save_info", "main:imports", "main:settings",
 					"main:progress",
 					"main:contentdb_list", "main:menu_message",

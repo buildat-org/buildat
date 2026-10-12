@@ -1454,6 +1454,76 @@ buildat.safe.launch_save = function(game, name)
 	launch_grid.screens().start_local_app(game, "save=" .. name)
 	return true
 end
+-- [PAUSE_WORLDS_LOCAL] A served game may open another of its own saves
+-- on the user's click (vanilla's Worlds... in the pause menu): only the
+-- game of the local server the client is connected to, which is left
+-- first. Any other game, or a remote server, is refused.
+local launch_own_save
+__buildat_served_overrides.launch_save = function(game, name)
+	local here = __buildat_local_game and __buildat_local_game()
+	-- nil: the local server's own
+	game = game or here
+	if not here or game ~= here then
+		return false, "launch_save: only the local server's own game"
+	end
+	if not __buildat_user_activated() then
+		return false, "launch_save: only right after the user's own key or click"
+	end
+	return launch_own_save(game, name)
+end
+launch_own_save = function(game, name)
+	local found = false
+	for _, sv in ipairs(__buildat_list_saves(game)) do
+		found = found or sv.name == name
+	end
+	if not found then
+		return false, "launch_save(" .. tostring(game) .. ", " ..
+				tostring(name) .. "): no such save"
+	end
+	buildat.safe.leave()
+	return buildat.safe.launch_save(game, name)
+end
+-- [VIEW_SETTINGS_LOCAL] Whether the server joined is the local one this
+-- client started, whose settings are the user's own
+buildat.safe.connected_locally = function()
+	return (__buildat_local_game and __buildat_local_game()) ~= nil
+end
+-- [VIEW_SETTINGS_LOCAL] The game joined again on the user's click (a
+-- render mode is fixed for a session): the local server's save opened
+-- again through the launcher, since leaving stops that server; another
+-- server reconnected at the address in use, why on the wait.
+-- later: the local server's rejoin armed on the click and run by the next
+-- call within 30 s, once the game's own settings write is in (the server's
+-- answer can take seconds while it loads).
+local rejoin_armed = nil
+buildat.safe.rejoin = function(why, save, later)
+	local now = __buildat_get_time_us()
+	if rejoin_armed and now < rejoin_armed.until_us and
+			buildat.safe.connected_locally() then
+		local name = rejoin_armed.save
+		rejoin_armed = nil
+		return launch_own_save(__buildat_local_game(), name)
+	end
+	if not __buildat_user_activated() then
+		return false, "rejoin: only right after the user's own key or click"
+	end
+	if buildat.safe.connected_locally() then
+		if later then
+			rejoin_armed = {save = save, until_us = now + 30e6}
+			return true, "armed"
+		end
+		return __buildat_served_overrides.launch_save(nil, save)
+	end
+	local address = __buildat_server_address()
+	if not address then
+		return false, "rejoin: not joined"
+	end
+	if not leave_to_launcher() then
+		return false, "rejoin: no launcher to rejoin from"
+	end
+	__buildat_reconnect(address, tostring(why or "Rejoining"), true)
+	return true
+end
 -- **The launch menu's screens for any launch UI** ([LAUNCH_MENU_V2]): a
 -- launch UI runs its own files and nobody else's, so these two are how
 -- another one joins a server and shows the Engine settings without a
