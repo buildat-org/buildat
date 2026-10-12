@@ -786,6 +786,11 @@ Example usage (by using an object as the base structure for value):
 
 	output_values = cereal.binary_input(data, type)
 
+A record, as a C++ interface::Record writes it (doc/architecture.txt):
+	{"record", major, minor, type}
+read, another major is an error and the fields a newer minor added at the
+end are skipped.
+
 urho3d (magic)
 --------------
 Whitelist-based wrapper for Magic's Lua API; the sandbox sees it as the

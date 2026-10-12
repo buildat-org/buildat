@@ -1,10 +1,12 @@
 #!/bin/bash
 # tier: quick
-# cost: ~5s (2026-10-12)
-# covers: src/interface/record.h src/interface/protocol.h
+# cost: ~10 s (2026-10-12)
+# covers: src/interface/record.h src/interface/protocol.h src/lua_bindings/cereal.cpp
 # [COMPAT_BREAK_07] 8b: a record with a field added at its end read by the
 # reader before it; another major refused; a file hashed by an algorithm
-# this does not know refused.
+# this does not know refused. With a display, the Lua cereal binding's
+# "record" in a serverless app: the same bytes as C++ writes, a newer
+# minor's tail skipped, another major refused.
 #   util/record_check.sh
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,6 +15,7 @@ trap 'rm -rf "${t:?}"' EXIT
 cat > "$t/c.cpp" <<'CPP'
 #include "interface/protocol.h"
 #include <cassert>
+#include <cstdio>
 using namespace interface;
 struct Old { uint32_t a = 0; ss_ b; };
 struct New { uint32_t a = 0; ss_ b; uint32_t c = 0; };
@@ -78,9 +81,51 @@ int main()
 		ar(f);
 	} catch(RecordError &e){ refused = true; }
 	assert(refused);
+	// For the Lua part: the bytes of a New and a 42 after it
+	std::ostringstream hx(std::ios::binary);
+	{ cereal::PortableBinaryOutputArchive ar(hx); ar(n, (uint32_t)42); }
+	for(unsigned char ch : hx.str())
+		printf("%02x", ch);
+	printf("\n");
 	return 0;
 }
 CPP
 c++ -std=c++11 -I"$here/src" -I"$here" -I"$here/3rdparty/cereal/include" \
-	"$t/c.cpp" -o "$t/c" && "$t/c"
-echo "PASS: a record's added tail skipped by an older reader; another major refused; an unknown file hash refused"
+	"$t/c.cpp" -o "$t/c"
+want=$("$t/c")
+
+lua_part=""
+if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && [ -x "$here/Build/bin/buildat" ]; then
+	app=$t/u/dev_apps/lr
+	mkdir -p "$app/main/client_lua"
+	echo '{"kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
+	printf '{"author": "tester", "name": "lr", "version": "1.0.0", "engine_api": 1,
+		"audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
+		"description": "record_check", "serverless": true}\n' > "$app/meta.json"
+	cat > "$app/main/client_lua/init.lua" <<'L'
+local log = buildat.Logger("lr")
+local cereal = require("buildat/extension/cereal")
+local function hex(s)
+	return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end))
+end
+local function t(major, minor, fields)
+	return {"object", {"r", {"record", major, minor, {"object", unpack(fields)}}},
+			{"after", "int32_t"}}
+end
+local d = cereal.binary_output({r = {a = 7, b = "x", c = 9}, after = 42},
+		t(1, 1, {{"a", "int32_t"}, {"b", "string"}, {"c", "int32_t"}}))
+local o = cereal.binary_input(d, t(1, 0, {{"a", "int32_t"}, {"b", "string"}}))
+local ok = pcall(cereal.binary_input, d, t(2, 0, {{"a", "int32_t"}}))
+log:info("lr: " .. hex(d) .. " " .. o.r.a .. o.r.b .. tostring(o.r.c) ..
+		o.after .. " " .. tostring(ok))
+L
+	printf 'delay 3000\nquit\n' > "$t/cmds"
+	(cd "$here/Build" && BUILDAT_RUN=dev:lr timeout 60 bin/buildat \
+		-o launch_ui=launch_menu -D "$t/u" -w 640x480 -l 3 -o sound_mute=1 \
+		-c @"$t/cmds" > "$t/lua.log" 2>&1)
+	got=$(grep -aoP 'lr: \K.*' "$t/lua.log" | head -1)
+	[ "$got" = "$want 7xnil42 false" ] ||
+		{ echo "FAIL: Lua's record: \"$got\", not \"$want 7xnil42 false\""; exit 1; }
+	lua_part="; Lua's the same"
+fi
+echo "PASS: a record's added tail skipped by an older reader; another major refused; an unknown file hash refused$lua_part"

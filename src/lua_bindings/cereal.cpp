@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include "interface/record.h"
 #include <cstring>
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/string.hpp>
@@ -28,7 +29,25 @@ namespace lua_bindings {
 }) */
 
 static constexpr auto known_types =
-		"byte, int16_t, int32_t, double, array, unordered_map, object";
+		"byte, int16_t, int32_t, double, array, unordered_map, object, record";
+
+// {"record", major, minor, type}: an interface::Record's major and minor,
+// then its type in a byte string. Read, another major is refused and a
+// tail written by a newer minor skipped.
+// simplified: an older minor's record, with fewer fields at its end, does
+// not read; a minor that reads both is for when served Lua keeps records
+// across versions (it reads what its own server writes today)
+static void record_params(lua_State *L, int type_L, uint8_t &major,
+		uint8_t &minor)
+{
+	lua_rawgeti(L, type_L, 2);
+	lua_rawgeti(L, type_L, 3);
+	if(!lua_isnumber(L, -2) || !lua_isnumber(L, -1))
+		throw Exception("record requires {\"record\", major, minor, type}");
+	major = (uint8_t)lua_tointeger(L, -2);
+	minor = (uint8_t)lua_tointeger(L, -1);
+	lua_pop(L, 2);
+}
 
 // An array's elements all have the one type, and finding that out per element
 // is most of what decoding one costs: a std::string built from the type
@@ -196,6 +215,16 @@ static void binary_input_read_value(lua_State *L, int type_L,
 			field_i++;
 		}
 		// value_result_table_L is left on stack
+	} else if(outfield_type == "record"){
+		if(!has_table)
+			throw Exception("record requires parameter table");
+		uint8_t major = 0, minor = 0;
+		record_params(L, type_L, major, minor);
+		interface::Record<cereal::PortableBinaryInputArchive> r(ar,
+				"Lua", major, minor);
+		lua_rawgeti(L, type_L, 4);
+		binary_input_read_value(L, -1, r.ar);
+		lua_remove(L, -2); // the type; the value is left on stack
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
 				"; known types are "+known_types);
@@ -311,6 +340,19 @@ static void binary_output_write_value(lua_State *L, int value_L, int type_L,
 			}
 			lua_pop(L, 1); // Continue iterating by popping table value
 			field_i++;
+		}
+	} else if(outfield_type == "record"){
+		if(!has_table)
+			throw Exception("record requires parameter table");
+		uint8_t major = 0, minor = 0;
+		record_params(L, type_L, major, minor);
+		{
+			interface::Record<cereal::PortableBinaryOutputArchive> r(ar,
+					"Lua", major, minor);
+			lua_rawgeti(L, type_L, 4);
+			binary_output_write_value(L, value_L, -1, r.ar);
+			lua_pop(L, 1);
+			r.end();
 		}
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""
