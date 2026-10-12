@@ -591,6 +591,8 @@ struct Module: public interface::Module, public Interface
 	storage::Store *m_store = nullptr;
 	AccessSettings m_access;
 	ss_ m_setup_code;
+	// The log has said how a locked-out operator gets back in
+	bool m_said_locked_out = false;
 	bool m_launched = false;
 	// The token the launcher started this server with (main.cpp takes it
 	// out of the environment), and the peers that showed it: the
@@ -1513,6 +1515,33 @@ struct Module: public interface::Module, public Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->set_has_admin(admin);
 		});
+		if(admin && !m_said_locked_out){
+			// [COMPAT_CHECKS]: the operator whose only admin record does
+			// not read is locked out (fail closed); how to get back in
+			sv_<ss_> unreadable_names;
+			bool readable_admin = false;
+			for(const ss_ &key : m_store->list("auth/")){
+				Account account;
+				if(!get_account(key.substr(5), account))
+					unreadable_names.push_back(key.substr(5));
+				else if(account.has("admin"))
+					readable_admin = true;
+			}
+			if(!readable_admin){
+				m_said_locked_out = true;
+				ss_ names;
+				for(const ss_ &n : unreadable_names)
+					names += (names.empty() ? "" : ", ")+n;
+				log_e(MODULE, "No admin account can be read, and %s, which "
+						"cannot (a newer Buildat's, or damaged), may be one: "
+						"the server is not offered to be claimed. To get back "
+						"in, run the Buildat that wrote it, or stop the server "
+						"and delete that row (store \"accounts\", key "
+						"\"auth/<name>\") from %s/save.sqlite; the next start "
+						"offers the server to be claimed", cs(names),
+						cs(m_save->path()));
+			}
+		}
 		if(admin){
 			m_setup_code.clear();
 			ss_ kept;
