@@ -35,7 +35,7 @@ shoot() { # <tag>
 	{ echo "wait_log 180000 chat: liquid_shore: ready"
 		# And the client's own world drawn before the shot, not only the
 		# server's light settled
-		echo "wait_log 120000 0 undrawn within 2"
+		echo "wait_log 120000 scene, 0 undrawn within 2"
 		echo "delay 8000"
 		# Straight down: the flowing row under the eye, the pool just
 		# beyond it, both flat-on and both near

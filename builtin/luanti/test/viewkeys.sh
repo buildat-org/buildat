@@ -43,7 +43,7 @@ srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
-wait_log 60000 0 undrawn within 2
+wait_log 60000 scene, 0 undrawn within 2
 # "0 undrawn" is the mesher's count, not the frame: the first picture is
 # the one the fullscreen check compares against, and taken two seconds
 # after that line it came out at a frame mean of 19 against the usual 109

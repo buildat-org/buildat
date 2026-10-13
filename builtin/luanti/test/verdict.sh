@@ -15,7 +15,7 @@ grep -a "fuzz: FAILED" "$out/srv.log" | sed 's/^.*fuzz: //' | while read -r l; d
 grep -aq "fuzz: FAILED" "$out/srv.log" && status=1
 # The world not settling in the start wait ([START_WAIT]) is a verdict
 grep -a 'wait_log: ".*" not seen' "$out/cli.log" | grep -a "undrawn\|put the player" | head -1 | sed 's/.*wait_log: /FAIL: the world did not settle: /' >&2
-grep -aq 'wait_log: "0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log" && status=1
+grep -aq 'wait_log: "scene, 0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log" && status=1
 grep -a " E " "$out/srv.log" | grep -av "fuzz:" | head -5 | sed 's/^/FAIL: server error: /' >&2
 grep -aq " E " "$out/srv.log" && status=1
 grep -aq "not held" "$out/srv.log" "$out/cli.log" && say "a held key read as not held ([HELD_KEY_FLAKE])"

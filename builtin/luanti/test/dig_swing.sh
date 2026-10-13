@@ -138,7 +138,7 @@ for GAME in ${1:-mineclone2 minetest_game ext}; do
 		echo "wait_log 60000 chat: dig_swing: the stage is laid"
 		# The world's first sending done: a chunk still on its way from
 		# before a dig shows the dug node again, and it is dug twice
-		echo "wait_log 120000 0 undrawn within 2"
+		echo "wait_log 120000 scene, 0 undrawn within 2"
 		echo "delay 3000"
 		holds
 	} > "$out/cmds.txt"

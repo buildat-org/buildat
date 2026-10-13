@@ -48,7 +48,7 @@ START_WAIT="${START_WAIT:-60}"
 awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_WAIT * 1000))" 'BEGIN {
 	srand(seed)
 	print "wait_log " wait " the server put the player"
-	print "wait_log " wait " 0 undrawn within 2"
+	print "wait_log " wait " scene, 0 undrawn within 2"
 	print "delay 2000"
 	t = 0; shot = 0; yaw = 0
 	while (t < secs) {

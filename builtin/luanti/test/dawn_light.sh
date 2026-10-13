@@ -42,7 +42,7 @@ shoot() { # <tag> <extra env>
 	local tag=$1
 	local cmds="$out/cmds_$tag.txt"
 	: > "$cmds"
-	echo "wait_log 180000 0 undrawn within 2" >> "$cmds"
+	echo "wait_log 180000 scene, 0 undrawn within 2" >> "$cmds"
 	for h in $hours; do
 		echo "wait_log 180000 chat: dawn: hour $h" >> "$cmds"
 		echo "delay 3000" >> "$cmds"

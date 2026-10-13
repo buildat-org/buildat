@@ -145,7 +145,7 @@ exec 3> "$fifo"
 # not settle. Two seconds of grace after.
 START_WAIT="${START_WAIT:-$([ -n "${NETSIM:-}" ] && echo 300 || echo 60)}"
 echo "wait_log $((START_WAIT * 1000)) the server put the player" >&3
-echo "wait_log $((START_WAIT * 1000)) 0 undrawn within 2" >&3
+echo "wait_log $((START_WAIT * 1000)) scene, 0 undrawn within 2" >&3
 echo "delay 2000" >&3
 # A client that leaves during the wait -- disconnected, crashed -- ends
 # the run there (user, 2026-09-21): a driver started after it would open
@@ -154,10 +154,10 @@ echo "delay 2000" >&3
 settled=0
 for i in $(seq 1 $((START_WAIT * 2 + 10))); do
 	kill -0 "$cli" 2>/dev/null || break
-	if grep -aq 'wait_log: "0 undrawn within 2" seen' "$out/cli.log"; then
+	if grep -aq 'wait_log: "scene, 0 undrawn within 2" seen' "$out/cli.log"; then
 		settled=1; sleep 2; break
 	fi
-	if grep -aq 'wait_log: "0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log"; then
+	if grep -aq 'wait_log: "scene, 0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log"; then
 		break
 	fi
 	sleep 1

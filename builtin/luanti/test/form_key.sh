@@ -36,7 +36,7 @@ srv=$(check_pgrep buildat_server | head -1)
 [ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
-wait_log 60000 0 undrawn within 2
+wait_log 60000 scene, 0 undrawn within 2
 delay 2000
 keypress I
 text i

@@ -108,7 +108,7 @@ srv=$(check_pgrep buildat_server | head -1)
 # the predicted line before the chunk's next update from the server.
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
-wait_log 60000 0 undrawn within 2
+wait_log 60000 scene, 0 undrawn within 2
 delay 2000
 look_dir 1 -1 0
 delay 300
