@@ -34,6 +34,12 @@ bool log_watch_seen();
 // "YYYY-MM-DD HH:MM:SS W sys: text" in UTC ([SERVER_ADMIN_PAGE]). Kept in
 // memory only, from the start.
 size_t log_problems(char *buf, size_t size);
+// How many warnings and errors have been logged, and the next one after
+// the first *since of them ("E sys: text"; the oldest kept if that one
+// has gone), *since moved past it; false when there is none newer. A
+// scripted run's error watch.
+long long log_problem_count();
+bool log_problem_after(long long *since, char *buf, size_t size);
 
 // Try to stop using malloc() and other heavyweight interfaces. Call when
 // SIGSEGV or SIGABRT occurs to make the program much more likely to be able to

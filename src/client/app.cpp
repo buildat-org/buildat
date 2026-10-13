@@ -1456,6 +1456,11 @@ struct CApp: public App, public magic::Application
 	// wait_log: the log's line count when the wait began, -1 for none
 	long long m_wait_log_since = -1;
 	int64_t m_wait_log_until_us = 0;
+	// The error watch ([CHECKS_EVENT_WAITS]): the problems logged so far
+	// that it has looked at, and the error texts the drive said to expect
+	long long m_problems_seen = 0;
+	sv_<ss_> m_expected_errors;
+	bool m_shutdown_begun = false;
 	// When the wait last said it was still waiting
 	int64_t m_wait_log_said_us = 0;
 	ss_ m_pending_screenshot;
@@ -1756,6 +1761,8 @@ struct CApp: public App, public magic::Application
 	void shutdown()
 	{
 		log_v(MODULE, "shutdown()");
+		// What the window does while it goes is not the run's
+		m_shutdown_begun = true;
 		join_texture_writer();
 		// Whatever is running has one last chance to close what it opened.
 		// A network client that vanishes without saying goodbye is left on
@@ -3200,6 +3207,10 @@ struct CApp: public App, public magic::Application
 		case Type::Delay:
 		case Type::Screenshot:
 		case Type::Look:
+		case Type::WaitLog:
+		case Type::WaitLogAny:
+		case Type::WaitLogAbsent:
+		case Type::ExpectError:
 			return true;
 		}
 		if(!ok)
@@ -3229,10 +3240,56 @@ struct CApp: public App, public magic::Application
 			m_command_seq_stdin_eof = true;
 	}
 
+	// **An unexpected error ends the run at once** ([CHECKS_EVENT_WAITS]):
+	// an error line, or the connection dropping, fails a sequence read
+	// from a file then and names the line, rather than at the next wait's
+	// timeout. An error the drive declared with expect_error passes, once.
+	// From the client's start to the start of its shutdown.
+	bool command_seq_watch()
+	{
+		if(m_command_seq_stdin || m_shutdown_begun)
+			return true;
+		char buf[700];
+		while(log_problem_after(&m_problems_seen, buf, sizeof buf)){
+			const ss_ line = buf;
+			const bool error = line.compare(0, 2, "E ") == 0;
+			if(!error && line.find("Disconnected from server") == ss_::npos)
+				continue;
+			// The sequence's own failure line is not a new one
+			if(line.find("Command sequence failed") != ss_::npos)
+				continue;
+			bool expected = false;
+			for(size_t i = 0; i < m_expected_errors.size(); i++){
+				if(line.find(m_expected_errors[i]) != ss_::npos){
+					m_expected_errors.erase(m_expected_errors.begin() + i);
+					expected = true;
+					break;
+				}
+			}
+			if(expected)
+				continue;
+			command_seq_fail("an error the drive did not expect: "+line);
+			return false;
+		}
+		return true;
+	}
+
 	void command_seq_tick()
 	{
 		using client::command_seq::Type;
 		if(!m_command_seq_active)
+			return;
+		// Declared before the watch looks: a drive's first lines can
+		// expect an error of the client's start
+		while(m_command_index < m_commands.size() &&
+				m_commands[m_command_index].type == Type::ExpectError){
+			log_i(MODULE, "command: %s", cs(client::command_seq::dump_command(
+					m_commands[m_command_index])));
+			m_expected_errors.push_back(m_commands[m_command_index].s);
+			m_command_logged_index = (int)m_command_index;
+			m_command_index++;
+		}
+		if(!command_seq_watch())
 			return;
 		client::command_seq::reassert_held_keys(GetSubsystem<magic::Input>());
 		if(!m_pending_screenshot.empty())
@@ -3256,7 +3313,13 @@ struct CApp: public App, public magic::Application
 				m_command_index++;
 				return;
 			}
-			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny){
+			if(c.type == Type::ExpectError){
+				m_expected_errors.push_back(c.s);
+				m_command_index++;
+				continue;
+			}
+			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny ||
+					c.type == Type::WaitLogAbsent){
 				if(m_wait_log_since < 0){
 					// WaitLogAny looks back over the whole run; WaitLog
 					// waits for the next line after it starts
@@ -3267,6 +3330,12 @@ struct CApp: public App, public magic::Application
 				}
 				if(log_watch_seen() ||
 						log_lines_since_contain(m_wait_log_since, c.s.c_str())){
+					if(c.type == Type::WaitLogAbsent){
+						m_wait_log_since = -1;
+						command_seq_fail("wait_log_absent: \""+c.s+
+								"\" was logged");
+						return;
+					}
 					log_i(MODULE, "wait_log: \"%s\" seen", cs(c.s));
 				} else if(now < m_wait_log_until_us){
 					// **A wait says it is waiting**, every ten seconds:
@@ -3285,6 +3354,16 @@ struct CApp: public App, public magic::Application
 								cs(itos((int)((m_wait_log_until_us - now) /
 								1000000))));
 					}
+					return;
+				} else if(c.type == Type::WaitLogAbsent){
+					log_i(MODULE, "wait_log_absent: \"%s\" not seen in %s ms",
+							cs(c.s), cs(itos(c.n)));
+				} else if(!m_command_seq_stdin){
+					// **A missed wait fails the run** ([CHECKS_EVENT_WAITS]):
+					// going on had every later wait sit out its timeout
+					m_wait_log_since = -1;
+					command_seq_fail("wait_log: \""+c.s+"\" not seen in "+
+							itos(c.n)+" ms");
 					return;
 				} else {
 					log_w(MODULE, "wait_log: \"%s\" not seen in %s ms; on",

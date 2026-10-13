@@ -189,6 +189,27 @@ which view moved and by how much. With no reference on the machine it skips
 and says so; a committed baseline is [CHECK_BASELINE]'s and wants a commit
 hash the user has picked.
 
+A drive progresses on events, not on time (the user, 2026-10-13): wait_log
+and wait_log_any are what move a sequence on. delay is for two things only:
+- what needs a length of time itself -- walking the player for a while, a
+  double click, a timeout doing what it is for;
+- a settle of at most 2 s after a wait, where a more targeted log line would
+  be awkward or spammy, or where the thing checked happens a few ticks after
+  the line.
+A delay that is neither gets a log line to wait for: one line where the thing
+happens, not a stream. A delay that stays says which kind it is in a comment
+where that is not obvious.
+
+A drive fails fast. A wait that times out fails the sequence and the client
+exits non-zero at once; a thing that must not happen is wait_log_absent. An
+error line in the client's log, or the connection dropping, fails it then and
+names the line; an error a drive provokes on purpose is declared first with
+expect_error. A timeout is a small multiple of what the event takes on the
+slowest machine the runner runs on, not a round minute. The shell side the
+same: a runner stops at its first failed step and kills what it started, and
+a runner waiting for a server, a file or a port polls that thing
+(wait_for_log in util/check_paths.sh) rather than sleeping.
+
 A drive's waits say what they are waiting for, and the line they print is in
 the log the verdict greps: a grep whose pattern the drive also carries counts
 the wait's own line and passes by itself. Filter wait_log out, or grep for the

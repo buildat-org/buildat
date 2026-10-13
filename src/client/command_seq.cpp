@@ -224,6 +224,18 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
 				return fail("wait_log <ms> <text>");
 			c.s = text;
+		} else if(cmd == "wait_log_absent"){
+			c.type = Type::WaitLogAbsent;
+			ss_ ms, text;
+			split_cmd(rest, &ms, &text);
+			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
+				return fail("wait_log_absent <ms> <text>");
+			c.s = text;
+		} else if(cmd == "expect_error"){
+			c.type = Type::ExpectError;
+			c.s = rest;
+			if(c.s.empty())
+				return fail("expect_error <text>");
 		} else if(cmd == "wait_log_any"){
 			c.type = Type::WaitLogAny;
 			ss_ ms, text;
@@ -491,6 +503,10 @@ ss_ dump_command(const Command &c)
 		return "wait_log "+itos(c.n)+" "+c.s;
 	case Type::WaitLogAny:
 		return "wait_log_any "+itos(c.n)+" "+c.s;
+	case Type::WaitLogAbsent:
+		return "wait_log_absent "+itos(c.n)+" "+c.s;
+	case Type::ExpectError:
+		return "expect_error "+c.s;
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:

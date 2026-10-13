@@ -86,10 +86,12 @@ SDL_VIDEO_X11_WMCLASS set by the caller is left alone.
 
 wait_log <ms> <text>
     Hold the sequence until the client's own log has a line containing the
-    text, or the time passes; either way a log line says so and the sequence
-    goes on. A wait for a screen or a moment instead of a guessed delay:
-    "wait_log 60000 the server put the player" and then "wait_log 60000 0
-    undrawn within 2" is the world being playable; "wait_log 90000 voxel
+    text. Not seen in the time, the sequence fails and the client exits
+    non-zero (read from standard input, a line says so and it goes on). A
+    wait for a screen or a moment instead of a guessed delay:
+    "wait_log 60000 the server put the player" and then "wait_log 60000
+    scene, 0 undrawn within 2" is the world being playable (a substring:
+    "0 undrawn" alone is also "110 undrawn"); "wait_log 90000 voxel
     types have their own textures" the same for the luanti_client extension.
 
     It waits for the *next* such line: what was logged before it started
@@ -102,6 +104,18 @@ wait_log_any <ms> <text>
     being read -- a launch UI that is slow to build says it is ready
     before the first command runs, and wait_log then sits out its whole
     timeout and every step after it runs that much late.
+
+wait_log_absent <ms> <text>
+    The time passes with no line containing the text since the command, or
+    the sequence fails: a thing that must not happen.
+
+expect_error <text>
+    The next error line containing the text is the drive's own doing.
+    Otherwise **an error line in the client's log, or the connection to the
+    server dropping, fails the sequence at once**, naming the line -- from
+    the client's start until it shuts down, for a sequence read from a file.
+    Lines at the head of the sequence are read before the client's first
+    frame, so they can expect an error of its start.
 
 screenshot <path>
     Write a PNG of the current framebuffer. Parent directories are created.

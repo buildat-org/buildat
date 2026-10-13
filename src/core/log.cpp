@@ -326,6 +326,7 @@ static void remember_line(const char *fmt, va_list va_args)
 
 static const size_t PROBLEMS_MAX = 100;
 static std::deque<std::string> problems;
+static long long problems_count = 0;
 
 static void remember_problem(int level, const char *sys, const char *fmt,
 		va_list va_args)
@@ -347,6 +348,32 @@ static void remember_problem(int level, const char *sys, const char *fmt,
 			sys+": "+text);
 	if(problems.size() > PROBLEMS_MAX)
 		problems.pop_front();
+	problems_count++;
+}
+
+long long log_problem_count()
+{
+	interface::MutexScope ms(log_mutex);
+	return problems_count;
+}
+
+bool log_problem_after(long long *since, char *buf, size_t size)
+{
+	interface::MutexScope ms(log_mutex);
+	const long long first = problems_count - (long long)problems.size();
+	const long long i = *since < first ? first : *since;
+	if(i >= problems_count)
+		return false;
+	*since = i + 1;
+	// Past the time, "E sys: text"
+	const std::string &line = problems[(size_t)(i - first)];
+	const std::string tail = line.size() > 20 ? line.substr(20) : line;
+	if(size > 0){
+		const size_t n = tail.size() < size - 1 ? tail.size() : size - 1;
+		memcpy(buf, tail.data(), n);
+		buf[n] = 0;
+	}
+	return true;
 }
 
 size_t log_problems(char *buf, size_t size)

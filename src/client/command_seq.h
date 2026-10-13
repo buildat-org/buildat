@@ -39,10 +39,17 @@ namespace command_seq
 		// client Lua to handle ([CMD_EVENT])
 		Event,
 		// wait_log <ms> <text>: the sequence held until the client's own
-		// log has a line containing the text, or the time passes (a log
-		// line says so and the sequence goes on) -- a wait for a screen or
-		// a moment instead of a guessed delay ([START_WAIT])
+		// log has a line containing the text -- a wait for a screen or a
+		// moment instead of a guessed delay ([START_WAIT]). Not seen in
+		// the time, the sequence fails ([CHECKS_EVENT_WAITS])
 		WaitLog,
+		// wait_log_absent <ms> <text>: the time passes with no such line,
+		// or the sequence fails -- a thing that must not happen
+		WaitLogAbsent,
+		// expect_error <text>: the next error line containing the text is
+		// the drive's own doing and does not fail the sequence; any other
+		// error line, or the connection dropping, does at once
+		ExpectError,
 		// **Whether the line has appeared at all in this run**, where
 		// WaitLog waits for the next one after it starts. A launch UI
 		// that says it is ready while the sequence is still being read
