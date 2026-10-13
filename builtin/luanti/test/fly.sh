@@ -56,10 +56,12 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_fly \
 port=$SERVER_PORT
 sleep 3
 srv=$(check_pgrep buildat_server | head -1)
-# Join, fly up 8 s in, keep flying; at 22 s (fly revoked at 20) press K
-# twice: off, then on again without the privilege
+# Join, fly up 8 s in, keep flying; once the client has the privileges
+# without fly (revoked 20 s after the server's join, which the client's
+# clock does not know) press K twice: off, then on again without it
 { echo "delay 8000"; echo "keypress K"; echo "delay 300"; echo "keydown Space"; echo "delay 2000"
-	echo "keyup Space"; echo "delay 12000"; echo "keypress K"; echo "delay 300"; echo "keypress K"
+	echo "keyup Space"; echo "wait_log 30000 privileges: fast, interact, noclip, shout"
+	echo "delay 300"; echo "keypress K"; echo "delay 300"; echo "keypress K"
 	echo "delay 8000"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli.log" 2>&1 &

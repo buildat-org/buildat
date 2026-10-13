@@ -13,7 +13,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_ext_settings.XXXXXX")
 cd "$here/Build"
-file=$BUILDAT_USER_PATH/luanti_client/settings.json
+file=$BUILDAT_USER_PATH/extensions/luanti_client/settings.json
 keys=$BUILDAT_USER_PATH/keys.txt
 [ -f "$file" ] && cp "$file" "$tmp/settings.bak"
 [ -f "$keys" ] && cp "$keys" "$tmp/keys.bak"
@@ -29,7 +29,7 @@ bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
 exec 3> "$fifo"
-python3 - "$tmp/cli.log" "$fifo" "$file" <<'PY'
+python3 - "$tmp/cli.log" "$fifo" "$file" "$keys" <<'PY'
 import re, sys, time, json
 log, fifo, path = sys.argv[1:4]
 w = open(fifo, "w")
@@ -105,7 +105,7 @@ if not row or not row[5].startswith("Y"): fail("the forward key did not rebind: 
 time.sleep(0.5)
 # The key store's, since 939799cf6: one override line per rebound key
 import os
-store = os.path.join(os.path.dirname(os.path.dirname(path)), "keys.txt")
+store = sys.argv[4]
 try:
     keys = open(store).read()
 except IOError:

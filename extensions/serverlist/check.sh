@@ -71,7 +71,7 @@ BUILDAT_SERVERLIST_URL=http://localhost:$port \
 	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
 	-L "$out/first.log" -c @"$out/cmds.txt" > /dev/null 2>&1
 # Rows, not newlines: the file's last row has none
-cached=$(grep -ac "|" "$out/user/serverlist/serverlist.csv" 2>/dev/null || echo 0)
+cached=$(grep -ac "|" "$out/user/extensions/serverlist/serverlist.csv" 2>/dev/null || echo 0)
 echo "the first run cached $cached servers"
 if [ "${cached:-0}" -lt 1 ]; then
 	kill "$mirror" 2>/dev/null

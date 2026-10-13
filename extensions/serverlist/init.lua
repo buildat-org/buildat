@@ -26,7 +26,7 @@ local network = require("buildat/extension/network")
 -- store, which became a Starport's once the client had talked to one, and
 -- the list was then asked of the Starport.
 local DEFAULT_URL = "https://servers.luanti.org"
--- In the extension's own storage (user/serverlist/)
+-- In the extension's own storage (user/extensions/serverlist/)
 local CACHE = "serverlist.csv"
 -- simplified: twelve, which is what a launcher's floor or grid has room
 -- for; the list has hundreds and a launcher that drew them all would be

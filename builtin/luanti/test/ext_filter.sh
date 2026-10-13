@@ -14,7 +14,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_ext_filter.XXXXXX")
 cd "$here/Build"
-file=$BUILDAT_USER_PATH/luanti_client/settings.json
+file=$BUILDAT_USER_PATH/extensions/luanti_client/settings.json
 [ -f "$file" ] && cp "$file" "$tmp/settings.bak"
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; if [ -f "$tmp/settings.bak" ]; then cp "$tmp/settings.bak" "$file"; else rm -f "$file"; fi' EXIT
 run() {   # $1 = which pass; drives one client through the python below
