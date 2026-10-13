@@ -128,7 +128,9 @@ cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
+# KEEP_SAVE=1 walks the save that is there: one an older Buildat wrote, or
+# the last run's reopened
+[ -n "${KEEP_SAVE:-}" ] || rm -rf "$BUILDAT_USER_PATH/apps/$GAME_DIR/saves/$save"
 port=$(( 29800 + (SEED % 90) ))
 srv=""; cli=""; netsim=""
 trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
