@@ -95,7 +95,7 @@ st(){ curl -s -o /dev/null -w '%{http_code}' "$1"; }
 [ "$(st "$A/api/v1/aitta/archive/$sha.zip?ticket=$ticket")" = 404 ] ||
 	fail "the ticket's second fetch"
 reqs plain "$t/plain.log" '{"cmd":"playtest","release":"tester/pt/1.0.1"}'
-grep -aq 'ai: {"error":"for the reviewers[^"]*","id":1,"ok":false' "$t/plain.log" ||
+grep -aq 'ai: {"code":"refused","error":"for the reviewers[^"]*","id":1,"ok":false' "$t/plain.log" ||
 	fail "the plain account's playtest: $(grep -a 'ai: ' "$t/plain.log" | head -2)"
 
 # 2. The admin's playtest, joined from the launcher
