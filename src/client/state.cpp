@@ -339,6 +339,7 @@ struct CState: public State
 		m_tell_after_all_files_transferred_requested = false;
 		m_connected = false;
 		m_disconnected = false;
+		m_hello_seen = false;
 		m_last_data_us = 0;
 		m_received_bytes = 0;
 		m_received_us = 0;
