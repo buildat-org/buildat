@@ -26,7 +26,7 @@ cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "a buildat server or client is already running" >&2; exit 2
 fi
-cat > "$out/fixture.lua" <<'LUA'
+{ echo "local SECONDS_EACH = $SECONDS_EACH"; cat <<'LUA'
 core.settings:set("fixed_map_seed", "5")
 local dirs = {{1, 0}, {-1, 0}, {0, 1}}
 local players, leg = {}, 0
@@ -47,11 +47,16 @@ local function move()
 end
 -- Every step's own time and the worst work between steps, said once a
 -- second (an interrupted server runs no on_shutdown)
-local steps, since = {}, 0
+local steps, since, measured = {}, 0, 0
 core.register_globalstep(function(dtime)
 	local _, _, latest = core.get_server_step_peak()
 	if #players >= 3 then
 		steps[#steps + 1] = string.format("%.4f", latest)
+		-- The shell ends the run on this line
+		measured = measured + dtime
+		if measured >= SECONDS_EACH and measured - dtime < SECONDS_EACH then
+			core.log("action", "preset_steps: done")
+		end
 	end
 	since = since + dtime
 	if since >= 1 then
@@ -74,6 +79,18 @@ core.register_on_joinplayer(function()
 	end
 end)
 LUA
+} > "$out/fixture.lua"
+
+# Waits for a line in a log, up to some seconds, while the server lives
+wait_line() { # log text seconds srv
+	local i
+	for ((i = 0; i < $3 * 5; i++)); do
+		grep -aq "$2" "$1" && return 0
+		kill -0 "$4" 2>/dev/null || return 1
+		sleep 0.2
+	done
+	return 1
+}
 
 run() { # tag preset-line-or-empty
 	local tag=$1 save=buildat_test_preset_steps_$1 port=29791
@@ -89,19 +106,26 @@ run() { # tag preset-line-or-empty
 		taskset -c 0,1 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
-	local cl=()
+	local cl=() n ok=1
 	for n in 1 2 3; do
-		{ echo "delay $(( (SECONDS_EACH + 20) * 1000 ))"; echo "quit"; } \
-			> "$out/cmds_$tag.txt"
-		taskset -c 2-$(( $(nproc) - 1 )) bin/buildat -s localhost:$port -w 320x240 -l 3 \
+		# The clients run until the measuring ends; timeout is their cap
+		taskset -c 2-$(( $(nproc) - 1 )) timeout $((SECONDS_EACH + 300)) \
+			bin/buildat -s localhost:$port -w 320x240 -l 3 \
 			-o sound_mute=1 -o default_username=ps$n \
-			-c @"$out/cmds_$tag.txt" > "$out/cli_${tag}_$n.log" 2>&1 &
+			> "$out/cli_${tag}_$n.log" 2>&1 &
 		cl+=($!)
-		sleep 2
+		# One join at a time, as before
+		wait_line "$out/srv_$tag.log" "preset_steps: joined $n" 120 $srv ||
+			{ echo "FAIL $tag: client $n did not join ($out/cli_${tag}_$n.log)"; ok=; break; }
 	done
+	[ -n "$ok" ] && { wait_line "$out/srv_$tag.log" "preset_steps: done" \
+			$((SECONDS_EACH + 120)) $srv ||
+		{ echo "FAIL $tag: the measuring did not end ($out/srv_$tag.log)"; ok=; }; }
+	kill "${cl[@]}" 2>/dev/null
 	for p in "${cl[@]}"; do wait "$p"; done
 	kill -INT "$srv" 2>/dev/null
-	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	for _i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+	[ -n "$ok" ] || return 1
 	grep -a "^buildat_preset\|^max_block" "$d/luanti/world.mt" | tr '\n' ' '; echo
 	python3 - "$out/srv_$tag.log" "$tag" <<'PY'
 import sys, re
@@ -131,6 +155,5 @@ run vps "$(printf '%s\n' "buildat_preset = VPS / Raspberry Pi" \
 	"max_block_send_distance = 4" "max_block_generate_distance = 4" \
 	"active_object_send_range_blocks = 4" "liquid_loop_max = 5000" \
 	"item_entity_ttl = 300")" || exit 1
-sleep 3
 run desktop "" || exit 1
 echo "PASS: both presets' step times are above"

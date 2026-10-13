@@ -4,7 +4,7 @@
 # covers: apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua
 # [DEBUG_INFO_PRIV]: the F5 info's position, look and seed as official
 # Luanti shows them -- with the debug privilege or the basic_debug HUD
-# flag. One fixture mod, four phases a few seconds apart: the player's
+# flag. One fixture mod, four phases the client asks for in turn: the player's
 # privileges cut to interact and shout and basic_debug turned off; debug
 # granted; debug revoked; the flag back on. At each phase the client's
 # F5 text, both levels, from its log: no place in 1 and 3, the place in
@@ -19,40 +19,44 @@ check_tmp debug_info_priv; t=$CHECK_TMP
 lsrv=
 trap '[ -n "$lsrv" ] && kill $lsrv 2>/dev/null; check_cleanup' EXIT
 cat > "$t/fixture.lua" <<'L'
-core.register_on_joinplayer(function(player)
-	local name = player:get_player_name()
-	local function phase(n, at, f)
-		core.after(at, function()
-			local p = core.get_player_by_name(name)
-			if not p then return end
-			f(p)
-			core.after(1, function() core.chat_send_player(name, "dp: " .. n) end)
-		end)
-	end
-	local function priv(on)
-		local privs = core.get_player_privs(name)
-		privs.debug = on or nil
-		core.set_player_privs(name, privs)
-	end
-	-- Late enough that the client is in: a phase sent while it loads
-	-- arrives with the next
-	phase(1, 15, function(p)
+-- A phase by chat, "/dp <n>", asked for by the client once it is in and
+-- has read the last one; said a second on, after what it changed
+local function priv(name, on)
+	local privs = core.get_player_privs(name)
+	privs.debug = on or nil
+	core.set_player_privs(name, privs)
+end
+local phases = {
+	function(name, p)
 		-- Buildat's own admin has every privilege (bootstrap.lua)
 		if core.__set_admin then core.__set_admin(name, false) end
 		core.set_player_privs(name, {interact = true, shout = true})
 		p:hud_set_flags({basic_debug = false})
-	end)
-	phase(2, 21, function() priv(true) end)
-	phase(3, 27, function() priv(false) end)
-	phase(4, 33, function(p) p:hud_set_flags({basic_debug = true}) end)
-end)
+	end,
+	function(name) priv(name, true) end,
+	function(name) priv(name, false) end,
+	function(name, p) p:hud_set_flags({basic_debug = true}) end,
+}
+core.register_chatcommand("dp", {func = function(name, param)
+	local n = tonumber(param)
+	local p = core.get_player_by_name(name)
+	if not (n and phases[n] and p) then
+		return false, "dp: no phase " .. param
+	end
+	phases[n](name, p)
+	core.after(1, function() core.chat_send_player(name, "dp: " .. n) end)
+	return true
+end})
 L
 # The client's F5 pressed once and twice at each phase, then back to off
 {
+	echo "wait_log_any 60000 the world is in"; echo "delay 500"
 	for n in 1 2 3 4; do
-		echo "wait_log 120000 dp: $n"; echo "delay 1000"
-		echo "keypress F5"; echo "delay 600"; echo "keypress F5"; echo "delay 600"
-		echo "keypress F5"; echo "delay 300"
+		echo "keypress T"; echo "wait_log 5000 chat: the line opened"
+		echo "text /dp $n"; echo "keypress Return"
+		# A settle after the line: the phase's privileges in the frames after it
+		echo "wait_log 10000 dp: $n"; echo "delay 300"
+		for _ in 1 2 3; do echo "keypress F5"; echo "wait_log 5000 debug info:"; done
 	done
 	echo quit
 } > "$t/cmds"
@@ -85,7 +89,8 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/v.log" \
 CHECK_PIDS+=($SERVER_PID)
 run_client 60 "$t/vc.log" timeout 240 "$here/Build/bin/buildat" \
 	-C "$t/vnc" -D "$t/vnu" -s 127.0.0.1:$SERVER_PORT -w 800x450 -u 1 -l 3 \
-	-o sound_mute=1 -c @"$t/cmds"
+	-o sound_mute=1 -c @"$t/cmds" ||
+	fail "vanilla's drive ($t/vc.log): $(grep -a "Command sequence failed\|run_client:" "$t/vc.log" | tail -1)"
 judge "$t/vc.log" "vanilla : b/.*\| step:" "seed: |\| chunk |yaw: " ||
 	fail "vanilla's F5 ($t/vc.log)"
 echo "ok: vanilla"
@@ -105,18 +110,20 @@ P=$((30200 + RANDOM % 300))
 LUANTI_GAME_PATH="$t/games" MINETEST_GAME_PATH="$t/games" \
 	luanti --server --world "$t/w" --port $P > "$t/l.log" 2>&1 &
 lsrv=$!
-for _ in $(seq 60); do
+for _ in $(seq 150); do
 	grep -q "listening on" "$t/l.log" && break
 	kill -0 $lsrv 2>/dev/null || fail "luanti died ($(tail -3 "$t/l.log"))"
-	sleep 0.5
+	sleep 0.2
 done
+grep -q "listening on" "$t/l.log" || fail "luanti did not come up ($t/l.log)"
 mkdir -p "$t/lcl"
 now=$(date +%s)
 echo "\"true\",\"udp://127.0.0.1:$P\",\"\",\"$now\",\"$now\",\"\",\"\",\"\"" \
 	> "$t/lcl/network_addresses.csv"
 (cd "$here/Build" && BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 \
 	BUILDAT_LUANTI_NAME=dpcheck timeout 240 bin/buildat -m luanti_client \
-	-D "$t/lcl" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/lc.log" 2>&1)
+	-D "$t/lcl" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/lc.log" 2>&1) ||
+	fail "luanti_client's drive ($t/lc.log): $(grep -a "Command sequence failed" "$t/lc.log" | tail -1)"
 judge "$t/lc.log" "luanti_c: F5: " "yaw: |looking " ||
 	fail "luanti_client's F5 ($t/lc.log)"
 echo "PASS: vanilla's and luanti_client's F5 hide the place without debug or basic_debug"

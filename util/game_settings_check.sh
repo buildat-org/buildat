@@ -31,6 +31,7 @@ trap 'kill $pids 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf
 fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here/Build"
 client(){ timeout 240 bin/buildat -o launch_ui=launch_menu -w 1100x1000 -u 1 -l 3 -o sound_mute=1 "$@"; }
+drove(){ grep -a "Command sequence failed\|run_client:" "$1" | tail -1; }
 seen(){ grep -aq "$1" "$2" || fail "$3 (no \"$1\" in $2: $(grep -a "Command seq\|click:\|failed" "$2" | tail -2))"; }
 
 a=$t/u/dev_apps/gscheck
@@ -57,6 +58,7 @@ local function open()
 		ui.dropdown("Own value", {{"one", "1"}, {"two", "2"}},
 				buildat.storage_read("own") or "1", function(v)
 			buildat.storage_write("own", v)
+			log:info("gscheck: own " .. v)
 		end)
 	end}, {title = "Broken", draw = function() error("broken on purpose") end}}}
 end
@@ -77,22 +79,22 @@ wait_log 5000 Game settings shown
 delay 1000
 screenshot $t/g_window.png
 click DropDownList "▼" 668 251
-delay 500
+wait_log 5000 dropdown_
 keypress Down
 keypress Return
-delay 500
+wait_log 5000 gscheck: own 2
 click DropDownList "▼" 668 591
-delay 500
+wait_log 5000 dropdown_
 keypress Down
 keypress Return
-delay 500
+wait_log 5000 dropdown_
 click Button "Key bindings..."
 wait_log 5000 Game keys shown
 delay 500
 click Button "Jump"
-delay 300
+wait_log 5000 Jump waits for a key
 keypress J
-delay 500
+wait_log 5000 Game keys: Jump = J
 keypress Escape
 wait_log 5000 Game keys closed
 delay 500
@@ -103,64 +105,74 @@ keypress J
 wait_log 5000 gscheck: jump pressed
 quit
 C
-client -C "$t/cg" -D "$t/u" -a dev/gscheck/play -c @"$t/g1.cmds" > "$t/g1.log" 2>&1
+client -C "$t/cg" -D "$t/u" -a dev/gscheck/play -c @"$t/g1.cmds" > "$t/g1.log" 2>&1 ||
+	fail "the gscheck drive ($t/g1.log: $(drove "$t/g1.log"))"
 seen "Game settings shown: Own, Broken, Sound" "$t/g1.log" "the window did not show its sections"
 seen "A settings section failed: .*broken on purpose" "$t/g1.log" "the broken section was not caught"
 seen "gscheck: closed, jump J" "$t/g1.log" "the key was not rebound"
 seen "gscheck: jump pressed" "$t/g1.log" "the rebound key did nothing"
 printf 'wait_log 60000 gscheck: max_fps\nquit\n' > "$t/g2.cmds"
-client -C "$t/cg" -D "$t/u" -a dev/gscheck/play -c @"$t/g2.cmds" > "$t/g2.log" 2>&1
+client -C "$t/cg" -D "$t/u" -a dev/gscheck/play -c @"$t/g2.cmds" > "$t/g2.log" 2>&1 ||
+	fail "the gscheck restart ($t/g2.log: $(drove "$t/g2.log"))"
 seen "gscheck: max_fps [0-9]*, jump J, own 2" "$t/g2.log" "the settings did not stay"
+
+# The "dropdown_" waits above: ui_utils' "dropdown_<n> open" and
+# "... closed", said as a popup opens and closes
 
 # 2
 cat > "$t/f.cmds" <<C
-wait_log 120000 Plan picker:
+wait_log 60000 Plan picker:
 delay 1000
 text p1
 keypress Return
 wait_log 20000 Entered the plan p1
 delay 2000
 keypress Escape
-delay 1000
+wait_log 5000 Pause menu shown
 click Button "Client settings..."
 wait_log 5000 Game settings shown
 delay 1000
 screenshot $t/f_window.png
 mouse_pos 550 500
 $(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+# the wheel's frames: the scrolls read before the click looks for its button
 delay 500
 click Button "Server..."
-delay 1500
+wait_log 5000 server window: Server Buildat
+delay 1000
 screenshot $t/f_server.png
 keypress Escape
-delay 1500
+wait_log 5000 Game settings shown
+delay 500
 mouse_pos 550 500
 $(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+# the wheel's frames: the scrolls read before the click looks for its button
 delay 500
 click Button "Open to LAN"
 wait_log 10000 Open to LAN: Open to the LAN at
 delay 500
 screenshot $t/f_lan.png
 keypress Escape
-delay 1500
+wait_log 5000 Pause menu shown
+delay 1000
 screenshot $t/f_pause.png
 click Button "Client settings..."
 quit
 C
 BUILDAT_FP_NAME=owner client -C "$t/cf" -D "$t/uf" -a app/floorplanner/play \
-	-c @"$t/f.cmds" > "$t/f.log" 2>&1
+	-c @"$t/f.cmds" > "$t/f.log" 2>&1 ||
+	fail "floorplanner's drive failed ($t/f.log: $(drove "$t/f.log"))"
 seen "Game settings shown: Floor planner, Sound" "$t/f.log" "floorplanner's window"
 [ "$(grep -ac "Game settings shown: " "$t/f.log")" = 3 ] ||
 	fail "Escape in the Server window did not come back to the settings"
 seen "Open to LAN: listening at" "$t/f.log" "Open to LAN from the settings"
-grep -a "Command sequence failed" "$t/f.log" && fail "floorplanner's drive failed"
 
 # 3
 cat > "$t/v.cmds" <<C
-wait_log 120000 the server put the player at
-delay 10000
+wait_log 60000 the server put the player at
+wait_log 60000 scene, 0 undrawn within 2
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
 click Button "Settings..."
 wait_log 5000 Game settings shown
 delay 1000
@@ -177,7 +189,8 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=gsworld start_server "$t/v.log" 
 	fail "the vanilla server did not start"
 pids="$SERVER_PID"
 client -C "$t/cvc" -D "$t/uvc" -s 127.0.0.1:"$SERVER_PORT" \
-	-c @"$t/v.cmds" > "$t/vc.log" 2>&1
+	-c @"$t/v.cmds" > "$t/vc.log" 2>&1 ||
+	fail "vanilla's drive ($t/vc.log: $(drove "$t/vc.log"))"
 grep -aq "Game settings shown: View, Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
 	fail "vanilla's Settings... ($(grep -a "Game settings shown\|Command seq" "$t/vc.log" | tail -2))"
 kill $pids; pids=

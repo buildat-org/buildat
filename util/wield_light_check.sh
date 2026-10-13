@@ -107,20 +107,25 @@ L
 printf "load_mod_wield_light = true\n" > "$d/apps/vanilla/saves/wl/luanti/world.mt"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=wl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 180 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
+# The first line after the world's start and the room's emerge, the
+# others seconds apart (the fixture's own timers: the light's change
+# reaching the client). The 500 ms after each is the frame drawn.
 {
+	first=180000
 	for p in dark torch away; do
-		echo "wait_log 300000 chat: wl: $p"; echo "delay 500"
+		echo "wait_log $first chat: wl: $p"; echo "delay 500"
 		echo "screenshot $t/$p.png"
+		first=30000
 	done
-	echo "delay 500"; echo quit
+	echo "wait_log 20000 Wrote screenshot $t/away.png"; echo quit
 } > "$t/cmds"
-run_client 60 "$t/cl.log" timeout 400 "$here/Build/bin/buildat" \
+run_client 60 "$t/cl.log" timeout 300 "$here/Build/bin/buildat" \
 	-C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 640x360 -u 1 -l 3 \
-	-o sound_mute=1 -c @"$t/cmds"
+	-o sound_mute=1 -c @"$t/cmds" || fail "the drive ($t/cl.log)"
 grep -aq "wl: vl_wieldlight false" "$t/srv.log" ||
 	fail "vl_wieldlight not turned off ($t/srv.log)"
 w=$(grep -ao "wl: walked .*" "$t/srv.log" | tail -1)

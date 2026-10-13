@@ -36,7 +36,7 @@ export BUILDAT_CONNECT_PORTS="$SP1,$SP2,$AN"
 cd "$here"
 for n in 1 2; do
 	p=$(eval echo \$SP$n)
-	start_server "$t/sp$n.log" "setup code" 120 $p \
+	start_server "$t/sp$n.log" "setup code" 60 $p \
 		Build/bin/buildat_server -m apps/starport -D "$t/sp$n" -l 3 ||
 		fail "Starport $n did not start"
 	CHECK_PIDS+=($SERVER_PID)
@@ -51,24 +51,26 @@ cat > "$t/h/apps/hearth/starport.json" <<J
   "gambling": "no", "personal_data": "no"}}
 J
 hearth(){ # log
-	start_server "$1" "STATUS Listening" 120 $AN \
+	start_server "$1" "STATUS Listening" 60 $AN \
 		Build/bin/buildat_server -m apps/hearth -D "$t/h" -l 3 ||
 		fail "Hearth did not start ($1)"
 	CHECK_PIDS+=($SERVER_PID)
 }
 hearth "$t/h1.log"
-for _ in $(seq 180); do
+for _ in $(seq 450); do
 	[ "$(cat "$t/sp1.log" "$t/sp2.log" | grep -c "verified ok")" -ge 2 ] && break
-	sleep 1
+	sleep 0.2
 done
 [ "$(cat "$t/sp1.log" "$t/sp2.log" | grep -c "verified ok")" -ge 2 ] ||
 	fail "not listed on both ($t/h1.log)"
-# A client: name, then env; the sequence in $t/cmds unless one is given
-seq_default='delay 6000
-quit'
-join(){ # log name, env...
-	local n=$1; shift
-	printf '%s\n' "${CMDS:-$seq_default}" > "$t/$n.cmds"
+# A client: name, the line its run ends at, then env; the sequence in
+# $CMDS instead when one is given. On a login the server sends the
+# result ("Joined as" or "Login refused: "), the linked IDs and then a
+# link's result.
+join(){ # log name, until, env...
+	local n=$1 until=$2; shift 2
+	printf '%s\n' "${CMDS:-wait_log_any 30000 $until
+quit}" > "$t/$n.cmds"
 	env "$@" timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/c_$n" \
 		-w 800x600 -l 3 -s 127.0.0.1:$AN -c @"$t/$n.cmds" > "$t/$n.log" 2>&1
 	grep -a "Command sequence failed" "$t/$n.log" && fail "$n: the drive ($t/$n.log)"
@@ -78,7 +80,7 @@ has(){ # log name, text
 	grep -aqF "$2" "$t/$1.log" || fail "$1: no \"$2\" ($t/$1.log)"
 }
 setup=$(grep -ao "setup code [A-Z0-9]*" "$t/h1.log" | tail -1 | cut -d' ' -f3)
-join admin BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
+join admin "admin script: done" BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup \
 	BUILDAT_HEARTH_ADMIN="add erin erinpass123
 add finn finnpass123"
@@ -118,22 +120,22 @@ print(" ".join(out))
 PY
 )
 [ -n "${tok_d:-}" ] || fail "the IDs' tokens ($t/h/apps/hearth/starport_claim.txt)"
-join id_a BUILDAT_HEARTH_STARPORT=$tok_a
+join id_a "Login refused: " BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a "Login refused: The name erin is taken on this server"
 # [SECURITY_RUN_5] A client's placeholder name is no ID's account either
-join id_d BUILDAT_HEARTH_STARPORT=$tok_d
+join id_d "Login refused: " BUILDAT_HEARTH_STARPORT=$tok_d
 has id_d 'Login refused: "client42" is kept for a client'
-join wrong BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=wrongpass1 \
+join wrong "Login refused: " BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=wrongpass1 \
 	BUILDAT_HEARTH_STARPORT=$tok_a
 has wrong "Login refused: Wrong password"
-join claim BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erinpass123 \
+join claim "link result: " BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erinpass123 \
 	BUILDAT_HEARTH_STARPORT=$tok_a
 has claim "Joined as erin"
 has claim "link result: The Starport ID is linked"
 has claim "linked Starport IDs: 127.0.0.1"
-join id_a2 BUILDAT_HEARTH_STARPORT=$tok_a
+join id_a2 "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a2 "Joined as erin"
-join other BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
+join other "Login refused: " BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_STARPORT=$tok_a
 has other "Login refused: That Starport ID is another account's here"
 echo "ok: refused by name, a wrong password links nothing, the password links, the ID then joins, another account's password refused"
@@ -150,21 +152,21 @@ CMDS="wait_log 30000 Login refused: TOTP: enter
 delay 1000
 text $code
 keypress Return
-delay 4000
-quit" join totp BUILDAT_HEARTH_NAME=finn BUILDAT_HEARTH_PASSWORD=finnpass123 \
+wait_log 20000 link result: 
+quit" join totp - BUILDAT_HEARTH_NAME=finn BUILDAT_HEARTH_PASSWORD=finnpass123 \
 	BUILDAT_HEARTH_STARPORT=$tok_c
 has totp "Joined as finn"
 has totp "link result: The Starport ID is linked"
 echo "ok: with TOTP, the code page's code links"
-join claim_b BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erinpass123 \
+join claim_b "link result: " BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erinpass123 \
 	BUILDAT_HEARTH_STARPORT=$tok_b
 has claim_b "linked Starport IDs: 127.0.0.1 localhost"
-join id_b BUILDAT_HEARTH_STARPORT=$tok_b
+join id_b "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_b
 has id_b "Joined as erin"
-join id_a3 BUILDAT_HEARTH_STARPORT=$tok_a
+join id_a3 "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a3 "Joined as erin"
 echo "ok: a second Starport's ID linked beside the first, each joins"
-join ban BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
+join ban "admin script: done" BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_ADMIN="ban erin on"
 has ban "admin result: erin was banned"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -180,18 +182,19 @@ c.commit()
 PY
 # A start announces at once, with the bans
 hearth "$t/h3.log"
-join id_c BUILDAT_HEARTH_STARPORT=$tok_c
+join id_c "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_c
 has id_c "Joined as finn"
 has id_c "linked Starport IDs: 127.0.0.1"
 echo "ok: a single link of before read as its Starport's"
 for n in 1 2; do
 	ok=
-	for _ in $(seq 60); do
+	# The ban report in the Starport's store, polled
+	for _ in $(seq 300); do
 		for f in $(find "$t/sp$n" -name save.sqlite); do
 			[ "$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT count(*) FROM store WHERE store='ban_reported'\").fetchone()[0])" "$f" 2>/dev/null)" -ge 1 ] && ok=1
 		done
 		[ -n "$ok" ] && break
-		sleep 1
+		sleep 0.2
 	done
 	[ -n "$ok" ] || fail "Starport $n has no ban report ($t/h3.log)"
 done

@@ -28,7 +28,7 @@ export BUILDAT_CONNECT_PORTS="$SP,$AI"
 cd "$here"
 page(){ curl -s -m 10 "http://127.0.0.1:$1"; }
 
-start_server "$t/sp.log" "setup code" 120 $SP \
+start_server "$t/sp.log" "setup code" 60 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$t/sp" -l 3 ||
 	fail "the Starport did not start ($t/sp.log)"
 pids+=($SERVER_PID)
@@ -45,7 +45,12 @@ J
 Build/bin/buildat_server -m apps/aitta -D "$t/ai" -P $AI -l 3 \
 	> "$t/ai.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 180); do grep -q "verified ok" "$t/sp.log" && break; sleep 1; done
+ai=$!
+for _ in $(seq 300); do
+	grep -q "verified ok" "$t/sp.log" && break
+	kill -0 $ai 2>/dev/null || fail "the Aitta ($t/ai.log)"
+	sleep 0.2
+done
 grep -q "verified ok" "$t/sp.log" || fail "the Aitta's listing ($t/sp.log)"
 
 # Aitta's page before anything is published, and the web client's
@@ -60,13 +65,16 @@ grep -q "Nothing is published" <<< "$(page $AI/index.html)" &&
 # The Aitta's listing claimed, so the Starport lists it; tester bound to a
 # key on the Aitta
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$t/ai/apps/aitta/starport_claim.txt")
-printf 'delay 6000\nquit\n' > "$t/cmds"
+# Until the last request is answered
+printf 'wait_log_any 30000 "id":3,\nquit\n' > "$t/cmds"
+printf 'wait_log_any 30000 "id":1,\nquit\n' > "$t/cmds1"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false,\"page_delay\":0}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds" > "$t/sp_admin.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$t/cmds" > "$t/sp_admin.log" 2>&1 ||
+	fail "the Starport admin's run ($t/sp_admin.log)"
 page $SP/api/v1/list | grep -q "Shop <script>" || fail "the claim ($t/sp_admin.log)"
 Build/bin/buildat aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 ca=$(grep -ao "setup code [A-Z0-9]*" "$t/ai.log" | cut -d' ' -f3)
@@ -74,7 +82,8 @@ BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass
 	BUILDAT_AITTA_CODE=$ca \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds" > "$t/cl_a.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds1" > "$t/cl_a.log" 2>&1 ||
+	fail "the Aitta admin's run ($t/cl_a.log)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind ($t/cl_a.log)"
 mkdir -p "$t/demo/main" "$t/demo/launcher"
 echo 'int x;' > "$t/demo/main/main.cpp"
@@ -95,7 +104,8 @@ grep -q "Nothing is published here yet" <<< "$(page $AI/)" ||
 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_REQS='{"cmd":"set_settings","settings":{"page_delay":0}}' \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds" > "$t/cl_a2.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$AI -c @"$t/cmds1" > "$t/cl_a2.log" 2>&1 ||
+	fail "the Aitta admin's second run ($t/cl_a2.log)"
 grep -aq '"page_delay":0' "$t/cl_a2.log" || fail "set_settings ($t/cl_a2.log)"
 
 p=$(page $AI/)

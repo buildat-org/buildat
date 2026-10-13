@@ -64,7 +64,7 @@ LUA
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 300 "$port" \
+	start_server "$out/srv.log" "Mods loaded" 120 "$port" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 	[ $? = 1 ] || exit 1 # its own verdict below
 srv=$SERVER_PID
@@ -72,17 +72,25 @@ if ! grep -aq "Mods loaded" "$out/srv.log"; then
 	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 	echo "SKIP: the server did not come up" >&2; exit "$SKIP"
 fi
-{ echo "wait_log 120000 footstep: the player is on"
-	echo "delay 4000"
+# On the platform (the fixture's line is the server's): placed, the world
+# around drawn, a second to land; then the five seconds of W
+{ echo "wait_log 60000 the server put the player"
+	echo "wait_log 60000 scene, 0 undrawn within 2"
+	echo "delay 1000"
 	echo "keydown W"
+	# A timing test: walks 5 s
 	echo "delay 5000"
 	echo "keyup W"
-	echo "delay 500"
 	echo "quit"; } > "$out/cmds.txt"
 run_client 60 "$out/cli.log" timeout 240 bin/buildat -s "localhost:$port" \
 	-w 640x400 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
+rc=$?
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+if [ $rc != 0 ]; then
+	echo "FAIL: the drive ($out/cli.log): $(grep -a "Command sequence failed\|run_client:" "$out/cli.log" | tail -1)"
+	exit 1
+fi
 had=$(grep -ac "nodes with a footstep" "$out/cli.log")
 known=$(grep -a "nodes with a footstep" "$out/cli.log" | head -1 |
 	sed -n 's/.*predictions, \([0-9]*\) nodes with a footstep.*/\1/p')

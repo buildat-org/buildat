@@ -35,11 +35,12 @@ server(){ # log, extra args...
 server "$t/s1.log"
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/s1.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/s1.log)"
-printf 'delay 1500\nquit\n' > "$t/seq"
+printf 'wait_log_any 20000 Joined as erin\nquit\n' > "$t/seq"
 BUILDAT_FP_NAME=erin BUILDAT_FP_PASSWORD=rightpass123 BUILDAT_FP_CREATE=1 \
 BUILDAT_FP_CODE=$code run_client 40 "$t/mk.log" timeout 40 \
 	"$here/Build/bin/buildat" -o launch_ui=launch_menu -s 127.0.0.1:$SERVER_PORT \
-	-D "$t/mk" -C "$t/mk.cache" -w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq"
+	-D "$t/mk" -C "$t/mk.cache" -w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" ||
+	fail "the account's client ($t/mk.log): $(grep -a "Command sequence failed" "$t/mk.log" | tail -1)"
 grep -aqF "Joined as erin" "$t/mk.log" || fail "the account ($t/mk.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 db=$(find "$t/s" -path '*_server*' -name save.sqlite | head -1)
@@ -66,11 +67,16 @@ PY
 BUILDAT_TOTP_WAIT_S=20 server "$t/s2.log" -W "$here/web"
 # CSS pixels in web_drive's 1200x800: the name field at (600, 326), the
 # password at (600, 399); with an error line the window is taller, and
-# they are at y 291 and 364
+# they are at y 291 and 364. The 25 s: the code wait of 20 s running out
+# (a timing test). The waits after a click or a typed name are the click's
+# frames: the field takes the focus and its stand-in input (synced each
+# frame) a frame or two later, and an eval or a click right away would read
+# the old one. Those after a waitlog are settles after the line: the code
+# page's field focused in the frames after the refusal is logged.
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "hello: Starport", 120], ["wait", 2000],
+ ["waitlog", "hello: Starport", 60], ["wait", 2000],
  ["click", 600, 326], ["wait", 500],
  ["eval", "'field ' + document.activeElement.id + ' ' + document.activeElement.getAttribute('autocomplete')"],
  ["type", "erin"], ["wait", 300],
@@ -80,18 +86,18 @@ cat > "$t/steps.json" <<J
  ["waitlog", "Login refused: TOTP: enter", 30], ["wait", 500],
  ["eval", "'field ' + document.activeElement.id + ' ' + document.activeElement.getAttribute('autocomplete')"],
  ["nav", "\${URL}"],
- ["waitlog", "Login refused: TOTP: enter", 120], ["wait", 1000],
+ ["waitlog", "Login refused: TOTP: enter", 60], ["wait", 1000],
  ["eval", "'field ' + document.activeElement.id + ' ' + document.activeElement.getAttribute('autocomplete') + ' after the reload'"],
  ["wait", 25000],
  ["nav", "\${URL}"],
- ["waitlog", "Login refused: The wait for the code has ended", 120], ["wait", 1000],
+ ["waitlog", "Login refused: The wait for the code has ended", 60], ["wait", 1000],
  ["click", 600, 291], ["wait", 500],
  ["eval", "'name ' + document.activeElement.value"],
  ["click", 600, 364], ["wait", 500],
  ["type", "rightpass123"], ["key", "Enter"],
  ["waitlog", "Login refused: TOTP: enter", 30],
  ["nav", "\${URL}"],
- ["waitlog", "Login refused: TOTP: enter", 120], ["wait", 1000],
+ ["waitlog", "Login refused: TOTP: enter", 60], ["wait", 1000],
  ["type", "$(totp 500000)"], ["key", "Enter"],
  ["waitlog", "Login refused: TOTP: wrong code", 30], ["wait", 1000],
  ["type", "$(totp 0)"], ["key", "Enter"],

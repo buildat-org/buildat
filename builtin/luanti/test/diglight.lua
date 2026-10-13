@@ -92,8 +92,17 @@ core.register_on_joinplayer(function(player)
 				player:set_pos({x = p.x, y = p.y + 0.5, z = p.z})
 				core.log("action", "diglight: player moved back to the start")
 			end
+			-- The client's reads are on these, its "chat: diglight: t=15" lines
+			local name = player:get_player_name()
+			if t == 15 or t == 70 or t == 115 or t == 135 then
+				core.chat_send_player(name, "diglight: t=" .. t)
+			end
 			if t < 145 then
 				core.after(1, tick)
+			else
+				core.after(10, function()
+					core.chat_send_player(name, "diglight: t=155")
+				end)
 			end
 		end
 		core.after(1, tick)

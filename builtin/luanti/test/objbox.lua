@@ -15,8 +15,12 @@ core.register_entity(":objbox:dummy", {
 		selectionbox = {-0.312, 0, -0.312, 0.312, 1.8, 0.312},
 		physical = false,
 	},
-	on_punch = function()
+	on_punch = function(_, puncher)
 		core.log("action", "objbox: dummy punched")
+		-- The drive waits for this line
+		if puncher and puncher:is_player() then
+			core.chat_send_player(puncher:get_player_name(), "objbox: dummy punched")
+		end
 	end,
 })
 -- A dropped item as Luanti's builtin one draws it; VoxeLibre's own are not

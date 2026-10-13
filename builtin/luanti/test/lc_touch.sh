@@ -99,38 +99,55 @@ EOF
 printf 'mute_sound = true\n' > "$out/luanti.conf"
 "$bin" --server --world "$out/world" --port $LUANTI --config "$out/luanti.conf" \
 	> "$out/luanti.log" 2>&1 &
-pids+=($!)
+lpid=$!
+pids+=($lpid)
 mkdir -p "$out/list"
 printf '{"list": []}' > "$out/list/list"
 python3 -m http.server -b 127.0.0.1 -d "$out/list" $LIST > "$out/list.log" 2>&1 &
 pids+=($!)
 cd "$here"
 BUILDAT_CONNECT_PORTS=$LIST BUILDAT_LUANTI_LIST=http://127.0.0.1:$LIST \
-start_server "$out/play.log" "Listening at" 120 $PLAY \
+start_server "$out/play.log" "Listening at" 60 $PLAY \
 	Build/bin/buildat_server -m apps/play -D "$out/playsrv" -l 3 ||
 	fail "apps/play ($out/play.log)"
 pids+=($SERVER_PID)
-for _i in $(seq 1 120); do
+for _i in $(seq 600); do
 	grep -q "Server for gameid" "$out/luanti.log" && break
-	sleep 1
+	kill -0 $lpid 2>/dev/null || break
+	sleep 0.2
 done
 grep -q "Server for gameid" "$out/luanti.log" || fail "the Luanti server ($out/luanti.log)"
 
-# 1200x800 CSS pixels; the UI is at 1.5 under touch
+# 1200x800 CSS pixels; the UI is at 1.5 under touch. A JSON step takes no
+# comment, so the waits by step: those of 2 s at most right after a waitlog
+# are settles, what the line said drawn in the frames after it (the menu
+# after its rows, the field after the self-test, the dialog after its line,
+# the chat line, the platform after "ready", the slot, the dug and the
+# placed node, the form); the 1 s at the end is a settle after the OK's
+# click, the fields it sent out before the browser closes.
+# simplified: the stick's walk and the turning drag wait 2 s each for the
+# server's answer to be drawn; no client line says the player moved or
+# turned (one on the server's position or look reaching the client would
+# replace them).
 cat > "$out/steps.json" <<EOF
 [
  ["nav", "\${URL}index.html"],
- ["wait", 15000],
- ["tap", 600, 390],
+ ["waitlog", "launch_menu: [0-9]+ rows", 120],
  ["wait", 2000],
+ ["tap", 600, 390],
+ ["waitlog", "launch_menu: [^,]+, [0-9]+ rows", 10],
+ ["wait", 1000],
  ["tap", 300, 455],
+ ["waitlog", "launch_menu: locked ", 10],
  ["wait", 1000],
  ["tap", 920, 590],
- ["wait", 3000],
+ ["waitlog", "world: self-test ok", 30],
+ ["wait", 1000],
  $(for _ in $(seq 20); do printf '["key", "Backspace"], '; done)
  ["type", "127.0.0.1:$LUANTI"],
  ["tap", 920, 697],
- ["wait", 3000],
+ ["waitlog", "Asking the user about udp://", 15],
+ ["wait", 1000],
  ["tap", 600, 517],
  ["waitlog", "Logged in", 60],
  ["waitlog", "loading done", 300],
@@ -140,7 +157,7 @@ cat > "$out/steps.json" <<EOF
  ["type", "/lc_setup"],
  ["key", "Enter"],
  ["waitlog", "lc_touch: ready", 30],
- ["wait", 5000],
+ ["wait", 2000],
  ["shot", "\${OUT}/01_ready.png"],
  ["drag", 150, 650, 150, 450, "touch"],
  ["wait", 2000],
@@ -149,26 +166,31 @@ cat > "$out/steps.json" <<EOF
  ["wait", 2000],
  ["shot", "\${OUT}/03_turned.png"],
  ["hold", 492, 768, 300],
- ["wait", 2000],
+ ["waitlog", "touch: hotbar slot 3", 10],
+ ["wait", 500],
  ["shot", "\${OUT}/04_slot.png"],
  ["hold", 600, 350, 4500],
- ["wait", 2000],
+ ["waitlog", "dug mcl_core:dirt", 10],
+ ["wait", 500],
  ["shot", "\${OUT}/05_dug.png"],
  ["tap", 600, 350],
- ["wait", 2000],
+ ["waitlog", "predicted mcl_core:stone at", 10],
+ ["wait", 1000],
  ["shot", "\${OUT}/06_placed.png"],
  ["hold", 978, 142, 300],
  ["waitlog", "chat: the line opened", 30],
  ["wait", 500],
  ["type", "/lc_form"],
  ["key", "Enter"],
- ["wait", 4000],
+ ["waitlog", "form lc_touch opened", 15],
+ ["wait", 1000],
  ["shot", "\${OUT}/07_form.png"],
  ["tap", 597, 366],
- ["wait", 500],
+ ["waitlog", "form: a left click", 10],
  ["type", "hello"],
  ["tap", 598, 446],
- ["wait", 3000]
+ ["waitlog", "form: a left click", 10],
+ ["wait", 1000]
 ]
 EOF
 TOUCH=1 WEB_DRIVE_URL="http://127.0.0.1:$PLAY/" "$here/util/web_drive.sh" firefox play \

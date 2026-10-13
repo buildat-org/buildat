@@ -31,7 +31,7 @@ fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 # and the scan found no rows. `-m launch_menu` asks for the thing the
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
-( cd "$here/Build" && bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
+( cd "$here/Build" && exec bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/cli.log" 2>&1 ) &
 cli=$!
 trap 'kill "$cli" 2>/dev/null; check_pkill buildat_server 2>/dev/null' EXIT
@@ -39,10 +39,11 @@ exec 3> "$fifo"
 python3 "$me/new_world.py" "$out/cli.log" "$fifo" "$saves"
 status=$?
 exec 3>&-
-sleep 2
-check_pkill buildat 2>/dev/null
+# The client quits on the drive's last line
+for i in $(seq 1 50); do kill -0 "$cli" 2>/dev/null || break; sleep 0.2; done
+kill "$cli" 2>/dev/null
 check_pkill buildat_server 2>/dev/null
-for i in $(seq 1 30); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do check_pgrep buildat_server >/dev/null || break; sleep 0.2; done
 # What this run made goes with it
 rm -rf "$saves/taken" "$saves/mgtest"
 exit $status

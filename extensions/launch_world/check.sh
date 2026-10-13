@@ -50,6 +50,8 @@ rm -f "$BUILDAT_USER_PATH/launch_world/room.txt"
 # (x, y, z), and a wall with no slabs in it fails here rather than in a
 # picture nobody reads
 lua "$here/extensions/launch_world/room.lua" || exit 1
+# What it starts in the background (CHECK_PIDS) is stopped at its exit
+trap check_cleanup EXIT
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
@@ -116,7 +118,10 @@ fi
 { echo "wait_log_any 30000 contents: "; echo "quit"; } > "$out/cmds_slot.txt"
 { echo "wait_log_any 30000 the launch UI is launch_menu"; echo "quit"
 	} > "$out/cmds_back.txt"
-{ echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
+# The last resort's two error lines are this run's own doing
+{ echo "expect_error the fallback launch UI launch_menu raised"
+	echo "expect_error buildat could not start"
+	echo "wait_log_any 30000 could not start a launch UI"; echo "quit"
 	} > "$out/cmds_nolauncher.txt"
 slot=$(bin/buildat -w 640x360 -l 3 -o launch_ui=launch_world 	-c @"$out/cmds_slot.txt" 2>&1 | grep -ac "launch_w.*: contents: ")
 back=$(bin/buildat -w 640x360 -l 3 -o launch_ui=nosuchthing 	-c @"$out/cmds_back.txt" 2>&1 | grep -av "wait_log" |
@@ -164,15 +169,11 @@ if [ ! -f "$here/cache/rccpp_build/main.so" ] ||
 		[ "$here/apps/vanilla/main/main.cpp" -nt \
 		"$here/cache/rccpp_build/main.so" ]; then
 	echo "warming the module cache (a cold compile is seven seconds)"
+	# Best effort: a warm that did not come up leaves the drives to say so
 	BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=zz_warm \
-		bin/buildat_server -u launcher=1 -m ../apps/vanilla -P 31877 -l 3 \
-		> "$out/warm.log" 2>&1 &
-	warm=$!
-	for i in $(seq 1 120); do
-		grep -aq "STATUS Listening\|Running world" "$out/warm.log" && break
-		sleep 1
-	done
-	kill -9 "$warm" 2>/dev/null; wait "$warm" 2>/dev/null
+		start_server "$out/warm.log" "STATUS Listening|Running world" 120 \
+		auto bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 || true
+	kill -9 "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null
 	rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/zz_warm"
 fi
 
@@ -182,6 +183,14 @@ fi
 # that only sees what comes after it then sat out its ninety seconds
 # and every step ran that much late (2026-09-24). wait_log_any counts
 # the line wherever it appeared in the run.
+#
+# **The drive moves on the room's own lines** ([CHECKS_EVENT_WAITS]):
+# "camera: landed", "browse: ", "prompt: ", "pause: open" and the
+# screenshot's "Wrote screenshot". An `event` is answered while it is
+# sent, before a wait after it starts, so its line is read with
+# wait_log_any where it is said once and not waited for at all where it
+# is said again. A delay left is a settle of a few frames after a line,
+# or a length of time the step is about.
 { echo "wait_log_any 90000 the room hums"
 	echo "delay 1200"
 	# **It starts at the wall, and Tab moves between the stations**
@@ -208,7 +217,7 @@ fi
 	echo "keypress O"
 	echo "keypress S"
 	echo "keypress T"
-	echo "delay 400"
+	echo "wait_log 5000 prompt: \"host\" matches"
 	echo "keypress Return"
 	# The room says when the attempt has failed ("connect: <name> failed:
 	# ..."), which is what the notice is drawn from, so the wait is on
@@ -217,19 +226,21 @@ fi
 	echo "delay 500"
 	echo "screenshot $out/connect-failed.png"
 	echo "wait_log 20000 Wrote screenshot $out/connect-failed.png"
+	# Whatever Escape opens or closes here, the mode event below puts
+	# right; the delay is the frames for the key to be read before it
 	echo "keypress Escape"
-	echo "delay 1500"
+	echo "delay 300"
 	echo "event mode menu"
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	# **The arrows browse the room** with the prompt empty: along a row
 	# and between the rows, the wall first and the floor's ranks after
 	echo "keypress Right"
-	echo "delay 250"
+	echo "wait_log 5000 browse: row"
 	echo "keypress Down"
-	echo "delay 250"
+	echo "wait_log 5000 browse: row"
 	echo "keypress Left"
-	echo "delay 400"
+	echo "wait_log 5000 browse: row"
 	# Back to the standing place, so every frame below has the same
 	# viewpoint as the one Escape returns to
 	echo "event mode menu"
@@ -243,7 +254,7 @@ fi
 	echo "screenshot $out/drift-b.png"
 	echo "wait_log 20000 Wrote screenshot $out/drift-b.png"
 	echo "event room still"
-	echo "delay 800"
+	echo "wait_log_any 5000 idle drift frozen"
 	# The dissolve: a bay opens and closes again. What is checked is that
 	# the wall moves and comes back -- states being configurations of one
 	# scene, the closed picture has to be the picture it was.
@@ -254,7 +265,7 @@ fi
 	# a server to start. Three letters name the empty pocket and Enter
 	# opens that one, every run.
 	echo "event room preset 1"
-	echo "delay 800"
+	echo "wait_log_any 5000 palette preset 1:"
 	# **The standing place first, and before the reference picture**
 	# ([CMD_EVENT]): the reopened picture is taken from there too, or
 	# "it comes back" compares two cameras rather than two walls
@@ -265,9 +276,10 @@ fi
 	echo "screenshot $out/dissolve-closed.png"
 	# A screenshot lands a frame or two after the command, so the next
 	# key has to wait or it is in the picture (2026-09-23)
-	echo "delay 600"
+	echo "wait_log 20000 Wrote screenshot $out/dissolve-closed.png"
 	# **By the room's own switch** ([LAUNCH_WORLD] stage 2): a launch is
-	# the animation now, and the dissolve is kept for stage 3 as an effect
+	# the animation now, and the dissolve is kept for stage 3 as an effect.
+	# The delay is the cubes' flight out, 0.9 s, and the frames after it
 	echo "event room dissolve"
 	echo "delay 1600"
 	echo "screenshot $out/dissolve-open.png"
@@ -302,7 +314,8 @@ fi
 	echo "keypress I"
 	echo "keypress N"
 	echo "keypress S"
-	echo "delay 600"
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/typed.png"
 	echo "wait_log 20000 Wrote screenshot $out/typed.png"
 	# The typing has already hopped the camera to the match; Enter on the
@@ -325,25 +338,25 @@ fi
 	echo "keypress S"
 	echo "keypress E"
 	echo "keypress T"
-	echo "delay 400"
+	echo "wait_log 5000 prompt: \"set\" matches"
 	echo "keypress Return"
+	echo "wait_log 10000 terminal: sat down"
 	echo "wait_log 20000 camera: landed"
 	echo "delay 400"
 	echo "screenshot $out/terminal.png"
+	echo "wait_log 20000 Wrote screenshot $out/terminal.png"
 	# **A setting changed and changed back.** A -w run never writes the
 	# preferences file (save_preferences stands down when the size is
 	# forced), so this asserts the change, not the file -- and the
 	# user's own settings are safe from a check.
-	echo "delay 300"
 	echo "keypress Down"
-	echo "delay 200"
 	echo "keypress Right"
+	echo "wait_log 5000 setting: "
 	echo "delay 400"
 	echo "screenshot $out/terminal-changed.png"
 	echo "wait_log 20000 Wrote screenshot $out/terminal-changed.png"
 	echo "keypress Right"
-	echo "delay 400"
-	echo "delay 400"
+	echo "wait_log 5000 setting: "
 	echo "keypress Escape"
 	echo "wait_log 20000 camera: landed"
 	echo "delay 400"
@@ -357,26 +370,32 @@ fi
 	# says which way the toggle went once it has rebuilt
 	# (set_8bit_voxel_geometry is done when rebuild_room returns), so the
 	# wait is on that and the delay after it is the frame's.
+	# (Said inside the event, so a wait that starts after it is
+	# wait_log_any; each of the two is said once a run.)
 	echo "event room ornament"
-	echo "wait_log 15000 ornament off"
+	echo "wait_log_any 5000 ornament off"
 	echo "delay 500"
 	echo "screenshot $out/no-ornament.png"
 	echo "wait_log 20000 Wrote screenshot $out/no-ornament.png"
 	echo "event room ornament"
-	echo "wait_log 15000 ornament on"
+	echo "wait_log_any 5000 ornament on"
 	echo "delay 500"
 	# The room as it is, and then the same frame with the reflection
 	# probe taken off the zone, which is what says the probe reaches the
 	# metals
 	echo "screenshot $out/room.png"
 	echo "wait_log 20000 Wrote screenshot $out/room.png"
+	# The probe is off the zone when the event returns; the delay is the
+	# frames that draw it
 	echo "event room probe"
-	echo "delay 800"
+	echo "wait_log_any 5000 reflection probe off"
+	echo "delay 300"
 	echo "screenshot $out/room-noprobe.png"
+	echo "wait_log 20000 Wrote screenshot $out/room-noprobe.png"
 	# The attract mode: left alone the room shows itself off. The drift
 	# is unfrozen for it and BUILDAT_LAUNCH_ATTRACT makes the wait short.
 	echo "event room still"
-	echo "delay 600"
+	echo "wait_log_any 5000 idle drift running"
 	# **Where the camera is, said rather than assumed** (2026-09-24):
 	# this step compares "home" against "back from the attract mode",
 	# and the room flies back to the standing place -- so if the shot
@@ -414,7 +433,8 @@ fi
 	echo "screenshot $out/prepause.png"
 	echo "wait_log 20000 Wrote screenshot $out/prepause.png"
 	echo "keypress Escape"
-	echo "delay 700"
+	echo "wait_log 5000 pause: open"
+	echo "delay 300"
 	echo "screenshot $out/paused.png"
 	echo "wait_log 20000 Wrote screenshot $out/paused.png"
 	# **The mouse does not turn the camera while a screen is up**
@@ -423,10 +443,12 @@ fi
 	# dialog has to be the frame it was. **This goes first**, before
 	# anything that moves the pointer: once the dialog is gone the
 	# mouse turns the camera again, which is the point of it.
+	# Half a second for the movement to have turned the camera, if it did
 	echo "mouse_move 220 40"
 	echo "delay 500"
 	echo "keypress Escape"
-	echo "delay 700"
+	echo "wait_log 5000 pause: closed"
+	echo "delay 300"
 	echo "screenshot $out/unpaused.png"
 	echo "wait_log 20000 Wrote screenshot $out/unpaused.png"
 	# **And the dialog answers the mouse** (the third playtest, 1):
@@ -434,15 +456,17 @@ fi
 	# to the room", which closes the dialog. Every menu this room draws
 	# has to do both; the desk's rows are the same machinery.
 	echo "keypress Escape"
-	echo "delay 700"
+	echo "wait_log 5000 pause: open"
 	echo "mouse_pos 640 400"
-	echo "delay 600"
+	echo "wait_log 5000 pause: hover on "
+	echo "delay 300"
 	echo "screenshot $out/pause-hover.png"
 	echo "wait_log 20000 Wrote screenshot $out/pause-hover.png"
 	echo "mouse_pos 640 263"
-	echo "delay 400"
+	echo "wait_log 5000 pause: hover on "
 	echo "mouse_click left"
-	echo "delay 700"
+	echo "wait_log 5000 pause: clicked"
+	echo "delay 300"
 	echo "screenshot $out/pause-clicked.png"
 	echo "wait_log 20000 Wrote screenshot $out/pause-clicked.png"
 	# **The search walks its matches and the camera follows** (the
@@ -459,11 +483,15 @@ fi
 	echo "screenshot $out/search1.png"
 	echo "wait_log 20000 Wrote screenshot $out/search1.png"
 	echo "keypress Down"
-	echo "delay 1000"
+	echo "wait_log 5000 prompt: match "
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/search2.png"
 	echo "wait_log 20000 Wrote screenshot $out/search2.png"
 	echo "keypress Down"
-	echo "delay 1000"
+	echo "wait_log 5000 prompt: match "
+	echo "wait_log 15000 camera: landed"
+	echo "delay 250"
 	echo "screenshot $out/search3.png"
 	echo "wait_log 20000 Wrote screenshot $out/search3.png"
 	echo "event mode menu"
@@ -476,22 +504,20 @@ fi
 	# its screen and the room takes it): the pause dialog's fourth item,
 	# a line typed at it, and Escape to put the room back.
 	echo "keypress Escape"
-	echo "delay 600"
+	echo "wait_log 5000 pause: open"
 	echo "keypress Down"
 	echo "keypress Down"
 	echo "keypress Down"
-	echo "delay 300"
 	echo "keypress Return"
-	echo "wait_log 15000 camera: landed"
-	echo "delay 250"
+	echo "wait_log 5000 console: over the room"
+	echo "delay 500"
 	echo "screenshot $out/room-console.png"
 	echo "wait_log 20000 Wrote screenshot $out/room-console.png"
 	echo "text buildat.version()"
-	echo "delay 300"
 	echo "keypress Return"
-	echo "delay 600"
+	echo "wait_log 5000 console: buildat.version() = "
 	echo "keypress Escape"
-	echo "delay 1200"
+	echo "wait_log 5000 console: closed"
 	echo "delay 400"
 	# **A game launched by name** -- digger, which every tree has. Last
 	# but one, because it starts a server and takes the client into the
@@ -504,7 +530,7 @@ fi
 	echo "wait_log 15000 camera: landed"
 	echo "delay 250"
 	for c in D I G G E R; do echo "keypress $c"; done
-	echo "delay 600"
+	echo "wait_log 5000 prompt: \"digger\" matches"
 	echo "keypress Return"
 	# **Wait for the launch rather than guessing at it**: on a slow
 	# machine -- a container under llvmpipe is one -- nine seconds was
@@ -517,13 +543,13 @@ fi
 	echo "wait_log 150000 game: the room stands down"
 	echo "delay 2000"
 	echo "screenshot $out/in-game.png"
+	echo "wait_log 20000 Wrote screenshot $out/in-game.png"
 	# **And back out of it** ([MENU_CONTEXT]): the room stands behind the
 	# game the whole time, so the way back is the client's own
 	# leave_to_menu plus a viewport. Escape is what drives it -- the
 	# game's own key, which every game in the tree binds to
 	# buildat.leave() ([NO_WAY_BACK]); the room has no key of its own
 	# for leaving a game any more.
-	echo "delay 400"
 	echo "keypress Escape"
 	echo "wait_log 30000 game: back in the room"
 	echo "delay 1500"
@@ -539,7 +565,7 @@ fi
 	# to go with the game's ([LAUNCH_SANDBOX]'s reset dropped every
 	# sandboxed handler, and the room is sandboxed now)
 	echo "keypress Tab"
-	echo "delay 1800"
+	echo "wait_log 15000 camera: landed"
 	# **An orb the room was asked for, in the middle of the screen**
 	# (2026-09-24): a fixed pixel was an orb only while the room held
 	# the number of orbs it held the day the pixel was written down --
@@ -556,12 +582,14 @@ fi
 	# landed on it and the orb behind it never heard (2026-09-24).
 	# Escape hides the prompt and leaves the camera where the search
 	# flew it.
+	# (Escape closing the prompt says nothing; a few frames for it, and
+	# for the pointer to be read where it was put before the click.)
 	echo "keypress Escape"
-	echo "delay 800"
+	echo "delay 300"
 	echo "mouse_pos 640 360"
-	echo "delay 400"
+	echo "delay 300"
 	echo "mouse_click left"
-	echo "delay 1200"
+	echo "wait_log 5000 : click: "
 	echo "quit"; } > "$out/cmds.txt"
 wait_quiet 40 || true
 # **Sixty seconds of silence ends it** (user, 2026-09-24): this drive is
@@ -571,7 +599,9 @@ wait_quiet 40 || true
 # and waiting out the rest of the ten is ten minutes to learn what a
 # minute already said.
 run_client 60 "$out/cli.log" timeout 600 bin/buildat -m launch_world \
- -w 1280x720 -l 3 -c @"$out/cmds.txt"
+ -w 1280x720 -l 3 -c @"$out/cmds.txt" ||
+	fail "the room's drive stopped:" \
+		"$(grep -a "Command sequence failed\|run_client\|Crash: SIG" "$out/cli.log" | tail -1)"
 # And the client has to have got to the end of the sequence
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
@@ -826,20 +856,27 @@ rm -rf "$out/cdb_mirror"; mkdir -p "$out/cdb_mirror"
 "$here/util/contentdb_mirror.sh" "$out/cdb_mirror" \
 	"$BUILDAT_USER_PATH/shared/vanilla/games/$cdb_game" Wuzzy "$cdb_game" "$cdb_game" \
 	> /dev/null || { echo "SKIP: no ContentDB mirror" >&2; exit 2; }
-pkill -f "http.server 30211" 2>/dev/null || true
+port_taken 30211 && fail "port 30211, the ContentDB mirror's, is taken"
 (cd "$out/cdb_mirror" && exec python3 -m http.server 30211 \
 	> "$out/cdb_mirror.log" 2>&1) &
 mirror=$!
-sleep 1
-{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
-	echo "event mode menu"; echo "delay 600"
+CHECK_PIDS+=($mirror)
+for i in $(seq 50); do
+	port_taken 30211 && break
+	kill -0 "$mirror" 2>/dev/null || fail "the ContentDB mirror exited ($out/cdb_mirror.log)"
+	sleep 0.2
+done
+port_taken 30211 || fail "the ContentDB mirror is not listening ($out/cdb_mirror.log)"
+{ echo "wait_log_any 60000 the room hums"
+	echo "event mode menu"; echo "wait_log 15000 camera: landed"
 	for k in C O N T E N T D B; do echo "keypress $k"; done
-	echo "delay 400"; echo "keypress Return"
+	echo "wait_log 5000 prompt: \"contentdb\" matches"; echo "keypress Return"
 	# **Wait for the game to say it has the list, not for a guess**: the
 	# server behind this screen took thirty-three seconds to listen on
 	# one run here, where the wait was twenty-five (2026-09-24)
 	echo "wait_log 90000 vanilla : menu:"
-	echo "delay 2500"; echo "event scan 8 cdb"
+	# Two seconds for the screen's rows to be laid out after the line
+	echo "delay 2000"; echo "event scan 8 cdb"
 	# **And the game's own way back reaches the room** ([MENU_CONTEXT]:
 	# a game's menu offers "back to the launcher", and `buildat.leave()`
 	# is what it calls). A sandboxed launch UI is not in the trusted
@@ -848,19 +885,23 @@ sleep 1
 	# room (2026-09-24). The row is at the bottom of vanilla's menu
 	# panel, which at this window size puts it here; a miss fails the
 	# assertion below rather than passing quietly.
-	echo "delay 1200"; echo "mouse_pos 480 457"
+	# (The pointer is read a few frames before the click.)
+	echo "mouse_pos 480 457"
 	echo "delay 300"; echo "mouse_click left"
 	# The room says when it has the screen again, which is what the six
 	# seconds here were waiting for
 	echo "wait_log 30000 game: back in the room"
-	echo "delay 1500"; echo "quit"; } > "$out/cmds_cdb.txt"
+	echo "quit"; } > "$out/cmds_cdb.txt"
 rm -f "$out/cdb_cli.log" "$out/cdb_cli_server.log"
 # The mirror's port is not one the server's box connects to by default
 # ([PROCESS_SANDBOX] A); the local server inherits this from the client
 BUILDAT_CONNECT_PORTS=30211 BUILDAT_CONTENTDB_URL=http://localhost:30211 \
 	timeout 150 bin/buildat -m launch_world -w 960x540 -l 3 \
 	-L "$out/cdb_cli.log" -c @"$out/cmds_cdb.txt" > /dev/null 2>&1
+cdb_rc=$?
 kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
+[ "$cdb_rc" = 0 ] || fail "the ContentDB drive stopped (exit $cdb_rc):" \
+	"$(grep -a "Command sequence failed" "$out/cdb_cli.log" | tail -1)"
 asked=$(grep -ac "launch_w.*: launch: ContentDB" "$out/cdb_cli.log")
 drew=$(grep -ac 'scan cdb: .*text "ContentDB: games"' "$out/cdb_cli.log")
 rows=$(grep -ac 'scan cdb: .*text "Install"' "$out/cdb_cli.log")
@@ -884,7 +925,8 @@ fi
 # next row, and Enter launches what is browsed there; and every pocket
 # is on the one wall ("f" in the bays line), the three others being cut.
 { echo "wait_log_any 90000 the room hums"; echo "delay 900"
-	echo "keypress Down"; echo "delay 700"
+	# (The delay after the browse line is the camera's hop to the row.)
+	echo "keypress Down"; echo "wait_log 5000 browse: row"; echo "delay 700"
 	echo "screenshot $out/second-row.png"
 	echo "wait_log 20000 Wrote screenshot $out/second-row.png"
 	echo "keypress Return"
@@ -892,11 +934,13 @@ fi
 	echo "delay 1200"
 	echo "keypress Escape"
 	echo "wait_log 30000 game: back in the room"
-	echo "delay 800"; echo "quit"; } > "$out/cmds_rows.txt"
+	echo "quit"; } > "$out/cmds_rows.txt"
 wait_quiet 40 || true
 run_client 60 "$out/rows_cli.log" \
 	timeout 300 bin/buildat -m launch_world -w 640x400 -l 3 \
-	-c @"$out/cmds_rows.txt" > /dev/null 2>&1
+	-c @"$out/cmds_rows.txt" > /dev/null 2>&1 ||
+	fail "the second row's drive stopped:" \
+		"$(grep -a "Command sequence failed\|run_client" "$out/rows_cli.log" | tail -1)"
 bays=$(grep -a "launch_w.*: bays " "$out/rows_cli.log" | head -1 |
 	sed 's/.*bays //')
 kinds=$(echo "$bays" | tr ' ' '\n' | grep "^[flrb]$" | sort -u | tr -d '\n')
@@ -936,16 +980,19 @@ for yaw in own 0; do
 	# nothing, and this room -- a client with no history -- has no
 	# logo-marked orb in it at all, every one of its twenty-five
 	# wearing the room's own sigil.
-	{ echo "wait_log_any 90000 the room hums"; echo "delay 1000"
-		echo "event mode menu"; echo "delay 700"
-		for c in D I G G; do echo "keypress $c"; echo "delay 120"; done
+	{ echo "wait_log_any 90000 the room hums"
+		echo "event mode menu"; echo "wait_log 15000 camera: landed"
+		for c in D I G G; do echo "keypress $c"; done
 		echo "wait_log 15000 camera: landed"
 		echo "delay 250"
 		echo "screenshot $out/mark_face_$yaw.png"
-		echo "delay 400"; echo "quit"; } > "$out/cmds_face_$yaw.txt"
-	env $extra BUILDAT_LAUNCH_HOP=2.0 bin/buildat -m launch_world \
-		-D "$out/emptyuser" -w 1280x720 -l 3 \
-		-c @"$out/cmds_face_$yaw.txt" > /dev/null 2>&1
+		echo "wait_log 20000 Wrote screenshot $out/mark_face_$yaw.png"
+		echo "quit"; } > "$out/cmds_face_$yaw.txt"
+	env $extra BUILDAT_LAUNCH_HOP=2.0 timeout 120 bin/buildat -m launch_world \
+		-D "$out/emptyuser" -w 1280x720 -l 3 -L "$out/face_$yaw.log" \
+		-c @"$out/cmds_face_$yaw.txt" > /dev/null 2>&1 ||
+		fail "the mark's face drive ($yaw) stopped:" \
+			"$(grep -a "Command sequence failed" "$out/face_$yaw.log" | tail -1)"
 done
 python3 - "$out" <<'PYMARK' || exit 1
 import sys, os
@@ -1038,18 +1085,13 @@ PYMARK
 # beginning "zz" from a session's own driving
 save=zza_launch_world_test
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
-port=31879
-BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" -l 3 \
-	> "$out/save_server.log" 2>&1 &
-maker=$!
 # What this run is for is the save's own record of which game it needs,
 # which is written as the world starts -- so that line is what it waits
 # for rather than the whole load
-for i in $(seq 1 90); do
-	grep -aq "Running world $save " "$out/save_server.log" 2>/dev/null && break
-	sleep 1
-done
+BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE="$save" \
+	start_server "$out/save_server.log" "Running world $save " 60 auto \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 || true
+maker=$SERVER_PID
 # **SIGKILL, and it is not laziness**: asked to shut down this early the
 # server aborts inside its own shutdown ("corrupted size vs. prev_size",
 # 2026-09-24) and sits in the crash handler, which hung this check for
@@ -1065,14 +1107,16 @@ fi
 # Two letters name it and nothing else in the room, Enter opens it, and
 # what is asserted is the far end: the server the room started took the
 # save's own path and drew no menu on the way.
-{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
-	echo "event mode menu"; echo "delay 600"
+{ echo "wait_log_any 60000 the room hums"
+	echo "event mode menu"; echo "wait_log 15000 camera: landed"
 	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
-	echo "delay 400"; echo "keypress Return"
+	echo "wait_log 5000 prompt: \"zza\" matches"; echo "keypress Return"
 	# **The room says when the game has the view**, which is what the ten
 	# seconds here were waiting for; the rest of a world coming up is
 	# devtest's business, not this check's
 	echo "wait_log 40000 game: the room stands down"
+	# 1.5 s for a second main:get_saves to have come and been answered,
+	# which is what the dialog assertion below reads
 	echo "delay 1500"; echo "quit"; } > "$out/cmds_save.txt"
 rm -f "$out/save_cli.log" "$out/save_cli_server.log"
 # A client that entered a game does not always get to its own quit
@@ -1083,12 +1127,12 @@ timeout 120 bin/buildat -m launch_world -w 640x400 -l 3 \
 # is about what is drawn, not about what can be reached, and a client
 # with 239 saves that can open twelve of them has lost the rest. With
 # the cap at nothing, every save is the prompt's to find.
-{ echo "wait_log_any 60000 the room hums"; echo "delay 600"
-	echo "event mode menu"; echo "delay 600"
+{ echo "wait_log_any 60000 the room hums"
+	echo "event mode menu"; echo "wait_log 15000 camera: landed"
 	echo "keypress Z"; echo "keypress Z"; echo "keypress A"
-	echo "delay 400"; echo "keypress Return"
+	echo "wait_log 5000 prompt: \"zza\" matches"; echo "keypress Return"
 	echo "wait_log 40000 game: the room stands down"
-	echo "delay 1500"; echo "quit"; } > "$out/cmds_hidden.txt"
+	echo "delay 1500"; echo "quit"; } > "$out/cmds_hidden.txt"  # as above
 rm -f "$out/hidden_cli.log" "$out/hidden_cli_server.log"
 BUILDAT_LAUNCH_SAVES=0 timeout 120 bin/buildat -m launch_world \
 	-w 640x400 -l 3 -L "$out/hidden_cli.log" \

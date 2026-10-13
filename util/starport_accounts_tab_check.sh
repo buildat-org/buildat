@@ -37,22 +37,27 @@ code=$(grep -o "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 
 # The sidebar buttons at a 1280x800 window: Overview at the top, Accounts the
 # bottom Admin entry. The first with the setup code is the admin, so the
-# Admin section (with Accounts) is there.
+# Admin section (with Accounts) is there, once the users list is in. The
+# delays: the sidebar made again the frame after the list, and a page's
+# own request answered and drawn after its line
 cat > "$t/cmds" <<EOF
-delay 6000
+wait_log_any 30000 accounts listed
+delay 1000
 mouse_pos 375 377
 mouse_click left
-delay 1200
+wait_log 5000 server window: the page
+delay 1000
 screenshot $t/acc1.png
 mouse_pos 375 96
 mouse_click left
-delay 1200
+wait_log 5000 server window: the page
+delay 1000
 screenshot $t/ov.png
 mouse_pos 375 377
 mouse_click left
-delay 1200
+wait_log 5000 server window: the page
+delay 1000
 screenshot $t/acc2.png
-delay 300
 quit
 EOF
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CREATE=1 \

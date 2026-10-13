@@ -38,44 +38,64 @@ rm -rf $BUILDAT_USER_PATH/apps/vanilla/saves/buildat_test_focus
 srv=""; cli=""
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_focus \
-	start_server "$tmp/srv.log" "Mods loaded" 200 auto \
+	start_server "$tmp/srv.log" "Mods loaded" 60 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 port=$SERVER_PORT
-sleep 3
-srv=$(check_pgrep buildat_server | head -1)
+srv=$SERVER_PID
 # Not a scripted client: one under -c keeps the cursor visible and its
 # focus forced, which is the opposite of what is tested. Killed at the end.
 bin/buildat -s "localhost:$port" -w 640x360 -l 3 \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
-for i in $(seq 1 60); do
-	grep -aq "the first placement" "$tmp/cli.log" && break
-	sleep 1
-done
-sleep 2
+wait_for_log "$tmp/cli.log" "the first placement" 60 ||
+	{ echo "FAIL: the client was not placed ($tmp/cli.log)"; exit 1; }
 # This run's client and no other window: by the client's pid, never by a
 # title, which another buildat or an editor may carry
 pid=$(check_pgrep buildat | tail -1)
 win=""
-for i in $(seq 1 20); do
+for i in $(seq 1 50); do
 	win=$(xdotool search --pid "$pid" --onlyvisible 2>/dev/null | head -1)
 	[ -n "$win" ] && break
-	sleep 1
+	sleep 0.2
 done
 [ -n "$win" ] || { echo "FAIL: no window for the client pid $pid"; exit 1; }
+# Each step waits for the client to log it, up to 5 s: the count of
+# <text> in the log above <n>. A step not seen ends the loop, and the
+# counts below say FAIL.
+seen_more()
+{
+	local j
+	for j in $(seq 1 25); do
+		[ "$(grep -ac "$1" "$tmp/cli.log")" -gt "$2" ] && return 0
+		kill -0 "$cli" 2>/dev/null || return 1
+		sleep 0.2
+	done
+	return 1
+}
+flip()
+{
+	local n r=0
+	n=$(grep -ac "mouse visible (focus lost)" "$tmp/cli.log")
+	xdotool windowminimize "$win"
+	seen_more "mouse visible (focus lost)" "$n" || r=1
+	n=$(grep -ac "mouse hidden (focus regained)" "$tmp/cli.log")
+	xdotool windowactivate --sync "$win" 2>/dev/null
+	seen_more "mouse hidden (focus regained)" "$n" || r=1
+	return $r
+}
 for i in $(seq 1 10); do
-	xdotool windowminimize "$win"; sleep 1
-	xdotool windowactivate --sync "$win" 2>/dev/null; sleep 1
+	flip || break
 done
 # And an alt+tab as the keys, to this window: the Tab under Alt reaches
 # the client before the window manager acts, and it must not be taken
-# as the game's mouse key (which is Tab)
+# as the game's mouse key (which is Tab). The 0.2 s are the keys' own
+# timing; the second after is what a wrong "the mouse key" line would
+# take to show, which nothing marks as not coming.
 xdotool keydown --window "$win" alt; sleep 0.2
 xdotool key --window "$win" Tab; sleep 0.2
 xdotool keyup --window "$win" alt; sleep 1
-xdotool windowminimize "$win"; sleep 1
-xdotool windowactivate --sync "$win" 2>/dev/null; sleep 1
+flip
 kill "$pid" 2>/dev/null
 lost=$(grep -ac "mouse visible (focus lost)" "$tmp/cli.log")
 regained=$(grep -ac "mouse hidden (focus regained)" "$tmp/cli.log")

@@ -37,12 +37,14 @@ srv(){
 	CHECK_PIDS+=($SERVER_PID)
 }
 stop(){ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; }
-# join <dir> <NAME> <PASSWORD> <CREATE> <CODE>
+# join <dir> <NAME> <PASSWORD> <CREATE> <CODE> [<line>]: until the
+# server's answer, "Joined as" by default or "Login refused"; the caller
+# reads the log
 join(){
-	printf 'delay 1500\nquit\n' > "$t/seq"
+	printf 'wait_log_any 15000 %s\nquit\n' "${6:-Joined as}" > "$t/seq"
 	BUILDAT_FP_NAME="$2" BUILDAT_FP_PASSWORD="$3" \
 		BUILDAT_FP_CREATE="$4" BUILDAT_FP_CODE="$5" \
-		timeout 60 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$SERVER_PORT" \
+		timeout 30 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$SERVER_PORT" \
 		-D "$t/$1" -w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 		> "$t/$1.log" 2>&1
 	cat "$t/$1.log"
@@ -81,7 +83,7 @@ put('auth/old', b'\x01' + acc('oldpass123', []))"
 srv 06
 grep -aq "The accounts are records now (format 2)" "$t/srv06.log" ||
 	fail "0.6's store not migrated ($t/srv06.log)"
-join o06 old oldpass123 0 "" | grep -aF "Joined as" | tail -1
+join o06 old oldpass123 0 "" | grep -aF "Joined as " | tail -1
 grep -aqF "Joined as old" "$t/o06.log" || fail "0.6's account did not log in ($t/o06.log)"
 stop
 db "assert get('format') == b'2', get('format')
@@ -108,7 +110,7 @@ assert c.total_changes == 1"
 srv 2
 grep -aq "setup code" "$t/srv2.log" && fail "a setup code with an unreadable admin ($t/srv2.log)"
 for c in 0 1; do
-	join "b$c" boss rightpass123 $c "" | grep -aF "Login refused" | tail -1
+	join "b$c" boss rightpass123 $c "" "Login refused" | grep -aF "Login refused: " | tail -1
 	grep -aqF 'Login refused: The account "boss" could not be read' "$t/b$c.log" ||
 		fail "boss, create=$c, not refused as unreadable ($t/b$c.log)"
 done
@@ -121,7 +123,7 @@ stop
 
 # 2.
 srv 3 -u launcher=1 -A 127.0.0.1
-join l newbie "" 0 "" | grep -aF "Joined as" | tail -1
+join l newbie "" 0 "" | grep -aF "Joined as " | tail -1
 grep -a "New account" "$t/srv3.log" | sed 's/.*accounts: //'
 grep -aq "New account" "$t/srv3.log" || fail "no local account made ($t/srv3.log)"
 stop
@@ -136,9 +138,9 @@ db "put('auth/tail', rec(1, 1, acc10('tailpass123') + s(b'a newer field')))
 put('auth/next', rec(2, 0, acc10('nextpass123')))"
 next=$(db "print(get('auth/next').hex())")
 srv 4
-join tl tail tailpass123 0 "" | grep -aF "Joined as" | tail -1
+join tl tail tailpass123 0 "" | grep -aF "Joined as " | tail -1
 grep -aqF "Joined as tail" "$t/tl.log" || fail "a newer minor's record did not log in ($t/tl.log)"
-join nx next nextpass123 0 "" | grep -aF "Login refused" | tail -1
+join nx next nextpass123 0 "" "Login refused" | grep -aF "Login refused: " | tail -1
 grep -aqF 'Login refused: The account "next" could not be read' "$t/nx.log" ||
 	fail "a newer major's record not refused as unreadable ($t/nx.log)"
 stop

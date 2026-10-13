@@ -25,17 +25,16 @@ P=29881
 mkdir -p "$t/srv/apps/digger" "$t/cl"
 cp "$here/apps/vanilla/launcher/grass_block.png" "$t/srv/apps/digger/server_icon.png"
 cd "$here/Build"
-bin/buildat_server -m ../apps/digger -D "$t/srv" -P $P -l 3 > "$t/srv.log" 2>&1 &
-srv=$!
-for _ in $(seq 180); do
-	grep -aq "Listening at" "$t/srv.log" && break
-	sleep 1
-done
+start_server "$t/srv.log" "Listening at" 180 $P \
+	bin/buildat_server -m ../apps/digger -D "$t/srv" -l 3 || fail "digger did not start"
+srv=$SERVER_PID
 grep -aq "The server's icon: .*server_icon.png" "$t/srv.log" ||
 	fail "the server did not take its icon ($(tail -2 "$t/srv.log"))"
 grep -aq "server_icon.png scaled down to 64" "$t/srv.log" ||
 	fail "the 120-pixel icon was not scaled down"
-printf 'delay 8000\nquit\n' > "$t/cmds"
+# A client's drive: it quits once its line is logged
+cmds(){ printf 'wait_log_any %s %s\nquit\n' "$1" "$2" > "$t/cmds"; }
+cmds 20000 "server icon from localhost:$P kept"
 timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -C "$t/cache" -s localhost:$P -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/cmds" > "$t/cl1.log" 2>&1
 grep -aq "server icon from localhost:$P kept" "$t/cl1.log" ||
@@ -47,6 +46,7 @@ grep -q "\"tcp://localhost:$P\".*\"$sha\"" "$t/cl/network_addresses.csv" ||
 	fail "the address's row has no icon: $(cat "$t/cl/network_addresses.csv")"
 kill $srv; srv=
 # The room, connecting to nothing
+cmds 20000 "wears its stored icon"
 timeout 90 bin/buildat -D "$t/cl" -C "$t/cache" -m launch_world -w 640x360 \
 	-l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq "marks: server tcp://localhost:$P wears its stored icon" "$t/cl2.log" ||
@@ -55,8 +55,9 @@ grep -aq "marks: server tcp://localhost:$P wears its stored icon" "$t/cl2.log" |
 # A Starport, and a Hearth listed on it with its icon
 SP=29884 AN=29885
 export BUILDAT_CONNECT_PORTS="$SP,$AN"
-bin/buildat_server -m ../apps/starport -D "$t/sp" -P $SP -l 3 > "$t/sp.log" 2>&1 &
-sp=$!
+start_server "$t/sp.log" "setup code" 180 $SP \
+	bin/buildat_server -m ../apps/starport -D "$t/sp" -l 3 || fail "the Starport did not start"
+sp=$SERVER_PID
 mkdir -p "$t/an/apps/hearth"
 cp "$here/client/data/favicon.png" "$t/an/apps/hearth/server_icon.png"
 isha=$(sha256sum "$t/an/apps/hearth/server_icon.png" | cut -d' ' -f1)
@@ -67,12 +68,14 @@ printf '{"starports": ["http://127.0.0.1:%s"], "name": "Icon check",
   "gambling": "no", "personal_data": "no"}}\n' $SP > "$t/an/apps/hearth/starport.json"
 bin/buildat_server -m ../apps/hearth -D "$t/an" -P $AN -l 3 > "$t/an.log" 2>&1 &
 an=$!
-for _ in $(seq 180); do
+for _ in $(seq 600); do
 	[ -f "$t/an/apps/hearth/starport_claim.txt" ] && break
-	sleep 1
+	kill -0 $an 2>/dev/null || fail "Hearth exited ($(tail -3 "$t/an.log"))"
+	sleep 0.2
 done
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$t/an/apps/hearth/starport_claim.txt")
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
+cmds 20000 '"id":1003,'
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
@@ -80,7 +83,8 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"e
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_sp" -w 640x360 -l 3 -o sound_mute=1 \
 	-s 127.0.0.1:$SP -c @"$t/cmds" > "$t/cl_sp.log" 2>&1
 list(){ curl -s -m 5 "127.0.0.1:$SP/api/v1/list"; }
-for _ in $(seq 180); do
+# Once a second: the Starport answers an address 60 lists a minute
+for _ in $(seq 60); do
 	list | grep -q "\"icon\":\"$isha\"" && break
 	sleep 1
 done
@@ -100,6 +104,8 @@ echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > "$t/cl2/starport.json"
 printf '%s\n%s\n' 'accepted,address,description,created,last_attempt,name,icon,server' \
 	"\"true\",\"http://127.0.0.1:$SP\",\"check\",\"0\",\"$(date +%s)\",\"\",\"\",\"\"" > "$t/cl2/network_addresses.csv"
 for n in 3 4; do
+	if [ $n = 3 ]; then cmds 20000 "icon $isha kept"
+	else cmds 20000 "wears its listing's icon"; fi
 	timeout 90 bin/buildat -D "$t/cl2" -C "$t/cache2" -m launch_world -w 640x360 \
 		-l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl$n.log" 2>&1
 done
@@ -117,6 +123,7 @@ cp "$here/client/data/favicon.png" "$t/cl5/shared/vanilla/games/testgame/menu/ic
 marks(){ # game -> the room's count of its own icons
 	printf '192.0.2.1:30000|One|3|%s\n192.0.2.2:30000|Two|2|%s\n' "$1" "$1" \
 		> "$t/cl5/extensions/serverlist/serverlist.csv"
+	cmds 20000 "of the room's own icons"
 	timeout 90 bin/buildat -D "$t/cl5" -C "$t/cache5" -m launch_world -w 640x360 \
 		-l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl5_$1.log" 2>&1
 	grep -ao "marks: [0-9]* of the room's own" "$t/cl5_$1.log" | cut -d' ' -f2

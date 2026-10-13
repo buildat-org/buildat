@@ -27,9 +27,9 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 cd "$here"
 
-Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
-	> "$tmp/sp.log" 2>&1 &
-pids+=($!)
+start_server "$tmp/sp.log" "setup code" 60 $SP \
+	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3
+rc=$?; pids+=(${SERVER_PID:-}); [ $rc = 0 ] || fail "the Starport did not start (sp.log)"
 mkdir -p "$tmp/he/apps/hearth"
 cat > "$tmp/he/apps/hearth/starport.json" <<J
 {"starports": ["http://127.0.0.1:$SP"], "name": "Check hearth", "ids": "anyone",
@@ -38,25 +38,22 @@ cat > "$tmp/he/apps/hearth/starport.json" <<J
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
 J
-Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
-	> "$tmp/he.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 120); do
-	grep -q "setup code" "$tmp/sp.log" && break
-	sleep 1
-done
+start_server "$tmp/he.log" "STATUS Listening" 60 $HE \
+	Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -l 3
+rc=$?; pids+=(${SERVER_PID:-}); [ $rc = 0 ] || fail "the Hearth did not start (he.log)"
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
-printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+# The set_settings answer is logged as "sp: <json>"
+printf 'wait_log_any 30000 sp: {\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"recommended_hearth\":\"http://127.0.0.1:$HE\",\"recommended_aittas\":[\"$A1\",\"$A2\"]}}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1 ||
+	fail "the admin's drive ($tmp/admin.log)"
 curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"recommends\":.*$A2" ||
 	fail "/api/v1/list has no recommends ($tmp/admin.log)"
 echo "ok: /api/v1/list carries the recommendations"
-for _ in $(seq 120); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
-grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.log)"
+wait_for_log "$tmp/sp.log" "verified ok" 60 || fail "the Hearth was not listed ($tmp/he.log)"
 
 # An ID logged in on the launcher: its session in starport.json, the
 # Starport's host accepted, the first Aitta known only by the old "aitta"
@@ -80,7 +77,7 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 launcher() { # cmds log
 	BUILDAT_STARPORT_OFFER=1 timeout 120 Build/bin/buildat \
 		-o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 4 \
-		-o sound_mute=1 -c @"$1" > "$2" 2>&1
+		-o sound_mute=1 -c @"$1" > "$2" 2>&1 || fail "the drive $1 ($2)"
 }
 # The dialog at 800x600: the second Aitta unchecked, then "Add"
 cat > "$tmp/c1" <<C
@@ -88,11 +85,11 @@ wait_log_any 30000 Offering 2 Aitta
 delay 1000
 mouse_pos 400 337
 mouse_click left
+# The click's frames: the box unchecked before the next press
 delay 300
 mouse_pos 316 353
 mouse_click left
 wait_log 5000 Aittas offered
-delay 500
 quit
 C
 launcher "$tmp/c1" "$tmp/cl1.log"
@@ -110,13 +107,15 @@ echo "ok: the checked Aitta added, the unchecked one ignored"
 # "name to use in" prompt (Use it), and no login dialog before that
 cat > "$tmp/c2" <<C
 wait_log_any 30000 trusted overlay: 1 Starport ID line
-delay 5000
+wait_log_any 20000 servers listed
+delay 500
 mouse_pos 725 15
 mouse_click left
-delay 4000
+wait_log 20000 ID name prompt:
+delay 500
 mouse_pos 330 335
 mouse_click left
-delay 6000
+wait_log 20000 Login refused:
 quit
 C
 launcher "$tmp/c2" "$tmp/cl2.log"

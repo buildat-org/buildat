@@ -106,11 +106,15 @@ start_server "$t/srv.log" "STATUS Listening" 120 auto \
 	bin/buildat_server -m "$t/app" -D "$t/srv" -l 3 ||
 	fail "the server did not listen ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf 'delay 12000\nquit\n' > "$t/seq"
+# The app's 3 s and 6 s after the files are its own timers
+printf 'wait_log_any 20000 LAMP brightness 2\nwait_log 10000 LAMP brightness 5\nquit\n' > "$t/seq"
 timeout 60 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$SERVER_PORT \
 	-D "$t/cl" -w 640x480 -l 3 -o sound_mute=1 -c @"$t/seq" > "$t/cl.log" 2>&1
-grep -q "LAMP brightness 2" "$t/cl.log" ||
+rc=$?
+grep -av "command: \\|wait_log" "$t/cl.log" > "$t/said"
+grep -q "LAMP brightness 2" "$t/said" ||
 	fail "the added Light did not reach the client ($t/cl.log)"
-grep -q "LAMP brightness 5" "$t/cl.log" ||
+grep -q "LAMP brightness 5" "$t/said" ||
 	fail "the Light's change did not reach the client ($t/cl.log)"
+[ $rc = 0 ] || fail "the drive ($t/cl.log)"
 echo "PASS: a component added to a node the client has, and its change after, replicated"

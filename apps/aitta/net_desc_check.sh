@@ -22,22 +22,24 @@ start_server "$t/srv.log" "setup code" 120 auto \
 CHECK_PIDS+=($SERVER_PID)
 A=http://127.0.0.1:$SERVER_PORT
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
+# The 500 ms are the dialog drawn in the frames after its line, the 300
+# the field's focus after the click
 cat > "$t/cmds" <<C
-delay 4000
+wait_log_any 20000 rows in
 text apps from aitta
-delay 1000
+wait_log 5000 rows for "apps from aitta"
 keypress Return
 wait_log 10000 Asking the user about $A
-delay 1000
+delay 500
 event scan dialog
 screenshot $t/dialog.png
 click LineEdit "Aitta (app list)"
 delay 300
 keypress Return
-delay 3000
+wait_log 5000 The user accepted $A
 quit
 C
-BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 90 bin/buildat \
+BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 60 bin/buildat \
 	-m launch_menu -D "$t/cl" -w 1024x700 -l 3 -o sound_mute=1 -c @"$t/cmds" \
 	> "$t/cl.log" 2>&1
 grep -aq "Command sequence complete" "$t/cl.log" ||

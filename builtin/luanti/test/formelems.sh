@@ -23,15 +23,15 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/formelems.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29788 \
+	start_server "$out/srv.log" "Mods loaded" 60 29788 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID; cli=""
+trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s localhost:29788 -w 1280x720 -l 3 -c - < "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/srv.log" <<'PYIN'
 import re, sys, time
@@ -45,7 +45,7 @@ def write(*cmds):
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
 def scan():
     global seen
-    write("delay 800", "event scan")
+    write("event scan")
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -63,15 +63,20 @@ def scan():
     return None
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
+# The form's own line on the client (form_session.lua); the half second
+# after it is its layout done in the next frames
 t0 = time.time()
-while time.time() - t0 < 90:
-    if "formelems: the form is shown" in open(srv, "rb").read().decode(
+while time.time() - t0 < 60:
+    if "form formelems_check opened" in open(log, "rb").read().decode(
             "utf-8", "replace"):
         break
-    time.sleep(1)
-time.sleep(3)
+    time.sleep(0.3)
+else:
+    fail("the form was not shown")
+# The form laid out in the frames after its line
+write("delay 500")
 els = scan()
-write("screenshot " + sys.argv[1].replace("cli.log", "form.png"), "delay 400")
+write("screenshot " + sys.argv[1].replace("cli.log", "form.png"))
 url = [e for e in els or [] if e[5] == "https://example.org/manual"]
 label = [e for e in els or [] if e[5] == "Read the manual"]
 if not label:
@@ -87,10 +92,15 @@ if not anim:
     fail("no animated image drawn")
 b = label[0]
 write("mouse_pos %d %d" % (b[1] + b[3] // 2, b[2] + b[4] // 2),
-      "delay 200", "mouse_click left", "delay 800")
-time.sleep(1.5)
-got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
-       if "formelems: fields " in l]
+      "mouse_click left")
+# The server's answer, read from its log as it comes, up to 10 s
+t0 = time.time()
+while True:
+    got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
+           if "formelems: fields " in l]
+    if got or time.time() - t0 > 10:
+        break
+    time.sleep(0.2)
 if not got:
     fail("the server received no fields")
 last = got[-1].split("formelems: fields ")[-1]
@@ -102,7 +112,7 @@ write("quit")
 PYIN
 status=$?
 exec 3>&-
-sleep 2
+for i in $(seq 1 50); do kill -0 "$cli" 2>/dev/null || break; sleep 0.2; done
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 exit $status

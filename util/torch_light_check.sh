@@ -84,10 +84,12 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 {
-	for p in A B C; do
-		echo "wait_log 180000 chat: tl: $p"; echo "screenshot $t/$p.png"
+	# A's wait is the world's start; B and C come 8 s apart (the fixture's)
+	echo "wait_log 180000 chat: tl: A"; echo "screenshot $t/A.png"
+	for p in B C; do
+		echo "wait_log 30000 chat: tl: $p"; echo "screenshot $t/$p.png"
 	done
-	echo "delay 500"; echo quit
+	echo "wait_log 10000 Wrote screenshot"; echo quit
 } > "$t/cmds"
 BUILDAT_RENDER_MODE=pbr_debug_baked BUILDAT_VOXEL_LINEAR=1 \
 	run_client 60 "$t/client.log" timeout 240 "$here/Build/bin/buildat" \

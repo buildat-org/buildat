@@ -19,7 +19,7 @@ check_tmp aitta_settings; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -33,7 +33,8 @@ client(){ # who log cmds
 	$1 timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$1" \
 		-w 1280x1000 -l 3 -s 127.0.0.1:$P -c @"$3" > "$2" 2>&1
 }
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+# The admin script's answers and the two requests'
+printf 'wait_log_any 30000 admin script: done\nwait_log_any 30000 "id":1,\nwait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_ADMIN="add plain checkpass2" \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
 {\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0}}" \
@@ -91,10 +92,10 @@ curl -s "http://127.0.0.1:$P/p/tester/sl" |
 echo "ok: the admin's Settings page: a bad JSON refused, play_url saved and linked"
 
 # 2.
-printf 'wait_log 30000 aitta: row\nclick Button "Settings"\nquit\n' > "$t/plain.cmds"
+printf 'wait_log_any 30000 "id":1,\nwait_log_any 30000 aitta: row\nclick Button "Settings"\nquit\n' > "$t/plain.cmds"
 BUILDAT_AITTA_REQS='{"cmd":"settings"}' client plain "$t/plain.log" "$t/plain.cmds"
 grep -aq "only the admin reads settings" "$t/plain.log" ||
 	fail "the request not refused to a plain account"
-grep -aq "aitta: row" "$t/plain.log" && ! grep -aq "Command sequence complete" "$t/plain.log" ||
+grep -aq 'click: no visible, uncovered Button "Settings"' "$t/plain.log" ||
 	fail "a Settings entry for a plain account"
 echo "PASS: Aitta's Settings page for the admin; none, and the request refused, for a plain account"

@@ -29,11 +29,16 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 client(){ # name password requests [env...]
 	local n=$1 pw=$2 reqs=$3
 	shift 3
-	printf 'delay 4000\nquit\n' > "$t/cmds_$n"
+	# Done at the answer to the last request (numbered from 1001), and to
+	# the admin script's last when there is one
+	{ case "$*" in *BUILDAT_HEARTH_ADMIN=*)
+			echo "wait_log_any 30000 admin script: done" ;; esac
+		printf 'wait_log_any 30000 "id":%d,"ok":\nquit\n' \
+			$((1000 + $(grep -c . <<< "$reqs"))); } > "$t/cmds_$n"
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
-		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" \
+		timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" \
 		-w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$P \
 		-c @"$t/cmds_$n" >> "$t/$n.log" 2>&1
 }

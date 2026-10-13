@@ -96,11 +96,13 @@ trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 # client ready".
 drive() {   # log fifo clilog cliready -> the census line, or nothing
 	local log="$1" fifo="$2" clilog="$3" cliready="$4" i
-	for i in $(seq 1 240); do
+	# Two and a half minutes: a VoxeLibre world and its client are up in
+	# two at the most
+	for i in $(seq 1 750); do
 		grep -aq "episode: ready\|episode: FAILED" "$log" &&
 				grep -aq "$cliready" "$clilog" && break
 		kill -0 "$cli" 2>/dev/null || break
-		sleep 1
+		sleep 0.2 # a poll
 	done
 	if grep -aq "episode: ready" "$log"; then
 		cat "$out/cmds.txt" > "$fifo"
@@ -110,10 +112,10 @@ drive() {   # log fifo clilog cliready -> the census line, or nothing
 	# Ten minutes: the module under VoxeLibre has had steps of 47 seconds
 	# while it emerged the world around a player put in the sky, and the
 	# fixture's timer only fires between them
-	for i in $(seq 1 600); do
+	for i in $(seq 1 3000); do
 		grep -aq "episode: census\|episode: FAILED" "$log" && break
 		kill -0 "$cli" 2>/dev/null || break
-		sleep 1
+		sleep 0.2
 	done
 	grep -a "episode: census" "$log" | sed 's/^.*episode: census //' | head -1
 }
@@ -141,15 +143,17 @@ printf 'name = episode\n' > "$work/worldmods/episode/mod.conf"
 { echo "fixed_map_seed = 1"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
+srv=$!
+# "Server for gameid ... listening" is the server taking connections
+for i in $(seq 1 600); do
 	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
 done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "the Luanti server did not come up" >&2; exit 1; }
 fifo="$out/extension_stdin"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
 	BUILDAT_LUANTI_CONNECT=1 \
@@ -160,28 +164,23 @@ exec 3>"$fifo"
 luanti_census=$(drive "$out/luanti_srv.log" "$fifo" "$out/extension_cli.log" \
 	"voxel types have their own textures")
 exec 3>&-
-kill "$cli" 2>/dev/null; sleep 1
+kill "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-kill -9 "$srv" 2>/dev/null
+# A poll: the server's exit
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 
 # --- the module, with the launcher in front of it
 cd "$here/Build"
 save=buildat_test_episode
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
-port=$(( 29900 + (RANDOM % 90) ))
+# A VoxeLibre world's mods are loaded in two minutes at the most
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=1 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m ../apps/vanilla -P "$port" \
-	> "$out/module_srv.log" 2>&1 &
-for i in $(seq 1 400); do
-	grep -q "Mods loaded" "$out/module_srv.log" 2>/dev/null && break
-	grep -q "Shutdown:" "$out/module_srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the module's server did not come up" >&2; exit 1; }
+	start_server "$out/module_srv.log" "Mods loaded" 150 auto \
+	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
+	{ srv=${SERVER_PID:-}; echo "the module's server did not come up" >&2; exit 1; }
+srv=$SERVER_PID port=$SERVER_PORT
 fifo="$out/module_stdin"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s "localhost:$port" -w 1280x720 -l 3 -c - < "$fifo" \
 	> "$out/module_cli.log" 2>&1 &
@@ -190,9 +189,10 @@ exec 3>"$fifo"
 module_census=$(drive "$out/module_srv.log" "$fifo" "$out/module_cli.log" \
 	"vanilla client ready")
 exec 3>&-
-kill "$cli" 2>/dev/null; sleep 1
+kill "$cli" 2>/dev/null; wait "$cli" 2>/dev/null
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# A poll: the server's exit
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 
 echo "luanti: ${luanti_census:-no census}"
 echo "module: ${module_census:-no census}"

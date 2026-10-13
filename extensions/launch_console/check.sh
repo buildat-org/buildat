@@ -20,29 +20,27 @@ fi
 # **`text`, not `keypress`**: a LineEdit fills from SDL's text input
 # rather than from key events, so a scripted keypress moves the focus
 # and types nothing. The field has the keyboard from the start.
-{ echo "delay 3000"
+# A key and the text after it go in one frame, in order, and the
+# handlers run as they come (the focus cycle is Urho3D's UI::HandleKeyDown),
+# so nothing waits between them: each step waits for the console's answer.
+{ echo "wait_log_any 30000 lines of the API document"
 	echo "text buildat.version()"
-	echo "delay 400"
 	echo "keypress Return"
-	echo "delay 600"
+	echo "wait_log 5000 console: buildat.version() = "
 	# **The slot, asked from inside the sandbox**: a launch UI can list
 	# the others, which is what the menu's own switch is built on, and
 	# the console is where anyone can check that by typing
 	echo "text #buildat.list_launch_uis()"
-	echo "delay 400"
 	echo "keypress Return"
-	echo "delay 600"
+	echo "wait_log 5000 console: #buildat.list_launch_uis() = "
 	# **The search on the left**, which a playtest found did nothing:
 	# Tab moves the keyboard into it, a term is typed, and Enter has to
 	# move the view to a line that has it.
 	echo "keypress Tab"
-	echo "delay 300"
 	echo "text voxel"
-	echo "delay 300"
 	echo "keypress Return"
-	echo "delay 600"
+	echo "wait_log 5000 console: search voxel -> "
 	echo "screenshot $out/console.png"
-	echo "delay 300"
 	# **And the line the search found copies out** (this screen's
 	# done-when: text copies out of the document). A `Text` has a
 	# selection and no copy of its own, so Ctrl+C takes the line the
@@ -50,7 +48,7 @@ fi
 	echo "keydown CTRL"
 	echo "keypress C"
 	echo "keyup CTRL"
-	echo "delay 400"
+	echo "wait_log_any 5000 console: copied "
 	# **And Tab comes back to the console** ([LAUNCH_WORLD], 2026-09-24:
 	# whatever holds the screen owns the input). Tab is Urho3D's own
 	# focus cycle now, which is what works whether this screen was
@@ -58,14 +56,13 @@ fi
 	# is what says the keyboard came back rather than landing on the
 	# document.
 	echo "keypress Tab"
-	echo "delay 300"
 	echo "text 7*6"
-	echo "delay 200"
 	echo "keypress Return"
-	echo "delay 500"
+	echo "wait_log 5000 console: 7*6 = "
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_console -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 back=$(grep -ac "console: 7\*6 = 42" "$out/cli.log")
 echo "the keyboard came back to the console $back times"
 if [ "$back" -lt 1 ]; then
@@ -113,7 +110,7 @@ if [ -z "$found" ] || [ "$found" -lt 1 ]; then
 	exit 1
 fi
 
-uis=$(grep -a "console: #buildat.list_launch_uis() = " "$out/cli.log" |
+uis=$(grep -a "launch_c.*: console: #buildat.list_launch_uis() = " "$out/cli.log" |
 	head -1 | sed 's/.*= //')
 echo "the sandbox can see $uis launch UIs"
 if [ -z "$uis" ] || [ "$uis" -lt 3 ]; then

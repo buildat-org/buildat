@@ -54,6 +54,12 @@ while time.time() < end:
 EOF
 }
 
+# A poll, 30 s at most
+until_log(){ # file pattern
+	for _ in $(seq 300); do grep -aq "$2" "$1" && return 0; sleep 0.1; done
+	return 1
+}
+
 # start <port> [args]: digger, until it listens
 start(){
 	local port=$1; shift
@@ -77,12 +83,13 @@ a=$(hear 29582 5)
 kill $s; wait $s 2>/dev/null; s=
 
 # 3
-printf 'wait_log 10000 LAN list full\ndelay 1500\nscreenshot %s/flood.png\nquit\n' \
+printf 'wait_log_any 30000 LAN list full\ndelay 1500\nscreenshot %s/flood.png\nquit\n' \
 	"$t" > "$t/seq"
 timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/u" -w 1280x720 -u 1 -l 3 -o sound_mute=1 \
 	-o lan_discovery=1 -a extension/launch_menu/connect -c @"$t/seq" > "$t/c.log" 2>&1 &
 c=$!
-sleep 3
+until_log "$t/c.log" "Listening for LAN" || fail "the client did not listen ($t/c.log)"
+# A round a second: the client's list fills over a few of its frames
 python3 - <<'EOF'
 import socket, json, time
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -92,6 +99,7 @@ for r in range(4):
         s.sendto(json.dumps({"buildat_lan": 1, "name": "fake\x01\n%d" % p +
                 "x" * 200, "app": "../evil", "version": "1", "port": p,
                 "players": -5}).encode(), ("239.255.29.50", 29599))
+    # a timing: a round a second
     time.sleep(1)
 EOF
 wait $c
@@ -103,16 +111,16 @@ grep -q "Wrote screenshot" "$t/c.log" || fail "no screenshot"
 lan_fds(){ # pid
 	ss -Huanp "sport = :29599" 2>/dev/null | grep -c "pid=$(pgrep -P $1),"
 }
-until_log(){ # file pattern
-	for _ in $(seq 300); do grep -aq "$2" "$1" && return 0; sleep 0.1; done
-	return 1
-}
-printf 'delay 3000\ndelay 1500\nclick Button "This network"\ndelay 3000\nquit\n' > "$t/seq4"
+# The delays hold the client while the shell reads its sockets: the
+# first marks the read before This network, the last the one after
+printf 'wait_log_any 30000 Join a Buildat server: shown\ndelay 1500\nclick Button "This network"\nwait_log 10000 Listening for LAN\ndelay 1500\nquit\n' > "$t/seq4"
 timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/u4" -w 1280x720 -u 1 -l 3 \
 	-o sound_mute=1 -a extension/launch_menu/connect -c @"$t/seq4" > "$t/c4.log" 2>&1 &
 c=$!
+# The first read at the drive's first hold; the second 0.5 s after the
+# line (a settle after it)
 until_log "$t/c4.log" "command: delay 1500" && before=$(lan_fds $c)
-until_log "$t/c4.log" "Listening for LAN" && sleep 0.5 && after=$(lan_fds $c)
+until_log "$t/c4.log" "Listening for LAN games" && sleep 0.5 && after=$(lan_fds $c)
 wait $c
 grep -q "Command sequence complete" "$t/c4.log" ||
 	fail "the drive stopped: $(grep -a "Command sequence\|rror" "$t/c4.log" | tail -2)"

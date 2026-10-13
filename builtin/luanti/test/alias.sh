@@ -24,16 +24,18 @@ cd "$here/Build"
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-minetest_game}" BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/alias.lua" \
-	start_server "$out/srv.log" "aliascheck: done" 300 auto \
-	timeout 320 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
+	start_server "$out/srv.log" "aliascheck: done" 120 auto \
+	timeout 150 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 	skip "the run never got to its end; see $out/srv.log"
 kill -INT $SERVER_PID 2>/dev/null
-for _ in $(seq 30); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 1; done
+# A poll: the server's exit
+for _ in $(seq 150); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 0.2; done
 grep -a "aliascheck:" "$out/srv.log" | sed 's/.*aliascheck: //'
 grep -aq "aliascheck: find by alias 1, by name 1" "$out/srv.log" ||
 	fail "find_nodes_in_area by an alias did not find the node"
 
-# The rename, over two runs of the same save
+# The rename, over two runs of the same save. r1's 1 s after the set is a
+# settle: the write lands at the end of the step, before the stop saves it
 P='{x = 3, y = 2001, z = 0}'
 cat > "$out/r1.lua" <<L
 core.register_node(":aliascheck:old", {description = "old"})
@@ -74,11 +76,12 @@ L
 for r in r1:set r2:read r1:set r3:forced; do
 	BUILDAT_LUANTI_GAME="${GAME:-minetest_game}" BUILDAT_LUANTI_SAVE=$save \
 		BUILDAT_LUANTI_LUA="$out/${r%:*}.lua" \
-		start_server "$out/${r%:*}.log" "aliascheck: ${r#*:}" 300 auto \
-		timeout 320 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
+		start_server "$out/${r%:*}.log" "aliascheck: ${r#*:}" 120 auto \
+		timeout 150 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		skip "run ${r%:*} never got to its end; see $out/${r%:*}.log"
 	kill -INT $SERVER_PID 2>/dev/null
-	for _ in $(seq 30); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 1; done
+	# A poll: the server's exit
+	for _ in $(seq 150); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 0.2; done
 done
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 forced=$(grep -a "aliascheck: forced" "$out/r3.log" | sed 's/.*aliascheck: forced //')

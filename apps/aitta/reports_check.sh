@@ -31,7 +31,7 @@ trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "ke
 fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 pid=$SERVER_PID
@@ -46,8 +46,13 @@ admin(){ env BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin \
 author1(){ env BUILDAT_AITTA_NAME=author1 BUILDAT_AITTA_PASSWORD=authpass12 "$@"; }
 mod2(){ env BUILDAT_AITTA_NAME=mod2 BUILDAT_AITTA_PASSWORD=modpass123 "$@"; }
 reqs(){ # who log requests...
-	local who=$1 log=$2; shift 2
-	printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+	local who=$1 log=$2 i; shift 2
+	# Every request's answer, by its id; the admin script's, when there is one
+	{
+		[ -n "${BUILDAT_AITTA_ADMIN:-}" ] && echo "wait_log_any 30000 admin script: done"
+		for i in $(seq $#); do echo "wait_log_any 30000 \"id\":$i,"; done
+		echo quit
+	} > "$t/reqs.cmds"
 	$who BUILDAT_AITTA_REQS="$(printf '%s\n' "$@")" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$who" \
 		-w 800x600 -l 3 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$log" 2>&1
@@ -87,10 +92,11 @@ curl -s -X POST --data-urlencode "release=tester/pk2/1.0.0" -d reason=other \
 	--data-urlencode "text=from the web" "$A/api/v1/aitta/report" |
 	grep -q "Sent; a moderator will look" || fail "the web form's report"
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
+# The delay between the two clicks: not a double click
 cat > "$t/report.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 text apps from aitta
-delay 1000
+wait_log 5000 apps from aitta"
 keypress Return
 wait_log 10000 Asking the user about $A
 delay 1000
@@ -101,6 +107,7 @@ click Button "Report..."
 wait_log 10000 aitta report: tester/pk/1.0.0
 delay 800
 click Button "Broken"
+# not a double click
 delay 500
 click Button "Send"
 wait_log 10000 aitta report: sent tester/pk/1.0.0 broken
@@ -138,16 +145,17 @@ curl -s "$A/api/v1/aitta/list" | grep -q '"why":"broken: it does not start"' ||
 
 # 3. The launcher's tile note, while delisted
 cat > "$t/note.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 text apps from aitta
-delay 1000
+wait_log 5000 apps from aitta"
 keypress Return
 wait_log 15000 aitta page: tester/pk2
 delay 1000
 keypress Escape
-delay 1000
+wait_log 5000 dialog: aitta closed by Escape
 text minigame 1.0.0
-delay 1500
+wait_log 5000 minigame 1.0.0"
+delay 500
 screenshot $t/note.png
 quit
 C

@@ -41,10 +41,11 @@ srv=$SERVER_PID
 code=$(nolog "$t/srv.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 [ -n "$code" ] || fail "no setup code in the server log"
 
-# join <userdir> <NAME> <PASSWORD> <CREATE> <CODE>: one scripted client that
-# logs in through builtin/accounts' env hook, then quits.
+# join <userdir> <NAME> <PASSWORD> <CREATE> <CODE> <UNTIL>: one scripted
+# client that logs in through builtin/accounts' env hook, then quits once
+# <UNTIL> is logged
 join(){
-	printf 'delay 6000\nquit\n' > "$t/seq"
+	printf 'wait_log_any 20000 %s\nquit\n' "$6" > "$t/seq"
 	BUILDAT_JOIN_NAME="$2" BUILDAT_JOIN_PASSWORD="$3" \
 		BUILDAT_JOIN_CREATE="$4" BUILDAT_JOIN_CODE="$5" \
 		timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
@@ -54,7 +55,7 @@ join(){
 }
 
 # 1. a mistyped/unknown name at a plain login is refused, account not made
-c1=$(join u1 ghost secret123 0 "")
+c1=$(join u1 ghost secret123 0 "" "Login refused: ")
 echo "$c1" | grep -qF 'Login refused: There is no account named "ghost"' ||
 	fail "an unknown name was not refused as unknown
 $(echo "$c1" | grep -iE 'login|account' | tail -5)"
@@ -62,7 +63,7 @@ nolog "$t/srv.log" | grep -q "New account ghost" &&
 	fail "the server made an account for a plain login of an unknown name"
 
 # 2. a create login of a new name makes the account and joins
-c2=$(join u2 alice secret123 1 "$code")
+c2=$(join u2 alice secret123 1 "$code" "Joined as alice")
 echo "$c2" | grep -qF "Joined as alice" ||
 	fail "the create login did not join
 $(echo "$c2" | grep -iE 'login|join|account|refused' | tail -5)"
@@ -70,7 +71,7 @@ nolog "$t/srv.log" | grep -q "New account alice" ||
 	fail "the server did not make the account on a create login"
 
 # 3. a plain login of that name and password joins
-c3=$(join u3 alice secret123 0 "")
+c3=$(join u3 alice secret123 0 "" "Joined as alice")
 echo "$c3" | grep -qF "Joined as alice" ||
 	fail "the account made could not log in
 $(echo "$c3" | grep -iE 'login|join|refused' | tail -5)"

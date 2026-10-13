@@ -58,6 +58,7 @@ srv=$SERVER_PID
 if ! grep -aq "Running world" "$out/srv.log"; then
 	echo "SKIP: the world did not come up"; kill -9 "$srv" 2>/dev/null; exit 77
 fi
+# The client only has to stay on; the shell kills it once it has listened
 { echo "delay 90000"; echo "quit"; } > "$out/cmds.txt"
 rm -f "$out/mix.raw"
 SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
@@ -66,10 +67,13 @@ SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
 cli=$!
 # The join is a minute of world loading away; the fixture then asks
 # every four seconds, so the measurement only has to land inside that
-for i in $(seq 1 150); do
+for i in $(seq 1 600); do
 	grep -aq "sound check: three asked" "$out/srv.log" && break
-	sleep 1
+	kill -0 "$cli" 2>/dev/null && kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
 done
+# The disk driver writes the mix in real time: the sounds asked for (3 s
+# long) are in the file's tail only after they have played
 sleep 6
 # **The tail of the mix, not the whole of it**: the client's first
 # seconds are silent while it loads, and averaging those in is how a

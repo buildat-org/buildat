@@ -34,41 +34,53 @@ printf 'name = camera\n' > "$work/worldmods/camera/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+srv=$!
 trap 'kill "$srv" 2>/dev/null' EXIT
+# "Server for gameid ... listening on": up
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
+done
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "the Luanti server did not come up ($out/luanti_srv.log)" >&2; exit 1; }
+# A C says the view it turned to in the client's log; the 1.5 s after
+# look_dir and after the first two is the third-person camera settling
+# against the wall.
+# camera.lua's stage, six seconds after the join, says so in the chat
 cat > "$out/cmds.txt" <<CMDS
 wait_log 90000 voxel types have their own textures
-delay 3000
+wait_log_any 30000 chat: camera: the floor and the wall are placed
+# a settle: the stage's nodes drawn
+delay 1500
 look_dir 0 -0.1 1
+# simplified: the world drawn in the new direction; a settle line after a
+# turn (0 undrawn in view) would be the event
 delay 1500
 screenshot $out/first.png
 keypress C
+wait_log 5000 chat (local): Third person view
 delay 1500
 event scan cam
-delay 300
 screenshot $out/behind.png
 keypress C
+wait_log 5000 chat (local): Third person view (front)
 delay 1500
 screenshot $out/front.png
 keypress C
-delay 500
+wait_log 5000 chat (local): First person view
 quit
 CMDS
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/extension_cli.log): $(grep -ao 'Command sequence failed.*' "$out/extension_cli.log" | head -1)"; exit 1; }
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep -a "person view\|E " "$out/extension_cli.log" | sed 's/.*: //' | head -5
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+grep -a "person view\|E " "$out/extension_cli.log" | grep -av wait_log | sed 's/.*: //' | head -5
 # [OVER_SHOULDER]'s open reading: where the camera and the model were in the
 # frame the back view was shot in, said by the client itself
 grep -a "camera at " "$out/extension_cli.log" | sed 's/.*: camera at/camera at/' | tail -1

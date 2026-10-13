@@ -21,14 +21,14 @@ curl -s -4 -m 5 -o /dev/null "http://127.0.0.1:$P/" || fail "no HTTP answer on 1
 curl -s -6 -m 5 -o /dev/null "http://[::1]:$P/" || fail "no HTTP answer on ::1"
 # A client each way: "localhost" is ::1 first where getaddrinfo says so,
 # and the client takes the first that answers
-printf 'delay 2000\nquit\n' > "$t/c"
+printf 'wait_log_any 20000 Connect succeeded\nquit\n' > "$t/c"
 for a in 127.0.0.1 localhost; do
 	timeout 60 Build/bin/buildat -D "$t/cl" -w 640x480 -l 3 -o sound_mute=1 \
 		-s $a:$P -c @"$t/c" > "$t/cl_$a.log" 2>&1
 done
-grep -q "from 127.0.0.1 connected" "$t/log" || fail "the IPv4 peer is not 127.0.0.1"
+wait_for_log "$t/log" "from 127.0.0.1 connected" 5 || fail "the IPv4 peer is not 127.0.0.1"
 if getent ahosts localhost | head -1 | grep -q "^::1"; then
-	grep -q "from ::1 connected" "$t/log" || fail "the IPv6 peer is not ::1"
+	wait_for_log "$t/log" "from ::1 connected" 5 || fail "the IPv6 peer is not ::1"
 fi
 grep -q "self-check failed" "$t/log" && fail "ipv6_text's self-check"
 echo "PASS: the default address takes IPv6 and IPv4, each peer by its plain address"

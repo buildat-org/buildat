@@ -22,6 +22,7 @@ start_server "$t/sp.log" "setup code" 120 $P \
 	fail "Starport did not start"
 CHECK_PIDS+=($SERVER_PID)
 
+# The half second after the page loads is its script's first frames
 python3 -c 'import json, sys
 print(json.dumps([["nav", "${URL}id"], ["wait", 500],
 	["eval", open(sys.argv[1]).read()]]))' \

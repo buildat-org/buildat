@@ -27,14 +27,21 @@ if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 rm -f "$out/mix.raw" "$out/cli.log" "$out/cli_server.log"
-# The pause menu's last button at 1000x700 and UI scale 1
+# The pause menu's last button at 1000x700 and UI scale 1. The second
+# after the loop starts is the "before" the mix is measured on; the 300 ms
+# after the pause menu's line its layout's frames; the six seconds in the
+# launch menu the "after" measured
 cat > "$out/cmds.txt" <<EOF
 wait_log 120000 the server put the player
-delay 6000
+wait_log 20000 luanti:sound: soundstuff_mono
+delay 1000
 keypress escape
-delay 1500
+wait_log 5000 pause: the menu shown
+delay 300
 mouse_pos 500 515
 mouse_click left
+wait_log 10000 leave_to_menu()
+# a timing test: the six seconds in the launch menu measured
 delay 6000
 quit
 EOF
@@ -46,16 +53,21 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 cli=$!
 at_leave=
 while kill -0 $cli 2>/dev/null; do
-	if [ -z "$at_leave" ] && grep -aq "leave_to_menu()" "$out/cli.log" 2>/dev/null
+	# Not the drive's own wait for it
+	if [ -z "$at_leave" ] && grep -a "leave_to_menu()" "$out/cli.log" 2>/dev/null |
+		grep -qv wait_log
 	then
 		at_leave=$(stat -c %s "$out/mix.raw")
+		# A timing: the two seconds after the leave that are not measured
 		sleep 2
 		after_from=$(stat -c %s "$out/mix.raw")
 	fi
-	sleep 0.1
+	sleep 0.1 # a poll
 done
-wait $cli
+wait $cli; st=$?
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
+[ $st = 0 ] ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 grep -aq "menu music: looping" "$out/cli_server.log" ||
 	{ echo "FAIL: the fixture never started its loop"; exit 1; }
 [ -n "$at_leave" ] ||

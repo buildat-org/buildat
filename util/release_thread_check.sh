@@ -28,29 +28,38 @@ start(){ # app port log
 	BUILDAT_CONNECT_PORTS=$A bin/buildat_server -m ../apps/$1 -D "$t/srv_$1" -P $2 -l 3 > "$3" 2>&1 &
 	echo $!
 }
-code_of(){ # log
-	for _ in $(seq 120); do
+code_of(){ # log pid
+	for _ in $(seq 300); do
 		grep -q "setup code" "$1" && break
-		sleep 1
+		kill -0 "$2" 2>/dev/null || break
+		sleep 0.2
 	done
 	grep -ao "setup code [A-Z0-9]*" "$1" | cut -d' ' -f3
 }
+# answers <n> <file>: a drive that quits once the Hearth's answers to the
+# requests 1001.. 1000+n are in
+answers(){
+	{ for i in $(seq "$1"); do echo "wait_log_any 20000 \"id\":$((1000 + i)),"; done
+		echo quit; } > "$2"
+}
+# Why a client's drive stopped
+why(){ grep -a "Command sequence failed" "$1" | tail -1 | cut -c 1-300; }
 pa=$(start aitta $A "$t/aitta.log")
 ph=$(start hearth $H "$t/hearth.log")
-ca=$(code_of "$t/aitta.log")
-ch=$(code_of "$t/hearth.log")
+ca=$(code_of "$t/aitta.log" $pa)
+ch=$(code_of "$t/hearth.log" $ph)
 [ -n "$ca" ] || fail "Aitta did not start ($(tail -3 "$t/aitta.log"))"
 [ -n "$ch" ] || fail "Hearth did not start ($(tail -3 "$t/hearth.log"))"
 
 # Aitta: tester bound to a key; demo 1.0.0 at home in this Hearth, elsewhere
 # in another
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 8000\nquit\n' > "$t/cmds"
+printf 'wait_log_any 20000 ai: {"id":1,\nquit\n' > "$t/cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$ca \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_a" -w 800x600 -l 3 -o sound_mute=1 \
-	-s 127.0.0.1:$A -c @"$t/cmds" > "$t/cl_a.log" 2>&1
+	-s 127.0.0.1:$A -c @"$t/cmds" > "$t/cl_a.log" 2>&1 || fail "the Aitta client: $(why "$t/cl_a.log")"
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl_a.log" || fail "the bind did not go through"
 publish(){ # name home [version]
 	local v=${3:-1.0.0}
@@ -77,18 +86,18 @@ curl -s "http://127.0.0.1:$A/api/v1/aitta/release?id=tester/demo/1.0.0" |
 	grep -q 'first \*\*release\*\* of demo' || fail "Aitta does not serve the changelog"
 
 # Hearth: the admin sets the sources
-printf 'delay 6000\nquit\n' > "$t/cmds_h"
+answers 1 "$t/cmds_h"
 BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 BUILDAT_HEARTH_CODE=$ch \
 BUILDAT_HEARTH_REQS="{\"cmd\":\"release_sources\",\"aittas\":[\"http://127.0.0.1:$A\"],\"addresses\":[\"http://127.0.0.1:$H\"]}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
-	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_h.log" 2>&1
+	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_h.log" 2>&1 || fail "the Hearth client: $(why "$t/cl_h.log")"
 grep -aq 'hr: {.*"ok":true' "$t/cl_h.log" ||
 	fail "release_sources: $(grep -a 'hr: ' "$t/cl_h.log" | head -2)"
 
-for _ in $(seq 30); do
+for _ in $(seq 150); do
 	grep -q "is the thread" "$t/hearth.log" && break
-	sleep 1
+	sleep 0.2
 done
 grep -q "The release tester/demo/1.0.0 .* is the thread" "$t/hearth.log" ||
 	fail "no release thread ($(grep -a "elease" "$t/hearth.log" | tail -3))"
@@ -104,14 +113,15 @@ grep -q "tester/elsewhere" "$t/hearth.log" && fail "a release of another Hearth 
 for z in $zips; do
 	"$b" aitta install "$z" "$t/user" > /dev/null 2>&1 || fail "install $z"
 done
+answers 4 "$t/cmds_f"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 BUILDAT_HEARTH_REQS='{"cmd":"new_thread","feedback":true,"subject":"tester/demo '"$(cat "$t/pub")"'","title":"It hums","body":"a check","kind":"problem","version":"1.0.0"}
 {"cmd":"status","thread":2,"status":"fixed","fixed_in":"1.1.0"}
 {"cmd":"status","thread":1,"status":"fixed"}
 {"cmd":"new_thread","topic":1,"title":"x","body":"x","kind":"bug"}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/user" -C "$t/cache_f" -w 800x600 -l 3 \
-	-o sound_mute=1 -a installed/tester.demo@1.0.0/feedback -c @"$t/cmds_h" \
-	> "$t/cl_f.log" 2>&1
+	-o sound_mute=1 -a installed/tester.demo@1.0.0/feedback -c @"$t/cmds_f" \
+	> "$t/cl_f.log" 2>&1 || fail "the feedback client: $(why "$t/cl_f.log")"
 f=$(grep -a "hr feedback: " "$t/cl_f.log")
 [ -n "$f" ] || fail "no feedback composer ($(grep -a "ERROR\|WARNING" "$t/cl_f.log" | tail -3))"
 for want in '"package":"tester/demo"' '"version":"1.0.0"' \
@@ -131,14 +141,17 @@ echo "$page" | grep -q "problem, fixed in 1.1.0, reported in 1.0.0" || fail "the
 # demo 1.1.0 comes out: its release thread links the problem it fixes, and
 # whoever reported it is told
 publish demo "http://127.0.0.1:$H/" 1.1.0
-for _ in $(seq 90); do
+# Hearth reads the Aittas once a minute (nothing kicks it here): up to 90 s
+for _ in $(seq 450); do
 	grep -q "tester/demo/1.1.0 .* is the thread" "$t/hearth.log" && break
-	sleep 1
+	kill -0 $ph 2>/dev/null || break
+	sleep 0.2
 done
 n=$(grep -o "tester/demo/1.1.0 .* is the thread [0-9]*" "$t/hearth.log" | grep -o "[0-9]*$")
 [ -n "$n" ] || fail "no thread for demo 1.1.0"
 curl -s "http://127.0.0.1:$H/t/$n" | grep -q 'It hums <a class="ref" href="/t/2">' ||
 	fail "the 1.1.0 release thread does not link the problem it fixes"
+answers 6 "$t/cmds_n"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
 {"cmd":"subject","subject":"tester/demo '"$(cat "$t/pub")"'"}
@@ -147,7 +160,7 @@ BUILDAT_HEARTH_REQS='{"cmd":"notifications"}
 {"cmd":"link","thread":4,"subject":"tester/nothing k"}
 {"cmd":"new_thread","topic":1,"title":"Same name","body":"x","subject":"tester/demo otherkey"}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_h" -w 800x600 -l 3 -o sound_mute=1 \
-	-s 127.0.0.1:$H -c @"$t/cmds_h" > "$t/cl_n.log" 2>&1
+	-s 127.0.0.1:$H -c @"$t/cmds_n" > "$t/cl_n.log" 2>&1 || fail "the Hearth client: $(why "$t/cl_n.log")"
 grep -a '"id":1001' "$t/cl_n.log" | grep -q '"kind":"fixed","message":0,"note":"1.1.0"' ||
 	fail "the reporter was not told: $(grep -a '"id":1001' "$t/cl_n.log")"
 # The package's place ("Discuss" on Aitta's list): its two releases and
@@ -176,11 +189,14 @@ curl -s "http://127.0.0.1:$H/t/2" | grep -q 'About <a href="/p/tester/demo">' ||
 kill $ph
 while kill -0 $ph 2>/dev/null; do sleep 0.2; done
 ph=$(start hearth $H "$t/hearth2.log")
-for _ in $(seq 60); do
+for _ in $(seq 300); do
 	grep -q "STATUS Listening" "$t/hearth2.log" && break
-	sleep 1
+	kill -0 $ph 2>/dev/null || break
+	sleep 0.2
 done
 grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
+# simplified: 5 s for the restarted Hearth to read the Aitta and not make a
+# thread, as there is no line for "read, nothing new"
 sleep 5
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
 n=$(curl -s "http://127.0.0.1:$H/t/6" | grep -c "demo 1\.")

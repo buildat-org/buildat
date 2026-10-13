@@ -37,18 +37,26 @@ BUILDAT_LUANTI_LUA="$t/srv/shared/fixture.lua" start_server "$t/srv.log" \
 CHECK_PIDS+=($SERVER_PID)
 shots=${WS_SHOTS:-/tmp/wieldlight_stale_shots/$(date +%Y%m%d_%H%M%S)}
 mkdir -p "$shots"
+# The first shot after the world's start and the tunnel's emerge; the
+# others ~3 s apart (59 steps of 0.05 s), the last two 10 and 5 s. The
+# 100 ms after a shot's line is the moved player drawn; the 2 s after
+# "ws: done" is the dug glowstone's light reaching the client's voxels.
 {
+	first=180000
 	for n in $(seq 59 59 708) away dug; do
-		echo "wait_log 300000 chat: ws: shot $n"; echo "delay 100"
+		echo "wait_log $first chat: ws: shot $n"; echo "delay 100"
 		echo "screenshot $shots/shot_$n.png"
+		first=30000
 	done
 	# "ws: done" comes in the tick of "shot dug", before the shot is taken
-	echo "delay 3000"
-	echo "event scan_volume 8 ws lamp"; echo "delay 3000"; echo quit
+	echo "wait_log_any 10000 chat: ws: done"; echo "delay 2000"
+	# the scan is written before the event command returns
+	echo "event scan_volume 8 ws lamp"
+	echo quit
 } > "$t/cmds"
 run_client 60 "$t/client.log" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 	-D "$t/nu" -s "127.0.0.1:$SERVER_PORT" -w 960x540 -l 3 -o sound_mute=1 \
-	-c @"$t/cmds"
+	-c @"$t/cmds" || fail "the drive ($t/client.log)"
 grep -a "ws: " "$t/srv.log" | grep -v "ws: lamp" | sed 's/.*ws: /ws: /'
 grep -aq "ws: done" "$t/srv.log" || fail "the run never got to its end ($t/srv.log)"
 bad=$(grep -a "ws: the .*: [1-9][0-9]* voxels differ" "$t/srv.log")

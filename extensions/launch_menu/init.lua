@@ -857,12 +857,14 @@ browse = function(kind, query, by, filter, focus_filter)
 			elseif key == KEY_LEFT or key == KEY_ESCAPE then
 				local back = locked or current
 				if back then back.button:SetFocus(true) end
+				log:info("launch_menu: back to the row")
 				return true
 			end
 			return key == KEY_RIGHT or key == KEY_TAB
 		end
 		if (key == KEY_RIGHT or key == KEY_TAB) and action_buttons[1] then
 			action_buttons[1]:SetFocus(true)
+			log:info("launch_menu: into the panel")
 			return true
 		end
 		if key == KEY_LEFT then return true end
@@ -893,6 +895,7 @@ browse = function(kind, query, by, filter, focus_filter)
 		end
 		if key == KEY_ESCAPE then
 			uistack.main:pop(root)
+			log:info("launch_menu: " .. kind .. " closed")
 			return true
 		end
 	end)
@@ -976,6 +979,7 @@ local function logs()
 			local ok, why = run()
 			status.text = ok and ok ~= true and ok or (ok and "Done" or
 					tostring(why))
+			log:info("launch_menu: logs: " .. status.text)
 		end}
 	end
 	if path ~= "" then
@@ -1001,6 +1005,7 @@ local function logs()
 			return true
 		end
 	end)
+	log:info("launch_menu: logs shown")
 end
 
 -- **Settings**, one tree: each part once. The Keys screen is
@@ -1057,6 +1062,8 @@ settings = function()
 			desc.text = item.entry.description or ""
 		end
 	end)
+	-- What a check waits for
+	log:info("launch_menu: settings, " .. #items .. " rows")
 end
 
 -- launch_action is -a's kind/name/id, run over Home as picking it would
@@ -1154,6 +1161,8 @@ function M.show_dead_server(title, on_close)
 	local path, tail = api.local_server_log_tail(20)
 	ui_utils.show_message_dialog(title .. "\n\n" .. tail ..
 			"\nThe full log is at " .. path, on_close)
+	-- What a check waits for
+	log:info("dead server shown: " .. title)
 end
 
 local function to_home()

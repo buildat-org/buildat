@@ -39,9 +39,26 @@ def write(*cmds):
         w.write(c + "\n")
     w.flush()
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
+def size():
+    return len(open(log, "rb").read())
+# Until the client logs <text> after byte <since>, up to <secs>
+def until(text, since, secs=10):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text in open(log, "rb").read()[since:].decode("utf-8", "replace"):
+            return True
+        time.sleep(0.2)
+    fail("no %r in %d s" % (text, secs))
+# The commands, then the line that says they were done
+def act(text, *cmds, secs=10):
+    p = size()
+    write(*cmds)
+    until(text, p, secs)
+# A scan comes after a step's line; the half second is the screen laid
+# out in the frames after it
 def scan(label):
     global seen
-    write("delay 800", "event scan " + label)
+    write("delay 500", "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 30:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -61,18 +78,19 @@ def find(els, word):
         if word.lower() in e[5].lower() and e[3] > 0:
             return e
     return None
-def click(e):
-    write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
-          "mouse_click left", "delay 500")
+def click(e, text, secs=10):
+    act(text, "mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2),
+        "mouse_click left", secs=secs)
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-time.sleep(8)
-write("text luanti client")
+# Home drawn, then the search's own list
+until("rows in", 0, 30)
+act('rows for "luanti client"', "text luanti client")
 els = scan("a")
 if not els: fail("no menu scan")
 tiles = [e for e in els if "luanti client settings" in e[5].lower() and e[3] > 0]
 if not tiles: fail("no settings row; saw " + ", ".join(e[5] for e in els)[:300])
-click(max(tiles, key=lambda e: e[2]))
+click(max(tiles, key=lambda e: e[2]), "settings: the screen shown")
 els = scan("b")
 row = els and find(els, "Render mode")
 if not row: fail("no render mode row; saw " + ", ".join(e[5] for e in els or [])[:300])
@@ -84,45 +102,58 @@ try:
     before = json.load(open(path)).get("mode")
 except IOError:
     before = None
-click(drops[0])
-write("keypress Down", "delay 300", "keypress Return", "delay 800")
-time.sleep(1.5)
-data = json.load(open(path))
+# ui_utils's "dropdown_<n> open"/"closed"; the pick is saved at once
+click(drops[0], "open")
+act("closed", "keypress Down", "keypress Return")
+t0 = time.time()
+while True:
+    try:
+        data = json.load(open(path))
+    except (IOError, ValueError):
+        data = {}
+    if data.get("mode") != before or time.time() - t0 > 5:
+        break
+    time.sleep(0.2)
 if data.get("mode") == before or data.get("mode") not in ("unlit", "shadows", "pbr"):
     fail("the mode did not change: %r -> %r" % (before, data.get("mode")))
 els = scan("c")
 # The key editor: the forward row rebound to Y, read back, and the
 # default put back with Backspace
-click(find(els, "Key bindings"))
+click(find(els, "Key bindings"), "key editor: shown")
 els = scan("e")
 row = els and find(els, "Walk forward")
 if not row: fail("no key editor; saw " + ", ".join(e[5] for e in els or [])[:300])
-click(row)
-write("keypress Y", "delay 300")
+click(row, "key editor: Walk forward listens")
+act("key editor: Walk forward is Y", "keypress Y")
 els = scan("f")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("Y"): fail("the forward key did not rebind: %r" % (row and row[5]))
-time.sleep(0.5)
-# The key store's, since 939799cf6: one override line per rebound key
-import os
+# The key store's, since 939799cf6: one override line per rebound key;
+# written with the bind, read until it says so or 5 s pass
 store = sys.argv[4]
-try:
-    keys = open(store).read()
-except IOError:
-    keys = ""
+t0 = time.time()
+while True:
+    try:
+        keys = open(store).read()
+    except IOError:
+        keys = ""
+    if "override\tluanti_client\tforward\tY\n" in keys + "\n" or \
+            time.time() - t0 > 5:
+        break
+    time.sleep(0.2)
 if "override\tluanti_client\tforward\tY\n" not in keys + "\n":
     fail("the key store does not say forward is Y: %r" % keys[-300:])
-click(row)
-write("keypress Backspace", "delay 300")
+click(row, "key editor: Walk forward listens")
+act("key editor: Walk forward is W", "keypress Backspace")
 els = scan("g")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("W"): fail("the default did not come back: %r" % (row and row[5]))
 # Escape is Back on both screens ([BOX_PLAYTEST_2] 6, 7): out of the
 # editor to the settings screen, out of that to the menu
-write("keypress Escape", "delay 300")
+act("key editor: closed", "keypress Escape")
 els = scan("h")
 if not (els and find(els, "Render mode")): fail("Escape did not leave the editor for the settings screen")
-write("keypress Escape", "delay 300")
+act("settings: closed", "keypress Escape")
 els = scan("d")
 if not (els and find(els, "Settings") and not find(els, "Render mode (next")):
     fail("not back in the menu")

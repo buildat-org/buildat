@@ -40,9 +40,11 @@ fi
 # voxels and the player's room is not the place for them
 user="$out/user"; rm -rf "$user"; mkdir -p "$user"
 {
-	echo "delay 6000"
+	echo "wait_log_any 60000 the room hums"
 	# One turn of the loop is about twenty seconds; enough turns to
-	# cover the minutes asked for, and the sequence ends by itself
+	# cover the minutes asked for, and the sequence ends by itself. Its
+	# delays are the soak's pace, the room worked for the minutes asked
+	# for, and not waits for anything
 	turns=$(( MINUTES * 3 + 2 ))
 	for i in $(seq 1 "$turns"); do
 		# Menu mode: browse and search
@@ -66,14 +68,17 @@ user="$out/user"; rm -rf "$user"; mkdir -p "$user"
 		echo "keypress Tab"
 		echo "delay 1800"
 		echo "keypress Tab"
+		# the soak's pace, as above
 		echo "delay 1800"
 		# The desk through the dialog's Settings, and out again
 		echo "keypress Escape"
 		echo "delay 600"
 		echo "keypress Down"
 		echo "keypress Return"
+		# the soak's pace, as above
 		echo "delay 1500"
 		echo "keypress Escape"
+		# the soak's pace, as above
 		echo "delay 1200"
 		# The pause dialog, and out again
 		echo "keypress Escape"
@@ -89,15 +94,23 @@ user="$out/user"; rm -rf "$user"; mkdir -p "$user"
 bin/buildat -m launch_world -D "$user" -w 800x500 -l 3 \
 	-L "$out/cli.log" -c @"$out/cmds.txt" > /dev/null 2>&1 &
 run=$!
-sleep 8
-pid=$(check_pgrep buildat | head -1)
-if [ -z "$pid" ]; then
+trap 'kill "$run" 2>/dev/null' EXIT
+# The room up: its first line, up to a minute
+for _ in $(seq 300); do
+	grep -aq "the room hums" "$out/cli.log" 2>/dev/null && break
+	kill -0 "$run" 2>/dev/null || break
+	sleep 0.2
+done
+pid=$run
+if ! grep -aq "the room hums" "$out/cli.log" 2>/dev/null; then
+	kill "$run" 2>/dev/null
 	echo "SKIP: the client did not come up" >&2; exit 2
 fi
 : > "$out/rss.txt"
 while kill -0 "$run" 2>/dev/null; do
 	rss=$(awk '/VmRSS/ {print $2}' "/proc/$pid/status" 2>/dev/null)
 	[ -n "$rss" ] && echo "$(date +%s) $rss" >> "$out/rss.txt"
+	# The sampling interval, ten seconds: a timing, not a wait
 	sleep 10
 done
 wait "$run" 2>/dev/null

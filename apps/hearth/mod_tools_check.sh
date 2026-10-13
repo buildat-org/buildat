@@ -25,25 +25,38 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hearth_mod_tools; t=$CHECK_TMP
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server --sim-clock -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
+# commands Q: until each request is answered, and the admin script's
 client(){ # name log requests commands [env...]
-	local n=$1 log=$2 reqs=$3
-	printf "$4" > "$t/cmds_$n"
+	local n=$1 log=$2 reqs=$3 i=0 w
+	if [ "$4" = Q ]; then
+		while IFS= read -r w; do
+			[ -n "$w" ] && i=$((i + 1)) && echo "wait_log_any 20000 \"id\":$((1000 + i)),"
+		done <<< "$reqs"
+		case "${*:5}" in *BUILDAT_HEARTH_ADMIN=*)
+			echo "wait_log_any 20000 admin script: done";; esac
+		echo quit
+	else
+		printf "$4"
+	fi > "$t/cmds_$n"
 	shift 4
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=${n}pass1234 \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" \
 		-w 900x700 -l 3 -o sound_mute=1 -s 127.0.0.1:$P \
-		-c @"$t/cmds_$n" > "$log" 2>&1
+		-c @"$t/cmds_$n" > "$log" 2>&1 ||
+		fail "the client $n ($log): $(grep -a "Command sequence failed" "$log" | tail -1)"
 }
-Q='delay 6000\nquit\n'
+Q=Q
+# Thread 1 open: its page, drawn with every message's actions
+T='wait_log_any 20000 hearth: page My lamp\ndelay 500\n'
 answer(){ grep -ao "hr: {.*\"id\":$2,.*" "$1" | head -1; }
 num(){ answer "$1" $2 | grep -o '"result":[0-9]*' | cut -d: -f2; }
 ok(){ answer "$1" $2 | grep -q '"ok":true' || fail "$3: $(answer "$1" $2 | head -c 300)"; }
@@ -80,11 +93,11 @@ set -- $ids
 M1=$1 M2=$2 M3=$3 M4=$4
 
 # 1. The action rows
-client mem "$t/mem_row.log" "" "delay 6000\nquit\n" BUILDAT_HEARTH_OPEN="$T1#$M1"
+client mem "$t/mem_row.log" "" "${T}quit\n" BUILDAT_HEARTH_OPEN="$T1#$M1"
 a=$(acts "$t/mem_row.log" $M1)
 [ -n "$a" ] || fail "no actions logged for the member"
 echo "$a" | grep -q "images\|Delete\|Ban" && fail "a member's tools: $a"
-client hal "$t/hal_row.log" "" "delay 6000\nscreenshot $t/hal.png\nclick Button \"Show images to everyone\"\nwait_log 10000 hearth: action m$M1 Hide images from everyone\ndelay 500\nquit\n" \
+client hal "$t/hal_row.log" "" "${T}screenshot $t/hal.png\nclick Button \"Show images to everyone\"\nwait_log 10000 hearth: action m$M1 Hide images from everyone\nquit\n" \
 	BUILDAT_HEARTH_OPEN="$T1#$M1"
 a=$(acts "$t/hal_row.log" $M1)
 has "$a" "Show images to everyone" && has "$a" "Hide images from everyone" ||
@@ -92,7 +105,17 @@ has "$a" "Show images to everyone" && has "$a" "Hide images from everyone" ||
 echo "$a" | grep -q "Delete\|Ban" && fail "a helper's Delete or Ban: $a"
 curl -s "http://127.0.0.1:$P/t/$T1" | grep -q "<img src=\"/f/$I/" ||
 	fail "the image not shown to everyone"
-client mia "$t/mia_row.log" "" "delay 6000\nscreenshot $t/row.png\nclick Button \"Delete...\"\nwait_log 10000 hearth: page Delete\ndelay 1000\nclick Button \"Spam\"\ndelay 1000\nscreenshot $t/delete.png\nclick Button \"Delete\"\ndelay 2000\nquit\n" \
+# A reason picked draws the dialog again; the moderator's own request is
+# answered with ok
+# The page comes before its rows' action buttons: the row's own
+# "action mN Delete..." line, and the 300 ms its button drawn.
+# A moderator's first login is asked about ntfy in a window over the
+# thread ([NTFY_ASK_OVER_GAME]), and closing it leaves no message
+# selected: Don't add in a login of its own, so mia's runs click the thread
+NTFY='wait_log_any 20000 server window: the page ntfy\ndelay 300\nclick Button "Don'"'"'t add"\nwait_log 5000 server window: closed\n'
+# The second before quit is the answer's packet sent (no answer comes back)
+client mia "$t/mia_ntfy.log" "" "${NTFY}delay 1000\nquit\n"
+client mia "$t/mia_row.log" "" "${T}wait_log_any 10000 Delete...\ndelay 300\nscreenshot $t/row.png\nclick Button \"Delete...\"\nwait_log 10000 hearth: page Delete\ndelay 500\nclick Button \"Spam\"\nwait_log 5000 hearth: page Delete\ndelay 500\nscreenshot $t/delete.png\nclick Button \"Delete\"\nwait_log 10000 \"ok\":true\nquit\n" \
 	BUILDAT_HEARTH_OPEN="$T1#$M2"
 a=$(acts "$t/mia_row.log" $M2)
 has "$a" "Delete..." && has "$a" "Ban..." || fail "the moderator's tools: $a"
@@ -123,9 +146,9 @@ ok "$t/mia_del2.log" 1001 "the thread's delete"
 curl -s "http://127.0.0.1:$P/" | grep -q "Cheap pills" && fail "the deleted thread is listed"
 
 # 3. Ban... for a day, from the dialog
-client mia "$t/mia_ban.log" "" "delay 6000\nclick Button \"Ban...\"\nwait_log 10000 hearth: page Ban\ndelay 1000\nclick Button \"Spam\"\ndelay 1000\nscreenshot $t/ban.png\nclick Button \"Ban\"\ndelay 2000\nquit\n" \
+client mia "$t/mia_ban.log" "" "${T}click Button \"Ban...\"\nwait_log 10000 hearth: page Ban\ndelay 500\nclick Button \"Spam\"\nwait_log 5000 hearth: page Ban\ndelay 500\nscreenshot $t/ban.png\nclick Button \"Ban\"\nwait_log 10000 \"ok\":true\nquit\n" \
 	BUILDAT_HEARTH_OPEN="$T1#$M1"
-client neo "$t/neo_banned.log" '{"cmd":"me"}' "$Q"
+client neo "$t/neo_banned.log" '{"cmd":"me"}' 'expect_error Disconnected from server\nwait_log_any 20000 Login refused\nquit\n' 
 grep -a "Login refused" "$t/neo_banned.log" | grep -aq "until 20[0-9-]* [0-9:]* UTC: Spam" ||
 	fail "neo's refusal: $(grep -a 'Login refused' "$t/neo_banned.log" | head -2)"
 client mia "$t/mia_ban2.log" '{"cmd":"ban","name":"hal","days":1,"reason":"Spam","text":""}' "$Q"

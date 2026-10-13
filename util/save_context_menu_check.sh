@@ -27,11 +27,12 @@ saves="wait_log_any 20000 , first alpha
 delay 1500
 event scan 1 home
 click Button \"Saves*\"
-delay 1500
+wait_log 5000 launch_menu: save,
+delay 300
 event scan 1 saves"
 # drive <n> <commands> [env]
 drive(){
-	printf "%s\ndelay 500\nquit\n" "$2" > "$t/$1.cmds"
+	printf "%s\nquit\n" "$2" > "$t/$1.cmds"
 	env ${3:-} timeout 300 "$here/Build/bin/buildat" -o launch_ui=launch_menu -D "$d" \
 		-C "$t/c$1" -w 1100x800 -l 3 -o sound_mute=1 -c @"$t/$1.cmds" > "$t/$1.log" 2>&1
 	for p in $(pgrep -f "[b]uildat_server .*-D $d"); do kill $p; done
@@ -56,18 +57,21 @@ touch_at=$(row_at 3) || exit 1
 echo "alpha's row at $at, by finger at $touch_at"
 drive 1 "$saves
 mouse_pos $at
+# The cursor moved is read in the frame after, then the click
 delay 300
 mouse_click right
-delay 1000
+wait_log 5000 launch_menu: the actions of alpha
+delay 300
 event scan 1 menu
 click Button \"World options...\"
-wait_log 120000 menu: the world alpha selected for its options
-delay 1000"
+wait_log 120000 menu: the world alpha selected for its options"
 drive 2 "$saves
 finger_down 1 $touch_at
-delay 1000
+wait_log 5000 launch_menu: the actions of alpha
 finger_up 1
-delay 1000
+# A settle after the line: the release read, the menu still up, in the
+# frames after
+delay 300
 event scan 1 menu" BUILDAT_TOUCH=1
 python3 - "$t/0.log" "$t/1.log" "$t/2.log" <<'PY' || fail "the menus ($t/0.log $t/1.log $t/2.log)"
 import sys

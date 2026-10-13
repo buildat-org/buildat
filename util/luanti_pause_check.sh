@@ -27,40 +27,51 @@ P=30178
 LUANTI_GAME_PATH="$t/games" MINETEST_GAME_PATH="$t/games" \
 	luanti --server --world "$t/w" --port $P > "$t/srv.log" 2>&1 &
 s=$!
-for _ in $(seq 60); do
+for _ in $(seq 150); do
 	grep -q "listening on" "$t/srv.log" && break
 	kill -0 $s 2>/dev/null || fail "server died ($(tail -3 "$t/srv.log"))"
-	sleep 0.5
+	sleep 0.2
 done
+grep -q "listening on" "$t/srv.log" || fail "the server did not come up ($t/srv.log)"
 # The address allowed already, as a player's Allow leaves it
 mkdir -p "$t/cl"
 now=$(date +%s)
 echo "\"true\",\"udp://127.0.0.1:$P\",\"\",\"$now\",\"$now\",\"\",\"\",\"\"" \
 	> "$t/cl/network_addresses.csv"
-# Positions at 800x600
+# Positions at 800x600. The dropdown's popup waited for by ui_utils'
+# "dropdown_<n> open"; its Down and Return a few frames apart, as pressed
 cat > "$t/cmds" <<C
-delay 15000
+wait_log 60000 voxel types have their own textures
+wait_log_any 30000 loading: the world is in
+delay 500
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
+delay 300
 mouse_pos 380 343
 mouse_click left
+wait_log 5000 dropdown_
+# the popup's list takes keys some frames after it opens (a Down 7 ms
+# after the line was lost)
 delay 500
 keypress Down
+# the keys' pacing: the list reads the Down a frame before the Return
 delay 200
 keypress Return
-delay 500
+wait_log 5000 view range 200, saved
 event scan
 keypress Escape
-delay 1000
+wait_log 5000 pause: closed
+delay 300
 event scan
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
 quit
 C
 cd "$here/Build"
 BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME=pausecheck \
 	timeout 120 bin/buildat -m luanti_client -D "$t/cl" -w 800x600 -l 3 \
-	-o sound_mute=1 -c @"$t/cmds" > "$t/cl.log" 2>&1
+	-o sound_mute=1 -c @"$t/cmds" > "$t/cl.log" 2>&1 ||
+	fail "the drive ($t/cl.log): $(grep -a "Command sequence failed" "$t/cl.log" | tail -1)"
 grep -aq 'menu "ui_stack_[0-9_.]*: luanti_client pause"' "$t/cl.log" ||
 	fail "no pause menu after Escape"
 grep -aq '"view_range" : 200' "$t/cl/extensions/luanti_client/settings.json" 2>/dev/null ||

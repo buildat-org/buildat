@@ -50,11 +50,13 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 end)
 L
 # 20 taps at (x, y) jittered by up to 3 CSS pixels, each followed by one
-# at (ox, oy) outside
+# at (ox, oy) outside; each waits for the popup's own line (ui_utils logs
+# it opening and closing), so a tap that opens nothing fails the drive
+# there
 taps(){ # x y ox oy
 	for i in $(seq 20); do
-		echo " [\"tap\", $(($1 + RANDOM % 7 - 3)), $(($2 + RANDOM % 7 - 3))], [\"wait\", 700],"
-		echo " [\"tap\", $3, $4], [\"wait\", 700],"
+		echo " [\"tap\", $(($1 + RANDOM % 7 - 3)), $(($2 + RANDOM % 7 - 3))], [\"waitlog\", \"dropdown_\\\\d+ open\", 10],"
+		echo " [\"tap\", $3, $4], [\"waitlog\", \"dropdown_\\\\d+ closed\", 10],"
 	done
 }
 drive(){ # name, game, steps file, url
@@ -76,17 +78,21 @@ twenty(){ # name, out lines
 start_server "$t/srv.log" "STATUS Listening" 90 auto "$here/Build/bin/buildat_server" \
 	-m "$a" -D "$t/sd" -C "$t/sd.cache" -W "$here/web" -l 3 || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
+# The second after the drag is the time a popup it wrongly opened would
+# have to say so; the short waits after a line are the page's next frames
 cat > "$t/scroll.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "tdrop: ready", 120], ["wait", 2000],
- ["key", "o"], ["wait", 2000],
- ["key", "p"], ["wait", 500],
+ ["waitlog", "tdrop: ready", 60], ["wait", 1000],
+ ["key", "o"], ["waitlog", "Game settings shown", 10], ["wait", 500],
+ ["key", "p"], ["waitlog", "tdrop: at ", 10],
 $(taps 270 151 70 74)
- ["tap", 270, 151], ["wait", 700], ["tap", 240, 212], ["wait", 700],
- ["click", 270, 151], ["wait", 700], ["click", 240, 240], ["wait", 700],
+ ["tap", 270, 151], ["waitlog", "dropdown_\\\\d+ open", 10],
+ ["tap", 240, 212], ["waitlog", "tdrop: picked 2", 10], ["waitlog", "dropdown_\\\\d+ closed", 10],
+ ["click", 270, 151], ["waitlog", "dropdown_\\\\d+ open", 10],
+ ["click", 240, 240], ["waitlog", "tdrop: picked 3", 10], ["waitlog", "dropdown_\\\\d+ closed", 10],
  ["drag", 270, 151, 270, 51, "touch"], ["wait", 1000],
- ["key", "p"], ["wait", 500]
+ ["key", "p"], ["waitlog", "tdrop: at ", 10]
 ]
 J
 drive scroll tdrop "$t/scroll.json" "http://127.0.0.1:$SERVER_PORT/"
@@ -102,14 +108,16 @@ echo "ok: in a scroll view 20 taps open and a tap outside closes, a tap and a cl
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 # Outside a scroll view: Home's Settings, "Display and sound", the
 # Antialiasing dropdown at (306, 340), outside it the title at (100, 230)
+# The waits after a line are the page's next frames, the menu laid out;
+# the last one only ends the list after the taps' trailing comma
 cat > "$t/plain.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "launch_menu", 120], ["wait", 3000],
- ["tap", 200, 460], ["wait", 2000],
- ["tap", 180, 275], ["wait", 2000],
+ ["waitlog", "launch_menu: ", 60], ["wait", 2000],
+ ["tap", 200, 460], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
+ ["tap", 180, 275], ["waitlog", "Engine settings shown", 10], ["wait", 500],
 $(taps 306 340 100 230)
- ["wait", 500]
+ ["wait", 200]
 ]
 J
 drive plain play "$t/plain.json" ""

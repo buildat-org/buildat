@@ -23,15 +23,15 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/form_enter.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29785 \
+	start_server "$out/srv.log" "Mods loaded" 120 29785 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s localhost:29785 -w 1280x720 -l 3 -c - < "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
+trap 'kill $cli 2>/dev/null; kill -INT $srv 2>/dev/null' EXIT
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/srv.log" <<'PY'
 import re, sys, time
@@ -47,7 +47,8 @@ def scan():
     # vanilla's scan names its own lines "scan scan:" whatever the event's
     # label is
     global seen
-    write("delay 800", "event scan")
+    # A settle: the form drawn in the frames after its line
+    write("delay 300", "event scan")
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -69,13 +70,21 @@ def rows(els):
     return None
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-t0 = time.time()
-while time.time() - t0 < 90:
-    if "form_enter: the form is shown" in open(srv, "rb").read().decode(
-            "utf-8", "replace"):
-        break
-    time.sleep(1)
-time.sleep(3)
+# The client's "form form_enter opened", after what the log held when the
+# step was sent (or anywhere in it)
+def wait_for(text, secs, anywhere=False):
+    global seen
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        data = open(log, "rb").read()
+        i = data.find(text.encode(), 0 if anywhere else seen)
+        if i >= 0:
+            seen = i + len(text)
+            return
+        time.sleep(0.1)
+    fail("no \"%s\" in %d s (%s)" % (text, secs, log))
+# The join, and the fixture's form three seconds after it
+wait_for("form form_enter opened", 90, True)
 els = scan()
 before = rows(els)
 if before is None:
@@ -85,9 +94,12 @@ edits = [e for e in els if e[0] == "LineEdit" and e[3] > 0]
 if not edits:
     fail("no field on the screen")
 e = edits[0]
+# The 200 ms are the hover and the field's focus taken in the frames after
 write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 200",
-      "mouse_click left", "delay 300", "text ap", "delay 300",
-      "keypress Return", "delay 1200")
+      "mouse_click left", "delay 200", "text ap", "delay 200",
+      "keypress Return")
+# The server's answer is the form shown again
+wait_for("form form_enter opened", 10)
 els = scan()
 after = rows(els)
 got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
@@ -105,7 +117,7 @@ sys.exit(0 if ok else 1)
 PY
 status=$?
 exec 3>&-
-sleep 2
+for i in $(seq 50); do kill -0 $cli 2>/dev/null || break; sleep 0.2; done
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 exit $status

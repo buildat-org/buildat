@@ -26,13 +26,14 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 cd "$here"
 
-start_server "$tmp/sp.log" "setup code" 120 $SP \
+start_server "$tmp/sp.log" "setup code" 60 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
 	fail "the Starport did not start (sp.log)"
 pids+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
-printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+# The third of BUILDAT_SP_REQS, the claim, answered
+printf 'wait_log_any 30000 sp: {"id":3,\nquit\n' > "$tmp/cmds.txt"
 n=0
 for app in ${@:-hearth aitta}; do
 	n=$((n + 1))
@@ -46,12 +47,14 @@ for app in ${@:-hearth aitta}; do
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
 EOF
-	Build/bin/buildat_server -m apps/$app -D "$d" -P $AN -l 3 \
-		> "$tmp/$app.log" 2>&1 &
-	pids+=($!)
-	for _ in $(seq 180); do
+	start_server "$tmp/$app.log" "setup code" 60 $AN \
+		Build/bin/buildat_server -m apps/$app -D "$d" -l 3 ||
+		fail "$app did not start ($tmp/$app.log)"
+	pids+=($SERVER_PID)
+	for _ in $(seq 300); do
 		[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge $n ] && break
-		sleep 1
+		kill -0 $SERVER_PID 2>/dev/null || break
+		sleep 0.2
 	done
 	[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge $n ] ||
 		fail "$app: no verified listing ($tmp/$app.log)"
@@ -61,7 +64,8 @@ EOF
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 		timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-		-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_$app.log" 2>&1
+		-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_$app.log" 2>&1 ||
+		fail "$app: the admin's run ($(grep -a 'Command sequence failed\|^E' "$tmp/sp_$app.log" | tail -2))"
 	curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 		fail "$app: the claim ($tmp/sp_$app.log)"
 	token=$(python3 - "$SP" "$id" "$app" <<'PY'
@@ -79,14 +83,16 @@ print(r["result"]["token"])
 PY
 	) || fail "$app: the ID API"
 	setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/$app.log" | tail -1 | cut -d' ' -f3)
+	printf 'wait_log_any 30000 Joined as grown%s\nquit\n' "$app" > "$tmp/join.txt"
 	env "${prefix}_STARPORT=$token" "${prefix}_CODE=$setup" timeout 90 \
 		Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
-		-c @"$tmp/cmds.txt" > "$tmp/cl_$app.log" 2>&1
+		-c @"$tmp/join.txt" > "$tmp/cl_$app.log" 2>&1 ||
+		fail "$app: the ID did not join ($(grep -a 'Command sequence failed\|^E' "$tmp/cl_$app.log" | tail -2))"
+	wait_for_log "$tmp/$app.log" "grown$app claimed the server with the setup code" 10
 	grep -q "Joined as grown$app" "$tmp/cl_$app.log" &&
 		grep -q "grown$app claimed the server with the setup code" "$tmp/$app.log" ||
 		fail "$app: the ID did not join ($tmp/cl_$app.log, $tmp/$app.log)"
 	echo "ok: $app listed, and a Starport ID joined as its first admin"
-	kill "${pids[-1]}"
-	sleep 1
+	kill "${pids[-1]}"; wait "${pids[-1]}" 2>/dev/null
 done
 echo "PASS: a Starport ID joins ${*:-hearth aitta}"

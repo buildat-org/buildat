@@ -33,19 +33,18 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/surface_light.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29788 \
+	start_server "$out/srv.log" "Mods loaded" 60 29788 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "FAIL: the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # A client is what makes the world around the player load, which is what
 # the fixture reads; it does nothing else here
-printf 'wait_log 240000 chat: surface_light: done\ndelay 500\nquit\n' \
+printf 'wait_log 60000 chat: surface_light: done\nquit\n' \
 		> "$out/cmds.txt"
-bin/buildat -s localhost:29788 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+bin/buildat -s localhost:29788 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/srv.log" <<'PY'

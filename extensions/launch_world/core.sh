@@ -48,15 +48,18 @@ fi
 	echo "event mode menu"
 	echo "wait_log 10000 camera: landed"
 	for c in D I G G E R; do echo "keypress $c"; done
-	echo "delay 800"
+	echo "wait_log 10000 camera: landed"
 	echo "keypress Return"
-	echo "wait_log 120000 game: the room stands down"
-	echo "delay 1000"
+	echo "wait_log 60000 game: the room stands down"
+	# The room stands down on its own clock, and digger may still be
+	# compiling: its player placed is the game up, Escape heard
+	echo "wait_log_any 60000 player physics enabled"
+	echo "delay 500"
 	# **The way out is the game's own** ([NO_WAY_BACK]): Escape runs
 	# buildat.leave(), which comes back here because there is a launcher
 	echo "keypress Escape"
 	echo "wait_log 20000 game: back in the room"
-	echo "delay 500"
+	echo "delay 500"  # a settle: the room drawn again
 	echo "screenshot $out/back.png"
 	# **And the room is moving again**: nothing in it is ever static, so
 	# two frames apart say whether coming back left a screen on top of
@@ -75,6 +78,7 @@ fi
 	# row opened and the room picked from the list, which boots a new
 	# one. One Tab afterwards is one station: a window of the menu's left
 	# on top, or the old room still listening, makes it none or two.
+	# A settle: the drift's camera on its way back to the standing place
 	echo "delay 1500"
 	echo "keypress Escape"
 	echo "wait_log 5000 pause: open"
@@ -82,22 +86,22 @@ fi
 	echo "keypress Down"
 	echo "keypress Return"
 	echo "wait_log 10000 room: closed"
-	echo "delay 1500"
+	echo "wait_log_any 10000 rows in"
+	echo "delay 300"
 	echo "text dis"
-	echo "delay 500"
+	echo "wait_log 5000 rows for \"dis\""
 	echo "keypress Return"
-	echo "delay 1500"
+	echo "wait_log 5000 Engine settings shown"
 	# Up twice, past Back: the Launch UI row, then in its list the room,
-	# the last entry
-	for i in 1 2; do
+	# the last entry. The 200 ms are the menu's focus moving a key at a time
+	for w in "Launch UIs shown" "has the screen again"; do
 		echo "keypress Up"; echo "delay 200"; echo "keypress Up"; echo "delay 200"
-		echo "keypress Return"; echo "delay 500"
+		echo "keypress Return"; echo "wait_log 10000 $w"
 	done
-	echo "wait_log 10000 has the screen again"
+	# A settle: the new room's keys listened for in the ticks after
 	echo "delay 1500"
 	echo "keypress Tab"
 	echo "wait_log 10000 camera: landed"
-	echo "delay 1000"
 	echo "quit"
 	} > "$out/cmds.txt"
 # **A user directory of its own**: the desk's has saves and servers and
@@ -106,8 +110,9 @@ fi
 # own state into the player's ([SMOKE_PICK]: a runner has to mean the
 # same thing on another machine)
 mkdir -p "$out/user"
-run_client 40 "$out/cli.log" timeout 240 bin/buildat -m launch_world \
-	-D "$out/user" -w 640x360 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
+run_client 40 "$out/cli.log" timeout 180 bin/buildat -m launch_world \
+	-D "$out/user" -w 640x360 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -a 'Command sequence failed\|run_client:' "$out/cli.log" | head -1)"; exit 1; }
 
 contents=$(grep -a "launch_w.*: contents: " "$out/cli.log" | head -1 |
 	sed 's/.*contents: //')

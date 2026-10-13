@@ -24,30 +24,38 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=sw start_server "$t/v.log" \
 	fail "the vanilla server did not start ($t/v.log)"
 CHECK_PIDS+=($SERVER_PID)
 for size in auto 1.5; do
+	# A page of the Server window says it is shown; a click on its page
+	# must bring no Settings back, the one off it must
 	cat > "$t/$size.cmds" <<C
 wait_log 120000 the server put the player at
-delay 8000
+wait_log 60000 scene, 0 undrawn within 2
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
+delay 300
 click Button "Settings..."
 wait_log 5000 Game settings shown
 delay 1000
 mouse_pos 550 500
 $(for _ in $(seq 30); do echo "mouse_wheel -1"; done)
+# The frames after the input: the list scrolled before the click looks
 delay 500
 click Button "Server..."
-delay 1500
+wait_log 5000 server window: the page
+delay 300
 click Button "Open to LAN"
-delay 1000
+wait_log 5000 server window: the page
+delay 300
 click Button "Account"
-delay 1000
+wait_log 5000 server window: the page
+delay 300
 mouse_pos 650 650
 mouse_click left
-delay 1000
+wait_log_absent 1000 Game settings shown
 screenshot $t/${size}_inside.png
 mouse_pos 15 500
 mouse_click left
-delay 1500
+wait_log 5000 Game settings shown
+delay 500
 screenshot $t/${size}_off.png
 quit
 C

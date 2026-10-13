@@ -482,6 +482,8 @@ local function fetch_icons(url, servers)
 				if got ~= sha then
 					log:warning("Starport " .. url .. ": icon " .. sha ..
 							" not kept (" .. tostring(got) .. ")")
+				else
+					log:info("Starport " .. url .. ": icon " .. sha .. " kept")
 				end
 			end, {description = "Starport (server icon)"})
 		end
@@ -617,6 +619,8 @@ function M.safe.fetch(cb, ask, extra)
 			if type(v) == "table" and v.ok and type(v.servers) == "table" then
 				note_recommends(url, v.recommends)
 				note_version(url, v.version)
+				log:info("Starport " .. url .. ": " .. #v.servers ..
+						" servers listed")
 				results[url] = v.servers
 				kept[url] = {ts = os.time(), servers = v.servers}
 				fetch_icons(url, v.servers)
@@ -753,6 +757,7 @@ local function open_window(desc, width, on_escape, opts)
 	root:SubscribeToStackEvent("KeyDown", function(_, data)
 		if data:GetInt("Key") == magic.KEY_ESCAPE then
 			uistack.main:pop(root)
+			log:info("dialog: " .. desc .. " closed by Escape")
 			if on_escape then
 				on_escape()
 			end
@@ -1105,6 +1110,7 @@ function M.offer_version()
 		if not_now then
 			s.version_not_now = n.version
 			save_state()
+			log:info("Version: not now, " .. n.version .. " kept")
 		end
 	end
 	local root, w = open_window("starport version", 620, function()
@@ -1463,6 +1469,7 @@ settings_page = function(can, again, message)
 					x.state or "sent"), DIM)
 		end
 	end
+	log:info("starport: the settings shown")
 end
 
 --
@@ -1693,6 +1700,8 @@ function M.id_login(url, then_cb, message)
 	end)
 	add_button(r, "Close", close_and(root))
 	name:SetFocus(true)
+	-- What a check waits for
+	log:info("starport: the ID login shown for " .. url)
 end
 
 function M.id_reset(url, name_text)
@@ -2269,6 +2278,8 @@ function M.safe.id_token_here(cb, rename_reason)
 					"community sees it; others do not see which name you "..
 					"use here.")
 			local e = add_edit(w, suggest or "")
+			-- What a check waits for
+			log:info("ID name prompt: " .. community)
 			local rr = add_row(w)
 			add_button(rr, "Use it", function()
 				local n = e:GetText()

@@ -38,9 +38,13 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$user" \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap 'kill -INT "$srv" 2>/dev/null' EXIT
+# A key says what it did in the chat, and the frames after that line draw
+# it. The zoom is a held key and its easing in and out, by time.
+# simplified: the eight seconds after the world settles wait for
+# camera.lua's stage, six seconds after the join, which nothing on the
+# client marks (see camera.sh)
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
 wait_log 60000 scene, 0 undrawn within 2
@@ -53,44 +57,55 @@ look_dir 0 -0.1 1
 delay 2000
 screenshot $out/plain.png
 keypress F3
-delay 1500
+wait_log 5000 chat (local): Fog disabled
+delay 500
 screenshot $out/nofog.png
 keypress F3
+wait_log 5000 chat (local): Fog enabled
 keydown Z
+# a timing: Z held 1.5 s, the zoom eased in
 delay 1500
 screenshot $out/zoom.png
 keyup Z
+# a timing: the zoom's easing out
 delay 800
 screenshot $out/back.png
 keypress F12
-delay 1500
+wait_log 5000 F12: screenshot
 keypress V
-delay 1200
+wait_log 5000 chat (local): Minimap
+delay 500
 screenshot $out/map_x4.png
 keypress V
-delay 1200
+wait_log 5000 chat (local): Minimap
+delay 500
 screenshot $out/map_x2.png
 keypress V
-delay 1200
+wait_log 5000 chat (local): Minimap
+delay 500
 screenshot $out/map_x1.png
 keypress V
-delay 1200
+wait_log 5000 chat (local): Minimap
+delay 500
 screenshot $out/radar_x4.png
 keypress V
+wait_log 5000 chat (local): Minimap
 keypress V
+wait_log 5000 chat (local): Minimap
 keypress V
-delay 1200
+wait_log 5000 chat (local): Minimap
+delay 500
 screenshot $out/map_off.png
 $(fullscreen_section "$out")
-delay 500
 quit
 CMDS
 bin/buildat "${cli_user[@]}" -s localhost:29778 -w 1280x720 -o sound_mute=1 -l 3 -c @"$out/cmds.txt" \
-	> "$out/cli.log" 2>&1
-sleep 2
+	> "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-grep "chat (local)\|F12: screenshot\| E " "$out/cli.log" | sed 's/.*: //'
+# A poll: the server's exit
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+grep "chat (local)\|F12: screenshot\| E " "$out/cli.log" | grep -v wait_log | sed 's/.*: //'
 ls "$out"/*.png
 # F11 twice: the world drawn in and after fullscreen ([BOX_PLAYTEST_3] 1;
 # the extension's atlas is filled by hand, vanilla's is voxelworld's,
@@ -133,7 +148,8 @@ def apart(a, b):
 labels = []
 for line in open("%s/cli.log" % out, errors="ignore"):
 	i = line.find("Minimap ")
-	if i >= 0:
+	# Not the drive's own waits for it
+	if i >= 0 and "wait_log" not in line:
 		labels.append(line[i:].strip())
 first = labels[0] if labels else "(none)"
 appeared = apart(corner("plain"), corner("map_x4"))

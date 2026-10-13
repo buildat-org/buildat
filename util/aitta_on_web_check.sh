@@ -15,6 +15,10 @@ set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -s "$here/web/index.html" ] || skip "no web/ (util/build_web.sh)"
 check_tmp aitta_on_web; t=$CHECK_TMP
+# The waits after a waitlog are settles after the line: the screen it
+# names drawn (before its shot) or focused (before the typing) in the
+# frames after. Enter on Home's second row says "launch_menu: browse
+# <its label>" and opens that list; Escape closes it ("<kind> closed").
 cat > "$t/steps.json" <<J
 [
 	["nav", "\${URL}"],
@@ -23,16 +27,18 @@ cat > "$t/steps.json" <<J
 	["shot", "\${OUT}/home.png"],
 	["key", "Down"],
 	["key", "Enter"],
+	["waitlog", "launch_menu: browse ", 10],
 	["wait", 1500],
 	["shot", "\${OUT}/get_more.png"],
 	["key", "Escape"],
-	["wait", 1000],
+	["waitlog", "launch_menu: [a-z]+ closed", 10],
+	["wait", 300],
 	["type", "aitta"],
 	["waitlog", "launch_menu: [0-9]+ rows for \"aitta\".*first Apps from Aitta", 20],
 	["wait", 500],
 	["key", "Enter"],
 	["waitlog", "launch_menu: catalog Apps from Aitta", 20],
-	["wait", 2000],
+	["wait", 1500],
 	["shot", "\${OUT}/aitta.png"]
 ]
 J

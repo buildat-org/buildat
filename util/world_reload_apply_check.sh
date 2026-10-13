@@ -27,32 +27,37 @@ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 echo "enable_damage = false" >> "$mt"
 grep -q "creative_mode = true" "$mt" && fail "alpha creative from the start"
 
+# The Creative mode click relabels Play in its own frame, a scan 300 ms on
 cat > "$t/cmds" <<C
 wait_log_any 20000 , first alpha
 delay 1500
 click Text "alpha"
 wait_log 120000 the server put the player at
-delay 3000
+wait_log_any 60000 load: the world is in
+delay 500
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
 click Button "Worlds..."
 wait_log 10000 menu: the running world alpha selected
-delay 1500
+wait_log 10000 menu: the world alpha shown
+delay 300
 event scan
 click Button "Play"
-delay 1500
+wait_log 5000 pause: back in the game from the worlds
+delay 300
 event scan
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
 click Button "Worlds..."
 wait_log 10000 menu: the running world alpha selected
-delay 1500
+wait_log 10000 menu: the world alpha shown
+delay 300
 click Button "[ ] Creative mode"
-delay 1500
+wait_log 5000 menu: Creative mode on for alpha
 event scan
 click Button "Reload world to apply"
-wait_log 120000 the server put the player at
-delay 2000
+wait_log 60000 the server put the player at
+wait_log 60000 load: the world is in
 quit
 C
 timeout 300 "$here/Build/bin/buildat" -o launch_ui=launch_menu -D "$d" -C "$t/c2" \

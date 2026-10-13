@@ -36,11 +36,20 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
 	-out "$t/cert.pem" 2> /dev/null || fail "openssl"
 python3 "$here/util/tls_proxy.py" "$t/cert.pem" "$t/key.pem" \
 	"$TLS:127.0.0.1:$SERVER_PORT" > "$t/proxy.log" 2>&1 &
-CHECK_PIDS+=($!)
+CHECK_PIDS+=($!); proxy=$!
+# --delay is the link's latency, not a wait
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$TLS" \
 	--delay 0 --rate 64000 > "$t/netsim.log" 2>&1 &
-CHECK_PIDS+=($!)
-sleep 1
+CHECK_PIDS+=($!); link=$!
+# Both up, up to 10 s
+for _ in $(seq 50); do
+	grep -aq "tls_proxy: up" "$t/proxy.log" && grep -aq "netsim: listening" "$t/netsim.log" && break
+	kill -0 $proxy 2>/dev/null && kill -0 $link 2>/dev/null || break
+	sleep 0.2
+done
+grep -aq "netsim: listening" "$t/netsim.log" && grep -aq "tls_proxy: up" "$t/proxy.log" ||
+	fail "the proxy or the link did not come up ($t/proxy.log, $t/netsim.log)"
+# The delay is the 15 s the world has to be in the scene
 {
 	echo "wait_log 120000 vanilla client ready"
 	echo "wait_log 60000 load: the world is in"; echo "delay 15000"
@@ -48,7 +57,8 @@ sleep 1
 } > "$t/cmds"
 BUILDAT_CA_FILE=$t/cert.pem run_client 60 "$t/client.log" timeout 240 \
 	"$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" -s "https://127.0.0.1:$LINK" \
-	-w 800x450 -l 4 -o sound_mute=1 -c @"$t/cmds"
+	-w 800x450 -l 4 -o sound_mute=1 -c @"$t/cmds" ||
+	fail "the client ($t/client.log): $(grep -aE "Command sequence failed|run_client:" "$t/client.log" | tail -1)"
 grep -a "TLS: [0-9]* bytes" "$t/client.log" | sed 's/.*TLS: /TLS: /' | head -3
 ready=$(grep -a "vanilla client ready" "$t/client.log" | head -1 | awk '{print $3}')
 world=$(grep -aE "settle: [0-9]+ to mesh, ([2-9][0-9]{2}|[0-9]{4,}) chunks in scene" \

@@ -24,7 +24,7 @@ cd "$here/Build"
 
 # serve <dir> <log>: an Aitta on <dir>, its PID in CHECK_PIDS
 serve(){
-	start_server "$2" "Listening at" 120 auto \
+	start_server "$2" "Listening at" 60 auto \
 		bin/buildat_server -m ../apps/aitta -D "$1" -l 3 || fail "Aitta did not start ($2)"
 	CHECK_PIDS+=($SERVER_PID)
 	P=$SERVER_PORT
@@ -41,7 +41,7 @@ compile_only(){
 # settle <log> [env...]: a client's set_settings, answered ok
 settle(){
 	local log=$1; shift
-	printf 'delay 8000\nquit\n' > "$t/c.cmds"
+	printf 'wait_log_any 30000 ai: {"id":1,\nquit\n' > "$t/c.cmds"
 	env "$@" BUILDAT_AITTA_REQS='{"cmd":"set_settings","settings":{"page_delay":0}}' \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
 		-s 127.0.0.1:$P -c @"$t/c.cmds" > "$log" 2>&1

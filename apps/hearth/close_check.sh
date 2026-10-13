@@ -17,7 +17,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hearth_close; t=$CHECK_TMP
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -31,15 +31,18 @@ drive(){ # log commands [client args...]
 	env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		timeout 90 bin/buildat -m launch_menu -D "$t/cl" -w 800x600 -l 3 \
-		-o sound_mute=1 -c @"$t/cmds" "$@" > "$log" 2>&1
+		-o sound_mute=1 -c @"$t/cmds" "$@" > "$log" 2>&1 ||
+		fail "the drive $log: $(grep -a "Command sequence failed" "$log" | tail -1)"
 	grep -aq "Lua runtime error" "$log" && fail "a Lua error in $log"
 }
 # The lines after the commands' echo, from the one matching $2 on
 after(){ grep -av "command: \|wait_log" "$1" | sed -n "/$2/,\$p"; }
-J="delay 3000\nevent join 127.0.0.1:$P\nwait_log 30000 hearth: frame\ndelay 1500\n"
+J="wait_log_any 30000 rows in\nevent join 127.0.0.1:$P\nwait_log 30000 hearth: frame\ndelay 1500\n"
+# A dialog closed logs nothing: the 800 ms after its key is the time for a
+# wrong turn (a leave) to show before the scan
 
 # 1. The dialog's keys
-drive "$t/keys.log" "${J}keypress Escape\nwait_log 5000 hearth: exit dialog\ndelay 800\nscreenshot $t/dialog.png\nkeypress Escape\ndelay 800\nevent scan closed1\nkeypress Escape\nwait_log 5000 hearth: exit dialog\ndelay 500\nkeypress Up\nkeypress Return\ndelay 800\nevent scan closed2\nkeypress Escape\ndelay 500\nkeypress Down\nkeypress Return\ndelay 1500\nscreenshot $t/account.png\nquit\n"
+drive "$t/keys.log" "${J}keypress Escape\nwait_log 5000 hearth: exit dialog\ndelay 800\nscreenshot $t/dialog.png\nkeypress Escape\ndelay 800\nevent scan closed1\nkeypress Escape\nwait_log 5000 hearth: exit dialog\ndelay 500\nkeypress Up\nkeypress Return\ndelay 800\nevent scan closed2\nkeypress Escape\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 5000 server window: the page\ndelay 300\nscreenshot $t/account.png\nquit\n"
 n=$(grep -av "command: \|wait_log" "$t/keys.log" | grep -ac "hearth: exit dialog")
 [ "$n" = 3 ] || fail "the dialog opened $n times, not 3"
 after "$t/keys.log" "closed1" | grep -aq "launch_menu: back to Home" &&
@@ -63,14 +66,16 @@ after "$t/x.log" "hearth: exit dialog" | grep -aq "launch_menu: back to Home" ||
 echo "ok: the × then Q exits, the launcher back and the kept token empty"
 
 # 3. Joined straight, no launcher: no ×, Escape is My account
-printf 'wait_log 30000 hearth: frame\ndelay 1500\nkeypress Escape\ndelay 1500\nquit\n' > "$t/cmds"
+printf 'wait_log 30000 hearth: frame\ndelay 1500\nkeypress Escape\nwait_log 5000 server window: the page\nquit\n' > "$t/cmds"
 env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl2" -w 800x600 -l 3 -o sound_mute=1 \
-	-s 127.0.0.1:$P -c @"$t/cmds" > "$t/straight.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/cmds" > "$t/straight.log" 2>&1 ||
+	fail "the straight join's drive: $(grep -a "Command sequence failed" "$t/straight.log" | tail -1)"
 grep -aq "hearth: frame" "$t/straight.log" || fail "the straight join"
 grep -aq "hearth: the × to the launcher" "$t/straight.log" && fail "a × with no launcher"
 grep -av "command: " "$t/straight.log" | grep -aq "hearth: exit dialog" &&
 	fail "the dialog with no launcher"
-grep -aq "server window: " "$t/straight.log" || fail "Escape did not open My account"
+grep -av "command: \|wait_log" "$t/straight.log" | grep -aq "server window: " ||
+	fail "Escape did not open My account"
 echo "ok: with no launcher, no × and Escape is My account"
 echo PASS

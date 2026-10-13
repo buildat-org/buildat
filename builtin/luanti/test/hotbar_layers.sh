@@ -31,6 +31,10 @@ core.register_on_joinplayer(function(player)
 		inv:set_stack("main", 3, "mcl_core:dirt 12")
 		inv:set_stack("main", 8, "mcl_tools:pick_wood")
 		core.log("action", "hotbar_layers: the slots are filled")
+		-- For the client to wait on; the chat is at the top, away from
+		-- the hotbar's strip
+		core.chat_send_player(player:get_player_name(),
+				"hotbar_layers: the slots are filled")
 	end)
 end)
 LUA
@@ -41,28 +45,28 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap 'kill -INT "$srv" 2>/dev/null' EXIT
 {
-	echo "wait_log 60000 hotbar_layers: the slots are filled"
-	echo "delay 2500"
+	# The slots drawn in the frames after the line
+	echo "wait_log 90000 chat: hotbar_layers: the slots are filled"
+	echo "delay 2000"
 	echo "screenshot $out/start.png"
 	# Ten opens and closes of the pause menu
 	for i in $(seq 1 10); do
-		echo "keypress Escape"; echo "delay 400"
-		echo "keypress Escape"; echo "delay 400"
+		echo "keypress Escape"; echo "wait_log 5000 pause: the menu shown"
+		echo "keypress Escape"; echo "wait_log 5000 pause: the menu closed"
 	done
+	# The game drawn again after the last close
 	echo "delay 1000"
 	echo "screenshot $out/after_pause.png"
 	fullscreen_section "$out"
-	echo "delay 500"
 	echo "quit"
 } > "$out/cmds.txt"
-bin/buildat -s localhost:29782 -w 1280x720 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
-sleep 2
+bin/buildat -s localhost:29782 -w 1280x720 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 python3 - "$out" <<'PY'
 import sys
 from PIL import Image

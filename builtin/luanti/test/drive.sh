@@ -85,7 +85,7 @@ if [ -n "${MENU_RUN:-}" ]; then
 		pkill -f "http.server $((port + 200))" 2>/dev/null || true
 		(cd "$tmp/mirror" && exec python3 -m http.server $((port + 200)) > "$out/mirror.log" 2>&1) &
 		mirror=$!
-		sleep 1
+		for i in $(seq 1 50); do port_taken $((port + 200)) && break; sleep 0.2; done
 		menu_env="env BUILDAT_CONTENTDB_URL=http://localhost:$((port + 200))"
 		cold="-D $tmp/data -C $tmp/cache"
 		echo "empty paths under $tmp, the mirror on port $((port + 200))"
@@ -97,14 +97,17 @@ BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
 	-l "${LOG_LEVEL:-4}" \
 	> "$out/srv.log" 2>&1 &
-for i in $(seq 1 400); do
-	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	grep -q "Shutdown:" "$out/srv.log" 2>/dev/null && break
-	sleep 1
+srv=$!
+# Until the mods are loaded and the port is listened on, or the server is
+# gone
+for i in $(seq 1 600); do
+	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null &&
+		grep -q "STATUS Listening" "$out/srv.log" 2>/dev/null && break
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
 done
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
+grep -q "STATUS Listening" "$out/srv.log" 2>/dev/null && kill -0 "$srv" 2>/dev/null ||
+	{ echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
 fi
 
 # The client reads the fifo, and its run ends at the fifo's end: this
@@ -122,7 +125,11 @@ if [ -n "${NETSIM:-}" ]; then
 	python3 "$here/util/netsim.py" --listen "$cport" --to "localhost:$port" \
 		$NETSIM > "$out/netsim.log" 2>&1 &
 	netsim=$!
-	sleep 1
+	for i in $(seq 1 50); do
+		port_taken "$cport" && break
+		kill -0 "$netsim" 2>/dev/null || break
+		sleep 0.2
+	done
 fi
 # COLD=1: the client starts with an empty cache of its own, so every file
 # the server has is fetched at join ([PLAYER_POS_RACE]: the race is between
@@ -152,15 +159,17 @@ echo "delay 2000" >&3
 # the fifo for a reader that is gone and wait for nothing. The wait is
 # over when the client says the settle line was seen, or not seen.
 settled=0
-for i in $(seq 1 $((START_WAIT * 2 + 10))); do
+for i in $(seq 1 $((START_WAIT * 10 + 50))); do
 	kill -0 "$cli" 2>/dev/null || break
 	if grep -aq 'wait_log: "scene, 0 undrawn within 2" seen' "$out/cli.log"; then
+		# The drive's own 2 s settle after the line, so drive.py's
+		# minutes start after it
 		settled=1; sleep 2; break
 	fi
 	if grep -aq 'wait_log: "scene, 0 undrawn within 2" not seen\|wait_log: "the server put the player" not seen' "$out/cli.log"; then
 		break
 	fi
-	sleep 1
+	sleep 0.2
 done
 # A menu run has no world to settle yet: the client starts in the launch
 # menu and the driver's own menu rules are what make one, so the start wait
@@ -180,9 +189,9 @@ else
 fi
 
 limit=$((MINUTES * 60 + 300))
-for i in $(seq 1 "$limit"); do
+for i in $(seq 1 $((limit * 5))); do
 	kill -0 "$cli" 2>/dev/null || break
-	sleep 1
+	sleep 0.2
 done
 hung=0
 if kill -0 "$cli" 2>/dev/null; then
@@ -193,12 +202,14 @@ wait "$cli"
 cli_status=$?
 # The driver ends itself on a disconnect it sees; one blocked on the fifo
 # with the client gone is ended here
-if [ -n "$drv" ] && kill -0 "$drv" 2>/dev/null; then
-	sleep 2
+if [ -n "$drv" ]; then
+	for i in $(seq 1 10); do kill -0 "$drv" 2>/dev/null || break; sleep 0.2; done
 	kill "$drv" 2>/dev/null
+	wait "$drv" 2>/dev/null
 fi
-[ -n "$drv" ] && wait "$drv" 2>/dev/null
 exec 3>&-
+# simplified: a guessed two seconds for the server to log the client's
+# leave before it is stopped; a poll for that line when it is known
 sleep 2
 if [ -n "${MENU_RUN:-}" ]; then
 	# The client's own server: it ends with the client; its log is the
@@ -209,7 +220,7 @@ if [ -n "${MENU_RUN:-}" ]; then
 	cp "$local_log" "$out/srv.log" 2>/dev/null || : > "$out/srv.log"
 else
 	kill -INT "$srv" 2>/dev/null
-	for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 fi
 
 # The fuzz verdict reads the fixture's ticks and the frame peaks of a

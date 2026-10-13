@@ -711,6 +711,8 @@ do
 			-- The tab's way out, which also ends a kept login ([ACC_KEEP])
 			panel.button(w, "Log out", E.doc.accounts.logout)
 		end
+		-- What a check waits for
+		E.log:info("Pause menu shown")
 	end
 
 	close_pause = function()

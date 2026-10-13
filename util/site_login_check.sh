@@ -21,7 +21,7 @@ check_tmp site_login; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here"
 
-start_server "$t/sp.log" "setup code" 120 auto \
+start_server "$t/sp.log" "setup code" 60 auto \
 	Build/bin/buildat_server -m apps/starport -D "$t/sp" -l 3 ||
 	fail "the Starport did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -34,8 +34,10 @@ cat > "$t/site/index.html" <<H
 <!doctype html><meta charset="utf-8"><title>A site</title>
 <button id="in" style="position:fixed;inset:0;width:100%;height:100%">Sign in with a Starport ID</button>
 <script>
-document.getElementById("in").onclick = () =>
+document.getElementById("in").onclick = () => {
 	window.open("http://127.0.0.1:$SP/authorize?site=" + location.hash.slice(1), "sp", "width=600,height=700");
+	console.log("site: the window opened");
+};
 addEventListener("message", e => {
 	if(e.origin != "http://127.0.0.1:$SP" || !e.data.buildat_starport_token) return;
 	console.log("site token: " + e.data.buildat_starport_token + " " + e.data.name + " " + e.data.site);
@@ -44,8 +46,11 @@ addEventListener("message", e => {
 H
 (cd "$t/site" && exec python3 -m http.server -b 127.0.0.1 $WP) > "$t/site.log" 2>&1 &
 CHECK_PIDS+=($!)
+# Its port, polled
+for _i in $(seq 50); do port_taken $WP && break; sleep 0.2; done
+port_taken $WP || fail "the site's server ($t/site.log)"
 
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+printf 'wait_log_any 20000 sp: {"id":5,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
@@ -53,7 +58,8 @@ BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":
 {\"cmd\":\"site_create\",\"name\":\"Check site\",\"origin\":\"http://127.0.0.1:$WP\"}
 {\"cmd\":\"site_create\",\"name\":\"Other site\",\"origin\":\"https://other.example\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$SP -c @"$t/reqs.cmds" > "$t/reqs.log" 2>&1
+	-s 127.0.0.1:$SP -c @"$t/reqs.cmds" > "$t/reqs.log" 2>&1 ||
+	fail "the requests' client ($t/reqs.log)"
 grep -a '"id":3,"ok":false' "$t/reqs.log" | grep -q "origin: https://host" ||
 	fail "a bad origin: $(grep -a '"id":3,' "$t/reqs.log")"
 grep -ao 'sp: {"id":[45],"ok":true.*' "$t/reqs.log" | sed 's/^sp: //' > "$t/sites.json"
@@ -99,17 +105,21 @@ print("ok: by the API, the site's token signed with its secret, its own sub and 
 PY
 
 read -r sid secret sub < "$t/sites.json.id"
+# nav waits for the page's load. The window's page says nothing in the
+# console, so its two moments are awaited in it by an eval that polls
+# (10 s at most): the site's words, and the allow form shown after the
+# login. The 2 s after the window opened is a settle: it is about:blank
+# until its page loads, and an eval there would be lost with it.
 cat > "$t/steps.json" <<J
 [["nav", "http://127.0.0.1:$WP/#$sid"],
- ["wait", 1500],
  ["click", 300, 300],
- ["wait", 3000],
+ ["waitlog", "site: the window opened", 10],
+ ["wait", 2000],
  ["window", 1],
- ["wait", 1500],
+ ["eval", "new Promise(r => { let n = 0; const f = () => { const t = document.getElementById('what'); t && t.textContent ? r(t.textContent) : ++n > 100 ? r('') : setTimeout(f, 100); }; f(); })"],
  ["shot", "$t/01_authorize.png"],
- ["eval", "document.getElementById('what').textContent"],
  ["eval", "document.getElementById('name').value = 'siteid', document.getElementById('password').value = 'secret1', document.getElementById('login').requestSubmit(), 'login'"],
- ["wait", 2500],
+ ["eval", "new Promise(r => { let n = 0; const f = () => !document.getElementById('allow').classList.contains('hide') ? r('allow shown') : ++n > 100 ? r('no allow form') : setTimeout(f, 100); f(); })"],
  ["shot", "$t/02_allow.png"],
  ["eval", "document.getElementById('allow').requestSubmit(), 'allow'"],
  ["window", 0],

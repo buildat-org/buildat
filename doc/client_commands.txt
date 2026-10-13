@@ -110,7 +110,8 @@ wait_log_absent <ms> <text>
     the sequence fails: a thing that must not happen.
 
 expect_error <text>
-    The next error line containing the text is the drive's own doing.
+    An error line containing the text is the drive's own doing, from this
+    command on (each one: a provoked fault often logs its error twice).
     Otherwise **an error line in the client's log, or the connection to the
     server dropping, fails the sequence at once**, naming the line -- from
     the client's start until it shuts down, for a sequence read from a file.

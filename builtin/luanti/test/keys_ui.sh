@@ -43,9 +43,26 @@ def write(*cmds):
         out.write(c + "\n")
     out.flush()
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
+def size():
+    return len(open(log, "rb").read())
+# Until the client logs <text> after byte <since>, up to <secs>
+def until(text, since, secs=10):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text in open(log, "rb").read()[since:].decode("utf-8", "replace"):
+            return True
+        time.sleep(0.2)
+    fail("no %r in %d s" % (text, secs))
+# The commands, then the line that says they were done
+def act(text, *cmds, secs=10):
+    p = size()
+    write(*cmds)
+    until(text, p, secs)
+# A scan comes after a step's line; the half second is the screen laid
+# out in the frames after it
 def scan(label):
     global seen
-    write("delay 800", "event scan " + label)
+    write("delay 500", "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 30:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -65,40 +82,37 @@ def find(els, word):
         if word.lower() in e[5].lower() and e[3] > 0:
             return e
     return None
-def click(e):
-    write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
-          "mouse_click left", "delay 300")
+def click(e, text, secs=10):
+    act(text, "mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2),
+        "mouse_click left", secs=secs)
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-time.sleep(8)
-write("text luanti sett")
+# Home drawn, then the search's own list
+until("rows in", 0, 30)
+act('rows for "luanti sett"', "text luanti sett")
 els = scan("a")
 if not els: fail("no menu scan")
 b = find(els, "Luanti settings")
 if not b: fail("no settings button; saw " + ", ".join(e[5] for e in els)[:300])
-click(b)
-# The game's server starts behind the row: scanned until its screen is up
-b = None
-for i in range(20):
-    els = scan("b%d" % i)
-    b = els and find(els, "Key bindings")
-    if b: break
-    time.sleep(2)
+# The game's server starts behind the row; its screen says when it is up
+click(b, "menu: the settings shown", 60)
+els = scan("b")
+b = els and find(els, "Key bindings")
 if not b: fail("no Key bindings row; saw " + ", ".join(e[5] for e in els or [])[:200])
-click(b)
+click(b, "Game keys shown")
 els = scan("c")
 row = els and find(els, "Walk forward")
 if not row: fail("no forward row")
-click(row)
+click(row, "waits for a key")
 els = scan("d")
 if not (els and find(els, "Press a key")): fail("the row did not listen")
-write("keypress U", "delay 500")
+act(" = U; the view at", "keypress U")
 els = scan("e")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("U"): fail("forward is not U: " + str(row and row[5]))
 d = find(els, "Defaults")
 if not d: fail("no Defaults")
-click(d)
+click(d, "Game keys: Defaults")
 els = scan("f")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("W"): fail("Defaults did not put W back: " + str(row and row[5]))

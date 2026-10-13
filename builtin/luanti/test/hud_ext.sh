@@ -37,42 +37,51 @@ printf 'name = camera\n' > "$work/worldmods/camera/mod.conf"
 port=30030
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
+sub=$!
+# "Server for gameid=... listening on": up, or the server gone
+for i in $(seq 1 600); do
 	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
+	kill -0 $sub 2>/dev/null || break
+	sleep 0.2
 done
-sleep 3
 srv=$(pgrep -x luanti-refshots | head -1)
 [ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
 trap 'kill "$srv" 2>/dev/null' EXIT
+# The delays are settles: the world, the minimap and the text drawn in the
+# frames after the line or the turn
 cat > "$out/cmds.txt" <<CMDS
 wait_log 90000 voxel types have their own textures
-delay 3000
+delay 2000
 look_dir 0 -0.1 1
+# a settle: the view and the minimap redrawn at the new look
 delay 1500
 screenshot $out/minimap_surface.png
 keypress V
-delay 500
+wait_log 5000 V: Minimap
 keypress V
-delay 500
+wait_log 5000 V: Minimap
 keypress V
+wait_log 5000 V: Minimap
 delay 1500
 screenshot $out/minimap_radar.png
 keypress F5
-delay 1000
+wait_log 5000 F5: 
+delay 500
 screenshot $out/f5_level1.png
 keypress F5
-delay 1000
-screenshot $out/f5_level2.png
+wait_log 5000 F5: 
 delay 500
+screenshot $out/f5_level2.png
 quit
 CMDS
 BUILDAT_RENDER_MODE="${MODE:-unlit}" BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($(grep -a "Command sequence failed" "$out/extension_cli.log" | tail -1))"; exit 1; }
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep -a "Minimap\|E " "$out/extension_cli.log" | sed 's/.*: //' | head -6
 ls "$out"/*.png
 # **The verdict is that the run happened and said nothing angry**

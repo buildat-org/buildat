@@ -18,16 +18,18 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_bench \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 port=$SERVER_PORT
-sleep 3
-srv=$(check_pgrep buildat_server | head -1)
+srv=$SERVER_PID
+# The client only keeps a player connected while the server runs the
+# bench; the shell watches the server's log and kills it at "bench: done"
 { echo "delay 600000"; echo "quit"; } > "$tmp/cmds.txt"
 bin/buildat -s "localhost:$port" -w 640x360 -l 2 -c @"$tmp/cmds.txt" \
 	> "$tmp/cli.log" 2>&1 &
 cli=$!
-for i in $(seq 1 300); do
+for i in $(seq 1 3000); do
 	grep -aq "bench: done" "$tmp/srv.log" && break
 	kill -0 "$cli" 2>/dev/null || break
-	sleep 2
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
 done
 grep -a "bench: " "$tmp/srv.log" | sed 's/^.*bench: //'
 # **The verdict is that the bench ran** ([CI_RUNS]'s contract,

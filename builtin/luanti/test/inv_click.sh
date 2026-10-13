@@ -56,14 +56,18 @@ core.register_globalstep(function(dtime)
 	end
 end)
 core.register_on_joinplayer(function(player)
-	local name = player:get_player_name()
 	core.set_timeofday(0.5)
 	player:get_inventory():add_item("main", "mcl_core:tree 10")
-	core.after(8, function()
+end)
+-- The inventory, asked for by the client with /ic_open once its world is in
+core.register_chatcommand("ic_open", {func = function(name)
+	local player = core.get_player_by_name(name)
+	if player then
 		core.show_formspec(name, "", player:get_inventory_formspec())
 		core.chat_send_player(name, "inv_click: open")
-	end)
-end)'
+	end
+	return true
+end})'
 # The slots' centres at 1280x720, the same in both clients (vl_inv.sh)
 main1="400 579"; main10="400 389"; main11="460 389"; main12="520 389"
 main13="580 389"; craft1="700 164"; preview="880 194"
@@ -80,21 +84,37 @@ steps=(
 	"place:left $main13"
 	"held:left $preview"
 )
-cmds(){ # out-dir
-	local s n cs c i=0
-	echo "wait_log 240000 chat: inv_click: open"; echo "delay 2000"
+# The world in (the lines given), the inventory asked for and drawn in the
+# frames after its line. A click is hovered a few frames first.
+# simplified: each click's answer, and VoxeLibre's to the Escape, is
+# waited for by time: the server's inventory is logged on its side only,
+# and a pick changes nothing there to answer with
+cmds(){ # out-dir ready-wait-lines...
+	local s n cs c i=0 o=$1
+	shift
+	printf '%s\n' "$@"
+	echo "keypress T"; echo "wait_log 5000 chat: the line opened"
+	echo "text /ic_open"; echo "keypress Return"
+	# a settle after the line: the inventory drawn in the frames after it
+	echo "wait_log 20000 chat: inv_click: open"; echo "delay 1000"
 	for s in "${steps[@]}"; do
 		i=$((i + 1)); n=${s%%:*}
 		IFS=';' read -ra cs <<< "${s#*:}"
 		for c in "${cs[@]}"; do
+			# the click's frames: the slot hovered a few frames first
 			echo "mouse_pos ${c#* }"; echo "delay 300"
-			echo "mouse_click ${c%% *}"; echo "delay 1200"
+			# simplified: the form takes the click (its line), then a
+			# second for the server's answer, which no client line says
+			echo "mouse_click ${c%% *}"
+			echo "wait_log 5000 form: a ${c%% *} click"; echo "delay 1000"
 		done
 		# Off the slots, so the shot sees the hand and not a tooltip
 		echo "mouse_pos 1000 600"; echo "delay 600"
-		echo "screenshot $1/s${i}_$n.png"
-		echo "event scan"; echo "delay 800"
+		echo "screenshot $o/s${i}_$n.png"
+		echo "event scan"
 	done
+	# simplified: VoxeLibre's answer to the Escape (the grid moved into the
+	# inventory) on the server before the quit; no client line says it
 	echo "keypress Escape"; echo "delay 2000"
 	echo quit
 }
@@ -121,6 +141,9 @@ check(){ # client server-log
 	fi
 }
 failed=()
+# The servers this run started, stopped at its exit however it ends
+pids=()
+trap 'kill "${pids[@]}" 2>/dev/null' EXIT
 
 run_vanilla(){
 	local o="$out/vanilla" save=buildat_test_inv_click
@@ -134,11 +157,15 @@ run_vanilla(){
 		bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
-	cmds "$o" > "$o/cmds.txt"
+	pids+=($srv)
+	cmds "$o" "wait_log 120000 the server put the player" \
+		"wait_log 60000 scene, 0 undrawn within 2" > "$o/cmds.txt"
 	timeout 240 bin/buildat -s localhost:29797 -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		fail "vanilla: the drive ($o/cli.log): $(grep -ao 'Command sequence failed.*' "$o/cli.log" | head -1)"
 	kill -INT "$srv" 2>/dev/null
-	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# The server's exit, polled
+	for _i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	check vanilla "$o/srv.log"
 }
 
@@ -156,18 +183,24 @@ run_ext(){
 	( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 		--config "$o/luanti.conf" > "$o/luanti_srv.log" 2>&1 ) &
 	local srv=$!
-	for _i in $(seq 1 300); do
+	pids+=($srv)
+	# Up to two minutes for VoxeLibre to load, while the server lives
+	for _i in $(seq 1 600); do
 		grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null && break
-		sleep 1
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 0.2
 	done
-	sleep 3
-	cmds "$o" > "$o/cmds.txt"
+	grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null ||
+		fail "the Luanti server did not come up ($o/luanti_srv.log)"
+	cmds "$o" "wait_log 120000 voxel types have their own textures" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ic \
 		BUILDAT_LUANTI_CONNECT=1 timeout 240 \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		fail "ext: the drive ($o/cli.log): $(grep -ao 'Command sequence failed.*' "$o/cli.log" | head -1)"
 	kill "$srv" 2>/dev/null
-	for _i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# The server's exit, polled
+	for _i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	check ext "$o/luanti_srv.log"
 }
 

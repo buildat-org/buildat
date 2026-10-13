@@ -385,8 +385,8 @@ struct Module: public interface::Module, public Interface
 		});
 		if(is_on(c))
 			log_i(MODULE, "Announcing to %u Starport(s)", c.get("starports").size());
-		else
-			log_v(MODULE, "%s: not announced to any Starport",
+		else // once a change, as the line above; a check waits for it
+			log_i(MODULE, "%s: not announced to any Starport",
 					cs(config_path()));
 		m_wake.notify_all();
 	}

@@ -305,6 +305,8 @@ magic.SubscribeToEvent("Update", function()
 			e.cursorPosition = #(all .. sep .. md)
 			e:SetFocus(true)
 		end)
+		-- What a check waits for
+		log:info("hearth: the file " .. name .. " linked")
 	end, fail)
 end)
 
@@ -440,7 +442,10 @@ local function ask_exit()
 		close()
 		accounts.show_account()
 	end)
-	menu:add("Cancel", close)
+	menu:add("Cancel", function()
+		close()
+		log:info("hearth: exit dialog cancelled")
+	end)
 	log:info("hearth: exit dialog")
 end
 
@@ -556,9 +561,8 @@ local function open(title)
 	if not frame then
 		build_frame()
 	end
-	if scripted then
-		log:info("hearth: page " .. title)
-	end
+	-- What a check waits for, a driven web client's too
+	log:info("hearth: page " .. title)
 	area:RemoveAllChildren()
 	page_view = ui.list_view(area, W, H, {wheel = 40, follow_focus = true,
 			spacing = 6, fill = true})
@@ -1456,6 +1460,7 @@ show_thread = function(id, at, missing)
 			end
 			-- It comes back as "hr:new", as anyone else's does
 			req("reply", {thread = id, body = e:GetText()}, function()
+				log:info("hearth: reply sent in thread " .. id)
 				drafts[key] = nil
 				state_changed()
 				pcall(function() e:SetText("") end)

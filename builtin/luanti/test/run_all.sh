@@ -196,10 +196,10 @@ for name in $runners; do
 	# older than that and is left alone ([CI_RUNS] (6): a flake is
 	# quarantined, not papered over -- this is neither, it is the
 	# harness cleaning up after itself).
-	for w in $(seq 1 30); do
+	for w in $(seq 1 150); do
 		check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null ||
 			break
-		sleep 1
+		sleep 0.2
 	done
 	for p in $(check_pgrep buildat) $(check_pgrep buildat_server); do
 		age=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')

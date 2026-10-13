@@ -53,11 +53,12 @@ out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1) &&
 echo "$out" | grep -q "not bound" || fail "the unbound key's refusal: $out"
 
 # The admin binds tester to the key
-printf 'delay 8000\nquit\n' > "$t/cmds"
+# Each admin run is one request; done at its answer ("ai: {"id":1,...")
+printf 'wait_log_any 30000 "id":1,"ok":\nquit\n' > "$t/cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$code \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
-	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl.log" ||
 	fail "the bind did not go through ($(grep -a 'ai:' "$t/cl.log" | head -2))"
@@ -142,7 +143,7 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2.
 # 4. Delisted
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_REQS='{"cmd":"delist","release":"tester/demo/1.0.0"}' \
-	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
+	timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 -s 127.0.0.1:$P \
 	-c @"$t/cmds" > "$t/cl2.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/cl2.log" || fail "the delist did not go through"
 # The releases, not the "delisted" beside them ([AITTA_REPORTS])

@@ -29,19 +29,21 @@ trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
 echo 'core.settings:set("time_speed", "0")' > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE=buildat_test_cold \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 300 29825 \
+	start_server "$out/srv.log" "Mods loaded" 60 29825 \
 	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 || [ $? = 1 ] || exit 1 # its own verdict below
 if ! grep -aq "Mods loaded" "$out/srv.log" 2>/dev/null; then
 	echo "SKIP: the server did not load its mods" >&2; exit "$SKIP"
 fi
-sleep 3
+# The port taken, up to 10 s
+for _ in $(seq 50); do port_taken 29825 && break; sleep 0.2; done
 { echo "wait_log 120000 the server put the player"
-	echo "delay 15000"
+	echo "wait_log 60000 scene, 0 undrawn within 2"
 	echo "quit"; } > "$out/cmds.txt"
 # -C: a cache path of its own, empty, so nothing is there to be reused
 timeout 300 bin/buildat -s "localhost:29825" -C "$out/cache" -w 1280x720 \
 	-l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+rc=$?
 cached=$(sed -n 's/.*\([0-9][0-9]*\) of \([0-9][0-9]*\) announced files are cached.*/\1 \2/p' \
 		"$out/cli.log" | sort -n -k2 | tail -1) # the game's, not a later one-file announce
 if [ -z "$cached" ]; then
@@ -64,6 +66,10 @@ fi
 if grep -aq "Failed to run script\|attempt to concatenate" "$out/cli.log"; then
 	echo "FAIL: a script ran before the files it needs had arrived:"
 	grep -a -m 2 -A 2 "Failed to run script\|attempt to concatenate" "$out/cli.log" >&2
+	exit 1
+fi
+if [ "$rc" != 0 ]; then
+	echo "FAIL: the client's drive: $(grep -a "Command sequence failed" "$out/cli.log" | tail -1)"
 	exit 1
 fi
 echo "PASS: $2 files transferred into an empty cache and the world came up"

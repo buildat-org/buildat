@@ -31,11 +31,11 @@ client(){ # commands log [env...]
 	printf "$c" > "$t/cmds"
 	env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code "$@" \
-		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 \
+		timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 \
 		-l 3 -o sound_mute=1 -s 127.0.0.1:$P -c @"$t/cmds" > "$log" 2>&1
 }
 
-client 'delay 6000\nquit\n' "$t/topic.log" \
+client 'wait_log_any 30000 "id":1001,"ok":\nwait_log_any 10000 server window: This client\nquit\n' "$t/topic.log" \
 	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"x"}' \
 	BUILDAT_HEARTH_OPEN=server:account
 grep -aq 'hr: {"id":1001,"ok":true' "$t/topic.log" || fail "the topic"
@@ -45,13 +45,18 @@ for w in Server "This client"; do
 		fail "the Server window's $w version: $(grep -a 'server window' "$t/topic.log")"
 done
 
-# The page's title field has the focus; the message field clicked
-client 'delay 5000\nkeypress Escape\ndelay 500\nclick Button "Help"\ndelay 2000
-click Button "New thread..."\ndelay 2000\ntext My title\ndelay 300
+# The page's title field has the focus; the message field clicked. The
+# 300 ms are settles: what Escape left drawn, the title typed into, the
+# field's focus after the click. The preview comes a second after the last
+# change, which is after the kept state is written (a second at most)
+client 'wait_log_any 30000 hearth: page \ndelay 300\nkeypress Escape\ndelay 300
+click Button "Help"\nwait_log 5000 hearth: page Help
+click Button "New thread..."\nwait_log 5000 hearth: page A new thread\ndelay 300
+text My title\ndelay 300
 mouse_pos 450 200\nmouse_click left\ndelay 300\ntext first line
-keypress Return\ntext second line\ndelay 2500\nquit\n' \
+keypress Return\ntext second line\nwait_log 10000 hearth: preview\nquit\n' \
 	"$t/type.log" BUILDAT_HEARTH_RESUME=1
-client 'delay 6000\nquit\n' "$t/back.log" BUILDAT_HEARTH_RESUME=1
+client 'wait_log_any 30000 hearth: fields\nquit\n' "$t/back.log" BUILDAT_HEARTH_RESUME=1
 
 page=$(grep -ao "hearth: page .*" "$t/back.log" | tail -1)
 [ "$page" = "hearth: page A new thread" ] ||

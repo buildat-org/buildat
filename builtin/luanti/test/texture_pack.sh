@@ -34,28 +34,36 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 mkdir -p "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti"
 echo "buildat_texture_pack = buildat_check_pack" \
 	> "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
+# camera.lua's stage, its line also said in the chat for the client to
+# wait for (a copy: the other runners' pictures keep their chat empty)
+sed 's/core.log("action", "camera: the floor and the wall are placed")/&; core.chat_send_all("camera: the floor and the wall are placed")/' \
+	"$me/camera.lua" > "$out/camera.lua"
+grep -q chat_send_all.*the.floor "$out/camera.lua" || { echo "FAIL: camera.lua's line moved"; exit 1; }
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
-	BUILDAT_LUANTI_LUA="$me/camera.lua" \
+	BUILDAT_LUANTI_LUA="$out/camera.lua" \
 	start_server "$out/srv.log" "Mods loaded" 400 29784 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap 'rm -rf "$pack"; kill -INT '$srv' 2>/dev/null' EXIT
+# The 2 s after the stage's line: the player moved onto it and its floor
+# meshed in the ticks after. A look_dir ends when the camera is aimed;
+# the frames after it draw the new view
 {
-	echo "wait_log 60000 camera: the floor and the wall are placed"
-	echo "delay 3000"
+	echo "wait_log 60000 chat: camera: the floor and the wall are placed"
+	echo "delay 2000"
 	echo "look_dir 0 -0.6 1"
-	echo "delay 1500"
-	echo "screenshot $out/floor.png"
+	# a settle: first person is aimed at once, the view drawn after it
 	echo "delay 500"
+	echo "screenshot $out/floor.png"
 	echo "quit"
 } > "$out/cmds.txt"
-bin/buildat -s localhost:29784 -w 1280x720 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
-sleep 2
+bin/buildat -s localhost:29784 -w 1280x720 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep -a "texture pack:" "$out/srv.log" | sed 's/.*: //' | head -3
 python3 - "$out" <<'PY'
 import sys

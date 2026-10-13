@@ -5,8 +5,9 @@
 # in both clients, beside official Luanti's own
 # (local/luanti_inventory_reference/, the user's): the inventory, the
 # recipe book, help, the achievements and their second entry. A fixture
-# opens the inventory as the inventory key would, again every ten
-# seconds, and the client clicks what a player would -- the recipe
+# opens the inventory as the inventory key would, again each time the
+# client asks for the next step, and the client clicks what a player
+# would -- the recipe
 # book's, help's and the achievements' buttons, then the list's second
 # row -- and shoots each form the game answers with. The shots land in
 # local/vl_inv/<client>/, each beside its reference in
@@ -62,63 +63,97 @@ core.register_on_player_inventory_action(function(player, action, inv, info)
 			info.to_index .. " " .. info.count)
 end)
 core.register_on_joinplayer(function(player)
-	local name = player:get_player_name()
 	core.set_timeofday(0.5)
 	player:get_inventory():add_item("main", "mcl_core:tree")
-	-- The inventory for steps 1-4 and 6; 5 is a click in the achievements
-	-- 4 opened, 7 one in the help 6 opened
-	for i = 1, 7 do
-		core.after(10 + 10 * (i - 1), function()
-			if i == 2 then
-				-- Where step 1 dragged the tree to
-				local inv = player:get_inventory()
-				core.log("action", "vl_inv: main 1 " ..
-						inv:get_stack("main", 1):get_name() .. ", main 10 " ..
-						inv:get_stack("main", 10):get_name())
-			end
-			if i ~= 5 and i ~= 7 then
-				core.show_formspec(name, "", player:get_inventory_formspec())
-			end
-			core.chat_send_player(name, "vl_inv: step " .. i)
-		end)
+end)
+-- The next steps, asked for by the client with /vl_next once it has shot
+-- the last. The inventory for steps 1-4 and 6; 5 is a click in the
+-- achievements 4 opened, 7 one in the help 6 opened, so each comes with
+-- the step before it: the client cannot chat with a form open
+local groups, at = {{1}, {2}, {3}, {4, 5}, {6, 7}}, 0
+core.register_chatcommand("vl_next", {func = function(name)
+	local player = core.get_player_by_name(name)
+	if not player or not groups[at + 1] then
+		return true
 	end
-	core.after(10 + 10 * 7, function() core.close_formspec(name, "") end)
-end)'
-# Each step starts on the chat line the fixture sends with it: neither
-# the server's timers nor a client's join line keep time with the other
-# end. Where the inventory's buttons and the lists' rows are, at 1280x720,
-# is the same in both clients; what the step's last click must send. A
-# step's clicks are separated by ";", and "2x" before one doubles it: 6
-# opens help, its Blocks and the list's fifth entry, which is selected
-# and nothing else; 7 is a double click on the eighth, which opens it.
+	at = at + 1
+	for _, i in ipairs(groups[at]) do
+		if i == 2 then
+			-- Where step 1 dragged the tree to
+			local inv = player:get_inventory()
+			core.log("action", "vl_inv: main 1 " ..
+					inv:get_stack("main", 1):get_name() .. ", main 10 " ..
+					inv:get_stack("main", 10):get_name())
+		end
+		if i ~= 5 and i ~= 7 then
+			core.show_formspec(name, "", player:get_inventory_formspec())
+		end
+		core.chat_send_player(name, "vl_inv: step " .. i)
+	end
+	return true
+end})'
+# Each step starts on the chat line the fixture sends with it (a line of
+# this run's anywhere, as 5 and 7 come with 4 and 6). Where the
+# inventory's buttons and the lists' rows are, at 1280x720, is the same
+# in both clients; what the step's last click must send. A step's clicks
+# are separated by ";", and "2x" before one doubles it: 6 opens help, its
+# Blocks and the list's fifth entry, which is selected and nothing else
+# ("sel": no form comes back, so the game is given a second and a half);
+# 7 is a double click on the eighth, which opens it. Every other click is
+# answered with a form, which the client logs as opened.
 clicks=("" "698 318" "758 318" "878 318" "700 243" \
-	"758 318;634 203;300 170" "2x 300 202")
+	"758 318;634 203;sel 300 170" "2x 300 202")
 sent=("" "__mcl_craftguide=" "__mcl_doc=" "__mcl_achievements=" "awards=CHG:2" \
 	"doc_catlist=CHG:5" "doc_catlist=DCL:8")
-cmds(){ # out-dir
-	local i c
+# The next steps asked for: the form closed (its quit is sent, which the
+# checks do not read) and the chat line typed
+next_step(){
+	echo "keypress Escape"; echo "delay 300" # the form gone in the next frames
+	echo "keypress T"; echo "wait_log 5000 chat: the line opened"
+	echo "text /vl_next"; echo "keypress Return"
+}
+cmds(){ # out-dir ready-wait-lines...
+	local i c o=$1
+	shift
+	printf '%s\n' "$@"
+	echo "keypress T"; echo "wait_log 5000 chat: the line opened"
+	echo "text /vl_next"; echo "keypress Return"
 	for i in 1 2 3 4 5 6 7; do
-		echo "wait_log 240000 chat: vl_inv: step $i"
+		# The form shown with the line is drawn in the frames after it
+		echo "wait_log_any 20000 chat: vl_inv: step $i"
 		echo "delay 1000"
 		IFS=';' read -ra cs <<< "${clicks[$((i - 1))]}"
 		for c in "${cs[@]}"; do
-			echo "mouse_pos ${c#2x }"; echo "delay 200"
+			local at=${c#sel }
+			at=${at#2x }
+			# The click's frames: the hover read before the press
+			echo "mouse_pos $at"; echo "delay 200"
 			echo "mouse_click left"
+			# A double click: the second within 300 ms
 			if [ "${c#2x }" != "$c" ]; then echo "delay 100"; echo "mouse_click left"; fi
-			echo "delay 1500"
+			# simplified: "sel" sends a field and gets no form back, so
+			# it is given 1.5 s; a server line seen by the client would do
+			if [ "${c#sel }" != "$c" ]; then echo "delay 1500"
+			else echo "wait_log 10000 opened"; fi
 		done
-		echo "delay 500"; echo "screenshot $1/s$i.png"
+		# A settle after the line: the form drawn before the shot
+		echo "delay 500"; echo "screenshot $o/s$i.png"
 		if [ $i = 1 ]; then
 			# The tree dragged from the hotbar row's first slot to the
 			# first slot above: picked up by the press, put by the release.
 			# Twice, as the game refuses the first.
+			# simplified: the game's word on each drag is waited for by
+			# time; nothing on the client says it has come
+			# The 200-300 ms: the drag's frames between the moves
 			for _ in 1 2; do
 				echo "mouse_pos 400 578"; echo "delay 200"
 				echo "mouse_down left"; echo "delay 300"
 				echo "mouse_pos 400 388"; echo "delay 300"
+				# simplified: the game's word, by time (above)
 				echo "mouse_up left"; echo "delay 1500"
 			done
 		fi
+		case $i in 1|2|3|5) next_step;; esac
 	done
 	echo quit
 }
@@ -137,6 +172,9 @@ check_sent(){ # client server-log
 		failed+=("$1: the move was not told once to the game")
 }
 failed=()
+# The servers this run started, stopped at its exit however it ends
+pids=()
+trap 'kill "${pids[@]}" 2>/dev/null' EXIT
 
 run_vanilla(){
 	local o="$out/vanilla" save=buildat_test_vl_inv
@@ -150,11 +188,15 @@ run_vanilla(){
 		bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
-	cmds "$o" > "$o/cmds.txt"
+	pids+=($srv)
+	cmds "$o" "wait_log 120000 the server put the player" \
+		"wait_log 60000 scene, 0 undrawn within 2" > "$o/cmds.txt"
 	timeout 180 bin/buildat -s localhost:29797 -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		fail "vanilla: the drive ($o/cli.log): $(grep -ao 'Command sequence failed.*' "$o/cli.log" | head -1)"
 	kill -INT "$srv" 2>/dev/null
-	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# a poll: the server's exit
+	for _i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	check_sent vanilla "$o/srv.log"
 }
 
@@ -169,23 +211,27 @@ run_ext(){
 	printf 'fixed_map_seed = 1\nenable_damage = false\nmute_sound = true\n' \
 		> "$o/luanti.conf"
 	check_allow "udp://127.0.0.1:$port"
-	( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+	( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 		--config "$o/luanti.conf" > "$o/luanti_srv.log" 2>&1 ) &
-	for _i in $(seq 1 300); do
+	local srv=$!
+	pids+=($srv)
+	# Up to two minutes for VoxeLibre to load, while the server lives
+	for _i in $(seq 1 600); do
 		grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null && break
-		sleep 1
+		kill -0 "$srv" 2>/dev/null || break
+		sleep 0.2
 	done
-	sleep 3
-	local srv
-	srv=$(pgrep -x luanti-refshots | head -1)
-	[ -n "$srv" ] || { echo "FAIL: the Luanti server did not come up"; exit 1; }
-	cmds "$o" > "$o/cmds.txt"
+	grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null ||
+		fail "the Luanti server did not come up ($o/luanti_srv.log)"
+	cmds "$o" "wait_log 120000 voxel types have their own textures" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=vi \
 		BUILDAT_LUANTI_CONNECT=1 timeout 240 \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		fail "ext: the drive ($o/cli.log): $(grep -ao 'Command sequence failed.*' "$o/cli.log" | head -1)"
 	kill "$srv" 2>/dev/null
-	for _i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# a poll: the server's exit
+	for _i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	check_sent ext "$o/luanti_srv.log"
 }
 

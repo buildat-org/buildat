@@ -1,6 +1,7 @@
 [
 	["nav", "${URL}"],
 	["waitlog", "run_script_file\\(accounts/accounts.lua\\)", 120],
-	["wait", 3000],
+	["waitlog", "accounts: the login page shown", 20],
+	["wait", 500],
 	["eval", "document.title"]
 ]

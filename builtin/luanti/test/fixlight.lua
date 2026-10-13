@@ -11,11 +11,16 @@ core.register_on_joinplayer(function(player)
 		local p = player:get_pos()
 		local X, Z = math.floor(p.x + 0.5), math.floor(p.z + 0.5)
 		local name = player:get_player_name()
+		-- The client's drive waits for the chat line
+		local function done()
+			core.log("warning", "fixcheck: done")
+			core.chat_send_player(name, "fixcheck: done")
+		end
 		core.set_player_privs(name, {server = true, privs = true})
 		local cmd = core.registered_chatcommands["fixlight"]
 		if not cmd then
 			core.log("warning", "fixcheck: no fixlight command at all")
-			core.log("warning", "fixcheck: done")
+			done()
 			return
 		end
 		-- **The boxes first**: the command's own answer names the area it
@@ -34,14 +39,14 @@ core.register_on_joinplayer(function(player)
 		end
 		if not surface then
 			core.log("warning", "fixcheck: no surface under the player")
-			core.log("warning", "fixcheck: done")
+			done()
 			return
 		end
 		local air = {x = X, y = surface + 6, z = Z}
 		local function light() return core.get_node_light(air, 0.5) end
 		core.log("warning", "fixcheck: made surface=" .. surface ..
 				" open air light=" .. tostring(light()))
-		core.log("warning", "fixcheck: done")
+		done()
 	end)
 end)
 -- vim: set noet ts=4 sw=4:

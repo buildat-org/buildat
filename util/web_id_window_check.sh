@@ -37,7 +37,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
-start_server "$tmp/sp.log" "setup code" 120 $SP \
+start_server "$tmp/sp.log" "setup code" 60 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
 	fail "the Starport did not start"
 pids+=($SERVER_PID)
@@ -52,7 +52,12 @@ J
 Build/bin/buildat_server -m apps/hearth -D "$tmp/h" -P $AN -W "$here/web" -l 3 \
 	> "$tmp/h.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 180); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
+hp=$!
+for _ in $(seq 300); do
+	grep -q "verified ok" "$tmp/sp.log" && break
+	kill -0 $hp 2>/dev/null || fail "Hearth ($tmp/h.log)"
+	sleep 0.2
+done
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing ($tmp/h.log)"
 read -r _ _ id _ < <(grep -v "^#" "$tmp/h/apps/hearth/starport_claim.txt")
 
@@ -121,13 +126,15 @@ PY
 
 # The first admin, natively, so the web join is an ID's ordinary one
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/h.log" | tail -1 | cut -d' ' -f3)
-printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
+printf 'wait_log_any 30000 Joined as admin\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup timeout 90 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 	-c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
-grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin.log)"
+grep -v "command: \|wait_log" "$tmp/admin.log" | grep -q "Joined as admin" || fail "the admin's join ($tmp/admin.log)"
 
+# simplified: the drives wait for the login page, then go by time between
+# clicks: the Starport's window and its steps log nothing on the page
 WEB_DRIVE_URL="http://127.0.0.1:$AN/" "$here/util/web_drive.sh" firefox hearth \
 	"${1:-$here/util/web_id_window.json}" "$tmp/drive" > "$tmp/drive.txt" 2>&1 ||
 	fail "the drive ($tmp/drive.txt, $tmp/drive)"

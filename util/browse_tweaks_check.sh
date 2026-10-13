@@ -24,7 +24,8 @@ cd "$here/Build"
 drive(){ # name size scale commands
 	printf "$4" > "$t/$1.cmds"
 	timeout 60 bin/buildat -m launch_menu -D "$t/cl" -w "$2" $3 -l 3 \
-		-o sound_mute=1 -c @"$t/$1.cmds" > "$t/$1.log" 2>&1
+		-o sound_mute=1 -c @"$t/$1.cmds" > "$t/$1.log" 2>&1 ||
+		fail "the $1 drive: $(grep -a "Command sequence failed" "$t/$1.log" | tail -1)"
 	grep -aq "Command sequence complete" "$t/$1.log" || fail "the $1 drive"
 	grep -aq "Lua runtime error\|error shown in a dialog" "$t/$1.log" &&
 		fail "an error in $1: $(grep -a 'error shown\|runtime error' "$t/$1.log" | head -1)"
@@ -39,8 +40,9 @@ inside(){ # log label: the window inside the frame
 	[ $# = 6 ] && [ "$1" -ge 0 ] && [ $(($1 + $3)) -le "$5" ]
 }
 focus_x(){ grep -a "scan $2: focus" "$1" | grep -o ' at [0-9]*' | cut -c5-; }
-home='wait_log_any 20000 launch_menu: \ndelay 1500\nevent scan home\n'
-servers="${home}keypress Down\ndelay 300\nkeypress Return\ndelay 1500\nevent scan servers\n"
+# Keys go in one frame, in order: Down's focus is set before Return reads it
+home='wait_log_any 30000 rows in\ndelay 500\nevent scan home\n'
+servers="${home}keypress Down\nkeypress Return\nwait_log 10000 launch_menu: server,\ndelay 500\nevent scan servers\n"
 
 # 1. Narrow, then wide
 drive narrow 400x760 "-u 1" "${servers}screenshot $t/narrow.png\nquit\n"
@@ -52,7 +54,11 @@ inside "$t/narrow.log" home || fail "Home wider than the screen"
 inside "$t/narrow.log" servers || fail "Servers wider than the screen"
 echo "ok: the short headings, the windows inside a phone's width"
 
-drive wide 1280x720 "" "${servers}screenshot $t/wide.png\nkeypress Tab\ndelay 500\nevent scan tab\nkeydown Shift\ndelay 100\nkeypress Tab\ndelay 100\nkeyup Shift\ndelay 500\nevent scan back\nquit\n"
+# simplified: Shift+Tab's focus comes back without the menu's "back to
+# the row" line (2026-10-13: the handler did not see Shift held, and the
+# focus came back to another row by some other way), so the half second
+# after the keys is the focus moved; the line once the handler takes it
+drive wide 1280x720 "" "${servers}screenshot $t/wide.png\nkeypress Tab\nwait_log 5000 launch_menu: into the panel\ndelay 500\nevent scan tab\nkeydown Shift\ndelay 100\nkeypress Tab\ndelay 100\nkeyup Shift\ndelay 500\nevent scan back\nquit\n"
 [ "$(heading "$t/wide.log" home)" = "Type to search apps, saves and servers" ] ||
 	fail "Home's wide heading: $(heading "$t/wide.log" home)"
 heading "$t/wide.log" servers | grep -q "^Servers   (type to search; Ctrl+S" ||

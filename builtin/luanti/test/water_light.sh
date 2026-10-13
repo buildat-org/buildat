@@ -25,16 +25,15 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/water_light.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29787 \
+	start_server "$out/srv.log" "Mods loaded" 60 29787 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
-printf 'wait_log 240000 chat: water_light: done\ndelay 500\nquit\n' > "$out/cmds.txt"
-bin/buildat -s localhost:29787 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+printf 'wait_log 120000 chat: water_light: done\nquit\n' > "$out/cmds.txt"
+bin/buildat -s localhost:29787 -w 640x480 -l 3 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 python3 - "$out/srv.log" <<'PY'

@@ -19,41 +19,48 @@ fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/local_server_reuse.log; exit 1; }
 
 # Apps, then "devt" typed (by text: a keypress types nothing) searches
 # devtest's tile, which launches vanilla with menu=worlds,
-# luanti_game=devtest
+# luanti_game=devtest. Home's line is "launch_menu: <n> rows in <t> ms",
+# a list's "launch_menu: <kind>, <n> rows, by ...". The delays of 2 s at
+# most: the screen a line says is up laid out in the frames after it, a
+# selection's panel laid out again once its info fills it (a click at
+# once hit its "server performance" for Play)
 launch='mouse_pos 300 374
 mouse_click left
-delay 800
+wait_log 10000 rows, by
+delay 300
 text devt
-delay 500
+wait_log 10000 rows for "devt", by
+delay 300
 keypress Return
 wait_log 60000 handle_packet(): main:menu
 delay 2000'
 # The world list's first world, then Play; in the world, Escape and the
 # pause menu's "Leave the game" (positions at 800x600, from a scan)
 cat > "$t/cmds" <<C
-wait_log_any 20000 launch_menu: home
+wait_log_any 20000 rows in
 delay 800
 $launch
 keypress Escape
-wait_log 20000 launch_menu: home
+wait_log 20000 rows in
 delay 1500
 $launch
 mouse_pos 270 156
 mouse_click left
+wait_log 10000 menu: the world
 delay 500
-mouse_pos 548 344
-mouse_click left
+click Button "Play"
 wait_log 90000 the server put the player
-delay 3000
+wait_log 60000 scene, 0 undrawn within 2
 keypress Escape
-delay 1000
-mouse_pos 400 390
-mouse_click left
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Leave the game"
 wait_log 20000 Local server stopped
 quit
 C
 timeout 240 Build/bin/buildat -o launch_ui=launch_menu -w 800x600 -l 4 \
-	-o sound_mute=1 -c @"$t/cmds" > "$t/log" 2>&1
+	-o sound_mute=1 -c @"$t/cmds" > "$t/log" 2>&1 ||
+	fail "the drive: $(grep -a "Command sequence failed\|an error the drive" "$t/log" | tail -1)"
 n(){ grep -ac "$1" "$t/log"; }
 [ "$(n 'Starting local server')" = 1 ] || fail "$(n 'Starting local server') starts, not 1"
 [ "$(n 'Reusing the local server')" = 1 ] || fail "the second launch did not reuse it"

@@ -35,10 +35,12 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=js start_server "$t/srv.log" \
 CHECK_PIDS+=($SERVER_PID)
 VPORT=$SERVER_PORT
 LINK=$(free_port)
+# --delay is the link's latency, not a wait; then a poll for its port
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$VPORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
 CHECK_PIDS+=($!)
-sleep 1
+for _ in $(seq 25); do port_taken "$LINK" && break; sleep 0.2; done
+port_taken "$LINK" || fail "netsim did not listen ($t/netsim.log)"
 # client <n> <port> <commands>
 client(){
 	printf "%s\ndelay 300\nquit\n" "$3" > "$t/$1.cmds"
@@ -105,11 +107,14 @@ PY
 # 4: the page over 20 Mbit/s, the server's own port behind it
 kill "$SERVER_PID"
 FAST=$(free_port)
+# --delay is the link's latency, not a wait; then a poll for its port
 python3 "$here/util/netsim.py" --listen "$FAST" --to "127.0.0.1:$VPORT" \
 	--delay 0 --rate 20000 > "$t/netsim_fast.log" 2>&1 &
 CHECK_PIDS+=($!)
-sleep 1
+for _ in $(seq 25); do port_taken "$FAST" && break; sleep 0.2; done
+port_taken "$FAST" || fail "netsim did not listen ($t/netsim_fast.log)"
 look='["eval", "[document.getElementById(\"load1\").textContent, document.getElementById(\"load2\").textContent, document.getElementById(\"load\").style.display, document.getElementById(\"load1\").scrollWidth <= document.getElementById(\"load1\").clientWidth].join(\" | \")"]'
+# The 400 ms waits sample the page's own stripes as the download goes
 for v in desktop:1200x800@1:0 phone:400x800@2:1; do
 	IFS=: read -r name vp touch <<< "$v"
 	steps="[[\"nav\", \"\${URL}\"]"

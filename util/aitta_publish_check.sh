@@ -59,61 +59,84 @@ client(){
 	BUILDAT_AITTA_PASSWORD=checkpass BUILDAT_AITTA_CODE=$code \
 		timeout 240 bin/buildat -o launch_ui=launch_menu -D "$t/$u" \
 		-C "$t/c_$u" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/$n.cmds" \
-		> "$t/$n.log" 2>&1
+		> "$t/$n.log" 2>&1 ||
+		fail "the $n drive ($n.log): $(grep -ao 'Command sequence failed.*' "$t/$n.log" | head -1)"
 }
 tabs(){ for _ in $(seq "$1"); do echo "keypress Tab"; done; }
 backs(){ for _ in $(seq "$1"); do echo "keypress BackSpace"; done; }
-# A dropdown: open it and pick its first choice
+# A dropdown: open it and pick its first choice. The delays are the frames
+# its list takes to open and close, which nothing logs
 pick1(){ echo "delay 100"; echo "keypress Space"; echo "delay 500"; echo "keypress Down"; echo "delay 100"; echo "keypress Return"; echo "delay 300"; }
 said(){ grep -aqF "text \"$2" "$t/$1.log"; }
-OPEN=("delay 5000" "text publish" "delay 1500" "keypress Return" "delay 1500")
+# The launcher's search for <what>, and its first row run: <first wait>
+# is the launcher drawn (its rows logged), at the start or back from a world
+open(){ echo "$2"; echo "text $1"; echo "wait_log 10000 rows for \"$1\" in"
+	echo "keypress Return"; }
+START="wait_log_any 60000 rows in"
+# A page of the publish screen drawn; the 300 ms after it are its layout's
+# frames before a key or a scan reads it
+page(){ echo "wait_log $2 aitta publish: $1"; echo "delay 300"; }
 
 # 1, 2: the app, the form, the key, the bind; then 3
 mapfile -t cmds < <(
-	printf '%s\n' "${OPEN[@]}"
+	open publish "$START"; page "the package page" 10000
 	# "New app...", the focused button on an empty page
-	echo "keypress Return"; echo "delay 1000"
-	echo "text Bad-Name"; echo "keypress Return"; echo "delay 800"
+	echo "keypress Return"; page "a new app's name asked" 5000
+	echo "text Bad-Name"; echo "keypress Return"; page "not made" 5000
 	echo "event scan"
-	backs 8; echo "text hello"; echo "keypress Return"; echo "delay 1500"
+	backs 8; echo "text hello"; echo "keypress Return"
+	page "the package page, hello" 5000
 	# The page with hello: hello, New app, New extension, Open folder,
-	# then the fields from Author
+	# then the fields from Author; the reason under it in the frames
+	# after the typing
 	tabs 4; echo "text Bad"; echo "delay 500"; echo "event scan"
 	backs 3; echo "text tester"
 	tabs 3; echo "text Says hello."
 	tabs 1; pick1; tabs 1; pick1
 	# Audience, Home Hearth, Changelog, Icon, Screenshot, Save, Next
-	tabs 7; echo "keypress Return"; echo "delay 1500"
-	# Page 2: "Create my publishing key" has the focus
-	echo "keypress Return"; echo "delay 3000"; echo "event scan"
-	# Show the file, Bind on...
-	tabs 1; echo "keypress Return"; echo "delay 15000"
+	tabs 7; echo "keypress Return"; page "the key page, no key" 5000
+	# Page 2: "Create my publishing key" has the focus; the Aitta asked
+	# about it
+	echo "keypress Return"; page "the key page, The key is not bound" 20000
+	echo "event scan"
+	# Show the file, Bind on...: the world joined, logged in
+	tabs 1; echo "keypress Return"; echo "wait_log 60000 accounts: ntfy asked"
+	echo "delay 1000" # the question's window drawn after the line
 	# The admin's ntfy question first, in the Aitta's window: Later, back
 	# to the Aitta's page ([NTFY_ASK_OVER_GAME])
-	echo "mouse_pos 437 134"; echo "mouse_click left"; echo "delay 2500"
+	echo "mouse_pos 437 134"; echo "mouse_click left"
+	echo "wait_log 10000 aitta: home, no author"; echo "delay 500"
 	echo "shot bind.png"; echo "event scan"
 	# The Aitta's page: Bind, then Back to the launcher
-	echo "mouse_pos 422 177"; echo "mouse_click left"; echo "delay 2500"
-	echo "mouse_pos 422 139"; echo "mouse_click left"; echo "delay 5000"
-	printf '%s\n' "${OPEN[@]}"
-	tabs 16; echo "keypress Return"; echo "delay 3000"; echo "event scan"
+	echo "mouse_pos 422 177"; echo "mouse_click left"
+	echo "wait_log 10000 aitta: home, author tester"; echo "delay 500"
+	echo "mouse_pos 422 139"; echo "mouse_click left"
+	open publish "wait_log 30000 launch_menu: back to Home"
+	page "the package page" 10000
+	tabs 16; echo "keypress Return"; page "the key page, The key is bound" 20000
+	echo "event scan"
 	# Show the file, Back, Pack and publish
-	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
-	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
+	tabs 2; echo "keypress Return"; page "published tester/hello/0.1.0" 20000
+	echo "event scan"
+	tabs 2; echo "keypress Return"; page "not published" 20000
+	echo "event scan"
 	echo "shot duplicate.png"
 	# Show the file, Back, Pack and publish, Raise the version
-	tabs 3; echo "keypress Return"; echo "delay 1500"
-	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
+	tabs 3; echo "keypress Return"; page "raised to 0.1.1" 5000
+	tabs 2; echo "keypress Return"; page "published tester/hello/0.1.1" 20000
+	echo "event scan"
 	# 4. Back; hello, New app, New extension
-	tabs 1; echo "keypress Return"; echo "delay 1500"
-	tabs 2; echo "keypress Return"; echo "delay 1000"
-	echo "text hello_ext"; echo "keypress Return"; echo "delay 1500"
+	tabs 1; echo "keypress Return"; page "the package page" 5000
+	tabs 2; echo "keypress Return"; page "a new extension's name asked" 5000
+	echo "text hello_ext"; echo "keypress Return"
+	page "the package page, hello_ext" 5000
 	# Package, New app, New extension, Open folder, Author; a frame on
 	# the field before typing, the focus coming from a dropdown
 	tabs 4; echo "delay 100"; echo "text tester"; tabs 3; echo "text Says hello too."
 	tabs 1; pick1; tabs 1; pick1
-	tabs 7; echo "keypress Return"; echo "delay 3000"
-	tabs 2; echo "keypress Return"; echo "delay 4000"; echo "event scan"
+	tabs 7; echo "keypress Return"; page "the key page, The key is bound" 20000
+	tabs 2; echo "keypress Return"; page "published tester/hello_ext/0.1.0" 20000
+	echo "event scan"
 	echo "shot extension.png"
 )
 client u publish "${cmds[@]}"
@@ -143,19 +166,33 @@ grep -aq "Listed tester/hello_ext/0.1.0" "$t/srv.log" ||
 echo "ok: an extension published the same way"
 
 # 5. Played from its tile; installed on another client
-client u play "delay 5000" "text hello" "delay 1500" "keypress Return" \
-	"delay 20000"
+mapfile -t cmds < <(open hello "$START"; echo "wait_log 60000 hello started")
+client u play "${cmds[@]}"
 grep -aq "module_path: .*/dev_apps/hello" "$t/play.log" ||
 	fail "the Dev tile did not start dev_apps/hello (play.log)"
-grep -aq "hello started" "$t/play.log" ||
+# Not the wait's own line
+grep -a "hello started" "$t/play.log" | grep -qv "wait_log" ||
 	fail "hello's client Lua did not run (play.log)"
 # Apps from Aitta lists hello (0.1.1, its newest) and the extension:
 # each selected and installed from its panel ([AITTA_PAGE_LAYOUT])
-client u2 install "delay 5000" "text aitta" "delay 1500" "keypress Return" \
-	"delay 3000" "shot aitta.png" "click Button \"tester/hello\"" \
-	"delay 1000" "click Button \"Install\"" "delay 3000" \
-	"click Button \"tester/hello_ext\"" "delay 1000" \
-	"click Button \"Install\"" "delay 3000" "shot installed.png"
+# The list's rows are made right after its releases are logged; the page
+# is drawn again, and the list fetched again, after each install
+LISTED="wait_log 20000 aitta page: tester/hello_ext"
+mapfile -t cmds < <(open aitta "$START"
+	echo "$LISTED"; echo "delay 500"; echo "shot aitta.png"
+	# The first row's panel is filled with the list. No click on its row:
+	# a click there and Install's in one frame read as a double click,
+	# which installs too
+	echo "wait_log_any 5000 aitta panel: tester/hello 0.1.1"
+	echo "click Button \"Install\""
+	echo "wait_log 20000 aitta status: Installed tester/hello 0.1.1"
+	echo "$LISTED"; echo "delay 500"
+	echo "click Button \"tester/hello_ext\""
+	echo "wait_log 5000 aitta panel: tester/hello_ext 0.1.0"
+	echo "click Button \"Install\""
+	echo "wait_log 20000 aitta status: Installed tester/hello_ext 0.1.0"
+	echo "delay 500"; echo "shot installed.png")
+client u2 install "${cmds[@]}"
 [ -d "$t/u2/installed/tester/hello/0.1.1" ] ||
 	fail "0.1.1 was not installed from Apps from Aitta (aitta.png)"
 [ -f "$t/u2/installed/tester/hello_ext/0.1.0/init.lua" ] ||

@@ -46,8 +46,8 @@ namespace command_seq
 		// wait_log_absent <ms> <text>: the time passes with no such line,
 		// or the sequence fails -- a thing that must not happen
 		WaitLogAbsent,
-		// expect_error <text>: the next error line containing the text is
-		// the drive's own doing and does not fail the sequence; any other
+		// expect_error <text>: an error line containing the text, from here
+		// on, is the drive's own doing and does not fail the sequence; any other
 		// error line, or the connection dropping, does at once
 		ExpectError,
 		// **Whether the line has appeared at all in this run**, where

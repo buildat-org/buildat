@@ -52,8 +52,18 @@ tmp=$here/local/report_here; rm -rf $tmp; mkdir -p $tmp/sp $tmp/an/apps/floorpla
 SP=29641
 pids=()
 stop() { for p in "${pids[@]}"; do kill -INT $p 2>/dev/null; done
-	for _ in $(seq 30); do ss -ltn | grep -qE ":($AN|$SP) " || break; sleep 1; done; }
+	for _ in $(seq 150); do ss -ltn | grep -qE ":($AN|$SP) " || break; sleep 0.2; done; }
 trap stop EXIT
+# A line in a log, while its process lives
+upto() { # log text seconds pid
+	local i
+	for i in $(seq $(($3 * 5))); do
+		grep -aq "$2" "$1" && return 0
+		kill -0 "$4" 2>/dev/null || return 1
+		sleep 0.2
+	done
+	return 1
+}
 addr=""
 [ -n "$1" ] && addr="\"address\": \"$1\","
 cat > $tmp/an/apps/floorplanner/starport.json <<J
@@ -66,35 +76,42 @@ J
 cd "$here"
 # Its box lets it verify the listing on 29500 only, unless told
 BUILDAT_CONNECT_PORTS=$AN Build/bin/buildat_server -m apps/starport -D $tmp/sp -P $SP -l 3 > $tmp/sp.log 2>&1 & pids+=($!)
-for _ in $(seq 120); do grep -q "setup code" $tmp/sp.log && break; sleep 1; done
+upto $tmp/sp.log "setup code" 60 $! || { echo "FAIL: the Starport did not start ($tmp/sp.log)"; exit 1; }
 code=$(grep -o "setup code [A-Z0-9]*" $tmp/sp.log | cut -d' ' -f3)
 # The announce is to a Starport on a port of the moment, which the
 # server's box refuses unless told ([PROCESS_SANDBOX])
 BUILDAT_CONNECT_PORTS=$SP Build/bin/buildat_server -m apps/floorplanner -D $tmp/an -P $AN -l 3 > $tmp/an.log 2>&1 & pids+=($!)
-for _ in $(seq 120); do grep -q "verified ok" $tmp/sp.log && break; sleep 1; done
+upto $tmp/sp.log "verified ok" 90 $! || { echo "FAIL: the listing was not verified ($tmp/sp.log, $tmp/an.log)"; exit 1; }
 read -r _ _ id _ _ ccode < <(grep -v "^#" $tmp/an/apps/floorplanner/starport_claim.txt)
-printf 'delay 6000\nquit\n' > $tmp/cmds.txt
+# Done when the third request is answered
+printf 'wait_log 30000 "id":3,"ok"\nquit\n' > $tmp/cmds.txt
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D $tmp/cl -w 800x600 -l 3 -s 127.0.0.1:$SP -c @$tmp/cmds.txt > $tmp/cl.log 2>&1
+	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D $tmp/cl -w 800x600 -l 3 -s 127.0.0.1:$SP -c @$tmp/cmds.txt > $tmp/cl.log 2>&1 ||
+	{ echo "FAIL: the admin's requests ($tmp/cl.log)"; exit 1; }
 curl -s 127.0.0.1:$SP/api/v1/list | python3 -c "import json,sys; print('listed:', [(s['host'],s['port'],s.get('tls')) for s in json.load(sys.stdin)['servers']])"
 # The player's client: this Starport only, accepted
 now=$(date +%s)
 echo "{\"starports\": [\"http://127.0.0.1:$SP\"]}" > $tmp/fc/starport.json
 printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","http://127.0.0.1:%s","","%s","%s","","",""\n' $SP $now $now > $tmp/fc/network_addresses.csv
 fpcode=$(grep -ao "setup code [A-Z0-9]*" $tmp/an.log | tail -1 | awk '{print $3}')
+# The delays: the picker and its menu laid out in the frames after their
+# lines, and the report's window drawn
 cat > $tmp/fcmds.txt <<C
-delay 7000
+wait_log_any 30000 Plan picker:
+delay 500
 keypress up
 keypress return
-delay 1500
+wait_log 10000 The plan picker's menu shown
+delay 500
 keypress down
 keypress down
 keypress down
 keypress return
-delay 4000
+wait_log 20000 report here: connected to
+delay 1500
 screenshot $tmp/report.png
 quit
 C

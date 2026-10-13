@@ -3653,8 +3653,11 @@ local function show_client(host, port, name, password, mode, origin)
 						end
 					end
 				end
-				add_chat(({"First person view", "Third person view",
-						"Third person view (front)"})[camera_mode])
+				local said = ({"First person view", "Third person view",
+						"Third person view (front)"})[camera_mode]
+				add_chat(said)
+				-- As vanilla's local chat line: what a check waits for
+				log:info("chat (local): " .. said)
 			end
 			if key == BIND.fly.key then
 				-- The server's own movement check pulls a player without
@@ -3711,6 +3714,7 @@ local function show_client(host, port, name, password, mode, origin)
 				local kept = settings.load()
 				kept.debug_info = show_debug
 				settings.save(kept)
+				log:info("debug info: " .. show_debug)
 				-- In the log as well, as vanilla's: a check reads the text
 				if show_debug > 0 then
 					set_counters()
@@ -3718,7 +3722,10 @@ local function show_client(host, port, name, password, mode, origin)
 				end
 			end
 			if key == BIND.minimap.key and view.minimap then
-				add_chat(view.minimap:next_mode())
+				local said = view.minimap:next_mode()
+				-- In the log as well, for a check to wait on
+				log:info("V: " .. tostring(said))
+				add_chat(said)
 			end
 			if key == BIND.noclip.key then
 				avatar.noclip = not avatar.noclip
@@ -4017,6 +4024,8 @@ show_connect_dialog = function(address, name)
 				status.text = "The list did not come: " .. tostring(err)
 				official_rows = {}
 				show()
+				-- What a check waits for, as below
+				log:info("the official list did not come: " .. tostring(err))
 				return
 			end
 			local data = network.parse_json(body)
@@ -4049,6 +4058,8 @@ show_connect_dialog = function(address, name)
 			end
 			official_rows = rows
 			show()
+			-- What a check waits for
+			log:info("the official list: " .. #rows .. " servers")
 		end, {description = "Luanti's official server list"})
 	end
 	local function source_button(name, label)
@@ -4104,6 +4115,8 @@ show_connect_dialog = function(address, name)
 		settings.save(kept)
 	end)
 	show()
+	-- What a check waits for
+	log:info("Join a Luanti server: shown")
 
 	-- Escape cancels. A plain subscription rather than the stack's own,
 	-- because a LineEdit with the focus swallows the key and a stack handler

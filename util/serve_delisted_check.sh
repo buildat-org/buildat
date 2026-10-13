@@ -24,17 +24,18 @@ trap 'for g in "${groups[@]}"; do kill -- -"$g" 2>/dev/null; done; check_cleanup
 cd "$here/Build"
 mkdir -p "$t/srv"
 echo "name admin checkpass1" > "$t/srv/first_admin"
-start_server "$t/srv.log" "Listening at" 120 auto \
+start_server "$t/srv.log" "Listening at" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 req(){ # <log> <requests>
-	printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+	# The run ends at the request's answer, "ai: {...}"
+	printf 'wait_log_any 30000 ai: {"id":1,\nquit\n' > "$t/reqs.cmds"
 	BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass1 BUILDAT_AITTA_REQS="$2" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-		-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$1" 2>&1
+		-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$1" 2>&1 || fail "the drive ($1)"
 	grep -aq 'ai: {"id":1,"ok":true' "$1" || fail "the requests ($1)"
 }
 req "$t/bind.log" "{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}"
@@ -48,6 +49,8 @@ publish(){
 	zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack $1"
 	"$b" aitta publish "$zip" 127.0.0.1:$P > "$t/pub.out" 2>&1
 	grep -q "listed: tester/pt" "$t/pub.out" || fail "publish $1: $(cat "$t/pub.out")"
+	# simplified: kept; nothing found says what the second after a
+	# publish is for (a release's time is whole seconds)
 	sleep 1
 }
 publish 1.0.0
@@ -71,11 +74,12 @@ setsid env AITTA=127.0.0.1:$P BUILDAT_SERVE_DIR="$t/serve" POLL_SECONDS=5 \
 	UPDATE_MAX_WAIT=60 RELEASES_URL="http://127.0.0.1:$HP/releases.json" \
 	"$here/util/serve_latest_release.sh" tester/pt $SP "$t/u" > "$t/serve.log" 2>&1 &
 groups+=($!)
-wait_for_log "$slog" "Listening at" 300 || fail "1.0.0 did not start ($t/serve.log)"
+wait_for_log "$slog" "Listening at" 120 || fail "1.0.0 did not start ($t/serve.log)"
 
 # 1.
 req "$t/d1.log" '{"cmd":"delist","release":"tester/pt/1.0.0","reason":"licence","text":"not MIT"}'
 wait_for_log "$t/serve.log" "is delisted by" 60 || fail "no warning ($t/serve.log)"
+# Two more checks (POLL_SECONDS=5), to see the warning is not said again
 sleep 12
 [ "$(grep -c "is delisted by" "$t/serve.log")" = 1 ] &&
 	grep -q "tester/pt 1.0.0 is delisted by 127.0.0.1:$P: licence: not MIT; it runs on" "$t/serve.log" ||
@@ -88,6 +92,7 @@ n=$(grep -ac "Listening at" "$slog")
 req "$t/d2.log" '{"cmd":"delist","release":"tester/pt/1.0.0","reason":"malware","text":"<steals>"}'
 wait_for_log "$t/serve.log" "stopped until a newer release is listed" 60 ||
 	fail "not stopped ($t/serve.log)"
+# Two more checks, to see the server is not started again
 sleep 12
 curl -s -m 5 "http://127.0.0.1:$SP/" | grep -q "withdrawn by the Aitta it came from (malware: &lt;steals&gt;)" ||
 	fail "the stand-in's page: $(curl -s -m 5 "http://127.0.0.1:$SP/")"
@@ -97,13 +102,16 @@ echo "ok: delisted for malware, stopped, the stand-in says why"
 
 # 3.
 publish 1.0.1
-for _i in $(seq 300); do
+for _i in $(seq 600); do
 	[ "$(grep -ac "Listening at" "$slog")" -gt "$n" ] && break
-	sleep 1
+	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -gt "$n" ] || fail "1.0.1 did not start ($t/serve.log)"
 pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
-sleep 2
+for _i in $(seq 50); do
+	curl -s -m 2 "http://127.0.0.1:$SP/health" | grep -q . && break
+	sleep 0.2
+done
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health on 1.0.1"
 echo "ok: 1.0.1 served"
 echo "PASS"

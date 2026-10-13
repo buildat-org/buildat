@@ -39,9 +39,10 @@ A
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -P $SP -l 3 \
 		>> "$tmp/sp.log" 2>&1 &
 	pid=$!
-	for _ in $(seq 120); do
+	for _ in $(seq 300); do
 		curl -s -m 2 "localhost:$SP/api/v1/list" | grep -q "\"version\":{.*$1" && return
-		sleep 1
+		kill -0 $pid 2>/dev/null || break
+		sleep 0.2
 	done
 	fail "/api/v1/list has no version $1 (sp.log)"
 }
@@ -65,24 +66,27 @@ launcher() { # cmds log
 		-o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 4 \
 		-o sound_mute=1 -c @"$1" > "$2" 2>&1
 }
+# The delays of a second at most are settles after a line: the window it
+# says is up drawn and laid out in the frames after it
 cat > "$tmp/c1" <<C
 wait_log_any 30000 Offering version 0.9.0
 delay 1000
 screenshot $tmp/notice.png
 click Button "Not now"
-delay 500
+wait_log 5000 Version: not now, 0.9.0 kept
 quit
 C
-launcher "$tmp/c1" "$tmp/cl1.log"
+launcher "$tmp/c1" "$tmp/cl1.log" || fail "the drive ($tmp/cl1.log)"
 grep -q "Offering version 0.9.0 (https://example.org/linux-0.9.0.tar.gz" "$tmp/cl1.log" ||
 	fail "no notice, or not the platform's link ($tmp/cl1.log)"
 grep -q '"version_not_now":"0.9.0"' "$tmp/cl/starport.json" ||
 	fail "Not now not kept ($tmp/cl1.log)"
 echo "ok: the notice with this platform's link; Not now kept"
 
-printf 'delay 12000\nquit\n' > "$tmp/c2"
-launcher "$tmp/c2" "$tmp/cl2.log"
-grep -q "Offering version" "$tmp/cl2.log" && fail "0.9.0 told again after Not now"
+# The list in, and the notice not shown at the 0.5 s it is looked at
+printf 'wait_log_any 30000 servers listed\nwait_log_absent 2000 Offering version\nquit\n' > "$tmp/c2"
+launcher "$tmp/c2" "$tmp/cl2.log" || fail "the drive ($tmp/cl2.log)"
+grep -v " __app   : " "$tmp/cl2.log" | grep -q "Offering version" && fail "0.9.0 told again after Not now"
 echo "ok: not told again"
 
 starport 0.9.1
@@ -94,6 +98,8 @@ wait_log 5000 Version link
 delay 1000
 screenshot $tmp/next.png
 click Button "Close Buildat"
+# The window in which the client must end: Close Buildat ends it, so this
+# costs nothing when it does
 delay 10000
 C
 launcher "$tmp/c3" "$tmp/cl3.log"
@@ -117,7 +123,7 @@ wait_log 5000 Version next
 delay 500
 quit
 C
-launcher "$tmp/c3b" "$tmp/cl3b.log"
+launcher "$tmp/c3b" "$tmp/cl3b.log" || fail "the drive ($tmp/cl3b.log)"
 grep -q "Version next: .*close Buildat and run buildat-0.9.2-setup.exe: it updates" "$tmp/cl3b.log" ||
 	fail "an .exe's next steps: $(grep "Version next" "$tmp/cl3b.log")"
 echo "ok: an .exe's text"
@@ -134,7 +140,7 @@ wait_log 5000 Version link
 delay 500
 screenshot $tmp/failed.png
 click Button "Not now"
-delay 500
+wait_log 5000 Version: not now, 0.9.2 kept
 quit
 C
 BUILDAT_STARPORT_OFFER=1 timeout 120 env PATH="$tmp/none" Build/bin/buildat \
@@ -146,17 +152,21 @@ grep -q 'command: click Button "Not now"' "$tmp/cl4.log" &&
 	! grep -q "Command sequence failed" "$tmp/cl4.log" ||
 	fail "the notice closed on a failed open ($tmp/cl4.log)"
 cat > "$tmp/c5" <<C
-wait_log_any 20000 launch_menu: home
+wait_log_any 20000 rows in
 delay 1000
 click Button "Settings"
-delay 800
+wait_log 5000 launch_menu: settings,
+delay 300
 click Button "Logs and errors"
-delay 800
+wait_log 5000 launch_menu: logs shown
+delay 300
 click Button "Open the log folder"
-delay 800
+wait_log 5000 launch_menu: logs: Opened
 quit
 C
-launcher "$tmp/c5" "$tmp/cl5.log"
+launcher "$tmp/c5" "$tmp/cl5.log" || fail "the drive ($tmp/cl5.log)"
+# The opener is a process of its own: its file, or a second gone
+for _ in $(seq 5); do [ -s "$tmp/opened" ] && break; sleep 0.2; done
 opened=$(cat "$tmp/opened" 2>/dev/null)
 [ -n "$opened" ] && [ -d "$opened" ] ||
 	fail "Open the log folder opened \"$opened\" ($tmp/cl5.log)"

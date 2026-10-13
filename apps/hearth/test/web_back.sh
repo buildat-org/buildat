@@ -34,48 +34,65 @@ admin(){ # log reqs [env...]
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 120 bin/buildat -o launch_ui=launch_menu -D "$t/cl_admin" \
 		-w 1280x720 -l 3 -o sound_mute=1 -s 127.0.0.1:$SERVER_PORT \
-		-c @"$t/wait" > "$log" 2>&1
+		-c @"$t/wait" > "$log" 2>&1 ||
+		fail "the admin drive ($log): $(grep -ao 'Command sequence failed.*' "$log" | head -1)"
 	grep -ao "hr: {.*\"id\":1001,.*" "$log" | head -1 | grep -q '"ok":true' ||
 		fail "$reqs: $(grep -ao "hr: {.*\"id\":1001,.*" "$log" | head -1)"
 }
-printf 'delay 6000\nquit\n' > "$t/wait"
+# The request's answer; the first run's admin script answered too
+printf 'wait_log_any 20000 admin script: done\nwait_log_any 20000 "id":1001,\nquit\n' > "$t/wait"
 admin "$t/admin.log" '{"cmd":"new_topic","name":"Help","about":"Questions"}' \
 	"BUILDAT_HEARTH_ADMIN=add reader readerpass12"
+printf 'wait_log_any 20000 "id":1001,\nquit\n' > "$t/wait"
 admin "$t/admin2.log" '{"cmd":"new_thread","topic":1,"title":"Lamps","body":"A lamp"}'
 
 depth='["eval", "'"'depth '"' + Module.buildatBackDepth + '"' '"' + location.pathname"]'
-back='["eval", "history.back(), '"'back'"'"], ["wait", 1500]'
+back='["eval", "history.back(), '"'back'"'"]'
+# The frames after a page's line: its layout, and the depth the next
+# Update sets from it
+drawn='["wait", 300]'
+# simplified: the 2 s after Leave are the page before loading; the steps
+# have no wait for a navigation the page starts itself. A ["waitnav"]
+# step in util/web_drive.js would be the event
 cat > "$t/steps.json" <<J
 [
 	["nav", "\${URL}t/1"],
 	["nav", "\${URL}app#open=/t/1"],
 	["waitlog", "accounts: hello", 120],
-	["wait", 3000],
+	["waitlog", "accounts: the login page shown", 20],
+	$drawn,
 	["type", "reader"], ["key", "Tab"], ["type", "readerpass12"],
 	["tap", 195, 548],
-	["waitlog", "hearth: frame", 60],
-	["wait", 3000],
+	["waitlog", "hearth: frame", 30],
+	["waitlog", "hearth: page Lamps", 20],
+	$drawn,
 	["shot", "\${OUT}/thread.png"],
 	$depth,
 	$back,
 	["waitlog", "hearth: Escape, back\$", 5],
+	$drawn,
 	["shot", "\${OUT}/home.png"],
 	$depth,
 	$back,
 	["waitlog", "hearth: Escape, back to the sidebar", 5],
+	$drawn,
 	["shot", "\${OUT}/sidebar.png"],
 	$depth,
 	$back,
-	["waitlog", "hearth: exit dialog", 5],
+	["waitlog", "hearth: exit dialog\$", 5],
+	$drawn,
 	["shot", "\${OUT}/dialog.png"],
 	$depth,
 	$back,
+	["waitlog", "hearth: exit dialog cancelled", 5],
+	$drawn,
 	["shot", "\${OUT}/cancelled.png"],
 	$depth,
 	$back,
-	["waitlog", "hearth: exit dialog", 5],
+	["waitlog", "hearth: exit dialog\$", 5],
+	$drawn,
 	["key", "Enter"],
-	["wait", 3000],
+	["wait", 2000],
 	["eval", "'left to ' + location.pathname"]
 ]
 J

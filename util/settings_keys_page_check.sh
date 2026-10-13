@@ -26,25 +26,36 @@ trap check_cleanup EXIT
 cd "$here/Build"
 client(){ timeout 240 bin/buildat -o launch_ui=launch_menu -w 1100x600 -u 1 -l 3 -o sound_mute=1 "$@"; }
 # The page's log lines of one run: "<what>; the view at N, <row> selected"
+# Why a drive stopped: the wait it missed or the error it did not expect
+drive_err(){ grep -a "Command sequence failed" "$1" | tail -1 | cut -c 1-300; }
 lines(){ grep -a "$1: .*; the view at" "$2" | sed 's/.*: \([^:]*; the view at.*\)/\1/'; }
 
 # 1
 {
-	echo "wait_log 60000 rows in"; echo "delay 1500"
-	echo 'click Button "Settings"'; echo "delay 800"
+	# Each change waited for by the page's own line; the delays left are
+	# the screen settling after a wait, and the wheel's and the Downs'
+	# scrolling done in the frames after them
+	echo "wait_log_any 30000 rows in"; echo "delay 1500"
+	echo 'click Button "Settings"'; echo "wait_log 5000 launch_menu: settings Settings"
+	echo "delay 300"
 	echo 'click Button "Keys"'; echo "wait_log 5000 launch_menu: keys,"
 	echo "delay 500"; echo "mouse_pos 500 400"; echo "delay 500"
 	echo "keypress Down"; echo "keypress Down"; echo "keypress Backspace"
-	echo "delay 300"
+	echo "wait_log 5000 reset; the view at"
 	for _ in 1 2 3 4; do echo "mouse_wheel -1"; done
-	echo "delay 300"; echo "keypress Backspace"; echo "delay 300"
+	# The frames after the input: the view scrolled before the Backspace
+	echo "delay 300"; echo "keypress Backspace"; echo "wait_log 5000 reset; the view at"
 	for _ in $(seq 10); do echo "keypress Down"; done
-	echo "delay 300"; echo "keypress Backspace"; echo "delay 300"
-	echo "keypress Return"; echo "delay 200"; echo "keypress K"; echo "delay 300"
-	echo "keypress Backspace"; echo "delay 300"
+	# The frames after the input: the Downs' scrolling done
+	echo "delay 300"; echo "keypress Backspace"; echo "wait_log 5000 reset; the view at"
+	# Enter and the key a few frames apart, as pressed
+	echo "keypress Return"; echo "delay 200"; echo "keypress K"
+	echo "wait_log 5000 = K; the view at"
+	echo "keypress Backspace"; echo "wait_log 5000 reset; the view at"
 	echo "screenshot $t/launcher.png"; echo quit
 } > "$t/l.cmds"
-client -C "$t/lc" -D "$t/lu" -c @"$t/l.cmds" > "$t/l.log" 2>&1
+client -C "$t/lc" -D "$t/lu" -c @"$t/l.cmds" > "$t/l.log" 2>&1 ||
+	fail "the launcher's drive ($t/l.log): $(drive_err "$t/l.log")"
 lines launch_menu "$t/l.log" > "$t/l.lines"
 cat "$t/l.lines"
 python3 - "$t/l.lines" <<'PY' || fail "the launcher's Keys screen ($t/l.log)"
@@ -62,15 +73,15 @@ PY
 
 # 2: Luanti settings, the client starting vanilla's server
 cat > "$t/s.cmds" <<C
-wait_log 120000 Key bindings...
+wait_log_any 60000 menu: the settings shown
 delay 1000
 click Button "Key bindings..."
 wait_log 5000 Game keys shown
 delay 500
 click Button "Fly mode on and off"
-delay 300
+wait_log 5000 Fly mode on and off waits for a key
 keypress L
-delay 300
+wait_log 5000 = L; the view at
 screenshot $t/luanti_settings_keys.png
 keypress Escape
 wait_log 5000 Game keys closed
@@ -78,7 +89,8 @@ delay 1500
 screenshot $t/luanti_settings.png
 quit
 C
-client -C "$t/sc" -D "$t/su" -a app/vanilla/settings -l 4 -c @"$t/s.cmds" > "$t/s.log" 2>&1
+client -C "$t/sc" -D "$t/su" -a app/vanilla/settings -l 4 -c @"$t/s.cmds" > "$t/s.log" 2>&1 ||
+	fail "the Luanti settings drive ($t/s.log): $(drive_err "$t/s.log")"
 grep -a "Game keys shown\|Game keys: " "$t/s.log" | cut -c 30-
 grep -aq "Game keys shown: [0-9]* rows under Luanti *(app/vanilla), This client's$" "$t/s.log" ||
 	fail "Luanti settings' page is not the game's alone ($t/s.log)"
@@ -96,10 +108,12 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=kp start_server "$t/v.log" \
 	-m ../apps/vanilla -D "$t/vu" -C "$t/vc" -l 3 || fail "the vanilla server ($t/v.log)"
 CHECK_PIDS+=($SERVER_PID)
 cat > "$t/v.cmds" <<C
-wait_log 120000 the server put the player at
-delay 8000
+wait_log 60000 the server put the player at
+wait_log_any 60000 load: the world is in
+delay 500
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
+delay 500
 screenshot $t/pause.png
 click Button "Settings..."
 wait_log 5000 Game settings shown
@@ -107,34 +121,36 @@ delay 1000
 screenshot $t/settings.png
 mouse_pos 550 300
 $(for _ in $(seq 10); do echo "mouse_wheel -1"; done)
+# The frames after the input: the list scrolled before the click looks
 delay 500
 click Button "Key bindings..."
 wait_log 5000 Game keys shown
 delay 500
 mouse_pos 550 300
 $(for _ in $(seq 20); do echo "mouse_wheel -1"; done)
+# The frames after the input: the list scrolled before the click looks
 delay 500
 click Button "The line of detail on and off"
-delay 300
+wait_log 5000 The line of detail on and off waits for a key
 keypress N
-delay 300
+wait_log 5000 = N; the view at
 keypress Backspace
-delay 300
+wait_log 5000 reset; the view at
 keypress Return
-delay 200
+wait_log 5000 The line of detail on and off waits for a key
 keypress N
-delay 300
+wait_log 5000 = N; the view at
 screenshot $t/keys.png
 keypress Escape
 wait_log 5000 Game keys closed
 delay 500
 screenshot $t/settings_back.png
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu closed
 keypress N
-delay 1000
+wait_log 5000 debug info:
 quit
 C
 client -C "$t/vcc" -D "$t/vcu" -s 127.0.0.1:"$SERVER_PORT" -l 4 -c @"$t/v.cmds" > "$t/vc.log" 2>&1

@@ -27,52 +27,58 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "$me/diglight.lua"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29777 \
+	start_server "$out/srv.log" "Mods loaded" 180 29777 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l "${LOG_LEVEL:-4}" ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap 'kill "$srv" 2>/dev/null' EXIT
+# Each read on the fixture's chat line for its moment; the half second after a
+# look, the view turned drawn
 cat > "$out/cmds.txt" <<CMDS
-delay 23000
+wait_log 120000 chat: diglight: t=15
 event scan
 event scan_volume 4 t15 light
-delay 55000
+wait_log 70000 chat: diglight: t=70
 event scan
 event scan_volume 4 t70 light
 look_dir 1 -0.5 0
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/stair_${MODE}_t70.png
-delay 43000
+wait_log 60000 chat: diglight: t=115
 event scan
 event scan_volume 4 t115 light
-delay 20000
+wait_log 30000 chat: diglight: t=135
 event scan
 event scan_volume 4 t135 light
 look_dir -1 0.3 0
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/stair_${MODE}_step3_up.png
 look_dir 1 -0.3 0
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/stair_${MODE}_step3_down.png
-delay 20000
+wait_log 30000 chat: diglight: t=155
 event scan
 event scan_volume 4 t155 light
 look_dir 1 -0.5 0
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/stair_${MODE}_t155.png
 look_dir 1 -1.5 0
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/stair_${MODE}_t155_pit.png
-delay 2000
 quit
 CMDS
-BUILDAT_RENDER_MODE="$MODE" bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
-sleep 2
+BUILDAT_RENDER_MODE="$MODE" timeout 600 bin/buildat -s localhost:29777 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -a "Command sequence failed\|an error the drive" "$out/cli.log" | tail -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep "diglight:" "$out/srv.log" | sed 's/.*diglight: //' | grep -v "t=[0-9]*[1-46-9] " 
 grep "light sky\|voxel names\|light y=" "$out/cli.log" | sed 's/.*scan /scan /'
 # **The verdict is that the measurement happened**, not what the numbers

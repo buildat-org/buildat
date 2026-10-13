@@ -50,7 +50,18 @@ BUILDAT_LUANTI_SEED=3 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=ls star
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 client(){ run_client 60 "$1" timeout 400 "$here/Build/bin/buildat" -C "$t/nc" \
-	-D "$t/nu" -w ${WIN:-800x450} -l 3 -o sound_mute=1 "${@:2}"; }
+	-D "$t/nu" -w ${WIN:-800x450} -l 3 -o sound_mute=1 "${@:2}" ||
+	fail "the client ($1): $(grep -a "Command sequence failed\|run_client:" "$1" | tail -1 | cut -c 1-300)"; }
+# link_up <log> <pid>: the netsim link listening, up to 10 s
+link_up(){
+	local i
+	for i in $(seq 50); do
+		grep -aq "netsim: listening" "$1" && return 0
+		kill -0 "$2" 2>/dev/null || break
+		sleep 0.2
+	done
+	fail "the link did not come up ($1)"
+}
 # covered <screenshot> <picture> <from> <to> ...: how far the screenshot is
 # from the picture scaled to cover and centred, on the rows from..to
 # (fractions of the height)
@@ -106,7 +117,7 @@ assert amber > 20 and cyan > 20 and white > 20, "a colour missing"
 PY
 
 # 1
-printf "wait_log 300000 load: the world is in\nquit\n" > "$t/1.cmds"
+printf "wait_log 120000 load: the world is in\nquit\n" > "$t/1.cmds"
 client "$t/1.log" -s "127.0.0.1:$SERVER_PORT" -c @"$t/1.cmds"
 grep -aq "vanilla : load: the picture background[.0-9]*png, 1920x1080" "$t/1.log" ||
 	fail "no picture on the first join ($t/1.log)"
@@ -116,11 +127,12 @@ FAST=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0));
 python3 "$here/util/netsim.py" --listen "$FAST" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 24000 > "$t/netsim_fast.log" 2>&1 &
 CHECK_PIDS+=($!)
-sleep 1
+link_up "$t/netsim_fast.log" $!
 for WIN in 1000x450 900x600; do
 	# Soon: the screen ends well under a second after the picture since
-	# [REGISTRY_FILE]
-	printf 'wait_log 120000 load: the picture\ndelay 100\nscreenshot %s\nwait_log 300000 load: the world is in\ndelay 1500\nquit\n' \
+	# [REGISTRY_FILE]. The 1.5 s after it: time for a UI scale change the
+	# world would make to be logged
+	printf 'wait_log 60000 load: the picture\ndelay 100\nscreenshot %s\nwait_log 120000 load: the world is in\ndelay 1500\nquit\n' \
 		"$t/1_$WIN.png" > "$t/1_$WIN.cmds"
 	WIN=$WIN client "$t/1_$WIN.log" -s "127.0.0.1:$FAST" -c @"$t/1_$WIN.cmds"
 	pic=$(grep -aoP "vanilla : load: the picture \K\S+(?=,)" "$t/1_$WIN.log" | head -1)
@@ -142,38 +154,46 @@ done
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
-CHECK_PIDS+=($!)
-sleep 1
+linkpid=$!
+CHECK_PIDS+=($linkpid)
+link_up "$t/netsim.log" $linkpid
+# W held 2 s and the mouse moved on the screen, W and A walked 1.5 s each
+# in the world; the F5s' lines logged in the last half second
 cat > "$t/2.cmds" <<C
-wait_log 120000 load: last
+wait_log 60000 load: last
 delay 200
 screenshot $t/last.png
 keypress F5
 mouse_pos 400 225
 keydown W
 mouse_move 200 0
+# a timing test: W held 2 s, the mouse moved twice in it
 delay 400
 mouse_move 0 120
+# the rest of W held 2 s
 delay 1600
 keyup W
 keypress F5
 keypress F5
 keypress F5
-wait_log 120000 load: the picture
+wait_log 60000 load: the picture
 delay 100
 screenshot $t/screen.png
-wait_log 300000 load: the world is in
+wait_log 120000 load: the world is in
 delay 1500
 screenshot $t/world.png
 keydown W
+# a timing test: W walks 1.5 s
 delay 1500
 keyup W
 keydown A
+# a timing test: A walks 1.5 s
 delay 1500
 keyup A
 keypress F5
 keypress F5
 keypress F5
+# a settle: the three F5s' lines, logged in the frames after the keys
 delay 500
 quit
 C
@@ -181,8 +201,7 @@ C
 # picture: the link stopped at the first line, the picture still coming,
 # keeps the screen up for the stripes and the keys; a stop once the
 # picture shows is too late, what follows it already in the socket
-linkpid=$(pgrep -f "[n]etsim.py --listen $LINK ")
-[ -n "$linkpid" ] || fail "the 300 KB/s link is not there"
+kill -0 $linkpid 2>/dev/null || fail "the 300 KB/s link is not there"
 ( until grep -aq "vanilla : load: last " "$t/2.log" 2>/dev/null; do sleep 0.1; done
 	kill -STOP $linkpid; sleep 8; kill -CONT $linkpid ) &
 CHECK_PIDS+=($!)
@@ -261,7 +280,7 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=mn start_server "$t/m.log" \
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/m" -C "$t/m.cache" -l 3 ||
 	fail "the minimal server ($t/m.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf "wait_log 120000 load: no loading picture\nscreenshot %s\nwait_log 120000 load: the world is in\nquit\n" \
+printf "wait_log 60000 load: no loading picture\nscreenshot %s\nwait_log 60000 load: the world is in\nquit\n" \
 	"$t/dark.png" > "$t/3.cmds"
 client "$t/3.log" -s "127.0.0.1:$SERVER_PORT" -c @"$t/3.cmds"
 python3 - "$t/dark.png" <<'PY' || fail "the minimal game's screen ($t/3.log)"
@@ -279,14 +298,14 @@ PY
 # 4: the 300 KB/s link stopped for 25 s at the first line, 5 s short of
 # the client's own leave. Not the 3 MB/s one since [REGISTRY_FILE]: with a
 # warm cache all up to the own chunk is in the socket by the first line.
-linkpid=$(pgrep -f "[n]etsim.py --listen $LINK ")
-[ -n "$linkpid" ] || fail "the 300 KB/s link is gone"
+kill -0 $linkpid 2>/dev/null || fail "the 300 KB/s link is gone"
 cat > "$t/4.cmds" <<C
-wait_log 120000 Waiting for the server... 20 s
+wait_log 60000 Waiting for the server... 20 s
 screenshot $t/stall.png
-wait_log 300000 load: the world is in
+wait_log 120000 load: the world is in
 quit
 C
+# A timing test: the link polled for the first line, then stopped 25 s
 ( until grep -aq "vanilla : load: Loading the world" "$t/4.log" 2>/dev/null; do sleep 0.1; done
 	kill -STOP $linkpid; sleep 25; kill -CONT $linkpid ) &
 CHECK_PIDS+=($!)

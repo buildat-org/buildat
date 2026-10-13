@@ -45,6 +45,7 @@ fifo="$tmp/cmds.fifo"; mkfifo "$fifo"
 # check is about ([MENU_FALLBACK]: a launcher nobody drives is a
 # launcher nobody notices breaking).
 bin/buildat -m launch_menu -w 1280x720 -l 3 -c - < "$fifo" > "$tmp/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$tmp" <<'PY'
 import os, re, sys, time
@@ -79,9 +80,23 @@ def scan():
 			return els
 		time.sleep(0.3)
 	return None
+# Each step waits for the line that says it happened, after what the log
+# held when the step was sent (or anywhere in it)
+def wait_for(text, secs, anywhere=False):
+	global seen
+	t0 = time.time()
+	while time.time() - t0 < secs:
+		data = open(log, "rb").read()
+		i = data.find(text.encode(), 0 if anywhere else seen)
+		if i >= 0:
+			seen = i + len(text)
+			return
+		time.sleep(0.1)
+	print("FAIL: no \"%s\" in %d s (%s)" % (text, secs, log))
+	write("quit"); sys.exit(1)
 def shot(name):
-	write("screenshot %s/%s.png" % (d, name), "delay 900")
-	time.sleep(1.2)
+	write("screenshot %s/%s.png" % (d, name))
+	wait_for("Wrote screenshot %s/%s.png" % (d, name), 10)
 def differing(one, two, right=None):
 	a = Image.open(os.path.join(d, one + ".png")).convert("RGB")
 	b = Image.open(os.path.join(d, two + ".png")).convert("RGB")
@@ -90,15 +105,18 @@ def differing(one, two, right=None):
 	diff = ImageChops.difference(a, b)
 	return sum(1 for p in diff.getdata() if p != (0, 0, 0))
 
-write("delay 6000")
-time.sleep(7)
+# The 500 and 300 ms delays are settles: the menu, the selection and the
+# connect screen's focus drawn in the frames after
+wait_for("rows in", 30, True)
+write("delay 500")
 # 1. The menu answers the arrows
 shot("a")
-write("keypress DOWN", "delay 800")
-time.sleep(1.2)
+write("keypress DOWN", "delay 300")
 shot("b")
 # 2. The connect screen, found by its own text
-write("text join a bu", "delay 800")
+seen = len(open(log, "rb").read())
+write("text join a bu")
+wait_for('rows for "join a bu"', 5)
 els = scan()
 entry = None
 for e in els or []:
@@ -108,17 +126,20 @@ if entry is None:
 	print("FAIL: no \"Join a Buildat server\" in the menu; saw " +
 			", ".join("%r" % x[5] for x in els or [])[:200])
 	write("quit"); sys.exit(1)
+seen = len(open(log, "rb").read())
+# The 300 ms is the hover taken before the press; the 500 the screen
+# laid out after its line
 write("mouse_pos %d %d" % (entry[1] + entry[3] // 2, entry[2] + entry[4] // 2),
-		"delay 300", "mouse_click left", "delay 1800")
-time.sleep(2.5)
+		"delay 300", "mouse_click left")
+wait_for("Join a Buildat server: shown", 10)
+write("delay 500")
 shot("c")
 # The fields' column: the list is left of it
 fields = [e for e in scan() or [] if e[0] == "LineEdit" and e[3] > 0]
 left_of = min(e[1] for e in fields) - 8 if fields else None
-write("keypress DOWN", "delay 800")
-time.sleep(1.2)
+write("keypress DOWN", "delay 300")
 shot("d")
-write("delay 300", "quit")
+write("quit")
 
 CARET = 400
 moved = differing("a", "b")
@@ -143,6 +164,6 @@ sys.exit(0 if ok else 1)
 PY
 status=$?
 exec 3>&-
-sleep 2
-check_pkill buildat 2>/dev/null
+for i in $(seq 50); do kill -0 $cli 2>/dev/null || break; sleep 0.2; done
+kill $cli 2>/dev/null
 exit $status

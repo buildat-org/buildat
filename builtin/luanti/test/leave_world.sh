@@ -32,7 +32,8 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/leave_world"; mkdir -p "$out"; rm -f "$out"/*.png
 tmp=$(mktemp -d "/tmp/buildat_leave_world.XXXXXX")
 cd "$here/Build"
-for i in $(seq 1 60); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+# A server of an earlier run's still going away, polled
+for i in $(seq 1 300); do check_pgrep buildat_server >/dev/null || break; sleep 0.2; done
 if check_pgrep buildat_server >/dev/null; then
 	echo "SKIP: a buildat_server is already running" >&2; exit "$SKIP"
 fi
@@ -57,11 +58,14 @@ UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
 # What the last scan's own lines were, whoever answered it: uistack's
 # ("menu \"ui_stack...") or the world's ("keys forward=...")
 last_scan = ""
+# The delays a scan and a click write are the frames after a step, for
+# what it did to be drawn; what a step is waited for is a log line
 def scan(label, wait=40):
     # The resolution first: the world's own scan (vanilla's scan.lua) takes
     # "<res> <label>" and answers to the label "scan" without it, while
     # uistack's takes either -- so a scan of a game's screen needs it
     global seen, last_scan
+    # A settle: what the step before did, drawn in the frames before the scan
     write("delay 800", "event scan 8 " + label)
     t0 = time.time()
     while time.time() - t0 < wait:
@@ -76,7 +80,8 @@ def scan(label, wait=40):
                     els.append((m.group(1), int(m.group(2)), int(m.group(3)),
                                 int(m.group(4)), int(m.group(5)), m.group(6)))
             return els
-        time.sleep(0.3)
+        # The log polled for the scan's end
+        time.sleep(0.2)
     return None
 def find(els, word):
     for e in els or []:
@@ -84,8 +89,10 @@ def find(els, word):
             return e
     return None
 def click(e):
+    # The click's frames: the row hovered a few frames before the press;
+    # what follows (a scan's settle, a waited line) covers the frames after
     write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
-          "mouse_click left", "delay 600")
+          "mouse_click left")
 def fail(why):
     print("FAIL: " + why)
     write("quit")
@@ -98,12 +105,14 @@ def waitlog(text, secs):
     while time.time() - t0 < secs:
         if text in open(log, "rb").read().decode("utf-8", "replace"):
             return True
-        time.sleep(0.5)
+        # The log polled for the line
+        time.sleep(0.2)
     return False
 def logtext():
     return open(log, "rb").read().decode("utf-8", "replace")
 
-time.sleep(8)
+if not waitlog("launch_menu: ", 30):
+    fail("the menu never came up; see " + log)
 write("text voxel")
 els = scan("grid")
 tiles = [e for e in els or [] if "voxelibre" in e[5].lower() and e[3] > 0]
@@ -111,8 +120,10 @@ tile = tiles and max(tiles, key=lambda e: e[2])
 if not tile:
     fail("no VoxeLibre row; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(tile)
-for i in range(40):
-    time.sleep(1)
+# The game's menu says when its list of saves has come
+if not waitlog(" saves, ", 60):
+    fail("the game's menu never listed its worlds; see " + log)
+for i in range(10):
     els = scan("world%d" % i)
     if find(els, "which world?"):
         break
@@ -137,10 +148,12 @@ for e in els or []:
 if not play:
     fail("no Play row; saw " + ", ".join(e[5] for e in els or [])[:300])
 click(play)
-if not waitlog("the server put the player", 240):
+if not waitlog("the server put the player", 120):
     fail("the world never came up; see " + log)
-time.sleep(10)
-write("screenshot %s/in_world.png" % out, "delay 1500")
+if not waitlog("scene, 0 undrawn within 2", 60):
+    fail("the world was never drawn; see " + log)
+# A settle after the line: the world drawn in the frames after it
+write("delay 1000", "screenshot %s/in_world.png" % out)
 
 # (1) The world is the player's own screen: the launcher's start screen
 # used to be left on the stack, and a scan then answers with *its* name
@@ -156,8 +169,8 @@ if "keys forward=" not in last_scan:
          "placeholder a game runs under")
 
 # (2) Escape pauses the game rather than cancelling the start
-write("keypress Escape", "delay 1500")
-write("screenshot %s/paused.png" % out, "delay 1000")
+write("keypress Escape", "wait_log 10000 pause: the menu shown", "delay 500")
+write("screenshot %s/paused.png" % out, "delay 500")
 els = scan("pause")
 leave = find(els, "Leave the game")
 if not leave:
@@ -168,9 +181,11 @@ if not server_up():
 
 # (3) And the leave lets go of the game's picture
 click(leave)
-time.sleep(4)
-write("screenshot %s/after_leave.png" % out, "delay 1500")
-time.sleep(3)
+if not waitlog("launch_menu: back", 20):
+    fail("the leave never reached the menu; see " + log)
+# Two seconds on: the last frame of the world was still there to the
+# pixel then
+write("delay 2000", "screenshot %s/after_leave.png" % out, "delay 500")
 els = scan("back")
 if not find(els, "Browse"):
     fail("not back in the menu; saw " +

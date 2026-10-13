@@ -54,18 +54,24 @@ turned(){
 	local st=$d/nu/servers/127.0.0.1_$SERVER_PORT
 	mkdir -p "$st"
 	[ -z "$1" ] || printf '%s' "$1" > "$st/touch_sensitivity"
+	# The drag's delays are its pace; the last 2 s let the server's yaw
+	# line (every 0.25 s) catch up
 	{
-		echo "wait_log 120000 chat: tl: ready"; echo "delay 2000"
+		echo "wait_log 60000 chat: tl: ready"; echo "delay 2000"
 		echo "finger_down 1 700 250"; echo "delay 150"
+		# A timing test: the drag's pace, a move every 60 ms
 		for x in 710 720 730 740 750; do
 			echo "finger_move 1 $x 250"; echo "delay 60"
 		done
+		# simplified: the server's yaw line (every 0.25 s) catching up; a
+		# chat line from the fixture once the yaw stops changing would be
+		# the event
 		echo "finger_up 1"; echo "delay 2000"
 		echo quit
 	} > "$d.cmds"
 	BUILDAT_TOUCH=1 run_client 60 "$d.client.log" timeout 240 "$here/Build/bin/buildat" \
 		-C "$d/nc" -D "$d/nu" -s 127.0.0.1:$SERVER_PORT -w 1000x500 -u 1 -l 3 \
-		-o sound_mute=1 -c @"$d.cmds"
+		-o sound_mute=1 -c @"$d.cmds" || fail "the drive ($d.client.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	grep -aq "look sensitivity ${1:-0.2}$" "$d.client.log" ||
 		fail "no \"look sensitivity ${1:-0.2}\" ($d.client.log)"

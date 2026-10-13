@@ -34,20 +34,21 @@ groups=()
 trap 'for g in "${groups[@]}"; do kill -- -"$g" 2>/dev/null; done; check_cleanup' EXIT
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+printf 'wait_log_any 20000 ai: {"id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
 {\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0}}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1 ||
+	fail "the bind's client ($t/bind.log)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 mkdir -p "$t/app"
 cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
@@ -130,17 +131,18 @@ groups+=($!)
 setsid env AITTA=127.0.0.1:$P BUILDS_URL="http://127.0.0.1:$BP/build" \
 	"${serve[@]}" > "$t/serve.log" 2>&1 &
 groups+=($!)
-wait_for_log "$slog" "Listening at" 300 || fail "1.0.0 did not start ($t/serve.log)"
+wait_for_log "$slog" "Listening at" 180 || fail "1.0.0 did not start ($t/serve.log)"
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health"
 [ -d "$t/u1/installed/tester/pt/1.0.0" ] || fail "not installed by the script"
 echo kept > "$t/u1/apps/tester.pt/save.txt"
 echo "ok: installed and serving 1.0.0"
 publish 1.0.1
-wait_for_log "$t/serve.log" "tester/pt 1.0.1 is ready" 300 ||
+wait_for_log "$t/serve.log" "tester/pt 1.0.1 is ready" 180 ||
 	fail "no update to 1.0.1 ($t/serve.log)"
-for _i in $(seq 60); do
+for _i in $(seq 300); do
 	[ "$(grep -ac "Listening at" "$slog")" -ge 2 ] && break
-	sleep 1
+	kill -0 "${groups[-1]}" 2>/dev/null || break
+	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -ge 2 ] || fail "1.0.1 did not start ($slog)"
 pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "not on 1.0.1"
@@ -157,16 +159,23 @@ echo "ok: the build host asked with the Aitta and the version, the install first
 
 # 5. Without AITTA
 kill -- -"${groups[-1]}"
+g=${groups[-1]}
 unset 'groups[-1]'
-sleep 3
+# Its server let go of the port before the next one takes it
+for _i in $(seq 50); do
+	kill -0 -- -"$g" 2>/dev/null || break
+	sleep 0.2
+done
 setsid "${serve[@]}" > "$t/serve2.log" 2>&1 &
 groups+=($!)
-for _i in $(seq 120); do
+for _i in $(seq 300); do
 	[ "$(grep -ac "Listening at" "$slog")" -ge 3 ] && break
-	sleep 1
+	kill -0 "${groups[-1]}" 2>/dev/null || break
+	sleep 0.2
 done
 [ "$(grep -ac "Listening at" "$slog")" -ge 3 ] || fail "no start without AITTA ($t/serve2.log)"
 publish 1.0.2
+# A wait for nothing to happen: three of the script's 5 s polls
 sleep 15
 [ -d "$t/u1/installed/tester/pt/1.0.2" ] && fail "1.0.2 installed without AITTA"
 grep -aq "tester/pt 1.0.2" "$t/serve2.log" && fail "updated without AITTA"

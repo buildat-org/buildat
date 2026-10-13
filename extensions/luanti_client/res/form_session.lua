@@ -256,6 +256,8 @@ function M.new(env)
 		if env.on_open then
 			env.on_open()
 		end
+		-- The checks wait for this line
+		log:info("form " .. tostring(formname) .. " opened")
 	end
 
 	-- A scroll value set and the form sent with it, as Luanti's own
@@ -385,6 +387,9 @@ function M.new(env)
 		if not form or not form.drawn then
 			return false
 		end
+		-- One line a click on a form: what a driven run waits on between
+		-- two taps of a move
+		log:info("form: a "..button.." click")
 		local lx, ly = local_xy(x, y)
 		local function inside(e)
 			return lx >= e.x and lx < e.x + e.w and ly >= e.y and
@@ -454,6 +459,8 @@ function M.new(env)
 							form.state.dropdown_open ~= t.name and t.name
 							or nil
 					form.stale = true
+					log:info("form: dropdown \""..tostring(t.name).."\" "..
+							(form.state.dropdown_open and "opened" or "closed"))
 					return true
 				end
 				if t.scroll then

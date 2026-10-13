@@ -24,10 +24,11 @@ cd "$here/Build"
 trap check_cleanup EXIT
 holds(){
 	for what in stone dirt; do
-		printf 'keypress T\ndelay 800\ntext swing %s\nkeypress Return\n' $what
+		printf 'keypress T\nwait_log 5000 chat: the line opened\ntext swing %s\nkeypress Return\n' $what
 		printf 'wait_log 30000 chat: dig_swing: %s ready\ndelay 1500\n' $what
 		# Down at the node one ahead: straight down is the player's own feet
 		printf 'look_dir 0.6 -1 0\ndelay 500\n'
+		# The hold, and the swing finishing after the button is let go
 		printf 'mouse_down left\ndelay 2500\nmouse_up left\ndelay 1000\n'
 	done
 	echo quit
@@ -106,17 +107,27 @@ run_ext(){
 	( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 		--config "$out/ext.conf" > "$out/ext.srv.log" 2>&1 ) &
 	CHECK_PIDS+=($!)
-	wait_for_log "$out/ext.srv.log" "Server for gameid" 300 ||
+	local lpid=$!
+	for _i in $(seq 600); do
+		grep -aq "Server for gameid" "$out/ext.srv.log" && break
+		kill -0 $lpid 2>/dev/null || break
+		sleep 0.2
+	done
+	grep -aq "Server for gameid" "$out/ext.srv.log" ||
 		fail "the Luanti server ($out/ext.srv.log)"
 	{
 		echo "wait_log 120000 chat: dig_swing: the stage is laid"
-		# luanti_client says nothing when the world around is in
-		echo "delay 8000"
+		echo "wait_log_any 60000 loading: the world is in"
+		# simplified: that line is the player's own chunk; nothing logs the
+		# ones around drawn, so a fixed wait for them. Upgrade: a line like
+		# vanilla's "0 undrawn within 2"
+		echo "delay 4000"
 		holds
 	} > "$out/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ds \
 		BUILDAT_LUANTI_CONNECT=1 run_client 60 "$out/ext.cli.log" timeout 240 \
-		bin/buildat -m luanti_client -w 640x400 -l 5 -o sound_mute=1 -c @"$out/cmds.txt"
+		bin/buildat -m luanti_client -w 640x400 -l 5 -o sound_mute=1 -c @"$out/cmds.txt" ||
+		fail "the ext drive ($out/ext.cli.log)"
 	kill "${CHECK_PIDS[-1]}" 2>/dev/null
 	verdict ext "$out/ext.cli.log" "$out/ext.srv.log" || fail "ext ($out/ext.cli.log)"
 }
@@ -129,7 +140,7 @@ for GAME in ${1:-mineclone2 minetest_game ext}; do
 	echo "enable_damage = false" > "$BUILDAT_USER_PATH/apps/vanilla/saves/$save/luanti/world.mt"
 	BUILDAT_LUANTI_GAME=$GAME BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$me/dig_swing.lua" \
-		start_server "$out/$GAME.srv.log" "Mods loaded" 400 auto \
+		start_server "$out/$GAME.srv.log" "Mods loaded" 120 auto \
 		bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		fail "the $GAME server ($out/$GAME.srv.log)"
 	CHECK_PIDS+=($SERVER_PID)
@@ -139,11 +150,12 @@ for GAME in ${1:-mineclone2 minetest_game ext}; do
 		# The world's first sending done: a chunk still on its way from
 		# before a dig shows the dug node again, and it is dug twice
 		echo "wait_log 120000 scene, 0 undrawn within 2"
-		echo "delay 3000"
+		echo "delay 2000"
 		holds
 	} > "$out/cmds.txt"
 	run_client 60 "$out/$GAME.cli.log" timeout 240 bin/buildat -s "localhost:$SERVER_PORT" \
-		-w 640x400 -l 5 -o sound_mute=1 -c @"$out/cmds.txt"
+		-w 640x400 -l 5 -o sound_mute=1 -c @"$out/cmds.txt" ||
+		fail "the $GAME drive ($out/$GAME.cli.log)"
 	kill "$SERVER_PID" 2>/dev/null
 	verdict "$GAME" "$out/$GAME.cli.log" "$out/$GAME.srv.log" || fail "$GAME ($out/$GAME.cli.log)"
 done

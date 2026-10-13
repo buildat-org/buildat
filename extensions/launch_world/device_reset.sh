@@ -31,29 +31,44 @@ if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit "$SKIP"
 fi
 # The desk's rows in order: render scale, vsync, max fps, multisampling.
-# Three downs from the top is the one that recreates the context.
+# Three downs from the top is the one that recreates the context. The
+# boot's probe bake is waited for: a reset before it is done has no
+# restore to make. The 1 s delays are settles: the frames that draw
+# what the line before them said.
 { echo "wait_log_any 60000 the room hums"
-	echo "delay 2500"
+	echo "wait_log_any 30000 probe: baked twice"
+	echo "delay 1000"
 	echo "screenshot $out/before.png"
 	echo "wait_log 20000 Wrote screenshot $out/before.png"
 	echo "keypress Return"
-	echo "delay 2500"
+	echo "wait_log 5000 terminal: sat down"
 	echo "keypress Down"; echo "keypress Down"; echo "keypress Down"
-	echo "delay 400"
 	echo "keypress Right"
-	echo "delay 3000"
+	echo "wait_log 10000 setting: multisampling = "
+	echo "wait_log 10000 screen mode changed"
+	echo "wait_log 20000 probe: baked twice"
+	echo "delay 1000"
 	# And back, so the two pictures are of the same mode and the only
 	# difference left is what the reset took
 	echo "keypress Left"
-	echo "delay 3000"
+	echo "wait_log 10000 screen mode changed"
+	echo "wait_log 20000 probe: baked twice"
 	echo "keypress Escape"
-	echo "delay 2500"
+	echo "wait_log 5000 terminal: stood up"
+	echo "delay 1000"
 	echo "screenshot $out/after.png"
-	echo "delay 500"
+	echo "wait_log 20000 Wrote screenshot $out/after.png"
 	echo "quit"; } > "$out/cmds.txt"
-run_client 40 "$out/cli.log" timeout 180 bin/buildat -m launch_world \
+if ! run_client 40 "$out/cli.log" timeout 120 bin/buildat -m launch_world \
 	-D "$out/user" -w 1280x720 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1
-restored=$(grep -ac "screen mode changed" "$out/cli.log")
+then
+	grep -av "command: \\|wait_log" "$out/cli.log" |
+		grep -aq "screen mode changed" ||
+		echo "FAIL: the screen mode changed and the room never noticed"
+	echo "FAIL: the drive (see $out/cli.log)"; exit 1
+fi
+restored=$(grep -av "command: \\|wait_log" "$out/cli.log" |
+	grep -ac "screen mode changed")
 python3 - "$out" "$restored" <<'PY'
 import sys
 from PIL import Image

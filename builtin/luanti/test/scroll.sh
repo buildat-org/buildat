@@ -23,15 +23,15 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/scroll.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29786 \
+	start_server "$out/srv.log" "Mods loaded" 60 29786 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID; cli=""
+trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s localhost:29786 -w 1280x720 -l 3 -c - < "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/srv.log" <<'PYIN'
 import re, sys, time
@@ -45,7 +45,7 @@ def write(*cmds):
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
 def scan():
     global seen
-    write("delay 800", "event scan")
+    write("event scan")
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -67,15 +67,19 @@ def rows(els):
     return {e[5]: e[2] for e in els or [] if e[5].startswith("row ")}
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
+# The form's own line on the client (form_session.lua); the half second
+# after it is its layout done in the next frames
 t0 = time.time()
-while time.time() - t0 < 90:
-    if "scroll: the form is shown" in open(srv, "rb").read().decode(
+while time.time() - t0 < 60:
+    if "form scroll_check opened" in open(log, "rb").read().decode(
             "utf-8", "replace"):
         break
-    time.sleep(1)
-time.sleep(3)
-write("screenshot " + sys.argv[1].replace("cli.log", "before.png"),
-      "delay 400")
+    time.sleep(0.3)
+else:
+    fail("the form was not shown")
+# The form laid out in the frames after its line
+write("delay 500",
+      "screenshot " + sys.argv[1].replace("cli.log", "before.png"))
 els = scan()
 before = rows(els)
 if not before:
@@ -92,23 +96,26 @@ if not bar:
 for _ in range(2):
     write("mouse_pos %d %d" % (bar[1] + bar[3] // 2,
                                bar[2] + int(bar[4] * 0.75)),
-          "delay 200", "mouse_click left", "delay 700")
-# And the thumb dragged to the top of the trough, which is the third way
+          "mouse_click left", "wait_log 5000 form: a left click",
+          "delay 500")
+# And the thumb dragged to the top of the trough, which is the third way;
+# the 200 ms are the drag's own steps, a frame or more each
 write("mouse_pos %d %d" % (bar[1] + bar[3] // 2, bar[2] + int(bar[4] * 0.9)),
       "delay 200", "mouse_down left", "delay 200")
 for f in (0.6, 0.3, 0.05):
     write("mouse_pos %d %d" % (bar[1] + bar[3] // 2, bar[2] + int(bar[4] * f)),
           "delay 200")
-write("mouse_up left", "delay 700")
+write("mouse_up left", "delay 500")
 # And the wheel over the container itself, which is the other way in:
-# the box is the UIElement the rows are children of
+# the box is the UIElement the rows are children of.
+# simplified: a wheel's scroll logs nothing; the half second is the rows
+# moved in the frames after it, and after the drag's last step above
 boxes = [e for e in els if e[0] == "UIElement" and e[3] > 150 and e[4] > 80]
 if boxes:
     b = boxes[0]
     write("mouse_pos %d %d" % (b[1] + b[3] // 2, b[2] + b[4] // 2),
-          "delay 300", "mouse_wheel -1", "delay 900")
-write("screenshot " + sys.argv[1].replace("cli.log", "after.png"),
-      "delay 400")
+          "mouse_wheel -1", "delay 500")
+write("screenshot " + sys.argv[1].replace("cli.log", "after.png"))
 els = scan()
 after = rows(els)
 print("row 1 at y=%s before, y=%s after" % (before.get("row 1"),
@@ -129,7 +136,7 @@ write("quit")
 PYIN
 status=$?
 exec 3>&-
-sleep 2
+for i in $(seq 1 50); do kill -0 "$cli" 2>/dev/null || break; sleep 0.2; done
 kill -INT "$srv" 2>/dev/null
 for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 exit $status

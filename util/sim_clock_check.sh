@@ -47,7 +47,7 @@ trap cleanup EXIT
 fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here/Build"
 
-start_server "$t/sp.log" "setup code" 120 auto \
+start_server "$t/sp.log" "setup code" 60 auto \
 	bin/buildat_server --sim-clock -m ../apps/starport -D "$t/sp" -l 3 ||
 	fail "the Starport did not start"
 pids+=($SERVER_PID)
@@ -61,13 +61,13 @@ cat > "$t/hearth/apps/hearth/starport.json" <<EOF
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
 EOF
-start_server "$t/hearth.log" "setup code" 120 auto \
+start_server "$t/hearth.log" "setup code" 60 auto \
 	bin/buildat_server --sim-clock -m ../apps/hearth -D "$t/hearth" -l 3 ||
 	fail "Hearth did not start"
 pids+=($SERVER_PID)
 HP=$SERVER_PORT
 hcode=$(grep -ao "setup code [A-Z0-9]*" "$t/hearth.log" | cut -d' ' -f3)
-start_server "$t/aitta.log" "setup code" 120 auto \
+start_server "$t/aitta.log" "setup code" 60 auto \
 	bin/buildat_server --sim-clock -m ../apps/aitta -D "$t/aitta" -l 3 ||
 	fail "Aitta did not start"
 pids+=($SERVER_PID)
@@ -88,7 +88,8 @@ advance(){
 		done
 		grep -aq "sim clock: ${T}s ahead" "$t/$s.log" || fail "$s did not take the clock to $T"
 	done
-	# The modules' ticks after it
+	# The modules' ticks after it: a settle, as each reads the clock on its
+	# next tick
 	sleep 1
 }
 H=3600 D=86400
@@ -103,11 +104,22 @@ listed(){
 	! sp 10.7.$((probe / 250)).$((probe % 250)) report "{\"listing\":\"$1\"}" | grep -q "no such listing"
 }
 field(){ grep -o "\"$1\":\"[^\"]*\"" | head -1 | cut -d'"' -f4; }
-# Hearth: hc <name> <password> <log> <requests> [env...]
+# Hearth: hc <name> <password> <log> <requests> [env...]. The client runs
+# until the last request's answer (they are numbered from 1001) and the
+# admin script's end; with neither, until the join's outcome, JOIN_WAIT
+# ("Joined as" by default)
 hc(){
-	local n=$1 pw=$2 log=$3 reqs=$4
+	local n=$1 pw=$2 log=$3 reqs=$4 nreq e
 	shift 4
-	printf 'delay %s\nquit\n' "${MS:-6000}" > "$t/cmds_$n"
+	nreq=$(printf '%s\n' "$reqs" | grep -c .)
+	{
+		echo "wait_log_any 20000 ${JOIN_WAIT:-Joined as}"
+		[ "$nreq" -gt 0 ] && echo "wait_log_any 20000 \"id\":$((1000 + nreq)),"
+		for e in "$@"; do
+			case $e in BUILDAT_HEARTH_ADMIN=*) echo "wait_log_any 20000 admin script: done";; esac
+		done
+		echo quit
+	} > "$t/cmds_$n"
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw BUILDAT_HEARTH_CREATE=1 \
 		BUILDAT_HEARTH_CODE=$hcode BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" -w 800x600 -l 3 \
@@ -117,17 +129,17 @@ ans(){ grep -ao "hr: {.*\"id\":$2,.*" "$t/$1" | head -1; }
 level(){ ans "$1" "$2" | grep -o '"level":[0-9]*' | cut -d: -f2; }
 # A kept login's client: kl <log>, joined by its token alone
 kl(){
-	printf 'delay 3000\nquit\n' > "$t/cmds_kl"
+	printf '%s\n' 'wait_log_any 20000 "id":1001,' quit > "$t/cmds_kl"
 	BUILDAT_HEARTH_REQS='{"cmd":"me"}' timeout 90 bin/buildat -o launch_ui=launch_menu \
 		-D "$t/cl_keeper" -w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$HP \
 		-c @"$t/cmds_kl" > "$t/$1" 2>&1
 	grep -aq "Joined as keeper" "$t/$1"
 }
 # A new account by open registration, no code: reg <name>
-reg(){ MS=1500 hc $1 regpass1234 h_reg_$1.log '' BUILDAT_HEARTH_CODE=; }
+reg(){ hc $1 regpass1234 h_reg_$1.log '' BUILDAT_HEARTH_CODE=; }
 
 # 0. Day 0
-grep -aq "Listed on http://127.0.0.1:$SP as" "$t/hearth.log" || sleep 5
+wait_for_log "$t/hearth.log" "Listed on http://127.0.0.1:$SP as" 30
 hid=$(grep -ao "Listed on http://127.0.0.1:$SP as [0-9a-f]*" "$t/hearth.log" | tail -1 | cut -d' ' -f5)
 [ -n "$hid" ] || fail "Hearth was not listed (hearth.log)"
 r=$(sp 10.0.0.1 id/register '{"name":"alice","password":"alicepass1","adult":true}')
@@ -172,7 +184,7 @@ sp 10.0.0.1 id/login '{"name":"u3","password":"upass1234"}' | grep -q '"ok":true
 # The first listing claimed by the Starport's admin
 scode=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 ccode=$(python3 -c 'import hmac,hashlib,sys; print(hmac.new(bytes.fromhex(sys.argv[1]), b"buildat-claim-1\n", hashlib.sha256).hexdigest()[:16])' "${lsecrets[0]}")
-printf 'delay 6000\nquit\n' > "$t/cmds_sp"
+printf '%s\n' 'wait_log_any 20000 sp: {"id":3,' quit > "$t/cmds_sp"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$scode \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
@@ -217,14 +229,14 @@ curl -s "http://127.0.0.1:$HP/" | grep -q "Deals" && fail "sam's held thread on 
 ans h_sam0.log 1011 | grep -q '"ok":true' || fail "sam's second thread: $(ans h_sam0.log 1011)"
 ans h_sam0.log 1012 | grep -q "2 new threads a day" || fail "sam's third thread: $(ans h_sam0.log 1012)"
 [ "$(level h_sam0.log 1014)" = 0 ] || fail "sam stood on day 0: $(ans h_sam0.log 1014)"
-MS=3000 hc keeper keeperpass12 h_keeper0.log '' BUILDAT_HEARTH_KEEP=1
+hc keeper keeperpass12 h_keeper0.log '' BUILDAT_HEARTH_KEEP=1
 grep -aq "is kept logged in" "$t/hearth.log" || fail "the kept login (h_keeper0.log)"
 hc admin adminpass12 h_admin0c.log '' "BUILDAT_HEARTH_ADMIN=setting open_registration on"
 for n in n1 n2 n3 n4 n5; do
 	reg $n
 	grep -aq "Joined as $n" "$t/h_reg_$n.log" || fail "$n by open registration: $(grep -a "Login refused" "$t/h_reg_$n.log")"
 done
-reg n6
+JOIN_WAIT="Login refused" reg n6
 grep -aq "Login refused: This network has 5 new accounts waiting" "$t/h_reg_n6.log" ||
 	fail "a sixth untrusted account from one network: $(grep -a "Login refused\|Joined as" "$t/h_reg_n6.log")"
 hc admin adminpass12 h_admin0d.log '{"cmd":"trust","name":"n1","on":true}'
@@ -240,7 +252,7 @@ printf '{"author": "tester", "name": "demo", "version": "1.0.0", "engine_api": 2
 	"license_code": "MIT", "license_media": "CC0-1.0", "description": "sim",
 	"audience": "everyone"}\n' > "$t/app/meta.json"
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 6000\nquit\n' > "$t/cmds_ai"
+printf '%s\n' 'wait_log_any 20000 ai: {"id":1,' quit > "$t/cmds_ai"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 BUILDAT_AITTA_CODE=$acode \
 BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
@@ -320,8 +332,7 @@ for i in 1 2 3 4 5; do
 	kl h_kl_$i.log || fail "the kept login, used every 29 days, at day $((31 + 29 * i)) (h_kl_$i.log)"
 done
 advance $((7 * D))
-sleep 2
-grep -aqE "file [0-9]* deleted, unused|files no message names deleted" "$t/hearth.log" || fail "the unused file not deleted after 183 days (hearth.log)"
+wait_for_log "$t/hearth.log" "file [0-9]* deleted, unused|files no message names deleted" 10 || fail "the unused file not deleted after 183 days (hearth.log)"
 listed "$hid" || fail "Hearth's listing gone by 183 days"
 sp 10.0.0.1 id/me "{\"session\":\"$sa1\"}" | grep -q '"ok":true' &&
 	fail "a session unused since day 31 on day 183"
@@ -337,9 +348,10 @@ listed "$hid" && fail "Hearth's listing kept 5 years unheard"
 listed "${lids[0]}" && fail "the claimed listing kept 5 years unheard"
 r=$(sp 10.0.0.2 id/login '{"name":"teen","password":"teenpass1"}')
 echo "$r" | grep -q '"adult":true' || fail "the teen not an adult after 5 years: $r"
-for _ in $(seq 60); do
+# Hearth's second listing, polled
+for _ in $(seq 300); do
 	[ "$(grep -ac "Listed on http://127.0.0.1:$SP as" "$t/hearth.log")" -ge 2 ] && break
-	sleep 1
+	sleep 0.2
 done
 [ "$(grep -ac "Listed on http://127.0.0.1:$SP as" "$t/hearth.log")" -ge 2 ] ||
 	fail "Hearth not listed again after its listing went: $(grep -a 'Announce to' "$t/hearth.log" | tail -1)"

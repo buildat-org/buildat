@@ -17,16 +17,21 @@ if check_pgrep buildat >/dev/null; then
 fi
 # A search typed and Escape to clear it, which is the menu's own
 # keyboard: its "rows for" line proves the typing went there, and the
-# room must not answer the Escape with its pause.
-{ echo "delay 5000"
-	echo "text zq"; echo "delay 600"
+# room must not answer the Escape with its pause. Escape on a search
+# draws Home again ("rows in"); the half second after it is the room's
+# chance to answer the same key, which would be a pause line.
+{ echo "wait_log_any 30000 the menu, over the room"
+	echo "wait_log_any 30000 rows in"
+	echo "text zq"
+	echo 'wait_log 5000 rows for "zq"'
 	echo "keypress Escape"
-	echo "delay 1200"
+	echo "wait_log 5000 rows in"
+	echo "delay 500"
 	echo "screenshot $out/menu-over-room.png"
-	echo "delay 400"
 	echo "quit"; } > "$out/cmds.txt"
 bin/buildat -m launch_menu_attract -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
@@ -62,16 +67,25 @@ fi
 # would wipe what the menu gave and leave a client with no server and
 # no menu. They merge, last function wins, and the menu over the room
 # is what a game comes back to (2026-09-24).
-{ echo "delay 25000"; echo "event scan 8 a"; echo "delay 1000"
+# ContentDB's page says its rows when drawn; Home is drawn by the time
+# "back to Home" is said. The half seconds are the screen laid out in the
+# frames after its line.
+# simplified: offline, ContentDB's error is a "menu: <message>" and the
+# wait for the rows fails the run; a line of the page's own (drawn,
+# whatever came) would carry it through
+{ echo "wait_log_any 60000 menu: ContentDB "; echo "delay 500"
+	echo "event scan 8 a"
 	# The row at the bottom of vanilla's menu panel, at this window size
-	echo "mouse_pos 639 608"; echo "delay 300"; echo "mouse_click left"
-	echo "delay 6000"; echo "event scan 8 b"
-	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
+	echo "mouse_pos 639 608"; echo "mouse_click left"
+	echo "wait_log 20000 launch_menu: back to Home"; echo "delay 500"
+	echo "event scan 8 b"
+	echo "delay 500"; echo "quit"; } > "$out/cmds_back.txt"
 rm -f "$out/back.log" "$out/back_server.log"
 bin/buildat -o launch_ui=launch_menu_attract -a app/vanilla/contentdb \
  -w 1280x720 -l 3 -L "$out/back.log" \
-	-c @"$out/cmds_back.txt" > /dev/null 2>&1
-home=$(grep -ac "launch_menu: back to Home" "$out/back.log")
+	-c @"$out/cmds_back.txt" > /dev/null 2>&1 ||
+	fail "the drive back ($out/back.log): $(grep -ao 'Command sequence failed.*' "$out/back.log" | head -1)"
+home=$(grep -a "launch_menu: back to Home" "$out/back.log" | grep -vc wait_log)
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
 echo "a game launched from the composition: back to Home $home times," \

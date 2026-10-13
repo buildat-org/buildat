@@ -26,15 +26,17 @@ rm -rf "$a/.git"
 mkdir -p "$a/many"
 for i in $(seq -w 1 50); do echo x > "$a/many/f$i.txt"; done
 want=$(cd "$a" && find . -type f ! -path '*/.*' ! -path './aitta_page/*' | wc -l)
-# A page of the list at a time: 4 wheel clicks of 44 px are its 8 rows
+# A page of the list at a time: 4 wheel clicks of 44 px are its 8 rows;
+# the 300 ms after them is the list moved before its scan
 cat > "$t/p.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 text Publish an
-delay 800
+wait_log 10000 rows for "Publish an"
 keypress Return
-delay 2000
+wait_log 10000 aitta publish: the package page
 click Button "Next: key and publish"
-delay 2000
+wait_log 10000 aitta publish: the key page
+delay 500
 screenshot $t/top.png
 event scan
 mouse_pos 550 560

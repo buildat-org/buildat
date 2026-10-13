@@ -96,12 +96,14 @@ kill $pid; wait $pid 2>/dev/null
 grep -aq "redfield drawn" "$t/plain.log" || fail "redfield not run unscripted ($t/plain.log)"
 grep -a "what is left after leave_to_menu" "$t/plain.log" | grep -q "; 0 viewports" ||
 	fail "viewports left unscripted: $(grep -a "what is left after" "$t/plain.log")"
+# The 2 s after the leave: the grid used to come up over the last frame
+# and stay; the other delays are the frames after a line
 for scale in 1 0.5; do
 	cat > "$t/$scale.cmds" <<C
 wait_log_any 20000 rows in
 delay 1500
 text redfield
-delay 1000
+wait_log 5000 for "redfield"
 keypress Return
 wait_log 30000 redfield drawn
 delay 2000
@@ -126,7 +128,7 @@ echo "ok: a dev app's field gone with it at render scale 1 and 0.5"
 # 2.
 d=$t/v
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=lv start_server "$t/mk.log" \
-	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" -u launcher=1 \
+	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" -u launcher=1 \
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/vc" -l 3 || fail "lv ($t/mk.log)"
 wait_for_log "$t/mk.log" "The world is up" 60 || fail "lv not up ($t/mk.log)"
 kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
@@ -135,13 +137,13 @@ cat > "$t/v.cmds" <<C
 wait_log_any 20000 , first lv
 delay 1500
 click Text "lv"
-wait_log 120000 load: the world is in
+wait_log 60000 load: the world is in
 delay 1500
 keypress Escape
-delay 1000
+wait_log 10000 pause: the menu shown
+delay 300
 click Button "Leave the game"
 wait_log 10000 what is left after leave_to_menu
-delay 1000
 quit
 C
 timeout 200 "$here/Build/bin/buildat" -o launch_ui=launch_menu -D "$d" -C "$t/vc1" \

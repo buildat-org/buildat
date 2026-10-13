@@ -343,6 +343,8 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		local description = edit:GetText()
 		close_dialog(root)
 		on_answer(accepted, description)
+		-- What a check waits for
+		log:info("The user " .. (accepted and "accepted " or "declined ") .. uri)
 	end
 
 	local accept = menu:add("Accept", function() answer(true) end)
@@ -387,6 +389,8 @@ function M.pick_export(accept, cb, dir, back, parts)
 	-- What had the focus, which has it again once the picker is gone
 	-- (uistack's pop focuses a plain element: the keys went nowhere)
 	back = back or magic.ui.focusElement
+	-- The checks wait for this line
+	log:info("The file picker at " .. dir)
 	local root = uistack.main:push({desc="file picker"})
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "ui_utils/res/style.xml")
@@ -421,6 +425,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 		end
 		pcall(function() back:SetFocus(true) end)
 		if not name then
+			log:info("The file picker closed; nothing picked")
 			return cb(nil, "no file picked")
 		end
 		local data, why
@@ -1033,6 +1038,8 @@ function M.remember_server(uri, sha)
 		e.icon = sha
 	end
 	save_store(entries)
+	-- What a check waits for: the row is in the file
+	log:info("network: the server " .. uri .. " remembered")
 	return true
 end
 

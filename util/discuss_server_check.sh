@@ -57,20 +57,23 @@ cat > "$tmp/he/apps/hearth/starport.json" <<J
   "language": "no", "sexual": "no", "drugs": "no", "purchases": "no",
   "gambling": "no", "personal_data": "no"}}
 J
-Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
-	> "$tmp/he.log" 2>&1 &
-pids+=($!)
-for _ in $(seq 180); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
-grep -q "verified ok" "$tmp/sp.log" || fail "the Hearth was not listed ($tmp/he.log)"
-# The Starport's admin: the Hearth recommended, its listing claimed
+start_server "$tmp/he.log" "setup code" 120 $HE \
+	Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -l 3 ||
+	fail "the Hearth did not start (he.log)"
+pids+=($SERVER_PID)
+wait_for_log "$tmp/sp.log" "verified ok" 60 ||
+	fail "the Hearth was not listed ($tmp/he.log)"
+# The Starport's admin: the Hearth recommended, its listing claimed; the
+# claim, the script's third request, answered
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$tmp/he/apps/hearth/starport_claim.txt")
-printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+printf '%s\n' 'wait_log 30000 sp: {"id":3,' quit > "$tmp/cmds.txt"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false,\"recommended_hearth\":\"http://127.0.0.1:$HE\"}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/admin" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1 ||
+	fail "the Starport's admin drive ($tmp/admin.log)"
 # The Hearth's admin, an ID of its own by the setup code; and the reader's
 # session for the client
 read -r boss session < <(python3 - "$SP" "$id" <<'PY'
@@ -88,9 +91,11 @@ print(t["token"], r["session"])
 PY
 ) || fail "the ID API"
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/he.log" | tail -1 | cut -d' ' -f3)
+printf '%s\n' "wait_log_any 30000 Joined as" quit > "$tmp/boss.txt"
 BUILDAT_HEARTH_STARPORT=$boss BUILDAT_HEARTH_CODE=$setup timeout 90 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/boss" -w 800x600 -l 3 \
-	-o sound_mute=1 -s 127.0.0.1:$HE -c @"$tmp/cmds.txt" > "$tmp/boss.log" 2>&1
+	-o sound_mute=1 -s 127.0.0.1:$HE -c @"$tmp/boss.txt" > "$tmp/boss.log" 2>&1 ||
+	fail "the Hearth's admin drive ($tmp/boss.log)"
 grep -q "claimed the server with the setup code" "$tmp/he.log" ||
 	fail "the Hearth got no admin ($tmp/boss.log)"
 
@@ -110,10 +115,13 @@ EOF
 }
 client_dir "$tmp/cl" 1
 client_dir "$tmp/out" 0
-# luanti_client's dialog: Return through the address, name and password
-# fields joins; Escape, a scan of the pause menu; then the menu's second
-# last row, Discuss, and the ID's first-time "Use it". listed: the name
-# the launcher's serverlist cache has for the server, or none.
+wait_for_log "$tmp/lu.log" "Server for gameid" 60 ||
+	fail "the Luanti server did not start ($tmp/lu.log)"
+# luanti_client's dialog, made after its self-tests: Return through the
+# address, name and password fields joins (a few frames for the focus to
+# move between them); Escape, a scan of the pause menu; then the menu's
+# second last row, Discuss, and the ID's first-time "Use it". listed: the
+# name the launcher's serverlist cache has for the server, or none.
 pause() { # dir log listed extra_cmds...
 	local d=$1 log=$2 listed=$3
 	shift 3
@@ -123,11 +131,13 @@ pause() { # dir log listed extra_cmds...
 		printf '127.0.0.1:%s|%s|0|devtest\n' $LU "$listed" > "$d/extensions/serverlist/serverlist.csv"
 	fi
 	{
-		echo "delay 3000"
+		# A settle after the line: the screen it opens laid out
+		echo "wait_log_any 30000 world: self-test ok"; echo "delay 300"
 		for _ in 1 2 3; do echo "keypress Return"; echo "delay 400"; done
-		echo "delay 12000"
+		echo "wait_log_any 60000 voxel types have their own textures"
 		if [ -z "${OVERLAY:-}" ]; then
-			echo "keypress Escape"; echo "delay 1500"; echo "event scan"
+			echo "keypress Escape"; echo "wait_log 5000 pause: the menu shown"
+			echo "delay 300"; echo "event scan"
 		fi
 		for c in "$@"; do echo "$c"; done
 		echo "quit"
@@ -135,18 +145,29 @@ pause() { # dir log listed extra_cmds...
 	BUILDAT_LUANTI_ADDRESS=127.0.0.1:$LU BUILDAT_LUANTI_NAME=discusser \
 		BUILDAT_HEARTH_REQS="${HEARTH_REQS:-}" \
 		timeout 120 Build/bin/buildat -m luanti_client -D "$d" -w 800x600 -l 3 \
-		-o sound_mute=1 -c @"$tmp/c" > "$log" 2>&1
+		-o sound_mute=1 -c @"$tmp/c" > "$log" 2>&1 ||
+		fail "the drive ($log): $(grep -ao 'Command sequence failed.*' "$log" | head -1)"
 }
-DISCUSS=(
-	"mouse_pos 400 377" "mouse_click left"
-	"wait_log 30000 Connect succeeded (127.0.0.1:$HE)"
-	"delay 6000" "mouse_pos 330 326" "mouse_click left"
-	"delay 6000" "event scan")
+# Discuss, the Hearth joined, the ID's name asked the first time only;
+# then the page <page> and the scripted requests' answer (the first is
+# 1001), in either order
+discuss() { # first page
+	echo "mouse_pos 400 377"; echo "mouse_click left"
+	echo "wait_log 30000 Connect succeeded (127.0.0.1:$HE)"
+	if [ "$1" = 1 ]; then
+		# A settle after the line: the prompt laid out before the click
+		echo "wait_log 30000 ID name prompt"; echo "delay 300"
+		echo "mouse_pos 330 326"; echo "mouse_click left"
+	fi
+	echo "wait_log_any 30000 hearth: page $2"
+	echo 'wait_log_any 20000 hr: {"id":1001,'; echo "delay 500"; echo "event scan"
+}
 # No thread yet: the form, its title the listed name -- a control
 # character and a double space in it made one space -- and the address;
 # then a thread made as the form's Send would make it
 HEARTH_REQS="{\"cmd\":\"new_thread\",\"server\":true,\"subject\":\"server:127.0.0.1:$LU\",\"title\":\"Checked [127.0.0.1:$LU]\",\"body\":\"About it\",\"kind\":\"\"}" \
-	pause "$tmp/cl" "$tmp/cl1.log" $'Check \x01 Server' "${DISCUSS[@]}"
+	pause "$tmp/cl" "$tmp/cl1.log" $'Check \x01 Server' \
+	"$(discuss 1 "A thread about 127.0.0.1:$LU")"
 grep -aq 'text "Discuss (leave server)"' "$tmp/cl1.log" ||
 	fail "no Discuss in the pause menu ($tmp/cl1.log)"
 grep -aq "hr discuss: .*server:127.0.0.1:$LU" "$tmp/cl1.log" ||
@@ -160,7 +181,8 @@ echo "ok: Discuss with no thread opens the form, titled"
 # The thread made above is what the next Discuss opens (a request of
 # its own makes the Hearth say its pages)
 HEARTH_REQS='{"cmd":"me"}' \
-	pause "$tmp/cl" "$tmp/cl2.log" "Check Server" "${DISCUSS[@]}"
+	pause "$tmp/cl" "$tmp/cl2.log" "Check Server" \
+	"$(discuss 0 "Checked [127.0.0.1:$LU]")"
 grep -aq "hearth: page Checked \[127.0.0.1:$LU\]" "$tmp/cl2.log" ||
 	fail "the server's thread was not opened ($tmp/cl2.log)"
 grep -aq "hearth: page A thread about" "$tmp/cl2.log" && fail "the form again ($tmp/cl2.log)"
@@ -172,9 +194,12 @@ echo "ok: Discuss opens the server's thread"
 # choice opens
 HEARTH_REQS='{"cmd":"new_thread","game":true,"subject":"game:unknown:devtest","title":"devtest","body":"About it","kind":""}' \
 	OVERLAY=1 pause "$tmp/cl" "$tmp/cl5.log" "Check Server" \
-	"keypress F9" "delay 2500" "event scan" "mouse_pos 690 15" "mouse_click left" \
-	"wait_log 30000 Connect succeeded (127.0.0.1:$HE)" "delay 6000" \
-	"mouse_pos 300 98" "mouse_click left" "delay 3000"
+	"keypress F9" "wait_log 5000 trusted overlay shown" "delay 500" "event scan" \
+	"mouse_pos 690 15" "mouse_click left" \
+	"wait_log 30000 Connect succeeded (127.0.0.1:$HE)" \
+	"wait_log 30000 hearth: page What is it about?" "delay 300" \
+	"mouse_pos 300 98" "mouse_click left" 'wait_log_any 20000 hr: {"id":1001,' \
+	"wait_log 10000 hearth: page devtest"
 grep -aq "scan scan: mouse visible" "$tmp/cl5.log" ||
 	fail "the mouse is not free with the overlay open ($tmp/cl5.log)"
 grep -aq "hr discuss: .*game:unknown:devtest" "$tmp/cl5.log" ||

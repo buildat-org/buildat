@@ -31,14 +31,14 @@ creative_mode = false
 server_announce = false
 MT
 { cat "$me/camera.lua"; cat <<'LUA'
-core.register_on_joinplayer(function(player)
-	core.after(9, function()
-		core.show_formspec(player:get_player_name(), "broken",
-				"formspec_version[9]size[8,8]nosuchelement[1,1;2,2;x;y]"..
-				"image[a,b;c,d;nope.png]field[]")
-		core.log("action", "ext_error: the broken formspec is sent")
-	end)
-end)
+-- Asked for by chat once the client's world is up, not on a timer
+core.register_chatcommand("broken", {func = function(name)
+	core.show_formspec(name, "broken",
+			"formspec_version[9]size[8,8]nosuchelement[1,1;2,2;x;y]"..
+			"image[a,b;c,d;nope.png]field[]")
+	core.log("action", "ext_error: the broken formspec is sent")
+	return true
+end})
 LUA
 } > "$work/worldmods/camera/init.lua"
 printf 'name = camera\n' > "$work/worldmods/camera/mod.conf"
@@ -46,31 +46,44 @@ printf 'name = camera\n' > "$work/worldmods/camera/mod.conf"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
 check_allow "udp://127.0.0.1:$port"
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+srv=$!
 trap 'kill "$srv" 2>/dev/null' EXIT
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
+done
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "the Luanti server did not come up" >&2; exit 1; }
+# The formspec's error is logged as an E line before it is shown: the
+# drive's own doing. The 200 ms puts the typed command and its Return
+# in frames of their own; the 1.5 s is the notice drawn after its line.
 cat > "$out/cmds.txt" <<CMDS
+expect_error Failed to run
 wait_log 90000 voxel types have their own textures
-wait_log 60000 error shown
+keypress T
+wait_log 5000 chat: the line opened
+text /broken
+# the typed command in a frame of its own
+delay 200
+keypress Return
+wait_log 10000 error shown
 delay 1500
 screenshot $out/notice.png
-delay 500
+wait_log 20000 Wrote screenshot $out/notice.png
 quit
 CMDS
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 	BUILDAT_LUANTI_CONNECT=1 \
-	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1
+	timeout 180 "$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
+	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1 ||
+	{ echo "FAIL: the drive (see $out/extension_cli.log)"; exit 1; }
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
-shown=$(grep -a "error shown" "$out/extension_cli.log" | sed 's/.*error shown /error shown /' | head -2)
+# A poll: the server's exit
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
+shown=$(grep -av "command: \\|wait_log" "$out/extension_cli.log" | grep -a "error shown" | sed 's/.*error shown /error shown /' | head -2)
 echo "${shown:-no error was reported}"
 if echo "$shown" | grep -q "as a notice"; then
 	echo "PASS: the error under a session is a notice line"

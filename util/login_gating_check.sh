@@ -47,7 +47,7 @@ fail(){ echo "FAIL: $*"; exit 1; }
 # sets $srv and $code
 start(){
 	local d=$1 p=$2; shift 2
-	start_server "$t/$d.log" "STATUS Listening" 90 "$p" \
+	start_server "$t/$d.log" "STATUS Listening" 60 "$p" \
 		bin/buildat_server -m "../apps/$app" -D "$t/$d" -l 3 "$@" ||
 		fail "server did not listen"
 	srv=$SERVER_PID
@@ -61,11 +61,14 @@ start srv "$port"
 srv_log=$t/srv.log
 [ -n "$code" ] || fail "no setup code in the server log"
 
-# join <userdir> <NAME> <PASSWORD> <CREATE> <CODE>: one scripted client.
+# join <userdir> <NAME> <PASSWORD> <CREATE> <CODE> [<line>]: one scripted
+# client, until the server's answer (a line with "Joined as" by default,
+# "Login refused" for a refusal). Its status is not checked: the caller
+# reads the log and says what it lacks.
 join(){
-	printf 'delay 1500\nquit\n' > "$t/seq"
+	printf 'wait_log_any 15000 %s\nquit\n' "${6:-Joined as}" > "$t/seq"
 	env "${jp}_NAME=$2" "${jp}_PASSWORD=$3" "${jp}_CREATE=$4" "${jp}_CODE=$5" \
-		timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
+		timeout 30 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \
 		-w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" \
 		> "$t/$1.log" 2>&1
 	nolog "$t/$1.log"
@@ -78,7 +81,7 @@ echo "$c" | grep -qF "Joined as alice" ||
 $(echo "$c" | grep -iE 'login|join|refused' | tail -5)"
 
 # 1. a wrong password is refused as such, and the server counts it
-c1=$(join w1 alice wrongpass000 0 "")
+c1=$(join w1 alice wrongpass000 0 "" "Login refused")
 echo "$c1" | grep -qF 'Login refused: Wrong password' ||
 	fail "a wrong password was not refused as Wrong password
 $(echo "$c1" | grep -iE 'login|refused' | tail -5)"
@@ -88,7 +91,7 @@ nolog "$srv_log" | grep -q "failed: Wrong password" ||
 # 2. the accumulated failures lock the address's /24
 locked=0
 for i in $(seq 2 11); do
-	ci=$(join "w$i" alice wrongpass000 0 "")
+	ci=$(join "w$i" alice wrongpass000 0 "" "Login refused")
 	if echo "$ci" | grep -qF 'Login refused: Too many failed logins'; then
 		locked=1
 		break
@@ -111,7 +114,7 @@ BUILDAT_OWNER_TOKEN=check-owner-token start tok $((port+1)) -u launcher=1
 srv_log=$t/tok.log
 port=$((port+1))
 [ -n "$code" ] || fail "the token server has no setup code"
-c=$(join t1 bob rightpass123 1 "")
+c=$(join t1 bob rightpass123 1 "" "Login refused")
 echo "$c" | grep -qF 'Login refused: This server has no admin yet' ||
 	fail "a loopback client without the owner token was taken as local
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
@@ -121,16 +124,16 @@ sleep 2 # each counted failure makes the address wait (1, 2, 4 s)
 
 # 4. The other counted fail() paths of a new account: a wrong setup code,
 # and once the server has an admin, an invite code that does not exist
-c=$(join t2 bob rightpass123 1 WRONGCODE)
+c=$(join t2 bob rightpass123 1 WRONGCODE "Login refused")
 echo "$c" | grep -qF 'Login refused: Wrong setup code' ||
 	fail "a wrong setup code was not refused
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
-sleep 3
+sleep 3 # the second counted failure's wait
 c=$(join t3 bob rightpass123 1 "$code")
 echo "$c" | grep -qF "Joined as bob" ||
 	fail "the setup code did not make the admin
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
-c=$(join t4 carol rightpass123 1 NOSUCHINVITE)
+c=$(join t4 carol rightpass123 1 NOSUCHINVITE "Login refused")
 echo "$c" | grep -qF 'Login refused: No such invite code' ||
 	fail "a made-up invite code was not refused
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
@@ -160,17 +163,19 @@ echo "$c" | grep -qF "Joined as erin" || fail "the kept login's account
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 # rejoin <userdir>: the stored token only, as a client with no name set
 rejoin(){
-	timeout 40 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" -w 640x480 -u 1 \
+	printf 'wait_log_any 15000 %s\nquit\n' "${2:-Joined as}" > "$t/seq"
+	timeout 30 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" -w 640x480 -u 1 \
 		-l 3 -o sound_mute=1 -c @"$t/seq" > "$t/$1.re.log" 2>&1
 	nolog "$t/$1.re.log"
 }
 c=$(rejoin k1)
 echo "$c" | grep -qF "Joined as erin" || fail "the kept login did not log in
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
-c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 "")
+c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 "" \
+	"admin script: done")
 nolog "$srv_log" | grep -q "reset the password of erin" || fail "the reset
 $(echo "$c" | grep -iE 'login|joined|refused|admin' | tail -5)"
-c=$(rejoin k1)
+c=$(rejoin k1 "Login refused")
 echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
 	fail "a kept login outlived the password
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
@@ -200,7 +205,7 @@ PY
 port=$((port+1))
 start keep $port # the same save, the secret in it
 srv_log=$t/keep.log
-c=$(BUILDAT_JOIN_TOTP=$(totp 500000) join o1 erin otherpass123 0 "")
+c=$(BUILDAT_JOIN_TOTP=$(totp 500000) join o1 erin otherpass123 0 "" "Login refused")
 echo "$c" | grep -qF 'Login refused: TOTP: wrong code' ||
 	fail "a wrong TOTP code was not refused
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"

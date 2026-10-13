@@ -3588,7 +3588,11 @@ function close_room()
 	room_ui = {}
 	launch_overlay:Remove()
 	room_menu_button:Remove()
-	scene:SetDeepEnabled(false)
+	-- The Scene itself refuses SetEnabled (an error, and nothing changes):
+	-- its children are what go off
+	for i = scene:GetNumChildren() - 1, 0, -1 do
+		scene:GetChild(i):SetDeepEnabled(false)
+	end
 	magic.set_preferred_viewports({})
 	log:info("room: closed")
 end
@@ -4969,7 +4973,9 @@ for i = 1, #PAUSE_ITEMS do
 	pause_rows[i] = t
 	pause_buttons[i] = b
 	magic.SubscribeToEvent(b, "HoverBegin", function()
-		if pause_open then pause_pick(i) end
+		if not pause_open then return end
+		pause_pick(i)
+		log:info("pause: hover on " .. PAUSE_ITEMS[i][1])
 	end)
 	magic.SubscribeToEvent(b, "Released", function()
 		if not pause_open then return end

@@ -30,25 +30,28 @@ rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_RENDER_MODE=unlit \
 	BUILDAT_LUANTI_LUA="$me/dawn_light.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29786 \
+	start_server "$out/srv.log" "Mods loaded" 120 29786 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 shoot() { # <tag> <extra env>
 	local tag=$1
 	local cmds="$out/cmds_$tag.txt"
 	: > "$cmds"
-	echo "wait_log 180000 scene, 0 undrawn within 2" >> "$cmds"
+	echo "wait_log 60000 scene, 0 undrawn within 2" >> "$cmds"
+	# The first hour 25 s after the join, then one every 8 s
+	local first=40000
 	for h in $hours; do
-		echo "wait_log 180000 chat: dawn: hour $h" >> "$cmds"
+		echo "wait_log $first chat: dawn: hour $h" >> "$cmds"
+		first=15000
+		# simplified: a settle of 3 s, past the 2 s rule, for the light
+		# after the clock moves (below: 600 ms was measured short); a
+		# line from the client when a relight is done would replace it
 		echo "delay 3000" >> "$cmds"
 		echo "screenshot $out/${tag}_$h.png" >> "$cmds"
 	done
-	echo "delay 500" >> "$cmds"
 	echo "quit" >> "$cmds"
 	# **The meter settled rather than waited for** (2026-09-24): the
 	# adaptation runs on the frame's TimeStep, which the engine clamps
@@ -66,15 +69,18 @@ shoot() { # <tag> <extra env>
 	# stays.
 	# A run that has stopped logging is taken down rather than waited out
 	run_client 60 "$out/cli_$tag.log" env BUILDAT_VANILLA_ADAPT=1000000 $2 \
-		bin/buildat -s localhost:29786 -w 640x480 -l 3 -c @"$cmds"
+		timeout 180 bin/buildat -s localhost:29786 -w 640x480 -l 3 -c @"$cmds" ||
+		{ echo "FAIL: the drive ($out/cli_$tag.log): $(grep -a 'Command sequence failed\|run_client:' "$out/cli_$tag.log" | head -1)"; exit 1; }
 }
 # The fixture's clock starts on each join, so each client gets the whole
 # round of hours from the beginning
 shoot with "BUILDAT_LUANTI_NO_PREDAWN="
-sleep 3
+# The same name joins again: the server has let the first one go
+wait_for_log "$out/srv.log" "Player singleplayer left" 10 ||
+	{ echo "FAIL: the first client's player was not let go ($out/srv.log)"; exit 1; }
 shoot without "BUILDAT_LUANTI_NO_PREDAWN=1"
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 python3 - "$out" $hours <<'PY'
 import sys
 from PIL import Image

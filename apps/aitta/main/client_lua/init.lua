@@ -456,6 +456,8 @@ home = function()
 		end
 		-- Where the publish screen is ([AITTA_PUBLISH_UI])
 		button(page, "Back to the launcher", function() buildat.leave() end)
+		log:info("aitta: home, " .. (me.author ~= "" and "author " ..
+				me.author or "no author"))
 		if me.reviewer then
 			button(page, "Review releases", function() review_list() end)
 			button(page, "Reports", function() reports_page() end)

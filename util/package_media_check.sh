@@ -76,20 +76,21 @@ echo "ok: pack refuses a 300 px icon, a 64x32 one and a GIF"
 
 # 2.
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 A=http://127.0.0.1:$P
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+# Until the second request's answer (requests are numbered from 1)
+printf '%s\n' 'wait_log_any 20000 ai: {"id":2,' quit > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
 {\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0}}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1 || fail "the bind"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 for z in "$z1" "$z2"; do
 	"$b" aitta publish "$z" 127.0.0.1:$P > "$t/pub.out" 2>&1
@@ -132,22 +133,24 @@ echo "ok: listed with the hashes, served the same bytes by their type; the pages
 h=$(cat "$t/icon_hash")
 "$b" aitta install "$z1" "$t/u" > /dev/null 2>&1 || fail "install"
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
+# The settles after a line: the dialog, the rows' icons and the panel's
+# picture are drawn in the frames after it
 cat > "$t/cmds" <<C
-delay 4000
+wait_log_any 20000 launch_menu: 
 text minigame
-delay 1000
+wait_log 5000 rows for "minigame"
 event scan grid
 screenshot $t/grid.png
 keypress Escape
-delay 500
+wait_log 5000 rows in
 text apps from aitta
-delay 1000
+wait_log 5000 rows for "apps from aitta"
 keypress Return
 wait_log 10000 Asking the user about $A
 delay 1000
 keypress Return
-delay 4000
-delay 2000
+wait_log 20000 aitta status: 2 packages
+delay 1000
 event scan rows
 screenshot $t/rows.png
 click Button "tester/m2"
@@ -158,8 +161,7 @@ quit
 C
 BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 120 "$b" \
 	-m launch_menu -D "$t/u" -C "$t/cache" -w 1024x700 -l 3 -o sound_mute=1 -c @"$t/cmds" \
-	> "$t/cl.log" 2>&1
-grep -aq "Command sequence complete" "$t/cl.log" ||
+	> "$t/cl.log" 2>&1 ||
 	fail "the drive ($(grep -a "Command seq\|aitta\|Asking" "$t/cl.log" | tail -4))"
 ls "$t"/cache*/package_media/$h.png > /dev/null 2>&1 ||
 	fail "the installed app's icon not under the cache"
@@ -173,7 +175,7 @@ echo "ok: the grid's tile, the rows' icons and the panel's screenshot (see $t/{g
 # 4.
 reqs(){ # log requests...
 	local log=$1; shift
-	printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+	printf '%s\n' 'wait_log_any 20000 ai: {"id":1,' quit > "$t/reqs.cmds"
 	BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 		BUILDAT_AITTA_REQS="$(printf '%s\n' "$@")" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
@@ -254,33 +256,35 @@ echo "{\"starports\": [], \"aittas\": [\"$A\"]}" > "$t/dev/starport.json"
 now=$(date +%s)
 printf 'accepted,address,description,created,last_attempt,name,icon,server\n"true","%s","","%s","%s","","",""\n' \
 	"$A" $now $now > "$t/dev/network_addresses.csv"
+# The key page is drawn again once the Aitta says the key is bound; the
+# half second is the typed line drawn before the shot
 cat > "$t/dev.cmds" <<C
-delay 5000
+wait_log_any 20000 launch_menu: 
 text publish
-delay 1500
+wait_log 5000 rows for "publish"
 keypress Return
-delay 1500
+wait_log 10000 aitta publish: the package page
 event scan p1
 click Button "Next: key*"
-delay 3000
+wait_log 20000 aitta publish: the key page, The key is bound
 event scan p2
 click Button "The page on*"
-delay 1500
+wait_log 10000 aitta publish: the page of tester/m2
 click LineEdit "*"
 keypress End
 keypress Return
 text typed
+# The typed text drawn in the frames after, before the shot
 delay 500
 screenshot $t/dev_page.png
 click Button "Send"
-delay 3000
+wait_log 20000 aitta publish: the page of tester/m2, 
 event scan p3
 screenshot $t/dev_sent.png
 quit
 C
 timeout 120 "$b" -o launch_ui=launch_menu -D "$t/dev" -C "$t/dev_cache" -w 1024x700 -l 3 \
-	-o sound_mute=1 -c @"$t/dev.cmds" > "$t/dev.log" 2>&1
-grep -aq "Command sequence complete" "$t/dev.log" ||
+	-o sound_mute=1 -c @"$t/dev.cmds" > "$t/dev.log" 2>&1 ||
 	fail "the Developer drive ($(grep -a "Command seq" "$t/dev.log" | tail -2))"
 grep -aq 'scan p3: .*text "Sent: tester/m2"' "$t/dev.log" ||
 	fail "not sent: $(grep -a 'scan p3: .*Sent\|scan p3: .*Not sent' "$t/dev.log" | head -3)"

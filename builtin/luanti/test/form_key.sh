@@ -31,25 +31,28 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap "kill -INT $srv 2>/dev/null" EXIT
+# The 2 s after the settle: VoxeLibre's inventory formspec arrives a few
+# ticks after the join and nothing marks it on the client. The form's
+# field is focused, and its scan done, in the frames after "opened"
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
 wait_log 60000 scene, 0 undrawn within 2
 delay 2000
 keypress I
 text i
-delay 1500
-event scan
+wait_log 10000 opened
 delay 500
+event scan
 quit
 CMDS
 bin/buildat -s localhost:29785 -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
-sleep 2
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# A poll: the server's exit
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 edits=$(grep -a "scan scan: ui.*LineEdit" "$out/cli.log" | sed 's/.*text \("[^"]*"\).*/\1/')
 echo "fields: $edits"
 if [ -z "$edits" ]; then echo "FAIL: no form field on the screen"; exit 1; fi

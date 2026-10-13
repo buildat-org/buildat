@@ -36,13 +36,13 @@ run_one() {
 		echo "$settings"; } > "$out/fixture_$name.lua"
 	BUILDAT_LUANTI_GAME="${GAME:-devtest}" \
 		BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_LUA="$out/fixture_$name.lua" \
-		start_server "$out/srv_$name.log" "world kept" 300 29822 \
+		start_server "$out/srv_$name.log" "world kept" 60 29822 \
 		timeout 300 bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		{ echo "FAIL: the server did not start"; exit 1; }
-	check_pkill -INT buildat_server 2>/dev/null
-	for i in $(seq 1 60); do
-		check_pgrep buildat_server >/dev/null || break
-		sleep 1
+	kill -INT "$SERVER_PID" 2>/dev/null
+	for i in $(seq 1 300); do
+		kill -0 "$SERVER_PID" 2>/dev/null || break
+		sleep 0.2
 	done
 	sed -n 's/.*world kept \([0-9]*\) sections out and generated \([0-9]*\).*/\1 \2/p' \
 			"$out/srv_$name.log" | head -1

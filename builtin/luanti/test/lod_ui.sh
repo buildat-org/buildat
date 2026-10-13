@@ -45,9 +45,27 @@ def write(*cmds):
         out.write(c + "\n")
     out.flush()
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
+def size():
+    return len(open(log, "rb").read())
+# Until the client logs a line matching <text> (a regex) after byte
+# <since>, up to <secs>
+def until(text, since, secs=10):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if re.search(text, open(log, "rb").read()[since:].decode("utf-8", "replace")):
+            return True
+        time.sleep(0.2)
+    fail("no %r in %d s" % (text, secs))
+# The commands, then the line that says they were done
+def act(text, *cmds, secs=10):
+    p = size()
+    write(*cmds)
+    until(text, p, secs)
+# A scan comes after a step's line; the half second is the screen laid
+# out in the frames after it
 def scan(label):
     global seen
-    write("delay 800", "event scan " + label)
+    write("delay 500", "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 30:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -67,26 +85,23 @@ def find(els, word):
         if word.lower() in e[5].lower() and e[3] > 0:
             return e
     return None
-def click(e):
-    write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
-          "mouse_click left", "delay 300")
+def click(e, text, secs=10):
+    act(text, "mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2),
+        "mouse_click left", secs=secs)
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-time.sleep(8)
-write("text luanti sett")
+# Home drawn, then the search's own list
+until("rows in", 0, 30)
+act('rows for "luanti sett"', "text luanti sett")
 els = scan("a")
 if not els: fail("no menu scan")
 b = find(els, "Luanti settings")
 if not b: fail("no settings button; saw " + ", ".join(e[5] for e in els)[:300])
-click(b)
-# The game's server starts behind the row: scanned until its screen is up
-# A dropdown since [UI_DROPDOWN]: scanned until its screen is up
-row = None
-for i in range(20):
-    els = scan("b%d" % i)
-    row = els and find(els, "Distant terrain detail")
-    if row: break
-    time.sleep(2)
+# The game's server starts behind the row; its screen says when it is up
+click(b, "menu: the settings shown", 60)
+# A dropdown since [UI_DROPDOWN]
+els = scan("b")
+row = els and find(els, "Distant terrain detail")
 if not row:
     fail("no distant terrain row; saw " + ", ".join(e[5] for e in els or [])[:300])
 drops = [e for e in els[els.index(row):] if e[0] == "DropDownList"]
@@ -94,12 +109,17 @@ if not drops: fail("no distant terrain dropdown")
 # One Down from where it opens: "half" only when it opened on Full, which
 # an old install's stored half must ([LOD_FULL_DEFAULT]), and not the
 # default, so the pick proves something
-click(drops[0])
-write("keypress Down", "delay 300", "keypress Return", "delay 800")
-# The pick goes to the server, which writes the file
+# ui_utils's "dropdown_<n> open"
+click(drops[0], r"dropdown_\d+ open")
+# The list takes its focus on the frame it opens: the 300 ms is Down
+# landing before Return. The pick draws the screen again, the dropdown
+# gone with it rather than closed
+act("menu: the settings shown", "keypress Down", "delay 300", "keypress Return")
+# The pick goes to the server, which writes the file: read until it says
+# so or 10 s pass
 kept = ""
-for i in range(20):
-    time.sleep(1)
+for i in range(50):
+    time.sleep(0.2)
     try:
         kept = open(settings).read()
     except IOError:

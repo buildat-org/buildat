@@ -41,9 +41,14 @@ core.register_on_joinplayer(function(player)
 		player:set_look_horizontal(0)
 	end)
 	-- Again, in case the mapgen wrote over the first
-	core.after(5, lay)
+	core.after(5, function()
+		lay()
+		-- The drive waits for this line
+		core.chat_send_player(player:get_player_name(), "stairs: ready")
+	end)
 	core.after(14, function()
 		core.log("action", "stairs: second")
+		core.chat_send_player(player:get_player_name(), "stairs: second")
 		player:set_pos({x=0, y=199.5, z=-2})
 		player:set_look_horizontal(0)
 	end)
@@ -60,15 +65,17 @@ end)
 LUA
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" BUILDAT_LUANTI_SEED=5 \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 200 auto \
+	start_server "$out/srv.log" "Mods loaded" 120 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 port=$SERVER_PORT
-sleep 3
-srv=$(check_pgrep buildat_server | head -1)
-printf 'delay 9000\nkeydown W\ndelay 4000\nkeyup W\ndelay 3000\nkeydown D\ndelay 4000\nkeyup D\ndelay 500\nquit\n' > "$out/cmds.txt"
-timeout 120 bin/buildat -s "localhost:$port" -w 640x360 -o sound_mute=1 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+srv=$SERVER_PID
+# The 4 s holds are the walks; the fixture moves the player to the
+# second stair 9 s after "ready", past the first walk
+printf 'wait_log 120000 chat: stairs: ready\ndelay 1000\nkeydown W\ndelay 4000\nkeyup W\nwait_log 20000 chat: stairs: second\ndelay 1000\nkeydown D\ndelay 4000\nkeyup D\ndelay 500\nquit\n' > "$out/cmds.txt"
+timeout 180 bin/buildat -s "localhost:$port" -w 640x360 -o sound_mute=1 \
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive; see $out/cli.log"; exit 1; }
 # The highest y and the furthest along the walk: past the stair (3) and up
 # on it on the way is the pass. A stair that is a whole cube, or one turned
 # the wrong way, puts a step of a whole voxel in the way and the player

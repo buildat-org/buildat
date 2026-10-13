@@ -48,17 +48,20 @@ end)
 LUA
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29794 \
+	start_server "$out/srv.log" "Mods loaded" 120 29794 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
+# The client only has to be joined: it is held there, and ended as soon as
+# the server's fixture says it is done
 printf 'delay 60000\nquit\n' > "$out/cmds.txt"
 timeout 120 bin/buildat -s localhost:29794 -w 800x600 -l 3 \
 	-o sound_mute=1 -c @"$out/cmds.txt" > "$out/cli.log" 2>&1 &
 cli=$!
 for _i in $(seq 600); do
 	grep -aq 'fs_path: done' "$out/srv.log" && break
+	kill -0 "$cli" 2>/dev/null || break
 	sleep 0.1
 done
 kill "$cli" 2>/dev/null

@@ -72,6 +72,8 @@ local function close()
 	if window then
 		window:Remove()
 		window = nil
+		-- What a check waits for
+		log:info("pause: the menu closed")
 	end
 	accounts.close_page()
 	luanti.hold(nil)
@@ -150,7 +152,11 @@ local function worlds()
 			error("vanilla: could not load menu.lua: " .. tostring(err2))
 		end
 		menu.back = function()
-			later(function() luanti.hold(nil) end)
+			later(function()
+				luanti.hold(nil)
+				-- What a check waits for
+				log:info("pause: back in the game from the worlds")
+			end)
 		end
 	end)
 end
@@ -267,6 +273,8 @@ open = function()
 		-- The tab's way out, which also ends a kept login ([ACC_KEEP])
 		accounts.page_button(w, "Log out", accounts.logout)
 	end
+	-- What a check waits for
+	log:info("pause: the menu shown")
 end
 
 -- A click or a tap off the menu is Continue, and off an account page it

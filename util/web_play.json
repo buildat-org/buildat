@@ -1,6 +1,7 @@
 [
  ["nav", "${URL}index.html"],
- ["wait", 20000],
+ ["waitlog", "launch_menu: [0-9]+ rows in", 120],
+ ["wait", 1500],
  ["click", 812, 440],
  ["wait", 2000],
  ["click", 1100, 27],

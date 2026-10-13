@@ -40,7 +40,10 @@ BUILDAT_LUANTI_GAME=wsj BUILDAT_LUANTI_SAVE=wsj BUILDAT_LUANTI_LUA="$d/shared/fi
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/srv.cache" -l 3 ||
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-# join <n> <commands after the world is in>
+# join <n> <commands after the world is in>. The 5 s after the world is
+# in is the time a light from last session's slot would have to show; the
+# lamp's light is the server's answer to key 3, and the half second after
+# it the server's wield line
 join(){
 	printf "wait_log 120000 load: the world is in\ndelay 5000\n%s\ndelay 500\nquit\n" "$2" > "$t/$1.cmds"
 	run_client 60 "$t/$1.log" timeout 200 "$here/Build/bin/buildat" -C "$t/c" -D "$t/u" \
@@ -48,11 +51,11 @@ join(){
 	grep -aq "Command sequence complete" "$t/$1.log" || fail "join $1 ($t/$1.log)"
 }
 join 1 "keypress 3
-delay 2000"
+wait_log 10000 o self 14"
 grep -aq "wsj: wield 3 wsj:lamp" "$t/srv.log" || fail "join 1 not at slot 3 ($t/srv.log)"
 n=$(wc -l < "$t/srv.log")
 join 2 "keypress 3
-delay 2000"
+wait_log 10000 o self 14"
 got=$(tail -n +$((n + 1)) "$t/srv.log" | grep -ao "wsj: wield .*" | tr '\n' ';')
 echo "join 2, the server: $got"
 [ "$got" = "wsj: wield 1 ;wsj: wield 3 wsj:lamp;" ] || fail "join 2's slots ($t/srv.log)"

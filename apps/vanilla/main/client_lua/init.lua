@@ -2765,7 +2765,11 @@ function frame_peak.note(dt)
 		local w = voxelworld.counts()
 		local undrawn = voxelworld.undrawn_around(
 				buildat.Vector3(player.x, player.y, player.z), 2)
-		if w.to_mesh > 0 or undrawn > 0 or (frame_peak.settled_said or 0) == 0 then
+		-- **Settled is said with chunks in the scene** (2026-10-13): a
+		-- player placed before any arrived read "0 chunks, 0 undrawn",
+		-- and a check waiting for the world took that for it
+		if w.to_mesh > 0 or undrawn > 0 or
+				((frame_peak.settled_said or 0) == 0 and w.chunks > 0) then
 			frame_peak.settled_said = (w.to_mesh > 0 or undrawn > 0) and 0 or 1
 			log:info(string.format("settle: %d to mesh, %d chunks in scene, %d undrawn within 2",
 					w.to_mesh, w.chunks, undrawn))
@@ -3095,6 +3099,8 @@ local function open_chat()
 	chat_input.enabled = true
 	chat_input:SetText("")
 	chat_input:SetFocus(true)
+	-- What a check waits for, as luanti_client's
+	log:info("chat: the line opened")
 end
 
 local function send_chat()

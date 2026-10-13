@@ -19,17 +19,20 @@ which=${1:-both}
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a client or a server is already running"; exit 77
 fi
-# From the eye, 1.6 over the feet three nodes west, to each one's middle
+# From the eye, 1.6 over the feet three nodes west, to each one's middle.
+# The delays: the stage's objects, and each look, drawn in the frames
+# after; the 300 ms is the punch's hold
 cmds(){ # out-dir
-	echo "wait_log 240000 chat: objbox: ready"; echo "delay 3000"
+	echo "wait_log 120000 chat: objbox: ready"; echo "delay 2000"
 	local s
 	for s in "pig:3 -1.15 0" "item:3 -1.35 2" "dummy:3 -0.7 -2"; do
-		echo "look_dir ${s#*:}"; echo "delay 1500"
+		# a settle: first person is aimed at once, the view drawn after it
+		echo "look_dir ${s#*:}"; echo "delay 500"
 		echo "screenshot $1/${s%%:*}.png"
 	done
 	# Still on the stand-in: a punch lands on it
 	echo "mouse_down left"; echo "delay 300"; echo "mouse_up left"
-	echo "delay 1500"
+	echo "wait_log_any 10000 chat: objbox: dummy punched"
 	echo quit
 }
 failed=()
@@ -47,15 +50,17 @@ run_vanilla(){
 	cd "$here/Build"
 	BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 		BUILDAT_LUANTI_LUA="$me/objbox.lua" \
-		start_server "$o/srv.log" "Mods loaded" 400 29797 \
+		start_server "$o/srv.log" "Mods loaded" 180 29797 \
 		bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 		{ echo "FAIL: the server did not start"; exit 1; }
 	local srv=$SERVER_PID
 	cmds "$o" > "$o/cmds.txt"
 	timeout 240 bin/buildat -s localhost:29797 -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		failed+=("vanilla: the drive ($o/cli.log)")
 	kill -INT "$srv" 2>/dev/null
-	for _i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# The server's exit, polled
+	for _i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	shots vanilla "$o" "$o/srv.log"
 }
 
@@ -73,18 +78,21 @@ run_ext(){
 	( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 		--config "$o/luanti.conf" > "$o/luanti_srv.log" 2>&1 ) &
 	local srv=$!
-	for _i in $(seq 1 300); do
-		grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null && break
-		sleep 1
+	for _i in $(seq 1 600); do
+		grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null &&
+			port_taken $port && break
+		kill -0 $srv 2>/dev/null || break
+		sleep 0.2
 	done
-	sleep 3
 	cmds "$o" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ob \
 		BUILDAT_LUANTI_CONNECT=1 timeout 240 \
 		"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1
+		-o sound_mute=1 -c @"$o/cmds.txt" > "$o/cli.log" 2>&1 ||
+		failed+=("ext: the drive ($o/cli.log)")
 	kill "$srv" 2>/dev/null
-	for _i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+	# The server's exit, polled
+	for _i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 	shots ext "$o" "$o/luanti_srv.log"
 }
 

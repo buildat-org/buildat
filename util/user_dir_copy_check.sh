@@ -34,6 +34,8 @@ cp -a "$t/a" "$t/b"
 start_server "$t/b.log" "Listening at" 120 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/b" -l 3 || fail "the copy did not start"
 CHECK_PIDS+=($SERVER_PID)
+# The setup code's absence: nothing logs it, so a settle for the
+# accounts module's start
 sleep 2
 grep -aq "setup code" "$t/b.log" && fail "the copy has no admin ($t/b.log)"
 cmp -s "$t/a/apps/aitta/health_token.txt" "$t/b/apps/aitta/health_token.txt" ||

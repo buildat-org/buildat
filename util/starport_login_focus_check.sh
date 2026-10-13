@@ -38,10 +38,12 @@ J
 Build/bin/buildat_server -m apps/hearth -D "$tmp/he" -P $HE -l 3 \
 	> "$tmp/he.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 120); do
+for _ in $(seq 300); do
 	grep -q "setup code" "$tmp/sp.log" && grep -q "Listening at" "$tmp/he.log" && break
-	sleep 1
+	kill -0 "${pids[0]}" 2>/dev/null && kill -0 "${pids[1]}" 2>/dev/null || break
+	sleep 0.2
 done
+grep -q "setup code" "$tmp/sp.log" || fail "the Starport did not start ($tmp/sp.log)"
 grep -q "Listening at" "$tmp/he.log" || fail "the Hearth did not start ($tmp/he.log)"
 session=$(python3 - "$SP" <<'PY'
 import json, sys, time, urllib.request
@@ -57,8 +59,14 @@ join() { # dir cmds log
 	timeout 60 Build/bin/buildat -D "$1" -w 800x600 -l 3 -o sound_mute=1 \
 		-s 127.0.0.1:$HE -c @"$2" > "$3" 2>&1
 }
+# After the run's own verdict: a drive that failed otherwise
+drive_ok() { # log
+	grep -aq "Command sequence complete" "$1" ||
+		fail "the drive ($1): $(grep -a "Command sequence failed\|an error the drive" "$1" | tail -1)"
+}
 
-# Signed in: Return alone
+# Signed in: Return alone. The delays: the login dialog, drawn with the
+# hello's line, and the typed name laid out in the frames after
 mkdir -p "$tmp/in"
 cat > "$tmp/in/starport.json" <<EOF
 {"starports": ["http://127.0.0.1:$SP"],
@@ -66,10 +74,10 @@ cat > "$tmp/in/starport.json" <<EOF
 EOF
 cat > "$tmp/c1" <<C
 wait_log_any 30000 hello: Starport IDs
-delay 3000
+delay 1000
 screenshot $tmp/in.png
 keypress return
-delay 5000
+wait_log 10000 Asking the user about
 quit
 C
 join "$tmp/in" "$tmp/c1" "$tmp/in.log"
@@ -77,6 +85,7 @@ join "$tmp/in" "$tmp/c1" "$tmp/in.log"
 # first whether this server may have it
 grep -q "Asking the user about http://127.0.0.1:$SP" "$tmp/in.log" ||
 	fail "Return did not sign in with the ID ($tmp/in.log)"
+drive_ok "$tmp/in.log"
 echo "ok: signed in, Return signs in with the ID"
 
 # Signed out: Return signs nothing in, and typing goes to the name
@@ -84,18 +93,20 @@ mkdir -p "$tmp/out"
 printf '{"starports": ["http://127.0.0.1:%s"]}\n' $SP > "$tmp/out/starport.json"
 cat > "$tmp/c2" <<C
 wait_log_any 30000 hello: Starport IDs
-delay 3000
-text zqxname
 delay 1000
+text zqxname
+# the typed name drawn in the frames after it
+delay 500
 screenshot $tmp/out.png
 keypress return
-delay 2000
+wait_log_absent 2000 Asking the user about
 quit
 C
 join "$tmp/out" "$tmp/c2" "$tmp/out.log"
-grep -q "Asking the user about" "$tmp/out.log" &&
+grep -v " __app   : " "$tmp/out.log" | grep -q "Asking the user about" &&
 	fail "signed out, Return still signed in with an ID ($tmp/out.log)"
 [ -f "$tmp/out.png" ] || fail "no shot ($tmp/out.log)"
+drive_ok "$tmp/out.log"
 cp "$tmp/out.png" "$here/local/starport_login_focus_out.png" 2>/dev/null
 echo "ok: signed out, Return signs nothing in (typed name: local/starport_login_focus_out.png)"
 echo "PASS"

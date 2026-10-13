@@ -21,7 +21,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hearth_open_here; t=$CHECK_TMP
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -37,11 +37,13 @@ client(){ # log requests commands [env...]
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" \
 		-w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$P \
-		-c @"$t/cmds" > "$log" 2>&1
+		-c @"$t/cmds" > "$log" 2>&1 ||
+		fail "the drive $log: $(grep -a "Command sequence failed" "$log" | tail -1)"
 }
 pages(){ grep -a "hearth: page " "$1" | grep -av "command: \|wait_log: " |
 	sed 's/.*hearth: page //'; }
-Q='delay 6000\nquit\n'
+# The three requests answered
+Q='wait_log_any 20000 "id":1001,\nwait_log_any 20000 "id":1002,\nwait_log_any 20000 "id":1003,\nquit\n'
 
 client "$t/post.log" '{"cmd":"new_topic","name":"Help"}
 {"cmd":"new_thread","topic":1,"title":"Lamp flickers","body":"first","subject":"tester/pt 0123abcd"}
@@ -60,25 +62,29 @@ done
 echo "ok: the pages' links"
 
 # 2. Opened by the client
-open(){ # path: the pages drawn
-	client "$t/open.log" '{"cmd":"me"}' "delay 6000\nscreenshot $t/open${1//\//_}.png\nquit\n" \
+# Until the request is answered and the line the open ends on (its page,
+# or what it said) is logged; the half second after it is the page laid
+# out for the screenshot
+open(){ # path text: the pages drawn
+	client "$t/open.log" '{"cmd":"me"}' "wait_log_any 20000 \"id\":1001,\nwait_log_any 20000 $2\ndelay 500\nscreenshot $t/open${1//\//_}.png\nquit\n" \
 		BUILDAT_OPEN="$1"
 	grep -aq "Lua runtime error" "$t/open.log" && fail "a Lua error opening $1"
 	pages "$t/open.log" | tr '\n' '|'
 }
 has(){ echo "$1" | grep -q "$2" || fail "$3: $1"; }
-has "$(open /topic/1)" "|Help|$" "the topic"
-has "$(open /t/1)" "|Lamp flickers|$" "the thread"
-a=$(open /m/$M)
+has "$(open /topic/1 "hearth: page Help")" "|Help|$" "the topic"
+has "$(open /t/1 "hearth: page Lamp flickers")" "|Lamp flickers|$" "the thread"
+a=$(open /m/$M "hearth: action m$M ")
 has "$a" "|Lamp flickers|$" "the message's thread"
-grep -a "hearth: action m$M " "$t/open.log" | grep -aqv "command: " ||
+grep -a "hearth: action m$M " "$t/open.log" | grep -aqv "command: \|wait_log" ||
 	fail "the message not drawn"
-has "$(open /p/tester/pt)" "|tester/pt on this Hearth|$" "the package"
-has "$(open /u/admin)" "|admin|$" "the account"
-a=$(open /t/1x)
+has "$(open /p/tester/pt "hearth: page tester/pt on this Hearth")" \
+	"|tester/pt on this Hearth|$" "the package"
+has "$(open /u/admin "hearth: page admin")" "|admin|$" "the account"
+a=$(open /t/1x "not a place to open: /t/1x")
 echo "$a" | grep -q "Lamp" && fail "a bad shape opened: $a"
-grep -aq "not a place to open: /t/1x" "$t/open.log" || fail "a bad shape not said"
-a=$(open /t/99)
+grep -av "command: \|wait_log" "$t/open.log" | grep -aq "not a place to open: /t/1x" || fail "a bad shape not said"
+a=$(open /t/99 "no such thread")
 echo "$a" | grep -q "Lamp" && fail "a missing thread: $a"
 grep -a "hearth: said" "$t/open.log" | grep -aq "no such thread" ||
 	fail "a missing thread not said: $(grep -a 'hearth: said' "$t/open.log" | head -2)"

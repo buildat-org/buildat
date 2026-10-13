@@ -33,9 +33,10 @@ sum=$(md5sum < "$d/shared/vanilla/texture_packs/magenta/floor_stone.png" | cut -
 serve(){
 	local log=$1 kv rc; shift
 	for kv in "$@"; do export "$kv"; done
-	start_server "$log" "STATUS Listening" 180 auto "$here/Build/bin/buildat_server" \
+	start_server "$log" "STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 		-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3
 	rc=$?
+	CHECK_PIDS+=($SERVER_PID)
 	for kv in "$@"; do unset "${kv%%=*}"; done
 	[ $rc = 0 ] || fail "the server ($log)"
 }
@@ -44,14 +45,15 @@ stop(){ kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
 client(){
 	run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$3" \
 		-D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 1100x900 -u 1 -l 3 \
-		-o sound_mute=1 -c @"$2"
+		-o sound_mute=1 -c @"$2" ||
+		fail "the drive ($1: $(grep -a "Command sequence failed\|run_client:" "$1" | tail -1))"
 }
 # has_pack <cache>: the pack's picture somewhere in the client's cache
 has_pack(){
 	find "$1" -type f -size -2k -print0 2>/dev/null | xargs -0 -r md5sum |
 		grep -q "^$sum "
 }
-printf "wait_log 120000 vanilla client ready\nquit\n" > "$t/play.cmds"
+printf "wait_log 60000 vanilla client ready\nquit\n" > "$t/play.cmds"
 # The two worlds, made by a start each
 for w in w1 w2; do
 	serve "$t/$w.0.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=$w
@@ -60,11 +62,12 @@ for w in w1 w2; do
 done
 
 # 1
+# The delays: a settle after a line
 cat > "$t/1.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log_any 60000 menu: 2 saves
 delay 1000
 click Button "w1*"
-delay 500
+wait_log 10000 menu: the world w1 shown
 click Button "Texture pack..."
 wait_log 10000 menu: world texture pack of w1
 delay 500
@@ -73,16 +76,15 @@ wait_log 10000 magenta from the world's next start
 delay 500
 screenshot $t/1_chosen.png
 click Button "Remove"
-delay 500
+wait_log 5000 confirm dialog: Move magenta
 click Button "Remove"
 wait_log 10000 magenta is not removed: the texture pack of w1
 delay 500
 click Button "< back"
-delay 500
-click Button "w1*"
-delay 300
+# The list comes back with w1 still selected (a click on it would play it)
+wait_log 10000 menu: the world w1 shown
 click Button "Play"
-wait_log 120000 vanilla client ready
+wait_log 60000 vanilla client ready
 quit
 C
 serve "$t/m1.log"
@@ -105,10 +107,10 @@ echo "ok: w2 without it"
 
 # 3
 cat > "$t/3.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log_any 60000 menu: 2 saves
 delay 1000
 click Button "w1*"
-delay 500
+wait_log 10000 menu: the world w1 shown
 click Button "Texture pack..."
 wait_log 10000 menu: world texture pack of w1
 delay 500
@@ -116,16 +118,15 @@ click Button "( ) None*"
 wait_log 10000 No texture pack from the world's next start
 delay 500
 click Button "Remove"
-delay 500
+wait_log 5000 confirm dialog: Move magenta
 click Button "Remove"
 wait_log 10000 magenta moved to the trash
 delay 500
 click Button "< back"
-delay 500
-click Button "w1*"
-delay 300
+# The list comes back with w1 still selected (a click on it would play it)
+wait_log 10000 menu: the world w1 shown
 click Button "Play"
-wait_log 120000 vanilla client ready
+wait_log 60000 vanilla client ready
 quit
 C
 serve "$t/m3.log"
@@ -143,10 +144,10 @@ echo "ok: w1 back to None, magenta removed"
 # 4
 if curl -s -m 10 -o /dev/null https://content.luanti.org/api/packages/?limit=1; then
 	cat > "$t/4.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log_any 60000 menu: 2 saves
 delay 1000
 click Button "w1*"
-delay 500
+wait_log 10000 menu: the world w1 shown
 click Button "Texture pack..."
 wait_log 10000 menu: world texture pack of w1
 delay 500

@@ -27,15 +27,15 @@ for f in index.html buildat.js buildat.wasm; do ln -s "$here/web/$f" "$t/web/$f"
 head -c 45000000 /dev/urandom | base64 > "$t/web/buildat.data"
 cd "$here/Build"
 P=29584
-start_server "$t/srv.log" "STATUS Listening" 120 $P \
+start_server "$t/srv.log" "STATUS Listening" 60 $P \
 	bin/buildat_server -m ../apps/digger -D "$t/srv" -W "$t/web" -l 3 ||
 	fail "digger did not start"
 s=$SERVER_PID
 u=http://127.0.0.1:$P
-curl -s -H "Accept-Encoding: deflate" -o "$t/data" $u/buildat.data &
+curl -s -m 20 -H "Accept-Encoding: deflate" -o "$t/data" $u/buildat.data &
 c=$!
-sleep 0.05
-page=$(curl -s -o "$t/index" -w "%{time_total}" $u/index.html)
+sleep 0.05 # the data's request in first, as a page load's would be
+page=$(curl -s -m 20 -o "$t/index" -w "%{time_total}" $u/index.html)
 wait $c
 [ "$(stat -c %s "$t/data")" -gt 1000000 ] || fail "the data did not come"
 grep -q "<title>" "$t/index" || fail "the page did not come"

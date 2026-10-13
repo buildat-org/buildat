@@ -36,16 +36,24 @@ BUILDAT_LUANTI_LIST=http://127.0.0.1:9 \
 	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -P $PLAYSRV \
 	-l 3 > "$tmp/play.log" 2>&1 &
 pids+=($!)
+psrv=$!
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=127.0.0.1 \
 	-addext subjectAltName=IP:127.0.0.1 -keyout "$tmp/key.pem" \
 	-out "$tmp/cert.pem" 2> /dev/null || fail "openssl"
 python3 util/tls_proxy.py "$tmp/cert.pem" "$tmp/key.pem" \
 	"$PLAY:127.0.0.1:$PLAYSRV" "$ANTLS:127.0.0.1:$AN" > "$tmp/proxy.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 20); do grep -q "up" "$tmp/proxy.log" && break; sleep 0.5; done
-sleep 1
-for _ in $(seq 120); do
-	page=$(curl -sfk "https://127.0.0.1:$PLAY/") && break; sleep 1; done
+prx=$!
+for _ in $(seq 50); do
+	grep -q "up" "$tmp/proxy.log" && break
+	kill -0 $prx 2>/dev/null || fail "the TLS front ($tmp/proxy.log)"
+	sleep 0.2
+done
+for _ in $(seq 300); do
+	page=$(curl -sfk -m 5 "https://127.0.0.1:$PLAY/") && break
+	kill -0 $psrv 2>/dev/null || fail "the play server ($tmp/play.log)"
+	sleep 0.2
+done
 grep -q "var server = null;" <<< "$page" ||
 	fail "the page does not start on the launch menu ($tmp/play.log)"
 
@@ -54,7 +62,7 @@ grep -q "var server = null;" <<< "$page" ||
 mkdir -p "$tmp/sp/shared"
 cp "$tmp/cert.pem" "$tmp/sp/shared/check_ca.pem"
 BUILDAT_CA_FILE=$tmp/sp/shared/check_ca.pem \
-start_server "$tmp/sp.log" "setup code" 120 $SP \
+start_server "$tmp/sp.log" "setup code" 60 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
 	fail "the Starport did not start"
 pids+=($SERVER_PID)
@@ -75,9 +83,10 @@ J
 }
 listed hearth $AN "https://127.0.0.1:$ANTLS"
 listed aitta $AI ""
-for _ in $(seq 180); do
+for _ in $(seq 300); do
 	[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge 2 ] && break
-	sleep 1
+	kill -0 $SERVER_PID 2>/dev/null || fail "the Starport ($tmp/sp.log)"
+	sleep 0.2
 done
 [ "$(grep -c "verified ok" "$tmp/sp.log")" -ge 2 ] ||
 	fail "no two verified listings ($tmp/sp.log)"
@@ -88,11 +97,13 @@ for app in hearth aitta; do
 	reqs="$reqs
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}"
 done
-printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
+# Until the four requests are answered
+printf 'wait_log_any 30000 "id":4,\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="$reqs" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
+	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1 ||
+	fail "the Starport admin ($tmp/sp_admin.log)"
 list=$(curl -s -m 10 "localhost:$SP/api/v1/list")
 echo "$list" | grep -q "Play hearth" && echo "$list" | grep -q "Play aitta" ||
 	fail "the claims ($tmp/sp_admin.log)"
@@ -105,12 +116,15 @@ r = json.loads(urllib.request.urlopen(B + "register", json.dumps(dict(
 assert r["ok"], r
 PY
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/hearth.log" | tail -1 | cut -d' ' -f3)
+printf 'wait_log_any 30000 Joined as admin\nquit\n' > "$tmp/cmds_admin.txt"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup timeout 90 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
-	-c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
-grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin.log)"
+	-c @"$tmp/cmds_admin.txt" > "$tmp/admin.log" 2>&1
+grep -v "command: \|wait_log" "$tmp/admin.log" | grep -q "Joined as admin" || fail "the admin's join ($tmp/admin.log)"
 
+# simplified: web_play.json waits for Home, then goes by time between its
+# clicks at fixed places; a waitlog for each screen once each has its line
 WEB_DRIVE_INSECURE=1 WEB_DRIVE_URL="https://127.0.0.1:$PLAY/" \
 	"$here/util/web_drive.sh" firefox hearth \
 	"${1:-$here/util/web_play.json}" "$tmp/drive" > "$tmp/drive.txt" 2>&1 ||

@@ -273,6 +273,7 @@ return function(o)
 		if slot then
 			f.ui = true
 			o.set_wield(slot)
+			log:info("touch: hotbar slot " .. slot)
 			return
 		end
 		local w, h = screen()

@@ -32,28 +32,37 @@ CHECK_PIDS+=($SERVER_PID)
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
-CHECK_PIDS+=($!)
-sleep 1
+ns=$!
+CHECK_PIDS+=($ns)
+for i in $(seq 50); do
+	grep -aq "netsim: listening" "$t/netsim.log" && break
+	kill -0 $ns 2>/dev/null || fail "netsim ($t/netsim.log)"
+	sleep 0.2
+done
 {
-	echo "wait_log 180000 load: Waiting for the server"
-	echo "wait_log 60000 load: Leave offered"
-	echo "wait_log 300000 load: the world is in"; echo "delay 2000"
+	# VoxeLibre's 67 MB of files take about 230 s at this rate, then the
+	# world's first 5 MB and the stop. There is no Leave to wait for since
+	# [LOADING_STRIPES]. The 2 s is a settle: the scene's line with chunks.
+	echo "wait_log 330000 load: Waiting for the server"
+	echo "wait_log 120000 load: the world is in"; echo "delay 2000"
 	echo quit
 } > "$t/cmds"
 L=$t/client.log
 # The server stopped after the line's fifth megabyte count, for 25 s
 (
-	for i in $(seq 1 300); do
+	for i in $(seq 1 1500); do
 		[ "$(grep -ac "load: Loading the world.* MB" "$L" 2>/dev/null)" -ge 5 ] && break
-		sleep 1
+		sleep 0.2
 	done
 	kill -STOP $SERVER_PID; date +%s.%N > "$t/stopped"
+	# A timing test: the server silent for 25 s, which the line must say
 	sleep 25
 	kill -CONT $SERVER_PID; date +%s.%N > "$t/continued"
 ) &
 CHECK_PIDS+=($!)
 run_client 60 "$L" timeout 400 "$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" \
-	-s "127.0.0.1:$LINK" -w 800x450 -l 3 -o sound_mute=1 -c @"$t/cmds"
+	-s "127.0.0.1:$LINK" -w 800x450 -l 3 -o sound_mute=1 -c @"$t/cmds" ||
+	fail "the client ($L): $(grep -a "Command sequence failed\|run_client:" "$L" | tail -1)"
 grep -a "vanilla : load: " "$L" | sed 's/.*load: /load: /' | sed -n '1,3p;$p'
 [ -f "$t/stopped" ] || fail "the line never showed five megabyte counts ($L)"
 python3 - "$L" "$(cat "$t/stopped")" <<'PY' || fail "the line ($L)"

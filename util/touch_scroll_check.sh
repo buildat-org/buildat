@@ -48,6 +48,8 @@ end)
 L
 # Window pixels at 800x600 and scale 2: the slider's knob at (60, 233),
 # the gap between Row 1 and Row 2 at y 338, Row 3 at y 450
+# The delays in a drag are the finger's own timing; the second after it
+# is the view coming to rest, which logs nothing. Each P waits for its line.
 drag(){ # x0 y0 x1 y1: down, five moves, up
 	echo "finger_down 1 $1 $2"
 	echo "delay 100"
@@ -58,20 +60,24 @@ drag(){ # x0 y0 x1 y1: down, five moves, up
 	echo "finger_up 1"
 	echo "delay 1000"
 	echo "keypress P"
+	echo "wait_log 5000 tsdrag: at "
 }
-open="wait_log 60000 tsdrag: ready
-delay 1000
+# The half seconds: the launch's screen settling before the key, and the
+# window laid out in the frames after its line
+open="wait_log_any 30000 tsdrag: ready
+delay 500
 keypress O
 wait_log 5000 Game settings shown
-delay 1000
-keypress P"
+delay 500
+keypress P
+wait_log 5000 tsdrag: at "
 run(){ # name, the sequence after the window is open
 	printf '%s\n%s\nquit\n' "$open" "$2" > "$t/$1.cmds"
-	(cd "$here/Build" && timeout 120 bin/buildat -o launch_ui=launch_menu \
+	(cd "$here/Build" && timeout 60 bin/buildat -o launch_ui=launch_menu \
 		-w 800x600 -u 2 -l 3 -o sound_mute=1 -C "$t/c" -D "$t/u" \
-		-a dev/tsdrag/play -c @"$t/$1.cmds") > "$t/$1.log" 2>&1
-	grep -a "Command sequence failed" "$t/$1.log" && fail "$1: the drive ($t/$1.log)"
-	grep -a "tsdrag: \(at\|pressed\)" "$t/$1.log" | sed 's/.*tsdrag: //' > "$t/$1.out"
+		-a dev/tsdrag/play -c @"$t/$1.cmds") > "$t/$1.log" 2>&1 ||
+		fail "$1: the drive ($t/$1.log): $(grep -ao 'Command sequence failed.*' "$t/$1.log" | head -1)"
+	grep -a "tsdrag: \(at\|pressed\)" "$t/$1.log" | grep -v wait_log | sed 's/.*tsdrag: //' > "$t/$1.out"
 }
 # A drag begun on Row 3, 200 px up
 run button "$(drag 375 450 375 250)"
@@ -84,8 +90,9 @@ echo "ok: a drag begun on a button scrolls ($start to $end) and presses nothing"
 # A tap on Row 3, then the slider's knob dragged right and up, then a drag
 # begun between Row 1 and Row 2
 run rest "tap 375 450
-delay 800
+wait_log 5000 tsdrag: pressed
 keypress P
+wait_log 5000 tsdrag: at 
 $(drag 60 233 400 133)
 $(drag 375 338 375 138)"
 sed -n 2p "$t/rest.out" | grep -q "^pressed 3$" || fail "the tap: $(cat "$t/rest.out")"

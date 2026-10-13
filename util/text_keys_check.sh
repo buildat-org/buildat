@@ -41,8 +41,10 @@ want(){ # log label x,y expected
 }
 ctrl(){ echo "keydown ctrl\nkeypress $1\nkeyup ctrl\ndelay 200\n"; }
 
-# 1. Single-line
-s='wait_log_any 20000 launch_menu: \ndelay 1500\ntext join a buildat\ndelay 500\nkeypress Return\ndelay 1500\n'
+# 1. Single-line. The 200-300 ms delays are settles: the field drawn after
+# a key, a click or the screen's line; the 1 s before the triple click
+# keeps it from being read as the double click's third
+s='wait_log_any 20000 rows in\ndelay 300\ntext join a buildat\nwait_log 5000 rows for "join a buildat"\nkeypress Return\nwait_log 5000 Join a Buildat server: shown\ndelay 300\n'
 s+="$(ctrl A)event scan s1\ntext hello wörld foo_bar, baz\ndelay 200\n$(ctrl Left)event scan s2\n"
 s+="$(ctrl Left)keydown shift\n$(ctrl Right)keyup shift\nevent scan s3\n"
 s+='keypress End\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan s4\n'
@@ -90,14 +92,14 @@ hearth(){ # log requests commands [env...]
 	env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
-		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" \
+		timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/cl" \
 		-w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$SERVER_PORT \
 		-c @"$t/hearth.cmds" > "$log" 2>&1
 }
 hearth "$t/setup.log" '{"cmd":"new_topic","name":"Keys"}
-{"cmd":"new_thread","topic":1,"title":"Keys","body":"first"}' 'delay 6000\nquit\n'
+{"cmd":"new_thread","topic":1,"title":"Keys","body":"first"}' 'wait_log_any 30000 "id":1002,"ok":\nquit\n'
 grep -aq '"id":1001,.*"ok":true' "$t/setup.log" || fail "the thread: $(grep -a 'hr: ' "$t/setup.log" | head -2)"
-m='wait_log 20000 accounts: ntfy asked\ndelay 1500\nkeypress Escape\ndelay 500\nmouse_pos 290 180\nmouse_click left\ndelay 200\ntext one two  x\nkeypress Backspace\nkeypress Return\ntext three four\ndelay 300\nevent scan m1\n'
+m='wait_log 20000 accounts: ntfy asked\nwait_log_any 10000 hearth: page Keys\ndelay 500\nkeypress Escape\ndelay 300\nmouse_pos 290 180\nmouse_click left\ndelay 200\ntext one two  x\nkeypress Backspace\nkeypress Return\ntext three four\ndelay 300\nevent scan m1\n'
 m+="$(ctrl A)event scan m2\nmouse_pos 290 201\ndelay 300\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan m3\n"
 m+='keypress Home\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan m4\n'
 m+="$(ctrl Z)event scan m5\n"

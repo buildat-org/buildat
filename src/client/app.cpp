@@ -3258,14 +3258,11 @@ struct CApp: public App, public magic::Application
 			// The sequence's own failure line is not a new one
 			if(line.find("Command sequence failed") != ss_::npos)
 				continue;
+			// A declared text covers each line with it from then on: a
+			// provoked fault often logs the same error more than once
 			bool expected = false;
-			for(size_t i = 0; i < m_expected_errors.size(); i++){
-				if(line.find(m_expected_errors[i]) != ss_::npos){
-					m_expected_errors.erase(m_expected_errors.begin() + i);
-					expected = true;
-					break;
-				}
-			}
+			for(const ss_ &e : m_expected_errors)
+				expected = expected || line.find(e) != ss_::npos;
 			if(expected)
 				continue;
 			command_seq_fail("an error the drive did not expect: "+line);
@@ -3873,6 +3870,8 @@ struct CApp: public App, public magic::Application
 		bool maxed = !full && window_is_maximized(magic_graphics);
 		int w = event_data["Width"].GetInt();
 		int h = event_data["Height"].GetInt();
+		// What a check waits on after it resizes the window or the canvas
+		log_i(MODULE, "screen mode: %ix%i", w, h);
 		int desk_w = 0;
 		int desk_h = 0;
 		bool fills_desktop = desktop_size(&desk_w, &desk_h) &&

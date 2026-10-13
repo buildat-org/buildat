@@ -26,9 +26,14 @@ type wait_for_line > /dev/null 2>&1 || fail "no wait_for_line in util/package.sh
 # Busy outside the tree: a CPU loop named as Wine names the server,
 # orphaned the way Wine's processes are
 (exec -a 'Z:\stage\bin\buildat_server.exe' bash -c 'while :; do :; done' &)
-busy=$(pgrep -f 'buildat_server\.exe' | head -1)
+for i in $(seq 25); do
+	busy=$(pgrep -f 'buildat_server\.exe' | head -1)
+	[ -n "$busy" ] && break
+	sleep 0.2
+done
 [ -n "$busy" ] || fail "the busy loop did not start"
 : > "$t/busy.log"
+# The sleeps are the case itself: a server held up 35 s, a watchdog of 30
 sleep 45 & srv=$!
 (sleep 35; echo "Listening at any4:1" >> "$t/busy.log") &
 wait_for_line "$t/busy.log" $srv "Listening at" 60 > /dev/null 2>&1 ||

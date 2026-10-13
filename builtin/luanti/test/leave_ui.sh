@@ -17,7 +17,7 @@ tmp=$(mktemp -d "/tmp/buildat_leave_ui.XXXXXX")
 cd "$here/Build"
 # A server of an earlier run still shutting down would be read as this
 # run's; wait for it
-for i in $(seq 1 60); do check_pgrep buildat_server >/dev/null || break; sleep 1; done
+for i in $(seq 1 300); do check_pgrep buildat_server >/dev/null || break; sleep 0.2; done
 check_pgrep buildat_server >/dev/null && { echo "FAIL: a buildat_server is running" >&2; exit 2; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
@@ -42,8 +42,22 @@ def write(*cmds):
         w.write(c + "\n")
     w.flush()
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
+# The delays a scan and a click write are the frames after a step, for
+# what it did to be drawn; what a step is waited for is a log line
+def size():
+    return len(open(log, "rb").read())
+def waitlog(text, secs, since=0):
+    # A line with the text past byte <since> of the log
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text in open(log, "rb").read()[since:].decode("utf-8", "replace"):
+            return True
+        # A poll
+        time.sleep(0.2)
+    return False
 def scan(label):
     global seen
+    # A settle: the step before drawn in the frames after it
     write("delay 800", "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 40:
@@ -57,7 +71,8 @@ def scan(label):
                     els.append((m.group(1), int(m.group(2)), int(m.group(3)),
                                 int(m.group(4)), int(m.group(5)), m.group(6)))
             return els
-        time.sleep(0.3)
+        # A poll for the scan's last line
+        time.sleep(0.2)
     return None
 def find(els, word):
     for e in els:
@@ -65,6 +80,8 @@ def find(els, word):
             return e
     return None
 def click(e):
+    # The click's frames: the hover read before the press, and what it
+    # did drawn after
     write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
           "mouse_click left", "delay 600")
 def fail(why):
@@ -79,20 +96,26 @@ def open_worlds(tag):
     tiles = [e for e in els or [] if "voxelibre" in e[5].lower() and e[3] > 0]
     b = tiles and max(tiles, key=lambda e: e[2])
     if not b: fail("no VoxeLibre row (%s); saw %s" % (tag, ", ".join(e[5] for e in els or [])[:300]))
+    at = size()
     click(b)
-    for i in range(40):
-        time.sleep(1)
+    # The game's menu says when its list of saves has come
+    if not waitlog(" saves, ", 60, at):
+        fail("the game's menu never listed its worlds (%s)" % tag)
+    for i in range(10):
         els = scan("w%s%d" % (tag, i))
         if els and find(els, "which world?"):
             return els
     fail("the world screen did not come (%s); saw %s" % (tag, ", ".join(e[5] for e in els or [])[:300]))
-time.sleep(8)
+if not waitlog("launch_menu: ", 30):
+    fail("the menu never came up")
 els = open_worlds("a")
 if not server_up(): fail("no local server behind the world screen")
 b = find(els, "back to the launcher")
 if not b: fail("no back row")
+at = size()
 click(b)
-time.sleep(2)
+if not waitlog("launch_menu: back", 20, at):
+    fail("the back row never reached the menu")
 els = scan("back")
 if not (els and find(els, "Browse") and not find(els, "which world?")):
     fail("not back in the menu; saw " + ", ".join(e[5] for e in els or [])[:300])

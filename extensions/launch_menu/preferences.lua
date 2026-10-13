@@ -287,6 +287,8 @@ local function show_launch_uis(uis, now)
 	menu:add("Back", function()
 		uistack.main:pop(root)
 	end)
+	-- What a check waits for
+	log:info("Launch UIs shown")
 end
 
 function M.show()
@@ -393,6 +395,8 @@ function M.show()
 	menu:add("Back", function()
 		uistack.main:pop(root)
 	end)
+	-- What a check waits for
+	log:info("Engine settings shown")
 end
 
 -- **The keys** ([LAUNCH_MENU_V2] step 3): the client's own, the shared
@@ -565,6 +569,7 @@ local function key_page(parent, width, height, app_key, options)
 					magic.KEY_KP_ENTER or nil
 			line.text = "Press a key for \"" .. r.label ..
 					"\" (Escape leaves it)"
+			log:info(page.log .. ": " .. r.label .. " waits for a key")
 		end}
 	end
 	function page:key(key)

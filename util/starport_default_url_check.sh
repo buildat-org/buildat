@@ -50,18 +50,20 @@ start_server "$tmp/hearth.log" "setup code" 180 $AN \
 pids+=($SERVER_PID)
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/hearth.log" | tail -1 | cut -d' ' -f3)
 [ -n "$setup" ] || fail "Hearth did not start ($tmp/hearth.log)"
+# Time for an announce that must not happen
 sleep 3
 json=$tmp/an/apps/hearth/starport.json
 [ -e "$json" ] && fail "a starport.json with nobody asking for one"
 grep -q "Announcing to" "$tmp/hearth.log" && fail "announced with IDs off"
 echo "ok: IDs off and the page never opened, nothing announced"
 
-printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
+printf 'wait_log_any 20000 admin script: done\nwait_log_any 20000 hello: Starport IDs taken\nquit\n' > "$tmp/cmds.txt"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$setup \
 	BUILDAT_HEARTH_ADMIN="setting starport_ids anyone https://127.0.0.1:$ANTLS" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
+	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1 ||
+	fail "the admin's drive ($tmp/admin.log): $(grep -a "Command sequence failed" "$tmp/admin.log" | tail -1)"
 grep -q "Joined as admin" "$tmp/admin.log" || fail "the admin's join ($tmp/admin.log)"
 python3 - "$json" "$SP" "$ANTLS" <<'PY' || fail "starport.json ($json)"
 import json, sys
@@ -71,7 +73,8 @@ assert c["unlisted"] is True and c["ids"] == "anyone", c
 assert c["address"] == "https://127.0.0.1:" + sys.argv[3], c
 assert "name" not in c and "kind" not in c and "audience" not in c, c
 PY
-for _ in $(seq 120); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
+# A poll for the verification
+for _ in $(seq 300); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 0.2; done
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing ($tmp/sp.log)"
 read -r _ _ id _ < <(grep -v "^#" "$tmp/an/apps/hearth/starport_claim.txt")
 [ -n "$id" ] || fail "no listing id"
@@ -95,8 +98,9 @@ assert r["ok"], r
 print(r["result"]["token"])
 PY
 ) || fail "the ID API ($tmp/sp.log)"
+printf 'wait_log_any 20000 Joined as fromid\nquit\n' > "$tmp/id_cmds.txt"
 BUILDAT_HEARTH_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
-	-w 800x600 -l 3 -s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/id.log" 2>&1
+	-w 800x600 -l 3 -s 127.0.0.1:$AN -c @"$tmp/id_cmds.txt" > "$tmp/id.log" 2>&1
 grep -q "Joined as fromid" "$tmp/id.log" ||
 	fail "the ID did not join ($tmp/id.log, $tmp/hearth.log)"
 echo "ok: an ID joined"
@@ -104,7 +108,7 @@ echo "ok: an ID joined"
 # [SECURITY_RUN_2]: an announce naming Hearth's address from elsewhere never
 # verifies, and no token is made for it -- a web one to Hearth's origin
 # included
-python3 - "$SP" "$ANTLS" <<'PY' || fail "a look-alike listing's token ($tmp/sp.log)"
+python3 - "$SP" "$ANTLS" "$tmp/sp.log" <<'PY' || fail "a look-alike listing's token ($tmp/sp.log)"
 import json, sys, time, urllib.request, urllib.error
 B = "http://127.0.0.1:%s/api/v1/" % sys.argv[1]
 def call(w, **k):
@@ -115,7 +119,14 @@ def call(w, **k):
 a = call("announce", address="127.0.0.1", port=int(sys.argv[2]), tls=True,
         unlisted=True, login="both", access="starport")
 assert a.get("ok"), a
-time.sleep(5)
+# The Starport's try at verifying it, polled for: its line in the log
+seen = False
+for _ in range(100):
+    seen = "Listing %s " % a["id"] in open(sys.argv[3], errors="replace").read()
+    if seen:
+        break
+    time.sleep(0.2)
+assert seen, "the look-alike was never tried"
 s = call("id/login", name="defid", password="secret1")["result"]["session"]
 for k in ({}, {"web": True, "origin": "https://127.0.0.1:" + sys.argv[2]}):
     r = call("id/token", session=s, listing=a["id"], name="lookalike", **k)
@@ -131,11 +142,15 @@ import json, sys
 c = json.load(open(sys.argv[1])); c["enabled"] = False
 json.dump(c, open(sys.argv[1], "w"))
 PY
-sleep 2
+# Read again within two seconds
+wait_for_log "$tmp/hearth.log" "starport.json: not announced to any Starport" 10 ||
+	fail "\"enabled\": false not read ($tmp/hearth.log)"
+printf 'wait_log_any 20000 hello: Starport IDs not taken\nwait_log_any 20000 admin script: done\nwait_log_any 20000 hello: Starport IDs taken\nquit\n' > "$tmp/cmds2.txt"
 BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	BUILDAT_HEARTH_ADMIN="setting starport_ids anyone" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$AN -c @"$tmp/cmds.txt" > "$tmp/admin2.log" 2>&1
+	-s 127.0.0.1:$AN -c @"$tmp/cmds2.txt" > "$tmp/admin2.log" 2>&1 ||
+	fail "the admin's second drive ($tmp/admin2.log): $(grep -a "Command sequence failed" "$tmp/admin2.log" | tail -1)"
 grep -q "hello: Starport IDs not taken" "$tmp/admin2.log" ||
 	fail "\"enabled\": false did not read as IDs off ($tmp/admin2.log)"
 python3 - "$json" <<'PY' || fail "IDs on left Starport off ($json)"

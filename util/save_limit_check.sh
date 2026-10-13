@@ -195,7 +195,8 @@ grep -aEq "storage : max_disk_mb $limit: [0-9]+ MB written \(saves [0-9]+ MB, ga
 # The world list's Disk line: main:disk's limit is the option's MB
 printf 'wait_log 30000 menu: disk\ndelay 1500\nscreenshot %s\nquit\n' "$t/worlds.png" > "$t/w.cmds"
 timeout 90 bin/buildat -C "$t/cc" -D "$t/uc" -s 127.0.0.1:"$SERVER_PORT" \
-	-w 640x400 -u 1 -l 3 -o sound_mute=1 -c @"$t/w.cmds" > "$t/worlds.log" 2>&1
+	-w 640x400 -u 1 -l 3 -o sound_mute=1 -c @"$t/w.cmds" > "$t/worlds.log" 2>&1 ||
+	fail "the world list's drive ($t/worlds.log)"
 grep -aEq "menu: disk [0-9]+ of ${limit}000000$" "$t/worlds.log" ||
 	fail "main:disk: $(grep -a "menu: disk" "$t/worlds.log") ($t/worlds.log)"
 echo "ok: the start line says max_disk_mb $limit, and main:disk the same"
@@ -210,20 +211,25 @@ mport=$((29400 + RANDOM % 200))
 CHECK_PIDS+=($!)
 for i in $(seq 20); do curl -s -o /dev/null "http://127.0.0.1:$mport/big.zip" && break; sleep 0.5; done
 
+# The 300 ms: the text in the field before Return. The last delay keeps the
+# client on for the walk; the check's end stops it.
 cat > "$t/c.cmds" <<'C'
-wait_log 180000 limit_check: mark now
+wait_log 120000 limit_check: mark now
 delay 1000
 keypress T
-delay 700
+wait_log 5000 chat: the line opened
 text /mark
+# the typing taken in the frames before Return
 delay 300
 keypress Return
-delay 3000
+wait_log 10000 chat: marked
 keypress T
-delay 700
+wait_log 5000 chat: the line opened
 text /mark
+# the typing taken in the frames before Return
 delay 300
 keypress Return
+# on for the walk until the check's end stops it
 delay 1500000
 quit
 C
@@ -244,18 +250,30 @@ systemd-run --user --scope -q -p MemoryMax=200M true 2>/dev/null &&
 	cap="systemd-run --user --scope -q -p MemoryMax=3G -p MemorySwapMax=0"
 $cap timeout 1500 bin/buildat -C "$t/cc" -D "$t/uc" -s 127.0.0.1:"$SERVER_PORT" \
 	-w 640x400 -u 1 -l 3 -o sound_mute=1 -c @"$t/c.cmds" > "$t/client.log" 2>&1 &
-CHECK_PIDS+=($!)
-wait_for_log "$t/s.log" "limit_check: marked by" 180 || fail "no mark ($t/client.log)"
-wait_for_log "$t/s.log" "limit_check: the timer wrote" 400 || fail "no timer write ($t/s.log)"
+cpid=$!
+CHECK_PIDS+=($cpid)
+# A line in the server's log while the client walks: the walk stops with it
+walk_wait() # regex seconds
+{
+	local i
+	for i in $(seq $(($2 * 5))); do
+		grep -qaE "$1" "$t/s.log" && return 0
+		kill -0 $cpid 2>/dev/null || break
+		sleep 0.2
+	done
+	grep -qaE "$1" "$t/s.log"
+}
+walk_wait "limit_check: marked by" 150 || fail "no mark ($t/client.log)"
+walk_wait "limit_check: the timer wrote" 400 || fail "no timer write ($t/s.log, $t/client.log)"
 grep -a "limit_check: the timer wrote, hash now" "$t/s.log" | grep -q "now $(grep -a "limit_check: first hash" "$t/s.log" | sed 's/.*first hash //')$" &&
 	fail "the timer's node did not change the hash"
-wait_for_log "$t/s.log" "limit_check: poured" 400 || fail "no water ($t/s.log)"
+walk_wait "limit_check: poured" 400 || fail "no water ($t/s.log, $t/client.log)"
 grep -aq "limit_check: poured, floor:water_source floor:water_flowing" "$t/s.log" ||
 	fail "the water: $(grep -a "limit_check: poured" "$t/s.log")"
 echo "ok: a player's node, a timer's, and water flowing"
 
 # 3.
-wait_for_log "$t/s.log" "limit_check: done" 900 || fail "the walk did not end ($t/s.log)"
+walk_wait "limit_check: done" 900 || fail "the walk did not end ($t/s.log, $t/client.log)"
 grep -aq "storage : .* over the limit" "$t/s.log" || fail "never over ($t/s.log)"
 trims=$(grep -ac "main    : trimmed: [1-9]" "$t/s.log")
 [ "$trims" -ge 2 ] || fail "$trims trims ($t/s.log)"

@@ -21,7 +21,6 @@ cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
-{ echo "delay 2500"; echo "quit"; } > "$out/cmds.txt"
 names=""
 for f in "$here"/extensions/*/launch_ui.txt; do
 	[ -e "$f" ] || continue
@@ -33,11 +32,24 @@ for f in "$here"/extensions/*/launch_ui.txt; do
 done
 bad=0
 for n in $names; do
+	# Each UI's own line for being up; one not listed here gets the old
+	# 2.5 s. The 500 ms after it is for a raise in the frames after
+	case $n in
+		launch_console) ready="lines of the API document" ;;
+		launch_menu) ready="rows in" ;;
+		launch_menu_attract|launch_world) ready="the room hums" ;;
+		*) ready="" ;;
+	esac
+	if [ -n "$ready" ]; then
+		printf 'wait_log_any 30000 %s\ndelay 500\nquit\n' "$ready"
+	else
+		printf 'delay 2500\nquit\n'
+	fi > "$out/cmds.txt"
 	# **Under a timeout** (2026-09-24, twice in one hour): a client can
 	# hang in X11_ShowWindow waiting for the window manager to map its
 	# window, and a boot check that waits forever on the desk's weather
 	# reports nothing at all
-	timeout 90 bin/buildat -m "$n" -w 640x360 -l 3 \
+	timeout 60 bin/buildat -m "$n" -w 640x360 -l 3 \
 		-c @"$out/cmds.txt" > "$out/$n.log" 2>&1
 	why=""
 	grep -aq "Crash: SIG" "$out/$n.log" && why="crashed"
@@ -64,11 +76,15 @@ echo "$(echo "$names" | wc -w) launch UIs booted, $bad of them badly"
 # game's own screen (-a runs one launch action), presses Escape there (its
 # "< back to the launcher"), and asks the client to describe itself
 # afterwards -- a dead client answers nothing.
-{ echo "delay 25000"; echo "event scan 8 a"; echo "delay 1500"
+# The 1500 ms before Escape is also the time a second run of menu.lua
+# (below) would take to show; the 500 ms after Home are its rows drawn.
+{ echo "wait_log_any 60000 menu: ContentDB "; echo "event scan 8 a"
+	echo "delay 1500"
 	echo "keypress Escape"
-	echo "delay 6000"; echo "event scan 8 b"
-	echo "delay 2000"; echo "quit"; } > "$out/cmds_back.txt"
-timeout 180 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+	echo "wait_log 20000 launch_menu: back to Home"; echo "delay 500"
+	echo "event scan 8 b"; echo "quit"; } > "$out/cmds_back.txt"
+timeout 120 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb 	-w 1280x720 -l 3 -L "$out/back.log" -c @"$out/cmds_back.txt" 	> /dev/null 2>&1
+back_rc=$?
 # **A dead client is not a leave that did not work** ([CONTENTDB_SCAN]):
 # the scan below answers nothing when the client has taken a signal, and
 # the leave's own verdict then named the wrong fault
@@ -77,6 +93,8 @@ if grep -aq "Crash: SIG" "$out/back.log"; then
 	grep -a "Crash: SIG" -A 6 "$out/back.log" | head -8
 	exit 1
 fi
+[ "$back_rc" = 0 ] || fail "the leave's drive ($out/back.log):" \
+	"$(grep -a 'Command sequence failed' "$out/back.log" | head -1)"
 home=$(grep -ac "launch_menu: back to Home" "$out/back.log")
 lost=$(grep -ac "leave: no launcher to go back to" "$out/back.log")
 alive=$(grep -ac "scan b: ui" "$out/back.log")
@@ -108,14 +126,18 @@ fi
 # hands the menu back.
 # **The pointer goes to a corner first**: a row under the mouse takes the
 # selection as the menu appears (HoverBegin).
-{ echo "delay 600"; echo "mouse_pos 2 2"
-	echo "delay 4000"; echo "text developer c"; echo "delay 800"
-	echo "keypress Return"; echo "delay 2500"
-	echo "keypress Escape"; echo "delay 1500"; echo "quit"; } \
+# The 300 ms are the hover let go in the frames after the move.
+{ echo "wait_log_any 20000 rows in"; echo "mouse_pos 2 2"
+	echo "delay 300"; echo "text developer c"
+	echo "wait_log 5000 rows for \"developer c\""
+	echo "keypress Return"; echo "wait_log 10000 lines of the API document"
+	echo "keypress Escape"; echo "wait_log 5000 console: closed"; echo "quit"; } \
 	> "$out/cmds_console.txt"
 rm -f "$out/console.log"
-timeout 120 bin/buildat -m launch_menu -w 1024x640 -l 3 \
-	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1
+timeout 60 bin/buildat -m launch_menu -w 1024x640 -l 3 \
+	-L "$out/console.log" -c @"$out/cmds_console.txt" > /dev/null 2>&1 ||
+	fail "the console's drive ($out/console.log):" \
+		"$(grep -a 'Command sequence failed' "$out/console.log" | head -1)"
 copened=$(grep -ac "console: .* lines of the API document" "$out/console.log")
 cclosed=$(grep -ac "console: closed" "$out/console.log")
 echo "the menu's console opened $copened times, closed $cclosed"
@@ -135,32 +157,37 @@ fi
 # backtrace is on the screen rather than gone. That path reads the
 # launcher through the same lookup that had nothing in it for a
 # sandboxed launch UI, so it is worth driving beside the one above.
-{ echo "delay 40000"; echo "event scan 8 d"; echo "delay 3000"
-	echo "quit"; } > "$out/cmds_dead.txt"
+# The server is killed by this script, so the drop is the drive's own;
+# the 300 ms are the dialog drawn in the frames after its line
+{ echo "expect_error Disconnected from server"
+	echo "wait_log_any 60000 menu: ContentDB "
+	echo "wait_log 20000 dead server shown"; echo "delay 300"
+	echo "event scan 8 d"; echo "quit"; } > "$out/cmds_dead.txt"
 # **Last run's log is not this run's** (2026-09-24: the pid read out of
 # it was the run before's, so the kill took nothing and the assertion
 # failed on a server that was never touched)
 rm -f "$out/dead.log" "$out/dead_server.log"
-bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb \
+timeout 120 bin/buildat -o launch_ui=launch_menu -a app/vanilla/contentdb \
 	-w 1280x720 -l 3 -L "$out/dead.log" -c @"$out/cmds_dead.txt" \
 	> /dev/null 2>&1 &
 client=$!
 # The server the client started, by the pid it logged: pkill would take
 # any server on this desk with it
 srv=""
-for i in $(seq 1 40); do
+trap 'kill $client $srv 2>/dev/null' EXIT
+for i in $(seq 1 200); do
 	srv=$(grep -a "Started pid [0-9]*: .*buildat_server" "$out/dead.log" 2>/dev/null |
 		tail -1 | sed -n 's/.*Started pid \([0-9]*\):.*/\1/p')
 	[ -n "$srv" ] && break
-	sleep 1
+	kill -0 $client 2>/dev/null || break
+	sleep 0.2
 done
 if [ -n "$srv" ]; then
-	# Twenty seconds after it started is after the screen it serves is
-	# drawn and well before this sequence's own scan: what is being
-	# driven is a server that goes away under a client that is using
-	# it, not one that fails to start
-	sleep 20
-	kill -9 "$srv" 2>/dev/null
+	# Once the screen it serves is drawn: what is being driven is a
+	# server that goes away under a client that is using it, not one
+	# that fails to start
+	wait_for_log "$out/dead.log" "menu: ContentDB " 60 &&
+		kill -9 "$srv" 2>/dev/null
 fi
 wait "$client" 2>/dev/null
 said=$(grep -ac 'scan d: .*text "The server exited' "$out/dead.log")

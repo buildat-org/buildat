@@ -154,10 +154,11 @@ local nil_ok = pcall(cereal.binary_output, {}, {"object", {"a", {"array", "byte"
 log:info("lr: " .. hex(d) .. " " .. o.r.a .. o.r.b .. tostring(o.r.c) ..
 		o.after .. " " .. tostring(ok) .. " " .. n.r.a .. n.r.b .. n.r.c ..
 		n.after .. " " .. hex(w) .. " " .. bad .. " " .. tostring(nil_ok))
+log:info("record check: done")
 L
 	sed -i "s/OLD_HEX/$want_old/" "$app/main/client_lua/init.lua"
-	printf 'delay 3000\nquit\n' > "$t/cmds"
-	(cd "$here/Build" && BUILDAT_RUN=dev:lr timeout 60 bin/buildat \
+	printf 'wait_log_any 20000 record check: done\nquit\n' > "$t/cmds"
+	(cd "$here/Build" && BUILDAT_RUN=dev:lr timeout 40 bin/buildat \
 		-o launch_ui=launch_menu -D "$t/u" -w 640x480 -l 3 -o sound_mute=1 \
 		-c @"$t/cmds" > "$t/lua.log" 2>&1) || true
 	got=$(grep -aoP 'lr: \K.*' "$t/lua.log" | head -1)

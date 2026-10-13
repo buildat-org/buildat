@@ -18,32 +18,43 @@ check_tmp hearth_marks; t=$CHECK_TMP
 P=29885
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 $P \
+start_server "$t/srv.log" "setup code" 60 $P \
 	bin/buildat_server --sim-clock -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
+# Each request's answer, the admin script's end, the page (PAGE, Home
+# by default) and then UNTIL's lines; the second after the page's line is
+# its marks drawn, the sidebar's too, in the frames after it
 client(){ # name password log requests [env...]
 	# A request makes the client scripted, which logs its marks
-	local n=$1 pw=$2 log=$3 reqs=$4
+	local n=$1 pw=$2 log=$3 reqs=$4 i=0 w
 	[ -n "$reqs" ] || reqs='{"cmd":"me"}'
 	shift 4
-	printf 'delay %s\n%bquit\n' "${MS:-6000}" "${SHOT:+screenshot $SHOT\n}" \
-		> "$t/cmds_$n"
+	{ while IFS= read -r w; do
+			[ -n "$w" ] && i=$((i + 1)) && echo "wait_log_any 20000 \"id\":$((1000 + i)),"
+		done <<< "$reqs"
+		case "$*" in *BUILDAT_HEARTH_ADMIN=*)
+			echo "wait_log_any 20000 admin script: done";; esac
+		echo "wait_log_any 20000 hearth: page ${PAGE:-Hearth}"
+		echo "delay 1000"
+		printf '%b%bquit\n' "${SHOT:+screenshot $SHOT\n}" "${UNTIL:-}"
+	} > "$t/cmds_$n"
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" \
 		-w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$P \
-		-c @"$t/cmds_$n" > "$log" 2>&1
+		-c @"$t/cmds_$n" > "$log" 2>&1 ||
+		fail "the client $n ($log): $(grep -a "Command sequence failed" "$log" | tail -1)"
 }
 # has log "where key mark"...: each a "hearth: mark" line of that log
 has(){
 	local log=$1 m
 	shift
 	for m in "$@"; do
-		grep -aq "hearth: mark $m\$" "$log" ||
+		grep -av "command: \|wait_log" "$log" | grep -aq "hearth: mark $m\$" ||
 			fail "$(basename "$log"): no \"$m\" in: $(grep -ao 'hearth: mark .*' "$log" | sort -u | tr '\n' ';')"
 	done
 }
@@ -63,7 +74,8 @@ client admin checkpass12 "$t/a1.log" '{"cmd":"new_topic","name":"Main","about":"
 	"BUILDAT_HEARTH_ADMIN=add bob bobpass1234
 add carol carolpass1234"
 grep -aq 'hr: {"id":1002,"ok":true' "$t/a1.log" || fail "the topics"
-# bob a member, then the admin's thread a second later at least
+# bob a member, then the admin's thread a second later at least (the
+# second is the timestamps' own resolution)
 client bob bobpass1234 "$t/b0.log" ''
 sleep 1
 client admin checkpass12 "$t/a2.log" \
@@ -77,7 +89,7 @@ has "$t/b1.log" "side c1 medium main" "side c2 medium main" \
 [ "$(grep -ac 'hearth: mark page t1 medium main$' "$t/b1.log")" = 2 ] ||
 	fail "the thread is not in both Waiting and Latest"
 
-client bob bobpass1234 "$t/b2.log" '' BUILDAT_HEARTH_OPEN=1
+PAGE="In sub" client bob bobpass1234 "$t/b2.log" '' BUILDAT_HEARTH_OPEN=1
 has "$t/b2.log" "side c1 medium focus" "side c2 medium focus"
 client bob bobpass1234 "$t/b3.log" ''
 has "$t/b3.log" "page t1 medium focus" "page c1 medium focus"
@@ -91,16 +103,18 @@ has "$t/b5.log" "page t1 none focus" "side c1 none focus"
 client carol carolpass1234 "$t/c1.log" ''
 has "$t/c1.log" "page t1 none focus"
 
-# Live: bob on Home while the admin writes in Main
-MS=12000 client bob bobpass1234 "$t/b6.log" '' &
+# Live: bob on Home while the admin writes in Main, until both live marks
+UNTIL='wait_log_any 30000 hearth: mark page c1 medium main live\nwait_log_any 30000 hearth: mark side c1 medium main live\n' \
+	client bob bobpass1234 "$t/b6.log" '' &
 bpid=$!
 for _i in $(seq 100); do
-	grep -aq 'hearth: mark page c1' "$t/b6.log" 2>/dev/null && break
+	grep -av "command: \|wait_log" "$t/b6.log" 2>/dev/null |
+		grep -aq 'hearth: mark page c1' && break
 	sleep 0.1
 done
 client admin checkpass12 "$t/a3.log" \
 	'{"cmd":"new_thread","topic":1,"title":"In main","body":"again"}'
-wait $bpid
+wait $bpid || fail "bob's live client ($t/b6.log)"
 has "$t/b6.log" "page c1 medium main live" "side c1 medium main live"
 
 # Mark all read on Main: its thread and Sub's are read

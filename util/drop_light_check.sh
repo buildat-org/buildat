@@ -76,22 +76,26 @@ printf "load_mod_wield_light = false\nenable_damage = false\nmobs_spawn = false\
 	> "$d/apps/vanilla/saves/dl/luanti/world.mt"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=dl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 180 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 # The column under the player dug by hand, held: the second drop pops up
-# into the voxel dug a moment before
+# into the voxel dug a moment before. The 1.5 s is the dig's hold; the
+# first line comes after the world's start and the emerge, the others
+# 10 s apart (the fixture's phases).
 {
+	first=180000
 	for ph in noon night open; do
-		echo "wait_log 300000 chat: dl: dig $ph"; echo "mouse_down left"
+		echo "wait_log $first chat: dl: dig $ph"; echo "mouse_down left"
 		echo "delay 1500"; echo "mouse_up left"
+		first=20000
 	done
-	echo "wait_log 60000 chat: dl: done"; echo quit
+	echo "wait_log 20000 chat: dl: done"; echo quit
 } > "$t/cmds"
-run_client 60 "$t/client.log" timeout 400 "$here/Build/bin/buildat" \
+run_client 60 "$t/client.log" timeout 300 "$here/Build/bin/buildat" \
 	-C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 640x360 -u 1 -l 4 \
-	-o sound_mute=1 -c @"$t/cmds"
+	-o sound_mute=1 -c @"$t/cmds" || fail "the drive ($t/client.log)"
 grep -a "dl: " "$t/srv.log" | cut -c 30-
 python3 - "$t/client.log" <<'PY' || fail "the drops' light ($t/client.log)"
 import re, sys

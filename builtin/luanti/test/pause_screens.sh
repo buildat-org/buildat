@@ -43,52 +43,66 @@ printf 'name = camera\n' > "$work/worldmods/camera/mod.conf"
 port=30030
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
+sub=$!
+# Up: its line, then its port bound
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && port_taken $port && break
+	kill -0 $sub 2>/dev/null || break
+	sleep 0.2
 done
-sleep 3
 srv=$(pgrep -x luanti-refshots | head -1)
 [ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
 trap 'kill "$srv" 2>/dev/null' EXIT
 cat > "$out/cmds.txt" <<CMDS
 wait_log 90000 voxel types have their own textures
-delay 3000
+wait_log_any 60000 loading: the world is in
+delay 1000
 event scan
 screenshot $out/world.png
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
+delay 300
 event scan
 screenshot $out/pause.png
 CMDS
 # Where the pause menu's "Settings..." button is: the form is drawn under
 # the UI root rather than on the stack, so the scan cannot name it -- its
-# place in the form is fixed (size[6,6.9], the fifth row)
+# place in the form is fixed (size[6,6.9], the fifth row). The second
+# Escape is on the world (Settings... closed the pause menu before it
+# opened), which opens the pause menu again; "pause: " is either line, so
+# the wait holds whichever screen the first Escape left
 cat >> "$out/cmds.txt" <<CMDS
 mouse_pos 640 429
+# The cursor moved is read in the frame after, then the click
 delay 300
 mouse_click left
-delay 2000
+wait_log 5000 settings: the screen shown
+delay 300
 event scan
 screenshot $out/settings.png
 mouse_move 200 0
+# The window in which nothing must turn: the frames a turn would show in
 delay 800
 event scan
 keypress Escape
-delay 1000
+wait_log 5000 settings: closed
+delay 300
 keypress Escape
+wait_log 5000 pause:
+# A settle after the line: the screen drawn before the shot
 delay 1000
 screenshot $out/before_f11.png
 $(fullscreen_section "$out")
-delay 500
 quit
 CMDS
 BUILDAT_RENDER_MODE="${MODE:-unlit}" BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=cam \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/extension_cli.log" 2>&1 || {
+	echo "FAIL: the drive ($out/extension_cli.log): $(grep -a "Command sequence failed" "$out/extension_cli.log" | tail -1)"
+	exit 1; }
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep -a "scan [a-z]*: mouse\|scan [a-z]*: menu" "$out/extension_cli.log" | sed 's/.*: scan/scan/' | head -8
 # The verdict: the settings screen up, the cursor visible under it, and
 # the mouse moved while it is up turning nothing (the status row's yaw)

@@ -30,17 +30,25 @@ serve(){ # game save
 		fail "the $1 server ($t/$2.srv.log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
+# Five minutes: VoxeLibre's media through a 300 KB/s link, not a start
 printf "wait_log 300000 load: the world is in\nquit\n" > "$t/cmds"
 client(){ run_client 60 "$1" timeout 400 "$here/Build/bin/buildat" -C "$t/$2.c" \
-	-D "$t/$2.u" -w 800x450 -l 3 -o sound_mute=1 -s "$3" -c @"$t/cmds"; }
+	-D "$t/$2.u" -w 800x450 -l 3 -o sound_mute=1 -s "$3" -c @"$t/cmds" ||
+	fail "the $2 drive ($1): $(grep -ao 'Command sequence failed.*\|run_client: .*' "$1" | head -1)"; }
 
 # 1.
 serve mineclone2 vl
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
-CHECK_PIDS+=($!)
-sleep 1
+ns=$!
+CHECK_PIDS+=($ns)
+for _ in $(seq 50); do
+	grep -q "netsim: listening" "$t/netsim.log" && break
+	kill -0 $ns 2>/dev/null || fail "netsim exited ($t/netsim.log)"
+	sleep 0.2
+done
+grep -q "netsim: listening" "$t/netsim.log" || fail "netsim did not listen ($t/netsim.log)"
 client "$t/vl.log" vl "127.0.0.1:$LINK"
 grep -aq "load: the world is in" "$t/vl.log" || fail "VoxeLibre not loaded ($t/vl.log)"
 grep -a "vanilla : load: last" "$t/vl.log" | sed 's/.*load: last //' | uniq -c | cut -c1-120 | head -20

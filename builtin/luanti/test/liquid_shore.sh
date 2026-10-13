@@ -27,29 +27,34 @@ BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
+# simplified: the 2 s after the world settled are the sections the
+# server relit meshed again on the client; nothing logs the last of them
+# (the settle line is said once, and may have been before "ready"). The
+# old 8 s were not measured either; if the pool reads dark, a line where
+# the client takes a section's light is the event.
 shoot() { # <tag>
-	{ echo "wait_log 180000 chat: liquid_shore: ready"
+	{ echo "wait_log 150000 chat: liquid_shore: ready"
 		# And the client's own world drawn before the shot, not only the
 		# server's light settled
-		echo "wait_log 120000 scene, 0 undrawn within 2"
-		echo "delay 8000"
+		echo "wait_log_any 60000 scene, 0 undrawn within 2"
+		echo "delay 2000"
 		# Straight down: the flowing row under the eye, the pool just
-		# beyond it, both flat-on and both near
+		# beyond it, both flat-on and both near; the frames after the
+		# look draw it
 		echo "look 0 -89"
-		echo "delay 1500"
-		echo "screenshot $out/top_$1.png"
 		echo "delay 500"
+		echo "screenshot $out/top_$1.png"
 		echo "quit"; } > "$out/cmds_$1.txt"
 	bin/buildat -s localhost:29788 -w 1280x720 -l 3 \
-		-c @"$out/cmds_$1.txt" > "$out/cli_$1.log" 2>&1
+		-c @"$out/cmds_$1.txt" > "$out/cli_$1.log" 2>&1 ||
+		{ echo "FAIL: the drive ($out/cli_$1.log): $(grep -ao 'Command sequence failed.*' "$out/cli_$1.log" | head -1)"; exit 1; }
 }
 shoot level
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 python3 - "$out" <<'PY'
 import sys
 from PIL import Image

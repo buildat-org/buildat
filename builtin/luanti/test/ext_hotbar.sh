@@ -49,30 +49,38 @@ printf 'name = hotbar\n' > "$work/worldmods/hotbar/mod.conf"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
 check_allow "udp://127.0.0.1:$port"
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+srv=$!
 trap 'kill "$srv" 2>/dev/null' EXIT
+# "Server for gameid ... listening" is the server taking connections
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
+done
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "the Luanti server did not come up" >&2; exit 1; }
+# The row and the game's bar are said once each look, maybe before the
+# textures line. The 2 s after them are for the stacks the fixture puts
+# in 4 s after the join, which are only for the picture.
 cat > "$out/cmds.txt" <<CMDS
 wait_log 90000 voxel types have their own textures
-wait_log 60000 hotbar: 9 slots
-delay 4000
+wait_log_any 30000 hotbar: 9 slots
+wait_log_any 30000 hud image lowest:
+delay 2000
 screenshot $out/hotbar.png
-delay 500
+wait_log 20000 Wrote screenshot $out/hotbar.png
 quit
 CMDS
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=hb \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	echo "the drive stopped: $(grep -a "Command sequence failed" "$out/cli.log" | tail -1)" >&2
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 python3 - "$out" <<'PYIN'
 import re, sys
 out = sys.argv[1]

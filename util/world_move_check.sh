@@ -55,10 +55,11 @@ L
 serve(){
 	local log=$1 kv rc; shift
 	for kv in "$@"; do export "$kv"; done
-	start_server "$log" "STATUS Listening" 180 auto "$here/Build/bin/buildat_server" \
+	start_server "$log" "STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 		-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3 \
 		--max-disk-mb 300
 	rc=$?
+	CHECK_PIDS+=($SERVER_PID)
 	for kv in "$@"; do unset "${kv%%=*}"; done
 	[ $rc = 0 ] || fail "the server ($log)"
 }
@@ -67,14 +68,17 @@ stop(){ kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
 client(){
 	run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 		-D "$t/nu" -s 127.0.0.1:${3:-$SERVER_PORT} -w 1100x900 -u 1 -l 3 \
-		-o sound_mute=1 -c @"$2"
+		-o sound_mute=1 -c @"$2" ||
+		fail "the drive ($1: $(grep -a "Command sequence failed\|run_client:" "$1" | tail -1))"
 }
-chat(){ printf 'keypress T\ndelay 700\ntext %s\ndelay 300\nkeypress Return\nwait_log 20000 wm: %s\ndelay 500\n' "$1" "$2"; }
+# The delay after the text: the field has it before Return; the one after
+# the answer, the chat closed before the next T
+chat(){ printf 'keypress T\nwait_log 5000 chat: the line opened\ntext %s\ndelay 300\nkeypress Return\nwait_log 20000 wm: %s\ndelay 500\n' "$1" "$2"; }
 
 # 0
 serve "$t/0.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt \
 	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua"
-{ echo "wait_log 120000 wm: ready"; chat /mark marked; chat /look looked; echo quit; } > "$t/0.cmds"
+{ echo "wait_log 60000 wm: ready"; chat /mark marked; chat /look looked; echo quit; } > "$t/0.cmds"
 client "$t/0c.log" "$t/0.cmds"
 stop
 grep -aq "wm: at the mark floor:marker" "$t/0.log" || fail "no build in wt ($t/0.log)"
@@ -135,23 +139,29 @@ def patched(name, files, size):
 patched("room.zip", {"x/world.mt": "gameid = minimal\n"}, 4000000000)
 patched("less.zip", {"x/world.mt": "gameid = minimal\n" + "#" * 1000}, 17)
 PY
+# The half second after the picker's line: it takes no click in its first
+# frames, before its guard has seen it laid out
 imp(){ # imp <file> <what the log says after>
-	printf 'click Button "Import a world from a zip..."\ndelay 1500\nclick Button "%s"\nwait_log 60000 %s\ndelay 800\n' "$1" "$2"
+	printf 'click Button "Import a world from a zip..."\nwait_log 5000 The file picker at\ndelay 500\nclick Button "%s"\nwait_log 60000 %s\n' "$1" "$2"
 }
-ok(){ printf 'click Button "Ok"\ndelay 1500\n'; }
+# Ok on a dialog (a settle for it first) asks for the saves again
+ok(){ printf 'delay 500\nclick Button "Ok"\nwait_log 10000 saves, \n'; }
 serve "$t/1.log"
 {
-	echo "wait_log 60000 menu: 1 saves"; echo "delay 1000"
-	echo 'click Button "wt*"'; echo "delay 800"
-	echo 'click Button "Export..."'; echo "wait_log 60000 menu: Exported wt to"; echo "delay 500"; ok
-	imp wt.buildat.zip "menu: Imported wt_2"; echo "delay 1500"
+	echo "wait_log_any 60000 menu: 1 saves"; echo "delay 1000"
+	echo 'click Button "wt*"'; echo "wait_log 10000 menu: the world wt shown"
+	echo 'click Button "Export..."'; echo "wait_log 60000 menu: Exported wt to"; ok
+	# The import's news asks for the saves again
+	imp wt.buildat.zip "menu: Imported wt_2"; echo "wait_log 10000 saves, "
 	imp escape.zip "failed:"; ok
 	imp trigger.zip "failed:"; ok
 	imp room.zip "failed:"; ok
 	imp less.zip "failed:"; ok
 	imp leveldb.zip "failed:"; ok
 	imp lw.zip "menu: done; the world is up"
-	echo "delay 1000"; echo quit
+	# a settle after that line: the started world's first frames before
+	# the quit
+	echo "delay 1500"; echo quit
 } > "$t/1.cmds"
 client "$t/1c.log" "$t/1.cmds"
 stop
@@ -189,7 +199,7 @@ echo "ok: exported, imported as wt_2 alike; the bad zips refused with nothing ke
 # 2
 serve "$t/2.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt_2 \
 	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua"
-{ echo "wait_log 120000 wm: ready"; chat /look looked; echo quit; } > "$t/2.cmds"
+{ echo "wait_log 60000 wm: ready"; chat /look looked; echo quit; } > "$t/2.cmds"
 client "$t/2c.log" "$t/2.cmds"
 stop
 grep -aq "wm: at the mark floor:marker" "$t/2.log" || fail "no build in wt_2 ($t/2.log)"
@@ -200,20 +210,26 @@ head -c 10000000 /dev/urandom > "$t/blob"
 (cd "$t" && python3 -c 'import zipfile; z = zipfile.ZipFile("nu/exports/big.zip", "w"); z.write("blob", "big/blob")')
 serve "$t/3.log"
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+# A slow link; its --delay 0 is the link's latency, not a wait
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
 CHECK_PIDS+=($!)
-sleep 1
-printf 'wait_log 60000 menu: 3 saves\ndelay 1000\nclick Button "Import a world from a zip..."\ndelay 1500\nclick Button "big.zip"\nwait_log 30000 menu: import big.zip\ndelay 25000\nquit\n' > "$t/3a.cmds"
+# Its port, polled
+for _ in $(seq 50); do port_taken "$LINK" && break; sleep 0.2; done
+port_taken "$LINK" || fail "netsim did not listen ($t/netsim.log)"
+# The 25 s after the import began: it still under way over the slow link
+# while the second client asks, and then left half done. The picker's
+# half second as in imp
+printf 'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "Import a world from a zip..."\nwait_log 5000 The file picker at\ndelay 500\nclick Button "big.zip"\nwait_log 30000 menu: import big.zip\ndelay 25000\nquit\n' > "$t/3a.cmds"
 client "$t/3a.log" "$t/3a.cmds" "$LINK" &
 a=$!
 wait_for_log "$t/3.log" "Importing big.zip" 120 || fail "no import began ($t/3.log)"
-printf 'wait_log 60000 menu: 3 saves\ndelay 1000\nclick Button "wt*"\ndelay 800\nclick Button "Export..."\nwait_log 30000 Another transfer\ndelay 500\nquit\n' > "$t/3b.cmds"
+printf 'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "wt*"\nwait_log 10000 menu: the world wt\nclick Button "Export..."\nwait_log 30000 Another transfer\nquit\n' > "$t/3b.cmds"
 run_client 60 "$t/3b.log" timeout 120 "$here/Build/bin/buildat" -C "$t/nc2" \
 	-D "$t/nu2" -s 127.0.0.1:$SERVER_PORT -w 1100x900 -u 1 -l 3 -o sound_mute=1 -c @"$t/3b.cmds"
 grep -aq "menu: Another transfer is running: an import" "$t/3b.log" ||
 	fail "the second transfer was not refused ($t/3b.log)"
-wait $a
+wait $a || fail "the importing client's drive ($t/3a.log)"
 wait_for_log "$t/3.log" "The transfer's client left" 30 || fail "the leaving was not seen ($t/3.log)"
 grep -a "Importing big\|The transfer\|Another transfer" "$t/3.log" | cut -c 30- | head -5
 [ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left"

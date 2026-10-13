@@ -43,28 +43,36 @@ end)
 L
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=jw \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
 	--delay 0 --rate 2400 > "$t/netsim.log" 2>&1 &
-CHECK_PIDS+=($!)
-sleep 1
+ns=$!
+CHECK_PIDS+=($ns)
+for i in $(seq 50); do
+	grep -aq "netsim: listening" "$t/netsim.log" && break
+	kill -0 $ns 2>/dev/null || fail "netsim ($t/netsim.log)"
+	sleep 0.2
+done
 client(){ run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc$2" \
 	-D "$t/nu$2" -s "127.0.0.1:$3" -w 640x360 -l 3 -o sound_mute=1 -c @"$4"; }
 
-# 1
-printf "wait_log 120000 load: the world is in\ndelay 60000\nquit\n" > "$t/a.cmds"
+# 1. A's 60 s is staying in while B and C come (killed after them); B's
+# 2 s is the server's join after its world_in
+printf "wait_log 60000 load: the world is in\ndelay 60000\nquit\n" > "$t/a.cmds"
 client "$t/a.log" a "$SERVER_PORT" "$t/a.cmds" &
 a=$!
-wait_for_log "$t/srv.log" "jw: players \[." 120 || fail "A did not get in ($t/srv.log)"
-printf "wait_log 300000 load: the world is in\ndelay 3000\nquit\n" > "$t/b.cmds"
-client "$t/b.log" b "$LINK" "$t/b.cmds"
+wait_for_log "$t/srv.log" "jw: players \[." 60 || fail "A did not get in ($t/srv.log)"
+printf "wait_log 300000 load: the world is in\ndelay 2000\nquit\n" > "$t/b.cmds"
+client "$t/b.log" b "$LINK" "$t/b.cmds" || fail "B's run ($t/b.log)"
 # 2
 printf "wait_log 120000 the server put the player at\nquit\n" > "$t/c.cmds"
-client "$t/c.log" c "$LINK" "$t/c.cmds"
+client "$t/c.log" c "$LINK" "$t/c.cmds" || fail "C's run ($t/c.log)"
+# simplified: 3 s for the server to have taken C's leave; it logs nothing
+# for one never joined
 sleep 3
 kill $a 2>/dev/null; wait $a 2>/dev/null
 grep -a "main:world_in\|put in\|jw: players\|Player .* \(joined\|left\)" "$t/srv.log" | sed 's/.*\(main *: \|ACTION\[[^]]*\]: \)//' | cut -c 1-120
@@ -119,7 +127,8 @@ else
 		"$t/lc.png" > "$t/lc.cmds"
 	BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 BUILDAT_LUANTI_NAME=jwl \
 		run_client 60 "$t/lc.log" timeout 120 "$here/Build/bin/buildat" -m luanti_client \
-		-D "$t/lc" -w 640x360 -l 3 -o sound_mute=1 -c @"$t/lc.cmds"
+		-D "$t/lc" -w 640x360 -l 3 -o sound_mute=1 -c @"$t/lc.cmds" ||
+		fail "luanti_client's run ($t/lc.log)"
 	grep -a "luanti_c: loading done\|loading: the world is in" "$t/lc.log" | cut -c 12-
 	sed -n '/luanti_c: loading done/,$p' "$t/lc.log" |
 		grep -aq "loading: the world is in, drawn round the player" ||

@@ -42,8 +42,7 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 end)
 L
 cat > "$t/cmds" <<C
-delay 4000
-delay 1000
+wait_log_any 30000 sl: texture
 keypress Escape
 wait_log 10000 launch_menu: back to Home
 quit
@@ -69,14 +68,14 @@ grep -aq "sl: stored 1" "$t/b.log" || fail "the stored value not read back"
 echo "ok: run as dev:sl, the packet said once, the texture, stored and read back, left to Home"
 
 # 2. From an Aitta
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+printf 'wait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
@@ -89,9 +88,11 @@ zip=$("$b" aitta pack "$app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
 	fail "publish"
 echo "{\"aittas\": [\"http://127.0.0.1:$P\"], \"filters\": {\"unreviewed\": true}}" > "$t/managed.json"
 rm -rf "$t/u/dev_apps"
-# The network's question about the Aitta's address, said yes to
+# The network's question about the Aitta's address, said yes to. It is
+# asked before the drive starts; the delay, the dialog's guard taking no key
+# in its first frames
 cat > "$t/aitta.cmds" <<C
-wait_log 20000 Asking the user about http://127.0.0.1:$P
+wait_log_any 20000 Asking the user about http://127.0.0.1:$P
 delay 1500
 keypress Return
 wait_log 20000 sl: texture

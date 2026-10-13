@@ -59,6 +59,23 @@ core.register_chatcommand("look", {func = function(name)
 	look(0)
 	return true
 end})
+-- Until the strip's two far ends and the mark are not loaded any more:
+-- a loaded section is not trimmed
+core.register_chatcommand("unloaded", {func = function(name)
+	local at = {{x = -1090, y = 0, z = 0}, {x = 1090, y = 0, z = 0}, M}
+	local function poll(n)
+		for _, p in ipairs(at) do
+			if core.compare_block_status(p, "loaded") then
+				if n < 240 then return core.after(0.5, poll, n + 1) end
+				return core.chat_send_player(name, "wt: still loaded")
+			end
+		end
+		core.log("action", "wt: unloaded")
+		core.chat_send_player(name, "wt: unloaded")
+	end
+	poll(0)
+	return true
+end})
 L
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
@@ -66,20 +83,25 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-chat(){ printf 'keypress T\ndelay 700\ntext %s\ndelay 300\nkeypress Return\nwait_log 40000 wt: %s\ndelay 500\n' "$1" "$2"; }
-open_trim(){ printf 'keypress Escape\ndelay 1500\nclick Button "Worlds..."\nwait_log 10000 menu: the running world wt selected\ndelay 1500\nclick Button "Trim..."\nwait_log 10000 menu: trim \ndelay 800\n'; }
-trim(){ printf 'delay 300\nclick Button "Trim to this %s..."\nwait_log 30000 menu: trim asks\ndelay 800\nclick Button "Trim"\nwait_log 60000 sections forgotten;\ndelay 800\n' "$1"; }
+# The delays of 300 ms put typed text and the key or click after it in
+# frames of their own; the ones after a wait (up to 800 ms) are the page
+# or the dialog laid out after its line.
+chat(){ printf 'keypress T\nwait_log 5000 chat: the line opened\ntext %s\ndelay 300\nkeypress Return\nwait_log %s wt: %s\n' "$1" "${3:-20000}" "$2"; }
+open_trim(){ printf 'keypress Escape\nwait_log 5000 pause: the menu shown\nclick Button "Worlds..."\nwait_log 10000 menu: the world wt shown\ndelay 500\nclick Button "Trim..."\nwait_log 10000 menu: trim \ndelay 800\n'; }
+trim(){ printf 'delay 300\nclick Button "Trim to this %s..."\nwait_log 10000 menu: trim asks\ndelay 800\nclick Button "Trim"\nwait_log 60000 sections forgotten;\ndelay 800\n' "$1"; }
+# Out of the trim page to the list, and out of the list to the game
+leave(){ printf 'keypress Escape\nwait_log 5000 menu: the world wt shown\nkeypress Escape\nwait_log 5000 pause: back in the game from the worlds\n'; }
 client(){ run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 	-D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 1000x600 -u 1 -l 3 -o sound_mute=1 -c @"$2"; }
 # The strip's far ends unloaded before the trim: a loaded section is kept
 {
 	echo "wait_log 120000 wt: ready"; chat /mark marked; chat /look looked
-	echo "delay 40000"
+	chat /unloaded unloaded 130000
 	open_trim; printf 'click LineEdit "*"\ndelay 300\ntext 0\ndelay 300\n'; trim size
-	trim box; echo "screenshot $t/trim.png"
-	printf 'keypress Escape\ndelay 1000\nkeypress Escape\ndelay 1000\n'; chat /look looked; echo quit
+	trim box; echo "screenshot $t/trim.png"; echo "wait_log 20000 Wrote screenshot"
+	leave; chat /look looked; echo quit
 } > "$t/1.cmds"
-client "$t/1.log" "$t/1.cmds"
+client "$t/1.log" "$t/1.cmds" || fail "the first client's drive ($t/1.log)"
 grep -a "menu: trim\|wt: at\|trims wt" "$t/1.log" "$t/srv.log" | sed 's/.*\(menu: \|main *: \|wt: \)/\1/' | cut -c 1-200
 grep -a "trims wt:" "$t/srv.log" | head -1 | grep -aq ": [1-9][0-9]* sections forgotten" ||
 	fail "the size trim forgot nothing ($t/srv.log)"
@@ -105,13 +127,15 @@ c1=$(echo "$line" | awk -F' [|] ' '{ print $6 " " $7 " " $8 }')
 c2=$(echo "$line" | awk -F' [|] ' '{ print $9 " " $10 " " $11 }')
 [ -n "$c1" ] && [ -n "$c2" ] || fail "no box in: $line"
 edit(){ printf 'click LineEdit "%s"\ndelay 300\nkeypress End\n' "$1"; for _ in $(seq 30); do echo "keypress Backspace"; done; printf 'text %s\ndelay 300\n' "$2"; }
+# simplified: the 500 ms after the tick is for the box to be drawn
+# ticked, which logs nothing; a line in the tick's handler would do
 {
-	echo "wait_log 120000 wt: ready"; echo "delay 40000"
+	echo "wait_log 120000 wt: ready"; chat /unloaded unloaded 130000
 	open_trim; edit "$c1" "0 0 0"; edit "$c2" "1 1 1"
 	echo 'click Button "[ ] Also player builds outside"'; echo "delay 500"
-	trim box; printf 'keypress Escape\ndelay 1000\nkeypress Escape\ndelay 1000\n'; chat /look looked; echo quit
+	trim box; leave; chat /look looked; echo quit
 } > "$t/2.cmds"
-client "$t/2.log" "$t/2.cmds"
+client "$t/2.log" "$t/2.cmds" || fail "the second client's drive ($t/2.log)"
 grep -a "menu: trim asks\|wt: at\|trims wt" "$t/2.log" "$t/srv.log" | tail -3 | sed 's/.*\(menu: \|main *: \|wt: \)/\1/' | cut -c 1-200
 grep -a "menu: trim asks" "$t/2.log" | grep -aq "1 of them with player builds" ||
 	fail "the box with builds did not take the build ($t/2.log)"

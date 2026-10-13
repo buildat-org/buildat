@@ -21,9 +21,10 @@ app() { # name version
 	echo "return function(ctx) return {{id = \"play\", label = \"$1\"," \
 		"run = function() end}} end" > "$c/installed/someone/$1/$2/launcher/init.lua"
 }
+# Home's rows logged, then a second for them drawn
 start() { # name
-	printf 'delay 5000\nscreenshot %s\nquit\n' "$t/$1.png" > "$t/cmds"
-	(cd "$here" && timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$c" \
+	printf 'wait_log_any 20000 rows in\ndelay 1000\nscreenshot %s\nquit\n' "$t/$1.png" > "$t/cmds"
+	(cd "$here" && timeout 40 Build/bin/buildat -o launch_ui=launch_menu -D "$c" \
 		-w 1024x768 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/$1.log" 2>&1) ||
 		fail "$1: the client exited $? (see $t/$1.log)"
 }
@@ -37,7 +38,7 @@ grep -qx "installed/someone.old_app/play" "$c/launch_seen.csv" ||
 mkdir -p "$c/shared/vanilla/games/newgame/mods"
 start r2
 [ "$(history)" = "builtin/luanti/newgame " ] || fail "the game: $(history)"
-sleep 1; app new_app 1.0
+sleep 1; app new_app 1.0 # the history's times are seconds: a later one
 start r3
 [ "$(history)" = "installed/someone.new_app@1.0/play builtin/luanti/newgame " ] ||
 	fail "the app: $(history)"

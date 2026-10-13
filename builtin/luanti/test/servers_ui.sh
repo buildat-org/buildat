@@ -43,7 +43,8 @@ def write(*cmds):
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
 def scan(label):
     global seen
-    write("delay 800", "event scan " + label)
+    # A settle: what the last step changed drawn in the frames after
+    write("delay 300", "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -65,41 +66,68 @@ def find(els, word):
     return None
 def click(e):
     write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 150",
-          "mouse_click left", "delay 600")
+          "mouse_click left")
 def fail(why):
     print("FAIL (%s): %s" % (stage, why)); write("quit"); sys.exit(1)
-time.sleep(8)
+# The first of the texts in the log after what it held when the step was
+# sent (or anywhere in it)
+def wait_for(texts, secs, anywhere=False):
+    global seen
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        data = open(log, "rb").read()
+        for t in texts:
+            i = data.find(t.encode(), 0 if anywhere else seen)
+            if i >= 0:
+                seen = i + len(t)
+                return t
+        time.sleep(0.1)
+    fail("none of %r in %d s (%s)" % (texts, secs, log))
+def mark():
+    global seen
+    seen = len(open(log, "rb").read())
+# The menu up, or luanti_client's connect dialog, drawn right after its
+# self-tests
+wait_for(["rows in" if stage == "launch" else "world: self-test ok"], 30, True)
 els = scan("a")
 if not els: fail("no menu scan")
 if stage == "launch":
+    mark()
     write("text join a bu")
+    wait_for(['rows for "join a bu"'], 5)
     els = scan("a2")
     b = els and find(els, "Join a Buildat server")
     if not b: fail("no Join a Buildat server; saw " + ", ".join(e[5] for e in els)[:300])
+    mark()
     click(b)
+    wait_for(["Join a Buildat server: shown"], 10)
     els = scan("b")
     if not (els and find(els, "Servers used")): fail("no used list; saw " + ", ".join(e[5] for e in els or [])[:300])
-    write("screenshot " + out + "/launch_connect.png", "delay 500")
+    write("screenshot " + out + "/launch_connect.png")
+    wait_for(["Wrote screenshot " + out + "/launch_connect.png"], 10)
     print("PASS (launch)")
 else:
     b = find(els, "Official list")
     if not b: fail("no Official list button; saw " + ", ".join(e[5] for e in els)[:300])
+    mark()
     click(b)
-    time.sleep(1)
-    els = scan("c")
-    a = els and find(els, "Accept")
-    if a:
-        click(a)
-    for i in range(20):
-        time.sleep(1)
-        els = scan("d%d" % i)
-        if els and find(els, " servers"):
-            break
+    # The network permission asked for once a user path; the list's answer
+    # is a line either way
+    if wait_for(["Asking the user about", "the official list"], 10) != \
+            "the official list":
+        els = scan("c")
+        a = els and find(els, "Accept")
+        if a:
+            mark()
+            click(a)
+        wait_for(["the official list"], 30)
+    els = scan("d")
     st = els and find(els, " servers")
     if not st: fail("the list did not come; saw " + ", ".join(e[5] for e in els or [])[:400])
     rows = [e for e in els if e[0] == "Text" and re.search(r"\d+/\d+", e[5])]
     if not rows: fail("no row with a players count")
-    write("screenshot " + out + "/official_list.png", "delay 500")
+    write("screenshot " + out + "/official_list.png")
+    wait_for(["Wrote screenshot " + out + "/official_list.png"], 10)
     click(rows[0])
     els = scan("e")
     addr = [e for e in els if e[0] == "LineEdit" and ":" in e[5]]

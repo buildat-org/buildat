@@ -22,6 +22,7 @@ local open_window, add_text, add_label, add_row, add_button, add_edit,
 		h.add_button, h.add_edit, h.add_dropdown
 local WARN, DIM = h.WARN, h.DIM
 local OK = magic.Color(0.5, 0.9, 0.5)
+local log = buildat.Logger("extension/aitta")
 local USER = __buildat_get_path("user")
 local KEYS = USER .. "/aitta_keys"
 local AUDIENCES = {"everyone", "teen", "adult"}
@@ -137,6 +138,7 @@ local function ask_new(kind, back)
 		local path, err = __buildat_aitta_dev("new", name, kind)
 		if not path then
 			why.text = tostring(err)
+			log:info("aitta publish: not made: " .. why.text)
 			return
 		end
 		uistack.main:pop(root)
@@ -153,6 +155,7 @@ local function ask_new(kind, back)
 		back()
 	end)
 	e:SetFocus(true)
+	log:info("aitta publish: a new " .. kind .. "'s name asked")
 end
 
 -- **Page 1: the package and its manifest.** Each field is checked as it
@@ -210,6 +213,7 @@ page_package = function(message)
 			entry = e
 		end
 	end
+	log:info("aitta publish: the package page, " .. tostring(st.selected))
 	if not entry then
 		add_text(w, "Choose a package, or make a new one: an app is on " ..
 				"the grid at once, to play before it is published.", DIM)
@@ -500,6 +504,8 @@ page_publish = function(message)
 		result.text = "Packed " .. zip .. "; uploading to " .. url .. "..."
 		result.color = DIM
 		upload(url, zip, function(id, why, warning)
+			log:info("aitta publish: " .. (id and "published " .. id or
+					"not published: " .. tostring(why)))
 			st.result_ok, st.raise = id ~= nil, false
 			if id then
 				st.result = "Published " .. id .. " on " .. url .. ". It is " ..
@@ -521,6 +527,7 @@ page_publish = function(message)
 		add_button(pr, "Raise the version", function()
 			m.version = raise(m.version)
 			write_meta(name, m)
+			log:info("aitta publish: raised to " .. m.version)
 			st.raise, st.result = nil, "The version is " .. m.version .. " now"
 			st.result_ok = true
 			uistack.main:pop(root)
@@ -535,6 +542,7 @@ page_publish = function(message)
 			page_page()
 		end)
 	end
+	log:info("aitta publish: the key page, " .. (pub and status.text or "no key"))
 end
 
 -- **Page 3: the package's page on the Aitta** ([AITTA_PACKAGE_PAGE]): not
@@ -583,6 +591,8 @@ page_page = function(message)
 			page_page(id and "Sent: " .. id or "Not sent: " .. tostring(why))
 		end)
 	end, nil, true)
+	log:info("aitta publish: the page of " .. pkg ..
+			(message and ", " .. message or ""))
 end
 
 function M.safe.open_publish()

@@ -139,7 +139,8 @@ zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out") || fail "pack demo as an exten
 # The client boots it as a launch UI, in the sandbox though it does not
 # ask to be
 if [ "${AITTA_CHECK_CLIENT:-1}" = 1 ]; then
-	printf "delay 15000\nquit\n" > "$t/cmds.txt"
+	# The launch UI quits the client itself once it has said its line
+	printf "wait_log_any 15000 EXTBOOT io=\nquit\n" > "$t/cmds.txt"
 	(cd "$here/Build" && timeout 30 bin/buildat -m tester__ui -D "$t/user" \
 		-w 640x360 -l 3 -c @"$t/cmds.txt" > "$t/cli.log" 2>&1)
 	grep -aq "EXTBOOT io=nil" "$t/cli.log" ||

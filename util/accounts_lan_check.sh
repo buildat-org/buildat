@@ -41,34 +41,42 @@ n = b"accounts:open_lan"
 s = socket.create_connection((sys.argv[1], int(sys.argv[2])))
 s.sendall(hello() + packet(0, bytes([101, 0]) + len(n).to_bytes(4, "little") + n) +
         packet(101, b""))
+# The connection held while the server reads the request
 time.sleep(1)
 PY
 }
 
 # 1
+# The last delay keeps the host up while 2 and 3 run; it is killed after 3
 cat > "$t/a.cmds" <<C
-wait_log 120000 Plan picker:
+wait_log 60000 Plan picker:
 delay 1000
 click Button "Menu..."
-delay 500
+wait_log 5000 The plan picker's menu shown
 click Button "My account..."
-delay 1000
+wait_log 5000 server window: the page account
+delay 500
 click Button "Open to LAN"
+wait_log 5000 server window: the page lan
 delay 1000
 screenshot $t/a_before.png
 click Button "Open to LAN" 900 0
 wait_log 10000 Open to LAN: Open to the LAN at
 delay 500
 screenshot $t/a_after.png
+# The host held up while 2 and 3 run: a ceiling, as it is killed after 3
 delay 180000
 quit
 C
 BUILDAT_FP_NAME=owner client -C "$t/ca" -D "$t/ua" -a app/floorplanner/play \
 	-c @"$t/a.cmds" > "$t/a.log" 2>&1 &
-pids="$pids $!"
-for _ in $(seq 150); do
+apid=$!
+pids="$pids $apid"
+for _ in $(seq 450); do
 	grep -aq "Open to LAN: Open to the LAN at" "$t/a.log" && break
-	sleep 1
+	kill -0 $apid 2>/dev/null ||
+		fail "the host's drive ended ($(grep -a "Command sequence failed" "$t/a.log" | tail -1))"
+	sleep 0.2
 done
 at=$(grep -ao "Open to the LAN at [0-9.]*:[0-9]*" "$t/a.log" | head -1 | cut -d' ' -f6)
 [ -n "$at" ] || fail "not opened ($(grep -a "Open to LAN\|rror" "$t/a.log" | tail -3))"
@@ -77,27 +85,32 @@ grep -aq 'Announced to the LAN as "floorplanner"' "$t/a.log" ||
 
 # 2
 ask_lan "${at%:*}" "${at#*:}"
-grep -aq "Open to LAN refused" "$t/a.log" || fail "a peer on the LAN was not refused"
-start_server "$t/d.log" "STATUS Listening" 120 auto \
+wait_for_log "$t/a.log" "Open to LAN refused" 10 || fail "a peer on the LAN was not refused"
+start_server "$t/d.log" "STATUS Listening" 60 auto \
 	bin/buildat_server -m ../apps/floorplanner -A 127.0.0.1 -D "$t/ud" -C "$t/cd" ||
 	fail "the dedicated server did not start"
 pids="$pids $SERVER_PID"
 ask_lan 127.0.0.1 "$SERVER_PORT"
-grep -aq "Open to LAN refused" "$t/d.log" || fail "the dedicated server did not refuse"
+wait_for_log "$t/d.log" "Open to LAN refused" 10 || fail "the dedicated server did not refuse"
 
 # 3: the last click is to fail, there being no such button
+# The delays of 300 ms: the list drawn again, and a row picked, in the
+# frames after the line and the click
 cat > "$t/b.cmds" <<C
-delay 3000
+wait_log_any 30000 Join a Buildat server: shown
 click Button "This network"
-delay 3000
+wait_log_any 10000 This network: 1 heard
+delay 300
 click Button "floorplanner"
+# The click's frames: the row picked before Join is looked for
 delay 300
 click Button "Join"
 wait_log 60000 Plan picker:
 delay 1000
 click Button "Menu..."
-delay 500
+wait_log 5000 The plan picker's menu shown
 click Button "My account..."
+wait_log 5000 server window: the page account
 delay 1000
 screenshot $t/b_window.png
 click Button "Open to LAN"
@@ -114,23 +127,24 @@ kill $pids 2>/dev/null; pids=
 
 # 4
 cat > "$t/v.cmds" <<C
-wait_log 120000 the server put the player at
-delay 5000
+wait_log 60000 the server put the player at
+wait_log 60000 scene, 0 undrawn within 2
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
 click Button "Open to LAN"
-wait_log 10000 Open to LAN: Open to the LAN at
+wait_log 10000 Open to LAN: Open to the LAN
 delay 500
 screenshot $t/v_after.png
 quit
 C
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=lanworld start_server "$t/v.log" \
-	"STATUS Listening" 120 auto bin/buildat_server -u launcher=1 -A 127.0.0.1 \
+	"STATUS Listening" 60 auto bin/buildat_server -u launcher=1 -A 127.0.0.1 \
 	-m ../apps/vanilla -D "$t/uv" -C "$t/cv" -l 3 ||
 	fail "the vanilla server did not start"
 pids="$SERVER_PID"
 client -C "$t/cvc" -D "$t/uvc" -s 127.0.0.1:"$SERVER_PORT" -u 1 \
-	-c @"$t/v.cmds" > "$t/vc.log" 2>&1
+	-c @"$t/v.cmds" > "$t/vc.log" 2>&1 ||
+	fail "vanilla's drive ($(grep -a "Command sequence failed" "$t/vc.log" | tail -1))"
 grep -aq "Open to LAN: listening at" "$t/v.log" ||
 	fail "vanilla's pause menu did not open it ($(grep -a "Command seq\|click:" "$t/vc.log" | tail -3))"
 grep -aq 'Announced to the LAN as "lanworld"' "$t/v.log" ||

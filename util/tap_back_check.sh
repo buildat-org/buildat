@@ -25,24 +25,29 @@ t=$(mktemp -d)
 trap 'rm -rf "${t:?}"' EXIT
 fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/tap_back_check.log; echo "log in /tmp/tap_back_check.log"; exit 1; }
 # Positions at 800x600: Home's Settings row, Settings' heading, and the
-# left edge, where nothing is
+# left edge, where nothing is. The 500 ms after a click inside Settings and
+# on Home are the time given to a Back that must not come; the 200-300 ms
+# ones are the hover and the keys' focus taking in the frames after; the
+# 2 s at the end is cut short by the Quit, which ends the run
 cat > "$t/cmds" <<C
-wait_log_any 20000 launch_menu: home
-delay 1000
+wait_log_any 20000 rows in
+delay 500
 mouse_pos 260 350
 mouse_click left
-delay 800
+wait_log 5000 launch_menu: settings, 
+delay 300
 mouse_pos 300 210
 mouse_click left
-delay 800
+delay 500
 event scan
 mouse_pos 5 300
 mouse_click left
-delay 800
+wait_log 5000 UIStack:pop()
+delay 300
 event scan
 mouse_pos 5 300
 mouse_click left
-delay 800
+delay 500
 event scan
 mouse_pos 260 353
 delay 300
@@ -65,29 +70,38 @@ delay 300
 event scan
 keypress Up
 keypress Return
-delay 1000
+wait_log 5000 UIStack:push()
+delay 500
 keypress Escape
-delay 800
+wait_log 5000 UIStack:pop()
+delay 300
 keypress Down
 delay 300
 event scan
 keypress Escape
-delay 500
+wait_log 5000 confirm dialog: 
+delay 200
 keypress Right
 keypress Left
 keypress Right
 keypress Return
-delay 600
+wait_log 5000 UIStack:pop()
 keypress Escape
-delay 500
+wait_log 5000 confirm dialog: 
+delay 200
 keypress Down
 keypress Up
 keypress Return
-delay 3000
+wait_log 5000 shutdown()
 quit
 C
+# The dialog's Yes ends the client with its drive still going: the
+# drive's own failure line is the verdict, not the exit status
 timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$t/u" -w 800x600 -l 4 \
 	-o sound_mute=1 -c @"$t/cmds" > "$t/log" 2>&1
+grep -aq 'Command sequence failed\|did not expect' "$t/log" &&
+	fail "the drive: $(grep -a 'Command sequence failed' "$t/log" | head -1)"
+grep -aq 'Succesful shutdown' "$t/log" || fail "the client did not quit by the dialog ($t/log)"
 # Each scan's "Display and sound" header says Settings is up
 scans=$(grep -a "^scan scan: ui\|UIStack:p\|click on nothing" "$t/log")
 n=$(grep -c "push(): .*launch_menu settings" <<< "$scans")
@@ -119,24 +133,27 @@ grep -aq "command: quit" "$t/log" && fail "the arrows' Quit did not quit"
 # Home's Browse > Servers, its rows at 800x600: a click on the second, the
 # mouse on the third, then Down
 cat > "$t/cmds2" <<C
-wait_log_any 20000 launch_menu: home
-delay 800
+wait_log_any 20000 rows in
+delay 500
 keypress Down
 keypress Return
-delay 1000
+wait_log 5000  rows, by 
+delay 300
 mouse_pos 200 298
 mouse_click left
-delay 300
+wait_log 5000 launch_menu: locked
 mouse_pos 200 318
 delay 400
 event scan
 keypress Down
-delay 400
+wait_log 5000 launch_menu: unlocked
+delay 300
 event scan
 quit
 C
 timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$t/u2" -w 800x600 -l 4 \
-	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1
+	-o sound_mute=1 -c @"$t/cmds2" > "$t/log2" 2>&1 ||
+	{ cp "$t/log2" "$t/log"; fail "the drive: $(grep -a 'Command sequence failed' "$t/log2" | head -1)"; }
 cp "$t/log2" "$t/log"
 grep -aq "launch_menu: locked Join a Buildat server" "$t/log2" || fail "the click locked nothing"
 # The panel's heading, and the focus, in each scan

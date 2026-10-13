@@ -36,7 +36,7 @@ cp "$t/fixture.lua" "$d/shared/"
 echo "enable_damage = false" > "$d/apps/vanilla/saves/ct/luanti/world.mt"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=ct \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
@@ -62,22 +62,25 @@ client(){ # name, size, env..., then the sequence on stdin
 		-c @"$t/$n.cmds" > "$t/$n.log" 2>&1
 	grep -a "Command sequence failed" "$t/$n.log" && fail "$n: the drive ($t/$n.log)"
 }
-# The touch controls' Chat at (850, 94)
+# The touch controls' Chat at (850, 94). The delay after the chat page's
+# line: the focus line keyboard_page logs in the frames after it
 client touch 1000x500 BUILDAT_TOUCH=1 <<C
-wait_log 120000 chat: chat_top: ready
+wait_log 60000 chat: chat_top: ready
 delay 2000
 tap 850 94
-delay 1500
+wait_log 10000 chat page: y
+delay 500
 quit
 C
 top_half touch "$t/touch.log"
 client mouse 600x800 <<C
-wait_log 120000 chat: chat_top: ready
+wait_log 60000 chat: chat_top: ready
 delay 2000
 keypress Escape
-delay 1500
+wait_log 5000 pause: the menu shown
 click Button "Chat..."
-delay 1500
+wait_log 10000 chat page: y
+delay 500
 quit
 C
 top_half mouse "$t/mouse.log"
@@ -86,19 +89,23 @@ if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buil
 	echo "PASS: native; the web skipped (no Chrome or web/)"
 	exit 0
 fi
-# 400x800 CSS pixels: the touch controls' Chat at (325, 47)
+# 400x800 CSS pixels: the touch controls' Chat at (325, 47). The waits
+# are settles: the 2 s after the ready line the world drawn, the 500 ms
+# after the typed "hello" the field drawn with it, the 500 ms after the
+# keyboard's line the page drawn above it
 cat > "$t/web.json" <<'J'
 [
  ["nav", "${URL}?log=4"],
- ["waitlog", "chat: chat_top: ready", 240], ["wait", 3000],
- ["tap", 325, 47], ["wait", 1500],
+ ["waitlog", "chat: chat_top: ready", 120], ["wait", 2000],
+ ["tap", 325, 47], ["waitlog", "chat page: y", 10],
  ["type", "hello"], ["wait", 500],
  ["shot", "${OUT}/upright.png"],
- ["viewport", 800, 400], ["wait", 1500],
- ["eval", "buildatKeyboard.test = 300"], ["wait", 1500],
+ ["viewport", 800, 400], ["waitlog", "chat page: y", 10],
+ ["eval", "buildatKeyboard.test = 300"], ["waitlog", "chat page: y", 10],
+ ["wait", 500],
  ["shot", "${OUT}/keyboard.png"],
- ["eval", "buildatKeyboard.test = 150"], ["wait", 1500],
- ["eval", "'text ' + document.getElementById('text').value"], ["wait", 1000]
+ ["eval", "buildatKeyboard.test = 150"], ["waitlog", "chat page: y", 10],
+ ["eval", "'text ' + document.getElementById('text').value"]
 ]
 J
 TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \

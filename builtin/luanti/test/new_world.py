@@ -43,7 +43,7 @@ phase = 0
 notes = {}
 n = 0
 t0 = time.time()
-while time.time() - t0 < 600:
+while time.time() - t0 < 180:
     n += 1
     label = "n%d" % n
     write("event scan 8 %s" % label)
@@ -79,7 +79,9 @@ while time.time() - t0 < 600:
             e = s.find("Create and play", "Text")
             click(write, e)
             phase = 1
-            write("delay 2500")
+            # The refusal, which draws the screen again with its error line
+            if not uidrive.wait_log(log, "menu: There is already a save", 10):
+                say("FAIL: the taken name was not refused"); write("quit"); sys.exit(1)
         elif phase == 1:
             # The screen has to be this one still, with an error line on
             # it and both fields as they were
@@ -91,7 +93,9 @@ while time.time() - t0 < 600:
             say('after the refused create: error %r, name %r, seed %r' % (
                 notes["error"], notes["name"], notes["seed"]))
             # The seed selected and copied, then pasted into the name: the
-            # fields do Ctrl+C and Ctrl+V themselves once they are told to
+            # fields do Ctrl+C and Ctrl+V themselves once they are told to.
+            # The 200 and 400 ms put the selection, the copy and the paste
+            # in frames of their own.
             click(write, edits[1])
             write("keypress End", "keydown Left Shift", "keypress Home",
                   "keyup Left Shift", "delay 200",
@@ -119,6 +123,8 @@ while time.time() - t0 < 600:
             if "valleys" not in order:
                 say("FAIL: %s offers no valleys: %s" % (GAME, order))
                 write("quit"); sys.exit(1)
+            # simplified: the 500 ms is for the list to open, which logs
+            # nothing, and the 150s pace the keys through it
             click(write, drops[0])
             write("delay 500", *(["keypress Down", "delay 150"] * order.index("valleys")))
             write("keypress Return", "delay 500")
@@ -130,15 +136,18 @@ while time.time() - t0 < 600:
         said = " ".join(e[5] for e in s.ui if e[0] == "Text" and e[5] not in ("", "Ok"))
         say("FAIL: a dialog took the screen away: %s" % said)
         write("quit"); sys.exit(1)
+    # simplified: a screen changed by the step above is scanned again
+    # 1.2 s later, not on a line of its own; each screen's draw logging its
+    # name would let this wait for the next one
     write("delay 1200")
 
 # The world is being made; world.mt is written before it is loaded
 mt = os.path.join(saves, "mgtest", "luanti", "world.mt")
-for _ in range(120):
+for _ in range(300):
     if os.path.exists(mt):
         break
-    time.sleep(1)
-write("delay 500", "quit")
+    time.sleep(0.2)
+write("quit")
 text = open(mt).read() if os.path.exists(mt) else ""
 mg = re.search(r"^mg_name\s*=\s*(\S+)", text, re.M)
 say("world.mt says mg_name = %s" % (mg.group(1) if mg else "nothing"))

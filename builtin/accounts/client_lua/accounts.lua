@@ -509,6 +509,8 @@ show_login = function(error_text)
 	else
 		name:SetFocus(true)
 	end
+	-- What a check waits for before it types
+	log:info("accounts: the login page shown")
 end
 
 -- [ACCOUNT_CREATE]: the account-making window -- name, the password twice,
@@ -761,6 +763,11 @@ buildat.sub_packet("accounts:login_result", function(data)
 		for l in admin:gmatch("[^\n]+") do
 			local cmd, name, arg = l:match("^(%S+)%s*(%S*)%s*(.*)$")
 			if cmd then
+				-- Each but "list" has one admin_result, counted for the
+				-- check's "admin script: done"
+				if cmd ~= "list" then
+					M.admin_left = (M.admin_left or 0) + 1
+				end
 				M.admin(cmd, name, arg, cmd == "priv" or arg == "on")
 			end
 		end
@@ -817,6 +824,12 @@ end)
 buildat.sub_packet("accounts:admin_result", function(data)
 	M.message = cereal.binary_input(data, TEXT).text
 	log:info("admin result: " .. M.message)
+	if (M.admin_left or 0) > 0 then
+		M.admin_left = M.admin_left - 1
+		if M.admin_left == 0 then
+			log:info("admin script: done")
+		end
+	end
 	if page_kind == "users" then
 		users_page(page_back)
 	end
@@ -914,7 +927,11 @@ function M.ask_exit()
 	log:info("accounts: exit dialog")
 	local confirm = (ui_utils.safe or ui_utils).show_confirm_dialog
 	confirm("Exit to launcher?", M.logout,
-			function() M.asking_exit = false end, "Exit", "Cancel",
+			function()
+				M.asking_exit = false
+				-- What a check waits for
+				log:info("accounts: the exit cancelled")
+			end, "Exit", "Cancel",
 			{yes_focused = true, yes_keys = {magic.KEY_E, magic.KEY_Q},
 			priority = 200})
 end
@@ -1313,6 +1330,7 @@ ntfy_page = function(back)
 		button(r, "Add now", function()
 			st.ask = false
 			ntfy_page(back)
+			log:info("accounts: ntfy: the address page after Add now")
 		end, true)
 		-- Answered: the window closed if a game opened it, else (an
 		-- app's own) its first entry
@@ -3040,6 +3058,8 @@ function M.server_show(key)
 				sw.current = key
 				draw_sidebar()
 				e.draw()
+				-- What a check waits for
+				log:info("server window: the page " .. key)
 				return true
 			end
 		end
@@ -3093,6 +3113,7 @@ server_close = function(silent)
 	local on_close = sw.on_close
 	if sw.frame then
 		sw.frame:Remove()
+		log:info("server window: closed")
 	end
 	if sw.help then
 		sw.help:Remove()

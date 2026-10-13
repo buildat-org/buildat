@@ -28,7 +28,8 @@ for w in alpha bravo; do
 	wait_for_log "$t/mk_$w.log" "The world is up" 60 || fail "$w not up ($t/mk_$w.log)"
 	kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 	echo "enable_damage = false" >> "$d/apps/vanilla/saves/$w/luanti/world.mt"
-	# bravo the later, first on Home's Continue
+	# bravo the later, first on Home's Continue: a time apart a clock with
+	# seconds tells
 	sleep 1.5
 done
 
@@ -38,12 +39,13 @@ start_server "$t/s1.log" "STATUS Listening" 120 auto "$here/Build/bin/buildat_se
 	fail "the server ($t/s1.log)"
 CHECK_PIDS+=($SERVER_PID)
 cat > "$t/1.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log 30000 menu: 2 saves
 delay 1500
 event scan
 screenshot $t/none.png
 click Button "alpha*"
-delay 1500
+wait_log 10000 menu: the world alpha shown
+delay 300
 event scan
 screenshot $t/alpha.png
 quit
@@ -75,50 +77,60 @@ delay 1500
 event scan
 click Text "bravo"
 wait_log 120000 the server put the player at
-delay 3000
+wait_log_any 60000 load: the world is in
+delay 500
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
 click Button "Worlds..."
 wait_log 10000 menu: the running world bravo selected
-delay 1500
+wait_log 10000 menu: the world bravo shown
+delay 300
 event scan
 screenshot $t/bravo.png
 click Button "Delete..."
-delay 800
+wait_log 5000 confirm dialog: Move the world
+delay 300
 click Button "Move to the trash"
 wait_log 10000 menu: The world that is running
 delay 800
 keypress Escape
-delay 800
+wait_log 10000 menu: 2 saves
+delay 300
 keypress Escape
-delay 1500
+wait_log 5000 pause: back in the game from the worlds
+delay 500
 event scan
 screenshot $t/back.png
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
 click Button "Worlds..."
 wait_log 10000 menu: 2 saves
 delay 1500
 click LineEdit "*"
+# the click's frames: the field takes the focus in the frames after it
 delay 300
 text zzz
 keypress Return
-delay 1500
+wait_log 5000 menu: filtered by "zzz"
+delay 300
 event scan
 click LineEdit "*"
+# the click's frames: the field takes the focus in the frames after it
 delay 300
 keypress End
 keypress Backspace
 keypress Backspace
 keypress Backspace
 keypress Return
-delay 1500
+wait_log 5000 menu: filtered by ""
+delay 300
 click Button "alpha*"
-delay 1000
+wait_log 10000 menu: the world alpha shown
 click Button "Play"
-wait_log 120000 save=alpha
-wait_log 120000 the server put the player at
-delay 2000
+wait_log 60000 save=alpha
+wait_log 60000 the server put the player at
+wait_log 60000 load: the world is in
+delay 500
 screenshot $t/alpha_in.png
 quit
 C

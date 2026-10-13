@@ -35,11 +35,13 @@ printf 'name = formelems\n' > "$work/worldmods/formelems/mod.conf"
 port=30030
 ( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
+sub=$!
+# Up: its line, then its port bound
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && port_taken $port && break
+	kill -0 $sub 2>/dev/null || break
+	sleep 0.2
 done
-sleep 3
 srv=$(pgrep -x luanti-refshots | head -1)
 [ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
 trap 'kill "$srv" 2>/dev/null' EXIT
@@ -48,6 +50,7 @@ BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=drop \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 -c - \
 	< "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/luanti_srv.log" <<'PYIN'
 import re, sys, time
@@ -61,6 +64,8 @@ def write(*cmds):
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
 def scan():
     global seen
+    # A settle after the form's line: its elements laid out in the
+    # frames after it
     write("delay 800", "event scan a")
     t0 = time.time()
     while time.time() - t0 < 40:
@@ -75,18 +80,23 @@ def scan():
                                 int(m.group(4)), int(m.group(5)),
                                 m.group(6) or ""))
             return els
-        time.sleep(0.3)
+        # A poll for the scan's last line
+        time.sleep(0.2)
     return None
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
+# The client's line for the form, drawn in the same frame
 t0 = time.time()
 while time.time() - t0 < 90:
-    if "formelems: the form is shown" in open(srv, "rb").read().decode(
+    if "form formelems_check opened" in open(log, "rb").read().decode(
             "utf-8", "replace"):
         break
-    time.sleep(1)
-time.sleep(3)
+    # A poll
+    time.sleep(0.2)
+else:
+    fail("the form did not open in the client")
 els = scan()
+# The shot's frame drawn before the pointer moves
 write("screenshot " + sys.argv[1].replace("cli.log", "form.png"), "delay 400")
 url = [e for e in els or [] if e[5] == "https://example.org/manual"]
 label = [e for e in els or [] if e[5] == "Read the manual"]
@@ -102,11 +112,17 @@ anim = [e for e in els or [] if e[0] == "BorderImage" and
 if not anim:
     fail("no animated image drawn")
 b = label[0]
+# The click's frames: the hover read before the press
 write("mouse_pos %d %d" % (b[1] + b[3] // 2, b[2] + b[4] // 2),
-      "delay 200", "mouse_click left", "delay 800")
-time.sleep(1.5)
-got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
-       if "formelems: fields " in l]
+      "delay 200", "mouse_click left")
+t0 = time.time()
+while time.time() - t0 < 10:
+    got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
+           if "formelems: fields " in l]
+    if got:
+        break
+    # A poll for the server's line
+    time.sleep(0.2)
 if not got:
     fail("the server received no fields")
 last = got[-1].split("formelems: fields ")[-1]
@@ -118,7 +134,8 @@ write("quit")
 PYIN
 status=$?
 exec 3>&-
-sleep 2
+# The client gone at the end of its input, then the server
+for i in $(seq 1 50); do kill -0 $cli 2>/dev/null || break; sleep 0.2; done
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 exit $status

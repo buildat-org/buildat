@@ -228,7 +228,10 @@ local function add_filter(menu, filter, total, shown, on_change)
 	edit:SetText(filter)
 	magic.SubscribeToEvent(edit, "TextFinished",
 	function(self, event_type, event_data)
-		on_change(edit:GetText())
+		local typed = edit:GetText()
+		on_change(typed)
+		-- What a check waits for: the list drawn again under it
+		log:info("menu: filtered by \"" .. typed .. "\"")
 	end)
 	return edit
 end
@@ -578,6 +581,8 @@ function draw(saves, save_games)
 				f[key] = not f[key]
 				changed_worlds[selected_save] = true
 				panel.play:GetChild("ButtonText"):SetText(play_label())
+				log:info("menu: " .. label .. " " .. (f[key] and "on" or "off") ..
+						" for " .. selected_save)
 				buildat.send_packet("main:set_world_flags",
 						cereal.binary_output({selected_save,
 						f.creative_mode and "true" or "false",
@@ -848,6 +853,8 @@ function draw_settings(paths)
 		send(list)
 	end)
 	back_to_saves(menu, "settings")
+	-- What a check waits for
+	log:info("menu: the settings shown")
 end
 
 -- ContentDB's games, fetched by the server ([CONTENTDB]): a search field,
@@ -1984,6 +1991,7 @@ buildat.sub_packet("main:save_info", function(data)
 		b.button:GetChild("ButtonText"):SetText((panel.flags[key] and "[x] " or
 				"[ ] ") .. b.label)
 	end
+	log:info("menu: the world " .. info.name .. " shown")
 end)
 
 buildat.sub_packet("main:disk", function(data)

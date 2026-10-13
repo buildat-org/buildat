@@ -50,18 +50,23 @@ cv='["eval", "\"cv \" + Module.canvas.width + \"x\" + Module.canvas.height"]'
 # The canvas laid out at w x h CSS pixels with no resize, then a turn's
 # event alone (a rule, as emscripten clears the canvas's inline size)
 lay(){ echo "[\"eval\", \"var e = document.getElementById('lag') || document.head.appendChild(document.createElement('style')); e.id = 'lag'; e.textContent = '${1:-}' ? 'canvas { width: ${1:-}px !important; height: ${2:-}px !important }' : ''; window.dispatchEvent(new Event('orientationchange')); 'laid'\"]"; }
+# A resize or a layout is waited for by the client's "screen mode: WxH"
+# (its ScreenMode, the canvas at its new size); the half second after it
+# and the 2 s after the world's settle line are settles, the frames at the
+# new size drawn
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "chat: ra: ready", 240], ["wait", 10000],
+ ["waitlog", "chat: ra: ready", 120],
+ ["waitlog", "settle: 0 to mesh, [0-9]+ chunks in scene, 0 undrawn within 2", 60], ["wait", 2000],
  $cv, ["shot", "\${OUT}/1.png"],
- ["viewport", 393, 873], ["wait", 3000],
+ ["viewport", 393, 873], ["waitlog", "screen mode: ", 10], ["wait", 500],
  $cv, ["shot", "\${OUT}/2.png"],
- ["viewport", 873, 393], ["wait", 3000],
+ ["viewport", 873, 393], ["waitlog", "screen mode: ", 10], ["wait", 500],
  $cv, ["shot", "\${OUT}/3.png"],
- $(lay 300 600), ["wait", 2000],
+ $(lay 300 600), ["waitlog", "screen mode: ", 10], ["wait", 500],
  $cv, ["shot", "\${OUT}/4.png"],
- $(lay), ["wait", 2000],
+ $(lay), ["waitlog", "screen mode: ", 10], ["wait", 500],
  $cv, ["shot", "\${OUT}/5.png"]
 ]
 J

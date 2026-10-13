@@ -1593,6 +1593,10 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 	source:Play(sound)
 	log:debug(string.format("luanti:sound: %s gain %.3f %s heard at %.3f",
 			name, gain, location, source.gain))
+	-- A loop is a game's music or ambience: few, and what a check waits for
+	if loop then
+		log:info("luanti:sound: " .. name .. " looped")
+	end
 	stop_sound(handle)
 	handle_sounds[handle] = entry
 end
@@ -3774,6 +3778,8 @@ function M.open_player_inventory()
 	end
 	show_form("", player_spec)
 	current_form().source = "inventory"
+	-- What a check waits for
+	log:info("form: the inventory opened")
 end
 
 -- A form of the client's own: the game describes it the way a server would
@@ -3855,6 +3861,10 @@ end)
 
 buildat.sub_packet("luanti:player_formspec", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
+	-- What a check waits for: the inventory key opens something from now
+	if player_spec == "" and (values[1] or "") ~= "" then
+		log:info("form: the game set the inventory")
+	end
 	player_spec = values[1] or ""
 	-- The open inventory too: this is how a game turns its own page, as
 	-- VoxeLibre's creative one does ([CREATIVE_PAGES])
@@ -3862,6 +3872,7 @@ buildat.sub_packet("luanti:player_formspec", function(data)
 	if form and form.source == "inventory" and player_spec ~= "" then
 		form.spec = player_spec
 		session:redraw()
+		log:info("form: the inventory drawn again, the game's new one")
 	end
 end)
 

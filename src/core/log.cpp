@@ -308,20 +308,31 @@ static long long recent_count = 0;
 static std::string watch_text;
 static bool watch_seen = false;
 
+// A line is kept up to this long; the watch sees all of it. A request's
+// answer can be a quarter of a megabyte of JSON, and what a wait looks for
+// was past the old 1 KB cut
+static const size_t RECENT_LINE_MAX = 65536;
+
 static void remember_line(const char *fmt, va_list va_args)
 {
-	char buf[1024];
 	va_list copy;
 	va_copy(copy, va_args);
-	vsnprintf(buf, sizeof buf, fmt, copy);
+	int n = vsnprintf(nullptr, 0, fmt, copy);
 	va_end(copy);
-	recent_lines.push_back(buf);
+	std::string line(n > 0 ? n : 0, '\0');
+	if(n > 0){
+		va_copy(copy, va_args);
+		vsnprintf(&line[0], n + 1, fmt, copy);
+		va_end(copy);
+	}
+	if(!watch_text.empty() && line.find(watch_text) != std::string::npos)
+		watch_seen = true;
+	if(line.size() > RECENT_LINE_MAX)
+		line.resize(RECENT_LINE_MAX);
+	recent_lines.push_back(std::move(line));
 	if(recent_lines.size() > RECENT_MAX)
 		recent_lines.pop_front();
 	recent_count++;
-	if(!watch_text.empty() && recent_lines.back().find(watch_text) !=
-			std::string::npos)
-		watch_seen = true;
 }
 
 static const size_t PROBLEMS_MAX = 100;

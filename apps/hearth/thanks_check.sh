@@ -17,23 +17,31 @@ check_tmp hearth_thanks; t=$CHECK_TMP
 P=29886
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 $P \
+start_server "$t/srv.log" "setup code" 60 $P \
 	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
 client(){ # name password requests [env...]
-	local n=$1 pw=$2 reqs=$3
+	local n=$1 pw=$2 reqs=$3 i=0 w
 	shift 3
-	printf 'delay 4000\nquit\n' > "$t/cmds_$n"
+	# Each request's answer, and the admin script's end
+	{ while IFS= read -r w; do
+			[ -n "$w" ] && i=$((i + 1)) && echo "wait_log_any 20000 \"id\":$((1000 + i)),"
+		done <<< "$reqs"
+		case "$*" in *BUILDAT_HEARTH_ADMIN=*)
+			echo "wait_log_any 20000 admin script: done";; esac
+		echo quit
+	} > "$t/cmds_$n"
 	: > "$t/$n.log"
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" \
 		-w 800x600 -l 3 -o sound_mute=1 -s 127.0.0.1:$P \
-		-c @"$t/cmds_$n" > "$t/$n.log" 2>&1
+		-c @"$t/cmds_$n" > "$t/$n.log" 2>&1 ||
+		fail "the client $n ($t/$n.log): $(grep -a "Command sequence failed" "$t/$n.log" | tail -1)"
 }
 answer(){ # name id
 	grep -ao "hr: {.*\"id\":$2,.*" "$t/$1.log" | head -1

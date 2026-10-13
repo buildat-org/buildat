@@ -20,6 +20,9 @@
 -- An entry with a key and a default_key is bindable unless bindable()
 -- says otherwise; the rest are listed for the player's sake.
 local M = {}
+-- The checks wait on its few lines: shown, a row listening, a key bound,
+-- the defaults, closed
+local log = buildat.Logger("key_editor")
 
 -- **The key store** ([LAUNCH_MENU_V2] step 3): the bindings declared
 -- under app_id (a served game's id is its own, whatever is passed) with
@@ -148,6 +151,7 @@ function M.draw(o)
 			if bindable(b) then
 				listening = b
 				refresh()
+				log:info("key editor: " .. b.what .. " listens")
 			end
 		end}
 	end
@@ -170,10 +174,12 @@ function M.draw(o)
 		listening = nil
 		refresh()
 		save()
+		log:info("key editor: the defaults put back")
 	end}
 	local back = make_button(bottom, "< back")
 	items[#items + 1] = {back, function()
 		uistack.main:pop(root)
+		log:info("key editor: closed")
 		on_back()
 	end}
 	local nav = ui_utils.bind_button_menu(root, items)
@@ -201,10 +207,12 @@ function M.draw(o)
 			end
 		end
 		refresh()
+		log:info("key editor: " .. b.what .. " is " .. tostring(b.name))
 		return true
 	end)
 	refresh()
 	magic.input:SetMouseVisible(true, "the key bindings")
+	log:info("key editor: shown")
 	return root
 end
 

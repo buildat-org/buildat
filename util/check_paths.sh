@@ -113,14 +113,14 @@ start_server()
 	SERVER_PORT=$port
 	"$@" -P "$port" > "$log" 2>&1 &
 	SERVER_PID=$!
-	for _i in $(seq "$timeout"); do
+	for _i in $(seq $((timeout * 5))); do
 		grep -qaE "$ready" "$log" 2>/dev/null && return 0
 		if ! kill -0 $SERVER_PID 2>/dev/null; then
 			echo "start_server: the server exited before \"$ready\" ($log):" >&2
 			tail -15 "$log" >&2
 			return 1
 		fi
-		sleep 1
+		sleep 0.2
 	done
 	grep -qaE "$ready" "$log" 2>/dev/null && return 0
 	echo "start_server: no \"$ready\" in $timeout s ($log):" >&2
@@ -171,8 +171,25 @@ check_tmp()
 }
 check_cleanup()
 {
-	local p
+	local p i killed=("${CHECK_PIDS[@]}")
 	for p in "${CHECK_PIDS[@]}"; do kill "$p" 2>/dev/null; done
+	# A local server a failed drive's client started and did not stop
+	# (2026-10-13: one outlived world_mods_check and made the next checks
+	# skip): any buildat process working in this check's directory. By
+	# its name and PID, so the shell running this never matches.
+	if [ -n "${CHECK_TMP:-}" ]; then
+		for p in $(ps -eo pid=,comm=,args= | awk -v d="$CHECK_TMP" \
+				'$2 ~ /^buildat/ && index($0, d) { print $1 }'); do
+			kill "$p" 2>/dev/null; killed+=("$p")
+		done
+	fi
+	# **Gone before the next check starts** (2026-10-13: a Starport still
+	# exiting held its port, and the next check's bound nothing): up to
+	# 10 s for them to exit, then a kill they cannot ignore
+	for p in "${killed[@]}"; do
+		for i in $(seq 50); do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+		kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
+	done
 	[ -n "${CHECK_TMP:-}" ] || return 0
 	if [ -n "${KEEP_TMP:-}" ]; then echo "kept $CHECK_TMP"; else rm -rf "$CHECK_TMP"; fi
 }
@@ -183,9 +200,9 @@ check_cleanup()
 wait_for_log()
 {
 	local i
-	for i in $(seq "$3"); do
+	for i in $(seq $(($3 * 5))); do
 		grep -qaE "$2" "$1" 2>/dev/null && return 0
-		sleep 1
+		sleep 0.2
 	done
 	grep -qaE "$2" "$1" 2>/dev/null
 }
@@ -229,9 +246,11 @@ run_client()
 	shift 2
 	: > "$log"
 	"$@" > "$log" 2>&1 &
+	# quiet counts tenths of a second: the poll is short so the run ends
+	# when the client does, not up to a poll later
 	local pid=$! last=0 quiet=0 size=0
 	while kill -0 "$pid" 2>/dev/null; do
-		sleep 5
+		sleep 0.5
 		size=$(wc -c < "$log" 2>/dev/null || echo 0)
 		if [ "${size:-0}" -gt "$last" ]; then
 			last=$size
@@ -239,7 +258,7 @@ run_client()
 			continue
 		fi
 		quiet=$((quiet + 5))
-		[ "$quiet" -lt "$stall" ] && continue
+		[ "$quiet" -lt "$((stall * 10))" ] && continue
 		echo "run_client: nothing logged for ${stall}s; taken down" >> "$log"
 		# The child too: the command is usually "timeout ... bin/buildat",
 		# and killing timeout outright leaves the client behind
@@ -262,11 +281,11 @@ wait_quiet()
 	local s=${1:-30} i=0
 	while check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null; do
 		i=$((i + 1))
-		if [ "$i" -ge "$s" ]; then
+		if [ "$i" -ge "$((s * 5))" ]; then
 			echo "wait_quiet: a client or server is still up after ${s}s" >&2
 			return 1
 		fi
-		sleep 1
+		sleep 0.2
 	done
 	return 0
 }

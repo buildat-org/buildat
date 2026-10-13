@@ -48,19 +48,17 @@ trap 'check_pkill -INT buildat_server 2>/dev/null; true' EXIT
   cat "$me/fixlight.lua"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="${GAME:-mineclone2}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 300 "$port" \
+	start_server "$out/srv.log" "Mods loaded" 120 "$port" \
 	timeout 400 bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-# A player has to join for the fixture to have one to stand on
-{ echo "wait_log 120000 the server put the player"; echo "delay 60000"
+# A player has to join for the fixture to have one to stand on; the
+# fixture's work starts 25 s after the join
+{ echo "wait_log 120000 the server put the player"
+	echo "wait_log_any 60000 chat: fixcheck: done"
 	echo "quit"; } > "$out/cmds.txt"
 timeout 250 bin/buildat -s "localhost:$port" -w 640x480 -l 3 -c @"$out/cmds.txt" \
 	> "$out/cli.log" 2>&1
-for i in $(seq 1 60); do
-	grep -aq "fixcheck: done" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
 check_pkill -INT buildat_server 2>/dev/null
 if ! grep -aq "fixcheck: done" "$out/srv.log"; then
 	echo "SKIP: the run never got to its end; see $out/srv.log" >&2

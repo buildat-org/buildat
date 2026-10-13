@@ -33,21 +33,24 @@ printf 'name = hypertext\n' > "$work/worldmods/hypertext/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+srv=$!
 trap 'kill "$srv" 2>/dev/null' EXIT
+# Up to two minutes for VoxeLibre to load, while the server lives
+for i in $(seq 1 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
+done
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "FAIL: the Luanti server did not come up ($out/luanti_srv.log)"; exit 1; }
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=drop \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 -c - \
 	< "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/luanti_srv.log" <<'PYIN'
 import re, sys, time
@@ -61,6 +64,7 @@ def write(*cmds):
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text "(.*)")?')
 def scan():
     global seen
+    # A settle after the form's "opened" line: it drawn before the scan
     write("delay 800", "event scan a")
     t0 = time.time()
     while time.time() - t0 < 40:
@@ -75,19 +79,26 @@ def scan():
                                 int(m.group(4)), int(m.group(5)),
                                 m.group(6) or ""))
             return els
-        time.sleep(0.3)
+        # The log polled for the scan's end
+        time.sleep(0.2)
     return None
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-t0 = time.time()
-while time.time() - t0 < 90:
-    if "hypertext: the form is shown" in open(srv, "rb").read().decode(
-            "utf-8", "replace"):
-        break
-    time.sleep(1)
-time.sleep(3)
+# Up to <secs> for a line with <text> in <path>
+def logged(path, text, secs):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text in open(path, "rb").read():
+            return True
+        # The log polled for the line
+        time.sleep(0.2)
+    return False
+# The world's load and the fixture's three seconds after the join: the
+# client says when it opens the form
+if not logged(log, b"form hypertext_check opened", 120):
+    fail("the form was not opened on the client")
 els = scan()
-write("screenshot " + sys.argv[1].replace("cli.log", "form.png"), "delay 400")
+write("screenshot " + sys.argv[1].replace("cli.log", "form.png"))
 body = [e for e in els or [] if "Some words in it" in e[5]]
 if not body:
     fail("the hypertext is not on the screen; saw " +
@@ -101,9 +112,10 @@ for e in els or []:
 if not act:
     fail("no action button; saw " +
          ", ".join("%r" % e[5] for e in els or [])[:300])
+# The click's frames: the button hovered a few frames before the press
 write("mouse_pos %d %d" % (act[1] + act[3] // 2, act[2] + act[4] // 2),
-      "delay 200", "mouse_click left", "delay 800")
-time.sleep(1.5)
+      "delay 200", "mouse_click left")
+logged(srv, b"hypertext: fields doc=", 10)
 got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
        if "hypertext: fields doc=" in l]
 if not got:
@@ -114,10 +126,12 @@ print("the server received " + last)
 print("PASS: the action says which one it was" if last == "doc=action:here"
       else "FAIL: the server received " + last)
 write("quit")
+sys.exit(0 if last == "doc=action:here" else 1)
 PYIN
 status=$?
 exec 3>&-
-sleep 2
-kill "$srv" 2>/dev/null
+# The client out first, up to ten seconds
+for i in $(seq 1 50); do kill -0 "$cli" 2>/dev/null || break; sleep 0.2; done
+kill "$cli" "$srv" 2>/dev/null
 for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
 exit $status

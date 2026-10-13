@@ -57,14 +57,14 @@ stop(){ kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null; }
 world(){
 	local log=$1; shift
 	serve "$log" BUILDAT_LUANTI_GAME=minimal "$@"
-	for _ in $(seq 60); do grep -q "wmcheck:" "$log" && break; sleep 1; done
+	wait_for_log "$log" "wmcheck:" 60
 	stop
 	grep -a "wmcheck:" "$log" | head -1 | sed 's/.*wmcheck: //'
 }
 client(){
 	run_client 60 "$1" timeout 300 "$here/Build/bin/buildat" -C "$t/nc" \
 		-D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 1100x900 -u 1 -l 3 \
-		-o sound_mute=1 -c @"$2"
+		-o sound_mute=1 -c @"$2" || fail "the drive ($1)"
 }
 
 # The two worlds, made by a start each
@@ -77,11 +77,13 @@ done
 echo "load_mod_mobs_animal = true" >> "$d/apps/vanilla/saves/w1/luanti/world.mt"
 
 # 1
+# The delays of 2 s at most: the menu a click or a line opens, laid out in
+# the frames after it
 cat > "$t/1.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log_any 60000 menu: 2 saves
 delay 1000
 click Button "w1*"
-delay 500
+wait_log 10000 menu: the world w1 shown
 click Button "Mods..."
 wait_log 10000 menu: world mods of w1
 delay 500
@@ -100,6 +102,7 @@ click Button "Play"
 wait_log 10000 w1: its mods cannot load: mobs_animal needs mobs
 delay 500
 click Button "Ok"
+# the click's frames: the dialog gone before the next click
 delay 1000
 click Button "Mods..."
 wait_log 10000 menu: world mods of w1
@@ -112,9 +115,8 @@ wait_log 10000 On: mobs_animal, with mobs
 delay 500
 screenshot $t/1_on.png
 click Button "< back"
-delay 500
-click Button "w1*"
-delay 300
+# The list comes back with w1 still selected (a click on it would play it)
+wait_log 10000 menu: the world w1 shown
 click Button "Play"
 wait_log 120000 vanilla client ready
 quit
@@ -134,12 +136,12 @@ got=$(world "$t/w2b.log" BUILDAT_LUANTI_SAVE=w2)
 echo "w2: $got"
 [ "$got" = "mobs nil, mobs_animal nil, wm nil, nodes 0" ] || fail "w2 has them ($t/w2b.log)"
 
-# 3
+# 3 (the delays as in 1)
 cat > "$t/3.cmds" <<C
-wait_log 60000 menu: 2 saves
+wait_log_any 60000 menu: 2 saves
 delay 1000
 click Button "w1*"
-delay 500
+wait_log 10000 menu: the world w1 shown
 click Button "Mods..."
 wait_log 10000 menu: world mods of w1
 delay 500
@@ -150,9 +152,8 @@ click Button "[x] mobs"
 wait_log 10000 Off: mobs.
 delay 500
 click Button "< back"
-delay 500
-click Button "w1*"
-delay 300
+# The list comes back with w1 still selected (a click on it would play it)
+wait_log 10000 menu: the world w1 shown
 click Button "Play"
 wait_log 120000 vanilla client ready
 quit

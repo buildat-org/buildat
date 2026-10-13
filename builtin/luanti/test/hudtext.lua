@@ -67,5 +67,9 @@ core.register_on_joinplayer(function(player)
 			})
 		end
 		core.log("action", "hud text check: three alignments added")
+		-- In the client's log too, after the elements: what hudtext.sh's
+		-- drive waits for
+		core.chat_send_player(player:get_player_name(),
+				"hud text check: the elements added")
 	end)
 end)

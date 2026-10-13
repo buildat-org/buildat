@@ -34,21 +34,24 @@ printf 'name = dropdown\n' > "$work/worldmods/dropdown/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
 port=30030
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
+( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-for i in $(seq 1 300); do
+srv=$!; cli=""
+trap 'kill "$cli" "$srv" 2>/dev/null' EXIT
+# "Server for gameid ... listening" is the server taking connections
+for i in $(seq 1 600); do
 	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	sleep 1
+	kill -0 "$srv" 2>/dev/null || break
+	sleep 0.2
 done
-sleep 3
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
-trap 'kill "$srv" 2>/dev/null' EXIT
+grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
+	{ echo "the Luanti server did not come up" >&2; exit 1; }
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=drop \
 	BUILDAT_LUANTI_CONNECT=1 \
 	"$here/Build/bin/buildat" -m luanti_client -w 1280x720 -l 3 -c - \
 	< "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/luanti_srv.log" <<'PY'
 import re, sys, time
@@ -60,9 +63,11 @@ def write(*cmds):
         w.write(c + "\n")
     w.flush()
 UI = re.compile(r'(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+) text "(.*)"')
-def scan(label):
+# The settle before a scan: the form drawn in the frames after the line
+# waited for (its opening, the dropdown's)
+def scan(label, settle="delay 800"):
     global seen
-    write("delay 800", "event scan " + label)
+    write(settle, "event scan " + label)
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -82,31 +87,36 @@ def find(els, text):
         if e[5] == text and e[3] > 0:
             return e
     return None
-def click(e):
+# The cursor moved is read in the frame after (200 ms), then the click
+def click(e, *then):
     write("mouse_pos %d %d" % (e[1] + e[3] // 2, e[2] + e[4] // 2), "delay 200",
-          "mouse_click left", "delay 600")
+          "mouse_click left", *then)
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-t0 = time.time()
-while time.time() - t0 < 180:
-    if "dropdown: the form is shown" in open(srv, "rb").read().decode(
-            "utf-8", "replace"):
-        break
-    time.sleep(1)
-time.sleep(4)
+def waitfor(path, text, secs):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text in open(path, "rb").read().decode("utf-8", "replace"):
+            return True
+        time.sleep(0.3)
+    return False
+# The client says when it has the form up (a VoxeLibre join, and the
+# fixture's three seconds after it)
+if not waitfor(log, "form dropdown_check opened", 120):
+    fail("the form never opened on the client; see " + log)
 els = scan("a")
 box = find(els, "alpha")
 if not box:
     fail("no dropdown on the screen; saw " +
          ", ".join("%r" % e[5] for e in els or [])[:300])
-click(box)
-els = scan("b")
+click(box, 'wait_log 5000 form: dropdown "')
+els = scan("b", "delay 300")
 item = find(els, "gamma")
 if not item:
     fail("the list did not open; saw " +
          ", ".join("%r" % e[5] for e in els or [])[:300])
 click(item)
-time.sleep(2)
+waitfor(srv, "dropdown: fields pick=", 10)
 got = [l for l in open(srv, "rb").read().decode("utf-8", "replace").splitlines()
        if "dropdown: fields pick=" in l]
 if not got:
@@ -119,7 +129,8 @@ write("quit")
 PY
 status=$?
 exec 3>&-
-sleep 2
+# The client ends at the quit and the closed fifo
+for i in $(seq 1 50); do kill -0 "$cli" 2>/dev/null || break; sleep 0.2; done
 kill "$srv" 2>/dev/null
-for i in $(seq 1 30); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 exit $status

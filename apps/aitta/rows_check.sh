@@ -40,10 +40,10 @@ printf '{"author": "tester", "name": "%s", "version": "1.0.0",
 # The admin binds tester to the key, then the release is published
 admin(){ env BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin \
 	BUILDAT_AITTA_PASSWORD=checkpass BUILDAT_AITTA_CODE=$code "$@"; }
-printf 'delay 8000\nquit\n' > "$t/bind.cmds"
+printf 'wait_log 30000 ai: {"id":1,\nquit\n' > "$t/bind.cmds"
 admin BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/bind.cmds" > "$t/bind.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/bind.cmds" > "$t/bind.log" 2>&1 || fail "the bind's drive"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/$name" ||

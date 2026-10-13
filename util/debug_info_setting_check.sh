@@ -34,17 +34,20 @@ CHECK_PIDS+=($SERVER_PID)
 client(){ run_client 60 "$1" timeout 200 "$here/Build/bin/buildat" -C "$t/nc" \
 	-D "$t/nu" -s "127.0.0.1:$SERVER_PORT" -w 1100x600 -u 1 -l 3 \
 	-o sound_mute=1 -c @"$2"; }
+# The delays: a screen a line says is up laid out in the frames after it,
+# and the dropdown's list after its click
 settings='wait_log 120000 load: the world is in
 delay 1000
 keypress Escape
-delay 1000
+wait_log 5000 pause: the menu shown
+delay 500
 click Button "Settings..."
 wait_log 5000 Game settings shown
 delay 1000'
-printf '%s\nclick DropDownList "▼" 668 256\ndelay 500\nkeypress Down\nkeypress Return\ndelay 500\nquit\n' \
+printf '%s\nclick DropDownList "▼" 668 256\ndelay 500\nkeypress Down\nkeypress Return\nwait_log 5000 debug info:\nquit\n' \
 	"$settings" > "$t/1.cmds"
 client "$t/1.log" "$t/1.cmds"
-printf 'wait_log 120000 load: the world is in\ndelay 1000\nkeypress F5\ndelay 500\nquit\n' > "$t/2.cmds"
+printf 'wait_log 120000 load: the world is in\ndelay 1000\nkeypress F5\nwait_log 5000 debug info:\nquit\n' > "$t/2.cmds"
 client "$t/2.log" "$t/2.cmds"
 printf '%s\nscreenshot %s\nquit\n' "$settings" "$t/3.png" > "$t/3.cmds"
 client "$t/3.log" "$t/3.cmds"
@@ -78,12 +81,14 @@ now=$(date +%s)
 echo "\"true\",\"udp://127.0.0.1:$P\",\"\",\"$now\",\"$now\",\"\",\"\",\"\"" \
 	> "$t/lcl/network_addresses.csv"
 lc(){ # log, F5 presses
-	{ echo "wait_log 60000 loading done"; echo "delay 3000"
-		for _ in $(seq "$2"); do echo "keypress F5"; echo "delay 500"; done
+	# A settle after the line: the world's keys taken in the frames after
+	{ echo "wait_log 60000 loading done"; echo "delay 1000"
+		for _ in $(seq "$2"); do echo "keypress F5"; echo "wait_log 5000 debug info:"; done
 		echo quit; } > "$t/lc.cmds"
 	(cd "$here/Build" && BUILDAT_LUANTI_ADDRESS=127.0.0.1:$P BUILDAT_LUANTI_CONNECT=1 \
 		BUILDAT_LUANTI_NAME=dicheck timeout 120 bin/buildat -m luanti_client \
-		-D "$t/lcl" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/lc.cmds" > "$1" 2>&1)
+		-D "$t/lcl" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/lc.cmds" > "$1" 2>&1) ||
+		fail "the drive ($1): $(grep -a "Command sequence failed" "$1" | tail -1)"
 }
 lc "$t/lc1.log" 2
 lc "$t/lc2.log" 1

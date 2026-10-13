@@ -876,6 +876,7 @@ picker_menu = function()
 	in_picker_menu = true
 	local w = page_window(420)
 	login_window = w
+	log:info("The plan picker's menu shown")
 	page_text(w, "Floor planner")
 	local function page(open)
 		return function()
@@ -1109,6 +1110,8 @@ local function ask_invites()
 end
 
 local group_script_done = false
+-- The script's requests not answered yet; each has one fp:group_result
+local group_script_left = 0
 buildat.sub_packet("fp:groups", function(data)
 	doc.groups = cereal.binary_input(data, GROUPS)
 	log:info("Groups: " .. #doc.groups.groups .. ", invites to me: " ..
@@ -1120,6 +1123,7 @@ buildat.sub_packet("fp:groups", function(data)
 		for l in script:gmatch("[^\n]+") do
 			local cmd, group, name, arg = l:match("^(%S+)%s+(%d+)%s*(%S*)%s*(%S*)")
 			if cmd then
+				group_script_left = group_script_left + 1
 				group_cmd(cmd, tonumber(group), name, arg)
 			end
 		end
@@ -1151,6 +1155,13 @@ buildat.sub_packet("fp:group_result", function(data)
 		group_message = t
 		if doc.groups_page then
 			doc.groups_page()
+		end
+	end
+	-- After the answer's own line
+	if group_script_left > 0 then
+		group_script_left = group_script_left - 1
+		if group_script_left == 0 then
+			log:info("Group script: done")
 		end
 	end
 end)

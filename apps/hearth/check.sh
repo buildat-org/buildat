@@ -53,15 +53,29 @@ pid=$SERVER_PID
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "Hearth did not start (srv.log: $(tail -3 "$t/srv.log"))"
 
+# A client quits once each request is answered and each line of WAIT is
+# logged, or CMDS is its drive; a missed wait fails the check
 client(){ # name password log requests [env...]
-	local n=$1 pw=$2 log=$3 reqs=$4 ms=${MS:-8000}
+	local n=$1 pw=$2 log=$3 reqs=$4 i=0 w
 	shift 4
-	printf "${CMDS:-delay %s\\nquit\\n}" $ms > "$t/cmds_$n"
+	if [ -n "${CMDS:-}" ]; then
+		printf '%b' "$CMDS"
+	else
+		echo "wait_log_any 20000 Joined as"
+		while IFS= read -r w; do
+			[ -n "$w" ] && i=$((i + 1)) && echo "wait_log_any 10000 \"id\":$((1000 + i)),"
+		done <<< "$reqs"
+		while IFS= read -r w; do
+			[ -n "$w" ] && echo "wait_log_any 10000 $w"
+		done <<< "${WAIT:-}"
+		echo quit
+	fi > "$t/cmds_$n"
 	# CREATE: an unknown name is made rather than refused; a known one logs in
 	env BUILDAT_HEARTH_NAME=$n BUILDAT_HEARTH_PASSWORD=$pw BUILDAT_HEARTH_CREATE=1 \
 		BUILDAT_HEARTH_CODE=$code BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" -w 800x600 -l 3 -o sound_mute=1 \
-		-s 127.0.0.1:$P -c @"$t/cmds_$n" > "$log" 2>&1
+		-s 127.0.0.1:$P -c @"$t/cmds_$n" > "$log" 2>&1 ||
+		fail "the client $n ($log): $(grep -a "Command sequence failed\|an error the drive" "$log" | tail -2)"
 }
 answer(){ # log id
 	grep -ao "hr: {.*\"id\":$2,.*" "$1" | head -1
@@ -129,12 +143,19 @@ curl -s -X POST -d "{\"name\":\"bob\",\"token\":\"$tok\"}" "$U/unseen" |
 	fail "a count for a token that is no login"
 
 # 4. A chat: bob has thread 1 open, the admin writes in it
-MS=14000 client bob bobpass1234 "$t/watch.log" '' BUILDAT_HEARTH_OPEN=1 &
+CMDS='wait_log_any 30000 a live line\nquit\n' \
+	client bob bobpass1234 "$t/watch.log" '' BUILDAT_HEARTH_OPEN=1 &
 w=$!
-sleep 7
-client admin checkpass12 "$t/admin3.log" '{"cmd":"reply","thread":1,"body":"a live line"}' \
+# The thread drawn: its first message
+for _ in $(seq 150); do
+	grep -aq "hearth: m1 text" "$t/watch.log" 2>/dev/null && break
+	kill -0 $w 2>/dev/null || break
+	sleep 0.2
+done
+grep -aq "hearth: m1 text" "$t/watch.log" || { kill $w; fail "bob's thread did not open ($t/watch.log)"; }
+WAIT='admin result: ' client admin checkpass12 "$t/admin3.log" '{"cmd":"reply","thread":1,"body":"a live line"}' \
 	"BUILDAT_HEARTH_ADMIN=add carol carolpass1234"
-wait $w
+wait $w || fail "bob's watching client"
 ms(){ # the first log line matching, as milliseconds of the day
 	grep -a "$2" "$1" | head -1 | grep -o "[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]*" |
 		awk -F'[:.]' '{print (($1*60+$2)*60+$3)*1000+$4}'
@@ -288,7 +309,8 @@ grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 # 8. The reply field is multi-line: Enter breaks the line, Up moves a row
 # (the field's, not the buttons' -- ui_utils' keyboard page), Ctrl+Enter
 # sends
-CMDS='delay 5000\ntext one two\ndelay 200\nkeypress Return\ndelay 200\ntext three\ndelay 200\nkeypress Return\ndelay 200\nkeypress Return\ndelay 200\ntext four\ndelay 200\nkeypress Up\ndelay 200\nkeypress Up\ndelay 200\ntext X\ndelay 200\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\ndelay 1500\nquit\n' \
+# (the field's keys a tick apart, as typed)
+CMDS='wait_log_any 20000 hearth: m1 text\ndelay 500\ntext one two\ndelay 100\nkeypress Return\ndelay 100\ntext three\ndelay 100\nkeypress Return\ndelay 100\nkeypress Return\ndelay 100\ntext four\ndelay 100\nkeypress Up\ndelay 100\nkeypress Up\ndelay 100\ntext X\ndelay 100\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\nwait_log_any 10000 Xthree\nquit\n' \
 	client admin checkpass12 "$t/admin9.log" '' BUILDAT_HEARTH_OPEN=1
 get /t/1 > /dev/null
 grep -qPz '<p>one two<br>\nXthree</p>\n<p>four</p>' "$t/page" ||
@@ -358,7 +380,7 @@ im = Image.open(sys.argv[1]); print(im.format, "%dx%d" % im.size, "EXIF" if b"SE
 	fail "the JPEG's thumbnail: $(image)"
 client admin checkpass12 "$t/admin_att.log" "{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"Shots\",\"body\":\"See [![far.jpg](/f/$FJ/thumb)](/f/$FJ/far.jpg) and [dot.png](/f/$FP/dot.png), ![away](https://example.com/x.png) [notes](/f/$FO/notes.txt)\"}"
 TA=$(res "$t/admin_att.log" 1001 'r["result"]')
-MS=4000 client admin checkpass12 "$t/admin_att2.log" "{\"cmd\":\"thread\",\"thread\":$TA}
+client admin checkpass12 "$t/admin_att2.log" "{\"cmd\":\"thread\",\"thread\":$TA}
 {\"cmd\":\"thumb\",\"file\":$FP}"
 [ "$(get /t/$TA)" = 200 ] || fail "the thread with files: $TA"
 grep -q "<a href=\"/f/$FJ/far.jpg\" rel=\"nofollow ugc\"><img src=\"/f/$FJ/thumb\" alt=\"far.jpg\" loading=\"lazy\"></a>" "$t/page" ||
@@ -375,7 +397,7 @@ echo "$files" | grep -q "far.jpg</a> <span class=\"meta\">JPEG image, " &&
 	fail "the files to the client: $(answer "$t/admin_att2.log" 1001 | head -c 600)"
 [ "$(res "$t/admin_att2.log" 1002 'r["result"]["data"][:16]')" = 89504e470d0a1a0a ] ||
 	fail "the thumbnail by request: $(answer "$t/admin_att2.log" 1002 | head -c 300)"
-MS=4000 client admin checkpass12 "$t/admin_files2.log" '{"cmd":"file_settings","budget":0,"lod2_after":0}'
+client admin checkpass12 "$t/admin_files2.log" '{"cmd":"file_settings","budget":0,"lod2_after":0}'
 answer "$t/admin_files2.log" 1001 | grep -q '"ok":true' ||
 	fail "the budget: $(answer "$t/admin_files2.log" 1001)"
 [ "$(get /f/$FJ)" = 200 ] && [ "$(image)" = "JPEG 960x240 " ] ||
@@ -383,7 +405,7 @@ answer "$t/admin_files2.log" 1001 | grep -q '"ok":true' ||
 [ "$(get /f/$FJ/thumb)" = 200 ] && [ "$(image)" = "JPEG 320x80 " ] ||
 	fail "the thumbnail after the crush: $(image)"
 [ "$(get /f/$FO)" = 404 ] || fail "the other file over the budget was kept"
-MS=4000 client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","delete_after":0}'
+client admin checkpass12 "$t/admin_files3.log" '{"cmd":"file_settings","delete_after":0}'
 [ "$(get /f/$FJ)" = 404 ] && [ "$(get /f/$FP)" = 404 ] ||
 	fail "past delete_after an image was kept"
 
@@ -399,25 +421,25 @@ mkdir "$t/repo" && cd "$t/repo" && $g init -q && echo one > f.txt &&
 	$g format-patch -q -1 -o .. && cd "$here/Build" ||
 	fail "the test repository"
 mv "$t"/0001-*.patch "$t/fix.patch"
-MS=4000 client admin checkpass12 "$t/tr_admin.log" '{"cmd":"file_settings","budget":1000000000,"lod2_after":86400,"delete_after":8640000}
+client admin checkpass12 "$t/tr_admin.log" '{"cmd":"file_settings","budget":1000000000,"lod2_after":86400,"delete_after":8640000}
 {"cmd":"new_topic","name":"Tracker","about":"Tickets","tracker":true}
 {"cmd":"tracker_domains","add":["codeberg.org"]}' \
 	"BUILDAT_HEARTH_ADMIN=add dave davepass1234"
 T=$(res "$t/tr_admin.log" 1002 'r["result"]')
 [ -n "$T" ] || fail "the tracker topic: $(answer "$t/tr_admin.log" 1002)"
-MS=4000 client dave davepass1234 "$t/tr_dave1.log" "{\"cmd\":\"upload\",\"name\":\"fix.patch\",\"data\":\"$(xxd -p "$t/fix.patch" | tr -d '\n')\"}
+client dave davepass1234 "$t/tr_dave1.log" "{\"cmd\":\"upload\",\"name\":\"fix.patch\",\"data\":\"$(xxd -p "$t/fix.patch" | tr -d '\n')\"}
 {\"cmd\":\"upload\",\"name\":\"fake.patch\",\"data\":\"68690a\"}"
 F=$(res "$t/tr_dave1.log" 1001 'r["result"]["id"] if r["result"]["patch"] else ""')
 [ -n "$F" ] || fail "a new account's patch: $(answer "$t/tr_dave1.log" 1001)"
 answer "$t/tr_dave1.log" 1002 | grep -q "no files yet" ||
 	fail "a .patch that is not one: $(answer "$t/tr_dave1.log" 1002)"
-MS=4000 client dave davepass1234 "$t/tr_dave2.log" "{\"cmd\":\"new_thread\",\"topic\":$T,\"kind\":\"patch\",\"title\":\"f.txt: two\",\"body\":\"[fix.patch](/f/$F/fix.patch), also at https://codeberg.org/dave/buildat\"}
+client dave davepass1234 "$t/tr_dave2.log" "{\"cmd\":\"new_thread\",\"topic\":$T,\"kind\":\"patch\",\"title\":\"f.txt: two\",\"body\":\"[fix.patch](/f/$F/fix.patch), also at https://codeberg.org/dave/buildat\"}
 {\"cmd\":\"new_thread\",\"topic\":1,\"kind\":\"patch\",\"title\":\"x\",\"body\":\"y\"}"
 D=$(res "$t/tr_dave2.log" 1001 'r["result"]')
 [ -n "$D" ] || fail "a new account's patch ticket: $(answer "$t/tr_dave2.log" 1001)"
 answer "$t/tr_dave2.log" 1002 | grep -q "in a tracker topic" ||
 	fail "a patch outside a tracker: $(answer "$t/tr_dave2.log" 1002)"
-MS=4000 client dave davepass1234 "$t/tr_dave3.log" "{\"cmd\":\"reply\",\"thread\":$D,\"body\":\"see https://evil.example/x\"}
+client dave davepass1234 "$t/tr_dave3.log" "{\"cmd\":\"reply\",\"thread\":$D,\"body\":\"see https://evil.example/x\"}
 {\"cmd\":\"tracker_link\",\"thread\":$D,\"link\":\"https://git.dave.example/buildat/tree/fix\"}
 {\"cmd\":\"thread\",\"thread\":$D}"
 answer "$t/tr_dave3.log" 1001 | grep -q '"ok":true' ||
@@ -429,13 +451,13 @@ answer "$t/tr_dave3.log" 1001 | grep -q '"ok":true' ||
 	! grep -q "Tracker:" "$t/page" && ! grep -q "evil.example" "$t/page" &&
 	grep -q "Waiting for a Keeper to approve its link" "$t/page" ||
 	fail "the ticket's page before the domain: $(grep -c . "$t/page") lines"
-MS=4000 client admin checkpass12 "$t/tr_admin2.log" '{"cmd":"queue"}'
+client admin checkpass12 "$t/tr_admin2.log" '{"cmd":"queue"}'
 R=$(res "$t/tr_admin2.log" 1001 '[x["id"] for x in r["result"] if x["kind"] == "domain" and x["reason"] == "git.dave.example"][0]')
 [ -n "$R" ] || fail "the domain is not queued: $(answer "$t/tr_admin2.log" 1001 | cut -c1-300)"
-MS=4000 client admin checkpass12 "$t/tr_admin3.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"accept\"}"
+client admin checkpass12 "$t/tr_admin3.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"accept\"}"
 [ "$(get /t/$D)" = 200 ] && grep -q 'Tracker: <a rel="nofollow ugc" href="https://git.dave.example/buildat/tree/fix"' "$t/page" ||
 	fail "the accepted domain's link is not shown: $(answer "$t/tr_admin3.log" 1001)"
-MS=4000 client admin checkpass12 "$t/tr_admin4.log" '{"cmd":"tracker_domains","remove":["git.dave.example"]}'
+client admin checkpass12 "$t/tr_admin4.log" '{"cmd":"tracker_domains","remove":["git.dave.example"]}'
 [ "$(get /t/$D)" = 200 ] && ! grep -q "Tracker:" "$t/page" ||
 	fail "a removed domain's link is still shown"
 [ "$(get /f/$F/fix.patch)" = 200 ] && cd "$t/repo2" && $g am -q "$t/page" &&
@@ -444,10 +466,10 @@ MS=4000 client admin checkpass12 "$t/tr_admin4.log" '{"cmd":"tracker_domains","r
 echo "ok: a new account's patch ticket, inline and applied with git am; its links and its tracker link by the domains"
 # [SEC_HEARTH_FILES]: the ticket hidden, its patch is not served
 M=$(res "$t/tr_dave3.log" 1003 'r["result"]["list"][0]["id"]')
-MS=4000 client admin checkpass12 "$t/tr_admin5.log" "{\"cmd\":\"report\",\"message\":$M,\"reason\":\"x\"}
+client admin checkpass12 "$t/tr_admin5.log" "{\"cmd\":\"report\",\"message\":$M,\"reason\":\"x\"}
 {\"cmd\":\"queue\"}"
 R=$(res "$t/tr_admin5.log" 1002 "[x['id'] for x in r['result'] if x['message'] == $M][0]")
-MS=4000 client admin checkpass12 "$t/tr_admin6.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"hide\",\"statement\":\"x\"}"
+client admin checkpass12 "$t/tr_admin6.log" "{\"cmd\":\"moderate\",\"report\":$R,\"action\":\"hide\",\"statement\":\"x\"}"
 answer "$t/tr_admin6.log" 1001 | grep -q '"ok":true' ||
 	fail "the ticket's hide: $(answer "$t/tr_admin6.log" 1001)"
 [ "$(get /f/$F/fix.patch)" = 404 ] || fail "a hidden ticket's patch is served"
@@ -473,7 +495,7 @@ while [ "$(get "$u")" = 200 ] && pages=$((pages + 1)) &&
 		u=$(grep -o '/t/1?after=[0-9]*' "$t/page"); do :; done
 [ $pages -ge 2 ] && grep -q "END20" "$t/page" && ! grep -q "END1<" "$t/page" ||
 	fail "the long thread's pages ($pages, the last: $(grep -o 'END[0-9]*' "$t/page" | tr '\n' ' '))"
-client admin checkpass12 "$t/admin10.log" '' BUILDAT_HEARTH_OPEN=1
+WAIT=END20 client admin checkpass12 "$t/admin10.log" '' BUILDAT_HEARTH_OPEN=1
 grep -a '^.*hr: ' "$t/admin10.log" | grep -q '"more":true' &&
 	grep -a 'hr: ' "$t/admin10.log" | grep -q 'END20' ||
 	fail "the client did not read the long thread on"
@@ -506,7 +528,7 @@ answer "$t/bob11.log" 1008 | grep -q '"ok":false' || fail "bob edited a topic"
 # 12. [TRUST_LADDER]: a held link, a helper, reports weighed by network
 num(){ answer "$1" $2 | grep -o '"result":[0-9]*' | cut -d: -f2; }
 B1=$(num "$t/bob.log" 1001)
-client admin checkpass12 "$t/admin12a.log" '' "BUILDAT_HEARTH_ADMIN=add erin erinpass1234"
+WAIT="admin result: " client admin checkpass12 "$t/admin12a.log" '' "BUILDAT_HEARTH_ADMIN=add erin erinpass1234"
 client erin erinpass1234 "$t/erin12.log" '{"cmd":"reply","thread":1,"body":"see [lamps](//erinlamps.example)"}
 {"cmd":"reply","thread":1,"body":"and https://two.example"}'
 held=$(num "$t/erin12.log" 1001)
@@ -559,7 +581,7 @@ echo "ok: held links approved by a helper, reports by network"
 # for a helper, whose "show to everyone" draws it for all, in the log; a
 # helper takes one back; the account trusted, its other images are
 # shown, the one taken back not
-client admin checkpass12 "$t/admin13a.log" '' "BUILDAT_HEARTH_ADMIN=add frank frankpass1234"
+WAIT="admin result: " client admin checkpass12 "$t/admin13a.log" '' "BUILDAT_HEARTH_ADMIN=add frank frankpass1234"
 client frank frankpass1234 "$t/frank13.log" "{\"cmd\":\"upload\",\"name\":\"one.png\",\"data\":\"$(cat "$t/up_png")\"}
 {\"cmd\":\"upload\",\"name\":\"two.png\",\"data\":\"$(cat "$t/up_png")\"}
 {\"cmd\":\"upload\",\"name\":\"three.png\",\"data\":\"$(cat "$t/up_png")\"}
@@ -633,7 +655,8 @@ echo "ok: a helper vets only below its level; an image by its exact path; /f/ no
 # below its own and kicks and bans, but no password reset
 client admin checkpass12 "$t/admin12c.log" '{"cmd":"level","name":"dave","level":30}'
 answer "$t/admin12c.log" 1001 | grep -q '"ok":true' || fail "dave made a Steward: $(answer "$t/admin12c.log" 1001)"
-client dave davepass1234 "$t/dave12b.log" '{"cmd":"me"}' "BUILDAT_HEARTH_ADMIN=level bob 20
+WAIT="accounts listed
+admin result: erin is a Guest" client dave davepass1234 "$t/dave12b.log" '{"cmd":"me"}' "BUILDAT_HEARTH_ADMIN=level bob 20
 level carol 30
 password bob newpass1234
 level erin 0"

@@ -27,7 +27,7 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
-start_server "$tmp/sp.log" "setup code" 120 $SP \
+start_server "$tmp/sp.log" "setup code" 60 $SP \
 	Build/bin/buildat_server -m apps/starport -D "$tmp/sp" -l 3 ||
 	fail "the Starport did not start"
 pids+=($SERVER_PID)
@@ -42,10 +42,17 @@ J
 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/f" -P $AN -W "$here/web" \
 	-l 3 > "$tmp/f.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 180); do grep -q "verified ok" "$tmp/sp.log" && break; sleep 1; done
+fp=$!
+for _ in $(seq 300); do
+	grep -q "verified ok" "$tmp/sp.log" && break
+	kill -0 $fp 2>/dev/null || fail "floorplanner ($tmp/f.log)"
+	sleep 0.2
+done
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing ($tmp/f.log)"
 
-printf 'delay 6000\nquit\n' > "$tmp/cmds.txt"
+# Until the three requests are answered; the account until it is joined
+printf 'wait_log_any 30000 "id":3,\nquit\n' > "$tmp/cmds.txt"
+printf 'wait_log_any 30000 Joined as webop\nquit\n' > "$tmp/cmds_op.txt"
 # Claimed, as a listing is only served then
 code=$(grep -o "setup code [A-Z0-9]*" "$tmp/sp.log" | cut -d' ' -f3)
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$tmp/f/apps/floorplanner/starport_claim.txt")
@@ -54,16 +61,20 @@ BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"e
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}" \
 	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1
+	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/sp_admin.log" 2>&1 ||
+	fail "the Starport admin's run ($tmp/sp_admin.log)"
 curl -s -m 10 "localhost:$SP/api/v1/list" | grep -q "\"$id\"" ||
 	fail "the claim ($tmp/sp_admin.log)"
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/f.log" | tail -1 | cut -d' ' -f3)
 BUILDAT_FP_NAME=webop BUILDAT_FP_PASSWORD=webpass123 BUILDAT_FP_CREATE=1 \
 	BUILDAT_FP_CODE=$setup timeout 90 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
-	-c @"$tmp/cmds.txt" > "$tmp/op.log" 2>&1
-grep -q "Joined as webop" "$tmp/op.log" || fail "the account ($tmp/op.log)"
+	-c @"$tmp/cmds_op.txt" > "$tmp/op.log" 2>&1
+grep -v "command: \|wait_log" "$tmp/op.log" | grep -q "Joined as webop" || fail "the account ($tmp/op.log)"
 
+# simplified: web_fetch.json's waits between its clicks are by time: the
+# screens they open (the login page may come before or after starport:where,
+# the ntfy question's Escape, the menus) have no line pinned down for them
 WEB_DRIVE_URL="http://127.0.0.1:$AN/" "$here/util/web_drive.sh" firefox floorplanner \
 	"${1:-$here/util/web_fetch.json}" "$tmp/drive" > "$tmp/drive.txt" 2>&1 ||
 	fail "the drive ($tmp/drive.txt, $tmp/drive)"

@@ -52,7 +52,7 @@ L
 echo "enable_damage = false" > "$d/apps/vanilla/saves/wl/luanti/world.mt"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
@@ -66,25 +66,31 @@ stub="(function(){ var held = null, refuse = false;
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
+# A move every 200 ms, the last given a second for its look to reach the
+# server; the other waits are settles after a line: the world and the
+# pause menu up after the ready, the lock asked for in the frames after
+# the mouse mode changes
 moves='["mouse", 600, 400], ["wait", 200], ["mouse", 700, 420], ["wait", 200],
  ["mouse", 800, 440], ["wait", 200], ["mouse", 900, 460], ["wait", 1000]'
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "lock_check: ready", 240], ["wait", 3000],
+ ["waitlog", "lock_check: ready", 120], ["wait", 2000],
  ["eval", "$(echo "$stub" | tr "\n" " ")"],
- ["click", 100, 700], ["wait", 1500],
+ ["click", 100, 700], ["waitlog", "pause: a press off the menu", 10],
+ ["waitlog", "mouse mode 1 ", 10], ["wait", 500],
  ["eval", "'lock ' + !!document.pointerLockElement"],
  $moves,
- ["key", "i"], ["wait", 1500],
- ["key", "Escape"], ["wait", 2000],
+ ["key", "i"], ["waitlog", "mouse visible .a form opened", 10],
+ ["key", "Escape"], ["waitlog", "the pointer lock is not held: paused .not given", 10],
  ["eval", "'lock ' + !!document.pointerLockElement"],
  $moves,
  ["shot", "\${OUT}/paused.png"],
- ["click", 100, 700], ["wait", 1500],
+ ["click", 100, 700], ["waitlog", "pause: a press off the menu", 10],
+ ["waitlog", "mouse mode 1 ", 10], ["wait", 500],
  ["eval", "'lock ' + !!document.pointerLockElement"],
  $moves,
- ["eval", "document.exitPointerLock()"], ["wait", 1500]
+ ["eval", "document.exitPointerLock()"], ["waitlog", "mouse visible .a form opened", 10]
 ]
 J
 WEB_DRIVE_VIEWPORT=1200x800 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \

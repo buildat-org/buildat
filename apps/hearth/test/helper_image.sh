@@ -37,10 +37,13 @@ client(){ # name password log cmds [env...]
 answer(){ # log id
 	grep -ao "hr: {.*\"id\":$2,.*" "$1" | head -1
 }
-printf 'delay 6000\nquit\n' > "$t/wait"
-client admin checkpass12 "$t/admin.log" "$t/wait" \
+# Until the request's answer is in, and the admin script's
+printf 'wait_log_any 20000 "id":1001,\nquit\n' > "$t/wait"
+printf 'wait_log_any 20000 "id":1001,\nwait_log_any 20000 admin script: done\nquit\n' > "$t/wait_admin"
+client admin checkpass12 "$t/admin.log" "$t/wait_admin" \
 	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"Questions"}' \
-	"BUILDAT_HEARTH_ADMIN=add newbie newbiepass12"
+	"BUILDAT_HEARTH_ADMIN=add newbie newbiepass12" ||
+	fail "the admin's client: $(grep -a "Command sequence failed" "$t/admin.log" | tail -1)"
 answer "$t/admin.log" 1001 | grep -q '"ok":true' || fail "the topic: $(answer "$t/admin.log" 1001)"
 hex=$(xxd -p "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" | tr -d '\n')
 client newbie newbiepass12 "$t/up.log" "$t/wait" BUILDAT_HEARTH_CREATE= \
@@ -51,18 +54,23 @@ client newbie newbiepass12 "$t/post.log" "$t/wait" BUILDAT_HEARTH_CREATE= \
 	BUILDAT_HEARTH_REQS="{\"cmd\":\"new_thread\",\"topic\":1,\"title\":\"Newbie lamp\",\"body\":\"look [![lamp.png](/f/$id/thumb)](/f/$id/lamp.png)\"}"
 answer "$t/post.log" 1001 | grep -q '"ok":true' || fail "the thread: $(answer "$t/post.log" 1001)"
 
+# The 1.5 s on the thread: its thumbnail, a request after the page
 cat > "$t/cmds" <<C
-delay 4000
+wait_log_any 20000 hearth: page
+delay 300
 click Button "Help"
-delay 1500
+wait_log 10000 hearth: page Help
+delay 300
 click Button "Newbie lamp"
-delay 2500
+wait_log 10000 hearth: page Newbie lamp
+delay 1500
 screenshot $t/before.png
 click Button "Show to everyone"
-delay 2500
+wait_log 10000 hearth: page Newbie lamp
+delay 1000
 screenshot $t/after.png
 click Button "Take back"
-delay 1500
+wait_log 10000 hearth: page Newbie lamp
 quit
 C
 client admin checkpass12 "$t/helper.log" "$t/cmds" BUILDAT_HEARTH_CREATE=

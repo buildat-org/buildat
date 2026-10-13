@@ -24,14 +24,19 @@ cd "$here"
 [ -s web/index.html ] || fail "no web/ (util/build_web.sh)"
 
 start() { # app dir
-	start_server "$tmp/$2.log" "STATUS Listening" 120 $P \
+	start_server "$tmp/$2.log" "STATUS Listening" 60 $P \
 		Build/bin/buildat_server -m "apps/$1" -D "$tmp/$2" -l 3 ||
 		fail "the server ($tmp/$2.log)"
 	pid=$SERVER_PID
-	sleep 1
 }
 stop() { kill $pid; wait $pid 2>/dev/null; pid=; }
-title() { curl -s -m 10 "http://127.0.0.1:$P/index.html" | grep -o "<title>.*</title>"; }
+title() { # once the page is served
+	local i
+	for i in $(seq 50); do
+		curl -s -m 5 "http://127.0.0.1:$P/index.html" | grep -o "<title>.*</title>" && return
+		sleep 0.2
+	done
+}
 
 start hearth plain
 t=$(title); stop

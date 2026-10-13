@@ -25,7 +25,7 @@ P=29898
 U=http://127.0.0.1:$P
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 $P \
+start_server "$t/srv.log" "setup code" 60 $P \
 	bin/buildat_server -m ../apps/hearth -D "$t/srv" -W ../web -l 3 ||
 	fail "Hearth did not start"
 pid=$SERVER_PID
@@ -34,49 +34,64 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 
 # The admin's topic and the reader, trusted (a new account uploads no
 # files, [TRUST_LADDER]), by the native client
-admin(){ # log reqs [env...]
-	local log=$1 reqs=$2
-	shift 2
+admin(){ # log reqs cmds [env...]
+	local log=$1 reqs=$2 cmds=$3
+	shift 3
 	env BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12 \
 		BUILDAT_HEARTH_CREATE=1 BUILDAT_HEARTH_CODE=$code \
 		BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 120 bin/buildat -o launch_ui=launch_menu -D "$t/cl_admin" \
-		-w 1280x720 -l 3 -o sound_mute=1 -s 127.0.0.1:$P -c @"$t/wait" > "$log" 2>&1
+		-w 1280x720 -l 3 -o sound_mute=1 -s 127.0.0.1:$P -c @"$cmds" > "$log" 2>&1 ||
+		fail "$reqs: the drive ($log)"
 	grep -ao "hr: {.*\"id\":1001,.*" "$log" | head -1 | grep -q '"ok":true' ||
 		fail "$reqs: $(grep -ao "hr: {.*\"id\":1001,.*" "$log" | head -1)"
 }
-printf 'delay 6000\nquit\n' > "$t/wait"
+# The request's answer ("hr: {...}", the first request's id 1001), and
+# with an _ADMIN script, all of that answered too
+printf 'wait_log_any 20000 "id":1001,\nquit\n' > "$t/wait"
+printf 'wait_log_any 20000 "id":1001,\nwait_log_any 20000 admin script: done\nquit\n' \
+	> "$t/wait_admin"
 admin "$t/admin.log" '{"cmd":"new_topic","name":"Help","about":"Questions"}' \
-	"BUILDAT_HEARTH_ADMIN=add reader readerpass12"
-admin "$t/admin2.log" '{"cmd":"trust","name":"reader","on":true}'
+	"$t/wait_admin" "BUILDAT_HEARTH_ADMIN=add reader readerpass12"
+admin "$t/admin2.log" '{"cmd":"trust","name":"reader","on":true}' "$t/wait"
 cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" "$t/screenshot_lamp.png"
 
-# The taps are in CSS pixels, where the page puts the buttons at that size
+# The taps are in CSS pixels, where the page puts the buttons at that size.
+# Each page the hearth opens says so ("hearth: page <title>"), and the
+# uploaded file once its link is in the message; the waits left are a
+# field taking the focus a tap gave it (the tap on the message field) and
+# settles of up to 2 s after a line (the login page's name field focused,
+# the page drawn).
+# simplified: the 1 s after the drag waits for the page's scroll to come to
+# rest (ScrollView's touch inertia) before the shot and the tap on Start; a
+# line from the hearth when a page scroll ends would replace it.
 drive(){ # name viewport join help new message file start title drag
 	local n=$1 vp=$2
 	cat > "$t/$n.json" <<J
 [
 	["nav", "\${URL}app"],
-	["waitlog", "accounts: hello", 120],
-	["wait", 3000],
+	["waitlog", "accounts: hello", 60],
+	["wait", 2000],
 	["type", "reader"], ["key", "Tab"], ["type", "readerpass12"],
 	["tap", $3],
-	["waitlog", "hearth: frame", 60],
-	["wait", 2000],
-	["tap", $4], ["wait", 1500],
-	["tap", $5], ["wait", 1500],
+	["waitlog", "hearth: frame", 20],
+	["wait", 1000],
+	["tap", $4], ["waitlog", "hearth: page Help", 10], ["wait", 500],
+	["tap", $5], ["waitlog", "hearth: page A new thread", 10], ["wait", 500],
 	["type", "${9}"],
 	["tap", $6], ["wait", 500],
 	["type", "My lamp shows black in the corner"],
 	["file", "$t/screenshot_lamp.png"],
 	["tap", $7],
 	["waitlog", "the file picker opened", 10],
-	["wait", 3000],
+	["waitlog", "hearth: the file .* linked", 20],
+	["wait", 500],
 	["shot", "\${OUT}/picked.png"],
 	["drag", ${10}, "touch"], ["wait", 1000],
 	["shot", "\${OUT}/dragged.png"],
 	["tap", $8],
-	["wait", 3000],
+	["waitlog", "hearth: page ${9}", 20],
+	["wait", 1000],
 	["shot", "\${OUT}/posted.png"]
 ]
 J

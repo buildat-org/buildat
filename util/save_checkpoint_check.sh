@@ -33,12 +33,14 @@ core.register_on_joinplayer(function(player)
 	end)
 end)
 L
-echo "wait_log 120000 the server put the player at
+# The client stays on until the shell kills it: the 60 s is its time
+# limit, not a wait
+echo "wait_log 60000 the server put the player at
 delay 60000
 quit" > "$t/c.cmds"
 run(){ # <log> <fixture>: the server and a client; the client's PID in CLIENT
 	BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=w BUILDAT_LUANTI_LUA="$t/u/shared/$2" \
-		start_server "$t/$1.log" "STATUS Listening" 120 auto bin/buildat_server \
+		start_server "$t/$1.log" "STATUS Listening" 60 auto bin/buildat_server \
 		-u launcher=1 -A 127.0.0.1 -m ../apps/vanilla -D "$t/u" -C "$t/c" -l 4 ||
 		fail "the server did not start ($t/$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
@@ -49,9 +51,9 @@ run(){ # <log> <fixture>: the server and a client; the client's PID in CLIENT
 }
 
 run a place.lua
-wait_for_log "$t/a.log" "checkpoint_check: placed at" 120 || fail "nothing placed ($t/a.log)"
+wait_for_log "$t/a.log" "checkpoint_check: placed at" 60 || fail "nothing placed ($t/a.log)"
 pos=$(grep -a "checkpoint_check: placed at" "$t/a.log" | sed 's/.*placed at //')
-sleep 7
+sleep 7 # what is checked: a kill this long after the change keeps it
 kill -0 "$CLIENT" 2>/dev/null || fail "the client left before the kill ($t/a_client.log)"
 kill -9 "$SERVER_PID"; kill "$CLIENT"; wait "$SERVER_PID" "$CLIENT" 2>/dev/null
 grep -aq "checkpoint: " "$t/a.log" || fail "no checkpoint logged ($t/a.log)"
@@ -69,7 +71,7 @@ core.register_on_joinplayer(function(player)
 end)
 L
 run b look.lua
-wait_for_log "$t/b.log" "checkpoint_check: " 120 || fail "nothing read ($t/b.log)"
+wait_for_log "$t/b.log" "checkpoint_check: " 60 || fail "nothing read ($t/b.log)"
 grep -aq "checkpoint_check: floor:leaves, kept yes, glass true" "$t/b.log" ||
 	fail "lost: $(grep -a "checkpoint_check: " "$t/b.log" | sed 's/.*check: //')"
 echo "ok: the node, its field and the item are there after the restart"

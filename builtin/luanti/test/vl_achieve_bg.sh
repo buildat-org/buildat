@@ -47,13 +47,16 @@ end)
 LUA
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29796 \
+	start_server "$out/srv.log" "Mods loaded" 120 29796 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
-{ echo "delay 5000"
-	for i in $(seq -w 1 20); do
+# The form shown plain and then with the bar; 500 ms for it to be drawn,
+# then a shot a second while the form is held
+{ echo "wait_log 90000 form awards:awards opened"
+	echo "wait_log 10000 form awards:awards opened"; echo "delay 500"
+	for i in $(seq -w 1 5); do
 		echo "screenshot $out/s$i.png"; echo "delay 1000"
 	done
 	echo quit; } > "$out/cmds.txt"

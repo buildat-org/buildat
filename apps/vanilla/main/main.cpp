@@ -754,7 +754,11 @@ struct Module: public interface::Module
 	// everyone.
 	void on_chat(const network::Packet &packet)
 	{
-		if(!joined(packet.sender))
+		// [VANILLA_STOP] With no world, a held player who logged in counts:
+		// after the stop's restart nobody is in a world (2026-10-13: the
+		// held page's chat went nowhere)
+		if(!joined(packet.sender) &&
+				!(m_public && !m_scene && m_names.count(packet.sender)))
 			return;
 		sv_<ss_> values;
 		try {

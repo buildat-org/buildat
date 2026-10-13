@@ -21,16 +21,10 @@ fail(){ echo "FAIL: $*"; exit 1; }
 cd "$here/Build"
 A=29811; B=29812
 for p in $A $B; do
-	bin/buildat_server -m ../apps/uitest -D "$t/srv$p" -P $p -l 3 \
-		> "$t/srv$p.log" 2>&1 &
-	pids="$pids $!"
-done
-for p in $A $B; do
-	for _ in $(seq 120); do
-		grep -q "STATUS Listening" "$t/srv$p.log" && break
-		sleep 1
-	done
-	grep -q "STATUS Listening" "$t/srv$p.log" || fail "server $p did not start"
+	start_server "$t/srv$p.log" "STATUS Listening" 60 $p \
+		bin/buildat_server -m ../apps/uitest -D "$t/srv$p" -l 3 ||
+		fail "server $p did not start"
+	pids="$pids $SERVER_PID"
 done
 mkdir -p "$t/u"
 now=$(date +%s)
@@ -39,16 +33,18 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 client(){   # port, sequence -> $t/c$port.log
 	printf "$2" > "$t/seq$1"
 	timeout 60 bin/buildat -o launch_ui=launch_menu -s localhost:$1 -D "$t/u" -w 800x600 -l 3 \
-		-o sound_mute=1 -c @"$t/seq$1" > "$t/c$1.log" 2>&1
+		-o sound_mute=1 -c @"$t/seq$1" > "$t/c$1.log" 2>&1 ||
+		fail "the drive on $1 ($t/c$1.log): $(grep -ao 'Command sequence failed.*' "$t/c$1.log" | head -1)"
 }
 # 1
 client $A 'wait_log 30000 uitest: tcp_connect\nquit\n'
-grep -q "uitest: tcp_connect" "$t/c$A.log" ||
+# Not the drive's own wait for it
+grep "uitest: tcp_connect" "$t/c$A.log" | grep -qv wait_log ||
 	fail "the first server's script did not connect ($(tail -3 "$t/c$A.log"))"
 grep -q "Asking the user about tcp://localhost:9" "$t/c$A.log" &&
 	fail "asked again for the server the row was given to"
-# 2
-client $B "wait_log 30000 Asking the user about\ndelay 1000\nscreenshot $t/b.png\nquit\n"
+# 2: the dialog drawn in the frames after the line
+client $B "wait_log 30000 Asking the user about\ndelay 500\nscreenshot $t/b.png\nquit\n"
 grep -q "Asking the user about tcp://localhost:9 for \"localhost:$B\"" "$t/c$B.log" ||
 	fail "the second server's script was not asked about ($(grep -a 'Asking\|tcp_connect' "$t/c$B.log" | tail -3))"
 [ -n "${SHOT:-}" ] && cp "$t/b.png" "$SHOT"

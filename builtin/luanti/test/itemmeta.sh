@@ -23,15 +23,15 @@ fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="${GAME:-devtest}" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$me/itemmeta.lua" \
-	start_server "$out/srv.log" "Mods loaded" 400 29789 \
+	start_server "$out/srv.log" "Mods loaded" 120 29789 \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 bin/buildat -s localhost:29789 -w 1280x720 -l 3 -c - < "$fifo" > "$out/cli.log" 2>&1 &
+cli=$!
+trap 'kill $cli 2>/dev/null; kill -INT $srv 2>/dev/null' EXIT
 exec 3> "$fifo"
 python3 - "$out/cli.log" "$fifo" "$out/srv.log" <<'PYIN'
 import re, sys, time
@@ -44,7 +44,7 @@ def write(*cmds):
     w.flush()
 def scan():
     global seen
-    write("delay 800", "event scan")
+    write("event scan")
     t0 = time.time()
     while time.time() - t0 < 40:
         data = open(log, "rb").read()[seen:].decode("utf-8", "replace")
@@ -55,22 +55,29 @@ def scan():
     return None
 def fail(why):
     print("FAIL: " + why); write("quit"); sys.exit(1)
-t0 = time.time()
-while time.time() - t0 < 120:
-    if "itemmeta: the stacks are set" in open(srv, "rb").read().decode(
-            "utf-8", "replace"):
-        break
-    time.sleep(1)
-time.sleep(4)
+# A line in a log, anywhere in it
+def wait_for(path, text, secs):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if text.encode() in open(path, "rb").read():
+            return
+        time.sleep(0.1)
+    fail("no \"%s\" in %d s (%s)" % (text, secs, path))
+# The stacks are set four seconds after the join, on the server; the
+# client's world drawn, then a settle of a second for the inventory to
+# reach the hotbar in the frames after
+wait_for(srv, "itemmeta: the stacks are set", 90)
+write("wait_log_any 60000 scene, 0 undrawn within 2", "delay 1000")
 lines = scan()
-# Slot 1 in hand, which is where the hand's own picture is read
+# Slot 1 in hand, which is where the hand's own picture is read; the
+# 800 ms are the hand swapped in the frames after the key
+png = sys.argv[1].replace("cli.log", "hotbar.png")
 write("keypress 1", "delay 800")
-write("screenshot " + sys.argv[1].replace("cli.log", "hotbar.png"), "delay 600")
-time.sleep(1.5)
+write("screenshot " + png)
+wait_for(log, "Wrote screenshot " + png, 10)
 hot = [l for l in lines or [] if "hotbar" in l]
 print((hot[0].split("hotbar ")[-1][:120]) if hot else "no hotbar line")
 write("quit")
-time.sleep(1.0)
 from PIL import Image
 im = Image.open(sys.argv[1].replace("cli.log", "hotbar.png")).convert("RGB")
 w, h = im.size
@@ -106,10 +113,11 @@ ok = share > 1.0 and diff > 5 and pdiff > 5
 print("PASS: the colour, the overlay and the palette are what is drawn" if ok
       else "FAIL: red %.2f %%, overlay %.1f, palette %.1f" % (
           share, diff, pdiff))
+sys.exit(0 if ok else 1)
 PYIN
 status=$?
 exec 3>&-
-sleep 2
+for i in $(seq 50); do kill -0 $cli 2>/dev/null || break; sleep 0.2; done
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 150); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 exit $status

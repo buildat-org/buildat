@@ -31,12 +31,13 @@ P=$SERVER_PORT
 A=http://127.0.0.1:$P
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+printf 'wait_log_any 30000 ai: {"id":1,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl0" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1 ||
+	fail "the bind's run: $(grep -a 'Command sequence failed\|^E' "$t/bind.log" | tail -2)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 LONG=a_package_with_a_long_name_to_the_end
 publish(){ # name description
@@ -73,7 +74,11 @@ drive(){ # size scale log commands
 	grep -aq "Command sequence complete" "$3" ||
 		fail "the drive ($(grep -a "Command seq\|aitta \(status\|panel\)" "$3" | tail -3))"
 }
-open='delay 4000\ntext apps from aitta\ndelay 1000\nkeypress Return\nwait_log 15000 aitta status: 14 packages\ndelay 1000\n'
+# Home's rows, then its rows for what is typed; the second after the
+# status line is the list's layout settling. The short delays left below
+# are a frame or two for the wheel's scroll, the edit's focus and the
+# popup's Down, which log nothing
+open='wait_log_any 30000 rows in \ntext apps from aitta\nwait_log 5000 rows for "apps from aitta"\nkeypress Return\nwait_log 15000 aitta status: 14 packages\ndelay 1000\n'
 # Outside: the window outside the frame, or one of its parts down to the
 # list's and the panel's viewports outside the window (what is in a
 # viewport is clipped by it, so scrolled-away rows are not counted)
@@ -107,7 +112,7 @@ print("\n".join(bad[:5]))'
 }
 
 # 1. Wide: the rows, the wheel, a click
-drive 1280x700 1.4 "$t/wide.log" "${open}event scan wide\nscreenshot $t/wide.png\nmouse_pos 300 250\nmouse_wheel -40\ndelay 500\nscreenshot $t/wheel.png\nclick Button \"tester/zz_last\"\ndelay 1500\nscreenshot $t/last.png\nquit\n"
+drive 1280x700 1.4 "$t/wide.log" "${open}event scan wide\nscreenshot $t/wide.png\nmouse_pos 300 250\nmouse_wheel -40\ndelay 500\nscreenshot $t/wheel.png\nclick Button \"tester/zz_last\"\nwait_log 10000 aitta panel: tester/zz_last\nscreenshot $t/last.png\nquit\n"
 n=$(grep -a "scan wide: " "$t/wide.log" | grep -ac 'Text at .* text "tester/')
 [ "$n" -ge 5 ] || fail "rows in the scan: $n"
 for i in 01 12; do
@@ -120,7 +125,7 @@ o=$(outside "$t/wide.log" wide)
 echo "ok: the rows, the wheel to the last, its panel; inside the window"
 
 # 2. Install from the panel; the Installed filter
-drive 1280x700 1.4 "$t/inst.log" "${open}click Button \"tester/pkg01\"\ndelay 1000\nclick Button \"Install\"\nwait_log 15000 aitta status: Installed\ndelay 1000\nscreenshot $t/installed.png\nclick DropDownList \"▼\"\ndelay 500\nkeypress Down\ndelay 200\nkeypress Return\ndelay 1500\nevent scan filtered\nquit\n"
+drive 1280x700 1.4 "$t/inst.log" "${open}click Button \"tester/pkg01\"\nwait_log 10000 aitta panel: tester/pkg01\nclick Button \"Install\"\nwait_log 15000 aitta status: Installed\ndelay 1000\nscreenshot $t/installed.png\nclick DropDownList \"▼\"\nwait_log 5000 dropdown_\nkeypress Down\ndelay 200\nkeypress Return\nwait_log 15000 aitta status: 14 packages, 1 shown\nevent scan filtered\nquit\n"
 grep -aq "aitta status: Installed tester/pkg01 1.0.0" "$t/inst.log" ||
 	fail "the install: $(grep -a 'aitta status' "$t/inst.log" | tail -2)"
 [ -d "$t/cl/installed/tester/pkg01/1.0.0" ] || fail "not installed on disk"
@@ -129,7 +134,7 @@ rows=$(grep -a "scan filtered: " "$t/inst.log" | grep -ao 'Text at .* text "test
 echo "ok: installed from the panel; Installed lists it only"
 
 # 3. Typing filters
-drive 1280x700 1.4 "$t/type.log" "${open}click LineEdit \"\"\ndelay 300\ntext pkg1\ndelay 1000\nscreenshot $t/typed.png\nquit\n"
+drive 1280x700 1.4 "$t/type.log" "${open}click LineEdit \"\"\ndelay 300\ntext pkg1\nwait_log 5000 aitta status: 3 of 14 packages\nscreenshot $t/typed.png\nquit\n"
 grep -aq "aitta status: 3 of 14 packages" "$t/type.log" ||
 	fail "typing: $(grep -a 'aitta status' "$t/type.log" | tail -2)"
 echo "ok: typing filters"

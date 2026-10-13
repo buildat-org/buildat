@@ -49,69 +49,87 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap "kill -INT $srv 2>/dev/null${bak:+; cp '$bak' '$settings'}" EXIT
+# A look_dir ends when the camera is aimed; the second or so after it is
+# the third-person camera settling against the wall. A C is said in the
+# chat as the view it turned to.
+# The walled stage is camera.lua's, six seconds after the join, said in
+# the chat; the 2 s after it is a settle for the stage's nodes
 cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
-wait_log 60000 scene, 0 undrawn within 2
+wait_log_any 60000 chat: camera: the floor and the wall are placed
 delay 2000
 look_dir 0 -0.6 1
-delay 1500
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 screenshot $out/first.png
 keypress C
+wait_log 5000 chat (local): Third person view
 delay 1500
 screenshot $out/behind.png
 event scan
 look_dir 1 -0.3 0
+# the camera easing to the aim, a second or so of its own (timing)
 delay 1200
 event scan
 screenshot $out/behind_turned.png
 look_dir 0 0.8 1
+# the camera easing to the aim, a second or so of its own (timing)
 delay 1200
 screenshot $out/behind_up.png
 look_dir 0 -0.8 1
+# the camera easing to the aim, a second or so of its own (timing)
 delay 1200
 screenshot $out/behind_down.png
 look_dir 0 -0.1 1
+# the camera easing to the aim, a second or so of its own (timing)
 delay 1200
 event scan
 screenshot $out/behind_centred.png
 keypress C
+wait_log 5000 chat (local): Third person view (front)
 delay 1500
 screenshot $out/front.png
 keypress C
-delay 800
+wait_log 5000 chat (local): First person view
 # And the same back view on a floor with nothing behind the player, which
 # is what says how the third-person camera frames them when no wall is
 # pulling it in ([OVER_SHOULDER]). The stage is asked for by chat so it
 # cannot land in the middle of the shots above.
 keypress T
-delay 800
+wait_log 5000 chat: the line opened
 text open
 keypress Return
 wait_log 30000 chat: camera: the open stage is ready
-delay 2500
+delay 2000
 look_dir 0 -0.1 1
-delay 1200
+# a settle: first person is aimed at once, the view drawn after it
+delay 500
 event scan
 screenshot $out/open_first.png
 keypress C
+wait_log 5000 chat (local): Third person view
+# the camera easing out from the eye with no wall to stop it, the model
+# hidden until it is out (timing; 2026-10-13: at 1.2 s it was not drawn)
 delay 1500
 look_dir 0 -0.1 1
+# the camera easing to the aim, a second or so of its own (timing)
 delay 1200
 event scan
 screenshot $out/open_behind.png
 keypress C
+wait_log 5000 chat (local): Third person view (front)
 keypress C
-delay 500
+wait_log 5000 chat (local): First person view
 quit
 CMDS
 bin/buildat -s localhost:29778 -w 1280x720 -l 3 -c @"$out/cmds.txt" \
-	> "$out/cli.log" 2>&1
-sleep 2
+	> "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep -aE "self model at|camera at" "$out/cli.log" | sed 's/.*: scan/scan/'
 # The back view's pitch follows the look ([BOX_PLAYTEST_4] 3): looking up
 # the sky is the top of the frame, looking down the ground is the bottom
@@ -135,11 +153,15 @@ print("behind, looking up: top %.0f bottom %.0f; down: top %.0f bottom %.0f" %
 # world. The share is what to read and not the mean -- the mean moves
 # with whatever ground is behind, and read 131 one run and 94 the next
 # on the same view, where the share held at about a half (2026-09-22).
-im = Image.open("%s/open_behind.png" % out).convert("L")
-w, h = im.size
-patch = list(im.crop((w // 2 - 24, h // 2 - 24, w // 2 + 24,
-		h // 2 + 24)).getdata())
-dark = sum(1 for v in patch if v < 75) / float(len(patch))
+# The model is what differs from the first-person shot of the same look
+# (2026-10-13: "dark" pixels read 0% centred for a skin with grey hair)
+def patch(name):
+	im = Image.open("%s/%s.png" % (out, name)).convert("RGB")
+	w, h = im.size
+	return list(im.crop((w // 2 - 24, h // 2 - 24, w // 2 + 24,
+			h // 2 + 24)).getdata())
+dark = sum(1 for a, b in zip(patch("open_behind"), patch("open_first"))
+		if max(abs(x - y) for x, y in zip(a, b)) > 20) / float(48 * 48)
 shoulder = len(sys.argv) > 2 and sys.argv[2] != ""
 print("the crosshair's patch is %.0f%% model (centred reads 93, over the "
 		"shoulder about 50)" % (dark * 100))

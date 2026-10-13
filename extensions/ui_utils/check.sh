@@ -16,35 +16,42 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/menu_keys"
 rm -rf "$out"; mkdir -p "$out"
 cd "$here/Build"
-port=29881
-bin/buildat_server -m ../apps/floorplanner -D "$out/srv" -P $port -l 3 > "$out/srv.log" 2>&1 &
-for i in $(seq 1 120); do
-	grep -q "setup code" "$out/srv.log" 2>/dev/null && break; sleep 1
-done
-srv=$(pgrep -f "buildat_server .*-D $out/srv" | head -1)
+start_server "$out/srv.log" "setup code" 60 29881 \
+	bin/buildat_server -m ../apps/floorplanner -D "$out/srv" -l 3 ||
+	fail "the server did not start ($out/srv.log)"
+port=$SERVER_PORT; srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 code=$(grep -ao "setup code [A-Z0-9]*" "$out/srv.log" | tail -1 | awk '{print $3}')
 # Up from the picker's name field wraps to its last button, Menu...; in
 # the menu Down twice to My account..., which is the Server window: Right
-# into the page, Down to Two-step login...
+# into the page, Down to Two-step login... Each arrow waits for ui_utils's
+# "keyboard: to" line (-l 4), each Enter for the page it opens; the half
+# seconds are a page's focus put in the frames after its line.
 cat > "$out/cmds.txt" <<CMDS
-delay 7000
+wait_log_any 60000 Plan picker: 
+delay 500
 keypress up
+wait_log 5000 keyboard: to Menu...
 keypress return
-delay 1500
+wait_log 5000 The plan picker's menu shown
+delay 500
 keypress down
 keypress down
+wait_log 5000 keyboard: to My account...
 keypress return
-delay 1500
+wait_log 5000 server window: the page
+delay 500
 keypress right
 keypress down
+wait_log 5000 keyboard: to Two-step login...
 keypress return
-delay 1500
+delay 500
 quit
 CMDS
 BUILDAT_FP_CREATE=1 BUILDAT_FP_NAME=op BUILDAT_FP_PASSWORD=pw123456 BUILDAT_FP_CODE=$code \
-	timeout 120 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+	timeout 90 bin/buildat -o launch_ui=launch_menu -s localhost:$port -D "$out/cli" -w 800x500 -l 4 \
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 grep -a "ui_utils: keyboard" "$out/cli.log" | sed 's/.*ui_utils: //' > "$out/keys.txt"
 cat "$out/keys.txt"
 fail=0

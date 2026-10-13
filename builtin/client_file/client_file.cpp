@@ -369,13 +369,17 @@ struct Module: public interface::Module, public client_file::Interface
 				continue;
 			}
 			const FileInfo &info = *it->second.get();
-			if(info.hash != file_hash){
-				log_w(MODULE, "Requested file differs in hash: \"%s\": "
-						"requested %s, actual %s", cs(file_name),
+			// **A file changed since its announce is sent as it is now**,
+			// under its new hash, which the client takes: dropped, the
+			// client waited for it forever (2026-10-13: devtest's dynamic
+			// testnodes_generated_ck.png, asked for by a client that
+			// connected during the mods' load, replaced by the static one
+			// of the same name when the media were served)
+			if(info.hash != file_hash)
+				log_v(MODULE, "Requested file changed since: \"%s\": "
+						"requested %s, sending %s", cs(file_name),
 						cs(interface::sha1::hex(file_hash)),
 						cs(interface::sha1::hex(info.hash)));
-				continue;
-			}
 			ss_ content;
 			if(info.path.empty()){
 				content = info.content;

@@ -39,20 +39,30 @@ port=30031
 ( cd "$luanti" && exec "$bin" --server --world "$work" --port $port \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
 srv=$!
-for _ in $(seq 120); do grep -q "Server for gameid" "$out/luanti_srv.log" && break; sleep 1; done
+for _ in $(seq 600); do
+	grep -q "Server for gameid" "$out/luanti_srv.log" && break
+	kill -0 $srv 2>/dev/null || { echo "FAIL: official Luanti's server exited"; exit 1; }
+	sleep 0.2
+done
+grep -q "Server for gameid" "$out/luanti_srv.log" || { echo "FAIL: official Luanti's server did not start"; kill $srv; exit 1; }
 ( cd "$luanti" && exec "$bin" --go --address 127.0.0.1 --port $port --name uip \
 	--config "$out/luanti.conf" > "$out/luanti_cli.log" 2>&1 ) &
 cli=$!
 trap 'kill $cli $srv 2>/dev/null' EXIT
 win=""
-for _ in $(seq 40); do
-	sleep 1
+# Its window, polled
+for _ in $(seq 200); do
 	win=$(wmctrl -lp | awk -v p="$cli" '$3 == p {print $1; exit}')
 	[ -n "$win" ] && break
+	kill -0 $cli 2>/dev/null || break
+	sleep 0.2
 done
 [ -n "$win" ] || { echo "FAIL: no window for official Luanti"; exit 1; }
+# Each form on the server's timer; official's client logs nothing as it
+# shows one, so the 2 s after the server's line are its drawing
 for f in legacy real items bg; do
-	for _ in $(seq 90); do grep -q "UIP $f" "$out/luanti_srv.log" && break; sleep 1; done
+	for _ in $(seq 300); do grep -q "UIP $f" "$out/luanti_srv.log" && break; sleep 0.2; done
+	grep -q "UIP $f" "$out/luanti_srv.log" || { echo "FAIL: official Luanti showed no $f form"; exit 1; }
 	sleep 2
 	import -window "$win" "$out/official_$f.png"
 done
@@ -70,9 +80,14 @@ BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=uip BUILDAT_LUANTI_LUA="$t/srv/s
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 pid=$SERVER_PID
-printf "wait_log 90000 the server put the player at\ndelay 6000\nscreenshot $out/buildat_legacy.png\ndelay 8000\nscreenshot $out/buildat_real.png\ndelay 8000\nscreenshot $out/buildat_items.png\ndelay 6000\nmouse_pos 512 384\ndelay 500\nmouse_pos 513 384\ndelay 2000\nscreenshot $out/buildat_tips.png\ndelay 8000\nscreenshot $out/buildat_bg.png\nquit\n" > "$t/c"
+# Each form as the client opens it; the 1.5 s after the line are its
+# pictures loaded and drawn. The tooltip: a move to start the hover, and
+# the 2 s are its hover time
+f="wait_log 15000 form uip opened\ndelay 1500\n"
+printf "wait_log 90000 the server put the player at\n${f}screenshot $out/buildat_legacy.png\n${f}screenshot $out/buildat_real.png\n${f}screenshot $out/buildat_items.png\n${f}mouse_pos 512 384\ndelay 500\nmouse_pos 513 384\ndelay 2000\nscreenshot $out/buildat_tips.png\n${f}screenshot $out/buildat_bg.png\nquit\n" > "$t/c"
 timeout 150 bin/buildat -s 127.0.0.1:$P -w ${W}x$H -u 1 -l 3 -o sound_mute=1 \
-	-c @"$t/c" > "$out/buildat_cli.log" 2>&1
+	-c @"$t/c" > "$out/buildat_cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/buildat_cli.log): $(grep -ao 'Command sequence failed.*' "$out/buildat_cli.log" | head -1)"; exit 1; }
 
 python3 - "$out" <<'PY'
 import sys, numpy as np

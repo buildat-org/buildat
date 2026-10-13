@@ -1,7 +1,8 @@
 [
  ["nav", "${URL}index.html"],
  ["waitlog", "hello: Starport IDs taken", 90],
- ["wait", 3000],
+ ["waitlog", "accounts: the login page shown", 20],
+ ["wait", 500],
  ["click", 600, 273],
  ["wait", 4000],
  ["window", 1],

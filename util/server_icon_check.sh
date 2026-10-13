@@ -22,7 +22,7 @@ fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
 start() { # log
-	start_server "$tmp/$1" "STATUS Listening" 120 $P \
+	start_server "$tmp/$1" "STATUS Listening" 60 $P \
 		Build/bin/buildat_server -m apps/hearth -D "$tmp/srv" -l 3 ||
 		fail "the server ($tmp/$1)"
 	pid=$SERVER_PID
@@ -48,9 +48,10 @@ start srv2.log
 icon admin.png
 cmp -s "$tmp/admin.png" "$tmp/srv/apps/hearth/server_icon.png" ||
 	fail "the favicon is not the admin's server_icon.png"
-printf 'delay 3000\nquit\n' > "$tmp/cmds"
+printf 'wait_log_any 20000 announced files are cached\nquit\n' > "$tmp/cmds"
 timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 640x480 -l 3 -o sound_mute=1 \
-	-s 127.0.0.1:$P -c @"$tmp/cmds" > "$tmp/cl.log" 2>&1
+	-s 127.0.0.1:$P -c @"$tmp/cmds" > "$tmp/cl.log" 2>&1 ||
+	fail "the client ($tmp/cl.log): $(grep -a "Command sequence failed" "$tmp/cl.log" | tail -1)"
 grep -q "The server's icon: .*server_icon.png" "$tmp/srv2.log" ||
 	fail "the list's icon is not the admin's ($tmp/srv2.log)"
 stop

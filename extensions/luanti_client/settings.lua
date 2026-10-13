@@ -247,9 +247,12 @@ function M.show()
 		if key == KEY_ESCAPE then
 			save()
 			uistack.main:pop(root)
+			log:info("settings: closed")
 			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
+	-- What a check waits for
+	log:info("settings: the screen shown")
 end
 
 -- The pause menu ([LUANTI_PAUSE]), as vanilla's apps/vanilla pause.lua
@@ -269,6 +272,7 @@ function M.show_pause(o)
 	title.text = "Paused"
 	local function close()
 		uistack.main:pop(root)
+		log:info("pause: closed")
 	end
 	menu:add("Continue playing", close, true)
 	menu:add("Key bindings", function()
@@ -314,6 +318,7 @@ function M.show_pause(o)
 		s.view_range = v
 		M.save(s)
 		o.view:set_far_clip(v)
+		log:info("view range " .. v .. ", saved")
 	end)
 	M.add_sensitivity(menu, s)
 	menu:add("Settings...", function()
@@ -344,6 +349,8 @@ function M.show_pause(o)
 			return true
 		end
 	end)
+	-- What a check waits for
+	log:info("pause: the menu shown")
 	return root
 end
 

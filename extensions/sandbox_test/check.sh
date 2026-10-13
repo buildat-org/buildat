@@ -24,24 +24,28 @@ if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
 fi
 # "q" pressed on the launch UI, then "w" and "e" into the Starport ID
-# dialog's fields (the overlay's "Starport ID..." at the top right)
+# dialog's fields (the overlay's "Starport ID..." at the top right). The
+# safe tests' meshes and broken images log Urho3D errors on purpose. The
+# half second at the end is the frames a poll of w or e would be logged
+# in; a "polled" line is what the verdict below looks for.
 cat > "$out/cmds.txt" <<EOF
-delay 2500
+expect_error Used vertex range can only be queried
+expect_error Could not load texture from image resource
+wait_log_any 30000 reaches tried
 keypress q
-delay 300
+wait_log 5000 launch sandbox: polled q
 mouse_pos 542 9
 mouse_click left
-delay 1500
+wait_log 5000 starport: the ID login shown
 keypress w
-delay 300
 keypress Tab
-delay 300
 keypress e
-delay 300
+delay 500
 quit
 EOF
 bin/buildat -m sandbox_test -w 640x360 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
 if grep -aq "Crash: SIG" "$out/cli.log"; then
 	echo "FAIL: the client crashed --" \
 			"$(grep -a "Crash: SIG" "$out/cli.log" | head -1)"
@@ -80,7 +84,7 @@ fi
 # **Polling the keys** ([SANDBOX_API_AUDIT]): the attack's Update handler
 # saw "q", so the poll works; "w" and "e" went into the client's own
 # fields, which nobody else hears, by event or by GetKeyPress
-if ! grep -aq "launch sandbox: polled q" "$out/cli.log"; then
+if ! grep -aq "sandbox_.*: launch sandbox: polled q" "$out/cli.log"; then
 	echo "FAIL: the key poll did not see q on the launch UI"
 	exit 1
 fi

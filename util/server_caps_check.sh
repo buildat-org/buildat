@@ -18,11 +18,19 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp server_caps; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
-client(){ # <name> <ms> [env...]
-	local n=$1 ms=$2; shift 2
-	printf 'delay %s\nquit\n' "$ms" > "$t/$n.cmds"
+# bgclient <name> <commands> [env...]: in the background, CL its PID
+# (timeout's, which passes a kill on to the client)
+bgclient(){
+	local n=$1; printf "$2" > "$t/$n.cmds"; shift 2
 	env "$@" timeout 120 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$P -D "$t/$n" \
-		-w 640x360 -l 3 -o sound_mute=1 -c @"$t/$n.cmds" > "$t/$n.log" 2>&1
+		-w 640x360 -l 3 -o sound_mute=1 -c @"$t/$n.cmds" > "$t/$n.log" 2>&1 &
+	CL=$!
+	CHECK_PIDS+=($CL)
+}
+# client <name> <commands> [env...]: to its end, the drive's failure the check's
+client(){
+	bgclient "$@"
+	wait $CL || fail "the $1 drive ($t/$1.log): $(grep -ao 'Command sequence failed.*' "$t/$1.log" | head -1)"
 }
 stop(){ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; }
 
@@ -34,7 +42,10 @@ start_server "$t/d1.log" "Listening at" 120 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/d" -l 4 || fail "vanilla did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
-client a 25000
+# simplified: the save passes 1 MB with what the server generates around
+# the player in the 20 s; nothing says when it has. A line where
+# voxelworld's save passes a size would be the event
+client a 'wait_log 60000 the server put the player\ndelay 20000\nquit\n'
 stop
 size=$(du -sb "$t/d/apps" | cut -f1)
 [ "$size" -gt 1000000 ] || fail "the save is only $size bytes"
@@ -48,7 +59,15 @@ start_server "$t/d2.log" "Listening at" 120 auto \
 	--max-view-range 40 --max-world-mb 1 || fail "vanilla did not start again"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
-client b 15000
+# The client held there until the server has said both; the 2 s after
+# are generation asked for again, the cap said only once
+bgclient b 'delay 60000\nquit\n'
+wait_for_log "$t/d2.log" "wants 40 voxels of world" 60 &&
+	wait_for_log "$t/d2.log" "is at max_disk_mb: nothing new is generated" 30 ||
+	fail "the range or the world cap not said ($t/d2.log)"
+# The window in which the cap must not be said again
+sleep 2
+kill $CL; wait $CL 2>/dev/null
 stop
 grep -aq "wants 40 voxels of world" "$t/d2.log" &&
 	! grep -a "wants [0-9]* voxels of world" "$t/d2.log" | grep -vq "wants \(0\|40\) voxels" ||
@@ -66,14 +85,18 @@ start_server "$t/a.log" "Listening at" 120 auto \
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
-client adm 6000 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass0 \
+client adm 'wait_log_any 20000 admin script: done\nquit\n' \
+	BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass0 \
 	BUILDAT_AITTA_ADMIN="$(printf 'add player1 checkpass1\nadd player2 checkpass2')"
-sleep 2
-client p1 25000 BUILDAT_AITTA_NAME=player1 BUILDAT_AITTA_PASSWORD=checkpass1 &
-p1=$!
-sleep 12
-client p2 8000 BUILDAT_AITTA_NAME=player2 BUILDAT_AITTA_PASSWORD=checkpass2
-wait $p1
+# The admin's seat free: the server has seen the client go
+wait_for_log "$t/a.log" "disconnected" 20 || fail "the admin's client not gone ($t/a.log)"
+# The first player held in until the second is turned away
+bgclient p1 'delay 60000\nquit\n' BUILDAT_AITTA_NAME=player1 BUILDAT_AITTA_PASSWORD=checkpass1
+p1=$CL
+wait_for_log "$t/a.log" "player1 joined" 30 || fail "the first player did not join ($t/a.log)"
+client p2 'wait_log_any 30000 Login refused\nquit\n' \
+	BUILDAT_AITTA_NAME=player2 BUILDAT_AITTA_PASSWORD=checkpass2
+kill $p1; wait $p1 2>/dev/null
 grep -aq "player1 joined" "$t/a.log" || fail "the first player did not join ($t/a.log)"
 grep -aq "Login of player2 refused: the server is full" "$t/a.log" ||
 	fail "the second player let in ($t/a.log)"

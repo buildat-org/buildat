@@ -24,6 +24,8 @@ out="$here/local/serverlist_check"; mkdir -p "$out"
 rm -rf "$out/user" "$out/list" "$out/quietuser"
 mkdir -p "$out/user" "$out/list" "$out/quietuser"
 port=30778
+# The list servers this starts, stopped however it ends
+trap 'kill ${mirror:-} ${r1:-} ${r2:-} 2>/dev/null' EXIT
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
 	echo "SKIP: a buildat client is already running" >&2; exit 2
@@ -48,9 +50,12 @@ printf 'accepted,address,description,created,last_attempt,name,icon,server\n"tru
 # launcher that put a permission dialog in front of a first-time user
 # before they asked for anything would be answering a question nobody
 # posed. The list's own launch action is where the asking happens.
-{ echo "delay 6000"; echo "quit"; } > "$out/cmds_quiet.txt"
+# The room up and the extension's word on it; a dialog would have come
+# with the fetch, which is before that word
+{ echo "wait_log_any 30000 until asked to"; echo "wait_log_any 30000 the room hums"
+	echo "quit"; } > "$out/cmds_quiet.txt"
 BUILDAT_SERVERLIST_URL=http://localhost:$port \
-	timeout 90 bin/buildat -m launch_world -D "$out/quietuser" -w 640x360 \
+	timeout 60 bin/buildat -m launch_world -D "$out/quietuser" -w 640x360 \
 	-l 3 -L "$out/quiet.log" -c @"$out/cmds_quiet.txt" > /dev/null 2>&1
 quiet=$(grep -ac "serverli.*not fetching .* until asked to" "$out/quiet.log")
 asked=$(grep -ac "Asking the user about" "$out/quiet.log")
@@ -63,12 +68,13 @@ fi
 pkill -f "http.server $port" 2>/dev/null || true
 (cd "$out/list" && exec python3 -m http.server $port > "$out/http.log" 2>&1) &
 mirror=$!
-sleep 1
-{ echo "delay 8000"; echo "quit"; } > "$out/cmds.txt"
+for i in $(seq 50); do port_taken $port && break; sleep 0.2; done
+port_taken $port || { echo "FAIL: the list's server did not listen ($out/http.log)"; exit 1; }
+{ echo "wait_log_any 30000 servers cached in"; echo "quit"; } > "$out/cmds.txt"
 # The first run fetches and caches; the grid it drew had nothing in it,
 # which is the design: a launcher file cannot wait for the network
 BUILDAT_SERVERLIST_URL=http://localhost:$port \
-	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
+	timeout 60 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
 	-L "$out/first.log" -c @"$out/cmds.txt" > /dev/null 2>&1
 # Rows, not newlines: the file's last row has none
 cached=$(grep -ac "|" "$out/user/extensions/serverlist/serverlist.csv" 2>/dev/null || echo 0)
@@ -82,9 +88,10 @@ if [ "${cached:-0}" -lt 1 ]; then
 fi
 # The second run draws them: one orb a row, a mirror because the action
 # says it is a server, and the room's invented padding stood down
+{ echo "wait_log_any 30000 the room hums"; echo "quit"; } > "$out/cmds_room.txt"
 BUILDAT_SERVERLIST_URL=http://localhost:$port \
-	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
-	-L "$out/second.log" -c @"$out/cmds.txt" > /dev/null 2>&1
+	timeout 60 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
+	-L "$out/second.log" -c @"$out/cmds_room.txt" > /dev/null 2>&1
 kill "$mirror" 2>/dev/null; wait "$mirror" 2>/dev/null
 line=$(grep -a "launch_w.*: servers: .* off a fetched list" "$out/second.log" |
 	head -1 | sed 's/.*servers: //')
@@ -137,10 +144,17 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()' \
 	$other 2>> "$out/redirect_http.log" &
 r2=$!
-sleep 1
+for i in $(seq 50); do
+	port_taken $port && port_taken $other && break
+	sleep 0.2
+done
+# Asked about the redirect's port: the gate held, as a followed redirect
+# would have reached the other server before any asking
+{ echo "wait_log_any 30000 Asking the user about http://localhost:$other"
+	echo "quit"; } > "$out/cmds_redirect.txt"
 BUILDAT_SERVERLIST_URL=http://localhost:$port \
-	timeout 120 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
-	-L "$out/redirect.log" -c @"$out/cmds.txt" > /dev/null 2>&1
+	timeout 60 bin/buildat -m launch_world -D "$out/user" -w 640x360 -l 3 \
+	-L "$out/redirect.log" -c @"$out/cmds_redirect.txt" > /dev/null 2>&1
 kill "$r1" "$r2" 2>/dev/null; wait "$r1" "$r2" 2>/dev/null
 asked=$(grep -ac "Asking the user about http://localhost:$other" "$out/redirect.log")
 reached=$(grep -ac "^reached" "$out/redirect_http.log")

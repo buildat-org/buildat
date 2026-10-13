@@ -146,6 +146,8 @@ function M.show_dead_server(title, on_close)
 	local path, tail = api.local_server_log_tail(20)
 	ui_utils.show_message_dialog(title.."\n\n"..tail..
 			"\nThe full log is at "..path, on_close)
+	-- What a check waits for
+	log:info("dead server shown: " .. title)
 end
 
 -- The connect runs on a worker and this screen polls it
@@ -160,6 +162,8 @@ local function connect_or_show_error(address, fallbacks)
 	end
 	local root, _, status = push_status_screen("connecting",
 			"Connecting to "..address.."...")
+	-- What a check waits for
+	log:info("connect_server(): to " .. address)
 	local t0 = api.get_time_us()
 	local done = false
 	root:SubscribeToStackEvent("Update", function()
@@ -604,6 +608,8 @@ function M.show_connect_to_server()
 				shown = sig
 				lan_rows = rows
 				if tab == "lan" then redraw() end
+				-- What a check waits for
+				log:info("This network: " .. #rows .. " heard")
 			end
 		end)
 
@@ -710,6 +716,8 @@ function M.show_connect_to_server()
 			return true -- taken; the menu's own Escape = Back stands down
 		end
 	end)
+	-- The checks wait for this line
+	log:info("Join a Buildat server: shown")
 end
 
 local function show_starting(game)

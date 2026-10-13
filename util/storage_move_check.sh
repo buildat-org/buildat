@@ -18,9 +18,11 @@ u=$t/u
 old=$u/serverlist/serverlist.csv
 new=$u/extensions/serverlist/serverlist.csv
 run(){ # log
-	printf 'wait_log_any 20000 rows in\ndelay 1000\nquit\n' > "$t/cmds"
-	(cd "$here/Build" && timeout 60 bin/buildat -o launch_ui=launch_menu \
-		-D "$u" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/$1" 2>&1)
+	# Home's rows are read from serverlist's cache: the move is before them
+	printf 'wait_log_any 20000 rows in\nquit\n' > "$t/cmds"
+	(cd "$here/Build" && timeout 40 bin/buildat -o launch_ui=launch_menu \
+		-D "$u" -w 800x600 -l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/$1" 2>&1) ||
+		fail "the client ($t/$1)"
 }
 mkdir -p "$u/serverlist"
 printf '127.0.0.1:30000|Old one|0|devtest\n' > "$old"

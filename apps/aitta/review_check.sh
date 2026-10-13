@@ -28,7 +28,7 @@ trap '[ -n "$pid" ] && kill $pid 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "ke
 fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 pid=$SERVER_PID
@@ -41,8 +41,13 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 admin(){ env BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin \
 	BUILDAT_AITTA_PASSWORD=checkpass BUILDAT_AITTA_CODE=$code "$@"; }
 reqs(){ # who log requests...
-	local who=$1 log=$2; shift 2
-	printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+	local who=$1 log=$2 i; shift 2
+	# Every request's answer, by its id; the admin script's, when there is one
+	{
+		[ -n "${BUILDAT_AITTA_ADMIN:-}" ] && echo "wait_log_any 30000 admin script: done"
+		for i in $(seq $#); do echo "wait_log_any 30000 \"id\":$i,"; done
+		echo quit
+	} > "$t/reqs.cmds"
 	$who BUILDAT_AITTA_REQS="$(printf '%s\n' "$@")" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$who" \
 		-w 800x600 -l 3 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$log" 2>&1
@@ -100,7 +105,7 @@ grep -aq 'ai: {"code":"refused","error":"for the reviewers[^"]*","id":1,"ok":fal
 
 # 2. The admin's playtest, joined from the launcher
 cat > "$t/pt.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 event join 127.0.0.1:$P
 wait_log 30000 accounts: ntfy asked
 delay 500
@@ -122,7 +127,7 @@ delay 1000
 click Button "Accept"
 wait_log 20000 playtest: installed review:tester.pt@1.0.1
 wait_log 60000 minigame/init.lua loaded
-delay 3000
+delay 2000
 screenshot $t/running.png
 quit
 C
@@ -139,15 +144,16 @@ dir=$(find "$t/cl_admin" -path "*/review/tester__pt/1.0.1" -type d)
 # 3. The tile and its Remove; Aitta's page, its badges
 echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
 cat > "$t/grid.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 text remove
-delay 1500
+wait_log 5000 rows for "remove"
+delay 500
 screenshot $t/tile.png
 keypress Return
 wait_log 10000 playtest: removed review:tester.pt@1.0.1: true
 delay 1000
 text apps from aitta
-delay 1000
+wait_log 5000 apps from aitta"
 keypress Return
 wait_log 15000 aitta page: tester/pt
 delay 1500
@@ -168,9 +174,9 @@ grep -aq "aitta page: tester/pt 1.0.1 unreviewed" "$t/grid.log" ||
 # 4. Under the lock, 1.0.0 only
 echo "{\"aittas\": [\"$A\"], \"filters\": {\"unreviewed\": false}}" > "$t/managed.json"
 cat > "$t/lock.cmds" <<C
-delay 4000
+wait_log_any 30000 rows in
 text apps from aitta
-delay 1000
+wait_log 5000 apps from aitta"
 keypress Return
 wait_log 10000 Asking the user about $A
 delay 1000

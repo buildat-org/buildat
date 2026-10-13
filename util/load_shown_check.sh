@@ -33,6 +33,11 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=ls start_server "$t/srv.log" 
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/srv" -C "$t/srv.cache" -l 3 \
 	-W "$here/web" || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
+# The 10 s after the first world is two of the page's 5 s IndexedDB
+# saves (index.html's setInterval): the cache written before the reload.
+# simplified: waited by time, as no save says it is done; a console line
+# from index.html's save() once a save started after the world is written
+# would be the event (each save saying so would be one every 5 s).
 # The second page's own start before its watch: the first one's last
 # lines come in after the navigation
 cat > "$t/steps.json" <<'J'

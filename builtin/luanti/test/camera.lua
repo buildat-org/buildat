@@ -43,6 +43,8 @@ core.register_on_joinplayer(function(player)
 			end
 		end
 		core.log("action", "camera: the floor and the wall are placed")
+		-- What a drive waits for: the client logs a chat line
+		core.chat_send_all("camera: the floor and the wall are placed")
 		-- Driven by chat rather than by a timer, so it cannot land in the
 		-- middle of the walled stage's own shots: the runner types "open"
 		core.register_on_chat_message(function(name, message)

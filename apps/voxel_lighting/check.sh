@@ -68,27 +68,24 @@ shoot()
 	rm -rf "$shots"; mkdir -p "$shots"
 	rm -rf "$dir"; mkdir -p "$dir"
 	rm -f "$out/server.log"
-	bin/buildat_server -m ../apps/voxel_lighting -P "$port" \
-		-l 3 > "$out/server.log" 2>&1 &
-	local server=$!
-	local i
-	for i in $(seq 1 180); do
-		grep -aq "STATUS Listening" "$out/server.log" && break
-		sleep 1
-	done
-	if ! grep -aq "STATUS Listening" "$out/server.log"; then
+	# A taken port is a SKIP (2), a server that does not come up a FAIL (3)
+	local rc
+	start_server "$out/server.log" "STATUS Listening" 60 "$port" \
+		bin/buildat_server -m ../apps/voxel_lighting -l 3
+	rc=$?
+	local server=$SERVER_PID
+	if [ "$rc" != 0 ]; then
+		[ "$rc" = 2 ] && return 2
 		kill -9 "$server" 2>/dev/null; wait "$server" 2>/dev/null
-		echo "the server did not come up:"
-		tail -5 "$out/server.log"
-		return 2
+		return 3
 	fi
 	# **The window size is the check's, not the desk's**: the framings
 	# are comparable between runs only at one size, and -w leaves the
 	# remembered one alone
-	run_client 90 "$out/cli.log" timeout 300 bin/buildat -o launch_ui=launch_menu \
+	run_client 90 "$out/cli.log" timeout 120 bin/buildat -o launch_ui=launch_menu \
 		-s "localhost:$port" -w 1600x900 -l 3 \
 		-c @../apps/voxel_lighting/check.txt > /dev/null 2>&1
-	local rc=$?
+	rc=$?
 	kill "$server" 2>/dev/null; wait "$server" 2>/dev/null
 	cp "$shots"/*.png "$dir"/ 2>/dev/null
 	local n=$(ls "$dir"/*.png 2>/dev/null | wc -l)
@@ -109,10 +106,14 @@ if [ -z "$accept" ] && { [ ! -d "$ref" ] ||
 	exit 2
 fi
 
-if ! shoot "$run"; then
-	case $? in
-	2) echo "SKIP: the voxel_lighting server does not start here" >&2
+# not "if ! shoot": $? in its branch is the negation's 0
+shoot "$run"; shot=$?
+if [ "$shot" != 0 ]; then
+	case $shot in
+	2) echo "SKIP: port $port is taken" >&2
 		exit 2;;
+	3) echo "FAIL: the voxel_lighting server did not come up"
+		exit 1;;
 	esac
 	echo "FAIL: the run did not draw every view"
 	tail -3 "$out/cli.log"

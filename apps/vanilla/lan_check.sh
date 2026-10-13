@@ -20,17 +20,22 @@ mkdir -p "$out"
 cd "$here/Build"
 port=$(( 29600 + (RANDOM % 90) ))
 token=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
-BUILDAT_OWNER_TOKEN=$token bin/buildat_server -m ../apps/vanilla \
-	-A 127.0.0.1 -P "$port" -u launcher=1 > "$out/srv.log" 2>&1 &
-srv_pid() { pgrep -f "[b]uildat_server -m ../apps/vanilla -A 127.0.0.1 -P $port"; }
-trap 'kill -9 $(srv_pid) 2>/dev/null' EXIT
-for i in $(seq 1 120); do
-	grep -aq "STATUS Listening" "$out/srv.log" && break
-	sleep 1
-done
-python3 - "$port" "$token" > "$out/client.log" 2>&1 <<'PY'
+BUILDAT_OWNER_TOKEN=$token start_server "$out/srv.log" "STATUS Listening" 60 "$port" \
+	bin/buildat_server -m ../apps/vanilla -A 127.0.0.1 -u launcher=1 ||
+	{ echo "FAIL: the server did not start ($out/srv.log)"; exit 1; }
+srv=$SERVER_PID
+trap 'kill -9 $srv 2>/dev/null' EXIT
+python3 - "$port" "$token" "$out/srv.log" > "$out/client.log" 2>&1 <<'PY'
 import socket, struct, subprocess, sys, time
-port, token = int(sys.argv[1]), sys.argv[2].encode()
+port, token, srv = int(sys.argv[1]), sys.argv[2].encode(), sys.argv[3]
+# Until the server's log has <text> <n> times, up to <secs>
+def until(text, n, secs=10):
+    t0 = time.time()
+    while time.time() - t0 < secs:
+        if open(srv, "rb").read().decode("utf-8", "replace").count(text) >= n:
+            return True
+        time.sleep(0.2)
+    return False
 def listening():
     lines = subprocess.run(["ss", "-ltn"], capture_output=True,
             text=True).stdout.split("\n")
@@ -49,35 +54,41 @@ def define(t, name):
     n = name.encode()
     return packet(0, bytes([t & 255, t >> 8]) +
             len(n).to_bytes(4, "little") + n)
-def peer(send_token):
+def peer(send_token, said=None):
     s = socket.create_connection(("127.0.0.1", port))
     out = hello() + define(100, "accounts:owner_token") + define(101, "accounts:open_lan")
     if send_token is not None:
         out += packet(100, send_token)
     s.sendall(out)
     # accounts and vanilla read packets in threads of their own, so the
-    # token is given time to land before the ask, as the client's does:
-    # its menu asks after the files, round trips after the token
-    time.sleep(0.5)
+    # token lands before the ask, as the client's does: its menu asks
+    # after the files, round trips after the token. The server says how
+    # it took a token; none sent, there is nothing to wait for
+    if said:
+        until(said, 1)
     s.sendall(packet(101, b""))
     return s
-a = peer(None)           # no token
-b = peer(b"0" * 32)      # a wrong one
-time.sleep(3)
+a = peer(None)                                  # no token
+b = peer(b"0" * 32, "wrong owner token")        # a wrong one
+until("Open to LAN refused", 2)
 print("without the owner's token:", listening())
-c = peer(token)
-time.sleep(3)
+c = peer(token, "is this server's owner")
+# Listening at the LAN address too: polled until it is, up to 10 s
+t0 = time.time()
+while time.time() - t0 < 10 and \
+        not [x for x in listening().split() if not x.startswith("127.0.0.1:")]:
+    time.sleep(0.2)
 print("with it:", listening())
 
 PY
 before=$(sed -n 's/^without the owner.s token: //p' "$out/client.log")
 after=$(sed -n 's/^with it: //p' "$out/client.log")
 # And it stops when asked (a shutdown that deadlocked once, 2026-10-03)
-kill $(srv_pid) 2>/dev/null
+kill $srv 2>/dev/null
 stopped=no
-for i in $(seq 1 30); do
-	[ -z "$(srv_pid)" ] && { stopped=yes; break; }
-	sleep 1
+for i in $(seq 1 150); do
+	kill -0 $srv 2>/dev/null || { stopped=yes; break; }
+	sleep 0.2
 done
 owners=$(grep -ac "is this server's owner" "$out/srv.log")
 wrong=$(grep -ac "wrong owner token" "$out/srv.log")

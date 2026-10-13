@@ -38,7 +38,7 @@ port=29592
 # A launcher-started server is local ([VANILLA_PUBLIC]) and auto-starts the
 # bundled minimal game (no ContentDB), so the client lands in a world.
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=pausekeys \
-start_server "$t/srv.log" "STATUS Listening" 120 "$port" \
+start_server "$t/srv.log" "STATUS Listening" 60 "$port" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/srv" -l 3 ||
 	fail "server did not listen"
 srv=$SERVER_PID
@@ -54,23 +54,27 @@ run_drive(){
 		echo "wait_log 60000 the server put the player"
 		# Past the server's reposition of a spawned player onto meshed
 		# ground (a second "put the player"), which eats a key pressed too
-		# soon and leaves the menu unopened.
-		echo "delay 4000"
+		# soon and leaves the menu unopened: the world settled, and the
+		# two seconds after it for the reposition, which the client does
+		# not tell apart from the first
+		echo "wait_log 60000 scene, 0 undrawn within 2"
+		echo "delay 2000"
 		echo "keypress Escape"
-		echo "delay 1200"
-		# The view range is the pause menu's one dropdown
+		echo "wait_log 5000 pause: the menu shown"
+		# The view range is the pause menu's one dropdown; its popup opens
+		# in the frames after the click
 		echo 'click DropDownList "▼"'
 		echo "delay 500"
 		echo "keypress Up"
 		echo "delay 200"
 		echo "keypress Return"
-		echo "delay 1000"
+		echo "wait_log 5000 view range: "
 		echo "keypress Escape"
-		echo "delay 1000"
+		echo "wait_log 5000 pause: the menu closed"
+		# Five jumps, apart
 		printf 'keypress Space\ndelay 300\n%.0s' 1 2 3 4 5
-		echo "delay 500"
 		echo "keypress F5"
-		echo "delay 1000"
+		echo "wait_log 5000 FPS:"
 		echo "quit"
 	} > "$t/seq.$1"
 	timeout 90 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/$1" \

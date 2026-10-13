@@ -31,20 +31,23 @@ BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=vp start_server "$t/srv.log" \
 CHECK_PIDS+=($SERVER_PID)
 client(){ run_client 60 "$1" timeout 200 "$here/Build/bin/buildat" -C "$t/$2c" \
 	-D "$t/$2u" -s "127.0.0.1:$SERVER_PORT" -w 1100x600 -u 1 -l 3 \
-	-o sound_mute=1 -c @"$3"; }
+	-o sound_mute=1 -c @"$3" ||
+	fail "the drive ($1): $(grep -a "Command sequence failed\|run_client:" "$1" | tail -1 | cut -c 1-300)"; }
 # view <log>: the "view settings" line's values
 view(){ grep -a "view settings: " "$1" | tail -1 | sed 's/.*view settings: //'; }
 
-# 1: the four rows, at the window's top, each one step on
+# 1: the four rows, at the window's top, each one step on and waited for
+# by its line; a click on one waits for ui_utils' "dropdown_<n> open"
 {
-	echo "wait_log 120000 load: the world is in"; echo "delay 1000"
-	echo "keypress Escape"; echo "delay 1000"
+	echo "wait_log 60000 load: the world is in"; echo "delay 500"
+	echo "keypress Escape"; echo "wait_log 5000 pause: the menu shown"
 	echo 'click Button "Settings..."'; echo "wait_log 5000 Game settings shown"
 	echo "delay 1000"
-	for row in "120 Down" "154 Down" "188 Up" "222 Down"; do
+	for row in "120 Down view: render_mode = " "154 Down distant terrain: " \
+			"188 Up view: view_bobbing_amount = " "222 Down view: third_person_shoulder = "; do
 		set -- $row
-		echo "click DropDownList \"▼\" 668 $1"; echo "delay 500"
-		echo "keypress $2"; echo "keypress Return"; echo "delay 500"
+		echo "click DropDownList \"▼\" 668 $1"; echo "wait_log 5000 dropdown_"
+		echo "keypress $2"; echo "keypress Return"; shift 2; echo "wait_log 5000 $*"
 	done
 	echo "screenshot $t/view.png"; echo quit
 } > "$t/1.cmds"
@@ -58,7 +61,7 @@ for want in "view: render_mode = unlit" "distant terrain: third" \
 done
 
 # 2 and 3
-printf "wait_log 120000 load: the world is in\nwait_log 60000 luanti:world_info: \ndelay 1000\nquit\n" > "$t/j.cmds"
+printf "wait_log 60000 load: the world is in\nwait_log_any 30000 luanti:world_info: \ndelay 1000\nquit\n" > "$t/j.cmds"
 client "$t/2.log" a "$t/j.cmds"
 client "$t/3.log" b "$t/j.cmds"
 echo "A again: $(view "$t/2.log")"

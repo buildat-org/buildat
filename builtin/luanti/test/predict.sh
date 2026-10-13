@@ -88,6 +88,15 @@ core.register_on_joinplayer(function(player)
 	vm:set_data(data)
 	vm:write_to_map()
 	player:set_pos({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z})
+	-- No fall for a client that has not got the platform yet (2026-10-13:
+	-- one fell to y -35 before it came). Through VoxeLibre's playerphysics
+	-- where it is there: its elytra code sets the product of the gravity
+	-- factors every step, which put a plain override back to 1
+	if playerphysics then
+		playerphysics.add_physics_factor(player, "gravity", "predict", 0)
+	else
+		player:set_physics_override({gravity = 0})
+	end
 	player:get_inventory():set_stack("main", 1, dirt .. " 10")
 	player:set_wield_index(1)
 	core.log("action", "predict: player on the platform with " .. dirt)
@@ -99,55 +108,68 @@ BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla \
 	-l "${LOG_LEVEL:-3}" ||
 	{ echo "FAIL: the server did not start"; exit 1; }
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; exit 1; }
+srv=$SERVER_PID
+trap 'kill -INT "$srv" 2>/dev/null' EXIT
 # Each act: the click, the cube a frame or two after it (before the
 # server can have answered) and the cube after the round trip. A dig
 # completes inside the hold, so its "now" is the log's order instead:
-# the predicted line before the chunk's next update from the server.
+# the predicted line before the chunk's next update from the server. The
+# hold is let go at that predicted line.
+# simplified: the server's answer is waited for by time (2 s, 1 s after a
+# dig): node updates stream in all through the run, and nothing on the
+# client says which one is the answer to the click. A line where a
+# predicted voxel is written over by the server's would be the event
+# The fixture's move onto the platform waited for, not the spawn: after
+# the spawn's settle the platform was not there yet and the player fell
 cat > "$out/cmds.txt" <<CMDS
-wait_log 60000 the server put the player
+wait_log_any 60000 the server put the player at 0.0, 121.0, 0.0
 wait_log 60000 scene, 0 undrawn within 2
+# a settle after the line: the player lands on the platform
 delay 2000
 look_dir 1 -1 0
+# the pointed node follows the aim on the frames after it (here and below)
 delay 300
 event scan_volume 2 t0
 mouse_click right
-delay 40
+wait_log 5000 predicted
 event scan_volume 2 place_now
+# simplified: the server's answer, by time (see above)
 delay 2000
 event scan_volume 2 place_after
 look_dir 1 -1 0
 delay 300
 mouse_down left
-delay 1500
+wait_log 10000 predicted air at
 mouse_up left
-delay 500
+# simplified: the server's answer, by time
+delay 1000
 event scan_volume 2 dig_after
 look_dir 1 -1 0
 delay 300
 mouse_click right
-delay 40
+wait_log 5000 predicted
 event scan_volume 2 refused_place_now
+# simplified: the server's refusal, by time
 delay 2000
 event scan_volume 2 refused_place_after
 look_dir 1 -1 0
 delay 300
 mouse_down left
-delay 1500
+wait_log 10000 predicted air at
 mouse_up left
-delay 500
+# simplified: the server's refusal, by time
+delay 1000
 event scan_volume 2 refused_dig_after
 quit
 CMDS
 bin/buildat -s localhost:29778 -w 1280x720 -l "${CLIENT_LOG_LEVEL:-4}" \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
-sleep 2
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# a poll: the server's exit
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 grep "predict:" "$out/srv.log" | sed 's/.*predict: /server: /'
-grep "predicted " "$out/cli.log" | sed 's/.*vanilla *: /client: /'
+grep "predicted " "$out/cli.log" | grep -v wait_log | sed 's/.*vanilla *: /client: /'
 # The dirt count per cube: the platform's 25, the placed one on top; and
 # for the digs, the predicted line ahead of the server's answer
 python3 - "$out/cli.log" <<'PY'
@@ -164,6 +186,9 @@ for line in open(sys.argv[1]):
         label = m.group(1)
         dirt = [i for i, n in names.get(label, {}).items() if "dirt" in n]
         counts[label] = counts.get(label, 0) + sum(1 for w in m.group(2).split() if int(w) in dirt)
+    # Not the drive's own waits for it
+    if "wait_log" in line:
+        continue
     if "predicted air at" in line:
         order.append("dig")
     elif "voxelworld:node_volume_updated" in line:

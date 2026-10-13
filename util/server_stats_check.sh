@@ -28,14 +28,19 @@ client(){ # <name> <password> <admin lines> <cmds...>
 	printf '%s\n' "$@" quit > "$t/$n.cmds"
 	BUILDAT_AITTA_NAME=$n BUILDAT_AITTA_PASSWORD=$pw BUILDAT_AITTA_ADMIN="$adm" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl_$n" -w 1000x700 -l 3 \
-		-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/$n.cmds" > "$t/$n.log" 2>&1
+		-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/$n.cmds" > "$t/$n.log" 2>&1 ||
+		fail "the $n drive ($t/$n.log): $(grep -ao 'Command sequence failed.*' "$t/$n.log" | head -1)"
 }
+# The answer's line, not the drive's own wait for it
+said(){ grep -a "stats: " "$t/$1.log" | grep -v wait_log; }
 
-# 1.
+# 1. The window up, its sidebar laid out in the half second (the ntfy
+# question may come in it); the hover's second is the graph's tooltip
 client admin checkpass0 "$(printf 'add mod modpass1234\nadd helper helppass12\nlevel mod 30\nlevel helper 20\nstats')" \
-	"wait_log 20000 stats: " "delay 4000" "click Button \"Statistics\"" "delay 2000" \
+	"wait_log 20000 stats: " "wait_log_any 10000 server window: the page" "delay 500" \
+	"click Button \"Statistics\"" "wait_log 5000 server window: the page stats" "delay 300" \
 	"mouse_pos 650 210" "delay 500" "mouse_pos 745 210" "delay 1000" "screenshot $t/stats.png"
-line=$(grep -a "stats: " "$t/admin.log" | tail -1)
+line=$(said admin | tail -1)
 echo "$line" | grep -q "the hour in progress max 1; top admin made [1-9][0-9]* last [1-9]" ||
 	fail "the admin's stats: ${line:-none} ($t/admin.log)"
 [ -s "$t/stats.png" ] || fail "no screenshot"
@@ -43,9 +48,10 @@ echo "ok: the hour has its player, the admin's seen is set ($t/stats.png)"
 
 # 2.
 client mod modpass1234 stats "wait_log 20000 stats: "
-grep -aq "stats: " "$t/mod.log" || fail "the moderator's stats ($t/mod.log)"
-client helper helppass12 stats "wait_log 20000 admin request: stats" "delay 4000"
-grep -aq "admin request: stats" "$t/helper.log" && ! grep -aq "stats: " "$t/helper.log" ||
+[ -n "$(said mod)" ] || fail "the moderator's stats ($t/mod.log)"
+# The server says nothing to a helper's request: two seconds of no answer
+client helper helppass12 stats "wait_log_any 20000 admin request: stats" "wait_log_absent 2000 stats: "
+grep -a "admin request: stats" "$t/helper.log" | grep -qv wait_log && [ -z "$(said helper)" ] ||
 	fail "the helper's stats ($t/helper.log)"
 echo "ok: a moderator's answered, a helper's refused"
 echo "PASS"

@@ -22,7 +22,7 @@ P=29896
 U=http://127.0.0.1:$P
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 $P \
+start_server "$t/srv.log" "setup code" 60 $P \
 	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
 	fail "Hearth did not start"
 pid=$SERVER_PID
@@ -41,13 +41,16 @@ answer(){ # log id
 	grep -ao "hr: {.*\"id\":$2,.*" "$1" | head -1
 }
 
-printf 'delay 6000\nquit\n' > "$t/wait"
-client admin checkpass12 "$t/admin.log" "$t/wait" \
+printf 'wait_log_any 30000 "id":1001,\nquit\n' > "$t/wait"
+printf 'wait_log_any 30000 "id":1001,\nwait_log_any 30000 admin script: done\nquit\n' > "$t/wait_admin"
+client admin checkpass12 "$t/admin.log" "$t/wait_admin" \
 	BUILDAT_HEARTH_REQS='{"cmd":"new_topic","name":"Help","about":"Questions"}' \
-	"BUILDAT_HEARTH_ADMIN=add reader readerpass12"
+	"BUILDAT_HEARTH_ADMIN=add reader readerpass12" ||
+	fail "the admin's run: $(grep -a 'Command sequence failed\|^E' "$t/admin.log" | tail -2)"
 answer "$t/admin.log" 1001 | grep -q '"ok":true' || fail "the topic: $(answer "$t/admin.log" 1001)"
 client admin checkpass12 "$t/admin2.log" "$t/wait" \
-	BUILDAT_HEARTH_REQS='{"cmd":"trust","name":"reader","on":true}'
+	BUILDAT_HEARTH_REQS='{"cmd":"trust","name":"reader","on":true}' ||
+	fail "the admin's run: $(grep -a 'Command sequence failed\|^E' "$t/admin2.log" | tail -2)"
 answer "$t/admin2.log" 1001 | grep -q '"ok":true' || fail "the trust: $(answer "$t/admin2.log" 1001)"
 
 # The shot the user took, where the client puts its own
@@ -60,23 +63,26 @@ cp "$here/3rdparty/Urho3D/bin/CoreData/Textures/Spot.png" "$t/cl_reader/exports/
 # The places above the list: Pictures only when the home has some
 ups=3
 [ -n "$(ls -A "$HOME/Pictures" 2>/dev/null)" ] && ups=4
+# Each step waits for its page or the picker's line; the Escape that lets
+# the picker go logs nothing, so a short delay is the frame for the shot
 {
-	echo "delay 4000"
+	echo "wait_log 30000 hearth: page Hearth"
 	# Home, Search, Notifications, Following, Help
 	for _ in 1 2 3 4 5; do echo "keypress Down"; done
-	printf 'keypress Return\ndelay 1500\nkeypress Right\nkeypress Return\ndelay 1500\n'
+	printf 'keypress Return\nwait_log 10000 hearth: page Help\n'
+	printf 'keypress Right\nkeypress Return\nwait_log 10000 hearth: page A new thread\n'
 	printf 'text The lamp draws black\nkeypress Down\nkeypress Down\nkeypress Down\n'
 	printf 'text My lamp shows black in the corner, see the screenshot:\nkeypress Return\n'
 	# Start the thread, Bold, List, Link, Image, Code, File...
 	echo "keypress Tab"
 	for _ in 1 2 3 4 5 6; do echo "keypress Down"; done
-	printf 'keypress Return\ndelay 1500\nkeypress Escape\ndelay 800\n'
-	printf 'screenshot %s/escaped.png\nkeypress Return\ndelay 1500\n' "$t"
+	printf 'keypress Return\nwait_log 5000 The file picker at\nkeypress Escape\ndelay 800\n'
+	printf 'screenshot %s/escaped.png\nkeypress Return\nwait_log 5000 The file picker at\n' "$t"
 	# The first file, Up, Pictures, Home folder, Screenshots
 	for _ in $(seq $ups); do echo "keypress Up"; done
-	printf 'keypress Return\ndelay 1500\n'
-	printf 'screenshot %s/screenshots.png\nkeypress Return\ndelay 2500\n' "$t"
-	printf 'keypress Tab\nkeypress Return\ndelay 2500\nscreenshot %s/posted.png\nquit\n' "$t"
+	printf 'keypress Return\nwait_log 5000 The file picker at\n'
+	printf 'screenshot %s/screenshots.png\nkeypress Return\nwait_log 15000 hearth: the file screenshot_lamp.png linked\n' "$t"
+	printf 'keypress Tab\nkeypress Return\nwait_log 15000 hearth: page The lamp draws black\nscreenshot %s/posted.png\nquit\n' "$t"
 } > "$t/cmds"
 client reader readerpass12 "$t/reader.log" "$t/cmds" BUILDAT_HEARTH_CREATE=
 grep -aq "Command sequence complete" "$t/reader.log" ||

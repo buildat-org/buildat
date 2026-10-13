@@ -95,9 +95,10 @@ Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an" -P $AN -l 3 \
 	> "$tmp/an.log" 2>&1 &
 pids+=($!)
 claim="$tmp/an/apps/floorplanner/starport_claim.txt"
-for _ in $(seq 120); do
+for _ in $(seq 300); do
 	grep -q "verified ok" "$tmp/sp.log" && break
-	sleep 1
+	kill -0 "${pids[-1]}" 2>/dev/null || break
+	sleep 0.2
 done
 grep -q "verified ok" "$tmp/sp.log" || fail "no verified listing (sp.log, an.log)"
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$claim")
@@ -122,15 +123,20 @@ receipt=$(api -d "{\"listing\":\"$id\",\"reason\":\"spam\",\"key\":\"$key\"}" \
 	fail "no receipt for a report"
 echo "ok: report receipt $receipt"
 
+# A scripted client's run ends at the answer to its last request ("sp:
+# {...,"id":N,"ok":...}"), or at its login's answer
+sp_cmds(){ printf 'wait_log_any 30000 "id":%s,"ok":\nquit\n' "$1"; }
+printf 'wait_log_any 30000 Login refused\nquit\n' > "$tmp/cmds_refused.txt"
+printf 'wait_log_any 30000 Joined as\nquit\n' > "$tmp/cmds_joined.txt"
 # The admin's client: claim, then reject the report
-printf 'delay 8000\nquit\n' > "$tmp/cmds.txt"
+sp_cmds 5 > "$tmp/cmds.txt"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$code \
 BUILDAT_SP_REQS="{\"cmd\":\"set_settings\",\"settings\":{\"email_confirmation\":false}}
 {\"cmd\":\"set_email\",\"email\":\"op@example.org\"}
 {\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}
 {\"cmd\":\"decide\",\"group\":\"$id|spam\",\"decision\":\"dismiss\"}
 {\"cmd\":\"fleet_create\",\"name\":\"Check fleet\"}" \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds.txt" > "$tmp/cl.log" 2>&1
 n=$(grep -c 'sp: {"id":[0-9]*,"ok":true' "$tmp/cl.log")
 [ "$n" -ge 5 ] || fail "$n of 5 commands went through (cl.log)"
@@ -153,9 +159,10 @@ sed "s/\"Check house\"/\"Check main\", \"fleet\": \"$fleet\", \"pool\": \"main\"
 Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -P $AN2 -l 3 \
 	> "$tmp/an2.log" 2>&1 &
 pids+=($!)
-for _ in $(seq 120); do
+for _ in $(seq 300); do
 	[ "$(grep -c "verified ok" "$tmp/sp.log")" -ge 2 ] && break
-	sleep 1
+	kill -0 "${pids[-1]}" 2>/dev/null || break
+	sleep 0.2
 done
 api "localhost:$SP/api/v1/list" | python3 -c "
 import json, sys
@@ -186,6 +193,7 @@ PY
 	fail "a newer announce's kind and key (sp.log)"
 echo " " >> "$tmp/an2/apps/floorplanner/starport.json"
 back=
+# Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
 	api "localhost:$SP/api/v1/list" | python3 -c 'import json, sys
 s = [x for x in json.load(sys.stdin)["servers"] if x["name"] == "Check main"]
@@ -225,20 +233,19 @@ print(r["result"]["token"])
 PY
 ) || fail "the ID API"
 echo "ok: IDs made, an adult's year not kept, a token got"
-printf 'delay 8000\nquit\n' > "$tmp/cmds2.txt"
 # The server has no admin yet: the setup code makes the ID it (10g)
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/an2.log" | tail -1 | cut -d' ' -f3)
-BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
-	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+BUILDAT_FP_STARPORT=$token timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds_refused.txt" \
 	> "$tmp/cl2.log" 2>&1
 grep -q "Login refused: This server has no admin yet" "$tmp/cl2.log" ||
 	fail "an ID got in before the server had an admin (cl2.log)"
-BUILDAT_FP_STARPORT=$token BUILDAT_FP_CODE=$setup timeout 90 \
+BUILDAT_FP_STARPORT=$token BUILDAT_FP_CODE=$setup timeout 60 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 \
-	-c @"$tmp/cmds2.txt" > "$tmp/cl2.log" 2>&1
+	-c @"$tmp/cmds_joined.txt" > "$tmp/cl2.log" 2>&1
 grep -q "Joined as grownup" "$tmp/cl2.log" &&
-	grep -q "New account grownup for a Starport ID" "$tmp/an2.log" &&
-	grep -q "grownup claimed the server with the setup code" "$tmp/an2.log" ||
+	wait_for_log "$tmp/an2.log" "New account grownup for a Starport ID" 5 &&
+	wait_for_log "$tmp/an2.log" "grownup claimed the server with the setup code" 5 ||
 	fail "the token did not log in as the first admin (cl2.log, an2.log)"
 echo "ok: the ID's token logged in to the fleet's server, its first admin"
 # [COMPAT_BREAK_07] 8g: a token of 0.6's format, and a site's, refused
@@ -258,8 +265,8 @@ PY
 for x in "old:The token is not from a Starport this server is on" \
 		"site:Not a token for a server"; do
 	[ "${x%%:*}" = old ] && tok=$old || tok=$site
-	BUILDAT_FP_STARPORT=$tok timeout 90 Build/bin/buildat -o launch_ui=launch_menu \
-		-D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+	BUILDAT_FP_STARPORT=$tok timeout 60 Build/bin/buildat -o launch_ui=launch_menu \
+		-D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds_refused.txt" \
 		> "$tmp/cl2_${x%%:*}.log" 2>&1
 	grep -q "Login refused: ${x#*:}" "$tmp/cl2_${x%%:*}.log" ||
 		fail "the ${x%%:*} token was not refused (cl2_${x%%:*}.log)"
@@ -298,33 +305,34 @@ assert not r["ok"] and r["code"] == "upgrade_required", r
 print(json.dumps({"listing": st["id"]}))
 PY
 	fail "announcing a ban, a newer kind and key"
-printf 'delay 8000\nquit\n' > "$tmp/cmds3.txt"
+sp_cmds 1 > "$tmp/cmds3.txt"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS='{"cmd":"blocklist_create","name":"Check list"}' \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 list=$(grep -o '"id":"[0-9a-f]*","name":"Check list"' "$tmp/cl3.log" |
 	head -1 | cut -d'"' -f4)
 [ -n "$list" ] || fail "no blocklist made (cl3.log)"
+sp_cmds 3 > "$tmp/cmds3.txt"
 BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass \
 BUILDAT_SP_REQS="{\"cmd\":\"blocklist_publish\",\"list\":\"$list\",\"scope\":\"listing:$id\"}
 {\"cmd\":\"blocklist_subscribe\",\"list\":\"$list\",\"scope\":\"fleet:${fleet%%:*}\"}
 {\"cmd\":\"queue\"}" \
-	timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
+	timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 \
 	-s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/cl3.log" 2>&1
 grep -q '"id":"id:grown|harassment"' "$tmp/cl3.log" ||
 	fail "the ban is not in the queue as a report about the ID (cl3.log)"
 echo "ok: a reported ban is in the queue, about the ID; a newer kind listed as other, its unknown key passed on, codes too_often and upgrade_required"
-# The fleet's server learns the list at its next announce: its start
+# The fleet's server learns the list at its next announce: its start.
+# -l 4 for the announce's answer ("Announced to", a verbose line)
 kill "${pids[-1]}"
 wait "${pids[-1]}" 2>/dev/null
-start_server "$tmp/an2b.log" "Announcing to" 120 $AN2 \
-	Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -l 3 ||
+start_server "$tmp/an2b.log" "Announced to" 60 $AN2 \
+	Build/bin/buildat_server -m apps/floorplanner -D "$tmp/an2" -l 4 ||
 	fail "the fleet's server did not start again (an2b.log)"
 pids+=($SERVER_PID)
-sleep 3
-BUILDAT_FP_STARPORT=$token timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
-	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+BUILDAT_FP_STARPORT=$token timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds_refused.txt" \
 	> "$tmp/cl4.log" 2>&1
 grep -q "Login refused: Banned by a blocklist" "$tmp/cl4.log" ||
 	fail "the blocklist did not keep the ID out (cl4.log, an2b.log)"
@@ -338,6 +346,7 @@ c.update(unlisted=True, ids="approved")
 c.pop("login", None)
 json.dump(c, open(sys.argv[1], "w"))
 PY
+# Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
 	api "localhost:$SP/api/v1/list" | grep -q '"Check main"' || break
 	sleep 1
@@ -361,8 +370,8 @@ print(" ".join(out))
 PY
 ) || fail "an unlisted server's token, by address"
 tnew=$tokens
-BUILDAT_FP_STARPORT=$tnew timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
-	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds2.txt" \
+BUILDAT_FP_STARPORT=$tnew timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
+	-w 800x600 -l 3 -s 127.0.0.1:$AN2 -c @"$tmp/cmds_refused.txt" \
 	> "$tmp/cl5.log" 2>&1
 grep -q "Login refused: Your Starport ID waits" "$tmp/cl5.log" ||
 	fail "a new ID did not wait for approval (cl5.log)"
@@ -373,6 +382,7 @@ c = json.load(open(sys.argv[1]))
 c["starports"] = []
 json.dump(c, open(sys.argv[1], "w"))
 PY
+# Once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 30); do
 	api "localhost:$SP/api/v1/list" | grep -q '"Check house"' || break
 	sleep 1
@@ -385,8 +395,10 @@ echo "ok: a Starport removed from the file withdraws the listing at once"
 
 # 8
 sp_reqs(){ # account password requests log
+	{ [ -n "${BUILDAT_SP_ADMIN:-}" ] && echo "wait_log_any 30000 admin script: done"
+		sp_cmds "$(grep -c . <<< "$3")"; } > "$tmp/cmds3.txt"
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_NAME=$1 BUILDAT_SP_PASSWORD=$2 \
-	BUILDAT_SP_REQS=$3 timeout 90 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
+	BUILDAT_SP_REQS=$3 timeout 60 Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" \
 		-w 800x600 -l 3 -s 127.0.0.1:$SP -c @"$tmp/cmds3.txt" > "$tmp/$4" 2>&1
 }
 BUILDAT_SP_ADMIN="add mod modpass1234" sp_reqs admin checkpass '{"cmd":"me"}' cl6a.log

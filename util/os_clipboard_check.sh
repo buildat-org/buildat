@@ -32,8 +32,11 @@ for i in $(seq 50); do
 	sleep 0.2
 done
 [ -n "$d" ] || fail "weston's Xwayland ($t/weston.log)"
+# The 300 ms are the field's focus after the click. The 6 s at the end
+# are the client holding the clipboard while the shell reads it; the shell
+# ends the client as soon as it has
 cat > "$t/cmds" <<C
-delay 4000
+wait_log_any 20000 Join a Buildat server: shown
 click LineEdit "29500"
 delay 300
 keypress End
@@ -72,6 +75,7 @@ drive(){ # name, the text the copy should be, get command, env...
 		sleep 0.1
 		kill -0 $pid 2>/dev/null || break
 	done
+	kill $pid 2>/dev/null
 	wait $pid
 	[ "$got" = "$want" ] || fail "$name: the clipboard reads \"$got\", not $want ($t/$name.log)"
 	[ "$primary" = "$want" ] || fail "$name: the primary selection reads \"$primary\" ($t/$name.log)"

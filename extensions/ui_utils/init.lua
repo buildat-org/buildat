@@ -1933,6 +1933,8 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 	else
 		no_button:SetFocus(true)
 	end
+	-- What a check waits for
+	log:info("confirm dialog: " .. tostring(message))
 end
 
 -- A small non-modal notice in the top right corner. It does not take focus and

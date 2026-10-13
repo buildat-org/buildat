@@ -32,13 +32,14 @@ cleanup() {
 }
 trap cleanup EXIT
 fail() { echo "FAIL: $*"; exit 1; }
-until_log() { # file pattern seconds
+until_log() { # file pattern seconds [pid: over at once when it exits]
 	local n
-	for n in $(seq "$3"); do
+	for n in $(seq $(($3 * 5))); do
 		grep -aq "$2" "$1" 2>/dev/null && return 0
-		sleep 1
+		[ -n "${4:-}" ] && ! kill -0 "$4" 2>/dev/null && break
+		sleep 0.2
 	done
-	return 1
+	grep -aq "$2" "$1" 2>/dev/null
 }
 cd "$here"
 
@@ -71,14 +72,15 @@ echo "ok: one user directory given twice (once by a symlink) is refused"
 setsid Build/bin/buildat_server -m apps/starport -D "$t/sp" -P $SP -l 3 \
 	> "$t/sp.log" 2>&1 &
 pids+=($!)
-until_log "$t/sp.log" "setup code" 120 || fail "the Starport did not start"
+until_log "$t/sp.log" "setup code" 60 $! || fail "the Starport did not start"
 spcode=$(grep -ao "setup code [A-Z0-9]*" "$t/sp.log" | head -1 | cut -d' ' -f3)
-printf 'delay 8000\nquit\n' > "$t/spcmds"
-spadmin() { # requests
+spadmin() { # requests, a JSON line each; done when the last is answered
+	printf 'wait_log 30000 "id":%s,"ok"\nquit\n' "$(grep -c . <<< "$1")" > "$t/spcmds"
 	BUILDAT_SP_NAME=admin BUILDAT_SP_PASSWORD=checkpass BUILDAT_SP_CODE=$spcode \
 	BUILDAT_SP_CREATE=1 BUILDAT_SP_REQS="$1" timeout 90 Build/bin/buildat \
 		-o launch_ui=launch_menu -D "$t/spadmin" -w 800x600 -l 3 -o sound_mute=1 \
-		-s 127.0.0.1:$SP -c @"$t/spcmds" >> "$t/spadmin.log" 2>&1
+		-s 127.0.0.1:$SP -c @"$t/spcmds" >> "$t/spadmin.log" 2>&1 ||
+		fail "the Starport admin's requests ($t/spadmin.log)"
 }
 spadmin '{"cmd":"set_settings","settings":{"email_confirmation":false}}
 {"cmd":"set_email","email":"op@example.org"}'
@@ -98,13 +100,15 @@ setsid python3 -m http.server $HP --bind 127.0.0.1 --directory "$t/rel" \
 pids+=($!)
 setsid "${serve[@]}" floorplanner $FP "$t/u1" -- vanilla $VA "$t/u2" \
 	> "$t/serve.log" 2>&1 &
-pids+=($!)
+spid=$!
+pids+=($spid)
 fplog="$t/serve/server-floorplanner-$FP.log"
-until_log "$fplog" "Listening at" 300 && until_log "$t/serve/server-vanilla-$VA.log" "Listening at" 300 ||
+until_log "$fplog" "Listening at" 300 $spid &&
+	until_log "$t/serve/server-vanilla-$VA.log" "Listening at" 300 $spid ||
 	fail "t1 did not start ($t/serve.log)"
 code=$(grep -ao "setup code [A-Z0-9]*" "$fplog" | tail -1 | awk '{print $3}')
 echo "ok: both up on t1"
-until_log "$t/sp.log" "verified ok" 120 || fail "floorplanner not verified by the Starport"
+until_log "$t/sp.log" "verified ok" 60 || fail "floorplanner not verified by the Starport"
 read -r _ _ id _ _ ccode < <(grep -v "^#" "$t/u1/apps/floorplanner/starport_claim.txt")
 spadmin "{\"cmd\":\"claim\",\"listing\":\"$id\",\"code\":\"$ccode\"}"
 listing | grep -q "Checked planner" || fail "the claim ($t/spadmin.log)"
@@ -113,9 +117,14 @@ echo "ok: floorplanner listed on the Starport"
 
 # The native client: the launcher's connect screen, the port typed, in
 # plan p1; then the restart, a screenshot while it waits, and back
+# The 300 ms after a click and after the text: the field's focus and the
+# typing taken in the frames after them. The restart is a disconnect the
+# drive expects.
 cat > "$t/c1" <<C
-delay 4000
+expect_error Disconnected from server: The server is restarting
+wait_log_any 30000 Join a Buildat server: shown
 click LineEdit "29500"
+# the click's frames: the field takes focus a frame later
 delay 300
 keypress End
 keypress Backspace
@@ -124,9 +133,10 @@ keypress Backspace
 keypress Backspace
 keypress Backspace
 text $FP
+# the typing taken in the frames after it
 delay 300
 click Button "Join"
-wait_log 60000 Entered the plan p1
+wait_log 30000 Entered the plan p1
 wait_log 300000 Notice from the server
 delay 500
 screenshot $t/warned.png
@@ -134,7 +144,7 @@ wait_log 300000 leave: The server is restarting
 delay 1000
 screenshot $t/reconnecting.png
 wait_log 300000 reconnect: joined
-wait_log 60000 Entered the plan p1
+wait_log 30000 Entered the plan p1
 delay 2000
 screenshot $t/back.png
 quit
@@ -145,21 +155,25 @@ BUILDAT_FP_NAME=adm BUILDAT_FP_PASSWORD=adminpass12 BUILDAT_FP_CODE=$code \
 	-o launch_ui=launch_menu -D "$t/cl" -w 1000x700 -l 3 -o sound_mute=1 \
 	-a extension/launch_menu/connect -c @"$t/c1" > "$t/c1.log" 2>&1 &
 pids+=($!)
-until_log "$t/c1.log" "floorpla: Entered the plan p1" 90 || fail "the native client did not join ($t/c1.log)"
+until_log "$t/c1.log" "floorpla: Entered the plan p1" 60 $! || fail "the native client did not join ($t/c1.log)"
 
 # The web client: logged in as the same account, kept, in a plan w1 it
-# makes
+# makes. The waits are settles after the line: the login screen drawn
+# after the hello, the picker's field focused, and the screen drawn
+# before each shot
 cat > "$t/w.json" <<J
 [
 	["nav", "\${URL}"],
 	["waitlog", "run_script_file\\\\(accounts/accounts.lua\\\\)", 120],
-	["wait", 3000],
+	["waitlog", "hello: Starport IDs", 30],
+	["wait", 1000],
 	["click", 600, 289],
 	["click", 600, 364],
 	["type", "adm"], ["key", "Tab"], ["type", "adminpass12"],
 	["click", 600, 543],
 	["waitlog", "Joined as adm", 30],
-	["wait", 2000],
+	["waitlog", "Plan picker:", 30],
+	["wait", 500],
 	["type", "w1"], ["key", "Enter"],
 	["waitlog", "Entered the plan w1", 30],
 	["waitlog", "Disconnected from server", 300],
@@ -174,14 +188,14 @@ WEB_DRIVE_URL="http://127.0.0.1:$FP/" setsid util/web_drive.sh firefox floorplan
 	"$t/w.json" "$t/web" > "$t/web.log" 2>&1 &
 wpid=$!
 pids+=($wpid)
-until_log "$t/web/page.log" "Entered the plan w1" 180 || fail "the web client did not join ($t/web.log)"
+until_log "$t/web/page.log" "Entered the plan w1" 180 $wpid || fail "the web client did not join ($t/web.log)"
 echo "ok: a native and a web client in floorplanner, in p1 and w1"
 
 # t2, with floorplanner's module changed so that its compile is real. The
 # clients are on: it waits, and warns 40 s in
 from=$(wc -l < "$t/serve.log")
 rel t2 "// t2"
-until_log "$t/serve.log" "buildat-t2-linux-x86_64-web-precompiled is ready" 120 ||
+until_log "$t/serve.log" "buildat-t2-linux-x86_64-web-precompiled is ready" 120 $spid ||
 	fail "t2 not ready ($t/serve.log)"
 until_log "$t/c1.log" "Notice from the server: The server updates to t2 in 60 s" 70 ||
 	fail "the native client not warned ($t/c1.log)"
@@ -189,6 +203,7 @@ warned=$(date +%s)
 tail -n +"$from" "$t/serve.log" | grep -q "stopping" && fail "stopped before the warning"
 until_log "$t/web/page.log" "Notice from the server: The server updates to t2 in 60 s" 5 ||
 	fail "the web client not warned"
+# a poll, once a second: the Starport answers an address 60 lists a minute
 for _ in $(seq 20); do listing | grep -q '"updating":true' && break; sleep 1; done
 listing | python3 -c '
 import json, sys
@@ -199,7 +214,7 @@ echo "ok: with the clients on, t2 waited; they were warned, and the listing says
 until_log "$t/serve.log" "stopping floorplanner" 90 || fail "t2 never restarted"
 stopped=$(date +%s)
 [ $((stopped - warned)) -ge 50 ] || fail "restarted $((stopped - warned)) s after the warning"
-until_log "$t/c1.log" "Command sequence complete\|Command sequence failed" 400
+until_log "$t/c1.log" "Command sequence complete\|Command sequence failed" 120
 wait "$wpid"; wstatus=$?
 s=$(tail -n +"$from" "$t/serve.log")
 line() { echo "$s" | grep -n "$1" | head -1 | cut -d: -f1; }
@@ -226,8 +241,9 @@ echo "ok: both clients told \"updating to t2\" and back in their plans without a
 # t3 does not compile: both stay on t2, and it is not tried again
 from=$(wc -l < "$t/serve.log")
 rel t3 "#error broken"
-until_log "$t/serve.log" "floorplanner does not compile on buildat-t3" 300 ||
+until_log "$t/serve.log" "floorplanner does not compile on buildat-t3" 120 $spid ||
 	fail "the broken t3 was not refused ($t/serve.log)"
+# Three polls (POLL_SECONDS=5) in which nothing may stop or try t3 again
 sleep 15
 s=$(tail -n +"$from" "$t/serve.log")
 echo "$s" | grep -q "stopping" && fail "a server stopped for the broken t3 ($t/serve.log)"
@@ -237,14 +253,18 @@ grep -q t2 "$t/serve/current" || fail "current is not t2"
 curl -s -o /dev/null -m 5 "http://127.0.0.1:$FP/" && curl -s -o /dev/null -m 5 "http://127.0.0.1:$VA/" ||
 	fail "a server is not answering after t3"
 echo "ok: a release that does not compile leaves both on t2, and is not tried again"
+# a poll, once a second (the list's rate limit): the listing clears on the
+# server's next report
 for _ in $(seq 30); do listing | grep -q '"updating":true' || break; sleep 1; done
 listing | grep -q '"updating":true' && fail "still listed as updating after the restart"
 echo "ok: the listing no longer says updating"
 
 # t4 with a client on: it waits; the client leaves, and it goes
+# On until the shell kills it: the delay at the end is that
 cat > "$t/c2" <<C
-delay 4000
+wait_log_any 30000 Join a Buildat server: shown
 click LineEdit "29500"
+# the click's frames: the field takes focus a frame later
 delay 300
 keypress End
 keypress Backspace
@@ -253,8 +273,10 @@ keypress Backspace
 keypress Backspace
 keypress Backspace
 text $FP
+# the typing taken in the frames after it
 delay 300
 click Button "Join"
+# on until the shell kills it
 delay 600000
 C
 mkdir -p "$t/cl2"
@@ -264,17 +286,19 @@ BUILDAT_FP_NAME=adm BUILDAT_FP_PASSWORD=adminpass12 BUILDAT_FP_PLAN=p1 \
 	-c @"$t/c2" > "$t/c2.log" 2>&1 &
 c2=$!
 pids+=($c2)
-until_log "$t/c2.log" "floorpla: Entered the plan p1" 90 || fail "the client did not join for t4 ($t/c2.log)"
+until_log "$t/c2.log" "floorpla: Entered the plan p1" 60 $c2 || fail "the client did not join for t4 ($t/c2.log)"
 from=$(wc -l < "$t/serve.log")
 rel t4
-until_log "$t/serve.log" "buildat-t4-linux-x86_64-web-precompiled is ready" 120 ||
+until_log "$t/serve.log" "buildat-t4-linux-x86_64-web-precompiled is ready" 120 $spid ||
 	fail "t4 not ready ($t/serve.log)"
+# Two polls (POLL_SECONDS=5) in which t4 must not stop with the client on
 sleep 10
 tail -n +"$from" "$t/serve.log" | grep -q "stopping" && fail "t4 did not wait for the client"
 kill -- -"$c2"
-for _ in $(seq 20); do
+# a poll for the stop
+for _ in $(seq 100); do
 	tail -n +"$from" "$t/serve.log" | grep -q "stopping floorplanner" && break
-	sleep 1
+	sleep 0.2
 done
 tail -n +"$from" "$t/serve.log" | grep -q "stopping floorplanner" ||
 	fail "t4 did not go once the client left ($t/serve.log)"

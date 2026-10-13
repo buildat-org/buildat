@@ -43,7 +43,9 @@ save="buildat_test_fuzz_$SEED"
 # A screenshot every thirty seconds of walk, and the mouse is never moved
 # in absolute terms -- look sets the aim, which is all the fixture reads.
 # The world loading around the player is waited for ([START_WAIT]): the
-# placement, then the settle line, START_WAIT the ceiling (60 s).
+# placement, then the settle line, START_WAIT the ceiling (60 s). The
+# delays are the walk's own: how long a key or a button is held, the
+# inventory open, and the pause after a step, all from the seed.
 START_WAIT="${START_WAIT:-60}"
 awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_WAIT * 1000))" 'BEGIN {
 	srand(seed)
@@ -82,6 +84,7 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 			print "keyup W"
 			waited = 1
 		} else if (r < 0.58) {
+			# a timing: a jump held 150 ms, then a walk of d s
 			d = 1 + rand() * 2
 			print "keydown W"; print "keydown Space"; print "delay 150"
 			print "keyup Space"; print "delay " int(d * 1000); print "keyup W"
@@ -104,6 +107,9 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 		} else if (r < 0.94) {
 			print "keypress " (1 + int(rand() * 9)); d = 0.2
 		} else {
+			# a timing: the inventory up 0.8 s, the pace of the walk; a wait
+			# for its line would fail the walk where a random state
+			# (a form already up) keeps it shut, which is not a finding
 			print "keypress I"; print "delay 800"; print "keypress Escape"; d = 1
 		}
 		# The walk has spent its time already; everything else waits here
@@ -140,17 +146,12 @@ trap 'kill "$cli" 2>/dev/null; kill "${netsim:-}" 2>/dev/null; kill -INT "$srv" 
 { echo "rawset(_G, \"FUZZ_SEED\", $SEED)"; cat "${FUZZ_LUA:-$me/fuzz.lua}"; } > "$out/fixture.lua"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" -P "$port" \
-	-l "${LOG_LEVEL:-4}" \
-	> "$out/srv.log" 2>&1 &
-for i in $(seq 1 400); do
-	grep -q "Mods loaded" "$out/srv.log" 2>/dev/null && break
-	grep -q "Shutdown:" "$out/srv.log" 2>/dev/null && break
-	sleep 1
-done
-sleep 5
-srv=$(check_pgrep buildat_server | head -1)
-[ -n "$srv" ] || { echo "the server did not come up" >&2; tail -3 "$out/srv.log" >&2; exit 1; }
+	start_server "$out/srv.log" "Mods loaded" 180 "$port" \
+	bin/buildat_server -u launcher=1 -m "../apps/$GAME_DIR" \
+	-l "${LOG_LEVEL:-4}"
+rc=$?
+srv=${SERVER_PID:-}
+[ $rc = 0 ] || { echo "the server did not come up" >&2; exit 1; }
 
 # NETSIM="--delay 80 --rate 2000 --loss 2": the client goes through
 # util/netsim.py's lossy link to the server ([NET_SIM]); the proxy's port
@@ -161,7 +162,8 @@ if [ -n "${NETSIM:-}" ]; then
 	python3 "$here/util/netsim.py" --listen "$cport" --to "localhost:$port" \
 		$NETSIM > "$out/netsim.log" 2>&1 &
 	netsim=$!
-	sleep 1
+	# The proxy's port, polled
+	for _ in $(seq 25); do port_taken "$cport" && break; sleep 0.2; done
 fi
 bin/buildat -s "localhost:$cport" -w 1280x720 -l "${CLIENT_LOG_LEVEL:-3}" \
 	-c @"$out/cmds.txt" \
@@ -183,9 +185,10 @@ if kill -0 "$cli" 2>/dev/null; then
 fi
 wait "$cli"
 cli_status=$?
+# The server's ticks after the player left, for the fixture's last lines
 sleep 2
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 
 . "$me/verdict.sh"
 exit $status

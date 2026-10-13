@@ -73,30 +73,31 @@ steps[#steps + 1] = {"o_lit", function(p)
 	p:get_inventory():set_stack("offhand", 1, "mcl_torches:torch") end}
 steps[#steps + 1] = {"o_far", function(p)
 	p:set_pos({x = C.x - 25, y = C.y, z = C.z}) end}
+-- A step, then its name in the chat once its light is sent; the client
+-- asks for the next by /wll_next once it has its picture
+local i = 0
+local function step(name)
+	local p = core.get_player_by_name(name)
+	if not p then return end
+	i = i + 1
+	if not steps[i] then return end
+	steps[i][2](p)
+	-- The placed torch's light is the server's to flood and send (the
+	-- held one's is the client's, at its next lights)
+	core.after(1.5, function()
+		core.chat_send_player(name, "wll: " .. steps[i][1])
+	end)
+end
+core.register_chatcommand("wll_next", {func = function(name) step(name) end})
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
 	player:set_physics_override({gravity = 0, speed = 0})
-	core.after(2, function()
-		core.emerge_area(P1, P2, function(_, _, left)
-			if left > 0 then return end
-			room()
-			core.set_timeofday(0)
-			local i = 0
-			local function step()
-				local p = core.get_player_by_name(name)
-				if not p then return end
-				i = i + 1
-				if not steps[i] then return end
-				steps[i][2](p)
-				-- The placed torch's light is the server's to flood and
-				-- send; the held one's is the client's at the next lights
-				core.after(2.5, function()
-					core.chat_send_player(name, "wll: " .. steps[i][1])
-					core.after(2, step)
-				end)
-			end
-			core.after(3, step)
-		end)
+	core.emerge_area(P1, P2, function(_, _, left)
+		if left > 0 then return end
+		room()
+		core.set_timeofday(0)
+		-- The room's blocks sent and drawn: nothing says when
+		core.after(3, function() step(name) end)
 	end)
 end)
 L
@@ -114,16 +115,20 @@ for mode in pbr shadows unlit; do
 		-C "$d.cache" -l 3 || fail "the $mode server ($t/$mode.srv.log)"
 	CHECK_PIDS+=($SERVER_PID)
 	{
+		w=120000 # the first: the server's start and the room's emerge
 		for s in $STEPS; do
-			echo "wait_log 300000 chat: wll: $s"; echo "delay 1000"
+			# The light drawn in the frames after the line
+			echo "wait_log $w chat: wll: $s"; echo "delay 2000"; w=10000
 			echo "screenshot $t/${mode}_$s.png"
+			echo "keypress T"; echo "wait_log 5000 chat: the line opened"
+			echo "text /wll_next"; echo "keypress Return"
 		done
-		echo "delay 500"; echo quit
+		echo quit
 	} > "$t/$mode.cmds"
 	BUILDAT_LUANTI_KEY=0.05 run_client 60 "$t/$mode.log" timeout 400 \
 		"$here/Build/bin/buildat" -C "$t/c" -D "$t/u_$mode" \
 		-s 127.0.0.1:$SERVER_PORT -w 640x360 -u 1 -l 4 -o sound_mute=1 \
-		-c @"$t/$mode.cmds"
+		-c @"$t/$mode.cmds" || fail "the $mode drive ($t/$mode.log)"
 	kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 	grep -aq "luanti:world_info: .*, $mode$" "$t/$mode.log" || fail "not drawn $mode ($t/$mode.log)"
 	grep -aq "Command sequence complete" "$t/$mode.log" || fail "the $mode drive ($t/$mode.log)"

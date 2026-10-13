@@ -24,23 +24,27 @@ mkdir -p "$t/srv/apps/vanilla/saves/cp/luanti" "$t/srv/shared/vanilla/games"
 cp -r "$G" "$t/srv/shared/vanilla/games/"
 printf "creative_mode = true\nenable_damage = false\n" > "$t/srv/apps/vanilla/saves/cp/luanti/world.mt"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=cp start_server "$t/srv.log" \
-	"STATUS Listening" 180 auto "$here/Build/bin/buildat_server" -u launcher=1 \
+	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" -u launcher=1 \
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/srv" -C "$t/srv.cache" -l 3 ||
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 # A VoxeLibre server answers a click seconds late for a while after a
-# join (2.5 s seen): the world left to settle, and 4 s after each click
-open="wait_log 300000 load: the world is in
-delay 15000
+# join (2.5 s seen): a page's answer is waited for up to 15 s. The delays
+# of 300 ms: the pointer read where it was put before the click; of 500
+# ms, the form drawn in the frames after its line
+open="wait_log 120000 load: the world is in
+wait_log_any 120000 form: the game set the inventory
 keypress i
-delay 3000
+wait_log 5000 form: the inventory opened
+delay 500
 event scan 1 p1"
 # drive <n> <commands>
 drive(){
-	printf "%s\ndelay 500\nquit\n" "$2" > "$t/$1.cmds"
+	printf "%s\nquit\n" "$2" > "$t/$1.cmds"
 	run_client 60 "$t/$1.log" timeout 300 "$here/Build/bin/buildat" -C "$t/c" \
 		-D "$t/u" -w 1000x700 -l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" \
-		-c @"$t/$1.cmds"
+		-c @"$t/$1.cmds" ||
+		fail "drive $1 ($t/$1.log: $(grep -a "Command sequence failed\|run_client:" "$t/$1.log" | tail -1))"
 	grep -aq "Command sequence complete" "$t/$1.log" || fail "drive $1 ($t/$1.log)"
 }
 
@@ -67,17 +71,21 @@ set -- $at
 prev="$1 $2" next="$3 $4" search="$5 $6"
 echo "prev at $prev, next at $next, the search at $search"
 
+# The 300 ms: the click's frames, the hover read before the press, the
+# field's focus before the typing and the typing before the next click
 drive 2 "$open
 mouse_pos $next
 delay 300
 mouse_click left
-delay 4000
+wait_log 15000 form: the inventory drawn again
+delay 500
 event scan 1 p2
 screenshot $t/p2.png
 mouse_pos $prev
 delay 300
 mouse_click left
-delay 4000
+wait_log 15000 form: the inventory drawn again
+delay 500
 event scan 1 p3
 mouse_pos $search
 delay 300
@@ -88,7 +96,8 @@ delay 300
 mouse_pos $next
 delay 300
 mouse_click left
-delay 4000
+wait_log 15000 form: the inventory drawn again
+delay 500
 event scan 1 p4
 screenshot $t/p4.png"
 python3 - "$t/2.log" <<'PY' || fail "the pages ($t/2.log, $t/p2.png, $t/p4.png)"

@@ -87,6 +87,9 @@ core.register_on_joinplayer(function(player)
 	vm:write_to_map()
 	player:set_pos({x = ORIGIN.x, y = ORIGIN.y + 1, z = ORIGIN.z})
 	core.log("action", "dig_sound: the player stands on " .. dirt)
+	-- And to the client, whose log the drive waits on
+	core.chat_send_player(player:get_player_name(),
+			"dig_sound: the player stands on " .. dirt)
 end)
 -- What the server actually asked the client to play, so a silent run can
 -- be told apart from a run where nothing was dug at all.
@@ -113,10 +116,11 @@ LUA
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME="$GAME" BUILDAT_LUANTI_SAVE="$save" \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
-	start_server "$out/srv.log" "Mods loaded" 300 "$port" \
+	start_server "$out/srv.log" "Mods loaded" 120 "$port" \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -l 3 ||
 	[ $? = 1 ] || exit 1 # its own verdict below
 srv=$SERVER_PID
+trap 'kill -INT "$srv" 2>/dev/null' EXIT
 if ! grep -aq "Mods loaded" "$out/srv.log"; then
 	kill -9 "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
 	echo "SKIP: the server did not come up" >&2; exit "$SKIP"
@@ -125,8 +129,11 @@ fi
 # says only that something played. What the dig is worth is the
 # difference between the two, and the still run is also what says the
 # game is not playing ambience over the answer.
-{ echo "wait_log 120000 dig_sound: the player stands on"
-	echo "delay 4000"
+# The 2 s after the stage's line: the platform drawn and the player landed
+# on it in the frames after. The rest are lengths of time: the hold, the
+# sound played out into the mix, and the still run's mix to compare with.
+{ echo "wait_log_any 60000 chat: dig_sound: the player stands on"
+	echo "delay 2000"
 	# **Diagonally down, as predict.sh points**: straight down puts the ray
 	# in the player's own feet and nothing is pointed at, which is how the
 	# first cut of this held the button for three seconds and dug nothing.
@@ -139,19 +146,23 @@ fi
 	echo "mouse_up left"
 	echo "delay 1500"
 	echo "quit"; } > "$out/cmds.txt"
-{ echo "wait_log 120000 dig_sound: the player stands on"
-	echo "delay 4000"
+{ echo "wait_log_any 60000 chat: dig_sound: the player stands on"
+	echo "delay 2000"
 	echo "look_dir 1 -1 0"
+	# a timing: the still run's mix, as long as the dig run's from here
 	echo "delay 5000"
 	echo "quit"; } > "$out/cmds_still.txt"
 SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
 	run_client 60 "$out/cli.log" timeout 240 bin/buildat -s "localhost:$port" \
-	-w 640x400 -l 4 -o sound_mute=0 -c @"$out/cmds.txt" > /dev/null 2>&1
+	-w 640x400 -l 4 -o sound_mute=0 -c @"$out/cmds.txt" > /dev/null 2>&1 ||
+	{ echo "FAIL: the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*\|run_client:.*' "$out/cli.log" | head -1)"; exit 1; }
 SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix_still.raw" \
 	run_client 60 "$out/cli_still.log" timeout 240 bin/buildat -s "localhost:$port" \
-	-w 640x400 -l 4 -o sound_mute=0 -c @"$out/cmds_still.txt" > /dev/null 2>&1
+	-w 640x400 -l 4 -o sound_mute=0 -c @"$out/cmds_still.txt" > /dev/null 2>&1 ||
+	{ echo "FAIL: the still drive ($out/cli_still.log): $(grep -ao 'Command sequence failed.*\|run_client:.*' "$out/cli_still.log" | head -1)"; exit 1; }
 kill -INT "$srv" 2>/dev/null
-for i in $(seq 1 60); do kill -0 "$srv" 2>/dev/null || break; sleep 1; done
+# The server's exit, polled
+for i in $(seq 1 300); do kill -0 "$srv" 2>/dev/null || break; sleep 0.2; done
 asked=$(grep -ac "dig_sound: dug " "$out/srv.log")
 name=$(grep -a "dig_sound: dug " "$out/srv.log" | head -1 |
 	sed 's/.*dug //')

@@ -30,20 +30,21 @@ b="$here/Build/bin/buildat"
 trap check_cleanup EXIT
 
 cd "$here/Build"
-start_server "$t/srv.log" "setup code" 120 auto \
+start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'delay 8000\nquit\n' > "$t/reqs.cmds"
+printf 'wait_log_any 30000 ai: {"id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_CODE=$code \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
 {\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0,\"play_url\":\"https://play.example/\"}}" \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1 ||
+	fail "the bind's run: $(grep -a 'Command sequence failed\|^E' "$t/bind.log" | tail -2)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 
 # publish <name> <version> <serverless> <extra client_lua line>
@@ -120,11 +121,12 @@ zip=$("$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>/dev/null) || fail "pack ext"
 for u in / /p/tester/sl /p/tester/ext; do
 	curl -s "http://127.0.0.1:$P$u" | grep -q "Host at" && fail "a Host at link unset ($u)"
 done
-printf 'delay 8000\nquit\n' > "$t/set.cmds"
+printf 'wait_log_any 30000 ai: {"id":1,\nquit\n' > "$t/set.cmds"
 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
 	BUILDAT_AITTA_REQS='{"cmd":"set_settings","settings":{"app_hosting_provider":"https://host.example/new"}}' \
 	timeout 90 bin/buildat -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
-	-s 127.0.0.1:$P -c @"$t/set.cmds" > "$t/set.log" 2>&1
+	-s 127.0.0.1:$P -c @"$t/set.cmds" > "$t/set.log" 2>&1 ||
+	fail "the setting's run: $(grep -a 'Command sequence failed\|^E' "$t/set.log" | tail -2)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/set.log" || fail "the setting"
 curl -s "http://127.0.0.1:$P/" > "$t/front"
 curl -s "http://127.0.0.1:$P/p/tester/other" > "$t/page"
