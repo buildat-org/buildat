@@ -74,6 +74,9 @@ srv=$SERVER_PID
 { echo "wait_log 60000 the server put the player"
 	echo "wait_log 60000 scene, 0 undrawn within 2"
 	echo "keypress K"; echo "wait_log 5000 Fly mode enabled"
+	# Noclip too: the world is new each run, and a spawn under leaves
+	# stopped the climb (2026-10-13: up 0.3, then down 1.3 after the revoke)
+	echo "keypress H"; echo "wait_log 5000 Noclip mode enabled"
 	echo "keydown Space"; echo "delay 2000"; echo "keyup Space"
 	echo "wait_log_any 30000 privileges: fast, interact, noclip, shout"
 	echo "keypress K"; echo "wait_log 5000 Fly mode disabled"
