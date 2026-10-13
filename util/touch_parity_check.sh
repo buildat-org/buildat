@@ -41,6 +41,12 @@ local function stacks(inv, list)
 	end
 	return table.concat(out, " ")
 end
+-- A line in the server's log, which the verdict reads, and as chat in the
+-- client's, which the drive waits on
+local function say(text)
+	core.log("action", text)
+	core.chat_send_all(text)
+end
 -- The inventory and the wield each time they change, and where the
 -- player is four times a second
 local last, wait = nil, 0
@@ -55,7 +61,7 @@ core.register_globalstep(function(dtime)
 				player:get_wield_index()
 		if now ~= last then
 			last = now
-			core.log("action", "touch_parity state: " .. now)
+			say("touch_parity state: " .. now)
 		end
 		local p = player:get_pos()
 		core.log("action", string.format("touch_parity pos %.2f %.2f %.2f",
@@ -119,17 +125,17 @@ core.register_on_joinplayer(function(player)
 end)
 core.register_on_placenode(function(pos, node, placer, old, stack, pointed)
 	placed = pos
-	core.log("action", "touch_parity: placed " .. node.name ..
+	say("touch_parity: placed " .. node.name ..
 			(vector.equals(pointed.under, marker) and " against the marker" or
 			" at " .. core.pos_to_string(pos)))
 end)
 core.register_on_dignode(function(pos, node)
-	core.log("action", "touch_parity: dug " .. node.name ..
+	say("touch_parity: dug " .. node.name ..
 			(placed and vector.equals(pos, placed) and " that was placed" or ""))
 end)
 core.register_on_player_receive_fields(function(player, formname, fields)
 	if formname == "" and fields.quit then
-		core.log("action", "touch_parity: inventory closed")
+		say("touch_parity: inventory closed")
 	end
 end)
 L
@@ -141,7 +147,7 @@ server(){ # dir, extra args...
 	echo "enable_damage = false" > "$d/apps/vanilla/saves/tp/luanti/world.mt"
 	BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=tp \
 	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$d.log" \
-		"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" \
+		"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
 		-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 		-C "$d.cache" -l 3 "$@" || fail "the server ($d.log)"
 	CHECK_PIDS+=($SERVER_PID)
@@ -156,52 +162,76 @@ want(){ # log, line, what
 # the left third; the inventory's main row 1 at y 259 and row 2 at 317,
 # columns from x 288 by 58.5, the craft grid's first row at y 70 from x
 # 463, the preview at (697, 124)
-drag(){ # x0 y0 x1 y1
+# A finger's moves keep their own pace (a drag over half a second, a
+# second finger tapped while the first is held); every other step waits
+# for what it does: the fixture's state line as chat, or the form's line
+# for a tap that only picks up or lets go
+drag(){ # x0 y0 x1 y1 state
 	echo "finger_down 1 $1 $2"; echo "delay 150"
 	for i in 1 2 3 4 5; do
 		echo "finger_move 1 $(($1 + ($3 - $1) * i / 5)) $(($2 + ($4 - $2) * i / 5))"
+		# A timing: the drag's own pace
 		echo "delay 60"
 	done
-	echo "finger_up 1"; echo "delay 1500"
+	echo "finger_up 1"; echo "wait_log 10000 $5"
 }
+# The stick walks 2 s, and the player stands still 1.5 s after, which is
+# what tells the two walks apart in the positions
 stick(){ # dy: down from (150, 300) for 2 s
 	echo "finger_down 1 150 300"; echo "delay 100"
 	echo "finger_move 1 150 $((300 + $1 / 2))"; echo "delay 50"
 	echo "finger_move 1 150 $((300 + $1))"; echo "delay 2000"
+	# A timing: standing still 1.5 s
 	echo "finger_up 1"; echo "delay 1500"
 }
+click="wait_log 10000 form: a left click"
 {
-	echo "wait_log 120000 chat: touch_parity: ready"
+	echo "wait_log 60000 chat: touch_parity: ready"
 	# The client's world round the player too: the loading screen ends at
-	# the player's own chunk ([LOAD_OWN_CHUNK]), the marker's may come after
-	echo "wait_log 120000 , 0 undrawn within 2"; echo "delay 3000"
-	echo "tap 417 467"; echo "delay 1000"; echo "tap 305 467"; echo "delay 1000"
-	echo "tap 638 267"; echo "delay 1500"
-	echo "finger_down 1 638 267"; echo "delay 4000"; echo "finger_up 1"; echo "delay 1500"
+	# the player's own chunk ([LOAD_OWN_CHUNK]), the marker's may come
+	# after, drawn in the frames after the line
+	echo "wait_log_any 60000 scene, 0 undrawn within 2"; echo "delay 2000"
+	echo "tap 417 467"; echo "wait_log 10000 | wield 3"
+	echo "tap 305 467"; echo "wait_log 10000 | wield 1"
+	# simplified: the marker's chunk comes after the settle line (a tap at
+	# 2.4 s found nothing to point at, 2026-10-13) and no line marks it;
+	# 3 s more is the dev drive's 5 s from the settle line to the tap
+	echo "delay 3000"
+	echo "tap 638 267"; echo "wait_log 10000 placed floor:stone against the marker"
+	echo "finger_down 1 638 267"; echo "wait_log 15000 dug floor:marker"; echo "finger_up 1"
 	stick 32
 	stick 100
-	echo "tap 748 94"; echo "delay 2000"
-	drag 288 259 346 317
-	echo "tap 346 317"; echo "delay 800"; echo "tap 404 259"; echo "delay 1500"
+	# The form is laid out in the frames after the tap
+	echo "tap 748 94"; echo "wait_log 10000 touch: Inventory"; echo "delay 500"
+	drag 288 259 346 317 "main2=markerx6 main10=stonex10 |"
+	echo "tap 346 317"; echo "$click"
+	echo "tap 404 259"; echo "wait_log 10000 main2=markerx6 main3=stonex10 |"
+	# A timing: the finger's own pace, and a second finger tapped while
+	# the first is held
 	echo "finger_down 1 404 259"; echo "delay 150"
 	echo "finger_move 1 404 288"; echo "delay 60"; echo "finger_move 1 404 317"; echo "delay 300"
-	echo "finger_down 2 800 400"; echo "delay 100"; echo "finger_up 2"; echo "delay 800"
+	echo "finger_down 2 800 400"; echo "delay 100"; echo "finger_up 2"
+	echo "wait_log 10000 main3=stonex9 main11=stonex1 |"
 	echo "finger_move 1 433 317"; echo "delay 60"; echo "finger_move 1 463 317"; echo "delay 300"
-	echo "finger_up 1"; echo "delay 1500"
-	drag 404 317 463 70
-	drag 346 259 521 70
-	echo "tap 697 124"; echo "delay 800"; echo "tap 522 259"; echo "delay 1500"
-	echo "tap 522 259"; echo "delay 800"; echo "tap 150 150"; echo "delay 1500"
-	echo "tap 463 317"; echo "delay 800"; echo "tap 288 259"; echo "delay 1500"
-	echo "tap 150 150"; echo "delay 1500"
+	echo "finger_up 1"; echo "wait_log 10000 main11=stonex1 main12=stonex9 |"
+	drag 404 317 463 70 "main12=stonex9 | craft1=stonex1 |"
+	drag 346 259 521 70 "craft1=stonex1 craft2=markerx6"
+	# A settle: the preview's slot is filled from the inventory the client
+	# gets after the server's line (2026-10-13: a tap at once took nothing)
+	echo "delay 500"
+	echo "tap 697 124"; echo "wait_log 10000 craft2=markerx5"
+	echo "tap 522 259"; echo "wait_log 10000 main5=sandx1 main12=stonex9 | craft2=markerx5 |"
+	echo "tap 522 259"; echo "$click"; echo "tap 150 150"; echo "$click"
+	echo "tap 463 317"; echo "$click"
+	echo "tap 288 259"; echo "wait_log 10000 state: main1=stonex9 main5=sandx1 | craft2=markerx5 |"
+	echo "tap 150 150"; echo "wait_log 10000 touch_parity: inventory closed"
 	echo "screenshot $t/native_end.png"
 	echo quit
 } > "$t/native.cmds"
 server "$t/n"
 BUILDAT_TOUCH=1 run_client 60 "$t/native.log" timeout 240 "$here/Build/bin/buildat" \
 	-C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT -w 1000x500 -u 1 -l 3 \
-	-o sound_mute=1 -c @"$t/native.cmds"
-grep -a "Command sequence failed" "$t/native.log" && fail "the drive ($t/native.log)"
+	-o sound_mute=1 -c @"$t/native.cmds" || fail "the drive ($t/native.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 L=$t/n.log
 want $L "wield 3" "the tap on hotbar slot 3"
@@ -244,7 +274,13 @@ echo "ok: native: the hotbar, the place and dig at the finger, the stick ($half 
 # from x 371, the preview at (558, 99)
 # The taps wait for the client's world, not only the server's ready: its
 # first data can sit behind the map for over a minute, and the world is
-# meshed again when it comes (2026-10-11)
+# meshed again when it comes (2026-10-11). The hold is a finger held 4 s,
+# long enough to dig twice; every other step waits for its line. The
+# other waits are settles after the line: the marker's chunk drawn after
+# the settle line, the inventory laid out after its tap, and the craft
+# preview filled after the grid's line. simplified: the
+# 5 s before the tap on the marker is for the marker's chunk, which has
+# no line of its own; with the 2 s it is dev's 7 s.
 if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buildat.wasm" ]; then
 	echo "PASS: native; the web skipped (no Chrome or web/)"
 	exit 0
@@ -252,22 +288,27 @@ fi
 cat > "$t/web.json" <<'J'
 [
  ["nav", "${URL}"],
- ["waitlog", "touch_parity: ready", 240],
- ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 240],
- ["wait", 5000],
- ["tap", 316, 368], ["wait", 1000], ["tap", 204, 368], ["wait", 1000],
- ["tap", 510, 213], ["wait", 1500],
- ["hold", 510, 213, 4000], ["wait", 1500],
- ["tap", 673, 47], ["wait", 2000],
- ["drag", 231, 206, 278, 254, "touch"], ["wait", 1500],
- ["tap", 278, 254], ["wait", 800], ["tap", 324, 206], ["wait", 1500],
- ["carry", 324, 206, 324, 254, 700, 300, 371, 254], ["wait", 1500],
- ["drag", 324, 254, 371, 56, "touch"], ["wait", 1500],
- ["drag", 278, 206, 418, 56, "touch"], ["wait", 1500],
- ["tap", 558, 99], ["wait", 800], ["tap", 418, 206], ["wait", 1500],
- ["tap", 418, 206], ["wait", 800], ["tap", 100, 100], ["wait", 1500],
- ["tap", 371, 254], ["wait", 800], ["tap", 231, 206], ["wait", 1500],
- ["tap", 100, 100], ["wait", 1500],
+ ["waitlog", "touch_parity: ready", 120],
+ ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
+ ["wait", 2000],
+ ["tap", 316, 368], ["waitlog", "\\| wield 3", 10],
+ ["tap", 204, 368], ["waitlog", "\\| wield 1", 10], ["wait", 5000],
+ ["tap", 510, 213], ["waitlog", "placed floor:stone against the marker", 10],
+ ["hold", 510, 213, 4000], ["waitlog", "dug floor:stone that was placed", 10],
+ ["tap", 673, 47], ["waitlog", "touch: Inventory", 10], ["wait", 500],
+ ["drag", 231, 206, 278, 254, "touch"], ["waitlog", "main2=markerx6 main10=stonex10 \\|", 10],
+ ["tap", 278, 254], ["waitlog", "form: a left click", 10],
+ ["tap", 324, 206], ["waitlog", "main2=markerx6 main3=stonex10 \\|", 10],
+ ["carry", 324, 206, 324, 254, 700, 300, 371, 254], ["waitlog", "main11=stonex1 main12=stonex9 \\|", 10],
+ ["drag", 324, 254, 371, 56, "touch"], ["waitlog", "main12=stonex9 \\| craft1=stonex1 \\|", 10],
+ ["drag", 278, 206, 418, 56, "touch"], ["waitlog", "craft1=stonex1 craft2=markerx6", 10],
+ ["wait", 500], ["tap", 558, 99], ["waitlog", "craft2=markerx5", 10],
+ ["tap", 418, 206], ["waitlog", "main5=sandx1 main12=stonex9 \\| craft2=markerx5 \\|", 10],
+ ["tap", 418, 206], ["waitlog", "form: a left click", 10],
+ ["tap", 100, 100], ["waitlog", "form: a left click", 10],
+ ["tap", 371, 254], ["waitlog", "form: a left click", 10],
+ ["tap", 231, 206], ["waitlog", "state: main1=stonex9 main5=sandx1 \\| craft2=markerx5 \\|", 10],
+ ["tap", 100, 100], ["waitlog", "touch_parity: inventory closed", 10],
  ["shot", "${OUT}/web_end.png"]
 ]
 J

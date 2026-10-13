@@ -267,8 +267,9 @@ async function chrome() {
 		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
 				maxTouchPoints: 5});
 	const key = async (k, mods = 0) => {
-		const [, code, vk] = KEYS[k] || [k, "Key" + k.toUpperCase(),
-				k.toUpperCase().charCodeAt(0)];
+		// A digit's code is Digit2, not Key2, which SDL maps to nothing
+		const [, code, vk] = KEYS[k] || [k, (/[0-9]/.test(k) ? "Digit" :
+				"Key") + k.toUpperCase(), k.toUpperCase().charCodeAt(0)];
 		const name = KEYS[k] ? (k === "Space" ? " " : code) : k;
 		const base = {key: name, code, windowsVirtualKeyCode: vk, modifiers: mods};
 		await c.send("Input.dispatchKeyEvent", Object.assign({type: "rawKeyDown"}, base));

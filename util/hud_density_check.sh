@@ -30,17 +30,25 @@ trap check_cleanup EXIT
 d=$t/srv
 mkdir -p "$d/shared/vanilla/games" "$d/apps/vanilla/saves/hd/luanti"
 cp -r "$G" "$d/shared/vanilla/games/"
+# The 32 slots when the drive selects the second slot: a tap on it
+# upright, where the chat's typed command on the touch page did not
+# always arrive and a key did nothing (2026-10-13)
 cat > "$d/shared/fixture.lua" <<'L'
-core.register_on_joinplayer(function(player)
-	local name = player:get_player_name()
-	core.after(5, function() core.chat_send_player(name, "hd: ready") end)
-	core.after(25, function()
-		local p = core.get_player_by_name(name)
-		if p then
+local wide, last = {}, {}
+core.register_globalstep(function()
+	for _, p in ipairs(core.get_connected_players()) do
+		local name = p:get_player_name()
+		local i = p:get_wield_index()
+		if i ~= last[name] then
+			last[name] = i
+			core.log("action", "hd: " .. name .. " wields " .. i)
+		end
+		if not wide[name] and i == 2 then
+			wide[name] = true
 			p:hud_set_hotbar_itemcount(32)
 			core.chat_send_player(name, "hd: wide")
 		end
-	end)
+	end
 end)
 L
 echo "enable_damage = false" > "$d/apps/vanilla/saves/hd/luanti/world.mt"
@@ -50,17 +58,28 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$d.cache" -l 3 \
 	-W "$here/web" || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-# 873x393 CSS pixels at 2.75 is 2401x1081
+# 873x393 CSS pixels at 2.75 is 2401x1081. A turn waits for the hotbar's
+# row at the new width; the first wait is VoxeLibre's 9 slots, set at the
+# join (a settle line before it is the empty scene's). The 2 s after it
+# lets the world draw for the shot; the 500 ms after each "hotbar: ..."
+# line are the frames that draw it. The 32 slots come behind the world
+# still streaming to the page: 43 s once, not in 180 s the next time
+# (2026-10-13; dev waited up to 400 s). This fails until that backlog is
+# sped up (doc/plan, [CHECKS_EVENT_WAITS]'s "Found" note); 60 s, and a
+# turn's relayout 30 s, its frames slow while the world streams
 cat > "$t/steps.json" <<'J'
 [
  ["nav", "${URL}"],
- ["waitlog", "chat: hd: ready", 600], ["wait", 2000],
+ ["waitlog", "hotbar: 9 slots, .* of 2[0-9][0-9][0-9]", 240], ["wait", 2000],
  ["shot", "${OUT}/sideways9.png"],
- ["viewport", 393, 873], ["wait", 3000],
+ ["viewport", 393, 873],
+ ["waitlog", "hotbar: 9 slots, .* of 10[0-9][0-9]", 30], ["wait", 500],
  ["shot", "${OUT}/upright9.png"],
- ["waitlog", "chat: hd: wide", 400], ["wait", 2000],
+ ["tap", 70, 847],
+ ["waitlog", "hotbar: 32 slots, .* of 10[0-9][0-9]", 60], ["wait", 500],
  ["shot", "${OUT}/upright32.png"],
- ["viewport", 873, 393], ["wait", 3000],
+ ["viewport", 873, 393],
+ ["waitlog", "hotbar: 32 slots, .* of 2[0-9][0-9][0-9]", 30], ["wait", 500],
  ["shot", "${OUT}/sideways32.png"]
 ]
 J
@@ -95,10 +114,10 @@ bad=$(grep -aoP 'hud: statbar \S+ from \K-?\d+ to \d+ of \d+' "$L" | awk '$1 < 0
 [ -z "$bad" ] || fail "a statbar off the screen: $bad ($L)"
 [ "$(grep -ac "hud: statbar" "$L")" -gt 0 ] || fail "no statbar drawn ($L)"
 # Natively, density 1
-printf 'wait_log 300000 chat: hd: ready\ndelay 2000\nquit\n' > "$t/n.cmds"
-timeout 400 "$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT \
-	-w 1280x720 -l 3 -o sound_mute=1 -c @"$t/n.cmds" > "$t/native.log" 2>&1
-grep -a "Command sequence failed" "$t/native.log" && fail "the native drive ($t/native.log)"
+printf 'wait_log_any 120000 hotbar: 9 slots\nquit\n' > "$t/n.cmds"
+timeout 200 "$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" -s 127.0.0.1:$SERVER_PORT \
+	-w 1280x720 -l 3 -o sound_mute=1 -c @"$t/n.cmds" > "$t/native.log" 2>&1 ||
+	fail "the native drive ($t/native.log): $(grep -ao 'Command sequence failed.*' "$t/native.log" | head -1)"
 read -r n pic _ < <(rows "$t/native.log" | tail -1)
 [ "${pic:-}" = 48 ] || fail "natively the picture is ${pic:-?}, not 48 ($t/native.log)"
 echo "PASS: the hotbar at the density (132 sideways), one row fitting the width upright and at 32 slots, the statbars on the screen, natively 48 as before"

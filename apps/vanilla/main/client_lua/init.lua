@@ -3844,8 +3844,12 @@ end)
 -- touchscreen's tap
 keys.place_now = function()
 	if pointed_p == nil then
-		log:info(string.format("click at nothing: reach %.1f",
-				math.min(POINT_RANGE, luanti.dig_range(wield_index))))
+		-- Where it looked, and a finger's point, for a miss to be read
+		local aim = keys.touch and keys.touch.aim
+		log:info(string.format("click at nothing: reach %.1f, look %.1f, %.1f%s",
+				math.min(POINT_RANGE, luanti.dig_range(wield_index)), yaw,
+				pitch, aim and string.format(", finger at %d, %d", aim.x,
+				aim.y) or ""))
 		return
 	end
 	-- The right button is Luanti's place-or-use: what it comes to is the
