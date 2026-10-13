@@ -112,11 +112,11 @@ grep -aq "marks: server 127.0.0.1:$AN wears its listing's icon" "$t/cl4.log" ||
 
 # Luanti's list: a server wears the icon of the game the list names, when
 # that game is installed here; two on one game both wear it
-mkdir -p "$t/cl5/shared/vanilla/games/testgame/menu" "$t/cl5/serverlist"
+mkdir -p "$t/cl5/shared/vanilla/games/testgame/menu" "$t/cl5/extensions/serverlist"
 cp "$here/client/data/favicon.png" "$t/cl5/shared/vanilla/games/testgame/menu/icon.png"
 marks(){ # game -> the room's count of its own icons
 	printf '192.0.2.1:30000|One|3|%s\n192.0.2.2:30000|Two|2|%s\n' "$1" "$1" \
-		> "$t/cl5/serverlist/serverlist.csv"
+		> "$t/cl5/extensions/serverlist/serverlist.csv"
 	timeout 90 bin/buildat -D "$t/cl5" -C "$t/cache5" -m launch_world -w 640x360 \
 		-l 3 -o sound_mute=1 -c @"$t/cmds" > "$t/cl5_$1.log" 2>&1
 	grep -ao "marks: [0-9]* of the room's own" "$t/cl5_$1.log" | cut -d' ' -f2
