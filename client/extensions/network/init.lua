@@ -861,15 +861,22 @@ local function http_start(url, cb, body)
 	if not http_polling then
 		http_polling = true
 		magic.SubscribeToEvent("Update", function()
+			-- The callbacks run after the walk: one that starts a fetch
+			-- adds to http_pending, and a key added during pairs() can
+			-- rehash the table under next() ("invalid key to 'next'")
+			local finished = {}
 			for jid, callback in pairs(http_pending) do
 				local ok, body, redirect = __buildat_http_poll(jid)
 				if ok ~= nil then
 					http_pending[jid] = nil
-					if ok then
-						callback(body)
-					else
-						callback(nil, body, redirect)
-					end
+					table.insert(finished, {callback, ok, body, redirect})
+				end
+			end
+			for _, f in ipairs(finished) do
+				if f[2] then
+					f[1](f[3])
+				else
+					f[1](nil, f[3], f[4])
 				end
 			end
 		end)
