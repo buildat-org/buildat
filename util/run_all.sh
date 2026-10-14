@@ -12,6 +12,11 @@
 #          goes back to and why. Run alone, or as this tier while it is
 #          fixed, and in no other tier, --changed's picks included
 #
+#   ci     not a tier of its own: every runner with a "# ci" line
+#          beside its tier line, whatever its tier -- what GitHub's
+#          checks workflow runs ([CI_TIER]): no downloaded game, nothing
+#          leaving the machine
+#
 #   util/run_all.sh quick
 #   util/run_all.sh full --list
 #   ONLY='keys.*|focus' util/run_all.sh quick
@@ -58,8 +63,8 @@ if [ "$tier" = "--changed" ]; then
 fi
 for a in "$@"; do [ "$a" = "--list" ] && list_only=1; done
 case "$tier" in
-quick|full|long|broken) ;;
-*) echo "run_all: no tier \"$tier\": quick, full, long or broken" >&2
+quick|full|long|broken|ci) ;;
+*) echo "run_all: no tier \"$tier\": quick, full, long, broken or ci" >&2
 	exit 2;;
 esac
 out="$root/local/run_all"
@@ -85,7 +90,11 @@ for f in $(git -C "$root" grep -l '^# tier:' -- '*.sh'); do
 	*) echo "run_all: ${f#"$root"/} has the tier \"$t\": quick, full, long or broken" >&2
 		exit 2;;
 	esac
-	[ "$t" = "$tier" ] || continue
+	if [ "$tier" = ci ]; then
+		[ "$t" != broken ] && grep -q '^# ci$' "$f" || continue
+	else
+		[ "$t" = "$tier" ] || continue
+	fi
 	name=${f#"$root"/}
 	case "$f" in "$luanti_test"/*) name=$(basename "$f");; esac
 	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }

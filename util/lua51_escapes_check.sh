@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: 1s (2026-10-08)
 # covers: util/lua51_escapes.cmake
 # [LUA51_ESCAPES]: the build's scan refuses \u{..}, \xXX and \z at their

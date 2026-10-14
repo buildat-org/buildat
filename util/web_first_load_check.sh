@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# ci
 # cost: ~20s (2026-10-04)
 # covers: builtin/network/network.cpp
 # [SELECT_BAD_FD], the second half: the first page load after a start

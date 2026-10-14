@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# ci
 # cost: ~40 s (2026-10-14)
 # covers: builtin/moderation/moderation.cpp
 # [SEC_RUN5_LEFTOVERS] (run 5's F2, drive D5): a report costs the same

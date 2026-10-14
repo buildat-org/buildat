@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# ci
 # cost: ~60 s (2026-10-13)
 # covers: builtin/luanti/luanti.cpp builtin/luanti/lua/entity.lua builtin/luanti/lua/bootstrap.lua
 # [COMPAT_BREAK_07] 8h: a luanti world's players row and clock that this

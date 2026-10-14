@@ -13,6 +13,7 @@
 # passes this and fails there.
 #
 # tier: quick
+# ci
 # cost: 3s
 # always: yes
 #

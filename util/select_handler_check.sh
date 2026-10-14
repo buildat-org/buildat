@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~2s (2026-10-04)
 # covers: src/interface/select_handler.h
 # [SELECT_BAD_FD]: a socket closed under select() is left out while it stays

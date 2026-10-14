@@ -1,6 +1,7 @@
 # [CI_RUNS] (5): the checks, run the one way they are run --
 # util/checks_in_docker.sh, the packaging image, Xvfb -- beside the
 # archives. Started by hand only ([CI_GREEN], user, 2026-10-05): the
+# ci tier ([CI_TIER]: the runners marked "# ci", no network), the
 # quick tier, or the full and long tiers, on the chosen branch; the push,
 # tag and schedule triggers come back once the quick tier is green. Every run's
 # local/ is an artifact, if: always(), because a failure that cannot be
@@ -10,11 +11,24 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: 'quick, or nightly (full and long)'
+        description: 'ci, quick, or nightly (full and long)'
         type: choice
-        options: [quick, nightly]
-        default: quick
+        options: [ci, quick, nightly]
+        default: ci
 jobs:
+  ci:
+    if: inputs.tier == 'ci'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The ci tier
+        run: JOBS=$(nproc) util/checks_in_docker.sh ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-run
+          path: Build/checks/out/
+          if-no-files-found: ignore
   quick:
     if: inputs.tier == 'quick'
     runs-on: ubuntu-latest

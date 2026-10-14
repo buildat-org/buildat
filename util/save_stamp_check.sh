@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~15 s (2026-10-12)
 # covers: builtin/storage/storage.cpp
 # [COMPAT_BREAK_07] 8h: a save is stamped with its format (PRAGMA

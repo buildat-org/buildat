@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 10s
 # [VOXELFORMAT_PRESETS]: a saved world whose id field is widened, through
 # voxelworld's save. A server-only app (written here) writes 1000 voxel types

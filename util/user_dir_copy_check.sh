@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# ci
 # cost: ~40 s (2026-10-10)
 # covers: src/server/main.cpp src/impl/fs.cpp
 # [USER_DIR_COPY]: an Aitta whose admin came from first_admin, running.

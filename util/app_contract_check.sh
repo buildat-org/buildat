@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~20 s (2026-10-12)
 # covers: builtin/loader/loader.cpp src/impl/aitta.cpp
 # [COMPAT_BREAK_07] 8c, the app contract: a server on an app whose module

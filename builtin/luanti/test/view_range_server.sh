@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# ci
 # cost: 60s (this desk, 2026-09-26; local/run_all/costs corrects it per machine)
 # [CLIENT_FRAME]: **how far out the world is kept is the server's to
 # decide.** A player asking for a view range of four hundred is asking

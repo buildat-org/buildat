@@ -47,7 +47,11 @@ mount_media=""
 # keeps the directory); the archive has no .git, so the hash by name
 ccache_dir="${BUILDAT_CCACHE_DIR:-$here/Build/ccache}"
 mkdir -p "$ccache_dir"
-docker run --rm -i \
+# **Nothing leaves the machine in the ci tier** ([CI_TIER]): no network
+# but the container's loopback, so a runner that reaches out fails here
+net=""
+[ "$tier" = ci ] && net="--network none"
+docker run --rm -i $net \
 	-v "$out:/out:z" \
 	-v "$ccache_dir:/ccache:z" -e CCACHE_DIR=/ccache \
 	-e "BUILDAT_GIT_HASH=$(git -C "$here" rev-parse --short HEAD)" \

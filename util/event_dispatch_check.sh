@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~2s (2026-10-08)
 # covers: src/interface/event.h
 # [REWORK_FIXES]: EVENT_TYPEN given no parameter throws "Missing parameter",

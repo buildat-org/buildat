@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~2s (2026-10-08)
 # covers: src/interface/address.h
 # [REWORK_FIXES]: host:port and URL parsing, the one copy every caller uses.

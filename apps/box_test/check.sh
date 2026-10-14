@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: 10s (a first run compiles the app, 2026-10-02)
 # covers: src/server/confine.cpp src/server/main.cpp apps/box_test/**
 # [PROCESS_SANDBOX]: **the hostile app**. apps/box_test spends its start

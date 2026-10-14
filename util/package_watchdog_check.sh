@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# ci
 # cost: ~70s (2026-10-05)
 # covers: util/package.sh tree_cpu wait_for_line
 # [WIN_PREBUILD_STALL]: the prebuild's watchdog fails a server whose log
