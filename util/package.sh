@@ -758,7 +758,8 @@ smoke_test() {
 	done
 	kill -9 "$srv" 2>/dev/null || true; wait "$srv" 2>/dev/null || true
 	if [ ! -f "$dir/shot.png" ]; then
-		echo "smoke test: no screenshot; see $dir/cli.log and $dir/srv.log" >&2
+		echo "smoke test: no screenshot; see $dir/cli.log and $dir/srv.log; the client's log's end:" >&2
+		tail -40 "$dir/cli.log" >&2
 		exit 1
 	fi
 	# What the archive has to have done: joined, drawn the world -- the

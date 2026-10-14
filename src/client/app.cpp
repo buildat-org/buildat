@@ -3919,7 +3919,11 @@ struct CApp: public App, public magic::Application
 		else if(magic_level == magic::LOG_WARNING)
 			c55_level = CORE_WARNING;
 		else if(magic_level == magic::LOG_ERROR)
-			c55_level = CORE_ERROR;
+			// No audio device (a CI container, Wine) is the box's, not a
+			// fault: a warning, so a drive's error watch does not end on
+			// it ([PACKAGE_070_SMOKE])
+			c55_level = message.find("Could not initialize audio output") !=
+					ss_::npos ? CORE_WARNING : CORE_ERROR;
 		log_(c55_level, MODULE, "Urho3D %s", cs(message));
 	}
 

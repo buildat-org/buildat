@@ -42,6 +42,7 @@ docker run --rm -i \
 	-e "BUILDAT_GIT_HASH=$hash" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
 	-e "WIN_VARIANTS=${WIN_VARIANTS:-1}" \
+	-e KEEP_TMP=1 \
 	"$image" bash -c "
 		set -eu
 		trap 'chown -R $(id -u):$(id -g) /ccache 2>/dev/null || true' EXIT
@@ -61,8 +62,14 @@ docker run --rm -i \
 		# (a Windows run has neither; the script is set -e)
 		cp Build/package/build_web.log /out/logs/ 2>/dev/null || true
 		cp -r Build/package/stage/prebuild-apps-* /out/logs/ 2>/dev/null || true
-		# And the smoke test's leavings, for reading a failure from outside
-		mkdir -p /out/smoke && cp /tmp/tmp.*/shot.png /tmp/tmp.*/*.log /out/smoke/ 2>/dev/null || true
+		# And the smoke tests' leavings, for reading a failure from outside:
+		# KEEP_TMP above keeps package.sh's trap from deleting them (the
+		# container goes), one directory each ([PACKAGE_070_SMOKE])
+		for d in /tmp/buildat_package_smoke_test*/; do
+			[ -d \$d ] || continue
+			o=/out/smoke/\$(basename \$d); mkdir -p \$o
+			cp \$d/shot.png \$d/*.log \$d/*.txt \$o/ 2>/dev/null || true
+		done
 		exit \$status
 	" < "$tarball"
 rm -f "$tarball"
