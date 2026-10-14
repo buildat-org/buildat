@@ -144,7 +144,9 @@ local function setup_simple_voxel_data(node)
 	local w = node:GetVar("simple_voxel_w"):GetInt()
 	local h = node:GetVar("simple_voxel_h"):GetInt()
 	local d = node:GetVar("simple_voxel_d"):GetInt()
-	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg)
+	-- A body: no world position, so the texture repeat starts at its corner
+	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg,
+			0, 0, 0)
 	-- Same shader as the terrain, or the piece is drawn by whatever the
 	-- mesher left on it and comes out nothing like the ground it lands on
 	voxel_shading.apply_to_node(node)

@@ -2502,33 +2502,18 @@ end
 -- TODO: Implement sandbox unwrapping in C++ and remove these from here
 --       (already done in lua_bindings/voxel.cpp)
 
-function buildat.safe.set_simple_voxel_model(safe_node, w, h, d, safe_buffer)
-	if not getmetatable(safe_node) or
-			getmetatable(safe_node).type_name ~= "Node" then
-		error("node is not a sandboxed Node instance")
-	end
-	node = getmetatable(safe_node).unsafe
-
-	buffer = nil
-	if type(safe_buffer) == 'string' then
-		buffer = safe_buffer
-	else
-		if not getmetatable(safe_buffer) or
-				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
-			error("safe_buffer is not a sandboxed VectorBuffer instance")
-		end
-		buffer = getmetatable(safe_buffer).unsafe
-	end
-
-	__buildat_set_simple_voxel_model(node, w, h, d, buffer)
-end
-
 -- voxel_reg, atlas_reg, and then where this block's (0, 0, 0) sits in the
 -- world, which is what a voxel of uv_scale > 1 takes its slice of the
--- repeat from ([WORLD_UV]). No origin is the old behaviour, the block
--- standing at the world's own zero.
+-- repeat from ([WORLD_UV]). Required ([VOXEL_GEOMETRY_ORIGIN]): a block
+-- with no world position passes 0, 0, 0.
 function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
 		voxel_reg, atlas_reg, ox, oy, oz)
+	if type(ox) ~= "number" or type(oy) ~= "number" or
+			type(oz) ~= "number" then
+		error("set_8bit_voxel_geometry(): the origin ox, oy, oz is required"..
+				" (where the block's (0, 0, 0) sits in the world; 0, 0, 0"..
+				" for one with no world position)", 2)
+	end
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -2546,10 +2531,13 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
 		buffer = getmetatable(safe_buffer).unsafe
 	end
 	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer,
-			voxel_reg, atlas_reg, ox or 0, oy or 0, oz or 0)
+			voxel_reg, atlas_reg, ox, oy, oz)
 end
 
-function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)
+-- origin, {x=, y=, z=} or a Vector3, is where the volume's inside
+-- (0, 0, 0) sits in the world ([WORLD_UV]); nil for a model of its own
+function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, voxel_reg,
+		atlas_reg, use_skylight, material_cb, horizon, origin)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
@@ -2566,7 +2554,10 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, ...)
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
-	__buildat_set_voxel_geometry(node, buffer, ...)
+	-- Every argument: luabind matches by count
+	__buildat_set_voxel_geometry(node, buffer, voxel_reg, atlas_reg,
+			use_skylight or false, material_cb, horizon,
+			origin and {x = origin.x, y = origin.y, z = origin.z})
 end
 
 -- set_voxel_data(node, data): a chunk node's voxel data from a serialized

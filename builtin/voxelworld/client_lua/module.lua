@@ -552,9 +552,18 @@ function sub_events()
 			M.frame_us.horizon = M.frame_us.horizon + t1 - t0
 			horizon_meshed_us[node:GetID()] = t1
 			if lod == 1 then
+				-- The chunk's origin, whatever horizon is: a voxel of
+				-- uv_scale > 1 repeats across the chunk edges with it
+				-- ([VOXEL_GEOMETRY_ORIGIN])
+				local origin = nil
+				if M.chunk_size_voxels then
+					origin = buildat.Vector3(node_p):div_components(
+							M.chunk_size_voxels):floor():mul_components(
+							M.chunk_size_voxels)
+				end
 				buildat.set_voxel_geometry(
 						node, data, voxel_reg, atlas_reg, M.use_skylight,
-						set_up_materials, horizon)
+						set_up_materials, horizon, origin)
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 				note_slow_mesh(node, t1, 0, 1)
 

@@ -50,8 +50,7 @@ Starport listing takes it as its kind unless `starport.json` names one.
   `aggregate_look`.
 * Checks and test scenes: `box_test` (a hostile app the server's
   sandbox must contain), `voxel_lighting`, `multisection_lighting`,
-  `voxel_physics`, `geometry`, `geometry2`, `entitytest`, `featuretest`,
-  `uitest`, `test`.
+  `voxel_physics`, `entitytest`, `featuretest`, `uitest`, `test`.
 
 Further reading:
 

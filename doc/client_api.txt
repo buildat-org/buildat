@@ -250,10 +250,14 @@ buildat.pack_voxel_volume(args) -> string
 buildat.deserialize_volume(data) -> Volume, and the typed
 buildat.deserialize_volume_int32(data), buildat.deserialize_volume_8bit(data)
 buildat.set_voxel_geometry(node, volume_data, voxel_reg, atlas_reg
-  [, use_skylight [, set_up_materials [, horizon]]])
+  [, use_skylight [, set_up_materials [, horizon [, origin]]]])
 - The mesher, on a worker thread; the node's CustomGeometry is replaced when
   it is done. horizon is a HorizonMap string (see column_heights) for the
-  terrain's own occlusion of the sky ([PBR_FIT]).
+  terrain's own occlusion of the sky ([PBR_FIT]). origin, {x=, y=, z=} or a
+  Vector3, is where the volume's inside (0, 0, 0) sits in the world, which a
+  voxel of uv_scale > 1 takes its slice of the texture repeat from
+  ([WORLD_UV]); a world's chunk passes it, a model standing on its own leaves
+  it out and every voxel gets the whole texture.
 buildat.set_voxel_lod_geometry(lod, node, volume_data, ...)
 - The same at one voxel per lod^3
 buildat.clear_voxel_geometry(node)
@@ -275,9 +279,13 @@ buildat.set_quad_geometry(node, quads) -> {tile, ...}
   node's CustomGeometry, one geometry per distinct tile in ascending tile
   order (the answer says which tile each geometry is), both windings of
   every quad; a posed model is one build per frame ([OBJECT_MESH])
-buildat.set_simple_voxel_model(node, w, h, d, buffer)
-buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, ...)
-- The old fixed-format paths, kept for the small games
+buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, voxel_reg, atlas_reg,
+  ox, oy, oz)
+- The old fixed-format path, kept for the small games: one byte a voxel.
+  ox, oy, oz is where the block's (0, 0, 0) sits in the world, which a voxel
+  of uv_scale > 1 takes its slice of the texture repeat from ([WORLD_UV]);
+  required, and a block with no world position (a body, a model) passes
+  0, 0, 0.
 buildat.set_voxel_data(node, data)
 buildat.get_voxel_data(node) -> string or nil
 - A chunk node's buildat_voxel_data var as a string, which is what a

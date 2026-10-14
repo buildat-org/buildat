@@ -1396,7 +1396,9 @@ function setup_simple_voxel_data(node)
 	local h = node:GetVar("simple_voxel_h"):GetInt()
 	local d = node:GetVar("simple_voxel_d"):GetInt()
 	log:info(dump(node:GetName()).." voxel data size: "..data:GetSize())
-	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg)
+	-- A body: no world position, so the texture repeat starts at its corner
+	buildat.set_8bit_voxel_geometry(node, w, h, d, data, voxel_reg, atlas_reg,
+			0, 0, 0)
 end
 
 voxelworld.sub_ready(function()

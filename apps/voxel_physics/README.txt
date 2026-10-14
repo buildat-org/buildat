@@ -1,11 +1,9 @@
 voxel_physics
 =============
 
-geometry2's falling voxel bodies, but standing on a voxelworld: the terrain is
-generated and meshed by voxelworld instead of being one hand written string of
-voxels, it is lit by voxelworld's skylight and drawn with voxel_shading, and
-the pieces that fall on it are drawn with the same shader out of the same
-voxel registry.
+Falling voxel bodies on a voxelworld: the terrain is generated and meshed by
+voxelworld, lit by its skylight and drawn with voxel_shading, and the pieces
+that fall on it are drawn with the same shader out of the same voxel registry.
 
 Each piece is a random connected shape inside a 3x3x3 box, grown from the
 middle voxel outwards, so what lands interlocks instead of stacking like

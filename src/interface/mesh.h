@@ -22,10 +22,6 @@ namespace interface
 		using namespace Urho3D;
 		namespace pv = PolyVox;
 
-		// Create a model from a string; eg. (2, 2, 2, "11101111")
-		Model* create_simple_voxel_model(Context *context, int w, int h, int d,
-				const ss_ &source_data);
-
 		// Create a model from 8-bit voxel data, using a voxel registry, without
 		// textures or normals, based on the physically_solid flag.
 		// Returns nullptr if there is no geometry

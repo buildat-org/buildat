@@ -13,8 +13,6 @@
 #include <luabind/adopt_policy.hpp>
 #include <luabind/pointer_traits.hpp>
 #include <Scene.h>
-#include <StaticModel.h>
-#include <Model.h>
 #include <CustomGeometry.h>
 #include <Image.h>
 #include <algorithm>
@@ -48,40 +46,6 @@ namespace lua_bindings {
 		if(tolua_isusertype(L, index, #type, 0, &tolua_err)) \
 			result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
-
-void set_simple_voxel_model(const luabind::object &node_o,
-		int w, int h, int d, const luabind::object &buffer_o)
-{
-	lua_State *L = node_o.interpreter();
-
-	GET_TOLUA_STUFF(node, 1, Node);
-	TRY_GET_TOLUA_STUFF(buf, 5, const VectorBuffer);
-
-	log_d(MODULE, "set_simple_voxel_model(): node=%p", node);
-	log_d(MODULE, "set_simple_voxel_model(): buf=%p", buf);
-
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_tocppstring(L, 5);
-	else
-		data.assign((const char*)buf->GetData(), buf->GetSize());
-
-	if((int)data.size() != w * h * d){
-		throw Exception(ss_()+"set_simple_voxel_model(): Data size does not match"
-				" with dimensions ("+cs(data.size())+" vs. "+cs(w*h*d)+")");
-	}
-
-	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
-	lua_pop(L, 1);
-	Context *context = buildat_app->get_scene()->GetContext();
-
-	SharedPtr<Model> fromScratchModel(
-			interface::mesh::create_simple_voxel_model(context, w, h, d, data));
-
-	StaticModel *object = node->GetOrCreateComponent<StaticModel>(LOCAL);
-	object->SetModel(fromScratchModel);
-}
 
 void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o,
@@ -224,13 +188,19 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// interface/mesh.h lays them out. See [PBR_FIT] 2c.
 	up_<interface::mesh::HorizonMap> horizon;
 
+	// Where the volume's inside (0, 0, 0) sits in the world, which a voxel
+	// of uv_scale > 1 takes its slice of the repeat from ([WORLD_UV]); a
+	// world's chunk passes it whatever horizon is ([VOXEL_GEOMETRY_ORIGIN])
+	up_<PolyVox::Vector3DInt32> uv_origin;
+
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
 			bool use_skylight, const luabind::object &material_cb,
-			const ss_ &horizon_data):
+			const ss_ &horizon_data, up_<PolyVox::Vector3DInt32> uv_origin):
 		node(node), data(data), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
 		use_skylight(use_skylight), material_cb(material_cb),
-		horizon(parse_horizon(horizon_data, "set_voxel_geometry()"))
+		horizon(parse_horizon(horizon_data, "set_voxel_geometry()")),
+		uv_origin(std::move(uv_origin))
 	{
 		ScopeTimer timer("pre geometry");
 		// The deserialise is one shot and cheap beside what follows it;
@@ -254,7 +224,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	{
 		generate_voxel_geometry(
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, &alpha_geoms, &masked_geoms, horizon.get());
+				use_skylight, &alpha_geoms, &masked_geoms, horizon.get(),
+				uv_origin.get());
 		interface::mesh::generate_occluder(occluder, *volume,
 				voxel_reg.get());
 		return true;
@@ -535,13 +506,20 @@ void set_voxel_geometry(const luabind::object &node_o,
 		const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
 		bool use_skylight, const luabind::object &material_cb,
-		const luabind::object &horizon_o)
+		const luabind::object &horizon_o, const luabind::object &origin_o)
 {
 	lua_State *L = node_o.interpreter();
 	// The horizon map, a string, or nothing
 	ss_ horizon_data;
 	if(horizon_o.is_valid() && luabind::type(horizon_o) == LUA_TSTRING)
 		horizon_data = luabind::object_cast<ss_>(horizon_o);
+	// The origin, {x=, y=, z=}, or nothing
+	up_<PolyVox::Vector3DInt32> uv_origin;
+	if(origin_o.is_valid() && luabind::type(origin_o) == LUA_TTABLE)
+		uv_origin.reset(new PolyVox::Vector3DInt32(
+				luabind::object_cast<int>(origin_o["x"]),
+				luabind::object_cast<int>(origin_o["y"]),
+				luabind::object_cast<int>(origin_o["z"])));
 
 	GET_TOLUA_STUFF(node, 1, Node);
 	log_d(MODULE, "set_voxel_geometry(): node=%p", node);
@@ -561,7 +539,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 
 	up_<SetVoxelGeometryTask> task(new SetVoxelGeometryTask(
 			node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
-			horizon_data));
+			horizon_data, std::move(uv_origin)));
 
 	auto *thread_pool = buildat_app->get_thread_pool();
 
@@ -955,7 +933,6 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_mesh_alpha_nibbles),
-			LUABIND_FUNC(set_simple_voxel_model),
 			LUABIND_FUNC(set_8bit_voxel_geometry),
 			LUABIND_FUNC(set_voxel_geometry),
 			LUABIND_FUNC(set_voxel_lod_geometry),
