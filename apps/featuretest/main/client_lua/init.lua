@@ -111,8 +111,36 @@ end
 do
 	local node = scene:CreateChild("Fire")
 	node.position = magic.Vector3(3.5, 0.2, -3)
+	-- Urho3D's Particle/Fire.xml, built here: its material's texture is a
+	-- DDS, which the client does not load
+	local mat = magic.Material:new()
+	mat:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/DiffUnlitParticleAdd.xml"))
+	mat:SetTexture(magic.TU_DIFFUSE,
+			magic.cache:GetResource("Texture2D", "main/fire_basic_flame.png"))
+	local effect = magic.ParticleEffect.new()
+	effect.material = mat
+	effect.numParticles = 200
+	effect.emitterType = 0
+	effect:SetMinDirection(magic.Vector3(-0.1, 0.1, -0.1))
+	effect:SetMaxDirection(magic.Vector3(0.1, 1, 0.1))
+	effect:SetConstantForce(magic.Vector3(0, 2, 0))
+	effect.dampingForce = 2
+	effect.minEmissionRate = 40
+	effect.maxEmissionRate = 50
+	effect:SetMinParticleSize(magic.Vector2(0.1, 0.1))
+	effect:SetMaxParticleSize(magic.Vector2(0.4, 0.4))
+	effect.minTimeToLive = 1
+	effect.maxTimeToLive = 1
+	effect.minVelocity = 1
+	effect.maxVelocity = 2
+	effect.sizeMul = 0.5
+	effect.scaled = true
+	effect:AddColorTime(magic.Color(0.1, 0.5, 1, 1), 0)
+	effect:AddColorTime(magic.Color(1, 0.63, 0.45, 1), 0.5)
+	effect:AddColorTime(magic.Color(0, 0, 0, 0), 1)
 	local emitter = node:CreateComponent("ParticleEmitter")
-	emitter.effect = magic.cache:GetResource("ParticleEffect", "Particle/Fire.xml")
+	emitter.effect = effect
 	emitter.emitting = true
 end
 
@@ -177,7 +205,6 @@ do
 	local listener = camera_node:CreateComponent("SoundListener")
 	if magic.audio then
 		magic.audio.listener = listener
-		magic.audio:SetMasterGain(magic.SOUND_MASTER, 0.7)
 	end
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
