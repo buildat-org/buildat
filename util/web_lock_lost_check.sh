@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua
 # [WEB_LOCK_LOST]: on the desktop web, the world with the mouse and no
 # pointer lock opens the pause menu, and the mouse turns the view only
 # while the lock is held. Vanilla (the minimal game) in Chrome at
@@ -81,7 +81,7 @@ cat > "$t/steps.json" <<J
  ["waitlog", "mouse mode 1 ", 10], ["wait", 500],
  ["eval", "'lock ' + !!document.pointerLockElement"],
  $moves,
- ["key", "i"], ["waitlog", "mouse visible .a form opened", 10],
+ ["key", "e"], ["waitlog", "mouse visible .a form opened", 10],
  ["key", "Escape"], ["waitlog", "the pointer lock is not held: paused .not given", 10],
  ["eval", "'lock ' + !!document.pointerLockElement"],
  $moves,
