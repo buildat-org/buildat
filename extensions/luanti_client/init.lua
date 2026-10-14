@@ -17,16 +17,16 @@ local magic = require("buildat/extension/urho3d")
 -- file's own environment, since as locals they took init.lua's big
 -- functions past LuaJIT's 60 upvalues
 HA_CENTER, HA_LEFT, HA_RIGHT, KEY_1, KEY_8, KEY_A, KEY_C,
-		KEY_CTRL, KEY_D, KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_F2, KEY_F3,
-		KEY_F5, KEY_F10, KEY_H, KEY_I, KEY_K, KEY_Q, KEY_S, KEY_SHIFT,
+		KEY_F, KEY_D, KEY_ESCAPE, KEY_F1, KEY_F11, KEY_F12, KEY_F2, KEY_F3,
+		KEY_F5, KEY_F10, KEY_H, KEY_E, KEY_K, KEY_Q, KEY_S, KEY_SHIFT,
 		KEY_SPACE, KEY_T, KEY_V, KEY_W, KEY_Z, LM_HORIZONTAL, LM_VERTICAL,
 		MOUSEB_LEFT, MOUSEB_MIDDLE, MOUSEB_RIGHT, VA_CENTER,
 		VA_TOP =
 	magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_1,
-	magic.KEY_8, magic.KEY_A, magic.KEY_C, magic.KEY_CTRL, magic.KEY_D,
+	magic.KEY_8, magic.KEY_A, magic.KEY_C, magic.KEY_F, magic.KEY_D,
 	magic.KEY_ESCAPE, magic.KEY_F1, magic.KEY_F11, magic.KEY_F12,
 	magic.KEY_F2, magic.KEY_F3, magic.KEY_F5, magic.KEY_F10, magic.KEY_H,
-	magic.KEY_I, magic.KEY_K, magic.KEY_Q, magic.KEY_S, magic.KEY_SHIFT,
+	magic.KEY_E, magic.KEY_K, magic.KEY_Q, magic.KEY_S, magic.KEY_SHIFT,
 	magic.KEY_SPACE, magic.KEY_T, magic.KEY_V, magic.KEY_W, magic.KEY_Z,
 	magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.MOUSEB_LEFT,
 	magic.MOUSEB_MIDDLE, magic.MOUSEB_RIGHT,
@@ -200,7 +200,7 @@ local BINDINGS = {
 	{action = "jump", key = KEY_SPACE, name = "Space", what = "Jump"},
 	-- The same keys as apps/vanilla's, so one scripted episode drives both
 	{action = "sneak", key = KEY_SHIFT, name = "Shift", what = "Sneak"},
-	{action = "fast", key = KEY_CTRL, name = "Ctrl", what = "Move fast"},
+	{action = "fast", key = KEY_F, name = "F", what = "Move fast"},
 	{action = "fly", key = KEY_K, name = "K", what = "Fly on and off"},
 	{action = "camera", key = KEY_C, name = "C",
 			what = "Camera: first person, behind, in front"},
@@ -217,7 +217,7 @@ local BINDINGS = {
 	{action = "noclip", key = KEY_H, name = "H",
 			what = "Through walls on and off"},
 	{action = "chat", key = KEY_T, name = "T", what = "Say something"},
-	{action = "inventory", key = KEY_I, name = "I", what = "Inventory"},
+	{action = "inventory", key = KEY_E, name = "E", what = "Inventory"},
 	{action = "drop", key = KEY_Q, name = "Q",
 			what = "Drop what is held - with Ctrl one of it"},
 	{action = "hotbar", first = KEY_1, last = KEY_8, name = "1 - 8",

@@ -37,9 +37,9 @@ same player. BUILDAT_RENDER_MODE, set to anything non-empty, starts the dialog
 with the PBR checkbox ticked, so that a scripted run does not have to click it
 by pixel coordinates and a miss cannot be mistaken for the shader failing.
 
-Controls: the mouse looks, WASD walks, space jumps, ctrl sneaks, shift is
+Controls: the mouse looks, WASD walks, space jumps, shift sneaks, F is
 faster, 1 to 8 pick a hotbar slot, the left mouse button digs what is pointed
-at and the right one places what is wielded, I opens the inventory, T says
+at and the right one places what is wielded, E opens the inventory, T says
 something (a line starting with a slash is a command), K toggles flying, H
 toggles going through walls, F1 hides the hotbar, the health bar and the
 crosshair, F2 hides what has been said (which is in the top left corner under

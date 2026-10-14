@@ -110,7 +110,7 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 			# a timing: the inventory up 0.8 s, the pace of the walk; a wait
 			# for its line would fail the walk where a random state
 			# (a form already up) keeps it shut, which is not a finding
-			print "keypress I"; print "delay 800"; print "keypress Escape"; d = 1
+			print "keypress E"; print "delay 800"; print "keypress Escape"; d = 1
 		}
 		# The walk has spent its time already; everything else waits here
 		if (!waited) print "delay " int(d * 1000)

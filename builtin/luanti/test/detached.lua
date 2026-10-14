@@ -7,7 +7,7 @@
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/detached.lua \
 --   bin/buildat_server -m ../apps/vanilla -D ../user
 --
--- Connect a client and press I: the form has the player's own slots under a
+-- Connect a client and press E: the form has the player's own slots under a
 -- row of three, which is the detached inventory, holding stone, dirt and
 -- sand. Moving a stack in or out logs what the callbacks were told -- and
 -- the left button carries the whole stack, the right button one item of it

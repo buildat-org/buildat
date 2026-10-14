@@ -27,7 +27,7 @@ M.BINDINGS = {
 	-- Official's three modes and its special key ([FLY_MODES]): fast mode
 	-- is a toggle, and on the ground the special key is what moves fast
 	-- while it is on
-	{action = "aux1", key = magic.KEY_E, name = "E",
+	{action = "aux1", key = magic.KEY_F, name = "F",
 			what = "Special - move fast in fast mode"},
 	{action = "fly", key = magic.KEY_K, name = "K", what = "Fly mode on and off"},
 	{action = "fast", key = magic.KEY_J, name = "J", what = "Fast mode on and off"},
@@ -37,7 +37,7 @@ M.BINDINGS = {
 			name = "1 - 9", what = "Pick a hotbar slot"},
 	{action = "chat", key = magic.KEY_T, name = "T",
 			what = "Chat - a / line is a command"},
-	{action = "inventory", key = magic.KEY_I, name = "I", what = "Inventory"},
+	{action = "inventory", key = magic.KEY_E, name = "E", what = "Inventory"},
 	{action = "drop", key = magic.KEY_Q, name = "Q",
 			what = "Drop what is held (Ctrl: one)"},
 	{action = "mouse", key = magic.KEY_TAB, name = "Tab",

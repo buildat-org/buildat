@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # [BOX_PLAYTEST_2] (8): the key that opens a form must not type into the
-# field the form focuses. VoxeLibre's creative inventory (I) focuses its
+# field the form focuses. VoxeLibre's creative inventory (E) focuses its
 # search field; after the press the field must be empty. A real key is a
 # KeyDown and a TextInput in one frame and the sequencer's keypress is
 # only the first, so the text is injected beside it. Prints PASS or FAIL;
@@ -40,8 +40,8 @@ cat > "$out/cmds.txt" <<CMDS
 wait_log 60000 the server put the player
 wait_log 60000 scene, 0 undrawn within 2
 delay 2000
-keypress I
-text i
+keypress E
+text e
 wait_log 10000 opened
 delay 500
 event scan

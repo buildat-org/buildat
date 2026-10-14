@@ -971,7 +971,7 @@ def rules(s, mem):
     # form rule above does the craft
     if wanted_craft(s, mem) is not None and \
             mem.get("craft_blocked_until", 0) <= turn:
-        return "open_inventory", ["keypress I", ms(1.0)], \
+        return "open_inventory", ["keypress E", ms(1.0)], \
             lambda n: n.form is not None
     # A thing wanted in the hand lying past the hotbar -- a stone pickaxe
     # crafted and left in main:20 while the wooden one dug on -- and a
@@ -980,7 +980,7 @@ def rules(s, mem):
         if hotbar_slot_of(s, word) is None and \
                 any(item_is(st, word) for i, st in mem.get("main", []) if i > 9) and \
                 any(st == "" for _, st in s.hotbar):
-            return "open_inventory", ["keypress I", ms(1.0)], \
+            return "open_inventory", ["keypress E", ms(1.0)], \
                 lambda n: n.form is not None
     # Rung 3: the cobble for the stone pickaxe and the furnace comes from
     # the staircase down (user, 2026-09-20: not from looking around for
@@ -1027,7 +1027,7 @@ def rules(s, mem):
     if dark and mem.get("torch_turn", -99) < turn - 30 and \
             (tslot is not None or have(s, "torch", 1, mem)):
         if tslot is None:
-            return "open_inventory", ["keypress I", ms(1.0)], \
+            return "open_inventory", ["keypress E", ms(1.0)], \
                 lambda n: n.form is not None
         yr = math.radians(s.yaw)
         mem["torch_turn"] = turn
@@ -1199,7 +1199,7 @@ def rules(s, mem):
             return "place_table", cmds, lambda n: any(
                 "crafting_table" in b["name"] for b in n.bins.values())
         if have(s, "crafting_table", 1, mem):
-            return "open_inventory", ["keypress I", ms(1.0)], \
+            return "open_inventory", ["keypress E", ms(1.0)], \
                 lambda n: n.form is not None
 
     # a tree in view, while logs are wanted (six cover the ladder's wood)

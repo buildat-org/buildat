@@ -4,7 +4,7 @@
 # covers: builtin/luanti/client_lua/module.lua
 # [CREATIVE_PAGES]: a game that changes the player's inventory formspec
 # while it is open has it redrawn. VoxeLibre in creative, the inventory
-# open (I); a first run finds the page buttons below the "1 / N" label and
+# open (E); a first run finds the page buttons below the "1 / N" label and
 # the search field in a scan, a second clicks them:
 #   1. next: "2 / N", other items in the first slot, the form still open;
 #   2. prev: "1 / N" again;
@@ -34,7 +34,7 @@ CHECK_PIDS+=($SERVER_PID)
 # ms, the form drawn in the frames after its line
 open="wait_log 120000 load: the world is in
 wait_log_any 120000 form: the game set the inventory
-keypress i
+keypress e
 wait_log 5000 form: the inventory opened
 delay 500
 event scan 1 p1"
