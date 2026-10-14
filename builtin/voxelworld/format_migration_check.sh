@@ -141,6 +141,7 @@ struct Module: public interface::Module
 			for(int i = 1; i <= N; i++){
 				interface::VoxelDefinition def;
 				def.name.block_name = "t"+itos(i);
+				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
 				reg->add_voxel(def);
 			}
 			if(m_mode == "read20")

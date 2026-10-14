@@ -402,15 +402,15 @@ namespace voxelworld
 		// One written without takes the light that was there, and the
 		// change is what the flood works from.
 		//
-		// Light falls through anything that transmits light without losing
-		// any, and spreads sideways and upwards losing one step per voxel.
-		// A voxel transmits light if its edge material is
-		// EDGEMATERIALID_EMPTY, which is the same test the mesher uses to
-		// decide whether a face is drawn against it.
+		// Light gets past a voxel whose edge material is EDGEMATERIALID_EMPTY
+		// or which says transmits_light (glass, a plant: drawn, and seen
+		// through), and spreads sideways and upwards losing one step per
+		// voxel. The open sky's column falls undiminished only through a
+		// voxel that is fully_empty or says transmits_light (Luanti's
+		// sunlight_propagates; see lighting.h): water lets light through a
+		// level at a time. Air that says neither is refused by add_voxel()
+		// ([API_DEFAULTS_07]).
 		//
-		// simplified: transparency is that one test, so glass would have to
-		// be a light barrier or a hole in the terrain. A voxel definition
-		// flag of its own is the upgrade path.
 		// Which light this is about. A game binds the fields it fills (see
 		// VoxelFormat) and asks for the ones it wants kept up to date here;
 		// the two are separate questions and both are opt-in.

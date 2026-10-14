@@ -240,17 +240,19 @@ namespace network
 	enum class SendPolicy
 	{
 		// Queue whatever it takes. Nothing is ever lost and nothing ever
-		// waits, and a peer that never reads costs memory without bound.
-		// The default, because it is what a game that has not thought about
-		// this wants: it works.
+		// waits, and a peer that never reads costs memory without bound:
+		// on a public server, a client that stops reading grows the server
+		// without limit. Asked for, by a game whose peers are its own.
 		Buffer,
 		// Over the limit, a new packet is dropped and said so once. For a
 		// game whose packets are a stream of the latest of something --
 		// positions -- and where an old one is worth nothing anyway.
 		Drop,
 		// Over the limit for longer than the grace period, the peer is
-		// disconnected. Luanti's own answer, and what
-		// apps/vanilla picks.
+		// disconnected. Luanti's own answer, and **the default**
+		// ([API_DEFAULTS_07]), at 8 MB and 30 s: "a world's worth behind",
+		// the numbers apps/vanilla picked, which a healthy client does not
+		// trip. builtin/network/send_policy_check.sh runs it.
 		Disconnect,
 	};
 

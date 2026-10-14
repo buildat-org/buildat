@@ -17,6 +17,10 @@ local FOG_END = RENDER_DISTANCE * 1.15
 -- The server fills the skylight bits of every voxel and the mesher shades the
 -- geometry by them, which is what tells a dug tunnel apart from a shadow.
 voxelworld.use_skylight = true
+-- LOD on, which voxelworld leaves off: past 80 voxels a chunk is meshed
+-- from a downsampled volume. This is the sample the LOD work ([LOD_LOOK])
+-- takes its checks on, so it keeps the look it had.
+voxelworld.lod_distance = 80
 
 -- Lighting as in apps/voxel_lighting: a PBR voxel material lit in HDR and
 -- tonemapped, so the sun can be brighter than white without the frame clipping

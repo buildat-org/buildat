@@ -17,8 +17,6 @@ voxelworld.use_skylight = true
 -- Nothing here is simulated by Bullet, so no collision shapes are needed;
 -- terrain hits are read from the voxel volumes instead
 voxelworld.physics_distance = 0
--- Seen from the air, so a bit further than a walking game's
-voxelworld.lod_distance = 120
 
 -- Lighting as in apps/infidigger: a PBR voxel material lit in HDR and
 -- tonemapped, so the sun can be brighter than white without the frame clipping

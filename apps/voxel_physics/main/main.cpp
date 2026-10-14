@@ -167,6 +167,9 @@ struct Module: public interface::Module
 		vdef.edge_material_id = solid ? interface::EDGEMATERIALID_GROUND :
 				interface::EDGEMATERIALID_EMPTY;
 		vdef.physically_solid = solid;
+		// What is not solid here is air: the sky passes it and a merge
+		// counts it as nothing standing there
+		vdef.fully_empty = !solid;
 		reg->add_voxel(vdef);
 	}
 

@@ -29,8 +29,9 @@ local function check_compress()
 	assert(buildat.decompress(buildat.compress("", "zstd"), "zstd") == "")
 	assert(buildat.decompress(buildat.compress(data, "zstd", 1), "zstd") == data)
 	assert(buildat.decompress(buildat.compress(data, "zlib", 9), "zlib") == data)
-	-- The default format is zlib, which is what buildat's own data uses
-	assert(buildat.decompress(buildat.compress(data, "zlib")) == data)
+	-- There is no default format, for either
+	assert(not pcall(buildat.decompress, buildat.compress(data, "zlib")),
+			"decompress() without a format was allowed")
 end
 
 -- A volume packed by pack_voxel_volume() has to hold what the same data set
@@ -334,6 +335,7 @@ local function check_voxel_format()
 	late:set_format("blocks")
 	local def = safe.VoxelDefinition()
 	def.name.block_name = "engine_test:late"
+	def.edge_material_id = safe.VoxelDefinition.EDGEMATERIALID_GROUND
 	late:add_voxel(def)
 	local ok2 = pcall(function()
 		late:set_format{id = {shift = 0, width = 16}}
@@ -353,6 +355,7 @@ local function check_voxel_variants()
 	}
 	local def = safe.VoxelDefinition()
 	def.name.block_name = "engine_test:facing"
+	def.edge_material_id = safe.VoxelDefinition.EDGEMATERIALID_GROUND
 	def.variants = {
 		-- A turned cube: the same six textures in another order
 		-- The faces are 0...5, so this is the six textures rotated by one
@@ -417,6 +420,7 @@ local function check_voxel_modifiers()
 
 	local def = safe.VoxelDefinition()
 	def.name.block_name = "engine_test:damp"
+	def.edge_material_id = safe.VoxelDefinition.EDGEMATERIALID_GROUND
 	-- Dry at tint 0 and soaked at the top of the field
 	def.tint_ramp = {0xffffff, 0x807060}
 	def.sag_extent = 0.25
@@ -485,6 +489,11 @@ local function check_voxel_look_rules()
 	for _, name in ipairs({"air", "rock", "sand"}) do
 		local def = safe.VoxelDefinition()
 		def.name.block_name = "engine_test:"..name
+		if name == "air" then
+			def.fully_empty = true
+		else
+			def.edge_material_id = safe.VoxelDefinition.EDGEMATERIALID_GROUND
+		end
 		reg:add_voxel(def)
 	end
 

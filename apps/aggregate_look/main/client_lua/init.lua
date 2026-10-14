@@ -9,9 +9,8 @@ local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene
 
--- The whole scene is one section seen from outside itself, so nothing may
--- drop to a reduced LOD and nothing needs collision.
-voxelworld.lod_distance = 1000
+-- The whole scene is one section seen from outside itself, so nothing
+-- needs collision (and LOD is off, voxelworld's default).
 voxelworld.physics_distance = 0
 voxelworld.use_skylight = true
 

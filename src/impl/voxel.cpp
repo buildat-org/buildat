@@ -285,10 +285,29 @@ struct CVoxelRegistry: public VoxelRegistry
 				"for a world written in 0.6's); see doc/server_api.txt");
 	}
 
+	// **Air made the 0.6 way is refused** ([API_DEFAULTS_07]): empty edges
+	// and nothing of its own to draw, but neither fully_empty nor
+	// transmits_light. It stops the sky at its first voxel and is
+	// something standing there to a merge; nothing is derived for it,
+	// since which of the two it meant is the game's to say.
+	static void require_air_said(const char *what, const VoxelDefinition &def)
+	{
+		if(def.edge_material_id != EDGEMATERIALID_EMPTY ||
+				def.fully_empty || def.transmits_light ||
+				def.face_draw_type == FaceDrawType::ALWAYS ||
+				!def.shape.empty() || !def.shape_masked.empty())
+			return;
+		throw Exception(ss_()+what+"(): \""+def.name.block_name+"\" has empty "
+				"edges and nothing to draw, and says neither fully_empty "
+				"(air: nothing occupies it) nor transmits_light (something "
+				"the sky is seen through); set the one it is");
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		require_format("add_voxel");
+		require_air_said("add_voxel", def);
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
@@ -317,6 +336,8 @@ struct CVoxelRegistry: public VoxelRegistry
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		require_format("add_voxels");
+		for(VoxelDefinition &def : defs)
+			require_air_said("add_voxels", def);
 		for(VoxelDefinition &def : defs){
 			const VoxelTypeId id = m_defs.size();
 			if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
@@ -973,11 +994,22 @@ bool voxel_format_self_test()
 		up_<VoxelRegistry> reg(new CVoxelRegistry());
 		VoxelDefinition def;
 		def.name.block_name = "a";
+		def.fully_empty = true;
 		bool refused = false;
 		try { reg->add_voxel(def); } catch(Exception &e){ refused = true; }
 		assert(refused);
 		reg->set_format(VoxelFormat::blocks());
 		assert(reg->add_voxel(def) == 1);
+		// Air the 0.6 way: empty edges and nothing said
+		VoxelDefinition old_air;
+		old_air.name.block_name = "old_air";
+		refused = false;
+		try { reg->add_voxel(old_air); } catch(Exception &e){
+			refused = ss_(e.what()).find("fully_empty") != ss_::npos;
+		}
+		assert(refused);
+		old_air.transmits_light = true;
+		assert(reg->add_voxel(old_air) == 2);
 	}
 
 	// The ways a format can be wrong

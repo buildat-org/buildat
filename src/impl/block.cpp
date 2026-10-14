@@ -125,6 +125,9 @@ struct CBlockRegistry: public BlockRegistry
 					vdef.name.rotation_primary = 0;
 					vdef.name.rotation_secondary = 0;
 					vdef.handler_module = def.handler_module;
+					// A piece of a textured cube; air with empty edges is
+					// refused ([API_DEFAULTS_07])
+					vdef.edge_material_id = EDGEMATERIALID_GROUND;
 					for(size_t i = 0; i < 6; i++){
 						AtlasSegmentDefinition &seg = vdef.textures[i];
 						seg.resource_name = def.side_textures[i];

@@ -281,6 +281,12 @@ surface_modifiers, validate; the layouts below and preset(name)),
 VoxelSample. voxel_format_self_test(). The Lua side of the same is in
 doc/client_api.txt under "Miscellaneous".
 
+**Air says it is air** ([API_DEFAULTS_07]): add_voxel() refuses a
+definition with empty edges and nothing of its own to draw (no shape, faces
+not ALWAYS) that says neither fully_empty (nothing occupies it: the sky
+passes it, a merge writes into it) nor transmits_light (something the sky is
+seen through). That was 0.6's air, which stopped the sky at its first voxel.
+
 **A world's voxel format, picked** ([VOXELFORMAT_PRESETS]). There is no
 default: a registry's add_voxel() throws until set_format() has been given
 a format, so a world that says nothing does not start. A new game picks one
@@ -412,8 +418,8 @@ builtin/network/api.h -- network::Interface: send(peer, name, data),
 list_peers(), set_send_policy(policy, max_queue_bytes, grace_us) --
 SendPolicy Buffer (queue without bound), Drop (a new packet over the limit
 is dropped), Disconnect (over the limit for grace_us and the peer is let
-go, what apps/vanilla picks); the grace counts from when the socket last
-took anything from the peer. declare(name, Channel::LatestOnly): a packet
+go; the default, at 8 MB and 30 s [API_DEFAULTS_07]); the grace counts from
+when the socket last took anything from the peer. declare(name, Channel::LatestOnly): a packet
 of that name waits in a lane of its own where a newer one replaces an
 older still queued (positions, HUD values) and goes ahead of the ordered
 queue -- except a peer's first packets of the name, which go ordered

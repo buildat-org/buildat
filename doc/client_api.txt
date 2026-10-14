@@ -60,8 +60,8 @@ buildat.sha256(data) -> 32 bytes
 buildat.hex(data) -> string
 
 buildat.compress(data, format [, level]) -> string
-buildat.decompress(data [, format]) -> data, bytes_consumed
-- format is "zlib" or "zstd"; decompress defaults to "zlib"
+buildat.decompress(data, format) -> data, bytes_consumed
+- format is "zlib" or "zstd", required for both
 - bytes_consumed is how much of the front of data the stream took, which is what
   says where the next one begins when streams are concatenated
 
@@ -1404,15 +1404,21 @@ You can create a client-side voxel registry like this:
 
 local voxel_reg = buildat.createVoxelRegistry()
 local atlas_reg = buildat.createAtlasRegistry()
+-- A format first: there is no default (see set_format below)
+voxel_reg:set_format("blocks")
 do
+	-- Air says it is air: nothing occupies it, so the sky passes it and
+	-- a merge writes into it. A voxel with empty edges and nothing to draw
+	-- that says neither fully_empty nor transmits_light is refused.
+	local air = buildat.VoxelDefinition()
+	air.name.block_name = "air"
+	air.face_draw_type = buildat.VoxelDefinition.FACEDRAWTYPE_NEVER
+	air.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_EMPTY
+	air.fully_empty = true
+	voxel_reg:add_voxel(air) -- id 1
+
 	local vdef = buildat.VoxelDefinition()
 	vdef.name.block_name = "rock"
-	vdef.name.segment_x = 0
-	vdef.name.segment_y = 0
-	vdef.name.segment_z = 0
-	vdef.name.rotation_primary = 0
-	vdef.name.rotation_secondary = 0
-	vdef.handler_module = ""
 	local textures = {}
 	for i = 1, 6 do
 		local seg = buildat.AtlasSegmentDefinition()
@@ -1424,10 +1430,7 @@ do
 	vdef.textures = textures
 	vdef.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
 	vdef.physically_solid = true
-	voxel_reg:add_voxel(vdef)
-	voxel_reg:add_voxel(vdef)
-	voxel_reg:add_voxel(vdef)
-	voxel_reg:add_voxel(vdef)
+	voxel_reg:add_voxel(vdef) -- id 2
 end
 
 vdef.tile_turns is six quarter turns, one per face, of the texture inside its
@@ -1456,7 +1459,7 @@ param values it applies to:
       -- order, each turned inside its own face
       {tile_order = {1, 2, 3, 4, 5, 0}, tile_turns = {0, 0, 1, 3, 2, 0},
               params = {2, 6, 10}},
-      -- A palette entry, and a liquid standing a quarter of the way up
+      -- Light tinted blue, and a liquid standing a quarter of the way up
       {shape = {}, color = 0x336699, liquid_top = 0.25, params = {1}},
   }
 
@@ -1470,8 +1473,12 @@ param values it applies to:
 - shape replaces the definition's own quads, and is empty for a variant that
   keeps them. tile_order and tile_turns are for cube faces; a shape's quads
   carry their own texture coordinates, as always.
-- color is multiplied into the vertex colour, 0xRRGGBB. What wants it is a
-  palette: one texture, and the param says which entry tints this voxel.
+- color is multiplied into the vertex colour, 0xRRGGBB. The vertex colour is
+  light, so this tints the light the voxel gets and not its texture: a glow,
+  coloured shade. It is not a palette, which would show in shade and vanish
+  in sunlight; a palette over a texture is the tint modifier, a field the
+  format binds, picking between the two ends of the definition's tint_ramp
+  (see set_format below and src/interface/voxel.h).
 - liquid_top is where a liquid's surface stands in the voxel, which is what
   Luanti's flowing liquids put in param2. The corner heights that make a
   surface continuous read the neighbours' own params too.
@@ -1519,7 +1526,7 @@ is none of them is an error.
   colours rather than types wants.
 - param is handed to the voxel's definition, which is what says what it
   means: which way the voxel faces, how high a liquid stands in it, which
-  entry of a palette it wears.
+  of its variants it is drawn as.
 - color is 0xRRGGBB in the low 24 bits of a field 24 or 32 bits wide, and is
   multiplied into the vertex colour. That colour is light rather than albedo,
   so it tints the light a voxel receives and not its texture: right for a

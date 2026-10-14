@@ -57,19 +57,21 @@ static int l_compress(lua_State *L)
 	return 1;
 }
 
-// decompress(data [, format]) -> data, bytes_consumed
+// decompress(data, format) -> data, bytes_consumed
 //
 // bytes_consumed is how much of the front of data the stream took, which is
 // what tells a caller reading concatenated streams where the next one begins.
+// The format is required, as compress()'s is ([API_DEFAULTS_07]).
 static int l_decompress(lua_State *L)
 {
 	ss_ data = lua_checkcppstring(L, 1);
-	CompressFormat format = FORMAT_ZLIB;
-	if(!lua_isnoneornil(L, 2)){
-		if(!parse_format(luaL_checkstring(L, 2), format))
-			return luaL_error(L, "decompress(): unknown format \"%s\"",
-					luaL_checkstring(L, 2));
-	}
+	CompressFormat format;
+	if(lua_isnoneornil(L, 2))
+		return luaL_error(L, "decompress(): the format is required"
+				" (\"zlib\" or \"zstd\")");
+	if(!parse_format(luaL_checkstring(L, 2), format))
+		return luaL_error(L, "decompress(): unknown format \"%s\"",
+				luaL_checkstring(L, 2));
 
 	std::ostringstream os(std::ios::binary);
 	size_t consumed = 0;

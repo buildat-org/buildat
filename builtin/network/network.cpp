@@ -552,11 +552,12 @@ struct Module: public interface::Module, public network::Interface
 	int64_t m_accept_paused_until_us = 0;
 	int64_t m_peers_full_logged_us = 0;
 	// The game's answer to a peer that will not read; see SendPolicy in
-	// api.h. Buffer is what a game that never says anything gets, because
-	// it is the one that neither loses data nor makes anybody wait.
-	SendPolicy m_send_policy = SendPolicy::Buffer;
-	size_t m_max_queue_bytes = 4 * 1024 * 1024;
-	int64_t m_grace_us = 10000000;
+	// api.h. Disconnect is what a game that never says anything gets: a
+	// queue that grows without bound is a public server's memory
+	// ([API_DEFAULTS_07])
+	SendPolicy m_send_policy = SendPolicy::Disconnect;
+	size_t m_max_queue_bytes = 8 * 1024 * 1024;
+	int64_t m_grace_us = 30000000;
 	bool m_will_restore_after_unload = false;
 	up_<interface::Thread> m_thread;
 	// The web client's files as last read, by name, kept while the file's

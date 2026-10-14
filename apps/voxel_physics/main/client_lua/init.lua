@@ -9,10 +9,9 @@ local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene
 
--- The scene is viewed from outside itself, so nothing may drop to a reduced
--- LOD. The pieces are simulated on the server and arrive as node transforms,
--- so the client needs no collision shapes of its own.
-voxelworld.lod_distance = 1000
+-- The pieces are simulated on the server and arrive as node transforms, so
+-- the client needs no collision shapes of its own (and LOD is off,
+-- voxelworld's default).
 voxelworld.physics_distance = 1
 voxelworld.use_skylight = true
 

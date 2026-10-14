@@ -50,7 +50,7 @@ buildat.qr_code           = __buildat_qr_code
 buildat.hex               = __buildat_hex
 buildat.random_bytes      = __buildat_random_bytes
 -- compress(data, format [, level]) -> string, where format is "zlib" or "zstd"
--- decompress(data [, format]) -> data, bytes_consumed
+-- decompress(data, format) -> data, bytes_consumed
 buildat.compress          = __buildat_compress
 buildat.decompress        = __buildat_decompress
 -- Big-endian byte strings in, byte strings out

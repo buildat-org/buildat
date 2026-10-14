@@ -10,9 +10,8 @@ local voxel_shading = require("buildat/module/voxel_shading")
 
 local scene = replicate.main_scene
 
--- The scene is viewed from outside itself, so nothing may drop to a reduced
--- LOD, and there is no player, so no collision shapes are wanted at all.
-voxelworld.lod_distance = 1000
+-- There is no player, so no collision shapes are wanted at all (and LOD is
+-- off, voxelworld's default).
 voxelworld.physics_distance = 1
 -- The server fills the skylight bits of every voxel, so chunk geometry can be
 -- shaded by them. This is what tells a cave apart from a tree's shadow.

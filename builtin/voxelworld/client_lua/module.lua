@@ -10,10 +10,12 @@ local M = {}
 log:info("voxelworld loading")
 
 -- Set by the game before the camera is set, if the defaults do not suit it.
--- A scene viewed from far outside itself wants a large lod_distance so that
--- it does not render at a reduced LOD, and a scene with no player wants
+-- LOD is off unless asked for ([API_DEFAULTS_07]): past lod_distance a chunk
+-- is meshed from a downsampled volume, which loses shaped voxels and the
+-- translucent and masked materials, so a game sets a number (infidigger's
+-- 80) when it wants that trade. A scene with no player wants
 -- physics_distance small so no collision shapes are built at all.
-M.lod_distance = 80
+M.lod_distance = math.huge
 M.physics_distance = 100
 -- How much world this client wants sent to it, in voxels. Only the client
 -- knows what its computer can draw, and what it is not going to draw is the
@@ -567,8 +569,9 @@ function sub_events()
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 				note_slow_mesh(node, t1, 0, 1)
 
-				-- 1 -> 2
-				far_trigger_d = M.lod_distance * (1.0 + LOD_THRESHOLD)
+				-- 1 -> 2, or clip out when LOD is off
+				far_trigger_d = math.min(M.lod_distance * (1.0 + LOD_THRESHOLD),
+						M.camera_far_clip * 1.4)
 				far_weight = 0.5
 			else
 				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
