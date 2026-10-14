@@ -14,9 +14,11 @@
 # [COMPAT_CHECKS], cross-version (records as storage's pack() writes them,
 # made here):
 #   0. Another server's store as 0.6 wrote it (no "format", records with
-#      no header, the save not stamped): migrated once (format 2), the
+#      no header, the save not stamped): migrated once (format 3), the
 #      save stamped (user_version 1, its version row); its account logs
-#      in with its password.
+#      in with its password. A store of format 2 (a 0.7 development
+#      build's, a record's fields behind a u64 length and a byte order
+#      flag) reframed once (format 3); its account logs in.
 #   3. An account record of minor 1 with a field added at its end logs
 #      in; one of major 2 is refused as unreadable, its bytes unchanged.
 #   util/account_unreadable_check.sh
@@ -61,13 +63,20 @@ $1
 c.commit()" "$f"
 }
 # Records as storage::pack() writes them: cereal's endianness byte, then
-# the fields; a record is its major and minor, then its body (a pack of
-# its fields) as a string. A password as accounts derives it.
+# the fields; a record is its major and minor, then the length of its
+# fields as a varint and the fields. A password as accounts derives it.
 REC='def s(b): return struct.pack("<Q", len(b)) + b
+def varint(n):
+    out = b""
+    while True:
+        out += bytes([(n & 0x7f) | (0x80 if n >> 7 else 0)])
+        n >>= 7
+        if not n: return out
 def acc(pw, privs, salt=b"0123456789abcdef"):
     h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 10000)
     return s(salt) + s(h) + struct.pack("<Q", len(privs)) + b"".join(s(p.encode()) for p in privs)
-def rec(major, minor, body): return b"\x01" + bytes([major, minor]) + s(b"\x01" + body)
+def rec(major, minor, body): return b"\x01" + bytes([major, minor]) + varint(len(body)) + body
+def rec07(major, minor, body): return b"\x01" + bytes([major, minor]) + s(b"\x01" + body)
 def acc10(pw, privs=()): return s(b"pbkdf2-sha256") + struct.pack("<I", 10000) + acc(pw, list(privs))
 def put(key, v): c.execute("INSERT OR REPLACE INTO store VALUES(\"accounts\", ?, ?)", (key, v))
 def get(key): return bytes(c.execute("SELECT value FROM store WHERE store = \"accounts\" AND key = ?", (key,)).fetchone()[0])'
@@ -81,12 +90,12 @@ c.execute(\"DELETE FROM store WHERE store = '__save'\")
 c.execute('PRAGMA user_version = 0')
 put('auth/old', b'\x01' + acc('oldpass123', []))"
 srv 06
-grep -aq "The accounts are records now (format 2)" "$t/srv06.log" ||
+grep -aq "The accounts are records now (format 3)" "$t/srv06.log" ||
 	fail "0.6's store not migrated ($t/srv06.log)"
 join o06 old oldpass123 0 "" | grep -aF "Joined as " | tail -1
 grep -aqF "Joined as old" "$t/o06.log" || fail "0.6's account did not log in ($t/o06.log)"
 stop
-db "assert get('format') == b'2', get('format')
+db "assert get('format') == b'3', get('format')
 assert get('auth/old')[1:3] == b'\x01\x00', get('auth/old')
 assert c.execute('PRAGMA user_version').fetchone()[0] == 1
 assert c.execute(\"SELECT value FROM store WHERE store = '__save' AND key = 'version'\").fetchone()" ||
@@ -94,7 +103,16 @@ assert c.execute(\"SELECT value FROM store WHERE store = '__save' AND key = 'ver
 srv 07
 grep -aq "records now" "$t/srv07.log" && fail "migrated twice ($t/srv07.log)"
 stop
-echo "ok: 0.6's accounts migrated once and stamped; its account logs in"
+db "put('format', b'2')
+put('auth/dev07', rec07(1, 0, acc10('dev07pass123')))"
+srv 08
+grep -aq "reframed (format 2 to 3)" "$t/srv08.log" ||
+	fail "a format 2 store not reframed ($t/srv08.log)"
+join o08 dev07 dev07pass123 0 "" | grep -aF "Joined as " | tail -1
+grep -aqF "Joined as dev07" "$t/o08.log" || fail "format 2's account did not log in ($t/o08.log)"
+stop
+db "assert get('format') == b'3', get('format')"
+echo "ok: 0.6's accounts migrated once and stamped; its account logs in; a format 2 store reframed"
 SRV=srv
 
 srv 1
@@ -145,4 +163,4 @@ grep -aqF 'Login refused: The account "next" could not be read' "$t/nx.log" ||
 	fail "a newer major's record not refused as unreadable ($t/nx.log)"
 stop
 [ "$(db "print(get('auth/next').hex())")" = "$next" ] || fail "auth/next written over"
-echo "PASS: an unreadable account record is refused and kept; with it the only admin, no setup code, how to get back in said, and a local login is not admin; 0.6's store migrated and stamped; a newer minor's record read, a newer major's refused and kept"
+echo "PASS: an unreadable account record is refused and kept; with it the only admin, no setup code, how to get back in said, and a local login is not admin; 0.6's store migrated and stamped, a format 2 one reframed; a newer minor's record read, a newer major's refused and kept"

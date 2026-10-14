@@ -48,10 +48,11 @@ static void check_value_table(lua_State *L, int idx, const char *what)
 }
 
 // {"record", major, minor, type}: an interface::Record's major and minor,
-// then its type in a byte string. Read, another major is refused, a tail
-// written by a newer minor skipped, and an older minor's record, its type
-// an object with fewer fields at its end, read with the ones it lacks at
-// their type's zero value (0, "", {}; an object's fields each the same)
+// then its length as a varint and its fields. Read, another major is
+// refused, a tail written by a newer minor skipped, and an older minor's
+// record, its type an object with fewer fields at its end, read with the
+// ones it lacks at their type's zero value (0, "", {}; an object's fields
+// each the same)
 static void record_params(lua_State *L, int type_L, uint8_t &major,
 		uint8_t &minor)
 {
@@ -296,7 +297,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 				check_field_def(L, -1);
 				lua_rawgeti(L, -1, 1); // name
 				lua_rawgeti(L, -2, 2); // type
-				if(r.is.peek() == std::char_traits<char>::eof())
+				if(r.left() == 0)
 					push_default(L, -1);
 				else
 					binary_input_read_value(L, -1, r.ar);
@@ -307,6 +308,7 @@ static void binary_input_read_value(lua_State *L, int type_L,
 		} else {
 			binary_input_read_value(L, inner_L, r.ar);
 		}
+		r.end();
 		lua_remove(L, inner_L); // the value is left on stack
 	} else {
 		throw Exception(ss_()+"Unknown type \""+outfield_type+"\""

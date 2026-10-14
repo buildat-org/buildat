@@ -105,8 +105,8 @@ import socket, struct, sys
 s = socket.create_connection(("127.0.0.1", int(sys.argv[1])))
 p = lambda t, d: struct.pack("<HBI", t, 0, len(d)) + d
 v = b"0.7.0"
-h = b"\1" + struct.pack("<IIQ", 1, 1, len(v)) + v + struct.pack("<IQ", 2, 0)
-s.sendall(p(2, b"\1\1\0" + struct.pack("<Q", len(h)) + h))
+h = struct.pack("<IIQ", 1, 1, len(v)) + v + struct.pack("<IQ", 2, 0)
+s.sendall(p(2, b"\1\1\0" + bytes([len(h)]) + h))
 n = sys.argv[2].encode()
 s.sendall(p(0, struct.pack("<HI", 100, len(n)) + n))
 chunk = p(100, b"") * 5000

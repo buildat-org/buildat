@@ -1169,12 +1169,129 @@ bool voxel_format_self_test()
 	return true;
 }
 
+// [RECORD_FRAMING_COST] The record framing (interface/record.h): a round
+// trip, a newer minor's tail skipped, an older minor's missing field left
+// at its default, a record inside a record, and a length that does not
+// match its fields refused
+namespace record_test {
+struct A0 {
+	int32_t x = 0;
+	ss_ s;
+	template<class Ar> void serialize(Ar &a){
+		Record<Ar> r(a, "A", 1, 0);
+		r.ar(x, s);
+		r.end();
+	}
+};
+struct A1 {
+	int32_t x = 0;
+	ss_ s;
+	int32_t y = 7;
+	template<class Ar> void serialize(Ar &a){
+		Record<Ar> r(a, "A", 1, 1);
+		r.ar(x, s);
+		if(r.minor >= 1) r.ar(y);
+		r.end();
+	}
+};
+template<class Inner> struct N {
+	Inner a;
+	int32_t z = 0;
+	template<class Ar> void serialize(Ar &a_){
+		Record<Ar> r(a_, "N", 1, 0);
+		r.ar(a, z);
+		r.end();
+	}
+};
+template<class T> ss_ pack(T &v, int32_t after)
+{
+	std::ostringstream os(std::ios::binary);
+	{
+		cereal::PortableBinaryOutputArchive ar(os);
+		ar(v, after);
+	}
+	return os.str();
+}
+template<class T> int32_t unpack(const ss_ &s, T &v)
+{
+	std::istringstream is(s, std::ios::binary);
+	cereal::PortableBinaryInputArchive ar(is);
+	int32_t after = 0;
+	ar(v, after);
+	return after;
+}
+template<class T> bool refused(const ss_ &s)
+{
+	try {
+		T v;
+		unpack(s, v);
+	} catch(std::exception &e){
+		return true;
+	}
+	return false;
+}
+}
+
+static bool record_self_test()
+{
+	using namespace record_test;
+	A1 a1;
+	a1.x = -5;
+	a1.s = ss_(200, 'q'); // a two-byte length
+	a1.y = 9;
+	const ss_ s1 = pack(a1, 42);
+	A1 b1;
+	assert(unpack(s1, b1) == 42 && b1.x == -5 && b1.s == a1.s && b1.y == 9);
+	// Flag, 1.1, the length 4+8+200+4 = 216 as a varint, the fields
+	assert(s1.size() == 1 + 2 + 2 + 216 + 4);
+	assert((uint8_t)s1[3] == (0x80 | (216 & 0x7f)) && (uint8_t)s1[4] == 1);
+
+	// 1.1 read by a 1.0 reader: y skipped, what follows read
+	A0 b0;
+	assert(unpack(s1, b0) == 42 && b0.x == -5 && b0.s == a1.s);
+	// 1.0 read by a 1.1 reader: y left at its default
+	A0 a0;
+	a0.x = 3;
+	const ss_ s0 = pack(a0, 43);
+	b1 = A1();
+	assert(unpack(s0, b1) == 43 && b1.x == 3 && b1.y == 7);
+
+	// Nested: the inner tail skipped inside the outer record
+	N<A1> n1;
+	n1.a = a1;
+	n1.z = 11;
+	const ss_ sn = pack(n1, 44);
+	N<A1> m1;
+	assert(unpack(sn, m1) == 44 && m1.a.y == 9 && m1.z == 11);
+	N<A0> m0;
+	assert(unpack(sn, m0) == 44 && m0.a.s == a1.s && m0.z == 11);
+
+	// A0 {3, ""} is flag, 1.0, length 12, x, the string's 8-byte size
+	assert(s0.size() == 1 + 2 + 1 + 12 + 4 && s0[3] == 12);
+	assert(!refused<A0>(s0));
+	ss_ bad = s0;
+	bad[3] = 100; // past the end
+	assert(refused<A0>(bad));
+	bad[3] = 2; // shorter than the fields
+	assert(refused<A0>(bad));
+	bad[3] = 13; // a byte the same minor does not read
+	bad.insert(bad.begin() + 16, '\0');
+	assert(refused<A0>(bad));
+	bad = s0;
+	bad[1] = 2; // another major
+	assert(refused<A0>(bad));
+	bad = s0.substr(0, 3) + ss_(11, '\xff'); // a varint that does not end
+	assert(refused<A0>(bad));
+	return true;
+}
+
 VoxelRegistry* createVoxelRegistry()
 {
 	// Cheap, once per process, and it is the only place every build passes
 	// through before a voxel exists
 	static const bool tested = voxel_format_self_test() &&
-			voxel_selector_self_test() && voxel_volume_self_test();
+			voxel_selector_self_test() && voxel_volume_self_test() &&
+			record_self_test();
 	(void)tested;
 	return new CVoxelRegistry();
 }
@@ -1185,7 +1302,7 @@ void VoxelRegistry::serialize(std::ostream &os)
 	VoxelFormat format = get_format();
 	VoxelSelector look = get_look_selector();
 	cereal::PortableBinaryOutputArchive archive(os);
-	archive((uint8_t)3, format, defs, look);
+	archive((uint8_t)4, format, defs, look);
 }
 
 void VoxelRegistry::deserialize(std::istream &is)
@@ -1196,8 +1313,12 @@ void VoxelRegistry::deserialize(std::istream &is)
 	VoxelSelector look;
 	cereal::PortableBinaryInputArchive archive(is);
 	archive(version);
-	if(version == 3){
+	if(version == 4){
 		archive(format, defs, look);
+	} else if(version == 3){
+		throw Exception("VoxelRegistry::deserialize(): format 3, written by "
+				"a 0.7 development build whose records this build does not "
+				"read");
 	} else if(version == 2){
 		// 0.6's, in a saved world (voxel_cereal_legacy.h)
 		legacy06::read(archive, format);
@@ -1206,7 +1327,7 @@ void VoxelRegistry::deserialize(std::istream &is)
 		legacy06::read(archive, look);
 	} else {
 		throw Exception(ss_()+"VoxelRegistry::deserialize(): format "+
-				itos(version)+", where this reads 3 (and 0.6's 2)");
+				itos(version)+", where this reads 4 (and 0.6's 2)");
 	}
 	clear();
 	set_format(format);

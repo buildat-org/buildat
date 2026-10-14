@@ -2699,10 +2699,14 @@ struct CInstance: public voxelworld::Instance
 			cereal::PortableBinaryInputArchive ar(is);
 			uint8_t version = 0;
 			ar(version);
-			if(version == 2){
+			if(version == 3){
 				ar(m_save_names);
+			} else if(version == 2){
+				throw Exception(ss_()+"voxelworld: the name table of world \""+
+						m_world_name+"\" was written by a 0.7 development build "
+						"whose records this build does not read");
 			} else if(version == 1){
-				// 0.6's (voxel_cereal_legacy.h); written again as 2
+				// 0.6's (voxel_cereal_legacy.h); written again as 3
 				interface::legacy06::read_vector(ar, m_save_names,
 						[](interface::legacy06::In &a, interface::VoxelName &n){
 					interface::legacy06::read(a, n);
@@ -2711,7 +2715,7 @@ struct CInstance: public voxelworld::Instance
 			} else {
 				throw Exception(ss_()+"voxelworld: the name table of world \""+
 						m_world_name+"\" is version "+itos(version)+
-						" and this build writes 2");
+						" and this build writes 3");
 			}
 		}
 		// Save id 0 is VOXELTYPEID_UNDEFINED under every format, and is not
@@ -2769,7 +2773,7 @@ struct CInstance: public voxelworld::Instance
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar((uint8_t)2, m_save_names);
+			ar((uint8_t)3, m_save_names);
 		}
 		m_store->set(names_key(), os.str());
 		m_save_names_dirty = false;
@@ -2936,10 +2940,14 @@ struct CInstance: public voxelworld::Instance
 			cereal::PortableBinaryInputArchive ar(is);
 			uint8_t version = 0;
 			ar(version);
-			if(version == 2){
+			if(version == 3){
 				ar(m_save_formats);
+			} else if(version == 2){
+				throw Exception(ss_()+"voxelworld: the format table of world "
+						"\""+m_world_name+"\" was written by a 0.7 development "
+						"build whose records this build does not read");
 			} else if(version == 1){
-				// 0.6's (voxel_cereal_legacy.h); written again as 2 below
+				// 0.6's (voxel_cereal_legacy.h); written again as 3 below
 				interface::legacy06::read_vector(ar, m_save_formats,
 						[](interface::legacy06::In &a,
 								interface::VoxelFormat &f){
@@ -2949,7 +2957,7 @@ struct CInstance: public voxelworld::Instance
 			} else {
 				throw Exception(ss_()+"voxelworld: the format table of world "
 						"\""+m_world_name+"\" is version "+itos(version)+
-						" and this build writes 2");
+						" and this build writes 3");
 			}
 		}
 		m_formats_dirty = legacy_formats;
@@ -2976,7 +2984,7 @@ struct CInstance: public voxelworld::Instance
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar((uint8_t)2, m_save_formats);
+			ar((uint8_t)3, m_save_formats);
 		}
 		m_store->set(formats_key(), os.str());
 		m_formats_dirty = false;

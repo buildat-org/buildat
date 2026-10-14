@@ -203,8 +203,9 @@ a patch release only adds, behind a feature name that served Lua asks for
 with buildat.has(name); a minor may raise the minimum. The number covers
 everything on the wire, Magic's replicated attributes included.
 
-**Records**: a cereal record is its major and minor version, then its
-fields as one byte string (interface::Record, src/interface/record.h). A
+**Records**: a cereal record is its major and minor version, then the
+length of its fields as a varint and the fields, read in place
+(interface::Record, src/interface/record.h). A
 newer minor only adds fields at the end, which an older reader skips; an
 older minor is read with what it has; another major is refused. The rule,
 with an example of each, is in compatibility.txt.

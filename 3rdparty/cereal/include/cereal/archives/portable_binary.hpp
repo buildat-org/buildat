@@ -135,6 +135,7 @@ namespace cereal
       PortableBinaryInputArchive(std::istream & stream) :
         InputArchive<PortableBinaryInputArchive, AllowEmptyClassElision>(this),
         itsStream(stream),
+        itsStringBuf(dynamic_cast<std::stringbuf *>(stream.rdbuf())),
         itsConvertEndianness( false )
       {
         // buildat: a byte, not a bool -- it is the stream's first, and the
@@ -174,14 +175,20 @@ namespace cereal
       //! string stream only: a file's in_avail() is not what is left.
       void checkSize( std::uint64_t size )
       {
-        auto * sb = dynamic_cast<std::stringbuf *>( itsStream.rdbuf() );
-        if( sb && size > static_cast<std::uint64_t>( sb->in_avail() ) )
+        if( itsStringBuf && size > static_cast<std::uint64_t>( itsStringBuf->in_avail() ) )
           throw Exception("A size of " + std::to_string(size) + " past the " +
-              std::to_string(sb->in_avail()) + " bytes left in the input stream");
+              std::to_string(itsStringBuf->in_avail()) + " bytes left in the input stream");
       }
+
+      //! buildat: the string stream's buffer (null for another stream), for
+      //! interface::Record to read a record's fields in place and skip a
+      //! newer minor's tail. Looked up once: a cast per container and record
+      //! was a measurable part of a registry's load ([RECORD_FRAMING_COST])
+      std::stringbuf * stringbuf() { return itsStringBuf; }
 
     private:
       std::istream & itsStream;
+      std::stringbuf * itsStringBuf;
       bool itsConvertEndianness; //!< If set to true, we will need to swap bytes upon loading
   };
 

@@ -25,9 +25,9 @@ def packet(t, data):
 
 def hello(pmin=1, pmax=1):
     v = b"0.7.0"
-    body = b"\1" + struct.pack("<IIQ", pmin, pmax, len(v)) + v + \
+    body = struct.pack("<IIQ", pmin, pmax, len(v)) + v + \
             struct.pack("<IQ", 2, 0)
-    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
+    return packet(2, b"\1\1\0" + bytes([len(body)]) + body)  # its length a one-byte varint
 
 assert status("/index.html") == 200, "index.html"
 assert status("/?x=1") == 200, "/ with a query"

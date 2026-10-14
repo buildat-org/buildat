@@ -44,13 +44,15 @@ record "hello" 1.0 of {protocol_min, protocol_max, version, api, features}.
 Records
 -------
 Data that crosses the network or is saved is a record: its major and
-minor version (a byte each), then its fields as one byte string (a u64
-length first).
+minor version (a byte each), the length of its fields as a varint (seven
+bits a byte, low first, the top bit set on all but the last), then the
+fields.
 - A newer minor only adds fields at the end; a reader skips the tail it
   does not know.
 - An older minor is read: C++ asks r.minor for what is there, and Lua
   reads the fields it lacks at their type's zero value.
-- Another major is refused with an error, not read from the wrong offset.
+- Another major is refused with an error, not read from the wrong offset,
+  and so is a length that does not match what the fields took.
 
 In C++ (interface::Record, src/interface/record.h), in a serialize():
 

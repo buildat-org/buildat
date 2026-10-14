@@ -668,7 +668,7 @@ interface/polyvox_numeric.h: container_coord, container_coord16
 interface/polyvox_std.h: operator, dump, os
 interface/process.h: get_environment_variable, ExecOptions, shell_exec, open_with_system, Handle, valid, start, request_terminate, kill_force, terminate, is_running, reap
 interface/protocol.h: protocol_features, Hello, own, serialize, r, hello_data, os, ar, hello_of, is, FileHash, FileContent, file_hash_algorithm, hello_refusal
-interface/record.h: RecordError, end, header, string
+interface/record.h: RecordError, end, left, buf, byte, header, length
 interface/select_handler.h: SelectHandler, fd_open, bad_fd_error, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
 interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool

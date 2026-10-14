@@ -799,7 +799,42 @@ local function check_compose_image()
 	assert(made == 20, "compose_image: made "..made.." images")
 end
 
+-- [RECORD_FRAMING_COST] cereal's records (src/lua_bindings/cereal.cpp):
+-- the framing byte for byte, a newer minor's tail skipped and what follows
+-- read, an older minor's missing field at its zero value, and the same
+-- inside a record
+local function check_records()
+	local input, output = buildat.cereal_binary_input,
+			buildat.cereal_binary_output
+	local A0 = {"record", 1, 0, {"object", {"x", "int32_t"}, {"s", "string"}}}
+	local A1 = {"record", 1, 1, {"object", {"x", "int32_t"}, {"s", "string"},
+			{"y", "int32_t"}}}
+	-- The outer flag, 1.0, the length 12 (x, the string's 8-byte size), x
+	local d = output({x = 3, s = ""}, A0)
+	assert(d == "\1\1\0\12\3\0\0\0\0\0\0\0\0\0\0\0",
+			"records: 1.0 framed as "..#d.." bytes")
+	local function pair(a) return {"object", {"a", a}, {"z", "int32_t"}} end
+	local long = string.rep("q", 200) -- a two-byte length
+	d = output({a = {x = -5, s = long, y = 9}, z = 42}, pair(A1))
+	local v = input(d, pair(A1))
+	assert(v.a.x == -5 and v.a.s == long and v.a.y == 9 and v.z == 42,
+			"records: a 1.1 round trip")
+	v = input(d, pair(A0))
+	assert(v.a.x == -5 and v.a.s == long and v.a.y == nil and v.z == 42,
+			"records: a 1.1 read as 1.0")
+	v = input(output({a = {x = 3, s = "b"}, z = 43}, pair(A0)), pair(A1))
+	assert(v.a.x == 3 and v.a.s == "b" and v.a.y == 0 and v.z == 43,
+			"records: a 1.0 read as 1.1")
+	local function nested(a) return {"record", 1, 0, pair(a)} end
+	d = output({a = {x = 1, s = long, y = 2}, z = 44}, nested(A1))
+	v = input(d, nested(A0))
+	assert(v.a.s == long and v.z == 44, "records: nested")
+	assert(not pcall(input, d:sub(1, -2), nested(A1)),
+			"records: one cut short read")
+end
+
 function M.self_test()
+	check_records()
 	check_compress()
 	check_pack_voxel_volume()
 	check_voxel_format()

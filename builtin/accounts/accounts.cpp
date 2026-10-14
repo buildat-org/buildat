@@ -1010,19 +1010,64 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
+	// [RECORD_FRAMING_COST] Format 2, a 0.7 development build's: a record
+	// was its major and minor, a u64 length and the fields behind an inner
+	// byte order flag. The accounts' records hold no records, so each is
+	// reframed byte for byte; one of another shape is left as it is.
+	static bool reframe_07dev(const ss_ &v, ss_ &out)
+	{
+		if(v.size() < 12 || (uint8_t)v[0] > 1 || v[11] != v[0])
+			return false;
+		uint64_t len = 0;
+		for(int i = 0; i < 8; i++){
+			const int at = v[0] ? 3 + i : 10 - i; // the flag: little-endian
+			len |= (uint64_t)(uint8_t)v[at] << (8 * i);
+		}
+		if(len != v.size() - 11)
+			return false;
+		out = v.substr(0, 3);
+		for(uint64_t n = len - 1; ; n >>= 7){
+			out += (char)((n & 0x7f) | (n >> 7 ? 0x80 : 0));
+			if(!(n >> 7))
+				break;
+		}
+		out += v.substr(12);
+		return true;
+	}
+
 	void migrate_records()
 	{
 		ss_ format;
-		if(m_store->get("format", format) && format == "2")
+		if(m_store->get("format", format) && format == "3")
 			return;
+		if(format == "2"){
+			m_store->batch([&](){
+				for(const char *prefix : {"auth/", "invite/", "ban/",
+						"access/settings"}){
+					for(const ss_ &key : m_store->list(prefix)){
+						ss_ data, out;
+						if(!m_store->get(key, data))
+							continue;
+						if(reframe_07dev(data, out))
+							m_store->set(key, out);
+						else
+							log_e(MODULE, "%s is not a format 2 record; kept "
+									"as it is", cs(key));
+					}
+				}
+				m_store->set("format", "3");
+			});
+			log_i(MODULE, "The accounts' records reframed (format 2 to 3)");
+			return;
+		}
 		m_store->batch([&](){
 			migrate_prefix<Account>("auth/");
 			migrate_prefix<Invite>("invite/");
 			migrate_prefix<Ban>("ban/");
 			migrate_prefix<AccessSettings>("access/settings");
-			m_store->set("format", "2");
+			m_store->set("format", "3");
 		});
-		log_i(MODULE, "The accounts are records now (format 2)");
+		log_i(MODULE, "The accounts are records now (format 3)");
 	}
 
 	void migrate_levels()

@@ -47,9 +47,9 @@ def packet(t, data):
     return struct.pack("<HBI", t, 0, len(data)) + data
 def hello():
     v = b"0.7.0"
-    body = b"\1" + struct.pack("<IIQ", 1, 1, len(v)) + v + \
+    body = struct.pack("<IIQ", 1, 1, len(v)) + v + \
             struct.pack("<IQ", 2, 0)
-    return packet(2, b"\1\1\0" + struct.pack("<Q", len(body)) + body)
+    return packet(2, b"\1\1\0" + bytes([len(body)]) + body)  # its length a one-byte varint
 def define(t, name):
     n = name.encode()
     return packet(0, bytes([t & 255, t >> 8]) +
