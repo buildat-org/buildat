@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~5 min (2026-10-11)
-# covers: apps/vanilla/main/client_lua/init.lua src/client/state.cpp
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua src/client/state.cpp
 # [JOIN_PROGRESS]: vanilla's "Loading the world" line says what comes.
 # Vanilla on VoxeLibre over a link of 300 KB/s (util/netsim.py), the
 # native client joining:

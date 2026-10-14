@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-12)
-# covers: builtin/luanti/lua/entity.lua apps/vanilla/main/client_lua/init.lua
+# covers: builtin/luanti/lua/entity.lua builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [WIELD_SLOT_JOIN]: a join holds slot 1, on the server as on the screen.
 # The minimal game, wield_light on, a fixture's lamp item (light 14) in
 # slot 3. Join 1 holds slot 3 (key 3) and leaves; join 2: the server's

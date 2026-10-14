@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-12)
-# covers: src/impl/packet_stream.cpp src/client/state.cpp src/client/app_lua.h apps/vanilla/main/client_lua/init.lua
+# covers: src/impl/packet_stream.cpp src/client/state.cpp src/client/app_lua.h builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [LOAD_IN_FLIGHT]: the loading screen's second stripe says what is
 # arriving when nothing has been whole for half a second.
 #   1. Vanilla on VoxeLibre over a 300 KB/s link (util/netsim.py): "load:

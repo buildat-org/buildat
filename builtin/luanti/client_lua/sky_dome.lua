@@ -1,4 +1,4 @@
--- Buildat: vanilla/client_lua/sky_dome.lua
+-- Buildat: builtin/luanti/client_lua/sky_dome.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -18,7 +18,8 @@
 -- **Every uniform is set here at creation**, including the ones nothing ever
 -- changes: a shader parameter a material never sets reads as zero, and zero
 -- for most of these is a black sky.
-local log = buildat.Logger("vanilla")
+local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
+		or "luanti")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}
@@ -32,10 +33,10 @@ local SUN_OVEREXPOSURE = 2.5
 local ok_model, err_model, model =
 		buildat.run_script_file("luanti/sky_model.lua")
 if not ok_model or type(model) ~= "table" then
-	error("vanilla: could not load sky_model.lua: " .. tostring(err_model))
+	error("luanti: could not load sky_model.lua: " .. tostring(err_model))
 end
 -- The schedule, the sun's direction and the predawn light are the model
--- both clients share (res/sky_model.lua); this file is vanilla's drawing
+-- both clients share (res/sky_model.lua); this file is the client loop's drawing
 -- of them
 for k, v in pairs(model) do M[k] = v end
 

@@ -1,4 +1,4 @@
--- Buildat: vanilla/client_lua/skybox.lua
+-- Buildat: builtin/luanti/client_lua/skybox.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -16,7 +16,8 @@
 -- only when the six names change. nodecore darkens its own faces by level,
 -- which arrives as six new names and is handled; a texture whose own content
 -- changes underneath is not.
-local log = buildat.Logger("vanilla")
+local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
+		or "luanti")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}

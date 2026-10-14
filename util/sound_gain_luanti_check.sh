@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-12)
-# covers: builtin/luanti/client_lua/module.lua apps/vanilla/main/client_lua/init.lua
+# covers: builtin/luanti/client_lua/module.lua builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [SOUND_GAIN_LUANTI]: positioned sounds at Luanti's gain, min(1, 3 g /
 # max(d, 1)) by the distance from the ear. The minimal game with a mod
 # of one sound; a fixture, the player held still looking +z:

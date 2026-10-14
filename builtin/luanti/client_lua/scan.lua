@@ -1,4 +1,4 @@
--- Buildat: vanilla/client_lua/scan.lua
+-- Buildat: builtin/luanti/client_lua/scan.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -354,10 +354,11 @@ return function(ctx)
 			lines[#lines + 1] = string.format("scan %s: no form open", label)
 		end
 		-- A menu screen left over the world ([WIN_WORLD] (b): a box kept
-		-- "Building the world" up after the join); the driver fails on it
+		-- "Building the world" up after the join); the driver fails on it.
+		-- An app's world menu is "<app> menu: <what>" (vanilla's menu.lua)
 		local stack = require("buildat/extension/uistack").main.stack
 		local top = stack[#stack]
-		if top and top:GetName():find(": vanilla menu: ", 1, true) then
+		if top and top:GetName():find(" menu: ", 1, true) then
 			lines[#lines + 1] = string.format("scan %s: menu screen %s over the world",
 					label, buildat.dump(top:GetName()))
 		end

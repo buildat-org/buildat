@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~1 min (2026-10-14)
-# covers: apps/vanilla/main/client_lua/keys.lua
+# covers: builtin/luanti/client_lua/keys.lua
 # [KEYS_E_F]: vanilla's default keys in a world (VoxeLibre, survival:
 # creative's search field takes the focus, and an E typed there is
 # text):

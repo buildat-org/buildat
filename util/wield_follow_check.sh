@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~70s (2026-10-04)
-# covers: builtin/luanti/client_lua/module.lua builtin/luanti/lua/entity.lua apps/vanilla/main/client_lua/scan.lua
+# covers: builtin/luanti/client_lua/module.lua builtin/luanti/lua/entity.lua builtin/luanti/client_lua/scan.lua
 # [WIELD_AT_FEET]: what rides the player's own object -- VoxeLibre's held
 # item -- is drawn from where the client has the player now, so in third
 # person it stays at the hand as the player turns and walks, where the

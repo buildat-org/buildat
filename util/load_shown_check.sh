@@ -3,7 +3,7 @@
 # broken: back to full; a 15 s still stretch at a phone's CPU; dev fails it
 #   too, passing some runs (local/runs/dev_baseline)
 # cost: ~12 min (2026-10-11)
-# covers: src/client/state.cpp src/client/web/index.html apps/vanilla/main/client_lua/init.lua
+# covers: src/client/state.cpp src/client/web/index.html builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [LOAD_SHOWN]: the web client's start says what it is doing. Vanilla on
 # VoxeLibre in Chrome as a phone, its CPU six times slower
 # (util/web_drive.js's cpu and watch steps): from the page opening to the

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/init.lua builtin/luanti/luanti.cpp builtin/luanti/session.h builtin/luanti/lua/entity.lua
+# covers: apps/vanilla/main/main.cpp builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua builtin/luanti/luanti.cpp builtin/luanti/session.h builtin/luanti/lua/entity.lua
 # [JOIN_WHEN_LOADED]: vanilla puts a player in the world only once their
 # client has it loaded. Vanilla on the minimal game; a fixture logs the
 # connected players whenever they change, which is who another player sees.

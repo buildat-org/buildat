@@ -172,7 +172,7 @@ local keys_editor = (function(ok, err, m)
 		error("vanilla menu: could not load keys.lua: " .. tostring(err))
 	end
 	return m
-end)(buildat.run_script_file("main/keys.lua"))
+end)(buildat.run_script_file("luanti/keys.lua"))
 -- ContentDB's games ([CONTENTDB]): the server fetches, this asks and draws
 local ask_contentdb, draw_contentdb
 local contentdb_query = ""

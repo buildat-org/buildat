@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~7 min (2026-10-12)
-# covers: apps/vanilla/main/client_lua/init.lua apps/vanilla/main/main.cpp src/client/state.cpp builtin/replicate/replicate.cpp
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua apps/vanilla/main/main.cpp src/client/state.cpp builtin/replicate/replicate.cpp
 # [LOADING_SCREEN]: while the world loads, vanilla shows a screen of its
 # own: one of the game's menu/background*.png at random, scaled to cover,
 # on Buildat's dark colour; no HUD, no walking, no mouse look; it ends once

@@ -3,7 +3,7 @@
 # broken: back to full; the tap on the marker finds nothing in about half
 #   the runs ([CHECKS_EVENT_WAITS_REST]) (local/runs/event_waits)
 # cost: ~5 min (2026-10-11)
-# covers: src/client/app.cpp extensions/luanti_client/res/touch.lua extensions/luanti_client/res/form_session.lua builtin/luanti/lua/dig.lua apps/vanilla/main/client_lua/player.lua
+# covers: src/client/app.cpp extensions/luanti_client/res/touch.lua extensions/luanti_client/res/form_session.lua builtin/luanti/lua/dig.lua builtin/luanti/client_lua/player.lua
 # [TOUCH_PARITY]: vanilla on a touchscreen as Luanti's Android client, on
 # the minimal game, by finger. A fixture puts the player on a platform in
 # the air facing a wall with a marker in it right of the centre, gives the

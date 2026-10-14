@@ -9,7 +9,7 @@
 #
 #   builtin/luanti/test/stairs.sh
 #
-# covers: apps/vanilla/main/client_lua/init.lua
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)

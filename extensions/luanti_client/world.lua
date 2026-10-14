@@ -850,7 +850,7 @@ function M.new(magic, buildat, log, options)
 		-- Vanilla's chain, vanilla being the reference ([LC_PBR_PARITY]):
 		-- the exposure metered before the bloom, the bloom a glow on what
 		-- clips, Uncharted2 with no bias on top of the meter. See
-		-- apps/vanilla/main/client_lua/init.lua for where each number
+		-- builtin/luanti/client_lua/client.lua for where each number
 		-- was picked.
 		rp:Append(magic.cache:GetResource("XMLFile",
 				"shaders/res/AutoExposureMean.xml"))

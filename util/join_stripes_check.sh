@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~4 min (2026-10-12)
-# covers: extensions/ui_utils/init.lua src/client/state.cpp client/api.lua src/client/web/index.html apps/vanilla/main/client_lua/init.lua builtin/network/network.cpp
+# covers: extensions/ui_utils/init.lua src/client/state.cpp client/api.lua src/client/web/index.html builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua builtin/network/network.cpp
 # [JOIN_STRIPES]: the join's wait on the client's two stripes, from the
 # first announce to the game's world loading, and the web page's own wait
 # in the same stripes. The minimal game's vanilla:

@@ -1,17 +1,16 @@
--- Buildat: vanilla/client_lua/keys.lua
+-- Buildat: builtin/luanti/client_lua/keys.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- The key bindings, and the one screen that edits them ([KEY_BINDINGS]):
 -- the Luanti settings screen of the launcher and the pause menu's "Key
 -- bindings" both draw this. The table is the code's own -- key_down() in
--- init.lua reads it -- so a key cannot be bound here and missed there.
+-- client.lua reads it -- so a key cannot be bound here and missed there.
 -- What the keys are is the client's key store's (client/api.lua's
 -- declare_keys), the player's for every server. Key names are Urho3D's;
 -- the mouse's buttons and wheel are not bindable.
 local magic = require("buildat/extension/urho3d")
-local cereal = require("buildat/extension/cereal")
-local log = buildat.Logger("vanilla/keys")
+local log = buildat.Logger("luanti/keys")
 
 local M = {}
 
@@ -112,56 +111,5 @@ end
 declare()
 -- Read again after the game's settings window ([GAME_SETTINGS])
 M.declare = declare
-
--- The settings list as the server sent it. The "key.<action>=<name>"
--- rows it held before the store -- in the server's settings.json, or a
--- public server's in this client's storage ("key_rows") -- are moved into
--- the store once and dropped there. Returns how many there were.
-function M.apply(list)
-	local rows, kept = {}, {}
-	for _, row in ipairs(list) do
-		local action, name = row:match("^key%.([%w_]+)=(.+)$")
-		if action then
-			rows[action] = name
-		elseif not row:match("^key%.") then
-			kept[#kept + 1] = row
-		end
-	end
-	M.settings = kept
-	if next(rows) == nil then
-		return 0
-	end
-	buildat.set_app_keys(nil, rows)
-	declare()
-	log:info("key bindings moved from the settings to the key store")
-	if M.public then
-		buildat.storage_write("key_rows", "")
-	else
-		buildat.send_packet("main:set_settings",
-				cereal.binary_output(kept, {"array", "string"}))
-	end
-	return 1
-end
-
--- **A public server's key rows were the client's own** ([VANILLA_PUBLIC]
--- 6), kept in the client's storage for that server; read once more so
--- that apply() moves them. pause.lua sets M.public from main:account.
-M.public = false
-
-function M.own_rows(list)
-	if not M.public then
-		return list
-	end
-	local out = {}
-	for _, row in ipairs(list) do
-		if not row:match("^key%.") then
-			out[#out + 1] = row
-		end
-	end
-	for row in (buildat.storage_read("key_rows") or ""):gmatch("[^\n]+") do
-		out[#out + 1] = row
-	end
-	return out
-end
 
 return M

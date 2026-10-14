@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~3 min (2026-10-12)
-# covers: extensions/luanti_client/init.lua extensions/luanti_client/itemdef.lua apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua builtin/luanti/lua/dig.lua
+# covers: extensions/luanti_client/init.lua extensions/luanti_client/itemdef.lua builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua builtin/luanti/lua/dig.lua
 # [DIG_SWING_SOUND]: vanilla's swing sounds, by the client's log (no
 # audio here). dig_swing.lua's stage in VoxeLibre (named dig sounds) and
 # minetest_game ("__group"): stone with a pickaxe and dirt by hand, the

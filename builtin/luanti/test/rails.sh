@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: builtin/luanti/lua/entity.lua builtin/luanti/lua/raycast.lua builtin/luanti/registry.h apps/vanilla/main/client_lua/init.lua
+# covers: builtin/luanti/lua/entity.lua builtin/luanti/lua/raycast.lua builtin/luanti/registry.h builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [VL_RAIL_BOXES]: vanilla on VoxeLibre, rails.lua's stage, the player
 # with interact and shout only:
 #   1. rails walked along z, across, along x both ways, off the tee, up a

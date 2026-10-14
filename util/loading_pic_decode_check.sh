@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-12)
-# covers: apps/vanilla/main/client_lua/init.lua src/lua_bindings/misc_urho3d.cpp client/extensions/urho3d/init.lua
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua src/lua_bindings/misc_urho3d.cpp client/extensions/urho3d/init.lua
 # [LOADING_PIC_DECODE]: vanilla's loading picture is decoded once into a
 # texture, with no file written. The minimal game copied as "pic", with a
 # menu/background.png:

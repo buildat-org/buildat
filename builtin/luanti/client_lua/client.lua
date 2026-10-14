@@ -1,4 +1,4 @@
--- Buildat: vanilla/client_lua/init.lua
+-- Buildat: builtin/luanti/client_lua/client.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -8,7 +8,20 @@
 -- player.lua, copied from extensions/luanti_client, which is also where its
 -- checks live; what is here is the keys, the camera and the world to ask
 -- about.
-local log = buildat.Logger("vanilla")
+-- **The client loop** ([LUANTI_APP_GLUE]): an app runs it with
+-- luanti.run_client(app) (module.lua), app being its hooks:
+--   log    the logger's name ("luanti")
+--   pause  function({keys = keys}) returning the function that opens the
+--          app's pause menu; without one Escape gives the mouse back
+-- and gets this file's shared table (keys) back. Its stages, keys.stage,
+-- are what an app replaces or wraps: hud(elements, flags) draws the
+-- game's HUD with the hotbar and the crosshair, frame(dt) is the frame.
+-- The app's server sends the player in (luanti:* packets, the module's)
+-- and may send luanti:loading_picture {name, png} for the loading screen.
+-- simplified: two stages; pointing and the inventory's drawing become
+-- stages when an app needs to replace them.
+local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
+		or "luanti")
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
@@ -56,9 +69,9 @@ voxel_shading.use_sun_gate(true)
 -- stays theirs -- it is still what chooses between these eight and what
 -- pushes their parameters, and the .glsl behind them is the extension's.
 -- See [SHADER_HOME] in doc/plan/master_plan.md.
--- BUILDAT_VANILLA_ABLATE=gate: the sun-gated four replaced by the plain
+-- BUILDAT_LUANTI_ABLATE=gate: the sun-gated four replaced by the plain
 -- four, so the nibble never gates the sun -- a fit's ablation ([PBR_FIT])
-local gated = not (buildat.get_env("BUILDAT_VANILLA_ABLATE") or ""):find("gate")
+local gated = not (buildat.get_env("BUILDAT_LUANTI_ABLATE") or ""):find("gate")
 voxel_shading.use_technique_set({
 	plain = "luanti_client/res/LuantiVoxel.xml",
 	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
@@ -105,24 +118,24 @@ local FALL_TOLERANCE = 14
 -- The player's own physics, which knows neither the protocol nor Urho3D:
 -- see the header of player.lua
 local ok_player, err_player, player_physics =
-		buildat.run_script_file("main/player.lua")
+		buildat.run_script_file("luanti/player.lua")
 if not ok_player or type(player_physics) ~= "table" then
-	error("vanilla: could not load player.lua: " .. tostring(err_player))
+	error("luanti: could not load player.lua: " .. tostring(err_player))
 end
 
 -- A game's own sky, which is six pictures rather than a gradient; see the
 -- header of skybox.lua
-local ok_sky, err_sky, skybox = buildat.run_script_file("main/skybox.lua")
+local ok_sky, err_sky, skybox = buildat.run_script_file("luanti/skybox.lua")
 if not ok_sky or type(skybox) ~= "table" then
-	error("vanilla: could not load skybox.lua: " .. tostring(err_sky))
+	error("luanti: could not load skybox.lua: " .. tostring(err_sky))
 end
 
 -- And the sky itself, which is Luanti's own shader rather than buildat's;
 -- see the header of sky_dome.lua
 local ok_lsky, err_lsky, sky_dome =
-		buildat.run_script_file("main/sky_dome.lua")
+		buildat.run_script_file("luanti/sky_dome.lua")
 if not ok_lsky or type(sky_dome) ~= "table" then
-	error("vanilla: could not load sky_dome.lua: " ..
+	error("luanti: could not load sky_dome.lua: " ..
 			tostring(err_lsky))
 end
 
@@ -134,10 +147,10 @@ end
 -- table here is that one, so a rebound key is what key_down() reads
 local keys = (function(ok, err, m)
 	if not ok or type(m) ~= "table" then
-		error("vanilla: could not load keys.lua: " .. tostring(err))
+		error("luanti: could not load keys.lua: " .. tostring(err))
 	end
 	return m
-end)(buildat.run_script_file("main/keys.lua"))
+end)(buildat.run_script_file("luanti/keys.lua"))
 local BINDINGS = keys.BINDINGS
 local BIND = keys.BIND
 
@@ -197,7 +210,7 @@ local SUN_BRIGHTNESS = 28.0
 local MOON_BRIGHTNESS = 1.0
 -- [PBR_FIT] term 1: the pbr path's sun, sky and moon in the path-traced
 -- reference's units, one copy for both Luanti clients: PHYS in
--- res/sky_model.lua ([LC_PBR_PARITY]). What is vanilla's alone is below.
+-- res/sky_model.lua ([LC_PBR_PARITY]). What is this client's alone is below.
 local PHYS = sky_dome.PHYS
 function PHYS.sun_color(height)
 	return magic.Color(PHYS.sun_rgb(height))
@@ -381,7 +394,7 @@ do
 	-- hill in front of the player was lit like noon and the ground beyond
 	-- it was black, with a hard edge, because the two were on different
 	-- zones. One is enough above; the number leaves room for a game's own.
-	zone.priority = tonumber(buildat.get_env("BUILDAT_VANILLA_ZONE_PRIO") or "")
+	zone.priority = tonumber(buildat.get_env("BUILDAT_LUANTI_ZONE_PRIO") or "")
 			or 1
 	zone.override = true
 	-- What the voxel shader reflects; without it its IBL term samples
@@ -549,14 +562,14 @@ do
 	-- than stone lit at three times it -- and two grays over one frame
 	-- would compound.
 	--
-	-- BUILDAT_VANILLA_GRAY_BY_LIGHT=<top> moves the ramp's top and 0
+	-- BUILDAT_LUANTI_GRAY_BY_LIGHT=<top> moves the ramp's top and 0
 	-- turns the shader's gray off, which is how the ladders are shot;
-	-- BUILDAT_VANILLA_NIGHT_GRAY="<L0> <L1>" moves the frame pass's two
+	-- BUILDAT_LUANTI_NIGHT_GRAY="<L0> <L1>" moves the frame pass's two
 	-- levels and "off" turns it off. With the shader's gray on, the
 	-- pass is off whatever it says.
 	local by_light = tonumber(
-			buildat.get_env("BUILDAT_VANILLA_GRAY_BY_LIGHT") or "") or 1.5
-	local gray_env = buildat.get_env("BUILDAT_VANILLA_NIGHT_GRAY") or ""
+			buildat.get_env("BUILDAT_LUANTI_GRAY_BY_LIGHT") or "") or 1.5
+	local gray_env = buildat.get_env("BUILDAT_LUANTI_NIGHT_GRAY") or ""
 	-- **The pass stays on unless it is asked off** (2026-09-26): taking
 	-- it out of the pbr path took the night with it -- vp4 at 20:30 went
 	-- from a mean of 8 to 109 -- so it is doing something the metered
@@ -580,8 +593,8 @@ do
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
 	-- The curve: Urho's per-channel Uncharted2, picked by the user off the
 	-- pair for its range in caves ([PBR_FIT] term 4, 2026-09-20); ACES
-	-- (luanti_client/res/TonemapACES) behind BUILDAT_VANILLA_TONEMAP=aces
-	local tonemap = buildat.get_env("BUILDAT_VANILLA_TONEMAP") or "uncharted2"
+	-- (luanti_client/res/TonemapACES) behind BUILDAT_LUANTI_TONEMAP=aces
+	local tonemap = buildat.get_env("BUILDAT_LUANTI_TONEMAP") or "uncharted2"
 	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/TonemapACES.xml"))
@@ -618,7 +631,7 @@ do
 	-- the key free, a term turned off re-exposes everything else
 	local key = tonumber(buildat.get_env("BUILDAT_LUANTI_KEY") or "")
 	if key then AUTO_EXPOSURE.lum_range = {key, key} end
-	-- BUILDAT_VANILLA_ADAPT=<rate>: the adaptation rate, for a run that
+	-- BUILDAT_LUANTI_ADAPT=<rate>: the adaptation rate, for a run that
 	-- asks whether the meter had settled. **Read before the rate is set
 	-- on the path**, or it reached the shader only after an
 	-- exposure_reset put it back (2026-09-24) -- so a run asking for an
@@ -626,7 +639,7 @@ do
 	-- adaptation had reached by then, which on a slow machine is a
 	-- different picture.
 	AUTO_EXPOSURE.adapt_rate = tonumber(
-			buildat.get_env("BUILDAT_VANILLA_ADAPT") or "") or
+			buildat.get_env("BUILDAT_LUANTI_ADAPT") or "") or
 			AUTO_EXPOSURE.adapt_rate
 	rp:SetShaderParameter("AutoExposureAdaptRate", AUTO_EXPOSURE.adapt_rate)
 	rp:SetShaderParameter("AutoExposureLumRange",
@@ -923,7 +936,8 @@ end
 WIELD.place(CAMERA_FOV)
 -- View bobbing and the hand's motion, official's ([VIEW_BOB]): the shared
 -- module under luanti_client/res; the setting view_bobbing_amount comes
--- with main:settings (1 unless set; 0 is off, as official's)
+-- with the app's settings, keys.apply_view (1 unless set; 0 is off,
+-- as official's)
 WIELD.motion = (function(ok, err, lib)
 	if not ok then
 		log:warning("camera_motion.lua: " .. tostring(err))
@@ -1176,7 +1190,7 @@ local CHAT_STYLE = magic.cache:GetResource("XMLFile",
 -- the HUD, walking and mouse look wait with it.
 local load_wait = {t = 0, next = 0.5, screen = ui_utils.load_screen()}
 load_wait.screen.line("Loading the world...")
-buildat.sub_packet("main:loading_picture", function(data)
+buildat.sub_packet("luanti:loading_picture", function(data)
 	local got = cereal.binary_input(data, {"array", "string"})
 	if not load_wait or #got < 2 then
 		log:info("load: no loading picture")
@@ -1478,10 +1492,10 @@ local WHITE_DISC_COLOR = {r = 1, g = 1, b = 1}
 -- frame and a get_env is a sandbox call ([FRAME_WORK]). One table, the
 -- chunk being at Lua 5.1's two hundred locals.
 local SKY_ENV = {
-	ablate = buildat.get_env("BUILDAT_VANILLA_ABLATE") or "",
+	ablate = buildat.get_env("BUILDAT_LUANTI_ABLATE") or "",
 	translucency = tonumber(
 			buildat.get_env("BUILDAT_VOXEL_TRANSLUCENCY") or ""),
-	light_log = buildat.get_env("BUILDAT_VANILLA_LIGHT_LOG") == "1",
+	light_log = buildat.get_env("BUILDAT_LUANTI_LIGHT_LOG") == "1",
 	cloud_n = tonumber(buildat.get_env("BUILDAT_SKY_CLOUD_N") or ""),
 }
 
@@ -1935,7 +1949,7 @@ local function update_sky(dt)
 		sky_lights.sun_node.direction = magic.Vector3(dir.x, dir.y, dir.z)
 		sky_lights.sun.brightness = sky_now.unlit and SUN_BRIGHTNESS * up or
 				PHYS.sun(height)
-		-- BUILDAT_VANILLA_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
+		-- BUILDAT_LUANTI_ABLATE=sun,shadow,amb,bounce,ground,ibl: a term turned
 		-- off for a fit's ablation run ([PBR_FIT]); the sun goes with any
 		local abl0 = SKY_ENV.ablate
 		if sky_now.debug_shadows then abl0 = abl0 .. ",sun,moon" end
@@ -2114,7 +2128,7 @@ local function update_sky(dt)
 		voxel_shading.set_chamber_light(chamber)
 		cave_ambient_now = chamber
 		-- **Every term of the light, said out loud** under
-		-- BUILDAT_VANILLA_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
+		-- BUILDAT_LUANTI_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
 		-- ambient a face with the whole sky gets, the bounce and the
 		-- ground in the same units, the cave floor and the two per-frame
 		-- camera readings that scale them. Read beside the
@@ -2616,6 +2630,7 @@ keys.set_detail = function(level)
 	buildat.storage_write("debug_info", tostring(level))
 	log:info("debug info: " .. level)
 end
+keys.detail_level = function() return detail_level end
 log:info("debug info at start: " .. detail_level)
 
 -- Luanti's yaw, from the launcher's. The launcher measures from +Z towards
@@ -3248,8 +3263,9 @@ local function draw_hud(elements, flags)
 	end
 end
 
-luanti.sub_hud(draw_hud)
-keys.redraw_hud = function() draw_hud(hud_elements) end
+keys.stage = {hud = draw_hud}
+luanti.sub_hud(function(elements, flags) keys.stage.hud(elements, flags) end)
+keys.redraw_hud = function() keys.stage.hud(hud_elements) end
 keys.redraw_hud()
 
 -- The game's set_lighting(): shadows.intensity is how dark a shadow is,
@@ -3285,19 +3301,16 @@ end)
 
 hud_follows_inventory = function()
 	if hud_r.has_inventory then
-		draw_hud(hud_elements)
+		keys.stage.hud(hud_elements)
 	end
 end
 
 --
--- The pause menu, main/pause.lua; its key binding editor is keys.lua's, the
--- same screen the launcher's settings draw
-local open_pause_menu = (function(ok, err, m)
-	if not ok or type(m) ~= "function" then
-		error("vanilla: could not load pause.lua: " .. tostring(err))
-	end
-	return m
-end)(buildat.run_script_file("main/pause.lua"))({keys = keys})
+-- The pause menu, the app's (see the header); vanilla's key binding
+-- editor in it is keys.lua's, the same screen the launcher's settings draw
+local open_pause_menu = luanti.app and luanti.app.pause and
+		luanti.app.pause({keys = keys}) or
+		function() set_mouse_in_world(false, "escape") end
 keys.open_pause = open_pause_menu
 
 --
@@ -3521,10 +3534,10 @@ end
 -- being at Lua's 200 locals
 (function(ok, err, install)
 	if not ok or type(install) ~= "function" then
-		error("vanilla: could not load scan.lua: " .. tostring(err))
+		error("luanti: could not load scan.lua: " .. tostring(err))
 	end
 	return install
-end)(buildat.run_script_file("main/scan.lua"))({
+end)(buildat.run_script_file("luanti/scan.lua"))({
 	camera_node = function() return camera_node end,
 	view = function() return yaw, pitch, (camera and camera.fov) or CAMERA_FOV end,
 	pointed = function() return pointed_p end, -- the frame's, bodies included
@@ -4090,7 +4103,7 @@ keys.on_key = function(key)
 		luanti.chat_local(mute and "Sound unmuted" or "Sound muted")
 	elseif key == BIND.hud.key then
 		hud_shown = not hud_shown
-		draw_hud(hud_elements)
+		keys.stage.hud(hud_elements)
 		-- The first-person item in the corner goes with the HUD
 		-- ([HUD_HIDES_HAND]); the third-person item is the world's and
 		-- stays. draw_hotbar() puts back exactly what is in hand, now that
@@ -4098,7 +4111,7 @@ keys.on_key = function(key)
 		draw_hotbar()
 	elseif key == BIND.chatlog.key then
 		chat_shown = not chat_shown
-		draw_hud(hud_elements)
+		keys.stage.hud(hud_elements)
 	elseif key == BIND.detail.key then
 		-- Cycled rather than toggled, the way Luanti's own F5 is, and what a
 		-- player coming from it expects: nothing, short, everything. See
@@ -4544,6 +4557,7 @@ function frame_peak.update(dt)
 	update_underwater(buildat.Vector3(player.x,
 			player.y + player_physics.EYE_HEIGHT, player.z))
 end
+keys.stage.frame = frame_peak.update
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
 	-- Out of the packet handler that asked for it: a leave and a connect
@@ -4556,7 +4570,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 	frame_peak.note(dt)
 	local t0 = buildat.get_time_us()
-	frame_peak.update(dt)
+	keys.stage.frame(dt)
 	-- The script's own share: the handler less the two phases timed inside
 	frame_peak.script_us = buildat.get_time_us() - t0 -
 			frame_peak.skyvis_us - sky_cube.us
@@ -4586,11 +4600,15 @@ end
 -- The player's choice, or nil for the default
 function keys.view.choose(n)
 	buildat.storage_write("view_range", n and tostring(n) or "")
+	keys.view.apply()
+end
+-- The range in use, after the ceiling or the choice changed
+function keys.view.apply()
 	sky_now.set_range(keys.view.current())
 end
 -- From the start, before the server's settings come: a browser does not
 -- first ask for the whole of the native default
-sky_now.set_range(keys.view.current())
+keys.view.apply()
 
 -- **The player's own view settings** ([VANILLA_PLAYER_SETTINGS], user
 -- 2026-10-11: a player on somebody's server could not change them): the
@@ -4620,105 +4638,8 @@ keys.apply_view = function(row)
 		WIELD.shoulder = shoulder == "1"
 	end
 end
-keys.set_view = function(name, value)
-	if keys.view_local then
-		local list = {}
-		for _, row in ipairs(keys.settings or {}) do
-			if not row:match("^" .. name .. "=") then
-				list[#list + 1] = row
-			end
-		end
-		list[#list + 1] = name .. "=" .. value
-		keys.settings = list
-		buildat.send_packet("main:set_settings",
-				cereal.binary_output(list, {"array", "string"}))
-	else
-		buildat.storage_write("view_" .. name, value)
-	end
-	keys.view_rows[name] = value
-	keys.apply_view(name .. "=" .. value)
-	log:info("view: " .. name .. " = " .. value)
-end
-
-keys.rejoin = function(later)
-	local why = keys.rejoin_why
-	if not later then
-		keys.rejoin_why = nil
-	end
-	local ok, err = buildat.rejoin(why, keys.world, later)
-	log:info("view: rejoin: " .. tostring(ok) .. " " .. tostring(err))
-end
-
-buildat.sub_packet("main:settings", function(data)
-	local list = keys.own_rows(cereal.binary_input(data, {"array", "string"}))
-	keys.view_local = buildat.connected_locally()
-	for i, row in ipairs(list) do
-		local name = row:match("^([%w_]+)=")
-		if name and keys.view_rows[name] then
-			local own = not keys.view_local and
-					buildat.storage_read("view_" .. name) or ""
-			if own ~= "" then
-				list[i] = name .. "=" .. own
-			end
-			keys.view_rows[name] = list[i]:match("=(.*)$")
-		end
-	end
-	local v = keys.view_rows
-	log:info(string.format("view settings: render %s, distant %s, " ..
-			"bobbing %s, shoulder %s", v.render_mode, v.lod_detail,
-			v.view_bobbing_amount, v.third_person_shoulder))
-	keys.apply(list)
-	keys.view.web = nil
-	for _, row in ipairs(list) do
-		local w = row:match("^web_view_range=(%d+)$")
-		if w then
-			keys.view.web = tonumber(w)
-		end
-	end
-	for _, row in ipairs(list) do
-		local n = row:match("^view_range=(%d+)$")
-		if n then
-			keys.view.ceiling = tonumber(n)
-			sky_now.set_range(keys.view.current())
-		end
-		keys.apply_view(row)
-	end
-	if keys.rejoin_why then
-		keys.rejoin_due = true
-	end
-end)
-
-keys.settings_sections = {{title = "View", draw = function(_, ui)
-	local v = keys.view_rows
-	-- Fixed for a session: a new one is a rejoin
-	ui.dropdown("Render mode", {{"PBR", "pbr"},
-			{"Shadows", "shadows"}, {"Unlit", "unlit"}}, v.render_mode,
-			function(m)
-		if m == v.render_mode then
-			return
-		end
-		keys.set_view("render_mode", m)
-		keys.rejoin_why = "Rejoining for the render mode " .. m .. "..."
-		-- A local server's write is in once its list comes back: armed
-		-- now, on the click, and run by the main:settings handler
-		keys.rejoin(keys.view_local)
-	end)
-	ui.dropdown("Distant terrain detail", {{"Full", "full"},
-			{"Reduced past half range", "half"},
-			{"Reduced past a third", "third"}}, v.lod_detail,
-			function(d) keys.set_view("lod_detail", d) end)
-	ui.toggle("View bobbing", v.view_bobbing_amount ~= "0", function(on)
-		keys.set_view("view_bobbing_amount", on and "1" or "0")
-	end)
-	ui.toggle("Over the shoulder", v.third_person_shoulder == "1",
-			function(on)
-		keys.set_view("third_person_shoulder", on and "1" or "0")
-	end)
-	ui.dropdown("Debug info (F5)", {{"Off", "0"}, {"Basic", "1"},
-			{"Full", "2"}}, tostring(detail_level), function(l)
-		keys.set_detail(tonumber(l))
-	end)
-end}}
+-- The app's settings window's sections, the touch one added below
+keys.settings_sections = {}
 -- A window that changed size -- fullscreen toggled, the window dragged --
 -- leaves the screen-sized containers the wrong size, and what is centred or
 -- bottom-aligned inside them lands wherever that size says. Both are put
@@ -4741,7 +4662,7 @@ magic.SubscribeToEvent("Update", function()
 		hotbar_ui:relayout()
 	end
 	hud_r.root.size = magic.IntVector2(w, h)
-	draw_hud(hud_elements)
+	keys.stage.hud(hud_elements)
 end)
 
 -- **Touch controls** on a touchscreen (luanti/touch.lua, luanti_client's
@@ -4749,7 +4670,7 @@ end)
 if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	keys.touch = (function(ok, err, m)
 		if not ok or type(m) ~= "function" then
-			error("vanilla: could not load touch.lua: " .. tostring(err))
+			error("luanti: could not load touch.lua: " .. tostring(err))
 		end
 		return m
 	end)(buildat.run_script_file("luanti/touch.lua"))({
@@ -4818,6 +4739,5 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	log:info("touch controls on, look sensitivity " .. keys.touch.sensitivity)
 end
 
-buildat.send_packet("main:get_settings", "")
-log:info("vanilla client ready")
+return keys
 -- vim: set noet ts=4 sw=4:

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua extensions/luanti_client/init.lua
 # [DEBUG_INFO_PRIV]: the F5 info's position, look and seed as official
 # Luanti shows them -- with the debug privilege or the basic_debug HUD
 # flag. One fixture mod, four phases the client asks for in turn: the player's

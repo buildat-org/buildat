@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: extensions/luanti_client/res/touch.lua apps/vanilla/main/client_lua/init.lua
+# covers: extensions/luanti_client/res/touch.lua builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua
 # [TOUCH_LOOK_SETTING]: the look sensitivity on a touchscreen. Vanilla (the
 # minimal game) natively with the touch controls, twice: the same 50 pixel
 # finger drag turns the player 60 degrees at the default 0.2 and twice that

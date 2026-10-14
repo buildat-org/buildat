@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua
+# covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua builtin/luanti/client_lua/module.lua
 # [VANILLA_PLAYER_SETTINGS]: the player's own view settings on a server they
 # joined directly. Vanilla on the minimal game, the server's settings.json
 # saying shadows and distant detail reduced past half:

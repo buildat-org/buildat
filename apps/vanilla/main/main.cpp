@@ -543,7 +543,7 @@ struct Module: public interface::Module
 			ar(values);
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:loading_picture", os.str());
+			inetwork->send(peer, "luanti:loading_picture", os.str());
 		});
 	}
 

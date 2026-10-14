@@ -235,7 +235,7 @@ Environment variables the module and its runners read: BUILDAT_LUANTI_GAME,
 _SAVE, _LUA (a fixture file), _PBR (the render mode), _LINEAR, _TONEMAP,
 _CLOUD_N, _TRANSLUCENCY, _JIT, _LUAPROF, _ABLATE (diagnostics), and
 LUANTI_EXTRA_IMPORT_PATH (the pbr sky's dawn and dusk knobs are fixed at
-their picks in apps/vanilla/main/client_lua/sky_dome.lua); a player never sets any of them -- the settings
+their picks in builtin/luanti/client_lua/sky_dome.lua); a player never sets any of them -- the settings
 menu holds what a player changes.
 
 The interface

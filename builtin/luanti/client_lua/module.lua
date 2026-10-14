@@ -4278,5 +4278,18 @@ for k, v in pairs(bodies) do
 	M[k] = v
 end
 
+-- **The client loop** ([LUANTI_APP_GLUE]): the player in the world --
+-- the controller, the camera, keys, pointing and digging, the hotbar, the
+-- wielded item, the HUD, chat, the sky and touch -- in client.lua, whose
+-- header lists app's hooks. Returns the loop's shared table.
+function M.run_client(app)
+	M.app = app or {}
+	local ok, err, keys = buildat.run_script_file("luanti/client.lua")
+	if not ok or type(keys) ~= "table" then
+		error("luanti: could not load client.lua: " .. tostring(err))
+	end
+	return keys
+end
+
 return M
 -- vim: set noet ts=4 sw=4:
