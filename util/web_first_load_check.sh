@@ -18,7 +18,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -f "$here/web/buildat.wasm" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 0; }
+[ -f "$here/web/buildat.wasm" ] || skip "no web/ (util/build_web.sh)"
 t=$(mktemp -d)
 s=
 trap '[ -n "$s" ] && kill $s 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
