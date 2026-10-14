@@ -173,6 +173,11 @@ local keys_editor = (function(ok, err, m)
 	end
 	return m
 end)(buildat.run_script_file("luanti/keys.lua"))
+do
+	local _, err, install = buildat.run_script_file("main/key_rows.lua")
+	assert(install, err)
+	install(keys_editor)
+end
 -- ContentDB's games ([CONTENTDB]): the server fetches, this asks and draws
 local ask_contentdb, draw_contentdb
 local contentdb_query = ""
