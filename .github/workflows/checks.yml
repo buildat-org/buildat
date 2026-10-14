@@ -15,12 +15,23 @@ on:
         type: choice
         options: [ci, quick, nightly]
         default: ci
+# A newer run of a tier on a branch stops the older one
+concurrency:
+  group: checks-${{ github.ref }}-${{ inputs.tier }}
+  cancel-in-progress: true
 jobs:
   ci:
     if: inputs.tier == 'ci'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The compiler cache checks_in_docker.sh keeps in Build/ccache: the
+      # build is most of a run's runner-minutes ([CI_TIER] 6)
+      - uses: actions/cache@v4
+        with:
+          path: Build/ccache
+          key: ccache-ci-${{ github.sha }}
+          restore-keys: ccache-ci-
       # 3.5 MB, so fetched each run rather than cached
       - name: devtest
         run: util/media_fetch.sh devtest
