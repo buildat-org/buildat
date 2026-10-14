@@ -518,9 +518,10 @@
 			return stored;
 		ss_ out = mapgen_name_from_settings();
 		if(out.empty())
-			out = m_world_is_new ? "v7" : "singlenode";
+			out = m_world_is_new ? "valleys" : "singlenode";
 		if(m_store)
 			m_store->set("mg_name", out);
+		log_i(MODULE, "mapgen %s, stored for this world", out.c_str());
 		return out;
 	}
 

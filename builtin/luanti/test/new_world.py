@@ -32,7 +32,7 @@ def offered_mapgens():
     def names(key):
         return set(n.strip() for n in conf("game.conf", key).split(",") if n.strip())
     allowed, disallowed = names("allowed_mapgens"), names("disallowed_mapgens")
-    out = [n for n in ("v7", "v5", "valleys", "carpathian", "flat", "fractal",
+    out = [n for n in ("valleys", "v7", "v5", "carpathian", "flat", "fractal",
                        "v6", "singlenode")
            if (not allowed or n in allowed) and n not in disallowed]
     chosen = conf("minetest.conf", "mg_name")

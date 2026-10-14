@@ -1048,14 +1048,15 @@ end)
 -- A new save, in the two steps importing a world already takes: which game,
 -- and then what to call it. The name field is on the second screen with the
 -- game it is for, rather than above a column of one button per game.
--- The mapgens Luanti ships, official's default first ([NEW_WORLD_FORM]):
+-- The mapgens Luanti ships, the default first ([NEW_WORLD_FORM]; valleys,
+-- where official's is v7: user, 2026-10-14):
 -- what the world is made of is a choice made once, when it is made, and a
 -- world made with the wrong one is a world made again.
 --
 -- simplified: a constant rather than core.get_mapgen_names(), which is the
 -- engine's answer and there is no engine running while the menu is up. The
 -- upgrade path is the luanti module answering a main:get_mapgens packet.
-local MAPGENS = {"v7", "v5", "valleys", "carpathian", "flat", "fractal",
+local MAPGENS = {"valleys", "v7", "v5", "carpathian", "flat", "fractal",
 		"v6", "singlenode"}
 -- What each game offers of them, the server's reading of its game.conf
 -- and minetest.conf, the one to pick first ([GAME_CONF_MAPGENS])

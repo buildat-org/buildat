@@ -3716,7 +3716,7 @@ struct Module: public interface::Module
 		const std::set<ss_> allowed = list("allowed_mapgens");
 		const std::set<ss_> disallowed = list("disallowed_mapgens");
 		sv_<ss_> out;
-		for(const char *name : {"v7", "v5", "valleys", "carpathian", "flat",
+		for(const char *name : {"valleys", "v7", "v5", "carpathian", "flat",
 				"fractal", "v6", "singlenode"})
 			if((allowed.empty() || allowed.count(name)) && !disallowed.count(name))
 				out.push_back(name);

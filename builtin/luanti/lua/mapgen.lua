@@ -34,8 +34,8 @@ local function game_mapgen_name()
 		end
 		return false
 	end
-	-- The dialog's order, v7 first as the default
-	local candidates = {DEFAULTS["mg_name"], "v7", "valleys", "carpathian",
+	-- The dialog's order, valleys first as the default
+	local candidates = {DEFAULTS["mg_name"], "valleys", "v7", "carpathian",
 			"v5", "flat", "fractal", "singlenode", "v6"}
 	for _, name in ipairs(candidates) do
 		if ok(name) then return name end

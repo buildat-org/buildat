@@ -539,10 +539,11 @@ local DEFAULTS = parse_settingtypes(read_file(
 
 -- And what this build says instead, or as well
 local OWN_DEFAULTS = {
-	-- Luanti's own default for a world that does not name one. Which
-	-- mapgen a world is actually generated with is written into the save
-	-- the first time it is opened; see mapgen_name() in luanti.cpp.
-	["mg_name"] = "v7",
+	-- The default for a world that does not name one: valleys, where
+	-- Luanti's own is v7 (user, 2026-10-14). Which mapgen a world is
+	-- actually generated with is written into the save the first time it
+	-- is opened; see mapgen_name() in luanti.cpp.
+	["mg_name"] = "valleys",
 	["water_level"] = "1",
 	["mapgen_limit"] = "31000",
 	["chunksize"] = "5",
