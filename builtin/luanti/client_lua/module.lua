@@ -3057,6 +3057,8 @@ local function parse_stack(str)
 	return {name = name, count = tonumber(count) or 1,
 			wear = tonumber(wear) or 0, meta = parse_stack_meta(str)}
 end
+-- A stack string as {name, count, wear, meta}, nil for an empty one
+M.parse_stack = parse_stack
 
 -- The colour a palette gives at an index, as "#rrggbb": the palette is a
 -- picture of N colours, read left to right and then down, and Luanti
@@ -3577,6 +3579,40 @@ if not ok_fsess or type(form_session) ~= "table" then
 	error("luanti: could not load form_session.lua: " .. tostring(err_fsess))
 end
 
+-- What a form sends, for an app drawing its own (the form stage):
+-- fields, {quit = "true"} when it is closed; a move, from and to being
+-- {location =, list =, index =} ("current_player", "nodemeta:x,y,z",
+-- "detached:<name>"); a craft of count from the grid
+function M.send_fields(formname, fields)
+	local flat = {formname}
+	for k, v in pairs(fields) do
+		flat[#flat + 1] = tostring(k)
+		flat[#flat + 1] = tostring(v)
+	end
+	buildat.send_packet("luanti:fields", cereal.binary_output(flat,
+			{"array", "string"}))
+end
+function M.inv_move(count, from, to)
+	buildat.send_packet("luanti:inv_action", cereal.binary_output({
+		"move", from.location, from.list, tostring(from.index),
+		to.location, to.list, tostring(to.index), tostring(count),
+	}, {"array", "string"}))
+end
+function M.inv_craft(count)
+	buildat.send_packet("luanti:inv_action", cereal.binary_output(
+			{"craft", tostring(count)}, {"array", "string"}))
+end
+-- The lists of the node a form is about ("x,y,z") or of a detached
+-- inventory ("detached:<name>"), list name -> stack strings; nil until
+-- the server sends them. f(at) when they come or change.
+function M.node_lists(at)
+	return node_inventory[at]
+end
+local node_inventory_subs = {}
+function M.sub_node_inventory(f)
+	node_inventory_subs[#node_inventory_subs + 1] = f
+end
+
 local function S()
 	if session then
 		return session
@@ -3584,24 +3620,10 @@ local function S()
 	session = form_session.new({
 		magic = magic, log = log, formspec = formspec, ui = make_ui(),
 		send_fields = function(form, fields)
-			local flat = {form.formname}
-			for k, v in pairs(fields) do
-				flat[#flat + 1] = tostring(k)
-				flat[#flat + 1] = tostring(v)
-			end
-			buildat.send_packet("luanti:fields", cereal.binary_output(flat,
-					{"array", "string"}))
+			M.send_fields(form.formname, fields)
 		end,
-		move = function(count, from, to)
-			buildat.send_packet("luanti:inv_action", cereal.binary_output({
-				"move", from.location, from.list, tostring(from.index),
-				to.location, to.list, tostring(to.index), tostring(count),
-			}, {"array", "string"}))
-		end,
-		craft = function(count)
-			buildat.send_packet("luanti:inv_action", cereal.binary_output(
-					{"craft", tostring(count)}, {"array", "string"}))
-		end,
+		move = function(count, from, to) M.inv_move(count, from, to) end,
+		craft = function(count) M.inv_craft(count) end,
 		item_description = function(name)
 			local desc = M.item_description(name)
 			return desc and M.strip_escapes(desc)
@@ -3649,6 +3671,11 @@ form_model_arrived = function()
 end
 
 local function show_form(formname, spec, at, handler)
+	-- The app's own drawing of it, the client loop's form stage
+	if not handler and M.form_stage and M.form_stage(formname, spec,
+			at ~= "" and at or nil) then
+		return
+	end
 	-- What the last form was about is not what this one is about: the node
 	-- goes, because the server sends this form's own. The detached ones
 	-- stay -- they belong to nobody and the player's own inventory form,
@@ -3673,10 +3700,13 @@ end
 -- it is up form_open() says so, as for a form, and Escape calls `close`.
 -- `window`, if given, is what form_window() reports for a scan. hold(nil)
 -- lets go. keep_on_escape: Escape does nothing, the window's own buttons
--- close it.
-local held, held_window, held_keep = nil, nil, false
-function M.hold(close, window, keep_on_escape)
+-- close it. on, if given: on.click(x, y, button) -> true gets the clicks
+-- a form would (mouse and touch alike), in the UI root's coordinates;
+-- on.key(key) -> true the keys before Escape is looked at.
+local held, held_window, held_keep, held_on = nil, nil, false, {}
+function M.hold(close, window, keep_on_escape, on)
 	held, held_window, held_keep = close, window, keep_on_escape or false
+	held_on = close and on or {}
 end
 -- held() -> whether a game's window holds the world now
 function M.held()
@@ -3777,9 +3807,11 @@ function M.open_player_inventory()
 		return
 	end
 	show_form("", player_spec)
-	current_form().source = "inventory"
-	-- What a check waits for
-	log:info("form: the inventory opened")
+	if current_form() then
+		current_form().source = "inventory"
+		-- What a check waits for
+		log:info("form: the inventory opened")
+	end
 end
 
 -- A form of the client's own: the game describes it the way a server would
@@ -3800,6 +3832,9 @@ end
 -- "middle". Returns whether the form took it, so that a click that was not
 -- on one still digs.
 function M.click(x, y, button)
+	if held_on.click then
+		return held_on.click(x, y, button)
+	end
 	return S():click(x, y, button)
 end
 
@@ -3811,6 +3846,9 @@ function M.key(key)
 	-- A held window's keys are its own: what is typed into its fields is
 	-- not the game's
 	if held and not current_form() then
+		if held_on.key and held_on.key(key) then
+			return true
+		end
 		if key == magic.KEY_ESCAPE and not held_keep then
 			local close = held
 			held, held_window = nil, nil
@@ -3854,6 +3892,9 @@ buildat.sub_packet("luanti:node_inventory", function(data)
 		i = i + 2 + size
 	end
 	node_inventory[at] = lists
+	for _, f in ipairs(node_inventory_subs) do
+		f(at)
+	end
 	if session then
 		session:redraw()
 	end

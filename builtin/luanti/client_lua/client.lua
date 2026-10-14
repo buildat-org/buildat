@@ -15,11 +15,13 @@
 --          app's pause menu; without one Escape gives the mouse back
 -- and gets this file's shared table (keys) back. Its stages, keys.stage,
 -- are what an app replaces or wraps: hud(elements, flags) draws the
--- game's HUD with the hotbar and the crosshair, frame(dt) is the frame.
+-- game's HUD with the hotbar and the crosshair, frame(dt) is the frame;
+-- point(eye, dir, reach) -> distance, hit is the app's own things the
+-- ray meets (hit() called as a punch at one is, while the dig is held);
+-- form(formname, spec, at) -> true draws a form, the player's own
+-- inventory one included, in place of the module's renderer.
 -- The app's server sends the player in (luanti:* packets, the module's)
 -- and may send luanti:loading_picture {name, png} for the loading screen.
--- simplified: two stages; pointing and the inventory's drawing become
--- stages when an app needs to replace them.
 local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
 		or "luanti")
 local magic = require("buildat/extension/urho3d")
@@ -3263,7 +3265,16 @@ local function draw_hud(elements, flags)
 	end
 end
 
-keys.stage = {hud = draw_hud}
+keys.stage = {hud = draw_hud,
+	point = function() return nil end,
+	form = function() return false end}
+luanti.form_stage = function(formname, spec, at)
+	return keys.stage.form(formname, spec, at)
+end
+-- For an app's own HUD: the slot in hand, and whether the HUD is up (F1,
+-- the loading screen)
+keys.wield = function() return wield_index end
+keys.hud_visible = function() return hud_shown and not load_wait end
 luanti.sub_hud(function(elements, flags) keys.stage.hud(elements, flags) end)
 keys.redraw_hud = function() keys.stage.hud(hud_elements) end
 keys.redraw_hud()
@@ -3785,14 +3796,19 @@ local function update_dig(dt, playing)
 	-- An object in front of the node is what is hit (pointed_obj, found
 	-- with the frame), at the reach a dig has
 	if holding then
-		local id = pointed_obj
+		local id = pointed_obj or keys.pointed_app
 		if id then
 			dig = nil
 			update_crack()
 			if hit_wait <= 0 then
 				hit_wait = OBJECT_HIT_DELAY
-				buildat.send_packet("luanti:punch_object", cereal.binary_output(
-						{tostring(id)}, {"array", "string"}))
+				if id == keys.pointed_app then
+					id()
+				else
+					buildat.send_packet("luanti:punch_object",
+							cereal.binary_output({tostring(id)},
+							{"array", "string"}))
+				end
 			end
 			return
 		end
@@ -4277,9 +4293,17 @@ function frame_peak.update(dt)
 		local reach = math.min(POINT_RANGE, luanti.dig_range(wield_index))
 		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
 				dir.x, dir.y, dir.z, reach)
-		pointed_obj = id and (pointed_p == nil or distance <
-				(buildat.Vector3(eye.x, eye.y, eye.z) - pointed_p):length()) and
+		local node_d = pointed_p and (buildat.Vector3(eye.x, eye.y, eye.z) -
+				pointed_p):length()
+		pointed_obj = id and (pointed_p == nil or distance < node_d) and
 				id or nil
+		-- And the app's own things (keys.stage.point), nearer than both
+		local app_d, hit = keys.stage.point(eye, dir, reach)
+		keys.pointed_app = app_d and hit and (node_d == nil or app_d < node_d)
+				and (pointed_obj == nil or app_d < distance) and hit or nil
+		if keys.pointed_app then
+			pointed_obj = nil
+		end
 	end
 	-- A finger's place, at what this frame points at: a tap's begin and
 	-- end can come in one frame, before the ray went through it

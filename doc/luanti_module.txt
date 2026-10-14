@@ -282,8 +282,14 @@ luanti.run_client(app). The app's hooks: log, the logger's name; pause,
 a function that gets {keys = keys} and returns the function that opens the
 app's pause menu. It returns the loop's shared table, whose stages an app
 replaces or wraps: keys.stage.hud(elements, flags) draws the game's HUD,
-the hotbar and the crosshair; keys.stage.frame(dt) is the frame. Pointing
-and the inventory's drawing are not stages yet.
+the hotbar and the crosshair; keys.stage.frame(dt) is the frame;
+keys.stage.point(eye, dir, reach) returns the distance to the app's own
+thing the ray meets and a function called as a punch at it;
+keys.stage.form(formname, spec, at) returns true when the app drew the
+form itself, the player's own inventory included. The module's client
+half gives such a drawing what it needs: luanti.parse_stack(),
+luanti.send_fields(), luanti.inv_move(), luanti.inv_craft(),
+luanti.node_lists(at) and luanti.sub_node_inventory(f).
 
 The world is the save. The map, the clock and everything else the world is go
 into the save the caller opened and keeps open; a Luanti world directory is
