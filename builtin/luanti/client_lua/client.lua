@@ -3464,7 +3464,7 @@ local function find_pointed_voxel()
 	local last = nil
 	local range = math.min(POINT_RANGE, luanti.dig_range(wield_index))
 	for i = 1, math.floor(range / POINT_STEP) do
-		local p = (p0 + dir * (i * POINT_STEP)):round()
+		local p = (p0 + dir * (i * POINT_STEP)):Round()
 		if p ~= last then
 			-- Luanti's pointable ([POINTABLE]): the ray goes through a
 			-- pointable = false node (water in most games, decor) as
@@ -3682,7 +3682,7 @@ local function set_crack(p, resource)
 		return
 	end
 	local node = crack_node_for(resource)
-	node.position = magic.Vector3.from_buildat(luanti.body_world(p) or p)
+	node.position = luanti.body_world(p) or p
 	node.enabled = true
 	crack_worn = resource
 end
@@ -4277,7 +4277,7 @@ function frame_peak.update(dt)
 		local eye = camera_node.worldPosition
 		local dir = keys.point_dir()
 		local reach = pointed_p and (buildat.Vector3(eye.x, eye.y, eye.z) -
-				pointed_p):length() or
+				pointed_p):Length() or
 				math.min(POINT_RANGE, luanti.dig_range(wield_index))
 		local bp, babove = luanti.pointed_body(eye.x, eye.y, eye.z,
 				dir.x, dir.y, dir.z, reach)
@@ -4294,7 +4294,7 @@ function frame_peak.update(dt)
 		local id, distance = luanti.pointed_object(eye.x, eye.y, eye.z,
 				dir.x, dir.y, dir.z, reach)
 		local node_d = pointed_p and (buildat.Vector3(eye.x, eye.y, eye.z) -
-				pointed_p):length()
+				pointed_p):Length()
 		pointed_obj = id and (pointed_p == nil or distance < node_d) and
 				id or nil
 		-- And the app's own things (keys.stage.point), nearer than both
@@ -4321,8 +4321,7 @@ function frame_peak.update(dt)
 		frame_boxes({{-x, -y, -z, x, y, z}})
 		pointed_node.enabled = true
 	elseif pointed_p then
-		pointed_node.position = magic.Vector3.from_buildat(
-				luanti.body_world(pointed_p) or pointed_p)
+		pointed_node.position = luanti.body_world(pointed_p) or pointed_p
 		frame_boxes(pointed_boxes or {{-0.5, -0.5, -0.5, 0.5, 0.5, 0.5}})
 		pointed_node.enabled = true
 	else

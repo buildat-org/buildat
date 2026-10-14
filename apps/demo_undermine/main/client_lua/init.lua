@@ -673,7 +673,7 @@ local function find_pointed_voxel(camera_node)
 	local last_p = nil
 	--log:verbose("p0="..p0:dump()..", dir="..dir:dump())
 	for i = 1, math.floor(max_d / d_per_step) do
-		local p = (p0 + dir * i * d_per_step):round()
+		local p = (p0 + dir * i * d_per_step):Round()
 		if p ~= last_p then
 			local v = voxelworld.get_static_voxel(p)
 			local id = field_of(v, FIELD.id)
@@ -755,7 +755,7 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		if p and p_above then
 			local v = voxelworld.get_static_voxel(p)
 			--log:info("pointed voxel: "..p:dump()..": "..v.id)
-			pointed_voxel_visual_node.position = magic.Vector3.from_buildat(p)
+			pointed_voxel_visual_node.position = p
 			local d = p_above - p
 			if d.x > 0 then
 				pointed_voxel_visual_node.rotation =

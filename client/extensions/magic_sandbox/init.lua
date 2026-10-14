@@ -218,7 +218,8 @@ function M.wrap_class(type_name, def)
 					if super_def.properties and super_def.properties[key] then
 						local property_def = super_def.properties[key]
 						if property_def.set then
-							local new_unsafe_value = property_def.set(value)
+							local new_unsafe_value = property_def.set(value,
+								type_name.."."..key)
 							unsafe[key] = new_unsafe_value
 							return
 						end
@@ -246,7 +247,8 @@ function M.wrap_class(type_name, def)
 					if property_def.set == nil then
 						error("Property \""..name.."\" of "..type_name.." cannot be written")
 					end
-					local new_unsafe_value = property_def.set(value)
+					local new_unsafe_value = property_def.set(value,
+							type_name.."."..key)
 					unsafe[key] = new_unsafe_value
 					return
 				end
@@ -297,7 +299,8 @@ function M.wrap_class(type_name, def)
 	return class
 end
 
-function M.safe_to_unsafe(safe_thing, valid_types)
+-- `what` names the value in an error: "Node.position", "f argument 2"
+function M.safe_to_unsafe(safe_thing, valid_types, what)
 	if type(valid_types) == 'string' then
 		valid_types = {valid_types}
 	elseif getmetatable(valid_types) and getmetatable(valid_types).type_name then
@@ -356,8 +359,27 @@ function M.safe_to_unsafe(safe_thing, valid_types)
 				return safe_thing
 			end
 		end
-		error("Disallowed type: "..dump(type_of_thing).."; Allowed types: "..
-				dump(valid_types))
+		-- **A table vector** ([VECTOR_NAMES]): a buildat.Vector3 or a plain
+		-- {x=, y=, z=} where a Vector3 goes, made one as from_buildat does.
+		-- Read raw: no sandbox __index runs here
+		if type_of_thing == "table" then
+			for _, valid_type in ipairs(valid_types) do
+				local n = allowed_type_name(valid_type)
+				if n == "Vector3" or n == "Vector2" then
+					local x, y = rawget(safe_thing, "x"), rawget(safe_thing, "y")
+					local z = rawget(safe_thing, "z")
+					if type(x) ~= "number" or type(y) ~= "number" or
+							(n == "Vector3" and type(z) ~= "number") then
+						error((what and what..": " or "").."a table as a "..n..
+								" needs numeric x, y"..(n == "Vector3" and
+								" and z" or "")..", not "..dump(safe_thing), 2)
+					end
+					return n == "Vector3" and Vector3(x, y, z) or Vector2(x, y)
+				end
+			end
+		end
+		error((what and what..": " or "").."Disallowed type: "..
+				dump(type_of_thing).."; Allowed types: "..dump(valid_types))
 	end
 end
 

@@ -2800,7 +2800,35 @@ local Vector3_prototype = {
 	length = function(a)
 		return math.sqrt(a.x*a.x + a.y*a.y + a.z*a.z)
 	end,
+	DotProduct = function(a, b)
+		return a.x * b.x + a.y * b.y + a.z * b.z
+	end,
+	CrossProduct = function(a, b)
+		return buildat.safe.Vector3(a.y * b.z - a.z * b.y,
+				a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+	end,
 }
+-- **Urho3D's names** ([VECTOR_NAMES]), as magic.Vector3 has them; the
+-- lowercase ones are the same functions, kept until the next break
+-- (doc/plan/compatibility_plan.md). `*` and `/` by a vector are by
+-- component, as Urho3D's are
+local function urho_names(P, new)
+	P.Length, P.Equals, P.Floor, P.Round = P.length, P.eq, P.floor, P.round
+	P.Normalized = function(a)
+		local l = a:length()
+		return l > 0 and a:div(l) or new(a)
+	end
+	P.__mul = function(a, b)
+		if type(b) == "table" then return a:mul_components(b) end
+		return a:mul(b)
+	end
+	P.__div = function(a, b)
+		if type(b) == "table" then return a:div_components(b) end
+		return a:div(b)
+	end
+end
+urho_names(Vector3_prototype, function(a) return buildat.safe.Vector3(a) end)
+
 function buildat.safe.Vector3(x, y, z)
 	local self = {}
 	if x ~= nil and y == nil and z == nil then
@@ -2819,8 +2847,8 @@ function buildat.safe.Vector3(x, y, z)
 		__eq = Vector3_prototype.eq,
 		__add = Vector3_prototype.add,
 		__sub = Vector3_prototype.sub,
-		__mul = Vector3_prototype.mul,
-		__div = Vector3_prototype.div,
+		__mul = Vector3_prototype.__mul,
+		__div = Vector3_prototype.__div,
 	})
 	return self
 end
@@ -2869,7 +2897,12 @@ local Vector2_prototype = {
 	length = function(a)
 		return math.sqrt(a.x*a.x + a.y*a.y)
 	end,
+	DotProduct = function(a, b)
+		return a.x * b.x + a.y * b.y
+	end,
 }
+urho_names(Vector2_prototype, function(a) return buildat.safe.Vector2(a) end)
+
 function buildat.safe.Vector2(x, y)
 	local self = {}
 	if x ~= nil and y == nil then
@@ -2885,8 +2918,8 @@ function buildat.safe.Vector2(x, y)
 		__eq = Vector3_prototype.eq,
 		__add = Vector2_prototype.add,
 		__sub = Vector2_prototype.sub,
-		__mul = Vector2_prototype.mul,
-		__div = Vector2_prototype.div,
+		__mul = Vector2_prototype.__mul,
+		__div = Vector2_prototype.__div,
 	})
 	return self
 end

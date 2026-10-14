@@ -23,7 +23,7 @@ M.zone_size = buildat.Vector2(0, 0)
 
 local function setup_sizes(sector_size)
 	M.sector_size = sector_size
-	M.zone_div = (M.sector_size / ideal_zone_size):floor()
+	M.zone_div = (M.sector_size / ideal_zone_size):Floor()
 	M.zone_size = buildat.Vector2(ideal_zone_size, ideal_zone_size)
 	log:info("sector_size: "..M.sector_size:dump())
 	log:info("zone_div: "..M.zone_div:dump())

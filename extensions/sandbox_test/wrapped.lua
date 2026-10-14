@@ -326,4 +326,41 @@ do
 	log:info("wrapped: a quaternion turns a vector; the focus under an element")
 end
 
+-- [VECTOR_NAMES]: a buildat.Vector3's Urho3D names give what the old ones
+-- do; one is taken where a Vector3 goes, and a table without z is refused
+-- with what it was for named
+do
+	local a, b = buildat.Vector3(3, 4.6, 0), buildat.Vector3(1, 2, 3)
+	assert(a:Length() == a:length() and a:Length() == math.sqrt(9 + 4.6^2))
+	assert(a:Floor() == a:floor() and a:Round() == a:round())
+	assert(a:Floor():Equals(buildat.Vector3(3, 4, 0)) and a:eq(a))
+	assert(a * b == a:mul_components(b) and a / b == a:div_components(b))
+	assert(a * 2 == a:mul(2) and a / 2 == a:div(2))
+	assert(b:DotProduct(b) == 14)
+	assert(buildat.Vector3(1, 0, 0):CrossProduct(buildat.Vector3(0, 1, 0)) ==
+			buildat.Vector3(0, 0, 1))
+	assert(math.abs(a:Normalized():Length() - 1) < 1e-9)
+	assert(buildat.Vector3(0, 0, 0):Normalized() == buildat.Vector3(0, 0, 0))
+	local c = buildat.Vector2(3, 4)
+	assert(c:Length() == 5 and c * c == buildat.Vector2(9, 16) and
+			c:DotProduct(c) == 25)
+	local scene = magic.Scene()
+	local n1, n2 = scene:CreateChild("a"), scene:CreateChild("b")
+	n1.position = magic.Vector3(1, 2, 3)
+	n2.position = b
+	assert(n2.position.x == n1.position.x and n2.position.y == 2 and
+			n2.position.z == 3, "a buildat.Vector3 as a node's position")
+	n2:Translate({x = 3, y = 3, z = 3})
+	assert(n2.position.z == 6, "a plain table to Translate")
+	local ok, err = pcall(function() n2.position = {x = 1, y = 2} end)
+	assert(not ok and tostring(err):find("Node.position", 1, true) and
+			tostring(err):find("needs numeric x, y and z", 1, true),
+			"a table without z: " .. tostring(err))
+	local ok2, err2 = pcall(function() n2:Translate({x = 1}) end)
+	assert(not ok2 and tostring(err2):find("argument 2", 1, true),
+			"Translate with no y: " .. tostring(err2))
+	scene:Remove()
+	log:info("wrapped: the table vectors' names, and one where a Vector3 goes")
+end
+
 return true

@@ -430,7 +430,7 @@ local function find_pointed_voxel()
 	local dir = buildat.Vector3(camera_node.worldDirection)
 	local last_p = nil
 	for i = 1, math.floor(DIG_REACH / d_per_step) do
-		local p = (p0 + dir * i * d_per_step):round()
+		local p = (p0 + dir * i * d_per_step):Round()
 		if p ~= last_p then
 			local v = voxelworld.get_static_voxel(p)
 			-- 0 is "not loaded", 1 is air
@@ -467,7 +467,7 @@ local function update_pointed_voxel()
 		pointed_node.enabled = false
 		return
 	end
-	pointed_node.position = magic.Vector3.from_buildat(p)
+	pointed_node.position = p
 	local d = p_above - p
 	if d.x > 0 then pointed_node.rotation = magic.Quaternion(90, 0, -90)
 	elseif d.x < 0 then pointed_node.rotation = magic.Quaternion(90, 0, 90)

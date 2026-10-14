@@ -29,7 +29,7 @@ return function(ctx)
 		local last = nil
 		local through = {}
 		for i = 1, math.floor(RANGE / STEP) do
-			local p = (p0 + dir * (i * STEP)):round()
+			local p = (p0 + dir * (i * STEP)):Round()
 			if p ~= last then
 				local v = voxelworld.get_static_voxel(p)
 				if ctx.voxel_is_solid(v) then
@@ -323,7 +323,7 @@ return function(ctx)
 					lines[#lines + 1] = string.format(
 							"scan %s: object %s %s at %.1f,%.1f,%.1f d=%.1f screen %d,%d bin %d,%d",
 							label, tostring(o.id), o.label, o.x, o.y, o.z,
-							d:length(), math.floor((sx + 1) / 2 * ww),
+							d:Length(), math.floor((sx + 1) / 2 * ww),
 							math.floor((1 - sy) / 2 * wh),
 							math.min(res - 1, math.floor((sx + 1) / 2 * res)),
 							math.min(res - 1, math.floor((1 - sy) / 2 * res)))

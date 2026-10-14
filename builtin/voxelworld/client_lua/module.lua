@@ -248,7 +248,7 @@ buildat.sub_packet("voxelworld:init", function(data)
 	M.chunk_size_voxels = buildat.Vector3(values.chunk_size_voxels)
 	M.section_size_chunks = buildat.Vector3(values.section_size_chunks)
 	M.section_size_voxels =
-			M.chunk_size_voxels:mul_components(M.section_size_chunks)
+			M.chunk_size_voxels * M.section_size_chunks
 
 	-- Clear caches
 	node_volume_cache = {}
@@ -424,8 +424,8 @@ function sub_events()
 			return
 		end
 		local data = node:GetVar("buildat_voxel_data"):GetBuffer()
-		local chunk_p = buildat.Vector3(node:GetWorldPosition()):div_components(
-				M.chunk_size_voxels):floor()
+		local chunk_p = (buildat.Vector3(node:GetWorldPosition()) /
+				M.chunk_size_voxels):Floor()
 		local t0 = buildat.get_time_us()
 		horizon_note_chunk(chunk_p, buildat.column_heights(data, voxel_reg),
 				moved)
@@ -549,8 +549,8 @@ function sub_events()
 			local t0 = buildat.get_time_us()
 			if M.horizon and M.use_skylight and M.chunk_size_voxels and
 					M.chunk_size_voxels.x == HORIZON_CHUNK then
-				horizon = horizon_map_for(buildat.Vector3(node_p):div_components(
-						M.chunk_size_voxels):floor())
+				horizon = horizon_map_for((buildat.Vector3(node_p) /
+						M.chunk_size_voxels):Floor())
 			end
 			local t1 = buildat.get_time_us()
 			M.frame_us.horizon = M.frame_us.horizon + t1 - t0
@@ -561,9 +561,8 @@ function sub_events()
 				-- ([VOXEL_GEOMETRY_ORIGIN])
 				local origin = nil
 				if M.chunk_size_voxels then
-					origin = buildat.Vector3(node_p):div_components(
-							M.chunk_size_voxels):floor():mul_components(
-							M.chunk_size_voxels)
+					origin = (buildat.Vector3(node_p) /
+							M.chunk_size_voxels):Floor() * M.chunk_size_voxels
 				end
 				buildat.set_voxel_geometry(
 						node, data, voxel_reg, atlas_reg, M.use_skylight,
@@ -702,8 +701,8 @@ function sub_events()
 			-- TODO: How should position information be sent to the server?
 			local p = camera_p
 			if update_counter % 60 == 0 then
-				local section_p = buildat.Vector3(p):div_components(
-						M.section_size_voxels):floor()
+				local section_p = (buildat.Vector3(p) /
+						M.section_size_voxels):Floor()
 				--log:info("p: "..p.x..", "..p.y..", "..p.z.." -> section_p: "..
 				--		section_p.x..", "..section_p.y..", "..section_p.z)
 				--[[send_get_section(section_p + buildat.Vector3( 0, 0, 0))
@@ -944,8 +943,8 @@ function sub_events()
 		if node:GetVar("buildat_static"):GetBool() == true and
 				M.chunk_size_voxels then
 			local p = node:GetWorldPosition()
-			local chunk_p = buildat.Vector3(p):div_components(
-					M.chunk_size_voxels):floor()
+			local chunk_p = (buildat.Vector3(p) /
+					M.chunk_size_voxels):Floor()
 			local cache = M.get_static_node_cache(chunk_p)
 			cache.node = node
 			cache.fetched = true
@@ -959,8 +958,8 @@ function sub_events()
 		modified_held[node_id] = nil
 		if node and M.chunk_size_voxels then
 			local p = node:GetWorldPosition()
-			local chunk_p = buildat.Vector3(p):div_components(
-					M.chunk_size_voxels):floor()
+			local chunk_p = (buildat.Vector3(p) /
+					M.chunk_size_voxels):Floor()
 			local cache = M.get_static_node_cache(chunk_p)
 			cache.node = nil
 			cache.fetched = false
@@ -1003,9 +1002,9 @@ function M.get_chunk_position(voxel_p)
 		log:debug("get_chunk_position(): Not initialized")
 		return nil, nil
 	end
-	local p = buildat.Vector3(voxel_p):round()
-	local chunk_p = p:div_components(M.chunk_size_voxels):floor()
-	local in_chunk_p = p - M.chunk_size_voxels:mul_components(chunk_p)
+	local p = buildat.Vector3(voxel_p):Round()
+	local chunk_p = (p / M.chunk_size_voxels):Floor()
+	local in_chunk_p = p - M.chunk_size_voxels * chunk_p
 	return chunk_p, in_chunk_p
 end
 
@@ -1223,7 +1222,7 @@ function M.get_static_node(chunk_p)
 	log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (no cache)")
 	-- NOTE: Chunks are positioned by their center position, and chunks are
 	--       aligned to a grid offset by half their size from global origin
-	local chunk_center_p = chunk_p:mul_components(M.chunk_size_voxels) +
+	local chunk_center_p = chunk_p * M.chunk_size_voxels +
 			M.chunk_size_voxels / 2
 	log:trace("get_static_node(): chunk_center_p="..chunk_center_p:dump())
 
@@ -1235,9 +1234,7 @@ function M.get_static_node(chunk_p)
 	local find_uc = chunk_center_p + clearance
 	log:trace("get_static_node(): find_lc="..find_lc:dump())
 	log:trace("get_static_node(): find_uc="..find_uc:dump())
-	local result = octree:GetDrawables(magic.BoundingBox(
-			magic.Vector3.from_buildat(find_lc),
-			magic.Vector3.from_buildat(find_uc)))
+	local result = octree:GetDrawables(magic.BoundingBox(find_lc, find_uc))
 	log:trace("get_static_node(): result="..dump(result))
 	-- NOTE: The result will contain all kinds of global things like zones and
 	--       lights
@@ -1288,7 +1285,7 @@ end
 -- Return value: VoxelInstance (found), VoxelInstance(0) (not found)
 -- TODO: Maybe comment out the trace logging from eating resources
 function M.get_static_voxel(p)
-	p = buildat.Vector3(p):round()
+	p = buildat.Vector3(p):Round()
 	log:trace("get_static_voxel(): p="..p:dump())
 	-- Calculate which chunk this voxel is in
 	local chunk_p, in_chunk_p = M.get_chunk_position(p)
@@ -1320,7 +1317,7 @@ end
 -- game reads its own, and the value is a plain number because a plane other
 -- than the first holds no role the engine knows about.
 function M.get_static_voxel_plane(p, plane)
-	p = buildat.Vector3(p):round()
+	p = buildat.Vector3(p):Round()
 	local chunk_p, in_chunk_p = M.get_chunk_position(p)
 	if chunk_p == nil then
 		return 0

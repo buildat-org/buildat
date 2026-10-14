@@ -66,7 +66,7 @@ local function checked(what, i, v, t)
 	if v == nil and not type_allows_nil(t) then
 		error(what.." argument "..i.." is nil")
 	end
-	return magic_sandbox.safe_to_unsafe(v, t)
+	return magic_sandbox.safe_to_unsafe(v, t, what.." argument "..i)
 end
 
 -- f called with the checked arguments, the trailing nils left off as
@@ -173,8 +173,8 @@ local function simple_property(valid_types)
 		get = function(current_value)
 			return magic_sandbox.unsafe_to_safe(current_value, valid_types)
 		end,
-		set = function(new_value)
-			return magic_sandbox.safe_to_unsafe(new_value, valid_types)
+		set = function(new_value, what)
+			return magic_sandbox.safe_to_unsafe(new_value, valid_types, what)
 		end,
 	}
 end

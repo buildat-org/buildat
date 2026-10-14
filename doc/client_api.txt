@@ -780,10 +780,21 @@ buildat.safe.get_file_content(name) -> bytes or nil
 - The bytes of a file the server served ([BLOCKED_MODULE]). The sandbox
   already runs a served file as code, so reading one's bytes is no wider.
 
-buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z} with :add, :sub,
-buildat.Vector2(x, y) -> {x, y}                    :mul_components, :length...
+buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z}
+buildat.Vector2(x, y) / buildat.Vector2(v) -> {x, y}
 - Plain-table vectors with the arithmetic an app's own code wants, as
-  against the sandboxed magic.Vector3, which is a wrapped userdata.
+  against the sandboxed magic.Vector3, which is a wrapped userdata. The
+  methods are named as magic.Vector3's are ([VECTOR_NAMES]): Length,
+  Normalized, DotProduct, CrossProduct (Vector3 only), Equals, Floor,
+  Round; and dump. + and - by a vector; * and / by a number scale, by a
+  vector they go by component. The lowercase names (length, eq, floor,
+  round, add, sub, mul, div, mul_components, div_components) are the
+  same functions, kept until the next compatibility break.
+- A magic call or property that takes a Vector3 or Vector2 takes one of
+  these, or any table with numeric x, y (and z), as it takes a
+  magic.Vector3: node.position = buildat.Vector3(1, 2, 3). A table
+  without them is refused, the error naming the property or argument.
+  magic.Vector3.from_buildat(v) stays.
 
 
 Safe interfaces of built-in extensions
