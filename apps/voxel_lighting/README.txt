@@ -11,6 +11,45 @@ this size. A cave is carved into it with a sphere swept along the camera's
 view direction, yawed 20 degrees so it does not run straight away from the
 camera.
 
+Eight sections
+--------------
+
+Started with the launch param sections=8 (the server's -u sections=8, or the
+launch grid's second tile), the same scene is placed in a world of 2x2x2
+sections, 128 voxels on a side, so that everything it checks has to work
+across section boundaries. That puts three boundary planes through it, at
+x=64, y=64 and z=64.
+
+The scene is placed at SCENE_OFFSET in main.cpp rather than rebuilt, so the
+terrain under the cave, the cave itself and the two benchmark edits are the
+ones the single section has. The offset is what decides where the boundaries
+fall through it, and it puts them at scene x=57, y=29 and z=28.
+
+The cave crosses those at roughly a fortieth, an eighth and three quarters of
+its length: one boundary two voxels inside the mouth, where the light gradient
+is steepest; one just under the surface there; and one far down the tunnel
+where there is almost no light left. The cave runs through four sections that
+way, and the benchmark shaft crosses the horizontal plane with five voxels
+below it and six above.
+
+Putting the mouth on the corner where all eight sections meet looks like the
+hardest arrangement and is not. The cave leaves through one octant immediately
+and then spends three quarters of its length inside a single section, which is
+the case that was already working.
+
+The terrain keeps going past the 64 voxel scene to fill the rest of the world.
+That is the visible difference: the same view of the same cave, with terrain
+running off the edges of the frame instead of a floating block. The trees do
+not land where one section puts them, because they are placed per cell of a
+grid over the world rather than by a count per section, which is what makes
+one growing over a boundary come out whole from both sides. There is no pond
+and so no benchmarks 4 to 7: those are for the materials, and eight sections
+are for the light. Rock and dirt keep the static spots they had (0.04 rather
+than 0.25), so the eight sections' look stays what it was.
+
+V verifies the skylight over the whole world, so light that should have
+crossed a boundary and did not shows up as voxels that differ.
+
 Checking it
 -----------
 
@@ -20,6 +59,10 @@ makes the current run the reference. Two runs of the same code sit under about
 12 here and the bar is 30, while a change that moved the lighting measured 72
 to 868 ([CHECK_BASELINE]). check.txt is still there to be driven by hand when
 what is wanted is a person's eye rather than a number.
+
+check_multisection.txt is the eight sections' views, three benchmarks before
+and after the edits, into ../tmp/multisection_lighting_check/; it is driven by
+hand against a server started with -u sections=8 (see its header).
 
 Lighting
 --------
@@ -495,6 +538,8 @@ Running
 
     $ bin/buildat_server -m ../apps/voxel_lighting
     $ bin/buildat -s localhost
+
+or with -u sections=8 on the server for the eight sections.
 
 check.txt visits all six benchmarks and screenshots each, for comparing a
 rendering change against the previous run:

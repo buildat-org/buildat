@@ -9,6 +9,7 @@
 #include "worldgen/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
+#include "interface/server_config.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
@@ -32,8 +33,26 @@ namespace main {
 
 using namespace Urho3D;
 
-// One section, so the whole scene is 64x64x64 voxels at 0..63 on each axis
-static const int VOLUME_SIZE = 64;
+// The scene is 64x64x64 voxels, one section. The launch param sections=8
+// (the server's -u, a launcher tile's params) puts it in a world of 2x2x2
+// sections instead, 128 voxels on a side, so that everything it checks has
+// to work across the three section boundary planes at x=64, y=64 and z=64.
+// Set at core:start, before worldgen is enabled, and only read after.
+static const int SECTION_SIZE = 64;
+static const int SCENE_SIZE = SECTION_SIZE;
+static int g_sections_per_axis = 1;
+// Where the scene's origin lands in the world. With eight sections it puts
+// the planes at scene x=57, y=29 and z=28, which the cave crosses at a
+// fortieth, an eighth and three quarters of its length: one boundary two
+// voxels inside the mouth where the light gradient is steepest, one just
+// under the surface there, and one far down the tunnel where there is almost
+// no light left. The cave runs through four sections that way. Putting the
+// mouth on the corner where all eight meet looks like the hardest case and
+// is not, because the cave then leaves through one octant at once and spends
+// the rest of its length in it.
+static int g_scene_offset[3] = {0, 0, 0};
+static const int MULTI_SCENE_OFFSET[3] = {7, 35, 36};
+static bool multi(){ return g_sections_per_axis > 1; }
 
 // The cave runs along the camera's view direction so the camera looks straight
 // into it. Kept in sync with client_lua/init.lua by hand; there are only two
@@ -118,6 +137,23 @@ static const int BENCH_SLAB_H = 2;
 
 static const uint8_t AIR_ID = 1;
 
+// With eight sections trees are placed one per cell of a grid over the world
+// rather than by a count per section, so that they do not depend on which
+// section is being generated and one growing over a boundary comes out whole
+// from both sides. The cell size is the one-section density: ten trees in a
+// 64x64 section. TREE_MARGIN is how far a tree reaches out of its own column,
+// and so how far outside a section one can still be rooted and reach into it.
+static const int TREE_CELL = 20;
+static const int TREE_MARGIN = 3;
+static const int TREE_SEED = 777;
+
+// Rounds towards minus infinity, which is what turns a world coordinate into
+// the coordinate of the cell containing it on the negative side of the origin
+static int floor_div(int a, int b)
+{
+	return (a >= 0) ? (a / b) : -(((-a) + b - 1) / b);
+}
+
 struct Worldgen: public worldgen::GeneratorInterface
 {
 	// The client places its benchmark cameras relative to the cave, so it is
@@ -140,6 +176,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 	pv::Vector3DInt32 bench_shaft_centre;  // BENCH_SHAFT_W^2 x bench_shaft_h
 	int bench_shaft_h = 0;
 	pv::Vector3DInt32 bench_slab_centre;   // BENCH_SLAB_W x 2 x BENCH_SLAB_W
+	bool bench_valid = false;
 
 	void generate(SceneReference scene_ref,
 			const pv::Vector3DInt16 &section_p,
@@ -150,20 +187,31 @@ struct Worldgen: public worldgen::GeneratorInterface
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
 
-			int w = uc.getX() - lc.getX() + 1;
-			int d = uc.getZ() - lc.getZ() + 1;
+			const int ox = g_scene_offset[0], oy = g_scene_offset[1];
+			const int oz = g_scene_offset[2];
+			// Everything is a function of world position rather than of
+			// position in the section, so that eight sections join up. With
+			// eight the noise is taken over a slightly larger area than the
+			// section, so that a tree rooted just outside it can still be
+			// asked how high the ground under it is.
+			const int M = multi() ? TREE_MARGIN : 0;
+			const int nx0 = lc.getX() - M, nz0 = lc.getZ() - M;
+			int w = uc.getX() - lc.getX() + 1 + 2*M;
+			int d = uc.getZ() - lc.getZ() + 1 + 2*M;
 
 			// Digger's terrain, but with the low frequencies dropped. Digger
 			// spreads its first octave over 160 voxels, which inside a 64
 			// voxel box reads as a tilt rather than as terrain. Starting at a
 			// wavelength of exactly the volume size puts one hill and one
 			// valley in the scene, and the octaves below it supply the detail.
-			interface::v3f spread(VOLUME_SIZE, VOLUME_SIZE, VOLUME_SIZE);
+			interface::v3f spread(SCENE_SIZE, SCENE_SIZE, SCENE_SIZE);
 			// Digger's amplitude is set for its own much longer wavelength;
 			// at this one it would swing the surface across the whole volume.
 			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
 			interface::Noise noise(&np, TERRAIN_SEED, w, d);
-			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
+			// Sampled at scene coordinates, so the terrain under the cave is
+			// the same whichever world the scene is in
+			noise.fbmMap2D(nx0 - ox + spread.X/2, nz0 - oz + spread.Z/2);
 			noise.transformNoiseMap();
 
 			// Reported so GROUND_OFFSET and TERRAIN_AMPLITUDE can be retuned
@@ -179,9 +227,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 					nmin, nmax, nmin + GROUND_OFFSET + 11.0f,
 					nmax + GROUND_OFFSET + 11.0f);
 
+			auto have_column = [&](int x, int z){
+				return x >= nx0 && x < nx0 + w && z >= nz0 && z < nz0 + d;
+			};
 			auto surface_at = [&](int x, int z) -> float {
-				size_t i = (size_t)(z - lc.getZ()) * w + (x - lc.getX());
-				return noise.result[i] + GROUND_OFFSET;
+				size_t i = (size_t)(z - nz0) * w + (x - nx0);
+				return noise.result[i] + GROUND_OFFSET + oy;
 			};
 
 			// Everything is built into a local array first so that skylight
@@ -229,60 +280,84 @@ struct Worldgen: public worldgen::GeneratorInterface
 			float sa = std::sin(CAVE_YAW_DEGREES * 3.14159265f / 180.0f);
 			auto rot_x = [&](float x, float z){ return x * ca + z * sa; };
 			auto rot_z = [&](float x, float z){ return -x * sa + z * ca; };
-			float centre_x = lc.getX() + VOLUME_SIZE / 2.0f;
-			float centre_z = lc.getZ() + VOLUME_SIZE / 2.0f;
-			float ox = (uc.getX() - CAVE_MOUTH_INSET) - centre_x;
-			float oz = (uc.getZ() - CAVE_MOUTH_INSET) - centre_z;
-			int mouth_x = (int)std::floor(centre_x + rot_x(ox, oz) + 0.5f);
-			int mouth_z = (int)std::floor(centre_z + rot_z(ox, oz) + 0.5f);
-			// surface_at() indexes the noise map, so it must stay in the region
-			if(mouth_x < lc.getX()) mouth_x = lc.getX();
-			if(mouth_x > uc.getX()) mouth_x = uc.getX();
-			if(mouth_z < lc.getZ()) mouth_z = lc.getZ();
-			if(mouth_z > uc.getZ()) mouth_z = uc.getZ();
+			// The corner of the scene box, not of a section
+			float centre_x = ox + SCENE_SIZE / 2.0f;
+			float centre_z = oz + SCENE_SIZE / 2.0f;
+			float mox = (ox + SCENE_SIZE - 1 - CAVE_MOUTH_INSET) - centre_x;
+			float moz = (oz + SCENE_SIZE - 1 - CAVE_MOUTH_INSET) - centre_z;
+			int mouth_x = (int)std::floor(centre_x + rot_x(mox, moz) + 0.5f);
+			int mouth_z = (int)std::floor(centre_z + rot_z(mox, moz) + 0.5f);
 
 			// Trees, for something that casts a shadow with a shape to it.
 			// Digger's density is a forest; here it would hide the terrain.
-			auto pr = interface::PseudoRandom(777);
-			for(int i = 0; i < w * d / 400; i++){
-				int x = pr.range(lc.getX() + 3, uc.getX() - 3);
-				int z = pr.range(lc.getZ() + 3, uc.getZ() - 3);
-				int y = (int)(surface_at(x, z) + 11.0f);
-				if(y < lc.getY() || y > uc.getY() - 8)
-					continue;
-				// A canopy is five voxels across, so this keeps the whole of
-				// it out of the mouth rather than only its trunk
-				if(std::abs(x - mouth_x) <= TREE_MOUTH_CLEARANCE &&
-						std::abs(z - mouth_z) <= TREE_MOUTH_CLEARANCE)
-					continue;
-
+			auto plant = [&](int x, int y, int z){
 				for(int y1 = y; y1 < y + 4; y1++)
 					set_id(x, y1, z, 6);
 				for(int x1 = x-2; x1 <= x+2; x1++)
 					for(int y1 = y+3; y1 <= y+7; y1++)
 						for(int z1 = z-2; z1 <= z+2; z1++)
 							set_id(x1, y1, z1, 5);
+			};
+			// A canopy is five voxels across, so this keeps the whole of it
+			// out of the mouth rather than only its trunk
+			auto in_doorway = [&](int x, int z){
+				return std::abs(x - mouth_x) <= TREE_MOUTH_CLEARANCE &&
+						std::abs(z - mouth_z) <= TREE_MOUTH_CLEARANCE;
+			};
+			if(multi()){
+				// One per cell of a grid laid over the world, placed by a
+				// random number seeded from the cell. Cells reaching a little
+				// outside the section are visited for the trees that reach in.
+				for(int cz = floor_div(lc.getZ() - M, TREE_CELL);
+						cz <= floor_div(uc.getZ() + M, TREE_CELL); cz++){
+				for(int cx = floor_div(lc.getX() - M, TREE_CELL);
+						cx <= floor_div(uc.getX() + M, TREE_CELL); cx++){
+					auto pr = interface::PseudoRandom(
+							TREE_SEED + cx * 73856093 + cz * 19349663);
+					int x = cx * TREE_CELL + pr.range(0, TREE_CELL - 1);
+					int z = cz * TREE_CELL + pr.range(0, TREE_CELL - 1);
+					if(!have_column(x, z) || in_doorway(x, z))
+						continue;
+					plant(x, (int)(surface_at(x, z) + 11.0f), z);
+				}
+				}
+			} else {
+				auto pr = interface::PseudoRandom(TREE_SEED);
+				for(int i = 0; i < W * D / 400; i++){
+					int x = pr.range(lc.getX() + 3, uc.getX() - 3);
+					int z = pr.range(lc.getZ() + 3, uc.getZ() - 3);
+					int y = (int)(surface_at(x, z) + 11.0f);
+					if(y < lc.getY() || y > uc.getY() - 8)
+						continue;
+					if(in_doorway(x, z))
+						continue;
+					plant(x, y, z);
 
-				// Keep the most central tree for benchmark 5, which looks at
-				// a canopy with the sun behind it. Central so that the camera
-				// it puts on the far side of the tree is still in the scene.
-				float cdx = x - (lc.getX() + VOLUME_SIZE / 2.0f);
-				float cdz = z - (lc.getZ() + VOLUME_SIZE / 2.0f);
-				float bdx = tree_centre[0] - (lc.getX() + VOLUME_SIZE / 2.0f);
-				float bdz = tree_centre[2] - (lc.getZ() + VOLUME_SIZE / 2.0f);
-				if(!tree_valid ||
-						cdx * cdx + cdz * cdz < bdx * bdx + bdz * bdz){
-					tree_centre[0] = x;
-					tree_centre[1] = y + 5;
-					tree_centre[2] = z;
-					tree_valid = true;
+					// Keep the most central tree for benchmark 5, which looks
+					// at a canopy with the sun behind it. Central so that the
+					// camera it puts on the far side of the tree is still in
+					// the scene.
+					float cdx = x - (lc.getX() + SCENE_SIZE / 2.0f);
+					float cdz = z - (lc.getZ() + SCENE_SIZE / 2.0f);
+					float bdx = tree_centre[0] - (lc.getX() + SCENE_SIZE / 2.0f);
+					float bdz = tree_centre[2] - (lc.getZ() + SCENE_SIZE / 2.0f);
+					if(!tree_valid ||
+							cdx * cdx + cdz * cdz < bdx * bdx + bdz * bdz){
+						tree_centre[0] = x;
+						tree_centre[1] = y + 5;
+						tree_centre[2] = z;
+						tree_valid = true;
+					}
 				}
 			}
 
 			// Dig the basin and fill it. Done before the cave is carved, so
 			// the cave stays dry however far below the water line it runs.
 			// The floor is a bowl that meets the water line at the rim, which
-			// leaves a shoreline instead of a wall of water.
+			// leaves a shoreline instead of a wall of water. One section's
+			// scene only: the pond and its benchmark are the materials', and
+			// eight sections are for the light across boundaries.
+			if(!multi())
 			for(int z = POND_CENTRE_Z - POND_RADIUS;
 					z <= POND_CENTRE_Z + POND_RADIUS; z++){
 				for(int x = POND_CENTRE_X - POND_RADIUS;
@@ -310,9 +385,9 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// far edge of the pond, which is the one place near it that no
 			// tree can grow into, and looks back across it towards the middle
 			// of the volume.
-			{
-				float ux = POND_CENTRE_X - (lc.getX() + VOLUME_SIZE / 2.0f);
-				float uz = POND_CENTRE_Z - (lc.getZ() + VOLUME_SIZE / 2.0f);
+			if(!multi()){
+				float ux = POND_CENTRE_X - (lc.getX() + SCENE_SIZE / 2.0f);
+				float uz = POND_CENTRE_Z - (lc.getZ() + SCENE_SIZE / 2.0f);
 				float ul = std::sqrt(ux * ux + uz * uz);
 				if(ul < 0.001f){ ux = 0.0f; uz = 1.0f; ul = 1.0f; }
 				ux /= ul;
@@ -343,7 +418,23 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 			float sx = mouth_x;
 			float sz = mouth_z;
-			float sy = surface_at(mouth_x, mouth_z) + 11.0f + CAVE_RADIUS;
+			// Every section carves the whole cave and clips it, so every one
+			// of them needs the ground height at the mouth, which is only in
+			// the noise map of the sections the mouth is over. One extra
+			// sample of the same noise gives it to all of them -- all, since
+			// a map's value and a lone sample's differ in the last bits, and
+			// two sections carving from two heights leave a seam.
+			float mouth_surface;
+			if(!multi()){
+				mouth_surface = surface_at(mouth_x, mouth_z);
+			} else {
+				interface::Noise mouth_noise(&np, TERRAIN_SEED, 1, 1);
+				mouth_noise.fbmMap2D(mouth_x - ox + spread.X/2,
+						mouth_z - oz + spread.Z/2);
+				mouth_noise.transformNoiseMap();
+				mouth_surface = mouth_noise.result[0] + GROUND_OFFSET + oy;
+			}
+			float sy = mouth_surface + 11.0f + CAVE_RADIUS;
 
 			size_t carved = 0;
 			for(float t = 0.f; t <= CAVE_LENGTH; t += 0.5f){
@@ -378,43 +469,37 @@ struct Worldgen: public worldgen::GeneratorInterface
 			cave_valid = true;
 
 			// The shaft goes straight up out of the cave to the open air; the
-			// slab hangs over the mouth. Together they swap where the cave gets
-			// its light from, which is the thing the relight has to get right.
-			auto clamp_xz = [&](int v, int lo, int hi){
-				return v < lo ? lo : (v > hi ? hi : v);
-			};
-			int shaft_x = clamp_xz((int)std::floor(sx + dx * BENCH_SHAFT_T +
-					0.5f), lc.getX() + 2, uc.getX() - 2);
-			int shaft_z = clamp_xz((int)std::floor(sz + dz * BENCH_SHAFT_T +
-					0.5f), lc.getZ() + 2, uc.getZ() - 2);
-			int shaft_bottom = (int)std::floor(sy + dy * BENCH_SHAFT_T + 0.5f);
-			// surface_at() + 11 is the first air voxel above the ground, so
-			// this breaks the surface open rather than stopping under it. The
-			// shaft goes two voxels past that, which is where the cap sits, so
-			// digging it again cuts the cap out and the two edits can be
-			// cycled for as long as anyone wants to watch them.
-			int shaft_top = (int)std::floor(
-					surface_at(shaft_x, shaft_z)) + 11;
-			if(shaft_top < shaft_bottom)
-				shaft_top = shaft_bottom;
-			// A box of height h centred at c covers c-(h/2) .. c+(h-1)/2
-			bench_shaft_h = (shaft_top + 1) - shaft_bottom + 1;
-			bench_shaft_centre = pv::Vector3DInt32(shaft_x,
-					shaft_bottom + bench_shaft_h / 2, shaft_z);
-
-			// The slab caps the shaft, filling the two air voxels directly
-			// above the ground, so the second edit takes back exactly the light
-			// the first one let in and the cave returns to where it started.
-			// The shaft reaches through both of them, so digging again cuts the
-			// cap back out.
-			bench_slab_centre = pv::Vector3DInt32(
-					clamp_xz(shaft_x, lc.getX() + 3, uc.getX() - 3),
-					shaft_top + 1,
-					clamp_xz(shaft_z, lc.getZ() + 3, uc.getZ() - 3));
-
-			log_v(MODULE, "Bench: shaft " PV3I_FORMAT " h %i, slab "
-					PV3I_FORMAT, PV3I_PARAMS(bench_shaft_centre),
-					bench_shaft_h, PV3I_PARAMS(bench_slab_centre));
+			// slab caps it. Together they swap where the cave gets its light
+			// from, which is the thing the relight has to get right. Worked
+			// out in whichever sections have the noise for that column under
+			// them, which all give the same answer.
+			int shaft_x = (int)std::floor(sx + dx * BENCH_SHAFT_T + 0.5f);
+			int shaft_z = (int)std::floor(sz + dz * BENCH_SHAFT_T + 0.5f);
+			if(have_column(shaft_x, shaft_z)){
+				int shaft_bottom =
+						(int)std::floor(sy + dy * BENCH_SHAFT_T + 0.5f);
+				// surface_at() + 11 is the first air voxel above the ground,
+				// so this breaks the surface open rather than stopping under
+				// it. The shaft goes one voxel past that, which is where the
+				// cap sits, so digging it again cuts the cap out and the two
+				// edits can be cycled for as long as anyone wants to watch.
+				int shaft_top =
+						(int)std::floor(surface_at(shaft_x, shaft_z)) + 11;
+				if(shaft_top < shaft_bottom)
+					shaft_top = shaft_bottom;
+				// A box of height h centred at c covers c-(h/2) .. c+(h-1)/2
+				bench_shaft_h = (shaft_top + 1) - shaft_bottom + 1;
+				bench_shaft_centre = pv::Vector3DInt32(shaft_x,
+						shaft_bottom + bench_shaft_h / 2, shaft_z);
+				// The cap fills the two air voxels directly above the ground,
+				// so the second edit takes back the light the first let in
+				bench_slab_centre = pv::Vector3DInt32(shaft_x,
+						shaft_top + 1, shaft_z);
+				bench_valid = true;
+				log_v(MODULE, "Bench: shaft " PV3I_FORMAT " h %i, slab "
+						PV3I_FORMAT, PV3I_PARAMS(bench_shaft_centre),
+						bench_shaft_h, PV3I_PARAMS(bench_slab_centre));
+			}
 
 			// voxelworld keeps the skylight of every voxel up to date from
 			// here on, so these go in as plain ids
@@ -522,6 +607,15 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		bool refused = false;
+		const ss_ sections = interface::launch_param(m_server->get_config().
+				get<ss_>("untrusted_launch"), "sections", &refused);
+		g_sections_per_axis = sections == "8" ? 2 : 1;
+		if(refused || (sections != "" && sections != "1" && sections != "8"))
+			log_w(MODULE, "sections: 1 or 8; one section it is");
+		for(int i = 0; i < 3; i++)
+			g_scene_offset[i] = multi() ? MULTI_SCENE_OFFSET[i] : 0;
+
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_main_scene = imc->create_scene();
 		});
@@ -537,8 +631,9 @@ struct Module: public interface::Module
 
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivoxelworld)
 		{
-			// A single section: the whole scene, never streamed
-			pv::Region region(0, 0, 0, 0, 0, 0);
+			// The whole world, never streamed
+			const int n = g_sections_per_axis - 1;
+			pv::Region region(0, 0, 0, n, n, n);
 			ivoxelworld->create_instance(m_main_scene, region);
 		});
 
@@ -552,18 +647,22 @@ struct Module: public interface::Module
 			add_voxel(reg, "air", "", false, true);              // id 1
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots. The README says why these values.
+			// static_spots: eight sections' were never raised with one's,
+			// and their look is kept as it is
+			const float rock_spots = multi() ? 0.04f : 0.25f;
 			add_voxel(reg, "rock", "main/rock.png", true, false,
-					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, 0.25f); // id 2
+					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, rock_spots); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true, false,
-					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, 0.25f); // id 3
+					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, rock_spots); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true, false,
 					0.90f, 1.0f, 0.75f, 0.06f, 0.012f); // id 4
 			add_voxel(reg, "leaves", "main/leaves.png", true, false,
 					0.95f, 1.0f, 1.5f, 0.11f, 0.03f); // id 5
 			add_voxel(reg, "tree", "main/tree.png", true, false,
 					0.85f, 0.35f, 2.0f); // id 6
-			add_voxel(reg, "water", "main/water.png", true, false,
-					0.28f, 1.0f, 6.0f, 0.0f, 0.05f); // id 7
+			if(!multi())
+				add_voxel(reg, "water", "main/water.png", true, false,
+						0.28f, 1.0f, 6.0f, 0.0f, 0.05f); // id 7
 
 			// The whole point of this scene: let voxelworld light it
 			ivoxelworld->get_instance(m_main_scene)->
@@ -576,8 +675,10 @@ struct Module: public interface::Module
 			instance->enable();
 		});
 
-		log_v(MODULE, "voxel_lighting: %ix%ix%i scene",
-				VOLUME_SIZE, VOLUME_SIZE, VOLUME_SIZE);
+		const int world_size = g_sections_per_axis * SECTION_SIZE;
+		log_v(MODULE, "voxel_lighting: %ix%ix%i voxels in %i section(s)",
+				world_size, world_size, world_size, g_sections_per_axis *
+				g_sections_per_axis * g_sections_per_axis);
 	}
 
 	void on_unload()
@@ -631,6 +732,11 @@ struct Module: public interface::Module
 		network::access(m_server, [&](network::Interface *inetwork){
 			// Generation normally finishes long before anyone connects; if it
 			// has not, on_worldgen_queue_modified() sends this instead
+			// Before anything that places a camera
+			char scene[48];
+			snprintf(scene, sizeof scene, "%i %i %i", g_scene_offset[0],
+					g_scene_offset[1], g_scene_offset[2]);
+			inetwork->send(event.recipient, "main:scene", scene);
 			if(m_worldgen && m_worldgen->cave_valid)
 				inetwork->send(event.recipient, "main:cave", cave_packet());
 			if(m_worldgen && m_worldgen->water_valid)
@@ -677,7 +783,7 @@ struct Module: public interface::Module
 	void bench_box(const pv::Vector3DInt32 &centre, int w, int h, int d,
 			uint32_t id)
 	{
-		if(!m_worldgen || !m_worldgen->cave_valid){
+		if(!m_worldgen || !m_worldgen->bench_valid){
 			log_w(MODULE, "bench_box(): world is not generated yet");
 			return;
 		}
@@ -713,16 +819,21 @@ struct Module: public interface::Module
 	}
 
 	// Check voxelworld's incremental skylight against a flood fill done from
-	// scratch over the whole scene. The scene is one section, so the whole
+	// scratch over the whole world. It is at most eight sections, so the whole
 	// thing fits in memory and the two can be compared voxel by voxel; this is
-	// what says whether an edit relit everything it should have.
+	// what says whether an edit relit everything it should have, and light
+	// that should have crossed a boundary and did not shows up here.
 	void verify_skylight()
 	{
 		voxelworld::access(m_server, m_main_scene,
 				[&](voxelworld::Instance *world)
 		{
-			pv::Region region = world->get_section_region_voxels(
-					pv::Vector3DInt16(0, 0, 0));
+			const int16_t n = g_sections_per_axis - 1;
+			pv::Region region(
+					world->get_section_region_voxels(
+							pv::Vector3DInt16(0, 0, 0)).getLowerCorner(),
+					world->get_section_region_voxels(
+							pv::Vector3DInt16(n, n, n)).getUpperCorner());
 			auto lc = region.getLowerCorner();
 			auto uc = region.getUpperCorner();
 			const int W = uc.getX() - lc.getX() + 1;

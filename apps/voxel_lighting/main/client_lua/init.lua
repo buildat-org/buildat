@@ -23,7 +23,8 @@ voxelworld.use_skylight = true
 -- VIEW_DIR is kept in sync with main.cpp by hand; the cave is carved along it
 -- (yawed by CAVE_YAW_DEGREES there).
 local VIEW_DIR = {x = -1.0, y = -0.7, z = -1.0}
--- Middle of the volume, a little below the mean terrain surface (y=32)
+-- Middle of the scene, a little below the mean terrain surface (y=32); moved
+-- with the scene when it is in eight sections (main:scene)
 local LOOK_AT = {x = 32, y = 27, z = 32}
 local CAMERA_DISTANCE = 90
 local CAMERA_FOV = 45
@@ -65,19 +66,28 @@ local function apply_angles(node, yaw, pitch)
 	node.rotation = magic.Quaternion(pitch, yaw, 0)
 end
 
--- Benchmark camera placements. 1 is known up front; 2 and 3 need the cave,
--- which arrives from the server in main:cave.
+-- Benchmark camera placements. 1 is known up front, and moves with the scene
+-- (main:scene); 2 and 3 need the cave, which arrives from the server in
+-- main:cave, and 4 to 7 the pond and a tree, which only one section's scene
+-- has. Their HUD buttons show once they are there.
 local benchmarks = {}
-do
+local benchmark_buttons = {}
+local function overview(ox, oy, oz)
 	local d = normalized(VIEW_DIR)
 	local b_yaw, b_pitch = angles_from_dir(VIEW_DIR)
-	benchmarks[1] = {
+	return {
 		name = "Overview",
-		x = LOOK_AT.x - d.x * CAMERA_DISTANCE,
-		y = LOOK_AT.y - d.y * CAMERA_DISTANCE,
-		z = LOOK_AT.z - d.z * CAMERA_DISTANCE,
+		x = LOOK_AT.x + ox - d.x * CAMERA_DISTANCE,
+		y = LOOK_AT.y + oy - d.y * CAMERA_DISTANCE,
+		z = LOOK_AT.z + oz - d.z * CAMERA_DISTANCE,
 		yaw = b_yaw, pitch = b_pitch,
 	}
+end
+benchmarks[1] = overview(0, 0, 0)
+local function benchmark_ready(i)
+	if benchmark_buttons[i] then
+		benchmark_buttons[i].visible = true
+	end
 end
 
 local yaw = benchmarks[1].yaw
@@ -252,6 +262,26 @@ buildat.sub_packet("main:cave", function(data)
 			"%.2f); benchmarks 2 and 3 ready", mx, my, mz, dx, dy, dz))
 end)
 
+-- Where the scene's origin is in the world, as "x y z": 0 0 0 in one
+-- section, moved in eight. The overview follows it, so it frames the same
+-- scene the same way; the world keeps going past the edges of it, which is
+-- the whole visible difference between the two.
+buildat.sub_packet("main:scene", function(data)
+	local ox, oy, oz = string.match(data, "([^ ]+) ([^ ]+) ([^ ]+)")
+	if not oz then
+		log:error("main:scene: cannot parse \""..data.."\"")
+		return
+	end
+	ox, oy, oz = tonumber(ox), tonumber(oy), tonumber(oz)
+	benchmarks[1] = overview(ox, oy, oz)
+	-- Where the camera starts, which is the overview until someone moves it
+	if not free_look and (ox ~= 0 or oy ~= 0 or oz ~= 0) then
+		local b = benchmarks[1]
+		camera_node.position = magic.Vector3(b.x, b.y, b.z)
+	end
+	log:info(string.format("scene at (%d, %d, %d)", ox, oy, oz))
+end)
+
 -- Three framings of the same tree, all from the shaded side of it.
 --
 -- Benchmark 5 stands back and above, looking at the canopy with the sun behind
@@ -317,6 +347,9 @@ buildat.sub_packet("main:tree", function(data)
 		x = eye6.x, y = eye6.y + SUN_VIEW_RISE, z = eye6.z,
 		yaw = yaw6, pitch = pitch6,
 	}
+	benchmark_ready(5)
+	benchmark_ready(6)
+	benchmark_ready(7)
 	log:info(string.format("canopy at (%.1f, %.1f, %.1f); benchmarks 5, 6 "..
 			"and 7 ready", tx, ty, tz))
 end)
@@ -349,6 +382,7 @@ buildat.sub_packet("main:water", function(data)
 		z = ez - look.z * POND_BACK_OFF,
 		yaw = w_yaw, pitch = 0,
 	}
+	benchmark_ready(4)
 	log:info(string.format("pond at (%.1f, %.1f, %.1f); benchmark 4 ready",
 			tx, ty, tz))
 end)
@@ -482,16 +516,20 @@ do
 			action()
 			magic.ui:SetFocusElement(nil)
 		end)
+		return button
 	end
 
 	add_button("Free move (Tab)", function() set_free_look(not free_look) end)
 	add_button("1 Overview", function() go_to_benchmark(1) end)
 	add_button("2 Cave mouth", function() go_to_benchmark(2) end)
 	add_button("3 Inside cave", function() go_to_benchmark(3) end)
-	add_button("4 Pond", function() go_to_benchmark(4) end)
-	add_button("5 Backlit canopy", function() go_to_benchmark(5) end)
-	add_button("6 Sun behind", function() go_to_benchmark(6) end)
-	add_button("7 Sun in sky", function() go_to_benchmark(7) end)
+	for k, label in ipairs({"4 Pond", "5 Backlit canopy", "6 Sun behind",
+			"7 Sun in sky"}) do
+		local i = k + 3
+		benchmark_buttons[i] = add_button(label,
+				function() go_to_benchmark(i) end)
+		benchmark_buttons[i].visible = benchmarks[i] ~= nil
+	end
 	add_button("Dig shaft (P)", function()
 		buildat.send_packet("main:bench_shaft", "")
 	end)
