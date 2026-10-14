@@ -10,21 +10,21 @@ local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 
---local RENDER_DISTANCE = 640
-local RENDER_DISTANCE = 480
---local RENDER_DISTANCE = 320
---local RENDER_DISTANCE = 240
---local RENDER_DISTANCE = 160
-
-local FOG_END = RENDER_DISTANCE * 1.2
+-- Fog hides the streaming edge (section = 64 voxels, load radius 5).
+local RENDER_DISTANCE = 280
+local FOG_END = RENDER_DISTANCE * 1.15
 
 -- The server fills the skylight bits of every voxel and the mesher shades the
--- geometry by them, which is what tells a cave apart from a shadow.
+-- geometry by them, which is what tells a dug tunnel apart from a shadow.
 voxelworld.use_skylight = true
+-- LOD on, which voxelworld leaves off: past 80 voxels a chunk is meshed
+-- from a downsampled volume. This is the sample the LOD work ([LOD_LOOK])
+-- takes its checks on, so it keeps the look it had.
+voxelworld.lod_distance = 80
 
 -- Lighting as in apps/voxel_lighting: a PBR voxel material lit in HDR and
 -- tonemapped, so the sun can be brighter than white without the frame clipping
--- and a dug tunnel can be genuinely dark. The zone's ambient color is the sky,
+-- and a tunnel can be genuinely dark. The zone's ambient color is the sky,
 -- which is what a surface with full skylight receives.
 local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
 -- Urho's PBR direct lighting is normalized, so a sun that reads as bright is a
@@ -42,7 +42,6 @@ local PLAYER_MASS = 70
 local MOVE_SPEED = 10
 local JUMP_SPEED = 7 -- Barely 2 voxels
 local PLAYER_ACCELERATION = 40
-local PLAYER_DECELERATION = 40
 
 local scene = replicate.main_scene
 
@@ -112,7 +111,7 @@ magic.input:SetMouseVisible(false)
 do
 	local zone_node = scene:CreateChild("Zone")
 	local zone = zone_node:CreateComponent("Zone")
-	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.boundingBox = magic.BoundingBox(-100000, 100000)
 	zone.ambientColor = SKY_AMBIENT
 	zone.fogColor = magic.Color(0.60, 0.72, 0.88)
 	zone.fogStart = FOG_END * 0.6
@@ -143,7 +142,7 @@ local player_shape = player_node:CreateComponent("CollisionShape")
 do
 	-- Placeholder until main:spawn arrives with terrain height at this x,z
 	player_node.position = magic.Vector3(-5, 80, 257)
-	player_node.direction = magic.Vector3(-1, 0, 0.4)
+	player_node.direction = magic.Vector3(-1, 0, 0.35)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
 	body.friction = 0
@@ -291,7 +290,6 @@ do
 	-- digging into the dark still reads as going into the dark. The ramp is
 	-- what keeps the edge of it from showing: full brightness out to two
 	-- voxels, then a smoothstep to nothing at five, flat at both ends.
-	-- lamp_ramp.png holds that curve as 64 texels of distance/range.
 	light.range = 5.0
 	light.fadeDistance = 5.0
 	light.rampTexture = magic.cache:GetResource("Texture2D",
@@ -305,7 +303,7 @@ local misc_text = magic.ui.root:CreateChild("Text")
 local worldgen_text = magic.ui.root:CreateChild("Text")
 local wait_text = magic.ui.root:CreateChild("Text")
 do
-	title_text:SetText("digger/init.lua")
+	title_text:SetText("digger")
 	title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 	title_text.horizontalAlignment = magic.HA_CENTER
 	title_text.verticalAlignment = magic.VA_TOP
@@ -357,6 +355,20 @@ local function set_generating_status(queue_size)
 	else
 		wait_text:SetText("Generating terrain...")
 	end
+end
+
+local function send_player_pos()
+	local p = player_node:GetWorldPosition()
+	local data = cereal.binary_output({
+		x = p.x,
+		y = p.y,
+		z = p.z,
+	}, {"object",
+		{"x", "double"},
+		{"y", "double"},
+		{"z", "double"},
+	})
+	buildat.send_packet("main:player_pos", data)
 end
 
 -- Unfocus UI
@@ -442,6 +454,8 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 end)
 
+local pos_send_counter = 0
+
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	local dt = event_data:GetFloat("TimeStep")
@@ -449,6 +463,12 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- Samples how much sky the camera can see, per direction, which is what
 	-- dims the reflected sky under ground; see builtin/voxel_shading
 	voxel_shading.update(dt)
+
+	pos_send_counter = pos_send_counter + 1
+	if pos_send_counter >= 15 then
+		pos_send_counter = 0
+		send_player_pos()
+	end
 
 	if camera_node then
 		local p, p_above = find_pointed_voxel(camera_node)
@@ -486,8 +506,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 
 	if player_node then
 		-- If falling out of world, restore onto world
-		if player_node.position.y < -500 then
-			player_node.position = magic.Vector3(0, 500, 0)
+		if player_node.position.y < -200 then
+			player_node.position = magic.Vector3(-5, 80, 257)
 		end
 
 		local dmouse = magic.input:GetMouseMove()
@@ -641,6 +661,7 @@ buildat.sub_packet("main:spawn", function(data)
 	spawn_received = true
 	enable_physics()
 	set_generating_status(0)
+	send_player_pos()
 end)
 
 buildat.sub_packet("main:worldgen_queue_size", function(data)

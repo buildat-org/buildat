@@ -1,7 +1,7 @@
 bomber_drone
 ============
 A fixed-wing drone over infinite voxel terrain. Terrain, worldgen and
-rendering are infidigger's; the drone, the bombs and the two camera views are
+rendering are digger's; the drone, the bombs and the two camera views are
 this game's.
 
 Controls:

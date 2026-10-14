@@ -23,8 +23,8 @@ What runs on it:
   installs.
 * **Hearth** (`apps/hearth`) -- a forum.
 * **Floorplanner** (`apps/floorplanner`).
-* Voxel demos: `apps/digger` (a finite world), `apps/infidigger` (an
-  infinite one).
+* Voxel demo: `apps/digger`, an infinite world streamed around the
+  players and saved.
 
 Download a build for Linux or Windows from
 [Releases](https://github.com/celeron55/buildat/releases), or build it
@@ -38,8 +38,8 @@ Each directory in `apps/` is an app: pick it in the launch menu, or run
 check -- and the launch menu's "Local app" list is grouped by it; a
 Starport listing takes it as its kind unless `starport.json` names one.
 
-* Games (world, arena): `vanilla` (Luanti games), `digger`, `infidigger`,
-  `bomber_drone` (a drone over infidigger's terrain), `minigame`,
+* Games (world, arena): `vanilla` (Luanti games), `digger`,
+  `bomber_drone` (a drone over digger's terrain), `minigame`,
   `vanilla_voxel_physics` (vanilla with voxel bodies that fall).
 * Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
 * Other: `play`, which serves the web client and has no game of its own:

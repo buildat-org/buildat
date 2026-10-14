@@ -18,7 +18,7 @@ voxelworld.use_skylight = true
 -- terrain hits are read from the voxel volumes instead
 voxelworld.physics_distance = 0
 
--- Lighting as in apps/infidigger: a PBR voxel material lit in HDR and
+-- Lighting as in apps/digger: a PBR voxel material lit in HDR and
 -- tonemapped, so the sun can be brighter than white without the frame clipping
 local SKY_AMBIENT = magic.Color(0.26, 0.33, 0.46)
 local SUN_BRIGHTNESS = 50.0
