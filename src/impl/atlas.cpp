@@ -30,7 +30,8 @@ bool AtlasSegmentDefinition::operator==(const AtlasSegmentDefinition &other) con
 			bumpiness == other.bumpiness &&
 			translucency == other.translucency &&
 			spots == other.spots &&
-			static_spots == other.static_spots
+			static_spots == other.static_spots &&
+			animation_length == other.animation_length
 	);
 }
 
@@ -48,6 +49,16 @@ struct CAtlasRegistry: public AtlasRegistry
 	sv_<unsigned char> m_upload_buffer;
 	// See set_surface_maps()
 	bool m_surface_maps = true;
+	// The animated segments and the frame each one shows; see update().
+	// Each frame's box, as drawn the first time it showed: the diffuse,
+	// normal and surface boxes one after the other.
+	struct Animated {
+		uint atlas_id;
+		uint seg_id;
+		int frame;
+		sv_<ss_> drawn;
+	};
+	sv_<Animated> m_animated;
 
 	CAtlasRegistry(magic::Context *context):
 		m_context(context)
@@ -232,6 +243,12 @@ struct CAtlasRegistry: public AtlasRegistry
 		atlas_cache.segments.resize(seg_id + 1);
 		AtlasSegmentCache &seg_cache = atlas_cache.segments[seg_id];
 		update_segment_cache(seg_id, seg_img, seg_cache, segment_def, atlas_cache);
+		// simplified: a LOD's segment stays on its first frame; it is drawn
+		// far off, and each animated segment is a redraw per frame change
+		if(segment_def.animation_length > 0.0f &&
+				segment_def.total_segments.y_ > 1 &&
+				segment_def.lod_simulation == 0)
+			m_animated.push_back({atlas_def->id, seg_id, 0, {}});
 		// Return reference to new segment
 		AtlasSegmentReference ref;
 		ref.atlas_id = atlas_def->id;
@@ -726,6 +743,78 @@ struct CAtlasRegistry: public AtlasRegistry
 	void update()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		// The animated tiles ([NODE_ANIM]): the frame of the moment drawn
+		// into each one's place when it changes, as Luanti's own clock
+		// picks it -- one loop every animation_length seconds, every tile
+		// in step. What it costs (VoxeLibre's lava and water, 15
+		// segments, 2026-10-15): a frame's first showing 0.7 ms a segment,
+		// after that 0.23 ms, the three boxes' uploads at every level;
+		// 1.6% of the main thread over a minute
+		if(!m_animated.empty()){
+			const double t = interface::os::time_us() / 1e6;
+			magic::ResourceCache *magic_cache =
+					m_context->GetSubsystem<magic::ResourceCache>();
+			for(Animated &a : m_animated){
+				const AtlasSegmentDefinition &def =
+						m_defs[a.atlas_id].segments[a.seg_id];
+				const int frames = def.total_segments.y_;
+				const double len = def.animation_length;
+				const int frame = (int)(std::fmod(t, len) / len * frames) %
+						frames;
+				if(frame == a.frame)
+					continue;
+				a.frame = frame;
+				AtlasCache &cache = m_cache[a.atlas_id];
+				// The segment's box in the atlas, as update_segment_cache()
+				// places it
+				const magic::IntVector2 seg = cache.segment_resolution;
+				const uint iy = a.seg_id / cache.total_segments.x_;
+				const uint ix = a.seg_id - iy * cache.total_segments.x_;
+				const magic::IntVector2 at(ix * seg.x_ * 2, iy * seg.y_ * 2);
+				const magic::IntVector2 box = seg * 2;
+				magic::Image *imgs[3] = {cache.image, cache.normal_image,
+						cache.spec_image};
+				magic::Texture2D *texs[3] = {cache.texture,
+						cache.normal_texture, cache.spec_texture};
+				const size_t row = (size_t)box.x_ * 4;
+				a.drawn.resize(frames);
+				ss_ &drawn = a.drawn[frame];
+				if(drawn.empty()){
+					// The first time: drawn as any segment is, which is
+					// slow (the surface maps, the sidecars looked for), and
+					// kept
+					magic::Image *img = magic_cache->GetResource<magic::Image>(
+							def.resource_name.c_str());
+					if(img == nullptr)
+						continue;
+					AtlasSegmentDefinition shown = def;
+					shown.select_segment.y_ =
+							(def.select_segment.y_ + frame) % frames;
+					update_segment_cache(a.seg_id, img,
+							cache.segments[a.seg_id], shown, cache);
+					for(magic::Image *im : imgs){
+						if(im == nullptr)
+							continue;
+						const size_t stride = (size_t)im->GetWidth() * 4;
+						for(int y = 0; y < box.y_; y++)
+							drawn.append((const char*)im->GetData() +
+									(at.y_ + y) * stride + at.x_ * 4, row);
+					}
+					continue;
+				}
+				// Again: the kept box back in the images and up
+				size_t off = 0;
+				for(int i = 0; i < 3; i++){
+					if(imgs[i] == nullptr)
+						continue;
+					const size_t stride = (size_t)imgs[i]->GetWidth() * 4;
+					for(int y = 0; y < box.y_; y++, off += row)
+						memcpy(imgs[i]->GetData() + (at.y_ + y) * stride +
+								at.x_ * 4, drawn.data() + off, row);
+					upload_box(texs[i], imgs[i], at, box, cache.levels);
+				}
+			}
+		}
 		// Re-create textures if a device reset has destroyed them
 		for(uint atlas_id = ATLAS_UNDEFINED + 1;
 		atlas_id < m_cache.size(); atlas_id++){

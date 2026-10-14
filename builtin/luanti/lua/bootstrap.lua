@@ -949,27 +949,33 @@ end
 --
 -- simplified: only vertical_frames, which is what water, lava, fire and
 -- furnaces use; a 2D sheet comes through as a still.
+-- A tile's vertical_frames as the aspect its frame count is worked out with
+-- and the seconds a loop takes (Luanti's default 1); 0, 0 for a still one.
+-- simplified: sheet_2d is drawn as its first frame.
+local function tile_animation(tile)
+	local a = type(tile) == "table" and tile.animation or nil
+	if type(a) ~= "table" or a.type ~= "vertical_frames" then
+		return 0, 0
+	end
+	local w = tonumber(a.aspect_w) or 1
+	local h = tonumber(a.aspect_h) or 1
+	return (w > 0 and h > 0) and (w / h) or 1, tonumber(a.length) or 1
+end
+
 local function tile_frame_aspects(list)
 	if type(list) ~= "table" then
 		return nil
 	end
-	local out = {}
+	local out, lengths = {}, {}
 	local any = false
 	for i = 1, 6 do
-		local a = type(list[i]) == "table" and list[i].animation or nil
-		local v = 0
-		if type(a) == "table" and a.type == "vertical_frames" then
-			local w = tonumber(a.aspect_w) or 1
-			local h = tonumber(a.aspect_h) or 1
-			v = (w > 0 and h > 0) and (w / h) or 1
-			any = true
-		end
-		out[i] = v
+		out[i], lengths[i] = tile_animation(list[i])
+		any = any or out[i] > 0
 	end
 	if not any then
 		return nil
 	end
-	return out
+	return out, lengths
 end
 
 -- What the two have to come out as, checked at load against the shapes
@@ -1334,6 +1340,13 @@ function core.__voxel_defs()
 				(def and def.sunlight_propagates) or false
 		local is_liquid = (drawtype == "liquid") or
 				(drawtype == "flowingliquid")
+		local tile_frames, tile_lengths =
+				tile_frame_aspects(six_tile_defs(def, is_liquid))
+		local overlay_frames, overlay_length = 0, 0
+		if drawtype == "plantlike_rooted" then
+			overlay_frames, overlay_length =
+					tile_animation((def and def.special_tiles or {})[1])
+		end
 		out[id] = {
 			id = id,
 			name = name or ("unknown_" .. id),
@@ -1384,7 +1397,8 @@ function core.__voxel_defs()
 			-- cuts the first frame out of one before it goes in an atlas,
 			-- because a whole strip stretched over a face is water's
 			-- sixteen frames at once
-			tile_frames = tile_frame_aspects(six_tile_defs(def, is_liquid)),
+			tile_frames = tile_frames,
+			tile_lengths = tile_lengths,
 			node_box = (drawtype == "nodebox") and node_boxes(def) or nil,
 			collision_box = collision_boxes(def),
 			selection_box = sel_box,
@@ -1408,6 +1422,8 @@ function core.__voxel_defs()
 			-- own tiles are the cube it is rooted in
 			overlay_tile = (drawtype == "plantlike_rooted") and
 					tile_name_of((def and def.special_tiles or {})[1]) or nil,
+			overlay_frames = overlay_frames,
+			overlay_length = overlay_length,
 			-- Blended rather than alpha masked. Without it framed glass and
 			-- panes are drawn with every texel either solid or gone, where
 			-- the game meant them to be seen through.

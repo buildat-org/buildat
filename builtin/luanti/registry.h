@@ -103,10 +103,12 @@
 	// bootstrap.lua's __voxel_defs(); see [VOXEL_MATERIALS]).
 	// `frames` is how many animation frames the texture is a vertical strip
 	// of: the segment is then the first of them, which is what the atlas's
-	// own total_segments is for. One is a still texture.
+	// own total_segments is for. One is a still texture. `length` is the
+	// seconds a loop through them takes, which the client's atlas plays
+	// ([NODE_ANIM]).
 	static interface::AtlasSegmentDefinition make_segment(const ss_ &texture,
 			const interface::AtlasSegmentDefinition &surface,
-			size_t frames = 1)
+			size_t frames = 1, float length = 0.0f)
 	{
 		interface::AtlasSegmentDefinition seg = surface;
 		seg.resource_name = texture;
@@ -114,6 +116,7 @@
 				texture.empty() ? 0 : 1,
 				texture.empty() ? 0 : (int)(frames < 1 ? 1 : frames));
 		seg.select_segment = magic::IntVector2(0, 0);
+		seg.animation_length = (frames > 1 && length > 0.0f) ? length : 0.0f;
 		return seg;
 	}
 
@@ -468,6 +471,9 @@
 			// the frame count is worked out with; 0 is a still tile
 			float tile_aspect[6] = {};
 			table_six_numbers(L, "tile_frames", tile_aspect);
+			// And the seconds a loop through those frames takes
+			float tile_length[6] = {};
+			table_six_numbers(L, "tile_lengths", tile_length);
 			sv_<float> boxes;
 			table_numbers(L, "node_box", boxes);
 			sv_<float> collision_boxes;
@@ -484,6 +490,11 @@
 			const ss_ own_groups = table_string(L, "node_box_groups");
 			ss_ facing = table_string(L, "facing");
 			ss_ overlay_tile = table_string(L, "overlay_tile");
+			// The rooted plant's own strip of frames, as tile_frames
+			const float overlay_aspect =
+					(float)table_number(L, "overlay_frames", 0);
+			const float overlay_length =
+					(float)table_number(L, "overlay_length", 0);
 			ss_ liquid_group = table_string(L, "liquid_group");
 			ss_ palette = table_string(L, "palette");
 			ss_ mesh = table_string(L, "mesh");
@@ -733,12 +744,17 @@
 			// The plant of a rooted plant: a texture the cube it stands in
 			// does not have, and the first of the definition's extra ones
 			ss_ overlay_texture;
+			size_t overlay_n = 1;
 			if(!overlay_tile.empty() && !fallback.empty()){
 				overlay_texture = texture_of_tile(
 						with_palette(overlay_tile, node_mul));
 				if(overlay_texture.empty()){
 					overlay_texture = fallback;
 					any_fallback = true;
+				} else if(overlay_aspect > 0.0f){
+					overlay_n = tile_frame_count(
+							with_palette(overlay_tile, node_mul),
+							overlay_aspect);
 				}
 			}
 			if(any_fallback && !fallback.empty()){
@@ -756,13 +772,13 @@
 			vdef.handler_module = "";
 			for(size_t f = 0; f < 6; f++)
 				vdef.textures[f] = make_segment(face_textures[f], surface,
-						face_frames[f]);
+						face_frames[f], tile_length[f]);
 			// The textures a shape's quads can wear beyond the six faces: a
 			// rooted plant's plant, which is nothing the cube it stands in
 			// has. Quad tile 6 is the first of these.
 			if(!overlay_texture.empty())
 				vdef.extra_textures.push_back(make_segment(overlay_texture,
-						surface));
+						surface, overlay_n, overlay_length));
 			// Which faces are drawn, as far as the edge material carries
 			// Luanti's rules:
 			//  - airlike is nothing at all, and nothing draws a face
@@ -882,11 +898,12 @@
 								var.textures.push_back(tinted[f].empty() ?
 										interface::AtlasSegmentDefinition() :
 										make_segment(tinted[f], surface,
-										face_frames[f]));
+										face_frames[f], tile_length[f]));
 							}
 							if(!tinted[6].empty()){
 								var.textures.push_back(
-										make_segment(tinted[6], surface));
+										make_segment(tinted[6], surface,
+										overlay_n, overlay_length));
 							}
 							coloured.push_back(var);
 						}

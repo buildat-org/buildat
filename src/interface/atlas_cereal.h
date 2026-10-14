@@ -12,7 +12,7 @@ namespace interface
 	template<class Archive>
 			void serialize(Archive &archive, AtlasSegmentDefinition &v)
 	{
-		Record<Archive> r(archive, "AtlasSegmentDefinition", 1, 0);
+		Record<Archive> r(archive, "AtlasSegmentDefinition", 1, 1);
 		r.ar(
 				v.resource_name,
 				v.total_segments,
@@ -25,6 +25,9 @@ namespace interface
 				v.spots,
 				v.static_spots
 		);
+		// 1.1: an animated tile's loop
+		if(r.minor >= 1)
+			r.ar(v.animation_length);
 		r.end();
 	}
 }

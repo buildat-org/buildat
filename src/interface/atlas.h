@@ -73,6 +73,11 @@ namespace interface
 		float translucency = 0.0f;
 		float spots = 0.0f;
 		float static_spots = 0.0f;
+		// An animated tile ([NODE_ANIM]): the seconds a loop through the
+		// total_segments.y frames takes, drawn from select_segment.y on;
+		// 0 is a still one. The atlas draws the frame of the moment into
+		// the segment's place; see update() in impl/atlas.cpp.
+		float animation_length = 0.0f;
 
 		bool operator==(const AtlasSegmentDefinition &other) const;
 	};
