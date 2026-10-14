@@ -26,8 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The compiler cache checks_in_docker.sh keeps in Build/ccache: the
-      # build is most of a run's runner-minutes ([CI_TIER] 6)
-      - uses: actions/cache@v4
+      # build is most of a run's runner-minutes ([CI_TIER] 6). Saved
+      # whatever the tier's verdict, which actions/cache@v4 alone skips
+      - uses: actions/cache/restore@v4
         with:
           path: Build/ccache
           key: ccache-ci-${{ github.sha }}
@@ -37,6 +38,11 @@ jobs:
         run: util/media_fetch.sh devtest
       - name: The ci tier
         run: JOBS=$(nproc) util/checks_in_docker.sh ci
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: Build/ccache
+          key: ccache-ci-${{ github.sha }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
