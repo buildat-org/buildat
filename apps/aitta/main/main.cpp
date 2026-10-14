@@ -1246,6 +1246,13 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		log_i(MODULE, "Listed %s (%zu bytes) from %s", cs(id), u.size,
 				cs(r.address));
+		// [AITTA_REVIEW_AMBER] The reviewers' phones: the release and the
+		// count waiting, as a report's push says its count
+		const int64_t waiting = unreviewed_count();
+		accounts::access(m_server, [&](accounts::Interface *a){
+			a->notify(accounts::LV_MODERATOR, "Aitta: "+id+" published, "+
+					std::to_string(waiting)+" to review");
+		});
 		if(lua51.empty())
 			return ok(r, id);
 		json::Value v = json::object();
@@ -1635,6 +1642,18 @@ struct Module: public interface::Module, public moderation::Host
 			if(p.at(i).is_string() && p.at(i).as_string() == by)
 				return true;
 		return false;
+	}
+
+	// What review_list's "unreviewed" lists, counted
+	int64_t unreviewed_count()
+	{
+		json::Value all = releases(true);
+		int64_t n = 0;
+		for(unsigned i = 0; i < all.size(); i++)
+			if(!all.at(i).get("delisted").is_true() &&
+					jstr(all.at(i), "review") != "reviewed")
+				n++;
+		return n;
 	}
 
 	json::Value handle_review(const ss_ &name, const ss_ &cmd,
@@ -2089,6 +2108,13 @@ struct Module: public interface::Module, public moderation::Host
 			v.set("account", name);
 			v.set("admin", admin);
 			v.set("reviewer", reviewer);
+			// [AITTA_REVIEW_AMBER] What waits, for the home page's labels
+			if(reviewer){
+				v.set("unreviewed", unreviewed_count());
+				moderation::access(m_server, [&](moderation::Interface *m){
+					v.set("open_reports", (int64_t)m->queue(this).size());
+				});
+			}
 			const ss_ author = get("owners", name);
 			v.set("author", author);
 			v.set("key", author.empty() ? "" : jstr(load("authors", author), "key"));

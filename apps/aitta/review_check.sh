@@ -111,7 +111,10 @@ wait_log 30000 accounts: ntfy asked
 delay 500
 click Button "Later"
 wait_log 30000 aitta: row
-click Button "Review releases"
+wait_log_any 10000 aitta: waiting 1 unreviewed, 0 reports
+delay 500
+screenshot $t/home.png
+click Button "Review releases (1)"
 wait_log 10000 aitta: review list unreviewed: 1
 click Button "Open"
 wait_log 10000 aitta: review tester/pt/1.0.1: unreviewed,

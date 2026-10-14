@@ -35,6 +35,7 @@ local offer = buildat.aitta_bind()
 
 local YELLOW = magic.Color(1.0, 0.8, 0.4)
 local GREY = magic.Color(0.7, 0.7, 0.7)
+local AMBER = magic.Color(1.0, 0.65, 0.1)
 local text = accounts.page_text
 local button = accounts.page_button
 
@@ -459,8 +460,17 @@ home = function()
 		log:info("aitta: home, " .. (me.author ~= "" and "author " ..
 				me.author or "no author"))
 		if me.reviewer then
-			button(page, "Review releases", function() review_list() end)
-			button(page, "Reports", function() reports_page() end)
+			-- [AITTA_REVIEW_AMBER] Amber while something waits
+			local function waiting(label, n, fn)
+				local b = button(page, label .. (n > 0 and " (" .. n .. ")" or ""), fn)
+				if n > 0 then
+					b:GetChild(0):SetColor(AMBER)
+				end
+			end
+			waiting("Review releases", me.unreviewed or 0, function() review_list() end)
+			waiting("Reports", me.open_reports or 0, function() reports_page() end)
+			log:info("aitta: waiting " .. tostring(me.unreviewed) ..
+					" unreviewed, " .. tostring(me.open_reports) .. " reports")
 		end
 		if me.author ~= "" then
 			button(page, "What was done to my releases",
