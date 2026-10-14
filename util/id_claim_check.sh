@@ -4,8 +4,8 @@
 # covers: builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua
 # [ID_CLAIM_ACCOUNT]: "That's my account" links a Starport ID to the account
 # that has its name here, by one login with the account's password. Hearth
-# listed on two Starports (a Starport is its host name: 127.0.0.1 and
-# localhost), accounts erin and finn (finn with TOTP, the RFC
+# listed on two Starports (a Starport is its host and a port other than
+# 443: 127.0.0.1:<port> and localhost:<port>), accounts erin and finn (finn with TOTP, the RFC
 # 6238 test secret), IDs made by the Starports' API; scripted clients:
 #   - erin's ID logs in: refused, the name taken; an ID named client42
 #     refused, the name a client's placeholder;
@@ -132,7 +132,7 @@ join claim "link result: " BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erin
 	BUILDAT_HEARTH_STARPORT=$tok_a
 has claim "Joined as erin"
 has claim "link result: The Starport ID is linked"
-has claim "linked Starport IDs: 127.0.0.1"
+has claim "linked Starport IDs: 127.0.0.1:$SP1"
 join id_a2 "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_a
 has id_a2 "Joined as erin"
 join other "Login refused: " BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
@@ -160,7 +160,7 @@ has totp "link result: The Starport ID is linked"
 echo "ok: with TOTP, the code page's code links"
 join claim_b "link result: " BUILDAT_HEARTH_NAME=erin BUILDAT_HEARTH_PASSWORD=erinpass123 \
 	BUILDAT_HEARTH_STARPORT=$tok_b
-has claim_b "linked Starport IDs: 127.0.0.1 localhost"
+has claim_b "linked Starport IDs: 127.0.0.1:$SP1 localhost:$SP2"
 join id_b "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_b
 has id_b "Joined as erin"
 join id_a3 "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_a
@@ -171,7 +171,7 @@ join ban "admin script: done" BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=
 has ban "admin result: erin was banned"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 # finn's link as a store from before had it
-python3 - "$db" "127.0.0.1" <<'PY' || fail "the old key"
+python3 - "$db" "127.0.0.1:$SP1" <<'PY' || fail "the old key"
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
 k = "starport_of/finn/" + sys.argv[2]
@@ -184,7 +184,7 @@ PY
 hearth "$t/h3.log"
 join id_c "linked Starport IDs: " BUILDAT_HEARTH_STARPORT=$tok_c
 has id_c "Joined as finn"
-has id_c "linked Starport IDs: 127.0.0.1"
+has id_c "linked Starport IDs: 127.0.0.1:$SP1"
 echo "ok: a single link of before read as its Starport's"
 for n in 1 2; do
 	ok=

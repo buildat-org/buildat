@@ -167,6 +167,15 @@ struct Module: public interface::Module, public Interface
 				normalize_url("https://host") != "https://host" ||
 				normalize_url("http://[::1]") != "http://[::1]:29595")
 			throw Exception("starport_announce: normalize_url self-check");
+		if(host_of("https://sp.example") != "sp.example" ||
+				host_of("https://sp.example:443/x") != "sp.example" ||
+				host_of(normalize_url("sp.example")) != "sp.example" ||
+				host_of("https://sp.example:8443") != "sp.example:8443" ||
+				host_of("http://127.0.0.1:29681") != "127.0.0.1:29681" ||
+				host_of("http://[::1]:29595") != "[::1]" ||
+				host_of("http://[::1]:8000") != "[::1]:8000" ||
+				host_of("https://[::1]/") != "[::1]")
+			throw Exception("starport_announce: host_of self-check");
 		auto said = [](const ss_ &a){
 			json::Value b = json::object();
 			if(!public_address(a, 29500, b))
@@ -805,14 +814,25 @@ struct Module: public interface::Module, public Interface
 
 	// -- [STARPORT] 10c
 
-	// The host of a Starport's url; an IPv6 literal whole, brackets and all
+	// A Starport as its links, blocklist and reports are keyed: the host,
+	// and a port other than 443 (user, [SEC_RUN5_PICKS] (b) 2026-10-14) or
+	// 29595, which normalize_url gives an http one named without a port.
+	// Two Starports on one host are two (each signs any sub it likes). An
+	// IPv6 literal whole, brackets and all.
+	// simplified: no links moved -- no Starport ran on another port when
+	// this came (user); one that had would find its links, made under the
+	// host alone, no longer theirs
 	static ss_ host_of(const ss_ &url)
 	{
 		const size_t s = url.find("://");
 		ss_ host = s == ss_::npos ? url : url.substr(s + 3);
-		if(!host.empty() && host[0] == '[')
-			return host.substr(0, host.find(']') + 1);
-		return host.substr(0, host.find_first_of(":/"));
+		host = host.substr(0, host.find('/'));
+		const size_t colon = host.rfind(':');
+		if(colon != ss_::npos && host.find(']', colon) == ss_::npos &&
+				(colon + 1 == host.size() || host.substr(colon + 1) == "443" ||
+				host.substr(colon + 1) == "29595"))
+			host = host.substr(0, colon);
+		return host;
 	}
 
 	// **Access, from the Accounts page** (10g): local accounts open is
