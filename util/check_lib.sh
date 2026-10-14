@@ -186,9 +186,10 @@ liquid_loop_max = 10'
 fail(){ echo "FAIL: $*"; exit 1; }
 skip() { echo "SKIP: $*"; exit $SKIP; }
 
-# [CI_TIER] 4: under BUILDAT_CI a runner whose verdict needs pixels, or a
-# machine outside the run, says so on a "# needs: pixels" / "# needs:
-# network" line and is skipped with that reason; without it, it runs
+# [CI_TIER] 4: under BUILDAT_CI a runner whose verdict needs pixels, or
+# the LAN or a machine outside the run, says so on a "# needs: pixels" /
+# "# needs: network" line and is skipped with that reason; without the
+# variable it runs
 _needs=$(grep -m1 '^# needs:' "$0" 2>/dev/null)
 [ -n "${BUILDAT_CI:-}" ] && [ -n "$_needs" ] && skip "BUILDAT_CI: ${_needs#\# }"
 

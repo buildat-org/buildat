@@ -8,6 +8,8 @@
 # its own description before a client is started -- without them half
 # the quick tier failed in two seconds with "command not found", which
 # is what the first run of util/checks_in_docker.sh said (2026-09-24).
+# curl and ss (iproute2): runners fetch their own server's pages and wait
+# on a port; without them seven runners failed in the ci tier (2026-10-14).
 # Nothing of the host's tree is built here: util/package_in_docker.sh hands
 # the container a git archive of the commit and takes the archives back.
 # Pinned ([WIN_DLL_INIT]): the base image by digest and the packages from
@@ -25,7 +27,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 	libx11-dev libxrandr-dev libasound2-dev libgl1-mesa-dev \
 	libcurl4-openssl-dev \
 	xvfb xauth libgl1-mesa-dri imagemagick zip tar gzip \
-	python3 python3-pil lua5.1 \
+	python3 python3-pil lua5.1 curl iproute2 \
 	xz-utils patchelf \
 	&& ln -sf /usr/bin/lua5.1 /usr/local/bin/lua \
 	&& rm -rf /var/lib/apt/lists/*

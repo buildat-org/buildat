@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~100 s (2026-10-08)
 # covers: apps/hearth/main/main.cpp
 # [HEARTH_DISCUSSED_API]: GET /api/v1/discussed. Empty first ({}). Then bob, a

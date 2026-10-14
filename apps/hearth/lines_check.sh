@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~40 s (2026-10-09)
 # covers: apps/hearth/main/** src/impl/markup.cpp
 # [HEARTH_LINES_CODE]: the admin's message has single newlines, a drawn

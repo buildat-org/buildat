@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# needs: network
 # cost: 30s
 # [SECURITY_RUN_1], the user's three: a launcher's game listens on
 # 127.0.0.1, its owner is whoever shows the token the launcher started it

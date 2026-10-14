@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: network
 # cost: 90s (2026-10-04)
 # covers: builtin/network/network.cpp src/impl/tcpsocket.cpp src/client/app.cpp
 # [LAN_DISCOVERY]: a server announces itself on the LAN's group only when

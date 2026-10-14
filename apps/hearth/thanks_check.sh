@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~60 s (2026-10-09)
 # covers: apps/hearth/main/main.cpp
 # [HEARTH_THANKS]: bob, a member, starts a thread. carol, a new account, is

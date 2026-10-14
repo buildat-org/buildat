@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~1 min (2026-10-09)
 # covers: apps/hearth/main/** src/client/web/index.html
 # [HEARTH_OPEN_HERE]: a local Hearth with a thread of two messages about
