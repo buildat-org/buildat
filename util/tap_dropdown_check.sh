@@ -1,7 +1,5 @@
 #!/bin/bash
-# tier: broken
-# broken: back to full; not open and closed 20 times (dev); no launch_menu
-#   settings line (the branch) (local/runs/dev_baseline)
+# tier: full
 # cost: ~3 min (2026-10-11)
 # covers: extensions/ui_utils/init.lua 3rdparty/Urho3D/Source/Urho3D/UI/Menu.cpp
 # [TAP_DROPDOWN]: a tap on a dropdown opens it on a phone. In Chrome with
@@ -109,16 +107,16 @@ y1=$(echo "$out" | grep '^at ' | tail -1 | awk '{print $2}')
 echo "ok: in a scroll view 20 taps open and a tap outside closes, a tap and a click pick, a drag scrolls ($y0 to $y1) and opens nothing"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 # Outside a scroll view: Home's Settings, "Display and sound", the
-# Antialiasing dropdown at (306, 340), outside it the title at (100, 230)
+# Antialiasing dropdown at (306, 326), outside it the title at (100, 217)
 # The waits after a line are the page's next frames, the menu laid out;
 # the last one only ends the list after the taps' trailing comma
 cat > "$t/plain.json" <<J
 [
  ["nav", "\${URL}"],
  ["waitlog", "launch_menu: ", 60], ["wait", 2000],
- ["tap", 200, 460], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
+ ["tap", 200, 478], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
  ["tap", 180, 275], ["waitlog", "Engine settings shown", 10], ["wait", 500],
-$(taps 306 340 100 230)
+$(taps 306 326 100 217)
  ["wait", 200]
 ]
 J

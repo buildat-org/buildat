@@ -2765,14 +2765,19 @@ function frame_peak.note(dt)
 		local w = voxelworld.counts()
 		local undrawn = voxelworld.undrawn_around(
 				buildat.Vector3(player.x, player.y, player.z), 2)
+		-- What will be meshed here: the queue while its head is due. Past
+		-- the view range chunks stay queued for when the camera comes
+		-- nearer, and a short range (a touchscreen's 60) never read 0
+		local to_mesh = (w.next_mesh_f and w.next_mesh_f <= 1) and
+				w.to_mesh or 0
 		-- **Settled is said with chunks in the scene** (2026-10-13): a
 		-- player placed before any arrived read "0 chunks, 0 undrawn",
 		-- and a check waiting for the world took that for it
-		if w.to_mesh > 0 or undrawn > 0 or
+		if to_mesh > 0 or undrawn > 0 or
 				((frame_peak.settled_said or 0) == 0 and w.chunks > 0) then
-			frame_peak.settled_said = (w.to_mesh > 0 or undrawn > 0) and 0 or 1
+			frame_peak.settled_said = (to_mesh > 0 or undrawn > 0) and 0 or 1
 			log:info(string.format("settle: %d to mesh, %d chunks in scene, %d undrawn within 2",
-					w.to_mesh, w.chunks, undrawn))
+					to_mesh, w.chunks, undrawn))
 		end
 	end
 	if load_wait then

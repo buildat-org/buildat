@@ -1,7 +1,5 @@
 #!/bin/bash
-# tier: broken
-# broken: back to full; the second Accounts open did not reopen (dev); no
-#   acc1 shot (the branch) (local/runs/dev_baseline)
+# tier: full
 # cost: ~30s (2026-10-04)
 # covers: apps/starport/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua
 # [STARPORT_ACCOUNTS_TAB]: the Starport app's Accounts tab (the accounts
@@ -36,16 +34,15 @@ start_server "$t/sp.log" "setup code" 90 "$port" \
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -o "setup code [A-Z0-9]*" "$t/sp.log" | cut -d' ' -f3)
 [ -n "$code" ] || fail "the Starport did not start (sp.log)"
-
-# The sidebar buttons at a 1280x800 window: Overview at the top, Accounts the
-# bottom Admin entry. The first with the setup code is the admin, so the
-# Admin section (with Accounts) is there, once the users list is in. The
-# delays: the sidebar made again the frame after the list, and a page's
-# own request answered and drawn after its line
+# The sidebar buttons at a 1280x800 window: Overview at the top (y 96),
+# Accounts the second Admin entry (y 418). The first with the setup code
+# is the admin, so the Admin section (with Accounts) is there, once the
+# users list is in. The delays: the sidebar made again the frame after
+# the list, and a page's own request answered and drawn after its line
 cat > "$t/cmds" <<EOF
 wait_log_any 30000 accounts listed
 delay 1000
-mouse_pos 375 377
+mouse_pos 375 418
 mouse_click left
 wait_log 5000 server window: the page
 delay 1000
@@ -55,7 +52,7 @@ mouse_click left
 wait_log 5000 server window: the page
 delay 1000
 screenshot $t/ov.png
-mouse_pos 375 377
+mouse_pos 375 418
 mouse_click left
 wait_log 5000 server window: the page
 delay 1000

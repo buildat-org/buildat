@@ -1,7 +1,5 @@
 #!/bin/bash
-# tier: broken
-# broken: back to full; the states stayed auto fullscreen (dev); no dropdown
-#   open (the branch) (local/runs/dev_baseline)
+# tier: full
 # cost: ~2 min (2026-10-11)
 # covers: src/client/web/index.html apps/vanilla/main/client_lua/pause.lua extensions/launch_menu/preferences.lua
 # [SCREEN_ORIENTATION]: the screen orientation preference, picked in
@@ -39,8 +37,8 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
-# CSS pixels: the dropdown at (244, 465), its Auto, Landscape and Portrait
-# at y 480, 494 and 508. After a line, settles of up to 1 s: the popup
+# CSS pixels: the dropdown at (244, 456), below View range (2026-10-14);
+# its Auto, Landscape and Portrait at y 471, 485 and 499. After a line, settles of up to 1 s: the popup
 # placed in the frames after it says it is open; after a pick, the page's
 # fullscreen, which the pick asks for and the browser enters a moment later
 # (the menu's line and the start's "so: ready" the same: the frames after)
@@ -50,13 +48,13 @@ cat > "$t/steps.json" <<J
  ["nav", "\${URL}"],
  ["waitlog", "chat: so: ready", 120], ["wait", 1000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 500],
- ["tap", 244, 465], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 494],
+ ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 485],
  ["waitlog", "pause: screen orientation landscape", 10], ["wait", 1000],
  $state,
- ["tap", 244, 465], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 508],
+ ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 499],
  ["waitlog", "pause: screen orientation portrait", 10], ["wait", 1000],
  $state,
- ["tap", 244, 465], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 480],
+ ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 471],
  ["waitlog", "pause: screen orientation auto", 10], ["wait", 1000],
  $state
 ]

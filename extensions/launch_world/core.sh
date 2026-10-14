@@ -107,7 +107,9 @@ fi
 # a room somebody moved things in, and a check that reads "the room
 # boots and launches" should not depend on any of it -- nor write its
 # own state into the player's ([SMOKE_PICK]: a runner has to mean the
-# same thing on another machine)
+# same thing on another machine). Fresh each run: a save an older build
+# left is refused by this one (2026-10-14)
+rm -rf "$out/user"
 mkdir -p "$out/user"
 run_client 40 "$out/cli.log" timeout 180 bin/buildat -m launch_world \
 	-D "$out/user" -w 640x360 -l 3 -c @"$out/cmds.txt" > /dev/null 2>&1 ||

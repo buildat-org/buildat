@@ -1,8 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: broken
-# broken: back to full; dev drew no pictures; the branch logs 3 client error
-#   lines (local/runs/dev_baseline)
+# tier: full
 # [THIRD_PERSON]: the extension client's camera key against official
 # Luanti's server, the three views shot: local/camera_ext/first.png,
 # behind.png, front.png; the stage is camera.lua's as a worldmod. Needs the
@@ -95,7 +93,9 @@ ls "$out"/*.png
 shots=$(ls "$out"/*.png 2>/dev/null | wc -l)
 # grep -c prints its count and exits 1 when that count is nought, so a
 # "|| echo 0" beside it prints the number twice (2026-09-25)
-errors=$(grep -ac " E " "$out/extension_cli.log" 2>/dev/null)
+# Up to the drive's end: after quit, Urho's "Texture creation while device
+# is lost" comes from any client that draws as it closes (2026-10-14)
+errors=$(sed '/Command sequence complete/q' "$out/extension_cli.log" 2>/dev/null | grep -ac " E ")
 errors=${errors:-0}
 echo "the three person views: $shots pictures, $errors error lines"
 if [ "$shots" -lt 1 ]; then

@@ -1,7 +1,5 @@
 #!/bin/bash
-# tier: broken
-# broken: back to full; vanilla let op in twice (dev); the admin's client
-#   (the branch) (local/runs/dev_baseline)
+# tier: full
 # cost: 3 min (two floorplanner rounds and a vanilla one, 2026-10-03)
 # covers: builtin/accounts/** apps/floorplanner/main/main.cpp
 # [FP_TWO_CLIENTS]: **one user, two clients at once**. An admin makes the
@@ -53,21 +51,23 @@ log_wait() {
 server floorplanner "$out/fp" "$out/fp.log"
 code=$(grep -ao "setup code [A-Z0-9]*" "$out/fp.log" | tail -1 | awk '{print $3}')
 cmds adm "wait_log_any 20000 admin script: done" "quit"
+# _CREATE=1: an unknown name is refused, even with the setup code
+# ([ACCOUNT_CREATE])
 client BUILDAT_FP adm adminpass12 "$code" "$out/adm.txt" "$out/adm.log" \
-	"BUILDAT_FP_ADMIN=add pl plpass1234" ||
+	BUILDAT_FP_CREATE=1 "BUILDAT_FP_ADMIN=add pl plpass1234" ||
 	{ echo "FAIL: the admin's client ($out/adm.log)"; exit 1; }
 grep -a "admin result" "$out/adm.log" | sed 's/.*accounts: /admin: /'
 
-# 1 and 2. "Start editing" is the toolbar's last button. A and B read
+# 1 and 2. "Start editing" is clicked by its text. A and B read
 # their drives from fifos, fed as the other gets on: B joins while A
 # edits, and edits once A is gone
-edit="mouse_pos 230 12"
+edit='click Button "Start editing"'
 mkfifo "$out/a.fifo" "$out/b.fifo"
 client BUILDAT_FP pl plpass1234 "" - "$out/a.log" BUILDAT_FP_PLAN=p1 < "$out/a.fifo" &
 ca=$!
 exec 3> "$out/a.fifo"
 # A settle after the line: the toolbar drawn before the click
-printf '%s\n' "wait_log_any 30000 Entered the plan" "delay 500" "$edit" "mouse_click left" >&3
+printf '%s\n' "wait_log_any 30000 Entered the plan" "delay 500" "$edit" >&3
 log_wait "$out/a.log" "Privileges: .*\<edit\>" 40 $ca ||
 	{ echo "FAIL: the first client of pl did not start editing ($out/a.log)"; exit 1; }
 client BUILDAT_FP pl plpass1234 "" - "$out/b.log" BUILDAT_FP_PLAN=p1 < "$out/b.fifo" &
@@ -76,7 +76,7 @@ exec 4> "$out/b.fifo"
 log_wait "$out/b.log" "Entered the plan|Login refused" 40 $cb
 echo quit >&3; exec 3>&-
 wait $ca
-printf '%s\n' "$edit" "mouse_click left" "wait_log 10000 Privileges:" "quit" >&4; exec 4>&-
+printf '%s\n' "$edit" "wait_log 10000 Privileges:" "quit" >&4; exec 4>&-
 wait $cb
 grep -a "is editing" "$out/fp.log" | sed 's/.*main *: //'
 ids=$(grep -a "pl (.*) is editing p1" "$out/fp.log" | sed 's/.*(\([0-9]*\)).*/\1/' | sort -u | wc -l)
@@ -117,7 +117,7 @@ server vanilla "$out/va" "$out/va.log"
 vcode=$(grep -ao "setup code [A-Z0-9]*" "$out/va.log" | tail -1 | awk '{print $3}')
 # The first in from a fifo, there until the second is answered
 mkfifo "$out/v.fifo"
-client BUILDAT_JOIN op adminpass12 "$vcode" - "$out/v1.log" < "$out/v.fifo" &
+client BUILDAT_JOIN op adminpass12 "$vcode" - "$out/v1.log" BUILDAT_JOIN_CREATE=1 < "$out/v.fifo" &
 cv=$!
 exec 3> "$out/v.fifo"
 log_wait "$out/v1.log" "Joined as op" 60 $cv ||

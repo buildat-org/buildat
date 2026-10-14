@@ -60,7 +60,8 @@
 //                           neither it nor the screen changed, and fails
 //                           after the match if there was one (Chrome only)
 // ${NAME} in a string is a --var's value. The page's console goes to the
-// log, a line each. Exits 1 when a step fails.
+// log, a line each. Exits 1 when a step fails, with the page shot to
+// ${OUT}/failed.png.
 "use strict";
 const fs = require("fs");
 
@@ -403,6 +404,7 @@ async function chrome() {
 		process.exit(2);
 	}
 	let failed = null;
+	const out = args.vars.OUT;
 	for (const [op, ...args] of steps) {
 		const [a, c] = args;
 		console.log("step:", op, a !== undefined ? a : "", c !== undefined ? c : "");
@@ -465,6 +467,10 @@ async function chrome() {
 			}
 		} catch (e) {
 			failed = op + ": " + e.message;
+			// What the page showed when it failed: a tap at a stale
+			// position reads as "no line matched" otherwise
+			if (out)
+				await b.ops.shot(out + "/failed.png").catch(() => {});
 			break;
 		}
 	}

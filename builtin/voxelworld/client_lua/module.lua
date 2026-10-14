@@ -175,6 +175,8 @@ local material_update_cbs = {} -- function(node)
 local node_volume_cache = {} -- {node_id: {volume:, last_access_us:}}
 -- Set up by sub_events(), which is what runs once the world is there
 local node_update_queue = nil
+-- Where the queue measures from (the camera), for undrawn_around()
+local queue_p = nil
 -- node id -> {before =, after =}: the voxel data a predicted write
 -- replaced and what it wrote, until the server answers; see
 -- M.set_static_voxel()
@@ -755,6 +757,7 @@ function sub_events()
 		end
 
 		node_update_queue:set_p(camera_p)
+		queue_p = camera_p
 		-- Which way they look is part of the order now: what is in front
 		-- of them is what they are waiting to see
 		node_update_queue:set_dir(camera_dir)
@@ -1155,12 +1158,23 @@ function M.undrawn_around(p, chunk_radius)
 	if c0 == nil then
 		return 0
 	end
+	-- A chunk past the queue's far (f > 1, M.camera_far_clip * 1.2 from
+	-- the camera) is never meshed, so it is not waiting to be: at a view
+	-- range of 60 (a touchscreen's) the corners within 2 are, and this
+	-- never said 0
+	local far = M.camera_far_clip * 1.2
+	local q = queue_p or p
+	local s = M.chunk_size_voxels
 	local missing = 0
 	for dz = -chunk_radius, chunk_radius do
 		for dy = -chunk_radius, chunk_radius do
 			for dx = -chunk_radius, chunk_radius do
-				if not M.is_chunk_drawn(buildat.Vector3(
-						c0.x + dx, c0.y + dy, c0.z + dz)) then
+				local cp = buildat.Vector3(c0.x + dx, c0.y + dy, c0.z + dz)
+				local ex = (cp.x + 0.5) * s.x - q.x
+				local ey = (cp.y + 0.5) * s.y - q.y
+				local ez = (cp.z + 0.5) * s.z - q.z
+				if math.sqrt(ex * ex + ey * ey + ez * ez) <= far and
+						not M.is_chunk_drawn(cp) then
 					missing = missing + 1
 				end
 			end

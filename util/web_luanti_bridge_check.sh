@@ -1,7 +1,5 @@
 #!/bin/bash
-# tier: broken
-# broken: back to full; the drive (dev); the Luanti server (the branch)
-#   (local/runs/dev_baseline)
+# tier: full
 # cost: 120s (2026-10-04)
 # covers: apps/play/** builtin/network/network.cpp client/extensions/network/init.lua
 # [PLAY_PAGE] (c): the web client on apps/play's page reaches a Luanti
@@ -49,7 +47,8 @@ start_server "$tmp/play.log" "Luanti's list: 1" 120 $PLAY \
 	Build/bin/buildat_server -m apps/play -D "$tmp/playsrv" -l 3 ||
 	fail "the list ($tmp/play.log)"
 pids+=($SERVER_PID)
-grep -q "Server for gameid" "$tmp/luanti.log" || fail "the Luanti server ($tmp/luanti.log)"
+# The play server can be up before Luanti says it listens
+wait_for_log "$tmp/luanti.log" "Server for gameid" 30 || fail "the Luanti server ($tmp/luanti.log)"
 
 WEB_DRIVE_URL="http://127.0.0.1:$PLAY/" "$here/util/web_drive.sh" firefox play \
 	"${1:-$here/util/web_luanti_bridge.json}" "$tmp/drive" > "$tmp/drive.txt" 2>&1 ||
