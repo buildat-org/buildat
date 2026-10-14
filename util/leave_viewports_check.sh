@@ -10,7 +10,7 @@
 #   2. Vanilla's minimal game, left from its pause menu: "0 viewports".
 #   util/leave_viewports_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp leave_viewports; t=$CHECK_TMP

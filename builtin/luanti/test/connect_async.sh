@@ -11,7 +11,7 @@
 #
 #   builtin/luanti/test/connect_async.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/connect_async"; mkdir -p "$out"
 if check_pgrep buildat >/dev/null; then

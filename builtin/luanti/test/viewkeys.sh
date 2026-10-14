@@ -14,7 +14,7 @@
 # scratch one has the default view range; it needs
 # shared/vanilla/games/mineclone2 in it).
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 . "$me/fullscreen_gate.sh"

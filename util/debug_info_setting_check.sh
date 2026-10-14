@@ -15,7 +15,7 @@
 # level is read at the extension's load, not each session
 #   util/debug_info_setting_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp debug_info_setting; t=$CHECK_TMP

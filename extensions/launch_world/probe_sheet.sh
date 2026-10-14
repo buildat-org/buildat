@@ -15,7 +15,7 @@
 # Not a check: it makes a picture for a person, and says nothing about
 # pass or fail. That is why it carries no tier line.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD/probe"
 mkdir -p "$out"; rm -f "$out"/*.png

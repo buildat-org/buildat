@@ -15,7 +15,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/web_play_check.sh [steps.json]   (default: the check's own)
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_webplay.XXXXXX")
 SP=29691

@@ -12,7 +12,7 @@
 # Another world's Play is pause_worlds_check's.
 #   util/world_reload_apply_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp world_reload_apply; t=$CHECK_TMP

@@ -23,7 +23,7 @@
 # No tier line: this makes a picture for a person to choose from, and
 # decides nothing itself.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/options_for_LAUNCH_WORLD_glow"; mkdir -p "$out"
 cd "$here/Build"

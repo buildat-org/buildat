@@ -63,18 +63,19 @@ Checks
 
 A change is expected to leave the quick tier green:
 
-    builtin/luanti/test/run_all.sh quick
+    util/run_all.sh quick
 
 CI on GitHub is not green yet; a local run is what counts.
 
 and, if it touches the Luanti module or a renderer, the full tier,
 which wants the game media (`util/media_fetch.sh`). The tiers are
-described at the top of `builtin/luanti/test/run_all.sh`;
+described at the top of `util/run_all.sh`;
 `util/checks_in_docker.sh` runs one the way CI does.
 
 Non-trivial logic leaves one runnable check behind. A runner says
 `PASS:` or `FAIL:` on its last line and exits by it -- that contract is
-in `builtin/luanti/test/lib.sh`.
+in `util/check_lib.sh`, and `util/check_contract.sh` reads every runner
+for it.
 
 Style
 -----

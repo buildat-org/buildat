@@ -17,7 +17,7 @@
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
+. "$me/../../../util/check_lib.sh"
 out="$here/local/dig_swing"
 mkdir -p "$out"
 cd "$here/Build"

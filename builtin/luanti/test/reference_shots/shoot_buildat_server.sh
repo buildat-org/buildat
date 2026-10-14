@@ -33,7 +33,7 @@
 # starts when it launches -- and between the two is a mineclone2 world's
 # loading, which is a minute and a half on this machine and is not a constant.
 set -u
-. "$(dirname "$0")/../../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../../util/check_lib.sh"
 
 # The repository root, from builtin/luanti/test/reference_shots/
 here=$(cd "$(dirname "$0")/../../../.." && pwd)

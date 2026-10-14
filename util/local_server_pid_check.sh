@@ -12,7 +12,7 @@
 #
 #   util/local_server_pid_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 a=

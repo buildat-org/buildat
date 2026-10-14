@@ -25,7 +25,7 @@
 # before the server opens it. Anything else that needs to be the same between
 # runs goes in the same place.
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"

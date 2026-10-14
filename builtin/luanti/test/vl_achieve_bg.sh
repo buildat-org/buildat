@@ -16,7 +16,7 @@
 #
 #   builtin/luanti/test/vl_achieve_bg.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/vl_achieve_bg"; mkdir -p "$out"
 save=buildat_test_vl_achieve_bg

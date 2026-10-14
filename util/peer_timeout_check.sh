@@ -16,7 +16,7 @@
 #
 #   util/peer_timeout_check.sh    [WEB=firefox]
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 s= c= q=

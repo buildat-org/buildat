@@ -9,7 +9,7 @@
 # and what is typed goes to the name field (the shot, for the eye:
 # local/starport_login_focus_out.png).
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_splf.XXXXXX")
 SP=29681

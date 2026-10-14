@@ -10,7 +10,7 @@
 # Hearth, listed on the Starport, and signs in with the ID by itself,
 # the login dialog only when that is refused.
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_sprec.XXXXXX")
 SP=29671

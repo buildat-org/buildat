@@ -20,7 +20,7 @@
 #      (in it longer), and k's group with nobody else in it is deleted.
 #   apps/floorplanner/abuse_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_fpabuse.XXXXXX")
 pids=()

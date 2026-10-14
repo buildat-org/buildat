@@ -22,7 +22,7 @@
 #
 #   builtin/luanti/test/vl_inv.sh [vanilla|ext]   (both by default)
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/vl_inv"; mkdir -p "$out"
 ref="$here/local/luanti_inventory_reference"

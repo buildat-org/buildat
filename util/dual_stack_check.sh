@@ -7,7 +7,7 @@
 # ::ffff:127.0.0.1. Skips where the machine has no IPv6 loopback.
 #   util/dual_stack_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 cd "$(dirname "$0")/.."
 ip -6 addr show lo 2>/dev/null | grep -q "::1" || { echo "SKIP: no ::1"; exit 0; }
 t=$(mktemp -d)

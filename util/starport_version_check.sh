@@ -11,7 +11,7 @@
 # says extract, an .exe's run) and "Close Buildat" ends the client.
 # The GitHub adapter prints the newest release, when GitHub answers.
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_spver.XXXXXX")
 SP=29681

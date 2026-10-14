@@ -13,7 +13,7 @@
 # user listens once to VoxeLibre's music against its digging.
 #   util/sound_gain_luanti_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp sound_gain_luanti; t=$CHECK_TMP

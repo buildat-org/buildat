@@ -23,7 +23,7 @@
 # simplified: the hand-over is read off the log, not from every frame
 #   util/join_stripes_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp join_stripes; t=$CHECK_TMP

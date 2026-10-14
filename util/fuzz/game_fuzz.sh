@@ -12,7 +12,7 @@
 #
 #   util/fuzz/game_fuzz.sh [rounds] [seed]
 set -u
-. "$(dirname "$0")/../check_paths.sh"
+. "$(dirname "$0")/../check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/security/fuzz/game"
 rounds=${1:-5}

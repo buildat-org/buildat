@@ -22,7 +22,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/web_id_window_check.sh [steps.json [rename_steps.json [claim_steps.json]]]
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_webid.XXXXXX")
 SP=29671

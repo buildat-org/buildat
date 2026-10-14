@@ -6,10 +6,10 @@
 # left, and the next launch of vanilla connects to it (launch:reusable) with
 # that launch's params (launch:untrusted: devtest's world list, as -u would
 # have given). A world opened there makes leaving stop the server again.
-# Needs the devtest game in the checks' user path (util/check_paths.sh).
+# Needs the devtest game in the checks' user path (util/check_lib.sh).
 #   util/local_server_reuse_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here"
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }

@@ -13,7 +13,7 @@
 #
 # The table goes to local/density/<seed>_<box>.txt as well.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 seed=${1:-12345}

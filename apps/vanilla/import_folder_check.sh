@@ -18,7 +18,7 @@
 #
 #   apps/vanilla/import_folder_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 [ -z "${BUILDAT_UNCONFINED:-}" ] || { echo "SKIP: BUILDAT_UNCONFINED is set; this is the sandboxed case"; exit 0; }

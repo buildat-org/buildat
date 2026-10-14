@@ -8,7 +8,7 @@
 #
 #   SEED=5 GAME=mineclone2 apps/vanilla_voxel_physics/test/hill.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 GAME="${GAME:-mineclone2}"
 SEED="${SEED:-5}"

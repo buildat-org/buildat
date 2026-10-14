@@ -18,7 +18,7 @@
 # on a release one POST to the admin's topic.
 #   util/admin_notify_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp admin_notify; t=$CHECK_TMP

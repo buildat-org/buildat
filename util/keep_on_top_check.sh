@@ -11,7 +11,7 @@
 # the toggle is; util/starport_id_join_check.sh covers that way in)
 #   util/keep_on_top_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp keep_on_top; t=$CHECK_TMP

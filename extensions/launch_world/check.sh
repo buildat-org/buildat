@@ -33,14 +33,13 @@
 #   on" (the branch) (local/runs/dev_baseline)
 # cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
-# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# It keeps util/check_lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 # run_client: a drive that has stopped logging is taken down rather than
 # waited out (user, 2026-09-24)
-. "$here/builtin/luanti/test/lib.sh"
 out="$here/local/options_for_LAUNCH_WORLD"; mkdir -p "$out"
 # **Last run's pictures are not this run's.** The client crashed halfway
 # through a run and every check still reported PASS, off the shots left

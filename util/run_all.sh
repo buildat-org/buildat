@@ -12,24 +12,24 @@
 #          goes back to and why. Run alone, or as this tier while it is
 #          fixed, and in no other tier, --changed's picks included
 #
-#   builtin/luanti/test/run_all.sh quick
-#   builtin/luanti/test/run_all.sh full --list
-#   ONLY='keys.*|focus' builtin/luanti/test/run_all.sh quick
+#   util/run_all.sh quick
+#   util/run_all.sh full --list
+#   ONLY='keys.*|focus' util/run_all.sh quick
 #
 # **--changed [range] is the regular check** ([SMOKE_PICK]): it takes
 # what git says changed and runs the cheapest runners that cover it,
 # which is one runner under a minute for most commits. The whole tier
 # is what a push runs.
 #
-#   builtin/luanti/test/run_all.sh --changed
-#   builtin/luanti/test/run_all.sh --changed origin/dev..HEAD --list
+#   util/run_all.sh --changed
+#   util/run_all.sh --changed origin/dev..HEAD --list
 #
 # **What a runner covers is where it lives**, so most of them say
 # nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
-# under apps/<a>/ covers apps/<a>/**, one in util/ itself, and one in this directory
-# covers builtin/luanti/**. A "# covers:" line *adds* paths a runner
-# also proves -- the client's own sources, mostly -- and only the
-# runners that prove something outside their own tree carry one. A
+# under apps/<a>/ covers apps/<a>/**, one in util/ itself, and one in
+# builtin/luanti/test covers builtin/luanti/**. A "# covers:" line *adds*
+# paths a runner also proves -- the client's own sources, mostly -- and
+# only the runners that prove something outside their own tree carry one. A
 # central table of paths to runners would be a second place to forget.
 # **What a runner costs** is measured: every run appends its seconds to
 # local/run_all/costs, and a "# cost:" line seeds one that has never
@@ -41,8 +41,11 @@
 # ([CI_RUNS] (6)); a known flake is marked "# flaky:" in the runner and
 # is run and reported but does not decide the status.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
-here=$(cd "$(dirname "$0")" && pwd)
+. "$(dirname "$0")/check_lib.sh"
+# builtin/luanti/test's runners are named by their file name alone, as
+# they were when this lived there ([RUN_ALL_TO_UTIL])
+root=$(cd "$(dirname "$0")/.." && pwd)
+luanti_test="$root/builtin/luanti/test"
 tier="${1:-quick}"
 list_only=""
 changed_range=""
@@ -59,14 +62,13 @@ quick|full|long|broken) ;;
 *) echo "run_all: no tier \"$tier\": quick, full, long or broken" >&2
 	exit 2;;
 esac
-out="$here/../../../local/run_all"
+out="$root/local/run_all"
 mkdir -p "$out"
-# **Every runner in the tree, not only this directory's** ([CI_RUNS]:
-# "every drive and run on CI"). The harness lives here for historical
-# reasons; a check under extensions/ or games/ that names a tier is run
-# the same way. A runner is named by its path from the root, so the two
-# kinds are told apart in the output and in the log names.
-root=$(cd "$here/../../.." && pwd)
+# **Every runner in the tree** ([CI_RUNS]: "every drive and run on
+# CI"): a check under util/, apps/ or extensions/ that names a tier is
+# run the same way as builtin/luanti/test's. A runner is named by its
+# path from the root, so the kinds are told apart in the output and in
+# the log names.
 runners=""
 # **core.sh beside a check.sh** is the cheap runner an edit runs
 # ([CHECK_COST]): where the full one is dear, its tree carries a second
@@ -85,7 +87,7 @@ for f in $(git -C "$root" grep -l '^# tier:' -- '*.sh'); do
 	esac
 	[ "$t" = "$tier" ] || continue
 	name=${f#"$root"/}
-	case "$f" in "$here"/*) name=$(basename "$f");; esac
+	case "$f" in "$luanti_test"/*) name=$(basename "$f");; esac
 	[ -n "${ONLY:-}" ] && { echo "$name" | grep -qE "$ONLY" || continue; }
 	runners="$runners $name"
 done
@@ -129,7 +131,7 @@ if [ -n "$changed" ]; then
 		esac
 		best=""; best_cost=999999
 		for name in $runners; do
-			path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+			path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
 			for pat in $(covers_of "$path" "$name"); do
 				pat=$(echo "$pat" | sed 's/\*\*/*/g')
 				# shellcheck disable=SC2254
@@ -154,7 +156,7 @@ $best"
 	# second -- would otherwise be the cheapest runner covering half the
 	# tree and push every deep one out of the pick
 	for name in $runners; do
-		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
 		grep -q "^# always: *yes" "$path" || continue
 		picked="$picked
 $name"
@@ -171,7 +173,7 @@ $name"
 	runners=$picked
 	total=0
 	for name in $runners; do
-		path="$here/$name"; [ -f "$path" ] || path="$root/$name"
+		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
 		total=$((total + $(cost_of "$path" "$name")))
 	done
 	echo "$(echo "$runners" | wc -w) runners, about ${total}s"
@@ -188,7 +190,7 @@ started=$(date +%s)
 for name in $runners; do
 	printf '%-34s ' "$name"
 	log="$out/$(echo "${name%.sh}" | tr / _).log"
-	path="$here/$name"
+	path="$luanti_test/$name"
 	[ -f "$path" ] || path="$root/$name"
 	t0=$(date +%s)
 	"$path" > "$log" 2>&1

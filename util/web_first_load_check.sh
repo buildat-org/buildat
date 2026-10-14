@@ -15,7 +15,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/web_first_load_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$here/web/buildat.wasm" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 0; }
 t=$(mktemp -d)

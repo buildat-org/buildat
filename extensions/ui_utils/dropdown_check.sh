@@ -11,7 +11,7 @@
 #
 #   extensions/ui_utils/dropdown_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 check_tmp dropdown; t=$CHECK_TMP
 mkdir -p "$t/cl"
 printf 'accepted,address,description,created,last_attempt,name,icon,server\n"false","https://servers.luanti.org","the server list","1791497098","1791497098","","",""\n' \

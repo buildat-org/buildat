@@ -14,7 +14,7 @@
 # simplified: native only; the web client draws the same script.
 #   util/vanilla_player_settings_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp vanilla_player_settings; t=$CHECK_TMP

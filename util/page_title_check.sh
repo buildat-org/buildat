@@ -9,7 +9,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/page_title_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_title.XXXXXX")
 P=29772

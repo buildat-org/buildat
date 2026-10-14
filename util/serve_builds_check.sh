@@ -13,7 +13,7 @@
 #
 #   util/serve_builds_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp serve_builds; t=$CHECK_TMP
 groups=()

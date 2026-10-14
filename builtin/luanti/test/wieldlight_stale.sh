@@ -17,7 +17,7 @@
 # Needs mineclone2 in the desk's games.
 #   builtin/luanti/test/wieldlight_stale.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"

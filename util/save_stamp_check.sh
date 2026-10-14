@@ -7,7 +7,7 @@
 # refused with the reason, and left as it was.
 #   util/save_stamp_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp save_stamp; t=$CHECK_TMP
 mkdir -p "$t/app/main"

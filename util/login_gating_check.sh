@@ -30,7 +30,7 @@
 #
 #   util/login_gating_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here/Build"
 [ -x bin/buildat_server ] || { echo "FAIL: no bin/buildat_server"; exit 1; }

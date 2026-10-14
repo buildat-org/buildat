@@ -11,7 +11,7 @@
 #
 #   apps/starport/age_form_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp starport_age; t=$CHECK_TMP
 P=29886

@@ -24,7 +24,7 @@
 # anyway, which is what a check costing under a second is for.
 set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
-. "$here/builtin/luanti/test/lib.sh"
+. "$here/util/check_lib.sh"
 cd "$here"
 # **LuaJIT's own parser first**: it is what the client and the server
 # run, and 5.4's luac refuses LuaJIT's 64-bit literals (classes.lua's

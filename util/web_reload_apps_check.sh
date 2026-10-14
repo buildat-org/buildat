@@ -15,7 +15,7 @@
 # login is accounts.lua's, the same as Hearth's
 #   util/web_reload_apps_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$here/web/index.html" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 77; }
 check_tmp web_reload_apps; t=$CHECK_TMP

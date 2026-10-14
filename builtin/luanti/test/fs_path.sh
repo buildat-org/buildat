@@ -11,7 +11,7 @@
 #
 #   builtin/luanti/test/fs_path.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/fs_path"; mkdir -p "$out"

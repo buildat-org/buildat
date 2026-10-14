@@ -16,7 +16,7 @@
 # The client is driven by a command sequence and takes no mouse or
 # keyboard from the desk it shares.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/sandbox_test"; mkdir -p "$out"
 cd "$here/Build"

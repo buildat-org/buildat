@@ -11,7 +11,7 @@
 # for ever there, and refuses every ID.
 #   util/starport_id_join_check.sh [app...]   (default: hearth aitta)
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_spid.XXXXXX")
 SP=29651

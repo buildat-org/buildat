@@ -8,7 +8,7 @@
 # "engine_api": 2 loads.
 #   util/app_contract_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp app_contract; t=$CHECK_TMP
 cd "$here/Build"

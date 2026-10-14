@@ -13,7 +13,7 @@
 # it on; a joined admin is told each time.
 #   util/starport_default_url_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_spdef.XXXXXX")
 SP=29761

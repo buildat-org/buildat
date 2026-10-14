@@ -18,7 +18,7 @@
 #      new key works in the game.
 #   util/settings_keys_page_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp settings_keys_page; t=$CHECK_TMP

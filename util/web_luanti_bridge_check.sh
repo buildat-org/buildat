@@ -15,7 +15,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/web_luanti_bridge_check.sh [steps.json]   (default: the check's own)
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_bridge.XXXXXX")
 PLAY=29711

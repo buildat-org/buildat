@@ -18,7 +18,7 @@
 #
 #   util/starport_accounts_tab_check.sh    (SHOT=dir keeps the screenshots)
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here/Build"
 [ -x bin/buildat_server ] || { echo "FAIL: no bin/buildat_server"; exit 1; }

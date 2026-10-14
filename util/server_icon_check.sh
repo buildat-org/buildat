@@ -8,7 +8,7 @@
 # PNG of 64 KB or less is neither, with a warning.
 #   util/server_icon_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_icon.XXXXXX")
 P=29771

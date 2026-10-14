@@ -25,7 +25,7 @@
 # re-asserted every second, so a shot taken right after one is the one least
 # likely to have been spoiled by the desktop's real mouse.
 set -u
-. "$(dirname "$0")/../../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../../util/check_lib.sh"
 
 # The repository root, from builtin/luanti/test/reference_shots/
 here=$(cd "$(dirname "$0")/../../../.." && pwd)

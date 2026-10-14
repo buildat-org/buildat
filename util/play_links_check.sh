@@ -16,7 +16,7 @@
 # Not here: the page at / links a TLS server only, and a local one has
 # no TLS -- seen on the live Starport.
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_plinks.XXXXXX")
 SP=29681

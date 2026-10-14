@@ -16,7 +16,7 @@
 #
 #   apps/aitta/check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 b="$here/Build/bin/buildat"
 t=$(mktemp -d)

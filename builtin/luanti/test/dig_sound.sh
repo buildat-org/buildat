@@ -27,10 +27,9 @@
 # on the system's hardware). What is read here is the module's own line,
 # not the mix; sound.sh is the one that measures the samples.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
 out="$here/local/dig_sound"; mkdir -p "$out"
 save=buildat_test_digsound
 port=31996

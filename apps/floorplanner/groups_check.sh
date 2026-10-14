@@ -8,7 +8,7 @@
 # clicked by label ([SEQ_CLICK]), and a covered one refused.
 #   apps/floorplanner/groups_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_fpgroups.XXXXXX")
 port=29875

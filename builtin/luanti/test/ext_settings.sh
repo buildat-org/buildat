@@ -9,7 +9,7 @@
 #
 #   builtin/luanti/test/ext_settings.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_ext_settings.XXXXXX")
 cd "$here/Build"

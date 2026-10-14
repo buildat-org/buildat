@@ -7,7 +7,7 @@
 #
 #   builtin/luanti/test/hypertext_ext.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/hypertext_ext"; mkdir -p "$out"

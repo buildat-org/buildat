@@ -16,10 +16,9 @@
 # which file of the group played. minetest_game because its nodes carry
 # sounds; devtest's do not, which is why this is not the game to ask.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
 out="$here/local/footstep"; mkdir -p "$out"
 save=buildat_test_footstep
 port=31997

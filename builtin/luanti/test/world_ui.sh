@@ -12,7 +12,7 @@
 #
 #   builtin/luanti/test/world_ui.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_world_ui.XXXXXX")
 out="$here/local/world_ui"; mkdir -p "$out"

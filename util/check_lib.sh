@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# Sourced by every check and drive: a user and a cache path of the checks'
+# The checks' kit ([CHECK_KIT]), sourced by every check and drive: the
+# runners' contract (fail, skip, the PASS:/FAIL:/SKIP: line and its exit
+# status), servers and clients started and waited on, waits for a log
+# line, the checks' own processes, temp directories, the permission
+# store -- and, what it began as, a user and a cache path of the checks'
 # own, so that the desk's playtesting and a check never share saves,
 # settings, a local server's pid file or module builds (user, 2026-10-04).
 # The binaries take BUILDAT_USER_PATH and BUILDAT_CACHE_PATH as their
 # defaults (src/boot/autodetect.cpp); a -D or -C given still wins.
 #
-#   . "$(dirname "$0")/../util/check_paths.sh"
+#   . "$(dirname "$0")/../util/check_lib.sh"
 _check_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # CHECK_USER_PATH another, for a run beside one that holds the checks' own
 # (a script that refuses to start next to a running buildat looks only there)

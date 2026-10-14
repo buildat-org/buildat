@@ -19,7 +19,7 @@
 # scan block of the same stem in cli.log. Never beside another
 # buildat_server. LOG_LEVEL and CLIENT_LOG_LEVEL as in fuzz.sh.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 # Seed 1 is no playtest world under mapgen v7, whatever the game: a sea at

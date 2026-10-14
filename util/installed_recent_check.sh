@@ -13,7 +13,7 @@
 #   util/installed_recent_check.sh
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
-. "$here/util/check_paths.sh"
+. "$here/util/check_lib.sh"
 t=$(mktemp -d); c=$t/cl
 fail() { echo "FAIL: $*"; echo "kept $t"; exit 1; }
 app() { # name version

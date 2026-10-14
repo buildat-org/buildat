@@ -19,7 +19,7 @@
 # and Back on Home leaves the page.
 #   util/tap_back_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 cd "$(dirname "$0")/.."
 t=$(mktemp -d)
 trap 'rm -rf "${t:?}"' EXIT

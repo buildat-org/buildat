@@ -10,7 +10,7 @@
 #
 #   builtin/luanti/test/form_key.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/form_key"
 mkdir -p "$out"

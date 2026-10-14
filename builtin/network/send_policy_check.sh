@@ -12,7 +12,7 @@
 #
 #   builtin/network/send_policy_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp send_policy
 # Under the repo, not /tmp: the boxed server reads nothing in /tmp

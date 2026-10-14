@@ -20,7 +20,7 @@
 # checks' cache is shared, so t2's floorplanner is changed to make its
 # compile real).
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d "/tmp/buildat_serveupd.XXXXXX")
 FP=29711 VA=29712 HP=29790 SP=29791

@@ -17,12 +17,11 @@
 # (it launches digger by name and leaves it again, which is that game's
 # client Lua starting, drawing and answering Escape)
 #
-# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# It keeps util/check_lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-. "$here/builtin/luanti/test/lib.sh"
 out="$here/local/launch_world_core"; mkdir -p "$out"
 rm -f "$out"/*.png
 # The room's description asserts itself first, and costs nothing

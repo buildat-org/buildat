@@ -18,7 +18,7 @@
 # 3 needs luanti in PATH and devtest in the desk's games, else is skipped.
 #   util/join_when_loaded_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp join_when_loaded; t=$CHECK_TMP

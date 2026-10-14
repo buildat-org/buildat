@@ -27,7 +27,7 @@
 #
 #   KEEP_TMP=1 builtin/luanti/test/menu_keys.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_menu_keys.XXXXXX")
 # KEEP_TMP keeps the four pictures: what a failure here is about is what

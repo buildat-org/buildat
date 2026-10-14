@@ -16,7 +16,7 @@
 # web/ from util/build_web.sh.
 #   apps/hearth/test/phone.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 [ -f "$here/web/index.html" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 77; }
 t=$(mktemp -d)

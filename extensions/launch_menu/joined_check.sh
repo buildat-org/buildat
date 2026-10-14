@@ -12,7 +12,7 @@
 #
 #   extensions/launch_menu/joined_check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 check_tmp joined; t=$CHECK_TMP
 P=29887
 cd "$(dirname "$0")/../../Build"

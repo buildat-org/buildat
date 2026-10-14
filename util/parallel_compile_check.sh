@@ -9,7 +9,7 @@
 #
 #   util/parallel_compile_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 b="$here/Build/bin/buildat_server"
 [ -x "$b" ] || { echo "FAIL: no $b"; exit 1; }

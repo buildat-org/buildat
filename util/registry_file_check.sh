@@ -13,7 +13,7 @@
 #      dirty registry): the joined client reads the file again, larger.
 #   util/registry_file_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
 [ -d "$G" ] || skip "no mineclone2"

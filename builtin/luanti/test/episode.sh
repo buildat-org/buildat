@@ -14,7 +14,7 @@
 # its server binary the way reference_shots/shoot_luanti_server.sh does,
 # and nothing else running.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 EPISODE="${EPISODE:-dig}"

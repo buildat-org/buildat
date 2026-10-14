@@ -12,7 +12,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/web_fetch_check.sh [steps.json]
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_webfetch.XXXXXX")
 SP=29681

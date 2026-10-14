@@ -12,7 +12,7 @@
 # util/build_web.sh.
 #   apps/hearth/test/web_back.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 [ -f "$here/web/index.html" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 77; }
 check_tmp hearth_web_back; t=$CHECK_TMP

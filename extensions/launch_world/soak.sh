@@ -23,10 +23,10 @@
 # textures, the meshes and the ornament are all generated at boot and
 # the reflection probe renders its ninety frames after that.
 #
-# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# It keeps util/check_lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_world_soak"; mkdir -p "$out"
 rm -f "$out"/*.log "$out"/*.txt

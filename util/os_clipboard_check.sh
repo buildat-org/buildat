@@ -15,7 +15,7 @@
 # compositor with one (weston's x11 backend, or the user's session).
 #   util/os_clipboard_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 cd "$(dirname "$0")/.."
 for c in weston xclip; do
 	command -v $c > /dev/null || { echo "SKIP: no $c"; exit 0; }

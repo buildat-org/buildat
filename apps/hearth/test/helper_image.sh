@@ -11,7 +11,7 @@
 # of those waiting for it).
 #   apps/hearth/test/helper_image.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 t=$(mktemp -d)
 pid=

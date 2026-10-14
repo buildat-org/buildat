@@ -9,7 +9,7 @@
 #
 #   builtin/luanti/test/objbox.sh [vanilla|ext]   (both by default)
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/objbox"; mkdir -p "$out"

@@ -13,7 +13,7 @@
 # Needs mineclone2 in the desk's games.
 #   util/loading_pic_decode_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
 [ -d "$G" ] || skip "no mineclone2"

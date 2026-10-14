@@ -11,7 +11,7 @@
 #
 # The same image the Linux archives are built in (util/docker/linux), a
 # git archive of HEAD rather than a mount of the working tree, a Release
-# build, and builtin/luanti/test/run_all.sh under Xvfb. Everything the
+# build, and util/run_all.sh under Xvfb. Everything the
 # run wrote under local/ is copied to Build/checks/out/ on the host, so a
 # failure can be read from outside the container.
 #
@@ -39,7 +39,7 @@ git -C "$here" archive --format=tar HEAD > "$tarball"
 # The game media the full and long tiers want, from the host rather
 # than fetched again per run ([CI_RUNS] (4)): util/media_fetch.sh fills
 # it, and CI caches it keyed on the release ids that script prints; it
-# goes where util/check_paths.sh puts the checks' user path
+# goes where util/check_lib.sh puts the checks' user path
 media="${BUILDAT_MEDIA_DIR:-$here/user/shared/vanilla}"
 mount_media=""
 [ -d "$media/games" ] && mount_media="-v $media:/work/buildat/local/check/user/shared/vanilla:z"
@@ -69,7 +69,7 @@ docker run --rm -i \
 		cd /work/buildat
 		status=0
 		xvfb-run -a -s '-screen 0 1280x720x24' \
-			builtin/luanti/test/run_all.sh $tier || status=\$?
+			util/run_all.sh $tier || status=\$?
 		cp -r local/. /out/ 2>/dev/null || true
 		chown -R $(id -u):$(id -g) /out 2>/dev/null || true
 		exit \$status

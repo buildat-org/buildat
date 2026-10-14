@@ -10,7 +10,7 @@
 # v is said and not written over while its mod sets a value.
 #   util/luanti_rows_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp luanti_rows; t=$CHECK_TMP
 cd "$here/Build"

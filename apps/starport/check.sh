@@ -40,7 +40,7 @@
 #
 #   KEEP_TMP=1 apps/starport/check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_starport.XXXXXX")
 SP=29641

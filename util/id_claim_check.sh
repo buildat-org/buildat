@@ -25,7 +25,7 @@
 # Starport). My account's link rows and their Unlink are not driven.
 #   util/id_claim_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp id_claim; t=$CHECK_TMP
 trap check_cleanup EXIT

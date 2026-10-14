@@ -10,7 +10,7 @@
 #   FIXTURE=connected builtin/luanti/test/mobmesh.sh   (another fixture with
 #                                                       the same stage and shots)
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 FIXTURE="${FIXTURE:-mobmesh}"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)

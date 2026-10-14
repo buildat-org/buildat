@@ -12,7 +12,7 @@
 #
 #   util/consent_check.sh    (SHOT=x.png keeps the second's dialog)
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 pids=

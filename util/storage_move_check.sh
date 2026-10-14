@@ -10,7 +10,7 @@
 # serverlist's cache (serverlist.csv) at start.
 #   util/storage_move_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp storage_move; t=$CHECK_TMP

@@ -17,7 +17,7 @@
 # Needs Node 22 or newer, and Firefox 129 or newer or Chrome; FIREFOX and
 # CHROME name the binaries (firefox, google-chrome).
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 [ $# -ge 3 ] || { sed -n '2,7p' "$0" | sed 's/^# *//' >&2; exit 2; }
 browser=$1 game=$2 steps=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")

@@ -8,7 +8,7 @@
 # of brightness 2 to a node once the client has it, then makes it 5.
 #   util/replicate_component_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
 check_tmp replicate_component; t=$CHECK_TMP

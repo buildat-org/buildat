@@ -11,7 +11,7 @@
 # Needs web/ from util/build_web.sh.
 #   util/aitta_on_web_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -s "$here/web/index.html" ] || skip "no web/ (util/build_web.sh)"
 check_tmp aitta_on_web; t=$CHECK_TMP

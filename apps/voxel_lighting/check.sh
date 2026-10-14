@@ -43,9 +43,8 @@
 # cost: 35s
 # covers: builtin/voxel_shading/** src/impl/mesh.cpp src/impl/voxel.cpp src/impl/voxel_volume.cpp builtin/voxelworld/**
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-. "$here/builtin/luanti/test/lib.sh"
 out="$here/local/voxel_lighting"; mkdir -p "$out"
 ref="$out/ref"
 run="$out/run"

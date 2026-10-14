@@ -17,7 +17,7 @@
 # No tier line: this makes a picture for a person to choose from, and
 # decides nothing itself.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 # BUILDAT_MARK_OUT names another directory to shoot into, so a re-shoot
 # does not write over a sheet somebody is still looking at

@@ -25,10 +25,9 @@
 #
 # covers: extensions/launch_menu/init.lua src/client/app.cpp
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
 out="$here/local/leave_world"; mkdir -p "$out"; rm -f "$out"/*.png
 tmp=$(mktemp -d "/tmp/buildat_leave_world.XXXXXX")
 cd "$here/Build"

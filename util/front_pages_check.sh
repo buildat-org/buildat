@@ -16,7 +16,7 @@
 # "Manage your published apps"; the Starport's footer as it was.
 #   util/front_pages_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 t=$(mktemp -d)
 pids=()

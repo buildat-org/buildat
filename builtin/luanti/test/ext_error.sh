@@ -11,7 +11,7 @@
 #
 #   builtin/luanti/test/ext_error.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/ext_error"; mkdir -p "$out"

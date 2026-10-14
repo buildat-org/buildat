@@ -15,10 +15,9 @@
 #
 # covers: builtin/luanti/luanti.cpp
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
 out="$here/local/view_range_server"; mkdir -p "$out"
 save="buildat_test_view_range"
 cd "$here/Build"

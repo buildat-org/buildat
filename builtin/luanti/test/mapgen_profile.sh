@@ -8,7 +8,7 @@
 #
 #   MINUTES=2 builtin/luanti/test/mapgen_profile.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/mapgen_profile"; mkdir -p "$out"

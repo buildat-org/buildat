@@ -1,40 +1,36 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# Reads every runner under this directory and says which of them cannot
-# fail -- the contract in lib.sh, checked statically ([CI_RUNS] (1)).
+# Reads every runner and says which of them cannot fail -- the contract
+# in check_lib.sh, checked statically ([CI_RUNS] (1)).
 #
 # It is a reading, not a check of behaviour: what it catches is a runner
 # that prints FAIL: and still leaves the shell at 0, which is a green
 # light with the fault written inside it. Exit 1 if any runner is like
 # that, so CI can hold the line once they are all fixed.
 #
-# **Every runner run_all.sh runs**, not only this directory's: a check
-# under extensions/ or apps/ that names a tier is held to the same
-# contract.
+# **Every runner run_all.sh runs**: every script git knows with a
+# "# tier:" line, wherever it is ([RUN_ALL_TO_UTIL]).
 #
-#   builtin/luanti/test/contract.sh
+#   util/check_contract.sh
 set -u
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 python3 - <<'PY'
-import os, re, sys, glob
+import os, re, sys, subprocess
 bad = []
 quiet = []
-root = os.path.abspath("../../..")
-# **A runner is a .sh that names a tier**, here as much as under
-# extensions/ and apps/: netsim_table.sh says in its own header that it
-# is a tool and takes arguments, and counting it as a silent runner was
-# this check asking a table generator for a verdict (2026-09-25).
-paths = sorted(f for f in os.listdir(".")
-		if f.endswith(".sh") and
-		re.search(r"^# tier: ", open(f, errors="ignore").read(), re.M))
-paths += sorted(p for p in glob.glob(root + "/extensions/*/check.sh") +
-		glob.glob(root + "/apps/*/check.sh")
-		if re.search(r"^# tier: ", open(p, errors="ignore").read(), re.M))
+# **A runner is a .sh that names a tier**: netsim_table.sh says in its
+# own header that it is a tool and takes arguments, and counting it as a
+# silent runner was this check asking a table generator for a verdict
+# (2026-09-25). Found as run_all.sh finds them.
+paths = sorted(subprocess.run(["git", "grep", "-l", "^# tier:", "--", "*.sh"],
+		capture_output=True, text=True, check=True).stdout.split())
+skipped = 0
 for name in paths:
 	# verdict.sh is sourced by fuzz.sh and drive.sh and sets their status;
-	# it is a fragment like lib.sh and not a runner of its own
-	if os.path.basename(name) in ("lib.sh", "contract.sh",
-			"fullscreen_gate.sh", "run_all.sh", "verdict.sh"):
+	# it is a fragment and not a runner of its own
+	if os.path.basename(name) in ("check_contract.sh", "fullscreen_gate.sh",
+			"run_all.sh", "verdict.sh"):
+		skipped += 1
 		continue
 	src = open(name, errors="ignore").read()
 	# **A runner's verdict may live in the python beside it** -- new_world.sh
@@ -80,14 +76,16 @@ for name in paths:
 			if l.strip() and not l.strip().startswith("#")]
 	last = lines[-1].strip() if lines else ""
 	# A runner may end on the line that says it passed, as long as every
-	# way of failing before it left through exit 1
+	# way of failing before it left through exit 1 -- or through
+	# check_lib.sh's fail, which is echo FAIL: and exit 1
 	# exec replaces this process with another runner's, so that runner's
 	# status is this one's (first_run.sh is drive.sh with a MENU_RUN)
 	ends_on_verdict = (re.fullmatch(r"\w+", last) or last.startswith("exit ")
 			or last.startswith("exec ")
 			or "verdict_exit" in last or last == "fi"
 			or last.endswith("|| exit 1")
-			or (("PASS" in last) and ("exit 1" in src)))
+			or (("PASS" in last) and ("exit 1" in src
+				or re.search(r"(^|[\s;&|{(])fail ", src, re.M))))
 	if not ends_on_verdict:
 		why.append("the last command is %r, so that is the exit status" % last)
 	if why:
@@ -97,9 +95,7 @@ for name, why in bad:
 	for w in why:
 		print("    %s" % w)
 print("%d runners with a verdict, %d that cannot fail, %d with no verdict "
-		"at all" % (len(os.listdir(".")) and
-		len([f for f in os.listdir(".") if f.endswith(".sh")]) - len(quiet) - 3,
-		len(bad), len(quiet)))
+		"at all" % (len(paths) - skipped - len(quiet), len(bad), len(quiet)))
 print("PASS: every runner's verdict decides its exit status" if not bad
 		else "FAIL: %d runners print a verdict their exit status does not carry"
 		% len(bad))

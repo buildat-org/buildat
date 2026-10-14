@@ -11,7 +11,7 @@
 #
 #   apps/box_test/check.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/box_test"
 rm -rf "$out"; mkdir -p "$out/user/apps/vanilla" "$out/user/shared/vanilla"

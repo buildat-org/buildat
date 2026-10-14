@@ -12,10 +12,9 @@
 #
 #   builtin/luanti/test/dawn_light.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
-. "$me/lib.sh"
 out="$here/local/dawn_light"; mkdir -p "$out"
 save=buildat_test_dawn
 hours="0200 0400 0430 0500 0545 1900 1930 2000 2030"

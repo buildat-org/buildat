@@ -11,7 +11,7 @@
 #   3. no "World options..." tile among the apps.
 #   util/save_context_menu_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp save_context_menu; t=$CHECK_TMP

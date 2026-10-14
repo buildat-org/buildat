@@ -10,7 +10,7 @@
 # Needs luanti in PATH and devtest in the desk's games.
 #   util/luanti_pause_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/devtest"
 [ -d "$G" ] || { echo "SKIP: no devtest"; exit 0; }

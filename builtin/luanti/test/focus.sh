@@ -13,7 +13,7 @@
 # Wants a display of its own and xdotool; the window is found by the
 # client's pid. See the skip below: it is not run on a display in use.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 # **Never on a display someone is using** (user, 2026-09-23: this check
 # injected alt+Tab into the session they were working in). It minimizes
 # windows, activates them and sends keys through the X server, and no

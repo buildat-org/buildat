@@ -18,7 +18,7 @@
 # runs only around the spawn; a client per point is the upgrade, at the
 # cost of rendering on the same machine.
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 GAME="${GAME:-mineclone2}" POINTS="${POINTS:-20}" INTERVAL="${INTERVAL:-5.3}"
 MINUTES="${MINUTES:-5}" BUSY="${BUSY:-0}" DIR="${DIR:-$here/local/checkpoint_bench}"

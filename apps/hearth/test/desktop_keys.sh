@@ -14,7 +14,7 @@
 # The reader is trusted by the admin first ([TRUST_LADDER]).
 #   apps/hearth/test/desktop_keys.sh
 set -u
-. "$(dirname "$0")/../../../util/check_paths.sh"
+. "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 t=$(mktemp -d)
 pid=

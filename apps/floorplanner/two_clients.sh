@@ -15,7 +15,7 @@
 #
 #   apps/floorplanner/two_clients.sh
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/two_clients"
 rm -rf "$out"; mkdir -p "$out"

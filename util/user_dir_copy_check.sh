@@ -11,7 +11,7 @@
 #
 #   util/user_dir_copy_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp user_dir_copy; t=$CHECK_TMP
 trap check_cleanup EXIT

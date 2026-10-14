@@ -15,10 +15,10 @@
 # makes a server a mirror by category and stands its invented padding
 # down when real ones are there.
 #
-# It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0
+# It keeps util/check_lib.sh's contract ([CI_RUNS] (1)): exit 0
 # passed, 1 failed, 2 could not run, and a last line saying which.
 set -u
-. "$(dirname "$0")/../../util/check_paths.sh"
+. "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/serverlist_check"; mkdir -p "$out"
 rm -rf "$out/user" "$out/list" "$out/quietuser"

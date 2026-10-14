@@ -14,7 +14,7 @@
 # simplified: native only; the three-row walk is vanilla_player_settings_check's.
 #   util/view_settings_local_check.sh
 set -u
-. "$(dirname "$0")/check_paths.sh"
+. "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp view_settings_local; t=$CHECK_TMP
