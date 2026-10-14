@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~15 s, ~40 s with the web part (2026-10-06)
 # covers: client/extensions/uistack/init.lua src/client/app.cpp
 # [TAP_BACK]: a click on nothing is Back. launch_menu's Settings stays up

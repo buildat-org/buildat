@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 21s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [EXT_SETTINGS]: the "Luanti client settings" row, driven -- the render
 # mode changed in its dropdown and the file read back, the key editor's forward

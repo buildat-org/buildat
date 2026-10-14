@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 16s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [BOX_PLAYTEST_2] (2): the "Join a Luanti server" row in the menu,
 # a connect to an address nothing answers at: the failure must be said in

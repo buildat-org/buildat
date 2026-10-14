@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 36s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [FLY_MODES]: the three modes as official has them, driven. A devtest
 # world (the singleplayer holds every privilege): K, then Space held for

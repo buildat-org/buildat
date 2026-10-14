@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~60s (2026-10-04)
 # covers: src/server/state.cpp src/server/rccpp.cpp builtin/loader/loader.cpp
 # [PARALLEL_COMPILE]: apps/sample_module_calls's modules, from an empty build cache,

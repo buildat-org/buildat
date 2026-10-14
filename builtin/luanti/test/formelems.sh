@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 19s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [FORMSPEC_SCROLL]: a formspec formelems is drawn, opens on a click and
 # sends the item that was picked. The fixture shows a form with

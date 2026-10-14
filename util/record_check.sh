@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~10 s (2026-10-12)
 # covers: src/interface/record.h src/interface/protocol.h src/lua_bindings/cereal.cpp
 # [COMPAT_BREAK_07] 8b: a record with a field added at its end read by the

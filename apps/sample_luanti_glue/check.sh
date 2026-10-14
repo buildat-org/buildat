@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~1 min (2026-10-14)
 # covers: apps/sample_luanti_glue/** builtin/luanti/session.h builtin/luanti/client_lua/client.lua builtin/luanti/client_lua/module.lua builtin/luanti/lua/json.lua builtin/luanti/lua_bindings.h
 # [LUANTI_APP_GLUE]: an app that is a Luanti game in a few dozen lines --

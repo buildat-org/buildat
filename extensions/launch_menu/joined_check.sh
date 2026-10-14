@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~40 s (2026-10-09)
 # covers: src/client/app.cpp client/extensions/network/init.lua extensions/launch_menu/init.lua
 # [JOINED_TLS_SERVERS]: a server joined is on launch_menu's start

@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 45s (this desk, 2026-09-28)
 # covers: builtin/voxelworld/** builtin/luanti/lua/bootstrap.lua
 # [UNDERGROUND_LIGHT] (3)'s own assertion: **open air over a surface

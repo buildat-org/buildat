@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: 8s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [LAUNCH_CONSOLE]: the third launch UI -- the API document on the left
 # and a Lua console on the right. What is asserted is what cannot be

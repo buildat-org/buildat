@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~40 s (2026-10-11)
 # covers: 3rdparty/Urho3D/Source/Urho3D/UI/ScrollView.cpp extensions/launch_menu/preferences.lua
 # [TOUCH_SCROLL_ON_BUTTONS]: a finger's drag in a ScrollView scrolls it

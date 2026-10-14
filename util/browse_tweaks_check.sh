@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~40 s (2026-10-10)
 # covers: extensions/launch_menu/init.lua apps/vanilla/launcher/init.lua
 # [BROWSE_TWEAKS], launch_menu:

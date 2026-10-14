@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 24s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # covers: src/client/command_seq.cpp src/client/command_seq.h
 # [KEY_BINDINGS]: a rebound key walks the player. user/shared/vanilla/settings.json

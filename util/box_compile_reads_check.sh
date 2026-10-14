@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~5s (2026-10-04)
 # covers: src/server/confine.cpp src/server/rccpp.cpp
 # [SECURITY_RUN_2] the box's compile reads: a module's C++ source is

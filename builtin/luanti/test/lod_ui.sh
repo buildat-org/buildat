@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# ci
 # cost: 20s (this desk, 2026-09-26; local/run_all/costs corrects it per machine)
 # [CLIENT_FRAME]: the distant terrain row, driven -- the launcher's menu,
 # its "Luanti settings", "Reduced past half range" picked in the

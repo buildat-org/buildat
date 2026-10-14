@@ -14,8 +14,10 @@
 #
 #   ci     not a tier of its own: every runner with a "# ci" line
 #          beside its tier line, whatever its tier -- what GitHub's
-#          checks workflow runs ([CI_TIER]): no downloaded game, nothing
-#          leaving the machine
+#          checks workflow runs ([CI_TIER]): devtest the one game
+#          (util/media_fetch.sh devtest), nothing leaving the machine;
+#          under BUILDAT_CI a client draws unlit and a "# needs: pixels"
+#          or "# needs: network" runner skips (util/check_lib.sh)
 #
 #   util/run_all.sh quick
 #   util/run_all.sh full --list

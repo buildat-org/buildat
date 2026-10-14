@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~90 s (2026-10-08)
 # covers: apps/hearth/main/** extensions/ui_utils/init.lua
 # [HEARTH_NEW_MARKS]: bob is a member before the admin writes in a

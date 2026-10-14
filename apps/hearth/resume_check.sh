@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~40 s (2026-10-08)
 # covers: apps/hearth/main/client_lua/init.lua builtin/accounts/**
 # [HEARTH_RESUME_2]: a client with BUILDAT_HEARTH_RESUME=1 opens a topic's

@@ -1,8 +1,9 @@
 #!/bin/bash
-# The game media the full and long tiers want ([CI_RUNS] (4)), fetched
-# from ContentDB into <user>/shared/vanilla/games:
+# The game media the checks want ([CI_RUNS] (4)), fetched from ContentDB
+# (and devtest from Luanti's source) into <user>/shared/vanilla/games:
 #
 #   util/media_fetch.sh            install what is missing
+#   util/media_fetch.sh devtest    devtest alone, what the ci tier plays
 #   util/media_fetch.sh --key      print author/name and release id per
 #                                  line, which is what a CI cache is
 #                                  keyed on: a run that changes nothing
@@ -19,6 +20,7 @@ url="${BUILDAT_CONTENTDB_URL:-https://content.luanti.org}"
 packages="Wuzzy/mineclone2/mineclone2"
 key_only=""
 [ "${1:-}" = "--key" ] && key_only=1
+[ "${1:-}" = devtest ] && packages=""
 mkdir -p "$dest"
 for p in $packages; do
 	author=${p%%/*}; rest=${p#*/}; name=${rest%%/*}; as=${rest##*/}
@@ -46,3 +48,20 @@ for p in $packages; do
 	rm -rf "$zip" "$tmp"
 	echo "$as: release $rel, $(du -sh "$dest/$as" | cut -f1)"
 done
+
+# devtest, the game most luanti runners play: not on ContentDB but in
+# Luanti's source, from a pinned tag
+# simplified: the tag by hand; the desk's devtest was a snapshot near it
+devtest_tag=5.17.0
+if [ -n "$key_only" ]; then
+	echo "luanti/devtest $devtest_tag"
+elif [ -e "$dest/devtest/game.conf" ]; then
+	echo "devtest: already here"
+else
+	tmp=$(mktemp -d /tmp/buildat_media.XXXXXX)
+	curl -fsSL "https://codeload.github.com/luanti-org/luanti/tar.gz/refs/tags/$devtest_tag" |
+		tar -xz -C "$tmp" --strip-components=2 "luanti-$devtest_tag/games/devtest"
+	mv "$tmp/devtest" "$dest/devtest"
+	rm -rf "$tmp"
+	echo "devtest: $devtest_tag, $(du -sh "$dest/devtest" | cut -f1)"
+fi

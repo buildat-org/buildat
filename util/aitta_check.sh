@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: 2s (2026-10-03)
 # covers: src/impl/aitta.cpp src/interface/aitta.h src/client/main.cpp
 # [AITTA_MVP] step 1: an app packed and signed, installed, and the installs

@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: 40s (a floorplanner server and a client, 2026-10-02)
 # covers: extensions/ui_utils/** builtin/accounts/client_lua/** apps/floorplanner/main/client_lua/init.lua
 # [MENU_KEYS]: **every menu by the keyboard**. A client joins a local

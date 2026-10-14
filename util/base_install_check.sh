@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~1 min (2026-10-14)
 # covers: src/impl/aitta.cpp builtin/loader/loader.cpp builtin/client_lua/client_lua.cpp src/server/confine.cpp
 # [LUANTI_APP_PACKAGES]: a variant of vanilla as a package. sample_vanilla_falling_blocks

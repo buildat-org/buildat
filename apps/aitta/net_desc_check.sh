@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~30 s (2026-10-09)
 # covers: client/extensions/network/init.lua client/extensions/starport/init.lua client/extensions/aitta/publish.lua
 # [AITTA_NET_DESC]: a fresh client (no network permissions) opens "Apps

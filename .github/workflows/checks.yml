@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 3.5 MB, so fetched each run rather than cached
+      - name: devtest
+        run: util/media_fetch.sh devtest
       - name: The ci tier
         run: JOBS=$(nproc) util/checks_in_docker.sh ci
       - uses: actions/upload-artifact@v4

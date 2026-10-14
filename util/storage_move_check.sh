@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: quick
+# ci
 # cost: ~20 s (2026-10-13)
 # covers: client/api.lua extensions/serverlist/init.lua
 # [COMPAT_CHECKS], [COMPAT_BREAK_07] 8i: a launch extension's storage at
