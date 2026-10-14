@@ -212,6 +212,10 @@ namespace luanti
 				int32_t above_z, const ss_ &player_name,
 				bool sneak = false) = 0;
 
+		// The other button with nothing pointed at: the wielded item's
+		// on_secondary_use, which is where food is eaten ([TOUCH_EAT])
+		virtual bool use_wielded(const ss_ &player_name) = 0;
+
 		// The drop key: what the player is holding goes into the world as
 		// an object. count is how many of the stack go, and zero is all of
 		// them -- the item's own on_drop is what does it.

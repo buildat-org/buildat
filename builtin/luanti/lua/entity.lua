@@ -1833,6 +1833,28 @@ function core.__use_node_inner(playername, under, above, sneak)
 	return true
 end
 
+-- The place button with nothing pointed at: the wielded item's
+-- on_secondary_use, which is where food starts being eaten ([TOUCH_EAT]).
+-- Luanti's INTERACT_ACTIVATE, pointed_thing nothing; with interact, as all
+-- of Luanti's interactions.
+function core.__use_wielded(playername)
+	local id = players[playername]
+	local ref = id and core.object_refs[id]
+	if not ref or not core.check_player_privs(playername, {interact = true}) then
+		return false
+	end
+	local wielded = ref:get_wielded_item()
+	local def = core.registered_items[wielded:get_name()]
+	if not def or not def.on_secondary_use then
+		return false
+	end
+	local left = def.on_secondary_use(wielded, ref, {type = "nothing"})
+	if left ~= nil then
+		ref:set_wielded_item(left)
+	end
+	return true
+end
+
 -- The game's own say on a move that touches the player's inventory:
 -- core.register_allow_player_inventory_action and
 -- core.register_on_player_inventory_action. A move inside it is "move"; a

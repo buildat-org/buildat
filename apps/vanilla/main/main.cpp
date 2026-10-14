@@ -180,6 +180,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:place"));
 		m_server->sub_event(this, Event::t(
+				"network:packet_received/main:use"));
+		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
 		m_server->sub_event(this, Event::t("storage:over_limit"));
 		m_server->sub_event(this, Event::t(
@@ -251,6 +253,8 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:packet_received/main:punch_object",
 				on_punch_object, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:place", on_place,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/main:use", on_use,
 				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
@@ -969,6 +973,21 @@ struct Module: public interface::Module
 		});
 		log_v(MODULE, "C%i: main:place " PV3I_FORMAT ": %s", packet.sender,
 				PV3I_PARAMS(above), placed ? "placed" : "nothing");
+	}
+
+	// The other button at nothing: the wielded item's secondary use, which
+	// is how food is eaten ([TOUCH_EAT]). Nothing in the packet; vanilla's
+	// own client sends it, so no feature name.
+	void on_use(const network::Packet &packet)
+	{
+		if(!joined(packet.sender))
+			return;
+		bool used = false;
+		luanti::access(m_server, [&](luanti::Interface *i){
+			used = i->use_wielded(player_name_of(packet.sender));
+		});
+		log_v(MODULE, "C%i: main:use: %s", packet.sender,
+				used ? "used" : "nothing");
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)

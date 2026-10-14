@@ -3855,6 +3855,9 @@ keys.place_now = function()
 				math.min(POINT_RANGE, luanti.dig_range(wield_index)), yaw,
 				pitch, aim and string.format(", finger at %d, %d", aim.x,
 				aim.y) or ""))
+		-- The wielded item's secondary use, which is how food is eaten:
+		-- a tap or the right button at the sky, then held ([TOUCH_EAT])
+		buildat.send_packet("main:use", "")
 		return
 	end
 	-- The right button is Luanti's place-or-use: what it comes to is the
