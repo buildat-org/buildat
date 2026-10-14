@@ -825,6 +825,8 @@ local function tell_the_client(o)
 		-- saved along with where they stood
 		__send_player_pos(o.player_name, o.pos.x, o.pos.y, o.pos.z, o.id,
 				o.look.h, o.look.v)
+		-- Till the client has it, its reports are from before
+		o.told = {x = o.pos.x, y = o.pos.y, z = o.pos.z, at = core.get_us_time()}
 	end
 end
 
@@ -916,8 +918,10 @@ end
 
 -- Luanti's respawn (Server::RespawnPlayer): full health and breath first,
 -- the health through set_hp so the hpchange callbacks see it, then the
--- on_respawnplayer callbacks, and the first that answers true has put the
--- player somewhere itself (a bed); otherwise the spawn point. The order
+-- on_respawnplayer callbacks, all of them (RUN_CALLBACKS_MODE_OR, no short
+-- circuit: VoxeLibre's mcl_spawn answers true, and the callbacks after it
+-- put out a death's fire), and one that answers true has put the player
+-- somewhere itself (a bed); otherwise the spawn point. The order
 -- matters: VoxeLibre's health bar reads get_hp() in its respawn callback,
 -- and with the health set after it the bar stayed at nought until the
 -- next hit (the first driven run, 2026-09-19). The death screen's button
@@ -936,7 +940,6 @@ function PlayerRef:respawn()
 			core.log("error", "on_respawnplayer: " .. tostring(moved))
 		elseif moved then
 			placed = true
-			break
 		end
 	end
 	if not placed then
@@ -2963,8 +2966,24 @@ end
 function core.__set_player_pos(name, x, y, z, look_h, look_v, controls)
 	local id = players[name]
 	local o = id and objects[id]
-	if not o then
+	-- A dead player's reports are dropped, as Luanti's process_PlayerPos
+	-- does: the ones from where they died, in flight over the respawn, put
+	-- them back there (in lava, relit: [RESPAWN_EFFECTS])
+	if not o or (o.player_name and o.hp <= 0) then
 		return
+	end
+	-- A report from before the client had the position the server told it
+	-- (a respawn, a set_pos) is dropped: it is far from that position.
+	-- simplified: far is 8 nodes, and after 2 s the reports are taken
+	-- anyway (a client that never applied it); a sequence number in the
+	-- protocol would be exact.
+	local told = o.told
+	if told then
+		if vector.distance(told, {x = x, y = y, z = z}) > 8 and
+				core.get_us_time() - told.at < 2000000 then
+			return
+		end
+		o.told = nil
 	end
 	if o.player_name and hold_down(o, x, y, z) then
 		local g = o.good_pos
