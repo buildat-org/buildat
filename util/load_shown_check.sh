@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; a 15 s still stretch at a phone's CPU; dev fails it
+#   too, passing some runs (local/runs/dev_baseline)
 # cost: ~12 min (2026-10-11)
 # covers: src/client/state.cpp src/client/web/index.html apps/vanilla/main/client_lua/init.lua
 # [LOAD_SHOWN]: the web client's start says what it is doing. Vanilla on

@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; look: the camera does not follow the mouse; dev's
+#   reruns fail too (predict_reruns.txt) (local/runs/dev_baseline)
 # [PREDICTION]: the vanilla client writes a dug or placed node before the
 # server answers, and the server's answer overwrites it. A player on the
 # episode fixture's platform, dirt in hand, clicking on the platform

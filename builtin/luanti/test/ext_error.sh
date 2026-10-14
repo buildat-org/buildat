@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; dev: the error under a session was not a notice; the
+#   branch: the drive (local/runs/dev_baseline)
 # [MENU_ERRORS]: an error raised inside a session is a notice line and not
 # a dialog -- a dialog under a world takes the mouse from the player. A
 # worldmod sends the client a formspec it cannot read; the client's log says

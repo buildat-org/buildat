@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the pictures and the objects; the same on dev
+#   (local/runs/dev_baseline)
 # cost: ~6 min (2026-10-12)
 # covers: builtin/luanti/client_lua/module.lua extensions/luanti_client/res/VoxelUnlitShadow.glsl extensions/luanti_client/res/PBRVoxel.glsl extensions/luanti_client/res/LuantiVoxelUnlit.xml
 # [WIELD_LIGHT_LOOK]: the held light as a placed one. VoxeLibre at night,

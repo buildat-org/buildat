@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; the drive; the same on dev (local/runs/dev_baseline)
 # [LC_TOUCH]: luanti_client on a touchscreen, by the touch controls it
 # shares with vanilla (extensions/luanti_client/res/touch.lua). Headless
 # Firefox as a phone (web_drive.sh's TOUCH=1: a coarse pointer and touch

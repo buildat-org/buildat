@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; the name screen has 0 fields; the same on dev
+#   (local/runs/dev_baseline)
 # [NEW_WORLD_FORM]: the new-world screen. A name that is already taken
 # leaves the screen standing with the name, the seed and the toggles as
 # they were, the seed is copied out of its field and pasted into the name

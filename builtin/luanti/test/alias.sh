@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; register_alias_force: aliascheck:old aliascheck:new;
+#   the same on dev (local/runs/dev_baseline)
 # cost: 60s (this desk, 2026-10-10)
 # [FEATURE_SWEEP_1009]: a node name list with an alias in it matches the node
 # the alias names, as Luanti's getIds() resolves it -- an ABM, an LBM or a

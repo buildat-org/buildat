@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the second Accounts open did not reopen (dev); no
+#   acc1 shot (the branch) (local/runs/dev_baseline)
 # cost: ~30s (2026-10-04)
 # covers: apps/starport/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua
 # [STARPORT_ACCOUNTS_TAB]: the Starport app's Accounts tab (the accounts

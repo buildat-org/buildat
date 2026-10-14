@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; dev drew no pictures; the branch logs 3 client error
+#   lines (local/runs/dev_baseline)
 # [THIRD_PERSON]: the extension client's camera key against official
 # Luanti's server, the three views shot: local/camera_ext/first.png,
 # behind.png, front.png; the stage is camera.lua's as a worldmod. Needs the

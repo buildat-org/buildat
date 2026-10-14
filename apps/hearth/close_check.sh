@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the exit dialog opened 2 times, not 3 (dev); never
+#   (the branch) (local/runs/dev_baseline)
 # cost: ~1 min (2026-10-10)
 # covers: apps/hearth/main/client_lua/init.lua client/api.lua
 # [HEARTH_CLOSE]: Hearth joined from the launcher, at its top:

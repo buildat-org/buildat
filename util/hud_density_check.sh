@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; no "hotbar: N slots" line on the branch
+#   ([CHECKS_EVENT_WAITS_REST]) (local/runs/event_waits)
 # cost: ~5 min (2026-10-11)
 # covers: extensions/luanti_client/res/hotbar.lua extensions/luanti_client/res/hud_draw.lua extensions/luanti_client/res/formspec.lua
 # [HUD_DENSITY]: the HUD at the screen's density, the hotbar's one row

@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; no save buildat_test_sprites; the same on dev
+#   (local/runs/dev_baseline)
 # [WORLD_LIST]: the world screen, driven -- the launcher's VoxeLibre row,
 # the row SAVE (buildat_test_sprites unless given; a test save of this
 # tree's own, a VoxeLibre one) picked, its

@@ -7,6 +7,10 @@
 #   quick  needs no downloaded game -- what a push runs
 #   full   wants the game media (mineclone2, VoxeLibre)
 #   long   the fuzz, the drives, the reference shots
+#   broken a runner that fails for a reason of its own, not the code's
+#          ([CHECKS_BROKEN_TIER]); its "# broken:" line says the tier it
+#          goes back to and why. Run alone, or as this tier while it is
+#          fixed, and in no other tier, --changed's picks included
 #
 #   builtin/luanti/test/run_all.sh quick
 #   builtin/luanti/test/run_all.sh full --list
@@ -50,6 +54,11 @@ if [ "$tier" = "--changed" ]; then
 	[ "$changed_range" = "--list" ] && changed_range=""
 fi
 for a in "$@"; do [ "$a" = "--list" ] && list_only=1; done
+case "$tier" in
+quick|full|long|broken) ;;
+*) echo "run_all: no tier \"$tier\": quick, full, long or broken" >&2
+	exit 2;;
+esac
 out="$here/../../../local/run_all"
 mkdir -p "$out"
 # **Every runner in the tree, not only this directory's** ([CI_RUNS]:
@@ -64,14 +73,14 @@ runners=""
 # one, and --changed picks whichever is cheaper for what changed.
 # **A runner is a script with a "# tier:" line, wherever it is**
 # ([CHECK_COVERAGE]): a list of places missed util/ and apps/, and named
-# a games/ that had gone. A tier that is none of the three is an error,
+# a games/ that had gone. A tier that is none of the four is an error,
 # not a runner nobody runs.
 for f in $(git -C "$root" grep -l '^# tier:' -- '*.sh'); do
 	f="$root/$f"
 	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
 	case "$t" in
-	quick|full|long) ;;
-	*) echo "run_all: ${f#"$root"/} has the tier \"$t\": quick, full or long" >&2
+	quick|full|long|broken) ;;
+	*) echo "run_all: ${f#"$root"/} has the tier \"$t\": quick, full, long or broken" >&2
 		exit 2;;
 	esac
 	[ "$t" = "$tier" ] || continue

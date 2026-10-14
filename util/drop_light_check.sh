@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the drops' light; the same on dev
+#   (local/runs/dev_baseline)
 # cost: ~2 min (2026-10-11)
 # covers: builtin/luanti/client_lua/module.lua
 # [DROP_LIGHT_FIRST]: an item dropped by a dug node is lit right from its

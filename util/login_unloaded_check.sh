@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; no "Login refused: TOTP: enter"; the same on dev
+#   (local/runs/dev_baseline)
 # cost: ~3 min (2026-10-11)
 # covers: builtin/accounts/accounts.cpp builtin/accounts/client_lua/accounts.lua src/client/web/index.html
 # [LOGIN_UNLOADED]: a web login outlives the page being reloaded, as a

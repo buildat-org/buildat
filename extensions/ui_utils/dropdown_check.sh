@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: quick
+# tier: broken
+# broken: back to quick; the filter went: All Starport; the same on dev
+#   (local/runs/dev_baseline)
 # cost: ~25 s (2026-10-09)
 # covers: extensions/ui_utils/init.lua extensions/launch_menu/init.lua
 # [UI_DROPDOWN]: ui_utils.dropdown, on launch_menu's Servers filter.

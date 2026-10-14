@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: long
+# tier: broken
+# broken: back to long; it asks ContentDB at localhost:30005, which is not
+#   there (dev) (local/runs/dev_baseline)
 # [FIRST_RUN]: the new user's first hour, driven -- empty user and cache
 # paths, VoxeLibre installed from a ContentDB mirror through the client's
 # own screens, a new world at seed 5, walked and dug to GOAL 2. Every

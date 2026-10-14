@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; touch: a look line before "placed floor:stone"; the
+#   same on dev (local/runs/dev_baseline)
 # cost: ~4 min (2026-10-11)
 # covers: apps/vanilla/main/client_lua/pause.lua
 # [PAGE_TAP_OUTSIDE]: a page over vanilla's world (the chat, My account,

@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: quick
+# tier: broken
+# broken: back to quick; no shot shows the form with the bar; the same on
+#   dev (local/runs/dev_baseline)
 # [VL_ACHIEVE_BG]: VoxeLibre's achievements form keeps its backdrop on
 # every item of its list. An item with progress adds a progress bar as a
 # background[] of its own, and the form's backdrop was drawn only for a

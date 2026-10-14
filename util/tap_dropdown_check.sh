@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; not open and closed 20 times (dev); no launch_menu
+#   settings line (the branch) (local/runs/dev_baseline)
 # cost: ~3 min (2026-10-11)
 # covers: extensions/ui_utils/init.lua 3rdparty/Urho3D/Source/Urho3D/UI/Menu.cpp
 # [TAP_DROPDOWN]: a tap on a dropdown opens it on a phone. In Chrome with

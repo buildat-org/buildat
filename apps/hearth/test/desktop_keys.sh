@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: long
+# tier: broken
+# broken: back to long; the screenshot was not picked (dev)
+#   (local/runs/dev_baseline)
 # cost: ~60 s (2026-10-09)
 # covers: client/extensions/network/init.lua src/client/app_lua.h extensions/ui_utils/init.lua
 # [HEARTH_USABILITY] 2, **desktop, by keyboard only**: the case of

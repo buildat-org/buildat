@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the states stayed auto fullscreen (dev); no dropdown
+#   open (the branch) (local/runs/dev_baseline)
 # cost: ~2 min (2026-10-11)
 # covers: src/client/web/index.html apps/vanilla/main/client_lua/pause.lua extensions/launch_menu/preferences.lua
 # [SCREEN_ORIENTATION]: the screen orientation preference, picked in

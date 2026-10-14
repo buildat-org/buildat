@@ -1,5 +1,6 @@
 #!/bin/bash
-# tier: long
+# tier: broken
+# broken: back to long; hearth: no frame 120 (dev) (local/runs/dev_baseline)
 # cost: ~3 min (2026-10-10)
 # covers: src/client/web/index.html apps/hearth/main/client_lua/init.lua apps/starport/main/client_lua/init.lua apps/aitta/main/client_lua/init.lua
 # [WEB_RELOAD_APPS]: Hearth, Starport and Aitta on the web load again by

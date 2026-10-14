@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; a different picture than the stored reference set;
+#   the same on dev (local/runs/dev_baseline)
 # cost: 120s (this desk, 2026-09-28)
 # covers: extensions/luanti_client/res/*.glsl builtin/voxel_shading/client_lua/** apps/vanilla/main/client_lua/init.lua
 #

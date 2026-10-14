@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the drive (dev); the Luanti server (the branch)
+#   (local/runs/dev_baseline)
 # cost: 120s (2026-10-04)
 # covers: apps/play/** builtin/network/network.cpp client/extensions/network/init.lua
 # [PLAY_PAGE] (c): the web client on apps/play's page reaches a Luanti

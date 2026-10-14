@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; 1 differ; the same on dev (local/runs/dev_baseline)
 # [UI_PARITY] 1 and 2: the two coordinate systems and the slot pitch,
 # against official Luanti; 3 to 5 a list's stacks; 8 bgcolor[] and
 # background9[]; 9 a HUD text's lines; 7 a tooltip, against

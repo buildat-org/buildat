@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; the client logged 3 error lines; the same on dev
+#   (local/runs/dev_baseline)
 # [EXT_HUD_PARITY]: the extension client's minimap and F5 keys against official
 # Luanti's server: the minimap at the top right in surface mode, V three
 # times to the radar, and F5's two levels, shot under local/hud_ext/; the

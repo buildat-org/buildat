@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; the server did not start; the same on dev
+#   (local/runs/dev_baseline)
 # [DIG_LIGHT]: diglight.lua's server beside a client that reads its own
 # light at t=15 (the pit), t=70 (the stair) and t=115 (its third step, the player put there) -- the scan's eye light
 # line and a scan_volume with light rows. Prints the two readings side

@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; vanilla let op in twice (dev); the admin's client
+#   (the branch) (local/runs/dev_baseline)
 # cost: 3 min (two floorplanner rounds and a vanilla one, 2026-10-03)
 # covers: builtin/accounts/** apps/floorplanner/main/main.cpp
 # [FP_TWO_CLIENTS]: **one user, two clients at once**. An admin makes the

@@ -145,10 +145,16 @@ and check_pgrep / check_pkill, which match only processes run with the
 checks' user path, so a check never touches a playtest's. util/uidrive.py
 is the scan parser and a fifo-driven client for a UI drive.
 
-Four header lines say the rest, and only the first is required:
+Five header lines say the rest, and only the first is required:
 
   # tier: quick        quick (no downloaded game, what a push runs), full
-                       (wants the game media), long (fuzz, drives, shots)
+                       (wants the game media), long (fuzz, drives, shots),
+                       broken (fails for a reason of its own, not the
+                       code's: run alone or with run_all.sh broken while
+                       it is fixed, and in no other tier; --changed picks
+                       from a tier, so it is left out there too)
+  # broken: <why>      with tier broken: the tier it goes back to and its
+                       recorded failure, in a few words
   # cost: 24s          a seed; local/run_all/costs is measured per machine
   # covers: <paths>    what it proves OUTSIDE its own tree; where it lives
                        is covered already -- extensions/<x>/check.sh, and a

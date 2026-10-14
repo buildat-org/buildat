@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; no back row; the same on dev
+#   (local/runs/dev_baseline)
 # [MENU_CONTEXT]: leaving a menu-only game for the launcher, driven -- the
 # VoxeLibre row opens the world screen (a local server behind it), "< back
 # to the launcher" returns to the menu with the client still up, then the

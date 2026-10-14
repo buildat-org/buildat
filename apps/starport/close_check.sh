@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the exit dialog opened 0 times, not 2; the same on
+#   the branch (local/runs/dev_baseline)
 # cost: ~1.5 min (2026-10-10)
 # covers: apps/starport/main/client_lua/init.lua apps/aitta/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua
 # [STARPORT_CLOSE]: a Starport and an Aitta joined from the launcher.

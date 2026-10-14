@@ -1,5 +1,6 @@
 #!/bin/bash
-# tier: long
+# tier: broken
+# broken: back to long; the drive stopped (dev) (local/runs/dev_baseline)
 # cost: ~45 s (2026-10-09)
 # covers: apps/hearth/main/client_lua/init.lua
 # [HEARTH_NEW_IMAGES] in the native client: a new account posts a thread

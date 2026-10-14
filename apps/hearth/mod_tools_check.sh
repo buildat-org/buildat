@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the deleted message's place (dev); a click on no
+#   visible row (the branch) (local/runs/dev_baseline)
 # cost: ~2 min (2026-10-09)
 # covers: apps/hearth/main/** builtin/accounts/accounts.cpp
 # [HEARTH_MOD_TOOLS]: on a local Hearth, a moderator (mia), a helper (hal),

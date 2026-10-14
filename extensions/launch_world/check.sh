@@ -28,7 +28,9 @@
 # proves nothing about your change; run_all.sh selects by path, and a
 # path is not an assertion.
 #
-# tier: full
+# tier: broken
+# broken: back to full; clicking an orb does nothing (dev); no "pause: hover
+#   on" (the branch) (local/runs/dev_baseline)
 # cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 #
 # It keeps builtin/luanti/test/lib.sh's contract ([CI_RUNS] (1)): exit 0

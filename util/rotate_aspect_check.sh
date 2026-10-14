@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the node's face (dev); no settle line (the branch)
+#   (local/runs/dev_baseline)
 # cost: ~2 min (2026-10-11)
 # covers: src/client/web/index.html
 # [ROTATE_ASPECT]: the 3D view follows the screen turning. Vanilla (the

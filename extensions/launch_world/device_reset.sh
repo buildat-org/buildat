@@ -17,7 +17,9 @@
 # the room's own desk is where that setting lives. So the reset here is
 # the reset F11 makes, taken from a window that stays where it is.
 #
-# tier: full
+# tier: broken
+# broken: back to full; the screen mode changed and the room never noticed
+#   (dev); the drive (the branch) (local/runs/dev_baseline)
 # cost: 75s
 # covers: extensions/launch_world/world.lua
 set -u

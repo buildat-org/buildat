@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; step 5 sent no awards=CHG:2 (dev); no "vl_inv: step
+#   5" (the branch) (local/runs/dev_baseline)
 # [VL_INV_PARITY]: VoxeLibre's survival inventory and the forms it opens,
 # in both clients, beside official Luanti's own
 # (local/luanti_inventory_reference/, the user's): the inventory, the

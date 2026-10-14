@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; needs the public Starport on 0.7, outside the
+#   machine: 6 of 6 relay calls fail (local/runs/event_waits)
 # cost: ~30s (2026-10-04); needs a display and reaches starport.buildat.org
 # covers: client/extensions/network/init.lua builtin/starport_announce/starport_announce.cpp
 # [WEB_ID_RELAY]: the web client has no HTTPS of its own; its server relays a

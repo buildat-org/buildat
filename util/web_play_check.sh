@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the drive, stale against the search-style launcher;
+#   the same on dev (local/runs/dev_baseline)
 # cost: 150s (2026-10-04)
 # covers: src/client/web/index.html builtin/network/network.cpp util/tls_proxy.py apps/play/** extensions/launch_menu/screens.lua
 # [WEB_ID_TRUST] (d), [PLAY_PAGE] (a) and (b): the web client from a fixed

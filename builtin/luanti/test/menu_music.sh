@@ -1,6 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-# tier: full
+# tier: broken
+# broken: back to full; the fixture never started its loop (dev); no "the
+#   server put the player" (the branch) (local/runs/dev_baseline)
 # cost: 60s
 # covers: src/client/app.cpp builtin/luanti/client_lua/module.lua
 # [MENU_MUSIC]: **does a game's music stop when the player leaves to the
