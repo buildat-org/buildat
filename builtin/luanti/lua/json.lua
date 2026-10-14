@@ -315,4 +315,25 @@ function core.write_json(data, styled)
 	return table.concat(out)
 end
 
+-- [LUANTI_APP_GLUE] The bridge to an app's C++: one call each way, a value
+-- as JSON. call_json() on the module's interface is core.<name>(value)
+-- here, its result written back ("null" for none); core.buildat_emit()
+-- is the event "luanti:app:<name>" any module beside this one takes.
+function core.__call_json(name, json)
+	local f = core[name]
+	if type(f) ~= "function" then
+		error("core." .. tostring(name) .. " is not a function")
+	end
+	local r = f(core.parse_json(json))
+	if r == nil then
+		return "null"
+	end
+	return assert(core.write_json(r))
+end
+
+function core.buildat_emit(name, value)
+	__luanti_emit(tostring(name), value == nil and "null" or
+			assert(core.write_json(value)))
+end
+
 -- vim: set noet ts=4 sw=4:

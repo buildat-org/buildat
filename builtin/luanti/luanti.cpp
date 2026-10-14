@@ -3583,6 +3583,7 @@ struct Module: public interface::Module, public luanti::Interface
 		set_global_cfunction("__luanti_compress", l_compress);
 		set_global_cfunction("__luanti_decompress", l_decompress);
 		set_global_cfunction("__luanti_refshot_mark", l_refshot_mark);
+		set_global_cfunction("__luanti_emit", l_emit);
 		set_global_cfunction("__luanti_set_node", l_set_node);
 		set_global_cfunction("__luanti_get_node", l_get_node);
 		set_global_cfunction("__luanti_region_to_world", l_region_to_world);
@@ -3967,6 +3968,38 @@ struct Module: public interface::Module, public luanti::Interface
 	sv_<ss_> call_string_list(const ss_ &name)
 	{
 		return string_list_from_lua(name.c_str());
+	}
+
+	ss_ call_json(const ss_ &name, const ss_ &json)
+	{
+		interface::MutexScope ms(m_lua_mutex);
+		if(!m_lua)
+			return "";
+		lua_State *L = m_lua;
+		int base = lua_gettop(L);
+		lua_pushcfunction(L, l_traceback);
+		lua_getglobal(L, "core");
+		lua_getfield(L, -1, "__call_json");
+		lua_remove(L, -2);
+		lua_pushlstring(L, name.c_str(), name.size());
+		lua_pushlstring(L, json.c_str(), json.size());
+		if(lua_pcall(L, 2, 1, base + 1) != 0){
+			log_w(MODULE, "call_json(%s): %s", cs(name),
+					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_settop(L, base);
+			return "";
+		}
+		size_t len = 0;
+		const char *p = lua_tolstring(L, -1, &len);
+		const ss_ r = p ? ss_(p, len) : "";
+		lua_settop(L, base);
+		return r;
+	}
+
+	Paths m_paths;
+	void set_paths(const Paths &paths)
+	{
+		m_paths = paths;
 	}
 
 	bool m_server_physics = false;

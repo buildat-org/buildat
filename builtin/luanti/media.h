@@ -25,14 +25,15 @@
 	// in its LICENSE.txt, and nothing here copies them into the tree. What
 	// the user does is put the pack in buildat's own directory, which is the
 	// same rule the games follow -- see apps/vanilla.
-	// The render mode the launcher game's settings screen wrote
-	// (apps/vanilla's settings.json in the user path), "" when
-	// there is none. Read here with no JSON parser: the file is the
-	// game's own, one line, and the key's value is a bare word.
+	// The render mode the app's settings screen wrote (Paths'
+	// settings_file, e.g. vanilla's settings.json), "" when there is none.
+	// Read here with no JSON parser: the file is the app's own, one line,
+	// and the key's value is a bare word.
 	ss_ settings_render_mode()
 	{
-		std::ifstream f(m_server->get_config().get<ss_>("user_path")+
-				"/shared/vanilla/settings.json");
+		if(m_paths.settings_file.empty())
+			return "";
+		std::ifstream f(m_paths.settings_file);
 		if(!f.good())
 			return "";
 		std::stringstream ss;
@@ -50,20 +51,19 @@
 
 	// Luanti's own base textures -- blank.png, heart.png, bubble.png,
 	// what a game's HUD asks the engine for: the copy under the module
-	// (textures/base, with its licence), or the user's own if they put
-	// one at user/shared/vanilla/textures/base/pack, which wins
+	// (textures/base, with its licence), or the user's own if the app
+	// names one (Paths' base_textures), which wins
 	ss_ base_textures_path()
 	{
-		const ss_ user = m_server->get_config().get<ss_>("user_path")+
-				"/shared/vanilla/textures/base/pack";
-		if(interface::fs::path_exists(user))
+		const ss_ user = m_paths.base_textures;
+		if(!user.empty() && interface::fs::path_exists(user))
 			return user;
 		return module_path()+"/textures/base/pack";
 	}
 
 	// The world's texture pack ([WORLD_TXP]): the one world.mt names as
-	// buildat_texture_pack, a directory under
-	// user/shared/vanilla/texture_packs, where vanilla installs them. It
+	// buildat_texture_pack, a directory under Paths' texture_packs, where
+	// the app installs them (vanilla: user/shared/vanilla/texture_packs). It
 	// goes in front of everything else, because first-one-wins is the rule
 	// below and a pack's whole point is to override what the game ships --
 	// including the LabPBR sidecars the atlas reads ([VOXEL_MATERIALS]
@@ -73,10 +73,9 @@
 	void collect_texture_packs(sv_<ss_> &dirs)
 	{
 		const ss_ name = setting_string("buildat_texture_pack");
-		if(name.empty())
+		if(name.empty() || m_paths.texture_packs.empty())
 			return;
-		const ss_ path = m_server->get_config().get<ss_>("user_path")+
-				"/shared/vanilla/texture_packs/"+name;
+		const ss_ path = m_paths.texture_packs+"/"+name;
 		// A directory's name, as vanilla writes it: no path in it
 		if(name.find_first_not_of("abcdefghijklmnopqrstuvwxyz"
 				"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != ss_::npos ||

@@ -33,6 +33,17 @@ namespace luanti
 		GameLoaded(SceneReference scene): scene(scene){}
 	};
 
+	// [LUANTI_APP_GLUE] core.buildat_emit(name, value) in the game's Lua:
+	// the event "luanti:app:<name>", the value as JSON. How an app's own
+	// Lua (load_lua()) tells its C++ of any callback it hooked.
+	struct AppEvent: public interface::Event::Private
+	{
+		ss_ name;
+		ss_ json;
+
+		AppEvent(const ss_ &name, const ss_ &json): name(name), json(json){}
+	};
+
 	// Nodes that are not the map's ([BODY_INTERACT]): a body that came off
 	// the world keeps its voxels in the same coordinate space, in a region
 	// far outside the map's bounds -- stacked in Y from REGION_Y, a
@@ -92,6 +103,21 @@ namespace luanti
 				std::function<void(const ss_ &)> handler) = 0;
 
 		virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
+
+		// Where the app keeps what the game reads beside itself, before
+		// run_game() ([LUANTI_APP_GLUE]); each "" for none:
+		// - settings_file: a JSON file whose "render_mode" the clients
+		//   are told (vanilla's settings.json);
+		// - base_textures: Luanti's own base textures, the user's copy,
+		//   in front of the module's;
+		// - texture_packs: the directory world.mt's buildat_texture_pack
+		//   names one in.
+		struct Paths {
+			ss_ settings_file;
+			ss_ base_textures;
+			ss_ texture_packs;
+		};
+		virtual void set_paths(const Paths &paths) = 0;
 
 		// What a Luanti world is made out of: its seed, which mapgen made it
 		// and what that mapgen was told, read out of its map_meta.txt into
@@ -247,6 +273,13 @@ namespace luanti
 		// its own -- a function it registered through load_lua() -- once
 		// the game is loaded. Empty on an error, which is logged.
 		virtual sv_<ss_> call_string_list(const ss_ &name) = 0;
+
+		// [LUANTI_APP_GLUE] core.<name>(value) called, the value and the
+		// result as JSON ("null" for none): the one way an app's C++ reaches
+		// any of the game's functions -- its own, handed in by load_lua(),
+		// calling what it likes. "" on an error, which is logged. The other
+		// way is AppEvent.
+		virtual ss_ call_json(const ss_ &name, const ss_ &json) = 0;
 
 		// Whether the map's chunks get server-side collision shapes
 		// (voxelworld's physics_enabled): off, since nothing of the game's

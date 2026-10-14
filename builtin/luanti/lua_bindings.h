@@ -301,6 +301,20 @@
 		return 1;
 	}
 
+	// __luanti_emit(name, json): core.buildat_emit's, the event
+	// "luanti:app:<name>" ([LUANTI_APP_GLUE])
+	static int l_emit(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t nl = 0, jl = 0;
+		const char *n = luaL_checklstring(L, 1, &nl);
+		const char *j = luaL_checklstring(L, 2, &jl);
+		const ss_ name(n, nl);
+		self->m_server->emit_event("luanti:app:"+name,
+				new AppEvent(name, ss_(j, jl)));
+		return 0;
+	}
+
 	static int l_set_node(lua_State *L)
 	{
 		Module *self = module_of(L);

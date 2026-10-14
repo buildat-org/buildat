@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: ~40 s (2026-10-10)
-# covers: extensions/launch_menu/init.lua builtin/luanti/launcher/init.lua
+# covers: extensions/launch_menu/init.lua apps/vanilla/launcher/init.lua
 # [BROWSE_TWEAKS], launch_menu:
 #   1. At a phone's width (400x760) Home's heading is "Type to search" and
 #      Servers' "Servers (type to search)", each window inside the screen
@@ -79,6 +79,6 @@ echo "ok: Tab into the panel at x $b, Shift+Tab back to x $a"
 
 # 4. The import tiles
 for l in "Import a Luanti game" "Import a Luanti world"; do
-	grep -q "label = \"$l\"" "$here/builtin/luanti/launcher/init.lua" || fail "no \"$l\""
+	grep -q "label = \"$l\"" "$here/apps/vanilla/launcher/init.lua" || fail "no \"$l\""
 done
 echo "PASS: short headings when narrow, the filters in the user's order, Shift+Tab back from the panel, the imports say Luanti (see $t/*.png)"

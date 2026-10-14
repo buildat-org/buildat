@@ -50,7 +50,7 @@ EOF
 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=$save \
 	BUILDAT_LUANTI_LUA="$me/menu_music.lua" \
 	SDL_AUDIODRIVER=disk SDL_DISKAUDIOFILE="$out/mix.raw" \
-	timeout 200 bin/buildat -a builtin/luanti/devtest -w 1000x700 -u 1 -l 4 \
+	timeout 200 bin/buildat -a app/vanilla/devtest -w 1000x700 -u 1 -l 4 \
 	-o sound_mute=0 -L "$out/cli.log" -c @"$out/cmds.txt" > /dev/null 2>&1 &
 cli=$!
 at_leave=

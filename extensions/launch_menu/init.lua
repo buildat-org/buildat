@@ -58,8 +58,8 @@ local PRIMARY = {app = "Play", save = "Continue", server = "Join",
 -- address typed, rather than what their category says
 local CATALOG_KEYS = {["extension/launch_menu/aitta"] = true,
 		["app/vanilla/contentdb"] = true,
-		["builtin/luanti/import_game"] = true,
-		["builtin/luanti/import_world"] = true}
+		["app/vanilla/import_game"] = true,
+		["app/vanilla/import_world"] = true}
 local SERVER_KEYS = {["extension/launch_menu/connect"] = true,
 		["extension/luanti_client/connect"] = true,
 		["extension/serverlist/refresh"] = true}
@@ -323,12 +323,16 @@ local function gather()
 				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
 				from = a.from, icon = a.icon,
 				id = a.from .. "/" .. tostring(a.id),
-				size = kind == "app" and a.kind ~= "builtin" and
+				size = kind == "app" and cat ~= "game" and
 						a.significance or nil,
 				description = a.description, last = a.last_launched,
 				run = function() warn_if(api.launch(a.key)) end})
+			-- A Luanti game's tile is vanilla's ([LUANTI_APP_GLUE]) and
+			-- not where vanilla's other tiles go as actions
 			if kind == "app" then
-				by_from[a.from] = by_from[a.from] or e
+				if cat ~= "game" then
+					by_from[a.from] = by_from[a.from] or e
+				end
 			else
 				e.sibling_of = a.from
 			end

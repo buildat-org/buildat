@@ -121,7 +121,7 @@ for _, a in ipairs(api.launch_actions()) do
 	local o = {name = a.label, icon = a.icon, key = a.key, kind = a.kind,
 		description = a.description, from = a.from,
 		category = a.category or "action", significance = a.significance}
-	-- An app, or a Luanti game (builtin/luanti's tiles), on the wall
+	-- An app, or a Luanti game (vanilla's tiles), on the wall
 	if o.category == "app" or o.category == "game" then
 		GAMES[#GAMES + 1] = o
 	else

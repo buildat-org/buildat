@@ -5098,6 +5098,11 @@ struct Module: public interface::Module
 			i->load_lua("core.__luanti_mods_path = [==["+mods_path()+"]==]",
 					"vanilla_mods");
 			apply_default_preset(save->path());
+			luanti::Interface::Paths paths;
+			paths.settings_file = luanti_path()+"/settings.json";
+			paths.base_textures = luanti_path()+"/textures/base/pack";
+			paths.texture_packs = luanti_path()+"/texture_packs";
+			i->set_paths(paths);
 			i->run_game(game_path, save);
 		});
 	}

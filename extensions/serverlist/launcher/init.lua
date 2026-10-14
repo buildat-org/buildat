@@ -10,7 +10,7 @@ return function(ctx)
 	local sl = require("buildat/extension/serverlist")
 	local out = {}
 	-- The installed Luanti games' icons, already resolved under the cache
-	-- (builtin/luanti/launcher does the same for the games' own tiles)
+	-- (vanilla's launcher does the same for the games' own tiles)
 	local icons = {}
 	for _, g in ipairs(buildat.list_installed_games("vanilla")) do
 		icons[g.name] = g.icon
