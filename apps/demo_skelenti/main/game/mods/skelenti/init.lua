@@ -370,4 +370,37 @@ core.register_globalstep(function(dtime)
 		end
 	end
 end)
+-- Items within 2 nodes of the player are picked up (user, 2026-10-14):
+-- what fits goes into the inventory, the rest stays on the ground
+local pickup_t = 0
+core.register_globalstep(function(dtime)
+	pickup_t = pickup_t + dtime
+	if pickup_t < 0.2 then
+		return
+	end
+	pickup_t = 0
+	for _, p in ipairs(core.get_connected_players()) do
+		if p:get_hp() > 0 then
+			local pos = p:get_pos()
+			local inv = p:get_inventory()
+			for _, o in ipairs(core.get_objects_inside_radius(
+					{x = pos.x, y = pos.y + 0.5, z = pos.z}, 2)) do
+				local e = o:get_luaentity()
+				if e and e.name == "__builtin:item" and e.itemstring ~= "" then
+					local was = ItemStack(e.itemstring):get_count()
+					local left = inv:add_item("main", e.itemstring)
+					if left:get_count() < was then
+						core.log("action", "skelenti: " .. p:get_player_name() ..
+								" picks up " .. e.itemstring)
+						if left:is_empty() then
+							o:remove()
+						else
+							e:set_item(left)
+						end
+					end
+				end
+			end
+		end
+	end
+end)
 dofile(core.get_modpath("skelenti") .. "/mobs.lua")
