@@ -1917,6 +1917,24 @@ buildat.sub_packet("main:import_next", function(data)
 	transfer_line("Importing", i.name, offset + #part, i.reader.size)
 	send_strings("main:import_data", {string.format("%d", offset), part})
 end)
+-- A public server's import whose world brings mods of its own: the admin
+-- says whether they come with it ([SECURITY_RUN_5])
+buildat.sub_packet("main:import_mods", function(data)
+	local v = cereal.binary_input(data, {"array", "string"})
+	local mods = table.concat(v, ", ", 2)
+	log:info("menu: import: " .. v[1] .. " brings mods: " .. mods)
+	local answer = function(a)
+		return function()
+			waiting("Importing " .. v[1] .. "...")
+			buildat.send_packet("main:import_mods_answer", a)
+		end
+	end
+	ui_utils.show_confirm_dialog(v[1] .. " brings mods of its own: " .. mods ..
+			". A world's mods run with all of the server's reach, its " ..
+			"accounts among them. Keep them only if you trust where the " ..
+			"world came from.", answer("keep"), answer("drop"),
+			"Keep the mods", "Leave them out")
+end)
 
 buildat.sub_packet("main:trim_info", function(data)
 	if done then

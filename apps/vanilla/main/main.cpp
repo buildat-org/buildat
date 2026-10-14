@@ -176,7 +176,7 @@ struct Module: public interface::Module
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
 				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
 				"stop_world", "trim", "export", "export_part", "import_begin",
-				"import_data", "transfer_cancel"})
+				"import_data", "import_mods_answer", "transfer_cancel"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -250,6 +250,8 @@ struct Module: public interface::Module
 				on_import_begin, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:import_data",
 				on_import_data, network::Packet)
+		EVENT_TYPEN("network:packet_received/main:import_mods_answer",
+				on_import_mods_answer, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:transfer_cancel",
 				on_transfer_cancel, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_world_txp",
@@ -1539,7 +1541,9 @@ struct Module: public interface::Module
 	//     main:export_part {offset} -> main:export_data {offset, bytes}
 	//   import: main:import_begin {name, bytes} -> main:import_next
 	//     {offset}; main:import_data {offset, bytes} -> import_next, and
-	//     after the last a menu message or error
+	//     after the last a menu message or error -- or, on a public server
+	//     whose zip brings world mods, main:import_mods {name, mod...} ->
+	//     main:import_mods_answer {"keep" or "drop"}, and then that
 	// simplified: the copy and the zip are made on the server's thread; a
 	// large world holds the game while they are made, as compacting does
 	struct Transfer {
@@ -1547,6 +1551,8 @@ struct Module: public interface::Module
 		bool import = false;
 		ss_ name;
 		int64_t size = 0, done = 0;
+		// The unpacked world's folder while its mods wait on the admin
+		ss_ mods_root;
 	};
 	Transfer m_transfer;
 	enum { TRANSFER_PART = 1024 * 1024 };
@@ -1742,10 +1748,31 @@ struct Module: public interface::Module
 			return;
 		}
 		const ss_ err = finish_import(packet.sender);
+		if(err.empty() && !m_transfer.mods_root.empty())
+			return; // the admin is asked about the world's mods
+		end_import(packet.sender, err);
+	}
+	void end_import(network::PeerInfo::Id peer, const ss_ &err)
+	{
 		end_transfer();
 		if(!err.empty())
-			menu_error(packet.sender, "Importing "+m_transfer_last+" failed: "+
+			menu_error(peer, "Importing "+m_transfer_last+" failed: "+
 					unpathed(err)+". Nothing was kept.");
+	}
+	// The admin's answer about the zip's world mods: kept, or removed
+	void on_import_mods_answer(const network::Packet &packet)
+	{
+		if(m_transfer.peer != packet.sender || m_transfer.mods_root.empty())
+			return;
+		const ss_ root = m_transfer.mods_root;
+		if(packet.data != "keep"){
+			for(const ss_ &p : {root+"/luanti/worldmods", root+"/worldmods"})
+				interface::fs::remove_all(p);
+			log_i(MODULE, "import: the zip's world mods left out");
+		} else {
+			log_w(MODULE, "import: the zip's world mods kept by the admin");
+		}
+		end_import(packet.sender, import_root(packet.sender, root));
 	}
 	ss_ m_transfer_last;
 	// main:transfer_cancel: the client could not write or read its side
@@ -1797,21 +1824,29 @@ struct Module: public interface::Module
 						"down: neither a Buildat save nor a Luanti world";
 			root += "/"+top[0].name;
 		}
-		const bool buildat_save = interface::fs::path_exists(root+"/save.sqlite");
 		// A world's own mods are code the server runs with all of its reach
 		// -- the accounts store among it -- and a public server's admin is
-		// not whoever owns the machine: a zip's are left out there
-		// ([SECURITY_RUN_5]). The Mods menu's ContentDB ones stay.
-		// simplified: left out, not offered; a confirm naming them is the
-		// upgrade if an admin needs one
+		// not whoever owns the machine: there the admin is asked, the mods
+		// named ([SECURITY_RUN_5], the user's call 2026-10-14). The Mods
+		// menu's ContentDB ones are not asked about.
 		if(m_public){
-			for(const ss_ &p : {root+"/luanti/worldmods", root+"/worldmods"}){
-				if(interface::fs::path_exists(p)){
-					log_w(MODULE, "import: the zip's world mods left out");
-					interface::fs::remove_all(p);
-				}
+			sv_<ss_> mods = {m_transfer.name};
+			for(const ss_ &p : {root+"/luanti/worldmods", root+"/worldmods"})
+				for(const auto &e : interface::fs::list_directory(p))
+					if(e.name != "." && e.name != "..")
+						mods.push_back(e.name);
+			if(mods.size() > 1){
+				m_transfer.mods_root = root;
+				send_strings(peer, "main:import_mods", mods);
+				return "";
 			}
 		}
+		return import_root(peer, root);
+	}
+	// The unpacked world at root put where it goes; an error's text or ""
+	ss_ import_root(network::PeerInfo::Id peer, const ss_ &root)
+	{
+		const bool buildat_save = interface::fs::path_exists(root+"/save.sqlite");
 		const ss_ name = free_save_name(m_transfer.name);
 		if(name.empty())
 			return "no free name for "+m_transfer.name;
