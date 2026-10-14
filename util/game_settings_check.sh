@@ -182,7 +182,7 @@ C
 # No damage: a fresh minimal world's player can fall to death before the
 # Escape, which then only respawns
 mkdir -p "$t/uv/apps/vanilla/saves/gsworld/luanti"
-echo "enable_damage = false" > "$t/uv/apps/vanilla/saves/gsworld/luanti/world.mt"
+printf '%s\n' "enable_damage = false" "$WEB_WORLD_MT" > "$t/uv/apps/vanilla/saves/gsworld/luanti/world.mt"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=gsworld start_server "$t/v.log" \
 	"STATUS Listening" 120 auto bin/buildat_server -u launcher=1 -A 127.0.0.1 \
 	-m ../apps/vanilla -D "$t/uv" -C "$t/cv" -l 3 ||

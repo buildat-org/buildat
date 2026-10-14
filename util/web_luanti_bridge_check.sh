@@ -33,7 +33,7 @@ fail() { echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 cd "$here"
 
 mkdir -p "$tmp/world"
-printf 'gameid = devtest\nbackend = sqlite3\nserver_announce = false\n' \
+printf 'gameid = devtest\nbackend = sqlite3\nserver_announce = false\n%s\n' "$WEB_WORLD_MT" \
 	> "$tmp/world/world.mt"
 printf 'mute_sound = true\n' > "$tmp/luanti.conf"
 "$bin" --server --world "$tmp/world" --port $LUANTI --config "$tmp/luanti.conf" \

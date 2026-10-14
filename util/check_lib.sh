@@ -160,7 +160,16 @@ start_server()
 # verdict_keep has to be the very next line after the command that made
 # the verdict, since it reads $?.
 SKIP=77
-fail() { echo "FAIL: $*"; exit 1; }
+# world.mt lines for a web check's world: the least the server keeps,
+# sends and runs, so that what a check measures is the page and not a
+# browser choking on the world (user, 2026-10-14). Below the "Server
+# performance..." form's minimum (4, 4, 4, 100): the buildat server reads
+# a range below 4 blocks as one 64-node section, Luanti as given.
+WEB_WORLD_MT='max_block_send_distance = 2
+max_block_generate_distance = 2
+active_object_send_range_blocks = 2
+liquid_loop_max = 10'
+fail(){ echo "FAIL: $*"; exit 1; }
 skip() { echo "SKIP: $*"; exit $SKIP; }
 
 # A temp directory of the check's own in $CHECK_TMP, removed at its exit

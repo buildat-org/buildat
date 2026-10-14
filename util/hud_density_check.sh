@@ -53,7 +53,7 @@ core.register_globalstep(function()
 	end
 end)
 L
-echo "enable_damage = false" > "$d/apps/vanilla/saves/hd/luanti/world.mt"
+printf '%s\n' "enable_damage = false" "$WEB_WORLD_MT" > "$d/apps/vanilla/saves/hd/luanti/world.mt"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=hd \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	"STATUS Listening" 120 auto "$here/Build/bin/buildat_server" -u launcher=1 \

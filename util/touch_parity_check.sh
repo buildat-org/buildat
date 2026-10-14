@@ -146,7 +146,7 @@ server(){ # dir, extra args...
 	mkdir -p "$d/apps/vanilla/saves/tp/luanti" "$d/shared"
 	cp "$t/fixture.lua" "$d/shared/"
 	# No damage: a fall before the teleport would respawn
-	echo "enable_damage = false" > "$d/apps/vanilla/saves/tp/luanti/world.mt"
+	printf '%s\n' "enable_damage = false" "$WEB_WORLD_MT" > "$d/apps/vanilla/saves/tp/luanti/world.mt"
 	BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=tp \
 	BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$d.log" \
 		"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \

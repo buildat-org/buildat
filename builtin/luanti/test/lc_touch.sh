@@ -32,7 +32,7 @@ fail() { echo "FAIL: $*"; exit 1; }
 # digs too slowly to get through, them on it looking down at it, stone in
 # the third slot; what the player does, logged
 mkdir -p "$out/world/worldmods/lc_touch"
-printf 'gameid = mineclone2\nbackend = sqlite3\nserver_announce = false\ncreative_mode = false\nenable_damage = false\n' \
+printf 'gameid = mineclone2\nbackend = sqlite3\nserver_announce = false\ncreative_mode = false\nenable_damage = false\n%s\n' "$WEB_WORLD_MT" \
 	> "$out/world/world.mt"
 printf 'name = lc_touch\n' > "$out/world/worldmods/lc_touch/mod.conf"
 cat > "$out/world/worldmods/lc_touch/init.lua" <<'EOF'

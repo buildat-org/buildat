@@ -49,7 +49,7 @@ core.register_on_joinplayer(function(player)
 	core.after(3, function() core.chat_send_player(name, "lock_check: ready") end)
 end)
 L
-echo "enable_damage = false" > "$d/apps/vanilla/saves/wl/luanti/world.mt"
+printf '%s\n' "enable_damage = false" "$WEB_WORLD_MT" > "$d/apps/vanilla/saves/wl/luanti/world.mt"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
