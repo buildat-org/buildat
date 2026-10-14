@@ -415,6 +415,14 @@ public:
 			materialToUse = m_fmt.look_id(back);
 			return true;
 		}
+		// [LEAF_SOLID_FACES] A voxel that draws all of its faces -- Luanti's
+		// allfaces, a tree's leaves -- is seen through, so the face against
+		// it is drawn: with the edge material alone, ground beside leaves
+		// was culled and the ground looked through.
+		if(draw_type(front_def) == interface::FaceDrawType::ALWAYS){
+			materialToUse = m_fmt.look_id(back);
+			return true;
+		}
 		// A translucent voxel does not draw its face against an opaque one:
 		// that surface is the opaque voxel's own, drawn by it and seen
 		// through the water rather than under another blended layer of it.
