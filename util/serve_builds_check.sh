@@ -10,12 +10,23 @@
 #   2. 0.0.2: 422, its log said; the server stays on 0.0.1.
 #   3. 0.0.3: a tar with ../x.so: refused, nothing written outside, on
 #      0.0.1 still.
+#   0. First: a BUILDS_URL that is http to a name, not a private address
+#      (127.evil.com, 192.168.1.1.evil.com) or a path that looks like one,
+#      stops the script at once ([SEC_RUN5_LEFTOVERS]).
 #
 #   util/serve_builds_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp serve_builds; t=$CHECK_TMP
+for u in http://127.evil.com/b http://192.168.1.1.evil.com http://evil.com/127.0/b; do
+	BUILDAT_SERVE_DIR="$t/refused" BUILDS_URL=$u timeout 10 \
+		"$here/util/serve_latest_release.sh" minigame 1 "$t/refused_user" > "$t/refused.log" 2>&1
+	rc=$?
+	[ $rc = 2 ] && grep -q "BUILDS_URL is https" "$t/refused.log" ||
+		fail "BUILDS_URL=$u: exit $rc, not refused ($t/refused.log)"
+done
+echo "ok: BUILDS_URL to a name that looks private refused"
 groups=()
 trap 'for g in "${groups[@]}"; do kill -- -"$g" 2>/dev/null; done; check_cleanup' EXIT
 cd "$here/Build"

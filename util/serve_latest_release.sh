@@ -166,9 +166,19 @@ asset_re='linux-x86_64-web-precompiled\.tar\.gz'
 builds_poll=${BUILDS_POLL:-30}
 builds_max_wait=${BUILDS_MAX_WAIT:-7200}
 if [ -n "${BUILDS_URL:-}" ]; then
+	# The host alone, and a private one only as an address: a name such as
+	# 127.evil.com resolves anywhere ([SEC_RUN5_LEFTOVERS])
+	builds_host=name
 	case $BUILDS_URL in
-	https://*|http://127.*|http://localhost[:/]*|http://\[::1\]*|http://10.*|\
-	http://192.168.*|http://172.1[6-9].*|http://172.2[0-9].*|http://172.3[01].*) ;;
+	https://*) builds_host=localhost ;;
+	http://\[::1\]*) builds_host=localhost ;;
+	http://*)
+		builds_host=${BUILDS_URL#http://}
+		builds_host=${builds_host%%[:/]*}
+		case $builds_host in localhost) ;; *[!0-9.]*) builds_host=name ;; esac ;;
+	esac
+	case $builds_host in
+	localhost|127.*|10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) ;;
 	*)
 		echo "BUILDS_URL is https, or http to a loopback or private address:" \
 			"what it answers is code the servers load" >&2
