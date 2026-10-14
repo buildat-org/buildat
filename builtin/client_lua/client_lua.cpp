@@ -62,26 +62,27 @@ struct Module: public interface::Module
 		log_t(MODULE, "on_module_loaded(): %s", cs(event.name));
 		ss_ module_name = event.name;
 		ss_ module_path = m_server->get_module_path(module_name);
-		ss_ client_lua_path = module_path+"/client_lua";
-		auto list = interface::fs::list_directory(client_lua_path);
-		if(list.empty())
+		// A variant's <module>/client_lua/<file> over its base's or
+		// builtin's module's, one file at a time, and the module's own
+		// directory with no meta.json in the variant ([LUANTI_APP_PACKAGES])
+		const ss_ own = m_server->get_modules_path()+"/"+module_name+
+				"/client_lua";
+		sm_<ss_, ss_> files;
+		for(const ss_ &dir : {module_path+"/client_lua", own})
+			for(const interface::fs::Node &n : interface::fs::list_directory(dir))
+				if(!n.is_directory)
+					files[n.name] = dir+"/"+n.name;
+		if(files.empty())
 			return;
-
+		const bool other = own != module_path+"/client_lua";
 		sv_<ss_> log_list;
-		for(const interface::fs::Node &n : list){
-			if(n.is_directory)
-				continue;
-			log_list.push_back(n.name);
-		}
+		for(const auto &f : files)
+			log_list.push_back(other && f.second.compare(0, own.size(), own)
+					== 0 ? f.first+" (the variant's)" : f.first);
 		log_i(MODULE, "client_lua: %s: %s", cs(module_name), cs(dump(log_list)));
-
-		for(const interface::fs::Node &n : list){
-			if(n.is_directory)
-				continue;
-			const ss_ &file_path = client_lua_path+"/"+n.name;
-			const ss_ &public_file_name = module_name+"/"+n.name;
+		for(const auto &f : files){
 			client_file::access(m_server, [&](client_file::Interface *i){
-				i->add_file_path(public_file_name, file_path);
+				i->add_file_path(module_name+"/"+f.first, f.second);
 			});
 		}
 	}

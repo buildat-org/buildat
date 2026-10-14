@@ -1,0 +1,98 @@
+Luanti-based apps: a variant of vanilla, an app that holds its game
+====================================================================
+
+A Buildat app can run a Luanti game through builtin/luanti
+(doc/luanti_module.txt) in one of two ways.
+
+1. A variant of vanilla
+-----------------------
+apps/vanilla is the app that plays the Luanti games a user has installed
+(user/shared/vanilla/games). A variant is vanilla with something added or
+changed, and holds only that:
+
+    apps/vanilla_voxel_physics/
+        meta.json               {"base": "vanilla", ...}
+        launcher/               its launch grid tile
+        voxel_physics/          a module of its own (meta.json, server and
+                                client_lua files)
+        main/client_lua/init.lua   optional: one of vanilla's main
+                                client_lua files replaced (main/ has no
+                                meta.json, so the rest of vanilla's main
+                                module stays)
+
+How it loads: vanilla's modules load as the variant's own; a module
+directory in the variant with a meta.json replaces vanilla's whole
+module, one without it replaces only the client_lua files it has. The
+order is variant, base, builtin, per file. The variant is its own app
+for the rest: its tile, its saves (user/apps/<author>.<name>/ when
+installed), its settings. It plays the same games as vanilla, from the
+same user/shared/vanilla/games.
+
+Where the base is found: "base": "vanilla" is looked for beside the
+variant (apps/vanilla in the tree), then among the apps Buildat ships
+(share/apps/vanilla), so an installed variant finds the vanilla of the
+Buildat it runs on. "base": "<author>.<name>" names an installed package
+instead, with "base_version" the lowest version taken (the newest
+installed of that major version is used). A base that does not resolve
+stops the server ("loader: ...") and refuses the install in the client.
+
+Run it from the tree:
+
+    $ cd Build
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../apps/vanilla_voxel_physics
+    $ bin/buildat -s localhost
+
+2. An app that holds its game
+-----------------------------
+The Luanti game is a directory inside the app's own module, and the
+module runs it; no game is installed and nothing names vanilla.
+apps/demo_skelenti is the example:
+
+    apps/demo_skelenti/
+        meta.json               no "base"
+        launcher/
+        main/
+            meta.json
+            main.cpp            loads builtin/luanti, then
+                                run_game(<module path>/game, <save>)
+            game/               the Luanti game: game.conf, mods/
+            client_lua/init.lua luanti.run_client(app) and the app's
+                                own HUD, inventory and mobs on its stages
+
+The module talks to the game through the bridge (call_json one way,
+core.buildat_emit the other; doc/server_api.txt, the luanti section).
+apps/luanti_glue_test is the same shape in a few dozen lines, with
+minimal_game.
+
+Run it from the tree:
+
+    $ cd Build
+    $ bin/buildat_server -m ../apps/demo_skelenti
+    $ bin/buildat -s localhost
+
+Packing and publishing
+----------------------
+Either kind is an Aitta package (doc/aitta.txt): fill in meta.json's
+author, name, version, engine_api and licences, then
+
+    $ bin/buildat aitta keygen ~/buildat.key
+    $ bin/buildat aitta pack ../apps/vanilla_voxel_physics ~/buildat.key /tmp/out
+    $ bin/buildat aitta install /tmp/out/<author>-<name>-<version>.zip user
+    $ bin/buildat_server -m user/installed/<author>/<name>/<version> -D user
+
+or publish the .zip and its .sig to an Aitta and install it from the
+client's "Apps from Aitta". A variant's package holds only the variant;
+vanilla is not in it.
+
+Licences
+--------
+license_code covers the app's code, the Luanti game's Lua included;
+license_media its textures, sounds and models. A Luanti game's mods are
+licensed one by one (each mod's LICENSE.txt or license.txt; a game's
+README or LEGAL.md often lists them), so the fields name every licence
+in the package, joined: "MIT AND LGPL-2.1-or-later" when all of them
+apply, "CC-BY-SA-4.0 OR CC-BY-4.0" when either may be chosen. An Aitta
+takes the expression when every id in it is on its list (free licences
+by default). Media under CC BY or CC BY-SA needs its credit kept: name
+the authors in the app's README. A variant declares only what it holds
+itself; vanilla's and the user's games are not in its package.

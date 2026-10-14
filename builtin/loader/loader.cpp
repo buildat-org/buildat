@@ -294,43 +294,24 @@ struct Module: public interface::Module, public loader::Interface
 		// meta.json (the Aitta manifest) names the base, whose modules are
 		// loaded as the variant's own after the variant's -- a module
 		// directory in both is the variant's, since its path is first
-		ss_ base = read_base_game(m_server->get_modules_path());
-		if(!base.empty()){
-			m_base_path = m_server->get_modules_path()+"/../"+base;
-			if(!interface::fs::path_exists(m_base_path+"/main/meta.json")){
-				m_server->shutdown(1, ss_()+"loader: base game \""+base+
-						"\" not found beside this one");
-				return;
-			}
-			log_i(MODULE, "A variant of %s", cs(base));
+		// ([LUANTI_APP_PACKAGES]: beside it, shipped or installed)
+		const ss_ app_dir = m_server->get_modules_path();
+		json::json_error_t e;
+		const json::Value m = json::load_file((app_dir+"/meta.json").c_str(),
+				&e);
+		ss_ why;
+		m_base_path = interface::aitta::find_base(m, app_dir,
+				m_server->get_config().get<ss_>("share_path"),
+				m_server->get_config().get<ss_>("user_path"), &why);
+		if(!why.empty()){
+			m_server->shutdown(1, "loader: "+why);
+			return;
+		}
+		if(!m_base_path.empty()){
+			log_i(MODULE, "A variant of %s", cs(m_base_path));
 			m_module_load_paths.push_back(m_base_path);
 		}
 		m_module_load_paths.push_back(m_server->get_builtin_modules_path());
-	}
-
-	// The "base" of <game>/meta.json, or "" (no file, no field)
-	static ss_ read_base_game(const ss_ &modules_path)
-	{
-		ss_ meta_path = modules_path+"/meta.json";
-		std::ifstream f(meta_path, std::ios::binary);
-		if(!f.good())
-			return "";
-		std::string content((std::istreambuf_iterator<char>(f)),
-				std::istreambuf_iterator<char>());
-		json::json_error_t json_error;
-		json::Value v = json::load_string(content.c_str(), &json_error);
-		if(v.is_undefined() || !v.is_object())
-			return "";
-		const json::Value &base = v.get("base");
-		if(!base.is_string())
-			return "";
-		ss_ name = base.as_string();
-		// A directory name and nothing else: a base is a sibling game
-		for(char c : name){
-			if(!isalnum((unsigned char)c) && c != '_' && c != '-')
-				return "";
-		}
-		return name;
 	}
 
 	~Module()

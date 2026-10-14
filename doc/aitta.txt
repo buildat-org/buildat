@@ -27,10 +27,25 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       with no server (Play)
         "icon": "icon.png",           optional: a square PNG in the
                                       archive, 256 px and 64 kB at most
-        "screenshot": "shot.jpg"      optional: a PNG or a JPEG
+        "screenshot": "shot.jpg",     optional: a PNG or a JPEG
                                       (baseline or progressive, 8-bit),
                                       1920 px a side and 2 MB at most
+        "base": "vanilla",            optional: the app this one is a
+                                      variant of (doc/luanti_apps.txt):
+                                      a shipped app's name, or
+                                      "<author>.<name>" of an installed
+                                      package
+        "base_version": "1.2.0"       optional, with an <author>.<name>
+                                      base: the lowest version taken;
+                                      the newest installed of its major
+                                      version is used
     }
+
+license_code and license_media are SPDX ids, or an expression of them
+joined by AND and OR with parentheses ("MIT AND (CC-BY-SA-4.0 OR
+LGPL-2.1-or-later)"); an Aitta takes it when every id in it is on its
+list. A base that does not resolve refuses the install in the client
+("install it first").
 
 The icon and screenshot are checked by their bytes, not their names, at
 pack and again at publish. The icon is on the release's launch grid

@@ -98,6 +98,16 @@ namespace interface
 		// A SemVer 2.0 version, 40 characters at most
 		bool semver_ok(const ss_ &v);
 
+		// [LUANTI_APP_PACKAGES] The app a variant is made on ([GAME_BASE]):
+		// its manifest's "base", a plain name -- an app beside app_dir, as
+		// in the tree, else one shipped in <share_path>/apps -- or
+		// "<author>.<name>", an installed package: the newest installed
+		// version, or with "base_version" the newest of its major at that
+		// version or above. The base's directory; "" with *why empty for
+		// no base, "" with *why set for one not there.
+		ss_ find_base(const json::Value &m, const ss_ &app_dir,
+				const ss_ &share_path, const ss_ &user_path, ss_ *why);
+
 		// What pack() puts in the archive: every file under dir, '/'
 		// separated, the names starting with '.' and aitta_page/ (the
 		// package's page, pack_page()'s) left out
@@ -115,8 +125,11 @@ namespace interface
 		// review: a reviewer's playtest ([AITTA_REVIEW]), an app only, into
 		// <user>/review/<author>__<name>/<version>/, no key kept, over one
 		// there was.
+		// share_path given: a variant whose base is not there (find_base())
+		// is refused, naming it.
 		ss_ install(const ss_ &zip_path, const ss_ &sig_path,
-				const ss_ &user_path, bool review = false);
+				const ss_ &user_path, bool review = false,
+				const ss_ &share_path = "");
 	}
 }
 // vim: set noet ts=4 sw=4:

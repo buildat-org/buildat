@@ -1179,8 +1179,9 @@ struct Module: public interface::Module, public moderation::Host
 					"\", and the manifest says \""+jstr(m, "author")+"\"");
 		for(const char *k : {"license_code", "license_media"})
 			if(!licence_ok(jstr(m, k)))
-				return drop(ss_(k)+" \""+jstr(m, k)+"\" is not one this "
-						"instance takes");
+				return drop(ss_(k)+" \""+jstr(m, k)+"\" names one this "
+						"instance does not take, or is not ids joined by AND "
+						"and OR");
 		const ss_ id = jstr(m, "author")+"/"+jstr(m, "name")+"/"+
 				jstr(m, "version");
 		// A moderator's "Delist package" holds for its later releases
@@ -1374,8 +1375,31 @@ struct Module: public interface::Module, public moderation::Host
 				"delisted" : pkg);
 	}
 
+	// An SPDX expression ([LUANTI_APP_PACKAGES]): ids joined by AND and OR,
+	// in parentheses or not, every id one this instance takes -- a Luanti
+	// game's mods come under several. simplified: no WITH (an exception);
+	// the parentheses are counted, not parsed
+	bool licence_ok(const ss_ &expression)
+	{
+		int depth = 0;
+		ss_ flat;
+		for(char c : expression){
+			depth += c == '(' ? 1 : c == ')' ? -1 : 0;
+			if(depth < 0)
+				return false;
+			flat += c == '(' || c == ')' ? ' ' : c;
+		}
+		std::istringstream is(flat);
+		ss_ word;
+		size_t n = 0;
+		for(; is>>word; n++)
+			if(n % 2 ? word != "AND" && word != "OR" : !licence_id_ok(word))
+				return false;
+		return depth == 0 && n % 2 == 1;
+	}
+
 	// "GPL-3.0-only", "GPL-3.0-or-later" and "GPL-3.0+" are GPL-3.0's
-	bool licence_ok(ss_ l)
+	bool licence_id_ok(ss_ l)
 	{
 		for(const char *suffix : {"-only", "-or-later", "+"}){
 			const ss_ s = suffix;

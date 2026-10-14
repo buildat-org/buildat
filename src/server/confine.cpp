@@ -4,6 +4,8 @@
 #include "core/config.h"
 #include "core/log.h"
 #include "interface/fs.h"
+#include "interface/aitta.h"
+#include "core/json.h"
 #include <cstdio>
 #include <cstdlib>
 #ifdef _WIN32
@@ -448,6 +450,18 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	rs.add(app_shared, rw);
 	rs.add(app_cache, rw);
 	rs.add(user+"/shared", FS_READ);
+	// A variant's base, which may be an installed package under the user
+	// path ([LUANTI_APP_PACKAGES]); the loader refuses one not there
+	{
+		json::json_error_t e;
+		ss_ why;
+		const ss_ base = real(interface::aitta::find_base(json::load_file(
+				(module_path+"/meta.json").c_str(), &e), module_path,
+				config.get<ss_>("share_path"), config.get<ss_>("user_path"),
+				&why));
+		if(!base.empty())
+			rs.add(base, FS_READ);
+	}
 	rs.add_around(prebuilt, {app_cache}, FS_READ);
 	auto net_rule = [&](uint64_t access, int port){
 		struct landlock_net_port_attr a;

@@ -133,8 +133,18 @@ echo "$out" | grep -q "more than 16 KiB" || fail "a 17 KB manifest: $out"
 # 3. A licence not taken; an author not the key's
 manifest tester 1.1.0 Proprietary
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.1.0"
-"$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "not one this instance takes" ||
+"$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "does not take" ||
 	fail "a proprietary licence was not refused"
+# An SPDX expression of free ids is taken, one naming another refused
+# ([LUANTI_APP_PACKAGES]: a Luanti game's mods come under several)
+manifest tester 1.6.0 "MIT AND (CC-BY-SA-4.0 OR LGPL-2.1-or-later)"
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.6.0"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester/demo/1.6.0" || fail "an SPDX expression: $out"
+manifest tester 1.7.0 "MIT OR Proprietary"
+zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.7.0"
+"$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "does not take" ||
+	fail "an expression naming a non-free licence was not refused"
 manifest someone 1.2.0 MIT
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.2.0"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "bound to the author" ||

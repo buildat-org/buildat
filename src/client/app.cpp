@@ -1179,13 +1179,12 @@ static ss_ app_kind(const ss_ &dir)
 			&err);
 	if(m.get("kind").is_string())
 		return m.get("kind").as_string();
-	const json::Value root = json::load_file((dir+"/meta.json").c_str(),
-			&err);
-	const json::Value &base = root.get("base");
-	if(base.is_string() && valid_app_name(base.as_string()))
-		return app_kind(g_client_config.get<ss_>("share_path")+"/apps/"+
-				base.as_string());
-	return "";
+	ss_ why;
+	const ss_ base = interface::aitta::find_base(json::load_file(
+			(dir+"/meta.json").c_str(), &err), dir,
+			g_client_config.get<ss_>("share_path"),
+			g_client_config.get<ss_>("user_path"), &why);
+	return base.empty() ? "" : app_kind(base);
 }
 
 // What the app's server calls it: an installed one without its version

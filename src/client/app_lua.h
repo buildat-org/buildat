@@ -767,7 +767,8 @@
 					throw Exception("cannot write "+f.first);
 			}
 			const ss_ dir = interface::aitta::install(tmp+".zip", tmp+".sig",
-					g_client_config.get<ss_>("user_path"), review);
+					g_client_config.get<ss_>("user_path"), review,
+					g_client_config.get<ss_>("share_path"));
 			if(!from.empty()){
 				std::ofstream o(dir+"/.aitta_from", std::ios::binary);
 				o<<from<<"\n";
@@ -2092,7 +2093,7 @@
 	// client_main among those returned, for the caller to run. The storage
 	// is the app's own, as with a local server, until leave_to_menu().
 	// simplified: the modules in name order, not the loader's dependency
-	// order, and no "base" app under it
+	// order
 	// Trusted only: client/api.lua
 	static int l_serverless_start(lua_State *L)
 	{
@@ -2106,12 +2107,28 @@
 			lua_pushstring(L, ("no app "+id).c_str());
 			return 2;
 		}
+		// A variant's base's modules under it, a module in both the
+		// variant's ([LUANTI_APP_PACKAGES])
+		json::json_error_t base_err;
+		ss_ why;
+		const ss_ base = interface::aitta::find_base(json::load_file(
+				(dir+"/meta.json").c_str(), &base_err), dir,
+				g_client_config.get<ss_>("share_path"),
+				g_client_config.get<ss_>("user_path"), &why);
+		if(!why.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, (id+": "+why).c_str());
+			return 2;
+		}
+		sm_<ss_, ss_> module_dirs;
+		for(const ss_ &d : {base, dir})
+			for(const auto &n : interface::fs::list_directory(d))
+				if(!d.empty() && n.is_directory && interface::fs::path_exists(
+						d+"/"+n.name+"/meta.json"))
+					module_dirs[n.name] = d+"/"+n.name;
 		sv_<ss_> modules;
-		for(const auto &n : interface::fs::list_directory(dir))
-			if(n.is_directory && interface::fs::path_exists(
-					dir+"/"+n.name+"/meta.json"))
-				modules.push_back(n.name);
-		std::sort(modules.begin(), modules.end());
+		for(const auto &pair : module_dirs)
+			modules.push_back(pair.first);
 		sv_<std::pair<ss_, ss_>> files;
 		sv_<ss_> mains;
 		std::function<void(const ss_&, const ss_&)> data =
@@ -2124,10 +2141,13 @@
 			}
 		};
 		for(const ss_ &m : modules){
-			const ss_ md = dir+"/"+m;
-			for(const auto &n : interface::fs::list_directory(md+"/client_lua"))
-				if(!n.is_directory)
-					files.push_back({m+"/"+n.name, md+"/client_lua/"+n.name});
+			const ss_ md = module_dirs[m];
+			// A variant's file over its base's module's, one at a time
+			std::set<ss_> have;
+			for(const ss_ &cl : {dir+"/"+m+"/client_lua", md+"/client_lua"})
+				for(const auto &n : interface::fs::list_directory(cl))
+					if(!n.is_directory && have.insert(n.name).second)
+						files.push_back({m+"/"+n.name, cl+"/"+n.name});
 			data(md+"/client_data", m+"/");
 			json::json_error_t err;
 			const json::Value meta = json::load_file(

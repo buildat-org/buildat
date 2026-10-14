@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <tuple>
 
 using interface::sha256::unhex;
 
@@ -325,6 +326,20 @@ ss_ check_manifest(const json::Value &m, bool service)
 	for(const char *k : {"icon", "screenshot"})
 		if(!str(k).empty() && !archive_path_ok(str(k)))
 			return ss_("\"")+k+"\": a path inside the archive, like icon.png";
+	// [LUANTI_APP_PACKAGES] A variant's base: a plain name or
+	// <author>.<name>, and a version to start from
+	if(!m.get("base").is_undefined()){
+		const ss_ b = str("base");
+		const size_t dot = b.find('.');
+		if(dot == ss_::npos ? !plain_name(b, false) :
+				!plain_name(b.substr(0, dot), false) ||
+				!plain_name(b.substr(dot + 1), false))
+			return "\"base\": an app's name, like vanilla, or an installed "
+					"package's <author>.<name>";
+	}
+	if(!m.get("base_version").is_undefined() &&
+			!semver_ok(str("base_version")))
+		return "\"base_version\": a SemVer 2.0 version, like 1.2.0";
 	// [FRONT_PAGES]: who it suits; a browser's page at / lists only
 	// "everyone" and "teen"
 	// A newer Buildat's word, to a service: a word
@@ -437,6 +452,76 @@ ss_ check_media(const json::Value &m, const ss_ &dir)
 			return v.as_string()+": "+why.substr(why.find(": ") + 2);
 	}
 	return "";
+}
+
+// a < b in SemVer's order. simplified: MAJOR.MINOR.PATCH by number and a
+// prerelease below its release; two prereleases compare as strings, not
+// by SemVer's identifiers (1.0.0-beta.11 is below 1.0.0-beta.2 here)
+static bool version_less(const ss_ &a, const ss_ &b)
+{
+	auto key = [](const ss_ &v){
+		const ss_ head = v.substr(0, v.find('+'));
+		const size_t dash = head.find('-');
+		long long n[3] = {0, 0, 0};
+		sscanf(head.c_str(), "%lld.%lld.%lld", &n[0], &n[1], &n[2]);
+		return std::make_tuple(n[0], n[1], n[2], dash == ss_::npos,
+				dash == ss_::npos ? ss_() : head.substr(dash + 1));
+	};
+	return key(a) < key(b);
+}
+
+static ss_ major_of(const ss_ &v)
+{
+	return v.substr(0, v.find('.'));
+}
+
+ss_ find_base(const json::Value &m, const ss_ &app_dir,
+		const ss_ &share_path, const ss_ &user_path, ss_ *why)
+{
+	why->clear();
+	const json::Value &bv = m.get("base");
+	if(!bv.is_string())
+		return "";
+	const ss_ b = bv.as_string();
+	const size_t dot = b.find('.');
+	if(dot == ss_::npos){
+		if(!plain_name(b, false)){
+			*why = "the base \""+b+"\" is not an app's name";
+			return "";
+		}
+		for(const ss_ &d : {app_dir+"/../"+b, share_path+"/apps/"+b})
+			if(fs::path_exists(d+"/main/meta.json"))
+				return d;
+		*why = "the base app \""+b+"\" is not there";
+		return "";
+	}
+	const ss_ author = b.substr(0, dot), name = b.substr(dot + 1);
+	const json::Value &from = m.get("base_version");
+	const ss_ least = from.is_string() ? from.as_string() : "";
+	if(!plain_name(author, false) || !plain_name(name, false) ||
+			(!least.empty() && !semver_ok(least))){
+		*why = "the base \""+b+"\" is not <author>.<name>";
+		return "";
+	}
+	const ss_ dir = user_path+"/installed/"+author+"/"+name;
+	ss_ best;
+	for(const fs::Node &n : fs::list_directory(dir)){
+		if(!n.is_directory || !semver_ok(n.name) ||
+				!fs::path_exists(dir+"/"+n.name+"/main/meta.json"))
+			continue;
+		if(!least.empty() && (major_of(n.name) != major_of(least) ||
+				version_less(n.name, least)))
+			continue;
+		if(best.empty() || version_less(best, n.name))
+			best = n.name;
+	}
+	if(best.empty()){
+		*why = "the base "+author+"/"+name+(least.empty() ? ss_() :
+				" "+least+" or a newer "+major_of(least)+".x")+
+				" is not installed";
+		return "";
+	}
+	return dir+"/"+best;
 }
 
 ss_ kind_of(const json::Value &m)
@@ -645,7 +730,7 @@ ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
 }
 
 ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
-		bool review)
+		bool review, const ss_ &share_path)
 {
 	const ss_ zip = read_file(zip_path);
 	json::json_error_t e;
@@ -673,6 +758,12 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		const ss_ why = check_manifest(m);
 		if(!why.empty())
 			throw Exception("meta.json: "+why);
+		if(!share_path.empty()){
+			ss_ why;
+			find_base(m, incoming, share_path, user_path, &why);
+			if(!why.empty())
+				throw Exception(why+"; install it first");
+		}
 		const ss_ kind = kind_of(m);
 		if(review){
 			// [AITTA_REVIEW] A playtest: apart from the installed ones,
