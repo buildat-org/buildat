@@ -3342,6 +3342,178 @@ struct CInstance: public voxelworld::Instance
 		return buf->volume->sample_at(voxel_p);
 	}
 
+	void mark_buffer_dirty(Section *section, ChunkBuffer &buf)
+	{
+		if(!buf.dirty){
+			buf.dirty = true;
+			m_total_buffers_dirty++;
+		}
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>()); // position in descending order
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+	}
+
+	// A chunk's buffer, loaded if it is not, and its section listed so that
+	// unload_old_buffers() sees it. nullptr for a chunk that is not there.
+	ChunkBuffer* load_buffer(const pv::Vector3DInt32 &chunk_p)
+	{
+		Section *section = get_section(container_coord16(chunk_p,
+				m_section_size_chunks));
+		if(section == nullptr || !section->loaded ||
+				section->node_ids->getVoxelAt(chunk_p) == 0)
+			return nullptr;
+		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
+				&m_total_buffers_loaded);
+		if(!buf.volume)
+			return nullptr;
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>()); // position in descending order
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+		return &buf;
+	}
+
+	// [LIQUID_SECTION_SURFACE] The neighbours of every dirty buffer in
+	// memory before the commit fills the padding from them: one that was
+	// not left its side undefined, which a liquid meshed as its surface
+	// inside the water. Before the commit's walk, which a load would
+	// otherwise change under it.
+	void load_padding_neighbours()
+	{
+		sv_<pv::Vector3DInt32> dirty;
+		for(Section *section : m_sections_with_loaded_buffers)
+			for(size_t i = 0; i < section->chunk_buffers.size(); i++)
+				if(section->chunk_buffers[i].dirty)
+					dirty.push_back(section->get_chunk_p(i));
+		for(const pv::Vector3DInt32 &cp : dirty)
+			for(int dz = -1; dz <= 1; dz++)
+			for(int dy = -1; dy <= 1; dy++)
+			for(int dx = -1; dx <= 1; dx++)
+				if(dx != 0 || dy != 0 || dz != 0)
+					load_buffer(cp + pv::Vector3DInt32(dx, dy, dz));
+	}
+
+	// [SECTION_EDGE_FACES] [LIQUID_SECTION_SURFACE] The voxels lc..uc (world)
+	// of chunk_p were written: each neighbour chunk whose padding holds one
+	// of them, and holds something else, is made dirty, so that its commit
+	// fills the padding again (fill_chunk_padding). Without it a dig at a
+	// chunk edge left the neighbour's face toward the hole unmeshed, and a
+	// chunk committed before its neighbour existed kept undefined padding,
+	// which draws a liquid's surface inside the water. The neighbour's
+	// buffer is loaded for the comparison; that also has it in memory when
+	// this chunk's own padding is filled.
+	void dirty_neighbour_padding(const pv::Vector3DInt32 &chunk_p,
+			const pv::Vector3DInt32 &lc, const pv::Vector3DInt32 &uc)
+	{
+		const pv::Region own = get_chunk_region_voxels(chunk_p);
+		const pv::Vector3DInt32 olc = own.getLowerCorner();
+		const pv::Vector3DInt32 ouc = own.getUpperCorner();
+		// Only the sides the written box touches
+		const int x0 = lc.getX() == olc.getX() ? -1 : 0, x1 = uc.getX() == ouc.getX() ? 1 : 0;
+		const int y0 = lc.getY() == olc.getY() ? -1 : 0, y1 = uc.getY() == ouc.getY() ? 1 : 0;
+		const int z0 = lc.getZ() == olc.getZ() ? -1 : 0, z1 = uc.getZ() == ouc.getZ() ? 1 : 0;
+		for(int dz = z0; dz <= z1; dz++)
+		for(int dy = y0; dy <= y1; dy++)
+		for(int dx = x0; dx <= x1; dx++){
+			if(dx == 0 && dy == 0 && dz == 0)
+				continue;
+			const pv::Vector3DInt32 np(chunk_p.getX() + dx,
+					chunk_p.getY() + dy, chunk_p.getZ() + dz);
+			ChunkBuffer *nbp = load_buffer(np);
+			if(nbp == nullptr || nbp->dirty)
+				continue;
+			ChunkBuffer &nb = *nbp;
+			// The written box's part inside the neighbour's padding
+			const pv::Region nr = get_chunk_region_voxels(np);
+			const pv::Vector3DInt32 nlc = nr.getLowerCorner() -
+					pv::Vector3DInt32(1, 1, 1);
+			const pv::Vector3DInt32 nuc = nr.getUpperCorner() +
+					pv::Vector3DInt32(1, 1, 1);
+			const pv::Vector3DInt32 a(std::max(lc.getX(), nlc.getX()),
+					std::max(lc.getY(), nlc.getY()),
+					std::max(lc.getZ(), nlc.getZ()));
+			const pv::Vector3DInt32 b(std::min(uc.getX(), nuc.getX()),
+					std::min(uc.getY(), nuc.getY()),
+					std::min(uc.getZ(), nuc.getZ()));
+			const pv::Vector3DInt32 off = nr.getLowerCorner();
+			bool differs = false;
+			for(int z = a.getZ(); z <= b.getZ() && !differs; z++)
+			for(int y = a.getY(); y <= b.getY() && !differs; y++)
+			for(int x = a.getX(); x <= b.getX() && !differs; x++)
+				differs = nb.volume->getVoxelAt(x - off.getX(),
+						y - off.getY(), z - off.getZ()).data !=
+						peek_voxel(pv::Vector3DInt32(x, y, z)).data;
+			if(differs)
+				mark_buffer_dirty(get_section(container_coord16(np,
+						m_section_size_chunks)), nb);
+		}
+	}
+
+	// BUILDAT_VOXELWORLD_PADDING_AUDIT: every 10 s, the padding of each
+	// loaded chunk buffer against the neighbour's voxel where that is loaded
+	// too -- undefined where the neighbour is defined, or another voxel. A
+	// debugging aid for [LIQUID_SECTION_SURFACE]; nothing reads it.
+	int64_t m_padding_audit_us = 0;
+	void audit_padding()
+	{
+		static const bool on = getenv("BUILDAT_VOXELWORLD_PADDING_AUDIT");
+		const int64_t now = interface::os::time_us();
+		if(!on || now < m_padding_audit_us)
+			return;
+		m_padding_audit_us = now + 10000000;
+		size_t chunks = 0, undef = 0, other = 0, light = 0, bad_chunks = 0;
+		for(auto &sector : m_sections)
+		for(auto &pair : sector.second){
+			Section &section = pair.second;
+			if(!section.loaded)
+				continue;
+			for(size_t i = 0; i < section.chunk_buffers.size(); i++){
+				ChunkBuffer &buf = section.chunk_buffers[i];
+				if(!buf.volume || buf.dirty)
+					continue;
+				chunks++;
+				const pv::Vector3DInt32 cp = section.get_chunk_p(i);
+				const pv::Region r = buf.volume->getEnclosingRegion();
+				const pv::Vector3DInt32 lc = r.getLowerCorner(),
+						uc = r.getUpperCorner();
+				const pv::Vector3DInt32 off(cp.getX() * m_chunk_size_voxels.getX(),
+						cp.getY() * m_chunk_size_voxels.getY(),
+						cp.getZ() * m_chunk_size_voxels.getZ());
+				size_t before = undef + other;
+				for(int z = lc.getZ(); z <= uc.getZ(); z++)
+				for(int y = lc.getY(); y <= uc.getY(); y++)
+				for(int x = lc.getX(); x <= uc.getX(); x++){
+					if(x != lc.getX() && x != uc.getX() && y != lc.getY() &&
+							y != uc.getY() && z != lc.getZ() && z != uc.getZ())
+						continue;
+					const VoxelInstance n = peek_voxel(off +
+							pv::Vector3DInt32(x, y, z));
+					if(is_undefined(n))
+						continue;
+					const VoxelInstance pad = buf.volume->getVoxelAt(x, y, z);
+					if(is_undefined(pad))
+						undef++;
+					else if(pad.data != n.data){
+						// Light alone, or another definition
+						if(get_voxel_reg()->get_cached(pad) ==
+								get_voxel_reg()->get_cached(n))
+							light++;
+						else
+							other++;
+					}
+				}
+				if(undef + other != before)
+					bad_chunks++;
+			}
+		}
+		log_i(MODULE, "padding audit: %zu chunk buffers, %zu stale (%zu "
+				"undefined, %zu another voxel); %zu with other light",
+				chunks, bad_chunks, undef, other, light);
+	}
+
 	void set_voxel(const pv::Vector3DInt32 &p, const interface::VoxelInstance &v,
 			bool disable_warnings)
 	{
@@ -3426,19 +3598,8 @@ struct CInstance: public voxelworld::Instance
 		}
 
 		buf.volume->setVoxelAt(voxel_p, nv);
-
-		// Set buffer dirty
-		if(!buf.dirty){
-			buf.dirty = true;
-			m_total_buffers_dirty++;
-		}
-
-		// Set section buffer loaded flag
-		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
-		if(it == m_sections_with_loaded_buffers.end() || *it != section)
-			m_sections_with_loaded_buffers.insert(it, section);
+		mark_buffer_dirty(section, buf);
+		dirty_neighbour_padding(chunk_p, p, p);
 	}
 
 	// The voxels of a region in one read, chunk by chunk rather than voxel
@@ -3867,17 +4028,8 @@ struct CInstance: public voxelworld::Instance
 			}
 
 			if(chunk_written){
-				if(!buf.dirty){
-					buf.dirty = true;
-					m_total_buffers_dirty++;
-				}
-				auto it = std::lower_bound(
-						m_sections_with_loaded_buffers.begin(),
-						m_sections_with_loaded_buffers.end(), section,
-						std::greater<Section*>());
-				if(it == m_sections_with_loaded_buffers.end() ||
-						*it != section)
-					m_sections_with_loaded_buffers.insert(it, section);
+				mark_buffer_dirty(section, buf);
+				dirty_neighbour_padding(chunk_p, lc, uc);
 			}
 		}
 		}
@@ -3952,11 +4104,11 @@ struct CInstance: public voxelworld::Instance
 	// and anything the mesher reads per voxel, such as skylight or the
 	// neighbours ambient occlusion counts, breaks along chunk boundaries.
 	//
-	// Taken from whatever is loaded; a neighbour that is not in memory leaves
-	// its side undefined, which is what the mesher falls back on anyway.
-	// Nothing is written back to the neighbours, so a voxel changed at a chunk
-	// edge leaves the neighbour's copy of it stale until that neighbour is
-	// committed in turn.
+	// Taken from whatever is loaded -- commit() loads the neighbours of what
+	// it writes first (load_padding_neighbours()); one that is not there
+	// leaves its side undefined, which the mesher falls back on. A
+	// write at a chunk edge makes the neighbours whose copy it changes dirty
+	// (dirty_neighbour_padding()), so they are filled again in turn.
 	void fill_chunk_padding(const pv::Vector3DInt32 &chunk_p,
 			VoxelVolume &volume)
 	{
@@ -4164,6 +4316,7 @@ struct CInstance: public voxelworld::Instance
 
 	void commit()
 	{
+		audit_padding();
 		const int64_t t0 = interface::os::time_us();
 		m_commit_pack_us = 0;
 		m_commit_scene_us = 0;
@@ -4198,6 +4351,7 @@ struct CInstance: public voxelworld::Instance
 		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
 				m_total_buffers_dirty,
 				m_sections_with_loaded_buffers.size());
+		load_padding_neighbours();
 		const size_t was_dirty = m_total_buffers_dirty;
 		// Said while it is still going and not only when it is over: a
 		// commit that never returns is what a hang looks like from the
