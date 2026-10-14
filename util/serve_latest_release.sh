@@ -718,17 +718,24 @@ stop_all(){
 delisted_why(){
 	local u=$AITTA
 	case $u in http://*|https://*) ;; *) u=http://$u ;; esac
-	curl -s -m 20 "${u%/}/api/v1/aitta/list" | python3 -c '
+	# Exit 1 when the list could not be read: the caller says so and
+	# keeps the server running (fail open, user 2026-10-14: an Aitta that
+	# is down must not stop every server that follows it)
+	local list
+	list=$(curl -fsS -m 20 "${u%/}/api/v1/aitta/list" 2>/dev/null) || return 1
+	printf '%s' "$list" | python3 -c '
 import json, sys
 try:
 	d = json.load(sys.stdin)
-except ValueError:
-	sys.exit()
-for r in d.get("delisted", []):
+	rows = d.get("delisted", [])
+except (ValueError, AttributeError):
+	sys.exit(1)
+for r in rows:
 	if r.get("author") + "/" + r.get("name") == sys.argv[1] and \
 			r.get("version") == sys.argv[2]:
 		print(r.get("why") or "no reason given")
-' "${games[$1]}" "${running[$1]##*/}" 2>/dev/null | head -n 1
+		break
+' "${games[$1]}" "${running[$1]##*/}" 2>/dev/null
 }
 
 # Server i's running release withdrawn for malware or CSAM: stopped, a
@@ -755,7 +762,9 @@ follow_aitta(){
 		case ${games[$i]} in */*) ;; *) continue ;; esac
 		[ -z "${running[$i]:-}" ] && continue
 		if [ -z "${withdrawn[$i]:-}" ] && command -v python3 >/dev/null; then
-			why=$(delisted_why "$i")
+			why=$(delisted_why "$i") ||
+				say "could not read $AITTA's list; whether ${games[$i]}" \
+					"${running[$i]##*/} was delisted is not known, it runs on"
 			case $why in
 			"") ;;
 			malware*|csam*|"reported for malware"*|"reported for csam"*)

@@ -10,6 +10,8 @@
 #   2. Delisted for malware: stopped, the stand-in on its port saying it
 #      was withdrawn and why, and the server not started again.
 #   3. 1.0.1 published: installed and served, the stand-in gone.
+#   4. The Aitta stopped: its list unreadable is said, and 1.0.1 runs on
+#      (fail open, the user's call 2026-10-14).
 #
 #   util/serve_delisted_check.sh
 set -u
@@ -114,4 +116,14 @@ for _i in $(seq 50); do
 done
 curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . || fail "no /health on 1.0.1"
 echo "ok: 1.0.1 served"
+
+# 4.
+grep -q "could not read 127.0.0.1:$P's list" "$t/serve.log" && fail "a readable list said unreadable ($t/serve.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+wait_for_log "$t/serve.log" "could not read 127.0.0.1:$P's list" 60 ||
+	fail "an unreadable list not said ($t/serve.log)"
+curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . ||
+	fail "not serving with the list unreadable"
+pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "1.0.1 stopped"
+echo "ok: the list unreadable said, 1.0.1 runs on"
 echo "PASS"
