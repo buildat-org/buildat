@@ -24,7 +24,8 @@ run(){ # log
 	kill -TERM "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 }
 run first.log
-db=$(find "$t/srv" -name save.sqlite -path '*rows*' | head -1)
+# The temp directory's own name has "rows" in it: the save's by its path
+db=$(find "$t/srv" -name save.sqlite -path '*/saves/rows/*' | head -1)
 [ -n "$db" ] || fail "no save.sqlite for the world under $t/srv"
 w=$(dirname "$db")/luanti
 [ -d "$w" ] || fail "no world directory $w"
