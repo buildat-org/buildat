@@ -7,7 +7,7 @@
 # own). Vanilla on the minimal game, the server at --max-disk-mb 300.
 #   0. A world, wt, with a player's build (a node a chat command placed).
 #   1. Export wt: a zip in the client's exports, which Python's zipfile
-#      reads whole. Import it: saved as wt_2, its store the same rows as
+#      reads whole, a symlink in the save left out ([SEC_RUN5_LEFTOVERS]). Import it: saved as wt_2, its store the same rows as
 #      wt's. Bad zips refused, nothing kept: a "../" entry, one whose
 #      header says more than the room, one whose stored entry holds more
 #      than its header says, and a Luanti world of the leveldb backend
@@ -19,6 +19,7 @@
 #      importing a 10 MB zip; a second client's export meanwhile refused;
 #      the first leaves mid-way, and the server's transfer folder is gone
 #      with no save made.
+# The refusals name no folder of the server's ([SEC_RUN5_LEFTOVERS]).
 # simplified: native only; the web's download of the parts and its picked
 # file read in parts are not driven.
 #   util/world_move_check.sh
@@ -83,7 +84,9 @@ client "$t/0c.log" "$t/0.cmds"
 stop
 grep -aq "wm: at the mark floor:marker" "$t/0.log" || fail "no build in wt ($t/0.log)"
 
-# 1: the zips to import, in the client's exports
+# 1: a link in wt, which the export does not read through
+ln -s /etc/hostname "$saves/wt/luanti/link.txt"
+# the zips to import, in the client's exports
 python3 - "$t/nu/exports" "$saves/wt/save.sqlite" <<'PY'
 import io, sqlite3, struct, sys, tempfile, zipfile, os
 out = sys.argv[1]
@@ -175,6 +178,7 @@ assert bad is None, "%s does not read" % bad
 names = z.namelist()
 print("the export: " + ", ".join(names))
 assert "wt/save.sqlite" in names and "wt/luanti/world.mt" in names
+assert "wt/luanti/link.txt" not in names, "the symlink was read through"
 def rows(p):
     c = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
     return list(c.iterdump())
@@ -187,6 +191,8 @@ for want in "would leave" "room for" "is stored as" "luanti --migrate sqlite3" \
 	grep -a "menu: Importing .* failed:" "$t/1c.log" | grep -aq -- "$want" ||
 		fail "no refusal saying \"$want\" ($t/1c.log)"
 done
+grep -a "menu: Importing .* failed:" "$t/1c.log" | grep -aq -- "$t" &&
+	fail "a refusal names the server's folders ($t/1c.log)"
 grep -aq "ann's list main has 2147483647 slots; left out" "$t/1.log" ||
 	fail "the 2^31-1 slot list was not left out ($t/1.log)"
 got=$(ls "$saves" | LC_ALL=C sort | tr '\n' ' ')

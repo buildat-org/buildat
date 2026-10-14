@@ -50,6 +50,9 @@
 #include "interface/thread.h"
 #include "interface/os.h"
 #include <atomic>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <PolyVoxCore/Vector.h>
 #define MODULE "main"
 
@@ -1914,6 +1917,17 @@ struct Module: public interface::Module
 	{
 		return m_server->get_config().get<ss_>("cache_path")+"/vanilla_transfer";
 	}
+	// An error for the player without where on the server's disk
+	// ([SEC_RUN5_LEFTOVERS]): the cache and user directories cut out
+	ss_ unpathed(ss_ err)
+	{
+		for(const char *k : {"cache_path", "user_path"}){
+			const ss_ p = m_server->get_config().get<ss_>(k);
+			for(size_t i; !p.empty() && (i = err.find(p)) != ss_::npos;)
+				err.replace(i, p.size(), "...");
+		}
+		return err;
+	}
 	void end_transfer()
 	{
 		interface::fs::remove_all(transfer_dir());
@@ -1928,11 +1942,19 @@ struct Module: public interface::Module
 				"once it is done.");
 		return false;
 	}
-	// Every file under dir, the archive's names under prefix
+	// Every file under dir, the archive's names under prefix; a symlink is
+	// left out, not read through ([SEC_RUN5_LEFTOVERS])
 	static void list_files(const ss_ &dir, const ss_ &prefix,
 			sv_<std::pair<ss_, ss_>> &out)
 	{
 		for(const auto &n : interface::fs::list_directory(dir)){
+#ifndef _WIN32
+			// simplified: POSIX links only; a Windows junction is read
+			// through (it takes the user to make one in a save)
+			struct stat st;
+			if(lstat((dir+"/"+n.name).c_str(), &st) != 0 || S_ISLNK(st.st_mode))
+				continue;
+#endif
 			if(n.is_directory)
 				list_files(dir+"/"+n.name, prefix+n.name+"/", out);
 			else
@@ -1991,7 +2013,8 @@ struct Module: public interface::Module
 		interface::fs::remove_all(dir+"/store");
 		if(!err.empty()){
 			end_transfer();
-			return menu_error(packet.sender, "Exporting "+save+" failed: "+err);
+			return menu_error(packet.sender, "Exporting "+save+" failed: "+
+					unpathed(err));
 		}
 		m_transfer.peer = packet.sender;
 		m_transfer.name = save;
@@ -2085,7 +2108,7 @@ struct Module: public interface::Module
 		end_transfer();
 		if(!err.empty())
 			menu_error(packet.sender, "Importing "+m_transfer_last+" failed: "+
-					err+". Nothing was kept.");
+					unpathed(err)+". Nothing was kept.");
 	}
 	ss_ m_transfer_last;
 	// main:transfer_cancel: the client could not write or read its side
@@ -4346,6 +4369,10 @@ struct Module: public interface::Module
 		const ss_ full = no_room();
 		if(!full.empty())
 			return full+". Delete a world or a game first.";
+		// Before the save is made, which start_world would leave empty
+		// ([SEC_RUN5_LEFTOVERS])
+		if(m_starting)
+			return "A world is already starting";
 		storage::Save *save = nullptr;
 		storage::access(m_server, [&](storage::Interface *istorage){
 			save = istorage->create(save_name);

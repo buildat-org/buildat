@@ -183,7 +183,8 @@ size_t zip_extract(const ss_ &zip_path, const ss_ &into_dir,
 	uint64_t total = 0;
 	for(const RawEntry &e : entries){
 		if(!name_is_safe(e.entry.name))
-			throw Exception("zip: "+e.entry.name+" would leave "+into_dir);
+			throw Exception("zip: "+e.entry.name+" would leave the folder it "
+					"unpacks to");
 		total += e.entry.size;
 	}
 	if(total > max_total)
