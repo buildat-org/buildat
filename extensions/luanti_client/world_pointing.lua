@@ -14,7 +14,7 @@ return function(self, magic, scene, camera_node, game_texture)
 	-- where a placed node would go, or nil for nothing in range.
 	--
 	-- Marching in steps a tenth of a node long and rounding to the nearest
-	-- integer, which is what apps/digger does: a node is the cube around
+	-- integer, which is what apps/demo_digger does: a node is the cube around
 	-- its coordinate, so rounding is the whole test. A step that lands in the
 	-- same node as the last one is skipped rather than asked about twice.
 	local POINT_STEP = 0.1
@@ -109,7 +109,7 @@ return function(self, magic, scene, camera_node, game_texture)
 
 	-- The outline of the face the ray came through, on the node it stopped
 	-- in. One flat outline that gets turned to whichever face it is, which is
-	-- what apps/digger does; NoTextureVColMultiply darkens what is behind it
+	-- what apps/demo_digger does; NoTextureVColMultiply darkens what is behind it
 	-- rather than drawing over it, so it reads on any texture.
 	-- What is pointed at: a frame around every face of the voxel, which
 	-- together read as the wire box Luanti draws around it. Two triangles

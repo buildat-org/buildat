@@ -4,9 +4,9 @@
 # covers: builtin/network/network.cpp src/impl/tcpsocket.cpp src/client/app.cpp
 # [LAN_DISCOVERY]: a server announces itself on the LAN's group only when
 # told to, and a client's list holds a flood of false ones to 32.
-#   1. digger with --lan-announce: an announcement with its name and port
+#   1. demo_digger with --lan-announce: an announcement with its name and port
 #      is heard on 239.255.29.50:29599 within 5 s.
-#   2. digger without it: nothing from its port in 5 s.
+#   2. demo_digger without it: nothing from its port in 5 s.
 #   3. 100 false announcements (other ports, control characters in the
 #      name) while a client shows the connect screen: the client says its
 #      list is full, and the screenshot shows 32 at most.
@@ -60,12 +60,12 @@ until_log(){ # file pattern
 	return 1
 }
 
-# start <port> [args]: digger, until it listens
+# start <port> [args]: demo_digger, until it listens
 start(){
 	local port=$1; shift
 	start_server "$t/srv$port.log" "STATUS Listening" 120 "$port" \
-		bin/buildat_server -m ../apps/digger -D "$t/srv$port" -l 3 "$@" ||
-		fail "digger did not start"
+		bin/buildat_server -m ../apps/demo_digger -D "$t/srv$port" -l 3 "$@" ||
+		fail "demo_digger did not start"
 	s=$SERVER_PID
 }
 
@@ -73,7 +73,7 @@ start(){
 start 29581 --lan-announce "LAN check"
 a=$(hear 29581 5)
 echo "$a" | grep -q '"name":"LAN check"' || fail "no announcement heard: '$a'"
-echo "$a" | grep -q '"app":"digger"' || fail "the app is missing: $a"
+echo "$a" | grep -q '"app":"demo_digger"' || fail "the app is missing: $a"
 kill $s; wait $s 2>/dev/null; s=
 
 # 2

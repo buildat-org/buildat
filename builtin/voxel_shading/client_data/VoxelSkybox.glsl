@@ -1,7 +1,7 @@
 // The sky the voxel world stands under. Drawn on a skybox, so it has no depth
 // presence at all: it is behind everything and never in the way of the ground.
 //
-// The gradient here is the one apps/voxel_lighting/make_client_data.py bakes
+// The gradient here is the one apps/sample_lighting_scene/make_client_data.py bakes
 // into VoxelSky.xml, so what a glossy surface reflects agrees with what is
 // overhead. The sun and the clouds are drawn only here: the reflection of the
 // sky carries its own painted sun disc, and the clouds are not reflected at

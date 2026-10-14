@@ -3,7 +3,7 @@
 # cost: ~3 min (2026-10-10)
 # covers: util/serve_latest_release.sh
 # [SERVE_BUILDS]: serve_latest_release.sh with BUILDS_URL, a release of
-# this tree serving minigame, and a build host of its own (python).
+# this tree serving demo_board_game, and a build host of its own (python).
 #   1. 0.0.1: the host answers 202 twice, then a tar of a --compile-only
 #      made with another cache: the server starts compiling nothing ("No
 #      need to recompile").
@@ -21,7 +21,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp serve_builds; t=$CHECK_TMP
 for u in http://127.evil.com/b http://192.168.1.1.evil.com http://evil.com/127.0/b; do
 	BUILDAT_SERVE_DIR="$t/refused" BUILDS_URL=$u timeout 10 \
-		"$here/util/serve_latest_release.sh" minigame 1 "$t/refused_user" > "$t/refused.log" 2>&1
+		"$here/util/serve_latest_release.sh" demo_board_game 1 "$t/refused_user" > "$t/refused.log" 2>&1
 	rc=$?
 	[ $rc = 2 ] && grep -q "BUILDS_URL is https" "$t/refused.log" ||
 		fail "BUILDS_URL=$u: exit $rc, not refused ($t/refused.log)"
@@ -32,10 +32,10 @@ trap 'for g in "${groups[@]}"; do kill -- -"$g" 2>/dev/null; done; check_cleanup
 cd "$here/Build"
 
 # The modules, built with a cache of their own
-BUILDAT_CACHE_PATH="$t/tarcache" timeout 600 bin/buildat_server -m ../apps/minigame \
+BUILDAT_CACHE_PATH="$t/tarcache" timeout 600 bin/buildat_server -m ../apps/demo_board_game \
 	-D "$t/tu" -l 3 --compile-only > "$t/tar_compile.log" 2>&1 ||
 	fail "the compile for the tar ($t/tar_compile.log)"
-(cd "$t/tarcache/apps/minigame/rccpp_build" && tar -cf "$t/modules.tar" *.so *.so.hash) ||
+(cd "$t/tarcache/apps/demo_board_game/rccpp_build" && tar -cf "$t/modules.tar" *.so *.so.hash) ||
 	fail "no modules to tar"
 python3 -c '
 import io, sys, tarfile
@@ -90,14 +90,14 @@ groups+=($!)
 setsid env BUILDAT_CACHE_PATH="$t/servecache" BUILDAT_SERVE_DIR="$t/serve" \
 	POLL_SECONDS=5 BUILDS_POLL=30 BUILDS_URL="http://127.0.0.1:$BP/build" \
 	RELEASES_URL="http://127.0.0.1:$HP/releases.json" \
-	"$here/util/serve_latest_release.sh" minigame $P "$t/u" -l 4 > "$t/serve.log" 2>&1 &
+	"$here/util/serve_latest_release.sh" demo_board_game $P "$t/u" -l 4 > "$t/serve.log" 2>&1 &
 groups+=($!)
-slog="$t/serve/server-minigame-$P.log"
+slog="$t/serve/server-demo_board_game-$P.log"
 
 # 1.
 wait_for_log "$slog" "Listening at" 300 || fail "0.0.1 did not start ($t/serve.log)"
-grep -q "asked BUILDS_URL for minigame on buildat-0.0.1-.*: building" "$t/serve.log" &&
-	grep -q "asked BUILDS_URL for minigame on buildat-0.0.1-.*: ready" "$t/serve.log" ||
+grep -q "asked BUILDS_URL for demo_board_game on buildat-0.0.1-.*: building" "$t/serve.log" &&
+	grep -q "asked BUILDS_URL for demo_board_game on buildat-0.0.1-.*: ready" "$t/serve.log" ||
 	fail "the asks ($t/serve.log)"
 [ "$(grep -c "ask " "$t/builds.log")" = 3 ] || fail "asked $(grep -c "ask " "$t/builds.log") times, not 3"
 grep -aq "No need to recompile" "$slog" && ! grep -aq "STATUS Compiling" "$slog" ||
@@ -108,9 +108,9 @@ echo "ok: 202 twice, then the modules: nothing compiled here"
 release 0.0.2
 wait_for_log "$t/serve.log" "does not compile on buildat-0.0.2" 120 ||
 	fail "0.0.2's failure ($t/serve.log)"
-grep -q "\[build minigame\] main.cpp:1: error: a check failing this" "$t/serve.log" ||
+grep -q "\[build demo_board_game\] main.cpp:1: error: a check failing this" "$t/serve.log" ||
 	fail "the build log not said ($t/serve.log)"
-grep -q "starting minigame on port $P on buildat-0.0.2" "$t/serve.log" && fail "0.0.2 started"
+grep -q "starting demo_board_game on port $P on buildat-0.0.2" "$t/serve.log" && fail "0.0.2 started"
 echo "ok: a failed build said, 0.0.1 kept"
 
 # 3.

@@ -43,7 +43,7 @@ LONG=a_package_with_a_long_name_to_the_end
 publish(){ # name description
 	local d="$t/apps/$1"
 	mkdir -p "$d"
-	cp -r ../apps/minigame/main ../apps/minigame/launcher "$d/"
+	cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$d/"
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
 		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 		"description": "%s"}\n' "$1" "$2" > "$d/meta.json"

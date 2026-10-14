@@ -15,7 +15,7 @@
 # install rules into a staging directory, gathers every third-party licence
 # into licenses/, writes VERSION, makes the archive under Build/package/out/,
 # and smoke-tests it: unpacks into a clean directory, starts buildat_server
-# on apps/digger -- which compiles a module at run time through the found
+# on apps/demo_digger -- which compiles a module at run time through the found
 # or bundled compiler -- connects a client that takes one screenshot that is
 # not black, and quits. Nothing is packaged by hand. Runs the same inside
 # util/docker's images as on a desk.
@@ -368,7 +368,7 @@ make_luanti_only() {
 	# The full archive's option back, so a later install of it is the full one
 	(cd "$build" && cmake "$here" "$@" -DBUILDAT_LUANTI_ONLY=FALSE > /dev/null 2>&1) || true
 	[ -d "$stage/compiler" ] && { echo "luanti only: compiler/ is in the archive" >&2; exit 1; }
-	[ -d "$stage/apps/digger" ] && { echo "luanti only: apps/digger is in the archive" >&2; exit 1; }
+	[ -d "$stage/apps/demo_digger" ] && { echo "luanti only: apps/demo_digger is in the archive" >&2; exit 1; }
 	if [ -d "$root/stage/$full/cache/rccpp_build" ]; then
 		mkdir -p "$stage/cache"
 		cp -r "$root/stage/$full/cache/rccpp_build" "$stage/cache/"
@@ -485,7 +485,7 @@ prebuild_modules() {
 # apps/vanilla with the bundled minimal game, so that every builtin --
 # luanti and luanti_mapgen above all, the modules a player uses -- is
 # compiled by the shipped compiler, the game's mods load and one section
-# generates. apps/digger before never compiled either, and a mapgen that
+# generates. apps/demo_digger before never compiled either, and a mapgen that
 # did not build under mingw shipped in 0.4.2.
 # The CPU time, in seconds, of a process and everything under it, and of
 # every Windows process there is: under Wine each process is reparented
@@ -617,7 +617,7 @@ build_web() {
 # The apps web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
 # one (user, 2026-09-29): the others ship as source, and on a box with no
 # compiler do not start
-WEB_PRECOMPILED_APPS="floorplanner vanilla aggregate bomber_drone"
+WEB_PRECOMPILED_APPS="floorplanner vanilla demo_aggregate demo_bomber_drone"
 
 # Those apps' modules compiled into a stage's cache: each game started once
 # on the staged server until it listens, with a user directory of its own

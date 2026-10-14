@@ -10,7 +10,7 @@ apps/vanilla is the app that plays the Luanti games a user has installed
 (user/shared/vanilla/games). A variant is vanilla with something added or
 changed, and holds only that:
 
-    apps/vanilla_voxel_physics/
+    apps/sample_vanilla_falling_blocks/
         meta.json               {"base": "vanilla", ...}
         launcher/               its launch grid tile
         voxel_physics/          a module of its own (meta.json, server and
@@ -39,7 +39,7 @@ stops the server ("loader: ...") and refuses the install in the client.
 Run it from the tree:
 
     $ cd Build
-    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../apps/vanilla_voxel_physics
+    $ BUILDAT_LUANTI_GAME=minimal bin/buildat_server -m ../apps/sample_vanilla_falling_blocks
     $ bin/buildat -s localhost
 
 2. An app that holds its game
@@ -61,7 +61,7 @@ apps/demo_skelenti is the example:
 
 The module talks to the game through the bridge (call_json one way,
 core.buildat_emit the other; doc/server_api.txt, the luanti section).
-apps/luanti_glue_test is the same shape in a few dozen lines, with
+apps/sample_luanti_glue is the same shape in a few dozen lines, with
 minimal_game.
 
 Run it from the tree:
@@ -76,7 +76,7 @@ Either kind is an Aitta package (doc/aitta.txt): fill in meta.json's
 author, name, version, engine_api and licences, then
 
     $ bin/buildat aitta keygen ~/buildat.key
-    $ bin/buildat aitta pack ../apps/vanilla_voxel_physics ~/buildat.key /tmp/out
+    $ bin/buildat aitta pack ../apps/sample_vanilla_falling_blocks ~/buildat.key /tmp/out
     $ bin/buildat aitta install /tmp/out/<author>-<name>-<version>.zip user
     $ bin/buildat_server -m user/installed/<author>/<name>/<version> -D user
 

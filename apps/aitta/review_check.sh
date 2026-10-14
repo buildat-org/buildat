@@ -3,7 +3,7 @@
 # cost: 70s (2026-10-09)
 # covers: apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua client/launch_grid.lua src/client/app_lua.h src/impl/aitta.cpp
 # [AITTA_REVIEW]: a local Aitta with an admin (a reviewer) and a plain
-# account; tester/pt (apps/minigame) published as 1.0.0, 1.0.1 (a file
+# account; tester/pt (apps/demo_board_game) published as 1.0.0, 1.0.1 (a file
 # changed, one added) and 1.0.2.
 #   1. The admin marks 1.0.0 reviewed and delists 1.0.2; 1.0.1's diff is
 #      against 1.0.0. A ticket fetches the delisted 1.0.2 once, not twice,
@@ -59,7 +59,7 @@ BUILDAT_AITTA_ADMIN="add plain checkpass2" reqs admin "$t/bind.log" \
 	"{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 mkdir -p "$t/app"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
 		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
@@ -126,14 +126,14 @@ wait_log 10000 Asking the user about $A
 delay 1000
 click Button "Accept"
 wait_log 20000 playtest: installed review:tester.pt@1.0.1
-wait_log 60000 minigame/init.lua loaded
+wait_log 60000 demo_board_game/init.lua loaded
 delay 2000
 screenshot $t/running.png
 quit
 C
 admin timeout 150 bin/buildat -m launch_menu -D "$t/cl_admin" -w 1024x700 \
 	-l 3 -c @"$t/pt.cmds" > "$t/pt.log" 2>&1
-grep -a "minigame/init.lua loaded" "$t/pt.log" | grep -aqv "command: \\|wait_log: " ||
+grep -a "demo_board_game/init.lua loaded" "$t/pt.log" | grep -aqv "command: \\|wait_log: " ||
 	fail "the playtest did not start ($(grep -a "playtest\|start_local" "$t/pt.log" | tail -2))"
 grep -aq "Command sequence complete" "$t/pt.log" ||
 	fail "the playtest drive ($(grep -a "Command seq\|click:\|aitta: \|playtest" "$t/pt.log" | tail -4))"

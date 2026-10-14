@@ -30,7 +30,7 @@ SEED="${SEED:-5}"
 MINUTES="${MINUTES:-3}"
 GAME="${GAME:-mineclone2}"
 # The buildat game the server runs: vanilla, or a variant of it
-# ([GAME_BASE]) -- GAME_DIR=vanilla_voxel_physics
+# ([GAME_BASE]) -- GAME_DIR=sample_vanilla_falling_blocks
 GAME_DIR="${GAME_DIR:-vanilla}"
 out="$here/local/fuzz/$SEED"
 mkdir -p "$out"

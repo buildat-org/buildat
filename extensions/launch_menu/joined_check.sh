@@ -4,7 +4,7 @@
 # covers: src/client/app.cpp client/extensions/network/init.lua extensions/launch_menu/init.lua
 # [JOINED_TLS_SERVERS]: a server joined is on launch_menu's start
 # screen whether or not it sends an icon, and one behind TLS by its https
-# address. A digger server with no icon is joined once; its row is
+# address. A demo_digger server with no icon is joined once; its row is
 # written, with no icon. The store then gets an https row joined later,
 # as a TLS join writes it (the join itself needs a certificate the
 # client trusts, so it is tried against a real server by hand); the
@@ -17,8 +17,8 @@ check_tmp joined; t=$CHECK_TMP
 P=29887
 cd "$(dirname "$0")/../../Build"
 start_server "$t/srv.log" "Listening at" 60 $P \
-	bin/buildat_server -m ../apps/digger -D "$t/srv" -l 3 ||
-	fail "digger did not start"
+	bin/buildat_server -m ../apps/demo_digger -D "$t/srv" -l 3 ||
+	fail "demo_digger did not start"
 CHECK_PIDS+=($SERVER_PID)
 grep -aq "The server's icon:" "$t/srv.log" && fail "the server has an icon"
 # The network extension says when the joined server's row is written

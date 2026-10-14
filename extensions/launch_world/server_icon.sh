@@ -1,9 +1,9 @@
 #!/bin/bash
 # tier: full
-# cost: 90s (a first run compiles digger and hearth, 2026-10-05)
+# cost: 90s (a first run compiles demo_digger and hearth, 2026-10-05)
 # covers: builtin/client_file/client_file.cpp src/client/app.cpp client/extensions/network/init.lua extensions/launch_world/world.lua builtin/starport_announce/starport_announce.cpp apps/starport/main/main.cpp client/extensions/starport/init.lua
 # [LAUNCH_WORLD] (4): **a native server's icon, kept from one connect**.
-# A digger server with an admin's server_icon.png of 120 pixels, which it
+# A demo_digger server with an admin's server_icon.png of 120 pixels, which it
 # scales to 64; a client connects once and quits; the client is started
 # again into the room, connecting to nothing, and the server's sphere on
 # the floor wears the stored icon.
@@ -22,11 +22,11 @@ srv= sp= an=
 trap 'kill $srv $sp $an 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 P=29881
-mkdir -p "$t/srv/apps/digger" "$t/cl"
-cp "$here/apps/vanilla/launcher/grass_block.png" "$t/srv/apps/digger/server_icon.png"
+mkdir -p "$t/srv/apps/demo_digger" "$t/cl"
+cp "$here/apps/vanilla/launcher/grass_block.png" "$t/srv/apps/demo_digger/server_icon.png"
 cd "$here/Build"
 start_server "$t/srv.log" "Listening at" 180 $P \
-	bin/buildat_server -m ../apps/digger -D "$t/srv" -l 3 || fail "digger did not start"
+	bin/buildat_server -m ../apps/demo_digger -D "$t/srv" -l 3 || fail "demo_digger did not start"
 srv=$SERVER_PID
 grep -aq "The server's icon: .*server_icon.png" "$t/srv.log" ||
 	fail "the server did not take its icon ($(tail -2 "$t/srv.log"))"

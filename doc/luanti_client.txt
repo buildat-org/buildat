@@ -105,7 +105,7 @@ not to do that has neither a visible colour nor a visible shadow. With the
 curve in, the sun is about fifty times the sky -- roughly what it is -- so a
 lit surface takes the sun's own warm colour instead of a mixture with the
 sky's, and the same curve lifts the shadows, so a shadow under full skylight
-reads as shade rather than as a hole. apps/voxel_lighting arrived at the same
+reads as shade rather than as a hole. apps/sample_lighting_scene arrived at the same
 numbers for the same reasons.
 
 Where the sun and the moon are for the purpose of casting a shadow is stepped

@@ -2,7 +2,7 @@
 # tier: full
 # cost: ~2 min (2026-10-09)
 # covers: util/serve_latest_release.sh src/client/main.cpp apps/aitta/main/main.cpp src/interface/web_brand.h
-# [AITTA_SERVE]: a local Aitta with tester/pt (apps/minigame) 1.0.0.
+# [AITTA_SERVE]: a local Aitta with tester/pt (apps/demo_board_game) 1.0.0.
 #   1. buildat aitta install by name: the newest, @1.0.0 said installed
 #      already, an unknown version refused with the versions listed, an
 #      unknown package refused.
@@ -51,7 +51,7 @@ BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass
 	fail "the bind's client ($t/bind.log)"
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 mkdir -p "$t/app"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
 		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",

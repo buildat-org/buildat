@@ -305,7 +305,7 @@ int main(int argc, char *argv[])
 			"  -R                   A local server this client starts restarts\n"
 			"                       a module when its source changes\n"
 			"  -a [kind/name/id]    Run one launch-grid action on boot, e.g.\n"
-			"                       app/vanilla/devtest, app/digger/play;\n"
+			"                       app/vanilla/devtest, app/demo_digger/play;\n"
 			"                       dev/<name>/<id> for an app in\n"
 			"                       <user>/dev_apps, installed/<author>.<name>\n"
 			"                       @<version>/<id> for one installed from a\n"

@@ -232,7 +232,7 @@
 	// c55_mc2_12, /fixlight with the rule off left every reading where it
 	// was and the picture broken, and with it on put the open columns back
 	// to fifteen and drew a world with a sky in it.
-	// What held it off was apps/voxel_lighting's cave going 92% black
+	// What held it off was apps/sample_lighting_scene's cave going 92% black
 	// with it on (RMSE 37.3 against a bar of 30), and that was the
 	// generator being asked a question only a relight can answer; see
 	// SkylightSeed::from_relight. With that fixed the same view reads 1.9
@@ -247,7 +247,7 @@
 	// then calls a cave open sky. The region's own top row is asked for
 	// every seed, as it always was -- on a small world it is the sky the
 	// generator's own flood comes from, and taking it away from
-	// generation seeds left apps/voxel_lighting 126560 voxels dark
+	// generation seeds left apps/sample_lighting_scene 126560 voxels dark
 	// (2026-09-28).
 	bool is_below_open_sky(const pv::Vector3DInt32 &p, bool from_relight)
 	{

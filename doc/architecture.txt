@@ -157,7 +157,7 @@ with one replaces that and may return zero.
 The one way out of a file is ctx.launch:
 
     ctx.launch{ extension = "luanti_client", params = { address = "..." } }
-    ctx.launch{ app = "digger" }
+    ctx.launch{ app = "demo_digger" }
 
 params cross as plain data -- strings, numbers, booleans and tables of
 them, copied; a function or a userdata is an error at the call. An

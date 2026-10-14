@@ -104,8 +104,8 @@ namespace interface
 
 		virtual const ServerConfig& get_config() = 0;
 
-		// The last path component of -m: "minigame" for
-		// -m ../apps/minigame. It namespaces what the server keeps under the
+		// The last path component of -m: "demo_board_game" for
+		// -m ../apps/demo_board_game. It namespaces what the server keeps under the
 		// user path, so that one game cannot name another's saves.
 		virtual ss_ get_app_id() = 0;
 

@@ -23,7 +23,7 @@ What runs on it:
   installs.
 * **Hearth** (`apps/hearth`) -- a forum.
 * **Floorplanner** (`apps/floorplanner`).
-* Voxel demo: `apps/digger`, an infinite world streamed around the
+* Voxel demo: `apps/demo_digger`, an infinite world streamed around the
   players and saved.
 
 Download a build for Linux or Windows from
@@ -38,19 +38,22 @@ Each directory in `apps/` is an app: pick it in the launch menu, or run
 check -- and the launch menu's "Local app" list is grouped by it; a
 Starport listing takes it as its kind unless `starport.json` names one.
 
-* Games (world, arena): `vanilla` (Luanti games), `digger`,
-  `bomber_drone` (a drone over digger's terrain), `minigame`,
-  `vanilla_voxel_physics` (vanilla with voxel bodies that fall).
+* Games (world, arena): `vanilla` (Luanti games), `demo_digger`,
+  `demo_bomber_drone` (a drone over demo_digger's terrain),
+  `demo_board_game`, `demo_skelenti` (a Luanti game in a Buildat app),
+  `sample_vanilla_falling_blocks` (vanilla with voxel bodies that fall).
 * Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
 * Other: `play`, which serves the web client and has no game of its own:
   its page starts on the launch menu (a Starport lists its origin in
   `web_clients`, doc/starport.txt).
-* Experiments, not developed now: `undermine` (digger's world, which
-  collapses), `aggregate` (undermine's world made of mixtures) and
-  `aggregate_look`.
+* Experiments, not developed now: `demo_undermine` (demo_digger's world,
+  which collapses), `demo_aggregate` (demo_undermine's world made of
+  mixtures) and `sample_material_wall`.
 * Checks and test scenes: `box_test` (a hostile app the server's
-  sandbox must contain), `voxel_lighting` (in one section or eight),
-  `voxel_physics`, `entitytest`, `featuretest`, `uitest`, `test`.
+  sandbox must contain), `sample_lighting_scene` (in one section or
+  eight), `sample_luanti_glue`, `sample_falling_blocks`,
+  `sample_server_entities`, `sample_client_scene`, `sample_ui`,
+  `sample_module_calls`.
 
 Further reading:
 
@@ -195,8 +198,8 @@ See [doc/client_api.txt](doc/client_api.txt) for what an app does to honour
 Saves
 -----
 
-An app can persist its world. `apps/digger` does: it opens or creates the
-save `user/apps/digger/saves/world`, and what you dig is there next time.
+An app can persist its world. `apps/demo_digger` does: it opens or creates the
+save `user/apps/demo_digger/saves/world`, and what you dig is there next time.
 Delete that directory to start over. Every other app generates and forgets,
 which is what they did before saves existed -- persistence is opt-in, and an
 arena game whose world is gone when the match ends should not have one.
@@ -212,7 +215,7 @@ For development or hosting, run the two binaries separately:
 Terminal 1:
 
     $ $wherever_buildat_is/Build
-    $ bin/buildat_server -m ../apps/minigame
+    $ bin/buildat_server -m ../apps/demo_board_game
 
 Terminal 2:
 
@@ -288,8 +291,8 @@ Modify something and see stuff happen
 Edit something and then restart the client (CTRL+C in terminal 2):
 
     $ cd $wherever_buildat_is
-    $ vim apps/minigame/main/client_lua/init.lua
-    $ vim apps/minigame/main/main.cpp
+    $ vim apps/demo_board_game/main/client_lua/init.lua
+    $ vim apps/demo_board_game/main/main.cpp
     $ vim builtin/network/network.cpp
 
 The server can do that part for you while you develop: `-R` makes it restart

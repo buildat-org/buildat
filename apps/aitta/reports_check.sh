@@ -69,7 +69,7 @@ reqs author1 "$t/bind.log" \
 	"{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}"
 ans "$t/bind.log" 1 > /dev/null || fail "the bind: $(grep -a 'ai: \|refused' "$t/bind.log")"
 mkdir -p "$t/app"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
 		"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
@@ -153,8 +153,8 @@ wait_log 15000 aitta page: tester/pk2
 delay 1000
 keypress Escape
 wait_log 5000 dialog: aitta closed by Escape
-text minigame 1.0.0
-wait_log 5000 minigame 1.0.0"
+text demo_board_game 1.0.0
+wait_log 5000 demo_board_game 1.0.0"
 delay 500
 screenshot $t/note.png
 quit

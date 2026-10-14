@@ -445,7 +445,7 @@ bool voxel_volume_self_test()
 		assert(to->sample_at(0, 0, 0).planes[0] == 0);
 
 		// Bits no role of either format claims are the game's own and travel
-		// where they are. This is undermine's support field: a world that
+		// where they are. This is demo_undermine's support field: a world that
 		// binds four bits of param and no more leaves 28...31 to the game.
 		VoxelFormat c = a, d = b;
 		c.param = VoxelField{0, 24, 4};
@@ -978,7 +978,7 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		// is what a new field of a world that has been played means
 	}
 
-	// Bits no role of either format claims are the game's own -- undermine's
+	// Bits no role of either format claims are the game's own -- demo_undermine's
 	// support field is four of them -- so they travel where they are, as
 	// long as nothing has since claimed them
 	uint32_t keep[VOXEL_MAX_PLANES] = {};

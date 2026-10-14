@@ -1,9 +1,9 @@
 #!/bin/bash
 # tier: full
 # cost: 40s (2026-10-04)
-# covers: client/extensions/network/init.lua apps/uitest/**
+# covers: client/extensions/network/init.lua apps/sample_ui/**
 # [CONSENT_PER_SERVER]: a script's network consent is the asking server's.
-# Two uitest servers; the client's store holds an accepted row for
+# Two sample_ui servers; the client's store holds an accepted row for
 # tcp://localhost:9 given to the first.
 #   1. Connected to the first: its script's connect takes the row, no
 #      dialog.
@@ -22,7 +22,7 @@ cd "$here/Build"
 A=29811; B=29812
 for p in $A $B; do
 	start_server "$t/srv$p.log" "STATUS Listening" 60 $p \
-		bin/buildat_server -m ../apps/uitest -D "$t/srv$p" -l 3 ||
+		bin/buildat_server -m ../apps/sample_ui -D "$t/srv$p" -l 3 ||
 		fail "server $p did not start"
 	pids="$pids $SERVER_PID"
 done
@@ -37,9 +37,9 @@ client(){   # port, sequence -> $t/c$port.log
 		fail "the drive on $1 ($t/c$1.log): $(grep -ao 'Command sequence failed.*' "$t/c$1.log" | head -1)"
 }
 # 1
-client $A 'wait_log 30000 uitest: tcp_connect\nquit\n'
+client $A 'wait_log 30000 sample_ui: tcp_connect\nquit\n'
 # Not the drive's own wait for it
-grep "uitest: tcp_connect" "$t/c$A.log" | grep -qv wait_log ||
+grep "sample_ui: tcp_connect" "$t/c$A.log" | grep -qv wait_log ||
 	fail "the first server's script did not connect ($(tail -3 "$t/c$A.log"))"
 grep -q "Asking the user about tcp://localhost:9" "$t/c$A.log" &&
 	fail "asked again for the server the row was given to"

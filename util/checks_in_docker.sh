@@ -3,7 +3,7 @@
 #
 #   util/checks_in_docker.sh quick
 #   util/checks_in_docker.sh full
-#   ONLY='lua_syntax|voxel_lighting' util/checks_in_docker.sh quick
+#   ONLY='lua_syntax|sample_lighting_scene' util/checks_in_docker.sh quick
 #
 # ONLY is run_all.sh's own filter, passed through: the build is what a
 # container run costs, so picking a runner out of the tier is how a

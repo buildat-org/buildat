@@ -13,8 +13,8 @@
 #
 # tier: quick
 # cost: 60s
-# covers: apps/digger/**
-# (it launches digger by name and leaves it again, which is that game's
+# covers: apps/demo_digger/**
+# (it launches demo_digger by name and leaves it again, which is that game's
 # client Lua starting, drawing and answering Escape)
 #
 # It keeps util/check_lib.sh's contract ([CI_RUNS] (1)): exit 0
@@ -50,7 +50,7 @@ fi
 	echo "wait_log 10000 camera: landed"
 	echo "keypress Return"
 	echo "wait_log 60000 game: the room stands down"
-	# The room stands down on its own clock, and digger may still be
+	# The room stands down on its own clock, and demo_digger may still be
 	# compiling: its player placed is the game up, Escape heard
 	echo "wait_log_any 60000 player physics enabled"
 	echo "delay 500"
@@ -140,7 +140,7 @@ raised=$(grep -ac "Assignment to undeclared global\|pcall(): Runtime error" \
 	"$out/cli.log")
 launched=$(grep -ac "game: the room stands down" "$out/cli.log")
 back=$(grep -ac "game: back in the room" "$out/cli.log")
-# The launch animation began ([LAUNCH_WORLD] section 0): digger takes the
+# The launch animation began ([LAUNCH_WORLD] section 0): demo_digger takes the
 # view within a second, so the pull is all of it this run sees
 pulled=$(grep -ac "launch: pull (" "$out/cli.log")
 attract=$(grep -ac "attract: over the wall" "$out/cli.log")

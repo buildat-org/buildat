@@ -4,7 +4,7 @@
 # covers: src/client/app.cpp src/client/main.cpp
 # [SERVER_ADOPTED]: a client stops only a local server it started, or one
 # whose client is gone; a scripted client keeps out of the default cache.
-#   1. Client A plays digger (-a app/digger/play) on a local server, with a cache given by -C
+#   1. Client A plays demo_digger (-a app/demo_digger/play) on a local server, with a cache given by -C
 #      as a person's launcher has; client B, on the same cache, starts and
 #      quits beside it: A's server is still running.
 #   2. A scripted client with no -C leaves the default cache's
@@ -27,7 +27,7 @@ cd "$here/Build"
 # rows line is logged before the drive starts)
 printf 'delay 60000\nquit\n' > "$t/long"
 printf 'wait_log_any 30000 launch_menu: \nquit\n' > "$t/short"
-timeout 90 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ua" -a app/digger/play -w 640x360 -l 3 \
+timeout 90 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ua" -a app/demo_digger/play -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/long" > "$t/a.log" 2>&1 &
 a=$!
 for _ in $(seq 300); do
@@ -54,10 +54,10 @@ kill -0 "$server" || fail "B's quit stopped A's server"
 # the orphan is a server started apart and the pidfile is written for it
 kill "$a" 2>/dev/null; wait "$a" 2>/dev/null; a=
 start_server "$t/o.log" "STATUS Listening" 60 29866 \
-	setsid bin/buildat_server -m ../apps/digger -D "$t/uo" -C "$t/co" -l 3 ||
+	setsid bin/buildat_server -m ../apps/demo_digger -D "$t/uo" -C "$t/co" -l 3 ||
 	fail "the orphan did not start ($(tail -3 "$t/o.log"))"
 server=$SERVER_PID; o=$server
-printf 'v=1\nversion=0.0.1\nserver=%s\nclient=0\napp=digger\nport=29866\n' \
+printf 'v=1\nversion=0.0.1\nserver=%s\nclient=0\napp=demo_digger\nport=29866\n' \
 	"$server" > "$pf"
 timeout 60 bin/buildat -o launch_ui=launch_menu -C "$t/cache" -D "$t/ub" -w 640x360 -l 3 \
 	-o sound_mute=1 -c @"$t/short" > "$t/b2.log" 2>&1 ||

@@ -15,7 +15,7 @@
 // sky itself. **builtin/voxel_shading has its own copy of the same block**,
 // for the nine games that draw with its shaders rather than these; that one
 // is not shared, because a change there is checked against
-// apps/voxel_lighting's images and this file is not on that path.
+// apps/sample_lighting_scene's images and this file is not on that path.
 
     // How much of the sky the camera can see, per direction: a cube of
     // SKYVIS_CELLS squared values per face, 1 for full sky and 0 for none,

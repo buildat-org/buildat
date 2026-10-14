@@ -318,7 +318,7 @@ static double ray_visibility(int status, int skylight, int steps)
 	// **A wall is a wall.** Only what the sky is seen through anyway --
 	// a leaf, a plant, a pane -- passes the daylight it stands in; stone
 	// stops the ray at nothing, which is what keeps a cave a cave. With
-	// every blocker passing it, apps/voxel_lighting's shaft interior
+	// every blocker passing it, apps/sample_lighting_scene's shaft interior
 	// went from no black at all to 92% of the frame ([UNDERGROUND_LIGHT]).
 	if(status == VOXEL_RAY_BLOCKED)
 		return 0.0;
@@ -463,7 +463,7 @@ static void march_rays(RayJob &job)
 				// sunlight_propagates: a voxel that says the sky is seen
 				// through it. Not the edge material, which is empty for
 				// anything that draws no face against its neighbour and
-				// is true of apps/voxel_lighting's own blocks -- with
+				// is true of apps/sample_lighting_scene's own blocks -- with
 				// that in the test the shaft interior did not move at all.
 				clear_cache[id] = (def != nullptr &&
 						def->transmits_light) ? 1 : 0;

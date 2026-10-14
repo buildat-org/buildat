@@ -34,7 +34,7 @@ BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 d="$t/apps/pkg"
 mkdir -p "$d"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$d/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$d/"
 printf '{"author": "tester", "name": "pkg", "version": "1.0.0",
 	"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a filter check"}\n' > "$d/meta.json"

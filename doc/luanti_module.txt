@@ -254,7 +254,7 @@ The interface
 
 An app that is a Luanti game is a main module that calls run_game() and,
 for each client, join_player() and replicate's assign_scene_to_peer(), and
-a client script that calls luanti.run_client(). apps/luanti_glue_test is
+a client script that calls luanti.run_client(). apps/sample_luanti_glue is
 one in about a hundred lines. From join_player() on, the client's input
 (luanti:where, dig, place, chat and the rest) goes to the game without the
 app forwarding it.

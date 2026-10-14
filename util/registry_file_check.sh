@@ -9,7 +9,7 @@
 #      again; the time from the announce to the world in is said (2.7 s
 #      on the desk, 2026-10-12, before [LOADING_PIC_DECODE] took a second
 #      off it).
-#   2. aggregate_look with a voxel type added 8 s after a client joined (a
+#   2. sample_material_wall with a voxel type added 8 s after a client joined (a
 #      dirty registry): the joined client reads the file again, larger.
 #   util/registry_file_check.sh
 set -u
@@ -60,7 +60,7 @@ echo "ok: the registry a file, cached at the second join"
 
 # 2.
 a=$t/al
-cp -r "$here/apps/aggregate_look" "$a"
+cp -r "$here/apps/sample_material_wall" "$a"
 python3 - "$a/main/main.cpp" <<'PY'
 import sys
 p = sys.argv[1]; s = open(p).read()
@@ -100,7 +100,7 @@ put('''	void on_files_transmitted(const client_file::FilesTransmitted &event)
 open(p, "w").write(s)
 PY
 start_server "$t/al.log" "STATUS Listening" 300 auto "$here/Build/bin/buildat_server" \
-	-m "$a" -D "$t/al.srv" -C "$t/al.cache" -l 3 || fail "aggregate_look ($t/al.log)"
+	-m "$a" -D "$t/al.srv" -C "$t/al.cache" -l 3 || fail "sample_material_wall ($t/al.log)"
 CHECK_PIDS+=($SERVER_PID)
 printf "wait_log 60000 the voxel registry from the served file\nwait_log 60000 the voxel registry from the served file\ndelay 500\nquit\n" > "$t/al.cmds"
 run_client 60 "$t/al_c.log" timeout 120 "$b" -C "$t/alc" -D "$t/alu" -w 800x450 -l 3 \

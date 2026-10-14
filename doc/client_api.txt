@@ -982,7 +982,7 @@ XMLFile:GetRoot([name]) -> XMLElement, XMLFile:ToString([indentation])
 magic.render_scene_to_texture(scene, camera_node, w, h) -> Texture2D
 - A scene drawn into a texture instead of into the window. What wants it is a
   thumbnail: a voxel volume or a model seen on its own, on a button, which is
-  what the structures menu in apps/aggregate wears.
+  what the structures menu in apps/demo_aggregate wears.
 - The camera node needs a Camera component. The texture keeps updating every
   frame, so geometry built asynchronously -- set_voxel_geometry() -- appears
   when it arrives without anything asking for another update.
@@ -1013,7 +1013,7 @@ magic.set_preferred_viewports({viewport, ...})
       magic.set_preferred_viewports({})                    -- teardown
 
 - Declarative: this is what is on the screen now. An app that moves a viewport
-  rect -- apps/bomber_drone splits the window in half -- calls it again after
+  rect -- apps/demo_bomber_drone splits the window in half -- calls it again after
   setting the new rects, and the rects it reads are in window pixels whatever
   the scale is, so nothing about screen-to-world maths or picking changes.
 - An app that does not call this is drawn at native resolution and keeps
@@ -1080,7 +1080,7 @@ Note:
 	side, because then you will get unpredictable fighting between the one set
 	on server-side and client-side.
 
-	Example: apps/entitytest/main/client_lua/init.lua
+	Example: apps/sample_server_entities/main/client_lua/init.lua
 
 	The client makes only the component types that hold the scene, draw,
 	collide or sound (src/client/state.cpp, `replicable`): Octree,
@@ -1613,7 +1613,7 @@ index. Rules are the other way.
 - The id role, where it is bound, still says whether a voxel has been
   generated at all -- id 0 is "nothing has got here yet" whatever the rules
   make of the rest of the word.
-- It travels with the registry, as the format does. apps/aggregate_look is
+- It travels with the registry, as the format does. apps/sample_material_wall is
   a world that uses it: two rules over two fields, and no voxel id stored
   anywhere.
 - The format travels with the registry, so a client that deserializes one

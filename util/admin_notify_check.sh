@@ -157,7 +157,7 @@ echo "$asug" | grep -Eq '^https://ntfy.sh/buildat-[0-9a-f]{32}$' && [ "$asug" !=
 	fail "Aitta's suggestion '$asug' beside Hearth's '$sug' ($t/aadmin.log)"
 grep -aq "note=Saved" "$t/aadmin.log" || fail "Aitta's admin's address ($t/aadmin.log)"
 mkdir -p "$t/app"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 printf '{"author": "tester", "name": "pk", "version": "1.0.0",
 	"engine_api": 2, "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "an ntfy check"}\n' > "$t/app/meta.json"

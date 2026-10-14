@@ -2351,7 +2351,7 @@ camera_node:CreateComponent("Camera")
 -- sound in here is a `SoundSource3D` and positional audio with no
 -- listener is silent without being an error -- the room played nothing
 -- at all and said nothing about it. The ear goes where the eyes are,
--- as vanilla and featuretest both put it; how loud it all is stays the
+-- as vanilla and sample_client_scene both put it; how loud it all is stays the
 -- player's own preference.
 if magic.audio then
 	magic.audio.listener = camera_node:CreateComponent("SoundListener")
@@ -2612,7 +2612,7 @@ camera_node:GetComponent("Camera").fov = fov
 local viewport = magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))
 -- **The viewport is registered before the render path is touched**,
--- which is the order apps/voxel_lighting uses and the last difference
+-- which is the order apps/sample_lighting_scene uses and the last difference
 -- between the two that was left to try.
 magic.set_preferred_viewports({viewport})
 
@@ -2656,7 +2656,7 @@ function apply_room_path(vp)
 	-- orbs and the readout draw and everything lit by a point light does
 	-- not. Brighten the shot six times and that is what is in it. So the
 	-- light passes are not reaching the HDR buffer, and the base pass
-	-- is. apps/voxel_lighting renders in HDR with the same three
+	-- is. apps/sample_lighting_scene renders in HDR with the same three
 	-- effects appended in the same order, and the difference that is
 	-- left is that its scene is lit by a **directional** light and this
 	-- one by points. That is where the next look starts, and it is a

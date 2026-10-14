@@ -5,8 +5,8 @@
 // to deliver it. What keeps the two apart now is that a good deal of what is
 // in here is an art style rather than a mechanism -- how far a spot turns, how
 // narrowly a leaf passes light through itself -- and this client's worlds and
-// apps/voxel_lighting's are not the same worlds. Tuning one of them through a
-// shared file retunes the other, which is how voxel_lighting's rock quietly
+// apps/sample_lighting_scene's are not the same worlds. Tuning one of them through a
+// shared file retunes the other, which is how sample_lighting_scene's rock quietly
 // lost its speckle.
 //
 // So the two are not kept in step. A fix to the machinery is worth carrying
@@ -26,7 +26,7 @@
 //                       plants the whole way across and every one of them can
 //                       hold a spot, so the sparkle has to gather tightly
 //                       around the light or it reads as glitter over a field.
-//                       voxel_lighting's few surfaces are sparsely spotted and
+//                       sample_lighting_scene's few surfaces are sparsely spotted and
 //                       a wide turn is what makes them catch anything at all.
 //   spotGloss           Ramped on sharply here, linear there. With plants this
 //                       dense, the half open cells -- most of them at any

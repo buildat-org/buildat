@@ -50,7 +50,7 @@ grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 # publish <name> <version> <serverless> <extra client_lua line>
 publish(){
 	rm -rf "$t/app"; mkdir -p "$t/app"
-	cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+	cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 	printf 'local a = 1\n%s\n' "$4" > "$t/app/main/client_lua/extra.lua"
 	printf '{"author": "tester", "name": "%s", "version": "%s", "serverless": %s,
 		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",

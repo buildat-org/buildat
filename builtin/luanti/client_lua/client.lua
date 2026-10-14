@@ -167,7 +167,7 @@ local function key_down(action)
 end
 
 
--- The same PBR setup the lighting games use; apps/voxel_lighting's README
+-- The same PBR setup the lighting games use; apps/sample_lighting_scene's README
 -- says why these numbers are what they are. These are what noon looks like;
 -- the sun moves with the world's clock, and night is the same sun dimmed
 -- and turned blue -- see update_sky() below.
@@ -3350,7 +3350,7 @@ local pointed_node = scene:CreateChild("pointed")
 local frame_boxes
 do
 	-- Four thin strips along the edges of each face of each box: a
-	-- wireframe box, the way apps/digger draws one
+	-- wireframe box, the way apps/demo_digger draws one
 	local geometry = pointed_node:CreateComponent("CustomGeometry")
 	local material = magic.Material.new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",

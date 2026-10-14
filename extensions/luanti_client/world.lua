@@ -835,7 +835,7 @@ function M.new(magic, buildat, log, options)
 	magic.set_preferred_viewports({viewport})
 
 	-- On the PBR path the frame is rendered in HDR and tone mapped, the way
-	-- apps/voxel_lighting does it. Nothing else makes the sun read as the
+	-- apps/sample_lighting_scene does it. Nothing else makes the sun read as the
 	-- sun: in a frame that clips at one, a sun strong enough to put a real
 	-- shadow on the ground flattens every lit surface to white, and one weak
 	-- enough not to do that is a sun whose colour and whose shadow are both
@@ -2729,7 +2729,7 @@ function M.new(magic, buildat, log, options)
 	-- is left for the sun is what the sun is. Only a little warm: what makes
 	-- sunlight read as golden is the blue ambient beside it, and a light
 	-- warmer than this shows up undisguised in what a glint reflects.
-	-- apps/voxel_lighting's sun is the same colour.
+	-- apps/sample_lighting_scene's sun is the same colour.
 	local SUN_COLOR = {1.0, 0.96, 0.88}
 	-- And how much of the sun's colour the clouds take while it is down
 	-- there. More than the light itself takes, because a cloud at dawn is

@@ -264,7 +264,7 @@ void VS()
     // Urho3D writes the ones a material has and leaves the rest as the
     // last draw left them -- so a correction switched on by "the box is
     // not degenerate" turned itself on in games that had never heard of
-    // it, and voxel_lighting's pond moved by seven times its own noise
+    // it, and sample_lighting_scene's pond moved by seven times its own noise
     // floor ([LOOK_CHECK], 2026-09-24). One flag, set beside the box.
     uniform float cProbeBox;
     // [LAUNCH_WORLD] stage 3: a floor of light for a sealed room, the

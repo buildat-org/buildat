@@ -154,7 +154,7 @@ if [ "$slot" -lt 1 ] || [ "$back" -lt 1 ]; then
 			"or a missing one does not fall back to the menu"
 	exit 1
 fi
-# **A game to go into** ([CI_RUNS]): the drive goes into digger by name
+# **A game to go into** ([CI_RUNS]): the drive goes into demo_digger by name
 # where the tree has games installed, and leaves that block out where it
 # has none -- a container -- and the assertions below say so.
 games_installed=$(ls "$BUILDAT_USER_PATH/shared/vanilla/games" 2>/dev/null | wc -l)
@@ -302,7 +302,7 @@ fi
 	# and the camera flies in; Escape brings the room back.
 	#
 	# **The empty pocket, not a game.** This typed "und" and launched
-	# undermine for real: a local server that has to compile its modules
+	# demo_undermine for real: a local server that has to compile its modules
 	# first, and when that ran long the connect failed and the game's own
 	# Escape exited the client -- taking the other 55 commands of this
 	# sequence with it, so half the assertions below read missing files
@@ -520,7 +520,7 @@ fi
 	echo "keypress Escape"
 	echo "wait_log 5000 console: closed"
 	echo "delay 400"
-	# **A game launched by name** -- digger, which every tree has. Last
+	# **A game launched by name** -- demo_digger, which every tree has. Last
 	# but one, because it starts a server and takes the client into the
 	# game.
 	if [ "${games_installed:-0}" -gt 0 ]; then
@@ -817,7 +817,7 @@ if [ "$went" -ge 1 ] && [ "$back" -lt 1 ]; then
 fi
 if [ "$went" -lt 1 ]; then
 	if [ "${games_installed:-0}" -gt 0 ]; then
-		echo "FAIL: launching digger by name started nothing"
+		echo "FAIL: launching demo_digger by name started nothing"
 		exit 1
 	fi
 	echo "note: no game is installed here, so the game and the way back"\

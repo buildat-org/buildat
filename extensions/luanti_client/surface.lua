@@ -32,7 +32,7 @@
 -- moment, and they want to be small: a spot reflects at full strength
 -- whatever the rest of the surface does, so a few per cent reads as a surface
 -- catching the light and a tenth of it reads as glitter paint. These are
--- scaled to the numbers apps/voxel_lighting arrived at, which is the same
+-- scaled to the numbers apps/sample_lighting_scene arrived at, which is the same
 -- shader with the same constants behind it: grass 0.012, leaves 0.03, water
 -- 0.05, rock 0.04 standing still.
 --

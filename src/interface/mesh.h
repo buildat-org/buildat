@@ -116,7 +116,7 @@ namespace interface
 		// interface/atlas.h says what fills the two maps. No technique is set:
 		// a game picks one for its chunks in voxelworld.sub_material_update(),
 		// and skylit geometry stays invisible until it does. The reference
-		// implementation is PBRVoxel in apps/voxel_lighting.
+		// implementation is PBRVoxel in apps/sample_lighting_scene.
 
 		// A voxel whose definition has a shape contributes that shape's quads
 		// instead of cube faces; see VoxelDefinition::shape in

@@ -29,7 +29,7 @@ fail(){ echo "FAIL: $*"; exit 1; }
 secret="$t/secret_outside_the_box"
 echo 'this is the user secret the box must not let the compiler read' > "$secret"
 
-cp -r "$here/apps/test" "$t/app"
+cp -r "$here/apps/sample_module_calls" "$t/app"
 # Two #includes at the very top, before any real header: a system path the
 # box allows, then the outside file it must deny.
 {

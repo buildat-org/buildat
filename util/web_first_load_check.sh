@@ -28,8 +28,8 @@ head -c 45000000 /dev/urandom | base64 > "$t/web/buildat.data"
 cd "$here/Build"
 P=29584
 start_server "$t/srv.log" "STATUS Listening" 60 $P \
-	bin/buildat_server -m ../apps/digger -D "$t/srv" -W "$t/web" -l 3 ||
-	fail "digger did not start"
+	bin/buildat_server -m ../apps/demo_digger -D "$t/srv" -W "$t/web" -l 3 ||
+	fail "demo_digger did not start"
 s=$SERVER_PID
 u=http://127.0.0.1:$P
 curl -s -m 20 -H "Accept-Encoding: deflate" -o "$t/data" $u/buildat.data &

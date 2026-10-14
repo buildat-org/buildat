@@ -362,7 +362,7 @@ struct CInstance: public voxelworld::Instance
 		// open_sky_from() then calls a cave open sky, seeds it at fifteen
 		// and loses the lot when the rock above arrives and the
 		// neighbourhood is zeroed together with nothing left holding
-		// light to spread back. apps/voxel_lighting, 2026-09-28: the
+		// light to spread back. apps/sample_lighting_scene, 2026-09-28: the
 		// column asked at generation left 87802 voxels darker than a
 		// fresh fill, the same number at 9, 30, 60 and 90 seconds, where
 		// without it the scene reads ok ([SKY_COLUMN_CAVE]).

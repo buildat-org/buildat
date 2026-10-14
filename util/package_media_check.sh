@@ -53,8 +53,8 @@ EOF
 # pack <name> <icon file> <screenshot file> <screenshot's name>
 pack(){
 	rm -rf "$t/app"; mkdir -p "$t/app"
-	cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/" 2>/dev/null ||
-		cp -r "$here/apps/minigame/main" "$here/apps/minigame/launcher" "$t/app/"
+	cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/" 2>/dev/null ||
+		cp -r "$here/apps/demo_board_game/main" "$here/apps/demo_board_game/launcher" "$t/app/"
 	cp "$t/$2" "$t/app/icon.png"; cp "$t/$3" "$t/app/$4"
 	printf '{"author": "tester", "name": "%s", "version": "1.0.0",
 		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
@@ -137,8 +137,8 @@ echo "{\"aittas\": [\"$A\"]}" > "$t/managed.json"
 # picture are drawn in the frames after it
 cat > "$t/cmds" <<C
 wait_log_any 20000 launch_menu: 
-text minigame
-wait_log 5000 rows for "minigame"
+text demo_board_game
+wait_log 5000 rows for "demo_board_game"
 event scan grid
 screenshot $t/grid.png
 keypress Escape
@@ -166,7 +166,7 @@ BUILDAT_STARPORT_MANAGED="$t/managed.json" timeout 120 "$b" \
 ls "$t"/cache*/package_media/$h.png > /dev/null 2>&1 ||
 	fail "the installed app's icon not under the cache"
 grep -a "scan grid: " "$t/cl.log" | grep -aq "$h.png" ||
-	fail "the tile: $(grep -a "scan grid: .*minigame" "$t/cl.log" | head -3)"
+	fail "the tile: $(grep -a "scan grid: .*demo_board_game" "$t/cl.log" | head -3)"
 grep -a "scan rows: " "$t/cl.log" | grep -ac "$h.png" | grep -q "^2$" ||
 	fail "the rows' icons: $(grep -a "scan rows: .*image" "$t/cl.log" | head -4)"
 grep -aq "aitta panel: screenshot .*\.png$" "$t/cl.log" || fail "no screenshot in the panel"

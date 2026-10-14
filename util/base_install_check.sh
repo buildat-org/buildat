@@ -2,7 +2,7 @@
 # tier: quick
 # cost: ~1 min (2026-10-14)
 # covers: src/impl/aitta.cpp builtin/loader/loader.cpp builtin/client_lua/client_lua.cpp src/server/confine.cpp
-# [LUANTI_APP_PACKAGES]: a variant of vanilla as a package. vanilla_voxel_physics
+# [LUANTI_APP_PACKAGES]: a variant of vanilla as a package. sample_vanilla_falling_blocks
 # with a manifest naming "base": "vanilla" is packed, signed and installed
 # into a fresh user dir, where nothing is beside it: its base is found among
 # the apps Buildat ships. One client_lua file of vanilla's main module,
@@ -22,7 +22,7 @@ trap check_cleanup EXIT
 
 # The package: the variant, a manifest, vanilla's init.lua with a line of
 # its own
-cp -r "$here/apps/vanilla_voxel_physics" "$t/app"
+cp -r "$here/apps/sample_vanilla_falling_blocks" "$t/app"
 rm -rf "$t/app/test"
 cat > "$t/app/meta.json" <<'J'
 {"author": "tester", "name": "vvp", "version": "1.0.0", "engine_api": 2,

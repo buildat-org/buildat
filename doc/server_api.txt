@@ -410,7 +410,7 @@ client_lua files it has (the order variant, base, builtin, per file).
 The variant is its own app everywhere else (its tile, its saves). A
 plain name is looked for beside the variant, then in the shipped apps;
 "<author>.<name>" among the installed packages (interface::aitta::
-find_base; doc/luanti_apps.txt). apps/vanilla_voxel_physics is one.
+find_base; doc/luanti_apps.txt). apps/sample_vanilla_falling_blocks is one.
 
 builtin/main_context/api.h -- main_context::Interface: the server-side
 Magic context and its scenes. get_context(), create_scene() ->

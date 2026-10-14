@@ -190,8 +190,8 @@ against check.sh) -- and that is what an edit runs.
 
 An app's look is checked by a runner and not by memory: a change under
 builtin/voxel_shading, the mesher or voxelworld picks
-apps/voxel_lighting/check.sh through its "covers" line. That one compares the
-fourteen framings against the reference run kept in local/voxel_lighting/ref/
+apps/sample_lighting_scene/check.sh through its "covers" line. That one compares the
+fourteen framings against the reference run kept in local/sample_lighting_scene/ref/
 -- taken with --accept on a tree whose look somebody has confirmed -- and says
 which view moved and by how much. With no reference on the machine it skips
 and says so; a committed baseline is [CHECK_BASELINE]'s and wants a commit

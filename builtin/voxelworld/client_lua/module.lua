@@ -12,7 +12,7 @@ log:info("voxelworld loading")
 -- Set by the game before the camera is set, if the defaults do not suit it.
 -- LOD is off unless asked for ([API_DEFAULTS_07]): past lod_distance a chunk
 -- is meshed from a downsampled volume, which loses shaped voxels and the
--- translucent and masked materials, so a game sets a number (digger's
+-- translucent and masked materials, so a game sets a number (demo_digger's
 -- 80) when it wants that trade. A scene with no player wants
 -- physics_distance small so no collision shapes are built at all.
 M.lod_distance = math.huge

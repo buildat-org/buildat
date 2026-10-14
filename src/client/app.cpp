@@ -654,7 +654,7 @@ static void check_scaled_viewport_size()
 		throw Exception("scaled_length: minimum of one pixel");
 	if(scaled_length(1280, 1.5f) != 1920)
 		throw Exception("scaled_length: above one");
-	// apps/bomber_drone's second viewport: the same factor, so the two
+	// apps/demo_bomber_drone's second viewport: the same factor, so the two
 	// halves still meet
 	magic::IntRect r = scaled_rect(magic::IntRect(0, 360, 1280, 720), 0.5f);
 	if(r.left_ != 0 || r.top_ != 180 || r.right_ != 640 || r.bottom_ != 360)

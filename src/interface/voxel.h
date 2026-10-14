@@ -734,7 +734,7 @@ namespace interface
 			return f;
 		}
 
-		// Materials drawn with the surface modifiers, as apps/aggregate's
+		// Materials drawn with the surface modifiers, as apps/demo_aggregate's
 		// own format is: 255 types, sky light, a tint, wetness and gloss
 		// of 4 bits each and how far the top face sags. Unbound: bits
 		// 28..31 of plane 0.

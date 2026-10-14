@@ -10,7 +10,7 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
 
     {
         "author": "celeron55",        a-z, 0-9 and _, 1 to 40
-        "name": "digger",             the same
+        "name": "demo_digger",        the same
         "version": "1.0.0",           letters, digits, . - + _, 1 to 40
         "engine_api": 2,              the engine API it is written for
         "license_code": "Apache-2.0",

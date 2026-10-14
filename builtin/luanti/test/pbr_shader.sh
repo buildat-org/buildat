@@ -7,7 +7,7 @@
 #
 # **Nothing in this tree could fail on a change to the shader the Luanti
 # clients draw with** (user, 2026-09-25; [UNDERGROUND_LIGHT] (3)).
-# apps/voxel_lighting/check.sh guards its own game's look and reads
+# apps/sample_lighting_scene/check.sh guards its own game's look and reads
 # builtin/voxel_shading's shader; `extensions/luanti_client/res/
 # PBRVoxel.glsl` -- the one apps/vanilla actually draws with -- had no
 # runner at all, and the light terms, the gray ramp and the zone the
@@ -15,7 +15,7 @@
 # red.
 #
 # **Three views at 13:00 and one at 20:30 against the stored set**, by RMSE, the same
-# shape apps/voxel_lighting/check.sh uses: vp1 (the open surface the
+# shape apps/sample_lighting_scene/check.sh uses: vp1 (the open surface the
 # ambient is fitted to), vp8 (a lamp in a cave) and vp10 (a chamber with
 # no sky of its own), and **vp1 again at 20:30**.
 #
@@ -58,7 +58,7 @@ shot="$out/shot/module_pbr_r${REFSHOT_RANGE}"
 # not the same rays twice. Read on this desk 2026-09-28, an unchanged
 # tree against a set shot minutes before it: **2.92, 3.98 and 2.45** for
 # vp1, vp8 and vp10. Twenty is well above that and well below a real
-# change -- apps/voxel_lighting measures those at 72 to 868.
+# change -- apps/sample_lighting_scene measures those at 72 to 868.
 # **Two readings per view, because one of them is blunt.** The RMSE
 # catches a change of shape -- a term that moved somewhere and not
 # elsewhere -- and its floor is the sky-visibility sweep, whose rays are

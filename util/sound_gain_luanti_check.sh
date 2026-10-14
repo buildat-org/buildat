@@ -23,7 +23,7 @@ mkdir -p "$d/apps/vanilla/saves/sg/luanti" "$(dirname "$g")"
 cp -r "$here/builtin/luanti/minimal_game" "$g"
 mkdir -p "$g/mods/sg/sounds"
 echo "name = sg" > "$g/mods/sg/mod.conf"
-cp "$here/apps/featuretest/main/client_data/fire_small.ogg" "$g/mods/sg/sounds/sg_test.ogg"
+cp "$here/apps/sample_client_scene/main/client_data/fire_small.ogg" "$g/mods/sg/sounds/sg_test.ogg"
 cat > "$g/mods/sg/init.lua" <<'L'
 -- The minimal game has no hand: one that digs the box
 core.register_item(":", {type = "none", tool_capabilities = {

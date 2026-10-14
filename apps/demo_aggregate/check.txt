@@ -1,0 +1,83 @@
+# Client command sequence for a visual check. Run from Build/:
+#   bin/buildat -s localhost -w 1280x720 -c @../apps/demo_aggregate/check.txt
+#
+# The first shot is late on purpose. voxel_shading marches rays to work out
+# how much of the sky each direction can see, and until that settles the
+# glossy specks of a surface reflect a sky they cannot actually see -- so a
+# tunnel is full of glints for the first half minute and clean after it.
+# Twenty seconds is not enough; thirty is. Anything compared against
+# apps/demo_undermine has to be taken at the same point for the same reason.
+delay 30000
+screenshot ../tmp/aggregate_check/1_spawn_tunnel.png
+
+# Dig the ceiling. One voxel: the dig has a cooldown and this is about
+# whether digging works at all, not about bringing the roof down.
+mouse_move 0 -120
+delay 400
+mouse_down left
+delay 2500
+mouse_up left
+delay 1000
+screenshot ../tmp/aggregate_check/2_dug.png
+mouse_move 0 120
+delay 500
+
+# A chamber, which is wider than stone will span, so its roof comes down as
+# soon as the simulation looks at it. The free camera frames what it puts up.
+keypress TAB
+delay 500
+keypress B
+delay 1500
+mouse_pos 640 321
+delay 400
+mouse_down left
+delay 300
+mouse_up left
+delay 12000
+# The overlook place, which the spawn and anything built there is in frame
+# from. The camera the menu takes itself to is off a corner of the structure
+# and can end up inside a tree; this is a fixed point that does not.
+keypress G
+delay 5000
+keydown G
+delay 200
+keyup G
+delay 8000
+screenshot ../tmp/aggregate_check/3_chamber.png
+
+# From above, and then the three views over it
+mouse_move 0 300
+delay 300
+keydown SPACE
+delay 800
+keyup SPACE
+delay 1500
+screenshot ../tmp/aggregate_check/4_above.png
+keypress V
+delay 2500
+screenshot ../tmp/aggregate_check/5_load.png
+keypress V
+delay 2000
+screenshot ../tmp/aggregate_check/6_support.png
+keypress V
+delay 2000
+screenshot ../tmp/aggregate_check/7_danger.png
+
+# Water poured under the open sky, and the same water 45 seconds later: it
+# soaks in and what is left dries. What is being looked at is that the puddle
+# is smaller in 9 than in 8 -- evaporation is a unit of 255 every 8 seconds
+# per voxel, so a shallow pour is most of the way gone by the second shot,
+# and the server says "evaporation: N units" while it happens.
+keypress 5
+delay 500
+mouse_move 0 1500
+delay 500
+mouse_click right
+delay 600
+mouse_click right
+delay 600
+mouse_click right
+delay 3000
+screenshot ../tmp/aggregate_check/8_poured.png
+delay 45000
+screenshot ../tmp/aggregate_check/9_dried.png

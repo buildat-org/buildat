@@ -8,10 +8,10 @@
 #      [SELECT_BAD_FD]: the drop closed its fd under the select that came
 #      next, and the select's failure set the listener aside for good; so
 #      the server must still accept after it, and say nothing of select().
-#   2. Beside it, a native client on digger, idle for 150 s: still on at
+#   2. Beside it, a native client on demo_digger, idle for 150 s: still on at
 #      the end, and the server dropped nobody else.
 #   3. With WEB=firefox or WEB=chrome: the web client (web/, from
-#      util/build_web.sh) idle for 150 s on digger, through
+#      util/build_web.sh) idle for 150 s on demo_digger, through
 #      util/web_drive.sh: the server dropped nobody.
 #
 #   util/peer_timeout_check.sh    [WEB=firefox]
@@ -25,8 +25,8 @@ fail(){ echo "FAIL: $*"; exit 1; }
 cd "$here/Build"
 P=29583
 start_server "$t/srv.log" "STATUS Listening" 60 $P \
-	bin/buildat_server -m ../apps/digger -D "$t/srv" -l 3 ||
-	fail "digger did not start"
+	bin/buildat_server -m ../apps/demo_digger -D "$t/srv" -l 3 ||
+	fail "demo_digger did not start"
 s=$SERVER_PID
 # The 150 s idle is the check (as the web drive's wait below)
 printf 'delay 150000\nquit\n' > "$t/seq"
@@ -76,7 +76,7 @@ if [ -n "${WEB:-}" ]; then
 [["nav", "${URL}"], ["waitlog", "Connect succeeded", 120],
  ["wait", 150000], ["shot", "${OUT}/idle.png"]]
 J
-	"$here/util/web_drive.sh" "$WEB" digger "$t/steps.json" "$t/web" \
+	"$here/util/web_drive.sh" "$WEB" demo_digger "$t/steps.json" "$t/web" \
 		> "$t/web.log" 2>&1 || fail "the web drive failed: $(tail -3 "$t/web.log")"
 	grep -q "nothing in 60 s; dropping it" "$t/web/server.log" &&
 		fail "the idle web client was dropped: $(grep 'nothing in 60 s; dropping it' "$t/web/server.log")"

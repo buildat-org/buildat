@@ -1,9 +1,0 @@
-# Client command sequence for a visual check. Run from Build/:
-#   bin/buildat -s localhost -w 1600x900 \
-#           -c @../apps/aggregate_look/check.txt
-#
-# The camera does not move and nothing in the world does either, so the image
-# is the same every run: this is a comparison against the last one, not a
-# recording of anything happening.
-delay 10000
-screenshot ../tmp/aggregate_look_check/1_grid.png

@@ -3,7 +3,7 @@
 # cost: ~3 min (2026-10-10)
 # covers: util/serve_latest_release.sh apps/aitta/main/main.cpp
 # [SERVE_DELISTED]: a local Aitta (its admin by first_admin) with
-# tester/pt (apps/minigame) 1.0.0, served by serve_latest_release.sh with
+# tester/pt (apps/demo_board_game) 1.0.0, served by serve_latest_release.sh with
 # AITTA.
 #   1. 1.0.0 delisted for licence: one warning over two checks, the
 #      server still up.
@@ -40,7 +40,7 @@ req(){ # <log> <requests>
 }
 req "$t/bind.log" "{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}"
 mkdir -p "$t/app"
-cp -r ../apps/minigame/main ../apps/minigame/launcher "$t/app/"
+cp -r ../apps/demo_board_game/main ../apps/demo_board_game/launcher "$t/app/"
 publish(){
 	printf '{"author": "tester", "name": "pt", "version": "%s",
 		"engine_api": 2, "audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
