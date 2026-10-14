@@ -82,7 +82,16 @@ runners=""
 # ([CHECK_COVERAGE]): a list of places missed util/ and apps/, and named
 # a games/ that had gone. A tier that is none of the four is an error,
 # not a runner nobody runs.
-for f in $(git -C "$root" grep -l '^# tier:' -- '*.sh'); do
+# **Without git too**: util/checks_in_docker.sh runs a `git archive`,
+# which has no .git, and every tier found nothing there and passed
+tiered() {
+	git -C "$root" grep -l '^# tier:' -- '*.sh' 2>/dev/null ||
+		(cd "$root" && grep -rl --include='*.sh' \
+			--exclude-dir=Build --exclude-dir=3rdparty --exclude-dir=local \
+			--exclude-dir=user --exclude-dir=cache '^# tier:' . |
+			sed 's|^\./||' | sort)
+}
+for f in $(tiered); do
 	f="$root/$f"
 	t=$(sed -n 's/^# tier: *//p' "$f" | head -1)
 	case "$t" in
@@ -254,6 +263,11 @@ echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(da
 [ -n "$failed_names" ] && echo "failed:$failed_names"
 echo "logs in $out"
 what=$([ -n "$changed" ] && echo "set the diff picked" || echo "$tier tier")
+# A whole tier that ran nothing is a fault of its own, not a green one
+if [ -z "$changed" ] && [ -z "${ONLY:-}" ] && [ $((pass + fail + skip)) -eq 0 ]; then
+	echo "FAIL: the $what has no runners here"
+	exit 1
+fi
 [ "$fail" -eq 0 ] && echo "PASS: the $what is green" ||
 	echo "FAIL: $fail runners of the $what failed"
 exit $([ "$fail" -eq 0 ] && echo 0 || echo 1)
