@@ -11,9 +11,8 @@
 -- of it is the vertices and the triangles of every mesh in the tree, put
 -- where the tree's transforms say.
 --
--- What is not read: BONE, KEYS and ANIM, which are the animation. A mob is
--- animated and would come out standing still in its rest pose; a chest is
--- not animated at all and comes out right.
+-- BONE and KEYS pose a mob at a frame of its animation (parse()'s frame);
+-- ANIM is not read, the game's animation ranges say the same.
 --
 -- Nothing here touches a file: parse() takes the bytes.
 
@@ -155,6 +154,46 @@ local function node_matrix_inverse(px, py, pz, sx, sy, sz, qw, qx, qy, qz)
 	return multiply(unscale, multiply(unrotate, untranslate))
 end
 
+-- A bone's position, scale or rotation at a frame: the keys that carry it
+-- either side of the frame, mixed by where the frame falls between them, as
+-- Irrlicht does; before the first key the first, after the last the last.
+-- A rotation is a quaternion mixed the short way round and normalised
+-- (node_matrix() normalises), which is near enough a slerp between keys a
+-- few frames apart. nil when no key carries it: the rest stands.
+local function sample(keys, field, frame)
+	local a, b
+	for _, key in ipairs(keys) do
+		if key[field] then
+			if key.frame <= frame and (a == nil or key.frame >= a.frame) then
+				a = key
+			end
+			if key.frame >= frame and (b == nil or key.frame < b.frame) then
+				b = key
+			end
+		end
+	end
+	a = a or b
+	b = b or a
+	if a == nil then
+		return nil
+	end
+	if a.frame == b.frame then
+		return a[field]
+	end
+	local t = (frame - a.frame) / (b.frame - a.frame)
+	local u, v = a[field], b[field]
+	local sign = 1
+	if field == "rot" and u[1] * v[1] + u[2] * v[2] + u[3] * v[3] +
+			u[4] * v[4] < 0 then
+		sign = -1
+	end
+	local out = {}
+	for i = 1, #u do
+		out[i] = u[i] + (sign * v[i] - u[i]) * t
+	end
+	return out
+end
+
 -- parse(data[, frame]) -> quads, groups, skipped
 --
 -- The same shape objmesh.parse() gives back: quads of
@@ -167,7 +206,7 @@ end
 -- and 2 and the caller can put them on different tiles.
 --
 -- frame: the model posed at that frame of its animation -- every bone's
--- transform from the last of its KEYS at or before the frame, and every
+-- transform between its KEYS either side of the frame, and every
 -- vertex moved by the bones that weight it, as Irrlicht does for Luanti.
 -- Without it the mesh is its bind pose, which for a mob authored in Blender
 -- is the arms out and the legs together ([OBJECT_MESH]).
@@ -177,8 +216,7 @@ end
 -- simplified: the winding and the axes go through as they are, which is what
 -- the .obj reader does too. A node mesh is drawn from both sides, so a
 -- winding that is the wrong way round costs the lighting of a face rather
--- than the face. A frame between two keys takes the earlier one; the
--- animation itself is [OBJECT_MESH] step 1's.
+-- than the face.
 function M.parse(data, frame)
 	data = tostring(data)
 	local r = reader(data)
@@ -346,24 +384,12 @@ function M.parse(data, frame)
 		local posed = {}
 		for i, bone in ipairs(bones) do
 			local rest = bone.rest
-			local p = {rest[1], rest[2], rest[3]}
-			local sc = {rest[4], rest[5], rest[6]}
-			local q = {rest[7], rest[8], rest[9], rest[10]}
-			local best = nil
-			for _, key in ipairs(bone.keys) do
-				if key.frame <= frame and (best == nil or
-						key.frame >= best.frame) then
-					best = key
-				end
-			end
-			if best == nil and #bone.keys > 0 then
-				best = bone.keys[1]
-			end
-			if best then
-				p = best.pos or p
-				sc = best.scale or sc
-				q = best.rot or q
-			end
+			local p = sample(bone.keys, "pos", frame) or
+					{rest[1], rest[2], rest[3]}
+			local sc = sample(bone.keys, "scale", frame) or
+					{rest[4], rest[5], rest[6]}
+			local q = sample(bone.keys, "rot", frame) or
+					{rest[7], rest[8], rest[9], rest[10]}
 			local local_now = node_matrix(p[1], p[2], p[3], sc[1], sc[2],
 					sc[3], q[1], q[2], q[3], q[4])
 			local rest_inv = node_matrix_inverse(rest[1], rest[2], rest[3],

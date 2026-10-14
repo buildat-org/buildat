@@ -1056,7 +1056,7 @@ local function parse_look(kind, texture, detail)
 		i = i + 1
 	end
 	look.frame = anim[1]
-	if anim[1] and anim[2] and anim[2] > anim[1] and (anim[3] or 0) > 0 then
+	if anim[1] and anim[2] and anim[2] > anim[1] and (anim[3] or -1) >= 0 then
 		look.anim = {first = anim[1], last = anim[2], speed = anim[3],
 				loop = anim[4] ~= 0}
 	end
@@ -1181,6 +1181,15 @@ startup_packet("luanti:object_props", "luanti_data/object_props.bin", function(d
 	local values = cereal.binary_input(data, {"array", "string"})
 	for i = 1, #values - 5, 6 do
 		local look = parse_look(values[i + 1], values[i + 2], values[i + 3])
+		-- The same model playing the same range keeps the pose it is at
+		-- rather than going back to the range's first while the look
+		-- changes for something else, or the speed
+		local was = object_looks[values[i]]
+		if was and was.anim and look.anim and was.mesh == look.mesh and
+				was.anim.first == look.anim.first and
+				was.anim.last == look.anim.last then
+			look.frame = was.frame
+		end
 		object_looks[values[i]] = look
 		look.pointable = values[i + 4] ~= "0"
 		-- The collision box's middle and the selection box, about the
@@ -1282,14 +1291,20 @@ local function animate_object(id)
 		anim_clock[id] = nil
 		return false
 	end
+	-- The clock is where the animation was (at, in frames) when it or its
+	-- speed was last set: a new range starts at its first frame, a new
+	-- speed goes on from the frame reached (set_animation_frame_speed:
+	-- VoxeLibre's walk keeps pace with the mob)
 	local now = buildat.get_time_us() / 1000000
-	local started = anim_clock[id]
-	if not started then
-		started = now
-		anim_clock[id] = now
+	local c = anim_clock[id]
+	if not c or c.first ~= a.first or c.last ~= a.last then
+		c = {t = now, at = 0, speed = a.speed, first = a.first, last = a.last}
+		anim_clock[id] = c
+	elseif c.speed ~= a.speed then
+		c.at, c.t, c.speed = c.at + (now - c.t) * c.speed, now, a.speed
 	end
 	local length = a.last - a.first + 1
-	local at = (now - started) * a.speed
+	local at = c.at + (now - c.t) * a.speed
 	if a.loop then
 		at = at % length
 	elseif at >= length - 1 then

@@ -441,7 +441,6 @@ end
 -- because a mod that sets a texture and carries on should carry on.
 for _, name in ipairs({
 	"set_texture_mod",
-	"set_animation_frame_speed",
 	"set_nametag_attributes", "set_observers",
 	"set_local_animation", -- an entity's; a player's is PlayerRef's below
 }) do
@@ -474,6 +473,19 @@ function ObjectRef:set_animation(frame_range, frame_speed, frame_blend, frame_lo
 		o.animation = {x = range.x or 1, y = range.y or 1,
 				speed = frame_speed or 15, blend = frame_blend or 0,
 				loop = frame_loop ~= false}
+	end
+end
+
+-- The speed alone, which VoxeLibre's mobs set every step to keep the walk
+-- in pace with the mob; the client goes on from the frame it is at.
+-- simplified: rounded to a quarter of an octave, because a new speed is
+-- the look sent again (every mob, every step, otherwise); a speed message
+-- of its own, as Luanti's, would carry it exactly.
+function ObjectRef:set_animation_frame_speed(frame_speed)
+	local o = state_of(self)
+	local s = tonumber(frame_speed)
+	if o and o.animation and s then
+		o.animation.speed = s > 0 and 2 ^ (math.floor(math.log(s) / math.log(2) * 4 + 0.5) / 4) or 0
 	end
 end
 

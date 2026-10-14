@@ -310,6 +310,59 @@ f 1 2
 	assert(core.__mesh_quads("thing.obj", "", 1) == nil)
 end)
 
+-- A bone's keys are mixed between frames ([OBJECT_ANIM_LOOK]): one
+-- triangle on a bone whose position keys are 0 at frame 0 and 10 along x at
+-- frame 10, in separate KEYS chunks from its rotation's, which stands.
+-- Frame 5 is half way; past the last key the last.
+check("b3d keys between frames", function()
+	local function le32(v)
+		v = v % 0x100000000
+		return string.char(v % 256, math.floor(v / 256) % 256,
+				math.floor(v / 0x10000) % 256, math.floor(v / 0x1000000))
+	end
+	local function lef32(v)
+		if v == 0 then
+			return string.char(0, 0, 0, 0)
+		end
+		local exp = 0
+		while v >= 2 do v = v / 2; exp = exp + 1 end
+		while v < 1 do v = v * 2; exp = exp - 1 end
+		local mant = math.floor((v - 1) * 0x800000 + 0.5)
+		local e = exp + 127
+		return string.char(mant % 256, math.floor(mant / 0x100) % 256,
+				(e % 2) * 128 + math.floor(mant / 0x10000), math.floor(e / 2))
+	end
+	local function chunk(tag, body)
+		return tag .. le32(#body) .. body
+	end
+	local function f(...)
+		local out = ""
+		for _, v in ipairs({...}) do out = out .. lef32(v) end
+		return out
+	end
+	local vrts = chunk("VRTS", le32(0) .. le32(1) .. le32(2) ..
+			f(0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1))
+	local tris = chunk("TRIS", le32(0) .. le32(0) .. le32(1) .. le32(2))
+	local mesh = chunk("MESH", le32(0xffffffff) .. vrts .. tris)
+	local bone = chunk("BONE", le32(0) .. f(1) .. le32(1) .. f(1) ..
+			le32(2) .. f(1))
+	local pos = chunk("KEYS", le32(1) .. le32(0) .. f(0, 0, 0) ..
+			le32(10) .. f(10, 0, 0))
+	local rot = chunk("KEYS", le32(4) .. le32(0) .. f(1, 0, 0, 0) ..
+			le32(10) .. f(1, 0, 0, 0))
+	local node = chunk("NODE", "root\0" .. f(0, 0, 0, 1, 1, 1, 1, 0, 0, 0) ..
+			mesh .. bone .. pos .. rot)
+	local body = le32(1) .. node
+	local b3d = "BB3D" .. le32(#body + 4) .. body
+	local function x_at(frame)
+		return core.__b3dmesh.parse(b3d, frame)[1].p[1]
+	end
+	assert(x_at(nil) == 0, "the bind pose")
+	assert(math.abs(x_at(5) - 5) < 1e-6, "frame 5 is " .. x_at(5))
+	assert(math.abs(x_at(2) - 2) < 1e-6, "frame 2 is " .. x_at(2))
+	assert(math.abs(x_at(20) - 10) < 1e-6, "past the last key")
+end)
+
 check("gltf mesh", function()
 	-- One triangle at (0,0,0), (1,0,0), (0,1,0) with its texture
 	-- coordinates, in a node scaled by two: the buffer is the indices, the
