@@ -3354,7 +3354,7 @@ do
 	local geometry = pointed_node:CreateComponent("CustomGeometry")
 	local material = magic.Material.new()
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureVColMultiply.xml"))
+			"luanti_client/res/LuantiFrame.xml"))
 	local c = magic.Color(0.10, 0.10, 0.10)
 	local drawn = nil
 	frame_boxes = function(boxes)
@@ -3384,9 +3384,10 @@ do
 			local h = {box[4] + 0.004, box[5] + 0.004, box[6] + 0.004}
 			for ax = 1, 3 do
 				local u, w = ax % 3 + 1, (ax + 1) % 3 + 1
-				-- A strip is 1/16 thick, and thinner on a thin box
-				local tu = math.min(1.0 / 16, (h[u] - l[u]) / 3)
-				local tw = math.min(1.0 / 16, (h[w] - l[w]) / 3)
+				-- A strip is 1/32 thick (user, 2026-10-14: half of the
+				-- 1/16 it was), and thinner on a thin box
+				local tu = math.min(1.0 / 32, (h[u] - l[u]) / 3)
+				local tw = math.min(1.0 / 32, (h[w] - l[w]) / 3)
 				for _, s in ipairs({l[ax], h[ax]}) do
 					local function v(pu, pw)
 						local q = {}

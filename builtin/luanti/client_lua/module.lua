@@ -752,8 +752,10 @@ local function make_object_node(look)
 		-- Unlit and alpha-masked. A lit technique is wrong here: the light
 		-- a voxel game needs is bright enough that a sprite under it comes
 		-- out a white blob, and what a sprite wears is its own colours.
+		-- Masked with the depth write on, as Luanti's alpha reference:
+		-- the pointed frame's far edges go behind it ([SELECTION_BOX])
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/DiffUnlitAlpha.xml"))
+				"luanti_client/res/LuantiUnlitMask.xml"))
 		material:SetTexture(magic.TU_DIFFUSE, tex)
 		set.material = material
 		local b = set:GetBillboard(0)
@@ -773,8 +775,9 @@ local function make_object_node(look)
 	model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 	if tex then
 		local material = magic.Material.new()
+		-- Masked with the depth write on, as the sprite above
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/DiffUnlitAlpha.xml"))
+				"luanti_client/res/LuantiUnlitMask.xml"))
 		material:SetTexture(magic.TU_DIFFUSE, tex)
 		model.material = material
 		model.castShadows = true

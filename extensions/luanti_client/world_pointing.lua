@@ -128,7 +128,8 @@ return function(self, magic, scene, camera_node, game_texture)
 		-- Just outside the voxel, so the frame does not fight the face it is
 		-- drawn on for the depth buffer
 		local d = 0.502
-		local w = 1.0 / 16
+		-- Half of the 1/16 it was (user, 2026-10-14, [SELECTION_BOX])
+		local w = 1.0 / 32
 
 		-- One rectangle in a plane, given as the two axes it runs along and
 		-- the constant of the third. axis is 1, 2 or 3 for x, y or z.
@@ -172,7 +173,7 @@ return function(self, magic, scene, camera_node, game_texture)
 		cg:Commit()
 		local m = magic.Material.new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/NoTextureVColMultiply.xml"))
+				"luanti_client/res/LuantiFrame.xml"))
 		cg:SetMaterial(0, m)
 		pointed_node.enabled = false
 	end

@@ -1,0 +1,8 @@
+<!-- The pointed thing's frame: NoTextureVColMultiply's, in the postalpha
+     pass. In the alpha pass it was sorted against the object it frames,
+     whose middle is the same point, and came out wholly in front of it or
+     wholly behind ([SELECTION_BOX]); after it, the depth the object wrote
+     hides the far edges and not the near ones. -->
+<technique vs="Unlit" ps="Unlit" vsdefines="VERTEXCOLOR NOUV" psdefines="VERTEXCOLOR">
+    <pass name="postalpha" depthwrite="false" blend="multiply" />
+</technique>
