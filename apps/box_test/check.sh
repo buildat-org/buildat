@@ -15,6 +15,9 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/box_test"
 rm -rf "$out"; mkdir -p "$out/user/apps/vanilla" "$out/user/shared/vanilla"
+# A link back above the user path, which the box's rules are cut around:
+# it recursed without end and the server died at start ([SEC_RUN5_LEFTOVERS])
+ln -s .. "$out/loop"
 # A file the box must not read: outside the user path, the cache and the
 # install, which is where everything of the user's is. Not under local/:
 # in the development tree that is the install directory, which the box

@@ -191,6 +191,12 @@ struct Ruleset
 		for(const interface::fs::Node &n : interface::fs::list_directory(d)){
 			if(n.name == "." || n.name == "..")
 				continue;
+			// A link back to this directory or above it (`Build -> .`)
+			// recursed without end ([SEC_RUN5_LEFTOVERS]); what it points
+			// to is granted where it is
+			const ss_ r = real(d+"/"+n.name);
+			if(r == d || inside(d, r))
+				continue;
 			add_around(d+"/"+n.name, holes, access);
 		}
 	}
