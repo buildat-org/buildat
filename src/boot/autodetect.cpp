@@ -139,7 +139,7 @@ static bool platform_data_paths()
 
 static void set_platform_data_paths(core::Config &config)
 {
-	// A check's own paths (util/check_paths.sh), so that a run never shares
+	// A check's own paths (util/check_lib.sh), so that a run never shares
 	// the desk's; under -C and -D, over the rest
 	// (set only when there: an empty one set reads as given)
 	const ss_ env_cache = env_or("BUILDAT_CACHE_PATH", "");
