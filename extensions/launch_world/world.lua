@@ -630,6 +630,8 @@ end
 -- The atlas takes the normal and roughness maps off each tile's own
 -- luminance, so what is set here is the finish and not a picture.
 local voxel_reg = api.createVoxelRegistry()
+-- A few types and nothing per voxel: the room's ids are bytes
+voxel_reg:set_format("blocks")
 local atlas_reg = api.createAtlasRegistry()
 local function add_voxel(name, texture, solid, roughness, spec_strength,
 		bumpiness, uv_scale, uv_scale_v)

@@ -546,6 +546,9 @@ struct Module: public interface::Module
 		{
 			interface::VoxelRegistry *reg = ivoxelworld->
 					get_instance(m_main_scene)->get_voxel_reg();
+			// 0.6's cut, which its saves, its checks and its code were written
+			// for
+			reg->set_format(interface::VoxelFormat::buildat_legacy_06());
 			add_voxel(reg, "air", "", false, true);              // id 1
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots. The README says why these values.
@@ -739,8 +742,8 @@ struct Module: public interface::Module
 			for(int x = 0; x < W; x++){
 				VoxelInstance v = world->get_voxel(pv::Vector3DInt32(
 						lc.getX() + x, lc.getY() + y, lc.getZ() + z), true);
-				ids[idx(x, y, z)] = (uint8_t)v.get_id();
-				stored[idx(x, y, z)] = v.get_skylight();
+				ids[idx(x, y, z)] = (uint8_t)v.legacy06_id();
+				stored[idx(x, y, z)] = v.legacy06_skylight();
 			}
 
 			// Straight down at full strength until something stops it, then

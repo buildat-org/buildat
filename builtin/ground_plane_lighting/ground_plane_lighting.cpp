@@ -289,7 +289,7 @@ struct CInstance: public ground_plane_lighting::Instance
 						for(;; y--){
 							VoxelInstance v = world->get_voxel(
 									pv::Vector3DInt32(x, y, z), true);
-							if(v.get_id() == interface::VOXELTYPEID_UNDEFINED){
+							if(v.legacy06_id() == interface::VOXELTYPEID_UNDEFINED){
 								// NOTE: This leaves the chunks below unhandled;
 								// there would have to be some kind of a dirty
 								// flag based on which this seach would be
@@ -300,7 +300,7 @@ struct CInstance: public ground_plane_lighting::Instance
 							const auto *def = voxel_reg->get_cached(v);
 							if(!def)
 								throw Exception(ss_()+"Undefined voxel: "+
-										itos(v.get_id()));
+										itos(v.legacy06_id()));
 							bool light_passes = (!def || !def->physically_solid);
 							if(!light_passes)
 								break;

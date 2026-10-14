@@ -277,9 +277,54 @@ get_by_name, get_all, get_count; set_format / get_format; set_look_selector
 id), VoxelFormat (the planes and the roles: VoxelField {plane, shift,
 width} for id, light_sky, light_lamp, param, color and the modifiers;
 plane_bits, plane_count, plane_of_name, id_of, light_pair,
-surface_modifiers, validate; the default_cut() and luanti() formats),
+surface_modifiers, validate; the layouts below and preset(name)),
 VoxelSample. voxel_format_self_test(). The Lua side of the same is in
 doc/client_api.txt under "Miscellaneous".
+
+**A world's voxel format, picked** ([VOXELFORMAT_PRESETS]). There is no
+default: a registry's add_voxel() throws until set_format() has been given
+a format, so a world that says nothing does not start. A new game picks one
+of these, or cuts its own (VoxelFormat, interface/voxel.h):
+
+  blocks()             id 16, light_sky 4, param 8      a block game
+  many_ids()           id 21, light_sky 4               many types, no state
+  painted()            color 24, light_sky 4, id 4      a colour per voxel
+  surfaces()           id 8, light_sky 4, tint, wetness, gloss, sag_top 4
+                                                        materials drawn with
+                                                        the surface modifiers
+  luanti()             id 16, light_sky 4, light_lamp 4, param 8
+                                                        Luanti's own
+  buildat_legacy_06()  id 21, light_sky 4 (24..27), light_lamp 4 (28..31)
+                                                        the cut 0.6 had: the
+                                                        compatibility layout
+
+None of the first four binds light_lamp: stored lamp light is a Luanti-ism,
+sky light is enough for room and cave light, and a lamp is a light source
+at render time. The bits a layout leaves unbound (each one's comment in
+voxel.h names them) are the game's: bound to a field of its own in a copy of
+the layout before set_format(), not grown into later. VoxelInstance's
+legacy06_id(), legacy06_skylight() and legacy06_lamplight() are
+buildat_legacy_06()'s bits by hand, right only for a world that set it.
+
+**A saved world opened under another format** (voxelworld; the rule is
+world_persistence_plan.md's "The format, and migration"). The engine moves
+data and never reinterprets it:
+
+  same role, same width, another position      moved
+  a role or plane the world has, the save not  zero
+  a role or plane the save has, the world not  dropped, with a warning
+  the id                                       remapped by name (the save's
+                                               name table)
+  any width change, of a role or named plane   the game's migration, or the
+                                               save is refused
+
+The last row because 4 bits into 3 loses data and even 4 into 5 is a
+choice -- scale, or zero-extend? -- that only the game can make. The game's
+migration is an interface::VoxelMigration (interface/voxel_volume.h) given to
+voxelworld's set_migration() before set_save(): per chunk, begin(from, to)
+(false declines, and the save is refused) and migrate(old, moved), handed
+the chunk as saved and the engine-moved one with the changed fields at zero
+to fill. A refused save is neither read nor written further.
 
 interface/voxel_selector.h -- VoxelSelector: the look rules for a world
 whose voxels have no id (VoxelRule of VoxelRuleClauses over fields;
@@ -589,7 +634,7 @@ builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, T
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, Interface, open, create, close, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
-builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
+builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
 interface/address.h: split_host_port, join_host_port, Url, parse_url
 interface/aitta.h: engine_api_refusal, keygen, public_of, sign, verify, verify_hash, module_meta_refusal, check_manifest, media_check, check_media, check_page, pack_page, kind_of, semver_ok, package_files, pack, install
@@ -629,11 +674,11 @@ interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, li
 interface/thread.h: ThreadedThing, ~ThreadedThing, run, on_crash, Thread, ~Thread, set_name, start, is_running, request_stop, stop_requested, join, get_name, ref_backtraces, set_caller_thread, get_caller_thread, get_current_thread, createThread, ThreadLocalKey, set, get
 interface/thread_pool.h: Task, ~Task, pre, thread, post, ThreadPool, ~ThreadPool, add_task, start, request_stop, join, run_post, createThreadPool
 interface/urho3d_cereal.h: save, load
-interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, default_cut, luanti, id_of, light_pair, surface_modifiers, any_surface_modifier, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, get_id, getMSB, get_skylight, set_skylight, get_lamplight, set_lamplight
+interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, blocks, many_ids, painted, surfaces, luanti, buildat_legacy_06, preset, id_of, light_pair, surface_modifiers, any_surface_modifier, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, legacy06_id, legacy06_skylight, legacy06_set_skylight, legacy06_lamplight, legacy06_set_lamplight
 interface/voxel_cereal.h: serialize, r, save, load
 interface/voxel_cereal_legacy.h: In, read_vector, read
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
-interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
+interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write
 ---- end of the generated listing ----

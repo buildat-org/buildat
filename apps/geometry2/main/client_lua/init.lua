@@ -40,6 +40,7 @@ end
 magic.SubscribeToEvent("KeyDown", "handle_keydown")
 
 local voxel_reg = buildat.createVoxelRegistry()
+voxel_reg:set_format("blocks")
 local atlas_reg = buildat.createAtlasRegistry()
 do
 	local vdef = buildat.VoxelDefinition()

@@ -253,21 +253,42 @@ namespace interface
 	//   a role the save has and the world does not   dropped, with a warning
 	//   a plane the save has and the world does not  dropped, with a warning
 	//   bits no role of either format claims         copied where they are
-	//   any width change                             refused
+	//   any width change, of a role or a named plane the game's migration, or refused
 	//
 	// The last row is the point of the whole thing. Loading a 4-bit field
 	// into a 3-bit one loses data and 4 bits into 5 is a choice -- scale, or
 	// zero-extend? -- that only the game can make, so the engine refuses
-	// rather than guessing. Returns null and fills why when it does; the
-	// game's own migration is what answers that case, and there is no hook
-	// for it yet.
+	// rather than guessing. Returns null and fills why when it does.
 	//
 	// The id field moves like any other. What the ids *mean* across a format
 	// change is a different question with a different answer -- the save's
 	// name table -- and remap_volume_ids() is that part.
+	struct VoxelMigration;
 	up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 			const VoxelFormat &from_format, const VoxelFormat &to_format,
-			ss_ *why);
+			ss_ *why, VoxelMigration *migration = nullptr);
+
+	// **A game's own migration**, for what the engine will not guess: a
+	// field or a named plane whose width changed. Given to migrate_volume()
+	// (a world's: voxelworld's set_migration()), it is asked per chunk:
+	//
+	// begin(from, to) first: false is the game declining this change, and
+	// the chunk is refused as with no migration at all. Then the engine
+	// does what it does alone -- moves what only moved, zeroes what is new,
+	// drops what is gone -- and leaves a field or a named plane whose
+	// width changed at zero; migrate(old, moved) gets the chunk as saved
+	// and that result, and writes those (or anything else it likes) into
+	// moved, with whatever loop it likes. A zero-extended id is
+	//   to.id.set(w, from.id.get(old_word))
+	// per voxel; a 4-bit field into 8 bits scaled is the value x17.
+	//
+	// Called on the thread that loads chunks, one chunk at a time.
+	struct VoxelMigration
+	{
+		virtual ~VoxelMigration(){}
+		virtual bool begin(const VoxelFormat &from, const VoxelFormat &to) = 0;
+		virtual void migrate(const VoxelVolume &old, VoxelVolume &moved) = 0;
+	};
 
 	// Rewrites every voxel's id field through map, which is indexed by the
 	// id as it is stored. An id past the end of map is left alone, and

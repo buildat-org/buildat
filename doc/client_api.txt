@@ -1470,11 +1470,16 @@ param values it applies to:
 - Only a param up to 8 bits wide is looked up this way. A wider one is
   storage for the app to read itself.
 
-voxel_reg:set_format{...} says how the app cuts up a voxel's 32 bits. The
-default is what buildat had before this existed -- the type id in bits 0...20
-and two 4-bit light levels in 24...31 -- and an app that says nothing keeps
-it. Say it before the first voxel is added: everything already stored, and
-every volume on its way anywhere, is bits under the old format.
+voxel_reg:set_format{...} says how the app cuts up a voxel's 32 bits. There
+is no default: add_voxel() is an error until a format is set. Say it before
+the first voxel is added: everything already stored, and every volume on its
+way anywhere, is bits under the format.
+
+voxel_reg:set_format("blocks") picks one of the named layouts instead, which
+doc/server_api.txt lists ("blocks", "many_ids", "painted", "surfaces",
+"luanti", and "buildat_legacy_06", the cut buildat had before formats: the
+type id in bits 0...20 and two 4-bit light levels in 24...31). A name that
+is none of them is an error.
 
   voxel_reg:set_format{
       plane_bits = 32,                    -- the app's own plane's width
@@ -1651,10 +1656,9 @@ buildat.pack_voxel_volume(args) -> string
   voxel format rather than a bit range: "id", "skylight", "lamplight",
   "light" (both light channels in one write, the sky light in the low bits),
   "param", "color", or "raw" for the whole word. Where a role actually is
-  depends on the format, which comes from args.registry; without a registry
-  the default format applies, which is id in bits 0..20 and the two lights in
-  24..31. Other bits are left alone, so ids and light are two sources over
-  the same box.
+  depends on the format, which comes from args.registry, and a call without
+  one is an error. Other bits are left alone, so ids and light are two
+  sources over the same box.
 - A field naming a role the format does not bind is an error, as is "light"
   in a format whose two light channels are not adjacent.
 - map is a table indexed by the key, or a string with one byte per key. A key

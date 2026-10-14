@@ -154,7 +154,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 				for(; y>-50; y--){
 					pv::Vector3DInt32 p(x, y, z);
 					VoxelInstance v = volume.getVoxelAt(p);
-					if(v.get_id() != 1)
+					if(v.legacy06_id() != 1)
 						break;
 				}
 				y++;*/
@@ -329,6 +329,9 @@ struct Module: public interface::Module
 			voxelworld::Instance *world =
 					ivoxelworld->get_instance(m_main_scene);
 			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
+			// 0.6's cut, which its saves, its checks and its code were written
+			// for
+			voxel_reg->set_format(interface::VoxelFormat::buildat_legacy_06());
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h. The values are
 			// voxel_lighting's, which is where they were chosen.
@@ -451,7 +454,7 @@ struct Module: public interface::Module
 			for(int y = SPAWN_Y_MAX; y >= SPAWN_Y_MIN; y--){
 				VoxelInstance v = world->get_voxel(
 						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
-				auto id = v.get_id();
+				auto id = v.legacy06_id();
 				if(id == interface::VOXELTYPEID_UNDEFINED){
 					column_ready = false;
 					return;

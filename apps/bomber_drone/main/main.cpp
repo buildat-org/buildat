@@ -316,6 +316,9 @@ struct Module: public interface::Module
 			voxelworld::Instance *world =
 					ivoxelworld->get_instance(m_main_scene);
 			interface::VoxelRegistry *voxel_reg = world->get_voxel_reg();
+			// 0.6's cut, which its saves, its checks and its code were written
+			// for
+			voxel_reg->set_format(interface::VoxelFormat::buildat_legacy_06());
 			// roughness, spec_strength, bumpiness, translucency, spots,
 			// static_spots; see interface/atlas.h
 			add_voxel(voxel_reg, "air", "", false, false, true);     // id 1
@@ -489,7 +492,7 @@ struct Module: public interface::Module
 		over_runway(runway_y, [&](const pv::Vector3DInt32 &p){
 			if(!all)
 				return;
-			if(world->get_voxel(p, true).get_id() ==
+			if(world->get_voxel(p, true).legacy06_id() ==
 					interface::VOXELTYPEID_UNDEFINED)
 				all = false;
 		});
@@ -562,7 +565,7 @@ struct Module: public interface::Module
 			for(int y = SPAWN_Y_MAX; y >= SPAWN_Y_MIN; y--){
 				VoxelInstance v = world->get_voxel(
 						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
-				auto id = v.get_id();
+				auto id = v.legacy06_id();
 				if(id == interface::VOXELTYPEID_UNDEFINED)
 					continue;
 				saw_defined = true;
@@ -570,7 +573,7 @@ struct Module: public interface::Module
 					continue;
 				VoxelInstance above = world->get_voxel(
 						pv::Vector3DInt32(SPAWN_X, y + 1, SPAWN_Z), true);
-				auto above_id = above.get_id();
+				auto above_id = above.legacy06_id();
 				if(above_id == interface::VOXELTYPEID_UNDEFINED)
 					return;
 				if(above_id != 1 && above_id != 5 && above_id != 6)

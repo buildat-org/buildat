@@ -245,8 +245,9 @@ builtin/voxelworld owns the world on the server and the client: the voxel
 registry (interface::VoxelRegistry, one named "main"), the sections and
 their chunks, generation through the "voxelworld:generation_request" event,
 saving through builtin/storage, and the light -- a skylight and a lamp
-flood, a level a voxel, kept in each voxel's high bits. A voxel is an
-interface::VoxelInstance, a uint32_t with a 21-bit type id in the low bits;
+flood, a level a voxel, kept in the bits the world's VoxelFormat binds for
+them. A voxel is a uint32_t word per plane, cut up by the format the game
+set (doc/server_api.txt lists the layouts);
 the client meshes chunks in src/impl/mesh.cpp and shades them with
 builtin/voxel_shading. Chunk data crosses the network as a node attribute,
 compressed, replicated by builtin/replicate.

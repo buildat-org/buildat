@@ -128,8 +128,8 @@ namespace interface
 		// world that uses LOD loses its shaped voxels in the distance.
 		//
 		// Can be called from any thread
-		// use_skylight: light the geometry by VoxelInstance::get_skylight()
-		// and get_lamplight() of the voxel in front of each face, along with
+		// use_skylight: light the geometry by the format's light_sky and
+		// light_lamp of the voxel in front of each face, along with
 		// per-vertex ambient occlusion and a per-face brightness, written
 		// into vertex colors. Only worlds that actually fill those bits
 		// should ask for it.

@@ -169,6 +169,14 @@ namespace voxelworld
 	{
 		virtual interface::VoxelRegistry* get_voxel_reg() = 0;
 
+		// The game's own migration, for a saved chunk whose format differs
+		// from this world's by more than moved bits: a field or a named
+		// plane whose width changed (VoxelMigration,
+		// interface/voxel_volume.h). Set before the save is opened, and
+		// kept alive by the game; nullptr, as by default, refuses such a
+		// save.
+		virtual void set_migration(interface::VoxelMigration *migration) = 0;
+
 		// Persist this world in a save, under a name of its own -- a save
 		// holds zero, one or many worlds, so the name is what separates
 		// them. Until this is called nothing is persisted, which is what
@@ -373,7 +381,8 @@ namespace voxelworld
 				bool create_missing_sections,
 				const pv::Region *owned = nullptr) = 0;
 
-		// Maintain VoxelInstance::get_skylight() of every voxel in the world.
+		// Maintain the sky light (the format's light_sky) of every voxel in
+		// the world.
 		// Off by default; a world that does not want skylight pays nothing and
 		// keeps whatever is in those bits. Once on, the light is kept up to
 		// date by set_voxel(), including through generation, and is settled

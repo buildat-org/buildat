@@ -44,6 +44,9 @@ struct Module: public interface::Module
 		m_server(server)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
+		// 0.6's cut, which its saves, its checks and its code were written
+		// for
+		m_voxel_reg->set_format(interface::VoxelFormat::buildat_legacy_06());
 	}
 
 	~Module()

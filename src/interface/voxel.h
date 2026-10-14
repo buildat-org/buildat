@@ -568,21 +568,33 @@ namespace interface
 	// volume plus its world's registry is self-describing, and nothing that
 	// takes a volume needs to take a format as well.
 	//
-	// The default is default_cut(), which is the cut the engine had before this
-	// existed, bit for bit. A game that says nothing keeps it.
+	// **There is no default.** A registry refuses its first voxel until
+	// set_format() has been given one, so a new game picks: one of the
+	// layouts below (blocks(), many_ids(), painted(), surfaces(), luanti())
+	// or a cut of its own. buildat_legacy_06() is the cut 0.6 had, kept for
+	// the saves and the sample games that were written in it, not one to
+	// start from.
+	//
+	// **The spare bits are the game's.** Plane 0 is 32 bits whatever a
+	// layout binds, so a layout leaves what it does not need unbound: that
+	// is room for a field of the game's own, bound in a copy of the layout
+	// before set_format(), and not room to widen the id into unasked. A
+	// world's format is set before its first voxel; widening a field later
+	// is a migration (VoxelMigration in interface/voxel_volume.h).
 	struct VoxelFormat
 	{
 		VoxelField id;
 		// What use_skylight reads. A game binds the light it actually
 		// fills and no more.
 		//
-		// light_lamp is for a world that computes the light a voxel gets
-		// from something other than the sky and stores it per voxel, which
-		// is what a Luanti server does and sends to its clients. A game
-		// whose lamps are lights in the scene does not want it: the shader
-		// lights the geometry from those, nothing writes the field, and
-		// binding it spends bits on zeroes. Of the games in this tree only
-		// the Luanti client binds it.
+		// light_lamp is stored lamp light, a Luanti-ism: the light a voxel
+		// gets from something other than the sky, computed and stored per
+		// voxel, which is what a Luanti server does and sends to its
+		// clients. A new game does not want it: sky light is enough for
+		// good room and cave light, and lamps are light sources at render
+		// time, which the shader lights the geometry from. None of the
+		// layouts below binds it; luanti() and buildat_legacy_06() do,
+		// for the worlds that have it.
 		VoxelField light_sky;
 		VoxelField light_lamp;
 		// What a definition's own rule interprets: which way a voxel faces,
@@ -684,12 +696,57 @@ namespace interface
 		};
 		static const sv_<Role>& roles();
 
-		static VoxelFormat default_cut()
+		// The layouts to pick from. Each names the bits it leaves unbound,
+		// which are the game's (see above).
+
+		// A block game: 65535 voxel types, sky light, and a param a
+		// definition reads as facing, a liquid's level or a palette entry.
+		// Unbound: bits 28..31 of plane 0.
+		static VoxelFormat blocks()
+		{
+			VoxelFormat f;
+			f.id = VoxelField{0, 0, 16};
+			f.light_sky = VoxelField{0, 16, 4};
+			f.param = VoxelField{0, 20, 8};
+			return f;
+		}
+
+		// Many voxel types and no per-voxel state: the id as wide as a
+		// type id goes (21 bits, VOXELTYPEID_MAX) and sky light.
+		// Unbound: bits 25..31 of plane 0.
+		static VoxelFormat many_ids()
 		{
 			VoxelFormat f;
 			f.id = VoxelField{0, 0, 21};
+			f.light_sky = VoxelField{0, 21, 4};
+			return f;
+		}
+
+		// A colour per voxel over a few materials: 0xRRGGBB, sky light and
+		// a 4-bit id (15 types). Unbound: nothing in plane 0; a game that
+		// wants bits of its own adds a plane.
+		static VoxelFormat painted()
+		{
+			VoxelFormat f;
+			f.color = VoxelField{0, 0, 24};
 			f.light_sky = VoxelField{0, 24, 4};
-			f.light_lamp = VoxelField{0, 28, 4};
+			f.id = VoxelField{0, 28, 4};
+			return f;
+		}
+
+		// Materials drawn with the surface modifiers, as apps/aggregate's
+		// own format is: 255 types, sky light, a tint, wetness and gloss
+		// of 4 bits each and how far the top face sags. Unbound: bits
+		// 28..31 of plane 0.
+		static VoxelFormat surfaces()
+		{
+			VoxelFormat f;
+			f.id = VoxelField{0, 0, 8};
+			f.light_sky = VoxelField{0, 8, 4};
+			f.tint = VoxelField{0, 12, 4};
+			f.wetness = VoxelField{0, 16, 4};
+			f.gloss = VoxelField{0, 20, 4};
+			f.sag_top = VoxelField{0, 24, 4};
 			return f;
 		}
 
@@ -704,6 +761,26 @@ namespace interface
 			f.param = VoxelField{0, 24, 8};
 			return f;
 		}
+
+		// **The cut 0.6 had, bit for bit**, for the saves written in it and
+		// the sample games whose saves and reference shots depend on it; a
+		// saved registry from before formats were stamped reads as this.
+		// Not a layout to start from: a 21-bit id, stored lamp light and
+		// three bits that are nobody's. Unbound: bits 21..23 of plane 0.
+		// VoxelInstance's legacy06_*() accessors are this cut by hand.
+		static VoxelFormat buildat_legacy_06()
+		{
+			VoxelFormat f;
+			f.id = VoxelField{0, 0, 21};
+			f.light_sky = VoxelField{0, 24, 4};
+			f.light_lamp = VoxelField{0, 28, 4};
+			return f;
+		}
+
+		// A layout by its name above ("blocks", "buildat_legacy_06", ...),
+		// for a caller that has a name and not a function: a Lua game.
+		// False for a name that is none of them.
+		static bool preset(const ss_ &name, VoxelFormat *out);
 
 		// The type id of a voxel. A format with no id bound has exactly one
 		// voxel type -- what wants that is a painter, whose voxels are all
@@ -754,8 +831,8 @@ namespace interface
 
 	// Asserts the invariants of VoxelField and VoxelFormat: the accessors
 	// round-trip, the built-in formats validate, malformed ones do not, and
-	// default_cut() read through a format agrees with VoxelInstance's own
-	// hardcoded cut. Runs once, from createVoxelRegistry().
+	// buildat_legacy_06() read through a format agrees with VoxelInstance's
+	// own hardcoded cut. Runs once, from createVoxelRegistry().
 	bool voxel_format_self_test();
 
 	struct VoxelInstance;
@@ -778,15 +855,19 @@ namespace interface
 		// and reads the warning as its answer. Ids run 1..num_voxels().
 		virtual VoxelTypeId num_voxels() = 0;
 
-		// How a voxel word is cut up; see VoxelFormat. The default is
-		// VoxelFormat::default_cut().
+		// How a voxel word is cut up; see VoxelFormat. There is no default:
+		// add_voxel() throws until set_format() has been called, naming the
+		// layouts to pick from.
 		//
 		// set_format() may only be called while the registry holds no voxel
 		// definitions, which in practice means before a world generates
 		// anything: everything saved in the world, and every volume on its
-		// way to a client, is bits under this format, and there is no
-		// migration for changing it underneath them. It throws on a format
-		// that does not validate and on one that arrives too late.
+		// way to a client, is bits under this format. It throws on a format
+		// that does not validate and on one that arrives too late. A saved
+		// world opened under another format has its chunks moved by the
+		// engine where the roles only moved, and a width change is the
+		// game's migration (VoxelMigration, interface/voxel_volume.h) or
+		// a refusal.
 		virtual const VoxelFormat& get_format() = 0;
 		virtual void set_format(const VoxelFormat &format) = 0;
 
@@ -850,14 +931,14 @@ namespace interface
 
 	VoxelRegistry* createVoxelRegistry();
 
-	// One voxel, as the engine's default format cuts it up.
+	// One voxel's first plane, as a word.
 	//
-	// The accessors below are that format's bit ranges written out by hand,
-	// and they are only right for a world that kept it. Anything that reads
-	// a voxel of a world whose format the game chose goes through
-	// VoxelFormat instead -- get_format() on the world's registry -- and the
-	// mesher does. What is left using these is code that only ever sees the
-	// default cut: the sample games, and the modules built for them.
+	// The legacy06_*() accessors are VoxelFormat::buildat_legacy_06()'s bit
+	// ranges written out by hand, and they are only right for a world that
+	// set that format. Anything that reads a voxel of another world goes
+	// through VoxelFormat -- get_format() on the world's registry -- and
+	// the mesher does. What is left using these is the sample games that
+	// set buildat_legacy_06(), and the modules built for them.
 	struct VoxelInstance
 	{
 		uint32_t data;
@@ -866,15 +947,14 @@ namespace interface
 		// Create voxel from raw data (MSBs are preserved)
 		VoxelInstance(uint32_t id): data(id){}
 
-		VoxelTypeId get_id() const {return data & 0x001fffff; }
-		uint8_t getMSB() const {return (data>>24) & 0xff; }
+		VoxelTypeId legacy06_id() const {return data & 0x001fffff; }
 
 		// Bits 24..27 hold skylight. It is only meaningful in transparent
 		// voxels: the mesher reads it from the voxel in front of each face.
 		// Nothing computes it by default; a world opts in by filling it.
 		static const uint8_t SKYLIGHT_MAX = 15;
-		uint8_t get_skylight() const {return (data>>24) & 0x0f; }
-		void set_skylight(uint8_t l){
+		uint8_t legacy06_skylight() const {return (data>>24) & 0x0f; }
+		void legacy06_set_skylight(uint8_t l){
 			data = (data & ~0x0f000000UL) | ((uint32_t)(l & 0x0f) << 24);
 		}
 
@@ -885,8 +965,8 @@ namespace interface
 		// time of day and a lamp's does not: a shader that is handed both can
 		// move the sun without anything being meshed again.
 		static const uint8_t LAMPLIGHT_MAX = 15;
-		uint8_t get_lamplight() const {return (data>>28) & 0x0f; }
-		void set_lamplight(uint8_t l){
+		uint8_t legacy06_lamplight() const {return (data>>28) & 0x0f; }
+		void legacy06_set_lamplight(uint8_t l){
 			data = (data & ~0xf0000000UL) | ((uint32_t)(l & 0x0f) << 28);
 		}
 	};

@@ -796,8 +796,8 @@ struct Module: public interface::Module
 			for(int y = SPAWN_Y_MAX; y >= SPAWN_Y_MIN; y--){
 				VoxelInstance v = world->get_voxel(
 						pv::Vector3DInt32(SPAWN_X, y, SPAWN_Z), true);
-				// Through the format, not VoxelInstance::get_id(), which is
-				// the default cut and would read this game's light and load
+				// Through the format, not VoxelInstance::legacy06_id(), which is
+				// buildat_legacy_06() and would read this game's light and load
 				// as part of the id
 				interface::VoxelTypeId id = fmt.id_of(v.data);
 				if(id == interface::VOXELTYPEID_UNDEFINED){

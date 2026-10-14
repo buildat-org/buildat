@@ -534,20 +534,21 @@ ss_ pack_voxel_volume(const luabind::object &args, lua_State *L)
 		throw Exception("pack_voxel_volume(): args is not a table");
 
 	// Which bits of a voxel a field name means. args.registry is the world's
-	// voxel registry, which is where its format lives; without one the
-	// default format applies, which is what every game had before formats
-	// existed.
-	interface::VoxelFormat format = interface::VoxelFormat::default_cut();
+	// voxel registry, which is where its format lives; there is no default
+	// format to fall back on
+	interface::VoxelFormat format;
 	{
 		luabind::object o = args["registry"];
-		if(o){
-			sp_<interface::VoxelRegistry> voxel_reg =
-					luabind::object_cast<sp_<interface::VoxelRegistry>>(o);
-			if(voxel_reg == nullptr)
-				throw Exception("pack_voxel_volume(): args.registry is not "
-						"a voxel registry");
-			format = voxel_reg->get_format();
-		}
+		if(!o)
+			throw Exception("pack_voxel_volume(): args.registry is missing: "
+					"the world's voxel registry, whose format says which "
+					"bits a field is");
+		sp_<interface::VoxelRegistry> voxel_reg =
+				luabind::object_cast<sp_<interface::VoxelRegistry>>(o);
+		if(voxel_reg == nullptr)
+			throw Exception("pack_voxel_volume(): args.registry is not "
+					"a voxel registry");
+		format = voxel_reg->get_format();
 	}
 
 	luabind::object region_o = args["region"];

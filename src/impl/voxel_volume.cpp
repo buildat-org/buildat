@@ -461,14 +461,89 @@ bool voxel_volume_self_test()
 		assert(d.id.get(to2->sample_at(1, 1, 1)) == 7);
 		assert((to2->getVoxelAt(1, 1, 1).data & 0xf0000000UL) == 0xa0000000UL);
 
-		// A width change is the game's migration, and there is no hook for
-		// one yet, so it is refused rather than guessed at
+		// A width change with no migration of the game's is refused rather
+		// than guessed at
 		VoxelFormat e = a;
 		e.param = VoxelField{0, 24, 6};
 		assert(e.validate());
 		why = "";
 		assert(!migrate_volume(from, a, e, &why));
 		assert(why.find("param") != ss_::npos);
+	}
+
+	// The game's migration (VoxelMigration): the id widened 16 to 20 bits
+	// and a 4-bit param to 8
+	{
+		VoxelFormat a = VoxelFormat::blocks();
+		a.param = VoxelField{0, 20, 4};
+		VoxelFormat b;
+		b.id = VoxelField{0, 0, 20};
+		b.light_sky = VoxelField{0, 20, 4};
+		b.param = VoxelField{0, 24, 8};
+		assert(a.validate() && b.validate());
+		pv::Region r(0, 0, 0, 3, 3, 3);
+		VoxelVolume from(r, a.planes);
+		const uint32_t ids[] = {1, 2, 0x1234, 0xfffe, 0xffff};
+		for(int i = 0; i < 5; i++){
+			uint32_t w = 0;
+			a.id.set(w, ids[i]);
+			a.light_sky.set(w, (uint32_t)(i + 10));
+			a.param.set(w, (uint32_t)(i + 11));
+			from.setVoxelAt(i % 4, i / 4, 1, VoxelInstance(w));
+		}
+
+		// One the game writes: zero-extends the id, scales the param x17,
+		// or declines
+		struct Widen: VoxelMigration
+		{
+			bool decline = false, scale = true;
+			VoxelFormat f, t;
+			bool begin(const VoxelFormat &from, const VoxelFormat &to){
+				f = from; t = to;
+				return !decline;
+			}
+			void migrate(const VoxelVolume &old, VoxelVolume &moved){
+				const pv::Vector3DInt32 lc =
+						old.getEnclosingRegion().getLowerCorner();
+				const pv::Vector3DInt32 uc =
+						old.getEnclosingRegion().getUpperCorner();
+				for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
+				for(int32_t y = lc.getY(); y <= uc.getY(); y++)
+				for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+					uint32_t o = old.plane_at(0, x, y, z);
+					uint32_t w = moved.plane_at(0, x, y, z);
+					t.id.set(w, f.id.get(o));
+					if(scale)
+						t.param.set(w, f.param.get(o) * 17);
+					moved.set_plane_at(0, x, y, z, w);
+				}
+			}
+		} widen;
+
+		ss_ why;
+		assert(!migrate_volume(from, a, b, &why));
+		assert(why.find("id") != ss_::npos);
+
+		up_<VoxelVolume> to = migrate_volume(from, a, b, &why, &widen);
+		assert(to);
+		for(int i = 0; i < 5; i++){
+			VoxelSample s = to->sample_at(i % 4, i / 4, 1);
+			assert(b.id.get(s) == ids[i]);
+			assert(b.light_sky.get(s) == (uint32_t)(i + 10));
+			assert(b.param.get(s) == (uint32_t)(i + 11) * 17);
+		}
+		assert(to->sample_at(3, 3, 3).planes[0] == 0);
+
+		// Zero-extended alone: the param the hook leaves is left zero
+		widen.scale = false;
+		to = migrate_volume(from, a, b, &why, &widen);
+		assert(to && b.id.get(to->sample_at(0, 1, 1)) == 0xffff);
+		assert(b.param.get(to->sample_at(0, 1, 1)) == 0);
+
+		widen.decline = true;
+		why = "";
+		assert(!migrate_volume(from, a, b, &why, &widen));
+		assert(why.find("declined") != ss_::npos);
 	}
 
 	// Ids through a name table
@@ -820,7 +895,7 @@ static uint32_t plane_mask(uint8_t bits)
 
 up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		const VoxelFormat &from_format, const VoxelFormat &to_format,
-		ss_ *why)
+		ss_ *why, VoxelMigration *migration)
 {
 	auto fail = [&](const ss_ &s) -> up_<VoxelVolume> {
 		if(why)
@@ -842,6 +917,9 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 	if(fp != from_format.planes)
 		return fail("the chunk's planes are not the ones of the format it is "
 				"tagged with, so the tag is wrong or the save is damaged");
+	if(migration && !migration->begin(from_format, to_format))
+		return fail("the game's migration declined "+from_format.dump()+
+				" to "+to_format.dump());
 
 	// Planes are matched by name, so a module's field follows its name
 	// wherever it moved to in the list. The game's own first plane has no
@@ -855,10 +933,14 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		// understands, so its width changing is not something the engine can
 		// move. The game's own plane is all roles and free bits, and both of
 		// those are handled below.
-		if(!tp[i].name.empty() && fp[j].bits != tp[i].bits)
+		if(!tp[i].name.empty() && fp[j].bits != tp[i].bits){
+			// Left zero for the game's migration to fill
+			if(migration)
+				continue;
 			return fail("the plane \""+tp[i].name+"\" is "+
 					itos((int)fp[j].bits)+" bits in the save and "+
 					itos((int)tp[i].bits)+" in this world");
+		}
 		src_of_dst[i] = (int)j;
 	}
 	for(size_t j = 0; j < fp.size(); j++){
@@ -879,6 +961,9 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		if(b.bound() && b.plane < VOXEL_MAX_PLANES)
 			to_roles[b.plane] |= b.mask() << b.shift;
 		if(a.bound() && b.bound()){
+			// Left zero for the game's migration to fill
+			if(a.width != b.width && migration)
+				continue;
 			if(a.width != b.width)
 				return fail(ss_("the ")+r.name+" field is "+
 						itos((int)a.width)+" bits in the save and "+
@@ -919,8 +1004,11 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 		any = any || write[i];
 	// A plane nothing wrote in the save is a plane nothing wrote here: it
 	// stays unallocated rather than becoming an array of zeroes
-	if(!any)
+	if(!any){
+		if(migration)
+			migration->migrate(from, *to);
 		return to;
+	}
 
 	const pv::Region &region = from.getEnclosingRegion();
 	const pv::Vector3DInt32 lc = region.getLowerCorner();
@@ -946,6 +1034,8 @@ up_<VoxelVolume> migrate_volume(const VoxelVolume &from,
 			}
 		}
 	}
+	if(migration)
+		migration->migrate(from, *to);
 	return to;
 }
 

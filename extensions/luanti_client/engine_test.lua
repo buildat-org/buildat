@@ -39,6 +39,9 @@ end
 -- two answers are independent.
 local function check_pack_voxel_volume()
 	local safe = buildat
+	-- 0.6's cut, which the accessors below read
+	local legacy = safe.createVoxelRegistry()
+	legacy:set_format("buildat_legacy_06")
 	-- Samples that need every byte order and both fields: a 4x3x2 box of ids,
 	-- and the same box's light. The numbers are made up but the layout is
 	-- Luanti's: x fastest, then y, then z.
@@ -66,6 +69,7 @@ local function check_pack_voxel_volume()
 	-- and the offset both get checked
 	local FILL = 7
 	local packed = buildat.pack_voxel_volume{
+		registry = legacy,
 		region = {-1, -1, -1, sx, sy, sz},
 		fill = FILL,
 		sources = {
@@ -151,6 +155,7 @@ local function check_pack_voxel_volume()
 	end
 	map[ids[0]] = nil -- One sample nothing maps, which leaves the fill alone
 	local mapped = buildat.pack_voxel_volume{
+		registry = legacy,
 		region = {0, 0, 0, sx - 1, sy - 1, sz - 1},
 		fill = FILL,
 		sources = {{
@@ -174,6 +179,7 @@ local function check_pack_voxel_volume()
 	-- A source box that hangs over the edge of the region is clipped, not an
 	-- error: that is how a neighbouring block's border slice arrives
 	local clipped = buildat.pack_voxel_volume{
+		registry = legacy,
 		region = {0, 0, 0, 0, 0, 0},
 		fill = FILL,
 		sources = {{
@@ -187,6 +193,7 @@ local function check_pack_voxel_volume()
 	-- field = "light" writes both light channels at once and leaves the id
 	-- alone, which is how a mapblock's param1 goes in
 	local both = buildat.pack_voxel_volume{
+		registry = legacy,
 		region = {0, 0, 0, 0, 0, 0},
 		fill = FILL,
 		sources = {{
@@ -209,6 +216,7 @@ local function check_pack_voxel_volume()
 		-- 7 with param2 3 is not mapped, and gets the default
 	}
 	local paired = buildat.pack_voxel_volume{
+		registry = legacy,
 		region = {0, 0, 0, 2, 0, 0},
 		fill = FILL,
 		sources = {{
@@ -228,16 +236,18 @@ end
 
 -- A voxel format is the game's own cut of the 32-bit voxel word, and every
 -- field name pack_voxel_volume() takes means a role of it rather than a bit
--- range. The default format is the one buildat had before formats existed,
--- and the assertion that matters is that reading through it gives what
--- VoxelInstance's own accessors give.
+-- range. There is no default: buildat_legacy_06 is the cut buildat had
+-- before formats existed, and the assertion that matters is that reading
+-- through it gives what VoxelInstance's own accessors give.
 local function check_voxel_format()
 	local safe = buildat
 
-	-- The default format: nothing said, nothing changed
+	-- 0.6's cut: nothing changed
 	local plain = safe.createVoxelRegistry()
+	plain:set_format("buildat_legacy_06")
 	local packed = buildat.pack_voxel_volume{
 		region = {0, 0, 0, 0, 0, 0},
+		registry = plain,
 		sources = {
 			{data = string.char(0, 0, 4, 210), format = "u32be",
 					source_size = {1, 1, 1}, field = "id"},
@@ -248,9 +258,27 @@ local function check_voxel_format()
 		},
 	}
 	local v = safe.deserialize_volume(packed):get_voxel_at(0, 0, 0)
-	assert(v:get_id() == 1234, "default id is "..v:get_id())
-	assert(v:get_skylight() == 9, "default skylight is "..v:get_skylight())
-	assert(v:get_lamplight() == 3, "default lamplight is "..v:get_lamplight())
+	assert(v:get_id() == 1234, "legacy id is "..v:get_id())
+	assert(v:get_skylight() == 9, "legacy skylight is "..v:get_skylight())
+	assert(v:get_lamplight() == 3, "legacy lamplight is "..v:get_lamplight())
+
+	-- No registry, no format: an error, not 0.6's cut assumed
+	assert(not pcall(buildat.pack_voxel_volume, {region = {0, 0, 0, 0, 0, 0}}),
+			"pack_voxel_volume() without a registry was allowed")
+	-- And a registry with no format takes no voxel
+	local unset = safe.createVoxelRegistry()
+	local undef = safe.VoxelDefinition()
+	undef.name.block_name = "engine_test:unset"
+	assert(not pcall(function() unset:add_voxel(undef) end),
+			"add_voxel() with no format was allowed")
+	-- A layout by name is the same cut as written out
+	local blocks = safe.createVoxelRegistry()
+	blocks:set_format("blocks")
+	assert(blocks:dump_format() ==
+			"VoxelFormat(32-bit, id=0...15, light_sky=16...19, param=20...27)",
+			"blocks is "..blocks:dump_format())
+	assert(not pcall(function() safe.createVoxelRegistry():set_format("none") end),
+			"set_format() took a layout that does not exist")
 
 	-- Luanti's own cut of the same word: a 16-bit id, param1 as two light
 	-- nibbles, and param2. Which is what this extension wants, and the point
@@ -279,7 +307,7 @@ local function check_voxel_format()
 		},
 	}
 	local v2 = safe.deserialize_volume(packed2):get_voxel_at(0, 0, 0)
-	-- get_id() and the light accessors read the default cut, so the word is
+	-- get_id() and the light accessors read 0.6's cut, so the word is
 	-- what has to be checked here
 	local word = v2.data % 4294967296
 	assert(word == 0xab * 256 + 0xcd + 7 * 65536 + 9 * 1048576 +
@@ -289,7 +317,7 @@ local function check_voxel_format()
 			"light_lamp=20...23, param=24...31)",
 			"dump_format() says "..luanti:dump_format())
 
-	-- The default format binds no param, so asking to write one is an error
+	-- 0.6's cut binds no param, so asking to write one is an error
 	-- rather than bits landing somewhere unsaid
 	local ok = pcall(function()
 		buildat.pack_voxel_volume{
@@ -303,6 +331,7 @@ local function check_voxel_format()
 
 	-- A format cannot arrive after the voxels it would reinterpret
 	local late = safe.createVoxelRegistry()
+	late:set_format("blocks")
 	local def = safe.VoxelDefinition()
 	def.name.block_name = "engine_test:late"
 	late:add_voxel(def)

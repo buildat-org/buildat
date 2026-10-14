@@ -291,10 +291,19 @@ static interface::VoxelField field_from_lua(const luabind::object &t,
 			(uint8_t)number("width", 0));
 }
 
+// voxel_reg:set_format("blocks"): a layout by its name (VoxelFormat::preset())
 static void vreg_set_format(VoxelRegistry &reg, const luabind::object &t)
 {
+	if(t && luabind::type(t) == LUA_TSTRING){
+		interface::VoxelFormat format;
+		ss_ name = luabind::object_cast<ss_>(t);
+		if(!interface::VoxelFormat::preset(name, &format))
+			throw Exception("set_format(): no layout named \""+name+"\"");
+		reg.set_format(format);
+		return;
+	}
 	if(!t || luabind::type(t) != LUA_TTABLE)
-		throw Exception("set_format(): argument is not a table");
+		throw Exception("set_format(): argument is not a table or a name");
 	interface::VoxelFormat format;
 	{
 		// plane_bits is the width of the game's own first plane

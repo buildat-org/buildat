@@ -200,6 +200,9 @@ struct Module: public interface::Module
 			voxelworld::Instance *world = ivoxelworld->
 					get_instance(m_main_scene);
 			interface::VoxelRegistry *reg = world->get_voxel_reg();
+			// 0.6's cut, which its saves, its checks and its code were written
+			// for
+			reg->set_format(interface::VoxelFormat::buildat_legacy_06());
 			add_voxel(reg, "air", "", false);                        // id 1
 			add_voxel(reg, "rock", "main/rock.png", true,
 					0.95f, 0.15f, 0.5f);                             // id 2

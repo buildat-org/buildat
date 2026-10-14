@@ -63,7 +63,10 @@ struct CVoxelRegistry: public VoxelRegistry
 	sd_<VoxelDefinition> m_defs;
 	sd_<CachedVoxelDefinition> m_cached_defs;
 	sm_<VoxelName, VoxelTypeId> m_name_to_id;
-	VoxelFormat m_format = VoxelFormat::default_cut();
+	// What get_format() answers before set_format(), which nothing can
+	// add a voxel under: add_voxel() refuses until m_format_set
+	VoxelFormat m_format = VoxelFormat::buildat_legacy_06();
+	bool m_format_set = false;
 	// What add_plane() was asked for, appended again to every format set
 	sv_<VoxelPlane> m_added_planes;
 	// How a voxel's definition is found; the default is the id role
@@ -191,6 +194,7 @@ struct CVoxelRegistry: public VoxelRegistry
 					itos(m_defs.size() - 1)+" voxels have already been "
 					"added under "+m_format.dump());
 		m_format = format;
+		m_format_set = true;
 		for(const VoxelPlane &p : m_added_planes)
 			append_plane(p);
 		m_is_dirty = true;
@@ -269,9 +273,22 @@ struct CVoxelRegistry: public VoxelRegistry
 		return m_defs.size() - 1;
 	}
 
+	// Under the lock
+	void require_format(const char *what)
+	{
+		if(m_format_set)
+			return;
+		throw Exception(ss_()+what+"(): the voxel registry has no format: "
+				"call set_format() before the first voxel, with one of "
+				"VoxelFormat::blocks(), many_ids(), painted(), surfaces(), "
+				"luanti() or a cut of the game's own (buildat_legacy_06() "
+				"for a world written in 0.6's); see doc/server_api.txt");
+	}
+
 	VoxelTypeId add_voxel(const VoxelDefinition &def)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		require_format("add_voxel");
 		VoxelTypeId id = m_defs.size();
 		if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
 			throw Exception(ss_()+"add_voxel(): def.id="+itos(def.id)+
@@ -299,6 +316,7 @@ struct CVoxelRegistry: public VoxelRegistry
 	void add_voxels(sv_<VoxelDefinition> &defs)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
+		require_format("add_voxels");
 		for(VoxelDefinition &def : defs){
 			const VoxelTypeId id = m_defs.size();
 			if(def.id != VOXELTYPEID_UNDEFINED && id != def.id)
@@ -825,7 +843,7 @@ bool voxel_selector_self_test()
 	// A clause on a field nothing bound never holds, so a rule wearing one
 	// is dead rather than always true
 	{
-		VoxelFormat f = VoxelFormat::default_cut();
+		VoxelFormat f = VoxelFormat::buildat_legacy_06();
 		VoxelSelector s;
 		s.kind = VoxelSelector::RULES;
 		s.fallback = 7;
@@ -859,6 +877,25 @@ const sv_<VoxelFormat::Role>& VoxelFormat::roles()
 	return a;
 }
 
+bool VoxelFormat::preset(const ss_ &name, VoxelFormat *out)
+{
+	static const struct { const char *name; VoxelFormat (*make)(); } all[] = {
+		{"blocks", &VoxelFormat::blocks},
+		{"many_ids", &VoxelFormat::many_ids},
+		{"painted", &VoxelFormat::painted},
+		{"surfaces", &VoxelFormat::surfaces},
+		{"luanti", &VoxelFormat::luanti},
+		{"buildat_legacy_06", &VoxelFormat::buildat_legacy_06},
+	};
+	for(const auto &p : all){
+		if(name == p.name){
+			*out = p.make();
+			return true;
+		}
+	}
+	return false;
+}
+
 bool voxel_format_self_test()
 {
 	// A field reads back what was written to it, and leaves the rest alone
@@ -879,17 +916,78 @@ bool voxel_format_self_test()
 	}
 
 	ss_ why;
-	assert(VoxelFormat::default_cut().validate(&why));
-	assert(VoxelFormat::luanti().validate(&why));
+	// Every layout validates, a voxel round-trips through each, and a
+	// 4-bit field of the game's own in its unbound bits validates and
+	// round-trips beside it
+	for(const char *name : {"blocks", "many_ids", "painted", "surfaces",
+			"luanti", "buildat_legacy_06"}){
+		VoxelFormat f;
+		assert(VoxelFormat::preset(name, &f));
+		assert(f.validate(&why));
+		uint32_t word = 0;
+		uint32_t n = 1;
+		for(const VoxelFormat::Role &r : VoxelFormat::roles()){
+			const VoxelField &field = f.*(r.field);
+			if(field.bound())
+				field.set(word, (n++ * 0x9e3779b9u) & field.mask());
+		}
+		n = 1;
+		for(const VoxelFormat::Role &r : VoxelFormat::roles()){
+			const VoxelField &field = f.*(r.field);
+			if(field.bound())
+				assert(field.get(word) == ((n++ * 0x9e3779b9u) & field.mask()));
+		}
+		// The game's own field: the highest 4 bits nothing bound
+		uint32_t used = 0;
+		for(const VoxelFormat::Role &r : VoxelFormat::roles()){
+			const VoxelField &field = f.*(r.field);
+			if(field.bound())
+				used |= field.mask() << field.shift;
+		}
+		if(f.plane_bits(0) == 32 && (used & 0xf0000000u) == 0){
+			VoxelFormat g = f;
+			g.speckle = VoxelField{0, 28, 4};
+			// A layout with four surface modifiers has no fifth to lend
+			VoxelField slots[VOXEL_SURFACE_MODIFIERS];
+			if(f.surface_modifiers(slots) < VOXEL_SURFACE_MODIFIERS){
+				assert(g.validate(&why));
+				uint32_t w2 = word;
+				g.speckle.set(w2, 0xb);
+				assert(g.speckle.get(w2) == 0xb);
+				for(const VoxelFormat::Role &r : VoxelFormat::roles()){
+					if(r.field == &VoxelFormat::speckle)
+						continue;
+					const VoxelField &field = f.*(r.field);
+					if(field.bound())
+						assert(field.get(w2) == field.get(word));
+				}
+			}
+		}
+	}
+	{
+		VoxelFormat f;
+		assert(!VoxelFormat::preset("no_such_layout", &f));
+	}
+	// No format, no voxel
+	{
+		up_<VoxelRegistry> reg(new CVoxelRegistry());
+		VoxelDefinition def;
+		def.name.block_name = "a";
+		bool refused = false;
+		try { reg->add_voxel(def); } catch(Exception &e){ refused = true; }
+		assert(refused);
+		reg->set_format(VoxelFormat::blocks());
+		assert(reg->add_voxel(def) == 1);
+	}
 
 	// The ways a format can be wrong
 	{
-		VoxelFormat f = VoxelFormat::default_cut();
+		VoxelFormat f = VoxelFormat::buildat_legacy_06();
 		f.param = f.id; // overlaps
 		assert(!f.validate(&why));
 	}
 	{
-		VoxelFormat f = VoxelFormat::default_cut();
+		VoxelFormat f = VoxelFormat::buildat_legacy_06();
 		f.param = VoxelField{0, 28, 8}; // past the end of the plane
 		assert(!f.validate(&why));
 	}
@@ -924,7 +1022,7 @@ bool voxel_format_self_test()
 	// Planes: a format has one 32-bit one unless it says otherwise, a named
 	// one belongs to a module, and a field lives inside its own plane
 	{
-		VoxelFormat f = VoxelFormat::default_cut();
+		VoxelFormat f = VoxelFormat::buildat_legacy_06();
 		assert(f.plane_count() == 1);
 		assert(f.plane_bits(0) == 32);
 		assert(f.plane_of_name("mod:heat") == -1);
@@ -988,15 +1086,15 @@ bool voxel_format_self_test()
 		assert(!f.validate(&why));
 	}
 
-	// default_cut() through the format is VoxelInstance's own hardcoded cut
+	// buildat_legacy_06() through the format is VoxelInstance's own hardcoded cut
 	{
-		VoxelFormat f = VoxelFormat::default_cut();
+		VoxelFormat f = VoxelFormat::buildat_legacy_06();
 		for(uint32_t word : {0u, 0xffffffffu, 0x12345678u, 0xdeadbeefu,
 				0x000fffffu, 0xf0f0f0f0u, 0x00000001u, 0x0badf00du}){
 			VoxelInstance v(word);
-			assert(f.id_of(word) == v.get_id());
-			assert(f.light_sky.get(word) == v.get_skylight());
-			assert(f.light_lamp.get(word) == v.get_lamplight());
+			assert(f.id_of(word) == v.legacy06_id());
+			assert(f.light_sky.get(word) == v.legacy06_skylight());
+			assert(f.light_lamp.get(word) == v.legacy06_lamplight());
 		}
 		VoxelField both;
 		assert(f.light_pair(&both));
@@ -1021,7 +1119,7 @@ bool voxel_format_self_test()
 	// migrate_volume(), not read past a VoxelSample's planes: a role on
 	// plane 200, and a plane named at index 9 of ten
 	{
-		const VoxelFormat to = VoxelFormat::default_cut();
+		const VoxelFormat to = VoxelFormat::buildat_legacy_06();
 		const pv::Region r(pv::Vector3DInt32(0, 0, 0), pv::Vector3DInt32(1, 1, 1));
 		VoxelFormat a = to;
 		a.id = VoxelField{200, 0, 21};

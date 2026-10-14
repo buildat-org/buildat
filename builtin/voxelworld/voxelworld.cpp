@@ -475,11 +475,16 @@ struct CInstance: public voxelworld::Instance
 	// The definitions the save carries, for a type the game has stopped
 	// registering. Loaded on the first one that turns up and not before.
 	up_<interface::VoxelRegistry> m_saved_reg;
+	// The game's, for a width change in a saved chunk (set_migration())
+	interface::VoxelMigration *m_migration = nullptr;
 	sv_<interface::VoxelName> m_unknown_voxels;
 	// The formats the save's chunks are in, indexed by the tag a chunk row
 	// carries, and which of them new chunks are written in
 	sv_<interface::VoxelFormat> m_save_formats;
 	uint16_t m_write_format = 0;
+	// The format table has changed since it was read, and goes in with the
+	// first chunks written: a save refused before that is left as it was
+	bool m_formats_dirty = false;
 
 	CInstance(interface::Server *server, SceneReference scene_ref,
 			const pv::Region &region, bool physics_enabled):
@@ -1637,7 +1642,7 @@ struct CInstance: public voxelworld::Instance
 			}
 			ss_ why;
 			up_<VoxelVolume> moved = interface::migrate_volume(*volume,
-					m_save_formats[tag], format, &why);
+					m_save_formats[tag], format, &why, m_migration);
 			if(!moved){
 				refuse_save(where+" was written in "+
 						m_save_formats[tag].dump()+" and this world is "+
@@ -1841,6 +1846,8 @@ struct CInstance: public voxelworld::Instance
 					bytes, section.visited_day));
 			save_name_table();
 			save_registry();
+			if(m_formats_dirty)
+				save_format_table();
 		});
 		m_save_times.write += interface::os::time_us() - t2;
 		section.modified = false;
@@ -2165,6 +2172,11 @@ struct CInstance: public voxelworld::Instance
 		return m_voxel_reg.get();
 	}
 
+	void set_migration(interface::VoxelMigration *migration)
+	{
+		m_migration = migration;
+	}
+
 	// Which bits of a voxel the sky light is in, which is the game's to
 	// decide; see VoxelFormat in interface/voxel.h. A game sets its format
 	// through get_voxel_reg()->set_format() before it generates anything,
@@ -2192,8 +2204,8 @@ struct CInstance: public voxelworld::Instance
 	}
 
 	// The voxel's type, through the format the game chose. Not
-	// VoxelInstance::get_id(), which is the default format's bit range and
-	// would read a game's own light, parameter and simulation bits as part
+	// VoxelInstance::legacy06_id(), which is buildat_legacy_06()'s bit range
+	// and would read a game's own light, parameter and simulation bits as part
 	// of the id.
 	interface::VoxelTypeId get_id(const VoxelInstance &v)
 	{
@@ -2940,8 +2952,7 @@ struct CInstance: public voxelworld::Instance
 						" and this build writes 2");
 			}
 		}
-		if(legacy_formats)
-			save_format_table();
+		m_formats_dirty = legacy_formats;
 		const interface::VoxelFormat &format = m_voxel_reg->get_format();
 		for(size_t i = 0; i < m_save_formats.size(); i++){
 			if(m_save_formats[i] == format){
@@ -2951,7 +2962,7 @@ struct CInstance: public voxelworld::Instance
 		}
 		m_save_formats.push_back(format);
 		m_write_format = (uint16_t)(m_save_formats.size() - 1);
-		save_format_table();
+		m_formats_dirty = true;
 		if(m_save_formats.size() > 1)
 			log_i(MODULE, "World \"%s\": %s is new to this save, which holds "
 					"%zu formats now", cs(m_world_name), cs(format.dump()),
@@ -2968,6 +2979,7 @@ struct CInstance: public voxelworld::Instance
 			ar((uint8_t)2, m_save_formats);
 		}
 		m_store->set(formats_key(), os.str());
+		m_formats_dirty = false;
 	}
 
 	// The definitions themselves, so that a type the game stops registering
