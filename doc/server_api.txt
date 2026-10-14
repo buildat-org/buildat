@@ -608,16 +608,28 @@ the mods register: NodeProps, Biome, NoiseParams, Ore, Schematic,
 Decoration, LTree.
 
 builtin/luanti/api.h -- luanti::Interface: an unmodified Luanti game
-inside the server. run_game(game_path, world_path, ...) loads the
-builtin and the game's mods and makes the world (GameLoaded event with
-the scene: "luanti:game_loaded"); set_progress_handler(cb) gets the
-loader's stage lines; import_world_settings / import_world for a Luanti
-world's map; load_lua(chunk, name) runs a chunk in the game's state;
-players (add_player, remove_player, set_player_pos, player_fell); acting
-(dig_node, punch_node, place_node, drop_wielded, punch_object,
-set_wield_index, chat_message); get_scene(). The protocol between this
-module's server half and its client half (builtin/luanti/client_lua) is
-the module's own and not part of this interface.
+inside the server. Before the game: load_lua(chunk, name) hands the app's
+Lua into the game's state; set_paths(Paths) names the settings file, the
+base textures and the texture packs directory (each "" for none);
+set_progress_handler(cb) gets the loader's stage lines;
+import_world_settings / import_world read a Luanti world's map.
+run_game(game_path, save) loads the builtin and the game's mods and makes
+the world in the save (GameLoaded with the scene: "luanti:game_loaded").
+The player session: join_player(name, peer, admin) places a client's
+player, puts it in the world once its client has loaded it, and from then
+the client's luanti:* input packets are the module's and its leave removes
+the player; player_in_world(peer). The bridge to the game's Lua:
+call_json(name, json) calls core.<name>(value) with a JSON value in and
+out, and core.buildat_emit(name, value) in the game's Lua is the event
+"luanti:app:<name>" (AppEvent, the value as JSON); call_string_list(name)
+is the older call for a list of strings. The rest: add_player,
+place_player, set_admin, chat_send, remove_player, set_player_pos,
+player_fell, dig_node, punch_node, place_node, use_wielded, drop_wielded,
+punch_object, set_wield_index, chat_message, set_chat_limit, get_scene,
+set_server_physics, set_region_map. The protocol between this module's
+server half and its client half (builtin/luanti/client_lua) is the
+module's own and not part of this interface; the client half's loop is
+luanti.run_client(app), described in doc/luanti_module.txt.
 
 
 Every name, generated
@@ -631,7 +643,7 @@ builtin/accounts/api.h: PeerId, Login, level_name, Interface, name_of, find_peer
 builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_file_path, add_file_paths, get_server_icon, access
 builtin/ground_plane_lighting/api.h: SceneReference, Instance, set_yst, get_yst, Interface, create_instance, delete_instance, get_instance, access
 builtin/loader/api.h: Interface, activate, get_module_info, access
-builtin/luanti/api.h: SceneReference, GameLoaded, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_string_list, set_server_physics, access
+builtin/luanti/api.h: SceneReference, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_string_list, call_json, set_server_physics, access
 builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, list_mapgens, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
 builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, group, decide, audit_log, appeal, appeals, decide_appeal, access

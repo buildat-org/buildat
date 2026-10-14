@@ -243,9 +243,47 @@ The interface
 
     struct Interface
     {
-        virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
         virtual void load_lua(const ss_ &chunk, const ss_ &chunkname) = 0;
+        virtual void set_paths(const Paths &paths) = 0;
+        virtual void run_game(const ss_ &game_path, storage::Save *save) = 0;
+        virtual void join_player(const ss_ &name, size_t peer,
+                bool admin) = 0;
+        virtual ss_ call_json(const ss_ &name, const ss_ &json) = 0;
+        ...
     };
+
+An app that is a Luanti game is a main module that calls run_game() and,
+for each client, join_player() and replicate's assign_scene_to_peer(), and
+a client script that calls luanti.run_client(). apps/luanti_glue_test is
+one in about a hundred lines. From join_player() on, the client's input
+(luanti:where, dig, place, chat and the rest) goes to the game without the
+app forwarding it.
+
+The bridge is how the app's C++ reaches the game, in both directions, with
+nothing added to the interface per feature. Its Lua, handed in by
+load_lua(), defines functions and hooks any callback list:
+
+    function core.glue_set_hp(a)
+        local p = core.get_player_by_name(a.name)
+        p:set_hp(a.hp)
+        return {hp = p:get_hp()}
+    end
+    core.register_on_punchplayer(function(player, _, _, _, _, damage)
+        core.buildat_emit("glue_punched", {damage = damage})
+    end)
+
+call_json("glue_set_hp", "{\"name\": \"x\", \"hp\": 7}") calls the
+first and returns its result as JSON ("" on an error, which is logged);
+the second arrives in any module subscribed to "luanti:app:glue_punched"
+as a luanti::AppEvent holding the value as JSON.
+
+The client loop is builtin/luanti/client_lua/client.lua, run by
+luanti.run_client(app). The app's hooks: log, the logger's name; pause,
+a function that gets {keys = keys} and returns the function that opens the
+app's pause menu. It returns the loop's shared table, whose stages an app
+replaces or wraps: keys.stage.hud(elements, flags) draws the game's HUD,
+the hotbar and the crosshair; keys.stage.frame(dt) is the frame. Pointing
+and the inventory's drawing are not stages yet.
 
 The world is the save. The map, the clock and everything else the world is go
 into the save the caller opened and keeps open; a Luanti world directory is
