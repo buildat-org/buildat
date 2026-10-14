@@ -549,6 +549,54 @@ end
 -- How long a finger is held on a save's row for its actions
 local LONG_PRESS_US = 600000
 
+-- [SAVE_CONTEXT_MENU] A save's actions by a right click on its row, or
+-- a finger held on it, in a list of `items` ({button, entry}) on root:
+-- Saves, and Home's Continue and search ([CONTINUE_CONTEXT_MENU]), where
+-- a row that is not a save gets nothing. The click carries the UI's
+-- coordinates; a touch's own are the screen's, so it only says that a
+-- finger is down.
+local function save_menus(root, items)
+	local function row_at(x, y)
+		for _, item in ipairs(items) do
+			local p, sz = item.button.screenPosition, item.button.size
+			if x >= p.x and y >= p.y and x < p.x + sz.x and y < p.y + sz.y then
+				return item
+			end
+		end
+		return nil
+	end
+	local touching, held, moved = false, nil, 0
+	root:SubscribeToStackEvent("TouchBegin", function()
+		touching, moved = true, 0
+	end)
+	root:SubscribeToStackEvent("TouchMove", function(_, d)
+		moved = moved + math.abs(d:GetInt("DX")) + math.abs(d:GetInt("DY"))
+		if moved > 20 then held = nil end
+	end)
+	root:SubscribeToStackEvent("TouchEnd", function()
+		touching, held = false, nil
+	end)
+	root:SubscribeToStackEvent("MouseButtonUp", function() held = nil end)
+	root:SubscribeToStackEvent("UIMouseClick", function(_, d)
+		local x, y = d:GetInt("X"), d:GetInt("Y")
+		local item = row_at(x, y)
+		if not (item and item.entry.kind == "save") then return end
+		if d:GetInt("Button") == magic.MOUSEB_RIGHT then
+			context_menu(item.entry, x, y)
+		else
+			held = {item = item, x = x, y = y, us = api.get_time_us()}
+		end
+	end)
+	root:SubscribeToStackEvent("Update", function()
+		if held and touching and
+				api.get_time_us() - held.us >= LONG_PRESS_US then
+			local h = held
+			held = nil
+			context_menu(h.item.entry, h.x, h.y)
+		end
+	end)
+end
+
 local function home(query)
 	local t0 = api.get_time_us()
 	local width = math.min(magic.ui.root.width - 40, 760)
@@ -638,6 +686,7 @@ local function home(query)
 		end
 	end)
 	on_typed(root, query, home)
+	save_menus(root, items)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if not (selected and item) then return end
@@ -900,50 +949,7 @@ browse = function(kind, query, by, filter, focus_filter)
 		end
 	end)
 	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
-	-- [SAVE_CONTEXT_MENU] A save's actions by a right click on its row, or
-	-- a finger held on it. The click carries the UI's coordinates; a
-	-- touch's own are the screen's, so it only says that a finger is down.
-	if kind == "save" then
-		local function row_at(x, y)
-			for _, item in ipairs(items) do
-				local p, sz = item.button.screenPosition, item.button.size
-				if x >= p.x and y >= p.y and x < p.x + sz.x and y < p.y + sz.y then
-					return item
-				end
-			end
-			return nil
-		end
-		local touching, held, moved = false, nil, 0
-		root:SubscribeToStackEvent("TouchBegin", function()
-			touching, moved = true, 0
-		end)
-		root:SubscribeToStackEvent("TouchMove", function(_, d)
-			moved = moved + math.abs(d:GetInt("DX")) + math.abs(d:GetInt("DY"))
-			if moved > 20 then held = nil end
-		end)
-		root:SubscribeToStackEvent("TouchEnd", function()
-			touching, held = false, nil
-		end)
-		root:SubscribeToStackEvent("MouseButtonUp", function() held = nil end)
-		root:SubscribeToStackEvent("UIMouseClick", function(_, d)
-			local x, y = d:GetInt("X"), d:GetInt("Y")
-			local item = row_at(x, y)
-			if not item then return end
-			if d:GetInt("Button") == magic.MOUSEB_RIGHT then
-				context_menu(item.entry, x, y)
-			else
-				held = {item = item, x = x, y = y, us = api.get_time_us()}
-			end
-		end)
-		root:SubscribeToStackEvent("Update", function()
-			if held and touching and
-					api.get_time_us() - held.us >= LONG_PRESS_US then
-				local h = held
-				held = nil
-				context_menu(h.item.entry, h.x, h.y)
-			end
-		end)
-	end
+	save_menus(root, items)
 	nav:on_change(function(button, selected, index)
 		local item = index and items[index]
 		if not (selected and item) or item == current then return end
