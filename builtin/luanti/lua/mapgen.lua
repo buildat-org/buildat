@@ -67,7 +67,12 @@ function core.__mapgen_node_props()
 			out[#out + 1] = (def.walkable ~= false) and 1 or 0
 			out[#out + 1] = (def.is_ground_content ~= false) and 1 or 0
 			out[#out + 1] = def.floodable and 1 or 0
-			out[#out + 1] = def.light_propagates and 1 or 0
+			-- Luanti's own rule, as no definition carries the field: light
+			-- passes what stores it. Read as a field, it was false for
+			-- every node, air included, and the mapgen's spread lit
+			-- nothing sideways -- the ground under a tree was black
+			out[#out + 1] = (def.paramtype == "light" or
+					def.sunlight_propagates) and 1 or 0
 			out[#out + 1] = def.sunlight_propagates and 1 or 0
 			out[#out + 1] = liquid
 			out[#out + 1] = def.drawtype or "normal"
