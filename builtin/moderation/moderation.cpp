@@ -73,13 +73,11 @@ struct Module: public interface::Module, public Interface
 				rep.set("held", held);
 		}
 		put(h, "reports", jstr(rep, "id"), rep);
+		sweep(h);
 		if(jstr(rep, "state") != "open")
 			return;
 		// [ADMIN_NOTIFY] The moderators' phones: the count, nothing of it
-		int open = 0;
-		for(const ss_ &id : keys(h, "reports"))
-			if(jstr(load(h, "reports", id), "state") == "open")
-				open++;
+		const int64_t open = open_count(h, 1);
 		accounts::access(m_server, [&](accounts::Interface *a){
 			a->notify(accounts::LV_MODERATOR, h->name()+": a new report, "+
 					std::to_string(open)+" open");
@@ -105,18 +103,67 @@ struct Module: public interface::Module, public Interface
 			return why;
 		const ss_ text = jstr(rep, "text");
 		if(text.size() >= 20){
-			// The same words as several others today
-			int same_text = 0;
-			const int64_t t = now_s();
-			for(const ss_ &id : keys(h, "reports")){
-				const json::Value o = load(h, "reports", id);
-				if(t - jint(o, "ts") < 86400 && jstr(o, "text") == text)
-					same_text++;
-			}
+			// The same words as several others today, counted by the
+			// text's hash ([SEC_RUN5_LEFTOVERS]: not a scan of every report)
+			// simplified: a calendar day (UTC), not the 24 hours before
+			const ss_ key = "text/"+std::to_string(now_s() / 86400)+"/"+
+					interface::sha256::hex(interface::sha256::calculate(text));
+			ss_ v;
+			const int same_text = index(h)->get(key, v) ? std::atoi(v.c_str()) : 0;
+			index(h)->set(key, std::to_string(same_text + 1));
 			if(same_text >= 3)
 				return "the same text as other reports today";
 		}
 		return "";
+	}
+
+	// [SEC_RUN5_LEFTOVERS] What a report would otherwise scan every
+	// report for: the open count, the texts' counts a day, the last sweep
+	storage::Store* index(Host *h)
+	{
+		return h->save()->store("moderation_index");
+	}
+	// The open reports, changed by `delta` (the caller has stored the
+	// reports' new states); counted once on a save that has no count yet
+	int64_t open_count(Host *h, int64_t delta)
+	{
+		ss_ v;
+		int64_t open = 0;
+		if(index(h)->get("open", v)){
+			open = std::max((int64_t)0, (int64_t)std::atoll(v.c_str()) + delta);
+		} else {
+			for(const ss_ &id : keys(h, "reports"))
+				open += jstr(load(h, "reports", id), "state") == "open";
+		}
+		index(h)->set("open", std::to_string(open));
+		return open;
+	}
+	// Once a day: held reports (spam, never in a group) gone after 30
+	// days, and the texts' counts of the days before
+	void sweep(Host *h)
+	{
+		const int64_t t = now_s(), day = t / 86400;
+		ss_ v;
+		if(index(h)->get("swept", v) && std::atoll(v.c_str()) == day)
+			return;
+		index(h)->set("swept", std::to_string(day));
+		int n = 0;
+		h->save()->store("reports")->batch([&](){
+			for(const ss_ &id : keys(h, "reports")){
+				const json::Value r = load(h, "reports", id);
+				if(jstr(r, "state") == "held" && t - jint(r, "ts") > 30 * 86400){
+					h->save()->store("reports")->remove(id);
+					n++;
+				}
+			}
+		});
+		const ss_ today = "text/"+std::to_string(day)+"/";
+		for(const ss_ &k : index(h)->list("text/"))
+			if(k.compare(0, today.size(), today) != 0)
+				index(h)->remove(k);
+		if(n > 0)
+			log_i(MODULE, "%s: %i held reports past 30 days swept",
+					cs(h->name()), n);
 	}
 
 	json::Value open_group(Host *h, const ss_ &gid, const ss_ &subject,
@@ -336,10 +383,12 @@ struct Module: public interface::Module, public Interface
 		// The reporters' records
 		const json::Value &reps = g.get("reports");
 		const int64_t t = now_s();
+		int64_t were_open = 0;
 		for(unsigned i = 0; i < reps.size(); i++){
 			json::Value rep = load(h, "reports", reps.at(i).as_string());
 			if(!rep.is_object())
 				continue;
+			were_open += jstr(rep, "state") == "open";
 			rep.set("state", decision == "uphold" ? "upheld" : "rejected");
 			rep.set("outcome", decision == "uphold" ? "acted on: "+
 					jstr(q, "action") : "no action");
@@ -347,6 +396,7 @@ struct Module: public interface::Module, public Interface
 			put(h, "reports", jstr(rep, "id"), rep);
 			h->decided(rep, decision == "uphold");
 		}
+		open_count(h, -were_open);
 		g.set("state", "closed");
 		g.set("decided", decision);
 		g.set("decided_by", by);
