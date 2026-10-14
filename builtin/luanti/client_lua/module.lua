@@ -2698,7 +2698,7 @@ end
 -- How long the clock packet waited on the way down ([NET_CHANNELS]): the
 -- server stamps it, the two clocks differ by a constant, so the wait is
 -- the excess over the smallest (received - sent) seen; the worst per
--- five seconds is logged, as the server logs main:where's on the way up
+-- five seconds is logged, as the server logs luanti:where's on the way up
 local time_age = {base = nil, worst = 0, from = 0}
 
 buildat.sub_packet("luanti:time", function(data)

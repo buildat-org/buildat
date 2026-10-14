@@ -826,7 +826,7 @@
 		}
 		// And when it was sent, the server's clock in microseconds, so
 		// the client can read how long the packet waited behind bulk on
-		// the way down ([NET_CHANNELS]; the up direction is main:where's)
+		// the way down ([NET_CHANNELS]; the up direction is luanti:where's)
 		char stamp[32];
 		snprintf(stamp, sizeof stamp, "%lld", (long long)interface::os::time_us());
 		flat.push_back(stamp);

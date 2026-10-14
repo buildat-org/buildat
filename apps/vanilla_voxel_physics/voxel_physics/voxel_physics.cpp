@@ -134,6 +134,24 @@ function core.__voxel_physics_props()
 	end
 	return out
 end
+
+-- A player's dig and place, told to the C++ ([LUANTI_APP_GLUE]'s bridge):
+-- the voxels that wake the sim. A mod's own (a mushroom popping) do not:
+-- they made hundreds of bodies out of what the world generated.
+local function changed(pos, by)
+	if by and by:is_player() then
+		core.buildat_emit("voxel_physics_changed", {pos.x, pos.y, pos.z})
+	end
+end
+core.register_on_dignode(function(pos, _, digger)
+	changed(pos, digger)
+end)
+core.register_on_placenode(function(pos, _, placer, _, _, pointed)
+	changed(pos, placer)
+	if pointed and pointed.under then
+		changed(pointed.under, placer)
+	end
+end)
 )LUA";
 
 struct Module: public interface::Module
@@ -171,8 +189,7 @@ struct Module: public interface::Module
 	{
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
 		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("network:packet_received/main:dig"));
-		m_server->sub_event(this, Event::t("network:packet_received/main:place"));
+		m_server->sub_event(this, Event::t("luanti:app:voxel_physics_changed"));
 		m_server->sub_event(this, Event::t("voxelworld:node_volume_updated"));
 		m_regions.m = this;
 		luanti::access(m_server, [&](luanti::Interface *i){
@@ -193,10 +210,8 @@ struct Module: public interface::Module
 	{
 		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:place", on_place,
-				network::Packet)
+		EVENT_TYPEN("luanti:app:voxel_physics_changed", on_changed,
+				luanti::AppEvent)
 		EVENT_TYPEN("voxelworld:node_volume_updated", on_node_volume_updated,
 				voxelworld::NodeVolumeUpdated)
 	}
@@ -238,11 +253,9 @@ struct Module: public interface::Module
 		log_i(MODULE, "%zu node types take part in the physics", structural);
 	}
 
-	// The player's changes are what wake the sim. Kept until the chunk
-	// they are in is committed: the game's own handler of the same packet
-	// is what makes the change, and it ran after this one and after the
-	// tick between (2026-09-22) -- the commit is the change having
-	// happened, whatever the order
+	// The player's changes are what wake the sim (on_dignode and
+	// on_placenode, through the bridge). Kept until the chunk they are in
+	// is committed: the commit is the change having happened
 	sv_<pv::Vector3DInt32> m_pending;
 
 	void on_node_volume_updated(const voxelworld::NodeVolumeUpdated &event)
@@ -264,32 +277,11 @@ struct Module: public interface::Module
 		m_pending.swap(left);
 	}
 
-	void on_dig(const network::Packet &packet)
+	void on_changed(const luanti::AppEvent &event)
 	{
-		pv::Vector3DInt32 p;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(p);
-		} catch(std::exception &e){
-			return;
-		}
-		m_pending.push_back(p);
-	}
-
-	void on_place(const network::Packet &packet)
-	{
-		pv::Vector3DInt32 under, above;
-		uint8_t sneak = 0;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(under, above, sneak);
-		} catch(std::exception &e){
-			return;
-		}
-		m_pending.push_back(under);
-		m_pending.push_back(above);
+		int x = 0, y = 0, z = 0;
+		if(sscanf(event.json.c_str(), "[%d,%d,%d]", &x, &y, &z) == 3)
+			m_pending.push_back(pv::Vector3DInt32(x, y, z));
 	}
 
 	// The simulation

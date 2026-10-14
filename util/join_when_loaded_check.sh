@@ -1,13 +1,13 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-11)
-# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/init.lua builtin/luanti/luanti.cpp builtin/luanti/lua/entity.lua
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/init.lua builtin/luanti/luanti.cpp builtin/luanti/session.h builtin/luanti/lua/entity.lua
 # [JOIN_WHEN_LOADED]: vanilla puts a player in the world only once their
 # client has it loaded. Vanilla on the minimal game; a fixture logs the
 # connected players whenever they change, which is who another player sees.
 #   1. A joins straight to the server and stays; B joins over a link of
 #      300 KB/s (util/netsim.py). Each one's join line, and their name among
-#      the players, come after their client's main:world_in; B placed (its
+#      the players, come after their client's luanti:world_in; B placed (its
 #      client's "the server put the player at") before that.
 #   2. C over the same link leaves once placed, before its world is in: no
 #      join, no leave, never among the players.
@@ -75,7 +75,7 @@ client "$t/c.log" c "$LINK" "$t/c.cmds" || fail "C's run ($t/c.log)"
 # for one never joined
 sleep 3
 kill $a 2>/dev/null; wait $a 2>/dev/null
-grep -a "main:world_in\|put in\|jw: players\|Player .* \(joined\|left\)" "$t/srv.log" | sed 's/.*\(main *: \|ACTION\[[^]]*\]: \)//' | cut -c 1-120
+grep -a "luanti:world_in\|put in\|jw: players\|Player .* \(joined\|left\)" "$t/srv.log" | sed 's/.*\(luanti *: \|ACTION\[[^]]*\]: \)//' | cut -c 1-120
 for c in b c; do grep -aq "the server put the player at" "$t/$c.log" || fail "$c not placed ($t/$c.log)"; done
 grep -aq "load: the world is in" "$t/c.log" && fail "C's world came in before it left; the link is too fast to test a leave"
 python3 - "$t/srv.log" <<'PY' || fail "the joins ($t/srv.log)"
@@ -83,13 +83,13 @@ import re, sys
 log = open(sys.argv[1], errors="replace").read().splitlines()
 ev = []
 for l in log:
-    m = re.search(r"Client (\d+): main:world_in", l)
+    m = re.search(r"Client (\d+): luanti:world_in", l)
     if m: ev.append(("in", m.group(1))); continue
     m = re.search(r"Player (\S+) (joined|left)", l)
     if m: ev.append((m.group(2), m.group(1))); continue
     m = re.search(r"jw: players \[(.*)\]", l)
     if m: ev.append(("players", m.group(1))); continue
-    if "no main:world_in" in l: ev.append(("limit", l))
+    if "no luanti:world_in" in l: ev.append(("limit", l))
 print(ev)
 assert not [e for e in ev if e[0] == "limit"], "a client put in by the limit"
 ins = [i for i, e in enumerate(ev) if e[0] == "in"]
@@ -143,4 +143,4 @@ print("the panel's colour on %.0f%% of the screen" % (panel * 100))
 assert panel < 0.3
 PY
 fi
-echo "PASS: vanilla puts a player in the world on their client's main:world_in, a slow link's too; one who leaves while loading leaves no trace; luanti_client's panel stays until the world round the player is drawn"
+echo "PASS: vanilla puts a player in the world on their client's luanti:world_in, a slow link's too; one who leaves while loading leaves no trace; luanti_client's panel stays until the world round the player is drawn"

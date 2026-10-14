@@ -242,6 +242,20 @@ namespace luanti
 		// on_secondary_use, which is where food is eaten ([TOUCH_EAT])
 		virtual bool use_wielded(const ss_ &player_name) = 0;
 
+		// [LUANTI_APP_GLUE] The player session: a client's player, by the
+		// name the app gives it, placed now and in the world once its
+		// client says it has the world loaded (luanti:world_in, or 180 s);
+		// admin is set_admin() then. From here the client's luanti:*
+		// input packets are the module's (session.h) and its leave
+		// removes the player.
+		virtual void join_player(const ss_ &name, size_t peer,
+				bool admin) = 0;
+		// Whether the peer's player is in the world, past its loading
+		virtual bool player_in_world(size_t peer) = 0;
+		// A player's chat lines at once, then one a second; 0, the
+		// default, is no limit (a public server's flood guard)
+		virtual void set_chat_limit(double burst) = 0;
+
 		// The drop key: what the player is holding goes into the world as
 		// an object. count is how many of the stack go, and zero is all of
 		// them -- the item's own on_drop is what does it.

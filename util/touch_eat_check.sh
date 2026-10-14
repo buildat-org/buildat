@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-14)
-# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/init.lua builtin/luanti/lua/entity.lua
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/init.lua builtin/luanti/lua/entity.lua builtin/luanti/session.h
 # [TOUCH_EAT]: food eaten with nothing pointed at. Vanilla on VoxeLibre
 # (survival), the player hungry (10) with five carrots wielded, floating
 # and looking at the sky:

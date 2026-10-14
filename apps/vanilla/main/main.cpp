@@ -96,30 +96,6 @@ struct Module: public interface::Module
 	// Which client took the name BUILDAT_LUANTI_NAME asked for, if any;
 	// see player_name_of()
 	network::PeerInfo::Id m_named_peer = 0;
-	// Where each client last said its player is, applied on the next tick;
-	// see on_where()
-	// And what the player is holding down, in Luanti's own bit order; see
-	// control_bits() in client_lua/init.lua and CONTROL_BITS in
-	// builtin/luanti/lua/entity.lua
-	struct Where {
-		double x = 0, y = 0, z = 0, look_h = 0, look_v = 0;
-		int32_t controls = 0;
-		double sent_us = 0; // the client's clock, microseconds (cereal's
-		                    // Lua side has doubles, not int64)
-	};
-	sm_<network::PeerInfo::Id, Where> m_pending_where;
-	// How long a position update waited on the wire ([NET_SIM]): the
-	// client's clock is not the server's, so the age is the excess over
-	// the smallest (received - sent) seen from that peer -- the fastest
-	// update sets the baseline, a lossy link shows as the rest lagging
-	// it. The worst per five seconds is logged.
-	struct WhereAge {
-		int64_t base_us = 0; // the smallest received - sent, or 0
-		int64_t worst_us = 0;
-		int64_t window_from_us = 0;
-	};
-	sm_<network::PeerInfo::Id, WhereAge> m_where_age;
-	float m_where_timer = 0.0f;
 	// A world runs once: what a second choice would be is a second Luanti
 	// environment in one server, which is not what the module is
 	bool m_starting = false;
@@ -154,13 +130,6 @@ struct Module: public interface::Module
 	// Who has joined, by the account name their player has
 	std::map<network::PeerInfo::Id, ss_> m_names;
 	std::set<network::PeerInfo::Id> m_join_sent;
-	// [JOIN_WHEN_LOADED]: placed and loading, by the seconds waited; and in
-	// the world, which the client's main:world_in or WORLD_IN_LIMIT does
-	std::map<network::PeerInfo::Id, float> m_loading;
-	std::set<network::PeerInfo::Id> m_in_world;
-	// Past the loading screen's own 60 s after the first chunk, which a
-	// slow link reaches only after the scene's megabytes
-	static constexpr float WORLD_IN_LIMIT = 180;
 
 	void init()
 	{
@@ -171,16 +140,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:dig"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:dig_start"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:punch_object"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:place"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:use"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:get_saves"));
 		m_server->sub_event(this, Event::t("storage:over_limit"));
@@ -217,7 +176,7 @@ struct Module: public interface::Module
 		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
 				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
 				"stop_world", "trim", "export", "export_part", "import_begin",
-				"import_data", "transfer_cancel", "world_in"})
+				"import_data", "transfer_cancel"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/main:")+n));
 		m_server->sub_event(this, Event::t(
@@ -225,15 +184,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:import_world"));
 		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:where"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:fell"));
-		m_server->sub_event(this, Event::t(
 				"network:packet_received/main:chat"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:wield"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:drop"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("accounts:login"));
 		m_server->sub_event(this, Event::t("accounts:privs"));
@@ -246,16 +197,6 @@ struct Module: public interface::Module
 		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/main:dig", on_dig,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:dig_start", on_dig_start,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:punch_object",
-				on_punch_object, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:place", on_place,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:use", on_use,
-				network::Packet)
 		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
 				network::Packet)
 		EVENT_TYPEN("storage:over_limit", on_over_limit, storage::OverLimit)
@@ -323,16 +264,6 @@ struct Module: public interface::Module
 				on_import_world, network::Packet)
 		EVENT_TYPEN("network:packet_received/main:chat", on_chat,
 				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:wield", on_wield,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:drop", on_drop,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:fell", on_fell,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:where", on_where,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:world_in", on_world_in,
-				network::Packet)
 		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
 		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
@@ -381,17 +312,11 @@ struct Module: public interface::Module
 	{
 		m_shown_world.erase(old_client.info.id);
 		m_shown_menu.erase(old_client.info.id);
-		if(m_scene){
-			luanti::access(m_server, [&](luanti::Interface *i){
-				i->remove_player(player_name_of(old_client.info.id));
-			});
-		}
+		// The player is the module's to remove (its session)
 		if(m_named_peer == old_client.info.id)
 			m_named_peer = 0;
 		m_names.erase(old_client.info.id);
 		m_join_sent.erase(old_client.info.id);
-		m_loading.erase(old_client.info.id);
-		m_in_world.erase(old_client.info.id);
 		// A transfer cut off leaves nothing behind
 		if(m_transfer.peer == old_client.info.id){
 			log_i(MODULE, "The transfer's client left; its files removed");
@@ -512,12 +437,6 @@ struct Module: public interface::Module
 		return m_public ? ss_("(on the server)") : path;
 	}
 
-	// A player's packets are a joined player's
-	bool joined(network::PeerInfo::Id peer)
-	{
-		return (!m_public || m_names.count(peer)) && m_in_world.count(peer);
-	}
-
 	// In through the join: the world when there is one; else the world
 	// menu for an admin, and for anyone else a wait until an admin has
 	// chosen one
@@ -581,26 +500,15 @@ struct Module: public interface::Module
 	void on_accounts_privs(const accounts::Login &login)
 	{
 		send_account(login.peer);
-		if(!m_public || !m_scene || !m_in_world.count(login.peer))
+		if(!m_public || !m_scene)
 			return;
 		const bool admin = is_admin(login.peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->set_admin(login.name, admin);
+			if(i->player_in_world(login.peer))
+				i->set_admin(login.name, admin);
 		});
 	}
 
-	// Where a client says its player is, five times a second each. Kept
-	// rather than applied: going into the module for each one costs a wait
-	// on whatever the module is doing -- a fifth of a second in a game the
-	// size of VoxeLibre, and three seconds at its worst -- so five a second
-	// per player is more than a second of waiting per second of play, and
-	// this module's own queue then grows without bound. Everything a player
-	// does afterwards waits behind that backlog: a click took twelve seconds
-	// to arrive when this was measured.
-	//
-	// Only the newest matters anyway, which is what makes keeping it right
-	// rather than merely cheap: a position is a heartbeat, like the tick
-	// src/server/state.cpp coalesces for the same reason.
 	// The loading screen's picture ([LOADING_SCREEN]): one of the running
 	// game's menu/background.png and background.<n>.png, at random each
 	// join, its name and bytes; none for a game without one. Sent behind
@@ -639,51 +547,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	void on_where(const network::Packet &packet)
-	{
-		// From the placement on, while loading too: it is what the world
-		// loads round ([JOIN_WHEN_LOADED]); the module moves nobody who is
-		// not in it yet
-		if(!m_in_world.count(packet.sender) && !m_loading.count(packet.sender))
-			return;
-		if(m_public && !m_names.count(packet.sender))
-			return;
-		Where w;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(w.x, w.y, w.z, w.look_h, w.look_v, w.controls, w.sent_us);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:where: %s", e.what());
-			return;
-		}
-		m_pending_where[packet.sender] = w;
-		if(w.sent_us > 0){
-			const int64_t now = interface::os::time_us();
-			WhereAge &a = m_where_age[packet.sender];
-			const int64_t d = now - (int64_t)w.sent_us;
-			if(a.base_us == 0 || d < a.base_us)
-				a.base_us = d;
-			const int64_t age = d - a.base_us;
-			if(age > a.worst_us)
-				a.worst_us = age;
-			if(a.window_from_us == 0)
-				a.window_from_us = now;
-			if(now - a.window_from_us >= 5000000){
-				log_i(MODULE, "where: the worst wait behind the wire in "
-						"five seconds %d ms (client %u)",
-						(int)(a.worst_us / 1000), (unsigned)packet.sender);
-				a.worst_us = 0;
-				a.window_from_us = now;
-			}
-		}
-	}
-
-	// And the tick is where they are handed over: one visit to the module
-	// for every player who has moved since the last one -- and not on every
-	// tick, the server's being thirty a second, but at the rate a client
-	// sends at. One visit per fifth of a second for the lot of them is what
-	// this is for; thirty would be worse than what it replaced.
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(m_restart_in >= 0){
@@ -698,74 +561,14 @@ struct Module: public interface::Module
 			}
 		}
 		poll_contentdb();
-		for(auto it = m_loading.begin(); it != m_loading.end();){
-			const network::PeerInfo::Id peer = it->first;
-			it->second += event.dtime;
-			++it;
-			if(m_loading[peer] >= WORLD_IN_LIMIT){
-				log_i(MODULE, "Client %u: no main:world_in in %.0f s; put in",
-						(unsigned)peer, (double)WORLD_IN_LIMIT);
-				put_in_world(peer);
-			}
-		}
-		m_where_timer += event.dtime;
-		if(m_where_timer < 0.2f)
-			return;
-		m_where_timer = 0.0f;
-		if(m_pending_where.empty())
-			return;
-		sm_<network::PeerInfo::Id, Where> pending;
-		pending.swap(m_pending_where);
-		luanti::access(m_server, [&](luanti::Interface *i){
-			for(const auto &pair : pending){
-				i->set_player_pos(player_name_of(pair.first),
-						(float)pair.second.x, (float)pair.second.y,
-						(float)pair.second.z, (float)pair.second.look_h,
-						(float)pair.second.look_v, pair.second.controls);
-			}
-		});
 	}
 
-	// How hard a player landed, which only their own client knows -- the
-	// physics is the client's. What it costs is the module's, so this hands
-	// over the speed and nothing else.
-	//
-	// The number is a client's word, so it is bounded here: below Luanti's
-	// own tolerance it costs nothing, and nothing beyond terminal velocity
-	// is believed. A client that lies about it can hurt nobody but itself,
-	// which is what Luanti's own TOSERVER_DAMAGE is worth as well.
-	void on_fell(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		double speed = 0;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(speed);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:fell: %s", e.what());
-			return;
-		}
-		if(!(speed > 14.0))
-			return;
-		if(speed > 200.0)
-			speed = 200.0;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->player_fell(player_name_of(packet.sender), (float)speed);
-		});
-	}
-
-	// A line a player typed. What it means is the module's: the callbacks
-	// run, the "/" commands among them, and what nobody takes is said to
-	// everyone.
+	// [VANILLA_STOP] A line a held player typed with no world running: to
+	// everyone in, as Luanti says one. In a world chat is the module's
+	// (luanti:chat), its limit set_chat_limit()'s.
 	void on_chat(const network::Packet &packet)
 	{
-		// [VANILLA_STOP] With no world, a held player who logged in counts:
-		// after the stop's restart nobody is in a world (2026-10-13: the
-		// held page's chat went nowhere)
-		if(!joined(packet.sender) &&
-				!(m_public && !m_scene && m_names.count(packet.sender)))
+		if(!(m_public && !m_scene && m_names.count(packet.sender)))
 			return;
 		sv_<ss_> values;
 		try {
@@ -781,213 +584,23 @@ struct Module: public interface::Module
 		const ss_ &message = values[0];
 		// **A public server's chat is limited** ([VANILLA_PUBLIC] 8): a
 		// player's lines fill a bucket that empties one a second, and a
-		// line into a full one is refused and the player told
-		if(m_public){
-			const int64_t now = interface::os::time_us();
-			auto &b = m_chat_bucket[packet.sender];
-			b.first = std::max(0.0, b.first - (now - b.second) / 1e6);
-			b.second = now;
-			if(b.first + 1 > CHAT_BURST){
-				luanti::access(m_server, [&](luanti::Interface *i){
-					i->chat_send(player_name_of(packet.sender),
-							"Too many lines: wait a moment");
-				});
-				return;
-			}
-			b.first += 1;
+		// line into a full one is refused
+		const int64_t now = interface::os::time_us();
+		auto &b = m_chat_bucket[packet.sender];
+		b.first = std::max(0.0, b.first - (now - b.second) / 1e6);
+		b.second = now;
+		if(b.first + 1 > CHAT_BURST)
+			return;
+		b.first += 1;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(sv_<ss_>{"<"+player_name_of(packet.sender)+"> "+message});
 		}
-		// [VANILLA_STOP] No game running: the line to everyone in, as
-		// Luanti says one
-		if(!m_scene){
-			std::ostringstream os(std::ios::binary);
-			{
-				cereal::PortableBinaryOutputArchive ar(os);
-				ar(sv_<ss_>{"<"+player_name_of(packet.sender)+"> "+message});
-			}
-			network::access(m_server, [&](network::Interface *inetwork){
-				for(const auto &kv : m_names)
-					inetwork->send(kv.first, "main:chat_line", os.str());
-			});
-			return;
-		}
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->chat_message(player_name_of(packet.sender), message);
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(const auto &kv : m_names)
+				inetwork->send(kv.first, "main:chat_line", os.str());
 		});
-	}
-
-	// Which hotbar slot the player is holding. The keys and the wheel are
-	// the client's, and what is in hand is what the next dig or place asks
-	// the module about.
-	void on_wield(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:wield: %s", e.what());
-			return;
-		}
-		if(values.empty())
-			return;
-		const int index = atoi(values[0].c_str());
-		if(index < 1 || index > 32)
-			return;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->set_wield_index(player_name_of(packet.sender), index);
-		});
-	}
-
-	// The drop key. The count is how many of the held stack go and zero is
-	// all of them, which is what Luanti's Q and Ctrl-Q are.
-	void on_drop(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:drop: %s", e.what());
-			return;
-		}
-		const int count = values.empty() ? 0 : atoi(values[0].c_str());
-		bool dropped = false;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			dropped = i->drop_wielded(player_name_of(packet.sender),
-					count < 0 ? 0 : count);
-		});
-		log_v(MODULE, "C%i: main:drop %i: %s", packet.sender, count,
-				dropped ? "dropped" : "nothing");
-	}
-
-	// A click on the client, as the voxel it pointed at. What it means is
-	// the module's to decide: core.dig_node() hands the node to the
-	// vendored builtin, which is where can_dig, the drops and every
-	// callback around a dig live.
-	void on_dig(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		pv::Vector3DInt32 voxel_p;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_p);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:dig: %s", e.what());
-			return;
-		}
-		bool dug = false;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			dug = i->dig_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ(),
-					player_name_of(packet.sender));
-		});
-		log_v(MODULE, "C%i: main:dig " PV3I_FORMAT ": %s", packet.sender,
-				PV3I_PARAMS(voxel_p), dug ? "dug" : "nothing");
-	}
-
-	// The button going down, which is where a held dig starts: the node is
-	// punched, so a mod's on_punch runs on the way in. How long the dig
-	// takes is the client's to time -- see core.__dig_props() in the module
-	// -- and main:dig is what it sends when it is done.
-	void on_dig_start(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		pv::Vector3DInt32 voxel_p;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_p);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:dig_start: %s", e.what());
-			return;
-		}
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->punch_node(voxel_p.getX(), voxel_p.getY(), voxel_p.getZ(),
-					player_name_of(packet.sender));
-		});
-		log_v(MODULE, "C%i: main:dig_start " PV3I_FORMAT, packet.sender,
-				PV3I_PARAMS(voxel_p));
-	}
-
-	// The same button, when what it was pointing at was an object rather
-	// than a node: one punch per press, and no faster than the client's own
-	// delay while it is held.
-	void on_punch_object(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:punch_object: %s", e.what());
-			return;
-		}
-		if(values.empty())
-			return;
-		const int32_t id = atoi(values[0].c_str());
-		bool punched = false;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			punched = i->punch_object(id, player_name_of(packet.sender));
-		});
-		log_v(MODULE, "C%i: main:punch_object %i: %s", packet.sender, id,
-				punched ? "punched" : "nothing");
-	}
-
-	// The other button. Luanti calls it place, and what it comes to is the
-	// pointed node's on_rightclick if it has one and the wielded item's
-	// on_place otherwise; which of the two is the module's to decide. under
-	// is the node pointed at and above is the empty voxel in front of it,
-	// which is where a node goes.
-	void on_place(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		pv::Vector3DInt32 under, above;
-		// Whether the player was holding the key that means "build against
-		// this rather than use it"; see place_node() in luanti/api.h
-		uint8_t sneak = 0;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(under, above, sneak);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:place: %s", e.what());
-			return;
-		}
-		bool placed = false;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			placed = i->place_node(under.getX(), under.getY(), under.getZ(),
-					above.getX(), above.getY(), above.getZ(),
-					player_name_of(packet.sender), sneak != 0);
-		});
-		log_v(MODULE, "C%i: main:place " PV3I_FORMAT ": %s", packet.sender,
-				PV3I_PARAMS(above), placed ? "placed" : "nothing");
-	}
-
-	// The other button at nothing: the wielded item's secondary use, which
-	// is how food is eaten ([TOUCH_EAT]). Nothing in the packet; vanilla's
-	// own client sends it, so no feature name.
-	void on_use(const network::Packet &packet)
-	{
-		if(!joined(packet.sender))
-			return;
-		bool used = false;
-		luanti::access(m_server, [&](luanti::Interface *i){
-			used = i->use_wielded(player_name_of(packet.sender));
-		});
-		log_v(MODULE, "C%i: main:use: %s", packet.sender,
-				used ? "used" : "nothing");
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)
@@ -1096,8 +709,13 @@ struct Module: public interface::Module
 			ss_ save = launch_param("save");
 			// [PAUSE_WORLDS_LOCAL] One from a player in the world is the
 			// pause menu's Worlds..., which lists them
-			if(save != "" && m_launched_param_save &&
-					!m_in_world.count(packet.sender))
+			bool in_world = false;
+			if(m_scene){
+				luanti::access(m_server, [&](luanti::Interface *i){
+					in_world = i->player_in_world(packet.sender);
+				});
+			}
+			if(save != "" && m_launched_param_save && !in_world)
 				return;
 			if(save != "" && !m_launched_param_save){
 				ss_ gameid = gameid_of_save(save);
@@ -4583,28 +4201,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	// The client's loading screen has ended (load_wait_end()): the player
-	// goes in, seen and hit and their game's join callbacks run
-	void on_world_in(const network::Packet &packet)
-	{
-		if(!m_loading.count(packet.sender))
-			return;
-		log_i(MODULE, "Client %u: main:world_in", (unsigned)packet.sender);
-		put_in_world(packet.sender);
-	}
-
-	void put_in_world(network::PeerInfo::Id peer)
-	{
-		m_loading.erase(peer);
-		m_in_world.insert(peer);
-		const bool admin = m_public && is_admin(peer);
-		luanti::access(m_server, [&](luanti::Interface *i){
-			i->add_player(player_name_of(peer), peer);
-			if(admin)
-				i->set_admin(player_name_of(peer), true);
-		});
-	}
-
 	void show_world_to(network::PeerInfo::Id peer)
 	{
 		// Once per peer: files_transmitted comes again after every batch
@@ -4632,11 +4228,11 @@ struct Module: public interface::Module
 		// minutes ([NET_SIM]'s link cell)
 		send_account(peer);
 		// Placed only: in the world once the client has it loaded
-		// ([JOIN_WHEN_LOADED]), see on_world_in()
+		// ([JOIN_WHEN_LOADED]); the player is the module's from here
+		const bool admin = m_public && is_admin(peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->place_player(player_name_of(peer), peer);
+			i->join_player(player_name_of(peer), peer, admin);
 		});
-		m_loading[peer] = 0;
 		replicate::access(m_server, [&](replicate::Interface *ireplicate){
 			ireplicate->assign_scene_to_peer(m_scene, peer);
 		});
@@ -5098,6 +4694,8 @@ struct Module: public interface::Module
 			i->load_lua("core.__luanti_mods_path = [==["+mods_path()+"]==]",
 					"vanilla_mods");
 			apply_default_preset(save->path());
+			if(m_public)
+				i->set_chat_limit(CHAT_BURST);
 			luanti::Interface::Paths paths;
 			paths.settings_file = luanti_path()+"/settings.json";
 			paths.base_textures = luanti_path()+"/textures/base/pack";

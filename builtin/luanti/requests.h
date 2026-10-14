@@ -255,6 +255,7 @@
 	// went on to it ([SECURITY_RUN_1])
 	void on_client_disconnected(const network::OldClient &old)
 	{
+		session_left(old.info.id);
 		m_peer_mode.erase(old.info.id);
 		m_files_transmitted.erase(old.info.id);
 		m_texmods_waiting.erase(old.info.id);

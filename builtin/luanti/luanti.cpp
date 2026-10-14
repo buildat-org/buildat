@@ -47,6 +47,7 @@
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
+#include "interface/polyvox_cereal.h"
 extern "C" {
 #include <lua.h>
 #include <lualib.h>
@@ -1221,6 +1222,7 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
+		session_init();
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -1269,6 +1271,29 @@ struct Module: public interface::Module, public luanti::Interface
 				on_fields, network::Packet)
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
 				on_inv_action, network::Packet)
+		// [LUANTI_APP_GLUE] The player session's (session.h)
+		EVENT_TYPEN("network:packet_received/luanti:where", on_where,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:fell", on_fell,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:chat", on_chat,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:wield", on_wield,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:drop", on_drop,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:dig", on_dig,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:dig_start", on_dig_start,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:punch_object",
+				on_punch_object, network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:place", on_place,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:use", on_use,
+				network::Packet)
+		EVENT_TYPEN("network:packet_received/luanti:world_in", on_world_in,
+				network::Packet)
 	}
 
 	void on_start()
@@ -1874,6 +1899,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(!m_game_running)
 			return;
+		session_tick(event.dtime);
 		m_step_accum += event.dtime;
 		if(m_step_accum < STEP_S)
 			return;
@@ -3493,6 +3519,7 @@ struct Module: public interface::Module, public luanti::Interface
 	#include "lua_bindings.h"
 
 	#include "requests.h"
+	#include "session.h"
 
 	// Interface
 

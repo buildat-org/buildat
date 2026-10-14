@@ -39,7 +39,7 @@ luanti.sub_chat(function(line)
 	accounts.chat_add(line)
 end)
 accounts.chat_send = function(text)
-	buildat.send_packet("main:chat",
+	buildat.send_packet("luanti:chat",
 			cereal.binary_output({text}, {"array", "string"}))
 end
 

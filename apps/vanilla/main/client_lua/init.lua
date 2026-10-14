@@ -1151,7 +1151,7 @@ local function set_wield(i)
 	end
 	wield_index = i
 	draw_hotbar()
-	buildat.send_packet("main:wield",
+	buildat.send_packet("luanti:wield",
 			cereal.binary_output({tostring(i)}, {"array", "string"}))
 end
 
@@ -1200,10 +1200,10 @@ local function load_wait_end()
 	log:info("load: the world is in")
 	-- And the player into it: until now they were only placed
 	-- ([JOIN_WHEN_LOADED])
-	buildat.send_packet("main:world_in", "")
+	buildat.send_packet("luanti:world_in", "")
 	-- The slot shown: the server's player starts at 1, this client's may
 	-- not ([WIELD_SLOT_JOIN])
-	buildat.send_packet("main:wield",
+	buildat.send_packet("luanti:wield",
 			cereal.binary_output({tostring(wield_index)}, {"array", "string"}))
 	keys.redraw_hud()
 	keys.take_world()
@@ -3117,7 +3117,7 @@ local function send_chat()
 	if text == nil or text == "" then
 		return
 	end
-	buildat.send_packet("main:chat",
+	buildat.send_packet("luanti:chat",
 			cereal.binary_output({text}, {"array", "string"}))
 end
 
@@ -3723,7 +3723,7 @@ local function dig_packet(name, p)
 	buildat.send_packet(name, cereal.binary_output({
 		p = voxel_packet_value(p),
 	}, {"object", {"p", VOXEL_PACKET_TYPE}}))
-	if name == "main:dig" and dig and dig.name then
+	if name == "luanti:dig" and dig and dig.name then
 		local pr = luanti.prediction(dig.name)
 		local dug_name = node_name_at(p)
 		WIELD.predict_node(voxel_packet_value(p), pr and pr.dig or "air")
@@ -3742,7 +3742,7 @@ local function dig_packet(name, p)
 	-- that matches a dig against those: a dug voxel whose chunk is among
 	-- them waited its turn, and one that is not is a chunk nobody asked to
 	-- redraw. See section 3 of doc/plan/master_plan.md.
-	if name == "main:dig" then
+	if name == "luanti:dig" then
 		local chunk_p = voxelworld.get_chunk_position(
 				buildat.Vector3(p.x, p.y, p.z))
 		local node = voxelworld.get_static_node(chunk_p)
@@ -3778,7 +3778,7 @@ local function update_dig(dt, playing)
 			update_crack()
 			if hit_wait <= 0 then
 				hit_wait = OBJECT_HIT_DELAY
-				buildat.send_packet("main:punch_object", cereal.binary_output(
+				buildat.send_packet("luanti:punch_object", cereal.binary_output(
 						{tostring(id)}, {"array", "string"}))
 			end
 			return
@@ -3808,7 +3808,7 @@ local function update_dig(dt, playing)
 		-- be dug at all
 		log:debug("dig: " .. tostring(dig.name) .. " takes " ..
 				tostring(dig.time) .. " s")
-		dig_packet("main:dig_start", dig.p)
+		dig_packet("luanti:dig_start", dig.p)
 		update_crack()
 		return
 	end
@@ -3817,7 +3817,7 @@ local function update_dig(dt, playing)
 	end
 	dig.elapsed = dig.elapsed + dt
 	if dig.time and dig.elapsed >= dig.time then
-		dig_packet("main:dig", dig.p)
+		dig_packet("luanti:dig", dig.p)
 		dig.done = true
 	end
 	update_crack()
@@ -3857,7 +3857,7 @@ keys.place_now = function()
 				aim.y) or ""))
 		-- The wielded item's secondary use, which is how food is eaten:
 		-- a tap or the right button at the sky, then held ([TOUCH_EAT])
-		buildat.send_packet("main:use", "")
+		buildat.send_packet("luanti:use", "")
 		return
 	end
 	-- The right button is Luanti's place-or-use: what it comes to is the
@@ -3869,7 +3869,7 @@ keys.place_now = function()
 	local above = voxel_packet_value(pointed_above or pointed_p)
 	local sneak = key_down("sneak") or magic.input:GetKeyDown(magic.KEY_LSHIFT) or
 			magic.input:GetKeyDown(magic.KEY_RSHIFT)
-	buildat.send_packet("main:place", cereal.binary_output({
+	buildat.send_packet("luanti:place", cereal.binary_output({
 		under = under,
 		above = above,
 		sneak = sneak and 1 or 0,
@@ -4033,7 +4033,7 @@ keys.on_key = function(key)
 		-- out of the inventory, so nothing is drawn until it says so.
 		local one = magic.input:GetKeyDown(magic.KEY_LCTRL) or
 				magic.input:GetKeyDown(magic.KEY_RCTRL)
-		buildat.send_packet("main:drop", cereal.binary_output(
+		buildat.send_packet("luanti:drop", cereal.binary_output(
 				{one and "1" or "0"}, {"array", "string"}))
 		elseif key == BIND.inventory.key then
 		-- Luanti's own inventory key, and what a game's inventory formspec
@@ -4192,7 +4192,7 @@ local function send_where()
 	-- long the update waited behind whatever was on the wire, as the
 	-- excess over the fastest one it saw, and logs the worst per five
 	-- seconds -- the number the channels attack
-	buildat.send_packet("main:where", cereal.binary_output({
+	buildat.send_packet("luanti:where", cereal.binary_output({
 		x = p.x, y = p.y, z = p.z,
 		look_h = math.rad(-yaw),
 		look_v = math.rad(pitch),
@@ -4380,7 +4380,7 @@ function frame_peak.update(dt)
 		local speed = player.landed_at
 		player.landed_at = nil
 		if speed > FALL_TOLERANCE then
-			buildat.send_packet("main:fell", cereal.binary_output(
+			buildat.send_packet("luanti:fell", cereal.binary_output(
 					{speed = speed}, {"object", {"speed", "double"}}))
 		end
 	end
