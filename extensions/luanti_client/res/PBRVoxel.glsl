@@ -637,6 +637,17 @@ void VS()
             TransmissionHash(cell + 89.0)) * 2.0 - 1.0;
     }
 
+    // Where the spots' cells are read: a hundredth of a voxel in from the
+    // face. A face lies on a cell boundary (n + 0.5 times 6 or 16 is
+    // whole), so its interpolated position falls either side of it by the
+    // rasteriser's rounding, and the cell flipped between two from pixel
+    // to pixel: twice the spots, in stripes where a GPU's error runs
+    // along a row ([NVIDIA_STRIPES]).
+    vec3 GetSpotPos()
+    {
+        return vWorldPos.xyz - normalize(vNormal) * 0.01;
+    }
+
     // A still spot is on or off with no fade: a facet has an edge, and its
     // tilt is constant across the cell, so it reads as one flat surface.
     float GetStaticSpots(vec3 worldPos, float fraction)
@@ -739,8 +750,8 @@ void PS()
         float metalness = cMetallic;
         float specStrength = surfaceSrc.g;
         #ifdef VOXELSPOTS
-            surfaceSpots = GetSurfaceSpots(vWorldPos.xyz, surfaceSrc.a);
-            staticSpots = GetStaticSpots(vWorldPos.xyz,
+            surfaceSpots = GetSurfaceSpots(GetSpotPos(), surfaceSrc.a);
+            staticSpots = GetStaticSpots(GetSpotPos(),
                 texture2D(sNormalMap, vTexCoord.xy).a);
             // A spot is glossy because it is a leaf or a facet that has
             // turned, and one that has half turned is a smaller turn rather
@@ -840,9 +851,9 @@ void PS()
         // A free direction tips some normals past the horizon, and those
         // reflect the ground half of the cube map: brown specks on water.
         vec3 spotTilt =
-            GetSpotTilt(vWorldPos.xyz, TRANSMISSION_CELLS) *
+            GetSpotTilt(GetSpotPos(), TRANSMISSION_CELLS) *
                 (SPOT_TILT * surfaceSpots) +
-            GetSpotTilt(vWorldPos.xyz, STATIC_SPOT_CELLS) *
+            GetSpotTilt(GetSpotPos(), STATIC_SPOT_CELLS) *
                 (STATIC_SPOT_TILT * staticSpots);
         spotTilt -= normal * dot(spotTilt, normal);
         normal = normalize(normal + spotTilt);
