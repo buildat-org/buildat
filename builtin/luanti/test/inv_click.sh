@@ -207,4 +207,5 @@ run_ext(){
 [ "$which" = ext ] || run_vanilla
 [ "$which" = vanilla ] || run_ext
 for f in "${failed[@]}"; do echo "FAIL: $f"; done
-[ ${#failed[@]} = 0 ] && echo "inv_click: ok"
+[ ${#failed[@]} = 0 ] || exit 1
+echo "PASS: the inventory's clicks land as official Luanti's; the shots are in $out"

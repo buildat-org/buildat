@@ -62,10 +62,18 @@ for name in paths:
 	# The shell's own verdict, with no exit anywhere after it
 	for m in re.finditer(r'echo\s+"?FAIL[:\s]', src):
 		rest = src[m.end():m.end() + 200]
-		# exit 1 straight away, a precondition's exit 2, or a status the
-		# runner carries to its own exit at the end
-		if not any(t in rest for t in ("exit 1", "exit $", "exit 2",
-				"status=1", "sys.exit", "SystemExit")):
+		# exit 1 straight away, a precondition's exit 2, a function's
+		# return 1 for its caller to act on, or a status the runner
+		# carries to its own exit at the end: a flag set (fail=1, ok=)
+		# that an exit or a return 1 reads later
+		# (on the echo's line or the next)
+		flag = re.search(r'\b(\w+)=1?\s*[;}\n]',
+				"\n".join(rest.split("\n")[:2]) + "\n")
+		carried = flag and re.search(
+				r'exit "?\$\{?%s\b|\$\{?%s\b\}?"?\s*\]\s*\|\|\s*(exit|return) 1'
+				% (flag.group(1), flag.group(1)), src)
+		if not carried and not any(t in rest for t in ("exit 1", "exit $",
+				"exit 2", "return 1", "status=1", "sys.exit", "SystemExit")):
 			why.append("a shell FAIL: is not followed by exit 1")
 			break
 	# And whatever the runner ends with is what its status will be.
@@ -83,7 +91,7 @@ for name in paths:
 	ends_on_verdict = (re.fullmatch(r"\w+", last) or last.startswith("exit ")
 			or last.startswith("exec ")
 			or "verdict_exit" in last or last == "fi"
-			or last.endswith("|| exit 1")
+			or last.endswith("|| exit 1") or last.endswith("exit 1; }")
 			or (("PASS" in last) and ("exit 1" in src
 				or re.search(r"(^|[\s;&|{(])fail ", src, re.M))))
 	if not ends_on_verdict:

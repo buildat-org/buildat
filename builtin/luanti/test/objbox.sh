@@ -99,4 +99,5 @@ run_ext(){
 [ "$which" = ext ] || run_vanilla
 [ "$which" = vanilla ] || run_ext
 for f in "${failed[@]}"; do echo "FAIL: $f"; done
-[ ${#failed[@]} = 0 ] && echo "PASS: objbox: punched; the shots are in $out"
+[ ${#failed[@]} = 0 ] || exit 1
+echo "PASS: objbox: punched; the shots are in $out"
