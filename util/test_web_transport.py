@@ -93,15 +93,21 @@ assert first_type(data) == 2, data[:16]
 s.close()
 print("native ok:", len(data), "bytes")
 
+# A refused peer is kept open for 10 s after its goodbye (network.cpp,
+# linger_until_us): read until the goodbye has come, not to the end
+def until(s, text):
+    data = b""
+    while text not in data:
+        d = s.recv(65536)
+        if not d:
+            break
+        data += d
+    return data
+
 # A client of another protocol is told why, in a network:goodbye
 s = socket.create_connection((host, int(port)), timeout=5)
 s.sendall(hello(9, 9))
-data = b""
-while True:
-    d = s.recv(65536)
-    if not d:
-        break
-    data += d
+data = until(s, b"newer than this one")
 assert b"network:goodbye" in data and b"newer than this one" in data, data
 s.close()
 print("another protocol refused")
@@ -112,12 +118,7 @@ s = socket.create_connection((host, int(port)), timeout=5)
 name = b"core:request_files"
 body = bytes([100, 0]) + len(name).to_bytes(4, "little") + name
 s.sendall(bytes([0, 0]) + len(body).to_bytes(4, "little") + body)
-data = b""
-while True:
-    d = s.recv(65536)
-    if not d:
-        break
-    data += d
+data = until(s, b"update Buildat")
 assert data[:2] == bytes([0, 0]) and b"network:goodbye" in data, data[:40]
 n = 6 + int.from_bytes(data[2:6], "little")
 assert data[n:n + 2] == bytes([100, 0]) and b"update Buildat" in data[n:], data
