@@ -2303,6 +2303,12 @@ local function load_open()
 	function api.picture(data)
 		local img = magic.Image:new()
 		if not magic.image_load_data(img, data, 4096) then
+			-- An iPhone's own PNG (Apple's CgBI) is not read: said so, not
+			-- as any picture that does not decode
+			if data:sub(1, 4) == "\137PNG" and data:sub(13, 16) == "CgBI" then
+				return nil, "an iPhone's PNG (Apple's CgBI), which is not " ..
+						"read here: save it again as a plain PNG or a JPEG"
+			end
 			return nil, #data .. " bytes; a PNG or JPEG, 4096 a side at most"
 		end
 		local tex = magic.Texture2D:new()

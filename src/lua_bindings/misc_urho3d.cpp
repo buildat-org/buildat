@@ -288,7 +288,11 @@ static int l_image_load_data(lua_State *L)
 		return (uint32_t)u[i] << 24 | (uint32_t)u[i+1] << 16 |
 				(uint32_t)u[i+2] << 8 | (uint32_t)u[i+3];
 	};
-	bool png = len >= 24 && memcmp(data, "\x89PNG", 4) == 0;
+	// IHDR first, where its size is read below: an Apple CgBI chunk before
+	// it (stb_image takes those) put the size past the check, and an 8192
+	// a side picture was decoded before it was refused ([SEC_RUN5_LEFTOVERS])
+	bool png = len >= 24 && memcmp(data, "\x89PNG", 4) == 0 &&
+			memcmp(data + 12, "IHDR", 4) == 0;
 	bool ok = len <= (size_t)(max_side * max_side) && (png ||
 			(len >= 4 && memcmp(data, "\xff\xd8\xff", 3) == 0));
 	// IHDR's width and height, bytes 16 to 23
