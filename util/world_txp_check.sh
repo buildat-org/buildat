@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels network
 # cost: ~3 min (2026-10-11)
 # covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua builtin/luanti/media.h
 # [WORLD_TXP]: a texture pack chosen per world. Vanilla on the minimal

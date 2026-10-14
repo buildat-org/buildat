@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [THIRD_PERSON]: the camera key cycled through the three views and each
 # shot: local/camera/first.png, behind.png, front.png. The stage is
 # camera.lua's floor with a wall two nodes behind the player, and then a

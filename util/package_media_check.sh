@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~90 s (2026-10-10)
 # covers: src/impl/aitta.cpp apps/aitta/main/main.cpp client/launch_grid.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua src/client/main.cpp
 # [PACKAGE_MEDIA]: a package's icon and screenshot.

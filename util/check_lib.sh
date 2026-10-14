@@ -22,6 +22,14 @@ mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
 # simplified: the render mode only; the window stays each runner's -w (the
 # runners click at UI coordinates), the view range each server's
 [ -n "${BUILDAT_CI:-}" ] && export BUILDAT_RENDER_MODE="${BUILDAT_RENDER_MODE:-unlit}"
+# Nothing leaves the machine under it ([CI_TIER] 4): the public Luanti
+# server list, which the serverlist extension and apps/play fetch
+# unasked, asked of a closed loopback port unless a runner serves its own
+# simplified: luanti_client's official-list page is hard-coded and only
+# fetched when opened; its runner (servers_ui.sh) is "needs: network"
+[ -n "${BUILDAT_CI:-}" ] && export \
+	BUILDAT_SERVERLIST_URL="${BUILDAT_SERVERLIST_URL:-http://127.0.0.1:9}" \
+	BUILDAT_LUANTI_LIST="${BUILDAT_LUANTI_LIST:-http://127.0.0.1:9}"
 # The Luanti games and textures the checks play, from the desk's user path:
 # hard links, so nothing is copied and a boxed server (Landlock is by path)
 # can read them, which it could not through a symlink out of its user path.
@@ -177,6 +185,12 @@ active_object_send_range_blocks = 2
 liquid_loop_max = 10'
 fail(){ echo "FAIL: $*"; exit 1; }
 skip() { echo "SKIP: $*"; exit $SKIP; }
+
+# [CI_TIER] 4: under BUILDAT_CI a runner whose verdict needs pixels, or a
+# machine outside the run, says so on a "# needs: pixels" / "# needs:
+# network" line and is skipped with that reason; without it, it runs
+_needs=$(grep -m1 '^# needs:' "$0" 2>/dev/null)
+[ -n "${BUILDAT_CI:-}" ] && [ -n "$_needs" ] && skip "BUILDAT_CI: ${_needs#\# }"
 
 # A temp directory of the check's own in $CHECK_TMP, removed at its exit
 # with the pids in CHECK_PIDS stopped first; KEEP_TMP=1 keeps it and says

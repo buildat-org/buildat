@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: long
+# needs: pixels
 # cost: ~60 s (2026-10-09)
 # covers: client/extensions/network/init.lua src/client/app_lua.h
 # [HEARTH_USABILITY] 1, **desktop, by mouse**: a user posts about an issue a

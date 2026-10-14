@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# needs: network
 # cost: 27s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [SERVER_LIST]: the two connect screens, driven -- the launch menu's
 # "Join a Buildat server" shot with the used addresses on the left; then the

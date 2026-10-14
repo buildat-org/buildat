@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: quick
+# needs: pixels
 # cost: 20s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
 # [MENU_KEYS]: the launch menu's keyboard. The client is started with no
 # server, because the launch menu is what it shows when it has nothing to

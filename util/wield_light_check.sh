@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~3 min (2026-10-11)
 # covers: builtin/luanti/lua/buildat_api.lua builtin/luanti/mods/wield_light/init.lua builtin/luanti/lua/modloader.lua builtin/luanti/client_lua/module.lua
 # [BUILDAT_WIELD_LIGHT]: a held torch is a light the client draws at the

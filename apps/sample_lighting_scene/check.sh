@@ -40,6 +40,7 @@
 # tree with no reference yet says so rather than passing.
 #
 # tier: quick
+# needs: pixels
 # cost: 35s
 # covers: builtin/voxel_shading/** src/impl/mesh.cpp src/impl/voxel.cpp src/impl/voxel_volume.cpp builtin/voxelworld/**
 set -u

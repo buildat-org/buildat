@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~2 min (2026-10-11)
 # covers: src/client/web/index.html
 # [ROTATE_ASPECT]: the 3D view follows the screen turning. Vanilla (the

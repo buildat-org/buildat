@@ -29,6 +29,7 @@
 # path is not an assertion.
 #
 # tier: broken
+# needs: pixels
 # broken: back to full; clicking an orb does nothing (dev); no "pause: hover
 #   on" (the branch) (local/runs/dev_baseline)
 # cost: 392s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)

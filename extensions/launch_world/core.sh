@@ -12,6 +12,7 @@
 # an edit; the full one covers a release.
 #
 # tier: quick
+# needs: pixels
 # cost: 60s
 # covers: apps/demo_digger/**
 # (it launches demo_digger by name and leaves it again, which is that game's

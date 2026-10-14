@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [BOX_PLAYTEST_3] (2): the pause menu's settings screen over the game --
 # the cursor must be visible and the view must not turn under it. The
 # scan's "mouse" line and the yaw in the status row are the reading.

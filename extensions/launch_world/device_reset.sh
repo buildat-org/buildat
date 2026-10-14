@@ -18,6 +18,7 @@
 # the reset F11 makes, taken from a window that stays where it is.
 #
 # tier: broken
+# needs: pixels
 # broken: back to full; the screen mode changed and the room never noticed
 #   (dev); the drive (the branch) (local/runs/dev_baseline)
 # cost: 75s

@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [WATER_LIGHT]: the shore where a flow meets a pool, in a world of a fixed
 # seed at a fixed place, shot straight down. What it asserts is the reading
 # [WATER_LIGHT] 2 is about: the flowing row against the pool beside it, the

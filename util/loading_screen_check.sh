@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~7 min (2026-10-12)
 # covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua apps/vanilla/main/main.cpp src/client/state.cpp builtin/replicate/replicate.cpp
 # [LOADING_SCREEN]: while the world loads, vanilla shows a screen of its

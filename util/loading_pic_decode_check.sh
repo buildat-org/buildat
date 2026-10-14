@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~1 min (2026-10-12)
 # covers: builtin/luanti/client_lua/client.lua apps/vanilla/main/client_lua/init.lua src/lua_bindings/misc_urho3d.cpp client/extensions/urho3d/init.lua
 # [LOADING_PIC_DECODE]: vanilla's loading picture is decoded once into a

@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: network
 # cost: ~4 min (2026-10-11)
 # covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua builtin/luanti/lua/modloader.lua
 # [WORLD_MODS]: mods from ContentDB, chosen per world. Needs the network

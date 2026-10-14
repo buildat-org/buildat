@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [HOTBAR_LAYERS]: the hotbar drawn the same way after ten pause-menu opens
 # and two fullscreen toggles. camera.lua's stage with items in some slots
 # and not others; the hotbar strip of each shot is compared with the first

@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: broken
+# needs: pixels
 # broken: back to full; the pictures and the objects; the same on dev
 #   (local/runs/dev_baseline)
 # cost: ~6 min (2026-10-12)

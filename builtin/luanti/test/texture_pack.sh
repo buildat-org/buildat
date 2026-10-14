@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [VOXEL_MATERIALS] layer 2's upgrade path: a texture pack under
 # user/shared/vanilla/texture_packs, chosen in the world's world.mt
 # ([WORLD_TXP]), wins over what the game ships. The runner writes

@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: broken
+# needs: pixels
 # broken: back to full; a different picture than the stored reference set;
 #   the same on dev (local/runs/dev_baseline)
 # cost: 120s (this desk, 2026-09-28)

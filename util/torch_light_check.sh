@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: ~2 min (2026-10-11)
 # covers: src/impl/mesh.cpp extensions/luanti_client/res/PBRVoxel.glsl
 # [TORCH_LIGHT]: a torch lights the dark around it on the pbr path. Vanilla

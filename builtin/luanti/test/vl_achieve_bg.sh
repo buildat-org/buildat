@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: broken
+# needs: pixels
 # broken: back to quick; no shot shows the form with the bar; the same on
 #   dev (local/runs/dev_baseline)
 # [VL_ACHIEVE_BG]: VoxeLibre's achievements form keeps its backdrop on

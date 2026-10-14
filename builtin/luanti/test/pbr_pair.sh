@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
+# needs: pixels
 # [LC_PBR_PARITY]: the same scene in both clients' pbr -- a platform high
 # in the air at noon, at dusk looking at the sun, at night, and a closed
 # stone room lit by a torch, and [CAVE_EXPOSURE_FLOOR]'s two probes: a

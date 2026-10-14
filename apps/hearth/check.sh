@@ -1,5 +1,6 @@
 #!/bin/bash
 # tier: full
+# needs: pixels
 # cost: 1 min (a first run compiles the app, 2026-10-04)
 # covers: apps/hearth/** src/interface/web_brand.h builtin/network/** 3rdparty/sqlite/CMakeLists.txt
 # [HEARTH_MVP] step 1, **the groundwork**:
