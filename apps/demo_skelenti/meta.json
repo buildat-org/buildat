@@ -1,0 +1,9 @@
+{
+	"author": "buildat",
+	"name": "demo_skelenti",
+	"version": "0.1.0",
+	"engine_api": 2,
+	"license_code": "Apache-2.0",
+	"license_media": "CC-BY-SA-4.0",
+	"description": "A small alpha-era Luanti game inside a Buildat app: dig, craft up to diamond, mind the skeletons."
+}

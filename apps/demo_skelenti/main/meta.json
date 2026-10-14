@@ -1,0 +1,15 @@
+{
+	"engine_api": 2,
+	"kind": "world",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "main_context"},
+		{"module": "storage"},
+		{"module": "replicate"},
+		{"module": "voxelworld"},
+		{"module": "voxel_shading"},
+		{"module": "luanti"}
+	]
+}
