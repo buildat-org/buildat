@@ -98,8 +98,10 @@ els = scan("a")
 if not els: fail("no menu scan")
 b = find(els, "Luanti settings")
 if not b: fail("no settings button; saw " + ", ".join(e[5] for e in els)[:300])
-# The game's server starts behind the row; its screen says when it is up
-click(b, "menu: the settings shown", 60)
+# The game's server starts behind the row; its screen says when it is up.
+# 180 s: it compiles its modules first, and a cold compile on GitHub's 4
+# vCPUs went past 60 ([CI_TIER], 2026-10-14)
+click(b, "menu: the settings shown", 180)
 # A dropdown since [UI_DROPDOWN]
 els = scan("b")
 row = els and find(els, "Distant terrain detail")
