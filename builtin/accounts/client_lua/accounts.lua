@@ -39,11 +39,12 @@ local M = {
 
 local TEXT = {"object", {"text", "string"}}
 -- [ACCOUNT_CREATE]: a leading version byte, then "create" at the end; add
--- version-gated fields rather than breaking the format again
+-- version-gated fields rather than breaking the format again. Version 2:
+-- "carry" ([FLEET_SUB_CARRY])
 local LOGIN = {"object", {"version", "byte"}, {"name", "string"},
 		{"password", "string"}, {"code", "string"}, {"token", "string"},
 		{"keep", "byte"}, {"totp", "string"}, {"starport", "string"},
-		{"create", "byte"}}
+		{"create", "byte"}, {"carry", "byte"}}
 local TOTP_REQ = {"object", {"cmd", "string"}, {"code", "string"}}
 local TOTP_RESULT = {"object", {"error", "string"}, {"secret", "string"},
 		{"uri", "string"}, {"on", "byte"}}
@@ -186,13 +187,15 @@ local function forget_id_here()
 	end
 end
 
+-- `carry`: the answer to the server's move question, 1 yes, 2 no
 local function send_login(name, password, code, token, keep, totp, starport,
-		create)
+		create, carry)
 	last_login = {name, password, code, token, keep, starport, create}
 	buildat.send_packet("accounts:login", cereal.binary_output(
-			{version = 1, name = name, password = password, code = code or "",
+			{version = 2, name = name, password = password, code = code or "",
 			token = token or "", keep = keep and 1 or 0, totp = totp or "",
-			starport = starport or "", create = create and 1 or 0}, LOGIN))
+			starport = starport or "", create = create and 1 or 0,
+			carry = carry or 0}, LOGIN))
 end
 M.send_login = send_login
 
@@ -288,6 +291,37 @@ end
 
 local show_create -- [ACCOUNT_CREATE]: defined after show_login
 local show_login
+
+-- **The server moved** ([FLEET_SUB_CARRY]): it changed fleets on the
+-- Starport, and the ID had an account here by its identity of before;
+-- asked once, and the login sent again with the answer
+local function show_moved(from, to, name)
+	M.close()
+	local w = page_window(380)
+	window = w
+	page_text(w, "This server moved from " .. from .. " to " .. to ..
+			". Keep your account " .. name .. " there?")
+	local l = last_login
+	local r = w:CreateChild("UIElement")
+	r:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+	for i, t in ipairs({"Keep it", "New account"}) do
+		local b = r:CreateChild("Button")
+		if i == 1 then
+			b:SetStyle("PrimaryButton")
+		else
+			b:SetStyleAuto()
+		end
+		b.minHeight = 30
+		b:SetFocusMode(magic.FM_FOCUSABLE)
+		local bt = b:CreateChild("Text")
+		bt:SetStyleAuto()
+		bt:SetText(t)
+		bt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(b, "Released", function()
+			send_login(l[1], l[2], l[3], l[4], l[5], "", l[6], l[7], i)
+		end)
+	end
+end
 
 -- **"That's my account"** ([ID_CLAIM_ACCOUNT]): a Starport ID whose name
 -- here is an account of this server's links to it by one login with the
@@ -700,6 +734,18 @@ buildat.sub_packet("accounts:login_result", function(data)
 			buildat.storage_write("name", M.name or "")
 		elseif err:sub(1, 5) ~= "TOTP:" then
 			buildat.storage_write("totp_wait", "")
+		end
+		if err:sub(1, 6) == "MOVED:" and last_login then
+			local from, to, name = err:sub(7):match("^(.*)\t(.*)\t(.*)$")
+			-- A scripted join's answer (<env>_CARRY: 1 keep, 2 new)
+			local carry = tonumber(buildat.get_env((opts.env or
+					"BUILDAT_JOIN") .. "_CARRY") or "")
+			if carry then
+				local l = last_login
+				return send_login(l[1], l[2], l[3], l[4], l[5], "", l[6], l[7],
+						carry)
+			end
+			return show_moved(from or "", to or "", name or "")
 		end
 		if err:sub(1, 5) == "TOTP:" and (last_login or totp_wait() ~= "") then
 			show_totp(err == "TOTP: enter the code from your authenticator "..

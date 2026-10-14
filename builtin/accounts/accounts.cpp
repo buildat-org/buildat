@@ -446,13 +446,18 @@ struct LoginRequest
 	// [ACCOUNT_CREATE]: this login is allowed to make the account if the name
 	// does not exist; a plain login (0) refuses an unknown name instead
 	uint8_t create = 0;
+	// [FLEET_SUB_CARRY] (version 2): the player's answer to "keep your
+	// account from before the server's move?": 0 not asked, 1 yes, 2 no
+	uint8_t carry = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
 		// A leading version byte: add version-gated fields below it rather
 		// than breaking the wire format again (voxel_cereal.h pattern)
-		uint8_t version = 1;
+		uint8_t version = 2;
 		archive(version);
 		archive(name, password, code, token, keep, totp, starport, create);
+		if(version >= 2)
+			archive(carry);
 	}
 };
 
@@ -1775,8 +1780,30 @@ struct Module: public interface::Module, public Interface
 			// 10g: an ID linked to an account logs in as that account,
 			// whatever name it picked for the community
 			ss_ linked;
-			const bool has = m_store->get("starport/"+id.starport+"/"+id.sub,
+			bool has = m_store->get("starport/"+id.starport+"/"+id.sub,
 					linked);
+			// [FLEET_SUB_CARRY] The server moved fleets on the Starport, and
+			// the ID had an account by its identity of before: the player
+			// is asked once whether to keep it; yes links the ID to it
+			ss_ prev;
+			if(!has && cred.name.empty() && !id.prev_sub.empty() &&
+					m_store->get("starport/"+id.starport+"/"+id.prev_sub,
+					prev)){
+				if(cred.carry == 0)
+					return reply("MOVED:"+id.moved_from+"\t"+id.moved_to+
+							"\t"+prev);
+				if(cred.carry == 1){
+					link_id(prev, id);
+					log_i(MODULE, "%s kept the account across its server's "
+							"move", cs(prev));
+					has = true;
+					linked = prev;
+				} else if(id.name == prev){
+					return reply("The name "+prev+" is your account from "
+							"before the move: pick another name for this "
+							"community on the Starport");
+				}
+			}
 			if(!cred.name.empty()){
 				if(has && linked != cred.name)
 					return reply("That Starport ID is another account's here");

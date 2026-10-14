@@ -919,7 +919,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(pool.size() > 32)
 			pool = pool.substr(0, 32);
 		if(fid.empty()){
-			l.set("fleet", "");
+			set_fleet(l, "");
 			l.set("pool", "");
 			return;
 		}
@@ -933,7 +933,7 @@ struct Module: public interface::Module, public moderation::Host
 				event({jstr(f, "owner")}, "", jstr(l, "name")+" joined your "
 						"fleet "+jstr(f, "name"));
 			}
-			l.set("fleet", fid);
+			set_fleet(l, fid);
 			l.set("pool", pool);
 			l.set("owner", jstr(f, "owner"));
 			if(l.get("claimed").is_undefined())
@@ -953,8 +953,74 @@ struct Module: public interface::Module, public moderation::Host
 				open_group(gid, jstr(l, "id"), "impersonation",
 						"Starport: announced with a wrong code for fleet "+fid);
 		}
-		l.set("fleet", "");
+		set_fleet(l, "");
 		l.set("pool", "");
+	}
+
+	// [FLEET_SUB_CARRY] A listing into fleet `fid` ("" for none), its
+	// players' identity scope (id_scope_of) moved with it:
+	// - a scope stays with its owner: an empty fleet takes the scope of
+	//   the first listing to join it, and the last listing to leave takes
+	//   the fleet's away with it (the fleet's is then fresh, taken by the
+	//   next to join);
+	// - any other move (into a fleet that has listings, out of one that
+	//   keeps some: back to the listing's own, or a fresh one if the
+	//   fleet keeps that) is to another scope, with the one before kept as
+	//   `scope_prev` for the token's `prev_sub` -- 2 a listing in 30 days,
+	//   past that nothing is carried.
+	// Fleets from before this have "fleet:<id>" (no "scope" field) and
+	// keep it. simplified: there is no fleet merge to carry across
+	void set_fleet(json::Value &l, const ss_ &fid)
+	{
+		const ss_ was = jstr(l, "fleet");
+		if(was == fid)
+			return;
+		const ss_ old_scope = id_scope_of(l);
+		const ss_ old_where = where_of(l);
+		if(!was.empty()){
+			json::Value f = load("fleets", was);
+			if(fleet_members(was, jstr(l, "id")) == 0 && f.is_object()){
+				l.set("scope", old_scope);
+				f.set("scope", "");
+				put("fleets", was, f);
+			} else if(own_scope_of(l) == id_scope_of(l)){
+				// The fleet has the scope this listing founded it with
+				l.set("scope", "scope:"+random_hex(12));
+			}
+		}
+		l.set("fleet", fid);
+		if(!fid.empty()){
+			json::Value f = load("fleets", fid);
+			if(f.is_object() && f.get("scope").is_string() &&
+					jstr(f, "scope").empty() &&
+					fleet_members(fid, jstr(l, "id")) == 0){
+				f.set("scope", own_scope_of(l));
+				put("fleets", fid, f);
+			}
+		}
+		const ss_ new_scope = id_scope_of(l);
+		if(new_scope == old_scope)
+			return;
+		json::Value moves = json::array();
+		const json::Value &m = l.get("scope_moves");
+		for(unsigned i = 0; m.is_array() && i < m.size(); i++)
+			if(now_s() - m.at(i).as_integer() < 30 * 86400)
+				moves.append(m.at(i));
+		const bool carry = moves.size() < 2;
+		moves.append(json::Value(now_s()));
+		l.set("scope_moves", moves);
+		l.set("scope_prev", carry ? old_scope : ss_());
+		l.set("scope_prev_where", carry ? old_where : ss_());
+		record("", jstr(l, "id"), "fleet", "identity scope moved"+
+				ss_(carry ? "" : " (over 2 in 30 days: not carried)"), true);
+	}
+	// The listings in fleet `fid` other than `but`
+	int fleet_members(const ss_ &fid, const ss_ &but)
+	{
+		int n = 0;
+		for(const ss_ &id : listing_ids())
+			n += id != but && jstr(load("listings", id), "fleet") == fid;
+		return n;
 	}
 
 	// A pool's servers are one entry, so they have to be the same thing:
@@ -2190,12 +2256,36 @@ struct Module: public interface::Module, public moderation::Host
 		return false;
 	}
 
-	// A per-fleet identity (10c): the same in a fleet, different in any
-	// other; a listing in no fleet is its own scope
+	// A listing's community: "fleet:<id>" or "listing:<id>", what
+	// blocklists name as their publishers and subscribers
 	ss_ scope_of(const json::Value &l)
 	{
 		return jstr(l, "fleet").empty() ? "listing:"+jstr(l, "id") :
 				"fleet:"+jstr(l, "fleet");
+	}
+	// A per-fleet identity (10c): the same in a fleet, different in any
+	// other; a listing in no fleet is its own scope. [FLEET_SUB_CARRY]:
+	// stored, so it stays with its owner across fleet moves (set_fleet)
+	ss_ own_scope_of(const json::Value &l)
+	{
+		return l.get("scope").is_string() && !jstr(l, "scope").empty() ?
+				jstr(l, "scope") : "listing:"+jstr(l, "id");
+	}
+	ss_ id_scope_of(const json::Value &l)
+	{
+		const ss_ fid = jstr(l, "fleet");
+		if(fid.empty())
+			return own_scope_of(l);
+		const json::Value f = load("fleets", fid);
+		return f.get("scope").is_string() && !jstr(f, "scope").empty() ?
+				jstr(f, "scope") : "fleet:"+fid;
+	}
+	// For the player's question: where a listing's identity scope is
+	ss_ where_of(const json::Value &l)
+	{
+		const ss_ fid = jstr(l, "fleet");
+		return fid.empty() ? jstr(l, "name") :
+				"the fleet "+jstr(load("fleets", fid), "name");
 	}
 	ss_ sub_of(const ss_ &name, const ss_ &scope)
 	{
@@ -2539,7 +2629,7 @@ struct Module: public interface::Module, public moderation::Host
 		if((aud == "adult" && age < 18) || (aud == "teen" && age < 13))
 			throw Exception("this server's audience is "+aud+": not for "
 					"this ID's age");
-		const ss_ scope = site ? "site:"+jstr(l, "id") : scope_of(l);
+		const ss_ scope = site ? "site:"+jstr(l, "id") : id_scope_of(l);
 		json::Value scopes = id.get("scopes").is_object() ?
 				id.get("scopes").deepcopy() : json::object();
 		ss_ shown = jstr(scopes.get(scope), "name");
@@ -2588,6 +2678,14 @@ struct Module: public interface::Module, public moderation::Host
 		p.set("exp", now_s() + 30 * 86400);
 		if(aud == "adult")
 			p.set("adult", true);
+		// [FLEET_SUB_CARRY] One move back, for this listing only: the
+		// server asks the player whether to keep the account it knew
+		const ss_ prev = site ? ss_() : jstr(l, "scope_prev");
+		if(!prev.empty() && prev != scope){
+			p.set("prev_sub", sub_of(name, prev));
+			p.set("moved_from", jstr(l, "scope_prev_where"));
+			p.set("moved_to", where_of(l));
+		}
 		const ss_ payload = base64url(p.stringify());
 		json::Value out = json::object();
 		out.set("token", payload+"."+hex(interface::sha256::hmac(
@@ -3174,7 +3272,7 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		if(!bans.is_array())
 			return;
-		const ss_ scope = scope_of(l);
+		const ss_ scope = id_scope_of(l);
 		const json::Value old = load("listing_bans", jstr(l, "id"));
 		std::set<ss_> was;
 		for(unsigned j = 0; old.is_array() && j < old.size(); j++)
@@ -3267,7 +3365,7 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		json::Value out = json::array();
 		for(const ss_ &n : names)
-			out.append(sub_of(n, scope));
+			out.append(sub_of(n, id_scope_of(l)));
 		return out;
 	}
 
@@ -3444,6 +3542,7 @@ struct Module: public interface::Module, public moderation::Host
 			f.set("id", random_hex(6));
 			f.set("owner", name);
 			f.set("code", random_hex(8));
+			f.set("scope", ""); // [FLEET_SUB_CARRY]: the first listing's
 		} else {
 			f = load("fleets", jstr(q, "fleet"));
 			if(!f.is_object() || jstr(f, "owner") != name)
@@ -3537,7 +3636,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(!l.is_object() || jstr(f, "owner") != name)
 			throw Exception("no such server in a fleet of yours");
 		l.set("fleet_removed", jstr(l, "fleet"));
-		l.set("fleet", "");
+		set_fleet(l, "");
 		l.set("pool", "");
 		put("listings", jstr(l, "id"), l);
 		return listing_summary(l);

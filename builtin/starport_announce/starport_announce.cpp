@@ -1114,6 +1114,13 @@ struct Module: public interface::Module, public Interface
 		out->name = p.get("name").as_string();
 		out->starport = host;
 		out->adult = p.get("adult").is_true();
+		if(p.get("prev_sub").is_string()){
+			out->prev_sub = p.get("prev_sub").as_string();
+			out->moved_from = p.get("moved_from").is_string() ?
+					p.get("moved_from").as_string() : "";
+			out->moved_to = p.get("moved_to").is_string() ?
+					p.get("moved_to").as_string() : "";
+		}
 		return "";
 	}
 

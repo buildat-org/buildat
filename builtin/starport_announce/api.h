@@ -16,6 +16,11 @@ namespace starport_announce
 		ss_ name;     // the name the player picked for the fleet
 		ss_ starport; // the Starport's host
 		bool adult = false; // "18 or over", told only to an adult listing
+		// [FLEET_SUB_CARRY]: the server moved fleets; the ID's identity
+		// in the scope before, and where it was and is now, for the player
+		ss_ prev_sub;
+		ss_ moved_from;
+		ss_ moved_to;
 	};
 
 	struct Interface

@@ -51,9 +51,15 @@ run their own. The official one is https://starport.buildat.org.
   fleet; the name is one the visitor picks for the site. A new secret
   makes the old tokens fail. A server's token is the same with typ
   "server" and listing in place of site, and a server takes no other
-  typ. A sub is per listing or fleet: a server that joins or leaves a
-  fleet sees its players under new subs, and their accounts there under
-  the old ones are left behind.
+  typ. A sub is per listing or fleet, and the scope stays with its
+  owner: a fleet founded by a listing has that listing's subs, and the
+  last listing to leave a fleet takes them away with it. A server that
+  moves otherwise (into a fleet that has servers, out of one that keeps
+  some) sees its players under new subs; its tokens then carry
+  `prev_sub`, the player's sub one move back, with `moved_from` and
+  `moved_to` (where it was and is, for the player), and the server asks
+  the player once whether to keep the account it knew by `prev_sub`. Only
+  that server gets the pair, and only for 2 moves in 30 days.
 - A Starport ID holds a name, a password hash and, if given, a recovery
   e-mail. It is deleted from its own settings. Mail goes through the
   server's SMTP server, set on the Server window's Health page; the old
