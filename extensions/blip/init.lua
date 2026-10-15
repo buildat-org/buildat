@@ -259,9 +259,11 @@ local function open_designer()
 	-- simplified: decided as the designer opens; a window turned or
 	-- resized while it is open keeps the layout it opened with
 	local ui_w, ui_h = magic.ui.root.width, magic.ui.root.height
-	local col = win
+	local col, code_col = win, nil
 	if ui_w >= 820 and ui_w > ui_h then
 		win:SetLayout(LM_HORIZONTAL, 12, magic.IntRect(10, 10, 10, 10))
+		-- On the left, the layout's order; filled below
+		code_col = win:CreateChild("UIElement")
 		col = win:CreateChild("UIElement")
 		col:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 	end
@@ -504,16 +506,17 @@ local function open_designer()
 
 	status = text(col, "")
 	status:SetFixedWidth(360)
-	if col ~= win then
+	if code_col then
 		-- As tall as the controls beside it: a horizontal layout gives a
-		-- child with no fixed height the window's
-		local right = win:CreateChild("UIElement")
-		right:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
-		text(right, "Code for the sound, as Copy makes it")
-		local code_view = right:CreateChild("ScrollView")
+		-- child with no fixed height the window's. As wide as the room
+		-- beside them allows, 360 to 720 (the controls' 360, the window's
+		-- borders and spacing, and a margin take 460)
+		code_col:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+		text(code_col, "Code for the sound, as Copy makes it")
+		local code_view = code_col:CreateChild("ScrollView")
 		code_view:SetStyleAuto()
 		code_view.scrollBarsAutoVisible = true
-		code_view:SetFixedWidth(360)
+		code_view:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
 		code = code_view:CreateChild("Text")
 		code:SetStyleAuto()
 		code_view.contentElement = code
