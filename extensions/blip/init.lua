@@ -86,9 +86,12 @@ end
 -- Every parameter at full precision: two tables that differ below the
 -- compact form's steps are two sounds
 local function key_of(p)
-	local out = {p.wave, p.seed}
+	local out = {p.wave, p.seed, string.format("%.17g", p.at or 0)}
 	for _, d in ipairs(gen.PARAMS) do
 		out[#out + 1] = string.format("%.17g", p[d[1]])
+	end
+	for _, l in ipairs(p.layers or {}) do
+		out[#out + 1] = "| " .. key_of(l)
 	end
 	return table.concat(out, " ")
 end
@@ -223,12 +226,31 @@ local function lua_value(v, indent)
 end
 
 -- **The raw engine calls**: the sound built with buildat.synth and played
--- with magic's classes, no blip; magic and node are the app's own
+-- with magic's classes, no blip; magic and node are the app's own. A
+-- sound of layers makes each in a buffer of its own and mixes it in.
 local function raw_calls(p)
-	local n, calls = gen.chain(p, RATE)
-	local out = {"local buf = buildat.synth.buffer(" .. n .. ")"}
-	for _, c in ipairs(calls) do
-		out[#out + 1] = "buf:" .. c[1] .. "(" .. lua_value(c[2], "") .. ")"
+	local total, parts = gen.build(p, RATE)
+	local function calls(out, name, part, indent)
+		for _, c in ipairs(part.calls) do
+			out[#out + 1] = indent .. name .. ":" .. c[1] .. "(" ..
+					lua_value(c[2], indent) .. ")"
+		end
+	end
+	if #parts == 1 then
+		local out = {"local buf = buildat.synth.buffer(" .. total .. ")"}
+		calls(out, "buf", parts[1], "")
+		return out
+	end
+	local out = {"local buf = buildat.synth.buffer(" .. total .. ")"}
+	for i, part in ipairs(parts) do
+		if part.n > 0 then
+			out[#out + 1] = "do -- layer " .. i .. ", from sample " .. part.at
+			out[#out + 1] = "\tlocal b = buildat.synth.buffer(" .. part.n .. ")"
+			calls(out, "b", part, "\t")
+			out[#out + 1] = "\tbuf:mix(b, 0, " .. part.at .. ", " .. part.n ..
+					", 1)"
+			out[#out + 1] = "end"
+		end
 	end
 	return out
 end
@@ -323,8 +345,12 @@ local function open_designer()
 	local uistack = require("buildat/core/uistack")
 	local ui_utils = require("buildat/extension/ui_utils")
 	local import = api.run_extension_file("import.lua")(gen)
+	-- d.p is the sound, its first layer; d.layer the one being edited
 	local d = {p = gen.preset("pickup", 1), seed = 1, format = "compact",
-		use = "play"}
+		use = "play", layer = 1}
+	local function cur()
+		return d.layer == 1 and d.p or d.p.layers[d.layer - 1]
+	end
 	designer = d
 	local root = uistack.main:push({desc = "blip"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
@@ -435,7 +461,7 @@ local function open_designer()
 		show_code()
 		dirty = false
 		last = api.get_time_us()
-		wait_us = math.max(150000, gen.chain(d.p, RATE) / RATE * 500000)
+		wait_us = math.max(150000, gen.build(d.p, RATE) / RATE * 500000)
 		M.safe.play(d.p)
 	end
 	local function changed()
@@ -450,39 +476,133 @@ local function open_designer()
 
 	-- The sliders, in a view of its own
 	local updating = false
+	local layer_text = nil
 	local function show_values()
 		updating = true
+		local p = cur()
 		for _, sl in ipairs(sliders) do
 			local dd = sl.def
-			sl.slider.value = (d.p[dd[1]] - dd[2]) / (dd[3] - dd[2])
-			sl.value.text = string.format("%.3f", d.p[dd[1]])
+			local v = p[dd[1]] or 0
+			sl.slider.value = (v - dd[2]) / (dd[3] - dd[2])
+			sl.value.text = string.format("%.3f", v)
 		end
-		d.wave_dropdown_set(d.p.wave)
+		d.wave_dropdown_set(p.wave)
+		layer_text.text = "Layer " .. d.layer .. " of " ..
+				(1 + #(d.p.layers or {}))
 		updating = false
 	end
 	local function set_sound(p, what)
-		d.p = p
+		d.p, d.layer = p, 1
 		show_values()
 		play_now()
 		say(what .. ": " .. gen.pack(p))
 	end
+	-- **A generator's sound in the layer being edited**: in the first,
+	-- the whole sound starts over; in another, that layer is replaced
+	-- at its offset. A sound of layers (rattle, chime) is always whole.
+	local function set_layer(p, what)
+		if d.layer == 1 or p.layers then
+			if not p.layers and what == "mutated" then
+				p.layers = d.p.layers
+				d.p = p
+				show_values()
+				play_now()
+				say(what .. ": " .. gen.pack(d.p))
+				return
+			end
+			set_sound(p, what)
+			return
+		end
+		p.at = cur().at
+		d.p.layers[d.layer - 1] = p
+		show_values()
+		play_now()
+		say(what .. " in layer " .. d.layer .. ": " .. gen.pack(d.p))
+	end
 
-	-- The generators, sfxr's seven, then mutate and random
-	local gens = row()
-	local gens2 = row()
+	-- The generators, sfxr's seven and blip's own, then mutate and
+	-- random; five a row
+	local rows = {}
+	local function gen_row(i)
+		local k = math.floor((i - 1) / 5) + 1
+		rows[k] = rows[k] or row()
+		return rows[k]
+	end
 	for i, name in ipairs(gen.PRESETS) do
-		button(i <= 4 and gens or gens2, name, function()
+		button(gen_row(i), name, function()
 			d.seed = d.seed + 1
-			set_sound(gen.preset(name, d.seed), name)
+			set_layer(gen.preset(name, d.seed), name)
 		end)
 	end
-	button(gens2, "mutate", function()
+	button(gen_row(#gen.PRESETS + 1), "mutate", function()
 		d.seed = d.seed + 1
-		set_sound(gen.mutate(d.p, d.seed), "mutated")
+		local q = gen.mutate(cur(), d.seed)
+		q.layers = nil
+		set_layer(q, "mutated")
 	end)
-	button(gens2, "random", function()
+	button(gen_row(#gen.PRESETS + 2), "random", function()
 		d.seed = d.seed + 1
-		set_sound(gen.random(d.p.wave, d.seed), "random")
+		set_layer(gen.random(cur().wave, d.seed), "random")
+	end)
+
+	-- **The layers**: the one being edited, one added (a copy of it 0.1 s
+	-- later) or the one being edited removed
+	local layer_row = row()
+	layer_text = text(layer_row, "", 110)
+	local function layers()
+		d.p.layers = d.p.layers or {}
+		return d.p.layers
+	end
+	button(layer_row, "<", function()
+		d.layer = math.max(1, d.layer - 1)
+		show_values()
+	end)
+	button(layer_row, ">", function()
+		d.layer = math.min(1 + #layers(), d.layer + 1)
+		show_values()
+	end)
+	button(layer_row, "Add layer", function()
+		if 1 + #layers() >= gen.MAX_LAYERS then
+			say("at most " .. gen.MAX_LAYERS .. " layers")
+			return
+		end
+		local q = {}
+		for k, v in pairs(cur()) do
+			q[k] = v
+		end
+		q.layers = nil
+		q.at = math.min(gen.MAX_AT, (cur().at or 0) + 0.1)
+		table.insert(layers(), d.layer, q)
+		d.layer = d.layer + 1
+		show_values()
+		play_now()
+		say("layer " .. d.layer .. " added: " .. gen.pack(d.p))
+	end)
+	button(layer_row, "Remove", function()
+		local ls = layers()
+		if #ls == 0 then
+			say("the only layer is not removed")
+			return
+		end
+		if d.layer == 1 then
+			-- The second becomes the first, the others after it as they
+			-- were
+			local first = table.remove(ls, 1)
+			for _, l in ipairs(ls) do
+				l.at = math.max(0, l.at - first.at)
+			end
+			first.at, first.layers = nil, ls
+			d.p = first
+		else
+			table.remove(ls, d.layer - 1)
+			d.layer = d.layer - 1
+		end
+		if #ls == 0 then
+			d.p.layers = nil
+		end
+		show_values()
+		play_now()
+		say("layer removed: " .. gen.pack(d.p))
 	end)
 	local wave_row = row()
 	local waves = {}
@@ -493,7 +613,7 @@ local function open_designer()
 		if updating then
 			return
 		end
-		d.p.wave = w
+		cur().wave = w
 		changed()
 	end, {label = "Wave"})))
 	function d.wave_dropdown_set(w)
@@ -514,8 +634,14 @@ local function open_designer()
 	-- As wide as the column (its layout stretches it); the rows are
 	-- made as wide below, once the column has its width
 	view:SetFixedHeight(math.min(260,
-			math.max(120, magic.ui.root.height - 330)))
+			math.max(120, magic.ui.root.height - 430)))
+	-- The layer's offset first, in seconds: up to 1 here, up to
+	-- gen.MAX_AT in the formats; the first layer's is 0
+	local defs = {{"at", 0, 1, 0}}
 	for _, def in ipairs(gen.PARAMS) do
+		defs[#defs + 1] = def
+	end
+	for _, def in ipairs(defs) do
 		local r = row(page)
 		r:SetFixedHeight(20)
 		-- Each text in a holder of the row's height, placed in it by
@@ -547,8 +673,13 @@ local function open_designer()
 			if updating then
 				return
 			end
-			d.p[def[1]] = def[2] + data:GetFloat("Value") * (def[3] - def[2])
-			value.text = string.format("%.3f", d.p[def[1]])
+			if def[1] == "at" and d.layer == 1 then
+				show_values()
+				return
+			end
+			local p = cur()
+			p[def[1]] = def[2] + data:GetFloat("Value") * (def[3] - def[2])
+			value.text = string.format("%.3f", p[def[1]])
 			changed()
 		end)
 	end

@@ -112,10 +112,28 @@ for i, name in ipairs(G.PRESETS) do
 end
 assert(G.pack(G.defaults()):sub(1, 6) == "blip1:")
 
+-- The layers and the parameters beyond sfxr's: the table form reads back
+-- as the same sound, and a sound with neither packs as blip1 did
+for _, name in ipairs({"crunch", "snort", "pluck", "rattle", "chime"}) do
+	local q = G.preset(name, 3)
+	local t = assert(loadstring("return " .. G.table_source(G.to_table(q))))()
+	assert(G.pack(G.params(t)) == G.pack(q), name .. "'s table form")
+end
+local old = WANT.sfxr_v102
+assert(#old == 57 and G.pack(G.params(old)) == old, "a blip1 string of 57")
+local two = old .. "+Ay" .. old:sub(7)
+local q = G.params(two)
+assert(#q.layers == 1 and q.layers[1].at == 0.05 and G.pack(q) == two,
+		"two layers")
+q = G.params({old, pluck = 0.5})
+assert(#G.pack(q) == 57 + 8 and G.params(G.pack(q)).pluck > 0.49, "pluck")
+assert(not pcall(G.params, old .. "+A"), "a layer cut short")
+assert(not pcall(G.params, {layers = {two}}), "a layer with layers")
+
 if bad > 0 then
 	print("FAIL: " .. bad .. " mapped to another blip1")
 	os.exit(1)
 end
 print("PASS: sfxr 100-102 and jsfxr's link and JSON decode and map; " ..
-		"the forms round-trip")
+		"the forms round-trip, layers and all")
 -- vim: set noet ts=4 sw=4:

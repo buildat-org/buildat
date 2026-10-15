@@ -180,7 +180,7 @@ end
 -- (blip1's own order, which is jsfxr's)
 local function from_b58(s)
 	local bytes = b58decode(s)
-	local n = #G.PARAMS - 1 -- all but the volume
+	local n = G.SFXR_PARAMS - 1 -- sfxr's, all but the volume
 	if not bytes or #bytes ~= 1 + 4 * n then
 		return nil, "not a jsfxr link string"
 	end

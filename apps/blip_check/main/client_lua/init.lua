@@ -29,6 +29,10 @@ for _, s in ipairs({compact, tbl, both}) do
 	blip.play_cached(s)
 	blip.play_cached(s)
 end
+-- Layers and the parameters beyond sfxr's, in the compact form
+for _, name in ipairs({"rattle", "pluck", "snort", "crunch"}) do
+	blip.play(gen.pack(gen.preset(name, 2)), {gain = 0.5})
+end
 local stream = blip.stream()
 stream:add(compact)
 stream:add(tbl, 0.05, 0.5)
@@ -60,13 +64,15 @@ local lua_us, cpp_us = 0, 0
 for _, name in ipairs(gen.PRESETS) do
 	local p = gen.preset(name, 1)
 	local t0 = now()
-	local n, calls
+	local n, parts
 	for _ = 1, 100 do
-		n, calls = gen.chain(p, 44100)
+		n, parts = gen.build(p, 44100)
 	end
 	local t1 = now()
 	for _ = 1, 100 do
-		gen.run(n, calls, buildat.synth)
+		for _, part in ipairs(parts) do
+			gen.run(part.n, part.calls, buildat.synth)
+		end
 	end
 	local t2 = now()
 	lua_us, cpp_us = lua_us + (t1 - t0), cpp_us + (t2 - t1)

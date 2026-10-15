@@ -17,7 +17,9 @@
 -- blocks have them, by the names jsfxr gives them without its "p_", so
 -- sfxr's presets and sliders carry over: each is mapped onto a curve or
 -- a block below. The sound is close to sfxr's and not the same: the
--- filters and the phaser are the blocks', not sfxr's.
+-- filters and the phaser are the blocks', not sfxr's. Beyond sfxr's (user,
+-- 2026-10-15): a sound is up to 16 such voices at offsets (layers), and a
+-- voice has a tremolo, a crackle and a pluck, each off at 0.
 --
 -- **blip1 is frozen once released**: a blip1 sound sounds the same in
 -- every later blip, which the blocks' own promise holds up
@@ -56,7 +58,19 @@ G.PARAMS = {
 	{"hpf_freq", 0, 1, 0},
 	{"hpf_ramp", -1, 1, 0},
 	{"volume", 0, 1, 0.5},
+	-- **Beyond sfxr** (user, 2026-10-15, for skelenti's sounds): off at
+	-- 0, so a sound without them is made as before and packs as before
+	{"trem_depth", 0, 1, 0},
+	{"trem_speed", 0, 1, 0},
+	{"crackle", 0, 1, 0},
+	{"pluck", 0, 1, 0},
 }
+-- sfxr's own, the volume last: what sfxr's and jsfxr's files carry
+G.SFXR_PARAMS = 23
+-- A sound is up to this many layers, each a voice of the parameters
+-- above at an offset (at, in seconds, at most 4.095)
+G.MAX_LAYERS = 16
+G.MAX_AT = 4.095
 local SEED_MAX = 16777215 -- 24 bits, four characters of the compact form
 local BY_NAME = {}
 for _, d in ipairs(G.PARAMS) do
@@ -92,9 +106,12 @@ function G.defaults()
 	return p
 end
 
--- The compact form: "blip1:", the wave as one character, each parameter
--- as two (4096 steps; a signed one in 4095, so that 0 is exact), the
--- seed as four
+-- The compact form: "blip1:", then each layer: the wave as one
+-- character, sfxr's parameters as two each (4096 steps; a signed one in
+-- 4095, so that 0 is exact), the seed as four, and the parameters beyond
+-- sfxr's as two each only when one of them is on. A layer after the
+-- first is "+", its offset in milliseconds as two characters, then the
+-- same.
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 local B64_INDEX = {}
 for i = 1, 64 do
@@ -119,26 +136,48 @@ local function unquantise(d, q)
 	return q / 4095
 end
 
-function G.pack(p)
-	local out = {"blip1:"}
+local function extended(p)
+	for i = G.SFXR_PARAMS + 1, #G.PARAMS do
+		local d = G.PARAMS[i]
+		if quantise(d, p[d[1]]) ~= quantise(d, d[4]) then
+			return true
+		end
+	end
+	return false
+end
+local function pack_voice(out, p)
 	put(out, WAVE_INDEX[p.wave], 1)
-	for _, d in ipairs(G.PARAMS) do
+	for i = 1, G.SFXR_PARAMS do
+		local d = G.PARAMS[i]
 		put(out, quantise(d, p[d[1]]), 2)
 	end
 	put(out, p.seed, 4)
+	if extended(p) then
+		for i = G.SFXR_PARAMS + 1, #G.PARAMS do
+			local d = G.PARAMS[i]
+			put(out, quantise(d, p[d[1]]), 2)
+		end
+	end
+end
+function G.pack(p)
+	local out = {"blip1:"}
+	pack_voice(out, p)
+	for _, l in ipairs(p.layers or {}) do
+		out[#out + 1] = "+"
+		put(out, floor(l.at * 1000 + 0.5), 2)
+		pack_voice(out, l)
+	end
 	return table.concat(out)
 end
 
-local COMPACT_LEN = 6 + 1 + 2 * #G.PARAMS + 4
-function G.unpack(s)
-	if type(s) ~= "string" or s:sub(1, 6) ~= "blip1:" then
-		error("blip: not a blip1 sound: " .. tostring(s):sub(1, 40), 3)
+local VOICE_LEN = 1 + 2 * G.SFXR_PARAMS + 4
+local VOICE_LEN_EXT = VOICE_LEN + 2 * (#G.PARAMS - G.SFXR_PARAMS)
+local function unpack_voice(s)
+	if (#s ~= VOICE_LEN and #s ~= VOICE_LEN_EXT) or s:find("[^%w%-_]") then
+		error("blip: a blip1 layer is " .. VOICE_LEN .. " or " ..
+				VOICE_LEN_EXT .. " characters of A-Z a-z 0-9 - _", 4)
 	end
-	if #s ~= COMPACT_LEN or s:find("[^%w%-_]", 7) then
-		error("blip: a blip1 sound is " .. COMPACT_LEN ..
-				" characters of A-Z a-z 0-9 - _", 3)
-	end
-	local pos = 7
+	local pos = 1
 	local function get(chars)
 		local v = 0
 		for _ = 1, chars do
@@ -150,17 +189,47 @@ function G.unpack(s)
 	local p = {v = G.VERSION}
 	p.wave = G.WAVES[get(1) + 1]
 	if not p.wave then
-		error("blip: a blip1 sound's wave is not one of blip1's", 3)
+		error("blip: a blip1 sound's wave is not one of blip1's", 4)
 	end
-	for _, d in ipairs(G.PARAMS) do
+	for i = 1, G.SFXR_PARAMS do
+		local d = G.PARAMS[i]
 		p[d[1]] = unquantise(d, get(2))
 	end
 	p.seed = get(4)
+	for i = G.SFXR_PARAMS + 1, #G.PARAMS do
+		local d = G.PARAMS[i]
+		p[d[1]] = #s == VOICE_LEN_EXT and unquantise(d, get(2)) or d[4]
+	end
+	return p
+end
+function G.unpack(s)
+	if type(s) ~= "string" or s:sub(1, 6) ~= "blip1:" then
+		error("blip: not a blip1 sound: " .. tostring(s):sub(1, 40), 3)
+	end
+	local parts = {}
+	for part in (s:sub(7) .. "+"):gmatch("([^+]*)%+") do
+		parts[#parts + 1] = part
+	end
+	if #parts > G.MAX_LAYERS then
+		error("blip: more than " .. G.MAX_LAYERS .. " layers", 3)
+	end
+	local p = unpack_voice(parts[1])
+	if #parts > 1 then
+		p.layers = {}
+		for i = 2, #parts do
+			local l = unpack_voice(parts[i]:sub(3))
+			local a, b = B64_INDEX[parts[i]:sub(1, 1)],
+				B64_INDEX[parts[i]:sub(2, 2)]
+			l.at = math.min(G.MAX_AT, ((a or 0) * 64 + (b or 0)) / 1000)
+			p.layers[i - 1] = l
+		end
+	end
 	return p
 end
 
--- Fields of a table checked onto p: known names, numbers in range
-local function apply(p, t)
+-- Fields of a table checked onto p: known names, numbers in range; a
+-- layer's own offset (at), and the first layer's list of the others
+local function apply(p, t, layer)
 	for k, v in pairs(t) do
 		if k == "v" then
 			if v ~= G.VERSION then
@@ -179,6 +248,20 @@ local function apply(p, t)
 						SEED_MAX, 3)
 			end
 			p.seed = v
+		elseif k == "at" and layer then
+			if type(v) ~= "number" or v ~= v then
+				error("blip: a layer's at is not a number", 3)
+			end
+			p.at = clamp(v, 0, G.MAX_AT)
+		elseif k == "layers" and not layer then
+			if type(v) ~= "table" or #v + 1 > G.MAX_LAYERS then
+				error("blip: layers is a list of at most " ..
+						(G.MAX_LAYERS - 1) .. " sounds", 3)
+			end
+			p.layers = {}
+			for i, l in ipairs(v) do
+				p.layers[i] = G.layer(l)
+			end
 		elseif k ~= 1 then
 			local d = BY_NAME[k]
 			if not d then
@@ -193,10 +276,32 @@ local function apply(p, t)
 	return p
 end
 
+-- One layer of a sound's layers, in any of the forms below, at = 0 if not
+-- given; a layer has no layers of its own
+function G.layer(sound)
+	local p
+	if type(sound) == "string" then
+		p = G.unpack(sound)
+	elseif type(sound) == "table" then
+		p = sound[1] ~= nil and G.unpack(sound[1]) or G.defaults()
+		apply(p, sound, true)
+	else
+		error("blip: a layer is a blip1 string or a table, not a " ..
+				type(sound), 2)
+	end
+	if p.layers then
+		error("blip: a layer with layers of its own", 2)
+	end
+	p.at = p.at or 0
+	return p
+end
+
 -- A sound in any of blip1's forms, as a full table of its parameters:
 --   "blip1:..."                     the compact form
 --   {v = 1, wave = "square", ...}   the table, every field optional
 --   {"blip1:...", volume = 0.3}     both: the table's fields override
+-- Its first layer is the table itself and its others are in layers, each
+-- with at: {..., layers = {{wave = "sine", ..., at = 0.05}, "blip1:..."}}
 function G.params(sound)
 	if type(sound) == "string" then
 		return G.unpack(sound)
@@ -211,25 +316,44 @@ end
 
 -- The table form: every field by name, for editing outside blip
 function G.to_table(p)
-	local t = {v = G.VERSION, wave = p.wave, seed = p.seed}
+	local t = {v = G.VERSION, wave = p.wave, seed = p.seed, at = p.at}
 	for _, d in ipairs(G.PARAMS) do
 		t[d[1]] = p[d[1]]
+	end
+	if p.layers then
+		t.layers = {}
+		for i, l in ipairs(p.layers) do
+			t.layers[i] = G.to_table(l)
+		end
 	end
 	return t
 end
 
--- As Lua source, in G.PARAMS' order, a field a line
-function G.table_source(t, indent)
+-- As Lua source, in G.PARAMS' order, a field a line; the parameters
+-- beyond sfxr's only when on; a layer's table nested depth deep
+function G.table_source(t, indent, depth)
 	indent = indent or "\t"
-	local out = {"{", indent .. "v = " .. t.v .. ", wave = \"" .. t.wave ..
-			"\", seed = " .. t.seed .. ","}
-	for _, d in ipairs(G.PARAMS) do
-		if t[d[1]] ~= nil then
-			out[#out + 1] = indent .. d[1] .. " = " ..
-					string.format("%.6g", t[d[1]]) .. ","
+	depth = depth or 0
+	local inner = indent:rep(depth + 1)
+	local out = {"{", inner .. (t.at and "at = " ..
+			string.format("%.6g", t.at) .. ", " or "") .. "v = " .. t.v ..
+			", wave = \"" .. t.wave .. "\", seed = " .. t.seed .. ","}
+	for i, d in ipairs(G.PARAMS) do
+		local v = t[d[1]]
+		if v ~= nil and (i <= G.SFXR_PARAMS or v ~= d[4]) then
+			out[#out + 1] = inner .. d[1] .. " = " ..
+					string.format("%.6g", v) .. ","
 		end
 	end
-	out[#out + 1] = "}"
+	if t.layers then
+		out[#out + 1] = inner .. "layers = {"
+		for _, l in ipairs(t.layers) do
+			out[#out + 1] = indent:rep(depth + 2) ..
+					G.table_source(l, indent, depth + 2) .. ","
+		end
+		out[#out + 1] = inner .. "},"
+	end
+	out[#out + 1] = indent:rep(depth) .. "}"
 	return table.concat(out, "\n")
 end
 
@@ -272,6 +396,34 @@ local function limit_end(p, total, arp, rep)
 		k, k_rep, k_arp = k + 64, k_rep + 64, k_arp + 64
 	end
 	return total
+end
+
+-- Points {t, v} (seconds, ascending, from 0) as envelope calls over n
+-- samples: the block takes 256 points a call, so a long list is cut into
+-- spans, each starting at the last point of the one before
+local function envelopes(calls, pts, rate, n)
+	local i = 1
+	while true do
+		local j = math.min(#pts, i + 255)
+		local from = i == 1 and 0 or floor(pts[i][1] * rate)
+		if from >= n then
+			return
+		end
+		local to = j < #pts and math.min(n, floor(pts[j][1] * rate)) or n
+		if to > from then
+			local seg = {}
+			for k = i, j do
+				seg[#seg + 1] = {math.max(0, pts[k][1] - from / rate),
+					pts[k][2]}
+			end
+			calls[#calls + 1] = {"envelope", {points = seg, rate = rate,
+				from = from, n = to - from}}
+		end
+		if j == #pts then
+			return
+		end
+		i = j
+	end
 end
 
 -- **The chain**: p mapped onto the blocks, as data -- the number of
@@ -345,11 +497,25 @@ function G.chain(p, rate)
 	else
 		-- Duty: high for 0.5 - duty / 2 of the period, moving
 		-- -duty_ramp / 20000 a sample, within 0..0.5
-		calls[1] = {"osc", {wave = p.wave, freq = freq, oversample = 8,
+		-- Oversampled against aliasing; a sine has no harmonics to alias,
+		-- and eight lookups a sample made it the web's slowest wave
+		calls[1] = {"osc", {wave = p.wave, freq = freq,
+			oversample = p.wave == "sine" and 1 or 8,
 			duty = {start = 0.5 - p.duty * 0.5,
 				slide = -p.duty_ramp * 0.00005 * SR, min = 0, max = 0.5,
 				restart = restart},
 			rate = rate, n = n}}
+	end
+	-- **Pluck**: a string (Karplus-Strong) tuned to the start frequency,
+	-- struck by the voice's first period; pluck is its feedback, so how
+	-- long it rings, and the envelope below shapes what rings
+	if p.pluck > 0 then
+		local period = 1 / freq.start
+		calls[#calls + 1] = {"envelope", {points = {{0, 1}, {period, 1},
+			{period + 1 / rate, 0}}, rate = rate, n = n}}
+		calls[#calls + 1] = {"delay", {delay = period,
+			max_delay = period + 2 / rate, feedback = 0.99 * p.pluck,
+			mix = 1, rate = rate, n = n}}
 	end
 	-- Low pass, off at lpf_freq 1: w = lpf^3 / 10 (in eighths), so the
 	-- cutoff sqrt(w) 352800 / 2 pi Hz; w times 1 + lpf_ramp / 1e4 an
@@ -392,7 +558,73 @@ function G.chain(p, rate)
 			rate = rate, n = n}}
 	end
 	calls[#calls + 1] = {"envelope", {points = env, rate = rate, n = n}}
+	local dur = n / rate
+	-- **Crackle**: the sound let through in grains of 3 ms at random
+	-- times, up to 400 a second (crackle^2 400); its own generator from
+	-- the seed
+	if p.crackle > 0 then
+		local gap = 2 / (p.crackle * p.crackle * 400)
+		local r = G.rng(p.seed + 1)
+		local pts = {{0, 0}}
+		local t = r.frnd(gap)
+		while t < dur do
+			pts[#pts + 1] = {t, 0}
+			pts[#pts + 1] = {t + 0.0003, 1}
+			pts[#pts + 1] = {t + 0.0027, 1}
+			pts[#pts + 1] = {t + 0.003, 0}
+			t = t + 0.003 + r.frnd(gap)
+		end
+		envelopes(calls, pts, rate, n)
+	end
+	-- **Tremolo**: the level down by trem_depth and back, a triangle at
+	-- up to 50 Hz (trem_speed^2 50)
+	local tf = p.trem_speed * p.trem_speed * 50
+	if p.trem_depth > 0 and tf >= 0.01 then
+		local half = 1 / (2 * tf)
+		local pts = {}
+		local k = 0
+		while k * half <= dur + half do
+			pts[#pts + 1] = {k * half, k % 2 == 0 and 1 or 1 - p.trem_depth}
+			k = k + 1
+		end
+		envelopes(calls, pts, rate, n)
+	end
 	return n, calls
+end
+
+-- **A sound's layers**: each voice's chain and where it starts, in
+-- samples, and the length of them all (at most a buffer's, the voices
+-- cut to it)
+local MAX_N = 2097152
+function G.build(p, rate)
+	rate = rate or SR
+	local voices = {p}
+	for _, l in ipairs(p.layers or {}) do
+		voices[#voices + 1] = l
+	end
+	local parts, total = {}, 0
+	for i, v in ipairs(voices) do
+		local n, calls = G.chain(v, rate)
+		local at = i == 1 and 0 or floor(v.at * rate + 0.5)
+		parts[i] = {at = at, n = n, calls = calls}
+		total = math.max(total, at + n)
+	end
+	if total > MAX_N then
+		total = MAX_N
+		for _, part in ipairs(parts) do
+			part.n = math.max(0, math.min(part.n, total - part.at))
+			for i = #part.calls, 1, -1 do
+				local c = part.calls[i][2]
+				local from = c.from or 0
+				if from >= part.n then
+					table.remove(part.calls, i)
+				else
+					c.n = math.min(c.n, part.n - from)
+				end
+			end
+		end
+	end
+	return total, parts
 end
 
 -- The chain run: a buffer of n samples
@@ -404,9 +636,19 @@ function G.run(n, calls, synth)
 	return buf
 end
 
+-- One layer is its own buffer; more are mixed into one
 function G.render(p, rate, synth)
-	local n, calls = G.chain(p, rate)
-	return G.run(n, calls, synth)
+	local total, parts = G.build(p, rate)
+	if #parts == 1 then
+		return G.run(parts[1].n, parts[1].calls, synth)
+	end
+	local out = synth.buffer(total)
+	for _, part in ipairs(parts) do
+		if part.n > 0 then
+			out:mix(G.run(part.n, part.calls, synth), 0, part.at, part.n, 1)
+		end
+	end
+	return out
 end
 
 -- **A random number generator of its own** (Park and Miller's), so a
@@ -429,7 +671,8 @@ end
 -- **sfxr's generators**, its code with its numbers, on the generator
 -- above; each sound gets a noise seed from it too
 G.PRESETS = {"pickup", "laser", "explosion", "powerup", "hit", "jump",
-	"blip"}
+	"blip", "thud", "knock", "crunch", "grunt", "squeal", "snort", "pluck",
+	"rattle", "chime"}
 local PRESET = {}
 function PRESET.pickup(p, frnd, rnd)
 	p.base_freq = 0.4 + frnd(0.5)
@@ -573,6 +816,133 @@ function PRESET.blip(p, frnd, rnd)
 	p.hpf_freq = 0.1
 end
 
+-- **blip's own generators** (user, 2026-10-15), after skelenti's sounds
+-- (dig, place, walk, a boar, a skeleton, a bow, a chime): a frequency in
+-- Hz and a stage's length in seconds as the parameters that give them,
+-- by sqrt only, so a preset is the same everywhere
+local function hz(f)
+	return sqrt(math.max(0, f / 3528 - 0.001))
+end
+local function secs(t)
+	return sqrt(t / 2.268)
+end
+-- A short struck tone: wood, stone, a bone
+local function knock(p, frnd, rnd, lo, span, len)
+	p.wave = rnd(1) == 0 and "sine" or "triangle"
+	p.base_freq = hz(lo + frnd(span))
+	p.freq_ramp = -frnd(0.05)
+	p.env_sustain = 0
+	p.env_decay = secs(len + frnd(len * 2))
+	p.env_punch = frnd(0.5)
+end
+-- A voice through a formant: a resonant low pass on a saw or a square
+local function voiced(p, frnd, rnd, f, lpf)
+	p.wave = rnd(1) == 0 and "saw" or "square"
+	p.duty = frnd(0.4)
+	p.base_freq = hz(f)
+	p.freq_ramp = -0.03 - frnd(0.07)
+	p.vib_strength = 0.05 + frnd(0.1)
+	p.vib_speed = 0.4 + frnd(0.2)
+	p.lpf_freq = lpf + frnd(0.08)
+	p.lpf_resonance = 0.5 + frnd(0.4)
+	p.env_attack = secs(0.01 + frnd(0.02))
+	p.env_sustain = secs(0.1 + frnd(0.15))
+	p.env_decay = secs(0.08 + frnd(0.1))
+end
+function PRESET.thud(p, frnd, rnd)
+	if rnd(1) == 0 then
+		-- A triangle's harmonics: a sine this low is lost on a small
+		-- speaker
+		p.wave = "triangle"
+		p.base_freq = hz(80 + frnd(120))
+		p.freq_ramp = -0.15 - frnd(0.2)
+	else
+		p.wave = "noise"
+		p.base_freq = 0.15 + frnd(0.15)
+		p.lpf_freq = 0.08 + frnd(0.1)
+	end
+	p.env_sustain = secs(0.01)
+	p.env_decay = secs(0.05 + frnd(0.1))
+	p.env_punch = 0.2 + frnd(0.4)
+end
+function PRESET.knock(p, frnd, rnd)
+	knock(p, frnd, rnd, 300, 2200, 0.02)
+	if rnd(1) == 1 then
+		p.hpf_freq = 0.2
+	end
+end
+function PRESET.crunch(p, frnd, rnd)
+	p.wave = "noise"
+	p.base_freq = 0.3 + frnd(0.3)
+	p.crackle = 0.5 + frnd(0.5)
+	p.lpf_freq = 0.25 + frnd(0.25)
+	p.lpf_resonance = frnd(0.4)
+	p.hpf_freq = 0.1 + frnd(0.2)
+	p.env_sustain = secs(0.04 + frnd(0.06))
+	p.env_decay = secs(0.06 + frnd(0.1))
+end
+function PRESET.grunt(p, frnd, rnd)
+	voiced(p, frnd, rnd, 120 + frnd(70), 0.12)
+	p.hpf_freq = 0.12
+end
+function PRESET.squeal(p, frnd, rnd)
+	voiced(p, frnd, rnd, 350 + frnd(250), 0.22)
+	p.hpf_freq = 0.2
+end
+function PRESET.snort(p, frnd, rnd)
+	p.wave = "noise"
+	p.base_freq = 0.25 + frnd(0.2)
+	p.lpf_freq = 0.1 + frnd(0.06)
+	p.lpf_resonance = 0.5 + frnd(0.3)
+	p.hpf_freq = 0.12
+	p.trem_depth = 0.5 + frnd(0.4)
+	p.trem_speed = sqrt((24 + frnd(16)) / 50)
+	p.env_attack = secs(0.02)
+	p.env_sustain = secs(0.12 + frnd(0.12))
+	p.env_decay = secs(0.06 + frnd(0.06))
+end
+function PRESET.pluck(p, frnd, rnd)
+	p.wave = G.WAVES[rnd(3) + 1]
+	p.base_freq = hz(70 + frnd(150))
+	p.pluck = 0.93 + frnd(0.06)
+	p.env_sustain = secs(0.1 + frnd(0.2))
+	p.env_decay = secs(0.15 + frnd(0.25))
+	p.lpf_freq = 0.3 + frnd(0.4)
+	p.lpf_ramp = -frnd(0.15)
+	-- One period struck rings at about half the level of a held tone
+	p.volume = 0.9
+end
+-- Bones: a knock and a few more after it, each a layer
+function PRESET.rattle(p, frnd, rnd)
+	knock(p, frnd, rnd, 900, 2000, 0.01)
+	p.volume = 0.5
+	p.layers = {}
+	for i = 1, 3 + rnd(6) do
+		local l = G.defaults()
+		knock(l, frnd, rnd, 900, 2000, 0.01)
+		l.volume = 0.25 + frnd(0.25)
+		l.at = floor(frnd(250)) / 1000
+		p.layers[i] = l
+	end
+end
+-- Two notes of a bell, the second a fifth, a fourth or an octave up
+function PRESET.chime(p, frnd, rnd)
+	local f = 600 + frnd(500)
+	p.wave = "sine"
+	p.base_freq = hz(f)
+	p.env_sustain = secs(0.02)
+	p.env_decay = secs(0.25 + frnd(0.2))
+	p.env_punch = 0.3
+	p.volume = 0.4
+	local l = {}
+	for k, v in pairs(p) do
+		l[k] = v
+	end
+	l.base_freq = hz(f * ({1.5, 4 / 3, 2})[rnd(2) + 1])
+	l.at = floor(50 + frnd(50)) / 1000
+	p.layers = {l}
+end
+
 -- Every parameter into its range, as G.params does
 local function settle(p)
 	for _, d in ipairs(G.PARAMS) do
@@ -590,6 +960,10 @@ function G.preset(name, seed)
 	local p = G.defaults()
 	f(p, r.frnd, r.rnd)
 	p.seed = floor(r.frnd(SEED_MAX + 1))
+	for _, l in ipairs(p.layers or {}) do
+		l.seed = floor(r.frnd(SEED_MAX + 1))
+		settle(l)
+	end
 	return settle(p)
 end
 
@@ -645,16 +1019,18 @@ function G.random(wave, seed)
 end
 
 -- sfxr's MUTATE: each parameter but the limit and the volume moved by
--- up to 0.05 half the time
+-- up to 0.05 half the time. One beyond sfxr's that is off stays off: a
+-- little pluck or crackle is another sound, not a nearby one.
 function G.mutate(p, seed)
 	local r = G.rng(seed)
 	local q = {}
 	for k, v in pairs(p) do
 		q[k] = v
 	end
-	for _, d in ipairs(G.PARAMS) do
+	for i, d in ipairs(G.PARAMS) do
 		local k = d[1]
-		if k ~= "freq_limit" and k ~= "volume" and r.rnd(1) == 1 then
+		if k ~= "freq_limit" and k ~= "volume" and r.rnd(1) == 1 and
+				(i <= G.SFXR_PARAMS or q[k] ~= d[4]) then
 			q[k] = q[k] + r.frnd(0.1) - 0.05
 		end
 	end
@@ -672,6 +1048,17 @@ G.HASHES = {
 	hit = "37f2aa7f9f57a67d",
 	jump = "ea815359c7b109da",
 	blip = "98f8feb988e5004f",
+	-- blip's own, with the layers and the parameters beyond sfxr's
+	-- (2026-10-15)
+	thud = "67ed7f9289e9bd33",
+	knock = "f866eef78046803f",
+	crunch = "adc2184869cfa34a",
+	grunt = "9eb6d1a4ba4209d1",
+	squeal = "8f80733bff062ec0",
+	snort = "6d62325e002f06ad",
+	pluck = "ce6bf7368270ebc0",
+	rattle = "90c3fee99077fa2c",
+	chime = "8bdfbfdf655a0c49",
 }
 function G.self_check(synth)
 	local bad = {}
@@ -679,7 +1066,7 @@ function G.self_check(synth)
 		local h = G.render(G.preset(name, 1), SR, synth):hash()
 		if h ~= G.HASHES[name] then
 			bad[#bad + 1] = name .. " hashes " .. h .. ", not " ..
-					G.HASHES[name]
+					tostring(G.HASHES[name])
 		end
 	end
 	return #bad == 0, bad

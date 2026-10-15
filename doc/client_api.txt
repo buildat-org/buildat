@@ -1149,6 +1149,18 @@ parameters by name ({wave = "square", base_freq = 0.3, ...}, the missing
 ones at their defaults), or the string plus a partial table that overrides
 it ({"blip1:...", volume = 0.2}). blip1 is frozen: a sound sounds the same
 in every later blip.
+- **Layers**: a sound is up to 16 voices, each starting `at` seconds in
+  (up to 4.095). The table's own fields are the first and layers = {...}
+  holds the others, each a sound in any form with at:
+  {wave = "sine", ..., layers = {{"blip1:...", at = 0.05}}}. In the
+  string, each after the first is "+", its at in milliseconds as two
+  characters, then the voice.
+- **Beyond sfxr's parameters**, each off at 0: trem_depth and trem_speed
+  (the level down by the depth and back, a triangle at up to 50 Hz),
+  crackle (the voice let through in 3 ms grains at random times, up to
+  400 a second) and pluck (a string tuned to the start frequency, struck
+  by the voice's first period; pluck is how long it rings). A voice with
+  them all off packs as it did before them.
 blip.play(sound [, opts]) -> SoundSource
 - Made and played, not kept. opts: {gain, panning, type, node}, type the
   SoundSource's sound type ("Effect"), node one of the caller's to play on.
@@ -1161,7 +1173,8 @@ blip.stream([opts]) -> mixer
 blip.wav(sound) -> the bytes of a 16-bit mono 44100 Hz WAV file
 blip.params(sound) -> the parameter table; blip.pack(p) -> "blip1:..."
 blip.preset(name, seed) -> p, name one of sfxr's generators (pickup,
-  laser, explosion, powerup, hit, jump, blip)
+  laser, explosion, powerup, hit, jump, blip) or blip's own (thud, knock,
+  crunch, grunt, squeal, snort, pluck, rattle, chime)
 blip.self_check() -> true, or false and the presets that moved: each
   generator's sound at seed 1 hashed against blip1's committed hashes
 blip.gen, blip.mix
@@ -2293,7 +2306,7 @@ magic.LT_INVALID:
 magic.LT_OBJECT_GROUP: 
 magic.LT_TILE_LAYER: 
 magic.Light: brightness, color, fadeDistance, fov, lightType, rampTexture, range, shadowBias, shadowCascade, shadowIntensity, specularIntensity
-magic.LineEdit: cursor, cursorPosition, echoCharacter, editable, maxLength, multiLine, text, textCopyable, textElement, textSelectable
+magic.LineEdit: clipBorder, cursor, cursorPosition, echoCharacter, editable, maxLength, multiLine, text, textCopyable, textElement, textSelectable
 magic.ListView: AddItem, AddSelection, ChangeSelection, ClearSelection, Expand, FindItem, GetItem, InsertItem, IsExpanded, IsSelected, RemoveAllItems, RemoveItem, RemoveSelection, SetSelection, ToggleExpand, ToggleSelection, baseIndent, clearSelectionOnDefocus, hierarchyMode, highlightMode, multiselect, numItems, selectOnClickEnd, selectedItem, selection
 magic.MASK_COLOR: 
 magic.MASK_NORMAL: 
