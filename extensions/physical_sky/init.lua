@@ -19,8 +19,8 @@
 -- **One source, two deliveries**: a client with no Buildat server behind it
 -- takes it bundled,
 --   local physical_sky = require("buildat/extension/physical_sky")
--- and a game takes its server's copy, served by client_file's
--- serve_extension() under the same names,
+-- and a game takes its server's copy, served for a module that names it in
+-- its meta.json's client_extensions, under the same names,
 --   local physical_sky = select(3, buildat.run_script_file("physical_sky/init.lua"))
 -- so it draws the version its server knows. A served resource name wins
 -- over the bundled file of that name, so the shader follows the same way.

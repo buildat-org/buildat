@@ -1426,8 +1426,6 @@ struct Module: public interface::Module
 			i->set_multiple_logins(true);
 		});
 		m_launch_plan = launch_param("save");
-		// The sky this server knows ([LC_SKY_SHARED]), not the client's
-		client_file::serve_extension(m_server, "physical_sky");
 		// Backups opened to look at when the server last stopped
 		storage::access(m_server, [&](storage::Interface *istorage){
 			for(const storage::SaveInfo &i : istorage->list())

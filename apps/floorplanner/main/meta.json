@@ -2,6 +2,7 @@
 	"engine_api": 2,
 	"kind": "app",
 	"client_main": "init.lua",
+	"client_extensions": ["physical_sky"],
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},

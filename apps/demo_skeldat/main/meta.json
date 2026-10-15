@@ -1,6 +1,7 @@
 {
 	"engine_api": 2,
 	"kind": "world",
+	"client_extensions": ["physical_sky"],
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},

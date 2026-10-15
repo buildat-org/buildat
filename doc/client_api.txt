@@ -1507,8 +1507,8 @@ uistack.UIStack(root) -> a stack of its own
 physical_sky
 ------------
 The sky in HDR at radiances an exposure meters ([LC_SKY_SHARED]), bundled as
-require("buildat/extension/physical_sky") and served by a server that calls
-client_file::serve_extension("physical_sky"), whose copy a game takes with
+require("buildat/extension/physical_sky") and served for a module that
+names it in its meta.json's client_extensions, whose copy a game takes with
 select(3, buildat.run_script_file("physical_sky/init.lua")). The source has
 each function's units.
 physical_sky.new_dome(scene, sun_dir, defaults, log) -> dome

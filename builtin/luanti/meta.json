@@ -1,4 +1,5 @@
 {
+	"client_extensions": ["physical_sky"],
 	"dependencies": [
 		{"module": "main_context"},
 		{"module": "client_file"},
