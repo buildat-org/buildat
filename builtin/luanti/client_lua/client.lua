@@ -219,14 +219,18 @@ local SUN_BRIGHTNESS = 28.0
 -- that the moon casts a shadow. See [LIGHT_SHAPE].
 local MOON_BRIGHTNESS = 1.0
 -- [PBR_FIT] term 1: the pbr path's sun, sky and moon in the path-traced
--- reference's units, one copy for both Luanti clients: PHYS in
--- res/sky_model.lua ([LC_PBR_PARITY]). What is this client's alone is below.
+-- reference's units, one copy for every pbr client: physical_sky's PHYS
+-- ([LC_SKY_SHARED]), read and never written. What is this client's alone
+-- is below.
 local PHYS = sky_dome.PHYS
-function PHYS.sun_color(height)
+local function sun_color(height)
 	return magic.Color(PHYS.sun_rgb(height))
 end
-PHYS.SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
-PHYS.MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
+-- The parity modes' sun and moon light colours, Luanti's look: a cold
+-- blue moon. pbr's moonlight is the render's warm 4100 K lamp instead
+-- (voxel_light.MOON_COLOR, through sky_light.MOON_COLOR)
+local SUN_COLOR = magic.Color(1.0, 0.96, 0.88)
+local MOON_COLOR = magic.Color(0.55, 0.68, 1.0)
 -- Reassigned when a game says what its horizon is; see sub_sky below
 local DAY_FOG = magic.Color(0.60, 0.72, 0.88)
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.8}
@@ -428,9 +432,9 @@ do
 		return node, light
 	end
 	sky_lights.sun_node, sky_lights.sun =
-			body_light("Sun", PHYS.SUN_COLOR, SUN_BRIGHTNESS)
+			body_light("Sun", SUN_COLOR, SUN_BRIGHTNESS)
 	sky_lights.moon_node, sky_lights.moon =
-			body_light("Moon", PHYS.MOON_COLOR, MOON_BRIGHTNESS)
+			body_light("Moon", MOON_COLOR, MOON_BRIGHTNESS)
 	-- Past the far cascade the world is ambient-lit, which at that range
 	-- reads as haze rather than as a missing shadow.
 	magic.renderer.shadowMapSize = 1024
@@ -1592,13 +1596,13 @@ local function apply_sky_of_hour(force)
 	-- has nowhere to put -- the drawing half of [SKY_LEFTOVERS] -- so both
 	-- modes use the two colours, which is what was hardcoded before.
 	local share = sky_dome.sun_tint_share(sky_now.daylight)
-	sky_lights.sun.color = blend(PHYS.SUN_COLOR,
+	sky_lights.sun.color = blend(SUN_COLOR,
 			game_sky.sun_tint or sky_dome.SUN_TINT, share)
 	if not sky_now.unlit then
 		-- pbr: the sun's colour from its elevation, not a tint at a
-		-- clock (PHYS.sun_color). simplified: no ozone, no aerosol; the
+		-- clock (sun_color()). simplified: no ozone, no aerosol; the
 		-- dawn's target is the render's 05:45 (see the plan).
-		sky_lights.sun.color = PHYS.sun_color(sky_now.height or 0)
+		sky_lights.sun.color = sun_color(sky_now.height or 0)
 		-- And the disc drawn at that (sky_light.sun_disc())
 		world_sky:set_sun_radiance(sky_light.sun_disc(sky_now.height or 0,
 				(game_sky.sun_scale or 1) * voxel_shading.sky_defaults.sun_half,
@@ -1606,7 +1610,7 @@ local function apply_sky_of_hour(force)
 	end
 	-- pbr: the render's moon (sky_light.terms())
 	local mc = sky_light.MOON_COLOR
-	sky_lights.moon.color = sky_now.unlit and blend(PHYS.MOON_COLOR,
+	sky_lights.moon.color = sky_now.unlit and blend(MOON_COLOR,
 			game_sky.moon_tint or sky_dome.MOON_TINT, share) or
 			magic.Color(mc.r, mc.g, mc.b)
 

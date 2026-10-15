@@ -115,44 +115,115 @@ local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
 		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
 		-- in the render: white, not Luanti's pale blue
 		day_horizon = {r = 0.99, g = 0.995, b = 1.0}}
--- The sky's radiance factor at a sun height (sin elevation): full by
--- day, gone over the last twelve degrees, the floor below
--- The zenith and the dome go first: at ten degrees the render's block
--- top is lit by a sun of about 74 over a dome of about 1.5, a third of
--- noon's, while its horizon band is still 9. The horizon keeps the old
--- short fade.
-function PHYS.sky(height)
-	return math.max(0, math.min(1, (height + 0.02) / 0.55))
-end
-function PHYS.horizon(height)
-	return math.max(0, math.min(1, (height + 0.05) / 0.21))
-end
-function PHYS.sun(height)
-	if height <= 0 then
-		return 0
-	end
-	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
-end
--- The sun's colour at a height, its luminance one: Rayleigh transmittance
--- through an air mass of 1 / sin(elevation), the optical depths sea
--- level's at 680, 550 and 440 nm ([PBR_FIT] term 3)
-function PHYS.sun_rgb(height)
-	local m = 1 / math.max(height, 0.05)
-	local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
-			math.exp(-0.24 * m)
-	local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-	return r / lum, g / lum, b / lum
-end
 -- How far under our horizon the sun still lights the clouds: the dip of
 -- the horizon from 7 km up, acos(R / (R + h)), in sine
 PHYS.cloud_dip = 0.047
+-- **The rules that read PHYS**, made over a PHYS and onto a table: the
+-- module's own below, and M.with()'s copies, so an app's overrides reach
+-- every function that reads them rather than a copy nothing reads.
+local function bind(PHYS, M)
+	-- The sky's radiance factor at a sun height (sin elevation): full by
+	-- day, gone over the last twelve degrees, the floor below
+	-- The zenith and the dome go first: at ten degrees the render's block
+	-- top is lit by a sun of about 74 over a dome of about 1.5, a third of
+	-- noon's, while its horizon band is still 9. The horizon keeps the old
+	-- short fade.
+	function PHYS.sky(height)
+		return math.max(0, math.min(1, (height + 0.02) / 0.55))
+	end
+	function PHYS.horizon(height)
+		return math.max(0, math.min(1, (height + 0.05) / 0.21))
+	end
+	function PHYS.sun(height)
+		if height <= 0 then
+			return 0
+		end
+		return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
+	end
+	-- The sun's colour at a height, its luminance one: Rayleigh transmittance
+	-- through an air mass of 1 / sin(elevation), the optical depths sea
+	-- level's at 680, 550 and 440 nm ([PBR_FIT] term 3)
+	function PHYS.sun_rgb(height)
+		local m = 1 / math.max(height, 0.05)
+		local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
+				math.exp(-0.24 * m)
+		local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+		return r / lum, g / lum, b / lum
+	end
+
+	-- The flash's radiance; see M.FLASH below
+	function M.flash_radiance()
+		return M.FLASH * PHYS.sky_zenith
+	end
+
+	-- The sky's two ends at a sun height: a hue -- PHYS.day_zenith and
+	-- day_horizon, the render's, unless a caller has its own -- at the
+	-- reference's radiance ([PBR_FIT] term 1)
+	function M.sky_radiance(zenith, horizon, height)
+		local function at(c, radiance)
+			local l = lum(c)
+			if l <= 1e-6 then
+				return {r = radiance, g = radiance, b = radiance}
+			end
+			local k = radiance / l
+			return {r = c.r * k, g = c.g * k, b = c.b * k}
+		end
+		return at(zenith, PHYS.night_sky +
+				(PHYS.sky_zenith - PHYS.night_sky) * PHYS.sky(height)),
+			at(horizon, PHYS.night_sky +
+				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(height))
+	end
+
+	-- The sun's disc at a radiance: E0 of the hour over the disc's solid
+	-- angle, pi times the half-width squared (the tangent of the half-angle,
+	-- near enough), in its colour. The path trace's disc is this and clips
+	-- white at every hour; Luanti's square at texture brightness sat under
+	-- the snow after metering ([PBR_FIT] step 2). rgba16f holds 65 504.
+	function M.sun_disc(height, half, color)
+		local disc = math.min(PHYS.sun(height) / (math.pi * half * half), 65504)
+		return disc * color.r, disc * color.g, disc * color.b
+	end
+
+	-- The clouds' light ([CLOUD_LIGHT]): a reflectance (the cloud colour, a
+	-- cloud top's near 0.9) lit by the sun and the sky, not a display colour
+	-- in a radiance sky. Returns the sun's and the sky's for the dome's
+	-- set_cloud_lit. The sky's share is the dome's mean as it is ([DUSK_CLOUD]:
+	-- a dome of radiance L puts pi L on a face, which reflects albedo L); the
+	-- sun's is E_sun of the hour times how high it is, times k_sun, set so
+	-- that at noon a thin cloud is cloud_n times the zenith patch (PHYS.cloud_n,
+	-- rated by the user). sun_through: what of the sun gets through
+	-- (the Luanti weather's direct_light()).
+	function M.cloud_lit(albedo, zenith, horizon, height, sun_through, cloud_n)
+		local mean = M.dome(zenith, horizon)
+		local n = cloud_n or PHYS.cloud_n
+		local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
+		local k_sun = math.max(0, (n * PHYS.sky_zenith / M.CLOUD_REF_LUM -
+				noon_mean) * math.pi / PHYS.sun(1))
+		-- The sun as the clouds see it: from 7 km up it sets PHYS.cloud_dip
+		-- later, through the longer air that reddens it
+		local h = height + PHYS.cloud_dip
+		local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi * sun_through
+		local sr, sg, sb = PHYS.sun_rgb(h)
+		-- And the dusk glow is sky light too: what a cloud gets of it is the
+		-- dome's mean of PhysicalSky's glow term, (1 - y)^2 over the hemisphere
+		-- (a third) times away + (1 - away) of a quarter for cos^2 towards the sun
+		local gm = M.dawn_glow(height) * M.DUSK_SKY *
+				(M.DUSK_AWAY + (1 - M.DUSK_AWAY) / 4) / 3
+		local gc = M.DAWN_COLOR
+		return {r = albedo.r * e * sr, g = albedo.g * e * sg, b = albedo.b * e * sb},
+			{r = albedo.r * (mean.r + gm * gc.r), g = albedo.g * (mean.g + gm * gc.g),
+				b = albedo.b * (mean.b + gm * gc.b)}
+	end
+	M.PHYS = PHYS
+	return M
+end
+bind(PHYS, M)
 do
 	local hr, _, hb = PHYS.sun_rgb(1)
 	local lr, _, lb = PHYS.sun_rgb(0)
 	assert(hb / hr > 0.75 and lb / lr < 0.05,
 			"white overhead, red on the horizon")
 end
-M.PHYS = PHYS
 
 -- What a full overcast takes from the zenith where the game's own day
 -- colours are not drawn (pbr draws the reference's), a named pick
@@ -204,9 +275,6 @@ end
 -- the exposure as a flash; the other modes draw them at white.
 M.GLOW_FULL = 14
 M.FLASH = 3
-function M.flash_radiance()
-	return M.FLASH * PHYS.sky_zenith
-end
 
 do
 	local function rgb(hex)
@@ -301,24 +369,6 @@ assert(math.abs(M.dawn_glow(-0.001) - M.dawn_glow(0.001)) < 0.02 * M.DAWN_GLOW,
 		"no step where the sun crosses the horizon")
 assert(M.dusk_tint(0.2) == 0 and M.dusk_tint(-0.3) == 1, "the tint's ends")
 
--- The sky's two ends at a sun height: a hue -- PHYS.day_zenith and
--- day_horizon, the render's, unless a caller has its own -- at the
--- reference's radiance ([PBR_FIT] term 1)
-function M.sky_radiance(zenith, horizon, height)
-	local function at(c, radiance)
-		local l = lum(c)
-		if l <= 1e-6 then
-			return {r = radiance, g = radiance, b = radiance}
-		end
-		local k = radiance / l
-		return {r = c.r * k, g = c.g * k, b = c.b * k}
-	end
-	return at(zenith, PHYS.night_sky +
-			(PHYS.sky_zenith - PHYS.night_sky) * PHYS.sky(height)),
-		at(horizon, PHYS.night_sky +
-			(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(height))
-end
-
 -- The dome's hue for the ambient: the cosine weighting a face sees. Five
 -- parts zenith, one horizon: with the horizon white a third of it made
 -- every shade too warm -- the render's open shaded wall reads B/R 0.92 and
@@ -351,49 +401,37 @@ function M.fog(horizon, ambient, seen)
 		b = horizon.b + (ambient.b - horizon.b) * k}
 end
 
--- The sun's disc at a radiance: E0 of the hour over the disc's solid
--- angle, pi times the half-width squared (the tangent of the half-angle,
--- near enough), in its colour. The path trace's disc is this and clips
--- white at every hour; Luanti's square at texture brightness sat under
--- the snow after metering ([PBR_FIT] step 2). rgba16f holds 65 504.
-function M.sun_disc(height, half, color)
-	local disc = math.min(PHYS.sun(height) / (math.pi * half * half), 65504)
-	return disc * color.r, disc * color.g, disc * color.b
-end
-
--- The clouds' light ([CLOUD_LIGHT]): a reflectance (the cloud colour, a
--- cloud top's near 0.9) lit by the sun and the sky, not a display colour
--- in a radiance sky. Returns the sun's and the sky's for the dome's
--- set_cloud_lit. The sky's share is the dome's mean as it is ([DUSK_CLOUD]:
--- a dome of radiance L puts pi L on a face, which reflects albedo L); the
--- sun's is E_sun of the hour times how high it is, times k_sun, set so
--- that at noon a thin cloud is cloud_n times the zenith patch (PHYS.cloud_n,
--- rated by the user). sun_through: what of the sun gets through
--- (the Luanti weather's direct_light()).
-function M.cloud_lit(albedo, zenith, horizon, height, sun_through, cloud_n)
-	local mean = M.dome(zenith, horizon)
-	local n = cloud_n or PHYS.cloud_n
-	local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
-	local k_sun = math.max(0, (n * PHYS.sky_zenith / M.CLOUD_REF_LUM -
-			noon_mean) * math.pi / PHYS.sun(1))
-	-- The sun as the clouds see it: from 7 km up it sets PHYS.cloud_dip
-	-- later, through the longer air that reddens it
-	local h = height + PHYS.cloud_dip
-	local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi * sun_through
-	local sr, sg, sb = PHYS.sun_rgb(h)
-	-- And the dusk glow is sky light too: what a cloud gets of it is the
-	-- dome's mean of PhysicalSky's glow term, (1 - y)^2 over the hemisphere
-	-- (a third) times away + (1 - away) of a quarter for cos^2 towards the sun
-	local gm = M.dawn_glow(height) * M.DUSK_SKY *
-			(M.DUSK_AWAY + (1 - M.DUSK_AWAY) / 4) / 3
-	local gc = M.DAWN_COLOR
-	return {r = albedo.r * e * sr, g = albedo.g * e * sg, b = albedo.b * e * sb},
-		{r = albedo.r * (mean.r + gm * gc.r), g = albedo.g * (mean.g + gm * gc.g),
-			b = albedo.b * (mean.b + gm * gc.b)}
-end
-
 assert(M.outside(0) == 0 and M.outside(1) == 1, "the gate's ends")
 
+
+-- **physical_sky with an app's own numbers**: a copy of the module whose
+-- PHYS has these values in place of the defaults (floorplanner's night and
+-- lamp), every rule here reading them. The module's table, which require
+-- shares between a client's callers, is not changed.
+-- simplified: one level; with() on the copy starts from the defaults again.
+function M.with(overrides)
+	local W, P = {}, {}
+	for k, v in pairs(M) do
+		W[k] = v
+	end
+	for k, v in pairs(PHYS) do
+		if type(v) ~= "function" then
+			P[k] = v
+		end
+	end
+	for k, v in pairs(overrides) do
+		P[k] = v
+	end
+	W.safe = W
+	return bind(P, W)
+end
+do
+	local W = M.with({sun_e0 = 2 * PHYS.sun_e0, night_sky = 1})
+	assert(W.PHYS.sun(1) == 2 * PHYS.sun(1) and M.PHYS == PHYS,
+			"with(): the copy's rules read its own numbers")
+	assert(W.sky_radiance({r = 1, g = 1, b = 1}, {r = 1, g = 1, b = 1},
+			-1).r > 0.9, "with(): the night sky")
+end
 
 -- **The dome**: a skybox drawn by PhysicalSky.glsl.
 --

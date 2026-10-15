@@ -1525,6 +1525,9 @@ physical_sky.PHYS, sky_radiance(), dome(), outside(), fog(), sun_disc(),
 cloud_lit(), overcast(), middle_grey(), flash_radiance(), dawn_glow(),
 dusk_tint() and their constants
 - The sky's numbers ([PBR_FIT] term 1) and the rules built on them.
+physical_sky.with(overrides) -> a copy of physical_sky
+- PHYS with these values in place of the defaults, every rule of the copy
+  reading them; the shared table is not changed. Never write into PHYS.
 
 voxel_light
 -----------
@@ -1548,10 +1551,10 @@ voxel_light.new_vis(magic, buildat, collect, params) -> vis
 voxel_light.terms(physical_sky, height, dome) -> t
 - The light a face gets at a sun height under a dome of that hue: sun, moon,
   sky, ambient, bounce, ground, lamp, glow. Sets nothing.
-voxel_light.apply(target, PHYS, t, translucency) -> chamber
+voxel_light.apply(target, physical_sky, t, chamber, translucency)
 - t onto a target of setters (ambient, bounce, lamp, ground, translucency,
-  chamber, cave_ambient, chamber_light), with the cave floor and the bounce
-  floor by the chamber reading.
+  cave_ambient, chamber_light), with the cave floor and the bounce floor by
+  the chamber reading (vis:chamber()).
 voxel_light.object_light(t, sky, lamp, no_sun), lamp_curve(level), TEXEL_K,
 MOON_COLOR
 - An object's light by its sky and lamp levels, in the frame's units.

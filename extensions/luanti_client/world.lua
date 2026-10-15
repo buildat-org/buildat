@@ -604,8 +604,10 @@ function M.new(magic, buildat, log, options)
 		buildat.set_mesh_bounce(0, 0, 0)
 		buildat.set_mesh_alpha_nibbles(true)
 	end
-	-- The render's moon, a 4100 K lamp; the cold blue is the other modes'
-	local PBR_MOON_COLOR = magic.Color(1.0, 0.86, 0.70)
+	-- The render's moon, a 4100 K lamp (voxel_light's); the cold blue
+	-- MOON_COLOR above is the other modes'
+	local PBR_MOON_COLOR = magic.Color(voxel_light.MOON_COLOR.r,
+			voxel_light.MOON_COLOR.g, voxel_light.MOON_COLOR.b)
 
 	-- The sky of the hour in those units, out of the band's colours, which
 	-- are display sRGB: Luanti's hue at the reference's radiance, the zenith

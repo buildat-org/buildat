@@ -138,12 +138,9 @@ local ok_phys, err_phys, physical_sky =
 if not ok_phys or type(physical_sky) ~= "table" then
 	error("floorplanner: could not load physical_sky: " .. tostring(err_phys))
 end
-local PHYS = {}
-for k, v in pairs(physical_sky.PHYS) do
-	PHYS[k] = v
-end
-PHYS.night_sky, PHYS.lamp = 0.0001, 8
-PHYS.cloud = {r = 0.9, g = 0.92, b = 0.95}
+physical_sky = physical_sky.with({night_sky = 0.0001, lamp = 8,
+		cloud = {r = 0.9, g = 0.92, b = 0.95}})
+local PHYS = physical_sky.PHYS
 M.PHYS = PHYS
 local function lum(c)
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b

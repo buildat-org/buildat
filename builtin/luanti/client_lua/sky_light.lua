@@ -135,18 +135,20 @@ function M.terms(height, dome)
 	return voxel_light.terms(physical_sky, height, dome)
 end
 
--- voxel_light.apply() onto voxel_shading and the zone
+-- voxel_light.apply() onto voxel_shading and the zone, at voxel_shading's
+-- chamber reading. Returns the reading.
 function M.apply(voxel_shading, zone, magic, t, translucency)
-	return voxel_light.apply({
+	local chamber = voxel_shading.chamber_light()
+	voxel_light.apply({
 		ambient = function(r, g, b) zone.ambientColor = magic.Color(r, g, b) end,
 		bounce = voxel_shading.set_bounce_light,
 		lamp = voxel_shading.set_lamp_light,
 		ground = voxel_shading.set_ground_light,
 		translucency = voxel_shading.set_translucency_gain,
-		chamber = voxel_shading.chamber_light,
 		cave_ambient = voxel_shading.set_cave_ambient,
 		chamber_light = voxel_shading.set_chamber_light,
-	}, PHYS, t, translucency)
+	}, physical_sky, t, chamber, translucency)
+	return chamber
 end
 
 do

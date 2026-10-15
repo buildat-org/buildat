@@ -609,6 +609,8 @@ local function lum(c)
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 end
 
+-- pbr's moonlight: the render's 4100 K lamp. The parity modes' cold blue
+-- moon (0.55, 0.68, 1.0) is Luanti's look, and theirs alone.
 M.MOON_COLOR = {r = 1.0, g = 0.86, b = 0.70}
 
 -- **The light terms** ([LC_SKY_SHARED] 2), computing the light and
@@ -745,22 +747,22 @@ end
 -- keeps its light (gain 1, the user's pick, 2026-09-25). The reading is
 -- the camera's rays: no face can work out what arrives round a corner,
 -- and the player is taken to be in the chamber they are looking at.
--- target: plain functions, ambient(r, g, b), bounce, lamp, ground (the
--- same), translucency(k), chamber() -> the reading, cave_ambient(r, g,
--- b), chamber_light(f). Returns the chamber reading.
-function M.apply(target, PHYS, t, translucency)
+-- sky: physical_sky (or its with() copy), as terms() takes it; chamber:
+-- the vis's reading (vis:chamber()); target: plain functions, ambient(r,
+-- g, b), bounce, lamp, ground (the same), translucency(k), cave_ambient(r,
+-- g, b), chamber_light(f).
+function M.apply(target, sky, t, chamber, translucency)
+	local PHYS = sky.PHYS
 	local a = t.ambient
 	target.ambient(a.r, a.g, a.b)
 	target.bounce(t.bounce.r, t.bounce.g, t.bounce.b)
 	target.lamp(t.lamp.r, t.lamp.g, t.lamp.b)
 	target.ground(t.ground.r, t.ground.g, t.ground.b)
 	target.translucency(translucency or PHYS.translucency)
-	local chamber = target.chamber()
 	local dark = 1.0 - math.min(1.0, chamber)
 	local f = PHYS.cave_floor * dark
 	target.cave_ambient(f, f, f)
 	target.chamber_light(chamber)
-	return chamber
 end
 return M
 -- vim: set noet ts=4 sw=4:
