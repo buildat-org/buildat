@@ -1039,20 +1039,7 @@
 		Module *self = module_of(L);
 		size_t len = 0;
 		const char *p = luaL_checklstring(L, 1, &len);
-		ss_ group(p ? p : "", len);
-		if(group.empty())
-			return 0;
-		sv_<ss_> files;
-		// Luanti's own suffixes: the plain name and one digit, which is
-		// what its media lookup accepts. The names are asked for rather
-		// than scanned for, because what the module serves is a hash map.
-		if(self->m_served_media.count(group+".ogg"))
-			files.push_back(group+".ogg");
-		for(char d = '0'; d <= '9'; d++){
-			const ss_ name = group+"."+d+".ogg";
-			if(self->m_served_media.count(name))
-				files.push_back(name);
-		}
+		const sv_<ss_> files = self->sound_files(ss_(p ? p : "", len));
 		if(files.empty())
 			return 0;
 		const ss_ &pick = files[rand() % files.size()];
@@ -1071,17 +1058,7 @@
 		Module *self = module_of(L);
 		size_t len = 0;
 		const char *p = luaL_checklstring(L, 1, &len);
-		ss_ group(p ? p : "", len);
-		if(group.empty())
-			return 0;
-		sv_<ss_> files;
-		if(self->m_served_media.count(group+".ogg"))
-			files.push_back(group+".ogg");
-		for(char d = '0'; d <= '9'; d++){
-			const ss_ name = group+"."+d+".ogg";
-			if(self->m_served_media.count(name))
-				files.push_back(name);
-		}
+		const sv_<ss_> files = self->sound_files(ss_(p ? p : "", len));
 		if(files.empty())
 			return 0;
 		lua_newtable(L);

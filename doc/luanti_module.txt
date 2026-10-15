@@ -289,7 +289,11 @@ keys.stage.form(formname, spec, at) returns true when the app drew the
 form itself, the player's own inventory included. The module's client
 half gives such a drawing what it needs: luanti.parse_stack(),
 luanti.send_fields(), luanti.inv_move(), luanti.inv_craft(),
-luanti.node_lists(at) and luanti.sub_node_inventory(f).
+luanti.node_lists(at) and luanti.sub_node_inventory(f). keys.player_pos()
+is where the player's feet are, as this client moves them.
+luanti.set_sound(media_name, sound) plays an app-made Sound wherever the
+media file of that name would be, the names the server's
+set_generated_sounds() resolves to.
 
 The world is the save. The map, the clock and everything else the world is go
 into the save the caller opened and keeps open; a Luanti world directory is

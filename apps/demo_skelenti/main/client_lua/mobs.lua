@@ -6,8 +6,8 @@
 -- dressed as boxes of the skins' layout, the legs and arms swinging as
 -- they walk, lit by the world's light, red for a moment when hurt. A
 -- click at one is the module's point stage, sent to the server as
--- skelenti:punch. Their sounds come by name and are played from the
--- table below.
+-- skelenti:punch. Their sounds come by name and are played from
+-- sounds.lua's.
 -- simplified: no death animation and no bow drawn; boxes axis-aligned
 -- for pointing (a boar is pointed at as a square).
 local magic = require("buildat/extension/urho3d")
@@ -17,13 +17,8 @@ local log = buildat.Logger("skelenti")
 
 local M = {}
 
--- What each moment sounds like: a file in main/client_data/ (heard as
--- "main/<file>"), or false for silence until the files are picked
-M.SOUNDS = {
-	boar_hurt = false, boar_death = false,
-	skeleton_hurt = false, skeleton_death = false,
-	bow = false, arrow_hit = false,
-}
+-- What each moment sounds like: sounds.lua's, set by init.lua
+M.sounds = nil
 
 -- A face's pixels {x, y, w, h} in the skin, and its four corners from the
 -- top left, seen from outside
@@ -270,10 +265,9 @@ buildat.sub_packet("skelenti:sound", function(data)
 	if not z then
 		return
 	end
-	local file = M.SOUNDS[moment]
+	local sound = M.sounds and M.sounds.pick(moment)
 	log:info(string.format("skelenti: sound %s at %.1f,%.1f,%.1f: %s", moment,
-			x, y, z, file or "silent"))
-	local sound = file and magic.cache:GetResource("Sound", "main/" .. file)
+			x, y, z, sound and "blip" or "silent"))
 	if not sound then
 		return
 	end

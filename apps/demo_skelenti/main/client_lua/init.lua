@@ -21,11 +21,70 @@ local keys = luanti.run_client({log = "skelenti",
 local ui = load("main/ui.lua")
 keys.stage.form = ui.form
 local mobs = load("main/mobs.lua")
+-- The sound effects, made once at startup: the game's (luanti's media
+-- names) and the mobs'
+local sounds = load("main/sounds.lua")
+local t0 = buildat.get_time_us()
+local made = sounds.make(require("buildat/extension/blip"), luanti)
+log:info(string.format("skelenti: %d sounds made in %.0f ms", made,
+		(buildat.get_time_us() - t0) / 1000))
+mobs.sounds = sounds
 keys.stage.point = mobs.point
+-- The music, by the place: a cave (little sky at the head), the danger
+-- zone, or sunrise; none otherwise. A mood holds for 2 s before the
+-- music follows it, so the edge of a cave does not flicker it.
+local music = load("main/music.lua")
+music.new(require("buildat/extension/urho3d"), log,
+		require("buildat/extension/replicate").main_scene)
+local field
+-- since: seconds since the world was taken; the light settles in the first
+-- few, and a cave is read off it
+local mood = {now = nil, seen = nil, held = 0, since = 0}
+local function danger_at(x, z)
+	if not field then
+		return 0
+	end
+	local i = math.floor((x - field.x0) / field.cell)
+	local j = math.floor((z - field.z0) / field.cell)
+	if i < 0 or j < 0 or i >= field.n or j >= field.n then
+		return 0
+	end
+	return field.data:byte(j * field.n + i + 1) / 255
+end
+local function mood_here()
+	local x, y, z = keys.player_pos()
+	if not x or mood.since < 5 then
+		return nil
+	end
+	local _, sky = luanti.light_color(x, y + 1.6, z)
+	if sky and sky < 8 then
+		return "caves"
+	end
+	if danger_at(x, z) >= 0.5 then
+		return "danger"
+	end
+	local t = luanti.time_of_day
+	if t and t >= 0.2 and t < 0.33 then
+		return "sunrise"
+	end
+end
 local frame = keys.stage.frame
 keys.stage.frame = function(dt)
 	frame(dt)
 	ui.draw_hud(keys)
+	if keys.world_taken then
+		mood.since = mood.since + dt
+	end
+	local m = mood_here()
+	if m ~= mood.seen then
+		mood.seen, mood.held = m, 0
+	end
+	mood.held = mood.held + dt
+	if mood.held >= 2 and mood.now ~= m then
+		mood.now = m
+		log:info("skelenti: mood " .. tostring(m))
+	end
+	music.update(dt, mood.now)
 end
 -- The danger on the ground around the player, from main.cpp's
 -- send_field(), drawn by the voxel shader as decay
@@ -40,6 +99,8 @@ buildat.sub_packet("skelenti:field", function(data)
 	end
 	voxel_shading.set_area_field(tonumber(x0), tonumber(z0), tonumber(cell),
 			n, n, data:sub(at))
+	field = {x0 = tonumber(x0), z0 = tonumber(z0), cell = tonumber(cell),
+		n = n, data = data:sub(at)}
 	log:info("skelenti: the danger field at " .. x0 .. "," .. z0)
 end)
 log:info("skelenti client ready")

@@ -2587,6 +2587,13 @@ luanti.sub_player_pos(function(p)
 			string.format("%.1f, %.1f, %.1f", p.x, p.y, p.z) ..
 			string.format(" looking %.0f, %.0f", yaw, pitch))
 end)
+-- Where the player's feet are, as this client moves them; nil before
+-- the player is placed
+keys.player_pos = function()
+	if player then
+		return player.x, player.y, player.z
+	end
+end
 -- The mouse into the world once the player is placed and the world is in
 -- (load_wait_end)
 keys.take_world = function()

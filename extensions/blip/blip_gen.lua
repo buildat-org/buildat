@@ -1116,8 +1116,10 @@ end
 
 -- sfxr's MUTATE: each parameter but the limit and the volume moved by
 -- up to 0.05 half the time. One beyond sfxr's that is off stays off: a
--- little pluck or crackle is another sound, not a nearby one.
-function G.mutate(p, seed)
+-- little pluck or crackle is another sound, not a nearby one. amount
+-- scales the step (1, sfxr's, when not given).
+function G.mutate(p, seed, amount)
+	local step = 0.1 * (amount or 1)
 	local r = G.rng(seed)
 	local q = {}
 	for k, v in pairs(p) do
@@ -1127,10 +1129,25 @@ function G.mutate(p, seed)
 		local k = d[1]
 		if k ~= "freq_limit" and k ~= "volume" and r.rnd(1) == 1 and
 				(i <= G.SFXR_PARAMS or q[k] ~= d[4]) then
-			q[k] = q[k] + r.frnd(0.1) - 0.05
+			q[k] = q[k] + r.frnd(step) - step / 2
 		end
 	end
 	return settle(q)
+end
+
+-- One of a sound's variants, so a sound played again is not the same
+-- every time: every layer mutated by amount (0..1 of sfxr's step) and
+-- given a noise seed of its own. vary(p, n, 0) is p with new noise.
+function G.vary(p, seed, amount)
+	local q = G.mutate(p, seed, amount)
+	q.seed = (p.seed + seed * 7919) % (SEED_MAX + 1)
+	if p.layers then
+		q.layers = {}
+		for i, l in ipairs(p.layers) do
+			q.layers[i] = G.vary(l, seed * 17 + i, amount)
+		end
+	end
+	return q
 end
 
 -- **The self-check**: each preset at seed 1, at 44100 Hz, against the

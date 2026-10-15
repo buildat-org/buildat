@@ -17,7 +17,9 @@ those mobs by the first player and turns spawning off;
 
 ## Licences
 
-The code is Apache-2.0, as the rest of the tree.
+The code is Apache-2.0, as the rest of the tree. The sounds and the
+music have no files: the client makes them at runtime
+(`main/client_lua/sounds.lua` with blip, `main/client_lua/music.lua`).
 
 The textures are CC BY-SA 4.0. They are from the Pixel Perfection
 resource pack by XSSheep

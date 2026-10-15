@@ -129,6 +129,15 @@ q = G.params({old, pluck = 0.5})
 assert(#G.pack(q) == 57 + 8 and G.params(G.pack(q)).pluck > 0.49, "pluck")
 assert(not pcall(G.params, old .. "+A"), "a layer cut short")
 assert(not pcall(G.params, {layers = {two}}), "a layer with layers")
+-- A variant: every layer nudged, its own noise, the layers' times kept
+local r = G.preset("rattle", 3)
+local v = G.vary(r, 2, 0.3)
+assert(v.seed ~= r.seed and #v.layers == #r.layers and
+		v.layers[1].at == r.layers[1].at and
+		v.layers[1].seed ~= r.layers[1].seed, "a variant's layers")
+assert(G.pack(G.vary(r, 2, 0.3)) == G.pack(v), "a variant is the same twice")
+local same = G.vary(r, 5, 0)
+assert(same.base_freq == r.base_freq and same.seed ~= r.seed, "no nudge")
 
 if bad > 0 then
 	print("FAIL: " .. bad .. " mapped to another blip1")

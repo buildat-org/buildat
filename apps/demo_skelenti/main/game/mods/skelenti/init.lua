@@ -370,6 +370,23 @@ core.register_globalstep(function(dtime)
 		end
 	end
 end)
+-- What a node sounds like, by what it is made of: blip's sounds, made by
+-- the client (client_lua/sounds.lua) under these names ([SKELENTI_SOUNDS])
+for name, def in pairs(core.registered_nodes) do
+	local g = def.groups or {}
+	local kind = g.cracky and "stone" or g.crumbly and "earth" or
+			g.choppy and "wood" or g.snappy and "leaves"
+	if kind then
+		local step = (name == "skelenti:gravel" or name == "skelenti:sand") and
+				"gravel" or kind == "leaves" and "earth" or kind
+		core.override_item(name, {sounds = {
+			dig = {name = "skelenti_dig_" .. kind, gain = 0.5},
+			dug = {name = "skelenti_dig_" .. kind, gain = 1.0},
+			place = {name = "skelenti_place_" .. kind, gain = 1.0},
+			footstep = {name = "skelenti_step_" .. step, gain = 0.5}}})
+	end
+end
+
 -- Items within 2 nodes of the player are picked up (user, 2026-10-14):
 -- what fits goes into the inventory, the rest stays on the ground
 local pickup_t = 0
@@ -392,6 +409,8 @@ core.register_globalstep(function(dtime)
 					if left:get_count() < was then
 						core.log("action", "skelenti: " .. p:get_player_name() ..
 								" picks up " .. e.itemstring)
+						core.sound_play("skelenti_pickup", {to_player =
+								p:get_player_name(), gain = 0.6}, true)
 						if left:is_empty() then
 							o:remove()
 						else

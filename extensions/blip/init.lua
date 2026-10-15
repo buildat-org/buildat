@@ -96,6 +96,12 @@ local function key_of(p)
 	return table.concat(out, " ")
 end
 
+-- A Sound of the sound, made and not kept: the caller's to play on a
+-- source of its own (a SoundSource3D, a luanti media name)
+function M.safe.sound(sound)
+	return to_sound(gen.render(gen.params(sound), RATE, buildat.synth))
+end
+
 function M.safe.play(sound, opts)
 	local p = gen.params(sound)
 	local source = play_on(to_sound(gen.render(p, RATE, buildat.synth)), opts)

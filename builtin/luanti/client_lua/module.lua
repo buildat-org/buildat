@@ -1600,7 +1600,15 @@ end)
 -- and far beyond any world), its panning kept.
 -- One table: the main chunk is at Lua's 200 locals. ear: where the
 -- listener was at the last update.
-local snd = {NO_ATTENUATION = 1e9, ear = nil}
+-- generated: media name -> a Sound the app made ([SKELENTI_SOUNDS]).
+local snd = {NO_ATTENUATION = 1e9, ear = nil, generated = {}}
+
+-- set_sound(media_name, sound): a Sound the app made, played wherever
+-- the media file of that name would be -- the server's half is
+-- set_generated_sounds() in api.h, which says which names there are
+function M.set_sound(name, sound)
+	snd.generated[name] = sound
+end
 local handle_sounds = {}
 
 function snd.heard(entry)
@@ -1626,7 +1634,8 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 	if object_scene == nil then
 		return
 	end
-	local sound = magic.cache:GetResource("Sound", MEDIA_PREFIX .. name)
+	local sound = snd.generated[name] or
+			magic.cache:GetResource("Sound", MEDIA_PREFIX .. name)
 	if sound == nil then
 		log:warning("luanti:sound: no sound \"" .. name .. "\"")
 		return

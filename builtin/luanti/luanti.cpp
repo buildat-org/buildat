@@ -4029,6 +4029,41 @@ struct Module: public interface::Module, public luanti::Interface
 		m_paths = paths;
 	}
 
+	// [SKELENTI_SOUNDS] See set_generated_sounds() in api.h
+	ss_ m_generated_sound_prefix;
+	int m_generated_sound_count = 0;
+	void set_generated_sounds(const ss_ &prefix, int count)
+	{
+		m_generated_sound_prefix = prefix;
+		m_generated_sound_count = std::max(0, std::min(count, 9));
+	}
+	// A sound group's files: Luanti's own suffixes, the plain name and
+	// one digit, which is what its media lookup accepts. The names are
+	// asked for rather than scanned for, because what the module serves
+	// is a hash map. A generated group has .1 .. .<count>, made by the
+	// app's client.
+	sv_<ss_> sound_files(const ss_ &group)
+	{
+		sv_<ss_> files;
+		if(group.empty())
+			return files;
+		if(!m_generated_sound_prefix.empty() &&
+				group.compare(0, m_generated_sound_prefix.size(),
+					m_generated_sound_prefix) == 0){
+			for(int d = 1; d <= m_generated_sound_count; d++)
+				files.push_back(group+"."+itos(d)+".ogg");
+			return files;
+		}
+		if(m_served_media.count(group+".ogg"))
+			files.push_back(group+".ogg");
+		for(char d = '0'; d <= '9'; d++){
+			const ss_ name = group+"."+d+".ogg";
+			if(m_served_media.count(name))
+				files.push_back(name);
+		}
+		return files;
+	}
+
 	bool m_server_physics = false;
 	void set_server_physics(bool on)
 	{

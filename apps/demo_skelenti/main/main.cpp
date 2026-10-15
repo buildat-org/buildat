@@ -241,6 +241,9 @@ struct Module: public interface::Module
 				log_i(MODULE, "skelenti: loading %s into the game", extra);
 				i->load_lua(os.str(), extra);
 			}
+			// The game's skelenti_* sounds are blip's, made by the client
+			// (client_lua/sounds.lua, VARIANTS of each)
+			i->set_generated_sounds("skelenti_", 8);
 			i->run_game(m_server->get_module_path(MODULE)+"/game", m_save);
 		});
 		return true;

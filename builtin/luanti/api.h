@@ -300,6 +300,14 @@ namespace luanti
 		// own collides on the server; a module that drops rigid bodies onto
 		// the terrain asks before run_game() ([VOXEL_PHYSICS_SAMPLE]).
 		virtual void set_server_physics(bool on) = 0;
+
+		// [SKELENTI_SOUNDS] Sounds the app's client makes rather than the
+		// game ships: a sound group whose name starts with prefix is
+		// <group>.1.ogg .. .<count>.ogg (count up to 9) as if they were
+		// served, picked from per play as files are. The client module
+		// plays what the app handed it under those names
+		// (set_sound in client_lua/module.lua). An empty prefix is none.
+		virtual void set_generated_sounds(const ss_ &prefix, int count) = 0;
 	};
 
 	inline bool access(interface::Server *server,
