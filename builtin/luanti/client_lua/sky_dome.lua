@@ -18,8 +18,11 @@
 -- **Every uniform is set here at creation**, including the ones nothing ever
 -- changes: a shader parameter a material never sets reads as zero, and zero
 -- for most of these is a black sky.
-local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
-		or "luanti")
+-- The game's logger under builtin/luanti; another game's (skeldat runs this
+-- file without that module) logs as "luanti"
+local has_luanti, luanti_module = pcall(require, "buildat/module/luanti")
+local log = buildat.Logger(has_luanti and type(luanti_module) == "table" and
+		(luanti_module.app or {}).log or "luanti")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}
