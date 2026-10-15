@@ -35,6 +35,7 @@
 #include "client_file/api.h"
 #include "luanti_mapgen/api.h"
 #include "main_context/api.h"
+#include "moderation/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
 #include "storage/api.h"
@@ -42,6 +43,7 @@
 #include "worldgen/api.h"
 #include "game.h"
 #include "bones.h"
+#include "move_check.h"
 #include <Scene.h>
 #include <Node.h>
 #include <cmath>
@@ -59,6 +61,7 @@ using interface::VoxelInstance;
 using skeldat::Stack;
 namespace pv = PolyVox;
 using Urho3D::M_PI;
+namespace vp = interface::voxel_path;
 using Urho3D::M_RADTODEG;
 
 // Luanti's mapgens write these three as numbers (vendor/mapnode.h), so
@@ -107,6 +110,13 @@ struct Player
 	ss_ dig_at;
 	double dig_t0 = 0;
 	double last_hit = -1; // the last hit at a mob
+	// The movement check's: where the last check passed the player, when,
+	// and whether in the air
+	float cx = 0, cy = 0, cz = 0;
+	double check_t = 0;
+	bool check_air = false;
+	// fly, fast and noclip, and no movement check (accounts' admin)
+	bool admin = false;
 
 	ss_ save() const {
 		std::ostringstream os;
@@ -269,12 +279,48 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	}
 };
 
+// moderation::Host for the audit log alone (the admin's give and take): a
+// subject is a player's name, and nothing is reported or decided here
+struct AuditHost: public moderation::Host
+{
+	storage::Save *m_save = nullptr;
+	storage::Save* save(){ return m_save; }
+	ss_ name(){ return "skeldat"; }
+	json::Value subject(const ss_ &id)
+	{
+		json::Value s = json::object();
+		s.set("id", id);
+		s.set("name", id);
+		s.set("owner", id);
+		s.set("players", 1);
+		return s;
+	}
+	sv_<ss_> members(const json::Value &group){ return {}; }
+	int severity(const ss_ &reason){ return 1; }
+	json::Value thresholds(const json::Value &group){ return json::object(); }
+	ss_ held(const json::Value &report){ return ""; }
+	ss_ bucket(const json::Value &report){ return ""; }
+	json::Value auto_act(const json::Value &group, const ss_ &id,
+			const ss_ &want){ return json::Value(); }
+	void uphold(moderation::Interface *m, const ss_ &by,
+			const json::Value &group, const json::Value &q){}
+	bool undo_auto(const ss_ &id, const json::Value &group){ return false; }
+	void reverse(moderation::Interface *m, const ss_ &by,
+			const json::Value &appeal, const ss_ &text){}
+	void decided(const json::Value &report, bool upheld){}
+	void event(const sv_<ss_> &to, const ss_ &by, const ss_ &text){}
+	void notify(const json::Value &statement){}
+};
+
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	const skeldat::Game m_game = skeldat::make_game();
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
+	AuditHost m_audit;
+	// The pathfinder's cell for a voxel id (fill_cells)
+	sv_<uint8_t> m_cell_of;
 	storage::Store *m_store = nullptr;
 	bool m_starting = false;
 	std::set<size_t> m_waiting, m_shown;
@@ -286,7 +332,8 @@ struct Module: public interface::Module
 	double m_time = 0;
 	// The time of day, 0 to 1 with 0.5 noon; a new world starts at 6:00
 	double m_day = 0.25;
-	float m_save_t = 0, m_furnace_t = 0, m_send_t = 0, m_breath_t = 0;
+	float m_save_t = 0, m_furnace_t = 0, m_send_t = 0, m_breath_t = 0,
+			m_move_t = 0;
 	size_t m_worldgen_queue = 0;
 	bool m_load_points_dirty = true;
 	interface::VoxelFormat m_format;
@@ -336,7 +383,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		for(const char *n : {"world_play", "world_create", "world_delete",
 				"pos", "dig_start", "dig", "place", "use", "wield", "open",
-				"close", "move", "craft", "fall", "respawn", "punch"})
+				"close", "move", "craft", "fall", "respawn", "punch", "admin"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/skeldat:")+n));
 	}
@@ -362,6 +409,8 @@ struct Module: public interface::Module
 				on_world_create, network::Packet)
 		EVENT_TYPEN("network:packet_received/skeldat:world_delete",
 				on_world_delete, network::Packet)
+		EVENT_TYPEN("network:packet_received/skeldat:admin",
+				on_admin, network::Packet)
 		// The rest of the game's packets go to one handler, by name
 		static const ss_ GAME = "network:packet_received/skeldat:";
 		for(const char *n : {"pos", "dig_start", "dig", "place", "use",
@@ -1124,6 +1173,7 @@ struct Module: public interface::Module
 		send(peer, "core:run_script",
 				"buildat.run_script_file(\"main/init.lua\")");
 		send(peer, "skeldat:items", items_text());
+		update_role(peer, pl, true);
 		chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
 		replicate::access(m_server, [&](replicate::Interface *i){
 			i->assign_scene_to_peer(m_scene, peer);
@@ -1152,8 +1202,14 @@ struct Module: public interface::Module
 		send_stats(peer, pl);
 	}
 
-	void send_position(size_t peer, const Player &pl)
+	// Where the server puts the player: the movement check's base too
+	void send_position(size_t peer, Player &pl)
 	{
+		pl.cx = pl.x;
+		pl.cy = pl.y;
+		pl.cz = pl.z;
+		pl.check_t = m_time;
+		pl.check_air = false;
 		std::ostringstream os;
 		os<<pl.x<<" "<<pl.y<<" "<<pl.z<<" "<<pl.yaw;
 		send(peer, "skeldat:position", os.str());
@@ -1351,7 +1407,16 @@ struct Module: public interface::Module
 			const int sx = (int)std::floor(pl.x / 16),
 					sz = (int)std::floor(pl.z / 16),
 					sy = (int)std::floor(pl.y / 16);
-			is>>pl.x>>pl.y>>pl.z>>pl.yaw;
+			float x, y, z, yaw;
+			if(!(is>>x>>y>>z>>yaw) || !std::isfinite(x) ||
+					!std::isfinite(y) || !std::isfinite(z) ||
+					!std::isfinite(yaw) || std::fabs(x) > 1e6f ||
+					std::fabs(y) > 1e6f || std::fabs(z) > 1e6f)
+				return;
+			pl.x = x;
+			pl.y = y;
+			pl.z = z;
+			pl.yaw = yaw;
 			if(sx != (int)std::floor(pl.x / 16) ||
 					sz != (int)std::floor(pl.z / 16) ||
 					sy != (int)std::floor(pl.y / 16))
@@ -2246,6 +2311,11 @@ struct Module: public interface::Module
 			m_send_t = 0;
 			send_players();
 		}
+		m_move_t += event.dtime;
+		if(m_move_t >= 1){
+			m_move_t = 0;
+			check_moves();
+		}
 		m_breath_t += event.dtime;
 		if(m_breath_t >= 1){
 			m_breath_t = 0;
@@ -2268,6 +2338,198 @@ struct Module: public interface::Module
 					m_sections.size(), m_catchup.size());
 			for(auto &pair : m_players)
 				send_time(pair.first);
+		}
+	}
+
+	// The admin's menu ([SKELDAT] decision 4): a player's inventory viewed,
+	// an item given to it or taken from it, each in moderation's audit log
+	// of the world's save. "skeldat:admin" both ways, a command a line:
+	//   players                    -> players\n<name> a line
+	//   view <name>                -> inv <name>\nmain=<list_text's>
+	//   give <name> <item> <count> -> the view again
+	//   take <name> <slot>         -> the view again
+	//   audit                      -> audit\n<ts by action whom text> a line
+	// simplified: the players on the server now, not the save's others
+	void on_admin(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		auto me = m_players.find(peer);
+		if(me == m_players.end() || !m_save || !is_admin(peer))
+			return;
+		std::istringstream is(packet.data);
+		ss_ cmd, name;
+		is>>cmd>>name;
+		if(cmd == "players"){
+			ss_ out = "players\n";
+			for(auto &pair : m_players)
+				out += pair.second.name+"\n";
+			send(peer, "skeldat:admin", out);
+			return;
+		}
+		if(cmd == "audit"){
+			std::ostringstream os;
+			os<<"audit\n";
+			moderation::access(m_server, [&](moderation::Interface *m){
+				m_audit.m_save = m_save;
+				const json::Value l = m->audit_log(&m_audit);
+				for(unsigned i = 0; i < l.size() && i < 50; i++){
+					const json::Value &a = l.at(i);
+					os<<json::jstr(a, "by")<<" "<<json::jstr(a, "action")<<" "
+							<<json::jstr(a, "listing")<<": "
+							<<json::jstr(a, "text")<<"\n";
+				}
+			});
+			send(peer, "skeldat:admin", os.str());
+			return;
+		}
+		size_t to = 0;
+		Player *pl = nullptr;
+		for(auto &pair : m_players){
+			if(pair.second.name == name){
+				to = pair.first;
+				pl = &pair.second;
+			}
+		}
+		if(!pl)
+			return;
+		const ss_ by = me->second.name;
+		if(cmd == "give"){
+			ss_ item;
+			int count = 0;
+			const skeldat::ItemDef *d = nullptr;
+			if(!(is>>item>>count) || !(d = m_game.item(item)))
+				return;
+			count = std::max(1, std::min(count,
+					m_game.stack_max(item)));
+			const Stack left = m_game.add(pl->main, Stack(item, count));
+			const int given = count - left.count;
+			if(given > 0)
+				audit(by, name, "give", itos(given)+" "+item);
+		} else if(cmd == "take"){
+			int slot = -1;
+			if(!(is>>slot) || slot < 0 || slot >= (int)pl->main.size() ||
+					pl->main[slot].empty())
+				return;
+			const ss_ what = pl->main[slot].str();
+			pl->main[slot] = Stack();
+			audit(by, name, "take", what);
+		} else if(cmd != "view"){
+			return;
+		}
+		if(cmd != "view")
+			send_inventory(to, *pl);
+		send(peer, "skeldat:admin", "inv "+name+"\n"+list_text("main",
+				pl->main));
+	}
+
+	void audit(const ss_ &by, const ss_ &whom, const ss_ &action,
+			const ss_ &text)
+	{
+		moderation::access(m_server, [&](moderation::Interface *m){
+			m_audit.m_save = m_save;
+			m->audit(&m_audit, by, whom, action, "admin", text, false, false);
+		});
+		log_i(MODULE, "skeldat: %s %ss %s: %s", cs(by), cs(action), cs(whom),
+				cs(text));
+	}
+
+	bool is_admin(size_t peer)
+	{
+		bool admin = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			admin = i->is_local(peer) ||
+					i->level(i->name_of(peer)) >= accounts::LV_ADMIN;
+		});
+		return admin;
+	}
+
+	// accounts' admin, or the launcher's own client (its owner token): fly,
+	// fast and noclip on the client, no movement check here. Sent as it
+	// changes, and always when `tell`.
+	void update_role(size_t peer, Player &pl, bool tell)
+	{
+		const bool admin = is_admin(peer);
+		if(admin == pl.admin && !tell)
+			return;
+		pl.admin = admin;
+		send(peer, "skeldat:role", admin ? "admin" : "");
+		log_i(MODULE, "skeldat: %s is %s", cs(pl.name),
+				admin ? "an admin" : "a player");
+	}
+
+	// A pathfinder's box from one read of the voxels: walkable() is SOLID,
+	// is_water() CLIMB, by the id
+	void fill_cells(voxelworld::Instance *w, vp::Field &f)
+	{
+		const pv::Region region(
+				pv::Vector3DInt32(f.origin.x, f.origin.y, f.origin.z),
+				pv::Vector3DInt32(f.origin.x + f.w - 1, f.origin.y + f.h - 1,
+						f.origin.z + f.d - 1));
+		interface::VoxelVolume vol = w->get_volume(region);
+		for(int y = f.origin.y; y < f.origin.y + f.h; y++)
+		for(int z = f.origin.z; z < f.origin.z + f.d; z++)
+		for(int x = f.origin.x; x < f.origin.x + f.w; x++){
+			const uint32_t id = m_format.id.get(vol.sample_at(x, y, z));
+			if(id >= m_cell_of.size()){
+				const size_t from = m_cell_of.size();
+				m_cell_of.resize(id + 1);
+				for(size_t i = from; i <= id; i++){
+					const skeldat::NodeDef *n = node_of(i);
+					m_cell_of[i] = i == ID_AIR ? vp::OPEN :
+							!n ? vp::SOLID : n->shape == skeldat::LIQUID ?
+							vp::CLIMB : n->shape == skeldat::TORCH ? vp::OPEN :
+							vp::SOLID;
+				}
+			}
+			f.cells[f.index(x, y, z)] = m_cell_of[id];
+		}
+	}
+
+	// The movement check (move_check.h), every second for each player not
+	// an admin: a move that could not have been made is pulled back to
+	// where the last check passed
+	// simplified: every player in the same tick, under a millisecond each
+	// (2026-10-15); spread them over the second when there are many
+	void check_moves()
+	{
+		for(auto &pair : m_players){
+			const size_t peer = pair.first;
+			Player &pl = pair.second;
+			update_role(peer, pl, false);
+			if(!pl.placed)
+				continue;
+			const float dt = (float)(m_time - pl.check_t);
+			if(pl.admin || pl.hp <= 0 || dt <= 0){
+				pl.cx = pl.x;
+				pl.cy = pl.y;
+				pl.cz = pl.z;
+				pl.check_t = m_time;
+				pl.check_air = false;
+				continue;
+			}
+			skeldat::move_check::Verdict v;
+			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+				v = skeldat::move_check::check([&](vp::Field &f){
+					fill_cells(w, f);
+				}, pl.cx, pl.cy, pl.cz, pl.x, pl.y, pl.z, dt, pl.check_air);
+			});
+			if(v.ok){
+				pl.cx = pl.x;
+				pl.cy = pl.y;
+				pl.cz = pl.z;
+				pl.check_t = m_time;
+				pl.check_air = v.air;
+				continue;
+			}
+			log_i(MODULE, "skeldat: %s pulled back from (%.1f, %.1f, %.1f) to "
+					"(%.1f, %.1f, %.1f): %s", cs(pl.name), pl.x, pl.y, pl.z,
+					pl.cx, pl.cy, pl.cz, v.why);
+			pl.x = pl.cx;
+			pl.y = pl.cy;
+			pl.z = pl.cz;
+			const bool air = pl.check_air;
+			send_position(peer, pl);
+			pl.check_air = air;
 		}
 	}
 

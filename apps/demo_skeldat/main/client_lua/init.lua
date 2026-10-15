@@ -194,7 +194,12 @@ local KEYS = {
 	{id = "inventory", label = "Inventory", default = "E",
 		shared = "inventory"},
 	{id = "hud", label = "The HUD on and off", default = "F1", shared = "hud"},
-	{id = "chat", label = "Chat", default = "T"},
+	{id = "chat", label = "Chat", default = "T", shared = "chat"},
+	{id = "fly", label = "Fly on and off (admins)", default = "K",
+		shared = "fly"},
+	{id = "fast", label = "Fast on and off (admins)", default = "J"},
+	{id = "noclip", label = "Noclip on and off, while flying (admins)",
+		default = "H", shared = "noclip"},
 }
 local key = {}
 game.key = key
@@ -628,12 +633,45 @@ chat_text:SetPosition(8, 8)
 local CHAT_SHOWN, CHAT_FOR = 6, 20
 local chat_recent = {}
 local chat_size = nil
-table.insert(require("buildat/module/chat").listeners, function(line)
+-- A line of the chat's, or the game's own to this player
+local function hud_line(line)
 	chat_recent[#chat_recent + 1] = {line = line, t = buildat.get_time_us()}
 	if #chat_recent > CHAT_SHOWN then
 		table.remove(chat_recent, 1)
 	end
+end
+table.insert(require("buildat/module/chat").listeners, hud_line)
+
+-- fly, fast and noclip, the admin's ([SKELDAT] decision 3), toggled by
+-- their keys as Luanti's; the server checks nobody else's moves
+local admin = false
+buildat.sub_packet("skeldat:role", function(data)
+	admin = data == "admin"
+	game.admin = admin
+	if not admin then
+		player.fly, player.fast, player.noclip = false, false, false
+	end
+	log:info("skeldat: role " .. (admin and "admin" or "player"))
 end)
+-- A drive's own: the modes set whatever the role, as a modified client
+-- would, for the server's movement check to be seen ("event
+-- skeldat_modes fly noclip fast", any of them)
+magic.SubscribeToEvent("command_seq:skeldat_modes", function(_, d)
+	local p = " " .. d:GetString("Param") .. " "
+	for _, mode in ipairs({"fly", "fast", "noclip"}) do
+		player[mode] = p:find(" " .. mode .. " ") ~= nil
+	end
+	log:info("skeldat: modes set by the drive:" .. p)
+end)
+local function toggle(mode, on_text, off_text)
+	if not admin then
+		hud_line("Only an admin can " .. on_text:lower() .. ".")
+		return
+	end
+	player[mode] = not player[mode]
+	hud_line(player[mode] and on_text or off_text)
+	log:info("skeldat: " .. mode .. " " .. tostring(player[mode]))
+end
 magic.SubscribeToEvent("Update", function()
 	local now = buildat.get_time_us()
 	while chat_recent[1] and now - chat_recent[1].t > CHAT_FOR * 1e6 do
@@ -679,6 +717,12 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		hud_on = not hud_on
 	elseif k == key.chat then
 		game.chat()
+	elseif k == key.fly then
+		toggle("fly", "Fly", "Walk")
+	elseif k == key.fast then
+		toggle("fast", "Move fast", "Move at walking speed")
+	elseif k == key.noclip then
+		toggle("noclip", "Noclip (while flying)", "Noclip off")
 	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
 		game.wield = k - magic.KEY_1 + 1
 		game.send("wield", tostring(game.wield - 1))
@@ -814,7 +858,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		fx, fz = s * f + c * r, c * f - s * r
 	end
 	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
-			sneak = not dead and down("sneak")})
+			sneak = not dead and down("sneak"), fast = player.fast})
 	if player.landed_at then
 		if player.landed_at > 14 then
 			game.send("fall", string.format("%.2f", player.landed_at))

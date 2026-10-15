@@ -21,6 +21,14 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
   inventory and pause menu; `worlds.lua` the world dialog; `mobs.lua`
   draws the mobs; `sounds.lua` and `music.lua` are skelenti's blip sounds
   and music, copied.
+- `main/move_check.h`: the movement check, the engine's voxel pathfinder
+  with a rule for a body in the air (self test in the header). Every
+  second a player who is not an admin is pulled back where the move could
+  not have been walked at twice the walk speed.
+- An admin (accounts' admin, or the launcher's own client) has fly (K),
+  fast (J) and noclip (H), and Admin... in the pause menu: each player's
+  inventory, an item given or a stack taken, into moderation's audit log
+  of the world's save, which the menu shows.
 - The chat is builtin/chat's: T (or the pause menu's Chat...) opens the
   console, the last lines show over the world for 20 s, and "Who's in the
   chat..." has the moderator's who-may-talk, mute, and reports, and
@@ -29,6 +37,9 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
 Start it from the launcher, or `buildat_server -m apps/demo_skeldat` and
 connect a client. Until a world runs, the first client on the server's
 machine picks one: play a save, name and create a new one, or delete one.
+
+A drive's event `skeldat_modes [fly] [fast] [noclip]` sets the modes
+whatever the role, as a modified client would.
 
 Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the dialog;
 `BUILDAT_SKELDAT_SEED=<n>` is a new world's seed; `BUILDAT_SKELDAT_TIME=0..1`
