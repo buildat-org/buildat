@@ -149,8 +149,9 @@ end
 
 -- The name of the player a spawner is attached to, or nil
 local function attached_player(def)
+	-- A ref is a userdata ([REF_IS_TABLE]): __ref_id is what says it is one
 	local o = def.attached
-	if type(o) == "table" and o.is_player and o:is_player() then
+	if core.__ref_id(o) and o:is_player() then
 		return o:get_player_name()
 	end
 	return nil
@@ -164,10 +165,7 @@ end
 
 local function spawner_record(kind, id, def, pos_min, pos_max, vel_min,
 		vel_max, acc_min, acc_max, exp_min, exp_max, size_min, size_max)
-	local attached = 0
-	if type(def.attached) == "table" then
-		attached = tonumber(core.__ref_id(def.attached)) or 0
-	end
+	local attached = tonumber(core.__ref_id(def.attached)) or 0
 	local flat = {kind, tostring(id), texture_name(def),
 			tostring(math.floor(number_or(def.amount, 1))),
 			tostring(number_or(def.time, 0)),
