@@ -1,4 +1,4 @@
--- Buildat: builtin/luanti/client_lua/skybox.lua
+-- Buildat: extensions/luanti_client/res/skybox.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -8,16 +8,14 @@
 -- nebulae is.
 --
 -- A node of its own, disabled until a game asks for one: the gradient sky
--- belongs to `builtin/voxel_shading` and every game that says nothing keeps
--- it exactly as it was. In its own file because init.lua is at Lua 5.1's
--- limit of two hundred locals in a chunk.
+-- is the client's own and every game that says nothing keeps it exactly as
+-- it was. Both clients run it ([LUANTI_SHARED]): the extension as its own
+-- res/skybox.lua, apps/vanilla's client as luanti/skybox.lua.
 --
 -- simplified: the cube is built from the pictures as they arrive and rebuilt
 -- only when the six names change. nodecore darkens its own faces by level,
 -- which arrives as six new names and is handled; a texture whose own content
 -- changes underneath is not.
-local log = buildat.Logger((require("buildat/module/luanti").app or {}).log
-		or "luanti")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}
@@ -54,8 +52,8 @@ end
 
 -- scene: where the node goes. gradient: the sky node create_skybox() made,
 -- which is turned off while a game's own is up. texture_of: an expression to
--- a resource name, which is luanti.texture().
-function M.new(scene, gradient, texture_of)
+-- a resource name, or nil for one not there yet. log: the client's Logger.
+function M.new(scene, gradient, texture_of, log)
 	local node = scene:CreateChild("GameSky")
 	local box = node:CreateComponent("Skybox")
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
@@ -65,6 +63,7 @@ function M.new(scene, gradient, texture_of)
 	-- nothing: a game may set its sky every few seconds, and minetest_game
 	-- does
 	local names_now = nil
+	local warned_names = nil
 	local self = {}
 
 	function self:set(textures)
@@ -80,7 +79,12 @@ function M.new(scene, gradient, texture_of)
 			local img = resource and
 					magic.cache:GetResource("Image", resource)
 			if img == nil then
-				log:warning("the game's skybox has no picture for face " .. i)
+				-- Once per sky: the caller retries while the media arrives
+				if warned_names ~= names then
+					warned_names = names
+					log:warning("the game's skybox has no picture for face "
+							.. i)
+				end
 				return
 			end
 			images[i] = img

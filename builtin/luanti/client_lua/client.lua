@@ -501,7 +501,7 @@ function sky_cube.refresh(force)
 end
 
 local game_skybox = skybox.new(scene, world_sky.node,
-		function(expr) return luanti.texture(expr) end)
+		function(expr) return luanti.texture(expr) end, log)
 
 local camera_node = scene:CreateChild("Camera")
 -- The component, because a waypoint asks it where a place in the world is

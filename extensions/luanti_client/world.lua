@@ -24,6 +24,7 @@ local particles = buildat.run_extension_file("res/particles.lua")
 local light_flood = buildat.run_extension_file("light.lua")
 local skyvis = buildat.run_extension_file("skyvis.lua")
 local sky_model = buildat.run_extension_file("res/sky_model.lua")
+local skybox = buildat.run_extension_file("res/skybox.lua")
 local world_particles = buildat.run_extension_file("world_particles.lua")
 local world_sounds = buildat.run_extension_file("world_sounds.lua")
 local world_pointing = buildat.run_extension_file("world_pointing.lua")
@@ -529,6 +530,9 @@ function M.new(magic, buildat, log, options)
 		sky_cube = skycube.new(magic, sky_material)
 		zone.zoneTexture = sky_cube.texture
 	end
+	-- A game's own six pictures in place of the gradient (the End's sky),
+	-- res/skybox.lua as vanilla's
+	local game_skybox = skybox.new(scene, sky_node, media_texture, log)
 
 	-- The sun, on the PBR path only. The vanilla path has no light in the
 	-- scene at all: the mesher bakes what a node is lit by into the vertex
@@ -2932,8 +2936,8 @@ function M.new(magic, buildat, log, options)
 					PHYS.day_horizon.b)
 		end
 		if sky and sky.type == "skybox" then
-			-- A game that gave its own textures gets its bgcolor, which is
-			-- the one thing of its sky that is understood here
+			-- A game that gave its own textures: res/skybox.lua draws them
+			-- (below), and its bgcolor is the fog and the light
 			top = sky_color("bgcolor", 1)
 			horizon = top
 		elseif sky and not sky.day_sky and sky.bgcolor then
@@ -3183,6 +3187,17 @@ function M.new(magic, buildat, log, options)
 			if not sky_static_at or
 					scene.elapsedTime >= sky_static_at + 1 then
 				sky_static_at = scene.elapsedTime
+				-- The game's own sky, retried here until its media is there;
+				-- what pbr reflects follows it
+				if sky and sky.type == "skybox" and sky.textures and
+						sky.textures[6] then
+					local cube = game_skybox:set(sky.textures)
+					if cube and sky_cube then
+						zone.zoneTexture = cube
+					end
+				elseif game_skybox:clear() and sky_cube then
+					zone.zoneTexture = sky_cube.texture
+				end
 				local sun = sky_bodies.sun
 				local moon = sky_bodies.moon
 				local stars = sky_bodies.stars
