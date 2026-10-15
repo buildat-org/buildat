@@ -40,6 +40,11 @@ static const double SECTION_PERIOD = 150;
 // The most expansions a section loaded after a long time away catches up
 // with: a month away is not a stalled load
 static const int CATCHUP_MAX = 16;
+// Bones grow off a voxel at MAX with air over it (user, 2026-10-15): the
+// chance a section's expansion grows one there, on top a bone block (to
+// STACK_MAX high) or a skull, two or a bone lying (main.cpp's expand()).
+// About two an expansion where a section's whole ground is at MAX.
+static const int GROW_ONE_IN = 2048, STACK_MAX = 4;
 
 // skelenti's danger of a place (apps/demo_skelenti/main/main.cpp): value
 // noise over 80-node cells, 0 to 1, a quarter of the world quiet. Only the

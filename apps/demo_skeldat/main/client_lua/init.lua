@@ -5,8 +5,10 @@
 -- skeldat's client ([SKELDAT]): the world drawn with voxel_shading, the
 -- player moved by player.lua (builtin/luanti's movement, copied), the
 -- pointing, digging and placing, the keys, day and night, and the others
--- as boxes. The HUD and the inventory are ui.lua's, Escape's menu
--- pause.lua's. main.cpp is the other end of every packet here.
+-- as boxes; the sounds of digging, placing and walking, and the music by
+-- the place. The HUD and the inventory are ui.lua's, Escape's menu
+-- pause.lua's, the mobs mobs.lua's. main.cpp is the other end of every
+-- packet here.
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
@@ -308,6 +310,7 @@ local function update_sky(dt)
 	local function dim(c, k)
 		return {r = c.r * k, g = c.g * k, b = c.b * k}
 	end
+	game.daylight = day
 	local k = 0.05 + 0.95 * day
 	voxel_shading.set_sky_look(dim(d.zenith, k), dim(d.horizon, k))
 	game.zone.ambientColor = magic.Color(0.26 * k, 0.33 * k, 0.46 * k)
@@ -457,10 +460,42 @@ do
 end
 
 --
+-- The sounds, made once at startup (sounds.lua): what a node sounds like
+-- by what it is made of, as skelenti's game has it
+-- simplified: only the player's own digging, placing and steps are heard;
+-- the others' are not sent
+--
+local sounds = load("main/sounds.lua")
+do
+	local t0 = buildat.get_time_us()
+	local made = sounds.make(require("buildat/extension/blip"))
+	log:info(string.format("skeldat: %d sounds made in %.0f ms", made,
+			(buildat.get_time_us() - t0) / 1000))
+end
+local mobs = load("main/mobs.lua")(game, sounds)
+local function material_of(name)
+	local n = name and game.nodes[name]
+	local g = n and n.groups or {}
+	return g.cracky and "stone" or g.crumbly and "earth" or
+			g.choppy and "wood" or g.snappy and "leaves" or nil
+end
+local function node_sound(what, name, p, gain)
+	local kind = material_of(name)
+	if what == "step" and kind then
+		kind = (name == "skeldat:gravel" or name == "skeldat:sand") and
+				"gravel" or kind == "leaves" and "earth" or kind
+	end
+	if kind then
+		mobs.play_at(what .. "_" .. kind, p.x, p.y, p.z, gain)
+	end
+end
+
+--
 -- Digging and placing
 --
 local pointed, above, pointed_def = nil, nil, nil
-local dig = nil -- {key, t, need}
+local dig = nil -- {key, t, need, name, sound_t}
+local pointed_mob = nil
 local place_cooldown = 0
 local function pkey(p)
 	return string.format("%d %d %d", p.x, p.y, p.z)
@@ -485,16 +520,21 @@ local function step_dig(dt)
 			dig = {key = k, t = 0}
 			return
 		end
-		dig = {key = k, t = 0, need = need}
+		dig = {key = k, t = 0, need = need, name = name, sound_t = 0}
 		game.send("dig_start", k)
 	end
 	if not dig.need then
 		return
 	end
 	dig.t = dig.t + dt
+	dig.sound_t = dig.sound_t - dt
 	if dig.t >= dig.need then
 		game.send("dig", k)
+		node_sound("dig", dig.name, pointed, 1.0)
 		dig = nil
+	elseif dig.sound_t <= 0 then
+		dig.sound_t = 0.3
+		node_sound("dig", dig.name, pointed, 0.5)
 	end
 end
 
@@ -523,6 +563,7 @@ local function on_place()
 		game.send("use", "")
 	elseif above and game.nodes[wielded()] then
 		game.send("place", pkey(above))
+		node_sound("place", wielded(), above, 1.0)
 	end
 end
 
@@ -627,6 +668,8 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, d)
 	end
 	if b == magic.MOUSEB_RIGHT then
 		on_place()
+	elseif b == magic.MOUSEB_LEFT and pointed_mob then
+		mobs.punch(pointed_mob)
 	end
 end)
 
@@ -639,6 +682,65 @@ magic.SubscribeToEvent("MouseWheel", function(_, d)
 	game.send("wield", tostring(game.wield - 1))
 	game.changed()
 end)
+
+--
+-- The steps: one each 1.6 voxels walked on the ground
+--
+local step = {d = 0, x = nil, z = nil}
+local function update_steps()
+	if step.x and player.on_ground then
+		step.d = step.d + math.sqrt((player.x - step.x) ^ 2 +
+				(player.z - step.z) ^ 2)
+		if step.d >= 1.6 then
+			step.d = 0
+			local p = buildat.Vector3(math.floor(player.x + 0.5),
+					math.floor(player.y - 0.4), math.floor(player.z + 0.5))
+			local def = voxel_def(voxelworld.get_static_voxel(p))
+			node_sound("step", def and def.name.block_name, p, 0.5)
+		end
+	end
+	step.x, step.z = player.x, player.z
+end
+
+--
+-- The music, by the place (skelenti's): a cave (little sky at the head),
+-- thick bones (the danger the fog reads), or sunrise; none otherwise. A
+-- mood holds for 2 s before the music follows it, so the edge of a cave
+-- does not flicker it. The first 5 s are not read: the world comes in.
+--
+local music = load("main/music.lua")
+music.new(magic, log, scene)
+local mood = {now = nil, seen = nil, held = 0, since = 0}
+local function mood_here()
+	if mood.since < 5 then
+		return nil
+	end
+	local v = voxelworld.get_static_voxel(buildat.Vector3(
+			math.floor(player.x + 0.5), math.floor(player.y + 1.6 + 0.5),
+			math.floor(player.z + 0.5)))
+	if v ~= nil and voxelworld.get_voxel_registry():light_sky_of(v) < 8 then
+		return "caves"
+	end
+	if fog.want >= 0.5 then
+		return "danger"
+	end
+	if game.day >= 0.2 and game.day < 0.33 then
+		return "sunrise"
+	end
+end
+local function update_music(dt)
+	mood.since = mood.since + dt
+	local m = mood_here()
+	if m ~= mood.seen then
+		mood.seen, mood.held = m, 0
+	end
+	mood.held = mood.held + dt
+	if mood.held >= 2 and mood.now ~= m then
+		mood.now = m
+		log:info("skeldat: mood " .. tostring(m))
+	end
+	music.update(dt, mood.now)
+end
 
 --
 -- The frame
@@ -658,6 +760,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		return
 	end
 	update_fog(dt)
+	update_music(dt)
 	if mouse_in_world and not held then
 		local m = magic.input:GetMouseMove()
 		yaw = (yaw + m.x * 0.12) % 360
@@ -688,16 +791,26 @@ magic.SubscribeToEvent("Update", function(_, d)
 		game.send("pos", string.format("%.3f %.3f %.3f %.1f %.1f",
 				player.x, player.y, player.z, yaw, pitch))
 	end
+	pointed_mob = nil
 	if dead then
 		pointed = nil
 	else
 		pointed, above, pointed_def = find_pointed()
+		-- A mob before the voxel takes the click
+		local eye = camera_node.worldPosition
+		local t, id = mobs.point(eye, camera_node.worldDirection,
+				POINT_RANGE)
+		if t and (not pointed or t < (buildat.Vector3(eye) -
+				pointed):Length() - 0.5) then
+			pointed, pointed_mob = nil, id
+		end
 	end
 	outline.enabled = pointed ~= nil
 	if pointed then
 		outline.position = magic.Vector3(pointed.x, pointed.y, pointed.z)
 	end
 	step_dig(dt)
+	update_steps()
 	ui.draw_hud()
 end)
 

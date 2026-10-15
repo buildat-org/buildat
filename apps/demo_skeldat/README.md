@@ -7,14 +7,20 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
 - `main/game.h`: the nodes, the items, the tools, the recipes and the
   inventory rules. Its self test:
   `g++ -std=c++11 -Isrc -DSKELDAT_GAME_TEST -x c++ apps/demo_skeldat/main/game.h -o /tmp/skeldat_game && /tmp/skeldat_game`
+- `main/bones.h`: the bones field's rule, how it grows and floods. Its
+  self test:
+  `g++ -std=c++11 -DSKELDAT_BONES_TEST -x c++ apps/demo_skeldat/main/bones.h -o /tmp/skeldat_bones && /tmp/skeldat_bones`
 - `main/main.cpp`: the world (Luanti's v7 mapgen through
   builtin/luanti_mapgen, fed skelenti's biomes, ores and trees; voxelworld
-  keeping the light and the save) and the players: where they are, what
-  they carry, dig, place, craft and cook, their health and breath, the
-  time of day.
+  keeping the light and the save), the bones in it, the players -- where
+  they are, what they carry, dig, place, craft and cook, their health and
+  breath, the time of day -- and skelenti's mobs, the boar and the
+  skeleton, spawning and burning by the bones around them.
 - `main/client_lua/`: the client. `player.lua` is builtin/luanti's
   movement, copied; `ui.lua` and `pause.lua` are skelenti's HUD,
-  inventory and pause menu; `worlds.lua` the world dialog.
+  inventory and pause menu; `worlds.lua` the world dialog; `mobs.lua`
+  draws the mobs; `sounds.lua` and `music.lua` are skelenti's blip sounds
+  and music, copied.
 
 Start it from the launcher, or `buildat_server -m apps/demo_skeldat` and
 connect a client. Until a world runs, the first client on the server's
@@ -23,7 +29,9 @@ machine picks one: play a save, name and create a new one, or delete one.
 Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the dialog;
 `BUILDAT_SKELDAT_SEED=<n>` is a new world's seed; `BUILDAT_SKELDAT_TIME=0..1`
 the time of day it starts at (0.5 noon); `BUILDAT_SKELDAT_SPAWN="x z"` a new
-world's spawn column, in a danger zone or not.
+world's spawn column, in a danger zone or not;
+`BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
+at x, z from the first player, once.
 
 ## Licences
 
