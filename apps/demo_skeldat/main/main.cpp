@@ -4,8 +4,8 @@
 //
 // skeldat ([SKELDAT]): skelenti made fresh in Buildat, no Luanti game under
 // it. The rules are game.h's; this is the world they run in -- Luanti's own
-// v7 mapgen (builtin/luanti_mapgen) fed skelenti's biomes, ores and trees,
-// voxelworld keeping the light and the saves -- and the players: where
+// valleys mapgen (builtin/luanti_mapgen) fed skelenti's biomes, ores and
+// trees, voxelworld keeping the light and the saves -- and the players: where
 // they are, what they carry, what they dig, place, craft and cook.
 //
 // The world: until one runs, a joining client gets the world dialog
@@ -789,7 +789,7 @@ struct Module: public interface::Module
 	luanti_mapgen::Params mapgen_params(uint32_t seed)
 	{
 		luanti_mapgen::Params mp;
-		mp.mgname = "v7";
+		mp.mgname = "valleys";
 		mp.seed = seed;
 		mp.water_level = 1;
 		mp.section_size = 64;

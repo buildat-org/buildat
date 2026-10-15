@@ -10,7 +10,7 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
 - `main/bones.h`: the bones field's rule, how it grows and floods. Its
   self test:
   `g++ -std=c++11 -DSKELDAT_BONES_TEST -x c++ apps/demo_skeldat/main/bones.h -o /tmp/skeldat_bones && /tmp/skeldat_bones`
-- `main/main.cpp`: the world (Luanti's v7 mapgen through
+- `main/main.cpp`: the world (Luanti's valleys mapgen through
   builtin/luanti_mapgen, fed skelenti's biomes, ores and trees; voxelworld
   keeping the light and the save), the bones in it, the players -- where
   they are, what they carry, dig, place, craft and cook, their health and

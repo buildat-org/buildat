@@ -4,7 +4,8 @@
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
-# two runs of one world at seed 3, noon.
+# two runs of one world at seed 2 (valleys: a dry spawn, no steps
+# over one voxel ahead), noon.
 # The first, two players: player1 walks and jumps unchecked by the
 # movement check, and is pulled back once a drive forces fly, fast and
 # noclip; digs a voxel without bones, which drops; a test skeleton burns in
@@ -39,11 +40,11 @@ g++ -O2 -std=c++14 -I"$here/src" "$here/util/voxel_path_test.cpp" \
 echo "$path" | tail -1
 
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
-server() # <log> [args]: the world "w" at seed 3, noon
+server() # <log> [args]: the world "w" at seed 2, noon
 {
 	local log=$1
 	shift
-	BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=3 BUILDAT_SKELDAT_TIME=0.5 \
+	BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 		-D "$t/srv" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($log)"
@@ -91,7 +92,9 @@ keyup Space
 delay 1500
 event skeldat_modes fast
 keydown W
+keydown Space
 delay 2500
+keyup Space
 keyup W
 delay 1500
 event skeldat_modes fly noclip
@@ -203,13 +206,14 @@ keyup W
 keypress J
 keypress H
 keypress K
-delay 15000
+delay 2000
 look 180 -70
 mouse_down left
 delay 2500
 mouse_up left
 delay 1000
 screenshot $t/zone.png
+delay 12000
 quit
 EOF
 cat > "$t/b2.cmds" <<EOF
