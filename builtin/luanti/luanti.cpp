@@ -38,6 +38,7 @@
 #include "luanti/shapes.h"
 #include "luanti/node_registry.h"
 #include "luanti/media.h"
+#include "luanti/session.h"
 #include <sqlite3.h>
 #include <fstream>
 #include <cstdlib>
@@ -644,7 +645,8 @@ static int64_t pos_key(int32_t x, int32_t y, int32_t z)
 			((int64_t)(z & 0x1fffff));
 }
 
-struct Module: public interface::Module, public luanti::Interface
+struct Module: public interface::Module, public luanti::Interface,
+		public luanti_session::Game
 {
 	interface::Server *m_server;
 	lua_State *m_lua = nullptr;
@@ -943,7 +945,9 @@ struct Module: public interface::Module, public luanti::Interface
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/luanti:inv_action"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		session_init();
+		for(const char *n : luanti_session::PACKETS)
+			m_server->sub_event(this, Event::t(
+					ss_("network:packet_received/luanti:")+n));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -993,28 +997,12 @@ struct Module: public interface::Module, public luanti::Interface
 		EVENT_TYPEN("network:packet_received/luanti:inv_action",
 				on_inv_action, network::Packet)
 		// [LUANTI_APP_GLUE] The player session's (session.h)
-		EVENT_TYPEN("network:packet_received/luanti:where", on_where,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:fell", on_fell,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:chat", on_chat,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:wield", on_wield,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:drop", on_drop,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:dig", on_dig,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:dig_start", on_dig_start,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:punch_object",
-				on_punch_object, network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:place", on_place,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:use", on_use,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/luanti:world_in", on_world_in,
-				network::Packet)
+		for(const char *n : luanti_session::PACKETS){
+			if(type == Event::t(ss_("network:packet_received/luanti:")+n)){
+				m_session.packet(*dynamic_cast<const network::Packet*>(p));
+				return;
+			}
+		}
 	}
 
 	void on_start()
@@ -1620,7 +1608,7 @@ struct Module: public interface::Module, public luanti::Interface
 	{
 		if(!m_game_running)
 			return;
-		session_tick(event.dtime);
+		m_session.tick(event.dtime);
 		m_step_accum += event.dtime;
 		if(m_step_accum < STEP_S)
 			return;
@@ -3658,7 +3646,20 @@ struct Module: public interface::Module, public luanti::Interface
 	#include "lua_bindings.h"
 
 	#include "requests.h"
-	#include "session.h"
+	// [LUANTI_APP_GLUE] The player session (session.h), this the Game
+	luanti_session::Session m_session{*this};
+	void join_player(const ss_ &name, size_t peer, bool admin)
+	{
+		m_session.join(name, peer, admin);
+	}
+	bool player_in_world(size_t peer)
+	{
+		return m_session.in_world(peer);
+	}
+	void set_chat_limit(double burst)
+	{
+		m_session.set_chat_limit(burst);
+	}
 
 	// Interface
 

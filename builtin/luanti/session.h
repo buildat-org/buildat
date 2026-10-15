@@ -4,16 +4,72 @@
 //
 // [LUANTI_APP_GLUE] The player session: what a client's player does,
 // from the app's join_player() to its leave. The input packets are
-// luanti:* and handled here, each a decode and a call into the game, so
+// luanti:* and handled here, each a decode and a call into the Game, so
 // an app that runs a game has a playable one without forwarding them.
-// Included by luanti.cpp inside struct Module. (Were apps/vanilla's main:*
-// handlers.)
+// (Were apps/vanilla's main:* handlers.) A plain header any module
+// includes ([SKELDAT_LUANTI_PARTS] 8): builtin/luanti's Module is the Game
+// that is Luanti's Lua, demo_skeldat's its own C++ rules. The owner
+// subscribes to PACKETS and hands those to packet(), calls tick() from its
+// tick and left() at a disconnect. Logs as "luanti".
+#pragma once
+#include "core/types.h"
+#include "network/api.h"
+#include "interface/os.h"
+#include "interface/polyvox_cereal.h"
+#include <cereal/archives/portable_binary.hpp>
+#include <cereal/types/vector.hpp>
+#include <cereal/types/string.hpp>
+#include <sstream>
+
+namespace luanti_session
+{
+
+// What a session calls on, by the player's name. A player is placed at
+// the join and in the world once its client has it loaded.
+struct Game
+{
+	virtual ~Game(){}
+	virtual void place_player(const ss_ &name, size_t peer) = 0;
+	virtual void add_player(const ss_ &name, size_t peer) = 0;
+	virtual void remove_player(const ss_ &name) = 0;
+	virtual void set_admin(const ss_ &name, bool admin) = 0;
+	// Off the network: the Game bounds them
+	virtual void set_player_pos(const ss_ &name, float x, float y, float z,
+			float look_h, float look_v, int32_t controls) = 0;
+	virtual void player_fell(const ss_ &name, float speed) = 0;
+	virtual void chat_message(const ss_ &name, const ss_ &message) = 0;
+	// To one player; "" is everyone
+	virtual void chat_send(const ss_ &to, const ss_ &text) = 0;
+	// One-based
+	virtual void set_wield_index(const ss_ &name, int index) = 0;
+	virtual bool drop_wielded(const ss_ &name, int count) = 0;
+	virtual bool dig_node(int32_t x, int32_t y, int32_t z,
+			const ss_ &name) = 0;
+	virtual bool punch_node(int32_t x, int32_t y, int32_t z,
+			const ss_ &name) = 0;
+	virtual bool punch_object(int32_t id, const ss_ &name) = 0;
+	virtual bool place_node(int32_t under_x, int32_t under_y,
+			int32_t under_z, int32_t above_x, int32_t above_y,
+			int32_t above_z, const ss_ &name, bool sneak) = 0;
+	virtual bool use_wielded(const ss_ &name) = 0;
+};
+
+// The packets a session takes, after "luanti:"
+static const char *const PACKETS[] = {"where", "fell", "chat", "wield",
+		"drop", "dig", "dig_start", "punch_object", "place", "use",
+		"world_in"};
+
+struct Session
+{
+	Game &m_game;
+	Session(Game &game): m_game(game){}
 
 	// Joined by the app, placed and loading, by the seconds waited; and in
 	// the world, which the client's luanti:world_in or WORLD_IN_LIMIT does
 	// ([JOIN_WHEN_LOADED])
 	sm_<network::PeerInfo::Id, float> m_loading;
 	std::set<network::PeerInfo::Id> m_in_world;
+	sm_<network::PeerInfo::Id, ss_> m_names;
 	// Whether the app said the player is an admin, applied once in
 	std::set<network::PeerInfo::Id> m_join_admin;
 	// Past the loading screen's own 60 s after the first chunk, which a
@@ -52,23 +108,16 @@
 	sm_<network::PeerInfo::Id, WhereAge> m_where_age;
 	float m_where_timer = 0.0f;
 
-	void session_init()
+	void join(const ss_ &name, size_t peer, bool admin)
 	{
-		for(const char *n : {"where", "fell", "chat", "wield", "drop", "dig",
-				"dig_start", "punch_object", "place", "use", "world_in"})
-			m_server->sub_event(this, Event::t(
-					ss_("network:packet_received/luanti:")+n));
-	}
-
-	void join_player(const ss_ &name, size_t peer, bool admin)
-	{
-		place_player(name, peer);
+		m_names[peer] = name;
+		m_game.place_player(name, peer);
 		m_loading[peer] = 0;
 		if(admin)
 			m_join_admin.insert(peer);
 	}
 
-	bool player_in_world(size_t peer)
+	bool in_world(size_t peer)
 	{
 		return m_in_world.count(peer) != 0;
 	}
@@ -78,7 +127,7 @@
 		m_chat_burst = burst;
 	}
 
-	void session_left(network::PeerInfo::Id peer)
+	void left(network::PeerInfo::Id peer)
 	{
 		const bool had = m_loading.count(peer) || m_in_world.count(peer);
 		m_loading.erase(peer);
@@ -87,11 +136,13 @@
 		m_pending_where.erase(peer);
 		m_where_age.erase(peer);
 		m_chat_bucket.erase(peer);
-		auto it = m_peer_players.find(peer);
-		// A copy: remove_player() erases what it refers to
-		const ss_ name = it == m_peer_players.end() ? ss_() : it->second;
-		if(had && !name.empty())
-			remove_player(name);
+		auto it = m_names.find(peer);
+		if(it == m_names.end())
+			return;
+		const ss_ name = it->second;
+		m_names.erase(it);
+		if(had)
+			m_game.remove_player(name);
 	}
 
 	// A joined player's name, or "" for a peer whose packets are nobody's
@@ -99,8 +150,29 @@
 	{
 		if(!m_in_world.count(peer))
 			return "";
-		auto it = m_peer_players.find(peer);
-		return it == m_peer_players.end() ? ss_() : it->second;
+		auto it = m_names.find(peer);
+		return it == m_names.end() ? ss_() : it->second;
+	}
+
+	// A luanti:* packet of PACKETS; false for any other
+	bool packet(const network::Packet &packet)
+	{
+		if(packet.name.compare(0, 7, "luanti:") != 0)
+			return false;
+		const ss_ n = packet.name.substr(7);
+		if(n == "where") on_where(packet);
+		else if(n == "fell") on_fell(packet);
+		else if(n == "chat") on_chat(packet);
+		else if(n == "wield") on_wield(packet);
+		else if(n == "drop") on_drop(packet);
+		else if(n == "dig") on_dig(packet);
+		else if(n == "dig_start") on_dig_start(packet);
+		else if(n == "punch_object") on_punch_object(packet);
+		else if(n == "place") on_place(packet);
+		else if(n == "use") on_use(packet);
+		else if(n == "world_in") on_world_in(packet);
+		else return false;
+		return true;
 	}
 
 	// The client's loading screen has ended: the player goes in, seen and
@@ -109,34 +181,35 @@
 	{
 		if(!m_loading.count(packet.sender))
 			return;
-		log_i(MODULE, "Client %u: luanti:world_in", (unsigned)packet.sender);
+		log_i("luanti", "Client %u: luanti:world_in", (unsigned)packet.sender);
 		put_in_world(packet.sender);
 	}
 
 	void put_in_world(network::PeerInfo::Id peer)
 	{
 		m_loading.erase(peer);
-		auto it = m_peer_players.find(peer);
-		if(it == m_peer_players.end())
+		auto it = m_names.find(peer);
+		if(it == m_names.end())
 			return;
 		m_in_world.insert(peer);
 		const ss_ name = it->second;
-		add_player(name, peer);
+		m_game.add_player(name, peer);
 		if(m_join_admin.count(peer))
-			set_admin(name, true);
+			m_game.set_admin(name, true);
 	}
 
-	// The loading limit and the positions, from on_tick: one visit to the
-	// game for every player who has moved since the last one, at the rate
-	// a client sends at rather than the server's thirty a second
-	void session_tick(float dtime)
+	// The loading limit and the positions, from the owner's tick: one
+	// visit to the game for every player who has moved since the last
+	// one, at the rate a client sends at rather than the server's thirty
+	// a second
+	void tick(float dtime)
 	{
 		for(auto it = m_loading.begin(); it != m_loading.end();){
 			const network::PeerInfo::Id peer = it->first;
 			it->second += dtime;
 			++it;
 			if(m_loading[peer] >= WORLD_IN_LIMIT){
-				log_i(MODULE, "Client %u: no luanti:world_in in %.0f s; put in",
+				log_i("luanti", "Client %u: no luanti:world_in in %.0f s; put in",
 						(unsigned)peer, (double)WORLD_IN_LIMIT);
 				put_in_world(peer);
 			}
@@ -148,12 +221,12 @@
 		sm_<network::PeerInfo::Id, Where> pending;
 		pending.swap(m_pending_where);
 		for(const auto &pair : pending){
-			auto it = m_peer_players.find(pair.first);
-			if(it == m_peer_players.end())
+			auto it = m_names.find(pair.first);
+			if(it == m_names.end())
 				continue;
 			const Where &w = pair.second;
-			set_player_pos(it->second, (float)w.x, (float)w.y, (float)w.z,
-					(float)w.look_h, (float)w.look_v, w.controls);
+			m_game.set_player_pos(it->second, (float)w.x, (float)w.y,
+					(float)w.z, (float)w.look_h, (float)w.look_v, w.controls);
 		}
 	}
 
@@ -169,7 +242,7 @@
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(w.x, w.y, w.z, w.look_h, w.look_v, w.controls, w.sent_us);
 		} catch(std::exception &e){
-			log_w(MODULE, "luanti:where: %s", e.what());
+			log_w("luanti", "luanti:where: %s", e.what());
 			return;
 		}
 		m_pending_where[packet.sender] = w;
@@ -185,7 +258,7 @@
 			if(a.window_from_us == 0)
 				a.window_from_us = now;
 			if(now - a.window_from_us >= 5000000){
-				log_i(MODULE, "where: the worst wait behind the wire in "
+				log_i("luanti", "where: the worst wait behind the wire in "
 						"five seconds %d ms (client %u)",
 						(int)(a.worst_us / 1000), (unsigned)packet.sender);
 				a.worst_us = 0;
@@ -203,7 +276,7 @@
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(values);
 		} catch(std::exception &e){
-			log_w(MODULE, "luanti:%s: %s", what, e.what());
+			log_w("luanti", "luanti:%s: %s", what, e.what());
 			return false;
 		}
 		return true;
@@ -226,12 +299,12 @@
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(speed);
 		} catch(std::exception &e){
-			log_w(MODULE, "luanti:fell: %s", e.what());
+			log_w("luanti", "luanti:fell: %s", e.what());
 			return;
 		}
 		if(!(speed > 14.0))
 			return;
-		player_fell(name, (float)std::min(speed, 200.0));
+		m_game.player_fell(name, (float)std::min(speed, 200.0));
 	}
 
 	// A line a player typed: the callbacks run, the "/" commands among
@@ -251,12 +324,12 @@
 			b.first = std::max(0.0, b.first - (now - b.second) / 1e6);
 			b.second = now;
 			if(b.first + 1 > m_chat_burst){
-				chat_send(name, "Too many lines: wait a moment");
+				m_game.chat_send(name, "Too many lines: wait a moment");
 				return;
 			}
 			b.first += 1;
 		}
-		chat_message(name, values[0]);
+		m_game.chat_message(name, values[0]);
 	}
 
 	// Which hotbar slot the player is holding: what the next dig or place
@@ -270,7 +343,7 @@
 			return;
 		const int index = atoi(values[0].c_str());
 		if(index >= 1 && index <= 32)
-			set_wield_index(name, index);
+			m_game.set_wield_index(name, index);
 	}
 
 	// The drop key: how many of the held stack go, zero all of them, which
@@ -282,50 +355,47 @@
 		if(name.empty() || !decode_strings(packet, "drop", values))
 			return;
 		const int count = values.empty() ? 0 : atoi(values[0].c_str());
-		const bool dropped = drop_wielded(name, count < 0 ? 0 : count);
-		log_v(MODULE, "C%u: luanti:drop %i: %s", (unsigned)packet.sender,
+		const bool dropped = m_game.drop_wielded(name, count < 0 ? 0 : count);
+		log_v("luanti", "C%u: luanti:drop %i: %s", (unsigned)packet.sender,
 				count, dropped ? "dropped" : "nothing");
 	}
 
 	// A voxel position packet, or false with a warning
 	static bool decode_voxel(const network::Packet &packet, const char *what,
-			pv::Vector3DInt32 &p)
+			PolyVox::Vector3DInt32 &p)
 	{
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(p);
 		} catch(std::exception &e){
-			log_w(MODULE, "luanti:%s: %s", what, e.what());
+			log_w("luanti", "luanti:%s: %s", what, e.what());
 			return false;
 		}
 		return true;
 	}
 
-	// The dig, timed on the client (core.__dig_props()) and sent when it is
-	// done: core.dig_node() hands the node to the vendored builtin, which
-	// is where can_dig, the drops and every callback around a dig live
+	// The dig, timed on the client and sent when it is done
 	void on_dig(const network::Packet &packet)
 	{
 		const ss_ name = in_world_name(packet.sender);
-		pv::Vector3DInt32 p;
+		PolyVox::Vector3DInt32 p;
 		if(name.empty() || !decode_voxel(packet, "dig", p))
 			return;
-		const bool dug = dig_node(p.getX(), p.getY(), p.getZ(), name);
-		log_v(MODULE, "C%u: luanti:dig (%i, %i, %i): %s",
+		const bool dug = m_game.dig_node(p.getX(), p.getY(), p.getZ(), name);
+		log_v("luanti", "C%u: luanti:dig (%i, %i, %i): %s",
 				(unsigned)packet.sender, p.getX(), p.getY(), p.getZ(),
 				dug ? "dug" : "nothing");
 	}
 
-	// The button going down, where a held dig starts: the node is punched,
-	// so a mod's on_punch runs on the way in
+	// The button going down, where a held dig starts: the node is punched
 	void on_dig_start(const network::Packet &packet)
 	{
 		const ss_ name = in_world_name(packet.sender);
-		pv::Vector3DInt32 p;
+		PolyVox::Vector3DInt32 p;
 		if(name.empty() || !decode_voxel(packet, "dig_start", p))
 			return;
-		punch_node(p.getX(), p.getY(), p.getZ(), name);
+		m_game.punch_node(p.getX(), p.getY(), p.getZ(), name);
 	}
 
 	// The same button at an object: one punch per press, and no faster than
@@ -338,34 +408,33 @@
 				values.empty())
 			return;
 		const int32_t id = atoi(values[0].c_str());
-		const bool punched = punch_object(id, name);
-		log_v(MODULE, "C%u: luanti:punch_object %i: %s",
+		const bool punched = m_game.punch_object(id, name);
+		log_v("luanti", "C%u: luanti:punch_object %i: %s",
 				(unsigned)packet.sender, id, punched ? "punched" : "nothing");
 	}
 
-	// The other button: the pointed node's on_rightclick if it has one and
-	// the wielded item's on_place otherwise (place_node()). under is the
-	// node pointed at and above the empty voxel in front of it; sneak is
-	// whether the "build against this" key was held.
+	// The other button: under is the node pointed at and above the empty
+	// voxel in front of it; sneak is whether the "build against this" key
+	// was held
 	void on_place(const network::Packet &packet)
 	{
 		const ss_ name = in_world_name(packet.sender);
 		if(name.empty())
 			return;
-		pv::Vector3DInt32 under, above;
+		PolyVox::Vector3DInt32 under, above;
 		uint8_t sneak = 0;
 		try {
 			std::istringstream is(packet.data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(under, above, sneak);
 		} catch(std::exception &e){
-			log_w(MODULE, "luanti:place: %s", e.what());
+			log_w("luanti", "luanti:place: %s", e.what());
 			return;
 		}
-		const bool placed = place_node(under.getX(), under.getY(),
+		const bool placed = m_game.place_node(under.getX(), under.getY(),
 				under.getZ(), above.getX(), above.getY(), above.getZ(), name,
 				sneak != 0);
-		log_v(MODULE, "C%u: luanti:place (%i, %i, %i): %s",
+		log_v("luanti", "C%u: luanti:place (%i, %i, %i): %s",
 				(unsigned)packet.sender, above.getX(), above.getY(),
 				above.getZ(), placed ? "placed" : "nothing");
 	}
@@ -377,9 +446,12 @@
 		const ss_ name = in_world_name(packet.sender);
 		if(name.empty())
 			return;
-		const bool used = use_wielded(name);
-		log_v(MODULE, "C%u: luanti:use: %s", (unsigned)packet.sender,
+		const bool used = m_game.use_wielded(name);
+		log_v("luanti", "C%u: luanti:use: %s", (unsigned)packet.sender,
 				used ? "used" : "nothing");
 	}
+};
+
+}
 
 // vim: set noet ts=4 sw=4:

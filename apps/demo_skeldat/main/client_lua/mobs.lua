@@ -6,7 +6,7 @@
 -- nodes (main.cpp) dressed as boxes of the skins' layout, the legs and arms
 -- swinging as they walk, lit by the voxel light where they stand, red for
 -- a moment when hurt. M.point() finds the one the eyes are on; a click at
--- it is sent as skeldat:punch. Their sounds come by name (skeldat:sound)
+-- it is sent as luanti:punch_object. Their sounds come by name (skeldat:sound)
 -- and are played from sounds.lua's.
 --   local mobs = run_script_file("main/mobs.lua")(game, sounds)
 -- game.light_units: the frame's light (init.lua's update_sky), and
@@ -246,7 +246,7 @@ return function(game, sounds)
 
 	function M.punch(id)
 		log:info("skeldat: punch " .. id)
-		game.send("punch", tostring(id))
+		game.send_luanti("punch_object", {tostring(id)}, {"array", "string"})
 	end
 
 	-- A sound by name at a place, heard from up to 24 voxels

@@ -32,6 +32,7 @@
 #include "interface/voxel.h"
 #include "luanti/node_registry.h"
 #include "luanti/media.h"
+#include "luanti/session.h"
 #include "accounts/api.h"
 #include "chat/api.h"
 #include "client_file/api.h"
@@ -306,7 +307,7 @@ struct AuditHost: public moderation::Host
 	void notify(const json::Value &statement){}
 };
 
-struct Module: public interface::Module
+struct Module: public interface::Module, public luanti_session::Game
 {
 	interface::Server *m_server;
 	const skeldat::Game m_game = skeldat::make_game();
@@ -377,10 +378,12 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
 		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		for(const char *n : {"world_play", "world_create", "world_delete",
-				"pos", "dig_start", "dig", "place", "use", "wield", "open",
-				"close", "move", "craft", "fall", "respawn", "punch", "admin"})
+				"open", "close", "move", "craft", "respawn", "admin"})
 			m_server->sub_event(this, Event::t(
 					ss_("network:packet_received/skeldat:")+n));
+		for(const char *n : luanti_session::PACKETS)
+			m_server->sub_event(this, Event::t(
+					ss_("network:packet_received/luanti:")+n));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -408,11 +411,17 @@ struct Module: public interface::Module
 				on_admin, network::Packet)
 		// The rest of the game's packets go to one handler, by name
 		static const ss_ GAME = "network:packet_received/skeldat:";
-		for(const char *n : {"pos", "dig_start", "dig", "place", "use",
-				"wield", "open", "close", "move", "craft", "fall",
-				"respawn", "punch"}){
+		for(const char *n : {"open", "close", "move", "craft", "respawn"}){
 			if(type == Event::t(GAME+n)){
 				on_game_packet(*dynamic_cast<const network::Packet*>(p));
+				return;
+			}
+		}
+		// What a player does in the world: builtin/luanti's session
+		// (luanti/session.h), its calls this Module's (Game, below)
+		for(const char *n : luanti_session::PACKETS){
+			if(type == Event::t(ss_("network:packet_received/luanti:")+n)){
+				m_session.packet(*dynamic_cast<const network::Packet*>(p));
 				return;
 			}
 		}
@@ -1130,6 +1139,20 @@ struct Module: public interface::Module
 		});
 		if(name.empty())
 			name = "player"+itos(peer);
+		m_session.join(name, peer, false);
+	}
+
+	//
+	// The session's calls (luanti_session::Game), by the player's name.
+	// Placed at the join; in the world when the client says it has the
+	// world loaded (luanti:world_in), which changes nothing here.
+	// The leave is on_client_disconnected's.
+	//
+
+	luanti_session::Session m_session{*this};
+
+	void place_player(const ss_ &name, size_t peer)
+	{
 		Player &pl = m_players[peer];
 		pl.name = name;
 		ss_ v;
@@ -1154,6 +1177,134 @@ struct Module: public interface::Module
 		m_load_points_dirty = true;
 		log_i(MODULE, "skeldat: %s joins at (%.1f, %.1f, %.1f)", cs(name),
 				pl.x, pl.y, pl.z);
+	}
+
+	void add_player(const ss_ &name, size_t peer)
+	{
+		log_i(MODULE, "skeldat: %s is in the world", cs(name));
+	}
+	void remove_player(const ss_ &name){}
+	// accounts' admin is update_role()'s
+	void set_admin(const ss_ &name, bool admin){}
+	// Chat is builtin/chat's
+	void chat_message(const ss_ &name, const ss_ &message){}
+	void chat_send(const ss_ &to, const ss_ &text){}
+	// simplified: no items on the ground to drop into
+	bool drop_wielded(const ss_ &name, int count){ return false; }
+
+	// The living player by name; the dead do nothing but respawn, which is
+	// skeldat:respawn
+	// simplified: a walk over the players, a handful at most
+	Player *alive(const ss_ &name, size_t &peer)
+	{
+		for(auto &pair : m_players){
+			if(pair.second.name == name){
+				peer = pair.first;
+				return pair.second.hp > 0 ? &pair.second : nullptr;
+			}
+		}
+		return nullptr;
+	}
+
+	void set_player_pos(const ss_ &name, float x, float y, float z,
+			float look_h, float look_v, int32_t controls)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(!pl)
+			return;
+		for(float v : {x, y, z, look_h})
+			if(!std::isfinite(v) || std::fabs(v) > 1e6f)
+				return;
+		auto section = [](const Player &pl){
+			return std::make_tuple((int)std::floor(pl.x / 16),
+					(int)std::floor(pl.y / 16), (int)std::floor(pl.z / 16));
+		};
+		const auto was = section(*pl);
+		pl->x = x;
+		pl->y = y;
+		pl->z = z;
+		// Luanti's horizontal look turns the other way from Urho's yaw
+		pl->yaw = -look_h * 180 / (float)M_PI;
+		if(section(*pl) != was)
+			m_load_points_dirty = true;
+	}
+
+	void player_fell(const ss_ &name, float speed)
+	{
+		size_t peer;
+		if(Player *pl = alive(name, peer))
+			hurt(peer, *pl, std::min(HP_MAX, (int)(speed - FALL_TOLERANCE)),
+					"falls");
+	}
+
+	void set_wield_index(const ss_ &name, int index)
+	{
+		size_t peer;
+		if(Player *pl = alive(name, peer))
+			pl->wield = std::max(0, std::min(8, index - 1));
+	}
+
+	bool dig_node(int32_t x, int32_t y, int32_t z, const ss_ &name)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(pl)
+			dig(peer, *pl, x, y, z);
+		return pl != nullptr;
+	}
+
+	// Where a held dig starts: dig() wants it to have taken its time
+	bool punch_node(int32_t x, int32_t y, int32_t z, const ss_ &name)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(!pl)
+			return false;
+		pl->dig_at = pos_key(x, y, z);
+		pl->dig_t0 = m_time;
+		return true;
+	}
+
+	bool punch_object(int32_t id, const ss_ &name)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(pl)
+			punch(peer, *pl, (uint32_t)id);
+		return pl != nullptr;
+	}
+
+	// Into above; under is what was pointed at, and the table's and the
+	// furnace's windows are skeldat:open
+	bool place_node(int32_t under_x, int32_t under_y, int32_t under_z,
+			int32_t above_x, int32_t above_y, int32_t above_z,
+			const ss_ &name, bool sneak)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(pl)
+			place(peer, *pl, above_x, above_y, above_z);
+		return pl != nullptr;
+	}
+
+	// Food is eaten
+	bool use_wielded(const ss_ &name)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(!pl)
+			return false;
+		Stack &st = pl->main[pl->wield];
+		const skeldat::ItemDef *d = m_game.item(st.name);
+		if(!d || d->eat <= 0 || pl->hp >= HP_MAX)
+			return false;
+		pl->hp = std::min(HP_MAX, pl->hp + d->eat);
+		st.take(1);
+		log_i(MODULE, "skeldat: %s eats %s", cs(pl->name), cs(d->name));
+		send_inventory(peer, *pl);
+		send_stats(peer, *pl);
+		return true;
 	}
 
 	void respawn(size_t peer, Player &pl)
@@ -1266,6 +1417,7 @@ struct Module: public interface::Module
 			save_player(it->second);
 			m_players.erase(it);
 		}
+		m_session.left(peer);
 		m_shown.erase(peer);
 		m_waiting.erase(peer);
 		m_load_points_dirty = true;
@@ -1369,52 +1521,7 @@ struct Module: public interface::Module
 		}
 		if(pl.hp <= 0)
 			return; // the dead do nothing else
-		if(what == "pos"){
-			const int sx = (int)std::floor(pl.x / 16),
-					sz = (int)std::floor(pl.z / 16),
-					sy = (int)std::floor(pl.y / 16);
-			float x, y, z, yaw;
-			if(!(is>>x>>y>>z>>yaw) || !std::isfinite(x) ||
-					!std::isfinite(y) || !std::isfinite(z) ||
-					!std::isfinite(yaw) || std::fabs(x) > 1e6f ||
-					std::fabs(y) > 1e6f || std::fabs(z) > 1e6f)
-				return;
-			pl.x = x;
-			pl.y = y;
-			pl.z = z;
-			pl.yaw = yaw;
-			if(sx != (int)std::floor(pl.x / 16) ||
-					sz != (int)std::floor(pl.z / 16) ||
-					sy != (int)std::floor(pl.y / 16))
-				m_load_points_dirty = true;
-		} else if(what == "wield"){
-			is>>pl.wield;
-			pl.wield = std::max(0, std::min(8, pl.wield));
-		} else if(what == "dig_start"){
-			int x, y, z;
-			if(is>>x>>y>>z){
-				pl.dig_at = pos_key(x, y, z);
-				pl.dig_t0 = m_time;
-			}
-		} else if(what == "dig"){
-			int x, y, z;
-			if(is>>x>>y>>z)
-				dig(peer, pl, x, y, z);
-		} else if(what == "place"){
-			int x, y, z;
-			if(is>>x>>y>>z)
-				place(peer, pl, x, y, z);
-		} else if(what == "use"){
-			Stack &st = pl.main[pl.wield];
-			const skeldat::ItemDef *d = m_game.item(st.name);
-			if(d && d->eat > 0 && pl.hp < HP_MAX){
-				pl.hp = std::min(HP_MAX, pl.hp + d->eat);
-				st.take(1);
-				log_i(MODULE, "skeldat: %s eats %s", cs(pl.name), cs(d->name));
-				send_inventory(peer, pl);
-				send_stats(peer, pl);
-			}
-		} else if(what == "open"){
+		if(what == "open"){
 			int x, y, z;
 			pl.open = "";
 			if(is>>x>>y>>z && reaches(pl, x, y, z)){
@@ -1437,15 +1544,6 @@ struct Module: public interface::Module
 				move(peer, pl, count, floc, flist, fi, tloc, tlist, ti);
 		} else if(what == "craft"){
 			craft(peer, pl);
-		} else if(what == "punch"){
-			uint32_t id = 0;
-			if(is>>id)
-				punch(peer, pl, id);
-		} else if(what == "fall"){
-			float speed = 0;
-			if(is>>speed && speed > FALL_TOLERANCE)
-				hurt(peer, pl, std::min(HP_MAX, (int)(speed - FALL_TOLERANCE)),
-						"falls");
 		}
 	}
 
@@ -2255,6 +2353,7 @@ struct Module: public interface::Module
 			return;
 		m_time += event.dtime;
 		m_world_t += event.dtime;
+		m_session.tick(event.dtime);
 		m_day = std::fmod(m_day + event.dtime / DAY_SECONDS, 1.0);
 		step_bones(event.dtime);
 		step_arrows(event.dtime);

@@ -10,6 +10,7 @@
 -- pause.lua's, the mobs mobs.lua's. main.cpp is the other end of every
 -- packet here.
 local magic = require("buildat/extension/urho3d")
+local cereal = require("buildat/extension/cereal")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
@@ -192,6 +193,23 @@ end
 function game.send(name, data)
 	buildat.send_packet("skeldat:" .. name, data)
 end
+-- What a player does in the world goes as builtin/luanti's session packets
+-- (luanti/session.h), which the server's C++ reads
+function game.send_luanti(name, value, type)
+	buildat.send_packet("luanti:" .. name,
+			value and cereal.binary_output(value, type) or "")
+end
+local VOXEL = {"object", {"x", "int32_t"}, {"y", "int32_t"}, {"z", "int32_t"}}
+local function voxel(p)
+	return {x = math.floor(p.x + 0.5), y = math.floor(p.y + 0.5),
+			z = math.floor(p.z + 0.5)}
+end
+local function send_voxel(name, p)
+	game.send_luanti(name, {p = voxel(p)}, {"object", {"p", VOXEL}})
+end
+local function send_wield()
+	game.send_luanti("wield", {tostring(game.wield)}, {"array", "string"})
+end
 
 --
 -- The keys, in the client's key store ([LAUNCH_MENU_V2]): the shared
@@ -320,6 +338,10 @@ buildat.sub_packet("skeldat:position", function(data)
 	local x, y, z, yw = data:match("^(%S+) (%S+) (%S+) (%S+)")
 	player:set_position(tonumber(x), tonumber(y), tonumber(z))
 	yaw = tonumber(yw) or 0
+	if not placed then
+		-- The loading is over when the server has placed the player
+		game.send_luanti("world_in")
+	end
 	placed = true
 	log:info(string.format("skeldat: placed at (%.1f, %.1f, %.1f)",
 			player.x, player.y, player.z))
@@ -630,7 +652,7 @@ local function step_dig(dt)
 			return
 		end
 		dig = {key = k, t = 0, need = need, name = name, sound_t = 0}
-		game.send("dig_start", k)
+		send_voxel("dig_start", pointed)
 	end
 	if not dig.need then
 		return
@@ -638,7 +660,7 @@ local function step_dig(dt)
 	dig.t = dig.t + dt
 	dig.sound_t = dig.sound_t - dt
 	if dig.t >= dig.need then
-		game.send("dig", k)
+		send_voxel("dig", pointed)
 		node_sound("dig", dig.name, pointed, 1.0)
 		dig = nil
 	elseif dig.sound_t <= 0 then
@@ -652,7 +674,7 @@ local function on_place()
 		-- Eating needs nothing pointed at
 		local d = game.items[wielded()]
 		if d and d.eat > 0 then
-			game.send("use", "")
+			game.send_luanti("use")
 		end
 		return
 	end
@@ -669,9 +691,11 @@ local function on_place()
 	end
 	local d = game.items[wielded()]
 	if d and d.eat > 0 then
-		game.send("use", "")
+		game.send_luanti("use")
 	elseif above and game.nodes[wielded()] then
-		game.send("place", pkey(above))
+		game.send_luanti("place", {under = voxel(pointed), above = voxel(above),
+				sneak = 0}, {"object", {"under", VOXEL}, {"above", VOXEL},
+				{"sneak", "byte"}})
 		node_sound("place", wielded(), above, 1.0)
 	end
 end
@@ -828,7 +852,7 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		toggle("noclip", "Noclip (while flying)", "Noclip off")
 	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
 		game.wield = k - magic.KEY_1 + 1
-		game.send("wield", tostring(game.wield - 1))
+		send_wield()
 		game.changed()
 	end
 end)
@@ -865,7 +889,7 @@ magic.SubscribeToEvent("MouseWheel", function(_, d)
 	end
 	local w = d:GetInt("Wheel")
 	game.wield = (game.wield - 1 - (w > 0 and 1 or w < 0 and -1 or 0)) % 9 + 1
-	game.send("wield", tostring(game.wield - 1))
+	send_wield()
 	game.changed()
 end)
 
@@ -964,7 +988,8 @@ magic.SubscribeToEvent("Update", function(_, d)
 			sneak = not dead and down("sneak"), fast = player.fast})
 	if player.landed_at then
 		if player.landed_at > 14 then
-			game.send("fall", string.format("%.2f", player.landed_at))
+			game.send_luanti("fell", {speed = player.landed_at},
+					{"object", {"speed", "double"}})
 		end
 		player.landed_at = nil
 	end
@@ -974,8 +999,14 @@ magic.SubscribeToEvent("Update", function(_, d)
 	send_t = send_t + dt
 	if send_t >= 0.1 then
 		send_t = 0
-		game.send("pos", string.format("%.3f %.3f %.3f %.1f %.1f",
-				player.x, player.y, player.z, yaw, pitch))
+		-- Luanti's look: radians, the horizontal turning the other way
+		-- simplified: no controls; nothing on the server reads them
+		game.send_luanti("where", {x = player.x, y = player.y, z = player.z,
+			look_h = math.rad(-yaw), look_v = math.rad(pitch), controls = 0,
+			sent_us = buildat.get_time_us()}, {"object", {"x", "double"},
+			{"y", "double"}, {"z", "double"}, {"look_h", "double"},
+			{"look_v", "double"}, {"controls", "int32_t"},
+			{"sent_us", "double"}})
 	end
 	pointed_mob = nil
 	if dead then
