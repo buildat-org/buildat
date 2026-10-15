@@ -254,6 +254,17 @@ local function open_designer()
 	local win = root:CreateChild("Window")
 	win:SetStyleAuto()
 	win:SetLayout(LM_VERTICAL, 6, magic.IntRect(10, 10, 10, 10))
+	-- **A second column on a landscape screen with room for it**: the
+	-- code that plays the sound, as Copy makes it, in both forms
+	-- simplified: decided as the designer opens; a window turned or
+	-- resized while it is open keeps the layout it opened with
+	local ui_w, ui_h = magic.ui.root.width, magic.ui.root.height
+	local col = win
+	if ui_w >= 820 and ui_w > ui_h then
+		win:SetLayout(LM_HORIZONTAL, 12, magic.IntRect(10, 10, 10, 10))
+		col = win:CreateChild("UIElement")
+		col:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+	end
 	local function close()
 		state.on_update = nil
 		designer = nil
@@ -281,7 +292,7 @@ local function open_designer()
 		return t
 	end
 	local function row(parent)
-		local r = (parent or win):CreateChild("UIElement")
+		local r = (parent or col):CreateChild("UIElement")
 		r:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
 		return r
 	end
@@ -297,7 +308,7 @@ local function open_designer()
 		nav:add(b, fn)
 		return b
 	end
-	text(win, "blip: sfxr's sounds, made by the engine's synth")
+	text(col, "blip: sfxr's sounds, made by the engine's synth")
 	local status = nil
 	local function say(s)
 		status.text = s
@@ -306,7 +317,17 @@ local function open_designer()
 
 	-- Play on every change, at most every 0.15 s while a slider moves
 	local dirty, last = false, 0
+	local code = nil
+	local function show_code()
+		if code then
+			-- Text draws no tabs
+			code.text = ("-- Compact\n" ..
+					snippet(d.p, "compact", d.use, false) .. "\n-- Table\n" ..
+					snippet(d.p, "table", d.use, false)):gsub("\t", "    ")
+		end
+	end
 	local function play_now()
+		show_code()
 		dirty = false
 		last = api.get_time_us()
 		M.safe.play(d.p)
@@ -379,7 +400,7 @@ local function open_designer()
 	end
 	button(wave_row, "Play", play_now)
 
-	local view = win:CreateChild("ScrollView")
+	local view = col:CreateChild("ScrollView")
 	view:SetStyleAuto()
 	view.scrollBarsAutoVisible = true
 	local page = view:CreateChild("UIElement")
@@ -417,7 +438,10 @@ local function open_designer()
 		say(path and ("saved " .. name) or ("not saved: " .. tostring(why)))
 	end)
 	ui_utils.dropdown(ex, FORMATS, d.format, function(v) d.format = v end)
-	ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v) d.use = v end)
+	ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
+		d.use = v
+		show_code()
+	end)
 	local ex2 = row()
 	button(ex2, "Copy", function()
 		ui_utils.copy(snippet(d.p, d.format, d.use, false))
@@ -478,9 +502,24 @@ local function open_designer()
 		end
 	end
 
-	status = text(win, "")
+	status = text(col, "")
 	status:SetFixedWidth(360)
+	if col ~= win then
+		-- As tall as the controls beside it: a horizontal layout gives a
+		-- child with no fixed height the window's
+		local right = win:CreateChild("UIElement")
+		right:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
+		text(right, "Code for the sound, as Copy makes it")
+		local code_view = right:CreateChild("ScrollView")
+		code_view:SetStyleAuto()
+		code_view.scrollBarsAutoVisible = true
+		code_view:SetFixedWidth(360)
+		code = code_view:CreateChild("Text")
+		code:SetStyleAuto()
+		code_view.contentElement = code
+	end
 	show_values()
+	show_code()
 	log:info("designer shown")
 end
 
