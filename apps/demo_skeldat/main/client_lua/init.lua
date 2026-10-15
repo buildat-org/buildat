@@ -31,6 +31,8 @@ voxelworld.use_skylight = true
 voxelworld.horizon = true
 voxel_shading.set_packed_sky(true)
 voxel_shading.use_sun_gate(true)
+-- The bones, which the format draws as its tint modifier (main.cpp)
+voxel_shading.use_modifiers(true)
 voxelworld.lod_distance = 4000
 voxelworld.send_distance = FAR_CLIP
 voxelworld.physics_distance = 1
@@ -312,6 +314,53 @@ local function update_sky(dt)
 	game.zone.fogColor = magic.Color(d.horizon.r * k, d.horizon.g * k,
 			d.horizon.b * k)
 end
+
+--
+-- The danger is the bones around the player ([SKELDAT], user, 2026-10-15:
+-- no danger zone on the client): the mean bones of the voxels that are not
+-- empty in a box 9 across about the feet, every other voxel, 0 to 1. The
+-- fog closes in with it, eased over about half a second; read four times
+-- a second, logged at each tenth.
+--
+local fog = {d = 0, want = 0, t = 0, logged = -1}
+local function danger_here()
+	local reg = voxelworld.get_voxel_registry()
+	local fx, fy, fz = math.floor(player.x + 0.5), math.floor(player.y + 0.5),
+			math.floor(player.z + 0.5)
+	local sum, n = 0, 0
+	for dz = -4, 4, 2 do
+		for dy = -4, 4, 2 do
+			for dx = -4, 4, 2 do
+				local p = buildat.Vector3(fx + dx, fy + dy, fz + dz)
+				local v = voxelworld.get_static_voxel(p)
+				local def = v and reg:get_by_id(reg:id_of(v))
+				if def and not def.fully_empty then
+					n = n + 1
+					sum = sum + (voxelworld.get_static_voxel_plane(p, 1) or 0) % 16
+				end
+			end
+		end
+	end
+	return n > 0 and sum / (n * 15) or 0
+end
+local function update_fog(dt)
+	fog.t = fog.t - dt
+	if fog.t <= 0 then
+		fog.t = 0.25
+		fog.want = danger_here()
+	end
+	fog.d = fog.d + (fog.want - fog.d) * math.min(1, dt * 2)
+	local tenth = math.floor(fog.d * 10 + 0.5)
+	if tenth ~= fog.logged then
+		fog.logged = tenth
+		log:info("skeldat: fog for danger " .. tenth / 10)
+	end
+	local far = FAR_CLIP * 0.95
+	local fog_end = far - (far - 8) * fog.d
+	game.zone.fogEnd = fog_end
+	game.zone.fogStart = fog_end * (0.6 - 0.6 * fog.d)
+end
+game.danger = function() return fog.d end
 
 --
 -- Pointing: the voxel the eyes look at, and the empty one before it
@@ -608,6 +657,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if not placed then
 		return
 	end
+	update_fog(dt)
 	if mouse_in_world and not held then
 		local m = magic.input:GetMouseMove()
 		yaw = (yaw + m.x * 0.12) % 360

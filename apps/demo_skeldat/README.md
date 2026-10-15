@@ -22,7 +22,8 @@ machine picks one: play a save, name and create a new one, or delete one.
 
 Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the dialog;
 `BUILDAT_SKELDAT_SEED=<n>` is a new world's seed; `BUILDAT_SKELDAT_TIME=0..1`
-the time of day it starts at (0.5 noon).
+the time of day it starts at (0.5 noon); `BUILDAT_SKELDAT_SPAWN="x z"` a new
+world's spawn column, in a danger zone or not.
 
 ## Licences
 

@@ -16,8 +16,9 @@
 //
 // The voxel word is Luanti's cut (VoxelFormat::luanti(): the id, the sky
 // and the lamp light, param2), which is what the mapgen writes, and a
-// second plane of 8 bits, "bones", for the bones field that grows over
-// the world (stage 3 of the plan).
+// second plane of 8 bits, "bones", whose low 4 are the bones field
+// (bones.h): seeded by the mapgen in the danger zones, grown a section at
+// a time, and drawn by the format's tint modifier.
 //
 // What the client says is trusted for now, apart from the reach and the
 // time a dig takes: its position is taken as it comes until the movement
@@ -37,6 +38,7 @@
 #include "voxelworld/api.h"
 #include "worldgen/api.h"
 #include "game.h"
+#include "bones.h"
 #include <cmath>
 #include <map>
 #include <random>
@@ -73,6 +75,13 @@ static const uint8_t FACEDIR_TURNS[4][6] = {{0, 0, 0, 0, 0, 0},
 static ss_ pos_key(int x, int y, int z)
 {
 	return itos(x)+","+itos(y)+","+itos(z);
+}
+
+static ss_ dtos(double v)
+{
+	char buf[32];
+	snprintf(buf, sizeof buf, "%.3f", v);
+	return buf;
 }
 
 struct Player
@@ -140,6 +149,53 @@ struct Furnace
 	}
 };
 
+// The mapgen's section, and its bones seeded by the place's danger: every
+// voxel that is not air in a column at bones::SEED_DANGER or more. Runs on
+// worldgen's worker thread, so it touches nothing but the volume.
+struct BonesGenerator: public worldgen::GeneratorInterface
+{
+	up_<worldgen::GeneratorInterface> m_inner;
+	interface::VoxelFormat m_format;
+	interface::VoxelField m_bones;
+	uint32_t m_salt;
+
+	BonesGenerator(worldgen::GeneratorInterface *inner,
+			const interface::VoxelFormat &format,
+			const interface::VoxelField &bones, uint32_t salt):
+		m_inner(inner), m_format(format), m_bones(bones), m_salt(salt){}
+
+	pv::Vector3DInt32 get_padding_voxels()
+	{
+		return m_inner->get_padding_voxels();
+	}
+
+	void generate(main_context::SceneReference scene,
+			const pv::Vector3DInt16 &section_p, interface::VoxelVolume &volume)
+	{
+		m_inner->generate(scene, section_p, volume);
+		volume.add_planes(m_format.planes);
+		const pv::Region &r = volume.getEnclosingRegion();
+		const pv::Vector3DInt32 &lc = r.getLowerCorner(),
+				&uc = r.getUpperCorner();
+		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+			const int b = skeldat::bones::seed_value(
+					skeldat::bones::danger(m_salt, (float)x, (float)z));
+			if(b == 0)
+				continue;
+			for(int32_t y = lc.getY(); y <= uc.getY(); y++){
+				const uint32_t id = m_format.id.get(
+						volume.getVoxelAt(x, y, z).data);
+				if(id == ID_IGNORE || id == ID_AIR)
+					continue;
+				uint32_t word = volume.plane_at(1, x, y, z);
+				m_bones.set(word, (uint32_t)b);
+				volume.set_plane_at(1, x, y, z, word);
+			}
+		}
+	}
+};
+
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
@@ -161,13 +217,28 @@ struct Module: public interface::Module
 	size_t m_worldgen_queue = 0;
 	bool m_load_points_dirty = true;
 	interface::VoxelFormat m_format;
+	interface::VoxelField m_bones{1, 0, 4};
 	std::mt19937 m_rand{std::random_device{}()};
+	// The world's own clock, seconds of game time since it was made, kept
+	// in its save: what a section's catch-up is counted against
+	double m_world_t = 0;
+	// The loaded sections, each with the world time its bones were last up
+	// to date; written to the store "skeldat_bones" when one unloads
+	std::map<ss_, double> m_sections;
+	// Expansions owed: due at random by the period, and the catch-ups of
+	// sections that have just loaded, done a few a tick
+	double m_expand_due = 0;
+	std::map<ss_, int> m_catchup;
+	size_t m_expansions = 0, m_expand_changed = 0;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
 	{
 		m_format = interface::VoxelFormat::luanti();
 		m_format.planes.push_back(interface::VoxelPlane("bones", 8));
+		// The bones drawn: the definitions' tint_ramp from white to a rust,
+		// red over twice its green so that grass turns brown
+		m_format.tint = m_bones;
 	}
 
 	void init()
@@ -178,6 +249,8 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
+		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
+		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
 		for(const char *n : {"world_play", "world_create", "world_delete",
 				"pos", "dig_start", "dig", "place", "use", "wield", "open",
 				"close", "move", "craft", "fall", "respawn"})
@@ -196,6 +269,10 @@ struct Module: public interface::Module
 				network::OldClient)
 		EVENT_TYPEN("worldgen:queue_modified", on_worldgen_queue_modified,
 				worldgen::QueueModifiedEvent)
+		EVENT_TYPEN("voxelworld:section_loaded", on_section_loaded,
+				voxelworld::SectionLoaded)
+		EVENT_TYPEN("voxelworld:section_unloaded", on_section_unloaded,
+				voxelworld::SectionUnloaded)
 		EVENT_TYPEN("network:packet_received/skeldat:world_play",
 				on_world_play, network::Packet)
 		EVENT_TYPEN("network:packet_received/skeldat:world_create",
@@ -336,6 +413,8 @@ struct Module: public interface::Module
 		m_store->set("seed", itos(seed));
 		if(m_store->get("day", v))
 			m_day = atof(v.c_str());
+		if(m_store->get("world_t", v))
+			m_world_t = atof(v.c_str());
 		// For a check: the time of day it starts at, 0.5 noon
 		const char *env_time = getenv("BUILDAT_SKELDAT_TIME");
 		if(env_time && env_time[0])
@@ -378,7 +457,8 @@ struct Module: public interface::Module
 		// Before the voxelworld, or its first requests are lost
 		worldgen::access(m_server, [&](worldgen::Interface *i){
 			i->create_instance(m_scene);
-			i->get_instance(m_scene)->set_generator(generator);
+			i->get_instance(m_scene)->set_generator(new BonesGenerator(
+					generator, m_format, m_bones, m_mapgen.seed));
 		});
 		voxelworld::access(m_server, [&](voxelworld::Interface *i){
 			// The bounds in sections of 64: what anyone will walk across,
@@ -470,6 +550,9 @@ struct Module: public interface::Module
 		d.edge_material_id = interface::EDGEMATERIALID_GROUND;
 		d.physically_solid = true;
 		d.light_source = (uint8_t)n.light_source;
+		// The bones: the albedo times this, from none to all
+		d.tint_ramp[0] = 0xffffff;
+		d.tint_ramp[1] = 0xc0604c;
 		sv_<interface::VoxelQuad> shape;
 		switch(n.shape){
 		case skeldat::CUBE:
@@ -683,6 +766,19 @@ struct Module: public interface::Module
 			m_spawn_ready = true;
 			return;
 		}
+		// For a check: the spawn's column, the zones allowed
+		const char *env = getenv("BUILDAT_SKELDAT_SPAWN");
+		int ex = 0, ez = 0;
+		if(env && sscanf(env, "%d %d", &ex, &ez) == 2){
+			int level = 0;
+			luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
+				im->spawn_level(m_mapgen, ex, ez, level);
+			});
+			m_spawn[0] = (float)ex;
+			m_spawn[1] = (float)std::max(level, 2);
+			m_spawn[2] = (float)ez;
+			m_spawn_ready = true;
+		}
 		std::mt19937 r(m_mapgen.seed);
 		for(int i = 0; i < 4000 && !m_spawn_ready; i++){
 			const int range = 32 + i / 4;
@@ -693,7 +789,9 @@ struct Module: public interface::Module
 			luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
 				ok = im->spawn_level(m_mapgen, x, z, level);
 			});
-			if(!ok || level < 2 || level > 120)
+			if(!ok || level < 2 || level > 120 || skeldat::bones::seed_value(
+					skeldat::bones::danger(m_mapgen.seed, (float)x,
+					(float)z)) > 0)
 				continue;
 			m_spawn[0] = (float)x;
 			m_spawn[1] = (float)level;
@@ -737,6 +835,132 @@ struct Module: public interface::Module
 	{
 		m_worldgen_queue = e.queue_size;
 		m_load_points_dirty = true;
+	}
+
+	//
+	// The bones (bones.h)
+	//
+
+	static ss_ section_key(const pv::Vector3DInt16 &sp)
+	{
+		return pos_key(sp.getX(), sp.getY(), sp.getZ());
+	}
+
+	// A section back: the expansions it missed while away, owed
+	void on_section_loaded(const voxelworld::SectionLoaded &e)
+	{
+		if(e.scene != m_scene || !m_save)
+			return;
+		const ss_ key = section_key(e.section_p);
+		ss_ v;
+		if(m_save->store("skeldat_bones")->get(key, v)){
+			const int n = skeldat::bones::catch_up(m_world_t - atof(v.c_str()));
+			if(n > 0)
+				m_catchup[key] = n;
+		}
+		m_sections[key] = m_world_t;
+	}
+
+	void on_section_unloaded(const voxelworld::SectionUnloaded &e)
+	{
+		if(e.scene != m_scene || !m_save)
+			return;
+		const ss_ key = section_key(e.section_p);
+		m_save->store("skeldat_bones")->set(key, dtos(m_world_t));
+		m_sections.erase(key);
+		m_catchup.erase(key);
+	}
+
+	// Every loaded section expands every SECTION_PERIOD on average, picked
+	// at random; the owed catch-ups a few a tick
+	void step_bones(float dtime)
+	{
+		if(m_sections.empty())
+			return;
+		m_expand_due += dtime * m_sections.size() /
+				skeldat::bones::SECTION_PERIOD;
+		int budget = 4;
+		while(m_expand_due >= 1 && budget-- > 0){
+			m_expand_due -= 1;
+			auto it = m_sections.begin();
+			std::advance(it, m_rand() % m_sections.size());
+			expand(it->first);
+		}
+		// What the budget did not reach is dropped, not carried: a server
+		// that falls behind grows the bones slower rather than in a burst
+		if(m_expand_due > 1)
+			m_expand_due = 1;
+		for(budget = 4; budget > 0 && !m_catchup.empty(); budget--){
+			auto it = m_catchup.begin();
+			const ss_ key = it->first;
+			if(--it->second <= 0)
+				m_catchup.erase(it);
+			expand(key);
+		}
+	}
+
+	// One expansion of a section, written back in one set_volume of the
+	// voxels it changed
+	void expand(const ss_ &key)
+	{
+		int sx, sy, sz;
+		char c;
+		std::istringstream is(key);
+		if(!(is>>sx>>c>>sy>>c>>sz))
+			return;
+		const pv::Vector3DInt16 sp(sx, sy, sz);
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			if(!w->is_section_loaded(sp))
+				return;
+			const pv::Region section = w->get_section_region_voxels(sp);
+			pv::Region grown = section;
+			grown.setLowerCorner(grown.getLowerCorner() -
+					pv::Vector3DInt32(1, 1, 1));
+			grown.setUpperCorner(grown.getUpperCorner() +
+					pv::Vector3DInt32(1, 1, 1));
+			interface::VoxelVolume vol = w->get_volume(grown);
+			if(!vol.plane_is_materialised(1))
+				return; // no bones in it nor around it
+			const pv::Vector3DInt32 &lc = grown.getLowerCorner();
+			skeldat::bones::Box box(vol.getWidth(), vol.getHeight(),
+					vol.getDepth());
+			bool any = false;
+			for(int z = 0; z < box.d; z++)
+			for(int y = 0; y < box.h; y++)
+			for(int x = 0; x < box.w; x++){
+				const interface::VoxelSample v = vol.sample_at(
+						lc.getX() + x, lc.getY() + y, lc.getZ() + z);
+				const uint32_t id = m_format.id.get(v);
+				const size_t i = box.at(x, y, z);
+				box.air[i] = id == ID_AIR || id == ID_IGNORE;
+				box.b[i] = (uint8_t)m_bones.get(v);
+				any = any || box.b[i] != 0;
+			}
+			if(!any)
+				return;
+			const sv_<uint8_t> before = box.b;
+			m_expansions++;
+			if(!skeldat::bones::expand(box))
+				return;
+			interface::VoxelVolume out(section, m_format.planes);
+			size_t changed = 0;
+			for(int z = 1; z < box.d - 1; z++)
+			for(int y = 1; y < box.h - 1; y++)
+			for(int x = 1; x < box.w - 1; x++){
+				const size_t i = box.at(x, y, z);
+				if(box.b[i] == before[i])
+					continue;
+				const int32_t px = lc.getX() + x, py = lc.getY() + y,
+						pz = lc.getZ() + z;
+				interface::VoxelSample v = vol.sample_at(px, py, pz);
+				m_bones.set(v, box.b[i]);
+				out.set_sample_at(px, py, pz, v);
+				changed++;
+			}
+			m_expand_changed += changed;
+			// The light as it was read: nothing here changes it
+			w->set_volume(out, false, true);
+		});
 	}
 
 	//
@@ -903,10 +1127,18 @@ struct Module: public interface::Module
 				if(pair.second.placed)
 					ps->set(pair.second.name, pair.second.save());
 		});
+		storage::Store *bs = m_save->store("skeldat_bones");
+		bs->batch([&](){
+			for(auto &pair : m_sections){
+				pair.second = m_world_t;
+				bs->set(pair.first, dtos(m_world_t));
+			}
+		});
 		m_store->batch([&](){
 			std::ostringstream os;
 			os<<m_day;
 			m_store->set("day", os.str());
+			m_store->set("world_t", dtos(m_world_t));
 			for(auto &pair : m_furnaces)
 				m_store->set("furnace/"+pair.first, pair.second.save());
 		});
@@ -928,13 +1160,27 @@ struct Module: public interface::Module
 	{
 		return m_format.id.get(voxel_at(x, y, z).data);
 	}
+	int bones_at(int x, int y, int z)
+	{
+		interface::VoxelSample v;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			v = w->get_sample(pv::Vector3DInt32(x, y, z), true);
+		});
+		return (int)m_bones.get(v);
+	}
+	// The bones stay with what is there, and go with it when it is dug
 	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0)
 	{
-		uint32_t word = 0;
-		m_format.id.set(word, id);
-		m_format.param.set(word, param);
+		const pv::Vector3DInt32 p(x, y, z);
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			w->set_voxel(pv::Vector3DInt32(x, y, z), VoxelInstance(word));
+			interface::VoxelSample v = w->get_sample(p, true);
+			uint32_t &word = v.planes[0];
+			word = 0;
+			m_format.id.set(word, id);
+			m_format.param.set(word, param);
+			if(id == ID_AIR)
+				m_bones.set(v, 0);
+			w->set_sample(p, v);
 		});
 	}
 
@@ -1062,6 +1308,7 @@ struct Module: public interface::Module
 				m_store->remove("furnace/"+at);
 		}
 		pl.dig_at = "";
+		const int bones = bones_at(x, y, z);
 		set_node(x, y, z, ID_AIR);
 		if(cap && cap->uses > 0){
 			tool.wear += skeldat::WEAR_MAX / cap->uses;
@@ -1071,15 +1318,18 @@ struct Module: public interface::Module
 		// What it drops goes straight into the inventory
 		// simplified: no items on the ground; what does not fit is lost
 		Stack drop;
-		if(n->drop == "")
+		if(bones > skeldat::bones::NO_DROP)
+			; // bone-ridden: nothing
+		else if(n->drop == "")
 			drop = Stack(n->name);
 		else if(n->drop != "-" && (n->drop_rarity <= 1 ||
 				m_rand() % n->drop_rarity == 0))
 			drop = Stack::parse(n->drop);
 		if(!drop.empty())
 			m_game.add(pl.main, drop);
-		log_i(MODULE, "skeldat: %s digs %s at %s", cs(pl.name), cs(n->name),
-				cs(at));
+		log_i(MODULE, "skeldat: %s digs %s at %s, bones %d%s", cs(pl.name),
+				cs(n->name), cs(at), bones, bones > skeldat::bones::NO_DROP ?
+				", dropping nothing" : "");
 		send_inventory(peer, pl);
 	}
 
@@ -1222,7 +1472,9 @@ struct Module: public interface::Module
 		if(!m_scene)
 			return;
 		m_time += event.dtime;
+		m_world_t += event.dtime;
 		m_day = std::fmod(m_day + event.dtime / DAY_SECONDS, 1.0);
+		step_bones(event.dtime);
 		if(m_load_points_dirty)
 			update_load_points();
 		m_send_t += event.dtime;
@@ -1245,6 +1497,11 @@ struct Module: public interface::Module
 		if(m_save_t >= 10){
 			m_save_t = 0;
 			save();
+			// The pace, for whoever tunes it
+			log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
+					"changed, %zu sections loaded, %zu owed a catch-up",
+					m_expansions, m_expand_changed, m_sections.size(),
+					m_catchup.size());
 			for(auto &pair : m_players)
 				send_time(pair.first);
 		}
