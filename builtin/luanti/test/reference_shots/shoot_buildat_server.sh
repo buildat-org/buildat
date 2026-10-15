@@ -87,6 +87,12 @@ tmp=$(mktemp -d)
 
 [ -d "$world" ] || { echo "no cached world at $world" >&2
 	echo "run: $me/shoot_luanti_server.sh reference" >&2; exit 2; }
+# The cache keeps the official run's fixture as a worldmod, and the import
+# loads it: a STATES ladder from that run would be shot instead of this
+# run's states. This run's fixture there, as shoot_luanti_server.sh does
+if [ -d "$world/worldmods/refviews" ]; then
+	cp "$built/refviews/"* "$world/worldmods/refviews/"
+fi
 
 cd "$here/Build"
 # Whatever way this script ends, the server and the client go with it: a
