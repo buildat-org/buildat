@@ -143,6 +143,7 @@ EM_JS(void, web_dgram_close, (int id), {
 #include "interface/sha256.h"
 #include "interface/bignum.h"
 #include <sstream>
+#include <sqlite3.h> // save_value() ([SAVE_ICON])
 #include <c55/getopt.h>
 #include <c55/os.h>
 #include <Application.h>
@@ -2524,6 +2525,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(list_launchers)
 		DEF_BUILDAT_FUNC(list_installed_games)
 		DEF_BUILDAT_FUNC(list_saves)
+		DEF_BUILDAT_FUNC(save_value)
 		DEF_BUILDAT_FUNC(stop_local_server)
 		DEF_BUILDAT_FUNC(request_stop_local_server)
 		DEF_BUILDAT_FUNC(force_kill_local_server)

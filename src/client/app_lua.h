@@ -376,6 +376,48 @@
 		return 1;
 	}
 
+	// save_value(app, save, store, key) -> the value's text, or nil: one
+	// key of a save's own store ([SAVE_ICON]), read-only, for what a
+	// launcher says a save is (its variant). A save list_saves() would
+	// list; nil for none, a missing key or a database it cannot read.
+	static int l_save_value(lua_State *L)
+	{
+		const ss_ app = lua_bindings::lua_tocppstring(L, 1);
+		const ss_ save = lua_bindings::lua_tocppstring(L, 2);
+		const ss_ store = lua_bindings::lua_tocppstring(L, 3);
+		const ss_ key = lua_bindings::lua_tocppstring(L, 4);
+		if(!valid_app_name(app) || !valid_app_name(save) || save[0] == '_')
+			return 0;
+		const ss_ db = g_client_config.get<ss_>("user_path")+"/apps/"+app+
+				"/saves/"+save+"/save.sqlite";
+		sqlite3 *h = nullptr;
+		if(sqlite3_open_v2(db.c_str(), &h, SQLITE_OPEN_READONLY, nullptr) !=
+				SQLITE_OK){
+			sqlite3_close(h);
+			return 0;
+		}
+		// A server playing it may be writing: wait a little, not forever
+		sqlite3_busy_timeout(h, 50);
+		sqlite3_stmt *st = nullptr;
+		int n = 0;
+		if(sqlite3_prepare_v2(h, "SELECT value FROM store WHERE store = ?"
+				" AND key = ?", -1, &st, nullptr) == SQLITE_OK){
+			sqlite3_bind_text(st, 1, store.c_str(), (int)store.size(),
+					SQLITE_TRANSIENT);
+			sqlite3_bind_text(st, 2, key.c_str(), (int)key.size(),
+					SQLITE_TRANSIENT);
+			if(sqlite3_step(st) == SQLITE_ROW){
+				const void *v = sqlite3_column_blob(st, 0);
+				const int len = sqlite3_column_bytes(st, 0);
+				lua_pushlstring(L, v ? (const char*)v : "", len);
+				n = 1;
+			}
+		}
+		sqlite3_finalize(st);
+		sqlite3_close(h);
+		return n;
+	}
+
 	// **The publish screen's file work** ([AITTA_PUBLISH_UI]), trusted
 	// only (client/core/aitta/publish.lua). aitta_dev(op, ...):
 	//   "list"                  {{name, kind, path}} of <user>/dev_apps

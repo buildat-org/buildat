@@ -645,8 +645,12 @@ buildat.safe.launch(key) -> true, or false and why
   so a sandbox can name nothing that is not on the grid. The key and the
   time go in the launch history.
 buildat.safe.list_apps() -> {{name, size, kind}, ...}
-buildat.safe.list_saves(app) -> {{name, ..., last_launched}, ...}
+buildat.safe.list_saves(app) -> {{name, ..., last_launched, variant, icon}, ...}
 - last_launched: when launch_save() last opened it, in unix seconds, or nil.
+- variant: which of its app's tiles the save is, for an app whose launcher
+  sets ctx.save_variant ([SAVE_ICON]): the value at that store and key of
+  the save, meant to be one tile's id; icon is that launcher's picture for
+  a save whose variant names no tile. Both nil for other apps.
 buildat.safe.launch_save(app, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk. It goes in the launch history

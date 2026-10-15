@@ -14,6 +14,12 @@
 -- vanilla.)
 local PRETTY = {mineclone2 = "VoxeLibre", minetest_game = "Minetest Game"}
 return function(ctx)
+	-- **A save is its game's** ([SAVE_ICON]): main.cpp keeps the game's
+	-- id in the save (store main, key gameid), and a game's tile's id is
+	-- its name, so a save shows its game's picture; one of a game not
+	-- installed, or none, the grass block
+	ctx.save_variant = {store = "main", key = "gameid",
+		icon = "grass_block.png"}
 	local out = {}
 	for i, g in ipairs(buildat.list_installed_games("vanilla")) do
 		local name = g.name

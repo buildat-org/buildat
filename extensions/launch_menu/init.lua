@@ -286,12 +286,16 @@ local function gather()
 	local app_label = {vanilla = "Luanti"}
 	local by_from = {}
 	local actions = api.launch_actions()
-	-- And an app's icon, for its saves: the first of its actions'
-	local icon_of = {}
+	-- And an app's icon, for its saves: the first of its actions', or
+	-- the one of the tile a save names ([SAVE_ICON]: its variant)
+	local icon_of, tile_icon = {}, {}
 	for _, a in ipairs(actions) do
 		local app = a.from:match("^app/(.+)$")
 		if app and not app_label[app] then app_label[app] = a.label end
 		icon_of[a.from] = icon_of[a.from] or a.icon
+		if a.id ~= nil then
+			tile_icon[a.from .. "/" .. tostring(a.id)] = a.icon
+		end
 	end
 	for _, a in ipairs(actions) do
 		-- Locally started things need a local server, which a page has not.
@@ -361,7 +365,9 @@ local function gather()
 				end}
 			end
 			add({label = sv.name, kind = "save", badge = parent,
-				icon = icon_of["app/" .. sv.app],
+				icon = sv.variant and
+						tile_icon["app/" .. sv.app .. "/" .. sv.variant] or
+						sv.icon or icon_of["app/" .. sv.app],
 				description = "Continue this save of " .. parent .. ".",
 				last = last > 0 and last or nil, actions = actions,
 				run = function()
@@ -703,7 +709,8 @@ local function home(query)
 			(query ~= "" and " for \"" .. query .. "\"" or "") .. " in " ..
 			math.floor((api.get_time_us() - t0) / 1000) .. " ms" ..
 			(items[1] and items[1].entry and
-				", first " .. tostring(items[1].entry.label) or ""))
+				", first " .. tostring(items[1].entry.label) ..
+				" (" .. tostring(items[1].entry.icon) .. ")" or ""))
 end
 
 -- One kind's list, searchable and sorted, with the selection's detail

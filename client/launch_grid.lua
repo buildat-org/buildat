@@ -219,7 +219,7 @@ local function run_launcher(log, source)
 				", not a table of actions")
 		return nil
 	end
-	return actions, from
+	return actions, from, ctx
 end
 
 local KIND_ORDER = {menu = 0, app = 1, installed = 1, dev = 1, review = 1,
@@ -301,10 +301,17 @@ end
 -- `for_save = true`: {app, id, label, description, run(save)}, rebuilt
 -- with the tiles and none of them a tile
 M.for_save = {}
+-- [SAVE_ICON] **What each save of an app is**: app -> {store, key, icon},
+-- from a launcher's `ctx.save_variant = {store =, key =, icon =}`. The
+-- value at that key of a save's store names one of the app's tiles (its
+-- id), whose picture the save shows; icon, the launcher's own file, is
+-- for a save whose value names none. Nil before the first scan.
+M.save_variants = nil
 
 function M.actions(log)
 	local out = {}
 	M.for_save = {}
+	M.save_variants = {}
 	local app_sizes = {}
 	for _, g in ipairs(buildat.list_apps() or {}) do
 		app_sizes[g.name] = tonumber(g.size)
@@ -326,7 +333,17 @@ function M.actions(log)
 		if source.kind == "extension" and source.name == "launch_menu" then
 			actions = menu_actions()
 		elseif source.launcher then
-			actions = run_launcher(log, source)
+			local ctx
+			actions, _, ctx = run_launcher(log, source)
+			-- simplified: an app's own (kind "app") only, as for_save
+			local v = ctx and ctx.save_variant
+			if source.kind == "app" and type(v) == "table" and
+					type(v.store) == "string" and type(v.key) == "string" then
+				M.save_variants[source.name] = {store = v.store, key = v.key,
+					icon = type(v.icon) == "string" and
+							not v.icon:find("[/\\]") and
+							source.name.."/launcher/"..v.icon or nil}
+			end
 		end
 		-- **A save stays with the version that made it**, and moves to
 		-- another when the player says so: this tile is the saying

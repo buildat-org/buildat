@@ -1494,9 +1494,21 @@ buildat.safe.list_apps = __buildat_list_apps
 buildat.safe.list_saves = function(...)
 	local history = launch_history_read()
 	local saves = __buildat_list_saves(...)
+	if not launch_grid.save_variants then
+		buildat.safe.launch_actions()
+	end
 	for _, sv in ipairs(saves) do
 		sv.last_launched = history["save/" .. tostring(sv.app) .. "/" ..
 				tostring(sv.name)]
+		-- [SAVE_ICON] Which of its app's tiles it is (an id of one, or
+		-- anything), and the app's picture for its saves
+		-- simplified: a read of each save's database each time; a cache
+		-- by the file's modified time if a long list makes it slow
+		local v = launch_grid.save_variants[sv.app]
+		if v then
+			sv.variant = __buildat_save_value(sv.app, sv.name, v.store, v.key)
+			sv.icon = v.icon
+		end
 	end
 	return saves
 end

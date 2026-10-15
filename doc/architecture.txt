@@ -175,6 +175,15 @@ level as key=value lines through the server's -u, kept as
 `untrusted_launch` in its config for a module to read as it would a
 packet -- never the environment. A builtin module is not a target yet.
 
+An app's launcher may also say what each of its saves is ([SAVE_ICON]):
+
+    ctx.save_variant = { store = "main", key = "gameid", icon = "grass_block.png" }
+
+The value at that key of a save's store names one of the app's tiles by
+its id, and a launch UI shows the save with that tile's picture; icon, a
+file beside the launcher's, is for a save whose value names no tile.
+vanilla's says a save is its Luanti game's.
+
 `buildat -a kind/name/id` runs one action on boot, with the grid
 underneath it: app/<name>/<id> (game/ is read as app/), builtin/...,
 extension/..., dev/<name>/<id> for an app in <user>/dev_apps,
