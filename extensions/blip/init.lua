@@ -180,9 +180,6 @@ end
 M.safe.params = gen.params
 M.safe.pack = gen.pack
 M.safe.preset = gen.preset
-M.safe.self_check = function()
-	return gen.self_check(buildat.synth)
-end
 
 -- **The designer** (the launch tile's): sfxr's generators, a mutate and
 -- a random, a slider a parameter and a play on every change; the export
@@ -192,7 +189,67 @@ local SNIPPET_USES = {
 	{"Add to a stream", "stream"},
 }
 local FORMATS = {{"Compact", "compact"}, {"Table", "table"},
-	{"Both", "both"}}
+	{"Both", "both"}, {"Raw engine calls", "raw"}}
+
+-- A value as Lua source: a number in the fewest digits that read back
+-- the same, so the raw calls make the same samples as blip
+local function lua_value(v, indent)
+	if type(v) == "number" then
+		local s = string.format("%.15g", v)
+		return tonumber(s) == v and s or string.format("%.17g", v)
+	elseif type(v) ~= "table" then
+		return string.format("%q", v)
+	end
+	local inner = indent .. "\t"
+	local out = {}
+	if #v > 0 then
+		for _, x in ipairs(v) do
+			out[#out + 1] = lua_value(x, inner)
+		end
+		return "{" .. table.concat(out, ", ") .. "}"
+	end
+	local keys = {}
+	for k in pairs(v) do
+		keys[#keys + 1] = k
+	end
+	table.sort(keys)
+	for _, k in ipairs(keys) do
+		out[#out + 1] = inner .. k .. " = " .. lua_value(v[k], inner) .. ","
+	end
+	return "{\n" .. table.concat(out, "\n") .. "\n" .. indent .. "}"
+end
+
+-- **The raw engine calls**: the sound built with buildat.synth and played
+-- with magic's classes, no blip; magic and node are the app's own
+local function raw_calls(p)
+	local n, calls = gen.chain(p, RATE)
+	local out = {"local buf = buildat.synth.buffer(" .. n .. ")"}
+	for _, c in ipairs(calls) do
+		out[#out + 1] = "buf:" .. c[1] .. "(" .. lua_value(c[2], "") .. ")"
+	end
+	return out
+end
+local function raw_snippet(p, use)
+	local out = raw_calls(p)
+	table.insert(out, 1, "-- " .. gen.pack(p) .. " as the engine's calls, no blip")
+	out[#out + 1] = "local shorts = magic.VectorBuffer:new()"
+	out[#out + 1] = "buf:to_shorts(shorts)"
+	if use == "stream" then
+		-- simplified: one sound queued on a stream; mixing several into
+		-- one is what blip_mix.lua does
+		out[#out + 1] = "local stream = magic.BufferedSoundStream:new()"
+		out[#out + 1] = "stream:SetFormat(44100, true, false)"
+		out[#out + 1] = "stream:AddData(shorts)"
+		out[#out + 1] = "node:CreateComponent(\"SoundSource\"):Play(stream)"
+	else
+		out[#out + 1] = "local sound = magic.Sound:new()" ..
+				(use == "play_cached" and "  -- kept: Play(sound) again" or "")
+		out[#out + 1] = "sound:SetFormat(44100, true, false)"
+		out[#out + 1] = "sound:SetData(shorts)"
+		out[#out + 1] = "node:CreateComponent(\"SoundSource\"):Play(sound)"
+	end
+	return table.concat(out, "\n") .. "\n"
+end
 
 local function sound_source(p, format)
 	if format == "compact" then
@@ -204,6 +261,9 @@ local function sound_source(p, format)
 end
 
 local function snippet(p, format, use, files)
+	if format == "raw" then
+		return raw_snippet(p, use)
+	end
 	local s = sound_source(p, format)
 	if files then
 		-- blip_gen.lua and blip_mix.lua copied into the app's main
@@ -234,6 +294,21 @@ local function snippet(p, format, use, files)
 				")\n"
 	end
 	return head .. "blip." .. use .. "(" .. s .. ")\n"
+end
+
+-- And the designer's raw engine calls, run, make the same samples
+M.safe.self_check = function()
+	local ok, bad = gen.self_check(buildat.synth)
+	for _, name in ipairs(gen.PRESETS) do
+		local code = table.concat(raw_calls(gen.preset(name, 1)), "\n") ..
+				"\nreturn buf:hash()"
+		local ran, h = api.eval(code, "blip raw calls")
+		if not ran or h ~= gen.HASHES[name] then
+			ok = false
+			bad[#bad + 1] = name .. "'s raw calls: " .. tostring(h)
+		end
+	end
+	return ok, bad
 end
 
 local designer = nil
@@ -325,9 +400,10 @@ local function open_designer()
 	local function show_code()
 		if code then
 			-- Text draws no tabs
-			code.text = ("-- Compact\n" ..
+			code.text = (d.format == "raw" and
+					snippet(d.p, "raw", d.use, false) or ("-- Compact\n" ..
 					snippet(d.p, "compact", d.use, false) .. "\n-- Table\n" ..
-					snippet(d.p, "table", d.use, false)):gsub("\t", "    ")
+					snippet(d.p, "table", d.use, false))):gsub("\t", "    ")
 		end
 	end
 	local function play_now()
@@ -442,7 +518,10 @@ local function open_designer()
 		-- The name alone: the whole path does not fit the window
 		say(path and ("saved " .. name) or ("not saved: " .. tostring(why)))
 	end)
-	ui_utils.dropdown(ex, FORMATS, d.format, function(v) d.format = v end)
+	ui_utils.dropdown(ex, FORMATS, d.format, function(v)
+		d.format = v
+		show_code()
+	end)
 	ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
 		d.use = v
 		show_code()
