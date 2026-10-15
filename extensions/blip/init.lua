@@ -517,13 +517,26 @@ local function open_designer()
 	for _, def in ipairs(gen.PARAMS) do
 		local r = row(page)
 		r:SetFixedHeight(20)
-		local name = text(r, def[1], 110)
+		-- Each text in a holder of the row's height, placed in it by
+		-- hand: a Text is taller than the row and would hang below the
+		-- slider
+		local function centred(s, width)
+			local holder = r:CreateChild("UIElement")
+			holder:SetFixedSize(width, 20)
+			local t = text(holder, s, width)
+			-- Centred, then up by the room the font keeps below its
+			-- lowercase, so that is what lines up with the slider
+			t.position = magic.IntVector2(0,
+					math.floor((20 - t.height) / 2) - 4)
+			return t
+		end
+		local name = centred(def[1], 110)
 		local slider = r:CreateChild("Slider")
 		slider:SetStyleAuto()
 		slider.range = 1
 		-- The rest of the row's width
 		slider:SetFixedHeight(16)
-		local value = text(r, "", 50)
+		local value = centred("", 50)
 		local sl = {def = def, slider = slider, value = value, name = name,
 			row = r}
 		sliders[#sliders + 1] = sl
@@ -554,11 +567,13 @@ local function open_designer()
 		if selected then
 			-- On the screen, against the panel less its clipped border
 			local panel = view.scrollPanel
-			local y = sl.row.screenPosition.y
+			local y = math.min(sl.row.screenPosition.y,
+					sl.name.screenPosition.y)
 			local top = panel.screenPosition.y + 4
 			local bottom = panel.screenPosition.y + panel.height - 4
 			-- The name's text is taller than its row
-			local h = math.max(sl.row.height, sl.name.height)
+			local h = math.max(sl.row.screenPosition.y + sl.row.height,
+					sl.name.screenPosition.y + sl.name.height) - y
 			local move = y < top and y - top or math.max(0, y + h - bottom)
 			if move ~= 0 then
 				view.viewPosition = magic.IntVector2(0,
@@ -659,6 +674,8 @@ local function open_designer()
 		code:SetStyleAuto()
 		code.multiLine = true
 		code.editable = false
+		-- The text off the field's edges
+		code.clipBorder = magic.IntRect(3, 3, 3, 3)
 		code.textSelectable = true
 		code.textCopyable = true
 		code:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))

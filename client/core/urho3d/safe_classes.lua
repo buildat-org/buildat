@@ -2451,6 +2451,8 @@ function M.define(dst, util)
 				set = util.simple_property("string").set,
 			},
 			cursorPosition = util.simple_property("number"),
+			-- The text's inset from the field's edges
+			clipBorder = util.simple_property(dst.IntRect),
 			-- **The two elements a field is made of**, read-only, so a
 			-- screen can give a field a font and a colour of its own:
 			-- without them the only way to a readable field is Urho3D's
