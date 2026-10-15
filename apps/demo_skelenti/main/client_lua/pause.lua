@@ -2,12 +2,12 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- The pause menu, Escape's: Continue and Leave. Without one the module's
--- loop only lets go of the mouse, and nothing takes it back.
+-- The pause menu, Escape's: Continue, Settings and Leave. Without one the
+-- module's loop only lets go of the mouse, and nothing takes it back.
 --   local open = run_script_file("main/pause.lua")
 -- returns the client loop's pause hook (luanti.run_client's app.pause).
--- simplified: two buttons; settings and key bindings are vanilla's pause
--- menu's to copy when skelenti wants them
+-- simplified: no account pages; skelenti has no login (its players are
+-- player<peer>), so there is no admin to show them to
 local magic = require("buildat/extension/urho3d")
 local luanti = require("buildat/module/luanti")
 local ui_utils = require("buildat/extension/ui_utils")
@@ -16,6 +16,16 @@ uistack = uistack.safe or uistack
 local log = buildat.Logger("skelenti")
 
 local root = nil
+-- What runs next frame: the menu again after the settings window, which
+-- would otherwise reopen in the Escape that closed the window
+local pending = nil
+magic.SubscribeToEvent("Update", function()
+	if pending then
+		local fn = pending
+		pending = nil
+		fn()
+	end
+end)
 
 local function close()
 	if not root then
@@ -30,7 +40,21 @@ local function close()
 	log:info("pause: the menu closed")
 end
 
-local function open()
+local open
+
+-- The client's settings window ([GAME_SETTINGS]): sound, video, the
+-- game's keys and the client's. The world stays held while it is up;
+-- its own Escape and Close shut it
+local function settings()
+	uistack.main:pop(root)
+	root = nil
+	magic.ui:SetFocusElement(nil)
+	luanti.hold(function() end)
+	log:info("pause: settings shown")
+	buildat.show_game_settings{on_close = function() pending = open end}
+end
+
+function open()
 	if root then
 		return
 	end
@@ -38,6 +62,7 @@ local function open()
 	local menu = ui_utils.vertical_menu(root, {min_width = 260})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	menu:add("Continue", close, true)
+	menu:add("Settings...", settings)
 	menu:add("Leave the game", function() buildat.leave() end)
 	-- Escape is the hold's: the loop calls close for it
 	luanti.hold(close, menu.window)
