@@ -3177,8 +3177,77 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.Resource,
 	})
 
+	-- A Sound filled from samples a script made ([SOUND_FROM_SAMPLES]), so
+	-- that a generated sound is made once and played by any number of
+	-- sources as a loaded one is: new(), SetFormat(), then SetData() once.
+	-- Once only, and the format before it: Urho3D frees the old samples on
+	-- a new SetData while a source's mixer may be reading them.
+	-- simplified: one cap on the samples of all the Sounds alive, for every
+	-- sandbox at once (they share these wrappers); per sandbox if one
+	-- crowds another out.
+	local SOUND_MAX_BYTES = 8 * 1024 * 1024
+	local SOUNDS_MAX_BYTES = 64 * 1024 * 1024
+	-- Unsafe Sound -> its samples' bytes, gone when the script's wrapper is
+	local sound_bytes = setmetatable({}, {__mode = "k"})
+	local function sounds_total()
+		local n = 0
+		for _, b in pairs(sound_bytes) do
+			n = n + b
+		end
+		return n
+	end
 	util.wc("Sound", {
 		inherited_from_by_wrapper = dst.Resource,
+		class = {
+			new = function()
+				return util.wrap_instance("Sound", Sound:new())
+			end,
+		},
+		instance = {
+			-- rate in Hz, 1000..96000; 16-bit or 8-bit; stereo or mono
+			SetFormat = util.wrap_function(
+					{"Sound", "number", "boolean", "boolean"},
+					function(self, rate, sixteen_bit, stereo)
+						if self.dataSize > 0 then
+							error("Sound:SetFormat(): the Sound has its"..
+									" samples already; set the format first")
+						end
+						if rate ~= math.floor(rate) or rate < 1000 or
+								rate > 96000 then
+							error("Sound:SetFormat(): the rate "..
+									tostring(rate).." is not a whole"..
+									" 1000..96000")
+						end
+						self:SetFormat(rate, sixteen_bit, stereo)
+					end),
+			-- The samples, as SetFormat() said, little-endian: a
+			-- VectorBuffer, since tolua cuts a string at its first zero
+			SetData = util.wrap_function({"Sound", "VectorBuffer"},
+					function(self, buffer)
+						if self.dataSize > 0 then
+							error("Sound:SetData(): a Sound is filled"..
+									" once; make a new one")
+						end
+						local n = buffer:GetSize()
+						if n == 0 or n > SOUND_MAX_BYTES then
+							error("Sound:SetData(): "..n.." bytes; a Sound"..
+									" holds 1.."..SOUND_MAX_BYTES)
+						end
+						if sounds_total() + n > SOUNDS_MAX_BYTES then
+							collectgarbage("collect")
+							if sounds_total() + n > SOUNDS_MAX_BYTES then
+								error("Sound:SetData(): the Sounds made from"..
+										" samples hold "..sounds_total()..
+										" bytes, and "..n.." more is over"..
+										" the "..SOUNDS_MAX_BYTES)
+							end
+						end
+						-- Copied: tolua knows no Deserializer in a
+						-- VectorBuffer, so LoadRaw() does not take it
+						self:SetData(buffer:GetData(), n)
+						sound_bytes[self] = n
+					end),
+		},
 		properties = {
 			looped = util.simple_property("boolean"),
 			length = util.simple_property("number"),

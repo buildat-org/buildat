@@ -94,6 +94,39 @@ local function check_procedural_sound()
 			"procedural sound ok: %d bytes, %.2f s buffered, playing %s",
 			stream.bufferNumBytes, stream.bufferLength,
 			tostring(source.playing)))
+	-- The same samples as a Sound ([SOUND_FROM_SAMPLES]): made once and
+	-- played by two sources at once, as a loaded one is. On a client
+	-- before 0.7.10 there is no Sound:new()
+	if not buildat.has("sound_from_samples") then
+		return
+	end
+	local sound = magic.Sound:new()
+	sound:SetFormat(RATE, true, false)
+	sound:SetData(buffer)
+	sound.looped = true
+	local sources = {}
+	for i = 1, 2 do
+		sources[i] = node:CreateComponent("SoundSource")
+		sources[i].gain = 0.0
+		sources[i]:Play(sound)
+	end
+	kept.sound, kept.sources = sound, sources
+	assert(math.abs(sound.length - SAMPLES / RATE) < 0.01,
+			"the Sound is " .. sound.length .. " s long")
+	assert(sources[1].playing and sources[2].playing, "both play it")
+	-- Filled once, and a Sound over the cap is refused with the reason
+	local ok, err = pcall(sound.SetData, sound, buffer)
+	assert(not ok, "a Sound took its samples twice")
+	local big, values = magic.VectorBuffer:new(), {}
+	for i = 1, 4 * 1024 * 1024 + 1 do
+		values[i] = 0
+	end
+	buildat.write_shorts(big, values)
+	local over = magic.Sound:new()
+	ok, err = pcall(over.SetData, over, big)
+	assert(not ok, "a Sound over the cap took its samples")
+	log:info("sound from samples ok: " .. string.format("%.2f", sound.length) ..
+			" s, two sources playing; over the cap: " .. tostring(err))
 end
 
 function show_stuff()

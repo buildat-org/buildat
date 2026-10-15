@@ -39,6 +39,7 @@ buildat.has(name) -> bool
   (src/interface/protocol.h; doc/architecture.txt, the hello). Served code
   asks this rather than testing for a function. The names:
     core_require        require("buildat/core/<name>") (0.7.10)
+    sound_from_samples  magic.Sound:new(), SetFormat, SetData (0.7.10)
 
 buildat.get_time_us() -> microseconds, a monotonic clock
 buildat.get_local_time() -> day of the year (1..366), hour, minute, second
@@ -318,6 +319,19 @@ buildat.write_floats(vector_buffer, values)
 - The values into the buffer as floats, replacing what was in it
 buildat.write_shorts(vector_buffer, values)
 - The same as 16-bit samples, each floored and clamped to -32768..32767
+
+A sound made of samples is played two ways. A magic.BufferedSoundStream
+is topped up ahead of its playhead (launch_world's synth). A magic.Sound
+made from samples ([SOUND_FROM_SAMPLES], buildat.has("sound_from_samples"))
+is made once and played by any number of SoundSources, as a loaded one:
+  local sound = magic.Sound:new()
+  sound:SetFormat(rate, sixteen_bit, stereo)  -- rate 1000..96000 Hz
+  sound:SetData(vector_buffer)                -- once; little-endian
+  sound.looped = true                         -- if wanted
+The format goes first and the data once: a Sound's samples are not
+replaced under a source playing them. A Sound holds at most 8 MiB, and
+the Sounds made from samples and alive at most 64 MiB together; over
+either SetData raises with the reason.
 
 
 The extension environment
@@ -2587,7 +2601,7 @@ magic.ScrollView: SetScrollBarsVisible, contentElement, horizontalScrollBar, pag
 magic.Skeleton: GetBone, GetNumBones, GetRootBone, numBones, rootBone
 magic.Skybox: 
 magic.Slider: ChangeValue, knob, orientation, range, repeatRate, value
-magic.Sound: frequency, length, looped
+magic.Sound: SetData, SetFormat, frequency, length, looped, new
 magic.SoundListener: 
 magic.SoundSource: Play, Stop, autoRemoveMode, frequency, gain, panning, playing, soundType
 magic.SoundSource3D: farDistance, innerAngle, nearDistance, outerAngle, rolloffFactor

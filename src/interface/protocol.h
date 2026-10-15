@@ -28,6 +28,7 @@ namespace interface
 	{
 		return {
 			"core_require", // 0.7.10, [CLIENT_CORE]
+			"sound_from_samples", // 0.7.10, [SOUND_FROM_SAMPLES]
 		};
 	}
 
