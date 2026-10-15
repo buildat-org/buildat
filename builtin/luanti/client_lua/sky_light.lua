@@ -218,6 +218,54 @@ function M.terms(height, dome)
 	return t
 end
 
+-- **An object's light** (a model, the hand, a dropped item, drawn unlit
+-- in the frame's units, [OBJECT_LIGHT]): PBRVoxel.glsl's vertex terms for
+-- a face with no sun at a sky and a lamp level (0..1), with units
+-- {ambient, bounce, lamp, sun} -- M.terms()' ambient, its sky times
+-- PHYS.bounce, its lamp, and its sun_level in the sun's colour. The sky
+-- share is the nibble times the face's local shade, which the mesher packs
+-- beside it and an object has no reading of: taken as the nibble again, an
+-- open place's; the bounce where the shaped nibble (the knee at 2..11)
+-- says the sky does not reach; a lamp by its falloff over the nibble's
+-- distance from a torch's level (M.lamp_curve()).
+-- simplified: no ground term and no normal (a side sees half the sky);
+-- level 2 is where a normal takes its share.
+-- The pbr path decodes its texel (pow 2.2) and an unlit object does not: a
+-- mid texel (0.5) is 0.44 of itself decoded, and the object is scaled by
+-- that so a mid tone sits level with the world's.
+-- simplified: one factor for every texel; the upgrade is an unlit
+-- technique that decodes, which level 2's material does anyway.
+M.TEXEL_K = 0.44
+-- PBRVoxel.glsl's lamp term at a lamp nibble (0..15): its falloff over the
+-- nibble's distance from a torch's level. res/light_ramp.png is the same
+-- curve over a level 14 light's reach.
+function M.lamp_curve(level)
+	local d = math.max(math.min(12 - level, 12), 1)
+	return (1 / d - 1 / 12) * 12 / 11
+end
+-- The sun where the sky nibble is full, which in Luanti is direct
+-- sunlight, at half: the mean of a face turned to it and one turned away
+-- (user: the whole of it made a held pickaxe too bright). no_sun leaves it
+-- out, for a lit model that has the sun's light of its own.
+-- simplified: no shadow map and no normal; an object in a tree's shadow on
+-- open ground is half sunlit. [OBJECT_LIGHT] level 2 is the sun's
+-- direction and shadow on it.
+function M.object_light(u, sky, lamp, no_sun)
+	local t = math.max(0, math.min(1, (sky - 2 / 15) / (9 / 15)))
+	local shaped = t * t * (3 - 2 * t)
+	local share = sky * sky
+	local bounce = (0.15 + sky) * (1 - shaped) * sky
+	local lit = M.lamp_curve(15 * lamp)
+	local k = M.TEXEL_K
+	local a, b, l = u.ambient, u.bounce, u.lamp
+	local s = u.sun and sky >= 1 and not no_sun and u.sun or
+			{r = 0, g = 0, b = 0}
+	local h = 0.5
+	return k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
+		k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
+		k * (a.b * share + b.b * bounce + l.b * lit + h * s.b)
+end
+
 -- M.terms() onto voxel_shading and the zone, and the cave's two: the
 -- constant floor under the ambient where the chamber the camera is in is
 -- dark ([CAVE_AO], PHYS.cave_floor, the same at every hour, which is what

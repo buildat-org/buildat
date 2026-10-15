@@ -829,7 +829,10 @@ end
 -- or nil where no voxel is loaded (the caller keeps what it had: a
 -- full-bright guess lit caves). no_sun leaves the sun out, for a lit
 -- model that has the sun's light of its own.
-M.PBR_TEXEL_K = 0.44
+-- The pbr formula is sky_light.lua's, shared with other games' clients
+-- ([SKELDAT_LUANTI_PARTS] 3)
+local sky_light = select(3, buildat.run_script_file("luanti/sky_light.lua"))
+M.PBR_TEXEL_K = sky_light.TEXEL_K
 -- Voxel id -> whether it stops a player, which here stands for stopping
 -- light. simplified: glass and leaves count as blockers, and a place in
 -- one is lit from beside it, which is its own light or a level under it.
@@ -850,13 +853,6 @@ end
 local BESIDE = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1},
 		{0, 0, -1}}
 
--- PBRVoxel.glsl's lamp term at a lamp nibble (0..15): its falloff over the
--- nibble's distance from a torch's level. res/light_ramp.png is the same
--- curve over a level 14 light's reach.
-local function lamp_curve(level)
-	local d = math.max(math.min(12 - level, 12), 1)
-	return (1 / d - 1 / 12) * 12 / 11
-end
 
 -- The dynamic lights drawn this frame, {x, y, z, level}, kept by
 -- M.update_lights(): an object and the hand are lit by them as by the
@@ -919,38 +915,9 @@ function M.light_color(x, y, z, no_sun, settle, glow)
 		local k = 0.28 + 0.72 * math.max(sky * M.daylight, lamp)
 		return magic.Color(k, k, k, 1.0), levels_sky, levels_lamp
 	end
-	-- PBRVoxel.glsl's vertex terms for a face with no sun: the ambient by
-	-- the sky share (the nibble times the face's local shade, which the
-	-- mesher packs beside it and an object has no reading of: taken as
-	-- the nibble again, an open place's), the bounce where the shaped
-	-- nibble (the knee at 2..11) says the sky does not reach, a lamp by
-	-- its falloff over the nibble's distance from a torch's level.
-	-- simplified: no ground term and no normal (a side sees half the
-	-- sky); level 2 is where a normal takes its share.
-	local t = math.max(0, math.min(1, (sky - 2 / 15) / (9 / 15)))
-	local shaped = t * t * (3 - 2 * t)
-	local share = sky * sky
-	local bounce = (0.15 + sky) * (1 - shaped) * sky
-	local lit = lamp_curve(15 * lamp)
-	-- The pbr path decodes its texel (pow 2.2) and an unlit object does
-	-- not: a mid texel (0.5) is 0.44 of itself decoded, and the object is
-	-- scaled by that so a mid tone sits level with the world's.
-	-- simplified: one factor for every texel; the upgrade is an unlit
-	-- technique that decodes, which level 2's material does anyway.
-	local k = M.PBR_TEXEL_K
-	local a, b, l = u.ambient, u.bounce, u.lamp
-	-- The sun where the sky nibble is full, which in Luanti is direct
-	-- sunlight, at half: the mean of a face turned to it and one turned
-	-- away (user: the whole of it made a held pickaxe too bright).
-	-- simplified: no shadow map and no normal; an object in a tree's
-	-- shadow on open ground is half sunlit. [OBJECT_LIGHT] level 2 is
-	-- the sun's direction and shadow on it.
-	local s = u.sun and sky >= 1 and not no_sun and u.sun or
-			{r = 0, g = 0, b = 0}
-	local h = 0.5
-	return magic.Color(k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
-			k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
-			k * (a.b * share + b.b * bounce + l.b * lit + h * s.b), 1.0),
+	-- pbr: sky_light.object_light()
+	local r, g, bl = sky_light.object_light(u, sky, lamp, no_sun)
+	return magic.Color(r, g, bl, 1.0),
 			levels_sky, levels_lamp
 end
 
@@ -2483,7 +2450,7 @@ function M.update_lights(dtime, eye)
 					r, g, b = l.r, l.g, l.b
 				end
 				if u then
-					k = lamp_curve(l.level) * math.pi
+					k = sky_light.lamp_curve(l.level) * math.pi
 					if l.r < 0 then
 						r, g, b = u.lamp.r, u.lamp.g, u.lamp.b
 					else

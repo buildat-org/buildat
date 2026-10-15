@@ -9,7 +9,8 @@
 -- it is sent as skeldat:punch. Their sounds come by name (skeldat:sound)
 -- and are played from sounds.lua's.
 --   local mobs = run_script_file("main/mobs.lua")(game, sounds)
--- game.daylight: 0 to 1, how much the sky's light counts now.
+-- game.light_units: the frame's light (init.lua's update_sky), and
+-- game.sky_light builtin/luanti's rules that light an object by it.
 -- simplified: no death animation and no bow drawn; boxes axis-aligned
 -- for pointing (a boar is pointed at as a square); unlit, flat by the
 -- light where it stands -- no sun direction on its sides, no shadow
@@ -17,9 +18,6 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local log = buildat.Logger("skeldat")
-
--- How bright full light draws a mob, through the HDR tonemap
-local BRIGHT = 1.6
 
 -- A face's pixels {x, y, w, h} in the skin, and its four corners from the
 -- top left, seen from outside
@@ -115,19 +113,18 @@ return function(game, sounds)
 	local M = {}
 	local mobs = {} -- node id -> {node, kind, parts, mat, ...}
 
-	-- The light where it stands, 0.28 at none as builtin/luanti's flat
-	-- light: the sky's by the daylight, or a lamp's
+	-- The light where it stands, as builtin/luanti's pbr path lights an
+	-- object (sky_light.object_light): r, g, b
 	local function light_at(p)
 		local v = voxelworld.get_static_voxel(buildat.Vector3(
 				math.floor(p.x + 0.5), math.floor(p.y + 0.5),
 				math.floor(p.z + 0.5)))
-		if v == nil then
+		if v == nil or game.light_units == nil then
 			return nil
 		end
 		local reg = voxelworld.get_voxel_registry()
-		local l = math.max(reg:light_sky_of(v) / 15 * (game.daylight or 1),
-				reg:light_lamp_of(v) / 15)
-		return (0.28 + 0.72 * l) * BRIGHT
+		return game.sky_light.object_light(game.light_units,
+				reg:light_sky_of(v) / 15, reg:light_lamp_of(v) / 15)
 	end
 
 	local function dress(node)
@@ -204,10 +201,11 @@ return function(game, sounds)
 			end
 			if m.light_t <= 0 then
 				m.light_t = 0.25
-				local k = light_at(magic.Vector3(p.x, p.y + 0.5, p.z))
-				if k then
-					local c = magic.Color(k, k, k, 1)
+				local r, g, b = light_at(magic.Vector3(p.x, p.y + 0.5, p.z))
+				if r then
+					local c = magic.Color(r, g, b, 1)
 					if m.red_t and m.red_t > 0 then
+						local k = (r + g + b) / 3
 						c = magic.Color(k * 1.5 + 0.3, k * 0.4, k * 0.4, 1)
 					end
 					m.mat:SetShaderParameter("MatDiffColor", c)

@@ -18,11 +18,6 @@
 -- **Every uniform is set here at creation**, including the ones nothing ever
 -- changes: a shader parameter a material never sets reads as zero, and zero
 -- for most of these is a black sky.
--- The game's logger under builtin/luanti; another game's (skeldat runs this
--- file without that module) logs as "luanti"
-local has_luanti, luanti_module = pcall(require, "buildat/module/luanti")
-local log = buildat.Logger(has_luanti and type(luanti_module) == "table" and
-		(luanti_module.app or {}).log or "luanti")
 local magic = require("buildat/extension/urho3d")
 
 local M = {}
@@ -158,7 +153,8 @@ assert(math.abs(M.dawn_glow(-0.001) - M.dawn_glow(0.001)) < 0.02 * M.DAWN_GLOW,
 assert(M.dusk_tint(0.2) == 0 and M.dusk_tint(-0.3) == 1, "the tint's ends")
 
 
-function M.new(scene, sun_dir, defaults)
+-- log: the game's logger
+function M.new(scene, sun_dir, defaults, log)
 	local node = scene:CreateChild("SkyDome")
 	local box = node:CreateComponent("Skybox")
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))

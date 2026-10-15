@@ -437,6 +437,18 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// builtin/luanti's sky and its pbr light's rules ([SKELDAT_LUANTI_PARTS]
+		// 3), under the names they run each other by; that module is not
+		// loaded here
+		const ss_ res = m_server->get_config().get<ss_>("share_path")+
+				"/extensions/luanti_client/res/";
+		const ss_ own = m_server->get_builtin_modules_path()+
+				"/luanti/client_lua/";
+		client_file::access(m_server, [&](client_file::Interface *i){
+			i->add_file_path("luanti/sky_model.lua", res+"sky_model.lua");
+			i->add_file_path("luanti/sky_dome.lua", own+"sky_dome.lua");
+			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
+		});
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
 		if(name && name[0])
 			start_world(name, true);
@@ -695,6 +707,14 @@ struct Module: public interface::Module
 			seg.resource_name = n.tiles[i];
 			seg.total_segments = Urho3D::IntVector2(1, 1);
 			seg.select_segment = Urho3D::IntVector2(0, 0);
+			// extensions/luanti_client/surface.lua's DEFAULT, what
+			// builtin/luanti's pbr light is fitted for; the atlas's own
+			// (spec_strength 1) mirrors the sky off grass.
+			// simplified: one surface for every node; surface.lua's guess
+			// by node kind comes with [SKELDAT_LUANTI_PARTS] 6
+			seg.roughness = 0.95f;
+			seg.spec_strength = 0.2f;
+			seg.bumpiness = 0.3f;
 		}
 		d.edge_material_id = interface::EDGEMATERIALID_GROUND;
 		d.physically_solid = true;
@@ -915,16 +935,21 @@ struct Module: public interface::Module
 			m_spawn_ready = true;
 			return;
 		}
-		// For a check: the spawn's column, the zones allowed
+		// For a check: the spawn's column, the zones allowed, "x z" or
+		// "x y z" (a place under the ground: a cave)
 		const char *env = getenv("BUILDAT_SKELDAT_SPAWN");
-		int ex = 0, ez = 0;
-		if(env && sscanf(env, "%d %d", &ex, &ez) == 2){
-			int level = 0;
+		int ex = 0, ey = 0, ez = 0;
+		const int got = env ? sscanf(env, "%d %d %d", &ex, &ey, &ez) : 0;
+		if(got == 2){
+			ez = ey;
 			luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *im){
-				im->spawn_level(m_mapgen, ex, ez, level);
+				im->spawn_level(m_mapgen, ex, ez, ey);
 			});
+			ey = std::max(ey, 2);
+		}
+		if(got >= 2){
 			m_spawn[0] = (float)ex;
-			m_spawn[1] = (float)std::max(level, 2);
+			m_spawn[1] = (float)ey;
 			m_spawn[2] = (float)ez;
 			m_spawn_ready = true;
 		}

@@ -455,7 +455,7 @@ end
 -- accord, and what it still owns -- the voxel materials, the reflections'
 -- own cube map, set_sky_light() and set_sky_tint() -- is untouched.
 local world_sky = sky_dome.new(scene, SUN_DIR,
-		voxel_shading.sky_defaults)
+		voxel_shading.sky_defaults, log)
 
 -- What the world reflects on the pbr path: the sky as it is drawn, into
 -- a cube of its own, re-rendered when the hour or the sun moves. The

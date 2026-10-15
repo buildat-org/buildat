@@ -26,13 +26,28 @@ local scene = replicate.main_scene
 local FAR_CLIP = 160
 local POINT_RANGE = 4.5
 local POINT_STEP = 0.02
-local SUN_BRIGHTNESS = 25.0
-local EXPOSURE_BIAS = 1.6
+-- builtin/luanti's sky and its pbr light's rules ([SKELDAT_LUANTI_PARTS]
+-- 3), served by main.cpp under their own names: the sun, the moon and the
+-- stars, dawn and dusk, and the light's colour as builtin/luanti's pbr
+local sky_dome = load("luanti/sky_dome.lua")
+local sky_light = load("luanti/sky_light.lua")
+local PHYS = sky_light.PHYS
 
 voxelworld.use_skylight = true
 voxelworld.horizon = true
 voxel_shading.set_packed_sky(true)
 voxel_shading.use_sun_gate(true)
+-- builtin/luanti's shaders, which the light's rules are for
+voxel_shading.use_technique_set({
+	plain = "luanti_client/res/LuantiVoxel.xml",
+	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
+	alpha = "luanti_client/res/LuantiVoxelAlpha.xml",
+	masked = "luanti_client/res/LuantiVoxelMasked.xml",
+	sun = "luanti_client/res/LuantiVoxelSun.xml",
+	sun_modifiers = "luanti_client/res/LuantiVoxelSunModifiers.xml",
+	sun_alpha = "luanti_client/res/LuantiVoxelSunAlpha.xml",
+	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
+})
 -- The bones, which the format draws as its tint modifier (main.cpp)
 voxel_shading.use_modifiers(true)
 voxelworld.lod_distance = 4000
@@ -223,18 +238,39 @@ do
 	zone.boundingBox = magic.BoundingBox(-100000, 100000)
 	zone.fogStart = FAR_CLIP * 0.6
 	zone.fogEnd = FAR_CLIP * 0.95
-	zone.priority = -1
+	-- Above Urho's default zone, as builtin/luanti's: a chunk that once
+	-- landed on the default one kept its unset ambient
+	zone.priority = 1
 	zone.override = true
-	zone.zoneTexture = magic.cache:GetResource("TextureCube",
-			voxel_shading.sky_cubemap)
 	game.zone = zone
 end
-local sun_node = scene:CreateChild("DirectionalLight")
-local sun = sun_node:CreateComponent("Light")
-sun.lightType = magic.LIGHT_DIRECTIONAL
-sun.castShadows = true
-sun.color = magic.Color(1.0, 0.96, 0.88)
-voxel_shading.create_skybox(scene, {x = -0.6, y = -1.0, z = 0.3})
+-- The sun and the moon, two lights each faded over the hour it crosses
+-- the horizon (builtin/luanti's [LIGHT_SHAPE], its shadow numbers)
+local function body_light(name)
+	local node = scene:CreateChild(name)
+	local light = node:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+	light.castShadows = true
+	light.specularIntensity = 1.0
+	light.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
+	light.shadowCascade = magic.CascadeParameters(24, 96, 0, 0, 0.8)
+	return node, light
+end
+local sun_node, sun = body_light("Sun")
+local moon_node, moon = body_light("Moon")
+local SUN_DIR = {x = -0.6, y = -1.0, z = 0.3}
+local sky = sky_dome.new(scene, SUN_DIR, voxel_shading.sky_defaults,
+		log)
+sky:set_physical(true)
+sky:set_auto_dim(false)
+-- What the world reflects: the sky as it is drawn, re-rendered once a
+-- second, a face a frame
+local sky_cube = {cube = require("buildat/extension/skycube").new(magic,
+		sky.material), due = 0}
+game.zone.zoneTexture = sky_cube.cube.texture
+voxel_shading.set_sky_light(1.0)
+voxel_shading.set_specular_emphasis(0.7)
+voxel_shading.set_gray_by_light(1.5)
 
 local player = physics.new(
 	function(x, y, z)
@@ -274,14 +310,7 @@ do
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
 	magic.renderer.HDRRendering = true
-	local rp = viewport.renderPath:Clone()
-	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
-	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
-	rp:Append(magic.cache:GetResource("XMLFile",
-			"PostProcess/GammaCorrection.xml"))
-	rp:SetEnabled("TonemapReinhardEq3", false)
-	rp:SetEnabled("TonemapUncharted2", true)
-	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	local rp = sky_light.render_path(magic, viewport.renderPath)
 	viewport.renderPath = rp
 end
 voxelworld.set_camera(camera_node)
@@ -296,33 +325,107 @@ buildat.sub_packet("skeldat:position", function(data)
 			player.x, player.y, player.z))
 end)
 
--- Day and night off the server's clock: the sun around the x axis, the
--- light and the sky dimmed as it sets
--- simplified: no moon, no dawn colours; the stars and a dimmed sky are
--- the night
+-- Day and night off the server's clock (game.day is Luanti's time of
+-- day, 0.5 noon), lit by builtin/luanti's rules (sky_light.lua) at the sun
+-- height of its stretched day: the sky's two ends in its hue at the
+-- reference's radiance, and the sun, the moon, the ambient, the bounce,
+-- the ground, a lamp, the cave floor and the fog from them. The sky's hue
+-- by the hour is builtin/luanti's: night, dawn and day colours, three
+-- blended (client.lua's apply_sky_of_hour), here at the render's day
+-- colours alone.
+-- simplified: no weather, no game sky; a clear sky every day
+local function hue_of_hour(t, lit)
+	local function three(night, dawn, day)
+		local a, b, k
+		if t < 0.5 then
+			a, b, k = night, dawn, t * 2
+		else
+			a, b, k = dawn, day, (t - 0.5) * 2
+		end
+		local function one(v, w)
+			local x = (v + (w - v) * k) * lit
+			return x > 0 and x ^ 2.2 or 0
+		end
+		return {r = one(a.r, b.r), g = one(a.g, b.g), b = one(a.b, b.b)}
+	end
+	local dz, dh = PHYS.day_zenith, PHYS.day_horizon
+	local nz = {r = dz.r * 0.10, g = dz.g * 0.10, b = dz.b * 0.14}
+	local nh = {r = dh.r * 0.10, g = dh.g * 0.10, b = dh.b * 0.14}
+	return three(nz, {r = (dz.r + nz.r) * 0.5, g = (dz.g + nz.g) * 0.5,
+			b = (dz.b + nz.b) * 0.5}, dz),
+		three(nh, {r = dh.r * 0.75, g = dh.g * 0.52, b = dh.b * 0.45}, dh)
+end
+local CLOUD = {r = 0.9, g = 0.92, b = 0.95}
 local function update_sky(dt)
 	game.day = (game.day + dt * game.day_rate) % 1
-	local a = (game.day - 0.25) * 2 * math.pi
-	local sx, sy, sz = math.cos(a), math.sin(a), 0.3
-	local day = math.max(0, math.min(1, sy * 4 + 0.3))
-	local dir = magic.Vector3(-sx, -sy, -sz):Normalized()
-	sun_node.direction = dir
-	sun.brightness = sy > 0 and SUN_BRIGHTNESS * math.min(1, sy * 3) or 0
+	local daylight = game.day * 24000
+	local tilt = sky_dome.orbit_tilt(nil, nil)
+	-- The shadow's direction held a step at a time (a map rasterised from
+	-- a light that turned between two frames crawls), the drawn sun smooth
+	local sx, sy, sz = sky_dome.sun_direction(sky_dome.stepped_time(daylight),
+			tilt)
+	local mx, height, mz = sky_dome.sun_direction(daylight, tilt)
+	local l = math.sqrt(sx * sx + sy * sy + sz * sz)
+	local dir = magic.Vector3(-sx / l, -sy / l, -sz / l)
+	local ml = math.sqrt(mx * mx + height * height + mz * mz)
+	sky:set_sun_direction({x = -mx / ml, y = -height / ml, z = -mz / ml})
 	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
-	voxel_shading.set_sky_light(0.08 + 0.92 * day)
-	voxel_shading.set_cloud_light(0.1 + 0.9 * day)
-	voxel_shading.set_star_look(0.06 * (1 - day))
-	local d = voxel_shading.sky_defaults
-	local function dim(c, k)
-		return {r = c.r * k, g = c.g * k, b = c.b * k}
+	sky:set_moon_look(sky_dome.moon_amount(daylight) > 0 and
+			sky_dome.MOON_HALF or 0)
+	local day = math.max(0, math.min(1, (height + 0.15) / 0.3))
+	day = math.max(day, sky_dome.predawn(height))
+	local up = sky_dome.sun_amount(daylight) * sky_dome.above_horizon(height)
+	local moon_up = sky_dome.moon_amount(daylight) *
+			sky_dome.above_horizon(-height)
+
+	local lit = (0.175 + 0.825 * day) ^ 2.2
+	local zenith, horizon = hue_of_hour(day, lit)
+	zenith, horizon = sky_light.sky_radiance(zenith, horizon, height)
+	sky:set_look(zenith, horizon, nil)
+	-- Where a direction cannot see the sky (a cave): Luanti's indoors grey
+	sky:set_indoors({r = 0.39, g = 0.39, b = 0.39}, lit)
+	local t = sky_light.terms(height, sky_light.dome(zenith, horizon))
+	sky:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)
+
+	sun_node.enabled = up > 0
+	if up > 0 then
+		sun_node.direction = dir
+		sun.brightness = t.sun
+		sun.color = magic.Color(t.sun_color.r, t.sun_color.g, t.sun_color.b)
 	end
-	game.daylight = day
-	local k = 0.05 + 0.95 * day
-	voxel_shading.set_sky_look(dim(d.zenith, k), dim(d.horizon, k))
-	game.zone.ambientColor = magic.Color(0.26 * k, 0.33 * k, 0.46 * k)
-	game.zone.fogColor = magic.Color(d.horizon.r * k, d.horizon.g * k,
-			d.horizon.b * k)
+	moon_node.enabled = moon_up > 0
+	if moon_up > 0 then
+		moon_node.direction = magic.Vector3(-dir.x, -dir.y, -dir.z)
+		moon.brightness = t.moon * moon_up
+		moon.color = magic.Color(t.moon_color.r, t.moon_color.g,
+				t.moon_color.b)
+	end
+	local half = voxel_shading.sky_defaults.sun_half
+	sky:set_sun_look(half, voxel_shading.sky_defaults.sun_color)
+	sky:set_sun_radiance(sky_light.sun_disc(height, half, t.sun_color))
+	sky:set_star_look(sky_dome.STAR_DENSITY_DEFAULT, nil,
+			(1 - day) * (1 - day))
+	sky:set_cloud_lit(sky_light.cloud_lit(CLOUD, zenith, horizon, height, 1))
+
+	sky_light.apply(voxel_shading, game.zone, magic, t)
+	-- For the mobs (mobs.lua), in the frame's units
+	game.light_units = {ambient = t.ambient, bounce = {r = t.sky.r * PHYS.bounce,
+		g = t.sky.g * PHYS.bounce, b = t.sky.b * PHYS.bounce}, lamp = t.lamp,
+		sun = {r = t.sun_level * t.sun_color.r, g = t.sun_level * t.sun_color.g,
+			b = t.sun_level * t.sun_color.b}}
+	local seen = voxel_shading.sky_visibility_above()
+	sky:set_outside(sky_light.outside(seen))
+	local fc = sky_light.fog(horizon, t.ambient, seen)
+	game.zone.fogColor = magic.Color(fc.r, fc.g, fc.b)
+
+	local now = scene.elapsedTime
+	if now >= sky_cube.due then
+		sky_cube.due = now + 1
+		sky_cube.cube:update()
+	end
+	sky_cube.cube:tick()
 end
+game.sky_light = sky_light
 
 --
 -- The danger is the bones around the player ([SKELDAT], user, 2026-10-15:

@@ -44,7 +44,8 @@ whatever the role, as a modified client would.
 Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the dialog;
 `BUILDAT_SKELDAT_SEED=<n>` is a new world's seed; `BUILDAT_SKELDAT_TIME=0..1`
 the time of day it starts at (0.5 noon); `BUILDAT_SKELDAT_SPAWN="x z"` a new
-world's spawn column, in a danger zone or not;
+world's spawn column, in a danger zone or not, or `"x y z"` a place under
+the ground;
 `BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
 at x, z from the first player, once; `BUILDAT_SKELDAT_AWAY=<s>` starts the
 world as if it had run that long with its sections away, so they catch up.
