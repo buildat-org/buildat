@@ -1178,6 +1178,23 @@ buildat.safe.run_extension_file = function(name)
 	return ret
 end
 
+-- One of the calling extension's own files as text, by the same names
+-- ([BLIP]: the designer saves its generator's source for an app to copy)
+buildat.safe.read_extension_file = function(name)
+	if type(name) ~= "string" or not (name:match("^[%w_%-]+%.lua$") or
+			name:match("^[%w_%-]+/[%w_%-]+%.lua$")) then
+		return nil, "read_extension_file(name): one .lua file, not a path"
+	end
+	local who = calling_extension()
+	local f = io.open(__buildat_extension_path(who) .. "/" .. name, "rb")
+	if not f then
+		return nil, "read_extension_file: no " .. name .. " in " .. who
+	end
+	local text = f:read("*a")
+	f:close()
+	return text
+end
+
 -- **The launch UIs this client has**, listed without running one:
 -- an extension says it is one by shipping `launch_ui.txt`, whose first
 -- line is its name for a person. Listing by loading would mean running
