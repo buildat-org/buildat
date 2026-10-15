@@ -1,0 +1,6 @@
+<!-- A particle at full glow, unfogged: see ParticleGlow.glsl. Both Luanti
+     clients; the rest of the particles are CoreData's
+     DiffUnlitParticleAlpha. -->
+<technique vs="luanti_client/res/ParticleGlow" ps="luanti_client/res/ParticleGlow" vsdefines="VERTEXCOLOR">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+</technique>

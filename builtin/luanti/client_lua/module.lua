@@ -885,7 +885,7 @@ end
 -- A voxel just dug arrives as air with no light and is relit a second
 -- or more later ([DROP_LIGHT_FIRST]), and a solid one holds a light of
 -- its own; both read so without settle.
-function M.light_color(x, y, z, no_sun, settle)
+function M.light_color(x, y, z, no_sun, settle, glow)
 	local px, py, pz = math.floor(x + 0.5), math.floor(y + 0.5),
 			math.floor(z + 0.5)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(px, py, pz))
@@ -910,6 +910,8 @@ function M.light_color(x, y, z, no_sun, settle)
 		end
 	end
 	lamp = dynamic_lamp(x, y, z, lamp)
+	-- A particle's glow raises its light to that level, Luanti's rule
+	lamp = math.max(lamp, glow or 0)
 	local levels_sky, levels_lamp = sky, lamp
 	sky, lamp = sky / 15, lamp / 15
 	local u = M.light_units
@@ -1975,7 +1977,9 @@ end
 -- What velocity range a direction box holds, the extension's
 -- ([LUANTI_SHARED])
 local _, _, particles_proto = buildat.run_script_file("luanti/particles.lua")
-local speed_range = particles_proto.speed_range
+-- One table, the main chunk being at Lua's 200 locals: the sky model's
+-- flash and full glow ([VANILLA_WEATHER]), and light() below
+local pt = {sky = select(3, buildat.run_script_file("luanti/sky_model.lua"))}
 
 local function middle(a, b)
 	return {(a[1] + b[1]) / 2, (a[2] + b[2]) / 2, (a[3] + b[3]) / 2}
@@ -1987,13 +1991,16 @@ end
 -- before it goes on.
 local particle_materials = {}
 local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
-		size_max, vel_min, vel_max, acc, active_time, anim)
+		size_max, vel_min, vel_max, acc, active_time, anim, glow)
 	local effect = magic.ParticleEffect.new()
 	-- One material a texture, made the first time it is drawn and kept
 	-- here, which is also what keeps it alive: every particle of a snow
 	-- storm made its own, and that was half of what a particle cost
-	-- ([PACKET_STALL], 2026-10-03)
-	local cached = particle_materials[resource]
+	-- ([PACKET_STALL], 2026-10-03). A particle at full glow is a light
+	-- and has one of its own, unfogged (res/ParticleGlow.xml)
+	local full = (glow or 0) >= pt.sky.GLOW_FULL
+	local key = full and resource .. "#glow" or resource
+	local cached = particle_materials[key]
 	local material = cached and cached.material
 	local tex = cached and cached.tex
 	if not cached then
@@ -2011,6 +2018,7 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 		-- are soft-edged -- and unlit, like the objects. Urho3D ships the
 		-- technique.
 		material:SetTechnique(0, magic.cache:GetResource("Technique",
+				full and "luanti_client/res/ParticleGlow.xml" or
 				"Techniques/DiffUnlitParticleAlpha.xml"))
 		-- **Held by the resource cache, not by this table** ([PARTICLE_SEGV]):
 		-- a Material made in Lua lives only while the engine holds it, so
@@ -2018,8 +2026,8 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 		-- particle of that texture handed the freed one to SetMaterial --
 		-- SIGSEGV in RefCounted. The cache's reference keeps it.
 		magic.cache:AddManualResource(material, "luanti_particle/" ..
-				resource:gsub("[^%w%._%-/]", "_"):gsub("%.%.", "_"))
-		particle_materials[resource] = {material = material, tex = tex}
+				key:gsub("[^%w%._%-/]", "_"):gsub("%.%.", "_"))
+		particle_materials[key] = {material = material, tex = tex}
 	end
 	effect.material = material
 	effect.numParticles = amount
@@ -2043,7 +2051,7 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 	effect:SetMaxParticleSize(magic.Vector2(size_max * half, size_max * half))
 	effect:SetMinDirection(magic.Vector3(vel_min[1], vel_min[2], vel_min[3]))
 	effect:SetMaxDirection(magic.Vector3(vel_max[1], vel_max[2], vel_max[3]))
-	local near, far = speed_range(vel_min, vel_max)
+	local near, far = particles_proto.speed_range(vel_min, vel_max)
 	effect.minVelocity = near
 	effect.maxVelocity = far
 	effect:SetConstantForce(magic.Vector3(acc[1], acc[2], acc[3]))
@@ -2074,6 +2082,39 @@ local function spawner_signature(p)
 		n[#n + 1] = string.format("%g", v)
 	end
 	return table.concat(n, "/")
+end
+
+-- **A particle's light** ([VANILLA_WEATHER] 5): Luanti's is its node's,
+-- raised to its glow. Here the emitter's, at its middle, as a sprite
+-- object's (M.light_color(): the parity modes' flat light, pbr's in its
+-- units), set as the effect's colour, which Urho3D applies to the live
+-- particles too. Full glow is a light: white, and on pbr the flash's
+-- radiance, which is over 1 and so goes on its own material's colour (a
+-- vertex colour is 8-bit and stops at 1). simplified: one light for the
+-- emitter's whole box, and a lit object's flat share of the sun rather than
+-- a lit technique on pbr and shadows; set again when it moves by a 255th.
+function pt.light(entry)
+	local c
+	if (entry.glow or 0) >= pt.sky.GLOW_FULL then
+		local f = M.light_units and pt.sky.flash_radiance() or 1
+		entry.material:SetShaderParameter("MatDiffColor",
+				magic.Color(f, f, f, 1))
+		c = magic.Color(1, 1, 1, 1)
+	else
+		local p = entry.node.position
+		c = M.light_color(p.x, p.y, p.z, false, false, entry.glow)
+		if c == nil then
+			return
+		end
+	end
+	local o = entry.lit
+	if o and math.abs(c.r - o.r) < 1 / 255 and math.abs(c.g - o.g) < 1 / 255
+			and math.abs(c.b - o.b) < 1 / 255 then
+		return
+	end
+	entry.lit = c
+	entry.effect.numColorFrames = 0
+	entry.effect:AddColorTime(magic.Color(c.r, c.g, c.b, 1), 0)
 end
 
 local function remove_spawner(id)
@@ -2132,7 +2173,7 @@ local function add_spawner(id, p)
 			math.max(0.01, p.exp_min), math.max(0.01, p.exp_max),
 			math.max(0.001, p.size_min), math.max(0.001, p.size_max),
 			p.vel_min, p.vel_max, middle(p.acc_min, p.acc_max), p.time,
-			p.animation)
+			p.animation, p.glow)
 	-- What the emitter box is: the position range, which the node sits in
 	-- the middle of
 	effect.emitterType = 1 -- EMITTER_BOX
@@ -2159,7 +2200,7 @@ local function add_spawner(id, p)
 	-- both were made in Lua, and a Lua-made Urho3D object is destroyed when
 	-- the last Lua reference to it goes, whatever the engine still holds.
 	particle_nodes[id] = {node = node, emitter = emitter, effect = effect,
-			material = material, signature = signature,
+			material = material, signature = signature, glow = p.glow,
 			life = p.time > 0 and (p.time + p.exp_max + 0.5) or nil,
 			attached = p.attached ~= "0" and p.attached or nil,
 			offset = pos, ttl_max = math.max(0.01, p.exp_max)}
@@ -2179,7 +2220,7 @@ local function add_single(p)
 	local effect, material = particle_effect(resource, 1, ttl, ttl,
 			math.max(0.001, p.size_min), math.max(0.001, p.size_max),
 			p.vel_min, p.vel_max, middle(p.acc_min, p.acc_max), 0.05,
-			p.animation)
+			p.animation, p.glow)
 	effect.emitterType = 0 -- EMITTER_SPHERE, of no size
 	effect:SetEmitterSize(magic.Vector3(0, 0, 0))
 	effect.minEmissionRate = 100
@@ -2191,8 +2232,10 @@ local function add_single(p)
 	if p.vertical then
 		emitter.faceCameraMode = magic.FC_ROTATE_Y
 	end
-	single_particles[#single_particles + 1] = {node = node, life = ttl + 0.5,
-			effect = effect, material = material}
+	local entry = {node = node, life = ttl + 0.5, effect = effect,
+			material = material, glow = p.glow}
+	pt.light(entry)
+	single_particles[#single_particles + 1] = entry
 end
 
 -- Ages the emitters and takes away the ones that are done with. A spawner
@@ -2217,6 +2260,7 @@ function M.update_particles(dtime, eye)
 			entry.node.position = magic.Vector3(p.x + entry.offset[1],
 					p.y + entry.offset[2], p.z + entry.offset[3])
 		end
+		pt.light(entry)
 		if entry.life then
 			entry.life = entry.life - dtime
 			if entry.life <= 0 then
@@ -2272,6 +2316,9 @@ local function parse_particles(v)
 				aspect_h = num(32), length = num(33),
 				frames_w = math.floor(num(34)),
 				frames_h = math.floor(num(35))},
+		glow = num(36),
+		collision = v[37] == "1",
+		collision_removal = v[38] == "1",
 	}
 end
 

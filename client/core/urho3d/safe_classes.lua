@@ -3146,6 +3146,10 @@ function M.define(dst, util)
 		properties = {
 			material = util.simple_property(dst.Material),
 			numParticles = util.simple_property("number"),
+			-- Zero clears the colour frames, for AddColorTime() to set a
+			-- new colour: what the live particles are drawn in, as Urho3D
+			-- reads the frames on every update
+			numColorFrames = util.simple_property("number"),
 			emitterType = util.simple_property("number"),
 			emitterSize = {get = util.simple_property(dst.Vector3).get},
 			minDirection = {get = util.simple_property(dst.Vector3).get},

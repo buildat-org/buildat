@@ -1637,6 +1637,18 @@ local function apply_sky_of_hour(force)
 				game_sky.cloud_color, cover,
 				sky_now.unlit and 0 or sky_dome.OVERCAST_DIM)
 	end
+	-- A game's white sky is a flash (VoxeLibre's lightning): pbr's sky,
+	-- which draws its own radiance and not the game's colours, goes to the
+	-- flash's (res/sky_model.lua); unlit draws the white as it is
+	local flash = sky_now.unlit and 0 or sky_dome.sky_flash(game_sky.zenith)
+	if flash > 0 then
+		local f = sky_dome.flash_radiance()
+		local function lit(c)
+			return {r = c.r + (f - c.r) * flash, g = c.g + (f - c.g) * flash,
+					b = c.b + (f - c.b) * flash}
+		end
+		zenith_now, horizon_now = lit(zenith_now), lit(horizon_now)
+	end
 	sky_now.horizon_now, sky_now.cover = horizon_now, cover
 	-- And the meter, which would put a storm at a clear day's brightness
 	if not sky_now.unlit and sky_now.metered_cover ~= cover then

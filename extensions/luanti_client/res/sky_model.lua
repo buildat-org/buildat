@@ -509,6 +509,25 @@ function M.middle_grey(grey, cover)
 	return grey * (1 - M.OVERCAST_EXPOSURE * (cover or 0))
 end
 
+-- **The flash**: a lightning bolt -- a particle at full glow, Luanti's
+-- "draw me as a light" -- and the game's sky gone white for a moment
+-- (VoxeLibre's lightning layer, 0.1 s). On pbr both are this many times
+-- the noon zenith's radiance, above anything the sky is, so they show over
+-- the exposure as a flash; the other modes draw them at white.
+M.GLOW_FULL = 14
+M.FLASH = 3
+function M.flash_radiance()
+	return M.FLASH * PHYS.sky_zenith
+end
+-- How much a game's sky colour ({r,g,b} 0..1) says flash: white, each
+-- channel near one, which no daylight sky is
+function M.sky_flash(c)
+	if not c then
+		return 0
+	end
+	return clamp01((math.min(c.r, c.g, c.b) - 0.9) / 0.1)
+end
+
 -- What the games really send, in and out ([VANILLA_WEATHER]'s checks)
 do
 	local function rgb(hex)
@@ -547,6 +566,12 @@ do
 	assert(math.abs(zt.r - zt.b) < 0.05 * lum(zt), "the clouds' grey")
 	local zd = M.overcast(z, h, rgb("5D5D5F"), 1, M.OVERCAST_DIM)
 	assert(lum(zd) < lum(z) * 0.5, "pbr's zenith darkens under cover")
+	-- VoxeLibre's lightning layer is white; its clear and its snow skies
+	-- are not a flash
+	assert(M.sky_flash(rgb("FFFFFF")) > 0.99, "a white sky flashes")
+	assert(M.sky_flash(rgb("78A7FF")) == 0, "a day sky does not")
+	assert(M.sky_flash(rgb("ADADAD")) == 0, "a snow sky does not")
+	assert(M.flash_radiance() > PHYS.sky_zenith, "over the noon sky")
 end
 
 return M

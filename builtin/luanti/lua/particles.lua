@@ -13,10 +13,12 @@
 --       posmin(3) posmax(3) velmin(3) velmax(3) accmin(3) accmax(3)
 --       expmin expmax sizemin sizemax
 --       anim_type aspect_w aspect_h length frames_w frames_h
+--       glow collisiondetection collision_removal
 --   "particle" 0 texture 1 0 vertical attached
 --       pos(3) pos(3) vel(3) vel(3) acc(3) acc(3)
 --       exptime exptime size size
 --       anim_type aspect_w aspect_h length frames_w frames_h
+--       glow collisiondetection collision_removal
 --   "delete" id
 --
 -- A single particle is a spawner of one that fires once, so the two share
@@ -27,10 +29,6 @@
 -- started with -- and none of radius, drag, jitter, bounce or attract. The
 -- deprecated positional form of add_particlespawner() is not taken either;
 -- every game written this decade passes the table.
---
--- simplified: glow is dropped. A particle here is drawn unlit, so one that
--- glows and one that does not look the same; what would tell them apart is
--- lighting the rest, which is the object lighting question.
 
 local function number_or(v, default)
 	local n = tonumber(v)
@@ -182,6 +180,10 @@ local function spawner_record(kind, id, def, pos_min, pos_max, vel_min,
 	append(flat, acc_max)
 	append(flat, {exp_min, exp_max, size_min, size_max})
 	append(flat, animation_fields(def.animation))
+	-- The light it is raised to (0..14) and what it does at a node
+	append(flat, {math.max(0, math.min(14, math.floor(number_or(def.glow, 0)))),
+			def.collisiondetection and "1" or "0",
+			def.collision_removal and "1" or "0"})
 	return flat
 end
 
@@ -250,5 +252,8 @@ function core.add_particle(def)
 		vertical = def.vertical,
 		attached = def.attached,
 		animation = def.animation,
+		glow = def.glow,
+		collisiondetection = def.collisiondetection,
+		collision_removal = def.collision_removal,
 	}, pos, pos, vel, vel, acc, acc, exptime, exptime, size, size))
 end
