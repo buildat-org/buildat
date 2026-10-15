@@ -291,7 +291,7 @@ is then that capture's cancel. A screen never adds a second Escape handler
 that pops itself -- with the menu's own, that was the pop twice.
 
 A click or tap on nothing is Escape, and so is the browser's Back
-([TAP_BACK], client/extensions/uistack): a touchscreen has no Escape key.
+([TAP_BACK], client/core/uistack): a touchscreen has no Escape key.
 Not on the first screen on the stack, where Escape would be Quit; there
 the browser's Back leaves the page. A layer over a world, where a click on
 nothing is the game's, is pushed with {tap_outside = false}.

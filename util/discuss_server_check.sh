@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~4 min (2026-10-07)
-# covers: client/api.lua discuss_this_server client/extensions/urho3d/init.lua apps/hearth/main/main.cpp apps/hearth/main/client_lua/init.lua extensions/luanti_client/settings.lua
+# covers: client/api.lua discuss_this_server client/core/urho3d/init.lua apps/hearth/main/main.cpp apps/hearth/main/client_lua/init.lua extensions/luanti_client/settings.lua
 # [DISCUSS_SERVER]: "Discuss (leave server)" in luanti_client's pause
 # menu. A Starport recommending a Hearth, the Hearth listed there with an
 # admin, an ID logged in on the client, and a local devtest Luanti server

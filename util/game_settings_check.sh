@@ -41,7 +41,7 @@ echo '{"engine_api": 2, "disable_cpp": true, "client_main": "init.lua", "depende
 echo 'return function(ctx) return {{id = "play", label = "gscheck", run = function() ctx.launch{app = "gscheck"} end}} end' > "$a/launcher/init.lua"
 cat > "$a/main/client_lua/init.lua" <<'L'
 local log = buildat.Logger("gscheck")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 local function keys()
 	local k = buildat.declare_keys(nil, "gscheck",
 			{{id = "jump", label = "Jump", default = "Space"}})

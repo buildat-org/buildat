@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 75s (2026-10-09)
-# covers: client/extensions/starport/init.lua apps/starport/main/main.cpp util/starport_version_github.py src/client/app_lua.h src/impl/linux/process.cpp extensions/launch_menu/init.lua
+# covers: client/core/starport/init.lua apps/starport/main/main.cpp util/starport_version_github.py src/client/app_lua.h src/impl/linux/process.cpp extensions/launch_menu/init.lua
 # [VERSION_CHECK]: a Starport whose version adapter says 0.9.0 carries it
 # in /api/v1/list, filtered (a bad platform left out); the launcher shows the
 # notice, "Not now" is kept across a restart, a newer version (0.9.1) is

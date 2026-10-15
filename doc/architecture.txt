@@ -15,8 +15,9 @@ Module code is transfered from the server and run in a safe Lua sandbox.
 Extensions (extensions/) run in the same sandbox, with the safe interfaces
 and a few verbs of their own (storage, a cache, their own files). What
 needs trust -- the sandbox itself, the sockets and the user's per-host
-consent, the Starport identity -- is the client's own code, in
-client/extensions/.
+consent, the Starport identity -- is the client's own code, the client
+core, in client/core/ ([CLIENT_CORE]). "Extension" means a sandboxed one
+only; the client core is another thing than the C++ core in src/core/.
 
 What a script cannot imitate is marked ([TRUST_COLOR]): a colour picked at
 random at client start fills every Starport field, and the launcher shows
@@ -109,7 +110,8 @@ Extensions use the new Lua 5.1/5.2 module interface.
 If an extension wish to provide an interface to sandboxed code, it should
 implement table "safe", which contains the safe interface.
 
-Extensions and modules use require "buildat/extension/<name>" to use extensions.
+Extensions and modules use require "buildat/extension/<name>" to use extensions,
+and require "buildat/core/<name>" for a part of the client core.
 
 The launch UI is loaded automatically at client startup if no server address
 is provided on the command line, which is what running `buildat` with no

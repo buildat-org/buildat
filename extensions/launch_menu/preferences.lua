@@ -22,9 +22,9 @@
 -- raises on a name it does not have rather than answering nil
 local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu/preferences")
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 uistack = uistack.main and uistack or uistack.safe
 local ui_utils = require("buildat/extension/ui_utils")
 ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe

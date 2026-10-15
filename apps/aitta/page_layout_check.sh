@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-10)
-# covers: client/extensions/aitta/init.lua
+# covers: client/core/aitta/init.lua
 # [AITTA_PAGE_LAYOUT]: a local Aitta with 14 packages, more than fit, one
 # with a long name and description. The launcher's "Apps from Aitta":
 #   1. Every package is a row; the wheel over the list reaches the last;

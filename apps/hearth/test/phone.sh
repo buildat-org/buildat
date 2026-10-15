@@ -3,7 +3,7 @@
 # broken: back to long; upright: the file picker never opened (dev)
 #   (local/runs/dev_baseline)
 # cost: ~150 s (2026-10-09)
-# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua util/web_drive.js client/extensions/network/json.lua
+# covers: apps/hearth/main/client_lua/init.lua builtin/accounts/client_lua/accounts.lua util/web_drive.js client/core/network/json.lua
 # [HEARTH_USABILITY] 1, **phone**: the same post as desktop_mouse.sh, from
 # the web client in headless Chrome as a phone (390x844 at 3 device pixels,
 # touch), held upright and then turned (844x390). Each time by taps: log in,

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-10)
-# covers: client/extensions/starport/init.lua builtin/accounts/client_lua/accounts.lua
+# covers: client/core/starport/init.lua builtin/accounts/client_lua/accounts.lua
 # [ID_AUTO_JOIN]: a local Starport and a Hearth listed on it, an admin
 # made there first; a client with a Starport ID signed in.
 #   1. The first join shows the dialog; Return signs in with the ID (the

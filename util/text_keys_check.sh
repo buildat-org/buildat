@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: ~45 s (2026-10-10)
-# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/extensions/uistack/init.lua
+# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua
 # [TEXT_KEYS], the text field's keys and clicks, by the ui scan's text,
 # cursor and selection after each step:
 #   1. Single-line, launch_menu's "Join a Buildat server" Address: Ctrl+A

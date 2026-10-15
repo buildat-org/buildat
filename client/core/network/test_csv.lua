@@ -2,7 +2,7 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- Run: lua client/extensions/network/test_csv.lua
+-- Run: lua client/core/network/test_csv.lua
 
 local csv = dofile((arg[0]:match("^(.*)/[^/]*$") or ".").."/csv.lua")
 

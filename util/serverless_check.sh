@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-10)
-# covers: src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua extensions/launch_menu/screens.lua
+# covers: src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/core/starport/init.lua client/core/aitta/init.lua extensions/launch_menu/screens.lua
 # [SERVERLESS_PLAY]: an app's client half with no server, natively, by
 # BUILDAT_RUN. A small app (client_main, a texture in client_data):
 #   1. As dev:sl: buildat.serverless() true, a packet sent twice said
@@ -27,7 +27,7 @@ printf '{"author": "tester", "name": "sl", "version": "1.0.0", "engine_api": 2,
 	"description": "a serverless check", "serverless": true}\n' > "$app/meta.json"
 cat > "$app/main/client_lua/init.lua" <<'L'
 local log = buildat.Logger("sl")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 log:info("sl: serverless " .. tostring(buildat.serverless()))
 buildat.send_packet("sl:hello", "a")
 buildat.send_packet("sl:hello", "b")

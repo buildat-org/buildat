@@ -744,7 +744,7 @@ function M.new(magic, buildat, log, options)
 	-- fov_for turns into the camera's vertical fov; set again each frame so
 	-- that a turned screen follows. Transitions run on the wanted one.
 	-- On self: this function is at Lua's 200 locals
-	self.fov_for = require("buildat/extension/urho3d").fov_for
+	self.fov_for = require("buildat/core/urho3d").fov_for
 	function self.apply_fov(v)
 		self.fov_now = v
 		camera.fov = self.fov_for(v)

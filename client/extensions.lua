@@ -7,10 +7,38 @@ local log = buildat.Logger("__client/extensions")
 local loaded_extensions = {}
 
 -- [EXTENSIONS_SANDBOXED]: **an extension in extensions/ runs in the
--- sandbox**, as a server's client Lua and a launch UI do; only the
--- client's own, in client/extensions, are trusted. What it returns is
--- kept as it is, so trusted code reads its .safe as before, and the
--- sandbox's require hands out a view of that.
+-- sandbox**, as a server's client Lua and a launch UI do. The client
+-- core, client/core/, is the client's own and trusted ([CLIENT_CORE]);
+-- it loads here the same way. What it returns is kept as it is, so
+-- trusted code reads its .safe as before, and the sandbox's require hands
+-- out a view of that.
+
+local core_dir = __buildat_get_path("share").."/client/core/"
+
+-- Whether name is a part of the client core rather than an extension
+function __buildat_is_core(name)
+	return __buildat_extension_path(name):sub(1, #core_dir) == core_dir
+end
+
+-- The core part or extension a require name asks for, and the name it is
+-- kept under, or nil: buildat/core/<core part> and
+-- buildat/extension/<extension>. buildat/extension/<core part> is the
+-- name from before [CLIENT_CORE], an alias until the next break (served
+-- client Lua uses it, and an older 0.7 client knows no other).
+function __buildat_extension_of(name)
+	local m = string.match(name, '^buildat/core/([a-zA-Z0-9_]+)$')
+	if m then
+		if __buildat_is_core(m) then
+			return m, name
+		end
+		return nil
+	end
+	m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
+	if m and __buildat_is_core(m) then
+		return m, "buildat/core/"..m
+	end
+	return m, name
+end
 
 local function load_trusted(name, path)
 	local script, err = loadfile(path)
@@ -47,10 +75,9 @@ function __buildat_require_extension(name)
 		return loaded_extensions[name]
 	end
 	local dir = __buildat_extension_path(name)
-	local own = __buildat_get_path("share").."/client/extensions/"
 	local path = dir.."/init.lua"
 	local interface
-	if dir:sub(1, #own) == own then
+	if dir:sub(1, #core_dir) == core_dir then
 		interface = load_trusted(name, path)
 	else
 		interface = load_sandboxed(name, path)
@@ -82,7 +109,7 @@ local old_require = require
 
 function require(name)
 	log:debug("require called with name=\""..name.."\"")
-	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
+	local m = __buildat_extension_of(name)
 	if m then
 		return __buildat_require_extension(m)
 	end

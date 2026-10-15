@@ -402,7 +402,7 @@ if pgrep -x luanti-refshots >/dev/null || pgrep -x luanti >/dev/null; then
 	sleep 1
 fi
 # A port the client's own sandbox has already been told about. The extension
-# goes through client/extensions/network, which asks the user before a script opens a
+# goes through client/core/network, which asks the user before a script opens a
 # socket and remembers the answer for a week; a fresh random port every run
 # would put that dialog in front of every run, and the harness is not the
 # thing to answer it. 30030 is one the user has accepted for a local Luanti

@@ -2,8 +2,8 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/uistack")
-local magic_sandbox = require("buildat/extension/magic_sandbox")
-local magic = require("buildat/extension/urho3d").safe
+local magic_sandbox = require("buildat/core/magic_sandbox")
+local magic = require("buildat/core/urho3d").safe
 local dump = buildat.dump
 local M = {safe = {}}
 log:info("extension/uistack/init.lua: Loading")

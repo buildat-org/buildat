@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 90s (a first run compiles demo_digger and hearth, 2026-10-05)
-# covers: builtin/client_file/client_file.cpp src/client/app.cpp client/extensions/network/init.lua extensions/launch_world/world.lua builtin/starport_announce/starport_announce.cpp apps/starport/main/main.cpp client/extensions/starport/init.lua
+# covers: builtin/client_file/client_file.cpp src/client/app.cpp client/core/network/init.lua extensions/launch_world/world.lua builtin/starport_announce/starport_announce.cpp apps/starport/main/main.cpp client/core/starport/init.lua
 # [LAUNCH_WORLD] (4): **a native server's icon, kept from one connect**.
 # A demo_digger server with an admin's server_icon.png of 120 pixels, which it
 # scales to 64; a client connects once and quits; the client is started

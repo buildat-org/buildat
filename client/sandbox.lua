@@ -67,7 +67,7 @@ local wrapped = setmetatable({}, {__mode = "k"}) -- wrapper -> function
 
 -- What a view or a wrapper stands for, or nil: the exploit search walks
 -- that, since a view's table and a wrapper's function are what the
--- sandbox reaches (client/extensions/sandbox_scan). Trusted only.
+-- sandbox reaches (client/core/sandbox_scan). Trusted only.
 function __buildat_sandbox_seen_through(v)
 	return real_of[v] or wrapped[v]
 end
@@ -192,9 +192,11 @@ getmetatable("").__index = real_of[__buildat_sandbox_environment.string]
 -- what it was written under.
 __buildat_sandbox_environment.require = function(name)
 	log:debug("require(\""..name.."\")")
-	-- Allow loading extensions
-	local m = string.match(name, '^buildat/extension/([a-zA-Z0-9_]+)$')
+	-- Allow loading the client core's parts and extensions, a core part
+	-- kept under its one name whichever it was asked by
+	local m, key = __buildat_extension_of(name)
 	if m then
+		name = key
 		local unsafe = package.loaded[name]
 		if unsafe == nil then
 			unsafe = __buildat_require_extension(m)
@@ -283,7 +285,7 @@ function __buildat_sandbox_debug_check_value(value)
 	end
 end
 
--- For debugging purposes. Used by client/extensions/sandbox_scan.
+-- For debugging purposes. Used by client/core/sandbox_scan.
 __buildat_latest_sandbox_global_wrapper_number = 0 -- Incremented every time
 __buildat_latest_sandbox_global_wrapper = nil
 -- Save a number of old wrappers for debugging purposes
@@ -547,7 +549,7 @@ do
 	local network_for_servers
 	served_globals.require = function(name)
 		local m = real_require(name)
-		if name ~= "buildat/extension/network" then
+		if __buildat_extension_of(name) ~= "network" then
 			return m
 		end
 		if not network_for_servers then

@@ -3,7 +3,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("extension/urho3d")
 local dump = buildat.dump
-local magic_sandbox = require("buildat/extension/magic_sandbox")
+local magic_sandbox = require("buildat/core/magic_sandbox")
 local safe_globals = dofile(buildat.extension_path("urho3d").."/safe_globals.lua")
 local safe_events = dofile(buildat.extension_path("urho3d").."/safe_events.lua")
 -- command_seq:<name> is any name a command sequence's `event` line gives,
@@ -1128,7 +1128,7 @@ local id_timer = 0
 local id_logouts = 0
 local offer_timer = 0
 local function starport_module()
-	local ok, sp = pcall(require, "buildat/extension/starport")
+	local ok, sp = pcall(require, "buildat/core/starport")
 	return ok and type(sp) == "table" and sp.logged_in_ids and sp or nil
 end
 -- A button of the overlay: raw, its Released answered by a global
@@ -1305,7 +1305,7 @@ local trust_in_game = nil
 -- that follows it, before there is a server address to go by
 local was_launching = false
 local function launching_local()
-	local us = package.loaded["buildat/extension/uistack"]
+	local us = package.loaded["buildat/core/uistack"]
 	local stack = us and us.main and us.main.stack or {}
 	local starting, connecting = false, false
 	for _, e in ipairs(stack) do

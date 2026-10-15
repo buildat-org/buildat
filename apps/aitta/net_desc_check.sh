@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: ~30 s (2026-10-09)
-# covers: client/extensions/network/init.lua client/extensions/starport/init.lua client/extensions/aitta/publish.lua
+# covers: client/core/network/init.lua client/core/starport/init.lua client/core/aitta/publish.lua
 # [AITTA_NET_DESC]: a fresh client (no network permissions) opens "Apps
 # from Aitta" against a local Aitta. The permission dialog's field reads
 # "Aitta (app list)" (a ui scan); Return in the field accepts: the entry

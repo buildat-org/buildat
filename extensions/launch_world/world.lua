@@ -73,7 +73,7 @@ light_look = LIGHT_LOOKS[light_look_name]
 -- require answers the safe interface inside the sandbox and the whole
 -- extension outside it; the safe table raises on a name it does not
 -- know, so it is asked with something it has
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
 -- **Its own files through the safe verb** ([LAUNCH_SANDBOX]): a
 -- sandboxed extension cannot dofile a path, and a launch UI of any size
@@ -187,7 +187,7 @@ GAMES[#GAMES + 1] = {name = "install a game", warm = true, empty = true}
 -- fetch replaces the padding and nothing else.
 local SERVERS = {}
 do
-	local net = require("buildat/extension/network")
+	local net = require("buildat/core/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		-- simplified: ten, the most recently used first, which is what
@@ -238,7 +238,7 @@ do
 	-- its listing carries; a fetch now (of the Starports the user said
 	-- yes to) refreshes them, and its icons, for the next build.
 	-- simplified: last time's list, as the room is built in one frame
-	local ok, sp = pcall(require, "buildat/extension/starport")
+	local ok, sp = pcall(require, "buildat/core/starport")
 	sp = ok and type(sp) == "table" and (sp.kept_rows and sp or sp.safe)
 	local listed = 0
 	for _, r in ipairs(sp and sp.kept_rows() or {}) do
@@ -3088,7 +3088,7 @@ held_was = true
 -- else's screen, including one that outlived the game that pushed it.
 -- Asking the stack is what the five flags below cannot do: they describe
 -- every way a screen can arrive and no way one can linger.
-room_stack = require("buildat/extension/uistack")
+room_stack = require("buildat/core/uistack")
 room_stack = room_stack.safe or room_stack
 
 -- **Whether another screen is actually on top of the room**

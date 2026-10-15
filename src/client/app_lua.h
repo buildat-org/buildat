@@ -377,7 +377,7 @@
 	}
 
 	// **The publish screen's file work** ([AITTA_PUBLISH_UI]), trusted
-	// only (client/extensions/aitta/publish.lua). aitta_dev(op, ...):
+	// only (client/core/aitta/publish.lua). aitta_dev(op, ...):
 	//   "list"                  {{name, kind, path}} of <user>/dev_apps
 	//   "new", name, kind       a minimal app or extension there -> its
 	//                           path, or nil and why
@@ -501,7 +501,7 @@
 					write_text(dir+"/main/client_lua/init.lua",
 							"-- "+arg+": what the player sees. doc/client_api.txt\n"
 							"local log = buildat.Logger(\""+arg+"\")\n"
-							"local magic = require(\"buildat/extension/urho3d\")\n"
+							"local magic = require(\"buildat/core/urho3d\")\n"
 							"log:info(\""+arg+" started\")\n"
 							"local t = magic.ui.root:CreateChild(\"Text\")\n"
 							"t:SetStyleAuto()\n"
@@ -746,7 +746,7 @@
 	// <user>/installed ([AITTA_MVP]); with review, a reviewer's playtest
 	// under <user>/review ([AITTA_REVIEW]). The Aitta, where given, in its
 	// .aitta_from: where its tile's Report... goes ([AITTA_REPORTS]).
-	// Trusted only: client/extensions/starport.
+	// Trusted only: client/core/starport.
 	static int l_aitta_install(lua_State *L)
 	{
 		const ss_ zip = lua_bindings::lua_tocppstring(L, 1);
@@ -1813,7 +1813,7 @@
 	// its game's (the port changes every launch); any other its address's,
 	// so a server cannot read what another one, or a local game, stored.
 	// server_address() -> the address the client is connected to, or nil.
-	// Trusted only: client/extensions/starport's report of the server one is on
+	// Trusted only: client/core/starport's report of the server one is on
 	static int l_server_address(lua_State *L)
 	{
 		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
@@ -3337,13 +3337,13 @@
 
 	// extension_path(name: string)
 	// [EXTENSIONS_SANDBOXED]: the client's own extensions -- the sandbox
-	// itself and what needs trust -- are in client/extensions and come
+	// itself and what needs trust -- are in client/core and come
 	// first, so that nothing in extensions/ takes one of their names
 	static int l_extension_path(lua_State *L)
 	{
 		ss_ name = lua_bindings::lua_tocppstring(L, 1);
 		const ss_ share = g_client_config.get<ss_>("share_path");
-		ss_ path = share+"/client/extensions/"+name;
+		ss_ path = share+"/client/core/"+name;
 		if(!interface::fs::path_exists(path+"/init.lua"))
 			path = share+"/extensions/"+name;
 		// One from Aitta; "__" is in no name of the tree's

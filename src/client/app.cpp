@@ -2060,7 +2060,7 @@ struct CApp: public App, public magic::Application
 		const ss_ uri = store_uri();
 		if(uri.empty())
 			return;
-		run_script_no_sandbox("require('buildat/extension/network')"
+		run_script_no_sandbox("require('buildat/core/network')"
 				".remember_server('"+uri+"')");
 	}
 
@@ -2075,7 +2075,7 @@ struct CApp: public App, public magic::Application
 		if(sha.empty())
 			return;
 		m_icon_address = address;
-		run_script_no_sandbox("require('buildat/extension/network')"
+		run_script_no_sandbox("require('buildat/core/network')"
 				".remember_server('"+uri+"', '"+sha+"')");
 		log_i(MODULE, "server icon from %s kept as %s", cs(address),
 				cs(sha.substr(0, 12)));
@@ -2850,7 +2850,7 @@ struct CApp: public App, public magic::Application
 	}
 
 	// A scripted client never hides or captures the cursor: the Input
-	// wrapper in client/extensions/urho3d/safe_classes.lua refuses those calls
+	// wrapper in client/core/urho3d/safe_classes.lua refuses those calls
 	// while is_scripted(). Undoing a hide after the fact was what warped
 	// the desktop cursor to the window's corner -- Urho's re-show restores
 	// a position sampled while the cursor was hidden. See [SCRIPTED_CURSOR]
@@ -3534,9 +3534,9 @@ struct CApp: public App, public magic::Application
 		if(key == m_key_screenshot && (event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL)){
 			ss_ extname = "sandbox_scan";
 			ss_ script = ss_() +
-					"local m = require('buildat/extension/"+extname+"')\n"
+					"local m = require('buildat/core/"+extname+"')\n"
 					"if type(m) ~= 'table' then\n"
-					"    error('Failed to load extension "+extname+"')\n"
+					"    error('Failed to load "+extname+"')\n"
 					"end\n"
 					"m.toggle()\n";
 			if(!run_script_no_sandbox(script)){
@@ -3545,7 +3545,7 @@ struct CApp: public App, public magic::Application
 		}
 		// **F9 to F12 are the client's, every other key an app's**
 		// ([CLIENT_KEYS]); no script hears these four
-		// (client/extensions/urho3d). F9 is the trusted overlay's. The
+		// (client/core/urho3d). F9 is the trusted overlay's. The
 		// player can move them (the key store, client/api.lua).
 		const bool ctrl = event_data["Qualifiers"].GetInt() & Urho3D::QUAL_CTRL;
 		// F10: the engine's DebugHud, the profiler there is; Ctrl+F10 the
@@ -3646,7 +3646,7 @@ struct CApp: public App, public magic::Application
 		// stands down too early). Taking the view is this call, and a
 		// launcher that keeps drawing while a game loads has to know
 		// when the game has actually taken it. The count lives here
-		// rather than in client/extensions/urho3d because each sandbox has its
+		// rather than in client/core/urho3d because each sandbox has its
 		// own copy of that file: a game bumping its own count is not
 		// something the launcher's copy can see.
 		m_viewport_generation++;

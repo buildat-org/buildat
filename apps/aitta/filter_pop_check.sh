@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-12)
-# covers: extensions/ui_utils/init.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua
+# covers: extensions/ui_utils/init.lua client/core/starport/init.lua client/core/aitta/init.lua
 # [AITTA_FILTER_POP]: a local Aitta with one package, not installed. The
 # launcher's "Apps from Aitta", its filter picked Installed, Updates, Not
 # installed and All, three times over: no error dialog, each pick a page

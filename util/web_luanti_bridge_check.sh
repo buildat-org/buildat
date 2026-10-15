@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 120s (2026-10-04)
-# covers: apps/play/** builtin/network/network.cpp client/extensions/network/init.lua
+# covers: apps/play/** builtin/network/network.cpp client/core/network/init.lua
 # [PLAY_PAGE] (c): the web client on apps/play's page reaches a Luanti
 # server through the bridge. A Luanti server (~/projects/luanti, devtest)
 # on 127.0.0.1, a served Luanti list (BUILDAT_LUANTI_LIST) without it,

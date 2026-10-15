@@ -2,7 +2,7 @@
 # tier: full
 # needs: pixels
 # cost: ~90 s (2026-10-10)
-# covers: src/impl/aitta.cpp apps/aitta/main/main.cpp client/launch_grid.lua client/extensions/starport/init.lua client/extensions/aitta/init.lua src/client/main.cpp
+# covers: src/impl/aitta.cpp apps/aitta/main/main.cpp client/launch_grid.lua client/core/starport/init.lua client/core/aitta/init.lua src/client/main.cpp
 # [PACKAGE_MEDIA]: a package's icon and screenshot.
 #   1. pack refuses a 300 px icon, a 64x32 one and a GIF screenshot; packs
 #      one with a 64 px icon and a JPEG screenshot, and one whose PNG

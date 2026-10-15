@@ -30,7 +30,7 @@ cp -r "$here/apps/$app" "$out/$app"
 {
 	echo '-- game_fuzz.sh: `event sandbox_fuzz <seed>` runs util/fuzz/sandbox_fuzz.lua'
 	echo 'SEED = 1'
-	echo 'require("buildat/extension/urho3d").SubscribeToEvent("command_seq:sandbox_fuzz",'
+	echo 'require("buildat/core/urho3d").SubscribeToEvent("command_seq:sandbox_fuzz",'
 	echo '	function(event_type, event_data)'
 	echo '		SEED = tonumber(event_data:GetString("Param")) or 1'
 	cat "$here/util/fuzz/sandbox_fuzz.lua"

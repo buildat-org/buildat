@@ -35,7 +35,7 @@
 --    wielded item's touch_interaction for what is pointed at), clutter()
 --    (optional: the chat's Declutter toggled, -> whether it is on; a
 --    "Clutter" button in More, and T.show_clutter(on) for its look)
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 local log = buildat.Logger("luanti/touch")
 
 -- How long a finger is held still before it digs, and how far it may move

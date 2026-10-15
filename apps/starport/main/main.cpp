@@ -3,7 +3,7 @@
 // **Starport** ([STARPORT], doc/plan/starport_plan.md): a directory of public
 // servers of buildat apps, as an app. Servers announce to it
 // (builtin/starport_announce); clients list from it and report listings
-// (client/extensions/starport); moderators, operators and the admin use it by
+// (client/core/starport); moderators, operators and the admin use it by
 // joining it (client_lua/init.lua).
 //
 // The HTTP API, under /api/v1/ on the server's port (network:http_request),

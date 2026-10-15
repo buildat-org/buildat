@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 120s (2026-10-04)
-# covers: src/client/app.cpp client/extensions/network/init.lua client/extensions/starport/init.lua apps/starport/main/main.cpp
+# covers: src/client/app.cpp client/core/network/init.lua client/core/starport/init.lua apps/starport/main/main.cpp
 # [WEB_ID_TRUST] (c): the web client's HTTP is the browser's fetch(), to a
 # Starport that answers with CORS -- no relay through the game server. A
 # Starport and floorplanner listed on it, serving the web client; the

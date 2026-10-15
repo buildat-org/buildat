@@ -1,9 +1,9 @@
--- Buildat: client/extensions/starport/test_group.lua
+-- Buildat: client/core/starport/test_group.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- group.lua's rows ([STARPORT] 2b), with no client:
---   luajit client/extensions/starport/test_group.lua
+--   luajit client/core/starport/test_group.lua
 local dir = arg[0]:match("^(.*)/") or "."
 local g = dofile(dir .. "/group.lua")
 

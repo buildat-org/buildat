@@ -17,15 +17,15 @@
 local M = {}
 
 local log = buildat.Logger("luanti_client/settings")
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 local ui_utils = require("buildat/extension/ui_utils")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 -- The engine's constants come from magic in the sandbox
 local KEY_ESCAPE =
 	magic.KEY_ESCAPE
 
 -- The JSON reader and writer the network extension carries
-local network = require("buildat/extension/network")
+local network = require("buildat/core/network")
 local json = {parse = network.parse_json, write = network.write_json}
 
 -- In the extension's own storage: <user>/luanti_client/settings.json
@@ -134,7 +134,7 @@ end
 -- in init.lua's session callback, which is at Lua's 60-upvalue line.
 function M.remember_server_name(host, port, name)
 	local uri = "udp://" .. host .. ":" .. port
-	local ok = require("buildat/extension/network").set_address_name(uri, name)
+	local ok = require("buildat/core/network").set_address_name(uri, name)
 	log:info("player name " .. name .. (ok and " kept for " or " not kept for ") .. uri)
 end
 

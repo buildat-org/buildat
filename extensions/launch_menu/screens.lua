@@ -11,15 +11,15 @@
 -- of copies of this file agree.
 local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu/screens")
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 uistack = uistack.main and uistack or uistack.safe
 local ui_utils = require("buildat/extension/ui_utils")
 ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
-local network = require("buildat/extension/network")
+local network = require("buildat/core/network")
 network = network.safe or network
-local starport = require("buildat/extension/starport")
+local starport = require("buildat/core/starport")
 starport = starport.safe or starport
 local HA_CENTER, HA_LEFT, HA_RIGHT, KEY_ESCAPE, LM_HORIZONTAL, LM_VERTICAL, VA_CENTER =
 		magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_ESCAPE, magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.VA_CENTER

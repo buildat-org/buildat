@@ -12,7 +12,7 @@
 -- says what the server sent. Rendering the world, formspecs, the HUD and input
 -- come next; see doc/luanti_client.txt.
 local log = buildat.Logger("luanti_client")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 -- The engine's constants come from magic in the sandbox; globals of this
 -- file's own environment, since as locals they took init.lua's big
 -- functions past LuaJIT's 60 upvalues
@@ -31,9 +31,9 @@ HA_CENTER, HA_LEFT, HA_RIGHT, KEY_1, KEY_8, KEY_A, KEY_C,
 	magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.MOUSEB_LEFT,
 	magic.MOUSEB_MIDDLE, magic.MOUSEB_RIGHT,
 	magic.VA_CENTER, magic.VA_TOP
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 local ui_utils = require("buildat/extension/ui_utils")
-local network = require("buildat/extension/network")
+local network = require("buildat/core/network")
 local srp = buildat.run_extension_file("srp.lua")
 local engine_test = buildat.run_extension_file("engine_test.lua")
 local luanti = buildat.run_extension_file("client.lua")

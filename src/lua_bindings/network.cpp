@@ -26,7 +26,7 @@
 #define MODULE "lua_bindings"
 
 // Sockets for Lua. This is the raw layer; it does not ask the user about
-// anything. The extension environment guards it (client/extensions/network).
+// anything. The extension environment guards it (client/core/network).
 //
 // The connect functions always return a socket object; if the connection could
 // not be made, socket:good() is false and socket:error() tells why.

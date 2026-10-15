@@ -10,7 +10,7 @@
 -- Run from M.boot() in the sandbox, so everything here is sandboxed
 -- code: extensions/sandbox_test/check.sh reads the line it logs.
 local log = buildat.Logger("wrapped")
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
 
 -- Matrix3x4 (2026-09-22): a transform built, taken apart and applied

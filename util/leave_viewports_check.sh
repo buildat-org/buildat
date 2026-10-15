@@ -29,7 +29,7 @@ echo 'return function(ctx) return {{id = "play", label = "redfield",
 	run = function() ctx.launch{app = "redfield"} end}} end' > "$a/launcher/init.lua"
 # Kept in globals, as genvaders keeps them, and never handed back
 cat > "$a/main/client_lua/init.lua" <<'L'
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 scene = magic.Scene()
 scene:CreateComponent("Octree")
 local zone = scene:CreateComponent("Zone")

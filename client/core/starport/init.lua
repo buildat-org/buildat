@@ -1,4 +1,4 @@
--- Buildat: client/extensions/starport/init.lua
+-- Buildat: client/core/starport/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -20,9 +20,9 @@
 --                                 BUILDAT_STARPORT_MANAGED overrides):
 --                                 what it sets cannot be changed here
 local log = buildat.Logger("extension/starport")
-local network = require("buildat/extension/network")
-local uistack = require("buildat/extension/uistack")
-local magic = require("buildat/extension/urho3d").safe
+local network = require("buildat/core/network")
+local uistack = require("buildat/core/uistack")
+local magic = require("buildat/core/urho3d").safe
 local rgb = require("buildat/extension/ui_utils").safe.rgb
 local group = dofile(__buildat_extension_path("starport") .. "/group.lua")
 local M = {safe = {}}
@@ -856,9 +856,9 @@ local function add_edit(parent, value, secret)
 	-- A solid fill of the colour, the style's texture off: multiplied
 	-- into its dark texture, the colour came out near black. Not on the
 	-- web, whose page is the server's code: it shows no colour to match
-	-- (client/extensions/urho3d's is_web)
+	-- (client/core/urho3d's is_web)
 	if __buildat_get_env("BUILDAT_PAGE_HTTPS") == nil then
-		local urho3d = require("buildat/extension/urho3d")
+		local urho3d = require("buildat/core/urho3d")
 		local r, g, b = urho3d.trust_color()
 		getmetatable(e).unsafe:SetTexture(nil)
 		e.color = magic.Color(r, g, b, 1)
@@ -1532,7 +1532,7 @@ local function keep_id(url, session, me)
 end
 
 -- [ID_LINE]: the IDs logged in, for the launcher's trusted overlay
--- (client/extensions/urho3d), as {url =, name =}; and logging one out
+-- (client/core/urho3d), as {url =, name =}; and logging one out
 -- from there, as the ID page's Log out does. On M and never in M.safe.
 function M.logged_in_ids()
 	local out = {}
@@ -2680,7 +2680,7 @@ M.id_token_here = M.safe.id_token_here
 M.take_id_join = M.safe.take_id_join
 M.has_id = M.safe.has_id
 M.group = M.safe.group
--- What client/extensions/aitta draws its dialogs with and reads the
+-- What client/core/aitta draws its dialogs with and reads the
 -- settings by. On M and never in M.safe: the dialogs are this side's own
 -- (the guards above, the trusted fields), which no sandbox may hold.
 M.dialog = {open_window = open_window, is_open = is_open, reseal = reseal,

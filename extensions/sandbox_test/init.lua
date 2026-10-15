@@ -4,7 +4,7 @@
 local log = buildat.Logger("sandbox_test")
 local dump = buildat.dump
 -- The hostile launch UI, sandboxed. The trusted half that Ctrl+F12 runs
--- is client/extensions/sandbox_scan.
+-- is client/core/sandbox_scan.
 local M = {}
 
 -- **The hostile launch UI** ([LAUNCH_SANDBOX]'s done-when): selected

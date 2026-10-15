@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: ~40 s (2026-10-09)
-# covers: src/client/app.cpp client/extensions/network/init.lua extensions/launch_menu/init.lua
+# covers: src/client/app.cpp client/core/network/init.lua extensions/launch_menu/init.lua
 # [JOINED_TLS_SERVERS]: a server joined is on launch_menu's start
 # screen whether or not it sends an icon, and one behind TLS by its https
 # address. A demo_digger server with no icon is joined once; its row is

@@ -75,7 +75,7 @@ local function menu_actions()
 	}
 	-- [AITTA_REVIEW]: where the filters (under Starport's lock) hide
 	-- unreviewed content, the tile lists reviewed releases only
-	local ok, aitta = pcall(require, "buildat/extension/aitta")
+	local ok, aitta = pcall(require, "buildat/core/aitta")
 	if ok and type(aitta) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
@@ -284,7 +284,7 @@ local function feedback_target(source)
 	end
 	-- [STARPORT_RECOMMENDS]: without its own, the Hearth a Starport
 	-- recommends
-	local ok, starport = pcall(require, "buildat/extension/starport")
+	local ok, starport = pcall(require, "buildat/core/starport")
 	local home = type(m.home_hearth) == "string" and m.home_hearth or
 			ok and type(starport) == "table" and starport.safe.fallback_hearth()
 	if not home then
@@ -386,7 +386,7 @@ function M.actions(log)
 			local aitta = (read(".aitta_from") or ""):match("^(https?://%S+)")
 			local author, name, version = source.name:gsub("^review:", ""):
 					match("^([%w_]+)%.([%w_]+)@(.+)$")
-			local ok, aitta_ext = pcall(require, "buildat/extension/aitta")
+			local ok, aitta_ext = pcall(require, "buildat/core/aitta")
 			if aitta and author and ok and type(aitta_ext) == "table" then
 				actions[#actions + 1] = {id = "report",
 					label = tostring(actions[1].label) .. " " .. version ..

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-07)
-# covers: client/extensions/aitta/publish.lua src/client/app.cpp client/launch_grid.lua apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua
+# covers: client/core/aitta/publish.lua src/client/app.cpp client/launch_grid.lua apps/aitta/main/main.cpp apps/aitta/main/client_lua/init.lua
 # [AITTA_PUBLISH_UI]: publishing without a terminal, at 800x600, on a
 # fresh user path and a local Aitta. Settings -> Developer's "Publish an
 # app or extension" (found by typing "publish"):

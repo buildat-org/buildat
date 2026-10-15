@@ -8,7 +8,7 @@
 -- launch UI runs. Each attempt is expected to be refused; the verdict
 -- line is what a check reads, and it names anything that got through.
 local log = buildat.Logger("sandbox_test")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 local M = {}
 
 -- One attempt: a name, and a function that returns what it reached.
@@ -67,14 +67,14 @@ local ATTEMPTS = {
 	-- outside its dirs, so these would read or probe any file on the
 	-- machine; the wrapper refuses a name that is not plainly relative.
 	{"cache:Exists an absolute path", function()
-		return require("buildat/extension/urho3d").cache:Exists("/etc/hostname")
+		return require("buildat/core/urho3d").cache:Exists("/etc/hostname")
 	end},
 	{"cache:GetResource an absolute path", function()
-		return require("buildat/extension/urho3d").cache
+		return require("buildat/core/urho3d").cache
 				:GetResource("Image", "/etc/hostname")
 	end},
 	{"cache:Exists a parent-traversal path", function()
-		return require("buildat/extension/urho3d").cache
+		return require("buildat/core/urho3d").cache
 				:Exists("....//....//....//....//etc/hostname")
 	end},
 	-- [SAFE_TABLE_PATCH]: the tables trusted code calls through. The
@@ -86,12 +86,12 @@ local ATTEMPTS = {
 		return true
 	end},
 	{"rewrite uistack.main:push", function()
-		local s = require("buildat/extension/uistack")
+		local s = require("buildat/core/uistack")
 		s.main.push = function() end
 		return true
 	end},
 	{"rewrite urho3d's cache", function()
-		require("buildat/extension/urho3d").cache = {}
+		require("buildat/core/urho3d").cache = {}
 		return true
 	end},
 	{"rewrite buildat.launch", function()

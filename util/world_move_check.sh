@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~5 min (2026-10-11)
-# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua src/impl/zip.cpp src/client/app_lua.h client/api.lua client/extensions/network/init.lua
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua src/impl/zip.cpp src/client/app_lua.h client/api.lua client/core/network/init.lua
 # [WORLD_TRIM_MOVE] 3-5: a world out as a zip and in again, through the
 # launcher's world menu (the native client; its picker is the client's
 # own). Vanilla on the minimal game, the server at --max-disk-mb 300.

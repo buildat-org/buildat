@@ -18,9 +18,9 @@
 -- yet (the plan's step 4, when someone asks for them).
 local api = buildat.safe or buildat
 local log = buildat.Logger("extension/launch_menu")
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 uistack = uistack.main and uistack or uistack.safe
 local ui_utils = require("buildat/extension/ui_utils")
 ui_utils = ui_utils.bind_button_menu and ui_utils or ui_utils.safe
@@ -270,7 +270,7 @@ local function gather()
 			run = function() console.show(function() end) end})
 	end
 	-- [AITTA_PUBLISH_UI]: the trusted side's screen, which a page has not
-	local aitta = require("buildat/extension/aitta")
+	local aitta = require("buildat/core/aitta")
 	aitta = aitta and (aitta.open_publish and aitta or aitta.safe)
 	if not web and aitta and aitta.open_publish then
 		add({label = "Publish an app or extension", kind = "action",
@@ -391,7 +391,7 @@ local function gather()
 	-- it again): a joined server whose kept name is empty takes its name
 	-- from there ([SEARCH_SERVER_NAMES]), and the rest are added below
 	-- simplified: the kept list, not a fetch of this menu's own
-	local starport = require("buildat/extension/starport")
+	local starport = require("buildat/core/starport")
 	starport = starport and (starport.kept_rows and starport or
 			starport.safe)
 	local rows = starport and starport.kept_rows() or {}
@@ -399,7 +399,7 @@ local function gather()
 	for _, row in ipairs(rows) do
 		listed_name[tostring(row.address)] = tostring(row.name)
 	end
-	local net = require("buildat/extension/network")
+	local net = require("buildat/core/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		local host, port = a.uri:match("^%a+://(.-):(%d+)$")
@@ -1081,7 +1081,7 @@ function M.boot(launch_action)
 	stale = false
 	entries = gather()
 	home("")
-	local net = require("buildat/extension/network")
+	local net = require("buildat/core/network")
 	net = net.unseen_counts and net or net.safe
 	local t = os.time()
 	if not web and net.unseen_counts and
@@ -1105,7 +1105,7 @@ function M.boot(launch_action)
 	-- asked; Home is drawn again if the list changed and Home is shown.
 	if not starport_fetched then
 		starport_fetched = true
-		local sp = require("buildat/extension/starport")
+		local sp = require("buildat/core/starport")
 		sp = sp and (sp.fetch and sp or sp.safe)
 		if sp and sp.fetch and sp.kept_rows then
 			local function said(rows)

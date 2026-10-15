@@ -36,7 +36,7 @@ function M.boot(action)
 	-- menu is text over it; without this the grid is unreadable in
 	-- front of a lit wall. Under the menu's own stack and over the
 	-- scene, which is what a priority below zero is.
-	local urho3d = require("buildat/extension/urho3d")
+	local urho3d = require("buildat/core/urho3d")
 	local magic = urho3d.Vector3 and urho3d or urho3d.safe
 	local white = magic.Image:new()
 	white:SetSize(2, 2, 3)

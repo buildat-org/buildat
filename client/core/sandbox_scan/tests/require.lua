@@ -22,9 +22,13 @@ for _, name in ipairs({
 	-- And the namespaces that are allowed, with something else at the end
 	-- of them: the patterns are anchored, so neither of these is a name
 	"buildat/extension/../../os",
+	"buildat/core/../../os",
 	"buildat/module/../../io",
 	"buildat/extension/",
+	"buildat/core/",
 	"buildat/module/",
+	-- An extension is not a part of the client core ([CLIENT_CORE])
+	"buildat/core/cereal",
 }) do
 	refuses(name)
 end
@@ -37,6 +41,13 @@ assert(type(cereal.binary_output) == "function",
 		"the extension that loaded is not the safe interface")
 assert(require("buildat/extension/cereal") == cereal,
 		"an extension loaded twice is not the same table")
+
+-- A core part by its name and by the old one, kept until the next break,
+-- is the same table ([CLIENT_CORE])
+local magic = require("buildat/core/urho3d")
+assert(type(magic) == "table", "a core part did not load in the sandbox")
+assert(require("buildat/extension/urho3d") == magic,
+		"buildat/extension/urho3d is not buildat/core/urho3d")
 
 log:info("require.lua: the standard libraries are not requirable")
 

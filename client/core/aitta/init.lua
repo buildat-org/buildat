@@ -1,4 +1,4 @@
--- Buildat: client/extensions/aitta/init.lua
+-- Buildat: client/core/aitta/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
@@ -6,13 +6,13 @@
 -- the Apps from Aitta page and its installs, reports on a release, a
 -- reviewer's playtest, serverless runs and publishing (publish.lua).
 -- Which Aittas, and the filters that say whether unreviewed releases are
--- shown, are the Starport settings' (client/extensions/starport), as are
+-- shown, are the Starport settings' (client/core/starport), as are
 -- the dialogs this draws with.
 local log = buildat.Logger("extension/aitta")
-local network = require("buildat/extension/network")
-local uistack = require("buildat/extension/uistack")
-local magic = require("buildat/extension/urho3d").safe
-local starport = require("buildat/extension/starport")
+local network = require("buildat/core/network")
+local uistack = require("buildat/core/uistack")
+local magic = require("buildat/core/urho3d").safe
+local starport = require("buildat/core/starport")
 local effective = starport.effective
 local d = starport.dialog
 local open_window, is_open, reseal = d.open_window, d.is_open, d.reseal

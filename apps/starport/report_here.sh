@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 60s a run, seven runs (2026-10-02)
-# covers: client/extensions/starport/** apps/starport/main/** builtin/starport_announce/**
+# covers: client/core/starport/** apps/starport/main/** builtin/starport_announce/**
 # [REPORT_HERE]: "Report this server..." finds the listing of the server
 # a native client is on. A local Starport, a floorplanner listed and
 # claimed on it, and a player's client with only that Starport, which

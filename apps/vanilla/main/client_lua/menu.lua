@@ -210,7 +210,7 @@ end
 -- where scrolling exists.
 --
 -- simplified: it applies when Enter is pressed rather than as the letters
--- arrive, because TextChanged is not in client/extensions/urho3d/safe_events.lua
+-- arrive, because TextChanged is not in client/core/urho3d/safe_events.lua
 -- and a redraw per letter would take the field out from under the typing
 -- anyway. The upgrade path is whitelisting that event and rebuilding only
 -- the list of buttons instead of the screen.

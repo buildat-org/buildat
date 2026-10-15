@@ -25,7 +25,7 @@ return function(ctx)
 	-- **The Luanti servers this client has joined** ([LAUNCH_MENU_V2]):
 	-- the network store's udp:// rows, keyed by address as serverlist's
 	-- are, with the name used there; the connect dialog opens filled in
-	local net = require("buildat/extension/network")
+	local net = require("buildat/core/network")
 	net = net.known_addresses and net or net.safe
 	for _, a in ipairs(net.known_addresses()) do
 		local address = a.uri:match("^udp://(.+)$")

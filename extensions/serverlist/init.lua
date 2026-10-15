@@ -18,7 +18,7 @@
 -- reached the network without asking would be the wrong kind of quiet.
 local log = buildat.Logger("serverlist")
 local M = {safe = {}}
-local network = require("buildat/extension/network")
+local network = require("buildat/core/network")
 
 -- The list this client knows: Luanti's official one.
 -- BUILDAT_SERVERLIST_URL overrides it, which is what the check serves its

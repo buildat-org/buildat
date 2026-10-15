@@ -803,7 +803,7 @@ end
 -- logged in to a Starport ID, whom the Hearth's login then takes.
 local DISCUSS_NAME_MAX = 60
 local function discuss_target(claim)
-	local ok, starport = pcall(require, "buildat/extension/starport")
+	local ok, starport = pcall(require, "buildat/core/starport")
 	if not ok or type(starport) ~= "table" or
 			#starport.logged_in_ids() == 0 then
 		return nil, "not logged in to a Starport ID"
@@ -877,11 +877,11 @@ buildat.safe.discuss_this_server = function(claim)
 	feedback = {address = t.hearth, server = {name = t.name,
 		address = t.address, subject = t.subject, title = t.title}}
 	log:info("discuss: " .. t.subject .. " on " .. t.hearth)
-	local magic = require("buildat/extension/urho3d").safe
+	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		magic.UnsubscribeFromEvent("Update", sub)
-		require("buildat/extension/starport").join_with_id(t.hearth)
+		require("buildat/core/starport").join_with_id(t.hearth)
 	end)
 	return true
 end
@@ -900,7 +900,7 @@ end
 -- **A reviewer's playtest** ([AITTA_REVIEW]): offer_playtest{release =
 -- "author/name/version", ticket =, sha256 =}, from an Aitta's review page,
 -- leaves to the launcher, which asks the player in its own dialog
--- (client/extensions/aitta playtest()) before it fetches the release by
+-- (client/core/aitta playtest()) before it fetches the release by
 -- the ticket from the Aitta this client is on and installs it apart. The
 -- page only offers: nothing is installed without the yes. -> true, or
 -- false and why
@@ -927,11 +927,11 @@ buildat.safe.offer_playtest = function(o)
 		return false, "no launcher to go back to"
 	end
 	log:info("playtest: offered " .. offer.release .. " from " .. offer.aitta)
-	local magic = require("buildat/extension/urho3d").safe
+	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		magic.UnsubscribeFromEvent("Update", sub)
-		require("buildat/extension/aitta").playtest(offer, function(app)
+		require("buildat/core/aitta").playtest(offer, function(app)
 			launch_grid.screens().start_local_app(app, "")
 		end)
 	end)
@@ -1061,11 +1061,11 @@ function __buildat_discuss_from_overlay(hearth)
 	log:info("discuss from the overlay: " .. (server and server.subject or
 			"no server") .. ", " .. (game and game.subject or "no game") ..
 			" on " .. hearth_address)
-	local magic = require("buildat/extension/urho3d").safe
+	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
 		magic.UnsubscribeFromEvent("Update", sub)
-		require("buildat/extension/starport").join_with_id(hearth_address)
+		require("buildat/core/starport").join_with_id(hearth_address)
 	end)
 	return true
 end
@@ -1613,10 +1613,10 @@ buildat.serverless_play = function(id)
 end
 -- BUILDAT_RUN, from src/client/app.cpp once the launch UI is up: an app id
 -- as list_apps() names it played at once, or <author>/<name> from the
--- Aittas (client/extensions/aitta)
+-- Aittas (client/core/aitta)
 function __buildat_run_serverless(what)
 	if what:match("^[%w_]+/[%w_]+$") then
-		require("buildat/extension/aitta").run_serverless(what)
+		require("buildat/core/aitta").run_serverless(what)
 		return
 	end
 	local ok, why = buildat.serverless_play(what)
@@ -1788,7 +1788,7 @@ do
 			{overrides = {j = "K"}}, e)) == "app")
 end
 -- The client's four as key codes, for the client's own handlers
--- (client/extensions/urho3d/init.lua), which read this at start and
+-- (client/core/urho3d/init.lua), which read this at start and
 -- after every change
 __buildat_client_key_names = function()
 	local st = key_store_load()

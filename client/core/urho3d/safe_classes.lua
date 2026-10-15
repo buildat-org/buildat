@@ -3,7 +3,7 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local dump = buildat.dump
 local log = buildat.Logger("safe_classes")
-local magic_sandbox = require("buildat/extension/magic_sandbox")
+local magic_sandbox = require("buildat/core/magic_sandbox")
 local M = {}
 
 -- A resource name a sandboxed script may ask the cache for. Urho3D's

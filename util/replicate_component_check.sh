@@ -89,8 +89,8 @@ extern "C" {
 }
 EOF
 cat > "$a/client_lua/init.lua" <<'EOF'
-local magic = require("buildat/extension/urho3d")
-local replicate = require("buildat/extension/replicate")
+local magic = require("buildat/core/urho3d")
+local replicate = require("buildat/core/replicate")
 local log = buildat.Logger("check")
 local seen
 magic.SubscribeToEvent("Update", function()

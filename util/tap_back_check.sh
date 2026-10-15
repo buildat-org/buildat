@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: ~15 s, ~40 s with the web part (2026-10-06)
-# covers: client/extensions/uistack/init.lua src/client/app.cpp
+# covers: client/core/uistack/init.lua src/client/app.cpp
 # [TAP_BACK]: a click on nothing is Back. launch_menu's Settings stays up
 # for a click in its window, goes for a click beside it, and Home, the
 # first screen, stays as it is for one (no Quit dialog). Escape's Quit

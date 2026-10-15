@@ -23,9 +23,12 @@ namespace interface
 	static const uint32_t PROTOCOL_MAX = 1;
 
 	// What was added since the minor, by name; served Lua's buildat.has()
+	// (doc/client_api.txt lists them)
 	static inline sv_<ss_> protocol_features()
 	{
-		return {};
+		return {
+			"core_require", // 0.7.10, [CLIENT_CORE]
+		};
 	}
 
 	struct Hello

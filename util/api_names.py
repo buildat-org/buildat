@@ -10,7 +10,7 @@ against them ([CLIENT_API_DOC]).
 
 Client: buildat.* and buildat.safe.* as client/*.lua assign them (a
 `function buildat.x` counts too), the sandboxed magic classes and their
-members out of client/extensions/urho3d/safe_classes.lua (util.wc("Name", {
+members out of client/core/urho3d/safe_classes.lua (util.wc("Name", {
 instance = {...}, properties = {...}})) and the globals of
 safe_globals.lua, and each extension's .safe members. Server: the
 headers under src/interface/ and each builtin's api.h.
@@ -75,7 +75,7 @@ def block_members(text, start):
 
 def client_magic():
     names = set()
-    text = read(os.path.join(root, "client/extensions/urho3d/safe_classes.lua"))
+    text = read(os.path.join(root, "client/core/urho3d/safe_classes.lua"))
     for m in re.finditer(r'util\.wc\("(\w+)",\s*\{', text):
         cls = m.group(1)
         names.add("magic." + cls)
@@ -92,14 +92,14 @@ def client_magic():
             for k in keys:
                 names.add("magic.%s.%s" % (cls, k))
     # the constants: safe_globals.lua is a list of quoted names
-    text = read(os.path.join(root, "client/extensions/urho3d/safe_globals.lua"))
+    text = read(os.path.join(root, "client/core/urho3d/safe_globals.lua"))
     for m in re.finditer(r'^\s*"([A-Z][A-Z0-9_]*)",', text, re.M):
         names.add("magic." + m.group(1))
     for fn in ("safe_globals.lua", "safe_classes.lua"):
-        text = read(os.path.join(root, "client/extensions/urho3d", fn))
+        text = read(os.path.join(root, "client/core/urho3d", fn))
         for m in re.finditer(r"^\s*(?:dst|Safe)\.([A-Za-z_]\w*)\s*=", text, re.M):
             names.add("magic." + m.group(1))
-    text = read(os.path.join(root, "client/extensions/urho3d/init.lua"))
+    text = read(os.path.join(root, "client/core/urho3d/init.lua"))
     for m in re.finditer(r"^\s*(?:function\s+)?Safe\.([A-Za-z_]\w*)\s*[=(]", text, re.M):
         names.add("magic." + m.group(1))
     return names

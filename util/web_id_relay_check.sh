@@ -3,7 +3,7 @@
 # broken: back to full; needs the public Starport on 0.7, outside the
 #   machine: 6 of 6 relay calls fail (local/runs/event_waits)
 # cost: ~30s (2026-10-04); needs a display and reaches starport.buildat.org
-# covers: client/extensions/network/init.lua builtin/starport_announce/starport_announce.cpp
+# covers: client/core/network/init.lua builtin/starport_announce/starport_announce.cpp
 # [WEB_ID_RELAY]: the web client has no HTTPS of its own; its server relays a
 # raw TCP connection to a Starport and the client runs TLS over it in Lua.
 # The relay is one connection per peer, reused back to back. A finished
@@ -98,7 +98,7 @@ extern "C" {
 EOF
 cat > "$app/main/client_lua/init.lua" <<EOF
 local log = buildat.Logger("relay_test")
-local network = require("buildat/extension/network")
+local network = require("buildat/core/network")
 local SP = "$SP"
 local total = 6
 local n, fails = 0, 0

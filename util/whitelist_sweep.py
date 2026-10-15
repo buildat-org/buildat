@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# What Urho3D exposes to Lua, against what client/extensions/urho3d/safe_classes.lua
+# What Urho3D exposes to Lua, against what client/core/urho3d/safe_classes.lua
 # lets a server's Lua reach. Prints the classes that are neither wrapped nor
 # refused, per subsystem, so that a whitelist sweep has a finish line and the
 # next one starts where the last stopped.
@@ -15,7 +15,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PKGS = os.path.join(ROOT, "3rdparty/Urho3D/Source/Urho3D/LuaScript/pkgs")
-SAFE = os.path.join(ROOT, "client/extensions/urho3d/safe_classes.lua")
+SAFE = os.path.join(ROOT, "client/core/urho3d/safe_classes.lua")
 
 # Not in scope, and why; see the plan. Nothing here is counted as missing.
 OUT_OF_SCOPE = {

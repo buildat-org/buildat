@@ -1,4 +1,4 @@
--- Buildat: client/extensions/sandbox_scan/init.lua
+-- Buildat: client/core/sandbox_scan/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("sandbox_test")

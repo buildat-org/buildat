@@ -10,7 +10,7 @@ Versions
 --------
 The engine and apps are versioned by SemVer 2.0: MAJOR.MINOR.PATCH, an
 optional -pre-release and +build (interface::aitta::semver_ok;
-client/extensions/starport's semver_cmp for precedence).
+client/core/starport's semver_cmp for precedence).
 - A patch release only adds: anything new on the wire is behind a feature
   name in the hello (below), so an older patch of the same minor still
   plays with it.

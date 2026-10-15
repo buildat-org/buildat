@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: ~1 min (2026-10-10)
-# covers: extensions/ui_utils/init.lua extensions/launch_menu/init.lua client/extensions/starport/init.lua
+# covers: extensions/ui_utils/init.lua extensions/launch_menu/init.lua client/core/starport/init.lua
 # [CLOSE_GLYPH]: launch_menu at a phone's size in the touch mode
 # (BUILDAT_TOUCH=1, 400x760), and at a desktop's:
 #   1. Home, the first screen, has no ×.

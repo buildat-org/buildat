@@ -20,7 +20,7 @@ cd "$(dirname "$0")/../.."
 out=local/options_for_LAUNCH_WORLD_sigil
 mkdir -p "$out"
 exec lua - "$@" <<'LUA'
-package.loaded["buildat/extension/urho3d"] = {Vector3 = true}
+package.loaded["buildat/core/urho3d"] = {Vector3 = true}
 local M = dofile("extensions/launch_world/ornament.lua")
 local N, TILES = 96, 12
 local names = {...}

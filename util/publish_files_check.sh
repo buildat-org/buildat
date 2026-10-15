@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 30s (2026-10-09)
-# covers: client/extensions/aitta/publish.lua
+# covers: client/core/aitta/publish.lua
 # [PUBLISH_FILES]: the publish page's "Goes in" files, every one, a line
 # each, in a list the wheel scrolls. A copy of Genvaders with 50 more files
 # in a scratch user directory, its page 2, the wheel a page at a time:

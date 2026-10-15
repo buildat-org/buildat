@@ -1,4 +1,4 @@
--- Buildat: client/extensions/network/json.lua
+-- Buildat: client/core/network/json.lua
 -- Copied from builtin/luanti/lua/json.lua, which is where it was written and
 -- where its history is; edit it there and copy it here rather than letting
 -- the two drift. Loaded by network/init.lua with a `core` of its own.

@@ -10,7 +10,7 @@
 -- B's ask for again. The client's own extensions (the `M.*` functions,
 -- not `M.safe`) ask as the client, "".
 --
---   local socket = require("buildat/extension/network")
+--   local socket = require("buildat/core/network")
 --   socket.udp_connect("localhost", 30001, function(sock, err)
 --       if not sock then log:error(err) return end
 --       sock:send("hello")
@@ -31,8 +31,8 @@
 
 local log = buildat.Logger("extension/network")
 local ui_utils = require("buildat/extension/ui_utils").safe
-local uistack = require("buildat/extension/uistack")
-local magic = require("buildat/extension/urho3d").safe
+local uistack = require("buildat/core/uistack")
+local magic = require("buildat/core/urho3d").safe
 local M = {safe = {}}
 
 local ACCEPTANCE_VALID_S = 7 * 24 * 3600

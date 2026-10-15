@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 120s (2026-10-04)
-# covers: apps/starport/main/main.cpp client/extensions/starport/init.lua builtin/starport_announce/** src/client/app.cpp
+# covers: apps/starport/main/main.cpp client/core/starport/init.lua builtin/starport_announce/** src/client/app.cpp
 # [WEB_ID_TRUST] (a): a web client signs in with a Starport ID in the
 # Starport's own window. A Starport, Hearth listed on it with IDs on and
 # serving the web client, and an ID made by the API; headless Firefox

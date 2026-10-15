@@ -1,4 +1,4 @@
--- Buildat: client/extensions/aitta/publish.lua
+-- Buildat: client/core/aitta/publish.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --

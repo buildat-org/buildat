@@ -1,7 +1,7 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("ui_utils")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 -- The engine's constants come from magic in the sandbox
 local FM_NOTFOCUSABLE, HA_CENTER, HA_LEFT, HA_RIGHT, KEY_DOWN,
 		KEY_ESCAPE, KEY_KP_ENTER, KEY_LEFT, KEY_RETURN, KEY_RETURN2,
@@ -11,7 +11,7 @@ local FM_NOTFOCUSABLE, HA_CENTER, HA_LEFT, HA_RIGHT, KEY_DOWN,
 	magic.KEY_RETURN, magic.KEY_RETURN2, magic.KEY_RIGHT, magic.KEY_UP,
 	magic.LM_VERTICAL, magic.VA_CENTER, magic.VA_TOP
 local dump = buildat.dump
-local uistack = require("buildat/extension/uistack")
+local uistack = require("buildat/core/uistack")
 -- res/style.xml is all of buildat's UI's style, its atlas res/style.png
 -- drawn by util/style_atlas.py
 local M = {safe = {}}

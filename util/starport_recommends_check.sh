@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 90s (2026-10-07)
-# covers: client/extensions/starport/init.lua apps/starport/main/main.cpp
+# covers: client/core/starport/init.lua apps/starport/main/main.cpp
 # [STARPORT_RECOMMENDS]: a Starport with a recommended Hearth and Aittas
 # serves them in /api/v1/list and an ID's "me"; a launcher whose ID is logged
 # in there is offered the Aittas it lacks at the start, and the answer

@@ -18,7 +18,7 @@
 -- and anyone can check that by typing.
 local api = buildat.safe or buildat
 local log = buildat.Logger("launch_console")
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
 -- The words in the menus' colours ([MENU_BRAND]); the panels are its own
 local ui_utils = require("buildat/extension/ui_utils")

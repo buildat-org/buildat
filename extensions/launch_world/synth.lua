@@ -30,7 +30,7 @@
 -- has, because it raises on a name it does not know rather than
 -- answering nil -- so `urho3d.safe` is not a question that can be put
 -- to it.
-local urho3d = require("buildat/extension/urho3d")
+local urho3d = require("buildat/core/urho3d")
 local magic = urho3d.Vector3 and urho3d or urho3d.safe
 
 local M = {}

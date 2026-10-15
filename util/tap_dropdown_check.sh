@@ -31,7 +31,7 @@ echo '{"kind": "app", "name": "tdrop", "version": "0.1.0", "engine_api": 2}' > "
 echo '{"engine_api": 2, "disable_cpp": true, "client_main": "init.lua", "dependencies": [{"module": "network"}, {"module": "client_lua"}, {"module": "client_data"}]}' > "$a/main/meta.json"
 cat > "$a/main/client_lua/init.lua" <<'L'
 local log = buildat.Logger("tdrop")
-local magic = require("buildat/extension/urho3d")
+local magic = require("buildat/core/urho3d")
 local pick
 log:info("tdrop: ready")
 magic.SubscribeToEvent("KeyDown", function(_, d)

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: 40s (2026-10-04)
-# covers: client/extensions/network/init.lua apps/sample_ui/**
+# covers: client/core/network/init.lua apps/sample_ui/**
 # [CONSENT_PER_SERVER]: a script's network consent is the asking server's.
 # Two sample_ui servers; the client's store holds an accepted row for
 # tcp://localhost:9 given to the first.
