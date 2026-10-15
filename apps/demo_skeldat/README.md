@@ -21,6 +21,10 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
   inventory and pause menu; `worlds.lua` the world dialog; `mobs.lua`
   draws the mobs; `sounds.lua` and `music.lua` are skelenti's blip sounds
   and music, copied.
+- The chat is builtin/chat's: T (or the pause menu's Chat...) opens the
+  console, the last lines show over the world for 20 s, and "Who's in the
+  chat..." has the moderator's who-may-talk, mute, and reports, and
+  everyone's report.
 
 Start it from the launcher, or `buildat_server -m apps/demo_skeldat` and
 connect a client. Until a world runs, the first client on the server's

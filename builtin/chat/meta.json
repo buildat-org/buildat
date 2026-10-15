@@ -1,0 +1,9 @@
+{
+	"dependencies": [
+		{"module": "network"},
+		{"module": "accounts"},
+		{"module": "storage"},
+		{"module": "moderation"},
+		{"module": "client_lua"}
+	]
+}

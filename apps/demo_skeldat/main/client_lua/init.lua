@@ -194,6 +194,7 @@ local KEYS = {
 	{id = "inventory", label = "Inventory", default = "E",
 		shared = "inventory"},
 	{id = "hud", label = "The HUD on and off", default = "F1", shared = "hud"},
+	{id = "chat", label = "Chat", default = "T"},
 }
 local key = {}
 game.key = key
@@ -618,6 +619,42 @@ end
 local ui = load("main/ui.lua")(game)
 game.open = ui.open
 local open_pause = load("main/pause.lua")(game, declare_keys)
+
+-- The chat's last lines over the world for a while, as Luanti's
+local chat_text = magic.ui.root:CreateChild("Text")
+chat_text:SetTextEffect(magic.TE_SHADOW)
+chat_text.priority = 1000
+chat_text:SetPosition(8, 8)
+local CHAT_SHOWN, CHAT_FOR = 6, 20
+local chat_recent = {}
+local chat_size = nil
+table.insert(require("buildat/module/chat").listeners, function(line)
+	chat_recent[#chat_recent + 1] = {line = line, t = buildat.get_time_us()}
+	if #chat_recent > CHAT_SHOWN then
+		table.remove(chat_recent, 1)
+	end
+end)
+magic.SubscribeToEvent("Update", function()
+	local now = buildat.get_time_us()
+	while chat_recent[1] and now - chat_recent[1].t > CHAT_FOR * 1e6 do
+		table.remove(chat_recent, 1)
+	end
+	local lines = {}
+	for i, c in ipairs(chat_recent) do
+		lines[i] = c.line
+	end
+	-- The HUD's scale (ui.lua's), as the root's size goes
+	local r = magic.ui.root
+	local size = 5 * math.max(1, math.floor(math.min(r.width / 320,
+			r.height / 220)))
+	if size ~= chat_size then
+		chat_size = size
+		chat_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono),
+				size)
+	end
+	chat_text:SetText(table.concat(lines, "\n"))
+	chat_text.visible = game.hud_visible() and not held
+end)
 local hud_on = true
 function game.hud_visible()
 	return hud_on
@@ -640,6 +677,8 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		ui.open("inventory")
 	elseif k == key.hud then
 		hud_on = not hud_on
+	elseif k == key.chat then
+		game.chat()
 	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
 		game.wield = k - magic.KEY_1 + 1
 		game.send("wield", tostring(game.wield - 1))

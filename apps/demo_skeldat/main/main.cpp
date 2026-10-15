@@ -31,6 +31,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "accounts/api.h"
+#include "chat/api.h"
 #include "client_file/api.h"
 #include "luanti_mapgen/api.h"
 #include "main_context/api.h"
@@ -1123,6 +1124,7 @@ struct Module: public interface::Module
 		send(peer, "core:run_script",
 				"buildat.run_script_file(\"main/init.lua\")");
 		send(peer, "skeldat:items", items_text());
+		chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
 		replicate::access(m_server, [&](replicate::Interface *i){
 			i->assign_scene_to_peer(m_scene, peer);
 		});

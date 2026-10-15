@@ -12,6 +12,7 @@
 		{"module": "voxel_shading"},
 		{"module": "worldgen"},
 		{"module": "luanti_mapgen"},
-		{"module": "accounts"}
+		{"module": "accounts"},
+		{"module": "chat"}
 	]
 }
