@@ -1338,6 +1338,7 @@ local drops = {} -- live dropdowns
 local drops_update, drops_sub -- below
 local drop_serial = 0
 local drop_labels = {} -- by the dropdown's name: {label, row, fill, width}
+local drop_setters = {} -- by the dropdown's name: {dropdown, dropdown_set's}
 local drop_was = {} -- by the dropdown's name: its popup up last frame
 function M.safe.dropdown(parent, choices, current, on_choose, options)
 	options = options or {}
@@ -1479,6 +1480,14 @@ function M.safe.dropdown(parent, choices, current, on_choose, options)
 			end
 		end
 	end)
+	drop_setters[drop:GetName()] = {drop, function(value)
+		for i, v in ipairs(values) do
+			if v == value then
+				index = i
+				drop:SetSelection(i - 1)
+			end
+		end
+	end}
 	drops[#drops + 1] = drop
 	if drops_sub then
 		magic.UnsubscribeFromEvent("Update", drops_sub)
@@ -1489,6 +1498,17 @@ end
 
 -- Whether a dropdown has the keys and the mouse: its popup up, or closed
 -- by this frame's Escape. A screen's own Escape or click-off stands down.
+-- **The choice shown set by the screen**, not by a pick: on_choose is not
+-- called. A plain SetSelection is put back by the dropdown, which keeps
+-- its own record of the choice, and a later pick of the old one is then
+-- no change to it.
+function M.safe.dropdown_set(drop, value)
+	local set = drop_setters[drop:GetName()]
+	if set then
+		set[2](value)
+	end
+end
+
 function M.safe.dropdown_open()
 	return drop_open or escape_taken
 end
@@ -1569,6 +1589,11 @@ drops_update = function()
 	for name, l in pairs(drop_labels) do
 		if gone(l[2]) then
 			drop_labels[name] = nil
+		end
+	end
+	for name, set in pairs(drop_setters) do
+		if gone(set[1]) then
+			drop_setters[name] = nil
 		end
 	end
 end

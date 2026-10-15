@@ -617,11 +617,7 @@ local function open_designer()
 		changed()
 	end, {label = "Wave"})))
 	function d.wave_dropdown_set(w)
-		for i, name in ipairs(gen.WAVES) do
-			if name == w then
-				dropdown:SetSelection(i - 1)
-			end
-		end
+		ui_utils.dropdown_set(dropdown, w)
 	end
 	button(wave_row, "Play", play_now)
 
