@@ -262,8 +262,17 @@ struct Module: public interface::Module, public Interface,
 			for(char c : packet.data.substr(0, LINE_MAX))
 				if((unsigned char)c >= 32 && c != 127)
 					text += c;
-			if(text.empty() || !may_talk(peer, name))
+			if(text.empty())
 				return;
+			if(!may_talk(peer, name)){
+				const bool muted = m_muted.count(name) != 0;
+				log_i(MODULE, "%s's line refused: %s", cs(name),
+						muted ? "muted" : "below the minimum level");
+				send(peer, "chat:line", muted ? "(A moderator has muted you.)" :
+						ss_("(The chat is for ")+MIN_NAMES[m_min]+
+						"s and up now.)");
+				return;
+			}
 			const int64_t now = interface::os::time_us();
 			auto &b = m_bucket[peer];
 			b.first = std::max(0.0, b.first - (now - b.second) / 1e6);

@@ -183,6 +183,7 @@ return function(game, declare_keys)
 				admin.main[#admin.main + 1] = part
 			end
 		end
+		log:info("pause: admin got " .. head)
 		if admin.page and root then
 			admin_page()
 		end

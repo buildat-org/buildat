@@ -359,6 +359,7 @@ struct Module: public interface::Module
 	// sections that have just loaded, done a few a tick
 	double m_expand_due = 0;
 	std::map<ss_, int> m_catchup;
+	size_t m_caught_up = 0;
 	size_t m_expansions = 0, m_expand_changed = 0, m_grown = 0;
 
 	Module(interface::Server *server):
@@ -551,6 +552,11 @@ struct Module: public interface::Module
 		const char *env_time = getenv("BUILDAT_SKELDAT_TIME");
 		if(env_time && env_time[0])
 			m_day = atof(env_time);
+		// For a check: seconds the world ran with its sections away, which
+		// they catch up on as they load
+		const char *env_away = getenv("BUILDAT_SKELDAT_AWAY");
+		if(env_away && env_away[0])
+			m_world_t += atof(env_away);
 		for(const ss_ &key : m_store->list("furnace/"))
 			if(m_store->get(key, v))
 				m_furnaces[key.substr(8)].load(v);
@@ -1039,6 +1045,7 @@ struct Module: public interface::Module
 			if(--it->second <= 0)
 				m_catchup.erase(it);
 			expand(key);
+			m_caught_up++;
 		}
 	}
 
@@ -2334,8 +2341,9 @@ struct Module: public interface::Module
 			// The pace, for whoever tunes it
 			log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
 					"changed, %zu grown, %zu sections loaded, %zu owed a "
-					"catch-up", m_expansions, m_expand_changed, m_grown,
-					m_sections.size(), m_catchup.size());
+					"catch-up, %zu caught up", m_expansions, m_expand_changed,
+					m_grown, m_sections.size(), m_catchup.size(),
+					m_caught_up);
 			for(auto &pair : m_players)
 				send_time(pair.first);
 		}
