@@ -31,6 +31,7 @@
 #include "interface/event.h"
 #include "interface/record.h"
 #include "luanti/api.h"
+#include "accounts/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
 #include "client_file/api.h"
@@ -388,8 +389,17 @@ struct Module: public interface::Module
 			i->send(peer, "core:run_script",
 					"buildat.run_script_file(\"main/init.lua\")");
 		});
+		// Every privilege for the launcher's own client (its owner token,
+		// not just an address on this machine) and for a server admin,
+		// as vanilla gives them ([SECURITY_RUN_1])
+		// simplified: decided at join; an account made admin mid-game gets
+		// them on its next join (vanilla's on_accounts_privs is the upgrade)
+		bool admin = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			admin = i->is_local(peer) || i->is_admin(i->name_of(peer));
+		});
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->join_player("player"+itos(peer), peer, false);
+			i->join_player("player"+itos(peer), peer, admin);
 		});
 		replicate::access(m_server, [&](replicate::Interface *i){
 			i->assign_scene_to_peer(m_scene, peer);

@@ -10,6 +10,7 @@
 		{"module": "replicate"},
 		{"module": "voxelworld"},
 		{"module": "voxel_shading"},
-		{"module": "luanti"}
+		{"module": "luanti"},
+		{"module": "accounts"}
 	]
 }
