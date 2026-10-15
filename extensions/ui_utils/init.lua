@@ -302,9 +302,13 @@ local function button_menu_nav(root, options)
 		end
 		local i = #items + 1
 		items[i] = {button = button, action = action}
-		local hover = button.hoverOffset
-		button.pressedOffset = magic.IntVector2(hover.x, hover.y)
-		button.hoverOffset = magic.IntVector2(0, 0)
+		-- A slider is an item too, with no press to draw (a Button's
+		-- offsets are not its)
+		if button:GetTypeName() ~= "Slider" then
+			local hover = button.hoverOffset
+			button.pressedOffset = magic.IntVector2(hover.x, hover.y)
+			button.hoverOffset = magic.IntVector2(0, 0)
+		end
 		button:SetFocusMode(magic.FM_FOCUSABLE)
 		magic.SubscribeToEvent(button, "Released",
 		function(self, event_type, event_data)

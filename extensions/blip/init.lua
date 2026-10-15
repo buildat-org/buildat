@@ -24,8 +24,11 @@ local gen = api.run_extension_file("blip_gen.lua")
 local mix = api.run_extension_file("blip_mix.lua")
 local RATE = 44100
 -- The engine's constants come from magic in the sandbox
-local KEY_ESCAPE, LM_HORIZONTAL, LM_VERTICAL =
-	magic.KEY_ESCAPE, magic.LM_HORIZONTAL, magic.LM_VERTICAL
+local KEY_ESCAPE, KEY_LEFT, KEY_RIGHT, LM_HORIZONTAL, LM_VERTICAL =
+	magic.KEY_ESCAPE, magic.KEY_LEFT, magic.KEY_RIGHT, magic.LM_HORIZONTAL,
+	magic.LM_VERTICAL
+-- A Left or Right on a selected slider: 50 steps across its range
+local SLIDER_STEP = 0.02
 
 local M = {safe = {gen = gen, mix = mix}}
 
@@ -352,13 +355,32 @@ local function open_designer()
 	-- The menu's keys and clicks; Escape closes it unless a dropdown's
 	-- popup is open, which takes it. The wheel is the code's and the
 	-- sliders' views', which scroll by it, not the selection's
+	-- Left and right step the selected slider, not the selection
+	local sliders = {}
 	local nav = ui_utils.bind_button_menu(root, nil, function(key)
 		if key == KEY_ESCAPE and magic.input:GetKeyPress(key) and
 				not ui_utils.dropdown_open() then
 			close()
 			return true
 		end
+		if key == KEY_LEFT or key == KEY_RIGHT then
+			for _, sl in ipairs(sliders) do
+				if sl.slider:HasFocus() then
+					-- Sends SliderChanged, as a drag does
+					sl.slider.value = math.max(0, math.min(1, sl.slider.value +
+							(key == KEY_LEFT and -SLIDER_STEP or SLIDER_STEP)))
+					return true
+				end
+			end
+		end
 	end, {wheel = false})
+	-- The menu's items in its order, and which of them are sliders
+	local n_items, slider_at = 0, {}
+	local function item(e, fn)
+		n_items = n_items + 1
+		nav:add(e, fn or function() end)
+		return e
+	end
 
 	local function text(parent, s, width)
 		local t = parent:CreateChild("Text")
@@ -383,7 +405,7 @@ local function open_designer()
 		local t = b:CreateChild("Text")
 		t:SetStyleAuto()
 		t.text = label
-		nav:add(b, fn)
+		item(b, fn)
 		return b
 	end
 	text(col, "blip: sfxr's sounds, made by the engine's synth")
@@ -426,7 +448,6 @@ local function open_designer()
 	end
 
 	-- The sliders, in a view of its own
-	local sliders = {}
 	local updating = false
 	local function show_values()
 		updating = true
@@ -467,13 +488,13 @@ local function open_designer()
 	for i, w in ipairs(gen.WAVES) do
 		waves[i] = {w, w}
 	end
-	local dropdown = ui_utils.dropdown(wave_row, waves, d.p.wave, function(w)
+	local dropdown = item(ui_utils.dropdown(wave_row, waves, d.p.wave, function(w)
 		if updating then
 			return
 		end
 		d.p.wave = w
 		changed()
-	end, {label = "Wave"})
+	end, {label = "Wave"}))
 	function d.wave_dropdown_set(w)
 		for i, name in ipairs(gen.WAVES) do
 			if name == w then
@@ -496,15 +517,18 @@ local function open_designer()
 	for _, def in ipairs(gen.PARAMS) do
 		local r = row(page)
 		r:SetFixedHeight(20)
-		text(r, def[1], 110)
+		local name = text(r, def[1], 110)
 		local slider = r:CreateChild("Slider")
 		slider:SetStyleAuto()
 		slider.range = 1
 		-- The rest of the row's width
 		slider:SetFixedHeight(16)
 		local value = text(r, "", 50)
-		local sl = {def = def, slider = slider, value = value}
+		local sl = {def = def, slider = slider, value = value, name = name,
+			row = r}
 		sliders[#sliders + 1] = sl
+		item(slider)
+		slider_at[n_items] = sl
 		magic.SubscribeToEvent(slider, "SliderChanged", function(_, _, data)
 			if updating then
 				return
@@ -515,6 +539,34 @@ local function open_designer()
 		end)
 	end
 
+	-- A selected slider: its name in the focus colour, its row scrolled
+	-- into the view (a slider's style draws no selection)
+	local focus_color = magic.Color(ui_utils.rgb("focus"))
+	-- Its own colour copied: a property hands back a reference
+	local c = sliders[1].name.color
+	local text_color = magic.Color(c.r, c.g, c.b, c.a)
+	nav:on_change(function(_, selected, i)
+		local sl = slider_at[i]
+		if not sl then
+			return
+		end
+		sl.name.color = selected and focus_color or text_color
+		if selected then
+			-- On the screen, against the panel less its clipped border
+			local panel = view.scrollPanel
+			local y = sl.row.screenPosition.y
+			local top = panel.screenPosition.y + 4
+			local bottom = panel.screenPosition.y + panel.height - 4
+			-- The name's text is taller than its row
+			local h = math.max(sl.row.height, sl.name.height)
+			local move = y < top and y - top or math.max(0, y + h - bottom)
+			if move ~= 0 then
+				view.viewPosition = magic.IntVector2(0,
+						math.max(0, view.viewPosition.y + move))
+			end
+		end
+	end)
+
 	-- The export row
 	local ex = row()
 	button(ex, "Save WAV", function()
@@ -523,14 +575,14 @@ local function open_designer()
 		-- The name alone: the whole path does not fit the window
 		say(path and ("saved " .. name) or ("not saved: " .. tostring(why)))
 	end)
-	ui_utils.dropdown(ex, FORMATS, d.format, function(v)
+	item(ui_utils.dropdown(ex, FORMATS, d.format, function(v)
 		d.format = v
 		show_code()
-	end)
-	ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
+	end))
+	item(ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
 		d.use = v
 		show_code()
-	end)
+	end))
 	local ex2 = row()
 	button(ex2, "Copy", function()
 		ui_utils.copy(snippet(d.p, d.format, d.use, false))
