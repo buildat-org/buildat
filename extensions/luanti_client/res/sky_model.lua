@@ -421,6 +421,17 @@ local function lum(c) return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b end
 
 -- Luanti's own cloud density, which every game gets whether or not it asks
 M.CLOUD_DENSITY_DEFAULT = 0.4
+-- Luanti's own cloud speed, nodes a second on x and z, and what one node
+-- a second is in SkyDome's units. simplified: the dome's clouds are no
+-- layer at a height (the shader divides the view by its y), so a speed has
+-- nothing exact to become; the factor makes the default drift at the rate
+-- the shader had baked in, and twice the speed twice as fast. See
+-- doc/luanti_client.txt.
+M.CLOUD_SPEED_DEFAULT = {0, -2}
+M.CLOUD_WIND_PER_NODE = 0.0054
+-- Luanti's own cloud colour is 229 of 255 opaque, and a colour named
+-- without an alpha is a full one
+M.CLOUD_ALPHA_DEFAULT = 229 / 255
 -- What a full overcast takes from the sun and the moon (a named pick)
 M.CLOUD_DIM = 0.8
 -- A cloud need not be black to be opaque

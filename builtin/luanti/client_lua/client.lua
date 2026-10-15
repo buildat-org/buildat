@@ -2336,6 +2336,8 @@ luanti.sub_sky(function(sky)
 	-- greys the sky in update_sky() and apply_sky_of_hour()
 	game_sky.cloud_cover = sky_dome.cloud_cover(sky.density, sky.cloud_color,
 			sky.clouds)
+	world_sky:set_clouds(sky.cloud_alpha, sky.cloud_speed and
+			sky.cloud_speed[1] and sky.cloud_speed[2] and sky.cloud_speed)
 	-- The fog is the horizon seen through the world's air, so it follows
 	-- the horizon the game asked for
 	if sky.horizon then

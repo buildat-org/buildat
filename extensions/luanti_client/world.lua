@@ -437,24 +437,12 @@ function M.new(magic, buildat, log, options)
 	-- grid's cells that hold one at that count
 	local STARS_DEFAULT = sky_model.STARS_DEFAULT
 	local STAR_DENSITY_DEFAULT = sky_model.STAR_DENSITY_DEFAULT
-	-- The same for the clouds: how much of the sky is covered at the density
-	-- a game has unless it says otherwise
-	-- Luanti's own default cloud speed, in nodes a second, and what one node
-	-- a second is worth in the sky shader's own units.
-	--
-	-- simplified, and knowingly: these clouds are not a layer at a height --
-	-- the shader divides the view direction by its own y to fake a flat
-	-- plane -- so a speed in nodes a second has nothing exact to become. The
-	-- factor is picked so that the default below drifts at the rate the
-	-- shader had baked in before a game could ask for anything, which makes
-	-- a game asking for twice that twice as fast. See doc/luanti_client.txt.
-	local CLOUD_SPEED_DEFAULT = {0, -2}
-	local CLOUD_WIND_PER_NODE = 0.0054
-	local CLOUD_DENSITY_DEFAULT = 0.4
-	-- Luanti's own default cloud colour is 229 of 255 opaque, and a game that
-	-- names a colour without an alpha gets a full one; either way the layer
-	-- is drawn at what the colour says rather than solid
-	local CLOUD_ALPHA_DEFAULT = 229 / 255
+	-- Luanti's own cloud speed, density and alpha, and a speed in the sky
+	-- shader's units: res/sky_model.lua's, vanilla's as well
+	local CLOUD_SPEED_DEFAULT = sky_model.CLOUD_SPEED_DEFAULT
+	local CLOUD_WIND_PER_NODE = sky_model.CLOUD_WIND_PER_NODE
+	local CLOUD_DENSITY_DEFAULT = sky_model.CLOUD_DENSITY_DEFAULT
+	local CLOUD_ALPHA_DEFAULT = sky_model.CLOUD_ALPHA_DEFAULT
 
 	-- What the game says is in the sky, out of SET_SUN, SET_MOON, SET_STARS
 	-- and CLOUD_PARAMS. What is here to begin with is what Luanti has before

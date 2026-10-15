@@ -2801,6 +2801,8 @@ function core.__add_player(name)
 	send_physics(o)
 	send_camera(o)
 	send_day_night(o)
+	-- The whole sky again, though it was sent before they left
+	o.sky_sent = nil
 	send_sky(o)
 	core.__send_privs(o.player_name)
 	send_modes(o)

@@ -127,6 +127,18 @@ local function send_sky(o)
 	put("clouds", on and "1" or "0")
 	put("density", clouds.density)
 	put("cloud_color", sky_rgb(clouds.color))
+	-- And how opaque they are (the colour's alpha, VoxeLibre's weather
+	-- sets it) and how fast they drift, nodes a second on x and z.
+	-- simplified: height and thickness are kept, not sent; both clients
+	-- draw the clouds on the dome, with no layer for them to place
+	local ct = clouds.color and core.colorspec_to_table and
+			core.colorspec_to_table(clouds.color)
+	put("cloud_alpha", ct and ct.a and string.format("%.4f", ct.a / 255))
+	local speed = clouds.speed
+	if type(speed) == "table" then
+		put("cloud_speed", string.format("%.4f,%.4f", tonumber(speed.x) or 0,
+				tonumber(speed.z or speed.y) or 0))
+	end
 	-- What is up there besides the gradient: Luanti's set_sun, set_moon and
 	-- set_stars. The pictures a game gives its sun and its moon cross too:
 	-- the sky's own square is what is drawn when it gives none.
@@ -143,6 +155,13 @@ local function send_sky(o)
 	put("star_count", stars.count)
 	put("star_color", sky_rgb(stars.star_color))
 	put("star_scale", stars.scale)
+	-- Sent only when it changed: VoxeLibre sets the rain's clouds and its
+	-- sky every step for every player, and each send is the whole record
+	local key = table.concat(flat, "\n")
+	if key == o.sky_sent then
+		return
+	end
+	o.sky_sent = key
 	__luanti_send_sky(o.player_name, flat)
 end
 

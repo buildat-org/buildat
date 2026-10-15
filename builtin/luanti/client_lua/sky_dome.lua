@@ -24,9 +24,6 @@ local magic = require("buildat/extension/urho3d")
 
 local M = {}
 
--- How fast the cloud layer drifts. Luanti's own default is two nodes a
--- second; SkyDome counts in its own units and says so.
-local CLOUD_WIND = {x = 0.004, y = 0.0}
 -- How far past white the sun's disc is drawn, which is what makes it read as
 -- a light rather than a white circle. The extension's own value.
 local SUN_OVEREXPOSURE = 2.5
@@ -236,8 +233,11 @@ function M.new(scene, sun_dir, defaults)
 	set("StarColor", 0.9, 0.9, 1.0)
 	set("StarFade", 0.0)
 	set("CloudCoverage", defaults.cloud_cover)
-	set("CloudAlpha", 1.0)
-	set("CloudWind", CLOUD_WIND.x, CLOUD_WIND.y)
+	-- And the clouds as Luanti has them before a game says anything:
+	-- set_clouds() below
+	set("CloudAlpha", M.CLOUD_ALPHA_DEFAULT)
+	set("CloudWind", M.CLOUD_SPEED_DEFAULT[1] * M.CLOUD_WIND_PER_NODE,
+			M.CLOUD_SPEED_DEFAULT[2] * M.CLOUD_WIND_PER_NODE)
 	-- What a player who cannot see the sky is under, and whether the game
 	-- allows the dimming at all. Luanti's own indoors default is #646464
 	-- and auto_dim_skybox is on; see set_indoors() below and [CAVE_SKY].
@@ -278,6 +278,15 @@ function M.new(scene, sun_dir, defaults)
 	function self:set_cloud_tint(c, k)
 		cloud_tint, cloud_tint_k = c, k or 0
 		put_cloud()
+	end
+
+	-- How opaque the clouds are (0..1) and how fast they drift, {x, z} in
+	-- nodes a second; nil leaves Luanti's default
+	function self:set_clouds(alpha, speed)
+		set("CloudAlpha", alpha or M.CLOUD_ALPHA_DEFAULT)
+		speed = speed or M.CLOUD_SPEED_DEFAULT
+		set("CloudWind", speed[1] * M.CLOUD_WIND_PER_NODE,
+				speed[2] * M.CLOUD_WIND_PER_NODE)
 	end
 
 	function self:set_cloud_color(c)

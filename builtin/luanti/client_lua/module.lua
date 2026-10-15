@@ -2721,6 +2721,11 @@ buildat.sub_packet("luanti:sky", function(data)
 		clouds = e.clouds ~= "0",
 		density = tonumber(e.density or ""),
 		cloud_color = rgb(e.cloud_color),
+		cloud_alpha = tonumber(e.cloud_alpha or ""),
+		-- {x, z} in nodes a second
+		cloud_speed = e.cloud_speed and {tonumber(e.cloud_speed:match(
+				"^[^,]+") or ""), tonumber(e.cloud_speed:match(",(.+)$") or
+				"")} or nil,
 		-- What else is up there: Luanti's set_sun, set_moon and set_stars
 		sun_visible = e.sun_visible ~= "0",
 		sun_scale = tonumber(e.sun_scale or ""),
