@@ -1433,6 +1433,10 @@ function core.__voxel_defs()
 				waving = def.waving, light_source = def.light_source,
 				blend = alpha_mode_of(def, drawtype) == "blend",
 			} or nil),
+			-- What the guess above read, for node_registry.h's port of it,
+			-- which the module checks against it
+			groups = def and def.groups or nil,
+			waving = def and def.waving or 0,
 			-- Cut out by the texture's own alpha, which is what a leaf, a
 			-- plant, a rail and a ladder are. Without it the holes in the
 			-- picture are drawn in whatever is under the alpha, which is

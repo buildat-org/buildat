@@ -36,6 +36,7 @@
 #include "interface/noise.h"
 #include "luanti/mapblock.h"
 #include "luanti/shapes.h"
+#include "luanti/node_registry.h"
 #include <sqlite3.h>
 #include <fstream>
 #include <cstdlib>
@@ -84,6 +85,7 @@ using interface::Event;
 namespace pv = PolyVox;
 namespace magic = Urho3D;
 using namespace luanti_shapes;
+using namespace luanti_registry;
 
 namespace luanti {
 
@@ -147,45 +149,6 @@ static ss_ node_texture_name(const ss_ &name)
 }
 
 
-// One family for every fence, because a fence reaches any other fence
-// whatever kind it is -- which is Luanti's rule for them. Rails will want one
-// per raillike group when they arrive; see connect_group in
-// interface/voxel.h, which has thirty-two.
-static const uint8_t FENCE_CONNECT_GROUP = 1;
-
-// How many variants a kind of facing needs, and which one a param2 picks.
-// The colour* kinds put a palette index in the high bits and the
-// direction in the same low ones, so they are the same lookup; see
-// Luanti's MapNode::getFaceDir.
-static size_t facing_variant_count(const ss_ &facing)
-{
-	if(facing == "facedir")
-		return 24;
-	if(facing == "4dir")
-		return 4;
-	if(facing == "wallmounted")
-		return 8;
-	// A plantlike node's meshoptions: the shape in bits 0-2 and the 1.4x
-	// size in bit 4 ([PLANT_SIZE]); the random offset and the random dip
-	// (bits 3 and 5) want the position and are not a variant --
-	// simplified: they are drawn as the plain shape
-	if(facing == "meshoptions")
-		return 16;
-	return 0;
-}
-
-static uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
-{
-	if(facing == "facedir")
-		return (uint8_t)((param & 0x1f) % 24);
-	if(facing == "4dir")
-		return (uint8_t)(param & 0x03);
-	if(facing == "wallmounted")
-		return (uint8_t)(param & 0x07);
-	if(facing == "meshoptions")
-		return (uint8_t)((param & 0x07) | ((param & 0x10) ? 8 : 0));
-	return 0;
-}
 
 // One picture placed into a "[combine:WxH:x,y=file:x,y=file" expression
 struct CombinePlace
@@ -457,29 +420,6 @@ static int l_lua_profile(lua_State *L)
 	return 0;
 }
 
-// Which colour a param2 picks out of a palette of this many colours.
-// Luanti stretches a palette over the 256 param2 values -- each pixel fills
-// 256/pixels of them -- so the colour changes only every step, and the bits
-// below it are the direction. A sane game ships exactly as many colours as
-// the bits above the direction can count, and then this is those bits.
-static size_t palette_slot_of_param(size_t slots, uint8_t param)
-{
-	if(slots <= 1)
-		return 0;
-	size_t slot = (size_t)param / (256 / slots);
-	return slot < slots ? slot : slots - 1;
-}
-
-// The facedir a variant of this kind stands for
-static uint8_t facing_facedir(const ss_ &facing, size_t variant)
-{
-	if(facing == "wallmounted")
-		return WALLMOUNTED_FACEDIR[variant & 7];
-	// A plant's shape is not a turn of its tiles
-	if(facing == "meshoptions")
-		return 0;
-	return (uint8_t)(variant % 24);
-}
 
 
 // The Lua state's own log lines land here, so a mod's core.log() is a buildat
@@ -866,21 +806,6 @@ struct Module: public interface::Module, public luanti::Interface
 	sm_<ss_, sv_<uint32_t>> m_palettes;
 	// How many frames each animated tile's strip holds, by tile name
 	sm_<ss_, size_t> m_frame_counts;
-	// See glass_edge_material()
-	sm_<ss_, interface::EdgeMaterialId> m_glass_edge_materials;
-	uint32_t m_next_glass_edge_material = 10;
-	bool m_glass_edge_materials_exhausted = false;
-	// See rail_connect_group()
-	sm_<int, uint8_t> m_rail_connect_groups;
-	// The same ids for a "connected" node box's groups, by the group's
-	// name ("fence", "pane"); rails and these share the 31
-	sm_<ss_, uint8_t> m_named_connect_groups;
-	uint32_t m_next_rail_connect_group = FENCE_CONNECT_GROUP + 1;
-	bool m_rail_connect_groups_exhausted = false;
-	// See liquid_shape_group()
-	sm_<ss_, uint8_t> m_liquid_shape_groups;
-	uint32_t m_next_liquid_shape_group = 1;
-	bool m_liquid_shape_groups_exhausted = false;
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -3416,18 +3341,11 @@ struct Module: public interface::Module, public luanti::Interface
 		log_v(MODULE, "check_mapblock: both shapes of a block read back");
 	}
 
-	// What the param2, LBM and palette helpers above and in import.h
-	// make of a few known inputs. Runs once, from run_game(), beside
-	// luanti_shapes::check_shapes().
+	// What the LBM list and "[combine" readers make of a few known
+	// inputs. Runs once, from run_game(), beside the shapes' and the
+	// registry's own checks.
 	static void check_params()
 	{
-		assert(facing_facedir("wallmounted", 1) == 0); // Floor: unturned
-		assert(facing_variant_count("facedir") == 24);
-		assert(facing_variant_count("4dir") == 4);
-		assert(facing_variant_count("") == 0);
-		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
-		assert(facing_variant_of_param("4dir", 0xfe) == 2);
-
 		// The LBM list a Luanti world carries, which decides what this
 		// module leaves alone in an imported world
 		assert(lbm_names_of("a:one~0;b:two~1234;") == "a:one;b:two;");
@@ -3437,26 +3355,6 @@ struct Module: public interface::Module, public luanti::Interface
 		// taken as a name, and a record with no name is dropped too
 		assert(lbm_names_of("nope;a:one~0;") == "a:one;");
 		assert(lbm_names_of("~5;") == "");
-
-		// A palette is stretched over the 256 param2 values, so a colour
-		// covers as many of them as the directions under it: devtest's
-		// facedir palette is eight colours and its facedir is five bits.
-		assert(palette_slot_of_param(8, 0) == 0);
-		assert(palette_slot_of_param(8, 31) == 0);
-		assert(palette_slot_of_param(8, 32) == 1);
-		assert(palette_slot_of_param(8, 255) == 7);
-		assert(palette_slot_of_param(64, 4) == 1);   // color4dir
-		assert(palette_slot_of_param(32, 8) == 1);   // colorwallmounted
-		assert(palette_slot_of_param(256, 137) == 137); // color
-		assert(palette_slot_of_param(1, 255) == 0);
-		// And a variant index stays inside the byte that indexes them: a
-		// colour times a direction is never more than the param itself
-		assert(palette_slot_of_param(8, 255) * 24 +
-				facing_variant_of_param("facedir", 255) < 256);
-		assert(palette_slot_of_param(64, 255) * 4 +
-				facing_variant_of_param("4dir", 255) < 256);
-		assert(palette_slot_of_param(32, 255) * 8 +
-				facing_variant_of_param("wallmounted", 255) < 256);
 
 		// A palette named as a "[combine" expression is the picture it
 		// places, cut to the size it names
@@ -3777,6 +3675,7 @@ struct Module: public interface::Module, public luanti::Interface
 
 		check_shapes();
 		check_params();
+		check_registry();
 		check_mapblock();
 		check_media_names();
 

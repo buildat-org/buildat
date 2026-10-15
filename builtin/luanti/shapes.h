@@ -223,6 +223,51 @@ static const int RAIL_SLOPE_TURNS[4] = {0, 180, 90, -90};
 // the ceiling and the floor turned a quarter.
 static const uint8_t WALLMOUNTED_FACEDIR[8] = {20, 0, 17, 15, 8, 6, 21, 1};
 
+// How many variants a kind of facing needs, and which one a param2 picks.
+// The colour* kinds put a palette index in the high bits and the
+// direction in the same low ones, so they are the same lookup; see
+// Luanti's MapNode::getFaceDir.
+inline size_t facing_variant_count(const ss_ &facing)
+{
+	if(facing == "facedir")
+		return 24;
+	if(facing == "4dir")
+		return 4;
+	if(facing == "wallmounted")
+		return 8;
+	// A plantlike node's meshoptions: the shape in bits 0-2 and the 1.4x
+	// size in bit 4 ([PLANT_SIZE]); the random offset and the random dip
+	// (bits 3 and 5) want the position and are not a variant --
+	// simplified: they are drawn as the plain shape
+	if(facing == "meshoptions")
+		return 16;
+	return 0;
+}
+
+inline uint8_t facing_variant_of_param(const ss_ &facing, uint8_t param)
+{
+	if(facing == "facedir")
+		return (uint8_t)((param & 0x1f) % 24);
+	if(facing == "4dir")
+		return (uint8_t)(param & 0x03);
+	if(facing == "wallmounted")
+		return (uint8_t)(param & 0x07);
+	if(facing == "meshoptions")
+		return (uint8_t)((param & 0x07) | ((param & 0x10) ? 8 : 0));
+	return 0;
+}
+
+// The facedir a variant of this kind stands for
+inline uint8_t facing_facedir(const ss_ &facing, size_t variant)
+{
+	if(facing == "wallmounted")
+		return WALLMOUNTED_FACEDIR[variant & 7];
+	// A plant's shape is not a turn of its tiles
+	if(facing == "meshoptions")
+		return 0;
+	return (uint8_t)(variant % 24);
+}
+
 // The quads from first onwards, turned about Y in place
 inline void turn_quads_y(sv_<interface::VoxelQuad> &out, size_t first,
 		int quarters)
@@ -666,6 +711,12 @@ inline void check_shapes()
 	// A wallmounted direction is one of the twenty-four
 	for(size_t i = 0; i < 8; i++)
 		assert(WALLMOUNTED_FACEDIR[i] < 24);
+	assert(facing_facedir("wallmounted", 1) == 0); // Floor: unturned
+	assert(facing_variant_count("facedir") == 24);
+	assert(facing_variant_count("4dir") == 4);
+	assert(facing_variant_count("") == 0);
+	assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
+	assert(facing_variant_of_param("4dir", 0xfe) == 2);
 
 	// A fence is a post that is always drawn and four pairs of bars that
 	// are drawn only when their direction connects, which is what

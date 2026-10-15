@@ -13,6 +13,10 @@
 -- mod -- and both spellings are taken below; what else is read (name,
 -- groups, waving, light_source) is spelled the same on both sides.
 --
+-- **A C++ port** is in builtin/luanti/node_registry.h (guess_surface()),
+-- for a module that has no Lua; builtin/luanti logs an error at start for
+-- every node the two disagree on. A change here is a change there.
+--
 -- The atlas derives a normal map and a spec map from six numbers per texture
 -- segment (see src/interface/atlas.h), and the PBR voxel shader reads them.
 -- Luanti says nothing about any of them: a node definition knows its drawtype,

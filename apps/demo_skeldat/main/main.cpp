@@ -30,7 +30,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
-#include "luanti/shapes.h"
+#include "luanti/node_registry.h"
 #include "accounts/api.h"
 #include "chat/api.h"
 #include "client_file/api.h"
@@ -64,7 +64,6 @@ namespace pv = PolyVox;
 using Urho3D::M_PI;
 namespace vp = interface::voxel_path;
 using Urho3D::M_RADTODEG;
-using namespace luanti_shapes;
 
 // Luanti's mapgens write these three as numbers (vendor/mapnode.h), so
 // the registry has them at those ids: ignore is the registry's own
@@ -643,119 +642,78 @@ struct Module: public interface::Module
 	// Luanti's unknown and air, then the nodes at their ids
 	void build_registry(interface::VoxelRegistry *reg)
 	{
+		luanti_registry::Builder builder;
+		luanti_registry::Media media;
 		for(uint32_t id = ID_UNKNOWN; id < ID_NODE0 + m_game.nodes.size();
 				id++){
-			interface::VoxelDefinition d;
-			if(const skeldat::NodeDef *n = node_of(id)){
-				d = voxel_def(*n);
-			} else if(id == ID_AIR){
-				d.name.block_name = "air";
-				d.fully_empty = true;
-				d.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-				d.physically_solid = false;
-				d.pointable = 0;
-			} else {
-				// Never generated; drawn as stone if a save has one
-				skeldat::NodeDef stone = *node_of(id_of("skeldat:stone"));
-				d = voxel_def(stone);
-				d.name.block_name = "unknown";
-			}
-			const interface::VoxelTypeId got = reg->add_voxel(d);
+			luanti_registry::NodeDef d = luanti_def(id);
+			interface::VoxelDefinition v = builder.build(d, media);
+			// The bones: the albedo times this, from none to all
+			v.tint_ramp[0] = 0xffffff;
+			v.tint_ramp[1] = 0xc0604c;
+			const interface::VoxelTypeId got = reg->add_voxel(v);
 			if(got != id)
-				throw Exception("skeldat: voxel "+d.name.block_name+" is id "+
+				throw Exception("skeldat: voxel "+d.name+" is id "+
 						itos(got)+", not "+itos(id));
 		}
 	}
 
-	interface::VoxelDefinition voxel_def(const skeldat::NodeDef &n)
+	// A voxel id's node as Luanti would have it defined, which is what
+	// builtin/luanti's registry builder and the mapgen read
+	luanti_registry::NodeDef luanti_def(uint32_t id)
 	{
-		interface::VoxelDefinition d;
-		d.name.block_name = n.name;
-		for(int i = 0; i < 6; i++){
-			interface::AtlasSegmentDefinition &seg = d.textures[i];
-			seg.resource_name = n.tiles[i];
-			seg.total_segments = Urho3D::IntVector2(1, 1);
-			seg.select_segment = Urho3D::IntVector2(0, 0);
-			// extensions/luanti_client/surface.lua's DEFAULT, what
-			// builtin/luanti's pbr light is fitted for; the atlas's own
-			// (spec_strength 1) mirrors the sky off grass.
-			// simplified: one surface for every node; surface.lua's guess
-			// by node kind comes with [SKELDAT_LUANTI_PARTS] 6
-			seg.roughness = 0.95f;
-			seg.spec_strength = 0.2f;
-			seg.bumpiness = 0.3f;
+		luanti_registry::NodeDef d;
+		if(id == ID_AIR){
+			d.name = "air";
+			d.drawtype = "airlike";
+			d.empty = true;
+			d.walkable = false;
+			d.pointable = 0;
+			d.sunlight = true;
+			d.param_type_light = true;
+			d.floodable = true;
+			return d;
 		}
-		d.edge_material_id = interface::EDGEMATERIALID_GROUND;
-		d.physically_solid = true;
+		// Never generated; drawn as stone if a save has one
+		const skeldat::NodeDef &n = node_of(id) ? *node_of(id) :
+				*node_of(id_of("skeldat:stone"));
+		d.name = node_of(id) ? n.name : "unknown";
+		d.groups = n.groups;
 		d.light_source = (uint8_t)n.light_source;
-		// The bones: the albedo times this, from none to all
-		d.tint_ramp[0] = 0xffffff;
-		d.tint_ramp[1] = 0xc0604c;
-		sv_<interface::VoxelQuad> shape;
+		d.has_tiles = true;
+		for(int i = 0; i < 6; i++)
+			d.tiles[i] = n.tiles[i];
+		d.param_type_light = n.shape != skeldat::CUBE;
+		// Leaves let light in but not the sun, as Luanti's do
+		d.sunlight = n.shape == skeldat::NODEBOX || n.shape == skeldat::TORCH;
 		switch(n.shape){
 		case skeldat::CUBE:
 			break;
 		case skeldat::ALLFACES:
-			d.face_draw_type = interface::FaceDrawType::ALWAYS;
-			d.alpha_masked = true;
-			d.transmits_light = true;
+			d.drawtype = "allfaces_optional";
+			d.alpha_clip = true;
 			break;
-		case skeldat::LIQUID: {
-			add_box_quads(shape, -0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f);
-			d.physically_solid = false;
-			d.is_liquid = true;
-			d.liquid_is_source = true;
-			d.liquid_top = 0.5f;
-			d.shape_group = 1;
-			d.translucent = true;
+		case skeldat::LIQUID:
+			d.drawtype = "liquid";
+			d.liquid_group = n.name;
+			d.walkable = false;
 			d.swimmable = true;
 			d.pointable = 0;
 			break;
-		}
 		case skeldat::NODEBOX:
-			for(size_t b = 0; b + 6 <= n.boxes.size(); b += 6)
-				add_box_quads(shape, n.boxes[b], n.boxes[b + 1],
-						n.boxes[b + 2], n.boxes[b + 3], n.boxes[b + 4],
-						n.boxes[b + 5]);
-			d.transmits_light = true;
-			d.collision_boxes = n.boxes;
-			d.selection_boxes = n.boxes;
+			d.drawtype = "nodebox";
+			d.node_box = d.collision_box = d.selection_box = n.boxes;
 			break;
-		case skeldat::TORCH: {
-			// Luanti's torchlike on the floor: one upright quad on the
-			// diagonal
-			add_torch_quads(shape, 1.0f, 1);
-			d.shape_double_sided = true;
-			d.alpha_masked = true;
-			d.transmits_light = true;
-			d.physically_solid = false;
-			d.selection_boxes = n.boxes;
+		case skeldat::TORCH:
+			d.drawtype = "torchlike";
+			d.walkable = false;
+			d.alpha_clip = true;
+			d.selection_box = n.boxes;
 			break;
 		}
-		}
-		if(!shape.empty()){
-			d.shape = shape;
-			d.face_draw_type = interface::FaceDrawType::NEVER;
-			d.edge_material_id = interface::EDGEMATERIALID_EMPTY;
-		}
-		if(n.facedir){
-			// param2 0 to 3, the way the player looked when placing it
-			for(int f = 0; f < 4; f++){
-				interface::VoxelVariant var;
-				for(int i = 0; i < 6; i++){
-					var.tile_order[i] = FACEDIR_TILES[f][i];
-					var.tile_turns[i] = FACEDIR_TURNS[f][i];
-				}
-				if(!shape.empty() && f != 0){
-					turn_quads(shape, (uint8_t)f, var.shape);
-					turn_boxes(n.boxes, (uint8_t)f, var.collision_boxes);
-					var.selection_boxes = var.collision_boxes;
-				}
-				d.variants.push_back(var);
-			}
-			for(int p = 0; p < 256; p++)
-				d.variant_of_param[p] = (uint8_t)(p & 3);
-		}
+		// param2 0 to 3, the way the player looked when placing it
+		if(n.facedir)
+			d.facing = "4dir";
 		return d;
 	}
 
@@ -777,28 +735,9 @@ struct Module: public interface::Module
 		mp.content_ids["mapgen_water_source"] = water;
 		mp.content_ids["mapgen_river_water_source"] = water;
 		mp.content_ids["mapgen_cobble"] = id_of("skeldat:cobble");
-		for(size_t i = 0; i < m_game.nodes.size(); i++){
-			const skeldat::NodeDef &n = m_game.nodes[i];
-			luanti_mapgen::Params::NodeProps p;
-			p.walkable = n.shape != skeldat::LIQUID &&
-					n.shape != skeldat::TORCH;
-			p.light_propagates = n.shape != skeldat::CUBE;
-			p.sunlight_propagates = n.shape == skeldat::NODEBOX ||
-					n.shape == skeldat::TORCH;
-			p.liquid_type = n.shape == skeldat::LIQUID ? 2 : 0;
-			p.drawtype = n.shape == skeldat::ALLFACES ? "allfaces_optional" :
-					n.shape == skeldat::LIQUID ? "liquid" :
-					n.shape == skeldat::NODEBOX ? "nodebox" :
-					n.shape == skeldat::TORCH ? "torchlike" : "normal";
-			p.param_type_light = n.shape != skeldat::CUBE;
-			mp.node_props[(uint32_t)i + ID_NODE0] = p;
-		}
-		luanti_mapgen::Params::NodeProps air;
-		air.walkable = false;
-		air.light_propagates = air.sunlight_propagates = true;
-		air.floodable = true;
-		air.drawtype = "airlike";
-		mp.node_props[ID_AIR] = air;
+		for(uint32_t id = ID_AIR; id < ID_NODE0 + m_game.nodes.size(); id++)
+			if(id == ID_AIR || node_of(id))
+				mp.node_props[id] = luanti_registry::mapgen_props(luanti_def(id));
 		auto biome = [&](const ss_ &name, const ss_ &top, int depth_top,
 				const ss_ &filler, int depth_filler, const ss_ &riverbed,
 				int y_min, int y_max){
