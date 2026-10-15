@@ -41,15 +41,16 @@ voxel_shading.use_sun_gate(true)
 -- builtin/luanti's shaders, which the light's rules are for
 voxel_shading.use_technique_set({
 	plain = "luanti_client/res/LuantiVoxel.xml",
-	modifiers = "luanti_client/res/LuantiVoxelModifiers.xml",
+	modifiers = "main/SkeldatVoxel.xml",
 	alpha = "luanti_client/res/LuantiVoxelAlpha.xml",
 	masked = "luanti_client/res/LuantiVoxelMasked.xml",
 	sun = "luanti_client/res/LuantiVoxelSun.xml",
-	sun_modifiers = "luanti_client/res/LuantiVoxelSunModifiers.xml",
+	sun_modifiers = "main/SkeldatVoxelSun.xml",
 	sun_alpha = "luanti_client/res/LuantiVoxelSunAlpha.xml",
 	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
 })
--- The bones, which the format draws as its tint modifier (main.cpp)
+-- The bones, the format's first modifier, drawn as skelenti's danger
+-- (main/SkeldatVoxel.xml)
 voxel_shading.use_modifiers(true)
 voxelworld.lod_distance = 4000
 voxelworld.send_distance = FAR_CLIP

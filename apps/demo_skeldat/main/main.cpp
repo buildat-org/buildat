@@ -18,7 +18,7 @@
 // and the lamp light, param2), which is what the mapgen writes, and a
 // second plane of 8 bits, "bones", whose low 4 are the bones field
 // (bones.h): seeded by the mapgen in the danger zones, grown a section at
-// a time, and drawn by the format's tint modifier. The mobs, skelenti's,
+// a time, and drawn as skelenti's danger (the format's first modifier). The mobs, skelenti's,
 // read the danger off it: where a skeleton spawns and whether the sun
 // burns it.
 //
@@ -50,6 +50,7 @@
 #include <Scene.h>
 #include <Node.h>
 #include <cmath>
+#include <atomic>
 #include <functional>
 #include <map>
 #include <random>
@@ -227,20 +228,81 @@ struct Ground
 	int sun = 0; // the sky's light there now
 };
 
-// The mapgen's section, and its bones seeded by the place's danger: every
-// voxel that is not air in a column at bones::SEED_DANGER or more. Runs on
+// The mapgen's section, skelenti's bone piles on its ground (bones.h's
+// pile()), and its bones seeded by the place's danger: every voxel that is
+// not air in a column at bones::SEED_DANGER or more, a pile's too. Runs on
 // worldgen's worker thread, so it touches nothing but the volume.
 struct BonesGenerator: public worldgen::GeneratorInterface
 {
+	// The nodes a pile is made of and stands on
+	struct PileIds {
+		uint32_t block = 0, tops[3] = {}, ground[3] = {};
+	};
 	up_<worldgen::GeneratorInterface> m_inner;
 	interface::VoxelFormat m_format;
 	interface::VoxelField m_bones;
 	uint32_t m_salt;
+	PileIds m_ids;
 
 	BonesGenerator(worldgen::GeneratorInterface *inner,
 			const interface::VoxelFormat &format,
-			const interface::VoxelField &bones, uint32_t salt):
-		m_inner(inner), m_format(format), m_bones(bones), m_salt(salt){}
+			const interface::VoxelField &bones, uint32_t salt,
+			const PileIds &ids):
+		m_inner(inner), m_format(format), m_bones(bones), m_salt(salt),
+		m_ids(ids){}
+
+	// The ground is the column's highest voxel in the section (lc..uc)
+	// that is not air; the stack may rise into the padding above, which
+	// the section over it takes as a tree's crown.
+	// simplified: a pile whose stack would leave the volume is not made,
+	// as a Luanti chunk's is not in skelenti, nor one on ground in the
+	// section's top layer (what is over it is the next section's, unknown
+	// here): about a sixteenth of them
+	void piles(interface::VoxelVolume &volume, const pv::Vector3DInt32 &lc,
+			const pv::Vector3DInt32 &uc, int32_t top)
+	{
+		auto id_at = [&](int32_t x, int32_t y, int32_t z){
+			return m_format.id.get(volume.getVoxelAt(x, y, z).data);
+		};
+		int made = 0;
+		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
+			skeldat::bones::Pile p;
+			if(!skeldat::bones::pile(m_salt, x, z, p))
+				continue;
+			int32_t y = uc.getY();
+			while(y >= lc.getY() && id_at(x, y, z) == ID_AIR)
+				y--;
+			if(y < lc.getY() || y == uc.getY() || y + 6 > top)
+				continue;
+			const uint32_t ground = id_at(x, y, z);
+			if(ground != m_ids.ground[0] && ground != m_ids.ground[1] &&
+					ground != m_ids.ground[2])
+				continue;
+			for(int i = 1; i <= p.height + 1; i++){
+				uint32_t word = volume.getVoxelAt(x, y + i, z).data;
+				const uint32_t here = m_format.id.get(word);
+				if(here != ID_AIR && here != ID_IGNORE)
+					break;
+				if(i <= p.height){
+					m_format.id.set(word, m_ids.block);
+				} else if(p.top <= 3){
+					m_format.id.set(word, m_ids.tops[p.top - 1]);
+					m_format.param.set(word, (uint32_t)p.turn);
+				} else {
+					break;
+				}
+				volume.setVoxelAt(x, y + i, z, VoxelInstance(word));
+			}
+			made++;
+		}
+		// The first section with any, for check.sh; one a section would be
+		// hundreds of lines
+		static std::atomic<bool> told(false);
+		if(made > 0 && !told.exchange(true))
+			log_i(MODULE, "skeldat: the first bone piles, %d in the section "
+					"at (%d, %d, %d)", made, lc.getX(), lc.getY(), lc.getZ());
+	}
 
 	pv::Vector3DInt32 get_padding_voxels()
 	{
@@ -255,6 +317,8 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 		const pv::Region &r = volume.getEnclosingRegion();
 		const pv::Vector3DInt32 &lc = r.getLowerCorner(),
 				&uc = r.getUpperCorner();
+		const pv::Vector3DInt32 pad = m_inner->get_padding_voxels();
+		piles(volume, lc + pad, uc - pad, uc.getY());
 		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
 		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
 			const int b = skeldat::bones::seed_value(
@@ -362,9 +426,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		m_format = interface::VoxelFormat::luanti();
 		m_format.planes.push_back(interface::VoxelPlane("bones", 8));
-		// The bones drawn: the definitions' tint_ramp from white to a rust,
-		// red over twice its green so that grass turns brown
-		m_format.tint = m_bones;
+		// The bones drawn as skelenti draws its danger: the first surface
+		// modifier, which the client's VOXELDECAY technique reads as the
+		// decay (AreaField.glsl). wetness is only the slot it rides in.
+		m_format.wetness = m_bones;
 	}
 
 	void init()
@@ -662,8 +727,16 @@ struct Module: public interface::Module, public luanti_session::Game
 		// Before the voxelworld, or its first requests are lost
 		worldgen::access(m_server, [&](worldgen::Interface *i){
 			i->create_instance(m_scene);
+			BonesGenerator::PileIds ids;
+			ids.block = id_of("skeldat:bone_block");
+			ids.tops[0] = id_of("skeldat:skull");
+			ids.tops[1] = id_of("skeldat:skulls");
+			ids.tops[2] = id_of("skeldat:bone_lying");
+			ids.ground[0] = id_of("skeldat:grass");
+			ids.ground[1] = id_of("skeldat:dirt");
+			ids.ground[2] = id_of("skeldat:sand");
 			i->get_instance(m_scene)->set_generator(new BonesGenerator(
-					generator, m_format, m_bones, m_mapgen.seed));
+					generator, m_format, m_bones, m_mapgen.seed, ids));
 		});
 		voxelworld::access(m_server, [&](voxelworld::Interface *i){
 			// The bounds in sections of 64: what anyone will walk across,
@@ -699,9 +772,6 @@ struct Module: public interface::Module, public luanti_session::Game
 				id++){
 			luanti_registry::NodeDef d = luanti_def(id);
 			interface::VoxelDefinition v = builder.build(d, media);
-			// The bones: the albedo times this, from none to all
-			v.tint_ramp[0] = 0xffffff;
-			v.tint_ramp[1] = 0xc0604c;
 			const interface::VoxelTypeId got = reg->add_voxel(v);
 			if(got != id)
 				throw Exception("skeldat: voxel "+d.name+" is id "+

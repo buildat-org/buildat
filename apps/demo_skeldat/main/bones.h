@@ -46,6 +46,14 @@ static const int CATCHUP_MAX = 16;
 // About two an expansion where a section's whole ground is at MAX.
 static const int GROW_ONE_IN = 2048, STACK_MAX = 4;
 
+// skelenti's hash of two integers, 0 to 1 (mobs.lua's hash)
+inline float hash(int32_t a, int32_t b, uint32_t salt)
+{
+	uint32_t v = (uint32_t)a * 73856093u ^ (uint32_t)b * 19349663u ^ salt;
+	v ^= v >> 13; v *= 0x5bd1e995u; v ^= v >> 15;
+	return (v & 0xffff) / 65535.0f;
+}
+
 // skelenti's danger of a place (apps/demo_skelenti/main/main.cpp): value
 // noise over 80-node cells, 0 to 1, a quarter of the world quiet. Only the
 // mapgen reads it, to seed a fresh section (user, 2026-10-15: "no danger
@@ -56,14 +64,31 @@ inline float danger(uint32_t salt, float x, float z)
 	const int ix = (int)std::floor(x / C), iz = (int)std::floor(z / C);
 	auto smooth = [](float t){ return t * t * (3 - 2 * t); };
 	const float tx = smooth(x / C - ix), tz = smooth(z / C - iz);
-	auto h = [&](int a, int b){
-		uint32_t v = (uint32_t)a * 73856093u ^ (uint32_t)b * 19349663u ^ salt;
-		v ^= v >> 13; v *= 0x5bd1e995u; v ^= v >> 15;
-		return (v & 0xffff) / 65535.0f;
-	};
+	auto h = [&](int a, int b){ return hash(a, b, salt); };
 	const float v = (h(ix, iz) * (1 - tx) + h(ix + 1, iz) * tx) * (1 - tz) +
 			(h(ix, iz + 1) * (1 - tx) + h(ix + 1, iz + 1) * tx) * tz;
 	return std::min(1.0f, std::max(0.0f, (v - 0.3f) / 0.6f));
+}
+
+// **A pile at map generation** ([SKELDAT_BONES_LOOK], skelenti's
+// on_generated in mobs.lua): on the ground of a column now and then, more
+// often the higher the danger from PILE_FROM, a stack of bone blocks
+// `height` high with top on it -- 1 a skull, 2 two, 3 a bone lying, 4
+// nothing -- turned by `turn`. False for a column with none.
+static const float PILE_FROM = 0.3f;
+struct Pile { int height = 0, top = 0, turn = 0; };
+inline bool pile(uint32_t salt, int32_t x, int32_t z, Pile &p)
+{
+	const float d = danger(salt, (float)x, (float)z);
+	if(!(d > PILE_FROM) || hash(x, z, salt + 7) >= 0.15f *
+			std::pow((d - PILE_FROM) / (1 - PILE_FROM), 1.5f))
+		return false;
+	// Below the chance, spread anew: the height and the top
+	const float q = hash(z, x, salt + 13);
+	p.height = (int)std::floor(q * q * (1 + 5 * d));
+	p.top = 1 + (int)std::floor(hash(x + z, x - z, salt) * 4);
+	p.turn = (int)std::floor(q * 97) % 4;
+	return true;
 }
 
 inline int seed_value(float danger)
@@ -220,9 +245,26 @@ int main()
 	for(int i = 0; i < 10000; i++)
 		seeded += seed_value(danger(3, (float)(i % 100) * 7,
 				(float)(i / 100) * 7)) > 0;
+	// The piles: none under PILE_FROM, more in the deep zone than at its
+	// edge, never over six blocks
+	int piles_low = 0, piles_high = 0, columns_low = 0, columns_high = 0;
+	for(int32_t z = -400; z < 400; z++)
+	for(int32_t x = -400; x < 400; x++){
+		const float d = danger(3, (float)x, (float)z);
+		Pile p;
+		const bool has = pile(3, x, z, p);
+		assert(!has || (d > PILE_FROM && p.height >= 0 && p.height <= 6 &&
+				p.top >= 1 && p.top <= 4 && p.turn >= 0 && p.turn < 4));
+		if(d > 0.3f && d < 0.5f){ columns_low++; piles_low += has; }
+		if(d > 0.9f){ columns_high++; piles_high += has; }
+	}
+	assert(columns_low && columns_high &&
+			piles_high * columns_low > 5 * piles_low * columns_high);
 	printf("bones: self test passed; %d%% of a 700x700 area seeded, the "
-			"front a voxel per 7 expansions (%.0f s)\n", seeded / 100,
-			7 * SECTION_PERIOD);
+			"front a voxel per 7 expansions (%.0f s); piles on %.2f%% of "
+			"the columns over 0.9, %.3f%% at 0.3-0.5\n", seeded / 100,
+			7 * SECTION_PERIOD, 100.0 * piles_high / columns_high,
+			100.0 * piles_low / columns_low);
 	return 0;
 }
 #endif

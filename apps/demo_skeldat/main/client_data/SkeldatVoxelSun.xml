@@ -1,0 +1,10 @@
+<!-- luanti_client's LuantiVoxelSunModifiers.xml with VOXELDECAY: the voxel's
+     first surface modifier, skeldat's bones, drawn as skelenti's danger -->
+<technique vs="luanti_client/res/PBRVoxel" ps="luanti_client/res/PBRVoxel"
+        vsdefines="VOXELSUNGATE VOXELSKYCURVE VOXELMODIFIERS"
+        psdefines="VOXELSUNGATE DIFFMAP PBR METALLIC VOXELNORMALMAP VOXELIBL VOXELSPOTS VOXELTRANSLUCENCY VOXELMODIFIERS VOXELDECAY VOXELSKYTINT">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

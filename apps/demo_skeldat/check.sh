@@ -9,7 +9,8 @@
 # The first, two players: player1 walks and jumps unchecked by the
 # movement check, and is pulled back once a drive forces fly, fast and
 # noclip; digs a voxel without bones, which drops; a test skeleton burns in
-# the sun and dies. player2 says a line, and player1 reports player2.
+# the sun and dies. player2 says a line, and player1 reports player2. The
+# map makes bone piles in the zone in sight.
 # The second, restarted with the save as if long away (the sections catch
 # up) and the client the launcher's own (an admin): the test boar is back
 # from the save; the admin mutes player2 from the report and sets who may
@@ -245,6 +246,8 @@ grep -aq "player1 gives player1: " "$s" && grep -aq "player1 takes player1: " "$
 	fail "the admin's give and take ($s)"
 grep -aq "pause: admin got audit" "$t/a2.log" || fail "the audit log page ($t/a2.log)"
 grep -aq "player2's line refused: muted" "$s" || fail "the muted line went out ($s)"
+grep -aE "skeldat: the first bone piles, [1-9]" "$t/srv1.log" | grep -q . ||
+	fail "no bone piles generated ($t/srv1.log)"
 grep -aq "pulled back" "$s" && fail "the admin was pulled back ($s)"
 grep -aE "skeldat: fog for danger (0\.[5-9]|1)" "$t/a2.log" | grep -q . ||
 	fail "no fog in the zone ($t/a2.log)"

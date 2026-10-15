@@ -86,6 +86,10 @@
 //       gloss changing the albedo, the roughness and how much of the texture's
 //       relief is kept. Off by default, because a world that binds no modifier
 //       has nothing in the tangent; see PBRVoxelModifiers.xml.
+//   VOXELDECAY  with VOXELMODIFIERS: the first slot is the decay
+//       AreaField.glsl draws, 0 to 1, read off the voxel in place of the area
+//       field; the slots are not read as tint, wetness, grain and gloss
+//       ([SKELDAT_BONES_LOOK]: skeldat's bones).
 //   VOXELTRANSLUCENCY  light reaching a surface from behind and coming through
 //       it at those spots, tinted by the surface's own color. This is why a
 //       leaf against the sun reads yellow-green and not as the blue of the sky
@@ -710,13 +714,17 @@ void PS()
 
     // A game's field of decay where this is (AreaField.glsl): the albedo
     // here, and below the gloss
-    float decay = GetAreaField(vWorldPos.xyz);
+    #if defined(VOXELMODIFIERS) && defined(VOXELDECAY)
+        float decay = vSurface.x;
+    #else
+        float decay = GetAreaField(vWorldPos.xyz);
+    #endif
     if (decay > 0.0)
         diffColor.rgb = DecayAlbedo(diffColor.rgb, vWorldPos.xyz, decay,
                 normalize(vNormal), 2.2);
 
 
-    #ifdef VOXELMODIFIERS
+    #if defined(VOXELMODIFIERS) && !defined(VOXELDECAY)
         // simplified: the four slots are read as tint, wetness, grain and
         // gloss, which is the first four of the engine's surface roles in
         // its own order. A world that binds exactly those gets this; one
@@ -784,7 +792,7 @@ void PS()
     roughness = mix(roughness, 1.0, 0.6 * decay);
     specStrength *= 1.0 - 0.7 * decay;
 
-    #ifdef VOXELMODIFIERS
+    #if defined(VOXELMODIFIERS) && !defined(VOXELDECAY)
         // Wetness and the binder both smooth a surface; the binder also
         // gives it something to shine with, where a wet surface shines with
         // the water on it
@@ -835,7 +843,7 @@ void PS()
         float invMax = inversesqrt(max(dot(tangentU, tangentU),
             dot(tangentV, tangentV)));
         vec3 nn = DecodeNormal(texture2D(sNormalMap, vTexCoord.xy));
-        #ifdef VOXELMODIFIERS
+        #if defined(VOXELMODIFIERS) && !defined(VOXELDECAY)
             // Grain is how fine the material is. A coarse surface keeps the
             // relief its texture's normal map has; a fine one -- sand, flour
             // -- has relief far below a texel and reads as flat, so the
