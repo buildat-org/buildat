@@ -1,0 +1,656 @@
+-- Buildat: apps/demo_skeldat/main/client_lua/init.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- skeldat's client ([SKELDAT]): the world drawn with voxel_shading, the
+-- player moved by player.lua (builtin/luanti's movement, copied), the
+-- pointing, digging and placing, the keys, day and night, and the others
+-- as boxes. The HUD and the inventory are ui.lua's, Escape's menu
+-- pause.lua's. main.cpp is the other end of every packet here.
+local magic = require("buildat/extension/urho3d")
+local replicate = require("buildat/extension/replicate")
+local voxelworld = require("buildat/module/voxelworld")
+local voxel_shading = require("buildat/module/voxel_shading")
+local log = buildat.Logger("skeldat")
+
+local function load(name)
+	local ok, err, m = buildat.run_script_file(name)
+	assert(ok and m, name .. ": " .. tostring(err))
+	return m
+end
+local physics = load("main/player.lua")
+
+local scene = replicate.main_scene
+local FAR_CLIP = 160
+local POINT_RANGE = 4.5
+local POINT_STEP = 0.02
+local SUN_BRIGHTNESS = 25.0
+local EXPOSURE_BIAS = 1.6
+
+voxelworld.use_skylight = true
+voxelworld.horizon = true
+voxel_shading.set_packed_sky(true)
+voxel_shading.use_sun_gate(true)
+voxelworld.lod_distance = 4000
+voxelworld.send_distance = FAR_CLIP
+voxelworld.physics_distance = 1
+
+--
+-- What the server says: the game is the shared state ui.lua draws from
+--
+local game = {
+	items = {}, nodes = {}, hand = {},
+	inv = {main = {}, craft = {}, craftresult = {}, craftpreview = {}},
+	node_inv = {},
+	stats = {hp = 20, breath = 10, breath_max = 10},
+	wield = 1,
+	day = 0.25, day_rate = 1 / 1200,
+	listeners = {},
+}
+
+function game.parse_stack(s)
+	if not s or s == "" then
+		return nil
+	end
+	local name, count, wear = s:match("^(%S+)%s*(%d*)%s*(%d*)$")
+	if not name then
+		return nil
+	end
+	return {name = name, count = tonumber(count) or 1,
+		wear = tonumber(wear) or 0}
+end
+
+function game.item_texture(name)
+	local d = game.items[name]
+	return d and d.image or nil
+end
+
+local function caps_of(s)
+	local caps = {}
+	for group, t1, t2, t3, uses in (s or ""):gmatch(
+			"([^:;]+):([^,]+),([^,]+),([^:]+):(%d+);") do
+		caps[#caps + 1] = {group = group, times = {tonumber(t1),
+			tonumber(t2), tonumber(t3)}, uses = tonumber(uses)}
+	end
+	return caps
+end
+
+buildat.sub_packet("skeldat:items", function(data)
+	for line in data:gmatch("[^\n]+") do
+		local f = {}
+		for part in (line .. "\t"):gmatch("([^\t]*)\t") do
+			f[#f + 1] = part
+		end
+		if f[1] == "hand" then
+			game.hand = {caps = caps_of(f[2])}
+		elseif f[1] == "item" then
+			game.items[f[2]] = {name = f[2], desc = f[3], image = f[4],
+				stack_max = tonumber(f[5]), caps = caps_of(f[6]),
+				eat = tonumber(f[7]) or 0}
+		elseif f[1] == "node" then
+			local groups = {}
+			for k, v in (f[3] or ""):gmatch("([^=;]+)=(%d+);") do
+				groups[k] = tonumber(v)
+			end
+			game.nodes[f[2]] = {groups = groups}
+		end
+	end
+	log:info("skeldat: the item definitions in")
+	game.changed()
+end)
+
+-- How long the wielded item takes on the node, as game.h's dig_time():
+-- the first of its caps that digs it, else the hand's; nil for never
+function game.dig_time(tool, node)
+	local n = game.nodes[node]
+	if not n then
+		return nil
+	end
+	local t = game.items[tool]
+	for _, def in ipairs({t or {caps = {}}, game.hand}) do
+		for _, c in ipairs(def.caps or {}) do
+			local g = n.groups[c.group]
+			if g and g >= 1 and g <= 3 and (c.times[g] or 0) > 0 then
+				return c.times[g]
+			end
+		end
+	end
+	return nil
+end
+
+local function parse_lists(data, into)
+	for name, rest in data:gmatch("([%w_]+)=([^\n]*)") do
+		local l = {}
+		for s in (rest .. "|"):gmatch("([^|]*)|") do
+			l[#l + 1] = s
+		end
+		into[name] = l
+	end
+end
+
+function game.changed()
+	for _, f in ipairs(game.listeners) do
+		f()
+	end
+end
+
+buildat.sub_packet("skeldat:inv", function(data)
+	parse_lists(data, game.inv)
+	game.changed()
+end)
+
+buildat.sub_packet("skeldat:node_inv", function(data)
+	local at, rest = data:match("^([^\n]+)\n(.*)$")
+	if at then
+		game.node_inv[at] = {}
+		parse_lists(rest, game.node_inv[at])
+		game.changed()
+	end
+end)
+
+buildat.sub_packet("skeldat:stats", function(data)
+	local hp, breath = data:match("^(%-?%d+) (%-?%d+)")
+	game.stats.hp, game.stats.breath = tonumber(hp), tonumber(breath)
+	log:info("skeldat: hp " .. hp .. " breath " .. breath)
+	game.changed()
+end)
+
+buildat.sub_packet("skeldat:time", function(data)
+	local day, rate = data:match("^(%S+) (%S+)")
+	game.day, game.day_rate = tonumber(day), tonumber(rate)
+end)
+
+-- A game's window over the world (ui.lua's, pause.lua's): while one is up
+-- the mouse is the screen's, Escape calls `close`, and on.click(x, y,
+-- button) and on.key(key) get the clicks and the keys first
+local held = nil
+function game.hold(close, window, _, on)
+	held = close and {close = close, on = on or {}} or nil
+end
+function game.held()
+	return held ~= nil
+end
+function game.send(name, data)
+	buildat.send_packet("skeldat:" .. name, data)
+end
+
+--
+-- The keys, in the client's key store ([LAUNCH_MENU_V2]): the shared
+-- names where there is one, so the player's own movement keys apply
+--
+local KEYS = {
+	{id = "forward", label = "Walk forward", default = "W",
+		shared = "move.forward"},
+	{id = "back", label = "Walk back", default = "S", shared = "move.back"},
+	{id = "left", label = "Walk left", default = "A", shared = "move.left"},
+	{id = "right", label = "Walk right", default = "D", shared = "move.right"},
+	{id = "jump", label = "Jump, and up in water", default = "Space",
+		shared = "jump"},
+	{id = "sneak", label = "Sneak", default = "Left Shift", shared = "sneak"},
+	{id = "inventory", label = "Inventory", default = "E",
+		shared = "inventory"},
+	{id = "hud", label = "The HUD on and off", default = "F1", shared = "hud"},
+}
+local key = {}
+game.key = key
+local function declare_keys()
+	local names = buildat.declare_keys(nil, "skeldat", KEYS)
+	for _, k in ipairs(KEYS) do
+		local name = type(names) == "table" and names[k.id] or k.default
+		key[k.id] = magic.input:GetKeyFromName(name)
+	end
+end
+declare_keys()
+local function down(id)
+	return held == nil and key[id] ~= 0 and magic.input:GetKeyDown(key[id])
+end
+
+--
+-- The scene
+--
+do
+	local zone = scene:CreateChild("Zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-100000, 100000)
+	zone.fogStart = FAR_CLIP * 0.6
+	zone.fogEnd = FAR_CLIP * 0.95
+	zone.priority = -1
+	zone.override = true
+	zone.zoneTexture = magic.cache:GetResource("TextureCube",
+			voxel_shading.sky_cubemap)
+	game.zone = zone
+end
+local sun_node = scene:CreateChild("DirectionalLight")
+local sun = sun_node:CreateComponent("Light")
+sun.lightType = magic.LIGHT_DIRECTIONAL
+sun.castShadows = true
+sun.color = magic.Color(1.0, 0.96, 0.88)
+voxel_shading.create_skybox(scene, {x = -0.6, y = -1.0, z = 0.3})
+
+local player = physics.new(
+	function(x, y, z)
+		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+		if v == nil then
+			return true -- not loaded: stand still rather than fall
+		end
+		local reg = voxelworld.get_voxel_registry()
+		local id = reg:id_of(v)
+		if id == 0 then
+			return true
+		end
+		local def = reg:get_by_id(id)
+		if def == nil then
+			return true
+		end
+		return def.physically_solid and (reg:collision_boxes_of(v) or true)
+	end,
+	function(x, y, z)
+		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+		if v == nil then
+			return false
+		end
+		local reg = voxelworld.get_voxel_registry()
+		local def = reg:get_by_id(reg:id_of(v))
+		return def ~= nil and def.swimmable == true
+	end)
+local yaw, pitch = 0, 0
+local placed = false
+
+local camera_node = scene:CreateChild("Camera")
+local camera = camera_node:CreateComponent("Camera")
+camera.nearClip = 0.05
+camera.farClip = FAR_CLIP
+magic.keep_fov(camera, 72)
+do
+	local viewport = magic.Viewport:new(scene, camera)
+	magic.set_preferred_viewports({viewport})
+	magic.renderer.HDRRendering = true
+	local rp = viewport.renderPath:Clone()
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/BloomHDR.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile", "PostProcess/Tonemap.xml"))
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"PostProcess/GammaCorrection.xml"))
+	rp:SetEnabled("TonemapReinhardEq3", false)
+	rp:SetEnabled("TonemapUncharted2", true)
+	rp:SetShaderParameter("TonemapExposureBias", EXPOSURE_BIAS)
+	viewport.renderPath = rp
+end
+voxelworld.set_camera(camera_node)
+voxel_shading.set_camera(camera_node)
+
+buildat.sub_packet("skeldat:position", function(data)
+	local x, y, z, yw = data:match("^(%S+) (%S+) (%S+) (%S+)")
+	player:set_position(tonumber(x), tonumber(y), tonumber(z))
+	yaw = tonumber(yw) or 0
+	placed = true
+	log:info(string.format("skeldat: placed at (%.1f, %.1f, %.1f)",
+			player.x, player.y, player.z))
+end)
+
+-- Day and night off the server's clock: the sun around the x axis, the
+-- light and the sky dimmed as it sets
+-- simplified: no moon, no dawn colours; the stars and a dimmed sky are
+-- the night
+local function update_sky(dt)
+	game.day = (game.day + dt * game.day_rate) % 1
+	local a = (game.day - 0.25) * 2 * math.pi
+	local sx, sy, sz = math.cos(a), math.sin(a), 0.3
+	local day = math.max(0, math.min(1, sy * 4 + 0.3))
+	local dir = magic.Vector3(-sx, -sy, -sz):Normalized()
+	sun_node.direction = dir
+	sun.brightness = sy > 0 and SUN_BRIGHTNESS * math.min(1, sy * 3) or 0
+	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
+	voxel_shading.set_sky_light(0.08 + 0.92 * day)
+	voxel_shading.set_cloud_light(0.1 + 0.9 * day)
+	voxel_shading.set_star_look(0.06 * (1 - day))
+	local d = voxel_shading.sky_defaults
+	local function dim(c, k)
+		return {r = c.r * k, g = c.g * k, b = c.b * k}
+	end
+	local k = 0.05 + 0.95 * day
+	voxel_shading.set_sky_look(dim(d.zenith, k), dim(d.horizon, k))
+	game.zone.ambientColor = magic.Color(0.26 * k, 0.33 * k, 0.46 * k)
+	game.zone.fogColor = magic.Color(d.horizon.r * k, d.horizon.g * k,
+			d.horizon.b * k)
+end
+
+--
+-- Pointing: the voxel the eyes look at, and the empty one before it
+--
+local function voxel_def(v)
+	if v == nil then
+		return nil
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return nil
+	end
+	local def = reg:get_by_id(id)
+	if def == nil or def.fully_empty then
+		return nil
+	end
+	return def
+end
+
+-- builtin/luanti's find_pointed_voxel(): through what is not pointable,
+-- onto the nearest selection box of what is
+local function find_pointed()
+	local p0 = buildat.Vector3(camera_node.worldPosition)
+	local dir = buildat.Vector3(camera_node.worldDirection)
+	local last = nil
+	for i = 1, math.floor(POINT_RANGE / POINT_STEP) do
+		local p = (p0 + dir * (i * POINT_STEP)):Round()
+		if p ~= last then
+			local v = voxelworld.get_static_voxel(p)
+			local def = voxel_def(v)
+			if def and def.pointable ~= 0 then
+				local boxes = voxelworld.get_voxel_registry():selection_boxes_of(v)
+				if not boxes then
+					return p, last or p, def
+				end
+				local best, normal = POINT_RANGE, nil
+				for _, b in ipairs(boxes) do
+					local t0, t1, n = 0, best, nil
+					for ax, k in ipairs({"x", "y", "z"}) do
+						local o, d = p0[k] - p[k], dir[k]
+						if math.abs(d) < 1e-9 then
+							if o < b[ax] or o > b[ax + 3] then
+								t0 = math.huge
+							end
+						else
+							local a1, a2 = (b[ax] - o) / d, (b[ax + 3] - o) / d
+							if a1 > a2 then
+								a1, a2 = a2, a1
+							end
+							if a1 > t0 then
+								t0, n = a1, {0, 0, 0}
+								n[ax] = d < 0 and 1 or -1
+							end
+							t1 = math.min(t1, a2)
+						end
+					end
+					if t0 <= t1 and t0 < best then
+						best, normal = t0, n or {0, 0, 0}
+					end
+				end
+				if normal then
+					return p, p + buildat.Vector3(normal[1], normal[2],
+							normal[3]), def
+				end
+			end
+			last = p
+		end
+	end
+	return nil
+end
+
+-- The pointed voxel outlined: a box of thin edges
+local outline = scene:CreateChild("Outline")
+do
+	local g = outline:CreateComponent("CustomGeometry")
+	g:BeginGeometry(0, magic.LINE_LIST)
+	local d = 0.505
+	local c = {{-d, -d, -d}, {d, -d, -d}, {d, -d, d}, {-d, -d, d},
+		{-d, d, -d}, {d, d, -d}, {d, d, d}, {-d, d, d}}
+	for _, e in ipairs({{1, 2}, {2, 3}, {3, 4}, {4, 1}, {5, 6}, {6, 7},
+			{7, 8}, {8, 5}, {1, 5}, {2, 6}, {3, 7}, {4, 8}}) do
+		for _, i in ipairs(e) do
+			g:DefineVertex(magic.Vector3(c[i][1], c[i][2], c[i][3]))
+			g:DefineColor(magic.Color(0.1, 0.1, 0.1))
+		end
+	end
+	g:Commit()
+	local m = magic.Material.new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureVCol.xml"))
+	g:SetMaterial(0, m)
+	outline.enabled = false
+end
+
+--
+-- Digging and placing
+--
+local pointed, above, pointed_def = nil, nil, nil
+local dig = nil -- {key, t, need}
+local place_cooldown = 0
+local function pkey(p)
+	return string.format("%d %d %d", p.x, p.y, p.z)
+end
+
+local function wielded()
+	local st = game.parse_stack(game.inv.main[game.wield])
+	return st and st.name or ""
+end
+
+local function step_dig(dt)
+	if not pointed or held or not magic.input:GetMouseButtonDown(
+			magic.MOUSEB_LEFT) then
+		dig = nil
+		return
+	end
+	local k = pkey(pointed)
+	if not dig or dig.key ~= k then
+		local name = pointed_def and pointed_def.name.block_name
+		local need = name and game.dig_time(wielded(), name)
+		if not need then
+			dig = {key = k, t = 0}
+			return
+		end
+		dig = {key = k, t = 0, need = need}
+		game.send("dig_start", k)
+	end
+	if not dig.need then
+		return
+	end
+	dig.t = dig.t + dt
+	if dig.t >= dig.need then
+		game.send("dig", k)
+		dig = nil
+	end
+end
+
+local function on_place()
+	if not pointed then
+		-- Eating needs nothing pointed at
+		local d = game.items[wielded()]
+		if d and d.eat > 0 then
+			game.send("use", "")
+		end
+		return
+	end
+	local name = pointed_def and pointed_def.name.block_name
+	if name == "skeldat:table" then
+		game.open("table", (pkey(pointed):gsub(" ", ",")))
+		game.send("open", pkey(pointed))
+		return
+	end
+	if name == "skeldat:furnace" or name == "skeldat:furnace_active" then
+		game.open("furnace", (pkey(pointed):gsub(" ", ",")))
+		game.send("open", pkey(pointed))
+		return
+	end
+	local d = game.items[wielded()]
+	if d and d.eat > 0 then
+		game.send("use", "")
+	elseif above and game.nodes[wielded()] then
+		game.send("place", pkey(above))
+	end
+end
+
+--
+-- The others, as boxes
+-- simplified: no names over them, no animation
+--
+local others = {}
+buildat.sub_packet("skeldat:players", function(data)
+	local seen = {}
+	for name, x, y, z, yw in data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+)\n") do
+		seen[name] = true
+		do
+			local o = others[name]
+			if not o then
+				local node = scene:CreateChild("Other")
+				local body = node:CreateChild("Body")
+				body.position = magic.Vector3(0, 0.875, 0)
+				body.scale = magic.Vector3(0.6, 1.75, 0.6)
+				local model = body:CreateComponent("StaticModel")
+				model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+				o = {node = node}
+				others[name] = o
+			end
+			o.node.position = magic.Vector3(tonumber(x), tonumber(y),
+					tonumber(z))
+			o.node.rotation = magic.Quaternion(0, tonumber(yw), 0)
+		end
+	end
+	for name, o in pairs(others) do
+		if not seen[name] then
+			o.node:Remove()
+			others[name] = nil
+		end
+	end
+end)
+
+--
+-- The mouse and the keys
+--
+local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
+local mouse_in_world = false
+local function set_mouse_in_world(on)
+	mouse_in_world = on
+	magic.input:SetMouseVisible(not on)
+	if web then
+		magic.input:SetMouseMode(on and magic.MM_RELATIVE or
+				magic.MM_ABSOLUTE)
+	end
+end
+
+local ui = load("main/ui.lua")(game)
+game.open = ui.open
+local open_pause = load("main/pause.lua")(game, declare_keys)
+local hud_on = true
+function game.hud_visible()
+	return hud_on
+end
+
+magic.SubscribeToEvent("KeyDown", function(_, d)
+	local k = d:GetInt("Key")
+	if held then
+		if held.on.key and held.on.key(k) then
+			return
+		end
+		if k == magic.KEY_ESCAPE then
+			held.close()
+		end
+		return
+	end
+	if k == magic.KEY_ESCAPE then
+		open_pause()
+	elseif k == key.inventory then
+		ui.open("inventory")
+	elseif k == key.hud then
+		hud_on = not hud_on
+	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
+		game.wield = k - magic.KEY_1 + 1
+		game.send("wield", tostring(game.wield - 1))
+		game.changed()
+	end
+end)
+
+-- A held window's clicks: UIMouseClick says where, in the root's own
+-- coordinates once its letterbox in a scripted run is taken off
+magic.SubscribeToEvent("UIMouseClick", function(_, d)
+	if held and held.on.click then
+		local rp = magic.ui.root.position
+		held.on.click(d:GetInt("X") - rp.x, d:GetInt("Y") - rp.y,
+				d:GetInt("Button") == magic.MOUSEB_RIGHT and "right" or "left")
+	end
+end)
+
+magic.SubscribeToEvent("MouseButtonDown", function(_, d)
+	local b = d:GetInt("Button")
+	if held then
+		return
+	end
+	if not mouse_in_world then
+		set_mouse_in_world(true)
+		return
+	end
+	if b == magic.MOUSEB_RIGHT then
+		on_place()
+	end
+end)
+
+magic.SubscribeToEvent("MouseWheel", function(_, d)
+	if held then
+		return
+	end
+	local w = d:GetInt("Wheel")
+	game.wield = (game.wield - 1 - (w > 0 and 1 or w < 0 and -1 or 0)) % 9 + 1
+	game.send("wield", tostring(game.wield - 1))
+	game.changed()
+end)
+
+--
+-- The frame
+--
+local send_t = 0
+local was_held = false
+magic.SubscribeToEvent("Update", function(_, d)
+	local dt = d:GetFloat("TimeStep")
+	if (held ~= nil) ~= was_held then
+		was_held = held ~= nil
+		set_mouse_in_world(not was_held)
+		dig = nil
+	end
+	update_sky(dt)
+	voxel_shading.update(dt)
+	if not placed then
+		return
+	end
+	if mouse_in_world and not held then
+		local m = magic.input:GetMouseMove()
+		yaw = (yaw + m.x * 0.12) % 360
+		pitch = math.max(-89, math.min(89, pitch + m.y * 0.12))
+	end
+	local dead = game.stats.hp <= 0
+	local fx, fz = 0, 0
+	if not dead then
+		local f = (down("forward") and 1 or 0) - (down("back") and 1 or 0)
+		local r = (down("right") and 1 or 0) - (down("left") and 1 or 0)
+		local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
+		fx, fz = s * f + c * r, c * f - s * r
+	end
+	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
+			sneak = not dead and down("sneak")})
+	if player.landed_at then
+		if player.landed_at > 14 then
+			game.send("fall", string.format("%.2f", player.landed_at))
+		end
+		player.landed_at = nil
+	end
+	camera_node.position = magic.Vector3(player.x,
+			player.y + physics.EYE_HEIGHT, player.z)
+	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
+	send_t = send_t + dt
+	if send_t >= 0.1 then
+		send_t = 0
+		game.send("pos", string.format("%.3f %.3f %.3f %.1f %.1f",
+				player.x, player.y, player.z, yaw, pitch))
+	end
+	if dead then
+		pointed = nil
+	else
+		pointed, above, pointed_def = find_pointed()
+	end
+	outline.enabled = pointed ~= nil
+	if pointed then
+		outline.position = magic.Vector3(pointed.x, pointed.y, pointed.z)
+	end
+	step_dig(dt)
+	ui.draw_hud()
+end)
+
+set_mouse_in_world(true)
+log:info("skeldat client ready")
+-- vim: set noet ts=4 sw=4:
