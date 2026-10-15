@@ -881,13 +881,39 @@ function PRESET.crunch(p, frnd, rnd)
 	p.env_sustain = secs(0.04 + frnd(0.06))
 	p.env_decay = secs(0.06 + frnd(0.1))
 end
+-- Sometimes a second syllable: the voice again as it ends, shorter, its
+-- pitch moved up or down
+local function tail(p, frnd, rnd)
+	if rnd(2) ~= 0 then
+		return
+	end
+	local l = {}
+	for k, v in pairs(p) do
+		l[k] = v
+	end
+	local len = (p.env_attack * p.env_attack +
+			p.env_sustain * p.env_sustain) * 2.268
+	l.at = floor(len * 900) / 1000
+	l.base_freq = p.base_freq * (0.8 + frnd(0.45))
+	l.freq_ramp = -0.15 + frnd(0.25)
+	l.env_sustain = p.env_sustain * (0.4 + frnd(0.4))
+	l.volume = p.volume * (0.7 + frnd(0.3))
+	p.layers = {l}
+end
 function PRESET.grunt(p, frnd, rnd)
-	voiced(p, frnd, rnd, 120 + frnd(70), 0.12)
-	p.hpf_freq = 0.12
+	voiced(p, frnd, rnd, 55 + frnd(110), 0.07 + frnd(0.06))
+	p.hpf_freq = 0.05 + frnd(0.05)
+	tail(p, frnd, rnd)
 end
 function PRESET.squeal(p, frnd, rnd)
-	voiced(p, frnd, rnd, 350 + frnd(250), 0.22)
-	p.hpf_freq = 0.2
+	voiced(p, frnd, rnd, 250 + frnd(750), 0.15 + frnd(0.25))
+	-- Up as often as down, and the filter swept with it
+	p.freq_ramp = -0.12 + frnd(0.24)
+	p.lpf_ramp = -0.05 + frnd(0.1)
+	p.lpf_resonance = 0.3 + frnd(0.65)
+	p.vib_strength = frnd(0.25)
+	p.hpf_freq = 0.12 + frnd(0.15)
+	tail(p, frnd, rnd)
 end
 function PRESET.snort(p, frnd, rnd)
 	p.wave = "noise"
@@ -1123,8 +1149,8 @@ G.HASHES = {
 	thud = "67ed7f9289e9bd33",
 	knock = "f866eef78046803f",
 	crunch = "adc2184869cfa34a",
-	grunt = "9eb6d1a4ba4209d1",
-	squeal = "8f80733bff062ec0",
+	grunt = "747945fc18caa280",
+	squeal = "f1294e224d36b07a",
 	snort = "6d62325e002f06ad",
 	pluck = "068748b0c0c77e8b",
 	rattle = "de28cfbaeaa1ec61",
