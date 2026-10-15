@@ -30,6 +30,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include "luanti/shapes.h"
 #include "accounts/api.h"
 #include "chat/api.h"
 #include "client_file/api.h"
@@ -63,6 +64,7 @@ namespace pv = PolyVox;
 using Urho3D::M_PI;
 namespace vp = interface::voxel_path;
 using Urho3D::M_RADTODEG;
+using namespace luanti_shapes;
 
 // Luanti's mapgens write these three as numbers (vendor/mapnode.h), so
 // the registry has them at those ids: ignore is the registry's own
@@ -74,14 +76,6 @@ static const int HP_MAX = 20, BREATH_MAX = 10;
 // Faster than this a landing hurts, a point a node a second over it
 // (Luanti's client: BS*14)
 static const float FALL_TOLERANCE = 14;
-
-// The four horizontal turns of a facedir, out of builtin/luanti's
-// FACEDIR_TILES and FACEDIR_TURNS: which tile each face wears and how far
-// it is turned in its face
-static const uint8_t FACEDIR_TILES[4][6] = {{0, 1, 2, 3, 4, 5},
-		{0, 1, 4, 5, 3, 2}, {0, 1, 3, 2, 5, 4}, {0, 1, 5, 4, 2, 3}};
-static const uint8_t FACEDIR_TURNS[4][6] = {{0, 0, 0, 0, 0, 0},
-		{3, 1, 0, 0, 0, 0}, {2, 2, 0, 0, 0, 0}, {1, 3, 0, 0, 0, 0}};
 
 static ss_ pos_key(int x, int y, int z)
 {
@@ -673,31 +667,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	static void box_quads(sv_<interface::VoxelQuad> &out, const float *b);
-	static void turn_y(float v[3], int quarters)
-	{
-		static const float SIN[4] = {0, 1, 0, -1}, COS[4] = {1, 0, -1, 0};
-		const int i = ((quarters % 4) + 4) % 4;
-		const float a = v[0], c = v[2];
-		v[0] = COS[i] * a - SIN[i] * c;
-		v[2] = SIN[i] * a + COS[i] * c;
-	}
-	static sv_<float> turn_boxes(const sv_<float> &in, int quarters)
-	{
-		sv_<float> out;
-		for(size_t b = 0; b + 6 <= in.size(); b += 6){
-			float lo[3] = {in[b], in[b + 1], in[b + 2]};
-			float hi[3] = {in[b + 3], in[b + 4], in[b + 5]};
-			turn_y(lo, quarters);
-			turn_y(hi, quarters);
-			for(int k = 0; k < 3; k++)
-				out.push_back(std::min(lo[k], hi[k]));
-			for(int k = 0; k < 3; k++)
-				out.push_back(std::max(lo[k], hi[k]));
-		}
-		return out;
-	}
-
 	interface::VoxelDefinition voxel_def(const skeldat::NodeDef &n)
 	{
 		interface::VoxelDefinition d;
@@ -732,9 +701,7 @@ struct Module: public interface::Module
 			d.transmits_light = true;
 			break;
 		case skeldat::LIQUID: {
-			static const float CUBE[6] = {-0.5f, -0.5f, -0.5f,
-					0.5f, 0.5f, 0.5f};
-			box_quads(shape, CUBE);
+			add_box_quads(shape, -0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f);
 			d.physically_solid = false;
 			d.is_liquid = true;
 			d.liquid_is_source = true;
@@ -747,28 +714,17 @@ struct Module: public interface::Module
 		}
 		case skeldat::NODEBOX:
 			for(size_t b = 0; b + 6 <= n.boxes.size(); b += 6)
-				box_quads(shape, &n.boxes[b]);
+				add_box_quads(shape, n.boxes[b], n.boxes[b + 1],
+						n.boxes[b + 2], n.boxes[b + 3], n.boxes[b + 4],
+						n.boxes[b + 5]);
 			d.transmits_light = true;
 			d.collision_boxes = n.boxes;
 			d.selection_boxes = n.boxes;
 			break;
 		case skeldat::TORCH: {
-			// Two quads crossed, as a plant
-			const float s = 0.5f;
-			for(int k = 0; k < 2; k++){
-				interface::VoxelQuad q;
-				const float dx = k ? s : -s, dz = s;
-				const float p[4][3] = {{-dx, -s, -dz}, {dx, -s, dz},
-						{dx, s, dz}, {-dx, s, -dz}};
-				const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
-				for(int c = 0; c < 4; c++){
-					for(int j = 0; j < 3; j++)
-						q.p[c][j] = p[c][j];
-					q.uv[c][0] = uv[c][0];
-					q.uv[c][1] = uv[c][1];
-				}
-				shape.push_back(q);
-			}
+			// Luanti's torchlike on the floor: one upright quad on the
+			// diagonal
+			add_torch_quads(shape, 1.0f, 1);
 			d.shape_double_sided = true;
 			d.alpha_masked = true;
 			d.transmits_light = true;
@@ -791,11 +747,8 @@ struct Module: public interface::Module
 					var.tile_turns[i] = FACEDIR_TURNS[f][i];
 				}
 				if(!shape.empty() && f != 0){
-					var.shape = shape;
-					for(interface::VoxelQuad &q : var.shape)
-						for(int c = 0; c < 4; c++)
-							turn_y(q.p[c], 4 - f);
-					var.collision_boxes = turn_boxes(n.boxes, 4 - f);
+					turn_quads(shape, (uint8_t)f, var.shape);
+					turn_boxes(n.boxes, (uint8_t)f, var.collision_boxes);
 					var.selection_boxes = var.collision_boxes;
 				}
 				d.variants.push_back(var);
@@ -2661,46 +2614,6 @@ struct Module: public interface::Module
 		}
 	}
 };
-
-void Module::box_quads(sv_<interface::VoxelQuad> &out, const float *b)
-{
-	// builtin/luanti's add_box_quads(): six quads, counter-clockwise seen
-	// from outside, each wearing the part of its tile it covers
-	float x0 = b[0], y0 = b[1], z0 = b[2], x1 = b[3], y1 = b[4], z1 = b[5];
-	const float ux0 = x0 + 0.5f, ux1 = x1 + 0.5f;
-	const float uy0 = y0 + 0.5f, uy1 = y1 + 0.5f;
-	const float uz0 = z0 + 0.5f, uz1 = z1 + 0.5f;
-	auto quad = [&](uint8_t tile,
-			float ax, float ay, float az, float au, float av,
-			float bx, float by, float bz, float bu, float bv,
-			float cx, float cy, float cz, float cu, float cv,
-			float dx, float dy, float dz, float du, float dv){
-		interface::VoxelQuad q;
-		const float p[4][3] = {{ax, ay, az}, {bx, by, bz},
-				{cx, cy, cz}, {dx, dy, dz}};
-		const float uv[4][2] = {{au, av}, {bu, bv}, {cu, cv}, {du, dv}};
-		for(size_t i = 0; i < 4; i++){
-			for(size_t j = 0; j < 3; j++)
-				q.p[i][j] = p[i][j];
-			q.uv[i][0] = uv[i][0];
-			q.uv[i][1] = uv[i][1];
-		}
-		q.tile = tile;
-		out.push_back(q);
-	};
-	quad(0, x0, y1, z1, ux0, 1-uz1,  x1, y1, z1, ux1, 1-uz1,
-			x1, y1, z0, ux1, 1-uz0,  x0, y1, z0, ux0, 1-uz0);
-	quad(1, x0, y0, z0, ux0, uz0,    x1, y0, z0, ux1, uz0,
-			x1, y0, z1, ux1, uz1,    x0, y0, z1, ux0, uz1);
-	quad(2, x1, y0, z1, uz1, 1-uy0,  x1, y0, z0, uz0, 1-uy0,
-			x1, y1, z0, uz0, 1-uy1,  x1, y1, z1, uz1, 1-uy1);
-	quad(3, x0, y0, z0, 1-uz0, 1-uy0, x0, y0, z1, 1-uz1, 1-uy0,
-			x0, y1, z1, 1-uz1, 1-uy1, x0, y1, z0, 1-uz0, 1-uy1);
-	quad(4, x0, y0, z1, 1-ux0, 1-uy0, x1, y0, z1, 1-ux1, 1-uy0,
-			x1, y1, z1, 1-ux1, 1-uy1, x0, y1, z1, 1-ux0, 1-uy1);
-	quad(5, x1, y0, z0, ux1, 1-uy0,  x0, y0, z0, ux0, 1-uy0,
-			x0, y1, z0, ux0, 1-uy1,  x1, y1, z0, ux1, 1-uy1);
-}
 
 extern "C" {
 	BUILDAT_EXPORT void* createModule_main(interface::Server *server){

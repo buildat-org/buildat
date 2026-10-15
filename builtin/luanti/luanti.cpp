@@ -35,6 +35,7 @@
 #include "interface/compress.h"
 #include "interface/noise.h"
 #include "luanti/mapblock.h"
+#include "luanti/shapes.h"
 #include <sqlite3.h>
 #include <fstream>
 #include <cstdlib>
@@ -82,6 +83,7 @@ extern "C" {
 using interface::Event;
 namespace pv = PolyVox;
 namespace magic = Urho3D;
+using namespace luanti_shapes;
 
 namespace luanti {
 
@@ -145,218 +147,11 @@ static ss_ node_texture_name(const ss_ &name)
 }
 
 
-// Which way a node faces, out of its param2.
-//
-// Luanti's own dir_to_tile[24][8] from mapblock_mesh.cpp, read at the
-// six directions buildat's faces are in -- +Y, -Y, +X, -X, +Z, -Z, which
-// is the order Luanti keeps its tiles in too. Taken from
-// extensions/luanti_client/shapes.lua, which read them out first and
-// checks them in its engine_test.lua.
-//
-// This is what VoxelVariant::tile_order and tile_turns are for: the
-// twenty-four turns of a facedir are twenty-four variants over one
-// definition's six textures, rather than a voxel type per rotation.
-// Which of the six tiles each face wears, per facedir
-static const uint8_t FACEDIR_TILES[24][6] = {
-	{0, 1, 2, 3, 4, 5},
-	{0, 1, 4, 5, 3, 2},
-	{0, 1, 3, 2, 5, 4},
-	{0, 1, 5, 4, 2, 3},
-	{5, 4, 2, 3, 0, 1},
-	{2, 3, 4, 5, 0, 1},
-	{4, 5, 3, 2, 0, 1},
-	{3, 2, 5, 4, 0, 1},
-	{4, 5, 2, 3, 1, 0},
-	{3, 2, 4, 5, 1, 0},
-	{5, 4, 3, 2, 1, 0},
-	{2, 3, 5, 4, 1, 0},
-	{3, 2, 0, 1, 4, 5},
-	{5, 4, 0, 1, 3, 2},
-	{2, 3, 0, 1, 5, 4},
-	{4, 5, 0, 1, 2, 3},
-	{2, 3, 1, 0, 4, 5},
-	{4, 5, 1, 0, 3, 2},
-	{3, 2, 1, 0, 5, 4},
-	{5, 4, 1, 0, 2, 3},
-	{1, 0, 3, 2, 4, 5},
-	{1, 0, 5, 4, 3, 2},
-	{1, 0, 2, 3, 5, 4},
-	{1, 0, 4, 5, 2, 3},
-};
-
-// How far that tile is turned inside its face, in quarter turns
-static const uint8_t FACEDIR_TURNS[24][6] = {
-	{0, 0, 0, 0, 0, 0},
-	{3, 1, 0, 0, 0, 0},
-	{2, 2, 0, 0, 0, 0},
-	{1, 3, 0, 0, 0, 0},
-	{0, 2, 3, 1, 2, 0},
-	{0, 2, 3, 1, 1, 1},
-	{0, 2, 3, 1, 0, 2},
-	{0, 2, 3, 1, 3, 3},
-	{2, 0, 1, 3, 2, 0},
-	{2, 0, 1, 3, 3, 3},
-	{2, 0, 1, 3, 0, 2},
-	{2, 0, 1, 3, 1, 1},
-	{3, 3, 3, 3, 1, 3},
-	{3, 3, 2, 0, 1, 3},
-	{3, 3, 1, 1, 1, 3},
-	{3, 3, 0, 2, 1, 3},
-	{1, 1, 1, 1, 3, 1},
-	{1, 1, 2, 0, 3, 1},
-	{1, 1, 3, 3, 3, 1},
-	{1, 1, 0, 2, 3, 1},
-	{2, 2, 2, 2, 2, 2},
-	{3, 1, 2, 2, 2, 2},
-	{0, 0, 2, 2, 2, 2},
-	{1, 3, 2, 2, 2, 2},
-};
-
-// The rotation a facedir is, as a matrix, derived from the table above rather
-// than from Luanti's handedness conventions: FACEDIR_TILES[d][f] says world
-// face f wears the tile of local face s, which means the rotation takes the
-// local face s to the world direction of f. Three of those give the columns,
-// and check_shapes() asserts that what comes out is a proper rotation.
-//
-// out[r][c], so that out * v is the rotated v.
-static void facedir_matrix(uint8_t d, int out[3][3])
-{
-	// Face f points this way: +Y, -Y, +X, -X, +Z, -Z
-	static const int FACE_DIR[6][3] = {
-		{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
-		{-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
-	};
-	// Local face 2 is +X, 0 is +Y and 4 is +Z, so those three give the
-	// columns of the matrix
-	static const uint8_t AXIS_FACE[3] = {2, 0, 4};
-	for(size_t c = 0; c < 3; c++){
-		const uint8_t s = AXIS_FACE[c];
-		for(size_t f = 0; f < 6; f++){
-			if(FACEDIR_TILES[d][f] != s)
-				continue;
-			for(size_t r = 0; r < 3; r++)
-				out[r][c] = FACE_DIR[f][r];
-			break;
-		}
-	}
-}
-
-// A shape turned the way a facedir turns it. The quads keep the tiles they
-// name -- a quad's texture is the local face it was built on, and that
-// travels with it -- so only the corners move.
-//
-// simplified: the texture is not turned inside the quad. tile_turns is what
-// does that for a cube's faces and the mesher does not apply it to a shape's
-// quads, so a turned node box wears its textures straight.
-static void turn_quads(const sv_<interface::VoxelQuad> &in, uint8_t d,
-		sv_<interface::VoxelQuad> &out)
-{
-	int m[3][3] = {};
-	facedir_matrix(d, m);
-	out = in;
-	for(interface::VoxelQuad &q : out){
-		for(size_t i = 0; i < 4; i++){
-			const float x = q.p[i][0], y = q.p[i][1], z = q.p[i][2];
-			for(size_t r = 0; r < 3; r++)
-				q.p[i][r] = (float)(m[r][0] * x + m[r][1] * y + m[r][2] * z);
-		}
-	}
-}
-
-// Boxes, six numbers each, turned the same way and clamped to the voxel's
-// own cube. simplified: what reaches outside the cube -- a fence's 1.5 --
-// is cut off, because the client's physics asks each cell for its own
-// boxes; a fence stays as tall as the cube it was.
-static void turn_boxes(const sv_<float> &in, uint8_t d, sv_<float> &out)
-{
-	int m[3][3] = {};
-	facedir_matrix(d, m);
-	out.clear();
-	for(size_t b = 0; b + 6 <= in.size(); b += 6){
-		float t[2][3];
-		for(size_t c = 0; c < 2; c++){
-			for(size_t r = 0; r < 3; r++){
-				float v = 0;
-				for(size_t k = 0; k < 3; k++)
-					v += m[r][k] * in[b + c * 3 + k];
-				t[c][r] = std::min(0.5f, std::max(-0.5f, v));
-			}
-		}
-		for(size_t c = 0; c < 2; c++)
-			for(size_t r = 0; r < 3; r++)
-				out.push_back(c == 0 ? std::min(t[0][r], t[1][r]) :
-						std::max(t[0][r], t[1][r]));
-	}
-}
-
-// One point turned a quarter at a time in the plane of two of its axes, and
-// the same by an arbitrary angle. Irrlicht's rotateXZBy and friends, which is
-// all Luanti's own node shapes turn by.
-static void turn_quarters(float v[3], int ia, int ib, int quarters)
-{
-	static const float SIN[4] = {0, 1, 0, -1};
-	static const float COS[4] = {1, 0, -1, 0};
-	const int i = ((quarters % 4) + 4) % 4;
-	const float a = v[ia], b = v[ib];
-	v[ia] = COS[i] * a - SIN[i] * b;
-	v[ib] = SIN[i] * a + COS[i] * b;
-}
-
-static void turn_degrees(float v[3], int ia, int ib, float deg)
-{
-	// Not M_PI: the module compile has Urho3D's own M_PI in scope
-	const float r = deg * 3.14159265358979323846f / 180.0f;
-	const float s = std::sin(r), c = std::cos(r);
-	const float a = v[ia], b = v[ib];
-	v[ia] = c * a - s * b;
-	v[ib] = s * a + c * b;
-}
-
-// How far the single quad of a sign or a torch is turned for each wall
-// direction, in quarters. It starts against +X; Luanti's drawSignlikeNode
-// and drawTorchlikeNode.
-static int wall_quad_turn(size_t wall)
-{
-	switch(wall){
-	case 2: return 0;
-	case 3: return 2;
-	case 4: return 1;
-	case 5: return -1;
-	default: return 0;
-	}
-}
-
-// A rail's tile and turn per mask of its four horizontal connections, which
-// is Luanti's own rail_kinds table from content_mapblock.cpp: a rail with
-// nothing or one thing beside it is straight, two opposite ones straight, two
-// beside each other a curve, three a junction and four a crossing. The tiles
-// are the node's first four in that order, and what turns is the quad rather
-// than the texture, which is what Luanti turns too.
-//
-// The mask's bits are Luanti's own for this: +Z is 1, -Z is 2, -X is 4 and
-// +X is 8. Taken from extensions/luanti_client/shapes.lua.
-struct RailKind { uint8_t tile; int degrees; };
-static const RailKind RAIL_KINDS[16] = {
-	{0, 0}, {0, 0}, {0, 0}, {0, 0},
-	{0, 90}, {1, 180}, {1, 270}, {2, 180},
-	{0, 90}, {1, 90}, {1, 0}, {2, 0},
-	{0, 90}, {2, 90}, {2, 270}, {3, 0},
-};
-
-// And the turn of a rail that climbs towards one of the four, in the order
-// the masks 16...19 are in: +Z, -Z, -X, +X. Luanti's rail_slope_angle.
-static const int RAIL_SLOPE_TURNS[4] = {0, 180, 90, -90};
-
 // One family for every fence, because a fence reaches any other fence
 // whatever kind it is -- which is Luanti's rule for them. Rails will want one
 // per raillike group when they arrive; see connect_group in
 // interface/voxel.h, which has thirty-two.
 static const uint8_t FENCE_CONNECT_GROUP = 1;
-
-// A wallmounted direction is a facedir too; Luanti's own
-// wallmounted_to_facedir[]. 6 and 7 are the two spare states, which are
-// the ceiling and the floor turned a quarter.
-static const uint8_t WALLMOUNTED_FACEDIR[8] = {20, 0, 17, 15, 8, 6, 21, 1};
 
 // How many variants a kind of facing needs, and which one a param2 picks.
 // The colour* kinds put a palette index in the high bits and the
@@ -3426,10 +3221,272 @@ struct Module: public interface::Module, public luanti::Interface
 		return out;
 	}
 
+	// The one runnable check the mapblock reader leaves behind: a block put
+	// together here in each of the two shapes the format has, and read back.
+	// It proves the reader against the spec it was written from; that it
+	// agrees with Luanti was checked by importing real worlds at versions
+	// 25, 28 and 29 and comparing what arrived with an independent decode of
+	// the same database. See doc/plan/luanti_module_plan.md, M7.
+	static void check_mapblock()
+	{
+		const size_t N = luanti_mapblock::NODECOUNT;
+		// What the check puts in and expects back
+		sv_<uint16_t> id(N, 0);
+		sv_<uint8_t> p1(N, 0), p2(N, 0);
+		for(size_t i = 0; i < N; i++){
+			id[i] = (uint16_t)(i % 300);
+			p1[i] = (uint8_t)(i % 251);
+			p2[i] = (uint8_t)(i % 253);
+		}
+		auto u8s = [](ss_ &os, uint32_t v){ os += (char)(v & 0xff); };
+		auto u16s = [&](ss_ &os, uint32_t v){
+			u8s(os, v >> 8); u8s(os, v);
+		};
+		auto u32s = [&](ss_ &os, uint32_t v){
+			u16s(os, v >> 16); u16s(os, v);
+		};
+		auto string16 = [&](ss_ &os, const ss_ &v){
+			u16s(os, (uint32_t)v.size());
+			os += v;
+		};
+		// Two names, one of them at an id that needs two bytes
+		auto nimap = [&](ss_ &os){
+			u8s(os, 0);
+			u16s(os, 2);
+			u16s(os, 7);
+			string16(os, "check:stone");
+			u16s(os, 299);
+			string16(os, "check:sand");
+		};
+		auto nodes = [&](ss_ &os){
+			for(size_t i = 0; i < N; i++)
+				u16s(os, id[i]);
+			for(size_t i = 0; i < N; i++)
+				u8s(os, p1[i]);
+			for(size_t i = 0; i < N; i++)
+				u8s(os, p2[i]);
+		};
+		// One node with something hanging off it: a field and a two-slot
+		// inventory with one thing in it
+		auto node_metadata = [&](){
+			ss_ os;
+			u8s(os, 2);                 // version
+			u16s(os, 1);                // one node has any
+			u16s(os, 258);              // x=2, y=0, z=1
+			u32s(os, 1);                // one field
+			string16(os, "infotext");
+			u16s(os, 0);                // a field's length is four bytes
+			u16s(os, 11);
+			os += "a sign says";
+			u8s(os, 0);                 // not private
+			os += "List main 2\n";
+			os += "Width 0\n";
+			os += "Item check:stone 5\n";
+			os += "Empty\n";
+			os += "EndInventoryList\n";
+			os += "EndInventory\n";
+			return os;
+		};
+		// One entity, at one node and two up and three across, and one
+		// timer on the node the metadata is on
+		auto static_objects = [&](ss_ &os){
+			u8s(os, 0);                 // version
+			u16s(os, 1);                // one object
+			u8s(os, 7);                 // a LuaEntity, which is a mod's own
+			u32s(os, 1 * 10 * 1000);    // the position, in BS thousandths
+			u32s(os, 2 * 10 * 1000);
+			u32s(os, 3 * 10 * 1000);
+			string16(os, "an object");
+		};
+		auto node_timers = [&](ss_ &os){
+			u8s(os, 2 + 4 + 4);         // how long one of them is
+			u16s(os, 1);                // one node has one
+			u16s(os, 258);              // the same node the metadata is on
+			u32s(os, 5000);             // five seconds long
+			u32s(os, 2500);             // and half way through
+		};
+		auto check_block = [&](const luanti_mapblock::Block &b,
+				const char *what){
+			for(size_t i = 0; i < N; i++){
+				if(b.param0[i] != id[i] || b.param1[i] != p1[i] ||
+						b.param2[i] != p2[i])
+					throw Exception(ss_("check_mapblock: ")+what+" came back "
+							"wrong at "+itos(i));
+			}
+			if(b.names.size() != 2 || b.names.at(7) != "check:stone" ||
+					b.names.at(299) != "check:sand")
+				throw Exception(ss_("check_mapblock: ")+what+" lost its "
+						"name-id mapping");
+			if(b.meta.size() != 1 || b.meta.count(258) == 0)
+				throw Exception(ss_("check_mapblock: ")+what+" came back "
+						"with "+itos(b.meta.size())+" nodes of metadata");
+			const luanti_mapblock::NodeMeta &m = b.meta.at(258);
+			if(m.fields.size() != 1 ||
+					m.fields.at("infotext") != "a sign says")
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"field hanging off a node");
+			if(m.lists.size() != 1 || m.lists.at("main").size() != 2 ||
+					m.lists.at("main")[0] != "check:stone 5" ||
+					!m.lists.at("main")[1].empty())
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"inventory hanging off a node");
+			if(b.objects.size() != 1 || b.objects[0].type != 7 ||
+					b.objects[0].data != "an object" ||
+					b.objects[0].x != 1.0f || b.objects[0].y != 2.0f ||
+					b.objects[0].z != 3.0f)
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"entity it was holding");
+			if(b.timers.size() != 1 || b.timers.count(258) == 0 ||
+					b.timers.at(258).timeout != 5.0f ||
+					b.timers.at(258).elapsed != 2.5f)
+				throw Exception(ss_("check_mapblock: ")+what+" lost the "
+						"timer on a node");
+		};
+
+		// Version 29: one zstd frame, and what is wanted is in front of it
+		{
+			ss_ inside;
+			u8s(inside, 0x00);          // flags
+			u16s(inside, 0xffff);       // lighting_complete
+			u32s(inside, 12345);        // timestamp
+			nimap(inside);
+			u8s(inside, 2);             // content_width
+			u8s(inside, 2);             // params_width
+			nodes(inside);
+			inside += node_metadata();
+			static_objects(inside);
+			node_timers(inside);
+			ss_ data;
+			u8s(data, 29);
+			std::ostringstream os(std::ios::binary);
+			interface::compress_zstd(inside, os);
+			data += os.str();
+			luanti_mapblock::Block block;
+			luanti_mapblock::deserialize_block(data, block);
+			check_block(block, "the version 29 block");
+		}
+
+		// Version 25: two zlib streams, and the mapping at the back behind
+		// the static objects
+		{
+			ss_ data;
+			u8s(data, 25);
+			u8s(data, 0x00);            // flags
+			u8s(data, 2);               // content_width
+			u8s(data, 2);               // params_width
+			ss_ raw_nodes;
+			nodes(raw_nodes);
+			{
+				std::ostringstream os(std::ios::binary);
+				interface::compress_zlib(raw_nodes, os);
+				data += os.str();
+			}
+			{
+				std::ostringstream os(std::ios::binary);
+				interface::compress_zlib(node_metadata(), os);
+				data += os.str();
+			}
+			static_objects(data);
+			u32s(data, 12345);          // timestamp
+			nimap(data);
+			node_timers(data);
+			luanti_mapblock::Block block;
+			luanti_mapblock::deserialize_block(data, block);
+			check_block(block, "the version 25 block");
+		}
+
+		// The key a row has, which is three twelve-bit coordinates in one
+		// integer and has to survive the negative ones
+		const int coords[6] = {0, 1, -1, 2047, -2048, -3};
+		for(int i = 0; i < 6; i++){
+			for(int j = 0; j < 6; j++){
+				int64_t key = (int64_t)coords[j] * 0x1000000 +
+						(int64_t)coords[i] * 0x1000 + (int64_t)coords[i];
+				pv::Vector3DInt16 p =
+						luanti_mapblock::block_pos_of_key(key);
+				if(p.getX() != coords[i] || p.getY() != coords[i] ||
+						p.getZ() != coords[j])
+					throw Exception("check_mapblock: the block key of ("+
+							itos(coords[i])+", "+itos(coords[i])+", "+
+							itos(coords[j])+") came back as ("+
+							itos(p.getX())+", "+itos(p.getY())+", "+
+							itos(p.getZ())+")");
+			}
+		}
+		log_v(MODULE, "check_mapblock: both shapes of a block read back");
+	}
+
+	// What the param2, LBM and palette helpers above and in import.h
+	// make of a few known inputs. Runs once, from run_game(), beside
+	// luanti_shapes::check_shapes().
+	static void check_params()
+	{
+		assert(facing_facedir("wallmounted", 1) == 0); // Floor: unturned
+		assert(facing_variant_count("facedir") == 24);
+		assert(facing_variant_count("4dir") == 4);
+		assert(facing_variant_count("") == 0);
+		assert(facing_variant_of_param("facedir", 31) == 7); // 31 % 24
+		assert(facing_variant_of_param("4dir", 0xfe) == 2);
+
+		// The LBM list a Luanti world carries, which decides what this
+		// module leaves alone in an imported world
+		assert(lbm_names_of("a:one~0;b:two~1234;") == "a:one;b:two;");
+		assert(lbm_names_of("a:one~0") == "a:one;");
+		assert(lbm_names_of("") == "");
+		// A name with no time is not a record and is dropped rather than
+		// taken as a name, and a record with no name is dropped too
+		assert(lbm_names_of("nope;a:one~0;") == "a:one;");
+		assert(lbm_names_of("~5;") == "");
+
+		// A palette is stretched over the 256 param2 values, so a colour
+		// covers as many of them as the directions under it: devtest's
+		// facedir palette is eight colours and its facedir is five bits.
+		assert(palette_slot_of_param(8, 0) == 0);
+		assert(palette_slot_of_param(8, 31) == 0);
+		assert(palette_slot_of_param(8, 32) == 1);
+		assert(palette_slot_of_param(8, 255) == 7);
+		assert(palette_slot_of_param(64, 4) == 1);   // color4dir
+		assert(palette_slot_of_param(32, 8) == 1);   // colorwallmounted
+		assert(palette_slot_of_param(256, 137) == 137); // color
+		assert(palette_slot_of_param(1, 255) == 0);
+		// And a variant index stays inside the byte that indexes them: a
+		// colour times a direction is never more than the param itself
+		assert(palette_slot_of_param(8, 255) * 24 +
+				facing_variant_of_param("facedir", 255) < 256);
+		assert(palette_slot_of_param(64, 255) * 4 +
+				facing_variant_of_param("4dir", 255) < 256);
+		assert(palette_slot_of_param(32, 255) * 8 +
+				facing_variant_of_param("wallmounted", 255) < 256);
+
+		// A palette named as a "[combine" expression is the picture it
+		// places, cut to the size it names
+		{
+			int w = 0, h = 0;
+			sv_<CombinePlace> places;
+			assert(parse_combine(
+					"[combine:16x2:0,0=mcl_core_palette_foliage.png",
+					w, h, places));
+			assert(w == 16 && h == 2);
+			assert(places.size() == 1);
+			assert(places[0].x == 0 && places[0].y == 0);
+			assert(places[0].name == "mcl_core_palette_foliage.png");
+			places.clear();
+			assert(parse_combine("[combine:4x4:0,0=a.png:1,2=b.png",
+					w, h, places));
+			assert(places.size() == 2);
+			assert(places[1].x == 1 && places[1].y == 2 &&
+					places[1].name == "b.png");
+			places.clear();
+			assert(!parse_combine("mcl_core_palette_grass.png", w, h, places));
+			assert(!parse_combine("[multiply:#ff0000", w, h, places));
+			assert(!parse_combine("[combine:16x2", w, h, places));
+			assert(!parse_combine("[combine:16x2:0,0=", w, h, places));
+			assert(!parse_combine("[combine:0x0:0,0=a.png", w, h, places));
+		}
+	}
+
 	// core.__voxel_defs() -> add_voxel(), in id order, with a solid colour
 	// each until M3 brings the real tiles
-	#include "shapes.h"
-
 	#include "registry.h"
 
 	#include "media.h"
@@ -3719,6 +3776,7 @@ struct Module: public interface::Module, public luanti::Interface
 				"core.__check_craft_index()", "check_players");
 
 		check_shapes();
+		check_params();
 		check_mapblock();
 		check_media_names();
 
