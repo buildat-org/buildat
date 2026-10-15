@@ -28,10 +28,16 @@ local M = {}
 
 -- Luanti's own: a node is pointable, not pointable, or blocking -- which
 -- stops the ray without being pointed at. A mod's pointabilities table says
--- so per node name or per group, over what the definition says.
-local function node_pointable(name, def, pointabilities)
+-- so per node name or per group, over what the definition says; a liquid
+-- on a ray that points liquids is pointable whatever its definition says
+-- (isPointableNode: VoxeLibre's water is pointable = false, and its empty
+-- bucket's ray points it, [VANILLA_ON_PLACE]).
+local function node_pointable(name, def, pointabilities, liquid_pointed)
 	local p = def and def.pointable
 	if p == nil then
+		p = true
+	end
+	if liquid_pointed then
 		p = true
 	end
 	local nodes = pointabilities and pointabilities.nodes
@@ -184,7 +190,8 @@ function Raycast:next()
 			local def = core.registered_nodes[name]
 			local liquid = def and def.liquidtype and
 					def.liquidtype ~= "none" or false
-			local pointable = node_pointable(name, def, self.pointabilities)
+			local pointable = node_pointable(name, def, self.pointabilities,
+					liquid and self.liquids)
 			local hit = nil
 			if pointable == "blocking" then
 				self.done = true

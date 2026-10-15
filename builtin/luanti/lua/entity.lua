@@ -1709,10 +1709,11 @@ function core.__player_receive_fields(playername, formname, fields)
 	end
 end
 
--- What the other mouse button comes to: core.item_place(), which is the
--- vendored builtin's own -- so the pointed node's on_rightclick wins if it
--- has one and is not overridden, and the player's wielded item is placed
--- otherwise. Returns whether anything happened.
+-- What the other mouse button comes to: the wielded item's on_place,
+-- core.item_place() (the vendored builtin's own) by default -- so the
+-- pointed node's on_rightclick wins if it has one and is not overridden,
+-- and the player's wielded item is placed otherwise. Returns whether
+-- anything happened.
 --
 -- simplified: no sneaking, so a node with an on_rightclick cannot be built
 -- against. Luanti's client sends whether the player was holding sneak, and
@@ -1838,8 +1839,13 @@ function core.__use_node_inner(playername, under, above, sneak)
 			return false
 		end
 	end
+	-- The wielded item's own on_place, as Luanti's server calls it
+	-- (ScriptApiItem::item_OnPlace): a tool's or a bucket's does what
+	-- core.item_place(), every item's default, does not ([VANILLA_ON_PLACE])
+	local idef = core.registered_items[wielded:get_name()]
+	local on_place = idef and idef.on_place or core.item_place
 	local before = wielded:to_string()
-	local left = core.item_place(wielded, ref, pointed)
+	local left = on_place(wielded, ref, pointed)
 	if left ~= nil then
 		ref:set_wielded_item(left)
 		return left:to_string() ~= before
