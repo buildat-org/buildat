@@ -2113,7 +2113,7 @@ function pt.light(entry)
 		return
 	end
 	entry.lit = c
-	entry.effect.numColorFrames = 0
+	entry.effect:SetNumColorFrames(0)
 	entry.effect:AddColorTime(magic.Color(c.r, c.g, c.b, 1), 0)
 end
 

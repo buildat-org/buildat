@@ -3118,6 +3118,12 @@ function M.define(dst, util)
 		instance = {
 			AddColorTime = util.self_function("AddColorTime", {},
 					{"ParticleEffect", "Color", "number"}),
+			-- Zero clears the colour frames, for AddColorTime() to set a
+			-- new colour: what the live particles are drawn in, as Urho3D
+			-- reads the frames on every update. A method, as tolua's
+			-- numColorFrames has no setter and a write to it is lost.
+			SetNumColorFrames = util.self_function("SetNumColorFrames", {},
+					{"ParticleEffect", "number"}),
 			-- One frame of a texture animation: the part of the image, and
 			-- how many seconds into a particle's life it is shown from
 			AddTextureTime = util.self_function("AddTextureTime", {},
@@ -3146,10 +3152,6 @@ function M.define(dst, util)
 		properties = {
 			material = util.simple_property(dst.Material),
 			numParticles = util.simple_property("number"),
-			-- Zero clears the colour frames, for AddColorTime() to set a
-			-- new colour: what the live particles are drawn in, as Urho3D
-			-- reads the frames on every update
-			numColorFrames = util.simple_property("number"),
 			emitterType = util.simple_property("number"),
 			emitterSize = {get = util.simple_property(dst.Vector3).get},
 			minDirection = {get = util.simple_property(dst.Vector3).get},

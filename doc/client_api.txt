@@ -2392,7 +2392,7 @@ magic.PLANE_RIGHT:
 magic.PLANE_UP: 
 magic.POINT_LIST: 
 magic.PS: 
-magic.ParticleEffect: AddColorTime, AddTextureTime, SetConstantForce, SetEmitterSize, SetMaxDirection, SetMaxParticleSize, SetMinDirection, SetMinParticleSize, activeTime, constantForce, dampingForce, emitterSize, emitterType, inactiveTime, material, maxDirection, maxEmissionRate, maxParticleSize, maxRotation, maxRotationSpeed, maxTimeToLive, maxVelocity, minDirection, minEmissionRate, minParticleSize, minRotation, minRotationSpeed, minTimeToLive, minVelocity, new, numColorFrames, numParticles, relative, scaled, sizeAdd, sizeMul, sorted, updateInvisible
+magic.ParticleEffect: AddColorTime, AddTextureTime, SetConstantForce, SetEmitterSize, SetMaxDirection, SetMaxParticleSize, SetMinDirection, SetMinParticleSize, SetNumColorFrames, activeTime, constantForce, dampingForce, emitterSize, emitterType, inactiveTime, material, maxDirection, maxEmissionRate, maxParticleSize, maxRotation, maxRotationSpeed, maxTimeToLive, maxVelocity, minDirection, minEmissionRate, minParticleSize, minRotation, minRotationSpeed, minTimeToLive, minVelocity, new, numParticles, relative, scaled, sizeAdd, sizeMul, sorted, updateInvisible
 magic.ParticleEmitter: Reset, effect, emitting, numParticles
 magic.PhysicsWorld: 
 magic.Plane: 
