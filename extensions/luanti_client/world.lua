@@ -2029,7 +2029,8 @@ function M.new(magic, buildat, log, options)
 	-- over the ambient the shader multiplies it by.
 	-- simplified: the ambient is the zone's, not the sky a face sees, so a
 	-- model's shaded side reads lighter than a shaded voxel side does.
-	local function object_color(x, y, z, lit)
+	-- glow: a particle's, which raises its light to that level, Luanti's rule.
+	local function object_color(x, y, z, lit, glow)
 		local p1 = param1_at(math.floor(x + 0.5), math.floor(y + 0.5),
 				math.floor(z + 0.5))
 		if not p1 then
@@ -2038,7 +2039,7 @@ function M.new(magic, buildat, log, options)
 		local day = p1 % 16
 		local night = math.floor(p1 / 16)
 		local sky = (day > night and day - night or 0) / 15
-		local lamp = night / 15
+		local lamp = math.max(night, glow or 0) / 15
 		-- A floor of a few percent, so that something in the pitch dark is a
 		-- silhouette rather than nothing at all
 		if pbr and lit then
@@ -2277,8 +2278,18 @@ function M.new(magic, buildat, log, options)
 		end
 	end
 
+	-- A particle's light ([VANILLA_WEATHER] 5), as vanilla's: its
+	-- emitter's, as an object's; full glow is a light, white, and on pbr the
+	-- lightning's flash radiance, so that it shows over the exposure.
+	local function particle_light(x, y, z, glow)
+		if (glow or 0) >= sky_model.GLOW_FULL then
+			local f = pbr and sky_model.flash_radiance() or 1
+			return magic.Color(f, f, f, 1)
+		end
+		return object_color(x, y, z, false, glow)
+	end
 	world_particles(self, magic, log, scene, camera_node, game_texture,
-			particle_technique, particles)
+			particle_technique, particles, particle_light)
 
 	function self:remove_object(id)
 		local entry = object_nodes[id]
@@ -2958,6 +2969,19 @@ function M.new(magic, buildat, log, options)
 			end
 			sky_top = magic.Color(z.r, z.g, z.b)
 			sky_horizon = magic.Color(h.r, h.g, h.b)
+		end
+		-- A white sky is the lightning's layer (VoxeLibre's, for 0.1 s):
+		-- the game's colour as it is, not eased, and on pbr at the flash's
+		-- radiance (res/sky_model.lua's sky_flash)
+		local flash = sky_model.sky_flash(sky and sky[band.."_sky"] and
+				sky_color(band.."_sky", 1))
+		if flash > 0 then
+			local f = pbr and sky_model.flash_radiance() or 1
+			local function lit(c)
+				return magic.Color(c.r + (f - c.r) * flash,
+						c.g + (f - c.g) * flash, c.b + (f - c.b) * flash)
+			end
+			sky_top, sky_horizon = lit(sky_top), lit(sky_horizon)
 		end
 		zone.fogColor = sky_horizon
 		if ambient then

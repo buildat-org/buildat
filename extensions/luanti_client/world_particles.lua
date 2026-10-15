@@ -7,7 +7,7 @@
 -- what it reads of M.new's ([SPLITS]: moved out as it was).
 
 return function(self, magic, log, scene, camera_node, game_texture,
-		particle_technique, particles)
+		particle_technique, particles, particle_light)
 	-- The particle emitters in the scene: the spawners by the id the server
 	-- deletes them by, and the single particles, each of which is an emitter
 	-- of one that fires once.
@@ -36,7 +36,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 	--
 	-- simplified: the tween is dropped -- the starting range is what the
 	-- whole spawner runs at -- and so are the bias inside a range, the
-	-- collision flags, the glow, the drag, the jitter, the bounce and the
+	-- collision flags, the drag, the jitter, the bounce and the
 	-- attractors. What that costs is a spawner that grows or shrinks over
 	-- its life, and particles that stop at the ground; the upgrade path is
 	-- either a manager of this client's own or more of Urho3D's own fields.
@@ -113,13 +113,19 @@ return function(self, magic, log, scene, camera_node, game_texture,
 	-- fields that differ between a spawner and a single particle: assigning
 	-- the same effect twice is a no-op in Urho3D, so everything has to be on
 	-- it before it goes on.
+	-- A particle at full glow is a light, a lightning bolt: unfogged
+	local GLOW_FULL =
+			buildat.run_extension_file("res/sky_model.lua").GLOW_FULL
+	local glow_technique = magic.cache:GetResource("Technique",
+			"luanti_client/res/ParticleGlow.xml")
 	local function particle_effect(texture_name, amount, ttl_min,
 			ttl_max, size_min, size_max, vel_min, vel_max, acc, active_time,
-			animation)
+			animation, glow)
 		local effect = magic.ParticleEffect.new()
 		local material = magic.Material.new()
 		local tex = game_texture(texture_name, magic.FILTER_NEAREST_ANISOTROPIC)
-		material:SetTechnique(0, particle_technique)
+		material:SetTechnique(0, (glow or 0) >= GLOW_FULL and glow_technique or
+				particle_technique)
 		material:SetTexture(0, tex)
 		effect.material = material
 		effect.numParticles = amount
@@ -165,6 +171,22 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		effect.activeTime = active_time
 		effect.inactiveTime = 0
 		return effect, material
+	end
+
+	-- An emitter's light, on its own material's colour (not clipped at one,
+	-- as pbr's sunlight is not). simplified: one light for the emitter's
+	-- whole box, read at its middle, and set again when it moves by a 255th.
+	local function light(entry)
+		local p = entry.node.position
+		local c = particle_light(p.x, p.y, p.z, entry.glow)
+		local o = entry.lit
+		if c == nil or o and math.abs(c.r - o.r) < 1 / 255 and
+				math.abs(c.g - o.g) < 1 / 255 and
+				math.abs(c.b - o.b) < 1 / 255 then
+			return
+		end
+		entry.lit = c
+		entry.material:SetShaderParameter("MatDiffColor", c)
 	end
 
 	-- set_particle_spawner(id, p, resolve): p nil takes the spawner away,
@@ -258,7 +280,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 				math.max(0.01, exptime.max),
 				math.max(0.001, size.min), math.max(0.001, size.max),
 				p.vel.start.min, p.vel.start.max,
-				particles.middle(p.acc.start), p.time, p.animation)
+				particles.middle(p.acc.start), p.time, p.animation, p.glow)
 		-- What the emitter box is: the position range, which the node sits
 		-- in the middle of
 		effect.emitterType = 1 -- EMITTER_BOX
@@ -300,7 +322,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		-- size instead of falling, which is what made rain invisible.
 		particle_nodes[id] = {node = node, life = life, attached = attached,
 				offset = pos, emitter = emitter, signature = signature,
-				effect = effect, material = material,
+				effect = effect, material = material, glow = p.glow,
 				ttl_max = math.max(0.01, exptime.max)}
 	end
 
@@ -319,7 +341,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		node.position = magic.Vector3(p.pos[1], p.pos[2], p.pos[3])
 		local effect, material = particle_effect(texture_name, 1,
 				ttl, ttl, math.max(0.001, p.size), math.max(0.001, p.size),
-				p.vel, p.vel, p.acc, 0.05, p.animation)
+				p.vel, p.vel, p.acc, 0.05, p.animation, p.glow)
 		effect.emitterType = 0 -- EMITTER_SPHERE, of no size
 		effect:SetEmitterSize(magic.Vector3(0, 0, 0))
 		effect.minEmissionRate = 100
@@ -330,9 +352,10 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		emitter.castShadows = false
 		-- The effect and the material live as long as the emitter does; see
 		-- set_particle_spawner()
-		single_particles[#single_particles + 1] =
-				{node = node, life = ttl + 0.5, effect = effect,
-				material = material}
+		local entry = {node = node, life = ttl + 0.5, effect = effect,
+				material = material, glow = p.glow}
+		light(entry)
+		single_particles[#single_particles + 1] = entry
 	end
 
 	-- Ages the emitters and takes away the ones that are done with. A
@@ -373,6 +396,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 							z + entry.offset[3])
 				end
 			end
+			light(entry)
 			if entry.life then
 				entry.life = entry.life - dtime
 				if entry.life <= 0 then
