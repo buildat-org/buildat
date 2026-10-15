@@ -129,13 +129,14 @@ Luanti with buildat bolted to the side.
                         loaded in. It includes the rest of the C++:
                         lua_bindings.h (most of the C functions the Lua
                         calls), requests.h (the client's requests, the node
-                        searches), media.h (the game's media served),
-                        registry.h (the node definitions and the media
-                        read for node_registry.h), node_registry.h (a node
-                        definition as a struct, its voxel definition,
-                        surface guess and mapgen properties) and shapes.h
-                        (the node shapes as quads) -- those two plain
-                        headers other modules include too,
+                        searches), registry.h (the node definitions and
+                        the media read for node_registry.h),
+                        node_registry.h (a node definition as a struct,
+                        its voxel definition, surface guess and mapgen
+                        properties), shapes.h (the node shapes as quads)
+                        and media.h (media names, the directories a game's
+                        and a texture pack's files are found in) -- those
+                        three plain headers other modules include too,
                         mapgen_params.h (what a vendored mapgen is told),
                         import.h (the world importer), mapblock.h.
     lua/bootstrap.lua   What the vendored builtin expects to find already

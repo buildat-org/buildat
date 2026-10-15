@@ -31,6 +31,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "luanti/node_registry.h"
+#include "luanti/media.h"
 #include "accounts/api.h"
 #include "chat/api.h"
 #include "client_file/api.h"
@@ -442,10 +443,51 @@ struct Module: public interface::Module
 			i->add_file_path("luanti/sky_dome.lua", own+"sky_dome.lua");
 			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
 		});
+		serve_media();
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
 		if(name && name[0])
 			start_world(name, true);
 	}
+
+	// The textures the way a Luanti game's are found ([SKELDAT_LUANTI_PARTS]
+	// 7): a texture pack, a directory under
+	// <user>/shared/demo_skeldat/texture_packs named by
+	// BUILDAT_SKELDAT_TEXTURE_PACK, over main/client_data, LabPBR sidecars
+	// and all. The pack's files go out as texture_pack/<name> and the
+	// registry's tiles name those: client_data serves main/<name> itself,
+	// and after this whatever the order.
+	// simplified: the pack is picked by the environment and covers the
+	// nodes, not the items' images; a pick in the admin's menu is the upgrade
+	std::set<ss_> m_pack_files;
+	void serve_media()
+	{
+		const char *pack = getenv("BUILDAT_SKELDAT_TEXTURE_PACK");
+		sv_<std::pair<ss_, ss_>> name_paths;
+		for(const auto &pair : luanti_media::collect(
+				luanti_media::texture_pack_dirs(
+				m_server->get_config().get<ss_>("user_path")+
+				"/shared/demo_skeldat/texture_packs", pack ? pack : ""))){
+			m_pack_files.insert(pair.first);
+			name_paths.push_back(std::make_pair("texture_pack/"+pair.first,
+					pair.second));
+		}
+		if(name_paths.empty())
+			return;
+		client_file::access(m_server, [&](client_file::Interface *i){
+			i->add_file_paths(name_paths);
+		});
+	}
+	struct PackMedia: luanti_registry::Media
+	{
+		const std::set<ss_> &pack;
+		PackMedia(const std::set<ss_> &pack): pack(pack){}
+		ss_ texture(const ss_ &tile)
+		{
+			if(tile.compare(0, 5, "main/") == 0 && pack.count(tile.substr(5)))
+				return "texture_pack/"+tile.substr(5);
+			return tile;
+		}
+	};
 
 	// A save a world may be: a valid name not beginning with _, which are
 	// the server's own (_server, builtin/accounts')
@@ -643,7 +685,7 @@ struct Module: public interface::Module
 	void build_registry(interface::VoxelRegistry *reg)
 	{
 		luanti_registry::Builder builder;
-		luanti_registry::Media media;
+		PackMedia media(m_pack_files);
 		for(uint32_t id = ID_UNKNOWN; id < ID_NODE0 + m_game.nodes.size();
 				id++){
 			luanti_registry::NodeDef d = luanti_def(id);
