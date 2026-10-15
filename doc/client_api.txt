@@ -1174,7 +1174,8 @@ blip.wav(sound) -> the bytes of a 16-bit mono 44100 Hz WAV file
 blip.params(sound) -> the parameter table; blip.pack(p) -> "blip1:..."
 blip.preset(name, seed) -> p, name one of sfxr's generators (pickup,
   laser, explosion, powerup, hit, jump, blip) or blip's own (thud, knock,
-  crunch, grunt, squeal, snort, pluck, rattle, chime)
+  crunch, grunt, squeal, snort, pluck, rattle, chime). Seeds next to each
+  other give alike sounds: draw them at random, do not count them up
 blip.self_check() -> true, or false and the presets that moved: each
   generator's sound at seed 1 hashed against blip1's committed hashes
 blip.gen, blip.mix

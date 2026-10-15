@@ -901,46 +901,116 @@ function PRESET.snort(p, frnd, rnd)
 	p.env_sustain = secs(0.12 + frnd(0.12))
 	p.env_decay = secs(0.06 + frnd(0.06))
 end
+-- A bow or a trap: the string's twang, and with it the limb's knock or
+-- the air's whip
 function PRESET.pluck(p, frnd, rnd)
-	p.wave = G.WAVES[rnd(3) + 1]
-	p.base_freq = hz(70 + frnd(150))
-	p.pluck = 0.93 + frnd(0.06)
-	p.env_sustain = secs(0.1 + frnd(0.2))
-	p.env_decay = secs(0.15 + frnd(0.25))
-	p.lpf_freq = 0.3 + frnd(0.4)
-	p.lpf_ramp = -frnd(0.15)
+	p.wave = rnd(1) == 0 and "triangle" or "saw"
+	p.base_freq = hz(90 + frnd(220))
+	p.pluck = 0.95 + frnd(0.04)
+	p.env_sustain = secs(0.05 + frnd(0.15))
+	p.env_decay = secs(0.2 + frnd(0.3))
+	p.lpf_freq = 0.2 + frnd(0.3)
+	p.lpf_ramp = -frnd(0.1)
 	-- One period struck rings at about half the level of a held tone
 	p.volume = 0.9
+	local l = G.defaults()
+	if rnd(1) == 0 then
+		knock(l, frnd, rnd, 150, 450, 0.02)
+		l.volume = 0.6
+	else
+		l.wave = "noise"
+		l.base_freq = 0.5 + frnd(0.3)
+		l.freq_ramp = -0.2 - frnd(0.2)
+		l.hpf_freq = 0.15 + frnd(0.15)
+		l.env_sustain = secs(0.01)
+		l.env_decay = secs(0.04 + frnd(0.08))
+		l.env_punch = 0.5
+		l.volume = 0.3 + frnd(0.2)
+	end
+	l.at = 0
+	p.layers = {l}
 end
--- Bones: a knock and a few more after it, each a layer
+-- A rattle's one hit, of a kind picked for the whole sound: a knock of
+-- wood or bone, a click of noise, or a snake's tail (noise, fast tremolo)
+local function rattle_kind(frnd, rnd)
+	local kind = rnd(3)
+	if kind <= 1 then
+		local lo, span = 300 + frnd(1200), 300 + frnd(1700)
+		local len = 0.004 + frnd(0.02)
+		return function(v)
+			knock(v, frnd, rnd, lo, span, len)
+			v.hpf_freq = kind == 1 and 0.2 or 0
+		end, 3 + rnd(6), 0.25
+	elseif kind == 2 then
+		local f, lpf = 0.4 + frnd(0.4), 0.3 + frnd(0.5)
+		return function(v)
+			v.wave = "noise"
+			v.base_freq = f + frnd(0.1)
+			v.lpf_freq = lpf
+			v.hpf_freq = 0.2 + frnd(0.2)
+			v.env_sustain = 0
+			v.env_decay = secs(0.005 + frnd(0.02))
+			v.env_punch = frnd(0.5)
+		end, 3 + rnd(6), 0.25
+	end
+	local trem = sqrt((35 + frnd(15)) / 50)
+	return function(v)
+		v.wave = "noise"
+		v.base_freq = 0.6 + frnd(0.3)
+		v.hpf_freq = 0.3 + frnd(0.2)
+		v.trem_depth = 0.7 + frnd(0.3)
+		v.trem_speed = trem
+		v.env_attack = secs(0.02 + frnd(0.05))
+		v.env_sustain = secs(0.2 + frnd(0.6))
+		v.env_decay = secs(0.1 + frnd(0.2))
+	end, rnd(1), 0.6
+end
+-- Bones: a hit and a few more after it, each a layer
 function PRESET.rattle(p, frnd, rnd)
-	knock(p, frnd, rnd, 900, 2000, 0.01)
+	local hit, n, spread = rattle_kind(frnd, rnd)
+	hit(p)
 	p.volume = 0.5
 	p.layers = {}
-	for i = 1, 3 + rnd(6) do
+	for i = 1, n do
 		local l = G.defaults()
-		knock(l, frnd, rnd, 900, 2000, 0.01)
+		hit(l)
 		l.volume = 0.25 + frnd(0.25)
-		l.at = floor(frnd(250)) / 1000
+		l.at = floor(frnd(spread * 1000)) / 1000
 		p.layers[i] = l
 	end
 end
--- Two notes of a bell, the second a fifth, a fourth or an octave up
+-- Notes of a bell: two or three, each a fifth, a fourth, a third, an
+-- octave or a twelfth from the last, up or down
 function PRESET.chime(p, frnd, rnd)
-	local f = 600 + frnd(500)
-	p.wave = "sine"
+	local f = 400 + frnd(1200)
+	p.wave = rnd(3) == 0 and "triangle" or "sine"
 	p.base_freq = hz(f)
-	p.env_sustain = secs(0.02)
-	p.env_decay = secs(0.25 + frnd(0.2))
-	p.env_punch = 0.3
-	p.volume = 0.4
-	local l = {}
-	for k, v in pairs(p) do
-		l[k] = v
+	p.env_sustain = secs(0.01 + frnd(0.03))
+	p.env_decay = secs(0.2 + frnd(0.4))
+	p.env_punch = frnd(0.5)
+	if rnd(2) == 0 then
+		p.trem_depth = 0.2 + frnd(0.3)
+		p.trem_speed = sqrt((4 + frnd(6)) / 50)
 	end
-	l.base_freq = hz(f * ({1.5, 4 / 3, 2})[rnd(2) + 1])
-	l.at = floor(50 + frnd(50)) / 1000
-	p.layers = {l}
+	p.volume = 0.4
+	p.layers = {}
+	local at = 0
+	for i = 1, 1 + rnd(1) do
+		local l = {}
+		for k, v in pairs(p) do
+			l[k] = v
+		end
+		l.layers = nil
+		local r = ({1.5, 4 / 3, 5 / 4, 6 / 5, 2, 3})[rnd(5) + 1]
+		if (rnd(2) == 0 and f / r > 300) or f * r > 4000 then
+			r = 1 / r
+		end
+		f = f * r
+		l.base_freq = hz(f)
+		at = at + floor(40 + frnd(110)) / 1000
+		l.at = at
+		p.layers[i] = l
+	end
 end
 
 -- Every parameter into its range, as G.params does
@@ -1056,9 +1126,9 @@ G.HASHES = {
 	grunt = "9eb6d1a4ba4209d1",
 	squeal = "8f80733bff062ec0",
 	snort = "6d62325e002f06ad",
-	pluck = "ce6bf7368270ebc0",
-	rattle = "90c3fee99077fa2c",
-	chime = "8bdfbfdf655a0c49",
+	pluck = "068748b0c0c77e8b",
+	rattle = "de28cfbaeaa1ec61",
+	chime = "8c362d635a8a6956",
 }
 function G.self_check(synth)
 	local bad = {}

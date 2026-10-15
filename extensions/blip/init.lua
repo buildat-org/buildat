@@ -348,6 +348,12 @@ local function open_designer()
 	-- d.p is the sound, its first layer; d.layer the one being edited
 	local d = {p = gen.preset("pickup", 1), seed = 1, format = "compact",
 		use = "play", layer = 1}
+	-- Seeds drawn, not counted: a preset at seeds next to each other
+	-- makes its first choices alike, so clicking a button again repeats
+	local seeds = gen.rng(api.get_time_us() % 2147483646)
+	local function next_seed()
+		d.seed = math.floor(seeds.frnd(16777216))
+	end
 	local function cur()
 		return d.layer == 1 and d.p or d.p.layers[d.layer - 1]
 	end
@@ -530,18 +536,18 @@ local function open_designer()
 	end
 	for i, name in ipairs(gen.PRESETS) do
 		button(gen_row(i), name, function()
-			d.seed = d.seed + 1
+			next_seed()
 			set_layer(gen.preset(name, d.seed), name)
 		end)
 	end
 	button(gen_row(#gen.PRESETS + 1), "mutate", function()
-		d.seed = d.seed + 1
+		next_seed()
 		local q = gen.mutate(cur(), d.seed)
 		q.layers = nil
 		set_layer(q, "mutated")
 	end)
 	button(gen_row(#gen.PRESETS + 2), "random", function()
-		d.seed = d.seed + 1
+		next_seed()
 		set_layer(gen.random(cur().wave, d.seed), "random")
 	end)
 
