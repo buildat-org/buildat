@@ -350,14 +350,15 @@ local function open_designer()
 	end
 	ui_utils.close_glyph(root, win, close)
 	-- The menu's keys and clicks; Escape closes it unless a dropdown's
-	-- popup is open, which takes it
+	-- popup is open, which takes it. The wheel is the code's and the
+	-- sliders' views', which scroll by it, not the selection's
 	local nav = ui_utils.bind_button_menu(root, nil, function(key)
 		if key == KEY_ESCAPE and magic.input:GetKeyPress(key) and
 				not ui_utils.dropdown_open() then
 			close()
 			return true
 		end
-	end)
+	end, {wheel = false})
 
 	local function text(parent, s, width)
 		local t = parent:CreateChild("Text")
