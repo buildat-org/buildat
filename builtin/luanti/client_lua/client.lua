@@ -648,6 +648,10 @@ do
 			magic.Vector2(AUTO_EXPOSURE.lum_range[1],
 			AUTO_EXPOSURE.lum_range[2]))
 	rp:SetShaderParameter("AutoExposureMiddleGrey", AUTO_EXPOSURE.middle_grey)
+	-- A game's set_lighting() saturation, last; off until asked for
+	rp:Append(magic.cache:GetResource("XMLFile",
+			"luanti_client/res/Saturation.xml"))
+	sky_lights.path = rp
 	viewport.renderPath = rp
 	-- A reference picture is taken at a settled exposure ([PT_SETTLE]):
 	-- the reference fixture asks for this before the shot, and the
@@ -3344,11 +3348,29 @@ keys.redraw_hud()
 -- The game's set_lighting(): shadows.intensity is how dark a shadow is,
 -- 1 being black, and Urho's shadowIntensity is the other way round -- how
 -- much light a shadow keeps. Luanti's own default is 0 and VoxeLibre asks
--- for 0.33. The saturation is carried and not drawn: it wants a colour
--- grade on the render path, which is [PBR_LEVEL]'s tonemap to settle.
+-- for 0.33. The saturation is a pass of its own, last on the path
+-- (res/Saturation.xml), in every mode; what is not drawn is said once
+-- (sky_model.lua's lighting_not_drawn).
 luanti.sub_hud(function()
 	local l = luanti.lighting
-	if not l or not sky_lights.sun then
+	if not l then
+		return
+	end
+	if sky_lights.saturation ~= l.saturation and sky_lights.path then
+		sky_lights.saturation = l.saturation
+		sky_lights.path:SetEnabled("Saturation",
+				math.abs(l.saturation - 1) > 1e-6)
+		sky_lights.path:SetShaderParameter("Saturation", l.saturation)
+	end
+	sky_lights.said = sky_lights.said or {}
+	for _, n in ipairs(sky_dome.lighting_not_drawn(l, {saturation = true,
+			shadow_intensity = true})) do
+		if not sky_lights.said[n] then
+			sky_lights.said[n] = true
+			log:info("set_lighting: " .. n .. " is not drawn")
+		end
+	end
+	if not sky_lights.sun then
 		return
 	end
 	-- On the parity modes only. On pbr a shadow is what the sun does not
@@ -3367,7 +3389,7 @@ luanti.sub_hud(function()
 			sky_lights.moon.shadowIntensity = keep
 		end
 		log:info(string.format("set_lighting: shadows keep %.2f (the light reads %s), " ..
-				"saturation %.2f (not drawn)", keep,
+				"saturation %.2f", keep,
 				tostring(sky_lights.sun.shadowIntensity), l.saturation))
 	end
 end)

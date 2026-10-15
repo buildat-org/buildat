@@ -861,6 +861,15 @@ function M.new(magic, buildat, log, options)
 		rp:SetShaderParameter("TonemapMaxWhite", 2.0)
 		viewport.renderPath = rp
 	end
+	-- A game's set_lighting() saturation, last, in every mode; off until
+	-- asked for (set_lighting()). The parity modes' path is a copy, so the
+	-- pass is this viewport's alone.
+	if not pbr then
+		viewport.renderPath = viewport.renderPath:Clone()
+	end
+	self.render_path = viewport.renderPath
+	self.render_path:Append(magic.cache:GetResource("XMLFile",
+			"luanti_client/res/Saturation.xml"))
 
 	-- The sounds the server asked for. A sound at a position is a node in
 	-- the scene and the listener rides the camera, which is what makes it
@@ -3263,6 +3272,29 @@ function M.new(magic, buildat, log, options)
 	function self:set_daylight(factor, time_of_day)
 		daylight = factor
 		daylight_time = time_of_day or daylight_time
+	end
+
+	-- A game's set_lighting() ([VANILLA_WEATHER] 6), flat by
+	-- res/sky_model.lua's LIGHTING names: the saturation in every mode,
+	-- how dark a shadow is on shadows (pbr's shadow is what the sun does
+	-- not reach, as vanilla's); the rest is said once and not drawn.
+	local lighting_said = {}
+	function self:set_lighting(l)
+		local sat = l.saturation or 1
+		self.render_path:SetEnabled("Saturation", math.abs(sat - 1) > 1e-6)
+		self.render_path:SetShaderParameter("Saturation", sat)
+		if mode == "shadows" and l.shadow_intensity then
+			local keep = 1 - math.max(0, math.min(1, l.shadow_intensity))
+			sun_light.shadowIntensity = keep
+			moon_light.shadowIntensity = keep
+		end
+		for _, n in ipairs(sky_model.lighting_not_drawn(l,
+				{saturation = true, shadow_intensity = true})) do
+			if not lighting_said[n] then
+				lighting_said[n] = true
+				log:info("set_lighting: "..n.." is not drawn")
+			end
+		end
 	end
 
 	function self:set_sky(new_sky)

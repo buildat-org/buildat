@@ -170,6 +170,7 @@ local TOCLIENT = {
 	SPAWN_PARTICLE = 0x46,
 	ADD_PARTICLESPAWNER = 0x47,
 	DELETE_PARTICLESPAWNER = 0x53,
+	SET_LIGHTING = 0x63,
 	SPAWN_PARTICLE_BATCH = 0x64,
 	FADE_SOUND     = 0x55,
 	FOV            = 0x36,
@@ -402,6 +403,9 @@ function M.new(socket, options, log)
 			on_moon = nil,
 			on_stars = nil,
 			on_clouds = nil,
+			-- on_lighting(lighting): the game's set_lighting(), see
+			-- SET_LIGHTING
+			on_lighting = nil,
 			on_play_sound = nil,
 			on_stop_sound = nil,
 			on_fade_sound = nil,
@@ -959,6 +963,36 @@ function M.new(socket, options, log)
 		end
 		if self.on_stars then
 			self.on_stars(stars)
+		end
+	end
+
+	-- A game's set_lighting(), flat by res/sky_model.lua's LIGHTING names.
+	-- The exposure came in 5.8, the volumetric light and the tint in 5.9,
+	-- the bloom after; what an older server leaves off keeps its default.
+	handlers[TOCLIENT.SET_LIGHTING] = function(r)
+		local l = {}
+		local function f32(name)
+			if r:remaining() >= 4 then
+				l[name] = r:f32()
+			end
+		end
+		f32("shadow_intensity")
+		f32("saturation")
+		for _, n in ipairs({"luminance_min", "luminance_max",
+				"exposure_correction", "speed_dark_bright",
+				"speed_bright_dark", "center_weight_power",
+				"volumetric_strength"}) do
+			f32(n)
+		end
+		if r:remaining() >= 4 then
+			local c = read_color(r)
+			l.tint_r, l.tint_g, l.tint_b = c[1], c[2], c[3]
+		end
+		f32("bloom_intensity")
+		f32("bloom_strength_factor")
+		f32("bloom_radius")
+		if self.on_lighting then
+			self.on_lighting(l)
 		end
 	end
 

@@ -1401,6 +1401,10 @@ local function show_client(host, port, name, password, mode, origin)
 		-- cave, the nether -- so only the first one is worth a line
 		local said_sky = false
 
+		client.on_lighting = function(lighting)
+			view:set_lighting(lighting)
+		end
+
 		client.on_sky = function(sky)
 			view:set_sky(sky)
 			if not said_sky then

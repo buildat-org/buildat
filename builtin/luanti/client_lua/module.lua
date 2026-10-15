@@ -2625,12 +2625,13 @@ buildat.sub_packet("luanti:hud", function(data)
 			selected_image = values[4] ~= "" and values[4] or nil,
 		}
 	elseif op == "lighting" then
-		-- The game's set_lighting() for this player: how dark a shadow is
-		-- (0 none, 1 black) and the colour saturation (1 as is)
-		M.lighting = {
-			shadow_intensity = tonumber(values[2]) or 0,
-			saturation = tonumber(values[3]) or 1,
-		}
+		-- The game's set_lighting() for this player, flat by
+		-- sky_model.lua's LIGHTING: shadow_intensity how dark a shadow is
+		-- (0 none, 1 black), saturation 1 as is, and the rest
+		M.lighting = {}
+		for i, f in ipairs(pt.sky.LIGHTING) do
+			M.lighting[f[1]] = tonumber(values[i + 1]) or f[2]
+		end
 	elseif op == "stats" then
 		M.stats = {
 			hp = tonumber(values[2]) or 0,

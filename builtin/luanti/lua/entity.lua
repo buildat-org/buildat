@@ -1377,19 +1377,27 @@ function PlayerRef:set_lighting(t)
 		merge_into(o.lighting, LIGHTING_DEFAULT)
 	end
 	merge_into(o.lighting, t)
-	-- Two of its fields reach the client; the rest -- the exposure
-	-- curve, the bloom and the volumetric light -- wait on
-	-- builtin/voxel_shading having the knobs ([DRAW_SETTERS])
-	for k in pairs(t) do
-		if k ~= "saturation" and k ~= "shadows" then
-			not_drawn("set_lighting." .. tostring(k),
-					"only shadows.intensity and saturation reach the " ..
-					"client; the rest wants the shading knobs first")
-		end
+	-- All of it reaches the client, flat, in the order of
+	-- luanti_client/res/sky_model.lua's LIGHTING, which says what it does
+	-- not draw ([VANILLA_WEATHER] 6)
+	local l = o.lighting
+	local e, b = l.exposure or {}, l.bloom or {}
+	local tint = l.shadows.tint
+	if type(tint) == "string" then
+		tint = core.colorspec_to_table(tint)
 	end
-	send_hud(o, {"lighting",
-			tostring(tonumber(o.lighting.shadows.intensity) or 0),
-			tostring(tonumber(o.lighting.saturation) or 1)})
+	tint = type(tint) == "table" and tint or {}
+	local out = {"lighting"}
+	for _, v in ipairs({{l.shadows.intensity, 0}, {l.saturation, 1},
+			{e.luminance_min, -3}, {e.luminance_max, -3},
+			{e.exposure_correction, 0}, {e.speed_dark_bright, 1000},
+			{e.speed_bright_dark, 1000}, {e.center_weight_power, 1},
+			{(l.volumetric_light or {}).strength, 0},
+			{b.intensity, 0.05}, {b.strength_factor, 1}, {b.radius, 1},
+			{tint.r, 0}, {tint.g, 0}, {tint.b, 0}}) do
+		out[#out + 1] = tostring(tonumber(v[1]) or v[2])
+	end
+	send_hud(o, out)
 end
 
 function PlayerRef:get_lighting()

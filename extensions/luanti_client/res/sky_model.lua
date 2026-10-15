@@ -574,4 +574,44 @@ do
 	assert(M.flash_radiance() > PHYS.sky_zenith, "over the noon sky")
 end
 
+
+-- **set_lighting** ([VANILLA_WEATHER] 6), flat, in the order vanilla's
+-- server sends it, each with Luanti's default. Both clients read a game's
+-- lighting into these names.
+M.LIGHTING = {
+	{"shadow_intensity", 0}, {"saturation", 1},
+	{"luminance_min", -3}, {"luminance_max", -3},
+	{"exposure_correction", 0}, {"speed_dark_bright", 1000},
+	{"speed_bright_dark", 1000}, {"center_weight_power", 1},
+	{"volumetric_strength", 0},
+	{"bloom_intensity", 0.05}, {"bloom_strength_factor", 1},
+	{"bloom_radius", 1},
+	{"tint_r", 0}, {"tint_g", 0}, {"tint_b", 0},
+}
+
+-- The names in l away from their default that the client does not draw
+-- (drawn: a set of names), for its one log line. What neither client
+-- draws: the exposure curve and its speeds (the pbr meter is fit to the
+-- path-traced reference, a game's Luanti-tuned range is not; the parity
+-- modes have no meter), the volumetric light, the bloom's (pbr's is the
+-- grade's) and the shadow's tint.
+function M.lighting_not_drawn(l, drawn)
+	local out = {}
+	for _, f in ipairs(M.LIGHTING) do
+		local v = l[f[1]]
+		if not drawn[f[1]] and v ~= nil and math.abs(v - f[2]) > 1e-6 then
+			out[#out + 1] = f[1]
+		end
+	end
+	return out
+end
+
+do
+	local l = {saturation = 1.1, luminance_min = -3.5, shadow_intensity = 0.33}
+	local n = M.lighting_not_drawn(l, {saturation = true,
+			shadow_intensity = true})
+	assert(#n == 1 and n[1] == "luminance_min",
+			"set_lighting: only what is set and not drawn")
+end
+
 return M

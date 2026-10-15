@@ -1,0 +1,8 @@
+<!-- A game's set_lighting() saturation, last in the path: see
+     Saturation.glsl. Off until a game asks for other than 1. -->
+<renderpath>
+    <command type="quad" tag="Saturation" enabled="false" vs="luanti_client/res/Saturation" ps="luanti_client/res/Saturation" output="viewport">
+        <parameter name="Saturation" value="1" />
+        <texture unit="diffuse" name="viewport" />
+    </command>
+</renderpath>
