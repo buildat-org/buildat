@@ -939,6 +939,39 @@ function M.light_color(x, y, z, no_sun, settle)
 			levels_sky, levels_lamp
 end
 
+-- **Under pbr a model is lit as the held item is** ([OBJECT_SUN],
+-- [SKELENTI_MOB_LIGHT]): Urho's PBR lit passes on its normals, so the
+-- sun's direction shades its sides and the shadow map the world's light
+-- pass has falls on it, and it casts into that map. Its colour is the
+-- light where it stands without the sun, over the zone's ambient, which
+-- the shader multiplies it by (the launcher's hand the same, client.lua's
+-- update_sky). Returns nil where no voxel is loaded, as light_color().
+-- Only while M.light_units is set (pbr); a parity mode's model is flat.
+function M.model_light(x, y, z, settle)
+	local c, sky, lamp = M.light_color(x, y, z, true, settle)
+	local a = M.light_units and M.light_units.ambient
+	if c == nil or a == nil then
+		return c, sky, lamp
+	end
+	-- Without light_color()'s texel factor: the lit passes decode the
+	-- texel themselves, and the factor on top of that drew a boar in the
+	-- sun near black
+	local k = M.PBR_TEXEL_K
+	local function ratio(v, av)
+		return av > 1e-6 and v / av / k or 0
+	end
+	return magic.Color(ratio(c.r, a.r), ratio(c.g, a.g), ratio(c.b, a.b), 1.0),
+			sky, lamp
+end
+-- A model's material for pbr (lit) or the flat light (unlit)
+function M.set_model_technique(m, pbr)
+	m:SetTechnique(0, magic.cache:GetResource("Technique", pbr and
+			"luanti/PBRLitAlphaMask.xml" or
+			"luanti_client/res/LuantiUnlitMask.xml"))
+	m:SetShaderParameter("Roughness", 1.0)
+	m:SetShaderParameter("Metallic", 0.0)
+end
+
 -- Set on an object's materials when it moves (and when the day turns; the
 -- launcher's set_daylight is every frame, the objects are placed by
 -- packet), at the middle of its box; skipped when it has not changed
@@ -946,8 +979,27 @@ local function light_object(have, x, y, z)
 	if #have.materials == 0 then
 		return
 	end
+	-- A model through pbr ([OBJECT_SUN]); a sprite has no normals
+	local pbr = M.light_units ~= nil and have.look ~= nil and
+			have.look.kind ~= "sprite"
+	if have.pbr ~= pbr then
+		have.pbr = pbr
+		have.lit = nil
+		for _, m in ipairs(have.materials) do
+			M.set_model_technique(m, pbr)
+		end
+		local cg = have.node:GetComponent("CustomGeometry")
+		if cg then
+			cg.castShadows = pbr
+		end
+	end
 	local box = have.box or {1, 1, 1}
-	local c, sky, lamp = M.light_color(x, y + box[2] / 2, z, false, have.new)
+	local c, sky, lamp
+	if pbr then
+		c, sky, lamp = M.model_light(x, y + box[2] / 2, z, have.new)
+	else
+		c, sky, lamp = M.light_color(x, y + box[2] / 2, z, false, have.new)
+	end
 	if c == nil then
 		return
 	end

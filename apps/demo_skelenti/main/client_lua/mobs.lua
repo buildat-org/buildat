@@ -112,6 +112,7 @@ local function build(node, quads, mat)
 	for i = 1, #tiles do
 		cg:SetMaterial(i - 1, mat)
 	end
+	return cg
 end
 
 local mobs = {} -- node id -> {node, kind, parts, mat, ...}
@@ -126,27 +127,26 @@ local function dress(node)
 		quad(quads, r, 64, 64, {0, w, -l}, {0, w, l}, {0, -w, l}, {0, -w, -l})
 		quad(quads, r, 64, 64, {-w, 0, -l}, {-w, 0, l}, {w, 0, l}, {w, 0, -l})
 		local mat = material("skelenti_arrow_entity.png")
-		build(node:CreateChild("look"), quads, mat)
 		mobs[node:GetID()] = {node = node, mat = mat, arrow = true,
-				light_t = 0}
+				light_t = 0, cgs = {build(node:CreateChild("look"), quads, mat)}}
 		return
 	end
 	if not kind then
 		return
 	end
 	local mat = material(kind.texture)
-	local parts = {}
+	local parts, cgs = {}, {}
 	for _, p in ipairs(kind.parts) do
 		local child = node:CreateChild("part")
 		child.position = magic.Vector3(p[1] / 16, p[2] / 16, p[3] / 16)
 		local quads, b = {}, p[4]
 		box(quads, p[5], kind.tw, kind.th, b[1], b[2], b[3], b[4], b[5], b[6])
-		build(child, quads, mat)
+		cgs[#cgs + 1] = build(child, quads, mat)
 		parts[#parts + 1] = {node = child, swing = p[6]}
 	end
 	local pos = node.worldPosition
 	mobs[node:GetID()] = {node = node, kind = kind, parts = parts, mat = mat,
-		last = magic.Vector3(pos.x, pos.y, pos.z), phase = 0, light_t = 0,
+		cgs = cgs, last = magic.Vector3(pos.x, pos.y, pos.z), phase = 0, light_t = 0,
 		hurt = node:GetVar("skelenti_hurt"):GetInt(), red_t = 0}
 	log:info("skelenti: a " .. name:gsub("skelenti_", "") .. " (" ..
 			node:GetID() .. ") is here")
@@ -190,7 +190,23 @@ function M.update(dt)
 		end
 		if m.light_t <= 0 then
 			m.light_t = 0.25
-			local c = luanti.light_color(p.x, p.y + 0.5, p.z, false, true)
+			-- Under pbr through the lit passes, as the module's own
+			-- objects: the sun's direction and shadow on its sides, and
+			-- its shadow cast ([SKELENTI_MOB_LIGHT])
+			local pbr = luanti.light_units ~= nil
+			if m.pbr ~= pbr then
+				m.pbr = pbr
+				luanti.set_model_technique(m.mat, pbr)
+				for _, cg in ipairs(m.cgs) do
+					cg.castShadows = pbr
+				end
+			end
+			local c
+			if pbr then
+				c = luanti.model_light(p.x, p.y + 0.5, p.z, true)
+			else
+				c = luanti.light_color(p.x, p.y + 0.5, p.z, false, true)
+			end
 			if c then
 				if m.red_t and m.red_t > 0 then
 					c = magic.Color(math.min(1, c.r * 1.5 + 0.3), c.g * 0.4,

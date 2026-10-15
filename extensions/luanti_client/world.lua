@@ -2035,7 +2035,13 @@ function M.new(magic, buildat, log, options)
 	-- there is, kept by apply_daylight() because that is where it is known
 	local object_sun = nil
 
-	local function object_color(x, y, z)
+	-- lit: for a mesh under pbr ([OBJECT_SUN]), drawn through the lit
+	-- passes, which add the zone's ambient times this colour and the sun
+	-- with its direction and shadow: so no sun share here, and the light
+	-- over the ambient the shader multiplies it by.
+	-- simplified: the ambient is the zone's, not the sky a face sees, so a
+	-- model's shaded side reads lighter than a shaded voxel side does.
+	local function object_color(x, y, z, lit)
 		local p1 = param1_at(math.floor(x + 0.5), math.floor(y + 0.5),
 				math.floor(z + 0.5))
 		if not p1 then
@@ -2047,6 +2053,13 @@ function M.new(magic, buildat, log, options)
 		local lamp = night / 15
 		-- A floor of a few percent, so that something in the pitch dark is a
 		-- silhouette rather than nothing at all
+		if pbr and lit then
+			local amb = zone.ambientColor
+			local function over(a)
+				return a > 1e-6 and (a * sky + lamp + OBJECT_DARK_FLOOR) / a or 0
+			end
+			return magic.Color(over(amb.r), over(amb.g), over(amb.b))
+		end
 		if pbr then
 			local amb = zone.ambientColor
 			local sun = object_sun
@@ -2077,7 +2090,7 @@ function M.new(magic, buildat, log, options)
 		if not entry.material and not entry.materials then
 			return
 		end
-		local c = object_color(x, y, z)
+		local c = object_color(x, y, z, entry.materials ~= nil)
 		if not c then
 			return
 		end
@@ -2099,7 +2112,9 @@ function M.new(magic, buildat, log, options)
 
 	local SPRITE_VISUALS, build_item_cube, object_template =
 			world_object_meshes(self, magic, scene, game_texture,
-			object_technique, texture)
+			pbr and magic.cache:GetResource("Technique",
+			"luanti_client/res/PBRLitAlphaMask.xml") or object_technique,
+			texture)
 
 	-- What an object is drawn as.
 	--

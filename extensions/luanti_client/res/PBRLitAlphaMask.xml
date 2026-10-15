@@ -1,0 +1,11 @@
+<!-- Urho3D's PBR lit forward passes with the texture's alpha cutting holes,
+     for an object's model and an item's cube under pbr ([OBJECT_SUN]): the
+     sun's direction and shadow map as the world's own light pass has them,
+     the zone's ambient under that, which the material's colour scales to
+     the light where the object stands (world.lua object_color()). No IBL.
+     The same as builtin/luanti's, which the held item there uses. -->
+<technique vs="PBRLitSolid" ps="PBRLitSolid" psdefines="DIFFMAP ALPHAMASK PBR">
+    <pass name="base" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>
