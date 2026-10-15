@@ -427,6 +427,8 @@ buildat.safe.launch_actions = function()
 			-- What a server speaks and which list it came from, or
 			-- absent ([SERVER_FILTER])
 			network = a.network, listed_by = a.listed_by,
+			-- Where a "settings" tile is filed ([TILE_CATEGORIES])
+			section = a.section,
 			-- When this key was last launched, in unix seconds, or
 			-- absent for one that never was
 			last_launched = history[key]}

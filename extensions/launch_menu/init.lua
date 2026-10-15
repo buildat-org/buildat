@@ -54,18 +54,12 @@ local KIND_TITLE = {app = "Apps", save = "Saves", server = "Servers",
 		catalog = "Get more", action = "Other"}
 local PRIMARY = {app = "Play", save = "Continue", server = "Join",
 		catalog = "Open", action = "Open"}
--- Launch actions that are a catalog to get more from, or a server's
--- address typed, rather than what their category says
-local CATALOG_KEYS = {["extension/launch_menu/aitta"] = true,
-		["app/vanilla/contentdb"] = true,
-		["app/vanilla/import_game"] = true,
-		["app/vanilla/import_world"] = true}
-local SERVER_KEYS = {["extension/launch_menu/connect"] = true,
-		["extension/luanti_client/connect"] = true,
-		["extension/serverlist/refresh"] = true}
--- And the settings screens that are tiles, which the Settings tree has
-local SETTINGS_KEYS = {["app/vanilla/settings"] = true,
-		["extension/luanti_client/settings"] = true}
+-- A tile's category -> where it is listed ([TILE_CATEGORIES]); a
+-- category not here is "Other". A "settings" tile is in the Settings tree
+-- under its section.
+local KIND_OF = {app = "app", game = "app", server = "server",
+		connect = "server", catalog = "catalog", tool = "catalog",
+		settings = "action"}
 
 -- How well an entry matches what is typed: 2 its label starts with it, 1
 -- it is in the label, the badge or the description (a server's address
@@ -306,11 +300,8 @@ local function gather()
 				-- Its lists are this menu's Apps and Servers
 				a.key ~= "extension/launch_menu/local" then
 			local cat = a.category or "action"
-			local kind = CATALOG_KEYS[a.key] and "catalog" or
-					SERVER_KEYS[a.key] and "server" or
-					SETTINGS_KEYS[a.key] and "action" or
-					(cat == "app" or cat == "game") and "app" or
-					cat == "server" and "server" or "action"
+			local kind = KIND_OF[cat] or "action"
+			local settings = cat == "settings"
 			-- A server's network and list are its own to say
 			-- ([SERVER_FILTER]); one that says none is Buildat's
 			local network = kind == "server" and (a.network or "Buildat") or
@@ -323,8 +314,8 @@ local function gather()
 					a.kind == "dev" and "Dev" or nil
 			local e = add({label = a.label, kind = kind,
 				network = network, listed_by = a.listed_by,
-				badge = SETTINGS_KEYS[a.key] and "Settings" or badge,
-				section = SETTINGS_KEYS[a.key] and "Luanti", key = a.key,
+				badge = settings and "Settings" or badge,
+				section = settings and a.section or nil, key = a.key,
 				from = a.from, icon = a.icon,
 				id = a.from .. "/" .. tostring(a.id),
 				size = kind == "app" and cat ~= "game" and
@@ -1045,8 +1036,18 @@ settings = function()
 			table.insert(by_section[e.section], e)
 		end
 	end
-	for _, section in ipairs({"Display and sound", "Controls", "Luanti",
-			"Logs and errors", "Developer"}) do
+	-- The tree's own sections, then any other a tile names, by name
+	local sections = {"Display and sound", "Controls", "Luanti",
+			"Logs and errors", "Developer"}
+	local known = {}
+	for _, section in ipairs(sections) do known[section] = true end
+	local others = {}
+	for section in pairs(by_section) do
+		if not known[section] then others[#others + 1] = section end
+	end
+	table.sort(others)
+	for _, section in ipairs(others) do sections[#sections + 1] = section end
+	for _, section in ipairs(sections) do
 		if section == "Logs and errors" then
 			view:header(section)
 			row({label = "Logs and errors", glyph = "⌗", description =

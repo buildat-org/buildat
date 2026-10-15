@@ -627,9 +627,16 @@ addition here is attack surface for every app too.
 
 buildat.safe.launch_actions() -> {{key, id, label, icon, kind, from,
   description, order, category, significance, network, listed_by,
-  last_launched}, ...}
+  section, last_launched}, ...}
 - The launch grid's tiles as plain data: no functions and no paths. The list
   is what the sandboxed launcher files built ([LAUNCH_GRID]).
+- category: what the tile is, an open set ([LAUNCH_SIGNIFY],
+  [TILE_CATEGORIES]); a launch UI draws its default for one it does not
+  know. "app" (an app source's default), "game" (a Luanti game), "server",
+  "connect" (joins a server by its address or fetches a list), "catalog"
+  (somewhere to get more apps or games), "tool" (an import), "settings"
+  (a settings screen, with section: the name of where a settings tree
+  files it), "action" (the default for the rest).
 - network: what a server or a connect action speaks, "Luanti" for
   luanti_client's and serverlist's; absent means Buildat. listed_by: the list
   a server came from, "Luanti server list" for serverlist's. Both are short

@@ -69,13 +69,14 @@ return function(ctx)
 		end}
 	out[#out + 1] = {id = "settings", label = "Luanti settings",
 		icon = "grass_block.png", order = 192,
+		category = "settings", section = "Luanti",
 		description = "The render mode, the view, the keys",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "settings"}}
 		end}
 	-- ContentDB's games, fetched and installed by the server ([CONTENTDB])
 	out[#out + 1] = {id = "contentdb", label = "ContentDB",
-		icon = "grass_block.png", order = 193,
+		icon = "grass_block.png", order = 193, category = "catalog",
 		description = "Browse and install games from content.luanti.org",
 		run = function()
 			ctx.launch{app = "vanilla", params = {menu = "contentdb"}}

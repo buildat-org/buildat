@@ -6,6 +6,7 @@
 -- blip's designer on the launch grid ([BLIP])
 return function(ctx)
 	return {{id = "designer", label = "blip sound designer", order = 185,
+		category = "app",
 		description = "sfxr's sounds, made and exported for a game",
 		run = function() ctx.launch{extension = "blip"} end}}
 end

@@ -69,6 +69,7 @@ local function menu_actions()
 			description = "Start an app on this machine",
 			run = function() M.screens().show_local_apps() end},
 		{id = "connect", label = "Join a Buildat server", order = 2,
+			category = "connect",
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = "By its address, on this network or from the Starports",
 			run = function() M.screens().show_connect_to_server() end},
@@ -78,6 +79,7 @@ local function menu_actions()
 	local ok, aitta = pcall(require, "buildat/core/aitta")
 	if ok and type(aitta) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
+			category = "catalog",
 			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
 			description = __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil and
 					"Play apps others made that run in the browser" or
@@ -493,6 +495,7 @@ function M.actions(log)
 					significance = significance_of(a, source, app_sizes),
 					network = short_name(a.network),
 					listed_by = short_name(a.listed_by),
+					section = short_name(a.section),
 					run = function()
 						local ok, err = pcall(run)
 						if not ok then

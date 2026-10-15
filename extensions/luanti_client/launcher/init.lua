@@ -11,12 +11,14 @@ return function(ctx)
 	local out = {
 		{id = "connect", label = "Join a Luanti server",
 			icon = "grass_block.png", order = 20, network = "Luanti",
+			category = "connect",
 			description = "By its address, or from Luanti's server list",
 			run = function() ctx.launch{extension = "luanti_client"} end},
 		-- The client's own settings ([EXT_SETTINGS]): a trusted screen on
 		-- the stack, no server behind it
 		{id = "settings", label = "Luanti client settings",
 			icon = "grass_block.png", order = 191,
+			category = "settings", section = "Luanti",
 			description = "Render mode, view range, view bobbing, name",
 			run = function()
 				ctx.launch{extension = "luanti_client", params = {menu = "settings"}}

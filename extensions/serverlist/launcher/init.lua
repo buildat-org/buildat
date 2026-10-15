@@ -46,6 +46,7 @@ return function(ctx)
 		label = #out > 0 and "Fetch the server list again" or
 				"Fetch the server list",
 		order = 299, network = "Luanti", listed_by = "Luanti server list",
+		category = "connect",
 		description = "Ask the list this client knows for its servers",
 		run = function() sl.refresh() end,
 	}
