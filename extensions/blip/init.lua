@@ -421,7 +421,7 @@ local function open_designer()
 		local value = text(r, "", 50)
 		local sl = {def = def, slider = slider, value = value}
 		sliders[#sliders + 1] = sl
-		magic.SubscribeToEvent(slider, "SliderChanged", function(_, data)
+		magic.SubscribeToEvent(slider, "SliderChanged", function(_, _, data)
 			if updating then
 				return
 			end
