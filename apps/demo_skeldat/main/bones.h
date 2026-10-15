@@ -91,6 +91,22 @@ inline bool pile(uint32_t salt, int32_t x, int32_t z, Pile &p)
 	return true;
 }
 
+// [SKELDAT_SKELETON_PLAYERS] A player looks like a skeleton to the others
+// while a voxel in the 3x4x3 box round the voxel its feet are in (x, y, z)
+// -- one below the feet to one over the head -- has bones over half
+// (user, 2026-10-15). bones_at(x, y, z) is a voxel's bones.
+static const int SKELETON_BONES = 8;
+template<typename F>
+inline bool skeleton_near(F bones_at, int x, int y, int z)
+{
+	for(int dy = -1; dy <= 2; dy++)
+	for(int dz = -1; dz <= 1; dz++)
+	for(int dx = -1; dx <= 1; dx++)
+		if(bones_at(x + dx, y + dy, z + dz) >= SKELETON_BONES)
+			return true;
+	return false;
+}
+
 inline int seed_value(float danger)
 {
 	return danger >= SEED_DANGER ? (int)std::lround(danger * MAX) : 0;
@@ -235,6 +251,23 @@ int main()
 	{
 		Box box(6, 6, 6);
 		assert(!expand(box));
+	}
+	// The skeleton's box: 8 in it, at its corners, makes one; 7 does not,
+	// nor 8 just outside
+	{
+		int at[3] = {0, 0, 0}, value = 0;
+		auto f = [&](int x, int y, int z){
+			return x == at[0] && y == at[1] && z == at[2] ? value : 0;
+		};
+		auto put = [&](int x, int y, int z, int v){
+			at[0] = x; at[1] = y; at[2] = z; value = v;
+		};
+		put(1, -1, 1, 8); assert(skeleton_near(f, 0, 0, 0));
+		put(-1, 2, -1, 8); assert(skeleton_near(f, 0, 0, 0));
+		put(0, 1, 0, 7); assert(!skeleton_near(f, 0, 0, 0));
+		put(0, 3, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
+		put(0, -2, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
+		put(2, 0, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 	}
 	// The seeding and the catch-up
 	assert(seed_value(0.49f) == 0 && seed_value(0.5f) == 8 &&

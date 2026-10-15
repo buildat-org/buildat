@@ -708,7 +708,8 @@ end
 local others = {}
 buildat.sub_packet("skeldat:players", function(data)
 	local seen = {}
-	for name, x, y, z, yw in data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+)\n") do
+	for name, x, y, z, yw, skeleton in
+			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
 		seen[name] = true
 		do
 			local o = others[name]
@@ -725,10 +726,24 @@ buildat.sub_packet("skeldat:players", function(data)
 			o.node.position = magic.Vector3(tonumber(x), tonumber(y),
 					tonumber(z))
 			o.node.rotation = magic.Quaternion(0, tonumber(yw), 0)
+			-- [SKELDAT_SKELETON_PLAYERS] Near enough bones, the skeleton
+			skeleton = skeleton == "1"
+			if skeleton ~= (o.skeleton or false) then
+				o.skeleton = skeleton
+				o.node:GetChild("Body").enabled = not skeleton
+				if skeleton then
+					mobs.dress_as(o.node, "skeldat_skeleton")
+				else
+					mobs.undress(o.node)
+				end
+				log:info("skeldat: " .. name .. " looks like a " ..
+						(skeleton and "skeleton" or "player"))
+			end
 		end
 	end
 	for name, o in pairs(others) do
 		if not seen[name] then
+			mobs.undress(o.node)
 			o.node:Remove()
 			others[name] = nil
 		end

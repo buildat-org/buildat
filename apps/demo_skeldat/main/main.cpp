@@ -113,6 +113,8 @@ struct Player
 	bool check_air = false;
 	// fly, fast and noclip, and no movement check (accounts' admin)
 	bool admin = false;
+	// Seen as a skeleton by the others (update_skeletons())
+	bool skeleton = false;
 
 	ss_ save() const {
 		std::ostringstream os;
@@ -408,7 +410,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	float m_ai_t = 0, m_spawn_t = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
 	// spawning of its own, and the mobs named at x, z from the first
-	// player placed, once, standing still for half a minute
+	// player placed, once, standing still for half a minute; "bones 1 0 8"
+	// sets the bones of the ground voxel at x, z
 	ss_ m_test;
 	bool m_test_done = false;
 	// The loaded sections, each with the world time its bones were last up
@@ -2053,6 +2056,23 @@ struct Module: public interface::Module, public luanti_session::Game
 			ss_ kind;
 			float dx = 0, dz = 0;
 			it>>kind>>dx>>dz;
+			if(kind == "bones"){
+				// "bones dx dz value": the ground's voxel there
+				int value = 0;
+				it>>value;
+				const int x = (int)std::floor(p->x + dx + 0.5f),
+						y = (int)std::floor(p->y + 0.5f) - 1,
+						z = (int)std::floor(p->z + dz + 0.5f);
+				voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+					const pv::Vector3DInt32 v(x, y, z);
+					interface::VoxelSample sample = w->get_sample(v, true);
+					m_bones.set(sample, (uint32_t)value);
+					w->set_sample(v, sample);
+				});
+				log_i(MODULE, "skeldat: test: bones %d at %d,%d,%d", value,
+						x, y, z);
+				continue;
+			}
 			Mob m;
 			m.kind = kind == "skeleton" ? SKELETON : BOAR;
 			m.x = p->x + dx, m.y = p->y, m.z = p->z + dz;
@@ -2450,6 +2470,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(m_move_t >= 1){
 			m_move_t = 0;
 			check_moves();
+			update_skeletons();
 		}
 		m_breath_t += event.dtime;
 		if(m_breath_t >= 1){
@@ -2669,7 +2690,35 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 	}
 
-	// Where the others are, to everyone: "name x y z yaw" a line
+	// [SKELDAT_SKELETON_PLAYERS] Who looks like a skeleton (bones.h's
+	// skeleton_near()), admins too; a change logged, and it goes out in
+	// send_players()
+	void update_skeletons()
+	{
+		for(auto &pair : m_players){
+			Player &pl = pair.second;
+			if(!pl.placed)
+				continue;
+			const int x = (int)std::floor(pl.x + 0.5f),
+					y = (int)std::floor(pl.y + 0.5f),
+					z = (int)std::floor(pl.z + 0.5f);
+			bool now = false;
+			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+				now = skeldat::bones::skeleton_near([&](int vx, int vy, int vz){
+					return (int)m_bones.get(w->get_sample(
+							pv::Vector3DInt32(vx, vy, vz), true));
+				}, x, y, z);
+			});
+			if(now == pl.skeleton)
+				continue;
+			pl.skeleton = now;
+			log_i(MODULE, "skeldat: %s looks like %s to the others",
+					cs(pl.name), now ? "a skeleton" : "a player");
+		}
+	}
+
+	// Where the others are, to everyone: "name x y z yaw skeleton" a line,
+	// skeleton 1 or 0
 	void send_players()
 	{
 		for(auto &to : m_players){
@@ -2678,7 +2727,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				const Player &o = pair.second;
 				if(pair.first != to.first && o.placed && o.hp > 0)
 					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
-							<<"\n";
+							<<" "<<(o.skeleton ? 1 : 0)<<"\n";
 			}
 			send(to.first, "skeldat:players", os.str());
 		}

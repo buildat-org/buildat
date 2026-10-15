@@ -120,10 +120,17 @@ text hello from player2
 keypress Return
 delay 500
 keypress Escape
-delay 15000
+delay 2000
+look 0 0
+keydown W
+delay 2500
+keyup W
+delay 10000
 quit
 EOF
-BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0" server "$t/srv1.log"
+# Both spawn at one place: bones at 8 beside it make player2 look like a
+# skeleton to player1 until it walks off (7 and the box: bones.h's self test)
+BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
 wait_for_log "$t/srv1.log" "player1 joins" 240 || fail "player1 did not join ($t/a1.log)"
 client b1 "$t/b1.cmds"; bpid=$CLIENT
@@ -146,6 +153,9 @@ grep -aq "the skeleton ([0-9]*) burns" "$s" && grep -aq "the skeleton .* dies" "
 	fail "the test skeleton did not burn to death ($s)"
 grep -aq "<player2> hello from player2" "$s" || fail "player2's line ($s)"
 grep -aq "player1 reports player2" "$s" || fail "no report ($s, $t/a1.log)"
+grep -a "skeldat: player2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks like a //' |
+	tr '\n' ' ' | grep -qx "skeleton player " ||
+	fail "player2 did not look like a skeleton by the bones and then a player ($t/a1.log)"
 
 # 2. The admin, the save as if a day away
 cat > "$t/a2.cmds" <<EOF

@@ -127,6 +127,26 @@ return function(game, sounds)
 				reg:light_sky_of(v) / 15, reg:light_lamp_of(v) / 15)
 	end
 
+	-- The kind's parts on node, and its entry in mobs
+	local function wear(node, kind)
+		local mat = material(kind.texture)
+		local parts = {}
+		for _, p in ipairs(kind.parts) do
+			local child = node:CreateChild("part")
+			child.position = magic.Vector3(p[1] / 16, p[2] / 16, p[3] / 16)
+			local quads, b = {}, p[4]
+			box(quads, p[5], kind.tw, kind.th, b[1], b[2], b[3], b[4], b[5], b[6])
+			build(child, quads, mat)
+			parts[#parts + 1] = {node = child, swing = p[6]}
+		end
+		local pos = node.worldPosition
+		local m = {node = node, kind = kind, parts = parts,
+			mat = mat, last = magic.Vector3(pos.x, pos.y, pos.z), phase = 0,
+			light_t = 0, hurt = node:GetVar("skeldat_hurt"):GetInt(), red_t = 0}
+		mobs[node:GetID()] = m
+		return m
+	end
+
 	local function dress(node)
 		local name = node:GetName()
 		local kind = KINDS[name]
@@ -145,20 +165,7 @@ return function(game, sounds)
 		if not kind then
 			return
 		end
-		local mat = material(kind.texture)
-		local parts = {}
-		for _, p in ipairs(kind.parts) do
-			local child = node:CreateChild("part")
-			child.position = magic.Vector3(p[1] / 16, p[2] / 16, p[3] / 16)
-			local quads, b = {}, p[4]
-			box(quads, p[5], kind.tw, kind.th, b[1], b[2], b[3], b[4], b[5], b[6])
-			build(child, quads, mat)
-			parts[#parts + 1] = {node = child, swing = p[6]}
-		end
-		local pos = node.worldPosition
-		mobs[node:GetID()] = {node = node, kind = kind, parts = parts,
-			mat = mat, last = magic.Vector3(pos.x, pos.y, pos.z), phase = 0,
-			light_t = 0, hurt = node:GetVar("skeldat_hurt"):GetInt(), red_t = 0}
+		wear(node, kind)
 		log:info("skeldat: a " .. name:gsub("skeldat_", "") .. " (" ..
 				node:GetID() .. ") is here")
 	end
@@ -169,6 +176,20 @@ return function(game, sounds)
 	replicate.sub_sync_node_removed(function(node, id)
 		mobs[id] = nil
 	end)
+
+	-- [SKELDAT_SKELETON_PLAYERS] Another player's node (init.lua) as a
+	-- mob kind ("skeldat_skeleton"), walking and lit like one but not
+	-- pointed at; undress takes it off
+	function M.dress_as(node, name)
+		wear(node, KINDS[name]).player = true
+	end
+	function M.undress(node)
+		local m = mobs[node:GetID()]
+		for _, part in ipairs(m and m.parts or {}) do
+			part.node:Remove()
+		end
+		mobs[node:GetID()] = nil
+	end
 
 	function M.update(dt)
 		for _, m in pairs(mobs) do
@@ -219,7 +240,7 @@ return function(game, sounds)
 	function M.point(eye, dir, reach)
 		local best, hit
 		for id, m in pairs(mobs) do
-			if not m.arrow then
+			if not m.arrow and not m.player then
 				local p, k = m.node.worldPosition, m.kind
 				local lo = {p.x - k.half, p.y, p.z - k.half}
 				local hi = {p.x + k.half, p.y + k.height, p.z + k.half}
