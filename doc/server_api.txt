@@ -69,7 +69,8 @@ with how many went unsaid.
 meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 "dependencies": [{"module": "network"}, {"module": "x", "optional":
 true}], "reverse_dependencies": [...], "disable_cpp": false,
-"client_main": "init.lua", "kind": "app"}. An app's module must say
+"client_main": "init.lua", "client_extensions": ["voxel_light"],
+"kind": "app"}. An app's module must say
 engine_api, the engine API it is written for (interface::aitta::
 ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 {"engine_api": 2} is the minimum. A key the loader does not know
@@ -80,6 +81,10 @@ dependency is loaded after this module and says the other may use this
 one. disable_cpp is a module with client halves only. client_main names a
 script in the module's client_lua/ that the engine runs once on each
 client, when its files first arrive (modules in load order).
+client_extensions names extensions (<share>/extensions/<name>) the
+server serves for the module's client scripts, which run that copy
+(buildat.run_script_file("<name>/init.lua")) rather than the client's
+bundled one: client_file::serve_extension().
 
 
 src/interface, the core

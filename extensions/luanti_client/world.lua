@@ -22,7 +22,7 @@ local sounds_proto = buildat.run_extension_file("res/sounds.lua")
 local shapes = buildat.run_extension_file("shapes.lua")
 local particles = buildat.run_extension_file("res/particles.lua")
 local light_flood = buildat.run_extension_file("light.lua")
-local skyvis = buildat.run_extension_file("skyvis.lua")
+local voxel_light = require("buildat/extension/voxel_light")
 local sky_model = buildat.run_extension_file("res/sky_model.lua")
 local skybox = buildat.run_extension_file("res/skybox.lua")
 local world_particles = buildat.run_extension_file("world_particles.lua")
@@ -1710,7 +1710,8 @@ function M.new(magic, buildat, log, options)
 
 	-- Only with the PBR path: nothing else reads it, and it is a worker
 	-- thread's worth of ray marching a frame
-	local vis = pbr and skyvis.new(magic, buildat, collect_vis_volumes) or nil
+	local vis = pbr and voxel_light.new_vis(magic, buildat,
+			collect_vis_volumes) or nil
 	-- Where the camera was last frame, to tell a step from a teleport
 	local vis_at = nil
 	local cave_floor_now = nil
@@ -1751,7 +1752,7 @@ function M.new(magic, buildat, log, options)
 	-- the counter at all.
 	function self:sky_visibility()
 		if not vis then return nil end
-		return vis:value_of(skyvis.cell_of(0, 1, 0)), #vis_list
+		return vis:value_of(voxel_light.cell_of(0, 1, 0)), #vis_list
 	end
 
 	-- A block that arrived from the server. Its own mesh and its neighbours'
@@ -3097,7 +3098,7 @@ function M.new(magic, buildat, log, options)
 					sky_color("sun_tint", 0.35 + brightness * 0.65))
 			-- What a direction that cannot see the sky is drawn as: Luanti's
 			-- indoors colour, dimmed with the day, mixed by the sky
-			-- visibility cube skyvis.lua already keeps. A seam is a place
+			-- visibility cube voxel_light already keeps. A seam is a place
 			-- where the rasteriser shows sky where the voxel data says rock,
 			-- so the cube is near zero there by construction and the hole
 			-- goes dark without anything having to detect it. See [CAVE_SKY]
@@ -3115,8 +3116,8 @@ function M.new(magic, buildat, log, options)
 			-- here means "in a cave", which would draw this client's sky as
 			-- the indoors colour everywhere. Set to one until this client
 			-- computes the scalar for itself; it has the cube that would
-			-- give it -- see skyvis.lua -- and the sky is then edited only
-			-- once there is no sky to see. [CAVE_SKY].
+			-- give it -- see extensions/voxel_light -- and the sky is then
+			-- edited only once there is no sky to see. [CAVE_SKY].
 			sky_material:SetShaderParameter("SkyOutside", 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And

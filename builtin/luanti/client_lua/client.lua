@@ -1905,8 +1905,9 @@ local function update_sky(dt)
 		zone.ambientColor = magic.Color(ratio, ratio, ratio * blue)
 		luanti.set_light_units(nil)
 	else
-		-- pbr: sky_light.lua's terms ([PBR_FIT]; why each is what it is is
-		-- there), under the dome of the sky drawn a frame ago
+		-- pbr: extensions/voxel_light's terms through sky_light.lua
+		-- ([PBR_FIT]; why each is what it is is there), under the dome of
+		-- the sky drawn a frame ago
 		local t = sky_light.terms(height,
 				sky_now.dome or blend(NIGHT_AMBIENT, SKY_AMBIENT, day))
 		world_sky:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)

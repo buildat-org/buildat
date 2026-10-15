@@ -1526,6 +1526,36 @@ cloud_lit(), overcast(), middle_grey(), flash_radiance(), dawn_glow(),
 dusk_tint() and their constants
 - The sky's numbers ([PBR_FIT] term 1) and the rules built on them.
 
+voxel_light
+-----------
+A voxel world's light in pbr ([LC_SKY_SHARED]), over physical_sky: bundled
+as require("buildat/extension/voxel_light") and served for a module that
+names it in its meta.json's client_extensions (builtin/voxel_shading does),
+whose copy a game takes with select(3, buildat.run_script_file(
+"voxel_light/init.lua")). It loads nothing itself; the caller hands in what
+it works on.
+voxel_light.new_vis(magic, buildat, collect, params) -> vis
+- How much sky the camera can see each way: rays marched through the voxels
+  (buildat.cast_voxel_rays_start) into a cube of 6x6 cells per face, put on
+  the render path's scene passes as SkyVis with params (name -> value).
+  collect(origin) -> {chunk_size, registry, volumes = {{x, y, z, volume}}}
+  or nil for open sky. vis:update(origin, dt) every frame (dt nil snaps);
+  vis:set_param(name, value), vis:redeclare(), vis.on_declare(render_path);
+  readings vis:above() (the sky overhead), vis:stats() -> mean, lo, hi,
+  vis:chamber() (the eight brightest cells), vis:most(), vis:value_of(cell),
+  vis:has_volumes(); voxel_light.cell_of(x, y, z) the shader's cell of a
+  direction.
+voxel_light.terms(physical_sky, height, dome) -> t
+- The light a face gets at a sun height under a dome of that hue: sun, moon,
+  sky, ambient, bounce, ground, lamp, glow. Sets nothing.
+voxel_light.apply(target, PHYS, t, translucency) -> chamber
+- t onto a target of setters (ambient, bounce, lamp, ground, translucency,
+  chamber, cave_ambient, chamber_light), with the cave floor and the bounce
+  floor by the chamber reading.
+voxel_light.object_light(t, sky, lamp, no_sun), lamp_curve(level), TEXEL_K,
+MOON_COLOR
+- An object's light by its sky and lamp levels, in the frame's units.
+
 magic_sandbox
 -------------
 magic_sandbox.class(name) -> function(superclass)

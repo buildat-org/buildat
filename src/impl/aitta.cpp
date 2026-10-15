@@ -268,9 +268,9 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 	if(!v.is_object())
 		return "meta.json is not an object";
 	static const char *known[] = {"engine_api", "kind", "comment",
-		"client_main", "disable_cpp", "dependencies", "reverse_dependencies",
-		"cxxflags", "ldflags", "cxxflags_windows", "ldflags_windows",
-		"cxxflags_linux", "ldflags_linux"};
+		"client_main", "client_extensions", "disable_cpp", "dependencies",
+		"reverse_dependencies", "cxxflags", "ldflags", "cxxflags_windows",
+		"ldflags_windows", "cxxflags_linux", "ldflags_linux"};
 	for(json::Iterator it(v); it.valid(); it.next()){
 		const ss_ key = it.key();
 		bool ok = false;

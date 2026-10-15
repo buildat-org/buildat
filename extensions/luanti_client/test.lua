@@ -60,7 +60,7 @@ local light = dofile(dir.."/light.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
 local objmesh = dofile(dir.."/objmesh.lua")
-local skyvis = dofile(dir.."/skyvis.lua")
+local voxel_light = dofile(dir.."/../voxel_light/init.lua")
 
 local function dump_name(s)
 	return "\""..s:gsub("[^%w%p ]", "?").."\""
@@ -2598,7 +2598,7 @@ do
 		end
 		local per_cell = args.rays_per_cell
 		assert(per_cell > 0 and n % per_cell == 0,
-				"skyvis: rays are not a whole number of cells")
+				"voxel_light: rays are not a whole number of cells")
 		local cells = {}
 		for c = 1, n / per_cell do
 			local sum = 0.0
@@ -2653,7 +2653,7 @@ do
 		end,
 	}
 	local collected = 0
-	local vis = skyvis.new(magic, fake_buildat, function(origin)
+	local vis = voxel_light.new_vis(magic, fake_buildat, function(origin)
 		collected = collected + 1
 		if world == nil then return nil end
 		return {chunk_size = {x = 16, y = 16, z = 16}, registry = {},
@@ -2694,31 +2694,41 @@ do
 		world = w
 		vis:update({x = 0.5, y = 0.5, z = 0.5}, nil) -- nil snaps
 		assert(#params.SkyVis == 216,
-				"skyvis: expected 216 values, got "..#params.SkyVis)
+				"voxel_light: expected 216 values, got "..#params.SkyVis)
 		return params.SkyVis
 	end
 
 	local open = sweep(function(p) return {id = AIR, skylight = 15} end)
 	assert(vis_at(open, 0, 1, 0) > 0.9 and vis_at(open, 1, 0, 0) > 0.9,
-			"skyvis: open sky is not open")
+			"voxel_light: open sky is not open")
 
 	local rock = sweep(function(p) return {id = ROCK, skylight = 0} end)
 	assert(vis_at(rock, 0, 1, 0) < 0.1 and vis_at(rock, -1, 0, 0) < 0.1,
-			"skyvis: solid rock reflects sky")
+			"voxel_light: solid rock reflects sky")
+	assert(vis:chamber() < 0.1 and vis:above() < 0.1,
+			"voxel_light: a sealed place reads as lit")
 
 	-- A world that has not arrived is not a cave
 	world = nil
 	vis:update({x = 0.5, y = 0.5, z = 0.5}, nil)
 	assert(vis_at(params.SkyVis, 0, 1, 0) > 0.9,
-			"skyvis: no voxel data should read as outdoors")
-	assert(not vis:has_volumes(), "skyvis: volumes out of nothing")
+			"voxel_light: no voxel data should read as outdoors")
+	assert(not vis:has_volumes(), "voxel_light: volumes out of nothing")
 
 	local ground = sweep(function(p)
 		if p.y < 0 then return {id = ROCK, skylight = 0} end
 		return {id = AIR, skylight = 15}
 	end)
-	assert(vis_at(ground, 0, 1, 0) > 0.9, "skyvis: the sky above is dark")
-	assert(vis_at(ground, 0, -1, 0) < 0.1, "skyvis: the ground reflects sky")
+	assert(vis_at(ground, 0, 1, 0) > 0.9, "voxel_light: the sky above is dark")
+	assert(vis_at(ground, 0, -1, 0) < 0.1, "voxel_light: the ground reflects sky")
+	-- The readings voxel_shading and the light terms take: the sky
+	-- overhead, the whole cube's mean (about half on open ground), and the
+	-- chamber's brightest cells
+	local mean, lo, hi = vis:stats()
+	assert(vis:above() > 0.9, "voxel_light: above() on open ground")
+	assert(mean > 0.3 and mean < 0.7 and lo < 0.1 and hi > 0.9,
+			"voxel_light: stats() on open ground: "..mean.." "..lo.." "..hi)
+	assert(vis:chamber() > 0.9, "voxel_light: chamber() under the open sky")
 
 	-- The mouth of a tunnel reflects the sky it can see and its walls do not,
 	-- which is what one value per face could not say
@@ -2732,22 +2742,22 @@ do
 	end)
 	local out = vis_at(tunnel, 1, 0, 0)
 	local off = vis_at(tunnel, 1, 1, 0)
-	assert(out > 0.3, "skyvis: the mouth of the tunnel is dark: "..out)
-	assert(off < out * 0.7, "skyvis: rock beside the mouth is lit: "..off)
+	assert(out > 0.3, "voxel_light: the mouth of the tunnel is dark: "..out)
+	assert(off < out * 0.7, "voxel_light: rock beside the mouth is lit: "..off)
 
 	-- dt-driven updates ease rather than snap, and get there
 	world = function(p) return {id = ROCK, skylight = 0} end
 	for i = 1, 400 do vis:update({x = 0.5, y = 0.5, z = 0.5}, 1 / 60) end
 	local dark = vis_at(params.SkyVis, 0, 1, 0)
-	assert(dark < 0.05, "skyvis: the easing never got there: "..dark)
+	assert(dark < 0.05, "voxel_light: the easing never got there: "..dark)
 
 	-- Set with the sky rather than per frame, and on the same passes
 	vis:set_param("SkyColor", "a colour")
 	vis:update({x = 0.5, y = 0.5, z = 0.5}, 1 / 60)
 	assert(params.SkyColor == "a colour",
-			"skyvis: the sky colour did not reach the scene pass")
+			"voxel_light: the sky colour did not reach the scene pass")
 
-	print("skyvis: ok")
+	print("voxel_light: ok")
 end
 
 

@@ -32,6 +32,9 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 	interface::ModuleMeta r;
 	r.disable_cpp = v.get("disable_cpp").as_boolean();
 	r.client_main = v.get("client_main").as_string();
+	const json::Value &ext_v = v.get("client_extensions");
+	for(unsigned int i = 0; i < ext_v.size(); i++)
+		r.client_extensions.push_back(ext_v.at(i).as_string());
 	r.cxxflags = v.get("cxxflags").as_string();
 	r.ldflags = v.get("ldflags").as_string();
 	r.cxxflags_windows = v.get("cxxflags_windows").as_string();
@@ -499,6 +502,8 @@ struct Module: public interface::Module, public loader::Interface
 			}
 			if(!info->meta.client_main.empty())
 				m_client_mains.push_back(name+"/"+info->meta.client_main);
+			for(const ss_ &ext : info->meta.client_extensions)
+				client_file::serve_extension(m_server, ext);
 		}
 	}
 

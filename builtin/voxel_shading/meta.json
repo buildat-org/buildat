@@ -1,5 +1,6 @@
 {
 	"disable_cpp": true,
+	"client_extensions": ["voxel_light"],
 	"dependencies": [
 		{"module": "client_lua"},
 		{"module": "client_data"},

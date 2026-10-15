@@ -7,8 +7,9 @@
 -- a sun height, the sky's radiance in a hue, the fog, the clouds' light,
 -- and the render path that meters and tonemaps the frame. builtin/luanti's
 -- client loop (client.lua) and any other game's (apps/demo_skeldat) call
--- these and apply them each to its own scene; the numbers and why they are
--- what they are live in res/sky_model.lua's PHYS and in sky_dome.lua.
+-- these and apply them each to its own scene. The rules themselves are
+-- extensions/physical_sky's (the sky) and extensions/voxel_light's (the
+-- light), re-exported here; what is this file's own is the render path.
 -- No state: the caller keeps its zone, lights and sky.
 local ok, err, sky_dome = buildat.run_script_file("luanti/sky_dome.lua")
 if not ok or type(sky_dome) ~= "table" then
@@ -24,10 +25,6 @@ M.PHYS = PHYS
 for _, name in ipairs({"sky_radiance", "dome", "outside", "fog", "sun_disc",
 		"cloud_lit"}) do
 	M[name] = physical_sky[name]
-end
-
-local function lum(c)
-	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 end
 
 -- [PT_EXPOSURE]: the meter -- Urho3D's AutoExposure.xml, log-average
@@ -122,152 +119,34 @@ function M.render_path(magic, base, opt)
 	return rp
 end
 
-M.MOON_COLOR = {r = 1.0, g = 0.86, b = 0.70}
+-- The light terms are extensions/voxel_light's ([LC_SKY_SHARED] 2), the
+-- copy voxel_shading's server serves, over the sky above
+local ok_vl, err_vl, voxel_light =
+		buildat.run_script_file("voxel_light/init.lua")
+if not ok_vl or type(voxel_light) ~= "table" then
+	error("luanti: could not load voxel_light: " .. tostring(err_vl))
+end
+M.MOON_COLOR = voxel_light.MOON_COLOR
+M.TEXEL_K = voxel_light.TEXEL_K
+M.lamp_curve = voxel_light.lamp_curve
+M.object_light = voxel_light.object_light
 
--- What a face gets at a sun height under a dome of that hue (M.dome()):
---   sun, sun_color   the sun's irradiance and colour (PHYS.sun_rgb)
---   moon, moon_color the moon's: the render's, a 4100 K lamp -- the cold
---                    blue is the parity modes' look, and the night probe
---                    read pbr's snow blue against the render's warm
---                    ([NIGHT_LIGHT], 2026-09-20)
---   sky              a face with the whole sky, the dome's hue at its mean
---   ambient          sky plus [DAWN_LIGHT]'s share of the glow
---   bounce, ground, lamp, sun_level (the sun on a level face)
---   glow, glow_tint  the glow on the sky's band (sky_dome's set_dawn_glow)
 function M.terms(height, dome)
-	local t = {}
-	t.sun = PHYS.sun(height)
-	local sr, sg, sb = PHYS.sun_rgb(height)
-	t.sun_color = {r = sr, g = sg, b = sb}
-	t.moon = PHYS.moon_e
-	t.moon_color = M.MOON_COLOR
-	-- The sky's mean radiance, which the shader multiplies by how much sky
-	-- a face sees. What a horizontal face receives over pi: the render's
-	-- grass (albedo 0.036) reads 1.50 sunlit at 13:00 and 0.15 in the
-	-- shade at 05:45, which leaves the dome at about the zenith's radiance
-	-- -- the horizon's band is bright but at a grazing weight. PHYS.dome of
-	-- it: the render's snow in an open shadow at 10:00 reads (1.6, 3.0,
-	-- 5.3), which off snow's albedo is a dome of 3.2 against a drawn zenith
-	-- patch of 4.5 -- Nishita's dome is bright toward the sun and dark
-	-- away, and a face sees the mean.
-	local mean = PHYS.night_sky +
-			(PHYS.sky_zenith * PHYS.dome - PHYS.night_sky) * PHYS.sky(height)
-	-- In the drawn sky's own hue, which is what a shadow on snow is lit by:
-	-- the render's reads (1.6, 3.0, 5.3), the sky's blue, where a grey
-	-- ambient gave a grey shadow
-	local l = lum(dome)
-	local k = l > 1e-6 and mean / l or 0
-	t.sky = {r = dome.r * k, g = dome.g * k, b = dome.b * k}
-	-- [DAWN_LIGHT]'s glow: on the sky's band, and a share of it added to
-	-- the three ambient terms in its orange -- each of which the shader
-	-- gates by the face's sky, so a sealed chamber keeps its dark; never
-	-- into the cave floor
-	local glow = sky_dome.dawn_glow(height)
-	local gc = sky_dome.DAWN_COLOR
-	local ga, gs = glow * sky_dome.DAWN_AMBIENT, glow * sky_dome.DUSK_SKY
-	t.glow = {r = gs * gc.r, g = gs * gc.g, b = gs * gc.b}
-	t.glow_tint = sky_dome.dusk_tint(height)
-	t.ambient = {r = t.sky.r + ga * gc.r, g = t.sky.g + ga * gc.g,
-		b = t.sky.b + ga * gc.b}
-	-- What a face the sky does not reach gets instead: light off the
-	-- surroundings, a share of the sky's mean in its hue ([PBR_FIT] term
-	-- 2), fitted to the render's cave mouth. simplified: one share for the
-	-- whole day; the render's cave at other hours is what would fit it
-	-- further.
-	t.bounce = {r = t.ambient.r * PHYS.bounce, g = t.ambient.g * PHYS.bounce,
-		b = t.ambient.b * PHYS.bounce}
-	-- A lamp at full in the sky's units: PHYS.lamp, in the glowstone's own
-	-- orange, at a torch's own faces ([TORCH_LIGHT]). simplified: one level
-	-- and one colour for every light source; a torch is not a glowstone.
-	t.lamp = {r = PHYS.lamp * 1.0, g = PHYS.lamp * 0.6, b = PHYS.lamp * 0.3}
-	-- The sun on a level face, over pi
-	t.sun_level = t.sun * math.max(height, 0) / math.pi
-	-- And the ground as the lower hemisphere sees it: its albedo times what
-	-- falls on it, the sky on all of it and a third of the sun, over pi. A
-	-- third, not the half that is lit on average: the ground a shaded wall
-	-- faces is partly in the same shadow, and the base pass has no shadow
-	-- map to say which ([PBR_FIT], contrast_dirt against
-	-- contrast_dirt_pit). simplified: one albedo for every ground.
-	local s = t.sun_level
-	t.ground = {
-		r = PHYS.ground.r * (s * sr + t.ambient.r),
-		g = PHYS.ground.g * (s * sg + t.ambient.g),
-		b = PHYS.ground.b * (s * sb + t.ambient.b)}
-	return t
+	return voxel_light.terms(physical_sky, height, dome)
 end
 
--- **An object's light** (a model, the hand, a dropped item, drawn unlit
--- in the frame's units, [OBJECT_LIGHT]): PBRVoxel.glsl's vertex terms for
--- a face with no sun at a sky and a lamp level (0..1), with units
--- {ambient, bounce, lamp, sun} -- M.terms()' ambient, its sky times
--- PHYS.bounce, its lamp, and its sun_level in the sun's colour. The sky
--- share is the nibble times the face's local shade, which the mesher packs
--- beside it and an object has no reading of: taken as the nibble again, an
--- open place's; the bounce where the shaped nibble (the knee at 2..11)
--- says the sky does not reach; a lamp by its falloff over the nibble's
--- distance from a torch's level (M.lamp_curve()).
--- simplified: no ground term and no normal (a side sees half the sky);
--- level 2 is where a normal takes its share.
--- The pbr path decodes its texel (pow 2.2) and an unlit object does not: a
--- mid texel (0.5) is 0.44 of itself decoded, and the object is scaled by
--- that so a mid tone sits level with the world's.
--- simplified: one factor for every texel; the upgrade is an unlit
--- technique that decodes, which level 2's material does anyway.
-M.TEXEL_K = 0.44
--- PBRVoxel.glsl's lamp term at a lamp nibble (0..15): its falloff over the
--- nibble's distance from a torch's level. res/light_ramp.png is the same
--- curve over a level 14 light's reach.
-function M.lamp_curve(level)
-	local d = math.max(math.min(12 - level, 12), 1)
-	return (1 / d - 1 / 12) * 12 / 11
-end
--- The sun where the sky nibble is full, which in Luanti is direct
--- sunlight, at half: the mean of a face turned to it and one turned away
--- (user: the whole of it made a held pickaxe too bright). no_sun leaves it
--- out, for a lit model that has the sun's light of its own.
--- simplified: no shadow map and no normal; an object in a tree's shadow on
--- open ground is half sunlit. [OBJECT_LIGHT] level 2 is the sun's
--- direction and shadow on it.
-function M.object_light(u, sky, lamp, no_sun)
-	local t = math.max(0, math.min(1, (sky - 2 / 15) / (9 / 15)))
-	local shaped = t * t * (3 - 2 * t)
-	local share = sky * sky
-	local bounce = (0.15 + sky) * (1 - shaped) * sky
-	local lit = M.lamp_curve(15 * lamp)
-	local k = M.TEXEL_K
-	local a, b, l = u.ambient, u.bounce, u.lamp
-	local s = u.sun and sky >= 1 and not no_sun and u.sun or
-			{r = 0, g = 0, b = 0}
-	local h = 0.5
-	return k * (a.r * share + b.r * bounce + l.r * lit + h * s.r),
-		k * (a.g * share + b.g * bounce + l.g * lit + h * s.g),
-		k * (a.b * share + b.b * bounce + l.b * lit + h * s.b)
-end
-
--- M.terms() onto voxel_shading and the zone, and the cave's two: the
--- constant floor under the ambient where the chamber the camera is in is
--- dark ([CAVE_AO], PHYS.cave_floor, the same at every hour, which is what
--- [UNDERGROUND_LIGHT]'s invariant needs -- scaled by how unlit the chamber
--- is, it is the whole floor in a sealed place and nothing under an open
--- sky), and the bounce's own floor scaled by how lit the chamber is, so a
--- sealed chamber stops following the hour and a cave lit round a corner
--- keeps its light (gain 1, the user's pick, 2026-09-25). The reading is
--- the camera's rays: no face can work out what arrives round a corner,
--- and the player is taken to be in the chamber they are looking at.
--- Returns the chamber reading.
+-- voxel_light.apply() onto voxel_shading and the zone
 function M.apply(voxel_shading, zone, magic, t, translucency)
-	local a = t.ambient
-	zone.ambientColor = magic.Color(a.r, a.g, a.b)
-	voxel_shading.set_bounce_light(t.bounce.r, t.bounce.g, t.bounce.b)
-	voxel_shading.set_lamp_light(t.lamp.r, t.lamp.g, t.lamp.b)
-	voxel_shading.set_ground_light(t.ground.r, t.ground.g, t.ground.b)
-	voxel_shading.set_translucency_gain(translucency or PHYS.translucency)
-	local chamber = voxel_shading.chamber_light()
-	local dark = 1.0 - math.min(1.0, chamber)
-	local f = PHYS.cave_floor * dark
-	voxel_shading.set_cave_ambient(f, f, f)
-	voxel_shading.set_chamber_light(chamber)
-	return chamber
+	return voxel_light.apply({
+		ambient = function(r, g, b) zone.ambientColor = magic.Color(r, g, b) end,
+		bounce = voxel_shading.set_bounce_light,
+		lamp = voxel_shading.set_lamp_light,
+		ground = voxel_shading.set_ground_light,
+		translucency = voxel_shading.set_translucency_gain,
+		chamber = voxel_shading.chamber_light,
+		cave_ambient = voxel_shading.set_cave_ambient,
+		chamber_light = voxel_shading.set_chamber_light,
+	}, PHYS, t, translucency)
 end
 
 do

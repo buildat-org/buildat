@@ -62,8 +62,9 @@ walk(buildat, "buildat", 1)
 for _, name in ipairs({"extension/urho3d", "extension/magic_sandbox",
 		"extension/network", "extension/replicate", "extension/starport",
 		"extension/uistack", "extension/sandbox_scan", "extension/cereal",
-		"extension/physical_sky", "extension/ui_utils", "extension/luanti_client",
-		"module/luanti", "module/voxelworld", "module/voxel_shading"}) do
+		"extension/physical_sky", "extension/voxel_light", "extension/ui_utils",
+		"extension/luanti_client", "module/luanti", "module/voxelworld",
+		"module/voxel_shading"}) do
 	local ok, m = pcall(require, "buildat/"..name)
 	if ok and type(m) == "table" then walk(m, (name:gsub(".*/", "")), 1) end
 end

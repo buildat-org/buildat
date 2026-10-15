@@ -18,6 +18,10 @@ namespace interface
 		// client's files first arrive, named relative to the module
 		// (e.g. "init.lua" runs "<module>/init.lua") ([ENGINE_LOADER])
 		ss_ client_main;
+		// Extensions (<share>/extensions/<name>) the server serves to its
+		// clients for this module's client scripts, which run the served
+		// copy: client_file::serve_extension()
+		sv_<ss_> client_extensions;
 		ss_ cxxflags;
 		ss_ ldflags;
 		ss_ cxxflags_linux;

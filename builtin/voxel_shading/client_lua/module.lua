@@ -109,182 +109,68 @@ end
 local sun_gate = false
 local use_modifiers = false
 
--- How much of the sky the camera can see, per direction, as a cube of 6x6
--- values per face: 216 numbers, which the shader samples along a pixel's
--- reflection direction and multiplies the sky cube map by. That is the whole
--- indoor/outdoor treatment. There is no second, dimmed cube map to fade to
--- any more, and no single blend value deciding which one a surface gets: this
--- dims the real sky in the directions it cannot be seen and leaves it alone
--- in the directions it can, which is what a baked indoor map was
--- approximating and it cannot get the geometry wrong. Standing in a tunnel
--- mouth, the walls stop reflecting sky while the mouth still does; looking at
--- a cave from outside with no sky in view, nothing reflects a horizon band
--- that is not there.
---
--- 6x6 rather than something coarser because the openings that matter are
--- small: the sky over a tunnel is a few degrees off the tunnel's own
--- direction. A cell here is about 15 degrees across, where a 3x3 cube's is 40
--- and the shader's interpolation spreads one cell over most of a face; the
--- self-check's flat ground reads 0.50 to the sides at this resolution and
--- 0.92 at 3x3, where the ground and the sky above it end up in the same cell.
---
--- The values come from marching rays through the voxel data from the camera.
--- No geometry, depth buffer or render pass is involved. buildat.cast_voxel_rays
--- does the marching, on a worker thread, which is what makes this many rays
--- affordable: the same loop written in Lua cost half a millisecond a frame for
--- four rays of twenty voxels, where the engine marches one in a third of a
--- microsecond. It also decides what stops a ray by the voxel registry's own
--- physically_solid, so glass and water are whatever the world says they are.
---
--- Handing the rays over costs several times more than marching them does --
--- see the note in apps/sample_lighting_scene/README.txt for where the time goes, and
--- for why making the marching itself faster would be the wrong thing to try.
---
--- A ray answers no if something solid stops it, and otherwise the skylight of
--- the air it ended in. Partial values come from sampling rather
--- than from any softening of that: the rays are jittered within their cells
--- and differently each sweep, and each cell keeps an average of its own rays,
--- so a cell settles at the fraction of its directions that see sky.
-local FACES = 6
-local CELLS = 6                -- Per face, per axis
-local CELL_COUNT = FACES * CELLS * CELLS
--- Rays cast into each cell per sweep, averaged into that cell's value. This is
--- the knob for how noisy one sweep's answer is: a cell's rays are yes or no,
--- so one of them is a coin flip weighted by how much of the cell sees sky, and
--- the average of K of them has a K-th of the variance. They are stratified
--- within the cell rather than independent, so they cover it evenly instead of
--- clumping the way K independent samples would.
-local RAYS_PER_CELL = 4
--- Cells refreshed per frame. A sweep is every cell once, so this is how often
--- the whole cube is renewed: 36 cells of the 216 here is a sweep every six
--- frames, or every three at the rate MAX_IN_FLIGHT actually keeps up -- read
--- its comment before taking this or RAYS_PER_CELL as rays per frame.
-local CELLS_PER_UPDATE = 36
--- How far a ray looks. Long, because the length is what makes the answer
--- strict: a ray down demo_digger's tunnel has to reach the end of it to find out
--- that the tunnel is not a way to the sky, and the tunnel is tens of voxels
--- long. Cheap enough that this is not the thing to save on.
-local RAY_VOXELS = 64
--- How much of a cell's new value is taken into the one the shader sees. What a
--- sweep hands over is already an average of RAYS_PER_CELL rays; this averages
--- those over time as well. At 0.10 a cell settles in about a second and the
--- reflections trail the camera by about that. Taking more of each sweep puts
--- the sampling's own noise on the screen, which reads as the speculars
--- flickering several times a second.
-local SKY_VIS_BLEND = 0.10
--- Sweeps averaged when snapping, for a camera that has been moved rather than
--- has moved: the same averaging done at once, so a screenshot taken right
--- after a teleport is as settled as one taken later. Two rather than more
--- because a sweep is already RAYS_PER_CELL deep. This is some thousands of
--- rays in one frame and drops one, which is what a teleport does anyway.
-local SNAP_SWEEPS = 2
+-- How much of the sky the camera can see, per direction: the cube the
+-- shader multiplies the sky cube map by, which is the whole indoor/outdoor
+-- treatment. It is extensions/voxel_light's ray cube ([LC_SKY_SHARED]),
+-- served by this module's server (client_extensions in meta.json) so it is
+-- the version the served shaders know; the voxels it marches through are
+-- collected here.
+local ok_vl, err_vl, voxel_light =
+		buildat.run_script_file("voxel_light/init.lua")
+if not ok_vl or type(voxel_light) ~= "table" then
+	error("voxel_shading: could not load voxel_light: " .. tostring(err_vl))
+end
+M.voxel_light = voxel_light
 -- Chunks are collected around the camera out to the reach of a ray, and the
 -- list is kept until the camera crosses into another chunk: which chunks are
 -- within reach does not change until then. Rebuilt every so many sweeps as
 -- well, since a streaming world loads chunks under a camera that is standing
 -- still.
-local VOLUME_MARGIN = RAY_VOXELS
+local VOLUME_MARGIN = voxel_light.RAY_VOXELS
 local VOLUME_REFRESH_SWEEPS = 20
 
--- Which way a cell looks. A direction is placed on the cube by its largest
--- component: that component picks the face, and the other two, divided by it,
--- are the position on the face in -1..1. Going the other way, as here, the
--- face's own axis is +-1 and the other two are the cell's position. The
--- shader takes a direction apart exactly this way, so the two only have to
--- agree with each other and not with anyone's cube map face convention.
---
--- Face f is axis (f - f % 2) / 2 -- 0 x, 1 y, 2 z -- and sign 1 for even f,
--- -1 for odd. u runs along the lowest-numbered axis that is not the face's
--- own and v along the highest.
-local FACE_AXES = {
-	{major = "x", u = "y", v = "z", sign =  1},
-	{major = "x", u = "y", v = "z", sign = -1},
-	{major = "y", u = "x", v = "z", sign =  1},
-	{major = "y", u = "x", v = "z", sign = -1},
-	{major = "z", u = "x", v = "y", sign =  1},
-	{major = "z", u = "x", v = "y", sign = -1},
-}
-
-local CELL_SIZE = 2.0 / CELLS
-
--- The directions, three numbers to a ray, in cell order: RAYS_PER_CELL of them
--- per cell, so a slice of cells is a run of directions. One flat array rather
--- than a table per ray because the engine reads every one of these every
--- frame, and a table each was most of what the sampling cost.
-local AXIS_OFFSET = {x = 0, y = 1, z = 2}
-local DIRS = {}
-for i = 1, CELL_COUNT * RAYS_PER_CELL * 3 do
-	DIRS[i] = 0.0
-end
-
 local camera_node = nil
--- What the shader is using now, and what the sweep in progress has found so
--- far, both as one value per cell. Starting fully lit: a game whose voxel
--- data has not arrived yet looks like it is outdoors, which it usually is.
-local sky_vis = {}
-local sweep_vis = {}
-for i = 1, CELL_COUNT do
-	sky_vis[i] = 1.0
-	sweep_vis[i] = 1.0
-end
-local sweep_next = 1
-local sweep_index = 0
--- Frames until the sky visibility parameter is put on the render path's scene
--- passes again; see push_sky_vis()
-local declare_countdown = 0
 -- Which chunk the collected volumes are for, and how many sweeps ago
 local volumes_chunk_x, volumes_chunk_y, volumes_chunk_z = nil, nil, nil
 local volumes_age = VOLUME_REFRESH_SWEEPS
--- The one table handed to buildat.cast_voxel_rays, reused: only the slice
--- bounds, the origin and the chunk list change between calls
-local ray_args = {
-	directions = DIRS,
-	max_steps = RAY_VOXELS,
-	-- Not used: skylight says the sky is open above a voxel, which is nothing
-	-- to do with whether the sky lies along the ray, so stopping a ray at it
-	-- answers the wrong question -- see the note further down. The engine will
-	-- do it for callers that do want it.
-	stop_skylight = 0,
-	-- Consecutive rays are one cell's, and the engine hands back their average
-	-- per cell rather than what each of them found: a few hundred numbers a
-	-- frame instead of four per ray. What a ray is worth is then the engine's
-	-- rule; see cast_voxel_rays() in src/lua_bindings/voxel_volume.cpp. A game
-	-- wanting its own leaves this unset and reads the rays itself.
-	rays_per_cell = RAYS_PER_CELL,
-	first = 1,
-	count = 1,
-	origin = {x = 0, y = 0, z = 0},
-	volumes = {},
+-- What collect_volumes() hands voxel_light, reused
+local collected = {volumes = {}}
+-- The scene passes' parameters, which voxel_light keeps on the render
+-- path with its own, and what each is until a game sets it:
+--   SpecEmphasis     multiplies the reflected sky; 1 is what a game renders,
+--                    the benchmarks turn it up (M.set_specular_emphasis())
+--   SkyLight         how much light is on the sky the reflections come from
+--                    (M.set_sky_light())
+--   SkyTint, SkyTintAmount  and what colour it is now, against the noon sky
+--                    the cube map holds; white and none is the cube map as
+--                    baked (M.set_sky_tint())
+--   BounceLight      light off the surroundings, where the sky does not
+--                    reach (M.set_bounce_light())
+--   GroundLight      the ground's radiance, for the lower hemisphere
+--                    (M.set_ground_light())
+--   LampLight        a lamp at full on the packed path, in the ambient's
+--                    units (M.set_lamp_light()); white is the plain path's
+--   CaveAmbient      [CAVE_AO]: what a cave is never darker than, the same
+--                    at every hour; nothing until a client sets it
+--   ChamberLight, GrayByLight, TranslucencyGain  see their setters
+--   ProbeBox         off for a world with a sky: a cube map at infinity
+--                    wants no parallax ([LAUNCH_WORLD]'s room is the one
+--                    that does)
+local vis_params = {
+	SpecEmphasis = 1.0,
+	SkyLight = 1.0,
+	SkyTint = magic.Vector3(1, 1, 1),
+	SkyTintAmount = 0.0,
+	BounceLight = magic.Vector3(0, 0, 0),
+	GroundLight = magic.Vector3(0, 0, 0),
+	LampLight = magic.Vector3(1, 1, 1),
+	CaveAmbient = magic.Vector3(0, 0, 0),
+	ChamberLight = 1.0,
+	GrayByLight = 0.0,
+	TranslucencyGain = 1.0,
+	ProbeBox = 0.0,
 }
--- The values as the shader takes them, rebuilt when they change rather than
--- per frame
-local sky_vis_buffer = magic.VectorBuffer:new()
-local sky_vis_param = nil
-local sky_vis_dirty = false
--- Multiplies the reflected sky in the shader. 1 is what a game renders; the
--- benchmarks turn it up to look at the reflections themselves. See
--- M.set_specular_emphasis().
-local spec_emphasis = 1.0
--- How much light is on the sky the reflections come from; see M.set_sky_light()
-local sky_light = 1.0
--- And what colour it is now, against the noon sky the cube map holds; see
--- M.set_sky_tint(). White and none is the cube map as it was baked.
-local sky_tint = magic.Vector3(1, 1, 1)
-local sky_tint_amount = 0.0
--- Light bounced off the surroundings, reaching a surface where the sky does
--- not; see M.set_bounce_light()
-local bounce_light = magic.Vector3(0, 0, 0)
--- What a lamp at full reads as on the packed path, in the ambient's units;
--- see M.set_lamp_light(). Unset (nil) is the plain path's white.
-local translucency_gain = 1.0
-local lamp_light = magic.Vector3(1, 1, 1)
--- [CAVE_AO]: what a cave is never darker than, in the ambient's units and
--- the same at every hour. Nothing until a client sets it.
-local cave_ambient = magic.Vector3(0, 0, 0)
-local chamber_light_param = 1.0
-local gray_by_light = 0.0
--- And the ground's radiance, for the lower hemisphere; see M.set_ground_light()
-local ground_light = magic.Vector3(0, 0, 0)
+local vis = nil -- voxel_light's, made once collect_volumes() is
 -- Whether the mesher packs the vertex alpha; see M.set_packed_sky()
 local packed_sky = 0.0
 -- The shadow-kind diagnostic; see M.set_shadow_kinds()
@@ -386,114 +272,16 @@ end
 
 voxelworld.sub_material_update(M.apply_to_node)
 
--- Where in its cell each ray of this sweep samples.
---
--- Two parts: a fixed offset per cell, and a step the whole sweep takes. The
--- step is two irrationals, so a cell's sample point walks its cell instead of
--- landing on a few spots, and the sequence is the same every run.
---
--- The per-cell offset is the part that matters for what this looks like. With
--- one offset for the whole cube, every cell samples the same relative point at
--- the same time and their errors line up: a sweep whose offset happens to lean
--- towards the sky brightens every cell that straddles an opening at once, so
--- the reflections in the whole scene move together rather than each surface
--- wobbling on its own. Coherent like that it reads as the scene pulsing, which
--- is far more visible than the same amount of noise spread over cells, and
--- since the step is a fixed sequence the pulsing is periodic. More rays does
--- not help: it is not a shortage of samples, it is every cell making the same
--- error at the same moment.
---
--- The offsets are the R2 low discrepancy sequence over the cells, which spreads
--- them evenly in the square rather than clumping the way independent random
--- ones would. The sweep step is the golden ratio and root two, unrelated to R2
--- so the two do not come back into step with each other.
-local CELL_JITTER_U = {}
-local CELL_JITTER_V = {}
-for i = 1, CELL_COUNT do
-	CELL_JITTER_U[i] = (i * 0.7548776662) % 1.0
-	CELL_JITTER_V[i] = (i * 0.5698402909) % 1.0
-end
-local SWEEP_STEP_U = 0.6180339887
-local SWEEP_STEP_V = 0.4142135624
-
--- Where a cell's rays sit relative to each other: a Hammersley set, which
--- covers the cell evenly. The set is then shifted as a whole by the cell's own
--- offset and by the sweep's step, which keeps the even coverage while moving
--- it, so no two cells sample the same relative points and no cell samples the
--- same points twice.
-local function radical_inverse_2(n)
-	local r, f = 0.0, 0.5
-	while n > 0 do
-		r = r + (n % 2) * f
-		n = math.floor(n / 2)
-		f = f * 0.5
-	end
-	return r
-end
-
-local STRAT_U = {}
-local STRAT_V = {}
-for k = 1, RAYS_PER_CELL do
-	STRAT_U[k] = (k - 0.5) / RAYS_PER_CELL
-	STRAT_V[k] = radical_inverse_2(k - 1)
-end
-
-local function aim_dirs(index)
-	local su = (index * SWEEP_STEP_U) % 1.0
-	local sv = (index * SWEEP_STEP_V) % 1.0
-	local i = 1
-	for face = 1, FACES do
-		local a = FACE_AXES[face]
-		local mo = AXIS_OFFSET[a.major] + 1
-		local uo = AXIS_OFFSET[a.u] + 1
-		local vo = AXIS_OFFSET[a.v] + 1
-		for row = 0, CELLS - 1 do
-			for col = 0, CELLS - 1 do
-				local bu = CELL_JITTER_U[i] + su
-				local bv = CELL_JITTER_V[i] + sv
-				local base = (i - 1) * RAYS_PER_CELL * 3
-				for k = 1, RAYS_PER_CELL do
-					local ju = (bu + STRAT_U[k]) % 1.0 - 0.5
-					local jv = (bv + STRAT_V[k]) % 1.0 - 0.5
-					DIRS[base + mo] = a.sign
-					DIRS[base + uo] = (col + 0.5 + ju) * CELL_SIZE - 1.0
-					DIRS[base + vo] = (row + 0.5 + jv) * CELL_SIZE - 1.0
-					base = base + 3
-				end
-				i = i + 1
-			end
-		end
-	end
-end
-
--- A ray answers 1 if nothing stopped it and 0 if something solid did.
---
--- Deliberately a yes or no. What a reflection wants to know is what lies in
--- that direction, and if the answer is rock three voxels away then it is rock,
--- however brightly lit the air in between happens to be. Partial values come
--- from the sampling, not from softening this.
---
--- What a ray is worth is the engine's rule now, since averaging rays into a
--- cell means deciding that: nothing if something solid stopped it, otherwise
--- the skylight of the air it ended in. See ray_visibility() in
--- src/lua_bindings/voxel_volume.cpp for why it is there and what it means.
---
--- Note what that rule does not do: stop a ray at full skylight. Skylight says
--- the sky is open above a point, which is nothing to do with whether the sky
--- lies along the ray, and stopping rays on it looked right and was badly wrong
--- -- at the mouth of demo_digger's tunnel the air is fully lit, so every direction
--- including the tunnel came back at 1. At the far end of a ray it answers
--- about the place the ray reached, which is a question it can answer.
-
--- The chunks a ray could reach. The engine picks the one it needs per step out
--- of this list, so it only has to be the right set, not a short one.
+-- The chunks a ray could reach, for voxel_light. The engine picks the one it
+-- needs per step out of this list, so it only has to be the right set, not
+-- a short one.
 --
 -- Rebuilding it every sweep cost half a millisecond a frame, which was more
 -- than the rays; it is the same set until the camera changes chunk.
 local function collect_volumes(origin)
 	local cs = voxelworld.chunk_size_voxels
 	if cs == nil then
-		return false -- voxelworld is not initialized yet
+		return nil -- voxelworld is not initialized yet
 	end
 	local cx = math.floor(origin.x / cs.x)
 	local cy = math.floor(origin.y / cs.y)
@@ -503,12 +291,12 @@ local function collect_volumes(origin)
 	volumes_age = volumes_age + 1
 	if volumes_age < VOLUME_REFRESH_SWEEPS and cx == volumes_chunk_x and
 			cy == volumes_chunk_y and cz == volumes_chunk_z and
-			ray_args.volumes[1] ~= nil then
-		return true
+			collected.volumes[1] ~= nil then
+		return collected
 	end
 	volumes_chunk_x, volumes_chunk_y, volumes_chunk_z = cx, cy, cz
 	volumes_age = 0
-	local volumes = ray_args.volumes
+	local volumes = collected.volumes
 	for i = #volumes, 1, -1 do
 		volumes[i] = nil
 	end
@@ -529,138 +317,13 @@ local function collect_volumes(origin)
 			end
 		end
 	end
-	ray_args.chunk_size = cs
-	ray_args.registry = voxelworld.get_voxel_registry()
-	return n > 0
+	collected.chunk_size = cs
+	collected.registry = voxelworld.get_voxel_registry()
+	return collected
 end
 
--- What a finished slice found, into the sweep: the engine has already averaged
--- each cell's rays into one value
-local function keep_slice(first_cell, count_cells, out)
-	local vis = out.visibility
-	for c = 1, count_cells do
-		sweep_vis[first_cell + c - 1] = vis[c]
-	end
-end
+vis = voxel_light.new_vis(magic, buildat, collect_volumes, vis_params)
 
-local function aim_args(first_cell, count_cells)
-	ray_args.first = (first_cell - 1) * RAYS_PER_CELL + 1
-	ray_args.count = count_cells * RAYS_PER_CELL
-end
-
--- One slice of a sweep, marched here and now. Only the snap uses this: it is
--- thousands of rays wanted before the next frame is drawn, which is what
--- blocking is for.
-local function cast_slice(first_cell, count_cells)
-	aim_args(first_cell, count_cells)
-	keep_slice(first_cell, count_cells, buildat.cast_voxel_rays(ray_args))
-end
-
--- f is how much of the sweep's rays to take; 1.0 replaces the values outright
-local function blend_cells(first, count, f)
-	for i = first, first + count - 1 do
-		sky_vis[i] = sky_vis[i] + (sweep_vis[i] - sky_vis[i]) * f
-	end
-	sky_vis_dirty = true
-end
-
--- The values as the shader takes them. One parameter of CELL_COUNT floats
--- rather than that many parameters: Urho sets a Variant buffer as a float
--- array, sized by what the uniform declares. Packed by the engine because
--- WriteFloat() per value is a sandbox call each.
---
--- Once a frame, however many slices landed in it. Repacking per slice meant
--- reading every cell out of Lua twice a frame to publish a cube that only the
--- shader ever reads, and the shader reads it once.
-local function repack_sky_vis()
-	if not sky_vis_dirty then return end
-	sky_vis_dirty = false
-	buildat.write_floats(sky_vis_buffer, sky_vis)
-	sky_vis_param = magic.Variant(sky_vis_buffer)
-end
-
--- Slices out on worker threads, oldest first. The marching is the same work
--- wherever it runs; what moves it off the frame is that the frame has better
--- uses for a third of a millisecond, and that the sampling wants several times
--- more rays than that.
---
--- More than one is kept in flight because a slice submitted in one frame is
--- collected in a later one: with a single slice out, every other frame would
--- have nothing to collect and nothing to submit, and the sweep would take
--- twice as long for no reason. Two is enough to keep a worker fed. The pool
--- has four of them and the mesher is the other caller.
---
--- Note what this does to the rate. The queue is topped back up to this depth
--- every frame, so when the workers keep up, two slices are submitted per frame
--- and the rays cast are twice CELLS_PER_UPDATE times RAYS_PER_CELL: 288 a
--- frame where those two constants read 144. Worth knowing before reading
--- either of them as a rate.
-local MAX_IN_FLIGHT = 2
-local in_flight = {}
-
-local function submit_slice(first_cell, count_cells)
-	aim_args(first_cell, count_cells)
-	in_flight[#in_flight + 1] = {first = first_cell, count = count_cells,
-			job = buildat.cast_voxel_rays_start(ray_args)}
-end
-
--- Blends in what has finished, oldest first, and stops at the first slice that
--- has not: they are taken in the order they were cast.
-local function collect_slices(f)
-	while in_flight[1] ~= nil do
-		local slice = in_flight[1]
-		local out = buildat.cast_voxel_rays_collect(slice.job)
-		if out == nil then
-			return
-		end
-		table.remove(in_flight, 1)
-		keep_slice(slice.first, slice.count, out)
-		blend_cells(slice.first, slice.count, f)
-	end
-end
-
--- Anything in flight is reading volumes it holds itself, so dropping the
--- handles is enough; what they find is no longer wanted.
-local function drop_slices()
-	for i = #in_flight, 1, -1 do
-		in_flight[i] = nil
-	end
-end
-
--- No chunks anywhere near: a camera above the world, or one whose world has
--- not arrived. Outdoors is the right answer for both.
-local function sweep_all_open()
-	for i = 1, CELL_COUNT do
-		sweep_vis[i] = 1.0
-	end
-end
-
-local function begin_sweep()
-	sweep_next = 1
-	sweep_index = sweep_index + 1
-	aim_dirs(sweep_index)
-end
-
-
--- The values go on the render path's scene pass commands rather than on
--- materials. Urho hands a scene pass command's shader parameters to every
--- batch that command draws, so this reaches the whole scene however many
--- chunks are loaded; a copy per material was hundreds of calls a sweep and
--- cost more than the ray marching did.
---
--- Two steps, because the cheap way to set it is not the way to declare it.
--- RenderPath:SetShaderParameter() only touches commands that already carry the
--- name, and that is the per frame path: three calls, no matter how long the
--- render path is. Adding the name to the scene passes means walking the
--- commands, and each command asked for is a fresh sandbox wrapper, which came
--- to a third of a millisecond a frame; so the walk happens now and then
--- instead. A game that swaps its render path -- they clone one and append post
--- processing to it -- gets the name back on the next walk, and until then the
--- shader keeps the values it had.
---
--- The commands themselves are deliberately not kept: they are pointers into a
--- vector the render path can reallocate.
-local DECLARE_EVERY_FRAMES = 60
 
 -- **A field over the world** ([SKELENTI_DANGER_LOOK]): a value 0 to 1 per
 -- cell of a grid on x and z that a game sets -- skelenti's danger -- and
@@ -680,7 +343,7 @@ function M.set_area_field(x0, z0, cell, w, h, bytes)
 		if area_field then
 			area_field.param = magic.Color(0, 0, 0, 0)
 		end
-		declare_countdown = 0
+		vis:redeclare()
 		return
 	end
 	assert(type(bytes) == "string" and #bytes == w * h,
@@ -697,7 +360,7 @@ function M.set_area_field(x0, z0, cell, w, h, bytes)
 	end
 	area_field.tex:SetData(img)
 	area_field.param = magic.Color(x0, z0, 1 / (w * cell), 1 / (h * cell))
-	declare_countdown = 0
+	vis:redeclare()
 end
 
 local function push_area_field(render_path)
@@ -711,132 +374,28 @@ local function push_area_field(render_path)
 	end
 end
 
-local function push_sky_vis()
-	repack_sky_vis()
-	if sky_vis_param == nil then return end
-	local viewport = magic.renderer:GetViewport(0)
-	if viewport == nil then return end
-	local render_path = viewport.renderPath
-	if render_path == nil then return end
-	declare_countdown = declare_countdown - 1
-	if declare_countdown <= 0 then
-		declare_countdown = DECLARE_EVERY_FRAMES
-		for i = 0, render_path:GetNumCommands() - 1 do
-			local command = render_path:GetCommand(i)
-			if command ~= nil and command.type == magic.CMD_SCENEPASS then
-				command:SetShaderParameter("SkyVis", sky_vis_param)
-				command:SetShaderParameter("SpecEmphasis", spec_emphasis)
-				command:SetShaderParameter("SkyLight", sky_light)
-				command:SetShaderParameter("SkyTint", sky_tint)
-				command:SetShaderParameter("SkyTintAmount", sky_tint_amount)
-				command:SetShaderParameter("BounceLight", bounce_light)
-				command:SetShaderParameter("GroundLight", ground_light)
-				command:SetShaderParameter("LampLight", lamp_light)
-				command:SetShaderParameter("CaveAmbient", cave_ambient)
-				command:SetShaderParameter("ChamberLight", chamber_light_param)
-				command:SetShaderParameter("GrayByLight", gray_by_light)
-				command:SetShaderParameter("TranslucencyGain", translucency_gain)
-				-- Off for a world with a sky, and said every frame like
-				-- the rest: a cube map at infinity wants no parallax
-				-- ([LAUNCH_WORLD]'s room is the one that does)
-				command:SetShaderParameter("ProbeBox", 0.0)
-			end
-		end
-		if area_field then
-			push_area_field(render_path)
-		end
-		return
+vis.on_declare = function(render_path)
+	if area_field then
+		push_area_field(render_path)
 	end
-	render_path:SetShaderParameter("SkyVis", sky_vis_param)
-	render_path:SetShaderParameter("SpecEmphasis", spec_emphasis)
-	render_path:SetShaderParameter("SkyLight", sky_light)
-	render_path:SetShaderParameter("SkyTint", sky_tint)
-	render_path:SetShaderParameter("SkyTintAmount", sky_tint_amount)
-	render_path:SetShaderParameter("BounceLight", bounce_light)
-	render_path:SetShaderParameter("GroundLight", ground_light)
-	render_path:SetShaderParameter("LampLight", lamp_light)
-	render_path:SetShaderParameter("CaveAmbient", cave_ambient)
-	render_path:SetShaderParameter("ChamberLight", chamber_light_param)
-	render_path:SetShaderParameter("GrayByLight", gray_by_light)
-	render_path:SetShaderParameter("TranslucencyGain", translucency_gain)
-	render_path:SetShaderParameter("ProbeBox", 0.0)
 end
 
 -- How much of the sky is visible overhead: 1 out in the open, towards 0
--- underground. What wants it is whatever is not per direction -- a zone's
--- fog colour is the one -- and it costs nothing, the cells being kept here
--- anyway. See [CAVE_SKY] in doc/plan/rendering_plan.md.
---
--- **The +Y face rather than the whole cube**, which that section proposed
--- and which measuring rejected: half the cube looks at the ground wherever
--- the player is standing, so a whole-cube mean is about a half in broad
--- daylight and the fog would be part indoors on an open beach. The face is
--- the cone of directions whose largest component is up, which is where the
--- daylight comes from, and is the same face the shader indexes as 2.
-local ABOVE_FIRST = 2 * CELLS * CELLS + 1
-local ABOVE_LAST = 3 * CELLS * CELLS
-
--- The whole cube's mean, and its lowest cell: what the reflections are
--- gated by per direction, which chamber_light() cannot say -- that is the
--- mean of the eight brightest and reads 1.0 while most of the sphere is
--- dark ([UNDERGROUND_LIGHT], 2026-09-28).
-function M.sky_vis_stats()
-	local sum, lo, hi = 0, 1e9, -1e9
-	for i = 1, CELL_COUNT do
-		local v = sky_vis[i]
-		sum = sum + v
-		if v < lo then lo = v end
-		if v > hi then hi = v end
-	end
-	return sum / CELL_COUNT, lo, hi
-end
-
+-- underground (the +Y face; [CAVE_SKY]). What wants it is whatever is not
+-- per direction -- a zone's fog colour is the one.
 function M.sky_visibility_above()
-	local sum = 0
-	for i = ABOVE_FIRST, ABOVE_LAST do
-		sum = sum + sky_vis[i]
-	end
-	return sum / (ABOVE_LAST - ABOVE_FIRST + 1)
+	return vis:above()
 end
 
--- How lit the brightest air this chamber shows the camera is: 0 where every
--- direction ends in rock or in unlit air, towards 1 where some direction ends
--- in air the daylight reached. What wants it is the light a chamber has by
--- bouncing -- [UNDERGROUND_LIGHT]: a cave lit at its far end lights all of
--- itself, and no face can work that out for itself, since the light arrives
--- round a corner. The cells already carry it: a ray answers nothing if
--- something solid stopped it and otherwise the skylight of the air it ended
--- in, which is this question asked in one direction.
---
--- **The brightest few cells rather than the brightest one**: a cell is four
--- jittered rays blended over time, so the single maximum chases its own
--- sampling, and a lit far end that covers a few degrees still lands in
--- several cells. Eight of 216 is about a twentieth of the sphere.
-local BEST_CELLS = 8
+-- The whole cube's mean, and its lowest and highest cell
+function M.sky_vis_stats()
+	return vis:stats()
+end
 
+-- How lit the brightest air this chamber shows the camera is
+-- ([UNDERGROUND_LIGHT]): the mean of the eight brightest cells
 function M.chamber_light()
-	-- An insertion sort over eight, once a frame, against 216 values: the
-	-- sort is cheaper than a table allocation would be
-	local best = {}
-	for i = 1, BEST_CELLS do
-		best[i] = 0.0
-	end
-	for i = 1, CELL_COUNT do
-		local v = sky_vis[i]
-		if v > best[BEST_CELLS] then
-			local j = BEST_CELLS
-			while j > 1 and best[j - 1] < v do
-				best[j] = best[j - 1]
-				j = j - 1
-			end
-			best[j] = v
-		end
-	end
-	local sum = 0
-	for i = 1, BEST_CELLS do
-		sum = sum + best[i]
-	end
-	return sum / BEST_CELLS
+	return vis:chamber()
 end
 
 -- How much to multiply the reflected sky by, 1 being what a game renders.
@@ -862,8 +421,7 @@ end
 -- Lambert through the leaf's colour squared ([PBR_FIT] 3b); the launcher
 -- sets it from the fit, BUILDAT_VOXEL_TRANSLUCENCY overrides
 function M.set_translucency_gain(k)
-	translucency_gain = math.max(0, k)
-	declare_countdown = 0
+	vis:set_param("TranslucencyGain", math.max(0, k))
 end
 
 -- A light of the place rather than of the sky: a constant floor under the
@@ -876,8 +434,7 @@ end
 -- sealed place stops following the hour while a cave lit round a corner keeps
 -- its light. One unless a client sets it, which is what the shader did before.
 function M.set_chamber_light(f)
-	chamber_light_param = math.max(0, f)
-	declare_countdown = 0
+	vis:set_param("ChamberLight", math.max(0, f))
 end
 
 -- [NIGHT_GRAY]'s third ladder: show a face gray by the light it gets rather
@@ -887,31 +444,31 @@ end
 -- top is the ramp's top as a multiple of the floor (1.25 is the picked
 -- width); nil or false turns it off.
 function M.set_gray_by_light(top)
-	gray_by_light = (type(top) == "number" and top > 0) and top or 0.0
-	declare_countdown = 0
+	vis:set_param("GrayByLight",
+			(type(top) == "number" and top > 0) and top or 0.0)
 end
 
 function M.set_cave_ambient(r, g, b)
-	cave_ambient = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
-	declare_countdown = 0
+	vis:set_param("CaveAmbient", magic.Vector3(math.max(0, r), math.max(0, g),
+			math.max(0, b)))
 end
 
 function M.set_lamp_light(r, g, b)
-	lamp_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
-	declare_countdown = 0
+	vis:set_param("LampLight", magic.Vector3(math.max(0, r), math.max(0, g),
+			math.max(0, b)))
 end
 
 function M.set_bounce_light(r, g, b)
-	bounce_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
-	declare_countdown = 0
+	vis:set_param("BounceLight", magic.Vector3(math.max(0, r), math.max(0, g),
+			math.max(0, b)))
 end
 
 -- The ground's radiance, in the zone ambient's units, which a surface
 -- receives by how much of its hemisphere looks down: half for a wall, all
 -- for a ceiling. Nothing until a client sets it.
 function M.set_ground_light(r, g, b)
-	ground_light = magic.Vector3(math.max(0, r), math.max(0, g), math.max(0, b))
-	declare_countdown = 0
+	vis:set_param("GroundLight", magic.Vector3(math.max(0, r), math.max(0, g),
+			math.max(0, b)))
 end
 
 -- Whether the mesher packs the skylight nibble and the shade into the
@@ -944,8 +501,7 @@ function M.set_sky_light(k)
 	if k == nil then
 		return
 	end
-	sky_light = math.max(0, k)
-	declare_countdown = 0
+	vis:set_param("SkyLight", math.max(0, k))
 end
 
 -- And what colour that sky is now. The cube map holds one sky -- the noon
@@ -966,74 +522,23 @@ function M.set_sky_tint(color, amount)
 		local g = color.g or color[2] or 1
 		local b = color.b or color[3] or 1
 		local luma = math.max(0.001, 0.299 * r + 0.587 * g + 0.114 * b)
-		sky_tint = magic.Vector3(r / luma, g / luma, b / luma)
+		vis:set_param("SkyTint", magic.Vector3(r / luma, g / luma, b / luma))
 	end
 	if amount then
-		sky_tint_amount = math.max(0, math.min(1, amount))
+		vis:set_param("SkyTintAmount", math.max(0, math.min(1, amount)))
 	end
-	declare_countdown = 0
 end
 
 function M.set_specular_emphasis(v)
-	spec_emphasis = v
 	-- Straight away rather than at the next declaring walk, so a key that
-	-- changes it takes effect on the next frame
-	declare_countdown = 0
+	-- changes it takes effect on the next frame (set_param does that)
+	vis:set_param("SpecEmphasis", v)
 end
 
 -- dt of nil snaps, for when the camera has been moved rather than has moved
 function M.update(dt)
 	if camera_node == nil then return end
-	local origin = camera_node:GetWorldPosition()
-	ray_args.origin.x = origin.x
-	ray_args.origin.y = origin.y
-	ray_args.origin.z = origin.z
-	if dt == nil then
-		-- Several sweeps at once, averaged the way the easing would have
-		-- averaged them over a second. A single sweep is one ray per cell,
-		-- which is too coarse to look at.
-		--
-		-- What is already out on a worker was cast from where the camera used
-		-- to be, and blending it in afterwards would undo part of the snap.
-		drop_slices()
-		for sweep = 1, SNAP_SWEEPS do
-			begin_sweep()
-			if collect_volumes(origin) then
-				cast_slice(1, CELL_COUNT)
-			else
-				sweep_all_open()
-			end
-			blend_cells(1, CELL_COUNT, sweep == 1 and 1.0 or 1.0 / sweep)
-		end
-		begin_sweep()
-		push_sky_vis()
-		return
-	end
-	-- Each frame's cells are blended in and handed to the shader as their own
-	-- rays land, rather than a whole sweep at a time: waiting for the sweep
-	-- steps every reflection in the scene together, six frames apart, where
-	-- this spreads the same change out. Reasoning rather than measurement --
-	-- see the note in apps/sample_lighting_scene/README.txt.
-	collect_slices(SKY_VIS_BLEND)
-	-- Topped back up to the same depth every frame, so what is submitted is
-	-- what came back: if the workers are busy, nothing is submitted and the
-	-- sweep waits rather than piling up.
-	while #in_flight < MAX_IN_FLIGHT do
-		if sweep_next == 1 and not collect_volumes(origin) then
-			sweep_all_open()
-			blend_cells(1, CELL_COUNT, SKY_VIS_BLEND)
-			begin_sweep()
-			break
-		end
-		local first = sweep_next
-		local count = math.min(CELLS_PER_UPDATE, CELL_COUNT - sweep_next + 1)
-		submit_slice(first, count)
-		sweep_next = sweep_next + count
-		if sweep_next > CELL_COUNT then
-			begin_sweep()
-		end
-	end
-	push_sky_vis()
+	vis:update(camera_node:GetWorldPosition(), dt)
 end
 
 -- The skybox's material, kept so that a game with a clock can move the sun

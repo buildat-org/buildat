@@ -91,9 +91,10 @@ facets -- because a Luanti node definition says nothing about any of it. Two
 things keep the specular honest. The
 cube map beside the shader is one static noon gradient and is multiplied by the
 colour the sky is at this moment, so a sunset reflects orange and a night
-reflects almost nothing without anything being rebaked. And skyvis.lua marches
-rays through the voxels around the camera -- 216 directions, a few hundred rays
-a frame on a worker thread -- for how much sky can be seen each way, which the
+reflects almost nothing without anything being rebaked. And
+extensions/voxel_light marches rays through the voxels around the camera -- 216
+directions, a few hundred rays a frame on a worker thread -- for how much sky
+can be seen each way, which the
 shader dims the cube map by: the mouth of a tunnel reflects sky while its walls
 do not. The counter line says what it has found straight up and over how many
 blocks of voxels, which is the quickest way to see it is working at all.
@@ -254,8 +255,6 @@ media.lua       The server's media files, in cache/luanti_client/<server>/ (buil
 player.lua      The player's box: the keys, gravity, and collision against
                 the nodes
 shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
-skyvis.lua      How much sky the camera can see each way, for the PBR path's
-                reflections; ported from builtin/voxel_shading's module.lua
 surface.lua     What a node's surface is made of, guessed from its definition:
                 the six numbers per texture segment the atlas turns into
                 normal and spec maps
