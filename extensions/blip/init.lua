@@ -489,7 +489,9 @@ local function open_designer()
 	local page = view:CreateChild("UIElement")
 	page:SetLayout(LM_VERTICAL, 2, magic.IntRect(0, 0, 0, 0))
 	view.contentElement = page
-	view:SetFixedSize(360, math.min(260,
+	-- As wide as the column (its layout stretches it); the rows are
+	-- made as wide below, once the column has its width
+	view:SetFixedHeight(math.min(260,
 			math.max(120, magic.ui.root.height - 330)))
 	for _, def in ipairs(gen.PARAMS) do
 		local r = row(page)
@@ -498,7 +500,8 @@ local function open_designer()
 		local slider = r:CreateChild("Slider")
 		slider:SetStyleAuto()
 		slider.range = 1
-		slider:SetFixedSize(150, 16)
+		-- The rest of the row's width
+		slider:SetFixedHeight(16)
 		local value = text(r, "", 50)
 		local sl = {def = def, slider = slider, value = value}
 		sliders[#sliders + 1] = sl
@@ -608,6 +611,8 @@ local function open_designer()
 		code.textCopyable = true
 		code:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
 	end
+	-- The rows as wide as the view, less its scroll bar
+	page:SetFixedWidth(view.width - 24)
 	show_values()
 	show_code()
 	log:info("designer shown")
