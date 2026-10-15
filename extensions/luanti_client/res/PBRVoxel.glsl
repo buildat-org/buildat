@@ -544,6 +544,7 @@ void VS()
     // #include that starts its line; indented, it reaches the GLSL
     // compiler as "include not found".
 #include "SkyVis.glsl"
+#include "AreaField.glsl"
 
     // Multiplies the reflected sky, for looking at the reflections rather
     // than at the scene. 1 is what a game renders; the benchmarks turn it up
@@ -707,6 +708,13 @@ void PS()
         vec4 diffColor = cMatDiffColor;
     #endif
 
+    // A game's field of decay where this is (AreaField.glsl): the albedo
+    // here, and below the relief and the gloss
+    float decay = GetAreaField(vWorldPos.xyz);
+    if (decay > 0.0)
+        diffColor.rgb = DecayAlbedo(diffColor.rgb, vWorldPos.xyz, decay,
+                vec3(0.70, 0.65, 0.46));
+
 
     #ifdef VOXELMODIFIERS
         // simplified: the four slots are read as tint, wetness, grain and
@@ -772,6 +780,9 @@ void PS()
         float metalness = cMetallic;
         float specStrength = 1.0;
     #endif
+    // Decay is matte: dead stone does not glint
+    roughness = mix(roughness, 1.0, 0.6 * decay);
+    specStrength *= 1.0 - 0.7 * decay;
 
     #ifdef VOXELMODIFIERS
         // Wetness and the binder both smooth a surface; the binder also
@@ -858,6 +869,16 @@ void PS()
         spotTilt -= normal * dot(spotTilt, normal);
         normal = normalize(normal + spotTilt);
     #endif
+    // And rough: each chip turned its own way, more as it decays, and
+    // flat again where the chips are smaller than a pixel
+    if (decay > 0.0) {
+        vec3 chipTilt = (vec3(AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 7.0),
+            AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 17.0),
+            AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 29.0)) * 2.0 - 1.0) *
+            (0.45 * decay * (1.0 - AreaFieldFar(vWorldPos.xyz)));
+        chipTilt -= normal * dot(chipTilt, normal);
+        normal = normalize(normal + chipTilt);
+    }
 
     // Get fog factor
     #ifdef HEIGHTFOG

@@ -40,6 +40,7 @@
 #include <Node.h>
 #include <cmath>
 #include <cstdarg>
+#include <fstream>
 #include <map>
 #include <random>
 #include <set>
@@ -138,6 +139,8 @@ struct Module: public interface::Module
 	float m_ai_t = 0, m_spawn_t = 0, m_save_t = 0, m_fog_t = 0;
 	// The fog each player was last given, by name
 	std::map<ss_, float> m_fog;
+	// The middle of the danger grid each player was last sent, by name
+	std::map<ss_, std::pair<int, int>> m_field;
 	// The world's own danger field (danger()), kept in its save
 	uint32_t m_salt = 0;
 	std::mt19937 m_rand{std::random_device{}()};
@@ -224,6 +227,20 @@ struct Module: public interface::Module
 		m_starting = true;
 		log_i(MODULE, "skelenti: the world \"%s\" starts", cs(name));
 		luanti::access(m_server, [&](luanti::Interface *i){
+			// A file of Lua into the game before its mods, as vanilla's
+			// BUILDAT_LUANTI_LUA: what a check stages its scene with
+			const char *extra = getenv("BUILDAT_LUANTI_LUA");
+			if(extra && extra[0]){
+				std::ifstream ifs(extra, std::ios::binary);
+				if(!ifs.good()){
+					m_server->shutdown(1, ss_()+"Cannot read "+extra);
+					return;
+				}
+				std::ostringstream os;
+				os<<ifs.rdbuf();
+				log_i(MODULE, "skelenti: loading %s into the game", extra);
+				i->load_lua(os.str(), extra);
+			}
 			i->run_game(m_server->get_module_path(MODULE)+"/game", m_save);
 		});
 		return true;
@@ -367,6 +384,7 @@ struct Module: public interface::Module
 		m_waiting.erase(old.info.id);
 		m_local.erase(old.info.id);
 		m_fog.erase("player"+itos(old.info.id));
+		m_field.erase("player"+itos(old.info.id));
 		m_last_hit.erase(old.info.id);
 	}
 
@@ -491,10 +509,47 @@ struct Module: public interface::Module
 		return std::min(1.0f, std::max(0.0f, (v - 0.3f) / 0.6f));
 	}
 
-	// Each player's fog from the danger where they stand, when it moved
+	// **The danger on the ground** ([SKELENTI_DANGER_LOOK]): the field
+	// around a player, FIELD_N cells of FIELD_CELL nodes a side, which the
+	// client hands to voxel_shading's set_area_field() and the voxel
+	// shader draws as decay. Sent again when the player is a quarter of
+	// it from its middle. "skelenti:field": "x0 z0 cell n\n" and n * n
+	// bytes, row by row along +x, each the danger at a cell's middle.
+	// simplified: a view range past a quarter of the grid (132 nodes)
+	// sees the edge's value carried on; a bigger grid is the upgrade.
+	static const int FIELD_CELL = 16, FIELD_N = 33;
+	void send_field(const Player &p)
+	{
+		const int cx = (int)std::floor(p.x / FIELD_CELL);
+		const int cz = (int)std::floor(p.z / FIELD_CELL);
+		auto it = m_field.find(p.name);
+		if(it != m_field.end() && std::abs(it->second.first - cx) <
+				FIELD_N / 4 && std::abs(it->second.second - cz) < FIELD_N / 4)
+			return;
+		size_t peer = 0;
+		if(p.name.compare(0, 6, "player") != 0 ||
+				!(std::istringstream(p.name.substr(6)) >> peer))
+			return;
+		m_field[p.name] = {cx, cz};
+		const int x0 = (cx - FIELD_N / 2) * FIELD_CELL;
+		const int z0 = (cz - FIELD_N / 2) * FIELD_CELL;
+		ss_ data = fmt("%i %i %i %i\n", x0, z0, FIELD_CELL, FIELD_N);
+		for(int j = 0; j < FIELD_N; j++)
+			for(int i = 0; i < FIELD_N; i++)
+				data += (char)(uint8_t)std::lround(255 * danger(
+						x0 + (i + 0.5f) * FIELD_CELL,
+						z0 + (j + 0.5f) * FIELD_CELL));
+		network::access(m_server, [&](network::Interface *inet){
+			inet->send(peer, "skelenti:field", data);
+		});
+	}
+
+	// Each player's fog from the danger where they stand, when it moved,
+	// and the danger on the ground around them
 	void fog()
 	{
 		for(const Player &p : m_players){
+			send_field(p);
 			const float d = danger(p.x, p.z);
 			auto it = m_fog.find(p.name);
 			if(it != m_fog.end() && std::fabs(it->second - d) < 0.03f)

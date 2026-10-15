@@ -1756,6 +1756,23 @@ function M.define(dst, util)
 			RemoveShaderParameter = util.self_function(
 					"RemoveShaderParameter", {},
 					{"RenderPathCommand", "string"}),
+			-- A texture every batch the command draws gets on a unit its
+			-- material leaves free, by resource name: one of the script's
+			-- own (AddManualResource's "generated/...") or a render
+			-- target's. A world-wide field the voxel shader reads
+			-- ([SKELENTI_DANGER_LOOK]). The name is checked as
+			-- GetResource's is: a path off the disk is not one.
+			SetTextureName = util.wrap_function(
+				{"RenderPathCommand", "number", "string"},
+				function(self, unit, name)
+					if not resource_name_ok(name) or unit < 0 or
+							unit >= 16 or unit % 1 ~= 0 then
+						error("SetTextureName(): a unit 0..15 and a " ..
+								"relative resource name")
+					end
+					self:SetTextureName(unit, name)
+				end
+			),
 		},
 		properties = {
 			-- One of the CMD_ constants; CMD_SCENEPASS is the one that draws

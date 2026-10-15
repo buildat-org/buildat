@@ -662,6 +662,55 @@ end
 -- vector the render path can reallocate.
 local DECLARE_EVERY_FRAMES = 60
 
+-- **A field over the world** ([SKELENTI_DANGER_LOOK]): a value 0 to 1 per
+-- cell of a grid on x and z that a game sets -- skelenti's danger -- and
+-- the shader reads at each pixel, filtered between the cells. A texture
+-- on unit 6 of the scene and light passes, as the parameters above are,
+-- and AreaField the grid's corner and size: (x0, z0, 1 / width, 1 /
+-- depth) in nodes. What the shader makes of the value is the shader's;
+-- zero everywhere, and before any field is set, is the plain look.
+local AREA_FIELD_UNIT = 6
+local area_field = nil -- {tex, name = its resource, param = Color}
+
+-- set_area_field(x0, z0, cell, w, h, bytes): w * h bytes, row by row from
+-- (x0, z0) along +x, each the value at a cell's middle times 255; nil
+-- clears it
+function M.set_area_field(x0, z0, cell, w, h, bytes)
+	if x0 == nil then
+		if area_field then
+			area_field.param = magic.Color(0, 0, 0, 0)
+		end
+		declare_countdown = 0
+		return
+	end
+	assert(type(bytes) == "string" and #bytes == w * h,
+			"set_area_field: w * h bytes")
+	local img = magic.Image:new()
+	img:SetSize(w, h, 1)
+	magic.image_set_data(img, w, h, 1, bytes)
+	-- One texture, filled again: the commands find it by its name
+	if area_field == nil then
+		local tex = magic.Texture2D:new()
+		tex:SetNumLevels(1)
+		magic.cache:AddManualResource(tex, "voxel_shading/area_field")
+		area_field = {tex = tex, name = "generated/voxel_shading/area_field"}
+	end
+	area_field.tex:SetData(img)
+	area_field.param = magic.Color(x0, z0, 1 / (w * cell), 1 / (h * cell))
+	declare_countdown = 0
+end
+
+local function push_area_field(render_path)
+	for i = 0, render_path:GetNumCommands() - 1 do
+		local command = render_path:GetCommand(i)
+		if command ~= nil and (command.type == magic.CMD_SCENEPASS or
+				command.type == magic.CMD_FORWARDLIGHTS) then
+			command:SetTextureName(AREA_FIELD_UNIT, area_field.name)
+			command:SetShaderParameter("AreaField", area_field.param)
+		end
+	end
+end
+
 local function push_sky_vis()
 	repack_sky_vis()
 	if sky_vis_param == nil then return end
@@ -692,6 +741,9 @@ local function push_sky_vis()
 				-- ([LAUNCH_WORLD]'s room is the one that does)
 				command:SetShaderParameter("ProbeBox", 0.0)
 			end
+		end
+		if area_field then
+			push_area_field(render_path)
 		end
 		return
 	end

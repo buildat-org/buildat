@@ -6,7 +6,7 @@
 # on a fresh server at seed 3, midnight: the world dialog creates the
 # world; a test skeleton 3 nodes off is punched to death and drops its
 # things, which the player walks up to and picks up; the fog follows the
-# place's danger; Escape opens the pause menu and Continue closes it. The server started again lists the world,
+# place's danger, and the client has the danger field to draw; Escape opens the pause menu and Continue closes it. The server started again lists the world,
 # plays it, and has the test boar back from the save.
 #   apps/demo_skelenti/check.sh
 set -u
@@ -56,6 +56,8 @@ died=$(grep -a "skelenti: the skeleton .* dies" "$t/srv.log" | tail -1)
 [ -n "$died" ] || fail "no skeleton died: $(grep -ac "hits the skeleton" \
 	"$t/srv.log") hits ($t/srv.log)"
 grep -aq "fog for danger" "$t/srv.log" || fail "no fog ($t/srv.log)"
+grep -aq "skelenti: the danger field at" "$t/cli.log" ||
+	fail "no danger field on the client ($t/cli.log)"
 picked=$(grep -a "skelenti: .* picks up" "$t/srv.log" | sed 's/.*picks up //' | tr '\n' ' ')
 [ -n "$picked" ] || fail "nothing picked up ($t/srv.log)"
 

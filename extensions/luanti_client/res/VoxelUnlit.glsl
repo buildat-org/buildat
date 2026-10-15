@@ -42,6 +42,10 @@ void VS()
     vColor = iColor;
 }
 
+#ifdef COMPILEPS
+#include "AreaField.glsl"
+#endif
+
 void PS()
 {
     vec4 diffColor = cMatDiffColor * texture2D(sDiffMap, vTexCoord);
@@ -49,6 +53,11 @@ void PS()
         if (diffColor.a < 0.5)
             discard;
     #endif
+    // A game's field of decay where this is (AreaField.glsl)
+    float decay = GetAreaField(vWorldPos.xyz);
+    if (decay > 0.0)
+        diffColor.rgb = DecayAlbedo(diffColor.rgb, vWorldPos.xyz, decay,
+                vec3(0.85, 0.82, 0.70));
 
     vec3 ambient = cAmbientColor.rgb * vColor.a + vColor.rgb;
     float fogFactor = GetFogFactor(vWorldPos.w);
