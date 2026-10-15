@@ -9,9 +9,15 @@ local log = buildat.Logger("blip_check")
 local blip = require("buildat/extension/blip")
 local gen, mix = blip.gen, blip.mix
 local now = buildat.get_time_us
+-- What each part said, shown at the end: the launch grid lists the app
+local said = {}
+local function say(line)
+	said[#said + 1] = line
+	log:info("blip check: " .. line)
+end
 
 local ok, bad = blip.self_check()
-log:info("blip check: self-check " .. (ok and "ok" or
+say("self-check " .. (ok and "ok" or
 		("FAILED: " .. table.concat(bad, "; "))))
 
 -- Each form, played and cached; the log's "played" lines say each did
@@ -26,7 +32,7 @@ end
 local stream = blip.stream()
 stream:add(compact)
 stream:add(tbl, 0.05, 0.5)
-log:info("blip check: plays ok")
+say("plays ok")
 
 -- The WAV's header, read back
 local w = blip.wav(compact)
@@ -44,7 +50,7 @@ assert(u(5, 4) == #w - 8 and u(41, 4) == samples * 2 and
 		#w == 44 + samples * 2, "the WAV's lengths")
 assert(u(21, 2) == 1 and u(23, 2) == 1 and u(25, 4) == 44100 and
 		u(35, 2) == 16, "the WAV's format")
-log:info("blip check: wav ok, " .. samples .. " samples")
+say("wav ok, " .. samples .. " samples")
 
 -- **The speed runner**: each preset made 100 times, the chain's Lua and
 -- the blocks' C++ timed apart; then the mixer's fill at 1, 8 and 32 voices
@@ -70,7 +76,7 @@ for _, name in ipairs(gen.PRESETS) do
 		longest, longest_name = each, name
 	end
 end
-log:info(string.format("blip check: speed presets: Lua %.1f ms, C++ %.1f" ..
+say(string.format("speed presets: Lua %.1f ms, C++ %.1f" ..
 		" ms per s of audio; the slowest (%s) made in %.2f ms",
 		lua_us / 1000 / total_s, cpp_us / 1000 / total_s, longest_name,
 		longest / 1000))
@@ -100,7 +106,13 @@ for _, voices in ipairs({1, 8, 32}) do
 		end
 		m:fill()
 	end
-	log:info(string.format("blip check: speed mixer: %d voices, %.1f ms " ..
+	say(string.format("speed mixer: %d voices, %.1f ms " ..
 			"per s of audio", voices, (now() - t0) / 1000 / 10))
 end
-log:info("blip check: done")
+say("done")
+-- Escape, or a click or tap anywhere, goes back to the launcher
+require("buildat/extension/ui_utils").show_message_dialog(
+		"blip check\n" .. table.concat(said, "\n"), buildat.leave)
+local magic = require("buildat/extension/urho3d")
+magic.SubscribeToEvent("MouseButtonDown", function() buildat.leave() end)
+magic.SubscribeToEvent("TouchBegin", function() buildat.leave() end)
