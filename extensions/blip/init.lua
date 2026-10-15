@@ -317,8 +317,10 @@ local function open_designer()
 		log:info("designer: " .. s)
 	end
 
-	-- Play on every change, at most every 0.15 s while a slider moves
-	local dirty, last = false, 0
+	-- Play on every change; while a slider moves, the next play waits
+	-- for half of the last sound (its length is the envelope's, or less
+	-- where the frequency limit ends it), and at least 0.15 s
+	local dirty, last, wait_us = false, 0, 0
 	local code = nil
 	local function show_code()
 		if code then
@@ -332,6 +334,7 @@ local function open_designer()
 		show_code()
 		dirty = false
 		last = api.get_time_us()
+		wait_us = math.max(150000, gen.chain(d.p, RATE) / RATE * 500000)
 		M.safe.play(d.p)
 	end
 	local function changed()
@@ -339,7 +342,7 @@ local function open_designer()
 	end
 	tick()
 	state.on_update = function()
-		if dirty and api.get_time_us() - last > 150000 then
+		if dirty and api.get_time_us() - last > wait_us then
 			play_now()
 		end
 	end
