@@ -344,6 +344,14 @@ set_plane_bytes, plane_is_materialised, read_words), getEnclosingRegion,
 voxel_count, a PolyVox-style Sampler. serialize_volume / deserialize_volume
 in voxel_cereal.h.
 
+interface/voxel_path.h -- interface::voxel_path: A* for a walking body over a
+box of cells the caller fills (Field: OPEN, SOLID, CLIMB; outside is
+SOLID). Rules: body_height, step_up, max_fall, max_length (voxels walked),
+max_expanded. stands, settle (to where a body comes to stand), find (a
+Result: found, capped, length, expanded, path), self_test. Walks to the
+eight neighbours without cutting corners, steps up, falls, climbs.
+util/voxel_path_test.cpp is its check and its timing ([SKELDAT]).
+
 interface/voxel_cereal.h, interface/atlas_cereal.h,
 interface/polyvox_cereal.h, interface/urho3d_cereal.h -- cereal
 serialization of the voxel types, the atlas definitions, PolyVox regions and
@@ -701,6 +709,7 @@ interface/urho3d_cereal.h: save, load
 interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, blocks, many_ids, painted, surfaces, luanti, buildat_legacy_06, preset, id_of, light_pair, surface_modifiers, any_surface_modifier, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, legacy06_id, legacy06_skylight, legacy06_set_skylight, legacy06_lamplight, legacy06_set_lamplight
 interface/voxel_cereal.h: serialize, r, save, load
 interface/voxel_cereal_legacy.h: In, read_vector, read
+interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result, stands, settle, find, self_test
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
 interface/web_brand.h: html, cut, page, file, f

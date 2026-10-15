@@ -408,6 +408,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/block.cpp
 	src/impl/noise.cpp
 	src/impl/voxel_volume.cpp
+	src/impl/voxel_path.cpp
 	src/impl/compress.cpp
 	src/impl/zip.cpp
 	src/impl/aitta.cpp

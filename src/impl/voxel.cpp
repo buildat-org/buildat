@@ -3,6 +3,7 @@
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
 #include "interface/voxel_volume.h"
+#include "interface/voxel_path.h"
 #include "core/log.h"
 #include "interface/os.h"
 #include "interface/voxel_cereal.h"
@@ -1291,7 +1292,7 @@ VoxelRegistry* createVoxelRegistry()
 	// through before a voxel exists
 	static const bool tested = voxel_format_self_test() &&
 			voxel_selector_self_test() && voxel_volume_self_test() &&
-			record_self_test();
+			record_self_test() && voxel_path::self_test();
 	(void)tested;
 	return new CVoxelRegistry();
 }
