@@ -36,9 +36,9 @@ local world_object_meshes =
 local NO_SPOTS = (buildat.get_env("BUILDAT_LUANTI_NO_SPOTS") or "") ~= ""
 
 local surface = buildat.run_extension_file("surface.lua")
--- The sky rendered into a cube for the world to reflect, shared with
--- apps/vanilla; see [SKY_REFLECTIONS]
-local skycube = require("buildat/extension/skycube")
+-- The sky: its radiances, its dome and the cube the world reflects, shared
+-- with apps/vanilla ([SKY_REFLECTIONS], [LC_SKY_SHARED])
+local psky = require("buildat/extension/physical_sky")
 
 local M = {}
 
@@ -476,7 +476,8 @@ function M.new(magic, buildat, log, options)
 	-- night does not draw it back at noon
 	local daylight_time = nil
 
-	-- The sky itself: a skybox drawn by res/SkyDome.glsl,
+	-- The sky itself: a skybox drawn by physical_sky/PhysicalSky.glsl in pbr
+	-- and res/LuantiSky.glsl in the parity modes,
 	-- which is handed the colours and the sun's direction from here.
 	local sky_node = scene:CreateChild("Sky")
 	local sky_material = nil
@@ -485,7 +486,8 @@ function M.new(magic, buildat, log, options)
 		skybox:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 		sky_material = magic.Material.new()
 		sky_material:SetTechnique(0, magic.cache:GetResource("Technique",
-				"shaders/res/SkyDome.xml"))
+				pbr and "physical_sky/PhysicalSky.xml" or
+				"luanti_client/res/LuantiSky.xml"))
 		skybox.material = sky_material
 	end
 
@@ -527,7 +529,7 @@ function M.new(magic, buildat, log, options)
 		-- are. The shader still multiplies it by the colour the sky is now
 		-- (set_sky_tint below, cSkyColor in res/PBRVoxel.glsl), which is
 		-- what being under water follows.
-		sky_cube = skycube.new(magic, sky_material)
+		sky_cube = psky.new_cube(sky_material)
 		zone.zoneTexture = sky_cube.texture
 	end
 	-- A game's own six pictures in place of the gradient (the End's sky),
@@ -588,7 +590,7 @@ function M.new(magic, buildat, log, options)
 	-- where vanilla's lamp is PHYS.lamp, so a torch-lit room keeps its place
 	-- against the day. SUN_BRIGHTNESS and MOON_BRIGHTNESS above are what the
 	-- lights start at; the shadows mode reads neither.
-	local PHYS = sky_model.PHYS
+	local PHYS = psky.PHYS
 	local UNITS = 1 / PHYS.lamp
 	-- And no mesher's constant bounce, which was the whole of the light
 	-- in a sealed cave on this path: its 0.055 lit the cave eleven times
@@ -2295,8 +2297,8 @@ function M.new(magic, buildat, log, options)
 	-- emitter's, as an object's; full glow is a light, white, and on pbr the
 	-- lightning's flash radiance, so that it shows over the exposure.
 	local function particle_light(x, y, z, glow)
-		if (glow or 0) >= sky_model.GLOW_FULL then
-			local f = pbr and sky_model.flash_radiance() or 1
+		if (glow or 0) >= psky.GLOW_FULL then
+			local f = pbr and psky.flash_radiance() or 1
 			return magic.Color(f, f, f, 1)
 		end
 		return object_color(x, y, z, false, glow)
@@ -2975,8 +2977,8 @@ function M.new(magic, buildat, log, options)
 		-- too, and the ambient, the dome's mean, with the two
 		local cover = cloud_cover()
 		if cover > 0 then
-			local z, h = sky_model.overcast(sky_top, sky_horizon, cloud_rgb(),
-					cover, pbr and sky_model.OVERCAST_DIM or 0)
+			local z, h = psky.overcast(sky_top, sky_horizon, cloud_rgb(),
+					cover, pbr and psky.OVERCAST_DIM or 0)
 			if ambient then
 				local function dome(a, b)
 					return luminance({5 * a.r + b.r, 5 * a.g + b.g,
@@ -2996,7 +2998,7 @@ function M.new(magic, buildat, log, options)
 		local flash = sky_model.sky_flash(sky and sky[band.."_sky"] and
 				sky_color(band.."_sky", 1))
 		if flash > 0 then
-			local f = pbr and sky_model.flash_radiance() or 1
+			local f = pbr and psky.flash_radiance() or 1
 			local function lit(c)
 				return magic.Color(c.r + (f - c.r) * flash,
 						c.g + (f - c.g) * flash, c.b + (f - c.b) * flash)
@@ -3013,7 +3015,7 @@ function M.new(magic, buildat, log, options)
 			if vp and vp.renderPath then
 				metered_cover = cover
 				vp.renderPath:SetShaderParameter("AutoExposureMiddleGrey",
-						sky_model.middle_grey(0.18, cover))
+						psky.middle_grey(0.18, cover))
 			end
 		end
 
@@ -3087,7 +3089,6 @@ function M.new(magic, buildat, log, options)
 			local sx, sy, sz = sun_direction(daylight_time)
 			sky_material:SetShaderParameter("SkyTop", sky_top)
 			sky_material:SetShaderParameter("SkyHorizon", sky_horizon)
-			sky_material:SetShaderParameter("SkyPhysical", pbr and 1 or 0)
 			sky_material:SetShaderParameter("SunDirection",
 					magic.Vector3(sx, sy, sz))
 			-- The tint the sun paints the horizon with, at its own strength
@@ -3153,7 +3154,7 @@ function M.new(magic, buildat, log, options)
 				-- dusk glow term.
 				local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
 				local k_sun = math.max(0, (PHYS.cloud_n * PHYS.sky_zenith /
-						sky_model.CLOUD_REF_LUM - noon_mean) * math.pi /
+						psky.CLOUD_REF_LUM - noon_mean) * math.pi /
 						PHYS.sun(1))
 				local h = height + PHYS.cloud_dip
 				local e = UNITS * PHYS.sun(h) * math.max(h, 0) * k_sun /

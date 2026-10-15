@@ -520,6 +520,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			i->add_file_path("luanti/sky_dome.lua", own+"sky_dome.lua");
 			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
 		});
+		// and the pbr sky they draw with ([LC_SKY_SHARED])
+		client_file::serve_extension(m_server, "physical_sky");
 		serve_media();
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
 		if(name && name[0])

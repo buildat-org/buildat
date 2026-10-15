@@ -15,9 +15,16 @@ if not ok or type(sky_dome) ~= "table" then
 	error("luanti: could not load sky_dome.lua: " .. tostring(err))
 end
 local PHYS = sky_dome.PHYS
+local physical_sky = sky_dome.physical_sky
 
 local M = {}
 M.PHYS = PHYS
+-- The sky's own rules ([LC_SKY_SHARED]): physical_sky's, here for the
+-- callers that read them through this table
+for _, name in ipairs({"sky_radiance", "dome", "outside", "fog", "sun_disc",
+		"cloud_lit"}) do
+	M[name] = physical_sky[name]
+end
 
 local function lum(c)
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
@@ -113,35 +120,6 @@ function M.render_path(magic, base, opt)
 	rp:Append(magic.cache:GetResource("XMLFile",
 			"luanti_client/res/Saturation.xml"))
 	return rp
-end
-
--- The sky's two ends at a sun height: a hue -- PHYS.day_zenith and
--- day_horizon, the render's, unless a caller has its own -- at the
--- reference's radiance ([PBR_FIT] term 1)
-function M.sky_radiance(zenith, horizon, height)
-	local function at(c, radiance)
-		local l = lum(c)
-		if l <= 1e-6 then
-			return {r = radiance, g = radiance, b = radiance}
-		end
-		local k = radiance / l
-		return {r = c.r * k, g = c.g * k, b = c.b * k}
-	end
-	return at(zenith, PHYS.night_sky +
-			(PHYS.sky_zenith - PHYS.night_sky) * PHYS.sky(height)),
-		at(horizon, PHYS.night_sky +
-			(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(height))
-end
-
--- The dome's hue for the ambient: the cosine weighting a face sees. Five
--- parts zenith, one horizon: with the horizon white a third of it made
--- every shade too warm -- the render's open shaded wall reads B/R 0.92 and
--- pbr's read 0.68 ([PBR_FIT], open_shade_dirt) -- the band being bright
--- but narrow under the cosine
-function M.dome(zenith, horizon)
-	return {r = (5 * zenith.r + horizon.r) / 6,
-		g = (5 * zenith.g + horizon.g) / 6,
-		b = (5 * zenith.b + horizon.b) / 6}
 end
 
 M.MOON_COLOR = {r = 1.0, g = 0.86, b = 0.70}
@@ -292,68 +270,6 @@ function M.apply(voxel_shading, zone, magic, t, translucency)
 	return chamber
 end
 
--- How much the sky is drawn, by how much of it the camera sees
--- (voxel_shading.sky_visibility_above()): a late and conservative gate
--- rather than a fade -- anything less than fully enclosed draws the sky
--- as it is, and only a cave with essentially no sky over it dims it. The
--- short ramp is so that walking into one is not a step ([CAVE_SKY]).
-function M.outside(seen)
-	return math.max(0, math.min(1, (seen - 0.02) / 0.08))
-end
-
--- The fog: the drawn horizon's radiance where the sky is seen, the
--- ambient where it is not -- a display colour dimmed by the hour sat at
--- 0.004 under a night sky of 0.00005 and the meter lifted the far edge of
--- the range to white ([LOD_LIGHT]); a cave's haze is the light a cave
--- gets
-function M.fog(horizon, ambient, seen)
-	local k = 1 - seen
-	return {r = horizon.r + (ambient.r - horizon.r) * k,
-		g = horizon.g + (ambient.g - horizon.g) * k,
-		b = horizon.b + (ambient.b - horizon.b) * k}
-end
-
--- The sun's disc at a radiance: E0 of the hour over the disc's solid
--- angle, pi times the half-width squared (the tangent of the half-angle,
--- near enough), in its colour. The path trace's disc is this and clips
--- white at every hour; Luanti's square at texture brightness sat under
--- the snow after metering ([PBR_FIT] step 2). rgba16f holds 65 504.
-function M.sun_disc(height, half, color)
-	local disc = math.min(PHYS.sun(height) / (math.pi * half * half), 65504)
-	return disc * color.r, disc * color.g, disc * color.b
-end
-
--- The clouds' light ([CLOUD_LIGHT]): a reflectance (the cloud colour, a
--- cloud top's near 0.9) lit by the sun and the sky, not a display colour
--- in a radiance sky. Returns the sun's and the sky's for sky_dome's
--- set_cloud_lit. The sky's share is the dome's mean as it is ([DUSK_CLOUD]:
--- a dome of radiance L puts pi L on a face, which reflects albedo L); the
--- sun's is E_sun of the hour times how high it is, times k_sun, set so
--- that at noon a thin cloud is cloud_n times the zenith patch (PHYS.cloud_n,
--- rated by the user). sun_through: what of the sun gets through
--- (sky_dome.direct_light()).
-function M.cloud_lit(albedo, zenith, horizon, height, sun_through, cloud_n)
-	local mean = M.dome(zenith, horizon)
-	local n = cloud_n or PHYS.cloud_n
-	local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
-	local k_sun = math.max(0, (n * PHYS.sky_zenith / sky_dome.CLOUD_REF_LUM -
-			noon_mean) * math.pi / PHYS.sun(1))
-	-- The sun as the clouds see it: from 7 km up it sets PHYS.cloud_dip
-	-- later, through the longer air that reddens it
-	local h = height + PHYS.cloud_dip
-	local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi * sun_through
-	local sr, sg, sb = PHYS.sun_rgb(h)
-	-- And the dusk glow is sky light too: what a cloud gets of it is the
-	-- dome's mean of SkyDome's glow term, (1 - y)^2 over the hemisphere (a
-	-- third) times away + (1 - away) of a quarter for cos^2 towards the sun
-	local gm = sky_dome.dawn_glow(height) * sky_dome.DUSK_SKY *
-			(sky_dome.DUSK_AWAY + (1 - sky_dome.DUSK_AWAY) / 4) / 3
-	local gc = sky_dome.DAWN_COLOR
-	return {r = albedo.r * e * sr, g = albedo.g * e * sg, b = albedo.b * e * sb},
-		{r = albedo.r * (mean.r + gm * gc.r), g = albedo.g * (mean.g + gm * gc.g),
-			b = albedo.b * (mean.b + gm * gc.b)}
-end
-
 do
 	local z, h = M.sky_radiance(PHYS.day_zenith, PHYS.day_horizon, 1)
 	local noon = M.terms(1, M.dome(z, h))
@@ -362,7 +278,6 @@ do
 	assert(noon.sky.b > noon.sky.r and noon.ambient.g > 1,
 			"noon's sky light is blue and bright")
 	assert(night.sun == 0 and night.ambient.g < 0.01, "the night's is dark")
-	assert(M.outside(0) == 0 and M.outside(1) == 1, "the gate's ends")
 end
 
 return M

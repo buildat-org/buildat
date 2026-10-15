@@ -1,6 +1,6 @@
-<!-- The sky dome; see SkyDome.glsl beside this file.
+<!-- The physical sky; see PhysicalSky.glsl beside this file.
      postopaque and no depth write is what keeps it behind the world; the box
      is seen from the inside, so nothing is culled. -->
-<technique vs="shaders/res/SkyDome" ps="shaders/res/SkyDome">
+<technique vs="physical_sky/PhysicalSky" ps="physical_sky/PhysicalSky">
     <pass name="postopaque" depthwrite="false" cull="none" />
 </technique>

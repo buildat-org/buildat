@@ -1504,12 +1504,27 @@ uistack.UIStack(root) -> a stack of its own
   that draws straight on magic.ui.root and pushes nothing reads "somebody
   else's screen is up" off #uistack.main.stack.
 
-skycube
--------
-skycube.new(magic, sky_material) -> cube
+physical_sky
+------------
+The sky in HDR at radiances an exposure meters ([LC_SKY_SHARED]), bundled as
+require("buildat/extension/physical_sky") and served by a server that calls
+client_file::serve_extension("physical_sky"), whose copy a game takes with
+select(3, buildat.run_script_file("physical_sky/init.lua")). The source has
+each function's units.
+physical_sky.new_dome(scene, sun_dir, defaults, log) -> dome
+- A skybox drawn by physical_sky/PhysicalSky.xml. defaults: zenith, horizon,
+  sun_color, sun_half, cloud_cover, moon_half, cloud_alpha, cloud_wind.
+  dome.material, dome.node; dome:set_look(), set_sun_direction(),
+  set_sun_radiance(), set_clouds(), set_cloud_lit(), set_overcast(),
+  set_indoors(), set_outside() and the rest set the shader's parameters.
+physical_sky.new_cube(sky_material) -> cube
 - The sky rendered into a small cube map for the world to reflect
   ([SKY_REFLECTIONS]): cube.texture goes into zone.zoneTexture and
   cube:update() re-renders the six faces when the sky has moved.
+physical_sky.PHYS, sky_radiance(), dome(), outside(), fog(), sun_disc(),
+cloud_lit(), overcast(), middle_grey(), flash_radiance(), dawn_glow(),
+dusk_tint() and their constants
+- The sky's numbers ([PBR_FIT] term 1) and the rules built on them.
 
 magic_sandbox
 -------------
@@ -2835,7 +2850,6 @@ extension.blip: pack, params, play, play_cached, preset, self_check, sound, stre
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
-extension.skycube: new
 extension.test: f
 extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

@@ -2,6 +2,10 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "interface/event.h"
+#include "interface/server.h"
+#include "interface/server_config.h"
+#include "interface/fs.h"
+#include "core/log.h"
 #include "network/api.h"
 
 namespace client_file
@@ -44,6 +48,32 @@ namespace client_file
 	{
 		return server->access_module("client_file", [&](interface::Module *module){
 			cb((client_file::Interface*)module->check_interface());
+		});
+	}
+
+	// [LC_SKY_SHARED] A client extension served under its own names:
+	// <share>/extensions/<name>/<file> as <name>/<file>. A game's client
+	// then runs its server's copy (buildat.run_script_file("<name>/
+	// init.lua")), and the resources it names resolve to the served files
+	// before the client's bundled ones -- the version the server knows,
+	// whatever the client was built with.
+	// simplified: the extension's own directory, not its subdirectories
+	inline void serve_extension(interface::Server *server, const ss_ &name)
+	{
+		const ss_ dir = server->get_config().get<ss_>("share_path")+
+				"/extensions/"+name;
+		sv_<std::pair<ss_, ss_>> files;
+		ss_ names;
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			if(!n.is_directory){
+				files.push_back({name+"/"+n.name, dir+"/"+n.name});
+				names += " "+name+"/"+n.name;
+			}
+		}
+		log_i("client_file", "Serving the extension %s:%s", cs(name),
+				cs(names));
+		access(server, [&](client_file::Interface *i){
+			i->add_file_paths(files);
 		});
 	}
 }

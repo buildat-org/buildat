@@ -284,8 +284,7 @@ sky:set_physical(true)
 sky:set_auto_dim(false)
 -- What the world reflects: the sky as it is drawn, re-rendered once a
 -- second, a face a frame
-local sky_cube = {cube = require("buildat/extension/skycube").new(magic,
-		sky.material), due = 0}
+local sky_cube = {cube = sky_dome.new_cube(sky.material), due = 0}
 game.zone.zoneTexture = sky_cube.cube.texture
 voxel_shading.set_sky_light(1.0)
 voxel_shading.set_specular_emphasis(0.7)

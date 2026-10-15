@@ -12,7 +12,7 @@ local M = {}
 M.MOON_HALF = 0.048
 
 -- How many stars a game asks for when it says nothing, and how many of the
--- star grid's cells hold one at that count. **The grid is SkyDome.glsl's
+-- star grid's cells hold one at that count. **The grid is the sky shaders'
 -- own**, two faces of STAR_GRID squared cells, which is about a quarter of a
 -- million -- so a thousand stars is four thousandths of them, and a game
 -- asking for more gets more in proportion.
@@ -294,122 +294,9 @@ do
 			"and takes the sun off the vertical plane at noon")
 end
 
--- [PBR_FIT] term 1 (here from apps/vanilla since [LC_PBR_PARITY]): on the
--- pbr path the sun and the sky are in the path-traced reference's units,
--- read off its EXRs (doc/plan/rendering_plan.md, the fit's first term);
--- vanilla's SUN_BRIGHTNESS, MOON_BRIGHTNESS, SKY_AMBIENT and NIGHT_AMBIENT
--- are the parity modes' alone. The metering takes the absolute scale; what these set is the
--- ratio of sun to sky to moon, which is what contrast is made of.
---   sun_e0, sun_tau  the sun's irradiance normal to it, E0 * exp(-tau /
---                    sin(elevation)): 170 at 64 degrees, which puts the
---                    render's sky patch over its sunlit snow at 10:00
---                    (sky_to_sun 0.25) once the snow's albedo is read
---                    decoded, and 93 at ten degrees, which is
---                    what its block top at 05:45 reads (1.9, 1.4, 1.0)
---                    off an albedo of 0.3 with the Rayleigh sun and a
---                    dome of 1.5 solved together (dawn_sun_dirt)
---   sky_zenith,      the sky's radiance at the zenith and the horizon
---   sky_horizon      by day: the render's 13:00 reads 4.9 near the
---                    zenith, 7.7 thirty degrees up, 12 at the horizon;
---                    fading over the last twelve degrees of the sun's
---                    elevation
---   bounce           light off the surroundings where the sky does not
---                    reach, as a share of the sky's mean (term 2)
---   ground           the ground's albedo, for what the lower hemisphere
---                    of a face outdoors sees: dirt and grass, warm
---   moon_e           the moon lamp's irradiance, the render's own
---   night_sky        what the sky is with the sun down: a floor for
---                    airglow, since Nishita gives none and the night's
---                    target is a sky under a fortieth of moonlit snow
--- simplified: the sky keeps Luanti's hue at this radiance, and the sun
--- its colour below; the colours are the terms after this one.
-local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
-		-- the moon at three times lunar irradiance, the user's pick off
-		-- the x1 | x3 | x5 sheet (2026-09-20, [NIGHT_LIGHT]); the render's
-		-- MOON_FACTOR is the same 3. And three times that (user,
-		-- 2026-10-08, [CAVE_EXPOSURE_FLOOR]): the moonlit field brighter
-		-- against the exposure's floor, which a sealed cave is not
-		sky_horizon = 12.0, moon_e = 0.0025 * 3 * 3,
-		-- the night sky at the user's pick off the 0.00002 | 0.00005 | 0.0002
-		-- ladder (2026-09-20, [NIGHT_LIGHT]), the render's NIGHT_SKY; three
-		-- times it with the moon (2026-10-08)
-		night_sky = 0.0001 * 3,
-		-- [CAVE_AO]'s floor: a constant light under the ambient so a sealed
-		-- cave keeps its corners, the same at every hour. 0.04 was the
-		-- user's pick of 2026-09-25; 0.005 since [CAVE_EXPOSURE_FLOOR]
-		-- (2026-10-09), so a sealed cave is darker than a moonlit field:
-		-- pbr_pair's closed cave reads 21.6/255 (0.01 read 27.7)
-		cave_floor = 0.005,
-		-- dome 0.9 -> 1.2 (2026-09-21, [PBR_FIT] a): the open-sky contrast
-		-- read 4.5 against the render's 2.8 and snow's 13.6 against 11.2;
-		-- at 1.2 snow's is 10.7 and its shade reads 1.0, dirt's 4.0; 1.5
-		-- overshot snow's shade (1.13) and the pit (1.73). The tables are
-		-- under local/options_for_PBR_FIT_viewport/probes_dome_*.txt
-		-- ground x1.5 (2026-09-21 22:15, [PBR_FIT] a): the open-sky
-		-- contrast 4.0 -> 3.19 against 2.81, the open shaded dirt face
-		-- 0.53 -> 0.66 of the render's, the small cave's lit wall 0.38 ->
-		-- 0.47 and both falloffs nearer; snow untouched. The shade's blue
-		-- lags its red (0.5 against 0.66): the ground's hue is the next
-		-- rung. probes_ground_075_kept.txt beside the dome tables.
-		-- lamp 8 -> 1.5 ([TORCH_LIGHT], 2026-10-11) with the falloff
-		-- counted from a torch's level: 1.5, 0.41, 0.14 at one, three and
-		-- six nodes from a torch, where 8 over the old distance from
-		-- fifteen gave 1.45, 0.37, 0.12 on the open faces the user saw
-		-- lit right. A glowstone's own faces drop from 8 to 1.5. vp8's
-		-- lamp_wall reads 2.8/4.2/7.3 of the render at 1, 2.2/3.5/6.7 at
-		-- 0.3, 1.2/2.0/3.9 at 0.1, grey at all three: its ceiling has a
-		-- nibble of a few, round the ledge, so no lamp level fits it
-		-- ([LAMP_REF]'s finding, 2026-09-18).
-		bounce = 0.15, lamp = 1.5, dome = 1.2, ground = {r = 0.75, g = 0.66, b = 0.45}, -- doubled 2026-09-19 with groundSeen cubed,
-		-- the transmitted light through a leaf, over Lambert through its
-		-- colour ([PBR_FIT] 3b, canopy_dawn)
-		translucency = 1.0,
-		-- how bright a thin noon cloud is against the sky's zenith patch:
-		-- picked by the user off a ladder of 1.5 to 20 ([CLOUD_LIGHT],
-		-- 2026-09-19); BUILDAT_SKY_CLOUD_N overrides
-		cloud_n = 8,
-		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
-		-- the horizon just over the sea at 13:00 reads (14.7, 14.9, 15.0)
-		-- in the render: white, not Luanti's pale blue
-		day_horizon = {r = 0.99, g = 0.995, b = 1.0}}
--- The sky's radiance factor at a sun height (sin elevation): full by
--- day, gone over the last twelve degrees, the floor below
--- The zenith and the dome go first: at ten degrees the render's block
--- top is lit by a sun of about 74 over a dome of about 1.5, a third of
--- noon's, while its horizon band is still 9. The horizon keeps the old
--- short fade.
-function PHYS.sky(height)
-	return math.max(0, math.min(1, (height + 0.02) / 0.55))
-end
-function PHYS.horizon(height)
-	return math.max(0, math.min(1, (height + 0.05) / 0.21))
-end
-function PHYS.sun(height)
-	if height <= 0 then
-		return 0
-	end
-	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(height, 0.05))
-end
--- The sun's colour at a height, its luminance one: Rayleigh transmittance
--- through an air mass of 1 / sin(elevation), the optical depths sea
--- level's at 680, 550 and 440 nm ([PBR_FIT] term 3)
-function PHYS.sun_rgb(height)
-	local m = 1 / math.max(height, 0.05)
-	local r, g, b = math.exp(-0.05 * m), math.exp(-0.10 * m),
-			math.exp(-0.24 * m)
-	local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-	return r / lum, g / lum, b / lum
-end
--- How far under our horizon the sun still lights the clouds: the dip of
--- the horizon from 7 km up, acos(R / (R + h)), in sine
-PHYS.cloud_dip = 0.047
-do
-	local hr, _, hb = PHYS.sun_rgb(1)
-	local lr, _, lb = PHYS.sun_rgb(0)
-	assert(hb / hr > 0.75 and lb / lr < 0.05,
-			"white overhead, red on the horizon")
-end
-M.PHYS = PHYS
+-- The sun's and the sky's radiance, pbr's, are extensions/physical_sky's
+-- since [LC_SKY_SHARED], with the weather's overcast(), the meter under
+-- cover and the flash: what is here is Luanti's.
 
 -- **The weather** ([VANILLA_WEATHER] 1): what a game's partial sky
 -- commands come to as a sky, the same in both clients, which had drifted
@@ -422,7 +309,7 @@ local function lum(c) return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b end
 -- Luanti's own cloud density, which every game gets whether or not it asks
 M.CLOUD_DENSITY_DEFAULT = 0.4
 -- Luanti's own cloud speed, nodes a second on x and z, and what one node
--- a second is in SkyDome's units. simplified: the dome's clouds are no
+-- a second is in the sky shaders' units. simplified: the dome's clouds are no
 -- layer at a height (the shader divides the view by its y), so a speed has
 -- nothing exact to become; the factor makes the default drift at the rate
 -- the shader had baked in, and twice the speed twice as fast. See
@@ -436,9 +323,6 @@ M.CLOUD_ALPHA_DEFAULT = 229 / 255
 M.CLOUD_DIM = 0.8
 -- A cloud need not be black to be opaque
 local CLOUD_SHADE_GAIN = 1.3
--- What a full overcast takes from the zenith where the game's own day
--- colours are not drawn (pbr draws the reference's), a named pick
-M.OVERCAST_DIM = 0.6
 
 -- **How much of the sky is cloud**, 0..1, out of the two ways a game says
 -- it: the density above Luanti's default 0.4, and the colour -- VoxeLibre
@@ -470,55 +354,10 @@ function M.direct_light(visible, cover)
 	return 1 - M.CLOUD_DIM * (cover or 0)
 end
 
--- **The sky under cover**: an overcast sky is darker at the horizon than
--- overhead -- the standard overcast sky's luminance goes as (1 + 2 sin h)
--- / 3, a third of the zenith's at the horizon -- and is the clouds'
--- colour. By the cover c, the zenith goes to the clouds' hue at its own
--- brightness (less zenith_dim of it: OVERCAST_DIM where the game's own
--- darker colours are not drawn, 0 where they are) and the horizon, and
--- with it the fog, to the same hue at a third of that. c = 0 changes
--- nothing. Works in any linear units: display colours or radiance.
--- -> zenith, horizon
-function M.overcast(zenith, horizon, cloud, cover, zenith_dim)
-	if not cover or cover <= 0 then
-		return zenith, horizon
-	end
-	cloud = cloud or {r = 1, g = 1, b = 1}
-	local cl = lum(cloud)
-	local hue = cl > 1e-6 and {r = cloud.r / cl, g = cloud.g / cl,
-			b = cloud.b / cl} or {r = 1, g = 1, b = 1}
-	local top = lum(zenith) * (1 - (zenith_dim or 0) * cover)
-	local function mix(a, k, l)
-		return {r = a.r + (hue.r * l - a.r) * k, g = a.g + (hue.g * l - a.g) * k,
-				b = a.b + (hue.b * l - a.b) * k}
-	end
-	return mix(zenith, cover, top), mix(horizon, cover, top / 3)
-end
-
--- **The meter under cover** (pbr): a metered camera puts an overcast day
--- at the clear day's brightness, which reads as no weather at all; the eye
--- sees a storm as dark. The meter's middle grey, less this share of it
--- under full cover -- a named pick.
--- The cloud albedo pbr's k_sun is rated at (Luanti's default cloud
--- colour, 0.9 0.92 0.95): a game's darker colour is then a darker cloud
--- rather than one k_sun lights back up to the same white -- VoxeLibre's
--- rain colour, its sun left visible on a Luanti server
-M.CLOUD_REF_LUM = 0.917
-M.OVERCAST_EXPOSURE = 0.5
-function M.middle_grey(grey, cover)
-	return grey * (1 - M.OVERCAST_EXPOSURE * (cover or 0))
-end
-
 -- **The flash**: a lightning bolt -- a particle at full glow, Luanti's
 -- "draw me as a light" -- and the game's sky gone white for a moment
--- (VoxeLibre's lightning layer, 0.1 s). On pbr both are this many times
--- the noon zenith's radiance, above anything the sky is, so they show over
--- the exposure as a flash; the other modes draw them at white.
-M.GLOW_FULL = 14
-M.FLASH = 3
-function M.flash_radiance()
-	return M.FLASH * PHYS.sky_zenith
-end
+-- (VoxeLibre's lightning layer, 0.1 s); how bright pbr draws it is
+-- physical_sky's flash_radiance().
 -- How much a game's sky colour ({r,g,b} 0..1) says flash: white, each
 -- channel near one, which no daylight sky is
 function M.sky_flash(c)
@@ -554,24 +393,14 @@ do
 	-- as it was
 	local mtg = M.cloud_cover(0.4, rgb("F0F0FF"))
 	assert(mtg < 0.1, "a default sky is clear")
-	local z, h = {r = 0.4, g = 0.6, b = 1.0}, {r = 0.6, g = 0.7, b = 0.9}
-	local z2, h2 = M.overcast(z, h, rgb("F0F0FF"), 0)
-	assert(z2 == z and h2 == h, "no cover changes nothing")
 	-- A game that says it with the density
 	assert(M.cloud_cover(1.0, rgb("FFFFFF")) > 0.9, "a full sky covers it")
 	assert(M.cloud_cover(0.0, rgb("000000")) == 0, "no layer covers nothing")
-	-- Under a thunderstorm: grey, the horizon a third of the zenith
-	local zt, ht = M.overcast(z, h, rgb("3D3D3F"), 1, 0)
-	assert(math.abs(lum(ht) - lum(zt) / 3) < 1e-6, "the horizon a third")
-	assert(math.abs(zt.r - zt.b) < 0.05 * lum(zt), "the clouds' grey")
-	local zd = M.overcast(z, h, rgb("5D5D5F"), 1, M.OVERCAST_DIM)
-	assert(lum(zd) < lum(z) * 0.5, "pbr's zenith darkens under cover")
 	-- VoxeLibre's lightning layer is white; its clear and its snow skies
 	-- are not a flash
 	assert(M.sky_flash(rgb("FFFFFF")) > 0.99, "a white sky flashes")
 	assert(M.sky_flash(rgb("78A7FF")) == 0, "a day sky does not")
 	assert(M.sky_flash(rgb("ADADAD")) == 0, "a snow sky does not")
-	assert(M.flash_radiance() > PHYS.sky_zenith, "over the noon sky")
 end
 
 

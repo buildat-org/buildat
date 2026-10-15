@@ -1,11 +1,13 @@
-// The sky, on a skybox: a gradient from the horizon to the zenith, the sun
-// and the moon, the stars at night and a flat layer of cloud.
+// extensions/physical_sky: the sky in HDR, at radiances the exposure
+// meters ([LC_SKY_SHARED]): a gradient from the horizon to the zenith, the
+// sun's disc and the moon, the stars at night, a flat layer of cloud lit by
+// the sun and the sky, and floorplanner's treeline. Luanti's coloured sky,
+// which the parity modes draw, is extensions/luanti_client/res/LuantiSky.glsl,
+// the other half of what was one shader (SkyDome) with a switch.
 //
 // What time of day it is is not worked out here. The client hands in the
-// colours -- Luanti's own sky colours, picked and dimmed the way its
-// src/client/sky.cpp picks and dims them -- and the direction of the sun, so
-// that the ramp through dawn and dusk is Lua's business and this file only
-// draws what it is told.
+// radiances and the direction of the sun (init.lua beside this file works
+// them out), so this file only draws what it is told.
 //
 // The cloud layer is the one from builtin/voxel_shading's VoxelSkybox, with
 // the colour handed in rather than baked in: squares of two tones on a plane
@@ -31,7 +33,6 @@ uniform vec3 cDawnGlow;
 // [DUSK_SKY]: the pbr band's level over the sky's own, the share of the
 // glow the dome away from the sun gets, and the band's share of orange
 uniform vec3 cDuskBand;
-uniform vec3 cCloudColor;
 uniform float cStarFade;
 // What the game says is up there: half the width of the sun's and the moon's
 // squares, zero for one it has turned off; how many of the star grid's cells
@@ -77,19 +78,19 @@ uniform vec2 cCloudWind;
 // this.
 uniform vec3 cSkyIndoors;
 uniform float cSkyAutoDim;
-// The gradient's shape: 0 is Luanti's, the horizon colour spread up the dome
-// by the square root; 1 is the path trace's at 13:00, the horizon's band
-// kept to the lowest part of the dome and the top colour holding above it
+// The gradient's shape: the path trace's at 13:00, the horizon's band kept
+// to the lowest part of the dome and the top colour holding above it
 // (render over the sea, elevation 17 to 2 degrees: the top's share 0.90,
-// 0.71, 0.36, 0.09, 0.01 -- a smoothstep of sin elevation over 0 to
-// 0.38). Set on the pbr path, whose sky is the lighting's number
-// ([PBR_FIT] term 1); the parity modes keep Luanti's. Unset reads as 0.
-uniform float cSkyPhysical;
-// On the physical path the game's cloud colour is a reflectance and these
-// are what lights it ([CLOUD_LIGHT]): the sun's share, albedo * E_sun *
-// k_sun * facing / pi, and the sky's, albedo * sky_mean / pi, both in the
-// sky's radiance units. The thin edge of a cloud lets the sun through and
-// the thick middle does not, so the sun's share thins with the density.
+// 0.71, 0.36, 0.09, 0.01 -- a smoothstep of sin elevation over 0 to 0.38);
+// the sky is the lighting's number ([PBR_FIT] term 1). 1 here is an
+// overcast dome instead (floorplanner's [FP_OVERCAST]): the horizon colour
+// spread up by the square root, nearer the CIE dome's than the clear sky's.
+uniform float cSkyOvercast;
+// The cloud colour is a reflectance and these are what lights it
+// ([CLOUD_LIGHT]): the sun's share, albedo * E_sun * k_sun * facing / pi,
+// and the sky's, albedo * sky_mean / pi, both in the sky's radiance units.
+// The thin edge of a cloud lets the sun through and the thick middle does
+// not, so the sun's share thins with the density.
 uniform vec3 cCloudSun;
 uniform vec3 cCloudSky;
 // How much sky the camera can see, as one number: 0 in a cave, 1 anywhere
@@ -301,7 +302,7 @@ void PS()
     vec3 color = d.y < 0.0 ?
             mix(cSkyHorizon, cSkyHorizon * 0.55, min(1.0, -d.y / HAZE_DEPTH)) :
             mix(cSkyHorizon, cSkyTop, sqrt(d.y));
-    if(cSkyPhysical > 0.5 && d.y >= 0.0){
+    if(cSkyOvercast < 0.5 && d.y >= 0.0){
         // Brightness and hue on their own curves: the render's horizon
         // band brightens over the lowest 20 degrees but stays blue until
         // the last few -- the top's share of the hue is 0.05 at the
@@ -388,8 +389,7 @@ void PS()
         float into = clamp((density - threshold) / CLOUD_EDGE, 0.0, 1.0);
         float cover = into * cCloudAlpha *
                 smoothstep(CLOUD_HORIZON, CLOUD_FADE, d.y);
-        vec3 cloud = cSkyPhysical > 0.5 ?
-                cCloudSky + cCloudSun * (1.0 - 0.5 * into) : cCloudColor;
+        vec3 cloud = cCloudSky + cCloudSun * (1.0 - 0.5 * into);
         color = mix(color, cloud, cover);
     }
 
@@ -438,8 +438,7 @@ void PS()
         // black, and it fades into a bright sky without a seam. A "brighter
         // than the sky" comparison switched colour abruptly where the two
         // crossed. The parity modes cover the sky with it, as Luanti does.
-        color = cSkyPhysical > 0.5 ? color + moon_color * cover
-                : mix(color, moon_color, cover);
+        color += moon_color * cover;
     }
 
     // **The treeline** (user, 2026-10-01): a forest TREE_DISTANCE away,

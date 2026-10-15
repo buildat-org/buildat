@@ -367,7 +367,7 @@ function M.build_ground()
 	g:SetNumGeometries(1)
 	g:BeginGeometry(0, magic.TRIANGLE_LIST)
 	-- Under PBR a disc of 200 m round the camera, whose edge is where the
-	-- sky's treeline stands (SkyDome.glsl, TREE_DISTANCE): the node
+	-- sky's treeline stands (PhysicalSky.glsl, TREE_DISTANCE): the node
 	-- follows the camera (M.apply_daylight), and the lawn's pattern is the
 	-- world's, so it stays put
 	local r = 200000

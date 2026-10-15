@@ -117,8 +117,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 	-- the same effect twice is a no-op in Urho3D, so everything has to be on
 	-- it before it goes on.
 	-- A particle at full glow is a light, a lightning bolt: unfogged
-	local GLOW_FULL =
-			buildat.run_extension_file("res/sky_model.lua").GLOW_FULL
+	local GLOW_FULL = require("buildat/extension/physical_sky").GLOW_FULL
 	local glow_technique = magic.cache:GetResource("Technique",
 			"luanti_client/res/ParticleGlow.xml")
 	local function particle_effect(texture_name, amount, ttl_min,

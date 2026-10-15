@@ -1008,6 +1008,8 @@ struct Module: public interface::Module, public luanti::Interface,
 	void on_start()
 	{
 		serve_shared_lua();
+		// The pbr sky, the client's own copy of it ([LC_SKY_SHARED])
+		client_file::serve_extension(m_server, "physical_sky");
 		// What may go ahead of the queue and replace its own stale copy
 		// ([NET_CHANNELS]): the player's own position, the clock, and the
 		// objects -- whose packet is the whole list every time (the

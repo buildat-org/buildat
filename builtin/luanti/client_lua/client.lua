@@ -464,8 +464,7 @@ local world_sky = sky_dome.new(scene, SUN_DIR,
 -- One table, since this chunk is at Lua 5.1's two hundred locals: the
 -- cube, and when it is next due -- the sun's direction moves every frame
 -- and the cube is six renders, so once a second, which nobody sees jump
-local sky_cube = {cube = require("buildat/extension/skycube").new(
-		magic, world_sky.material), due = 0}
+local sky_cube = {cube = sky_dome.new_cube(world_sky.material), due = 0}
 zone.zoneTexture = sky_cube.cube.texture
 -- Microseconds the cube's render took since the frame peak last read it
 sky_cube.us = 0
@@ -1649,7 +1648,7 @@ local function apply_sky_of_hour(force)
 			math.min(0.5, sky_dome.STAR_DENSITY_DEFAULT * count /
 					sky_dome.STARS_DEFAULT) or 0
 	-- The count and the night ramp go to different parameters here, which
-	-- is what SkyDome keeps apart and buildat's sky folded together; see
+	-- is what the sky shader keeps apart and buildat's sky folded together; see
 	-- set_star_look() in sky_dome.lua
 	world_sky:set_star_look(density, game_sky.star_color, (1 - t) * (1 - t))
 

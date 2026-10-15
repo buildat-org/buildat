@@ -9,7 +9,7 @@
 -- for reflections; the render path that makes the frame an eye's. The
 -- numbers are apps/vanilla's pbr path's (PHYS in its init.lua, fitted
 -- against a path-traced reference), and the sky is
--- extensions/shaders' SkyDome, which both Luanti clients draw too.
+-- extensions/physical_sky's, which both Luanti clients draw in pbr too.
 --
 --   local daylight = buildat.run_script_file("main/daylight.lua")
 local magic = require("buildat/extension/urho3d")
@@ -128,18 +128,23 @@ function M.ground(lat, day, mode)
 end
 
 --
--- What the sun and the sky are worth: vanilla's PHYS, in its units
+-- What the sun and the sky are worth: extensions/physical_sky's PHYS, in
+-- its units, with this app's own night and lamp over the games' picks
+-- (a snapshot from before them: the night sky a third of theirs, no moon,
+-- the lamp of before [TORCH_LIGHT]) and the clouds' albedo
 --
-local PHYS = {sun_e0 = 195, sun_tau = 0.127, sky_zenith = 4.5,
-		sky_horizon = 12.0, night_sky = 0.0001, dome = 1.2, cloud_n = 8,
-		lamp = 8,
-		day_zenith = {r = 0.57, g = 0.76, b = 1.0},
-		day_horizon = {r = 0.99, g = 0.995, b = 1.0},
-		cloud = {r = 0.9, g = 0.92, b = 0.95}}
-M.PHYS = PHYS
-local function clamp01(v)
-	return math.max(0, math.min(1, v))
+local ok_phys, err_phys, physical_sky =
+		buildat.run_script_file("physical_sky/init.lua")
+if not ok_phys or type(physical_sky) ~= "table" then
+	error("floorplanner: could not load physical_sky: " .. tostring(err_phys))
 end
+local PHYS = {}
+for k, v in pairs(physical_sky.PHYS) do
+	PHYS[k] = v
+end
+PHYS.night_sky, PHYS.lamp = 0.0001, 8
+PHYS.cloud = {r = 0.9, g = 0.92, b = 0.95}
+M.PHYS = PHYS
 local function lum(c)
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 end
@@ -153,12 +158,6 @@ end
 local function mix(a, b, k)
 	return {r = a.r + (b.r - a.r) * k, g = a.g + (b.g - a.g) * k,
 			b = a.b + (b.b - a.b) * k}
-end
-function M.sun_irradiance(h)
-	if h <= 0 then
-		return 0
-	end
-	return PHYS.sun_e0 * math.exp(-PHYS.sun_tau / math.max(h, 0.05))
 end
 
 -- The sky ([FP_OVERCAST]): clear, or overcast
@@ -175,16 +174,14 @@ local OVERCAST_SHARE = 0.2
 -- sky the CIE standard overcast dome.
 function M.light(h, ground, overcast)
 	local s = {}
-	s.sun = M.sun_irradiance(h)
+	s.sun = PHYS.sun(h)
 	-- Rayleigh through an air mass of 1 / sin(elevation), luminance one
-	local m = 1 / math.max(h, 0.05)
-	local sc = {r = math.exp(-0.05 * m), g = math.exp(-0.10 * m),
-			b = math.exp(-0.24 * m)}
-	s.sun_color = scaled(sc, 1)
-	-- The sky: its day hues through a warm dawn to night's, at vanilla's
+	local sr, sg, sb = PHYS.sun_rgb(h)
+	s.sun_color = {r = sr, g = sg, b = sb}
+	-- The sky: its day hues through a warm dawn to night's, at the games'
 	-- radiance curves
-	local f = clamp01((h + 0.02) / 0.55)
-	local fh = clamp01((h + 0.05) / 0.21)
+	local f = PHYS.sky(h)
+	local fh = PHYS.horizon(h)
 	local dz, dh = PHYS.day_zenith, PHYS.day_horizon
 	local dawn_h = {r = dh.r * 0.75, g = dh.g * 0.52, b = dh.b * 0.45}
 	local night_z = {r = dz.r * 0.10, g = dz.g * 0.10, b = dz.b * 0.14}
@@ -215,7 +212,7 @@ function M.light(h, ground, overcast)
 	local al = PHYS.cloud
 	local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
 	local k_sun = math.max(0, (PHYS.cloud_n * PHYS.sky_zenith * math.pi /
-			lum(al) - noon_mean) / M.sun_irradiance(1))
+			lum(al) - noon_mean) / PHYS.sun(1))
 	local e = s.sun * math.max(h, 0) * k_sun / math.pi
 	s.cloud_sun = {r = al.r * e * s.sun_color.r, g = al.g * e * s.sun_color.g,
 			b = al.b * e * s.sun_color.b}
@@ -244,7 +241,8 @@ end
 -- The sky, drawn and reflected
 --
 local SUN_HALF = 0.04
--- A skybox with SkyDome and the cube the plan's surfaces reflect.
+-- A skybox with physical_sky's shader and the cube the plan's surfaces
+-- reflect.
 -- sky:set(toward, h, light) each time the hour moves; sky:show(on).
 function M.new_sky(scene)
 	local node = scene:CreateChild("Sky")
@@ -252,7 +250,7 @@ function M.new_sky(scene)
 	box:SetModel(magic.cache:GetResource("Model", "Models/Box.mdl"))
 	local mat = magic.Material:new()
 	mat:SetTechnique(0, magic.cache:GetResource("Technique",
-			"shaders/res/SkyDome.xml"))
+			"physical_sky/PhysicalSky.xml"))
 	box.material = mat
 	-- Every uniform the shader reads: an unset one reads as zero
 	local V = magic.Vector3
@@ -262,12 +260,12 @@ function M.new_sky(scene)
 	end
 	for name, v in pairs({StarFade = 0, SunSize = SUN_HALF, SunOverexposure = 2.5,
 			MoonSize = 0, StarDensity = 0, CloudCoverage = 0.35, CloudAlpha = 1,
-			SunTextured = 0, MoonTextured = 0, SkyAutoDim = 0, SkyPhysical = 1,
+			SunTextured = 0, MoonTextured = 0, SkyAutoDim = 0, SkyOvercast = 0,
 			SkyOutside = 1}) do
 		mat:SetShaderParameter(name, v)
 	end
 	mat:SetShaderParameter("CloudWind", magic.Vector2(0.004, 0))
-	local cube = require("buildat/extension/skycube").new(magic, mat)
+	local cube = physical_sky.new_cube(mat)
 	local self = {node = node, material = mat, cube = cube, texture = cube.texture}
 	local last = nil
 	function self:set(tx, ty, tz, h, light)
@@ -281,7 +279,7 @@ function M.new_sky(scene)
 		-- clear sky's, which is all zenith from 22 degrees up.
 		-- simplified: the shader's gradient, not CIE's exactly (at 30
 		-- degrees 0.71 of the way to the zenith, not 0.5); the upgrade is
-		-- the formula in SkyDome.glsl behind a parameter
+		-- the formula in PhysicalSky.glsl behind cSkyOvercast
 		local oc = light.overcast
 		-- The cube again by the real sun: an overcast dome brightens with it
 		self.want = string.format("%.3f %.3f %.3f %s", tx, ty, tz, tostring(oc))
@@ -290,7 +288,7 @@ function M.new_sky(scene)
 		end
 		mat:SetShaderParameter("SunSize", oc and 0 or SUN_HALF)
 		mat:SetShaderParameter("CloudCoverage", oc and 0 or 0.35)
-		mat:SetShaderParameter("SkyPhysical", oc and 0 or 1)
+		mat:SetShaderParameter("SkyOvercast", oc and 1 or 0)
 		mat:SetShaderParameter("SunDirection", V(tx, ty, tz))
 		mat:SetShaderParameter("SkyTop", v3(light.zenith))
 		mat:SetShaderParameter("SkyHorizon", v3(light.horizon))

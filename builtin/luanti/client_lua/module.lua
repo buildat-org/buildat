@@ -1946,7 +1946,8 @@ end
 local _, _, particles_proto = buildat.run_script_file("luanti/particles.lua")
 -- One table, the main chunk being at Lua's 200 locals: the sky model's
 -- flash and full glow ([VANILLA_WEATHER]), and light() below
-local pt = {sky = select(3, buildat.run_script_file("luanti/sky_model.lua"))}
+local pt = {sky = select(3, buildat.run_script_file("luanti/sky_model.lua")),
+		phys = select(3, buildat.run_script_file("physical_sky/init.lua"))}
 
 local function middle(a, b)
 	return {(a[1] + b[1]) / 2, (a[2] + b[2]) / 2, (a[3] + b[3]) / 2}
@@ -1965,7 +1966,7 @@ local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
 	-- storm made its own, and that was half of what a particle cost
 	-- ([PACKET_STALL], 2026-10-03). A particle at full glow is a light
 	-- and has one of its own, unfogged (res/ParticleGlow.xml)
-	local full = (glow or 0) >= pt.sky.GLOW_FULL
+	local full = (glow or 0) >= pt.phys.GLOW_FULL
 	local key = full and resource .. "#glow" or resource
 	local cached = particle_materials[key]
 	local material = cached and cached.material
@@ -2074,8 +2075,8 @@ end
 -- moves by a 255th.
 function pt.light(entry)
 	local c
-	if (entry.glow or 0) >= pt.sky.GLOW_FULL then
-		local f = M.light_units and pt.sky.flash_radiance() or 1
+	if (entry.glow or 0) >= pt.phys.GLOW_FULL then
+		local f = M.light_units and pt.phys.flash_radiance() or 1
 		c = magic.Color(f, f, f, 1)
 		if not entry.own_material then
 			entry.material:SetShaderParameter("MatDiffColor", c)

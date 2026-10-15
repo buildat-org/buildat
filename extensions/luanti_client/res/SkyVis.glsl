@@ -11,7 +11,7 @@
 // doc/plan/rendering_plan.md for what reads it.
 //
 // Included rather than copied because two shaders in this directory want it:
-// PBRVoxel.glsl dims what a surface reflects, and SkyDome.glsl dims the
+// PBRVoxel.glsl dims what a surface reflects, and PhysicalSky.glsl dims the
 // sky itself. **builtin/voxel_shading has its own copy of the same block**,
 // for the nine games that draw with its shaders rather than these; that one
 // is not shared, because a change there is checked against
