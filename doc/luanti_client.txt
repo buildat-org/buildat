@@ -165,7 +165,11 @@ what is above Luanti's own 0.4 is weather, since every game gets that whether
 it asks or not; and the cloud colour, which is how VoxeLibre says it -- it
 never touches the density and paints its clouds #FFF0F0 for a clear sky,
 #5D5D5F for rain and #3D3D3F for a thunderstorm. Full overcast leaves the sun
-a fifth of itself, which is a day with no shadows in it.
+a fifth of itself, which is a day with no shadows in it. Under cover the sky
+goes the clouds' colour, its horizon and the fog a third of the zenith's
+brightness as an overcast sky is, and pbr's auto exposure aims lower so a
+storm does not meter back up to a clear day. These rules are
+res/sky_model.lua's, and vanilla's client uses the same ones.
 
 There is a floor under it while the sun is down. The sky is the only ambient
 there is here, and a game's night sky can be black -- VoxeLibre paints one --
