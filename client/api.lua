@@ -2261,6 +2261,9 @@ buildat.safe.write_floats             = __buildat_write_floats
 -- write_shorts(vector_buffer, values): the same as 16-bit samples, each
 -- floored and clamped
 buildat.safe.write_shorts             = __buildat_write_shorts
+-- [SYNTH_BLOCKS]: synth.buffer(n), a buffer of samples in C++ and the
+-- blocks that write it (src/lua_bindings/synth.cpp, doc/client_api.txt)
+buildat.safe.synth = {buffer = __buildat_synth_buffer}
 -- add_resource_dir(path) and compose_image(args), in the sandbox as they
 -- are (decided 2026-09-13). What they give sandboxed code is "write files
 -- under the cache and make them loadable", which a server can already do

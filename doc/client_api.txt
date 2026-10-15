@@ -40,6 +40,7 @@ buildat.has(name) -> bool
   asks this rather than testing for a function. The names:
     core_require        require("buildat/core/<name>") (0.7.10)
     sound_from_samples  magic.Sound:new(), SetFormat, SetData (0.7.10)
+    synth_blocks        buildat.synth (0.7.10)
 
 buildat.get_time_us() -> microseconds, a monotonic clock
 buildat.get_local_time() -> day of the year (1..366), hour, minute, second
@@ -332,6 +333,51 @@ The format goes first and the data once: a Sound's samples are not
 replaced under a source playing them. A Sound holds at most 8 MiB, and
 the Sounds made from samples and alive at most 64 MiB together; over
 either SetData raises with the reason.
+
+buildat.synth.buffer(n) -> a buffer of n samples ([SYNTH_BLOCKS],
+  buildat.has("synth_blocks"))
+- Samples held in C++, floats, -1..1 for full scale, and the blocks that
+  write them: Lua builds a chain and C++ runs it, so a sound is a few calls
+  and not one a sample (the web's Lua is interpreted). A buffer holds at
+  most 2^21 samples (47 s at 44100 Hz), the buffers alive 2^24 together.
+  Indices and spans are in samples from 0: `from` defaults to 0 and `n`
+  to the rest.
+- **The same samples everywhere**: a block's output for given inputs is
+  the same natively and on the web, and in every release
+  (doc/compatibility.txt). A block that changes is a new block.
+buf:len(), buf:get(i), buf:set(i, v), buf:clear([from, n])
+buf:gain(g[, g_to, from, n])
+- Multiplied by g, ramped to g_to over the span.
+buf:mix(src, src_from, dst_from, n, gain[, gain_to])
+- src's samples summed in, the gain ramped so that a cut does not click.
+buf:to_shorts(vector_buffer[, from, n]) / buf:from_shorts(vector_buffer
+  [, dst_from]) -> n
+- To and from 16-bit samples in a VectorBuffer: what a
+  BufferedSoundStream's AddData and a Sound's SetData take.
+buf:hash() -> 16 hex digits, the samples' FNV-1a
+The blocks write over a span and take a table; each has rate (Hz,
+1000..192000, 44100 by default), from and n. A curve is a number or a
+table, its rates per second, evaluated per sample from the span's start:
+  {start, slide (added a second), mul (multiplied in a second, > 0),
+   accel (mul's own multiplier a second), wobble and wobble_speed
+   (times 1 + wobble sin(2 pi wobble_speed t)), jumps = {{t, factor},
+   ...}, restart (seconds: back to the start, jumps too), min, max}
+buf:osc{wave, freq, duty, phase, oversample}
+- wave "square" (duty 0..1, a curve), "saw", "triangle" or "sine"; freq a
+  curve in Hz; oversample 1..16 subsamples averaged, so a square high up
+  does not alias. Written over the span.
+buf:noise{kind, seed, freq, oversample}
+- "white", a new value a sample, or "held" (sfxr's): 32 values a period
+  of freq, each held. seed 0..2^32-1. Written over the span.
+buf:filter{type, cutoff, resonance}
+- In place: "low", "high" or "band"; cutoff a curve in Hz, up to a fifth
+  of the rate; resonance a curve 0..0.99.
+buf:delay{delay, max_delay, feedback, mix}
+- In place: delay a curve in seconds, up to max_delay (at most 2);
+  feedback -0.99..0.99; mix 0..1, the delayed part. A phaser, a flanger
+  or an echo. The line starts empty each call.
+buf:envelope{points = {{t, v}, ...}}
+- Multiplied in: linear between the points (t in seconds, ascending).
 
 
 The extension environment

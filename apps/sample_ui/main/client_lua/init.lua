@@ -127,6 +127,42 @@ local function check_procedural_sound()
 	assert(not ok, "a Sound over the cap took its samples")
 	log:info("sound from samples ok: " .. string.format("%.2f", sound.length) ..
 			" s, two sources playing; over the cap: " .. tostring(err))
+	-- The synth's blocks from the sandbox ([SYNTH_BLOCKS]): a falling
+	-- square under an envelope, made into a Sound, and what is refused
+	if not buildat.has("synth_blocks") then
+		return
+	end
+	local synth = buildat.synth
+	local b = synth.buffer(SAMPLES)
+	b:osc{wave = "square", freq = {start = 880, mul = 0.25}, duty = 0.3,
+			oversample = 4, rate = RATE}
+	b:filter{type = "low", cutoff = 3000, rate = RATE}
+	b:envelope{points = {{0, 0}, {0.01, 1}, {0.25, 0}}, rate = RATE}
+	local shorts = magic.VectorBuffer:new()
+	b:to_shorts(shorts)
+	local made = magic.Sound:new()
+	made:SetFormat(RATE, true, false)
+	made:SetData(shorts)
+	kept.made = made
+	local refused = {}
+	for _, f in ipairs({
+		function() synth.buffer(2 ^ 21 + 1) end,
+		function() return b:get(b:len()) end,
+		function() b:osc{wave = "organ"} end,
+		function() b:osc{wave = "sine", rate = 10} end,
+		function() b:osc{wave = "sine", n = b:len() + 1} end,
+		function() b:mix(b, 0, 5, 10, 1) end,
+		function() b:to_shorts({}) end,
+		function() b.osc({}, {wave = "sine"}) end,
+		function() b:envelope{points = {{0.2, 1}, {0.1, 0}}} end,
+	}) do
+		local ok, err = pcall(f)
+		assert(not ok, "synth: refusal " .. (#refused + 1) .. " was not")
+		refused[#refused + 1] = tostring(err):gsub(".*synth: ", "")
+	end
+	log:info("synth ok: " .. string.format("%.2f", made.length) ..
+			" s made into a Sound, hash " .. b:hash() .. "; refused: " ..
+			table.concat(refused, "; "))
 end
 
 function show_stuff()

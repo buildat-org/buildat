@@ -551,11 +551,16 @@ if(BUILD_CLIENT)
 		src/lua_bindings/crypto.cpp
 		src/lua_bindings/compress.cpp
 		src/lua_bindings/replicate.cpp
+		src/lua_bindings/synth.cpp
 	)
 
 	if(WIN32)
 		list(APPEND CLIENT_SRCS ${BUILDAT_RC})
 	endif()
+	# [SYNTH_BLOCKS]: the same samples on every platform, so no fused
+	# multiply-add where the source has a multiply and an add
+	set_source_files_properties(src/lua_bindings/synth.cpp PROPERTIES
+			COMPILE_OPTIONS "-ffp-contract=off")
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 	# A GUI executable on Windows ([WIN8_START] 19): no console window,
 	# whose synchronous writes made the client pay a console write per

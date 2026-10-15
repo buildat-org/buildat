@@ -73,6 +73,15 @@ In Lua (cereal, client_api.txt), the same record as a type:
 
 A 1.0 record read with t has added_in_1 = 0.
 
+Synth blocks
+------------
+buildat.synth's blocks (client_api.txt, [SYNTH_BLOCKS]) give the same
+samples for the same inputs natively, on the web and in every release:
+a sound made from them, blip's included, sounds the same later. Their
+output is part of the engine's interface. A change to it is a new block,
+or a new `version` argument with the old code kept, never an edit;
+src/lua_bindings/synth.cpp's self-check holds the hashes.
+
 Apps
 ----
 Every module of an app says the engine API it is written against in its
