@@ -43,6 +43,9 @@ local SEED_REFERENCE = rawget(_G, "REFSHOT_SEED")
 
 -- The hold is set.lua's; REFSHOT_HOLD is the calibration ladder's override
 local HOLD = tonumber(rawget(_G, "REFSHOT_HOLD")) or REFSET.hold
+-- The moon's scale in the fixture: its light, no disc to see -- a
+-- thousandth of its square, under a pixel at any of the views
+local MOON_UNSEEN = 0.001
 -- How often the aim is put back, which has to fit inside the hold: at a
 -- second it is four re-aims of a six second state, and at a quarter of that
 -- it is still four. The calibration ladder halves one thing at a time, and
@@ -287,7 +290,9 @@ local function pin_view(player)
 	-- 2026-09-18): the reference's Nishita sky has none, and rather than
 	-- model them there or read around them the fixture turns them off.
 	-- A fixture fact, not a rendering one; the moonlit ground stays,
-	-- the disc goes. Re-asserted with the rest, since a game's weather
+	-- the disc goes: the moon is kept up at a scale too small to see,
+	-- since a hidden moon lights nothing in either client
+	-- ([VANILLA_WEATHER]). Re-asserted with the rest, since a game's weather
 	-- puts clouds back.
 	-- CLOUDS=1 leaves the game's clouds on: a set for looking at the
 	-- clouds themselves ([CLOUD_LIGHT]), not for the probes
@@ -295,7 +300,7 @@ local function pin_view(player)
 	if not clouds_wanted then
 		player:set_clouds({density = 0})
 	end
-	player:set_moon({visible = false})
+	player:set_moon({visible = true, scale = MOON_UNSEEN})
 	player:set_stars({visible = false})
 	-- **And kept off against the game**: mcl_weather's sky update puts
 	-- `moon = {visible = true}` on every player a few times a minute, and
@@ -309,15 +314,18 @@ local function pin_view(player)
 	local class = getmetatable(player) and getmetatable(player).__index
 	if type(class) == "table" and not class.__refshot_keeps_off then
 		class.__refshot_keeps_off = true
-		local function keep_off(name, field, value)
+		local function keep_off(name, field, value, field2, value2)
 			local orig = class[name]
 			class[name] = function(self, params)
 				params = type(params) == "table" and table.copy(params) or {}
 				params[field] = value
+				if field2 then
+					params[field2] = value2
+				end
 				return orig(self, params)
 			end
 		end
-		keep_off("set_moon", "visible", false)
+		keep_off("set_moon", "visible", true, "scale", MOON_UNSEEN)
 		keep_off("set_stars", "visible", false)
 		if not clouds_wanted then
 			keep_off("set_clouds", "density", 0)

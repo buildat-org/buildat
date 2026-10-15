@@ -1627,6 +1627,26 @@ local function apply_sky_of_hour(force)
 		horizon_now = at(horizon_now, PHYS.night_sky +
 				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(sky_now.height or 0))
 	end
+	-- Under cover the clouds' colour, the horizon a third of the zenith
+	-- (res/sky_model.lua's overcast, luanti_client's too); pbr draws the
+	-- reference's day colours and not the game's darker ones, so its zenith
+	-- dims as well
+	local cover = game_sky.cloud_cover or 0
+	if cover > 0 then
+		zenith_now, horizon_now = sky_dome.overcast(zenith_now, horizon_now,
+				game_sky.cloud_color, cover,
+				sky_now.unlit and 0 or sky_dome.OVERCAST_DIM)
+	end
+	sky_now.horizon_now, sky_now.cover = horizon_now, cover
+	-- And the meter, which would put a storm at a clear day's brightness
+	if not sky_now.unlit and sky_now.metered_cover ~= cover then
+		local vp = magic.renderer:GetViewport(0)
+		if vp and vp.renderPath then
+			sky_now.metered_cover = cover
+			vp.renderPath:SetShaderParameter("AutoExposureMiddleGrey",
+					sky_dome.middle_grey(AUTO_EXPOSURE.middle_grey, cover))
+		end
+	end
 	world_sky:set_look(zenith_now, horizon_now, nil)
 	-- For the fog below, which on the pbr path is this horizon: the same
 	-- radiance the sky meets the ground with, not a display colour
@@ -1788,12 +1808,15 @@ local function apply_sky_of_hour(force)
 		-- after sunset, where the sun's share is gone: the clouds were a
 		-- third of the sky they hang in.
 		local k_sun = math.max(0, (n * PHYS.sky_zenith /
-				math.max(lum(albedo), 1e-6) - noon_mean) * math.pi /
-				PHYS.sun(1))
+				sky_dome.CLOUD_REF_LUM - noon_mean) * math.pi / PHYS.sun(1))
 		-- The sun as the clouds see it: from 7 km up it sets
 		-- PHYS.cloud_dip later, through the longer air that reddens it
 		local h = (sky_now.height or 0) + PHYS.cloud_dip
-		local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi
+		-- None from a hidden sun (VoxeLibre's weather hides it), and
+		-- under cover what gets through it
+		local e = PHYS.sun(h) * math.max(h, 0) * k_sun / math.pi *
+				sky_dome.direct_light(game_sky.sun_visible ~= false,
+				game_sky.cloud_cover)
 		local sc = PHYS.sun_color(h)
 		-- And the dusk glow is sky light too: what a cloud gets of it is
 		-- the dome's mean of SkyDome's glow term, (1 - y)^2 over the
@@ -1929,21 +1952,21 @@ local function update_sky(dt)
 	end
 
 	-- How much of each light there is: its own hour of the day, whether it
-	-- is over the horizon at all, what the cloud leaves of it, and whether
-	-- the game turned it off. A body that is not there casts no light --
-	-- VoxeLibre turns all three off when the weather turns -- so that is a
-	-- gate and not a dimming. 0.8 is what a full overcast takes.
-	local through_cloud = 1 - 0.8 * (game_sky.cloud_cover or 0)
-	-- The discs' visibility (set_sun / set_moon) is the discs' alone:
-	-- official Luanti lights the day the same with the sun hidden, having
-	-- no light from either body, and the reference fixture hides the
-	-- moon's disc to keep it out of the crops while its moonlit ground
-	-- stays -- the light went with the disc and the night probe read the
-	-- moon as absent ([NIGHT_LIGHT], 2026-09-20)
+	-- is over the horizon at all, and what is left of it through the cloud
+	-- and whether the game turned it off -- res/sky_model.lua's
+	-- direct_light(), luanti_client's rule too ([VANILLA_WEATHER]). A body
+	-- that is not there casts no light: VoxeLibre turns all three off when
+	-- the weather turns, so a rainy day has no sun shadows. (The sky is no
+	-- longer held to official Luanti, which keeps a hidden sun's light; the
+	-- reference fixture keeps its moonlit ground with a moon too small to
+	-- see, not a hidden one -- [NIGHT_LIGHT].)
+	local cover = game_sky.cloud_cover or 0
 	local up = sky_dome.sun_amount(daylight) *
-			sky_dome.above_horizon(smooth_sy) * through_cloud
+			sky_dome.above_horizon(smooth_sy) *
+			sky_dome.direct_light(game_sky.sun_visible ~= false, cover)
 	local moon_up = sky_dome.moon_amount(daylight) *
-			sky_dome.above_horizon(-smooth_sy) * through_cloud
+			sky_dome.above_horizon(-smooth_sy) *
+			sky_dome.direct_light(game_sky.moon_visible ~= false, cover)
 	-- A light below the horizon is taken out of the scene rather than
 	-- dimmed: a directional light does not know about the horizon, and one
 	-- under it lights the undersides of everything and puts the night's
@@ -2222,6 +2245,13 @@ local function update_sky(dt)
 	-- meter: the snow-topped tree tops on vp5's ridge, at last. What a
 	-- cave's haze is on the pbr path is the ambient of the hour, which is
 	-- the light a cave gets.
+	-- Under cover the fog is the overcast horizon it meets, as on pbr
+	-- (a frame behind, as that)
+	if not game_sky.fog_color and (sky_now.cover or 0) > 0 and
+			sky_now.horizon_now then
+		local h = sky_now.horizon_now
+		base = blend(base, magic.Color(h.r, h.g, h.b), sky_now.cover)
+	end
 	local indoors = indoors_of(0.10 + 0.90 * day)
 	if sky_now.horizon_radiance then
 		local h = sky_now.horizon_radiance
@@ -2300,9 +2330,12 @@ luanti.sub_sky(function(sky)
 	if cover then
 		world_sky:set_look(nil, nil, cover)
 	end
-	-- Kept as well as sent, because cloud dims the sun and the moon; see
-	-- through_cloud in update_sky()
-	game_sky.cloud_cover = cover
+	-- What the weather is, apart from how much cloud is drawn: the density
+	-- and the clouds' colour (res/sky_model.lua's cloud_cover, VoxeLibre
+	-- saying rain in the colour alone); it takes the sun and the moon and
+	-- greys the sky in update_sky() and apply_sky_of_hour()
+	game_sky.cloud_cover = sky_dome.cloud_cover(sky.density, sky.cloud_color,
+			sky.clouds)
 	-- The fog is the horizon seen through the world's air, so it follows
 	-- the horizon the game asked for
 	if sky.horizon then

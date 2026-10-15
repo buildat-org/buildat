@@ -411,4 +411,131 @@ do
 end
 M.PHYS = PHYS
 
+-- **The weather** ([VANILLA_WEATHER] 1): what a game's partial sky
+-- commands come to as a sky, the same in both clients, which had drifted
+-- apart (vanilla read the clouds' density alone, so VoxeLibre's rain left
+-- its sun out). Generic, keyed on no game's name: a game that sends
+-- nothing unusual comes out as before. Colours are {r, g, b} 0..1.
+local function clamp01(v) return math.max(0, math.min(1, v)) end
+local function lum(c) return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b end
+
+-- Luanti's own cloud density, which every game gets whether or not it asks
+M.CLOUD_DENSITY_DEFAULT = 0.4
+-- What a full overcast takes from the sun and the moon (a named pick)
+M.CLOUD_DIM = 0.8
+-- A cloud need not be black to be opaque
+local CLOUD_SHADE_GAIN = 1.3
+-- What a full overcast takes from the zenith where the game's own day
+-- colours are not drawn (pbr draws the reference's), a named pick
+M.OVERCAST_DIM = 0.6
+
+-- **How much of the sky is cloud**, 0..1, out of the two ways a game says
+-- it: the density above Luanti's default 0.4, and the colour -- VoxeLibre
+-- never touches the density and darkens the clouds instead, #FFF0F0
+-- clear, #5D5D5F rain, #3D3D3F thunder. A black cloud that covers nothing
+-- shades nothing, so the colour is weighed by whether there is a layer.
+-- on: false when the game turned the clouds off (set_sky clouds = false).
+function M.cloud_cover(density, color, on)
+	if on == false then
+		return 0
+	end
+	density = density or M.CLOUD_DENSITY_DEFAULT
+	local have = clamp01(density / M.CLOUD_DENSITY_DEFAULT)
+	local dense = clamp01((density - M.CLOUD_DENSITY_DEFAULT) /
+			(1 - M.CLOUD_DENSITY_DEFAULT))
+	local shade = color and clamp01((1 - lum(color)) * CLOUD_SHADE_GAIN * have)
+			or 0
+	return 1 - (1 - dense) * (1 - shade)
+end
+
+-- **A body's direct light**, 0..1: none from a hidden sun or moon -- a gate,
+-- not a dimming; VoxeLibre hides the sun, the moon and the stars in bad
+-- weather, a dimension with no sky for good -- and what the cloud leaves
+-- of a visible one. The sky's own diffuse light is the callers' and stays.
+function M.direct_light(visible, cover)
+	if visible == false then
+		return 0
+	end
+	return 1 - M.CLOUD_DIM * (cover or 0)
+end
+
+-- **The sky under cover**: an overcast sky is darker at the horizon than
+-- overhead -- the standard overcast sky's luminance goes as (1 + 2 sin h)
+-- / 3, a third of the zenith's at the horizon -- and is the clouds'
+-- colour. By the cover c, the zenith goes to the clouds' hue at its own
+-- brightness (less zenith_dim of it: OVERCAST_DIM where the game's own
+-- darker colours are not drawn, 0 where they are) and the horizon, and
+-- with it the fog, to the same hue at a third of that. c = 0 changes
+-- nothing. Works in any linear units: display colours or radiance.
+-- -> zenith, horizon
+function M.overcast(zenith, horizon, cloud, cover, zenith_dim)
+	if not cover or cover <= 0 then
+		return zenith, horizon
+	end
+	cloud = cloud or {r = 1, g = 1, b = 1}
+	local cl = lum(cloud)
+	local hue = cl > 1e-6 and {r = cloud.r / cl, g = cloud.g / cl,
+			b = cloud.b / cl} or {r = 1, g = 1, b = 1}
+	local top = lum(zenith) * (1 - (zenith_dim or 0) * cover)
+	local function mix(a, k, l)
+		return {r = a.r + (hue.r * l - a.r) * k, g = a.g + (hue.g * l - a.g) * k,
+				b = a.b + (hue.b * l - a.b) * k}
+	end
+	return mix(zenith, cover, top), mix(horizon, cover, top / 3)
+end
+
+-- **The meter under cover** (pbr): a metered camera puts an overcast day
+-- at the clear day's brightness, which reads as no weather at all; the eye
+-- sees a storm as dark. The meter's middle grey, less this share of it
+-- under full cover -- a named pick.
+-- The cloud albedo pbr's k_sun is rated at (Luanti's default cloud
+-- colour, 0.9 0.92 0.95): a game's darker colour is then a darker cloud
+-- rather than one k_sun lights back up to the same white -- VoxeLibre's
+-- rain colour, its sun left visible on a Luanti server
+M.CLOUD_REF_LUM = 0.917
+M.OVERCAST_EXPOSURE = 0.5
+function M.middle_grey(grey, cover)
+	return grey * (1 - M.OVERCAST_EXPOSURE * (cover or 0))
+end
+
+-- What the games really send, in and out ([VANILLA_WEATHER]'s checks)
+do
+	local function rgb(hex)
+		return {r = tonumber(hex:sub(1, 2), 16) / 255,
+				g = tonumber(hex:sub(3, 4), 16) / 255,
+				b = tonumber(hex:sub(5, 6), 16) / 255}
+	end
+	-- VoxeLibre: the density stays 0.4, the weather in the colour
+	local clear = M.cloud_cover(0.4, rgb("FFF0F0"))
+	local rain = M.cloud_cover(0.4, rgb("5D5D5F"))
+	local thunder = M.cloud_cover(0.4, rgb("3D3D3F"))
+	local snow = M.cloud_cover(0.4, rgb("ADADAD"))
+	assert(clear < 0.1, "a clear sky keeps the sun")
+	assert(snow > 0.3 and snow < rain, "snow takes some, less than rain")
+	assert(rain > 0.6 and rain < thunder, "rain takes most of it")
+	assert(thunder > 0.9, "a thunderstorm takes nearly all of it")
+	-- The Nether, the End and the void: no clouds, nothing from them; the
+	-- bodies hidden, so no direct light whatever the cover
+	assert(M.cloud_cover(0.4, rgb("3D3D3F"), false) == 0, "no clouds, no cover")
+	assert(M.direct_light(false, 0) == 0, "a hidden body lights nothing")
+	assert(M.direct_light(true, 0) == 1, "a clear sky's sun is whole")
+	assert(M.direct_light(true, thunder) < 0.3, "a storm leaves little sun")
+	-- Minetest Game and devtest: the defaults, a white cloud -- the sky
+	-- as it was
+	local mtg = M.cloud_cover(0.4, rgb("F0F0FF"))
+	assert(mtg < 0.1, "a default sky is clear")
+	local z, h = {r = 0.4, g = 0.6, b = 1.0}, {r = 0.6, g = 0.7, b = 0.9}
+	local z2, h2 = M.overcast(z, h, rgb("F0F0FF"), 0)
+	assert(z2 == z and h2 == h, "no cover changes nothing")
+	-- A game that says it with the density
+	assert(M.cloud_cover(1.0, rgb("FFFFFF")) > 0.9, "a full sky covers it")
+	assert(M.cloud_cover(0.0, rgb("000000")) == 0, "no layer covers nothing")
+	-- Under a thunderstorm: grey, the horizon a third of the zenith
+	local zt, ht = M.overcast(z, h, rgb("3D3D3F"), 1, 0)
+	assert(math.abs(lum(ht) - lum(zt) / 3) < 1e-6, "the horizon a third")
+	assert(math.abs(zt.r - zt.b) < 0.05 * lum(zt), "the clouds' grey")
+	local zd = M.overcast(z, h, rgb("5D5D5F"), 1, M.OVERCAST_DIM)
+	assert(lum(zd) < lum(z) * 0.5, "pbr's zenith darkens under cover")
+end
+
 return M

@@ -2770,73 +2770,22 @@ function M.new(magic, buildat, log, options)
 		return factor ^ 2.2
 	end
 
-	-- How much of the sun and the moon the clouds keep. A directional light
-	-- does not know there is a layer of cloud between it and the ground; the
-	-- ambient does, because a game darkens the sky colours it sends when the
-	-- weather turns, and only the direct light is left saying it is a clear
-	-- day.
-	--
-	-- Two things say overcast and a game uses one or the other. Density is
-	-- how much of the sky is cloud, and 0.4 is what every game gets whether
-	-- or not it asks, so only what is above that is weather. The other is the
-	-- colour: VoxeLibre never touches the density and says it with the cloud
-	-- colour instead, #FFF0F0 for a clear sky against #5D5D5F for rain and
-	-- #3D3D3F for a thunderstorm. Reading both is what makes this work on a
-	-- game that has not been looked at.
-	local CLOUD_DIM = 0.8          -- what a full overcast takes from the sun
-	local CLOUD_SHADE_GAIN = 1.3   -- a cloud need not be black to be opaque
-
-	local function cloud_cover_of(density, color_bright)
-		-- Whether there is a layer there at all, which is what the colour
-		-- has to be weighed by: a black cloud that covers nothing shades
-		-- nothing
-		local have = clamp01(density / CLOUD_DENSITY_DEFAULT)
-		local dense = clamp01((density - CLOUD_DENSITY_DEFAULT) /
-				(1 - CLOUD_DENSITY_DEFAULT))
-		local shade = 0
-		local c = color_bright
-		if c then
-			local luma = (0.2126 * c[1] + 0.7152 * c[2] + 0.0722 * c[3]) / 255
-			shade = clamp01((1 - luma) * CLOUD_SHADE_GAIN * have)
-		end
-		-- Two ways of covering the sky, neither of which excuses the other
-		return 1 - (1 - dense) * (1 - shade)
+	-- How much of the sky is cloud and what a body's light is through it:
+	-- res/sky_model.lua's weather, one rule for both clients
+	-- ([VANILLA_WEATHER]). The colour arrives 0..255 with its alpha.
+	local function cloud_rgb()
+		local c = (sky_bodies.clouds or {}).color_bright
+		return c and {r = c[1] / 255, g = c[2] / 255, b = c[3] / 255} or nil
 	end
-
-	-- What the weather has to come out as, checked at load against what a
-	-- VoxeLibre server actually sends: it leaves the density at Luanti's own
-	-- 0.4 throughout and says the weather in the colour alone.
-	do
-		local clear = cloud_cover_of(0.4, {255, 240, 240})
-		local rain = cloud_cover_of(0.4, {93, 93, 95})
-		local thunder = cloud_cover_of(0.4, {61, 61, 63})
-		assert(clear < 0.1, "a clear sky keeps the sun")
-		assert(rain > 0.6 and rain < thunder, "rain takes most of it")
-		assert(thunder > 0.9, "a thunderstorm takes nearly all of it")
-		-- And a game that says it the other way, with the density
-		assert(cloud_cover_of(1.0, {255, 255, 255}) > 0.9,
-				"a sky full of cloud covers it whatever colour the cloud is")
-		assert(cloud_cover_of(0.0, {0, 0, 0}) == 0,
-				"a cloud that is not there covers nothing")
-	end
-
+	local metered_cover = nil
 	local function cloud_cover()
-		if sky and sky.clouds == false then
-			return 0
-		end
 		local clouds = sky_bodies.clouds or {}
-		return cloud_cover_of(clouds.density or CLOUD_DENSITY_DEFAULT,
-				clouds.color_bright)
+		return sky_model.cloud_cover(clouds.density, cloud_rgb(),
+				not (sky and sky.clouds == false))
 	end
-
-	-- A game that hides a body has said the plainest thing it can say about
-	-- it: VoxeLibre turns the sun, the moon and the stars off together when
-	-- the weather turns, before it darkens a single colour, and a dimension
-	-- with no sky turns them off for good. Something that cannot be seen
-	-- casts no light, so this is a gate rather than a dimming; what is left
-	-- is the sky, which is what an overcast day is lit by.
-	local function body_is_up(body)
-		return (body and body.visible ~= false) and 1 or 0
+	local function direct_light(body)
+		return sky_model.direct_light(not body or body.visible ~= false,
+				cloud_cover())
 	end
 
 	-- What the sun shines with now: its own colour, going the colour of the
@@ -2996,12 +2945,44 @@ function M.new(magic, buildat, log, options)
 		-- sky meets the ground with.
 		local _, height = sun_direction(daylight_time)
 		local sky_top, sky_horizon = top, horizon
+		local ambient
 		if pbr then
-			local ambient
 			sky_top, sky_horizon, ambient =
 					physical_sky(top, horizon, height)
+		end
+		-- Under cover the sky goes the clouds' colour, the horizon and the
+		-- fog a third of the zenith (res/sky_model.lua's overcast); on pbr,
+		-- where the game's darker colours are not drawn, the zenith dims
+		-- too, and the ambient, the dome's mean, with the two
+		local cover = cloud_cover()
+		if cover > 0 then
+			local z, h = sky_model.overcast(sky_top, sky_horizon, cloud_rgb(),
+					cover, pbr and sky_model.OVERCAST_DIM or 0)
+			if ambient then
+				local function dome(a, b)
+					return luminance({5 * a.r + b.r, 5 * a.g + b.g,
+							5 * a.b + b.b})
+				end
+				local k = dome(z, h) / math.max(dome(sky_top, sky_horizon),
+						1e-9)
+				ambient = magic.Color(ambient.r * k, ambient.g * k,
+						ambient.b * k)
+			end
+			sky_top = magic.Color(z.r, z.g, z.b)
+			sky_horizon = magic.Color(h.r, h.g, h.b)
+		end
+		zone.fogColor = sky_horizon
+		if ambient then
 			zone.ambientColor = ambient
-			zone.fogColor = sky_horizon
+		end
+		-- And the meter, which would put a storm at a clear day's brightness
+		if pbr and metered_cover ~= cover then
+			local vp = magic.renderer:GetViewport(0)
+			if vp and vp.renderPath then
+				metered_cover = cover
+				vp.renderPath:SetShaderParameter("AutoExposureMiddleGrey",
+						sky_model.middle_grey(0.18, cover))
+			end
 		end
 
 		-- What the PBR path's reflections are multiplied by: one, the cube
@@ -3024,9 +3005,9 @@ function M.new(magic, buildat, log, options)
 			-- steps, only the direction the shadow is cast from
 			local sx, sy, sz = sun_direction(stepped_time(daylight_time))
 			local _, smooth_sy = sun_direction(daylight_time)
-			local through_cloud = 1 - CLOUD_DIM * cloud_cover()
+			local sun_lit = direct_light(sky_bodies.sun)
 			local up = sun_amount(daylight_time) * above_horizon(smooth_sy) *
-					through_cloud * body_is_up(sky_bodies.sun)
+					sun_lit
 			sun_node.enabled = up > 0
 			local sun_color = sun_light_color(daylight_time)
 			if pbr then
@@ -3037,13 +3018,12 @@ function M.new(magic, buildat, log, options)
 			if up > 0 then
 				sun_node.direction = magic.Vector3(-sx, -sy, -sz)
 				sun_light.brightness = pbr and UNITS * PHYS.sun(smooth_sy) *
-						through_cloud * body_is_up(sky_bodies.sun) or
+						sun_lit or
 						SUN_BRIGHTNESS * up
 				sun_light.color = sun_color
 			end
 			local moon_up = moon_amount(daylight_time) *
-					above_horizon(-smooth_sy) * through_cloud *
-					body_is_up(sky_bodies.moon)
+					above_horizon(-smooth_sy) * direct_light(sky_bodies.moon)
 			moon_node.enabled = moon_up > 0
 			if moon_up > 0 then
 				moon_node.direction = magic.Vector3(sx, sy, sz)
@@ -3139,13 +3119,13 @@ function M.new(magic, buildat, log, options)
 				-- makes a thin noon cloud PHYS.cloud_n times the zenith. The
 				-- clouds see the sun PHYS.cloud_dip longer. simplified: no
 				-- dusk glow term.
-				local lum = math.max(luminance(own), 1e-6)
 				local noon_mean = (5 * PHYS.sky_zenith + PHYS.sky_horizon) / 6
 				local k_sun = math.max(0, (PHYS.cloud_n * PHYS.sky_zenith /
-						lum - noon_mean) * math.pi / PHYS.sun(1))
+						sky_model.CLOUD_REF_LUM - noon_mean) * math.pi /
+						PHYS.sun(1))
 				local h = height + PHYS.cloud_dip
 				local e = UNITS * PHYS.sun(h) * math.max(h, 0) * k_sun /
-						math.pi * body_is_up(sky_bodies.sun)
+						math.pi * direct_light(sky_bodies.sun)
 				local r, g, b = PHYS.sun_rgb(h)
 				sky_material:SetShaderParameter("CloudSun", magic.Color(
 						own[1] * e * r, own[2] * e * g, own[3] * e * b))
