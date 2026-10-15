@@ -400,10 +400,11 @@ local function open_designer()
 	local function show_code()
 		if code then
 			-- Text draws no tabs
-			code.text = (d.format == "raw" and
+			code:SetText(((d.format == "raw" and
 					snippet(d.p, "raw", d.use, false) or ("-- Compact\n" ..
 					snippet(d.p, "compact", d.use, false) .. "\n-- Table\n" ..
-					snippet(d.p, "table", d.use, false))):gsub("\t", "    ")
+					snippet(d.p, "table", d.use, false))):gsub("\t", "    ")))
+			code.cursorPosition = 0
 		end
 	end
 	local function play_now()
@@ -595,13 +596,16 @@ local function open_designer()
 		-- borders and spacing, and a margin take 460)
 		code_col:SetLayout(LM_VERTICAL, 6, magic.IntRect(0, 0, 0, 0))
 		text(code_col, "Code for the sound, as Copy makes it")
-		local code_view = code_col:CreateChild("ScrollView")
-		code_view:SetStyleAuto()
-		code_view.scrollBarsAutoVisible = true
-		code_view:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
-		code = code_view:CreateChild("Text")
+		-- A read-only multi-line edit, as formspec's textarea: selected and
+		-- copied (Ctrl+C) in part, not typed into; it wraps at its width
+		-- and scrolls by the wheel
+		code = code_col:CreateChild("LineEdit")
 		code:SetStyleAuto()
-		code_view.contentElement = code
+		code.multiLine = true
+		code.editable = false
+		code.textSelectable = true
+		code.textCopyable = true
+		code:SetFixedWidth(math.max(360, math.min(720, ui_w - 460)))
 	end
 	show_values()
 	show_code()
