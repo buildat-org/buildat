@@ -1,5 +1,5 @@
 [
- ["nav", "${URL}?log=4"],
+ ["nav", "${URL}?log=4&pref=web_idle_fps=5"],
  ["wait", 20000],
  ["eval", "(function(){var g=Module.canvas.getContext('webgl2'); var c=g.clear.bind(g); window.nclear=0; g.clear=function(m){window.nclear++; return c(m);}; return 'hooked';})()"],
  ["eval", "(function(){var n=window.nclear; window.nclear=0; return 'clears '+n+' focus='+document.hasFocus()+' wake='+!!Module.buildatWake;})()"],

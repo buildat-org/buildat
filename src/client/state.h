@@ -62,6 +62,9 @@ namespace client
 		virtual Arrival get_last_arrival() = 0;
 		// [LOAD_IN_FLIGHT] PacketStream::in_flight() on what has been read
 		virtual bool get_in_flight(ss_ *name, size_t *have, size_t *size) = 0;
+		// [WEB_LINK_BEHIND] what has been read from the server and not yet
+		// handled
+		virtual size_t get_backlog_bytes() = 0;
 	};
 
 	State* createState(sp_<app::App> app);

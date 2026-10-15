@@ -9,7 +9,8 @@
 //       --steps steps.json --log page.log [--var NAME=value ...]
 //
 // A steps file is a JSON list of steps, each a list:
-//   ["nav", url]            open the page, and wait for it to load
+//   ["nav", url]            open the page, and wait for it to load; the
+//                           address gets pref=web_idle_fps=60 (full_rate)
 //   ["wait", ms]
 //   ["waitlog", regex, s]   until a line of the page's console matches, one
 //                           after the last waitlog's, at most s seconds
@@ -64,6 +65,16 @@
 // ${OUT}/failed.png.
 "use strict";
 const fs = require("fs");
+// **The drives' pages run at full rate** ([WEB_LINK_BEHIND]): a headless
+// browser's page counts as unfocused and ran at web_idle_fps (5 frames a
+// second), and a streaming world's packets reached it minutes late. A
+// nav's address asks for 60 unless it names web_idle_fps itself.
+function full_rate(u) {
+	const url = new URL(u);
+	if (!url.searchParams.getAll("pref").some(p => p.startsWith("web_idle_fps=")))
+		url.searchParams.append("pref", "web_idle_fps=60");
+	return url.toString();
+}
 
 const args = {vars: {}};
 for (let i = 2; i < process.argv.length; i++) {
@@ -460,6 +471,8 @@ async function chrome() {
 				}
 				if (over)
 					throw new Error(`${over} stretches over ${still} ms with nothing changed`);
+			} else if (op === "nav") {
+				await b.ops.nav(full_rate(args[0]));
 			} else if (b.ops[op]) {
 				await b.ops[op](...args);
 			} else {

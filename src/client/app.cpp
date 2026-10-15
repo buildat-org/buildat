@@ -1838,7 +1838,7 @@ struct CApp: public App, public magic::Application
 	// input listener (index.html) calls buildatWake, which puts the full
 	// rate back on that input rather than on the next slow frame.
 	bool m_web_idle = false;
-	int m_web_idle_rate = 0;
+	int m_web_idle_ms = 0;
 	void web_idle_step()
 	{
 		const int rate = m_options.graphics.web_idle_fps;
@@ -1849,17 +1849,24 @@ struct CApp: public App, public magic::Application
 			return (idle ? 1 : 0) | (Module['buildatWake'] ? 0 : 2);
 		});
 		const bool idle = st & 1;
+		// **Catching up**: idle with a backlog ([WEB_LINK_BEHIND]). At 5
+		// frames a second the page handles a few packets a frame, and a
+		// world streaming in to a player who waited without touching
+		// anything came in minutes late. A timer at 60 a second, not the
+		// animation callback, which a hidden page does not get at all.
+		const bool catching_up = idle &&
+				m_state && m_state->get_backlog_bytes() > 0;
+		const int ms = catching_up ? 16 : 1000 / (rate > 0 ? rate : 5);
 		// The page's input woke it: the rate is full again, whatever this
 		// side last set, and an unfocused page goes back to slow from there
 		if(m_web_idle && (st & 2))
 			m_web_idle = false;
-		if(idle == m_web_idle && rate == m_web_idle_rate)
+		if(idle == m_web_idle && (!idle || ms == m_web_idle_ms))
 			return;
 		m_web_idle = idle;
-		m_web_idle_rate = rate;
+		m_web_idle_ms = ms;
 		if(idle){
-			emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT,
-					1000 / (rate > 0 ? rate : 5));
+			emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, ms);
 			EM_ASM({
 				Module['buildatWake'] = function(){
 					Module['buildatWake'] = null;
@@ -1870,8 +1877,8 @@ struct CApp: public App, public magic::Application
 			emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
 			EM_ASM({ Module['buildatWake'] = null; });
 		}
-		log_v(MODULE, "web: %s", idle ? cs("idle, "+itos(rate)+" frames a second") :
-				"full rate");
+		log_v(MODULE, "web: %s", !idle ? "full rate" : catching_up ?
+				"idle, catching up" : cs("idle, "+itos(rate)+" frames a second"));
 	}
 #endif
 

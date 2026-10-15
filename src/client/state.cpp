@@ -691,6 +691,11 @@ struct CState: public State
 		return m_last_arrival;
 	}
 
+	size_t get_backlog_bytes()
+	{
+		return backlog_bytes();
+	}
+
 	bool get_in_flight(ss_ *name, size_t *have, size_t *size)
 	{
 		return m_packet_stream.in_flight(m_socket_buffer, name, have, size);
