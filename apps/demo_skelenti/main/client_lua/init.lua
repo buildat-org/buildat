@@ -51,6 +51,43 @@ local function danger_at(x, z)
 	end
 	return field.data:byte(j * field.n + i + 1) / 255
 end
+-- The danger at x, z between the field's cells, so it changes smoothly
+-- underfoot
+local function danger_smooth(x, z)
+	if not field then
+		return 0
+	end
+	local c = field.cell
+	local fx, fz = (x - field.x0) / c - 0.5, (z - field.z0) / c - 0.5
+	local i, j = math.floor(fx), math.floor(fz)
+	local tx, tz = fx - i, fz - j
+	local function at(a, b)
+		return danger_at(field.x0 + (a + 0.5) * c, field.z0 + (b + 0.5) * c)
+	end
+	return (at(i, j) * (1 - tx) + at(i + 1, j) * tx) * (1 - tz) +
+			(at(i, j + 1) * (1 - tx) + at(i + 1, j + 1) * tx) * tz
+end
+-- **The fog of the danger** (user, 2026-10-15): the viewing range down to
+-- 8 nodes at full, the fade from nearer, set every frame from the danger
+-- underfoot eased over about half a second; logged at each tenth
+local fog = {d = 0, logged = -1}
+local function update_fog(dt)
+	local x, _, z = keys.player_pos()
+	if not x then
+		return
+	end
+	fog.d = fog.d + (danger_smooth(x, z) - fog.d) * math.min(1, dt * 2)
+	local tenth = math.floor(fog.d * 10 + 0.5)
+	if tenth ~= fog.logged then
+		fog.logged = tenth
+		log:info("skelenti: fog for danger " .. tenth / 10)
+	end
+	if fog.d < 0.05 then
+		luanti.set_fog_limit(nil)
+	else
+		luanti.set_fog_limit(200 - 192 * fog.d, 0.7 - 0.7 * fog.d)
+	end
+end
 local function mood_here()
 	local x, y, z = keys.player_pos()
 	if not x or mood.since < 5 then
@@ -85,6 +122,7 @@ keys.stage.frame = function(dt)
 		log:info("skelenti: mood " .. tostring(m))
 	end
 	music.update(dt, mood.now)
+	update_fog(dt)
 end
 -- The danger on the ground around the player, from main.cpp's
 -- send_field(), drawn by the voxel shader as decay

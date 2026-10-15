@@ -90,7 +90,8 @@ end
 
 -- A place for a kind to spawn near x, y, z, 12 to 24 nodes off, or nil:
 -- a boar on grass under the open sky by day, a skeleton on the floor of
--- a place the sun never reaches and no torch lights
+-- a place the sun never reaches and no torch lights -- or on any floor
+-- where the danger d is 0.5 or more (main.cpp's DAYLIGHT_DANGER)
 function core.skelenti_spawn_spot(a)
 	local tod = core.get_timeofday()
 	if a.kind == "boar" and (tod < 0.25 or tod > 0.75) then
@@ -110,7 +111,8 @@ function core.skelenti_spawn_spot(a)
 							core.get_node_light(p, 0.5) == 15 then
 						return {x, y - 0.5, z}
 					end
-				elseif core.get_node_light(p, 0.5) <= 3 and
+				elseif (a.d or 0) >= 0.5 or
+						core.get_node_light(p, 0.5) <= 3 and
 						(core.get_node_light(p) or 0) <= 4 then
 					return {x, y - 0.5, z}
 				end
@@ -155,19 +157,101 @@ function core.skelenti_drop(a)
 	end
 end
 
--- {n, d}: the fog of a place's danger, 0 to 1 (main.cpp's danger()): the
--- viewing range down from the client's own to 40 nodes, the fade
--- starting nearer
-function core.skelenti_fog(a)
-	local pl = core.get_player_by_name(a.n)
-	if not pl then
-		return nil
-	end
-	if a.d < 0.05 then
-		pl:set_sky({fog = {fog_distance = -1, fog_start = 0.7}})
-	else
-		pl:set_sky({fog = {fog_distance = math.floor(200 - 160 * a.d),
-				fog_start = 0.7 - 0.6 * a.d}})
+-- **The danger of a place**, as main.cpp's danger() works it out, for the
+-- mapgen here: main.cpp hands over the world's salt (skelenti_salt) and
+-- the danger at three places, which must come out the same here
+local salt
+local function mul32(a, b)
+	-- a * b mod 2^32 without passing 2^53: a in halves
+	local hi, lo = math.floor(a / 65536), a % 65536
+	return ((hi * b) % 65536 * 65536 + lo * b) % 4294967296
+end
+local function hash(a, b, k)
+	local v = bit.bxor(mul32(a % 4294967296, 73856093),
+			mul32(b % 4294967296, 19349663), k)
+	v = v % 4294967296
+	v = bit.bxor(v, bit.rshift(v, 13)) % 4294967296
+	v = mul32(v, 0x5bd1e995)
+	v = bit.bxor(v, bit.rshift(v, 15)) % 4294967296
+	return (v % 65536) / 65535
+end
+local function danger(x, z)
+	local C = 80
+	local ix, iz = math.floor(x / C), math.floor(z / C)
+	local function smooth(t) return t * t * (3 - 2 * t) end
+	local tx, tz = smooth(x / C - ix), smooth(z / C - iz)
+	local function h(a, b) return hash(a, b, salt) end
+	local v = (h(ix, iz) * (1 - tx) + h(ix + 1, iz) * tx) * (1 - tz) +
+			(h(ix, iz + 1) * (1 - tx) + h(ix + 1, iz + 1) * tx) * tz
+	return math.min(1, math.max(0, (v - 0.3) / 0.6))
+end
+
+-- {salt, at = {{x, z, d}, ...}} -> true, or nil and why
+function core.skelenti_salt(a)
+	salt = a.salt
+	for _, p in ipairs(a.at or {}) do
+		if math.abs(danger(p[1], p[2]) - p[3]) > 0.001 then
+			salt = nil
+			return {"the danger at " .. p[1] .. "," .. p[2] .. " is " ..
+					danger(p[1], p[2]) .. " here, " .. p[3] .. " in main.cpp"}
+		end
 	end
 	return true
 end
+
+-- **Bones piled in the danger zone** (user, 2026-10-15): on the ground
+-- of a column now and then, more often the higher the danger, a stack of
+-- bone blocks with a skull, two or a bone on top, or one of those alone.
+-- simplified: a chunk made before main.cpp's salt arrives gets none.
+local PILE_FROM = 0.3
+core.register_on_generated(function(minp, maxp)
+	if not salt then
+		return
+	end
+	local vm, emin, emax = core.get_mapgen_object("voxelmanip")
+	local hm = core.get_mapgen_object("heightmap")
+	if not vm or not hm then
+		return
+	end
+	local area = VoxelArea:new({MinEdge = emin, MaxEdge = emax})
+	local data, p2 = vm:get_data(), vm:get_param2_data()
+	local id = core.get_content_id
+	local AIR, BLOCK = id("air"), id("skelenti:bone_block")
+	local TOPS = {id("skelenti:skull"), id("skelenti:skulls"),
+		id("skelenti:bone_lying")}
+	local ground = {[id("skelenti:grass")] = true,
+		[id("skelenti:dirt")] = true, [id("skelenti:sand")] = true}
+	local sx, n = maxp.x - minp.x + 1, 0
+	for z = minp.z, maxp.z do
+		for x = minp.x, maxp.x do
+			local d = danger(x, z)
+			local r = hash(x, z, salt + 7)
+			local y = hm[(z - minp.z) * sx + (x - minp.x) + 1]
+			if d > PILE_FROM and r < 0.15 * ((d - PILE_FROM) /
+					(1 - PILE_FROM)) ^ 1.5 and y and y >= minp.y and
+					y + 6 <= maxp.y and ground[data[area:index(x, y, z)]] then
+				-- r below the chance spread anew: the height and the top
+				local q = hash(z, x, salt + 13)
+				local height = math.floor(q * q * (1 + 5 * d))
+				local top = 1 + math.floor(hash(x + z, x - z, salt) * 4)
+				for i = 1, height + 1 do
+					local vi = area:index(x, y + i, z)
+					if data[vi] ~= AIR then
+						break
+					end
+					if i <= height then
+						data[vi] = BLOCK
+					elseif TOPS[top] then
+						data[vi], p2[vi] = TOPS[top], math.floor(q * 97) % 4
+					end
+				end
+				n = n + 1
+			end
+		end
+	end
+	if n > 0 then
+		vm:set_data(data)
+		vm:set_param2_data(p2)
+		vm:write_to_map()
+	end
+end)

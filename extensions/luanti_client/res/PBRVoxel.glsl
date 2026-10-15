@@ -709,11 +709,11 @@ void PS()
     #endif
 
     // A game's field of decay where this is (AreaField.glsl): the albedo
-    // here, and below the relief and the gloss
+    // here, and below the gloss
     float decay = GetAreaField(vWorldPos.xyz);
     if (decay > 0.0)
         diffColor.rgb = DecayAlbedo(diffColor.rgb, vWorldPos.xyz, decay,
-                vec3(0.70, 0.65, 0.46));
+                normalize(vNormal), 2.2);
 
 
     #ifdef VOXELMODIFIERS
@@ -869,17 +869,6 @@ void PS()
         spotTilt -= normal * dot(spotTilt, normal);
         normal = normalize(normal + spotTilt);
     #endif
-    // And rough: each chip turned its own way, more as it decays, and
-    // flat again where the chips are smaller than a pixel
-    if (decay > 0.0) {
-        vec3 chipTilt = (vec3(AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 7.0),
-            AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 17.0),
-            AreaFieldHash(floor(vWorldPos.xyz * 8.0 + 0.37) + 29.0)) * 2.0 - 1.0) *
-            (0.45 * decay * (1.0 - AreaFieldFar(vWorldPos.xyz)));
-        chipTilt -= normal * dot(chipTilt, normal);
-        normal = normalize(normal + chipTilt);
-    }
-
     // Get fog factor
     #ifdef HEIGHTFOG
         float fogFactor = GetHeightFogFactor(vWorldPos.w, vWorldPos.y);

@@ -800,6 +800,19 @@ function M.set_daylight(amount)
 	M.daylight = math.max(0, math.min(1, amount or 1))
 end
 
+-- **The app's fog limit**: the viewing range lowered to far nodes, the
+-- fade from start (a share of it, as Luanti's fog_start), for as long as
+-- it is set -- the lower of it and the game's sky's fog_distance wins.
+-- Cheap enough to set every frame. nil gives the range back.
+M.fog_limit = nil
+M.on_fog_limit = nil -- client.lua's, to apply it
+function M.set_fog_limit(far, start)
+	M.fog_limit = far and {far = far, start = start} or nil
+	if M.on_fog_limit then
+		M.on_fog_limit()
+	end
+end
+
 -- Under pbr the frame is in radiance and the display floor would sit a
 -- hundred times over a cave: the launcher tells what PBRVoxel.glsl gives
 -- a face with no sun -- the hour's ambient (the sky share of it), the

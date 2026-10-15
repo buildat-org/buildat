@@ -56,7 +56,7 @@ grep -aq 'skelenti: the world "world" starts' "$t/srv.log" ||
 died=$(grep -a "skelenti: the skeleton .* dies" "$t/srv.log" | tail -1)
 [ -n "$died" ] || fail "no skeleton died: $(grep -ac "hits the skeleton" \
 	"$t/srv.log") hits ($t/srv.log)"
-grep -aq "fog for danger" "$t/srv.log" || fail "no fog ($t/srv.log)"
+grep -aq "skelenti: fog for danger" "$t/cli.log" || fail "no fog ($t/cli.log)"
 grep -aq "skelenti: [0-9]* sounds made" "$t/cli.log" &&
 	grep -aq "skelenti: sound skeleton_hurt .*: blip" "$t/cli.log" ||
 	fail "no blip sounds made or played ($t/cli.log)"

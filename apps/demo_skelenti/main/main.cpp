@@ -66,6 +66,9 @@ static const float WAKE = 48, SLEEP = 64;
 // would want a cap per area that is loaded. MAX_AREA and MAX_NEAR are a
 // boar's; a skeleton's go by the place's danger (danger())
 static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
+// From this danger up a skeleton spawns under the open sky too, and the
+// sun does not burn it (user, 2026-10-15)
+static const float DAYLIGHT_DANGER = 0.5f;
 
 // A mob is one record in the save's store "skelenti_mobs", key "mob/<n>"
 struct Mob
@@ -136,9 +139,7 @@ struct Module: public interface::Module
 	std::vector<Player> m_players;
 	std::map<size_t, double> m_last_hit;
 	double m_time = 0;
-	float m_ai_t = 0, m_spawn_t = 0, m_save_t = 0, m_fog_t = 0;
-	// The fog each player was last given, by name
-	std::map<ss_, float> m_fog;
+	float m_ai_t = 0, m_spawn_t = 0, m_save_t = 0, m_field_t = 0;
 	// The middle of the danger grid each player was last sent, by name
 	std::map<ss_, std::pair<int, int>> m_field;
 	// The world's own danger field (danger()), kept in its save
@@ -329,6 +330,20 @@ struct Module: public interface::Module
 				m_store->set("salt", salt);
 			}
 			m_salt = (uint32_t)std::stoul(salt);
+			// The mapgen's piles of bones work the danger out in Lua: the
+			// salt, and three places it must agree on
+			ss_ at;
+			for(int i = 0; i < 3; i++){
+				const float x = -437.0f + 311 * i, z = 129.0f - 173 * i;
+				at += fmt("%s[%.0f, %.0f, %.4f]", i ? ", " : "", x, z,
+						danger(x, z));
+			}
+			json::Value r = call("skelenti_salt", fmt(
+					"{\"salt\": %u, \"at\": [%s]}", m_salt, cs(at)));
+			if(!(r.is_boolean() && r.as_boolean()))
+				log_w(MODULE, "skelenti: the mapgen's danger is not main.cpp's:"
+						" %s", r.is_array() && r.size() == 1 &&
+						r.at(0).is_string() ? cs(r.at(0).as_string()) : "?");
 			for(const ss_ &key : m_store->list("mob/")){
 				ss_ data;
 				Mob m;
@@ -386,7 +401,6 @@ struct Module: public interface::Module
 		m_shown.erase(old.info.id);
 		m_waiting.erase(old.info.id);
 		m_local.erase(old.info.id);
-		m_fog.erase("player"+itos(old.info.id));
 		m_field.erase("player"+itos(old.info.id));
 		m_last_hit.erase(old.info.id);
 	}
@@ -480,10 +494,11 @@ struct Module: public interface::Module
 			m_spawn_t = 0;
 			spawn();
 		}
-		m_fog_t += event.dtime;
-		if(m_fog_t >= 1){
-			m_fog_t = 0;
-			fog();
+		m_field_t += event.dtime;
+		if(m_field_t >= 1){
+			m_field_t = 0;
+			for(const Player &p : m_players)
+				send_field(p);
 		}
 		m_save_t += event.dtime;
 		if(m_save_t >= 10){
@@ -547,23 +562,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	// Each player's fog from the danger where they stand, when it moved,
-	// and the danger on the ground around them
-	void fog()
-	{
-		for(const Player &p : m_players){
-			send_field(p);
-			const float d = danger(p.x, p.z);
-			auto it = m_fog.find(p.name);
-			if(it != m_fog.end() && std::fabs(it->second - d) < 0.03f)
-				continue;
-			m_fog[p.name] = d;
-			log_i(MODULE, "skelenti: %s's fog for danger %.2f", cs(p.name), d);
-			call("skelenti_fog", fmt("{\"n\": \"%s\", \"d\": %.3f}",
-					cs(p.name), d));
-		}
-	}
-
 	void spawn()
 	{
 		for(const Player &p : m_players){
@@ -584,8 +582,9 @@ struct Module: public interface::Module
 				if(kind == SKELETON && rnd() > 0.1f + 0.9f * d)
 					continue;
 				json::Value s = call("skelenti_spawn_spot", fmt(
-						"{\"kind\": \"%s\", \"x\": %.2f, \"y\": %.2f, \"z\": %.2f}",
-						KIND[kind], p.x, p.y, p.z));
+						"{\"kind\": \"%s\", \"x\": %.2f, \"y\": %.2f, "
+						"\"z\": %.2f, \"d\": %.2f}",
+						KIND[kind], p.x, p.y, p.z, d));
 				if(!s.is_array() || s.size() != 3)
 					continue;
 				Mob m;
@@ -831,8 +830,10 @@ struct Module: public interface::Module
 				m.vy -= GRAVITY * dt;
 				m.y += m.vy * dt;
 			}
-			// The sun: the natural light where it stands
-			if(m.kind == SKELETON && num(here.at(1)) >= 12){
+			// The sun: the natural light where it stands, unless the
+			// place's danger is high (user, 2026-10-15)
+			if(m.kind == SKELETON && num(here.at(1)) >= 12 &&
+					danger(m.x, m.z) < DAYLIGHT_DANGER){
 				m.burn_t += dt;
 				if(m.burn_t >= 1){
 					m.burn_t = 0;

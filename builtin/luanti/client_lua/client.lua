@@ -1264,9 +1264,14 @@ local sky_now = {height = 0, day = 0}
 -- is that a game may lower it and never raise it -- see [SKY_KNOBS].
 -- Negative gives it back.
 function sky_now.apply_far(sky)
-	local far = FAR_CLIP
+	local far, start = FAR_CLIP, sky.fog_start
 	if sky.fog_distance and sky.fog_distance >= 0 then
 		far = math.min(FAR_CLIP, sky.fog_distance)
+	end
+	-- The app's own limit (luanti.set_fog_limit), lowering it the same way
+	local limit = luanti.fog_limit
+	if limit and limit.far < far then
+		far, start = limit.far, limit.start
 	end
 	sky_now.far_clip = far
 	if camera then
@@ -1281,7 +1286,7 @@ function sky_now.apply_far(sky)
 			zone.fogStart = far * 10
 			zone.fogEnd = far * 10 + 1
 		else
-			zone.fogStart = far * (sky.fog_start or 0.7)
+			zone.fogStart = far * (start or 0.7)
 			zone.fogEnd = far
 		end
 	end
@@ -1424,6 +1429,9 @@ end)
 local underwater = false
 -- What the game said its sky is, as luanti.sub_sky() gives it
 local game_sky = {}
+luanti.on_fog_limit = function()
+	sky_now.apply_far(game_sky)
+end
 
 -- The viewing range, the Luanti settings' view_range row: what the server
 -- sends, what is meshed and what the camera draws are all this far; the

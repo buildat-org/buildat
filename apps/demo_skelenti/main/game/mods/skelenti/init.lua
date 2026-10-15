@@ -76,6 +76,29 @@ core.register_node("skelenti:diamond_ore", {description = "Diamond Ore",
 core.register_node("skelenti:bone_block", {description = "Bone Block",
 	tiles = {T"bone_block_top", T"bone_block_top", T"bone_block_side"},
 	groups = {cracky = 2}})
+-- What the danger zone is piled with (mobs.lua): a skull, two, a bone
+-- (user, 2026-10-15). Boxes in sixteenths: x0, y0, z0, x1, y1, z1, the
+-- face to -z, where the front tiles draw it.
+local function bones(name, desc, front, boxes, drop)
+	local b = {}
+	for i, box in ipairs(boxes) do
+		b[i] = {box[1] / 16, box[2] / 16, box[3] / 16, box[4] / 16,
+				box[5] / 16, box[6] / 16}
+	end
+	core.register_node("skelenti:" .. name, {description = desc,
+		drawtype = "nodebox", paramtype = "light", paramtype2 = "facedir",
+		tiles = {T"skull", T"skull", T"skull", T"skull", T"skull", T(front)},
+		node_box = {type = "fixed", fixed = b}, sunlight_propagates = true,
+		groups = {cracky = 3, oddly_breakable_by_hand = 3}, drop = drop})
+end
+bones("skull", "Skull", "skull_front",
+		{{-4, -6, -4, 4, 0, 4}, {-3, -8, -4, 3, -6, 1}})
+bones("skulls", "Skulls", "skulls_front",
+		{{-7, -8, -7, 1, -2, 1}, {2, -8, -1, 7, -4, 4}},
+		"skelenti:skull 2")
+bones("bone_lying", "Bone", "skull",
+		{{-6, -8, -1, 6, -6, 1}, {-8, -8, -2, -5, -5, 2},
+		{5, -8, -2, 8, -5, 2}}, "skelenti:bone")
 core.register_node("skelenti:torch", {description = "Torch",
 	drawtype = "torchlike", tiles = {T"torch"}, inventory_image = T"torch",
 	wield_image = T"torch", paramtype = "light", sunlight_propagates = true,

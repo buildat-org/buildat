@@ -31,6 +31,8 @@
 varying vec2 vTexCoord;
 varying vec4 vWorldPos;
 varying vec4 vColor;
+// The world normal: AreaField.glsl lays its bones by it
+varying vec3 vNormalW;
 
 void VS()
 {
@@ -40,6 +42,7 @@ void VS()
     vTexCoord = GetTexCoord(iTexCoord);
     vWorldPos = vec4(worldPos, GetDepth(gl_Position));
     vColor = iColor;
+    vNormalW = GetWorldNormal(modelMatrix);
 }
 
 #ifdef COMPILEPS
@@ -57,7 +60,7 @@ void PS()
     float decay = GetAreaField(vWorldPos.xyz);
     if (decay > 0.0)
         diffColor.rgb = DecayAlbedo(diffColor.rgb, vWorldPos.xyz, decay,
-                vec3(0.85, 0.82, 0.70));
+                normalize(vNormalW), 1.0);
 
     vec3 ambient = cAmbientColor.rgb * vColor.a + vColor.rgb;
     float fogFactor = GetFogFactor(vWorldPos.w);

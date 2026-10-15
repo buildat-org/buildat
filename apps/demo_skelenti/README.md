@@ -11,6 +11,13 @@ and connect a client. Until a world runs, the first client on the
 server's machine picks one: play a save, name and create a new one, or
 delete one. `BUILDAT_SKELENTI_WORLD=<name>` skips the dialog.
 
+Each world has its danger zones (main.cpp's danger()). The deeper in, the
+thicker the fog, the more skeletons, and the more bones: strewn over the
+ground and the sides of blocks (the voxel shader's area field), and piled
+up in bone blocks, skulls and loose bones by the mapgen (mobs.lua). From
+half danger up, skeletons spawn under the open sky and the sun does not
+burn them.
+
 Knobs for checks: `BUILDAT_SKELENTI_TEST="boar 0 3; skeleton 0 9"` puts
 those mobs by the first player and turns spawning off;
 `BUILDAT_LUANTI_FORCE_TIME=0..23999` pins the hour.
@@ -27,7 +34,9 @@ resource pack by XSSheep
 as copied into VoxeLibre (<https://git.minetest.land/VoxeLibre/VoxeLibre>
 -- see its LEGAL.md). Each is a verbatim copy of a VoxeLibre file,
 renamed, except `skelenti_boar.png`, which is VoxeLibre's pig skin
-(`mobs_mc_pig.png`) tinted brown. By file:
+(`mobs_mc_pig.png`) tinted brown, and `skelenti_skull.png`,
+`skelenti_skull_front.png` and `skelenti_skulls_front.png`, which are
+drawn in the colours of `skelenti_bone_block_side.png`. By file:
 
 - `skelenti_apple.png`: default_apple.png
 - `skelenti_arrow_entity.png`: mcl_bows_arrow.png

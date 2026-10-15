@@ -293,7 +293,10 @@ luanti.node_lists(at) and luanti.sub_node_inventory(f). keys.player_pos()
 is where the player's feet are, as this client moves them.
 luanti.set_sound(media_name, sound) plays an app-made Sound wherever the
 media file of that name would be, the names the server's
-set_generated_sounds() resolves to.
+set_generated_sounds() resolves to. luanti.set_fog_limit(far, start) lowers the
+viewing range to far nodes with the fade from start (a share of it), as
+a game's fog_distance and fog_start do, the lower of the two winning;
+cheap enough to call every frame, nil gives the range back.
 
 The world is the save. The map, the clock and everything else the world is go
 into the save the caller opened and keeps open; a Luanti world directory is
