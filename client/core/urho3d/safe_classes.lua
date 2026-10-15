@@ -3419,6 +3419,14 @@ function M.define(dst, util)
 		inherited_from_by_wrapper = dst.BillboardSet,
 		instance = {
 			Reset = util.self_function("Reset", {}, {"ParticleEmitter"}),
+			-- Magic's floor map (doc/client_api.txt): where falling
+			-- particles stop or go, by node column
+			SetFloorMap = util.self_function("SetFloorMap", {},
+					{"ParticleEmitter", "number", "number", "boolean"}),
+			SetFloorOrigin = util.self_function("SetFloorOrigin", {},
+					{"ParticleEmitter", "number", "number"}),
+			SetFloorHeight = util.self_function("SetFloorHeight", {},
+					{"ParticleEmitter", "number", "number", "number"}),
 		},
 		properties = {
 			effect = util.simple_property(dst.ParticleEffect),

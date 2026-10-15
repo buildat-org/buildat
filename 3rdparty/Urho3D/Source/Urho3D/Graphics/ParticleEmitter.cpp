@@ -208,6 +208,27 @@ void ParticleEmitter::Update(const FrameInfo& frame)
                 particle.velocity_ += lastTimeStep_ * force;
             }
             billboard.position_ += lastTimeStep_ * particle.velocity_ * scaleVector;
+            if (floorWidth_ && !relative_)
+            {
+                Vector3& p = billboard.position_;
+                int x = FloorToInt(p.x_ + 0.5f);
+                int z = FloorToInt(p.z_ + 0.5f);
+                int w = (int)floorWidth_, d = (int)floorDepth_;
+                if (x >= floorX_ && x < floorX_ + w && z >= floorZ_ && z < floorZ_ + d)
+                {
+                    float y = floor_[(unsigned)((x % w + w) % w + (z % d + d) % d * w)];
+                    if (p.y_ < y)
+                    {
+                        if (floorRemove_)
+                        {
+                            billboard.enabled_ = false;
+                            continue;
+                        }
+                        p.y_ = y;
+                        particle.velocity_ = Vector3::ZERO;
+                    }
+                }
+            }
             billboard.direction_ = particle.velocity_.Normalized();
 
             // Rotation
@@ -335,6 +356,32 @@ void ParticleEmitter::Reset()
     RemoveAllParticles();
     ResetEmissionTimer();
     SetEmitting(true);
+}
+
+void ParticleEmitter::SetFloorMap(unsigned width, unsigned depth, bool remove)
+{
+    if (width > 256 || depth > 256)
+        width = depth = 0;
+    floorWidth_ = depth ? width : 0;
+    floorDepth_ = width ? depth : 0;
+    floorRemove_ = remove;
+    floor_.Resize(floorWidth_ * floorDepth_);
+    for (unsigned i = 0; i < floor_.Size(); ++i)
+        floor_[i] = -M_INFINITY;
+}
+
+void ParticleEmitter::SetFloorOrigin(int x, int z)
+{
+    floorX_ = x;
+    floorZ_ = z;
+}
+
+void ParticleEmitter::SetFloorHeight(int x, int z, float y)
+{
+    if (!floorWidth_)
+        return;
+    int w = (int)floorWidth_, d = (int)floorDepth_;
+    floor_[(unsigned)((x % w + w) % w + (z % d + d) % d * w)] = y;
 }
 
 void ParticleEmitter::ApplyEffect()

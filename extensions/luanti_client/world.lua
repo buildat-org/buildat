@@ -2288,8 +2288,15 @@ function M.new(magic, buildat, log, options)
 		end
 		return object_color(x, y, z, false, glow)
 	end
+	local function solid_at(x, y, z)
+		local id = self:node_at(x, y, z)
+		if id == nil or not self.node_solid then
+			return nil
+		end
+		return self.node_solid[id] == true
+	end
 	world_particles(self, magic, log, scene, camera_node, game_texture,
-			particle_technique, particles, particle_light)
+			particle_technique, particles, particle_light, solid_at)
 
 	function self:remove_object(id)
 		local entry = object_nodes[id]

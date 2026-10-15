@@ -7,7 +7,7 @@
 -- what it reads of M.new's ([SPLITS]: moved out as it was).
 
 return function(self, magic, log, scene, camera_node, game_texture,
-		particle_technique, particles, particle_light)
+		particle_technique, particles, particle_light, solid_at)
 	-- The particle emitters in the scene: the spawners by the id the server
 	-- deletes them by, and the single particles, each of which is an emitter
 	-- of one that fires once.
@@ -25,6 +25,9 @@ return function(self, magic, log, scene, camera_node, game_texture,
 	-- a half of drops, which is about how long one takes to fall.
 	local dying_spawners = {}
 	local DYING_SPAWNERS_MAX = 32
+	-- Node lookups a frame for an emitter's floor map: a rain box's 1000
+	-- columns in about two seconds, the gained row as it moves at once
+	local FLOOR_BUDGET = 400
 
 	-- One Urho3D emitter out of one Luanti particle description.
 	--
@@ -36,7 +39,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 	--
 	-- simplified: the tween is dropped -- the starting range is what the
 	-- whole spawner runs at -- and so are the bias inside a range, the
-	-- collision flags, the drag, the jitter, the bounce and the
+	-- collision of what does not fall (particles.floor_new()), the drag, the jitter, the bounce and the
 	-- attractors. What that costs is a spawner that grows or shrinks over
 	-- its life, and particles that stop at the ground; the upgrade path is
 	-- either a manager of this client's own or more of Urho3D's own fields.
@@ -303,6 +306,16 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		if p.vertical then
 			emitter.faceCameraMode = magic.FC_ROTATE_Y
 		end
+		-- Collision, for what falls: a floor map (res/particles.lua)
+		local floor = nil
+		if p.collision and particles.falls(p.vel.start.min,
+				p.vel.start.max, p.acc.start.min, p.acc.start.max) then
+			local lo, hi = p.pos.start.min, p.pos.start.max
+			floor = particles.floor_new(emitter,
+					{lo[1] - pos[1], lo[2] - pos[2], lo[3] - pos[3]},
+					{hi[1] - pos[1], hi[2] - pos[2], hi[3] - pos[3]},
+					p.collision_removal)
+		end
 		-- A spawner that ends takes itself away once the last particle it
 		-- made has expired; one with no time waits for the server
 		local life = nil
@@ -323,6 +336,7 @@ return function(self, magic, log, scene, camera_node, game_texture,
 		particle_nodes[id] = {node = node, life = life, attached = attached,
 				offset = pos, emitter = emitter, signature = signature,
 				effect = effect, material = material, glow = p.glow,
+				floor = floor,
 				ttl_max = math.max(0.01, exptime.max)}
 	end
 
@@ -397,6 +411,11 @@ return function(self, magic, log, scene, camera_node, game_texture,
 				end
 			end
 			light(entry)
+			if entry.floor then
+				local q = entry.node.position
+				particles.floor_update(entry.floor, entry.emitter, q.x, q.y,
+						q.z, solid_at, FLOOR_BUDGET)
+			end
 			if entry.life then
 				entry.life = entry.life - dtime
 				if entry.life <= 0 then

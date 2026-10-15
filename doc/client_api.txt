@@ -1247,6 +1247,34 @@ replicate.main_scene
   using it lives. An emitter whose effect has been collected reads freed
   memory, which on this machine came out as Urho3D's defaults: particles
   scattered in random directions at the default size.
+- ParticleEffect's numColorFrames is read-only too (its setter is disabled
+  in the bindings); SetNumColorFrames(0) and AddColorTime() set a new
+  colour, which Urho3D applies to the live particles as well.
+- **ParticleEmitter's floor map** (Magic): SetFloorMap(width, depth,
+  remove) gives an emitter whose effect is not relative a floor for its
+  particles by node column -- column (x, z) is the world's
+  [x - 0.5, x + 0.5) by [z - 0.5, z + 0.5). SetFloorOrigin(x, z) is the
+  window's lowest column, and SetFloorHeight(x, z, y) a column's floor, a
+  world Y. A particle that falls below its column's floor stops on it, or
+  with remove is taken away; a column outside the window, or not set,
+  has none. The map is a ring -- (x, z) is held at (x mod width,
+  z mod depth) -- so a window that moves sets only the columns it gains.
+  Width and depth are at most 256; 0 takes the floor away. Falling
+  particles are what it is for: one under its floor going sideways stops
+  as well.
+- ParticleEffect's numColorFrames is read-only too (its setter is disabled
+  in the bindings); SetNumColorFrames(0) and AddColorTime() set a new
+  colour, which Urho3D applies to the live particles as well.
+- **ParticleEmitter's floor map** (Magic): SetFloorMap(width, depth,
+  remove) gives an emitter whose effect is not relative a floor for its
+  particles by node column -- column (x, z) is the world's
+  [x - 0.5, x + 0.5) by [z - 0.5, z + 0.5). SetFloorOrigin(x, z) is the
+  window's lowest column, and SetFloorHeight(x, z, y) a column's floor, a
+  world Y. A particle that falls below its column's floor stops on it, or
+  with remove is taken away; a column outside the window, or not set,
+  has none. The map is a ring -- (x, z) is held at (x mod width,
+  z mod depth) -- so a window that moves sets only the columns it gains.
+  Width and depth are at most 256; 0 takes the floor away.
 - Node:Clone([mode]) is there as well, also LOCAL by default: a copy of the
   node and its components in the same parent, made inside the engine. What
   wants it is geometry that costs a sandbox call per vertex to build and is
@@ -2393,7 +2421,7 @@ magic.PLANE_UP:
 magic.POINT_LIST: 
 magic.PS: 
 magic.ParticleEffect: AddColorTime, AddTextureTime, SetConstantForce, SetEmitterSize, SetMaxDirection, SetMaxParticleSize, SetMinDirection, SetMinParticleSize, SetNumColorFrames, activeTime, constantForce, dampingForce, emitterSize, emitterType, inactiveTime, material, maxDirection, maxEmissionRate, maxParticleSize, maxRotation, maxRotationSpeed, maxTimeToLive, maxVelocity, minDirection, minEmissionRate, minParticleSize, minRotation, minRotationSpeed, minTimeToLive, minVelocity, new, numParticles, relative, scaled, sizeAdd, sizeMul, sorted, updateInvisible
-magic.ParticleEmitter: Reset, effect, emitting, numParticles
+magic.ParticleEmitter: Reset, SetFloorHeight, SetFloorMap, SetFloorOrigin, effect, emitting, numParticles
 magic.PhysicsWorld: 
 magic.Plane: 
 magic.ProgressBar: ChangeValue, knob, loadingPercentStyle, orientation, range, showPercentText, value

@@ -33,6 +33,9 @@ buildat = {
 	get_locale = function()
 		return os.getenv("LANG") or ""
 	end,
+	version = function()
+		return "test"
+	end,
 }
 
 local serialize = dofile(dir.."/serialize.lua")
@@ -2253,6 +2256,37 @@ do
 end
 
 print("client: ok")
+-- particles.lua: the floor map, against a fake emitter: a roof over x >= 2
+-- at y 5, ground at y 0, the map missing at z = 3
+do
+	local set = {}
+	local emitter = {SetFloorMap = function() end,
+		SetFloorOrigin = function() end,
+		SetFloorHeight = function(_, x, z, y) set[x..","..z] = y end}
+	local function solid_at(x, y, z)
+		if z == 3 then return nil end
+		return y == 0 or (x >= 2 and y == 5)
+	end
+	assert(particles.falls({0, -20, 0}, {0, -15, 0}, {0, -1, 0}, {0, 0, 0}))
+	assert(not particles.falls({0, -1, 0}, {0, 1, 0}, {0, 0, 0}, {0, 0, 0}))
+	local f = particles.floor_new(emitter, {-1, 8, -1}, {1, 10, 1}, true)
+	assert(f.w == 5 and f.d == 5, "particles: the window is the box and one")
+	particles.floor_update(f, emitter, 0, 0, 0, solid_at, 1e6)
+	assert(set["0,0"] == 0.5 and set["2,0"] == 5.5 and set["-2,-2"] == 0.5,
+			"particles: the first solid below the top")
+	-- Moved one node along x: only the gained column row is queued
+	set = {}
+	particles.floor_update(f, emitter, 1, 0, 0, solid_at, 5 * 11)
+	assert(set["3,0"] == 5.5 and set["2,0"] == nil,
+			"particles: the gained columns first")
+	-- A box inside the roof: its floor at its top
+	local g = particles.floor_new(emitter, {0, 0, 0}, {0, 0, 0}, false)
+	particles.floor_update(g, emitter, 2, 5, 0, solid_at, 1e6)
+	assert(set["2,0"] == 5.5, "particles: a box in the ground")
+	particles.floor_update(g, emitter, 2, 5, 2, solid_at, 1e6)
+	assert(set["2,3"] == -1e9, "particles: no floor where the map is missing")
+end
+
 -- particles.lua: a spawner off the wire, and where its fields land
 do
 	-- The three shapes the format is built out of, written the way Luanti

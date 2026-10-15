@@ -2084,22 +2084,36 @@ local function spawner_signature(p)
 	return table.concat(n, "/")
 end
 
+-- A node's solidity for a particle floor map: nil where the map has not
+-- arrived
+function pt.solid_at(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return nil
+	end
+	return solid(voxelworld.get_voxel_registry(), v)
+end
+
 -- **A particle's light** ([VANILLA_WEATHER] 5): Luanti's is its node's,
 -- raised to its glow. Here the emitter's, at its middle, as a sprite
 -- object's (M.light_color(): the parity modes' flat light, pbr's in its
--- units), set as the effect's colour, which Urho3D applies to the live
--- particles too. Full glow is a light: white, and on pbr the flash's
--- radiance, which is over 1 and so goes on its own material's colour (a
--- vertex colour is 8-bit and stops at 1). simplified: one light for the
--- emitter's whole box, and a lit object's flat share of the sun rather than
--- a lit technique on pbr and shadows; set again when it moves by a 255th.
+-- units). A spawner has a material of its own and the light goes on its
+-- colour, unclipped; a single particle shares its texture's, and the light
+-- is the effect's colour, which Urho3D applies to the live particles too
+-- but which is 8-bit and stops at 1. Full glow is a light: white, and on
+-- pbr the flash's radiance, on the (glow) material's colour. simplified:
+-- one light for the emitter's whole box, and a lit object's flat share of
+-- the sun rather than a lit technique on pbr and shadows; set again when it
+-- moves by a 255th.
 function pt.light(entry)
 	local c
 	if (entry.glow or 0) >= pt.sky.GLOW_FULL then
 		local f = M.light_units and pt.sky.flash_radiance() or 1
-		entry.material:SetShaderParameter("MatDiffColor",
-				magic.Color(f, f, f, 1))
-		c = magic.Color(1, 1, 1, 1)
+		c = magic.Color(f, f, f, 1)
+		if not entry.own_material then
+			entry.material:SetShaderParameter("MatDiffColor", c)
+			c = magic.Color(1, 1, 1, 1)
+		end
 	else
 		local p = entry.node.position
 		c = M.light_color(p.x, p.y, p.z, false, false, entry.glow)
@@ -2113,6 +2127,10 @@ function pt.light(entry)
 		return
 	end
 	entry.lit = c
+	if entry.own_material then
+		entry.material:SetShaderParameter("MatDiffColor", c)
+		return
+	end
 	entry.effect:SetNumColorFrames(0)
 	entry.effect:AddColorTime(magic.Color(c.r, c.g, c.b, 1), 0)
 end
@@ -2186,6 +2204,11 @@ local function add_spawner(id, p)
 	local rate = p.time > 0 and amount / p.time or amount
 	effect.minEmissionRate = rate
 	effect.maxEmissionRate = rate
+	-- A spawner's own copy of the material, for its light on the
+	-- material's colour: a vertex colour is 8-bit and stops at 1, and pbr's
+	-- daylight is well past it (pt.light())
+	material = material:Clone()
+	effect.material = material
 	local emitter = node:CreateComponent("ParticleEmitter")
 	emitter.effect = effect
 	emitter.emitting = true
@@ -2196,11 +2219,22 @@ local function add_spawner(id, p)
 	if p.vertical then
 		emitter.faceCameraMode = magic.FC_ROTATE_Y
 	end
+	-- Collision, for what falls: a floor map (luanti/particles.lua)
+	local floor = nil
+	if p.collision and particles_proto.falls(p.vel_min, p.vel_max,
+			p.acc_min, p.acc_max) then
+		local lo, hi = p.pos_min, p.pos_max
+		floor = particles_proto.floor_new(emitter,
+				{lo[1] - pos[1], lo[2] - pos[2], lo[3] - pos[3]},
+				{hi[1] - pos[1], hi[2] - pos[2], hi[3] - pos[3]},
+				p.collision_removal)
+	end
 	-- The effect and its material are kept for as long as the emitter is:
 	-- both were made in Lua, and a Lua-made Urho3D object is destroyed when
 	-- the last Lua reference to it goes, whatever the engine still holds.
 	particle_nodes[id] = {node = node, emitter = emitter, effect = effect,
-			material = material, signature = signature, glow = p.glow,
+			material = material, own_material = true, signature = signature,
+			glow = p.glow, floor = floor,
 			life = p.time > 0 and (p.time + p.exp_max + 0.5) or nil,
 			attached = p.attached ~= "0" and p.attached or nil,
 			offset = pos, ttl_max = math.max(0.01, p.exp_max)}
@@ -2261,6 +2295,11 @@ function M.update_particles(dtime, eye)
 					p.y + entry.offset[2], p.z + entry.offset[3])
 		end
 		pt.light(entry)
+		if entry.floor then
+			local q = entry.node.position
+			particles_proto.floor_update(entry.floor, entry.emitter, q.x,
+					q.y, q.z, pt.solid_at, 400)
+		end
 		if entry.life then
 			entry.life = entry.life - dtime
 			if entry.life <= 0 then

@@ -86,6 +86,19 @@ public:
     void Reset();
     /// Apply not continuously updated values such as the material, the number of particles and sorting mode from the particle effect. Call this if you change the effect programmatically.
     void ApplyEffect();
+    /// Magic: give the particles a floor, a map of node columns by their
+    /// world X and Z (a column is [x - 0.5, x + 0.5)), for a particle that
+    /// is not relative. One that falls below its column's floor stops on
+    /// it, or with remove goes. Width or depth 0 takes the floor away; each
+    /// is at most 256. The map is a ring: column (x, z) is held at
+    /// (x mod width, z mod depth), so a moving window sets only the columns
+    /// it gains. Every column starts with no floor.
+    void SetFloorMap(unsigned width, unsigned depth, bool remove);
+    /// Magic: the floor's window, its lowest X and Z; a column outside it
+    /// has no floor.
+    void SetFloorOrigin(int x, int z);
+    /// Magic: the floor of column (x, z), a world Y.
+    void SetFloorHeight(int x, int z, float y);
 
     /// Return particle effect.
     ParticleEffect* GetEffect() const;
@@ -152,6 +165,13 @@ private:
     bool sendFinishedEvent_;
     /// Automatic removal mode.
     AutoRemoveMode autoRemove_;
+    /// Magic: the floor map; see SetFloorMap().
+    PODVector<float> floor_;
+    unsigned floorWidth_ = 0;
+    unsigned floorDepth_ = 0;
+    int floorX_ = 0;
+    int floorZ_ = 0;
+    bool floorRemove_ = false;
 };
 
 }
