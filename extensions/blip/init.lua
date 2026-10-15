@@ -779,6 +779,17 @@ local function open_designer()
 				("; dropped " .. table.concat(dropped, ", ")) or "")
 	end
 	button(im, "Import jsfxr", function()
+		-- A blip1 string as it is, its layers and all
+		local text = edit:GetText():match("^%s*(.-)%s*$")
+		if text:sub(1, 6) == "blip1:" then
+			local ok, p = pcall(gen.params, text)
+			if ok then
+				set_sound(p, "imported")
+			else
+				say("not a blip1 sound: " .. tostring(p))
+			end
+			return
+		end
 		local p, dropped = import.text(edit:GetText())
 		imported(p, dropped, "jsfxr")
 	end)
