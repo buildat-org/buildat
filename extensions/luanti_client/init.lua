@@ -2255,6 +2255,39 @@ local function show_client(host, port, name, password, mode, origin)
 			end
 		end
 
+		-- **The reference shooter's pictures, taken here**
+		-- (BUILDAT_REFSHOT_SELF): the fixture puts "refshot: i/N ..." on the
+		-- HUD for each state, and SHOT_AT seconds into one this takes the
+		-- frame and logs "REFSHOT picture i/N <file>" for
+		-- shoot_luanti_server.sh to file. Grabbing the window from outside
+		-- fails while it is on another desktop (unmapped).
+		local refshot_at = tonumber(buildat.get_env("BUILDAT_REFSHOT_SELF") or "")
+		local refshot_text, refshot_t, refshot_done = nil, 0, false
+		local function refshot_tick(dtime)
+			local text = nil
+			for _, e in pairs(hud_elements or {}) do
+				if type(e.text) == "string" and e.text:find("^refshot: %d+/%d+") then
+					text = e.text
+				end
+			end
+			if text ~= refshot_text then
+				refshot_text, refshot_t, refshot_done = text, 0, false
+				return
+			end
+			refshot_t = refshot_t + dtime
+			if text and not refshot_done and refshot_t >= refshot_at then
+				local name, err = buildat.take_screenshot()
+				if name then
+					refshot_done = true
+					log:info("REFSHOT picture " .. text:match("^refshot: (%d+/%d+)") ..
+							" " .. name)
+				elseif not tostring(err):find("pending") then
+					refshot_done = true
+					log:warning("REFSHOT picture failed: " .. tostring(err))
+				end
+			end
+		end
+
 		local function update_hud()
 			local on = show_hud and not loading and not world_wait
 			-- Nothing of the player's own while the loading panel is up: the
@@ -3124,6 +3157,9 @@ local function show_client(host, port, name, password, mode, origin)
 			view:update_sounds(dtime)
 			view:update_fov(dtime)
 			update_hud()
+			if refshot_at then
+				refshot_tick(dtime)
+			end
 			if chat_wanted then
 				chat_wanted = false
 				open_chat()

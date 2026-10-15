@@ -79,9 +79,28 @@ bin=${LUANTI_BIN:-./bin/luanti-refshots}
 # that has stopped drawing. What it could not do is reported rather than
 # swallowed: a run of MISSED lines with no reason behind them cost two runs
 # to tell apart from a client that had died.
+self_used=""
 take_picture()
 {
 	local try
+	# The extension takes its own (BUILDAT_REFSHOT_SELF below): its picture
+	# of state $idx, one not filed already (an older pass's)
+	if [ "$CLIENT" = "extension" ]; then
+		local f
+		for try in $(seq 1 16); do
+			f=$(grep -ao "REFSHOT picture $idx/[0-9]* .*" /tmp/refshots_ext.log | \
+					tail -1 | cut -d' ' -f4)
+			if [ -n "$f" ] && ! echo "$self_used" | grep -qxF "$f" &&
+					cp "$BUILDAT_USER_PATH/screenshots/$f" "$1" 2>"$imperr"; then
+				self_used="$self_used
+$f"
+				return 0
+			fi
+			sleep 0.5
+		done
+		echo "no picture of state $idx from the client" > "$imperr"
+		return 1
+	fi
 	for try in 1 2 3; do
 		import -window "$win" "$1" 2>"$imperr" && return 0
 		sleep 0.4
@@ -187,6 +206,7 @@ shoot_states()
 			[ "$(date +%s)" -lt "$cap" ]; do
 		line=$(grep -o "REFSHOT [0-9]* [0-9a-z_]*_\(none\|rain\)" "$log" | tail -1)
 		name=$(echo "$line" | cut -d' ' -f3)
+		idx=$(echo "$line" | cut -d' ' -f2)
 		if [ -n "$name" ] && [ "$name" != "$last" ]; then
 			# Two thirds of the way into the hold, which is where the aim has
 			# settled and the state has not moved on. SHOT_AT follows the
@@ -442,6 +462,7 @@ if [ "$CLIENT" = "extension" ]; then
 	{ echo "delay 1800000"; echo "quit"; } > "$cmds"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ref \
 		BUILDAT_LUANTI_CONNECT=1 BUILDAT_RENDER_MODE="$MODE" \
+		BUILDAT_REFSHOT_SELF="${SHOT_AT:-4}" \
 		"$here/Build/bin/buildat" -m luanti_client -w "${REFSHOT_W}x$REFSHOT_H" -l 3 \
 		-c @"$cmds" > /tmp/refshots_ext.log 2>&1 &
 	cli=$!
