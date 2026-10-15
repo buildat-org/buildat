@@ -374,7 +374,8 @@ local function open_designer()
 			end
 		end
 	end, {wheel = false})
-	-- The menu's items in its order, and which of them are sliders
+	-- The menu's items in its order, and which of them are sliders. A
+	-- dropdown is passed in parentheses: it returns its row too
 	local n_items, slider_at = 0, {}
 	local function item(e, fn)
 		n_items = n_items + 1
@@ -488,13 +489,13 @@ local function open_designer()
 	for i, w in ipairs(gen.WAVES) do
 		waves[i] = {w, w}
 	end
-	local dropdown = item(ui_utils.dropdown(wave_row, waves, d.p.wave, function(w)
+	local dropdown = item((ui_utils.dropdown(wave_row, waves, d.p.wave, function(w)
 		if updating then
 			return
 		end
 		d.p.wave = w
 		changed()
-	end, {label = "Wave"}))
+	end, {label = "Wave"})))
 	function d.wave_dropdown_set(w)
 		for i, name in ipairs(gen.WAVES) do
 			if name == w then
@@ -590,14 +591,14 @@ local function open_designer()
 		-- The name alone: the whole path does not fit the window
 		say(path and ("saved " .. name) or ("not saved: " .. tostring(why)))
 	end)
-	item(ui_utils.dropdown(ex, FORMATS, d.format, function(v)
+	item((ui_utils.dropdown(ex, FORMATS, d.format, function(v)
 		d.format = v
 		show_code()
-	end))
-	item(ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
+	end)))
+	item((ui_utils.dropdown(ex, SNIPPET_USES, d.use, function(v)
 		d.use = v
 		show_code()
-	end))
+	end)))
 	local ex2 = row()
 	button(ex2, "Copy", function()
 		ui_utils.copy(snippet(d.p, d.format, d.use, false))
