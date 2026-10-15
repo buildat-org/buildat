@@ -427,7 +427,7 @@ void VS()
             // the mountain behind the ridge does not block the lit ground
             // in front of a face, and a cave wall under a terrain cap of
             // zero still bounces. Unpacked the rgb is the light itself and
-            // the shade is one.
+            // the shade is the alpha's low nibble.
             bool isPacked = cPackedSky > 0.5;
             // The lamp's falloff computed from the nibble, not stepped
             // with it: Luanti's lamp light drops one level a node, and
@@ -453,7 +453,11 @@ void VS()
             vec3 baked = isPacked ?
                 cLampLight * max(1.0 / lampDist - 1.0 / 12.0, 0.0) *
                     (12.0 / 11.0) : iColor.rgb;
-            float shade = isPacked ? iColor.b : 1.0;
+            // This client's plain path has the shade in the alpha's low
+            // nibble (world.lua set_mesh_alpha_nibbles), which the bounce
+            // and the ground take as the packed path's ([LC_SKY_SHARED] 4):
+            // at one a cave's bounce was a flat lift, its corners gone
+            float shade = isPacked ? iColor.b : ShadeOfAlpha(iColor.a);
             // The ground a wall faces is lit or it is not, and the base
             // pass has no shadow map to say which; what it has is how
             // enclosed the place is -- the local shade and the terrain cap
@@ -465,7 +469,7 @@ void VS()
             // The mesher's underground rule rides in g: nought under the
             // column's own surface, the terrain cap above it
             float under_g = isPacked ? iColor.g : 1.0;
-            float groundSeen = isPacked ? shade * iColor.g : 1.0;
+            float groundSeen = isPacked ? shade * iColor.g : shade;
             // Cubed, with the ground's albedo doubled beside it ([PBR_FIT]
             // 3.3, 2026-09-19): the open shaded wall wanted more of the
             // lit ground and the pit less, and the enclosure's power is

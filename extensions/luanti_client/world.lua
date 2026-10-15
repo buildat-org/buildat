@@ -578,9 +578,6 @@ function M.new(magic, buildat, log, options)
 		return v < 0 and 0 or (v > 1 and 1 or v)
 	end
 
-	local function luminance(rgb)
-		return 0.2126 * rgb[1] + 0.7152 * rgb[2] + 0.0722 * rgb[3]
-	end
 
 
 	-- **The pbr path's light model is vanilla's** ([LC_PBR_PARITY]): the
@@ -595,9 +592,9 @@ function M.new(magic, buildat, log, options)
 	-- And no mesher's constant bounce, which was the whole of the light
 	-- in a sealed cave on this path: its 0.055 lit the cave eleven times
 	-- vanilla's, and a vertex colour is a byte, so vanilla's floor in
-	-- these units (0.00125) rounds to nought there. The floor is the
-	-- shader's CaveAmbient instead, set with the sky visibility below
-	-- ([CAVE_EXPOSURE_FLOOR]).
+	-- these units (0.00125) rounds to nought there. The bounce and the
+	-- floor are the shader's BounceLight and CaveAmbient instead,
+	-- voxel_light's terms (apply_daylight below).
 	-- And the mesh's alpha in two nibbles, the sky and the shade, so the
 	-- floor keeps a cave's corners where sky times shade is nought
 	if pbr then
@@ -609,45 +606,16 @@ function M.new(magic, buildat, log, options)
 	local PBR_MOON_COLOR = magic.Color(voxel_light.MOON_COLOR.r,
 			voxel_light.MOON_COLOR.g, voxel_light.MOON_COLOR.b)
 
-	-- The sky of the hour in those units, out of the band's colours, which
-	-- are display sRGB: Luanti's hue at the reference's radiance, the zenith
-	-- and the horizon on their own curves (vanilla's apply_sky_of_hour), and
-	-- the ambient the dome's mean, five parts zenith to one horizon -- what
-	-- a face lit by the sky alone receives, which the shader multiplies by
-	-- how much sky the face sees. height is the sine of the sun's elevation.
-	-- simplified: none of vanilla's dawn glow, bounce or ground terms; the
-	-- plain path's shader takes none of them.
-	local function physical_sky(top, horizon, height)
-		local function at(c, radiance)
-			local r, g, b = c.r ^ 2.2, c.g ^ 2.2, c.b ^ 2.2
-			local lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
-			if lum <= 1e-6 then
-				return magic.Color(radiance, radiance, radiance)
-			end
-			local k = radiance / lum
-			return magic.Color(r * k, g * k, b * k)
+	-- The sky of the hour in those units: the band's colours, which are
+	-- display sRGB, as the hue at the reference's radiance -- physical_sky's
+	-- sky_radiance(), vanilla's
+	local function sky_of_hour(top, horizon, height)
+		local function lin(c)
+			return {r = c.r ^ 2.2, g = c.g ^ 2.2, b = c.b ^ 2.2}
 		end
-		local f = PHYS.sky(height)
-		local z = at(top, UNITS * (PHYS.night_sky +
-				(PHYS.sky_zenith - PHYS.night_sky) * f))
-		local h = at(horizon, UNITS * (PHYS.night_sky +
-				(PHYS.sky_horizon - PHYS.night_sky) * PHYS.horizon(height)))
-		local dome = {r = (5 * z.r + h.r) / 6, g = (5 * z.g + h.g) / 6,
-				b = (5 * z.b + h.b) / 6}
-		local lum = 0.2126 * dome.r + 0.7152 * dome.g + 0.0722 * dome.b
-		local k = UNITS * (PHYS.night_sky +
-				(PHYS.sky_zenith * PHYS.dome - PHYS.night_sky) * f) /
-				math.max(lum, 1e-9)
-		return z, h, magic.Color(dome.r * k, dome.g * k, dome.b * k)
-	end
-	do
-		local blue = magic.Color(0.38, 0.71, 0.96)
-		local _, _, noon = physical_sky(blue, blue, 1)
-		local _, _, night = physical_sky(blue, blue, -0.5)
-		assert(math.abs(0.2126 * noon.r + 0.7152 * noon.g + 0.0722 * noon.b -
-				UNITS * PHYS.sky_zenith * PHYS.dome) < 1e-6,
-				"noon's ambient is the dome's radiance")
-		assert(night.b < noon.b * 1e-3, "and the night's is the floor")
+		local z, h = psky.sky_radiance(lin(top), lin(horizon), height)
+		return magic.Color(UNITS * z.r, UNITS * z.g, UNITS * z.b),
+				magic.Color(UNITS * h.r, UNITS * h.g, UNITS * h.b)
 	end
 	local sun_node = nil
 	local sun_light = nil
@@ -1716,8 +1684,47 @@ function M.new(magic, buildat, log, options)
 			collect_vis_volumes) or nil
 	-- Where the camera was last frame, to tell a step from a teleport
 	local vis_at = nil
-	local cave_floor_now = nil
-	local CAVE_FLOOR_GAIN = 0.48
+
+	-- **The light on this path is vanilla's** ([LC_SKY_SHARED] 4):
+	-- extensions/voxel_light's terms -- the sky with the dawn glow, the
+	-- bounce, the ground, the lamp, the cave floor by the chamber reading
+	-- -- applied here in this client's units. The shader is the plain
+	-- path (cPackedSky 0): the vertex rgb is the lamp already, so
+	-- LampLight is set and not read.
+	-- Each set only on a change: set_param walks the render path.
+	local light_now = {}
+	local function put(name, value, r, g, b)
+		local o = light_now[name]
+		local function near(a, c)
+			return math.abs(a - c) <= math.abs(c) * 0.02 + 1e-7
+		end
+		if o and near(o[1], r) and near(o[2], g) and near(o[3], b) then
+			return
+		end
+		light_now[name] = {r, g, b}
+		vis:set_param(name, value)
+	end
+	local function in_units(name)
+		return function(r, g, b)
+			put(name, magic.Vector3(UNITS * r, UNITS * g, UNITS * b), r, g, b)
+		end
+	end
+	local function scalar(name)
+		return function(k)
+			put(name, k, k, k, k)
+		end
+	end
+	local light_target = vis and {
+		ambient = function(r, g, b)
+			zone.ambientColor = magic.Color(UNITS * r, UNITS * g, UNITS * b)
+		end,
+		bounce = in_units("BounceLight"),
+		lamp = in_units("LampLight"),
+		ground = in_units("GroundLight"),
+		cave_ambient = in_units("CaveAmbient"),
+		translucency = scalar("TranslucencyGain"),
+		chamber_light = scalar("ChamberLight"),
+	}
 
 	local function update_sky_visibility()
 		if not vis then return end
@@ -1729,23 +1736,6 @@ function M.new(magic, buildat, log, options)
 				math.abs(p.y - vis_at[2]), math.abs(p.z - vis_at[3])) or nil
 		vis_at = {p.x, p.y, p.z}
 		vis:update(p, (moved ~= nil and moved < 8) and 1 or nil)
-		-- Vanilla's cave floor in these units, only where the camera sees
-		-- no sky, as vanilla scales its own by how dark the chamber is
-		-- ([CAVE_EXPOSURE_FLOOR]): everywhere it lifted the moonlit snow
-		-- a third. simplified: the most sky any direction sees stands in
-		-- for vanilla's chamber reading, which also counts daylit faces
-		-- in sight; a cave lit round a corner reads darker here.
-		-- CAVE_FLOOR_GAIN is measured, not derived: at vanilla's value the
-		-- closed cave read 43/255 to vanilla's 27.7; with the shade on it
-		-- (the alpha's low nibble), at 0.48 of it pbr_pair reads 20.2 to
-		-- 21.3, the corners seen.
-		-- Set only on a change: set_param walks the render path.
-		local cf = PHYS.cave_floor * UNITS * CAVE_FLOOR_GAIN *
-				(1 - math.min(1, vis:most()))
-		if not cave_floor_now or math.abs(cf - cave_floor_now) > cf * 0.02 + 1e-6 then
-			cave_floor_now = cf
-			vis:set_param("CaveAmbient", magic.Vector3(cf, cf, cf))
-		end
 	end
 
 	-- For the counters: how much sky the shader is being told there is
@@ -2969,29 +2959,17 @@ function M.new(magic, buildat, log, options)
 		-- sky meets the ground with.
 		local _, height = sun_direction(daylight_time)
 		local sky_top, sky_horizon = top, horizon
-		local ambient
 		if pbr then
-			sky_top, sky_horizon, ambient =
-					physical_sky(top, horizon, height)
+			sky_top, sky_horizon = sky_of_hour(top, horizon, height)
 		end
 		-- Under cover the sky goes the clouds' colour, the horizon and the
 		-- fog a third of the zenith (res/sky_model.lua's overcast); on pbr,
 		-- where the game's darker colours are not drawn, the zenith dims
-		-- too, and the ambient, the dome's mean, with the two
+		-- too
 		local cover = cloud_cover()
 		if cover > 0 then
 			local z, h = psky.overcast(sky_top, sky_horizon, cloud_rgb(),
 					cover, pbr and psky.OVERCAST_DIM or 0)
-			if ambient then
-				local function dome(a, b)
-					return luminance({5 * a.r + b.r, 5 * a.g + b.g,
-							5 * a.b + b.b})
-				end
-				local k = dome(z, h) / math.max(dome(sky_top, sky_horizon),
-						1e-9)
-				ambient = magic.Color(ambient.r * k, ambient.g * k,
-						ambient.b * k)
-			end
 			sky_top = magic.Color(z.r, z.g, z.b)
 			sky_horizon = magic.Color(h.r, h.g, h.b)
 		end
@@ -3001,7 +2979,7 @@ function M.new(magic, buildat, log, options)
 		local flash = sky_model.sky_flash(sky and sky[band.."_sky"] and
 				sky_color(band.."_sky", 1))
 		if flash > 0 then
-			local f = pbr and psky.flash_radiance() or 1
+			local f = pbr and UNITS * psky.flash_radiance() or 1
 			local function lit(c)
 				return magic.Color(c.r + (f - c.r) * flash,
 						c.g + (f - c.g) * flash, c.b + (f - c.b) * flash)
@@ -3009,8 +2987,17 @@ function M.new(magic, buildat, log, options)
 			sky_top, sky_horizon = lit(sky_top), lit(sky_horizon)
 		end
 		zone.fogColor = sky_horizon
-		if ambient then
-			zone.ambientColor = ambient
+		if light_target then
+			-- Under the dome drawn, as vanilla's (sky_light.lua): its hue,
+			-- the reference's mean
+			local t = voxel_light.terms(psky, height,
+					psky.dome(sky_top, sky_horizon))
+			voxel_light.apply(light_target, psky, t, vis:chamber())
+			sky_material:SetShaderParameter("DawnGlow", magic.Vector3(
+					UNITS * t.glow.r, UNITS * t.glow.g, UNITS * t.glow.b))
+			sky_material:SetShaderParameter("DuskBand", magic.Vector3(
+					psky.DUSK_BAND * psky.DUSK_SKY, psky.DUSK_AWAY,
+					t.glow_tint))
 		end
 		-- And the meter, which would put a storm at a clear day's brightness
 		if pbr and metered_cover ~= cover then
@@ -3114,13 +3101,13 @@ function M.new(magic, buildat, log, options)
 					sky_color("indoors", brightness))
 			sky_material:SetShaderParameter("SkyAutoDim",
 					(sky and sky.auto_dim_skybox == false) and 0.0 or 1.0)
-			-- **A parameter a material never sets reads as zero**, and zero
-			-- here means "in a cave", which would draw this client's sky as
-			-- the indoors colour everywhere. Set to one until this client
-			-- computes the scalar for itself; it has the cube that would
-			-- give it -- see extensions/voxel_light -- and the sky is then
-			-- edited only once there is no sky to see. [CAVE_SKY].
-			sky_material:SetShaderParameter("SkyOutside", 1.0)
+			-- On pbr the sky is edited only once there is no sky to see,
+			-- by how much of it the camera sees above (physical_sky's
+			-- gate, [CAVE_SKY]). **A parameter a material never sets reads
+			-- as zero**, which means "in a cave", so the parity modes, which
+			-- keep no sky visibility, set one.
+			sky_material:SetShaderParameter("SkyOutside",
+					vis and psky.outside(vis:above()) or 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And
 			-- over the hour the sun spends crossing the horizon they take its
