@@ -43,6 +43,7 @@
 # clean) as run 1's 1024 is.
 # The twelfth, crafting more: the held result clicked again crafts another
 # set onto it.
+# The thirteenth, invulnerability: the admin's toggle, kept over a rejoin.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -622,9 +623,54 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	[ $(grep -ac "inventory: craft more" "$t/craft.log") = 3 ] &&
 	grep -aq "inventory: move 12 skeldat:stick craftresult:1 -> main:10" "$t/craft.log" ||
 	fail "crafting more: $(grep -a "client1 crafts" "$log15" | sed 's/.*the result //' | tr '\n' ';') ($log15, $t/craft.log)"
+# 13. Invulnerable ([SKELDAT_INVULNERABLE]): the launcher's client, an
+# admin, turns itself invulnerable and falls (fast flight up 0.8 s, the
+# flight off): no damage; rejoined, it falls again unhurt, turns it off,
+# and the next fall hurts. Every damage goes through hurt(), the fall
+# stands for the arrow and the drowning.
+log16="$t/srv16.log"
+toggle() # the admin page's toggle, from the game
+{
+	printf '%s\n' "keypress Escape" "wait_log 5000 pause: the menu shown" \
+		"delay 500" 'click Button "Admin..."' \
+		"wait_log 30000 pause: admin got players" "delay 500" \
+		'click Button "client1"' "wait_log 30000 pause: admin got inv client1" \
+		"delay 500" 'click Button "Invulnerable*"' \
+		"wait_log 30000 pause: admin got inv client1" "delay 500" \
+		"screenshot $t/invulnerable.png" 'click Button "Back"' "delay 500" 'click Button "Back"' \
+		"wait_log 5000 pause: the menu shown" "delay 500" "keypress Escape" \
+		"wait_log 5000 pause: the menu closed"
+}
+fall()
+{
+	printf '%s\n' "keypress K" "keypress J" "keydown Space" "delay 800" \
+		"keyup Space" "keypress J" "keypress K" "delay 5000"
+}
+{ echo "$placed"; echo "delay 2000"; toggle; fall; echo quit; } > "$t/inv1.cmds"
+{ echo "$placed"; echo "delay 2000"; fall; toggle; fall; echo quit; } > "$t/inv2.cmds"
+# A guest's name goes by its connection: the rejoin, client1 again, on
+# the server started again
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+		start_server "$t/srv16_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv16" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		fail "the server ($t/srv16_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	client inv$n "$t/inv$n.cmds"
+	wait $CLIENT || fail "the invulnerable drive ($t/inv$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	cat "$t/srv16_$n.log" >> "$log16"
+done
+falls=$(grep -a "client1 falls" "$log16" | sed 's/.*falls, //' | tr '\n' ';')
+grep -aq "client1 sets client1: invulnerable on" "$log16" &&
+	grep -aq "client1 sets client1: invulnerable off" "$log16" &&
+	echo "$falls" | grep -qE "^invulnerable;invulnerable;[1-9][0-9]* hp left;$" ||
+	fail "invulnerability: the falls $falls ($log16)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability"
 # vim: set noet ts=4 sw=4:

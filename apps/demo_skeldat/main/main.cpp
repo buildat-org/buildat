@@ -120,10 +120,13 @@ struct Player
 	bool admin = false;
 	// Seen as a skeleton by the others (update_skeletons())
 	bool skeleton = false;
+	// No damage of any kind, the admin's toggle ([SKELDAT_INVULNERABLE])
+	bool invulnerable = false;
 
 	ss_ save() const {
 		std::ostringstream os;
-		os<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<breath<<"\n";
+		os<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<breath<<" "
+				<<invulnerable<<"\n";
 		for(auto *l : {&main, &craft, &craftresult}){
 			for(size_t i = 0; i < l->size(); i++)
 				os<<(i ? "|" : "")<<(*l)[i].str();
@@ -135,7 +138,7 @@ struct Player
 		std::istringstream is(s);
 		ss_ line;
 		std::getline(is, line);
-		std::istringstream(line)>>x>>y>>z>>yaw>>hp>>breath;
+		std::istringstream(line)>>x>>y>>z>>yaw>>hp>>breath>>invulnerable;
 		for(auto *l : {&main, &craft, &craftresult}){
 			std::getline(is, line);
 			std::istringstream ls(line);
@@ -1998,6 +2001,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(damage <= 0 || pl.hp <= 0)
 			return;
+		if(pl.invulnerable){
+			log_i(MODULE, "skeldat: %s %s, invulnerable", cs(pl.name), how);
+			return;
+		}
 		pl.hp = std::max(0, pl.hp - damage);
 		log_i(MODULE, "skeldat: %s %s, %d hp left", cs(pl.name), how, pl.hp);
 		send_stats(peer, pl);
@@ -3439,8 +3446,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	// of the world's save. "skeldat:admin" both ways, a command a line:
 	//   players                    -> players\n<name> a line
 	//   view <name>                -> inv <name>\nmain=<list_text's>
+	//                                 invulnerable=0|1 (a line)
 	//   give <name> <item> <count> -> the view again
 	//   take <name> <slot>         -> the view again
+	//   invulnerable <name> on|off -> the view again
 	//   audit                      -> audit\n<ts by action whom text> a line
 	// simplified: the players on the server now, not the save's others
 	void on_admin(const network::Packet &packet)
@@ -3510,13 +3519,21 @@ struct Module: public interface::Module, public luanti_session::Game
 			const ss_ what = pl->main[slot].str();
 			pl->main[slot] = Stack();
 			audit(by, name, "take", what);
+		} else if(cmd == "invulnerable"){
+			ss_ v;
+			is>>v;
+			if(v != "on" && v != "off")
+				return;
+			pl->invulnerable = v == "on";
+			audit(by, name, "set", "invulnerable "+v);
 		} else if(cmd != "view"){
 			return;
 		}
 		if(cmd != "view")
 			send_inventory(to, *pl);
 		network::send(m_server, peer, "skeldat:admin", "inv "+name+"\n"+
-				list_text("main", pl->main));
+				list_text("main", pl->main)+"invulnerable="+
+				(pl->invulnerable ? "1" : "0"));
 	}
 
 	// **The world from above** ([SKELDAT_BOUNDED_WORLD]), for the tuning: a

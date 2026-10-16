@@ -7,7 +7,8 @@
 -- server for one. The chat is builtin/chat's, its console builtin/accounts'
 -- (game.chat(), the chat key's) and its menu (mute, report) the chat's.
 -- An admin has Admin...: the players, each one's inventory to give an
--- item to or take a stack from, and the audit log of both.
+-- item to or take a stack from, invulnerability on and off, and the audit
+-- log of them.
 --   local open = run_script_file("main/pause.lua")(game, declare_keys)
 -- declare_keys: read the keys again after the settings window.
 -- simplified: no account pages for the admin; the admin's give is one or
@@ -130,6 +131,12 @@ return function(game, declare_keys)
 				admin_send(string.format("give %s %s 99", admin.name,
 						admin.give))
 			end)
+			-- No damage of any kind ([SKELDAT_INVULNERABLE])
+			menu:add("Invulnerable: " .. (admin.invulnerable and "on" or "off"),
+					function()
+				admin_send(string.format("invulnerable %s %s", admin.name,
+						admin.invulnerable and "off" or "on"))
+			end)
 			back = function()
 				admin.page = "players"
 				admin_send("players")
@@ -196,8 +203,11 @@ return function(game, declare_keys)
 			for part in (list .. "|"):gmatch("([^|]*)|") do
 				admin.main[#admin.main + 1] = part
 			end
+			admin.invulnerable = lines[2] == "invulnerable=1"
 		end
-		log:info("pause: admin got " .. head)
+		log:info("pause: admin got " .. head ..
+				(admin.invulnerable and head:match("^inv ") and
+				", invulnerable" or ""))
 		if admin.page and root then
 			admin_page()
 		end

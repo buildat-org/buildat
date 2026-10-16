@@ -31,8 +31,9 @@ module under it.
   not have been walked at twice the walk speed.
 - An admin (accounts' admin, or the launcher's own client) has fly (K),
   fast (J) and noclip (H), and Admin... in the pause menu: each player's
-  inventory, an item given or a stack taken, into moderation's audit log
-  of the world's save, which the menu shows.
+  inventory, an item given or a stack taken, and the player made
+  invulnerable (no damage of any kind) or not, into moderation's audit
+  log of the world's save, which the menu shows.
 - The chat is builtin/chat's: T (or the pause menu's Chat...) opens the
   console, the last lines show over the world for 20 s, and "Who's in the
   chat..." has the moderator's who-may-talk, mute, and reports, and
