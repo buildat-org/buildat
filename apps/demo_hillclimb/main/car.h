@@ -102,6 +102,9 @@ struct Wheel
 	bool slipping = false;
 	// This substep's force on the chassis and where it acts
 	V3 force, at;
+	// For the ground (ground.h): the tread's velocity over the ground,
+	// m/s, the contact's normal and the axle
+	V3 slide, normal, axle;
 };
 
 // Voxels are (x, y, z) with centres at integers, `u` of them to the metre
@@ -216,6 +219,8 @@ struct Car
 			float d = contact(g, u, hub * u, axle, s.tyre_r, s.tyre_w, n);
 			w.force = V3();
 			w.at = hub;
+			w.slide = V3();
+			w.axle = axle;
 			if(d <= 0){
 				w.load = w.spring = w.brush_x = w.brush_y = 0;
 				w.slipping = false;
@@ -256,6 +261,8 @@ struct Car
 			}
 			w.force = n * f + cx * fx + cy * fy;
 			w.at = at;
+			w.slide = cx * slip_x + cy * slip_y;
+			w.normal = n;
 			ground_torque += fx * s.tyre_r;
 		}
 		// The shaft: the governor toward the gear's speed at the pedal, the

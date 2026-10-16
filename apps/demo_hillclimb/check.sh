@@ -9,8 +9,9 @@
 # no client (BUILDAT_HILLCLIMB_DRIVE): the car settling on its springs,
 # lower with a payload, each gear's top speed, the brake, a slope
 # climbed and one past the sand's grip stalled; the time trial's times
-# kept per hill and payload in order, and a hill picked again. Stage 4
-# adds the ground.
+# kept per hill and payload in order, and a hill picked again; the
+# ground (main/ground.h's own self test too): a rut dug by wheels spun in
+# place, stones loose that roll down and rest.
 #   apps/demo_hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -21,6 +22,9 @@ app="$here/apps/demo_hillclimb"
 g++ -std=c++11 -O1 -DHILL_TEST -x c++ "$app/main/hill.h" -o "$t/hill_test" \
 	2> "$t/hill_build.log" || fail "hill.h self test did not build: $(head -3 "$t/hill_build.log")"
 "$t/hill_test" || fail "hill.h self test"
+g++ -std=c++11 -O1 -DGROUND_TEST -x c++ "$app/main/ground.h" -o "$t/ground_test" \
+	2> "$t/ground_build.log" || fail "ground.h self test did not build: $(head -3 "$t/ground_build.log")"
+"$t/ground_test" || fail "ground.h self test"
 
 for f in "$app"/main/client_lua/*.lua "$app"/launcher/*.lua; do
 	luajit -b "$f" /dev/null || fail "$f does not parse"
@@ -43,9 +47,10 @@ drive flat BUILDAT_HILLCLIMB_START="5 -30 180" \
 # end's bank; again in fourth, faster; then a hill of 15 degrees and 30 m
 drive climb BUILDAT_HILLCLIMB_DRIVE="0:2 2:W2 31:S2 33:B 34:W4 50:S4 \
 52:4H15/30 54:W4 66:Q" &
-# 40 degrees with 2 t aboard in first: past the sand's grip, it stalls
+# 40 degrees with 2 t aboard in first: past the sand's grip, it stalls,
+# its wheels spinning in place dig in and loosen stones that roll
 drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
-	BUILDAT_HILLCLIMB_DRIVE="0:1 2:W1 20:Q" &
+	BUILDAT_HILLCLIMB_DRIVE="0:1 1:W1 2:KW1 26:S1 34:Q" &
 wait
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
 grep -aq "hillclimb: the hill, seed 1, 22 degrees, 50 m long" "$t/flat.log" ||
@@ -103,15 +108,40 @@ if len(fins) == 3:
     want(fins[2][1] == "seed1/steep15/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
 want("hillclimb: the hill, seed 1, 15 degrees, 30 m long" in log, "the hill made again from the pick")
-last = stall[-3:]
-want(max(l["z"] for l in stall) < 12 and all(l["slip"] == "1111" for l in last),
+spin = [l for l in stall if 22 <= l["t"] <= 25]
+want(max(l["z"] for l in stall) < 12 and all("1" in l["slip"] for l in spin),
     "40 degrees with 2 t stalls, its wheels slipping: z %.1f, slip %s" % (
-    max(l["z"] for l in stall), [l["slip"] for l in last]))
+    max(l["z"] for l in stall), [l["slip"] for l in spin]))
+# The ground: the stall's spinning wheels dig a rut and throw the sand;
+# a stone comes loose, rolls down and rests
+slog = open("%s/stall.log" % d, errors="replace").read()
+g = [int(x) for x in re.findall(r"ground=(\d+)/", slog)]
+ruts = [int(x) for x in re.findall(r"rut=(\d+)", slog)]
+# On 40 degrees, past sand's angle of repose, a pit refills from above as
+# it is dug: a voxel deep at least (ground.h's self test digs two on the
+# flat)
+want(g and g[-1] >= 30 and max(ruts) >= 1,
+    "spun in place, the wheels dug a rut: %d voxels dug, %d deep" % (
+    g[-1] if g else 0, max(ruts) if ruts else 0))
+loose = {m[0]: [float(v) for v in m[1:4]] for m in re.findall(
+    r"rock (\d+) loose at (\S+),(\S+),(\S+) m", slog)}
+rests = {m[0]: [float(v) for v in m[1:4]] + [int(m[4])] for m in re.findall(
+    r"rock (\d+) rests at (\S+),(\S+),(\S+) m, \S+ m from where it came "
+    r"loose, (\d+) voxels", slog)}
+say = ["%s: y %.2f -> %.2f, %d voxels" % (k, loose[k][1], rests[k][1],
+    rests[k][3]) for k in sorted(rests) if k in loose]
+# Rock 1 is the one K dropped on the slope's lower third
+want("1" in rests and rests["1"][1] < loose["1"][1] - 1 and rests["1"][3] > 0,
+    "a stone on the slope rolled down and rested as voxels: %s" % say)
+want(len(loose) >= 2, "the spinning tyres loosened stones: %d" % (len(loose) - 1))
 us = [int(m) for m in re.findall(r"tick_us=(\d+)",
     open("%s/climb.log" % d, errors="replace").read())]
 print("  the physics per 30 Hz tick on the climb: mean %d us, worst %d us" % (
     sum(us) / len(us), max(us)))
+commits = [int(m) for m in re.findall(r"commits=(\d+)", slog)]
+want(max(commits) <= 6, "the ground's commits (each remeshes what it touched) "
+    "at most five a second: worst %d, %d in all" % (max(commits), sum(commits)))
 sys.exit(1 if bad else 0)
 PY
-echo "PASS: the hill, the car on rigid ground and the time trial"
+echo "PASS: the hill, the car, the time trial and the ground that gives"
 # vim: set noet ts=4 sw=4:

@@ -13,8 +13,9 @@
 //
 // Along +Z: a flat pad at the bottom, the slope, a flat pad at the top.
 // Across X: a bank of rock a metre wide and a metre high, the track 8 m
-// wide, the other bank; a third bank across the top pad's far end, so a
-// car that keeps going stops there and does not drop off the top. Under the surface a shell of sand with pebbles
+// wide, the other bank; banks across both ends too, so a car that keeps
+// going stops at the top's and does not drop off it, and a stone rolling
+// down stops at the bottom's. Under the surface a shell of sand with pebbles
 // (stones 2 to 3 voxels across) 1.5 m deep, then a fill nobody sees.
 // The slope's angle is the middle's; its ends ease in and out over 2 m,
 // so the car does not meet a kink at either pad.
@@ -124,8 +125,11 @@ struct Hill
 		return (int)std::floor(h);
 	}
 	// A pebble: in a 4-voxel cell, a stone of radius 1..1.6 voxels about a
-	// point in it, one cell in five
-	bool pebble(int x, int y, int z) const
+	// point in it, one cell in five. pebble_of() says which: its centre in
+	// voxel coordinates (a voxel's centre is its integer position) and its
+	// radius, for the ground to loosen it whole ([HILLCLIMB] 4).
+	bool pebble_of(int x, int y, int z, float &ox, float &oy, float &oz,
+			float &radius) const
 	{
 		const int C = 4;
 		int cx = (int)std::floor(x / (float)C), cy = (int)std::floor(y / (float)C),
@@ -140,10 +144,20 @@ struct Hill
 					pz = (c + unit(a, b, c, 17)) * C;
 			float r = 1.0f + 0.6f * unit(a, b, c, 19);
 			float qx = x + 0.5f - px, qy = y + 0.5f - py, qz = z + 0.5f - pz;
-			if(qx * qx + qy * qy + qz * qz <= r * r)
+			if(qx * qx + qy * qy + qz * qz <= r * r){
+				ox = px - 0.5f;
+				oy = py - 0.5f;
+				oz = pz - 0.5f;
+				radius = r;
 				return true;
+			}
 		}
 		return false;
+	}
+	bool pebble(int x, int y, int z) const
+	{
+		float a, b, c, r;
+		return pebble_of(x, y, z, a, b, c, r);
 	}
 
 	Voxel at(int x, int y, int z) const
@@ -152,7 +166,7 @@ struct Hill
 			return AIR;
 		const int s = surface(x, z);
 		const bool bank = x < BANK_W || x >= BANK_W + TRACK_W ||
-				z >= size_z() - BANK_W;
+				z < BANK_W || z >= size_z() - BANK_W;
 		if(bank)
 			return y <= s + BANK_H ? BANK : AIR;
 		if(y > s)
@@ -208,7 +222,7 @@ int main()
 	// 8 m of track between the banks, sand on top with stones in it
 	assert(Hill::TRACK_W == 8 * U);
 	int sand = 0, stone = 0;
-	for(int z = 0; z < a.size_z() - Hill::BANK_W; z++)
+	for(int z = Hill::BANK_W; z < a.size_z() - Hill::BANK_W; z++)
 	for(int x = Hill::BANK_W; x < Hill::BANK_W + Hill::TRACK_W; x++){
 		int s = a.surface(x, z);
 		assert(a.at(x, s + 1, z) == AIR);
@@ -225,6 +239,10 @@ int main()
 	int end = a.size_z() - 1;
 	assert(a.at(40, a.surface(40, end) + Hill::BANK_H, end) == BANK);
 	assert(Hill::PAD - Hill::BANK_W >= (int)(3.6f * U));
+	assert(a.at(40, a.surface(40, 0) + Hill::BANK_H, 0) == BANK);
+	// The car's start (main.cpp: the pad's middle) clear of the bottom's
+	// bank: the rear tyre's back 1.4 + 0.4 m behind it
+	assert(Hill::PAD / 2 - (int)std::ceil(1.8f * U) >= Hill::BANK_W);
 	printf("hill.h: self test passed; %dx%dx%d voxels, rise %.1f m, "
 			"%.1f%% stones in the shell\n", a.size_x(), a.size_y(), a.size_z(),
 			a.rise / U, 100.0f * stone / (sand + stone));

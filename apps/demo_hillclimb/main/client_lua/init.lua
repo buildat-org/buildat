@@ -296,6 +296,36 @@ local function draw_car()
 	end
 end
 
+-- The stones come loose (main.cpp send_rocks): "id x y z qw qx qy qz
+-- radius" each, ";" between, in voxels; spheres while they fly, the
+-- voxels again when they rest
+local STONE = lit(0.07, 0.066, 0.06)
+local rocks = {}
+buildat.sub_packet("hillclimb:rocks", function(data)
+	local seen = {}
+	for item in data:gmatch("[^;]+") do
+		local v = {}
+		for w in item:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+		if #v >= 9 then
+			local r = rocks[v[1]]
+			if r == nil then
+				r = part(scene, "Sphere", STONE, magic.Vector3(0, 0, 0),
+						magic.Vector3(2 * v[9], 2 * v[9], 2 * v[9]))
+				rocks[v[1]] = r
+			end
+			r.position = magic.Vector3(v[2], v[3], v[4])
+			r.rotation = magic.Quaternion(v[5], v[6], v[7], v[8])
+			seen[v[1]] = true
+		end
+	end
+	for id, r in pairs(rocks) do
+		if not seen[id] then
+			r:Remove()
+			rocks[id] = nil
+		end
+	end
+end)
+
 --
 -- The keys, in the client's key store: the shared movement names where
 -- there is one
@@ -453,6 +483,7 @@ local function draw_hud()
 	end
 	local race, t = b.v[17], b.v[18]
 	local state = race == 0 and "W starts the clock" or race == 1 and "" or
+			race == 3 and "The hill is being made" or
 			string.format("Finished in %.2f s. Backspace: another run", t)
 	hud:SetText(string.format("Gear %s   %4.1f m/s   %6.2f s\n%s\n"
 			.. "Tab: the hill and the car   Backspace: back to the start",

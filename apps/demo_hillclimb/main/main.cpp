@@ -21,8 +21,8 @@
 // For the check, with no client: BUILDAT_HILLCLIMB_DRIVE, steps of
 // "<seconds>:<keys>" from the car's start, each held until the next --
 // W accelerator, S brake, A and D steering, 1 to 4 and R the gear, B the
-// car back at the start, H<steep>/<length> another hill, Q the server's
-// end -- logging the car each second; and _START, "x z yaw" (m, m,
+// car back at the start, H<steep>/<length> another hill, K a stone dropped
+// on the slope, Q the server's end -- logging the car each second; and _START, "x z yaw" (m, m,
 // degrees) for a start other than the bottom pad's.
 #include "core/log.h"
 #include "client_file/api.h"
@@ -39,7 +39,9 @@
 #include "interface/os.h"
 #include "hill.h"
 #include "car.h"
+#include "ground.h"
 #include <PhysicsWorld.h>
+#include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
 #include <Scene.h>
@@ -73,40 +75,6 @@ static float env_or(const char *name, float def)
 	return v && v[0] ? (float)atof(v) : def;
 }
 
-// The hill's voxels, made once at the start: what the generator hands
-// voxelworld and what the tyres stand on. Outside the hill's box the
-// ground is flat at the bottom pad's level, as the client draws it.
-// simplified: a copy beside voxelworld's, which is the ground that gives
-// ([HILLCLIMB] 4) writing both
-struct Grid: public car::Ground
-{
-	int sx, sy, sz;
-	std::vector<uint8_t> v;
-	Grid(const hill::Hill &h):
-		sx(h.size_x()), sy(h.size_y()), sz(h.size_z()),
-		v((size_t)sx * sy * sz)
-	{
-		for(int z = 0; z < sz; z++)
-		for(int y = 0; y < sy; y++)
-		for(int x = 0; x < sx; x++)
-			v[((size_t)z * sy + y) * sx + x] = h.at(x, y, z);
-	}
-	bool inside(int x, int y, int z) const
-	{
-		return x >= 0 && y >= 0 && z >= 0 && x < sx && y < sy && z < sz;
-	}
-	hill::Voxel at(int x, int y, int z) const
-	{
-		return inside(x, y, z) ? (hill::Voxel)v[((size_t)z * sy + y) * sx + x] :
-				hill::AIR;
-	}
-	bool solid(int x, int y, int z) const
-	{
-		return inside(x, y, z) ? at(x, y, z) != hill::AIR :
-				y <= hill::Hill::BASE;
-	}
-};
-
 // What a player may pick ([HILLCLIMB] 3), which the server holds a
 // client's pick to; the world's region is the largest of these hills
 static const int STEEP_MIN = 5, STEEP_MAX = 40;
@@ -117,8 +85,8 @@ struct Worldgen: public worldgen::GeneratorInterface
 {
 	// Swapped by the main thread when the hill changes
 	std::mutex m_mutex;
-	std::shared_ptr<const Grid> m_grid;
-	void set(const std::shared_ptr<const Grid> &grid)
+	std::shared_ptr<const ground::Grid> m_grid;
+	void set(const std::shared_ptr<const ground::Grid> &grid)
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);
 		m_grid = grid;
@@ -128,12 +96,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 	void generate(SceneReference scene_ref, const pv::Vector3DInt16 &section_p,
 			VoxelVolume &volume)
 	{
-		std::shared_ptr<const Grid> grid;
+		std::shared_ptr<const ground::Grid> grid;
 		{
 			std::lock_guard<std::mutex> lock(m_mutex);
 			grid = m_grid;
 		}
-		const Grid &m_hill = *grid;
+		const ground::Grid &m_hill = *grid;
 		const pv::Region region = volume.getEnclosingRegion();
 		auto lc = region.getLowerCorner();
 		auto uc = region.getUpperCorner();
@@ -165,8 +133,28 @@ struct Module: public interface::Module
 	SceneReference m_scene = nullptr;
 	hill::Params m_params;
 	float m_latitude = 60, m_day = 172, m_time = 14;
-	std::shared_ptr<const Grid> m_grid;
+	up_<hill::Hill> m_hill;
+	std::shared_ptr<ground::Grid> m_grid;
 	Worldgen *m_worldgen = nullptr; // worldgen's to delete
+	// The ground that gives ([HILLCLIMB] 4), live once worldgen has made
+	// every section: its workers read the grid until then
+	up_<ground::Ground> m_ground;
+	bool m_ground_live = false;
+	float m_flush_t = 0;
+	int m_flushes = 0; // since the last car line: commits, so remeshes
+	// The stones come loose, as bodies until they rest
+	struct Rock
+	{
+		int id;
+		magic::Node *node;
+		magic::RigidBody *body;
+		float radius, still = 0, age = 0;
+		magic::Vector3 from;
+	};
+	sv_<Rock> m_rocks;
+	sv_<ground::Loose> m_loose;
+	int m_next_rock = 1;
+	bool m_rocks_sent = false;
 	// A pick from the menu, made when worldgen has nothing queued
 	bool m_pending = false;
 	hill::Params m_pending_params;
@@ -177,6 +165,7 @@ struct Module: public interface::Module
 	float m_race_t = 0;
 	storage::Save *m_save = nullptr;
 	int m_last_rank = -1;
+	bool m_reset = false;
 	// The car: car.h's model and its chassis' body
 	up_<car::Car> m_car;
 	magic::RigidBody *m_body = nullptr;
@@ -368,9 +357,13 @@ struct Module: public interface::Module
 	// second for the default hill (-O1)
 	void make_hill()
 	{
-		const hill::Hill h(m_params);
-		m_grid = std::make_shared<const Grid>(h);
+		m_hill.reset(new hill::Hill(m_params));
+		const hill::Hill &h = *m_hill;
+		m_grid = std::make_shared<ground::Grid>(h);
 		m_worldgen->set(m_grid);
+		m_ground.reset(new ground::Ground(*m_grid, h));
+		m_ground_live = false;
+		clear_rocks();
 		const int S = 64;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(const pv::Vector3DInt16 &sp : w->get_loaded_sections())
@@ -425,6 +418,10 @@ struct Module: public interface::Module
 			m_physics->SetUpdateEnabled(false);
 			m_physics->SetMaxSubSteps(-1);
 			m_physics->SetGravity(magic::Vector3(0, -9.81f * U, 0));
+			// Only what moves gets its bounds worked out each step: the
+			// voxels' boxes are many and still, and updating them all
+			// was half the physics' time
+			m_physics->GetWorld()->setForceUpdateAllAabbs(false);
 			m_car.reset(new car::Car(car::Spec(), m_payload));
 			const car::Spec &s = m_car->spec;
 			// Local: the client draws the car from hillclimb:car
@@ -469,6 +466,18 @@ struct Module: public interface::Module
 			m_drive_step = step;
 			if(keys.find('B') != ss_::npos)
 				reset_race();
+			// A stone dropped on the slope's lower third, a metre in from
+			// the left bank: clear of a car on the track's middle
+			if(keys.find('K') != ss_::npos){
+				ground::Loose l;
+				int x = hill::Hill::BANK_W + hill::U, z = m_hill->slope_z0() +
+						m_hill->run / 3;
+				l.centre = car::V3((float)x, m_hill->surface(x, z) + 3.0f,
+						(float)z);
+				l.radius = 1.3f;
+				l.kg = 9 * m_ground->soil.stone_kg;
+				m_loose.push_back(l);
+			}
 			size_t h = keys.find('H');
 			int steep = 0, length = 0;
 			if(h != ss_::npos && sscanf(keys.c_str() + h + 1, "%d/%d", &steep,
@@ -501,6 +510,8 @@ struct Module: public interface::Module
 			return;
 		if(m_pending)
 			apply_pending();
+		if(m_reset)
+			do_reset();
 		const float U = hill::U;
 		const float dt = 1.0f / SUBSTEPS_HZ;
 		// simplified: a long tick is cut to a quarter second of substeps;
@@ -509,9 +520,14 @@ struct Module: public interface::Module
 		const uint64_t t0 = interface::os::time_us();
 		main_context::access(m_server, [&](main_context::Interface *){
 			for(int i = 0; i < n; i++){
-				if(!m_drive.empty())
+				if(!m_drive.empty() && m_ground_live)
 					drive_step();
-				m_car->controls(m_input, dt);
+				// Held on the brake until the hill is made: the ground gives
+				// only then, and a run is on the ground that gives
+				car::Input held;
+				held.brake = true;
+				held.gear = m_input.gear;
+				m_car->controls(m_ground_live ? m_input : held, dt);
 				magic::Node *node = m_body->GetNode();
 				const magic::Vector3 p = node->GetWorldPosition();
 				const magic::Quaternion q = node->GetWorldRotation();
@@ -529,6 +545,15 @@ struct Module: public interface::Module
 							magic::Vector3(at.x, at.y, at.z) * U - p);
 					return v3(v / U);
 				}, dt);
+				if(m_ground_live){
+					for(int k = 0; k < 4; k++)
+						m_ground->wheel(k, m_car->wheel[k], m_car->spec, U, dt);
+					// Made bodies after the flush that takes their voxels out
+					// of the world's boxes (ground_tick), not inside them
+					for(const ground::Loose &l : m_ground->loose)
+						m_loose.push_back(l);
+					m_ground->loose.clear();
+				}
 				for(const car::Wheel &w : m_car->wheel){
 					if(w.load <= 0)
 						continue;
@@ -537,17 +562,145 @@ struct Module: public interface::Module
 							w.at.z) * U - p);
 				}
 				m_physics->Update(dt);
-				m_t += dt;
-				race_step(dt);
+				if(m_ground_live){
+					m_t += dt;
+					race_step(dt);
+				}
 			}
 		});
 		m_step_us += interface::os::time_us() - t0;
 		m_step_ticks++;
+		ground_tick(n * dt);
 		if(!m_drive.empty() && m_t - m_logged >= 1){
 			m_logged = m_t;
 			log_car();
 		}
 		send_car();
+	}
+
+	//
+	// The ground
+	//
+
+	// Once a tick: the ground live when worldgen is done, the changes into
+	// the world at most five times a second (each a commit, which remeshes
+	// what it touched), the stones that have come to rest back to voxels
+	void ground_tick(float dt)
+	{
+		if(!m_ground_live){
+			size_t queued = 1;
+			worldgen::access(m_server, m_scene, [&](worldgen::Instance *i){
+				queued = i->get_num_sections_queued();
+			});
+			m_ground_live = queued == 0;
+		}
+		const float U = hill::U;
+		main_context::access(m_server, [&](main_context::Interface *){
+			for(size_t i = 0; i < m_rocks.size();){
+				Rock &r = m_rocks[i];
+				r.age += dt;
+				bool still = r.body->GetLinearVelocity().Length() < 0.1f * U &&
+						r.body->GetAngularVelocity().Length() < 1.0f;
+				r.still = still ? r.still + dt : 0;
+				magic::Vector3 p = r.node->GetWorldPosition();
+				// simplified: one that has not stopped in 8 s (held under the
+				// car, rocking) rests where it is
+				if(r.still < 1 && r.age < 8 && p.y_ > -U){
+					i++;
+					continue;
+				}
+				int n = m_ground->rest(car::V3(p.x_, p.y_, p.z_), r.radius);
+				log_i(MODULE, "hillclimb: rock %d rests at %.2f,%.2f,%.2f m, "
+						"%.2f m from where it came loose, %d voxels", r.id,
+						p.x_ / U, p.y_ / U, p.z_ / U, (p - r.from).Length() / U, n);
+				r.node->Remove();
+				m_rocks.erase(m_rocks.begin() + i);
+			}
+		});
+		m_flush_t += dt;
+		if(m_flush_t >= 0.2f){
+			m_flush_t = 0;
+			if(!m_ground->changes.empty()){
+				voxelworld::access(m_server, m_scene,
+						[&](voxelworld::Instance *w){
+					// Written without light: voxelworld floods it from the
+					// change
+					for(const ground::Change &c : m_ground->changes)
+						w->set_voxel(pv::Vector3DInt32(c.x, c.y, c.z),
+								VoxelInstance(id_of(c.v)), true);
+				});
+				m_ground->changes.clear();
+				m_flushes++;
+			}
+			for(const ground::Loose &l : m_loose)
+				main_context::access(m_server, [&](main_context::Interface *){
+					add_rock(l);
+				});
+			m_loose.clear();
+		}
+		send_rocks();
+	}
+
+	// A stone's voxels gone from the grid: a sphere of its size thrown
+	// along the tread's slide. In main_context's access.
+	void add_rock(const ground::Loose &l)
+	{
+		const float U = hill::U;
+		magic::Scene *scene = m_body->GetNode()->GetScene();
+		{
+			Rock r;
+			r.id = m_next_rock++;
+			r.radius = l.radius;
+			r.node = scene->CreateChild("Rock", magic::LOCAL);
+			r.from = magic::Vector3(l.centre.x, l.centre.y, l.centre.z);
+			r.node->SetWorldPosition(r.from);
+			r.body = r.node->CreateComponent<magic::RigidBody>(magic::LOCAL);
+			r.body->SetMass(l.kg);
+			r.body->SetFriction(0.8f);
+			r.body->SetRollingFriction(0.05f);
+			r.body->SetRestitution(0.1f);
+			r.node->CreateComponent<magic::CollisionShape>(magic::LOCAL)->
+					SetSphere(2 * l.radius);
+			r.body->SetLinearVelocity(magic::Vector3(l.velocity.x,
+					l.velocity.y, l.velocity.z) * U);
+			m_rocks.push_back(r);
+			log_i(MODULE, "hillclimb: rock %d loose at %.2f,%.2f,%.2f m, %d "
+					"voxels, %.0f kg", r.id, l.centre.x / U, l.centre.y / U,
+					l.centre.z / U, l.voxels, l.kg);
+		}
+	}
+
+	void clear_rocks()
+	{
+		m_loose.clear();
+		main_context::access(m_server, [&](main_context::Interface *){
+			for(Rock &r : m_rocks)
+				r.node->Remove();
+		});
+		m_rocks.clear();
+	}
+
+	// "id x y z qw qx qy qz radius" per stone in flight, in voxels, ";"
+	// between them; once more empty when the last has come to rest
+	void send_rocks()
+	{
+		if(m_peers.empty() || (m_rocks.empty() && !m_rocks_sent))
+			return;
+		ss_ data;
+		for(const Rock &r : m_rocks){
+			magic::Vector3 p = r.node->GetWorldPosition();
+			magic::Quaternion q = r.node->GetWorldRotation();
+			char buf[160];
+			snprintf(buf, sizeof buf, "%s%d %.3f %.3f %.3f %.4f %.4f %.4f %.4f "
+					"%.3f", data.empty() ? "" : ";", r.id, p.x_, p.y_, p.z_, q.w_,
+					q.x_, q.y_, q.z_, r.radius);
+			data += buf;
+		}
+		m_rocks_sent = !m_rocks.empty();
+		network::access(m_server, [&](network::Interface *i){
+			for(auto peer : m_peers)
+				i->send(peer, "hillclimb:rocks", data);
+		});
 	}
 
 	//
@@ -641,12 +794,38 @@ struct Module: public interface::Module
 		});
 	}
 
+	// Each run on the hill as it was made
+	// Done at the next tick's start (do_reset), outside any module's
+	// access: making the hill again reaches voxelworld
 	void reset_race()
 	{
 		m_race = READY;
 		m_race_t = 0;
 		m_last_rank = -1;
-		place_car();
+		m_reset = true;
+	}
+	void do_reset()
+	{
+		m_reset = false;
+		// The ground as the hill was made (flushed with the next changes)
+		if(m_ground && m_ground->changed())
+			m_ground->restore();
+		clear_rocks();
+		main_context::access(m_server, [&](main_context::Interface *){
+			place_car();
+		});
+	}
+
+	// The deepest the track is under the hill's generated surface, in
+	// voxels: the ruts dug and sunk
+	int rut() const
+	{
+		int deepest = 0;
+		for(int z = 0; z < m_hill->size_z(); z++)
+		for(int x = hill::Hill::BANK_W; x < hill::Hill::BANK_W +
+				hill::Hill::TRACK_W; x++)
+			deepest = std::max(deepest, m_hill->surface(x, z) - m_grid->top(x, z));
+		return deepest;
 	}
 
 	// The check reads these: the centre of mass in metres, the speed, the
@@ -660,20 +839,24 @@ struct Module: public interface::Module
 		const car::Car &c = *m_car;
 		log_i(MODULE, "hillclimb: car t=%.1f pos=%.3f,%.3f,%.3f v=%.2f "
 				"shaft=%.3f springs=%.3f,%.3f,%.3f,%.3f slip=%d%d%d%d gear=%d "
-				"tick_us=%d race=%d/%.2f",
+				"tick_us=%d race=%d/%.2f ground=%d/%d/%d/%d rocks=%d rut=%d "
+				"commits=%d",
 				m_t, p.x_, p.y_, p.z_, v.Length(), c.shaft / (2 * car::PI),
 				c.wheel[0].spring, c.wheel[1].spring, c.wheel[2].spring,
 				c.wheel[3].spring, c.wheel[0].slipping, c.wheel[1].slipping,
 				c.wheel[2].slipping, c.wheel[3].slipping, (int)c.gear,
 				(int)(m_step_us / std::max(1, m_step_ticks)), (int)m_race,
-				m_race_t);
+				m_race_t, m_ground->dug, m_ground->sunk, m_ground->slid,
+				m_ground->freed, (int)m_rocks.size(), rut(), m_flushes);
+		m_flushes = 0;
 		m_step_us = 0;
 		m_step_ticks = 0;
 	}
 
 	// What the client draws, in voxels: the chassis' pose, the wheels'
 	// spin and steering, each spring's compression; the shaft in rev/s,
-	// the gear, the race (0 ready, 1 running, 2 finished) and its time
+	// the gear, the race (0 ready, 1 running, 2 finished, 3 the hill still
+	// being made) and its time
 	void send_car()
 	{
 		if(m_peers.empty())
@@ -689,7 +872,8 @@ struct Module: public interface::Module
 				q.w_, q.x_, q.y_, q.z_, c.spin, c.wheel[0].steer,
 				c.wheel[1].steer, c.wheel[0].spring * U, c.wheel[1].spring * U,
 				c.wheel[2].spring * U, c.wheel[3].spring * U,
-				c.shaft / (2 * car::PI), (int)c.gear, (int)m_race, m_race_t);
+				c.shaft / (2 * car::PI), (int)c.gear,
+				m_ground_live ? (int)m_race : 3, m_race_t);
 		network::access(m_server, [&](network::Interface *i){
 			for(auto peer : m_peers)
 				i->send(peer, "hillclimb:car", buf);
@@ -710,11 +894,8 @@ struct Module: public interface::Module
 		m_input.left = l != 0;
 		m_input.right = r != 0;
 		m_input.gear = (car::Gear)g;
-		if(reset && m_car){
-			main_context::access(m_server, [&](main_context::Interface *){
-				reset_race();
-			});
-		}
+		if(reset && m_car)
+			reset_race();
 	}
 
 	// "seed steep length payload latitude day hour" from the menu, held to
@@ -770,8 +951,8 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *){
 			m_car->payload = m_payload;
 			m_body->SetMass(m_car->mass());
-			reset_race();
 		});
+		reset_race();
 		network::access(m_server, [&](network::Interface *i){
 			for(auto peer : m_peers)
 				i->send(peer, "hillclimb:hill", hill_packet());
