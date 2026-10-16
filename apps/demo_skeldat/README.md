@@ -47,8 +47,17 @@ the time of day it starts at (0.5 noon); `BUILDAT_SKELDAT_SPAWN="x z"` a new
 world's spawn column, in a danger zone or not, or `"x y z"` a place under
 the ground;
 `BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
-at x, z from the first player, once; `BUILDAT_SKELDAT_AWAY=<s>` starts the
-world as if it had run that long with its sections away, so they catch up.
+at x, z from the first player, once (also `bones dx dz value` on the
+ground's voxel and `marker dx dz`, a marker skull);
+`BUILDAT_SKELDAT_SIZE="<half> <y0> <y1>"` a smaller world, in sections;
+`BUILDAT_SKELDAT_FILL=1` every voxel made with full bones, `half` those
+at x >= 0; `BUILDAT_SKELDAT_DAY=<s>` the seconds a day;
+`BUILDAT_SKELDAT_EXPAND=<s>` the seconds between a section's expansions;
+`BUILDAT_SKELDAT_LIGHT_STEP=<s>` a light skeleton's step;
+`BUILDAT_SKELDAT_SKELETONS=<n>` that many light skeletons added anywhere
+when the world is in; `BUILDAT_SKELDAT_MARKERS="sx sz n"` a footprint's
+marker count; `BUILDAT_SKELDAT_LANTERNS="x z coal [block]; ..."` burning
+lanterns on those columns, each reported every 10 s.
 
 ## Licences
 
@@ -72,7 +81,12 @@ renamed, except:
   #3f76e4;
 - `skull_item.png`: the face, cell (1,1) of the 8x4 grid of
   `skull_head.png`;
-- `crown.png`: `bone_block_top.png` with that face over it.
+- `crown.png`: `bone_block_top.png` with that face over it;
+- `marker_skull.png` and `marker_skull_front.png`: `skull.png` and
+  `skull_front.png` in red;
+- `lantern.png`, `lantern_active.png` and `lantern_top.png`: drawn for
+  skeldat;
+- `crack_0.png` to `crack_9.png`: the ten frames of `crack_anylength.png`.
 
 By file:
 

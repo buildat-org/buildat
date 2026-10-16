@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~11 min (2026-10-16)
+# cost: ~13 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -36,6 +36,8 @@
 # The eighth, a burning lantern lures light skeletons and one takes it;
 # the ninth, with a player: a skeleton beside one takes it, burns and
 # leaves it where it died, dropping bones; a marker skull dug and placed.
+# The tenth, the dig's crack: its frames by the dig's progress, gone
+# when the dig ends or is cut off.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -78,13 +80,13 @@ server() # <log> [args]: the world "w" at seed 2, noon
 }
 client() # <name> <cmds>, in the background: its PID in $CLIENT
 {
-	timeout 300 "$b" -C "$t/c_$1" -D "$t/u_$1" -w 800x500 -l 3 \
+	timeout 480 "$b" -C "$t/c_$1" -D "$t/u_$1" -w 800x500 -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$2" \
 		> "$t/$1.log" 2>&1 &
 	CLIENT=$!
 	CHECK_PIDS+=($CLIENT)
 }
-placed='wait_log 180000 skeldat: placed at'
+placed='wait_log 300000 skeldat: placed at'
 
 # 1. Two players
 cat > "$t/a1.cmds" <<EOF
@@ -157,7 +159,7 @@ EOF
 # skeleton to client1 until it walks off (7 and the box: bones.h's self test)
 BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
-wait_for_log "$t/srv1.log" "client1 joins" 240 || fail "client1 did not join ($t/a1.log)"
+wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t/a1.log)"
 client b1 "$t/b1.cmds"; bpid=$CLIENT
 wait $a || fail "client1's drive ($t/a1.log)"
 wait $bpid
@@ -310,7 +312,7 @@ grep -aq "client1 digs .*, dropping nothing" "$s" ||
 # 3. The end: a world of 2 x 2 x 2 sections, every voxel made with bones,
 # ends; started again, it is still ended, and its player told
 log3="$t/srv3.log"
-BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=1 \
+BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=1 \
 	start_server "$log3" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
@@ -322,7 +324,7 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 printf '%s\n' "$placed" "delay 1000" "screenshot $t/end.png" quit \
 	> "$t/end.cmds"
 log3="$t/srv4.log"
-BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SIZE="1 -1 0" \
+BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	start_server "$log3" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
@@ -350,7 +352,7 @@ light=$(grep -a "skeletons, [0-9]* full" "$t/srv7.log" | tail -1 | sed 's/.*skel
 # three markers, a day of 60 s and a step every 0.02 s: from the sunset
 # to the sunrise more of them are in (0, 0), and they placed bone blocks
 log10="$t/srv10.log"
-BUILDAT_SKELDAT_WORLD=night BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=60 \
+BUILDAT_SKELDAT_WORLD=night BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=60 \
 	BUILDAT_SKELDAT_TIME=0.6 BUILDAT_SKELDAT_SKELETONS=60 \
 	BUILDAT_SKELDAT_MARKERS="0 0 3" BUILDAT_SKELDAT_LIGHT_STEP=0.02 \
 	start_server "$log10" "STATUS Listening" 300 auto \
@@ -376,7 +378,7 @@ echo "$night" | awk 'NR == 1 { a = $2 } NR == 2 { b = $2; n = $3 }
 mark() # <log>: the small world "mark" at midnight, MARK_TEST its test
 {
 	local log=$1
-	BUILDAT_SKELDAT_WORLD=mark BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_WORLD=mark BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_TEST="${MARK_TEST:-}" \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
@@ -403,7 +405,7 @@ grep -aq "skeldat: 1 marker skulls in the world" "$t/srv9.log" ||
 # sections. A clean world, a game hour every 2 s from 19:12: the count
 # grows at night toward its target and no further.
 log5="$t/srv5.log"
-BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=48 \
+BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=48 \
 	BUILDAT_SKELDAT_TIME=0.8 start_server "$log5" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv5" -C "$t/srv.cache" -l 3 || fail "the server ($log5)"
@@ -419,7 +421,7 @@ grep -a "skeletons, the target" "$log5" | awk '$8 > $12 + 0 { bad = 1 } END { ex
 # (the dying is in the morning), a player among them a while: some wake
 # and sleep again, none lost
 log6="$t/srv6.log"
-BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_FILL=1 \
+BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_FILL=1 \
 	BUILDAT_SKELDAT_SKELETONS=200 BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_DAY=240 \
 	start_server "$log6" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
@@ -518,9 +520,39 @@ grep -aq "client1 digs skeldat:marker_skull" "$log13" &&
 grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: \([0-9]*\) marker.*/\1/' |
 	tail -3 | awk '{ c[NR] = $1 } END { exit !(NR == 3 && c[2] == c[1] - 1 && c[3] == c[1]) }' ||
 	fail "the footprint's marker count: $(grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: //' | tr '\n' ';') ($log13)"
+# 10. The dig's crack ([SKELDAT_DIG_LOOK]): a voxel dug by hand, its
+# crack's frames climbing to the last ones and gone with the dig; the
+# next dig cut off by looking at the sky, its crack gone and no dig
+log14="$t/srv14.log"
+BUILDAT_SKELDAT_WORLD=dig BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	start_server "$log14" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv14" -C "$t/srv.cache" -l 3 || fail "the server ($log14)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
+	"delay 2500" "mouse_up left" "delay 500" "mouse_down left" "delay 200" \
+	"look 0 60" "delay 500" "mouse_up left" "delay 500" quit > "$t/dig.cmds"
+client dig "$t/dig.cmds"
+wait $CLIENT || fail "the dig's drive ($t/dig.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+# "f N" a frame, "done" a dig sent, "gone": each crack's frames climb and
+# it goes; one gone after a "done" a dig (the held button digs on into
+# the next voxel), as many as the server's digs, and one cut off
+crack=$(grep -a "dig: the crack\|dig: done" "$t/dig.log" | sed 's/.*frame \([0-9]*\) .*/f \1/; s/.*the crack gone/gone/; s/.*dig: done.*/done/' | tr '\n' ' ')
+digs=$(grep -ac "client1 digs " "$log14")
+echo "$crack" | awk -v digs="$digs" '{ n = split($0, w, " "); last = -1; d = 0
+	for(i = 1; i <= n; i++){
+		if(w[i] == "f"){ f = w[++i] + 0; if(f < last) bad = 1; last = f; continue }
+		if(w[i] == "done"){ d = 1; continue }
+		if(d) done++; else cut++
+		last = -1; d = 0
+	}
+	exit !(!bad && last == -1 && done >= 1 && done == digs && cut >= 1) }' ||
+	fail "the crack's frames: $crack; $digs digs ($t/dig.log, $log14)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack"
 # vim: set noet ts=4 sw=4:

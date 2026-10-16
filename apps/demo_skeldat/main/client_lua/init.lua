@@ -587,27 +587,115 @@ local function find_pointed()
 	return nil
 end
 
--- The pointed voxel outlined: a box of thin edges
+-- The pointed voxel outlined in black ([SKELDAT_DIG_LOOK]): each of the
+-- box's twelve edges a strip turned to the camera, 2 * the UI scale
+-- pixels wide wherever the box is (a line is one pixel, and there is no
+-- line width), rebuilt each frame it shows
 local outline = scene:CreateChild("Outline")
+local outline_g = outline:CreateComponent("CustomGeometry")
+local OUTLINE_C, OUTLINE_E
 do
-	local g = outline:CreateComponent("CustomGeometry")
-	g:BeginGeometry(0, magic.LINE_LIST)
 	local d = 0.505
-	local c = {{-d, -d, -d}, {d, -d, -d}, {d, -d, d}, {-d, -d, d},
+	OUTLINE_C = {{-d, -d, -d}, {d, -d, -d}, {d, -d, d}, {-d, -d, d},
 		{-d, d, -d}, {d, d, -d}, {d, d, d}, {-d, d, d}}
-	for _, e in ipairs({{1, 2}, {2, 3}, {3, 4}, {4, 1}, {5, 6}, {6, 7},
-			{7, 8}, {8, 5}, {1, 5}, {2, 6}, {3, 7}, {4, 8}}) do
-		for _, i in ipairs(e) do
-			g:DefineVertex(magic.Vector3(c[i][1], c[i][2], c[i][3]))
-			g:DefineColor(magic.Color(0.1, 0.1, 0.1))
+	OUTLINE_E = {{1, 2}, {2, 3}, {3, 4}, {4, 1}, {5, 6}, {6, 7},
+		{7, 8}, {8, 5}, {1, 5}, {2, 6}, {3, 7}, {4, 8}}
+	outline_g:BeginGeometry(0, magic.TRIANGLE_LIST)
+	outline_g:Commit()
+	local m = magic.Material.new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTextureUnlitVCol.xml"))
+	-- A strip's winding is whichever way the edge runs
+	m.cullMode = magic.CULL_NONE
+	outline_g:SetMaterial(0, m)
+	outline.enabled = false
+end
+
+local function draw_outline(p)
+	-- The world's size of a pixel at a distance of 1, by the vertical
+	-- field of view over the UI's height, as the HUD counts pixels
+	local px = 2 * math.tan(math.rad(camera.fov / 2)) / magic.ui.root.height
+	local half = game.ui_scale() * px
+	local cam = camera_node.worldPosition
+	local cx, cy, cz = cam.x - p.x, cam.y - p.y, cam.z - p.z
+	local black = magic.Color(0, 0, 0)
+	local g = outline_g
+	g:BeginGeometry(0, magic.TRIANGLE_LIST)
+	for _, e in ipairs(OUTLINE_E) do
+		local a, b = OUTLINE_C[e[1]], OUTLINE_C[e[2]]
+		local ex, ey, ez = b[1] - a[1], b[2] - a[2], b[3] - a[3]
+		-- From the camera to the edge's middle, and across both
+		local vx, vy, vz = (a[1] + b[1]) / 2 - cx, (a[2] + b[2]) / 2 - cy,
+				(a[3] + b[3]) / 2 - cz
+		local dist = math.sqrt(vx * vx + vy * vy + vz * vz)
+		local sx, sy, sz = ey * vz - ez * vy, ez * vx - ex * vz,
+				ex * vy - ey * vx
+		local l = math.sqrt(sx * sx + sy * sy + sz * sz)
+		if l > 1e-6 then
+			local k = half * dist / l
+			sx, sy, sz = sx * k, sy * k, sz * k
+			local q = {{a[1] - sx, a[2] - sy, a[3] - sz},
+				{a[1] + sx, a[2] + sy, a[3] + sz},
+				{b[1] + sx, b[2] + sy, b[3] + sz},
+				{b[1] - sx, b[2] - sy, b[3] - sz}}
+			for _, i in ipairs({1, 2, 3, 1, 3, 4}) do
+				g:DefineVertex(magic.Vector3(q[i][1], q[i][2], q[i][3]))
+				g:DefineColor(black)
+			end
 		end
 	end
 	g:Commit()
-	local m = magic.Material.new()
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureVCol.xml"))
-	g:SetMaterial(0, m)
-	outline.enabled = false
+end
+
+-- The dig's crack ([SKELDAT_DIG_LOOK]): VoxeLibre's ten frames
+-- (client_data/crack_N.png), a cube just outside the voxel wearing the
+-- frame the dig has got to. One node a frame, enabled one at a time, as
+-- builtin/luanti's client has it: a Material put back on a model after
+-- being taken off is read after it is freed.
+-- simplified: a cube round anything, a torch or a skull too; the others'
+-- digging shows none (not sent)
+local CRACK_FRAMES = 10
+local crack_nodes, crack_shown, crack_at = {}, nil, nil
+local function set_crack(p, frame)
+	local at = p and string.format("%d %d %d", p.x, p.y, p.z)
+	if crack_shown and (crack_shown ~= frame or at ~= crack_at) then
+		crack_nodes[crack_shown].enabled = false
+		crack_shown = nil
+		-- Off the voxel: the dig ended, stopped or moved to another
+		if at ~= crack_at then
+			log:info("dig: the crack gone")
+		end
+	end
+	crack_at = at
+	if not p then
+		return
+	end
+	local node = crack_nodes[frame]
+	if not node then
+		node = scene:CreateChild("Crack")
+		local model = node:CreateComponent("StaticModel")
+		model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+		local m = magic.Material.new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffUnlitAlpha.xml"))
+		local t = magic.cache:GetResource("Texture2D",
+				"main/crack_" .. frame .. ".png")
+		if t then
+			t.filterMode = magic.FILTER_NEAREST
+			m:SetTexture(0, t)
+		end
+		model.material = m
+		-- Just outside the voxel, not fighting its faces for the depth
+		node.scale = magic.Vector3(1.004, 1.004, 1.004)
+		crack_nodes[frame] = node
+	end
+	node.position = magic.Vector3(p.x, p.y, p.z)
+	if crack_shown ~= frame then
+		log:info(string.format("dig: the crack's frame %d at %d %d %d", frame,
+				p.x, p.y, p.z))
+	end
+	node.enabled = true
+	crack_shown = frame
 end
 
 --
@@ -681,6 +769,7 @@ local function step_dig(dt)
 	dig.sound_t = dig.sound_t - dt
 	if dig.t >= dig.need then
 		send_voxel("dig", pointed)
+		log:info("dig: done at " .. k)
 		node_sound("dig", dig.name, pointed, 1.0)
 		dig = nil
 	elseif dig.sound_t <= 0 then
@@ -1064,8 +1153,15 @@ magic.SubscribeToEvent("Update", function(_, d)
 	outline.enabled = pointed ~= nil
 	if pointed then
 		outline.position = magic.Vector3(pointed.x, pointed.y, pointed.z)
+		draw_outline(pointed)
 	end
 	step_dig(dt)
+	if dig and dig.need and dig.need > 0 then
+		set_crack(pointed, math.min(CRACK_FRAMES - 1,
+				math.floor(dig.t / dig.need * CRACK_FRAMES)))
+	else
+		set_crack(nil)
+	end
 	update_steps()
 	ui.draw_hud()
 end)

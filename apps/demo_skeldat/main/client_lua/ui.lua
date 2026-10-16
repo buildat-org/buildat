@@ -66,6 +66,8 @@ local function scale()
 	local r = magic.ui.root
 	return math.max(1, math.floor(math.min(r.width / 320, r.height / 220)))
 end
+-- The outline's width goes by it too (init.lua)
+game.ui_scale = scale
 
 -- An item in a 16-pixel square at x, y, its count at the corner
 local function draw_stack(parent, str, x, y, s)
