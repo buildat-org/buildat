@@ -16,6 +16,8 @@ import time
 
 UI_RE = re.compile(
     r"ui\s+(\w+) at (-?\d+),(-?\d+) size (\d+)x(\d+)(?: text \"(.*?)\")?"
+    # A field's cursor and a text's selection ([TEXT_KEYS])
+    r"(?: cursor \d+)?(?: selection \d+\+\d+)?"
     r"(?: image (?:\"(.*?)\"|\? \(.*\)))?(?: (hidden))?(?: priority -?\d+)?$")
 
 
