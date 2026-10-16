@@ -281,7 +281,8 @@ local SUN_DIR = {x = -0.6, y = -1.0, z = 0.3}
 local sky = sky_dome.new(scene, SUN_DIR, voxel_shading.sky_defaults,
 		log)
 sky:set_physical(true)
-sky:set_auto_dim(false)
+-- Dimmed where the chamber reading sees no skylight ([TUNNEL_SKY]), below
+sky:set_auto_dim(true)
 -- What the world reflects: the sky as it is drawn, re-rendered once a
 -- second, a face a frame
 local sky_cube = {cube = sky_dome.new_cube(sky.material), due = 0}
@@ -404,8 +405,6 @@ local function update_sky(dt)
 	local zenith, horizon = hue_of_hour(day, lit)
 	zenith, horizon = sky_light.sky_radiance(zenith, horizon, height)
 	sky:set_look(zenith, horizon, nil)
-	-- Where a direction cannot see the sky (a cave): Luanti's indoors grey
-	sky:set_indoors({r = 0.39, g = 0.39, b = 0.39}, lit)
 	local t = sky_light.terms(height, sky_light.dome(zenith, horizon))
 	sky:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)
 
@@ -429,15 +428,20 @@ local function update_sky(dt)
 			(1 - day) * (1 - day))
 	sky:set_cloud_lit(sky_light.cloud_lit(CLOUD, zenith, horizon, height, 1))
 
-	sky_light.apply(voxel_shading, game.zone, magic, t)
+	local chamber = sky_light.apply(voxel_shading, game.zone, magic, t)
 	-- For the mobs (mobs.lua), in the frame's units
 	game.light_units = {ambient = t.ambient, bounce = {r = t.sky.r * PHYS.bounce,
 		g = t.sky.g * PHYS.bounce, b = t.sky.b * PHYS.bounce}, lamp = t.lamp,
 		sun = {r = t.sun_level * t.sun_color.r, g = t.sun_level * t.sun_color.g,
 			b = t.sun_level * t.sun_color.b}}
 	local seen = voxel_shading.sky_visibility_above()
-	sky:set_outside(sky_light.outside(seen))
-	local fc = sky_light.fog(horizon, t.ambient, seen)
+	-- [TUNNEL_SKY]: where the chamber sees no skylight, the sky and the
+	-- fog are the light of the place, so a tunnel longer than the view
+	-- range ends in a dim haze and not the noon sky
+	local enclosed, gate = sky_light.enclosed(t, chamber)
+	sky:set_indoors(enclosed, 1)
+	sky:set_outside(gate)
+	local fc = sky_light.fog(horizon, enclosed, seen)
 	game.zone.fogColor = magic.Color(fc.r, fc.g, fc.b)
 
 	local now = scene.elapsedTime

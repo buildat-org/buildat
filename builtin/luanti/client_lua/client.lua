@@ -1664,13 +1664,17 @@ local function apply_sky_of_hour(force)
 	-- linear tenth at midnight is five times that, which is enough to be the
 	-- night sky -- it is mixed in wherever the sky-visibility cube says a
 	-- direction is less than open, which outdoors is most of the low sky.
-	world_sky:set_indoors(indoors_of(1), sky_now.lit or 1)
-	-- The dim is Luanti's stand-in for the eye adapting to a cave, and
-	-- pbr has the real thing in the meter: dimmed by the gate and keyed by
-	-- the meter, the sky through a cave mouth read under its lit rim
-	-- ([PBR_FIT], cave_opening). The parity modes keep it.
-	world_sky:set_auto_dim(sky_now.unlit and
-			game_sky.auto_dim_skybox ~= false or false)
+	-- pbr's is the light of the place, set with the gate below
+	-- ([TUNNEL_SKY])
+	if sky_now.unlit then
+		world_sky:set_indoors(indoors_of(1), sky_now.cave.b)
+	end
+	-- The game's say over whether the sky is dimmed at all. pbr's gate is
+	-- the chamber reading, not the sky overhead: a cave mouth in sight
+	-- keeps the sky, which the meter keys under its lit rim ([PBR_FIT],
+	-- cave_opening), and only a place that sees no skylight -- a tunnel
+	-- longer than the view range -- draws it dim ([TUNNEL_SKY]).
+	world_sky:set_auto_dim(game_sky.auto_dim_skybox ~= false)
 	world_sky:set_physical(not sky_now.unlit)
 
 	-- The clouds are white because the sun is on them, so they go with it --
@@ -1721,6 +1725,50 @@ local function apply_sky_of_hour(force)
 	voxel_shading.set_sky_tint(
 			three(night_zenith, dawn_zenith, day_zenith, t), 1 - t)
 	sky_cube.refresh(force)
+end
+
+-- [TUNNEL_SKY]: the parity modes dim the sky and the fog as official
+-- Luanti does, by its own reading of whether the camera sees sunlight
+-- (sky_model.lua's background_brightness()), ten times a second, eased as
+-- Sky::update() eases it a frame at a time. Returns the share of the sky
+-- drawn as it is (the dome's set_outside()); sky_now.cave.b is the light
+-- the rest is drawn at.
+-- simplified: a liquid passes light here (it is not solid), where Luanti
+-- stops the reading at water a camera is not in
+local function cave_light(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return nil
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local def = reg:get_by_id(reg:id_of(v))
+	if def and def.physically_solid and not def.transmits_light then
+		return false
+	end
+	-- Luanti's day bank is the brighter of the sun and the lamp
+	local lamp = reg:light_lamp_of(v)
+	return math.max(reg:light_sky_of(v), lamp), lamp
+end
+sky_now.cave = {due = 0, seen = true, k = 1, b = 1}
+local function luanti_cave_sky(dt, day)
+	local c = sky_now.cave
+	c.due = c.due - dt
+	if c.due <= 0 then
+		c.due = 0.1
+		local p, d = camera_node.worldPosition, camera_node.worldDirection
+		local b, seen = sky_dome.background_brightness(cave_light,
+				{p.x, p.y, p.z}, {d.x, d.y, d.z},
+				math.min((sky_now.far_clip or FAR_CLIP) * 1.2, 60),
+				0.175 + 0.825 * day)
+		c.seen, c.direct = seen, b or c.direct
+	end
+	local n = dt * 60
+	c.k = (c.seen and 1 or 0) + (c.k - (c.seen and 1 or 0)) * 0.98 ^ n
+	if not c.seen and c.direct then
+		c.b = c.direct + (c.b - c.direct) *
+				(c.direct < c.b and 0.95 or 0.98) ^ n
+	end
+	return c.k
 end
 
 local function update_sky(dt)
@@ -1930,6 +1978,7 @@ local function update_sky(dt)
 				magic.Color(t.sun_level * suc.r, t.sun_level * suc.g,
 						t.sun_level * suc.b))
 		cave_ambient_now = chamber
+		sky_now.enclosed, sky_now.gate = sky_light.enclosed(t, chamber)
 		-- **Every term of the light, said out loud** under
 		-- BUILDAT_LUANTI_LIGHT_LOG=1 ([UNDERGROUND_LIGHT]): the sky
 		-- ambient a face with the whole sky gets, the bounce and the
@@ -1973,13 +2022,27 @@ local function update_sky(dt)
 	-- The short ramp is so that walking into one is not a step. See
 	-- [CAVE_SKY]'s correction in doc/plan/rendering_plan.md.
 	local outside = sky_light.outside(seen)
+	if sky_now.unlit then
+		outside = game_sky.auto_dim_skybox == false and 1 or
+				luanti_cave_sky(dt, day)
+	end
+	-- pbr: by the chamber reading, and what it dims to is the light of the
+	-- place ([TUNNEL_SKY])
+	if not sky_now.unlit and sky_now.gate then
+		outside = sky_now.gate
+		local e = sky_now.enclosed
+		world_sky:set_indoors(e, 1)
+	end
 	world_sky:set_outside(outside)
 	-- Logged when it moves, so a reference run's log carries the gate at
 	-- each viewpoint -- the reading [CAVE_SKY] was owed from inside a cave
-	if math.abs(seen - (sky_now.seen_said or -1)) >= 0.01 then
-		sky_now.seen_said = seen
-		log:info(string.format("cave gate: sky seen %.3f, outside %.2f",
-				seen, outside))
+	if math.abs(seen - (sky_now.seen_said or -1)) >= 0.01 or
+			math.abs(outside - (sky_now.outside_said or -1)) >= 0.02 or
+			math.abs(cave_ambient_now - (sky_now.chamber_said or -1)) >= 0.05 then
+		sky_now.seen_said, sky_now.outside_said = seen, outside
+		sky_now.chamber_said = cave_ambient_now
+		log:info(string.format("cave gate: sky seen %.3f, chamber %.3f, " ..
+				"outside %.2f", seen, cave_ambient_now or -1, outside))
 	end
 	-- A game's own fog colour is art direction and wins outright; without one
 	-- the fog is the horizon, dimmed by the hour the way the sky it meets is.
@@ -2026,7 +2089,15 @@ local function update_sky(dt)
 	if sky_now.horizon_radiance then
 		local h = sky_now.horizon_radiance
 		base = magic.Color(h.r, h.g, h.b)
-		indoors = zone.ambientColor
+		-- and where the chamber sees no skylight, the place's light, as
+		-- the sky past the far clip is ([TUNNEL_SKY])
+		local e = sky_now.enclosed
+		indoors = e and magic.Color(e.r, e.g, e.b) or zone.ambientColor
+	end
+	if sky_now.unlit then
+		-- Luanti's: the fog is the sky's horizon, indoors where it is
+		indoors = indoors_of(sky_now.cave.b)
+		seen = outside
 	end
 	zone.fogColor = blend(base, indoors, 1 - seen)
 	sky_now.height = height

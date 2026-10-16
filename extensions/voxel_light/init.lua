@@ -764,5 +764,26 @@ function M.apply(target, sky, t, chamber, translucency)
 	target.cave_ambient(f, f, f)
 	target.chamber_light(chamber)
 end
+-- [TUNNEL_SKY]: what the sky and the fog are drawn as where the camera's
+-- chamber reading sees no skylight -- the light the place itself gets, the
+-- bounce's floor at the reading (the shader's 0.15 of it) and the cave
+-- floor -- so that down a tunnel longer than the view range what shows past
+-- the far clip is a dim haze, not the noon sky. Towards the sky's ambient
+-- by physical_sky's gate on the reading, so that a place whose chamber sees
+-- the sky -- outdoors, a cave mouth, a shaft -- is as before. Returns the
+-- colour and the gate (0 sealed, 1 open), for the dome's set_indoors() and
+-- set_outside() and the fog.
+function M.enclosed(sky, t, chamber)
+	local c = math.max(0, math.min(1, chamber))
+	local f = sky.PHYS.cave_floor * (1 - c)
+	local g = sky.outside(c)
+	local function at(bounce, ambient)
+		local cave = bounce * 0.15 * c + f
+		return cave + (ambient - cave) * g
+	end
+	return {r = at(t.bounce.r, t.ambient.r), g = at(t.bounce.g, t.ambient.g),
+		b = at(t.bounce.b, t.ambient.b)}, g
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

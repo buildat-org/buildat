@@ -435,6 +435,145 @@ function M.lighting_not_drawn(l, drawn)
 	return out
 end
 
+-- **Whether the camera sees sunlight, and how light what it sees is**
+-- ([TUNNEL_SKY]): official Luanti's ClientMap::getBackgroundBrightness()
+-- (src/client/clientmap.cpp), which the parity modes dim the sky and the
+-- fog by (Sky::update(): where no sunlight is seen, both go to the indoors
+-- colour at this brightness). Fifty rays in a cone round the view, each
+-- sampled from 0.6 to 1.0 of max_d (Luanti's min(fog range * 1.2, 60)):
+-- the light of the air a ray crosses, four solid nodes in a row ending it,
+-- and sunlight seen where a ray reaches air at the sun's level past 0.8 of
+-- max_d (35 at most) before any solid. The brightness is the middle half
+-- of the rays' means, through the light curve.
+-- sample(x, y, z): nil where nothing has arrived, false where the node
+-- stops light, else its day and night light (0..15, the day bank 15 for sunlight);
+-- pos and dir in nodes, dir of unit length; dnr the day/night ratio 0..1.
+-- Returns the brightness 0..1, or nil where no ray sampled anything (the
+-- caller keeps its old one), and whether sunlight is seen.
+-- simplified: Luanti lets a camera inside water see through water; here
+-- what stops light is the sampler's to say, and Luanti's dnr blend is
+-- taken in floating point, its light curve as a 2.2 gamma (world.lua's
+-- brightness_of())
+local CONE = {}
+do
+	-- Luanti draws its own at random, once; a fixed draw here
+	local s = 12345
+	local function rand(a, b)
+		s = (s * 1103515245 + 12345) % 2147483648
+		return a + (b - a) * s / 2147483648
+	end
+	for i = 1, 50 do
+		local x, y, z = 0.02 * rand(-100, 100), 1, 0.01 * rand(-100, 100)
+		local l = math.sqrt(x * x + y * y + z * z)
+		CONE[i] = {x / l, y / l, z / l, rand(0, 1)}
+	end
+end
+-- dir turned by the rotation that takes +Y to c (Rodrigues)
+local function turned(d, c)
+	-- axis = Y x c, sin = |axis|, cos = c.y
+	local ax, az = c[3], -c[1]
+	local s = math.sqrt(ax * ax + az * az)
+	if s < 1e-9 then
+		return d[1], d[2], d[3]
+	end
+	ax, az = ax / s, az / s
+	local cs = c[2]
+	-- k x d and k . d with k = (ax, 0, az)
+	local kx, ky, kz = -az * d[2], az * d[1] - ax * d[3], ax * d[2]
+	local kd = ax * d[1] + az * d[3]
+	return d[1] * cs + kx * s + ax * kd * (1 - cs),
+		d[2] * cs + ky * s,
+		d[3] * cs + kz * s + az * kd * (1 - cs)
+end
+function M.background_brightness(sample, pos, dir, max_d, dnr)
+	local function light(day, night)
+		return ((dnr * day + (1 - dnr) * night) / 15) ^ 2.2
+	end
+	local seen_count = 0
+	local values = {}
+	local step = max_d > 35 and max_d / 35 * 1.5 or 1.5
+	for i = 1, #CONE do
+		local c = CONE[i]
+		local dx, dy, dz = turned(dir, c)
+		local d = max_d * 0.6 + step * c[4]
+		local sun_d = math.min(max_d * 0.8, 35)
+		local function at(t)
+			return sample(math.floor(pos[1] + dx * t + 0.5),
+					math.floor(pos[2] + dy * t + 0.5),
+					math.floor(pos[3] + dz * t + 0.5))
+		end
+		-- Starting where nothing has arrived: from close by instead
+		-- (Luanti's start of 2 with its point at 4)
+		if at(d) == nil then
+			d, sun_d = 2, 0
+		end
+		local sum, count, solid_run, solid_seen, seen = 0, 0, 0, false, false
+		while d < max_d do
+			d = d + step
+			local day, night = at(d)
+			if not day then
+				solid_seen = true
+				solid_run = solid_run + 1
+				if solid_run >= 4 then
+					break
+				end
+			else
+				if d >= sun_d and not seen and not solid_seen and day >= 15 then
+					seen = true
+				end
+				solid_run = 0
+				sum = sum + light(day, night)
+				count = count + 1
+			end
+		end
+		if seen then
+			seen_count = seen_count + 1
+		end
+		if count > 0 then
+			values[#values + 1] = sum / count
+		end
+		if seen_count >= 20 then
+			break
+		end
+	end
+	local n = #values
+	if n == 0 then
+		return nil, seen_count > 0
+	end
+	table.sort(values)
+	local use = n >= 10 and n - math.floor(n / 2) or
+			n >= 7 and n - math.floor(n / 3) or n
+	local first = math.floor((n - use) / 2)
+	local sum = 0
+	for i = first + 1, first + use do
+		sum = sum + values[i]
+	end
+	return sum / use, seen_count > 0
+end
+
+do
+	-- A 3x3 tunnel along +z, sealed, unlit: no sunlight, dark; the open
+	-- air at noon: sunlight, full
+	local function tunnel(x, y, z)
+		if math.abs(x) <= 1 and math.abs(y) <= 1 and z >= -1 then
+			return 0, 0
+		end
+		return false
+	end
+	local b, seen = M.background_brightness(tunnel, {0, 0, 0}, {0, 0, 1}, 40, 1)
+	assert(not seen and b == 0, "a sealed tunnel is dark and sunless")
+	b, seen = M.background_brightness(function() return 15, 0 end,
+			{0, 0, 0}, {0, 0, 1}, 40, 1)
+	assert(seen and math.abs(b - 1) < 1e-9, "the open sky at noon")
+	-- The same tunnel open at its end in sight (z = 20): its mouth seen
+	local function mouth(x, y, z)
+		if z > 20 then return 15, 0 end
+		return tunnel(x, y, z)
+	end
+	b, seen = M.background_brightness(mouth, {0, 0, 0}, {0, 0, 1}, 40, 1)
+	assert(seen, "a mouth in sight is sunlight seen")
+end
+
 do
 	local l = {saturation = 1.1, luminance_min = -3.5, shadow_intensity = 0.33}
 	local n = M.lighting_not_drawn(l, {saturation = true,

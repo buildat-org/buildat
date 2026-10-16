@@ -2745,6 +2745,35 @@ do
 	assert(out > 0.3, "voxel_light: the mouth of the tunnel is dark: "..out)
 	assert(off < out * 0.7, "voxel_light: rock beside the mouth is lit: "..off)
 
+	-- [TUNNEL_SKY]: with the mouth in the rays' reach the sky is drawn as
+	-- it is; a tunnel whose open end is past it reads sealed, and its sky
+	-- and fog are the cave's light, a thousandth of the noon sky's ambient
+	do
+		if not package.preload["buildat/extension/urho3d"] then
+			package.preload["buildat/extension/urho3d"] = function() return {} end
+		end
+		local psky = dofile(dir.."/../physical_sky/init.lua")
+		local P = psky.PHYS
+		local t = voxel_light.terms(psky, 1, psky.dome(psky.sky_radiance(
+				P.day_zenith, P.day_horizon, 1)))
+		local col, gate = voxel_light.enclosed(psky, t, vis:chamber())
+		assert(gate == 1 and col.g == t.ambient.g,
+				"voxel_light: a tunnel's mouth in reach dims the sky: "..gate)
+		sweep(function(p)
+			if p.x > voxel_light.RAY_VOXELS + 8 then
+				return {id = AIR, skylight = 15}
+			end
+			if math.abs(p.y) > 2 or math.abs(p.z) > 2 or p.x < -2 then
+				return {id = ROCK, skylight = 0}
+			end
+			return {id = AIR, skylight = 0}
+		end)
+		col, gate = voxel_light.enclosed(psky, t, vis:chamber())
+		assert(gate == 0 and col.g < t.ambient.g * 0.002,
+				"voxel_light: a long tunnel's sky is not the cave's light: "..
+				vis:chamber().." "..col.g)
+	end
+
 	-- dt-driven updates ease rather than snap, and get there
 	world = function(p) return {id = ROCK, skylight = 0} end
 	for i = 1, 400 do vis:update({x = 0.5, y = 0.5, z = 0.5}, 1 / 60) end

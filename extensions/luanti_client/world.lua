@@ -2899,6 +2899,40 @@ function M.new(magic, buildat, log, options)
 		sky_eased.check = nil
 	end
 
+	-- [TUNNEL_SKY]: Luanti's reading of whether the camera sees sunlight
+	-- (res/sky_model.lua's background_brightness()), ten times a second,
+	-- for the parity modes' fourth set of sky colours below. One table:
+	-- apply_daylight() is at Lua's 60 upvalues.
+	local cave_sky = {due = 0, seen = true}
+	local function sample_light(x, y, z)
+		local id = self:node_at(x, y, z)
+		local lt, st = self.node_light_through, self.node_sun_through
+		if id == nil or id == CONTENT_IGNORE or not lt then
+			return nil
+		end
+		if not lt[id] or not st[id] then
+			return false
+		end
+		-- The day bank in the low nibble, the night's in the high
+		local p1 = param1_at(x, y, z)
+		return p1 % 16, math.floor(p1 / 16)
+	end
+	-- The reading, due ten times a second; factor the day/night ratio
+	function cave_sky.read(dtime, factor)
+		cave_sky.due = cave_sky.due - dtime
+		if cave_sky.due > 0 then
+			return
+		end
+		cave_sky.due = 0.1
+		local p = camera_node.worldPosition
+		local d = camera_node.worldDirection
+		local b, seen = sky_model.background_brightness(sample_light,
+				{p.x, p.y, p.z}, {d.x, d.y, d.z},
+				math.min(far_clip * 1.2, 60), factor)
+		cave_sky.seen = seen
+		cave_sky.brightness = b or cave_sky.brightness
+	end
+
 	local function apply_daylight(dtime)
 		local factor = daylight
 		if not pbr then
@@ -2912,8 +2946,8 @@ function M.new(magic, buildat, log, options)
 		-- nothing below is the target, it is where the sky has got to on its
 		-- way there. See sky_ease() above.
 		--
-		-- simplified: Luanti has a fourth set for a player who cannot see the
-		-- sky at all, which is not read here.
+		-- And Luanti's fourth, the indoors colour at the light the camera
+		-- sees, where it sees no sunlight ([TUNNEL_SKY], below).
 		local band = "day"
 		if brightness < 0.13 then
 			band = "night"
@@ -2938,6 +2972,19 @@ function M.new(magic, buildat, log, options)
 		elseif sky and not sky.day_sky and sky.bgcolor then
 			top = sky_color("bgcolor", 1)
 			horizon = top
+		end
+		-- The fourth set: where no sunlight is seen the sky and the fog go
+		-- to the indoors colour at the light seen (Sky::update()), unless
+		-- the game says no dimming (auto_dim_skybox). pbr's is the chamber
+		-- gate further down.
+		-- simplified: Luanti also hides the clouds there; here they stay
+		if not pbr and not (sky and sky.auto_dim_skybox == false) then
+			cave_sky.read(dtime, factor)
+			if not cave_sky.seen then
+				top = sky_color("indoors", 1)
+				horizon = top
+				brightness = cave_sky.brightness or brightness
+			end
 		end
 
 		-- Where the sky has actually got to, which is what everything below
@@ -2987,12 +3034,21 @@ function M.new(magic, buildat, log, options)
 			sky_top, sky_horizon = lit(sky_top), lit(sky_horizon)
 		end
 		zone.fogColor = sky_horizon
+		local enclosed, gate
 		if light_target then
 			-- Under the dome drawn, as vanilla's (sky_light.lua): its hue,
 			-- the reference's mean
 			local t = voxel_light.terms(psky, height,
 					psky.dome(sky_top, sky_horizon))
 			voxel_light.apply(light_target, psky, t, vis:chamber())
+			-- [TUNNEL_SKY]: where the chamber sees no skylight the sky and
+			-- the fog are the light of the place, so a tunnel longer than
+			-- the view range ends in a dim haze and not the noon sky
+			enclosed, gate = voxel_light.enclosed(psky, t, vis:chamber())
+			enclosed = magic.Color(UNITS * enclosed.r, UNITS * enclosed.g,
+					UNITS * enclosed.b)
+			local fc = psky.fog(sky_horizon, enclosed, vis:above())
+			zone.fogColor = magic.Color(fc.r, fc.g, fc.b)
 			sky_material:SetShaderParameter("DawnGlow", magic.Vector3(
 					UNITS * t.glow.r, UNITS * t.glow.g, UNITS * t.glow.b))
 			sky_material:SetShaderParameter("DuskBand", magic.Vector3(
@@ -3098,16 +3154,15 @@ function M.new(magic, buildat, log, options)
 			-- false keeps its sky undimmed -- the same knob the launcher
 			-- turns through set_auto_dim() ([SKY_KNOBS])
 			sky_material:SetShaderParameter("SkyIndoors",
-					sky_color("indoors", brightness))
+					enclosed or sky_color("indoors", brightness))
 			sky_material:SetShaderParameter("SkyAutoDim",
 					(sky and sky.auto_dim_skybox == false) and 0.0 or 1.0)
 			-- On pbr the sky is edited only once there is no sky to see,
-			-- by how much of it the camera sees above (physical_sky's
-			-- gate, [CAVE_SKY]). **A parameter a material never sets reads
+			-- by the chamber reading (physical_sky's gate, [TUNNEL_SKY]). **A parameter a material never sets reads
 			-- as zero**, which means "in a cave", so the parity modes, which
 			-- keep no sky visibility, set one.
 			sky_material:SetShaderParameter("SkyOutside",
-					vis and psky.outside(vis:above()) or 1.0)
+					gate or 1.0)
 			-- Luanti's clouds are the daylight's own colour, unless the
 			-- game gave them one; either way they go dark with the day. And
 			-- over the hour the sun spends crossing the horizon they take its

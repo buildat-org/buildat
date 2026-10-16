@@ -135,6 +135,12 @@ function M.terms(height, dome)
 	return voxel_light.terms(physical_sky, height, dome)
 end
 
+-- [TUNNEL_SKY]: the sky's and the fog's colour where the chamber reading
+-- sees no skylight, and the gate (voxel_light.enclosed())
+function M.enclosed(t, chamber)
+	return voxel_light.enclosed(physical_sky, t, chamber)
+end
+
 -- voxel_light.apply() onto voxel_shading and the zone, at voxel_shading's
 -- chamber reading. Returns the reading.
 function M.apply(voxel_shading, zone, magic, t, translucency)
