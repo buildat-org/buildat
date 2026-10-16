@@ -53,6 +53,7 @@
 #include <Image.h>
 #include <Node.h>
 #include <cmath>
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <map>
@@ -76,7 +77,8 @@ using Urho3D::M_RADTODEG;
 // undefined 0, and the game's nodes follow air
 static const uint32_t ID_IGNORE = 0, ID_UNKNOWN = 1, ID_AIR = 2, ID_NODE0 = 3;
 static const float REACH = 5.5f;       // a little over Luanti's 4 from the eye
-static const float DAY_SECONDS = 1200; // Luanti's time_speed 72
+// A day in seconds, Luanti's time_speed 72; BUILDAT_SKELDAT_DAY for a check
+static const float DAY_SECONDS = 1200;
 static const int HP_MAX = 20, BREATH_MAX = 10;
 // Faster than this a landing hurts, a point a node a second over it
 // (Luanti's client: BS*14)
@@ -186,9 +188,16 @@ static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 		ARROW_SPEED = 18.0f;
 // Awake within WAKE of a player, asleep (saved, not stepped) past SLEEP
 static const float WAKE = 48, SLEEP = 64;
-// simplified: one cap for the world and one per 64-voxel area; MAX_AREA
-// and MAX_NEAR are a boar's, a skeleton's go by the danger
+// simplified: one cap for the awake ones and one per 64-voxel area;
+// MAX_AREA and MAX_NEAR are a boar's, a skeleton's go by the danger
 static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
+// The skeletons over the whole world ([SKELDAT_SKELETON_SIM]): from
+// SKELETONS_MIN on clean ground to SKELETONS_MAX with every column's top
+// at FLOOD, in a world of 1024 x 1024 columns (a smaller one has fewer);
+// asleep ("light"), one steps a voxel every LIGHT_STEP seconds
+static const float SKELETONS_MIN = 500, SKELETONS_MAX = 2000,
+		LIGHT_STEP = 1;
+static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
 static const float DAYLIGHT_DANGER = 0.5f;
@@ -203,6 +212,7 @@ struct Mob
 	float mode_t = 0; // seconds left of the mode
 	float vy = 0, speed = 0, shoot_t = 2, burn_t = 0, from_x = 0, from_z = 0;
 	uint32_t node_id = 0; // 0 asleep
+	float light_t = 0; // to the next light step
 	int hurt = 0, hurt_sent = 0;
 
 	ss_ save() const {
@@ -443,6 +453,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	double m_time = 0;
 	// The time of day, 0 to 1 with 0.5 noon; a new world starts at 6:00
 	double m_day = 0.25;
+	float m_day_s = DAY_SECONDS;
 	float m_save_t = 0, m_furnace_t = 0, m_send_t = 0, m_breath_t = 0,
 			m_move_t = 0;
 	size_t m_worldgen_queue = 0;
@@ -458,6 +469,21 @@ struct Module: public interface::Module, public luanti_session::Game
 	uint32_t m_next_mob = 1;
 	std::vector<Arrow> m_arrows;
 	float m_ai_t = 0, m_spawn_t = 0;
+	// The columns whose top voxel has FLOOD bones or more, a section's
+	// footprint each (x then z from -m_half), swept one a second; the
+	// skeletons' count adjusted every game hour
+	sv_<int> m_flooded;
+	// Each column's top voxel, its y (NO_GROUND for none, or water) and
+	// its bones, from the sweep and every set_node: what a light skeleton
+	// walks on. simplified: the top only, so a light skeleton in a cave
+	// stays put until a player wakes it; a voxel read for each of its steps
+	// was ~66 us, the world being too big for voxelworld's chunk buffers
+	sv_<int8_t> m_top_y;
+	sv_<uint8_t> m_top_b;
+	size_t m_sweep = 0;
+	float m_sweep_t = 0, m_hour_t = 0;
+	double m_light_us = 0;
+	size_t m_light_steps = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
 	// spawning of its own, and the mobs named at x, z from the first
 	// player placed, once, standing still for half a minute; "bones 1 0 8"
@@ -674,6 +700,9 @@ struct Module: public interface::Module, public luanti_session::Game
 				&m_y0, &m_y1) != 3)
 			log_w(MODULE, "skeldat: BUILDAT_SKELDAT_SIZE=\"%s\" not read",
 					env_size);
+		if(const char *env = getenv("BUILDAT_SKELDAT_DAY"))
+			if(atof(env) > 0)
+				m_day_s = (float)atof(env);
 		// For a check: the time of day it starts at, 0.5 noon
 		const char *env_time = getenv("BUILDAT_SKELDAT_TIME");
 		if(env_time && env_time[0])
@@ -685,6 +714,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			Mob m;
 			const uint32_t k = (uint32_t)atol(key.c_str() + 4);
 			if(m_store->get(key, v) && m.load(v)){
+				m.light_t = rnd() * LIGHT_STEP;
 				m_mobs[k] = m;
 				m_next_mob = std::max(m_next_mob, k + 1);
 			}
@@ -1115,6 +1145,26 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		m_world_ready = true;
 		find_spawn();
+		const int64_t t0 = interface::os::time_us();
+		m_flooded.assign(footprints(), 0);
+		const size_t cols = footprints() * skeldat::bones::SECTION *
+				skeldat::bones::SECTION;
+		m_top_y.assign(cols, NO_GROUND);
+		m_top_b.assign(cols, 0);
+		size_t bench = 0;
+		if(const char *env = getenv("BUILDAT_SKELDAT_SKELETONS"))
+			bench = (size_t)atol(env);
+		size_t added = 0;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			for(size_t i = 0; i < footprints(); i++)
+				sweep(w, i);
+			// For a check: that many more light skeletons, anywhere
+		});
+		for(size_t t = 0; t < 8 * bench && added < bench; t++)
+			added += add_skeleton(false);
+		log_i(MODULE, "skeldat: the columns swept in %.1f ms%s",
+				(interface::os::time_us() - t0) / 1e3, bench ?
+				cs(", "+itos(added)+" skeletons added") : "");
 		world_menu::access(m_server, [&](world_menu::Interface *i){
 			i->set_running(true);
 		});
@@ -1486,7 +1536,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	void send_time(size_t peer)
 	{
 		std::ostringstream os;
-		os<<m_day<<" "<<(1.0 / DAY_SECONDS);
+		os<<m_day<<" "<<(1.0 / m_day_s);
 		network::send(m_server, peer, "skeldat:time", os.str());
 	}
 
@@ -1629,6 +1679,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			if(id == ID_AIR)
 				m_bones.set(v, 0);
 			w->set_sample(p, v);
+			rescan_column(w, x, z);
 		});
 		const int S = skeldat::bones::SECTION;
 		m_recount.insert(pos_key(floor_div(x, S), floor_div(y, S),
@@ -1683,7 +1734,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(total > 0)
 			return;
 		m_ended = true;
-		m_end_days = m_world_t / DAY_SECONDS;
+		m_end_days = m_world_t / m_day_s;
 		char days_c[40];
 		snprintf(days_c, sizeof days_c, "%.1f days", m_end_days);
 		const ss_ days = days_c;
@@ -2133,8 +2184,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 				d = danger(w, p.x, p.y, p.z);
 			});
+			size_t awake = 0;
+			for(auto &kv : m_mobs)
+				awake += kv.second.node_id != 0;
 			for(uint8_t kind : {BOAR, SKELETON}){
-				if(m_mobs.size() >= MAX_MOBS)
+				if(awake >= MAX_MOBS)
 					return;
 				if(kind == BOAR && (m_day < 0.25 || m_day > 0.75))
 					continue;
@@ -2171,6 +2225,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				m.yaw = rnd() * 2 * (float)M_PI;
 				const uint32_t k = m_next_mob++;
 				m_mobs[k] = m;
+				awake++;
 				log_i(MODULE, "skeldat: a %s (%u) spawns at %.1f,%.1f,%.1f, "
 						"danger %.2f", MOB_KIND[kind], k, m.x, m.y, m.z, d);
 			}
@@ -2334,12 +2389,18 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		// Wake what a player is near, put to sleep what none is
 		sv_<uint32_t> awake;
+		size_t full = 0;
+		for(auto &kv : m_mobs)
+			full += kv.second.node_id != 0;
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
 			float d;
 			nearest(m.x, m.y, m.z, d);
-			if(!m.node_id && d < WAKE)
+			// simplified: the first in key order past MAX_MOBS wait
+			if(!m.node_id && d < WAKE && full < MAX_MOBS){
 				wake(m);
+				full++;
+			}
 			else if(m.node_id && d > SLEEP){
 				remove_node(m.node_id);
 				log_v(MODULE, "skeldat: the %s (%u) sleeps", MOB_KIND[m.kind],
@@ -2465,6 +2526,194 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 	}
 
+	//
+	// The skeletons over the whole world ([SKELDAT_SKELETON_SIM])
+	//
+
+	size_t footprints() const
+	{
+		return (size_t)(2 * m_half) * (2 * m_half);
+	}
+
+	// Column (x, z)'s place in m_top_y and m_top_b; -1 outside the world
+	long column(int x, int z) const
+	{
+		const int h = m_half * skeldat::bones::SECTION;
+		if(x < -h || x >= h || z < -h || z >= h || m_top_y.empty())
+			return -1;
+		return (long)(z + h) * (2 * h) + (x + h);
+	}
+
+	void set_top(int x, int z, int y, uint32_t id, uint32_t bones)
+	{
+		const long c = column(x, z);
+		if(c < 0)
+			return;
+		const skeldat::NodeDef *n = node_of(id);
+		const bool ground = !n || (n->shape != skeldat::LIQUID &&
+				n->shape != skeldat::TORCH);
+		m_top_y[c] = ground ? (int8_t)y : NO_GROUND;
+		m_top_b[c] = (uint8_t)bones;
+	}
+
+	// Footprint i's columns into the top map, and its columns at FLOOD or
+	// more into m_flooded
+	void sweep(voxelworld::Instance *w, size_t i)
+	{
+		const int sx = (int)(i % (2 * m_half)) - m_half,
+				sz = (int)(i / (2 * m_half)) - m_half;
+		const int S = skeldat::bones::SECTION;
+		for(int z = sz * S; z < sz * S + S; z++)
+		for(int x = sx * S; x < sx * S + S; x++)
+			set_top(x, z, NO_GROUND, ID_IGNORE, 0);
+		int n = 0;
+		each_top(w, sx, sz, [&](int x, int z, int y, uint32_t id,
+				const interface::VoxelSample &v){
+			const uint32_t b = m_bones.get(v);
+			set_top(x, z, y, id, b);
+			n += (int)b >= skeldat::bones::FLOOD;
+		});
+		m_flooded[i] = n;
+	}
+
+	// Column (x, z) read again, after a voxel of it changed
+	void rescan_column(voxelworld::Instance *w, int x, int z)
+	{
+		const int S = skeldat::bones::SECTION;
+		if(column(x, z) < 0)
+			return;
+		for(int y = m_y1 * S + S - 1; y >= m_y0 * S; y--){
+			const interface::VoxelSample v = w->get_sample(
+					pv::Vector3DInt32(x, y, z), true);
+			const uint32_t id = m_format.id.get(v);
+			if(id != ID_AIR && id != ID_IGNORE){
+				set_top(x, z, y, id, m_bones.get(v));
+				return;
+			}
+		}
+		set_top(x, z, NO_GROUND, ID_IGNORE, 0);
+	}
+
+	// A light skeleton on a random column past SLEEP of every player: on
+	// one at FLOOD, its footprint picked by its flooded columns, or
+	// anywhere (on_bones false)
+	bool add_skeleton(bool on_bones)
+	{
+		const int S = skeldat::bones::SECTION;
+		int64_t total = 0;
+		for(int n : m_flooded)
+			total += n;
+		if(on_bones && total == 0)
+			return false;
+		size_t i = m_rand() % footprints();
+		if(on_bones){
+			int64_t r = (int64_t)(m_rand() % (uint64_t)total);
+			for(i = 0; r >= m_flooded[i]; i++)
+				r -= m_flooded[i];
+		}
+		const int x = ((int)(i % (2 * m_half)) - m_half) * S + m_rand() % S,
+				z = ((int)(i / (2 * m_half)) - m_half) * S + m_rand() % S;
+		const long c = column(x, z);
+		if(c < 0 || m_top_y[c] == NO_GROUND ||
+				(on_bones && m_top_b[c] < skeldat::bones::FLOOD))
+			return false;
+		const float y = m_top_y[c] + 0.5f;
+		float d;
+		nearest((float)x, y, (float)z, d);
+		if(d < SLEEP)
+			return false;
+		Mob m;
+		m.kind = SKELETON;
+		m.x = (float)x, m.y = y, m.z = (float)z;
+		m.hp = MOB_HP[SKELETON];
+		m.yaw = rnd() * 2 * (float)M_PI;
+		m.light_t = rnd() * LIGHT_STEP;
+		m_mobs[m_next_mob++] = m;
+		return true;
+	}
+
+	// Every light skeleton a column each LIGHT_STEP, on the top map: on,
+	// or a new heading where the next column's top is not within one up
+	// and two down
+	void step_light(float dt)
+	{
+		const int64_t t0 = interface::os::time_us();
+		for(auto &kv : m_mobs){
+			Mob &m = kv.second;
+			if(m.node_id || m.kind != SKELETON)
+				continue;
+			m.light_t -= dt;
+			if(m.light_t > 0)
+				continue;
+			m.light_t += LIGHT_STEP;
+			m_light_steps++;
+			if(rnd() < 0.2f)
+				m.yaw = rnd() * 2 * (float)M_PI;
+			const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
+					z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
+			const long c = column(x, z);
+			const float y = c < 0 || m_top_y[c] == NO_GROUND ? -1e9f :
+					m_top_y[c] + 0.5f;
+			if(y <= m.y + 1.01f && y >= m.y - 2.01f)
+				m.x = (float)x, m.z = (float)z, m.y = y;
+			else
+				m.yaw = rnd() * 2 * (float)M_PI;
+		}
+		m_light_us += interface::os::time_us() - t0;
+	}
+
+	// A game hour: the count toward its target, added at night on bone
+	// columns, let die in the morning on clean ground
+	void step_population()
+	{
+		size_t n = 0;
+		for(auto &kv : m_mobs)
+			n += kv.second.kind == SKELETON;
+		int64_t flooded = 0;
+		for(int c : m_flooded)
+			flooded += c;
+		const double columns = (double)footprints() *
+				skeldat::bones::SECTION * skeldat::bones::SECTION,
+				f = flooded / columns;
+		const size_t target = (size_t)std::lround((SKELETONS_MIN +
+				(SKELETONS_MAX - SKELETONS_MIN) * f) * columns / (1024. * 1024.));
+		const size_t k = 1 + (n > target ? n - target : target - n) / 10;
+		size_t added = 0, died = 0;
+		const bool night = m_day < 0.25 || m_day >= 0.75,
+				morning = m_day >= 0.25 && m_day < 0.4;
+		{
+			if(night && n < target){
+				const size_t want = std::min(k, target - n);
+				// On bones; anywhere in a world with none
+				const bool any = std::any_of(m_flooded.begin(),
+						m_flooded.end(), [](int c){ return c > 0; });
+				for(size_t t = 0; t < 8 * want && added < want; t++)
+					added += add_skeleton(any);
+			}
+			if(morning && n > target){
+				const size_t want = std::min(k, n - target);
+				for(auto it = m_mobs.begin(); it != m_mobs.end() &&
+						died < want;){
+					const Mob &m = it->second;
+					const long c = column((int)std::floor(m.x + 0.5f),
+							(int)std::floor(m.z + 0.5f));
+					if(m.kind != SKELETON || m.node_id || c < 0 ||
+							m_top_b[c] >= skeldat::bones::FLOOD){
+						++it;
+						continue;
+					}
+					if(m_store)
+						m_store->remove("mob/"+itos(it->first));
+					it = m_mobs.erase(it);
+					died++;
+				}
+			}
+		}
+		log_i(MODULE, "skeldat: %zu skeletons, the target %zu (%.3f of the "
+				"columns flooded); %zu added, %zu let die", n + added - died,
+				target, f, added, died);
+	}
+
 	// Two points a tick on each flying arrow, the middle and the end: at
 	// 18 voxels a second it goes 0.6 a tick, so a point every 0.3
 	void step_arrows(float dt)
@@ -2583,7 +2832,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		m_time += event.dtime;
 		m_world_t += event.dtime;
 		m_session.tick(event.dtime);
-		m_day = std::fmod(m_day + event.dtime / DAY_SECONDS, 1.0);
+		m_day = std::fmod(m_day + event.dtime / m_day_s, 1.0);
 		// Every section loaded and generated: on the tick, after the
 		// requests the last loads made are in m_awaiting
 		if(!m_world_ready && m_save && m_sections.size() == all_sections() &&
@@ -2595,8 +2844,28 @@ struct Module: public interface::Module, public luanti_session::Game
 		step_arrows(event.dtime);
 		m_ai_t += event.dtime;
 		if(m_ai_t >= 0.1f){
-			step_mobs(m_ai_t);
+			// A long tick (the world's first sweep, 1.7 s) is no fall
+			// through the ground
+			step_mobs(std::min(m_ai_t, 0.2f));
 			m_ai_t = 0;
+		}
+		if(m_world_ready){
+			step_light(event.dtime);
+			m_sweep_t += event.dtime;
+			if(m_sweep_t >= 1){
+				m_sweep_t = 0;
+				const int64_t t0 = interface::os::time_us();
+				voxelworld::access(m_server, m_scene,
+						[&](voxelworld::Instance *w){
+					sweep(w, m_sweep++ % footprints());
+				});
+				m_light_us += interface::os::time_us() - t0;
+			}
+			m_hour_t += event.dtime;
+			if(m_hour_t >= m_day_s / 24){
+				m_hour_t = 0;
+				step_population();
+			}
 		}
 		m_spawn_t += event.dtime;
 		if(!m_test.empty())
@@ -2637,6 +2906,14 @@ struct Module: public interface::Module, public luanti_session::Game
 			log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
 					"changed, %zu grown, %zu sections loaded", m_expansions,
 					m_expand_changed, m_grown, m_sections.size());
+			size_t skeletons = 0, full = 0;
+			for(auto &kv : m_mobs)
+				if(kv.second.kind == SKELETON)
+					skeletons++, full += kv.second.node_id != 0;
+			log_i(MODULE, "skeldat: %zu skeletons, %zu full; %zu light steps "
+					"and the sweep, %.2f ms a second", skeletons, full,
+					m_light_steps, m_light_us / 1e3 / 10);
+			m_light_us = 0, m_light_steps = 0;
 			for(auto &pair : m_players)
 				send_time(pair.first);
 		}
@@ -2731,6 +3008,28 @@ struct Module: public interface::Module, public luanti_session::Game
 	// pixel a column, its top voxel's colour (grass, water, the rest grey)
 	// whitened by its bones, +x right and +z up; map.png in the world's
 	// save. What it says: where it went, or why not.
+	// Each column of a section's footprint (sx, sz) with a voxel in it:
+	// fn(x, z, its top voxel's y, id, the voxel)
+	template<typename F>
+	void each_top(voxelworld::Instance *w, int sx, int sz, F fn)
+	{
+		const int S = skeldat::bones::SECTION;
+		const pv::Region r(pv::Vector3DInt32(sx * S, m_y0 * S, sz * S),
+				pv::Vector3DInt32(sx * S + S - 1, m_y1 * S + S - 1,
+				sz * S + S - 1));
+		const interface::VoxelVolume vol = w->get_volume(r);
+		for(int z = sz * S; z < sz * S + S; z++)
+		for(int x = sx * S; x < sx * S + S; x++)
+		for(int y = m_y1 * S + S - 1; y >= m_y0 * S; y--){
+			const interface::VoxelSample v = vol.sample_at(x, y, z);
+			const uint32_t id = m_format.id.get(v);
+			if(id == ID_AIR || id == ID_IGNORE)
+				continue;
+			fn(x, z, y, id, v);
+			break;
+		}
+	}
+
 	ss_ write_map()
 	{
 		const int S = skeldat::bones::SECTION, W = 2 * m_half * S;
@@ -2738,37 +3037,21 @@ struct Module: public interface::Module, public luanti_session::Game
 		const uint32_t grass = id_of("skeldat:grass");
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(int sz = -m_half; sz < m_half; sz++)
-			for(int sx = -m_half; sx < m_half; sx++){
-				const pv::Region r(pv::Vector3DInt32(sx * S, m_y0 * S, sz * S),
-						pv::Vector3DInt32(sx * S + S - 1, m_y1 * S + S - 1,
-						sz * S + S - 1));
-				const interface::VoxelVolume vol = w->get_volume(r);
-				for(int z = sz * S; z < sz * S + S; z++)
-				for(int x = sx * S; x < sx * S + S; x++){
-					float c[3] = {0, 0, 0};
-					for(int y = m_y1 * S + S - 1; y >= m_y0 * S; y--){
-						const interface::VoxelSample v = vol.sample_at(x, y, z);
-						const uint32_t id = m_format.id.get(v);
-						if(id == ID_AIR || id == ID_IGNORE)
-							continue;
-						const skeldat::NodeDef *n = node_of(id);
-						const bool water = n && n->shape == skeldat::LIQUID;
-						const float base[3] = {
-							id == grass ? 60.f : water ? 40.f : 128.f,
-							id == grass ? 140.f : water ? 80.f : 128.f,
-							id == grass ? 60.f : water ? 200.f : 128.f};
-						const float b = m_bones.get(v) /
-								(float)skeldat::bones::MAX;
-						for(int k = 0; k < 3; k++)
-							c[k] = base[k] + (240 - base[k]) * b;
-						break;
-					}
-					const size_t i = ((size_t)(W - 1 - (z + m_half * S)) * W +
-							(x + m_half * S)) * 3;
-					for(int k = 0; k < 3; k++)
-						rgb[i + k] = (unsigned char)c[k];
-				}
-			}
+			for(int sx = -m_half; sx < m_half; sx++)
+			each_top(w, sx, sz, [&](int x, int z, int, uint32_t id,
+					const interface::VoxelSample &v){
+				const skeldat::NodeDef *n = node_of(id);
+				const bool water = n && n->shape == skeldat::LIQUID;
+				const float base[3] = {
+					id == grass ? 60.f : water ? 40.f : 128.f,
+					id == grass ? 140.f : water ? 80.f : 128.f,
+					id == grass ? 60.f : water ? 200.f : 128.f};
+				const float b = m_bones.get(v) / (float)skeldat::bones::MAX;
+				const size_t i = ((size_t)(W - 1 - (z + m_half * S)) * W +
+						(x + m_half * S)) * 3;
+				for(int k = 0; k < 3; k++)
+					rgb[i + k] = (unsigned char)(base[k] + (240 - base[k]) * b);
+			});
 		});
 		const ss_ path = m_save->path()+"/map.png";
 		bool ok = false;
