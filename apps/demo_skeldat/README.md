@@ -52,7 +52,8 @@ world's spawn column, in a danger zone or not, or `"x y z"` a place under
 the ground;
 `BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
 at x, z from the first player, once (also `bones dx dz value` on the
-ground's voxel and `marker dx dz`, a marker skull);
+ground's voxel, `marker dx dz`, a marker skull, and `craft i item n`, n
+of the item in the player's craft slot i);
 `BUILDAT_SKELDAT_SIZE="<half> <y0> <y1>"` a world's size in sections, over
 the size picked in the world menu (512, 1024, 256 or 128 wide; the two
 small ones 64 high); `BUILDAT_SKELDAT_SURVEY=1` the generated world's

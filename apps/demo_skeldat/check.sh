@@ -41,6 +41,8 @@
 # The eleventh, the sizes: 512, 256 and 128 wide made and surveyed (the
 # tops inside the height, the ores, the edge at full bones, the origin
 # clean) as run 1's 1024 is.
+# The twelfth, crafting more: the held result clicked again crafts another
+# set onto it.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -591,9 +593,36 @@ for size in "512 4 -1 0" "256 2 0 0" "128 1 0 0"; do
 	sizes="$sizes $w: $(grep -a "the world is in" "$t/size$w.log" | sed 's/.*in, //'), $((rss / 1024)) MB;"
 done
 echo "sizes:$sizes"
+# 12. Crafting more ([SKELDAT_CRAFT_MORE]): planks in the 2x2 grid's left
+# column, 3 each; the result clicked four times: held 4, 8 and 12 sticks,
+# the fourth refused (the grid empty); the 12 placed whole in main 10.
+# The slots' centres for 800x500 (scale 2): the result 508,169, main 10
+# 256,255 (ui.lua's layout; the logs below say if a click missed)
+log15="$t/srv15.log"
+BUILDAT_SKELDAT_WORLD=craft BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3" \
+	start_server "$log15" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv15" -C "$t/srv.cache" -l 3 || fail "the server ($log15)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1500" "keypress E" \
+	"wait_log 5000 inventory: inventory opened" "delay 500" "mouse_pos 508 169" \
+	"delay 200" "mouse_click left" "delay 700" "mouse_click left" "delay 700" \
+	"mouse_click left" "delay 700" "mouse_click left" "delay 700" \
+	"mouse_pos 256 255" "delay 200" "mouse_click left" "delay 700" \
+	"screenshot $t/craft.png" quit > "$t/craft.cmds"
+client craft "$t/craft.cmds"
+wait $CLIENT || fail "the crafting drive ($t/craft.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+[ "$(grep -a "client1 crafts" "$log15" | sed 's/.*the result //' | tr '\n' ' ')" = \
+	"skeldat:stick 4 skeldat:stick 8 skeldat:stick 12 " ] &&
+	[ $(grep -ac "inventory: craft more" "$t/craft.log") = 3 ] &&
+	grep -aq "inventory: move 12 skeldat:stick craftresult:1 -> main:10" "$t/craft.log" ||
+	fail "crafting more: $(grep -a "client1 crafts" "$log15" | sed 's/.*the result //' | tr '\n' ';') ($log15, $t/craft.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more"
 # vim: set noet ts=4 sw=4:

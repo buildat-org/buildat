@@ -286,7 +286,16 @@ local function click(x, y, button)
 		end
 	elseif win.sel.location == hit.location and win.sel.list == hit.list and
 			win.sel.index == hit.index then
-		win.sel = nil
+		-- The held result clicked: another set onto it, as in Luanti
+		-- ([SKELDAT_CRAFT_MORE]); the server refuses one that does not
+		-- fit or is not made. A right click lets go, as on any slot.
+		if hit.list == "craftresult" and not right then
+			game.send("craft", "")
+			log:info("inventory: craft more " .. stack_at(hit))
+			win.sel.count = 0
+		else
+			win.sel = nil
+		end
 	else
 		local from = win.sel
 		local st = game.parse_stack(stack_at(from))

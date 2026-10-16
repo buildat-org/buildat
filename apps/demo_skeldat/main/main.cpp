@@ -2198,7 +2198,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			res = out;
 		else
 			res.count += out.count;
-		log_i(MODULE, "skeldat: %s crafts %s", cs(pl.name), cs(out.str()));
+		log_i(MODULE, "skeldat: %s crafts %s, the result %s", cs(pl.name),
+				cs(out.str()), cs(res.str()));
 		send_inventory(peer, pl);
 	}
 
@@ -2432,10 +2433,11 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(m_test_done)
 			return;
-		const Player *p = nullptr;
+		Player *p = nullptr;
+		size_t peer = 0;
 		for(auto &pair : m_players)
 			if(pair.second.placed)
-				p = &pair.second;
+				p = &pair.second, peer = pair.first;
 		if(!p)
 			return;
 		m_test_done = true;
@@ -2444,8 +2446,21 @@ struct Module: public interface::Module, public luanti_session::Game
 		while(std::getline(is, item, ';')){
 			std::istringstream it(item);
 			ss_ kind;
+			it>>kind;
+			if(kind == "craft"){
+				// "craft i item n": the player's craft slot i (1-9) holds n
+				int i = 0, n = 0;
+				ss_ name;
+				it>>i>>name>>n;
+				if(i >= 1 && i <= 9 && m_game.item(name)){
+					p->craft[i - 1] = Stack(name, n);
+					send_inventory(peer, *p);
+					log_i(MODULE, "skeldat: test: %s in craft %d", cs(name), i);
+				}
+				continue;
+			}
 			float dx = 0, dz = 0;
-			it>>kind>>dx>>dz;
+			it>>dx>>dz;
 			if(kind == "marker"){
 				// "marker dx dz": a marker skull on the ground there
 				const int x = (int)std::floor(p->x + dx + 0.5f),
