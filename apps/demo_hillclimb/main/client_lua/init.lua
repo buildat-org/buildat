@@ -7,8 +7,9 @@
 -- the sun where it is at the server's latitude, day and hour
 -- (physical_sky.sun_toward), the car as the server moves it (main.cpp,
 -- car.h) drawn as its tyres, wheels and axles, the keys sent to the
--- server, and a camera orbiting the car. A world unit is one voxel,
--- 125 mm (main/hill.h).
+-- server, a camera orbiting the car, the time trial's clock and ranking,
+-- and the menu (Tab) picking the hill, the payload and the hour. A world
+-- unit is one voxel, 125 mm (main/hill.h).
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
@@ -83,25 +84,17 @@ end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
--- What the server says (main.cpp hill_packet): the hill's size, where the
--- car starts, in voxels; the latitude, the day and the hour
-local hill = nil
-buildat.sub_packet("hillclimb:hill", function(data)
-	local v = {}
-	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
-	hill = {size = magic.Vector3(v[1], v[2], v[3]),
-		target = magic.Vector3(v[4], v[5], v[6]),
-		lat = v[7], day = v[8], time = v[9]}
-	-- The land around, level with the bottom pad (a voxel's centre is its
-	-- integer position, so the pad's top is half a voxel over v[5] - 1) and
-	-- a tenth of a voxel under it so the pad draws over it: the hill does
-	-- not float. Its colour is a linear albedo over pi, the units the pbr
-	-- voxels are lit in, by eye against the sand
-	-- simplified: a plain colour, no texture (Material has no UV transform
-	-- in the whitelist); a textured ground is the shader param UOffset's
-	local ground = scene:CreateChild("Ground")
-	ground.position = magic.Vector3(v[4], v[5] - 0.6, v[3] / 2)
-	ground.scale = magic.Vector3(1000 * U, 1, 1000 * U)
+-- The land around, level with the bottom pad (a voxel's centre is its
+-- integer position, so the pad's top is half a voxel over the start's y
+-- - 1) and a tenth of a voxel under it so the pad draws over it: the
+-- hill does not float. Its colour is a linear albedo over pi, the units
+-- the pbr voxels are lit in, by eye against the sand.
+-- simplified: a plain colour, no texture (Material has no UV transform
+-- in the whitelist); a textured ground is the shader param UOffset's
+local ground = scene:CreateChild("Ground")
+ground.scale = magic.Vector3(1000 * U, 1, 1000 * U)
+ground.enabled = false
+do
 	local model = ground:CreateComponent("StaticModel")
 	model.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
 	local m = magic.Material:new()
@@ -110,8 +103,30 @@ buildat.sub_packet("hillclimb:hill", function(data)
 	m:SetShaderParameter("MatDiffColor", magic.Color(0.12, 0.10, 0.06))
 	m:SetShaderParameter("MatSpecColor", magic.Color(0, 0, 0))
 	model.material = m
+end
+
+-- What the server says (main.cpp hill_packet): the hill's size, where the
+-- car starts, in voxels; the latitude, the day and the hour; the seed,
+-- the steepness, the length and the payload. Again whenever the menu
+-- makes another hill.
+local hill = nil
+local picks = nil -- the menu's values, from the server's
+buildat.sub_packet("hillclimb:hill", function(data)
+	local v = {}
+	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	if #v < 13 then
+		return
+	end
+	hill = {size = magic.Vector3(v[1], v[2], v[3]),
+		target = magic.Vector3(v[4], v[5], v[6]),
+		lat = v[7], day = v[8], time = v[9]}
+	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
+		lat = v[7], day = v[8], hour = v[9]}
+	ground.position = magic.Vector3(v[4], v[5] - 0.6, v[3] / 2)
+	ground.enabled = true
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
-			.. "%g h", v[1], v[2], v[3], v[7], v[8], v[9]))
+			.. "%g h; seed %d, %d degrees, %d m, %d kg", v[1], v[2], v[3], v[7],
+			v[8], v[9], v[10], v[11], v[12], v[13]))
 end)
 
 -- The sky's hue by the sun's height, demo_skeldat's hue_of_hour (copied)
@@ -242,7 +257,7 @@ local states = {}
 buildat.sub_packet("hillclimb:car", function(data)
 	local v = {}
 	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
-	if #v < 16 then
+	if #v < 18 then
 		return
 	end
 	states[1] = states[2]
@@ -311,6 +326,7 @@ local function down(id)
 	return key[id] ~= 0 and magic.input:GetKeyDown(key[id])
 end
 local gear = 1
+local menu = nil -- the menu, {sel, values} while open: no driving
 local sent, sent_t = nil, 0
 -- "accel brake left right gear reset" (main.cpp on_input), sent when it
 -- changes and twice a second besides
@@ -319,13 +335,139 @@ local function send_input()
 		if down("gear" .. g) then gear = g end
 	end
 	if down("reverse") then gear = 0 end
-	local function b(id) return down(id) and 1 or 0 end
+	local function b(id) return not menu and down(id) and 1 or 0 end
 	local msg = string.format("%d %d %d %d %d %d", b("accel"), b("brake"),
 			b("left"), b("right"), gear, b("reset"))
 	local now = scene.elapsedTime
 	if msg ~= sent or now - sent_t > 0.5 then
 		buildat.send_packet("hillclimb:input", msg)
 		sent, sent_t = msg, now
+	end
+end
+
+--
+-- The clock, the ranking and the menu
+--
+local function text(x, y, size)
+	local t = magic.ui.root:CreateChild("Text")
+	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), size)
+	t:SetTextEffect(magic.TE_SHADOW)
+	t:SetPosition(x, y)
+	return t
+end
+local hud = text(12, 10, 18)
+local board = text(12, 120, 15)
+local menu_text = text(12, 120, 16)
+menu_text.visible = false
+
+-- "<rank of the last finish or -1> <best times...>" (main.cpp
+-- send_ranking), under the hill and the payload now picked
+local ranking = {last = -1, times = {}}
+buildat.sub_packet("hillclimb:ranking", function(data)
+	local v = {}
+	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	ranking = {last = v[1] or -1, times = {}}
+	for i = 2, #v do ranking.times[#ranking.times + 1] = v[i] end
+end)
+
+local MENU = {
+	{id = "seed", label = "Seed", min = 1, max = 999999, step = 1},
+	{id = "steep", label = "Steepness", min = 5, max = 40, step = 1,
+		unit = " degrees"},
+	{id = "length", label = "Length", min = 20, max = 60, step = 5,
+		unit = " m"},
+	{id = "payload", label = "Payload", list = {0, 500, 1000, 2000},
+		unit = " kg"},
+	{id = "lat", label = "Latitude", min = -80, max = 80, step = 5,
+		unit = " degrees"},
+	{id = "day", label = "Day of the year", min = 1, max = 365, step = 7},
+	{id = "hour", label = "Hour (solar)", min = 0, max = 24, step = 0.5},
+}
+local function menu_draw()
+	local lines = {"The hill and the car (Up/Down, Left/Right; Enter: make it;"
+			.. " Tab: close)", ""}
+	for i, m in ipairs(MENU) do
+		lines[#lines + 1] = string.format("%s %-16s %s%s",
+				i == menu.sel and ">" or " ", m.label, tostring(menu.values[m.id]),
+				m.unit or "")
+	end
+	menu_text:SetText(table.concat(lines, "\n"))
+end
+local function menu_change(dir)
+	local m = MENU[menu.sel]
+	local v = menu.values[m.id]
+	if m.list then
+		local i = 1
+		for j, x in ipairs(m.list) do if x == v then i = j end end
+		v = m.list[(i - 1 + dir) % #m.list + 1]
+	else
+		v = math.max(m.min, math.min(m.max, v + dir * m.step))
+	end
+	menu.values[m.id] = v
+end
+local function pressed(name)
+	return magic.input:GetKeyPress(name)
+end
+local function menu_keys()
+	if pressed(magic.KEY_TAB) then
+		if menu then
+			menu = nil
+		elseif picks then
+			local values = {}
+			for k, v in pairs(picks) do values[k] = v end
+			menu = {sel = 1, values = values}
+		end
+	end
+	menu_text.visible = menu ~= nil
+	board.visible = menu == nil
+	if not menu then
+		return
+	end
+	if pressed(magic.KEY_UP) then menu.sel = (menu.sel - 2) % #MENU + 1 end
+	if pressed(magic.KEY_DOWN) then menu.sel = menu.sel % #MENU + 1 end
+	if pressed(magic.KEY_LEFT) then menu_change(-1) end
+	if pressed(magic.KEY_RIGHT) then menu_change(1) end
+	if pressed(magic.KEY_RETURN) then
+		local v = menu.values
+		buildat.send_packet("hillclimb:params", string.format(
+				"%d %d %d %d %g %g %g", v.seed, v.steep, v.length, v.payload,
+				v.lat, v.day, v.hour))
+		menu = nil
+		menu_text.visible = false
+		board.visible = true
+		return
+	end
+	menu_draw()
+end
+
+local GEARS = {[0] = "R", "1", "2", "3", "4"}
+local function draw_hud()
+	local b, a = states[2], states[1]
+	if b == nil then
+		return
+	end
+	local speed = 0
+	if a and b.t > a.t then
+		local dx, dy, dz = b.v[1] - a.v[1], b.v[2] - a.v[2], b.v[3] - a.v[3]
+		speed = math.sqrt(dx * dx + dy * dy + dz * dz) / (b.t - a.t) / U
+	end
+	local race, t = b.v[17], b.v[18]
+	local state = race == 0 and "W starts the clock" or race == 1 and "" or
+			string.format("Finished in %.2f s. Backspace: another run", t)
+	hud:SetText(string.format("Gear %s   %4.1f m/s   %6.2f s\n%s\n"
+			.. "Tab: the hill and the car   Backspace: back to the start",
+			GEARS[b.v[16]] or "?", speed, t, state))
+	if picks and board.visible then
+		local lines = {string.format("Best on this hill with %d kg:",
+				picks.payload)}
+		for i, x in ipairs(ranking.times) do
+			lines[#lines + 1] = string.format("%s%2d. %7.2f s",
+					i - 1 == ranking.last and ">" or " ", i, x)
+		end
+		if #ranking.times == 0 then
+			lines[#lines + 1] = "  (none yet)"
+		end
+		board:SetText(table.concat(lines, "\n"))
 	end
 end
 
@@ -345,7 +487,9 @@ magic.SubscribeToEvent("Update", function(_, d)
 	update_sky()
 	voxel_shading.update(dt)
 	draw_car()
+	menu_keys()
 	send_input()
+	draw_hud()
 	local m = magic.input:GetMouseMove()
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		yaw = (yaw + m.x * 0.3) % 360

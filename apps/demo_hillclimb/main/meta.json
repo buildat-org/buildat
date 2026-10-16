@@ -8,6 +8,7 @@
 		{"module": "client_lua"},
 		{"module": "client_data"},
 		{"module": "main_context"},
+		{"module": "storage"},
 		{"module": "replicate"},
 		{"module": "voxelworld"},
 		{"module": "voxel_shading"},

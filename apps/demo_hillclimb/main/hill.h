@@ -13,7 +13,8 @@
 //
 // Along +Z: a flat pad at the bottom, the slope, a flat pad at the top.
 // Across X: a bank of rock a metre wide and a metre high, the track 8 m
-// wide, the other bank. Under the surface a shell of sand with pebbles
+// wide, the other bank; a third bank across the top pad's far end, so a
+// car that keeps going stops there and does not drop off the top. Under the surface a shell of sand with pebbles
 // (stones 2 to 3 voxels across) 1.5 m deep, then a fill nobody sees.
 // The slope's angle is the middle's; its ends ease in and out over 2 m,
 // so the car does not meet a kink at either pad.
@@ -150,7 +151,8 @@ struct Hill
 		if(x < 0 || x >= size_x() || z < 0 || z >= size_z() || y < 0)
 			return AIR;
 		const int s = surface(x, z);
-		const bool bank = x < BANK_W || x >= BANK_W + TRACK_W;
+		const bool bank = x < BANK_W || x >= BANK_W + TRACK_W ||
+				z >= size_z() - BANK_W;
 		if(bank)
 			return y <= s + BANK_H ? BANK : AIR;
 		if(y > s)
@@ -206,7 +208,7 @@ int main()
 	// 8 m of track between the banks, sand on top with stones in it
 	assert(Hill::TRACK_W == 8 * U);
 	int sand = 0, stone = 0;
-	for(int z = 0; z < a.size_z(); z++)
+	for(int z = 0; z < a.size_z() - Hill::BANK_W; z++)
 	for(int x = Hill::BANK_W; x < Hill::BANK_W + Hill::TRACK_W; x++){
 		int s = a.surface(x, z);
 		assert(a.at(x, s + 1, z) == AIR);
@@ -219,6 +221,10 @@ int main()
 	}
 	assert(stone > sand / 50 && stone < sand / 2);
 	assert(a.at(0, a.surface(0, 10) + Hill::BANK_H, 10) == BANK);
+	// The top's far end walled, and the top pad still longer than the car
+	int end = a.size_z() - 1;
+	assert(a.at(40, a.surface(40, end) + Hill::BANK_H, end) == BANK);
+	assert(Hill::PAD - Hill::BANK_W >= (int)(3.6f * U));
 	printf("hill.h: self test passed; %dx%dx%d voxels, rise %.1f m, "
 			"%.1f%% stones in the shell\n", a.size_x(), a.size_y(), a.size_z(),
 			a.rise / U, 100.0f * stone / (sand + stone));

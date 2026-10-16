@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~45 s (2026-10-16)
+# cost: ~80 s (2026-10-16)
 # covers: apps/demo_hillclimb/** extensions/physical_sky/init.lua
 # demo_hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
@@ -8,8 +8,9 @@
 # 8 m, sand with stones), the client Lua parsing, and three drives with
 # no client (BUILDAT_HILLCLIMB_DRIVE): the car settling on its springs,
 # lower with a payload, each gear's top speed, the brake, a slope
-# climbed and one past the sand's grip stalled. Later stages add the
-# time trial and the ground.
+# climbed and one past the sand's grip stalled; the time trial's times
+# kept per hill and payload in order, and a hill picked again. Stage 4
+# adds the ground.
 #   apps/demo_hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -38,8 +39,10 @@ drive()
 # then the brake
 drive flat BUILDAT_HILLCLIMB_START="5 -30 180" \
 	BUILDAT_HILLCLIMB_DRIVE="0:4 3:W1 9:W2 15:W3 21:W4 27:S4 31:Q" &
-# 22 degrees in second, climbed
-drive climb BUILDAT_HILLCLIMB_DRIVE="0:2 2:W2 33:Q" &
+# The time trial: 22 degrees climbed in second, held at the top by the
+# end's bank; again in fourth, faster; then a hill of 15 degrees and 30 m
+drive climb BUILDAT_HILLCLIMB_DRIVE="0:2 2:W2 31:S2 33:B 34:W4 50:S4 \
+52:4H15/30 54:W4 66:Q" &
 # 40 degrees with 2 t aboard in first: past the sand's grip, it stalls
 drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 	BUILDAT_HILLCLIMB_DRIVE="0:1 2:W1 20:Q" &
@@ -82,8 +85,24 @@ for gear, t, top in ((1, 8.5, 0.5), (2, 14.5, 0.9), (3, 20.5, 1.4), (4, 26.5, 2.
     want(abs(s - top) < 0.03 * top, "gear %d at %.1f rev/s: %.3f" % (gear, top, s))
 end = at(flat, 30.5)
 want(end["v"] < 0.05 and end["shaft"] == 0, "braked to a stop from 5 m/s: v %.2f" % end["v"])
-top = max(l["z"] for l in climb)
+top = max(l["z"] for l in climb if l["t"] < 31)
 want(top > 56, "22 degrees climbed to the top pad (z 56 m): %.1f" % top)
+want(at(climb, 30.5)["y"] > 20, "held on the top by the end's bank: y %.1f m" % at(climb, 30.5)["y"])
+log = open("%s/climb.log" % d, errors="replace").read()
+fins = re.findall(r"hillclimb: finish (\S+) s on (\S+), rank (\S+); the ranking:(.*)", log)
+for f in fins:
+    print("    finish %s s on %s rank %s; ranking%s" % f)
+want(len(fins) == 3, "three runs timed: %d" % len(fins))
+if len(fins) == 3:
+    k22 = "seed1/steep22/length50/sand/payload0/"
+    t1, t2 = float(fins[0][0]), float(fins[1][0])
+    want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
+        "second gear's time, then fourth's faster, under the hill's key")
+    want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
+        "the second run first in the ranking, the first beside it")
+    want(fins[2][1] == "seed1/steep15/length30/sand/payload0/" and
+        fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
+want("hillclimb: the hill, seed 1, 15 degrees, 30 m long" in log, "the hill made again from the pick")
 last = stall[-3:]
 want(max(l["z"] for l in stall) < 12 and all(l["slip"] == "1111" for l in last),
     "40 degrees with 2 t stalls, its wheels slipping: z %.1f, slip %s" % (
@@ -94,5 +113,5 @@ print("  the physics per 30 Hz tick on the climb: mean %d us, worst %d us" % (
     sum(us) / len(us), max(us)))
 sys.exit(1 if bad else 0)
 PY
-echo "PASS: the hill's generator, the server's module and the car on rigid ground"
+echo "PASS: the hill, the car on rigid ground and the time trial"
 # vim: set noet ts=4 sw=4:
