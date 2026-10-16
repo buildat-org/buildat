@@ -1,7 +1,8 @@
 # skelenti
 
-A small alpha-era Luanti game inside a Buildat app ([LUANTI_APP_EXAMPLE]):
-dig, craft up to diamond, mind the skeletons. The game's rules are Luanti
+A demo of mixing Luanti and Buildat in one app ([LUANTI_APP_EXAMPLE]),
+not a game to play: a small alpha-era Luanti game (dig, craft up to
+diamond, mind the skeletons) runs inside it. The game's rules are Luanti
 Lua (main/game/); the mobs, the HUD, the inventory's drawing and the
 pause menu are Buildat's own (main/main.cpp, main/client_lua/), the
 world menu builtin/world_menu's.

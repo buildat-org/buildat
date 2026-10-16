@@ -4,5 +4,5 @@
 -- The tile on the launch grid ([LAUNCH_GRID])
 return function(ctx) return {{id = "play", label = "skeldat",
 	icon = "icon.png", order = 141,
-	description = "skelenti made in Buildat alone, no Luanti game under it",
+	description = "The bones are taking the world. Hold them back, and last as many days as you can",
 	run = function() ctx.launch{app = "demo_skeldat"} end}} end

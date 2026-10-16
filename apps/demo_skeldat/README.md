@@ -1,8 +1,12 @@
 # skeldat
 
-skelenti ([LUANTI_APP_EXAMPLE], `apps/demo_skelenti`) made in Buildat
-alone ([SKELDAT]): no Luanti game and no builtin/luanti module under it.
-Dig, craft up to diamond, cook in a furnace, mind the bones.
+A bounded world that bones and skeletons are taking over: dig, craft
+and burn lanterns to push the bones back, lure the skeletons with their
+own marker skulls. Your score is the days until every voxel has bones.
+
+It began as skelenti ([LUANTI_APP_EXAMPLE], `apps/demo_skelenti`) remade
+in Buildat alone ([SKELDAT]): no Luanti game and no builtin/luanti
+module under it.
 
 - `main/game.h`: the nodes, the items, the tools, the recipes and the
   inventory rules. Its self test:
