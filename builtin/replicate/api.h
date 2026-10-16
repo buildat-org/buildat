@@ -98,6 +98,15 @@ namespace replicate
 			cb((replicate::Interface*)module->check_interface());
 		});
 	}
+
+	// [ACCESS_ONE_SHOT]: a peer shown a scene, which every game does once
+	inline void assign_scene_to_peer(interface::Server *server,
+			main_context::SceneReference scene_ref, PeerId peer)
+	{
+		access(server, [&](Interface *i){
+			i->assign_scene_to_peer(scene_ref, peer);
+		});
+	}
 }
 
 // vim: set noet ts=4 sw=4:

@@ -291,9 +291,7 @@ struct Module: public interface::Module
 	void on_start()
 	{
 		serve_media();
-		main_context::access(m_server, [&](main_context::Interface *i){
-			m_scene = i->create_scene();
-		});
+		m_scene = main_context::create_scene(m_server);
 		// Before voxelworld, or its first generation requests are lost
 		m_worldgen = new Worldgen();
 		worldgen::access(m_server, [&](worldgen::Interface *i){
@@ -397,8 +395,7 @@ struct Module: public interface::Module
 	void create_car()
 	{
 		const float U = hill::U;
-		main_context::access(m_server, [&](main_context::Interface *i){
-			magic::Scene *scene = i->check_scene(m_scene);
+		main_context::access(m_server, m_scene, [&](magic::Scene *scene){
 			m_physics = scene->GetComponent<magic::PhysicsWorld>();
 			// The car's substeps are this module's (on_tick); a world unit
 			// is a voxel, so gravity is in voxels

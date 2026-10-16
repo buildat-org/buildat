@@ -357,6 +357,14 @@ namespace network
 		});
 	}
 
+	// [ACCESS_ONE_SHOT]: a packet to a peer, the one call nearly every app
+	// made through access()
+	inline void send(interface::Server *server, PeerInfo::Id recipient,
+			const ss_ &name, const ss_ &data)
+	{
+		access(server, [&](Interface *i){ i->send(recipient, name, data); });
+	}
+
 	// [HTML_BRAND]'s font or logo for /brand/<name>, answered; false when
 	// the path is not one of them
 	inline bool serve_brand(interface::Server *server, const HttpRequest &r)

@@ -536,6 +536,45 @@ namespace voxelworld
 			cb(instance);
 		});
 	}
+
+	// [ACCESS_ONE_SHOT]: one voxel read or written, each an access (and a
+	// write its commit); several under one lock are still access()'s
+	inline VoxelInstance get_voxel(interface::Server *server,
+			SceneReference scene_ref, const pv::Vector3DInt32 &p,
+			bool disable_warnings = false)
+	{
+		VoxelInstance v(0);
+		access(server, scene_ref, [&](Instance *w){
+			v = w->get_voxel(p, disable_warnings);
+		});
+		return v;
+	}
+	inline void set_voxel(interface::Server *server, SceneReference scene_ref,
+			const pv::Vector3DInt32 &p, const VoxelInstance &v,
+			bool disable_warnings = false)
+	{
+		access(server, scene_ref, [&](Instance *w){
+			w->set_voxel(p, v, disable_warnings);
+		});
+	}
+	inline interface::VoxelSample get_sample(interface::Server *server,
+			SceneReference scene_ref, const pv::Vector3DInt32 &p,
+			bool disable_warnings = false)
+	{
+		interface::VoxelSample v;
+		access(server, scene_ref, [&](Instance *w){
+			v = w->get_sample(p, disable_warnings);
+		});
+		return v;
+	}
+	inline void set_sample(interface::Server *server, SceneReference scene_ref,
+			const pv::Vector3DInt32 &p, const interface::VoxelSample &v,
+			bool disable_warnings = false)
+	{
+		access(server, scene_ref, [&](Instance *w){
+			w->set_sample(p, v, disable_warnings);
+		});
+	}
 }
 
 // vim: set noet ts=4 sw=4:

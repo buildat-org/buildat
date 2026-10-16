@@ -53,5 +53,21 @@ namespace main_context
 			cb((main_context::Interface*)module->check_interface());
 		});
 	}
+
+	// [ACCESS_ONE_SHOT]: a scene's own, under main_context's lock (its
+	// nodes are main_context's thread's); throws if there is no such scene
+	inline bool access(interface::Server *server, SceneReference scene_ref,
+			std::function<void(magic::Scene*)> cb)
+	{
+		return access(server, [&](Interface *i){
+			cb(i->check_scene(scene_ref));
+		});
+	}
+	inline SceneReference create_scene(interface::Server *server)
+	{
+		SceneReference ref = nullptr;
+		access(server, [&](Interface *i){ ref = i->create_scene(); });
+		return ref;
+	}
 }
 // vim: set noet ts=4 sw=4:

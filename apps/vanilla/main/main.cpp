@@ -373,10 +373,8 @@ struct Module: public interface::Module
 		m_waiting_peers.push_back(login.peer);
 		if(is_admin(login.peer)){
 			m_shown_menu.insert(login.peer);
-			network::access(m_server, [&](network::Interface *inetwork){
-				inetwork->send(login.peer, "core:run_script",
-						"buildat.run_script_file(\"main/menu.lua\")");
-			});
+			network::send(m_server, login.peer, "core:run_script",
+					"buildat.run_script_file(\"main/menu.lua\")");
 			return;
 		}
 		const ss_ note = read_stop_note();
@@ -389,9 +387,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(values);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(login.peer, "main:join_wait", os.str());
-		});
+		network::send(m_server, login.peer, "main:join_wait", os.str());
 	}
 
 	// What the client shows of the server's: whether it is a public one,
@@ -412,9 +408,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(values);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:account", os.str());
-		});
+		network::send(m_server, peer, "main:account", os.str());
 	}
 
 	// A server admin has every privilege in the world ([VANILLA_PUBLIC] 3)
@@ -463,9 +457,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(values);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "luanti:loading_picture", os.str());
-		});
+		network::send(m_server, peer, "luanti:loading_picture", os.str());
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -573,10 +565,8 @@ struct Module: public interface::Module
 			// which save, and which game it needs. A world that was chosen
 			// before this client arrived is already on its way up, and the
 			// menu says so rather than offering another.
-			network::access(m_server, [&](network::Interface *inetwork){
-				inetwork->send(event.recipient, "core:run_script",
-						"buildat.run_script_file(\"main/menu.lua\")");
-			});
+			network::send(m_server, event.recipient, "core:run_script",
+					"buildat.run_script_file(\"main/menu.lua\")");
 			return;
 		}
 		show_world_to(event.recipient);
@@ -617,9 +607,7 @@ struct Module: public interface::Module
 		// Holding no world, the launcher may keep this server for its
 		// next launch of the app (start_world() takes it back)
 		if(!m_public && !m_starting && is_owner(packet.sender)){
-			network::access(m_server, [&](network::Interface *inetwork){
-				inetwork->send(packet.sender, "launch:reusable", "1");
-			});
+			network::send(m_server, packet.sender, "launch:reusable", "1");
 		}
 		// **A launch that named a save opens it and never draws a menu**
 		// ([LAUNCH_WORLD]: a save opened through ctx.launch's params).
@@ -668,18 +656,14 @@ struct Module: public interface::Module
 					menu = "world:"+world;
 			}
 			if(menu != ""){
-				network::access(m_server, [&](network::Interface *inetwork){
-					inetwork->send(packet.sender, "main:menu", menu);
-				});
+				network::send(m_server, packet.sender, "main:menu", menu);
 			}
 		}
 		// A public server's menu has no imports and no local settings, and
 		// over a running world it goes back to it ([VANILLA_PUBLIC] 5)
 		if(m_public){
 			const ss_ menu = m_starting ? "public_running" : "public";
-			network::access(m_server, [&](network::Interface *inetwork){
-				inetwork->send(packet.sender, "main:menu", menu);
-			});
+			network::send(m_server, packet.sender, "main:menu", menu);
 		}
 		sv_<ss_> flat;
 		sv_<ss_> saves;
@@ -1032,10 +1016,8 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, perf ? "main:perf_settings" :
-					"main:game_settings", os.str());
-		});
+		network::send(m_server, packet.sender, perf ? "main:perf_settings" :
+				"main:game_settings", os.str());
 	}
 	// main:get_game_settings {name}
 	void on_get_game_settings(const network::Packet &packet)
@@ -2000,9 +1982,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "main:save_info", os.str());
-		});
+		network::send(m_server, packet.sender, "main:save_info", os.str());
 	}
 
 	// main:set_world_flags <name> <creative_mode> <enable_damage>: into the
@@ -2297,9 +2277,7 @@ struct Module: public interface::Module
 				list.push_back(row);
 			ar(list);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:settings", os.str());
-		});
+		network::send(m_server, peer, "main:settings", os.str());
 	}
 	// ContentDB ([CONTENTDB]): a browser of its games, the server fetching
 	// through libcurl on a thread per job -- a listing, an install -- and
@@ -2807,9 +2785,8 @@ struct Module: public interface::Module
 					cereal::PortableBinaryOutputArchive ar(os);
 					ar(sv_<ss_>{job->name});
 				}
-				network::access(m_server, [&](network::Interface *inetwork){
-					inetwork->send(job->peer, "main:contentdb_picture", os.str());
-				});
+				network::send(m_server, job->peer, "main:contentdb_picture",
+						os.str());
 				continue;
 			}
 			// The zip's one top-level directory is the game; renamed into
@@ -2890,9 +2867,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:contentdb_list", os.str());
-		});
+		network::send(m_server, peer, "main:contentdb_list", os.str());
 		// The pictures after the list, one job each, so a slow one holds
 		// nothing but its own row ([CONTENTDB_LIST]); on the wire the row
 		// names its picture "contentdb/<author>_<name>.png"
@@ -2930,9 +2905,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(values);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, name, os.str());
-		});
+		network::send(m_server, peer, name, os.str());
 	}
 
 	// Where ContentDB's installs of a type go
@@ -3783,9 +3756,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(flat);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "main:imports", os.str());
-		});
+		network::send(m_server, packet.sender, "main:imports", os.str());
 	}
 
 	// One line to whoever is waiting, which is the same channel the mod
@@ -3801,9 +3772,7 @@ struct Module: public interface::Module
 			ar(values);
 		}
 		const ss_ data = os.str();
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "main:progress", data);
-		});
+		network::send(m_server, peer, "main:progress", data);
 	}
 
 	// Everything under from into to, saying how far along it is every so
@@ -4150,9 +4119,7 @@ struct Module: public interface::Module
 			cereal::PortableBinaryOutputArchive ar(os);
 			ar(values);
 		}
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, packet, os.str());
-		});
+		network::send(m_server, peer, packet, os.str());
 	}
 
 	void show_world_to(network::PeerInfo::Id peer)
@@ -4187,9 +4154,7 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->join_player(player_name_of(peer), peer, admin);
 		});
-		replicate::access(m_server, [&](replicate::Interface *ireplicate){
-			ireplicate->assign_scene_to_peer(m_scene, peer);
-		});
+		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 	}
 
 	// Under the user path, not the cache: a Luanti game the user installed
@@ -4497,9 +4462,7 @@ struct Module: public interface::Module
 				[&](starport_announce::Interface *a){ a->set_game(source); });
 		// A world is left by stopping the server, as a dedicated one's is
 		if(peer != 0){
-			network::access(m_server, [&](network::Interface *inetwork){
-				inetwork->send(peer, "launch:reusable", "0");
-			});
+			network::send(m_server, peer, "launch:reusable", "0");
 		}
 		if(m_public)
 			write_public_world(world_name);
@@ -4628,9 +4591,7 @@ struct Module: public interface::Module
 					ar(values);
 				}
 				const ss_ data = os.str();
-				network::access(m_server, [&](network::Interface *inetwork){
-					inetwork->send(peer, "main:progress", data);
-				});
+				network::send(m_server, peer, "main:progress", data);
 			});
 			// What the world is made out of goes in before it is made, and
 			// so does the world itself: the map is read from inside

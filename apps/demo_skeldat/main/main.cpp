@@ -465,13 +465,6 @@ struct Module: public interface::Module, public luanti_session::Game
 					[this](const network::Packet &p){ m_session.packet(p); });
 	}
 
-	void send(size_t peer, const ss_ &name, const ss_ &data)
-	{
-		network::access(m_server, [&](network::Interface *i){
-			i->send(peer, name, data);
-		});
-	}
-
 	//
 	// The world dialog
 	//
@@ -563,7 +556,7 @@ struct Module: public interface::Module, public luanti_session::Game
 						data += "\n"+info.name;
 			});
 		}
-		send(peer, "skeldat:worlds", data);
+		network::send(m_server, peer, "skeldat:worlds", data);
 	}
 
 	void on_world_play(const network::Packet &packet)
@@ -603,7 +596,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(m_scene){
 			show(event.recipient);
 		} else if(m_waiting.insert(event.recipient).second){
-			send(event.recipient, "core:run_script",
+			network::send(m_server, event.recipient, "core:run_script",
 					"buildat.run_script_file(\"main/worlds.lua\")");
 			send_worlds(event.recipient);
 		}
@@ -689,9 +682,7 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void create_world(uint32_t seed)
 	{
-		main_context::access(m_server, [&](main_context::Interface *i){
-			m_scene = i->create_scene();
-		});
+		m_scene = main_context::create_scene(m_server);
 		m_mapgen = mapgen_params(seed);
 		worldgen::GeneratorInterface *generator = nullptr;
 		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *i){
@@ -1204,15 +1195,13 @@ struct Module: public interface::Module, public luanti_session::Game
 		ss_ v;
 		if(m_save->store("skeldat_players")->get(name, v))
 			pl.load(v);
-		send(peer, "skeldat:worlds", "up");
-		send(peer, "core:run_script",
+		network::send(m_server, peer, "skeldat:worlds", "up");
+		network::send(m_server, peer, "core:run_script",
 				"buildat.run_script_file(\"main/init.lua\")");
-		send(peer, "skeldat:items", items_text());
+		network::send(m_server, peer, "skeldat:items", items_text());
 		update_role(peer, pl, true);
 		chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
-		replicate::access(m_server, [&](replicate::Interface *i){
-			i->assign_scene_to_peer(m_scene, peer);
-		});
+		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		if(!pl.placed)
 			respawn(peer, pl);
 		else
@@ -1375,19 +1364,20 @@ struct Module: public interface::Module, public luanti_session::Game
 		pl.check_air = false;
 		std::ostringstream os;
 		os<<pl.x<<" "<<pl.y<<" "<<pl.z<<" "<<pl.yaw;
-		send(peer, "skeldat:position", os.str());
+		network::send(m_server, peer, "skeldat:position", os.str());
 	}
 
 	void send_stats(size_t peer, const Player &pl)
 	{
-		send(peer, "skeldat:stats", itos(pl.hp)+" "+itos(pl.breath));
+		network::send(m_server, peer, "skeldat:stats",
+				itos(pl.hp)+" "+itos(pl.breath));
 	}
 
 	void send_time(size_t peer)
 	{
 		std::ostringstream os;
 		os<<m_day<<" "<<(1.0 / DAY_SECONDS);
-		send(peer, "skeldat:time", os.str());
+		network::send(m_server, peer, "skeldat:time", os.str());
 	}
 
 	static ss_ list_text(const ss_ &name, const sv_<Stack> &l)
@@ -1407,7 +1397,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		sv_<Stack> preview(1);
 		if(r)
 			preview[0] = Stack::parse(r->output);
-		send(peer, "skeldat:inv", list_text("main", pl.main)+
+		network::send(m_server, peer, "skeldat:inv", list_text("main", pl.main)+
 				list_text("craft", pl.craft)+
 				list_text("craftresult", pl.craftresult)+
 				list_text("craftpreview", preview));
@@ -1424,7 +1414,8 @@ struct Module: public interface::Module, public luanti_session::Game
 				<<list_text("dst", {f.dst});
 		for(auto &pair : m_players)
 			if(pair.second.open == at)
-				send(pair.first, "skeldat:node_inv", os.str());
+				network::send(m_server, pair.first, "skeldat:node_inv",
+						os.str());
 	}
 
 	// What the client needs to know of the items: what they look like, how
@@ -1510,11 +1501,8 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	VoxelInstance voxel_at(int x, int y, int z)
 	{
-		VoxelInstance v(0);
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			v = w->get_voxel(pv::Vector3DInt32(x, y, z), true);
-		});
-		return v;
+		return voxelworld::get_voxel(m_server, m_scene,
+				pv::Vector3DInt32(x, y, z), true);
 	}
 	uint32_t id_at(int x, int y, int z)
 	{
@@ -1522,11 +1510,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	}
 	int bones_at(int x, int y, int z)
 	{
-		interface::VoxelSample v;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			v = w->get_sample(pv::Vector3DInt32(x, y, z), true);
-		});
-		return (int)m_bones.get(v);
+		return (int)m_bones.get(voxelworld::get_sample(m_server, m_scene,
+				pv::Vector3DInt32(x, y, z), true));
 	}
 	// The bones stay with what is there, and go with it when it is dug
 	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0)
@@ -1918,13 +1903,6 @@ struct Module: public interface::Module, public luanti_session::Game
 		return best;
 	}
 
-	void with_scene(std::function<void(Urho3D::Scene*)> f)
-	{
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			f(imc->check_scene(m_scene));
-		});
-	}
-
 	// A moment's sound at a place, to everyone in the world; what it sounds
 	// like is the client's (client_lua/sounds.lua)
 	void sound(const char *moment, float x, float y, float z)
@@ -1932,7 +1910,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		char buf[100];
 		snprintf(buf, sizeof buf, "%s %.2f %.2f %.2f", moment, x, y, z);
 		for(size_t peer : m_shown)
-			send(peer, "skeldat:sound", buf);
+			network::send(m_server, peer, "skeldat:sound", buf);
 	}
 
 	// A place for a kind to spawn near a player, 12 to 24 voxels off: a
@@ -2075,7 +2053,7 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void wake(Mob &m)
 	{
-		with_scene([&](Urho3D::Scene *scene){
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
 					Urho3D::String("skeldat_")+MOB_KIND[m.kind]);
 			n->SetPosition(Urho3D::Vector3(m.x, m.y, m.z));
@@ -2088,7 +2066,7 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void remove_node(uint32_t &id)
 	{
-		with_scene([&](Urho3D::Scene *scene){
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			if(Urho3D::Node *n = scene->GetNode(id))
 				n->Remove();
 		});
@@ -2108,7 +2086,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		a.vz = dz / h * ARROW_SPEED + (rnd() - 0.5f) * 0.8f;
 		a.vy = (p.y + 1.2f - a.y) / t + 0.5f * ARROW_GRAVITY * t +
 				(rnd() - 0.5f) * 0.6f;
-		with_scene([&](Urho3D::Scene *scene){
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild("skeldat_arrow");
 			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
 			a.node_id = n->GetID();
@@ -2290,7 +2268,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				log_i(MODULE, "skeldat: the skeleton (%u) burns", b.first);
 			damage(b.first, b.second, NOBODY, 0, 0);
 		}
-		with_scene([&](Urho3D::Scene *scene){
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			for(auto &kv : m_mobs){
 				Mob &m = kv.second;
 				Urho3D::Node *n = m.node_id ? scene->GetNode(m.node_id) : nullptr;
@@ -2371,7 +2349,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				continue;
 			}
 			if(!was_stuck){
-				with_scene([&](Urho3D::Scene *scene){
+				main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 					if(Urho3D::Node *n = scene->GetNode(a.node_id)){
 						n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
 						if(!a.stuck){
@@ -2502,7 +2480,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			ss_ out = "players\n";
 			for(auto &pair : m_players)
 				out += pair.second.name+"\n";
-			send(peer, "skeldat:admin", out);
+			network::send(m_server, peer, "skeldat:admin", out);
 			return;
 		}
 		if(cmd == "audit"){
@@ -2518,7 +2496,7 @@ struct Module: public interface::Module, public luanti_session::Game
 							<<json::jstr(a, "text")<<"\n";
 				}
 			});
-			send(peer, "skeldat:admin", os.str());
+			network::send(m_server, peer, "skeldat:admin", os.str());
 			return;
 		}
 		size_t to = 0;
@@ -2557,8 +2535,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		if(cmd != "view")
 			send_inventory(to, *pl);
-		send(peer, "skeldat:admin", "inv "+name+"\n"+list_text("main",
-				pl->main));
+		network::send(m_server, peer, "skeldat:admin", "inv "+name+"\n"+
+				list_text("main", pl->main));
 	}
 
 	void audit(const ss_ &by, const ss_ &whom, const ss_ &action,
@@ -2591,7 +2569,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(admin == pl.admin && !tell)
 			return;
 		pl.admin = admin;
-		send(peer, "skeldat:role", admin ? "admin" : "");
+		network::send(m_server, peer, "skeldat:role", admin ? "admin" : "");
 		log_i(MODULE, "skeldat: %s is %s", cs(pl.name),
 				admin ? "an admin" : "a player");
 	}
@@ -2711,7 +2689,7 @@ struct Module: public interface::Module, public luanti_session::Game
 					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
 							<<" "<<(o.skeleton ? 1 : 0)<<"\n";
 			}
-			send(to.first, "skeldat:players", os.str());
+			network::send(m_server, to.first, "skeldat:players", os.str());
 		}
 	}
 

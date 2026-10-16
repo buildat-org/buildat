@@ -71,6 +71,13 @@ server->access_module(name, callback), which holds the other's mutex for
 the callback -- the api.h convention wraps it as
 <module>::access(server, [&](<module>::Interface *i){ ... }). A module's
 get_interface() is what access() hands out, checked by check_interface().
+The single operations most modules make have one call of their own, an
+access() inside each: network::send(server, peer, name, data),
+replicate::assign_scene_to_peer(server, scene, peer),
+main_context::create_scene(server), main_context::access(server, scene,
+[&](magic::Scene *s){ ... }) and voxelworld::get_voxel/set_voxel/
+get_sample/set_sample(server, scene, p, ...). Several under one lock are
+still an access().
 Throwing interface::ModuleAskedToStop from a handler stops the module.
 Any other exception from a handler shuts the server down, except on a
 network:packet_received/* event: a client's packet the handler cannot read
@@ -683,7 +690,7 @@ builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, T
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, Interface, open, create, close, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
-builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access
+builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access, v
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
 interface/address.h: split_host_port, join_host_port, Url, parse_url
 interface/aitta.h: engine_api_refusal, keygen, public_of, sign, verify, verify_hash, module_meta_refusal, check_manifest, media_check, check_media, check_page, pack_page, kind_of, semver_ok, find_base, package_files, pack, install
