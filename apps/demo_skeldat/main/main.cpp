@@ -195,8 +195,11 @@ static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
 // SKELETONS_MIN on clean ground to SKELETONS_MAX with every column's top
 // at FLOOD, in a world of 1024 x 1024 columns (a smaller one has fewer);
 // asleep ("light"), one steps a voxel every LIGHT_STEP seconds
+// (BUILDAT_SKELDAT_LIGHT_STEP for a check); at night it places 1 to
+// NIGHT_BLOCKS bone blocks on clean ground within SEED_RANGE columns
 static const float SKELETONS_MIN = 500, SKELETONS_MAX = 2000,
 		LIGHT_STEP = 1;
+static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
 static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
@@ -215,6 +218,11 @@ struct Mob
 	float light_t = 0; // to the next light step
 	// Saved: the game day of its last marker skull
 	double marker_day = -1e9;
+	// Not saved, a light one's: the footprint picked at sunrise or sunset
+	// (-1 none), the night's bone blocks left and the column of the next
+	int goal_fp = -1, quota = 0, seed_x = 0, seed_z = 0;
+	int detour = 0; // steps left on a heading round what blocked it
+	bool seeding = false;
 	int hurt = 0, hurt_sent = 0;
 
 	ss_ save() const {
@@ -456,7 +464,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	double m_time = 0;
 	// The time of day, 0 to 1 with 0.5 noon; a new world starts at 6:00
 	double m_day = 0.25;
-	float m_day_s = DAY_SECONDS;
+	float m_day_s = DAY_SECONDS, m_light_step = LIGHT_STEP;
+	// Day 1, night 0, -1 before the world is in; the night's bone blocks
+	int m_phase = -1;
+	size_t m_night_blocks = 0;
 	float m_save_t = 0, m_furnace_t = 0, m_send_t = 0, m_breath_t = 0,
 			m_move_t = 0;
 	size_t m_worldgen_queue = 0;
@@ -718,6 +729,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(const char *env = getenv("BUILDAT_SKELDAT_DAY"))
 			if(atof(env) > 0)
 				m_day_s = (float)atof(env);
+		if(const char *env = getenv("BUILDAT_SKELDAT_LIGHT_STEP"))
+			if(atof(env) > 0)
+				m_light_step = (float)atof(env);
 		// For a check: the time of day it starts at, 0.5 noon
 		const char *env_time = getenv("BUILDAT_SKELDAT_TIME");
 		if(env_time && env_time[0])
@@ -729,7 +743,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			Mob m;
 			const uint32_t k = (uint32_t)atol(key.c_str() + 4);
 			if(m_store->get(key, v) && m.load(v)){
-				m.light_t = rnd() * LIGHT_STEP;
+				m.light_t = rnd() * m_light_step;
 				m_mobs[k] = m;
 				m_next_mob = std::max(m_next_mob, k + 1);
 			}
@@ -1169,6 +1183,15 @@ struct Module: public interface::Module, public luanti_session::Game
 		size_t bench = 0;
 		if(const char *env = getenv("BUILDAT_SKELDAT_SKELETONS"))
 			bench = (size_t)atol(env);
+		// For a check: "sx sz n", footprint (sx, sz)'s marker count, the
+		// skulls themselves not placed
+		int mx, mz, mn;
+		if(const char *env = getenv("BUILDAT_SKELDAT_MARKERS"))
+			if(sscanf(env, "%d %d %d", &mx, &mz, &mn) == 3 &&
+					footprint(mx * skeldat::bones::SECTION,
+					mz * skeldat::bones::SECTION) >= 0)
+				m_markers[footprint(mx * skeldat::bones::SECTION,
+						mz * skeldat::bones::SECTION)] = mn;
 		size_t added = 0;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(size_t i = 0; i < footprints(); i++)
@@ -1686,7 +1709,8 @@ struct Module: public interface::Module, public luanti_session::Game
 				pv::Vector3DInt32(x, y, z), true));
 	}
 	// The bones stay with what is there, and go with it when it is dug
-	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0)
+	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0,
+			int bones = -1)
 	{
 		const pv::Vector3DInt32 p(x, y, z);
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
@@ -1698,6 +1722,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_format.param.set(word, param);
 			if(id == ID_AIR || id == m_marker)
 				m_bones.set(v, 0);
+			else if(bones >= 0)
+				m_bones.set(v, (uint32_t)bones);
 			const long f = footprint(x, z);
 			if(f >= 0 && old != id)
 				m_markers[f] += (id == m_marker) - (old == m_marker);
@@ -2717,17 +2743,96 @@ struct Module: public interface::Module, public luanti_session::Game
 		m.x = (float)x, m.y = y, m.z = (float)z;
 		m.hp = MOB_HP[SKELETON];
 		m.yaw = rnd() * 2 * (float)M_PI;
-		m.light_t = rnd() * LIGHT_STEP;
+		m.light_t = rnd() * m_light_step;
 		m_mobs[m_next_mob++] = m;
 		return true;
 	}
 
-	// Every light skeleton a column each LIGHT_STEP, on the top map: on,
-	// or a new heading where the next column's top is not within one up
-	// and two down
+	// The nearest column to (x, z) within SEED_RANGE, not (x, z), whose
+	// top is ground with no bones and air above, inside the nine footprints
+	// round `fp`
+	// simplified: SEED_RANGE, not the whole nine footprints, for the cost
+	// of 2000 searches at sunset
+	bool clean_column(int x, int z, long fp, int &ox, int &oz)
+	{
+		const int w = 2 * m_half;
+		for(int r = 1; r <= SEED_RANGE; r++)
+		for(int dz = -r; dz <= r; dz++)
+		for(int dx = -r; dx <= r; dx += (std::abs(dz) == r ? 1 : 2 * r)){
+			const long c = column(x + dx, z + dz), f = footprint(x + dx, z + dz);
+			if(c < 0 || m_top_y[c] == NO_GROUND || m_top_b[c] != 0 ||
+					m_top_y[c] >= (m_y1 + 1) * skeldat::bones::SECTION - 1 ||
+					std::abs(f % w - fp % w) > 1 || std::abs(f / w - fp / w) > 1)
+				continue;
+			ox = x + dx, oz = z + dz;
+			return true;
+		}
+		return false;
+	}
+
+	// At sunrise and sunset each skeleton picks, of its footprint and the
+	// eight round it, the one with the most marker skulls: its own on a
+	// tie, a random one when all have none; at sunset its night's bone
+	// blocks too
+	void pick_footprints(bool sunset)
+	{
+		const int w = 2 * m_half;
+		size_t moving = 0, n = 0;
+		for(auto &kv : m_mobs){
+			Mob &m = kv.second;
+			if(m.kind != SKELETON)
+				continue;
+			n++;
+			const long own = footprint((int)std::floor(m.x + 0.5f),
+					(int)std::floor(m.z + 0.5f));
+			if(own < 0)
+				continue;
+			long best = own;
+			sv_<long> all;
+			for(int dz = -1; dz <= 1; dz++)
+			for(int dx = -1; dx <= 1; dx++){
+				const long fx = own % w + dx, fz = own / w + dz;
+				if(fx < 0 || fx >= w || fz < 0 || fz >= w)
+					continue;
+				all.push_back(fz * w + fx);
+				if(m_markers[fz * w + fx] > m_markers[best])
+					best = fz * w + fx;
+			}
+			if(m_markers[best] == 0)
+				best = all[m_rand() % all.size()];
+			m.goal_fp = (int)best;
+			moving += best != own;
+			m.quota = sunset ? 1 + m_rand() % NIGHT_BLOCKS : 0;
+			m.seeding = false;
+		}
+		long most = 0;
+		for(size_t i = 0; i < footprints(); i++)
+			if(m_markers[i] > m_markers[most])
+				most = (long)i;
+		size_t there = 0;
+		for(auto &kv : m_mobs)
+			there += kv.second.kind == SKELETON && footprint(
+					(int)std::floor(kv.second.x + 0.5f),
+					(int)std::floor(kv.second.z + 0.5f)) == most;
+		log_i(MODULE, "skeldat: %s: %zu of %zu skeletons to another "
+				"footprint; the one with the most markers (%d, at %ld %ld) has "
+				"%zu; %zu bone blocks placed since", sunset ? "sunset" :
+				"sunrise", moving, n, m_markers[most], most % w - m_half,
+				most / w - m_half, there, m_night_blocks);
+		m_night_blocks = 0;
+	}
+
+	// Every light skeleton a column each light step, on the top map: at
+	// night to its next clean column and a bone block there, else to its
+	// footprint, else wandering inside it; on, or a new heading where the
+	// next column's top is not within one up and two down
 	void step_light(float dt)
 	{
 		const int64_t t0 = interface::os::time_us();
+		const int S = skeldat::bones::SECTION;
+		const uint32_t block = id_of("skeldat:bone_block");
+		struct Block { int x, y, z; };
+		sv_<Block> blocks;
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
 			if(m.node_id || m.kind != SKELETON)
@@ -2735,21 +2840,64 @@ struct Module: public interface::Module, public luanti_session::Game
 			m.light_t -= dt;
 			if(m.light_t > 0)
 				continue;
-			m.light_t += LIGHT_STEP;
+			m.light_t += m_light_step;
 			m_light_steps++;
-			if(rnd() < 0.2f)
+			const int mx = (int)std::floor(m.x + 0.5f),
+					mz = (int)std::floor(m.z + 0.5f);
+			const long own = footprint(mx, mz);
+			bool to = false;
+			int tx = 0, tz = 0;
+			if(m.quota > 0 && !m_ended && own >= 0){
+				if(!m.seeding && !clean_column(mx, mz, own, m.seed_x,
+						m.seed_z))
+					m.quota = 0;
+				else
+					m.seeding = true;
+				if(m.seeding && std::abs(m.seed_x - mx) <= 1 &&
+						std::abs(m.seed_z - mz) <= 1 &&
+						(m.seed_x != mx || m.seed_z != mz)){
+					const long c = column(m.seed_x, m.seed_z);
+					if(m_top_y[c] != NO_GROUND && m_top_b[c] == 0)
+						blocks.push_back({m.seed_x, m_top_y[c] + 1, m.seed_z});
+					m.seeding = false;
+					m.quota--;
+				} else if(m.seeding)
+					to = true, tx = m.seed_x, tz = m.seed_z;
+			}
+			if(!to && m.goal_fp >= 0 && own != m.goal_fp){
+				const int w = 2 * m_half;
+				to = true;
+				tx = (m.goal_fp % w - m_half) * S + S / 2;
+				tz = (m.goal_fp / w - m_half) * S + S / 2;
+			}
+			if(m.detour > 0)
+				m.detour--;
+			else if(to)
+				m.yaw = std::atan2((float)(tx - mx), (float)(tz - mz)) +
+						(rnd() - 0.5f) * 0.6f;
+			else if(rnd() < 0.2f)
 				m.yaw = rnd() * 2 * (float)M_PI;
 			const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
 					z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
 			const long c = column(x, z);
 			const float y = c < 0 || m_top_y[c] == NO_GROUND ? -1e9f :
 					m_top_y[c] + 0.5f;
-			if(y <= m.y + 1.01f && y >= m.y - 2.01f)
+			// Wandering, it keeps to its footprint
+			const bool stray = !to && m.goal_fp >= 0 && own == m.goal_fp &&
+					footprint(x, z) != m.goal_fp;
+			if(!stray && y <= m.y + 1.01f && y >= m.y - 2.01f)
 				m.x = (float)x, m.z = (float)z, m.y = y;
-			else
+			else {
 				m.yaw = rnd() * 2 * (float)M_PI;
+				if(to)
+					m.detour = 4 + m_rand() % 12;
+			}
 		}
 		m_light_us += interface::os::time_us() - t0;
+		for(const Block &b : blocks){
+			set_node(b.x, b.y, b.z, block, 0, skeldat::bones::MAX);
+			m_night_blocks++;
+		}
 	}
 
 	// A game hour: the count toward its target, added at night on bone
@@ -2951,6 +3099,12 @@ struct Module: public interface::Module, public luanti_session::Game
 				});
 				m_light_us += interface::os::time_us() - t0;
 			}
+			const int phase = m_day >= 0.25 && m_day < 0.75;
+			// The first tick's too: a world that starts at night has its
+			// night's work
+			if(phase != m_phase)
+				pick_footprints(phase == 0);
+			m_phase = phase;
 			m_hour_t += event.dtime;
 			if(m_hour_t >= m_day_s / 24){
 				m_hour_t = 0;

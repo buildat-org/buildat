@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~7 min (2026-10-16)
+# cost: ~8 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -28,6 +28,9 @@
 # skeletons added to the first world, restarted headless: their step time.
 # The fifth, a skeleton's marker skull: one on its first sight of a
 # player, none on its next that day, the count kept in the save.
+# The sixth, a night of 60 light skeletons in a fast clean world: more of
+# them in the footprint given three markers by the sunrise, and bone
+# blocks placed.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -338,6 +341,30 @@ for i in $(seq 60); do
 done
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 light=$(grep -a "skeletons, [0-9]* full" "$t/srv7.log" | tail -1 | sed 's/.*skeldat: //')
+# 6. A night: 60 light skeletons in a clean world, footprint (0, 0) given
+# three markers, a day of 60 s and a step every 0.02 s: from the sunset
+# to the sunrise more of them are in (0, 0), and they placed bone blocks
+log10="$t/srv10.log"
+BUILDAT_SKELDAT_WORLD=night BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=60 \
+	BUILDAT_SKELDAT_TIME=0.6 BUILDAT_SKELDAT_SKELETONS=60 \
+	BUILDAT_SKELDAT_MARKERS="0 0 3" BUILDAT_SKELDAT_LIGHT_STEP=0.02 \
+	start_server "$log10" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv10" -C "$t/srv.cache" -l 3 || fail "the server ($log10)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log10" ": sunset: " 60 || fail "no sunset ($log10)"
+for i in $(seq 120); do
+	sed -n '/: sunset: /,$p' "$log10" | grep -aq ": sunrise: " && break
+	sleep 0.5
+done
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+# "sunset K 0" and "sunrise K B": K in (0, 0), B the night's bone blocks
+night=$(sed -n '/: sunset: /,$p' "$log10" | grep -a ": sunset: \|: sunrise: " |
+	sed -n '1p;/sunrise/{p;q}' |
+	sed 's/.*: \(sun[a-z]*\): .* has \([0-9]*\); \([0-9]*\) bone.*/\1 \2 \3/')
+echo "$night" | awk 'NR == 1 { a = $2 } NR == 2 { b = $2; n = $3 }
+	END { exit !(b > a && n > 0) }' ||
+	fail "the night: $(echo $night) ($log10)"
 # 5. A marker skull: a skeleton 8 voxels from a player at midnight places
 # one; the player gone and another come, the same skeleton sees it and
 # places none that day; the count is in the save
@@ -409,7 +436,8 @@ echo "$last" | grep -qE "skeldat: (2[0-9][0-9]) skeletons, 0 full" ||
 	fail "after the player: $last ($log6)"
 grep -a "skeletons, the target" "$log6" | tail -1 | grep -q "the target 125 (1.000" ||
 	fail "the flooded world's target ($log6)"
+echo "a night: $(echo $night)"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks"
 # vim: set noet ts=4 sw=4:
