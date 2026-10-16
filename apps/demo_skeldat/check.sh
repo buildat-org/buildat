@@ -491,9 +491,11 @@ awk -v a="$f0" -v b="$f1" 'BEGIN { exit !(b > a) }' ||
 	fail "the clean side did not flood: $f0 to $f1 ($log11)"
 grep -aq "a bone block at 14,[0-9]*,0 goes" "$log11" ||
 	fail "the bone block in the lantern's sphere stayed ($log11)"
-sed -n '/test: a lantern at 12,/,/lantern at 12,[0-9]*,0 goes out/p' "$log11" |
-	grep -aqE "lantern at 12,[0-9]*,0 burning: .* mean 0\." ||
-	fail "the bones in the lantern's sphere did not fall ($log11)"
+# Its first report, 10 s or some 30 expansions in: the sphere clear, the
+# full bones gone in 5 ([SKELDAT_LANTERN_RATE])
+grep -a "lantern at 12,[0-9]*,0 burning" "$log11" | head -1 |
+	grep -aq " 0 with bones, mean 0.00, 0 bone blocks" ||
+	fail "the lantern's sphere not cleared at its first report: $(grep -a "lantern at 12,[0-9]*,0 burning" "$log11" | head -1 | sed 's/.*burning: //') ($log11)"
 lantern="clean side flooded $f0 to $f1; $(grep -a "lantern at 12,[0-9]*,0 burning" "$log11" |
 	tail -1 | sed 's/.*mean \([0-9.]*\).*/burning, mean \1/'); $(grep -a "lantern at 12,[0-9]*,0 out" "$log11" |
 	tail -1 | sed 's/.*mean \([0-9.]*\).*/out, mean \1/')"

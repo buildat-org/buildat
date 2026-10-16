@@ -204,11 +204,14 @@ static const float SKELETONS_MIN = 500, SKELETONS_MAX = 2000,
 		LIGHT_STEP = 1;
 static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
 // A burning lantern's sphere ([SKELDAT_FIGHT_BACK]): no bones grow in it,
-// a voxel's fall by one in one of LANTERN_RETRACT_IN of its section's
-// expansions and a bone block goes in one of LANTERN_DECAY_IN; a coal
-// lasts LANTERN_HOURS game hours
-static const int LANTERN_RADIUS = 8, LANTERN_RETRACT_IN = 4,
-		LANTERN_DECAY_IN = 8;
+// each of its section's expansions takes LANTERN_RETRACT off a voxel
+// (three times the growth: full bones gone in 5) and a bone block goes in
+// one of LANTERN_DECAY_IN ([SKELDAT_LANTERN_RATE]); a coal lasts
+// LANTERN_HOURS game hours
+// simplified: paced by the section's own expansions (about every 150 s,
+// at random); a lantern's own tick if that reads uneven
+static const int LANTERN_RADIUS = 8, LANTERN_RETRACT = 3,
+		LANTERN_DECAY_IN = 2;
 static const float LANTERN_HOURS = 4;
 // A burning lantern lures skeletons as LANTERN_LURE marker skulls do
 static const int LANTERN_LURE = 5;
@@ -1388,9 +1391,8 @@ struct Module: public interface::Module, public luanti_session::Game
 					const size_t i = box.at(x, y, z);
 					if(!guard[i] || air[i])
 						continue;
-					box.b[i] = before[i];
-					if(box.b[i] > 0 && m_rand() % LANTERN_RETRACT_IN == 0)
-						box.b[i]--;
+					box.b[i] = before[i] > LANTERN_RETRACT ?
+							before[i] - LANTERN_RETRACT : 0;
 					const pv::Vector3DInt32 p(lc.getX() + x, lc.getY() + y,
 							lc.getZ() + z);
 					if(m_format.id.get(vol.sample_at(p.getX(), p.getY(),
