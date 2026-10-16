@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-15)
+# cost: ~3 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -11,8 +11,8 @@
 # noclip; digs a voxel without bones, which drops; a test skeleton burns in
 # the sun and dies. client2 says a line, and client1 reports client2. The
 # map makes bone piles in the zone in sight.
-# The second, restarted with the save as if long away (the sections catch
-# up) and the client the launcher's own (an admin): the test boar is back
+# The second, restarted with the save and the client the launcher's own
+# (an admin): the test boar is back
 # from the save; the admin mutes client2 from the report and sets who may
 # talk, gives and takes an item (the audit log has both), flies into the
 # bones zone unchecked, where the fog, the danger music and a skeleton come
@@ -41,11 +41,17 @@ g++ -O2 -std=c++14 -I"$here/src" "$here/util/voxel_path_test.cpp" \
 echo "$path" | tail -1
 
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
+# The spawn at (0, 290): clean ground, the bones zone from z 300 on
+# (seed 2's, biased away from the origin: bones.h's danger()); run 1 walks
+# along it (-x: open grass, where -z has a cave's crack), the admin of run
+# 2 flies into it (+z, 15 degrees to +x: from where run 1 left it, x -16,
+# into the zone's core round x 0)
 server() # <log> [args]: the world "w" at seed 2, noon
 {
 	local log=$1
 	shift
 	BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \
+		BUILDAT_SKELDAT_SPAWN="0 290" \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 		-D "$t/srv" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($log)"
@@ -79,7 +85,7 @@ delay 500
 keypress Escape
 wait_log 5000 pause: the menu closed
 delay 1000
-look 0 0
+look -90 0
 keydown W
 keydown Space
 delay 2500
@@ -105,7 +111,7 @@ keyup Left Shift
 delay 1500
 event skeldat_modes
 delay 1500
-look 0 -70
+look -90 -70
 mouse_down left
 delay 2500
 mouse_up left
@@ -136,8 +142,16 @@ wait_for_log "$t/srv1.log" "client1 joins" 240 || fail "client1 did not join ($t
 client b1 "$t/b1.cmds"; bpid=$CLIENT
 wait $a || fail "client1's drive ($t/a1.log)"
 wait $bpid
+# The whole world in memory ([SKELDAT_BOUNDED_WORLD]): the server's size
+rss=$(ps -o rss= -p $SERVER_PID)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 s="$t/srv1.log"
+# Made at seed 2, the world's surface inside its 128 voxels of height:
+# the highest voxel the generator made under the top (63)
+top=$(grep -a "512 of 512 sections loaded" "$s" | sed 's/.*sections loaded, \([0-9.]*\) s, the highest voxel made at y \(-*[0-9]*\)/\1 \2/')
+[ -n "$top" ] && [ "${top#* }" -lt 60 ] ||
+	fail "the world not all in, or made over its top: $top ($s)"
+echo "the world: 512 sections in ${top% *} s, the highest voxel at y ${top#* }, the server $((rss / 1024)) MB"
 grep -aq "client1 is a player" "$s" || fail "client1 was not a player ($s)"
 first_pull=$(grep -a "pulled back" "$s" | head -1 | awk '{print $3}')
 cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{print $3}')
@@ -157,7 +171,7 @@ grep -a "skeldat: client2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks l
 	tr '\n' ' ' | grep -qx "skeleton player " ||
 	fail "client2 did not look like a skeleton by the bones and then a player ($t/a1.log)"
 
-# 2. The admin, the save as if a day away
+# 2. The admin
 cat > "$t/a2.cmds" <<EOF
 $placed
 wait_log_any 5000 skeldat: role admin
@@ -204,7 +218,7 @@ wait_log 5000 pause: the menu shown
 delay 500
 keypress Escape
 wait_log 5000 pause: the menu closed
-look 180 0
+look 15 0
 keypress K
 keydown Space
 delay 1500
@@ -212,15 +226,15 @@ keyup Space
 keypress H
 keypress J
 keydown W
-delay 2200
+delay 3200
 keyup W
 keypress J
 keypress H
 keypress K
 delay 2000
-look 180 -70
+look 15 -70
 mouse_down left
-delay 2500
+delay 6000
 mouse_up left
 delay 1000
 screenshot $t/zone.png
@@ -237,7 +251,7 @@ keypress Return
 delay 2000
 quit
 EOF
-BUILDAT_SKELDAT_AWAY=86400 server "$t/srv2.log" -u launcher=1
+server "$t/srv2.log" -u launcher=1
 client a2 "$t/a2.cmds"; a=$CLIENT
 wait_for_log "$t/srv2.log" "mutes client2" 300 || fail "no mute ($t/a2.log)"
 client b2 "$t/b2.cmds"; bpid=$CLIENT
@@ -247,8 +261,6 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 s="$t/srv2.log"
 mobs=$(grep -a 'the world "w" starts' "$s" | sed 's/.*furnaces, \([0-9]*\) mobs.*/\1/')
 [ "${mobs:-0}" -ge 1 ] || fail "no mob back from the save ($s)"
-caught=$(grep -a "caught up" "$s" | tail -1 | sed 's/.*, \([0-9]*\) caught up.*/\1/')
-[ "${caught:-0}" -ge 1 ] || fail "no section caught up ($s)"
 grep -aq "client1 is an admin" "$s" || fail "the launcher's client was no admin ($s)"
 grep -aq "client1 mutes client2, upholding a report" "$s" || fail "the mute ($s)"
 grep -aq "the lowest level that may talk is member" "$s" || fail "who may talk ($s)"
@@ -266,6 +278,6 @@ grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)" "$s" | grep -
 	fail "no skeleton spawned in the zone ($s)"
 grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
-echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back, $caught caught up"
+echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
 echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu, the bones zone"
 # vim: set noet ts=4 sw=4:

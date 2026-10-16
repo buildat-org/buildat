@@ -70,8 +70,13 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 		v.why = "too far up or down";
 		return v;
 	}
-	const P a0((int)std::floor(fx), (int)std::floor(fy), (int)std::floor(fz));
-	const P b0((int)std::floor(tx), (int)std::floor(ty), (int)std::floor(tz));
+	// A voxel's centre is at its integer coordinates (player.lua rounds x
+	// and z the same way); the feet's y rounds down onto the ground, which
+	// settle() lifts off
+	const P a0((int)std::floor(fx + 0.5f), (int)std::floor(fy),
+			(int)std::floor(fz + 0.5f));
+	const P b0((int)std::floor(tx + 0.5f), (int)std::floor(ty),
+			(int)std::floor(tz + 0.5f));
 	const int r = (int)std::ceil(reach) + 1;
 	const int y0 = std::min(a0.y, b0.y) - DOWN, y1 = std::max(a0.y, b0.y) + 3;
 	Field f;
@@ -132,10 +137,18 @@ static std::function<void(Field&)> world(
 		}
 	};
 }
+// The cases are written with a cell's centre at .5 (x 0.5 the middle of
+// cell 0); check() has it at the integer
+static Verdict at(const std::function<void(Field&)> &w, float fx,
+		float fy, float fz, float tx, float ty, float tz, bool was_air)
+{
+	return check(w, fx - 0.5f, fy, fz - 0.5f, tx - 0.5f, ty, tz - 0.5f, 1,
+			was_air);
+}
 static bool ok(const std::function<void(Field&)> &w, float fx,
 		float fy, float fz, float tx, float ty, float tz, bool was_air = false)
 {
-	return check(w, fx, fy, fz, tx, ty, tz, 1, was_air).ok;
+	return at(w, fx, fy, fz, tx, ty, tz, was_air).ok;
 }
 int main()
 {
@@ -155,6 +168,12 @@ int main()
 	auto wall = world([](int x, int y, int){
 		return x == 3 && y <= 2 ? SOLID : -1; });
 	assert(!ok(wall, 0.5f, 0, 0.5f, 5.5f, 0, 0.5f));
+	// Up to a wall on the -x side, 0.3 short of its face: x -2.2 is in
+	// cell -2 (centre -2.0), not the wall's -3 (a floor() had it in the
+	// wall, and an honest walk pulled back)
+	auto west = world([](int x, int y, int){
+		return x == -3 && y <= 2 ? SOLID : -1; });
+	assert(check(west, 0, 0, 0, -2.2f, 0, 0, 1, false).ok);
 	// The same wall with a gap: round it
 	auto gap = world([](int x, int y, int z){
 		return x == 3 && y <= 2 && z != 3 ? SOLID : -1; });
@@ -163,7 +182,7 @@ int main()
 	auto pillar = world([](int x, int y, int){
 		return x <= 1 && y < 10 ? SOLID : -1; });
 	assert(ok(pillar, 0.5f, 10, 0.5f, 4.5f, 0, 0.5f));
-	Verdict v = check(pillar, 0.5f, 10, 0.5f, 3.5f, 6, 0.5f, 1, false);
+	Verdict v = at(pillar, 0.5f, 10, 0.5f, 3.5f, 6, 0.5f, false);
 	assert(v.ok && v.air);
 	// Still falling the next check, and hanging there
 	assert(ok(pillar, 3.5f, 6, 0.5f, 3.5f, 2, 0.5f, true));

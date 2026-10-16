@@ -28,6 +28,10 @@
 namespace skeldat {
 namespace bones {
 
+// The world ([SKELDAT_BOUNDED_WORLD]): x and z -HALF to HALF - 1, y Y0 to
+// Y1, in sections of SECTION
+static const int HALF = 512, Y0 = -64, Y1 = 63, SECTION = 64;
+
 static const int MAX = 15;
 static const int FLOOD = 8;
 // A voxel with more than this drops nothing when dug (user, 2026-10-15:
@@ -37,9 +41,6 @@ static const int NO_DROP = 3;
 static const float SEED_DANGER = 0.5f;
 // Seconds of game time between a section's expansions, on average
 static const double SECTION_PERIOD = 150;
-// The most expansions a section loaded after a long time away catches up
-// with: a month away is not a stalled load
-static const int CATCHUP_MAX = 16;
 // Bones grow off a voxel at MAX with air over it (user, 2026-10-15): the
 // chance a section's expansion grows one there, on top a bone block (to
 // STACK_MAX high) or a skull, two or a bone lying (main.cpp's expand()).
@@ -57,8 +58,24 @@ inline float hash(int32_t a, int32_t b, uint32_t salt)
 // skelenti's danger of a place (apps/demo_skelenti/main/main.cpp): value
 // noise over 80-node cells, 0 to 1, a quarter of the world quiet. Only the
 // mapgen reads it, to seed a fresh section (user, 2026-10-15: "no danger
-// zone on the client").
+// zone on the client"). **Biased by the distance from the origin**
+// ([SKELDAT_BOUNDED_WORLD], user: "increase to 100% when reaching the world
+// edges"): the noise weighed from 0 near the origin to all of it, and a
+// rise to 1 at the edge, by t, the column's distance to the nearer edge
+// line over HALF -- so the spawn is clean, the middle has patches and the
+// border is solid bones.
+inline float noise_danger(uint32_t salt, float x, float z);
 inline float danger(uint32_t salt, float x, float z)
+{
+	auto step = [](float a, float b, float t){
+		t = std::min(1.0f, std::max(0.0f, (t - a) / (b - a)));
+		return t * t * (3 - 2 * t);
+	};
+	const float t = std::max(std::fabs(x + 0.5f), std::fabs(z + 0.5f)) / HALF;
+	return std::max(noise_danger(salt, x, z) * step(0.2f, 0.9f, t),
+			step(0.85f, 0.99f, t));
+}
+inline float noise_danger(uint32_t salt, float x, float z)
 {
 	const float C = 80;
 	const int ix = (int)std::floor(x / C), iz = (int)std::floor(z / C);
@@ -115,14 +132,6 @@ inline int seed_value(float danger)
 			SEED_DANGER) * (MAX - 1) / (1 - SEED_DANGER)) : 0;
 }
 
-// How many expansions a section owes for `seconds` away
-inline int catch_up(double seconds)
-{
-	if(seconds <= 0)
-		return 0;
-	return (int)std::min((double)CATCHUP_MAX, std::floor(seconds /
-			SECTION_PERIOD));
-}
 
 // A section and one voxel around it, x fastest: the bones and whether a
 // voxel is air-like (nothing floods into it)
@@ -272,11 +281,18 @@ int main()
 		put(0, -2, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 		put(2, 0, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 	}
-	// The seeding and the catch-up
+	// The seeding
 	assert(seed_value(0.49f) == 0 && seed_value(0.5f) == 1 &&
 			seed_value(0.75f) == 8 && seed_value(1.0f) == MAX);
-	assert(catch_up(-5) == 0 && catch_up(149) == 0 && catch_up(300) == 2 &&
-			catch_up(1e9) == CATCHUP_MAX);
+	// The bias: nothing round the origin, every edge column MAX
+	for(uint32_t salt = 1; salt < 20; salt++){
+		for(int a = -60; a < 60; a++)
+			assert(danger(salt, (float)a, (float)(a * 7 % 60)) == 0);
+		for(int a = -HALF; a < HALF; a++)
+			for(float e : {(float)-HALF, (float)(HALF - 1)})
+				assert(seed_value(danger(salt, (float)a, e)) == MAX &&
+						seed_value(danger(salt, e, (float)a)) == MAX);
+	}
 	int seeded = 0;
 	for(int i = 0; i < 10000; i++)
 		seeded += seed_value(danger(3, (float)(i % 100) * 7,

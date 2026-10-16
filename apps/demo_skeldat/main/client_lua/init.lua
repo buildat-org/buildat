@@ -291,8 +291,14 @@ voxel_shading.set_sky_light(1.0)
 voxel_shading.set_specular_emphasis(0.7)
 voxel_shading.set_gray_by_light(1.5)
 
+-- Over the world's top is open air, past its sides solid (bones.h's Y1
+-- and HALF: no section is there, and one not loaded stops the player)
+local WORLD_TOP = 63
 local player = physics.new(
 	function(x, y, z)
+		if y > WORLD_TOP then
+			return false
+		end
 		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
 		if v == nil then
 			return true -- not loaded: stand still rather than fall
