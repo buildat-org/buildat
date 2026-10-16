@@ -665,6 +665,11 @@ __buildat_served_overrides = {
 	key_store = function() return nil end,
 	set_launch_ui = refused("set_launch_ui"),
 	compose_launch_ui = refused("compose_launch_ui"),
+	-- An extension's own files: a module named like an extension served
+	-- `<extension>/x.lua`, and that chunk ran the extension's settings.lua
+	-- and rewrote what it shows at its next start ([SECURITY_RUN_6])
+	run_extension_file = refused("run_extension_file"),
+	read_extension_file = refused("read_extension_file"),
 	cache_read = function() return nil end,
 	cache_write = refused("cache_write"),
 	storage_read = function(name)

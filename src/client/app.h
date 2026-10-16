@@ -151,6 +151,10 @@ namespace app
 		virtual void handle_packet(const ss_ &name, const ss_ &data) = 0;
 		virtual void file_updated_in_cache(const ss_ &file_name,
 				const ss_ &file_hash, const ss_ &cached_path) = 0;
+		// A served file's name no longer routed to the server's copy: a
+		// resource loaded from it is loaded again from the client's own
+		// file of that name, where there is one
+		virtual void served_file_forgotten(const ss_ &file_name) = 0;
 		// The viewports the user's graphics preferences apply to: they are
 		// drawn at the render_scale the user asked for, under a UI that
 		// stays at native resolution. An empty list is teardown. A game that

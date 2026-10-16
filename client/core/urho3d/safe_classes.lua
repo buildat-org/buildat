@@ -3241,6 +3241,13 @@ function M.define(dst, util)
 							error("Sound:SetData(): "..n.." bytes; a Sound"..
 									" holds 1.."..SOUND_MAX_BYTES)
 						end
+						-- Whole frames: the mixer reads a frame and the
+						-- next past a cut one's end, and a looped Sound
+						-- shorter than a frame spun the mixer for good
+						if n % self.sampleSize ~= 0 then
+							error("Sound:SetData(): "..n.." bytes is not"..
+									" whole frames of "..self.sampleSize)
+						end
 						if sounds_total() + n > SOUNDS_MAX_BYTES then
 							collectgarbage("collect")
 							if sounds_total() + n > SOUNDS_MAX_BYTES then

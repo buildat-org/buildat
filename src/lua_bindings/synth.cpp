@@ -105,6 +105,10 @@ static void make_sine()
 
 static double sine(double phase)
 {
+	// A curve's jumps overflowing to inf and a factor 0 after them made
+	// a NaN phase, which indexed g_sine at INT_MIN ([SECURITY_RUN_6])
+	if(!std::isfinite(phase))
+		return 0;
 	phase = phase - std::floor(phase);
 	double q = phase * 4;
 	int quadrant = (int)q;
@@ -768,6 +772,12 @@ static const char *SELF_CHECK_LUA =
 	"	restart = 0.07, min = 50, max = 4000}\n"
 	"local duty = {start = 0.2, slide = 4, max = 0.8}\n"
 	"local function src(x) x:osc{wave = 'saw', freq = curve} end\n"
+	// Not hashed, only run: jumps overflowing to inf and a factor 0 after
+	// them, a NaN phase for sine(), which read out of bounds before
+	// ([SECURITY_RUN_6])
+	"do local j = {} for i = 1, 60 do j[i] = {0, 1e6} end j[61] = {0, 0}\n"
+	"	local x = b(64) x:osc{wave = 'sine', freq = {start = 1e9, jumps = j}}\n"
+	"	x:filter{type = 'low', cutoff = {start = 1e9, jumps = j}} end\n"
 	"return {\n"
 	" run(function(x) x:osc{wave = 'square', freq = curve, duty = duty,\n"
 	"	oversample = 8} end),\n"

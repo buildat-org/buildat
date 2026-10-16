@@ -7,6 +7,7 @@
 #include "interface/fs.h"
 #include "core/log.h"
 #include "network/api.h"
+#include <cctype>
 
 namespace client_file
 {
@@ -60,6 +61,15 @@ namespace client_file
 	// simplified: the extension's own directory, not its subdirectories
 	inline void serve_extension(interface::Server *server, const ss_ &name)
 	{
+		// A name, never a path: meta.json's "client_extensions" is an app's
+		for(char c : name)
+			if(!isalnum((unsigned char)c) && c != '_'){
+				log_w("client_file", "serve_extension: \"%s\" is not an "
+						"extension name", cs(name.substr(0, 60)));
+				return;
+			}
+		if(name.empty())
+			return;
 		const ss_ dir = server->get_config().get<ss_>("share_path")+
 				"/extensions/"+name;
 		sv_<std::pair<ss_, ss_>> files;

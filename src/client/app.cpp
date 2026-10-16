@@ -2127,6 +2127,15 @@ struct CApp: public App, public magic::Application
 		error_logging_pcall(L, 2, 0);
 	}
 
+	void served_file_forgotten(const ss_ &file_name)
+	{
+		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
+		// Only a name the client has a file for: the rest have nothing to
+		// go back to, and a game's thousands would each log a failed load
+		if(magic_cache->Exists(file_name.c_str()))
+			magic_cache->ReloadResourceWithDependencies(file_name.c_str());
+	}
+
 	void file_updated_in_cache(const ss_ &file_name,
 			const ss_ &file_hash, const ss_ &cached_path)
 	{

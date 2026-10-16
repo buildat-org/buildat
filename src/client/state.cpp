@@ -330,7 +330,16 @@ struct CState: public State
 		m_parsed_bytes = 0;
 		m_unordered.clear();
 		m_packet_stream = interface::PacketStream();
+		// **What the server served under a bundled resource's name goes
+		// back to the bundled file** ([SECURITY_RUN_6]): a texture or a
+		// style it served as launch_menu's or ui_utils' stayed loaded, and
+		// the launcher and its trusted screens drew it after leaving
+		sv_<ss_> served;
+		for(auto &pair : m_file_hashes)
+			served.push_back(pair.first);
 		m_file_hashes.clear();
+		for(const ss_ &name : served)
+			m_app->served_file_forgotten(name);
 		m_waiting_files.clear();
 		m_held_scripts.clear();
 		m_scripts_started = false;
