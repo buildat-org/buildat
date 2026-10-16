@@ -36,11 +36,14 @@ local M = {}
 local own_root = nil
 local filter = ""
 
+-- The waiting screen's line, which a progress text replaces in place
+local waiting_line = nil
 local function close()
 	if own_root then
 		uistack.main:pop(own_root)
 		own_root = nil
 	end
+	waiting_line = nil
 end
 
 local function own_push(kind)
@@ -292,10 +295,14 @@ end
 --
 
 local function waiting(message)
+	if waiting_line and own_root then
+		waiting_line:SetText(message)
+		return
+	end
 	local root = own_push("waiting")
 	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	text_on(menu.window, message)
+	waiting_line = text_on(menu.window, message)
 	-- And the seconds under it, so the screen moves while the user can
 	-- only wait ([FIRST_RUN]: a screen still for 4 s fails a driven run)
 	local secs = text_on(menu.window, "")
@@ -350,8 +357,10 @@ end
 buildat.sub_packet("world_menu:list", function(data)
 	local state = buildat.parse_json(data)
 	if not state.may_pick then
-		waiting("Waiting for the host to pick a world")
-		log:info("world_menu: the wait shown")
+		local text = (state.wait or "") ~= "" and state.wait or
+				"Waiting for the host to pick a world"
+		waiting(text)
+		log:info("world_menu: the wait shown: " .. text)
 		return
 	end
 	state.fields = state.fields or {}

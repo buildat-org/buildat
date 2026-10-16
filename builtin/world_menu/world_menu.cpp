@@ -21,6 +21,7 @@ struct Module: public interface::Module, public Interface
 	interface::Server *m_server;
 	Config m_config;
 	bool m_running = false;
+	ss_ m_progress;
 	// Who has the client half, and who has the menu up
 	std::set<PeerId> m_scripted, m_shown;
 
@@ -63,9 +64,17 @@ struct Module: public interface::Module, public Interface
 		send_list(peer);
 	}
 
+	void progress(const ss_ &text)
+	{
+		m_progress = text;
+		for(PeerId peer : m_shown)
+			send_list(peer);
+	}
+
 	void set_running(bool running)
 	{
 		m_running = running;
+		m_progress.clear();
 		if(!running)
 			return;
 		for(PeerId peer : m_shown)
@@ -92,8 +101,8 @@ struct Module: public interface::Module, public Interface
 	// own client
 	bool may_pick(const network::Packet &packet)
 	{
-		if(m_running || !m_shown.count(packet.sender) ||
-				!is_local(packet.sender)){
+		if(m_running || !m_progress.empty() ||
+				!m_shown.count(packet.sender) || !is_local(packet.sender)){
 			log_w(MODULE, "%s from peer %zu ignored", cs(packet.name),
 					packet.sender);
 			return false;
@@ -118,8 +127,9 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value out = json::object();
 		out.set("title", m_config.title);
-		const bool pick = !m_running && is_local(peer);
+		const bool pick = !m_running && m_progress.empty() && is_local(peer);
 		out.set("may_pick", pick);
+		out.set("wait", m_progress);
 		json::Value fields = json::array();
 		for(const Field &f : m_config.fields){
 			json::Value v = json::object();

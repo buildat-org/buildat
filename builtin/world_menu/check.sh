@@ -55,6 +55,10 @@ for app in demo_skeldat demo_skelenti; do
 	if [ $short = skeldat ]; then
 		grep -aq 'the world "world" starts, seed 4242,' "$t/$app.srv1.log" ||
 			fail "skeldat: the seed option not used ($t/$app.srv1.log)"
+		# The whole world made before the play, its progress in the menu
+		grep -aq "world_menu: the wait shown: Making the world: 256 of 512" \
+			"$t/$app.cli1.log" ||
+			fail "skeldat: no progress while the world was made ($t/$app.cli1.log)"
 	fi
 	printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
 		'click Button "world"' "wait_log 5000 world_menu: the list shown" \

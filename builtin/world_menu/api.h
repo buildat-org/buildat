@@ -25,8 +25,9 @@
 // Packets, client to server: world_menu:get, world_menu:play ({name}),
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
 // ({name, to}), world_menu:delete ({name}). Server to client:
-// world_menu:list (JSON: {title, may_pick, fields: [{key, label,
-// default, hint}], worlds: [{name, bytes, options}]}), world_menu:up.
+// world_menu:list (JSON: {title, may_pick, wait, fields: [{key, label,
+// default, hint}], worlds: [{name, bytes, options}]}; wait: the progress
+// text, if any), world_menu:up.
 namespace world_menu
 {
 	typedef size_t PeerId;
@@ -68,6 +69,9 @@ namespace world_menu
 		// A world starting or running: no more picks, and the menus shown
 		// close
 		virtual void set_running(bool running) = 0;
+		// A world being made: the menus shown say `text` and wait, and no
+		// world is picked meanwhile; "" for none. set_running(true) ends it.
+		virtual void progress(const ss_ &text) = 0;
 	};
 
 	inline bool access(interface::Server *server,
