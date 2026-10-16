@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <cstdarg>
 #include <execinfo.h>
 #include <signal.h>
@@ -77,22 +78,33 @@ static interface::Mutex backtrace_mutex;
 static char backtrace_buffer[10000];
 static size_t backtrace_buffer_len = 0;
 
+// snprintf answers what it would have written: added up past the buffer,
+// the next call's room wrapped to a huge size_t and it wrote past the end,
+// over the globals beside it -- a long exception chain from a client's
+// input did it ([SECURITY_RUN_6]). So the length stops at the last byte.
+static void bt_advance(int n)
+{
+	if(n > 0)
+		backtrace_buffer_len = std::min(backtrace_buffer_len + (size_t)n,
+				sizeof backtrace_buffer - 1);
+}
+
 static void bt_print_newline()
 {
-	backtrace_buffer_len += snprintf(
+	bt_advance(snprintf(
 			backtrace_buffer + backtrace_buffer_len,
 			sizeof backtrace_buffer - backtrace_buffer_len,
-			"\n");
+			"\n"));
 }
 
 static void bt_print(const char *fmt, ...)
 {
 	va_list va_args;
 	va_start(va_args, fmt);
-	backtrace_buffer_len += vsnprintf(
+	bt_advance(vsnprintf(
 			backtrace_buffer + backtrace_buffer_len,
 			sizeof backtrace_buffer - backtrace_buffer_len,
-			fmt, va_args);
+			fmt, va_args));
 	va_end(va_args);
 	bt_print_newline();
 }
@@ -168,7 +180,8 @@ static void bt_print_backtrace(char **symbols, void* const *trace, int trace_siz
 	}
 
 	// Remove trailing newline
-	if(backtrace_buffer[backtrace_buffer_len-1] == '\n'){
+	if(backtrace_buffer_len > 0 &&
+			backtrace_buffer[backtrace_buffer_len-1] == '\n'){
 		backtrace_buffer[backtrace_buffer_len-1] = 0;
 		backtrace_buffer_len--;
 	}

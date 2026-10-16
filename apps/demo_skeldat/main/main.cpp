@@ -1635,6 +1635,13 @@ struct Module: public interface::Module, public luanti_session::Game
 	void dig(size_t peer, Player &pl, int x, int y, int z)
 	{
 		const ss_ at = pos_key(x, y, z);
+		// Reach first: a client's y of 5e8 made voxelworld throw, and each
+		// throw logged a backtrace ([SECURITY_RUN_6])
+		if(!reaches(pl, x, y, z)){
+			log_i(MODULE, "skeldat: %s's dig at %s refused", cs(pl.name),
+					cs(at));
+			return;
+		}
 		const uint32_t id = id_at(x, y, z);
 		const skeldat::NodeDef *n = node_of(id);
 		Stack &tool = pl.main[pl.wield];
@@ -1684,6 +1691,8 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void place(size_t peer, Player &pl, int x, int y, int z)
 	{
+		if(!reaches(pl, x, y, z))
+			return;
 		Stack &st = pl.main[pl.wield];
 		const uint32_t id = id_of(st.name);
 		const skeldat::NodeDef *n = node_of(id);
