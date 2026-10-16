@@ -1,12 +1,13 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-16)
-# covers: builtin/world_menu/** builtin/storage/storage.cpp
-# [WORLD_MENU]: the shared world menu in skeldat and skelenti, driven by
-# the launcher's own client (-u launcher=1). In each, on a fresh server, a
-# world made through New world... (skeldat's with the seed option typed)
-# and played; on the server started again, the world listed, renamed
-# and deleted, the list empty after.
+# covers: builtin/world_menu/** builtin/storage/storage.cpp apps/vanilla/main/client_lua/menu.lua
+# [WORLD_MENU]: the shared world menu in skeldat, skelenti and vanilla,
+# driven by the launcher's own client (-u launcher=1). In each, on a fresh
+# server, a world made through New world... (skeldat's with the seed
+# option typed; vanilla's New save..., the minimal game) and played; on
+# the server started again, the world listed, renamed and deleted (to
+# vanilla's trash), the list empty after.
 #   builtin/world_menu/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -20,7 +21,8 @@ b="$here/Build/bin/buildat"
 run()
 {
 	local app=$1 n=$2 cmds=$3
-	BUILDAT_SKELDAT_WORLD= BUILDAT_SKELENTI_WORLD= start_server \
+	BUILDAT_SKELDAT_WORLD= BUILDAT_SKELENTI_WORLD= BUILDAT_LUANTI_SAVE= \
+		BUILDAT_LUANTI_GAME= start_server \
 		"$t/$app.srv$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -u launcher=1 -m "$here/apps/$app" \
 		-D "$t/$app/srv" -C "$t/$app/srv.cache" -l 3 ||
@@ -71,5 +73,27 @@ for app in demo_skeldat demo_skelenti; do
 		fail "$short: the deleted world's directory is still there"
 	echo "  $short: made (and played), renamed, deleted"
 done
-echo "PASS: the world menu in skeldat and skelenti: a world made, played, renamed and deleted"
+# vanilla: its own New save... screens, then the shared list's Rename and
+# Delete
+printf '%s\n' "wait_log 120000 menu: 0 saves" "delay 1000" \
+	'click Button "New save..."' "delay 800" 'click Button "minimal"' \
+	"delay 800" 'click Button "Create and play"' \
+	"wait_log 180000 load: the world is in" "quit" > "$t/vanilla.cmds1"
+run vanilla 1 "$t/vanilla.cmds1"
+grep -aq "The world is up" "$t/vanilla.srv1.log" ||
+	fail "vanilla: New save did not start a world ($t/vanilla.srv1.log)"
+printf '%s\n' "wait_log 120000 menu: 1 saves" "delay 1000" \
+	'click Button "world*"' "wait_log 10000 menu: the world world shown" \
+	"delay 300" 'click Button "Rename..."' \
+	"wait_log 5000 world_menu: the name screen shown" "delay 300" \
+	"text renamed" "delay 300" 'click Button "Rename"' \
+	"wait_log 10000 menu: the world renamed shown" "delay 300" \
+	'click Button "Delete..."' "delay 500" 'click Button "Move to the trash"' \
+	"wait_log 10000 menu: 0 saves" "quit" > "$t/vanilla.cmds2"
+run vanilla 2 "$t/vanilla.cmds2"
+grep -aq "Save world renamed renamed" "$t/vanilla.srv2.log" &&
+	grep -aq "Save renamed moved to .*/trash/renamed-" "$t/vanilla.srv2.log" ||
+	fail "vanilla: not renamed and trashed ($t/vanilla.srv2.log)"
+echo "  vanilla: made (and played), renamed, moved to the trash"
+echo "PASS: the world menu in skeldat, skelenti and vanilla: a world made, played, renamed and deleted"
 # vim: set noet ts=4 sw=4:

@@ -159,6 +159,7 @@ struct Module: public interface::Module
 			{"get_perf_settings", &Module::on_get_perf_settings},
 			{"set_perf_settings", &Module::on_set_perf_settings},
 			{"delete", &Module::on_delete},
+			{"rename", &Module::on_rename},
 			{"open", &Module::on_open},
 			{"create", &Module::on_create},
 			{"get_imports", &Module::on_get_imports},
@@ -2068,6 +2069,41 @@ struct Module: public interface::Module
 		}
 		log_i(MODULE, "Save %s moved to %s", cs(values[0]), cs(to));
 		menu_message(packet.sender, values[0]+" moved to the trash");
+	}
+
+	// [WORLD_MENU] [name, to]
+	void on_rename(const network::Packet &packet)
+	{
+		if(!may_manage(packet.sender))
+			return;
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:rename: %s", e.what());
+			return;
+		}
+		if(values.size() != 2 || !is_world_name(values[0]) ||
+				!is_world_name(values[1]))
+			return;
+		if(m_starting && values[0] == m_world_name){
+			menu_error(packet.sender, "The world that is running is not "
+					"renamed");
+			return;
+		}
+		bool ok = false;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			ok = istorage->rename(values[0], values[1]);
+		});
+		if(!ok){
+			menu_error(packet.sender, values[0]+" was not renamed: "
+					"is there a save called "+values[1]+" already?");
+			return;
+		}
+		log_i(MODULE, "Save %s renamed %s", cs(values[0]), cs(values[1]));
+		menu_message(packet.sender, values[0]+" renamed "+values[1]);
 	}
 
 	sv_<ss_> list_apps()

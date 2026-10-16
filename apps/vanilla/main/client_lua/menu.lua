@@ -16,6 +16,7 @@ local cereal = require("buildat/extension/cereal")
 local ui_utils = require("buildat/extension/ui_utils")
 local rgb = (ui_utils.safe or ui_utils).rgb
 local uistack = require("buildat/extension/uistack")
+local world_menu = require("buildat/module/world_menu")
 
 local root = nil
 -- The one line the waiting screen shows, kept so that the next thing to say
@@ -23,9 +24,6 @@ local root = nil
 -- while a game loads is one line per mod, and a game has a couple of hundred
 local waiting_text = nil
 local games = {}
--- Which page of the save list is on the screen; the list is redrawn when it
--- changes, which is what every other change to this menu does too
-local page = 1
 -- What the last save list said, so that a screen that goes back to it does
 -- not have to ask the server again
 local last_saves, last_save_games = {}, {}
@@ -91,7 +89,6 @@ end
 
 -- What is typed into each list's filter box, kept across the redraws a page
 -- turn or a filter change costs. See add_filter().
-local save_filter = ""
 local import_filter = ""
 local game_filter = ""
 -- Which page of the game list the new-save flow is on
@@ -316,37 +313,16 @@ local function button_on(menu, parent, label, action, width, main)
 	return b
 end
 
--- The world screen in two columns: the saves on the left as a list that
--- scrolls, the selected one's glance, its two world.mt flags, Play and
--- Delete on the right. A row's click selects it and asks the server for
--- the glance; a second click (or Enter on it) plays.
+-- The world screen: builtin/world_menu's two columns, the saves on the
+-- left, the selected one's glance, its two world.mt flags and what it
+-- does on the right. What is vanilla's goes in through the screen's
+-- hooks: each row's game and size, the disk line, the imports, the
+-- glance (main:save_info) and the buttons of the world's own screens.
 -- simplified: a row shows the name and the game, not when it was last
 -- played -- that is in the panel, read on select; official's Configure,
 -- Host and Announce are not here.
 function draw(saves, save_games)
 	last_saves, last_save_games = saves, save_games
-	close()
-	root = uistack.main:push({desc = "vanilla menu: saves"})
-	-- Over the HUD and the hotbar (priority 10) when over the world
-	root.priority = 100
-	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
-	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-
-	local title = menu.window:CreateChild("Text")
-	title:SetStyleAuto()
-	title:SetText(menu_game and (menu_game .. ": which world?") or
-			"vanilla: which save?")
-
-	local columns = menu.window:CreateChild("UIElement")
-	columns:SetLayout(narrow() and magic.LM_VERTICAL or magic.LM_HORIZONTAL,
-			16, magic.IntRect(0, 0, 0, 0))
-	local left = columns:CreateChild("UIElement")
-	left:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
-	left:SetFixedWidth(fit(520))
-	local right = columns:CreateChild("UIElement")
-	right:SetLayout(magic.LM_VERTICAL, 8, magic.IntRect(0, 0, 0, 0))
-	right:SetFixedWidth(fit(420))
-
 	-- Every save, newest first: the server sorts them by when each was
 	-- last played
 	local items = {}
@@ -373,39 +349,10 @@ function draw(saves, save_games)
 			items[#items + 1] = {label = label, name = name}
 		end
 	end
-	local shown = filtered(items, save_filter)
-	add_filter({window = left}, save_filter, #items, #shown, function(text)
-		save_filter = text
-		draw(saves, save_games)
-	end)
-	local list = left:CreateChild("ListView")
-	list:SetStyleAuto()
-	list:SetFixedSize(fit(520), narrow() and
-			math.max(100, math.floor(magic.ui.root.height * 0.18)) or 520)
-	if selected_save then
-		local still = false
-		for _, item in ipairs(shown) do
-			if item.name == selected_save then
-				still = true
-			end
-		end
-		if not still then
-			selected_save = nil
-		end
-	end
-	local row_buttons = {}
-	local function select(name)
-		selected_save = name
-		for n, b in pairs(row_buttons) do
-			b.selected = (n == name)
-		end
-		buildat.send_packet("main:save_info",
-				cereal.binary_output({name}, {"array", "string"}))
-	end
 	-- Play, or what it does to the running world when it was changed
-	local function play_label()
-		return M.back and not public and selected_save == running_world and
-				changed_worlds[selected_save] and "Reload world to apply" or "Play"
+	local function play_label(name)
+		return M.back and not public and name == running_world and
+				changed_worlds[name] and "Reload world to apply" or "Play"
 	end
 	local function play(name)
 		-- [PAUSE_WORLDS_LOCAL] Over a launcher's running game: the running
@@ -432,67 +379,10 @@ function draw(saves, save_games)
 		buildat.send_packet("main:open",
 				cereal.binary_output({name}, {"array", "string"}))
 	end
-	for _, item in ipairs(shown) do
-		local row = list.contentElement:CreateChild("Button")
-		row:SetStyleAuto()
-		row:SetName("Button")
-		row:SetLayout(magic.LM_VERTICAL, 10, magic.IntRect(8, 0, 8, 0))
-		row:SetFixedWidth(fit(520) - 24)
-		row.minHeight = 28
-		local text = row:CreateChild("Text")
-		text:SetName("ButtonText")
-		text:SetStyleAuto()
-		text:SetText(item.label)
-		text:SetTextAlignment(magic.HA_LEFT)
-		row_buttons[item.name] = row
-		menu:add(row, function()
-			if selected_save == item.name then
-				play(item.name)
-			elseif not selected_save then
-				-- The right column is drawn only for a selection
-				selected_save = item.name
-				draw(saves, save_games)
-			else
-				select(item.name)
-			end
-		end)
-		list:AddItem(row)
+	local function one(packet, name)
+		buildat.send_packet(packet,
+				cereal.binary_output({name}, {"array", "string"}))
 	end
-	if #shown == 0 then
-		local none = left:CreateChild("Text")
-		none:SetStyleAuto()
-		none:SetText(#items == 0 and "No saves yet" or "Nothing matches")
-	end
-	-- Under a limit only: a player's own local game has none
-	if disk and disk[2] > 0 then
-		local line = left:CreateChild("Text")
-		line:SetStyleAuto()
-		line:SetName("DiskLine")
-		line:SetWordwrap(true)
-		line:SetFixedWidth(fit(520))
-		line:SetText("Disk: " .. mb(disk[1]) .. " of " ..
-				mb(disk[2]) .. " (worlds " .. mb(disk[3]) .. ", games " ..
-				mb(disk[4]) .. ", cache " .. mb(disk[5]) .. ")")
-		if disk[1] >= disk[2] then
-			line:SetColor(magic.Color(rgb("error")))
-		end
-	end
-
-	-- One button rather than one per game: which game is a choice, and it
-	-- goes on the same screen as the name it is being given
-	local under = {add = function(_, label, action)
-		return button_on(menu, left, label, action, fit(520))
-	end}
-	under:add(menu_game and "New world..." or "New save...", function()
-		if menu_game then
-			draw_new_save_name(menu_game)
-			return
-		end
-		game_filter = ""
-		game_page = 1
-		draw_new_game()
-	end)
-
 	-- What the import folder has ([LUANTI_IMPORT_FOLDER]), which is where a
 	-- game and a world come from until somebody has put one here by hand
 	local function ask_for_imports(which)
@@ -502,171 +392,182 @@ function draw(saves, save_games)
 		waiting("Looking in the import folder...")
 		buildat.send_packet("main:get_imports", "")
 	end
-	-- [WORLD_TRIM_MOVE] A zipped Buildat save or Luanti world, from this
-	-- computer to the server
-	under:add("Import a world from a zip...", function()
-		M.import_zip()
-	end)
-	if public then
-		-- A game from ContentDB is on the server for everyone, where an
-		-- import is from this computer's Luanti
-		under:add("Get a game from ContentDB...", function()
-			ask_contentdb("")
-		end)
-		-- [VANILLA_STOP] The players are held in a menu of their own until
-		-- an admin starts a world again
-		if public == "public_running" then
-			under:add("Stop the world...", function()
-				ui_utils.show_confirm_dialog("Stop the world? Everyone is " ..
-						"held until an admin starts one again.", function()
-					waiting("Stopping...")
-					buildat.send_packet("main:stop_world", "")
-				end, function() end, "Stop")
-			end)
-		end
-	else
-		under:add("Import a game from Luanti...", function()
-			ask_for_imports("games")
-		end)
-		under:add("Import a world from Luanti...", function()
-			ask_for_imports("worlds")
-		end)
-	end
-	-- Back, by Escape or the × ([CLOSE_GLYPH]): to the world, or to the
-	-- launcher's grid ([MENU_CONTEXT]); a client that came straight to this
-	-- server leaves it instead
-	local function back()
-		if public == "public_running" or M.back then
-			done = true
-			close()
-			if M.back then
-				M.back()
-			end
-		else
-			buildat.leave()
-		end
-	end
-	menu:on_key(function(key)
-		if key == magic.KEY_ESCAPE and magic.input:GetKeyPress(key) then
-			back()
-			return true
-		end
-	end)
-	ui_utils.close_glyph(root, menu.window, back)
-
-	-- The right column: the glance, the flags, Play and Delete
-	panel = {lines = {}, flags = {}}
-	local head = right:CreateChild("Text")
-	head:SetStyleAuto()
-	head:SetText(selected_save or (narrow() and "Pick a world above" or
-			"Pick a world on the left"))
-	panel.head = head
-	-- [WORLDS_SELECTED] Nothing more without a selection: no glance, no
-	-- flags, no buttons, and nothing for the keyboard walk to stop on
-	if selected_save then
-		-- On a narrow screen the glance is one line that wraps, so that the
-		-- screen fits a phone's height
-		for k = 1, narrow() and 1 or 7 do
-			local line = right:CreateChild("Text")
-			line:SetStyleAuto()
-			line:SetText("")
-			line:SetTextAlignment(magic.HA_LEFT)
-			if narrow() then
-				line:SetWordwrap(true)
-				line:SetFixedWidth(fit(420))
-			end
-			panel.lines[k] = line
-		end
-		local function flag_row(key, label)
-			local b = button_on(menu, right, "[ ] " .. label, function()
-				if not selected_save or panel.flags[key] == nil then
-					return
-				end
-				local f = panel.flags
-				f[key] = not f[key]
-				changed_worlds[selected_save] = true
-				panel.play:GetChild("ButtonText"):SetText(play_label())
-				log:info("menu: " .. label .. " " .. (f[key] and "on" or "off") ..
-						" for " .. selected_save)
-				buildat.send_packet("main:set_world_flags",
-						cereal.binary_output({selected_save,
-						f.creative_mode and "true" or "false",
-						f.enable_damage and "true" or "false"}, {"array", "string"}))
-			end, fit(420))
-			panel[key] = {button = b, label = label}
-		end
-		flag_row("creative_mode", "Creative mode")
-		flag_row("enable_damage", "Enable damage")
-		button_on(menu, right, "Game settings...", function()
-			if selected_save then
-				waiting("Reading the settings of " .. selected_save .. "...")
-				buildat.send_packet("main:get_game_settings",
-						cereal.binary_output({selected_save}, {"array", "string"}))
-			end
-		end, fit(420))
-		-- [SERVER_PRESETS] the same form, of what the world costs its server
-		button_on(menu, right, "Server performance...", function()
-			if selected_save then
-				waiting("Reading the settings of " .. selected_save .. "...")
-				buildat.send_packet("main:get_perf_settings",
-						cereal.binary_output({selected_save}, {"array", "string"}))
-			end
-		end, fit(420))
-		-- [WORLD_MODS]
-		button_on(menu, right, "Mods...", function()
-			if selected_save then
-				waiting("Reading the mods of " .. selected_save .. "...")
-				buildat.send_packet("main:get_world_mods",
-						cereal.binary_output({selected_save}, {"array", "string"}))
-			end
-		end, fit(420))
-		-- [WORLD_TRIM_MOVE]
-		button_on(menu, right, "Trim...", function()
-			if selected_save then
-				waiting("Reading " .. selected_save .. "...")
-				buildat.send_packet("main:trim", cereal.binary_output(
-						{selected_save, "info"}, {"array", "string"}))
-			end
-		end, fit(420))
-		button_on(menu, right, "Export...", function()
-			if selected_save then
-				M.export(selected_save)
-			end
-		end, fit(420))
-		-- [WORLD_TXP]
-		button_on(menu, right, "Texture pack...", function()
-			if selected_save then
-				waiting("Reading the texture pack of " .. selected_save .. "...")
-				buildat.send_packet("main:get_world_txp",
-						cereal.binary_output({selected_save}, {"array", "string"}))
-			end
-		end, fit(420))
-		panel.play = button_on(menu, right, play_label(), function()
-			if selected_save then
-				play(selected_save)
-			end
-		end, fit(420), true)
-		button_on(menu, right, "Delete...", function()
-			local name = selected_save
-			if not name then
+	local spec = {
+		title = menu_game and (menu_game .. ": which world?") or
+				"vanilla: which save?",
+		worlds = items,
+		selected = selected_save,
+		on_select = function(name) selected_save = name end,
+		empty = "No saves yet",
+		-- One button rather than one per game: which game is a choice, and
+		-- it goes on the same screen as the name it is being given
+		new_label = menu_game and "New world..." or "New save...",
+		new = function()
+			if menu_game then
+				draw_new_save_name(menu_game)
 				return
 			end
-			ui_utils.show_confirm_dialog("Move the world \"" .. name ..
-					"\" to the trash?", function()
-				selected_save = nil
-				waiting("Moving " .. name .. " to the trash...")
-				buildat.send_packet("main:delete",
-						cereal.binary_output({name}, {"array", "string"}))
-			end, function() end, "Move to the trash")
-		end, fit(420))
-		-- The selected row in view and in focus, and its glance asked for
-		local row = row_buttons[selected_save]
-		list:SetSelection(list:FindItem(row))
-		row:SetFocus(true)
-		select(selected_save)
+			game_filter = ""
+			game_page = 1
+			draw_new_game()
+		end,
+		play = play,
+		play_label = play_label,
+		rename = function(name, to)
+			selected_save = to
+			waiting("Renaming " .. name .. "...")
+			buildat.send_packet("main:rename", cereal.binary_output({name, to},
+					{"array", "string"}))
+		end,
+		delete_text = function(name)
+			return "Move the world \"" .. name .. "\" to the trash?"
+		end,
+		delete_yes = "Move to the trash",
+		delete = function(name)
+			waiting("Moving " .. name .. " to the trash...")
+			one("main:delete", name)
+		end,
+		-- Over the HUD and the hotbar (priority 10) when over the world
+		push = function(kind)
+			close()
+			root = uistack.main:push({desc = "vanilla menu: " ..
+					(kind == "worlds" and "saves" or kind)})
+			root.priority = 100
+			return root
+		end,
+		-- Under a limit only: a player's own local game has none
+		footer = function(left)
+			if not (disk and disk[2] > 0) then
+				return
+			end
+			local line = left:CreateChild("Text")
+			line:SetStyleAuto()
+			line:SetName("DiskLine")
+			line:SetWordwrap(true)
+			line:SetFixedWidth(fit(520))
+			line:SetText("Disk: " .. mb(disk[1]) .. " of " ..
+					mb(disk[2]) .. " (worlds " .. mb(disk[3]) .. ", games " ..
+					mb(disk[4]) .. ", cache " .. mb(disk[5]) .. ")")
+			if disk[1] >= disk[2] then
+				line:SetColor(magic.Color(rgb("error")))
+			end
+		end,
+		under = function(add)
+			-- [WORLD_TRIM_MOVE] A zipped Buildat save or Luanti world, from
+			-- this computer to the server
+			add("Import a world from a zip...", function() M.import_zip() end)
+			if public then
+				-- A game from ContentDB is on the server for everyone, where
+				-- an import is from this computer's Luanti
+				add("Get a game from ContentDB...", function()
+					ask_contentdb("")
+				end)
+				-- [VANILLA_STOP] The players are held in a menu of their own
+				-- until an admin starts a world again
+				if public == "public_running" then
+					add("Stop the world...", function()
+						ui_utils.show_confirm_dialog("Stop the world? Everyone " ..
+								"is held until an admin starts one again.",
+								function()
+							waiting("Stopping...")
+							buildat.send_packet("main:stop_world", "")
+						end, function() end, "Stop")
+					end)
+				end
+			else
+				add("Import a game from Luanti...", function()
+					ask_for_imports("games")
+				end)
+				add("Import a world from Luanti...", function()
+					ask_for_imports("worlds")
+				end)
+			end
+		end,
+		-- Back, by Escape or the × ([CLOSE_GLYPH]): to the world, or to the
+		-- launcher's grid ([MENU_CONTEXT]); a client that came straight to
+		-- this server leaves it instead
+		back = function()
+			if public == "public_running" or M.back then
+				done = true
+				close()
+				if M.back then
+					M.back()
+				end
+			else
+				buildat.leave()
+			end
+		end,
+		-- The glance (main:save_info fills it), the flags and the world's
+		-- own screens
+		panel = function(add, right, name, head)
+			panel = {lines = {}, flags = {}, head = head}
+			-- On a narrow screen the glance is one line that wraps, so that
+			-- the screen fits a phone's height
+			for k = 1, narrow() and 1 or 7 do
+				local line = right:CreateChild("Text")
+				line:SetStyleAuto()
+				line:SetText("")
+				line:SetTextAlignment(magic.HA_LEFT)
+				if narrow() then
+					line:SetWordwrap(true)
+					line:SetFixedWidth(fit(420))
+				end
+				panel.lines[k] = line
+			end
+			local function flag_row(key, label)
+				local b = add("[ ] " .. label, function()
+					if panel.flags[key] == nil then
+						return
+					end
+					local f = panel.flags
+					f[key] = not f[key]
+					changed_worlds[name] = true
+					panel.play:GetChild("ButtonText"):SetText(play_label(name))
+					log:info("menu: " .. label .. " " .. (f[key] and "on" or
+							"off") .. " for " .. name)
+					buildat.send_packet("main:set_world_flags",
+							cereal.binary_output({name,
+							f.creative_mode and "true" or "false",
+							f.enable_damage and "true" or "false"},
+							{"array", "string"}))
+				end)
+				panel[key] = {button = b, label = label}
+			end
+			flag_row("creative_mode", "Creative mode")
+			flag_row("enable_damage", "Enable damage")
+			local function screen_button(label, reading, packet)
+				add(label, function()
+					waiting("Reading " .. reading .. name .. "...")
+					one(packet, name)
+				end)
+			end
+			screen_button("Game settings...", "the settings of ",
+					"main:get_game_settings")
+			-- [SERVER_PRESETS] the same form, of what the world costs its
+			-- server
+			screen_button("Server performance...", "the settings of ",
+					"main:get_perf_settings")
+			-- [WORLD_MODS]
+			screen_button("Mods...", "the mods of ", "main:get_world_mods")
+			-- [WORLD_TRIM_MOVE]
+			add("Trim...", function()
+				waiting("Reading " .. name .. "...")
+				buildat.send_packet("main:trim", cereal.binary_output(
+						{name, "info"}, {"array", "string"}))
+			end)
+			add("Export...", function() M.export(name) end)
+			-- [WORLD_TXP]
+			screen_button("Texture pack...", "the texture pack of ",
+					"main:get_world_txp")
+			-- Its glance asked for
+			one("main:save_info", name)
+		end,
+	}
+	panel = nil
+	local shown = world_menu.open(spec)
+	if panel then
+		panel.play = shown.play
 	end
-
-	magic.input:SetMouseVisible(true, "a menu screen")
 
 	-- A launch that asked for an import screen goes straight to it, once
 	-- the save list it comes back to is drawn ([LAUNCH_GRID])

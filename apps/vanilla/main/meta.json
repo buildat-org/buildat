@@ -12,6 +12,7 @@
 		{"module": "voxel_shading"},
 		{"module": "luanti"},
 		{"module": "accounts"},
-		{"module": "starport_announce"}
+		{"module": "starport_announce"},
+		{"module": "world_menu"}
 	]
 }
