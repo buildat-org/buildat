@@ -6,17 +6,17 @@
 # move_check.h, and the engine pathfinder's with its time a search), then
 # two runs of one world at seed 2 (valleys: a dry spawn, no steps
 # over one voxel ahead), noon.
-# The first, two players: player1 walks and jumps unchecked by the
+# The first, two players: client1 walks and jumps unchecked by the
 # movement check, and is pulled back once a drive forces fly, fast and
 # noclip; digs a voxel without bones, which drops; a test skeleton burns in
-# the sun and dies. player2 says a line, and player1 reports player2. The
+# the sun and dies. client2 says a line, and client1 reports client2. The
 # map makes bone piles in the zone in sight.
 # The second, restarted with the save as if long away (the sections catch
 # up) and the client the launcher's own (an admin): the test boar is back
-# from the save; the admin mutes player2 from the report and sets who may
+# from the save; the admin mutes client2 from the report and sets who may
 # talk, gives and takes an item (the audit log has both), flies into the
 # bones zone unchecked, where the fog, the danger music and a skeleton come
-# and a dug voxel drops nothing. player2's line is refused, muted.
+# and a dug voxel drops nothing. client2's line is refused, muted.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -64,14 +64,14 @@ placed='wait_log 180000 skeldat: placed at'
 # 1. Two players
 cat > "$t/a1.cmds" <<EOF
 $placed
-wait_log 60000 chat: <player2> hello from player2
+wait_log 60000 chat: <client2> hello from client2
 keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 click Button "Who's in the chat..."
 wait_log 5000 chat: the menu shown
 delay 1000
-click Button "Report player2"
+click Button "Report client2"
 delay 1000
 click Button "Close"
 wait_log 5000 pause: the menu shown
@@ -116,7 +116,7 @@ $placed
 delay 2000
 keypress T
 delay 800
-text hello from player2
+text hello from client2
 keypress Return
 delay 500
 keypress Escape
@@ -128,17 +128,17 @@ keyup W
 delay 10000
 quit
 EOF
-# Both spawn at one place: bones at 8 beside it make player2 look like a
-# skeleton to player1 until it walks off (7 and the box: bones.h's self test)
+# Both spawn at one place: bones at 8 beside it make client2 look like a
+# skeleton to client1 until it walks off (7 and the box: bones.h's self test)
 BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
-wait_for_log "$t/srv1.log" "player1 joins" 240 || fail "player1 did not join ($t/a1.log)"
+wait_for_log "$t/srv1.log" "client1 joins" 240 || fail "client1 did not join ($t/a1.log)"
 client b1 "$t/b1.cmds"; bpid=$CLIENT
-wait $a || fail "player1's drive ($t/a1.log)"
+wait $a || fail "client1's drive ($t/a1.log)"
 wait $bpid
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 s="$t/srv1.log"
-grep -aq "player1 is a player" "$s" || fail "player1 was not a player ($s)"
+grep -aq "client1 is a player" "$s" || fail "client1 was not a player ($s)"
 first_pull=$(grep -a "pulled back" "$s" | head -1 | awk '{print $3}')
 cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] || fail "the drive set no modes ($t/a1.log)"
@@ -147,15 +147,15 @@ cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{prin
 for why in "in the air" "too far" "in a wall"; do
 	grep -aq "pulled back .*: $why" "$s" || fail "no pull back for \"$why\" ($s)"
 done
-grep -aE "player1 digs skeldat:[a-z_]+ at [-0-9,]+, bones [0-3]$" "$s" | grep -q . ||
+grep -aE "client1 digs skeldat:[a-z_]+ at [-0-9,]+, bones [0-3]$" "$s" | grep -q . ||
 	fail "no dig without bones that drops ($s)"
 grep -aq "the skeleton ([0-9]*) burns" "$s" && grep -aq "the skeleton .* dies" "$s" ||
 	fail "the test skeleton did not burn to death ($s)"
-grep -aq "<player2> hello from player2" "$s" || fail "player2's line ($s)"
-grep -aq "player1 reports player2" "$s" || fail "no report ($s, $t/a1.log)"
-grep -a "skeldat: player2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks like a //' |
+grep -aq "<client2> hello from client2" "$s" || fail "client2's line ($s)"
+grep -aq "client1 reports client2" "$s" || fail "no report ($s, $t/a1.log)"
+grep -a "skeldat: client2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks like a //' |
 	tr '\n' ' ' | grep -qx "skeleton player " ||
-	fail "player2 did not look like a skeleton by the bones and then a player ($t/a1.log)"
+	fail "client2 did not look like a skeleton by the bones and then a player ($t/a1.log)"
 
 # 2. The admin, the save as if a day away
 cat > "$t/a2.cmds" <<EOF
@@ -168,7 +168,7 @@ delay 500
 click Button "Who's in the chat..."
 wait_log 5000 chat: the menu shown
 delay 5000
-click Button "Mute player2"
+click Button "Mute client2"
 delay 1500
 click DropDownList "▼"
 delay 500
@@ -181,14 +181,14 @@ delay 500
 click Button "Admin..."
 wait_log 30000 pause: admin got players
 delay 500
-click Button "player1"
-wait_log 30000 pause: admin got inv player1
+click Button "client1"
+wait_log 30000 pause: admin got inv client1
 delay 500
 click Button "Give a stack"
-wait_log 30000 pause: admin got inv player1
+wait_log 30000 pause: admin got inv client1
 delay 500
 click Button "Take*"
-wait_log 30000 pause: admin got inv player1
+wait_log 30000 pause: admin got inv client1
 delay 500
 click Button "Back"
 wait_log 30000 pause: admin got players
@@ -239,7 +239,7 @@ quit
 EOF
 BUILDAT_SKELDAT_AWAY=86400 server "$t/srv2.log" -u launcher=1
 client a2 "$t/a2.cmds"; a=$CLIENT
-wait_for_log "$t/srv2.log" "mutes player2" 300 || fail "no mute ($t/a2.log)"
+wait_for_log "$t/srv2.log" "mutes client2" 300 || fail "no mute ($t/a2.log)"
 client b2 "$t/b2.cmds"; bpid=$CLIENT
 wait $a || fail "the admin's drive ($t/a2.log)"
 wait $bpid
@@ -249,13 +249,13 @@ mobs=$(grep -a 'the world "w" starts' "$s" | sed 's/.*furnaces, \([0-9]*\) mobs.
 [ "${mobs:-0}" -ge 1 ] || fail "no mob back from the save ($s)"
 caught=$(grep -a "caught up" "$s" | tail -1 | sed 's/.*, \([0-9]*\) caught up.*/\1/')
 [ "${caught:-0}" -ge 1 ] || fail "no section caught up ($s)"
-grep -aq "player1 is an admin" "$s" || fail "the launcher's client was no admin ($s)"
-grep -aq "player1 mutes player2, upholding a report" "$s" || fail "the mute ($s)"
+grep -aq "client1 is an admin" "$s" || fail "the launcher's client was no admin ($s)"
+grep -aq "client1 mutes client2, upholding a report" "$s" || fail "the mute ($s)"
 grep -aq "the lowest level that may talk is member" "$s" || fail "who may talk ($s)"
-grep -aq "player1 gives player1: " "$s" && grep -aq "player1 takes player1: " "$s" ||
+grep -aq "client1 gives client1: " "$s" && grep -aq "client1 takes client1: " "$s" ||
 	fail "the admin's give and take ($s)"
 grep -aq "pause: admin got audit" "$t/a2.log" || fail "the audit log page ($t/a2.log)"
-grep -aq "player2's line refused: muted" "$s" || fail "the muted line went out ($s)"
+grep -aq "client2's line refused: muted" "$s" || fail "the muted line went out ($s)"
 grep -aE "skeldat: the first bone piles, [1-9]" "$t/srv1.log" | grep -q . ||
 	fail "no bone piles generated ($t/srv1.log)"
 grep -aq "pulled back" "$s" && fail "the admin was pulled back ($s)"
@@ -264,7 +264,7 @@ grep -aE "skeldat: fog for danger (0\.[5-9]|1)" "$t/a2.log" | grep -q . ||
 grep -aq "skeldat: mood danger" "$t/a2.log" || fail "no danger music ($t/a2.log)"
 grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)" "$s" | grep -q . ||
 	fail "no skeleton spawned in the zone ($s)"
-grep -aq "player1 digs .*, dropping nothing" "$s" ||
+grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back, $caught caught up"
 echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu, the bones zone"

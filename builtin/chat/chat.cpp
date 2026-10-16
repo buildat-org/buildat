@@ -47,7 +47,8 @@ struct Module: public interface::Module, public Interface,
 	int m_min = 0; // index into MIN_NAMES
 	std::deque<ss_> m_lines;
 	std::map<size_t, std::pair<double, int64_t>> m_bucket;
-	std::map<size_t, int64_t> m_last_report;
+	// The last report by address: a reconnect is a new peer
+	std::map<ss_, int64_t> m_last_report;
 	// Each peer's address, for a report's bucket
 	std::map<size_t, ss_> m_address;
 
@@ -210,7 +211,6 @@ struct Module: public interface::Module, public Interface,
 		if(m_in.erase(peer))
 			send_states();
 		m_bucket.erase(peer);
-		m_last_report.erase(peer);
 	}
 
 	void say(const ss_ &line)
@@ -332,18 +332,25 @@ struct Module: public interface::Module, public Interface,
 		}
 	}
 
-	// A report of `who`, with the chat's last lines: one a peer each 30 s
+	// A report of `who`, with the chat's last lines: one an address each
+	// 30 s
 	void report(size_t peer, const ss_ &by, const ss_ &who)
 	{
 		bool there = false;
 		for(auto &pair : m_in)
 			there = there || pair.second == who;
 		const int64_t now = now_s();
-		auto last = m_last_report.find(peer);
+		const ss_ addr = m_address.count(peer) ? m_address[peer] :
+				"peer "+std::to_string(peer);
+		auto last = m_last_report.find(addr);
 		if(!there || who == by || (last != m_last_report.end() &&
 				now - last->second < REPORT_EVERY_S))
 			return;
-		m_last_report[peer] = now;
+		// The addresses past their wait go; the map holds the last 30 s's
+		for(auto it = m_last_report.begin(); it != m_last_report.end();)
+			it = now - it->second >= REPORT_EVERY_S ?
+					m_last_report.erase(it) : std::next(it);
+		m_last_report[addr] = now;
 		ss_ text;
 		const size_t from = m_lines.size() > REPORT_LINES ?
 				m_lines.size() - REPORT_LINES : 0;

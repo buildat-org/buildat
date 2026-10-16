@@ -24,13 +24,13 @@ struct Playfield
 	}
 	int get(int x, int y){
 		size_t i = y * w + x;
-		if(i > tiles.size())
+		if(i >= tiles.size())
 			return 0;
 		return tiles[i];
 	}
 	void set(int x, int y, int v){
 		size_t i = y * w + x;
-		if(i > tiles.size())
+		if(i >= tiles.size())
 			return;
 		if(!inside_field(x, y))
 			return;

@@ -1210,8 +1210,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		accounts::access(m_server, [&](accounts::Interface *i){
 			name = i->name_of(peer);
 		});
+		// A peer without an account is "client<peer>", which accounts keeps
+		// from new accounts (reserved_name()): "player<peer>" was any
+		// account's of that name, its inventory and its chat name
 		if(name.empty())
-			name = "player"+itos(peer);
+			name = "client"+itos(peer);
 		m_session.join(name, peer, false);
 	}
 

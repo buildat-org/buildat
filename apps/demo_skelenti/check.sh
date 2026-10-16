@@ -30,7 +30,7 @@ w="$t/srv/apps/demo_skelenti/saves/world/luanti"
 mkdir -p "$w" && printf 'fixed_map_seed = 3\nmg_name = v7\n' > "$w/world.mt"
 export BUILDAT_SKELENTI_TEST="skeleton 0 3; boar 4 3" BUILDAT_LUANTI_FORCE_TIME=0
 BUILDAT_SKELENTI_WORLD= start_server "$t/srv.log" "STATUS Listening" 300 auto \
-	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skelenti" \
+	"$here/Build/bin/buildat_server" -u launcher=1 -m "$here/apps/demo_skelenti" \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 {
@@ -68,7 +68,7 @@ picked=$(grep -a "skelenti: .* picks up" "$t/srv.log" | sed 's/.*picks up //' | 
 # Again: the dialog lists the world and plays it, the boar in its save
 unset BUILDAT_SKELENTI_TEST
 BUILDAT_SKELENTI_WORLD= start_server "$t/srv2.log" "STATUS Listening" 300 auto \
-	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skelenti" \
+	"$here/Build/bin/buildat_server" -u launcher=1 -m "$here/apps/demo_skelenti" \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the restart ($t/srv2.log)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "wait_log 120000 worlds: the dialog shown, 1 worlds" \

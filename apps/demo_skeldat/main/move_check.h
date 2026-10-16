@@ -38,6 +38,8 @@ static const float SLACK = 1.5f;
 static const float JUMP = 1.5f;
 // How far under the move the box reaches for ground
 static const int DOWN = 8;
+// The fastest fall believed, voxels a second (luanti_session's on_fell cap)
+static const float FALL = 200;
 
 struct Verdict
 {
@@ -58,6 +60,14 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	if(std::hypot(tx - fx, tz - fz) > reach){
 		v.ok = false;
 		v.why = "too far";
+		return v;
+	}
+	// The box's height is the move's: up no more than a walk and a jump,
+	// down no more than a second at the fall speed luanti_session believes
+	// (200), or a client's y of 1e6 is a box of half a billion cells
+	if(ty - fy > reach + JUMP || fy - ty > FALL * dt + DOWN){
+		v.ok = false;
+		v.why = "too far up or down";
 		return v;
 	}
 	const P a0((int)std::floor(fx), (int)std::floor(fy), (int)std::floor(fz));
@@ -167,6 +177,9 @@ int main()
 	auto water = world([](int x, int y, int){
 		return x == 2 && y >= 0 && y < 6 ? CLIMB : -1; });
 	assert(ok(water, 2.5f, 0, 0.5f, 2.5f, 4, 0.5f));
+	// A client's position a million up or down: refused before any box
+	assert(!ok(flat, 0.5f, 0, 0.5f, 0.5f, 1e6f, 0.5f));
+	assert(!ok(flat, 0.5f, 0, 0.5f, 0.5f, -1e6f, 0.5f));
 	printf("skeldat move_check.h: self test passed\n");
 	return 0;
 }

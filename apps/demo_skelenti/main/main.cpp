@@ -128,11 +128,6 @@ struct Module: public interface::Module
 	storage::Save *m_save = nullptr;
 	storage::Store *m_store = nullptr;
 	std::set<size_t> m_waiting, m_shown;
-	// Who may pick, make and delete a world: a client on this machine.
-	// simplified: by its address (not a web page's); another user on the
-	// machine passes too -- the accounts module's owner token, as vanilla
-	// has it, is the upgrade
-	std::set<size_t> m_local;
 	bool m_starting = false;
 	std::map<uint32_t, Mob> m_mobs;
 	uint32_t m_next_key = 1;
@@ -164,7 +159,6 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("core:shutdown"));
 		m_server->sub_event(this, Event::t("luanti:game_loaded"));
 		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/skelenti:punch"));
@@ -181,8 +175,6 @@ struct Module: public interface::Module
 		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
 		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
 				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:client_connected", on_client_connected,
-				network::NewClient)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 		EVENT_TYPEN("network:packet_received/skelenti:world_play",
@@ -256,7 +248,7 @@ struct Module: public interface::Module
 	void send_worlds(size_t peer)
 	{
 		ss_ data = "wait";
-		if(m_local.count(peer)){
+		if(is_owner(peer)){
 			data = "list";
 			storage::access(m_server, [&](storage::Interface *i){
 				for(const storage::SaveInfo &info : i->list())
@@ -272,7 +264,7 @@ struct Module: public interface::Module
 	// A world packet is the dialog's, and only before a world runs
 	bool may_pick(const network::Packet &packet)
 	{
-		if(m_starting || !m_local.count(packet.sender)){
+		if(m_starting || !is_owner(packet.sender)){
 			log_w(MODULE, "skelenti: %s from peer %zu ignored",
 					cs(packet.name), packet.sender);
 			return false;
@@ -313,11 +305,15 @@ struct Module: public interface::Module
 		send_worlds(packet.sender);
 	}
 
-	void on_client_connected(const network::NewClient &event)
+	// Who may pick, make and delete a world: the launcher's own client (its
+	// owner token, not an address another user on this machine has too)
+	bool is_owner(size_t peer)
 	{
-		const ss_ &a = event.info.address;
-		if(!event.info.web && (a == "127.0.0.1" || a == "::1"))
-			m_local.insert(event.info.id);
+		bool owner = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			owner = i->is_local(peer);
+		});
+		return owner;
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)
@@ -410,7 +406,6 @@ struct Module: public interface::Module
 	{
 		m_shown.erase(old.info.id);
 		m_waiting.erase(old.info.id);
-		m_local.erase(old.info.id);
 		m_field.erase("player"+itos(old.info.id));
 		m_last_hit.erase(old.info.id);
 	}
