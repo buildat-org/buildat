@@ -32,7 +32,7 @@ flags="-std=c++17 -g -O1 -I$here/src -I$here
 declare -A srcs=(
 	[compress]="src/impl/compress.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp"
 	[packet_stream]="src/impl/packet_stream.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp"
-	[voxel_volume]="src/impl/voxel_volume.cpp src/impl/compress.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp 3rdparty/polyvox/library/PolyVoxCore/source/Region.cpp src/impl/voxel.cpp src/impl/linux/os.cpp src/impl/fs.cpp src/impl/linux/fs.cpp 3rdparty/c55lib/c55/filesys.cpp"
+	[voxel_volume]="src/impl/voxel_volume.cpp src/impl/compress.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp 3rdparty/polyvox/library/PolyVoxCore/source/Region.cpp src/impl/voxel.cpp src/impl/voxel_path.cpp src/impl/linux/os.cpp src/impl/fs.cpp src/impl/linux/fs.cpp 3rdparty/c55lib/c55/filesys.cpp"
 	[json]="src/core/json.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp"
 	[zip]="src/impl/zip.cpp src/impl/compress.cpp src/impl/fs.cpp src/impl/linux/fs.cpp src/core/log.cpp 3rdparty/c55lib/c55/os.cpp 3rdparty/c55lib/c55/filesys.cpp"
 	# The decoders compiled in, instrumented; the rest of Urho3D from its
