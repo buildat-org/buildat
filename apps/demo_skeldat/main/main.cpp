@@ -1730,6 +1730,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	// Where the server puts the player: the movement check's base too
 	void send_position(size_t peer, Player &pl)
 	{
+		// Its range follows ([SKELDAT_RESPAWN_LOAD]): the moves' own check
+		// sees no section change, the place having been set here already,
+		// and a respawned player's range stayed where it died
+		m_load_points_dirty = true;
 		pl.cx = pl.x;
 		pl.cy = pl.y;
 		pl.cz = pl.z;
@@ -2648,6 +2652,20 @@ struct Module: public interface::Module, public luanti_session::Game
 			std::istringstream it(item);
 			ss_ kind;
 			it>>kind;
+			if(kind == "place"){
+				// "place x z": the player moved onto that column's top
+				int x = 0, z = 0;
+				it>>x>>z;
+				int y = (m_y1 + 1) * skeldat::bones::SECTION - 1;
+				while(y > m_y0 * skeldat::bones::SECTION &&
+						id_at(x, y - 1, z) == ID_AIR)
+					y--;
+				p->x = (float)x, p->y = (float)y, p->z = (float)z;
+				send_position(peer, *p);
+				log_i(MODULE, "skeldat: test: %s placed at %d,%d,%d",
+						cs(p->name), x, y, z);
+				continue;
+			}
 			if(kind == "give"){
 				// "give item n k": k stacks of n into the player's main
 				int n = 0, k = 1;

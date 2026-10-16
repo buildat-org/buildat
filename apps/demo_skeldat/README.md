@@ -58,8 +58,9 @@ the ground;
 `BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
 at x, z from the first player, once (also `bones dx dz value` on the
 ground's voxel, `marker dx dz`, a marker skull, `craft i item n`, n
-of the item in the player's craft slot i, and `give item n k`, k stacks
-of n into its inventory);
+of the item in the player's craft slot i, `give item n k`, k stacks
+of n into its inventory, and `place x z`, the player moved onto that
+column);
 `BUILDAT_SKELDAT_SIZE="<half> <y0> <y1>"` a world's size in sections, over
 the size picked in the world menu (512, 1024, 256 or 128 wide; the two
 small ones 64 high); `BUILDAT_SKELDAT_SURVEY=1` the generated world's

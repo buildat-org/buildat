@@ -46,6 +46,7 @@
 # The thirteenth, invulnerability: the admin's toggle, kept over a rejoin.
 # The fourteenth, items on the ground: a full inventory's dig, the drop
 # key, a death's half; lying a game day, kept over a restart, picked up.
+# The fifteenth, a respawn far from the spawn: the world there drawn.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -710,9 +711,31 @@ grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
 grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 	[ $(grep -ac "client1 picks up 99 skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
+# 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
+# 512 x 128 x 512: the player's range follows it, the chunks within 2 of
+# the eye drawn within 30 s (a join's 2.5 s; before, not until the player
+# walked into another section)
+log18="$t/srv18.log"
+BUILDAT_SKELDAT_WORLD=respawn BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.4 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_TEST="place 0 250" \
+	start_server "$log18" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv18" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log18)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "wait_log 300000 skeldat: the chunks within 2 drawn" "delay 5000" \
+	"keypress K" "keypress J" "keydown Space" "delay 1500" "keyup Space" \
+	"keypress J" "keypress K" "wait_log 20000 pause: the death screen shown" \
+	"delay 1000" 'click Button "Respawn"' \
+	"wait_log 30000 skeldat: the chunks within 2 drawn" quit > "$t/respawn.cmds"
+client respawn "$t/respawn.cmds"
+wait $CLIENT || fail "the respawn's world not drawn ($t/respawn.log, $log18)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+respawn=$(grep -a "skeldat: the chunks within 2 drawn [0-9]" "$t/respawn.log" | tail -1 | sed "s/.*drawn //")
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
+echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world"
 # vim: set noet ts=4 sw=4:

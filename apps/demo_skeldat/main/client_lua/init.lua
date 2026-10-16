@@ -354,6 +354,58 @@ end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
+-- A placing (the join, a respawn) until the chunks within 2 of the camera
+-- are drawn, said once ([SKELDAT_RESPAWN_LOAD]): when the first of them
+-- came, and the last; checked ten times a second
+local placed_us, near_first, near_check, near_ready = nil, nil, 0, false
+local function watch_near(dt)
+	near_check = near_check - dt
+	if not placed_us or near_check > 0 then
+		return
+	end
+	near_check = 0.1
+	-- The player's eye, once the camera is there: undrawn_around() leaves
+	-- out what is past the far plane from the queue's last place, which
+	-- after a respawn is the old one
+	local eye = buildat.Vector3(player.x, player.y + 1.6, player.z)
+	local cam = camera_node.worldPosition
+	if voxelworld.get_chunk_position(eye) == nil or
+			(buildat.Vector3(cam) - eye):Length() > 4 then
+		near_ready = false
+		return
+	end
+	-- and the queue has had a frame there
+	if not near_ready then
+		near_ready = true
+		return
+	end
+	-- simplified: the layers inside 0 to WORLD_TOP alone (above it no
+	-- chunk is ever made, under 0 only in the 128-high worlds); the
+	-- world's own bottom on the client is the upgrade
+	local c0, sz = voxelworld.get_chunk_position(eye),
+			voxelworld.chunk_size_voxels
+	local undrawn, total = 0, 0
+	for dz = -2, 2 do for dy = -2, 2 do for dx = -2, 2 do
+		local mid = (c0.y + dy + 0.5) * sz.y
+		if mid >= 0 and mid <= WORLD_TOP + sz.y / 2 then
+			total = total + 1
+			if not voxelworld.is_chunk_drawn(buildat.Vector3(c0.x + dx,
+					c0.y + dy, c0.z + dz)) then
+				undrawn = undrawn + 1
+			end
+		end
+	end end end
+	local s = (buildat.get_time_us() - placed_us) / 1e6
+	if undrawn < total and not near_first then
+		near_first = s
+	end
+	if undrawn == 0 then
+		log:info(string.format("skeldat: the chunks within 2 drawn %.1f s " ..
+				"after the placing (the first at %.1f s)", s, near_first or s))
+		placed_us, near_first, near_ready = nil, nil, false
+	end
+end
+
 buildat.sub_packet("skeldat:position", function(data)
 	local x, y, z, yw = data:match("^(%S+) (%S+) (%S+) (%S+)")
 	player:set_position(tonumber(x), tonumber(y), tonumber(z))
@@ -363,6 +415,7 @@ buildat.sub_packet("skeldat:position", function(data)
 		game.send_luanti("world_in")
 	end
 	placed = true
+	placed_us = buildat.get_time_us()
 	log:info(string.format("skeldat: placed at (%.1f, %.1f, %.1f)",
 			player.x, player.y, player.z))
 end)
@@ -1105,6 +1158,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	end
 	update_fog(dt)
 	update_music(dt)
+	watch_near(dt)
 	if mouse_in_world and not held then
 		local m = magic.input:GetMouseMove()
 		yaw = (yaw + m.x * 0.12) % 360
