@@ -19,28 +19,9 @@ local rad, sin, cos = math.rad, math.sin, math.cos
 --
 -- Where the sun is
 --
--- The direction towards the sun on the plan (+X to the plan view's right,
--- +Z up the screen, +Y up) and the sine of its elevation. `north` is
--- degrees clockwise from the plan view's up to north; `day` 1..365,
--- `minute` 0..1439 of solar time.
--- simplified: solar time (no equation of time, a quarter of an hour at
--- most; no longitude or time zone), and the declination's cosine fit
-function M.sun_toward(lat, north, day, minute)
-	local decl = rad(-23.44 * cos(rad(360 / 365 * (day + 10))))
-	local hour_angle = rad((minute / 60 - 12) * 15)
-	local p = rad(lat)
-	local sin_h = sin(p) * sin(decl) + cos(p) * cos(decl) * cos(hour_angle)
-	sin_h = math.max(-1, math.min(1, sin_h))
-	local cos_h = math.sqrt(1 - sin_h * sin_h)
-	-- The azimuth from south, westward; then from north, eastward
-	local az = math.atan2(sin(hour_angle), cos(hour_angle) * sin(p) -
-			math.tan(decl) * cos(p)) + math.pi
-	local east, northward = sin(az) * cos_h, cos(az) * cos_h
-	local a = rad(north)
-	local nx, nz = sin(a), cos(a)
-	local ex, ez = cos(a), -sin(a)
-	return east * ex + northward * nx, sin_h, east * ez + northward * nz
-end
+-- The direction towards the sun on the plan: physical_sky.sun_toward()
+-- (floorplanner's, moved there for demo_hillclimb too [HILLCLIMB]), set
+-- below where physical_sky is loaded
 
 -- The eight points of the compass, for a direction on the plan
 local POINTS = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
@@ -140,6 +121,7 @@ if not ok_phys or type(physical_sky) ~= "table" then
 end
 physical_sky = physical_sky.with({night_sky = 0.0001, lamp = 8,
 		cloud = {r = 0.9, g = 0.92, b = 0.95}})
+M.sun_toward = physical_sky.sun_toward
 local PHYS = physical_sky.PHYS
 M.PHYS = PHYS
 local function lum(c)

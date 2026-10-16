@@ -404,6 +404,32 @@ end
 assert(M.outside(0) == 0 and M.outside(1) == 1, "the gate's ends")
 
 
+-- **Where the sun is by place and time** (floorplanner's, [FP_DAYLIGHT];
+-- here for every app that has a latitude, [HILLCLIMB]): the direction
+-- towards the sun in a scene whose +X is the plan view's right, +Z up the
+-- screen and +Y up, and the sine of its elevation. `north` is
+-- degrees clockwise from the plan view's up to north; `day` 1..365,
+-- `minute` 0..1439 of solar time.
+-- simplified: solar time (no equation of time, a quarter of an hour at
+-- most; no longitude or time zone), and the declination's cosine fit
+function M.sun_toward(lat, north, day, minute)
+	local rad, sin, cos = math.rad, math.sin, math.cos
+	local decl = rad(-23.44 * cos(rad(360 / 365 * (day + 10))))
+	local hour_angle = rad((minute / 60 - 12) * 15)
+	local p = rad(lat)
+	local sin_h = sin(p) * sin(decl) + cos(p) * cos(decl) * cos(hour_angle)
+	sin_h = math.max(-1, math.min(1, sin_h))
+	local cos_h = math.sqrt(1 - sin_h * sin_h)
+	-- The azimuth from south, westward; then from north, eastward
+	local az = math.atan2(sin(hour_angle), cos(hour_angle) * sin(p) -
+			math.tan(decl) * cos(p)) + math.pi
+	local east, northward = sin(az) * cos_h, cos(az) * cos_h
+	local a = rad(north)
+	local nx, nz = sin(a), cos(a)
+	local ex, ez = cos(a), -sin(a)
+	return east * ex + northward * nx, sin_h, east * ez + northward * nz
+end
+
 -- **physical_sky with an app's own numbers**: a copy of the module whose
 -- PHYS has these values in place of the defaults (floorplanner's night and
 -- lamp), every rule here reading them. The module's table, which require
