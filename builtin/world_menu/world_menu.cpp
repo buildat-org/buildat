@@ -137,6 +137,7 @@ struct Module: public interface::Module, public Interface
 			v.set("label", f.label);
 			v.set("default", f.def);
 			v.set("hint", f.hint);
+			v.set("ask", !f.show_only);
 			fields.append(v);
 		}
 		out.set("fields", fields);
@@ -215,6 +216,8 @@ struct Module: public interface::Module, public Interface
 		std::map<ss_, ss_> options;
 		const json::Value &o = v.get("options");
 		for(const Field &f : m_config.fields){
+			if(f.show_only)
+				continue;
 			const ss_ value = o.is_object() ? jstr(o, f.key.c_str()) : "";
 			if(!value.empty() && value.size() <= 200)
 				options[f.key] = value;

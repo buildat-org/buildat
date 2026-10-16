@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~3 min (2026-10-16)
+# cost: ~4 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -16,7 +16,11 @@
 # from the save; the admin mutes client2 from the report and sets who may
 # talk, gives and takes an item (the audit log has both), flies into the
 # bones zone unchecked, where the fog, the danger music and a skeleton come
-# and a dug voxel drops nothing. client2's line is refused, muted.
+# and a dug voxel drops nothing. client2's line is refused, muted. The
+# admin writes the world's map.
+# The third, a world of 2 x 2 x 2 sections made with every voxel at full
+# bones (BUILDAT_SKELDAT_FILL): it ends, and started again it stays ended
+# and says so to its player.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -212,6 +216,12 @@ wait_log 30000 pause: admin got audit
 delay 500
 screenshot $t/audit.png
 click Button "Back"
+wait_log 30000 pause: admin got players
+delay 500
+click Button "The world's map"
+wait_log 60000 pause: admin got map
+delay 500
+click Button "Back"
 delay 500
 click Button "Back"
 wait_log 5000 pause: the menu shown
@@ -267,6 +277,10 @@ grep -aq "the lowest level that may talk is member" "$s" || fail "who may talk (
 grep -aq "client1 gives client1: " "$s" && grep -aq "client1 takes client1: " "$s" ||
 	fail "the admin's give and take ($s)"
 grep -aq "pause: admin got audit" "$t/a2.log" || fail "the audit log page ($t/a2.log)"
+map="$t/srv/apps/demo_skeldat/saves/w/map.png"
+grep -aq "skeldat: the map written to $map" "$s" &&
+	[ "$(python3 -I -c 'import struct,sys; d=open(sys.argv[1],"rb").read(24); print(*struct.unpack(">II", d[16:24]))' "$map")" = "1024 1024" ] ||
+	fail "the admin's map not written, 1024 x 1024 ($s)"
 grep -aq "client2's line refused: muted" "$s" || fail "the muted line went out ($s)"
 grep -aE "skeldat: the first bone piles, [1-9]" "$t/srv1.log" | grep -q . ||
 	fail "no bone piles generated ($t/srv1.log)"
@@ -278,6 +292,33 @@ grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)" "$s" | grep -
 	fail "no skeleton spawned in the zone ($s)"
 grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
+# 3. The end: a world of 2 x 2 x 2 sections, every voxel made with bones,
+# ends; started again, it is still ended, and its player told
+log3="$t/srv3.log"
+BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=1 \
+	start_server "$log3" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log3" "every voxel has bones: the world ends after" 60 ||
+	fail "the filled world did not end ($log3)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+# The notice comes with the placing, before a wait_log after it would look
+printf '%s\n' "$placed" "delay 1000" "screenshot $t/end.png" quit \
+	> "$t/end.cmds"
+log3="$t/srv4.log"
+BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	start_server "$log3" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
+CHECK_PIDS+=($SERVER_PID)
+client end "$t/end.cmds"
+wait $CLIENT || fail "the ended world's drive ($t/end.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: Every voxel has bones. The world ended after" "$t/end.log" ||
+	fail "the ended world's player not told ($t/end.log)"
+grep -aq 'the world "end" ended after' "$log3" ||
+	fail "the end not kept in the save ($log3)"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu, the bones zone"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end"
 # vim: set noet ts=4 sw=4:

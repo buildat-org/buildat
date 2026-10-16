@@ -101,7 +101,7 @@ function M.draw_hud()
 	local sig = table.concat({tostring(shown), stats.hp, stats.breath,
 		game.wield, r.width, r.height, table.concat(main, "|", 1,
 		math.min(9, #main)), game.item_texture("skeldat:stick") or "",
-		tostring(game.held())}, ";")
+		tostring(game.held()), game.ended or ""}, ";")
 	if sig == hud_drawn then
 		return
 	end
@@ -113,6 +113,10 @@ function M.draw_hud()
 		return
 	end
 	local s = scale()
+	if game.ended then
+		local t = text(hud, game.ended, 0, 8 * s, 8 * s)
+		t:SetPosition(math.floor((r.width - t.width) / 2), math.floor(8 * s))
+	end
 	local x0 = math.floor((r.width - 182 * s) / 2)
 	local y0 = r.height - 23 * s
 	image(hud, tex("hotbar.png"), x0, y0, 182 * s, 22 * s)

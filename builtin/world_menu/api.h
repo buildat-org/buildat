@@ -26,13 +26,14 @@
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
 // ({name, to}), world_menu:delete ({name}). Server to client:
 // world_menu:list (JSON: {title, may_pick, wait, fields: [{key, label,
-// default, hint}], worlds: [{name, bytes, options}]}; wait: the progress
+// default, hint, ask}], worlds: [{name, bytes, options}]}; wait: the progress
 // text, if any), world_menu:up.
 namespace world_menu
 {
 	typedef size_t PeerId;
 
-	// An option of the app's on a world, asked for when one is made
+	// An option of the app's on a world, asked for when one is made, or
+	// (show_only) one the app writes itself and the menu only shows
 	// simplified: set when the world is made and shown after, not edited;
 	// an app that needs to change one adds an edit to the options screen
 	struct Field
@@ -40,6 +41,8 @@ namespace world_menu
 		ss_ key, label, def;
 		// Said beside the field where a new world is named
 		ss_ hint;
+		// Left out of a brace list, false (C++11: no initializer here)
+		bool show_only;
 	};
 
 	struct Config

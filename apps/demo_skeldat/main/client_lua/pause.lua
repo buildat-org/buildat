@@ -134,6 +134,14 @@ return function(game, declare_keys)
 				admin.page = "players"
 				admin_send("players")
 			end
+		elseif admin.page == "map" then
+			text("The world from above, +x right and +z up; the whiter, the" ..
+					" more bones")
+			text(admin.map or "Writing...")
+			back = function()
+				admin.page = "players"
+				admin_send("players")
+			end
 		elseif admin.page == "audit" then
 			text("The audit log, the newest first")
 			text(#admin.audit == 0 and "Nothing yet." or
@@ -150,6 +158,10 @@ return function(game, declare_keys)
 					admin_send("view " .. name)
 				end)
 			end
+			menu:add("The world's map", function()
+				admin.page, admin.map = "map", nil
+				admin_send("map")
+			end)
 			menu:add("The audit log", function()
 				admin.page = "audit"
 				admin_send("audit")
@@ -176,6 +188,8 @@ return function(game, declare_keys)
 			admin.players = lines
 		elseif head == "audit" then
 			admin.audit = lines
+		elseif head == "map" then
+			admin.map = lines[1]
 		elseif head:match("^inv ") then
 			admin.main = {}
 			local list = (lines[1] or ""):match("^main=(.*)$") or ""

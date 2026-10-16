@@ -328,9 +328,11 @@ local function draw_new(state)
 	local name = edit_on(menu.window, #state.worlds == 0 and "world" or "")
 	local fields = {}
 	for _, f in ipairs(state.fields) do
-		text_on(menu.window, f.label .. ((f.hint or "") ~= "" and
-				" (" .. f.hint .. ")" or "") .. ":")
-		fields[f.key] = edit_on(menu.window, f.default or "")
+		if f.ask ~= false then
+			text_on(menu.window, f.label .. ((f.hint or "") ~= "" and
+					" (" .. f.hint .. ")" or "") .. ":")
+			fields[f.key] = edit_on(menu.window, f.default or "")
+		end
 	end
 	local function ok()
 		local n = name:GetText():match("^%s*(.-)%s*$")
