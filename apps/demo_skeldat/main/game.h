@@ -329,6 +329,16 @@ inline Game make_game()
 			{-7, -8, -7, 1, -2, 1, 2, -8, -1, 7, -4, 4}, "skeldat:skull 2");
 	bones("bone_lying", "Bone", "skull", {-6, -8, -1, 6, -6, 1,
 			-8, -8, -2, -5, -5, 2, 5, -8, -2, 8, -5, 2}, "skeldat:bone");
+	// A skeleton's mark where it saw a player ([SKELDAT_SKELETON_SIM]):
+	// the skull in red, holding no bones; dug, itself
+	{
+		bones("marker_skull", "Marker Skull", "skull_front",
+				{-4, -6, -4, 4, 0, 4, -3, -8, -4, 3, -6, 1}, "");
+		NodeDef &n = g.nodes.back();
+		for(ss_ &t : n.tiles)
+			t = "main/marker_" + t.substr(5);
+		g.items[n.name].image = "main/marker_skull_front.png";
+	}
 	{
 		NodeDef &n = node("torch", "Torch", {"torch"},
 				{{"snappy", 3}, {"dig_immediate", 3}});

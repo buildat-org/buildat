@@ -26,6 +26,8 @@
 # has a higher target, and a player among 200 light skeletons wakes some,
 # which sleep again when it leaves, none lost. 2000 light
 # skeletons added to the first world, restarted headless: their step time.
+# The fifth, a skeleton's marker skull: one on its first sight of a
+# player, none on its next that day, the count kept in the save.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -336,6 +338,34 @@ for i in $(seq 60); do
 done
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 light=$(grep -a "skeletons, [0-9]* full" "$t/srv7.log" | tail -1 | sed 's/.*skeldat: //')
+# 5. A marker skull: a skeleton 8 voxels from a player at midnight places
+# one; the player gone and another come, the same skeleton sees it and
+# places none that day; the count is in the save
+mark() # <log>: the small world "mark" at midnight, MARK_TEST its test
+{
+	local log=$1
+	BUILDAT_SKELDAT_WORLD=mark BUILDAT_SKELDAT_SIZE="2 -1 0" \
+		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_TEST="${MARK_TEST:-}" \
+		start_server "$log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv8" -C "$t/srv.cache" -l 3 || fail "the server ($log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+MARK_TEST="skeleton 0 8" mark "$t/srv8.log"
+printf '%s\n' "$placed" "delay 4000" quit > "$t/mark.cmds"
+for c in mark1 mark2; do
+	client $c "$t/mark.cmds"
+	wait $CLIENT || fail "the drive by the marker's skeleton ($t/$c.log)"
+done
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+[ "$(grep -ac "skeldat: a skeleton (1) places a marker skull" "$t/srv8.log")" = 1 ] ||
+	fail "not one marker skull placed ($t/srv8.log)"
+grep -aq "skeldat: a skeleton (1) sees client[0-9]*, its marker placed today" \
+	"$t/srv8.log" || fail "the second sight not seen, or a second marker ($t/srv8.log)"
+mark "$t/srv9.log"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: 1 marker skulls in the world" "$t/srv9.log" ||
+	fail "the marker's count not in the save ($t/srv9.log)"
 
 # 4. The skeletons over the world ([SKELDAT_SKELETON_SIM]), in 4 x 2 x 4
 # sections. A clean world, a game hour every 2 s from 19:12: the count
@@ -381,5 +411,5 @@ grep -a "skeletons, the target" "$log6" | tail -1 | grep -q "the target 125 (1.0
 	fail "the flooded world's target ($log6)"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull"
 # vim: set noet ts=4 sw=4:
