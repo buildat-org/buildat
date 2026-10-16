@@ -679,6 +679,14 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 			log_v(MODULE, "mg_flags \"%s\" -> %i",
 					cs(params.mg_flags), (int)m_params->flags);
 		}
+		// The mapgen's own noises the world sets, read the way Luanti's
+		// world.mt would be
+		if(!params.noises.empty()){
+			Settings settings;
+			for(const auto &pair : params.noises)
+				read_noise_params(pair.second, settings.noises[pair.first]);
+			m_params->readParams(&settings);
+		}
 
 		// The biomes a mapgen asks about as it goes. Luanti's own
 		// EmergeManager makes this the same way, out of the parameters the
@@ -1204,8 +1212,12 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	// of times and a mapgen allocates its noise maps when it is built.
 	VendoredGenerator* query_generator(const Params &params)
 	{
-		const ss_ key = params.mgname+"/"+itos(params.seed)+"/"+
+		ss_ key = params.mgname+"/"+itos(params.seed)+"/"+
 				itos(params.water_level);
+		// simplified: a noise told apart by its offset, scale and seed
+		for(const auto &pair : params.noises)
+			key += "/"+pair.first+"="+ftos(pair.second.offset)+","+
+					ftos(pair.second.scale)+","+itos(pair.second.seed);
 		if(m_query == nullptr || key != m_query_key){
 			delete m_query;
 			// The biomes are kept, because which biome is where is one of

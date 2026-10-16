@@ -138,6 +138,10 @@ namespace luanti_mapgen
 			float lacunarity = 2.0f;
 			ss_ flags;
 		};
+		// A mapgen's own noises by Luanti's setting names
+		// ("mgvalleys_np_terrain_height"), over the mapgen's defaults: what
+		// a world.mt's lines would set ([SKELDAT_BOUNDED_WORLD])
+		sm_<ss_, NoiseParams> noises;
 
 		// An ore as the game registered it: the node names are already the
 		// ids they mean, and the biome names are still names, because which

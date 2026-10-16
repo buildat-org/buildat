@@ -1,10 +1,10 @@
 // A shim, not Luanti's: see README.txt.
 //
 // Luanti's settings, as much as a mapgen reads: it asks for its own noise
-// parameters and flags, and what answers is nothing -- the C++ defaults in
-// the mapgen's own constructor are what this build generates with. The
-// world's own overrides are a later refinement; see "Mapgen stage 3" in
-// doc/plan/luanti_module_plan.md.
+// parameters and flags, and what answers is the world's noises
+// (luanti_mapgen::Params::noises) and nothing else -- the C++ defaults in
+// the mapgen's own constructor are the rest. The other overrides are a
+// later refinement; see "Mapgen stage 3" in doc/plan/luanti_module_plan.md.
 #ifndef LUANTI_SHIM_SETTINGS_H
 #define LUANTI_SHIM_SETTINGS_H
 #include "irrlichttypes_bloated.h"
@@ -18,8 +18,14 @@
 class Settings
 {
 public:
+	// The world's noises, by setting name (luanti_mapgen::Params::noises)
+	std::map<std::string, NoiseParams> noises;
 	bool getNoiseParams(const std::string &name, NoiseParams &np) const {
-		return false;
+		auto it = noises.find(name);
+		if(it == noises.end())
+			return false;
+		np = it->second;
+		return true;
 	}
 	void setNoiseParams(const std::string &name, const NoiseParams &np){}
 
