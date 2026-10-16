@@ -210,6 +210,8 @@ static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
 static const int LANTERN_RADIUS = 8, LANTERN_RETRACT_IN = 4,
 		LANTERN_DECAY_IN = 8;
 static const float LANTERN_HOURS = 4;
+// A burning lantern lures skeletons as LANTERN_LURE marker skulls do
+static const int LANTERN_LURE = 5;
 static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
@@ -226,8 +228,10 @@ struct Mob
 	float vy = 0, speed = 0, shoot_t = 2, burn_t = 0, from_x = 0, from_z = 0;
 	uint32_t node_id = 0; // 0 asleep
 	float light_t = 0; // to the next light step
-	// Saved: the game day of its last marker skull
+	// Saved: the game day of its last marker skull; the coal in the
+	// lantern it carries, -1 none ([SKELDAT_FIGHT_BACK])
 	double marker_day = -1e9;
+	int carry_coal = -1;
 	// Not saved, a light one's: the footprint picked at sunrise or sunset
 	// (-1 none), the night's bone blocks left and the column of the next
 	int goal_fp = -1, quota = 0, seed_x = 0, seed_z = 0;
@@ -238,12 +242,12 @@ struct Mob
 	ss_ save() const {
 		std::ostringstream os;
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
-				marker_day;
+				marker_day<<" "<<carry_coal;
 		return os.str();
 	}
 	bool load(const ss_ &s){
 		int k = -1;
-		std::istringstream(s)>>k>>x>>y>>z>>yaw>>hp>>marker_day;
+		std::istringstream(s)>>k>>x>>y>>z>>yaw>>hp>>marker_day>>carry_coal;
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON) && hp > 0;
 	}
@@ -1801,8 +1805,12 @@ struct Module: public interface::Module, public luanti_session::Game
 			else if(bones >= 0)
 				m_bones.set(v, (uint32_t)bones);
 			const long f = footprint(x, z);
-			if(f >= 0 && old != id)
+			if(f >= 0 && old != id && (id == m_marker || old == m_marker)){
 				m_markers[f] += (id == m_marker) - (old == m_marker);
+				log_i(MODULE, "skeldat: %d marker skulls in the footprint at "
+						"%ld %ld", m_markers[f], f % (2 * m_half) - m_half,
+						f / (2 * m_half) - m_half);
+			}
 			w->set_sample(p, v);
 			rescan_column(w, x, z);
 		});
@@ -2392,6 +2400,19 @@ struct Module: public interface::Module, public luanti_session::Game
 			ss_ kind;
 			float dx = 0, dz = 0;
 			it>>kind>>dx>>dz;
+			if(kind == "marker"){
+				// "marker dx dz": a marker skull on the ground there
+				const int x = (int)std::floor(p->x + dx + 0.5f),
+						z = (int)std::floor(p->z + dz + 0.5f);
+				int y = (int)std::floor(p->y + 0.5f) + 2;
+				while(y > (int)std::floor(p->y + 0.5f) - 3 &&
+						id_at(x, y - 1, z) == ID_AIR)
+					y--;
+				set_node(x, y, z, m_marker);
+				log_i(MODULE, "skeldat: test: a marker skull at %s",
+						cs(pos_key(x, y, z)));
+				continue;
+			}
 			if(kind == "bones"){
 				// "bones dx dz value": the ground's voxel there
 				int value = 0;
@@ -2483,7 +2504,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			out.push_back(Stack("skeldat:meat_raw", 1 + m_rand() % 2));
 			return out;
 		}
-		const int bones = m_rand() % 3, arrows = m_rand() % 3;
+		const int bones = 1 + m_rand() % 2, arrows = m_rand() % 3;
 		if(bones)
 			out.push_back(Stack("skeldat:bone", bones));
 		if(arrows)
@@ -2491,6 +2512,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		// The end game's part: only a deep skeleton has one
 		if(m.y < -32 && rnd() < 0.34f)
 			out.push_back(Stack("skeldat:skull"));
+		if(m.carry_coal >= 0){
+			out.push_back(Stack("skeldat:lantern"));
+			if(m.carry_coal > 0)
+				out.push_back(Stack("skeldat:coal", m.carry_coal));
+		}
 		return out;
 	}
 
@@ -2514,13 +2540,15 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		ss_ list;
 		auto killer = m_players.find(by);
+		const sv_<Stack> dropped = drops(m);
+		for(const Stack &s : dropped)
+			list += (list.empty() ? "" : ", ") + s.str();
 		if(killer != m_players.end()){
-			for(const Stack &s : drops(m)){
-				list += (list.empty() ? "" : ", ") + s.str();
+			for(const Stack &s : dropped)
 				m_game.add(killer->second.main, s);
-			}
 			send_inventory(by, killer->second);
-		}
+		} else
+			leave_lantern(m);
 		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops [%s]",
 				MOB_KIND[m.kind], key, m.x, m.y, m.z, cs(list));
 		sound(m.kind == BOAR ? "boar_death" : "skeleton_death", m.x, m.y, m.z);
@@ -2681,6 +2709,14 @@ struct Module: public interface::Module, public luanti_session::Game
 					burnt.push_back({key, 1000});
 			}
 		});
+		for(uint32_t key : awake){
+			auto it = m_mobs.find(key);
+			pv::Vector3DInt32 at;
+			if(it != m_mobs.end() && it->second.kind == SKELETON &&
+					it->second.carry_coal < 0 &&
+					lantern_at_hand(it->second.x, it->second.y, it->second.z, at))
+				take_lantern(key, it->second, at);
+		}
 		for(const Mark &k : marks){
 			set_node(k.p[0], k.p[1], k.p[2], m_marker);
 			log_i(MODULE, "skeldat: a skeleton (%u) places a marker skull at "
@@ -2877,6 +2913,11 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		const int w = 2 * m_half;
 		size_t moving = 0, n = 0;
+		// What lures: the marker skulls, and a burning lantern as
+		// LANTERN_LURE of them
+		sv_<int> lure = m_markers;
+		for(auto &pair : lanterns_by_footprint())
+			lure[pair.first] += LANTERN_LURE * (int)pair.second.size();
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
 			if(m.kind != SKELETON)
@@ -2894,10 +2935,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				if(fx < 0 || fx >= w || fz < 0 || fz >= w)
 					continue;
 				all.push_back(fz * w + fx);
-				if(m_markers[fz * w + fx] > m_markers[best])
+				if(lure[fz * w + fx] > lure[best])
 					best = fz * w + fx;
 			}
-			if(m_markers[best] == 0)
+			if(lure[best] == 0)
 				best = all[m_rand() % all.size()];
 			m.goal_fp = (int)best;
 			moving += best != own;
@@ -2906,7 +2947,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		long most = 0;
 		for(size_t i = 0; i < footprints(); i++)
-			if(m_markers[i] > m_markers[most])
+			if(lure[i] > lure[most])
 				most = (long)i;
 		size_t there = 0;
 		for(auto &kv : m_mobs)
@@ -2916,7 +2957,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		log_i(MODULE, "skeldat: %s: %zu of %zu skeletons to another "
 				"footprint; the one with the most markers (%d, at %ld %ld) has "
 				"%zu; %zu bone blocks placed since", sunset ? "sunset" :
-				"sunrise", moving, n, m_markers[most], most % w - m_half,
+				"sunrise", moving, n, lure[most], most % w - m_half,
 				most / w - m_half, there, m_night_blocks);
 		m_night_blocks = 0;
 	}
@@ -2932,6 +2973,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		const uint32_t block = id_of("skeldat:bone_block");
 		struct Block { int x, y, z; };
 		sv_<Block> blocks;
+		struct Take { uint32_t key; pv::Vector3DInt32 at; };
+		sv_<Take> takes;
+		const auto lanterns = lanterns_by_footprint();
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
 			if(m.node_id || m.kind != SKELETON)
@@ -2946,7 +2990,19 @@ struct Module: public interface::Module, public luanti_session::Game
 			const long own = footprint(mx, mz);
 			bool to = false;
 			int tx = 0, tz = 0;
-			if(m.quota > 0 && !m_ended && own >= 0){
+			// A burning lantern in its footprint: to it, and taken
+			auto lit = lanterns.find(own);
+			if(m.carry_coal < 0 && own >= 0 && own == m.goal_fp &&
+					lit != lanterns.end()){
+				const pv::Vector3DInt32 &l = lit->second[0];
+				pv::Vector3DInt32 at;
+				if(lantern_at_hand(m.x, m.y, m.z, at)){
+					takes.push_back({kv.first, at});
+					continue;
+				}
+				to = true, tx = l.getX(), tz = l.getZ();
+			}
+			if(!to && m.quota > 0 && !m_ended && own >= 0){
 				if(!m.seeding && !clean_column(mx, mz, own, m.seed_x,
 						m.seed_z))
 					m.quota = 0;
@@ -2997,6 +3053,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			set_node(b.x, b.y, b.z, block, 0, skeldat::bones::MAX);
 			m_night_blocks++;
 		}
+		for(const Take &t : takes)
+			take_lantern(t.key, m_mobs[t.key], t.at);
 	}
 
 	// A game hour: the count toward its target, added at night on bone
@@ -3041,6 +3099,7 @@ struct Module: public interface::Module, public luanti_session::Game
 					}
 					if(m_store)
 						m_store->remove("mob/"+itos(it->first));
+					leave_lantern(it->second);
 					it = m_mobs.erase(it);
 					died++;
 				}
@@ -3714,6 +3773,80 @@ struct Module: public interface::Module, public luanti_session::Game
 		return out;
 	}
 
+	// The burning lanterns by footprint
+	std::map<long, sv_<pv::Vector3DInt32>> lanterns_by_footprint()
+	{
+		std::map<long, sv_<pv::Vector3DInt32>> out;
+		for(auto &pair : m_furnaces){
+			int x, y, z;
+			if(pair.second.lantern && pair.second.fuel_left > 0 &&
+					parse_pos(pair.first, x, y, z) && footprint(x, z) >= 0)
+				out[footprint(x, z)].push_back(pv::Vector3DInt32(x, y, z));
+		}
+		return out;
+	}
+
+	// A burning lantern within a column of (x, z) and two voxels of y
+	bool lantern_at_hand(float x, float y, float z, pv::Vector3DInt32 &at)
+	{
+		for(auto &pair : m_furnaces){
+			int lx, ly, lz;
+			if(pair.second.lantern && pair.second.fuel_left > 0 &&
+					parse_pos(pair.first, lx, ly, lz) &&
+					std::fabs(lx - x) <= 1.5f && std::fabs(lz - z) <= 1.5f &&
+					std::fabs(ly - y) <= 2.5f){
+				at = pv::Vector3DInt32(lx, ly, lz);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// A skeleton takes the lantern at `at`: out of the world, put out, its
+	// coal with it
+	void take_lantern(uint32_t key, Mob &m, const pv::Vector3DInt32 &at)
+	{
+		const ss_ k = pos_key(at.getX(), at.getY(), at.getZ());
+		auto it = m_furnaces.find(k);
+		if(it == m_furnaces.end() || m.carry_coal >= 0)
+			return;
+		m.carry_coal = it->second.fuel.name == "skeldat:coal" ?
+				it->second.fuel.count : 0;
+		m_furnaces.erase(it);
+		if(m_store)
+			m_store->remove("furnace/"+k);
+		set_node(at.getX(), at.getY(), at.getZ(), ID_AIR);
+		log_i(MODULE, "skeldat: a skeleton (%u) takes the lantern at %s, %d "
+				"coal in it", key, cs(k), m.carry_coal);
+	}
+
+	// A skeleton dead with no one to take what it had: its lantern left
+	// where it died, unlit, with its coal
+	void leave_lantern(Mob &m)
+	{
+		if(m.carry_coal < 0)
+			return;
+		const int x = (int)std::floor(m.x + 0.5f),
+				z = (int)std::floor(m.z + 0.5f);
+		int y = (int)std::floor(m.y + 0.5f);
+		while(y < (int)std::floor(m.y + 0.5f) + 3 && id_at(x, y, z) != ID_AIR)
+			y++;
+		if(!reaches_world(x, y, z) || id_at(x, y, z) != ID_AIR){
+			log_i(MODULE, "skeldat: the lantern lost at %d,%d,%d", x, y, z);
+			m.carry_coal = -1;
+			return;
+		}
+		set_node(x, y, z, id_of("skeldat:lantern"));
+		Furnace f;
+		f.lantern = true;
+		if(m.carry_coal > 0)
+			f.fuel = Stack("skeldat:coal", m.carry_coal);
+		m_furnaces[pos_key(x, y, z)] = f;
+		log_i(MODULE, "skeldat: the lantern left at %s, %d coal in it",
+				cs(pos_key(x, y, z)), m.carry_coal);
+		m.carry_coal = -1;
+	}
+
 	// For a check: each lantern's sphere, its voxels with bones, their
 	// mean and its bone blocks, a line each
 	void report_lanterns()
@@ -3769,10 +3902,15 @@ struct Module: public interface::Module, public luanti_session::Game
 				continue;
 			}
 			const int y = m_top_y[c] + 1;
-			set_node(x, y, z, id_of("skeldat:lantern"));
+			// Lit already, a coal of them burning
+			set_node(x, y, z, id_of(coal > 0 ? "skeldat:lantern_active" :
+					"skeldat:lantern"));
 			Furnace f;
 			f.lantern = true;
-			f.fuel = Stack("skeldat:coal", coal);
+			if(coal > 0)
+				f.fuel_left = m_day_s / 24 * LANTERN_HOURS;
+			if(coal > 1)
+				f.fuel = Stack("skeldat:coal", coal - 1);
 			m_furnaces[pos_key(x, y, z)] = f;
 			if(with_block)
 				set_node(x + 2, m_top_y[c2] + 1, z, block, 0,

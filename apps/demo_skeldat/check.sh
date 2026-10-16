@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~10 min (2026-10-16)
+# cost: ~11 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -33,6 +33,9 @@
 # blocks placed.
 # The seventh, lanterns: no bones grow in a burning one's sphere, those
 # there fall and a bone block goes; out of coal, the bones come back.
+# The eighth, a burning lantern lures light skeletons and one takes it;
+# the ninth, with a player: a skeleton beside one takes it, burns and
+# leaves it where it died, dropping bones; a marker skull dug and placed.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -463,15 +466,61 @@ awk -v a="$f0" -v b="$f1" 'BEGIN { exit !(b > a) }' ||
 	fail "the clean side did not flood: $f0 to $f1 ($log11)"
 grep -aq "a bone block at 14,[0-9]*,0 goes" "$log11" ||
 	fail "the bone block in the lantern's sphere stayed ($log11)"
-sed -n '/lantern at 12,[0-9]*,0 is lit/,/lantern at 12,[0-9]*,0 goes out/p' "$log11" |
+sed -n '/test: a lantern at 12,/,/lantern at 12,[0-9]*,0 goes out/p' "$log11" |
 	grep -aqE "lantern at 12,[0-9]*,0 burning: .* mean 0\." ||
 	fail "the bones in the lantern's sphere did not fall ($log11)"
 lantern="clean side flooded $f0 to $f1; $(grep -a "lantern at 12,[0-9]*,0 burning" "$log11" |
 	tail -1 | sed 's/.*mean \([0-9.]*\).*/burning, mean \1/'); $(grep -a "lantern at 12,[0-9]*,0 out" "$log11" |
 	tail -1 | sed 's/.*mean \([0-9.]*\).*/out, mean \1/')"
+# 8. A burning lantern lures light skeletons as five marker skulls at the
+# sunset, and one of them takes it
+log12="$t/srv12.log"
+BUILDAT_SKELDAT_WORLD=lure BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_DAY=60 BUILDAT_SKELDAT_TIME=0.6 BUILDAT_SKELDAT_SKELETONS=60 \
+	BUILDAT_SKELDAT_LIGHT_STEP=0.02 BUILDAT_SKELDAT_LANTERNS="20 20 9" \
+	start_server "$log12" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv12" -C "$t/srv.cache" -l 3 || fail "the server ($log12)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log12" "takes the lantern at 20," 90 ||
+	fail "no skeleton took the lantern ($log12)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
+	fail "the lantern did not lure as five markers ($log12)"
+# 9. With a player at noon: a skeleton beside a lantern takes it, burns
+# and leaves it where it died, its bones dropped; the player digs a
+# marker skull and places it again
+log13="$t/srv13.log"
+BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1; marker 0 1" \
+	start_server "$log13" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
+	"delay 600" "mouse_up left" "delay 800" "look 90 -60" "delay 500" \
+	"mouse_down right" "delay 150" "mouse_up right" "delay 800" \
+	"screenshot $t/take.png" "delay 14000" quit > "$t/take.cmds"
+client take "$t/take.cmds"
+wait $CLIENT || fail "the drive by the lantern ($t/take.log)"
+wait_for_log "$log13" "the lantern left at" 30 ||
+	fail "the lantern not left where the skeleton died ($log13)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "a skeleton (1) takes the lantern at 4," "$log13" ||
+	fail "the skeleton beside the lantern did not take it ($log13)"
+grep -aq "the skeleton (1) dies at .*, drops \[skeldat:bone" "$log13" ||
+	fail "the dead skeleton dropped no bones ($log13)"
+grep -aq "client1 digs skeldat:marker_skull" "$log13" &&
+	grep -aq "client1 places skeldat:marker_skull" "$log13" ||
+	fail "the marker skull not dug and placed ($log13)"
+# The last three counts: before the dig, after it and after the place
+grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: \([0-9]*\) marker.*/\1/' |
+	tail -3 | awk '{ c[NR] = $1 } END { exit !(NR == 3 && c[2] == c[1] - 1 && c[3] == c[1]) }' ||
+	fail "the footprint's marker count: $(grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: //' | tr '\n' ';') ($log13)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed"
 # vim: set noet ts=4 sw=4:

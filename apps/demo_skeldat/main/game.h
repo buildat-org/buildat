@@ -504,6 +504,11 @@ inline int self_test()
 	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:wood_pick");
 	grid[8] = Stack(st);
 	assert(!g.craft(grid));
+	// A lantern: iron at the corners, bones between ([SKELDAT_FIGHT_BACK])
+	for(int i = 0; i < 9; i++)
+		grid[i] = i == 4 ? Stack() : Stack(i % 2 ? "skeldat:bone" :
+				"skeldat:iron_ingot");
+	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:lantern");
 	// Stacks: add fills the same item first and spills into empty slots
 	sv_<Stack> list(3);
 	list[1] = Stack("skeldat:dirt", 98);
