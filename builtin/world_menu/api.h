@@ -1,0 +1,82 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+#pragma once
+#include "interface/event.h"
+#include "interface/server.h"
+#include "interface/module.h"
+#include <functional>
+#include <map>
+
+// **A world menu** ([WORLD_MENU]): an app's worlds, its saves not beginning
+// with _ (those are the server's own), listed newest first; a new one
+// named and given the app's options, a rename, a delete, and a play. Only
+// the launcher's own client picks (builtin/accounts' is_local); another
+// is told to wait for the host. The client half is client_lua/module.lua,
+// which the server opens on the client itself: an app has nothing of the
+// menu in its own client.
+//
+// The app configures it once, calls show(peer) for a client that has no
+// world to be in, and starts the world it is told of by world_menu:play
+// (Play). It then calls set_running(true), which closes every menu shown;
+// a world it cannot start is said by calling show(peer) again.
+// A world's options are kept in its save, store "world_menu", key the
+// option's.
+//
+// Packets, client to server: world_menu:get, world_menu:play ({name}),
+// world_menu:create ({name, options: {key: value}}), world_menu:rename
+// ({name, to}), world_menu:delete ({name}). Server to client:
+// world_menu:list (JSON: {title, may_pick, fields: [{key, label,
+// default, hint}], worlds: [{name, bytes, options}]}), world_menu:up.
+namespace world_menu
+{
+	typedef size_t PeerId;
+
+	// An option of the app's on a world, asked for when one is made
+	// simplified: set when the world is made and shown after, not edited;
+	// an app that needs to change one adds an edit to the options screen
+	struct Field
+	{
+		ss_ key, label, def;
+		// Said beside the field where a new world is named
+		ss_ hint;
+	};
+
+	struct Config
+	{
+		ss_ title;
+		std::vector<Field> fields;
+	};
+
+	// world_menu:play: `peer` picked the world `name`, made by this pick
+	// when `created`
+	struct Play: public interface::Event::Private
+	{
+		PeerId peer;
+		ss_ name;
+		bool created;
+		std::map<ss_, ss_> options;
+		Play(PeerId peer, const ss_ &name, bool created,
+				const std::map<ss_, ss_> &options):
+			peer(peer), name(name), created(created), options(options){}
+	};
+
+	struct Interface
+	{
+		virtual void configure(const Config &config) = 0;
+		// The menu to a client with no world to be in
+		virtual void show(PeerId peer) = 0;
+		// A world starting or running: no more picks, and the menus shown
+		// close
+		virtual void set_running(bool running) = 0;
+	};
+
+	inline bool access(interface::Server *server,
+			std::function<void(world_menu::Interface*)> cb)
+	{
+		return server->access_module("world_menu",
+				[&](interface::Module *module){
+			cb((world_menu::Interface*)module->check_interface());
+		});
+	}
+}
+// vim: set noet ts=4 sw=4:

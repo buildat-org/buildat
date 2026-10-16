@@ -8,11 +8,11 @@
 // trees, voxelworld keeping the light and the saves -- and the players: where
 // they are, what they carry, what they dig, place, craft and cook.
 //
-// The world: until one runs, a joining client gets the world dialog
-// (client_lua/worlds.lua) and the launcher's own client picks a save to
-// play, a new one to make or one to delete. The first save picked is the
-// world for as long as the server runs. BUILDAT_SKELDAT_WORLD=<name> skips
-// the dialog (the checks; a server nobody sits at).
+// The world: until one runs, a joining client gets builtin/world_menu and
+// the launcher's own client picks a save to play or makes a new one, its
+// seed asked for. The first save picked is the world for as long as the
+// server runs. BUILDAT_SKELDAT_WORLD=<name> skips the menu (the checks; a
+// server nobody sits at).
 //
 // The voxel word is Luanti's cut (VoxelFormat::luanti(): the id, the sky
 // and the lamp light, param2), which is what the mapgen writes, and a
@@ -44,6 +44,7 @@
 #include "storage/api.h"
 #include "voxelworld/api.h"
 #include "worldgen/api.h"
+#include "world_menu/api.h"
 #include "game.h"
 #include "bones.h"
 #include "move_check.h"
@@ -449,10 +450,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 		sub(m_server, "voxelworld:section_unloaded",
 				&Module::on_section_unloaded);
+		sub(m_server, "world_menu:play", &Module::on_world_play);
 		const ss_ game = "network:packet_received/skeldat:";
-		sub(m_server, game+"world_play", &Module::on_world_play);
-		sub(m_server, game+"world_create", &Module::on_world_create);
-		sub(m_server, game+"world_delete", &Module::on_world_delete);
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn"})
@@ -484,6 +483,9 @@ struct Module: public interface::Module, public luanti_session::Game
 			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
 		});
 		serve_media();
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->configure({"skeldat", {{"seed", "Seed", "", "empty: random"}}});
+		});
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
 		if(name && name[0])
 			start_world(name, true);
@@ -529,66 +531,28 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 	};
 
-	// A save a world may be: a valid name not beginning with _, which are
-	// the server's own (_server, builtin/accounts')
-	static bool is_world(storage::Interface *i, const ss_ &name)
+	// A number is itself, other text its FNV-1a hash
+	static uint32_t seed_of(const ss_ &text)
 	{
-		return i->valid_name(name) && name[0] != '_';
+		if(text.size() <= 10 &&
+				text.find_first_not_of("0123456789") == ss_::npos)
+			return (uint32_t)std::stoull(text);
+		uint32_t h = 2166136261u;
+		for(unsigned char c : text)
+			h = (h ^ c) * 16777619u;
+		return h;
 	}
 
-	bool may_pick(size_t peer)
+	// A world picked or made in builtin/world_menu; one that does not start
+	// is the menu again
+	void on_world_play(const world_menu::Play &event)
 	{
-		bool local = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			local = i->is_local(peer);
-		});
-		return local && !m_starting;
-	}
-
-	void send_worlds(size_t peer)
-	{
-		ss_ data = "wait";
-		if(may_pick(peer)){
-			data = "list";
-			storage::access(m_server, [&](storage::Interface *i){
-				for(const storage::SaveInfo &info : i->list())
-					if(is_world(i, info.name))
-						data += "\n"+info.name;
+		auto seed = event.options.find("seed");
+		if(!start_world(event.name, false, seed == event.options.end() ?
+				"" : seed->second))
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(event.peer);
 			});
-		}
-		network::send(m_server, peer, "skeldat:worlds", data);
-	}
-
-	void on_world_play(const network::Packet &packet)
-	{
-		if(!may_pick(packet.sender) || !start_world(packet.data, false))
-			send_worlds(packet.sender);
-	}
-
-	void on_world_create(const network::Packet &packet)
-	{
-		bool exists = false;
-		storage::access(m_server, [&](storage::Interface *i){
-			for(const storage::SaveInfo &info : i->list())
-				exists = exists || info.name == packet.data;
-		});
-		if(!may_pick(packet.sender) || exists ||
-				!start_world(packet.data, true))
-			send_worlds(packet.sender);
-	}
-
-	void on_world_delete(const network::Packet &packet)
-	{
-		if(may_pick(packet.sender)){
-			storage::access(m_server, [&](storage::Interface *i){
-				if(is_world(i, packet.data)){
-					log_i(MODULE, "skeldat: the world \"%s\" deleted",
-							cs(packet.data));
-					i->remove(packet.data);
-				}
-			});
-		}
-		send_worlds(packet.sender);
 	}
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
@@ -596,9 +560,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(m_scene){
 			show(event.recipient);
 		} else if(m_waiting.insert(event.recipient).second){
-			network::send(m_server, event.recipient, "core:run_script",
-					"buildat.run_script_file(\"main/worlds.lua\")");
-			send_worlds(event.recipient);
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(event.recipient);
+			});
 		}
 	}
 
@@ -606,12 +570,14 @@ struct Module: public interface::Module, public luanti_session::Game
 	// The world
 	//
 
-	bool start_world(const ss_ &name, bool create)
+	// The save opened (made, when `create`), its seed `seed_text` when it
+	// has none yet: a number, or any text hashed to one
+	bool start_world(const ss_ &name, bool create, const ss_ &seed_text = "")
 	{
 		if(m_starting)
 			return false;
 		storage::access(m_server, [&](storage::Interface *i){
-			if(!is_world(i, name))
+			if(!i->valid_name(name) || name[0] == '_')
 				return;
 			m_save = i->open(name);
 			if(!m_save && create)
@@ -622,12 +588,17 @@ struct Module: public interface::Module, public luanti_session::Game
 			return false;
 		}
 		m_starting = true;
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->set_running(true);
+		});
 		m_store = m_save->store("skeldat");
 		ss_ v;
 		uint32_t seed = m_rand();
 		const char *env_seed = getenv("BUILDAT_SKELDAT_SEED");
 		if(m_store->get("seed", v))
 			seed = (uint32_t)std::stoul(v);
+		else if(!seed_text.empty())
+			seed = seed_of(seed_text);
 		else if(env_seed && env_seed[0])
 			seed = (uint32_t)std::stoul(env_seed);
 		m_store->set("seed", itos(seed));
@@ -1195,7 +1166,6 @@ struct Module: public interface::Module, public luanti_session::Game
 		ss_ v;
 		if(m_save->store("skeldat_players")->get(name, v))
 			pl.load(v);
-		network::send(m_server, peer, "skeldat:worlds", "up");
 		network::send(m_server, peer, "core:run_script",
 				"buildat.run_script_file(\"main/init.lua\")");
 		network::send(m_server, peer, "skeldat:items", items_text());

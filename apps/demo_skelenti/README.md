@@ -2,14 +2,14 @@
 
 A small alpha-era Luanti game inside a Buildat app ([LUANTI_APP_EXAMPLE]):
 dig, craft up to diamond, mind the skeletons. The game's rules are Luanti
-Lua (main/game/); the mobs, the HUD, the inventory's drawing, the world
-dialog and the pause menu are Buildat's own (main/main.cpp,
-main/client_lua/).
+Lua (main/game/); the mobs, the HUD, the inventory's drawing and the
+pause menu are Buildat's own (main/main.cpp, main/client_lua/), the
+world menu builtin/world_menu's.
 
 Start it from the launcher, or `buildat_server -m apps/demo_skelenti`
 and connect a client. Until a world runs, the first client on the
-server's machine picks one: play a save, name and create a new one, or
-delete one. `BUILDAT_SKELENTI_WORLD=<name>` skips the dialog.
+server's machine picks one: play a save, name and create a new one,
+rename or delete one. `BUILDAT_SKELENTI_WORLD=<name>` skips the menu.
 
 Each world has its danger zones (main.cpp's danger()). The deeper in, the
 thicker the fog, the more skeletons, and the more bones: strewn over the

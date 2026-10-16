@@ -15,6 +15,7 @@
 		{"module": "luanti_mapgen"},
 		{"module": "accounts"},
 		{"module": "moderation"},
-		{"module": "chat"}
+		{"module": "chat"},
+		{"module": "world_menu"}
 	]
 }

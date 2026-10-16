@@ -1,10 +1,10 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-14)
-# covers: apps/demo_skelenti/** builtin/luanti/client_lua/client.lua builtin/luanti/client_lua/module.lua
+# covers: apps/demo_skelenti/** builtin/world_menu/** builtin/luanti/client_lua/client.lua builtin/luanti/client_lua/module.lua
 # [LUANTI_APP_EXAMPLE]: skelenti packed (its size reported), then played
-# on a fresh server at seed 3, midnight: the world dialog creates the
-# world; a test skeleton 3 nodes off is punched to death and drops its
+# on a fresh server at seed 3, midnight: the world menu
+# (builtin/world_menu) creates the world; a test skeleton 3 nodes off is punched to death and drops its
 # things, which the player walks up to and picks up; the fog follows the
 # place's danger, and the client has the danger field to draw; the
 # sounds are made with blip and the skeleton's played; Escape opens the pause menu and Continue closes it. The server started again lists the world,
@@ -23,7 +23,7 @@ zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out") || fail "pack"
 size=$(stat -c %s "$zip")
 
 # The seed, in the save's place before the save is made (no save yet:
-# the dialog lists none). v7, which the test's places were picked on:
+# the menu lists none). v7, which the test's places were picked on:
 # under valleys seed 3 spawns at -277,-23, whose nodes reach the game ~20 s
 # after the join, and the test's skeleton dies over "ignore"
 w="$t/srv/apps/demo_skelenti/saves/world/luanti"
@@ -34,7 +34,9 @@ BUILDAT_SKELENTI_WORLD= start_server "$t/srv.log" "STATUS Listening" 300 auto \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 {
-	printf '%s\n' "wait_log 120000 worlds: the dialog shown, 0 worlds" \
+	printf '%s\n' "wait_log 120000 world_menu: the list shown, 0 worlds" \
+		'click Button "New world..."' \
+		"wait_log 5000 world_menu: the name screen shown" "delay 300" \
 		'click Button "Create"' "wait_log 180000 load: the world is in" \
 		"delay 3000" "look 0 -5" "delay 300"
 	# A held press: a click in one frame is no punch
@@ -52,7 +54,7 @@ run_client 60 "$t/cli.log" timeout 300 "$b" -C "$t/c" \
 	-c @"$t/cmds" || fail "the drive ($t/cli.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq 'skelenti: the world "world" starts' "$t/srv.log" ||
-	fail "the dialog's Create did not start the world ($t/srv.log)"
+	fail "the menu's Create did not start the world ($t/srv.log)"
 died=$(grep -a "skelenti: the skeleton .* dies" "$t/srv.log" | tail -1)
 [ -n "$died" ] || fail "no skeleton died: $(grep -ac "hits the skeleton" \
 	"$t/srv.log") hits ($t/srv.log)"
@@ -65,14 +67,15 @@ grep -aq "skelenti: the danger field at" "$t/cli.log" ||
 picked=$(grep -a "skelenti: .* picks up" "$t/srv.log" | sed 's/.*picks up //' | tr '\n' ' ')
 [ -n "$picked" ] || fail "nothing picked up ($t/srv.log)"
 
-# Again: the dialog lists the world and plays it, the boar in its save
+# Again: the menu lists the world and plays it, the boar in its save
 unset BUILDAT_SKELENTI_TEST
 BUILDAT_SKELENTI_WORLD= start_server "$t/srv2.log" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -u launcher=1 -m "$here/apps/demo_skelenti" \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the restart ($t/srv2.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "wait_log 120000 worlds: the dialog shown, 1 worlds" \
-	'click Button "Play world"' "wait_log 180000 load: the world is in" \
+printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
+	'click Button "world"' "wait_log 5000 world_menu: the list shown" \
+	"delay 300" 'click Button "Play"' "wait_log 180000 load: the world is in" \
 	"quit" > "$t/cmds2"
 run_client 60 "$t/cli2.log" timeout 300 "$b" -C "$t/c" \
 	-D "$t/u" -w 800x500 -l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" \
@@ -80,5 +83,5 @@ run_client 60 "$t/cli2.log" timeout 300 "$b" -C "$t/c" \
 up=$(grep -a "skelenti: the world is up" "$t/srv2.log" | sed 's/.*is up, //')
 [ "${up%% *}" -ge 1 ] 2>/dev/null || fail "no mobs saved: $up ($t/srv2.log)"
 echo "packed $size bytes (50 kB the aim); ${died#*skelenti: }; picked up $picked; restarted with $up"
-echo "PASS: skelenti's world dialog, a skeleton's death, the fog, the pause menu and the save"
+echo "PASS: skelenti's world menu, a skeleton's death, the fog, the pause menu and the save"
 # vim: set noet ts=4 sw=4:

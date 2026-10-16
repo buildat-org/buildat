@@ -6,10 +6,9 @@
 // (game/), runs it in a save of the player's choosing and shows it with
 // the module's client loop (client_lua/).
 //
-// The world: until one runs, a joining client gets the world dialog
-// (client_lua/worlds.lua), whose choice -- a save to play, a new one to
-// make, one to delete -- comes back as skelenti:world_* packets. The
-// first save picked is the world for as long as the server runs; whoever
+// The world: until one runs, a joining client gets builtin/world_menu,
+// whose choice -- a save to play or a new one -- comes back as
+// world_menu:play. The first save picked is the world for as long as the server runs; whoever
 // joins after goes straight in. BUILDAT_SKELENTI_WORLD=<name> skips the
 // dialog, the save opened or made at the start (the checks; a server
 // nobody sits at). What is Buildat's own is here and in
@@ -37,6 +36,7 @@
 #include "client_file/api.h"
 #include "storage/api.h"
 #include "main_context/api.h"
+#include "world_menu/api.h"
 #include <Scene.h>
 #include <Node.h>
 #include <cmath>
@@ -162,9 +162,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/skelenti:punch"));
-		for(const char *n : {"play", "create", "delete"})
-			m_server->sub_event(this, Event::t(
-					ss_("network:packet_received/skelenti:world_")+n));
+		m_server->sub_event(this, Event::t("world_menu:play"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -177,18 +175,16 @@ struct Module: public interface::Module
 				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
-		EVENT_TYPEN("network:packet_received/skelenti:world_play",
-				on_world_play, network::Packet)
-		EVENT_TYPEN("network:packet_received/skelenti:world_create",
-				on_world_create, network::Packet)
-		EVENT_TYPEN("network:packet_received/skelenti:world_delete",
-				on_world_delete, network::Packet)
+		EVENT_TYPEN("world_menu:play", on_world_play, world_menu::Play)
 		EVENT_TYPEN("network:packet_received/skelenti:punch", on_punch,
 				network::Packet)
 	}
 
 	void on_start()
 	{
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->configure({"skelenti", {}});
+		});
 		const char *name = getenv("BUILDAT_SKELENTI_WORLD");
 		if(name && name[0])
 			start_world(name, true);
@@ -219,6 +215,9 @@ struct Module: public interface::Module
 			return false;
 		}
 		m_starting = true;
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->set_running(true);
+		});
 		log_i(MODULE, "skelenti: the world \"%s\" starts", cs(name));
 		luanti::access(m_server, [&](luanti::Interface *i){
 			// A file of Lua into the game before its mods, as vanilla's
@@ -243,77 +242,14 @@ struct Module: public interface::Module
 		return true;
 	}
 
-	// The world dialog's list, to a peer waiting for a world: "list" and a
-	// save name a line, or "wait" for one who may not pick
-	void send_worlds(size_t peer)
+	// A world picked or made in builtin/world_menu; one that does not start
+	// is the menu again
+	void on_world_play(const world_menu::Play &event)
 	{
-		ss_ data = "wait";
-		if(is_owner(peer)){
-			data = "list";
-			storage::access(m_server, [&](storage::Interface *i){
-				for(const storage::SaveInfo &info : i->list())
-					if(is_world(i, info.name))
-						data += "\n"+info.name;
+		if(!start_world(event.name, false))
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(event.peer);
 			});
-		}
-		network::access(m_server, [&](network::Interface *i){
-			i->send(peer, "skelenti:worlds", data);
-		});
-	}
-
-	// A world packet is the dialog's, and only before a world runs
-	bool may_pick(const network::Packet &packet)
-	{
-		if(m_starting || !is_owner(packet.sender)){
-			log_w(MODULE, "skelenti: %s from peer %zu ignored",
-					cs(packet.name), packet.sender);
-			return false;
-		}
-		return true;
-	}
-
-	void on_world_play(const network::Packet &packet)
-	{
-		if(may_pick(packet) && !start_world(packet.data, false))
-			send_worlds(packet.sender);
-	}
-
-	void on_world_create(const network::Packet &packet)
-	{
-		if(!may_pick(packet))
-			return;
-		bool exists = false;
-		storage::access(m_server, [&](storage::Interface *i){
-			for(const storage::SaveInfo &info : i->list())
-				exists = exists || info.name == packet.data;
-		});
-		if(exists || !start_world(packet.data, true))
-			send_worlds(packet.sender);
-	}
-
-	void on_world_delete(const network::Packet &packet)
-	{
-		if(!may_pick(packet))
-			return;
-		storage::access(m_server, [&](storage::Interface *i){
-			if(is_world(i, packet.data)){
-				log_i(MODULE, "skelenti: the world \"%s\" deleted",
-						cs(packet.data));
-				i->remove(packet.data);
-			}
-		});
-		send_worlds(packet.sender);
-	}
-
-	// Who may pick, make and delete a world: the launcher's own client (its
-	// owner token, not an address another user on this machine has too)
-	bool is_owner(size_t peer)
-	{
-		bool owner = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			owner = i->is_local(peer);
-		});
-		return owner;
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)
@@ -366,11 +302,9 @@ struct Module: public interface::Module
 		if(m_scene){
 			show(event.recipient);
 		} else if(m_waiting.insert(event.recipient).second){
-			network::access(m_server, [&](network::Interface *i){
-				i->send(event.recipient, "core:run_script",
-						"buildat.run_script_file(\"main/worlds.lua\")");
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show(event.recipient);
 			});
-			send_worlds(event.recipient);
 		}
 	}
 
@@ -379,12 +313,8 @@ struct Module: public interface::Module
 	{
 		if(!m_shown.insert(peer).second)
 			return;
-		network::access(m_server, [&](network::Interface *i){
-			// The world dialog goes, where there was one
-			i->send(peer, "skelenti:worlds", "up");
-			i->send(peer, "core:run_script",
-					"buildat.run_script_file(\"main/init.lua\")");
-		});
+		network::send(m_server, peer, "core:run_script",
+				"buildat.run_script_file(\"main/init.lua\")");
 		// Every privilege for the launcher's own client (its owner token,
 		// not just an address on this machine) and for a server admin,
 		// as vanilla gives them ([SECURITY_RUN_1])

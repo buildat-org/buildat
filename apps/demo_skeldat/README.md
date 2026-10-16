@@ -18,7 +18,7 @@ Dig, craft up to diamond, cook in a furnace, mind the bones.
   skeleton, spawning and burning by the bones around them.
 - `main/client_lua/`: the client. `player.lua` is builtin/luanti's
   movement, copied; `ui.lua` and `pause.lua` are skelenti's HUD,
-  inventory and pause menu; `worlds.lua` the world dialog; `mobs.lua`
+  inventory and pause menu (the world menu is builtin/world_menu); `mobs.lua`
   draws the mobs; `sounds.lua` and `music.lua` are skelenti's blip sounds
   and music, copied.
 - `main/move_check.h`: the movement check, the engine's voxel pathfinder
@@ -41,7 +41,7 @@ machine picks one: play a save, name and create a new one, or delete one.
 A drive's event `skeldat_modes [fly] [fast] [noclip]` sets the modes
 whatever the role, as a modified client would.
 
-Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the dialog;
+Knobs for checks: `BUILDAT_SKELDAT_WORLD=<name>` skips the world menu;
 `BUILDAT_SKELDAT_SEED=<n>` is a new world's seed; `BUILDAT_SKELDAT_TIME=0..1`
 the time of day it starts at (0.5 noon); `BUILDAT_SKELDAT_SPAWN="x z"` a new
 world's spawn column, in a danger zone or not, or `"x y z"` a place under

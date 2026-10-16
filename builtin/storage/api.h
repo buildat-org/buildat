@@ -93,6 +93,9 @@ namespace storage
 		virtual sv_<SaveInfo> list() = 0;
 		// Deletes the save's directory and everything in it
 		virtual void remove(const ss_ &name) = 0;
+		// [WORLD_MENU] The save named `to` from now on; false if `from` is no
+		// save or is open, or `to` is invalid or taken
+		virtual bool rename(const ss_ &from, const ss_ &to) = 0;
 		// false if it has a path separator, a leading dot, or anything else
 		// that would make it something other than one directory name
 		virtual bool valid_name(const ss_ &name) = 0;

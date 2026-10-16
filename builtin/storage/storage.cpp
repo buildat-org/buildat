@@ -15,6 +15,8 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <cstdio>
+#include <cstring>
+#include <cerrno>
 #include <map>
 #ifdef _WIN32
 	#include <direct.h>
@@ -888,6 +890,38 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!remove_directory_tree(path))
 			log_w(MODULE, "remove(): [%s] was not fully removed", cs(path));
+	}
+
+	bool rename(const ss_ &from, const ss_ &to)
+	{
+		if(!valid_name(from) || !valid_name(to)){
+			log_w(MODULE, "rename(): invalid save name \"%s\" or \"%s\"",
+					cs(from), cs(to));
+			return false;
+		}
+		const ss_ path = m_saves_path+"/"+from, to_path = m_saves_path+"/"+to;
+		if(!interface::fs::path_exists(path+"/save.sqlite")){
+			log_w(MODULE, "rename(): no save at [%s]", cs(path));
+			return false;
+		}
+		// simplified: on a filesystem that ignores case, a rename that only
+		// changes the case is refused here as taken
+		if(interface::fs::path_exists(to_path)){
+			log_w(MODULE, "rename(): [%s] is taken", cs(to_path));
+			return false;
+		}
+		for(const up_<CSave> &save : m_open){
+			if(save->m_path == path){
+				log_w(MODULE, "rename(): [%s] is open", cs(path));
+				return false;
+			}
+		}
+		if(std::rename(path.c_str(), to_path.c_str()) != 0){
+			log_w(MODULE, "rename(): [%s] to [%s]: %s", cs(path), cs(to_path),
+					strerror(errno));
+			return false;
+		}
+		return true;
 	}
 
 	void* get_interface()
