@@ -33,7 +33,7 @@ static const int FLOOD = 8;
 // A voxel with more than this drops nothing when dug (user, 2026-10-15:
 // over 20%)
 static const int NO_DROP = 3;
-// From this danger up a fresh section is seeded, at danger * MAX
+// From this danger up a fresh section is seeded, 1 here to MAX at 1
 static const float SEED_DANGER = 0.5f;
 // Seconds of game time between a section's expansions, on average
 static const double SECTION_PERIOD = 150;
@@ -109,7 +109,10 @@ inline bool skeleton_near(F bones_at, int x, int y, int z)
 
 inline int seed_value(float danger)
 {
-	return danger >= SEED_DANGER ? (int)std::lround(danger * MAX) : 0;
+	// [SKELDAT_BONES_SEEN] Ramped from 1 at SEED_DANGER to MAX at 1, so a
+	// fresh zone shades in from its edge rather than starting at 8
+	return danger >= SEED_DANGER ? 1 + (int)std::lround((danger -
+			SEED_DANGER) * (MAX - 1) / (1 - SEED_DANGER)) : 0;
 }
 
 // How many expansions a section owes for `seconds` away
@@ -270,8 +273,8 @@ int main()
 		put(2, 0, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 	}
 	// The seeding and the catch-up
-	assert(seed_value(0.49f) == 0 && seed_value(0.5f) == 8 &&
-			seed_value(1.0f) == MAX);
+	assert(seed_value(0.49f) == 0 && seed_value(0.5f) == 1 &&
+			seed_value(0.75f) == 8 && seed_value(1.0f) == MAX);
 	assert(catch_up(-5) == 0 && catch_up(149) == 0 && catch_up(300) == 2 &&
 			catch_up(1e9) == CATCHUP_MAX);
 	int seeded = 0;
