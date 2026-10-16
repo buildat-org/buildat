@@ -162,6 +162,24 @@ return function(game, sounds)
 				light_t = 0}
 			return
 		end
+		if name == "skeldat_drop" then
+			-- A stack on the ground ([SKELDAT_DEATH_DROPS]): its item's
+			-- picture on two crossed upright quads, no swing (as an arrow)
+			local quads, w = {}, 0.2
+			local r = {0, 0, 16, 16}
+			quad(quads, r, 16, 16, {-w, 2 * w, 0}, {w, 2 * w, 0}, {w, 0, 0},
+					{-w, 0, 0})
+			quad(quads, r, 16, 16, {0, 2 * w, -w}, {0, 2 * w, w}, {0, 0, w},
+					{0, 0, -w})
+			local item = node:GetVar("skeldat_item"):GetString()
+			local mat = material(game.item_texture(item) or "")
+			mat.cullMode = magic.CULL_NONE
+			build(node:CreateChild("look"), quads, mat)
+			mobs[node:GetID()] = {node = node, mat = mat, arrow = true,
+				light_t = 0}
+			log:info("skeldat: a drop of " .. item .. " is here")
+			return
+		end
 		if not kind then
 			return
 		end

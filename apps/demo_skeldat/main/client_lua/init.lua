@@ -237,6 +237,8 @@ local KEYS = {
 	{id = "sneak", label = "Sneak", default = "Left Shift", shared = "sneak"},
 	{id = "inventory", label = "Inventory", default = "E",
 		shared = "inventory"},
+	{id = "drop", label = "Drop one of the held item (Ctrl: all)",
+		default = "Q", shared = "drop"},
 	{id = "hud", label = "The HUD on and off", default = "F1", shared = "hud"},
 	{id = "chat", label = "Chat", default = "T", shared = "chat"},
 	{id = "fly", label = "Fly on and off (admins)", default = "K",
@@ -969,6 +971,9 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		open_pause()
 	elseif k == key.inventory then
 		ui.open("inventory")
+	elseif k == key.drop then
+		game.send_luanti("drop", {magic.input:GetQualifierDown(magic.QUAL_CTRL)
+				and "0" or "1"}, {"array", "string"})
 	elseif k == key.hud then
 		hud_on = not hud_on
 	elseif k == key.chat then

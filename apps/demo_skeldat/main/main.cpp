@@ -266,6 +266,22 @@ struct Arrow
 	uint32_t node_id = 0;
 };
 
+// A stack on the ground ([SKELDAT_DEATH_DROPS]): it falls until it rests
+// on a voxel (through water to the bed), a living player within
+// DROP_REACH takes what fits, and it is gone a game day after the drop;
+// "skeldat_drop" in the scene, its item in the var "skeldat_item". Saved
+// as "drop/<n>", "x y z age stack"
+struct Drop
+{
+	Stack st;
+	float x = 0, y = 0, z = 0, vx = 0, vy = 0, vz = 0, age = 0;
+	bool resting = false;
+	// The drop key's: not its dropper's until it has walked away from it
+	ss_ owner;
+	uint32_t node_id = 0;
+};
+static const float DROP_REACH = 1.5f;
+
 // Where something stands in a column (Module::ground())
 struct Ground
 {
@@ -512,6 +528,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	std::map<uint32_t, Mob> m_mobs;
 	uint32_t m_next_mob = 1;
 	std::vector<Arrow> m_arrows;
+	std::vector<Drop> m_drops;
 	float m_ai_t = 0, m_spawn_t = 0;
 	// The columns whose top voxel has FLOOD bones or more, a section's
 	// footprint each (x then z from -m_half), swept one a second; the
@@ -796,6 +813,17 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_next_mob = std::max(m_next_mob, k + 1);
 			}
 		}
+		for(const ss_ &key : m_store->list("drop/")){
+			Drop d;
+			ss_ item;
+			std::istringstream is;
+			if(m_store->get(key, v) && (is.str(v), is>>d.x>>d.y>>d.z>>d.age) &&
+					std::getline(is>>std::ws, item) &&
+					!(d.st = Stack::parse(item)).empty())
+				m_drops.push_back(d);
+		}
+		if(!m_drops.empty())
+			log_i(MODULE, "skeldat: %zu drops on the ground", m_drops.size());
 		if(const char *env = getenv("BUILDAT_SKELDAT_TEST"))
 			m_test = env;
 		log_i(MODULE, "skeldat: the world \"%s\" starts, seed %u, %zu "
@@ -1553,8 +1581,24 @@ struct Module: public interface::Module, public luanti_session::Game
 	// Chat is builtin/chat's
 	void chat_message(const ss_ &name, const ss_ &message){}
 	void chat_send(const ss_ &to, const ss_ &text){}
-	// simplified: no items on the ground to drop into
-	bool drop_wielded(const ss_ &name, int count){ return false; }
+	// The drop key: count of the held stack, 0 all of it, thrown ahead
+	bool drop_wielded(const ss_ &name, int count)
+	{
+		size_t peer;
+		Player *pl = alive(name, peer);
+		if(!pl || pl->main[pl->wield].empty())
+			return false;
+		Stack &st = pl->main[pl->wield];
+		const int n = count <= 0 || count > st.count ? st.count : count;
+		Stack out = st;
+		out.count = n;
+		st.take(n);
+		const float yaw = pl->yaw * (float)M_PI / 180;
+		drop(out, pl->x, pl->y + 1.2f, pl->z, std::sin(yaw) * 3, 2,
+				std::cos(yaw) * 3, pl->name);
+		send_inventory(peer, *pl);
+		return true;
+	}
 
 	// The living player by name; the dead do nothing but respawn, which is
 	// skeldat:respawn
@@ -1814,6 +1858,14 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_store->set("furnace/"+pair.first, pair.second.save());
 			for(auto &pair : m_mobs)
 				m_store->set("mob/"+itos(pair.first), pair.second.save());
+			for(const ss_ &key : m_store->list("drop/"))
+				m_store->remove(key);
+			for(size_t i = 0; i < m_drops.size(); i++){
+				const Drop &d = m_drops[i];
+				std::ostringstream ds;
+				ds<<d.x<<" "<<d.y<<" "<<d.z<<" "<<d.age<<" "<<d.st.str();
+				m_store->set("drop/"+itos(i), ds.str());
+			}
 			std::ostringstream ms;
 			for(int n : m_markers)
 				ms<<n<<" ";
@@ -2007,7 +2059,148 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		pl.hp = std::max(0, pl.hp - damage);
 		log_i(MODULE, "skeldat: %s %s, %d hp left", cs(pl.name), how, pl.hp);
+		if(pl.hp == 0){
+			death_drops(pl);
+			send_inventory(peer, pl);
+		}
 		send_stats(peer, pl);
+	}
+
+	// Half the non-empty stacks, rounded up, picked at random, dropped
+	// where the player died; nothing below the world
+	void death_drops(Player &pl)
+	{
+		if(pl.y < m_y0 * skeldat::bones::SECTION)
+			return;
+		sv_<Stack*> full;
+		for(auto *l : {&pl.main, &pl.craft, &pl.craftresult})
+			for(Stack &st : *l)
+				if(!st.empty())
+					full.push_back(&st);
+		std::shuffle(full.begin(), full.end(), m_rand);
+		const size_t n = (full.size() + 1) / 2;
+		for(size_t i = 0; i < n; i++){
+			drop(*full[i], pl.x + rnd() - 0.5f, pl.y + 0.5f,
+					pl.z + rnd() - 0.5f);
+			*full[i] = Stack();
+		}
+		log_i(MODULE, "skeldat: %s dies at %.1f,%.1f,%.1f, dropping %zu of "
+				"%zu stacks", cs(pl.name), pl.x, pl.y, pl.z, n, full.size());
+	}
+
+	void drop(const Stack &st, float x, float y, float z, float vx = 0,
+			float vy = 0, float vz = 0, const ss_ &owner = "")
+	{
+		if(st.empty())
+			return;
+		Drop d;
+		d.st = st;
+		d.x = x, d.y = y, d.z = z, d.vx = vx, d.vy = vy, d.vz = vz;
+		d.owner = owner;
+		m_drops.push_back(d);
+		log_i(MODULE, "skeldat: a drop of %s at %.1f,%.1f,%.1f", cs(st.str()),
+				x, y, z);
+	}
+
+	// What does not fit the player's inventory, dropped at its feet
+	void give_or_drop(Player &pl, const Stack &st)
+	{
+		drop(m_game.add(pl.main, st), pl.x, pl.y + 0.5f, pl.z);
+	}
+
+	void step_drops(float dt)
+	{
+		// An unloaded voxel is ground to walkable(): not before the world
+		if(m_drops.empty() || !m_world_ready)
+			return;
+		sv_<Drop> kept;
+		sv_<uint32_t> gone;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			for(Drop &d : m_drops){
+				d.age += dt;
+				if(d.age > m_day_s){
+					log_i(MODULE, "skeldat: the drop of %s at %.1f,%.1f,%.1f "
+							"is gone", cs(d.st.str()), d.x, d.y, d.z);
+					gone.push_back(d.node_id);
+					continue;
+				}
+				// Its ground dug away
+				if(d.resting && !walkable(w, (int)std::floor(d.x + 0.5f),
+						(int)std::floor(d.y), (int)std::floor(d.z + 0.5f)))
+					d.resting = false, d.vy = 0;
+				if(!d.resting){
+					d.vy = std::max(d.vy - GRAVITY * dt, -30.0f);
+					const float nx = d.x + d.vx * dt, nz = d.z + d.vz * dt;
+					if(walkable(w, (int)std::floor(nx + 0.5f),
+							(int)std::floor(d.y + 0.5f),
+							(int)std::floor(nz + 0.5f)))
+						d.vx = d.vz = 0;
+					else
+						d.x = nx, d.z = nz;
+					const float ny = d.y + d.vy * dt;
+					const int vy = (int)std::floor(ny + 0.5f);
+					if(d.vy < 0 && walkable(w, (int)std::floor(d.x + 0.5f), vy,
+							(int)std::floor(d.z + 0.5f))){
+						d.y = vy + 0.5f;
+						d.resting = true;
+						log_i(MODULE, "skeldat: the drop of %s rests at "
+								"%.1f,%.1f,%.1f", cs(d.st.str()), d.x, d.y, d.z);
+					} else
+						d.y = ny;
+					// simplified: below the world it is lost at once
+					if(d.y < m_y0 * skeldat::bones::SECTION - 8){
+						gone.push_back(d.node_id);
+						continue;
+					}
+				}
+				for(auto &pair : m_players){
+					Player &pl = pair.second;
+					if(!pl.placed || pl.hp <= 0)
+						continue;
+					const float dist = std::sqrt((pl.x - d.x) * (pl.x - d.x) +
+							(pl.y + 0.5f - d.y) * (pl.y + 0.5f - d.y) +
+							(pl.z - d.z) * (pl.z - d.z));
+					if(pl.name == d.owner){
+						if(dist > 2 * DROP_REACH)
+							d.owner.clear();
+						continue;
+					}
+					if(dist > DROP_REACH)
+						continue;
+					const Stack left = m_game.add(pl.main, d.st);
+					if(left.count == d.st.count)
+						continue;
+					log_i(MODULE, "skeldat: %s picks up %d %s", cs(pl.name),
+							d.st.count - left.count, cs(d.st.name));
+					d.st = left;
+					send_inventory(pair.first, pl);
+					if(d.st.empty())
+						break;
+				}
+				if(d.st.empty()){
+					gone.push_back(d.node_id);
+					continue;
+				}
+				kept.push_back(d);
+			}
+		});
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
+			for(uint32_t id : gone)
+				if(Urho3D::Node *n = id ? scene->GetNode(id) : nullptr)
+					n->Remove();
+			for(Drop &d : kept){
+				Urho3D::Node *n = d.node_id ? scene->GetNode(d.node_id) : nullptr;
+				if(!n){
+					n = scene->CreateChild("skeldat_drop");
+					n->SetVar(Urho3D::StringHash("skeldat_item"),
+							Urho3D::Variant(Urho3D::String(d.st.name.c_str())));
+					d.node_id = n->GetID();
+				}
+				if(n->GetPosition() != Urho3D::Vector3(d.x, d.y, d.z))
+					n->SetPosition(Urho3D::Vector3(d.x, d.y, d.z));
+			}
+		});
+		m_drops.swap(kept);
 	}
 
 	void dig(size_t peer, Player &pl, int x, int y, int z)
@@ -2049,8 +2242,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			if(tool.wear >= skeldat::WEAR_MAX)
 				tool = Stack();
 		}
-		// What it drops goes straight into the inventory
-		// simplified: no items on the ground; what does not fit is lost
+		// What it drops goes straight into the inventory, what does not
+		// fit to the ground
 		Stack drop;
 		if(bones > skeldat::bones::NO_DROP)
 			; // bone-ridden: nothing
@@ -2059,8 +2252,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		else if(n->drop != "-" && (n->drop_rarity <= 1 ||
 				m_rand() % n->drop_rarity == 0))
 			drop = Stack::parse(n->drop);
-		if(!drop.empty())
-			m_game.add(pl.main, drop);
+		give_or_drop(pl, drop);
 		log_i(MODULE, "skeldat: %s digs %s at %s, bones %d%s", cs(pl.name),
 				cs(n->name), cs(at), bones, bones > skeldat::bones::NO_DROP ?
 				", dropping nothing" : "");
@@ -2456,6 +2648,17 @@ struct Module: public interface::Module, public luanti_session::Game
 			std::istringstream it(item);
 			ss_ kind;
 			it>>kind;
+			if(kind == "give"){
+				// "give item n k": k stacks of n into the player's main
+				int n = 0, k = 1;
+				ss_ name;
+				it>>name>>n>>k;
+				for(int i = 0; i < k && m_game.item(name); i++)
+					m_game.add(p->main, Stack(name, n));
+				send_inventory(peer, *p);
+				log_i(MODULE, "skeldat: test: %d of %s given", k, cs(name));
+				continue;
+			}
 			if(kind == "craft"){
 				// "craft i item n": the player's craft slot i (1-9) holds n
 				int i = 0, n = 0;
@@ -2591,8 +2794,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	}
 
 	// hp off a mob, by a player's hit or by the sun (by NOBODY); it dies at
-	// 0, and what it drops goes into the killer's inventory
-	// simplified: no items on the ground, as with digging
+	// 0, and what it drops goes into the killer's inventory, what does not
+	// fit to the ground at the killer
 	static const size_t NOBODY = (size_t)-1;
 	void damage(uint32_t key, int hp, size_t by, float bx, float bz)
 	{
@@ -2615,7 +2818,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			list += (list.empty() ? "" : ", ") + s.str();
 		if(killer != m_players.end()){
 			for(const Stack &s : dropped)
-				m_game.add(killer->second.main, s);
+				give_or_drop(killer->second, s);
 			send_inventory(by, killer->second);
 		} else
 			leave_lantern(m);
@@ -3353,6 +3556,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			step_bones(event.dtime);
 		step_end();
 		step_arrows(event.dtime);
+		step_drops(event.dtime);
 		m_ai_t += event.dtime;
 		if(m_ai_t >= 0.1f){
 			// A long tick (the world's first sweep, 1.7 s) is no fall

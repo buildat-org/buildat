@@ -44,6 +44,8 @@
 # The twelfth, crafting more: the held result clicked again crafts another
 # set onto it.
 # The thirteenth, invulnerability: the admin's toggle, kept over a rejoin.
+# The fourteenth, items on the ground: a full inventory's dig, the drop
+# key, a death's half; lying a game day, kept over a restart, picked up.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -668,9 +670,49 @@ grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 	grep -aq "client1 sets client1: invulnerable off" "$log16" &&
 	echo "$falls" | grep -qE "^invulnerable;invulnerable;[1-9][0-9]* hp left;$" ||
 	fail "invulnerability: the falls $falls ($log16)"
+# 14. Drops ([SKELDAT_DEATH_DROPS]), a game day 40 s: the launcher's
+# client with 36 stacks of stone digs (the dirt to the ground, no room),
+# drops one stone ahead (Q) and waits out the day (both gone); it dies
+# by a fall, half its stacks (18) dropped. The server started again: 18
+# on the ground; the respawn at the same column picks them all up.
+log17="$t/srv17.log"
+printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
+	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
+	"delay 1500" "look 0 -40" "delay 500" "screenshot $t/drops.png" \
+	"delay 40000" "keypress K" "keypress J" "keydown Space" "delay 1500" \
+	"keyup Space" "keypress J" "keypress K" \
+	"wait_log 15000 pause: the death screen shown" "delay 1000" quit \
+	> "$t/drops1.cmds"
+printf '%s\n' "wait_log 300000 pause: the death screen shown" "delay 1000" \
+	'click Button "Respawn"' "delay 3000" quit > "$t/drops2.cmds"
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=drops BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+		BUILDAT_SKELDAT_TIME=0.25 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=40 \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 99 36")" \
+		start_server "$t/srv17_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv17" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		fail "the server ($t/srv17_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	client drops "$t/drops$n.cmds"
+	wait $CLIENT || fail "the drops' drive $n ($t/drops.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	cat "$t/srv17_$n.log" >> "$log17"
+done
+grep -aq "a drop of skeldat:dirt at" "$t/srv17_1.log" ||
+	fail "the dig with a full inventory dropped nothing ($t/srv17_1.log)"
+grep -aq "a drop of skeldat:stone at" "$t/srv17_1.log" &&
+	grep -aq "the drop of skeldat:stone at .* is gone" "$t/srv17_1.log" ||
+	fail "the drop key's stone not dropped, or not gone in a day ($t/srv17_1.log)"
+grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
+	[ $(grep -ac "a drop of skeldat:stone 99 at" "$t/srv17_1.log") = 18 ] ||
+	fail "the death's drops ($t/srv17_1.log)"
+grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
+	[ $(grep -ac "client1 picks up 99 skeldat:stone" "$t/srv17_2.log") = 18 ] ||
+	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground"
 # vim: set noet ts=4 sw=4:
