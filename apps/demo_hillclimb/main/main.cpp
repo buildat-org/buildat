@@ -214,29 +214,16 @@ struct Module: public interface::Module
 							step.substr(c + 1)));
 			}
 		}
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		m_server->sub_event(this,
-				Event::t("network:packet_received/hillclimb:input"));
-		m_server->sub_event(this,
-				Event::t("network:packet_received/hillclimb:params"));
-	}
-
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
-				network::OldClient)
-		EVENT_TYPEN("network:packet_received/hillclimb:input", on_input,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/hillclimb:params", on_params,
-				network::Packet)
+		sub(m_server, "core:start", &Module::on_start);
+		sub(m_server, "core:tick", &Module::on_tick);
+		sub(m_server, "client_file:files_transmitted",
+				&Module::on_files_transmitted);
+		sub(m_server, "network:client_disconnected",
+				&Module::on_client_disconnected);
+		sub(m_server, "network:packet_received/hillclimb:input",
+				&Module::on_input);
+		sub(m_server, "network:packet_received/hillclimb:params",
+				&Module::on_params);
 	}
 
 	// A texture of 16 pixels square, a colour and a grain, no file behind it

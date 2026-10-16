@@ -136,141 +136,60 @@ struct Module: public interface::Module
 		game_settings_self_check();
 		perf_self_check();
 		interface::launch_param_self_check();
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("luanti:game_loaded"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:get_saves"));
-		m_server->sub_event(this, Event::t("storage:over_limit"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/launch:untrusted"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:open"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:save_info"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:set_world_flags"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:get_game_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:set_game_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:get_perf_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:set_perf_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:delete"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:create"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:get_imports"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:get_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:set_settings"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:contentdb_query"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:contentdb_install"));
-		for(const char *n : {"get_world_mods", "set_world_mods", "remove_mod",
-				"restart_world", "get_world_txp", "set_world_txp", "remove_txp",
-				"stop_world", "trim", "export", "export_part", "import_begin",
-				"import_data", "import_mods_answer", "transfer_cancel"})
-			m_server->sub_event(this, Event::t(
-					ss_("network:packet_received/main:")+n));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:import_game"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:import_world"));
-		m_server->sub_event(this, Event::t(
-				"network:packet_received/main:chat"));
-		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		m_server->sub_event(this, Event::t("accounts:login"));
-		m_server->sub_event(this, Event::t("accounts:privs"));
+		sub(m_server, "core:start", &Module::on_start);
+		sub(m_server, "core:tick", &Module::on_tick);
+		sub(m_server, "luanti:game_loaded", &Module::on_game_loaded);
+		sub(m_server, "client_file:files_transmitted",
+				&Module::on_files_transmitted);
+		sub(m_server, "storage:over_limit", &Module::on_over_limit);
+		sub(m_server, "network:packet_received/launch:untrusted",
+				&Module::on_launch_untrusted);
+		sub(m_server, "accounts:login", &Module::on_accounts_login);
+		sub(m_server, "accounts:privs", &Module::on_accounts_privs);
+		sub(m_server, "network:client_disconnected",
+				&Module::on_client_disconnected);
+		// The launcher's and the game's own packets, "main:<name>"
+		typedef void (Module::*Handler)(const network::Packet&);
+		static const std::pair<const char*, Handler> PACKETS[] = {
+			{"get_saves", &Module::on_get_saves},
+			{"save_info", &Module::on_save_info},
+			{"set_world_flags", &Module::on_set_world_flags},
+			{"get_game_settings", &Module::on_get_game_settings},
+			{"set_game_settings", &Module::on_set_game_settings},
+			{"get_perf_settings", &Module::on_get_perf_settings},
+			{"set_perf_settings", &Module::on_set_perf_settings},
+			{"delete", &Module::on_delete},
+			{"open", &Module::on_open},
+			{"create", &Module::on_create},
+			{"get_imports", &Module::on_get_imports},
+			{"get_settings", &Module::on_get_settings},
+			{"set_settings", &Module::on_set_settings},
+			{"contentdb_query", &Module::on_contentdb_query},
+			{"contentdb_install", &Module::on_contentdb_install},
+			{"get_world_mods", &Module::on_get_world_mods},
+			{"set_world_mods", &Module::on_set_world_mods},
+			{"remove_mod", &Module::on_remove_mod},
+			{"restart_world", &Module::on_restart_world},
+			{"stop_world", &Module::on_stop_world},
+			{"trim", &Module::on_trim},
+			{"export", &Module::on_export},
+			{"export_part", &Module::on_export_part},
+			{"import_begin", &Module::on_import_begin},
+			{"import_data", &Module::on_import_data},
+			{"import_mods_answer", &Module::on_import_mods_answer},
+			{"transfer_cancel", &Module::on_transfer_cancel},
+			{"get_world_txp", &Module::on_get_world_txp},
+			{"set_world_txp", &Module::on_set_world_txp},
+			{"remove_txp", &Module::on_remove_txp},
+			{"import_game", &Module::on_import_game},
+			{"import_world", &Module::on_import_world},
+			{"chat", &Module::on_chat},
+		};
+		for(const auto &packet : PACKETS)
+			sub(m_server, ss_("network:packet_received/main:")+packet.first,
+					packet.second);
 	}
 
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("luanti:game_loaded", on_game_loaded, luanti::GameLoaded)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received/main:get_saves", on_get_saves,
-				network::Packet)
-		EVENT_TYPEN("storage:over_limit", on_over_limit, storage::OverLimit)
-		EVENT_TYPEN("network:packet_received/launch:untrusted",
-				on_launch_untrusted, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:save_info", on_save_info,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_world_flags",
-				on_set_world_flags, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_game_settings",
-				on_get_game_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_game_settings",
-				on_set_game_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_perf_settings",
-				on_get_perf_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_perf_settings",
-				on_set_perf_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:delete", on_delete,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:open", on_open,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:create", on_create,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_imports", on_get_imports,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_settings",
-				on_get_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_settings",
-				on_set_settings, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:contentdb_query",
-				on_contentdb_query, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:contentdb_install",
-				on_contentdb_install, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_world_mods",
-				on_get_world_mods, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_world_mods",
-				on_set_world_mods, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:remove_mod",
-				on_remove_mod, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:restart_world",
-				on_restart_world, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:stop_world",
-				on_stop_world, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:trim", on_trim,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:export", on_export,
-				network::Packet)
-		EVENT_TYPEN("network:packet_received/main:export_part",
-				on_export_part, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:import_begin",
-				on_import_begin, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:import_data",
-				on_import_data, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:import_mods_answer",
-				on_import_mods_answer, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:transfer_cancel",
-				on_transfer_cancel, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:get_world_txp",
-				on_get_world_txp, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:set_world_txp",
-				on_set_world_txp, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:remove_txp",
-				on_remove_txp, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:import_game",
-				on_import_game, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:import_world",
-				on_import_world, network::Packet)
-		EVENT_TYPEN("network:packet_received/main:chat", on_chat,
-				network::Packet)
-		EVENT_TYPEN("accounts:login", on_accounts_login, accounts::Login)
-		EVENT_TYPEN("accounts:privs", on_accounts_privs, accounts::Login)
-		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
-				network::OldClient)
-	}
 
 	// A Luanti player per client. The name is this game's to choose and the
 	// client does not send one, so it is the peer's number: what it is for

@@ -437,62 +437,32 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void init()
 	{
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:tick"));
-		m_server->sub_event(this, Event::t("core:shutdown"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("network:client_disconnected"));
-		m_server->sub_event(this, Event::t("worldgen:queue_modified"));
-		m_server->sub_event(this, Event::t("voxelworld:section_loaded"));
-		m_server->sub_event(this, Event::t("voxelworld:section_unloaded"));
-		for(const char *n : {"world_play", "world_create", "world_delete",
-				"open", "close", "move", "craft", "respawn", "admin"})
-			m_server->sub_event(this, Event::t(
-					ss_("network:packet_received/skeldat:")+n));
-		for(const char *n : luanti_session::PACKETS)
-			m_server->sub_event(this, Event::t(
-					ss_("network:packet_received/luanti:")+n));
-	}
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_VOIDN("core:shutdown", save)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
-				network::OldClient)
-		EVENT_TYPEN("worldgen:queue_modified", on_worldgen_queue_modified,
-				worldgen::QueueModifiedEvent)
-		EVENT_TYPEN("voxelworld:section_loaded", on_section_loaded,
-				voxelworld::SectionLoaded)
-		EVENT_TYPEN("voxelworld:section_unloaded", on_section_unloaded,
-				voxelworld::SectionUnloaded)
-		EVENT_TYPEN("network:packet_received/skeldat:world_play",
-				on_world_play, network::Packet)
-		EVENT_TYPEN("network:packet_received/skeldat:world_create",
-				on_world_create, network::Packet)
-		EVENT_TYPEN("network:packet_received/skeldat:world_delete",
-				on_world_delete, network::Packet)
-		EVENT_TYPEN("network:packet_received/skeldat:admin",
-				on_admin, network::Packet)
+		sub(m_server, "core:start", &Module::on_start);
+		sub(m_server, "core:tick", &Module::on_tick);
+		sub(m_server, "core:shutdown", &Module::save);
+		sub(m_server, "client_file:files_transmitted",
+				&Module::on_files_transmitted);
+		sub(m_server, "network:client_disconnected",
+				&Module::on_client_disconnected);
+		sub(m_server, "worldgen:queue_modified",
+				&Module::on_worldgen_queue_modified);
+		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
+		sub(m_server, "voxelworld:section_unloaded",
+				&Module::on_section_unloaded);
+		const ss_ game = "network:packet_received/skeldat:";
+		sub(m_server, game+"world_play", &Module::on_world_play);
+		sub(m_server, game+"world_create", &Module::on_world_create);
+		sub(m_server, game+"world_delete", &Module::on_world_delete);
+		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
-		static const ss_ GAME = "network:packet_received/skeldat:";
-		for(const char *n : {"open", "close", "move", "craft", "respawn"}){
-			if(type == Event::t(GAME+n)){
-				on_game_packet(*dynamic_cast<const network::Packet*>(p));
-				return;
-			}
-		}
+		for(const char *n : {"open", "close", "move", "craft", "respawn"})
+			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
-		for(const char *n : luanti_session::PACKETS){
-			if(type == Event::t(ss_("network:packet_received/luanti:")+n)){
-				m_session.packet(*dynamic_cast<const network::Packet*>(p));
-				return;
-			}
-		}
+		for(const char *n : luanti_session::PACKETS)
+			sub<network::Packet>(m_server,
+					ss_("network:packet_received/luanti:")+n,
+					[this](const network::Packet &p){ m_session.packet(p); });
 	}
 
 	void send(size_t peer, const ss_ &name, const ss_ &data)
