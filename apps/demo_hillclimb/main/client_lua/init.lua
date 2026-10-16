@@ -5,8 +5,10 @@
 -- demo_hillclimb's client ([HILLCLIMB] 1): the hill drawn in pbr as
 -- demo_skeldat draws its world (builtin/luanti's sky and light rules),
 -- the sun where it is at the server's latitude, day and hour
--- (physical_sky.sun_toward), and a camera orbiting the start. A world
--- unit is one voxel, 125 mm (main/hill.h).
+-- (physical_sky.sun_toward), the car as the server moves it (main.cpp,
+-- car.h) drawn as its tyres, wheels and axles, the keys sent to the
+-- server, and a camera orbiting the car. A world unit is one voxel,
+-- 125 mm (main/hill.h).
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
@@ -178,9 +180,157 @@ local function update_sky()
 	sky_cube.cube:tick()
 end
 
--- The orbit: dragged with the left button, the wheel the distance
--- simplified: around the start; the car's position once there is a car
--- ([HILLCLIMB] 2)
+--
+-- The car, drawn from hillclimb:car: car.h's Spec, in metres
+--
+local CAR = {tyre_r = 0.40, tyre_w = 0.30, track = 1.60, wheelbase = 2.80,
+	mount_y = -0.1, droop = 0.45}
+local function lit(r, g, b)
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTexture.xml"))
+	m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b))
+	m:SetShaderParameter("MatSpecColor", magic.Color(0.02, 0.02, 0.02))
+	return m
+end
+local TYRE, RIM, STEEL = lit(0.01, 0.01, 0.01), lit(0.15, 0.15, 0.14),
+		lit(0.05, 0.05, 0.06)
+local function part(parent, model, mat, pos, scale, rot)
+	local n = parent:CreateChild("Part")
+	n.position = pos
+	n.scale = scale
+	if rot then
+		n.rotation = rot
+	end
+	local m = n:CreateComponent("StaticModel")
+	m.model = magic.cache:GetResource("Model", "Models/" .. model .. ".mdl")
+	m.material = mat
+	m.castShadows = true
+	return n
+end
+local car_node = scene:CreateChild("Car")
+car_node.enabled = false
+local hub_y = (CAR.mount_y - CAR.droop) * U
+part(car_node, "Box", STEEL, magic.Vector3(0, CAR.mount_y * U, 0),
+		magic.Vector3(0.15 * U, 0.15 * U, (CAR.wheelbase + 0.3) * U))
+local wheels, axles = {}, {}
+local SIDEWAYS = magic.Quaternion(90, magic.Vector3(0, 0, 1))
+for i = 1, 4 do
+	local x = (i % 2 == 1 and -1 or 1) * CAR.track / 2 * U
+	local z = (i <= 2 and 1 or -1) * CAR.wheelbase / 2 * U
+	local hub = car_node:CreateChild("Hub")
+	hub.position = magic.Vector3(x, hub_y, z)
+	local spin = hub:CreateChild("Spin")
+	local d, w = 2 * CAR.tyre_r * U, CAR.tyre_w * U
+	part(spin, "Cylinder", TYRE, magic.Vector3(0, 0, 0),
+			magic.Vector3(d, w, d), SIDEWAYS)
+	part(spin, "Cylinder", RIM, magic.Vector3(0, 0, 0),
+			magic.Vector3(d * 0.6, w * 1.05, d * 0.6), SIDEWAYS)
+	-- A bar across the rim, so the wheel is seen turning
+	part(spin, "Box", STEEL, magic.Vector3(0, 0, 0),
+			magic.Vector3(w * 1.1, 0.08 * U, d * 0.75))
+	wheels[i] = {hub = hub, spin = spin, x = x, z = z}
+end
+for a = 1, 2 do
+	axles[a] = part(car_node, "Box", STEEL, magic.Vector3(0, hub_y, 0),
+			magic.Vector3(CAR.track * U, 0.1 * U, 0.1 * U))
+end
+
+-- Two states, drawn a packet behind and blended, so the car moves as
+-- smoothly as the frames do at the server's 30 Hz
+local states = {}
+buildat.sub_packet("hillclimb:car", function(data)
+	local v = {}
+	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	if #v < 16 then
+		return
+	end
+	states[1] = states[2]
+	states[2] = {t = scene.elapsedTime, v = v}
+	car_node.enabled = true
+end)
+local car_pos = nil
+local function draw_car()
+	local b = states[2]
+	if b == nil then
+		return
+	end
+	local a = states[1] or b
+	local span = math.max(1e-3, b.t - a.t)
+	local k = math.max(0, math.min(1, (scene.elapsedTime - b.t) / span))
+	local function mix(i) return a.v[i] + (b.v[i] - a.v[i]) * k end
+	car_pos = magic.Vector3(mix(1), mix(2), mix(3))
+	car_node.position = car_pos
+	car_node.rotation = magic.Quaternion(a.v[4], a.v[5], a.v[6], a.v[7]):Slerp(
+			magic.Quaternion(b.v[4], b.v[5], b.v[6], b.v[7]), k)
+	local spin_deg = math.deg(b.v[8])
+	for i, w in ipairs(wheels) do
+		local y = hub_y + b.v[10 + i]
+		w.hub.position = magic.Vector3(w.x, y, w.z)
+		w.y = y
+		w.hub.rotation = magic.Quaternion(i <= 2 and math.deg(b.v[8 + i]) or 0,
+				magic.Vector3(0, 1, 0))
+		w.spin.rotation = magic.Quaternion(spin_deg, magic.Vector3(1, 0, 0))
+	end
+	-- Each axle between its two hubs, tilted as they stand
+	for a_i = 1, 2 do
+		local l, r = wheels[a_i * 2 - 1], wheels[a_i * 2]
+		axles[a_i].position = magic.Vector3(0, (l.y + r.y) / 2, l.z)
+		axles[a_i].rotation = magic.Quaternion(math.deg(math.atan2(r.y - l.y,
+				r.x - l.x)), magic.Vector3(0, 0, 1))
+	end
+end
+
+--
+-- The keys, in the client's key store: the shared movement names where
+-- there is one
+--
+local KEYS = {
+	{id = "accel", label = "Accelerator", default = "W",
+		shared = "move.forward"},
+	{id = "brake", label = "Brake", default = "S", shared = "move.back"},
+	{id = "left", label = "Steer left", default = "A", shared = "move.left"},
+	{id = "right", label = "Steer right", default = "D",
+		shared = "move.right"},
+	{id = "gear1", label = "First gear", default = "1"},
+	{id = "gear2", label = "Second gear", default = "2"},
+	{id = "gear3", label = "Third gear", default = "3"},
+	{id = "gear4", label = "Fourth gear", default = "4"},
+	{id = "reverse", label = "Reverse", default = "R"},
+	{id = "reset", label = "The car back to the start", default = "Backspace"},
+}
+local key = {}
+do
+	local names = buildat.declare_keys(nil, "hillclimb", KEYS)
+	for _, k in ipairs(KEYS) do
+		local name = type(names) == "table" and names[k.id] or k.default
+		key[k.id] = magic.input:GetKeyFromName(name)
+	end
+end
+local function down(id)
+	return key[id] ~= 0 and magic.input:GetKeyDown(key[id])
+end
+local gear = 1
+local sent, sent_t = nil, 0
+-- "accel brake left right gear reset" (main.cpp on_input), sent when it
+-- changes and twice a second besides
+local function send_input()
+	for g = 1, 4 do
+		if down("gear" .. g) then gear = g end
+	end
+	if down("reverse") then gear = 0 end
+	local function b(id) return down(id) and 1 or 0 end
+	local msg = string.format("%d %d %d %d %d %d", b("accel"), b("brake"),
+			b("left"), b("right"), gear, b("reset"))
+	local now = scene.elapsedTime
+	if msg ~= sent or now - sent_t > 0.5 then
+		buildat.send_packet("hillclimb:input", msg)
+		sent, sent_t = msg, now
+	end
+end
+
+-- The orbit about the car: dragged with the left button, the wheel the
+-- distance
 local yaw, pitch, dist = 200, 20, 12 * U
 magic.SubscribeToEvent("MouseWheel", function(_, d)
 	local w = d:GetInt("Wheel")
@@ -194,16 +344,18 @@ magic.SubscribeToEvent("Update", function(_, d)
 	end
 	update_sky()
 	voxel_shading.update(dt)
+	draw_car()
+	send_input()
 	local m = magic.input:GetMouseMove()
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		yaw = (yaw + m.x * 0.3) % 360
 		pitch = math.max(-10, math.min(85, pitch + m.y * 0.3))
 	end
 	local y, p = math.rad(yaw), math.rad(pitch)
-	local t = hill.target
+	local t = car_pos or hill.target
 	camera_node.position = magic.Vector3(
 			t.x + dist * math.cos(p) * math.sin(y),
-			t.y + 1.5 * U + dist * math.sin(p),
+			t.y + 0.5 * U + dist * math.sin(p),
 			t.z + dist * math.cos(p) * math.cos(y))
-	camera_node:LookAt(magic.Vector3(t.x, t.y + U, t.z))
+	camera_node:LookAt(magic.Vector3(t.x, t.y, t.z))
 end)
