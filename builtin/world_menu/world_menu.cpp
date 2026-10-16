@@ -138,6 +138,14 @@ struct Module: public interface::Module, public Interface
 			v.set("default", f.def);
 			v.set("hint", f.hint);
 			v.set("ask", !f.show_only);
+			json::Value choices = json::array();
+			for(const auto &c : f.choices){
+				json::Value pair = json::array();
+				pair.append(c.first);
+				pair.append(c.second);
+				choices.append(pair);
+			}
+			v.set("choices", choices);
 			fields.append(v);
 		}
 		out.set("fields", fields);
@@ -218,7 +226,12 @@ struct Module: public interface::Module, public Interface
 		for(const Field &f : m_config.fields){
 			if(f.show_only)
 				continue;
-			const ss_ value = o.is_object() ? jstr(o, f.key.c_str()) : "";
+			ss_ value = o.is_object() ? jstr(o, f.key.c_str()) : "";
+			// A choice's value or the first's
+			if(!f.choices.empty() && std::none_of(f.choices.begin(),
+					f.choices.end(), [&](const std::pair<ss_, ss_> &c){
+						return c.first == value; }))
+				value = f.choices[0].first;
 			if(!value.empty() && value.size() <= 200)
 				options[f.key] = value;
 		}

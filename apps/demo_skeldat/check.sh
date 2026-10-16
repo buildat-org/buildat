@@ -38,6 +38,9 @@
 # leaves it where it died, dropping bones; a marker skull dug and placed.
 # The tenth, the dig's crack: its frames by the dig's progress, gone
 # when the dig ends or is cut off.
+# The eleventh, the sizes: 512, 256 and 128 wide made and surveyed (the
+# tops inside the height, the ores, the edge at full bones, the origin
+# clean) as run 1's 1024 is.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -157,7 +160,8 @@ quit
 EOF
 # Both spawn at one place: bones at 8 beside it make client2 look like a
 # skeleton to client1 until it walks off (7 and the box: bones.h's self test)
-BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" server "$t/srv1.log"
+BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" \
+	server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
 wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t/a1.log)"
 client b1 "$t/b1.cmds"; bpid=$CLIENT
@@ -173,6 +177,23 @@ top=$(grep -a "512 of 512 sections loaded" "$s" | sed 's/.*sections loaded, \([0
 [ -n "$top" ] && [ "${top#* }" -lt 60 ] ||
 	fail "the world not all in, or made over its top: $top ($s)"
 echo "the world: 512 sections in ${top% *} s, the highest voxel at y ${top#* }, the server $((rss / 1024)) MB"
+# A world's survey line ([SKELDAT_WORLD_SIZES]): <log> <lowest y>: the
+# tops inside the height, each ore there, every edge column at full
+# bones and the origin's none
+surveyed()
+{
+	local line
+	line=$(grep -a "skeldat: survey:" "$1" | tail -1)
+	echo "$line" | awk -v y0="$2" '{
+		split($0, a, "tops "); split(a[2], b, ","); split(b[1], t, "\\.\\.")
+		for(i = 1; i <= NF; i++){
+			if($i == "coal" || $i == "iron" || $i == "diamond") if($(i + 1) + 0 == 0) bad = 1
+			if($i == "bones") { if($(i + 1) + 0 != $(i + 3) + 0) bad = 1 }
+		}
+		if(t[1] + 0 < y0 || t[2] + 0 > 62 || $NF != 0) bad = 1
+		exit bad }' || fail "the world made: $line ($1)"
+}
+surveyed "$s" -64
 grep -aq "client1 is a player" "$s" || fail "client1 was not a player ($s)"
 first_pull=$(grep -a "pulled back" "$s" | head -1 | awk '{print $3}')
 cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{print $3}')
@@ -550,9 +571,29 @@ echo "$crack" | awk -v digs="$digs" '{ n = split($0, w, " "); last = -1; d = 0
 	}
 	exit !(!bad && last == -1 && done >= 1 && done == digs && cut >= 1) }' ||
 	fail "the crack's frames: $crack; $digs digs ($t/dig.log, $log14)"
+# 11. The sizes ([SKELDAT_WORLD_SIZES]) besides run 1's 1024: 512 x 128
+# x 512, 256 x 64 x 256 and 128 x 64 x 128 made at seed 2, each surveyed
+sizes=
+for size in "512 4 -1 0" "256 2 0 0" "128 1 0 0"; do
+	set -- $size
+	w=$1
+	shift
+	BUILDAT_SKELDAT_WORLD=s$w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="$*" \
+		BUILDAT_SKELDAT_SURVEY=1 start_server "$t/size$w.log" "STATUS Listening" \
+		300 auto "$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/size$w" -C "$t/srv.cache" -l 3 || fail "the server ($t/size$w.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	wait_for_log "$t/size$w.log" "skeldat: the world is in" 300 ||
+		fail "the $w world not in ($t/size$w.log)"
+	rss=$(ps -o rss= -p $SERVER_PID)
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	surveyed "$t/size$w.log" $(($2 * 64))
+	sizes="$sizes $w: $(grep -a "the world is in" "$t/size$w.log" | sed 's/.*in, //'), $((rss / 1024)) MB;"
+done
+echo "sizes:$sizes"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes"
 # vim: set noet ts=4 sw=4:

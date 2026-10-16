@@ -65,13 +65,14 @@ inline float hash(int32_t a, int32_t b, uint32_t salt)
 // line over HALF -- so the spawn is clean, the middle has patches and the
 // border is solid bones.
 inline float noise_danger(uint32_t salt, float x, float z);
-inline float danger(uint32_t salt, float x, float z)
+// half: the world's, in voxels ([SKELDAT_WORLD_SIZES]: the size picked)
+inline float danger(uint32_t salt, float x, float z, int half = HALF)
 {
 	auto step = [](float a, float b, float t){
 		t = std::min(1.0f, std::max(0.0f, (t - a) / (b - a)));
 		return t * t * (3 - 2 * t);
 	};
-	const float t = std::max(std::fabs(x + 0.5f), std::fabs(z + 0.5f)) / HALF;
+	const float t = std::max(std::fabs(x + 0.5f), std::fabs(z + 0.5f)) / half;
 	return std::max(noise_danger(salt, x, z) * step(0.2f, 0.9f, t),
 			step(0.85f, 0.99f, t));
 }
@@ -94,9 +95,10 @@ inline float noise_danger(uint32_t salt, float x, float z)
 // nothing -- turned by `turn`. False for a column with none.
 static const float PILE_FROM = 0.3f;
 struct Pile { int height = 0, top = 0, turn = 0; };
-inline bool pile(uint32_t salt, int32_t x, int32_t z, Pile &p)
+inline bool pile(uint32_t salt, int32_t x, int32_t z, Pile &p,
+		int half = HALF)
 {
-	const float d = danger(salt, (float)x, (float)z);
+	const float d = danger(salt, (float)x, (float)z, half);
 	if(!(d > PILE_FROM) || hash(x, z, salt + 7) >= 0.15f *
 			std::pow((d - PILE_FROM) / (1 - PILE_FROM), 1.5f))
 		return false;
@@ -288,10 +290,15 @@ int main()
 	for(uint32_t salt = 1; salt < 20; salt++){
 		for(int a = -60; a < 60; a++)
 			assert(danger(salt, (float)a, (float)(a * 7 % 60)) == 0);
-		for(int a = -HALF; a < HALF; a++)
-			for(float e : {(float)-HALF, (float)(HALF - 1)})
-				assert(seed_value(danger(salt, (float)a, e)) == MAX &&
-						seed_value(danger(salt, e, (float)a)) == MAX);
+		// The smallest world's (half 64) clean middle: t under 0.2
+		for(int a = -10; a < 10; a++)
+			assert(danger(salt, (float)a, (float)(a * 3 % 10), 64) == 0);
+		// Every size's edge ([SKELDAT_WORLD_SIZES])
+		for(int half : {HALF, 256, 128, 64})
+		for(int a = -half; a < half; a++)
+			for(float e : {(float)-half, (float)(half - 1)})
+				assert(seed_value(danger(salt, (float)a, e, half)) == MAX &&
+						seed_value(danger(salt, e, (float)a, half)) == MAX);
 	}
 	int seeded = 0;
 	for(int i = 0; i < 10000; i++)

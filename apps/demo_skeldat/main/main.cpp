@@ -282,6 +282,8 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	interface::VoxelFormat m_format;
 	interface::VoxelField m_bones;
 	uint32_t m_salt;
+	// The world's half in voxels, for the seeding's bias
+	int m_half_v = skeldat::bones::HALF;
 	// The highest voxel any section was made with
 	std::atomic<int> m_top{-100000};
 	// For a check: every voxel seeded at MAX (BUILDAT_SKELDAT_FILL), a
@@ -314,7 +316,9 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
 		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
 			skeldat::bones::Pile p;
-			if(!skeldat::bones::pile(m_salt, x, z, p))
+			// FILL=half's clean side stays clean
+			if((m_fill == 2 && x < 0) ||
+					!skeldat::bones::pile(m_salt, x, z, p, m_half_v))
 				continue;
 			int32_t y = uc.getY();
 			while(y >= lc.getY() && id_at(x, y, z) == ID_AIR)
@@ -388,7 +392,7 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 			const int b = m_fill == 1 || (m_fill == 2 && x >= 0) ?
 					skeldat::bones::MAX : m_fill == 2 ? 0 :
 					skeldat::bones::seed_value(skeldat::bones::danger(m_salt,
-					(float)x, (float)z));
+					(float)x, (float)z, m_half_v));
 			if(b == 0)
 				continue;
 			for(int32_t y = lc.getY(); y <= uc.getY(); y++){
@@ -600,7 +604,13 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 		serve_media();
 		world_menu::access(m_server, [&](world_menu::Interface *i){
+			world_menu::Field size{"size", "Size", "", "", false};
+			// [SKELDAT_WORLD_SIZES]: start_world() reads it
+			size.choices = {{"512", "512 x 128 x 512"},
+				{"1024", "1024 x 128 x 1024"}, {"256", "256 x 64 x 256"},
+				{"128", "128 x 64 x 128"}};
 			i->configure({"skeldat", {{"seed", "Seed", "", "empty: random"},
+					size,
 					// The high score, written at the end (step_end())
 					{"ended", "Every voxel had bones after", "", "", true}}});
 		});
@@ -732,6 +742,15 @@ struct Module: public interface::Module, public luanti_session::Game
 			log_i(MODULE, "skeldat: the world \"%s\" ended after %.1f days",
 					cs(name), m_end_days);
 		}
+		// The size picked when it was made ([SKELDAT_WORLD_SIZES]): its
+		// width; a world from before the choice is 1024, as it was made
+		ss_ size = "1024";
+		m_save->store("world_menu")->get("size", size);
+		const int width = atoi(size.c_str());
+		if(width == 512 || width == 1024)
+			m_half = width / 128, m_y0 = -1, m_y1 = 0;
+		else if(width == 256 || width == 128)
+			m_half = width / 128, m_y0 = 0, m_y1 = 0;
 		// For a check: a small world, "<half> <y0> <y1>" in sections
 		const char *env_size = getenv("BUILDAT_SKELDAT_SIZE");
 		if(env_size && env_size[0] && sscanf(env_size, "%d %d %d", &m_half,
@@ -774,8 +793,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(const char *env = getenv("BUILDAT_SKELDAT_TEST"))
 			m_test = env;
 		log_i(MODULE, "skeldat: the world \"%s\" starts, seed %u, %zu "
-				"furnaces, %zu mobs", cs(name), seed, m_furnaces.size(),
-				m_mobs.size());
+				"furnaces, %zu mobs, %d x %d x %d", cs(name), seed,
+				m_furnaces.size(), m_mobs.size(), 2 * m_half * 64,
+				(m_y1 - m_y0 + 1) * 64, 2 * m_half * 64);
 		create_world(seed);
 		return true;
 	}
@@ -815,6 +835,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_generator = new BonesGenerator(generator, m_format, m_bones,
 					m_mapgen.seed, ids);
 			const char *fill = getenv("BUILDAT_SKELDAT_FILL");
+			m_generator->m_half_v = m_half * skeldat::bones::SECTION;
 			m_generator->m_fill = !fill ? 0 : ss_(fill) == "1" ? 1 :
 					ss_(fill) == "half" ? 2 : 0;
 			i->get_instance(m_scene)->set_generator(m_generator);
@@ -922,8 +943,17 @@ struct Module: public interface::Module, public luanti_session::Game
 		luanti_mapgen::Params mp;
 		mp.mgname = "valleys";
 		mp.seed = seed;
-		mp.water_level = 1;
+		// A world 64 high ([SKELDAT_WORLD_SIZES]) is y 0..63, its water at
+		// 20; one 128 high is y -64..63, water at 1
+		const bool low = m_y0 >= 0;
+		const int wl = low ? 20 : 1, lift = wl - 1;
+		mp.water_level = wl;
 		mp.section_size = skeldat::bones::SECTION;
+		// The terrain's spreads by the world's width, not under 128, so a
+		// small world still has a valley and a hill
+		const float width = 2.0f * m_half * skeldat::bones::SECTION,
+				th_spread = std::max(128.0f, width),
+				vd_spread = std::max(128.0f, width / 2);
 		// The valleys squeezed into the world's 128 voxels of height
 		// ([SKELDAT_BOUNDED_WORLD]): over 1024² at seeds 1-12 the top
 		// solid voxel is at -6..54, where the defaults' is at -67..258.
@@ -940,8 +970,19 @@ struct Module: public interface::Module, public luanti_session::Game
 			np.persist = persist;
 			mp.noises[name] = np;
 		};
-		noise("mgvalleys_np_terrain_height", 8, 12, 1024, 5202, 6, 0.4f);
-		noise("mgvalleys_np_valley_depth", 2.5f, 1.2f, 512, -1914, 1, 1.0f);
+		// 64 high: over seeds 1-12 the top solid voxel at 11..44 (the
+		// survey as for the 128 one, at widths 256 and 128)
+		if(low){
+			noise("mgvalleys_np_terrain_height", 22, 10, th_spread, 5202, 6,
+					0.4f);
+			noise("mgvalleys_np_valley_depth", 1.5f, 0.8f, vd_spread, -1914,
+					1, 1.0f);
+		} else {
+			noise("mgvalleys_np_terrain_height", 8, 12, th_spread, 5202, 6,
+					0.4f);
+			noise("mgvalleys_np_valley_depth", 2.5f, 1.2f, vd_spread, -1914,
+					1, 1.0f);
+		}
 		noise("mgvalleys_np_inter_valley_slope", 0.3f, 0.3f, 128, 746, 1,
 				1.0f);
 		for(size_t i = 0; i < m_game.nodes.size(); i++)
@@ -979,11 +1020,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			mp.biomes.push_back(b);
 		};
 		biome("grassland", "skeldat:grass", 1, "skeldat:dirt", 3,
-				"skeldat:sand", 4, 31000);
+				"skeldat:sand", 4 + lift, 31000);
 		biome("beach", "skeldat:sand", 1, "skeldat:sand", 2, "skeldat:sand",
-				-6, 3);
+				-6 + lift, 3 + lift);
 		biome("seabed", "skeldat:gravel", 1, "skeldat:sand", 2, "",
-				-31000, -7);
+				-31000, -7 + lift);
 		auto ore = [&](const ss_ &name, int scarcity, int num, int y_max,
 				int y_min){
 			luanti_mapgen::Params::Ore o;
@@ -998,10 +1039,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			mp.ores.push_back(o);
 		};
 		ore("skeldat:coal_ore", 8 * 8 * 8, 8, 64, -31000);
-		ore("skeldat:iron_ore", 10 * 10 * 10, 5, 0, -31000);
-		ore("skeldat:diamond_ore", 15 * 15 * 15, 4, -48, -31000);
+		// 64 high, each still under the surface (11 and up)
+		ore("skeldat:iron_ore", 10 * 10 * 10, 5, low ? 14 : 0, -31000);
+		ore("skeldat:diamond_ore", 15 * 15 * 15, 4, low ? 6 : -48, -31000);
 		ore("skeldat:gravel", 16 * 16 * 16, 20, 64, -31000);
-		ore("skeldat:dirt", 16 * 16 * 16, 20, 64, -32);
+		ore("skeldat:dirt", 16 * 16 * 16, 20, 64, low ? 4 : -32);
 		// A tree, 5x6x5: a trunk of four, leaves around its top two and
 		// over it
 		luanti_mapgen::Params::Decoration d;
@@ -1011,7 +1053,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		d.sidelen = 16;
 		d.fill_ratio = 0.006f;
 		d.biomes = {"grassland"};
-		d.y_min = 4;
+		d.y_min = 4 + lift;
 		d.y_max = 200;
 		d.flags = "place_center_x, place_center_z";
 		d.rotation = "random";
@@ -1054,8 +1096,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			// The feet's y on the column's top, or false for water or a tree
+			const int y1 = (m_y1 + 1) * SECTION - 1, y0 = m_y0 * SECTION;
 			auto ground = [&](int x, int z, int &feet){
-				for(int y = Y1 - 2; y > Y0; y--){
+				for(int y = y1 - 2; y > y0; y--){
 					if(!walkable(w, x, y, z)){
 						if(is_water(w, x, y, z))
 							return false;
@@ -1077,7 +1120,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			const int got = env ? sscanf(env, "%d %d %d", &ex, &ey, &ez) : 0;
 			if(got == 2){
 				ez = ey;
-				ey = Y1;
+				ey = y1;
 				ground(ex, ez, ey);
 			}
 			if(got >= 2){
@@ -1092,9 +1135,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				const int x = (int)(r() % (2 * range)) - range;
 				const int z = (int)(r() % (2 * range)) - range;
 				int feet = 0;
-				if(!ground(x, z, feet) || feet < 2 ||
+				if(!ground(x, z, feet) || feet < m_mapgen.water_level + 1 ||
 						seed_value(skeldat::bones::danger(
-						(uint32_t)m_mapgen.seed, (float)x, (float)z)) > 0)
+						(uint32_t)m_mapgen.seed, (float)x, (float)z,
+						m_half * SECTION)) > 0)
 					continue;
 				m_spawn[0] = (float)x;
 				m_spawn[1] = (float)feet;
@@ -1103,7 +1147,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			}
 		});
 		if(!m_spawn_ready){
-			m_spawn[1] = Y1;
+			m_spawn[1] = (float)((m_y1 + 1) * SECTION - 1);
 			m_spawn_ready = true;
 		}
 		std::ostringstream os;
@@ -1224,6 +1268,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 		for(size_t t = 0; t < 8 * bench && added < bench; t++)
 			added += add_skeleton(false);
+		if(getenv("BUILDAT_SKELDAT_SURVEY"))
+			survey();
 		if(const char *env = getenv("BUILDAT_SKELDAT_LANTERNS")){
 			test_lanterns(env);
 			m_lantern_report = true;
@@ -2763,6 +2809,51 @@ struct Module: public interface::Module, public luanti_session::Game
 		return (size_t)(2 * m_half) * (2 * m_half);
 	}
 
+	// For a check (BUILDAT_SKELDAT_SURVEY, [SKELDAT_WORLD_SIZES]): what was
+	// made -- the tops' range, the ores, the edge's and the origin's bones
+	// -- in a line, and the map into the save
+	void survey()
+	{
+		const int S = skeldat::bones::SECTION, h = m_half * S;
+		int lo = 1000, hi = -1000, edge = 0, edge_max = 0;
+		for(int z = -h; z < h; z++)
+		for(int x = -h; x < h; x++){
+			const long c = column(x, z);
+			if(m_top_y[c] != NO_GROUND)
+				lo = std::min(lo, (int)m_top_y[c]),
+				hi = std::max(hi, (int)m_top_y[c]);
+			if(x == -h || x == h - 1 || z == -h || z == h - 1)
+				edge++, edge_max += m_top_b[c] == skeldat::bones::MAX;
+		}
+		std::map<uint32_t, size_t> ores;
+		for(const char *n : {"skeldat:coal_ore", "skeldat:iron_ore",
+				"skeldat:diamond_ore"})
+			ores[id_of(n)] = 0;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			for(int sz = -m_half; sz < m_half; sz++)
+			for(int sx = -m_half; sx < m_half; sx++){
+				const interface::VoxelVolume vol = w->get_volume(pv::Region(
+						pv::Vector3DInt32(sx * S, m_y0 * S, sz * S),
+						pv::Vector3DInt32(sx * S + S - 1, m_y1 * S + S - 1,
+						sz * S + S - 1)));
+				for(int z = sz * S; z < sz * S + S; z++)
+				for(int y = m_y0 * S; y < (m_y1 + 1) * S; y++)
+				for(int x = sx * S; x < sx * S + S; x++){
+					auto it = ores.find(m_format.id.get(vol.sample_at(x, y, z)));
+					if(it != ores.end())
+						it->second++;
+				}
+			}
+		});
+		log_i(MODULE, "skeldat: survey: tops %d..%d, coal %zu, iron %zu, "
+				"diamond %zu, edge columns at full bones %d of %d, the "
+				"origin's %d", lo, hi, ores[id_of("skeldat:coal_ore")],
+				ores[id_of("skeldat:iron_ore")],
+				ores[id_of("skeldat:diamond_ore")], edge_max, edge,
+				(int)m_top_b[column(0, 0)]);
+		write_map();
+	}
+
 	// A voxel that can have bones: not air, a marker skull or a lantern
 	bool holds_bones(uint32_t id)
 	{
@@ -3524,7 +3615,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		for(int x = f.origin.x; x < f.origin.x + f.w; x++){
 			// Over the world's top is open air; past its sides, nothing
 			// to walk in
-			if(y > skeldat::bones::Y1){
+			if(y >= (m_y1 + 1) * skeldat::bones::SECTION){
 				f.cells[f.index(x, y, z)] = vp::OPEN;
 				continue;
 			}

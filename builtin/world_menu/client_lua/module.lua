@@ -328,7 +328,18 @@ local function draw_new(state)
 	local name = edit_on(menu.window, #state.worlds == 0 and "world" or "")
 	local fields = {}
 	for _, f in ipairs(state.fields) do
-		if f.ask ~= false then
+		if f.ask ~= false and f.choices and #f.choices > 0 then
+			-- One of the app's choices, the first the default
+			local list, value = {}, f.choices[1][1]
+			for i, c in ipairs(f.choices) do
+				list[i] = {c[2], c[1]}
+			end
+			menu:add_dropdown(f.label, list, value, function(v)
+				value = v
+				log:info("world_menu: " .. f.key .. " picked: " .. v)
+			end)
+			fields[f.key] = {GetText = function() return value end}
+		elseif f.ask ~= false then
 			text_on(menu.window, f.label .. ((f.hint or "") ~= "" and
 					" (" .. f.hint .. ")" or "") .. ":")
 			fields[f.key] = edit_on(menu.window, f.default or "")

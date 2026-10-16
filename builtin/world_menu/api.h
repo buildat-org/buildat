@@ -26,7 +26,8 @@
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
 // ({name, to}), world_menu:delete ({name}). Server to client:
 // world_menu:list (JSON: {title, may_pick, wait, fields: [{key, label,
-// default, hint, ask}], worlds: [{name, bytes, options}]}; wait: the progress
+// default, hint, ask, choices: [[value, label]]}], worlds: [{name, bytes,
+// options}]}; wait: the progress
 // text, if any), world_menu:up.
 namespace world_menu
 {
@@ -43,6 +44,9 @@ namespace world_menu
 		ss_ hint;
 		// Left out of a brace list, false (C++11: no initializer here)
 		bool show_only;
+		// One of these (value, label) picked, the first the default; empty,
+		// typed text ([SKELDAT_WORLD_SIZES])
+		std::vector<std::pair<ss_, ss_>> choices;
 	};
 
 	struct Config

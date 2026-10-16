@@ -5,7 +5,8 @@
 # [WORLD_MENU]: the shared world menu in skeldat, skelenti and vanilla,
 # driven by the launcher's own client (-u launcher=1). In each, on a fresh
 # server, a world made through New world... (skeldat's with the seed
-# option typed; vanilla's New save..., the minimal game) and played; on
+# typed and the size picked from its choices; vanilla's New save..., the
+# minimal game) and played; on
 # the server started again, the world listed, renamed and deleted (to
 # vanilla's trash), the list empty after.
 #   builtin/world_menu/check.sh
@@ -41,9 +42,13 @@ for app in demo_skeldat demo_skelenti; do
 		printf '%s\n' "wait_log 120000 world_menu: the list shown, 0 worlds" \
 			'click Button "New world..."' \
 			"wait_log 5000 world_menu: the name screen shown" "delay 300"
-		# skeldat's seed, in its field (the empty one; the name's says world)
+		# skeldat's seed, in its field (the empty one; the name's says world),
+		# and its size from the choices, the fourth: 128 x 64 x 128
 		[ $short = skeldat ] && printf '%s\n' 'click LineEdit ""' \
-			"delay 300" "text 4242" "delay 300"
+			"delay 300" "text 4242" "delay 300" 'click DropDownList "▼"' \
+			"delay 500" "keypress Down" "keypress Down" "keypress Down" \
+			"keypress Return" "wait_log 5000 world_menu: size picked: 128" \
+			"delay 300"
 		printf '%s\n' 'click Button "Create"' \
 			"wait_log 180000 $([ $short = skeldat ] && echo 'skeldat: placed at' ||
 				echo 'load: the world is in')" "quit"
@@ -53,10 +58,11 @@ for app in demo_skeldat demo_skelenti; do
 		grep -aq "$short: the world \"world\" starts" "$t/$app.srv1.log" ||
 		fail "$short: New world did not make and start \"world\" ($t/$app.srv1.log)"
 	if [ $short = skeldat ]; then
-		grep -aq 'the world "world" starts, seed 4242,' "$t/$app.srv1.log" ||
-			fail "skeldat: the seed option not used ($t/$app.srv1.log)"
+		grep -aq 'the world "world" starts, seed 4242,.* 128 x 64 x 128' \
+			"$t/$app.srv1.log" ||
+			fail "skeldat: the seed or size option not used ($t/$app.srv1.log)"
 		# The whole world made before the play, its progress in the menu
-		grep -aq "world_menu: the wait shown: Making the world: 256 of 512" \
+		grep -aq "world_menu: the wait shown: Making the world: 1 of 4" \
 			"$t/$app.cli1.log" ||
 			fail "skeldat: no progress while the world was made ($t/$app.cli1.log)"
 	fi

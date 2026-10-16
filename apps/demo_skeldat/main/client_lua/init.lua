@@ -301,8 +301,9 @@ voxel_shading.set_sky_light(1.0)
 voxel_shading.set_specular_emphasis(0.7)
 voxel_shading.set_gray_by_light(1.5)
 
--- Over the world's top is open air, past its sides solid (bones.h's Y1
--- and HALF: no section is there, and one not loaded stops the player)
+-- Over the world's top is open air, past its sides solid: the top is
+-- bones.h's Y1 at every size ([SKELDAT_WORLD_SIZES]); past the sides no
+-- section is there, and one not loaded stops the player
 local WORLD_TOP = 63
 local player = physics.new(
 	function(x, y, z)

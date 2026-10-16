@@ -49,9 +49,12 @@ the ground;
 `BUILDAT_SKELDAT_TEST="boar 0 3; skeleton 2 9"` no spawning, and those mobs
 at x, z from the first player, once (also `bones dx dz value` on the
 ground's voxel and `marker dx dz`, a marker skull);
-`BUILDAT_SKELDAT_SIZE="<half> <y0> <y1>"` a smaller world, in sections;
+`BUILDAT_SKELDAT_SIZE="<half> <y0> <y1>"` a world's size in sections, over
+the size picked in the world menu (512, 1024, 256 or 128 wide; the two
+small ones 64 high); `BUILDAT_SKELDAT_SURVEY=1` the generated world's
+tops, ores and edge bones logged once it is in;
 `BUILDAT_SKELDAT_FILL=1` every voxel made with full bones, `half` those
-at x >= 0; `BUILDAT_SKELDAT_DAY=<s>` the seconds a day;
+at x >= 0 (and no piles at x < 0); `BUILDAT_SKELDAT_DAY=<s>` the seconds a day;
 `BUILDAT_SKELDAT_EXPAND=<s>` the seconds between a section's expansions;
 `BUILDAT_SKELDAT_LIGHT_STEP=<s>` a light skeleton's step;
 `BUILDAT_SKELDAT_SKELETONS=<n>` that many light skeletons added anywhere
