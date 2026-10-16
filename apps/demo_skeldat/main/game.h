@@ -361,6 +361,21 @@ inline Game make_game()
 		n.light_source = 8;
 		g.items.erase(n.name);
 	}
+	// A lantern ([SKELDAT_FIGHT_BACK]): coal in it, no bones grow near it
+	// and those there fall (main.cpp); lit, it is the active one
+	for(int lit = 0; lit < 2; lit++){
+		const ss_ side = lit ? "lantern_active" : "lantern";
+		NodeDef &n = node(lit ? "lantern_active" : "lantern", "Lantern",
+				{"lantern_top", "lantern_top", side}, {{"cracky", 3},
+				{"oddly_breakable_by_hand", 3}}, lit ? "skeldat:lantern" : "");
+		n.shape = NODEBOX;
+		n.boxes = {-0.3125f, -0.5f, -0.3125f, 0.3125f, 0.25f, 0.3125f};
+		if(lit){
+			n.light_source = 12;
+			g.items.erase(n.name);
+		} else
+			g.items[n.name].image = "main/lantern_active.png";
+	}
 	// The table and the furnace show their fronts
 	g.items["skeldat:table"].image = "main/table_front.png";
 	g.items["skeldat:furnace"].image = "main/furnace_front.png";
@@ -441,6 +456,10 @@ inline Game make_game()
 	craft("skeldat:furnace", 3, {c, c, c, c, "", c, c, c, c});
 	craft("skeldat:torch 4", 1, {"skeldat:coal", "skeldat:stick"});
 	craft("skeldat:bone_block", 3, {b, b, b, b, b, b, b, b, b});
+	{
+		const ss_ i = "skeldat:iron_ingot";
+		craft("skeldat:lantern", 3, {i, b, i, b, "", b, i, b, i});
+	}
 	const ss_ k = "skeldat:skull", d = "skeldat:diamond",
 			bb = "skeldat:bone_block";
 	craft("skeldat:crown", 3, {k, d, k, bb, k, bb});

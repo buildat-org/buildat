@@ -8,7 +8,7 @@
 -- The HUD: hearts, bubbles under water, the hotbar and
 -- the crosshair. The inventory: the player's own with a 2x2 grid, a
 -- crafting table's 3x3 (the same craft list of 9, its corner shown), a
--- furnace's slots. A click picks a stack up and the next one puts it
+-- furnace's slots, a lantern's coal. A click picks a stack up and the next one puts it
 -- down; the right button picks up half and puts down one.
 -- simplified: the stack picked up stays drawn in its slot, outlined, until
 -- it is put down; no tooltips; the furnace shows no progress.
@@ -218,6 +218,11 @@ local function draw()
 		image(win.el, tex("arrow_right.png"), pad + 3.5 * u,
 				pad + u, 24 * s, 16 * s)
 		slot(at, "dst", 1, 6 * u, u)
+	elseif win.mode == "lantern" then
+		-- Its coal alone ([SKELDAT_FIGHT_BACK])
+		image(win.el, tex("fire_bg.png"), pad + 4 * u, pad + 0.2 * u,
+				14 * s, 14 * s)
+		slot(win.at, "fuel", 1, 4 * u, u)
 	else
 		local n = win.mode == "table" and 3 or 2
 		for row = 0, n - 1 do
@@ -303,7 +308,8 @@ local function click(x, y, button)
 	return true
 end
 
--- mode: "inventory", "table" or "furnace"; at: the node's "x,y,z"
+-- mode: "inventory", "table", "furnace" or "lantern"; at: the node's
+-- "x,y,z"
 function M.open(mode, at)
 	if win then
 		local same = win.mode == mode and win.at == at

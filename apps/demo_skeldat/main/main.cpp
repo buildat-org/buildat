@@ -151,16 +151,18 @@ struct Furnace
 {
 	Stack src, fuel, dst;
 	float fuel_left = 0, src_time = 0;
+	// A lantern's: the fuel slot alone ([SKELDAT_FIGHT_BACK])
+	bool lantern = false;
 
 	ss_ save() const {
 		std::ostringstream os;
 		os<<src.str()<<"|"<<fuel.str()<<"|"<<dst.str()<<"|"<<fuel_left<<"|"
-				<<src_time;
+				<<src_time<<"|"<<lantern;
 		return os.str();
 	}
 	void load(const ss_ &s){
 		std::istringstream is(s);
-		ss_ a[5];
+		ss_ a[6];
 		for(ss_ &p : a)
 			std::getline(is, p, '|');
 		src = Stack::parse(a[0]);
@@ -168,6 +170,7 @@ struct Furnace
 		dst = Stack::parse(a[2]);
 		fuel_left = (float)atof(a[3].c_str());
 		src_time = (float)atof(a[4].c_str());
+		lantern = a[5] == "1";
 	}
 };
 
@@ -200,6 +203,13 @@ static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
 static const float SKELETONS_MIN = 500, SKELETONS_MAX = 2000,
 		LIGHT_STEP = 1;
 static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
+// A burning lantern's sphere ([SKELDAT_FIGHT_BACK]): no bones grow in it,
+// a voxel's fall by one in one of LANTERN_RETRACT_IN of its section's
+// expansions and a bone block goes in one of LANTERN_DECAY_IN; a coal
+// lasts LANTERN_HOURS game hours
+static const int LANTERN_RADIUS = 8, LANTERN_RETRACT_IN = 4,
+		LANTERN_DECAY_IN = 8;
+static const float LANTERN_HOURS = 4;
 static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
@@ -272,7 +282,8 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	std::atomic<int> m_top{-100000};
 	// For a check: every voxel seeded at MAX (BUILDAT_SKELDAT_FILL), a
 	// world that ends at once
-	bool m_fill = false;
+	// For a check: every voxel at MAX (1), or those at x >= 0 (2)
+	int m_fill = 0;
 	PileIds m_ids;
 
 	BonesGenerator(worldgen::GeneratorInterface *inner,
@@ -370,7 +381,8 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 		}
 		for(int32_t z = lc.getZ(); z <= uc.getZ(); z++)
 		for(int32_t x = lc.getX(); x <= uc.getX(); x++){
-			const int b = m_fill ? skeldat::bones::MAX :
+			const int b = m_fill == 1 || (m_fill == 2 && x >= 0) ?
+					skeldat::bones::MAX : m_fill == 2 ? 0 :
 					skeldat::bones::seed_value(skeldat::bones::danger(m_salt,
 					(float)x, (float)z));
 			if(b == 0)
@@ -465,6 +477,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	// The time of day, 0 to 1 with 0.5 noon; a new world starts at 6:00
 	double m_day = 0.25;
 	float m_day_s = DAY_SECONDS, m_light_step = LIGHT_STEP;
+	// Seconds between a section's expansions; BUILDAT_SKELDAT_EXPAND for a
+	// check
+	double m_section_period = skeldat::bones::SECTION_PERIOD;
+	bool m_lantern_report = false;
 	// Day 1, night 0, -1 before the world is in; the night's bone blocks
 	int m_phase = -1;
 	size_t m_night_blocks = 0;
@@ -494,13 +510,13 @@ struct Module: public interface::Module, public luanti_session::Game
 	// was ~66 us, the world being too big for voxelworld's chunk buffers
 	// Marker skulls a footprint, kept by set_node, saved as "markers"
 	sv_<int> m_markers;
-	uint32_t m_marker = ID_IGNORE;
+	uint32_t m_marker = ID_IGNORE, m_lantern_ids[2] = {ID_IGNORE, ID_IGNORE};
 	sv_<int8_t> m_top_y;
 	sv_<uint8_t> m_top_b;
 	size_t m_sweep = 0;
 	float m_sweep_t = 0, m_hour_t = 0;
 	double m_light_us = 0;
-	size_t m_light_steps = 0;
+	size_t m_light_steps = 0, m_woken = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
 	// spawning of its own, and the mobs named at x, z from the first
 	// player placed, once, standing still for half a minute; "bones 1 0 8"
@@ -732,6 +748,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(const char *env = getenv("BUILDAT_SKELDAT_LIGHT_STEP"))
 			if(atof(env) > 0)
 				m_light_step = (float)atof(env);
+		if(const char *env = getenv("BUILDAT_SKELDAT_EXPAND"))
+			if(atof(env) > 0)
+				m_section_period = atof(env);
 		// For a check: the time of day it starts at, 0.5 noon
 		const char *env_time = getenv("BUILDAT_SKELDAT_TIME");
 		if(env_time && env_time[0])
@@ -792,7 +811,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_generator = new BonesGenerator(generator, m_format, m_bones,
 					m_mapgen.seed, ids);
 			const char *fill = getenv("BUILDAT_SKELDAT_FILL");
-			m_generator->m_fill = fill && fill[0] == '1';
+			m_generator->m_fill = !fill ? 0 : ss_(fill) == "1" ? 1 :
+					ss_(fill) == "half" ? 2 : 0;
 			i->get_instance(m_scene)->set_generator(m_generator);
 		});
 		voxelworld::access(m_server, [&](voxelworld::Interface *i){
@@ -1064,7 +1084,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			}
 			std::mt19937 r(m_mapgen.seed);
 			for(int i = 0; i < 4000 && !m_spawn_ready; i++){
-				const int range = std::min(32 + i / 4, HALF - 16);
+				const int range = std::min(32 + i / 4, m_half * SECTION - 16);
 				const int x = (int)(r() % (2 * range)) - range;
 				const int z = (int)(r() % (2 * range)) - range;
 				int feet = 0;
@@ -1200,6 +1220,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 		for(size_t t = 0; t < 8 * bench && added < bench; t++)
 			added += add_skeleton(false);
+		if(const char *env = getenv("BUILDAT_SKELDAT_LANTERNS")){
+			test_lanterns(env);
+			m_lantern_report = true;
+		}
 		log_i(MODULE, "skeldat: the columns swept in %.1f ms%s",
 				(interface::os::time_us() - t0) / 1e3, bench ?
 				cs(", "+itos(added)+" skeletons added") : "");
@@ -1226,8 +1250,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(m_sections.empty())
 			return;
-		m_expand_due += dtime * m_sections.size() /
-				skeldat::bones::SECTION_PERIOD;
+		m_expand_due += dtime * m_sections.size() / m_section_period;
 		int budget = 4;
 		while(m_expand_due >= 1 && budget-- > 0){
 			m_expand_due -= 1;
@@ -1274,21 +1297,64 @@ struct Module: public interface::Module, public luanti_session::Game
 						lc.getX() + x, lc.getY() + y, lc.getZ() + z);
 				const uint32_t id = m_format.id.get(v);
 				const size_t i = box.at(x, y, z);
-				box.air[i] = id == ID_AIR || id == ID_IGNORE || id == m_marker;
+				box.air[i] = !holds_bones(id);
 				box.b[i] = (uint8_t)m_bones.get(v);
 				any = any || box.b[i] != 0;
 			}
 			if(!any)
 				return;
+			// Burning lanterns' spheres are air to the flood (nothing
+			// gains, nothing floods through); in them the bones fall by
+			// one now and then, and bone blocks go
+			const sv_<pv::Vector3DInt32> lit = lanterns_in(grown);
+			const sv_<uint8_t> air = box.air;
+			sv_<uint8_t> guard;
+			if(!lit.empty()){
+				guard.assign(box.b.size(), 0);
+				const int R2 = LANTERN_RADIUS * LANTERN_RADIUS;
+				for(int z = 0; z < box.d; z++)
+				for(int y = 0; y < box.h; y++)
+				for(int x = 0; x < box.w; x++)
+				for(const pv::Vector3DInt32 &l : lit){
+					const int dx = lc.getX() + x - l.getX(),
+							dy = lc.getY() + y - l.getY(),
+							dz = lc.getZ() + z - l.getZ();
+					if(dx * dx + dy * dy + dz * dz <= R2){
+						guard[box.at(x, y, z)] = 1;
+						box.air[box.at(x, y, z)] = 1;
+						break;
+					}
+				}
+			}
 			const sv_<uint8_t> before = box.b;
 			m_expansions++;
 			skeldat::bones::expand(box);
+			const uint32_t block = id_of("skeldat:bone_block");
+			sv_<pv::Vector3DInt32> decayed;
+			if(!guard.empty()){
+				for(int z = 1; z < box.d - 1; z++)
+				for(int y = 1; y < box.h - 1; y++)
+				for(int x = 1; x < box.w - 1; x++){
+					const size_t i = box.at(x, y, z);
+					if(!guard[i] || air[i])
+						continue;
+					box.b[i] = before[i];
+					if(box.b[i] > 0 && m_rand() % LANTERN_RETRACT_IN == 0)
+						box.b[i]--;
+					const pv::Vector3DInt32 p(lc.getX() + x, lc.getY() + y,
+							lc.getZ() + z);
+					if(m_format.id.get(vol.sample_at(p.getX(), p.getY(),
+							p.getZ())) == block &&
+							m_rand() % LANTERN_DECAY_IN == 0)
+						decayed.push_back(p);
+				}
+			}
 			int64_t bare = 0;
 			for(int z = 1; z < box.d - 1; z++)
 			for(int y = 1; y < box.h - 1; y++)
 			for(int x = 1; x < box.w - 1; x++){
 				const size_t i = box.at(x, y, z);
-				bare += !box.air[i] && box.b[i] == 0;
+				bare += !air[i] && box.b[i] == 0;
 			}
 			m_bare[key] = bare;
 			interface::VoxelVolume out(section, m_format.planes);
@@ -1310,6 +1376,16 @@ struct Module: public interface::Module, public luanti_session::Game
 			// The light as it was read: nothing here changes it
 			if(changed)
 				w->set_volume(out, false, true);
+			interface::VoxelSample gone;
+			m_format.id.set(gone.planes[0], ID_AIR);
+			if(!decayed.empty())
+				m_recount.insert(key);
+			for(const pv::Vector3DInt32 &p : decayed){
+				w->set_sample(p, gone);
+				rescan_column(w, p.getX(), p.getZ());
+				log_i(MODULE, "skeldat: a bone block at %d,%d,%d goes",
+						p.getX(), p.getY(), p.getZ());
+			}
 			grow(w, vol, box);
 		});
 	}
@@ -1759,7 +1835,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			for(int32_t x = lc.getX(); x <= uc.getX(); x++){
 				const interface::VoxelSample v = vol.sample_at(x, y, z);
 				const uint32_t id = m_format.id.get(v);
-				bare += id != ID_AIR && id != ID_IGNORE && id != m_marker &&
+				bare += holds_bones(id) &&
 						(!any_bones || m_bones.get(v) == 0);
 			}
 			m_bare[key] = bare;
@@ -1842,8 +1918,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			pl.open = "";
 			if(is>>x>>y>>z && reaches(pl, x, y, z)){
 				const skeldat::NodeDef *n = node_of(id_at(x, y, z));
-				if(n && (n->name == "skeldat:table" ||
-						n->name.compare(0, 15, "skeldat:furnace") == 0)){
+				if(n && (n->name == "skeldat:table" || has_slots(n->name))){
 					pl.open = pos_key(x, y, z);
 					if(n->name != "skeldat:table"){
 						m_furnaces[pl.open]; // one that predates its record
@@ -1894,7 +1969,7 @@ struct Module: public interface::Module, public luanti_session::Game
 					cs(at));
 			return;
 		}
-		if(n->name.compare(0, 15, "skeldat:furnace") == 0){
+		if(has_slots(n->name)){
 			auto f = m_furnaces.find(at);
 			if(f != m_furnaces.end() && !(f->second.src.empty() &&
 					f->second.fuel.empty() && f->second.dst.empty()))
@@ -1970,10 +2045,20 @@ struct Module: public interface::Module, public luanti_session::Game
 		set_node(x, y, z, id, param);
 		log_i(MODULE, "skeldat: %s places %s at %s", cs(pl.name),
 				cs(n->name), cs(pos_key(x, y, z)));
-		if(n->name == "skeldat:furnace")
-			m_furnaces[pos_key(x, y, z)] = Furnace();
+		if(n->name == "skeldat:furnace" || n->name == "skeldat:lantern"){
+			Furnace f;
+			f.lantern = n->name == "skeldat:lantern";
+			m_furnaces[pos_key(x, y, z)] = f;
+		}
 		st.take(1);
 		send_inventory(peer, pl);
+	}
+
+	// A furnace or a lantern, lit or not: m_furnaces holds its slots
+	static bool has_slots(const ss_ &name)
+	{
+		return name.compare(0, 15, "skeldat:furnace") == 0 ||
+				name.compare(0, 15, "skeldat:lantern") == 0;
 	}
 
 	// A slot by where it is: "me" and a list of the player's own, or
@@ -1997,6 +2082,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			return nullptr;
 		auto it = m_furnaces.find(loc);
 		if(it == m_furnaces.end())
+			return nullptr;
+		if(it->second.lantern && list != "fuel")
 			return nullptr;
 		if(list == "src")
 			return &it->second.src;
@@ -2345,6 +2432,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(m.mode == FIGHT)
 			m.mode = WANDER, m.mode_t = 0;
+		m_woken++;
 		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
 					Urho3D::String("skeldat_")+MOB_KIND[m.kind]);
@@ -2637,6 +2725,17 @@ struct Module: public interface::Module, public luanti_session::Game
 	size_t footprints() const
 	{
 		return (size_t)(2 * m_half) * (2 * m_half);
+	}
+
+	// A voxel that can have bones: not air, a marker skull or a lantern
+	bool holds_bones(uint32_t id)
+	{
+		if(m_lantern_ids[0] == ID_IGNORE){
+			m_lantern_ids[0] = id_of("skeldat:lantern");
+			m_lantern_ids[1] = id_of("skeldat:lantern_active");
+		}
+		return id != ID_AIR && id != ID_IGNORE && id != m_marker &&
+				id != m_lantern_ids[0] && id != m_lantern_ids[1];
 	}
 
 	// The footprint (x, z) is in, its index in m_flooded and m_markers; -1
@@ -3140,7 +3239,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(m_furnace_t >= 1){
 			m_furnace_t = 0;
 			for(auto &pair : m_furnaces)
-				step_furnace(pair.first, pair.second);
+				if(pair.second.lantern)
+					step_lantern(pair.first, pair.second);
+				else
+					step_furnace(pair.first, pair.second);
 		}
 		m_save_t += event.dtime;
 		if(m_save_t >= 10){
@@ -3154,10 +3256,12 @@ struct Module: public interface::Module, public luanti_session::Game
 			for(auto &kv : m_mobs)
 				if(kv.second.kind == SKELETON)
 					skeletons++, full += kv.second.node_id != 0;
-			log_i(MODULE, "skeldat: %zu skeletons, %zu full; %zu light steps "
-					"and the sweep, %.2f ms a second", skeletons, full,
-					m_light_steps, m_light_us / 1e3 / 10);
-			m_light_us = 0, m_light_steps = 0;
+			log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
+					"light steps and the sweep, %.2f ms a second", skeletons,
+					full, m_woken, m_light_steps, m_light_us / 1e3 / 10);
+			m_light_us = 0, m_light_steps = 0, m_woken = 0;
+			if(m_lantern_report)
+				report_lanterns();
 			for(auto &pair : m_players)
 				send_time(pair.first);
 		}
@@ -3549,6 +3653,132 @@ struct Module: public interface::Module, public luanti_session::Game
 			if(id != want && (id == id_of("skeldat:furnace") ||
 					id == id_of("skeldat:furnace_active")))
 				set_node(x, y, z, want, m_format.param.get(v.data));
+		}
+	}
+
+	//
+	// Lanterns ([SKELDAT_FIGHT_BACK])
+	//
+
+	// A lantern a second: its coal burning down, the next taken from its
+	// slot, the node lit while one burns
+	void step_lantern(const ss_ &at, Furnace &f)
+	{
+		const bool before = f.fuel_left > 0;
+		if(f.fuel_left > 0)
+			f.fuel_left -= 1;
+		if(f.fuel_left <= 0 && f.fuel.name == "skeldat:coal" &&
+				!f.fuel.empty()){
+			f.fuel_left = m_day_s / 24 * LANTERN_HOURS;
+			f.fuel.take(1);
+			send_furnace(at);
+		}
+		const bool lit = f.fuel_left > 0;
+		int x, y, z;
+		if(before == lit || !parse_pos(at, x, y, z))
+			return;
+		const uint32_t id = id_at(x, y, z);
+		if(id == id_of("skeldat:lantern") ||
+				id == id_of("skeldat:lantern_active"))
+			set_node(x, y, z, id_of(lit ? "skeldat:lantern_active" :
+					"skeldat:lantern"));
+		log_i(MODULE, "skeldat: the lantern at %s %s", cs(at),
+				lit ? "is lit" : "goes out");
+	}
+
+	static bool parse_pos(const ss_ &at, int &x, int &y, int &z)
+	{
+		char c;
+		std::istringstream is(at);
+		return (bool)(is>>x>>c>>y>>c>>z);
+	}
+
+	// The burning lanterns whose spheres reach into `r`
+	sv_<pv::Vector3DInt32> lanterns_in(const pv::Region &r)
+	{
+		sv_<pv::Vector3DInt32> out;
+		const pv::Vector3DInt32 &lc = r.getLowerCorner(),
+				&uc = r.getUpperCorner();
+		for(auto &pair : m_furnaces){
+			int x, y, z;
+			if(!pair.second.lantern || pair.second.fuel_left <= 0 ||
+					!parse_pos(pair.first, x, y, z))
+				continue;
+			if(x + LANTERN_RADIUS >= lc.getX() && x - LANTERN_RADIUS <=
+					uc.getX() && y + LANTERN_RADIUS >= lc.getY() &&
+					y - LANTERN_RADIUS <= uc.getY() &&
+					z + LANTERN_RADIUS >= lc.getZ() &&
+					z - LANTERN_RADIUS <= uc.getZ())
+				out.push_back(pv::Vector3DInt32(x, y, z));
+		}
+		return out;
+	}
+
+	// For a check: each lantern's sphere, its voxels with bones, their
+	// mean and its bone blocks, a line each
+	void report_lanterns()
+	{
+		const uint32_t block = id_of("skeldat:bone_block");
+		const int R = LANTERN_RADIUS;
+		for(auto &pair : m_furnaces){
+			int lx, ly, lz;
+			if(!pair.second.lantern || !parse_pos(pair.first, lx, ly, lz))
+				continue;
+			int n = 0, with = 0, blocks = 0;
+			double sum = 0;
+			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+				for(int z = -R; z <= R; z++)
+				for(int y = -R; y <= R; y++)
+				for(int x = -R; x <= R; x++){
+					if(x * x + y * y + z * z > R * R)
+						continue;
+					const interface::VoxelSample v = w->get_sample(
+							pv::Vector3DInt32(lx + x, ly + y, lz + z), true);
+					const uint32_t id = m_format.id.get(v);
+					if(!holds_bones(id))
+						continue;
+					const uint32_t b = m_bones.get(v);
+					n++, with += b > 0, sum += b, blocks += id == block;
+				}
+			});
+			log_i(MODULE, "skeldat: the lantern at %s %s: %d voxels in %d, "
+					"%d with bones, mean %.2f, %d bone blocks", cs(pair.first),
+					pair.second.fuel_left > 0 ? "burning" : "out", n, R, with,
+					n ? sum / n : 0.0, blocks);
+		}
+	}
+
+	// For a check, BUILDAT_SKELDAT_LANTERNS="x z coal [block]; ...": a
+	// lantern on each column's top with that many coal, and with block 1
+	// a bone block two to its +x
+	void test_lanterns(const char *spec)
+	{
+		std::istringstream is(spec);
+		ss_ item;
+		const uint32_t block = id_of("skeldat:bone_block");
+		while(std::getline(is, item, ';')){
+			int x, z, coal, with_block = 0;
+			if(sscanf(item.c_str(), "%d %d %d %d", &x, &z, &coal,
+					&with_block) < 3)
+				continue;
+			const long c = column(x, z), c2 = column(x + 2, z);
+			if(c < 0 || c2 < 0 || m_top_y[c] == NO_GROUND ||
+					m_top_y[c2] == NO_GROUND){
+				log_w(MODULE, "skeldat: test: no ground for a lantern at %d %d",
+						x, z);
+				continue;
+			}
+			const int y = m_top_y[c] + 1;
+			set_node(x, y, z, id_of("skeldat:lantern"));
+			Furnace f;
+			f.lantern = true;
+			f.fuel = Stack("skeldat:coal", coal);
+			m_furnaces[pos_key(x, y, z)] = f;
+			if(with_block)
+				set_node(x + 2, m_top_y[c2] + 1, z, block, 0,
+						skeldat::bones::MAX);
+			log_i(MODULE, "skeldat: test: a lantern at %s with %d coal",
+					cs(pos_key(x, y, z)), coal);
 		}
 	}
 };

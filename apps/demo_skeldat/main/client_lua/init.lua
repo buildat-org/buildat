@@ -704,8 +704,12 @@ local function on_place()
 		game.send("open", pkey(pointed))
 		return
 	end
-	if name == "skeldat:furnace" or name == "skeldat:furnace_active" then
-		game.open("furnace", (pkey(pointed):gsub(" ", ",")))
+	local slots = (name == "skeldat:furnace" or
+			name == "skeldat:furnace_active") and "furnace" or
+			(name == "skeldat:lantern" or name == "skeldat:lantern_active") and
+			"lantern"
+	if slots then
+		game.open(slots, (pkey(pointed):gsub(" ", ",")))
 		game.send("open", pkey(pointed))
 		return
 	end

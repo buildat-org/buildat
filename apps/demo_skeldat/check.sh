@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~8 min (2026-10-16)
+# cost: ~10 min (2026-10-16)
 # covers: apps/demo_skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -31,6 +31,8 @@
 # The sixth, a night of 60 light skeletons in a fast clean world: more of
 # them in the footprint given three markers by the sunrise, and bone
 # blocks placed.
+# The seventh, lanterns: no bones grow in a burning one's sphere, those
+# there fall and a bone block goes; out of coal, the bones come back.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -429,15 +431,47 @@ for i in $(seq 60); do
 	sleep 0.5
 done
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aE "skeldat: [0-9]+ skeletons, [1-9][0-9]* full" "$log6" | grep -q . ||
+grep -aE "skeldat: [0-9]+ skeletons, [0-9]+ full, [1-9][0-9]* woken" "$log6" | grep -q . ||
 	fail "no skeleton woke by the player ($log6)"
 last=$(grep -a "skeletons, [0-9]* full" "$log6" | tail -1)
 echo "$last" | grep -qE "skeldat: (2[0-9][0-9]) skeletons, 0 full" ||
 	fail "after the player: $last ($log6)"
 grep -a "skeletons, the target" "$log6" | tail -1 | grep -q "the target 125 (1.000" ||
 	fail "the flooded world's target ($log6)"
+# 7. Lanterns ([SKELDAT_FIGHT_BACK]) in 2 x 2 x 2 sections at seed 2,
+# the bones at full at x >= 0 and none at x < 0, a section's expansion
+# every 0.3 s and a coal 40 s: one lantern on the clean side with coal
+# for the run, its sphere never gets bones while the clean side's do; one
+# in the bones with one coal and a bone block beside it: the bones fall,
+# the block goes, and once it is out the bones come back
+log11="$t/srv11.log"
+BUILDAT_SKELDAT_WORLD=lantern BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_EXPAND=0.3 BUILDAT_SKELDAT_DAY=240 \
+	BUILDAT_SKELDAT_LANTERNS="-12 0 9; 12 0 1 1" \
+	start_server "$log11" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv11" -C "$t/srv.cache" -l 3 || fail "the server ($log11)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log11" "lantern at 12,[0-9]*,0 out: .* mean ([5-9]|1[0-5])\." 180 ||
+	fail "the lantern in the bones: not out, or no bones back ($log11)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -a "lantern at -12,[0-9]*,0 burning" "$log11" | grep -qv " 0 with bones" &&
+	fail "bones in the clean side's lantern's sphere ($log11)"
+f0=$(grep -a "columns flooded" "$log11" | head -1 | sed 's/.*(\([0-9.]*\) of.*/\1/')
+f1=$(grep -a "columns flooded" "$log11" | tail -1 | sed 's/.*(\([0-9.]*\) of.*/\1/')
+awk -v a="$f0" -v b="$f1" 'BEGIN { exit !(b > a) }' ||
+	fail "the clean side did not flood: $f0 to $f1 ($log11)"
+grep -aq "a bone block at 14,[0-9]*,0 goes" "$log11" ||
+	fail "the bone block in the lantern's sphere stayed ($log11)"
+sed -n '/lantern at 12,[0-9]*,0 is lit/,/lantern at 12,[0-9]*,0 goes out/p' "$log11" |
+	grep -aqE "lantern at 12,[0-9]*,0 burning: .* mean 0\." ||
+	fail "the bones in the lantern's sphere did not fall ($log11)"
+lantern="clean side flooded $f0 to $f1; $(grep -a "lantern at 12,[0-9]*,0 burning" "$log11" |
+	tail -1 | sed 's/.*mean \([0-9.]*\).*/burning, mean \1/'); $(grep -a "lantern at 12,[0-9]*,0 out" "$log11" |
+	tail -1 | sed 's/.*mean \([0-9.]*\).*/out, mean \1/')"
 echo "a night: $(echo $night)"
+echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns"
 # vim: set noet ts=4 sw=4:
