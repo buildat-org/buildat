@@ -46,6 +46,9 @@ return function(game, declare_keys)
 		if not root then
 			return
 		end
+		-- [SKELDAT_WORLD_ADMIN] A single player's pause ends with the
+		-- menu (the server says whether it is one)
+		game.send("pause", "auto off")
 		uistack.main:pop(root)
 		root = nil
 		game.hold(nil)
@@ -386,11 +389,35 @@ return function(game, declare_keys)
 		if game.admin then
 			menu:add("Admin...", open_admin)
 		end
+		-- [SKELDAT_WORLD_ADMIN] The picker's: the world menu over the
+		-- running world (world_menu's client, its close back to the game),
+		-- and the pause
+		if game.picker then
+			menu:add("Worlds...", function()
+				close()
+				local world_menu = require("buildat/module/world_menu")
+				world_menu.on_close = function()
+					world_menu.on_close = nil
+					game.hold(nil)
+					log:info("pause: the worlds closed")
+				end
+				game.hold(function() end)
+				game.send("worlds", "")
+				log:info("pause: worlds asked")
+			end)
+			-- The picker's own pause, not this menu's
+			local held = game.paused and not game.paused_auto
+			menu:add(held and "Resume world" or "Pause world", function()
+				game.send("pause", held and "off" or "on")
+				close()
+			end)
+		end
 		menu:add("Settings...", settings)
 		menu:add("How to play...", function() game.send("intro", "") end)
 		menu:add("High scores...", function() game.send("scores", "list") end)
 		menu:add("Leave the game", function() buildat.leave() end)
 		game.hold(close, menu.window)
+		game.send("pause", "auto on")
 		log:info("pause: the menu shown")
 	end
 

@@ -11,8 +11,9 @@
 // The world: until one runs, a joining client gets builtin/world_menu and
 // the launcher's own client picks a save to play or makes a new one, its
 // seed asked for. The first save picked is the world for as long as the
-// server runs. BUILDAT_SKELDAT_WORLD=<name> skips the menu (the checks; a
-// server nobody sits at).
+// server runs, or until the picker switches or closes it from the pause
+// menu ([SKELDAT_WORLD_ADMIN]). BUILDAT_SKELDAT_WORLD=<name> skips the menu
+// (the checks; a server nobody sits at).
 //
 // The voxel word is Luanti's cut (VoxelFormat::luanti(): the id, the sky
 // and the lamp light, param2), which is what the mapgen writes, and a
@@ -568,6 +569,12 @@ struct Module: public interface::Module, public luanti_session::Game
 	int m_end_place = 0;
 	// [SKELDAT_RERUN] A re-run asked for: the module is reloading
 	bool m_rerunning = false;
+	// [SKELDAT_WORLD_ADMIN] The world paused, by whom, and whether by a
+	// single player's open pause menu (auto); the peers whose refused
+	// requests were logged this pause
+	bool m_paused = false, m_pause_auto = false;
+	ss_ m_paused_by;
+	std::set<size_t> m_pause_refused;
 	// m_joining: sent the join, its login not yet in
 	std::set<size_t> m_waiting, m_shown, m_joining;
 	std::map<size_t, Player> m_players;
@@ -727,18 +734,28 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, "voxelworld:section_unloaded",
 				&Module::on_section_unloaded);
 		sub(m_server, "world_menu:play", &Module::on_world_play);
+		sub(m_server, "world_menu:close", &Module::on_world_close);
 		const ss_ game = "network:packet_received/skeldat:";
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
-				"bow", "intro", "scores", "rerun"})
+				"bow", "intro", "scores", "rerun", "pause", "worlds"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
+		// [SKELDAT_WORLD_ADMIN] Paused, only the chat, the wield and the
+		// world's arrival
 		for(const char *n : luanti_session::PACKETS)
 			sub<network::Packet>(m_server,
 					ss_("network:packet_received/luanti:")+n,
-					[this](const network::Packet &p){ m_session.packet(p); });
+					[this](const network::Packet &p){
+				if(m_paused && p.name != "luanti:chat" &&
+						p.name != "luanti:wield" && p.name != "luanti:world_in"){
+					refused_paused(p);
+					return;
+				}
+				m_session.packet(p);
+			});
 	}
 
 	//
@@ -858,6 +875,12 @@ struct Module: public interface::Module, public luanti_session::Game
 	void on_world_play(const world_menu::Play &event)
 	{
 		auto seed = event.options.find("seed");
+		if(m_save){
+			// [SKELDAT_WORLD_ADMIN] Picked in a running world: a switch
+			switch_world(event.peer, event.name, seed == event.options.end() ?
+					"" : seed->second);
+			return;
+		}
 		if(!start_world(event.name, false, seed == event.options.end() ?
 				"" : seed->second))
 			world_menu::access(m_server, [&](world_menu::Interface *i){
@@ -1075,9 +1098,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(const char *env = getenv("BUILDAT_SKELDAT_TEST"))
 			m_test = env;
 		log_i(MODULE, "skeldat: the world \"%s\" starts, seed %u, %zu "
-				"furnaces, %zu mobs, %d x %d x %d", cs(name), seed,
+				"furnaces, %zu mobs, %d x %d x %d, day %.4f", cs(name), seed,
 				m_furnaces.size(), m_mobs.size(), 2 * m_half * 64,
-				(m_y1 - m_y0 + 1) * 64, 2 * m_half * 64);
+				(m_y1 - m_y0 + 1) * 64, 2 * m_half * 64, m_day);
 		create_world(seed);
 		return true;
 	}
@@ -1898,6 +1921,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		send_time(peer);
 		send_end(peer);
 		send_world(peer);
+		// [SKELDAT_WORLD_ADMIN] Paused, said; a second player ends a single
+		// player's pause
+		if(m_pause_auto && m_players.size() > 1)
+			set_paused(false, true, pl.name);
+		send_paused(peer);
 		m_load_points_dirty = true;
 		log_i(MODULE, "skeldat: %s joins at (%.1f, %.1f, %.1f)", cs(name),
 				pl.x, pl.y, pl.z);
@@ -2515,8 +2543,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(!m_scene)
 			return;
-		log_i(MODULE, "skeldat: the world \"%s\" closed for a reload",
-				cs(m_world_name));
+		log_i(MODULE, "skeldat: the world \"%s\" closed for a reload, day "
+				"%.4f", cs(m_world_name), m_day);
 		save();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			w->commit();
@@ -2539,12 +2567,32 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 		m_save = nullptr;
 		m_scores = nullptr;
+		// The menu picks again: a switch's world or a closed one's menu
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->set_running(false);
+		});
 	}
 
 	// The new instance: a re-run's world made (the target deleted first,
 	// the old world itself when it is the target), or the start's again
 	void on_continue()
 	{
+		// [SKELDAT_WORLD_ADMIN] "play\n<name>\n<seed>" or "close"
+		const ss_ sw = m_server->tmp_restore_data("skeldat:switch");
+		if(!sw.empty()){
+			std::istringstream ss(sw);
+			ss_ how, name, seed;
+			std::getline(ss, how);
+			std::getline(ss, name);
+			std::getline(ss, seed);
+			start(false);
+			if(how == "play" && start_world(name, false, seed)){
+				log_i(MODULE, "skeldat: switched to \"%s\"", cs(name));
+			} else {
+				log_i(MODULE, "skeldat: no world runs: the world menu");
+			}
+			return;
+		}
 		const ss_ data = m_server->tmp_restore_data("skeldat:rerun");
 		std::istringstream is(data);
 		ss_ name, seed, size, speed;
@@ -2575,6 +2623,129 @@ struct Module: public interface::Module, public luanti_session::Game
 				cs(seed), cs(size), cs(speed));
 		start(false);
 		start_world(name, false, seed);
+	}
+
+	//
+	// [SKELDAT_WORLD_ADMIN] The picker's (world_menu's: the launcher's own
+	// client, an admin) Worlds..., a switch to another world, Close world,
+	// and the pause. A switch and a close are the re-run's reload: the
+	// world saved and closed, every client sent off with the goodbye and
+	// rejoining. A close's reload starts no world: the menu to the picker,
+	// the wait to the rest.
+	//
+
+	bool picker(size_t peer)
+	{
+		bool ok = false;
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			ok = i->is_picker(peer);
+		});
+		return ok;
+	}
+
+	ss_ name_of(size_t peer)
+	{
+		auto it = m_players.find(peer);
+		return it != m_players.end() ? it->second.name : "client"+itos(peer);
+	}
+
+	void reload_for(const ss_ &line, const ss_ &data, const ss_ &goodbye)
+	{
+		m_rerunning = true;
+		log_i(MODULE, "skeldat: %s", cs(line));
+		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
+		m_server->tmp_store_data("skeldat:switch", data);
+		network::access(m_server, [&](network::Interface *i){
+			for(network::PeerInfo::Id p : i->list_peers()){
+				i->send(p, "network:goodbye", "1"+goodbye);
+				i->disconnect(p);
+			}
+		});
+		m_server->reload_module(MODULE);
+	}
+
+	void switch_world(size_t peer, const ss_ &name, const ss_ &seed)
+	{
+		if(m_rerunning || !picker(peer) || name == m_world_name){
+			log_w(MODULE, "skeldat: a switch to \"%s\" by %s refused",
+					cs(name), cs(name_of(peer)));
+			return;
+		}
+		reload_for(name_of(peer)+" switches the world to "+name,
+				"play\n"+name+"\n"+seed,
+				"The server switches to the world "+name);
+	}
+
+	void on_world_close(const world_menu::Close &event)
+	{
+		if(m_rerunning || !m_save || !picker(event.peer)){
+			log_w(MODULE, "skeldat: a close by %s refused",
+					cs(name_of(event.peer)));
+			return;
+		}
+		reload_for(name_of(event.peer)+" closes the world "+m_world_name,
+				"close", "The world "+m_world_name+" was closed");
+	}
+
+	// A game request while paused: refused, logged once a peer a pause
+	void refused_paused(const network::Packet &p)
+	{
+		if(m_pause_refused.insert(p.sender).second)
+			log_i(MODULE, "skeldat: %s's %s refused: paused",
+					cs(name_of(p.sender)), cs(p.name));
+	}
+
+	// "on" / "off" from the picker; "auto on" / "auto off" from a local
+	// game's only client, its pause menu opened and closed
+	void on_pause(size_t peer, const ss_ &how)
+	{
+		const bool is_auto = how.compare(0, 5, "auto ") == 0;
+		const bool on = how == "on" || how == "auto on";
+		if(is_auto){
+			bool single = false;
+			accounts::access(m_server, [&](accounts::Interface *i){
+				single = i->is_local(peer);
+			});
+			network::access(m_server, [&](network::Interface *i){
+				single = single && i->list_peers().size() == 1;
+			});
+			// A picker's own pause is not the menu's to end
+			if(!single || (m_paused && !m_pause_auto) || on == m_paused)
+				return;
+		} else if(!picker(peer)){
+			log_w(MODULE, "skeldat: %s's pause %s refused: not the picker",
+					cs(name_of(peer)), cs(how));
+			return;
+		}
+		set_paused(on, is_auto, name_of(peer));
+	}
+
+	void set_paused(bool on, bool is_auto, const ss_ &by)
+	{
+		if(on == m_paused && is_auto == m_pause_auto)
+			return;
+		const bool chat_line = !(on ? is_auto : m_pause_auto);
+		m_paused = on;
+		m_pause_auto = on && is_auto;
+		m_paused_by = on ? by : "";
+		m_pause_refused.clear();
+		// The lag notice's minute starts again
+		m_keep_up_us = 0, m_ticked_s = 0, m_dropped_n = 0;
+		const ss_ line = by+(on ? " paused the world" : " resumed the world")+
+				(is_auto ? " (the pause menu)" : "");
+		log_i(MODULE, "skeldat: %s, day %.4f, world_t %.1f", cs(line), m_day,
+				m_world_t);
+		if(chat_line)
+			chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
+		for(auto &pair : m_players)
+			send_paused(pair.first);
+	}
+
+	// "" running, else "<name>" or "auto <name>"
+	void send_paused(size_t peer)
+	{
+		network::send(m_server, peer, "skeldat:paused", !m_paused ? "" :
+				(m_pause_auto ? "auto " : "")+m_paused_by);
 	}
 
 	//
@@ -2797,11 +2968,6 @@ struct Module: public interface::Module, public luanti_session::Game
 		Player &pl = it->second;
 		const ss_ what = packet.name.substr(8); // after "skeldat:"
 		std::istringstream is(packet.data);
-		if(what == "respawn"){
-			if(pl.hp <= 0)
-				respawn(peer, pl);
-			return;
-		}
 		if(what == "intro"){
 			send_intro(peer);
 			return;
@@ -2810,8 +2976,34 @@ struct Module: public interface::Module, public luanti_session::Game
 			send_scores(peer, packet.data);
 			return;
 		}
+		if(what == "pause"){
+			on_pause(peer, packet.data);
+			return;
+		}
+		if(what == "worlds"){
+			if(!picker(peer)){
+				log_w(MODULE, "skeldat: %s's Worlds... refused: not the "
+						"picker", cs(pl.name));
+				return;
+			}
+			world_menu::access(m_server, [&](world_menu::Interface *i){
+				i->show_running(peer, m_world_name);
+			});
+			return;
+		}
+		// [SKELDAT_WORLD_ADMIN] Paused: the game's requests refused; the
+		// node's window closed and the how-to and the scores read
+		if(m_paused && what != "close"){
+			refused_paused(packet);
+			return;
+		}
 		if(what == "rerun"){
 			rerun(pl);
+			return;
+		}
+		if(what == "respawn"){
+			if(pl.hp <= 0)
+				respawn(peer, pl);
 			return;
 		}
 		if(pl.hp <= 0)
@@ -5130,15 +5322,24 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(!m_scene)
 			return;
-		m_time += event.dtime;
-		m_world_t += event.dtime;
-		m_session.tick(event.dtime);
-		m_day = std::fmod(m_day + event.dtime / m_day_s, 1.0);
 		// Every section loaded and generated: on the tick, after the
 		// requests the last loads made are in m_awaiting
 		if(!m_world_ready && m_save && m_sections.size() == all_sections() &&
 				m_awaiting.empty())
 			world_in();
+		// [SKELDAT_WORLD_ADMIN] Paused: the world's clock and every step of
+		// the game stand; the sections load and send, the session takes
+		// the joins
+		if(m_paused){
+			m_session.tick(event.dtime);
+			if(m_load_points_dirty)
+				update_load_points();
+			return;
+		}
+		m_time += event.dtime;
+		m_world_t += event.dtime;
+		m_session.tick(event.dtime);
+		m_day = std::fmod(m_day + event.dtime / m_day_s, 1.0);
 		if(!m_ended)
 			step_bones(event.dtime);
 		if(!m_ended && m_world_ready)
@@ -5439,7 +5640,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(admin == pl.admin && !tell)
 			return;
 		pl.admin = admin;
-		network::send(m_server, peer, "skeldat:role", admin ? "admin" : "");
+		// [SKELDAT_WORLD_ADMIN] And world_menu's picker
+		network::send(m_server, peer, "skeldat:role", ss_(admin ? "admin" : "")+
+				(picker(peer) ? " picker" : ""));
 		log_i(MODULE, "skeldat: %s is %s", cs(pl.name),
 				admin ? "an admin" : "a player");
 	}

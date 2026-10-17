@@ -22,6 +22,8 @@ struct Module: public interface::Module, public Interface
 	Config m_config;
 	std::vector<Preset> m_presets;
 	bool m_running = false;
+	// The running world's name while a picker has the menu in it
+	ss_ m_running_name;
 	ss_ m_progress;
 	// Who has the client half, and who has the menu up
 	std::set<PeerId> m_scripted, m_shown;
@@ -43,6 +45,7 @@ struct Module: public interface::Module, public Interface
 			{"create", &Module::on_create},
 			{"rename", &Module::on_rename},
 			{"delete", &Module::on_delete},
+			{"close", &Module::on_close},
 		};
 		for(const auto &packet : PACKETS)
 			sub(m_server, ss_("network:packet_received/world_menu:")+
@@ -82,9 +85,21 @@ struct Module: public interface::Module, public Interface
 			send_list(peer);
 	}
 
+	void show_running(PeerId peer, const ss_ &running)
+	{
+		m_running_name = running;
+		show(peer);
+	}
+
+	bool is_picker(PeerId peer)
+	{
+		return picker(peer);
+	}
+
 	void set_running(bool running)
 	{
 		m_running = running;
+		m_running_name.clear();
 		m_progress.clear();
 		if(!running)
 			return;
@@ -135,11 +150,15 @@ struct Module: public interface::Module, public Interface
 		return any;
 	}
 
-	// Only to a menu that is up, before a world runs, from the launcher's
-	// own client or an admin (picker())
+	// Only to a menu that is up, before a world runs or shown in it, from
+	// the launcher's own client or an admin (picker())
+	bool open() const
+	{
+		return (!m_running || !m_running_name.empty()) && m_progress.empty();
+	}
 	bool may_pick(const network::Packet &packet)
 	{
-		if(m_running || !m_progress.empty() ||
+		if(!open() ||
 				!m_shown.count(packet.sender) || !picker(packet.sender)){
 			log_w(MODULE, "%s from peer %zu ignored", cs(packet.name),
 					packet.sender);
@@ -161,11 +180,13 @@ struct Module: public interface::Module, public Interface
 		return false;
 	}
 
-	void send_list(PeerId peer)
+	void send_list(PeerId peer, const ss_ &note = "")
 	{
 		json::Value out = json::object();
 		out.set("title", m_config.title);
-		const bool pick = !m_running && m_progress.empty() && picker(peer);
+		const bool pick = open() && picker(peer);
+		out.set("running", m_running ? m_running_name : ss_());
+		out.set("note", note);
 		out.set("may_pick", pick);
 		if(!pick)
 			out.set("no_admin", !any_admin());
@@ -260,6 +281,12 @@ struct Module: public interface::Module, public Interface
 			send_list(packet.sender);
 			return;
 		}
+		if(m_running && name == m_running_name){
+			// The running one: the menu closes
+			m_shown.erase(packet.sender);
+			network::send(m_server, packet.sender, "world_menu:up", "");
+			return;
+		}
 		log_i(MODULE, "world_menu: play \"%s\"", cs(name));
 		m_server->emit_event("world_menu:play",
 				new Play(packet.sender, name, false, {}));
@@ -315,6 +342,8 @@ struct Module: public interface::Module, public Interface
 			return;
 		const json::Value v = read(packet);
 		const ss_ name = jstr(v, "name"), to = jstr(v, "to");
+		if(refused_running(packet, name) || refused_running(packet, to))
+			return;
 		storage::access(m_server, [&](storage::Interface *i){
 			if(is_world(i, name) && is_world(i, to) && i->rename(name, to))
 				log_i(MODULE, "world_menu: \"%s\" renamed \"%s\"", cs(name),
@@ -323,11 +352,34 @@ struct Module: public interface::Module, public Interface
 		send_list(packet.sender);
 	}
 
+	// The running world is not renamed or deleted: said in the menu
+	bool refused_running(const network::Packet &packet, const ss_ &name)
+	{
+		if(!m_running || name != m_running_name)
+			return false;
+		log_w(MODULE, "world_menu: %s of the running world \"%s\" refused",
+				cs(packet.name), cs(name));
+		send_list(packet.sender, "The running world can't be renamed or "
+				"deleted");
+		return true;
+	}
+
+	void on_close(const network::Packet &packet)
+	{
+		if(!may_pick(packet) || !m_running)
+			return;
+		log_i(MODULE, "world_menu: close \"%s\"", cs(m_running_name));
+		m_shown.erase(packet.sender);
+		m_server->emit_event("world_menu:close", new Close(packet.sender));
+	}
+
 	void on_delete(const network::Packet &packet)
 	{
 		if(!may_pick(packet))
 			return;
 		const ss_ name = jstr(read(packet), "name");
+		if(refused_running(packet, name))
+			return;
 		storage::access(m_server, [&](storage::Interface *i){
 			if(is_world(i, name) && exists(i, name)){
 				log_i(MODULE, "world_menu: \"%s\" deleted", cs(name));

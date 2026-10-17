@@ -38,16 +38,25 @@ local filter = ""
 
 -- The waiting screen's line, which a progress text replaces in place
 local waiting_line = nil
-local function close()
+local function pop()
 	if own_root then
 		uistack.main:pop(own_root)
 		own_root = nil
 	end
 	waiting_line = nil
 end
+-- [SKELDAT_WORLD_ADMIN] M.on_close(): the app's, called when the menu
+-- shown in a running world goes away (Back, or Play on that world)
+local function close()
+	local was = own_root
+	pop()
+	if was and M.on_close then
+		M.on_close()
+	end
+end
 
 local function own_push(kind)
-	close()
+	pop()
 	own_root = uistack.main:push({desc = "world menu: " .. kind})
 	return own_root
 end
@@ -435,6 +444,17 @@ buildat.sub_packet("world_menu:list", function(data)
 	end
 	served.title = state.title .. ": which world?"
 	served.worlds = state.worlds
+	-- [SKELDAT_WORLD_ADMIN] Shown in a running world: it marked, Back
+	-- and Close world; a refusal said over the list
+	local running = (state.running or "") ~= "" and state.running or nil
+	for _, w in ipairs(state.worlds) do
+		w.label = w.name == running and (w.name .. " (running)") or nil
+	end
+	if (state.note or "") ~= "" then
+		served.title = served.title .. "\n" .. state.note
+		log:info("world_menu: said: " .. state.note)
+	end
+	served.back = running and close or nil
 	log:info("world_menu: " .. #(state.presets or {}) .. " presets")
 	served.play = function(name)
 		log:info("world_menu: play " .. name)
@@ -451,6 +471,14 @@ buildat.sub_packet("world_menu:list", function(data)
 		waiting("Deleting " .. name .. "...")
 	end
 	served.under = function(add)
+		if running then
+			add("Close world", function()
+				log:info("world_menu: close " .. running)
+				send("close", {})
+				waiting("Closing " .. running .. "...")
+			end)
+			add("Back", close)
+		end
 		add("Leave the game", function() buildat.leave() end)
 	end
 	-- Its size and the options it was made with

@@ -1208,12 +1208,35 @@ local function hud_line(line)
 end
 table.insert(require("buildat/module/chat").listeners, hud_line)
 
+-- [SKELDAT_WORLD_ADMIN] The world paused (game.paused, the pauser's
+-- name): "Paused by <name>" over the view, not for a single player's
+-- own pause menu ("auto <name>")
+local paused_text = magic.ui.root:CreateChild("Text")
+paused_text:SetTextEffect(magic.TE_SHADOW)
+paused_text.priority = 1000
+paused_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
+paused_text:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+paused_text:SetPosition(0, 60)
+paused_text.visible = false
+buildat.sub_packet("skeldat:paused", function(data)
+	local auto, by = data:match("^(auto )(.*)$")
+	by = by or data
+	game.paused = data ~= "" and by or nil
+	game.paused_auto = auto ~= nil
+	paused_text:SetText("Paused by " .. by)
+	paused_text.visible = data ~= "" and not auto
+	log:info("skeldat: " .. (data == "" and "running" or
+			("paused by " .. by .. (auto and " (the pause menu)" or ""))))
+end)
+
 -- fly, fast and noclip, the admin's ([SKELDAT] decision 3), toggled by
 -- their keys as Luanti's; the server checks nobody else's moves
 local admin = false
 buildat.sub_packet("skeldat:role", function(data)
-	admin = data == "admin"
+	admin = data:find("admin") ~= nil
 	game.admin = admin
+	-- [SKELDAT_WORLD_ADMIN] world_menu's picker: Worlds... and the pause
+	game.picker = data:find("picker") ~= nil
 	if not admin then
 		player.fly, player.fast, player.noclip = false, false, false
 	end
@@ -1227,6 +1250,13 @@ end)
 magic.SubscribeToEvent("command_seq:skeldat_admin", function(_, d)
 	game.send("admin", d:GetString("Param"))
 	log:info("skeldat: the drive sends admin " .. d:GetString("Param"))
+end)
+-- "event skeldat_send <name> <data>": any game packet, the same
+-- ([SKELDAT_WORLD_ADMIN]'s refusals)
+magic.SubscribeToEvent("command_seq:skeldat_send", function(_, d)
+	local name, data = d:GetString("Param"):match("^(%S+) ?(.*)$")
+	game.send(name, data)
+	log:info("skeldat: the drive sends " .. name .. " " .. data)
 end)
 magic.SubscribeToEvent("command_seq:skeldat_modes", function(_, d)
 	local p = " " .. d:GetString("Param") .. " "
@@ -1608,7 +1638,8 @@ local function update_rolls(b, jumped, landed, fall)
 		if landed then
 			own:clack(fall / 10)
 		end
-		local len = own:feed(b.s, player.on_ground and not b.wet, down("back"))
+		local len = own:feed(game.paused and 0 or b.s,
+				player.on_ground and not b.wet and not game.paused, down("back"))
 		roll.lo = math.min(roll.lo or len, len)
 		roll.hi = math.max(roll.hi or len, len)
 	else
@@ -1717,10 +1748,13 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
 	end
 	local ground0, vy0 = player.on_ground, player.vy
-	player:update(dt, {x = fx, z = fz, speed = speed,
-			jump = not dead and down("jump"),
-			sneak = not dead and down("sneak"), fast = player.fast,
-			turn = r, brake = not dead and down("back")})
+	-- [SKELDAT_WORLD_ADMIN] Paused, the player stands as it is
+	if not game.paused then
+		player:update(dt, {x = fx, z = fz, speed = speed,
+				jump = not dead and down("jump"),
+				sneak = not dead and down("sneak"), fast = player.fast,
+				turn = r, brake = not dead and down("back")})
+	end
 	local b = player.board
 	if (b ~= nil) ~= board_shown then
 		board_shown, board_braking = b ~= nil, false

@@ -1458,6 +1458,155 @@ grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.lo
 	grep -aq "inventory: move 2 skeldat:stick main:10 -> main:11" "$t/touch.log" ||
 	fail "the inventory by finger ($t/touch.log)"
 echo "touch: strokes (push, moved) $strokes, a 50 pixel drag turned $turned degrees"
+# 32. The picker's worlds and pause ([SKELDAT_WORLD_ADMIN]): 128 worlds of
+# seed 2 on a launcher's server (-u launcher=1: a client on 127.0.0.1 is
+# its own, world_menu's picker). "w2" made first; then in "w1" client1's
+# pause menu pauses the world by itself and its close resumes it; Pause
+# world holds the day and the world's age over 10 s (W held, its moves
+# refused); Resume world; the menu open again pauses, and a second
+# client's join resumes it. Worlds... lists w1 running, and w2's Play
+# switches: client1 sent off, w2 starts. A client in w2 closes it from
+# the same menu: no world runs; the next client gets the menu and plays
+# w1 again, at the day it was closed with. Then on a server with no
+# launcher a player's pause and Worlds... are refused.
+# simplified: the steps that stand while paused are one return in
+# on_tick; the day and m_world_t stand for them. A non-picker's wait
+# after a close is world_menu's ([WORLD_MENU_ADMIN]'s check)
+log35="$t/srv35.log"
+wa_server() # <log> <world> [args]
+{
+	local log=$1 world=$2
+	shift 2
+	BUILDAT_SKELDAT_WORLD=$world BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+		start_server "$log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv35" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+wa_server "$t/srv35a.log" w2 -u launcher=1
+wait_for_log "$t/srv35a.log" "the world is in" 120 || fail "w2 not made ($t/srv35a.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+wa_server "$log35" w1 -u launcher=1
+cat > "$t/wa1.cmds" <<EOF
+$placed
+delay 1500
+keypress Escape
+wait_log 5000 skeldat: paused by client1 (the pause menu)
+delay 500
+keypress Escape
+wait_log 5000 skeldat: running
+delay 500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Pause world"
+wait_log 5000 skeldat: paused by client1
+keydown W
+delay 10000
+keyup W
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Resume world"
+wait_log 5000 skeldat: running
+delay 500
+keypress Escape
+wait_log 5000 skeldat: paused by client1 (the pause menu)
+wait_log 120000 skeldat: running
+delay 500
+keypress Escape
+delay 500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Worlds..."
+wait_log 10000 world_menu: the list shown, 2 worlds
+delay 500
+click Button "w2"
+wait_log 5000 world_menu: the list shown
+delay 500
+expect_error Disconnected from server: The server switches
+click Button "Play"
+wait_log 30000 Disconnected from server: The server switches to the world w2
+quit
+EOF
+client wa1 "$t/wa1.cmds"; a=$CLIENT
+for _ in $(seq 600); do
+	# The third: the first two are the menu's before the picker's pause
+	[ "$(grep -ac "paused the world (the pause menu)" "$log35")" -ge 3 ] && break
+	kill -0 $a 2>/dev/null || break
+	sleep 0.2
+done
+printf '%s\n' "$placed" "delay 1000" quit > "$t/wa2.cmds"
+client wa2 "$t/wa2.cmds"; b2=$CLIENT
+# A client the server sends off exits with an error: the drive's end
+# is what says it went through
+drove(){ ! grep -aq "Command sequence failed" "$1" && grep -aq "command: quit" "$1"; }
+wait $a; drove "$t/wa1.log" || fail "the pause and the switch ($t/wa1.log)"
+wait $b2 || fail "the second client ($t/wa2.log)"
+wait_for_log "$log35" 'the world "w2" starts' 120 || fail "no switch to w2 ($log35)"
+cat > "$t/wa3.cmds" <<EOF
+$placed
+delay 1500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Worlds..."
+wait_log 10000 world_menu: the list shown, 2 worlds
+delay 500
+expect_error Disconnected from server: The world w2 was closed
+click Button "Close world"
+wait_log 30000 Disconnected from server: The world w2 was closed
+quit
+EOF
+client wa3 "$t/wa3.cmds"
+wait $CLIENT; drove "$t/wa3.log" || fail "the close ($t/wa3.log)"
+wait_for_log "$log35" "no world runs: the world menu" 60 || fail "w2 not closed ($log35)"
+cat > "$t/wa4.cmds" <<EOF
+wait_log 60000 world_menu: the list shown, 2 worlds
+delay 1000
+click Button "w1"
+wait_log 5000 world_menu: the list shown
+delay 500
+click Button "Play"
+$placed
+delay 1000
+quit
+EOF
+client wa4 "$t/wa4.cmds"
+wait $CLIENT || fail "w1 played again ($t/wa4.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+paused=$(grep -a "client1 paused the world, day" "$log35" | sed 's/.*, day //')
+resumed=$(grep -a "client1 resumed the world, day" "$log35" | sed 's/.*, day //')
+[ -n "$paused" ] && [ "$paused" = "$resumed" ] ||
+	fail "the world went on while paused: day $paused, then $resumed ($log35)"
+grep -aq "client1's luanti:where refused: paused" "$log35" ||
+	fail "client1's moves not refused while paused ($log35)"
+grep -aq "client2 resumed the world (the pause menu)" "$log35" ||
+	fail "a second client did not end the pause menu's pause ($log35)"
+grep -aq "client1 switches the world to w2" "$log35" &&
+	grep -aq "world_menu: close \"w2\"" "$log35" ||
+	fail "the switch or the close ($log35)"
+closed=$(grep -a 'the world "w1" closed for a reload, day' "$log35" | sed 's/.*, day //')
+again=$(grep -a 'the world "w1" starts' "$log35" | sed -n 2p | sed 's/.*, day //')
+[ -n "$closed" ] && [ "$closed" = "$again" ] ||
+	fail "w1 did not come back at its day: closed at $closed, started at $again ($log35)"
+log36="$t/srv36.log"
+BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	start_server "$log36" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv36" -C "$t/srv.cache" -l 3 || fail "the server ($log36)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1000" "event skeldat_send pause on" \
+	"event skeldat_send worlds" "delay 1000" quit > "$t/wa5.cmds"
+client wa5 "$t/wa5.cmds"
+wait $CLIENT || fail "the player's requests ($t/wa5.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "client1's pause on refused: not the picker" "$log36" &&
+	grep -aq "client1's Worlds... refused: not the picker" "$log36" &&
+	! grep -aq "paused the world" "$log36" ||
+	fail "a player's pause or Worlds... not refused ($log36)"
+echo "worlds and pause: day $paused over 10 s paused, w1 closed at $closed and back at $again"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1465,5 +1614,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause"
 # vim: set noet ts=4 sw=4:

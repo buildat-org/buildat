@@ -21,14 +21,20 @@
 // a world it cannot start is said by calling show(peer) again.
 // A world's options are kept in its save, store "world_menu", key the
 // option's.
+// [SKELDAT_WORLD_ADMIN] While a world runs, show_running(peer, name)
+// shows a picker the list with that world marked: Play on another is
+// world_menu:play as before (the app switches), on the running one the
+// menu closes; the running one is not renamed or deleted; Close world is
+// world_menu:close (Close). Back closes the menu.
 //
 // Packets, client to server: world_menu:get, world_menu:play ({name}),
 // world_menu:create ({name, options: {key: value}}), world_menu:rename
-// ({name, to}), world_menu:delete ({name}). Server to client:
-// world_menu:list (JSON: {title, may_pick, wait, fields: [{key, label,
-// default, hint, ask, choices: [[value, label]]}], worlds: [{name, bytes,
-// options}], presets: [{label, options}]}; wait: the progress
-// text, if any), world_menu:up.
+// ({name, to}), world_menu:delete ({name}), world_menu:close. Server to
+// client: world_menu:list (JSON: {title, may_pick, wait, running, note,
+// fields: [{key, label, default, hint, ask, choices: [[value, label]]}],
+// worlds: [{name, bytes, options}], presets: [{label, options}]}; wait:
+// the progress text, if any; running: the running world's name, if the
+// menu is shown in it; note: a refusal to say), world_menu:up.
 // **Presets** ([SKELDAT_HIGH_SCORES]): option sets the app offers on the
 // new world screen, as "From the high scores"; picking one fills the
 // fields. None, no list.
@@ -76,6 +82,13 @@ namespace world_menu
 			peer(peer), name(name), created(created), options(options){}
 	};
 
+	// world_menu:close: `peer` closed the running world
+	struct Close: public interface::Event::Private
+	{
+		PeerId peer;
+		Close(PeerId peer): peer(peer){}
+	};
+
 	struct Interface
 	{
 		virtual void configure(const Config &config) = 0;
@@ -89,6 +102,11 @@ namespace world_menu
 		virtual void progress(const ss_ &text) = 0;
 		// The new world screen's presets, sent again to the menus shown
 		virtual void set_presets(const std::vector<Preset> &presets) = 0;
+		// The menu to a picker while the world `running` runs
+		virtual void show_running(PeerId peer, const ss_ &running) = 0;
+		// Whether the peer picks the worlds: the launcher's own client, or
+		// an admin's account
+		virtual bool is_picker(PeerId peer) = 0;
 	};
 
 	inline bool access(interface::Server *server,
