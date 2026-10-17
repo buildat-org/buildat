@@ -1168,9 +1168,10 @@ struct Module: public interface::Module, public PlayersHost,
 			m_players.craft(peer, pl);
 		} else if(what == "bow"){
 			ss_ how;
-			float dx = 0, dy = 0, dz = 0;
+			float dx = 0, dy = 0, dz = 0, e[3];
 			is>>how>>dx>>dy>>dz;
-			m_players.bow(peer, pl, how, dx, dy, dz);
+			const bool eye = bool(is>>e[0]>>e[1]>>e[2]);
+			m_players.bow(peer, pl, how, dx, dy, dz, eye ? e : nullptr);
 		}
 	}
 

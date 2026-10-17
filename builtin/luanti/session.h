@@ -239,6 +239,21 @@ struct Session
 		}
 	}
 
+	// A peer's where that came since the last 0.2 s apply, applied now:
+	// for a game that needs the place at once ([SKELDAT_BOW_AIM]: the
+	// bow's release follows a where of its own)
+	void apply_where(network::PeerInfo::Id peer)
+	{
+		auto p = m_pending_where.find(peer);
+		auto it = m_names.find(peer);
+		if(p == m_pending_where.end() || it == m_names.end())
+			return;
+		const Where w = p->second;
+		m_pending_where.erase(p);
+		m_game.set_player_pos(it->second, (float)w.x, (float)w.y,
+				(float)w.z, (float)w.look_h, (float)w.look_v, w.controls);
+	}
+
 	void on_where(const network::Packet &packet)
 	{
 		// From the placement on, while loading too: it is what the world

@@ -160,6 +160,17 @@ return function(game, sounds)
 			build(node:CreateChild("look"), quads, mat)
 			mobs[node:GetID()] = {node = node, mat = mat, arrow = true,
 				light_t = 0}
+			-- [SKELDAT_BOW_AIM] The own arrow's first sight: how late and
+			-- how far from the eye it shot from
+			local r = game.bow_release
+			if r and buildat.get_time_us() - r.us < 1000000 then
+				game.bow_release = nil
+				local p = node.worldPosition
+				log:info(string.format("skeldat: the arrow shown %.2f from "
+						.. "the eye, %d ms after the release",
+						math.sqrt((p.x - r.x) ^ 2 + (p.y - r.y) ^ 2 +
+						(p.z - r.z) ^ 2), (buildat.get_time_us() - r.us) / 1000))
+			end
 			return
 		end
 		if name == "skeldat_drop" then

@@ -170,6 +170,13 @@ struct Players: public luanti_session::Game, public MobsHost
 					(int)std::floor(pl.y / 16), (int)std::floor(pl.z / 16));
 		};
 		const auto was = section(*pl);
+		// simplified: the gap at least 0.05 s, so a where sent early (the
+		// bow's release sends one) does not read as a burst of speed
+		if(pl->where_t >= 0)
+			pl->speed = std::sqrt((x - pl->x) * (x - pl->x) +
+					(y - pl->y) * (y - pl->y) + (z - pl->z) * (z - pl->z)) /
+					std::max(0.05, world.time - pl->where_t);
+		pl->where_t = world.time;
 		pl->x = x;
 		pl->y = y;
 		pl->z = z;
@@ -387,16 +394,55 @@ struct Players: public luanti_session::Game, public MobsHost
 	{
 		if(growth.ended || !world.reaches_world(x, y, z))
 			return false;
-		const float dx = x - pl.x, dy = y - (pl.y + 1.625f), dz = z - pl.z;
+		const float dx = x - pl.x, dy = y - (pl.y + EYE), dz = z - pl.z;
 		return std::sqrt(dx * dx + dy * dy + dz * dz) <= REACH;
 	}
 
+	// [SKELDAT_BOW_AIM] Where an arrow starts: the client's eye at the
+	// release (e, when it sent one) if it is within 1.5 + speed x 0.25 of
+	// the server's copy's eye and no solid voxel is between the two, else
+	// the copy's eye. A client cannot shoot from inside a wall or afar.
+	Urho3D::Vector3 bow_eye(const Player &pl, const float *e)
+	{
+		const Urho3D::Vector3 copy(pl.x, pl.y + (pl.prone ? PRONE_EYE : EYE),
+				pl.z);
+		if(!e)
+			return copy;
+		// For a check: the eye said moved this far along x (a client's lie)
+		static const float shift = getenv("BUILDAT_SKELDAT_EYE_SHIFT") ?
+				(float)atof(getenv("BUILDAT_SKELDAT_EYE_SHIFT")) : 0;
+		const Urho3D::Vector3 eye(e[0] + shift, e[1], e[2]);
+		const float off = (eye - copy).Length();
+		const bool finite = std::isfinite(e[0]) && std::isfinite(e[1]) &&
+				std::isfinite(e[2]);
+		bool clear = finite && off <= 1.5f + pl.speed * 0.25f;
+		if(clear){
+			voxelworld::access(world.server, world.scene,
+					[&](voxelworld::Instance *w){
+				const int n = (int)std::ceil(off / 0.25f);
+				for(int i = 1; i <= n && clear; i++){
+					const Urho3D::Vector3 p = copy + (eye - copy) * (i / (float)n);
+					clear = !world.walkable(w, (int)std::floor(p.x_ + 0.5f),
+							(int)std::floor(p.y_ + 0.5f),
+							(int)std::floor(p.z_ + 0.5f));
+				}
+			});
+		}
+		if(clear)
+			return eye;
+		log_w(MODULE, "skeldat: %s's eye at the release refused (%.2f off at "
+				"%.1f a second%s): the copy's", cs(pl.name), finite ? off : -1.0f,
+				pl.speed, finite && off <= 1.5f + pl.speed * 0.25f ?
+				", through a voxel" : "");
+		return copy;
+	}
+
 	// [SKELDAT_BOW] "start": the draw begins with the bow held and an
-	// arrow in the main inventory; "release dx dy dz": timed here, the
-	// arrow shot from the eye along the look at the draw's speed, one
-	// arrow taken and the bow worn; under BOW_MIN nothing
+	// arrow in the main inventory; "release dx dy dz [ex ey ez]": timed
+	// here, the arrow shot from the eye (bow_eye()) along the look at the
+	// draw's speed, one arrow taken and the bow worn; under BOW_MIN nothing
 	void bow(size_t peer, Player &pl, const ss_ &how, float dx, float dy,
-			float dz)
+			float dz, const float *e = nullptr)
 	{
 		Stack &held = pl.main[pl.wield];
 		auto arrow = std::find_if(pl.main.begin(), pl.main.end(),
@@ -413,6 +459,8 @@ struct Players: public luanti_session::Game, public MobsHost
 		}
 		if(how != "release" || pl.draw_t < 0)
 			return;
+		// The where the client sent with the release, applied now
+		session.apply_where(peer);
 		const float draw = std::min(1.0f, (float)(world.time - pl.draw_t) / BOW_DRAW);
 		pl.draw_t = -1;
 		const float l = std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -432,9 +480,12 @@ struct Players: public luanti_session::Game, public MobsHost
 			held = Stack();
 		send_inventory(peer, pl);
 		const float speed = draw * BOW_SPEED;
+		const Urho3D::Vector3 eye = bow_eye(pl, e);
+		const float off = (eye - Urho3D::Vector3(pl.x, pl.y +
+				(pl.prone ? PRONE_EYE : EYE), pl.z)).Length();
 		Arrow a;
-		a.x = pl.x + dx * 0.5f, a.y = pl.y + 1.6f + dy * 0.5f,
-				a.z = pl.z + dz * 0.5f;
+		a.x = eye.x_ + dx * 0.5f, a.y = eye.y_ + dy * 0.5f,
+				a.z = eye.z_ + dz * 0.5f;
 		a.vx = dx * speed, a.vy = dy * speed, a.vz = dz * speed;
 		a.by_player = true;
 		a.peer = peer;
@@ -446,8 +497,9 @@ struct Players: public luanti_session::Game, public MobsHost
 		mobs.arrows.push_back(a);
 		// [SKELDAT_BOW_SOUND_TUNE] The shooter plays its own at the release
 		sound("bow", a.x, a.y, a.z, peer);
-		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f)",
-				cs(pl.name), speed, draw);
+		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f) from "
+				"%.3f,%.3f,%.3f (the copy's %.2f off; the feet at %.2f)",
+				cs(pl.name), speed, draw, eye.x_, eye.y_, eye.z_, off, pl.y);
 	}
 
 	void hurt(size_t peer, Player &pl, int damage, const char *how)

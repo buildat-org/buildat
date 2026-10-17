@@ -1420,11 +1420,18 @@ local function left_up()
 	if not bow.t then
 		return
 	end
+	-- [SKELDAT_BOW_AIM] From the eye the crosshair is at, the server's
+	-- copy of the player fresh first
 	local dir = camera_node.worldDirection
-	game.send("bow", string.format("release %.4f %.4f %.4f", dir.x, dir.y,
-			dir.z))
-	log:info(string.format("skeldat: the bow released at %.2f",
-			math.min(1, bow.t / BOW_DRAW)))
+	local eye = camera_node.worldPosition
+	bow.send_where()
+	game.bow_release = bow.t / BOW_DRAW >= BOW_MIN and {x = eye.x, y = eye.y,
+		z = eye.z, us = buildat.get_time_us()} or nil
+	game.send("bow", string.format("release %.4f %.4f %.4f %.3f %.3f %.3f",
+			dir.x, dir.y, dir.z, eye.x, eye.y, eye.z))
+	log:info(string.format("skeldat: the bow released at %.2f from "
+			.. "%.3f,%.3f,%.3f", math.min(1, bow.t / BOW_DRAW), eye.x, eye.y,
+			eye.z))
 	local s = bow.t / BOW_DRAW >= BOW_MIN and sounds.pick("bow")
 	if s then
 		draw_sound.release:Play(s)
@@ -1754,6 +1761,20 @@ magic.SubscribeToEvent("command_seq:skeldat_board", function(_, d)
 			" by the drive")
 end)
 local send_t = 0
+-- Where the player is, to the server: every 0.1 s, and at a bow's release
+-- ([SKELDAT_BOW_AIM]: the server's copy fresh for the arrow's check).
+-- Luanti's look: radians, the horizontal turning the other way.
+-- simplified: no controls but the board's and the places had
+function bow.send_where()
+	game.send_luanti("where", {x = player.x, y = player.y, z = player.z,
+		look_h = math.rad(-yaw), look_v = math.rad(pitch),
+		controls = places + (player.board and BOARD_BIT or 0) +
+				(player.prone and PRONE_BIT or 0),
+		sent_us = buildat.get_time_us()}, {"object", {"x", "double"},
+		{"y", "double"}, {"z", "double"}, {"look_h", "double"},
+		{"look_v", "double"}, {"controls", "int32_t"},
+		{"sent_us", "double"}})
+end
 local was_held = false
 magic.SubscribeToEvent("Update", function(_, d)
 	local dt = d:GetFloat("TimeStep")
@@ -1889,16 +1910,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	send_t = send_t + dt
 	if send_t >= 0.1 then
 		send_t = 0
-		-- Luanti's look: radians, the horizontal turning the other way
-		-- simplified: no controls but the board's and the places had
-		game.send_luanti("where", {x = player.x, y = player.y, z = player.z,
-			look_h = math.rad(-yaw), look_v = math.rad(pitch),
-			controls = places + (player.board and BOARD_BIT or 0) +
-					(player.prone and PRONE_BIT or 0),
-			sent_us = buildat.get_time_us()}, {"object", {"x", "double"},
-			{"y", "double"}, {"z", "double"}, {"look_h", "double"},
-			{"look_v", "double"}, {"controls", "int32_t"},
-			{"sent_us", "double"}})
+		bow.send_where()
 	end
 	pointed_mob = nil
 	if dead then

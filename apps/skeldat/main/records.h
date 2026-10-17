@@ -11,6 +11,9 @@
 // undefined 0, and the game's nodes follow air
 static const uint32_t ID_IGNORE = 0, ID_UNKNOWN = 1, ID_AIR = 2, ID_NODE0 = 3;
 static const float REACH = 5.5f;       // a little over Luanti's 4 from the eye
+// The eye over the feet, standing and lying on the board (player.lua's
+// EYE_HEIGHT and PRONE_EYE)
+static const float EYE = 1.625f, PRONE_EYE = 0.5f;
 // A day in seconds, Luanti's time_speed 72; BUILDAT_SKELDAT_DAY for a check
 static const float DAY_SECONDS = 1200;
 static const int HP_MAX = 20, BREATH_MAX = 10;
@@ -62,6 +65,10 @@ struct Player
 	bool board = false, board_seen = false;
 	// [SKELDAT_BOARD_PRONE] Lying flat now, and at any time since the check
 	bool prone = false, prone_seen = false;
+	// [SKELDAT_BOW_AIM] The speed between the last two wheres, and when
+	// the last came (the server's clock)
+	float speed = 0;
+	double where_t = -1;
 	float check_v = 0;
 	int board_air = 0;
 	// A place sent (send_position) that the client has not reported yet:
