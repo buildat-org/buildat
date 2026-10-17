@@ -248,7 +248,9 @@ return function(game, declare_keys)
 		magic.ui:SetFocusElement(nil)
 		game.hold(function() end)
 		log:info("pause: settings shown")
-		buildat.show_game_settings{on_close = function()
+		-- [SKELDAT_TOUCH] and the touch controls' own (init.lua's)
+		buildat.show_game_settings{sections = game.settings_sections,
+				on_close = function()
 			declare_keys()
 			pending = open
 		end}

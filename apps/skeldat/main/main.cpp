@@ -754,11 +754,14 @@ struct Module: public interface::Module, public luanti_session::Game
 	void start(bool pick)
 	{
 		// The day's schedule, luanti_client's ([SKY_RENDER_SHARED]: the sky's
-		// render is extensions/sky_render, meta.json's client_extensions)
+		// render is extensions/sky_render, meta.json's client_extensions),
+		// and Luanti's touch controls ([SKELDAT_TOUCH]), as builtin/luanti
+		// serves them
 		const ss_ res = m_server->get_config().get<ss_>("share_path")+
 				"/extensions/luanti_client/res/";
 		client_file::access(m_server, [&](client_file::Interface *i){
 			i->add_file_path("luanti/sky_model.lua", res+"sky_model.lua");
+			i->add_file_path("luanti/touch.lua", res+"touch.lua");
 		});
 		serve_media();
 		world_menu::access(m_server, [&](world_menu::Interface *i){

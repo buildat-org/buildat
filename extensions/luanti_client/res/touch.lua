@@ -34,7 +34,10 @@
 --    short_dig() (optional: a short tap digs and a long one places, the
 --    wielded item's touch_interaction for what is pointed at), clutter()
 --    (optional: the chat's Declutter toggled, -> whether it is on; a
---    "Clutter" button in More, and T.show_clutter(on) for its look)
+--    "Clutter" button in More, and T.show_clutter(on) for its look),
+--    more (optional: {{label, fn}, ...}, buttons of the client's own at
+--    the end of More's column). An action of More's that BIND lacks has
+--    no button.
 local magic = require("buildat/core/urho3d")
 local log = buildat.Logger("luanti/touch")
 
@@ -142,17 +145,25 @@ return function(o)
 	-- Clutter: the chat overlay cut down ([TOUCH_CHAT_CLUTTER]), its text
 	-- yellow while it is
 	local clutter_text = nil
+	for i = #rest, 1, -1 do
+		if not o.BIND[rest[i][2]] then
+			table.remove(rest, i)
+		end
+	end
 	if o.clutter then
 		rest[#rest + 1] = {"Clutter", nil, function()
 			T.show_clutter(o.clutter())
-		end}
+		end, true}
+	end
+	for _, r in ipairs(o.more or {}) do
+		rest[#rest + 1] = {r[1], nil, r[2]}
 	end
 	for i, r in ipairs(rest) do
 		local b = button(r[1], magic.HA_RIGHT, magic.VA_TOP, -16,
 				TOP + i * 52, 90, 44, r[3] or key(r[2]))
 		b.visible = false
 		more[#more + 1] = b
-		if r[3] then
+		if r[4] then
 			clutter_text = b:GetChild(0)
 		end
 	end

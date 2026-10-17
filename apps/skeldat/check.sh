@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~21 min (2026-10-17)
-# covers: apps/skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
+# covers: apps/skeldat/** extensions/luanti_client/res/touch.lua builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
 # two runs of one world, 256 wide, at seed 2 (valleys: a dry spawn, no steps
@@ -1381,6 +1381,74 @@ grep -aq "skeldat: placed at" "$t/rr2.log" || fail "no client placed in w_rerun 
 	[ ! -e "$t/srv33/apps/skeldat/saves/w_rerun_rerun" ] ||
 	fail "the saves after two re-runs: $(ls "$t/srv33/apps/skeldat/saves")"
 echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | tr '\n' ' ')"
+# 31. Touch controls ([SKELDAT_TOUCH]), BUILDAT_TOUCH=1 at 800x500 in
+# the crafting world of 12: the stick pushed full and then half way for
+# 2 s each (the second about half as far); a finger dragged 50 pixels
+# right turns the view (48 degrees at the default 0.2 and this UI scale
+# of 1.25), dragged down it looks at the ground; a tap places the held
+# dirt (slot 1), a finger held still digs; hotbar slot 2 (UI 640 x 400,
+# skeldat's scale 1) tapped, the bow drawn by a held finger and
+# shot by its lift; the Inventory button opens it, two taps craft and
+# move the sticks to main:10, a finger on main:11 slid onto main:10 and
+# a second finger's tap there picks up half, a tap on main:11 puts it
+# down. simplified: a tap on a mob, the board's brake by the stick and
+# the pause menu's buttons by tap are not driven: the first is the
+# place's own branch, the others are the keys' and the UI's.
+log34="$t/srv34.log"
+BUILDAT_SKELDAT_WORLD=touch BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3; give skeldat:dirt 10 1; give skeldat:bow 1 1; give skeldat:arrow 10 1" \
+	start_server "$log34" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv34" -C "$t/srv.cache" -l 3 || fail "the server ($log34)"
+CHECK_PIDS+=($SERVER_PID)
+{
+	echo "$placed"; echo "delay 2000"
+	for to in 250 309; do
+		echo "finger_down 1 100 350"; echo "finger_move 1 100 $to"
+		echo "delay 2000"; echo "finger_up 1"; echo "delay 1000"
+	done
+	echo "finger_down 2 600 250"
+	for x in 610 620 630 640 650; do echo "finger_move 2 $x 250"; echo "delay 60"; done
+	echo "finger_up 2"; echo "delay 500"; echo "finger_down 2 600 200"
+	for y in 210 220 230 240 250; do echo "finger_move 2 600 $y"; echo "delay 60"; done
+	echo "finger_up 2"; echo "delay 500"
+	echo "tap 600 250"; echo "delay 1000"
+	echo "finger_down 3 600 250"; echo "delay 4000"; echo "finger_up 3"
+	echo "delay 500"; echo "tap 325 485"; echo "delay 500"
+	echo "finger_down 3 600 150"; echo "delay 1500"; echo "finger_up 3"
+	echo "delay 1000"; echo "tap 548 94"
+	echo "wait_log 5000 inventory: inventory opened"; echo "delay 500"
+	# The window's slots at skeldat's scale 1: the craft result, main:10
+	# and main:11 (12's are at its scale 2, without touch's UI scale)
+	echo "tap 468 199"; echo "delay 700"; echo "tap 310 253"; echo "delay 700"
+	echo "finger_down 1 333 253"; echo "delay 200"; echo "finger_move 1 310 253"
+	echo "delay 200"; echo "finger_down 2 400 420"; echo "delay 100"
+	echo "finger_up 2"; echo "delay 200"; echo "finger_up 1"; echo "delay 500"
+	echo "tap 333 253"; echo "delay 700"; echo "keypress Escape"; echo "delay 500"
+	echo quit
+} > "$t/touch.cmds"
+BUILDAT_TOUCH=1 client touch "$t/touch.cmds"
+wait $CLIENT || fail "the touch drive ($t/touch.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+strokes=$(grep -a "skeldat: the stick pushed" "$t/touch.log" | sed 's/.*pushed \([0-9.]*\) moved \([0-9.]*\)/\1 \2/' | tr '\n' ' ')
+turned=$(grep -a "skeldat: touch turned" "$t/touch.log" | head -1 | sed 's/.*turned \([-0-9.]*\) .*/\1/')
+set -- $strokes
+awk -v p1="${1:-0}" -v m1="${2:-0}" -v p2="${3:-0}" -v m2="${4:-0}" 'BEGIN {
+	exit !(p1 > 0.95 && m1 > 4 && p2 > 0.4 && p2 < 0.6 && m2 / m1 > 0.3 &&
+		m2 / m1 < 0.7) }' ||
+	fail "the stick's strokes: $strokes ($t/touch.log)"
+awk -v y="${turned:-0}" 'BEGIN { exit !(y > 35 && y < 70) }' ||
+	fail "a drag did not turn the view: ${turned:-none} ($t/touch.log)"
+grep -aq "client1 places skeldat:dirt" "$log34" && grep -aq "dig: done at" "$t/touch.log" &&
+	grep -aq "touch: hotbar slot 2" "$t/touch.log" &&
+	grep -aq "skeldat: the bow drawn" "$t/touch.log" &&
+	grep -aq "client1 shoots an arrow at" "$log34" ||
+	fail "the tap's place, the held finger's dig, or the bow ($log34, $t/touch.log)"
+grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.log" &&
+	grep -aq "inventory: move 2 skeldat:stick main:10 -> main:11" "$t/touch.log" ||
+	fail "the inventory by finger ($t/touch.log)"
+echo "touch: strokes (push, moved) $strokes, a 50 pixel drag turned $turned degrees"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1388,5 +1456,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls"
 # vim: set noet ts=4 sw=4:

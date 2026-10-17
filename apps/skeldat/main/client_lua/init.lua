@@ -269,8 +269,12 @@ local function declare_keys()
 	end
 end
 declare_keys()
+-- [SKELDAT_TOUCH] The touch controls, set below on a touchscreen: their
+-- stick and buttons hold the same actions as the keys
+local touch = nil
 local function down(id)
-	return held == nil and key[id] ~= 0 and magic.input:GetKeyDown(key[id])
+	return held == nil and (touch ~= nil and touch.held[id] or
+			key[id] ~= 0 and magic.input:GetKeyDown(key[id]))
 end
 
 --
@@ -970,9 +974,18 @@ local function has_arrow()
 	return false
 end
 
+-- The left button, or on a touchscreen a finger held still (touch.lua's
+-- dig: SDL makes a left button of a finger too, which is not read then)
+local function left_held()
+	if touch then
+		return touch.dig
+	end
+	return magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT)
+end
+
 local function step_dig(dt)
 	if not pointed or held or wielded() == "skeldat:bow" or
-			not magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+			not left_held() then
 		dig = nil
 		return
 	end
@@ -1144,8 +1157,10 @@ local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local mouse_in_world = false
 local function set_mouse_in_world(on)
 	mouse_in_world = on
-	magic.input:SetMouseVisible(not on)
-	if web then
+	-- A touchscreen's pointer stays: the UI takes a finger's taps only
+	-- while it is shown, and the touch controls are UI
+	magic.input:SetMouseVisible(not on or touch ~= nil)
+	if web and not touch then
 		magic.input:SetMouseMode(on and magic.MM_RELATIVE or
 				magic.MM_ABSOLUTE)
 	end
@@ -1234,17 +1249,8 @@ function game.hud_visible()
 	return hud_on
 end
 
-magic.SubscribeToEvent("KeyDown", function(_, d)
-	local k = d:GetInt("Key")
-	if held then
-		if held.on.key and held.on.key(k) then
-			return
-		end
-		if k == magic.KEY_ESCAPE then
-			held.close()
-		end
-		return
-	end
+-- A key's action, which the touch controls' buttons press as well
+local function on_key(k)
 	if k == magic.KEY_ESCAPE then
 		open_pause()
 	elseif k == key.inventory then
@@ -1268,30 +1274,35 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 		send_wield()
 		game.changed()
 	end
+end
+magic.SubscribeToEvent("KeyDown", function(_, d)
+	local k = d:GetInt("Key")
+	if held then
+		if held.on.key and held.on.key(k) then
+			return
+		end
+		if k == magic.KEY_ESCAPE then
+			held.close()
+		end
+		return
+	end
+	on_key(k)
 end)
 
 -- A held window's clicks: UIMouseClick says where, in the root's own
 -- coordinates once its letterbox in a scripted run is taken off
 magic.SubscribeToEvent("UIMouseClick", function(_, d)
-	if held and held.on.click then
+	-- A touchscreen's are clicked by the touch controls (form_press)
+	if held and held.on.click and not touch then
 		local rp = magic.ui.root.position
 		held.on.click(d:GetInt("X") - rp.x, d:GetInt("Y") - rp.y,
 				d:GetInt("Button") == magic.MOUSEB_RIGHT and "right" or "left")
 	end
 end)
 
-magic.SubscribeToEvent("MouseButtonDown", function(_, d)
-	local b = d:GetInt("Button")
-	if held then
-		return
-	end
-	if not mouse_in_world then
-		set_mouse_in_world(true)
-		return
-	end
-	if b == magic.MOUSEB_RIGHT then
-		on_place()
-	elseif b == magic.MOUSEB_LEFT and wielded() == "skeldat:bow" then
+-- The left button's press: the bow drawn, or a pointed mob hit
+local function left_down()
+	if wielded() == "skeldat:bow" then
 		-- The bow digs and punches nothing; a press with no arrow is
 		-- nothing
 		if has_arrow() and game.stats.hp > 0 then
@@ -1299,13 +1310,13 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, d)
 			game.send("bow", "start")
 			log:info("skeldat: the bow drawn")
 		end
-	elseif b == magic.MOUSEB_LEFT and pointed_mob then
+	elseif pointed_mob then
 		mobs.punch(pointed_mob)
 	end
-end)
-
-magic.SubscribeToEvent("MouseButtonUp", function(_, d)
-	if d:GetInt("Button") ~= magic.MOUSEB_LEFT or not bow.t then
+end
+-- And its release: a drawn bow shoots
+local function left_up()
+	if not bow.t then
 		return
 	end
 	local dir = camera_node.worldDirection
@@ -1314,6 +1325,30 @@ magic.SubscribeToEvent("MouseButtonUp", function(_, d)
 	log:info(string.format("skeldat: the bow released at %.2f",
 			math.min(1, bow.t / BOW_DRAW)))
 	bow.t = nil
+end
+
+-- A touchscreen's finger is a mouse's to SDL as well; the touch controls
+-- say what it does there
+magic.SubscribeToEvent("MouseButtonDown", function(_, d)
+	local b = d:GetInt("Button")
+	if held or touch then
+		return
+	end
+	if not mouse_in_world then
+		set_mouse_in_world(true)
+		return
+	end
+	if b == magic.MOUSEB_RIGHT then
+		on_place()
+	elseif b == magic.MOUSEB_LEFT then
+		left_down()
+	end
+end)
+
+magic.SubscribeToEvent("MouseButtonUp", function(_, d)
+	if d:GetInt("Button") == magic.MOUSEB_LEFT and not touch then
+		left_up()
+	end
 end)
 
 magic.SubscribeToEvent("MouseWheel", function(_, d)
@@ -1326,6 +1361,110 @@ magic.SubscribeToEvent("MouseWheel", function(_, d)
 	send_wield()
 	game.changed()
 end)
+
+--
+-- [SKELDAT_TOUCH] Touch controls on a touchscreen (BUILDAT_TOUCH=1):
+-- Luanti's scheme, luanti_client's res/touch.lua served as
+-- luanti/touch.lua, which skeldat takes until it has one of its own. All
+-- of it acts at the crosshair, where skeldat points; a finger only turns
+-- the view. A tap hits a pointed mob, else places; a finger held still
+-- digs, or with the bow draws, and its lift shoots. The windows of
+-- ui.lua take a finger as the left button and a second finger's tap as
+-- the right; the pause menu's and the pages' buttons take taps as they
+-- are. simplified: the chat's lines stay where they are, clear of the
+-- controls; no Clutter button.
+--
+game.settings_sections = {}
+if buildat.get_env("BUILDAT_TOUCH") == "1" then
+	local function click(button)
+		return function(x, y)
+			if held and held.on.click then
+				held.on.click(x, y, button)
+			end
+		end
+	end
+	touch = load("luanti/touch.lua")({
+		on_key = on_key,
+		BIND = {drop = {key = key.drop}, fly = {key = key.fly},
+			fast = {key = key.fast}, noclip = {key = key.noclip}},
+		more = {{"HUD", function() hud_on = not hud_on end}},
+		pause = open_pause,
+		place = function()
+			if pointed_mob then
+				mobs.punch(pointed_mob)
+			else
+				on_place()
+			end
+		end,
+		set_wield = function(i)
+			bow.t = nil
+			game.wield = i
+			send_wield()
+			game.changed()
+		end,
+		inventory = function() ui.open("inventory") end,
+		chat = function() game.chat() end,
+		-- ui.lua's hotbar: 9 slots of 20 at its scale, a pixel off the
+		-- bottom
+		hotbar = function()
+			local sc = game.ui_scale()
+			return 9, 20 * sc, sc
+		end,
+		form_open = game.held,
+		form_press = click("left"),
+		form_move = function() end,
+		form_release = function() end,
+		form_right = click("right"),
+	})
+	-- Luanti's touchscreen_sensitivity ([TOUCH_LOOK_SETTING]), in the
+	-- game's storage as builtin/luanti keeps it
+	touch.sensitivity =
+			tonumber(buildat.storage_read("touch_sensitivity") or "") or 0.2
+	local SENSITIVITIES = {0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.75, 1}
+	game.settings_sections[1] = {title = "Touch", draw = function(_, sui)
+		local list = {}
+		for i, v in ipairs(SENSITIVITIES) do
+			list[i] = {tostring(v), v}
+		end
+		sui.dropdown("Look sensitivity", list, touch.sensitivity, function(v)
+			touch.sensitivity = v
+			buildat.storage_write("touch_sensitivity", tostring(v))
+			log:info("touch look sensitivity " .. v)
+		end)
+	end}
+	-- Luanti's Android autojump: a voxel's step walked up without Jump
+	player.autojump = true
+	log:info("skeldat: touch controls on, look sensitivity " ..
+			touch.sensitivity)
+end
+-- A finger held still, and its lift: the left button's press and release;
+-- and the stick's strokes logged, where each starts and ends
+local touch_dig, touch_turned, touch_turn_t, stroke = false, nil, 0, nil
+local function update_touch()
+	local st = touch.stick
+	if st and not stroke then
+		stroke = {x = player.x, z = player.z, push = 0}
+	end
+	if stroke and st then
+		stroke.push = math.max(stroke.push, math.sqrt(st.x * st.x + st.y * st.y))
+	elseif stroke then
+		log:info(string.format("skeldat: the stick pushed %.2f moved %.1f",
+				stroke.push, math.sqrt((player.x - stroke.x) ^ 2 +
+				(player.z - stroke.z) ^ 2)))
+		stroke = nil
+	end
+	if touch.dig ~= touch_dig then
+		touch_dig = touch.dig
+		if held then
+			return
+		end
+		if touch_dig then
+			left_down()
+		else
+			left_up()
+		end
+	end
+end
 
 --
 -- The steps: one each 1.6 voxels walked on the ground
@@ -1486,17 +1625,43 @@ magic.SubscribeToEvent("Update", function(_, d)
 	update_music(dt)
 	watch_near(dt)
 	light_backdrop(dt)
-	if mouse_in_world and not held then
+	if touch then
+		update_touch()
+		local turning = touch.yaw ~= 0 or touch.pitch ~= 0
+		if not held then
+			yaw = (yaw + touch.yaw) % 360
+			pitch = math.max(-89, math.min(89, pitch + touch.pitch))
+		end
+		-- A drag's turn logged once it has stopped for 0.3 s
+		local now = buildat.get_time_us()
+		if turning then
+			touch_turned = (touch_turned or 0) + touch.yaw
+			touch_turn_t = now
+		elseif touch_turned and now - touch_turn_t > 300000 then
+			log:info(string.format("skeldat: touch turned %.1f to yaw %.1f",
+					touch_turned, yaw))
+			touch_turned = nil
+		end
+		touch.yaw, touch.pitch = 0, 0
+	elseif mouse_in_world and not held then
 		local m = magic.input:GetMouseMove()
 		yaw = (yaw + m.x * 0.12) % 360
 		pitch = math.max(-89, math.min(89, pitch + m.y * 0.12))
 	end
 	local dead = game.stats.hp <= 0
-	local fx, fz, r = 0, 0, 0
+	local fx, fz, r, speed = 0, 0, 0, nil
 	local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
 	if not dead then
 		local f = (down("forward") and 1 or 0) - (down("back") and 1 or 0)
 		r = (down("right") and 1 or 0) - (down("left") and 1 or 0)
+		-- [SKELDAT_TOUCH] The stick, analog: its way, and its length the
+		-- speed; on the board its sideways push steers, and pulled back
+		-- (touch.lua's held back) it brakes
+		local stick = touch and not held and touch.stick
+		if stick and (stick.x ~= 0 or stick.y ~= 0) then
+			f, r = -stick.y, stick.x
+			speed = math.sqrt(f * f + r * r)
+		end
 		fx, fz = s * f + c * r, c * f - s * r
 	end
 	-- [SKELDAT_SKATEBOARD] On the board the left and right keys turn it
@@ -1507,7 +1672,8 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
 	end
 	local ground0, vy0 = player.on_ground, player.vy
-	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
+	player:update(dt, {x = fx, z = fz, speed = speed,
+			jump = not dead and down("jump"),
 			sneak = not dead and down("sneak"), fast = player.fast,
 			turn = r, brake = not dead and down("back")})
 	local b = player.board
