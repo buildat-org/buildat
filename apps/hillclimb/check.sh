@@ -8,7 +8,8 @@
 # 8 m, sand with stones), the client Lua parsing, and three drives with
 # no client (BUILDAT_HILLCLIMB_DRIVE): the car settling on its springs,
 # lower with a payload, each gear's top speed, the brake, a slope
-# climbed and one past the sand's grip stalled; the time trial's times
+# climbed and one past the sand's grip stalled; then 2 t in fourth at 25,
+# 31 and 37 degrees climbing or spinning, never stalled ([HC_POWER]); the time trial's times
 # kept per hill and payload in order, and a hill picked again; the
 # ground (main/ground.h's own self test too): a rut dug by wheels spun in
 # place, stones loose that roll down and rest.
@@ -63,6 +64,13 @@ drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
 drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
 	BUILDAT_HILLCLIMB_START="2.1 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
 wait
+# [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
+# bottom pad: each climbs or spins its wheels, none stalls
+for a in 25 31 37; do
+	drive over$a BUILDAT_HILLCLIMB_STEEP=$a BUILDAT_HILLCLIMB_PAYLOAD=2000 \
+		BUILDAT_HILLCLIMB_DRIVE="0:4 1:W4 22:Q" &
+done
+wait
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
 # The default hill ([HC_DEFAULTS])
 grep -aq "hillclimb: the hill, seed 1, 29 degrees, 50 m long" "$t/flat.log" ||
@@ -90,6 +98,19 @@ def want(ok, what):
     print("  %s %s" % ("ok  " if ok else "FAIL", what))
     if not ok: bad.append(what)
 flat, climb, stall = lines("flat"), lines("climb"), lines("stall")
+# [HC_POWER] Overloaded in fourth: never the shaft stopped with the
+# pedal down (from 3 s, the pedal ramped up) while the car stands; and
+# empty in first on the flat, no wheel spins at the start
+for a in (25, 31, 37):
+    over = [l for l in lines("over%d" % a) if 3 <= l["t"] <= 21]
+    stood = [l for l in over if abs(l["shaft"]) < 0.02 and l["v"] < 0.05]
+    top = max(l["z"] for l in over)
+    spun = sum(1 for l in over if "1" in l["slip"])
+    want(not stood, "2 t in 4th at %d degrees climbs or spins: up to z %.1f, "
+        "%d of %d lines slipping, %d stalled" % (a, top, spun, len(over), len(stood)))
+start = [l for l in flat if 3 <= l["t"] <= 6]
+want(all(l["slip"] == "0000" for l in start),
+    "empty in 1st on the flat, no wheel spins at the start: %s" % sorted(set(l["slip"] for l in start)))
 # [HC_PITS_ROCKS] The rock at z 9.7 stops the car or turns it aside;
 # beside it the car goes on straight past it
 # (the line beside is clear only so far: further up it meets a pit)

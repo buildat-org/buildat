@@ -69,11 +69,15 @@ struct Spec
 	float shaft_inertia = 150; // kg m^2: the wheels and the low range's
 	                           // reflected engine
 	float governor = 20000;  // N m per rad/s toward the target
-	// rev/s at the wheel at full pedal, and the most torque, all four
+	// rev/s at the wheel at full pedal, and the most torque, all four.
+	// [HC_POWER] Twice the first figures, and no gear under 9000: the
+	// worst stall, 4 t on sand's steepest grip (tan = mu, 31 degrees),
+	// needs m g r sin(atan mu) = 8.1 kN m, so every gear on every slope
+	// either climbs or spins its wheels
 	float gear_speed[GEARS] = {-0.5f, 0.5f, 0.9f, 1.4f, 2.0f};
-	float gear_torque[GEARS] = {9000, 12000, 8000, 5500, 4000};
+	float gear_torque[GEARS] = {18000, 24000, 16000, 11000, 9000};
 	float engine_brake = 0.3f; // of the gear's torque, pedal up
-	float brake_torque = 16000;
+	float brake_torque = 30000; // over the strongest gear's
 	float steer_max = 0.6f, steer_rate = 0.8f; // rad, rad/s
 	float pedal_rate = 0.7f;   // per second: the gentle ramps
 };
