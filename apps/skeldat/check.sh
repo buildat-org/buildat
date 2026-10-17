@@ -1093,9 +1093,11 @@ first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] && [ -n "$first_pull" ] && [[ ! "$first_pull" < "$cheat" ]] &&
 	grep -aq "pulled back .*: too far (on the board)" "$log27" ||
 	fail "an honest board pulled back, or the forced one not: first at $first_pull, the cheat at $cheat ($log27)"
-# [SKELDAT_BOARD_SOUND] The roll's self test, and its stream 3 to 4 chunks
-# (30 to 40 ms, [SKELDAT_BOARD_SOUND_LAG]) ahead after each feed over the
-# ride, with no underrun said
+# [SKELDAT_BOARD_SOUND] The roll's self test, and its stream at the
+# device's buffer and 20 ms to a chunk over it ahead after each feed over
+# the ride ([SKELDAT_BOARD_SOUND_FAULT]: the figure the client logs, or
+# the last the queue was raised to, the frames here run to 50 ms), the
+# underruns said at most once (the raises end them)
 grep -aq "skeldat: board sound: self test passed" "$c1" ||
 	fail "the board sound's self test ($c1)"
 roll=$(grep -a "skeldat: board speed" "$c1" |
@@ -1103,8 +1105,15 @@ roll=$(grep -a "skeldat: board speed" "$c1" |
 	awk 'NR == 1 { lo = $1; hi = $2 } $1 < lo { lo = $1 } $2 > hi { hi = $2 }
 		END { print NR, lo, hi }')
 read -r roll_n roll_lo roll_hi <<< "$roll"
-[ "${roll_n:-0}" -ge 10 ] && [ "${roll_lo:-0}" -ge 30 ] && [ "${roll_hi:-999}" -le 41 ] &&
-	! grep -aq "board sound: .* underruns" "$c1" ||
+kept=$(grep -a "board sound: the device's buffer" "$c1" | head -1 |
+	sed 's/.*the roll kept \([0-9]*\) ms ahead.*/\1/')
+echo "the roll's device: $(grep -a "board sound: the device's buffer" "$c1" | head -1 | sed 's/.*board sound: //')"
+raised=$(grep -a "board sound: the queue raised to" "$c1" | tail -1 |
+	sed 's/.*raised to \([0-9]*\) ms.*/\1/')
+echo "the roll's queue raised $(grep -ac "board sound: the queue raised" "$c1") times, to ${raised:-none}"
+[ "${roll_n:-0}" -ge 10 ] && [ -n "$kept" ] && [ "${roll_lo:-0}" -ge "$kept" ] &&
+	[ "${roll_hi:-999}" -le $((${raised:-$kept} + 11)) ] &&
+	[ "$(grep -ac "board sound: .* underruns in" "$c1")" -le 1 ] ||
 	fail "the roll's stream: $roll_n reports, $roll_lo to $roll_hi ms ahead ($c1)"
 echo "the roll: $roll_lo to $roll_hi ms ahead over $roll_n reports"
 grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*$" "$t/board2.log" ||

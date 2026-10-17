@@ -325,8 +325,12 @@ A sound made of samples is played two ways. A magic.BufferedSoundStream
 is topped up ahead of its playhead (launch_world's synth); what is queued
 is heard that much later. The source's streamBufferLength (ms, 20..1000,
 set before Play; Urho3D's 100 by default) is its own buffer behind the
-queue ([SKELDAT_BOARD_SOUND_LAG]), and the native audio device's is 40 ms
-(rounded to SDL's power of two samples). A magic.Sound
+queue ([SKELDAT_BOARD_SOUND_LAG]), and the native audio device's is 20 ms
+(rounded to SDL's power of two samples: 23 at 44100). magic.audio's
+bufferLengthMs and fragmentLengthMs (read only, 0 with no device) say
+the device buffer obtained and a mixing fragment: the mixer takes a
+buffer's worth at once, so a stream queued shorter than that plays
+silence for the rest ([SKELDAT_BOARD_SOUND_FAULT]). A magic.Sound
 made from samples ([SOUND_FROM_SAMPLES], buildat.has("sound_from_samples"))
 is made once and played by any number of SoundSources, as a loaded one:
   local sound = magic.Sound:new()
@@ -2056,7 +2060,7 @@ magic.Animatable:
 magic.AnimatedModel: skeleton
 magic.Animation: 
 magic.AnimationController: IsPlaying, Play, SetSpeed, Stop
-magic.Audio: Play, SetMasterGain, Stop, listener, playing
+magic.Audio: Play, SetMasterGain, Stop, bufferLengthMs, fragmentLengthMs, listener, playing
 magic.BEZIER_CURVE: 
 magic.BLEND_ADD: 
 magic.BLEND_ADDALPHA: 

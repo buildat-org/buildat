@@ -3397,6 +3397,10 @@ function M.define(dst, util)
 		properties = {
 			listener = util.simple_property({dst.SoundListener, "__nil"}),
 			playing = util.simple_property("boolean"),
+			-- [SKELDAT_BOARD_SOUND_FAULT] The device buffer obtained and a
+			-- mixing fragment, ms: a stream's queue must outrun the first
+			bufferLengthMs = util.read_only_property("number"),
+			fragmentLengthMs = util.read_only_property("number"),
 		},
 	})
 

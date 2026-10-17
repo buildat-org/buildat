@@ -20,6 +20,8 @@ class Audio : public Object
 
     unsigned GetSampleSize() const;
     int GetMixRate() const;
+    int GetBufferLengthMs() const;
+    int GetFragmentLengthMs() const;
     bool GetInterpolation() const;
     bool IsStereo() const;
     bool IsPlaying() const;
@@ -37,6 +39,8 @@ class Audio : public Object
 
     tolua_readonly tolua_property__get_set unsigned sampleSize;
     tolua_readonly tolua_property__get_set int mixRate;
+    tolua_readonly tolua_property__get_set int bufferLengthMs;
+    tolua_readonly tolua_property__get_set int fragmentLengthMs;
     tolua_readonly tolua_property__get_set bool interpolation;
     tolua_readonly tolua_property__is_set bool stereo;
     tolua_readonly tolua_property__is_set bool playing;

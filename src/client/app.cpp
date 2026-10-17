@@ -1705,9 +1705,10 @@ struct CApp: public App, public magic::Application
 		engineParameters_["Multisample"] = m_options.graphics.multisampling;
 #ifndef __EMSCRIPTEN__
 		// The audio device's buffer, ms: Urho3D's 100 is heard as a delay
-		// ([SKELDAT_BOARD_SOUND_LAG]); 20 is its least. The web's stays.
-		// simplified: 40 for every app; an app's own if one crackles
-		engineParameters_["SoundBuffer"] = 40;
+		// ([SKELDAT_BOARD_SOUND_LAG]); 20 is its least, 1024 samples at
+		// 44100 ([SKELDAT_BOARD_SOUND_FAULT]). The web's stays.
+		// simplified: 20 for every app; 40 again if one crackles
+		engineParameters_["SoundBuffer"] = 20;
 #endif
 
 		magic::Log *magic_log = GetSubsystem<magic::Log>();

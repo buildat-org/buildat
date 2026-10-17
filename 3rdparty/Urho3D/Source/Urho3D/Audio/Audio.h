@@ -73,6 +73,10 @@ public:
 
     /// Return mixing rate.
     int GetMixRate() const { return mixRate_; }
+    /// Return the device buffer's length in milliseconds, as obtained; 0 with no mode. [SKELDAT_BOARD_SOUND_FAULT] (Buildat)
+    int GetBufferLengthMs() const { return bufferLengthMs_; }
+    /// Return a mixing fragment's length in milliseconds: what a stream gives at once; 0 with no mode. (Buildat)
+    int GetFragmentLengthMs() const { return fragmentLengthMs_; }
 
     /// Return whether output is interpolated.
     bool GetInterpolation() const { return interpolation_; }
@@ -141,6 +145,8 @@ private:
     unsigned fragmentSize_;
     /// Mixing rate.
     int mixRate_;
+    /// The obtained device buffer and the fragment, ms. (Buildat)
+    int bufferLengthMs_ = 0, fragmentLengthMs_ = 0;
     /// Mixing interpolation flag.
     bool interpolation_;
     /// Stereo flag.

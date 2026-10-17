@@ -1591,6 +1591,14 @@ do
 	else
 		log:error("skeldat: " .. tostring(line))
 	end
+	-- [SKELDAT_BOARD_SOUND_FAULT] The device's buffer as obtained, which
+	-- the engine's own line does not bring to this log
+	local device, fragment = board_sound.device(magic)
+	log:info(string.format("skeldat: board sound: the device's buffer %d ms"
+			.. " (%s), a fragment %d ms, the roll kept %d ms ahead", device,
+			(magic.audio and magic.audio.bufferLengthMs or 0) > 0 and "obtained"
+			or "no device mode, assumed", fragment,
+			device + board_sound.MARGIN_MS))
 	local grains = board_sound.grains(buildat.synth)
 	local node = scene:CreateChild("board sound")
 	roll.own = board_sound.player(magic, buildat.synth, grains, 1, node,

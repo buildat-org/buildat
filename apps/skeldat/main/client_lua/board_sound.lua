@@ -14,12 +14,25 @@
 local M = {}
 M.RATE = 22050
 -- [SKELDAT_BOARD_SOUND_LAG] What is queued is heard that much later: 10 ms
--- chunks, fed while the stream holds under 30 ms (above a 60 Hz frame's
--- 17 with room for a slow one), into a source buffer of 30 ms (STREAM_MS)
--- simplified: AHEAD a constant to raise if the underruns logged say so
+-- chunks. [SKELDAT_BOARD_SOUND_FAULT] The mixer takes a device buffer's
+-- worth at once, so the queue is kept at the device's buffer and
+-- MARGIN_MS more (a 60 Hz frame's 17 and some): less, and the rest of
+-- each pull was silence. The source's own buffer holds a fragment's pull
+-- and 10 ms (at least STREAM_MS). M.device(magic) -> device, fragment
+-- ms; DEVICE_MS and FRAGMENT_MS when there is no device mode. A frame
+-- longer than the queue lets it run dry: each time the queue grows by
+-- RAISE_MS, to at most the device's and MAX_MARGIN_MS (logged).
+-- simplified: it never shrinks again; a slow moment keeps it longer
+M.RAISE_MS, M.MAX_MARGIN_MS = 5, 100
 M.CHUNK = 221 -- 10 ms
-M.AHEAD = 0.03
+M.MARGIN_MS = 20
 M.STREAM_MS = 30
+M.DEVICE_MS, M.FRAGMENT_MS = 46, 23
+function M.device(magic)
+	local a = magic.audio
+	local d, f = a and a.bufferLengthMs or 0, a and a.fragmentLengthMs or 0
+	return d > 0 and d or M.DEVICE_MS, f > 0 and f or M.FRAGMENT_MS
+end
 -- simplified: first figures, to tune by ear
 M.HITS_PER_SPEED = 25 -- a second, per voxel a second
 M.TOP = 8 -- the speed of the full level
@@ -122,7 +135,7 @@ end
 -- A roll's state; seed makes its noise and its hits' times
 function M.new(synth, grains, seed)
 	local r = {grains = grains, rnd = seed or 1, noise_seed = (seed or 1) * 7,
-		level = 0, scrape = 0, next_hit = 0,
+		level = 0, scrape = 0, next_hit = 0, raw = {},
 		acc = synth.buffer(M.CHUNK + GRAIN),
 		spare = synth.buffer(M.CHUNK + GRAIN),
 		noise = synth.buffer(M.CHUNK + PRE)}
@@ -131,9 +144,24 @@ function M.new(synth, grains, seed)
 		self.rnd = (self.rnd * 1103515245 + 12345) % 2147483648
 		return self.rnd / 2147483648
 	end
+	-- A filter's noise, [SKELDAT_BOARD_SOUND_FAULT]: each type's white
+	-- noise goes on from the last chunk's, its last PRE samples the front
+	-- of this one's, so the filter settles on the same input and the
+	-- chunks join (a new noise a chunk ticked at 100 Hz)
 	function r:filtered(type, cutoff)
+		local N = M.CHUNK
+		local raw = self.raw[type]
+		if not raw then
+			raw = synth.buffer(N + PRE)
+			self.raw[type] = raw
+		end
+		raw:clear(0, PRE)
+		raw:mix(raw, N, 0, PRE, 1)
 		self.noise_seed = self.noise_seed % 4294967291 + 1
-		self.noise:noise{kind = "white", seed = self.noise_seed, rate = M.RATE}
+		raw:noise{kind = "white", seed = self.noise_seed, rate = M.RATE,
+				from = PRE, n = N}
+		self.noise:clear()
+		self.noise:mix(raw, 0, 0, N + PRE, 1)
 		self.noise:filter{type = type, cutoff = cutoff, resonance = 0,
 				rate = M.RATE}
 		return self.noise
@@ -204,7 +232,10 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 	p.vb = magic.VectorBuffer:new()
 	p.source = source
 	source.soundType = magic.SOUND_EFFECT
-	source.streamBufferLength = M.STREAM_MS
+	local device, fragment = M.device(magic)
+	p.device, p.fragment = device, fragment
+	p.ahead = (device + M.MARGIN_MS) / 1000
+	source.streamBufferLength = math.max(M.STREAM_MS, fragment + 10)
 	source:Play(p.stream)
 	-- The pop and the clack out of the queue ([SKELDAT_BOARD_SOUND_LAG]):
 	-- Sounds made once, played when they happen, behind the device only
@@ -228,23 +259,43 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 		shot.gain = math.max(0, math.min(1, gain))
 		shot:Play(grains.clack_sound)
 	end
-	local underruns, said_t, fed = 0, buildat.get_time_us(), false
+	-- An underrun: the stream found dry at feed time, so a pull since got
+	-- less than it wanted (silence for the rest). Not "under a fragment":
+	-- after each pull a queue of device + MARGIN_MS sits under one, which
+	-- counted ten a second on a clean roll. Counted from the first for
+	-- 10 s, then said.
+	local underruns, first_t, fed, fed_t, gap = 0, nil, false, nil, 0
 	-- -> the stream's length after it, s
 	function p:feed(s, on_ground, brake)
 		local guard = 0
+		local now = buildat.get_time_us()
 		if fed and self.stream.bufferLength <= 0 then
 			underruns = underruns + 1
-		end
-		fed = true
-		local now = buildat.get_time_us()
-		if log and now - said_t >= 60e6 then
-			if underruns > 0 then
-				log:info(string.format("skeldat: board sound: %d underruns "
-						.. "this last minute", underruns))
+			first_t = first_t or now
+			local top = (self.device + M.MAX_MARGIN_MS) / 1000
+			if self.ahead < top then
+				self.ahead = math.min(top, self.ahead + M.RAISE_MS / 1000)
+				if log then
+					log:info(string.format("skeldat: board sound: the queue "
+							.. "raised to %d ms", self.ahead * 1000 + 0.5))
+				end
 			end
-			underruns, said_t = 0, now
 		end
-		while self.stream.bufferLength < M.AHEAD and guard < 16 do
+		-- And the longest gap between two feeds (a frame's), for the line
+		if fed and fed_t then
+			gap = math.max(gap, now - fed_t)
+		end
+		fed, fed_t = true, now
+		if first_t and now - first_t >= 10e6 then
+			if log then
+				log:info(string.format("skeldat: board sound: %d underruns in "
+						.. "10 s, the device's buffer %d ms, the queue %d ms, "
+						.. "the longest frame %d ms", underruns, self.device,
+						self.ahead * 1000 + 0.5, gap / 1000))
+			end
+			underruns, first_t, gap = 0, nil, 0
+		end
+		while self.stream.bufferLength < self.ahead and guard < 32 do
 			self:render(s, on_ground, brake)
 			self.out:to_shorts(self.vb, 0, M.CHUNK)
 			self.stream:AddData(self.vb)
@@ -266,7 +317,7 @@ end
 -- -> a line for the log; raises on a failure
 -- At s 0, 4 and 8, then the two air runs' last chunks; 0 and the air are
 -- the silent chunk's hash
-M.HASHES = "02cfd07dc33f6da3 d2fb62e9ce11b347 95b0afcb487297a5 " ..
+M.HASHES = "02cfd07dc33f6da3 830566adb5d45b54 1406c9e09c71c22c " ..
 		"02cfd07dc33f6da3 02cfd07dc33f6da3"
 M.SPLASH_HASHES = "085d7de7da131b7d 31ebb910b1815737 1fd16cff43a8764b " ..
 		"8b5536f8b417ffc6 5cc0da446564836a d9d78cce94d09c41 f07cb5ae5cd878e1 " ..
@@ -307,6 +358,34 @@ function M.self_test(synth)
 	assert(got == M.HASHES,
 			"board sound: the hashes " .. got .. ", committed " ..
 			tostring(M.HASHES))
+	-- [SKELDAT_BOARD_SOUND_FAULT] The seams: the roar alone (no hits) over
+	-- 200 chunks, the largest step between two chunks within 1.5 times the
+	-- largest inside one
+	local seams = {}
+	local hit_gain = M.HIT_GAIN
+	M.HIT_GAIN = 0
+	local ok, err = pcall(function()
+		for _, s in ipairs({4, 8}) do
+			local r = M.new(synth, grains, 5)
+			local inner, seam, last = 0, 0, nil
+			for c = 1, 200 do
+				r:render(s, true, false)
+				local o = r.out
+				if c > 2 then
+					seam = math.max(seam, math.abs(o:get(0) - last))
+				end
+				for i = 1, M.CHUNK - 1 do
+					inner = math.max(inner, math.abs(o:get(i) - o:get(i - 1)))
+				end
+				last = o:get(M.CHUNK - 1)
+			end
+			seams[#seams + 1] = string.format("%.2f", seam / inner)
+			assert(seam <= 1.5 * inner, string.format("board sound: a seam's "
+					.. "step %.4f at %d, inside a chunk %.4f", seam, s, inner))
+		end
+	end)
+	M.HIT_GAIN = hit_gain
+	assert(ok, err)
 	local sp, splash = M.splashes(synth), {}
 	for _, kind in ipairs({"soft", "hard"}) do
 		for v = 1, 4 do
@@ -317,7 +396,8 @@ function M.self_test(synth)
 	assert(splash == M.SPLASH_HASHES, "board sound: the splashes' hashes " ..
 			splash .. ", committed " .. tostring(M.SPLASH_HASHES))
 	return string.format("board sound: self test passed, %d and %d hits "
-			.. "in 2 s at 4 and 8, hashes %s", rates[1], rates[2], got)
+			.. "in 2 s at 4 and 8, the seams %s of the steps inside, hashes %s",
+			rates[1], rates[2], table.concat(seams, " and "), got)
 end
 
 return M
