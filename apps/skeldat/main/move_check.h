@@ -16,8 +16,9 @@
 // the air rule.
 // [SKELDAT_SKATEBOARD] A body on the board (Board) goes as fast as the
 // height lost allows, v^2 <= v0^2 + 2 g drop, the start's speed the one
-// the last passed check measured; steps up 2, jumps 4 voxels and what its
-// speed would lift it, and crosses a gap in a line of open cells.
+// the last passed check measured; steps up 2, jumps (its two jumps added
+// to what its speed would lift it, [SKELDAT_BOARD_PUSH]), and crosses a
+// gap in a line of open cells.
 // simplified: the drop is between the two checks' heights and BOARD_DIP,
 // so a valley between them gives no more than that; a board in the air
 // is let hover up to BOARD_AIR checks.
@@ -49,8 +50,11 @@ static const int DOWN = 8;
 static const float FALL = 200;
 // player.lua's pull: Luanti's gravity, doubled
 static const float G = 2 * 9.81f;
-// The board's jump, 2 x speed_jump (13): 13^2 / 2G is 4.3
-static const float BOARD_JUMP = 5;
+// The board's jump's speed, sqrt(1.2) x speed_jump (7.1), and its strafe
+// jump's sideways speed (player.lua's BOARD_JUMP and BOARD_STRAFE); two
+// of each in one flight, a ground jump and an air jump
+static const float BOARD_JUMP = 7.2f;
+static const float BOARD_STRAFE = 3;
 static const float BOARD_DIP = 1;
 static const int BOARD_AIR = 6;
 // The box's reach to either side of the board's move
@@ -90,11 +94,17 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	float reach = WALK * LAG * dt + SLACK;
 	float jump = JUMP;
 	float vmax = WALK * LAG;
+	// The rise the board's speed can give it, off a crest: none on level
+	// ground (set below, once the start is known)
+	float rise = 0;
 	if(board.on){
 		const float drop = std::max(0.0f, fy - ty) + BOARD_DIP;
 		vmax = std::max(vmax, std::sqrt(board.v0 * board.v0 + 2 * G * drop));
-		reach = vmax * LAG * dt + SLACK;
-		jump = BOARD_JUMP + vmax * vmax / (2 * G);
+		// Two strafe jumps, at a right angle to the travel; the speed
+		// measured (the next v0) is capped without them
+		const float side = 2 * BOARD_STRAFE;
+		reach = std::sqrt(vmax * vmax + side * side) * LAG * dt + SLACK;
+		rise = vmax;
 	}
 	const float dist = std::hypot(tx - fx, tz - fz);
 	v.speed = std::min(dist / dt, vmax);
@@ -143,6 +153,23 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	// A start that does not settle (a voxel placed into it since) is not
 	// the mover's doing: nothing to judge
 	const bool b_lands = settle(f, rules, b);
+	if(board.on){
+		// [SKELDAT_BOARD_PUSH] On level ground (the ground round the start
+		// one height, the board not in the air before) only the two jumps
+		// rise it; else they add to what its speed gives
+		if(board.air == 0 && !was_air){
+			P l = a0;
+			bool level = settle(f, rules, l);
+			for(int dz = -1; dz <= 1 && level; dz++)
+			for(int dx = -1; dx <= 1 && level; dx++)
+				level = f.at(l.x + dx, l.y - 1, l.z + dz) == SOLID &&
+						f.at(l.x + dx, l.y, l.z + dz) != SOLID;
+			if(level)
+				rise = 0;
+		}
+		const float v = rise + 2 * BOARD_JUMP;
+		jump = v * v / (2 * G) + 0.5f;
+	}
 	if(!settle(f, rules, a)){
 		// Though a board in the air too long is
 		if(board.on && board.air >= BOARD_AIR &&
@@ -299,8 +326,16 @@ int main()
 	auto step3 = world([](int x, int y, int){
 		return x >= 3 && y <= 2 ? SOLID : -1; });
 	assert(!check(step3, 0, 0, 0, 6, 3, 0, 1, false, bd).ok);
-	// The jump's 4, over a gap 6 wide and 20 deep, and not through a wall
-	assert(check(flat, 0, 0, 0, 3, 4, 0, 1, false, bd).ok);
+	// [SKELDAT_BOARD_PUSH] From the flat the two jumps at once, 5.2: 5
+	// believed, 6 not; off a slope its speed's rise and the two
+	assert(check(flat, 0, 0, 0, 3, 5, 0, 1, false, bd).ok);
+	assert(!check(flat, 0, 0, 0, 3, 6, 0, 1, false, bd).ok);
+	assert(check(slope, 25, 5, 0, 28, 12, 0, 1, false, bd).ok);
+	// A strafe jump's sideways 3 at each jump, over the speed
+	Board pushed = bd;
+	pushed.v0 = 8;
+	assert(check(flat, 0, 0, 0, 0, 0, 13, 1, false, pushed).ok);
+	// The jump over a gap 6 wide and 20 deep, and not through a wall
 	auto gap6 = world([](int x, int y, int){
 		return x >= 2 && x <= 7 && y < 0 && y >= -20 ? OPEN : -1; });
 	assert(check(gap6, 0, 0, 0, 10, 0, 0, 1, false, bd).ok);

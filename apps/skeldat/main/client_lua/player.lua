@@ -68,7 +68,18 @@ M.DEFAULT_MOVEMENT = {
 M.BOARD_STEP = 2
 M.BOARD_BRAKE = 24
 M.BOARD_STOP = 0.5
-M.BOARD_JUMP = 2 -- times speed_jump
+-- [SKELDAT_BOARD_PUSH] The jump's speed, added to vy: 1.2 times the
+-- walk's jump's height from the flat; one more in the air until the
+-- ground. Left or right held at the press: a strafe jump, BOARD_STRAFE_H
+-- of the height and BOARD_STRAFE voxels/s to that side.
+-- simplified: the strafe's two are the user's example numbers
+M.BOARD_JUMP = math.sqrt(1.2) -- times speed_jump
+M.BOARD_STRAFE_H = 0.9
+M.BOARD_STRAFE = 3
+-- The rider's push on the ground: up to BOARD_PUSH times speed_walk,
+-- from 0 in BOARD_PUSH_TIME seconds
+M.BOARD_PUSH = 2
+M.BOARD_PUSH_TIME = 3
 M.BOARD_TURN = 3
 -- Half the board's length: where its ends sample the ground
 M.BOARD_HALF = 0.6
@@ -814,6 +825,23 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local a = math.atan2(b.hx, b.hz) + turn_angle(wish, dt, b.s)
 		b.hx, b.hz = math.sin(a), math.cos(a)
 	end
+	-- [SKELDAT_BOARD_PUSH] The jump, added to vy and the horizontal
+	-- velocity; a turn key held makes it a strafe jump to that side
+	local function board_jump(wish)
+		local b = self.board
+		local m = self.movement
+		local ov = self.override or EMPTY_OVERRIDE
+		local j = M.BOARD_JUMP * m.speed_jump * (ov.jump or 1)
+		local t = wish.turn or 0
+		local side = t > 0 and 1 or t < 0 and -1 or 0
+		if side ~= 0 then
+			j = j * math.sqrt(M.BOARD_STRAFE_H)
+			-- The heading's right is (hz, -hx)
+			self.vx = self.vx + b.hz * side * M.BOARD_STRAFE
+			self.vz = self.vz - b.hx * side * M.BOARD_STRAFE
+		end
+		self.vy = self.vy + j
+	end
 
 	-- One step on the board. On the ground the move is along the slope and
 	-- the speed what the height says, s^2 - 2 g dy, which loses nothing:
@@ -833,7 +861,10 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			leave_board()
 			return step(dt, wish)
 		end
+		local pressed = wish.jump and not b.jump_held
+		b.jump_held = wish.jump
 		if self.on_ground then
+			b.air_jump = true
 			turn(wish, dt)
 			if wish.brake then
 				b.s = math.max(0, b.s - M.BOARD_BRAKE * dt)
@@ -842,7 +873,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			local vy = b.s * b.k * c
 			if wish.jump then
 				self.vx, self.vz = b.hx * b.s * c, b.hz * b.s * c
-				self.vy = vy + M.BOARD_JUMP * m.speed_jump * (ov.jump or 1)
+				self.vy = vy
+				board_jump(wish)
 				self.on_ground = false
 				return
 			end
@@ -876,6 +908,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			self.x, self.y, self.z = nx, ny, nz
 			self.vy = 0
 			b.k, b.s = k, s2 > 0 and math.sqrt(s2) or 0
+			-- The push, on any slope, not braking
+			local push = M.BOARD_PUSH * m.speed_walk
+			if not wish.brake and b.s < push then
+				b.s = math.min(push, b.s + push / M.BOARD_PUSH_TIME * dt)
+			end
 			if b.s < M.BOARD_STOP then
 				leave_board()
 			end
@@ -883,7 +920,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		end
 		-- In the air: thrown, stopped by a ceiling and by what the board
 		-- would not ride onto; ground it would is a landing below. The
-		-- keys turn the flight, the speed kept (the heading follows it)
+		-- keys turn the flight and the heading, the speed kept. One jump
+		-- in the air, on a new press.
 		do
 			local hs = math.sqrt(self.vx * self.vx + self.vz * self.vz)
 			local a = turn_angle(wish, dt, hs)
@@ -891,6 +929,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 				local sa, ca = math.sin(a), math.cos(a)
 				self.vx, self.vz = self.vx * ca + self.vz * sa,
 						self.vz * ca - self.vx * sa
+				turn(wish, dt)
+			end
+			if pressed and b.air_jump ~= false then
+				b.air_jump = false
+				board_jump(wish)
 			end
 		end
 		local vy0 = self.vy
@@ -912,15 +955,18 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			self.vy = 0
 		end
 		local hs = math.sqrt(self.vx * self.vx + self.vz * self.vz)
-		if hs > 0.1 then
-			b.hx, b.hz = self.vx / hs, self.vz / hs
-		end
 		if self.vy > 0 then
 			return
+		end
+		-- The landing is along the flight: the ground sampled that way
+		local hx, hz = b.hx, b.hz
+		if hs > 0.1 then
+			b.hx, b.hz = self.vx / hs, self.vz / hs
 		end
 		local ny, k, centre = board_at(p[1], p[3], p[2])
 		local on = type(centre) == "number" and p[2] <= ny
 		if not on and not (hit_y and vy0 <= 0) then
+			b.hx, b.hz = hx, hz
 			return
 		end
 		self.on_ground = true
@@ -929,7 +975,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			self.board, self.vx, self.vz, self.vy = nil, 0, 0, 0
 			return
 		end
-		local along = (hs + self.vy * k) / math.sqrt(1 + k * k)
+		-- The horizontal speed goes on along the ground, onto a climb too
+		-- (the user's); downhill what the flight's velocity gives along it,
+		-- as before
+		local along = k >= 0 and hs or
+				(hs + self.vy * k) / math.sqrt(1 + k * k)
 		local s2 = along > 0 and along * along - 2 * g * (ny - self.y) or 0
 		self.y, self.vy = ny, 0
 		b.k, b.s = k, s2 > 0 and math.sqrt(s2) or 0
@@ -1237,7 +1287,7 @@ do
 	run(flat, {x = 0, z = 0, look_x = 0, look_z = 1}, 2)
 	assert(flat.board and math.abs(heading(flat) - math.pi / 2) < 1e-9,
 			"board keys: the look turned it")
-	for _, s in ipairs({4, 16}) do
+	for _, s in ipairs({8, 16}) do
 		board(flat, 0, -0.5, s)
 		run(flat, {x = 0, z = 0, turn = 1}, 0.25)
 		local want = 2 * M.BOARD_TURN / (1 + s / 8) * 0.25
@@ -1259,15 +1309,118 @@ do
 			"board keys: in the air turned " .. turned .. " (not " .. want ..
 			"), speed " .. hs0 .. " to " .. hs1)
 	run(flat, {x = 0, z = 0}, 2)
-	-- The jump: twice the walk's speed, four times its height
-	board(flat, 0, -0.5, 5)
-	local peak = -0.5
-	run(flat, {x = 0, z = 0, jump = true, look_x = 1, look_z = 0}, 1 / 60)
-	run(flat, {x = 0, z = 0, look_x = 1, look_z = 0}, 2, function(pl)
-		peak = math.max(peak, pl.y)
+	-- [SKELDAT_BOARD_PUSH] The jump: 1.2 times the walk's height, added
+	-- to vy; one more in the air on a new press, none after it until the
+	-- ground; a strafe jump with a turn key; a landing on a climb keeping
+	-- the horizontal speed; the push to twice the walk on the flat
+	local J = M.BOARD_JUMP * M.DEFAULT_MOVEMENT.speed_jump
+	local H = J * J / (2 * g)
+	local idle, hop = {x = 0, z = 0}, {x = 0, z = 0, jump = true}
+	local function peak_of(pl)
+		local top = pl.y
+		while pl.vy > 0 or not pl.on_ground do
+			run(pl, idle, 1 / 60)
+			top = math.max(top, pl.y)
+			if pl.on_ground then break end
+		end
+		return top
+	end
+	for _, s0 in ipairs({0.6, 4, 16}) do
+		board(flat, 0, -0.5, s0)
+		run(flat, hop, 1 / 60)
+		local h = peak_of(flat) + 0.5
+		assert(math.abs(h - H) < 0.05, "board: the jump at " .. s0 .. " is "
+				.. h .. " high, not " .. H)
+		assert(flat.board and flat.on_ground, "board: it does not land")
+	end
+	-- The air jump at the top, then no third
+	board(flat, 0, -0.5, 8)
+	run(flat, hop, 1 / 60)
+	run(flat, idle, 1 / 60)
+	while flat.vy > 0 do run(flat, idle, 1 / 60) end
+	local apex = flat.y
+	run(flat, hop, 1 / 60)
+	local vy2 = flat.vy
+	run(flat, idle, 1 / 60)
+	run(flat, hop, 1 / 60)
+	assert(flat.vy < vy2, "board: a third jump in the air")
+	board(flat, 0, -0.5, 8)
+	run(flat, hop, 1 / 60)
+	run(flat, idle, 1 / 60)
+	while flat.vy > 0 do run(flat, idle, 1 / 60) end
+	apex = flat.y
+	run(flat, hop, 1 / 60)
+	local h2 = peak_of(flat) - apex
+	assert(math.abs(h2 - H) < 0.05, "board: the air jump rose " .. h2)
+	assert(flat.on_ground and flat.board, "board: no landing after two")
+	-- Landed: the ground jump and the air jump again
+	run(flat, hop, 1 / 60)
+	run(flat, idle, 1 / 60)
+	local before = flat.vy
+	run(flat, hop, 1 / 60)
+	assert(not flat.on_ground and flat.vy > before + J * 0.9,
+			"board: no air jump after the landing")
+	-- Off a crest rising at 5, and falling at 12: J added, once
+	local step_g = g / 60
+	for _, v in ipairs({5, -12}) do
+		board(flat, 0, 20, 8)
+		flat.on_ground, flat.vx, flat.vz, flat.vy = false, 8, 0, v
+		run(flat, hop, 1 / 60)
+		assert(math.abs(flat.vy - (v + J - step_g)) < 1e-6, "board: a press "
+				.. "at vy " .. v .. " gives " .. flat.vy)
+		run(flat, idle, 1 / 60)
+		local w = flat.vy
+		run(flat, hop, 1 / 60)
+		assert(math.abs(flat.vy - (w - step_g)) < 1e-6,
+				"board: a second press in the air off a crest")
+	end
+	-- The strafe jump: D held at the press from 8, 90% of the height and
+	-- 3 to the right; the heading kept in the air, along the flight after
+	board(flat, 0, -0.5, 8)
+	run(flat, {x = 0, z = 0, jump = true, turn = 1}, 1 / 60)
+	local hx, hz = flat.board.hx, flat.board.hz
+	local fwd = flat.vx * hx + flat.vz * hz
+	local side = flat.vx * hz - flat.vz * hx
+	assert(math.abs(fwd - 8) < 1e-6 and math.abs(side - 3) < 1e-6,
+			"board: the strafe jump's velocity " .. fwd .. " on, " .. side ..
+			" aside")
+	local hs = peak_of(flat)
+	assert(math.abs(hs + 0.5 - 0.9 * H) < 0.05,
+			"board: the strafe jump is " .. (hs + 0.5) .. " high")
+	local hl = math.sqrt(flat.vx ^ 2 + flat.vz ^ 2)
+	assert(flat.board and math.abs(flat.board.hx - flat.vx / hl) < 1e-6,
+			"board: the heading not along the flight after the landing")
+	-- Down onto a climb of 1 in 2 at 10: on at about 10
+	local climb = M.new(columns(function(x)
+		return x < 4 and -10 or math.floor((x - 4) / 2)
+	end))
+	board(climb, 0, 3, 10)
+	climb.on_ground, climb.vx, climb.vz, climb.vy = false, 10, 0, 0
+	local landed_s
+	run(climb, idle, 1, function(pl)
+		if not landed_s and pl.on_ground and pl.board then
+			landed_s = pl.board.s
+		end
 	end)
-	assert(peak + 0.5 > 3.5, "board: the jump is " .. (peak + 0.5) .. " high")
-	assert(flat.board and flat.on_ground, "board: it does not land")
+	assert(landed_s and landed_s > 9.5, "board: the climb's landing kept "
+			.. tostring(landed_s))
+	-- The push: from 0.6 to 8 in about 3 s, held there; S stops it; a
+	-- climb of 1 in 5 slows it
+	board(flat, 0, -0.5, 0.6)
+	local at8
+	local tt = 0
+	run(flat, idle, 4, function(pl)
+		tt = tt + 1 / 60
+		if not at8 and pl.board.s >= 8 - 1e-6 then at8 = tt end
+	end)
+	assert(at8 and at8 > 2.7 and at8 < 2.9 and math.abs(flat.board.s - 8) < 1e-6,
+			"board: the push reached 8 at " .. tostring(at8))
+	run(flat, {x = 0, z = 0, brake = true}, 2)
+	assert(not flat.board, "board: the brake does not stop a pushed board")
+	local five = M.new(columns(function(x) return math.floor(x / 5) end))
+	board(five, 0, 0.5, 8)
+	run(five, idle, 2)
+	assert(five.board and five.board.s < 7, "board: a 1 in 5 climb did not slow it")
 	-- A ramp up 4 and off its crest: flying, then on the board again
 	local ramp = M.new(columns(function(x)
 		return (x >= 10 and x <= 13) and x - 10 or -1
@@ -1324,8 +1477,10 @@ do
 	run(stuck, {x = 1, z = 0}, 3)
 	assert(stuck.x > 12 and not stuck.prone,
 			"prone: no crawl out of the hole, x " .. stuck.x)
+	-- (the climb's loss, and the push since, under 8)
 	assert(step2.board and math.abs(step2.y - 1.5) < 1e-6 and
-			math.abs(step2.board.s - math.sqrt(100 - 2 * g * 2)) < 0.05,
+			step2.board.s > math.sqrt(100 - 2 * g * 2) - 0.05 and
+			step2.board.s < 8,
 			"board: a step of 2 not ridden, y " .. step2.y)
 end
 

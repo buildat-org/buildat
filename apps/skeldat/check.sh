@@ -1021,7 +1021,7 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 # through a wall's hole one high, and a wall of 3 stops it; walked off the side down
 # 8 onto a flat, S stops it within the brake's reach. The camera looks
 # back over the first ride, which goes on straight ([SKELDAT_BOARD_KEYS]). The server pulls
-# back none of it, and pulls back a board the drive forces to 25 on the
+# back none of it, and pulls back a board the drive forces to 35 on the
 # flat. client2 sees client1 on a board and lying flat.
 log27="$t/srv27.log"
 cat > "$t/board1.cmds" <<EOF
@@ -1048,7 +1048,7 @@ keydown S
 wait_log 10000 skeldat: walking
 keyup S
 delay 1500
-event skeldat_board 25
+event skeldat_board 35
 delay 3000
 quit
 EOF
