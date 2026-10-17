@@ -290,8 +290,9 @@ return function(game, sounds)
 
 	-- A sound by name at a place, heard from up to 24 voxels, or far
 	local playing = {}
-	-- [SKELDAT_BOW_SOUNDS] An arrow lands mostly 20 to 40 off
-	local FAR = {arrow_land = 48}
+	-- [SKELDAT_BOW_SOUNDS] An arrow lands mostly 20 to 40 off; a shot
+	-- heard to 32 ([SKELDAT_BOW_SOUND_TUNE])
+	local FAR = {arrow_land = 48, bow = 32}
 	function M.play_at(moment, x, y, z, gain, far)
 		local sound = sounds.pick(moment)
 		if not sound then

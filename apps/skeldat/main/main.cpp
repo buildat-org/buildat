@@ -3200,7 +3200,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			a.node_id = n->GetID();
 		});
 		m_arrows.push_back(a);
-		sound("bow", a.x, a.y, a.z);
+		// [SKELDAT_BOW_SOUND_TUNE] The shooter plays its own at the release
+		sound("bow", a.x, a.y, a.z, peer);
 		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f)",
 				cs(pl.name), speed, draw);
 	}

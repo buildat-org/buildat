@@ -374,7 +374,7 @@ voxel_shading.set_camera(camera_node)
 -- server times the shot itself
 local hand = load("main/hand.lua").new(camera_node, load("main/wield.lua"),
 		game)
-local BOW_DRAW = 1 -- main.cpp's
+local BOW_DRAW, BOW_MIN = 1, 0.1 -- main.cpp's
 local bow = {t = nil, light = nil, light_t = 0}
 
 -- A placing (the join, a respawn) until the chunks within 2 of the camera
@@ -793,9 +793,16 @@ end
 local sounds = load("main/sounds.lua")
 do
 	local t0 = buildat.get_time_us()
-	local made = sounds.make(require("buildat/extension/blip"))
+	local blip = require("buildat/extension/blip")
+	local made = sounds.make(blip, magic, buildat.synth)
 	log:info(string.format("skeldat: %d sounds made in %.0f ms", made,
 			(buildat.get_time_us() - t0) / 1000))
+	local ok, line = pcall(sounds.self_check, blip, buildat.synth)
+	if ok then
+		log:info("skeldat: " .. line)
+	else
+		log:error("skeldat: " .. tostring(line))
+	end
 end
 local mobs = load("main/mobs.lua")(game, sounds)
 -- **Beyond the edge** ([SKELDAT_EDGE_RIDGE]): bone hills from the world's
@@ -1368,9 +1375,12 @@ end)
 -- [SKELDAT_BOW_SOUNDS] The draw's squeak, the drawer's own at once (the
 -- others' from the server); a draw ended any way fades it out in 30 ms
 -- (the frame's update)
-local draw_sound = {src = scene:CreateChild("bow_draw"):CreateComponent(
-		"SoundSource"), fade = nil}
+local draw_sound = {node = scene:CreateChild("bow_draw"), fade = nil}
+draw_sound.src = draw_sound.node:CreateComponent("SoundSource")
 draw_sound.src.soundType = magic.SOUND_EFFECT
+-- [SKELDAT_BOW_SOUND_TUNE] The release's, the shooter's own at once too
+draw_sound.release = draw_sound.node:CreateComponent("SoundSource")
+draw_sound.release.soundType = magic.SOUND_EFFECT
 function bow.sound_step(dt)
 	if bow.t or not draw_sound.src.playing then
 		return
@@ -1412,6 +1422,11 @@ local function left_up()
 			dir.z))
 	log:info(string.format("skeldat: the bow released at %.2f",
 			math.min(1, bow.t / BOW_DRAW)))
+	local s = bow.t / BOW_DRAW >= BOW_MIN and sounds.pick("bow")
+	if s then
+		draw_sound.release:Play(s)
+		log:info("skeldat: sound bow (own)")
+	end
 	bow.t = nil
 end
 

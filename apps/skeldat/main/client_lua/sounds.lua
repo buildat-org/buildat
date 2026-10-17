@@ -159,26 +159,34 @@ M.TAKES = {
 	-- [SKELDAT_BOW_SOUNDS] (simplified: first guesses, tuned by ear)
 	-- The draw's squeak: stick-slip pulses, a saw rising 60 to 110 Hz
 	-- (the ramp is per sample: 0.111^3 / 100 is 1.83x a second) through a
-	-- 900..1300 Hz band, a slow wobble, louder as it bends, BOW_DRAW long
+	-- 1500..3000 Hz band, louder as it bends, BOW_DRAW long.
+	-- [SKELDAT_BOW_SOUND_TUNE] The mids cut: no resonant peak near 1 kHz
+	-- and little wobble, which made it a voice
 	bow_draw = {a = v{wave = "saw", base_freq = hz(60), freq_ramp = 0.111,
-		hpf_freq = hp(900), lpf_freq = lp(1300), lpf_resonance = 0.7,
-		vib_strength = 0.1, vib_speed = 0.24, env_attack = secs(0.9),
+		hpf_freq = hp(1500), lpf_freq = lp(3000), lpf_resonance = 0.2,
+		vib_strength = 0.03, vib_speed = 0.24, env_attack = secs(0.9),
 		env_sustain = secs(0.1), env_decay = secs(0.05), volume = 0.5}},
-	-- The release's chop: a 500..2000 Hz noise burst, 3 ms in and 50 ms
-	-- out, over a sine thump falling 150 to 90 Hz in 40 ms
-	bow = {a = layers(burst(500, 2000, 0.017, 0.7,
-			{env_attack = secs(0.003)}),
+	-- The release: a string slap (800..6000 Hz noise, 2 ms in, 120 ms
+	-- out), the arrow's whoosh (noise over 2 kHz, 80 ms) and a sine thump
+	-- falling 150 to 90 Hz in 40 ms ([SKELDAT_BOW_SOUND_TUNE]).
+	-- simplified: the whoosh's low-pass is held at 4 kHz; blip's ramp
+	-- falls at most a sixth in 80 ms, not 8 to 2 kHz
+	bow = {a = layers(burst(800, 6000, 0.033, 1, {env_attack = secs(0.002),
+			env_sustain = secs(0.03)}),
+		burst(2000, 4000, 0.02, 0.8, {env_sustain = secs(0.04)}),
 		tone("sine", 150, 0.013, 0.4, -0.31))},
-	-- An arrow sticking: a wooden thock, a tick and a short quiver
-	arrow_land = {a = layers(tone("triangle", 900, 0.005, 0.6, 0),
-		tone("triangle", 3000, 0.0017, 0.3, 0),
-		v{wave = "sine", base_freq = hz(180), trem_depth = 1,
-			trem_speed = sqrt(30 / 50), env_decay = secs(0.2),
-			volume = 0.35})},
+	-- An arrow sticking: a thock with a body (400..2500 Hz noise, 60 ms;
+	-- a 700 Hz triangle, 40 ms) and the shaft's quiver (300..600 Hz
+	-- noise under a 30 Hz tremolo, 0.25 s)
+	arrow_land = {a = layers(burst(400, 2500, 0.02, 0.8,
+			{env_sustain = secs(0.03)}),
+		tone("triangle", 700, 0.013, 0.6, 0),
+		burst(300, 600, 0.083, 0.8, {trem_depth = 1,
+			trem_speed = sqrt(30 / 50)}))},
 	-- An arrow striking a mob or a player
 	arrow_hit = {
-		a = layers(tone("sine", 220, 0.1, 0.6, -0.3),
-			burst(nil, 2000, 0.01, 0.4)),
+		a = layers(tone("sine", 400, 0.1, 0.6, -0.3),
+			burst(600, 4000, 0.02, 0.8, {env_sustain = secs(0.06)})),
 		b = layers(tone("sine", 200, 0.07, 0.5, -0.3),
 			at(0.02, v{wave = "sine", base_freq = hz(240),
 				trem_depth = 1, trem_speed = sqrt(18 / 50),
@@ -198,23 +206,128 @@ end
 -- mutate step)
 M.VARY = 0.15
 
+-- [SKELDAT_BOW_SOUND_TUNE] These rendered and scaled to this peak (as
+-- the board's grains are): the bow's and the arrow's, too faint as made.
+-- Before that, driven to DRIVE times their peak through a soft clip
+-- (tanh's): a noise burst's peak is one sample, and scaled by it alone
+-- the rest stayed quiet
+M.PEAK = {bow = 0.9, arrow_land = 0.9, arrow_hit = 0.9}
+M.DRIVE = 4
+M.RATE = 44100
+
 -- name -> its Sounds, once make() has run
 M.made = {}
 
+local function peak_of(b)
+	local m = 0
+	for i = 0, b:len() - 1 do
+		m = math.max(m, math.abs(b:get(i)))
+	end
+	return m
+end
+-- A take's samples, scaled to M.PEAK if it has one
+function M.render(blip, synth, name, p)
+	local b = blip.gen.render(p, M.RATE, synth)
+	local peak = M.PEAK[name] and peak_of(b) or 0
+	if peak > 0 then
+		local k = M.DRIVE / peak
+		for i = 0, b:len() - 1 do
+			-- tanh's Pade form, 1 at 3, where it is held
+			local x = math.max(-3, math.min(3, b:get(i) * k))
+			b:set(i, x * (27 + x * x) / (27 + 9 * x * x))
+		end
+		b:gain(M.PEAK[name] / peak_of(b))
+	end
+	return b
+end
+
 -- Renders each picked take's variants. -> how many Sounds were made
-function M.make(blip)
+-- magic and synth: for the takes scaled to a peak (blip.sound otherwise)
+function M.make(blip, magic, synth)
 	local gen, n = blip.gen, 0
 	for name, takes in pairs(M.TAKES) do
 		local p = gen.params(takes[M.PICK[name]])
 		local list = {}
 		for i = 1, M.VARIANTS do
 			-- Variant 1 is the take as designed
-			list[i] = blip.sound(i == 1 and p or gen.vary(p, i, M.VARY))
+			local pv = i == 1 and p or gen.vary(p, i, M.VARY)
+			if M.PEAK[name] then
+				local vb = magic.VectorBuffer:new()
+				M.render(blip, synth, name, pv):to_shorts(vb)
+				list[i] = magic.Sound:new()
+				list[i]:SetFormat(M.RATE, true, false)
+				list[i]:SetData(vb)
+			else
+				list[i] = blip.sound(pv)
+			end
 			n = n + 1
 		end
 		M.made[name] = list
 	end
 	return n
+end
+
+-- [SKELDAT_BOW_SOUND_TUNE] The self-check against the takes as they were
+-- (6e73cfc08): bow, arrow_land and arrow_hit at their peak and with 4
+-- times the RMS over the first 100 ms (arrow_hit 2: its old sine filled
+-- them already, and 4 would be a square wave); bow_draw's share between
+-- 700 and 1500 Hz at most half. -> a line for the log; raises on a
+-- failure
+local LOUDER = {bow = 4, arrow_land = 4, arrow_hit = 2}
+local WAS = {
+	bow_draw = v{wave = "saw", base_freq = hz(60), freq_ramp = 0.111,
+		hpf_freq = hp(900), lpf_freq = lp(1300), lpf_resonance = 0.7,
+		vib_strength = 0.1, vib_speed = 0.24, env_attack = secs(0.9),
+		env_sustain = secs(0.1), env_decay = secs(0.05), volume = 0.5},
+	bow = layers(burst(500, 2000, 0.017, 0.7, {env_attack = secs(0.003)}),
+		tone("sine", 150, 0.013, 0.4, -0.31)),
+	arrow_land = layers(tone("triangle", 900, 0.005, 0.6, 0),
+		tone("triangle", 3000, 0.0017, 0.3, 0),
+		v{wave = "sine", base_freq = hz(180), trem_depth = 1,
+			trem_speed = sqrt(30 / 50), env_decay = secs(0.2), volume = 0.35}),
+	arrow_hit = layers(tone("sine", 220, 0.1, 0.6, -0.3),
+		burst(nil, 2000, 0.01, 0.4)),
+}
+function M.self_check(blip, synth)
+	local gen, out, bad = blip.gen, {}, {}
+	local function rms100(b)
+		local n, e = math.min(b:len(), M.RATE / 10), 0
+		for i = 0, n - 1 do
+			e = e + b:get(i) ^ 2
+		end
+		return math.sqrt(e / n)
+	end
+	for _, name in ipairs({"bow", "arrow_land", "arrow_hit"}) do
+		local now = M.render(blip, synth, name,
+				gen.params(M.TAKES[name][M.PICK[name]]))
+		local was = gen.render(gen.params(WAS[name]), M.RATE, synth)
+		local k, peak = rms100(now) / rms100(was), peak_of(now)
+		out[#out + 1] = string.format("%s %.2fx", name, k)
+		if k < LOUDER[name] or math.abs(peak - 0.9) > 0.01 then
+			bad[#bad + 1] = string.format("%s %.2fx, peak %.2f", name, k, peak)
+		end
+	end
+	local function mids(b)
+		local band, e, eb = synth.buffer(b:len()), 0, 0
+		band:mix(b, 0, 0, b:len(), 1)
+		for _ = 1, 2 do
+			band:filter{type = "high", cutoff = 700, resonance = 0, rate = M.RATE}
+			band:filter{type = "low", cutoff = 1500, resonance = 0, rate = M.RATE}
+		end
+		for i = 0, b:len() - 1 do
+			e, eb = e + b:get(i) ^ 2, eb + band:get(i) ^ 2
+		end
+		return eb / e
+	end
+	local now = mids(gen.render(gen.params(M.TAKES.bow_draw[M.PICK.bow_draw]),
+			M.RATE, synth))
+	local was = mids(gen.render(gen.params(WAS.bow_draw), M.RATE, synth))
+	out[#out + 1] = string.format("the draw's mids %.2f, were %.2f", now, was)
+	if now > was / 2 then
+		bad[#bad + 1] = out[#out]
+	end
+	assert(#bad == 0, "sounds: " .. table.concat(bad, "; "))
+	return "sounds: self-check passed, " .. table.concat(out, ", ")
 end
 
 -- One of name's variants, or nil before make() or for a name it lacks
