@@ -67,8 +67,10 @@ $cc -DSKELDAT_GAME_TEST -x c++ "$m/game.h" -o "$t/game" && "$t/game" ||
 # [SKELDAT_SKULL_ICON] Every item's picture a PNG in client_data with a
 # pixel not fully transparent (8-bit, not interlaced, as client_data's are)
 # (filtered rows: the first alpha not 0 is predicted from zeros, so its
-# byte is not 0 either)
-"$t/game" images | python3 -I -c '
+# byte is not 0 either); and [SKELDAT_BOARD_TOGGLE]'s two HUD pictures,
+# 16x16
+{ "$t/game" images; echo "board_icon main/board_icon.png"
+	echo "board_cross main/board_cross.png"; } | python3 -I -c '
 import struct, sys, zlib
 bad = []
 for line in sys.stdin:
@@ -78,6 +80,8 @@ for line in sys.stdin:
     except OSError:
         bad.append(name + ": no " + image); continue
     w, h, depth, ctype = struct.unpack(">IIBB", d[16:26])
+    if name.startswith("board_") and (w, h) != (16, 16):
+        bad.append(name + ": " + image + " is %dx%d" % (w, h))
     idat, i = b"", 8
     while i < len(d):
         n, kind = struct.unpack(">I4s", d[i:i + 8])
@@ -1891,6 +1895,30 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "client1's eye at the release refused (5\.0[0-9] off" "$t/srv39b.log" &&
 	grep -aq "client1 shoots an arrow at .* (the copy's 0.00 off" "$t/srv39b.log" ||
 	fail "an eye 5 off was not refused ($t/srv39b.log)"
+# 36. The skateboard turned off ([SKELDAT_BOARD_TOGGLE]): F logs it off,
+# the game's storage keeps "1", and the client started again reads it
+log40="$t/srv40.log"
+BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	start_server "$log40" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv40" -C "$t/srv.cache" -l 3 || fail "the server ($log40)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1000" "keypress F" \
+	"wait_log 5000 skeldat: the skateboard off" "delay 500" \
+	"screenshot $t/board_off.png" quit > "$t/toggle1.cmds"
+client toggle "$t/toggle1.cmds"
+wait $CLIENT || fail "the toggle's drive ($t/toggle.log)"
+cp "$t/toggle.log" "$t/toggle1.log"
+kept_file=$(find "$t/u_toggle" -name board_off | head -1)
+[ -n "$kept_file" ] && [ "$(cat "$kept_file")" = 1 ] ||
+	fail "the board's off not kept in the game's storage ($t/u_toggle)"
+printf '%s\n' "$placed" "delay 500" quit > "$t/toggle2.cmds"
+client toggle "$t/toggle2.cmds"
+wait $CLIENT || fail "the toggle's second drive ($t/toggle.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: the skateboard off (kept)" "$t/toggle.log" ||
+	fail "the client started again did not read the board's off ($t/toggle.log)"
+echo "the skateboard: off by F, kept in $(basename "$(dirname "$kept_file")")/board_off"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"

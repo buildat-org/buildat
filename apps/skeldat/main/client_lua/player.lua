@@ -1062,7 +1062,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	-- ground a voxel or more lower two ahead. Not sneaking, which is how a
 	-- hill is walked down, nor crawling.
 	local function try_board(wish)
-		if not self.on_ground or self.in_liquid or self.in_liquid_stable or
+		-- [SKELDAT_BOARD_TOGGLE] Turned off: walking downhill stays walking
+		if self.board_off or not self.on_ground or self.in_liquid or
+				self.in_liquid_stable or
 				self.climbing or flying() or wish.sneak or self.prone then
 			return
 		end
@@ -1375,6 +1377,19 @@ do
 	run(backer, {x = 0, z = 0, look_x = -1, look_z = 0}, 0.2)
 	run(backer, {x = 0, z = 0, look_x = -1, look_z = 0, brake = true}, 2)
 	assert(not backer.board, "board: the back key pressed again did not stop it")
+	-- [SKELDAT_BOARD_TOGGLE] Turned off, a walk off the edge stays a
+	-- walk; turned on again, the same walk mounts
+	local walker = M.new(edge)
+	walker.board_off = true
+	walker:set_position(-2, 0.5, 0)
+	local walk = {x = 1, z = 0, look_x = 1, look_z = 0}
+	local rode = false
+	run(walker, walk, 2, function(pl) rode = rode or pl.board ~= nil end)
+	assert(not rode, "board: off, the walk off the edge took it")
+	walker = M.new(edge)
+	walker:set_position(-2, 0.5, 0)
+	run(walker, walk, 1)
+	assert(walker.board, "board: on again, the walk off the edge did not take it")
 	-- The brake: from 10, a stop within 10^2 / (2 * brake) and a bit
 	local flat = M.new(columns(function() return -1 end))
 	board(flat, 0, -0.5, 10)

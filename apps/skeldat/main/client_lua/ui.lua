@@ -95,6 +95,22 @@ local hud = magic.ui.root:CreateChild("UIElement")
 hud:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
 local hud_drawn = nil
 
+-- Where the HUD's skateboard icon is: its top left, in UI pixels, and
+-- its size; and whether a point is on it (a tap, [SKELDAT_TOUCH])
+function M.board_icon_rect()
+	local r, s = magic.ui.root, scale()
+	local x0 = math.floor((r.width - 182 * s) / 2)
+	local y0 = r.height - 23 * s
+	return x0 + 83 * s, y0 - 2 * s - 16 * s, 16 * s
+end
+function M.board_icon_hit(x, y)
+	if not (game.hud_visible() and game.stats.hp > 0) then
+		return false
+	end
+	local bx, by, n = M.board_icon_rect()
+	return x >= bx and y >= by and x < bx + n and y < by + n
+end
+
 function M.draw_hud()
 	local stats = game.stats
 	local main = game.inv.main
@@ -103,7 +119,8 @@ function M.draw_hud()
 	local sig = table.concat({tostring(shown), stats.hp, stats.breath,
 		game.wield, r.width, r.height, table.concat(main, "|", 1,
 		math.min(9, #main)), game.item_texture("skeldat:stick") or "",
-		tostring(game.held()), game.ended or ""}, ";")
+		tostring(game.held()), game.ended or "",
+		tostring(game.board_off())}, ";")
 	if sig == hud_drawn then
 		return
 	end
@@ -145,6 +162,14 @@ function M.draw_hud()
 			image(hud, bubble, x0 + 182 * s - 9 * s - 8 * s * (j - 1), y,
 					9 * s, 9 * s)
 		end
+	end
+	-- [SKELDAT_BOARD_TOGGLE] The skateboard between the hearts and the
+	-- bubbles, crossed while off. simplified: 16 high where the hearts
+	-- are 9, so it reaches 7 up past them
+	local bx, by = M.board_icon_rect()
+	image(hud, tex("board_icon.png"), bx, by, 16 * s, 16 * s)
+	if game.board_off() then
+		image(hud, tex("board_cross.png"), bx, by, 16 * s, 16 * s)
 	end
 	if not game.held() then
 		local c = 15 * s

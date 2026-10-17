@@ -36,8 +36,9 @@
 --    (optional: the chat's Declutter toggled, -> whether it is on; a
 --    "Clutter" button in More, and T.show_clutter(on) for its look),
 --    more (optional: {{label, fn}, ...}, buttons of the client's own at
---    the end of More's column). An action of More's that BIND lacks has
---    no button.
+--    the end of More's column), tap(x, y) (optional: a finger down on a
+--    target of the client's own, in UI pixels -> true when it took it).
+--    An action of More's that BIND lacks has no button.
 local magic = require("buildat/core/urho3d")
 local log = buildat.Logger("luanti/touch")
 
@@ -277,6 +278,10 @@ return function(o)
 		end
 		fingers[id] = f
 		if over_buttons(ux, uy) then
+			f.ui = true
+			return
+		end
+		if o.tap and o.tap(ux, uy) then
 			f.ui = true
 			return
 		end

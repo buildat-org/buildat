@@ -258,6 +258,7 @@ local KEYS = {
 	{id = "fast", label = "Fast on and off (admins)", default = "J"},
 	{id = "noclip", label = "Noclip on and off, while flying (admins)",
 		default = "H", shared = "noclip"},
+	{id = "board", label = "The skateboard on and off", default = "F"},
 }
 local key = {}
 game.key = key
@@ -1324,6 +1325,21 @@ function game.hud_visible()
 	return hud_on
 end
 
+-- [SKELDAT_BOARD_TOGGLE] Whether the board comes up by itself, the
+-- player's choice on this server (the game's storage); the HUD shows it
+player.board_off = buildat.storage_read("board_off") == "1"
+if player.board_off then
+	log:info("skeldat: the skateboard off (kept)")
+end
+function game.board_off()
+	return player.board_off
+end
+function game.toggle_board()
+	player.board_off = not player.board_off
+	buildat.storage_write("board_off", player.board_off and "1" or "0")
+	log:info("skeldat: the skateboard " .. (player.board_off and "off" or "on"))
+end
+
 -- A key's action, which the touch controls' buttons press as well
 local function on_key(k)
 	if k == magic.KEY_ESCAPE then
@@ -1343,6 +1359,8 @@ local function on_key(k)
 		toggle("fast", "Move fast", "Move at walking speed")
 	elseif k == key.noclip then
 		toggle("noclip", "Noclip (while flying)", "Noclip off")
+	elseif k == key.board then
+		game.toggle_board()
 	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
 		bow.t = nil
 		game.wield = k - magic.KEY_1 + 1
@@ -1522,6 +1540,14 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		hotbar = function()
 			local sc = game.ui_scale()
 			return 9, 20 * sc, sc
+		end,
+		-- The HUD's skateboard icon, a tap target too
+		tap = function(x, y)
+			if not ui.board_icon_hit(x, y) then
+				return false
+			end
+			game.toggle_board()
+			return true
 		end,
 		form_open = game.held,
 		form_press = click("left"),
