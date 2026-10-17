@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~5 min (2026-10-17)
+# cost: ~6 min (2026-10-17)
 # covers: builtin/world_menu/** builtin/storage/storage.cpp apps/vanilla/main/client_lua/menu.lua apps/skeldat/main/client_lua/join.lua
 # [WORLD_MENU]: the shared world menu in skeldat, skelenti and vanilla,
 # driven by the launcher's own client (-u launcher=1). In each, on a fresh
@@ -8,8 +8,11 @@
 # typed and the size picked from its choices; vanilla's New save..., the
 # minimal game) and played; on
 # the server started again, the world listed, renamed and deleted (to
-# vanilla's trash), the list empty after. skeldat on a public server:
-# the admin made by the setup code picks ([WORLD_MENU_ADMIN]).
+# vanilla's trash), the list empty after. skeldat started with the
+# launcher's save= ([SKELDAT_LAUNCH_WORLD]): a missing one is the menu,
+# an existing one played says Loading, "world" starts with no list.
+# skeldat on a public server: the admin made by the setup code picks
+# ([WORLD_MENU_ADMIN]).
 #   builtin/world_menu/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -18,15 +21,15 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp world_menu; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 
-# <app> <run> <cmds file>: a server on the app's tree under $t/<app>, one
-# client through the commands
+# <app> <run> <cmds file> [-u lines]: a server on the app's tree under
+# $t/<app>, one client through the commands
 run()
 {
-	local app=$1 n=$2 cmds=$3
+	local app=$1 n=$2 cmds=$3 launch=${4:-launcher=1}
 	BUILDAT_SKELDAT_WORLD= BUILDAT_SKELENTI_WORLD= BUILDAT_LUANTI_SAVE= \
 		BUILDAT_LUANTI_GAME= start_server \
 		"$t/$app.srv$n.log" "STATUS Listening" 300 auto \
-		"$here/Build/bin/buildat_server" -u launcher=1 -m "$here/apps/$app" \
+		"$here/Build/bin/buildat_server" -u "$launch" -m "$here/apps/$app" \
 		-D "$t/$app/srv" -C "$t/$app/srv.cache" -l 3 ||
 		fail "the server ($t/$app.srv$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
@@ -64,6 +67,25 @@ for app in skeldat demo_skelenti; do
 		grep -aq "world_menu: the wait shown: Making the world: 1 of 4" \
 			"$t/$app.cli1.log" ||
 			fail "skeldat: no progress while the world was made ($t/$app.cli1.log)"
+		# [SKELDAT_LAUNCH_WORLD] The launcher's save=: one that is no world
+		# is the menu, where "world" played says Loading; "world" itself
+		# starts with no list
+		printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
+			'click Button "world"' "wait_log 5000 world_menu: the list shown" \
+			"delay 300" 'click Button "Play"' \
+			"wait_log 180000 skeldat: placed at" "quit" > "$t/skeldat.cmds_l1"
+		run $app l1 "$t/skeldat.cmds_l1" "$(printf 'launcher=1\nsave=nosuch')"
+		grep -aq 'the launch.s save "nosuch" is no world' "$t/$app.srvl1.log" ||
+			fail "skeldat: save=nosuch not said ($t/$app.srvl1.log)"
+		grep -aq "world_menu: the wait shown: Loading the world" "$t/$app.clil1.log" &&
+			! grep -aq "the wait shown: Making" "$t/$app.clil1.log" ||
+			fail "skeldat: an existing world not Loading ($t/$app.clil1.log)"
+		printf '%s\n' "wait_log 120000 skeldat: placed at" "quit" > "$t/skeldat.cmds_l2"
+		run $app l2 "$t/skeldat.cmds_l2" "$(printf 'launcher=1\nsave=world')"
+		grep -aq 'the world "world" starts' "$t/$app.srvl2.log" &&
+			! grep -aq "world_menu: the list shown" "$t/$app.clil2.log" ||
+			fail "skeldat: save=world not started without the menu ($t/$app.srvl2.log)"
+		echo "  skeldat: the launch's save= started, a missing one the menu, Loading said"
 	fi
 	printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
 		'click Button "world"' "wait_log 5000 world_menu: the list shown" \

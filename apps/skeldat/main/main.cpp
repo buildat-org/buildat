@@ -31,6 +31,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/os.h"
+#include "interface/server_config.h"
 #include "luanti/node_registry.h"
 #include "luanti/media.h"
 #include "luanti/session.h"
@@ -545,6 +546,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	sv_<uint8_t> m_cell_of;
 	storage::Store *m_store = nullptr;
 	bool m_starting = false;
+	// The world started was new: "Making", else "Loading"
+	bool m_making = false;
 	int64_t m_start_us = interface::os::time_us();
 	// worldgen's; read for its highest voxel only
 	BonesGenerator *m_generator = nullptr;
@@ -750,9 +753,21 @@ struct Module: public interface::Module, public luanti_session::Game
 					// The high score, written at the end (step_end())
 					{"ended", "The surface all bones after", "", "", true}}});
 		});
+		// The launcher's picked world ([SKELDAT_LAUNCH_WORLD]), the launch's
+		// save=; BUILDAT_SKELDAT_WORLD, a check's, made if it is not there
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
-		if(name && name[0])
+		if(name && name[0]){
 			start_world(name, true);
+		} else {
+			bool refused = false;
+			const ss_ save = interface::launch_param(m_server->get_config().
+					get<ss_>("untrusted_launch"), "save", &refused);
+			if(refused)
+				log_w(MODULE, "skeldat: the launch's save refused");
+			if(!save.empty() && !start_world(save, false))
+				log_w(MODULE, "skeldat: the launch's save \"%s\" is no world: "
+						"the menu", cs(save));
+		}
 	}
 
 	// The textures the way a Luanti game's are found ([SKELDAT_LUANTI_PARTS]
@@ -886,12 +901,15 @@ struct Module: public interface::Module, public luanti_session::Game
 			return false;
 		}
 		m_starting = true;
-		// The players wait for the whole world (world_in())
-		world_menu::access(m_server, [&](world_menu::Interface *i){
-			i->progress("Making the world...");
-		});
 		m_store = m_save->store("skeldat");
 		ss_ v;
+		// A world with no seed yet is new, the world menu's made one too
+		m_making = !m_store->get("seed", v);
+		// The players wait for the whole world (world_in())
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->progress(m_making ? "Making the world..." :
+					"Loading the world...");
+		});
 		uint32_t seed = m_rand();
 		const char *env_seed = getenv("BUILDAT_SKELDAT_SEED");
 		if(m_store->get("seed", v))
@@ -1438,7 +1456,8 @@ struct Module: public interface::Module, public luanti_session::Game
 					(interface::os::time_us() - m_start_us) / 1e6,
 					m_generator ? (int)m_generator->m_top : 0);
 			world_menu::access(m_server, [&](world_menu::Interface *i){
-				i->progress("Making the world: "+itos(m_sections.size())+
+				i->progress(ss_(m_making ? "Making" : "Loading")+
+						" the world: "+itos(m_sections.size())+
 						" of "+itos(all)+" sections");
 			});
 		}
