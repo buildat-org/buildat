@@ -1439,6 +1439,27 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_spawn[2] = (float)z;
 				m_spawn_ready = true;
 			}
+			// [SKELDAT_STARTER_ITEMS]: a bow and 4 arrows' worth near a new
+			// world's spawn, once (a stored spawn returned above); scattered
+			// 3 to 6 voxels off, on the ground, else on the spawn's column
+			const char *starter = getenv("BUILDAT_SKELDAT_STARTER");
+			if(!m_spawn_ready || (starter && ss_(starter) == "0"))
+				return;
+			const int sx = (int)m_spawn[0], sz = (int)m_spawn[2];
+			for(int i = 0; i < 8; i++){
+				int x = sx, z = sz, feet = (int)m_spawn[1];
+				for(int k = 0; k < 8; k++){
+					const int dx = (int)(r() % 13) - 6, dz = (int)(r() % 13) - 6;
+					int f = 0;
+					if(std::max(std::abs(dx), std::abs(dz)) >= 3 &&
+							ground(sx + dx, sz + dz, f)){
+						x = sx + dx, z = sz + dz, feet = f;
+						break;
+					}
+				}
+				drop(Stack(i < 4 ? "skeldat:stick" : "skeldat:bone"),
+						(float)x, (float)feet + 0.5f, (float)z);
+			}
 		});
 		if(!m_spawn_ready){
 			m_spawn[1] = (float)((m_y1 + 1) * SECTION - 1);
