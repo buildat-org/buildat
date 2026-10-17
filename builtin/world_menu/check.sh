@@ -42,13 +42,11 @@ for app in skeldat demo_skelenti; do
 		printf '%s\n' "wait_log 120000 world_menu: the list shown, 0 worlds" \
 			'click Button "New world..."' \
 			"wait_log 5000 world_menu: the name screen shown" "delay 300"
-		# skeldat's seed, in its field (the empty one; the name's says world),
-		# and its size from the choices, the fourth: 128 x 64 x 128
+		# skeldat's seed, in its field (the empty one; the name's says world);
+		# its size and bone speed the defaults, 128 x 64 x 128 at 1x
+		# ([SKELDAT_BONE_SPEED])
 		[ $short = skeldat ] && printf '%s\n' 'click LineEdit ""' \
-			"delay 300" "text 4242" "delay 300" 'click DropDownList "▼"' \
-			"delay 500" "keypress Down" "keypress Down" "keypress Down" \
-			"keypress Return" "wait_log 5000 world_menu: size picked: 128" \
-			"delay 300"
+			"delay 300" "text 4242" "delay 300"
 		printf '%s\n' 'click Button "Create"' \
 			"wait_log 180000 $([ $short = skeldat ] && echo 'skeldat: placed at' ||
 				echo 'load: the world is in')" "quit"
@@ -59,8 +57,8 @@ for app in skeldat demo_skelenti; do
 		fail "$short: New world did not make and start \"world\" ($t/$app.srv1.log)"
 	if [ $short = skeldat ]; then
 		grep -aq 'the world "world" starts, seed 4242,.* 128 x 64 x 128' \
-			"$t/$app.srv1.log" ||
-			fail "skeldat: the seed or size option not used ($t/$app.srv1.log)"
+			"$t/$app.srv1.log" && grep -aq "the bones at 1x" "$t/$app.srv1.log" ||
+			fail "skeldat: the seed option not used, or not the default size and speed ($t/$app.srv1.log)"
 		# The whole world made before the play, its progress in the menu
 		grep -aq "world_menu: the wait shown: Making the world: 1 of 4" \
 			"$t/$app.cli1.log" ||

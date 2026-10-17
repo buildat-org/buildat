@@ -33,6 +33,13 @@ module under it.
   second a player who is not an admin is pulled back where the move could
   not have been walked at twice the walk speed, or, on the board, made at
   the speed the height lost allows.
+- The bones' speed, 1x, 2x, 5x or 10x: picked when a world is made
+  (Bone speed, beside Size; 128 wide at 1x the defaults) and switched by
+  an admin on the Admin... page. It scales the bones' growth, a
+  lantern's clearing, the skeletons' bone blocks at night, their marker
+  skulls and their skulls down deep holes, not their moving or
+  shooting. The score names the lowest speed the world was at. A server
+  that falls behind the bones says so in the chat, once a minute.
 - The skateboard: walking downhill (ground a voxel lower two ahead, not
   sneaking) puts the player on a board by itself. It rides steps of up
   to 2 as a slope, loses no speed but by climbing and by S (the brake),

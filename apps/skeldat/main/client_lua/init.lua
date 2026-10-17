@@ -178,11 +178,13 @@ end)
 
 -- [SKELDAT_BOUNDED_WORLD]: every column's top had bones
 -- ([SKELDAT_SURFACE_END]), and the world is only
--- looked at now; data: the days it lasted
+-- looked at now; data: the days it lasted and the lowest bone speed it
+-- was at ([SKELDAT_BONE_SPEED])
 buildat.sub_packet("skeldat:end", function(data)
+	local days, speed = data:match("^(%S+) ?(%S*)")
 	game.ended = "The bones cover the whole surface. The world ended after " ..
-			string.format("%.1f", tonumber(data) or 0) ..
-			" days."
+			string.format("%.1f", tonumber(days) or 0) ..
+			" days at " .. (tonumber(speed) or 1) .. "x."
 	log:info("skeldat: " .. game.ended)
 	game.changed()
 end)
@@ -1146,6 +1148,12 @@ end)
 -- A drive's own: the modes set whatever the role, as a modified client
 -- would, for the server's movement check to be seen ("event
 -- skeldat_modes fly noclip fast", any of them)
+-- "event skeldat_admin <command>": the admin packet sent as is, whatever
+-- the role, as a modified client would ([SKELDAT_BONE_SPEED]'s check)
+magic.SubscribeToEvent("command_seq:skeldat_admin", function(_, d)
+	game.send("admin", d:GetString("Param"))
+	log:info("skeldat: the drive sends admin " .. d:GetString("Param"))
+end)
 magic.SubscribeToEvent("command_seq:skeldat_modes", function(_, d)
 	local p = " " .. d:GetString("Param") .. " "
 	for _, mode in ipairs({"fly", "fast", "noclip"}) do

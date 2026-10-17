@@ -251,6 +251,7 @@ static int front(const Box &box, int cx, int cy, int cz)
 	}
 	return far;
 }
+static int front_five = 0, front_one = 0;
 int main()
 {
 	// One voxel at FLOOD in a solid section: its neighbours at once, and
@@ -357,6 +358,42 @@ int main()
 	}
 	assert(columns_low && columns_high &&
 			piles_high * columns_low > 5 * piles_low * columns_high);
+	// [SKELDAT_BONE_SPEED] The rule run `speed` times an expansion, on
+	// one read of the neighbours' shell, as main.cpp's expand() does: the
+	// front along a row of four 64-wide sections at 5x is within 5% of
+	// 1x's over five times the expansions, across the borders it waits at
+	{
+		auto run = [](int speed, int expansions, uint32_t r){
+			const int K = 4, W = 64;
+			std::vector<uint8_t> row(K * W, 0);
+			row[0] = FLOOD;
+			for(int e = 0; e < expansions; e++){
+				r = r * 1103515245 + 12345;
+				const int k = (int)((r >> 16) % K);
+				Box box(W + 2, 3, 3);
+				for(int x = 0; x < W + 2; x++){
+					const int g = k * W + x - 1;
+					box.b[box.at(x, 1, 1)] = g >= 0 && g < K * W ? row[g] : 0;
+					box.air[box.at(x, 1, 1)] = g < 0 || g >= K * W;
+				}
+				for(int i = 0; i < speed; i++)
+					expand(box);
+				for(int x = 1; x <= W; x++)
+					row[k * W + x - 1] = box.b[box.at(x, 1, 1)];
+			}
+			int far = 0;
+			for(int g = 0; g < K * W; g++)
+				if(row[g] > 0)
+					far = g;
+			return far;
+		};
+		// Eight schedules each, the sums
+		int five = 0, one = 0;
+		for(uint32_t seed = 1; seed <= 8; seed++)
+			five += run(5, 600, seed), one += run(1, 3000, seed * 7919);
+		front_five = five, front_one = one;
+		assert(one > 8 * 64 && std::abs(five - one) <= one / 20);
+	}
 	// A 1-wide shaft 6 deep is a deep hole, a dip of 3 is not, nor the
 	// shaft with bones, nor one with a neighbour as deep (a trench's end)
 	{
@@ -372,6 +409,9 @@ int main()
 			"the columns over 0.9, %.3f%% at 0.3-0.5\n", seeded / 100,
 			7 * SECTION_PERIOD, 100.0 * piles_high / columns_high,
 			100.0 * piles_low / columns_low);
+	printf("bones: the front at 5x %.1f voxels, at 1x over five times the "
+			"expansions %.1f (eight schedules)\n", front_five / 8.0,
+			front_one / 8.0);
 	return 0;
 }
 #endif

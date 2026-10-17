@@ -362,12 +362,15 @@ grep -aq "client1 digs .*, dropping nothing" "$s" ||
 # started again, it is still ended, and its player told
 log3="$t/srv3.log"
 BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=surface \
+	BUILDAT_SKELDAT_SPEED=2 \
 	start_server "$log3" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
 CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$log3" "every column's top has bones: the world ends after" 60 ||
 	fail "the filled world did not end ($log3)"
+grep -aq "the world ends after [0-9.]* days at 2x" "$log3" ||
+	fail "the score does not name the speed ($log3)"
 under=$(grep -a "the world ends after" "$log3" | sed 's/.*; \([0-9]*\) voxels under.*/\1/')
 [ "${under:-0}" -gt 100000 ] || fail "the end waited on the deep stone: ${under:-none} bare under the tops ($log3)"
 echo "the end: $under voxels bare under the tops"
@@ -1145,6 +1148,61 @@ set -- $bottom
 grep -aq "a skeleton drops a skull into the hole at $1," "$log29" &&
 	grep -aq "a dropped skull is a voxel at $1,$2,$3" "$log29" ||
 	fail "no skull dropped down the shaft at ${bottom:-none} to its bottom ($log29)"
+# 27. The bones' speed ([SKELDAT_BONE_SPEED]). A 128 world made at 5x,
+# free-running a game day after it is in: 1x's expansions (32), the
+# rule run 5 times in each. Then in real time at 5x: the launcher's
+# client (an admin) sends "speed 1", which is in the audit log and in
+# its chat. Started again with no admin, the world is at 1x, a player's
+# "speed 10" does nothing, and in 70 s nothing says it falls behind. A
+# 10x world starved (0.3 expansions a second of 4 due) says in the chat
+# that it can't keep up.
+speed_server() # <run> <world> [args]: a 128 world
+{
+	local n=$1 world=$2
+	shift 2
+	BUILDAT_SKELDAT_WORLD=$world BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
+		start_server "$t/srv30_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv30" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($t/srv30_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+BUILDAT_SKELDAT_SPEED=5 speed_server free speed5 --free-run
+s="$t/srv30_free.log"
+wait_for_log "$s" "skeldat: the world is in" 120 || fail "the world not in ($s)"
+for _ in $(seq 120); do
+	[ $(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { print n + 0 }' "$s") -gt 120 ] && break
+	sleep 1
+done
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+day=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++; if(n == 1 || n == 121) print $9, $21 }' "$s")
+set -- $day
+[ $# = 4 ] && grep -aq "the bones at 5x" "$s" && [ $(($4 - $2)) = $((5 * ($3 - $1))) ] &&
+	[ $(($3 - $1)) -ge 30 ] && [ $(($3 - $1)) -le 34 ] ||
+	fail "a day at 5x: expansions and rule runs $day ($s)"
+echo "the bones at 5x: a day's $(($3 - $1)) expansions, $(($4 - $2)) rule runs"
+printf '%s\n' "$placed" "delay 2000" "event skeldat_admin speed 1" \
+	"wait_log 10000 chat: *** The bones now grow at 1x" "delay 1000" quit > "$t/speed1.cmds"
+BUILDAT_SKELDAT_SPEED=5 speed_server 1 speedw -u launcher=1
+client speed1 "$t/speed1.cmds"
+wait $CLIENT || fail "the admin's speed drive ($t/speed1.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "the bones at 5x" "$t/srv30_1.log" && grep -aq "client1 sets : bone speed 1x" "$t/srv30_1.log" ||
+	fail "the admin's speed 1 not set and audited ($t/srv30_1.log)"
+printf '%s\n' "$placed" "delay 2000" "event skeldat_admin speed 10" "delay 70000" quit > "$t/speed2.cmds"
+speed_server 2 speedw
+client speed2 "$t/speed2.cmds"
+wait $CLIENT || fail "the player's speed drive ($t/speed2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "the bones at 1x (the lowest 1x)" "$t/srv30_2.log" && ! grep -aq "bone speed 10x" "$t/srv30_2.log" &&
+	! grep -aq "can't keep up" "$t/srv30_2.log" ||
+	fail "the speed not kept, a player's speed taken, or a 1x world behind ($t/srv30_2.log)"
+printf '%s\n' "$placed" "wait_log 90000 chat: *** The server can't keep up with 10x bones" \
+	"delay 500" quit > "$t/speed3.cmds"
+BUILDAT_SKELDAT_SPEED=10 BUILDAT_SKELDAT_EXPAND=1 BUILDAT_SKELDAT_BUDGET=0.01 speed_server 3 behind
+client speed3 "$t/speed3.cmds"
+wait $CLIENT || fail "no can't-keep-up line in the chat ($t/speed3.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+echo "behind: $(grep -a "can't keep up" "$t/srv30_3.log" | head -1 | sed 's/.*skeldat: //')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1152,5 +1210,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed"
 # vim: set noet ts=4 sw=4:

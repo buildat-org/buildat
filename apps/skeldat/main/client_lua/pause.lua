@@ -158,6 +158,13 @@ return function(game, declare_keys)
 				admin_send("players")
 			end
 		else
+			-- [SKELDAT_BONE_SPEED] The world's, switched here
+			menu:add_dropdown("Bone speed", {{"1x", "1"}, {"2x", "2"},
+					{"5x", "5"}, {"10x", "10"}}, admin.speed or "1", function(v)
+				if v ~= admin.speed then
+					admin_send("speed " .. v)
+				end
+			end)
 			text("Players")
 			for _, name in ipairs(admin.players) do
 				menu:add(name, function()
@@ -191,8 +198,9 @@ return function(game, declare_keys)
 		for l in rest:gmatch("[^\n]+") do
 			lines[#lines + 1] = l
 		end
-		if head == "players" then
+		if head:match("^players") then
 			admin.players = lines
+			admin.speed = head:match("^players (%d+)") or admin.speed
 		elseif head == "audit" then
 			admin.audit = lines
 		elseif head == "map" then
