@@ -782,10 +782,15 @@ end
 local mobs = load("main/mobs.lua")(game, sounds)
 -- **Beyond the edge** ([SKELDAT_EDGE_RIDGE]): bone hills from the world's
 -- edge out to FAR_CLIP, one static mesh built when skeldat:world ("half
--- y0 y1 crest") says the size; heights from the edge's mean crest rolling
--- higher and lower by a value noise, the bone block's top, unlit but for
--- the sky's light, in the fog as the world is. Not voxels, not walked on.
-local backdrop = {node = nil, mat = nil, light_t = 0}
+-- y0 y1 crest low") says the size; heights from the edge's mean crest
+-- rolling higher and lower by a value noise, the bone block's top, in the
+-- fog as the world is. Not voxels, not walked on. [SKELDAT_BACKDROP_LOW]:
+-- at the edge it starts 4 under the lowest edge column's top (low),
+-- behind the ridge's wall, rising to the rolling height over 16 voxels
+-- out; each quad goes by its slope into one of nine groups (flat, and
+-- four compass ways at two tilts), a material each, lit as an object with
+-- no sun plus the sun by the group's normal (no shadows)
+local backdrop = {node = nil, groups = {}, light_t = 0}
 local function backdrop_noise(x, z)
 	local function hash(ix, iz)
 		local h = (ix * 374761393 + iz * 668265263) % 2147483647
@@ -804,18 +809,34 @@ local function backdrop_noise(x, z)
 	return layer(48) * 0.7 + layer(16) * 0.3
 end
 buildat.sub_packet("skeldat:world", function(data)
-	local h, y0, y1, crest = data:match("^(%S+) (%S+) (%S+) (%S+)$")
+	local h, y0, y1, crest, low = data:match("^(%S+) (%S+) (%S+) (%S+) ?(%S*)$")
 	h, crest = tonumber(h), tonumber(crest)
 	if not crest or backdrop.node then
 		return
 	end
+	low = tonumber(low) or crest
 	game.world = {half = h, y0 = tonumber(y0), y1 = tonumber(y1)}
 	local t0 = buildat.get_time_us()
 	local C, R = 8, FAR_CLIP
 	local function height(x, z)
 		local e = math.max(math.abs(x + 0.5) - h, math.abs(z + 0.5) - h, 0)
-		return crest + (backdrop_noise(x, z) - 0.4) * 30 * math.min(1, e / 32)
+		local rolling = crest + (backdrop_noise(x, z) - 0.4) * 30 *
+				math.min(1, e / 32)
+		local s = math.min(1, e / 16)
+		s = s * s * (3 - 2 * s)
+		return low - 4 + (rolling - low + 4) * s
 	end
+	-- The group of a quad's upward normal: 0 flat, else 1 + its compass
+	-- way (+x, +z, -x, -z) + 4 when steep
+	local function group(nx, ny, nz)
+		if ny > 0.97 then
+			return 0
+		end
+		local way = math.abs(nx) > math.abs(nz) and (nx > 0 and 0 or 2) or
+				(nz > 0 and 1 or 3)
+		return 1 + way + (ny < 0.8 and 4 or 0)
+	end
+	local sums = {}
 	local quads = {}
 	for z = -h - R, h + R - C, C do
 		for x = -h - R, h + R - C, C do
@@ -825,7 +846,21 @@ buildat.sub_packet("skeldat:world", function(data)
 				end
 				local a, b, c, d = v(x, z), v(x + C, z), v(x + C, z + C),
 						v(x, z + C)
-				quads[#quads + 1] = {tile = 0,
+				-- Up from the diagonals' cross
+				local ux, uy, uz = c[1] - a[1], c[2] - a[2], c[3] - a[3]
+				local wx, wy, wz = d[1] - b[1], d[2] - b[2], d[3] - b[3]
+				local nx, ny, nz = uy * wz - uz * wy, uz * wx - ux * wz,
+						ux * wy - uy * wx
+				local l = math.sqrt(nx * nx + ny * ny + nz * nz)
+				if ny < 0 then
+					l = -l
+				end
+				nx, ny, nz = nx / l, ny / l, nz / l
+				local gi = group(nx, ny, nz)
+				local sum = sums[gi] or {0, 0, 0}
+				sum[1], sum[2], sum[3] = sum[1] + nx, sum[2] + ny, sum[3] + nz
+				sums[gi] = sum
+				quads[#quads + 1] = {tile = gi,
 					p = {a[1], a[2], a[3], b[1], b[2], b[3], c[1], c[2], c[3],
 						d[1], d[2], d[3]},
 					uv = {x / 4, z / 4, (x + C) / 4, z / 4, (x + C) / 4,
@@ -834,29 +869,48 @@ buildat.sub_packet("skeldat:world", function(data)
 		end
 	end
 	backdrop.node = scene:CreateChild("Backdrop")
-	local m = magic.Material.new()
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"luanti_client/res/LuantiUnlitMask.xml"))
 	local t = magic.cache:GetResource("Texture2D", "main/bone_block_top.png")
 	if t then
 		t.filterMode = magic.FILTER_NEAREST
-		m:SetTexture(magic.TU_DIFFUSE, t)
 	end
-	backdrop.mat = m
-	buildat.set_quad_geometry(backdrop.node, quads)
-	backdrop.node:GetComponent("CustomGeometry"):SetMaterial(0, m)
+	local tiles = buildat.set_quad_geometry(backdrop.node, quads)
+	local cg = backdrop.node:GetComponent("CustomGeometry")
+	for i = 1, #tiles do
+		local m = magic.Material.new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"luanti_client/res/LuantiUnlitMask.xml"))
+		if t then
+			m:SetTexture(magic.TU_DIFFUSE, t)
+		end
+		cg:SetMaterial(i - 1, m)
+		local sum = sums[tiles[i]]
+		local l = math.sqrt(sum[1] ^ 2 + sum[2] ^ 2 + sum[3] ^ 2)
+		backdrop.groups[i] = {mat = m, n = {sum[1] / l, sum[2] / l, sum[3] / l}}
+	end
 	log:info(string.format("skeldat: the backdrop beyond the edge at %d, " ..
-			"%d quads, %.1f ms", h, #quads, (buildat.get_time_us() - t0) / 1000))
+			"%d quads in %d groups, %.1f ms; its rim at %.1f, the lowest " ..
+			"edge column %d", h, #quads, #tiles, (buildat.get_time_us() - t0) /
+			1000, height(-h, 0), low))
 end)
--- Lit as an object under the open sky, twice a second
+-- Lit as an object under the open sky, twice a second: the light with no
+-- sun, and the sun's by each group's slope to it. object_light gives the
+-- sun at a half (a face toward it and one away), so twice its share is
+-- the sun's whole
 local function light_backdrop(dt)
 	backdrop.light_t = backdrop.light_t - dt
-	if not backdrop.mat or backdrop.light_t > 0 or not game.light_units then
+	if not backdrop.node or backdrop.light_t > 0 or not game.light_units then
 		return
 	end
 	backdrop.light_t = 0.5
-	local r, g, b = game.sky_light.object_light(game.light_units, 1, 0)
-	backdrop.mat:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+	local u = game.light_units
+	local r0, g0, b0 = game.sky_light.object_light(u, 1, 0, true)
+	local r1, g1, b1 = game.sky_light.object_light(u, 1, 0)
+	local d = sun_node.direction
+	for _, gr in ipairs(backdrop.groups) do
+		local k = 2 * math.max(0, -(gr.n[1] * d.x + gr.n[2] * d.y + gr.n[3] * d.z))
+		gr.mat:SetShaderParameter("MatDiffColor", magic.Color(r0 + (r1 - r0) * k,
+				g0 + (g1 - g0) * k, b0 + (b1 - b0) * k, 1))
+	end
 end
 
 local function material_of(name)

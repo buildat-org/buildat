@@ -840,8 +840,12 @@ grep -aq "client1 digs" "$t/srv21_1.log" &&
 	fail "the outermost column's wall was dug ($t/srv21_1.log)"
 grep -aq "client1 digs skeldat:bone_block" "$t/srv21_2.log" ||
 	fail "the hillside's bone block not dug ($t/srv21_2.log)"
-grep -aq "skeldat: the backdrop beyond the edge at 64" "$t/edge1.log" ||
-	fail "no backdrop ($t/edge1.log)"
+# The backdrop's rim under the lowest edge column's top, so no sky
+# between ([SKELDAT_BACKDROP_LOW])
+rim=$(grep -a "skeldat: the backdrop beyond the edge at 64" "$t/edge1.log" | head -1)
+echo "$rim" | sed 's/.*its rim at \([-0-9.]*\), the lowest edge column \([-0-9]*\).*/\1 \2/' |
+	awk '{ exit !($1 < $2) }' ||
+	fail "no backdrop, or its rim over the lowest edge column: ${rim#*: } ($t/edge1.log)"
 # 19. The body follows the light form ([SKELDAT_LIGHT_PRIMARY]): a
 # skeleton 12 voxels from a player at midnight; its light form closes to
 # a bow's distance and its body walks after it: awake, shooting, and no

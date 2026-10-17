@@ -572,6 +572,9 @@ struct Module: public interface::Module, public luanti_session::Game
 	float m_far_t = 0;
 	// The outermost columns' mean top, once the world is in
 	float m_edge_crest = 0;
+	// The lowest of those tops ([SKELDAT_BACKDROP_LOW]), where the hills
+	// beyond start under
+	int m_edge_low = 0;
 	// Each skeldat:far's count logged, for a check (BUILDAT_SKELDAT_FAR=1)
 	bool m_far_report = getenv("BUILDAT_SKELDAT_FAR") != nullptr;
 	float m_ai_t = 0, m_spawn_t = 0;
@@ -1372,15 +1375,18 @@ struct Module: public interface::Module, public luanti_session::Game
 			const int h = m_half * skeldat::bones::SECTION;
 			double sum = 0;
 			size_t n = 0;
+			int low = 1 << 30;
 			for(int a = -h; a < h; a++)
 				for(const auto &xz : {std::make_pair(a, -h),
 						std::make_pair(a, h - 1), std::make_pair(-h, a),
 						std::make_pair(h - 1, a)}){
 					const long c = column(xz.first, xz.second);
 					if(c >= 0 && m_top_y[c] != NO_GROUND)
-						sum += m_top_y[c], n++;
+						sum += m_top_y[c], n++, low = std::min(low,
+								(int)m_top_y[c]);
 				}
 			m_edge_crest = n ? (float)(sum / n) + 1 : 0;
+			m_edge_low = n ? low : 0;
 		}
 		// Not in a check's own set of mobs (TEST: no spawning; the bench,
 		// 0 an empty world)
@@ -2095,13 +2101,14 @@ struct Module: public interface::Module, public luanti_session::Game
 	}
 
 	// The world's size and its edge's mean crest, for the client's
-	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest",
-	// half in voxels
+	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest
+	// low", half in voxels, low the lowest edge column's top
 	void send_world(size_t peer)
 	{
 		std::ostringstream os;
 		os<<m_half * skeldat::bones::SECTION<<" "<<m_y0 * skeldat::bones::SECTION
-				<<" "<<(m_y1 + 1) * skeldat::bones::SECTION - 1<<" "<<m_edge_crest;
+				<<" "<<(m_y1 + 1) * skeldat::bones::SECTION - 1<<" "<<m_edge_crest
+				<<" "<<m_edge_low;
 		network::send(m_server, peer, "skeldat:world", os.str());
 	}
 
