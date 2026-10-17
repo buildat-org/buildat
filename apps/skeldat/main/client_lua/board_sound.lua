@@ -41,7 +41,7 @@ M.ROAR_GAIN = 0.3
 M.SCRAPE_GAIN = 0.2
 local GRAIN = 441 -- 20 ms
 local PRE = 220 -- a filter's settling, cut off the front
-local CLACK_GAP = 331 -- 15 ms
+M.CLACK_PEAK = 0.8
 
 -- A grain's peak scaled to 1
 local function normalise(b)
@@ -55,7 +55,7 @@ local function normalise(b)
 end
 
 -- The knocks, made once: band-filtered noise and the deck's mode under a
--- fast decay; and the jump's thud
+-- fast decay
 function M.grains(synth)
 	local R = M.RATE
 	local g = {}
@@ -72,10 +72,6 @@ function M.grains(synth)
 		normalise(b)
 		g[i] = b
 	end
-	local thud = synth.buffer(GRAIN * 3)
-	thud:osc{wave = "sine", freq = {start = 110, mul = 0.05}, rate = R}
-	thud:envelope{points = {{0, 1}, {0.06, 0}}, rate = R}
-	g.thud = thud
 	return g
 end
 
@@ -281,24 +277,18 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 	p.ahead = (device + M.MARGIN_MS) / 1000
 	source.streamBufferLength = math.max(M.STREAM_MS, fragment + 10)
 	source:Play(p.stream)
-	-- The pop and the clack out of the queue ([SKELDAT_BOARD_SOUND_LAG]):
-	-- Sounds made once, played when they happen, behind the device only
-	if not grains.pop_sound then
-		local n = grains.thud:len()
-		local pop, clack = synth.buffer(n), synth.buffer(n)
-		pop:mix(grains[1], 0, 0, GRAIN, 2 * M.HIT_GAIN)
-		pop:mix(grains.thud, 0, 0, n, 0.5)
-		clack:mix(grains[2], 0, 0, GRAIN, 2 * M.HIT_GAIN)
-		clack:mix(grains[3], 0, CLACK_GAP, GRAIN, 2 * M.HIT_GAIN)
-		grains.pop_sound, grains.clack_sound = M.to_sound(magic, pop),
-				M.to_sound(magic, clack)
+	-- The landing's clack out of the queue ([SKELDAT_BOARD_SOUND_LAG]): a
+	-- Sound made once, played when it happens, behind the device only.
+	-- [SKELDAT_BOARD_CLAP] One hit (grain 2) at a peak of CLACK_PEAK, some
+	-- 3 to 4 times a roll hit's, so it is heard over the roll; no jump
+	-- sound
+	if not grains.clack_sound then
+		local clack = synth.buffer(GRAIN)
+		clack:mix(grains[2], 0, 0, GRAIN, M.CLACK_PEAK)
+		grains.clack_sound = M.to_sound(magic, clack)
 	end
 	local shot = node:CreateComponent(kind)
 	shot.soundType = magic.SOUND_EFFECT
-	function p:pop()
-		shot.gain = 1
-		shot:Play(grains.pop_sound)
-	end
 	function p:clack(gain)
 		shot.gain = math.max(0, math.min(1, gain))
 		shot:Play(grains.clack_sound)

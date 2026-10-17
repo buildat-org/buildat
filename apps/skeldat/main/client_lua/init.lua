@@ -1637,15 +1637,9 @@ function play_splash(speed, source, who)
 	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f%s", who,
 			speed, gain, hard and ", hard" or ""))
 end
-local function update_rolls(b, jumped, landed, fall)
+local function update_rolls(b)
 	local own = roll.own
 	if b then
-		if jumped then
-			own:pop()
-		end
-		if landed then
-			own:clack(fall / 10)
-		end
 		local len = own:feed(game.paused and 0 or b.s,
 				player.on_ground and not b.wet and not game.paused, down("back"))
 		roll.lo = math.min(roll.lo or len, len)
@@ -1755,7 +1749,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player.board = player.board or {k = 0}
 		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
 	end
-	local ground0, vy0 = player.on_ground, player.vy
+	local vy0 = player.vy
 	-- [SKELDAT_WORLD_ADMIN] Paused, the player stands as it is
 	if not game.paused then
 		player:update(dt, {x = fx, z = fz, speed = speed,
@@ -1771,8 +1765,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 				player.z))
 	end
 	board_node.enabled = b ~= nil
-	update_rolls(b, b and ground0 and not player.on_ground and down("jump"),
-			b and not ground0 and player.on_ground, -(vy0 or 0))
+	update_rolls(b)
 	if b and down("back") and not board_braking then
 		board_braking = true
 		log:info(string.format("skeldat: braking at %.1f at (%.1f, %.1f, %.1f)",
@@ -1781,6 +1774,14 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if b and not player.on_ground then
 		board_air = board_air + dt
 	else
+		-- [SKELDAT_BOARD_CLAP] A landing on the board after a flight of
+		-- 0.15 s or more clacks, louder with the fall (a step's flicker of
+		-- the ground makes none)
+		if b and board_air >= 0.15 then
+			local gain = 0.6 + 0.4 * math.min(1, -(vy0 or 0) / 8)
+			roll.own:clack(gain)
+			log:info(string.format("skeldat: the board's clack at %.2f", gain))
+		end
 		if board_air > 0.3 then
 			log:info(string.format("skeldat: the board flew %.2f s to (%.1f, "
 					.. "%.1f, %.1f)", board_air, player.x, player.y, player.z))

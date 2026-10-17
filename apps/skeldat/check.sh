@@ -1116,6 +1116,13 @@ echo "the roll's queue raised $(grep -ac "board sound: the queue raised" "$c1") 
 	[ "$(grep -ac "board sound: .* underruns in" "$c1")" -le 1 ] ||
 	fail "the roll's stream: $roll_n reports, $roll_lo to $roll_hi ms ahead ($c1)"
 echo "the roll: $roll_lo to $roll_hi ms ahead over $roll_n reports"
+# [SKELDAT_BOARD_CLAP] A clack for each flight logged (those of 0.3 s and
+# more; one of 0.15 clacks too), none at a jump: no sound is made for one
+flights=$(grep -ac "skeldat: the board flew" "$c1")
+clacks=$(grep -ac "skeldat: the board's clack at" "$c1")
+[ "$flights" -ge 1 ] && [ "$clacks" -ge "$flights" ] ||
+	fail "the landings' clacks: $clacks for $flights flights ($c1)"
+echo "the board: $clacks clacks, $flights flights logged"
 grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*$" "$t/board2.log" ||
 	fail "client2's splash ($t/board2.log)"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
