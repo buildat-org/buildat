@@ -27,11 +27,13 @@ local scene = replicate.main_scene
 local FAR_CLIP = 160
 local POINT_RANGE = 4.5
 local POINT_STEP = 0.02
--- builtin/luanti's sky and its pbr light's rules ([SKELDAT_LUANTI_PARTS]
--- 3), served by main.cpp under their own names: the sun, the moon and the
--- stars, dawn and dusk, and the light's colour as builtin/luanti's pbr
-local sky_dome = load("luanti/sky_dome.lua")
-local sky_light = load("luanti/sky_light.lua")
+-- The sky's render and its pbr light's rules, extensions/sky_render
+-- ([SKELDAT_LUANTI_PARTS] 3, [SKY_RENDER_SHARED]): the dome, dawn and dusk,
+-- and the light's colour as builtin/luanti's pbr. The day's schedule (the
+-- sun, the moon and the stars) is luanti_client's sky_model.lua, served by
+-- main.cpp.
+local sky_model = load("luanti/sky_model.lua")
+local sky_light = load("sky_render/init.lua")
 local PHYS = sky_light.PHYS
 
 voxelworld.use_skylight = true
@@ -300,14 +302,13 @@ end
 local sun_node, sun = body_light("Sun")
 local moon_node, moon = body_light("Moon")
 local SUN_DIR = {x = -0.6, y = -1.0, z = 0.3}
-local sky = sky_dome.new(scene, SUN_DIR, voxel_shading.sky_defaults,
-		log)
-sky:set_physical(true)
+local sky = sky_light.new_dome(scene, SUN_DIR, voxel_shading.sky_defaults,
+		log, sky_model)
 -- Dimmed where the chamber reading sees no skylight ([TUNNEL_SKY]), below
 sky:set_auto_dim(true)
 -- What the world reflects: the sky as it is drawn, re-rendered once a
 -- second, a face a frame
-local sky_cube = {cube = sky_dome.new_cube(sky.material), due = 0}
+local sky_cube = {cube = sky_light.new_cube(sky.material), due = 0}
 game.zone.zoneTexture = sky_cube.cube.texture
 voxel_shading.set_sky_light(1.0)
 voxel_shading.set_specular_emphasis(0.7)
@@ -479,24 +480,24 @@ local CLOUD = {r = 0.9, g = 0.92, b = 0.95}
 local function update_sky(dt)
 	game.day = (game.day + dt * game.day_rate) % 1
 	local daylight = game.day * 24000
-	local tilt = sky_dome.orbit_tilt(nil, nil)
+	local tilt = sky_model.orbit_tilt(nil, nil)
 	-- The shadow's direction held a step at a time (a map rasterised from
 	-- a light that turned between two frames crawls), the drawn sun smooth
-	local sx, sy, sz = sky_dome.sun_direction(sky_dome.stepped_time(daylight),
+	local sx, sy, sz = sky_model.sun_direction(sky_model.stepped_time(daylight),
 			tilt)
-	local mx, height, mz = sky_dome.sun_direction(daylight, tilt)
+	local mx, height, mz = sky_model.sun_direction(daylight, tilt)
 	local l = math.sqrt(sx * sx + sy * sy + sz * sz)
 	local dir = magic.Vector3(-sx / l, -sy / l, -sz / l)
 	local ml = math.sqrt(mx * mx + height * height + mz * mz)
 	sky:set_sun_direction({x = -mx / ml, y = -height / ml, z = -mz / ml})
 	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
-	sky:set_moon_look(sky_dome.moon_amount(daylight) > 0 and
-			sky_dome.MOON_HALF or 0)
+	sky:set_moon_look(sky_model.moon_amount(daylight) > 0 and
+			sky_model.MOON_HALF or 0)
 	local day = math.max(0, math.min(1, (height + 0.15) / 0.3))
-	day = math.max(day, sky_dome.predawn(height))
-	local up = sky_dome.sun_amount(daylight) * sky_dome.above_horizon(height)
-	local moon_up = sky_dome.moon_amount(daylight) *
-			sky_dome.above_horizon(-height)
+	day = math.max(day, sky_model.predawn(height))
+	local up = sky_model.sun_amount(daylight) * sky_model.above_horizon(height)
+	local moon_up = sky_model.moon_amount(daylight) *
+			sky_model.above_horizon(-height)
 
 	local lit = (0.175 + 0.825 * day) ^ 2.2
 	local zenith, horizon = hue_of_hour(day, lit)
@@ -521,7 +522,7 @@ local function update_sky(dt)
 	local half = voxel_shading.sky_defaults.sun_half
 	sky:set_sun_look(half, voxel_shading.sky_defaults.sun_color)
 	sky:set_sun_radiance(sky_light.sun_disc(height, half, t.sun_color))
-	sky:set_star_look(sky_dome.STAR_DENSITY_DEFAULT, nil,
+	sky:set_star_look(sky_model.STAR_DENSITY_DEFAULT, nil,
 			(1 - day) * (1 - day))
 	sky:set_cloud_lit(sky_light.cloud_lit(CLOUD, zenith, horizon, height, 1))
 

@@ -3036,7 +3036,7 @@ function M.new(magic, buildat, log, options)
 		zone.fogColor = sky_horizon
 		local enclosed, gate
 		if light_target then
-			-- Under the dome drawn, as vanilla's (sky_light.lua): its hue,
+			-- Under the dome drawn, as vanilla's (extensions/sky_render): its hue,
 			-- the reference's mean
 			local t = voxel_light.terms(psky, height,
 					psky.dome(sky_top, sky_horizon))

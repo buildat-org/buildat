@@ -247,20 +247,16 @@ struct Module: public interface::Module
 
 	void serve_media()
 	{
-		// builtin/luanti's sky and its pbr light's rules, under the names
-		// they run each other by, as skeldat serves them
+		// The day's schedule, luanti_client's, as skeldat serves it (the
+		// sky's render is extensions/sky_render, [SKY_RENDER_SHARED])
 		const ss_ res = m_server->get_config().get<ss_>("share_path")+
 				"/extensions/luanti_client/res/";
-		const ss_ own = m_server->get_builtin_modules_path()+
-				"/luanti/client_lua/";
 		static const uint8_t SAND[3] = {196, 174, 128};
 		static const uint8_t STONE[3] = {128, 124, 116};
 		static const uint8_t FILL[3] = {120, 98, 72};
 		static const uint8_t BANK[3] = {96, 92, 86};
 		client_file::access(m_server, [&](client_file::Interface *i){
 			i->add_file_path("luanti/sky_model.lua", res+"sky_model.lua");
-			i->add_file_path("luanti/sky_dome.lua", own+"sky_dome.lua");
-			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
 			i->add_file_content("main/sand.png", texture(1, SAND, 14));
 			i->add_file_content("main/stone.png", texture(2, STONE, 18));
 			i->add_file_content("main/fill.png", texture(3, FILL, 10));

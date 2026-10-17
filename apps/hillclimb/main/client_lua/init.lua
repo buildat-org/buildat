@@ -25,8 +25,10 @@ end
 local scene = replicate.main_scene
 local U = 8 -- voxels to the metre
 local FAR_CLIP = 150 * U
-local sky_dome = load("luanti/sky_dome.lua")
-local sky_light = load("luanti/sky_light.lua")
+-- extensions/sky_render, and the day's schedule luanti_client's
+-- sky_model.lua, served by main.cpp ([SKY_RENDER_SHARED])
+local sky_model = load("luanti/sky_model.lua")
+local sky_light = load("sky_render/init.lua")
 local PHYS = sky_light.PHYS
 
 voxelworld.use_skylight = true
@@ -60,12 +62,11 @@ sun.specularIntensity = 1.0
 sun.shadowBias = magic.BiasParameters(0.00005, 0.8, 0.002)
 sun.shadowCascade = magic.CascadeParameters(10 * U, 40 * U, 120 * U, 0, 0.8)
 
-local sky = sky_dome.new(scene, {x = -0.6, y = -1.0, z = 0.3},
-		voxel_shading.sky_defaults, log)
-sky:set_physical(true)
+local sky = sky_light.new_dome(scene, {x = -0.6, y = -1.0, z = 0.3},
+		voxel_shading.sky_defaults, log, sky_model)
 -- Open sky everywhere: never the indoor grey a cave dims it to
 sky:set_auto_dim(false)
-local sky_cube = {cube = sky_dome.new_cube(sky.material), due = 0}
+local sky_cube = {cube = sky_light.new_cube(sky.material), due = 0}
 zone.zoneTexture = sky_cube.cube.texture
 voxel_shading.set_sky_light(1.0)
 voxel_shading.set_specular_emphasis(0.7)
@@ -156,7 +157,7 @@ end
 local CLOUD = {r = 0.9, g = 0.92, b = 0.95}
 local function update_sky()
 	-- +Z is north (the hill climbs north)
-	local tx, h, tz = sky_dome.sun_toward(hill.lat, 0, hill.day,
+	local tx, h, tz = sky_light.sun_toward(hill.lat, 0, hill.day,
 			hill.time * 60)
 	local l = math.sqrt(tx * tx + h * h + tz * tz)
 	local dir = magic.Vector3(-tx / l, -h / l, -tz / l)
@@ -164,14 +165,14 @@ local function update_sky()
 	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
 	sky:set_moon_look(0)
 	local day = math.max(0, math.min(1, (h + 0.15) / 0.3))
-	day = math.max(day, sky_dome.predawn(h))
+	day = math.max(day, sky_model.predawn(h))
 	local lit = (0.175 + 0.825 * day) ^ 2.2
 	local zenith, horizon = hue_of_hour(day, lit)
 	zenith, horizon = sky_light.sky_radiance(zenith, horizon, h)
 	sky:set_look(zenith, horizon, nil)
 	local t = sky_light.terms(h, sky_light.dome(zenith, horizon))
 	sky:set_dawn_glow(t.glow.r, t.glow.g, t.glow.b, t.glow_tint)
-	local up = sky_dome.above_horizon(h)
+	local up = sky_model.above_horizon(h)
 	sun_node.enabled = up > 0
 	if up > 0 then
 		sun_node.direction = dir
@@ -181,7 +182,7 @@ local function update_sky()
 	local half = voxel_shading.sky_defaults.sun_half
 	sky:set_sun_look(half, voxel_shading.sky_defaults.sun_color)
 	sky:set_sun_radiance(sky_light.sun_disc(h, half, t.sun_color))
-	sky:set_star_look(sky_dome.STAR_DENSITY_DEFAULT, nil,
+	sky:set_star_look(sky_model.STAR_DENSITY_DEFAULT, nil,
 			(1 - day) * (1 - day))
 	sky:set_cloud_lit(sky_light.cloud_lit(CLOUD, zenith, horizon, h, 1))
 	sky_light.apply(voxel_shading, zone, magic, t)

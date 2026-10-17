@@ -753,17 +753,12 @@ struct Module: public interface::Module, public luanti_session::Game
 	// pick: start the world the environment or the launch names
 	void start(bool pick)
 	{
-		// builtin/luanti's sky and its pbr light's rules ([SKELDAT_LUANTI_PARTS]
-		// 3), under the names they run each other by; that module is not
-		// loaded here
+		// The day's schedule, luanti_client's ([SKY_RENDER_SHARED]: the sky's
+		// render is extensions/sky_render, meta.json's client_extensions)
 		const ss_ res = m_server->get_config().get<ss_>("share_path")+
 				"/extensions/luanti_client/res/";
-		const ss_ own = m_server->get_builtin_modules_path()+
-				"/luanti/client_lua/";
 		client_file::access(m_server, [&](client_file::Interface *i){
 			i->add_file_path("luanti/sky_model.lua", res+"sky_model.lua");
-			i->add_file_path("luanti/sky_dome.lua", own+"sky_dome.lua");
-			i->add_file_path("luanti/sky_light.lua", own+"sky_light.lua");
 		});
 		serve_media();
 		world_menu::access(m_server, [&](world_menu::Interface *i){

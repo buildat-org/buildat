@@ -1,30 +1,65 @@
--- Buildat: builtin/luanti/client_lua/sky_light.lua
+-- Buildat: extensions/sky_render/init.lua
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+-- SPDX-License-Identifier: Apache-2.0 OR MIT
 --
--- The pbr path's light, as rules ([SKELDAT_LUANTI_PARTS] 3): what the sun,
--- the sky, the bounce, the ground, a lamp and a sealed cave give a face at
--- a sun height, the sky's radiance in a hue, the fog, the clouds' light,
--- and the render path that meters and tonemaps the frame. builtin/luanti's
--- client loop (client.lua) and any other game's (apps/skeldat) call
--- these and apply them each to its own scene. The rules themselves are
--- extensions/physical_sky's (the sky) and extensions/voxel_light's (the
--- light), re-exported here; what is this file's own is the render path.
--- No state: the caller keeps its zone, lights and sky.
-local ok, err, sky_dome = buildat.run_script_file("luanti/sky_dome.lua")
-if not ok or type(sky_dome) ~= "table" then
-	error("luanti: could not load sky_dome.lua: " .. tostring(err))
+-- **The pbr sky's render** ([SKELDAT_LUANTI_PARTS] 3, moved out of
+-- builtin/luanti by [SKY_RENDER_SHARED]): physical_sky's dome, and the
+-- light as rules -- what the sun, the sky, the bounce, the ground, a lamp
+-- and a sealed cave give a face at a sun height, the sky's radiance in a
+-- hue, the fog, the clouds' light -- and the render path that meters and
+-- tonemaps the frame. builtin/luanti's client loop, apps/skeldat and
+-- apps/hillclimb call these and apply them each to its own scene. The
+-- rules themselves are extensions/physical_sky's (the sky) and
+-- extensions/voxel_light's (the light), re-exported here; what is this
+-- file's own is the render path. No state: the caller keeps its zone,
+-- lights and sky. The day's schedule is the caller's (new_dome()).
+-- Served: a module names it in its meta.json's client_extensions, beside
+-- physical_sky; voxel_light comes with voxel_shading.
+-- simplified: the render path's NightGray, TonemapACES and Saturation are
+-- extensions/luanti_client/res's, which every client bundles; they move
+-- here when a client without that extension wants this.
+local ok, err, physical_sky = buildat.run_script_file("physical_sky/init.lua")
+if not ok or type(physical_sky) ~= "table" then
+	error("sky_render: could not load physical_sky: " .. tostring(err))
 end
-local PHYS = sky_dome.PHYS
-local physical_sky = sky_dome.physical_sky
+local PHYS = physical_sky.PHYS
 
 local M = {}
 M.PHYS = PHYS
+M.physical_sky = physical_sky
 -- The sky's own rules ([LC_SKY_SHARED]): physical_sky's, here for the
 -- callers that read them through this table
 for _, name in ipairs({"sky_radiance", "dome", "outside", "fog", "sun_disc",
-		"cloud_lit"}) do
+		"cloud_lit", "sun_toward", "new_cube"}) do
 	M[name] = physical_sky[name]
+end
+
+-- physical_sky's dome, with the moon and the clouds a schedule has before
+-- a game says anything. schedule: MOON_HALF, CLOUD_ALPHA_DEFAULT,
+-- CLOUD_SPEED_DEFAULT ({x, z} in nodes a second) and CLOUD_WIND_PER_NODE
+-- (builtin/luanti's and skeldat's: luanti_client's res/sky_model.lua).
+-- log: the game's logger
+function M.new_dome(scene, sun_dir, defaults, log, schedule)
+	local d = {}
+	for k, v in pairs(defaults) do
+		d[k] = v
+	end
+	d.moon_half = schedule.MOON_HALF
+	d.cloud_alpha = schedule.CLOUD_ALPHA_DEFAULT
+	d.cloud_wind = {schedule.CLOUD_SPEED_DEFAULT[1] *
+			schedule.CLOUD_WIND_PER_NODE, schedule.CLOUD_SPEED_DEFAULT[2] *
+			schedule.CLOUD_WIND_PER_NODE}
+	local self = physical_sky.new_dome(scene, sun_dir, d, log)
+	-- How opaque the clouds are (0..1) and how fast they drift, {x, z} in
+	-- nodes a second; nil leaves the schedule's default
+	local set_wind = self.set_clouds
+	function self:set_clouds(alpha, speed)
+		speed = speed or schedule.CLOUD_SPEED_DEFAULT
+		set_wind(self, alpha, {speed[1] * schedule.CLOUD_WIND_PER_NODE,
+				speed[2] * schedule.CLOUD_WIND_PER_NODE})
+	end
+	return self
 end
 
 -- [PT_EXPOSURE]: the meter -- Urho3D's AutoExposure.xml, log-average
@@ -124,7 +159,7 @@ end
 local ok_vl, err_vl, voxel_light =
 		buildat.run_script_file("voxel_light/init.lua")
 if not ok_vl or type(voxel_light) ~= "table" then
-	error("luanti: could not load voxel_light: " .. tostring(err_vl))
+	error("sky_render: could not load voxel_light: " .. tostring(err_vl))
 end
 M.MOON_COLOR = voxel_light.MOON_COLOR
 M.TEXEL_K = voxel_light.TEXEL_K

@@ -2,9 +2,10 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- The sky: extensions/physical_sky's dome in pbr and Luanti's own sky
--- (extensions/luanti_client/res/LuantiSky.glsl) in the parity modes, one
--- material with the technique swapped (set_physical()), rather than
+-- The sky: extensions/sky_render's dome (physical_sky's) in pbr and
+-- Luanti's own sky (extensions/luanti_client/res/LuantiSky.glsl) in the
+-- parity modes, one material with the technique swapped (set_physical()),
+-- rather than
 -- builtin/voxel_shading's skybox. Luanti's schedule (res/sky_model.lua) and
 -- physical_sky's numbers are both read through this table.
 --
@@ -29,6 +30,11 @@ if not ok_phys or type(physical_sky) ~= "table" then
 	error("luanti: could not load physical_sky: " .. tostring(err_phys))
 end
 M.physical_sky = physical_sky
+local ok_render, err_render, sky_render =
+		buildat.run_script_file("sky_render/init.lua")
+if not ok_render or type(sky_render) ~= "table" then
+	error("luanti: could not load sky_render: " .. tostring(err_render))
+end
 -- The schedule, the sun's direction and the predawn light are the model
 -- both clients share (res/sky_model.lua), and the radiances, the glow and
 -- the dusk ramp are physical_sky's; this file is the client loop's drawing
@@ -83,17 +89,9 @@ assert(M.point_colors(0.1).b < M.point_colors(0.1).r * 0.5, "the low sun's is or
 
 -- log: the game's logger
 function M.new(scene, sun_dir, defaults, log)
-	-- physical_sky's dome with Luanti's moon and clouds as it has them
-	-- before a game says anything: set_clouds() below
-	local d = {}
-	for k, v in pairs(defaults) do
-		d[k] = v
-	end
-	d.moon_half = M.MOON_HALF
-	d.cloud_alpha = M.CLOUD_ALPHA_DEFAULT
-	d.cloud_wind = {M.CLOUD_SPEED_DEFAULT[1] * M.CLOUD_WIND_PER_NODE,
-			M.CLOUD_SPEED_DEFAULT[2] * M.CLOUD_WIND_PER_NODE}
-	local self = physical_sky.new_dome(scene, sun_dir, d, log)
+	-- sky_render's dome with Luanti's moon and clouds as it has them
+	-- before a game says anything
+	local self = sky_render.new_dome(scene, sun_dir, defaults, log, model)
 	local set = self.set_param
 	local physical_technique = magic.cache:GetResource("Technique",
 			"physical_sky/PhysicalSky.xml")
@@ -143,15 +141,6 @@ function M.new(scene, sun_dir, defaults, log)
 		end
 		cloud_rgb = {r = c.r or 0.9, g = c.g or 0.92, b = c.b or 0.95}
 		put_cloud()
-	end
-
-	-- How opaque the clouds are (0..1) and how fast they drift, {x, z} in
-	-- nodes a second; nil leaves Luanti's default
-	local set_wind = self.set_clouds
-	function self:set_clouds(alpha, speed)
-		speed = speed or M.CLOUD_SPEED_DEFAULT
-		set_wind(self, alpha, {speed[1] * M.CLOUD_WIND_PER_NODE,
-				speed[2] * M.CLOUD_WIND_PER_NODE})
 	end
 
 	-- [DUSK_PARITY]: the band round the low sun, share of it in the

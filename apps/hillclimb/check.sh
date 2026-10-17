@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~80 s (2026-10-16)
-# covers: apps/hillclimb/** extensions/physical_sky/init.lua
+# covers: apps/hillclimb/** extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
 # same hill, the slope's angle, the pads flat and long enough, the track

@@ -1559,6 +1559,30 @@ voxel_light.object_light(t, sky, lamp, no_sun), lamp_curve(level), TEXEL_K,
 MOON_COLOR
 - An object's light by its sky and lamp levels, in the frame's units.
 
+sky_render
+----------
+The pbr sky's render ([SKY_RENDER_SHARED]): physical_sky's dome, voxel_light's
+terms over it and the frame's render path, served for a module that names it
+in its meta.json's client_extensions (beside physical_sky; voxel_light comes
+with builtin/voxel_shading), taken with select(3, buildat.run_script_file(
+"sky_render/init.lua")). builtin/luanti, skeldat and hillclimb use it.
+sky_render.new_dome(scene, sun_dir, defaults, log, schedule) -> dome
+- physical_sky.new_dome() with the moon and clouds of the schedule (a table
+  of MOON_HALF, CLOUD_ALPHA_DEFAULT, CLOUD_SPEED_DEFAULT and
+  CLOUD_WIND_PER_NODE); dome:set_clouds(alpha, speed) takes the speed in
+  nodes a second.
+sky_render.render_path(magic, base, opt) -> render path
+- A clone of base with the night gray, the exposure meter, the bloom, the
+  tonemap and the saturation; opt: linear, tonemap ("uncharted2", "aces"),
+  gray_off, gray, adapt_rate, lum_range. sky_render.EXPOSURE is the meter's.
+sky_render.terms(height, dome), apply(voxel_shading, zone, magic, t[,
+translucency]), enclosed(t, chamber)
+- voxel_light's over physical_sky, applied onto voxel_shading and the zone.
+sky_render.PHYS, physical_sky, sky_radiance(), dome(), outside(), fog(),
+sun_disc(), cloud_lit(), sun_toward(), new_cube(), object_light(),
+lamp_curve(), TEXEL_K, MOON_COLOR
+- physical_sky's and voxel_light's, re-exported.
+
 magic_sandbox
 -------------
 magic_sandbox.class(name) -> function(superclass)

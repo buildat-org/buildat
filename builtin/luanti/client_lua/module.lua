@@ -829,9 +829,9 @@ end
 -- or nil where no voxel is loaded (the caller keeps what it had: a
 -- full-bright guess lit caves). no_sun leaves the sun out, for a lit
 -- model that has the sun's light of its own.
--- The pbr formula is sky_light.lua's, shared with other games' clients
--- ([SKELDAT_LUANTI_PARTS] 3)
-local sky_light = select(3, buildat.run_script_file("luanti/sky_light.lua"))
+-- The pbr formula is extensions/sky_render's, shared with other games'
+-- clients ([SKELDAT_LUANTI_PARTS] 3, [SKY_RENDER_SHARED])
+local sky_light = select(3, buildat.run_script_file("sky_render/init.lua"))
 M.PBR_TEXEL_K = sky_light.TEXEL_K
 -- Voxel id -> whether it stops a player, which here stands for stopping
 -- light. simplified: glass and leaves count as blockers, and a place in

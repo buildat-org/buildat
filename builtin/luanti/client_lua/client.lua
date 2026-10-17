@@ -141,13 +141,13 @@ if not ok_lsky or type(sky_dome) ~= "table" then
 			tostring(err_lsky))
 end
 -- And the pbr path's light, as rules shared with other games' clients
--- ([SKELDAT_LUANTI_PARTS] 3)
+-- ([SKELDAT_LUANTI_PARTS] 3): extensions/sky_render ([SKY_RENDER_SHARED])
 local sky_light = (function(ok, err, m)
 	if not ok or type(m) ~= "table" then
-		error("luanti: could not load sky_light.lua: " .. tostring(err))
+		error("luanti: could not load sky_render: " .. tostring(err))
 	end
 	return m
-end)(buildat.run_script_file("luanti/sky_light.lua"))
+end)(buildat.run_script_file("sky_render/init.lua"))
 
 -- The keys, in one place, so that what the player is told and what the code
 -- reads cannot drift apart. Luanti's own defaults, and the F5 line below
