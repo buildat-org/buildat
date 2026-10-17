@@ -27,8 +27,11 @@
 // ({name, to}), world_menu:delete ({name}). Server to client:
 // world_menu:list (JSON: {title, may_pick, wait, fields: [{key, label,
 // default, hint, ask, choices: [[value, label]]}], worlds: [{name, bytes,
-// options}]}; wait: the progress
+// options}], presets: [{label, options}]}; wait: the progress
 // text, if any), world_menu:up.
+// **Presets** ([SKELDAT_HIGH_SCORES]): option sets the app offers on the
+// new world screen, as "From the high scores"; picking one fills the
+// fields. None, no list.
 namespace world_menu
 {
 	typedef size_t PeerId;
@@ -53,6 +56,11 @@ namespace world_menu
 	{
 		ss_ title;
 		std::vector<Field> fields;
+	};
+	struct Preset
+	{
+		ss_ label;
+		std::map<ss_, ss_> options;
 	};
 
 	// world_menu:play: `peer` picked the world `name`, made by this pick
@@ -79,6 +87,8 @@ namespace world_menu
 		// A world being made: the menus shown say `text` and wait, and no
 		// world is picked meanwhile; "" for none. set_running(true) ends it.
 		virtual void progress(const ss_ &text) = 0;
+		// The new world screen's presets, sent again to the menus shown
+		virtual void set_presets(const std::vector<Preset> &presets) = 0;
 	};
 
 	inline bool access(interface::Server *server,

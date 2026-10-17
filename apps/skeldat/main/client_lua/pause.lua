@@ -298,6 +298,71 @@ return function(game, declare_keys)
 		show_intro(data)
 	end)
 
+	-- [SKELDAT_HIGH_SCORES] The sets of parameters, best first, and a
+	-- set's scores: the server's skeldat:scores, asked by "list" and
+	-- "set <key>"
+	local function scores_page(title, rows, back)
+		close()
+		root = uistack.main:push({desc = "scores"})
+		local menu = ui_utils.vertical_menu(root, {min_width = 460})
+		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		local t = menu.window:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetText(title)
+		for _, r in ipairs(rows) do
+			if r[2] then
+				menu:add(r[1], r[2])
+			else
+				local l = menu.window:CreateChild("Text")
+				l:SetStyleAuto()
+				l:SetFixedWidth(440)
+				l:SetWordwrap(true)
+				l:SetText(r[1])
+			end
+		end
+		menu:add("Back", back, true)
+		game.hold(back, menu.window)
+	end
+	local function hours(s)
+		return string.format("%.1f h", (tonumber(s) or 0) / 3600)
+	end
+	buildat.sub_packet("skeldat:scores", function(data)
+		local j = buildat.parse_json(data) or {}
+		if j.sets then
+			local rows = {}
+			for _, set in ipairs(j.sets) do
+				rows[#rows + 1] = {string.format("%s: %d, %dx, seed %s: "
+						.. "%.1f days", set.name or "?", set.size or 0,
+						set.speed or 1, tostring(set.seed), set.best or 0),
+						function() game.send("scores", "set " .. set.key) end}
+			end
+			if #rows == 0 then
+				rows[1] = {"No world has ended yet."}
+			end
+			scores_page("High scores", rows, function()
+				close()
+				pending = open
+			end)
+			log:info("pause: high scores shown, " .. #j.sets .. " sets")
+		elseif j.set then
+			local set, rows = j.set, {}
+			for i, sc in ipairs(set.scores or {}) do
+				local who = {}
+				for _, p in ipairs(sc.players or {}) do
+					who[#who + 1] = tostring(p[1]) .. " " .. hours(p[2])
+				end
+				rows[#rows + 1] = {string.format("%d. %.1f days, %s, %s: %s", i,
+						sc.days or 0, tostring(sc.date), tostring(sc.world),
+						table.concat(who, ", "))}
+			end
+			scores_page(string.format("%s: %d, %dx, seed %s", set.name or "?",
+					set.size or 0, set.speed or 1, tostring(set.seed)), rows,
+					function() game.send("scores", "list") end)
+			log:info("pause: scores of " .. tostring(set.key) .. " shown, " ..
+					#rows .. " scores")
+		end
+	end)
+
 	function open()
 		if root then
 			return
@@ -313,6 +378,7 @@ return function(game, declare_keys)
 		end
 		menu:add("Settings...", settings)
 		menu:add("How to play...", function() game.send("intro", "") end)
+		menu:add("High scores...", function() game.send("scores", "list") end)
 		menu:add("Leave the game", function() buildat.leave() end)
 		game.hold(close, menu.window)
 		log:info("pause: the menu shown")

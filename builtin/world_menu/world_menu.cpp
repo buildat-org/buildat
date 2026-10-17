@@ -20,6 +20,7 @@ struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
 	Config m_config;
+	std::vector<Preset> m_presets;
 	bool m_running = false;
 	ss_ m_progress;
 	// Who has the client half, and who has the menu up
@@ -65,6 +66,13 @@ struct Module: public interface::Module, public Interface
 					"require(\"buildat/module/world_menu\")");
 		m_shown.insert(peer);
 		send_list(peer);
+	}
+
+	void set_presets(const std::vector<Preset> &presets)
+	{
+		m_presets = presets;
+		for(PeerId peer : m_shown)
+			send_list(peer);
 	}
 
 	void progress(const ss_ &text)
@@ -181,6 +189,17 @@ struct Module: public interface::Module, public Interface
 			fields.append(v);
 		}
 		out.set("fields", fields);
+		json::Value presets = json::array();
+		for(const Preset &p : m_presets){
+			json::Value v = json::object();
+			v.set("label", p.label);
+			json::Value options = json::object();
+			for(const auto &o : p.options)
+				options.set(o.first, o.second);
+			v.set("options", options);
+			presets.append(v);
+		}
+		out.set("presets", presets);
 		json::Value worlds = json::array();
 		if(pick){
 			storage::access(m_server, [&](storage::Interface *i){

@@ -327,18 +327,48 @@ end
 -- The server's list as a spec, and the selection kept across lists
 local served = {}
 
--- A new world's name and the app's options
-local function draw_new(state)
+-- A new world's name and the app's options; `preset` the index of the
+-- app's preset whose options fill the fields ([SKELDAT_HIGH_SCORES]),
+-- `typed` the name typed before it was picked
+local function draw_new(state, preset, typed)
 	local menu, root = screen(served, "new world")
 	text_on(menu.window, state.title .. ": a new world, named:")
-	local name = edit_on(menu.window, #state.worlds == 0 and "world" or "")
+	local name = edit_on(menu.window, typed or
+			(#state.worlds == 0 and "world" or ""))
+	local presets = state.presets or {}
+	local from = preset and presets[preset] and presets[preset].options or {}
+	if #presets > 0 then
+		local list = {{"(none)", "0"}}
+		for i, p in ipairs(presets) do
+			list[#list + 1] = {p.label, tostring(i)}
+		end
+		-- Drawn again on the next frame, not inside the dropdown's own
+		-- event, which the redraw removes
+		local picked = nil
+		menu:add_dropdown("From the high scores", list, tostring(preset or 0),
+				function(v)
+			log:info("world_menu: preset " .. v .. " picked")
+			picked = tonumber(v)
+		end)
+		root:SubscribeToStackEvent("Update", function()
+			if picked then
+				local p = picked
+				picked = nil
+				draw_new(state, p ~= 0 and p or nil, name:GetText())
+			end
+		end)
+	end
 	local fields = {}
 	for _, f in ipairs(state.fields) do
 		if f.ask ~= false and f.choices and #f.choices > 0 then
-			-- One of the app's choices, the first the default
+			-- One of the app's choices, the first the default, or the
+			-- preset's if it is one of them
 			local list, value = {}, f.choices[1][1]
 			for i, c in ipairs(f.choices) do
 				list[i] = {c[2], c[1]}
+				if from[f.key] == c[1] then
+					value = c[1]
+				end
 			end
 			menu:add_dropdown(f.label, list, value, function(v)
 				value = v
@@ -348,7 +378,7 @@ local function draw_new(state)
 		elseif f.ask ~= false then
 			text_on(menu.window, f.label .. ((f.hint or "") ~= "" and
 					" (" .. f.hint .. ")" or "") .. ":")
-			fields[f.key] = edit_on(menu.window, f.default or "")
+			fields[f.key] = edit_on(menu.window, from[f.key] or f.default or "")
 		end
 	end
 	local function ok()
@@ -405,6 +435,7 @@ buildat.sub_packet("world_menu:list", function(data)
 	end
 	served.title = state.title .. ": which world?"
 	served.worlds = state.worlds
+	log:info("world_menu: " .. #(state.presets or {}) .. " presets")
 	served.play = function(name)
 		log:info("world_menu: play " .. name)
 		send("play", {name = name})

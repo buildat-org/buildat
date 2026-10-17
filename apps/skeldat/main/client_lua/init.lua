@@ -181,10 +181,16 @@ end)
 -- looked at now; data: the days it lasted and the lowest bone speed it
 -- was at ([SKELDAT_BONE_SPEED])
 buildat.sub_packet("skeldat:end", function(data)
-	local days, speed = data:match("^(%S+) ?(%S*)")
+	local days, speed, best, place = data:match("^(%S+) ?(%S*) ?(%S*) ?(%S*)")
 	game.ended = "The bones cover the whole surface. The world ended after " ..
 			string.format("%.1f", tonumber(days) or 0) ..
 			" days at " .. (tonumber(speed) or 1) .. "x."
+	-- [SKELDAT_HIGH_SCORES] Its place among the scores of its parameters
+	if tonumber(place) and tonumber(place) > 0 then
+		game.ended = game.ended .. string.format("\nBest for these parameters: "
+				.. "%.1f days; this one is number %d.", tonumber(best),
+				tonumber(place))
+	end
 	log:info("skeldat: " .. game.ended)
 	game.changed()
 end)

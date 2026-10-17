@@ -102,6 +102,10 @@ for app in skeldat demo_skelenti; do
 		fail "$short: not renamed and deleted ($t/$app.srv2.log)"
 	[ ! -e "$t/$app/srv/apps/$app/saves/renamed" ] ||
 		fail "$short: the deleted world's directory is still there"
+	# [SKELDAT_HIGH_SCORES] Presets: none for an app that sets none, nor
+	# for skeldat with no score yet
+	grep -aq "world_menu: 0 presets" "$t/$app.cli1.log" ||
+		fail "$short: presets in the list ($t/$app.cli1.log)"
 	echo "  $short: made (and played), renamed, deleted"
 done
 # [WORLD_MENU_ADMIN] skeldat on a public server (no launcher=1), no world

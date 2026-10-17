@@ -53,7 +53,9 @@
 #include <Scene.h>
 #include <Image.h>
 #include <Node.h>
+#include "core/json.h"
 #include <cmath>
+#include <ctime>
 #include <algorithm>
 #include <array>
 #include <deque>
@@ -555,6 +557,15 @@ struct Module: public interface::Module, public luanti_session::Game
 	int64_t m_start_us = interface::os::time_us();
 	// worldgen's; read for its highest voxel only
 	BonesGenerator *m_generator = nullptr;
+	// [SKELDAT_HIGH_SCORES] Each player's seconds in this world ("played/"
+	// in the skeldat store), the world's name, and the scores outside the
+	// worlds: the save "_skeldat", store "scores", a key a parameter set
+	std::map<ss_, double> m_played;
+	ss_ m_world_name;
+	storage::Save *m_scores = nullptr;
+	// The ended world's set's best days and this score's place in it
+	double m_end_best = 0;
+	int m_end_place = 0;
 	// m_joining: sent the join, its login not yet in
 	std::set<size_t> m_waiting, m_shown, m_joining;
 	std::map<size_t, Player> m_players;
@@ -714,7 +725,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
-				"bow", "intro"})
+				"bow", "intro", "scores"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
@@ -757,8 +768,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			i->configure({"skeldat", {{"seed", "Seed", "", "empty: random"},
 					size, speed,
 					// The high score, written at the end (step_end())
-					{"ended", "The surface all bones after", "", "", true}}});
+					{"ended", "The surface all bones after", "", "", true},
+					// Who played it, with their hours ([SKELDAT_HIGH_SCORES])
+					{"players", "Players", "", "", true}}});
 		});
+		send_presets();
 		// The launcher's picked world ([SKELDAT_LAUNCH_WORLD]), the launch's
 		// save=; BUILDAT_SKELDAT_WORLD, a check's, made if it is not there
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
@@ -908,6 +922,24 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		m_starting = true;
 		m_store = m_save->store("skeldat");
+		m_world_name = name;
+		for(const ss_ &key : m_store->list("played/")){
+			ss_ t;
+			if(m_store->get(key, t))
+				m_played[key.substr(7)] = atof(t.c_str());
+		}
+		// For a check: "name seconds; ..." added to the times
+		if(const char *env = getenv("BUILDAT_SKELDAT_PLAYED")){
+			std::istringstream ps(env);
+			ss_ one;
+			while(std::getline(ps, one, ';')){
+				std::istringstream os(one);
+				ss_ who;
+				double secs = 0;
+				if(os>>who>>secs)
+					m_played[who] += secs;
+			}
+		}
 		ss_ v;
 		// A world with no seed yet is new, the world menu's made one too
 		m_making = !m_store->get("seed", v);
@@ -933,9 +965,13 @@ struct Module: public interface::Module, public luanti_session::Game
 		m_stuck_id = id_of("skeldat:stuck_arrow");
 		if(m_store->get("world_t", v))
 			m_world_t = atof(v.c_str());
+		else if(const char *env = getenv("BUILDAT_SKELDAT_WORLD_T"))
+			m_world_t = atof(env); // for a check: a new world's age, seconds
 		if(m_store->get("ended", v)){
 			m_ended = true;
 			m_end_days = atof(v.c_str());
+			if(m_store->get("ended_rank", v))
+				std::istringstream(v)>>m_end_best>>m_end_place;
 			log_i(MODULE, "skeldat: the world \"%s\" ended after %.1f days",
 					cs(name), m_end_days);
 		}
@@ -2145,6 +2181,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			os<<m_day;
 			m_store->set("day", os.str());
 			m_store->set("world_t", dtos(m_world_t));
+			for(const auto &pp : m_played)
+				m_store->set("played/"+pp.first, dtos(pp.second));
 			for(auto &pair : m_furnaces)
 				m_store->set("furnace/"+pair.first, pair.second.save());
 			for(auto &pair : m_mobs)
@@ -2302,6 +2340,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		const ss_ days = days_c;
 		m_store->set("ended", dtos(m_end_days));
 		m_save->store("world_menu")->set("ended", days);
+		record_score();
 		// What the end did not wait for, once: the voxels under the tops
 		// that have no bones
 		int64_t under = 0;
@@ -2380,7 +2419,199 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(m_ended)
 			network::send(m_server, peer, "skeldat:end", dtos(m_end_days)+" "+
-					itos(m_speed_low));
+					itos(m_speed_low)+" "+dtos(m_end_best)+" "+
+					itos(m_end_place));
+	}
+
+	//
+	// [SKELDAT_HIGH_SCORES] The scores, outside the worlds
+	//
+
+	storage::Store* scores()
+	{
+		if(!m_scores){
+			storage::access(m_server, [&](storage::Interface *i){
+				m_scores = i->open("_skeldat");
+				if(!m_scores)
+					m_scores = i->create("_skeldat");
+			});
+		}
+		return m_scores ? m_scores->store("scores") : nullptr;
+	}
+
+	// A set's JSON: {name, seed, size, speed, scores: [{days, date, world,
+	// players: [[name, seconds]]}]}, best first
+	json::Value read_set(storage::Store *st, const ss_ &key)
+	{
+		ss_ v;
+		if(st && st->get(key, v)){
+			const json::Value j = json::load_string(v.c_str());
+			if(j.is_object())
+				return j;
+		}
+		return json::object();
+	}
+
+	// Who played this world: the most time first, ten, and after them each
+	// one in for more than half the world's time
+	sv_<std::pair<ss_, double>> players_kept()
+	{
+		sv_<std::pair<ss_, double>> all(m_played.begin(), m_played.end());
+		std::sort(all.begin(), all.end(), [](const std::pair<ss_, double> &a,
+				const std::pair<ss_, double> &b){ return a.second > b.second; });
+		sv_<std::pair<ss_, double>> kept;
+		for(size_t i = 0; i < all.size(); i++)
+			if(i < 10 || all[i].second > m_world_t / 2)
+				kept.push_back(all[i]);
+		return kept;
+	}
+
+	// The end's score into its set (seed, size, the lowest speed), the set
+	// named after the last world not "_rerun" to end with it; the world's
+	// own Players field; the presets again
+	void record_score()
+	{
+		const sv_<std::pair<ss_, double>> kept = players_kept();
+		std::ostringstream names;
+		json::Value players = json::array();
+		for(size_t i = 0; i < kept.size(); i++){
+			char h[32];
+			snprintf(h, sizeof h, "%.1f h", kept[i].second / 3600);
+			names<<(i ? ", " : "")<<kept[i].first<<" "<<h;
+			json::Value p = json::array();
+			p.append(json::Value(kept[i].first));
+			p.append(json::Value(kept[i].second));
+			players.append(p);
+		}
+		m_save->store("world_menu")->set("players", names.str());
+		storage::Store *st = scores();
+		if(!st)
+			return;
+		ss_ seed = "0";
+		m_store->get("seed", seed);
+		const int size = m_half * 2 * skeldat::bones::SECTION;
+		const ss_ key = "set/"+seed+"/"+itos(size)+"/"+itos(m_speed_low);
+		json::Value set = read_set(st, key);
+		set.set("seed", json::Value(seed));
+		set.set("size", json::Value((int64_t)size));
+		set.set("speed", json::Value((int64_t)m_speed_low));
+		const ss_ rerun = "_rerun";
+		const bool is_rerun = m_world_name.size() > rerun.size() &&
+				m_world_name.compare(m_world_name.size() - rerun.size(),
+				rerun.size(), rerun) == 0;
+		if(!is_rerun)
+			set.set("name", json::Value(m_world_name));
+		else if(json::jstr(set, "name").empty())
+			set.set("name", json::Value(m_world_name.substr(0,
+					m_world_name.size() - rerun.size())));
+		char date[16];
+		const time_t now = time(nullptr);
+		strftime(date, sizeof date, "%Y-%m-%d", localtime(&now));
+		json::Value score = json::object();
+		score.set("days", json::Value(m_end_days));
+		score.set("date", json::Value(ss_(date)));
+		score.set("world", json::Value(m_world_name));
+		score.set("players", players);
+		// Best first: in before the first with fewer days
+		const json::Value &old = set.get("scores");
+		json::Value list = json::array();
+		m_end_place = 0;
+		for(unsigned i = 0; old.is_array() && i < old.size(); i++){
+			if(!m_end_place && old.at(i).get("days").as_number() < m_end_days){
+				list.append(score);
+				m_end_place = list.size();
+			}
+			list.append(old.at(i));
+		}
+		if(!m_end_place){
+			list.append(score);
+			m_end_place = list.size();
+		}
+		set.set("scores", list);
+		m_end_best = list.at(0u).get("days").as_number();
+		st->set(key, set.stringify());
+		m_store->set("ended_rank", dtos(m_end_best)+" "+itos(m_end_place));
+		log_i(MODULE, "skeldat: the score %.1f days is %d. of %u in %s "
+				"(\"%s\"), best %.1f; players: %s", m_end_days, m_end_place,
+				list.size(), cs(key), cs(json::jstr(set, "name")), m_end_best,
+				cs(names.str()));
+		send_presets();
+	}
+
+	// The sets, best first: [{key, name, seed, size, speed, best}]
+	json::Value list_sets()
+	{
+		json::Value out = json::array();
+		storage::Store *st = scores();
+		if(!st)
+			return out;
+		sv_<std::pair<double, json::Value>> sets;
+		for(const ss_ &key : st->list("set/")){
+			const json::Value set = read_set(st, key);
+			const json::Value &sc = set.get("scores");
+			if(!sc.is_array() || sc.size() == 0)
+				continue;
+			json::Value v = json::object();
+			v.set("key", json::Value(key));
+			v.set("name", json::Value(json::jstr(set, "name")));
+			v.set("seed", json::Value(json::jstr(set, "seed")));
+			v.set("size", json::Value(json::jint(set, "size")));
+			v.set("speed", json::Value(json::jint(set, "speed")));
+			const double best = sc.at(0u).get("days").as_number();
+			v.set("best", json::Value(best));
+			sets.push_back({best, v});
+		}
+		std::stable_sort(sets.begin(), sets.end(), [](
+				const std::pair<double, json::Value> &a,
+				const std::pair<double, json::Value> &b){
+			return a.first > b.first; });
+		for(const auto &p : sets)
+			out.append(p.second);
+		return out;
+	}
+
+	// The world menu's "From the high scores": each set's parameters
+	void send_presets()
+	{
+		const json::Value sets = list_sets();
+		std::vector<world_menu::Preset> presets;
+		for(unsigned i = 0; i < sets.size() && i < 20; i++){
+			const json::Value &v = sets.at(i);
+			char label[200];
+			snprintf(label, sizeof label, "%s: %d, %dx, seed %s, best %.1f days",
+					cs(json::jstr(v, "name")), (int)json::jint(v, "size"),
+					(int)json::jint(v, "speed"), cs(json::jstr(v, "seed")),
+					v.get("best").as_number());
+			world_menu::Preset p;
+			p.label = label;
+			p.options["seed"] = json::jstr(v, "seed");
+			p.options["size"] = itos(json::jint(v, "size"));
+			p.options["speed"] = itos(json::jint(v, "speed"));
+			presets.push_back(p);
+		}
+		world_menu::access(m_server, [&](world_menu::Interface *i){
+			i->set_presets(presets);
+		});
+	}
+
+	// skeldat:scores: "list", the sets; "set <key>", one set's best ten
+	void send_scores(size_t peer, const ss_ &ask)
+	{
+		json::Value out = json::object();
+		if(ask.compare(0, 4, "set ") == 0){
+			const ss_ key = ask.substr(4);
+			json::Value set = read_set(scores(), key);
+			const json::Value &sc = set.get("scores");
+			json::Value best = json::array();
+			for(unsigned i = 0; sc.is_array() && i < sc.size() && i < 10; i++)
+				best.append(sc.at(i));
+			set.set("scores", best);
+			set.set("key", json::Value(key));
+			out.set("set", set);
+		} else {
+			out.set("sets", list_sets());
+		}
+		network::send(m_server, peer, "skeldat:scores", out.stringify());
 	}
 
 	// Inside the world above its bottom layer
@@ -2419,6 +2650,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		if(what == "intro"){
 			send_intro(peer);
+			return;
+		}
+		if(what == "scores"){
+			send_scores(peer, packet.data);
 			return;
 		}
 		if(pl.hp <= 0)
@@ -4748,6 +4983,10 @@ struct Module: public interface::Module, public luanti_session::Game
 			world_in();
 		if(!m_ended)
 			step_bones(event.dtime);
+		if(!m_ended && m_world_ready)
+			for(auto &pair : m_players)
+				if(pair.second.placed)
+					m_played[pair.second.name] += event.dtime;
 		step_end();
 		step_arrows(event.dtime);
 		step_drops(event.dtime);

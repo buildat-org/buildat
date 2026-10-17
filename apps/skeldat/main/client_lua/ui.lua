@@ -116,8 +116,12 @@ function M.draw_hud()
 	end
 	local s = scale()
 	if game.ended then
+		-- Wrapped to the screen, each line centred
 		local t = text(hud, game.ended, 0, 8 * s, 8 * s)
-		t:SetPosition(math.floor((r.width - t.width) / 2), math.floor(8 * s))
+		t:SetFixedWidth(r.width - 16 * s)
+		t:SetWordwrap(true)
+		t:SetTextAlignment(magic.HA_CENTER)
+		t:SetPosition(math.floor(8 * s), math.floor(8 * s))
 	end
 	local x0 = math.floor((r.width - 182 * s) / 2)
 	local y0 = r.height - 23 * s

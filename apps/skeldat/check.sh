@@ -1243,6 +1243,75 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 [ $(grep -ac "skeldat : pause: how to play shown" "$t/intro2.log") = 1 ] ||
 	fail "the dialog came again on the second join ($t/intro2.log)"
 echo "the opening dialog: $days days at a new 128 world's start"
+# 29. High scores ([SKELDAT_HIGH_SCORES]), three 128 worlds of seed 2 at
+# 1x on one server tree, each ended at once (the surface filled), aged by
+# BUILDAT_SKELDAT_WORLD_T: "w1" 30 days with 12 players' times given
+# (the ten most kept and the 11th, in over half the time; the 12th not),
+# its Players field the same; "w2" 10 days, second in the set, the set
+# now named w2; "w2_rerun" 5 days, third, the name kept. A client in it:
+# the end text's place, High scores... with the one set, and the set's
+# three scores. Then the launcher's world menu: the set as a preset, and
+# a world made from it is of seed 2, 128 wide, 1x.
+hs() # <n> [server args], the environment the caller's
+{
+	local n=$1
+	shift
+	BUILDAT_SKELDAT_SEED=2 start_server "$t/srv32_$n.log" "STATUS Listening" \
+		300 auto "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv32" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($t/srv32_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+hs_w() # <n> <world> <age>: a 128 world ended at once
+{
+	BUILDAT_SKELDAT_WORLD=$2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=surface \
+		BUILDAT_SKELDAT_WORLD_T=$3 hs $1
+}
+hs_end()
+{
+	wait_for_log "$t/srv32_$1.log" "skeldat: the score .* is [0-9]*\. of" 60 ||
+		fail "no score recorded ($t/srv32_$1.log)"
+	grep -a "skeldat: the score" "$t/srv32_$1.log" | sed 's/.*skeldat: //'
+}
+played="p01 30000; p02 29000; p03 28000; p04 27000; p05 26000; p06 25000; p07 24000; p08 23000; p09 22000; p10 21000; p11 20000; p12 1000"
+BUILDAT_SKELDAT_PLAYED="$played" hs_w 1 w1 36000
+s1=$(hs_end 1)
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+echo "$s1" | grep -q 'is 1\. of 1 in set/2/128/1 ("w1")' &&
+	echo "$s1" | grep -q "players: p01 8.3 h, .*p10 5.8 h, p11 5.6 h$" ||
+	fail "w1's score, or its players: $s1 ($t/srv32_1.log)"
+hs_w 2 w2 12000
+s2=$(hs_end 2)
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+echo "$s2" | grep -q 'is 2\. of 2 in set/2/128/1 ("w2"), best 30\.0' ||
+	fail "w2 not second, or the set not named after it: $s2 ($t/srv32_2.log)"
+printf '%s\n' "$placed" "delay 1500" "keypress Escape" "wait_log 5000 pause: the menu shown" \
+	"delay 500" 'click Button "High scores..."' "wait_log 5000 pause: high scores shown" \
+	"delay 500" 'click Button "w2:*"' "wait_log 5000 pause: scores of" \
+	"delay 500" "screenshot $t/scores.png" quit > "$t/hs.cmds"
+hs_w 3 w2_rerun 6000
+s3=$(hs_end 3)
+echo "$s3" | grep -q 'is 3\. of 3 in set/2/128/1 ("w2"), best 30\.0' ||
+	fail "the re-run's score, or the name it left: $s3 ($t/srv32_3.log)"
+client hs "$t/hs.cmds"
+wait $CLIENT || fail "the high scores drive ($t/hs.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "Best for these parameters: 30.0 days; this one is number 3" "$t/hs.log" &&
+	grep -aq "pause: high scores shown, 1 sets" "$t/hs.log" &&
+	grep -aq "pause: scores of set/2/128/1 shown, 3 scores" "$t/hs.log" ||
+	fail "the end's place, or the high scores pages ($t/hs.log)"
+printf '%s\n' "wait_log 120000 world_menu: 1 presets" 'click Button "New world..."' \
+	"wait_log 5000 world_menu: the name screen shown" "delay 300" "text fromset" \
+	'click DropDownList "▼"' "delay 500" "keypress Down" "keypress Return" \
+	"wait_log 5000 world_menu: preset 1 picked" "delay 500" 'click Button "Create"' \
+	"wait_log 180000 skeldat: placed at" quit > "$t/hs_menu.cmds"
+hs 4 -u launcher=1
+client hs_menu "$t/hs_menu.cmds"
+wait $CLIENT || fail "the world menu's preset drive ($t/hs_menu.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq 'the world "fromset" starts, seed 2,.* 128 x 64 x 128' "$t/srv32_4.log" &&
+	grep -aq "the bones at 1x" "$t/srv32_4.log" ||
+	fail "a world from the preset not of its seed, size and speed ($t/srv32_4.log)"
+echo "high scores: $s3"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1250,5 +1319,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog, the high scores"
 # vim: set noet ts=4 sw=4:
