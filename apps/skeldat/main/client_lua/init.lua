@@ -447,7 +447,7 @@ buildat.sub_packet("skeldat:position", function(data)
 end)
 
 -- Day and night off the server's clock (game.day is Luanti's time of
--- day, 0.5 noon), lit by builtin/luanti's rules (sky_light.lua) at the sun
+-- day, 0.5 noon), lit by extensions/sky_render's rules at the sun
 -- height of its stretched day: the sky's two ends in its hue at the
 -- reference's radiance, and the sun, the moon, the ambient, the bounce,
 -- the ground, a lamp, the cave floor and the fog from them. The sky's hue
