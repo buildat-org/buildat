@@ -113,7 +113,9 @@ inline bool pile(uint32_t salt, int32_t x, int32_t z, Pile &p,
 // [SKELDAT_SKELETON_PLAYERS] A player looks like a skeleton to the others
 // while a voxel in the 3x4x3 box round the voxel its feet are in (x, y, z)
 // -- one below the feet to one over the head -- has bones over half
-// (user, 2026-10-15). bones_at(x, y, z) is a voxel's bones.
+// (user, 2026-10-15). bones_at(x, y, z) is a voxel's bones. The same box
+// keeps the sun off a skeleton ([SKELDAT_SUN_IN_BONES]), its bones_at
+// giving a bone block or a skull MAX.
 static const int SKELETON_BONES = 8;
 template<typename F>
 inline bool skeleton_near(F bones_at, int x, int y, int z)

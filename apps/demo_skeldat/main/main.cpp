@@ -54,6 +54,7 @@
 #include <Node.h>
 #include <cmath>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <functional>
 #include <map>
@@ -560,6 +561,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	// was ~66 us, the world being too big for voxelworld's chunk buffers
 	// Marker skulls a footprint, kept by set_node, saved as "markers"
 	sv_<int> m_markers;
+	// The nodes that keep the sun off a skeleton beside them
+	std::array<uint32_t, 4> m_sun_ids{};
 	uint32_t m_marker = ID_IGNORE, m_lantern_ids[2] = {ID_IGNORE, ID_IGNORE};
 	sv_<int8_t> m_top_y;
 	sv_<uint8_t> m_top_b;
@@ -776,6 +779,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(m_store->get("day", v))
 			m_day = atof(v.c_str());
 		m_marker = id_of("skeldat:marker_skull");
+		m_sun_ids = {id_of("skeldat:bone_block"), id_of("skeldat:skull"),
+				id_of("skeldat:skulls"), m_marker};
 		if(m_store->get("world_t", v))
 			m_world_t = atof(v.c_str());
 		if(m_store->get("ended", v)){
@@ -2538,6 +2543,27 @@ struct Module: public interface::Module, public luanti_session::Game
 		return n ? (float)sum / (n * skeldat::bones::MAX) : 0.0f;
 	}
 
+	// [SKELDAT_SUN_IN_BONES] The sun does not burn a skeleton (user,
+	// 2026-10-16) while the 3x4x3 box round its feet's voxel has a voxel of
+	// bones over half -- bones::skeleton_near(), the rule a player looks
+	// like one by -- or a bone block or a skull, counted as full bones.
+	// -1 when the feet's voxel is not loaded.
+	int sun_safe(voxelworld::Instance *w, float x, float y, float z)
+	{
+		const int fx = (int)std::floor(x + 0.5f), fy = (int)std::floor(y + 0.5f),
+				fz = (int)std::floor(z + 0.5f);
+		if(m_format.id.get(w->get_sample(pv::Vector3DInt32(fx, fy, fz),
+				true).planes[0]) == ID_IGNORE)
+			return -1;
+		return skeldat::bones::skeleton_near([&](int vx, int vy, int vz){
+			const interface::VoxelSample v = w->get_sample(
+					pv::Vector3DInt32(vx, vy, vz), true);
+			const uint32_t id = m_format.id.get(v.planes[0]);
+			return std::find(m_sun_ids.begin(), m_sun_ids.end(), id) !=
+					m_sun_ids.end() ? skeldat::bones::MAX : (int)m_bones.get(v);
+		}, fx, fy, fz);
+	}
+
 	// Where something h voxels tall can stand in the column at x, z, from a
 	// step up to three down from feet y. A voxel at integer y spans y-0.5
 	// to y+0.5, so feet on the one at y are at y+0.5.
@@ -2746,16 +2772,20 @@ struct Module: public interface::Module, public luanti_session::Game
 			float dx = 0, dz = 0;
 			it>>dx>>dz;
 			if(kind == "marker"){
-				// "marker dx dz": a marker skull on the ground there
+				// "marker dx dz [node]": a marker skull, or the node, on
+				// the ground there
+				ss_ name;
+				it>>name;
+				const uint32_t id = name.empty() ? m_marker : id_of(name);
 				const int x = (int)std::floor(p->x + dx + 0.5f),
 						z = (int)std::floor(p->z + dz + 0.5f);
 				int y = (int)std::floor(p->y + 0.5f) + 2;
 				while(y > (int)std::floor(p->y + 0.5f) - 3 &&
 						id_at(x, y - 1, z) == ID_AIR)
 					y--;
-				set_node(x, y, z, m_marker);
-				log_i(MODULE, "skeldat: test: a marker skull at %s",
-						cs(pos_key(x, y, z)));
+				set_node(x, y, z, id);
+				log_i(MODULE, "skeldat: test: %s at %s", name.empty() ?
+						"a marker skull" : cs(name), cs(pos_key(x, y, z)));
 				continue;
 			}
 			if(kind == "bones"){
@@ -2791,6 +2821,12 @@ struct Module: public interface::Module, public luanti_session::Game
 			m.hp = MOB_HP[m.kind];
 			m.yaw = (float)M_PI;
 			m.mode_t = 30;
+			// "... marked": its marker skull placed today, so it places
+			// none beside itself, which would keep the sun off it
+			ss_ flag;
+			it>>flag;
+			if(flag == "marked")
+				m.marker_day = m_world_t / m_day_s;
 			const uint32_t k = m_next_mob++;
 			m_mobs[k] = m;
 			log_i(MODULE, "skeldat: test: a %s (%u) at %.1f,%.1f,%.1f",
@@ -3045,13 +3081,13 @@ struct Module: public interface::Module, public luanti_session::Game
 					} else if(m.mode == FIGHT)
 						m.mode = WANDER;
 					step_body(w, m, p, dt);
-					// The sun burns it, unless the bones are thick round
-					// its light form
+					// The sun burns it, unless bones are round its light
+					// form
 					if(here.sun >= 12){
 						m.burn_t += dt;
 						if(m.burn_t >= 1){
 							m.burn_t = 0;
-							if(danger(w, m.x, m.y, m.z) < DAYLIGHT_DANGER)
+							if(sun_safe(w, m.x, m.y, m.z) == 0)
 								burnt.push_back({key, 2});
 						}
 					}
@@ -3729,8 +3765,19 @@ struct Module: public interface::Module, public luanti_session::Game
 					const Mob &m = it->second;
 					const long c = column((int)std::floor(m.x + 0.5f),
 							(int)std::floor(m.z + 0.5f));
-					if(m.kind != SKELETON || m.node_id || c < 0 ||
-							m_top_b[c] >= skeldat::bones::FLOOD){
+					// By the sun's rule from its voxels; where they are not
+					// loaded, the column top's bones.
+					// simplified: unloaded, a bone block or skull beside it
+					// does not count
+					int safe = -1;
+					if(m.kind == SKELETON && !m.node_id && c >= 0)
+						voxelworld::access(m_server, m_scene,
+								[&](voxelworld::Instance *w){
+							safe = sun_safe(w, m.x, m.y, m.z);
+						});
+					if(safe < 0 && c >= 0)
+						safe = m_top_b[c] >= skeldat::bones::FLOOD;
+					if(m.kind != SKELETON || m.node_id || c < 0 || safe){
 						++it;
 						continue;
 					}

@@ -172,7 +172,7 @@ EOF
 # skeleton to client1 until it walks off (7 and the box: bones.h's self test).
 # The skeleton on the clean side, 20 off: it comes at the players, and in
 # the zone the bones would shade it from the sun
-BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 -20; boar 6 0; bones 1 0 8" \
+BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 -20 marked; boar 6 0; bones 1 0 8" \
 	server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
 wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t/a1.log)"
@@ -537,7 +537,7 @@ grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
 log13="$t/srv13.log"
 BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
-	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1; marker 0 1" \
+	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1 marked; marker 0 1" \
 	start_server "$log13" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
@@ -850,6 +850,30 @@ grep -aq "a skeleton shoots at client1" "$log22" &&
 	[ $(grep -a "skeletons, [0-9]* full" "$log22" | grep -vc "0 full") -ge 1 ] &&
 	! grep -a "skeletons, [0-9]* full" "$log22" | grep -v "0 full" | grep -qv " 0 bodies put back" ||
 	fail "the body did not follow its light form: $body ($log22)"
+# 20. No sun in the bones ([SKELDAT_SUN_IN_BONES]): at noon on clean
+# ground two skeletons: one 6 from a player, at a bow's distance where
+# it stands, beside a bone block, which does not burn; one 20 off with no
+# bones round it, which does as it walks in. Both marked, as the marker
+# skull a skeleton puts in the next column on seeing a player would keep
+# the sun off it too
+log23="$t/srv23.log"
+BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+	BUILDAT_SKELDAT_TEST="skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
+	start_server "$log23" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv23" -C "$t/srv.cache" -l 3 || fail "the server ($log23)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 10000" quit > "$t/sun.cmds"
+client sun "$t/sun.cmds"
+wait $CLIENT || fail "the sun's drive ($t/sun.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+safe=$(grep -a "test: a skeleton (" "$log23" | sed -n 1p | sed 's/.*(\([0-9]*\)).*/\1/')
+open=$(grep -a "test: a skeleton (" "$log23" | sed -n 2p | sed 's/.*(\([0-9]*\)).*/\1/')
+grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
+	! grep -aq "the skeleton ($safe) burns" "$log23" &&
+	grep -aq "the skeleton ($open) burns" "$log23" ||
+	fail "the bone block did not keep the sun off ($log23)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -857,5 +881,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block"
 # vim: set noet ts=4 sw=4:
