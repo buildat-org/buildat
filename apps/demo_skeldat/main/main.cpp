@@ -81,6 +81,12 @@ static const float REACH = 5.5f;       // a little over Luanti's 4 from the eye
 // A day in seconds, Luanti's time_speed 72; BUILDAT_SKELDAT_DAY for a check
 static const float DAY_SECONDS = 1200;
 static const int HP_MAX = 20, BREATH_MAX = 10;
+// [SKELDAT_SKATEBOARD] The bit of luanti:where's controls that says the
+// player is on the board (player.lua's board, init.lua sends it)
+static const int32_t BOARD_BIT = 1 << 16;
+// And the low byte: the count of skeldat:position packets the client has
+// had, so a report from before the last is known
+static const int32_t PLACES_MASK = 0xff;
 
 static ss_ pos_key(int x, int y, int z)
 {
@@ -115,6 +121,18 @@ struct Player
 	float cx = 0, cy = 0, cz = 0;
 	double check_t = 0;
 	bool check_air = false;
+	// [SKELDAT_SKATEBOARD] On the board now (the client's where), at any
+	// time since the last check, the speed that check measured and its
+	// checks in the air running on the board
+	bool board = false, board_seen = false;
+	float check_v = 0;
+	int board_air = 0;
+	// A place sent (send_position) that the client has not reported yet:
+	// what it reports meanwhile is from before, and is not taken. The
+	// places sent, counted; the client's where says how many it has had
+	// (PLACES_MASK)
+	bool moved = false;
+	int32_t places = 0;
 	// fly, fast and noclip, and no movement check (accounts' admin)
 	bool admin = false;
 	// Seen as a skeleton by the others (update_skeletons())
@@ -1717,6 +1735,13 @@ struct Module: public interface::Module, public luanti_session::Game
 		for(float v : {x, y, z, look_h})
 			if(!std::isfinite(v) || std::fabs(v) > 1e6f)
 				return;
+		// A lagging client's places from before the one sent: a pull back
+		// of each would only queue more of them
+		if(pl->moved){
+			if((controls & PLACES_MASK) != pl->places)
+				return;
+			pl->moved = false;
+		}
 		auto section = [](const Player &pl){
 			return std::make_tuple((int)std::floor(pl.x / 16),
 					(int)std::floor(pl.y / 16), (int)std::floor(pl.z / 16));
@@ -1725,6 +1750,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		pl->x = x;
 		pl->y = y;
 		pl->z = z;
+		pl->board = (controls & BOARD_BIT) != 0;
+		pl->board_seen = pl->board_seen || pl->board;
 		// Luanti's horizontal look turns the other way from Urho's yaw
 		pl->yaw = -look_h * 180 / (float)M_PI;
 		if(section(*pl) != was)
@@ -1836,6 +1863,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		pl.cz = pl.z;
 		pl.check_t = m_time;
 		pl.check_air = false;
+		pl.moved = true;
+		pl.places = (pl.places + 1) & PLACES_MASK;
 		std::ostringstream os;
 		os<<pl.x<<" "<<pl.y<<" "<<pl.z<<" "<<pl.yaw;
 		network::send(m_server, peer, "skeldat:position", os.str());
@@ -2932,6 +2961,37 @@ struct Module: public interface::Module, public luanti_session::Game
 				set_node(x, y, z, id);
 				log_i(MODULE, "skeldat: test: %s at %s", name.empty() ?
 						"a marker skull" : cs(name), cs(pos_key(x, y, z)));
+				continue;
+			}
+			if(kind == "course"){
+				// [SKELDAT_SKATEBOARD] "course dx dz": a board's course of
+				// stone from there along +x, 5 wide, its heights over the
+				// player's ground: a platform of 12, a slope down to 0, a
+				// ramp of 2 at 1:2, a flat, a wall of 3 at 70; and off
+				// x 64..69 a slope down 8 along +z and a flat 70 long. The
+				// player put on the platform.
+				const int X = (int)std::floor(p->x + dx + 0.5f),
+						Z = (int)std::floor(p->z + dz + 0.5f),
+						B = (int)std::floor(p->y + 0.5f);
+				const uint32_t stone = id_of("skeldat:stone");
+				auto column = [&](int i, int j, int h){
+					const int lo = B + std::min(h, 0) - 3;
+					for(int y = lo; y <= std::max(h, 0) + B + 6; y++)
+						set_node(X + i, y, Z + j, y < B + h ? stone : ID_AIR);
+				};
+				for(int i = -3; i <= 75; i++)
+				for(int j = -2; j <= 2; j++){
+					const int h = i < 4 ? 12 : i < 16 ? 15 - i :
+							i >= 36 && i < 40 ? (i - 34) / 2 :
+							i >= 70 && i <= 72 ? 3 : 0;
+					column(i, j, h);
+				}
+				for(int i = 64; i <= 69; i++)
+				for(int j = 3; j <= 78; j++)
+					column(i, j, std::max(-8, 2 - j));
+				p->x = (float)X, p->y = (float)(B + 12), p->z = (float)Z;
+				send_position(peer, *p);
+				log_i(MODULE, "skeldat: test: a course at %d,%d,%d", X, B, Z);
 				continue;
 			}
 			if(kind == "lantern"){
@@ -4701,19 +4761,26 @@ struct Module: public interface::Module, public luanti_session::Game
 			if(!pl.placed)
 				continue;
 			const float dt = (float)(m_time - pl.check_t);
-			if(pl.admin || pl.hp <= 0 || dt <= 0){
+			skeldat::move_check::Board bd;
+			bd.on = pl.board_seen;
+			bd.v0 = pl.check_v;
+			bd.air = pl.board_air;
+			pl.board_seen = pl.board;
+			if(pl.admin || pl.hp <= 0 || dt <= 0 || pl.moved){
 				pl.cx = pl.x;
 				pl.cy = pl.y;
 				pl.cz = pl.z;
 				pl.check_t = m_time;
 				pl.check_air = false;
+				pl.check_v = 0;
+				pl.board_air = 0;
 				continue;
 			}
 			skeldat::move_check::Verdict v;
 			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 				v = skeldat::move_check::check([&](vp::Field &f){
 					fill_cells(w, f);
-				}, pl.cx, pl.cy, pl.cz, pl.x, pl.y, pl.z, dt, pl.check_air);
+				}, pl.cx, pl.cy, pl.cz, pl.x, pl.y, pl.z, dt, pl.check_air, bd);
 			});
 			if(v.ok){
 				pl.cx = pl.x;
@@ -4721,11 +4788,16 @@ struct Module: public interface::Module, public luanti_session::Game
 				pl.cz = pl.z;
 				pl.check_t = m_time;
 				pl.check_air = v.air;
+				pl.check_v = v.speed;
+				pl.board_air = bd.on && v.air ? bd.air + 1 : 0;
 				continue;
 			}
 			log_i(MODULE, "skeldat: %s pulled back from (%.1f, %.1f, %.1f) to "
-					"(%.1f, %.1f, %.1f): %s", cs(pl.name), pl.x, pl.y, pl.z,
-					pl.cx, pl.cy, pl.cz, v.why);
+					"(%.1f, %.1f, %.1f): %s%s", cs(pl.name), pl.x, pl.y, pl.z,
+					pl.cx, pl.cy, pl.cz, v.why, bd.on ? " (on the board)" : "");
+			// The client's board stops where it is put
+			pl.check_v = 0;
+			pl.board_air = 0;
 			pl.x = pl.cx;
 			pl.y = pl.cy;
 			pl.z = pl.cz;
@@ -4772,7 +4844,8 @@ struct Module: public interface::Module, public luanti_session::Game
 				const Player &o = pair.second;
 				if(pair.first != to.first && o.placed && o.hp > 0)
 					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
-							<<" "<<(o.skeleton ? 1 : 0)<<"\n";
+							<<" "<<(o.skeleton ? 1 : 0)<<" "<<(o.board ? 1 : 0)
+							<<"\n";
 			}
 			network::send(m_server, to.first, "skeldat:players", os.str());
 		}

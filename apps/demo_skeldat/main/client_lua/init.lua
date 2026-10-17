@@ -418,9 +418,12 @@ local function watch_near(dt)
 	end
 end
 
+-- The places had, counted, as main.cpp's PLACES_MASK
+local places = 0
 buildat.sub_packet("skeldat:position", function(data)
 	local x, y, z, yw = data:match("^(%S+) (%S+) (%S+) (%S+)")
 	player:set_position(tonumber(x), tonumber(y), tonumber(z))
+	places = (places + 1) % 256
 	yaw = tonumber(yw) or 0
 	if not placed then
 		-- The loading is over when the server has placed the player
@@ -1024,6 +1027,18 @@ local function on_place()
 	end
 end
 
+-- [SKELDAT_SKATEBOARD] The board, a flat box; main.cpp's BOARD_BIT
+local BOARD_BIT = 65536
+local function board_box(parent)
+	local node = parent:CreateChild("Board")
+	local box = node:CreateChild("Box")
+	box.position = magic.Vector3(0, 0.04, 0)
+	box.scale = magic.Vector3(0.3, 0.08, 1.0)
+	box:CreateComponent("StaticModel").model =
+			magic.cache:GetResource("Model", "Models/Box.mdl")
+	return node
+end
+
 --
 -- The others, as boxes
 -- simplified: no names over them, no animation
@@ -1031,8 +1046,8 @@ end
 local others = {}
 buildat.sub_packet("skeldat:players", function(data)
 	local seen = {}
-	for name, x, y, z, yw, skeleton in
-			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
+	for name, x, y, z, yw, skeleton, on_board in
+			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
 		seen[name] = true
 		do
 			local o = others[name]
@@ -1043,8 +1058,16 @@ buildat.sub_packet("skeldat:players", function(data)
 				body.scale = magic.Vector3(0.6, 1.75, 0.6)
 				local model = body:CreateComponent("StaticModel")
 				model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-				o = {node = node}
+				o = {node = node, board = board_box(node)}
+				o.board.enabled = false
 				others[name] = o
+			end
+			-- [SKELDAT_SKATEBOARD] simplified: turned with the look, not
+			-- the board's heading
+			if o.board.enabled ~= (on_board == "1") then
+				o.board.enabled = on_board == "1"
+				log:info("skeldat: " .. name .. (o.board.enabled and
+						" rides a board" or " walks"))
 			end
 			o.node.position = magic.Vector3(tonumber(x), tonumber(y),
 					tonumber(z))
@@ -1319,6 +1342,19 @@ end
 --
 -- The frame
 --
+local board_node = board_box(scene)
+board_node.enabled = false
+local board_shown, board_top, board_log_t = false, 0, 0
+local board_braking, board_air = false, 0
+-- For a check, a cheat the server's movement check should pull back:
+-- "event skeldat_board <speed>" the board at that speed along the look,
+-- kept at it
+local board_cheat = nil
+magic.SubscribeToEvent("command_seq:skeldat_board", function(_, d)
+	board_cheat = tonumber(d:GetString("Param"))
+	log:info("skeldat: the board forced to " .. tostring(board_cheat) ..
+			" by the drive")
+end)
 local send_t = 0
 local was_held = false
 magic.SubscribeToEvent("Update", function(_, d)
@@ -1344,14 +1380,57 @@ magic.SubscribeToEvent("Update", function(_, d)
 	end
 	local dead = game.stats.hp <= 0
 	local fx, fz = 0, 0
+	local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
 	if not dead then
 		local f = (down("forward") and 1 or 0) - (down("back") and 1 or 0)
 		local r = (down("right") and 1 or 0) - (down("left") and 1 or 0)
-		local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
 		fx, fz = s * f + c * r, c * f - s * r
 	end
+	-- [SKELDAT_SKATEBOARD] On the board the look turns it and the back
+	-- key brakes; the board's own box under the feet
+	if board_cheat then
+		player.board = player.board or {k = 0}
+		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
+	end
 	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
-			sneak = not dead and down("sneak"), fast = player.fast})
+			sneak = not dead and down("sneak"), fast = player.fast,
+			look_x = s, look_z = c, brake = not dead and down("back")})
+	local b = player.board
+	if (b ~= nil) ~= board_shown then
+		board_shown, board_braking = b ~= nil, false
+		log:info("skeldat: " .. (b and "on the board" or "walking") ..
+				string.format(" at (%.1f, %.1f, %.1f)", player.x, player.y,
+				player.z))
+	end
+	board_node.enabled = b ~= nil
+	if b and down("back") and not board_braking then
+		board_braking = true
+		log:info(string.format("skeldat: braking at %.1f at (%.1f, %.1f, %.1f)",
+				b.s, player.x, player.y, player.z))
+	end
+	if b and not player.on_ground then
+		board_air = board_air + dt
+	else
+		if board_air > 0.3 then
+			log:info(string.format("skeldat: the board flew %.2f s to (%.1f, "
+					.. "%.1f, %.1f)", board_air, player.x, player.y, player.z))
+		end
+		board_air = 0
+	end
+	if b then
+		board_node.position = magic.Vector3(player.x, player.y, player.z)
+		board_node.rotation = magic.Quaternion(
+				-math.deg(math.atan(b.k)), math.deg(math.atan2(b.hx, b.hz)), 0)
+		if b.s > board_top then
+			board_top = b.s
+		end
+		board_log_t = board_log_t + dt
+		if board_log_t >= 0.5 then
+			board_log_t = 0
+			log:info(string.format("skeldat: board speed %.1f, top %.1f", b.s,
+					board_top))
+		end
+	end
 	if player.landed_at then
 		if player.landed_at > 14 then
 			game.send_luanti("fell", {speed = player.landed_at},
@@ -1366,9 +1445,10 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if send_t >= 0.1 then
 		send_t = 0
 		-- Luanti's look: radians, the horizontal turning the other way
-		-- simplified: no controls; nothing on the server reads them
+		-- simplified: no controls but the board's and the places had
 		game.send_luanti("where", {x = player.x, y = player.y, z = player.z,
-			look_h = math.rad(-yaw), look_v = math.rad(pitch), controls = 0,
+			look_h = math.rad(-yaw), look_v = math.rad(pitch),
+			controls = places + (player.board and BOARD_BIT or 0),
 			sent_us = buildat.get_time_us()}, {"object", {"x", "double"},
 			{"y", "double"}, {"z", "double"}, {"look_h", "double"},
 			{"look_v", "double"}, {"controls", "int32_t"},

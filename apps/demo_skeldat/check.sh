@@ -75,6 +75,8 @@ g++ -O2 -std=c++14 -I"$here/src" "$here/util/voxel_path_test.cpp" \
 echo "$path" | tail -1
 luajit -e "assert(dofile('$m/client_lua/hand.lua').self_test())" ||
 	fail "hand.lua's self test (the bow's shape)"
+luajit -e "dofile('$m/client_lua/player.lua')" ||
+	fail "player.lua's self test (the walk's and the board's)"
 
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
 # The spawn at (0, 290): clean ground, the bones zone from z 300 on
@@ -1004,6 +1006,75 @@ grep -aq "the skeleton (1) dies" "$s1" && grep -aq "an arrow from client1 hits t
 grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not picked up ($s1)"
 [ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
 	fail "no stuck-arrow voxel, or not picked up after the restart: ${kept:-none} ($t/srv26_2.log)"
+# 24. The board ([SKELDAT_SKATEBOARD]) on a course of stone (TEST
+# course, main.cpp): walked onto its slope of 12, client1 is on the board
+# by itself, gets the drop's speed and keeps it on the flat, flies off a
+# ramp of 2 and lands, and a wall of 3 stops it; walked off the side down
+# 8 onto a flat, S stops it within the brake's reach. The server pulls
+# back none of it, and pulls back a board the drive forces to 25 on the
+# flat. client2 sees client1 on a board.
+log27="$t/srv27.log"
+cat > "$t/board1.cmds" <<EOF
+$placed
+wait_log 60000 skeldat: placed at (-40.0,
+delay 1500
+look 90 0
+delay 1000
+keydown W
+wait_log 5000 skeldat: on the board
+keyup W
+wait_log 20000 skeldat: walking
+delay 1000
+look 0 0
+delay 500
+keydown W
+wait_log 5000 skeldat: on the board
+keyup W
+delay 1600
+keydown S
+wait_log 10000 skeldat: walking
+keyup S
+delay 1500
+event skeldat_board 25
+delay 3000
+quit
+EOF
+printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 rides a board" \
+	"delay 500" quit > "$t/board2.cmds"
+BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 2" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="course -40 -20" \
+	start_server "$log27" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv27" -C "$t/srv.cache" -l 3 || fail "the server ($log27)"
+CHECK_PIDS+=($SERVER_PID)
+client board1 "$t/board1.cmds"; a=$CLIENT
+wait_for_log "$log27" "skeldat: test: a course" 330 || fail "no course ($log27)"
+client board2 "$t/board2.cmds"; bpid=$CLIENT
+wait $a || fail "the board's drive ($t/board1.log)"
+wait $bpid || fail "client2's drive ($t/board2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+c1="$t/board1.log"
+top=$(awk '/skeldat: walking at/ { exit } /skeldat: board speed/ { l = $0 } END { print l }' "$c1" |
+	sed 's/.*top \([0-9.]*\).*/\1/')
+flew=$(grep -a "skeldat: the board flew" "$c1" | head -1 | sed 's/.*flew \([0-9.]*\) s.*/\1/')
+wall=$(grep -a "skeldat: walking at" "$c1" | head -1 | sed 's/.*at (\([-0-9.]*\),.*/\1/')
+brake=$(grep -a "skeldat: braking at" "$c1" | head -1 |
+	sed 's/.*braking at \([0-9.]*\) at .*, \([-0-9.]*\))$/\1 \2/')
+stop=$(grep -a "skeldat: walking at" "$c1" | sed -n 2p | sed 's/.*, \([-0-9.]*\))$/\1/')
+echo "the board: top speed ${top:-none} (the drop's 22.1), flew ${flew:-no} s, stopped by the wall at x ${wall:-none}, braked from ${brake% *} in $(awk -v b="${brake#* }" -v s="${stop:-0}" 'BEGIN { printf "%.1f", s - b }')"
+awk -v top="${top:-0}" -v flew="${flew:-0}" -v wall="${wall:-0}" -v v="${brake% *}" \
+	-v b="${brake#* }" -v s="${stop:-0}" 'BEGIN { exit !(top >= 20 && top <= 22.5 &&
+		flew >= 0.5 && wall > 20 && wall < 29.5 && v > 10 && s - b >= 0 &&
+		s - b <= v * v / 48 + 1.5) }' ||
+	fail "the board's run: top $top, flew $flew, the wall at $wall, braked from $brake to $stop ($c1)"
+cheat=$(grep -a "the board forced to" "$c1" | head -1 | awk '{print $3}')
+first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
+[ -n "$cheat" ] && [ -n "$first_pull" ] && [[ ! "$first_pull" < "$cheat" ]] &&
+	grep -aq "pulled back .*: too far (on the board)" "$log27" ||
+	fail "an honest board pulled back, or the forced one not: first at $first_pull, the cheat at $cheat ($log27)"
+grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
+	fail "client2 did not see client1 on a board ($t/board2.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1011,5 +1082,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard"
 # vim: set noet ts=4 sw=4:

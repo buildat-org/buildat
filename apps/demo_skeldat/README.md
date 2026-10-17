@@ -28,7 +28,14 @@ module under it.
 - `main/move_check.h`: the movement check, the engine's voxel pathfinder
   with a rule for a body in the air (self test in the header). Every
   second a player who is not an admin is pulled back where the move could
-  not have been walked at twice the walk speed.
+  not have been walked at twice the walk speed, or, on the board, made at
+  the speed the height lost allows.
+- The skateboard: walking downhill (ground a voxel lower two ahead, not
+  sneaking) puts the player on a board by itself. It rides steps of up
+  to 2 as a slope, loses no speed but by climbing and by S (the brake),
+  turns toward where the camera looks, flies off crests, jumps twice
+  as hard as a walk, and is left for walking at a stop, a wall, water or
+  a ladder. The others see a flat box under a player on one.
 - The world's edge: the last 16 columns of each side rise up to 12 in
   bone blocks, the outermost column a bone wall nothing digs (made once
   when a world is first in), and bone hills drawn beyond it to the view.
@@ -57,6 +64,8 @@ Start it from the launcher, or `buildat_server -m apps/demo_skeldat` and
 connect a client. Until a world runs, the first client on the server's
 machine picks one: play a save, name and create a new one, or delete one.
 
+A drive's event `skeldat_board <speed>` keeps the player on the board at
+that speed along the look, a cheat for the movement check to catch.
 A drive's event `skeldat_modes [fly] [fast] [noclip]` sets the modes
 whatever the role, as a modified client would.
 

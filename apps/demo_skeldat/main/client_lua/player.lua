@@ -7,6 +7,7 @@
 -- extensions/luanti_client/player.lua, where its checks are. Nothing in it
 -- knows Luanti's protocol or Urho3D; edit it there and copy it here
 -- rather than letting the copies drift.
+-- The board ([SKELDAT_SKATEBOARD], below the walk) is this copy's own.
 --
 -- coordinate stops the player, which is what makes it checkable without
 -- either of them (see test.lua).
@@ -58,6 +59,22 @@ M.DEFAULT_MOVEMENT = {
 	liquid_sink = 10,
 	gravity = 9.81,
 }
+
+-- [SKELDAT_SKATEBOARD] The board, skeldat's own (not in the copies this
+-- one came from): steps of up to BOARD_STEP up or down ridden as a slope,
+-- nothing slowing it but a climb and the brake, under BOARD_STOP walked
+-- off. Speeds in voxels a second, the brake in voxels a second squared,
+-- the turn in radians a second at a standstill (it falls with the speed).
+M.BOARD_STEP = 2
+M.BOARD_BRAKE = 24
+M.BOARD_STOP = 0.5
+M.BOARD_JUMP = 2 -- times speed_jump
+M.BOARD_TURN = 3
+-- Half the board's length: where its ends sample the ground
+M.BOARD_HALF = 0.6
+-- The board's frame is cut finer by travel than walking's, coarser by time
+M.BOARD_STEP_S = 0.02
+M.BOARD_STEP_MOVE = 0.25
 
 -- What a voxel that is a whole cube is made of, in its own coordinates: the
 -- shorthand solid() returns true for
@@ -283,6 +300,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	function self:set_position(x, y, z)
 		self.x, self.y, self.z = x, y, z
 		self.vy = 0
+		if self.board then
+			self.board, self.vx, self.vz = nil, 0, 0
+		end
 	end
 
 	-- A push the server gave the player, out of TOCLIENT_PLAYER_SPEED: an
@@ -649,6 +669,263 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		end
 	end
 
+	--
+	-- [SKELDAT_SKATEBOARD] The board. self.board is nil walking, else
+	-- {s = the speed along the ground, hx, hz = the heading, k = the
+	-- slope along it}; in the air (on_ground false) self.vx, vy and vz
+	-- carry it as a walk's do. wish.look_x and look_z are where the camera
+	-- looks, which the board turns to; wish.brake is the back key.
+	--
+	local function flying()
+		if self.fly_active ~= nil then
+			return self.fly_active
+		end
+		return self.fly
+	end
+	local function filled(x, y, z)
+		local w = is_solid(x, y, z)
+		return w ~= false and w ~= nil
+	end
+	-- The ground of a column near feet height y: the top of the highest
+	-- solid voxel at most BOARD_STEP over or under the feet with two open
+	-- over it; "wall" when the body's own cells there are solid and there
+	-- is no such top; nil when nothing is that close under. Kept for the
+	-- frame, by the feet's cell.
+	-- simplified: a voxel made of boxes counts as a whole one
+	local tops = {}
+	local function column_top(cx, cz, y)
+		local f = math.floor(y + 0.5)
+		local key = ((cx + 32768) * 65536 + cz + 32768) * 1024 + f + 512
+		local t = tops[key]
+		if t ~= nil then
+			return t or nil
+		end
+		for c = f + M.BOARD_STEP - 1, f - M.BOARD_STEP - 1, -1 do
+			if filled(cx, c, cz) and not filled(cx, c + 1, cz) and
+					not filled(cx, c + 2, cz) then
+				t = c + 0.5
+				break
+			end
+		end
+		if t == nil and (filled(cx, f, cz) or filled(cx, f + 1, cz)) then
+			t = "wall"
+		end
+		tops[key] = t or false
+		return t
+	end
+	-- The ground's height at (x, z): the four column tops round it, each
+	-- at its voxel's centre, mixed by distance, which is what makes a step
+	-- a slope. A wall beside counts as the centre column, a drop as
+	-- falling away. Also the centre column's own top.
+	local function surface(x, z, y)
+		local centre = column_top(math.floor(x + 0.5), math.floor(z + 0.5), y)
+		local x0, z0 = math.floor(x), math.floor(z)
+		local ux, uz = x - x0, z - z0
+		local h = 0
+		for i = 0, 1 do
+			for j = 0, 1 do
+				local t = column_top(x0 + i, z0 + j, y)
+				if t == "wall" then
+					t = type(centre) == "number" and centre or y
+				elseif t == nil then
+					t = y - M.BOARD_STEP - 1
+				end
+				h = h + t * (i == 1 and ux or 1 - ux) * (j == 1 and uz or 1 - uz)
+			end
+		end
+		return h, centre
+	end
+	-- The board's height at (x, z), from its two ends and its middle, and
+	-- the slope along it
+	local function board_at(x, z, y)
+		local b = self.board
+		local ex, ez = b.hx * M.BOARD_HALF, b.hz * M.BOARD_HALF
+		local front = surface(x + ex, z + ez, y)
+		local mid, centre = surface(x, z, y)
+		local back = surface(x - ex, z - ez, y)
+		return (front + 2 * mid + back) / 4,
+				(front - back) / (2 * M.BOARD_HALF), centre
+	end
+	-- Whether the board's move by d along an axis (1 x, 3 z) is stopped: by
+	-- a column it cannot ride onto, or by what is over the ground there,
+	-- the box lifted onto the highest ground it covers
+	local function stopped(axis, d)
+		local p = {self.x, self.y, self.z}
+		p[axis] = p[axis] + d
+		local top = self.y
+		for cx = cell_lo(p[1] - M.RADIUS), cell_hi(p[1] + M.RADIUS) do
+			for cz = cell_lo(p[3] - M.RADIUS), cell_hi(p[3] + M.RADIUS) do
+				local t = column_top(cx, cz, self.y)
+				if t == "wall" then
+					return true
+				end
+				if t and t > top then
+					top = t
+				end
+			end
+		end
+		return move_axis({self.x, top + 0.01, self.z}, axis, d, is_solid)
+	end
+	local function leave_board()
+		local b = self.board
+		if self.on_ground then
+			local c = 1 / math.sqrt(1 + b.k * b.k)
+			self.vx, self.vz = b.hx * b.s * c, b.hz * b.s * c
+		end
+		self.board = nil
+	end
+	-- Toward where the camera looks, at a rate falling with the speed
+	local function turn(wish, dt)
+		local b = self.board
+		local lx, lz = wish.look_x or 0, wish.look_z or 0
+		if lx == 0 and lz == 0 then
+			return
+		end
+		local now = math.atan2(b.hx, b.hz)
+		local diff = (math.atan2(lx, lz) - now + math.pi) % (2 * math.pi) -
+				math.pi
+		local max = M.BOARD_TURN / (1 + b.s / 8) * dt
+		now = now + math.max(-max, math.min(max, diff))
+		b.hx, b.hz = math.sin(now), math.cos(now)
+	end
+
+	-- One step on the board. On the ground the move is along the slope and
+	-- the speed what the height says, s^2 - 2 g dy, which loses nothing:
+	-- after any run it is sqrt(v0^2 + 2 g drop), the server's bound. Where
+	-- the ground falls away faster than a body thrown along it, the board
+	-- flies; it lands keeping the speed along the ground and losing the
+	-- rest.
+	local function board_step(dt, wish)
+		local b = self.board
+		local m = self.movement
+		local ov = self.override or EMPTY_OVERRIDE
+		local g = 2 * m.gravity * (ov.gravity or 1)
+		local fx, fz = math.floor(self.x + 0.5), math.floor(self.z + 0.5)
+		local fy = math.floor(self.y + 0.5)
+		if flying() or (is_liquid ~= nil and is_liquid(fx, fy, fz)) or
+				(is_climbable ~= nil and is_climbable(fx, fy, fz)) then
+			leave_board()
+			return step(dt, wish)
+		end
+		if self.on_ground then
+			turn(wish, dt)
+			if wish.brake then
+				b.s = math.max(0, b.s - M.BOARD_BRAKE * dt)
+			end
+			local c = 1 / math.sqrt(1 + b.k * b.k)
+			local vy = b.s * b.k * c
+			if wish.jump then
+				self.vx, self.vz = b.hx * b.s * c, b.hz * b.s * c
+				self.vy = vy + M.BOARD_JUMP * m.speed_jump * (ov.jump or 1)
+				self.on_ground = false
+				return
+			end
+			local d = b.s * c * dt
+			local dx, dz = b.hx * d, b.hz * d
+			local bx, bz = stopped(1, dx), stopped(3, dz)
+			-- Head on into a wall: walking, still; along one, sliding
+			-- with what of the speed went along it
+			if (bx and bz) or (bx and math.abs(b.hx) > 0.9) or
+					(bz and math.abs(b.hz) > 0.9) then
+				self.board, self.vx, self.vz = nil, 0, 0
+				return
+			elseif bx then
+				b.s, b.hx, b.hz, dx = b.s * math.abs(b.hz), 0,
+						b.hz >= 0 and 1 or -1, 0
+			elseif bz then
+				b.s, b.hx, b.hz, dz = b.s * math.abs(b.hx),
+						b.hx >= 0 and 1 or -1, 0, 0
+			end
+			local nx, nz = self.x + dx, self.z + dz
+			local ny, k, centre = board_at(nx, nz, self.y)
+			local thrown = self.y + vy * dt - 0.5 * g * dt * dt
+			if type(centre) ~= "number" or ny < thrown - 0.02 then
+				self.vx, self.vz = b.hx * b.s * c, b.hz * b.s * c
+				self.x, self.y, self.z = nx, thrown, nz
+				self.vy = vy - g * dt
+				self.on_ground = false
+				return
+			end
+			local s2 = b.s * b.s - 2 * g * (ny - self.y)
+			self.x, self.y, self.z = nx, ny, nz
+			self.vy = 0
+			b.k, b.s = k, s2 > 0 and math.sqrt(s2) or 0
+			if b.s < M.BOARD_STOP then
+				leave_board()
+			end
+			return
+		end
+		-- In the air: thrown, stopped by a ceiling and by what the board
+		-- would not ride onto; ground it would is a landing below
+		local vy0 = self.vy
+		self.vy = self.vy - g * dt
+		local p = {self.x, self.y, self.z}
+		local hit_y = move_axis(p, 2, (vy0 + self.vy) / 2 * dt, is_solid)
+		self.y = p[2]
+		if stopped(1, self.vx * dt) then
+			self.vx = 0
+		end
+		p[1] = self.x + self.vx * dt
+		if stopped(3, self.vz * dt) then
+			self.vz = 0
+		end
+		p[3] = self.z + self.vz * dt
+		self.x, self.y, self.z = p[1], p[2], p[3]
+		if hit_y and vy0 > 0 then
+			self.vy = 0
+		end
+		local hs = math.sqrt(self.vx * self.vx + self.vz * self.vz)
+		if hs > 0.1 then
+			b.hx, b.hz = self.vx / hs, self.vz / hs
+		end
+		if self.vy > 0 then
+			return
+		end
+		local ny, k, centre = board_at(p[1], p[3], p[2])
+		local on = type(centre) == "number" and p[2] <= ny
+		if not on and not (hit_y and vy0 <= 0) then
+			return
+		end
+		self.on_ground = true
+		if type(centre) ~= "number" then
+			-- Down on something the board does not ride: walking
+			self.board, self.vx, self.vz, self.vy = nil, 0, 0, 0
+			return
+		end
+		local along = (hs + self.vy * k) / math.sqrt(1 + k * k)
+		local s2 = along > 0 and along * along - 2 * g * (ny - self.y) or 0
+		self.y, self.vy = ny, 0
+		b.k, b.s = k, s2 > 0 and math.sqrt(s2) or 0
+		if b.s < M.BOARD_STOP then
+			leave_board()
+		end
+	end
+
+	-- Onto the board by itself: walking at the walk's speed or more onto
+	-- ground a voxel or more lower two ahead. Not sneaking, which is how a
+	-- hill is walked down.
+	local function try_board(wish)
+		if not self.on_ground or self.in_liquid or self.in_liquid_stable or
+				self.climbing or flying() or wish.sneak then
+			return
+		end
+		local h = math.sqrt(self.vx * self.vx + self.vz * self.vz)
+		if h < self.movement.speed_walk * 0.95 then
+			return
+		end
+		local hx, hz = self.vx / h, self.vz / h
+		local function top(n)
+			return column_top(math.floor(self.x + hx * n + 0.5),
+					math.floor(self.z + hz * n + 0.5), self.y)
+		end
+		local t0, t1, t2 = top(0), top(1), top(2)
+		if type(t0) == "number" and type(t1) == "number" and
+				type(t2) == "number" and t1 <= t0 + 1e-3 and
+				t0 - t2 >= 1 - 1e-3 then
+			self.board = {s = h, hx = hx, hz = hz, k = 0}
+		end
+	end
+
 	function self:update(dtime, wish)
 		if dtime <= 0 then
 			return self.x, self.y, self.z
@@ -656,20 +933,31 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		if dtime > M.DTIME_LIMIT then
 			dtime = M.DTIME_LIMIT
 		end
+		tops = {}
 		-- Cut the way ClientEnvironment::step() cuts: ten milliseconds or
 		-- a tenth of a node of travel, whichever is shorter, so a long
 		-- frame is several short ones and a jump goes the same height
 		-- however choppy the client is
 		local speed = math.sqrt(self.vx * self.vx + self.vy * self.vy +
 				self.vz * self.vz)
-		local max_step = M.STEP_MAX_S
+		local max_s, max_move = M.STEP_MAX_S, M.STEP_MAX_MOVE
+		if self.board then
+			speed = math.max(speed, self.board.s)
+			max_s, max_move = M.BOARD_STEP_S, M.BOARD_STEP_MOVE
+		end
+		local max_step = max_s
 		if speed > 0.001 then
-			max_step = math.min(max_step, M.STEP_MAX_MOVE / speed)
+			max_step = math.min(max_step, max_move / speed)
 		end
 		local steps = math.ceil(dtime / max_step)
 		local part = dtime / steps
 		for _ = 1, steps do
-			step(part, wish)
+			if self.board then
+				board_step(part, wish)
+			else
+				step(part, wish)
+				try_board(wish)
+			end
 		end
 		return self.x, self.y, self.z
 	end
@@ -827,6 +1115,87 @@ do
 			"player: a gravity override of zero still pulls")
 	assert(quick.vx > slow.vx * 1.9,
 			"player: the speed override does nothing")
+end
+
+-- [SKELDAT_SKATEBOARD] The board, on worlds of columns: top(x) the
+-- highest solid voxel of the column at x
+do
+	local function columns(top)
+		return function(x, y) return y <= top(x) end
+	end
+	local g = 2 * M.DEFAULT_MOVEMENT.gravity
+	local function run(pl, wish, seconds, each)
+		for _ = 1, seconds * 60 do
+			pl:update(1 / 60, wish)
+			if each then each(pl) end
+		end
+	end
+	local function board(pl, x, y, s)
+		pl:set_position(x, y, 0)
+		pl.on_ground, pl.board = true, {s = s, hx = 1, hz = 0, k = 0}
+	end
+	-- Walked onto a slope down 30, flat after it, a wall of 3 at 80: the
+	-- board by itself, the speed what the drop gives and kept on the flat,
+	-- the wall a stop and a walk
+	local hill = M.new(columns(function(x)
+		if x < 0 then return 20 end
+		if x < 30 then return 20 - x end
+		if x >= 80 and x <= 81 then return -7 end
+		return -10
+	end))
+	hill:set_position(-6, 20.5, 0)
+	local boarded, top_speed, at_40 = false, 0, nil
+	run(hill, {x = 1, z = 0, look_x = 1, look_z = 0}, 8, function(pl)
+		if pl.board then
+			boarded = true
+			top_speed = math.max(top_speed, pl.board.s)
+			if not at_40 and pl.x >= 40 then at_40 = pl.board.s end
+		end
+	end)
+	local bound = math.sqrt(16 + 2 * g * 30)
+	assert(boarded, "board: walking down a slope does not take the board")
+	assert(top_speed <= bound * 1.01 and top_speed > bound * 0.9,
+			"board: the speed down 30 is " .. top_speed .. ", not " .. bound)
+	assert(at_40 and at_40 > bound * 0.9, "board: the flat slows it")
+	assert(not hill.board and hill.x < 80 and hill.x > 78,
+			"board: a step of 3 does not stop it, x " .. hill.x)
+	-- The brake: from 10, a stop within 10^2 / (2 * brake) and a bit
+	local flat = M.new(columns(function() return -1 end))
+	board(flat, 0, -0.5, 10)
+	run(flat, {x = 0, z = 0, look_x = 1, look_z = 0}, 0.5)
+	assert(flat.board and math.abs(flat.board.s - 10) < 1e-6,
+			"board: the flat slows it")
+	local x0 = flat.x
+	run(flat, {x = 0, z = 0, brake = true, look_x = 1, look_z = 0}, 3)
+	assert(not flat.board and flat.x - x0 < 100 / (2 * M.BOARD_BRAKE) + 1,
+			"board: the brake does not stop it")
+	-- The jump: twice the walk's speed, four times its height
+	board(flat, 0, -0.5, 5)
+	local peak = -0.5
+	run(flat, {x = 0, z = 0, jump = true, look_x = 1, look_z = 0}, 1 / 60)
+	run(flat, {x = 0, z = 0, look_x = 1, look_z = 0}, 2, function(pl)
+		peak = math.max(peak, pl.y)
+	end)
+	assert(peak + 0.5 > 3.5, "board: the jump is " .. (peak + 0.5) .. " high")
+	assert(flat.board and flat.on_ground, "board: it does not land")
+	-- A ramp up 4 and off its crest: flying, then on the board again
+	local ramp = M.new(columns(function(x)
+		return (x >= 10 and x <= 13) and x - 10 or -1
+	end))
+	board(ramp, 0, -0.5, 20)
+	local flew = false
+	run(ramp, {x = 0, z = 0, look_x = 1, look_z = 0}, 3, function(pl)
+		if pl.board and not pl.on_ground and pl.x > 13 then flew = true end
+	end)
+	assert(flew and ramp.board and ramp.on_ground and ramp.x > 20,
+			"board: no flight off the ramp")
+	-- A step of 2 ridden up, the speed paid for it
+	local step2 = M.new(columns(function(x) return x >= 5 and 1 or -1 end))
+	board(step2, 0, -0.5, 10)
+	run(step2, {x = 0, z = 0, look_x = 1, look_z = 0}, 1)
+	assert(step2.board and math.abs(step2.y - 1.5) < 1e-6 and
+			math.abs(step2.board.s - math.sqrt(100 - 2 * g * 2)) < 0.05,
+			"board: a step of 2 not ridden, y " .. step2.y)
 end
 
 return M

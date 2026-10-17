@@ -14,6 +14,13 @@
 // simplified: a slow glide down passes the air rule; the box reaches DOWN
 // voxels under the move, and a body over a deeper drop is judged only by
 // the air rule.
+// [SKELDAT_SKATEBOARD] A body on the board (Board) goes as fast as the
+// height lost allows, v^2 <= v0^2 + 2 g drop, the start's speed the one
+// the last passed check measured; steps up 2, jumps 4 voxels and what its
+// speed would lift it, and crosses a gap in a line of open cells.
+// simplified: the drop is between the two checks' heights and BOARD_DIP,
+// so a valley between them gives no more than that; a board in the air
+// is let hover up to BOARD_AIR checks.
 // Pure: main.cpp hands it the cells. Self test:
 //   g++ -std=c++11 -DSKELDAT_MOVE_TEST -Isrc -x c++ apps/demo_skeldat/main/move_check.h -x none src/impl/voxel_path.cpp -o /tmp/skeldat_move && /tmp/skeldat_move
 //   (one line)
@@ -40,12 +47,32 @@ static const float JUMP = 1.5f;
 static const int DOWN = 8;
 // The fastest fall believed, voxels a second (luanti_session's on_fell cap)
 static const float FALL = 200;
+// player.lua's pull: Luanti's gravity, doubled
+static const float G = 2 * 9.81f;
+// The board's jump, 2 x speed_jump (13): 13^2 / 2G is 4.3
+static const float BOARD_JUMP = 5;
+static const float BOARD_DIP = 1;
+static const int BOARD_AIR = 6;
+// The box's reach to either side of the board's move
+static const int BOARD_SIDE = 8;
+
+struct Board
+{
+	// On the board since the last check
+	bool on = false;
+	// The speed the last passed check measured
+	float v0 = 0;
+	// The checks running that had it in the air on the board
+	int air = 0;
+};
 
 struct Verdict
 {
 	bool ok = true;
 	// The body was in the air at `to`
 	bool air = false;
+	// The speed measured, capped at the most believed: the next v0
+	float speed = 0;
 	const char *why = "";
 };
 
@@ -53,11 +80,21 @@ struct Verdict
 // was_air: the last passed check had the body in the air.
 inline Verdict check(const std::function<void(Field&)> &fill,
 		float fx, float fy, float fz, float tx, float ty, float tz,
-		float dt, bool was_air)
+		float dt, bool was_air, const Board &board = Board())
 {
 	Verdict v;
-	const float reach = WALK * LAG * dt + SLACK;
-	if(std::hypot(tx - fx, tz - fz) > reach){
+	float reach = WALK * LAG * dt + SLACK;
+	float jump = JUMP;
+	float vmax = WALK * LAG;
+	if(board.on){
+		const float drop = std::max(0.0f, fy - ty) + BOARD_DIP;
+		vmax = std::max(vmax, std::sqrt(board.v0 * board.v0 + 2 * G * drop));
+		reach = vmax * LAG * dt + SLACK;
+		jump = BOARD_JUMP + vmax * vmax / (2 * G);
+	}
+	const float dist = std::hypot(tx - fx, tz - fz);
+	v.speed = std::min(dist / dt, vmax);
+	if(dist > reach){
 		v.ok = false;
 		v.why = "too far";
 		return v;
@@ -65,7 +102,7 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	// The box's height is the move's: up no more than a walk and a jump,
 	// down no more than a second at the fall speed luanti_session believes
 	// (200), or a client's y of 1e6 is a box of half a billion cells
-	if(ty - fy > reach + JUMP || fy - ty > FALL * dt + DOWN){
+	if(ty - fy > reach + jump || fy - ty > FALL * dt + DOWN){
 		v.ok = false;
 		v.why = "too far up or down";
 		return v;
@@ -80,16 +117,35 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	const int r = (int)std::ceil(reach) + 1;
 	const int y0 = std::min(a0.y, b0.y) - DOWN, y1 = std::max(a0.y, b0.y) + 3;
 	Field f;
-	f.resize(P(a0.x - r, y0, a0.z - r), 2 * r + 1, y1 - y0 + 1, 2 * r + 1);
+	if(board.on){
+		// The board's move is long: the box round both ends, not a square
+		// of its reach round the start
+		const int s = BOARD_SIDE;
+		const int x0 = std::min(a0.x, b0.x) - s, z0 = std::min(a0.z, b0.z) - s;
+		f.resize(P(x0, y0, z0), std::max(a0.x, b0.x) + s - x0 + 1,
+				y1 - y0 + 1, std::max(a0.z, b0.z) + s - z0 + 1);
+	} else {
+		f.resize(P(a0.x - r, y0, a0.z - r), 2 * r + 1, y1 - y0 + 1,
+				2 * r + 1);
+	}
 	fill(f);
 	Rules rules;
 	rules.max_length = reach;
+	if(board.on)
+		rules.step_up = 2;
 	P a = a0, b = b0;
 	// A start that does not settle (a voxel placed into it since) is not
 	// the mover's doing: nothing to judge
-	if(!settle(f, rules, a))
-		return v;
 	const bool b_lands = settle(f, rules, b);
+	if(!settle(f, rules, a)){
+		// Though a board in the air too long is
+		if(board.on && board.air >= BOARD_AIR &&
+				(!b_lands || ty - (float)b.y > JUMP)){
+			v.ok = false;
+			v.why = "in the air";
+		}
+		return v;
+	}
 	// Sunk deeper than settle lifts: inside the ground (noclip)
 	if(!b_lands && (f.at(b0.x, b0.y, b0.z) == SOLID ||
 			f.at(b0.x, b0.y + 1, b0.z) == SOLID)){
@@ -100,8 +156,12 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	v.air = !b_lands || ty - (float)b.y > JUMP;
 	if(v.air){
 		// Up to a jump over where the last check stood; down since then
-		// when it was in the air too
-		if(was_air ? ty > fy - 0.5f : ty > (float)a.y + JUMP){
+		// when it was in the air too. The board's flight is thrown: up to
+		// what its speed lifts it, for a few checks.
+		const bool high = board.on ?
+				ty > (float)a.y + jump || board.air >= BOARD_AIR :
+				was_air ? ty > fy - 0.5f : ty > (float)a.y + JUMP;
+		if(high){
 			v.ok = false;
 			v.why = "in the air";
 			return v;
@@ -110,6 +170,20 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 			return v;
 	}
 	const Result res = find(f, a, b, rules);
+	if(!res.found && board.on){
+		// Over a gap: a line of open cells from the body to the body
+		const int n = (int)std::ceil(std::hypot(dist, ty - fy) * 2) + 1;
+		bool open = true;
+		for(int i = 0; i <= n && open; i++){
+			const float u = (float)i / n;
+			const int x = (int)std::floor(fx + (tx - fx) * u + 0.5f),
+					y = (int)std::floor(fy + (ty - fy) * u + 1),
+					z = (int)std::floor(fz + (tz - fz) * u + 0.5f);
+			open = f.at(x, y, z) != SOLID;
+		}
+		if(open)
+			return v;
+	}
 	if(!res.found){
 		v.ok = false;
 		v.why = res.capped ? "too far to search" : "no way there";
@@ -199,6 +273,39 @@ int main()
 	// A client's position a million up or down: refused before any box
 	assert(!ok(flat, 0.5f, 0, 0.5f, 0.5f, 1e6f, 0.5f));
 	assert(!ok(flat, 0.5f, 0, 0.5f, 0.5f, -1e6f, 0.5f));
+	// [SKELDAT_SKATEBOARD] The board: down a slope of 30 as fast as the
+	// drop allows, and not faster on the flat
+	auto slope = world([](int x, int y, int){
+		return y < 30 - std::max(0, std::min(30, x)) ? SOLID : -1; });
+	Board bd;
+	bd.on = true;
+	bd.v0 = 4;
+	Verdict s1 = check(slope, 0, 30, 0, 30, 0, 0, 1, false, bd);
+	assert(s1.ok && s1.speed > 20);
+	assert(!check(slope, 0, 30, 0, 30, 30, 0, 1, false, bd).ok);
+	bd.v0 = 10;
+	assert(check(flat, 0, 0, 0, 20, 0, 0, 1, false, bd).ok);
+	assert(!check(flat, 0, 0, 0, 30, 0, 0, 1, false, bd).ok);
+	// Walking would have been pulled back
+	assert(!check(flat, 0, 0, 0, 20, 0, 0, 1, false).ok);
+	// Onto a step of 2, not of 3
+	assert(check(step2, 0, 0, 0, 6, 2, 0, 1, false, bd).ok);
+	auto step3 = world([](int x, int y, int){
+		return x >= 3 && y <= 2 ? SOLID : -1; });
+	assert(!check(step3, 0, 0, 0, 6, 3, 0, 1, false, bd).ok);
+	// The jump's 4, over a gap 6 wide and 20 deep, and not through a wall
+	assert(check(flat, 0, 0, 0, 3, 4, 0, 1, false, bd).ok);
+	auto gap6 = world([](int x, int y, int){
+		return x >= 2 && x <= 7 && y < 0 && y >= -20 ? OPEN : -1; });
+	assert(check(gap6, 0, 0, 0, 10, 0, 0, 1, false, bd).ok);
+	assert(!check(wall, 0, 0, 0, 10, 0, 0, 1, false, bd).ok);
+	// A hover: let for a few checks, not for ever
+	Board up = bd;
+	up.air = 1;
+	assert(check(flat, 0, 4, 0, 1, 4, 0, 1, true, up).ok);
+	up.air = BOARD_AIR;
+	assert(!check(flat, 0, 4, 0, 1, 4, 0, 1, true, up).ok);
+	assert(!check(gap6, 4, 2, 0, 5, 2, 0, 1, true, up).ok);
 	printf("skeldat move_check.h: self test passed\n");
 	return 0;
 }
