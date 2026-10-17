@@ -1832,6 +1832,9 @@ rebuild = function()
 	end
 	local seen_voxels, all_solids = {}, {}
 	place.layers = {}
+	-- [FP_FLOOR_AREA] Each layout's rooms' net floor, summed: what their
+	-- labels on the plan add up to (none for a layout with no rooms)
+	local areas = {}
 	M.room_light, M.room_seen = {}, {}
 	-- Which layouts are above the current one, for S.hide_above; what is
 	-- built new is shown, so the hiding is done again
@@ -1878,6 +1881,21 @@ rebuild = function()
 		end
 		place.layers[#place.layers + 1] = {id = l.id, insts = E.inst_data, rel = r,
 				rooms = E.room_data}
+		for _, rd in pairs(E.room_data) do
+			areas[l.id] = (areas[l.id] or 0) + rd.net
+		end
+	end
+	-- The layouts menu shows them: drawn again when one changed
+	local changed = false
+	for id in pairs(areas) do
+		changed = changed or areas[id] ~= place.areas[id]
+	end
+	for id in pairs(place.areas) do
+		changed = changed or areas[id] == nil
+	end
+	place.areas = areas
+	if changed and S.layouts_open then
+		place.build_window()
 	end
 	E.solids = all_solids
 	-- The slots of rooms that are gone

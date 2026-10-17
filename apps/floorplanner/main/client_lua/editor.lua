@@ -487,7 +487,7 @@ do
 	end
 end
 
-local place = {parts = {}}
+local place = {parts = {}, areas = {}}
 -- The current layout's fields, making the first one current when the
 -- current one is gone
 function place.current()
@@ -3994,8 +3994,10 @@ place.build_window = function()
 		if e and l.strs.group == e.strs.group then
 			in_group = in_group + 1
 		end
+		-- [FP_FLOOR_AREA] Its rooms' net floor summed (rebuild()'s)
+		local a = place.areas[l.id]
 		panel.keep(function() return panel.button(w, l.strs.group .. ": " ..
-				l.strs.name, function()
+				l.strs.name .. (a and " (" .. m2(a) .. ")" or ""), function()
 			place.switch(l.id)
 			refresh_panels()
 		end, l.id == S.layout) end)
@@ -7357,6 +7359,22 @@ function M.start(d)
 			end
 		end
 	end
+	-- For a check: "event fp_room x0 z0 x1 z1" (mm), a room on those
+	-- corners in the current layout, no walls ([FP_FLOOR_AREA]'s check)
+	magic.SubscribeToEvent("command_seq:fp_room", function(_, d)
+		local x0, z0, x1, z1 = d:GetString("Param"):match(
+				"^(%S+) (%S+) (%S+) (%S+)$")
+		x0, z0, x1, z1 = tonumber(x0), tonumber(z0), tonumber(x1), tonumber(z1)
+		if not z1 then
+			return
+		end
+		local walls = S.room_walls
+		S.room_walls = false
+		add_room({{x = x0, z = z0}, {x = x1, z = z0}, {x = x1, z = z1},
+				{x = x0, z = z1}})
+		S.room_walls = walls
+		log:info("A room made by the drive")
+	end)
 	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing
 		-- else
