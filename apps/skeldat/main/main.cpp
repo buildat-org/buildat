@@ -548,7 +548,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	int64_t m_start_us = interface::os::time_us();
 	// worldgen's; read for its highest voxel only
 	BonesGenerator *m_generator = nullptr;
-	std::set<size_t> m_waiting, m_shown;
+	// m_joining: sent the join, its login not yet in
+	std::set<size_t> m_waiting, m_shown, m_joining;
 	std::map<size_t, Player> m_players;
 	std::map<ss_, Furnace> m_furnaces;
 	luanti_mapgen::Params m_mapgen;
@@ -689,6 +690,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				&Module::on_files_transmitted);
 		sub(m_server, "network:client_disconnected",
 				&Module::on_client_disconnected);
+		sub(m_server, "accounts:login", &Module::on_login);
 		sub(m_server, "worldgen:queue_modified",
 				&Module::on_worldgen_queue_modified);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
@@ -819,13 +821,47 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
+		const size_t peer = event.recipient;
 		if(m_world_ready){
-			show(event.recipient);
-		} else if(m_waiting.insert(event.recipient).second){
+			show(peer);
+			return;
+		}
+		// [WORLD_MENU_ADMIN] On a public server, while no world is picked,
+		// the join first: only an admin picks one, and the first admin is
+		// made with the setup code. on_login() goes on from there. A world
+		// being made lets a guest wait for it, as a running one lets it in
+		bool joined = m_starting;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			joined = joined || i->launched() || !i->name_of(peer).empty();
+		});
+		if(!joined){
+			m_joining.insert(peer);
+			network::send(m_server, peer, "core:run_script",
+					"buildat.run_script_file(\"main/join.lua\")");
+			return;
+		}
+		menu_or_wait(peer);
+	}
+
+	void menu_or_wait(size_t peer)
+	{
+		if(m_waiting.insert(peer).second){
 			world_menu::access(m_server, [&](world_menu::Interface *i){
-				i->show(event.recipient);
+				i->show(peer);
 			});
 		}
+	}
+
+	// A join's login: the world if it runs, else the world menu (which
+	// shows the list to an admin and the wait to the rest)
+	void on_login(const accounts::Login &login)
+	{
+		if(!m_joining.erase(login.peer))
+			return;
+		if(m_world_ready)
+			show(login.peer);
+		else
+			menu_or_wait(login.peer);
 	}
 
 	//
@@ -2049,6 +2085,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		m_session.left(peer);
 		m_shown.erase(peer);
 		m_waiting.erase(peer);
+		m_joining.erase(peer);
 		m_load_points_dirty = true;
 	}
 

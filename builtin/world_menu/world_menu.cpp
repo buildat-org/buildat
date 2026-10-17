@@ -32,6 +32,9 @@ struct Module: public interface::Module, public Interface
 	void init()
 	{
 		sub(m_server, "network:client_disconnected", &Module::on_disconnected);
+		// [WORLD_MENU_ADMIN] Who may pick follows the account
+		sub(m_server, "accounts:login", &Module::on_account);
+		sub(m_server, "accounts:privs", &Module::on_account);
 		typedef void (Module::*Handler)(const network::Packet&);
 		static const std::pair<const char*, Handler> PACKETS[] = {
 			{"get", &Module::on_get},
@@ -88,21 +91,48 @@ struct Module: public interface::Module, public Interface
 		m_shown.erase(event.info.id);
 	}
 
-	bool is_local(PeerId peer)
+	// To every menu up: the peer's own may now pick, and the rest's wait
+	// text depends on whether there is an admin
+	void on_account(const accounts::Login &)
 	{
-		bool local = false;
+		for(PeerId peer : m_shown)
+			send_list(peer);
+	}
+
+	// [WORLD_MENU_ADMIN] Who picks the world: the launcher's own client
+	// on the launcher's server, and an admin's account on any (a public
+	// server has no launcher's client)
+	bool picker(PeerId peer)
+	{
+		bool ok = false;
 		accounts::access(m_server, [&](accounts::Interface *i){
-			local = i->is_local(peer);
+			const ss_ name = i->name_of(peer);
+			ok = i->is_local(peer) || (!name.empty() && i->is_admin(name));
 		});
-		return local;
+		return ok;
+	}
+
+	// Whether any account is an admin: none, and the setup code's join is
+	// the way to be one
+	bool any_admin()
+	{
+		bool any = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			for(const ss_ &name : i->account_names())
+				if(i->is_admin(name)){
+					any = true;
+					return;
+				}
+		});
+		return any;
 	}
 
 	// Only to a menu that is up, before a world runs, from the launcher's
-	// own client
+	// own client or an admin (picker())
 	bool may_pick(const network::Packet &packet)
 	{
 		if(m_running || !m_progress.empty() ||
-				!m_shown.count(packet.sender) || !is_local(packet.sender)){
+				!m_shown.count(packet.sender) || !picker(packet.sender)){
 			log_w(MODULE, "%s from peer %zu ignored", cs(packet.name),
 					packet.sender);
 			return false;
@@ -127,8 +157,10 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value out = json::object();
 		out.set("title", m_config.title);
-		const bool pick = !m_running && m_progress.empty() && is_local(peer);
+		const bool pick = !m_running && m_progress.empty() && picker(peer);
 		out.set("may_pick", pick);
+		if(!pick)
+			out.set("no_admin", !any_admin());
 		out.set("wait", m_progress);
 		json::Value fields = json::array();
 		for(const Field &f : m_config.fields){

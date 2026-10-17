@@ -294,11 +294,14 @@ end
 -- The server's way in
 --
 
-local function waiting(message)
-	if waiting_line and own_root then
+-- extra: {label, fn} for a button over Leave the game, or nil
+local waiting_extra = nil
+local function waiting(message, extra)
+	if waiting_line and own_root and (extra and extra[1]) == waiting_extra then
 		waiting_line:SetText(message)
 		return
 	end
+	waiting_extra = extra and extra[1]
 	local root = own_push("waiting")
 	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
 	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
@@ -310,6 +313,9 @@ local function waiting(message)
 	root:SubscribeToStackEvent("Update", function()
 		secs:SetText(math.floor((buildat.get_time_us() - t0) / 1000000) .. " s")
 	end)
+	if extra then
+		menu:add(extra[1], extra[2])
+	end
 	menu:add("Leave the game", function() buildat.leave() end)
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
@@ -370,9 +376,24 @@ end
 buildat.sub_packet("world_menu:list", function(data)
 	local state = buildat.parse_json(data)
 	if not state.may_pick then
+		-- [WORLD_MENU_ADMIN] An admin picks; with none yet, the setup
+		-- code's account makes one: the join again (a login on the same
+		-- peer replaces its name), whose Create has the code's field
+		local extra = nil
 		local text = (state.wait or "") ~= "" and state.wait or
-				"Waiting for the host to pick a world"
-		waiting(text)
+				"Waiting for an admin to pick a world"
+		if (state.wait or "") == "" and state.no_admin then
+			text = "This server has no admin yet: join with the setup code " ..
+					"from the server's log"
+			extra = {"Join with the setup code...", function()
+				local _, _, accounts = buildat.run_script_file(
+						"accounts/accounts.lua")
+				if type(accounts) == "table" then
+					accounts.start({title = state.title})
+				end
+			end}
+		end
+		waiting(text, extra)
 		log:info("world_menu: the wait shown: " .. text)
 		return
 	end

@@ -1,14 +1,15 @@
 #!/bin/bash
 # tier: full
-# cost: ~3 min (2026-10-16)
-# covers: builtin/world_menu/** builtin/storage/storage.cpp apps/vanilla/main/client_lua/menu.lua
+# cost: ~5 min (2026-10-17)
+# covers: builtin/world_menu/** builtin/storage/storage.cpp apps/vanilla/main/client_lua/menu.lua apps/skeldat/main/client_lua/join.lua
 # [WORLD_MENU]: the shared world menu in skeldat, skelenti and vanilla,
 # driven by the launcher's own client (-u launcher=1). In each, on a fresh
 # server, a world made through New world... (skeldat's with the seed
 # typed and the size picked from its choices; vanilla's New save..., the
 # minimal game) and played; on
 # the server started again, the world listed, renamed and deleted (to
-# vanilla's trash), the list empty after.
+# vanilla's trash), the list empty after. skeldat on a public server:
+# the admin made by the setup code picks ([WORLD_MENU_ADMIN]).
 #   builtin/world_menu/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -81,6 +82,59 @@ for app in skeldat demo_skelenti; do
 		fail "$short: the deleted world's directory is still there"
 	echo "  $short: made (and played), renamed, deleted"
 done
+# [WORLD_MENU_ADMIN] skeldat on a public server (no launcher=1), no world
+# and no admin: bob's join is refused, told of the setup code; boss joins
+# with the code, is admin and gets the menu; bob joins again and waits
+# for an admin; boss makes a world and bob goes in with it; carl,
+# arriving to the running world, goes in with no join
+pub=$t/skeldat_public
+BUILDAT_SKELDAT_WORLD= start_server "$t/pub.srv.log" "STATUS Listening" 300 \
+	auto "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$pub/srv" -C "$pub/srv.cache" -l 3 || fail "the server ($t/pub.srv.log)"
+CHECK_PIDS+=($SERVER_PID)
+pub_pid=$SERVER_PID
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/pub.srv.log" | head -1)
+[ -n "$code" ] || fail "no setup code ($t/pub.srv.log)"
+# pub_client <name> <log> <cmds> [code]
+pub_client()
+{
+	BUILDAT_JOIN_NAME=$1 BUILDAT_JOIN_PASSWORD=secret123 \
+		BUILDAT_JOIN_CREATE=${1:+1} BUILDAT_JOIN_CODE="${4:-}" \
+		run_client 60 "$2" timeout 400 "$b" -C "$pub/c$1" -D "$pub/u$1" \
+		-w 1100x700 -l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$3"
+}
+printf '%s\n' "wait_log 30000 accounts: the login page shown" "delay 500" \
+	"screenshot $t/pub.no_admin.png" "quit" > "$t/bob0.cmds"
+pub_client bob "$t/pub.bob0.log" "$t/bob0.cmds" ||
+	fail "bob: the first drive ($t/pub.bob0.log)"
+grep -aq "Login refused: This server has no admin yet: .*setup code" \
+	"$t/pub.bob0.log" || fail "bob: not told of the setup code ($t/pub.bob0.log)"
+printf '%s\n' 'wait_log 30000 accounts: ntfy asked' \
+	'wait_log_any 5000 server window: the page ntfy' 'delay 300' \
+	"click Button \"Don't add\"" 'delay 500' \
+	"wait_log_any 30000 world_menu: the list shown, 0 worlds" \
+	"delay 20000" 'click Button "New world..."' \
+	"wait_log 5000 world_menu: the name screen shown" "delay 300" \
+	'click Button "Create"' "wait_log 300000 skeldat: placed at" "quit" \
+	> "$t/boss.cmds"
+# Boss opens the registration, for bob, and holds the menu 20 s while bob
+# joins and waits
+BUILDAT_JOIN_ADMIN="setting open_registration on" pub_client boss "$t/pub.boss.log" "$t/boss.cmds" "$code" &
+boss=$!
+wait_for_log "$t/pub.boss.log" "the list shown, 0 worlds" 120 ||
+	fail "boss: no menu ($t/pub.boss.log)"
+printf '%s\n' "wait_log 30000 world_menu: the wait shown: Waiting for an admin" \
+	"delay 500" "screenshot $t/pub.bob_wait.png" \
+	"wait_log 300000 skeldat: placed at" "quit" > "$t/bob.cmds"
+pub_client bob "$t/pub.bob.log" "$t/bob.cmds" || fail "bob: the drive ($t/pub.bob.log)"
+wait $boss || fail "boss: the drive ($t/pub.boss.log)"
+printf '%s\n' "wait_log 120000 skeldat: placed at" "quit" > "$t/carl.cmds"
+pub_client "" "$t/pub.carl.log" "$t/carl.cmds" || fail "carl: the drive ($t/pub.carl.log)"
+grep -aq "accounts: the login page shown\|world_menu: the wait shown" \
+	"$t/pub.carl.log" && fail "carl: joined or waited in a running world ($t/pub.carl.log)"
+kill $pub_pid; wait $pub_pid 2>/dev/null
+echo "  skeldat public: bob told of the setup code, boss admin by it made the world, bob and carl in"
+
 # vanilla: its own New save... screens, then the shared list's Rename and
 # Delete
 printf '%s\n' "wait_log 120000 menu: 0 saves" "delay 1000" \
@@ -103,5 +157,5 @@ grep -aq "Save world renamed renamed" "$t/vanilla.srv2.log" &&
 	grep -aq "Save renamed moved to .*/trash/renamed-" "$t/vanilla.srv2.log" ||
 	fail "vanilla: not renamed and trashed ($t/vanilla.srv2.log)"
 echo "  vanilla: made (and played), renamed, moved to the trash"
-echo "PASS: the world menu in skeldat, skelenti and vanilla: a world made, played, renamed and deleted"
+echo "PASS: the world menu in skeldat, skelenti and vanilla: a world made, played, renamed and deleted; on a public server an admin by the setup code picks"
 # vim: set noet ts=4 sw=4:
