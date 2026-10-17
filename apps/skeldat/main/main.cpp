@@ -80,39 +80,6 @@ using Urho3D::M_RADTODEG;
 
 #include "records.h"
 
-// moderation::Host for the audit log alone (the admin's give and take): a
-// subject is a player's name, and nothing is reported or decided here
-struct AuditHost: public moderation::Host
-{
-	storage::Save *m_save = nullptr;
-	storage::Save* save(){ return m_save; }
-	ss_ name(){ return "skeldat"; }
-	json::Value subject(const ss_ &id)
-	{
-		json::Value s = json::object();
-		s.set("id", id);
-		s.set("name", id);
-		s.set("owner", id);
-		s.set("players", 1);
-		return s;
-	}
-	sv_<ss_> members(const json::Value &group){ return {}; }
-	int severity(const ss_ &reason){ return 1; }
-	json::Value thresholds(const json::Value &group){ return json::object(); }
-	ss_ held(const json::Value &report){ return ""; }
-	ss_ bucket(const json::Value &report){ return ""; }
-	json::Value auto_act(const json::Value &group, const ss_ &id,
-			const ss_ &want){ return json::Value(); }
-	void uphold(moderation::Interface *m, const ss_ &by,
-			const json::Value &group, const json::Value &q){}
-	bool undo_auto(const ss_ &id, const json::Value &group){ return false; }
-	void reverse(moderation::Interface *m, const ss_ &by,
-			const json::Value &appeal, const ss_ &text){}
-	void decided(const json::Value &report, bool upheld){}
-	void event(const sv_<ss_> &to, const ss_ &by, const ss_ &text){}
-	void notify(const json::Value &statement){}
-};
-
 #include "world_view.h"
 #include "furnaces.h"
 #include "drops.h"
@@ -121,15 +88,16 @@ struct AuditHost: public moderation::Host
 #include "scores.h"
 #include "mobs.h"
 #include "players.h"
+#include "admin.h"
 
-struct Module: public interface::Module, public PlayersHost
+struct Module: public interface::Module, public PlayersHost,
+		public AdminHost
 {
 	interface::Server *m_server;
 	const skeldat::Game m_game = skeldat::make_game();
 	// The world as the parts see it (world_view.h)
 	WorldView m_world{m_server, m_game};
 	storage::Save *m_save = nullptr;
-	AuditHost m_audit;
 	storage::Store *m_store = nullptr;
 	bool m_starting = false;
 	// The world started was new: "Making", else "Loading"
@@ -143,19 +111,6 @@ struct Module: public interface::Module, public PlayersHost
 	ss_ m_world_name;
 	// [SKELDAT_RERUN] A re-run asked for: the module is reloading
 	bool m_rerunning = false;
-	// [SKELDAT_WORLD_ADMIN] The world paused, by whom, and whether by a
-	// single player's open pause menu (auto); the peers whose refused
-	// requests were logged this pause
-	bool m_paused = false, m_pause_auto = false;
-	ss_ m_paused_by;
-	std::set<size_t> m_pause_refused;
-	// [SKELDAT_SKIP_TIME] A skip to sunrise or sunset: the game seconds
-	// left of it (0: none) and in all, the wall time it started, whom by,
-	// the expansions before it, and the last progress sent
-	double m_skip_left = 0, m_skip_total = 0;
-	int64_t m_skip_us = 0, m_skip_sent_us = 0;
-	ss_ m_skip_to, m_skip_by;
-	size_t m_skip_expansions = 0;
 	// m_joining: sent the join, its login not yet in
 	std::set<size_t> m_waiting, m_joining;
 	// The furnaces and the lanterns (furnaces.h)
@@ -178,6 +133,8 @@ struct Module: public interface::Module, public PlayersHost
 	// The mobs, the arrows and the light skeletons (mobs.h)
 	Mobs m_mobs{m_world, m_players.all, m_players, m_drops, m_growth,
 			m_furnaces};
+	// The role, the pause, the skip and the admin's menu (admin.h)
+	Admin m_admin{m_world, *this, m_save, m_players, m_growth, m_terrain};
 	// The outermost columns' mean top, once the world is in
 	float m_edge_crest = 0;
 	// The lowest of those tops ([SKELDAT_BACKDROP_LOW]), where the hills
@@ -257,7 +214,8 @@ struct Module: public interface::Module, public PlayersHost
 		sub(m_server, "world_menu:play", &Module::on_world_play);
 		sub(m_server, "world_menu:close", &Module::on_world_close);
 		const ss_ game = "network:packet_received/skeldat:";
-		sub(m_server, game+"admin", &Module::on_admin);
+		sub<network::Packet>(m_server, game+"admin",
+				[this](const network::Packet &p){ m_admin.on_admin(p); });
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
 				"bow", "intro", "scores", "rerun", "pause", "worlds", "skip"})
@@ -270,9 +228,9 @@ struct Module: public interface::Module, public PlayersHost
 			sub<network::Packet>(m_server,
 					ss_("network:packet_received/luanti:")+n,
 					[this](const network::Packet &p){
-				if((m_paused || m_skip_left > 0) && p.name != "luanti:chat" &&
+				if((m_admin.paused || m_admin.skip_left > 0) && p.name != "luanti:chat" &&
 						p.name != "luanti:wield" && p.name != "luanti:world_in"){
-					refused_paused(p);
+					m_admin.refused_paused(p);
 					return;
 				}
 				m_players.session.packet(p);
@@ -888,6 +846,14 @@ struct Module: public interface::Module, public PlayersHost
 	// What the players are sent of the world's run
 	//
 
+	// PlayersHost's, the admin's
+	void update_role(size_t peer, Player &pl, bool tell)
+	{
+		m_admin.update_role(peer, pl, tell);
+	}
+	void joined(size_t peer, Player &pl){ m_admin.joined(peer, pl); }
+	bool skipping(){ return m_admin.skipping(); }
+
 	// The world's size and its edge's mean crest, for the client's
 	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest
 	// low", half in voxels, low the lowest edge column's top
@@ -1080,27 +1046,12 @@ struct Module: public interface::Module, public PlayersHost
 
 	//
 	// [SKELDAT_WORLD_ADMIN] The picker's (world_menu's: the launcher's own
-	// client, an admin) Worlds..., a switch to another world, Close world,
-	// and the pause. A switch and a close are the re-run's reload: the
-	// world saved and closed, every client sent off with the goodbye and
-	// rejoining. A close's reload starts no world: the menu to the picker,
-	// the wait to the rest.
+	// client, an admin) Worlds..., a switch to another world and Close
+	// world (the pause is admin.h's). A switch and a close are the
+	// re-run's reload: the world saved and closed, every client sent off
+	// with the goodbye and rejoining. A close's reload starts no world: the
+	// menu to the picker, the wait to the rest.
 	//
-
-	bool picker(size_t peer)
-	{
-		bool ok = false;
-		world_menu::access(m_server, [&](world_menu::Interface *i){
-			ok = i->is_picker(peer);
-		});
-		return ok;
-	}
-
-	ss_ name_of(size_t peer)
-	{
-		auto it = m_players.all.find(peer);
-		return it != m_players.all.end() ? it->second.name : "client"+itos(peer);
-	}
 
 	void reload_for(const ss_ &line, const ss_ &data, const ss_ &goodbye)
 	{
@@ -1119,192 +1070,26 @@ struct Module: public interface::Module, public PlayersHost
 
 	void switch_world(size_t peer, const ss_ &name, const ss_ &seed)
 	{
-		if(m_rerunning || !picker(peer) || name == m_world_name){
+		if(m_rerunning || !m_admin.picker(peer) || name == m_world_name){
 			log_w(MODULE, "skeldat: a switch to \"%s\" by %s refused",
-					cs(name), cs(name_of(peer)));
+					cs(name), cs(m_players.name_of(peer)));
 			return;
 		}
-		reload_for(name_of(peer)+" switches the world to "+name,
+		reload_for(m_players.name_of(peer)+" switches the world to "+name,
 				"play\n"+name+"\n"+seed,
 				"The server switches to the world "+name);
 	}
 
 	void on_world_close(const world_menu::Close &event)
 	{
-		if(m_rerunning || !m_save || !picker(event.peer)){
+		if(m_rerunning || !m_save || !m_admin.picker(event.peer)){
 			log_w(MODULE, "skeldat: a close by %s refused",
-					cs(name_of(event.peer)));
+					cs(m_players.name_of(event.peer)));
 			return;
 		}
-		reload_for(name_of(event.peer)+" closes the world "+m_world_name,
+		reload_for(m_players.name_of(event.peer)+" closes the world "+m_world_name,
 				"close", "The world "+m_world_name+" was closed");
 	}
-
-	// A game request while paused: refused, logged once a peer a pause
-	void refused_paused(const network::Packet &p)
-	{
-		if(m_pause_refused.insert(p.sender).second)
-			log_i(MODULE, "skeldat: %s's %s refused: %s",
-					cs(name_of(p.sender)), cs(p.name),
-					m_paused ? "paused" : "skipping");
-	}
-
-	// "on" / "off" from the picker; "auto on" / "auto off" from a local
-	// game's only client, its pause menu opened and closed
-	void on_pause(size_t peer, const ss_ &how)
-	{
-		const bool is_auto = how.compare(0, 5, "auto ") == 0;
-		const bool on = how == "on" || how == "auto on";
-		if(is_auto){
-			bool single = false;
-			accounts::access(m_server, [&](accounts::Interface *i){
-				single = i->is_local(peer);
-			});
-			network::access(m_server, [&](network::Interface *i){
-				single = single && i->list_peers().size() == 1;
-			});
-			// A picker's own pause is not the menu's to end; a skip runs
-			// with the menu open (its button is in it)
-			if(!single || (m_paused && !m_pause_auto) || on == m_paused ||
-					m_skip_left > 0)
-				return;
-		} else if(!picker(peer)){
-			log_w(MODULE, "skeldat: %s's pause %s refused: not the picker",
-					cs(name_of(peer)), cs(how));
-			return;
-		}
-		// [SKELDAT_SKIP_TIME] A pause stops a skip first
-		if(on && m_skip_left > 0)
-			end_skip("stopped by the pause");
-		set_paused(on, is_auto, name_of(peer));
-	}
-
-	// [SKELDAT_SKIP_TIME] "on": to the next sunset by day, sunrise by
-	// night; "stop". The picker's, not after the end; a single player's
-	// menu pause gives way to it.
-	void on_skip(size_t peer, const ss_ &how)
-	{
-		if(!picker(peer)){
-			log_w(MODULE, "skeldat: %s's skip refused: not the picker",
-					cs(name_of(peer)));
-			return;
-		}
-		if(how == "stop"){
-			if(m_skip_left > 0)
-				end_skip("stopped by "+name_of(peer));
-			return;
-		}
-		if(how != "on" || m_growth.ended || m_skip_left > 0 || !m_world.ready ||
-				(m_paused && !m_pause_auto)){
-			log_w(MODULE, "skeldat: %s's skip refused: %s", cs(name_of(peer)),
-					m_growth.ended ? "the world has ended" : m_skip_left > 0 ?
-					"one runs" : "not now");
-			return;
-		}
-		if(m_paused){
-			m_paused = m_pause_auto = false;
-			m_paused_by.clear();
-		}
-		const bool day = m_world.day >= 0.25 && m_world.day < 0.75;
-		const double target = day ? 0.75 : 0.25;
-		// A hair past it, so the phase turns in the skip
-		m_skip_left = m_skip_total =
-				(std::fmod(target - m_world.day + 1.0, 1.0) + 1e-5) * m_world.day_s;
-		m_skip_to = day ? "sunset" : "sunrise";
-		m_skip_by = name_of(peer);
-		m_skip_us = m_skip_sent_us = interface::os::time_us();
-		m_skip_expansions = m_growth.expansions;
-		m_pause_refused.clear();
-		const ss_ line = m_skip_by+" skips to "+m_skip_to;
-		log_i(MODULE, "skeldat: %s: %.1f s of game time, day %.4f", cs(line),
-				m_skip_total, m_world.day);
-		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
-		for(auto &pair : m_players.all)
-			send_paused(pair.first);
-	}
-
-	// Sub-steps of 0.1 s of game time, as many as fit in 35 ms of the
-	// tick's wall time; the progress to the clients four times a second
-	void step_skip()
-	{
-		const int64_t t0 = interface::os::time_us();
-		while(m_skip_left > 0 && interface::os::time_us() - t0 < 35000){
-			const float dt = (float)std::min(0.1, m_skip_left);
-			step_world(dt);
-			m_skip_left -= dt;
-		}
-		const int64_t now = interface::os::time_us();
-		if(m_skip_left <= 0){
-			end_skip("done");
-		} else if(now - m_skip_sent_us >= 250000){
-			m_skip_sent_us = now;
-			for(auto &pair : m_players.all){
-				send_paused(pair.first);
-				m_players.send_time(pair.first);
-			}
-		}
-	}
-
-	void end_skip(const ss_ &how)
-	{
-		const double done = m_skip_total - std::max(0.0, m_skip_left);
-		const double rate = m_growth.sections.size() / m_growth.section_period;
-		log_i(MODULE, "skeldat: the skip to %s %s: %.1f s of game time in "
-				"%.2f s, day %.4f, %zu expansions (%.1f due)", cs(m_skip_to),
-				cs(how), done, (interface::os::time_us() - m_skip_us) / 1e6, m_world.day,
-				m_growth.expansions - m_skip_expansions, done * rate);
-		m_skip_left = 0;
-		// The lag notice's minute starts again
-		m_growth.keep_up_us = 0, m_growth.ticked_s = 0, m_growth.dropped_n = 0;
-		for(auto &pair : m_players.all){
-			send_paused(pair.first);
-			m_players.send_time(pair.first);
-		}
-	}
-
-	void set_paused(bool on, bool is_auto, const ss_ &by)
-	{
-		if(on == m_paused && is_auto == m_pause_auto)
-			return;
-		const bool chat_line = !(on ? is_auto : m_pause_auto);
-		m_paused = on;
-		m_pause_auto = on && is_auto;
-		m_paused_by = on ? by : "";
-		m_pause_refused.clear();
-		// The lag notice's minute starts again
-		m_growth.keep_up_us = 0, m_growth.ticked_s = 0, m_growth.dropped_n = 0;
-		const ss_ line = by+(on ? " paused the world" : " resumed the world")+
-				(is_auto ? " (the pause menu)" : "");
-		log_i(MODULE, "skeldat: %s, day %.4f, world_t %.1f", cs(line), m_world.day,
-				m_world.t);
-		if(chat_line)
-			chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
-		for(auto &pair : m_players.all)
-			send_paused(pair.first);
-	}
-
-	// "" running, else "<name>" or "auto <name>"; skipping, "skip <percent>
-	// <sunrise|sunset>"
-	void send_paused(size_t peer)
-	{
-		if(m_skip_left > 0){
-			network::send(m_server, peer, "skeldat:paused", "skip "+itos((int)(
-					100 * (1 - m_skip_left / m_skip_total)))+" "+m_skip_to);
-			return;
-		}
-		network::send(m_server, peer, "skeldat:paused", !m_paused ? "" :
-				(m_pause_auto ? "auto " : "")+m_paused_by);
-	}
-
-	// Paused, said; a second player ends a single player's pause
-	void joined(size_t peer, Player &pl)
-	{
-		if(m_pause_auto && m_players.all.size() > 1)
-			set_paused(false, true, pl.name);
-		send_paused(peer);
-	}
-
-	bool skipping(){ return m_skip_left > 0; }
 
 	void on_game_packet(const network::Packet &packet)
 	{
@@ -1324,11 +1109,11 @@ struct Module: public interface::Module, public PlayersHost
 			return;
 		}
 		if(what == "pause"){
-			on_pause(peer, packet.data);
+			m_admin.on_pause(peer, packet.data);
 			return;
 		}
 		if(what == "worlds"){
-			if(!picker(peer)){
+			if(!m_admin.picker(peer)){
 				log_w(MODULE, "skeldat: %s's Worlds... refused: not the "
 						"picker", cs(pl.name));
 				return;
@@ -1341,11 +1126,11 @@ struct Module: public interface::Module, public PlayersHost
 		// [SKELDAT_WORLD_ADMIN] Paused: the game's requests refused; the
 		// node's window closed and the how-to and the scores read
 		if(what == "skip"){
-			on_skip(peer, packet.data);
+			m_admin.on_skip(peer, packet.data);
 			return;
 		}
-		if((m_paused || m_skip_left > 0) && what != "close"){
-			refused_paused(packet);
+		if((m_admin.paused || m_admin.skip_left > 0) && what != "close"){
+			m_admin.refused_paused(packet);
 			return;
 		}
 		if(what == "rerun"){
@@ -1403,7 +1188,7 @@ struct Module: public interface::Module, public PlayersHost
 		m_growth.speed_low = std::min(m_growth.speed_low, s);
 		m_save->store("world_menu")->set("speed", itos(s));
 		m_store->set("speed_low", itos(m_growth.speed_low));
-		audit(by, "", "set", "bone speed "+itos(s)+"x");
+		m_admin.audit(by, "", "set", "bone speed "+itos(s)+"x");
 		const ss_ line = "The bones now grow at "+itos(s)+"x";
 		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
 	}
@@ -1420,7 +1205,7 @@ struct Module: public interface::Module, public PlayersHost
 		// [SKELDAT_WORLD_ADMIN] Paused: the world's clock and every step of
 		// the game stand; the sections load and send, the session takes
 		// the joins
-		if(m_paused){
+		if(m_admin.paused){
 			m_players.session.tick(event.dtime);
 			if(m_world.load_points_dirty)
 				update_load_points();
@@ -1428,8 +1213,8 @@ struct Module: public interface::Module, public PlayersHost
 		}
 		m_players.session.tick(event.dtime);
 		// [SKELDAT_SKIP_TIME] Skipping: the world's steps in sub-steps
-		if(m_skip_left > 0)
-			step_skip();
+		if(m_admin.skip_left > 0)
+			m_admin.step_skip();
 		else
 			step_world(event.dtime);
 		if(m_world.load_points_dirty)
@@ -1443,7 +1228,7 @@ struct Module: public interface::Module, public PlayersHost
 		if(m_move_t >= 1){
 			m_move_t = 0;
 			// The players held while skipping: no move to check
-			if(m_skip_left <= 0)
+			if(m_admin.skip_left <= 0)
 				m_players.check_moves();
 			update_skeletons();
 		}
@@ -1457,7 +1242,7 @@ struct Module: public interface::Module, public PlayersHost
 	// The bones a tick; a server behind says so in the chat
 	void step_bones(float dtime)
 	{
-		m_growth.step(dtime, m_skip_left > 0, !m_players.all.empty(),
+		m_growth.step(dtime, m_admin.skip_left > 0, !m_players.all.empty(),
 				[&](const char *line){
 			chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
 		});
@@ -1576,142 +1361,6 @@ struct Module: public interface::Module, public PlayersHost
 			m_furnaces.report_lanterns();
 		for(auto &pair : m_players.all)
 			m_players.send_time(pair.first);
-	}
-
-	// The admin's menu ([SKELDAT] decision 4): a player's inventory viewed,
-	// an item given to it or taken from it, each in moderation's audit log
-	// of the world's save. "skeldat:admin" both ways, a command a line:
-	//   players                    -> players\n<name> a line
-	//   view <name>                -> inv <name>\nmain=<list_text's>
-	//                                 invulnerable=0|1 (a line)
-	//   give <name> <item> <count> -> the view again
-	//   take <name> <slot>         -> the view again
-	//   invulnerable <name> on|off -> the view again
-	//   audit                      -> audit\n<ts by action whom text> a line
-	// simplified: the players on the server now, not the save's others
-	void on_admin(const network::Packet &packet)
-	{
-		const size_t peer = packet.sender;
-		auto me = m_players.all.find(peer);
-		if(me == m_players.all.end() || !m_save || !is_admin(peer))
-			return;
-		std::istringstream is(packet.data);
-		ss_ cmd, name;
-		is>>cmd>>name;
-		if(cmd == "speed"){
-			set_speed(atoi(name.c_str()), me->second.name);
-			cmd = "players";
-		}
-		if(cmd == "players"){
-			ss_ out = "players "+itos(m_growth.speed)+"\n";
-			for(auto &pair : m_players.all)
-				out += pair.second.name+"\n";
-			network::send(m_server, peer, "skeldat:admin", out);
-			return;
-		}
-		if(cmd == "map"){
-			network::send(m_server, peer, "skeldat:admin", "map\n"+m_terrain.write_map());
-			return;
-		}
-		if(cmd == "audit"){
-			std::ostringstream os;
-			os<<"audit\n";
-			moderation::access(m_server, [&](moderation::Interface *m){
-				m_audit.m_save = m_save;
-				const json::Value l = m->audit_log(&m_audit);
-				for(unsigned i = 0; i < l.size() && i < 50; i++){
-					const json::Value &a = l.at(i);
-					os<<json::jstr(a, "by")<<" "<<json::jstr(a, "action")<<" "
-							<<json::jstr(a, "listing")<<": "
-							<<json::jstr(a, "text")<<"\n";
-				}
-			});
-			network::send(m_server, peer, "skeldat:admin", os.str());
-			return;
-		}
-		size_t to = 0;
-		Player *pl = nullptr;
-		for(auto &pair : m_players.all){
-			if(pair.second.name == name){
-				to = pair.first;
-				pl = &pair.second;
-			}
-		}
-		if(!pl)
-			return;
-		const ss_ by = me->second.name;
-		if(cmd == "give"){
-			ss_ item;
-			int count = 0;
-			const skeldat::ItemDef *d = nullptr;
-			if(!(is>>item>>count) || !(d = m_game.item(item)))
-				return;
-			count = std::max(1, std::min(count,
-					m_game.stack_max(item)));
-			const Stack left = m_game.add(pl->main, Stack(item, count));
-			const int given = count - left.count;
-			if(given > 0)
-				audit(by, name, "give", itos(given)+" "+item);
-		} else if(cmd == "take"){
-			int slot = -1;
-			if(!(is>>slot) || slot < 0 || slot >= (int)pl->main.size() ||
-					pl->main[slot].empty())
-				return;
-			const ss_ what = pl->main[slot].str();
-			pl->main[slot] = Stack();
-			audit(by, name, "take", what);
-		} else if(cmd == "invulnerable"){
-			ss_ v;
-			is>>v;
-			if(v != "on" && v != "off")
-				return;
-			pl->invulnerable = v == "on";
-			audit(by, name, "set", "invulnerable "+v);
-		} else if(cmd != "view"){
-			return;
-		}
-		if(cmd != "view")
-			m_players.send_inventory(to, *pl);
-		network::send(m_server, peer, "skeldat:admin", "inv "+name+"\n"+
-				m_players.list_text("main", pl->main)+"invulnerable="+
-				(pl->invulnerable ? "1" : "0"));
-	}
-
-	void audit(const ss_ &by, const ss_ &whom, const ss_ &action,
-			const ss_ &text)
-	{
-		moderation::access(m_server, [&](moderation::Interface *m){
-			m_audit.m_save = m_save;
-			m->audit(&m_audit, by, whom, action, "admin", text, false, false);
-		});
-		log_i(MODULE, "skeldat: %s %ss %s: %s", cs(by), cs(action), cs(whom),
-				cs(text));
-	}
-
-	bool is_admin(size_t peer)
-	{
-		bool admin = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			admin = i->is_local(peer) ||
-					i->level(i->name_of(peer)) >= accounts::LV_ADMIN;
-		});
-		return admin;
-	}
-
-	// accounts' admin, or the launcher's own client (its owner token): fly,
-	// fast and noclip on the client, no movement check here. Sent as it
-	// changes, and always when `tell`.
-	void update_role(size_t peer, Player &pl, bool tell)
-	{
-		const bool admin = is_admin(peer);
-		if(admin == pl.admin && !tell)
-			return;
-		pl.admin = admin;
-		// [SKELDAT_WORLD_ADMIN] And world_menu's picker
-		network::send(m_server, peer, "skeldat:role", ss_(admin ? "admin" : "")+
-				(picker(peer) ? " picker" : ""));
-		log_i(MODULE, "skeldat: %s is %s", cs(pl.name),
-				admin ? "an admin" : "a player");
 	}
 
 	// [SKELDAT_SKELETON_PLAYERS] Who looks like a skeleton (bones.h's

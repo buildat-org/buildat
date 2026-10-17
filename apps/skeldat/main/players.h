@@ -915,5 +915,11 @@ struct Players: public luanti_session::Game, public MobsHost
 				send_stats(pair.first, pl);
 		}
 	}
+
+	ss_ name_of(size_t peer)
+	{
+		auto it = all.find(peer);
+		return it != all.end() ? it->second.name : "client"+itos(peer);
+	}
 };
 // vim: set noet ts=4 sw=4:
