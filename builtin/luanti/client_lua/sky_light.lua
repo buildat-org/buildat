@@ -6,7 +6,7 @@
 -- the sky, the bounce, the ground, a lamp and a sealed cave give a face at
 -- a sun height, the sky's radiance in a hue, the fog, the clouds' light,
 -- and the render path that meters and tonemaps the frame. builtin/luanti's
--- client loop (client.lua) and any other game's (apps/demo_skeldat) call
+-- client loop (client.lua) and any other game's (apps/skeldat) call
 -- these and apply them each to its own scene. The rules themselves are
 -- extensions/physical_sky's (the sky) and extensions/voxel_light's (the
 -- light), re-exported here; what is this file's own is the render path.

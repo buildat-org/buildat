@@ -36,7 +36,7 @@ run()
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 }
 
-for app in demo_skeldat demo_skelenti; do
+for app in skeldat demo_skelenti; do
 	short=${app#demo_}
 	{
 		printf '%s\n' "wait_log 120000 world_menu: the list shown, 0 worlds" \

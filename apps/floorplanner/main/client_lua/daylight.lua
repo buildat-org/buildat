@@ -20,7 +20,7 @@ local rad, sin, cos = math.rad, math.sin, math.cos
 -- Where the sun is
 --
 -- The direction towards the sun on the plan: physical_sky.sun_toward()
--- (floorplanner's, moved there for demo_hillclimb too [HILLCLIMB]), set
+-- (floorplanner's, moved there for hillclimb too [HILLCLIMB]), set
 -- below where physical_sky is loaded
 
 -- The eight points of the compass, for a direction on the plan

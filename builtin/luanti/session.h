@@ -8,7 +8,7 @@
 // an app that runs a game has a playable one without forwarding them.
 // (Were apps/vanilla's main:* handlers.) A plain header any module
 // includes ([SKELDAT_LUANTI_PARTS] 8): builtin/luanti's Module is the Game
-// that is Luanti's Lua, demo_skeldat's its own C++ rules. The owner
+// that is Luanti's Lua, skeldat's its own C++ rules. The owner
 // subscribes to PACKETS and hands those to packet(), calls tick() from its
 // tick and left() at a disconnect. Logs as "luanti".
 #pragma once

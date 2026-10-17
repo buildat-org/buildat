@@ -1,9 +1,0 @@
-{
-	"author": "buildat",
-	"name": "demo_hillclimb",
-	"version": "0.1.0",
-	"engine_api": 2,
-	"license_code": "Apache-2.0",
-	"license_media": "CC0-1.0",
-	"description": "A hill-climb time trial on generated voxel ground."
-}

@@ -140,6 +140,13 @@ Saves and settings
   user/extensions/<extension>/; the pidfile and the web client's URL
   file are key=value lines.
 - The accounts store is format "2".
+- Buildat's demos (apps/demo_*, apps/sample_*) keep no saves over
+  versions or over a rename: a demo's world may not open in another
+  version, nothing reads a demo's older save, and a renamed demo starts
+  with none. save.sqlite's stamp still refuses a newer save. (skeldat
+  and hillclimb, once demo_skeldat and demo_hillclimb, start empty;
+  the old <user>/apps/demo_skeldat and demo_hillclimb directories are
+  left as they were.)
 
 Environment variables
 ---------------------

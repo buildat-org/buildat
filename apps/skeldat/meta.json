@@ -1,0 +1,9 @@
+{
+	"author": "buildat",
+	"name": "skeldat",
+	"version": "0.1.0",
+	"engine_api": 2,
+	"license_code": "Apache-2.0",
+	"license_media": "CC-BY-SA-4.0",
+	"description": "A bounded world that bones and skeletons are taking over: dig, craft and burn lanterns to push the bones back, lure the skeletons with their own marker skulls. Your score is the days until every voxel has bones."
+}
