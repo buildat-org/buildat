@@ -70,7 +70,8 @@ at x >= 0 (and no piles at x < 0); `BUILDAT_SKELDAT_DAY=<s>` the seconds a day;
 `BUILDAT_SKELDAT_EXPAND=<s>` the seconds between a section's expansions;
 `BUILDAT_SKELDAT_LIGHT_STEP=<s>` a light skeleton's step;
 `BUILDAT_SKELDAT_SKELETONS=<n>` that many light skeletons added anywhere
-when the world is in; `BUILDAT_SKELDAT_MARKERS="sx sz n"` a footprint's
+when the world is in, and a new world not populated to its target (set,
+or TEST); `BUILDAT_SKELDAT_MARKERS="sx sz n"` a footprint's
 marker count; `BUILDAT_SKELDAT_LANTERNS="x z coal [block]; ..."` burning
 lanterns on those columns, each reported every 10 s.
 

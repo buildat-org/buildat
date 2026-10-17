@@ -1300,6 +1300,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				sweep(w, i);
 			// For a check: that many more light skeletons, anywhere
 		});
+		// Not in a check's own set of mobs (TEST: no spawning; the bench,
+		// 0 an empty world)
+		if(m_test.empty() && !getenv("BUILDAT_SKELDAT_SKELETONS"))
+			populate();
 		for(size_t t = 0; t < 8 * bench && added < bench; t++)
 			added += add_skeleton(false);
 		if(getenv("BUILDAT_SKELDAT_SURVEY"))
@@ -3395,19 +3399,50 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	// A game hour: the count toward its target, added at night on bone
 	// columns, let die in the morning on clean ground
-	void step_population()
+	// The skeletons' count and its target by the flooded share f
+	size_t skeleton_target(size_t &n, double &f)
 	{
-		size_t n = 0;
+		n = 0;
 		for(auto &kv : m_mobs)
 			n += kv.second.kind == SKELETON;
 		int64_t flooded = 0;
 		for(int c : m_flooded)
 			flooded += c;
 		const double columns = (double)footprints() *
-				skeldat::bones::SECTION * skeldat::bones::SECTION,
-				f = flooded / columns;
-		const size_t target = (size_t)std::lround((SKELETONS_MIN +
+				skeldat::bones::SECTION * skeldat::bones::SECTION;
+		f = flooded / columns;
+		return (size_t)std::lround((SKELETONS_MIN +
 				(SKELETONS_MAX - SKELETONS_MIN) * f) * columns / (1024. * 1024.));
+	}
+
+	// A world's skeletons there from the start ([SKELDAT_START_SKELETONS]):
+	// once a world is in, the first time (a new world, or one made before
+	// this), the count up to its target at once, on bone columns (anywhere
+	// in a world with none); no player is placed yet, so none is too near
+	void populate()
+	{
+		std::string v;
+		if(!m_store || m_store->get("populated", v))
+			return;
+		size_t n;
+		double f;
+		const size_t target = skeleton_target(n, f);
+		const bool any = std::any_of(m_flooded.begin(), m_flooded.end(),
+				[](int c){ return c > 0; });
+		size_t added = 0;
+		const size_t want = target > n ? target - n : 0;
+		for(size_t t = 0; t < 8 * want && added < want; t++)
+			added += add_skeleton(any);
+		m_store->set("populated", "1");
+		log_i(MODULE, "skeldat: populated: %zu skeletons added, %zu in all, "
+				"the target %zu", added, n + added, target);
+	}
+
+	void step_population()
+	{
+		size_t n;
+		double f;
+		const size_t target = skeleton_target(n, f);
 		const size_t k = 1 + (n > target ? n - target : target - n) / 10;
 		size_t added = 0, died = 0;
 		const bool night = m_day < 0.25 || m_day >= 0.75,

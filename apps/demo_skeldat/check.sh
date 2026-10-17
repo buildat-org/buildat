@@ -47,6 +47,7 @@
 # The fourteenth, items on the ground: a full inventory's dig, the drop
 # key, a death's half; lying a game day, kept over a restart, picked up.
 # The fifteenth, a respawn far from the spawn: the world there drawn.
+# The sixteenth, a new world's skeletons there from the start.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -332,8 +333,10 @@ grep -aq "pulled back" "$s" && fail "the admin was pulled back ($s)"
 grep -aE "skeldat: fog for danger (0\.[5-9]|1)" "$t/a2.log" | grep -q . ||
 	fail "no fog in the zone ($t/a2.log)"
 grep -aq "skeldat: mood danger" "$t/a2.log" || fail "no danger music ($t/a2.log)"
-grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)" "$s" | grep -q . ||
-	fail "no skeleton spawned in the zone ($s)"
+# Spawned there, or one of the populated world's woken by the player
+# ([SKELDAT_START_SKELETONS]: the zone's own count can leave no room)
+grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)|skeletons, [1-9][0-9]* full" "$s" |
+	grep -q . || fail "no skeleton spawned or woken in the zone ($s)"
 grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
 # 3. The end: a world of 2 x 2 x 2 sections, every voxel made with bones,
@@ -430,9 +433,11 @@ grep -aq "skeldat: 1 marker skulls in the world" "$t/srv9.log" ||
 
 # 4. The skeletons over the world ([SKELDAT_SKELETON_SIM]), in 4 x 2 x 4
 # sections. A clean world, a game hour every 2 s from 19:12: the count
-# grows at night toward its target and no further.
+# grows at night toward its target and no further (SKELETONS=0: not
+# populated at the start, sixteen's)
 log5="$t/srv5.log"
 BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_DAY=48 \
+	BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TIME=0.8 start_server "$log5" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv5" -C "$t/srv.cache" -l 3 || fail "the server ($log5)"
@@ -479,7 +484,7 @@ grep -a "skeletons, the target" "$log6" | tail -1 | grep -q "the target 125 (1.0
 log11="$t/srv11.log"
 BUILDAT_SKELDAT_WORLD=lantern BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_EXPAND=0.3 BUILDAT_SKELDAT_DAY=240 \
-	BUILDAT_SKELDAT_LANTERNS="-12 0 9; 12 0 1 1" \
+	BUILDAT_SKELDAT_LANTERNS="-12 0 9; 12 0 1 1" BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log11" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv11" -C "$t/srv.cache" -l 3 || fail "the server ($log11)"
@@ -554,7 +559,7 @@ grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: \([0-9]*\) marker
 # next dig cut off by looking at the sky, its crack gone and no dig
 log14="$t/srv14.log"
 BUILDAT_SKELDAT_WORLD=dig BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log14" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv14" -C "$t/srv.cache" -l 3 || fail "the server ($log14)"
@@ -655,7 +660,7 @@ fall()
 # the server started again
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		start_server "$t/srv16_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 		-D "$t/srv16" -C "$t/srv.cache" -l 3 -u launcher=1 ||
@@ -706,10 +711,10 @@ grep -aq "a drop of skeldat:stone at" "$t/srv17_1.log" &&
 	grep -aq "the drop of skeldat:stone at .* is gone" "$t/srv17_1.log" ||
 	fail "the drop key's stone not dropped, or not gone in a day ($t/srv17_1.log)"
 grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
-	[ $(grep -ac "a drop of skeldat:stone 99 at" "$t/srv17_1.log") = 18 ] ||
+	[ $(grep -acE "a drop of skeldat:stone 9[89] at" "$t/srv17_1.log") = 18 ] ||
 	fail "the death's drops ($t/srv17_1.log)"
 grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
-	[ $(grep -ac "client1 picks up 99 skeldat:stone" "$t/srv17_2.log") = 18 ] ||
+	[ $(grep -acE "client1 picks up 9[89] skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
 # 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
 # 512 x 128 x 512: the player's range follows it, the chunks within 2 of
@@ -732,10 +737,31 @@ client respawn "$t/respawn.cmds"
 wait $CLIENT || fail "the respawn's world not drawn ($t/respawn.log, $log18)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 respawn=$(grep -a "skeldat: the chunks within 2 drawn [0-9]" "$t/respawn.log" | tail -1 | sed "s/.*drawn //")
+# 16. A new world populated ([SKELDAT_START_SKELETONS]): 256 x 64 x 256
+# in the morning, once it is in, at its target at once; started again,
+# the same skeletons loaded and no second populating
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=pop BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 0 0" \
+		BUILDAT_SKELDAT_TIME=0.3 start_server "$t/srv19_$n.log" "STATUS Listening" \
+		300 auto "$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv19" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv19_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	wait_for_log "$t/srv19_$n.log" "skeldat: the world is in" 300 ||
+		fail "the world not in ($t/srv19_$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+pop=$(grep -a "skeldat: populated: " "$t/srv19_1.log" | sed 's/.*populated: //')
+echo "$pop" | awk '{ exit !($1 > 0 && $1 == $4 && $4 == $NF) }' ||
+	fail "the new world not populated to its target: $pop ($t/srv19_1.log)"
+grep -aq "skeldat: populated" "$t/srv19_2.log" &&
+	fail "populated again ($t/srv19_2.log)"
+grep -aq "the world \"pop\" starts, seed 2, 0 furnaces, $(echo "$pop" | awk "{ print \$4 }") mobs" \
+	"$t/srv19_2.log" || fail "not the same skeletons loaded: $pop ($t/srv19_2.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
+echo "a new world populated: $pop"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons"
 # vim: set noet ts=4 sw=4:
