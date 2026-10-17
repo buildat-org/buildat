@@ -3395,6 +3395,10 @@ function M.chat_page(back, draft)
 	-- The log takes what the rest leaves of half the screen (8 above it)
 	chat_list:SetFixedHeight(math.max(40, 40 + math.floor(rh / 2) - 8 - w.height))
 	chat_to_end()
+	-- Focused, but taking no text until the page's first frame: the key
+	-- press that opened it (T) brings its letter after it, in the same
+	-- frame ([CHAT_OPEN_KEY_TYPED])
+	e.editable = false
 	e:SetFocus(true)
 	local sub, told
 	sub = magic.SubscribeToEvent("Update", function()
@@ -3402,6 +3406,7 @@ function M.chat_page(back, draft)
 			magic.UnsubscribeFromEvent("Update", sub)
 			return
 		end
+		e.editable = true
 		-- Where it is, a frame on, for a check
 		if not told then
 			told = true

@@ -157,6 +157,7 @@ cat > "$t/b1.cmds" <<EOF
 $placed
 delay 2000
 keypress T
+text t
 delay 800
 text hello from client2
 keypress Return
@@ -224,7 +225,9 @@ grep -aE "client1 digs skeldat:[a-z_]+ at [-0-9,]+, bones [0-3]$" "$s" | grep -q
 	fail "no dig without bones that drops ($s)"
 grep -aq "the skeleton ([0-9]*) burns" "$s" && grep -aq "the skeleton .* dies" "$s" ||
 	fail "the test skeleton did not burn to death ($s)"
-grep -aq "<client2> hello from client2" "$s" || fail "client2's line ($s)"
+# T and its letter in one frame, as a real press: the letter not in the
+# line ([CHAT_OPEN_KEY_TYPED])
+grep -aq "<client2> hello from client2" "$s" || fail "client2's line, or a t before it ($s)"
 grep -aq "client1 reports client2" "$s" || fail "no report ($s, $t/a1.log)"
 grep -a "skeldat: client2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks like a //' |
 	tr '\n' ' ' | grep -qx "skeleton player " ||
