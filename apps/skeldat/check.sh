@@ -64,6 +64,32 @@ m="$here/apps/skeldat/main"
 cc="g++ -std=c++11 -Wno-pragma-once-outside-header -I$here/src"
 $cc -DSKELDAT_GAME_TEST -x c++ "$m/game.h" -o "$t/game" && "$t/game" ||
 	fail "game.h's self test"
+# [SKELDAT_SKULL_ICON] Every item's picture a PNG in client_data with a
+# pixel not fully transparent (8-bit, not interlaced, as client_data's are)
+# (filtered rows: the first alpha not 0 is predicted from zeros, so its
+# byte is not 0 either)
+"$t/game" images | python3 -I -c '
+import struct, sys, zlib
+bad = []
+for line in sys.stdin:
+    name, image = line.split()
+    try:
+        d = open(sys.argv[1] + "/client_data/" + image.split("/", 1)[1], "rb").read()
+    except OSError:
+        bad.append(name + ": no " + image); continue
+    w, h, depth, ctype = struct.unpack(">IIBB", d[16:26])
+    idat, i = b"", 8
+    while i < len(d):
+        n, kind = struct.unpack(">I4s", d[i:i + 8])
+        if kind == b"IDAT": idat += d[i + 8:i + 8 + n]
+        i += 12 + n
+    raw = zlib.decompress(idat)
+    if ctype == 6 and depth == 8:
+        row = 1 + 4 * w
+        if not any(raw[y * row + 1 + 4 * x + 3] for y in range(h) for x in range(w)):
+            bad.append(name + ": " + image + " is empty")
+if bad: sys.exit("\n".join(bad))
+' "$m" || fail "an item's picture missing or empty"
 $cc -DSKELDAT_BONES_TEST -x c++ "$m/bones.h" -o "$t/bones" && "$t/bones" ||
 	fail "bones.h's self test"
 $cc -DSKELDAT_MOVE_TEST -x c++ "$m/move_check.h" -x none \

@@ -428,7 +428,7 @@ inline Game make_game()
 	item("apple", "Apple", 4);
 	item("meat_raw", "Raw Boar Meat", 3);
 	item("meat_cooked", "Cooked Boar Meat", 8);
-	item("skull", "Deep Skull", 0, "skull_item");
+	item("skull", "Deep Skull", 0, "skull_front");
 	item("crown", "Bone Crown").stack_max = 1;
 
 	// The hand: dirt, wood slowly, leaves; no stone
@@ -587,7 +587,17 @@ inline int self_test()
 	return 0;
 }
 }
-int main(){ return skeldat::self_test(); }
+// With an argument: each item's picture a line, for check.sh's look at
+// the PNGs ([SKELDAT_SKULL_ICON])
+int main(int argc, char **argv)
+{
+	if(argc > 1){
+		for(auto &pair : skeldat::make_game().items)
+			printf("%s %s\n", pair.first.c_str(), pair.second.image.c_str());
+		return 0;
+	}
+	return skeldat::self_test();
+}
 namespace skeldat {
 #endif
 
