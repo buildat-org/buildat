@@ -547,9 +547,9 @@ struct AuditHost: public moderation::Host
 #include "drops.h"
 #include "bones_growth.h"
 #include "mobs.h"
+#include "players.h"
 
-struct Module: public interface::Module, public luanti_session::Game,
-		public MobsHost
+struct Module: public interface::Module, public PlayersHost
 {
 	interface::Server *m_server;
 	const skeldat::Game m_game = skeldat::make_game();
@@ -589,26 +589,24 @@ struct Module: public interface::Module, public luanti_session::Game,
 	ss_ m_skip_to, m_skip_by;
 	size_t m_skip_expansions = 0;
 	// m_joining: sent the join, its login not yet in
-	std::set<size_t> m_waiting, m_shown, m_joining;
-	std::map<size_t, Player> m_players;
+	std::set<size_t> m_waiting, m_joining;
 	// The furnaces and the lanterns (furnaces.h)
 	Furnaces m_furnaces{m_world};
 	// The bones' growth and the world's end (bones_growth.h)
 	BonesGrowth m_growth{m_world, m_furnaces};
 	luanti_mapgen::Params m_mapgen;
 	bool m_spawn_ready = false;
-	// Every section of the world in ([SKELDAT_BOUNDED_WORLD]): the players
-	// wait for it
-	bool m_world_ready = false;
-	float m_spawn[3] = {0, 0, 0};
 	float m_save_t = 0, m_send_t = 0, m_breath_t = 0,
 			m_move_t = 0;
 	size_t m_worldgen_queue = 0;
-	bool m_load_points_dirty = true;
 	// The stacks on the ground (drops.h)
 	Drops m_drops{m_world};
+	// The players, what they do and the session (players.h)
+	Players m_players{m_world, *this, m_save, m_mobs, m_drops, m_growth,
+			m_furnaces};
 	// The mobs, the arrows and the light skeletons (mobs.h)
-	Mobs m_mobs{m_world, m_players, *this, m_drops, m_growth, m_furnaces};
+	Mobs m_mobs{m_world, m_players.all, m_players, m_drops, m_growth,
+			m_furnaces};
 	// The outermost columns' mean top, once the world is in
 	float m_edge_crest = 0;
 	// The lowest of those tops ([SKELDAT_BACKDROP_LOW]), where the hills
@@ -627,7 +625,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		// modifier, which the client's VOXELDECAY technique reads as the
 		// decay (AreaField.glsl). wetness is only the slot it rides in.
 		m_world.format.wetness = m_world.bones;
-		m_furnaces.changed = [this](const ss_ &at){ send_furnace(at); };
+		m_furnaces.changed = [this](const ss_ &at){ m_players.send_furnace(at); };
 		// What is kept by the voxel: the stuck arrows (saved), the marker
 		// skulls a footprint, and the sections whose tops are counted
 		// again (the top may have moved to another section of the column)
@@ -706,7 +704,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 					refused_paused(p);
 					return;
 				}
-				m_session.packet(p);
+				m_players.session.packet(p);
 			});
 	}
 
@@ -843,8 +841,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
-		if(m_world_ready){
-			show(peer);
+		if(m_world.ready){
+			m_players.show(peer);
 			return;
 		}
 		// [WORLD_MENU_ADMIN] On a public server, while no world is picked,
@@ -879,8 +877,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 	{
 		if(!m_joining.erase(login.peer))
 			return;
-		if(m_world_ready)
-			show(login.peer);
+		if(m_world.ready)
+			m_players.show(login.peer);
 		else
 			menu_or_wait(login.peer);
 	}
@@ -1337,7 +1335,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		using namespace skeldat::bones;
 		ss_ v;
 		if(m_store->get("spawn", v)){
-			std::istringstream(v)>>m_spawn[0]>>m_spawn[1]>>m_spawn[2];
+			std::istringstream(v)>>m_world.spawn[0]>>m_world.spawn[1]>>m_world.spawn[2];
 			m_spawn_ready = true;
 			return;
 		}
@@ -1371,9 +1369,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 				ground(ex, ez, ey);
 			}
 			if(got >= 2){
-				m_spawn[0] = (float)ex;
-				m_spawn[1] = (float)ey;
-				m_spawn[2] = (float)ez;
+				m_world.spawn[0] = (float)ex;
+				m_world.spawn[1] = (float)ey;
+				m_world.spawn[2] = (float)ez;
 				m_spawn_ready = true;
 			}
 			std::mt19937 r(m_mapgen.seed);
@@ -1387,9 +1385,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 						(uint32_t)m_mapgen.seed, (float)x, (float)z,
 						m_world.half * SECTION)) > 0)
 					continue;
-				m_spawn[0] = (float)x;
-				m_spawn[1] = (float)feet;
-				m_spawn[2] = (float)z;
+				m_world.spawn[0] = (float)x;
+				m_world.spawn[1] = (float)feet;
+				m_world.spawn[2] = (float)z;
 				m_spawn_ready = true;
 			}
 			// [SKELDAT_STARTER_ITEMS]: a bow and 4 arrows' worth near a new
@@ -1398,9 +1396,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 			const char *starter = getenv("BUILDAT_SKELDAT_STARTER");
 			if(!m_spawn_ready || (starter && ss_(starter) == "0"))
 				return;
-			const int sx = (int)m_spawn[0], sz = (int)m_spawn[2];
+			const int sx = (int)m_world.spawn[0], sz = (int)m_world.spawn[2];
 			for(int i = 0; i < 8; i++){
-				int x = sx, z = sz, feet = (int)m_spawn[1];
+				int x = sx, z = sz, feet = (int)m_world.spawn[1];
 				for(int k = 0; k < 8; k++){
 					const int dx = (int)(r() % 13) - 6, dz = (int)(r() % 13) - 6;
 					int f = 0;
@@ -1415,11 +1413,11 @@ struct Module: public interface::Module, public luanti_session::Game,
 			}
 		});
 		if(!m_spawn_ready){
-			m_spawn[1] = (float)((m_world.y1 + 1) * SECTION - 1);
+			m_world.spawn[1] = (float)((m_world.y1 + 1) * SECTION - 1);
 			m_spawn_ready = true;
 		}
 		std::ostringstream os;
-		os<<m_spawn[0]<<" "<<m_spawn[1]<<" "<<m_spawn[2];
+		os<<m_world.spawn[0]<<" "<<m_world.spawn[1]<<" "<<m_world.spawn[2];
 		m_store->set("spawn", os.str());
 		log_i(MODULE, "skeldat: spawn at %s", cs(os.str()));
 	}
@@ -1431,7 +1429,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		sv_<voxelworld::LoadPoint> points;
 		points.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(0, 0, 0),
 				m_world.half, std::max(-m_world.y0, m_world.y1), m_world.half, std::max(-m_world.y0, m_world.y1)));
-		for(auto &pair : m_players){
+		for(auto &pair : m_players.all){
 			const Player &pl = pair.second;
 			if(!pl.placed)
 				continue;
@@ -1443,13 +1441,13 @@ struct Module: public interface::Module, public luanti_session::Game,
 			w->set_load_points(points);
 			w->set_stream_budget(m_worldgen_queue >= 12 ? 0 : 2);
 		});
-		m_load_points_dirty = false;
+		m_world.load_points_dirty = false;
 	}
 
 	void on_worldgen_queue_modified(const worldgen::QueueModifiedEvent &e)
 	{
 		m_worldgen_queue = e.queue_size;
-		m_load_points_dirty = true;
+		m_world.load_points_dirty = true;
 	}
 
 	//
@@ -1466,7 +1464,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		// sixteenth, and the time it took
 		const size_t all = m_world.all_sections();
 		if(m_growth.sections.size() % std::max<size_t>(1, all / 16) == 0 &&
-				!m_world_ready){
+				!m_world.ready){
 			log_i(MODULE, "skeldat: %zu of %zu sections loaded, %.1f s, the "
 					"highest voxel made at y %d", m_growth.sections.size(), all,
 					(interface::os::time_us() - m_start_us) / 1e6,
@@ -1496,7 +1494,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 	// The whole world in: the spawn found on it and the players let in
 	void world_in()
 	{
-		m_world_ready = true;
+		m_world.ready = true;
 		find_spawn();
 		const int64_t t0 = interface::os::time_us();
 		m_growth.flooded.assign(m_world.footprints(), 0);
@@ -1561,7 +1559,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		log_i(MODULE, "skeldat: the world is in, %.1f s",
 				(interface::os::time_us() - m_start_us) / 1e6);
 		for(size_t peer : m_waiting)
-			show(peer);
+			m_players.show(peer);
 		m_waiting.clear();
 	}
 
@@ -1573,363 +1571,22 @@ struct Module: public interface::Module, public luanti_session::Game,
 	}
 
 	//
-	// The players
+	// The leave and the save (the players are players.h's)
 	//
-
-	// Once per peer: files_transmitted comes again after each batch
-	void show(size_t peer)
-	{
-		if(!m_shown.insert(peer).second)
-			return;
-		ss_ name;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			name = i->name_of(peer);
-		});
-		// A peer without an account is "client<peer>", which accounts keeps
-		// from new accounts (reserved_name()): "player<peer>" was any
-		// account's of that name, its inventory and its chat name
-		if(name.empty())
-			name = "client"+itos(peer);
-		m_session.join(name, peer, false);
-	}
-
-	//
-	// The session's calls (luanti_session::Game), by the player's name.
-	// Placed at the join; in the world when the client says it has the
-	// world loaded (luanti:world_in), which changes nothing here.
-	// The leave is on_client_disconnected's.
-	//
-
-	luanti_session::Session m_session{*this};
-
-	void place_player(const ss_ &name, size_t peer)
-	{
-		Player &pl = m_players[peer];
-		pl.name = name;
-		ss_ v;
-		if(m_save->store("skeldat_players")->get(name, v))
-			pl.load(v);
-		else
-			pl.intro = !getenv("BUILDAT_SKELDAT_INTRO") ||
-					ss_(getenv("BUILDAT_SKELDAT_INTRO")) != "0";
-		network::send(m_server, peer, "core:run_script",
-				"buildat.run_script_file(\"main/init.lua\")");
-		network::send(m_server, peer, "skeldat:items", items_text());
-		update_role(peer, pl, true);
-		chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
-		replicate::assign_scene_to_peer(m_server, m_world.scene, peer);
-		if(!pl.placed)
-			respawn(peer, pl);
-		else
-			send_position(peer, pl);
-		send_inventory(peer, pl);
-		send_stats(peer, pl);
-		send_time(peer);
-		send_end(peer);
-		send_world(peer);
-		// [SKELDAT_WORLD_ADMIN] Paused, said; a second player ends a single
-		// player's pause
-		if(m_pause_auto && m_players.size() > 1)
-			set_paused(false, true, pl.name);
-		send_paused(peer);
-		m_load_points_dirty = true;
-		log_i(MODULE, "skeldat: %s joins at (%.1f, %.1f, %.1f)", cs(name),
-				pl.x, pl.y, pl.z);
-	}
-
-	void add_player(const ss_ &name, size_t peer)
-	{
-		log_i(MODULE, "skeldat: %s is in the world", cs(name));
-		auto it = m_players.find(peer);
-		if(it != m_players.end() && it->second.intro){
-			it->second.intro = false;
-			send_intro(peer);
-		}
-	}
-	void remove_player(const ss_ &name){}
-	// accounts' admin is update_role()'s
-	void set_admin(const ss_ &name, bool admin){}
-	// Chat is builtin/chat's
-	void chat_message(const ss_ &name, const ss_ &message){}
-	void chat_send(const ss_ &to, const ss_ &text){}
-	// The drop key: count of the held stack, 0 all of it, thrown ahead
-	bool drop_wielded(const ss_ &name, int count)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(!pl || pl->main[pl->wield].empty())
-			return false;
-		Stack &st = pl->main[pl->wield];
-		const int n = count <= 0 || count > st.count ? st.count : count;
-		Stack out = st;
-		out.count = n;
-		st.take(n);
-		const float yaw = pl->yaw * (float)M_PI / 180;
-		m_drops.drop(out, pl->x, pl->y + 1.2f, pl->z, std::sin(yaw) * 3, 2,
-				std::cos(yaw) * 3, pl->name);
-		send_inventory(peer, *pl);
-		return true;
-	}
-
-	// The living player by name; the dead do nothing but respawn, which is
-	// skeldat:respawn
-	// simplified: a walk over the players, a handful at most
-	Player *alive(const ss_ &name, size_t &peer)
-	{
-		for(auto &pair : m_players){
-			if(pair.second.name == name){
-				peer = pair.first;
-				return pair.second.hp > 0 ? &pair.second : nullptr;
-			}
-		}
-		return nullptr;
-	}
-
-	void set_player_pos(const ss_ &name, float x, float y, float z,
-			float look_h, float look_v, int32_t controls)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(!pl)
-			return;
-		for(float v : {x, y, z, look_h})
-			if(!std::isfinite(v) || std::fabs(v) > 1e6f)
-				return;
-		// A lagging client's places from before the one sent: a pull back
-		// of each would only queue more of them
-		if(pl->moved){
-			if((controls & PLACES_MASK) != pl->places)
-				return;
-			pl->moved = false;
-		}
-		auto section = [](const Player &pl){
-			return std::make_tuple((int)std::floor(pl.x / 16),
-					(int)std::floor(pl.y / 16), (int)std::floor(pl.z / 16));
-		};
-		const auto was = section(*pl);
-		pl->x = x;
-		pl->y = y;
-		pl->z = z;
-		pl->board = (controls & BOARD_BIT) != 0;
-		pl->board_seen = pl->board_seen || pl->board;
-		pl->prone = (controls & PRONE_BIT) != 0;
-		pl->prone_seen = pl->prone_seen || pl->prone;
-		// Luanti's horizontal look turns the other way from Urho's yaw
-		pl->yaw = -look_h * 180 / (float)M_PI;
-		if(section(*pl) != was)
-			m_load_points_dirty = true;
-	}
-
-	// [SKELDAT_NO_FALL_DAMAGE] A fall does not hurt (user, 2026-10-17):
-	// getting back up is its cost
-	void player_fell(const ss_ &name, float speed)
-	{
-		log_i(MODULE, "skeldat: %s lands at %.1f, no damage", cs(name), speed);
-	}
-
-	void set_wield_index(const ss_ &name, int index)
-	{
-		size_t peer;
-		if(Player *pl = alive(name, peer)){
-			const int w = std::max(0, std::min(8, index - 1));
-			// A switch ends the bow's draw unshot
-			if(w != pl->wield)
-				pl->draw_t = -1;
-			pl->wield = w;
-		}
-	}
-
-	bool dig_node(int32_t x, int32_t y, int32_t z, const ss_ &name)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(pl)
-			dig(peer, *pl, x, y, z);
-		return pl != nullptr;
-	}
-
-	// Where a held dig starts: dig() wants it to have taken its time
-	bool punch_node(int32_t x, int32_t y, int32_t z, const ss_ &name)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(!pl)
-			return false;
-		pl->dig_at = pos_key(x, y, z);
-		pl->dig_t0 = m_world.time;
-		return true;
-	}
-
-	bool punch_object(int32_t id, const ss_ &name)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(pl)
-			punch(peer, *pl, (uint32_t)id);
-		return pl != nullptr;
-	}
-
-	// Into above; under is what was pointed at, and the table's and the
-	// furnace's windows are skeldat:open
-	bool place_node(int32_t under_x, int32_t under_y, int32_t under_z,
-			int32_t above_x, int32_t above_y, int32_t above_z,
-			const ss_ &name, bool sneak)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(pl)
-			place(peer, *pl, above_x, above_y, above_z);
-		return pl != nullptr;
-	}
-
-	// Food is eaten
-	bool use_wielded(const ss_ &name)
-	{
-		size_t peer;
-		Player *pl = alive(name, peer);
-		if(!pl)
-			return false;
-		Stack &st = pl->main[pl->wield];
-		const skeldat::ItemDef *d = m_game.item(st.name);
-		if(!d || d->eat <= 0 || pl->hp >= HP_MAX)
-			return false;
-		pl->hp = std::min(HP_MAX, pl->hp + d->eat);
-		st.take(1);
-		log_i(MODULE, "skeldat: %s eats %s", cs(pl->name), cs(d->name));
-		send_inventory(peer, *pl);
-		send_stats(peer, *pl);
-		return true;
-	}
-
-	void respawn(size_t peer, Player &pl)
-	{
-		pl.x = m_spawn[0];
-		pl.y = m_spawn[1];
-		pl.z = m_spawn[2];
-		pl.hp = HP_MAX;
-		pl.breath = BREATH_MAX;
-		pl.placed = true;
-		send_position(peer, pl);
-		send_stats(peer, pl);
-	}
-
-	// Where the server puts the player: the movement check's base too
-	void send_position(size_t peer, Player &pl)
-	{
-		// Its range follows ([SKELDAT_RESPAWN_LOAD]): the moves' own check
-		// sees no section change, the place having been set here already,
-		// and a respawned player's range stayed where it died
-		m_load_points_dirty = true;
-		pl.cx = pl.x;
-		pl.cy = pl.y;
-		pl.cz = pl.z;
-		pl.check_t = m_world.time;
-		pl.check_air = false;
-		pl.moved = true;
-		pl.places = (pl.places + 1) & PLACES_MASK;
-		std::ostringstream os;
-		os<<pl.x<<" "<<pl.y<<" "<<pl.z<<" "<<pl.yaw;
-		network::send(m_server, peer, "skeldat:position", os.str());
-	}
-
-	void send_stats(size_t peer, const Player &pl)
-	{
-		network::send(m_server, peer, "skeldat:stats",
-				itos(pl.hp)+" "+itos(pl.breath));
-	}
-
-	void send_time(size_t peer)
-	{
-		std::ostringstream os;
-		os<<m_world.day<<" "<<(1.0 / m_world.day_s);
-		network::send(m_server, peer, "skeldat:time", os.str());
-	}
-
-	static ss_ list_text(const ss_ &name, const sv_<Stack> &l)
-	{
-		ss_ s = name+"=";
-		for(size_t i = 0; i < l.size(); i++)
-			s += (i ? "|" : "")+l[i].str();
-		return s+"\n";
-	}
-
-	void send_inventory(size_t peer, const Player &pl)
-	{
-		Stack grid[9];
-		for(int i = 0; i < 9; i++)
-			grid[i] = pl.craft[i];
-		const skeldat::Recipe *r = m_game.craft(grid);
-		sv_<Stack> preview(1);
-		if(r)
-			preview[0] = Stack::parse(r->output);
-		network::send(m_server, peer, "skeldat:inv", list_text("main", pl.main)+
-				list_text("craft", pl.craft)+
-				list_text("craftresult", pl.craftresult)+
-				list_text("craftpreview", preview));
-	}
-
-	void send_furnace(const ss_ &at)
-	{
-		auto it = m_furnaces.all.find(at);
-		if(it == m_furnaces.all.end())
-			return;
-		const Furnace &f = it->second;
-		std::ostringstream os;
-		os<<at<<"\n"<<list_text("src", {f.src})<<list_text("fuel", {f.fuel})
-				<<list_text("dst", {f.dst});
-		for(auto &pair : m_players)
-			if(pair.second.open == at)
-				network::send(m_server, pair.first, "skeldat:node_inv",
-						os.str());
-	}
-
-	// What the client needs to know of the items: what they look like, how
-	// they stack, what they dig and how fast; and the groups of the nodes
-	// for the dig times. A line each, tab-separated.
-	ss_ items_text()
-	{
-		auto caps = [](const sv_<skeldat::Cap> &cs){
-			std::ostringstream os;
-			for(const skeldat::Cap &c : cs)
-				os<<c.group<<":"<<c.times[1]<<","<<c.times[2]<<","
-						<<c.times[3]<<":"<<c.uses<<";";
-			return os.str();
-		};
-		std::ostringstream os;
-		os<<"hand\t"<<caps(m_game.hand.caps)<<"\n";
-		for(auto &pair : m_game.items){
-			const skeldat::ItemDef &d = pair.second;
-			os<<"item\t"<<d.name<<"\t"<<d.desc<<"\t"<<d.image<<"\t"
-					<<d.stack_max<<"\t"<<caps(d.caps)<<"\t"<<d.eat<<"\n";
-		}
-		for(const skeldat::NodeDef &n : m_game.nodes){
-			os<<"node\t"<<n.name<<"\t";
-			for(auto &g : n.groups)
-				os<<g.first<<"="<<g.second<<";";
-			os<<"\n";
-		}
-		return os.str();
-	}
 
 	void on_client_disconnected(const network::OldClient &old)
 	{
 		const size_t peer = old.info.id;
-		auto it = m_players.find(peer);
-		if(it != m_players.end()){
-			save_player(it->second);
-			m_players.erase(it);
+		auto it = m_players.all.find(peer);
+		if(it != m_players.all.end()){
+			m_players.save_player(it->second);
+			m_players.all.erase(it);
 		}
-		m_session.left(peer);
-		m_shown.erase(peer);
+		m_players.session.left(peer);
+		m_players.shown.erase(peer);
 		m_waiting.erase(peer);
 		m_joining.erase(peer);
-		m_load_points_dirty = true;
-	}
-
-	void save_player(const Player &pl)
-	{
-		if(m_save && pl.placed)
-			m_save->store("skeldat_players")->set(pl.name, pl.save());
+		m_world.load_points_dirty = true;
 	}
 
 	void save()
@@ -1938,7 +1595,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 			return;
 		storage::Store *ps = m_save->store("skeldat_players");
 		ps->batch([&](){
-			for(auto &pair : m_players)
+			for(auto &pair : m_players.all)
 				if(pair.second.placed)
 					ps->set(pair.second.name, pair.second.save());
 		});
@@ -1965,9 +1622,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 	}
 
 	//
-	// What a player does
+	// What the players are sent of the world's run
 	//
-
 
 	// The world's size and its edge's mean crest, for the client's
 	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest
@@ -2179,8 +1835,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 
 	ss_ name_of(size_t peer)
 	{
-		auto it = m_players.find(peer);
-		return it != m_players.end() ? it->second.name : "client"+itos(peer);
+		auto it = m_players.all.find(peer);
+		return it != m_players.all.end() ? it->second.name : "client"+itos(peer);
 	}
 
 	void reload_for(const ss_ &line, const ss_ &data, const ss_ &goodbye)
@@ -2275,7 +1931,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 				end_skip("stopped by "+name_of(peer));
 			return;
 		}
-		if(how != "on" || m_growth.ended || m_skip_left > 0 || !m_world_ready ||
+		if(how != "on" || m_growth.ended || m_skip_left > 0 || !m_world.ready ||
 				(m_paused && !m_pause_auto)){
 			log_w(MODULE, "skeldat: %s's skip refused: %s", cs(name_of(peer)),
 					m_growth.ended ? "the world has ended" : m_skip_left > 0 ?
@@ -2300,7 +1956,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		log_i(MODULE, "skeldat: %s: %.1f s of game time, day %.4f", cs(line),
 				m_skip_total, m_world.day);
 		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
-		for(auto &pair : m_players)
+		for(auto &pair : m_players.all)
 			send_paused(pair.first);
 	}
 
@@ -2319,9 +1975,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 			end_skip("done");
 		} else if(now - m_skip_sent_us >= 250000){
 			m_skip_sent_us = now;
-			for(auto &pair : m_players){
+			for(auto &pair : m_players.all){
 				send_paused(pair.first);
-				send_time(pair.first);
+				m_players.send_time(pair.first);
 			}
 		}
 	}
@@ -2337,9 +1993,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 		m_skip_left = 0;
 		// The lag notice's minute starts again
 		m_growth.keep_up_us = 0, m_growth.ticked_s = 0, m_growth.dropped_n = 0;
-		for(auto &pair : m_players){
+		for(auto &pair : m_players.all){
 			send_paused(pair.first);
-			send_time(pair.first);
+			m_players.send_time(pair.first);
 		}
 	}
 
@@ -2360,7 +2016,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 				m_world.t);
 		if(chat_line)
 			chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
-		for(auto &pair : m_players)
+		for(auto &pair : m_players.all)
 			send_paused(pair.first);
 	}
 
@@ -2376,6 +2032,16 @@ struct Module: public interface::Module, public luanti_session::Game,
 		network::send(m_server, peer, "skeldat:paused", !m_paused ? "" :
 				(m_pause_auto ? "auto " : "")+m_paused_by);
 	}
+
+	// Paused, said; a second player ends a single player's pause
+	void joined(size_t peer, Player &pl)
+	{
+		if(m_pause_auto && m_players.all.size() > 1)
+			set_paused(false, true, pl.name);
+		send_paused(peer);
+	}
+
+	bool skipping(){ return m_skip_left > 0; }
 
 	//
 	// [SKELDAT_HIGH_SCORES] The scores, outside the worlds
@@ -2568,21 +2234,10 @@ struct Module: public interface::Module, public luanti_session::Game,
 		network::send(m_server, peer, "skeldat:scores", out.stringify());
 	}
 
-	// From the player's eyes to the middle of the voxel
-	// Within reach, and inside the world above its bottom layer, which is
-	// not dug ([SKELDAT_BOUNDED_WORLD])
-	bool reaches(const Player &pl, int x, int y, int z)
-	{
-		if(m_growth.ended || !m_world.reaches_world(x, y, z))
-			return false;
-		const float dx = x - pl.x, dy = y - (pl.y + 1.625f), dz = z - pl.z;
-		return std::sqrt(dx * dx + dy * dy + dz * dz) <= REACH;
-	}
-
 	void on_game_packet(const network::Packet &packet)
 	{
-		auto it = m_players.find(packet.sender);
-		if(it == m_players.end())
+		auto it = m_players.all.find(packet.sender);
+		if(it == m_players.all.end())
 			return;
 		const size_t peer = packet.sender;
 		Player &pl = it->second;
@@ -2627,7 +2282,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		}
 		if(what == "respawn"){
 			if(pl.hp <= 0)
-				respawn(peer, pl);
+				m_players.respawn(peer, pl);
 			return;
 		}
 		if(pl.hp <= 0)
@@ -2635,13 +2290,13 @@ struct Module: public interface::Module, public luanti_session::Game,
 		if(what == "open"){
 			int x, y, z;
 			pl.open = "";
-			if(is>>x>>y>>z && reaches(pl, x, y, z)){
+			if(is>>x>>y>>z && m_players.reaches(pl, x, y, z)){
 				const skeldat::NodeDef *n = m_world.node_of(m_world.id_at(x, y, z));
-				if(n && (n->name == "skeldat:table" || has_slots(n->name))){
+				if(n && (n->name == "skeldat:table" || m_players.has_slots(n->name))){
 					pl.open = pos_key(x, y, z);
 					if(n->name != "skeldat:table"){
 						m_furnaces.all[pl.open]; // one that predates its record
-						send_furnace(pl.open);
+						m_players.send_furnace(pl.open);
 					}
 				}
 			}
@@ -2651,408 +2306,15 @@ struct Module: public interface::Module, public luanti_session::Game,
 			int count = 0, fi = 0, ti = 0;
 			ss_ floc, flist, tloc, tlist;
 			if(is>>count>>floc>>flist>>fi>>tloc>>tlist>>ti)
-				move(peer, pl, count, floc, flist, fi, tloc, tlist, ti);
+				m_players.move(peer, pl, count, floc, flist, fi, tloc, tlist, ti);
 		} else if(what == "craft"){
-			craft(peer, pl);
+			m_players.craft(peer, pl);
 		} else if(what == "bow"){
 			ss_ how;
 			float dx = 0, dy = 0, dz = 0;
 			is>>how>>dx>>dy>>dz;
-			bow(peer, pl, how, dx, dy, dz);
+			m_players.bow(peer, pl, how, dx, dy, dz);
 		}
-	}
-
-	// [SKELDAT_BOW] "start": the draw begins with the bow held and an
-	// arrow in the main inventory; "release dx dy dz": timed here, the
-	// arrow shot from the eye along the look at the draw's speed, one
-	// arrow taken and the bow worn; under BOW_MIN nothing
-	void bow(size_t peer, Player &pl, const ss_ &how, float dx, float dy,
-			float dz)
-	{
-		Stack &held = pl.main[pl.wield];
-		auto arrow = std::find_if(pl.main.begin(), pl.main.end(),
-				[](const Stack &st){ return st.name == "skeldat:arrow"; });
-		if(how == "start"){
-			pl.draw_t = held.name == "skeldat:bow" && arrow != pl.main.end() ?
-					m_world.time : -1;
-			if(pl.draw_t >= 0){
-				log_i(MODULE, "skeldat: %s draws the bow", cs(pl.name));
-				// [SKELDAT_BOW_SOUNDS] The others hear the draw play out
-				sound("bow_draw", pl.x, pl.y + 1.5f, pl.z, peer);
-			}
-			return;
-		}
-		if(how != "release" || pl.draw_t < 0)
-			return;
-		const float draw = std::min(1.0f, (float)(m_world.time - pl.draw_t) / BOW_DRAW);
-		pl.draw_t = -1;
-		const float l = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if(held.name != "skeldat:bow" || arrow == pl.main.end() ||
-				!(l > 0.5f && l < 2)){
-			return;
-		}
-		if(draw < BOW_MIN){
-			log_i(MODULE, "skeldat: %s lets the bow go undrawn (%.2f)",
-					cs(pl.name), draw);
-			return;
-		}
-		dx /= l, dy /= l, dz /= l;
-		arrow->take(1);
-		held.wear += skeldat::WEAR_MAX / BOW_USES;
-		if(held.wear >= skeldat::WEAR_MAX)
-			held = Stack();
-		send_inventory(peer, pl);
-		const float speed = draw * BOW_SPEED;
-		Arrow a;
-		a.x = pl.x + dx * 0.5f, a.y = pl.y + 1.6f + dy * 0.5f,
-				a.z = pl.z + dz * 0.5f;
-		a.vx = dx * speed, a.vy = dy * speed, a.vz = dz * speed;
-		a.by_player = true;
-		a.peer = peer;
-		main_context::access(m_server, m_world.scene, [&](Urho3D::Scene *scene){
-			Urho3D::Node *n = scene->CreateChild("skeldat_arrow");
-			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
-			a.node_id = n->GetID();
-		});
-		m_mobs.arrows.push_back(a);
-		// [SKELDAT_BOW_SOUND_TUNE] The shooter plays its own at the release
-		sound("bow", a.x, a.y, a.z, peer);
-		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f)",
-				cs(pl.name), speed, draw);
-	}
-
-	void hurt(size_t peer, Player &pl, int damage, const char *how)
-	{
-		if(damage <= 0 || pl.hp <= 0)
-			return;
-		// [SKELDAT_SKIP_TIME] Held through a skip, unharmed
-		if(pl.invulnerable || m_skip_left > 0){
-			log_i(MODULE, "skeldat: %s %s, %s", cs(pl.name), how,
-					pl.invulnerable ? "invulnerable" : "held by a skip");
-			return;
-		}
-		pl.hp = std::max(0, pl.hp - damage);
-		log_i(MODULE, "skeldat: %s %s, %d hp left", cs(pl.name), how, pl.hp);
-		if(pl.hp == 0){
-			death_drops(pl);
-			send_inventory(peer, pl);
-		}
-		send_stats(peer, pl);
-	}
-
-	// Half the non-empty stacks, rounded up, picked at random, dropped
-	// where the player died; nothing below the world
-	void death_drops(Player &pl)
-	{
-		if(pl.y < m_world.y0 * skeldat::bones::SECTION)
-			return;
-		sv_<Stack*> full;
-		for(auto *l : {&pl.main, &pl.craft, &pl.craftresult})
-			for(Stack &st : *l)
-				if(!st.empty())
-					full.push_back(&st);
-		std::shuffle(full.begin(), full.end(), m_world.rand);
-		const size_t n = (full.size() + 1) / 2;
-		for(size_t i = 0; i < n; i++){
-			m_drops.drop(*full[i], pl.x + m_world.rnd() - 0.5f, pl.y + 0.5f,
-					pl.z + m_world.rnd() - 0.5f);
-			*full[i] = Stack();
-		}
-		log_i(MODULE, "skeldat: %s dies at %.1f,%.1f,%.1f, dropping %zu of "
-				"%zu stacks", cs(pl.name), pl.x, pl.y, pl.z, n, full.size());
-	}
-
-	// What does not fit the player's inventory, dropped at its feet
-	void give_or_drop(Player &pl, const Stack &st)
-	{
-		m_drops.drop(m_game.add(pl.main, st), pl.x, pl.y + 0.5f, pl.z);
-	}
-
-	// The drops a tick; a living player within DROP_REACH takes what fits
-	// (the drop key's not its dropper's until it has walked away from it)
-	void step_drops(float dt)
-	{
-		// An unloaded voxel is ground to walkable(): not before the world
-		if(!m_world_ready)
-			return;
-		// [SKELDAT_BOW_SOUNDS] One pickup sound a player a tick, at a drop
-		// it took from
-		std::map<size_t, Urho3D::Vector3> picked;
-		m_drops.step(dt, m_world.day_s, [&](Drop &d){
-			for(auto &pair : m_players){
-				Player &pl = pair.second;
-				if(!pl.placed || pl.hp <= 0)
-					continue;
-				const float dist = std::sqrt((pl.x - d.x) * (pl.x - d.x) +
-						(pl.y + 0.5f - d.y) * (pl.y + 0.5f - d.y) +
-						(pl.z - d.z) * (pl.z - d.z));
-				if(pl.name == d.owner){
-					if(dist > 2 * DROP_REACH)
-						d.owner.clear();
-					continue;
-				}
-				if(dist > DROP_REACH)
-					continue;
-				const Stack left = m_game.add(pl.main, d.st);
-				if(left.count == d.st.count)
-					continue;
-				log_i(MODULE, "skeldat: %s picks up %d %s", cs(pl.name),
-						d.st.count - left.count, cs(d.st.name));
-				d.st = left;
-				send_inventory(pair.first, pl);
-				picked[pair.first] = Urho3D::Vector3(d.x, d.y, d.z);
-				if(d.st.empty())
-					break;
-			}
-		});
-		for(auto &pair : picked)
-			sound("pickup", pair.second.x_, pair.second.y_, pair.second.z_);
-	}
-
-	void dig(size_t peer, Player &pl, int x, int y, int z)
-	{
-		const ss_ at = pos_key(x, y, z);
-		// Reach first: a client's y of 5e8 made voxelworld throw, and each
-		// throw logged a backtrace ([SECURITY_RUN_6])
-		if(!reaches(pl, x, y, z)){
-			log_i(MODULE, "skeldat: %s's dig at %s refused", cs(pl.name),
-					cs(at));
-			return;
-		}
-		const uint32_t id = m_world.id_at(x, y, z);
-		const skeldat::NodeDef *n = m_world.node_of(id);
-		Stack &tool = pl.main[pl.wield];
-		// The bow digs nothing ([SKELDAT_BOW])
-		if(tool.name == "skeldat:bow")
-			return;
-		const skeldat::Cap *cap = nullptr;
-		const float time = n ? m_game.dig_time(tool.name, *n, &cap) : -1;
-		// A quarter less than the time, for the network's lag
-		if(!n || time < 0 || !reaches(pl, x, y, z) || pl.dig_at != at ||
-				m_world.time - pl.dig_t0 < time * 0.75f){
-			log_i(MODULE, "skeldat: %s's dig at %s refused", cs(pl.name),
-					cs(at));
-			return;
-		}
-		if(has_slots(n->name)){
-			if(!m_furnaces.dug(at))
-				return; // not while it holds anything
-		}
-		pl.dig_at = "";
-		const int bones = m_world.bones_at(x, y, z);
-		m_world.set_node(x, y, z, ID_AIR);
-		if(cap && cap->uses > 0){
-			tool.wear += skeldat::WEAR_MAX / cap->uses;
-			if(tool.wear >= skeldat::WEAR_MAX)
-				tool = Stack();
-		}
-		// What it drops goes straight into the inventory, what does not
-		// fit to the ground
-		Stack drop;
-		if(bones > skeldat::bones::NO_DROP)
-			; // bone-ridden: nothing
-		else if(n->drop == "")
-			drop = Stack(n->name);
-		else if(n->drop != "-" && (n->drop_rarity <= 1 ||
-				m_world.rand() % n->drop_rarity == 0))
-			drop = Stack::parse(n->drop);
-		give_or_drop(pl, drop);
-		// The arrows stuck into it, the digger's ([SKELDAT_BOW])
-		static const int FACE[6][3] = {{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
-				{-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
-		for(int f = 0; f < 6; f++){
-			const int ax = x - FACE[f][0], ay = y - FACE[f][1],
-					az = z - FACE[f][2];
-			if(m_world.id_at(ax, ay, az) == m_world.stuck_id &&
-					m_world.param_at(ax, ay, az) == (uint32_t)f){
-				m_world.set_node(ax, ay, az, ID_AIR);
-				give_or_drop(pl, Stack("skeldat:arrow"));
-			}
-		}
-		log_i(MODULE, "skeldat: %s digs %s at %s, bones %d%s", cs(pl.name),
-				cs(n->name), cs(at), bones, bones > skeldat::bones::NO_DROP ?
-				", dropping nothing" : "");
-		send_inventory(peer, pl);
-	}
-
-	void place(size_t peer, Player &pl, int x, int y, int z)
-	{
-		if(!reaches(pl, x, y, z))
-			return;
-		Stack &st = pl.main[pl.wield];
-		const uint32_t id = m_world.id_of(st.name);
-		const skeldat::NodeDef *n = m_world.node_of(id);
-		const skeldat::NodeDef *here = m_world.node_of(m_world.id_at(x, y, z));
-		const uint32_t here_id = m_world.id_at(x, y, z);
-		// Into air or water, beside something, out of everyone's way
-		bool beside = false;
-		static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
-				{0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-		for(auto &d : D){
-			const uint32_t b = m_world.id_at(x + d[0], y + d[1], z + d[2]);
-			beside = beside || (b != ID_AIR && b != ID_IGNORE &&
-					b != m_world.id_of("skeldat:water_source"));
-		}
-		if(!n || !(here_id == ID_AIR || here_id == m_world.stuck_id || (here &&
-				here->shape == skeldat::LIQUID)) || !beside ||
-				!reaches(pl, x, y, z))
-			return;
-		if(n->shape != skeldat::TORCH){
-			for(auto &pair : m_players){
-				const Player &o = pair.second;
-				if(o.hp > 0 && x + 0.5f > o.x - 0.3f && x - 0.5f < o.x + 0.3f &&
-						z + 0.5f > o.z - 0.3f && z - 0.5f < o.z + 0.3f &&
-						y + 0.5f > o.y && y - 0.5f < o.y + 1.75f)
-					return;
-			}
-		}
-		// Facing the player: the yaw is the client's, 0 towards +z
-		uint32_t param = 0;
-		if(n->facedir){
-			const int q = ((int)std::floor((pl.yaw + 45) / 90) % 4 + 4) % 4;
-			// Looking towards +z the front faces -z, which is facedir 0
-			static const uint32_t FACE[4] = {0, 1, 2, 3};
-			param = FACE[q];
-		}
-		m_world.set_node(x, y, z, id, param);
-		log_i(MODULE, "skeldat: %s places %s at %s", cs(pl.name),
-				cs(n->name), cs(pos_key(x, y, z)));
-		if(n->name == "skeldat:furnace" || n->name == "skeldat:lantern")
-			m_furnaces.placed(x, y, z, n->name == "skeldat:lantern");
-		st.take(1);
-		send_inventory(peer, pl);
-	}
-
-	// A furnace or a lantern, lit or not: m_furnaces holds its slots
-	static bool has_slots(const ss_ &name)
-	{
-		return name.compare(0, 15, "skeldat:furnace") == 0 ||
-				name.compare(0, 15, "skeldat:lantern") == 0;
-	}
-
-	// A slot by where it is: "me" and a list of the player's own, or
-	// "x,y,z" and a list of the furnace the player has open
-	Stack* slot(Player &pl, const ss_ &loc, const ss_ &list, int index,
-			bool put)
-	{
-		index--;
-		if(loc == "me"){
-			if(list == "main" && index >= 0 && index < 36)
-				return &pl.main[index];
-			// Outside the inventory's own 2x2 only at a table
-			if(list == "craft" && index >= 0 && index < 9 &&
-					(index % 3 < 2 && index / 3 < 2 || at_table(pl)))
-				return &pl.craft[index];
-			if(list == "craftresult" && index == 0 && !put)
-				return &pl.craftresult[0];
-			return nullptr;
-		}
-		if(loc != pl.open || index != 0)
-			return nullptr;
-		auto it = m_furnaces.all.find(loc);
-		if(it == m_furnaces.all.end())
-			return nullptr;
-		if(it->second.lantern && list != "fuel")
-			return nullptr;
-		if(list == "src")
-			return &it->second.src;
-		if(list == "fuel")
-			return &it->second.fuel;
-		if(list == "dst" && !put)
-			return &it->second.dst;
-		return nullptr;
-	}
-
-	bool at_table(Player &pl)
-	{
-		if(pl.open.empty())
-			return false;
-		int x, y, z;
-		char c;
-		std::istringstream is(pl.open);
-		if(!(is>>x>>c>>y>>c>>z) || !reaches(pl, x, y, z))
-			return false;
-		return m_world.id_at(x, y, z) == m_world.id_of("skeldat:table");
-	}
-
-	void move(size_t peer, Player &pl, int count, const ss_ &floc,
-			const ss_ &flist, int fi, const ss_ &tloc, const ss_ &tlist,
-			int ti)
-	{
-		Stack *from = slot(pl, floc, flist, fi, false);
-		Stack *to = slot(pl, tloc, tlist, ti, true);
-		if(!from || !to || !m_game.move(*from, *to, count))
-			return;
-		send_inventory(peer, pl);
-		if(floc != "me")
-			send_furnace(floc);
-		if(tloc != "me" && tloc != floc)
-			send_furnace(tloc);
-	}
-
-	void craft(size_t peer, Player &pl)
-	{
-		Stack grid[9];
-		bool outside = false;
-		for(int i = 0; i < 9; i++){
-			grid[i] = pl.craft[i];
-			outside = outside || (!grid[i].empty() && (i % 3 == 2 || i / 3 == 2));
-		}
-		const skeldat::Recipe *r = m_game.craft(grid);
-		if(!r || (outside && !at_table(pl)))
-			return;
-		Stack out = Stack::parse(r->output);
-		Stack &res = pl.craftresult[0];
-		if(!res.empty() && (res.name != out.name ||
-				res.count + out.count > m_game.stack_max(out.name)))
-			return;
-		for(Stack &s : pl.craft)
-			if(!s.empty())
-				s.take(1);
-		if(res.empty())
-			res = out;
-		else
-			res.count += out.count;
-		log_i(MODULE, "skeldat: %s crafts %s, the result %s", cs(pl.name),
-				cs(out.str()), cs(res.str()));
-		send_inventory(peer, pl);
-	}
-
-	//
-	// The players as the mobs reach them (MobsHost; the mobs are mobs.h's)
-	//
-
-	// The nearest player placed and alive, and how far
-	Player* nearest(float x, float y, float z, float &d,
-			size_t *peer_out = nullptr)
-	{
-		Player *best = nullptr;
-		d = 1e9f;
-		for(auto &pair : m_players){
-			Player &p = pair.second;
-			const float e = std::sqrt((p.x-x)*(p.x-x) + (p.y-y)*(p.y-y) +
-					(p.z-z)*(p.z-z));
-			if(p.placed && p.hp > 0 && e < d){
-				d = e;
-				best = &p;
-				if(peer_out)
-					*peer_out = pair.first;
-			}
-		}
-		return best;
-	}
-
-	// A moment's sound at a place, to everyone in the world; what it sounds
-	// like is the client's (client_lua/sounds.lua)
-	// (but `except`, which plays it itself)
-	void sound(const char *moment, float x, float y, float z,
-			size_t except = (size_t)-1)
-	{
-		char buf[100];
-		snprintf(buf, sizeof buf, "%s %.2f %.2f %.2f", moment, x, y, z);
-		for(size_t peer : m_shown)
-			if(peer != except)
-				network::send(m_server, peer, "skeldat:sound", buf);
 	}
 
 	//
@@ -3207,76 +2469,43 @@ struct Module: public interface::Module, public luanti_session::Game,
 				(interface::os::time_us() - t0) / 1e3);
 	}
 
-	// A client's click at a mob: what the player holds hits it, from no
-	// further than a hand reaches with room for the lag
-	void punch(size_t peer, Player &pl, uint32_t id)
-	{
-		if(id == 0 || m_world.time - pl.last_hit < 0.35 ||
-				pl.main[pl.wield].name == "skeldat:bow")
-			return;
-		for(auto &kv : m_mobs.all){
-			Mob &m = kv.second;
-			if(m.node_id != id)
-				continue;
-			const float dy = pl.y + 1.6f - m.y - MOB_HEIGHT[m.kind] / 2.0f;
-			if(std::sqrt((pl.x-m.x)*(pl.x-m.x) + (pl.z-m.z)*(pl.z-m.z) +
-					dy * dy) > 6)
-				return;
-			pl.last_hit = m_world.time;
-			Stack &st = pl.main[pl.wield];
-			const skeldat::ItemDef *def = m_game.item(st.name);
-			const int dmg = def ? def->fleshy : m_game.hand.fleshy;
-			if(def && def->tool){
-				st.wear += skeldat::WEAR_MAX /
-						(st.name.find("sword") != ss_::npos ? 200 : 100);
-				if(st.wear >= skeldat::WEAR_MAX)
-					st = Stack();
-				send_inventory(peer, pl);
-			}
-			log_i(MODULE, "skeldat: %s hits the %s (%u) for %d, hp %d",
-					cs(pl.name), MOB_KIND[m.kind], kv.first, dmg, m.hp - dmg);
-			m_mobs.damage(kv.first, dmg, peer, pl.x, pl.z);
-			return;
-		}
-	}
-
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(!m_world.scene)
 			return;
 		// Every section loaded and generated: on the tick, after the
 		// requests the last loads made are in m_awaiting
-		if(!m_world_ready && m_save && m_growth.sections.size() == m_world.all_sections() &&
+		if(!m_world.ready && m_save && m_growth.sections.size() == m_world.all_sections() &&
 				m_awaiting.empty())
 			world_in();
 		// [SKELDAT_WORLD_ADMIN] Paused: the world's clock and every step of
 		// the game stand; the sections load and send, the session takes
 		// the joins
 		if(m_paused){
-			m_session.tick(event.dtime);
-			if(m_load_points_dirty)
+			m_players.session.tick(event.dtime);
+			if(m_world.load_points_dirty)
 				update_load_points();
 			return;
 		}
-		m_session.tick(event.dtime);
+		m_players.session.tick(event.dtime);
 		// [SKELDAT_SKIP_TIME] Skipping: the world's steps in sub-steps
 		if(m_skip_left > 0)
 			step_skip();
 		else
 			step_world(event.dtime);
-		if(m_load_points_dirty)
+		if(m_world.load_points_dirty)
 			update_load_points();
 		m_send_t += event.dtime;
 		if(m_send_t >= 0.2f){
 			m_send_t = 0;
-			send_players();
+			m_players.send_players();
 		}
 		m_move_t += event.dtime;
 		if(m_move_t >= 1){
 			m_move_t = 0;
 			// The players held while skipping: no move to check
 			if(m_skip_left <= 0)
-				check_moves();
+				m_players.check_moves();
 			update_skeletons();
 		}
 		m_save_t += event.dtime;
@@ -3289,7 +2518,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 	// The bones a tick; a server behind says so in the chat
 	void step_bones(float dtime)
 	{
-		m_growth.step(dtime, m_skip_left > 0, !m_players.empty(),
+		m_growth.step(dtime, m_skip_left > 0, !m_players.all.empty(),
 				[&](const char *line){
 			chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
 		});
@@ -3298,7 +2527,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 	// The end at no bare column: the score, the save, the players told
 	void step_end()
 	{
-		if(!m_growth.count(m_world_ready, m_world.t / m_world.day_s))
+		if(!m_growth.count(m_world.ready, m_world.t / m_world.day_s))
 			return;
 		char days_c[40];
 		// The lowest speed it was at: a lower one is the easier
@@ -3312,7 +2541,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		log_i(MODULE, "skeldat: every column's top has bones: the world ends "
 				"after %s; %lld voxels under the tops have none", cs(days),
 				(long long)under);
-		for(auto &pair : m_players)
+		for(auto &pair : m_players.all)
 			send_end(pair.first);
 	}
 
@@ -3326,13 +2555,13 @@ struct Module: public interface::Module, public luanti_session::Game,
 		m_world.day = std::fmod(m_world.day + dtime / m_world.day_s, 1.0);
 		if(!m_growth.ended)
 			step_bones(dtime);
-		if(!m_growth.ended && m_world_ready)
-			for(auto &pair : m_players)
+		if(!m_growth.ended && m_world.ready)
+			for(auto &pair : m_players.all)
 				if(pair.second.placed)
 					m_played[pair.second.name] += dtime;
 		step_end();
 		m_mobs.step_arrows(dtime);
-		step_drops(dtime);
+		m_players.step_drops(dtime);
 		m_mobs.ai_t += dtime;
 		if(m_mobs.ai_t >= 0.1f){
 			// A long tick in steps of 0.2 s, so it is no fall through the
@@ -3343,7 +2572,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 				m_mobs.step_mobs(std::min(left, 0.2f));
 			m_mobs.ai_t = 0;
 		}
-		if(m_world_ready){
+		if(m_world.ready){
 			m_mobs.step_light(dtime);
 			m_mobs.far_t += dtime;
 			if(m_mobs.far_t >= std::min(m_mobs.light_step, 1.0f)){
@@ -3382,7 +2611,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		m_breath_t += dtime;
 		if(m_breath_t >= 1){
 			m_breath_t = 0;
-			step_breath();
+			m_players.step_breath();
 		}
 		m_furnaces.step(dtime, m_world.day_s);
 	}
@@ -3406,8 +2635,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();
-		for(auto &pair : m_players)
-			send_time(pair.first);
+		for(auto &pair : m_players.all)
+			m_players.send_time(pair.first);
 	}
 
 	// The admin's menu ([SKELDAT] decision 4): a player's inventory viewed,
@@ -3424,8 +2653,8 @@ struct Module: public interface::Module, public luanti_session::Game,
 	void on_admin(const network::Packet &packet)
 	{
 		const size_t peer = packet.sender;
-		auto me = m_players.find(peer);
-		if(me == m_players.end() || !m_save || !is_admin(peer))
+		auto me = m_players.all.find(peer);
+		if(me == m_players.all.end() || !m_save || !is_admin(peer))
 			return;
 		std::istringstream is(packet.data);
 		ss_ cmd, name;
@@ -3436,7 +2665,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		}
 		if(cmd == "players"){
 			ss_ out = "players "+itos(m_growth.speed)+"\n";
-			for(auto &pair : m_players)
+			for(auto &pair : m_players.all)
 				out += pair.second.name+"\n";
 			network::send(m_server, peer, "skeldat:admin", out);
 			return;
@@ -3463,7 +2692,7 @@ struct Module: public interface::Module, public luanti_session::Game,
 		}
 		size_t to = 0;
 		Player *pl = nullptr;
-		for(auto &pair : m_players){
+		for(auto &pair : m_players.all){
 			if(pair.second.name == name){
 				to = pair.first;
 				pl = &pair.second;
@@ -3503,9 +2732,9 @@ struct Module: public interface::Module, public luanti_session::Game,
 			return;
 		}
 		if(cmd != "view")
-			send_inventory(to, *pl);
+			m_players.send_inventory(to, *pl);
 		network::send(m_server, peer, "skeldat:admin", "inv "+name+"\n"+
-				list_text("main", pl->main)+"invulnerable="+
+				m_players.list_text("main", pl->main)+"invulnerable="+
 				(pl->invulnerable ? "1" : "0"));
 	}
 
@@ -3584,74 +2813,12 @@ struct Module: public interface::Module, public luanti_session::Game,
 				admin ? "an admin" : "a player");
 	}
 
-	// The movement check (move_check.h), every second for each player not
-	// an admin: a move that could not have been made is pulled back to
-	// where the last check passed
-	// simplified: every player in the same tick, under a millisecond each
-	// (2026-10-15); spread them over the second when there are many
-	void check_moves()
-	{
-		for(auto &pair : m_players){
-			const size_t peer = pair.first;
-			Player &pl = pair.second;
-			update_role(peer, pl, false);
-			if(!pl.placed)
-				continue;
-			const float dt = (float)(m_world.time - pl.check_t);
-			skeldat::move_check::Board bd;
-			bd.on = pl.board_seen;
-			bd.v0 = pl.check_v;
-			bd.air = pl.board_air;
-			bd.prone = pl.prone_seen;
-			pl.board_seen = pl.board;
-			pl.prone_seen = pl.prone;
-			if(pl.admin || pl.hp <= 0 || dt <= 0 || pl.moved){
-				pl.cx = pl.x;
-				pl.cy = pl.y;
-				pl.cz = pl.z;
-				pl.check_t = m_world.time;
-				pl.check_air = false;
-				pl.check_v = 0;
-				pl.board_air = 0;
-				continue;
-			}
-			skeldat::move_check::Verdict v;
-			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
-				v = skeldat::move_check::check([&](vp::Field &f){
-					m_world.fill_cells(w, f);
-				}, pl.cx, pl.cy, pl.cz, pl.x, pl.y, pl.z, dt, pl.check_air, bd);
-			});
-			if(v.ok){
-				pl.cx = pl.x;
-				pl.cy = pl.y;
-				pl.cz = pl.z;
-				pl.check_t = m_world.time;
-				pl.check_air = v.air;
-				pl.check_v = v.speed;
-				pl.board_air = bd.on && v.air ? bd.air + 1 : 0;
-				continue;
-			}
-			log_i(MODULE, "skeldat: %s pulled back from (%.1f, %.1f, %.1f) to "
-					"(%.1f, %.1f, %.1f): %s%s", cs(pl.name), pl.x, pl.y, pl.z,
-					pl.cx, pl.cy, pl.cz, v.why, bd.on ? " (on the board)" : "");
-			// The client's board stops where it is put
-			pl.check_v = 0;
-			pl.board_air = 0;
-			pl.x = pl.cx;
-			pl.y = pl.cy;
-			pl.z = pl.cz;
-			const bool air = pl.check_air;
-			send_position(peer, pl);
-			pl.check_air = air;
-		}
-	}
-
 	// [SKELDAT_SKELETON_PLAYERS] Who looks like a skeleton (bones.h's
 	// skeleton_near()), admins too; a change logged, and it goes out in
-	// send_players()
+	// m_players.send_players()
 	void update_skeletons()
 	{
-		for(auto &pair : m_players){
+		for(auto &pair : m_players.all){
 			Player &pl = pair.second;
 			if(!pl.placed)
 				continue;
@@ -3670,47 +2837,6 @@ struct Module: public interface::Module, public luanti_session::Game,
 			pl.skeleton = now;
 			log_i(MODULE, "skeldat: %s looks like %s to the others",
 					cs(pl.name), now ? "a skeleton" : "a player");
-		}
-	}
-
-	// Where the others are, to everyone: "name x y z yaw skeleton" a line,
-	// skeleton 1 or 0
-	void send_players()
-	{
-		for(auto &to : m_players){
-			std::ostringstream os;
-			for(auto &pair : m_players){
-				const Player &o = pair.second;
-				if(pair.first != to.first && o.placed && o.hp > 0)
-					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
-							<<" "<<(o.skeleton ? 1 : 0)<<" "<<(o.board ? 1 : 0)
-							<<" "<<(o.prone ? 1 : 0)<<"\n";
-			}
-			network::send(m_server, to.first, "skeldat:players", os.str());
-		}
-	}
-
-	// Drowning: a breath a second with the head in water, then a hit
-	// point; two breaths back a second out of it
-	void step_breath()
-	{
-		const uint32_t water = m_world.id_of("skeldat:water_source");
-		for(auto &pair : m_players){
-			Player &pl = pair.second;
-			if(!pl.placed || pl.hp <= 0)
-				continue;
-			const bool under = m_world.id_at((int)std::floor(pl.x + 0.5f),
-					(int)std::floor(pl.y + 1.6f + 0.5f),
-					(int)std::floor(pl.z + 0.5f)) == water;
-			const int was = pl.breath;
-			if(under && pl.breath > 0)
-				pl.breath--;
-			else if(under)
-				hurt(pair.first, pl, 1, "drowns");
-			else
-				pl.breath = std::min(BREATH_MAX, pl.breath + 2);
-			if(pl.breath != was)
-				send_stats(pair.first, pl);
 		}
 	}
 

@@ -46,6 +46,13 @@ struct WorldView
 	float day_s = DAY_SECONDS;
 	// The pathfinder's cell for a voxel id (fill_cells)
 	sv_<uint8_t> cell_of;
+	// Every section of the world in ([SKELDAT_BOUNDED_WORLD]): the players
+	// wait for it
+	bool ready = false;
+	// Where a player (re)spawns
+	float spawn[3] = {0, 0, 0};
+	// A player moved or left: the sections loaded around them to pick again
+	bool load_points_dirty = true;
 
 	WorldView(interface::Server *server, const skeldat::Game &game):
 		server(server), game(game)
