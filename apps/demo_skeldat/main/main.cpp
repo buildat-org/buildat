@@ -197,6 +197,11 @@ static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 		ARROW_SPEED = 18.0f;
 // Awake within WAKE of a player, asleep (saved, not stepped) past SLEEP
 static const float WAKE = 48, SLEEP = 64;
+// A skeleton near a player ([SKELDAT_LIGHT_PRIMARY]): its light form's
+// step, the body's speed after it (faster than the light form's, so it
+// keeps up) and how far behind the body is put back on it (across; up or
+// down three times that)
+static const float NEAR_STEP = 0.5f, BODY_SPEED = 2.6f, BODY_LAG = 3;
 // simplified: one cap for the awake ones and one per 64-voxel area;
 // MAX_AREA and MAX_NEAR are a boar's, a skeleton's go by the danger
 static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
@@ -247,6 +252,10 @@ struct Mob
 	int detour = 0; // steps left on a heading round what blocked it
 	bool seeding = false;
 	int hurt = 0, hurt_sent = 0;
+	// A skeleton's body, awake ([SKELDAT_LIGHT_PRIMARY]): x, y, z are its
+	// light form, which decides; the body walks after it, put there when
+	// BODY_LAG behind. Not saved
+	float bx = 0, by = 0, bz = 0, bvy = 0;
 
 	ss_ save() const {
 		std::ostringstream os;
@@ -532,6 +541,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	uint32_t m_next_mob = 1;
 	std::vector<Arrow> m_arrows;
 	std::vector<Drop> m_drops;
+	// Bodies put back on their light form, for the report
+	size_t m_body_puts = 0;
 	float m_far_t = 0;
 	// The outermost columns' mean top, once the world is in
 	float m_edge_crest = 0;
@@ -2792,6 +2803,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(m.mode == FIGHT)
 			m.mode = WANDER, m.mode_t = 0;
+		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 		m_woken++;
 		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
@@ -2922,6 +2934,47 @@ struct Module: public interface::Module, public luanti_session::Game
 		return false;
 	}
 
+	// The body after its light form ([SKELDAT_LIGHT_PRIMARY]): toward it
+	// at BODY_SPEED, a step up as a jump, falling; put on it when BODY_LAG
+	// off. It faces the player it fights, else the way it goes
+	void step_body(voxelworld::Instance *w, Mob &m, const Player *p, float dt)
+	{
+		const int h = MOB_HEIGHT[SKELETON];
+		const float dx = m.x - m.bx, dz = m.z - m.bz,
+				flat = std::sqrt(dx * dx + dz * dz);
+		// Behind on the ground; a fall to the floor under it is no lag
+		if(flat > BODY_LAG || std::fabs(m.y - m.by) > 3 * BODY_LAG){
+			m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
+			m_body_puts++;
+		}
+		else if(flat > 0.05f){
+			const float k = std::min(1.0f, BODY_SPEED * dt / flat);
+			const float nx = m.bx + dx * k, nz = m.bz + dz * k;
+			const Ground to = ground(w, nx, m.by, nz, h);
+			if(to.found && to.y <= m.by + 1.01f){
+				m.bx = nx, m.bz = nz;
+				if(to.y > m.by)
+					m.by = to.y, m.bvy = 0;
+			}
+			m.yaw = std::atan2(dx, dz);
+		}
+		const Ground under = ground(w, m.bx, m.by, m.bz, h);
+		if(under.found && m.by <= under.y + 0.001f)
+			m.bvy = 0, m.by = under.y;
+		else {
+			m.bvy -= GRAVITY * dt;
+			m.by += m.bvy * dt;
+			if(under.found)
+				m.by = std::max(m.by, under.y);
+		}
+		// Together and the body on its ground, the light form stands there
+		// too: one saved or stepped over a cave's mouth floats otherwise
+		if(flat <= 0.05f && under.found && m.bvy == 0)
+			m.y = m.by;
+		if(p && m.mode == FIGHT)
+			m.yaw = std::atan2(p->x - m.bx, p->z - m.bz);
+	}
+
 	void step_mobs(float dt)
 	{
 		// Wake what a player is near, put to sleep what none is
@@ -2965,38 +3018,49 @@ struct Module: public interface::Module, public luanti_session::Game
 				float d;
 				size_t peer = 0;
 				const Player *p = nearest(m.x, m.y, m.z, d, &peer);
-				float move_yaw = m.yaw, speed = 0;
-				if(m.kind == SKELETON && p && d < 16){
-					// Its first sight of a player: a marker skull, one a
-					// game day ([SKELDAT_SKELETON_SIM])
-					if(m.mode != FIGHT && !m_ended){
-						int at[3];
-						if(m_world_t / m_day_s - m.marker_day < 1)
-							log_i(MODULE, "skeldat: a skeleton (%u) sees %s, "
-									"its marker placed today", key,
-									cs(p->name));
-						else if(marker_spot(w, m, at)){
-							marks.push_back({key, {at[0], at[1], at[2]},
-									p->name});
-							m.marker_day = m_world_t / m_day_s;
+				if(m.kind == SKELETON){
+					// The light form decides (step_light()); here the
+					// fight's sight and bow, and the body after it
+					if(p && d < 16){
+						// Its first sight of a player: a marker skull, one
+						// a game day ([SKELDAT_SKELETON_SIM])
+						if(m.mode != FIGHT && !m_ended){
+							int at[3];
+							if(m_world_t / m_day_s - m.marker_day < 1)
+								log_i(MODULE, "skeldat: a skeleton (%u) sees "
+										"%s, its marker placed today", key,
+										cs(p->name));
+							else if(marker_spot(w, m, at)){
+								marks.push_back({key, {at[0], at[1], at[2]},
+										p->name});
+								m.marker_day = m_world_t / m_day_s;
+							}
+						}
+						m.mode = FIGHT;
+						m.shoot_t -= dt;
+						if(m.shoot_t <= 0 && d < 14){
+							shots.push_back({key, peer});
+							m.shoot_t = 1.5f + rnd() * 1.5f;
+						}
+					} else if(m.mode == FIGHT)
+						m.mode = WANDER;
+					step_body(w, m, p, dt);
+					// The sun burns it, unless the bones are thick round
+					// its light form
+					if(here.sun >= 12){
+						m.burn_t += dt;
+						if(m.burn_t >= 1){
+							m.burn_t = 0;
+							if(danger(w, m.x, m.y, m.z) < DAYLIGHT_DANGER)
+								burnt.push_back({key, 2});
 						}
 					}
-					m.mode = FIGHT;
-					m.yaw = std::atan2(p->x - m.x, p->z - m.z);
-					move_yaw = m.yaw;
-					// Between 3 and 9 voxels off: a bow's distance that a
-					// sword's reach can still close
-					if(d > 9)
-						speed = MOB_SPEED[SKELETON][1];
-					else if(d < 3)
-						speed = MOB_SPEED[SKELETON][1],
-						move_yaw = m.yaw + (float)M_PI;
-					m.shoot_t -= dt;
-					if(m.shoot_t <= 0 && d < 14){
-						shots.push_back({key, peer});
-						m.shoot_t = 1.5f + rnd() * 1.5f;
-					}
-				} else if(m.mode == FLEE && m.mode_t > 0){
+					if(m.y < -1000)
+						burnt.push_back({key, 1000});
+					continue;
+				}
+				float move_yaw = m.yaw, speed = 0;
+				if(m.mode == FLEE && m.mode_t > 0){
 					m.yaw = move_yaw = std::atan2(m.x - m.from_x, m.z - m.from_z);
 					speed = MOB_SPEED[m.kind][1];
 				} else {
@@ -3034,16 +3098,6 @@ struct Module: public interface::Module, public luanti_session::Game
 					m.vy -= GRAVITY * dt;
 					m.y += m.vy * dt;
 				}
-				// The sun burns a skeleton, unless the bones are thick
-				// around it
-				if(m.kind == SKELETON && here.sun >= 12){
-					m.burn_t += dt;
-					if(m.burn_t >= 1){
-						m.burn_t = 0;
-						if(danger(w, m.x, m.y, m.z) < DAYLIGHT_DANGER)
-							burnt.push_back({key, 2});
-					}
-				}
 				if(m.y < -1000)
 					burnt.push_back({key, 1000});
 			}
@@ -3065,8 +3119,12 @@ struct Module: public interface::Module, public luanti_session::Game
 		for(auto &s : shots){
 			auto m = m_mobs.find(s.first);
 			auto p = m_players.find(s.second);
-			if(m != m_mobs.end() && p != m_players.end())
-				shoot(m->second, p->second);
+			if(m == m_mobs.end() || p == m_players.end())
+				continue;
+			// From the body
+			Mob b = m->second;
+			b.x = b.bx, b.y = b.by, b.z = b.bz;
+			shoot(b, p->second);
 		}
 		for(auto &b : burnt){
 			if(!m_mobs.count(b.first))
@@ -3081,7 +3139,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				Urho3D::Node *n = m.node_id ? scene->GetNode(m.node_id) : nullptr;
 				if(!n)
 					continue;
-				n->SetPosition(Urho3D::Vector3(m.x, m.y, m.z));
+				if(m.kind == SKELETON)
+					n->SetPosition(Urho3D::Vector3(m.bx, m.by, m.bz));
+				else
+					n->SetPosition(Urho3D::Vector3(m.x, m.y, m.z));
 				n->SetRotation(Urho3D::Quaternion(m.yaw * M_RADTODEG,
 						Urho3D::Vector3::UP));
 				if(m.hurt != m.hurt_sent){
@@ -3373,17 +3434,56 @@ struct Module: public interface::Module, public luanti_session::Game
 		struct Take { uint32_t key; pv::Vector3DInt32 at; };
 		sv_<Take> takes;
 		const auto lanterns = lanterns_by_footprint();
+		// The light form's next feet at (x, z): the column's top, or for
+		// one with a body the ground round its own height (a cave, an
+		// overhang), as the body walks; -1e9 for none
+		auto next_y = [&](const Mob &m, int x, int z){
+			if(m.node_id){
+				Ground g;
+				voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+					g = ground(w, (float)x, m.y, (float)z, MOB_HEIGHT[SKELETON]);
+				});
+				return g.found ? g.y : -1e9f;
+			}
+			const long c = column(x, z);
+			return c < 0 || m_top_y[c] == NO_GROUND ? -1e9f :
+					m_top_y[c] + 0.5f;
+		};
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
-			if(m.node_id || m.kind != SKELETON)
+			if(m.kind != SKELETON)
 				continue;
-			m.light_t -= dt;
+			// Every skeleton is its light form ([SKELDAT_LIGHT_PRIMARY]);
+			// one with a body steps often enough for the body to walk
+			const float step = m.node_id ? std::min(NEAR_STEP, m_light_step) :
+					m_light_step;
+			m.light_t = std::min(m.light_t - dt, step);
 			if(m.light_t > 0)
 				continue;
-			m.light_t += m_light_step;
+			m.light_t += step;
 			m_light_steps++;
 			const int mx = (int)std::floor(m.x + 0.5f),
 					mz = (int)std::floor(m.z + 0.5f);
+			// Fighting: a bow's distance, between 3 and 9, that a sword's
+			// reach can still close
+			if(m.node_id && m.mode == FIGHT){
+				float d;
+				const Player *p = nearest(m.x, m.y, m.z, d);
+				if(!p || (d >= 3 && d <= 9))
+					continue;
+				m.yaw = std::atan2(p->x - m.x, p->z - m.z) +
+						(d < 3 ? (float)M_PI : 0);
+				const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
+						z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
+				const float y = next_y(m, x, z);
+				if(y <= m.y + 1.01f && y >= m.y - 2.01f)
+					m.x = (float)x, m.z = (float)z, m.y = y;
+				continue;
+			}
+			// With a body and nothing to do, it stands half the time, as
+			// a wandering skeleton did
+			if(m.node_id && m.goal_fp < 0 && m.quota <= 0 && rnd() < 0.5f)
+				continue;
 			const long own = footprint(mx, mz);
 			bool to = false;
 			int tx = 0, tz = 0;
@@ -3431,9 +3531,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				m.yaw = rnd() * 2 * (float)M_PI;
 			const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
 					z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
-			const long c = column(x, z);
-			const float y = c < 0 || m_top_y[c] == NO_GROUND ? -1e9f :
-					m_top_y[c] + 0.5f;
+			const float y = next_y(m, x, z);
 			// Wandering, it keeps to its footprint
 			const bool stray = !to && m.goal_fp >= 0 && own == m.goal_fp &&
 					footprint(x, z) != m.goal_fp;
@@ -3861,9 +3959,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				if(kv.second.kind == SKELETON)
 					skeletons++, full += kv.second.node_id != 0;
 			log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
-					"light steps and the sweep, %.2f ms a second", skeletons,
-					full, m_woken, m_light_steps, m_light_us / 1e3 / 10);
-			m_light_us = 0, m_light_steps = 0, m_woken = 0;
+					"light steps and the sweep, %.2f ms a second; %zu bodies "
+					"put back", skeletons, full, m_woken, m_light_steps,
+					m_light_us / 1e3 / 10, m_body_puts);
+			m_light_us = 0, m_light_steps = 0, m_woken = 0, m_body_puts = 0;
 			if(m_lantern_report)
 				report_lanterns();
 			for(auto &pair : m_players)

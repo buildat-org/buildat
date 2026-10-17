@@ -50,6 +50,7 @@
 # The sixteenth, a new world's skeletons there from the start.
 # The seventeenth, the bodiless skeletons drawn out to the view.
 # The eighteenth, the world's edge: a hillside, a wall nothing digs.
+# The nineteenth, a skeleton's body following its light form.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -168,8 +169,10 @@ delay 10000
 quit
 EOF
 # Both spawn at one place: bones at 8 beside it make client2 look like a
-# skeleton to client1 until it walks off (7 and the box: bones.h's self test)
-BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 20; boar 6 0; bones 1 0 8" \
+# skeleton to client1 until it walks off (7 and the box: bones.h's self test).
+# The skeleton on the clean side, 20 off: it comes at the players, and in
+# the zone the bones would shade it from the sun
+BUILDAT_SKELDAT_SURVEY=1 BUILDAT_SKELDAT_TEST="skeleton 0 -20; boar 6 0; bones 1 0 8" \
 	server "$t/srv1.log"
 client a1 "$t/a1.cmds"; a=$CLIENT
 wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t/a1.log)"
@@ -826,6 +829,27 @@ grep -aq "client1 digs skeldat:bone_block" "$t/srv21_2.log" ||
 	fail "the hillside's bone block not dug ($t/srv21_2.log)"
 grep -aq "skeldat: the backdrop beyond the edge at 64" "$t/edge1.log" ||
 	fail "no backdrop ($t/edge1.log)"
+# 19. The body follows the light form ([SKELDAT_LIGHT_PRIMARY]): a
+# skeleton 12 voxels from a player at midnight; its light form closes to
+# a bow's distance and its body walks after it: awake, shooting, and no
+# body put back on its light form over two reports
+log22="$t/srv22.log"
+BUILDAT_SKELDAT_WORLD=body BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+	BUILDAT_SKELDAT_TEST="skeleton 0 12" \
+	start_server "$log22" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv22" -C "$t/srv.cache" -l 3 || fail "the server ($log22)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 21000" quit > "$t/body.cmds"
+client body "$t/body.cmds"
+wait $CLIENT || fail "the body's drive ($t/body.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+body=$(grep -a "skeletons, [0-9]* full" "$log22" | grep -v "0 full" | sed 's/.*full, //' | tr '\n' ';')
+grep -aq "a skeleton shoots at client1" "$log22" &&
+	[ $(grep -a "skeletons, [0-9]* full" "$log22" | grep -vc "0 full") -ge 1 ] &&
+	! grep -a "skeletons, [0-9]* full" "$log22" | grep -v "0 full" | grep -qv " 0 bodies put back" ||
+	fail "the body did not follow its light form: $body ($log22)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -833,5 +857,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form"
 # vim: set noet ts=4 sw=4:
