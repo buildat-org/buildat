@@ -129,6 +129,12 @@ struct Module: public interface::Module, public main_context::Interface
 		params["LogQuiet"] = true; // Don't log to stdout
 		if(!m_engine->Initialize(params))
 			throw Exception("Urho3D engine initialization failed");
+		// [SERVER_FREE_RUN]: headless, Urho3D's limit for an unfocused
+		// window (60) held every tick to 16 ms
+		if(server_config.get<bool>("free_run")){
+			m_engine->SetMaxFps(0);
+			m_engine->SetMaxInactiveFps(0);
+		}
 
 		ResourceCache *magic_cache =
 				m_context->GetSubsystem<ResourceCache>();

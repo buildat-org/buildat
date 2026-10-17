@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
 	server::Config &config = g_server_config;
 
 	std::string module_path;
-	bool port_given = false;
+	bool port_given = false, proxies_given = false;
 
 	// [PROCESS_SANDBOX]: --unconfined, taken out before getopt, which
 	// knows no long options; BUILDAT_UNCONFINED=1 says the same
@@ -130,6 +130,11 @@ int main(int argc, char *argv[])
 			// [SIM_CLOCK]: a check moves the calendar by writing seconds
 			// to <user_path>/sim_clock; only from this command line
 			config.set("sim_clock", true);
+			take = 1;
+		} else if(ss_(argv[i]) == "--free-run"){
+			// [SERVER_FREE_RUN]: ticks back to back, for a headless check
+			// that measures the game; only from this command line
+			config.set("free_run", true);
 			take = 1;
 		} else if(ss_(argv[i]) == "--lan-announce" && i + 1 < argc){
 			config.set("lan_announce", ss_(argv[i + 1]));
@@ -227,6 +232,10 @@ int main(int argc, char *argv[])
 			"  --sim-clock          Run the calendar ahead by the seconds\n"
 			"                       in user_path/sim_clock, read every tick\n"
 			"                       (for checks)\n"
+			"  --free-run           Tick as fast as the modules go, not with\n"
+			"                       the clock; headless (for checks): no\n"
+			"                       client is let in, and with --lan-announce,\n"
+			"                       -W or -T it does not start\n"
 			"\n"
 			"Environment:\n"
 			"  BUILDAT_USER_PATH    As -D, where -D is not given\n"
@@ -302,6 +311,7 @@ int main(int argc, char *argv[])
 		case 'T':
 			log_i(MODULE, "config.web_trusted_proxies: %s", c55_optarg);
 			config.set("web_trusted_proxies", c55_optarg);
+			proxies_given = true;
 			break;
 		case 'w':
 			config.set("watch_client_files", true);
@@ -425,6 +435,21 @@ int main(int argc, char *argv[])
 	// root; read again every tick, so a check writes it in place.
 	// simplified: a Windows box's child opens it after the box, and needs
 	// --unconfined for it
+	// [SERVER_FREE_RUN]: headless only; a public server's flags with it
+	// are a mistake, and it does not start
+	const bool free_run = config.get<bool>("free_run");
+	if(free_run){
+		if(!config.get<ss_>("lan_announce").empty() ||
+				!config.get<ss_>("web_client_path").empty() ||
+				proxies_given){
+			log_e(MODULE, "--free-run is for a headless check; not with "
+					"--lan-announce, -W or -T");
+			return 1;
+		}
+		log_w(MODULE, "--free-run: the ticks go as fast as the modules "
+				"take them, and no client is let in");
+	}
+
 	FILE *sim_clock = nullptr;
 	if(config.get<bool>("sim_clock")){
 		const ss_ path = config.get<ss_>("user_path")+"/sim_clock";
@@ -493,6 +518,8 @@ int main(int argc, char *argv[])
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 		long long sim_offset_s = 0;
+		uint64_t free_ticks = 0;
+		const uint64_t free_start_us = next_tick_us;
 		// **Save now** ([USER_DIR_COPY]): <user>/apps/<app>/save_now, looked
 		// for once a second (in the app's directory, which the box reads):
 		// core:save to every module, synchronously, and then the file
@@ -517,13 +544,22 @@ int main(int argc, char *argv[])
 			if(delay_us < 0)
 				delay_us = 0;
 
-			usleep(delay_us);
+			if(!free_run)
+				usleep(delay_us);
 
 			state->handle_events();
 
-			if(current_us >= next_tick_us){
+			if(free_run || current_us >= next_tick_us){
 				next_tick_us += t_per_tick;
-				if(next_tick_us < current_us - 1000 * 1000){
+				if(free_run){
+					// The pace, every simulated ten minutes
+					if(++free_ticks % (30 * 600) == 0){
+						const double wall = (current_us - free_start_us) / 1e6;
+						log_i(MODULE, "free-run: %.0f s simulated in %.1f s "
+								"(%.1fx)", free_ticks / 30.0, wall,
+								free_ticks / 30.0 / std::max(wall, 1e-3));
+					}
+				} else if(next_tick_us < current_us - 1000 * 1000){
 					log_w("main", "Skipping %zuus", current_us - next_tick_us);
 					next_tick_us = current_us;
 				}
@@ -540,7 +576,12 @@ int main(int argc, char *argv[])
 				}
 				interface::Event event("core:tick",
 						new interface::TickEvent(t_per_tick / 1e6));
-				state->emit_event(std::move(event));
+				// Free-running, the next tick waits for every module to
+				// have taken this one, or the queue would only grow
+				if(free_run)
+					state->emit_event_synchronously(std::move(event));
+				else
+					state->emit_event(std::move(event));
 				if(current_us >= next_save_look_us){
 					next_save_look_us = current_us + 1000000;
 					if(interface::fs::path_exists(save_now_path)){

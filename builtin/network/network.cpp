@@ -1232,6 +1232,9 @@ struct Module: public interface::Module, public network::Interface
 		} catch(interface::RecordError &e){
 			refusal = e.what();
 		}
+		// [SERVER_FREE_RUN]: its clock is not the client's
+		if(refusal.empty() && m_server->get_config().get<bool>("free_run"))
+			refusal = "This server is free-running (a headless check's)";
 		if(!refusal.empty()){
 			log_i(MODULE, "Peer %zu refused: %s", peer.id, cs(refusal));
 			send_u(peer, "network:goodbye", "0"+refusal);

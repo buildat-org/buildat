@@ -1075,6 +1075,50 @@ first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
 	fail "an honest board pulled back, or the forced one not: first at $first_pull, the cheat at $cheat ($log27)"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 	fail "client2 did not see client1 on a board ($t/board2.log)"
+# 25. Free-running ([SERVER_FREE_RUN]): a 128 world, no player, at the
+# real constants with --free-run. A game day (1200 s) after the world is
+# in passes in well under its time, and its expansions are the day's (4
+# sections, one each 150 s: 32). The same world in real time for 60 s
+# takes about 60 s of game time (a bones line every 10). A client is
+# turned away, and with --lan-announce the server does not start.
+free()
+{
+	BUILDAT_SKELDAT_WORLD=free BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
+		start_server "$t/srv28_$1.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv28" -C "$t/srv.cache" -l 3 "${@:2}" || fail "the server ($t/srv28_$1.log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+free fast --free-run
+s="$t/srv28_fast.log"
+printf '%s\n' "wait_log 20000 Disconnected from server" quit > "$t/free.cmds"
+timeout 40 "$b" -C "$t/c_free" -D "$t/u_free" -w 800x500 -l 3 -o sound_mute=1 \
+	-s "127.0.0.1:$SERVER_PORT" -c @"$t/free.cmds" > "$t/free.log" 2>&1
+grep -aq "Disconnected from server: This server is free-running" "$t/free.log" ||
+	fail "a client was not turned away by the free-running server ($t/free.log)"
+# The day after the world is in: 120 bones lines (each 10 s), timed
+wait_for_log "$s" "skeldat: the world is in" 120 || fail "the world not in ($s)"
+for _ in $(seq 120); do
+	[ $(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { print n + 0 }' "$s") -gt 120 ] && break
+	sleep 1
+done
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+day=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++; if(n == 1 || n == 121) print $3, $9 }' "$s")
+set -- $day
+[ $# = 4 ] || fail "no day free-running in 120 s: $day ($s)"
+secs=$(echo "$1 $3" | awk '{ split($1, a, ":"); split($2, b, ":"); print (b[1] - a[1]) * 3600 + (b[2] - a[2]) * 60 + b[3] - a[3] }')
+echo "free-running: a day in $secs s, $(($4 - $2)) expansions; $(grep -a "free-run: " "$s" | tail -1 | sed 's/.*free-run: //')"
+awk -v s="$secs" -v e=$(($4 - $2)) 'BEGIN { exit !(s < 120 && e >= 30 && e <= 34) }' ||
+	fail "the free-running day: $secs s, $(($4 - $2)) expansions ($s)"
+free real
+sleep 60
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+lines=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { print n + 0 }' "$t/srv28_real.log")
+[ $lines -ge 3 ] && [ $lines -le 7 ] || fail "in real time, $lines bones lines in a minute ($t/srv28_real.log)"
+! timeout 60 "$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" -D "$t/srv28" \
+	-C "$t/srv.cache" -l 3 --free-run --lan-announce check > "$t/srv28_lan.log" 2>&1 &&
+	grep -aq "free-run is for a headless check" "$t/srv28_lan.log" ||
+	fail "--free-run with --lan-announce started ($t/srv28_lan.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1082,5 +1126,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running"
 # vim: set noet ts=4 sw=4:
