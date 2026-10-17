@@ -80,45 +80,89 @@ function M.grains(synth)
 end
 
 -- [SKELDAT_BOARD_WATER] The splash, on foot or on the board: 4 variants
--- (a seed each), soft and hard (the plop and the spray louder), each 0.6 s
--- of the body's plop (a falling sine), the spray (noise low-passed from 3
--- kHz to 400 Hz) and 20 bubbles (rising sine chirps over the first 0.3 s).
--- -> {soft = {4 buffers}, hard = {4 buffers}}
--- simplified: the figures are first guesses, to tune by ear
+-- (a seed each), soft and hard (the spray and the thump louder), each 0.6
+-- s. [SKELDAT_SPLASH_NOISE] Mostly noise: the spray (noise low-passed
+-- from 4 kHz to 600 Hz) and a hiss over 3 kHz at the front; the body's
+-- thump (noise low-passed at 250 Hz, a falling sine under it); 8 short
+-- bubbles (a sine and its band of noise, half each, barely rising); 4 to
+-- 8 droplets (bursts of band noise) over 0.1 to 0.6 s.
+-- -> {soft = {4 buffers}, hard = {4 buffers}, ratio = {soft = {4}, hard =
+-- {4}}: the noise layers' energy over the tones', before the normalising}
+-- simplified: the figures are first guesses, to tune by ear; the
+-- droplets' band stops at the filter's 4.4 kHz (a fifth of the rate)
 local SPLASH = math.floor(0.6 * M.RATE)
+local function energy(b)
+	local e = 0
+	for i = 0, b:len() - 1 do
+		e = e + b:get(i) ^ 2
+	end
+	return e
+end
 function M.splashes(synth)
 	local R = M.RATE
-	local out = {soft = {}, hard = {}}
+	local out = {soft = {}, hard = {}, ratio = {soft = {}, hard = {}}}
 	for v = 1, 4 do
 		local rnd = v * 7919
 		local function rand()
 			rnd = (rnd * 1103515245 + 12345) % 2147483648
 			return rnd / 2147483648
 		end
-		local plop, spray = synth.buffer(SPLASH), synth.buffer(SPLASH)
-		local n = math.floor(0.06 * R)
-		plop:osc{wave = "sine", freq = {start = 130 + 15 * v, mul = 0.02},
-				rate = R, n = n}
-		plop:envelope{points = {{0, 1}, {0.06, 0}}, rate = R, n = n}
-		spray:noise{kind = "white", seed = 2000 + v, rate = R}
-		spray:filter{type = "low", cutoff = {start = 3000, slide = -6500,
-				min = 400}, resonance = 0, rate = R}
-		spray:envelope{points = {{0, 0}, {0.01, 1}, {0.5, 0}}, rate = R}
-		local bubbles, chirp = synth.buffer(SPLASH), synth.buffer(SPLASH)
-		for _ = 1, 20 do
-			local len = (0.02 + 0.04 * rand())
-			local k = math.floor(len * R)
-			local f = 400 + 2600 * rand()
-			chirp:osc{wave = "sine", freq = {start = f,
-					slide = f * (0.2 + 0.3 * rand()) / len}, rate = R, n = k}
-			chirp:envelope{points = {{0, 1}, {len, 0}}, rate = R, n = k}
-			bubbles:mix(chirp, 0, math.floor(rand() * 0.3 * R), k, 0.3)
+		local seed = 2000 + 100 * v
+		local function noise(b, from, n)
+			seed = seed + 1
+			b:noise{kind = "white", seed = seed, rate = R, from = from, n = n}
 		end
-		for kind, loud in pairs({soft = 1, hard = 2}) do
+		local spray, hiss, thump = synth.buffer(SPLASH), synth.buffer(SPLASH),
+				synth.buffer(SPLASH)
+		noise(spray)
+		spray:filter{type = "low", cutoff = {start = 4000, slide = -5700,
+				min = 600}, resonance = 0, rate = R}
+		spray:envelope{points = {{0, 0}, {0.01, 1}, {0.6, 0}}, rate = R}
+		noise(hiss)
+		hiss:filter{type = "high", cutoff = 3000, resonance = 0, rate = R}
+		hiss:envelope{points = {{0, 1}, {0.15, 0}}, rate = R}
+		local n = math.floor(0.06 * R)
+		noise(thump, 0, n)
+		thump:filter{type = "low", cutoff = 250, resonance = 0, rate = R, n = n}
+		thump:envelope{points = {{0, 1}, {0.05, 0}}, rate = R, n = n}
+		local tone, noisy = synth.buffer(SPLASH), synth.buffer(SPLASH)
+		local t = synth.buffer(SPLASH)
+		t:osc{wave = "sine", freq = {start = 130 + 15 * v, mul = 0.02},
+				rate = R, n = n}
+		t:envelope{points = {{0, 1}, {0.06, 0}}, rate = R, n = n}
+		tone:mix(t, 0, 0, n, 0.15)
+		for _ = 1, 8 do
+			local len = 0.005 + 0.01 * rand()
+			local k = math.floor(len * R)
+			local f = 1000 + 3000 * rand()
+			local at = math.floor(rand() * 0.3 * R)
+			t:osc{wave = "sine", freq = {start = f,
+					slide = f * (0.05 + 0.1 * rand()) / len}, rate = R, n = k}
+			t:envelope{points = {{0, 1}, {len, 0}}, rate = R, n = k}
+			tone:mix(t, 0, at, k, 0.05)
+			noise(t, 0, k)
+			t:filter{type = "band", cutoff = f, resonance = 0.7, rate = R, n = k}
+			t:envelope{points = {{0, 1}, {len, 0}}, rate = R, n = k}
+			noisy:mix(t, 0, at, k, 0.05)
+		end
+		for _ = 1, 4 + math.floor(rand() * 5) do
+			local len = 0.005 + 0.005 * rand()
+			local k = math.floor(len * R)
+			noise(t, 0, k)
+			t:filter{type = "band", cutoff = 1500 + 2900 * rand(),
+					resonance = 0.5, rate = R, n = k}
+			t:envelope{points = {{0, 1}, {len, 0}}, rate = R, n = k}
+			noisy:mix(t, 0, math.min(SPLASH - k,
+					math.floor((0.1 + 0.5 * rand()) * R)), k, 0.15)
+		end
+		for kind, loud in pairs({soft = 1, hard = 1.5}) do
 			local b = synth.buffer(SPLASH)
-			b:mix(plop, 0, 0, n, 0.8 * loud)
-			b:mix(spray, 0, 0, SPLASH, 0.4 * loud)
-			b:mix(bubbles, 0, 0, SPLASH, 1)
+			b:mix(noisy, 0, 0, SPLASH, 1)
+			b:mix(spray, 0, 0, SPLASH, loud)
+			b:mix(hiss, 0, 0, SPLASH, 0.3)
+			b:mix(thump, 0, 0, n, 0.6 * loud)
+			out.ratio[kind][v] = energy(b) / math.max(1e-12, energy(tone))
+			b:mix(tone, 0, 0, SPLASH, 1)
 			normalise(b)
 			out[kind][v] = b
 		end
@@ -295,13 +339,17 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 			end
 			underruns, first_t, gap = 0, nil, 0
 		end
-		while self.stream.bufferLength < self.ahead and guard < 32 do
+		-- The length the loop ended on: the mixer's thread may pull before
+		-- a second read
+		local len = self.stream.bufferLength
+		while len < self.ahead and guard < 32 do
 			self:render(s, on_ground, brake)
 			self.out:to_shorts(self.vb, 0, M.CHUNK)
 			self.stream:AddData(self.vb)
 			guard = guard + 1
+			len = self.stream.bufferLength
 		end
-		return self.stream.bufferLength
+		return len
 	end
 	-- Off the board: the next ride ramps in from silence
 	function p:rest()
@@ -319,9 +367,9 @@ end
 -- the silent chunk's hash
 M.HASHES = "02cfd07dc33f6da3 830566adb5d45b54 1406c9e09c71c22c " ..
 		"02cfd07dc33f6da3 02cfd07dc33f6da3"
-M.SPLASH_HASHES = "085d7de7da131b7d 31ebb910b1815737 1fd16cff43a8764b " ..
-		"8b5536f8b417ffc6 5cc0da446564836a d9d78cce94d09c41 f07cb5ae5cd878e1 " ..
-		"b811c6c15f4f5af6"
+M.SPLASH_HASHES = "cbe50032a8c5a3d1 9e2e6ecc44aadd45 9b8f551c845b74b9 " ..
+		"9725ca98b1d9e1f3 ebdf70e8c2806398 5e05b72237f62b2c 2216079b41d76eb5 " ..
+		"e199da12b377d312"
 function M.self_test(synth)
 	local grains = M.grains(synth)
 	local hashes = {}
@@ -393,11 +441,21 @@ function M.self_test(synth)
 		end
 	end
 	splash = table.concat(splash, " ")
+	-- [SKELDAT_SPLASH_NOISE] Mostly noise: 3 times the tones' energy
+	local least = math.huge
+	for _, kind in ipairs({"soft", "hard"}) do
+		for v = 1, 4 do
+			least = math.min(least, sp.ratio[kind][v])
+		end
+	end
+	assert(least >= 3, string.format("board sound: a splash's noise only "
+			.. "%.1f times its tones' energy", least))
 	assert(splash == M.SPLASH_HASHES, "board sound: the splashes' hashes " ..
 			splash .. ", committed " .. tostring(M.SPLASH_HASHES))
 	return string.format("board sound: self test passed, %d and %d hits "
-			.. "in 2 s at 4 and 8, the seams %s of the steps inside, hashes %s",
-			rates[1], rates[2], table.concat(seams, " and "), got)
+			.. "in 2 s at 4 and 8, the seams %s of the steps inside, the "
+			.. "splashes' noise at least %.0f times the tones, hashes %s",
+			rates[1], rates[2], table.concat(seams, " and "), least, got)
 end
 
 return M
