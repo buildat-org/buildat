@@ -10,7 +10,9 @@
 --   local board_sound = load("main/board_sound.lua")
 --   local grains = board_sound.grains(buildat.synth)
 --   local r = board_sound.new(buildat.synth, grains, seed)
---   r:render(s, on_ground, brake) -- -> hits; the chunk in r.out[0, CHUNK)
+--   r:render(s, on_ground) -- -> hits; the chunk in r.out[0, CHUNK)
+-- [SKELDAT_NO_SCRAPE] No brake sound: the roll quiets as the brake slows
+-- the board (the scrape, band-filtered noise, sounded like a bus door)
 local M = {}
 M.RATE = 22050
 -- [SKELDAT_BOARD_SOUND_LAG] What is queued is heard that much later: 10 ms
@@ -38,7 +40,6 @@ M.HITS_PER_SPEED = 25 -- a second, per voxel a second
 M.TOP = 8 -- the speed of the full level
 M.HIT_GAIN = 0.25
 M.ROAR_GAIN = 0.3
-M.SCRAPE_GAIN = 0.2
 local GRAIN = 441 -- 20 ms
 local PRE = 220 -- a filter's settling, cut off the front
 M.CLACK_PEAK = 0.8
@@ -175,7 +176,7 @@ end
 -- A roll's state; seed makes its noise and its hits' times
 function M.new(synth, grains, seed)
 	local r = {grains = grains, rnd = seed or 1, noise_seed = (seed or 1) * 7,
-		level = 0, scrape = 0, next_hit = 0, raw = {},
+		level = 0, next_hit = 0, raw = {},
 		acc = synth.buffer(M.CHUNK + GRAIN),
 		spare = synth.buffer(M.CHUNK + GRAIN),
 		noise = synth.buffer(M.CHUNK + PRE)}
@@ -208,7 +209,7 @@ function M.new(synth, grains, seed)
 	end
 	-- The next chunk at speed s: -> the hits mixed in. A hit's tail runs
 	-- into the next chunk (acc and spare swap, the tail carried).
-	function r:render(s, on_ground, brake)
+	function r:render(s, on_ground)
 		local N = M.CHUNK
 		self.acc, self.spare = self.spare, self.acc
 		self.acc:clear()
@@ -218,12 +219,6 @@ function M.new(synth, grains, seed)
 		if self.level > 0 or level > 0 then
 			self.acc:mix(self:filtered("low", math.min(4000, 120 + 20 * s)),
 					PRE, 0, N, M.ROAR_GAIN * self.level, M.ROAR_GAIN * level)
-		end
-		local scrape = (on_ground and brake) and math.min(1, s / M.TOP) or 0
-		if self.scrape > 0 or scrape > 0 then
-			self.acc:mix(self:filtered("band", 2000 + 250 * math.min(s, 8)),
-					PRE, 0, N, M.SCRAPE_GAIN * self.scrape,
-					M.SCRAPE_GAIN * scrape)
 		end
 		local hits = 0
 		if on_ground and s > 0 then
@@ -243,7 +238,7 @@ function M.new(synth, grains, seed)
 		else
 			self.next_hit = 0
 		end
-		self.level, self.scrape = level, scrape
+		self.level = level
 		return hits
 	end
 	return r
@@ -300,7 +295,7 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 	-- 10 s, then said.
 	local underruns, first_t, fed, fed_t, gap = 0, nil, false, nil, 0
 	-- -> the stream's length after it, s
-	function p:feed(s, on_ground, brake)
+	function p:feed(s, on_ground)
 		local guard = 0
 		local now = buildat.get_time_us()
 		if fed and self.stream.bufferLength <= 0 then
@@ -333,7 +328,7 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 		-- a second read
 		local len = self.stream.bufferLength
 		while len < self.ahead and guard < 32 do
-			self:render(s, on_ground, brake)
+			self:render(s, on_ground)
 			self.out:to_shorts(self.vb, 0, M.CHUNK)
 			self.stream:AddData(self.vb)
 			guard = guard + 1
@@ -343,7 +338,7 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 	end
 	-- Off the board: the next ride ramps in from silence
 	function p:rest()
-		self.level, self.scrape, fed = 0, 0, false
+		self.level, fed = 0, false
 	end
 	return p
 end
@@ -365,8 +360,8 @@ function M.self_test(synth)
 	local hashes = {}
 	for _, s in ipairs({0, 4, 8}) do
 		local r = M.new(synth, grains, 1)
-		r:render(s, true, false)
-		r:render(s, true, false)
+		r:render(s, true)
+		r:render(s, true)
 		hashes[#hashes + 1] = r.out:hash()
 	end
 	local rates = {}
@@ -374,7 +369,7 @@ function M.self_test(synth)
 		local r = M.new(synth, grains, 3)
 		local hits, n = 0, math.floor(2 * M.RATE / M.CHUNK) -- 2 s
 		for _ = 1, n do
-			hits = hits + r:render(s, true, false)
+			hits = hits + r:render(s, true)
 		end
 		local want = M.HITS_PER_SPEED * s * n * M.CHUNK / M.RATE
 		assert(math.abs(hits - want) <= 0.1 * want, string.format(
@@ -382,10 +377,10 @@ function M.self_test(synth)
 		rates[#rates + 1] = hits
 		-- Up: one chunk to ramp out and the last hits' tails
 		for _ = 1, 1 + math.ceil(GRAIN / M.CHUNK) do
-			r:render(s, false, false)
+			r:render(s, false)
 		end
 		for _ = 1, 3 do
-			r:render(s, false, false)
+			r:render(s, false)
 			for i = 0, M.CHUNK - 1 do
 				assert(r.out:get(i) == 0, "board sound: the air not silent")
 			end
@@ -407,7 +402,7 @@ function M.self_test(synth)
 			local r = M.new(synth, grains, 5)
 			local inner, seam, last = 0, 0, nil
 			for c = 1, 200 do
-				r:render(s, true, false)
+				r:render(s, true)
 				local o = r.out
 				if c > 2 then
 					seam = math.max(seam, math.abs(o:get(0) - last))

@@ -1641,7 +1641,7 @@ local function update_rolls(b)
 	local own = roll.own
 	if b then
 		local len = own:feed(game.paused and 0 or b.s,
-				player.on_ground and not b.wet and not game.paused, down("back"))
+				player.on_ground and not b.wet and not game.paused)
 		roll.lo = math.min(roll.lo or len, len)
 		roll.hi = math.max(roll.hi or len, len)
 	else
@@ -1662,7 +1662,7 @@ local function update_rolls(b)
 		local n = near[i]
 		if n then
 			p.node.position = magic.Vector3(n.o.x, n.o.y, n.o.z)
-			p:feed(n.o.speed, true, false)
+			p:feed(n.o.speed, true)
 		else
 			p:rest()
 		end
