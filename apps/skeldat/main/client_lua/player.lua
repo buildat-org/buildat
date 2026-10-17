@@ -857,8 +857,39 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	-- the ground falls away faster than a body thrown along it, the board
 	-- flies; it lands keeping the speed along the ground and losing the
 	-- rest.
+	-- The wish with the keys held since a mount by itself taken out
+	-- (try_board's b.held); a key let go is the board's again
+	local function unheld(b, wish)
+		local held = b.held
+		if not held then
+			return wish
+		end
+		local t = wish.turn or 0
+		if held.turn ~= 0 and t * held.turn <= 0 then
+			held.turn = 0
+		end
+		if held.brake and not wish.brake then
+			held.brake = false
+		end
+		if held.turn == 0 and not held.brake then
+			b.held = nil
+			return wish
+		end
+		local w = {}
+		for k, v in pairs(wish) do
+			w[k] = v
+		end
+		if held.turn ~= 0 then
+			w.turn = 0
+		end
+		if held.brake then
+			w.brake = false
+		end
+		return w
+	end
 	local function board_step(dt, wish)
 		local b = self.board
+		wish = unheld(b, wish)
 		local m = self.movement
 		local ov = self.override or EMPTY_OVERRIDE
 		local g = 2 * m.gravity * (ov.gravity or 1)
@@ -1048,7 +1079,13 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		if type(t0) == "number" and type(t1) == "number" and
 				type(t2) == "number" and t1 <= t0 + 1e-3 and
 				t0 - t2 >= 1 - 1e-3 then
-			self.board = {s = h, hx = hx, hz = hz, k = 0}
+			-- [SKELDAT_BOARD_STRAFE_MOUNT] The turn and brake keys held
+			-- now (a strafe off an edge, a walk backwards) are not the
+			-- board's until let go once
+			local t = wish.turn or 0
+			self.board = {s = h, hx = hx, hz = hz, k = 0, held = {
+				turn = t > 0 and 1 or t < 0 and -1 or 0,
+				brake = wish.brake and true or false}}
 		end
 	end
 
@@ -1309,6 +1346,35 @@ do
 	assert(at_40 and at_40 > bound * 0.9, "board: the flat slows it")
 	assert(not hill.board and hill.x < 80 and hill.x > 78,
 			"board: a step of 3 does not stop it, x " .. hill.x)
+	-- [SKELDAT_BOARD_STRAFE_MOUNT] Strafing right off a one-voxel edge
+	-- (looking +z, walking +x, the right key held): the board heads +x and
+	-- keeps it for 2 s; the key let go and pressed again turns it. Walking
+	-- backwards off it with the back key held: rolling until let go, and
+	-- the press again brakes.
+	local edge = columns(function(x) return x < 1 and 0 or -1 end)
+	local strafer = M.new(edge)
+	strafer:set_position(-2, 0.5, 0)
+	local right = {x = 1, z = 0, look_x = 0, look_z = 1, turn = 1}
+	run(strafer, right, 1)
+	assert(strafer.board, "board: the strafe off the edge did not take it")
+	run(strafer, right, 2)
+	local hdg = math.deg(math.atan2(strafer.board.hz, strafer.board.hx))
+	assert(math.abs(hdg) < 2, "board: the held strafe key turned it " .. hdg)
+	run(strafer, {x = 0, z = 0, look_x = 0, look_z = 1, turn = 0}, 0.2)
+	run(strafer, {x = 0, z = 0, look_x = 0, look_z = 1, turn = 1}, 0.5)
+	hdg = math.deg(math.atan2(strafer.board.hz, strafer.board.hx))
+	assert(math.abs(hdg) > 10, "board: the key pressed again did not turn it")
+	local backer = M.new(edge)
+	backer:set_position(-2, 0.5, 0)
+	local back = {x = 1, z = 0, look_x = -1, look_z = 0, brake = true}
+	run(backer, back, 1)
+	assert(backer.board, "board: walking backwards off the edge did not take it")
+	run(backer, back, 1)
+	assert(backer.board and backer.board.s > 3,
+			"board: the back key held from the mount braked it")
+	run(backer, {x = 0, z = 0, look_x = -1, look_z = 0}, 0.2)
+	run(backer, {x = 0, z = 0, look_x = -1, look_z = 0, brake = true}, 2)
+	assert(not backer.board, "board: the back key pressed again did not stop it")
 	-- The brake: from 10, a stop within 10^2 / (2 * brake) and a bit
 	local flat = M.new(columns(function() return -1 end))
 	board(flat, 0, -0.5, 10)
