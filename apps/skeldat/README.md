@@ -127,8 +127,6 @@ renamed, except:
   multiplied by #79c05a over it;
 - `water.png`: the first 16x16 frame of the animation, multiplied by
   #3f76e4;
-- `skull_item.png`: the face, cell (1,1) of the 8x4 grid of
-  `skull_head.png`;
 - `crown.png`: `bone_block_top.png` with that face over it;
 - `marker_skull.png` and `marker_skull_front.png`: `skull.png` and
   `skull_front.png` in red;
