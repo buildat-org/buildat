@@ -1727,6 +1727,106 @@ echo "$done_line" | awk '{ d = $10 + 0; e = $11 + 0; due = substr($13, 2) + 0
 	fail "client1 hurt in a skip ($log37)"
 echo "$stopped" | awk '{ d = $10 + 0; exit !(d > 0.751 || d < 0.249) }' ||
 	fail "the stopped skip did not stand between: $stopped ($log37)"
+# 34. The stars round the moon's axis ([STARS_AXIS]): at 23:31 in a
+# 128 world, the camera fixed on the moon high in the south, two
+# screenshots 5 s (30 game minutes, DAY 240) apart: the stars near the
+# moon matched between them keep their angle from it -- the median change
+# under half a degree over five or more (the old turn about Z: 1.4)
+log38="$t/srv38.log"
+BUILDAT_SKELDAT_WORLD=sky BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.98 BUILDAT_SKELDAT_DAY=240 \
+	start_server "$log38" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv38" -C "$t/srv.cache" -l 3 || fail "the server ($log38)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 3000" "look_dir 0 0.92 0.39" "delay 8000" \
+	"screenshot $t/sky_a.png" "delay 5000" "screenshot $t/sky_b.png" quit \
+	> "$t/sky.cmds"
+client sky "$t/sky.cmds"
+wait $CLIENT || fail "the night sky's drive ($t/sky.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+stars=$(python3 -I - "$t/sky_a.png" "$t/sky_b.png" <<'PY'
+import sys, math, struct, zlib
+def png(path):
+    d = open(path, 'rb').read()
+    w, h = struct.unpack('>II', d[16:24]); bd, ct = d[24], d[25]
+    assert bd == 8 and ct in (2, 6)
+    n = 3 if ct == 2 else 4
+    idat = b''; i = 8
+    while i < len(d):
+        l = struct.unpack('>I', d[i:i+4])[0]; t = d[i+4:i+8]
+        if t == b'IDAT': idat += d[i+8:i+8+l]
+        i += 12 + l
+    raw = zlib.decompress(idat); stride = w * n
+    out = []; prev = bytearray(stride); p = 0
+    for y in range(h):
+        f = raw[p]; line = bytearray(raw[p+1:p+1+stride]); p += 1 + stride
+        for x in range(stride):
+            a = line[x-n] if x >= n else 0; b = prev[x]; c = prev[x-n] if x >= n else 0
+            if f == 1: line[x] = (line[x] + a) & 255
+            elif f == 2: line[x] = (line[x] + b) & 255
+            elif f == 3: line[x] = (line[x] + (a + b) // 2) & 255
+            elif f == 4:
+                pp = a + b - c; pa, pb, pc = abs(pp-a), abs(pp-b), abs(pp-c)
+                line[x] = (line[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        out.append([sum(line[x*n:x*n+3]) for x in range(w)]); prev = line
+    return w, h, out
+def find(path):
+    w, h, img = png(path)
+    H = h - 70
+    # the crosshair out
+    for y in range(h // 2 - 9, h // 2 + 10):
+        for x in range(w // 2 - 9, w // 2 + 10):
+            img[y][x] = 0
+    top = max(max(r) for r in img[:H])
+    core = [(x, y) for y in range(H) for x in range(w) if img[y][x] >= 0.8 * top]
+    mc = (sum(p[0] for p in core) / len(core), sum(p[1] for p in core) / len(core))
+    r2 = max((p[0]-mc[0])**2 + (p[1]-mc[1])**2 for p in core)
+    stars = []
+    for y in range(4, H - 4):
+        row = img[y]
+        for x in range(4, w - 4):
+            v = row[x]
+            if v < 20 or (x-mc[0])**2 + (y-mc[1])**2 < r2 * 4:
+                continue
+            if any(img[y+dy][x+dx] > v or (img[y+dy][x+dx] == v and (dy, dx) < (0, 0))
+                    for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dx or dy):
+                continue
+            low = min(img[y+dy][x+dx] for dy in (-4, 0, 4) for dx in (-4, 0, 4))
+            if v - low >= 15:
+                stars.append((x, y))
+    return w, h, mc, stars, len(core)
+fov = float(sys.argv[3]) if len(sys.argv) > 3 else 72
+def ray(w, h, p):
+    f = (h / 2) / math.tan(math.radians(fov) / 2)
+    v = (p[0] - w / 2, -(p[1] - h / 2), f)
+    l = math.sqrt(sum(c * c for c in v)); return [c / l for c in v]
+def ang(a, b):
+    return math.degrees(math.acos(max(-1, min(1, sum(x * y for x, y in zip(a, b))))))
+wa, ha, ma, sa, na = find(sys.argv[1])
+wb, hb, mb, sb, nb = find(sys.argv[2])
+print("moon at %.1f,%.1f (%d px) and %.1f,%.1f (%d px); %d and %d stars" % (ma + (na,) + mb + (nb, len(sa), len(sb))))
+ra, rb = ray(wa, ha, ma), ray(wb, hb, mb)
+print("the moon moved %.2f degrees" % ang(ra, rb))
+diffs = []
+near = sorted(sa, key=lambda s: ang(ray(wa, ha, s), ra))[:12]
+for s in near:
+    guess = (s[0] - ma[0] + mb[0], s[1] - ma[1] + mb[1])
+    t = min(sb, key=lambda q: (q[0]-guess[0])**2 + (q[1]-guess[1])**2)
+    if (t[0]-guess[0])**2 + (t[1]-guess[1])**2 > 15**2: continue
+    # one star in b for one in a: the nearest a star to it is this one
+    back = min(sa, key=lambda q: (q[0]-t[0]+mb[0]-ma[0])**2 + (q[1]-t[1]+mb[1]-ma[1])**2)
+    if back != s: continue
+    a1, a2 = ang(ray(wa, ha, s), ra), ang(ray(wb, hb, t), rb)
+    diffs.append(a2 - a1)
+    print("star %.0f,%.0f -> %.0f,%.0f: %.2f -> %.2f degrees from the moon" % (s + t + (a1, a2)))
+ad = sorted(abs(d) for d in diffs)
+med = ad[len(ad) // 2] if ad else 99
+print("matched %d, the median change %.2f degrees" % (len(ad), med))
+sys.exit(0 if len(ad) >= 5 and med < 0.5 else 1)
+PY
+) || fail "the stars moved against the moon: $(echo "$stars" | tail -1) ($t/sky_a.png, $t/sky_b.png)"
+echo "stars: $(echo "$stars" | tail -1)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"

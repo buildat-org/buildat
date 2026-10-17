@@ -164,6 +164,8 @@ local function update_sky()
 	local l = math.sqrt(tx * tx + h * h + tz * tz)
 	local dir = magic.Vector3(-tx / l, -h / l, -tz / l)
 	sky:set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
+	-- [STARS_AXIS] The stars round the celestial pole, by the hour
+	sky:set_sky_turn(sky_light.sky_turn_toward(hill.lat, 0, hill.time * 60))
 	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
 	sky:set_moon_look(0)
 	local day = math.max(0, math.min(1, (h + 0.15) / 0.3))

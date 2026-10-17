@@ -494,6 +494,9 @@ local function update_sky(dt)
 	local dir = magic.Vector3(-sx / l, -sy / l, -sz / l)
 	local ml = math.sqrt(mx * mx + height * height + mz * mz)
 	sky:set_sun_direction({x = -mx / ml, y = -height / ml, z = -mz / ml})
+	-- [STARS_AXIS] The stars round the sun's tilted axis, by its angle
+	local ux, uy = sky_model.sun_direction(daylight, 0)
+	sky:set_sky_turn(sky_light.tilted_axis(tilt), math.atan2(uy, ux))
 	voxel_shading.set_sun_direction({x = dir.x, y = dir.y, z = dir.z})
 	sky:set_moon_look(sky_model.moon_amount(daylight) > 0 and
 			sky_model.MOON_HALF or 0)

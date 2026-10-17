@@ -430,6 +430,83 @@ function M.sun_toward(lat, north, day, minute)
 	return east * ex + northward * nx, sin_h, east * ez + northward * nz
 end
 
+-- **The sky's turn** ([STARS_AXIS]): turn_rows(axis, angle) is the
+-- inverse of the turn by angle (radians) about axis (a unit vector),
+-- row by row, nine numbers: what set_sky_turn gives the shader, which
+-- looks a star up at it applied to the view's direction. With the sky's
+-- turn, the stars stay where the sun and the moon put them.
+function M.turn_rows(k, a)
+	local c, s = math.cos(a), math.sin(a)
+	local t = 1 - c
+	local x, y, z = k.x, k.y, k.z
+	return {c + t * x * x, t * x * y + s * z, t * x * z - s * y,
+		t * y * x - s * z, c + t * y * y, t * y * z + s * x,
+		t * z * x + s * y, t * z * y - s * x, c + t * z * z}
+end
+-- An orbit tilted about X by `tilt` degrees, as Luanti's and
+-- sky_model.sun_direction tilt theirs: the axis Z turned by the tilt
+function M.tilted_axis(tilt)
+	local r = math.rad(tilt or 0)
+	return {x = 0, y = -math.sin(r), z = math.cos(r)}
+end
+-- sun_toward's sky: the axis the celestial pole (north raised by the
+-- latitude) and the angle by the hour, for a minute of solar time
+function M.sky_turn_toward(lat, north, minute)
+	local a, p = math.rad(north), math.rad(lat)
+	local axis = {x = math.sin(a) * math.cos(p), y = math.sin(p),
+		z = math.cos(a) * math.cos(p)}
+	return axis, math.rad((minute / 60 - 12) * 15)
+end
+
+do
+	local function apply(r, v)
+		return r[1] * v[1] + r[2] * v[2] + r[3] * v[3],
+			r[4] * v[1] + r[5] * v[2] + r[6] * v[3],
+			r[7] * v[1] + r[8] * v[2] + r[9] * v[3]
+	end
+	-- One point, in degrees off the first, over a day of turned-back suns
+	local function spread(sun_at, turn_at)
+		local fx, fy, fz, worst
+		for i = 0, 47 do
+			local v = {sun_at(i)}
+			local x, y, z = apply(M.turn_rows(turn_at(i)), v)
+			if not fx then
+				fx, fy, fz, worst = x, y, z, 0
+			else
+				local d = math.max(-1, math.min(1, fx * x + fy * y + fz * z))
+				worst = math.max(worst, math.deg(math.acos(d)))
+			end
+		end
+		return worst
+	end
+	-- A tilted orbit (22.8, the luanti client's own): the sun at
+	-- (cos a, sin a, 0) turned by the tilt about X
+	local tilt = 22.8
+	local r = math.rad(tilt)
+	local w = spread(function(i)
+		local a = i / 48 * 2 * math.pi
+		local x, y = math.cos(a), math.sin(a)
+		return x, y * math.cos(r), y * math.sin(r)
+	end, function(i)
+		return M.tilted_axis(tilt), i / 48 * 2 * math.pi
+	end)
+	assert(w < 0.5, "the tilted sun turned back moves " .. w .. " degrees")
+	-- sun_toward's, at 60 north on midsummer, north a quarter turned
+	w = spread(function(i)
+		local x, y, z = M.sun_toward(60, 90, 172, i * 30)
+		local l = math.sqrt(x * x + y * y + z * z)
+		return x / l, y / l, z / l
+	end, function(i)
+		return M.sky_turn_toward(60, 90, i * 30)
+	end)
+	assert(w < 0.5, "sun_toward's sun turned back moves " .. w .. " degrees")
+	-- No tilt: the shader's old turn, about Z by the sun's own angle
+	local rows = M.turn_rows({x = 0, y = 0, z = 1}, 0.7)
+	assert(math.abs(rows[1] - math.cos(0.7)) < 1e-9 and
+			math.abs(rows[2] - math.sin(0.7)) < 1e-9 and
+			math.abs(rows[4] + math.sin(0.7)) < 1e-9, "the untilted turn")
+end
+
 -- **physical_sky with an app's own numbers**: a copy of the module whose
 -- PHYS has these values in place of the defaults (floorplanner's night and
 -- lamp), every rule here reading them. The module's table, which require
@@ -526,6 +603,10 @@ function M.new_dome(scene, sun_dir, defaults, log)
 	set("MoonTextured", 0.0)
 	set("SunTextured", 0.0)
 	set("StarDensity", 0.0)
+	set("SkyTurnOn", 0.0)
+	set("SkyTurnX", 1, 0, 0)
+	set("SkyTurnY", 0, 1, 0)
+	set("SkyTurnZ", 0, 0, 1)
 	set("StarColor", 0.9, 0.9, 1.0)
 	set("StarFade", 0.0)
 	set("CloudCoverage", defaults.cloud_cover)
@@ -637,6 +718,22 @@ function M.new_dome(scene, sun_dir, defaults, log)
 			set("StarColor", color.r or color[1] or 0.9, color.g or color[2] or 0.9,
 					color.b or color[3] or 1.0)
 		end
+	end
+
+	-- [STARS_AXIS] The axis ({x, y, z}, a unit vector) the sun, the moon
+	-- and the stars go round, and the turn's angle (radians) about it: the
+	-- stars are drawn turned by it. nil: Luanti's untilted turn, read off
+	-- the sun's direction
+	function self:set_sky_turn(axis, angle)
+		if not axis then
+			set("SkyTurnOn", 0.0)
+			return
+		end
+		local r = M.turn_rows(axis, angle)
+		set("SkyTurnX", r[1], r[2], r[3])
+		set("SkyTurnY", r[4], r[5], r[6])
+		set("SkyTurnZ", r[7], r[8], r[9])
+		set("SkyTurnOn", 1.0)
 	end
 
 	-- The way the light travels, as a Light's direction is, so the sun

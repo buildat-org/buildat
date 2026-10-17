@@ -44,6 +44,12 @@ uniform float cSunOverexposure;
 uniform float cMoonSize;
 uniform float cStarDensity;
 uniform vec3 cStarColor;
+// [STARS_AXIS] The sky's turn, as PhysicalSky.glsl has it (physical_sky's
+// set_sky_turn): the rows of its inverse, cSkyTurnOn 1 when given
+uniform vec3 cSkyTurnX;
+uniform vec3 cSkyTurnY;
+uniform vec3 cSkyTurnZ;
+uniform float cSkyTurnOn;
 uniform float cCloudCoverage;
 // How opaque the layer is, which is the alpha the game gave its cloud colour
 uniform float cCloudAlpha;
@@ -256,8 +262,9 @@ void PS()
         // same angle: Luanti turns its star mesh by 2 pi (wicked time - 1/4)
         // about Z, and the sun's own direction is the cosine and sine of
         // that, so it is the rotation. Stars rise and set with it.
-        vec3 turned = vec3(d.x * sun.x + d.y * sun.y,
-            d.y * sun.x - d.x * sun.y, d.z);
+        vec3 turned = cSkyTurnOn > 0.5 ?
+            vec3(dot(cSkyTurnX, d), dot(cSkyTurnY, d), dot(cSkyTurnZ, d)) :
+            vec3(d.x * sun.x + d.y * sun.y, d.y * sun.x - d.x * sun.y, d.z);
         vec2 within;
         vec3 cell = StarCell(turned, within);
         vec2 key = cell.xy + cell.z * 71.0;

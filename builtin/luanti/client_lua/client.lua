@@ -1820,6 +1820,10 @@ local function update_sky(dt)
 	-- default speed. Drawn smooth, the sun is at most half a step from
 	-- where its shadow is cast from, which does not show.
 	world_sky:set_sun_direction(normalized({x = -mx, y = -smooth_sy, z = -mz}))
+	-- [STARS_AXIS] And the stars round the same tilted axis, by the
+	-- sun's angle on it (Luanti's sky.cpp turns its stars by the tilt too)
+	local ux, uy = sky_dome.sun_direction(daylight, 0)
+	world_sky:set_sky_turn(sky_light.tilted_axis(tilt), math.atan2(uy, ux))
 	sky_cube.refresh(false)
 
 	-- Dawn and dusk are the half hour either side of the horizon rather

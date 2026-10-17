@@ -31,7 +31,8 @@ M.physical_sky = physical_sky
 -- The sky's own rules ([LC_SKY_SHARED]): physical_sky's, here for the
 -- callers that read them through this table
 for _, name in ipairs({"sky_radiance", "dome", "outside", "fog", "sun_disc",
-		"cloud_lit", "sun_toward", "new_cube"}) do
+		"cloud_lit", "sun_toward", "new_cube", "tilted_axis",
+		"sky_turn_toward"}) do
 	M[name] = physical_sky[name]
 end
 

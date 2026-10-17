@@ -47,6 +47,13 @@ uniform float cSunOverexposure;
 uniform vec3 cSunRadiance;
 uniform float cMoonSize;
 uniform float cStarDensity;
+// [STARS_AXIS] The sky's turn, the axis the sun, the moon and the stars
+// go round: the rows of its inverse (set_sky_turn), cSkyTurnOn 1 when a
+// game gave one
+uniform vec3 cSkyTurnX;
+uniform vec3 cSkyTurnY;
+uniform vec3 cSkyTurnZ;
+uniform float cSkyTurnOn;
 uniform vec3 cStarColor;
 uniform float cCloudCoverage;
 // How opaque the layer is, which is the alpha the game gave its cloud colour
@@ -354,11 +361,13 @@ void PS()
     // dark enough for them
     if(cStarFade > 0.0 && cStarDensity > 0.0 && d.y > -0.05){
         // Turned with the day, about the axis the sun goes round and by the
-        // same angle: Luanti turns its star mesh by 2 pi (wicked time - 1/4)
-        // about Z, and the sun's own direction is the cosine and sine of
-        // that, so it is the rotation. Stars rise and set with it.
-        vec3 turned = vec3(d.x * sun.x + d.y * sun.y,
-            d.y * sun.x - d.x * sun.y, d.z);
+        // same angle: the game's turn ([STARS_AXIS]), else Luanti's untilted
+        // one -- its star mesh turned by 2 pi (wicked time - 1/4) about Z,
+        // the sun's own direction the cosine and sine of that, so it is the
+        // rotation. Stars rise and set with it.
+        vec3 turned = cSkyTurnOn > 0.5 ?
+            vec3(dot(cSkyTurnX, d), dot(cSkyTurnY, d), dot(cSkyTurnZ, d)) :
+            vec3(d.x * sun.x + d.y * sun.y, d.y * sun.x - d.x * sun.y, d.z);
         vec2 within;
         vec3 cell = StarCell(turned, within);
         vec2 key = cell.xy + cell.z * 71.0;
