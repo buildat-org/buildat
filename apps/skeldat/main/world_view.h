@@ -40,6 +40,12 @@ struct WorldView
 	sv_<std::function<void(int, int, int, uint32_t, uint32_t)>> on_set;
 	// The random numbers every part draws from
 	std::mt19937 rand{std::random_device{}()};
+	// The server's clock, seconds; the world's own, seconds of game time
+	// since it was made (kept in its save); a game day's length, seconds
+	double time = 0, t = 0;
+	float day_s = DAY_SECONDS;
+	// The pathfinder's cell for a voxel id (fill_cells)
+	sv_<uint8_t> cell_of;
 
 	WorldView(interface::Server *server, const skeldat::Game &game):
 		server(server), game(game)
@@ -350,6 +356,40 @@ struct WorldView
 				continue;
 			fn(x, z, y, id, v);
 			break;
+		}
+	}
+	// A pathfinder's box from one read of the voxels: walkable() is SOLID,
+	// is_water() CLIMB, by the id
+	void fill_cells(voxelworld::Instance *w, vp::Field &f)
+	{
+		const pv::Region region(
+				pv::Vector3DInt32(f.origin.x, f.origin.y, f.origin.z),
+				pv::Vector3DInt32(f.origin.x + f.w - 1, f.origin.y + f.h - 1,
+						f.origin.z + f.d - 1));
+		interface::VoxelVolume vol = w->get_volume(region);
+		for(int y = f.origin.y; y < f.origin.y + f.h; y++)
+		for(int z = f.origin.z; z < f.origin.z + f.d; z++)
+		for(int x = f.origin.x; x < f.origin.x + f.w; x++){
+			// Over the world's top is open air; past its sides, nothing
+			// to walk in
+			if(y >= (y1 + 1) * skeldat::bones::SECTION){
+				f.cells[f.index(x, y, z)] = vp::OPEN;
+				continue;
+			}
+			const uint32_t id = format.id.get(vol.sample_at(x, y, z));
+			if(id >= cell_of.size()){
+				const size_t from = cell_of.size();
+				cell_of.resize(id + 1);
+				for(size_t i = from; i <= id; i++){
+					const skeldat::NodeDef *n = node_of(i);
+					cell_of[i] = i == ID_AIR ? vp::OPEN :
+							!n ? vp::SOLID : n->shape == skeldat::LIQUID ?
+							vp::CLIMB : n->shape == skeldat::TORCH ||
+							!n->walkable ? vp::OPEN :
+							vp::SOLID;
+				}
+			}
+			f.cells[f.index(x, y, z)] = cell_of[id];
 		}
 	}
 };

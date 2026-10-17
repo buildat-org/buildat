@@ -1,0 +1,1494 @@
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+// [SKELDAT_MODULAR] **The mobs, the arrows and the light skeletons**
+// (skelenti's mobs, main.cpp there, with the world read in C++): the
+// boars and skeletons near the players, their bodies, damage and drops,
+// the arrows in flight and stuck, the marker skulls, and the skeletons
+// over the whole world in their light form (the population, the light
+// steps, the routes, the far view). Saved as "mob/<key>" by the Module.
+// It reaches the players through MobsHost, which the Module is.
+// Included by main.cpp inside namespace skeldat, after bones_growth.h
+#pragma once
+
+struct MobsHost
+{
+	virtual Player* nearest(float x, float y, float z, float &d,
+			size_t *peer_out = nullptr) = 0;
+	virtual void hurt(size_t peer, Player &pl, int damage, const char *how) = 0;
+	virtual void give_or_drop(Player &pl, const Stack &st) = 0;
+	virtual void send_inventory(size_t peer, const Player &pl) = 0;
+	virtual void send_position(size_t peer, Player &pl) = 0;
+	virtual void sound(const char *moment, float x, float y, float z,
+			size_t except = (size_t)-1) = 0;
+protected:
+	~MobsHost() {}
+};
+
+struct Mobs
+{
+	WorldView &world;
+	std::map<size_t, Player> &players;
+	MobsHost &host;
+	Drops &drops;
+	BonesGrowth &growth;
+	Furnaces &furnaces;
+	// The world's save, from its start
+	storage::Store *store = nullptr;
+	// The mobs, by key; the arrows in flight or stuck
+	std::map<uint32_t, Mob> all;
+	float light_step = LIGHT_STEP;
+	// Day 1, night 0, -1 before the world is in; the night's bone blocks
+	int phase = -1;
+	size_t night_blocks = 0;
+	uint32_t next_mob = 1;
+	std::vector<Arrow> arrows;
+	// Bodies put back on their light form, for the report
+	size_t body_puts = 0;
+	float far_t = 0;
+	// Each skeldat:far's count logged, for a check (BUILDAT_SKELDAT_FAR=1)
+	bool far_report = getenv("BUILDAT_SKELDAT_FAR") != nullptr;
+	float ai_t = 0, spawn_t = 0;
+	// Marker skulls a footprint, kept through the world's on_set, saved as
+	// "markers"
+	sv_<int> markers;
+	// [SKELDAT_SURFACE_END] The game day a skull was last dropped down a
+	// deep hole, by column; saved as "holes"
+	std::map<long, int> hole_day;
+	// [SKELDAT_BOW] The stuck_arrow voxels, by "x,y,z", kept through
+	// the world's on_set and saved as "stuck/<x,y,z>"
+	std::set<ss_> stuck;
+	size_t sweep = 0;
+	float sweep_t = 0, hour_t = 0;
+	double light_us = 0;
+	size_t light_steps = 0, woken = 0;
+	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
+	// spawning of its own, and the mobs named at x, z from the first
+	// player placed, once, standing still for half a minute; "bones 1 0 8"
+	// sets the bones of the ground voxel at x, z
+	ss_ test;
+	bool test_done = false;
+
+	Mobs(WorldView &world, std::map<size_t, Player> &players, MobsHost &host,
+			Drops &drops, BonesGrowth &growth, Furnaces &furnaces):
+		world(world), players(players), host(host), drops(drops),
+		growth(growth), furnaces(furnaces)
+	{}
+
+	// A place for a kind to spawn near a player, 12 to 24 voxels off: a
+	// boar on grass under the open sky, a skeleton on a floor no light
+	// reaches -- or on any floor where the danger d is DAYLIGHT_DANGER or
+	// more
+	bool spawn_spot(voxelworld::Instance *w, uint8_t kind, const Player &p,
+			float d, float out[3])
+	{
+		const uint32_t grass = world.id_of("skeldat:grass");
+		for(int i = 0; i < 8; i++){
+			const float r = 12 + world.rnd() * 12, t = world.rnd() * 2 * (float)M_PI;
+			const int x = (int)std::floor(p.x + r * std::cos(t) + 0.5f),
+					z = (int)std::floor(p.z + r * std::sin(t) + 0.5f),
+					y0 = (int)std::floor(p.y + 0.5f);
+			for(int y = y0 + 12; y >= y0 - 16; y--){
+				const uint32_t below = world.wid(w, x, y - 1, z);
+				if(below == ID_IGNORE || !world.walkable(w, x, y - 1, z) ||
+						world.walkable(w, x, y, z) || world.walkable(w, x, y + 1, z) ||
+						world.is_water(w, x, y, z))
+					continue;
+				int sky, lamp;
+				world.light(w, x, y, z, sky, lamp);
+				if(kind == BOAR ? below == grass && sky == 15 :
+						d >= DAYLIGHT_DANGER || std::max(sky, lamp) <= 3){
+					out[0] = (float)x, out[1] = y - 0.5f, out[2] = (float)z;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	void spawn()
+	{
+		for(auto &pair : players){
+			const Player &p = pair.second;
+			if(!p.placed || p.hp <= 0)
+				continue;
+			float d = 0;
+			voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+				d = world.danger(w, p.x, p.y, p.z);
+			});
+			size_t awake = 0;
+			for(auto &kv : all)
+				awake += kv.second.node_id != 0;
+			for(uint8_t kind : {BOAR, SKELETON}){
+				if(awake >= MAX_MOBS)
+					return;
+				if(kind == BOAR && (world.day < 0.25 || world.day > 0.75))
+					continue;
+				size_t near = 0;
+				for(auto &kv : all){
+					const Mob &m = kv.second;
+					if(m.kind == kind && m.node_id && std::fabs(m.x-p.x) < 32 &&
+							std::fabs(m.z-p.z) < 32 && std::fabs(m.y-p.y) < 32)
+						near++;
+				}
+				// A skeleton by the danger: more tries, more of them
+				if(near >= (kind == SKELETON ? 1 + (size_t)(5 * d) : MAX_NEAR))
+					continue;
+				if(kind == SKELETON && world.rnd() > 0.1f + 0.9f * d)
+					continue;
+				float s[3];
+				bool found = false;
+				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+					found = spawn_spot(w, kind, p, d, s);
+				});
+				if(!found)
+					continue;
+				size_t area = 0;
+				for(auto &kv : all)
+					if(std::fabs(kv.second.x - s[0]) < 32 &&
+							std::fabs(kv.second.z - s[2]) < 32)
+						area++;
+				if(area >= (kind == SKELETON ? 2 + (size_t)(8 * d) : MAX_AREA))
+					continue;
+				Mob m;
+				m.kind = kind;
+				m.x = s[0], m.y = s[1], m.z = s[2];
+				m.hp = MOB_HP[kind];
+				m.yaw = world.rnd() * 2 * (float)M_PI;
+				const uint32_t k = next_mob++;
+				all[k] = m;
+				awake++;
+				log_i(MODULE, "skeldat: a %s (%u) spawns at %.1f,%.1f,%.1f, "
+						"danger %.2f", MOB_KIND[kind], k, m.x, m.y, m.z, d);
+			}
+		}
+	}
+
+	void stage_test()
+	{
+		if(test_done)
+			return;
+		Player *p = nullptr;
+		size_t peer = 0;
+		for(auto &pair : players)
+			if(pair.second.placed)
+				p = &pair.second, peer = pair.first;
+		if(!p)
+			return;
+		test_done = true;
+		std::istringstream is(test);
+		ss_ item;
+		while(std::getline(is, item, ';')){
+			std::istringstream it(item);
+			ss_ kind;
+			it>>kind;
+			if(kind == "place"){
+				// "place x z": the player moved onto that column's top
+				int x = 0, z = 0;
+				it>>x>>z;
+				int y = (world.y1 + 1) * skeldat::bones::SECTION - 1;
+				while(y > world.y0 * skeldat::bones::SECTION &&
+						world.id_at(x, y - 1, z) == ID_AIR)
+					y--;
+				p->x = (float)x, p->y = (float)y, p->z = (float)z;
+				host.send_position(peer, *p);
+				log_i(MODULE, "skeldat: test: %s placed at %d,%d,%d",
+						cs(p->name), x, y, z);
+				continue;
+			}
+			if(kind == "give"){
+				// "give item n k": k stacks of n into the player's main
+				int n = 0, k = 1;
+				ss_ name;
+				it>>name>>n>>k;
+				for(int i = 0; i < k && world.game.item(name); i++)
+					world.game.add(p->main, Stack(name, n));
+				host.send_inventory(peer, *p);
+				log_i(MODULE, "skeldat: test: %d of %s given", k, cs(name));
+				continue;
+			}
+			if(kind == "craft"){
+				// "craft i item n": the player's craft slot i (1-9) holds n
+				int i = 0, n = 0;
+				ss_ name;
+				it>>i>>name>>n;
+				if(i >= 1 && i <= 9 && world.game.item(name)){
+					p->craft[i - 1] = Stack(name, n);
+					host.send_inventory(peer, *p);
+					log_i(MODULE, "skeldat: test: %s in craft %d", cs(name), i);
+				}
+				continue;
+			}
+			float dx = 0, dz = 0;
+			it>>dx>>dz;
+			if(kind == "marker"){
+				// "marker dx dz [node [dy]]": a marker skull, or the node,
+				// on the ground there, or dy over that (-1 the ground's top)
+				ss_ name;
+				int dy = -1000;
+				it>>name>>dy;
+				const uint32_t id = name.empty() ? world.marker : world.id_of(name);
+				const int x = (int)std::floor(p->x + dx + 0.5f),
+						z = (int)std::floor(p->z + dz + 0.5f);
+				int y = (int)std::floor(p->y + 0.5f) + 2;
+				while(y > (int)std::floor(p->y + 0.5f) - 3 &&
+						world.id_at(x, y - 1, z) == ID_AIR)
+					y--;
+				if(dy > -1000)
+					y += dy;
+				world.set_node(x, y, z, id);
+				log_i(MODULE, "skeldat: test: %s at %s", name.empty() ?
+						"a marker skull" : cs(name), cs(pos_key(x, y, z)));
+				continue;
+			}
+			if(kind == "course"){
+				// [SKELDAT_SKATEBOARD] "course dx dz": a board's course of
+				// stone from there along +x, 5 wide, its heights over the
+				// player's ground: a platform of 12, a slope down to 0, a
+				// ramp of 2 at 1:2, a flat, a wall of 3 at 64 with a hole
+				// one high at its middle ([SKELDAT_BOARD_PRONE]) and one
+				// at 70 without; and off
+				// x 64..69 a slope down 8 along +z and a flat 70 long. The
+				// player put on the platform.
+				const int X = (int)std::floor(p->x + dx + 0.5f),
+						Z = (int)std::floor(p->z + dz + 0.5f),
+						B = (int)std::floor(p->y + 0.5f);
+				const uint32_t stone = world.id_of("skeldat:stone");
+				auto column = [&](int i, int j, int h){
+					const int lo = B + std::min(h, 0) - 3;
+					for(int y = lo; y <= std::max(h, 0) + B + 6; y++)
+						world.set_node(X + i, y, Z + j, y < B + h ? stone : ID_AIR);
+				};
+				for(int i = -3; i <= 75; i++)
+				for(int j = -2; j <= 2; j++){
+					const int h = i < 4 ? 12 : i < 16 ? 15 - i :
+							i >= 36 && i < 40 ? (i - 34) / 2 :
+							(i >= 70 && i <= 72) || i == 64 || i == 65 ? 3 : 0;
+					column(i, j, h);
+					if((i == 64 || i == 65) && j == 0)
+						world.set_node(X + i, B, Z, ID_AIR);
+				}
+				for(int i = 64; i <= 69; i++)
+				for(int j = 3; j <= 78; j++)
+					column(i, j, std::max(-8, 2 - j));
+				p->x = (float)X, p->y = (float)(B + 12), p->z = (float)Z;
+				host.send_position(peer, *p);
+				log_i(MODULE, "skeldat: test: a course at %d,%d,%d", X, B, Z);
+				continue;
+			}
+			if(kind == "lantern"){
+				// "lantern dx dz coal": as BUILDAT_SKELDAT_LANTERNS, after
+				// what the knobs before it built
+				int coal = 1;
+				it>>coal;
+				furnaces.test_lanterns((itos((int)std::floor(p->x + dx +
+						0.5f))+" "+itos((int)std::floor(p->z + dz + 0.5f))+" "+
+						itos(coal)).c_str(), world.day_s);
+				continue;
+			}
+			if(kind == "bones"){
+				// "bones dx dz value": the ground's voxel there
+				int value = 0;
+				it>>value;
+				const int x = (int)std::floor(p->x + dx + 0.5f),
+						y = (int)std::floor(p->y + 0.5f) - 1,
+						z = (int)std::floor(p->z + dz + 0.5f);
+				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+					const pv::Vector3DInt32 v(x, y, z);
+					interface::VoxelSample sample = w->get_sample(v, true);
+					world.bones.set(sample, (uint32_t)value);
+					w->set_sample(v, sample);
+				});
+				log_i(MODULE, "skeldat: test: bones %d at %d,%d,%d", value,
+						x, y, z);
+				continue;
+			}
+			Mob m;
+			m.kind = kind == "skeleton" ? SKELETON : BOAR;
+			m.x = p->x + dx, m.y = p->y, m.z = p->z + dz;
+			voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+				Ground g = world.ground(w, m.x, m.y + 2, m.z, MOB_HEIGHT[m.kind]);
+				if(g.found)
+					m.y = g.y;
+			});
+			// Not near the player's height: on its column's top
+			const long c = world.column((int)std::floor(m.x + 0.5f),
+					(int)std::floor(m.z + 0.5f));
+			if(m.y == p->y && c >= 0 && world.top_y[c] != NO_GROUND)
+				m.y = world.top_y[c] + 0.5f;
+			m.hp = MOB_HP[m.kind];
+			m.yaw = (float)M_PI;
+			m.mode_t = 30;
+			// "... marked": its marker skull placed today, so it places
+			// none beside itself, which would keep the sun off it.
+			// "... seed dx dz n": n night's blocks, the first at that
+			// column off the player
+			ss_ flag;
+			while(it>>flag){
+				if(flag == "marked")
+					m.marker_day = world.t / world.day_s;
+				if(flag == "lure")
+					m.goal_fp = (int)world.footprint((int)std::floor(m.x + 0.5f),
+							(int)std::floor(m.z + 0.5f));
+				if(flag == "seed"){
+					float sx = 0, sz = 0;
+					it>>sx>>sz>>m.quota;
+					m.seed_x = (int)std::floor(p->x + sx + 0.5f);
+					m.seed_z = (int)std::floor(p->z + sz + 0.5f);
+					m.seeding = true;
+				}
+			}
+			const uint32_t k = next_mob++;
+			all[k] = m;
+			log_i(MODULE, "skeldat: test: a %s (%u) at %.1f,%.1f,%.1f",
+					MOB_KIND[m.kind], k, m.x, m.y, m.z);
+		}
+	}
+
+	// Woken, it has seen nothing yet
+	void wake(Mob &m)
+	{
+		if(m.mode == FIGHT)
+			m.mode = WANDER, m.mode_t = 0;
+		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
+		woken++;
+		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
+			Urho3D::Node *n = scene->CreateChild(
+					Urho3D::String("skeldat_")+MOB_KIND[m.kind]);
+			n->SetPosition(Urho3D::Vector3(m.x, m.y, m.z));
+			n->SetRotation(Urho3D::Quaternion(m.yaw * M_RADTODEG,
+					Urho3D::Vector3::UP));
+			n->SetVar(Urho3D::StringHash("skeldat_hurt"), Urho3D::Variant(m.hurt));
+			m.node_id = n->GetID();
+		});
+	}
+
+	void remove_node(uint32_t &id)
+	{
+		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
+			if(Urho3D::Node *n = scene->GetNode(id))
+				n->Remove();
+		});
+		id = 0;
+	}
+
+	void shoot(const Mob &m, const Player &p)
+	{
+		const float dx = p.x - m.x, dz = p.z - m.z;
+		const float h = std::sqrt(dx*dx + dz*dz);
+		if(h < 0.5f)
+			return;
+		Arrow a;
+		a.x = m.x + dx / h * 0.6f, a.y = m.y + 1.5f, a.z = m.z + dz / h * 0.6f;
+		const float t = h / ARROW_SPEED;
+		a.vx = dx / h * ARROW_SPEED + (world.rnd() - 0.5f) * 0.8f;
+		a.vz = dz / h * ARROW_SPEED + (world.rnd() - 0.5f) * 0.8f;
+		a.vy = (p.y + 1.2f - a.y) / t + 0.5f * ARROW_GRAVITY * t +
+				(world.rnd() - 0.5f) * 0.6f;
+		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
+			Urho3D::Node *n = scene->CreateChild("skeldat_arrow");
+			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
+			a.node_id = n->GetID();
+		});
+		arrows.push_back(a);
+		host.sound("bow", m.x, m.y + 1.5f, m.z);
+		log_i(MODULE, "skeldat: a skeleton shoots at %s", cs(p.name));
+	}
+
+	sv_<Stack> loot(const Mob &m)
+	{
+		sv_<Stack> out;
+		if(m.kind == BOAR){
+			out.push_back(Stack("skeldat:meat_raw", 1 + world.rand() % 2));
+			return out;
+		}
+		const int bones = 1 + world.rand() % 2, shafts = world.rand() % 3;
+		if(bones)
+			out.push_back(Stack("skeldat:bone", bones));
+		if(shafts)
+			out.push_back(Stack("skeldat:arrow", shafts));
+		// The end game's part: only a deep skeleton has one
+		if(m.y < -32 && world.rnd() < 0.34f)
+			out.push_back(Stack("skeldat:skull"));
+		if(m.carry_coal >= 0){
+			out.push_back(Stack("skeldat:lantern"));
+			if(m.carry_coal > 0)
+				out.push_back(Stack("skeldat:coal", m.carry_coal));
+		}
+		return out;
+	}
+
+	// hp off a mob, by a player's hit or by the sun (by NOBODY); it dies at
+	// 0, and what it drops goes into the killer's inventory, what does not
+	// fit to the ground at the killer
+	static const size_t NOBODY = (size_t)-1;
+	// ground_drops: with no killer, its drops left on the ground
+	void damage(uint32_t key, int hp, size_t by, float bx, float bz,
+			bool ground_drops = false)
+	{
+		Mob &m = all[key];
+		m.hp -= hp;
+		m.hurt++;
+		if(m.kind == BOAR){
+			m.mode = FLEE;
+			m.mode_t = 5;
+			m.from_x = bx, m.from_z = bz;
+		}
+		if(m.hp > 0){
+			host.sound(m.kind == BOAR ? "boar_hurt" : "skeleton_hurt", m.x, m.y, m.z);
+			return;
+		}
+		ss_ list;
+		auto killer = players.find(by);
+		const sv_<Stack> dropped = loot(m);
+		for(const Stack &s : dropped)
+			list += (list.empty() ? "" : ", ") + s.str();
+		if(killer != players.end()){
+			for(const Stack &s : dropped)
+				host.give_or_drop(killer->second, s);
+			host.send_inventory(by, killer->second);
+		} else {
+			if(ground_drops)
+				for(const Stack &s : dropped)
+					drops.drop(s, m.x + world.rnd() - 0.5f, m.y + 0.5f, m.z + world.rnd() - 0.5f);
+			leave_lantern(m);
+		}
+		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops [%s]",
+				MOB_KIND[m.kind], key, m.x, m.y, m.z, cs(list));
+		host.sound(m.kind == BOAR ? "boar_death" : "skeleton_death", m.x, m.y, m.z);
+		if(m.node_id)
+			remove_node(m.node_id);
+		if(store)
+			store->remove("mob/"+itos(key));
+		all.erase(key);
+	}
+
+	// The nearest free ground to a mob within three columns, not its own:
+	// an air voxel on a walkable one, round the feet's height
+	bool marker_spot(voxelworld::Instance *w, const Mob &m, int out[3])
+	{
+		const int mx = (int)std::floor(m.x + 0.5f),
+				my = (int)std::floor(m.y + 0.5f),
+				mz = (int)std::floor(m.z + 0.5f);
+		for(int r = 1; r <= 3; r++)
+		for(int dz = -r; dz <= r; dz++)
+		for(int dx = -r; dx <= r; dx++){
+			if(std::max(std::abs(dx), std::abs(dz)) != r)
+				continue;
+			const int x = mx + dx, z = mz + dz;
+			for(int y = my + 1; y >= my - 2; y--){
+				if(world.wid(w, x, y, z) == ID_AIR && world.walkable(w, x, y - 1, z) &&
+						world.reaches_world(x, y, z)){
+					out[0] = x, out[1] = y, out[2] = z;
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	// The body after its light form ([SKELDAT_LIGHT_PRIMARY]): toward it
+	// at BODY_SPEED, a step up as a jump, falling; put on it when BODY_LAG
+	// off. It faces the player it fights, else the way it goes
+	void step_body(voxelworld::Instance *w, Mob &m, const Player *p, float dt)
+	{
+		const int h = MOB_HEIGHT[SKELETON];
+		const float dx = m.x - m.bx, dz = m.z - m.bz,
+				flat = std::sqrt(dx * dx + dz * dz);
+		// Behind on the ground; a fall to the floor under it is no lag
+		if(flat > BODY_LAG || std::fabs(m.y - m.by) > 3 * BODY_LAG){
+			m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
+			body_puts++;
+		}
+		else if(flat > 0.05f){
+			const float k = std::min(1.0f, BODY_SPEED * dt / flat);
+			const float nx = m.bx + dx * k, nz = m.bz + dz * k;
+			const Ground to = world.ground(w, nx, m.by, nz, h);
+			// Water is a wall to it ([SKELDAT_SKELETON_WATER])
+			if(to.found && !to.water && to.y <= m.by + 1.01f){
+				m.bx = nx, m.bz = nz;
+				if(to.y > m.by)
+					m.by = to.y, m.bvy = 0;
+			}
+			m.yaw = std::atan2(dx, dz);
+		}
+		const Ground under = world.ground(w, m.bx, m.by, m.bz, h);
+		if(under.found && m.by <= under.y + 0.001f)
+			m.bvy = 0, m.by = under.y;
+		else {
+			m.bvy -= GRAVITY * dt;
+			m.by += m.bvy * dt;
+			if(under.found)
+				m.by = std::max(m.by, under.y);
+		}
+		// Together and the body on its ground, the light form stands there
+		// too: one saved or stepped over a cave's mouth floats otherwise
+		if(flat <= 0.05f && under.found && m.bvy == 0)
+			m.y = m.by;
+		if(p && m.mode == FIGHT)
+			m.yaw = std::atan2(p->x - m.bx, p->z - m.bz);
+	}
+
+	void step_mobs(float dt)
+	{
+		// Wake what a player is near, put to sleep what none is
+		sv_<uint32_t> awake;
+		size_t full = 0;
+		for(auto &kv : all)
+			full += kv.second.node_id != 0;
+		for(auto &kv : all){
+			Mob &m = kv.second;
+			float d;
+			host.nearest(m.x, m.y, m.z, d);
+			// simplified: the first in key order past MAX_MOBS wait
+			if(!m.node_id && d < WAKE && full < MAX_MOBS){
+				wake(m);
+				full++;
+			}
+			else if(m.node_id && d > SLEEP){
+				remove_node(m.node_id);
+				log_v(MODULE, "skeldat: the %s (%u) sleeps", MOB_KIND[m.kind],
+						kv.first);
+			}
+			if(m.node_id)
+				awake.push_back(kv.first);
+		}
+		if(awake.empty())
+			return;
+		sv_<std::pair<uint32_t, int>> burnt;
+		sv_<uint32_t> drowned;
+		sv_<std::pair<uint32_t, size_t>> shots;
+		struct Mark { uint32_t key; int p[3]; ss_ seen; };
+		sv_<Mark> marks;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			for(uint32_t key : awake){
+				Mob &m = all[key];
+				const int h = MOB_HEIGHT[m.kind];
+				// Where the map is not loaded yet, it waits
+				const Ground here = world.ground(w, m.x, m.y, m.z, h);
+				if(!here.loaded)
+					continue;
+				// What it wants: a heading and a speed
+				m.mode_t -= dt;
+				float d;
+				size_t peer = 0;
+				const Player *p = host.nearest(m.x, m.y, m.z, d, &peer);
+				if(m.kind == SKELETON){
+					// The light form decides (step_light()); here the
+					// fight's sight and bow, and the body after it
+					if(p && d < 16){
+						// Its first sight of a player: a marker skull, one
+						// a game day ([SKELDAT_SKELETON_SIM])
+						if(m.mode != FIGHT && !growth.ended){
+							int at[3];
+							if(world.t / world.day_s - m.marker_day < 1.0 / growth.speed)
+								log_i(MODULE, "skeldat: a skeleton (%u) sees "
+										"%s, its marker placed today", key,
+										cs(p->name));
+							else if(marker_spot(w, m, at)){
+								marks.push_back({key, {at[0], at[1], at[2]},
+										p->name});
+								m.marker_day = world.t / world.day_s;
+							}
+						}
+						m.mode = FIGHT;
+						m.shoot_t -= dt;
+						if(m.shoot_t <= 0 && d < 14){
+							shots.push_back({key, peer});
+							m.shoot_t = 1.5f + world.rnd() * 1.5f;
+						}
+					} else if(m.mode == FIGHT)
+						m.mode = WANDER;
+					step_body(w, m, p, dt);
+					// [SKELDAT_SKELETON_WATER] Its body in water, the feet's
+					// voxel or the one over them: dead at once
+					const int bx = (int)std::floor(m.bx + 0.5f),
+							by = (int)std::floor(m.by + 0.5f),
+							bz = (int)std::floor(m.bz + 0.5f);
+					if(world.is_water(w, bx, by, bz) || world.is_water(w, bx, by + 1, bz)){
+						drowned.push_back(key);
+						continue;
+					}
+					// The sun burns it, unless bones are round its light
+					// form
+					if(here.sun >= 12){
+						m.burn_t += dt;
+						if(m.burn_t >= 1){
+							m.burn_t = 0;
+							if(world.sun_safe(w, m.x, m.y, m.z) == 0)
+								burnt.push_back({key, 2});
+						}
+					}
+					if(m.y < -1000)
+						burnt.push_back({key, 1000});
+					continue;
+				}
+				float move_yaw = m.yaw, speed = 0;
+				if(m.mode == FLEE && m.mode_t > 0){
+					m.yaw = move_yaw = std::atan2(m.x - m.from_x, m.z - m.from_z);
+					speed = MOB_SPEED[m.kind][1];
+				} else {
+					if(m.mode != WANDER || m.mode_t <= 0){
+						m.mode = WANDER;
+						m.mode_t = 3 + world.rnd() * 4;
+						m.speed = world.rnd() < 0.5f ? 0 : MOB_SPEED[m.kind][0];
+						m.yaw = world.rnd() * 2 * (float)M_PI;
+					}
+					move_yaw = m.yaw, speed = m.speed;
+				}
+				// Where it can go: a step up, or down to a fall; a wall or a
+				// drop past three turns it
+				const float nx = m.x + std::sin(move_yaw) * speed * dt,
+						nz = m.z + std::cos(move_yaw) * speed * dt;
+				Ground to;
+				const Ground *under = &here;
+				if(speed > 0){
+					to = world.ground(w, nx, m.y, nz, h);
+					if(to.found && to.y <= m.y + 1.01f){
+						m.x = nx, m.z = nz;
+						m.y = std::max(m.y, to.y);
+						under = &to;
+					} else if(m.mode == WANDER)
+						m.yaw = world.rnd() * 2 * (float)M_PI;
+				}
+				if(under->found){
+					if(m.y > under->y + 0.001f){
+						m.vy -= GRAVITY * dt;
+						m.y = std::max(under->y, m.y + m.vy * dt);
+					}
+					if(m.y <= under->y)
+						m.vy = 0;
+				} else {
+					m.vy -= GRAVITY * dt;
+					m.y += m.vy * dt;
+				}
+				if(m.y < -1000)
+					burnt.push_back({key, 1000});
+			}
+		});
+		for(uint32_t key : awake){
+			auto it = all.find(key);
+			pv::Vector3DInt32 at;
+			if(it != all.end() && it->second.kind == SKELETON &&
+					it->second.carry_coal < 0 &&
+					furnaces.lantern_at_hand(it->second.x, it->second.y, it->second.z, at))
+				take_lantern(key, it->second, at);
+		}
+		for(const Mark &k : marks){
+			world.set_node(k.p[0], k.p[1], k.p[2], world.marker);
+			log_i(MODULE, "skeldat: a skeleton (%u) places a marker skull at "
+					"%d,%d,%d on seeing %s", k.key, k.p[0], k.p[1], k.p[2],
+					cs(k.seen));
+		}
+		for(auto &s : shots){
+			auto m = all.find(s.first);
+			auto p = players.find(s.second);
+			if(m == all.end() || p == players.end())
+				continue;
+			// From the body
+			Mob b = m->second;
+			b.x = b.bx, b.y = b.by, b.z = b.bz;
+			shoot(b, p->second);
+		}
+		for(uint32_t key : drowned){
+			log_i(MODULE, "skeldat: the skeleton (%u) is in water", key);
+			Mob &m = all[key];
+			m.x = m.bx, m.y = m.by, m.z = m.bz;
+			damage(key, 1000, NOBODY, 0, 0, true);
+		}
+		for(auto &b : burnt){
+			if(!all.count(b.first))
+				continue;
+			if(b.second < 1000)
+				log_i(MODULE, "skeldat: the skeleton (%u) burns", b.first);
+			damage(b.first, b.second, NOBODY, 0, 0);
+		}
+		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
+			for(auto &kv : all){
+				Mob &m = kv.second;
+				Urho3D::Node *n = m.node_id ? scene->GetNode(m.node_id) : nullptr;
+				if(!n)
+					continue;
+				if(m.kind == SKELETON)
+					n->SetPosition(Urho3D::Vector3(m.bx, m.by, m.bz));
+				else
+					n->SetPosition(Urho3D::Vector3(m.x, m.y, m.z));
+				n->SetRotation(Urho3D::Quaternion(m.yaw * M_RADTODEG,
+						Urho3D::Vector3::UP));
+				if(m.hurt != m.hurt_sent){
+					n->SetVar(Urho3D::StringHash("skeldat_hurt"),
+							Urho3D::Variant(m.hurt));
+					m.hurt_sent = m.hurt;
+				}
+			}
+		});
+	}
+
+	// A light skeleton on a random column past SLEEP of every player: on
+	// one at FLOOD, its footprint picked by its flooded columns, or
+	// anywhere (on_bones false)
+	bool add_skeleton(bool on_bones)
+	{
+		const int S = skeldat::bones::SECTION;
+		int64_t total = 0;
+		for(int n : growth.flooded)
+			total += n;
+		if(on_bones && total == 0)
+			return false;
+		size_t i = world.rand() % world.footprints();
+		if(on_bones){
+			int64_t r = (int64_t)(world.rand() % (uint64_t)total);
+			for(i = 0; r >= growth.flooded[i]; i++)
+				r -= growth.flooded[i];
+		}
+		const int x = ((int)(i % (2 * world.half)) - world.half) * S + world.rand() % S,
+				z = ((int)(i / (2 * world.half)) - world.half) * S + world.rand() % S;
+		const long c = world.column(x, z);
+		if(c < 0 || world.top_y[c] == NO_GROUND ||
+				(on_bones && world.top_b[c] < skeldat::bones::FLOOD))
+			return false;
+		const float y = world.top_y[c] + 0.5f;
+		float d;
+		host.nearest((float)x, y, (float)z, d);
+		if(d < SLEEP)
+			return false;
+		Mob m;
+		m.kind = SKELETON;
+		m.x = (float)x, m.y = y, m.z = (float)z;
+		m.hp = MOB_HP[SKELETON];
+		m.yaw = world.rnd() * 2 * (float)M_PI;
+		m.light_t = world.rnd() * light_step;
+		all[next_mob++] = m;
+		return true;
+	}
+
+	// The nearest column to (x, z) within SEED_RANGE, not (x, z), whose
+	// top is ground with no bones and air above, inside the nine footprints
+	// round `fp`
+	// simplified: SEED_RANGE, not the whole nine footprints, for the cost
+	// of 2000 searches at sunset
+	bool clean_column(int x, int z, long fp, int &ox, int &oz)
+	{
+		const int w = 2 * world.half;
+		for(int r = 1; r <= SEED_RANGE; r++)
+		for(int dz = -r; dz <= r; dz++)
+		for(int dx = -r; dx <= r; dx += (std::abs(dz) == r ? 1 : 2 * r)){
+			const long c = world.column(x + dx, z + dz), f = world.footprint(x + dx, z + dz);
+			if(c < 0 || world.top_y[c] == NO_GROUND || world.top_b[c] != 0 ||
+					world.top_y[c] >= (world.y1 + 1) * skeldat::bones::SECTION - 1 ||
+					std::abs(f % w - fp % w) > 1 || std::abs(f / w - fp / w) > 1)
+				continue;
+			ox = x + dx, oz = z + dz;
+			return true;
+		}
+		return false;
+	}
+
+	// At sunrise and sunset each skeleton picks, of its footprint and the
+	// eight round it, the one with the most marker skulls: its own on a
+	// tie, a random one when all have none; at sunset its night's bone
+	// blocks too
+	void pick_footprints(bool sunset)
+	{
+		const int w = 2 * world.half;
+		size_t moving = 0, n = 0;
+		// What lures: the marker skulls, and a burning lantern as
+		// LANTERN_LURE of them
+		sv_<int> lure = markers;
+		for(auto &pair : furnaces.lanterns_by_footprint())
+			lure[pair.first] += LANTERN_LURE * (int)pair.second.size();
+		for(auto &kv : all){
+			Mob &m = kv.second;
+			if(m.kind != SKELETON)
+				continue;
+			n++;
+			const long own = world.footprint((int)std::floor(m.x + 0.5f),
+					(int)std::floor(m.z + 0.5f));
+			if(own < 0)
+				continue;
+			long best = own;
+			sv_<long> around;
+			for(int dz = -1; dz <= 1; dz++)
+			for(int dx = -1; dx <= 1; dx++){
+				const long fx = own % w + dx, fz = own / w + dz;
+				if(fx < 0 || fx >= w || fz < 0 || fz >= w)
+					continue;
+				around.push_back(fz * w + fx);
+				if(lure[fz * w + fx] > lure[best])
+					best = fz * w + fx;
+			}
+			if(lure[best] == 0)
+				best = around[world.rand() % around.size()];
+			m.goal_fp = (int)best;
+			moving += best != own;
+			m.quota = sunset ? (1 + world.rand() % NIGHT_BLOCKS) * growth.speed : 0;
+			m.seeding = false;
+		}
+		long most = 0;
+		for(size_t i = 0; i < world.footprints(); i++)
+			if(lure[i] > lure[most])
+				most = (long)i;
+		size_t there = 0;
+		for(auto &kv : all)
+			there += kv.second.kind == SKELETON && world.footprint(
+					(int)std::floor(kv.second.x + 0.5f),
+					(int)std::floor(kv.second.z + 0.5f)) == most;
+		log_i(MODULE, "skeldat: %s: %zu of %zu skeletons to another "
+				"footprint; the one with the most markers (%d, at %ld %ld) has "
+				"%zu; %zu bone blocks placed since", sunset ? "sunset" :
+				"sunrise", moving, n, lure[most], most % w - world.half,
+				most / w - world.half, there, night_blocks);
+		night_blocks = 0;
+	}
+
+	// Every light skeleton a column each light step, on the top map: at
+	// night to its next clean column and a bone block there, else to its
+	// footprint, else wandering inside it; on, or a new heading where the
+	// next column's top is not within one up and two down
+	// [SKELDAT_SURFACE_END] A skeleton's step at (x, z): a deep hole
+	// within 2 columns (bones.h's deep_hole(), on the column tops) gets a
+	// skull dropped into it in one of HOLE_ONE_IN, at most once a game day
+	// a hole; from the lowest rim's height, falling as a drop does
+	void drop_into_holes(int x, int z)
+	{
+		// Once in 1/speed of a day, each step's chance times the speed
+		const int day = (int)(world.t / world.day_s * growth.speed);
+		for(int dz = -2; dz <= 2; dz++)
+		for(int dx = -2; dx <= 2; dx++){
+			const long c = world.column(x + dx, z + dz);
+			if(c < 0 || world.top_y[c] == NO_GROUND || world.top_b[c] != 0)
+				continue;
+			int around[8], n = 0;
+			for(int bz = -1; bz <= 1; bz++)
+			for(int bx = -1; bx <= 1; bx++){
+				if(bx == 0 && bz == 0)
+					continue;
+				const long b = world.column(x + dx + bx, z + dz + bz);
+				around[n++] = b < 0 || world.top_y[b] == NO_GROUND ? NO_GROUND :
+						world.top_y[b];
+			}
+			if(!skeldat::bones::deep_hole(world.top_y[c], 0, around))
+				continue;
+			auto it = hole_day.find(c);
+			if((it != hole_day.end() && it->second == day) ||
+					world.rand() % skeldat::bones::HOLE_ONE_IN >= (uint32_t)growth.speed)
+				continue;
+			hole_day[c] = day;
+			int rim = around[0];
+			for(int v : around)
+				rim = std::min(rim, v);
+			drops.seed_skull((float)(x + dx), rim + 1.5f, (float)(z + dz));
+			log_i(MODULE, "skeldat: a skeleton drops a skull into the hole at "
+					"%d,%d,%d", x + dx, world.top_y[c], z + dz);
+		}
+	}
+
+	void step_light(float dt)
+	{
+		const int64_t t0 = interface::os::time_us();
+		const int S = skeldat::bones::SECTION;
+		const uint32_t block = world.id_of("skeldat:bone_block");
+		struct Block { int x, y, z; };
+		sv_<Block> blocks;
+		struct Take { uint32_t key; pv::Vector3DInt32 at; };
+		sv_<Take> takes;
+		const auto lanterns = furnaces.lanterns_by_footprint();
+		// The light form's next feet at (x, z): the column's top, or for
+		// one with a body the ground round its own height (a cave, an
+		// overhang), as the body walks; -1e9 for none
+		auto next_y = [&](const Mob &m, int x, int z){
+			if(m.node_id){
+				Ground g;
+				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+					g = world.ground(w, (float)x, m.y, (float)z, MOB_HEIGHT[SKELETON]);
+				});
+				// Water a wall ([SKELDAT_SKELETON_WATER]); the column tops
+				// have none, a water top being NO_GROUND
+				return g.found && !g.water ? g.y : -1e9f;
+			}
+			const long c = world.column(x, z);
+			return c < 0 || world.top_y[c] == NO_GROUND ? -1e9f :
+					world.top_y[c] + 0.5f;
+		};
+		for(auto &kv : all){
+			Mob &m = kv.second;
+			if(m.kind != SKELETON)
+				continue;
+			// Every skeleton is its light form ([SKELDAT_LIGHT_PRIMARY]);
+			// one with a body steps often enough for the body to walk
+			const float step = m.node_id ? std::min(NEAR_STEP, light_step) :
+					light_step;
+			m.light_t = std::min(m.light_t - dt, step);
+			if(m.light_t > 0)
+				continue;
+			m.light_t += step;
+			light_steps++;
+			const int mx = (int)std::floor(m.x + 0.5f),
+					mz = (int)std::floor(m.z + 0.5f);
+			if(!growth.ended)
+				drop_into_holes(mx, mz);
+			// Fighting: a bow's distance, between 3 and 9, that a sword's
+			// reach can still close
+			if(m.node_id && m.mode == FIGHT){
+				float d;
+				const Player *p = host.nearest(m.x, m.y, m.z, d);
+				if(!p || (d >= 3 && d <= 9))
+					continue;
+				m.yaw = std::atan2(p->x - m.x, p->z - m.z) +
+						(d < 3 ? (float)M_PI : 0);
+				const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
+						z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
+				const float y = next_y(m, x, z);
+				if(y <= m.y + 1.01f && y >= m.y - 2.01f)
+					m.x = (float)x, m.z = (float)z, m.y = y;
+				continue;
+			}
+			// With a body and nothing to do, it stands half the time, as
+			// a wandering skeleton did
+			if(m.node_id && m.goal_fp < 0 && m.quota <= 0 && world.rnd() < 0.5f)
+				continue;
+			const long own = world.footprint(mx, mz);
+			bool to = false;
+			int tx = 0, tz = 0;
+			// What it must stand next to, for a way built to it: -1e9 for
+			// a footprint's middle, which is no such target
+			int ty = -1000000000;
+			// A burning lantern in its footprint: to it, and taken
+			// Or on its way built to one, which may cross out of it
+			const bool home = own >= 0 && (own == m.goal_fp ||
+					(!m.route.empty() && m.goal_fp >= 0));
+			auto lit = lanterns.find(home ? m.goal_fp : own);
+			if(m.carry_coal < 0 && home && lit != lanterns.end()){
+				const pv::Vector3DInt32 &l = lit->second[0];
+				pv::Vector3DInt32 at;
+				if(furnaces.lantern_at_hand(m.x, m.y, m.z, at)){
+					takes.push_back({kv.first, at});
+					continue;
+				}
+				to = true, tx = l.getX(), tz = l.getZ(), ty = l.getY();
+			}
+			if(!to && m.quota > 0 && !growth.ended && own >= 0){
+				if(!m.seeding && !clean_column(mx, mz, own, m.seed_x,
+						m.seed_z))
+					m.quota = 0;
+				else
+					m.seeding = true;
+				if(m.seeding && std::abs(m.seed_x - mx) <= 1 &&
+						std::abs(m.seed_z - mz) <= 1 &&
+						(m.seed_x != mx || m.seed_z != mz)){
+					const long c = world.column(m.seed_x, m.seed_z);
+					if(world.top_y[c] != NO_GROUND && world.top_b[c] == 0){
+						blocks.push_back({m.seed_x, world.top_y[c] + 1, m.seed_z});
+						if(m.built)
+							log_i(MODULE, "skeldat: a skeleton (%u) places its "
+									"night's block at %d,%d,%d, by the way it "
+									"built", kv.first, m.seed_x, world.top_y[c] + 1,
+									m.seed_z);
+					}
+					m.built = false;
+					m.seeding = false;
+					m.quota--;
+				} else if(m.seeding){
+					to = true, tx = m.seed_x, tz = m.seed_z;
+					const long c = world.column(tx, tz);
+					if(world.top_y[c] != NO_GROUND)
+						ty = world.top_y[c] + 1;
+				}
+			}
+			if(!to || ty < -1000)
+				m.route.clear();
+			if(!m.route.empty()){
+				follow_route(kv.first, m);
+				continue;
+			}
+			if(!to && m.goal_fp >= 0 && own != m.goal_fp){
+				const int w = 2 * world.half;
+				to = true;
+				tx = (m.goal_fp % w - world.half) * S + S / 2;
+				tz = (m.goal_fp / w - world.half) * S + S / 2;
+			}
+			if(m.detour > 0)
+				m.detour--;
+			else if(to)
+				m.yaw = std::atan2((float)(tx - mx), (float)(tz - mz)) +
+						(world.rnd() - 0.5f) * 0.6f;
+			else if(world.rnd() < 0.2f)
+				m.yaw = world.rnd() * 2 * (float)M_PI;
+			const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
+					z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
+			const float y = next_y(m, x, z);
+			// Wandering, it keeps to its footprint
+			const bool stray = !to && m.goal_fp >= 0 && own == m.goal_fp &&
+					world.footprint(x, z) != m.goal_fp;
+			if(!stray && y <= m.y + 1.01f && y >= m.y - 2.01f)
+				m.x = (float)x, m.z = (float)z, m.y = y;
+			else if(to && ty > -1000 && world.t >= m.search_t &&
+					search_way(kv.first, m, vp::P(tx, ty, tz)))
+				m.detour = 0;
+			else {
+				m.yaw = world.rnd() * 2 * (float)M_PI;
+				if(to)
+					m.detour = 4 + world.rand() % 12;
+			}
+		}
+		light_us += interface::os::time_us() - t0;
+		for(const Block &b : blocks){
+			world.set_node(b.x, b.y, b.z, block, 0, skeldat::bones::MAX);
+			night_blocks++;
+		}
+		for(const Take &t : takes)
+			take_lantern(t.key, all[t.key], t.at);
+	}
+
+	// [SKELDAT_BONE_BRIDGES] A way for m to stand at goal (a feet voxel):
+	// a walking one, or one with bone blocks to build, its route up to the
+	// first of them. false for none, and it waits BUILD_WAIT to look again.
+	// A light form with no body walks the column tops, so under them is
+	// solid to it
+	bool search_way(uint32_t key, Mob &m, const vp::P &goal)
+	{
+		m.search_t = world.t + BUILD_WAIT;
+		const vp::P from((int)std::floor(m.x + 0.5f),
+				(int)std::floor(m.y + 1.0f), (int)std::floor(m.z + 0.5f));
+		if(std::abs(goal.x - from.x) > BUILD_RANGE ||
+				std::abs(goal.z - from.z) > BUILD_RANGE)
+			return false;
+		// The two and 4 round them, 12 under the lower and 8 over the higher
+		const int M = 4, DOWN = 12, UP = 8;
+		vp::Field f;
+		f.resize(vp::P(std::min(from.x, goal.x) - M,
+				std::min(from.y, goal.y) - DOWN, std::min(from.z, goal.z) - M),
+				std::abs(goal.x - from.x) + 2 * M + 1,
+				std::abs(goal.y - from.y) + DOWN + UP + 1,
+				std::abs(goal.z - from.z) + 2 * M + 1);
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			world.fill_cells(w, f);
+		});
+		// Water is no way for a skeleton ([SKELDAT_SKELETON_WATER])
+		for(uint8_t &c : f.cells)
+			if(c == vp::CLIMB)
+				c = vp::LIQUID;
+		// One with no body walks the column tops: solid under them
+		if(!m.node_id)
+			for(int z = f.origin.z; z < f.origin.z + f.d; z++)
+			for(int x = f.origin.x; x < f.origin.x + f.w; x++){
+				const long c = world.column(x, z);
+				if(c < 0 || world.top_y[c] == NO_GROUND)
+					continue;
+				for(int y = f.origin.y; y < world.top_y[c]; y++)
+					f.set(x, y, z, vp::SOLID);
+			}
+		// The target (a lantern) taken as room: it is beside it a step
+		// before, where it acts
+		f.set(goal.x, goal.y, goal.z, vp::OPEN);
+		f.set(goal.x, goal.y + 1, goal.z, vp::OPEN);
+		vp::Rules r;
+		r.body_height = MOB_HEIGHT[SKELETON];
+		r.step_up = 1;
+		r.max_fall = 2;
+		r.build_cost = BUILD_COST;
+		r.max_expanded = BUILD_CAP;
+		const vp::Result res = vp::find(f, from, goal, r);
+		if(!res.found || res.path.size() < 2)
+			return false;
+		m.route.assign(res.path.begin() + 1, res.path.end());
+		m.build = !res.blocks.empty();
+		if(m.build){
+			m.build_at = res.blocks[0];
+			const vp::P over(m.build_at.x, m.build_at.y + 1, m.build_at.z);
+			auto it = std::find(m.route.begin(), m.route.end(), over);
+			if(it == m.route.end())
+				return m.route.clear(), false;
+			m.route.erase(it + 1, m.route.end());
+		}
+		log_i(MODULE, "skeldat: a skeleton (%u) finds a way to %d,%d,%d: "
+				"%zu steps, %zu bone blocks", key, goal.x, goal.y, goal.z,
+				res.path.size() - 1, res.blocks.size());
+		return true;
+	}
+
+	// A step along m's route; at its block's cell, the block built (the
+	// night's, or a try at the lantern) and the route done
+	void follow_route(uint32_t key, Mob &m)
+	{
+		const vp::P n = m.route.front();
+		if(m.build && m.route.size() == 1){
+			const vp::P &b = m.build_at;
+			const uint32_t id = world.id_at(b.x, b.y, b.z);
+			const skeldat::NodeDef *def = world.node_of(id);
+			if(id == ID_AIR || (def && def->shape == skeldat::LIQUID)){
+				world.set_node(b.x, b.y, b.z, world.id_of("skeldat:bone_block"), 0,
+						skeldat::bones::MAX);
+				night_blocks++;
+				m.built = true;
+				if(m.seeding && m.quota > 0)
+					m.quota--;
+				log_i(MODULE, "skeldat: a skeleton (%u) builds a bone block "
+						"at %d,%d,%d", key, b.x, b.y, b.z);
+			}
+			m.route.clear();
+			m.search_t = 0;
+			return;
+		}
+		const int mx = (int)std::floor(m.x + 0.5f),
+				mz = (int)std::floor(m.z + 0.5f);
+		float y = -1e9f;
+		if(m.node_id){
+			Ground g;
+			voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+				g = world.ground(w, (float)n.x, m.y, (float)n.z, MOB_HEIGHT[SKELETON]);
+			});
+			if(g.found && !g.water)
+				y = g.y;
+		} else {
+			const long c = world.column(n.x, n.z);
+			if(c >= 0 && world.top_y[c] != NO_GROUND)
+				y = world.top_y[c] + 0.5f;
+		}
+		// The world changed under it, or a column top that is not the way
+		if(std::abs(n.x - mx) > 1 || std::abs(n.z - mz) > 1 ||
+				std::fabs(y - (n.y - 0.5f)) > 0.01f){
+			m.route.clear();
+			return;
+		}
+		m.yaw = std::atan2((float)(n.x - mx), (float)(n.z - mz));
+		m.x = (float)n.x, m.z = (float)n.z, m.y = y;
+		m.route.erase(m.route.begin());
+	}
+
+	// A game hour: the count toward its target, added at night on bone
+	// columns, let die in the morning on clean ground
+	// The bodiless skeletons within FAR_DRAW of each player, to be drawn
+	// ([SKELDAT_FAR_SKELETONS]): "x y z yaw" a line, the place rounded to
+	// the voxel and the yaw to a sixteenth of a turn; sent when it differs
+	void send_far()
+	{
+		static const float FAR_DRAW = 160;
+		for(auto &pair : players){
+			Player &pl = pair.second;
+			if(!pl.placed)
+				continue;
+			std::ostringstream os;
+			size_t n = 0;
+			for(auto &kv : all){
+				const Mob &m = kv.second;
+				if(m.kind != SKELETON || m.node_id ||
+						std::fabs(m.x - pl.x) > FAR_DRAW ||
+						std::fabs(m.z - pl.z) > FAR_DRAW ||
+						std::hypot(m.x - pl.x, m.z - pl.z) > FAR_DRAW)
+					continue;
+				const int yaw = ((int)std::lround(m.yaw / (2 * M_PI) * 16) %
+						16 + 16) % 16;
+				os<<(int)std::floor(m.x + 0.5f)<<" "<<m.y<<" "
+						<<(int)std::floor(m.z + 0.5f)<<" "<<yaw<<"\n";
+				n++;
+			}
+			const ss_ s = os.str();
+			if(s == pl.far_sent)
+				continue;
+			pl.far_sent = s;
+			network::send(world.server, pair.first, "skeldat:far", s);
+			if(far_report)
+				log_i(MODULE, "skeldat: %zu far skeletons to %s", n,
+						cs(pl.name));
+		}
+	}
+
+	// The skeletons' count and its target by the flooded share f
+	size_t skeleton_target(size_t &n, double &f)
+	{
+		n = 0;
+		for(auto &kv : all)
+			n += kv.second.kind == SKELETON;
+		int64_t flooded = 0;
+		for(int c : growth.flooded)
+			flooded += c;
+		const double columns = (double)world.footprints() *
+				skeldat::bones::SECTION * skeldat::bones::SECTION;
+		f = flooded / columns;
+		return (size_t)std::lround((SKELETONS_MIN +
+				(SKELETONS_MAX - SKELETONS_MIN) * f) * columns / (1024. * 1024.));
+	}
+
+	// A world's skeletons there from the start ([SKELDAT_START_SKELETONS]):
+	// once a world is in, the first time (a new world, or one made before
+	// this), the count up to its target at once, on bone columns (anywhere
+	// in a world with none); no player is placed yet, so none is too near
+	void populate()
+	{
+		std::string v;
+		if(!store || store->get("populated", v))
+			return;
+		size_t n;
+		double f;
+		const size_t target = skeleton_target(n, f);
+		const bool any = std::any_of(growth.flooded.begin(), growth.flooded.end(),
+				[](int c){ return c > 0; });
+		size_t added = 0;
+		const size_t want = target > n ? target - n : 0;
+		for(size_t t = 0; t < 8 * want && added < want; t++)
+			added += add_skeleton(any);
+		store->set("populated", "1");
+		log_i(MODULE, "skeldat: populated: %zu skeletons added, %zu in all, "
+				"the target %zu", added, n + added, target);
+	}
+
+	void step_population()
+	{
+		size_t n;
+		double f;
+		const size_t target = skeleton_target(n, f);
+		const size_t k = 1 + (n > target ? n - target : target - n) / 10;
+		size_t added = 0, died = 0;
+		const bool night = world.day < 0.25 || world.day >= 0.75,
+				morning = world.day >= 0.25 && world.day < 0.4;
+		{
+			if(night && n < target){
+				const size_t want = std::min(k, target - n);
+				// On bones; anywhere in a world with none
+				const bool any = std::any_of(growth.flooded.begin(),
+						growth.flooded.end(), [](int c){ return c > 0; });
+				for(size_t t = 0; t < 8 * want && added < want; t++)
+					added += add_skeleton(any);
+			}
+			if(morning && n > target){
+				const size_t want = std::min(k, n - target);
+				for(auto it = all.begin(); it != all.end() &&
+						died < want;){
+					const Mob &m = it->second;
+					const long c = world.column((int)std::floor(m.x + 0.5f),
+							(int)std::floor(m.z + 0.5f));
+					// By the sun's rule from its voxels; where they are not
+					// loaded, the column top's bones.
+					// simplified: unloaded, a bone block or skull beside it
+					// does not count
+					int safe = -1;
+					if(m.kind == SKELETON && !m.node_id && c >= 0)
+						voxelworld::access(world.server, world.scene,
+								[&](voxelworld::Instance *w){
+							safe = world.sun_safe(w, m.x, m.y, m.z);
+						});
+					if(safe < 0 && c >= 0)
+						safe = world.top_b[c] >= skeldat::bones::FLOOD;
+					if(m.kind != SKELETON || m.node_id || c < 0 || safe){
+						++it;
+						continue;
+					}
+					if(store)
+						store->remove("mob/"+itos(it->first));
+					leave_lantern(it->second);
+					it = all.erase(it);
+					died++;
+				}
+			}
+		}
+		log_i(MODULE, "skeldat: %zu skeletons, the target %zu (%.3f of the "
+				"columns flooded); %zu added, %zu let die", n + added - died,
+				target, f, added, died);
+	}
+
+	// Two points a tick on each flying arrow, the middle and the end: at
+	// 18 voxels a second it goes 0.6 a tick, so a point every 0.3
+	void step_arrows(float dt)
+	{
+		pick_stuck();
+		if(arrows.empty())
+			return;
+		sv_<char> solid;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			for(Arrow &a : arrows){
+				if(a.stuck)
+					continue;
+				for(float f : {0.5f, 1.0f}){
+					const float vy = a.vy - ARROW_GRAVITY * dt;
+					solid.push_back(world.walkable(w,
+							(int)std::floor(a.x + a.vx * dt * f + 0.5f),
+							(int)std::floor(a.y + vy * dt * f + 0.5f),
+							(int)std::floor(a.z + a.vz * dt * f + 0.5f)));
+				}
+			}
+		});
+		size_t j = 0;
+		sv_<Arrow> kept;
+		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; };
+		sv_<Hit> hits;
+		for(Arrow &a : arrows){
+			a.age += dt;
+			bool gone = !a.stuck && a.age > 8;
+			// [SKELDAT_BOW] Stuck: a living player near takes it if it fits;
+			// after ARROW_STUCK it is a voxel, or gone where there is no air
+			if(a.stuck && (picked(a.x, a.y, a.z) || a.age > ARROW_STUCK)){
+				if(a.age > ARROW_STUCK)
+					stick_voxel(a);
+				remove_node(a.node_id);
+				continue;
+			}
+			const bool was_stuck = a.stuck;
+			const size_t base = j;
+			if(!a.stuck){
+				j += 2;
+				a.vy -= ARROW_GRAVITY * dt;
+			}
+			for(int k = 0; !gone && !a.stuck && k < 2; k++){
+				const float f = k ? 1.0f : 0.5f;
+				const float x = a.x + a.vx * dt * f, y = a.y + a.vy * dt * f,
+						z = a.z + a.vz * dt * f;
+				// A player's hits the mobs, as a hit by the player
+				if(a.by_player){
+					for(auto &kv : all){
+						const Mob &m = kv.second;
+						const bool sk = m.kind == SKELETON;
+						const float mx = sk ? m.bx : m.x, my = sk ? m.by : m.y,
+								mz = sk ? m.bz : m.z;
+						if(m.node_id && std::hypot(mx - x, mz - z) < 0.5f &&
+								y > my - 0.1f && y < my + MOB_HEIGHT[m.kind] + 0.1f){
+							const float v = std::sqrt(a.vx * a.vx + a.vy * a.vy +
+									a.vz * a.vz);
+							hits.push_back({kv.first, std::max(1, (int)std::lround(
+									BOW_DAMAGE * v)), a.peer, x, z});
+							host.sound("arrow_hit", x, y, z);
+							gone = true;
+							break;
+						}
+					}
+				}
+				for(auto &pair : players){
+					Player &pl = pair.second;
+					if(!a.by_player && pl.placed && pl.hp > 0 &&
+							std::hypot(pl.x - x, pl.z - z) < 0.45f &&
+							y > pl.y - 0.1f && y < pl.y + 1.85f){
+						host.hurt(pair.first, pl, 2 + world.rand() % 3,
+								"is hit by an arrow");
+						host.sound("arrow_hit", x, y, z);
+						gone = true;
+						break;
+					}
+				}
+				if(gone)
+					break;
+				if(solid[base + k]){
+					a.stuck = true;
+					a.age = 0;
+					a.sx = (int)std::floor(x + 0.5f), a.sy = (int)std::floor(y + 0.5f),
+							a.sz = (int)std::floor(z + 0.5f);
+					a.fx = (int)std::floor(a.x + 0.5f), a.fy = (int)std::floor(a.y + 0.5f),
+							a.fz = (int)std::floor(a.z + 0.5f);
+					log_i(MODULE, "skeldat: an arrow sticks at %.1f,%.1f,%.1f",
+							a.x, a.y, a.z);
+					host.sound("arrow_land", a.x, a.y, a.z);
+				} else
+					a.x = x, a.y = y, a.z = z;
+			}
+			if(gone){
+				remove_node(a.node_id);
+				continue;
+			}
+			if(!was_stuck){
+				main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
+					if(Urho3D::Node *n = scene->GetNode(a.node_id)){
+						n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
+						if(!a.stuck){
+							Urho3D::Quaternion r;
+							r.FromLookRotation(Urho3D::Vector3(a.vx, a.vy, a.vz));
+							n->SetRotation(r);
+						}
+					}
+				});
+			}
+			kept.push_back(a);
+		}
+		arrows.swap(kept);
+		for(const Hit &h : hits){
+			if(!all.count(h.key))
+				continue;
+			auto pl = players.find(h.peer);
+			log_i(MODULE, "skeldat: an arrow from %s hits the %s (%u) for %d",
+					pl != players.end() ? cs(pl->second.name) : "?",
+					MOB_KIND[all[h.key].kind], h.key, h.dmg);
+			damage(h.key, h.dmg, h.peer, h.x, h.z);
+		}
+	}
+
+	// [SKELDAT_BOW] A living player within ARROW_REACH of (x, y, z) with
+	// room takes an arrow: true when one did
+	bool picked(float x, float y, float z)
+	{
+		for(auto &pair : players){
+			Player &pl = pair.second;
+			if(!pl.placed || pl.hp <= 0 || std::hypot(pl.x - x, pl.z - z) >=
+					ARROW_REACH || y < pl.y - 1 || y > pl.y + 2.5f)
+				continue;
+			if(!world.game.add(pl.main, Stack("skeldat:arrow")).empty())
+				continue;
+			host.send_inventory(pair.first, pl);
+			host.sound("pickup", x, y, z);
+			log_i(MODULE, "skeldat: %s picks up an arrow at %.1f,%.1f,%.1f",
+					cs(pl.name), x, y, z);
+			return true;
+		}
+		return false;
+	}
+
+	// A stuck arrow kept for good: a stuck_arrow voxel where it sticks
+	// out, turned to the face it went into (wallmounted's param2 toward
+	// that voxel); none where that is not air
+	void stick_voxel(const Arrow &a)
+	{
+		int d[3] = {a.sx - a.fx, a.sy - a.fy, a.sz - a.fz};
+		int axis = 0;
+		for(int i = 1; i < 3; i++)
+			if(std::abs(d[i]) > std::abs(d[axis]))
+				axis = i;
+		if(d[axis] == 0 || world.id_at(a.fx, a.fy, a.fz) != ID_AIR)
+			return;
+		// 0 +y, 1 -y, 2 +x, 3 -x, 4 +z, 5 -z
+		const uint32_t param = axis == 1 ? (d[1] > 0 ? 0 : 1) :
+				axis == 0 ? (d[0] > 0 ? 2 : 3) : (d[2] > 0 ? 4 : 5);
+		world.set_node(a.fx, a.fy, a.fz, world.stuck_id, param);
+		log_i(MODULE, "skeldat: a stuck arrow kept at %d,%d,%d, facing %u",
+				a.fx, a.fy, a.fz, param);
+	}
+
+	// The stuck_arrow voxels near a living player, picked up as arrows
+	void pick_stuck()
+	{
+		if(stuck.empty() || players.empty())
+			return;
+		sv_<ss_> taken;
+		for(const ss_ &k : stuck){
+			int x, y, z;
+			if(Furnaces::parse_pos(k, x, y, z) && picked((float)x, (float)y, (float)z))
+				taken.push_back(k);
+		}
+		for(const ss_ &k : taken){
+			int x, y, z;
+			Furnaces::parse_pos(k, x, y, z);
+			world.set_node(x, y, z, ID_AIR);
+		}
+	}
+
+	// A skeleton takes the lantern at `at`: out of the world, put out, its
+	// coal with it
+	void take_lantern(uint32_t key, Mob &m, const pv::Vector3DInt32 &at)
+	{
+		if(m.carry_coal >= 0)
+			return;
+		const int coal = furnaces.take_lantern(at);
+		if(coal < 0)
+			return;
+		m.carry_coal = coal;
+		log_i(MODULE, "skeldat: a skeleton (%u) takes the lantern at %s, %d "
+				"coal in it", key, cs(pos_key(at.getX(), at.getY(), at.getZ())),
+				m.carry_coal);
+	}
+
+	// A skeleton dead with no one to take what it had: its lantern left
+	// where it died, unlit, with its coal
+	void leave_lantern(Mob &m)
+	{
+		if(m.carry_coal < 0)
+			return;
+		furnaces.leave_lantern(m.x, m.y, m.z, m.carry_coal);
+		m.carry_coal = -1;
+	}
+};
+// vim: set noet ts=4 sw=4:
