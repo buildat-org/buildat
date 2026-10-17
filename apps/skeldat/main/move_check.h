@@ -123,10 +123,13 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	}
 	// A voxel's centre is at its integer coordinates (player.lua rounds x
 	// and z the same way); the feet's y rounds down onto the ground, which
-	// settle() lifts off
-	const P a0((int)std::floor(fx + 0.5f), (int)std::floor(fy),
+	// settle() lifts off. The board rides a surface mixed between column
+	// tops, its feet up to half a voxel into a step's upper column: read
+	// half a voxel higher
+	const float lift = board.on ? 0.5f : 0;
+	const P a0((int)std::floor(fx + 0.5f), (int)std::floor(fy + lift),
 			(int)std::floor(fz + 0.5f));
-	const P b0((int)std::floor(tx + 0.5f), (int)std::floor(ty),
+	const P b0((int)std::floor(tx + 0.5f), (int)std::floor(ty + lift),
 			(int)std::floor(tz + 0.5f));
 	const int r = (int)std::ceil(reach) + 1;
 	const int y0 = std::min(a0.y, b0.y) - DOWN, y1 = std::max(a0.y, b0.y) + 3;
@@ -321,6 +324,14 @@ int main()
 	assert(!check(flat, 0, 0, 0, 30, 0, 0, 1, false, bd).ok);
 	// Walking would have been pulled back
 	assert(!check(flat, 0, 0, 0, 20, 0, 0, 1, false).ok);
+	// Off a platform's edge (solid under 26 to x -37, under 25 at -36) as
+	// the board's mixed surface rides it, the feet half a voxel into the
+	// edge column: check.sh 24's course, once pulled back "in a wall"
+	auto edge = world([](int x, int y, int){
+		return y < (x <= -37 ? 26 : x == -36 ? 25 : 14) ? SOLID : OPEN; });
+	Board slow = bd;
+	slow.v0 = 4;
+	assert(check(edge, -40, 25.5f, 0, -36.6f, 24.9f, 0, 1, false, slow).ok);
 	// Onto a step of 2, not of 3
 	assert(check(step2, 0, 0, 0, 6, 2, 0, 1, false, bd).ok);
 	auto step3 = world([](int x, int y, int){
