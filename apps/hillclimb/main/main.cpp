@@ -16,7 +16,7 @@
 // is then made again in the same world. The parameters the server starts
 // with: BUILDAT_HILLCLIMB_SEED, _STEEP (degrees), _LENGTH (the slope's
 // run, m), _LATITUDE (degrees), _DAY (1..365), _TIME (hours, solar) and
-// _PAYLOAD (kg).
+// _PAYLOAD (kg); _FEATURES=0, no pits or rocks.
 //
 // For the check, with no client: BUILDAT_HILLCLIMB_DRIVE, steps of
 // "<seconds>:<keys>" from the car's start, each held until the next --
@@ -194,6 +194,8 @@ struct Module: public interface::Module
 		m_params.seed = (uint32_t)env_or("BUILDAT_HILLCLIMB_SEED", 1);
 		m_params.steep_deg = env_or("BUILDAT_HILLCLIMB_STEEP", 29);
 		m_params.length_m = env_or("BUILDAT_HILLCLIMB_LENGTH", 50);
+		// For the car's checks: a hill with no pits or rocks
+		m_params.features = env_or("BUILDAT_HILLCLIMB_FEATURES", 1) != 0;
 		m_latitude = env_or("BUILDAT_HILLCLIMB_LATITUDE", 60);
 		m_day = env_or("BUILDAT_HILLCLIMB_DAY", 172);
 		m_time = env_or("BUILDAT_HILLCLIMB_TIME", 14);
@@ -706,11 +708,14 @@ struct Module: public interface::Module
 	}
 
 	// The ranking's keys: the parameter set and the payload, then the time
-	// in milliseconds, zero-padded so the store's order is the ranking's
+	// in milliseconds, zero-padded so the store's order is the ranking's.
+	// v2 ([HC_PITS_ROCKS], [HC_POWER]): a hill with pits and rocks, a car
+	// of twice the power; the times before are kept under the old keys,
+	// not shown
 	ss_ ranking_prefix() const
 	{
 		char buf[128];
-		snprintf(buf, sizeof buf, "seed%u/steep%d/length%d/sand/payload%d/",
+		snprintf(buf, sizeof buf, "v2/seed%u/steep%d/length%d/sand/payload%d/",
 				m_params.seed, (int)m_params.steep_deg, (int)m_params.length_m,
 				(int)m_payload);
 		return buf;
@@ -899,6 +904,7 @@ struct Module: public interface::Module
 		m_pending_params.seed = (uint32_t)seed;
 		m_pending_params.steep_deg = (float)steep;
 		m_pending_params.length_m = (float)length;
+		m_pending_params.features = m_params.features;
 		m_pending_payload = (float)payload;
 		m_pending_look[0] = lat;
 		m_pending_look[1] = day;

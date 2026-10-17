@@ -19,9 +19,14 @@
 // (stones 2 to 3 voxels across) 1.5 m deep, then a fill nobody sees.
 // The slope's angle is the middle's; its ends ease in and out over 2 m,
 // so the car does not meet a kink at either pad.
+// [HC_PITS_ROCKS] On the slope, about one feature each 6 m: pits, bowls
+// in the sand at its angle of repose, and rocks poking up from it, each
+// left out where it would leave a cross-section less than 3 m free.
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 namespace hill {
 
@@ -35,6 +40,7 @@ struct Params
 	uint32_t seed = 1;
 	float steep_deg = 22; // the middle's slope
 	float length_m = 50;  // the slope's run along Z
+	bool features = true; // pits and rocks ([HC_PITS_ROCKS]); off for a check
 	// simplified: sand with pebbles is the only terrain; rocky, muddy and
 	// vegetated are later ([HILLCLIMB] 5)
 };
@@ -55,12 +61,25 @@ struct Hill
 	float k = 0;                       // the middle's rise per voxel
 	float rise = 0;
 
+	// [HC_PITS_ROCKS] A pit or a rock, in voxels: its centre (x, z, and a
+	// rock's y; a voxel's centre at +0.5, as a pebble's) and radius, and a
+	// pit's depth
+	enum Kind { PIT, ROCK };
+	struct Feature { Kind kind; float x, y, z, r, depth; };
+	std::vector<Feature> features;
+	static const int FEATURE_EVERY = 6 * U; // one each, on average
+	static const int FREE_W = 3 * U;        // kept free across the track
+	static const int TOP_CLEAR = 4 * U;     // none this near the top pad
+	static constexpr float REPOSE = 0.67f;  // tan 34 degrees, sand's
+
 	Hill(const Params &params): p(params)
 	{
 		run = (int)std::lround(p.length_m * U);
 		k = std::tan(p.steep_deg * PI / 180);
 		// Each eased end rises half of what a straight one would
 		rise = k * (run - EASE);
+		if(p.features)
+			place_features();
 	}
 
 	int size_x() const { return 2 * BANK_W + TRACK_W; }
@@ -112,8 +131,91 @@ struct Hill
 		float b = at(ix, iz + 1) + (at(ix + 1, iz + 1) - at(ix, iz + 1)) * tx;
 		return a + (b - a) * tz;
 	}
+	// The widest free run across the track at row z, voxels
+	int free_width(const std::vector<Feature> &fs, int z) const
+	{
+		std::vector<std::pair<float, float>> blocked;
+		for(const Feature &f : fs){
+			float dz = z + 0.5f - f.z;
+			if(dz * dz < f.r * f.r){
+				float h = std::sqrt(f.r * f.r - dz * dz);
+				blocked.push_back({f.x - h, f.x + h});
+			}
+		}
+		std::sort(blocked.begin(), blocked.end());
+		float at = BANK_W, best = 0;
+		for(auto &b : blocked){
+			best = std::max(best, b.first - at);
+			at = std::max(at, b.second);
+		}
+		best = std::max(best, (float)(BANK_W + TRACK_W) - at);
+		return (int)std::floor(best);
+	}
+	// The features from the seed: a slot each FEATURE_EVERY along the
+	// slope (off the pads and the eased ends, TOP_CLEAR from the top), a
+	// pit or a rock at random in it, left out where it would touch
+	// another or close a row to under FREE_W
+	void place_features()
+	{
+		const float lo = PAD + EASE, hi = top_z0() - TOP_CLEAR;
+		const int n = (int)((hi - lo) / FEATURE_EVERY);
+		for(int i = 0; i < n; i++){
+			Feature f;
+			f.kind = unit(i, 0, 0, 101) < 0.5f ? PIT : ROCK;
+			// A pit 1 to 2.5 m across and 0.3 to 0.7 m deep; a rock 0.4 to
+			// 0.9 m in radius
+			f.r = f.kind == PIT ? (0.5f + 0.75f * unit(i, 1, 0, 101)) * U :
+					(0.4f + 0.5f * unit(i, 1, 0, 101)) * U;
+			f.depth = (0.3f + 0.4f * unit(i, 2, 0, 101)) * U;
+			f.z = lo + f.r + (i + unit(i, 3, 0, 101)) * (hi - lo - 2 * f.r) / n;
+			f.x = BANK_W + f.r + unit(i, 4, 0, 101) * (TRACK_W - 2 * f.r);
+			f.y = 0;
+			bool ok = f.z + f.r <= hi;
+			for(const Feature &g : features){
+				float dx = f.x - g.x, dz = f.z - g.z;
+				ok = ok && dx * dx + dz * dz > (f.r + g.r + U) * (f.r + g.r + U);
+			}
+			std::vector<Feature> with = features;
+			with.push_back(f);
+			for(int z = (int)(f.z - f.r); ok && z <= (int)(f.z + f.r); z++)
+				ok = free_width(with, z) >= FREE_W;
+			if(!ok)
+				continue;
+			if(f.kind == ROCK){
+				// A third to a half of it over the sand
+				float above = (2.0f / 3 + 1.0f / 3 * unit(i, 5, 0, 101)) * f.r;
+				f.y = surface((int)f.x, (int)f.z) + 1 + above - f.r;
+			}
+			features.push_back(f);
+		}
+	}
+	// How far the pits lower the surface at (x, z): a bowl at the sand's
+	// angle of repose, flat at its depth
+	float pit_depth(float x, float z) const
+	{
+		float d = 0;
+		for(const Feature &f : features){
+			if(f.kind != PIT)
+				continue;
+			float dx = x - f.x, dz = z - f.z, r = std::sqrt(dx * dx + dz * dz);
+			if(r < f.r)
+				d = std::max(d, std::fmin(f.depth, (f.r - r) * REPOSE));
+		}
+		return d;
+	}
+	const Feature *rock_at(int x, int y, int z) const
+	{
+		for(const Feature &f : features){
+			float qx = x + 0.5f - f.x, qy = y + 0.5f - f.y, qz = z + 0.5f - f.z;
+			if(f.kind == ROCK && qx * qx + qy * qy + qz * qz <= f.r * f.r)
+				return &f;
+		}
+		return nullptr;
+	}
+
 	// The track's surface: the top voxel's y at (x, z). The pads are flat;
-	// the slope undulates by up to BUMP, faded in from its ends
+	// the slope undulates by up to BUMP, faded in from its ends, and dips
+	// into the pits
 	int surface(int x, int z) const
 	{
 		float h = BASE + profile(z + 0.5f);
@@ -122,15 +224,25 @@ struct Hill
 		float v = (top_z0() - z - 0.5f) / (float)EASE;
 		w *= v <= 0 ? 0 : v >= 1 ? 1 : v;
 		h += w * BUMP * (2 * noise(x, z, 3 * U, 1) - 1);
+		h -= pit_depth(x + 0.5f, z + 0.5f);
 		return (int)std::floor(h);
 	}
 	// A pebble: in a 4-voxel cell, a stone of radius 1..1.6 voxels about a
 	// point in it, one cell in five. pebble_of() says which: its centre in
 	// voxel coordinates (a voxel's centre is its integer position) and its
 	// radius, for the ground to loosen it whole ([HILLCLIMB] 4).
+	// A rock ([HC_PITS_ROCKS]) is one too, whole: the ground loosens it by
+	// its bed, which a big one's weight holds.
 	bool pebble_of(int x, int y, int z, float &ox, float &oy, float &oz,
 			float &radius) const
 	{
+		if(const Feature *f = rock_at(x, y, z)){
+			ox = f->x - 0.5f;
+			oy = f->y - 0.5f;
+			oz = f->z - 0.5f;
+			radius = f->r;
+			return true;
+		}
 		const int C = 4;
 		int cx = (int)std::floor(x / (float)C), cy = (int)std::floor(y / (float)C),
 				cz = (int)std::floor(z / (float)C);
@@ -170,7 +282,7 @@ struct Hill
 		if(bank)
 			return y <= s + BANK_H ? BANK : AIR;
 		if(y > s)
-			return AIR;
+			return rock_at(x, y, z) ? STONE : AIR;
 		if(y <= s - SHELL)
 			return FILL;
 		return pebble(x, y, z) ? STONE : SAND;
@@ -182,9 +294,23 @@ struct Hill
 #ifdef HILL_TEST
 #include <cassert>
 #include <cstdio>
-int main()
+#include <cstdlib>
+int main(int argc, char **argv)
 {
 	using namespace hill;
+	// "hill_test <seed> <steep> <length>": that hill's features, in metres
+	// (x across from the left bank's outside, z up from the bottom)
+	if(argc == 4){
+		Params fp;
+		fp.seed = (uint32_t)atoi(argv[1]);
+		fp.steep_deg = (float)atof(argv[2]);
+		fp.length_m = (float)atof(argv[3]);
+		Hill h(fp);
+		for(const Hill::Feature &f : h.features)
+			printf("%s %.2f %.2f %.2f\n", f.kind == Hill::PIT ? "pit" : "rock",
+					f.x / U, f.z / U, f.r / U);
+		return 0;
+	}
 	Params p;
 	Hill a(p), b(p);
 	// The same seed, the same hill; another seed, another
@@ -225,7 +351,7 @@ int main()
 	for(int z = Hill::BANK_W; z < a.size_z() - Hill::BANK_W; z++)
 	for(int x = Hill::BANK_W; x < Hill::BANK_W + Hill::TRACK_W; x++){
 		int s = a.surface(x, z);
-		assert(a.at(x, s + 1, z) == AIR);
+		assert(a.at(x, s + 1, z) == AIR || a.rock_at(x, s + 1, z));
 		assert(a.at(x, s, z) != AIR && a.at(x, s, z) != FILL);
 		for(int y = s - Hill::SHELL + 1; y <= s; y++){
 			sand += a.at(x, y, z) == SAND;
@@ -243,9 +369,45 @@ int main()
 	// The car's start (main.cpp: the pad's middle) clear of the bottom's
 	// bank: the rear tyre's back 1.4 + 0.4 m behind it
 	assert(Hill::PAD / 2 - (int)std::ceil(1.8f * U) >= Hill::BANK_W);
+	// [HC_PITS_ROCKS] Over 50 seeds at the default 29 degrees: a row of
+	// the track never under 3 m free; nothing on the pads, the eased ends
+	// or the last 4 m; a pit's dip 0.3 to 0.7 m; a third to a half of a
+	// rock over the sand; a rock is a stone the ground loosens whole
+	int pits = 0, rocks = 0;
+	for(uint32_t seed = 1; seed <= 50; seed++){
+		Params fp;
+		fp.seed = seed;
+		fp.steep_deg = 29;
+		Hill h(fp);
+		Hill same(fp);
+		assert(same.features.size() == h.features.size());
+		for(int z = 0; z < h.size_z(); z++)
+			assert(h.free_width(h.features, z) >= Hill::FREE_W);
+		for(const Hill::Feature &f : h.features){
+			assert(f.z - f.r >= Hill::PAD + Hill::EASE);
+			assert(f.z + f.r <= h.top_z0() - Hill::TOP_CLEAR);
+			assert(f.x - f.r >= Hill::BANK_W &&
+					f.x + f.r <= Hill::BANK_W + Hill::TRACK_W);
+			if(f.kind == Hill::PIT){
+				pits++;
+				float dip = h.pit_depth(f.x, f.z);
+				assert(dip >= 0.3f * U - 0.01f && dip <= 0.7f * U + 0.01f);
+			} else {
+				rocks++;
+				float top = f.y + f.r, sand = h.surface((int)f.x, (int)f.z) + 1;
+				assert(top - sand >= 2 * f.r / 3 - 0.01f && top - sand <= f.r + 0.01f);
+				int cx = (int)f.x, cz = (int)f.z;
+				assert(h.at(cx, (int)(f.y + f.r - 1), cz) == STONE);
+				float ox, oy, oz, r;
+				assert(h.pebble_of(cx, (int)f.y, cz, ox, oy, oz, r) && r == f.r);
+			}
+		}
+	}
+	assert(pits > 50 && rocks > 50);
 	printf("hill.h: self test passed; %dx%dx%d voxels, rise %.1f m, "
-			"%.1f%% stones in the shell\n", a.size_x(), a.size_y(), a.size_z(),
-			a.rise / U, 100.0f * stone / (sand + stone));
+			"%.1f%% stones in the shell; 50 hills, %d pits and %d rocks\n",
+			a.size_x(), a.size_y(), a.size_z(), a.rise / U,
+			100.0f * stone / (sand + stone), pits, rocks);
 	return 0;
 }
 #endif

@@ -36,7 +36,9 @@ cd "$here/Build"
 drive()
 {
 	local name=$1; shift
-	env "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
+	# The car's own drives on a hill with no pits or rocks (the rock's
+	# below sets them on again)
+	env BUILDAT_HILLCLIMB_FEATURES=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
 		-C "$t/$name/c" -P $((29700 + RANDOM % 300)) -l 3 > "$t/$name.log" 2>&1
 }
 # On the flat past the hill's start, facing away: each gear's top speed,
@@ -52,6 +54,14 @@ drive climb BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 31:S2 \
 # its wheels spinning in place dig in and loosen stones that roll
 drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 	BUILDAT_HILLCLIMB_DRIVE="0:1 1:W1 2:KW1 26:S1 34:Q" &
+# [HC_PITS_ROCKS] Seed 6 at 29 degrees has a rock at x 5.26 z 9.74 m,
+# 0.74 m in radius, and nothing else below it near these lines
+# ("hill_test 6 29 50"): from the bottom pad in second with the left
+# wheels on its line, and on a line 3 m to its left
+drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
+	BUILDAT_HILLCLIMB_START="6.21 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
+drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
+	BUILDAT_HILLCLIMB_START="2.1 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
 wait
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
 # The default hill ([HC_DEFAULTS])
@@ -67,7 +77,7 @@ def lines(name):
                 r"shaft=(\S+) springs=(\S+),(\S+),(\S+),(\S+) slip=(\d+)", l)
         if m:
             g = m.groups()
-            out.append(dict(t=float(g[0]), y=float(g[2]), z=float(g[3]),
+            out.append(dict(t=float(g[0]), x=float(g[1]), y=float(g[2]), z=float(g[3]),
                 v=float(g[4]), shaft=float(g[5]),
                 springs=[float(x) for x in g[6:10]], slip=g[10]))
     if not out:
@@ -80,6 +90,18 @@ def want(ok, what):
     print("  %s %s" % ("ok  " if ok else "FAIL", what))
     if not ok: bad.append(what)
 flat, climb, stall = lines("flat"), lines("climb"), lines("stall")
+# [HC_PITS_ROCKS] The rock at z 9.7 stops the car or turns it aside;
+# beside it the car goes on straight past it
+# (the line beside is clear only so far: further up it meets a pit)
+rock, beside = lines("rock"), lines("beside")
+r_top = max(l["z"] for l in rock)
+b_top = max(l["z"] for l in beside)
+r_dx = max(abs(l["x"] - rock[0]["x"]) for l in rock)
+b_dx = max(abs(l["x"] - beside[0]["x"]) for l in beside if l["z"] <= 13)
+print("  into the rock: up to z %.1f, x off by %.2f; beside it: up to z %.1f, "
+        "x off by %.2f by z 13" % (r_top, r_dx, b_top, b_dx))
+want(r_top < 11 or r_dx > 0.5, "a rock stops the car or turns it aside")
+want(b_top > 13 and b_dx < 0.5, "beside the rock the car goes on past it")
 # Settled on its springs, still: the sag is the weight over the spring
 # (2000 kg / 4 at 60 kN/m is 82 mm), and a second later the same
 s1, s2 = at(flat, 1.5)["springs"], at(flat, 2.5)["springs"]
@@ -101,13 +123,13 @@ for f in fins:
     print("    finish %s s on %s rank %s; ranking%s" % f)
 want(len(fins) == 3, "three runs timed: %d" % len(fins))
 if len(fins) == 3:
-    k22 = "seed1/steep22/length50/sand/payload0/"
+    k22 = "v2/seed1/steep22/length50/sand/payload0/"
     t1, t2 = float(fins[0][0]), float(fins[1][0])
     want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
         "second gear's time, then fourth's faster, under the hill's key")
     want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
         "the second run first in the ranking, the first beside it")
-    want(fins[2][1] == "seed1/steep15/length30/sand/payload0/" and
+    want(fins[2][1] == "v2/seed1/steep15/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
 want("hillclimb: the hill, seed 1, 15 degrees, 30 m long" in log, "the hill made again from the pick")
 spin = [l for l in stall if 22 <= l["t"] <= 25]
