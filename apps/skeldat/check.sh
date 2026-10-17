@@ -1167,7 +1167,8 @@ clacks=$(grep -ac "skeldat: the board's clack at" "$c1")
 [ "$flights" -ge 1 ] && [ "$clacks" -ge "$flights" ] ||
 	fail "the landings' clacks: $clacks for $flights flights ($c1)"
 echo "the board: $clacks clacks, $flights flights logged"
-grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*$" "$t/board2.log" ||
+# [SKELDAT_SPLASH_TAKES] its onset from the walk's speed into it
+grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*, onset [0-9.]* s$" "$t/board2.log" ||
 	fail "client2's splash ($t/board2.log)"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 	fail "client2 did not see client1 on a board ($t/board2.log)"

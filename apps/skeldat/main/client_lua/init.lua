@@ -1650,30 +1650,43 @@ do
 	end
 end
 -- [SKELDAT_BOARD_WATER] The splash on entering water, one-shots: the
--- player's own, and another's at its body within 32 (its source's range)
+-- player's own, and another's at its body within 32 (its source's range);
+-- rendered at each entry, its onset from the speed ([SKELDAT_SPLASH_TAKES])
 local splash = {node = scene:CreateChild("splash"), n = 0}
-do
-	local made = board_sound.splashes(buildat.synth)
-	for _, kind in ipairs({"soft", "hard"}) do
-		splash[kind] = {}
-		for v = 1, 4 do
-			splash[kind][v] = board_sound.to_sound(magic, made[kind][v])
-		end
-	end
-	splash.own = splash.node:CreateComponent("SoundSource")
-	splash.own.soundType = magic.SOUND_EFFECT
-end
+splash.own = splash.node:CreateComponent("SoundSource")
+splash.own.soundType = magic.SOUND_EFFECT
 -- source: the own (nil) or a SoundSource3D; who: for the log
 function play_splash(speed, source, who)
 	local gain, hard = board_sound.splash_gain(speed,
 			player.movement.speed_walk)
 	splash.n = splash.n % 4 + 1
+	local ramp = board_sound.splash_ramp(speed)
 	local src = source or splash.own
 	src.gain = gain
-	src:Play(splash[hard and "hard" or "soft"][splash.n])
-	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f%s", who,
-			speed, gain, hard and ", hard" or ""))
+	src:Play(board_sound.to_sound(magic, board_sound.splash(buildat.synth,
+			board_sound.SPLASH_TAKE, splash.n, ramp, hard)))
+	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f, onset "
+			.. "%.2f s%s", who, speed, gain, ramp, hard and ", hard" or ""))
 end
+-- "event skeldat_splash_takes": every take at 1, 3 and 10 a second, soft
+-- and hard, into the client's exports as WAVs, for the user's ear
+-- ([SKELDAT_SPLASH_TAKES]; nothing played)
+magic.SubscribeToEvent("command_seq:skeldat_splash_takes", function()
+	for _, take in ipairs(board_sound.SPLASH_TAKES) do
+		for _, speed in ipairs({1, 3, 10}) do
+			for _, hard in ipairs({false, true}) do
+				local name = string.format("%s_%d_%s.wav", take, speed,
+						hard and "hard" or "soft")
+				local path, err = buildat.save_file(name, board_sound.wav(
+						board_sound.splash(buildat.synth, take, 1,
+						board_sound.splash_ramp(speed), hard)))
+				log:info("skeldat: splash take " .. name .. ": " ..
+						tostring(path or err))
+			end
+		end
+	end
+	log:info("skeldat: splash takes saved")
+end)
 local function update_rolls(b)
 	local own = roll.own
 	if b then
