@@ -254,6 +254,50 @@ return function(game, declare_keys)
 		end}
 	end
 
+	-- [SKELDAT_INTRO] The premise and the ways to fight back: the
+	-- server's skeldat:intro (a new player's first entry, or How to
+	-- play...), its days left in it
+	local INTRO = {
+		"Your score is how many days you hold out.",
+		"Lanterns (iron and bones, filled with coal) stop the bones growing "
+				.. "around them and slowly push them back. Skeletons will try "
+				.. "to steal them.",
+		"Skeletons burn in daylight away from the bones, and die in water. "
+				.. "Killed, they drop bones and arrows.",
+		"Marker skulls: a skeleton that sees you leaves a red skull. At dawn "
+				.. "and dusk skeletons gather where the skulls are. Dig one and "
+				.. "place it to lure them where you want.",
+		"The bow (three sticks and three bones; arrows: a bone over a "
+				.. "stick): hold the left button to draw, release to shoot.",
+		"Walking fast down a step you ride a skateboard: left and right "
+				.. "steer, back brakes, jump jumps (once more in the air), "
+				.. "sneak lies flat.",
+	}
+	local function show_intro(days)
+		close()
+		root = uistack.main:push({desc = "intro"})
+		local menu = ui_utils.vertical_menu(root, {min_width = 460})
+		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		local function line(text)
+			local t = menu.window:CreateChild("Text")
+			t:SetStyleAuto()
+			t:SetFixedWidth(440)
+			t:SetWordwrap(true)
+			t:SetText(text)
+		end
+		line("In about " .. days .. " game days the world will be consumed "
+				.. "by bones.")
+		for _, text in ipairs(INTRO) do
+			line(text)
+		end
+		menu:add("Close", close, true)
+		game.hold(close, menu.window)
+		log:info("pause: how to play shown, " .. days .. " days")
+	end
+	buildat.sub_packet("skeldat:intro", function(data)
+		show_intro(data)
+	end)
+
 	function open()
 		if root then
 			return
@@ -268,6 +312,7 @@ return function(game, declare_keys)
 			menu:add("Admin...", open_admin)
 		end
 		menu:add("Settings...", settings)
+		menu:add("How to play...", function() game.send("intro", "") end)
 		menu:add("Leave the game", function() buildat.leave() end)
 		game.hold(close, menu.window)
 		log:info("pause: the menu shown")

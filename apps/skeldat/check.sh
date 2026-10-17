@@ -105,6 +105,8 @@ client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CHECK_PIDS+=($CLIENT)
 }
 placed='wait_log 300000 skeldat: placed at'
+# The opening dialog holds a new player's keys: off but in its own run (28)
+export BUILDAT_SKELDAT_INTRO=0
 
 # 1. Two players
 cat > "$t/a1.cmds" <<EOF
@@ -1209,6 +1211,38 @@ client speed3 "$t/speed3.cmds"
 wait $CLIENT || fail "no can't-keep-up line in the chat ($t/speed3.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 echo "behind: $(grep -a "can't keep up" "$t/srv30_3.log" | head -1 | sed 's/.*skeldat: //')"
+# 28. The opening dialog ([SKELDAT_INTRO]): a new player in a new 128
+# world at 1x gets it, with the days measured for a 128 world (28,
+# less the minutes gone); joining again it does not come, and
+# the pause menu's How to play... shows it
+intro_server()
+{
+	BUILDAT_SKELDAT_INTRO=1 BUILDAT_SKELDAT_WORLD=intro BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="1 0 0" \
+		start_server "$t/srv31_$1.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv31" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv31_$1.log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+printf '%s\n' "$placed" "wait_log 30000 pause: how to play shown" "delay 500" \
+	"screenshot $t/intro.png" "keypress Escape" "wait_log 5000 pause: the menu closed" \
+	"delay 500" quit > "$t/intro1.cmds"
+intro_server 1
+client intro1 "$t/intro1.cmds"
+wait $CLIENT || fail "no opening dialog for a new player ($t/intro1.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+days=$(grep -a "skeldat : pause: how to play shown" "$t/intro1.log" | head -1 | sed 's/.*shown, \([0-9]*\) days/\1/')
+[ "$days" = 27 ] || [ "$days" = 28 ] || fail "the days at a 128 world's start: $days ($t/intro1.log)"
+printf '%s\n' "$placed" "delay 5000" "keypress Escape" "wait_log 5000 pause: the menu shown" \
+	"delay 500" 'click Button "How to play..."' "wait_log 5000 pause: how to play shown" \
+	"delay 500" quit > "$t/intro2.cmds"
+intro_server 2
+client intro2 "$t/intro2.cmds"
+wait $CLIENT || fail "no How to play from the pause menu ($t/intro2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+[ $(grep -ac "skeldat : pause: how to play shown" "$t/intro2.log") = 1 ] ||
+	fail "the dialog came again on the second join ($t/intro2.log)"
+echo "the opening dialog: $days days at a new 128 world's start"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1216,5 +1250,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog"
 # vim: set noet ts=4 sw=4:

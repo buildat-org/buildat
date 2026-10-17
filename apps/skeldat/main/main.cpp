@@ -56,6 +56,7 @@
 #include <cmath>
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <atomic>
 #include <functional>
 #include <map>
@@ -144,6 +145,9 @@ struct Player
 	bool skeleton = false;
 	// No damage of any kind, the admin's toggle ([SKELDAT_INVULNERABLE])
 	bool invulnerable = false;
+	// [SKELDAT_INTRO] New to the world (no save of it): the opening dialog
+	// once it is in; not with BUILDAT_SKELDAT_INTRO=0 (the checks' drives)
+	bool intro = false;
 	// The last skeldat:far sent ([SKELDAT_FAR_SKELETONS]); none yet is not
 	// the empty list
 	ss_ far_sent = "-";
@@ -576,6 +580,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	// the high score, and nothing changes in it after. What is under the
 	// tops does not count.
 	std::map<ss_, int64_t> m_bare;
+	// The total of m_bare once a game day, the last few: (day, count)
+	std::deque<std::pair<double, int64_t>> m_bare_days;
 	std::set<ss_> m_recount;
 	bool m_ended = false;
 	double m_end_days = 0;
@@ -708,7 +714,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
-				"bow"})
+				"bow", "intro"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
@@ -1806,6 +1812,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		ss_ v;
 		if(m_save->store("skeldat_players")->get(name, v))
 			pl.load(v);
+		else
+			pl.intro = !getenv("BUILDAT_SKELDAT_INTRO") ||
+					ss_(getenv("BUILDAT_SKELDAT_INTRO")) != "0";
 		network::send(m_server, peer, "core:run_script",
 				"buildat.run_script_file(\"main/init.lua\")");
 		network::send(m_server, peer, "skeldat:items", items_text());
@@ -1829,6 +1838,11 @@ struct Module: public interface::Module, public luanti_session::Game
 	void add_player(const ss_ &name, size_t peer)
 	{
 		log_i(MODULE, "skeldat: %s is in the world", cs(name));
+		auto it = m_players.find(peer);
+		if(it != m_players.end() && it->second.intro){
+			it->second.intro = false;
+			send_intro(peer);
+		}
 	}
 	void remove_player(const ss_ &name){}
 	// accounts' admin is update_role()'s
@@ -2268,6 +2282,15 @@ struct Module: public interface::Module, public luanti_session::Game
 		int64_t total = 0;
 		for(auto &pair : m_bare)
 			total += pair.second;
+		// A game day's count, the last four kept ([SKELDAT_INTRO])
+		const double day = m_world_t / m_day_s;
+		if(m_bare_days.empty() || day - m_bare_days.back().first >= 1){
+			m_bare_days.push_back({day, total});
+			if(m_bare_days.size() > 4)
+				m_bare_days.pop_front();
+			log_i(MODULE, "skeldat: day %.1f, %lld columns bare", day,
+					(long long)total);
+		}
 		if(total > 0)
 			return;
 		m_ended = true;
@@ -2325,6 +2348,34 @@ struct Module: public interface::Module, public luanti_session::Game
 		network::send(m_server, peer, "skeldat:world", os.str());
 	}
 
+	// [SKELDAT_INTRO] The days left, "about": from the uncovered columns'
+	// rate over the last few game days (m_bare_days), else the days a
+	// world of this size takes at 1x, over the speed, less those gone; 0
+	// once ended. The days measured free-running with no player
+	// (2026-10-17): 128 at seeds 2-5 17.5, 36.1, 39.2, 19.9; 256 at seeds 2
+	// and 3 24.5, 68.0; 512 and 1024 on that trend (x1.6 a doubling)
+	// simplified: the history is not saved, a restarted world starts it
+	// again from the constant
+	void send_intro(size_t peer)
+	{
+		const double gone = m_world_t / m_day_s;
+		double left;
+		if(m_ended){
+			left = 0;
+		} else if(m_bare_days.size() >= 3 && m_bare_days.front().second >
+				m_bare_days.back().second){
+			const auto &a = m_bare_days.front(), &b = m_bare_days.back();
+			left = b.second * (b.first - a.first) / (a.second - b.second);
+		} else {
+			const int width = m_half * 2 * skeldat::bones::SECTION;
+			const double days = width <= 128 ? 28 : width <= 256 ? 46 :
+					width <= 512 ? 75 : 120;
+			left = days / m_speed - gone;
+		}
+		const int n = m_ended ? 0 : std::max(1, (int)std::lround(left));
+		network::send(m_server, peer, "skeldat:intro", itos(n));
+	}
+
 	void send_end(size_t peer)
 	{
 		if(m_ended)
@@ -2364,6 +2415,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(what == "respawn"){
 			if(pl.hp <= 0)
 				respawn(peer, pl);
+			return;
+		}
+		if(what == "intro"){
+			send_intro(peer);
 			return;
 		}
 		if(pl.hp <= 0)
