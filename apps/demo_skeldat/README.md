@@ -36,6 +36,13 @@ module under it.
   of it), a dig or a kill drops what does not fit, and a death drops half
   the player's stacks at random. A drop lies a game day, kept with the
   world, and a living player within 1.5 voxels takes what fits.
+- The bow (three sticks as the arc, three bones down the side): held,
+  the left button draws it over a second and the release shoots an
+  arrow from the inventory at a speed by the draw (the server times it);
+  it digs nothing. An arrow is a bone over a stick (4). A stuck arrow,
+  anyone's, is picked up by walking near it, and after a minute is kept
+  as a voxel, picked up the same way or dug. The held item is drawn in
+  the hand; the bow as a mesh that bends with the draw.
 - An admin (accounts' admin, or the launcher's own client) has fly (K),
   fast (J) and noclip (H), and Admin... in the pause menu: each player's
   inventory, an item given or a stack taken, and the player made
@@ -106,6 +113,7 @@ renamed, except:
   `skull_front.png` in red;
 - `lantern.png`, `lantern_active.png` and `lantern_top.png`: drawn for
   skeldat;
+- `stuck_arrow.png`: drawn for skeldat in `arrow_entity.png`'s colours;
 - `crack_0.png` to `crack_9.png`: the ten frames of `crack_anylength.png`.
 
 By file:
@@ -117,6 +125,7 @@ By file:
 - `bone_block_side.png`: mcl_core_bone_block_side.png
 - `bone_block_top.png`: mcl_core_bone_block_top.png
 - `bone.png`: mcl_mobitems_bone.png
+- `bow.png`: mcl_bows_bow.png
 - `bubble.png`: hudbars_icon_breath.png
 - `coal_ore.png`: mcl_core_coal_ore.png
 - `coal.png`: default_coal_lump.png

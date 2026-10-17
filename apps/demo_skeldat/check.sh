@@ -73,6 +73,8 @@ g++ -O2 -std=c++14 -I"$here/src" "$here/util/voxel_path_test.cpp" \
 	"$here/src/impl/voxel_path.cpp" -o "$t/path" && path=$("$t/path") ||
 	fail "the pathfinder's test: $path"
 echo "$path" | tail -1
+luajit -e "assert(dofile('$m/client_lua/hand.lua').self_test())" ||
+	fail "hand.lua's self test (the bow's shape)"
 
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
 # The spawn at (0, 290): clean ground, the bones zone from z 300 on
@@ -941,6 +943,60 @@ grep -aq "skeleton ($3) builds" "$log25" && grep -aq "a skeleton ($3) takes the 
 grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 	! grep -aq "skeleton ($4) builds" "$log25" ||
 	fail "a block built where a walking way is ($log25)"
+# 23. The bow ([SKELDAT_BOW]): the launcher's client, invulnerable, a
+# bow and 6 arrows, a skeleton 6 ahead at midnight. A full draw (1.2 s)
+# shoots at the bow's speed, a half (0.5 s) at half, a tap nothing; two
+# more full ones and the skeleton is dead. Held looking down the bow digs
+# nothing: the arrow shot into the ground at its feet is picked up. Five
+# presses far off: two or more shots, then with none left (the
+# skeleton's misses picked up too) a press draws nothing. Left 60 s, a far
+# one is a stuck-arrow voxel; the server started again, the player put on
+# it picks it up. Frames of the hand at rest, half and full drawn.
+log26="$t/srv26.log"
+shot()
+{
+	printf '%s\n' "mouse_down left" "delay $1" ${2:+"screenshot $2"} \
+		"mouse_up left" "delay 1500"
+}
+{ echo "$placed"; toggle; echo "look 0 0"; echo "delay 1000"
+	echo "screenshot $t/bow_rest.png"
+	shot 1200 "$t/bow_full.png"; shot 450 "$t/bow_half.png"; shot 50
+	shot 1200; shot 1200
+	echo "look 0 -60"; shot 2500
+	echo "look 90 0"; shot 1200; shot 1200; shot 1200; shot 1200; shot 1200
+	echo "delay 66000"; echo quit; } > "$t/bow1.cmds"
+printf '%s\n' "$placed" "delay 3000" quit > "$t/bow2.cmds"
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=bow BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:bow 1 1; give skeldat:arrow 6 1; skeleton 0 6 marked" || echo "place ${kept:-0 0}")" \
+		start_server "$t/srv26_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv26" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		fail "the server ($t/srv26_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	client bow$n "$t/bow$n.cmds"
+	wait $CLIENT || fail "the bow's drive $n ($t/bow$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	cat "$t/srv26_$n.log" >> "$log26"
+	[ $n = 1 ] && kept=$(grep -a "a stuck arrow kept at" "$t/srv26_1.log" | head -1 |
+		sed 's/.*kept at \([-0-9]*\),[-0-9]*,\([-0-9]*\),.*/\1 \2/')
+done
+s1="$t/srv26_1.log"
+speeds=$(grep -a "client1 shoots an arrow at" "$s1" | sed 's/.* at \([0-9.]*\) .*/\1/' | tr '\n' ' ')
+echo "the bow: speeds $speeds"
+set -- $speeds
+draws=$(grep -ac "client1 draws the bow" "$s1")
+[ $# -ge 7 ] && [ $draws = $(($# + 1)) ] && [ $draws -lt 11 ] &&
+	awk -v f="$1" -v h="$2" 'BEGIN { exit !(f >= 29 && h >= 12 && h <= 18) }' &&
+	[ $(grep -ac "client1 lets the bow go undrawn" "$s1") = 1 ] ||
+	fail "the bow's draws: $speeds ($s1)"
+grep -aq "the skeleton (1) dies" "$s1" && grep -aq "an arrow from client1 hits the skeleton (1)" "$s1" ||
+	fail "no arrow killed the skeleton ($s1)"
+! grep -aq "client1 digs" "$s1" || fail "the bow dug ($s1)"
+grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not picked up ($s1)"
+[ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
+	fail "no stuck-arrow voxel, or not picked up after the restart: ${kept:-none} ($t/srv26_2.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -948,5 +1004,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow"
 # vim: set noet ts=4 sw=4:

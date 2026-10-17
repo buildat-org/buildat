@@ -354,6 +354,14 @@ end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
+-- The wielded item before the eye ([SKELDAT_BOW]): hand.lua, the bow's
+-- draw the left button's while it holds a bow and an arrow is there; the
+-- server times the shot itself
+local hand = load("main/hand.lua").new(camera_node, load("main/wield.lua"),
+		game)
+local BOW_DRAW = 1 -- main.cpp's
+local bow = {t = nil, light = nil, light_t = 0}
+
 -- A placing (the join, a respawn) until the chunks within 2 of the camera
 -- are drawn, said once ([SKELDAT_RESPAWN_LOAD]): when the first of them
 -- came, and the last; checked ten times a second
@@ -884,9 +892,19 @@ local function wielded()
 	return st and st.name or ""
 end
 
+local function has_arrow()
+	for i = 1, 36 do
+		local st = game.parse_stack(game.inv.main[i])
+		if st and st.name == "skeldat:arrow" then
+			return true
+		end
+	end
+	return false
+end
+
 local function step_dig(dt)
-	if not pointed or held or not magic.input:GetMouseButtonDown(
-			magic.MOUSEB_LEFT) then
+	if not pointed or held or wielded() == "skeldat:bow" or
+			not magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		dig = nil
 		return
 	end
@@ -1121,6 +1139,7 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 	elseif k == key.noclip then
 		toggle("noclip", "Noclip (while flying)", "Noclip off")
 	elseif k >= magic.KEY_1 and k <= magic.KEY_9 then
+		bow.t = nil
 		game.wield = k - magic.KEY_1 + 1
 		send_wield()
 		game.changed()
@@ -1148,9 +1167,29 @@ magic.SubscribeToEvent("MouseButtonDown", function(_, d)
 	end
 	if b == magic.MOUSEB_RIGHT then
 		on_place()
+	elseif b == magic.MOUSEB_LEFT and wielded() == "skeldat:bow" then
+		-- The bow digs and punches nothing; a press with no arrow is
+		-- nothing
+		if has_arrow() and game.stats.hp > 0 then
+			bow.t = 0
+			game.send("bow", "start")
+			log:info("skeldat: the bow drawn")
+		end
 	elseif b == magic.MOUSEB_LEFT and pointed_mob then
 		mobs.punch(pointed_mob)
 	end
+end)
+
+magic.SubscribeToEvent("MouseButtonUp", function(_, d)
+	if d:GetInt("Button") ~= magic.MOUSEB_LEFT or not bow.t then
+		return
+	end
+	local dir = camera_node.worldDirection
+	game.send("bow", string.format("release %.4f %.4f %.4f", dir.x, dir.y,
+			dir.z))
+	log:info(string.format("skeldat: the bow released at %.2f",
+			math.min(1, bow.t / BOW_DRAW)))
+	bow.t = nil
 end)
 
 magic.SubscribeToEvent("MouseWheel", function(_, d)
@@ -1158,6 +1197,7 @@ magic.SubscribeToEvent("MouseWheel", function(_, d)
 		return
 	end
 	local w = d:GetInt("Wheel")
+	bow.t = nil
 	game.wield = (game.wield - 1 - (w > 0 and 1 or w < 0 and -1 or 0)) % 9 + 1
 	send_wield()
 	game.changed()
@@ -1307,6 +1347,32 @@ magic.SubscribeToEvent("Update", function(_, d)
 		set_crack(nil)
 	end
 	update_steps()
+	-- The hand: the light where the player stands, four times a second;
+	-- the draw narrows the view by up to a tenth
+	if bow.t and (wielded() ~= "skeldat:bow" or held or dead) then
+		bow.t = nil
+	end
+	if bow.t then
+		bow.t = bow.t + dt
+	end
+	local draw = bow.t and math.min(1, bow.t / BOW_DRAW) or -1
+	bow.light_t = bow.light_t - dt
+	if bow.light_t <= 0 and game.light_units then
+		bow.light_t = 0.25
+		local e = camera_node.worldPosition
+		local v = voxelworld.get_static_voxel(buildat.Vector3(math.floor(e.x + 0.5),
+				math.floor(e.y + 0.5), math.floor(e.z + 0.5)))
+		if v then
+			local reg = voxelworld.get_voxel_registry()
+			bow.light = {game.sky_light.object_light(game.light_units,
+					reg:light_sky_of(v) / 15, reg:light_lamp_of(v) / 15)}
+		end
+	end
+	local item = wielded()
+	hand:update(hud_on and not dead and item ~= "" and item or nil, draw,
+			has_arrow(), bow.light)
+	local ease = draw > 0 and draw * draw * (3 - 2 * draw) or 0
+	camera.fov = magic.fov_for(72) * (1 - 0.1 * ease)
 	ui.draw_hud()
 end)
 

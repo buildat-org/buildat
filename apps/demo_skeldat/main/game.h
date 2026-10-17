@@ -56,6 +56,10 @@ struct NodeDef
 	// A node box in sixteenths, six numbers a box
 	sv_<float> boxes;
 	bool facedir = false;
+	// Turned to the face it is on, six ways (Luanti's wallmounted: param2
+	// 0 +y, 1 -y, 2 +x, 3 -x, 4 +z, 5 -z), the box made for the floor
+	bool wallmounted = false;
+	bool walkable = true;
 	int light_source = 0;
 	bool falling = false;
 };
@@ -343,6 +347,21 @@ inline Game make_game()
 			t = "main/marker_" + t.substr(5);
 		g.items[n.name].image = "main/marker_skull_front.png";
 	}
+	// An arrow stuck for good ([SKELDAT_BOW]): the shaft out of the face
+	// it went into, the head buried, two vanes; walked through, dug or
+	// picked up as an arrow (main.cpp), not an item
+	{
+		NodeDef &n = node("stuck_arrow", "Arrow", {"stuck_arrow"},
+				{{"dig_immediate", 3}}, "skeldat:arrow");
+		n.shape = NODEBOX;
+		n.wallmounted = true;
+		n.walkable = false;
+		n.boxes = {-0.5f, -8, -0.5f, 0.5f, 2, 0.5f, -2, 0, -0.25f, 2, 2, 0.25f,
+				-0.25f, 0, -2, 0.25f, 2, 2};
+		for(float &v : n.boxes)
+			v /= 16;
+		g.items.erase(n.name);
+	}
 	{
 		NodeDef &n = node("torch", "Torch", {"torch"},
 				{{"snappy", 3}, {"dig_immediate", 3}});
@@ -399,6 +418,13 @@ inline Game make_game()
 	item("diamond", "Diamond");
 	item("bone", "Bone");
 	item("arrow", "Arrow");
+	// [SKELDAT_BOW] A bow: no caps, so it digs as the hand would, which
+	// main.cpp refuses; worn by its shots
+	{
+		ItemDef &d = item("bow", "Bow");
+		d.tool = true;
+		d.stack_max = 1;
+	}
 	item("apple", "Apple", 4);
 	item("meat_raw", "Raw Boar Meat", 3);
 	item("meat_cooked", "Cooked Boar Meat", 8);
@@ -467,6 +493,13 @@ inline Game make_game()
 	const ss_ k = "skeldat:skull", d = "skeldat:diamond",
 			bb = "skeldat:bone_block";
 	craft("skeldat:crown", 3, {k, d, k, bb, k, bb});
+	// [SKELDAT_BOW] Minecraft's bow, bones for the string; an arrow a bone
+	// over a stick
+	{
+		const ss_ s = "skeldat:stick";
+		craft("skeldat:bow", 3, {"", s, b, s, "", b, "", s, b});
+		craft("skeldat:arrow 4", 1, {b, s});
+	}
 	g.cooking = {{"skeldat:iron_ore", "skeldat:iron_ingot", 4},
 			{"skeldat:meat_raw", "skeldat:meat_cooked", 3}};
 	g.fuel = {{"skeldat:coal", 40}, {"skeldat:tree", 15}, {"skeldat:wood", 8},
@@ -516,6 +549,20 @@ inline int self_test()
 		grid[i] = i == 4 ? Stack() : Stack(i % 2 ? "skeldat:bone" :
 				"skeldat:iron_ingot");
 	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:lantern");
+	// The bow: sticks as the arc, bones down the right; an arrow a bone
+	// over a stick in any column, not a stick over a bone
+	for(Stack &s : grid) s = Stack();
+	grid[1] = grid[3] = grid[7] = Stack(st);
+	grid[2] = grid[5] = grid[8] = Stack("skeldat:bone");
+	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:bow");
+	assert(g.item("skeldat:bow")->tool && g.item("skeldat:bow")->caps.empty());
+	for(Stack &s : grid) s = Stack();
+	grid[1] = Stack("skeldat:bone"); grid[4] = Stack(st);
+	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:arrow 4");
+	grid[1] = Stack(st); grid[4] = Stack("skeldat:bone");
+	assert(!g.craft(grid));
+	assert(!g.node("skeldat:stuck_arrow")->walkable &&
+			!g.item("skeldat:stuck_arrow"));
 	// Stacks: add fills the same item first and spills into empty slots
 	sv_<Stack> list(3);
 	list[1] = Stack("skeldat:dirt", 98);

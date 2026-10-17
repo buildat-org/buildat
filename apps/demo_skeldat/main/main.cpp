@@ -109,6 +109,7 @@ struct Player
 	ss_ dig_at;
 	double dig_t0 = 0;
 	double last_hit = -1; // the last hit at a mob
+	double draw_t = -1; // the bow's draw started, -1 none ([SKELDAT_BOW])
 	// The movement check's: where the last check passed the player, when,
 	// and whether in the air
 	float cx = 0, cy = 0, cz = 0;
@@ -193,6 +194,13 @@ static const int MOB_HEIGHT[] = {1, 2};
 static const float MOB_SPEED[][2] = {{1.2f, 3.5f}, {1.0f, 1.8f}};
 static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 		ARROW_SPEED = 18.0f;
+// [SKELDAT_BOW] A player's bow: full drawn in BOW_DRAW s, the arrow at
+// the draw times BOW_SPEED, none under BOW_MIN; its hit BOW_DAMAGE a
+// voxel a second; BOW_USES shots. A stuck arrow, anyone's, is picked up
+// within ARROW_REACH, and after ARROW_STUCK s is a stuck_arrow voxel
+static const float BOW_DRAW = 1, BOW_SPEED = 30, BOW_MIN = 0.1f,
+		BOW_DAMAGE = 0.3f, ARROW_REACH = 1.5f, ARROW_STUCK = 60;
+static const int BOW_USES = 250;
 // Awake within WAKE of a player, asleep (saved, not stepped) past SLEEP
 static const float WAKE = 48, SLEEP = 64;
 // A skeleton near a player ([SKELDAT_LIGHT_PRIMARY]): its light form's
@@ -289,6 +297,11 @@ struct Arrow
 	float x, y, z, vx, vy, vz, age = 0;
 	bool stuck = false;
 	uint32_t node_id = 0;
+	// A player's ([SKELDAT_BOW]): it hits mobs, not players
+	bool by_player = false;
+	size_t peer = 0;
+	// Stuck: the voxel it went into and the one it sticks out into
+	int sx = 0, sy = 0, sz = 0, fx = 0, fy = 0, fz = 0;
 };
 
 // A stack on the ground ([SKELDAT_DEATH_DROPS]): it falls until it rests
@@ -575,6 +588,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	sv_<int> m_markers;
 	// The nodes that keep the sun off a skeleton beside them
 	std::array<uint32_t, 4> m_sun_ids{};
+	// [SKELDAT_BOW] The stuck_arrow voxels, by "x,y,z", kept by set_node()
+	// and saved as "stuck/<x,y,z>"
+	uint32_t m_stuck_id = ID_IGNORE;
+	std::set<ss_> m_stuck;
 	uint32_t m_marker = ID_IGNORE, m_lantern_ids[2] = {ID_IGNORE, ID_IGNORE};
 	sv_<int8_t> m_top_y;
 	sv_<uint8_t> m_top_b;
@@ -631,7 +648,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		const ss_ game = "network:packet_received/skeldat:";
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
-		for(const char *n : {"open", "close", "move", "craft", "respawn"})
+		for(const char *n : {"open", "close", "move", "craft", "respawn",
+				"bow"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
@@ -793,6 +811,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		m_marker = id_of("skeldat:marker_skull");
 		m_sun_ids = {id_of("skeldat:bone_block"), id_of("skeldat:skull"),
 				id_of("skeldat:skulls"), m_marker};
+		m_stuck_id = id_of("skeldat:stuck_arrow");
 		if(m_store->get("world_t", v))
 			m_world_t = atof(v.c_str());
 		if(m_store->get("ended", v)){
@@ -849,6 +868,8 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_next_mob = std::max(m_next_mob, k + 1);
 			}
 		}
+		for(const ss_ &key : m_store->list("stuck/"))
+			m_stuck.insert(key.substr(6));
 		for(const ss_ &key : m_store->list("drop/")){
 			Drop d;
 			ss_ item;
@@ -993,7 +1014,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			break;
 		case skeldat::NODEBOX:
 			d.drawtype = "nodebox";
-			d.node_box = d.collision_box = d.selection_box = n.boxes;
+			d.node_box = d.selection_box = n.boxes;
+			if(n.walkable)
+				d.collision_box = n.boxes;
+			else
+				d.walkable = false;
 			break;
 		case skeldat::TORCH:
 			d.drawtype = "torchlike";
@@ -1005,6 +1030,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		// param2 0 to 3, the way the player looked when placing it
 		if(n.facedir)
 			d.facing = "4dir";
+		if(n.wallmounted)
+			d.facing = "wallmounted";
 		return d;
 	}
 
@@ -1708,8 +1735,13 @@ struct Module: public interface::Module, public luanti_session::Game
 	void set_wield_index(const ss_ &name, int index)
 	{
 		size_t peer;
-		if(Player *pl = alive(name, peer))
-			pl->wield = std::max(0, std::min(8, index - 1));
+		if(Player *pl = alive(name, peer)){
+			const int w = std::max(0, std::min(8, index - 1));
+			// A switch ends the bow's draw unshot
+			if(w != pl->wield)
+				pl->draw_t = -1;
+			pl->wield = w;
+		}
 	}
 
 	bool dig_node(int32_t x, int32_t y, int32_t z, const ss_ &name)
@@ -1949,6 +1981,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		return m_format.id.get(voxel_at(x, y, z).data);
 	}
+	uint32_t param_at(int x, int y, int z)
+	{
+		return m_format.param.get(voxel_at(x, y, z).data);
+	}
 	int bones_at(int x, int y, int z)
 	{
 		return (int)m_bones.get(voxelworld::get_sample(m_server, m_scene,
@@ -1966,8 +2002,21 @@ struct Module: public interface::Module, public luanti_session::Game
 			word = 0;
 			m_format.id.set(word, id);
 			m_format.param.set(word, param);
-			if(id == ID_AIR || id == m_marker)
+			if(id == ID_AIR || id == m_marker || id == m_stuck_id)
 				m_bones.set(v, 0);
+			if(old != id && (old == m_stuck_id || id == m_stuck_id)){
+				const ss_ k = pos_key(x, y, z);
+				if(id == m_stuck_id)
+					m_stuck.insert(k);
+				else
+					m_stuck.erase(k);
+				if(m_store){
+					if(id == m_stuck_id)
+						m_store->set("stuck/"+k, "1");
+					else
+						m_store->remove("stuck/"+k);
+				}
+			}
 			else if(bones >= 0)
 				m_bones.set(v, (uint32_t)bones);
 			const long f = footprint(x, z);
@@ -2120,7 +2169,67 @@ struct Module: public interface::Module, public luanti_session::Game
 				move(peer, pl, count, floc, flist, fi, tloc, tlist, ti);
 		} else if(what == "craft"){
 			craft(peer, pl);
+		} else if(what == "bow"){
+			ss_ how;
+			float dx = 0, dy = 0, dz = 0;
+			is>>how>>dx>>dy>>dz;
+			bow(peer, pl, how, dx, dy, dz);
 		}
+	}
+
+	// [SKELDAT_BOW] "start": the draw begins with the bow held and an
+	// arrow in the main inventory; "release dx dy dz": timed here, the
+	// arrow shot from the eye along the look at the draw's speed, one
+	// arrow taken and the bow worn; under BOW_MIN nothing
+	void bow(size_t peer, Player &pl, const ss_ &how, float dx, float dy,
+			float dz)
+	{
+		Stack &held = pl.main[pl.wield];
+		auto arrow = std::find_if(pl.main.begin(), pl.main.end(),
+				[](const Stack &st){ return st.name == "skeldat:arrow"; });
+		if(how == "start"){
+			pl.draw_t = held.name == "skeldat:bow" && arrow != pl.main.end() ?
+					m_time : -1;
+			if(pl.draw_t >= 0)
+				log_i(MODULE, "skeldat: %s draws the bow", cs(pl.name));
+			return;
+		}
+		if(how != "release" || pl.draw_t < 0)
+			return;
+		const float draw = std::min(1.0f, (float)(m_time - pl.draw_t) / BOW_DRAW);
+		pl.draw_t = -1;
+		const float l = std::sqrt(dx * dx + dy * dy + dz * dz);
+		if(held.name != "skeldat:bow" || arrow == pl.main.end() ||
+				!(l > 0.5f && l < 2)){
+			return;
+		}
+		if(draw < BOW_MIN){
+			log_i(MODULE, "skeldat: %s lets the bow go undrawn (%.2f)",
+					cs(pl.name), draw);
+			return;
+		}
+		dx /= l, dy /= l, dz /= l;
+		arrow->take(1);
+		held.wear += skeldat::WEAR_MAX / BOW_USES;
+		if(held.wear >= skeldat::WEAR_MAX)
+			held = Stack();
+		send_inventory(peer, pl);
+		const float speed = draw * BOW_SPEED;
+		Arrow a;
+		a.x = pl.x + dx * 0.5f, a.y = pl.y + 1.6f + dy * 0.5f,
+				a.z = pl.z + dz * 0.5f;
+		a.vx = dx * speed, a.vy = dy * speed, a.vz = dz * speed;
+		a.by_player = true;
+		a.peer = peer;
+		main_context::access(m_server, m_scene, [&](Urho3D::Scene *scene){
+			Urho3D::Node *n = scene->CreateChild("skeldat_arrow");
+			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
+			a.node_id = n->GetID();
+		});
+		m_arrows.push_back(a);
+		sound("bow", a.x, a.y, a.z);
+		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f)",
+				cs(pl.name), speed, draw);
 	}
 
 	void hurt(size_t peer, Player &pl, int damage, const char *how)
@@ -2290,6 +2399,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		const uint32_t id = id_at(x, y, z);
 		const skeldat::NodeDef *n = node_of(id);
 		Stack &tool = pl.main[pl.wield];
+		// The bow digs nothing ([SKELDAT_BOW])
+		if(tool.name == "skeldat:bow")
+			return;
 		const skeldat::Cap *cap = nullptr;
 		const float time = n ? m_game.dig_time(tool.name, *n, &cap) : -1;
 		// A quarter less than the time, for the network's lag
@@ -2327,6 +2439,18 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_rand() % n->drop_rarity == 0))
 			drop = Stack::parse(n->drop);
 		give_or_drop(pl, drop);
+		// The arrows stuck into it, the digger's ([SKELDAT_BOW])
+		static const int FACE[6][3] = {{0, 1, 0}, {0, -1, 0}, {1, 0, 0},
+				{-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+		for(int f = 0; f < 6; f++){
+			const int ax = x - FACE[f][0], ay = y - FACE[f][1],
+					az = z - FACE[f][2];
+			if(id_at(ax, ay, az) == m_stuck_id &&
+					param_at(ax, ay, az) == (uint32_t)f){
+				set_node(ax, ay, az, ID_AIR);
+				give_or_drop(pl, Stack("skeldat:arrow"));
+			}
+		}
 		log_i(MODULE, "skeldat: %s digs %s at %s, bones %d%s", cs(pl.name),
 				cs(n->name), cs(at), bones, bones > skeldat::bones::NO_DROP ?
 				", dropping nothing" : "");
@@ -2351,8 +2475,9 @@ struct Module: public interface::Module, public luanti_session::Game
 			beside = beside || (b != ID_AIR && b != ID_IGNORE &&
 					b != id_of("skeldat:water_source"));
 		}
-		if(!n || !(here_id == ID_AIR || (here && here->shape ==
-				skeldat::LIQUID)) || !beside || !reaches(pl, x, y, z))
+		if(!n || !(here_id == ID_AIR || here_id == m_stuck_id || (here &&
+				here->shape == skeldat::LIQUID)) || !beside ||
+				!reaches(pl, x, y, z))
 			return;
 		if(n->shape != skeldat::TORCH){
 			for(auto &pair : m_players){
@@ -2505,7 +2630,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			return false;
 		const skeldat::NodeDef *n = node_of(id);
 		return !n || (n->shape != skeldat::LIQUID &&
-				n->shape != skeldat::TORCH);
+				n->shape != skeldat::TORCH && n->walkable);
 	}
 	bool is_water(voxelworld::Instance *w, int x, int y, int z)
 	{
@@ -3325,7 +3450,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_lantern_ids[1] = id_of("skeldat:lantern_active");
 		}
 		return id != ID_AIR && id != ID_IGNORE && id != m_marker &&
-				id != m_lantern_ids[0] && id != m_lantern_ids[1];
+				id != m_lantern_ids[0] && id != m_lantern_ids[1] &&
+				id != m_stuck_id;
 	}
 
 	// The footprint (x, z) is in, its index in m_flooded and m_markers; -1
@@ -3391,7 +3517,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			const interface::VoxelSample v = w->get_sample(
 					pv::Vector3DInt32(x, y, z), true);
 			const uint32_t id = m_format.id.get(v);
-			if(id != ID_AIR && id != ID_IGNORE){
+			if(id != ID_AIR && id != ID_IGNORE && id != m_stuck_id){
 				set_top(x, z, y, id, m_bones.get(v));
 				return;
 			}
@@ -4001,6 +4127,7 @@ struct Module: public interface::Module, public luanti_session::Game
 	// 18 voxels a second it goes 0.6 a tick, so a point every 0.3
 	void step_arrows(float dt)
 	{
+		pick_stuck();
 		if(m_arrows.empty())
 			return;
 		sv_<char> solid;
@@ -4019,9 +4146,19 @@ struct Module: public interface::Module, public luanti_session::Game
 		});
 		size_t j = 0;
 		sv_<Arrow> kept;
+		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; };
+		sv_<Hit> hits;
 		for(Arrow &a : m_arrows){
 			a.age += dt;
-			bool gone = a.age > (a.stuck ? 60 : 8);
+			bool gone = !a.stuck && a.age > 8;
+			// [SKELDAT_BOW] Stuck: a living player near takes it if it fits;
+			// after ARROW_STUCK it is a voxel, or gone where there is no air
+			if(a.stuck && (picked(a.x, a.y, a.z) || a.age > ARROW_STUCK)){
+				if(a.age > ARROW_STUCK)
+					stick_voxel(a);
+				remove_node(a.node_id);
+				continue;
+			}
 			const bool was_stuck = a.stuck;
 			const size_t base = j;
 			if(!a.stuck){
@@ -4032,9 +4169,28 @@ struct Module: public interface::Module, public luanti_session::Game
 				const float f = k ? 1.0f : 0.5f;
 				const float x = a.x + a.vx * dt * f, y = a.y + a.vy * dt * f,
 						z = a.z + a.vz * dt * f;
+				// A player's hits the mobs, as a hit by the player
+				if(a.by_player){
+					for(auto &kv : m_mobs){
+						const Mob &m = kv.second;
+						const bool sk = m.kind == SKELETON;
+						const float mx = sk ? m.bx : m.x, my = sk ? m.by : m.y,
+								mz = sk ? m.bz : m.z;
+						if(m.node_id && std::hypot(mx - x, mz - z) < 0.5f &&
+								y > my - 0.1f && y < my + MOB_HEIGHT[m.kind] + 0.1f){
+							const float v = std::sqrt(a.vx * a.vx + a.vy * a.vy +
+									a.vz * a.vz);
+							hits.push_back({kv.first, std::max(1, (int)std::lround(
+									BOW_DAMAGE * v)), a.peer, x, z});
+							sound("arrow_hit", x, y, z);
+							gone = true;
+							break;
+						}
+					}
+				}
 				for(auto &pair : m_players){
 					Player &pl = pair.second;
-					if(pl.placed && pl.hp > 0 &&
+					if(!a.by_player && pl.placed && pl.hp > 0 &&
 							std::hypot(pl.x - x, pl.z - z) < 0.45f &&
 							y > pl.y - 0.1f && y < pl.y + 1.85f){
 						hurt(pair.first, pl, 2 + m_rand() % 3,
@@ -4049,6 +4205,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				if(solid[base + k]){
 					a.stuck = true;
 					a.age = 0;
+					a.sx = (int)std::floor(x + 0.5f), a.sy = (int)std::floor(y + 0.5f),
+							a.sz = (int)std::floor(z + 0.5f);
+					a.fx = (int)std::floor(a.x + 0.5f), a.fy = (int)std::floor(a.y + 0.5f),
+							a.fz = (int)std::floor(a.z + 0.5f);
 					log_i(MODULE, "skeldat: an arrow sticks at %.1f,%.1f,%.1f",
 							a.x, a.y, a.z);
 					sound("arrow_hit", a.x, a.y, a.z);
@@ -4074,13 +4234,81 @@ struct Module: public interface::Module, public luanti_session::Game
 			kept.push_back(a);
 		}
 		m_arrows.swap(kept);
+		for(const Hit &h : hits){
+			if(!m_mobs.count(h.key))
+				continue;
+			auto pl = m_players.find(h.peer);
+			log_i(MODULE, "skeldat: an arrow from %s hits the %s (%u) for %d",
+					pl != m_players.end() ? cs(pl->second.name) : "?",
+					MOB_KIND[m_mobs[h.key].kind], h.key, h.dmg);
+			damage(h.key, h.dmg, h.peer, h.x, h.z);
+		}
+	}
+
+	// [SKELDAT_BOW] A living player within ARROW_REACH of (x, y, z) with
+	// room takes an arrow: true when one did
+	bool picked(float x, float y, float z)
+	{
+		for(auto &pair : m_players){
+			Player &pl = pair.second;
+			if(!pl.placed || pl.hp <= 0 || std::hypot(pl.x - x, pl.z - z) >=
+					ARROW_REACH || y < pl.y - 1 || y > pl.y + 2.5f)
+				continue;
+			if(!m_game.add(pl.main, Stack("skeldat:arrow")).empty())
+				continue;
+			send_inventory(pair.first, pl);
+			sound("pickup", x, y, z);
+			log_i(MODULE, "skeldat: %s picks up an arrow at %.1f,%.1f,%.1f",
+					cs(pl.name), x, y, z);
+			return true;
+		}
+		return false;
+	}
+
+	// A stuck arrow kept for good: a stuck_arrow voxel where it sticks
+	// out, turned to the face it went into (wallmounted's param2 toward
+	// that voxel); none where that is not air
+	void stick_voxel(const Arrow &a)
+	{
+		int d[3] = {a.sx - a.fx, a.sy - a.fy, a.sz - a.fz};
+		int axis = 0;
+		for(int i = 1; i < 3; i++)
+			if(std::abs(d[i]) > std::abs(d[axis]))
+				axis = i;
+		if(d[axis] == 0 || id_at(a.fx, a.fy, a.fz) != ID_AIR)
+			return;
+		// 0 +y, 1 -y, 2 +x, 3 -x, 4 +z, 5 -z
+		const uint32_t param = axis == 1 ? (d[1] > 0 ? 0 : 1) :
+				axis == 0 ? (d[0] > 0 ? 2 : 3) : (d[2] > 0 ? 4 : 5);
+		set_node(a.fx, a.fy, a.fz, m_stuck_id, param);
+		log_i(MODULE, "skeldat: a stuck arrow kept at %d,%d,%d, facing %u",
+				a.fx, a.fy, a.fz, param);
+	}
+
+	// The stuck_arrow voxels near a living player, picked up as arrows
+	void pick_stuck()
+	{
+		if(m_stuck.empty() || m_players.empty())
+			return;
+		sv_<ss_> taken;
+		for(const ss_ &k : m_stuck){
+			int x, y, z;
+			if(parse_pos(k, x, y, z) && picked((float)x, (float)y, (float)z))
+				taken.push_back(k);
+		}
+		for(const ss_ &k : taken){
+			int x, y, z;
+			parse_pos(k, x, y, z);
+			set_node(x, y, z, ID_AIR);
+		}
 	}
 
 	// A client's click at a mob: what the player holds hits it, from no
 	// further than a hand reaches with room for the lag
 	void punch(size_t peer, Player &pl, uint32_t id)
 	{
-		if(id == 0 || m_time - pl.last_hit < 0.35)
+		if(id == 0 || m_time - pl.last_hit < 0.35 ||
+				pl.main[pl.wield].name == "skeldat:bow")
 			return;
 		for(auto &kv : m_mobs){
 			Mob &m = kv.second;
@@ -4128,9 +4356,12 @@ struct Module: public interface::Module, public luanti_session::Game
 		step_drops(event.dtime);
 		m_ai_t += event.dtime;
 		if(m_ai_t >= 0.1f){
-			// A long tick (the world's first sweep, 1.7 s) is no fall
-			// through the ground
-			step_mobs(std::min(m_ai_t, 0.2f));
+			// A long tick in steps of 0.2 s, so it is no fall through the
+			// ground and a body keeps up with its light form, which steps
+			// by the clock; past a second (the world's first sweep, 1.7 s)
+			// the rest is dropped
+			for(float left = std::min(m_ai_t, 1.0f); left > 1e-4f; left -= 0.2f)
+				step_mobs(std::min(left, 0.2f));
 			m_ai_t = 0;
 		}
 		if(m_world_ready){
@@ -4440,7 +4671,8 @@ struct Module: public interface::Module, public luanti_session::Game
 					const skeldat::NodeDef *n = node_of(i);
 					m_cell_of[i] = i == ID_AIR ? vp::OPEN :
 							!n ? vp::SOLID : n->shape == skeldat::LIQUID ?
-							vp::CLIMB : n->shape == skeldat::TORCH ? vp::OPEN :
+							vp::CLIMB : n->shape == skeldat::TORCH ||
+							!n->walkable ? vp::OPEN :
 							vp::SOLID;
 				}
 			}
