@@ -38,10 +38,17 @@ struct WorldView
 	// set_node's listeners: (x, y, z, the old id, the new), inside the
 	// voxel world's access
 	sv_<std::function<void(int, int, int, uint32_t, uint32_t)>> on_set;
+	// The random numbers every part draws from
+	std::mt19937 rand{std::random_device{}()};
 
 	WorldView(interface::Server *server, const skeldat::Game &game):
 		server(server), game(game)
 	{}
+
+	float rnd()
+	{
+		return std::uniform_real_distribution<float>(0, 1)(rand);
+	}
 
 	uint32_t id_of(const ss_ &name) const
 	{
