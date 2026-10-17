@@ -513,6 +513,57 @@ function M.minus(pts, holes)
 	return pieces
 end
 
+-- The convex hull, counter-clockwise (Andrew's monotone chain)
+function M.hull(pts)
+	local p = {}
+	for i, q in ipairs(pts) do
+		p[i] = q
+	end
+	table.sort(p, function(a, b)
+		return a[1] < b[1] or a[1] == b[1] and a[2] < b[2]
+	end)
+	if #p < 3 then
+		return p
+	end
+	local h = {}
+	local function add(q, k0)
+		while #h >= k0 + 2 and cross(h[#h][1] - h[#h - 1][1],
+				h[#h][2] - h[#h - 1][2], q[1] - h[#h - 1][1],
+				q[2] - h[#h - 1][2]) <= 0 do
+			h[#h] = nil
+		end
+		h[#h + 1] = q
+	end
+	for i = 1, #p do
+		add(p[i], 0)
+	end
+	local lower = #h
+	for i = #p - 1, 1, -1 do
+		add(p[i], lower - 1)
+	end
+	h[#h] = nil
+	return h
+end
+
+-- [FP_NET_WALLS] A room's net floor: its inset polygon (counter-clockwise)
+-- less the footprints over it, each by its convex hull. -> mm2
+-- simplified: an outline that is not convex (an odd join) is cut by its
+-- hull, a little too much; split it into convex parts if that shows
+function M.net_area(inner, feet)
+	local holes = {}
+	for _, f in ipairs(feet) do
+		local h = M.hull(f)
+		if #h >= 3 then
+			holes[#holes + 1] = h
+		end
+	end
+	local a = 0
+	for _, piece in ipairs(M.minus(inner, holes)) do
+		a = a + M.area(piece)
+	end
+	return a
+end
+
 -- Which floor a walker is on, of floors {{id, y (its level), under (a
 -- room of it is under the walker)}, ...} with its feet at `feet`: the id to
 -- change to, or nil to stay on cur. Up to a floor over the walker once the
@@ -764,6 +815,25 @@ do
 	assert(M.pick_floor(side, 1, 0) == 3, "into the other building")
 	assert(M.pick_floor({{id = 1, y = 0, under = false}}, 1, 0) == nil,
 			"outside, nowhere to go")
+end
+
+-- [FP_NET_WALLS] A 4000 x 3000 room less a 100 x 2000 partition standing
+-- in it: 0.2 m2; a wall reaching in from outside: its part inside; one
+-- along the edge, outside the inset polygon: nothing
+do
+	local room = {{0, 0}, {4000, 0}, {4000, 3000}, {0, 3000}}
+	near(M.net_area(room, {}), 12e6, "no walls")
+	local part = {{1950, 500}, {2050, 500}, {2050, 2500}, {1950, 2500}}
+	near(M.net_area(room, {part}), 12e6 - 0.2e6, "a partition")
+	local reach = {{3000, 1450}, {5000, 1450}, {5000, 1550}, {3000, 1550}}
+	near(M.net_area(room, {reach}), 12e6 - 0.1e6, "a wall reaching in")
+	local edge = {{-50, -100}, {4050, -100}, {4050, 0}, {-50, 0}}
+	near(M.net_area(room, {edge}), 12e6, "a wall outside the edge")
+	near(M.net_area(room, {part, reach}), 12e6 - 0.3e6, "two")
+	-- Clockwise or with a point inside, the hull is the same box
+	local cw = {{1950, 500}, {1950, 2500}, {2000, 1500}, {2050, 2500},
+			{2050, 500}}
+	near(M.net_area(room, {cw}), 12e6 - 0.2e6, "a hull")
 end
 
 -- A corner given twice (two walls' outlines meeting at a room corner) or a

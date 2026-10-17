@@ -974,6 +974,36 @@ function M.ceiling_at(x, z)
 	return best and room_ceiling(best) or settings().ceiling
 end
 
+-- [FP_NET_WALLS] A wall hung from the ceiling with its bottom this high
+-- or more over the floor (the plan's ceiling less its height) leaves the
+-- floor under it
+local NET_CLEAR = 1600
+-- The inset polygon less the outlines (E.outlines) of every wall that
+-- stands on the floor or hangs lower than NET_CLEAR and whose box meets
+-- it; one on the room's own edge is outside the inset polygon already
+local function net_area(inner)
+	local x0, z0, x1, z1 = math.huge, math.huge, -math.huge, -math.huge
+	for _, p in ipairs(inner) do
+		x0, z0 = math.min(x0, p[1]), math.min(z0, p[2])
+		x1, z1 = math.max(x1, p[1]), math.max(z1, p[2])
+	end
+	local feet = {}
+	for id, o in pairs(E.outlines) do
+		local e = doc.ents[id]
+		if e and (wall_span(e.ints)) < NET_CLEAR then
+			local a, b, c, d = math.huge, math.huge, -math.huge, -math.huge
+			for _, p in ipairs(o.pts) do
+				a, b = math.min(a, p[1]), math.min(b, p[2])
+				c, d = math.max(c, p[1]), math.max(d, p[2])
+			end
+			if a < x1 and c > x0 and b < z1 and d > z0 then
+				feet[#feet + 1] = o.pts
+			end
+		end
+	end
+	return geom.net_area(inner, feet)
+end
+
 local function build_room_data()
 	E.room_data = {}
 	for _, e in ipairs(of_type("room")) do
@@ -1005,7 +1035,7 @@ local function build_room_data()
 		end
 		local inner = geom.inset(pts, offsets)
 		E.room_data[e.id] = {pts = pts, ids = ids, inner = inner,
-				gross = geom.area(pts), net = geom.area(inner)}
+				gross = geom.area(pts), net = net_area(inner)}
 	end
 end
 
@@ -7374,6 +7404,26 @@ function M.start(d)
 				{x = x0, z = z1}})
 		S.room_walls = walls
 		log:info("A room made by the drive")
+	end)
+	-- "event fp_wall x0 z0 x1 z1 [bottom]": a 100 mm centred wall, full
+	-- height, or hung from the plan's ceiling down to bottom ([FP_NET_WALLS])
+	magic.SubscribeToEvent("command_seq:fp_wall", function(_, d)
+		local v = {}
+		for w in d:GetString("Param"):gmatch("%S+") do
+			v[#v + 1] = tonumber(w)
+		end
+		if not v[4] then
+			return
+		end
+		local keep = {S.thickness, S.justify, S.shift, S.height, S.hang}
+		S.thickness, S.justify, S.shift = 100, 0, 0
+		S.height, S.hang = v[5] and settings().ceiling - v[5] or 0,
+				v[5] and 1 or 0
+		add_wall({x = v[1], z = v[2]}, v[3], v[4], nil)
+		S.thickness, S.justify, S.shift, S.height, S.hang =
+				keep[1], keep[2], keep[3], keep[4], keep[5]
+		S.draw = nil
+		log:info("A wall made by the drive")
 	end)
 	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing
