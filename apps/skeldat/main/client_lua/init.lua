@@ -1067,8 +1067,8 @@ buildat.sub_packet("skeldat:players", function(data)
 				o.board.enabled = false
 				others[name] = o
 			end
-			-- [SKELDAT_SKATEBOARD] simplified: turned with the look, not
-			-- the board's heading
+			-- [SKELDAT_BOARD_KEYS] A rider is turned along its travel, the
+			-- last move over the ground (kept while still), not its look
 			-- [SKELDAT_BOARD_PRONE] Lying flat: the body's box laid along
 			-- the board, the head forward
 			-- simplified: one dressed as a skeleton stands
@@ -1087,9 +1087,17 @@ buildat.sub_packet("skeldat:players", function(data)
 				log:info("skeldat: " .. name .. (o.board.enabled and
 						" rides a board" or " walks"))
 			end
-			o.node.position = magic.Vector3(tonumber(x), tonumber(y),
-					tonumber(z))
-			o.node.rotation = magic.Quaternion(0, tonumber(yw), 0)
+			x, y, z = tonumber(x), tonumber(y), tonumber(z)
+			if o.x then
+				local dx, dz = x - o.x, z - o.z
+				if dx * dx + dz * dz > 0.0025 then
+					o.travel = math.deg(math.atan2(dx, dz))
+				end
+			end
+			o.x, o.z = x, z
+			o.node.position = magic.Vector3(x, y, z)
+			o.node.rotation = magic.Quaternion(0, on_board == "1" and
+					o.travel or tonumber(yw), 0)
 			-- [SKELDAT_SKELETON_PLAYERS] Near enough bones, the skeleton
 			skeleton = skeleton == "1"
 			if skeleton ~= (o.skeleton or false) then
@@ -1403,22 +1411,23 @@ magic.SubscribeToEvent("Update", function(_, d)
 		pitch = math.max(-89, math.min(89, pitch + m.y * 0.12))
 	end
 	local dead = game.stats.hp <= 0
-	local fx, fz = 0, 0
+	local fx, fz, r = 0, 0, 0
 	local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
 	if not dead then
 		local f = (down("forward") and 1 or 0) - (down("back") and 1 or 0)
-		local r = (down("right") and 1 or 0) - (down("left") and 1 or 0)
+		r = (down("right") and 1 or 0) - (down("left") and 1 or 0)
 		fx, fz = s * f + c * r, c * f - s * r
 	end
-	-- [SKELDAT_SKATEBOARD] On the board the look turns it and the back
-	-- key brakes; the board's own box under the feet
+	-- [SKELDAT_SKATEBOARD] On the board the left and right keys turn it
+	-- ([SKELDAT_BOARD_KEYS]; the look is free) and the back key brakes;
+	-- the board's own box under the feet
 	if board_cheat then
 		player.board = player.board or {k = 0}
 		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
 	end
 	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
 			sneak = not dead and down("sneak"), fast = player.fast,
-			look_x = s, look_z = c, brake = not dead and down("back")})
+			turn = r, brake = not dead and down("back")})
 	local b = player.board
 	if (b ~= nil) ~= board_shown then
 		board_shown, board_braking = b ~= nil, false

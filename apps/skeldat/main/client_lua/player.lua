@@ -697,8 +697,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	-- [SKELDAT_SKATEBOARD] The board. self.board is nil walking, else
 	-- {s = the speed along the ground, hx, hz = the heading, k = the
 	-- slope along it}; in the air (on_ground false) self.vx, vy and vz
-	-- carry it as a walk's do. wish.look_x and look_z are where the camera
-	-- looks, which the board turns to; wish.brake is the back key.
+	-- carry it as a walk's do. wish.turn (-1..1, + to the right) steers it
+	-- ([SKELDAT_BOARD_KEYS]: the left and right keys; the look does not);
+	-- wish.brake is the back key.
 	--
 	local function flying()
 		if self.fly_active ~= nil then
@@ -801,19 +802,17 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		end
 		self.board = nil
 	end
-	-- Toward where the camera looks, at a rate falling with the speed
+	-- The turn keys' angle this step, at a rate falling with the speed
+	-- s; on the ground twice the air's (the user's)
+	local function turn_angle(wish, dt, s)
+		local t = math.max(-1, math.min(1, wish.turn or 0))
+		return t * M.BOARD_TURN / (1 + s / 8) * dt *
+				(self.on_ground and 2 or 1)
+	end
 	local function turn(wish, dt)
 		local b = self.board
-		local lx, lz = wish.look_x or 0, wish.look_z or 0
-		if lx == 0 and lz == 0 then
-			return
-		end
-		local now = math.atan2(b.hx, b.hz)
-		local diff = (math.atan2(lx, lz) - now + math.pi) % (2 * math.pi) -
-				math.pi
-		local max = M.BOARD_TURN / (1 + b.s / 8) * dt
-		now = now + math.max(-max, math.min(max, diff))
-		b.hx, b.hz = math.sin(now), math.cos(now)
+		local a = math.atan2(b.hx, b.hz) + turn_angle(wish, dt, b.s)
+		b.hx, b.hz = math.sin(a), math.cos(a)
 	end
 
 	-- One step on the board. On the ground the move is along the slope and
@@ -883,7 +882,17 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			return
 		end
 		-- In the air: thrown, stopped by a ceiling and by what the board
-		-- would not ride onto; ground it would is a landing below
+		-- would not ride onto; ground it would is a landing below. The
+		-- keys turn the flight, the speed kept (the heading follows it)
+		do
+			local hs = math.sqrt(self.vx * self.vx + self.vz * self.vz)
+			local a = turn_angle(wish, dt, hs)
+			if a ~= 0 then
+				local sa, ca = math.sin(a), math.cos(a)
+				self.vx, self.vz = self.vx * ca + self.vz * sa,
+						self.vz * ca - self.vx * sa
+			end
+		end
 		local vy0 = self.vy
 		self.vy = self.vy - g * dt
 		local p = {self.x, self.y, self.z}
@@ -1221,6 +1230,35 @@ do
 	run(flat, {x = 0, z = 0, brake = true, look_x = 1, look_z = 0}, 3)
 	assert(not flat.board and flat.x - x0 < 100 / (2 * M.BOARD_BRAKE) + 1,
 			"board: the brake does not stop it")
+	-- [SKELDAT_BOARD_KEYS] The look does not turn it; the turn keys do,
+	-- to the right for +, at twice the air's rate on the ground
+	local function heading(pl) return math.atan2(pl.board.hx, pl.board.hz) end
+	board(flat, 0, -0.5, 10)
+	run(flat, {x = 0, z = 0, look_x = 0, look_z = 1}, 2)
+	assert(flat.board and math.abs(heading(flat) - math.pi / 2) < 1e-9,
+			"board keys: the look turned it")
+	for _, s in ipairs({4, 16}) do
+		board(flat, 0, -0.5, s)
+		run(flat, {x = 0, z = 0, turn = 1}, 0.25)
+		local want = 2 * M.BOARD_TURN / (1 + s / 8) * 0.25
+		local got = heading(flat) - math.pi / 2
+		assert(math.abs(got - want) < 1e-6, "board keys: at " .. s ..
+				" on the ground turned " .. got .. ", not " .. want)
+	end
+	board(flat, 0, -0.5, 8)
+	run(flat, {x = 0, z = 0, jump = true}, 1 / 60)
+	local hs0 = math.sqrt(flat.vx ^ 2 + flat.vz ^ 2)
+	local a0 = math.atan2(flat.vx, flat.vz)
+	run(flat, {x = 0, z = 0, turn = 1}, 0.2)
+	assert(not flat.on_ground, "board keys: landed too soon for the test")
+	local hs1 = math.sqrt(flat.vx ^ 2 + flat.vz ^ 2)
+	local turned = math.atan2(flat.vx, flat.vz) - a0
+	local want = M.BOARD_TURN / (1 + hs0 / 8) * 0.2
+	assert(math.abs(hs1 - hs0) < 1e-6 and math.abs(turned - want) < 1e-6 and
+			math.abs(heading(flat) - math.atan2(flat.vx, flat.vz)) < 1e-6,
+			"board keys: in the air turned " .. turned .. " (not " .. want ..
+			"), speed " .. hs0 .. " to " .. hs1)
+	run(flat, {x = 0, z = 0}, 2)
 	-- The jump: twice the walk's speed, four times its height
 	board(flat, 0, -0.5, 5)
 	local peak = -0.5
