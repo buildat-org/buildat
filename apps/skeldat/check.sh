@@ -1312,6 +1312,47 @@ grep -aq 'the world "fromset" starts, seed 2,.* 128 x 64 x 128' "$t/srv32_4.log"
 	grep -aq "the bones at 1x" "$t/srv32_4.log" ||
 	fail "a world from the preset not of its seed, size and speed ($t/srv32_4.log)"
 echo "high scores: $s3"
+# 30. The re-run ([SKELDAT_RERUN]): "w" (seed 2, 128 wide, ended at once,
+# the surface filled) re-run from the pause menu's Play again: the client
+# told the world is made again (a client with a launcher rejoins by it;
+# these are started with -s and are only disconnected), the module
+# reloaded and "w_rerun" made with w's seed, size and speed, w kept; a
+# client joining is placed in it; its own Play again deletes and makes
+# w_rerun again, no w_rerun_rerun.
+log33="$t/srv33.log"
+BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_FILL=surface start_server "$log33" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv33" -C "$t/srv.cache" -l 3 || fail "the server ($log33)"
+CHECK_PIDS+=($SERVER_PID)
+again='keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Play again"
+wait_log 10000 Disconnected from server: The world is being made again'
+printf '%s\n' "$placed" "delay 1500" "$again" quit > "$t/rr1.cmds"
+client rr1 "$t/rr1.cmds"
+wait $CLIENT
+wait_for_log "$log33" 'the world "w_rerun" starts' 120 ||
+	fail "no re-run world ($log33, $t/rr1.log)"
+grep -aq "Disconnected from server: The world is being made again as w_rerun" "$t/rr1.log" ||
+	fail "the client not told of the re-run ($t/rr1.log)"
+printf '%s\n' "$placed" "delay 1500" "$again" quit > "$t/rr2.cmds"
+client rr2 "$t/rr2.cmds"
+wait $CLIENT
+wait_for_log "$log33" "re-run: deleted w_rerun" 120 ||
+	fail "the second re-run did not delete w_rerun ($log33, $t/rr2.log)"
+wait_for_log "$log33" "the world is in" 120
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "client1 starts a re-run as w_rerun" "$log33" &&
+	grep -aq "re-run: w_rerun, seed [0-9]*, 128 wide, 1x" "$log33" &&
+	[ $(grep -ac 'the world "w_rerun" starts, seed 2,.* 128 x 128 x 128' "$log33") = 2 ] ||
+	fail "the re-run's name, seed or size ($log33)"
+grep -aq "skeldat: placed at" "$t/rr2.log" || fail "no client placed in w_rerun ($t/rr2.log)"
+[ -d "$t/srv33/apps/skeldat/saves/w" ] && [ -d "$t/srv33/apps/skeldat/saves/w_rerun" ] &&
+	[ ! -e "$t/srv33/apps/skeldat/saves/w_rerun_rerun" ] ||
+	fail "the saves after two re-runs: $(ls "$t/srv33/apps/skeldat/saves")"
+echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | tr '\n' ' ')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1319,5 +1360,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog, the high scores"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog, the high scores, the re-run"
 # vim: set noet ts=4 sw=4:

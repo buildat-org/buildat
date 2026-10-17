@@ -371,6 +371,14 @@ return function(game, declare_keys)
 		local menu = ui_utils.vertical_menu(root, {min_width = 260})
 		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		menu:add("Continue", close, true)
+		-- [SKELDAT_RERUN] The ended world again, as <name>_rerun
+		if game.ended then
+			menu:add("Play again", function()
+				log:info("pause: play again")
+				game.send("rerun", "")
+				close()
+			end)
+		end
 		menu:add("Chat...", function() console(true) end)
 		menu:add("Who's in the chat...", chat_menu)
 		if game.admin then

@@ -566,6 +566,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	// The ended world's set's best days and this score's place in it
 	double m_end_best = 0;
 	int m_end_place = 0;
+	// [SKELDAT_RERUN] A re-run asked for: the module is reloading
+	bool m_rerunning = false;
 	// m_joining: sent the join, its login not yet in
 	std::set<size_t> m_waiting, m_shown, m_joining;
 	std::map<size_t, Player> m_players;
@@ -704,6 +706,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	void init()
 	{
 		sub(m_server, "core:start", &Module::on_start);
+		// [SKELDAT_RERUN] The module reloaded: the world closed, and on
+		// again (a re-run's, or the start's)
+		sub(m_server, "core:unload", &Module::on_unload);
+		sub(m_server, "core:continue", &Module::on_continue);
 		sub(m_server, "core:tick", &Module::on_tick);
 		sub(m_server, "core:shutdown", &Module::save);
 		sub(m_server, "client_file:files_transmitted",
@@ -725,7 +731,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
-				"bow", "intro", "scores"})
+				"bow", "intro", "scores", "rerun"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
@@ -740,6 +746,12 @@ struct Module: public interface::Module, public luanti_session::Game
 	//
 
 	void on_start()
+	{
+		start(true);
+	}
+
+	// pick: start the world the environment or the launch names
+	void start(bool pick)
 	{
 		// builtin/luanti's sky and its pbr light's rules ([SKELDAT_LUANTI_PARTS]
 		// 3), under the names they run each other by; that module is not
@@ -776,7 +788,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		// The launcher's picked world ([SKELDAT_LAUNCH_WORLD]), the launch's
 		// save=; BUILDAT_SKELDAT_WORLD, a check's, made if it is not there
 		const char *name = getenv("BUILDAT_SKELDAT_WORLD");
-		if(name && name[0]){
+		if(!pick){
+		} else if(name && name[0]){
 			start_world(name, true);
 		} else {
 			bool refused = false;
@@ -2424,6 +2437,128 @@ struct Module: public interface::Module, public luanti_session::Game
 	}
 
 	//
+	// [SKELDAT_RERUN] A re-run of an ended world: any player's, the same
+	// seed, size and speed, as <name>_rerun (a _rerun world's own name
+	// again). Everyone is sent off with the goodbye that says the server
+	// restarts, which a client with a launcher rejoins by; the module
+	// reloads, the old instance closing the world (on_unload), the new
+	// one deleting the target and making it (on_continue), every member
+	// fresh.
+	// simplified: a client with no launcher under it (started with -s)
+	// is only disconnected
+	//
+
+	void rerun(const Player &pl)
+	{
+		if(!m_ended || m_rerunning){
+			// The button is there only after the end: this is a stray
+			log_i(MODULE, "skeldat: %s's re-run refused: %s", cs(pl.name),
+					m_ended ? "one is starting" : "the world has not ended");
+			return;
+		}
+		const ss_ rr = "_rerun";
+		const bool is_rerun = m_world_name.size() > rr.size() &&
+				m_world_name.compare(m_world_name.size() - rr.size(), rr.size(),
+				rr) == 0;
+		const ss_ target = is_rerun ? m_world_name : m_world_name+rr;
+		bool valid = false;
+		storage::access(m_server, [&](storage::Interface *i){
+			valid = i->valid_name(target);
+		});
+		if(!valid){
+			chat::access(m_server, [&](chat::Interface *c){
+				c->say("A re-run of "+m_world_name+" can't be named "+target);
+			});
+			return;
+		}
+		m_rerunning = true;
+		const ss_ line = pl.name+" starts a re-run as "+target;
+		log_i(MODULE, "skeldat: %s", cs(line));
+		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
+		ss_ seed = "0";
+		m_store->get("seed", seed);
+		m_server->tmp_store_data("skeldat:rerun", target+"\n"+seed+"\n"+
+				itos(m_half * 2 * skeldat::bones::SECTION)+"\n"+
+				itos(m_speed_low));
+		network::access(m_server, [&](network::Interface *i){
+			for(network::PeerInfo::Id p : i->list_peers()){
+				i->send(p, "network:goodbye", "1The world is being made again "
+						"as "+target);
+				i->disconnect(p);
+			}
+		});
+		m_server->reload_module(MODULE);
+	}
+
+	// The old instance: the world saved and closed, out of every module
+	// that held it
+	void on_unload()
+	{
+		if(!m_scene)
+			return;
+		log_i(MODULE, "skeldat: the world \"%s\" closed for a reload",
+				cs(m_world_name));
+		save();
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			w->commit();
+		});
+		worldgen::access(m_server, [&](worldgen::Interface *i){
+			i->delete_instance(m_scene);
+		});
+		voxelworld::access(m_server, [&](voxelworld::Interface *i){
+			i->delete_instance(m_scene);
+		});
+		main_context::access(m_server, [&](main_context::Interface *i){
+			i->delete_scene(m_scene);
+		});
+		m_scene = nullptr;
+		storage::access(m_server, [&](storage::Interface *i){
+			if(m_save)
+				i->close(m_save);
+			if(m_scores)
+				i->close(m_scores);
+		});
+		m_save = nullptr;
+		m_scores = nullptr;
+	}
+
+	// The new instance: a re-run's world made (the target deleted first,
+	// the old world itself when it is the target), or the start's again
+	void on_continue()
+	{
+		const ss_ data = m_server->tmp_restore_data("skeldat:rerun");
+		std::istringstream is(data);
+		ss_ name, seed, size, speed;
+		std::getline(is, name);
+		std::getline(is, seed);
+		std::getline(is, size);
+		std::getline(is, speed);
+		if(name.empty()){
+			start(true);
+			return;
+		}
+		storage::access(m_server, [&](storage::Interface *i){
+			for(const storage::SaveInfo &info : i->list())
+				if(info.name == name){
+					i->remove(name);
+					log_i(MODULE, "skeldat: re-run: deleted %s", cs(name));
+				}
+			storage::Save *save = i->create(name);
+			if(save){
+				storage::Store *menu = save->store("world_menu");
+				menu->set("seed", seed);
+				menu->set("size", size);
+				menu->set("speed", speed);
+				i->close(save);
+			}
+		});
+		log_i(MODULE, "skeldat: re-run: %s, seed %s, %s wide, %sx", cs(name),
+				cs(seed), cs(size), cs(speed));
+		start(false);
+		start_world(name, false, seed);
+	}
+
+	//
 	// [SKELDAT_HIGH_SCORES] The scores, outside the worlds
 	//
 
@@ -2654,6 +2789,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		if(what == "scores"){
 			send_scores(peer, packet.data);
+			return;
+		}
+		if(what == "rerun"){
+			rerun(pl);
 			return;
 		}
 		if(pl.hp <= 0)

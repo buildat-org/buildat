@@ -191,6 +191,7 @@ buildat.sub_packet("skeldat:end", function(data)
 				.. "%.1f days; this one is number %d.", tonumber(best),
 				tonumber(place))
 	end
+	game.ended = game.ended .. "\nPlay again from the menu (Escape)."
 	log:info("skeldat: " .. game.ended)
 	game.changed()
 end)
