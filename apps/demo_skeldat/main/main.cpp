@@ -2911,7 +2911,9 @@ struct Module: public interface::Module, public luanti_session::Game
 	// 0, and what it drops goes into the killer's inventory, what does not
 	// fit to the ground at the killer
 	static const size_t NOBODY = (size_t)-1;
-	void damage(uint32_t key, int hp, size_t by, float bx, float bz)
+	// ground_drops: with no killer, its drops left on the ground
+	void damage(uint32_t key, int hp, size_t by, float bx, float bz,
+			bool ground_drops = false)
 	{
 		Mob &m = m_mobs[key];
 		m.hp -= hp;
@@ -2934,8 +2936,12 @@ struct Module: public interface::Module, public luanti_session::Game
 			for(const Stack &s : dropped)
 				give_or_drop(killer->second, s);
 			send_inventory(by, killer->second);
-		} else
+		} else {
+			if(ground_drops)
+				for(const Stack &s : dropped)
+					drop(s, m.x + rnd() - 0.5f, m.y + 0.5f, m.z + rnd() - 0.5f);
 			leave_lantern(m);
+		}
 		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops [%s]",
 				MOB_KIND[m.kind], key, m.x, m.y, m.z, cs(list));
 		sound(m.kind == BOAR ? "boar_death" : "skeleton_death", m.x, m.y, m.z);
@@ -2987,7 +2993,8 @@ struct Module: public interface::Module, public luanti_session::Game
 			const float k = std::min(1.0f, BODY_SPEED * dt / flat);
 			const float nx = m.bx + dx * k, nz = m.bz + dz * k;
 			const Ground to = ground(w, nx, m.by, nz, h);
-			if(to.found && to.y <= m.by + 1.01f){
+			// Water is a wall to it ([SKELDAT_SKELETON_WATER])
+			if(to.found && !to.water && to.y <= m.by + 1.01f){
 				m.bx = nx, m.bz = nz;
 				if(to.y > m.by)
 					m.by = to.y, m.bvy = 0;
@@ -3038,6 +3045,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(awake.empty())
 			return;
 		sv_<std::pair<uint32_t, int>> burnt;
+		sv_<uint32_t> drowned;
 		sv_<std::pair<uint32_t, size_t>> shots;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
@@ -3081,6 +3089,15 @@ struct Module: public interface::Module, public luanti_session::Game
 					} else if(m.mode == FIGHT)
 						m.mode = WANDER;
 					step_body(w, m, p, dt);
+					// [SKELDAT_SKELETON_WATER] Its body in water, the feet's
+					// voxel or the one over them: dead at once
+					const int bx = (int)std::floor(m.bx + 0.5f),
+							by = (int)std::floor(m.by + 0.5f),
+							bz = (int)std::floor(m.bz + 0.5f);
+					if(is_water(w, bx, by, bz) || is_water(w, bx, by + 1, bz)){
+						drowned.push_back(key);
+						continue;
+					}
 					// The sun burns it, unless bones are round its light
 					// form
 					if(here.sun >= 12){
@@ -3161,6 +3178,12 @@ struct Module: public interface::Module, public luanti_session::Game
 			Mob b = m->second;
 			b.x = b.bx, b.y = b.by, b.z = b.bz;
 			shoot(b, p->second);
+		}
+		for(uint32_t key : drowned){
+			log_i(MODULE, "skeldat: the skeleton (%u) is in water", key);
+			Mob &m = m_mobs[key];
+			m.x = m.bx, m.y = m.by, m.z = m.bz;
+			damage(key, 1000, NOBODY, 0, 0, true);
 		}
 		for(auto &b : burnt){
 			if(!m_mobs.count(b.first))
@@ -3479,7 +3502,9 @@ struct Module: public interface::Module, public luanti_session::Game
 				voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 					g = ground(w, (float)x, m.y, (float)z, MOB_HEIGHT[SKELETON]);
 				});
-				return g.found ? g.y : -1e9f;
+				// Water a wall ([SKELDAT_SKELETON_WATER]); the column tops
+				// have none, a water top being NO_GROUND
+				return g.found && !g.water ? g.y : -1e9f;
 			}
 			const long c = column(x, z);
 			return c < 0 || m_top_y[c] == NO_GROUND ? -1e9f :

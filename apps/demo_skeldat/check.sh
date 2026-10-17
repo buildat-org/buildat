@@ -874,6 +874,30 @@ grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
 	! grep -aq "the skeleton ($safe) burns" "$log23" &&
 	grep -aq "the skeleton ($open) burns" "$log23" ||
 	fail "the bone block did not keep the sun off ($log23)"
+# 21. Water ([SKELDAT_SKELETON_WATER]): at midnight a skeleton put in a
+# pool dies at once, its drops on the ground; one 12 off across a pond's
+# row 10 off, wanting a bow's distance (9), is held by the water, not in it
+log24="$t/srv24.log"
+pond=$(for x in -4 -3 -2 -1 0 1 2 3 4; do printf 'marker %d 10 skeldat:water_source; ' $x; done)
+BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+	BUILDAT_SKELDAT_TEST="${pond}marker 0 -6 skeldat:water_source; skeleton 0 12 marked; skeleton 0 -6 marked" \
+	start_server "$log24" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv24" -C "$t/srv.cache" -l 3 || fail "the server ($log24)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 20000" quit > "$t/water.cmds"
+client water "$t/water.cmds"
+wait $CLIENT || fail "the water's drive ($t/water.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+across=$(grep -a "test: a skeleton (" "$log24" | sed -n 1p | sed 's/.*(\([0-9]*\)).*/\1/')
+pool=$(grep -a "test: a skeleton (" "$log24" | sed -n 2p | sed 's/.*(\([0-9]*\)).*/\1/')
+[ -n "$pool" ] && grep -aq "the skeleton ($pool) is in water" "$log24" &&
+	grep -aA1 "the skeleton ($pool) is in water" "$log24" | grep -aq "a drop of" ||
+	fail "the skeleton in the pool did not die ($log24)"
+grep -aq "a skeleton shoots at client1" "$log24" &&
+	! grep -aq "the skeleton ($across) is in water" "$log24" ||
+	fail "the skeleton went into the pond ($log24)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -881,5 +905,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of"
 # vim: set noet ts=4 sw=4:
