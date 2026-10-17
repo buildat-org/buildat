@@ -1701,15 +1701,16 @@ struct Module: public interface::Module, public luanti_session::Game
 				log_i(MODULE, "skeldat: a bone block at %d,%d,%d goes",
 						p.getX(), p.getY(), p.getZ());
 			}
-			grow(w, vol, box);
+			grow(w, vol, box, guard);
 		});
 	}
 
 	// Bones off the voxels at MAX with air over them, now and then
 	// (bones::GROW_ONE_IN): a bone block on a bone block stacks to
-	// STACK_MAX; a skull, two or a bone tops nothing
+	// STACK_MAX; a skull, two or a bone tops nothing. Not into a burning
+	// lantern's sphere (`guard`, empty when none reaches the box)
 	void grow(voxelworld::Instance *w, const interface::VoxelVolume &vol,
-			const skeldat::bones::Box &box)
+			const skeldat::bones::Box &box, const sv_<uint8_t> &guard)
 	{
 		using namespace skeldat::bones;
 		const uint32_t block = id_of("skeldat:bone_block");
@@ -1721,7 +1722,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		for(int x = 1; x < box.w - 1; x++){
 			const size_t i = box.at(x, y, z);
 			if(box.b[i] < MAX || box.air[i] ||
-					m_rand() % GROW_ONE_IN >= (uint32_t)m_speed)
+					m_rand() % GROW_ONE_IN >= (uint32_t)m_speed ||
+					(!guard.empty() && guard[box.at(x, y + 1, z)]))
 				continue;
 			const int32_t px = lc.getX() + x, py = lc.getY() + y,
 					pz = lc.getZ() + z;
