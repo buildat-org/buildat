@@ -31,7 +31,9 @@ namespace voxel_path
 
 	// What a cell is to a body. CLIMB is open, and a body in it stands
 	// without ground under it and moves up and down: a ladder, water.
-	enum Cell: uint8_t { OPEN = 0, SOLID = 1, CLIMB = 2 };
+	// LIQUID is water to a body that keeps out of it: no body in it, no
+	// ground on it, and a build move may put a block in it.
+	enum Cell: uint8_t { OPEN = 0, SOLID = 1, CLIMB = 2, LIQUID = 3 };
 
 	// The box searched, x fastest, then z, then y. Outside it is SOLID, so
 	// a path never leaves it.
@@ -76,6 +78,14 @@ namespace voxel_path
 		float max_length = 0;
 		// A ceiling on the cells a search expands, whatever the length
 		size_t max_expanded = 20000;
+		// Over 0, build moves, each a block put in an OPEN or LIQUID cell
+		// at this cost in walks besides its walk: a bridge (a walk onto a
+		// cell with no ground, the block under it), a stair (a step up
+		// onto a block put at the step's height) and a ledge (where the
+		// drop is more than max_fall, a block max_fall down to land on).
+		// Along the x and z axes only. The block is not in the field, so
+		// a body may stand on it or fall past it later in the path.
+		float build_cost = 0;
 	};
 
 	struct Result
@@ -87,6 +97,8 @@ namespace voxel_path
 		size_t expanded = 0;
 		// From the start to the goal, both included, when found
 		sv_<P> path;
+		// The blocks the build moves put, in the path's order
+		sv_<P> blocks;
 	};
 
 	// Whether a body stands at p: its cells free of SOLID, and ground under

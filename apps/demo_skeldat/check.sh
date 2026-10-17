@@ -898,6 +898,41 @@ pool=$(grep -a "test: a skeleton (" "$log24" | sed -n 2p | sed 's/.*(\([0-9]*\))
 grep -aq "a skeleton shoots at client1" "$log24" &&
 	! grep -aq "the skeleton ($across) is in water" "$log24" ||
 	fail "the skeleton went into the pond ($log24)"
+# 22. Ways built of bone ([SKELDAT_BONE_BRIDGES]), at night, the player
+# taken off past waking range so the light forms walk: two skeletons whose
+# night's block is across a pond 6 wide build one bridge of 6 blocks and
+# then walk across; one lured to a lantern on a platform 5 up builds a
+# stair and takes it; one whose block is behind a wall it can walk round
+# builds nothing
+log25="$t/srv25.log"
+ways=$(for z in $(seq -7 7); do for x in 3 4 5 6 7 8; do
+	printf 'marker %d %d skeldat:water_source -1; ' $x $z; done; done
+for z in -1 0 1; do for x in -9 -8 -7; do printf 'marker %d %d skeldat:stone 4; ' $x $z; done; done
+for x in -3 -2 -1 0 1 2 3; do for y in 0 1 2; do printf 'marker %d -14 skeldat:stone %d; ' $x $y; done; done)
+BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
+	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
+	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 0 -11 marked seed 0 -17 1; place 100 0" \
+	start_server "$log25" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv25" -C "$t/srv.cache" -l 3 || fail "the server ($log25)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 60000" quit > "$t/ways.cmds"
+client ways "$t/ways.cmds"
+wait $CLIENT || fail "the ways' drive ($t/ways.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+keys=$(grep -a "test: a skeleton (" "$log25" | sed 's/.*(\([0-9]*\)).*/\1/' | tr '\n' ' ')
+set -- $keys
+bridge=$(grep -a "skeleton ($1) builds\|skeleton ($2) builds" "$log25" | sed 's/.* at //' | sort -u)
+echo "ways: the bridge $(echo $bridge)"
+[ $(echo "$bridge" | grep -c .) = 6 ] && [ $(echo "$bridge" | cut -d, -f3 | sort -u | wc -l) = 1 ] &&
+	grep -aq "skeleton ($1) places its night's block at 11,\|skeleton ($2) places its night's block at 11," "$log25" ||
+	fail "no bridge of 6 in a line, crossed ($log25)"
+grep -aq "skeleton ($3) builds" "$log25" && grep -aq "a skeleton ($3) takes the lantern" "$log25" ||
+	fail "no stair to the lantern ($log25)"
+grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
+	! grep -aq "skeleton ($4) builds" "$log25" ||
+	fail "a block built where a walking way is ($log25)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -905,5 +940,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone"
 # vim: set noet ts=4 sw=4:
