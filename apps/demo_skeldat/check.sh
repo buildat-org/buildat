@@ -48,6 +48,7 @@
 # key, a death's half; lying a game day, kept over a restart, picked up.
 # The fifteenth, a respawn far from the spawn: the world there drawn.
 # The sixteenth, a new world's skeletons there from the start.
+# The seventeenth, the bodiless skeletons drawn out to the view.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -757,11 +758,45 @@ grep -aq "skeldat: populated" "$t/srv19_2.log" &&
 	fail "populated again ($t/srv19_2.log)"
 grep -aq "the world \"pop\" starts, seed 2, 0 furnaces, $(echo "$pop" | awk "{ print \$4 }") mobs" \
 	"$t/srv19_2.log" || fail "not the same skeletons loaded: $pop ($t/srv19_2.log)"
+# 17. Far skeletons ([SKELDAT_FAR_SKELETONS]): nine light skeletons in a
+# row 52 voxels ahead (past WAKE), their steps slowed to 30 s: the client
+# draws as many as the server sends; started again at midnight (by day
+# the woken burn) with the player placed 7 from them, they wake, have
+# bodies, and the far list is empty
+log20="$t/srv20.log"
+T=; for x in -16 -12 -8 -4 0 4 8 12 16; do T="$T skeleton $x 52;"; done
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=far BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+		BUILDAT_SKELDAT_TIME=$([ $n = 1 ] && echo 0.5 || echo 0) \
+		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_FAR=1 BUILDAT_SKELDAT_LIGHT_STEP=30 \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "$T" || echo "place 0 45")" \
+		start_server "$t/srv20_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv20" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv20_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "wait_log 30000 far skeletons drawn" "delay 3000" \
+		quit > "$t/far.cmds"
+	[ $n = 1 ] && sed -i 's/^delay 3000$/look 0 -8\ndelay 1500\nscreenshot '"${t//\//\\/}"'\/far.png/' "$t/far.cmds"
+	client far$n "$t/far.cmds"
+	wait $CLIENT || fail "the far skeletons' drive $n ($t/far$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	cat "$t/srv20_$n.log" >> "$log20"
+done
+drawn=$(grep -a "skeldat: [0-9]* far skeletons drawn" "$t/far1.log" | tail -1 | sed 's/.*skeldat: \([0-9]*\) far.*/\1/')
+sent=$(grep -a "far skeletons to client1" "$t/srv20_1.log" | tail -1 | sed 's/.*skeldat: \([0-9]*\) far.*/\1/')
+[ "$drawn" = 9 ] && [ "$sent" = 9 ] ||
+	fail "the far skeletons: $drawn drawn, $sent sent, not 9 ($t/far1.log, $t/srv20_1.log)"
+# (the nine may then shoot the player dead, and asleep again be far)
+grep -aq "skeldat: 0 far skeletons to client1" "$t/srv20_2.log" &&
+	grep -aq "skeldat: a skeleton ([0-9]*) is here" "$t/far2.log" ||
+	fail "the near skeletons not woken out of the far list ($t/srv20_2.log)"
+far="9 drawn and sent; $(grep -a "skeldat: [0-9]* far skeletons drawn" "$t/far1.log" | tail -1 | sed 's/.*(//; s/)//')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
 echo "a new world populated: $pop"
+echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons"
 # vim: set noet ts=4 sw=4:

@@ -122,6 +122,9 @@ struct Player
 	bool skeleton = false;
 	// No damage of any kind, the admin's toggle ([SKELDAT_INVULNERABLE])
 	bool invulnerable = false;
+	// The last skeldat:far sent ([SKELDAT_FAR_SKELETONS]); none yet is not
+	// the empty list
+	ss_ far_sent = "-";
 
 	ss_ save() const {
 		std::ostringstream os;
@@ -529,6 +532,9 @@ struct Module: public interface::Module, public luanti_session::Game
 	uint32_t m_next_mob = 1;
 	std::vector<Arrow> m_arrows;
 	std::vector<Drop> m_drops;
+	float m_far_t = 0;
+	// Each skeldat:far's count logged, for a check (BUILDAT_SKELDAT_FAR=1)
+	bool m_far_report = getenv("BUILDAT_SKELDAT_FAR") != nullptr;
 	float m_ai_t = 0, m_spawn_t = 0;
 	// The columns whose top voxel has FLOOD bones or more, a section's
 	// footprint each (x then z from -m_half), swept one a second; the
@@ -2733,6 +2739,11 @@ struct Module: public interface::Module, public luanti_session::Game
 				if(g.found)
 					m.y = g.y;
 			});
+			// Not near the player's height: on its column's top
+			const long c = column((int)std::floor(m.x + 0.5f),
+					(int)std::floor(m.z + 0.5f));
+			if(m.y == p->y && c >= 0 && m_top_y[c] != NO_GROUND)
+				m.y = m_top_y[c] + 0.5f;
 			m.hp = MOB_HP[m.kind];
 			m.yaw = (float)M_PI;
 			m.mode_t = 30;
@@ -3399,6 +3410,42 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	// A game hour: the count toward its target, added at night on bone
 	// columns, let die in the morning on clean ground
+	// The bodiless skeletons within FAR_DRAW of each player, to be drawn
+	// ([SKELDAT_FAR_SKELETONS]): "x y z yaw" a line, the place rounded to
+	// the voxel and the yaw to a sixteenth of a turn; sent when it differs
+	void send_far()
+	{
+		static const float FAR_DRAW = 160;
+		for(auto &pair : m_players){
+			Player &pl = pair.second;
+			if(!pl.placed)
+				continue;
+			std::ostringstream os;
+			size_t n = 0;
+			for(auto &kv : m_mobs){
+				const Mob &m = kv.second;
+				if(m.kind != SKELETON || m.node_id ||
+						std::fabs(m.x - pl.x) > FAR_DRAW ||
+						std::fabs(m.z - pl.z) > FAR_DRAW ||
+						std::hypot(m.x - pl.x, m.z - pl.z) > FAR_DRAW)
+					continue;
+				const int yaw = ((int)std::lround(m.yaw / (2 * M_PI) * 16) %
+						16 + 16) % 16;
+				os<<(int)std::floor(m.x + 0.5f)<<" "<<m.y<<" "
+						<<(int)std::floor(m.z + 0.5f)<<" "<<yaw<<"\n";
+				n++;
+			}
+			const ss_ s = os.str();
+			if(s == pl.far_sent)
+				continue;
+			pl.far_sent = s;
+			network::send(m_server, pair.first, "skeldat:far", s);
+			if(m_far_report)
+				log_i(MODULE, "skeldat: %zu far skeletons to %s", n,
+						cs(pl.name));
+		}
+	}
+
 	// The skeletons' count and its target by the flooded share f
 	size_t skeleton_target(size_t &n, double &f)
 	{
@@ -3619,6 +3666,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		if(m_world_ready){
 			step_light(event.dtime);
+			m_far_t += event.dtime;
+			if(m_far_t >= std::min(m_light_step, 1.0f)){
+				m_far_t = 0;
+				send_far();
+			}
 			m_sweep_t += event.dtime;
 			if(m_sweep_t >= 1){
 				m_sweep_t = 0;

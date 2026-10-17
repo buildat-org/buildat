@@ -315,8 +315,89 @@ return function(game, sounds)
 				x, y, z))
 		M.play_at(moment, x, y, z)
 	end)
+	-- The bodiless skeletons out to the view ([SKELDAT_FAR_SKELETONS]):
+	-- skeldat:far, "x y z yaw" a line (the yaw in sixteenths of a turn),
+	-- each a pooled node built once with the skeleton's parts in the
+	-- standing pose, moved and turned per packet; the spare ones hidden.
+	-- One geometry for all was rebuilt per packet, 80 ms for 590 of them
+	-- (luabind's conversion of every quad), a hitch every second.
+	-- simplified: lit by one value, the light at the first of them; no
+	-- step between the voxels (a lerp if the jumps read badly)
+	local far = {pool = {}, mat = nil, light_t = 0, at = nil, n = 0,
+		frames = 0, frames_t = 0}
+	-- The skeleton's quads round its feet, once
+	local far_template = {}
+	do
+		local k = KINDS.skeldat_skeleton
+		for _, part in ipairs(k.parts) do
+			local q, b = {}, part[4]
+			box(q, part[5], k.tw, k.th, b[1], b[2], b[3], b[4], b[5], b[6])
+			for _, one in ipairs(q) do
+				for i = 1, 12, 3 do
+					one.p[i] = one.p[i] + part[1] / 16
+					one.p[i + 1] = one.p[i + 1] + part[2] / 16
+					one.p[i + 2] = one.p[i + 2] + part[3] / 16
+				end
+				far_template[#far_template + 1] = one
+			end
+		end
+	end
+	buildat.sub_packet("skeldat:far", function(data)
+		local t0 = buildat.get_time_us()
+		far.mat = far.mat or material(KINDS.skeldat_skeleton.texture)
+		local n = 0
+		far.at = nil
+		for line, x, y, z, yw in data:gmatch("((%S+) (%S+) (%S+) (%S+))\n") do
+			n = n + 1
+			local slot = far.pool[n]
+			if not slot then
+				slot = {node = replicate.main_scene:CreateChild("far_skeleton"),
+					line = nil}
+				build(slot.node, far_template, far.mat)
+				far.pool[n] = slot
+			end
+			x, y, z = tonumber(x), tonumber(y), tonumber(z)
+			-- The sandbox's calls are the cost: none for one that is as it was
+			if slot.line ~= line then
+				slot.node.position = magic.Vector3(x, y, z)
+				slot.node.rotation = magic.Quaternion(0, tonumber(yw) * 22.5, 0)
+				if not slot.line then
+					slot.node:SetEnabled(true)
+				end
+				slot.line = line
+			end
+			far.at = far.at or magic.Vector3(x, y + 1, z)
+		end
+		for i = n + 1, far.n do
+			far.pool[i].node:SetEnabled(false)
+			far.pool[i].line = nil
+		end
+		far.n = n
+		far.light_t = 0
+		if far.n ~= far.said then
+			far.said = far.n
+			log:info(string.format("skeldat: %d far skeletons drawn (placed in "
+					.. "%.1f ms)", far.n, (buildat.get_time_us() - t0) / 1000))
+		end
+	end)
+
 	magic.SubscribeToEvent("Update", function(_, d)
 		local dt = d:GetFloat("TimeStep")
+		-- The frames' mean beside the far count, every 10 s
+		far.frames, far.frames_t = far.frames + 1, far.frames_t + dt
+		if far.frames_t >= 10 then
+			log:info(string.format("skeldat: frames %.1f ms, %d far skeletons",
+					far.frames_t * 1000 / far.frames, far.n))
+			far.frames, far.frames_t = 0, 0
+		end
+		far.light_t = far.light_t - dt
+		if far.at and far.light_t <= 0 then
+			far.light_t = 0.5
+			local r, g, b = light_at(far.at)
+			if r then
+				far.mat:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+			end
+		end
 		for i = #playing, 1, -1 do
 			playing[i].t = playing[i].t - dt
 			if playing[i].t <= 0 then

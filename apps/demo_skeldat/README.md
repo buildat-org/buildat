@@ -69,6 +69,7 @@ tops, ores and edge bones logged once it is in;
 at x >= 0 (and no piles at x < 0); `BUILDAT_SKELDAT_DAY=<s>` the seconds a day;
 `BUILDAT_SKELDAT_EXPAND=<s>` the seconds between a section's expansions;
 `BUILDAT_SKELDAT_LIGHT_STEP=<s>` a light skeleton's step;
+`BUILDAT_SKELDAT_FAR=1` each far skeletons list sent to a player logged;
 `BUILDAT_SKELDAT_SKELETONS=<n>` that many light skeletons added anywhere
 when the world is in, and a new world not populated to its target (set,
 or TEST); `BUILDAT_SKELDAT_MARKERS="sx sz n"` a footprint's
