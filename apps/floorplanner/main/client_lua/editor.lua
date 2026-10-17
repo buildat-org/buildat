@@ -2661,6 +2661,7 @@ local function build_toolbar()
 	local l = S.layout and doc.ents[S.layout]
 	add(l and l.strs.name or "Layouts", nil, function()
 		S.layouts_open = not S.layouts_open
+		log:info("Layouts menu " .. (S.layouts_open and "shown" or "closed"))
 		refresh_panels()
 	end, S.layouts_open)
 	-- Viewing ([FP_VIEW_EDIT]): the tools that only make and change
@@ -7369,9 +7370,38 @@ function M.start(d)
 			S.swallow_up = true
 			return
 		end
+		-- [FP_OUTSIDE_CLOSE] A press on the background round the pause
+		-- menu (any of its pages) or the layouts menu closes it at the
+		-- release, as vanilla's, and does nothing else; one that starts
+		-- on the window and ends off it (a slider's drag) does not. Not
+		-- the panels used with the view (props, palette): a press on any
+		-- of them is not the background.
+		-- simplified: the mouse's (a finger's made-up one included); the
+		-- builtin accounts pages the menu opens keep their Back
+		local sc = magic.ui.scale
+		local ux, uy = S.mx / sc, S.my / sc
+		if S.paused and E.pause_win and not panel.over({E.pause_win}, ux, uy) then
+			S.close_on_up = "pause menu"
+		elseif not S.paused and place.win and not over_ui() then
+			S.close_on_up = "layouts menu"
+		end
+		if S.close_on_up then
+			S.swallow_up = true
+			return
+		end
 		M.mouse_down(data:GetInt("Button"))
 	end))
 	magic.SubscribeToEvent("MouseButtonUp", live(function(_, data)
+		if S.close_on_up then
+			log:info("A press off the " .. S.close_on_up .. " closes it")
+			if S.close_on_up == "pause menu" then
+				close_pause()
+			else
+				S.layouts_open = false
+				refresh_panels()
+			end
+			S.close_on_up = nil
+		end
 		M.mouse_up(data:GetInt("Button"))
 	end))
 	magic.SubscribeToEvent("MouseMove", live(function(_, data)
