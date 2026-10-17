@@ -98,6 +98,8 @@ delay 1000
 screenshot $t/back.png
 quit
 C
+# The user is a Guest: the admin lets Guests talk first
+# ([VANILLA_CHAT_MIN]: Residents and up by default)
 # The admin plays the world again once the user's chat line has come
 # (the server sends it to everyone in), and the two seconds after it are
 # the user's Escape back to the held page
@@ -107,6 +109,12 @@ wait_log 60000 the server put the player at
 delay 1000
 keypress Escape
 wait_log 10000 pause: the menu shown
+delay 500
+click DropDownList "▼"
+wait_log 5000 dropdown_
+click Text "Guests and up"
+wait_log 10000 chat: *** Chat is for Guests and up now
+delay 500
 click Button "Worlds..."
 wait_log 10000 saves, 
 click Button "Stop the world..."

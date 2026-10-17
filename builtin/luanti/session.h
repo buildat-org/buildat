@@ -17,6 +17,7 @@
 #include "interface/os.h"
 #include "interface/polyvox_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
+#include <functional>
 #include <cereal/types/vector.hpp>
 #include <cereal/types/string.hpp>
 #include <sstream>
@@ -78,6 +79,9 @@ struct Session
 	// Lines a player may chat at once, then one a second; 0 is no limit
 	// (set_chat_limit)
 	double m_chat_burst = 0;
+	// [VANILLA_CHAT_MIN] Who may say a plain line: "" for yes, else what
+	// the player is told (set_chat_gate); a "/" command runs either way
+	std::function<ss_(size_t peer, const ss_ &name)> m_chat_gate;
 	sm_<network::PeerInfo::Id, std::pair<double, int64_t>> m_chat_bucket;
 
 	// Where a client says its player is, five times a second each, and
@@ -125,6 +129,11 @@ struct Session
 	void set_chat_limit(double burst)
 	{
 		m_chat_burst = burst;
+	}
+
+	void set_chat_gate(std::function<ss_(size_t peer, const ss_ &name)> gate)
+	{
+		m_chat_gate = gate;
 	}
 
 	void left(network::PeerInfo::Id peer)
@@ -328,6 +337,14 @@ struct Session
 				return;
 			}
 			b.first += 1;
+		}
+		if(m_chat_gate && values[0][0] != '/'){
+			const ss_ why = m_chat_gate(packet.sender, name);
+			if(!why.empty()){
+				log_i("luanti", "%s's line refused: %s", cs(name), cs(why));
+				m_game.chat_send(name, why);
+				return;
+			}
 		}
 		m_game.chat_message(name, values[0]);
 	}

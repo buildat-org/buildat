@@ -12,6 +12,8 @@
 		{"module": "voxel_shading"},
 		{"module": "luanti"},
 		{"module": "accounts"},
+		{"module": "moderation"},
+		{"module": "chat"},
 		{"module": "starport_announce"},
 		{"module": "world_menu"}
 	]

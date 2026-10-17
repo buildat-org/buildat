@@ -28,6 +28,12 @@ M.listeners = {}
 M.state = {min = "everyone", may_talk = false, muted = false,
 	moderator = false, people = {}}
 M.queue = {}
+-- [VANILLA_CHAT_MIN] chat:set_min's values as the players read them
+-- (builtin/accounts' level names)
+M.MIN_SHOWN = {everyone = "Guests and up", member = "Residents and up",
+	helper = "Keepers and up"}
+M.MIN_CHOICES = {{"Guests and up", "everyone"},
+	{"Residents and up", "member"}, {"Keepers and up", "helper"}}
 local KEEP = 200
 local accounts = nil
 local root, hold_fn, close
@@ -99,12 +105,11 @@ local function build()
 	if s.muted then
 		text(menu.window, "A moderator has muted you.")
 	elseif not s.may_talk then
-		text(menu.window, "The chat is for " .. (s.min == "member" and
-				"members" or "helpers") .. " and up now.")
+		text(menu.window, "The chat is for " .. (M.MIN_SHOWN[s.min] or
+				s.min) .. " now.")
 	end
 	if s.moderator then
-		menu:add_dropdown("Who may talk", {"everyone", "member", "helper"},
-				s.min, function(v)
+		menu:add_dropdown("Who may talk", M.MIN_CHOICES, s.min, function(v)
 			buildat.send_packet("chat:set_min", v)
 		end)
 	end

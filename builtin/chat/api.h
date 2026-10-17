@@ -38,6 +38,13 @@ namespace chat
 		virtual void leave(size_t peer) = 0;
 		// A line of the server's own to everyone in
 		virtual void say(const ss_ &line) = 0;
+		// [VANILLA_CHAT_MIN] The lowest level that may talk while the save
+		// has none a moderator set (everyone|member|helper; everyone if no
+		// app says)
+		virtual void set_default_min(const ss_ &min) = 0;
+		// Whether a peer may say a line as `name` (chat:state's may_talk:
+		// the level, a mute); if not, *why is what to tell the player
+		virtual bool may_talk(size_t peer, const ss_ &name, ss_ *why) = 0;
 	};
 
 	inline bool access(interface::Server *server,

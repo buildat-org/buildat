@@ -32,6 +32,9 @@ static const double REPORT_EVERY_S = 30;
 static const char *MIN_NAMES[] = {"everyone", "member", "helper"};
 static const int MIN_LEVELS[] = {accounts::LV_NEW, accounts::LV_MEMBER,
 		accounts::LV_HELPER};
+// As the players read them (builtin/accounts' level names)
+static const char *MIN_SHOWN[] = {"Guests and up", "Residents and up",
+		"Keepers and up"};
 
 static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 
@@ -45,6 +48,7 @@ struct Module: public interface::Module, public Interface,
 	std::map<size_t, ss_> m_in;
 	std::set<ss_> m_muted;
 	int m_min = 0; // index into MIN_NAMES
+	bool m_min_saved = false; // a moderator's, not the app's default
 	std::deque<ss_> m_lines;
 	std::map<size_t, std::pair<double, int64_t>> m_bucket;
 	// The last report by address: a reconnect is a new peer
@@ -113,7 +117,7 @@ struct Module: public interface::Module, public Interface,
 		if(m_store->get("min", v))
 			for(int i = 0; i < 3; i++)
 				if(v == MIN_NAMES[i])
-					m_min = i;
+					m_min = i, m_min_saved = true;
 		for(const ss_ &key : m_store->list("mute/"))
 			m_muted.insert(key.substr(5));
 	}
@@ -158,11 +162,19 @@ struct Module: public interface::Module, public Interface,
 		return lv;
 	}
 
-	bool may_talk(size_t peer, const ss_ &name)
+	bool may_talk(size_t peer, const ss_ &name, ss_ *why = nullptr)
 	{
 		const int lv = level_of(peer);
-		return !m_muted.count(name) && (lv >= accounts::LV_HELPER ||
-				lv >= MIN_LEVELS[m_min]);
+		if(m_muted.count(name)){
+			if(why)
+				*why = "A moderator has muted you.";
+			return false;
+		}
+		if(lv >= accounts::LV_HELPER || lv >= MIN_LEVELS[m_min])
+			return true;
+		if(why)
+			*why = ss_("The chat is for ")+MIN_SHOWN[m_min]+" now.";
+		return false;
 	}
 
 	void send_state(size_t peer)
@@ -218,6 +230,13 @@ struct Module: public interface::Module, public Interface,
 		to_all("*** "+line);
 	}
 
+	void set_default_min(const ss_ &min)
+	{
+		for(int i = 0; i < 3; i++)
+			if(min == MIN_NAMES[i] && !m_min_saved)
+				m_min = i;
+	}
+
 	void on_connected(const network::NewClient &e)
 	{
 		m_address[e.info.id] = e.info.address;
@@ -264,13 +283,11 @@ struct Module: public interface::Module, public Interface,
 					text += c;
 			if(text.empty())
 				return;
-			if(!may_talk(peer, name)){
-				const bool muted = m_muted.count(name) != 0;
+			ss_ why;
+			if(!may_talk(peer, name, &why)){
 				log_i(MODULE, "%s's line refused: %s", cs(name),
-						muted ? "muted" : "below the minimum level");
-				send(peer, "chat:line", muted ? "(A moderator has muted you.)" :
-						ss_("(The chat is for ")+MIN_NAMES[m_min]+
-						"s and up now.)");
+						m_muted.count(name) ? "muted" : "below the minimum level");
+				send(peer, "chat:line", "("+why+")");
 				return;
 			}
 			const int64_t now = interface::os::time_us();
@@ -288,13 +305,13 @@ struct Module: public interface::Module, public Interface,
 			for(int i = 0; i < 3; i++){
 				if(packet.data == MIN_NAMES[i] && i != m_min){
 					m_min = i;
+					m_min_saved = true;
 					m_store->set("min", MIN_NAMES[i]);
 					audit(name, "chat", "chat_min", ss_("the lowest level that "
 							"may talk: ")+MIN_NAMES[i]);
 					log_i(MODULE, "%s: the lowest level that may talk is %s",
 							cs(name), MIN_NAMES[i]);
-					say(ss_("Chat is for ")+(i == 0 ? "everyone" : i == 1 ?
-							"members and up" : "helpers and up")+" now");
+					say(ss_("Chat is for ")+MIN_SHOWN[i]+" now");
 					send_states();
 				}
 			}

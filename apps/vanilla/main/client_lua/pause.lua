@@ -42,6 +42,12 @@ accounts.chat_send = function(text)
 	buildat.send_packet("luanti:chat",
 			cereal.binary_output({text}, {"array", "string"}))
 end
+-- [VANILLA_CHAT_MIN] Who may talk is builtin/chat's (chat.state); its own
+-- lines (a change of it) into the console with the game's
+local chat = require("buildat/module/chat")
+chat.listeners[#chat.listeners + 1] = function(line)
+	accounts.chat_add(line)
+end
 
 -- What the server said in main:account
 local account = {public = false, admin = false, world = "", is_local = false}
@@ -196,6 +202,14 @@ open = function()
 			end}
 		end)
 	end)
+	-- [VANILLA_CHAT_MIN] A moderator's and an admin's (the LAN game's
+	-- owner too): who may talk, here and in the lobby; the
+	-- first dropdown, which a drive's click finds first
+	if chat.state.moderator then
+		ui_utils.dropdown(w, chat.MIN_CHOICES, chat.state.min, function(v)
+			buildat.send_packet("chat:set_min", v)
+		end, {label = "Who may talk", fill = true})
+	end
 	-- **The viewing range, the player's own** (user, 2026-09-30), kept on
 	-- this client for this server, never over what the server allows
 	-- (keys.view in init.lua). A web client starts lower, and a fast one

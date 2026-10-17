@@ -255,6 +255,12 @@ namespace luanti
 		// A player's chat lines at once, then one a second; 0, the
 		// default, is no limit (a public server's flood guard)
 		virtual void set_chat_limit(double burst) = 0;
+		// [VANILLA_CHAT_MIN] Asked of a plain line before the game's
+		// callbacks see it: "" lets it through, else the line is dropped
+		// and the player told that text. A "/" command is not asked: the
+		// game's privileges are its own. Called on this module's thread.
+		virtual void set_chat_gate(
+				std::function<ss_(size_t peer, const ss_ &name)> gate) = 0;
 
 		// The drop key: what the player is holding goes into the world as
 		// an object. count is how many of the stack go, and zero is all of

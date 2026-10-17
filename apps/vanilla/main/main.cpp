@@ -23,6 +23,7 @@
 #include "storage/api.h"
 #include "voxelworld/api.h"
 #include "accounts/api.h"
+#include "chat/api.h"
 #include "starport_announce/api.h"
 #include <cstdlib>
 #include <sys/stat.h>
@@ -367,6 +368,9 @@ struct Module: public interface::Module
 		if(!m_public)
 			return;
 		m_names[login.peer] = login.name;
+		chat::access(m_server, [&](chat::Interface *i){
+			i->join(login.peer, login.name);
+		});
 		if(m_scene){
 			show_world_to(login.peer);
 			return;
@@ -496,6 +500,20 @@ struct Module: public interface::Module
 		if(values.empty() || values[0].empty())
 			return;
 		const ss_ &message = values[0];
+		// [VANILLA_CHAT_MIN] builtin/chat says who may talk
+		const ss_ why = chat_refusal(m_server, packet.sender,
+				player_name_of(packet.sender));
+		if(!why.empty()){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(sv_<ss_>{"("+why+")"});
+			}
+			log_i(MODULE, "%s's line refused: %s",
+					cs(player_name_of(packet.sender)), cs(why));
+			network::send(m_server, packet.sender, "main:chat_line", os.str());
+			return;
+		}
 		// **A public server's chat is limited** ([VANILLA_PUBLIC] 8): a
 		// player's lines fill a bucket that empties one a second, and a
 		// line into a full one is refused
@@ -515,6 +533,18 @@ struct Module: public interface::Module
 			for(const auto &kv : m_names)
 				inetwork->send(kv.first, "main:chat_line", os.str());
 		});
+	}
+
+	// What a player who may not talk is told, "" if they may. Static: the
+	// world's chat asks it on builtin/luanti's thread
+	static ss_ chat_refusal(interface::Server *server, size_t peer,
+			const ss_ &name)
+	{
+		ss_ why;
+		chat::access(server, [&](chat::Interface *i){
+			i->may_talk(peer, name, &why);
+		});
+		return why;
 	}
 
 	void on_game_loaded(const luanti::GameLoaded &event)
@@ -4190,6 +4220,12 @@ struct Module: public interface::Module
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->join_player(player_name_of(peer), peer, admin);
 		});
+		// A public server's player is in the chat from the join
+		// (on_accounts_login)
+		if(!m_public)
+			chat::access(m_server, [&](chat::Interface *i){
+				i->join(peer, player_name_of(peer));
+			});
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 	}
 
@@ -4300,6 +4336,14 @@ struct Module: public interface::Module
 		if(m_public)
 			log_i(MODULE, "A public server: clients join by account, and the "
 					"worlds are the admins'");
+		// [VANILLA_CHAT_MIN] Who may talk, builtin/chat's setting: on a
+		// public server Residents and up (a Guest is anyone who made an
+		// account), on the launcher's own LAN game everyone (a friend
+		// joining talks at once); a moderator's choice in the save over
+		// either
+		chat::access(m_server, [&](chat::Interface *i){
+			i->set_default_min(m_public ? "member" : "everyone");
+		});
 		// BUILDAT_LUANTI_FETCH_ONCE: one ContentDB listing at start, its
 		// outcome logged and sent to nobody -- the smoke's way of running
 		// http_get, whose std::call_once died on the box through a
@@ -4647,6 +4691,10 @@ struct Module: public interface::Module
 			apply_default_preset(save->path());
 			if(m_public)
 				i->set_chat_limit(CHAT_BURST);
+			interface::Server *server = m_server;
+			i->set_chat_gate([server](size_t peer, const ss_ &name){
+				return chat_refusal(server, peer, name);
+			});
 			luanti::Interface::Paths paths;
 			paths.settings_file = luanti_path()+"/settings.json";
 			paths.base_textures = luanti_path()+"/textures/base/pack";

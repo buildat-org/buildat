@@ -3660,6 +3660,10 @@ struct Module: public interface::Module, public luanti::Interface,
 	{
 		m_session.set_chat_limit(burst);
 	}
+	void set_chat_gate(std::function<ss_(size_t peer, const ss_ &name)> gate)
+	{
+		m_session.set_chat_gate(gate);
+	}
 
 	// Interface
 
