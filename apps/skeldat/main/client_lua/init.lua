@@ -322,6 +322,15 @@ voxel_shading.set_gray_by_light(1.5)
 -- bones.h's Y1 at every size ([SKELDAT_WORLD_SIZES]); past the sides no
 -- section is there, and one not loaded stops the player
 local WORLD_TOP = 63
+local function is_liquid(x, y, z)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+	if v == nil then
+		return false
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local def = reg:get_by_id(reg:id_of(v))
+	return def ~= nil and def.swimmable == true
+end
 local player = physics.new(
 	function(x, y, z)
 		if y > WORLD_TOP then
@@ -341,16 +350,7 @@ local player = physics.new(
 			return true
 		end
 		return def.physically_solid and (reg:collision_boxes_of(v) or true)
-	end,
-	function(x, y, z)
-		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
-		if v == nil then
-			return false
-		end
-		local reg = voxelworld.get_voxel_registry()
-		local def = reg:get_by_id(reg:id_of(v))
-		return def ~= nil and def.swimmable == true
-	end)
+	end, is_liquid)
 local yaw, pitch = 0, 0
 local placed = false
 
@@ -1070,6 +1070,7 @@ end
 -- simplified: no names over them, no animation
 --
 local others = {}
+local play_splash -- [SKELDAT_BOARD_WATER], set with the roll below
 buildat.sub_packet("skeldat:players", function(data)
 	local seen = {}
 	for name, x, y, z, yw, skeleton, on_board, prone in
@@ -1121,6 +1122,26 @@ buildat.sub_packet("skeldat:players", function(data)
 					o.speed = math.sqrt(dx * dx + dz * dz) / dts
 				end
 			end
+			-- [SKELDAT_BOARD_WATER] Into water at its feet: a splash there
+			-- at its speed, within 32
+			local wet = is_liquid(math.floor(x + 0.5), math.floor(y + 0.5),
+					math.floor(z + 0.5))
+			if wet and o.wet == false and o.t then
+				local dts = math.max(1e-3, (now - o.t) / 1e6)
+				local dx, dy, dz = x - o.x, y - o.y, z - o.z
+				local px, py, pz = x - player.x, y - player.y, z - player.z
+				if px * px + py * py + pz * pz < 32 * 32 then
+					if not o.splash then
+						o.splash = o.node:CreateComponent("SoundSource3D")
+						o.splash.soundType = magic.SOUND_EFFECT
+						o.splash.nearDistance = 2
+						o.splash.farDistance = 32
+					end
+					play_splash(math.sqrt(dx * dx + dy * dy + dz * dz) / dts,
+							o.splash, name .. "'s")
+				end
+			end
+			o.wet = wet
 			o.x, o.y, o.z, o.t = x, y, z, now
 			o.riding = on_board == "1"
 			o.node.position = magic.Vector3(x, y, z)
@@ -1553,6 +1574,31 @@ do
 		roll.others[i].node = n
 	end
 end
+-- [SKELDAT_BOARD_WATER] The splash on entering water, one-shots: the
+-- player's own, and another's at its body within 32 (its source's range)
+local splash = {node = scene:CreateChild("splash"), n = 0}
+do
+	local made = board_sound.splashes(buildat.synth)
+	for _, kind in ipairs({"soft", "hard"}) do
+		splash[kind] = {}
+		for v = 1, 4 do
+			splash[kind][v] = board_sound.to_sound(magic, made[kind][v])
+		end
+	end
+	splash.own = splash.node:CreateComponent("SoundSource")
+	splash.own.soundType = magic.SOUND_EFFECT
+end
+-- source: the own (nil) or a SoundSource3D; who: for the log
+function play_splash(speed, source, who)
+	local gain, hard = board_sound.splash_gain(speed,
+			player.movement.speed_walk)
+	splash.n = splash.n % 4 + 1
+	local src = source or splash.own
+	src.gain = gain
+	src:Play(splash[hard and "hard" or "soft"][splash.n])
+	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f%s", who,
+			speed, gain, hard and ", hard" or ""))
+end
 local function update_rolls(b, jumped, landed, fall)
 	local own = roll.own
 	if b then
@@ -1562,7 +1608,7 @@ local function update_rolls(b, jumped, landed, fall)
 		if landed then
 			own:clack(fall / 10)
 		end
-		local len = own:feed(b.s, player.on_ground, down("back"))
+		local len = own:feed(b.s, player.on_ground and not b.wet, down("back"))
 		roll.lo = math.min(roll.lo or len, len)
 		roll.hi = math.max(roll.hi or len, len)
 	else
@@ -1714,6 +1760,10 @@ magic.SubscribeToEvent("Update", function(_, d)
 					(roll.lo or 0) * 1000, (roll.hi or 0) * 1000))
 			roll.lo, roll.hi = nil, nil
 		end
+	end
+	if player.splashed then
+		play_splash(player.splashed, nil, "a")
+		player.splashed = nil
 	end
 	if player.landed_at then
 		if player.landed_at > 14 then

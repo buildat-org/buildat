@@ -1024,8 +1024,12 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 # 8 onto a flat, S stops it within the brake's reach. The camera looks
 # back over the first ride, which goes on straight ([SKELDAT_BOARD_KEYS]). The server pulls
 # back none of it, and pulls back a board the drive forces to 35 on the
-# flat. client2 sees client1 on a board and lying flat.
+# flat. client2 sees client1 on a board and lying flat, then walks into
+# a ring of water 2 round the spawn and splashes ([SKELDAT_BOARD_WATER]).
 log27="$t/srv27.log"
+ring=$(for x in -2 -1 0 1 2; do for z in -2 -1 0 1 2; do
+	[ ${x#-} = 2 ] || [ ${z#-} = 2 ] && printf 'marker %d %d skeldat:water_source; ' $x $z
+done; done)
 cat > "$t/board1.cmds" <<EOF
 $placed
 wait_log 60000 skeldat: placed at (-40.0,
@@ -1055,10 +1059,11 @@ delay 3000
 quit
 EOF
 printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
+	"delay 500" "keydown W" "wait_log 5000 skeldat: a splash at" "keyup W" \
 	"delay 500" quit > "$t/board2.cmds"
 BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
-	BUILDAT_SKELDAT_TEST="course -40 -20" \
+	BUILDAT_SKELDAT_TEST="${ring}course -40 -20" \
 	start_server "$log27" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv27" -C "$t/srv.cache" -l 3 || fail "the server ($log27)"
@@ -1102,6 +1107,8 @@ read -r roll_n roll_lo roll_hi <<< "$roll"
 	! grep -aq "board sound: .* underruns" "$c1" ||
 	fail "the roll's stream: $roll_n reports, $roll_lo to $roll_hi ms ahead ($c1)"
 echo "the roll: $roll_lo to $roll_hi ms ahead over $roll_n reports"
+grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*$" "$t/board2.log" ||
+	fail "client2's splash ($t/board2.log)"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 	fail "client2 did not see client1 on a board ($t/board2.log)"
 # 25. Free-running ([SERVER_FREE_RUN]): a 128 world, no player, at the

@@ -301,6 +301,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- How fast the player was going down when they last hit something,
 		-- in nodes a second, or nil. Whoever reads it clears it.
 		landed_at = nil,
+		-- [SKELDAT_BOARD_WATER] The speed into a liquid when last entered,
+		-- nodes a second, or nil; whoever reads it clears it
+		splashed = nil,
 		-- The node a sneaking player last stood on, which they do not
 		-- walk off; see the end of step()
 		sneak_node = nil,
@@ -396,7 +399,12 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- state (LocalPlayer::move, "the oscillating value")
 		local ly = self.y + (self.in_liquid and 0.1 or 0.5)
 		local lny = math.floor(ly + 0.5)
+		local was_in = self.in_liquid
 		self.in_liquid = is_liquid ~= nil and is_liquid(nx, lny, nz) or false
+		if self.in_liquid and not was_in then
+			self.splashed = math.sqrt(self.vx * self.vx + self.vy * self.vy +
+					self.vz * self.vz)
+		end
 		-- And the stable one, the node at the feet: what the sneak, the
 		-- crouch speed and the slip read, so that a body standing in
 		-- shallow water descends by sneak and walks at the walk
@@ -856,11 +864,42 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local g = 2 * m.gravity * (ov.gravity or 1)
 		local fx, fz = math.floor(self.x + 0.5), math.floor(self.z + 0.5)
 		local fy = math.floor(self.y + 0.5)
-		if flying() or (is_liquid ~= nil and is_liquid(fx, fy, fz)) or
-				(is_climbable ~= nil and is_climbable(fx, fy, fz)) then
+		if flying() or (is_climbable ~= nil and is_climbable(fx, fy, fz)) then
 			leave_board()
 			return step(dt, wish)
 		end
+		-- [SKELDAT_BOARD_WATER] In a liquid the board is kept: braked as
+		-- by the brake key, turned by the turn keys, carried across at its
+		-- heading and s, up and down as swimming is (no board jump); at s
+		-- 0 walking or swimming. b.wet says so (the roll is silent).
+		-- simplified: the brake's rate; the walk's acceleration and the
+		-- liquid's drag in step() take a little off each step's move
+		if is_liquid ~= nil and is_liquid(fx, fy, fz) then
+			if not b.wet and not self.on_ground then
+				-- In from the air: the flight's speed across
+				local hs = math.sqrt(self.vx * self.vx + self.vz * self.vz)
+				b.s = hs
+				if hs > 0.1 then
+					b.hx, b.hz = self.vx / hs, self.vz / hs
+				end
+			end
+			b.wet, b.k = true, 0
+			turn(wish, dt)
+			b.s = math.max(0, b.s - M.BOARD_BRAKE * dt)
+			if b.s <= 0 then
+				leave_board()
+				return step(dt, wish)
+			end
+			self.vx, self.vz = b.hx * b.s, b.hz * b.s
+			step(dt, {x = 0, z = 0, jump = wish.jump, sneak = wish.sneak})
+			-- Into a wall: walking
+			if (b.hx ~= 0 and self.vx == 0) or (b.hz ~= 0 and self.vz == 0) then
+				self.board = nil
+			end
+			return
+		end
+		-- Out of it, dry: the next liquid is entered again
+		b.wet, self.in_liquid, self.in_liquid_stable = nil, false, false
 		local pressed = wish.jump and not b.jump_held
 		b.jump_held = wish.jump
 		if self.on_ground then
@@ -1477,6 +1516,36 @@ do
 	run(stuck, {x = 1, z = 0}, 3)
 	assert(stuck.x > 12 and not stuck.prone,
 			"prone: no crawl out of the hole, x " .. stuck.x)
+	-- [SKELDAT_BOARD_WATER] Water 2 deep over the flat from x 10 (to 30,
+	-- or to 11 for the strip): ridden into at 8 the board stays, braked to
+	-- walking within 8^2 / (2 * brake), one splash; across the strip at
+	-- 16 the board rolls on out of it
+	local function pond(x1)
+		return function(x, y) return x >= 10 and x <= x1 and y >= 0 and y <= 1 end
+	end
+	local function ride(x1, s0, seconds)
+		local pl = M.new(columns(function() return -1 end), pond(x1))
+		board(pl, 0, -0.5, s0)
+		local splashes, x_in, wet_board = 0, nil, false
+		run(pl, {x = 0, z = 0}, seconds, function(q)
+			if q.splashed then
+				splashes, q.splashed = splashes + 1, nil
+			end
+			if q.board and q.board.wet then
+				wet_board, x_in = true, x_in or q.x
+			end
+		end)
+		return pl, splashes, x_in, wet_board
+	end
+	local pl, splashes, x_in, wet_board = ride(30, 8, 3)
+	assert(wet_board and not pl.board and pl.x - x_in < 64 / (2 * M.BOARD_BRAKE) + 0.3
+			and splashes == 1, string.format("water: the board in at x %s, "
+			.. "walking at %.2f, %d splashes", tostring(x_in), pl.x, splashes))
+	pl, splashes, x_in, wet_board = ride(11, 16, 2)
+	assert(wet_board and pl.board and not pl.board.wet and pl.x > 20 and
+			splashes == 1, string.format("water: across the strip at 16, "
+			.. "the board %s at %.1f, %d splashes", tostring(pl.board ~= nil),
+			pl.x, splashes))
 	-- (the climb's loss, and the push since, under 8)
 	assert(step2.board and math.abs(step2.y - 1.5) < 1e-6 and
 			step2.board.s > math.sqrt(100 - 2 * g * 2) - 0.05 and

@@ -66,6 +66,59 @@ function M.grains(synth)
 	return g
 end
 
+-- [SKELDAT_BOARD_WATER] The splash, on foot or on the board: 4 variants
+-- (a seed each), soft and hard (the plop and the spray louder), each 0.6 s
+-- of the body's plop (a falling sine), the spray (noise low-passed from 3
+-- kHz to 400 Hz) and 20 bubbles (rising sine chirps over the first 0.3 s).
+-- -> {soft = {4 buffers}, hard = {4 buffers}}
+-- simplified: the figures are first guesses, to tune by ear
+local SPLASH = math.floor(0.6 * M.RATE)
+function M.splashes(synth)
+	local R = M.RATE
+	local out = {soft = {}, hard = {}}
+	for v = 1, 4 do
+		local rnd = v * 7919
+		local function rand()
+			rnd = (rnd * 1103515245 + 12345) % 2147483648
+			return rnd / 2147483648
+		end
+		local plop, spray = synth.buffer(SPLASH), synth.buffer(SPLASH)
+		local n = math.floor(0.06 * R)
+		plop:osc{wave = "sine", freq = {start = 130 + 15 * v, mul = 0.02},
+				rate = R, n = n}
+		plop:envelope{points = {{0, 1}, {0.06, 0}}, rate = R, n = n}
+		spray:noise{kind = "white", seed = 2000 + v, rate = R}
+		spray:filter{type = "low", cutoff = {start = 3000, slide = -6500,
+				min = 400}, resonance = 0, rate = R}
+		spray:envelope{points = {{0, 0}, {0.01, 1}, {0.5, 0}}, rate = R}
+		local bubbles, chirp = synth.buffer(SPLASH), synth.buffer(SPLASH)
+		for _ = 1, 20 do
+			local len = (0.02 + 0.04 * rand())
+			local k = math.floor(len * R)
+			local f = 400 + 2600 * rand()
+			chirp:osc{wave = "sine", freq = {start = f,
+					slide = f * (0.2 + 0.3 * rand()) / len}, rate = R, n = k}
+			chirp:envelope{points = {{0, 1}, {len, 0}}, rate = R, n = k}
+			bubbles:mix(chirp, 0, math.floor(rand() * 0.3 * R), k, 0.3)
+		end
+		for kind, loud in pairs({soft = 1, hard = 2}) do
+			local b = synth.buffer(SPLASH)
+			b:mix(plop, 0, 0, n, 0.8 * loud)
+			b:mix(spray, 0, 0, SPLASH, 0.4 * loud)
+			b:mix(bubbles, 0, 0, SPLASH, 1)
+			normalise(b)
+			out[kind][v] = b
+		end
+	end
+	return out
+end
+-- The splash's gain from the speed into the water: 0.2 at the walk's
+-- (walk), 1 from 10 a second up; the hard variant from 6 up
+function M.splash_gain(speed, walk)
+	local g = 0.2 + 0.8 * (speed - walk) / math.max(0.1, 10 - walk)
+	return math.max(0.1, math.min(1, g)), speed >= 6
+end
+
 -- A roll's state; seed makes its noise and its hits' times
 function M.new(synth, grains, seed)
 	local r = {grains = grains, rnd = seed or 1, noise_seed = (seed or 1) * 7,
@@ -129,7 +182,7 @@ function M.new(synth, grains, seed)
 end
 
 -- A buffer made a Sound, for a one-shot
-local function to_sound(magic, buf)
+function M.to_sound(magic, buf)
 	local vb = magic.VectorBuffer:new()
 	buf:to_shorts(vb)
 	local sound = magic.Sound:new()
@@ -162,8 +215,8 @@ function M.player(magic, synth, grains, seed, node, kind, log)
 		pop:mix(grains.thud, 0, 0, n, 0.5)
 		clack:mix(grains[2], 0, 0, GRAIN, 2 * M.HIT_GAIN)
 		clack:mix(grains[3], 0, CLACK_GAP, GRAIN, 2 * M.HIT_GAIN)
-		grains.pop_sound, grains.clack_sound = to_sound(magic, pop),
-				to_sound(magic, clack)
+		grains.pop_sound, grains.clack_sound = M.to_sound(magic, pop),
+				M.to_sound(magic, clack)
 	end
 	local shot = node:CreateComponent(kind)
 	shot.soundType = magic.SOUND_EFFECT
@@ -208,12 +261,16 @@ end
 
 -- The self-check: chunks at fixed seeds hashed against the committed
 -- figures (the blocks are the same everywhere, src/lua_bindings/synth.cpp),
--- the hits a second within 10% of 25 s, and the air silent.
+-- the hits a second within 10% of 25 s, and the air silent; and the
+-- splashes' (SPLASH_HASHES, soft 1..4 then hard 1..4).
 -- -> a line for the log; raises on a failure
 -- At s 0, 4 and 8, then the two air runs' last chunks; 0 and the air are
 -- the silent chunk's hash
 M.HASHES = "02cfd07dc33f6da3 d2fb62e9ce11b347 95b0afcb487297a5 " ..
 		"02cfd07dc33f6da3 02cfd07dc33f6da3"
+M.SPLASH_HASHES = "085d7de7da131b7d 31ebb910b1815737 1fd16cff43a8764b " ..
+		"8b5536f8b417ffc6 5cc0da446564836a d9d78cce94d09c41 f07cb5ae5cd878e1 " ..
+		"b811c6c15f4f5af6"
 function M.self_test(synth)
 	local grains = M.grains(synth)
 	local hashes = {}
@@ -250,6 +307,15 @@ function M.self_test(synth)
 	assert(got == M.HASHES,
 			"board sound: the hashes " .. got .. ", committed " ..
 			tostring(M.HASHES))
+	local sp, splash = M.splashes(synth), {}
+	for _, kind in ipairs({"soft", "hard"}) do
+		for v = 1, 4 do
+			splash[#splash + 1] = sp[kind][v]:hash()
+		end
+	end
+	splash = table.concat(splash, " ")
+	assert(splash == M.SPLASH_HASHES, "board sound: the splashes' hashes " ..
+			splash .. ", committed " .. tostring(M.SPLASH_HASHES))
 	return string.format("board sound: self test passed, %d and %d hits "
 			.. "in 2 s at 4 and 8, hashes %s", rates[1], rates[2], got)
 end
