@@ -45,7 +45,9 @@ module under it.
   to 2 as a slope, loses no speed but by climbing and by S (the brake),
   turns toward where the camera looks, flies off crests, jumps twice
   as hard as a walk, and is left for walking at a stop, a wall, water or
-  a ladder. The others see a flat box under a player on one.
+  a ladder. Shift held on it lays the player flat, through holes one
+  voxel high; up again where there is room. The others see a flat box
+  under a player on one, and the player lying on it.
 - The world's edge: the last 16 columns of each side rise up to 12 in
   bone blocks, the outermost column a bone wall nothing digs (made once
   when a world is first in), and bone hills drawn beyond it to the view.

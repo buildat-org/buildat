@@ -84,6 +84,8 @@ static const int HP_MAX = 20, BREATH_MAX = 10;
 // [SKELDAT_SKATEBOARD] The bit of luanti:where's controls that says the
 // player is on the board (player.lua's board, init.lua sends it)
 static const int32_t BOARD_BIT = 1 << 16;
+// [SKELDAT_BOARD_PRONE] And lying flat on it (player.lua's prone)
+static const int32_t PRONE_BIT = 1 << 17;
 // And the low byte: the count of skeldat:position packets the client has
 // had, so a report from before the last is known
 static const int32_t PLACES_MASK = 0xff;
@@ -125,6 +127,8 @@ struct Player
 	// time since the last check, the speed that check measured and its
 	// checks in the air running on the board
 	bool board = false, board_seen = false;
+	// [SKELDAT_BOARD_PRONE] Lying flat now, and at any time since the check
+	bool prone = false, prone_seen = false;
 	float check_v = 0;
 	int board_air = 0;
 	// A place sent (send_position) that the client has not reported yet:
@@ -1835,6 +1839,8 @@ struct Module: public interface::Module, public luanti_session::Game
 		pl->z = z;
 		pl->board = (controls & BOARD_BIT) != 0;
 		pl->board_seen = pl->board_seen || pl->board;
+		pl->prone = (controls & PRONE_BIT) != 0;
+		pl->prone_seen = pl->prone_seen || pl->prone;
 		// Luanti's horizontal look turns the other way from Urho's yaw
 		pl->yaw = -look_h * 180 / (float)M_PI;
 		if(section(*pl) != was)
@@ -3110,7 +3116,9 @@ struct Module: public interface::Module, public luanti_session::Game
 				// [SKELDAT_SKATEBOARD] "course dx dz": a board's course of
 				// stone from there along +x, 5 wide, its heights over the
 				// player's ground: a platform of 12, a slope down to 0, a
-				// ramp of 2 at 1:2, a flat, a wall of 3 at 70; and off
+				// ramp of 2 at 1:2, a flat, a wall of 3 at 64 with a hole
+				// one high at its middle ([SKELDAT_BOARD_PRONE]) and one
+				// at 70 without; and off
 				// x 64..69 a slope down 8 along +z and a flat 70 long. The
 				// player put on the platform.
 				const int X = (int)std::floor(p->x + dx + 0.5f),
@@ -3126,8 +3134,10 @@ struct Module: public interface::Module, public luanti_session::Game
 				for(int j = -2; j <= 2; j++){
 					const int h = i < 4 ? 12 : i < 16 ? 15 - i :
 							i >= 36 && i < 40 ? (i - 34) / 2 :
-							i >= 70 && i <= 72 ? 3 : 0;
+							(i >= 70 && i <= 72) || i == 64 || i == 65 ? 3 : 0;
 					column(i, j, h);
+					if((i == 64 || i == 65) && j == 0)
+						set_node(X + i, B, Z, ID_AIR);
 				}
 				for(int i = 64; i <= 69; i++)
 				for(int j = 3; j <= 78; j++)
@@ -4977,7 +4987,9 @@ struct Module: public interface::Module, public luanti_session::Game
 			bd.on = pl.board_seen;
 			bd.v0 = pl.check_v;
 			bd.air = pl.board_air;
+			bd.prone = pl.prone_seen;
 			pl.board_seen = pl.board;
+			pl.prone_seen = pl.prone;
 			if(pl.admin || pl.hp <= 0 || dt <= 0 || pl.moved){
 				pl.cx = pl.x;
 				pl.cy = pl.y;
@@ -5057,7 +5069,7 @@ struct Module: public interface::Module, public luanti_session::Game
 				if(pair.first != to.first && o.placed && o.hp > 0)
 					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
 							<<" "<<(o.skeleton ? 1 : 0)<<" "<<(o.board ? 1 : 0)
-							<<"\n";
+							<<" "<<(o.prone ? 1 : 0)<<"\n";
 			}
 			network::send(m_server, to.first, "skeldat:players", os.str());
 		}

@@ -64,6 +64,10 @@ struct Board
 	float v0 = 0;
 	// The checks running that had it in the air on the board
 	int air = 0;
+	// [SKELDAT_BOARD_PRONE] Lying flat since the last check: a body one
+	// voxel high, believed on the board or where there is no room over it
+	// to stand
+	bool prone = false;
 };
 
 struct Verdict
@@ -133,6 +137,8 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	rules.max_length = reach;
 	if(board.on)
 		rules.step_up = 2;
+	if(board.prone && (board.on || f.at(b0.x, b0.y + 1, b0.z) == SOLID))
+		rules.body_height = 1;
 	P a = a0, b = b0;
 	// A start that does not settle (a voxel placed into it since) is not
 	// the mover's doing: nothing to judge
@@ -148,7 +154,7 @@ inline Verdict check(const std::function<void(Field&)> &fill,
 	}
 	// Sunk deeper than settle lifts: inside the ground (noclip)
 	if(!b_lands && (f.at(b0.x, b0.y, b0.z) == SOLID ||
-			f.at(b0.x, b0.y + 1, b0.z) == SOLID)){
+			(rules.body_height > 1 && f.at(b0.x, b0.y + 1, b0.z) == SOLID))){
 		v.ok = false;
 		v.why = "in a wall";
 		return v;
@@ -299,6 +305,22 @@ int main()
 		return x >= 2 && x <= 7 && y < 0 && y >= -20 ? OPEN : -1; });
 	assert(check(gap6, 0, 0, 0, 10, 0, 0, 1, false, bd).ok);
 	assert(!check(wall, 0, 0, 0, 10, 0, 0, 1, false, bd).ok);
+	// [SKELDAT_BOARD_PRONE] Through a wall's hole one high (x 3..4, the
+	// hole at y 0, z 0): lying flat on the board passes, standing is in
+	// the wall; lying flat claimed off the board in the open is the
+	// standing box, and so is in the hole's wall too
+	auto holed = world([](int x, int y, int z){
+		return x >= 3 && x <= 4 && y <= 2 && y >= 0 && !(y == 0 && z == 0) ?
+				SOLID : -1; });
+	Board lying = bd;
+	lying.prone = true;
+	assert(check(holed, 0, 0, 0, 3.5f, 0, 0, 1, false, lying).ok);
+	assert(check(holed, 0, 0, 0, 7, 0, 0, 1, false, lying).ok);
+	assert(!check(holed, 0, 0, 0, 3.5f, 0, 0, 1, false, bd).ok);
+	Board crawl;
+	crawl.prone = true;
+	assert(check(holed, 0, 0, 0, 3.5f, 0, 0, 1, false, crawl).ok);
+	assert(!check(holed, 0, 0, 0, 3.5f, 1, 0, 1, false, crawl).ok);
 	// A hover: let for a few checks, not for ever
 	Board up = bd;
 	up.air = 1;

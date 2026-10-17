@@ -1016,10 +1016,11 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 # 24. The board ([SKELDAT_SKATEBOARD]) on a course of stone (TEST
 # course, main.cpp): walked onto its slope of 12, client1 is on the board
 # by itself, gets the drop's speed and keeps it on the flat, flies off a
-# ramp of 2 and lands, and a wall of 3 stops it; walked off the side down
+# ramp of 2 and lands, lying flat (Shift held from the boarding on) goes
+# through a wall's hole one high, and a wall of 3 stops it; walked off the side down
 # 8 onto a flat, S stops it within the brake's reach. The server pulls
 # back none of it, and pulls back a board the drive forces to 25 on the
-# flat. client2 sees client1 on a board.
+# flat. client2 sees client1 on a board and lying flat.
 log27="$t/srv27.log"
 cat > "$t/board1.cmds" <<EOF
 $placed
@@ -1030,7 +1031,9 @@ delay 1000
 keydown W
 wait_log 5000 skeldat: on the board
 keyup W
+keydown Left Shift
 wait_log 20000 skeldat: walking
+keyup Left Shift
 delay 1000
 look 0 0
 delay 500
@@ -1046,7 +1049,7 @@ event skeldat_board 25
 delay 3000
 quit
 EOF
-printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 rides a board" \
+printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
 	"delay 500" quit > "$t/board2.cmds"
 BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \

@@ -72,6 +72,12 @@ M.BOARD_JUMP = 2 -- times speed_jump
 M.BOARD_TURN = 3
 -- Half the board's length: where its ends sample the ground
 M.BOARD_HALF = 0.6
+-- [SKELDAT_BOARD_PRONE] Lying flat on the board (Shift): the box this
+-- high, under a voxel with the board under it, and the eye this far over
+-- the feet, eased there and back in PRONE_EASE seconds
+M.PRONE_HEIGHT = 0.8
+M.PRONE_EYE = 0.5
+M.PRONE_EASE = 0.25
 -- The board's frame is cut finer by travel than walking's, coarser by time
 M.BOARD_STEP_S = 0.02
 M.BOARD_STEP_MOVE = 0.25
@@ -114,8 +120,9 @@ end
 -- the whole voxel, or the boxes it is made of, each {x0, y0, z0, x1, y1, z1}
 -- in the voxel's own -0.5...0.5 coordinates. A box the player is already
 -- inside of does not stop them, which is what lets somebody the server put
--- inside a wall walk out of it.
-local function move_axis(p, axis, d, solid)
+-- inside a wall walk out of it. height: the box's, M.HEIGHT if nil (lying
+-- flat on the board is lower, [SKELDAT_BOARD_PRONE]).
+local function move_axis(p, axis, d, solid, height)
 	if d == 0 then
 		return false
 	end
@@ -126,6 +133,7 @@ local function move_axis(p, axis, d, solid)
 			if not a1 then a1 = a else a2 = a end
 		end
 	end
+	local OFF_HI = height and {M.RADIUS, height, M.RADIUS} or OFF_HI
 	local lo1, hi1 = p[a1] + OFF_LO[a1], p[a1] + OFF_HI[a1]
 	local lo2, hi2 = p[a2] + OFF_LO[a2], p[a2] + OFF_HI[a2]
 	local u0, u1 = cell_lo(lo1), cell_hi(hi1)
@@ -204,9 +212,9 @@ M.move_axis = move_axis
 -- move is tried again from a step up, and what the player then stands on is
 -- found by settling back down. Only from the ground, so a jump does not
 -- climb a wall.
-local function move_horizontal(p, axis, d, solid, step_height)
+local function move_horizontal(p, axis, d, solid, step_height, height)
 	local direct = {p[1], p[2], p[3]}
-	local hit = move_axis(direct, axis, d, solid)
+	local hit = move_axis(direct, axis, d, solid, height)
 	local function take(q)
 		p[1], p[2], p[3] = q[1], q[2], q[3]
 	end
@@ -216,15 +224,15 @@ local function move_horizontal(p, axis, d, solid, step_height)
 	end
 	-- No room to rise, or still blocked up there: the plain move it is
 	local up = {p[1], p[2], p[3]}
-	if move_axis(up, 2, step_height, solid) then
+	if move_axis(up, 2, step_height, solid, height) then
 		take(direct)
 		return true
 	end
-	if move_axis(up, axis, d, solid) then
+	if move_axis(up, axis, d, solid, height) then
 		take(direct)
 		return true
 	end
-	move_axis(up, 2, -step_height, solid)
+	move_axis(up, 2, -step_height, solid, height)
 	take(up)
 	return false
 end
@@ -269,6 +277,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		x = 0, y = 0, z = 0,
 		vx = 0, vy = 0, vz = 0,
 		on_ground = false,
+		-- [SKELDAT_BOARD_PRONE] Lying flat, and the box's height and the
+		-- eye's over the feet that go with it
+		prone = false,
+		height = M.HEIGHT,
+		eye = M.EYE_HEIGHT,
 		in_liquid = false,
 		in_liquid_stable = false,
 		-- Whether a ladder or a vine is holding the player up; see
@@ -405,7 +418,10 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		-- constant has a multiplier of its own in the override besides
 		-- the one over all of them.
 		local speed = m.speed_walk * (ov.speed_walk or 1)
-		if wish.fast then
+		if self.prone then
+			-- Crawling out of where it lay flat
+			speed = m.speed_crouch * (ov.speed_crouch or 1)
+		elseif wish.fast then
 			speed = m.speed_fast * (ov.speed_fast or 1)
 		elseif wish.sneak and not free_move and not wet and
 				(ov.sneak or 1) ~= 0 then
@@ -575,7 +591,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local p = {self.x, self.y, self.z}
 		-- Vertically first, so that whether the player is standing on
 		-- something is settled before a step up is considered
-		if move_axis(p, 2, avg_vy * dtime, stops) then
+		if move_axis(p, 2, avg_vy * dtime, stops, self.height) then
 			self.on_ground = avg_vy < 0
 			-- A bouncy node throws a fall back up at bouncy/100 of it
 			-- (collisionMoveSimple); a bounce too slow to clear the
@@ -613,9 +629,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 				M.AIR_STEP_HEIGHT
 		local p0 = {p[1], p[2], p[3]}
 		local hit_x = move_horizontal(p, 1, self.vx * dtime, stops,
-				step_height)
+				step_height, self.height)
 		local hit_z = move_horizontal(p, 3, self.vz * dtime, stops,
-				step_height)
+				step_height, self.height)
 		-- Autojump: walking on the ground into something the step does not
 		-- take, with room over the head, jumps when the same move from a
 		-- jump's height (Luanti's 1.1) would get further
@@ -700,14 +716,16 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		if t ~= nil then
 			return t or nil
 		end
+		-- Lying flat, one voxel over the ground is room
+		local tall = not self.prone
 		for c = f + M.BOARD_STEP - 1, f - M.BOARD_STEP - 1, -1 do
 			if filled(cx, c, cz) and not filled(cx, c + 1, cz) and
-					not filled(cx, c + 2, cz) then
+					not (tall and filled(cx, c + 2, cz)) then
 				t = c + 0.5
 				break
 			end
 		end
-		if t == nil and (filled(cx, f, cz) or filled(cx, f + 1, cz)) then
+		if t == nil and (filled(cx, f, cz) or (tall and filled(cx, f + 1, cz))) then
 			t = "wall"
 		end
 		tops[key] = t or false
@@ -764,7 +782,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 				end
 			end
 		end
-		return move_axis({self.x, top + 0.01, self.z}, axis, d, is_solid)
+		return move_axis({self.x, top + 0.01, self.z}, axis, d, is_solid,
+				self.height)
 	end
 	local function leave_board()
 		local b = self.board
@@ -860,7 +879,8 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local vy0 = self.vy
 		self.vy = self.vy - g * dt
 		local p = {self.x, self.y, self.z}
-		local hit_y = move_axis(p, 2, (vy0 + self.vy) / 2 * dt, is_solid)
+		local hit_y = move_axis(p, 2, (vy0 + self.vy) / 2 * dt, is_solid,
+				self.height)
 		self.y = p[2]
 		if stopped(1, self.vx * dt) then
 			self.vx = 0
@@ -903,10 +923,10 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 
 	-- Onto the board by itself: walking at the walk's speed or more onto
 	-- ground a voxel or more lower two ahead. Not sneaking, which is how a
-	-- hill is walked down.
+	-- hill is walked down, nor crawling.
 	local function try_board(wish)
 		if not self.on_ground or self.in_liquid or self.in_liquid_stable or
-				self.climbing or flying() or wish.sneak then
+				self.climbing or flying() or wish.sneak or self.prone then
 			return
 		end
 		local h = math.sqrt(self.vx * self.vx + self.vz * self.vz)
@@ -934,6 +954,22 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			dtime = M.DTIME_LIMIT
 		end
 		tops = {}
+		-- Flat while Shift is held on the board; up again where the
+		-- standing box fits, off the board too (crawling out of a hole)
+		local prone = self.prone
+		if self.board and wish.sneak then
+			prone = true
+		elseif prone and not move_axis({self.x, self.y, self.z}, 2,
+				M.HEIGHT - M.PRONE_HEIGHT, is_solid, M.PRONE_HEIGHT) then
+			prone = false
+		end
+		if prone ~= self.prone then
+			self.prone, tops = prone, {}
+		end
+		self.height = prone and M.PRONE_HEIGHT or M.HEIGHT
+		local eye = prone and M.PRONE_EYE or M.EYE_HEIGHT
+		local ease = (M.EYE_HEIGHT - M.PRONE_EYE) / M.PRONE_EASE * dtime
+		self.eye = self.eye + math.max(-ease, math.min(ease, eye - self.eye))
 		-- Cut the way ClientEnvironment::step() cuts: ten milliseconds or
 		-- a tenth of a node of travel, whichever is shorter, so a long
 		-- frame is several short ones and a jump goes the same height
@@ -1193,6 +1229,47 @@ do
 	local step2 = M.new(columns(function(x) return x >= 5 and 1 or -1 end))
 	board(step2, 0, -0.5, 10)
 	run(step2, {x = 0, z = 0, look_x = 1, look_z = 0}, 1)
+	-- [SKELDAT_BOARD_PRONE] A wall at x 10..11 three high with a hole one
+	-- high at z 0: the board stops at it standing, passes it lying flat,
+	-- stays flat in it after Shift is let go and stands once out; stopped
+	-- in it, the player crawls out and stands
+	local hole = function(x, y, z)
+		if y <= -1 then return true end
+		return x >= 10 and x <= 11 and y <= 2 and not (y == 0 and z == 0)
+	end
+	local go = {x = 0, z = 0, look_x = 1, look_z = 0}
+	local flat_go = {x = 0, z = 0, look_x = 1, look_z = 0, sneak = true}
+	local stand = M.new(hole)
+	board(stand, 0, -0.5, 8)
+	run(stand, go, 3)
+	assert(not stand.board and stand.x < 9.8, "prone: the wall did not stop "
+			.. "the board, x " .. stand.x)
+	local low = M.new(hole)
+	board(low, 0, -0.5, 8)
+	run(low, flat_go, 3)
+	assert(low.board and low.x > 14 and low.prone,
+			"prone: no way through the hole lying flat, x " .. low.x)
+	run(low, go, 0.2)
+	assert(not low.prone and low.height == M.HEIGHT, "prone: not up again")
+	local mid = M.new(hole)
+	board(mid, 0, -0.5, 8)
+	local flat_in, stood_out = true, false
+	for _ = 1, 180 do
+		mid:update(1 / 60, mid.x < 10.5 and flat_go or go)
+		if mid.x > 9.8 and mid.x < 11.7 and not mid.prone then flat_in = false end
+		if mid.x > 12.5 and not mid.prone then stood_out = true end
+	end
+	assert(flat_in and stood_out, "prone: let go in the hole, not flat in it "
+			.. "or not up after it")
+	local stuck = M.new(hole)
+	board(stuck, 10.5, -0.5, 0.3)
+	stuck.prone = true
+	run(stuck, flat_go, 0.1)
+	assert(not stuck.board and stuck.prone, "prone: stopped in the hole, "
+			.. "not flat")
+	run(stuck, {x = 1, z = 0}, 3)
+	assert(stuck.x > 12 and not stuck.prone,
+			"prone: no crawl out of the hole, x " .. stuck.x)
 	assert(step2.board and math.abs(step2.y - 1.5) < 1e-6 and
 			math.abs(step2.board.s - math.sqrt(100 - 2 * g * 2)) < 0.05,
 			"board: a step of 2 not ridden, y " .. step2.y)

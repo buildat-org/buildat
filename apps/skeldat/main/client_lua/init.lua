@@ -1032,6 +1032,8 @@ end
 
 -- [SKELDAT_SKATEBOARD] The board, a flat box; main.cpp's BOARD_BIT
 local BOARD_BIT = 65536
+-- [SKELDAT_BOARD_PRONE] main.cpp's PRONE_BIT
+local PRONE_BIT = 131072
 local function board_box(parent)
 	local node = parent:CreateChild("Board")
 	local box = node:CreateChild("Box")
@@ -1049,8 +1051,8 @@ end
 local others = {}
 buildat.sub_packet("skeldat:players", function(data)
 	local seen = {}
-	for name, x, y, z, yw, skeleton, on_board in
-			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
+	for name, x, y, z, yw, skeleton, on_board, prone in
+			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
 		seen[name] = true
 		do
 			local o = others[name]
@@ -1067,6 +1069,19 @@ buildat.sub_packet("skeldat:players", function(data)
 			end
 			-- [SKELDAT_SKATEBOARD] simplified: turned with the look, not
 			-- the board's heading
+			-- [SKELDAT_BOARD_PRONE] Lying flat: the body's box laid along
+			-- the board, the head forward
+			-- simplified: one dressed as a skeleton stands
+			if (o.prone or false) ~= (prone == "1") then
+				o.prone = prone == "1"
+				local body = o.node:GetChild("Body")
+				body.position = o.prone and magic.Vector3(0, 0.35, 0.2) or
+						magic.Vector3(0, 0.875, 0)
+				body.scale = o.prone and magic.Vector3(0.6, 0.4, 1.75) or
+						magic.Vector3(0.6, 1.75, 0.6)
+				log:info("skeldat: " .. name .. (o.prone and " lies flat" or
+						" stands"))
+			end
 			if o.board.enabled ~= (on_board == "1") then
 				o.board.enabled = on_board == "1"
 				log:info("skeldat: " .. name .. (o.board.enabled and
@@ -1448,7 +1463,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player.landed_at = nil
 	end
 	camera_node.position = magic.Vector3(player.x,
-			player.y + physics.EYE_HEIGHT, player.z)
+			player.y + player.eye, player.z)
 	camera_node.rotation = magic.Quaternion(pitch, yaw, 0)
 	send_t = send_t + dt
 	if send_t >= 0.1 then
@@ -1457,7 +1472,8 @@ magic.SubscribeToEvent("Update", function(_, d)
 		-- simplified: no controls but the board's and the places had
 		game.send_luanti("where", {x = player.x, y = player.y, z = player.z,
 			look_h = math.rad(-yaw), look_v = math.rad(pitch),
-			controls = places + (player.board and BOARD_BIT or 0),
+			controls = places + (player.board and BOARD_BIT or 0) +
+					(player.prone and PRONE_BIT or 0),
 			sent_us = buildat.get_time_us()}, {"object", {"x", "double"},
 			{"y", "double"}, {"z", "double"}, {"look_h", "double"},
 			{"look_v", "double"}, {"controls", "int32_t"},
