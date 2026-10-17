@@ -12,6 +12,9 @@
 		{"module": "replicate"},
 		{"module": "voxelworld"},
 		{"module": "voxel_shading"},
-		{"module": "worldgen"}
+		{"module": "worldgen"},
+		{"module": "accounts"},
+		{"module": "moderation"},
+		{"module": "chat"}
 	]
 }

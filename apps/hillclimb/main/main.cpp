@@ -9,21 +9,35 @@
 // server's physics authoritative. Nothing is saved: a track is generated
 // from its parameters each time.
 //
-// The time trial: the clock starts on the first W after the car is put
-// at the start and stops when its rear axle crosses the top pad's line;
-// the time is kept in the save "ranking" under the hill's parameters and
-// the payload. The client's menu picks them (hillclimb:params); the hill
-// is then made again in the same world. The parameters the server starts
+// The time trial: a player's clock starts on their first W after their
+// car is put at the start and stops when its rear axle crosses the top
+// pad's line; the time is kept in the save "ranking" under the hill's
+// parameters and the payload, with the player's name and how worn the
+// hill was. The client's menu picks them (hillclimb:params); the hill is
+// then made again in the same world. The parameters the server starts
 // with: BUILDAT_HILLCLIMB_SEED, _STEEP (degrees), _LENGTH (the slope's
 // run, m), _LATITUDE (degrees), _DAY (1..365), _TIME (hours, solar) and
-// _PAYLOAD (kg); _FEATURES=0, no pits or rocks.
+// _PAYLOAD (kg); _FEATURES=0, no pits or rocks; _INTERVAL, the rounds'
+// in seconds (a check's).
+//
+// [HC_MULTIPLAYER] A car each: every player in has one, driven by their
+// own input; the cars do not touch each other (a collision layer of their
+// own), the ground is the one hill's. On a public server (no launch
+// parameter launcher=1) a player joins through builtin/accounts, and the
+// hill's parameters are an admin's. Rounds: at an interval (never, or 1
+// to 30 minutes; 10 by default on a public server), counted from the
+// first player's drive, the players still driving get an extra interval
+// and the rest observe; then the results, and the hill made anew with a
+// new seed.
 //
 // For the check, with no client: BUILDAT_HILLCLIMB_DRIVE, steps of
 // "<seconds>:<keys>" from the car's start, each held until the next --
 // W accelerator, S brake, A and D steering, 1 to 4 and R the gear, B the
 // car back at the start, H<steep>/<length> another hill, K a stone dropped
-// on the slope, Q the server's end -- logging the car each second; and _START, "x z yaw" (m, m,
-// degrees) for a start other than the bottom pad's.
+// on the slope, Q the server's end -- driving a car of its own (peer 0,
+// "drive"), logging it each second; _CARS=<n>, n - 1 more cars driven by
+// the same keys (the step's cost); and _START, "x z yaw" (m, m, degrees)
+// for a start other than the bottom pad's.
 #include "core/log.h"
 #include "client_file/api.h"
 #include "network/api.h"
@@ -32,6 +46,8 @@
 #include "voxelworld/api.h"
 #include "worldgen/api.h"
 #include "storage/api.h"
+#include "accounts/api.h"
+#include "chat/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
@@ -53,6 +69,9 @@
 #include <set>
 #include <memory>
 #include <mutex>
+#include <map>
+#include <random>
+#include <ctime>
 #define MODULE "main"
 
 namespace pv = PolyVox;
@@ -80,6 +99,11 @@ static float env_or(const char *name, float def)
 static const int STEEP_MIN = 5, STEEP_MAX = 40;
 static const int LENGTH_MIN = 20, LENGTH_MAX = 60;
 static const int PAYLOADS[] = {0, 500, 1000, 2000};
+// [HC_MULTIPLAYER] The rounds' intervals, seconds: never, or minutes
+static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
+// The cars' collision layer: they touch the world and the stones, not
+// each other
+static const unsigned CAR_LAYER = 2;
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
@@ -160,18 +184,41 @@ struct Module: public interface::Module
 	hill::Params m_pending_params;
 	float m_pending_look[3] = {0, 0, 0};
 	float m_pending_payload = 0;
-	// The time trial
-	enum Race { READY, RUNNING, FINISHED } m_race = READY;
-	float m_race_t = 0;
+	// The time trial; OUT: the round ended the run ("did not finish")
+	enum Race { READY, RUNNING, FINISHED, OUT };
 	storage::Save *m_save = nullptr;
-	int m_last_rank = -1;
-	bool m_reset = false;
-	// The car: car.h's model and its chassis' body
-	up_<car::Car> m_car;
-	magic::RigidBody *m_body = nullptr;
+	// [HC_MULTIPLAYER] A player and their car: car.h's model, its
+	// chassis' body, their input and their run. Peer 0 and up from
+	// BOT_PEER are the check's drive's (no client).
+	struct Player
+	{
+		size_t peer = 0;
+		int id = 0;
+		ss_ name;
+		up_<car::Car> car;
+		magic::RigidBody *body = nullptr;
+		car::Input input;
+		Race race = READY;
+		float race_t = 0;
+		int last_rank = -1;
+		bool reset = false, observing = false;
+		// The hill's ended runs when this run started
+		int fin_at = 0, unfin_at = 0;
+	};
+	static const size_t BOT_PEER = 1000000000;
+	std::map<size_t, Player> m_players;
+	int m_next_id = 1;
 	magic::PhysicsWorld *m_physics = nullptr;
-	car::Input m_input;
 	float m_payload = 0;
+	// The runs ended on this hill since it was made
+	int m_hill_finished = 0, m_hill_unfinished = 0;
+	// The rounds: the interval (0 never), the phase and its time
+	enum Round { R_WAITING, R_RUNNING, R_EXTRA, R_RESULTS } m_round = R_WAITING;
+	float m_interval = 0, m_round_t = 0, m_round_sent = 0;
+	bool m_public = true;
+	std::mt19937 m_rand{(uint32_t)std::time(nullptr)};
+	// Sent the join (accounts), not yet in
+	std::set<size_t> m_joining;
 	float m_start_x = 0, m_start_z = 0, m_start_yaw = 0; // m, m, degrees
 	bool m_start_set = false;
 	std::set<network::PeerInfo::Id> m_peers;
@@ -226,6 +273,7 @@ struct Module: public interface::Module
 				&Module::on_input);
 		sub(m_server, "network:packet_received/hillclimb:params",
 				&Module::on_params);
+		sub(m_server, "accounts:login", &Module::on_login);
 	}
 
 	// A texture of 16 pixels square, a colour and a grain, no file behind it
@@ -330,7 +378,29 @@ struct Module: public interface::Module
 		});
 		if(!m_save)
 			log_w(MODULE, "hillclimb: no ranking: the save would not open");
-		create_car();
+		// [HC_MULTIPLAYER] A public server is one not started by the
+		// launcher for its own client, as vanilla works it out
+		bool refused = false;
+		m_public = interface::launch_param(m_server->get_config().get<ss_>(
+				"untrusted_launch"), "launcher", &refused) != "1";
+		// The interval: a check's, the admin's kept, or the default
+		ss_ kept;
+		const char *env = getenv("BUILDAT_HILLCLIMB_INTERVAL");
+		if(env && env[0])
+			m_interval = (float)atof(env);
+		else if(m_save && m_save->store("settings")->get("interval", kept))
+			m_interval = (float)atof(kept.c_str());
+		else
+			m_interval = m_public ? 600 : 0;
+		log_i(MODULE, "hillclimb: %s server, rounds every %.0f s", m_public ?
+				"a public" : "a local", m_interval);
+		setup_physics();
+		if(!m_drive.empty()){
+			const int cars = std::max(1, (int)env_or("BUILDAT_HILLCLIMB_CARS", 1));
+			add_player(0, "drive");
+			for(int i = 1; i < cars; i++)
+				add_player(BOT_PEER + i, "drive"+itos(i));
+		}
 	}
 
 	// The hill of m_params, in the world in place of the one there: the
@@ -371,26 +441,26 @@ struct Module: public interface::Module
 
 	// Where it starts: on the bottom pad facing up the hill, or the
 	// check's _START, a little over the ground to settle
-	void place_car()
+	void place_car(Player &pl)
 	{
 		const float U = hill::U;
 		const hill::Hill h(m_params);
 		float x = m_start_set ? m_start_x : h.size_x() / 2.0f / U;
 		float z = m_start_set ? m_start_z : hill::Hill::PAD / 2.0f / U;
-		const car::Spec &s = m_car->spec;
+		const car::Spec &s = pl.car->spec;
 		float y = (hill::Hill::BASE + 0.5f) / U + s.tyre_r + s.droop -
 				s.mount_y + 0.05f;
-		magic::Node *n = m_body->GetNode();
+		magic::Node *n = pl.body->GetNode();
 		n->SetWorldPosition(magic::Vector3(x * U, y * U, z * U));
 		n->SetWorldRotation(magic::Quaternion(m_start_set ? m_start_yaw : 0,
 				magic::Vector3::UP));
-		m_body->SetLinearVelocity(magic::Vector3::ZERO);
-		m_body->SetAngularVelocity(magic::Vector3::ZERO);
-		m_body->Activate();
-		m_car->shaft = m_car->pedal = m_car->brake = m_car->steer = 0;
+		pl.body->SetLinearVelocity(magic::Vector3::ZERO);
+		pl.body->SetAngularVelocity(magic::Vector3::ZERO);
+		pl.body->Activate();
+		pl.car->shaft = pl.car->pedal = pl.car->brake = pl.car->steer = 0;
 	}
 
-	void create_car()
+	void setup_physics()
 	{
 		const float U = hill::U;
 		main_context::access(m_server, m_scene, [&](magic::Scene *scene){
@@ -404,16 +474,6 @@ struct Module: public interface::Module
 			// voxels' boxes are many and still, and updating them all
 			// was half the physics' time
 			m_physics->GetWorld()->setForceUpdateAllAabbs(false);
-			m_car.reset(new car::Car(car::Spec(), m_payload));
-			const car::Spec &s = m_car->spec;
-			// Local: the client draws the car from hillclimb:car
-			magic::Node *n = scene->CreateChild("Car", magic::LOCAL);
-			m_body = n->CreateComponent<magic::RigidBody>(magic::LOCAL);
-			m_body->SetMass(m_car->mass());
-			m_body->SetFriction(0.6f);
-			auto *shape = n->CreateComponent<magic::CollisionShape>(
-					magic::LOCAL);
-			shape->SetBox(magic::Vector3(s.box_w, s.box_h, s.box_l) * U);
 			// A floor for the chassis at the bottom pad's surface, the
 			// ground's level all round (Grid::solid): the tyres' contact
 			// is shallow, and a car off the top or over a bank sank into
@@ -425,12 +485,64 @@ struct Module: public interface::Module
 			floor->CreateComponent<magic::CollisionShape>(magic::LOCAL)->
 					SetStaticPlane();
 		});
-		place_car();
-		log_i(MODULE, "hillclimb: the car, %.0f kg with %.0f kg of payload",
-				m_car->spec.mass, m_payload);
 	}
 
-	// The check's drive: the keys of the step whose time has come
+	// A player in, a car of their own at the start; their client told
+	// which car is theirs
+	void add_player(size_t peer, const ss_ &name)
+	{
+		if(m_players.count(peer))
+			return;
+		const float U = hill::U;
+		Player &pl = m_players[peer];
+		pl.peer = peer;
+		pl.id = m_next_id++;
+		pl.name = name;
+		pl.input.gear = car::G2;
+		// A run cannot start in a round's extra time
+		pl.observing = m_round == R_EXTRA || m_round == R_RESULTS;
+		main_context::access(m_server, m_scene, [&](magic::Scene *scene){
+			pl.car.reset(new car::Car(car::Spec(), m_payload));
+			const car::Spec &s = pl.car->spec;
+			// Local: the client draws the car from hillclimb:car
+			magic::Node *n = scene->CreateChild("Car", magic::LOCAL);
+			pl.body = n->CreateComponent<magic::RigidBody>(magic::LOCAL);
+			pl.body->SetMass(pl.car->mass());
+			pl.body->SetFriction(0.6f);
+			pl.body->SetCollisionLayerAndMask(CAR_LAYER, 0xffff & ~CAR_LAYER);
+			auto *shape = n->CreateComponent<magic::CollisionShape>(
+					magic::LOCAL);
+			shape->SetBox(magic::Vector3(s.box_w, s.box_h, s.box_l) * U);
+			place_car(pl);
+		});
+		log_i(MODULE, "hillclimb: %s's car (%d), %.0f kg with %.0f kg of "
+				"payload; %zu cars", cs(name), pl.id, pl.car->spec.mass,
+				m_payload, m_players.size());
+		if(peer != 0 && peer < BOT_PEER){
+			network::send(m_server, peer, "hillclimb:you", itos(pl.id));
+			network::send(m_server, peer, "hillclimb:hill", hill_packet(peer));
+			chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
+			send_ranking(peer);
+		}
+	}
+
+	void remove_player(size_t peer)
+	{
+		auto it = m_players.find(peer);
+		if(it == m_players.end())
+			return;
+		Player &pl = it->second;
+		if(pl.race == RUNNING)
+			m_hill_unfinished++;
+		main_context::access(m_server, [&](main_context::Interface *){
+			pl.body->GetNode()->Remove();
+		});
+		log_i(MODULE, "hillclimb: %s's car (%d) gone", cs(pl.name), pl.id);
+		m_players.erase(it);
+	}
+
+	// The check's drive: the keys of the step whose time has come, for
+	// each of its cars
 	void drive_step()
 	{
 		ss_ keys;
@@ -447,7 +559,9 @@ struct Module: public interface::Module
 		if(step != m_drive_step){
 			m_drive_step = step;
 			if(keys.find('B') != ss_::npos)
-				reset_race();
+				for(auto &kv : m_players)
+					if(kv.first == 0 || kv.first >= BOT_PEER)
+						reset_race(kv.second);
 			// A stone dropped on the slope's lower third, a metre in from
 			// the left bank: clear of a car on the track's middle
 			if(keys.find('K') != ss_::npos){
@@ -474,26 +588,32 @@ struct Module: public interface::Module
 			m_drive.clear();
 			return;
 		}
-		m_input.accel = keys.find('W') != ss_::npos;
-		m_input.brake = keys.find('S') != ss_::npos;
-		m_input.left = keys.find('A') != ss_::npos;
-		m_input.right = keys.find('D') != ss_::npos;
-		for(char c : keys.substr(0, keys.find('H'))){
-			if(c >= '1' && c <= '4')
-				m_input.gear = (car::Gear)(car::G1 + (c - '1'));
-			if(c == 'R')
-				m_input.gear = car::REVERSE;
+		for(auto &kv : m_players){
+			if(kv.first != 0 && kv.first < BOT_PEER)
+				continue;
+			car::Input &in = kv.second.input;
+			in.accel = keys.find('W') != ss_::npos;
+			in.brake = keys.find('S') != ss_::npos;
+			in.left = keys.find('A') != ss_::npos;
+			in.right = keys.find('D') != ss_::npos;
+			for(char c : keys.substr(0, keys.find('H'))){
+				if(c >= '1' && c <= '4')
+					in.gear = (car::Gear)(car::G1 + (c - '1'));
+				if(c == 'R')
+					in.gear = car::REVERSE;
+			}
 		}
 	}
 
 	void on_tick(const interface::TickEvent &event)
 	{
-		if(!m_car)
+		if(!m_physics)
 			return;
 		if(m_pending)
 			apply_pending();
-		if(m_reset)
-			do_reset();
+		for(auto &kv : m_players)
+			if(kv.second.reset)
+				do_reset(kv.second);
 		const float U = hill::U;
 		const float dt = 1.0f / SUBSTEPS_HZ;
 		// simplified: a long tick is cut to a quarter second of substeps;
@@ -504,60 +624,72 @@ struct Module: public interface::Module
 			for(int i = 0; i < n; i++){
 				if(!m_drive.empty() && m_ground_live)
 					drive_step();
-				// Held on the brake until the hill is made: the ground gives
-				// only then, and a run is on the ground that gives
-				car::Input held;
-				held.brake = true;
-				held.gear = m_input.gear;
-				m_car->controls(m_ground_live ? m_input : held, dt);
-				magic::Node *node = m_body->GetNode();
-				const magic::Vector3 p = node->GetWorldPosition();
-				const magic::Quaternion q = node->GetWorldRotation();
-				auto v3 = [&](const magic::Vector3 &v){
-					return car::V3(v.x_, v.y_, v.z_);
-				};
-				car::Pose pose;
-				pose.pos = v3(p / U);
-				pose.right = v3(q * magic::Vector3::RIGHT);
-				pose.up = v3(q * magic::Vector3::UP);
-				pose.forward = v3(q * magic::Vector3::FORWARD);
-				m_car->step(*m_grid, U, pose, [&](const car::V3 &at){
-					// Relative to the body, as ApplyForce's position
-					magic::Vector3 v = m_body->GetVelocityAtPoint(
-							magic::Vector3(at.x, at.y, at.z) * U - p);
-					return v3(v / U);
-				}, dt);
-				if(m_ground_live){
-					for(int k = 0; k < 4; k++)
-						m_ground->wheel(k, m_car->wheel[k], m_car->spec, U, dt);
-					// Made bodies after the flush that takes their voxels out
-					// of the world's boxes (ground_tick), not inside them
-					for(const ground::Loose &l : m_ground->loose)
-						m_loose.push_back(l);
-					m_ground->loose.clear();
-				}
-				for(const car::Wheel &w : m_car->wheel){
-					if(w.load <= 0)
-						continue;
-					m_body->ApplyForce(magic::Vector3(w.force.x, w.force.y,
-							w.force.z) * U, magic::Vector3(w.at.x, w.at.y,
-							w.at.z) * U - p);
-				}
+				for(auto &kv : m_players)
+					step_car(kv.second, dt);
 				m_physics->Update(dt);
 				if(m_ground_live){
 					m_t += dt;
-					race_step(dt);
+					for(auto &kv : m_players)
+						race_step(kv.second, dt);
 				}
 			}
 		});
+		if(m_ground_live)
+			step_round(n * dt);
 		m_step_us += interface::os::time_us() - t0;
 		m_step_ticks++;
 		ground_tick(n * dt);
-		if(!m_drive.empty() && m_t - m_logged >= 1){
+		if(!m_drive.empty() && m_t - m_logged >= 1 && m_players.count(0)){
 			m_logged = m_t;
-			log_car();
+			log_car(m_players[0]);
 		}
-		send_car();
+		send_cars();
+	}
+
+	// One substep of a player's car: its tyres from its input, the ground
+	// under them, the forces on its body
+	void step_car(Player &pl, float dt)
+	{
+		const float U = hill::U;
+		// Held on the brake until the hill is made (the ground gives only
+		// then, and a run is on the ground that gives), and while observing
+		car::Input held;
+		held.brake = true;
+		held.gear = pl.input.gear;
+		pl.car->controls(m_ground_live && !pl.observing ? pl.input : held, dt);
+		magic::Node *node = pl.body->GetNode();
+		const magic::Vector3 p = node->GetWorldPosition();
+		const magic::Quaternion q = node->GetWorldRotation();
+		auto v3 = [&](const magic::Vector3 &v){
+			return car::V3(v.x_, v.y_, v.z_);
+		};
+		car::Pose pose;
+		pose.pos = v3(p / U);
+		pose.right = v3(q * magic::Vector3::RIGHT);
+		pose.up = v3(q * magic::Vector3::UP);
+		pose.forward = v3(q * magic::Vector3::FORWARD);
+		pl.car->step(*m_grid, U, pose, [&](const car::V3 &at){
+			// Relative to the body, as ApplyForce's position
+			magic::Vector3 v = pl.body->GetVelocityAtPoint(
+					magic::Vector3(at.x, at.y, at.z) * U - p);
+			return v3(v / U);
+		}, dt);
+		if(m_ground_live){
+			for(int k = 0; k < 4; k++)
+				m_ground->wheel(k, pl.car->wheel[k], pl.car->spec, U, dt);
+			// Made bodies after the flush that takes their voxels out of
+			// the world's boxes (ground_tick), not inside them
+			for(const ground::Loose &l : m_ground->loose)
+				m_loose.push_back(l);
+			m_ground->loose.clear();
+		}
+		for(const car::Wheel &w : pl.car->wheel){
+			if(w.load <= 0)
+				continue;
+			pl.body->ApplyForce(magic::Vector3(w.force.x, w.force.y,
+					w.force.z) * U, magic::Vector3(w.at.x, w.at.y,
+					w.at.z) * U - p);
+		}
 	}
 
 	//
@@ -628,7 +760,7 @@ struct Module: public interface::Module
 	void add_rock(const ground::Loose &l)
 	{
 		const float U = hill::U;
-		magic::Scene *scene = m_body->GetNode()->GetScene();
+		magic::Scene *scene = m_physics->GetScene();
 		{
 			Rock r;
 			r.id = m_next_rock++;
@@ -689,50 +821,76 @@ struct Module: public interface::Module
 	// The time trial
 	//
 
-	void race_step(float dt)
+	// A run starts on its first W, not while observing; the round's clock
+	// with the first run on the hill
+	void race_step(Player &pl, float dt)
 	{
-		if(m_race == READY && m_input.accel){
-			m_race = RUNNING;
-			m_race_t = 0;
+		if(pl.race == READY && pl.input.accel && !pl.observing){
+			pl.race = RUNNING;
+			pl.race_t = 0;
+			pl.fin_at = m_hill_finished;
+			pl.unfin_at = m_hill_unfinished;
+			if(m_interval > 0 && m_round == R_WAITING){
+				m_round = R_RUNNING;
+				m_round_t = 0;
+				log_i(MODULE, "hillclimb: round: %s's drive starts the clock "
+						"(%.0f s)", cs(pl.name), m_interval);
+			}
 		}
-		if(m_race != RUNNING)
+		if(pl.race != RUNNING)
 			return;
-		m_race_t += dt;
+		pl.race_t += dt;
 		// The rear axle over the top pad's first voxel
 		const hill::Hill h(m_params);
-		magic::Node *n = m_body->GetNode();
+		magic::Node *n = pl.body->GetNode();
 		magic::Vector3 rear = n->GetWorldPosition() + n->GetWorldRotation() *
-				magic::Vector3(0, 0, -m_car->spec.wheelbase / 2 * hill::U);
+				magic::Vector3(0, 0, -pl.car->spec.wheelbase / 2 * hill::U);
 		if(rear.z_ >= h.top_z0() - 0.5f)
-			finish();
+			finish(pl);
 	}
 
 	// The ranking's keys: the parameter set and the payload, then the time
 	// in milliseconds, zero-padded so the store's order is the ranking's.
 	// v2 ([HC_PITS_ROCKS], [HC_POWER]): a hill with pits and rocks, a car
-	// of twice the power; the times before are kept under the old keys,
-	// not shown
+	// of twice the power. v3 ([HC_MULTIPLAYER]): an entry's value is
+	// "name\tdate\tfinished\tunfinished", the runs ended on the hill before
+	// it started. The times before are kept under the old keys, not shown.
 	ss_ ranking_prefix() const
 	{
 		char buf[128];
-		snprintf(buf, sizeof buf, "v2/seed%u/steep%d/length%d/sand/payload%d/",
+		snprintf(buf, sizeof buf, "v3/seed%u/steep%d/length%d/sand/payload%d/",
 				m_params.seed, (int)m_params.steep_deg, (int)m_params.length_m,
 				(int)m_payload);
 		return buf;
 	}
 
-	sv_<float> ranking(size_t max)
+	struct Entry
 	{
-		sv_<float> times;
+		float t;
+		ss_ name, date;
+		int fin = 0, unfin = 0;
+	};
+	sv_<Entry> ranking(size_t max)
+	{
+		sv_<Entry> out;
 		if(!m_save)
-			return times;
+			return out;
 		const ss_ prefix = ranking_prefix();
-		for(const ss_ &key : m_save->store("times")->list(prefix)){
-			if(times.size() >= max)
+		storage::Store *st = m_save->store("times");
+		for(const ss_ &key : st->list(prefix)){
+			if(out.size() >= max)
 				break;
-			times.push_back(atoi(key.c_str() + prefix.size()) / 1000.0f);
+			Entry e;
+			e.t = atoi(key.c_str() + prefix.size()) / 1000.0f;
+			ss_ v;
+			st->get(key, v);
+			std::istringstream is(v);
+			std::getline(is, e.name, '\t');
+			std::getline(is, e.date, '\t');
+			is >> e.fin >> e.unfin;
+			out.push_back(e);
 		}
-		return times;
+		return out;
 	}
 
 	static ss_ seconds(float t)
@@ -742,65 +900,174 @@ struct Module: public interface::Module
 		return buf;
 	}
 
-	void finish()
+	void finish(Player &pl)
 	{
-		m_race = FINISHED;
-		const int ms = (int)std::lround(m_race_t * 1000);
-		m_last_rank = -1;
+		pl.race = FINISHED;
+		const int ms = (int)std::lround(pl.race_t * 1000);
+		pl.last_rank = -1;
 		if(m_save){
 			char key[64];
 			snprintf(key, sizeof key, "%09d/%lld", ms,
 					(long long)interface::os::time_us());
+			char date[16];
+			const std::time_t now = std::time(nullptr);
+			std::strftime(date, sizeof date, "%Y-%m-%d", std::gmtime(&now));
 			const ss_ prefix = ranking_prefix();
-			m_save->store("times")->set(prefix + key, "");
+			m_save->store("times")->set(prefix + key, pl.name+"\t"+date+"\t"+
+					itos(pl.fin_at)+"\t"+itos(pl.unfin_at));
 			const sv_<ss_> keys = m_save->store("times")->list(prefix);
 			for(size_t i = 0; i < keys.size(); i++)
 				if(keys[i] == prefix + key)
-					m_last_rank = (int)i;
+					pl.last_rank = (int)i;
 		}
+		m_hill_finished++;
 		ss_ list;
-		for(float t : ranking(10))
-			list += " " + seconds(t);
+		for(const Entry &e : ranking(10))
+			list += " " + seconds(e.t);
 		log_i(MODULE, "hillclimb: finish %.3f s on %s, rank %d; the ranking:%s",
-				ms / 1000.0f, cs(ranking_prefix()), m_last_rank, cs(list));
-		send_ranking();
+				ms / 1000.0f, cs(ranking_prefix()), pl.last_rank, cs(list));
+		log_i(MODULE, "hillclimb: %s finished in %.3f s after %d runs (%d "
+				"finished)", cs(pl.name), ms / 1000.0f, pl.fin_at + pl.unfin_at,
+				pl.fin_at);
+		for(size_t peer : m_peers)
+			send_ranking(peer);
 	}
 
-	// The best ten under the hill and payload, and where the last finish
-	// is among all of them (-1 if none)
-	void send_ranking()
+	// The best ten under the hill and payload: the first line where the
+	// peer's last finish is among all of them (-1 if none), then one each,
+	// "time finished unfinished date name"
+	void send_ranking(size_t peer)
 	{
-		ss_ data = itos(m_last_rank);
-		for(float t : ranking(10))
-			data += " " + seconds(t);
-		network::access(m_server, [&](network::Interface *i){
-			for(auto peer : m_peers)
-				i->send(peer, "hillclimb:ranking", data);
-		});
+		auto it = m_players.find(peer);
+		ss_ data = itos(it != m_players.end() ? it->second.last_rank : -1);
+		for(const Entry &e : ranking(10))
+			data += "\n" + seconds(e.t) + " " + itos(e.fin) + " " +
+					itos(e.unfin) + " " + (e.date.empty() ? "-" : e.date) +
+					" " + (e.name.empty() ? "?" : e.name);
+		network::send(m_server, peer, "hillclimb:ranking", data);
 	}
 
-	// Each run on the hill as it was made
+	// Each run on the hill as it was made, for one car
 	// Done at the next tick's start (do_reset), outside any module's
-	// access: making the hill again reaches voxelworld
-	void reset_race()
+	// access
+	void reset_race(Player &pl)
 	{
-		m_race = READY;
-		m_race_t = 0;
-		m_last_rank = -1;
-		m_reset = true;
+		if(pl.race == RUNNING)
+			m_hill_unfinished++;
+		// In the extra time a run ended is an observer's
+		if(m_round == R_EXTRA)
+			pl.observing = true;
+		pl.race = READY;
+		pl.race_t = 0;
+		pl.last_rank = -1;
+		pl.reset = true;
 	}
-	void do_reset()
+	void do_reset(Player &pl)
 	{
-		m_reset = false;
-		// The ground as the hill was made (flushed with the next changes)
-		if(m_ground && m_ground->changed())
-			m_ground->restore();
-		clear_rocks();
+		pl.reset = false;
+		// One car: the hill as it was made again, as before there were
+		// more; with more the ground is everyone's ([HC_MULTIPLAYER] 1)
+		if(m_players.size() == 1){
+			if(m_ground && m_ground->changed())
+				m_ground->restore();
+			clear_rocks();
+		}
 		main_context::access(m_server, [&](main_context::Interface *){
-			place_car();
+			place_car(pl);
 		});
 	}
 
+	//
+	// [HC_MULTIPLAYER] The rounds
+	//
+
+	void step_round(float dt)
+	{
+		if(m_interval <= 0)
+			return;
+		m_round_sent += dt;
+		if(m_round_sent >= 0.5f){
+			m_round_sent = 0;
+			send_round();
+		}
+		if(m_round == R_WAITING)
+			return;
+		m_round_t += dt;
+		bool driving = false;
+		for(auto &kv : m_players)
+			driving = driving || kv.second.race == RUNNING;
+		if(m_round == R_RUNNING && m_round_t >= m_interval){
+			m_round = R_EXTRA;
+			m_round_t = 0;
+			for(auto &kv : m_players)
+				if(kv.second.race != RUNNING)
+					kv.second.observing = true;
+			log_i(MODULE, "hillclimb: round: the extra time");
+			send_round();
+		} else if(m_round == R_EXTRA){
+			for(auto &kv : m_players)
+				if(kv.second.race != RUNNING)
+					kv.second.observing = true;
+			if(m_round_t >= m_interval || !driving)
+				end_round();
+		} else if(m_round == R_RESULTS && m_round_t >= 5){
+			// The hill anew: a new seed, the rest as they are
+			m_pending_params = m_params;
+			m_pending_params.seed = 1 + m_rand() % 999999;
+			m_pending_payload = m_payload;
+			m_pending_look[0] = m_latitude;
+			m_pending_look[1] = m_day;
+			m_pending_look[2] = m_time;
+			m_pending = true;
+			m_round = R_WAITING;
+			m_round_t = 0;
+			send_round();
+		}
+	}
+
+	// The runs still going have no time; the results to everyone
+	void end_round()
+	{
+		ss_ results;
+		sv_<std::pair<float, ss_>> done;
+		for(auto &kv : m_players){
+			Player &pl = kv.second;
+			if(pl.race == RUNNING){
+				pl.race = OUT;
+				m_hill_unfinished++;
+				results += "\n- " + pl.name;
+			} else if(pl.race == FINISHED){
+				done.push_back(std::make_pair(pl.race_t, pl.name));
+			}
+		}
+		std::sort(done.begin(), done.end());
+		ss_ head;
+		for(const auto &d : done)
+			head += "\n" + seconds(d.first) + " " + d.second;
+		results = head + results;
+		log_i(MODULE, "hillclimb: round over:%s", cs(ss_(results.empty() ?
+				" no runs" : results)));
+		m_round = R_RESULTS;
+		m_round_t = 0;
+		for(size_t peer : m_peers)
+			network::send(m_server, peer, "hillclimb:results", results);
+		send_round();
+	}
+
+	// "phase left": 0 no rounds, 1 waiting for a drive, 2 the round, 3
+	// its extra time, 4 the results; the seconds left of the phase
+	void send_round()
+	{
+		const int phase = m_interval <= 0 ? 0 : 1 + (int)m_round;
+		const float left = m_round == R_RESULTS ? 5 - m_round_t :
+				m_round == R_WAITING ? m_interval : m_interval - m_round_t;
+		char buf[64];
+		snprintf(buf, sizeof buf, "%d %.1f", phase, std::max(0.0f, left));
+		for(size_t peer : m_peers)
+			network::send(m_server, peer, "hillclimb:round", buf);
+	}
+
+	//
 	// The deepest the track is under the hill's generated surface, in
 	// voxels: the ruts dug and sunk
 	int rut() const
@@ -814,94 +1081,143 @@ struct Module: public interface::Module
 	}
 
 	// The check reads these: the centre of mass in metres, the speed, the
-	// shaft, each spring's compression and whether its tyre slides
-	void log_car()
+	// shaft, each spring's compression and whether its tyre slides; and
+	// the cars there are, whose step tick_us is
+	void log_car(Player &pl)
 	{
 		const float U = hill::U;
-		magic::Node *n = m_body->GetNode();
+		magic::Node *n = pl.body->GetNode();
 		magic::Vector3 p = n->GetWorldPosition() / U;
-		magic::Vector3 v = m_body->GetLinearVelocity() / U;
-		const car::Car &c = *m_car;
+		magic::Vector3 v = pl.body->GetLinearVelocity() / U;
+		const car::Car &c = *pl.car;
 		log_i(MODULE, "hillclimb: car t=%.1f pos=%.3f,%.3f,%.3f v=%.2f "
 				"shaft=%.3f springs=%.3f,%.3f,%.3f,%.3f slip=%d%d%d%d gear=%d "
 				"tick_us=%d race=%d/%.2f ground=%d/%d/%d/%d rocks=%d rut=%d "
-				"commits=%d",
+				"commits=%d cars=%zu",
 				m_t, p.x_, p.y_, p.z_, v.Length(), c.shaft / (2 * car::PI),
 				c.wheel[0].spring, c.wheel[1].spring, c.wheel[2].spring,
 				c.wheel[3].spring, c.wheel[0].slipping, c.wheel[1].slipping,
 				c.wheel[2].slipping, c.wheel[3].slipping, (int)c.gear,
-				(int)(m_step_us / std::max(1, m_step_ticks)), (int)m_race,
-				m_race_t, m_ground->dug, m_ground->sunk, m_ground->slid,
-				m_ground->freed, (int)m_rocks.size(), rut(), m_flushes);
+				(int)(m_step_us / std::max(1, m_step_ticks)), (int)pl.race,
+				pl.race_t, m_ground->dug, m_ground->sunk, m_ground->slid,
+				m_ground->freed, (int)m_rocks.size(), rut(), m_flushes,
+				m_players.size());
 		m_flushes = 0;
 		m_step_us = 0;
 		m_step_ticks = 0;
 	}
 
-	// What the client draws, in voxels: the chassis' pose, the wheels'
-	// spin and steering, each spring's compression; the shaft in rev/s,
-	// the gear, the race (0 ready, 1 running, 2 finished, 3 the hill still
-	// being made) and its time
-	void send_car()
+	// What the client draws, each car: its id and its player's name, then
+	// in voxels the chassis' pose, the wheels' spin and steering, each
+	// spring's compression; the shaft in rev/s, the gear, the race (0
+	// ready, 1 running, 2 finished, 3 the hill still being made, 4 out of
+	// time), its time and whether the player observes
+	void send_cars()
 	{
 		if(m_peers.empty())
 			return;
 		const float U = hill::U;
-		magic::Node *n = m_body->GetNode();
-		magic::Vector3 p = n->GetWorldPosition();
-		magic::Quaternion q = n->GetWorldRotation();
-		const car::Car &c = *m_car;
-		char buf[512];
-		snprintf(buf, sizeof buf, "%.3f %.3f %.3f %.5f %.5f %.5f %.5f %.4f "
-				"%.4f %.4f %.3f %.3f %.3f %.3f %.3f %d %d %.3f", p.x_, p.y_, p.z_,
-				q.w_, q.x_, q.y_, q.z_, c.spin, c.wheel[0].steer,
-				c.wheel[1].steer, c.wheel[0].spring * U, c.wheel[1].spring * U,
-				c.wheel[2].spring * U, c.wheel[3].spring * U,
-				c.shaft / (2 * car::PI), (int)c.gear,
-				m_ground_live ? (int)m_race : 3, m_race_t);
+		sv_<ss_> lines;
+		for(auto &kv : m_players){
+			const Player &pl = kv.second;
+			magic::Node *n = pl.body->GetNode();
+			magic::Vector3 p = n->GetWorldPosition();
+			magic::Quaternion q = n->GetWorldRotation();
+			const car::Car &c = *pl.car;
+			char buf[640];
+			snprintf(buf, sizeof buf, "%d %s %.3f %.3f %.3f %.5f %.5f %.5f %.5f "
+					"%.4f %.4f %.4f %.3f %.3f %.3f %.3f %.3f %d %d %.3f %d", pl.id,
+					cs(pl.name), p.x_, p.y_, p.z_, q.w_, q.x_, q.y_, q.z_, c.spin,
+					c.wheel[0].steer, c.wheel[1].steer, c.wheel[0].spring * U,
+					c.wheel[1].spring * U, c.wheel[2].spring * U,
+					c.wheel[3].spring * U, c.shaft / (2 * car::PI), (int)c.gear,
+					m_ground_live ? (int)pl.race == OUT ? 4 : (int)pl.race : 3,
+					pl.race_t, pl.observing ? 1 : 0);
+			lines.push_back(buf);
+		}
 		network::access(m_server, [&](network::Interface *i){
 			for(auto peer : m_peers)
-				i->send(peer, "hillclimb:car", buf);
+				for(const ss_ &l : lines)
+					i->send(peer, "hillclimb:car", l);
 		});
 	}
 
-	// "accel brake left right gear reset", each a number
-	// simplified: one car, driven by whoever sends; more cars are later
+	// "accel brake left right gear reset", each a number, to the sender's
+	// own car
 	void on_input(const network::Packet &packet)
 	{
+		auto it = m_players.find(packet.sender);
+		if(it == m_players.end())
+			return;
+		Player &pl = it->second;
 		std::istringstream is(packet.data);
 		int a = 0, b = 0, l = 0, r = 0, g = 1, reset = 0;
 		if(!(is >> a >> b >> l >> r >> g >> reset) || g < car::REVERSE ||
 				g >= car::GEARS)
 			return;
-		m_input.accel = a != 0;
-		m_input.brake = b != 0;
-		m_input.left = l != 0;
-		m_input.right = r != 0;
-		m_input.gear = (car::Gear)g;
-		if(reset && m_car)
-			reset_race();
+		pl.input.accel = a != 0;
+		pl.input.brake = b != 0;
+		pl.input.left = l != 0;
+		pl.input.right = r != 0;
+		pl.input.gear = (car::Gear)g;
+		if(reset && !pl.reset)
+			reset_race(pl);
 	}
 
-	// "seed steep length payload latitude day hour" from the menu, held to
-	// what a player may pick; made when worldgen is idle (on_tick)
+	// [HC_MULTIPLAYER] 2: who picks the hill: anyone in a local game, an
+	// admin on a public server (the check's drive, peer 0, too)
+	bool may_pick(size_t peer)
+	{
+		if(!m_public || peer == 0)
+			return true;
+		bool ok = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			ok = i->is_local(peer) ||
+					i->level(i->name_of(peer)) >= accounts::LV_ADMIN;
+		});
+		return ok;
+	}
+
+	// "seed steep length payload latitude day hour [interval]" from the
+	// menu, held to what a player may pick; made when worldgen is idle
+	// (on_tick). On a public server the seed is the round's: kept.
 	void on_params(const network::Packet &packet)
 	{
+		if(!may_pick(packet.sender)){
+			auto it = m_players.find(packet.sender);
+			log_w(MODULE, "hillclimb: params from %s refused: not an admin",
+					cs(it != m_players.end() ? it->second.name :
+					"peer "+itos(packet.sender)));
+			return;
+		}
 		std::istringstream is(packet.data);
 		long long seed = 0;
-		int steep = 0, length = 0, payload = -1;
+		int steep = 0, length = 0, payload = -1, interval = -1;
 		float lat = 0, day = 0, hour = 0;
 		if(!(is >> seed >> steep >> length >> payload >> lat >> day >> hour))
 			return;
-		bool payload_ok = false;
+		is >> interval;
+		bool payload_ok = false, interval_ok = interval == -1;
 		for(int w : PAYLOADS)
 			payload_ok = payload_ok || w == payload;
+		for(int w : INTERVALS)
+			interval_ok = interval_ok || w == interval;
 		if(seed < 1 || seed > 999999 || steep < STEEP_MIN || steep > STEEP_MAX ||
 				length < LENGTH_MIN || length > LENGTH_MAX || !payload_ok ||
-				!(lat >= -80 && lat <= 80) || !(day >= 1 && day <= 365) ||
-				!(hour >= 0 && hour <= 24))
+				!interval_ok || !(lat >= -80 && lat <= 80) ||
+				!(day >= 1 && day <= 365) || !(hour >= 0 && hour <= 24))
 			return;
-		m_pending_params.seed = (uint32_t)seed;
+		if(interval >= 0 && interval != (int)m_interval){
+			m_interval = (float)interval;
+			if(m_save)
+				m_save->store("settings")->set("interval", itos(interval));
+			m_round = R_WAITING;
+			m_round_t = 0;
+			log_i(MODULE, "hillclimb: rounds every %d s", interval);
+			send_round();
+		}
+		m_pending_params.seed = m_public && packet.sender != 0 ?
+				m_params.seed : (uint32_t)seed;
 		m_pending_params.steep_deg = (float)steep;
 		m_pending_params.length_m = (float)length;
 		m_pending_params.features = m_params.features;
@@ -934,48 +1250,80 @@ struct Module: public interface::Module
 		m_payload = m_pending_payload;
 		if(hill_changed)
 			make_hill();
-		main_context::access(m_server, [&](main_context::Interface *){
-			m_car->payload = m_payload;
-			m_body->SetMass(m_car->mass());
-		});
-		reset_race();
-		network::access(m_server, [&](network::Interface *i){
-			for(auto peer : m_peers)
-				i->send(peer, "hillclimb:hill", hill_packet());
-		});
-		send_ranking();
+		// Every car at the start, nobody observing, the round waiting
+		for(auto &kv : m_players){
+			Player &pl = kv.second;
+			main_context::access(m_server, [&](main_context::Interface *){
+				pl.car->payload = m_payload;
+				pl.body->SetMass(pl.car->mass());
+			});
+			reset_race(pl);
+			pl.observing = false;
+		}
+		// A new hill counts its own runs, the ones cut short above not
+		if(hill_changed)
+			m_hill_finished = m_hill_unfinished = 0;
+		m_round = R_WAITING;
+		m_round_t = 0;
+		for(size_t peer : m_peers){
+			network::send(m_server, peer, "hillclimb:hill", hill_packet(peer));
+			send_ranking(peer);
+		}
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
 	{
 		m_peers.erase(old_client.info.id);
+		m_joining.erase(old_client.info.id);
+		remove_player(old_client.info.id);
 	}
 
 	// What the client draws by: the hill's size and where the car starts,
 	// in voxels, the place and the hour, and the menu's picks: the seed,
-	// the steepness, the length and the payload
-	ss_ hill_packet()
+	// the steepness, the length and the payload; whether this peer may
+	// pick, and the rounds' interval in seconds
+	ss_ hill_packet(size_t peer)
 	{
 		const hill::Hill h(m_params);
 		char buf[256];
-		snprintf(buf, sizeof buf, "%d %d %d %d %d %d %g %g %g %u %d %d %d",
+		snprintf(buf, sizeof buf, "%d %d %d %d %d %d %g %g %g %u %d %d %d %d %d",
 				h.size_x(), h.size_y(), h.size_z(), h.size_x() / 2,
 				hill::Hill::BASE + 1, hill::Hill::PAD / 2, m_latitude, m_day,
 				m_time, m_params.seed, (int)m_params.steep_deg,
-				(int)m_params.length_m, (int)m_payload);
+				(int)m_params.length_m, (int)m_payload, may_pick(peer) ? 1 : 0,
+				(int)m_interval);
 		return buf;
 	}
 
+	// [HC_MULTIPLAYER] 6: on a public server, the join through accounts
+	// first (main/join.lua); in a local game, in at once
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		network::access(m_server, [&](network::Interface *i){
-			i->send(event.recipient, "hillclimb:hill", hill_packet());
-		});
-		m_peers.insert(event.recipient);
-		send_ranking();
+		const size_t peer = event.recipient;
+		m_peers.insert(peer);
+		network::send(m_server, peer, "hillclimb:hill", hill_packet(peer));
 		replicate::access(m_server, [&](replicate::Interface *i){
-			i->assign_scene_to_peer(m_scene, event.recipient);
+			i->assign_scene_to_peer(m_scene, peer);
 		});
+		ss_ name;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			name = i->name_of(peer);
+		});
+		if(m_public && name.empty()){
+			m_joining.insert(peer);
+			network::send(m_server, peer, "core:run_script",
+					"buildat.run_script_file(\"main/join.lua\")");
+			return;
+		}
+		// A peer without an account is "client<peer>", which accounts keeps
+		// from new accounts (skeldat's rule)
+		add_player(peer, name.empty() ? "client"+itos(peer) : name);
+	}
+
+	void on_login(const accounts::Login &login)
+	{
+		if(m_joining.erase(login.peer))
+			add_player(login.peer, login.name);
 	}
 };
 

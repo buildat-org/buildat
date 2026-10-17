@@ -108,8 +108,9 @@ end
 
 -- What the server says (main.cpp hill_packet): the hill's size, where the
 -- car starts, in voxels; the latitude, the day and the hour; the seed,
--- the steepness, the length and the payload. Again whenever the menu
--- makes another hill.
+-- the steepness, the length and the payload; whether this client may
+-- pick ([HC_MULTIPLAYER] 2: an admin on a public server) and the rounds'
+-- interval, seconds. Again whenever the menu makes another hill.
 local hill = nil
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
@@ -122,7 +123,8 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		target = magic.Vector3(v[4], v[5], v[6]),
 		lat = v[7], day = v[8], time = v[9]}
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
-		lat = v[7], day = v[8], hour = v[9]}
+		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0}
+	hill.may_pick = v[14] ~= 0
 	ground.position = magic.Vector3(v[4], v[5] - 0.6, v[3] / 2)
 	ground.enabled = true
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
@@ -197,20 +199,26 @@ local function update_sky()
 end
 
 --
--- The car, drawn from hillclimb:car: car.h's Spec, in metres
+-- The cars, drawn from hillclimb:car: car.h's Spec, in metres.
+-- [HC_MULTIPLAYER] One each: this client's own (hillclimb:you) as it was,
+-- the others' translucent with their names over them
 --
 local CAR = {tyre_r = 0.40, tyre_w = 0.30, track = 1.60, wheelbase = 2.80,
 	mount_y = -0.1, droop = 0.45}
-local function lit(r, g, b)
+local function lit(r, g, b, a)
 	local m = magic.Material:new()
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTexture.xml"))
-	m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b))
+	m:SetTechnique(0, magic.cache:GetResource("Technique", a and
+			"Techniques/NoTextureAlpha.xml" or "Techniques/NoTexture.xml"))
+	m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, a or 1))
 	m:SetShaderParameter("MatSpecColor", magic.Color(0.02, 0.02, 0.02))
 	return m
 end
-local TYRE, RIM, STEEL = lit(0.01, 0.01, 0.01), lit(0.15, 0.15, 0.14),
-		lit(0.05, 0.05, 0.06)
+local LOOKS = {
+	own = {tyre = lit(0.01, 0.01, 0.01), rim = lit(0.15, 0.15, 0.14),
+		steel = lit(0.05, 0.05, 0.06)},
+	ghost = {tyre = lit(0.01, 0.01, 0.01, 0.35), rim = lit(0.15, 0.15, 0.14,
+		0.35), steel = lit(0.05, 0.05, 0.06, 0.35)},
+}
 local function part(parent, model, mat, pos, scale, rot)
 	local n = parent:CreateChild("Part")
 	n.position = pos
@@ -224,63 +232,97 @@ local function part(parent, model, mat, pos, scale, rot)
 	m.castShadows = true
 	return n
 end
-local car_node = scene:CreateChild("Car")
-car_node.enabled = false
 local hub_y = (CAR.mount_y - CAR.droop) * U
-part(car_node, "Box", STEEL, magic.Vector3(0, CAR.mount_y * U, 0),
-		magic.Vector3(0.15 * U, 0.15 * U, (CAR.wheelbase + 0.3) * U))
-local wheels, axles = {}, {}
 local SIDEWAYS = magic.Quaternion(90, magic.Vector3(0, 0, 1))
-for i = 1, 4 do
-	local x = (i % 2 == 1 and -1 or 1) * CAR.track / 2 * U
-	local z = (i <= 2 and 1 or -1) * CAR.wheelbase / 2 * U
-	local hub = car_node:CreateChild("Hub")
-	hub.position = magic.Vector3(x, hub_y, z)
-	local spin = hub:CreateChild("Spin")
-	local d, w = 2 * CAR.tyre_r * U, CAR.tyre_w * U
-	part(spin, "Cylinder", TYRE, magic.Vector3(0, 0, 0),
-			magic.Vector3(d, w, d), SIDEWAYS)
-	part(spin, "Cylinder", RIM, magic.Vector3(0, 0, 0),
-			magic.Vector3(d * 0.6, w * 1.05, d * 0.6), SIDEWAYS)
-	-- A bar across the rim, so the wheel is seen turning
-	part(spin, "Box", STEEL, magic.Vector3(0, 0, 0),
-			magic.Vector3(w * 1.1, 0.08 * U, d * 0.75))
-	wheels[i] = {hub = hub, spin = spin, x = x, z = z}
-end
-for a = 1, 2 do
-	axles[a] = part(car_node, "Box", STEEL, magic.Vector3(0, hub_y, 0),
-			magic.Vector3(CAR.track * U, 0.1 * U, 0.1 * U))
+-- A car's nodes; a ghost's name over it
+local function make_car(ghost, name)
+	local look = ghost and LOOKS.ghost or LOOKS.own
+	local c = {node = scene:CreateChild("Car"), wheels = {}, axles = {},
+		states = {}, name = name}
+	c.node.enabled = false
+	part(c.node, "Box", look.steel, magic.Vector3(0, CAR.mount_y * U, 0),
+			magic.Vector3(0.15 * U, 0.15 * U, (CAR.wheelbase + 0.3) * U))
+	for i = 1, 4 do
+		local x = (i % 2 == 1 and -1 or 1) * CAR.track / 2 * U
+		local z = (i <= 2 and 1 or -1) * CAR.wheelbase / 2 * U
+		local hub = c.node:CreateChild("Hub")
+		hub.position = magic.Vector3(x, hub_y, z)
+		local spin = hub:CreateChild("Spin")
+		local d, w = 2 * CAR.tyre_r * U, CAR.tyre_w * U
+		part(spin, "Cylinder", look.tyre, magic.Vector3(0, 0, 0),
+				magic.Vector3(d, w, d), SIDEWAYS)
+		part(spin, "Cylinder", look.rim, magic.Vector3(0, 0, 0),
+				magic.Vector3(d * 0.6, w * 1.05, d * 0.6), SIDEWAYS)
+		-- A bar across the rim, so the wheel is seen turning
+		part(spin, "Box", look.steel, magic.Vector3(0, 0, 0),
+				magic.Vector3(w * 1.1, 0.08 * U, d * 0.75))
+		c.wheels[i] = {hub = hub, spin = spin, x = x, z = z}
+	end
+	for a = 1, 2 do
+		c.axles[a] = part(c.node, "Box", look.steel, magic.Vector3(0, hub_y, 0),
+				magic.Vector3(CAR.track * U, 0.1 * U, 0.1 * U))
+	end
+	if ghost then
+		local l = c.node:CreateChild("Name")
+		l.position = magic.Vector3(0, 2.2 * U, 0)
+		local t = l:CreateComponent("Text3D")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 20)
+		t.text = name
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		t.faceCameraMode = magic.FC_ROTATE_XYZ
+		t.fixedScreenSize = true
+		t.textEffect = magic.TE_STROKE
+		t.effectColor = magic.Color(0, 0, 0, 0.8)
+		log:info("hillclimb: " .. name .. "'s car drawn as a ghost")
+	end
+	return c
 end
 
--- Two states, drawn a packet behind and blended, so the car moves as
--- smoothly as the frames do at the server's 30 Hz
-local states = {}
+-- "id name" and the rest, by car: two states each, drawn a packet behind
+-- and blended, so a car moves as smoothly as the frames do at the
+-- server's 30 Hz. A car not heard of for 2 s is gone.
+local own_id = nil
+local cars = {}
+buildat.sub_packet("hillclimb:you", function(data)
+	own_id = tonumber(data)
+	log:info("hillclimb: this client's car is " .. tostring(own_id))
+end)
 buildat.sub_packet("hillclimb:car", function(data)
-	local v = {}
-	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
-	if #v < 18 then
+	local id, name, rest = data:match("^(%d+) (%S+) (.*)$")
+	id = tonumber(id)
+	if not id or not own_id then
 		return
 	end
-	states[1] = states[2]
-	states[2] = {t = scene.elapsedTime, v = v}
-	car_node.enabled = true
+	local v = {}
+	for w in rest:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	if #v < 19 then
+		return
+	end
+	local c = cars[id]
+	if not c then
+		c = make_car(id ~= own_id, name)
+		cars[id] = c
+	end
+	c.states[1] = c.states[2]
+	c.states[2] = {t = scene.elapsedTime, v = v}
+	c.node.enabled = true
 end)
 local car_pos = nil
-local function draw_car()
-	local b = states[2]
+local function draw_car(c)
+	local b = c.states[2]
 	if b == nil then
 		return
 	end
-	local a = states[1] or b
+	local a = c.states[1] or b
 	local span = math.max(1e-3, b.t - a.t)
 	local k = math.max(0, math.min(1, (scene.elapsedTime - b.t) / span))
 	local function mix(i) return a.v[i] + (b.v[i] - a.v[i]) * k end
-	car_pos = magic.Vector3(mix(1), mix(2), mix(3))
-	car_node.position = car_pos
-	car_node.rotation = magic.Quaternion(a.v[4], a.v[5], a.v[6], a.v[7]):Slerp(
+	c.pos = magic.Vector3(mix(1), mix(2), mix(3))
+	c.node.position = c.pos
+	c.node.rotation = magic.Quaternion(a.v[4], a.v[5], a.v[6], a.v[7]):Slerp(
 			magic.Quaternion(b.v[4], b.v[5], b.v[6], b.v[7]), k)
 	local spin_deg = math.deg(b.v[8])
-	for i, w in ipairs(wheels) do
+	for i, w in ipairs(c.wheels) do
 		local y = hub_y + b.v[10 + i]
 		w.hub.position = magic.Vector3(w.x, y, w.z)
 		w.y = y
@@ -290,11 +332,55 @@ local function draw_car()
 	end
 	-- Each axle between its two hubs, tilted as they stand
 	for a_i = 1, 2 do
-		local l, r = wheels[a_i * 2 - 1], wheels[a_i * 2]
-		axles[a_i].position = magic.Vector3(0, (l.y + r.y) / 2, l.z)
-		axles[a_i].rotation = magic.Quaternion(math.deg(math.atan2(r.y - l.y,
+		local l, r = c.wheels[a_i * 2 - 1], c.wheels[a_i * 2]
+		c.axles[a_i].position = magic.Vector3(0, (l.y + r.y) / 2, l.z)
+		c.axles[a_i].rotation = magic.Quaternion(math.deg(math.atan2(r.y - l.y,
 				r.x - l.x)), magic.Vector3(0, 0, 1))
 	end
+end
+local function draw_cars()
+	for id, c in pairs(cars) do
+		if scene.elapsedTime - (c.states[2] and c.states[2].t or 0) > 2 then
+			c.node:Remove()
+			cars[id] = nil
+		else
+			draw_car(c)
+		end
+	end
+	car_pos = cars[own_id] and cars[own_id].pos
+end
+
+-- [HC_MULTIPLAYER] 4: observing, the camera on the car furthest up the
+-- slope (its z), driving ones first; a new leader taken after it has led
+-- for 2 s, so two side by side do not flick it
+local watch = {id = nil, cand = nil, since = 0}
+local function observed()
+	local own = cars[own_id]
+	if not (own and own.states[2] and own.states[2].v[19] == 1) then
+		watch.id = nil
+		return nil
+	end
+	local best, best_z, running = nil, nil, false
+	for id, c in pairs(cars) do
+		local s = c.states[2]
+		if s and c.pos then
+			local run = s.v[17] == 1
+			if (run and not running) or (run == running and
+					(best_z == nil or c.pos.z > best_z)) then
+				best, best_z, running = id, c.pos.z, run
+			end
+		end
+	end
+	local now = scene.elapsedTime
+	if best ~= watch.cand then
+		watch.cand, watch.since = best, now
+	end
+	if best and (watch.id == nil or not cars[watch.id] or
+			(best ~= watch.id and now - watch.since >= 2)) then
+		watch.id = best
+		log:info("hillclimb: observing " .. cars[best].name)
+	end
+	return watch.id and cars[watch.id]
 end
 
 -- The stones come loose (main.cpp send_rocks): "id x y z qw qx qy qz
@@ -344,6 +430,7 @@ local KEYS = {
 	{id = "gear4", label = "Fourth gear", default = "4"},
 	{id = "reverse", label = "Reverse", default = "R"},
 	{id = "reset", label = "The car back to the start", default = "Backspace"},
+	{id = "chat", label = "Chat", default = "T", shared = "chat"},
 }
 local key = {}
 do
@@ -358,6 +445,37 @@ local function down(id)
 end
 local gear = 2
 local menu = nil -- the menu, {sel, values} while open: no driving
+-- [HC_MULTIPLAYER] 6: the chat, builtin/chat's, its console
+-- builtin/accounts' (skeldat's); open: no driving
+local chat = require("buildat/module/chat")
+local chat_open = false
+local accounts
+do
+	local _, err, acc = buildat.run_script_file("accounts/accounts.lua")
+	if type(acc) == "table" then
+		accounts = acc
+		-- The join was the boot's (main/join.lua) or none: the packets are
+		-- this instance's from here on
+		accounts.logged_in = true
+		chat.attach(accounts)
+	else
+		log:warning("hillclimb: no accounts.lua: " .. tostring(err))
+	end
+end
+local function open_chat()
+	if not accounts or chat_open then
+		return
+	end
+	chat_open = true
+	local function back()
+		accounts.close_page()
+		chat_open = false
+		magic.ui:SetFocusElement(nil)
+		log:info("hillclimb: the chat closed")
+	end
+	accounts.chat_page(back)
+	log:info("hillclimb: the chat shown")
+end
 local sent, sent_t = nil, 0
 -- "accel brake left right gear reset" (main.cpp on_input), sent when it
 -- changes and twice a second besides
@@ -366,7 +484,9 @@ local function send_input()
 		if down("gear" .. g) then gear = g end
 	end
 	if down("reverse") then gear = 0 end
-	local function b(id) return not menu and down(id) and 1 or 0 end
+	local function b(id)
+		return not menu and not chat_open and down(id) and 1 or 0
+	end
 	local msg = string.format("%d %d %d %d %d %d", b("accel"), b("brake"),
 			b("left"), b("right"), gear, b("reset"))
 	local now = scene.elapsedTime
@@ -388,17 +508,50 @@ local function text(x, y, size)
 end
 local hud = text(12, 10, 18)
 local board = text(12, 120, 15)
+-- The chat's last lines, and the round's results, a while each
+local chat_text = text(12, 330, 15)
+local chat_lines = {}
+table.insert(chat.listeners, function(line)
+	chat_lines[#chat_lines + 1] = {line = line, t = buildat.get_time_us()}
+	if #chat_lines > 5 then
+		table.remove(chat_lines, 1)
+	end
+end)
+local round = {phase = 0, left = 0}
+buildat.sub_packet("hillclimb:round", function(data)
+	local phase, left = data:match("^(%d+) (%S+)")
+	round.phase, round.left = tonumber(phase) or 0, tonumber(left) or 0
+end)
+local results = nil
+buildat.sub_packet("hillclimb:results", function(data)
+	results = {text = data, t = scene.elapsedTime}
+	log:info("hillclimb: the round's results:" .. (data == "" and " no runs"
+			or data:gsub("\n", "; ")))
+end)
 local menu_text = text(12, 120, 16)
 menu_text.visible = false
 
--- "<rank of the last finish or -1> <best times...>" (main.cpp
--- send_ranking), under the hill and the payload now picked
-local ranking = {last = -1, times = {}}
+-- "<rank of the last finish or -1>", then a line each, "time finished
+-- unfinished date name" (main.cpp send_ranking), under the hill and the
+-- payload now picked; the counts the runs ended on the hill before
+local ranking = {last = -1, entries = {}}
 buildat.sub_packet("hillclimb:ranking", function(data)
-	local v = {}
-	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
-	ranking = {last = v[1] or -1, times = {}}
-	for i = 2, #v do ranking.times[#ranking.times + 1] = v[i] end
+	local first = true
+	ranking = {last = -1, entries = {}}
+	for line in data:gmatch("[^\n]+") do
+		if first then
+			ranking.last = tonumber(line) or -1
+			first = false
+		else
+			local t, f, u, date, name = line:match(
+					"^(%S+) (%d+) (%d+) (%S+) (.+)$")
+			if t then
+				ranking.entries[#ranking.entries + 1] = {t = tonumber(t),
+					fin = tonumber(f), unfin = tonumber(u), date = date,
+					name = name}
+			end
+		end
+	end
 end)
 
 local MENU = {
@@ -413,14 +566,19 @@ local MENU = {
 		unit = " degrees"},
 	{id = "day", label = "Day of the year", min = 1, max = 365, step = 7},
 	{id = "hour", label = "Hour (solar)", min = 0, max = 24, step = 0.5},
+	-- [HC_MULTIPLAYER] 3: the rounds, seconds (0 never)
+	{id = "interval", label = "Rounds", list = {0, 60, 120, 180, 300, 600,
+		900, 1800}, show = function(v)
+			return v == 0 and "never" or (v / 60 .. " min") end},
 }
 local function menu_draw()
 	local lines = {"The hill and the car (Up/Down, Left/Right; Enter: make it;"
 			.. " Tab: close)", ""}
 	for i, m in ipairs(MENU) do
+		local v = menu.values[m.id]
 		lines[#lines + 1] = string.format("%s %-16s %s%s",
-				i == menu.sel and ">" or " ", m.label, tostring(menu.values[m.id]),
-				m.unit or "")
+				i == menu.sel and ">" or " ", m.label,
+				m.show and m.show(v) or tostring(v), m.unit or "")
 	end
 	menu_text:SetText(table.concat(lines, "\n"))
 end
@@ -439,10 +597,21 @@ end
 local function pressed(name)
 	return magic.input:GetKeyPress(name)
 end
+local hud_note = nil
+-- A drive's own: "event hillclimb_params <the packet>", sent whether or
+-- not this client may pick, as a modified client would (the refusal's
+-- check)
+magic.SubscribeToEvent("command_seq:hillclimb_params", function(_, d)
+	buildat.send_packet("hillclimb:params", d:GetString("Param"))
+	log:info("hillclimb: the drive sends params " .. d:GetString("Param"))
+end)
 local function menu_keys()
 	if pressed(magic.KEY_TAB) then
 		if menu then
 			menu = nil
+		elseif picks and not hill.may_pick then
+			hud_note = {text = "Only an admin picks the hill here",
+				t = scene.elapsedTime}
 		elseif picks then
 			local values = {}
 			for k, v in pairs(picks) do values[k] = v end
@@ -461,8 +630,8 @@ local function menu_keys()
 	if pressed(magic.KEY_RETURN) then
 		local v = menu.values
 		buildat.send_packet("hillclimb:params", string.format(
-				"%d %d %d %d %g %g %g", v.seed, v.steep, v.length, v.payload,
-				v.lat, v.day, v.hour))
+				"%d %d %d %d %g %g %g %d", v.seed, v.steep, v.length,
+				v.payload, v.lat, v.day, v.hour, v.interval))
 		menu = nil
 		menu_text.visible = false
 		board.visible = true
@@ -472,8 +641,17 @@ local function menu_keys()
 end
 
 local GEARS = {[0] = "R", "1", "2", "3", "4"}
-local function draw_hud()
-	local b, a = states[2], states[1]
+local ROUND = {"Round: the clock starts with the first drive",
+	"Round: %d:%02d left", "Extra time: %d:%02d left to finish",
+	"The round is over; a new hill in %d s"}
+local function mmss(x)
+	x = math.max(0, math.floor(x))
+	return math.floor(x / 60), x % 60
+end
+-- What is watched: this client's car, or observing, the leader's
+local function draw_hud(watched)
+	local own = cars[own_id]
+	local b, a = own and own.states[2], own and own.states[1]
 	if b == nil then
 		return
 	end
@@ -485,22 +663,58 @@ local function draw_hud()
 	local race, t = b.v[17], b.v[18]
 	local state = race == 0 and "W starts the clock" or race == 1 and "" or
 			race == 3 and "The hill is being made" or
+			race == 4 and "Out of time: did not finish" or
 			string.format("Finished in %.2f s. Backspace: another run", t)
-	hud:SetText(string.format("Gear %s   %4.1f m/s   %6.2f s\n%s\n"
-			.. "Tab: the hill and the car   Backspace: back to the start",
-			GEARS[b.v[16]] or "?", speed, t, state))
-	if picks and board.visible then
-		local lines = {string.format("Best on this hill with %d kg:",
-				picks.payload)}
-		for i, x in ipairs(ranking.times) do
-			lines[#lines + 1] = string.format("%s%2d. %7.2f s",
-					i - 1 == ranking.last and ">" or " ", i, x)
-		end
-		if #ranking.times == 0 then
-			lines[#lines + 1] = "  (none yet)"
-		end
-		board:SetText(table.concat(lines, "\n"))
+	if watched and watched ~= own and watched.states[2] then
+		state = string.format("Observing %s: %.2f s", watched.name,
+				watched.states[2].v[18])
 	end
+	local lines = {string.format("Gear %s   %4.1f m/s   %6.2f s",
+			GEARS[b.v[16]] or "?", speed, t), state}
+	if round.phase > 0 then
+		local f = ROUND[round.phase]
+		lines[#lines + 1] = round.phase == 4 and string.format(f,
+				math.ceil(round.left)) or round.phase == 1 and f or
+				string.format(f, mmss(round.left))
+	end
+	if hud_note and scene.elapsedTime - hud_note.t < 3 then
+		lines[#lines + 1] = hud_note.text
+	end
+	lines[#lines + 1] = "Tab: the hill and the car   Backspace: back to the "
+			.. "start   T: chat"
+	hud:SetText(table.concat(lines, "\n"))
+	if picks and board.visible then
+		local rows = {}
+		if results and scene.elapsedTime - results.t < 8 then
+			rows[1] = "The round's results:"
+			for l in results.text:gmatch("[^\n]+") do
+				rows[#rows + 1] = l:match("^%- ") and (l:sub(3) ..
+						": did not finish") or ("  " .. l)
+			end
+		else
+			rows[1] = string.format("Best on this hill with %d kg:",
+					picks.payload)
+			for i, e in ipairs(ranking.entries) do
+				-- How worn the hill was when the run started
+				local worn = (e.fin + e.unfin == 0) and "fresh" or
+						string.format("after %d runs (%d finished)",
+						e.fin + e.unfin, e.fin)
+				rows[#rows + 1] = string.format("%s%2d. %7.2f s  %s, %s",
+						i - 1 == ranking.last and ">" or " ", i, e.t, e.name, worn)
+			end
+			if #ranking.entries == 0 then
+				rows[#rows + 1] = "  (none yet)"
+			end
+		end
+		board:SetText(table.concat(rows, "\n"))
+	end
+	local now, shown = buildat.get_time_us(), {}
+	for _, c in ipairs(chat_lines) do
+		if now - c.t < 20e6 then
+			shown[#shown + 1] = c.line
+		end
+	end
+	chat_text:SetText(table.concat(shown, "\n"))
 end
 
 -- The orbit about the car: dragged with the left button, the wheel the
@@ -518,17 +732,24 @@ magic.SubscribeToEvent("Update", function(_, d)
 	end
 	update_sky()
 	voxel_shading.update(dt)
-	draw_car()
-	menu_keys()
+	draw_cars()
+	if not chat_open and not menu and pressed(key.chat) then
+		open_chat()
+	end
+	if not chat_open then
+		menu_keys()
+	end
 	send_input()
-	draw_hud()
+	local watched = observed()
+	draw_hud(watched or cars[own_id])
 	local m = magic.input:GetMouseMove()
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
 		yaw = (yaw + m.x * 0.3) % 360
 		pitch = math.max(-10, math.min(85, pitch + m.y * 0.3))
 	end
 	local y, p = math.rad(yaw), math.rad(pitch)
-	local t = car_pos or hill.target
+	-- [HC_MULTIPLAYER] 4: observing, the leader's car; else this client's
+	local t = (watched and watched.pos) or car_pos or hill.target
 	camera_node.position = magic.Vector3(
 			t.x + dist * math.cos(p) * math.sin(y),
 			t.y + 0.5 * U + dist * math.sin(p),
