@@ -310,6 +310,10 @@ inline Game make_game()
 			"skeldat:diamond");
 	node("bone_block", "Bone Block", {"bone_block_top", "bone_block_top",
 			"bone_block_side"}, {{"cracky", 2}});
+	// The world's outermost column ([SKELDAT_EDGE_RIDGE]): the bone
+	// block's look, no group a tool or the hand digs, not an item
+	g.items.erase(node("bone_wall", "Bone Wall", {"bone_block_top",
+			"bone_block_top", "bone_block_side"}, {}).name);
 	// A skull, two, a bone: boxes in sixteenths, the face to -z
 	auto bones = [&](const ss_ &name, const ss_ &desc, const ss_ &front,
 			sv_<float> boxes, const ss_ &drop) {
@@ -482,6 +486,9 @@ inline int self_test()
 	// not iron ore; a stone pick iron ore
 	assert(std::fabs(g.dig_time("", *g.node("skeldat:dirt")) - 0.8f) < 1e-4f);
 	assert(g.dig_time("", *g.node("skeldat:stone")) < 0);
+	assert(g.dig_time("skeldat:diamond_pick", *g.node("skeldat:bone_wall")) < 0 &&
+			g.dig_time("", *g.node("skeldat:bone_wall")) < 0 &&
+			!g.item("skeldat:bone_wall"));
 	assert(g.dig_time("skeldat:wood_pick", *g.node("skeldat:stone")) > 0);
 	assert(g.dig_time("skeldat:wood_pick", *g.node("skeldat:iron_ore")) < 0);
 	assert(g.dig_time("skeldat:stone_pick", *g.node("skeldat:iron_ore")) > 0);

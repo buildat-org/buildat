@@ -49,6 +49,7 @@
 # The fifteenth, a respawn far from the spawn: the world there drawn.
 # The sixteenth, a new world's skeletons there from the start.
 # The seventeenth, the bodiless skeletons drawn out to the view.
+# The eighteenth, the world's edge: a hillside, a wall nothing digs.
 #   apps/demo_skeldat/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -794,6 +795,37 @@ grep -aq "skeldat: 0 far skeletons to client1" "$t/srv20_2.log" &&
 	grep -aq "skeldat: a skeleton ([0-9]*) is here" "$t/far2.log" ||
 	fail "the near skeletons not woken out of the far list ($t/srv20_2.log)"
 far="9 drawn and sent; $(grep -a "skeldat: [0-9]* far skeletons drawn" "$t/far1.log" | tail -1 | sed 's/.*(//; s/)//')"
+# 18. The edge ([SKELDAT_EDGE_RIDGE]) in 128 x 64 x 128 at dusk: made
+# once (the hillside's blocks and the outermost column's wall); with a
+# diamond pick, on the outermost column a dig straight down does nothing,
+# two columns in it digs a bone block; the backdrop built; a frame from the crest outward
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=edge BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
+		BUILDAT_SKELDAT_TIME=0.74 BUILDAT_SKELDAT_SPAWN="0 30" \
+		BUILDAT_SKELDAT_TEST="place 0 $([ $n = 1 ] && echo 63 || echo 61); give skeldat:diamond_pick 1 1" \
+		start_server "$t/srv21_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+		-D "$t/srv21" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv21_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	# The test's placing, not the join's
+	printf '%s\n' "wait_log 300000 $([ $n = 1 ] && echo 63 || echo 61).0)" \
+		"wait_log 30000 skeldat: the chunks within 2 drawn" \
+		"delay 1000" "look 0 -10" "delay 1000" "screenshot $t/edge$n.png" \
+		"look 0 -90" "delay 500" "mouse_down left" "delay 3500" "mouse_up left" \
+		"delay 500" quit > "$t/edge.cmds"
+	client edge$n "$t/edge.cmds"
+	wait $CLIENT || fail "the edge's drive $n ($t/edge$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+grep -aE "skeldat: the edge made: [1-9][0-9]* bone blocks, [1-9][0-9]* wall" "$t/srv21_1.log" |
+	grep -q . && ! grep -aq "skeldat: the edge made" "$t/srv21_2.log" ||
+	fail "the edge not made once ($t/srv21_1.log, $t/srv21_2.log)"
+grep -aq "client1 digs" "$t/srv21_1.log" &&
+	fail "the outermost column's wall was dug ($t/srv21_1.log)"
+grep -aq "client1 digs skeldat:bone_block" "$t/srv21_2.log" ||
+	fail "the hillside's bone block not dug ($t/srv21_2.log)"
+grep -aq "skeldat: the backdrop beyond the edge at 64" "$t/edge1.log" ||
+	fail "no backdrop ($t/edge1.log)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -801,5 +833,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge"
 # vim: set noet ts=4 sw=4:

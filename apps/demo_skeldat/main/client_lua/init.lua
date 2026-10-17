@@ -379,15 +379,19 @@ local function watch_near(dt)
 		near_ready = true
 		return
 	end
-	-- simplified: the layers inside 0 to WORLD_TOP alone (above it no
-	-- chunk is ever made, under 0 only in the 128-high worlds); the
-	-- world's own bottom on the client is the upgrade
+	-- Only the chunks inside the world (skeldat:world's box; before it,
+	-- 0 to WORLD_TOP): none is ever made outside it
 	local c0, sz = voxelworld.get_chunk_position(eye),
 			voxelworld.chunk_size_voxels
+	local box = game.world or {half = 1e9, y0 = 0, y1 = WORLD_TOP}
 	local undrawn, total = 0, 0
 	for dz = -2, 2 do for dy = -2, 2 do for dx = -2, 2 do
-		local mid = (c0.y + dy + 0.5) * sz.y
-		if mid >= 0 and mid <= WORLD_TOP + sz.y / 2 then
+		-- Chunk c holds the voxels c * size to (c + 1) * size - 1
+		local x0, y0, z0 = (c0.x + dx) * sz.x, (c0.y + dy) * sz.y,
+				(c0.z + dz) * sz.z
+		if y0 >= box.y0 and y0 + sz.y - 1 <= box.y1 and
+				x0 >= -box.half and x0 + sz.x <= box.half and
+				z0 >= -box.half and z0 + sz.z <= box.half then
 			total = total + 1
 			if not voxelworld.is_chunk_drawn(buildat.Vector3(c0.x + dx,
 					c0.y + dy, c0.z + dz)) then
@@ -768,6 +772,85 @@ do
 			(buildat.get_time_us() - t0) / 1000))
 end
 local mobs = load("main/mobs.lua")(game, sounds)
+-- **Beyond the edge** ([SKELDAT_EDGE_RIDGE]): bone hills from the world's
+-- edge out to FAR_CLIP, one static mesh built when skeldat:world ("half
+-- y0 y1 crest") says the size; heights from the edge's mean crest rolling
+-- higher and lower by a value noise, the bone block's top, unlit but for
+-- the sky's light, in the fog as the world is. Not voxels, not walked on.
+local backdrop = {node = nil, mat = nil, light_t = 0}
+local function backdrop_noise(x, z)
+	local function hash(ix, iz)
+		local h = (ix * 374761393 + iz * 668265263) % 2147483647
+		h = (h * h * 3 + h * 1274126177) % 2147483647
+		return (h % 10007) / 10007
+	end
+	local function layer(period)
+		local fx, fz = x / period, z / period
+		local ix, iz = math.floor(fx), math.floor(fz)
+		local tx, tz = fx - ix, fz - iz
+		tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
+		local a = hash(ix, iz) + (hash(ix + 1, iz) - hash(ix, iz)) * tx
+		local b = hash(ix, iz + 1) + (hash(ix + 1, iz + 1) - hash(ix, iz + 1)) * tx
+		return a + (b - a) * tz
+	end
+	return layer(48) * 0.7 + layer(16) * 0.3
+end
+buildat.sub_packet("skeldat:world", function(data)
+	local h, y0, y1, crest = data:match("^(%S+) (%S+) (%S+) (%S+)$")
+	h, crest = tonumber(h), tonumber(crest)
+	if not crest or backdrop.node then
+		return
+	end
+	game.world = {half = h, y0 = tonumber(y0), y1 = tonumber(y1)}
+	local t0 = buildat.get_time_us()
+	local C, R = 8, FAR_CLIP
+	local function height(x, z)
+		local e = math.max(math.abs(x + 0.5) - h, math.abs(z + 0.5) - h, 0)
+		return crest + (backdrop_noise(x, z) - 0.4) * 30 * math.min(1, e / 32)
+	end
+	local quads = {}
+	for z = -h - R, h + R - C, C do
+		for x = -h - R, h + R - C, C do
+			if x < -h or x >= h or z < -h or z >= h then
+				local function v(px, pz)
+					return {px - 0.5, height(px, pz), pz - 0.5}
+				end
+				local a, b, c, d = v(x, z), v(x + C, z), v(x + C, z + C),
+						v(x, z + C)
+				quads[#quads + 1] = {tile = 0,
+					p = {a[1], a[2], a[3], b[1], b[2], b[3], c[1], c[2], c[3],
+						d[1], d[2], d[3]},
+					uv = {x / 4, z / 4, (x + C) / 4, z / 4, (x + C) / 4,
+						(z + C) / 4, x / 4, (z + C) / 4}}
+			end
+		end
+	end
+	backdrop.node = scene:CreateChild("Backdrop")
+	local m = magic.Material.new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			"luanti_client/res/LuantiUnlitMask.xml"))
+	local t = magic.cache:GetResource("Texture2D", "main/bone_block_top.png")
+	if t then
+		t.filterMode = magic.FILTER_NEAREST
+		m:SetTexture(magic.TU_DIFFUSE, t)
+	end
+	backdrop.mat = m
+	buildat.set_quad_geometry(backdrop.node, quads)
+	backdrop.node:GetComponent("CustomGeometry"):SetMaterial(0, m)
+	log:info(string.format("skeldat: the backdrop beyond the edge at %d, " ..
+			"%d quads, %.1f ms", h, #quads, (buildat.get_time_us() - t0) / 1000))
+end)
+-- Lit as an object under the open sky, twice a second
+local function light_backdrop(dt)
+	backdrop.light_t = backdrop.light_t - dt
+	if not backdrop.mat or backdrop.light_t > 0 or not game.light_units then
+		return
+	end
+	backdrop.light_t = 0.5
+	local r, g, b = game.sky_light.object_light(game.light_units, 1, 0)
+	backdrop.mat:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+end
+
 local function material_of(name)
 	local n = name and game.nodes[name]
 	local g = n and n.groups or {}
@@ -1159,6 +1242,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	update_fog(dt)
 	update_music(dt)
 	watch_near(dt)
+	light_backdrop(dt)
 	if mouse_in_world and not held then
 		local m = magic.input:GetMouseMove()
 		yaw = (yaw + m.x * 0.12) % 360

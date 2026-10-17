@@ -533,6 +533,8 @@ struct Module: public interface::Module, public luanti_session::Game
 	std::vector<Arrow> m_arrows;
 	std::vector<Drop> m_drops;
 	float m_far_t = 0;
+	// The outermost columns' mean top, once the world is in
+	float m_edge_crest = 0;
 	// Each skeldat:far's count logged, for a check (BUILDAT_SKELDAT_FAR=1)
 	bool m_far_report = getenv("BUILDAT_SKELDAT_FAR") != nullptr;
 	float m_ai_t = 0, m_spawn_t = 0;
@@ -1305,11 +1307,26 @@ struct Module: public interface::Module, public luanti_session::Game
 				m_markers[footprint(mx * skeldat::bones::SECTION,
 						mz * skeldat::bones::SECTION)] = mn;
 		size_t added = 0;
+		make_edge();
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(size_t i = 0; i < footprints(); i++)
 				sweep(w, i);
 			// For a check: that many more light skeletons, anywhere
 		});
+		{
+			const int h = m_half * skeldat::bones::SECTION;
+			double sum = 0;
+			size_t n = 0;
+			for(int a = -h; a < h; a++)
+				for(const auto &xz : {std::make_pair(a, -h),
+						std::make_pair(a, h - 1), std::make_pair(-h, a),
+						std::make_pair(h - 1, a)}){
+					const long c = column(xz.first, xz.second);
+					if(c >= 0 && m_top_y[c] != NO_GROUND)
+						sum += m_top_y[c], n++;
+				}
+			m_edge_crest = n ? (float)(sum / n) + 1 : 0;
+		}
 		// Not in a check's own set of mobs (TEST: no spawning; the bench,
 		// 0 an empty world)
 		if(m_test.empty() && !getenv("BUILDAT_SKELDAT_SKELETONS"))
@@ -1580,6 +1597,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		send_stats(peer, pl);
 		send_time(peer);
 		send_end(peer);
+		send_world(peer);
 		m_load_points_dirty = true;
 		log_i(MODULE, "skeldat: %s joins at (%.1f, %.1f, %.1f)", cs(name),
 				pl.x, pl.y, pl.z);
@@ -1998,6 +2016,17 @@ struct Module: public interface::Module, public luanti_session::Game
 				"%s", cs(days));
 		for(auto &pair : m_players)
 			send_end(pair.first);
+	}
+
+	// The world's size and its edge's mean crest, for the client's
+	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest",
+	// half in voxels
+	void send_world(size_t peer)
+	{
+		std::ostringstream os;
+		os<<m_half * skeldat::bones::SECTION<<" "<<m_y0 * skeldat::bones::SECTION
+				<<" "<<(m_y1 + 1) * skeldat::bones::SECTION - 1<<" "<<m_edge_crest;
+		network::send(m_server, peer, "skeldat:world", os.str());
 	}
 
 	void send_end(size_t peer)
@@ -3461,6 +3490,81 @@ struct Module: public interface::Module, public luanti_session::Game
 				log_i(MODULE, "skeldat: %zu far skeletons to %s", n,
 						cs(pl.name));
 		}
+	}
+
+	// **The world's edge** ([SKELDAT_EDGE_RIDGE]), once, when the world is
+	// first in: over the last EDGE_COLUMNS of each side a hillside of bone
+	// blocks from the column's ground (under water, its bed) by
+	// bones::edge_rise(), and the outermost column bone_wall from the
+	// bottom layer to the hillside's top, which nothing digs.
+	// simplified: made here on the whole world, not in the generator,
+	// which sees one 64-high section and not a ground in the one under it
+	void make_edge()
+	{
+		using namespace skeldat::bones;
+		std::string v;
+		if(!m_store || m_store->get("edge", v))
+			return;
+		const int64_t t0 = interface::os::time_us();
+		const int S = SECTION, h = m_half * S, y0 = m_y0 * S,
+				top = (m_y1 + 1) * S - 1;
+		const uint32_t block = id_of("skeldat:bone_block"),
+				wall = id_of("skeldat:bone_wall");
+		size_t blocks = 0, walls = 0;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			for(int sz = -m_half; sz < m_half; sz++)
+			for(int sx = -m_half; sx < m_half; sx++){
+				if(sx != -m_half && sx != m_half - 1 && sz != -m_half &&
+						sz != m_half - 1)
+					continue;
+				const pv::Region r(pv::Vector3DInt32(sx * S, y0, sz * S),
+						pv::Vector3DInt32(sx * S + S - 1, top, sz * S + S - 1));
+				const interface::VoxelVolume vol = w->get_volume(r);
+				interface::VoxelVolume out(r, m_format.planes);
+				size_t changed = 0;
+				auto put = [&](int x, int y, int z, uint32_t id){
+					interface::VoxelSample s = vol.sample_at(x, y, z);
+					s.planes[0] = 0;
+					m_format.id.set(s.planes[0], id);
+					m_bones.set(s, MAX);
+					out.set_sample_at(x, y, z, s);
+					changed++;
+				};
+				for(int z = sz * S; z < sz * S + S; z++)
+				for(int x = sx * S; x < sx * S + S; x++){
+					const int d = std::min(std::min(x + h, h - 1 - x),
+							std::min(z + h, h - 1 - z));
+					if(d >= EDGE_COLUMNS)
+						continue;
+					// The ground: the top voxel that is not air or water
+					int g = top;
+					for(; g > y0; g--){
+						const uint32_t id = m_format.id.get(vol.sample_at(x, g, z));
+						const skeldat::NodeDef *n = node_of(id);
+						if(id != ID_AIR && id != ID_IGNORE &&
+								!(n && n->shape == skeldat::LIQUID))
+							break;
+					}
+					const int rise = edge_rise(d, top - 1 - g);
+					for(int y = g + 1; y <= g + rise; y++){
+						const uint32_t id = m_format.id.get(vol.sample_at(x, y, z));
+						const skeldat::NodeDef *n = node_of(id);
+						if(id == ID_AIR || (n && (n->shape == skeldat::LIQUID ||
+								n->name == "skeldat:leaves")))
+							put(x, y, z, block), blocks++;
+					}
+					if(d == 0)
+						for(int y = y0; y <= g + rise; y++)
+							put(x, y, z, wall), walls++;
+				}
+				if(changed)
+					w->set_volume(out);
+			}
+		});
+		m_store->set("edge", "1");
+		log_i(MODULE, "skeldat: the edge made: %zu bone blocks, %zu wall "
+				"voxels, %.1f ms", blocks, walls,
+				(interface::os::time_us() - t0) / 1e3);
 	}
 
 	// The skeletons' count and its target by the flooded share f

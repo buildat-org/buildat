@@ -29,6 +29,9 @@ module under it.
   with a rule for a body in the air (self test in the header). Every
   second a player who is not an admin is pulled back where the move could
   not have been walked at twice the walk speed.
+- The world's edge: the last 16 columns of each side rise up to 12 in
+  bone blocks, the outermost column a bone wall nothing digs (made once
+  when a world is first in), and bone hills drawn beyond it to the view.
 - Items on the ground: Q drops one of the held stack ahead (Ctrl+Q all
   of it), a dig or a kill drops what does not fit, and a death drops half
   the player's stacks at random. A drop lies a game day, kept with the

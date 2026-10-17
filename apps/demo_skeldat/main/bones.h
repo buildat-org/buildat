@@ -200,6 +200,21 @@ inline bool expand(Box &box)
 	return changed;
 }
 
+// The world's edge ([SKELDAT_EDGE_RIDGE]): a hillside of bone blocks over
+// the last EDGE_COLUMNS columns of each side, rising EDGE_HEIGHT by a
+// smoothstep towards the edge (d the column's distance to it, 0 the
+// outermost); room, the voxels free over the column's ground under the
+// world's top, caps it
+static const int EDGE_COLUMNS = 16, EDGE_HEIGHT = 12;
+inline int edge_rise(int d, int room)
+{
+	if(d < 0 || d >= EDGE_COLUMNS)
+		return 0;
+	const float t = 1.0f - (float)d / EDGE_COLUMNS;
+	const int h = (int)std::lround(EDGE_HEIGHT * t * t * (3 - 2 * t));
+	return std::max(0, std::min(h, room));
+}
+
 } // namespace bones
 } // namespace skeldat
 
@@ -283,6 +298,14 @@ int main()
 		put(0, -2, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 		put(2, 0, 0, 15); assert(!skeleton_near(f, 0, 0, 0));
 	}
+	// The edge's hillside: its full height at the edge, falling to none
+	// past EDGE_COLUMNS, never more than the room, at most 1.1 a column
+	assert(edge_rise(0, 100) == EDGE_HEIGHT && edge_rise(EDGE_COLUMNS, 100) == 0 &&
+			edge_rise(-1, 100) == 0 && edge_rise(0, 5) == 5 &&
+			edge_rise(3, 0) == 0);
+	for(int d = 0; d + 1 < EDGE_COLUMNS; d++)
+		assert(edge_rise(d, 100) >= edge_rise(d + 1, 100) &&
+				edge_rise(d, 100) - edge_rise(d + 1, 100) <= 2);
 	// The seeding
 	assert(seed_value(0.49f) == 0 && seed_value(0.5f) == 1 &&
 			seed_value(0.75f) == 8 && seed_value(1.0f) == MAX);
