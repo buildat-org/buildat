@@ -43,18 +43,20 @@ drive()
 # then the brake
 drive flat BUILDAT_HILLCLIMB_START="5 -30 180" \
 	BUILDAT_HILLCLIMB_DRIVE="0:4 3:W1 9:W2 15:W3 21:W4 27:S4 31:Q" &
-# The time trial: 22 degrees climbed in second, held at the top by the
-# end's bank; again in fourth, faster; then a hill of 15 degrees and 30 m
-drive climb BUILDAT_HILLCLIMB_DRIVE="0:2 2:W2 31:S2 33:B 34:W4 50:S4 \
-52:4H15/30 54:W4 66:Q" &
+# The time trial: 22 degrees climbed in second, the gear a car starts in
+# ([HC_DEFAULTS]: no gear key before it), held at the top by the end's
+# bank; again in fourth, faster; then a hill of 15 degrees and 30 m
+drive climb BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 31:S2 \
+33:B 34:W4 50:S4 52:4H15/30 54:W4 66:Q" &
 # 40 degrees with 2 t aboard in first: past the sand's grip, it stalls,
 # its wheels spinning in place dig in and loosen stones that roll
 drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 	BUILDAT_HILLCLIMB_DRIVE="0:1 1:W1 2:KW1 26:S1 34:Q" &
 wait
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
-grep -aq "hillclimb: the hill, seed 1, 22 degrees, 50 m long" "$t/flat.log" ||
-	fail "no hill made ($t/flat.log)"
+# The default hill ([HC_DEFAULTS])
+grep -aq "hillclimb: the hill, seed 1, 29 degrees, 50 m long" "$t/flat.log" ||
+	fail "no hill made, or not at 29 degrees by default ($t/flat.log)"
 python3 -I - "$t" <<'PY' || fail "the car (logs in $t)"
 import re, sys
 d = sys.argv[1]

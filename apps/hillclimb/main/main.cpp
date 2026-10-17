@@ -192,7 +192,7 @@ struct Module: public interface::Module
 	void init()
 	{
 		m_params.seed = (uint32_t)env_or("BUILDAT_HILLCLIMB_SEED", 1);
-		m_params.steep_deg = env_or("BUILDAT_HILLCLIMB_STEEP", 22);
+		m_params.steep_deg = env_or("BUILDAT_HILLCLIMB_STEEP", 29);
 		m_params.length_m = env_or("BUILDAT_HILLCLIMB_LENGTH", 50);
 		m_latitude = env_or("BUILDAT_HILLCLIMB_LATITUDE", 60);
 		m_day = env_or("BUILDAT_HILLCLIMB_DAY", 172);

@@ -81,7 +81,7 @@ struct Spec
 struct Input
 {
 	bool accel = false, brake = false, left = false, right = false;
-	Gear gear = G1;
+	Gear gear = G2;
 };
 
 // The chassis, as main.cpp reads it from the body, in metres
@@ -122,7 +122,7 @@ struct Car
 	float shaft = 0;         // rad/s
 	float spin = 0;          // rad, for drawing
 	float pedal = 0, brake = 0, steer = 0;
-	Gear gear = G1;
+	Gear gear = G2;
 
 	Car(const Spec &s, float payload_kg): spec(s), payload(payload_kg)
 	{

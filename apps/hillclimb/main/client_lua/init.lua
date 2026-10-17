@@ -356,7 +356,7 @@ end
 local function down(id)
 	return key[id] ~= 0 and magic.input:GetKeyDown(key[id])
 end
-local gear = 1
+local gear = 2
 local menu = nil -- the menu, {sel, values} while open: no driving
 local sent, sent_t = nil, 0
 -- "accel brake left right gear reset" (main.cpp on_input), sent when it
