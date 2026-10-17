@@ -310,7 +310,15 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 	}
 
 	-- The server put the player here, so whatever we thought is wrong
+	-- A place the server's check believed can have the feet up to a
+	-- tenth inside the ground; a box inside a voxel does not stop, so the
+	-- player would fall through it: lifted onto a whole voxel whose top is
+	-- under half a voxel over the feet
 	function self:set_position(x, y, z)
+		local fy = cell_lo(y)
+		if is_solid(cell_lo(x), fy, cell_lo(z)) == true and fy + 0.5 - y < 0.5 then
+			y = fy + 0.5
+		end
 		self.x, self.y, self.z = x, y, z
 		self.vy = 0
 		if self.board then
@@ -1099,6 +1107,14 @@ do
 	local walker = M.new(cliff)
 	sneaker:set_position(1, 0.5, 0)
 	walker:set_position(1, 0.5, 0)
+	-- Put a tenth into the ground, it stands on it
+	local sunk = M.new(function(x, y, z) return y <= 0 end)
+	sunk:set_position(0, 0.4, 0)
+	for _ = 1, 20 do
+		sunk:update(0.05, {x = 0, z = 0})
+	end
+	assert(math.abs(sunk.y - 0.5) < 1e-6,
+			"player: put a tenth into the ground, fell to y = " .. sunk.y)
 	for _ = 1, 100 do
 		sneaker:update(0.05, {x = 1, z = 0, sneak = true})
 		walker:update(0.05, {x = 1, z = 0})

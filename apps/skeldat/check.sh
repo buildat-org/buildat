@@ -1,10 +1,10 @@
 #!/bin/bash
 # tier: full
-# cost: ~13 min (2026-10-16)
+# cost: ~21 min (2026-10-17)
 # covers: apps/skeldat/** builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
-# two runs of one world at seed 2 (valleys: a dry spawn, no steps
+# two runs of one world, 256 wide, at seed 2 (valleys: a dry spawn, no steps
 # over one voxel ahead), noon.
 # The first, two players: client1 walks and jumps unchecked by the
 # movement check, and is pulled back once a drive forces fly, fast and
@@ -40,7 +40,8 @@
 # when the dig ends or is cut off.
 # The eleventh, the sizes: 512, 256 and 128 wide made and surveyed (the
 # tops inside the height, the ores, the edge at full bones, the origin
-# clean) as run 1's 1024 is.
+# clean). No run makes a 1024 world ([SKELDAT_CHECKS_512]): slow, and
+# nothing in it a 512 does not show.
 # The twelfth, crafting more: the held result clicked again crafts another
 # set onto it.
 # The thirteenth, invulnerability: the admin's toggle, kept over a rejoin.
@@ -79,17 +80,17 @@ luajit -e "dofile('$m/client_lua/player.lua')" ||
 	fail "player.lua's self test (the walk's and the board's)"
 
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
-# The spawn at (0, 290): clean ground, the bones zone from z 300 on
-# (seed 2's, biased away from the origin: bones.h's danger()); run 1 walks
-# along it (-x: open grass, where -z has a cave's crack), the admin of run
-# 2 flies into it (+z, 15 degrees to +x: from where run 1 left it, x -16,
-# into the zone's core round x 0)
-server() # <log> [args]: the world "w" at seed 2, noon
+# The spawn at (0, 72) in a 256 world: clean ground, half way to the
+# edge's bones (seed 2's, biased away from the origin: bones.h's
+# danger()); run 1 walks -x on open grass, the admin of run 2 flies into
+# the danger's patch round (100, 10), 118 degrees from +z to +x from
+# where run 1 left it (-17, 72)
+server() # <log> [args]: the world "w" at seed 2, noon, 256 x 64 x 256
 {
 	local log=$1
 	shift
 	BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \
-		BUILDAT_SKELDAT_SPAWN="0 290" \
+		BUILDAT_SKELDAT_SIZE="2 0 0" BUILDAT_SKELDAT_SPAWN="0 72" \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 		-D "$t/srv" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($log)"
@@ -188,12 +189,12 @@ wait $bpid
 rss=$(ps -o rss= -p $SERVER_PID)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 s="$t/srv1.log"
-# Made at seed 2, the world's surface inside its 128 voxels of height:
+# Made at seed 2, the world's surface inside its 64 voxels of height:
 # the highest voxel the generator made under the top (63)
-top=$(grep -a "512 of 512 sections loaded" "$s" | sed 's/.*sections loaded, \([0-9.]*\) s, the highest voxel made at y \(-*[0-9]*\)/\1 \2/')
+top=$(grep -a "16 of 16 sections loaded" "$s" | sed 's/.*sections loaded, \([0-9.]*\) s, the highest voxel made at y \(-*[0-9]*\)/\1 \2/')
 [ -n "$top" ] && [ "${top#* }" -lt 60 ] ||
 	fail "the world not all in, or made over its top: $top ($s)"
-echo "the world: 512 sections in ${top% *} s, the highest voxel at y ${top#* }, the server $((rss / 1024)) MB"
+echo "the world: 16 sections in ${top% *} s, the highest voxel at y ${top#* }, the server $((rss / 1024)) MB"
 # A world's survey line ([SKELDAT_WORLD_SIZES]): <log> <lowest y>: the
 # tops inside the height, each ore there, every edge column at full
 # bones and the origin's none
@@ -213,7 +214,7 @@ surveyed()
 		if(t[1] + 0 < y0 || t[2] + 0 > 62) bad = 1
 		exit bad }' || fail "the world made: $line ($1)"
 }
-surveyed "$s" -64
+surveyed "$s" 0
 grep -aq "client1 is a player" "$s" || fail "client1 was not a player ($s)"
 first_pull=$(grep -a "pulled back" "$s" | head -1 | awk '{print $3}')
 cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{print $3}')
@@ -291,7 +292,7 @@ wait_log 5000 pause: the menu shown
 delay 500
 keypress Escape
 wait_log 5000 pause: the menu closed
-look 15 0
+look 118 0
 keypress K
 keydown Space
 delay 1500
@@ -299,13 +300,13 @@ keyup Space
 keypress H
 keypress J
 keydown W
-delay 3200
+delay 6600
 keyup W
 keypress J
 keypress H
 keypress K
 delay 2000
-look 15 -70
+look 118 -70
 mouse_down left
 delay 6000
 mouse_up left
@@ -342,8 +343,8 @@ grep -aq "client1 gives client1: " "$s" && grep -aq "client1 takes client1: " "$
 grep -aq "pause: admin got audit" "$t/a2.log" || fail "the audit log page ($t/a2.log)"
 map="$t/srv/apps/skeldat/saves/w/map.png"
 grep -aq "skeldat: the map written to $map" "$s" &&
-	[ "$(python3 -I -c 'import struct,sys; d=open(sys.argv[1],"rb").read(24); print(*struct.unpack(">II", d[16:24]))' "$map")" = "1024 1024" ] ||
-	fail "the admin's map not written, 1024 x 1024 ($s)"
+	[ "$(python3 -I -c 'import struct,sys; d=open(sys.argv[1],"rb").read(24); print(*struct.unpack(">II", d[16:24]))' "$map")" = "256 256" ] ||
+	fail "the admin's map not written, 256 x 256 ($s)"
 grep -aq "client2's line refused: muted" "$s" || fail "the muted line went out ($s)"
 grep -aE "skeldat: the first bone piles, [1-9]" "$t/srv1.log" | grep -q . ||
 	fail "no bone piles generated ($t/srv1.log)"
@@ -609,7 +610,7 @@ echo "$crack" | awk -v digs="$digs" '{ n = split($0, w, " "); last = -1; d = 0
 	}
 	exit !(!bad && last == -1 && done >= 1 && done == digs && cut >= 1) }' ||
 	fail "the crack's frames: $crack; $digs digs ($t/dig.log, $log14)"
-# 11. The sizes ([SKELDAT_WORLD_SIZES]) besides run 1's 1024: 512 x 128
+# 11. The sizes ([SKELDAT_WORLD_SIZES]): 512 x 128
 # x 512, 256 x 64 x 256 and 128 x 64 x 128 made at seed 2, each surveyed
 sizes=
 for size in "512 4 -1 0" "256 2 0 0" "128 1 0 0"; do
@@ -1051,7 +1052,7 @@ quit
 EOF
 printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
 	"delay 500" quit > "$t/board2.cmds"
-BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 2" \
+BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="course -40 -20" \
 	start_server "$log27" "STATUS Listening" 300 auto \
