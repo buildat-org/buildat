@@ -1096,6 +1096,10 @@ struct Module: public interface::Module, public luanti_session::Game
 		d.y_min = 4 + lift;
 		d.y_max = 200;
 		d.flags = "place_center_x, place_center_z";
+		// Luanti puts a schematic's layer 0 at the place_on node, and the
+		// force-placed trunk took the grass: one up, the trunk on it
+		// ([SKELDAT_TREE_DEPTH])
+		d.place_offset_y = 1;
 		d.rotation = "random";
 		luanti_mapgen::Params::Schematic &s = d.schematic;
 		s.given = true;
@@ -3086,6 +3090,11 @@ struct Module: public interface::Module, public luanti_session::Game
 				edge++, edge_max += m_top_b[c] == skeldat::bones::MAX;
 		}
 		std::map<uint32_t, size_t> ores;
+		// The trees' lowest trunk voxels, and those on grass
+		// ([SKELDAT_TREE_DEPTH])
+		const uint32_t trunk = id_of("skeldat:tree"),
+				grass = id_of("skeldat:grass");
+		size_t trunks = 0, on_grass = 0;
 		for(const char *n : {"skeldat:coal_ore", "skeldat:iron_ore",
 				"skeldat:diamond_ore"})
 			ores[id_of(n)] = 0;
@@ -3099,18 +3108,26 @@ struct Module: public interface::Module, public luanti_session::Game
 				for(int z = sz * S; z < sz * S + S; z++)
 				for(int y = m_y0 * S; y < (m_y1 + 1) * S; y++)
 				for(int x = sx * S; x < sx * S + S; x++){
-					auto it = ores.find(m_format.id.get(vol.sample_at(x, y, z)));
+					const uint32_t id = m_format.id.get(vol.sample_at(x, y, z));
+					auto it = ores.find(id);
 					if(it != ores.end())
 						it->second++;
+					if(id == trunk && y > m_y0 * S){
+						const uint32_t under = m_format.id.get(
+								vol.sample_at(x, y - 1, z));
+						if(under != trunk)
+							trunks++, on_grass += under == grass;
+					}
 				}
 			}
 		});
 		log_i(MODULE, "skeldat: survey: tops %d..%d, coal %zu, iron %zu, "
 				"diamond %zu, edge columns at full bones %d of %d, the "
-				"origin's %d", lo, hi, ores[id_of("skeldat:coal_ore")],
+				"origin's %d, trunks on grass %zu of %zu", lo, hi,
+				ores[id_of("skeldat:coal_ore")],
 				ores[id_of("skeldat:iron_ore")],
 				ores[id_of("skeldat:diamond_ore")], edge_max, edge,
-				(int)m_top_b[column(0, 0)]);
+				(int)m_top_b[column(0, 0)], on_grass, trunks);
 		write_map();
 	}
 

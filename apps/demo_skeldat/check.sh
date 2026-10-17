@@ -197,8 +197,11 @@ surveyed()
 		for(i = 1; i <= NF; i++){
 			if($i == "coal" || $i == "iron" || $i == "diamond") if($(i + 1) + 0 == 0) bad = 1
 			if($i == "bones") { if($(i + 1) + 0 != $(i + 3) + 0) bad = 1 }
+			if($i == "origin'\''s" && $(i + 1) + 0 != 0) bad = 1
+			# Every trunk on grass ([SKELDAT_TREE_DEPTH])
+			if($i == "grass" && ($(i + 1) + 0 != $NF + 0 || $NF + 0 == 0)) bad = 1
 		}
-		if(t[1] + 0 < y0 || t[2] + 0 > 62 || $NF != 0) bad = 1
+		if(t[1] + 0 < y0 || t[2] + 0 > 62) bad = 1
 		exit bad }' || fail "the world made: $line ($1)"
 }
 surveyed "$s" -64
