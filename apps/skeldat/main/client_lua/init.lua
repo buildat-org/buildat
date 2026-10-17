@@ -1542,15 +1542,14 @@ do
 	end
 	local grains = board_sound.grains(buildat.synth)
 	local node = scene:CreateChild("board sound")
-	roll.own = board_sound.player(magic, buildat.synth, grains, 1,
-			node:CreateComponent("SoundSource"))
+	roll.own = board_sound.player(magic, buildat.synth, grains, 1, node,
+			"SoundSource", log)
 	for i = 1, 3 do
 		local n = scene:CreateChild("board sound")
-		local src = n:CreateComponent("SoundSource3D")
-		src.nearDistance = 2
-		src.farDistance = 32
 		roll.others[i] = board_sound.player(magic, buildat.synth, grains,
-				1 + i, src)
+				1 + i, n, "SoundSource3D")
+		roll.others[i].source.nearDistance = 2
+		roll.others[i].source.farDistance = 32
 		roll.others[i].node = n
 	end
 end

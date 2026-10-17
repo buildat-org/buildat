@@ -322,7 +322,11 @@ buildat.write_shorts(vector_buffer, values)
 - The same as 16-bit samples, each floored and clamped to -32768..32767
 
 A sound made of samples is played two ways. A magic.BufferedSoundStream
-is topped up ahead of its playhead (launch_world's synth). A magic.Sound
+is topped up ahead of its playhead (launch_world's synth); what is queued
+is heard that much later. The source's streamBufferLength (ms, 20..1000,
+set before Play; Urho3D's 100 by default) is its own buffer behind the
+queue ([SKELDAT_BOARD_SOUND_LAG]), and the native audio device's is 40 ms
+(rounded to SDL's power of two samples). A magic.Sound
 made from samples ([SOUND_FROM_SAMPLES], buildat.has("sound_from_samples"))
 is made once and played by any number of SoundSources, as a loaded one:
   local sound = magic.Sound:new()
@@ -2809,7 +2813,7 @@ magic.Skybox:
 magic.Slider: ChangeValue, knob, orientation, range, repeatRate, value
 magic.Sound: SetData, SetFormat, frequency, length, looped, new
 magic.SoundListener: 
-magic.SoundSource: Play, Stop, autoRemoveMode, frequency, gain, panning, playing, soundType
+magic.SoundSource: Play, Stop, autoRemoveMode, frequency, gain, panning, playing, soundType, streamBufferLength
 magic.SoundSource3D: farDistance, innerAngle, nearDistance, outerAngle, rolloffFactor
 magic.SoundStream: SetFormat, frequency, sampleSize, stopAtEnd
 magic.Sphere: Clear, Define, Distance, Merge, center, radius

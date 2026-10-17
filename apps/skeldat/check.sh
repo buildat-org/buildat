@@ -1088,8 +1088,9 @@ first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] && [ -n "$first_pull" ] && [[ ! "$first_pull" < "$cheat" ]] &&
 	grep -aq "pulled back .*: too far (on the board)" "$log27" ||
 	fail "an honest board pulled back, or the forced one not: first at $first_pull, the cheat at $cheat ($log27)"
-# [SKELDAT_BOARD_SOUND] The roll's self test, and its stream 2 to 3 chunks
-# (100 to 150 ms) ahead after each feed over the ride
+# [SKELDAT_BOARD_SOUND] The roll's self test, and its stream 3 to 4 chunks
+# (30 to 40 ms, [SKELDAT_BOARD_SOUND_LAG]) ahead after each feed over the
+# ride, with no underrun said
 grep -aq "skeldat: board sound: self test passed" "$c1" ||
 	fail "the board sound's self test ($c1)"
 roll=$(grep -a "skeldat: board speed" "$c1" |
@@ -1097,7 +1098,8 @@ roll=$(grep -a "skeldat: board speed" "$c1" |
 	awk 'NR == 1 { lo = $1; hi = $2 } $1 < lo { lo = $1 } $2 > hi { hi = $2 }
 		END { print NR, lo, hi }')
 read -r roll_n roll_lo roll_hi <<< "$roll"
-[ "${roll_n:-0}" -ge 10 ] && [ "${roll_lo:-0}" -ge 100 ] && [ "${roll_hi:-999}" -le 151 ] ||
+[ "${roll_n:-0}" -ge 10 ] && [ "${roll_lo:-0}" -ge 30 ] && [ "${roll_hi:-999}" -le 41 ] &&
+	! grep -aq "board sound: .* underruns" "$c1" ||
 	fail "the roll's stream: $roll_n reports, $roll_lo to $roll_hi ms ahead ($c1)"
 echo "the roll: $roll_lo to $roll_hi ms ahead over $roll_n reports"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||

@@ -3328,6 +3328,19 @@ function M.define(dst, util)
 			soundType = util.simple_property("string"),
 			autoRemoveMode = util.simple_property("number"),
 			playing = util.simple_property("boolean"),
+			-- ms, 20 to 1000, for the next Play() of a stream
+			-- ([SKELDAT_BOARD_SOUND_LAG]); checked here as well as clamped
+			-- in C++, since tolua casts a NaN to an int before that
+			streamBufferLength = {
+				get = util.simple_property("number").get,
+				set = function(v, what)
+					if type(v) ~= "number" or not (v >= 20 and v <= 1000) then
+						error((what or "streamBufferLength") ..
+								": a number of ms from 20 to 1000", 2)
+					end
+					return math.floor(v)
+				end,
+			},
 		},
 	})
 

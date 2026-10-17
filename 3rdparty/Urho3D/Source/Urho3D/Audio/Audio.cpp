@@ -137,7 +137,8 @@ bool Audio::SetMode(int bufferLengthMSec, int mixRate, bool stereo, bool interpo
     clipBuffer_ = new int[stereo ? fragmentSize_ << 1 : fragmentSize_];
 
     URHO3D_LOGINFO("Set audio mode " + String(mixRate_) + " Hz " + (stereo_ ? "stereo" : "mono") + " " +
-            (interpolation_ ? "interpolated" : ""));
+            (interpolation_ ? "interpolated" : "") + ", a buffer of " + String(obtained.samples) + " samples (" +
+            String(obtained.samples * 1000 / Max(obtained.freq, 1)) + " ms)");
 
     return Play();
 }

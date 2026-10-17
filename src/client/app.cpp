@@ -1703,6 +1703,12 @@ struct CApp: public App, public magic::Application
 		engineParameters_["VSync"] = m_options.graphics.vsync;
 		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;
 		engineParameters_["Multisample"] = m_options.graphics.multisampling;
+#ifndef __EMSCRIPTEN__
+		// The audio device's buffer, ms: Urho3D's 100 is heard as a delay
+		// ([SKELDAT_BOARD_SOUND_LAG]); 20 is its least. The web's stays.
+		// simplified: 40 for every app; an app's own if one crackles
+		engineParameters_["SoundBuffer"] = 40;
+#endif
 
 		magic::Log *magic_log = GetSubsystem<magic::Log>();
 		// Disable timestamps in log messages (also added to events)

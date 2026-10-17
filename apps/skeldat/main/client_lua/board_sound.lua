@@ -5,7 +5,7 @@
 -- [SKELDAT_BOARD_SOUND] The board's roll, synthesized and streamed: the
 -- wheels' hits on concrete's grain each knock the deck, at a rate rising
 -- with the speed, over a low roar of the wheels. Every surface sounds as
--- concrete; the air is silent. One roll a stream, fed 50 ms chunks made
+-- concrete; the air is silent. One roll a stream, fed 10 ms chunks made
 -- by buildat.synth's blocks, so the summing is C++'s.
 --   local board_sound = load("main/board_sound.lua")
 --   local grains = board_sound.grains(buildat.synth)
@@ -13,9 +13,13 @@
 --   r:render(s, on_ground, brake) -- -> hits; the chunk in r.out[0, CHUNK)
 local M = {}
 M.RATE = 22050
-M.CHUNK = 1103 -- 50 ms
--- Fed while the stream holds under this: 2 to 3 chunks ahead
-M.AHEAD = 0.1
+-- [SKELDAT_BOARD_SOUND_LAG] What is queued is heard that much later: 10 ms
+-- chunks, fed while the stream holds under 30 ms (above a 60 Hz frame's
+-- 17 with room for a slow one), into a source buffer of 30 ms (STREAM_MS)
+-- simplified: AHEAD a constant to raise if the underruns logged say so
+M.CHUNK = 221 -- 10 ms
+M.AHEAD = 0.03
+M.STREAM_MS = 30
 -- simplified: first figures, to tune by ear
 M.HITS_PER_SPEED = 25 -- a second, per voxel a second
 M.TOP = 8 -- the speed of the full level
@@ -65,21 +69,14 @@ end
 -- A roll's state; seed makes its noise and its hits' times
 function M.new(synth, grains, seed)
 	local r = {grains = grains, rnd = seed or 1, noise_seed = (seed or 1) * 7,
-		level = 0, scrape = 0, next_hit = 0, shots = {},
-		acc = synth.buffer(M.CHUNK + GRAIN * 3),
-		spare = synth.buffer(M.CHUNK + GRAIN * 3),
+		level = 0, scrape = 0, next_hit = 0,
+		acc = synth.buffer(M.CHUNK + GRAIN),
+		spare = synth.buffer(M.CHUNK + GRAIN),
 		noise = synth.buffer(M.CHUNK + PRE)}
 	r.out = r.acc
 	function r:rand()
 		self.rnd = (self.rnd * 1103515245 + 12345) % 2147483648
 		return self.rnd / 2147483648
-	end
-	-- The jump's pop, the landing's clack (gain 0..1): at the next chunk
-	function r:pop()
-		self.shots[#self.shots + 1] = "pop"
-	end
-	function r:clack(gain)
-		self.shots[#self.shots + 1] = math.max(0, math.min(1, gain))
 	end
 	function r:filtered(type, cutoff)
 		self.noise_seed = self.noise_seed % 4294967291 + 1
@@ -125,38 +122,76 @@ function M.new(synth, grains, seed)
 		else
 			self.next_hit = 0
 		end
-		for _, shot in ipairs(self.shots) do
-			local g = self.grains
-			if shot == "pop" then
-				self.acc:mix(g[1], 0, 0, GRAIN, 2 * M.HIT_GAIN)
-				self.acc:mix(g.thud, 0, 0, g.thud:len(), 0.5)
-			else
-				self.acc:mix(g[2], 0, 0, GRAIN, 2 * M.HIT_GAIN * shot)
-				self.acc:mix(g[3], 0, CLACK_GAP, GRAIN, 2 * M.HIT_GAIN * shot)
-			end
-		end
-		self.shots = {}
 		self.level, self.scrape = level, scrape
 		return hits
 	end
 	return r
 end
 
--- A roll played: a stream on source, topped up by feed(). A rider off the
--- board feeds nothing, and its stream runs dry into silence.
-function M.player(magic, synth, grains, seed, source)
+-- A buffer made a Sound, for a one-shot
+local function to_sound(magic, buf)
+	local vb = magic.VectorBuffer:new()
+	buf:to_shorts(vb)
+	local sound = magic.Sound:new()
+	sound:SetFormat(M.RATE, true, false)
+	sound:SetData(vb)
+	return sound
+end
+
+-- A roll played: a stream on a source of `kind` ("SoundSource" or
+-- "SoundSource3D", p.source) in node, topped up by feed(). A rider off the
+-- board feeds nothing, and its stream runs dry into silence. log: where
+-- the underruns are said, once a minute (nil: not said)
+function M.player(magic, synth, grains, seed, node, kind, log)
 	local p = M.new(synth, grains, seed)
+	local source = node:CreateComponent(kind)
 	p.stream = magic.BufferedSoundStream:new()
 	p.stream:SetFormat(M.RATE, true, false)
 	p.stream.stopAtEnd = false
 	p.vb = magic.VectorBuffer:new()
 	p.source = source
 	source.soundType = magic.SOUND_EFFECT
+	source.streamBufferLength = M.STREAM_MS
 	source:Play(p.stream)
+	-- The pop and the clack out of the queue ([SKELDAT_BOARD_SOUND_LAG]):
+	-- Sounds made once, played when they happen, behind the device only
+	if not grains.pop_sound then
+		local n = grains.thud:len()
+		local pop, clack = synth.buffer(n), synth.buffer(n)
+		pop:mix(grains[1], 0, 0, GRAIN, 2 * M.HIT_GAIN)
+		pop:mix(grains.thud, 0, 0, n, 0.5)
+		clack:mix(grains[2], 0, 0, GRAIN, 2 * M.HIT_GAIN)
+		clack:mix(grains[3], 0, CLACK_GAP, GRAIN, 2 * M.HIT_GAIN)
+		grains.pop_sound, grains.clack_sound = to_sound(magic, pop),
+				to_sound(magic, clack)
+	end
+	local shot = node:CreateComponent(kind)
+	shot.soundType = magic.SOUND_EFFECT
+	function p:pop()
+		shot.gain = 1
+		shot:Play(grains.pop_sound)
+	end
+	function p:clack(gain)
+		shot.gain = math.max(0, math.min(1, gain))
+		shot:Play(grains.clack_sound)
+	end
+	local underruns, said_t, fed = 0, buildat.get_time_us(), false
 	-- -> the stream's length after it, s
 	function p:feed(s, on_ground, brake)
 		local guard = 0
-		while self.stream.bufferLength < M.AHEAD and guard < 8 do
+		if fed and self.stream.bufferLength <= 0 then
+			underruns = underruns + 1
+		end
+		fed = true
+		local now = buildat.get_time_us()
+		if log and now - said_t >= 60e6 then
+			if underruns > 0 then
+				log:info(string.format("skeldat: board sound: %d underruns "
+						.. "this last minute", underruns))
+			end
+			underruns, said_t = 0, now
+		end
+		while self.stream.bufferLength < M.AHEAD and guard < 16 do
 			self:render(s, on_ground, brake)
 			self.out:to_shorts(self.vb, 0, M.CHUNK)
 			self.stream:AddData(self.vb)
@@ -166,7 +201,7 @@ function M.player(magic, synth, grains, seed, source)
 	end
 	-- Off the board: the next ride ramps in from silence
 	function p:rest()
-		self.level, self.scrape, self.shots = 0, 0, {}
+		self.level, self.scrape, fed = 0, 0, false
 	end
 	return p
 end
@@ -177,8 +212,8 @@ end
 -- -> a line for the log; raises on a failure
 -- At s 0, 4 and 8, then the two air runs' last chunks; 0 and the air are
 -- the silent chunk's hash
-M.HASHES = "b83a197b10502863 f94f0c5ac11723dc 318d272121990513 " ..
-		"b83a197b10502863 b83a197b10502863"
+M.HASHES = "02cfd07dc33f6da3 d2fb62e9ce11b347 95b0afcb487297a5 " ..
+		"02cfd07dc33f6da3 02cfd07dc33f6da3"
 function M.self_test(synth)
 	local grains = M.grains(synth)
 	local hashes = {}
@@ -191,17 +226,18 @@ function M.self_test(synth)
 	local rates = {}
 	for _, s in ipairs({4, 8}) do
 		local r = M.new(synth, grains, 3)
-		local hits = 0
-		for _ = 1, 40 do -- 2 s
+		local hits, n = 0, math.floor(2 * M.RATE / M.CHUNK) -- 2 s
+		for _ = 1, n do
 			hits = hits + r:render(s, true, false)
 		end
-		local want = M.HITS_PER_SPEED * s * 40 * M.CHUNK / M.RATE
+		local want = M.HITS_PER_SPEED * s * n * M.CHUNK / M.RATE
 		assert(math.abs(hits - want) <= 0.1 * want, string.format(
 				"board sound: %d hits at %d, want %.0f", hits, s, want))
 		rates[#rates + 1] = hits
-		-- Up: one chunk to ramp out and one for the last hits' tails
-		r:render(s, false, false)
-		r:render(s, false, false)
+		-- Up: one chunk to ramp out and the last hits' tails
+		for _ = 1, 1 + math.ceil(GRAIN / M.CHUNK) do
+			r:render(s, false, false)
+		end
 		for _ = 1, 3 do
 			r:render(s, false, false)
 			for i = 0, M.CHUNK - 1 do

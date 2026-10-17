@@ -305,6 +305,11 @@ void SoundSource::SetPanning(float panning)
     MarkNetworkUpdate();
 }
 
+void SoundSource::SetStreamBufferLength(int msec)
+{
+    streamBufferLength_ = Clamp(msec, 20, 1000);
+}
+
 void SoundSource::SetAutoRemoveMode(AutoRemoveMode mode)
 {
     autoRemove_ = mode;
@@ -554,7 +559,7 @@ void SoundSource::PlayLockless(SharedPtr<SoundStream> stream)
     {
         // Setup the stream buffer
         unsigned sampleSize = stream->GetSampleSize();
-        unsigned streamBufferSize = sampleSize * stream->GetIntFrequency() * STREAM_BUFFER_LENGTH / 1000;
+        unsigned streamBufferSize = sampleSize * stream->GetIntFrequency() * streamBufferLength_ / 1000;
 
         streamBuffer_ = new Sound(context_);
         streamBuffer_->SetSize(streamBufferSize);

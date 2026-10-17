@@ -72,6 +72,10 @@ public:
     void SetAttenuation(float attenuation);
     /// Set stereo panning. -1.0 is full left and 1.0 is full right.
     void SetPanning(float panning);
+    /// Set the stream buffer's length in milliseconds (20 to 1000), for the
+    /// next Play() of a stream: shorter is less delay, longer survives a
+    /// slower main thread. [SKELDAT_BOARD_SOUND_LAG] (Buildat)
+    void SetStreamBufferLength(int msec);
     /// Set to remove either the sound source component or its owner node from the scene automatically on sound playback completion. Disabled by default.
     void SetAutoRemoveMode(AutoRemoveMode mode);
     /// Set new playback position.
@@ -100,6 +104,8 @@ public:
 
     /// Return stereo panning.
     float GetPanning() const { return panning_; }
+    /// Return the stream buffer's length in milliseconds.
+    int GetStreamBufferLength() const { return streamBufferLength_; }
 
     /// Return automatic removal mode on sound playback completion.
     AutoRemoveMode GetAutoRemoveMode() const { return autoRemove_; }
@@ -140,6 +146,8 @@ protected:
     float attenuation_;
     /// Stereo panning.
     float panning_;
+    /// Stream buffer length in milliseconds.
+    int streamBufferLength_ = STREAM_BUFFER_LENGTH;
     /// Effective master gain.
     float masterGain_;
     /// Whether finished event should be sent on playback stop.
