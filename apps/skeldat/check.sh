@@ -1088,6 +1088,18 @@ first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] && [ -n "$first_pull" ] && [[ ! "$first_pull" < "$cheat" ]] &&
 	grep -aq "pulled back .*: too far (on the board)" "$log27" ||
 	fail "an honest board pulled back, or the forced one not: first at $first_pull, the cheat at $cheat ($log27)"
+# [SKELDAT_BOARD_SOUND] The roll's self test, and its stream 2 to 3 chunks
+# (100 to 150 ms) ahead after each feed over the ride
+grep -aq "skeldat: board sound: self test passed" "$c1" ||
+	fail "the board sound's self test ($c1)"
+roll=$(grep -a "skeldat: board speed" "$c1" |
+	sed 's/.*the roll \([0-9]*\)\.\.\([0-9]*\) ms.*/\1 \2/' |
+	awk 'NR == 1 { lo = $1; hi = $2 } $1 < lo { lo = $1 } $2 > hi { hi = $2 }
+		END { print NR, lo, hi }')
+read -r roll_n roll_lo roll_hi <<< "$roll"
+[ "${roll_n:-0}" -ge 10 ] && [ "${roll_lo:-0}" -ge 100 ] && [ "${roll_hi:-999}" -le 151 ] ||
+	fail "the roll's stream: $roll_n reports, $roll_lo to $roll_hi ms ahead ($c1)"
+echo "the roll: $roll_lo to $roll_hi ms ahead over $roll_n reports"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 	fail "client2 did not see client1 on a board ($t/board2.log)"
 # 25. Free-running ([SERVER_FREE_RUN]): a 128 world, no player, at the
@@ -1376,5 +1388,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run"
 # vim: set noet ts=4 sw=4:

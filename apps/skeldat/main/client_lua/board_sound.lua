@@ -1,0 +1,221 @@
+-- Buildat: apps/skeldat/main/client_lua/board_sound.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- [SKELDAT_BOARD_SOUND] The board's roll, synthesized and streamed: the
+-- wheels' hits on concrete's grain each knock the deck, at a rate rising
+-- with the speed, over a low roar of the wheels. Every surface sounds as
+-- concrete; the air is silent. One roll a stream, fed 50 ms chunks made
+-- by buildat.synth's blocks, so the summing is C++'s.
+--   local board_sound = load("main/board_sound.lua")
+--   local grains = board_sound.grains(buildat.synth)
+--   local r = board_sound.new(buildat.synth, grains, seed)
+--   r:render(s, on_ground, brake) -- -> hits; the chunk in r.out[0, CHUNK)
+local M = {}
+M.RATE = 22050
+M.CHUNK = 1103 -- 50 ms
+-- Fed while the stream holds under this: 2 to 3 chunks ahead
+M.AHEAD = 0.1
+-- simplified: first figures, to tune by ear
+M.HITS_PER_SPEED = 25 -- a second, per voxel a second
+M.TOP = 8 -- the speed of the full level
+M.HIT_GAIN = 0.25
+M.ROAR_GAIN = 0.3
+M.SCRAPE_GAIN = 0.2
+local GRAIN = 441 -- 20 ms
+local PRE = 220 -- a filter's settling, cut off the front
+local CLACK_GAP = 331 -- 15 ms
+
+-- A grain's peak scaled to 1
+local function normalise(b)
+	local peak = 0
+	for i = 0, b:len() - 1 do
+		peak = math.max(peak, math.abs(b:get(i)))
+	end
+	if peak > 0 then
+		b:gain(1 / peak)
+	end
+end
+
+-- The knocks, made once: band-filtered noise and the deck's mode under a
+-- fast decay; and the jump's thud
+function M.grains(synth)
+	local R = M.RATE
+	local g = {}
+	for i = 1, 4 do
+		local b = synth.buffer(GRAIN)
+		b:noise{kind = "white", seed = 1000 + i, rate = R}
+		b:filter{type = "band", cutoff = 600 + 100 * (i - 1),
+				resonance = 0.8, rate = R}
+		normalise(b)
+		local mode = synth.buffer(GRAIN)
+		mode:osc{wave = "sine", freq = 170 + 30 * (i - 1), rate = R}
+		b:mix(mode, 0, 0, GRAIN, 0.8)
+		b:envelope{points = {{0, 1}, {0.003, 0.4}, {0.02, 0}}, rate = R}
+		normalise(b)
+		g[i] = b
+	end
+	local thud = synth.buffer(GRAIN * 3)
+	thud:osc{wave = "sine", freq = {start = 110, mul = 0.05}, rate = R}
+	thud:envelope{points = {{0, 1}, {0.06, 0}}, rate = R}
+	g.thud = thud
+	return g
+end
+
+-- A roll's state; seed makes its noise and its hits' times
+function M.new(synth, grains, seed)
+	local r = {grains = grains, rnd = seed or 1, noise_seed = (seed or 1) * 7,
+		level = 0, scrape = 0, next_hit = 0, shots = {},
+		acc = synth.buffer(M.CHUNK + GRAIN * 3),
+		spare = synth.buffer(M.CHUNK + GRAIN * 3),
+		noise = synth.buffer(M.CHUNK + PRE)}
+	r.out = r.acc
+	function r:rand()
+		self.rnd = (self.rnd * 1103515245 + 12345) % 2147483648
+		return self.rnd / 2147483648
+	end
+	-- The jump's pop, the landing's clack (gain 0..1): at the next chunk
+	function r:pop()
+		self.shots[#self.shots + 1] = "pop"
+	end
+	function r:clack(gain)
+		self.shots[#self.shots + 1] = math.max(0, math.min(1, gain))
+	end
+	function r:filtered(type, cutoff)
+		self.noise_seed = self.noise_seed % 4294967291 + 1
+		self.noise:noise{kind = "white", seed = self.noise_seed, rate = M.RATE}
+		self.noise:filter{type = type, cutoff = cutoff, resonance = 0,
+				rate = M.RATE}
+		return self.noise
+	end
+	-- The next chunk at speed s: -> the hits mixed in. A hit's tail runs
+	-- into the next chunk (acc and spare swap, the tail carried).
+	function r:render(s, on_ground, brake)
+		local N = M.CHUNK
+		self.acc, self.spare = self.spare, self.acc
+		self.acc:clear()
+		self.acc:mix(self.spare, N, 0, self.acc:len() - N, 1)
+		self.out = self.acc
+		local level = on_ground and math.min(1, s / M.TOP) or 0
+		if self.level > 0 or level > 0 then
+			self.acc:mix(self:filtered("low", math.min(4000, 120 + 20 * s)),
+					PRE, 0, N, M.ROAR_GAIN * self.level, M.ROAR_GAIN * level)
+		end
+		local scrape = (on_ground and brake) and math.min(1, s / M.TOP) or 0
+		if self.scrape > 0 or scrape > 0 then
+			self.acc:mix(self:filtered("band", 2000 + 250 * math.min(s, 8)),
+					PRE, 0, N, M.SCRAPE_GAIN * self.scrape,
+					M.SCRAPE_GAIN * scrape)
+		end
+		local hits = 0
+		if on_ground and s > 0 then
+			-- Gaps of 0.5 to 1.5 times the mean: each time jittered by up
+			-- to half of it
+			local gap = M.RATE / (M.HITS_PER_SPEED * s)
+			local t = self.next_hit
+			while t < N do
+				local lv = self.level + (level - self.level) * t / N
+				local g = self.grains[1 + math.floor(self:rand() * 4)]
+				self.acc:mix(g, 0, math.floor(t), GRAIN,
+						M.HIT_GAIN * lv * (0.3 + 0.7 * self:rand()))
+				hits = hits + 1
+				t = t + gap * (0.5 + self:rand())
+			end
+			self.next_hit = t - N
+		else
+			self.next_hit = 0
+		end
+		for _, shot in ipairs(self.shots) do
+			local g = self.grains
+			if shot == "pop" then
+				self.acc:mix(g[1], 0, 0, GRAIN, 2 * M.HIT_GAIN)
+				self.acc:mix(g.thud, 0, 0, g.thud:len(), 0.5)
+			else
+				self.acc:mix(g[2], 0, 0, GRAIN, 2 * M.HIT_GAIN * shot)
+				self.acc:mix(g[3], 0, CLACK_GAP, GRAIN, 2 * M.HIT_GAIN * shot)
+			end
+		end
+		self.shots = {}
+		self.level, self.scrape = level, scrape
+		return hits
+	end
+	return r
+end
+
+-- A roll played: a stream on source, topped up by feed(). A rider off the
+-- board feeds nothing, and its stream runs dry into silence.
+function M.player(magic, synth, grains, seed, source)
+	local p = M.new(synth, grains, seed)
+	p.stream = magic.BufferedSoundStream:new()
+	p.stream:SetFormat(M.RATE, true, false)
+	p.stream.stopAtEnd = false
+	p.vb = magic.VectorBuffer:new()
+	p.source = source
+	source.soundType = magic.SOUND_EFFECT
+	source:Play(p.stream)
+	-- -> the stream's length after it, s
+	function p:feed(s, on_ground, brake)
+		local guard = 0
+		while self.stream.bufferLength < M.AHEAD and guard < 8 do
+			self:render(s, on_ground, brake)
+			self.out:to_shorts(self.vb, 0, M.CHUNK)
+			self.stream:AddData(self.vb)
+			guard = guard + 1
+		end
+		return self.stream.bufferLength
+	end
+	-- Off the board: the next ride ramps in from silence
+	function p:rest()
+		self.level, self.scrape, self.shots = 0, 0, {}
+	end
+	return p
+end
+
+-- The self-check: chunks at fixed seeds hashed against the committed
+-- figures (the blocks are the same everywhere, src/lua_bindings/synth.cpp),
+-- the hits a second within 10% of 25 s, and the air silent.
+-- -> a line for the log; raises on a failure
+-- At s 0, 4 and 8, then the two air runs' last chunks; 0 and the air are
+-- the silent chunk's hash
+M.HASHES = "b83a197b10502863 f94f0c5ac11723dc 318d272121990513 " ..
+		"b83a197b10502863 b83a197b10502863"
+function M.self_test(synth)
+	local grains = M.grains(synth)
+	local hashes = {}
+	for _, s in ipairs({0, 4, 8}) do
+		local r = M.new(synth, grains, 1)
+		r:render(s, true, false)
+		r:render(s, true, false)
+		hashes[#hashes + 1] = r.out:hash()
+	end
+	local rates = {}
+	for _, s in ipairs({4, 8}) do
+		local r = M.new(synth, grains, 3)
+		local hits = 0
+		for _ = 1, 40 do -- 2 s
+			hits = hits + r:render(s, true, false)
+		end
+		local want = M.HITS_PER_SPEED * s * 40 * M.CHUNK / M.RATE
+		assert(math.abs(hits - want) <= 0.1 * want, string.format(
+				"board sound: %d hits at %d, want %.0f", hits, s, want))
+		rates[#rates + 1] = hits
+		-- Up: one chunk to ramp out and one for the last hits' tails
+		r:render(s, false, false)
+		r:render(s, false, false)
+		for _ = 1, 3 do
+			r:render(s, false, false)
+			for i = 0, M.CHUNK - 1 do
+				assert(r.out:get(i) == 0, "board sound: the air not silent")
+			end
+		end
+		hashes[#hashes + 1] = r.out:hash()
+	end
+	local got = table.concat(hashes, " ")
+	assert(got == M.HASHES,
+			"board sound: the hashes " .. got .. ", committed " ..
+			tostring(M.HASHES))
+	return string.format("board sound: self test passed, %d and %d hits "
+			.. "in 2 s at 4 and 8, hashes %s", rates[1], rates[2], got)
+end
+
+return M

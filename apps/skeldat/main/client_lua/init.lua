@@ -1095,13 +1095,20 @@ buildat.sub_packet("skeldat:players", function(data)
 						" rides a board" or " walks"))
 			end
 			x, y, z = tonumber(x), tonumber(y), tonumber(z)
+			local now = buildat.get_time_us()
 			if o.x then
 				local dx, dz = x - o.x, z - o.z
 				if dx * dx + dz * dz > 0.0025 then
 					o.travel = math.deg(math.atan2(dx, dz))
 				end
+				-- [SKELDAT_BOARD_SOUND] The speed for its roll
+				local dts = (now - o.t) / 1e6
+				if dts > 0 then
+					o.speed = math.sqrt(dx * dx + dz * dz) / dts
+				end
 			end
-			o.x, o.z = x, z
+			o.x, o.y, o.z, o.t = x, y, z, now
+			o.riding = on_board == "1"
 			o.node.position = magic.Vector3(x, y, z)
 			o.node.rotation = magic.Quaternion(0, on_board == "1" and
 					o.travel or tonumber(yw), 0)
@@ -1379,6 +1386,72 @@ local function update_music(dt)
 end
 
 --
+-- [SKELDAT_BOARD_SOUND] The board's roll (board_sound.lua): the player's
+-- own, and the 3 nearest other riders' within 32 at their boards
+-- simplified: 3, the streams' cost; more when it is measured. The others
+-- always roll: their being in the air is not sent.
+--
+local board_sound = load("main/board_sound.lua")
+local roll = {own = nil, others = {}, lo = nil, hi = nil}
+do
+	local ok, line = pcall(board_sound.self_test, buildat.synth)
+	if ok then
+		log:info("skeldat: " .. line)
+	else
+		log:error("skeldat: " .. tostring(line))
+	end
+	local grains = board_sound.grains(buildat.synth)
+	local node = scene:CreateChild("board sound")
+	roll.own = board_sound.player(magic, buildat.synth, grains, 1,
+			node:CreateComponent("SoundSource"))
+	for i = 1, 3 do
+		local n = scene:CreateChild("board sound")
+		local src = n:CreateComponent("SoundSource3D")
+		src.nearDistance = 2
+		src.farDistance = 32
+		roll.others[i] = board_sound.player(magic, buildat.synth, grains,
+				1 + i, src)
+		roll.others[i].node = n
+	end
+end
+local function update_rolls(b, jumped, landed, fall)
+	local own = roll.own
+	if b then
+		if jumped then
+			own:pop()
+		end
+		if landed then
+			own:clack(fall / 10)
+		end
+		local len = own:feed(b.s, player.on_ground, down("back"))
+		roll.lo = math.min(roll.lo or len, len)
+		roll.hi = math.max(roll.hi or len, len)
+	else
+		own:rest()
+	end
+	local near = {}
+	for _, o in pairs(others) do
+		if o.riding and o.speed then
+			local dx, dy, dz = o.x - player.x, o.y - player.y, o.z - player.z
+			local d = dx * dx + dy * dy + dz * dz
+			if d < 32 * 32 then
+				near[#near + 1] = {o = o, d = d}
+			end
+		end
+	end
+	table.sort(near, function(a, c) return a.d < c.d end)
+	for i, p in ipairs(roll.others) do
+		local n = near[i]
+		if n then
+			p.node.position = magic.Vector3(n.o.x, n.o.y, n.o.z)
+			p:feed(n.o.speed, true, false)
+		else
+			p:rest()
+		end
+	end
+end
+
+--
 -- The frame
 --
 local board_node = board_box(scene)
@@ -1432,6 +1505,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player.board = player.board or {k = 0}
 		player.board.s, player.board.hx, player.board.hz = board_cheat, s, c
 	end
+	local ground0, vy0 = player.on_ground, player.vy
 	player:update(dt, {x = fx, z = fz, jump = not dead and down("jump"),
 			sneak = not dead and down("sneak"), fast = player.fast,
 			turn = r, brake = not dead and down("back")})
@@ -1443,6 +1517,8 @@ magic.SubscribeToEvent("Update", function(_, d)
 				player.z))
 	end
 	board_node.enabled = b ~= nil
+	update_rolls(b, b and ground0 and not player.on_ground and down("jump"),
+			b and not ground0 and player.on_ground, -(vy0 or 0))
 	if b and down("back") and not board_braking then
 		board_braking = true
 		log:info(string.format("skeldat: braking at %.1f at (%.1f, %.1f, %.1f)",
@@ -1467,8 +1543,10 @@ magic.SubscribeToEvent("Update", function(_, d)
 		board_log_t = board_log_t + dt
 		if board_log_t >= 0.5 then
 			board_log_t = 0
-			log:info(string.format("skeldat: board speed %.1f, top %.1f", b.s,
-					board_top))
+			log:info(string.format("skeldat: board speed %.1f, top %.1f, "
+					.. "the roll %.0f..%.0f ms ahead", b.s, board_top,
+					(roll.lo or 0) * 1000, (roll.hi or 0) * 1000))
+			roll.lo, roll.hi = nil, nil
 		end
 	end
 	if player.landed_at then
