@@ -47,8 +47,8 @@ for app in skeldat demo_skelenti; do
 			'click Button "New world..."' \
 			"wait_log 5000 world_menu: the name screen shown" "delay 300"
 		# skeldat's seed, in its field (the empty one; the name's says world);
-		# its size and bone speed the defaults, 128 x 64 x 128 at 1x
-		# ([SKELDAT_BONE_SPEED])
+		# its size and bone speed the defaults, 256 x 64 x 256 at 1x
+		# ([SKELDAT_BONE_SPEED], [SKELDAT_TUNE_256])
 		[ $short = skeldat ] && printf '%s\n' 'click LineEdit ""' \
 			"delay 300" "text 4242" "delay 300"
 		printf '%s\n' 'click Button "Create"' \
@@ -60,11 +60,11 @@ for app in skeldat demo_skelenti; do
 		grep -aq "$short: the world \"world\" starts" "$t/$app.srv1.log" ||
 		fail "$short: New world did not make and start \"world\" ($t/$app.srv1.log)"
 	if [ $short = skeldat ]; then
-		grep -aq 'the world "world" starts, seed 4242,.* 128 x 64 x 128' \
+		grep -aq 'the world "world" starts, seed 4242,.* 256 x 64 x 256' \
 			"$t/$app.srv1.log" && grep -aq "the bones at 1x" "$t/$app.srv1.log" ||
 			fail "skeldat: the seed option not used, or not the default size and speed ($t/$app.srv1.log)"
 		# The whole world made before the play, its progress in the menu
-		grep -aq "world_menu: the wait shown: Making the world: 1 of 4" \
+		grep -aq "world_menu: the wait shown: Making the world: 1 of 16" \
 			"$t/$app.cli1.log" ||
 			fail "skeldat: no progress while the world was made ($t/$app.cli1.log)"
 		# [SKELDAT_LAUNCH_WORLD] The launcher's save=: one that is no world

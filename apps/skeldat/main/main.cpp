@@ -769,9 +769,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		world_menu::access(m_server, [&](world_menu::Interface *i){
 			world_menu::Field size{"size", "Size", "", "", false};
 			// [SKELDAT_WORLD_SIZES]: start_world() reads it; the first the
-			// default ([SKELDAT_BONE_SPEED]: the smallest)
-			size.choices = {{"128", "128 x 64 x 128"},
-				{"256", "256 x 64 x 256"}, {"512", "512 x 128 x 512"},
+			// default ([SKELDAT_TUNE_256]: 256, the others in size order)
+			size.choices = {{"256", "256 x 64 x 256"},
+				{"128", "128 x 64 x 128"}, {"512", "512 x 128 x 512"},
 				{"1024", "1024 x 128 x 1024"}};
 			// [SKELDAT_BONE_SPEED]: start_world() reads it too
 			world_menu::Field speed{"speed", "Bone speed", "", "", false};

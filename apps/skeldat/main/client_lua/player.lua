@@ -80,7 +80,7 @@ M.BOARD_STRAFE = 3
 -- from 0 in BOARD_PUSH_TIME seconds
 M.BOARD_PUSH = 2
 M.BOARD_PUSH_TIME = 3
-M.BOARD_TURN = 3
+M.BOARD_TURN = 2.25
 -- Half the board's length: where its ends sample the ground
 M.BOARD_HALF = 0.6
 -- [SKELDAT_BOARD_PRONE] Lying flat on the board (Shift): the box this
