@@ -156,21 +156,26 @@ M.TAKES = {
 			unpack(clacks(0.2, 10, 0.5, 0.45, 600))),
 	},
 
-	-- A bow loosed, and an arrow striking
-	bow = {
-		a = v{wave = "triangle", base_freq = hz(98), pluck = 0.97,
-			lpf_freq = lp(2500), env_sustain = secs(0.1),
-			env_decay = secs(0.3), volume = 0.8},
-		b = layers(v{wave = "saw", base_freq = hz(147), pluck = 0.95,
-				lpf_freq = lp(3000), env_sustain = secs(0.08),
-				env_decay = secs(0.22), volume = 0.7},
-			at(0.02, burst(2500, 5000, 0.15, 0.25,
-				{env_attack = secs(0.02)}))),
-		c = layers(v{wave = "triangle", base_freq = hz(73), pluck = 0.98,
-				lpf_freq = lp(1500), env_sustain = secs(0.15),
-				env_decay = secs(0.3), volume = 0.8},
-			tone("sine", 110, 0.15, 0.3, -0.04)),
-	},
+	-- [SKELDAT_BOW_SOUNDS] (simplified: first guesses, tuned by ear)
+	-- The draw's squeak: stick-slip pulses, a saw rising 60 to 110 Hz
+	-- (the ramp is per sample: 0.111^3 / 100 is 1.83x a second) through a
+	-- 900..1300 Hz band, a slow wobble, louder as it bends, BOW_DRAW long
+	bow_draw = {a = v{wave = "saw", base_freq = hz(60), freq_ramp = 0.111,
+		hpf_freq = hp(900), lpf_freq = lp(1300), lpf_resonance = 0.7,
+		vib_strength = 0.1, vib_speed = 0.24, env_attack = secs(0.9),
+		env_sustain = secs(0.1), env_decay = secs(0.05), volume = 0.5}},
+	-- The release's chop: a 500..2000 Hz noise burst, 3 ms in and 50 ms
+	-- out, over a sine thump falling 150 to 90 Hz in 40 ms
+	bow = {a = layers(burst(500, 2000, 0.017, 0.7,
+			{env_attack = secs(0.003)}),
+		tone("sine", 150, 0.013, 0.4, -0.31))},
+	-- An arrow sticking: a wooden thock, a tick and a short quiver
+	arrow_land = {a = layers(tone("triangle", 900, 0.005, 0.6, 0),
+		tone("triangle", 3000, 0.0017, 0.3, 0),
+		v{wave = "sine", base_freq = hz(180), trem_depth = 1,
+			trem_speed = sqrt(30 / 50), env_decay = secs(0.2),
+			volume = 0.35})},
+	-- An arrow striking a mob or a player
 	arrow_hit = {
 		a = layers(tone("sine", 220, 0.1, 0.6, -0.3),
 			burst(nil, 2000, 0.01, 0.4)),

@@ -716,7 +716,7 @@ grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 # drops one stone ahead (Q) and waits out the day (both gone); in water
 # over its head, it drowns, half its stacks (18) dropped. The server
 # started again: 18 on the ground; the respawn at the same column picks
-# them all up.
+# them all up, one pickup sound a tick ([SKELDAT_BOW_SOUNDS]).
 log17="$t/srv17.log"
 printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
@@ -750,6 +750,10 @@ grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
 grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 	[ $(grep -acE "client1 picks up 9[89] skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
+# [SKELDAT_BOW_SOUNDS] A pickup's sound, once a tick however many stacks
+picks=$(grep -ac "skeldat: sound pickup at" "$t/drops.log")
+[ "$picks" -ge 1 ] && [ "$picks" -lt 18 ] ||
+	fail "18 stacks picked up with $picks pickup sounds ($t/drops.log)"
 # 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
 # 512 x 128 x 512: the player's range follows it, the chunks within 2 of
 # the eye drawn within 30 s (a join's 2.5 s; before, not until the player
@@ -970,7 +974,8 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 # presses far off: two or more shots, then with none left (the
 # skeleton's misses picked up too) a press draws nothing. Left 60 s, a far
 # one is a stuck-arrow voxel; the server started again, the player put on
-# it picks it up. Frames of the hand at rest, half and full drawn.
+# it picks it up. Frames of the hand at rest, half and full drawn. The
+# draws', shots' and landings' sounds ([SKELDAT_BOW_SOUNDS]).
 log26="$t/srv26.log"
 shot()
 {
@@ -1014,6 +1019,19 @@ grep -aq "the skeleton (1) dies" "$s1" && grep -aq "an arrow from client1 hits t
 	fail "no arrow killed the skeleton ($s1)"
 ! grep -aq "client1 digs" "$s1" || fail "the bow dug ($s1)"
 grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not picked up ($s1)"
+# [SKELDAT_BOW_SOUNDS] Each draw squeaks on the drawer's own (the server
+# sends it to the others only); each shot, the player's and the
+# skeleton's, chops; an arrow sticking lands
+b1="$t/bow1.log"
+shots=$(( $# + $(grep -ac "a skeleton shoots at client1" "$s1") ))
+[ "$(grep -ac "skeldat: sound bow_draw (own)" "$b1")" = "$draws" ] &&
+	! grep -aq "skeldat: sound bow_draw at" "$b1" &&
+	[ "$(grep -ac "skeldat: sound bow at" "$b1")" = "$shots" ] &&
+	grep -aq "a skeleton shoots at client1" "$s1" &&
+	grep -aq "skeldat: sound arrow_land at" "$b1" &&
+	grep -aq "skeldat: 168 sounds made" "$b1" ||
+	fail "the bow's sounds: $draws draws, $shots shots, 21 sounds of 8 made ($b1)"
+echo "the bow's sounds: $draws draws, $shots shots"
 [ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
 	fail "no stuck-arrow voxel, or not picked up after the restart: ${kept:-none} ($t/srv26_2.log)"
 # 24. The board ([SKELDAT_SKATEBOARD]) on a course of stone (TEST

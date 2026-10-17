@@ -3160,8 +3160,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		if(how == "start"){
 			pl.draw_t = held.name == "skeldat:bow" && arrow != pl.main.end() ?
 					m_time : -1;
-			if(pl.draw_t >= 0)
+			if(pl.draw_t >= 0){
 				log_i(MODULE, "skeldat: %s draws the bow", cs(pl.name));
+				// [SKELDAT_BOW_SOUNDS] The others hear the draw play out
+				sound("bow_draw", pl.x, pl.y + 1.5f, pl.z, peer);
+			}
 			return;
 		}
 		if(how != "release" || pl.draw_t < 0)
@@ -3271,6 +3274,9 @@ struct Module: public interface::Module, public luanti_session::Game
 		sv_<Drop> kept;
 		sv_<uint32_t> gone;
 		sv_<pv::Vector3DInt32> seeds;
+		// [SKELDAT_BOW_SOUNDS] One pickup sound a player a tick, at a drop
+		// it took from
+		std::map<size_t, Urho3D::Vector3> picked;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(Drop &d : m_drops){
 				d.age += dt;
@@ -3344,6 +3350,7 @@ struct Module: public interface::Module, public luanti_session::Game
 							d.st.count - left.count, cs(d.st.name));
 					d.st = left;
 					send_inventory(pair.first, pl);
+					picked[pair.first] = Urho3D::Vector3(d.x, d.y, d.z);
 					if(d.st.empty())
 						break;
 				}
@@ -3354,6 +3361,8 @@ struct Module: public interface::Module, public luanti_session::Game
 				kept.push_back(d);
 			}
 		});
+		for(auto &pair : picked)
+			sound("pickup", pair.second.x_, pair.second.y_, pair.second.z_);
 		const uint32_t skull = seeds.empty() ? ID_IGNORE : id_of("skeldat:skull");
 		for(const pv::Vector3DInt32 &p : seeds){
 			set_node(p.getX(), p.getY(), p.getZ(), skull, 0,
@@ -3747,12 +3756,15 @@ struct Module: public interface::Module, public luanti_session::Game
 
 	// A moment's sound at a place, to everyone in the world; what it sounds
 	// like is the client's (client_lua/sounds.lua)
-	void sound(const char *moment, float x, float y, float z)
+	// (but `except`, which plays it itself)
+	void sound(const char *moment, float x, float y, float z,
+			size_t except = (size_t)-1)
 	{
 		char buf[100];
 		snprintf(buf, sizeof buf, "%s %.2f %.2f %.2f", moment, x, y, z);
 		for(size_t peer : m_shown)
-			network::send(m_server, peer, "skeldat:sound", buf);
+			if(peer != except)
+				network::send(m_server, peer, "skeldat:sound", buf);
 	}
 
 	// A place for a kind to spawn near a player, 12 to 24 voxels off: a
@@ -5304,7 +5316,7 @@ struct Module: public interface::Module, public luanti_session::Game
 							a.fz = (int)std::floor(a.z + 0.5f);
 					log_i(MODULE, "skeldat: an arrow sticks at %.1f,%.1f,%.1f",
 							a.x, a.y, a.z);
-					sound("arrow_hit", a.x, a.y, a.z);
+					sound("arrow_land", a.x, a.y, a.z);
 				} else
 					a.x = x, a.y = y, a.z = z;
 			}

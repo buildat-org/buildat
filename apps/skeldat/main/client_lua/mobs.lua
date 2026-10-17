@@ -288,9 +288,11 @@ return function(game, sounds)
 		game.send_luanti("punch_object", {tostring(id)}, {"array", "string"})
 	end
 
-	-- A sound by name at a place, heard from up to 24 voxels
+	-- A sound by name at a place, heard from up to 24 voxels, or far
 	local playing = {}
-	function M.play_at(moment, x, y, z, gain)
+	-- [SKELDAT_BOW_SOUNDS] An arrow lands mostly 20 to 40 off
+	local FAR = {arrow_land = 48}
+	function M.play_at(moment, x, y, z, gain, far)
 		local sound = sounds.pick(moment)
 		if not sound then
 			return
@@ -300,7 +302,7 @@ return function(game, sounds)
 		local src = node:CreateComponent("SoundSource3D")
 		src.soundType = magic.SOUND_EFFECT
 		src.nearDistance = 2
-		src.farDistance = 24
+		src.farDistance = far or FAR[moment] or 24
 		src.gain = gain or 1
 		src:Play(sound)
 		playing[#playing + 1] = {node = node, t = 5}

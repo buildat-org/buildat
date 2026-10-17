@@ -1365,6 +1365,23 @@ magic.SubscribeToEvent("UIMouseClick", function(_, d)
 	end
 end)
 
+-- [SKELDAT_BOW_SOUNDS] The draw's squeak, the drawer's own at once (the
+-- others' from the server); a draw ended any way fades it out in 30 ms
+-- (the frame's update)
+local draw_sound = {src = scene:CreateChild("bow_draw"):CreateComponent(
+		"SoundSource"), fade = nil}
+draw_sound.src.soundType = magic.SOUND_EFFECT
+function bow.sound_step(dt)
+	if bow.t or not draw_sound.src.playing then
+		return
+	end
+	draw_sound.fade = (draw_sound.fade or 0.03) - dt
+	draw_sound.src.gain = math.max(0, draw_sound.fade / 0.03)
+	if draw_sound.fade <= 0 then
+		draw_sound.src:Stop()
+	end
+end
+
 -- The left button's press: the bow drawn, or a pointed mob hit
 local function left_down()
 	if wielded() == "skeldat:bow" then
@@ -1374,6 +1391,12 @@ local function left_down()
 			bow.t = 0
 			game.send("bow", "start")
 			log:info("skeldat: the bow drawn")
+			local s = sounds.pick("bow_draw")
+			if s then
+				draw_sound.fade, draw_sound.src.gain = nil, 1
+				draw_sound.src:Play(s)
+				log:info("skeldat: sound bow_draw (own)")
+			end
 		end
 	elseif pointed_mob then
 		mobs.punch(pointed_mob)
@@ -1881,6 +1904,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	if bow.t then
 		bow.t = bow.t + dt
 	end
+	bow.sound_step(dt)
 	local draw = bow.t and math.min(1, bow.t / BOW_DRAW) or -1
 	bow.light_t = bow.light_t - dt
 	if bow.light_t <= 0 and game.light_units then
