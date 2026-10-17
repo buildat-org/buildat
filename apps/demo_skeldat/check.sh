@@ -228,7 +228,7 @@ grep -a "skeldat: client2 looks like a" "$t/a1.log" | tail -2 | sed 's/.*looks l
 	tr '\n' ' ' | grep -qx "skeleton player " ||
 	fail "client2 did not look like a skeleton by the bones and then a player ($t/a1.log)"
 
-# 2. The admin
+# 2. The admin, invulnerable on its own page, as the zone's skeletons shoot
 cat > "$t/a2.cmds" <<EOF
 $placed
 wait_log_any 5000 skeldat: role admin
@@ -259,6 +259,9 @@ click Button "Give a stack"
 wait_log 30000 pause: admin got inv client1
 delay 500
 click Button "Take*"
+wait_log 30000 pause: admin got inv client1
+delay 500
+click Button "Invulnerable*"
 wait_log 30000 pause: admin got inv client1
 delay 500
 click Button "Back"
@@ -616,21 +619,26 @@ echo "sizes:$sizes"
 # column, 3 each; the result clicked four times: held 4, 8 and 12 sticks,
 # the fourth refused (the grid empty); the 12 placed whole in main 10.
 # The slots' centres for 800x500 (scale 2): the result 508,169, main 10
-# 256,255 (ui.lua's layout; the logs below say if a click missed)
+# 256,255 (ui.lua's layout; the logs below say if a click missed). Then
+# no fall damage ([SKELDAT_NO_FALL_DAMAGE]): fast flight up 1.5 s, the
+# flight off (an admin's, the launcher's client), a landing at over the
+# old tolerance (14) and no hp lost
 log15="$t/srv15.log"
 BUILDAT_SKELDAT_WORLD=craft BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
 	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3" \
 	start_server "$log15" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
-	-D "$t/srv15" -C "$t/srv.cache" -l 3 || fail "the server ($log15)"
+	-D "$t/srv15" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log15)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "delay 1500" "keypress E" \
 	"wait_log 5000 inventory: inventory opened" "delay 500" "mouse_pos 508 169" \
 	"delay 200" "mouse_click left" "delay 700" "mouse_click left" "delay 700" \
 	"mouse_click left" "delay 700" "mouse_click left" "delay 700" \
 	"mouse_pos 256 255" "delay 200" "mouse_click left" "delay 700" \
-	"screenshot $t/craft.png" quit > "$t/craft.cmds"
+	"screenshot $t/craft.png" "keypress E" "delay 500" "keypress K" \
+	"keypress J" "keydown Space" "delay 1500" "keyup Space" "keypress J" \
+	"keypress K" "delay 6000" quit > "$t/craft.cmds"
 client craft "$t/craft.cmds"
 wait $CLIENT || fail "the crafting drive ($t/craft.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -639,11 +647,14 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	[ $(grep -ac "inventory: craft more" "$t/craft.log") = 3 ] &&
 	grep -aq "inventory: move 12 skeldat:stick craftresult:1 -> main:10" "$t/craft.log" ||
 	fail "crafting more: $(grep -a "client1 crafts" "$log15" | sed 's/.*the result //' | tr '\n' ';') ($log15, $t/craft.log)"
+landed=$(grep -a "client1 lands at" "$log15" | sed 's/.*lands at \([0-9]*\).*/\1/' | sort -n | tail -1)
+[ -n "$landed" ] && [ "$landed" -gt 14 ] && ! grep -aq "client1 .* hp left" "$log15" ||
+	fail "a fall hurt, or none landed hard: ${landed:-none} ($log15)"
 # 13. Invulnerable ([SKELDAT_INVULNERABLE]): the launcher's client, an
-# admin, turns itself invulnerable and falls (fast flight up 0.8 s, the
-# flight off): no damage; rejoined, it falls again unhurt, turns it off,
-# and the next fall hurts. Every damage goes through hurt(), the fall
-# stands for the arrow and the drowning.
+# admin, in water to over its head, turns itself invulnerable before its
+# 10 s of breath are gone: it drowns unhurt; rejoined, still unhurt, turns
+# it off, and the drowning hurts. Every damage goes through hurt(), the
+# drowning stands for the arrow.
 log16="$t/srv16.log"
 toggle() # the admin page's toggle, from the game
 {
@@ -657,18 +668,16 @@ toggle() # the admin page's toggle, from the game
 		"wait_log 5000 pause: the menu shown" "delay 500" "keypress Escape" \
 		"wait_log 5000 pause: the menu closed"
 }
-fall()
-{
-	printf '%s\n' "keypress K" "keypress J" "keydown Space" "delay 800" \
-		"keyup Space" "keypress J" "keypress K" "delay 5000"
-}
-{ echo "$placed"; echo "delay 2000"; toggle; fall; echo quit; } > "$t/inv1.cmds"
-{ echo "$placed"; echo "delay 2000"; fall; toggle; fall; echo quit; } > "$t/inv2.cmds"
+{ echo "$placed"; toggle; echo "delay 8000"; echo quit; } > "$t/inv1.cmds"
+{ echo "$placed"; echo "delay 3000"; toggle; echo "delay 4000"; echo quit; } > "$t/inv2.cmds"
 # A guest's name goes by its connection: the rejoin, client1 again, on
-# the server started again
+# the server started again. The water from the feet to over the head,
+# placed from the top (each one's ground found under the air)
+water="marker 0 0 skeldat:water_source 3; marker 0 0 skeldat:water_source 2; marker 0 0 skeldat:water_source 1"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "$water")" \
 		start_server "$t/srv16_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 		-D "$t/srv16" -C "$t/srv.cache" -l 3 -u launcher=1 ||
@@ -679,30 +688,30 @@ for n in 1 2; do
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv16_$n.log" >> "$log16"
 done
-falls=$(grep -a "client1 falls" "$log16" | sed 's/.*falls, //' | tr '\n' ';')
+drowns=$(grep -a "client1 drowns" "$log16" | sed 's/.*drowns, //' | sort | uniq -c | tr -s ' \n' ' ')
 grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 	grep -aq "client1 sets client1: invulnerable off" "$log16" &&
-	echo "$falls" | grep -qE "^invulnerable;invulnerable;[1-9][0-9]* hp left;$" ||
-	fail "invulnerability: the falls $falls ($log16)"
+	grep -a "client1 drowns" "$log16" | sed 's/.*drowns, //; s/[0-9]* hp left/hurt/' |
+		uniq | tr '\n' ';' | grep -qx "invulnerable;hurt;" ||
+	fail "invulnerability: the drowning $drowns ($log16)"
 # 14. Drops ([SKELDAT_DEATH_DROPS]), a game day 40 s: the launcher's
 # client with 36 stacks of stone digs (the dirt to the ground, no room),
-# drops one stone ahead (Q) and waits out the day (both gone); it dies
-# by a fall, half its stacks (18) dropped. The server started again: 18
-# on the ground; the respawn at the same column picks them all up.
+# drops one stone ahead (Q) and waits out the day (both gone); in water
+# over its head, it drowns, half its stacks (18) dropped. The server
+# started again: 18 on the ground; the respawn at the same column picks
+# them all up.
 log17="$t/srv17.log"
 printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
 	"delay 1500" "look 0 -40" "delay 500" "screenshot $t/drops.png" \
-	"delay 40000" "keypress K" "keypress J" "keydown Space" "delay 1500" \
-	"keyup Space" "keypress J" "keypress K" \
-	"wait_log 15000 pause: the death screen shown" "delay 1000" quit \
+	"wait_log 60000 pause: the death screen shown" "delay 25000" quit \
 	> "$t/drops1.cmds"
 printf '%s\n' "wait_log 300000 pause: the death screen shown" "delay 1000" \
 	'click Button "Respawn"' "delay 3000" quit > "$t/drops2.cmds"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=drops BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.25 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=40 \
-		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 99 36")" \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 99 36; $water")" \
 		start_server "$t/srv17_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 		-D "$t/srv17" -C "$t/srv.cache" -l 3 -u launcher=1 ||
@@ -727,18 +736,17 @@ grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 # 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
 # 512 x 128 x 512: the player's range follows it, the chunks within 2 of
 # the eye drawn within 30 s (a join's 2.5 s; before, not until the player
-# walked into another section)
+# walked into another section); the death by drowning there
 log18="$t/srv18.log"
 BUILDAT_SKELDAT_WORLD=respawn BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.4 BUILDAT_SKELDAT_SPAWN="0 0" \
-	BUILDAT_SKELDAT_TEST="place 0 250" \
+	BUILDAT_SKELDAT_TEST="place 0 250; $water" \
 	start_server "$log18" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv18" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log18)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "wait_log 300000 skeldat: the chunks within 2 drawn" "delay 5000" \
-	"keypress K" "keypress J" "keydown Space" "delay 1500" "keyup Space" \
-	"keypress J" "keypress K" "wait_log 20000 pause: the death screen shown" \
+printf '%s\n' "wait_log 300000 skeldat: the chunks within 2 drawn" \
+	"wait_log 60000 pause: the death screen shown" \
 	"delay 1000" 'click Button "Respawn"' \
 	"wait_log 30000 skeldat: the chunks within 2 drawn" quit > "$t/respawn.cmds"
 client respawn "$t/respawn.cmds"

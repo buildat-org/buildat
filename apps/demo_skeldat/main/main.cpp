@@ -81,9 +81,6 @@ static const float REACH = 5.5f;       // a little over Luanti's 4 from the eye
 // A day in seconds, Luanti's time_speed 72; BUILDAT_SKELDAT_DAY for a check
 static const float DAY_SECONDS = 1200;
 static const int HP_MAX = 20, BREATH_MAX = 10;
-// Faster than this a landing hurts, a point a node a second over it
-// (Luanti's client: BS*14)
-static const float FALL_TOLERANCE = 14;
 
 static ss_ pos_key(int x, int y, int z)
 {
@@ -1701,12 +1698,11 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_load_points_dirty = true;
 	}
 
+	// [SKELDAT_NO_FALL_DAMAGE] A fall does not hurt (user, 2026-10-17):
+	// getting back up is its cost
 	void player_fell(const ss_ &name, float speed)
 	{
-		size_t peer;
-		if(Player *pl = alive(name, peer))
-			hurt(peer, *pl, std::min(HP_MAX, (int)(speed - FALL_TOLERANCE)),
-					"falls");
+		log_i(MODULE, "skeldat: %s lands at %.1f, no damage", cs(name), speed);
 	}
 
 	void set_wield_index(const ss_ &name, int index)
