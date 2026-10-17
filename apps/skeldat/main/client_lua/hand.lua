@@ -51,7 +51,22 @@ function M.bow_shape(d)
 		string = 2 * math.sqrt(ty * ty + (tz - nz) ^ 2)}
 end
 
-function M.self_test()
+-- [SKELDAT_BOW_VIEW] The bow's node at draw d (-1 or 0 to 1) from the
+-- hand's resting place base: at rest 1.5x the size it was (0.11), drawn
+-- eased to half the distance from the eye with today's end point halved
+-- (the same place on the screen) and the scale back to 0.11, so twice
+-- today's drawn size. -> x, y, z, the scale
+M.BOW_SCALE, M.BOW_DRAWN_SCALE = 0.165, 0.11
+function M.bow_place(d, base)
+	local e = d > 0 and d * d * (3 - 2 * d) or 0
+	local function mix(a, b) return a + (b - a) * e end
+	return mix(base.x, 0.006), mix(base.y, -0.006), mix(base.z, base.z / 2),
+			mix(M.BOW_SCALE, M.BOW_DRAWN_SCALE)
+end
+
+-- near: the camera's nearClip (init.lua's)
+function M.self_test(near)
+	near = near or 0.05
 	local rest, half, full = M.bow_shape(0), M.bow_shape(0.5), M.bow_shape(1)
 	for _, s in ipairs({rest, half, full}) do
 		assert(math.abs(s.string - 2 * HALF_L) < 1e-6, "the string's length")
@@ -62,6 +77,22 @@ function M.self_test()
 	assert(full.tip_y < half.tip_y and half.tip_y < rest.tip_y,
 			"the tips in from the rest span")
 	assert(full.bend > rest.bend)
+	-- On the screen, height over distance against today's 0.11 at 0.25:
+	-- 1.5x at rest, 2x drawn; the nearest point (the nock, the string's
+	-- and the arrow's end at nock_z + 0.035, the draw's roll keeping z)
+	-- beyond the near plane all the way
+	local base = {x = 0.2, y = -0.13, z = 6.5 / 26}
+	local today = 0.11 / base.z
+	local _, _, z0, s0 = M.bow_place(-1, base)
+	local _, _, z1, s1 = M.bow_place(1, base)
+	assert(math.abs(z0 - 0.25) < 1e-9 and math.abs(z1 - 0.125) < 1e-9)
+	assert(math.abs(s0 / z0 / today - 1.5) < 1e-9, "1.5x at rest")
+	assert(math.abs(s1 / z1 / today - 2) < 1e-9, "2x drawn")
+	for i = 0, 10 do
+		local _, _, z, sc = M.bow_place(i / 10, base)
+		assert(z + sc * (M.bow_shape(i / 10).nock_z + 0.035) > near,
+				"the drawn bow cut by the near plane")
+	end
 	return true
 end
 
@@ -237,13 +268,12 @@ function M.new(camera_node, wield, game)
 		end
 		if sh.bow then
 			-- Drawn, from the hand's place and turn up before the eye,
-			-- aimed along the look, eased by the draw
+			-- aimed along the look, eased by the draw (M.bow_place)
 			local e = draw > 0 and draw * draw * (3 - 2 * draw) or 0
-			local function mix(a, b) return a + (b - a) * e end
-			h.node.position = magic.Vector3(mix(base.x, 0.012),
-					mix(base.y, -0.012), base.z)
+			local x, y, z, sc = M.bow_place(draw, base)
+			h.node.position = magic.Vector3(x, y, z)
 			h.node.rotation = wield.REST:Slerp(magic.Quaternion(0, 0, -8), e)
-			sh.node.scale = magic.Vector3(0.11, 0.11, 0.11)
+			sh.node.scale = magic.Vector3(sc, sc, sc)
 		else
 			h.node.position = magic.Vector3(base.x, base.y, base.z)
 			h.node.rotation = wield.REST
