@@ -2,7 +2,10 @@
 
 A bounded world that bones and skeletons are taking over: dig, craft
 and burn lanterns to push the bones back, lure the skeletons with their
-own marker skulls. Your score is the days until every voxel has bones.
+own marker skulls. Your score is the days until the bones cover the
+whole surface: every column's top voxel. What is under it does not
+count, and a skeleton beside a deep hole (a shaft dug down, a pit)
+sometimes drops a skull into it, which grows bones where it lands.
 
 It began as skelenti ([LUANTI_APP_EXAMPLE], `apps/demo_skelenti`) remade
 in Buildat alone ([SKELDAT]): no Luanti game and no builtin/luanti

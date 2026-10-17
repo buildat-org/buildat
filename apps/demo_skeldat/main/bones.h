@@ -217,6 +217,19 @@ inline int edge_rise(int d, int room)
 	return std::max(0, std::min(h, room));
 }
 
+// [SKELDAT_SURFACE_END] A deep hole: a column whose top (y, bones) is
+// more than DEEP_HOLE under the lowest of its eight neighbours' tops and
+// has no bones -- a shaft dug to keep a column bare, or a natural pit. A
+// skeleton beside one drops a skull into it in one of HOLE_ONE_IN steps.
+static const int DEEP_HOLE = 4, HOLE_ONE_IN = 20;
+inline bool deep_hole(int top, int bones, const int around[8])
+{
+	int low = around[0];
+	for(int i = 1; i < 8; i++)
+		low = std::min(low, around[i]);
+	return bones == 0 && top < low - DEEP_HOLE;
+}
+
 } // namespace bones
 } // namespace skeldat
 
@@ -344,6 +357,16 @@ int main()
 	}
 	assert(columns_low && columns_high &&
 			piles_high * columns_low > 5 * piles_low * columns_high);
+	// A 1-wide shaft 6 deep is a deep hole, a dip of 3 is not, nor the
+	// shaft with bones, nor one with a neighbour as deep (a trench's end)
+	{
+		const int around[8] = {10, 10, 10, 10, 10, 10, 10, 10};
+		assert(deep_hole(4, 0, around));
+		assert(!deep_hole(7, 0, around));
+		assert(!deep_hole(4, 1, around));
+		const int trench[8] = {10, 10, 10, 4, 10, 10, 10, 10};
+		assert(!deep_hole(4, 0, trench));
+	}
 	printf("bones: self test passed; %d%% of a 700x700 area seeded, the "
 			"front a voxel per 7 expansions (%.0f s); piles on %.2f%% of "
 			"the columns over 0.9, %.3f%% at 0.3-0.5\n", seeded / 100,

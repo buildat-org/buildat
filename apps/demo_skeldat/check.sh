@@ -18,9 +18,9 @@
 # bones zone unchecked, where the fog, the danger music and a skeleton come
 # and a dug voxel drops nothing. client2's line is refused, muted. The
 # admin writes the world's map.
-# The third, a world of 2 x 2 x 2 sections made with every voxel at full
-# bones (BUILDAT_SKELDAT_FILL): it ends, and started again it stays ended
-# and says so to its player.
+# The third, a world of 2 x 2 x 2 sections made with full bones on its
+# surface alone (BUILDAT_SKELDAT_FILL=surface): it ends with the deep
+# stone bare, and started again it stays ended and says so to its player.
 # The fourth, the skeletons over a world of 4 x 2 x 4 sections: a clean
 # one's count grows at night to its target, no further; a flooded one
 # has a higher target, and a player among 200 light skeletons wakes some,
@@ -357,16 +357,20 @@ grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)|skeletons, [1-
 	grep -q . || fail "no skeleton spawned or woken in the zone ($s)"
 grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
-# 3. The end: a world of 2 x 2 x 2 sections, every voxel made with bones,
-# ends; started again, it is still ended, and its player told
+# 3. The end: a world of 2 x 2 x 2 sections made with bones on its
+# surface alone (each voxel with air over it), the deep stone bare, ends;
+# started again, it is still ended, and its player told
 log3="$t/srv3.log"
-BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=1 \
+BUILDAT_SKELDAT_WORLD=end BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=surface \
 	start_server "$log3" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
 	-D "$t/srv3" -C "$t/srv.cache" -l 3 || fail "the server ($log3)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$log3" "every voxel has bones: the world ends after" 60 ||
+wait_for_log "$log3" "every column's top has bones: the world ends after" 60 ||
 	fail "the filled world did not end ($log3)"
+under=$(grep -a "the world ends after" "$log3" | sed 's/.*; \([0-9]*\) voxels under.*/\1/')
+[ "${under:-0}" -gt 100000 ] || fail "the end waited on the deep stone: ${under:-none} bare under the tops ($log3)"
+echo "the end: $under voxels bare under the tops"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 # The notice comes with the placing, before a wait_log after it would look
 printf '%s\n' "$placed" "delay 1000" "screenshot $t/end.png" quit \
@@ -380,7 +384,7 @@ CHECK_PIDS+=($SERVER_PID)
 client end "$t/end.cmds"
 wait $CLIENT || fail "the ended world's drive ($t/end.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "skeldat: Every voxel has bones. The world ended after" "$t/end.log" ||
+grep -aq "skeldat: The bones cover the whole surface. The world ended after" "$t/end.log" ||
 	fail "the ended world's player not told ($t/end.log)"
 grep -aq 'the world "end" ended after' "$log3" ||
 	fail "the end not kept in the save ($log3)"
@@ -1119,6 +1123,28 @@ lines=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { 
 	-C "$t/srv.cache" -l 3 --free-run --lan-announce check > "$t/srv28_lan.log" 2>&1 &&
 	grep -aq "free-run is for a headless check" "$t/srv28_lan.log" ||
 	fail "--free-run with --lan-announce started ($t/srv28_lan.log)"
+# 26. A deep hole ([SKELDAT_SURFACE_END]): at midnight, a shaft 10 deep
+# dug 3 from the launcher's client (invulnerable) and a skeleton 1 off
+# its edge. Within a minute the skeleton drops a skull into it, which
+# falls to the shaft's bottom and is a skull voxel there.
+log29="$t/srv29.log"
+shaft=$(for d in $(seq 10 -1 1); do printf 'marker 3 0 air -%d; ' $d; done)
+{ echo "$placed"; toggle; echo "delay 90000"; echo quit; } > "$t/hole.cmds"
+BUILDAT_SKELDAT_WORLD=hole BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="${shaft}skeleton 1 0 marked" \
+	start_server "$log29" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skeldat" \
+	-D "$t/srv29" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log29)"
+CHECK_PIDS+=($SERVER_PID)
+client hole "$t/hole.cmds"
+wait_for_log "$log29" "a dropped skull is a voxel" 300
+kill $CLIENT $SERVER_PID 2>/dev/null; wait $CLIENT $SERVER_PID 2>/dev/null
+bottom=$(grep -a "test: air at" "$log29" | head -1 | sed 's/.*air at \([-0-9]*\),\([-0-9]*\),\([-0-9]*\).*/\1 \2 \3/')
+set -- $bottom
+grep -aq "a skeleton drops a skull into the hole at $1," "$log29" &&
+	grep -aq "a dropped skull is a voxel at $1,$2,$3" "$log29" ||
+	fail "no skull dropped down the shaft at ${bottom:-none} to its bottom ($log29)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1126,5 +1152,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard, free-running, a skull down a shaft"
 # vim: set noet ts=4 sw=4:

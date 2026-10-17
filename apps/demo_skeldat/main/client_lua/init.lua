@@ -176,10 +176,11 @@ buildat.sub_packet("skeldat:stats", function(data)
 	game.changed()
 end)
 
--- [SKELDAT_BOUNDED_WORLD]: every voxel had bones, and the world is only
+-- [SKELDAT_BOUNDED_WORLD]: every column's top had bones
+-- ([SKELDAT_SURFACE_END]), and the world is only
 -- looked at now; data: the days it lasted
 buildat.sub_packet("skeldat:end", function(data)
-	game.ended = "Every voxel has bones. The world ended after " ..
+	game.ended = "The bones cover the whole surface. The world ended after " ..
 			string.format("%.1f", tonumber(data) or 0) ..
 			" days."
 	log:info("skeldat: " .. game.ended)
