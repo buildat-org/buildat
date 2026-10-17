@@ -12,6 +12,9 @@ namespace interface
 namespace voxel_path
 {
 
+// M_SQRT2 is POSIX, not C++: MinGW's headers do not give it ([WIN_M_SQRT2])
+static const float SQRT2 = 1.41421356f;
+
 static bool body_free(const Field &f, const Rules &r, const P &p)
 {
 	for(int i = 0; i < r.body_height; i++){
@@ -217,7 +220,7 @@ Result find(const Field &f, const P &from, const P &to, const Rules &r)
 				continue;
 			P t;
 			if(walk_to(f, r, s, s.x + d[0], s.z + d[1], t))
-				relax(t, diagonal ? (float)M_SQRT2 : 1.0f);
+				relax(t, diagonal ? SQRT2 : 1.0f);
 			if(r.build_cost <= 0 || diagonal)
 				continue;
 			P b;
@@ -269,7 +272,7 @@ bool self_test()
 		r.max_length = 0;
 		// A diagonal is shorter than its two sides
 		Result dg = find(f, P(0, 1, 0), P(2, 1, 2), r);
-		assert(dg.found && std::fabs(dg.length - 2 * (float)M_SQRT2) < 1e-3f);
+		assert(dg.found && std::fabs(dg.length - 2 * SQRT2) < 1e-3f);
 	}
 	{
 		// A one-voxel step is a jump; two is not, and nor is a wall
