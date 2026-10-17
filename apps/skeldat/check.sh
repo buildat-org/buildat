@@ -1614,15 +1614,70 @@ BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	-D "$t/srv36" -C "$t/srv.cache" -l 3 || fail "the server ($log36)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "delay 1000" "event skeldat_send pause on" \
-	"event skeldat_send worlds" "delay 1000" quit > "$t/wa5.cmds"
+	"event skeldat_send worlds" "event skeldat_send skip on" "delay 1000" quit \
+	> "$t/wa5.cmds"
 client wa5 "$t/wa5.cmds"
 wait $CLIENT || fail "the player's requests ($t/wa5.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "client1's pause on refused: not the picker" "$log36" &&
 	grep -aq "client1's Worlds... refused: not the picker" "$log36" &&
+	grep -aq "client1's skip refused: not the picker" "$log36" &&
 	! grep -aq "paused the world" "$log36" ||
 	fail "a player's pause or Worlds... not refused ($log36)"
 echo "worlds and pause: day $paused over 10 s paused, w1 closed at $closed and back at $again"
+# 33. Skipping time ([SKELDAT_SKIP_TIME]): a 128 world of seed 2 at noon
+# on a launcher's server, client1 the picker. Skip to sunset from the
+# pause menu: it ends at day 0.75 or just past, the skeletons' sunset
+# pick logged once, the expansions those due for the game time skipped
+# (within 5%), no hit points lost; the wall time logged. Then a skip to
+# sunrise stopped from the menu stands between the two. (A player's skip
+# refused: 32's server with no launcher.)
+log37="$t/srv37.log"
+BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
+	BUILDAT_SKELDAT_TIME=0.5 start_server "$log37" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv37" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log37)"
+CHECK_PIDS+=($SERVER_PID)
+cat > "$t/skip.cmds" <<EOF
+$placed
+delay 2000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Skip to sunset"
+wait_log 5000 skeldat: skipping to sunset
+wait_log 60000 skeldat: running
+delay 1000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Skip to sunrise"
+wait_log 5000 skeldat: skipping to sunrise
+delay 1000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 300
+click Button "Stop skipping"
+wait_log 5000 skeldat: running
+delay 1000
+quit
+EOF
+client skip "$t/skip.cmds"
+wait $CLIENT || fail "the skips ($t/skip.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done_line=$(grep -a "the skip to sunset done" "$log37" | sed 's/.*done: //')
+stopped=$(grep -a "the skip to sunrise stopped by client1" "$log37" | sed 's/.*client1: //')
+echo "skip: to sunset $done_line; to sunrise $stopped"
+echo "$done_line" | awk '{ d = $10 + 0; e = $11 + 0; due = substr($13, 2) + 0
+	exit !(d >= 0.75 && d < 0.751 && (e - due) ^ 2 <= (due * 0.05 > 1 ? due * 0.05 : 1) ^ 2) }' ||
+	fail "the skip to sunset: $done_line ($log37)"
+[ "$(awk '/skips to sunset/ { on = 1 } /the skip to sunset done/ { on = 0 } on && /skeldat: sunset: / { n++ } END { print n + 0 }' "$log37")" = 1 ] ||
+	fail "the sunset's pick not logged once in the skip ($log37)"
+# Unharmed in the skips; after the second (at night) the skeletons may hit
+[ "$(awk '/ skips to / { on = 1 } /the skip to / { on = 0 } on && /client1 .* hp left/ { n++ } END { print n + 0 }' "$log37")" = 0 ] ||
+	fail "client1 hurt in a skip ($log37)"
+echo "$stopped" | awk '{ d = $10 + 0; exit !(d > 0.751 || d < 0.249) }' ||
+	fail "the stopped skip did not stand between: $stopped ($log37)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1630,5 +1685,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time"
 # vim: set noet ts=4 sw=4:

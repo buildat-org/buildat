@@ -1218,7 +1218,21 @@ paused_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 24)
 paused_text:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
 paused_text:SetPosition(0, 60)
 paused_text.visible = false
+-- [SKELDAT_SKIP_TIME] "skip <percent> <sunrise|sunset>": held the same,
+-- "Skipping to sunset: 40%" (game.skipping, the target)
 buildat.sub_packet("skeldat:paused", function(data)
+	local percent, target = data:match("^skip (%d+) (%S+)$")
+	local was = game.skipping
+	game.skipping = target
+	if target then
+		game.paused, game.paused_auto = "skip", false
+		paused_text:SetText("Skipping to " .. target .. ": " .. percent .. "%")
+		paused_text.visible = true
+		if not was then
+			log:info("skeldat: skipping to " .. target)
+		end
+		return
+	end
 	local auto, by = data:match("^(auto )(.*)$")
 	by = by or data
 	game.paused = data ~= "" and by or nil

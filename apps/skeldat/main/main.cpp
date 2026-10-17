@@ -575,6 +575,13 @@ struct Module: public interface::Module, public luanti_session::Game
 	bool m_paused = false, m_pause_auto = false;
 	ss_ m_paused_by;
 	std::set<size_t> m_pause_refused;
+	// [SKELDAT_SKIP_TIME] A skip to sunrise or sunset: the game seconds
+	// left of it (0: none) and in all, the wall time it started, whom by,
+	// the expansions before it, and the last progress sent
+	double m_skip_left = 0, m_skip_total = 0;
+	int64_t m_skip_us = 0, m_skip_sent_us = 0;
+	ss_ m_skip_to, m_skip_by;
+	size_t m_skip_expansions = 0;
 	// m_joining: sent the join, its login not yet in
 	std::set<size_t> m_waiting, m_shown, m_joining;
 	std::map<size_t, Player> m_players;
@@ -739,7 +746,7 @@ struct Module: public interface::Module, public luanti_session::Game
 		sub(m_server, game+"admin", &Module::on_admin);
 		// The rest of the game's packets go to one handler, by name
 		for(const char *n : {"open", "close", "move", "craft", "respawn",
-				"bow", "intro", "scores", "rerun", "pause", "worlds"})
+				"bow", "intro", "scores", "rerun", "pause", "worlds", "skip"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
 		// (luanti/session.h), its calls this Module's (Game, below)
@@ -749,7 +756,7 @@ struct Module: public interface::Module, public luanti_session::Game
 			sub<network::Packet>(m_server,
 					ss_("network:packet_received/luanti:")+n,
 					[this](const network::Packet &p){
-				if(m_paused && p.name != "luanti:chat" &&
+				if((m_paused || m_skip_left > 0) && p.name != "luanti:chat" &&
 						p.name != "luanti:wield" && p.name != "luanti:world_in"){
 					refused_paused(p);
 					return;
@@ -1674,10 +1681,13 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		// What the budget did not reach is dropped, not carried: a server
 		// that falls behind grows the bones slower rather than in a burst
-		if(m_expand_due > 1){
+		// [SKELDAT_SKIP_TIME] A skip does all its expansions, late or not
+		if(m_expand_due > 1 && m_skip_left <= 0){
 			m_dropped_n += m_expand_due - 1;
 			m_expand_due = 1;
 		}
+		if(m_skip_left > 0)
+			return;
 		// Behind, said once a minute of real time to everyone
 		const int64_t now = interface::os::time_us();
 		if(m_keep_up_us == 0)
@@ -2691,8 +2701,9 @@ struct Module: public interface::Module, public luanti_session::Game
 	void refused_paused(const network::Packet &p)
 	{
 		if(m_pause_refused.insert(p.sender).second)
-			log_i(MODULE, "skeldat: %s's %s refused: paused",
-					cs(name_of(p.sender)), cs(p.name));
+			log_i(MODULE, "skeldat: %s's %s refused: %s",
+					cs(name_of(p.sender)), cs(p.name),
+					m_paused ? "paused" : "skipping");
 	}
 
 	// "on" / "off" from the picker; "auto on" / "auto off" from a local
@@ -2709,15 +2720,103 @@ struct Module: public interface::Module, public luanti_session::Game
 			network::access(m_server, [&](network::Interface *i){
 				single = single && i->list_peers().size() == 1;
 			});
-			// A picker's own pause is not the menu's to end
-			if(!single || (m_paused && !m_pause_auto) || on == m_paused)
+			// A picker's own pause is not the menu's to end; a skip runs
+			// with the menu open (its button is in it)
+			if(!single || (m_paused && !m_pause_auto) || on == m_paused ||
+					m_skip_left > 0)
 				return;
 		} else if(!picker(peer)){
 			log_w(MODULE, "skeldat: %s's pause %s refused: not the picker",
 					cs(name_of(peer)), cs(how));
 			return;
 		}
+		// [SKELDAT_SKIP_TIME] A pause stops a skip first
+		if(on && m_skip_left > 0)
+			end_skip("stopped by the pause");
 		set_paused(on, is_auto, name_of(peer));
+	}
+
+	// [SKELDAT_SKIP_TIME] "on": to the next sunset by day, sunrise by
+	// night; "stop". The picker's, not after the end; a single player's
+	// menu pause gives way to it.
+	void on_skip(size_t peer, const ss_ &how)
+	{
+		if(!picker(peer)){
+			log_w(MODULE, "skeldat: %s's skip refused: not the picker",
+					cs(name_of(peer)));
+			return;
+		}
+		if(how == "stop"){
+			if(m_skip_left > 0)
+				end_skip("stopped by "+name_of(peer));
+			return;
+		}
+		if(how != "on" || m_ended || m_skip_left > 0 || !m_world_ready ||
+				(m_paused && !m_pause_auto)){
+			log_w(MODULE, "skeldat: %s's skip refused: %s", cs(name_of(peer)),
+					m_ended ? "the world has ended" : m_skip_left > 0 ?
+					"one runs" : "not now");
+			return;
+		}
+		if(m_paused){
+			m_paused = m_pause_auto = false;
+			m_paused_by.clear();
+		}
+		const bool day = m_day >= 0.25 && m_day < 0.75;
+		const double target = day ? 0.75 : 0.25;
+		// A hair past it, so the phase turns in the skip
+		m_skip_left = m_skip_total =
+				(std::fmod(target - m_day + 1.0, 1.0) + 1e-5) * m_day_s;
+		m_skip_to = day ? "sunset" : "sunrise";
+		m_skip_by = name_of(peer);
+		m_skip_us = m_skip_sent_us = interface::os::time_us();
+		m_skip_expansions = m_expansions;
+		m_pause_refused.clear();
+		const ss_ line = m_skip_by+" skips to "+m_skip_to;
+		log_i(MODULE, "skeldat: %s: %.1f s of game time, day %.4f", cs(line),
+				m_skip_total, m_day);
+		chat::access(m_server, [&](chat::Interface *c){ c->say(line); });
+		for(auto &pair : m_players)
+			send_paused(pair.first);
+	}
+
+	// Sub-steps of 0.1 s of game time, as many as fit in 35 ms of the
+	// tick's wall time; the progress to the clients four times a second
+	void step_skip()
+	{
+		const int64_t t0 = interface::os::time_us();
+		while(m_skip_left > 0 && interface::os::time_us() - t0 < 35000){
+			const float dt = (float)std::min(0.1, m_skip_left);
+			step_world(dt);
+			m_skip_left -= dt;
+		}
+		const int64_t now = interface::os::time_us();
+		if(m_skip_left <= 0){
+			end_skip("done");
+		} else if(now - m_skip_sent_us >= 250000){
+			m_skip_sent_us = now;
+			for(auto &pair : m_players){
+				send_paused(pair.first);
+				send_time(pair.first);
+			}
+		}
+	}
+
+	void end_skip(const ss_ &how)
+	{
+		const double done = m_skip_total - std::max(0.0, m_skip_left);
+		const double rate = m_sections.size() / m_section_period;
+		log_i(MODULE, "skeldat: the skip to %s %s: %.1f s of game time in "
+				"%.2f s, day %.4f, %zu expansions (%.1f due)", cs(m_skip_to),
+				cs(how), done, (interface::os::time_us() - m_skip_us) / 1e6, m_day,
+				m_expansions - m_skip_expansions, done * rate);
+		m_skip_left = 0;
+		// The lag notice's minute starts again
+		m_keep_up_us = 0, m_ticked_s = 0, m_dropped_n = 0;
+		for(auto &pair : m_players){
+			send_paused(pair.first);
+			send_time(pair.first);
+		}
 	}
 
 	void set_paused(bool on, bool is_auto, const ss_ &by)
@@ -2741,9 +2840,15 @@ struct Module: public interface::Module, public luanti_session::Game
 			send_paused(pair.first);
 	}
 
-	// "" running, else "<name>" or "auto <name>"
+	// "" running, else "<name>" or "auto <name>"; skipping, "skip <percent>
+	// <sunrise|sunset>"
 	void send_paused(size_t peer)
 	{
+		if(m_skip_left > 0){
+			network::send(m_server, peer, "skeldat:paused", "skip "+itos((int)(
+					100 * (1 - m_skip_left / m_skip_total)))+" "+m_skip_to);
+			return;
+		}
 		network::send(m_server, peer, "skeldat:paused", !m_paused ? "" :
 				(m_pause_auto ? "auto " : "")+m_paused_by);
 	}
@@ -2993,7 +3098,11 @@ struct Module: public interface::Module, public luanti_session::Game
 		}
 		// [SKELDAT_WORLD_ADMIN] Paused: the game's requests refused; the
 		// node's window closed and the how-to and the scores read
-		if(m_paused && what != "close"){
+		if(what == "skip"){
+			on_skip(peer, packet.data);
+			return;
+		}
+		if((m_paused || m_skip_left > 0) && what != "close"){
 			refused_paused(packet);
 			return;
 		}
@@ -3097,8 +3206,10 @@ struct Module: public interface::Module, public luanti_session::Game
 	{
 		if(damage <= 0 || pl.hp <= 0)
 			return;
-		if(pl.invulnerable){
-			log_i(MODULE, "skeldat: %s %s, invulnerable", cs(pl.name), how);
+		// [SKELDAT_SKIP_TIME] Held through a skip, unharmed
+		if(pl.invulnerable || m_skip_left > 0){
+			log_i(MODULE, "skeldat: %s %s, %s", cs(pl.name), how,
+					pl.invulnerable ? "invulnerable" : "held by a skip");
 			return;
 		}
 		pl.hp = std::max(0, pl.hp - damage);
@@ -5336,20 +5447,52 @@ struct Module: public interface::Module, public luanti_session::Game
 				update_load_points();
 			return;
 		}
-		m_time += event.dtime;
-		m_world_t += event.dtime;
 		m_session.tick(event.dtime);
-		m_day = std::fmod(m_day + event.dtime / m_day_s, 1.0);
+		// [SKELDAT_SKIP_TIME] Skipping: the world's steps in sub-steps
+		if(m_skip_left > 0)
+			step_skip();
+		else
+			step_world(event.dtime);
+		if(m_load_points_dirty)
+			update_load_points();
+		m_send_t += event.dtime;
+		if(m_send_t >= 0.2f){
+			m_send_t = 0;
+			send_players();
+		}
+		m_move_t += event.dtime;
+		if(m_move_t >= 1){
+			m_move_t = 0;
+			// The players held while skipping: no move to check
+			if(m_skip_left <= 0)
+				check_moves();
+			update_skeletons();
+		}
+		m_save_t += event.dtime;
+		if(m_save_t >= 10){
+			m_save_t = 0;
+			save_and_report();
+		}
+	}
+
+	// The world's own steps over dtime of game time: the clock, the bones,
+	// the end, the arrows, the drops, the mobs, the light, the spawns, the
+	// breath and the furnaces
+	void step_world(float dtime)
+	{
+		m_time += dtime;
+		m_world_t += dtime;
+		m_day = std::fmod(m_day + dtime / m_day_s, 1.0);
 		if(!m_ended)
-			step_bones(event.dtime);
+			step_bones(dtime);
 		if(!m_ended && m_world_ready)
 			for(auto &pair : m_players)
 				if(pair.second.placed)
-					m_played[pair.second.name] += event.dtime;
+					m_played[pair.second.name] += dtime;
 		step_end();
-		step_arrows(event.dtime);
-		step_drops(event.dtime);
-		m_ai_t += event.dtime;
+		step_arrows(dtime);
+		step_drops(dtime);
+		m_ai_t += dtime;
 		if(m_ai_t >= 0.1f){
 			// A long tick in steps of 0.2 s, so it is no fall through the
 			// ground and a body keeps up with its light form, which steps
@@ -5360,13 +5503,13 @@ struct Module: public interface::Module, public luanti_session::Game
 			m_ai_t = 0;
 		}
 		if(m_world_ready){
-			step_light(event.dtime);
-			m_far_t += event.dtime;
+			step_light(dtime);
+			m_far_t += dtime;
 			if(m_far_t >= std::min(m_light_step, 1.0f)){
 				m_far_t = 0;
 				send_far();
 			}
-			m_sweep_t += event.dtime;
+			m_sweep_t += dtime;
 			if(m_sweep_t >= 1){
 				m_sweep_t = 0;
 				const int64_t t0 = interface::os::time_us();
@@ -5382,38 +5525,25 @@ struct Module: public interface::Module, public luanti_session::Game
 			if(phase != m_phase)
 				pick_footprints(phase == 0);
 			m_phase = phase;
-			m_hour_t += event.dtime;
+			m_hour_t += dtime;
 			if(m_hour_t >= m_day_s / 24){
 				m_hour_t = 0;
 				step_population();
 			}
 		}
-		m_spawn_t += event.dtime;
+		m_spawn_t += dtime;
 		if(!m_test.empty())
 			stage_test();
 		else if(m_spawn_t >= 4){
 			m_spawn_t = 0;
 			spawn();
 		}
-		if(m_load_points_dirty)
-			update_load_points();
-		m_send_t += event.dtime;
-		if(m_send_t >= 0.2f){
-			m_send_t = 0;
-			send_players();
-		}
-		m_move_t += event.dtime;
-		if(m_move_t >= 1){
-			m_move_t = 0;
-			check_moves();
-			update_skeletons();
-		}
-		m_breath_t += event.dtime;
+		m_breath_t += dtime;
 		if(m_breath_t >= 1){
 			m_breath_t = 0;
 			step_breath();
 		}
-		m_furnace_t += event.dtime;
+		m_furnace_t += dtime;
 		if(m_furnace_t >= 1){
 			m_furnace_t = 0;
 			for(auto &pair : m_furnaces)
@@ -5422,29 +5552,29 @@ struct Module: public interface::Module, public luanti_session::Game
 				else
 					step_furnace(pair.first, pair.second);
 		}
-		m_save_t += event.dtime;
-		if(m_save_t >= 10){
-			m_save_t = 0;
-			save();
-			// The pace, for whoever tunes it
-			log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
-					"changed, %zu grown, %zu sections loaded, %zu rule runs "
-					"at %dx", m_expansions, m_expand_changed, m_grown,
-					m_sections.size(), m_rule_runs, m_speed);
-			size_t skeletons = 0, full = 0;
-			for(auto &kv : m_mobs)
-				if(kv.second.kind == SKELETON)
-					skeletons++, full += kv.second.node_id != 0;
-			log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
-					"light steps and the sweep, %.2f ms a second; %zu bodies "
-					"put back", skeletons, full, m_woken, m_light_steps,
-					m_light_us / 1e3 / 10, m_body_puts);
-			m_light_us = 0, m_light_steps = 0, m_woken = 0, m_body_puts = 0;
-			if(m_lantern_report)
-				report_lanterns();
-			for(auto &pair : m_players)
-				send_time(pair.first);
-		}
+	}
+
+	void save_and_report()
+	{
+		save();
+		// The pace, for whoever tunes it
+		log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
+				"changed, %zu grown, %zu sections loaded, %zu rule runs "
+				"at %dx", m_expansions, m_expand_changed, m_grown,
+				m_sections.size(), m_rule_runs, m_speed);
+		size_t skeletons = 0, full = 0;
+		for(auto &kv : m_mobs)
+			if(kv.second.kind == SKELETON)
+				skeletons++, full += kv.second.node_id != 0;
+		log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
+				"light steps and the sweep, %.2f ms a second; %zu bodies "
+				"put back", skeletons, full, m_woken, m_light_steps,
+				m_light_us / 1e3 / 10, m_body_puts);
+		m_light_us = 0, m_light_steps = 0, m_woken = 0, m_body_puts = 0;
+		if(m_lantern_report)
+			report_lanterns();
+		for(auto &pair : m_players)
+			send_time(pair.first);
 	}
 
 	// The admin's menu ([SKELDAT] decision 4): a player's inventory viewed,

@@ -406,11 +406,26 @@ return function(game, declare_keys)
 				log:info("pause: worlds asked")
 			end)
 			-- The picker's own pause, not this menu's
-			local held = game.paused and not game.paused_auto
+			local held = game.paused and not game.paused_auto and
+					not game.skipping
 			menu:add(held and "Resume world" or "Pause world", function()
 				game.send("pause", held and "off" or "on")
 				close()
 			end)
+			-- [SKELDAT_SKIP_TIME] To the next sunset by day, sunrise by
+			-- night (game.day 0.25..0.75 is the day), or Stop
+			if game.skipping then
+				menu:add("Stop skipping", function()
+					game.send("skip", "stop")
+					close()
+				end)
+			elseif not game.ended and not held then
+				local day = (game.day or 0.5) >= 0.25 and (game.day or 0.5) < 0.75
+				menu:add(day and "Skip to sunset" or "Skip to sunrise", function()
+					game.send("skip", "on")
+					close()
+				end)
+			end
 		end
 		menu:add("Settings...", settings)
 		menu:add("How to play...", function() game.send("intro", "") end)
