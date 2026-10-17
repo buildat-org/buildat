@@ -121,6 +121,7 @@ struct Module: public interface::Module, public replicate::Interface
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
 		m_server->sub_event(this, Event::t("core:tick"));
+		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -133,6 +134,26 @@ struct Module: public interface::Module, public replicate::Interface
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
+		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
+				main_context::SceneDeleted)
+	}
+
+	// [LOCAL_REJOIN] A deleted scene leaves its peers' sync: a module's
+	// reload deletes its scene before its peers' disconnects come in, and
+	// each tick between said "Scene not found" for each of them
+	void on_scene_deleted(const main_context::SceneDeleted &e)
+	{
+		main_context::access(m_server, [&](main_context::Interface *imc){
+			for(auto &pair: m_peers){
+				PeerState &ps = pair.second;
+				if(ps.scene_ref != e.scene)
+					continue;
+				ps.scene_state.Clear();
+				ps.scene_ref = nullptr;
+				log_v(MODULE, "peer %i: its scene %p deleted", ps.peer_id,
+						e.scene);
+			}
+		});
 	}
 
 	void on_start()

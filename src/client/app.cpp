@@ -1906,7 +1906,10 @@ struct CApp: public App, public magic::Application
 #endif
 		m_lost_remote_why = reason;
 		m_lost_remote_restarting = restarting;
-		if(g_local_server.valid() && !g_local_server_log.empty()){
+		// [LOCAL_REJOIN] A local server whose goodbye said it goes on is
+		// left at once, to be rejoined: the wait below is for a crash
+		if(g_local_server.valid() && !g_local_server_log.empty() &&
+				!restarting){
 			// The socket closes before the process is gone -- a crash
 			// writes its backtrace first -- so the verdict waits a moment
 			m_lost_connection_us = get_timeofday_us();
@@ -2547,6 +2550,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(force_kill_local_server)
 		DEF_BUILDAT_FUNC(local_server_ready)
 		DEF_BUILDAT_FUNC(local_server_running)
+		DEF_BUILDAT_FUNC(keep_local_server)
 		DEF_BUILDAT_FUNC(local_server_port)
 		DEF_BUILDAT_FUNC(game_storage_dir)
 		DEF_BUILDAT_FUNC(set_client_keys)

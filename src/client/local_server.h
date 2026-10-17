@@ -27,6 +27,9 @@ static ss_ g_local_server_launch;
 // running, and the next launch of the same app connects to it instead of
 // starting another. Any stop clears it.
 static bool g_local_server_reusable = false;
+// [LOCAL_REJOIN] The next leave_to_menu() keeps it: its goodbye said it
+// goes on (a world switch's reload), and the client rejoins it
+static bool g_local_server_keep_once = false;
 // The watchdog's stall, in seconds; a screen may lower it ([BOX_PLAYTEST_2] 12)
 static int g_watchdog_seconds = 10;
 // **A script that does not return is stopped, not waited out**: a

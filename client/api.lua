@@ -257,6 +257,15 @@ function __buildat_leave_lost(lost, restarting)
 	if kicked or not address then
 		return leave_to_launcher(why)
 	end
+	-- [LOCAL_REJOIN] The launcher's own server going on (a world switch's
+	-- reload) stays up through the leave, to be rejoined
+	-- simplified: one that said so and then exits (a release's restart
+	-- by its shutdown_reason) is retried for the reconnect's 5 minutes
+	if restarting and buildat.safe.connected_locally() and
+			__buildat_local_server_running() and launcher_under_game() then
+		log:info("leave: the local server goes on; kept, to be rejoined")
+		__buildat_keep_local_server()
+	end
 	if not leave_to_launcher() then
 		return false
 	end

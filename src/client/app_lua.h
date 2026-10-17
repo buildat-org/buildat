@@ -2128,6 +2128,14 @@
 		return 1;
 	}
 
+	// keep_local_server() ([LOCAL_REJOIN]): the next leave_to_menu() does
+	// not stop the local server
+	static int l_keep_local_server(lua_State *L)
+	{
+		g_local_server_keep_once = true;
+		return 0;
+	}
+
 	// [SERVERLESS_PLAY] serverless_start(app id) -> {"<module>/<script>",
 	// ...} or nil and why: an app's client half with no server. Each
 	// module's (a directory with a meta.json) client_lua and client_data
@@ -2248,8 +2256,11 @@
 		// its app (launch:reusable)
 		if(g_local_server_reusable)
 			log_i(MODULE, "Local server kept: it holds no world");
+		else if(g_local_server_keep_once)
+			log_i(MODULE, "Local server kept: it goes on, to be rejoined");
 		else
 			begin_stop_local_server();
+		g_local_server_keep_once = false;
 		self->m_state->reset();
 		g_serverless_app.clear();
 		self->m_lost_connection_us = 0;
