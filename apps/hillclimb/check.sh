@@ -37,8 +37,10 @@ for f in "$app"/main/client_lua/*.lua "$app"/launcher/*.lua; do
 done
 # [HC_TOUCH] the stick's mapping (touch.lua's self test, run as it
 # loads) and the steering's (car.h's)
-luajit -e 'buildat = {Logger = function() end}; require = function() end
-	dofile(arg[1])' "$app/main/client_lua/touch.lua" || fail "touch.lua's self test"
+# (-e's chunk first, then the file as the script; a dofile(arg[1]) read
+# stdin, arg[1] being nil)
+luajit -e 'buildat = {Logger = function() end}; require = function() end' \
+	"$app/main/client_lua/touch.lua" || fail "touch.lua's self test"
 g++ -std=c++11 -O1 -DCAR_TEST -x c++ "$app/main/car.h" -o "$t/car_test" \
 	2> "$t/car_build.log" || fail "car.h self test did not build: $(head -3 "$t/car_build.log")"
 "$t/car_test" || fail "car.h self test"
@@ -406,7 +408,9 @@ echo "  Escape: the menu, no input under it, settings and back, leave"
 # pause menu. [HC_TOUCH_ORBIT] a drag in the top third (100 pixels, 80
 # HUD ones) turns the yaw 24 degrees, a pinch there from 80 to 160
 # pixels apart halves the distance, and the stick (third gear) with a
-# drag back at once does both
+# drag back at once does both. [HC_STICK_AXES] up is twice the travel
+# (2R, 162 pixels): a push 3R up and R/2 across keeps its steer, 0.44 in
+# fourth
 mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
@@ -440,7 +444,7 @@ finger_up 4
 finger_up 3
 wait_log 3000 hillclimb: camera yaw 224 pitch 20 dist 6.0 m
 finger_down 1 200 300
-finger_move 1 200 240
+finger_move 1 200 180
 finger_down 3 300 80
 finger_move 3 200 80
 delay 2000
@@ -448,12 +452,17 @@ finger_up 3
 wait_log 3000 hillclimb: camera yaw 200 pitch 20 dist 6.0 m
 finger_up 1
 delay 1000
+finger_down 1 200 400
+finger_move 1 241 156
+delay 1000
+finger_up 1
+delay 1000
 tap 724 50
 delay 3000
 finger_down 1 200 300
-finger_move 1 200 280
+finger_move 1 200 260
 delay 200
-finger_move 1 240 280
+finger_move 1 240 260
 delay 300
 screenshot $t/touch.png
 finger_up 1
@@ -482,6 +491,8 @@ grep -aq "touch: Start" "$t/touch.log" && [ -n "$start" ] &&
 	awk -v z="${start#*|}" 'BEGIN { exit !(z < 5) }' &&
 	grep -aq "touch: Menu" "$t/touch.log" && grep -aq "pause: the menu shown" "$t/touch.log" ||
 	fail "Start (no stick, the car at the start: ${start:-none}) or Menu ($t/touch.log)"
+echo "$in" | grep -q '^1 0 0 0 4 0 4[0-9]|' ||
+	fail "a push past the top cut the steer ($t/touch.log)"
 echo "$in" | grep -q '^1 0 0 0 3 0 0|' ||
 	fail "the stick in third under the orbit's drag ($t/touch.log)"
 echo "  touch: the stick's drives (gear:metres) $climbs; Start, then first gear at z ${start#*|} m"

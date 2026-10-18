@@ -21,7 +21,8 @@
 local magic = require("buildat/extension/urho3d")
 local log = buildat.Logger("hillclimb")
 
--- The ring's radius, HUD pixels: the full push
+-- The ring's half width, HUD pixels: the full push across and down; up
+-- goes twice as far ([HC_STICK_AXES])
 local R = 65
 -- The steps up (first to fourth from the first), the brake's and
 -- reverse's down; simplified: the first figures, not tuned by driving
@@ -60,11 +61,32 @@ end
 local function pinch(d0, d1)
 	return d1 > 0 and d0 / d1 or 1
 end
+-- [HC_STICK_AXES] A finger dx, dy (HUD pixels, y down) from where it
+-- landed -> the stick's x and y (-1..1) and the knob's clamped offset:
+-- each axis clamped by itself, so a push past the top keeps its steer;
+-- up to 2R, across and down to R
+local function push(dx, dy)
+	local cx = math.max(-R, math.min(R, dx))
+	local cy = math.max(-2 * R, math.min(R, dy))
+	return cx / R, cy < 0 and -cy / (2 * R) or -cy / R, cx, cy
+end
 local function in_rect(x, y, px, py, sx, sy)
 	return x >= px and y >= py and x < px + sx and y < py + sy
 end
 
 do
+	do
+		-- Half across and 3R up: the steer whole, the fourth gear
+		local a, b, steer, gear = map(push(R / 2, -3 * R))
+		assert(a and math.abs(steer - 0.444) < 0.01 and gear == 4)
+		a, b, steer, gear = map(push(2 * R, 0))
+		assert(steer == 1 and gear == nil)
+		-- R up is half the forward travel now: the second gear
+		a, b, steer, gear = map(push(0, -R))
+		assert(a and gear == 2)
+		local sx, sy = push(0, 3 * R)
+		assert(sy == -1)
+	end
 	assert(area(0.2, false) == "orbit" and area(0.5, false) == "stick")
 	assert(area(0.5, true) == "orbit" and area(0.9, true) == "orbit")
 	assert(math.abs(pinch(200, 400) - 0.5) < 1e-9)
@@ -99,15 +121,16 @@ return function(o)
 		return x / sc - rp.x, y / sc - rp.y
 	end
 
-	-- The ring, its steps marked across it, and the knob
+	-- The ring (a box: 2R across, R below the centre and 2R above it), its
+	-- steps marked across it, and the knob
 	local ring = magic.ui.root:CreateChild("BorderImage")
-	ring:SetFixedSize(R * 2, R * 2)
+	ring:SetFixedSize(R * 2, R * 3)
 	ring.color = magic.Color(1, 1, 1, 0.15)
 	ring.priority = 49
 	for _, y in ipairs({UP[1], UP[2], UP[3], UP[4], BRAKE, REVERSE}) do
 		local m = ring:CreateChild("BorderImage")
 		m:SetFixedSize(R, 2)
-		m:SetPosition(R / 2, math.floor(R - y * R))
+		m:SetPosition(R / 2, math.floor(2 * R - y * (y > 0 and 2 * R or R)))
 		m.color = magic.Color(1, 1, 1, 0.4)
 	end
 	ring.visible = false
@@ -158,14 +181,11 @@ return function(o)
 	end
 
 	local function move(ux, uy)
-		local dx, dy = ux - stick.x0, uy - stick.y0
-		local d = math.sqrt(dx * dx + dy * dy)
-		local k = d > R and R / d or 1
-		local sx, sy = dx * k / R, -dy * k / R
+		local sx, sy, cx, cy = push(ux - stick.x0, uy - stick.y0)
 		local accel, brake, steer, gear = map(sx, sy)
 		M.input = {accel = accel, brake = brake, steer = steer, gear = gear}
-		knob:SetPosition(math.floor(stick.x0 + dx * k - 24),
-				math.floor(stick.y0 + dy * k - 24))
+		knob:SetPosition(math.floor(stick.x0 + cx - 24),
+				math.floor(stick.y0 + cy - 24))
 	end
 
 	local function apart()
@@ -200,7 +220,7 @@ return function(o)
 			return
 		end
 		stick = {id = d:GetInt("TouchID"), x0 = ux, y0 = uy}
-		ring:SetPosition(math.floor(ux - R), math.floor(uy - R))
+		ring:SetPosition(math.floor(ux - R), math.floor(uy - 2 * R))
 		ring.visible, knob.visible = true, true
 		move(ux, uy)
 	end)
