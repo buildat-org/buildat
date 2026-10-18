@@ -17,7 +17,7 @@
 # steered off the side up the slope put back to a pose 2 to 3 s old, out
 # of the ground, and driving on; off the top's end the same; one parked a
 # minute never put back, nor the flat's; a stone thrown off the edge
-# removed.
+# removed. [HC_PAUSE_MENU] and [HC_TOUCH]: driven clients at the end.
 #   apps/hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -35,6 +35,13 @@ g++ -std=c++11 -O1 -DGROUND_TEST -x c++ "$app/main/ground.h" -o "$t/ground_test"
 for f in "$app"/main/client_lua/*.lua "$app"/launcher/*.lua; do
 	luajit -b "$f" /dev/null || fail "$f does not parse"
 done
+# [HC_TOUCH] the stick's mapping (touch.lua's self test, run as it
+# loads) and the steering's (car.h's)
+luajit -e 'buildat = {Logger = function() end}; require = function() end
+	dofile(arg[1])' "$app/main/client_lua/touch.lua" || fail "touch.lua's self test"
+g++ -std=c++11 -O1 -DCAR_TEST -x c++ "$app/main/car.h" -o "$t/car_test" \
+	2> "$t/car_build.log" || fail "car.h self test did not build: $(head -3 "$t/car_build.log")"
+"$t/car_test" || fail "car.h self test"
 
 cd "$here/Build"
 # Three drives at once, each its own server with the hill and the car and
@@ -391,5 +398,65 @@ want="W1|pause: the menu shown|W0|pause: the menu closed|pause: settings shown|p
 [ "${seq#W0|}" = "$want" ] && grep -aq "leave: no launcher" "$t/pause.log" ||
 	fail "the pause menu: $seq ($t/pause.log)"
 echo "  Escape: the menu, no input under it, settings and back, leave"
+# [HC_TOUCH] BUILDAT_TOUCH=1 at 800x500 (a UI scale of 1.25: the ring's
+# 65 pixels are 81): a stick pushed full up on the left drives up the
+# slope in fourth, the same on the right half, full down backs it; Start
+# (the column's top) resets with no stick, the car at the start again (a
+# quarter up and a half across: first gear, steer 44); Menu opens the
+# pause menu
+mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15" -u launcher=1
+cat > "$t/touch.cmds" <<C
+wait_log 120000 hillclimb: this client's car is
+delay 3000
+finger_down 1 200 300
+finger_move 1 200 100
+delay 4000
+finger_up 1
+delay 2000
+finger_down 2 600 300
+finger_move 2 600 100
+delay 3000
+finger_up 2
+delay 1500
+finger_down 1 200 200
+finger_move 1 200 450
+delay 3000
+finger_up 1
+delay 1000
+tap 724 50
+delay 3000
+finger_down 1 200 300
+finger_move 1 200 280
+delay 200
+finger_move 1 240 280
+delay 300
+screenshot $t/touch.png
+finger_up 1
+delay 500
+tap 724 190
+wait_log 5000 pause: the menu shown
+delay 500
+quit
+C
+BUILDAT_TOUCH=1 mp_client touch "$t/touch.cmds"
+wait $CLIENT || fail "the touch drive ($t/touch.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+# "msg z" each input line, and the climbs: a pushed stick's line and the
+# next one's z
+in=$(grep -a " hillclim: hillclimb: input " "$t/touch.log" |
+	sed 's/.*input \(.*\) at z \([-0-9.]*\) m/\1|\2/')
+climbs=$(echo "$in" | awk -F'|' 'p != "" { print p, $2 - z; p = "" }
+	$1 == "1 0 0 0 4 0 0" || $1 == "1 0 0 0 0 0 0" { p = $1; z = $2 }' |
+	awk '{ printf "%s:%.1f ", $5, $8 }')
+set -- $climbs
+[ $# -eq 3 ] && [ "${1%%:*}" = 4 ] && [ "${2%%:*}" = 4 ] && [ "${3%%:*}" = 0 ] &&
+	awk -v a="${1#*:}" -v b="${2#*:}" -v c="${3#*:}" 'BEGIN { exit !(a > 5 && b > 5 && c < -1) }' ||
+	fail "the stick's drives (gear:metres) $climbs ($t/touch.log)"
+start=$(echo "$in" | sed -n '/^0 0 0 0 0 1 0|/,$p' | grep '^1 0 0 0 1 0 4[0-9]|' | head -1)
+grep -aq "touch: Start" "$t/touch.log" && [ -n "$start" ] &&
+	awk -v z="${start#*|}" 'BEGIN { exit !(z < 5) }' &&
+	grep -aq "touch: Menu" "$t/touch.log" && grep -aq "pause: the menu shown" "$t/touch.log" ||
+	fail "Start (no stick, the car at the start: ${start:-none}) or Menu ($t/touch.log)"
+echo "  touch: the stick's drives (gear:metres) $climbs; Start, then first gear at z ${start#*|} m"
 echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds"
 # vim: set noet ts=4 sw=4:

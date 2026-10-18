@@ -84,7 +84,10 @@ struct Spec
 
 struct Input
 {
-	bool accel = false, brake = false, left = false, right = false;
+	bool accel = false, brake = false;
+	// -1..1, + to the right: the keys' full lock, or a touch stick's
+	// ([HC_TOUCH]) share of it
+	float steer = 0;
 	Gear gear = G2;
 };
 
@@ -146,8 +149,7 @@ struct Car
 		pedal = approach(pedal, in.accel ? 1 : 0,
 				spec.pedal_rate * dt * (in.accel ? 1 : 2));
 		brake = approach(brake, in.brake ? 1 : 0, spec.pedal_rate * dt * 2);
-		float t = in.left == in.right ? 0 : in.left ? -spec.steer_max :
-				spec.steer_max;
+		float t = clampf(in.steer, -1, 1) * spec.steer_max;
 		steer = approach(steer, t, spec.steer_rate * dt);
 		// Ackermann: the inner wheel on the tighter circle
 		for(int i = 0; i < 2; i++){
@@ -282,3 +284,23 @@ struct Car
 };
 
 } // namespace car
+
+#ifdef CAR_TEST
+// g++ -std=c++11 -DCAR_TEST -x c++ car.h: the steering's target
+#include <cstdio>
+int main()
+{
+	car::Car c(car::Spec(), 0);
+	car::Input in;
+	in.steer = 0.5f;
+	for(int i = 0; i < 100; i++)
+		c.controls(in, 0.05f);
+	if(std::fabs(c.steer - 0.5f * c.spec.steer_max) > 1e-5f){
+		printf("car.h: steer 0.5 gave %f rad, not half of %f\n", c.steer,
+				c.spec.steer_max);
+		return 1;
+	}
+	printf("car.h: self test passed\n");
+	return 0;
+}
+#endif

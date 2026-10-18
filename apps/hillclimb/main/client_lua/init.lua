@@ -664,9 +664,13 @@ local function open_chat(after)
 	log:info("hillclimb: the chat shown")
 end
 local pause = nil -- main/pause.lua's, made below
+-- [HC_TOUCH] main/touch.lua's on a touchscreen, made below; its Start
+-- button's reset, sent once
+local touch, touch_reset = nil, false
 local sent, sent_t = nil, 0
--- "accel brake left right gear reset" (main.cpp on_input), sent when it
--- changes and twice a second besides
+-- "accel brake left right gear reset steer" (main.cpp on_input), sent
+-- when it changes and twice a second besides; steer -100..100, the keys'
+-- full lock or the touch stick's
 local function send_input()
 	for g = 1, 4 do
 		if down("gear" .. g) then gear = g end
@@ -676,11 +680,24 @@ local function send_input()
 		return not menu and not chat_open and not pause.held() and down(id)
 				and 1 or 0
 	end
-	local msg = string.format("%d %d %d %d %d %d", b("accel"), b("brake"),
-			b("left"), b("right"), gear, b("reset"))
+	local accel, brake, left, right = b("accel"), b("brake"), b("left"),
+			b("right")
+	local steer = (right - left) * 100
+	local st = touch and touch.input
+	if st then
+		gear = st.gear or gear
+		accel = st.accel and 1 or accel
+		brake = st.brake and 1 or brake
+		steer = math.floor(st.steer * 100 + 0.5)
+	end
+	local msg = string.format("%d %d %d %d %d %d %d", accel, brake, left,
+			right, gear, touch_reset and 1 or b("reset"), steer)
+	touch_reset = false
 	local now = scene.elapsedTime
 	if msg ~= sent then
-		log:info("hillclimb: input " .. msg)
+		-- The car's z (up the slope) for the check
+		log:info(string.format("hillclimb: input %s at z %.1f m", msg,
+				car_pos and car_pos.z / U or 0))
 	end
 	if msg ~= sent or now - sent_t > 0.5 then
 		buildat.send_packet("hillclimb:input", msg)
@@ -865,10 +882,12 @@ local function draw_hud(watched)
 		speed = math.sqrt(dx * dx + dy * dy + dz * dz) / (b.t - a.t) / U
 	end
 	local race, t = b.v[17], b.v[18]
-	local state = race == 0 and "W starts the clock" or race == 1 and "" or
+	local state = race == 0 and (touch and "The stick up starts the clock"
+			or "W starts the clock") or race == 1 and "" or
 			race == 3 and "The hill is being made" or
 			race == 4 and "Out of time: did not finish" or
-			string.format("Finished in %.2f s. Backspace: another run", t)
+			string.format("Finished in %.2f s. %s: another run", t,
+			touch and "Start" or "Backspace")
 	if watched and watched ~= own and watched.states[2] then
 		state = string.format("Observing %s: %.2f s", watched.name,
 				watched.states[2].v[18])
@@ -884,8 +903,11 @@ local function draw_hud(watched)
 	if hud_note and scene.elapsedTime - hud_note.t < 3 then
 		lines[#lines + 1] = hud_note.text
 	end
-	lines[#lines + 1] = "Tab: the hill and the car   Backspace: back to the "
-			.. "start   T: chat   Esc: menu"
+	-- The touch controls' buttons say theirs
+	if not touch then
+		lines[#lines + 1] = "Tab: the hill and the car   Backspace: back to "
+				.. "the start   T: chat   Esc: menu"
+	end
 	hud:SetText(table.concat(lines, "\n"))
 	if picks and board.visible then
 		local rows = {}
@@ -923,6 +945,23 @@ end
 
 pause = load("main/pause.lua")({hill_menu = open_hill_menu,
 	chat = open_chat, keys = read_keys})
+-- simplified: the Tab menu, opened from the pause menu, takes keys only
+if buildat.get_env("BUILDAT_TOUCH") == "1" then
+	touch = load("main/touch.lua")({
+		start = function() touch_reset = true end,
+		chat = function() open_chat() end,
+		menu = function()
+			menu = nil
+			pause.open()
+		end,
+		-- Driving (not observing), no menu or window up
+		active = function()
+			return not menu and not chat_open and not pause.held() and
+					watch.id == nil
+		end,
+		visible = function() return not chat_open and not pause.held() end,
+	})
+end
 
 -- The orbit about the car: dragged with the left button, the wheel the
 -- distance
@@ -965,8 +1004,9 @@ magic.SubscribeToEvent("Update", function(_, d)
 	local watched = observed()
 	draw_hud(watched or cars[own_id])
 	local m = magic.input:GetMouseMove()
+	-- A finger is a mouse's to SDL too: on a touchscreen it is the stick's
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) and
-			not pause.held() then
+			not pause.held() and not touch then
 		yaw = (yaw + m.x * 0.3) % 360
 		pitch = math.max(-10, math.min(85, pitch + m.y * 0.3))
 	end

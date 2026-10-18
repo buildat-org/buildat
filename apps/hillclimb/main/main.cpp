@@ -738,8 +738,8 @@ struct Module: public interface::Module
 			car::Input &in = kv.second.input;
 			in.accel = keys.find('W') != ss_::npos;
 			in.brake = keys.find('S') != ss_::npos;
-			in.left = keys.find('A') != ss_::npos;
-			in.right = keys.find('D') != ss_::npos;
+			in.steer = (keys.find('D') != ss_::npos) -
+					(keys.find('A') != ss_::npos);
 			for(char c : keys.substr(0, keys.find('H'))){
 				if(c >= '1' && c <= '4')
 					in.gear = (car::Gear)(car::G1 + (c - '1'));
@@ -1297,8 +1297,8 @@ struct Module: public interface::Module
 		});
 	}
 
-	// "accel brake left right gear reset", each a number, to the sender's
-	// own car
+	// "accel brake left right gear reset [steer]", each a number, to the
+	// sender's own car; steer -100..100 ([HC_TOUCH]) over left and right
 	void on_input(const network::Packet &packet)
 	{
 		auto it = m_players.find(packet.sender);
@@ -1312,8 +1312,9 @@ struct Module: public interface::Module
 			return;
 		pl.input.accel = a != 0;
 		pl.input.brake = b != 0;
-		pl.input.left = l != 0;
-		pl.input.right = r != 0;
+		int steer = 0;
+		pl.input.steer = (is >> steer) ? car::clampf(steer / 100.0f, -1, 1) :
+				(r != 0) - (l != 0);
 		pl.input.gear = (car::Gear)g;
 		if(reset && !pl.reset)
 			reset_race(pl);
