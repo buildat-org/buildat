@@ -1684,19 +1684,17 @@ struct Module: public interface::Module, public PlayersHost,
 				if(!wake)
 					continue;
 				// Room under it or beside it (a voxel outside the
-				// section read as room: woken and looked at)
+				// section read from the world)
 				bool room = false;
 				for(int i = 0; i < 6 && !room; i++){
 					if(SIX[i][1] > 0)
 						continue;
 					const int nx = x + SIX[i][0], ny = y + SIX[i][1],
 							nz = z + SIX[i][2];
-					if(nx < sx * S || ny < sy * S || nz < sz * S ||
-							nx >= sx * S + S || nz >= sz * S + S){
-						room = true;
-						break;
-					}
-					const uint32_t nd = vol.getVoxelAt(nx, ny, nz).data;
+					const bool out = nx < sx * S || ny < sy * S || nz < sz * S ||
+							nx >= sx * S + S || nz >= sz * S + S;
+					const uint32_t nd = out ? w->get_voxel(pv::Vector3DInt32(
+							nx, ny, nz), true).data : vol.getVoxelAt(nx, ny, nz).data;
 					const uint32_t nid = m_world.format.id.get(nd);
 					const uint32_t np = m_world.format.param.get(nd);
 					room = nid == ID_AIR || (nid == m_hz_ids[0] &&

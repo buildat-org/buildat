@@ -39,6 +39,16 @@ static const float WATER_SHARE = 0.1f;
 // from the inlet to the outlet
 static const int RIVER_DEPTH = 2, RIVER_BANK = 7, RIVER_FALL = 8,
 		TWO_RIVERS_FROM = 512;
+// The lake: its bed SEA_DEPTH under the line at the middle; the edge
+// raised but for LAKE_GAP of the perimeter. The sea: the edge's
+// SEA_ZONE of the half width pushed to SEA_DEPTH under the line, an
+// island forced a side ISLAND_FROM..+12 off the edge, a spring on one
+// island in SPRING_ONE_IN over SPRING_ISLAND columns
+static const int SEA_DEPTH = 8, ISLAND_FROM = 26, SPRING_ONE_IN = 4,
+		SPRING_ISLAND = 64;
+// The sea's bone start: its islands within SEA_BONES of the edge
+static const int SEA_BONES = 48;
+static const float LAKE_GAP = 0.125f, SEA_ZONE = 0.35f;
 
 enum Form { RIVERS, PLAINS, LAKE, SEA };
 static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea"};
@@ -130,6 +140,7 @@ enum ColumnFlags: uint8_t {
 	DRAIN = 8, // its water voxels drains (a river's outlet)
 	SHORE = 16, // within 2 of water, and not 2 over it: sand
 	NEAR_WATER = 32, // within 2 of water: no tree
+	LEVEL_DRAIN = 64, // the 3 voxels over its water drains (the sea's edge)
 };
 static const int16_t NO_WATER = -32768;
 
@@ -360,8 +371,147 @@ inline void mark_shores(Heightmap &m)
 //   their banks raised to RIVER_BANK over the bed where lower, the
 //   channel's columns RIVER_DEPTH of water over the bed; its columns at
 //   the world's edge springs at the inlet, drains at the outlet.
-// simplified: the lake and sea biases come in their stage; until then
-// they are plains
+// - lake: the middle pushed under the water line by a radial falloff,
+//   islands where the noise stays over it; the edge raised but for a gap
+//   of LAKE_GAP of the perimeter; the water every column under the line
+//   joined to the middle;
+// - sea: all of it SEA_DEPTH under the line but the islands, large and
+//   small by thresholds of two noises (fewer in the edge's SEA_ZONE,
+//   none in its outer 6), and one a side forced near the edge; the water every column under the line
+//   joined to the edge, the edge's columns level drains over it; a spring
+//   on the highest column of some islands.
+inline void bias_lake(const Params &p, Heightmap &m, float mean, float amp)
+{
+	const int w = m.width();
+	std::mt19937 r(p.seed ^ 0x1a4e);
+	const float gap_at = std::uniform_real_distribution<float>(0, 1)(r);
+	const float line = (float)p.water_level;
+	for(int z = -p.half; z < p.half; z++)
+		for(int x = -p.half; x < p.half; x++){
+			float &h = m.at(x, z);
+			const float rr = std::sqrt((float)x * x + (float)z * z) / p.half;
+			const float k = std::max(0.0f, std::min(1.0f, (0.7f - rr) / 0.5f));
+			h -= k * k * (3 - 2 * k) * (mean - line + SEA_DEPTH + 0.3f * amp);
+			// Some small islands in it
+			const float small = fbm2(x / 16.0f, z / 16.0f, p.seed + 78, 2, 0.5f);
+			if(k > 0.5f && small > 0.55f)
+				h = std::max(h, line + 1 + (small - 0.55f) * 30);
+			// The edge's lift, but in the gap: the perimeter's coordinate
+			const int e = std::min(std::min(x + p.half, p.half - 1 - x),
+					std::min(z + p.half, p.half - 1 - z));
+			const float s = (x == -p.half || z == p.half - 1) ?
+					0.25f * (z + p.half) / w + (x == -p.half ? 0.0f : 0.25f) :
+					std::atan2((float)z, (float)x) / 6.2832f + 0.5f;
+			const float d = std::fabs(std::fmod(s - gap_at + 1.5f, 1.0f) - 0.5f);
+			if(d > LAKE_GAP / 2 && e < w / 8)
+				h += 12.0f * (1 - (float)e / (w / 8));
+		}
+}
+
+inline void bias_sea(const Params &p, Heightmap &m)
+{
+	const int w = m.width();
+	const float line = (float)p.water_level, bed = line - SEA_DEPTH;
+	for(int z = -p.half; z < p.half; z++)
+		for(int x = -p.half; x < p.half; x++){
+			float &h = m.at(x, z);
+			const int e = std::min(std::min(x + p.half, p.half - 1 - x),
+					std::min(z + p.half, p.half - 1 - z));
+			// The land: islands where either noise is over its threshold,
+			// fewer toward the edge's SEA_ZONE and none in its outer 6
+			const float big = fbm2(x / 60.0f, z / 60.0f, p.seed + 77, 3, 0.5f),
+					small = fbm2(x / 16.0f, z / 16.0f, p.seed + 78, 2, 0.5f);
+			const float zone = std::max(0.0f, 1 - e / (SEA_ZONE * p.half));
+			float land = std::max((big - 0.1f - 0.2f * zone) / 0.25f,
+					(small - 0.45f) / 0.2f);
+			land = e <= 6 ? 0 : std::max(0.0f, std::min(1.0f, land));
+			const float k = land * land * (3 - 2 * land);
+			// The seabed a little uneven, the land its own height
+			h = (bed + (h - line) * 0.1f) * (1 - k) +
+					std::max(h, line + 2 + 6 * k) * k;
+		}
+	// One island a side, forced
+	std::mt19937 r(p.seed ^ 0x15a1);
+	std::uniform_real_distribution<float> u(0, 1);
+	for(int side = 0; side < 4; side++){
+		const float along = -p.half + (0.2f + 0.6f * u(r)) * w,
+				off = ISLAND_FROM + 12 * u(r), rad = 8 + 6 * u(r);
+		const float cx = side == 0 ? -p.half + off : side == 1 ? p.half - 1 - off : along,
+				cz = side == 2 ? -p.half + off : side == 3 ? p.half - 1 - off : along;
+		for(int z = (int)(cz - rad); z <= (int)(cz + rad); z++)
+			for(int x = (int)(cx - rad); x <= (int)(cx + rad); x++){
+				if(!m.in(x, z))
+					continue;
+				const float d = std::sqrt((x - cx) * (x - cx) + (z - cz) * (z - cz));
+				if(d < rad)
+					m.at(x, z) = std::max(m.at(x, z), line + 2 + 5 * (1 - d / rad));
+			}
+	}
+}
+
+// Every column under the line joined (4 ways) to the seeds: water to the
+// line
+inline void flood(Heightmap &m, int line, std::vector<size_t> todo)
+{
+	for(size_t c : todo)
+		m.flags[c] |= WATER, m.water[c] = (int16_t)line;
+	const int w = m.width();
+	while(!todo.empty()){
+		const size_t c = todo.back();
+		todo.pop_back();
+		const int x = (int)(c % w), z = (int)(c / w);
+		const int nx[4] = {x + 1, x - 1, x, x}, nz[4] = {z, z, z + 1, z - 1};
+		for(int i = 0; i < 4; i++){
+			if(nx[i] < 0 || nz[i] < 0 || nx[i] >= w || nz[i] >= w)
+				continue;
+			const size_t n = (size_t)nz[i] * w + nx[i];
+			if((m.flags[n] & WATER) || std::floor(m.h[n]) >= line)
+				continue;
+			m.flags[n] |= WATER, m.water[n] = (int16_t)line;
+			todo.push_back(n);
+		}
+	}
+}
+
+// The sea's islands: a spring on the highest column of one in
+// SPRING_ONE_IN of those over SPRING_ISLAND columns
+inline size_t island_springs(Heightmap &m, int line, uint32_t seed)
+{
+	const int w = m.width();
+	std::vector<uint8_t> seen(m.h.size(), 0);
+	std::mt19937 r(seed ^ 0x5915);
+	size_t springs = 0;
+	for(size_t c0 = 0; c0 < m.h.size(); c0++){
+		if(seen[c0] || std::floor(m.h[c0]) < line)
+			continue;
+		std::vector<size_t> todo = {c0};
+		seen[c0] = 1;
+		size_t n = 0, top = c0;
+		while(!todo.empty()){
+			const size_t c = todo.back();
+			todo.pop_back();
+			n++;
+			if(m.h[c] > m.h[top])
+				top = c;
+			const int x = (int)(c % w), z = (int)(c / w);
+			const int nx[4] = {x + 1, x - 1, x, x}, nz[4] = {z, z, z + 1, z - 1};
+			for(int i = 0; i < 4; i++){
+				if(nx[i] < 0 || nz[i] < 0 || nx[i] >= w || nz[i] >= w)
+					continue;
+				const size_t k = (size_t)nz[i] * w + nx[i];
+				if(!seen[k] && std::floor(m.h[k]) >= line)
+					seen[k] = 1, todo.push_back(k);
+			}
+		}
+		if(n > (size_t)SPRING_ISLAND && r() % SPRING_ONE_IN == 0){
+			m.flags[top] |= WATER | SPRING;
+			m.water[top] = (int16_t)(std::floor(m.h[top]) + 1);
+			springs++;
+		}
+	}
+	return springs;
+}
+
 inline Heightmap make_heightmap(const Params &p)
 {
 	Heightmap m;
@@ -389,6 +539,10 @@ inline Heightmap make_heightmap(const Params &p)
 						river.bed[i] + RIVER_BANK + k * k * 40);
 			});
 	}
+	if(p.form == LAKE)
+		bias_lake(p, m, mean, amp);
+	if(p.form == SEA)
+		bias_sea(p, m);
 	erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
 	// Within the world: a floor of 8 under the ground, 8 of air over it
 	for(float &v : m.h)
@@ -415,6 +569,34 @@ inline Heightmap make_heightmap(const Params &p)
 				if(!(m.flags[c] & CHANNEL))
 					m.h[c] = std::max(m.h[c], river.bed[i] + RIVER_BANK);
 			});
+	} else if(p.form == LAKE || p.form == SEA){
+		const int line = p.water_level;
+		std::vector<size_t> seeds;
+		if(p.form == LAKE){
+			// The middle's lowest column within a sixth of the width
+			size_t low = m.index(0, 0);
+			for(int z = -w / 6; z < w / 6; z++)
+				for(int x = -w / 6; x < w / 6; x++)
+					if(m.at(x, z) < m.h[low])
+						low = m.index(x, z);
+			if(std::floor(m.h[low]) < line)
+				seeds.push_back(low);
+		} else {
+			for(int a = -p.half; a < p.half; a++)
+				for(size_t c : {m.index(a, -p.half), m.index(a, p.half - 1),
+						m.index(-p.half, a), m.index(p.half - 1, a)})
+					if(std::floor(m.h[c]) < line)
+						seeds.push_back(c);
+		}
+		flood(m, line, seeds);
+		if(p.form == SEA){
+			for(int a = -p.half; a < p.half; a++)
+				for(size_t c : {m.index(a, -p.half), m.index(a, p.half - 1),
+						m.index(-p.half, a), m.index(p.half - 1, a)})
+					if(m.flags[c] & WATER)
+						m.flags[c] |= LEVEL_DRAIN;
+			island_springs(m, line, p.seed);
+		}
 	} else {
 		const int line = water_line(m);
 		for(size_t c = 0; c < m.h.size(); c++)
@@ -467,6 +649,7 @@ inline int tree_part(int dx, int dy, int dz)
 int main()
 {
 	using namespace skeldat::mapgen;
+	setvbuf(stdout, nullptr, _IONBF, 0);
 	// The noise in -1..1, and the same twice
 	for(int i = 0; i < 100000; i++){
 		const float v = fbm3(i * 0.37f, i * 0.11f, i * 0.73f, 5, 3, 0.5f);
@@ -540,6 +723,28 @@ int main()
 					drains, rivers[0].bed.front(), rivers[0].bed.back());
 		assert(springs > 0 && drains > 0);
 	}
+	// A sea's edge columns water over 90% of the perimeter, a lake's dry
+	// over 7/8, at 256, seeds 1-4
+	for(int form : {LAKE, SEA})
+		for(uint32_t seed = 1; seed <= 4; seed++){
+			Params p;
+			p.seed = seed, p.half = 128, p.form = form;
+			Heightmap m = make_heightmap(p);
+			size_t wet = 0, all = 0, water = 0, springs = 0;
+			for(int a = -128; a < 128; a++)
+				for(size_t c : {m.index(a, -128), m.index(a, 127),
+						m.index(-128, a), m.index(127, a)})
+					wet += (m.flags[c] & WATER) != 0, all++;
+			for(uint8_t f : m.flags)
+				water += (f & WATER) != 0, springs += (f & SPRING) != 0;
+			printf("mapgen: %s, seed %u: the edge %.0f%% wet, %.0f%% of the "
+					"columns water, %zu springs\n", FORM_NAMES[form], seed,
+					100.0 * wet / all, 100.0 * water / m.flags.size(), springs);
+			if(form == SEA)
+				assert(wet >= all * 9 / 10);
+			else
+				assert(wet <= all / 8 && water > m.flags.size() / 20);
+		}
 	// The caves: a few percent of the rock, the same twice
 	{
 		size_t n = 0, all = 0;

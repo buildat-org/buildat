@@ -119,10 +119,13 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 			const int wt = f & mapgen::WATER ? m_map->water[m_map->index(x, z)] : g;
 			const uint32_t water = f & mapgen::SPRING ? m_ids.spring :
 					f & mapgen::DRAIN ? m_ids.drain : m_ids.water;
+			// The sea's edge: drains over its water
+			const int drain_top = f & mapgen::LEVEL_DRAIN ? wt + 3 : wt;
 			const uint32_t top = f & mapgen::CHANNEL ? m_ids.gravel :
 					sandy ? m_ids.sand : m_ids.grass;
 			for(int y = lc.getY(); y <= uc.getY(); y++){
-				uint32_t id = y > g && y <= wt ? water : ID_AIR;
+				uint32_t id = y > g && y <= wt ? water :
+						y > wt && y <= drain_top ? m_ids.drain : ID_AIR;
 				if(y <= m_p.bottom)
 					id = m_ids.stone;
 				else if(y <= g){
@@ -552,10 +555,10 @@ struct Terrain
 		const int64_t t0 = interface::os::time_us();
 		auto map = std::make_shared<const mapgen::Heightmap>(mapgen::make_heightmap(p));
 		heightmap = map;
-		// The water line: plains' water table (mapgen.h's water_line(); a
-		// world made before keeps the valleys' line); the pockets' depths
-		// and the spawn's dry ground are by it
-		if(form != "legacy_valleys"){
+		// The water line: plains' water table (mapgen.h's water_line()), the
+		// other forms' the base line (a world made before keeps the
+		// valleys'); the pockets' depths and the spawn's dry ground are by it
+		if(form == "plains"){
 			p.water_level = mapgen::water_line(*map);
 			water_level = p.water_level;
 		}
@@ -743,6 +746,9 @@ struct Terrain
 	// blocks from the column's ground (under water, its bed) by
 	// bones::edge_rise(), and the outermost column bone_wall from the
 	// bottom layer to the hillside's top, which nothing digs.
+	// [SKELDAT_OWN_MAPGEN] Cut where a river's channel or the lake meets
+	// it; on the sea none, its islands within SEA_BONES of the edge its
+	// bone start (their top 3 at full bones).
 	// simplified: made here on the whole world, not in the generator,
 	// which sees one 64-high section and not a ground in the one under it
 	void make_edge()
@@ -780,11 +786,34 @@ struct Terrain
 				for(int x = sx * S; x < sx * S + S; x++){
 					const int d = std::min(std::min(x + h, h - 1 - x),
 							std::min(z + h, h - 1 - z));
+					if(form == "sea"){
+						// The sea's bone start: its islands within SEA_BONES
+						// of the edge, their top 3 at full bones
+						if(d >= mapgen::SEA_BONES)
+							continue;
+						int n = 0;
+						for(int y = top; y > y0 && n < 3; y--){
+							const uint32_t id = world.format.id.get(vol.sample_at(x, y, z));
+							const skeldat::NodeDef *nd = world.node_of(id);
+							if(id == ID_AIR || id == ID_IGNORE)
+								continue;
+							if(nd && nd->shape == skeldat::LIQUID)
+								break;
+							interface::VoxelSample s = vol.sample_at(x, y, z);
+							world.bones.set(s, MAX);
+							out.set_sample_at(x, y, z, s);
+							changed++, blocks++, n++;
+						}
+						continue;
+					}
 					if(d >= EDGE_COLUMNS)
 						continue;
-					// [SKELDAT_OWN_MAPGEN] Cut where a river's channel meets it
-					if(heightmap && heightmap->in(x, z) && (heightmap->flags[
-							heightmap->index(x, z)] & mapgen::CHANNEL))
+					// [SKELDAT_OWN_MAPGEN] Cut where a river's channel meets it,
+					// and where the lake does; none on the sea
+					const uint8_t hf = heightmap && heightmap->in(x, z) ?
+							heightmap->flags[heightmap->index(x, z)] : 0;
+					if((hf & mapgen::CHANNEL) || (form == "lake" && (hf & mapgen::WATER)) ||
+							form == "sea")
 						continue;
 					// The ground: the top voxel that is not air or water
 					int g = top;
