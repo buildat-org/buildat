@@ -1029,7 +1029,7 @@
 		client_file::access(self->m_server, [&](client_file::Interface *i){
 			i->add_file_path(media_resource_name(name), path);
 		});
-		self->m_served_media[name] = path;
+		self->m_media.m_served_media[name] = path;
 		lua_pushboolean(L, true);
 		return 1;
 	}
@@ -1039,7 +1039,7 @@
 		Module *self = module_of(L);
 		size_t len = 0;
 		const char *p = luaL_checklstring(L, 1, &len);
-		const sv_<ss_> files = self->sound_files(ss_(p ? p : "", len));
+		const sv_<ss_> files = self->m_media.sound_files(ss_(p ? p : "", len));
 		if(files.empty())
 			return 0;
 		const ss_ &pick = files[rand() % files.size()];
@@ -1058,7 +1058,7 @@
 		Module *self = module_of(L);
 		size_t len = 0;
 		const char *p = luaL_checklstring(L, 1, &len);
-		const sv_<ss_> files = self->sound_files(ss_(p ? p : "", len));
+		const sv_<ss_> files = self->m_media.sound_files(ss_(p ? p : "", len));
 		if(files.empty())
 			return 0;
 		lua_newtable(L);

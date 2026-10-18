@@ -257,8 +257,8 @@
 	{
 		m_session.left(old.info.id);
 		m_peer_mode.erase(old.info.id);
-		m_files_transmitted.erase(old.info.id);
-		m_texmods_waiting.erase(old.info.id);
+		m_media.m_files_transmitted.erase(old.info.id);
+		m_media.m_texmods_waiting.erase(old.info.id);
 	}
 
 	void send_world_info(network::PeerInfo::Id peer, const ss_ &asked_mode)
@@ -284,7 +284,7 @@
 		// Neither side saying: the launcher game's setting
 		// (user/shared/vanilla/settings.json, its "render_mode"; [LAUNCH_GRID])
 		if(m.empty())
-			m = settings_render_mode();
+			m = m_media.settings_render_mode();
 		if(m == "0")
 			m = "unlit";
 		else if(m == "" || m == "1")
@@ -353,33 +353,7 @@
 	// A core.__<name>() that answers with an array of strings, as a vector
 	sv_<ss_> string_list_from_lua(const char *name)
 	{
-		sv_<ss_> flat;
-		interface::MutexScope ms(m_lua_mutex);
-		// No game yet -- a server at its world menu -- and a client may
-		// ask anyway: an empty answer, not a null state
-		if(!m_lua)
-			return flat;
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, name);
-		if(lua_pcall(L, 0, 1, 0) != 0){
-			log_w(MODULE, "%s(): %s", name,
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return flat;
-		}
-		size_t n = lua_objlen(L, -1);
-		flat.reserve(n);
-		for(size_t i = 0; i < n; i++){
-			lua_rawgeti(L, -1, (int)i + 1);
-			size_t len = 0;
-			const char *p = lua_tolstring(L, -1, &len);
-			flat.push_back(ss_(p ? p : "", p ? len : 0));
-			lua_pop(L, 1);
-		}
-		lua_settop(L, base);
-		return flat;
+		return luanti::string_list_from_lua(m_lua, m_lua_mutex, name);
 	}
 
 	// What an item looks like, as the texture modifier expression the client

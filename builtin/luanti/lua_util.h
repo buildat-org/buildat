@@ -135,5 +135,38 @@ static inline void run_chunk_string(lua_State *L, interface::Mutex &mutex,
 	lua_settop(L, base);
 }
 
+// What a function of the game's core table returns as a list of strings;
+// empty when there is no game
+static inline sv_<ss_> string_list_from_lua(lua_State *L,
+		interface::Mutex &mutex, const char *name)
+{
+	sv_<ss_> flat;
+	interface::MutexScope ms(mutex);
+	// No game yet -- a server at its world menu -- and a client may
+	// ask anyway: an empty answer, not a null state
+	if(!L)
+		return flat;
+	int base = lua_gettop(L);
+	lua_getglobal(L, "core");
+	lua_getfield(L, -1, name);
+	if(lua_pcall(L, 0, 1, 0) != 0){
+		log_w(MODULE, "%s(): %s", name,
+				lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+		lua_settop(L, base);
+		return flat;
+	}
+	size_t n = lua_objlen(L, -1);
+	flat.reserve(n);
+	for(size_t i = 0; i < n; i++){
+		lua_rawgeti(L, -1, (int)i + 1);
+		size_t len = 0;
+		const char *p = lua_tolstring(L, -1, &len);
+		flat.push_back(ss_(p ? p : "", p ? len : 0));
+		lua_pop(L, 1);
+	}
+	lua_settop(L, base);
+	return flat;
+}
+
 }
 // vim: set noet ts=4 sw=4:
