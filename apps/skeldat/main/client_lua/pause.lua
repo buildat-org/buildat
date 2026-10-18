@@ -42,6 +42,19 @@ return function(game, declare_keys)
 		end
 	end)
 
+	local open
+	-- [SKELDAT_DEATH_PAUSE] The death screen, {root, window}, under the
+	-- menu and its pages in a root of its own; while it is up the hold
+	-- goes back to it, its Escape the menu over it
+	local death = nil
+	local function unhold()
+		if death then
+			game.hold(function() open() end, death.window, true)
+		else
+			game.hold(nil)
+		end
+	end
+
 	local function close()
 		if not root then
 			return
@@ -51,13 +64,14 @@ return function(game, declare_keys)
 		game.send("pause", "auto off")
 		uistack.main:pop(root)
 		root = nil
-		game.hold(nil)
+		unhold()
 		-- A clicked button stays the focus, and Space would press it again
 		magic.ui:SetFocusElement(nil)
 		log:info("pause: the menu closed")
+		if death then
+			log:info("pause: back to the death screen")
+		end
 	end
-
-	local open
 
 	-- The chat console over the world; Escape and its Back come back here
 	-- when it was opened from the menu, to the world when by the key
@@ -68,7 +82,7 @@ return function(game, declare_keys)
 		end
 		local function back()
 			accounts.close_page()
-			game.hold(nil)
+			unhold()
 			magic.ui:SetFocusElement(nil)
 			log:info("pause: the chat closed")
 			if from_menu then
@@ -187,7 +201,7 @@ return function(game, declare_keys)
 				admin.page = nil
 				uistack.main:pop(root)
 				root = nil
-				game.hold(nil)
+				unhold()
 				pending = open
 			end
 		end
@@ -236,7 +250,7 @@ return function(game, declare_keys)
 			if close_chat then
 				game.hold(close_chat, window)
 			else
-				game.hold(nil)
+				unhold()
 				pending = open
 			end
 		end)
@@ -386,6 +400,20 @@ return function(game, declare_keys)
 		end
 		menu:add("Chat...", function() console(true) end)
 		menu:add("Who's in the chat...", chat_menu)
+		-- [SKELDAT_PAUSE_ACCOUNT] accounts' own page, Log out on it; its
+		-- Back to this menu
+		local me = accounts.who()
+		menu:add("My account" .. (me and me ~= "" and " (" .. me .. ")" or "")
+				.. "...", function()
+			uistack.main:pop(root)
+			root = nil
+			game.hold(function() end)
+			log:info("pause: my account shown")
+			accounts.account_page(function()
+				unhold()
+				pending = open
+			end)
+		end)
 		if game.admin then
 			menu:add("Admin...", open_admin)
 		end
@@ -398,7 +426,7 @@ return function(game, declare_keys)
 				local world_menu = require("buildat/module/world_menu")
 				world_menu.on_close = function()
 					world_menu.on_close = nil
-					game.hold(nil)
+					unhold()
 					log:info("pause: the worlds closed")
 				end
 				game.hold(function() end)
@@ -440,8 +468,8 @@ return function(game, declare_keys)
 
 	local function show_death()
 		close()
-		root = uistack.main:push({desc = "death"})
-		local menu = ui_utils.vertical_menu(root, {min_width = 260})
+		local droot = uistack.main:push({desc = "death"})
+		local menu = ui_utils.vertical_menu(droot, {min_width = 260})
 		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		local t = menu.window:CreateChild("Text")
 		t:SetStyleAuto()
@@ -450,12 +478,25 @@ return function(game, declare_keys)
 			game.send("respawn", "")
 		end, true)
 		menu:add("Leave the game", function() buildat.leave() end)
-		-- Escape does not close it
-		game.hold(function() end, menu.window, true)
+		-- Escape does not close it: the menu over it
+		death = {root = droot, window = menu.window}
+		unhold()
 		log:info("pause: the death screen shown")
 	end
+	-- The respawn: the death screen and the menu over it, if up, gone
+	local function hide_death()
+		if death then
+			uistack.main:pop(death.root)
+			death = nil
+		end
+		if root then
+			close()
+		else
+			game.hold(nil)
+		end
+	end
 
-	table.insert(game.listeners, function()
+	local function follow()
 		local now = game.stats.hp <= 0
 		if now == dead then
 			return
@@ -464,9 +505,13 @@ return function(game, declare_keys)
 		if dead then
 			show_death()
 		else
-			close()
+			hide_death()
 		end
-	end)
+	end
+	table.insert(game.listeners, follow)
+	-- [SKELDAT_DEAD_REJOIN] The state as it is when this is made, not only
+	-- its changes after
+	follow()
 
 	return open
 end

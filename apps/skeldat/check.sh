@@ -751,7 +751,9 @@ grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 # drops one stone ahead (Q) and waits out the day (both gone); in water
 # over its head, it drowns, half its stacks (18) dropped. The server
 # started again: 18 on the ground; the respawn at the same column picks
-# them all up, one pickup sound a tick ([SKELDAT_BOW_SOUNDS]).
+# them all up, one pickup sound a tick ([SKELDAT_BOW_SOUNDS]). Before the
+# respawn, Escape opens the pause menu over the death screen and
+# Continue goes back to it ([SKELDAT_DEATH_PAUSE]).
 log17="$t/srv17.log"
 printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
@@ -759,6 +761,9 @@ printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 	"wait_log 60000 pause: the death screen shown" "delay 25000" quit \
 	> "$t/drops1.cmds"
 printf '%s\n' "wait_log 300000 pause: the death screen shown" "delay 1000" \
+	"keypress Escape" "wait_log 5000 pause: the menu shown" "delay 500" \
+	"screenshot $t/death_pause.png" 'click Button "Continue"' \
+	"wait_log 5000 pause: back to the death screen" "delay 500" \
 	'click Button "Respawn"' "delay 3000" quit > "$t/drops2.cmds"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=drops BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
@@ -782,6 +787,11 @@ grep -aq "a drop of skeldat:stone at" "$t/srv17_1.log" &&
 grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
 	[ $(grep -acE "a drop of skeldat:stone 9[89] at" "$t/srv17_1.log") = 18 ] ||
 	fail "the death's drops ($t/srv17_1.log)"
+# [SKELDAT_DEATH_PAUSE] Escape on the death screen: the menu over it, the
+# single player's pause; Continue back to it, and Respawn then
+grep -aq "client1 paused the world (the pause menu)" "$t/srv17_2.log" &&
+	grep -aq "client1 resumed the world (the pause menu)" "$t/srv17_2.log" ||
+	fail "the pause menu over the death screen did not pause ($t/srv17_2.log, $t/drops.log)"
 grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 	[ $(grep -acE "client1 picks up 9[89] skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
@@ -2224,6 +2234,50 @@ grep -aq "making_map: first packet, 8 x 8 footprints" "$t/mk1.log" &&
 	[ "$m1" -ge 1 ] && [ "$m1" = "$m2" ] ||
 	fail "the making's map: client1 $m1 footprints mapped, client2 $m2 ($t/mk1.log, $t/mk2.log)"
 echo "the making's map: $m1 footprints mapped on each, $(grep -a "the world is in" "$log45" | sed 's/.*skeldat: //')"
+# 42. Back dead ([SKELDAT_DEAD_REJOIN]): a public server with its world
+# running (no guest join); bob, the admin by the setup code, drowns at
+# the spawn, quits on the death screen and joins again on the same
+# server: the death screen again, and Respawn places bob with full hp.
+# Before it, the pause menu over the death screen ([SKELDAT_DEATH_PAUSE])
+# has "My account (bob)...", accounts' page, whose Back comes back to
+# the menu ([SKELDAT_PAUSE_ACCOUNT]).
+log46="$t/srv46.log"
+BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 \
+	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="$water" \
+	start_server "$log46" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv46" -C "$t/srv.cache" -l 3 || fail "the server ($log46)"
+CHECK_PIDS+=($SERVER_PID)
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$log46" | head -1)
+[ -n "$code" ] || fail "no setup code ($log46)"
+printf '%s\n' "wait_log_any 60000 accounts: ntfy asked" \
+	"wait_log_any 5000 server window: the page ntfy" "delay 300" \
+	"click Button \"Don't add\"" \
+	"wait_log_any 120000 pause: the death screen shown" "delay 2000" \
+	quit > "$t/dead1.cmds"
+printf '%s\n' "wait_log_any 120000 pause: the death screen shown" \
+	"delay 1000" "screenshot $t/dead_back.png" "keypress Escape" \
+	"wait_log 5000 pause: the menu shown" "delay 500" \
+	'click Button "My account (bob)..."' "wait_log 5000 server window: the page" \
+	"delay 500" "screenshot $t/my_account.png" 'click Button "Back"' \
+	"wait_log 5000 pause: the menu shown" "delay 500" \
+	'click Button "Continue"' "wait_log 5000 pause: back to the death screen" \
+	"delay 500" 'click Button "Respawn"' \
+	"wait_log 30000 skeldat: placed at" "delay 1000" quit > "$t/dead2.cmds"
+for n in 1 2; do
+	BUILDAT_JOIN_NAME=bob BUILDAT_JOIN_PASSWORD=secret123 \
+		BUILDAT_JOIN_CREATE=$([ $n = 1 ] && echo 1) \
+		BUILDAT_JOIN_CODE=$([ $n = 1 ] && echo "$code") \
+		client dead$n "$t/dead$n.cmds"
+	wait $CLIENT || fail "the dead rejoin's drive $n ($t/dead$n.log)"
+done
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: bob dies at" "$log46" &&
+	grep -aq "skeldat: hp 20 " "$t/dead2.log" ||
+	fail "bob not back from the dead: $(grep -a "pause: the death\|skeldat: hp\|placed at" "$t/dead2.log" | sed 's/.*: skeldat: \|.*: pause: //' | tr '\n' ';') ($t/dead2.log, $log46)"
+echo "back dead: the death screen on the rejoin, Respawn placed bob"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"

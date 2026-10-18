@@ -99,6 +99,10 @@ struct Players: public luanti_session::Game, public MobsHost
 	{
 		log_i(MODULE, "skeldat: %s is in the world", cs(name));
 		auto it = all.find(peer);
+		// [SKELDAT_DEAD_REJOIN] A dead joiner's hp 0 again once its world
+		// is in, its screens up by then (the join's was sent before)
+		if(it != all.end() && it->second.hp <= 0)
+			send_stats(peer, it->second);
 		if(it != all.end() && it->second.intro){
 			it->second.intro = false;
 			host.send_intro(peer);
