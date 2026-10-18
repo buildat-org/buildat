@@ -82,6 +82,9 @@ extern "C" {
 #define STBI_WRITE_NO_STDIO
 #include <STB/stb_image_write.h>
 #define MODULE "luanti"
+// The Module's parts ([LUANTI_MODULAR]), after MODULE, which they log as
+#include "luanti/lua_util.h"
+#include "luanti/mapgen_params.h"
 
 using interface::Event;
 namespace pv = PolyVox;
@@ -1160,6 +1163,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	int64_t m_seed = 0;
 	// Whether this save is one nobody has opened before; see load_seed()
 	bool m_world_is_new = false;
+	MapgenParams m_mapgen{m_lua, m_lua_mutex, m_store, m_world_is_new};
 
 	void load_seed()
 	{
@@ -1173,14 +1177,14 @@ struct Module: public interface::Module, public luanti::Interface,
 		} else {
 			// The first thing a world is asked for is its seed, so a save
 			// with none is a save nobody has played yet. What that decides
-			// is what mapgen it gets; see mapgen_name().
+			// is what mapgen it gets; see MapgenParams::mapgen_name().
 			m_world_is_new = true;
 			// Luanti's own fixed_map_seed, which is what makes one world the
 			// same world twice: a benchmark that generates terrain has to
 			// generate the same terrain, and a bug report about a place has
 			// to be able to name it. Read the way Luanti reads it -- only
 			// when a world is being made, never over one that has a seed.
-			const ss_ fixed = setting_string("fixed_map_seed");
+			const ss_ fixed = m_mapgen.setting_string("fixed_map_seed");
 			if(!fixed.empty()){
 				m_seed = (int64_t)strtoull(fixed.c_str(), nullptr, 10);
 				log_i(MODULE, "The world's seed is fixed_map_seed, %s",
@@ -2367,7 +2371,7 @@ struct Module: public interface::Module, public luanti::Interface,
 			// content ids the mods asked for while loading are the ids this
 			// run uses whatever a previous one did. See
 			// doc/plan/world_persistence_plan.md.
-			world->set_name_aliases(node_aliases());
+			world->set_name_aliases(m_mapgen.node_aliases());
 			world->set_save(m_save, "main");
 			// [SAVE_CHECKPOINT] Nothing to write yet; says this game
 			// checkpoints itself, so voxelworld does not on its own
@@ -2391,21 +2395,22 @@ struct Module: public interface::Module, public luanti::Interface,
 		// Luanti's own mapgens are vendored: this module hands over what a
 		// generator is a function of and gets one back.
 		luanti_mapgen::Params params;
-		params.mgname = mapgen_name();
+		params.mgname = m_mapgen.mapgen_name();
 		params.seed = m_seed;
 		params.singlenode_word = singlenode_word();
-		params.content_ids = content_ids_by_name();
-		params.node_props = mapgen_node_props();
-		params.biomes = mapgen_biomes();
-		params.ores = mapgen_ores();
-		params.decorations = mapgen_decorations();
+		params.content_ids = m_mapgen.content_ids_by_name();
+		params.node_props = m_mapgen.mapgen_node_props();
+		params.biomes = m_mapgen.mapgen_biomes();
+		params.ores = m_mapgen.mapgen_ores();
+		params.decorations = m_mapgen.mapgen_decorations();
 		params.section_size = m_section_size.getX();
-		params.water_level = mapgen_water_level();
-		params.mg_flags = mapgen_flags();
+		params.water_level = m_mapgen.mapgen_water_level();
+		params.mg_flags = m_mapgen.mapgen_flags();
 		// What a mod asks for as get_mapgen_setting("water_level"): the
 		// world's own, which is not always what the settings say
 		set_global_string("__luanti_water_level", itos(params.water_level));
-		mapgen_gen_notify(params.gen_notify_flags, params.gen_notify_deco_ids);
+		m_mapgen.mapgen_gen_notify(params.gen_notify_flags,
+				params.gen_notify_deco_ids);
 		if(!params.gen_notify_flags.empty())
 			log_v(MODULE, "gennotify: \"%s\", %zu decoration ids",
 					cs(params.gen_notify_flags),
@@ -2576,7 +2581,42 @@ struct Module: public interface::Module, public luanti::Interface,
 				m_texmods.size());
 	}
 
-	#include "mapgen_params.h"
+	// The mapgen, which at singlenode is one node everywhere: Luanti's own
+	// MapgenSinglenode fills a generated block with whatever
+	// "mapgen_singlenode" names, or with air when a game does not name one,
+	// and sets the sunlight. So a generated section here is air as well --
+	// what a mod reads out of a part of the world nobody has built in is
+	// "air" and not "ignore", which is what every mod that looks before it
+	// places is written against.
+	//
+	// merge_volume() and not set_volume(): this is a generator, and the
+	// priorities in voxelworld's api.h are exactly what a generator wants --
+	// anything a mod has already put there stays.
+	//
+	// simplified: the section is filled at once rather than a chunk at a
+	// time as voxelworld asks, because a singlenode section is one word
+	// repeated and the whole of it costs a few milliseconds. A real mapgen
+	// is the milestone where that stops being true.
+	uint32_t singlenode_word()
+	{
+		if(m_singlenode_word == 0){
+			bool known = false;
+			uint32_t id = import_content_id("mapgen_singlenode", known);
+			if(!known)
+				id = import_content_id("air", known);
+			const interface::VoxelFormat f = interface::VoxelFormat::luanti();
+			uint32_t word = 0;
+			f.id.set(word, id);
+			// Lit, because a world with nothing in it is a world the sky
+			// reaches everywhere in -- and because this is written before
+			// voxelworld's skylight is turned on, so nothing else will put
+			// the light there. Luanti's MapgenSinglenode sets the same
+			// sunlight for the same reason.
+			f.light_sky.set(word, f.light_sky.mask());
+			m_singlenode_word = word;
+		}
+		return m_singlenode_word;
+	}
 
 	void generate_section(voxelworld::Instance *world,
 			const pv::Vector3DInt16 &section_p)
@@ -2799,7 +2839,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	// before a player is standing on it.
 	void generate_world()
 	{
-		const bool fill = (mapgen_name() == "singlenode");
+		const bool fill = (m_mapgen.mapgen_name() == "singlenode");
 		const pv::Vector3DInt32 p0(-SPAWN_RADIUS, -SPAWN_RADIUS_Y,
 				-SPAWN_RADIUS);
 		const pv::Vector3DInt32 p1(SPAWN_RADIUS, SPAWN_RADIUS_Y,
@@ -3444,7 +3484,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	void collect_texture_packs(sv_<ss_> &dirs)
 	{
 		for(const ss_ &d : luanti_media::texture_pack_dirs(m_paths.texture_packs,
-				setting_string("buildat_texture_pack")))
+				m_mapgen.setting_string("buildat_texture_pack")))
 			dirs.push_back(d);
 	}
 
@@ -3559,88 +3599,6 @@ struct Module: public interface::Module, public luanti::Interface,
 				ifile->add_file_content(pair.first, pair.second);
 		});
 		log_v(MODULE, "%zu node textures served", files.size());
-	}
-
-	// Lua table helpers; the table is on top of the stack
-
-	ss_ table_string(lua_State *L, const char *key)
-	{
-		lua_getfield(L, -1, key);
-		ss_ v = lua_tostring(L, -1) ? lua_tostring(L, -1) : "";
-		lua_pop(L, 1);
-		return v;
-	}
-
-	bool table_boolean(lua_State *L, const char *key)
-	{
-		lua_getfield(L, -1, key);
-		bool v = lua_toboolean(L, -1);
-		lua_pop(L, 1);
-		return v;
-	}
-
-	double table_number(lua_State *L, const char *key, double def)
-	{
-		lua_getfield(L, -1, key);
-		double v = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : def;
-		lua_pop(L, 1);
-		return v;
-	}
-
-	// An array of numbers under key; left empty when it is not there
-	void table_numbers(lua_State *L, const char *key, sv_<float> &out)
-	{
-		out.clear();
-		lua_getfield(L, -1, key);
-		if(!lua_istable(L, -1)){
-			lua_pop(L, 1);
-			return;
-		}
-		size_t n = lua_objlen(L, -1);
-		out.reserve(n);
-		for(size_t i = 1; i <= n; i++){
-			lua_rawgeti(L, -1, (int)i);
-			out.push_back((float)lua_tonumber(L, -1));
-			lua_pop(L, 1);
-		}
-		lua_pop(L, 1);
-	}
-
-	// An array of six strings under key, or false when it is not there
-	bool table_six_strings(lua_State *L, const char *key, ss_ out[6])
-	{
-		lua_getfield(L, -1, key);
-		if(!lua_istable(L, -1)){
-			lua_pop(L, 1);
-			return false;
-		}
-		bool ok = true;
-		for(size_t i = 0; i < 6; i++){
-			lua_rawgeti(L, -1, (int)i + 1);
-			cc_ *v = lua_tostring(L, -1);
-			if(v)
-				out[i] = v;
-			else
-				ok = false;
-			lua_pop(L, 1);
-		}
-		lua_pop(L, 1);
-		return ok;
-	}
-
-	void table_six_numbers(lua_State *L, const char *key, float out[6])
-	{
-		lua_getfield(L, -1, key);
-		if(!lua_istable(L, -1)){
-			lua_pop(L, 1);
-			return;
-		}
-		for(size_t i = 0; i < 6; i++){
-			lua_rawgeti(L, -1, (int)i + 1);
-			out[i] = (float)lua_tonumber(L, -1);
-			lua_pop(L, 1);
-		}
-		lua_pop(L, 1);
 	}
 
 	#include "lua_bindings.h"
@@ -3845,9 +3803,9 @@ struct Module: public interface::Module, public luanti::Interface,
 		// reads it while it loads -- VoxeLibre registers no biomes at all
 		// for a singlenode world. The save's own answer, which for an
 		// imported world is its map_meta.txt's and is in no setting here.
-		set_global_string("__luanti_mapgen_name", mapgen_name());
+		set_global_string("__luanti_mapgen_name", m_mapgen.mapgen_name());
 		// And which LBMs this world has already had; see lbm_names_of()
-		publish_lbm_introduced();
+		m_mapgen.publish_lbm_introduced();
 
 		run_chunk_file(module_path()+"/lua/modloader.lua");
 

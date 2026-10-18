@@ -121,7 +121,7 @@
 				const ss_ names = lbm_names_of(value);
 				if(m_store)
 					m_store->set("lbm_introduced", names);
-				publish_lbm_introduced();
+				m_mapgen.publish_lbm_introduced();
 				log_v(MODULE, "import_world(): the world has already had "
 						"these LBMs: %s", cs(names));
 			}

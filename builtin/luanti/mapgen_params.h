@@ -3,8 +3,35 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //
 // What a vendored mapgen is told: the game's nodes, biomes, ores and
-// decorations and the world's mapgen settings, read from Lua; included by
-// luanti.cpp inside struct Module ([SPLITS]: moved out as it was).
+// decorations and the world's mapgen settings, read from Lua
+// ([LUANTI_MODULAR]: a part of the Module, with references to the game's
+// Lua state, the save's store and whether the world is new).
+#pragma once
+#include "core/types.h"
+#include "core/log.h"
+#include "interface/mutex.h"
+#include "storage/api.h"
+#include "luanti_mapgen/api.h"
+#include "luanti/lua_util.h"
+#include <map>
+extern "C" {
+#include <lua.h>
+}
+
+namespace luanti {
+
+struct MapgenParams
+{
+	lua_State *&m_lua;
+	interface::Mutex &m_lua_mutex;
+	storage::Store *&m_store;
+	const bool &m_world_is_new;
+
+	MapgenParams(lua_State *&lua, interface::Mutex &lua_mutex,
+			storage::Store *&store, const bool &world_is_new):
+		m_lua(lua), m_lua_mutex(lua_mutex), m_store(store),
+		m_world_is_new(world_is_new)
+	{}
 
 	// Every node name the game registered and the id it got, which is what
 	// a vendored mapgen is told to build with: it asks for "mapgen_stone"
@@ -508,7 +535,8 @@
 		ss_ names;
 		if(m_store)
 			m_store->get("lbm_introduced", names);
-		set_global_string("__luanti_lbm_introduced", names);
+		lua_pushstring(m_lua, names.c_str());
+		lua_setglobal(m_lua, "__luanti_lbm_introduced");
 	}
 
 	ss_ mapgen_name()
@@ -603,40 +631,7 @@
 		lua_settop(L, base);
 		return out;
 	}
+};
 
-	// The mapgen, which at singlenode is one node everywhere: Luanti's own
-	// MapgenSinglenode fills a generated block with whatever
-	// "mapgen_singlenode" names, or with air when a game does not name one,
-	// and sets the sunlight. So a generated section here is air as well --
-	// what a mod reads out of a part of the world nobody has built in is
-	// "air" and not "ignore", which is what every mod that looks before it
-	// places is written against.
-	//
-	// merge_volume() and not set_volume(): this is a generator, and the
-	// priorities in voxelworld's api.h are exactly what a generator wants --
-	// anything a mod has already put there stays.
-	//
-	// simplified: the section is filled at once rather than a chunk at a
-	// time as voxelworld asks, because a singlenode section is one word
-	// repeated and the whole of it costs a few milliseconds. A real mapgen
-	// is the milestone where that stops being true.
-	uint32_t singlenode_word()
-	{
-		if(m_singlenode_word == 0){
-			bool known = false;
-			uint32_t id = import_content_id("mapgen_singlenode", known);
-			if(!known)
-				id = import_content_id("air", known);
-			const interface::VoxelFormat f = interface::VoxelFormat::luanti();
-			uint32_t word = 0;
-			f.id.set(word, id);
-			// Lit, because a world with nothing in it is a world the sky
-			// reaches everywhere in -- and because this is written before
-			// voxelworld's skylight is turned on, so nothing else will put
-			// the light there. Luanti's MapgenSinglenode sets the same
-			// sunlight for the same reason.
-			f.light_sky.set(word, f.light_sky.mask());
-			m_singlenode_word = word;
-		}
-		return m_singlenode_word;
-	}
+}
+// vim: set noet ts=4 sw=4:

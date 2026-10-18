@@ -485,7 +485,7 @@
 		// handed it -- the bare terrain under a chunk whose on_generated
 		// has not run. A singlenode world's fill marks nothing generated,
 		// and there loaded is all there is to wait for.
-		const bool fill_only = (self->mapgen_name() == "singlenode");
+		const bool fill_only = (self->m_mapgen.mapgen_name() == "singlenode");
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
 			for(auto &pair : loaded){
