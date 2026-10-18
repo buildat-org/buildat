@@ -12,6 +12,9 @@
 -- The terrain this was written against: devtest's v7, which a new world
 -- no longer gets by default (valleys)
 core.settings:set("mg_name", "v7")
+-- And one seed: a random one put the spawn in a lake now and then, and a
+-- shaft dug through water is no reading
+core.settings:set("fixed_map_seed", "3")
 local LEN = 10
 local DEPTH = 10
 local base = nil
@@ -89,8 +92,16 @@ core.register_on_joinplayer(function(player)
 	core.set_timeofday(0.5)
 	local p = player:get_pos()
 	base = {x = math.floor(p.x) + 6, y = 0, z = math.floor(p.z) + 6}
-	core.after(6, function()
+	-- Built once the ground under it has loaded: six seconds is not
+	-- always enough on a busy desk, so up to six more tries
+	local waits = 0
+	local function start()
 		if not build() then
+			waits = waits + 1
+			if waits <= 6 then
+				core.after(5, start)
+				return
+			end
 			core.chat_send_all("water_light: done")
 			return
 		end
@@ -117,7 +128,7 @@ core.register_on_joinplayer(function(player)
 			-- blamed for a world that had not got there. The shaft is
 			-- open to the sky by construction, so a zero at the top is
 			-- the world not being ready rather than an answer.
-			if now:match("water0=%d+/0") then
+			if now:match("water0=[%w_]+/0/") then
 				last = nil
 				if tries < 8 then
 					core.after(10, settle)
@@ -146,5 +157,6 @@ core.register_on_joinplayer(function(player)
 			core.after(10, settle)
 		end
 		core.after(12, settle)
-	end)
+	end
+	core.after(6, start)
 end)
