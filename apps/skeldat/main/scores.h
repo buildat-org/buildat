@@ -31,6 +31,12 @@ struct Scores
 
 	storage::Store* scores()
 	{
+		return db_store("scores");
+	}
+	// A store of the save "_skeldat": "scores", or "server"'s running
+	// world ([SKELDAT_RESUME_WORLD])
+	storage::Store* db_store(const char *name)
+	{
 		if(!db){
 			storage::access(world.server, [&](storage::Interface *i){
 				db = i->open("_skeldat");
@@ -38,7 +44,7 @@ struct Scores
 					db = i->create("_skeldat");
 			});
 		}
-		return db ? db->store("scores") : nullptr;
+		return db ? db->store(name) : nullptr;
 	}
 
 	// A set's JSON: {name, seed, size, speed, scores: [{days, date, world,

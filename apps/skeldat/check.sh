@@ -2019,6 +2019,71 @@ stone = at("client1 picks up 1 skeldat:stone")
 assert q and stone and stone[0] - q[0] > 2.5, "the Q drop taken back %s" % (stone and q and "%.1f s after" % (stone[0] - q[0]))
 print("ok: the meat taken %.1f s after the kill, the stone %.1f s after Q" % (meat[0] - died[0], stone[0] - q[0]))
 PY
+# 39. A dedicated server starts the world that ran at its exit
+# ([SKELDAT_RESUME_WORLD]): 32's directory, w1 running when it was
+# stopped. A start with no launcher and no BUILDAT_SKELDAT_WORLD runs w1
+# again; a launcher's start is the menu, where w1 is played and closed;
+# the next start with no launcher is the menu. 32's second directory ran
+# "w": with that save deleted the start says so and is the menu, and the
+# one after says nothing, the name gone.
+rw_server() # <log> <dir> [args]: no world named, no launch; 32's size
+{
+	local log=$1 dir=$2
+	shift 2
+	BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" start_server "$log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$dir" -C "$t/srv.cache" -l 3 "$@" || fail "the server ($log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+rw_server "$t/srv43a.log" "$t/srv35"
+wait_for_log "$t/srv43a.log" "the world is in" 120 &&
+	grep -aq "skeldat: resumed the world w1" "$t/srv43a.log" ||
+	fail "w1 not resumed ($t/srv43a.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+rw_server "$t/srv43b.log" "$t/srv35" -u launcher=1
+cat > "$t/rw1.cmds" <<EOF
+wait_log 60000 world_menu: the list shown, 2 worlds
+delay 1000
+click Button "w1"
+wait_log 5000 world_menu: the list shown
+delay 500
+click Button "Play"
+$placed
+delay 1500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Worlds..."
+wait_log 10000 world_menu: the list shown, 2 worlds
+delay 500
+expect_error Disconnected from server: The world w1 was closed
+click Button "Close world"
+wait_log 30000 Disconnected from server: The world w1 was closed
+quit
+EOF
+client rw1 "$t/rw1.cmds"
+wait $CLIENT; drove "$t/rw1.log" || fail "w1's close ($t/rw1.log)"
+wait_for_log "$t/srv43b.log" "no world runs: the world menu" 60 ||
+	fail "w1 not closed ($t/srv43b.log)"
+! grep -aq "skeldat: resumed the world" "$t/srv43b.log" ||
+	fail "a launcher's start resumed a world ($t/srv43b.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+rw_server "$t/srv43c.log" "$t/srv35"
+sleep 5
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+! grep -aq "skeldat: resumed the world\|the world is in" "$t/srv43c.log" ||
+	fail "a world started after a close ($t/srv43c.log)"
+rm -r "$t/srv36/apps/skeldat/saves/w"
+rw_server "$t/srv43d.log" "$t/srv36"
+sleep 3
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+rw_server "$t/srv43e.log" "$t/srv36"
+sleep 3
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: the world w that ran at exit is gone: the menu" "$t/srv43d.log" &&
+	! grep -aq "ran at exit\|skeldat: resumed" "$t/srv43e.log" ||
+	fail "a deleted world's name ($t/srv43d.log, $t/srv43e.log)"
+echo "the world at exit: w1 resumed, the menu after its close, a deleted one's name dropped"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -2026,5 +2091,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again"
 # vim: set noet ts=4 sw=4:

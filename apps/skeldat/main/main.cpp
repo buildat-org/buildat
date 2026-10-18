@@ -294,6 +294,20 @@ struct Module: public interface::Module, public PlayersHost,
 			if(!save.empty() && !start_world(save, false))
 				log_w(MODULE, "skeldat: the launch's save \"%s\" is no world: "
 						"the menu", cs(save));
+			// [SKELDAT_RESUME_WORLD] No launcher at all (a dedicated
+			// server): the world that ran at the last exit, if one did
+			ss_ kept;
+			storage::Store *srv = m_scores.db_store("server");
+			if(m_server->get_config().get<ss_>("untrusted_launch").empty() &&
+					srv && srv->get("running", kept) && !kept.empty()){
+				if(start_world(kept, false)){
+					log_i(MODULE, "skeldat: resumed the world %s", cs(kept));
+				} else {
+					log_w(MODULE, "skeldat: the world %s that ran at exit is "
+							"gone: the menu", cs(kept));
+					srv->remove("running");
+				}
+			}
 		}
 	}
 
@@ -436,6 +450,10 @@ struct Module: public interface::Module, public PlayersHost,
 		m_starting = true;
 		m_store = m_save->store("skeldat");
 		m_world_name = name;
+		// [SKELDAT_RESUME_WORLD] What a dedicated server starts again; an
+		// exit leaves it, a close removes it
+		if(storage::Store *srv = m_scores.db_store("server"))
+			srv->set("running", name);
 		for(const ss_ &key : m_store->list("played/")){
 			ss_ t;
 			if(m_store->get(key, t))
@@ -1009,6 +1027,8 @@ struct Module: public interface::Module, public PlayersHost,
 				log_i(MODULE, "skeldat: switched to \"%s\"", cs(name));
 			} else {
 				log_i(MODULE, "skeldat: no world runs: the world menu");
+				if(storage::Store *srv = m_scores.db_store("server"))
+					srv->remove("running");
 			}
 			return;
 		}
