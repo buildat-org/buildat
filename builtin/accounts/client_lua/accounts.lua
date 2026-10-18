@@ -3367,7 +3367,9 @@ end
 -- keyboard over more than the lower half (a phone on its side) has the
 -- field row first, with no title; the page is made again as the screen or
 -- the keyboard changes, the field's text kept.
-function M.chat_page(back, draft)
+-- again: made again in place (the screen's size), the field keeping its
+-- focus and taking text at once
+function M.chat_page(back, draft, again)
 	local key, list = chat_channel()
 	chat_relabel = nil
 	local root = magic.ui.root
@@ -3446,8 +3448,10 @@ function M.chat_page(back, draft)
 	chat_to_end()
 	-- Focused, but taking no text until the page's first frame: the key
 	-- press that opened it (T) brings its letter after it, in the same
-	-- frame ([CHAT_OPEN_KEY_TYPED])
-	e.editable = false
+	-- frame ([CHAT_OPEN_KEY_TYPED]). Not when made again: a read-only
+	-- field for a frame takes a phone's keyboard down, and it does not
+	-- come back without a tap ([TOUCH_CHAT_KEYBOARD])
+	e.editable = again and true or false
 	e:SetFocus(true)
 	local sub, told
 	sub = magic.SubscribeToEvent("Update", function()
@@ -3466,7 +3470,7 @@ function M.chat_page(back, draft)
 		if root.width ~= rw or root.height ~= rh or
 				(buildat.keyboard_height() > root.height / 2) ~= tall then
 			magic.UnsubscribeFromEvent("Update", sub)
-			M.chat_page(back, e:GetText())
+			M.chat_page(back, e:GetText(), true)
 		end
 	end)
 end

@@ -13,7 +13,9 @@
 #     touch Chat; the page turned to 800x400 makes it again at the new
 #     size; a stand-in keyboard (buildatKeyboard.test) taller than half the
 #     screen puts the field row first with its text kept, and one of half
-#     or less puts it back last.
+#     or less puts it back last; [TOUCH_CHAT_KEYBOARD] the page's stand-in
+#     field is never read-only over those remakes (a phone takes its
+#     keyboard down for a read-only field, and no tap brings it back).
 # simplified: the phone's own keyboard is not driven; the stand-in is
 # what the page's reader returns.
 #   util/chat_top_check.sh
@@ -101,11 +103,13 @@ cat > "$t/web.json" <<'J'
  ["type", "hello"], ["wait", 500],
  ["shot", "${OUT}/upright.png"],
  ["viewport", 800, 400], ["waitlog", "chat page: y", 10],
+ ["eval", "window.ro = 0, new MutationObserver(function(){ if(document.getElementById('text').readOnly) ro++; }).observe(document.getElementById('text'), {attributes: true, attributeFilter: ['readonly']}), 'watching'"],
  ["eval", "buildatKeyboard.test = 300"], ["waitlog", "chat page: y", 10],
  ["wait", 500],
  ["shot", "${OUT}/keyboard.png"],
  ["eval", "buildatKeyboard.test = 150"], ["waitlog", "chat page: y", 10],
- ["eval", "'text ' + document.getElementById('text').value"]
+ ["eval", "'text ' + document.getElementById('text').value"],
+ ["eval", "'readonly ' + ro"]
 ]
 J
 TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
@@ -118,4 +122,8 @@ got=$(pages "$t/drive/page.log" | awk '{print $3, $4}' | tr '\n' ' ')
 	[ "${BASH_REMATCH[2]}" -lt "${BASH_REMATCH[1]}" ] ||
 	fail "web: the pages \"$got\" ($t/drive/page.log)"
 grep -aq '^eval: "text hello"' "$t/drive.txt" || fail "web: the text not kept ($t/drive.txt)"
+# [TOUCH_CHAT_KEYBOARD] The page made again under the keyboard: its field
+# never read-only, which takes a phone's keyboard down
+grep -aq '^eval: "readonly 0"' "$t/drive.txt" ||
+	fail "web: the field read-only in a remake: $(grep -a '^eval: "readonly' "$t/drive.txt") ($t/drive.txt)"
 echo "PASS: the chat at the screen's top half with its field focused, natively and in Chrome; it follows the screen turning, and a keyboard over more than half puts the field row first"
