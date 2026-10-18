@@ -138,6 +138,27 @@ struct Players: public luanti_session::Game, public MobsHost
 		return true;
 	}
 
+	// [SKELDAT_INV_DROP] count of a slot dropped as the drop key drops: the
+	// slot by a move's source checks (slot()), the count clamped
+	void drop_slot(size_t peer, Player &pl, int count, const ss_ &loc,
+			const ss_ &list, int index)
+	{
+		Stack *from = slot(pl, loc, list, index, false);
+		if(!from || from->empty() || count <= 0 || pl.hp <= 0)
+			return;
+		Stack out = *from;
+		out.count = std::min(count, from->count);
+		from->take(out.count);
+		log_i(MODULE, "skeldat: %s drops %s from %s %s:%d", cs(pl.name),
+				cs(out.str()), cs(loc), cs(list), index);
+		const float yaw = pl.yaw * (float)M_PI / 180;
+		drops.drop(out, pl.x, pl.y + 1.2f, pl.z, std::sin(yaw) * 3, 2,
+				std::cos(yaw) * 3, pl.name);
+		send_inventory(peer, pl);
+		if(loc != "me")
+			send_furnace(loc);
+	}
+
 	// The living player by name; the dead do nothing but respawn, which is
 	// skeldat:respawn
 	// simplified: a walk over the players, a handful at most

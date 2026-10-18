@@ -220,7 +220,7 @@ struct Module: public interface::Module, public PlayersHost,
 		sub<network::Packet>(m_server, game+"admin",
 				[this](const network::Packet &p){ m_admin.on_admin(p); });
 		// The rest of the game's packets go to one handler, by name
-		for(const char *n : {"open", "close", "move", "craft", "respawn",
+		for(const char *n : {"open", "close", "move", "drop_slot", "craft", "respawn",
 				"bow", "intro", "scores", "rerun", "pause", "worlds", "skip"})
 			sub(m_server, game+n, &Module::on_game_packet);
 		// What a player does in the world: builtin/luanti's session
@@ -1207,6 +1207,11 @@ struct Module: public interface::Module, public PlayersHost,
 			ss_ floc, flist, tloc, tlist;
 			if(is>>count>>floc>>flist>>fi>>tloc>>tlist>>ti)
 				m_players.move(peer, pl, count, floc, flist, fi, tloc, tlist, ti);
+		} else if(what == "drop_slot"){
+			int count = 0, i = 0;
+			ss_ loc, list;
+			if(is>>count>>loc>>list>>i)
+				m_players.drop_slot(peer, pl, count, loc, list, i);
 		} else if(what == "craft"){
 			m_players.craft(peer, pl);
 		} else if(what == "bow"){

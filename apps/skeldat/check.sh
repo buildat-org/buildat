@@ -1540,8 +1540,9 @@ echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | 
 # move the sticks to main:10, a finger on main:11 slid onto main:10 and
 # a second finger's tap there picks up half, a tap on main:11 puts it
 # down; main:10 picked again, a tap in the window's margin lets it go
-# and leaves the window open ([SKELDAT_INV_DESELECT]); a tap outside the
-# window closes it ([SKELDAT_INV_TAP_OUT], the slots' taps did not). More's Skateboard ([SKELDAT_TOUCH_BOARD]) tapped twice turns
+# and leaves the window open ([SKELDAT_INV_DESELECT]); picked again, the
+# drop key drops one, a tap outside the other, Q with none picked
+# nothing ([SKELDAT_INV_DROP]); a tap outside the window closes it ([SKELDAT_INV_TAP_OUT], the slots' taps did not). More's Skateboard ([SKELDAT_TOUCH_BOARD]) tapped twice turns
 # the board off and on. simplified: a tap on a mob, the board's brake
 # by the stick and the pause menu's buttons by tap are not driven: the
 # first is the place's own branch, the others are the keys' and the UI's.
@@ -1581,6 +1582,13 @@ CHECK_PIDS+=($SERVER_PID)
 	# window's margin, which leaves it open
 	echo "tap 310 253"; echo "delay 500"; echo "tap 300 175"
 	echo "wait_log 3000 inventory: let go"; echo "delay 500"
+	# [SKELDAT_INV_DROP] main:10's two picked: the drop key drops one, a
+	# tap outside the other, the window open; the key with none picked
+	# drops nothing
+	echo "tap 310 253"; echo "delay 500"; echo "keypress Q"
+	echo "wait_log 3000 inventory: drop 1"; echo "delay 500"; echo "tap 400 30"
+	echo "wait_log 3000 inventory: drop 1"; echo "delay 500"; echo "keypress Q"
+	echo "delay 500"
 	# [SKELDAT_INV_TAP_OUT] closed by a tap outside it
 	echo "tap 400 30"; echo "wait_log 3000 inventory: closed"; echo "delay 500"
 	# More, then its sixth entry (Drop, Fly, Fast, Noclip, HUD, Skateboard)
@@ -1619,6 +1627,8 @@ grep -aq "client1 places skeldat:dirt" "$log34" && grep -aq "dig: done at" "$t/t
 [ "$(grep -ac "skeldat *: inventory: closed" "$t/touch.log")" = 1 ] &&
 	[ "$(grep -ac "skeldat *: inventory: let go" "$t/touch.log")" = 1 ] &&
 	[ "$(grep -ac "skeldat *: inventory: move" "$t/touch.log")" = 2 ] &&
+	[ "$(grep -acE "client1 drops skeldat:stick( 1)? from me main:10" "$log34")" = 2 ] &&
+	[ "$(grep -ac "a drop of " "$log34")" = 2 ] &&
 	grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.log" &&
 	grep -aq "inventory: move 2 skeldat:stick main:10 -> main:11" "$t/touch.log" ||
 	fail "the inventory by finger ($t/touch.log)"

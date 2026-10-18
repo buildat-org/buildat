@@ -302,6 +302,29 @@ local function draw()
 	end
 end
 
+-- [SKELDAT_INV_DROP] n of the picked stack dropped (nil: all picked),
+-- the server's drop_slot; the pick goes when nothing of it is left
+local function drop_pick(n)
+	local sel = win.sel
+	local st = game.parse_stack(stack_at(sel))
+	if not st then
+		win.sel = nil
+		return
+	end
+	local picked = sel.count > 0 and math.min(sel.count, st.count) or st.count
+	n = math.min(n or picked, picked)
+	game.send("drop_slot", string.format("%d %s %s %d", n, sel.location,
+			sel.list, sel.index))
+	log:info(string.format("inventory: drop %d %s %s:%d", n, st.name,
+			sel.list, sel.index))
+	if picked - n > 0 then
+		sel.count = picked - n
+	else
+		win.sel = nil
+	end
+	draw()
+end
+
 local function click(x, y, button)
 	if not win then
 		return false
@@ -315,8 +338,15 @@ local function click(x, y, button)
 			hit = sl
 		end
 	end
-	-- [SKELDAT_INV_DESELECT] On no slot, in the window or out of it, a
-	-- picked stack is let go (it stays in its slot), and that is all
+	local outside = x < 0 or y < 0 or x >= win.el.width or y >= win.el.height
+	-- [SKELDAT_INV_DROP] Outside with a pick: the pick dropped, the window
+	-- stays
+	if outside and win.sel then
+		drop_pick(nil)
+		return true
+	end
+	-- [SKELDAT_INV_DESELECT] In the window on no slot, a picked stack is
+	-- let go (it stays in its slot), and that is all
 	if not hit and win.sel then
 		win.sel = nil
 		log:info("inventory: let go")
@@ -325,7 +355,7 @@ local function click(x, y, button)
 	end
 	-- [SKELDAT_INV_TAP_OUT] Outside the window: closed, as by its key (a
 	-- touchscreen has no other way out)
-	if x < 0 or y < 0 or x >= win.el.width or y >= win.el.height then
+	if outside then
 		close()
 		return true
 	end
@@ -398,6 +428,15 @@ function M.open(mode, at)
 		-- The inventory key closes it, as it opened it
 		if key == game.key.inventory then
 			close()
+			return true
+		end
+		-- [SKELDAT_INV_DROP] The drop key drops of the pick, one (Ctrl: all
+		-- picked), and with none nothing: not the hotbar's
+		if key == game.key.drop then
+			if win.sel then
+				drop_pick(not magic.input:GetQualifierDown(magic.QUAL_CTRL) and
+						1 or nil)
+			end
 			return true
 		end
 		return false
