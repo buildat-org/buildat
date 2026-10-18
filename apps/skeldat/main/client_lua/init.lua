@@ -1668,8 +1668,7 @@ end
 --
 local music = load("main/music.lua")
 music.new(magic, log, scene)
-local mood = {now = nil, seen = nil, held = 0, since = 0, dark = false,
-	dark_t = 0}
+local mood = {since = 0, dark = false, dark_t = 0}
 -- [SKELDAT_CAVE_MUSIC_DARK] Dark air near (x, y, z): an open voxel with no
 -- sky or lamp light, reached through open voxels in 24 steps (2000
 -- visited at most), or anywhere within 6 through the rock. at(x, y, z)
@@ -1740,10 +1739,9 @@ do
 					tostring(got[3]), tostring(got[4])}, " "))
 	end
 end
+-- Whether the cave's mood holds here: the head's sky light under 8 and
+-- dark air near
 local function mood_here()
-	if mood.since < 5 then
-		return nil
-	end
 	local hx, hy, hz = math.floor(player.x + 0.5),
 			math.floor(player.y + 1.6 + 0.5), math.floor(player.z + 0.5)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(hx, hy, hz))
@@ -1764,30 +1762,114 @@ local function mood_here()
 						reg:light_lamp_of(w) == 0
 			end, hx, hy, hz)
 		end
-		if mood.dark then
-			return "caves"
+		return mood.dark
+	end
+	return false
+end
+-- [SKELDAT_CAVE_MUSIC_LIMIT] The mood from what holds here: caves,
+-- danger, sunrise, in that order. The cave and the danger music each on
+-- their own clock: a start (the mood taken, after its 2 s hold) at most
+-- once a game day, a minute at most each; one held back gives the next
+-- that holds. say(line) gets the log's lines.
+-- simplified: the client's own clock, not the world's (a skip or a pause
+-- does not move it), kept for the session only
+local function mood_machine(max_s, day_s, say)
+	local o = {now = nil, seen = nil, held = 0, clock = 0, started = {},
+		said = {}}
+	local function allowed(m)
+		local st = o.started[m]
+		local why = nil
+		if st and o.now == m then
+			if o.clock - st >= max_s then
+				why = "(the minute up)"
+			end
+		elseif st then
+			local left = day_s() - (o.clock - st)
+			if left > 0 then
+				why = string.format("held back (%d s to go)", math.ceil(left))
+			end
 		end
+		-- Said when a stretch of it begins
+		local kind = why and why:gsub(" %(%d.*", "")
+		if kind ~= o.said[m] then
+			o.said[m] = kind
+			if why then
+				say("mood " .. m .. " " .. why)
+			end
+		end
+		return why == nil
 	end
-	if fog.want >= 0.5 then
-		return "danger"
+	-- here: {caves, danger, sunrise} as they hold
+	function o.step(dt, here)
+		o.clock = o.clock + dt
+		local m = here.caves and allowed("caves") and "caves" or
+				here.danger and allowed("danger") and "danger" or
+				here.sunrise and "sunrise" or nil
+		if m ~= o.seen then
+			o.seen, o.held = m, 0
+		end
+		o.held = o.held + dt
+		if o.held >= 2 and o.now ~= m then
+			o.now = m
+			local start = m == "caves" or m == "danger"
+			if start then
+				o.started[m] = o.clock
+			end
+			say("mood " .. tostring(m) .. (start and " (start)" or ""))
+		end
+		return o.now
 	end
-	if game.day >= 0.2 and game.day < 0.33 then
-		return "sunrise"
+	return o
+end
+-- Its self test, a minute of 6 s and a day of 20: a cave from 0 to 16 s
+-- (the start at 2, the minute up at 8, none at 10, held back), out to
+-- 20, back in to 30 (still held back to 22, the second start at 24, up
+-- at 30), then from 34 a cave held back with thick bones: danger
+do
+	local lines = {}
+	local o = mood_machine(6, function() return 20 end, function(line)
+		lines[#lines + 1] = line
+	end)
+	for i = 1, 80 do
+		local t = i * 0.5
+		o.step(0.5, {caves = t <= 16 or (t > 20 and t <= 30) or t > 34,
+			danger = t > 34})
+	end
+	local got = table.concat(lines, "; ")
+	local want = "mood caves (start); mood caves (the minute up); mood nil; " ..
+		"mood caves held back (12 s to go); mood caves (start); " ..
+		"mood caves (the minute up); mood nil; " ..
+		"mood caves held back (9 s to go); mood danger (start)"
+	if got == want then
+		log:info("skeldat: music limit: self test passed")
+	else
+		log:error("skeldat: music limit: self test failed: " .. got)
+	end
+end
+mood.machine = mood_machine(60, function()
+	return game.day_rate and game.day_rate > 0 and 1 / game.day_rate or 1200
+end, function(line)
+	log:info("skeldat: " .. line)
+end)
+do
+	-- BUILDAT_SKELDAT_CAVE_MUSIC "<minute> <day>" in seconds, for a drive
+	local a, b = (buildat.get_env("BUILDAT_SKELDAT_CAVE_MUSIC") or ""):match(
+			"^(%S+) (%S+)$")
+	if tonumber(a) and tonumber(b) then
+		mood.machine = mood_machine(tonumber(a), function() return tonumber(b) end,
+				function(line) log:info("skeldat: " .. line) end)
 	end
 end
 local function update_music(dt)
 	mood.since = mood.since + dt
 	mood.dark_t = mood.dark_t - dt
-	local m = mood_here()
-	if m ~= mood.seen then
-		mood.seen, mood.held = m, 0
+	local here = {}
+	if mood.since >= 5 then
+		here.caves = mood_here()
+		here.danger = fog.want >= 0.5
+		here.sunrise = game.day >= 0.2 and game.day < 0.33
 	end
-	mood.held = mood.held + dt
-	if mood.held >= 2 and mood.now ~= m then
-		mood.now = m
-		log:info("skeldat: mood " .. tostring(m))
-	end
-	music.update(dt, mood.now)
+	music.update(dt, mood.machine.step(dt, here))
 end
 
 --
