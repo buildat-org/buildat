@@ -19,6 +19,11 @@ struct MobsHost
 	virtual void send_position(size_t peer, Player &pl) = 0;
 	virtual void sound(const char *moment, float x, float y, float z,
 			size_t except = (size_t)-1) = 0;
+	// [SKELDAT_SOUNDS_HEARD] The picker's own, not placed; a shooter's own
+	// arrow, heard from further
+	virtual void sound_own(size_t peer, const char *moment) = 0;
+	virtual void sound_near(size_t peer, const char *moment, float x,
+			float y, float z) = 0;
 protected:
 	~MobsHost() {}
 };
@@ -392,6 +397,7 @@ struct Mobs
 	{
 		if(m.mode == FIGHT)
 			m.mode = WANDER, m.mode_t = 0;
+		m.draw_t = -1, m.draw_sent = 0;
 		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 		woken++;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
@@ -412,6 +418,19 @@ struct Mobs
 				n->Remove();
 		});
 		id = 0;
+	}
+
+	// [SKELDAT_SKELETON_DRAW] The bow drawn this long before the shot;
+	// the next draw 0.7 to 2.2 s after it, 1.5 to 3 between the shots
+	// with the draw
+	static constexpr float DRAW_S = 0.8f;
+	void let_go(uint32_t key, Mob &m, const char *why)
+	{
+		if(m.draw_t < 0)
+			return;
+		m.draw_t = -1;
+		m.shoot_t = 0.7f + world.rnd() * 1.5f;
+		log_i(MODULE, "skeldat: a skeleton (%u) lets its draw go: %s", key, why);
 	}
 
 	void shoot(const Mob &m, const Player &p)
@@ -471,6 +490,7 @@ struct Mobs
 		Mob &m = all[key];
 		m.hp -= hp;
 		m.hurt++;
+		let_go(key, m, "hurt");
 		if(m.kind == BOAR){
 			m.mode = FLEE;
 			m.mode_t = 5;
@@ -539,7 +559,9 @@ struct Mobs
 			m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 			body_puts++;
 		}
-		else if(flat > 0.05f){
+		// Drawing its bow it stands ([SKELDAT_SKELETON_DRAW]), turned to
+		// the player below
+		else if(flat > 0.05f && m.draw_t < 0){
 			const float k = std::min(1.0f, BODY_SPEED * dt / flat);
 			const float nx = m.bx + dx * k, nz = m.bz + dz * k;
 			const Ground to = world.ground(w, nx, m.by, nz, h);
@@ -596,7 +618,7 @@ struct Mobs
 			return;
 		sv_<std::pair<uint32_t, int>> burnt;
 		sv_<uint32_t> drowned;
-		sv_<std::pair<uint32_t, size_t>> shots;
+		sv_<std::pair<uint32_t, size_t>> shots, draws;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
 		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
@@ -631,13 +653,27 @@ struct Mobs
 							}
 						}
 						m.mode = FIGHT;
-						m.shoot_t -= dt;
-						if(m.shoot_t <= 0 && d < 14){
-							shots.push_back({key, peer});
-							m.shoot_t = 1.5f + world.rnd() * 1.5f;
+						// [SKELDAT_SKELETON_DRAW] The draw, then the shot
+						// at the player as they are then
+						if(m.draw_t >= 0){
+							m.draw_t -= dt;
+							if(m.draw_t <= 0){
+								shots.push_back({key, peer});
+								m.draw_t = -1;
+								m.shoot_t = 0.7f + world.rnd() * 1.5f;
+							}
+						} else {
+							m.shoot_t -= dt;
+							if(m.shoot_t <= 0 && d < 14){
+								m.draw_t = DRAW_S;
+								draws.push_back({key, peer});
+							}
 						}
-					} else if(m.mode == FIGHT)
-						m.mode = WANDER;
+					} else {
+						let_go(key, m, "the player out of 16");
+						if(m.mode == FIGHT)
+							m.mode = WANDER;
+					}
 					step_body(w, m, p, dt);
 					// [SKELDAT_SKELETON_WATER] Its body in water, the feet's
 					// voxel or the one over them: dead at once
@@ -719,6 +755,15 @@ struct Mobs
 					"%d,%d,%d on seeing %s", k.key, k.p[0], k.p[1], k.p[2],
 					cs(k.seen));
 		}
+		for(auto &s : draws){
+			auto m = all.find(s.first);
+			auto p = players.find(s.second);
+			if(m == all.end() || p == players.end())
+				continue;
+			host.sound("bow_draw", m->second.bx, m->second.by + 1.5f, m->second.bz);
+			log_i(MODULE, "skeldat: a skeleton (%u) draws at %s", s.first,
+					cs(p->second.name));
+		}
 		for(auto &s : shots){
 			auto m = all.find(s.first);
 			auto p = players.find(s.second);
@@ -758,6 +803,12 @@ struct Mobs
 					n->SetVar(Urho3D::StringHash("skeldat_hurt"),
 							Urho3D::Variant(m.hurt));
 					m.hurt_sent = m.hurt;
+				}
+				const int drawing = m.draw_t >= 0;
+				if(drawing != m.draw_sent){
+					n->SetVar(Urho3D::StringHash("skeldat_draw"),
+							Urho3D::Variant(drawing));
+					m.draw_sent = drawing;
 				}
 			}
 		});
@@ -1433,7 +1484,8 @@ struct Mobs
 									a.vz * a.vz);
 							hits.push_back({kv.first, std::max(1, (int)std::lround(
 									BOW_DAMAGE * v)), a.peer, x, z});
-							host.sound("arrow_hit", x, y, z);
+							host.sound("arrow_hit", x, y, z, a.peer);
+							host.sound_near(a.peer, "arrow_hit", x, y, z);
 							gone = true;
 							break;
 						}
@@ -1462,7 +1514,11 @@ struct Mobs
 							a.fz = (int)std::floor(a.z + 0.5f);
 					log_i(MODULE, "skeldat: an arrow sticks at %.1f,%.1f,%.1f",
 							a.x, a.y, a.z);
-					host.sound("arrow_land", a.x, a.y, a.z);
+					if(a.by_player){
+						host.sound("arrow_land", a.x, a.y, a.z, a.peer);
+						host.sound_near(a.peer, "arrow_land", a.x, a.y, a.z);
+					} else
+						host.sound("arrow_land", a.x, a.y, a.z);
 				} else
 					a.x = x, a.y = y, a.z = z;
 			}
@@ -1508,7 +1564,8 @@ struct Mobs
 			if(!world.game.add(pl.main, Stack("skeldat:arrow")).empty())
 				continue;
 			host.send_inventory(pair.first, pl);
-			host.sound("pickup", x, y, z);
+			host.sound("pickup", x, y, z, pair.first);
+			host.sound_own(pair.first, "pickup");
 			log_i(MODULE, "skeldat: %s picks up an arrow at %.1f,%.1f,%.1f",
 					cs(pl.name), x, y, z);
 			return true;

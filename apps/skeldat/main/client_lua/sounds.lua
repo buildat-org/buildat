@@ -205,7 +205,8 @@ M.VARY = 0.15
 -- Before that, driven to DRIVE times their peak through a soft clip
 -- (tanh's): a noise burst's peak is one sample, and scaled by it alone
 -- the rest stayed quiet
-M.PEAK = {arrow_land = 0.9, arrow_hit = 0.9}
+-- [SKELDAT_SOUNDS_HEARD] And the pickup's, not heard as made
+M.PEAK = {arrow_land = 0.9, arrow_hit = 0.9, pickup = 0.9}
 M.DRIVE = 4
 M.RATE = 44100
 
@@ -318,6 +319,23 @@ function M.self_check(blip, synth)
 		end
 		return eb / e
 	end
+	-- [SKELDAT_SOUNDS_HEARD] The pickup's level beside a step's and a
+	-- dig's, read rather than guessed: the peak and the RMS of each
+	local levels = {}
+	for _, name in ipairs({"pickup", "step_wood", "dig_earth"}) do
+		local b = M.render(blip, synth, name,
+				gen.params(M.TAKES[name][M.PICK[name]]))
+		local e = 0
+		for i = 0, b:len() - 1 do
+			e = e + b:get(i) ^ 2
+		end
+		levels[#levels + 1] = string.format("%s peak %.2f rms %.3f", name,
+				peak_of(b), math.sqrt(e / math.max(1, b:len())))
+		if name == "pickup" and math.abs(peak_of(b) - 0.9) > 0.01 then
+			bad[#bad + 1] = levels[#levels]
+		end
+	end
+	out[#out + 1] = "levels: " .. table.concat(levels, ", ")
 	local now = mids(gen.render(gen.params(M.TAKES.bow_draw[M.PICK.bow_draw]),
 			M.RATE, synth))
 	local was = mids(gen.render(gen.params(WAS.bow_draw), M.RATE, synth))

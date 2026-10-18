@@ -783,7 +783,8 @@ grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 	[ $(grep -acE "client1 picks up 9[89] skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"
 # [SKELDAT_BOW_SOUNDS] A pickup's sound, once a tick however many stacks
-picks=$(grep -ac "skeldat: sound pickup at" "$t/drops.log")
+# (the picker's own, [SKELDAT_SOUNDS_HEARD])
+picks=$(grep -ac "skeldat: sound_own pickup" "$t/drops.log")
 [ "$picks" -ge 1 ] && [ "$picks" -lt 18 ] ||
 	fail "18 stacks picked up with $picks pickup sounds ($t/drops.log)"
 # 15. A respawn 250 voxels from the death ([SKELDAT_RESPAWN_LOAD]), in
@@ -897,7 +898,11 @@ echo "$rim" | sed 's/.*its rim at \([-0-9.]*\), the lowest edge column \([-0-9]*
 # 19. The body follows the light form ([SKELDAT_LIGHT_PRIMARY]): a
 # skeleton 12 voxels from a player at midnight; its light form closes to
 # a bow's distance and its body walks after it: awake, shooting, and no
-# body put back on its light form over two reports
+# body put back on its light form over two reports. [SKELDAT_SKELETON_DRAW]
+# Each shot 0.8 s after its draw: on the server "draws at" then "shoots
+# at", on the client "sound bow_draw at" then "sound bow at", and the
+# pose's "a skeleton draws". simplified: the draw let go is not driven (a
+# player cannot walk from 9 out past 16 in its 0.8 s)
 log22="$t/srv22.log"
 BUILDAT_SKELDAT_WORLD=body BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
@@ -915,6 +920,33 @@ grep -aq "a skeleton shoots at client1" "$log22" &&
 	[ $(grep -a "skeletons, [0-9]* full" "$log22" | grep -vc "0 full") -ge 1 ] &&
 	! grep -a "skeletons, [0-9]* full" "$log22" | grep -v "0 full" | grep -qv " 0 bodies put back" ||
 	fail "the body did not follow its light form: $body ($log22)"
+python3 -I - "$log22" "$t/body.log" <<'PY' || fail "the skeleton's draw ($log22, $t/body.log)"
+import sys, re
+def ts(l):
+    m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
+# A draw, then the shot that follows it: on the server by the skeleton's
+# key, on the client by the place (it stands while it draws)
+def gaps(path, a, b, key):
+    lines = open(path, errors="replace").read().split("\n")
+    out, t = [], {}
+    for l in lines:
+        if a in l:
+            t[key(l)] = ts(l)
+        elif b in l and key(l) in t:
+            out.append(ts(l) - t.pop(key(l)))
+    return out
+def at(l):
+    m = re.search(r" at ([-0-9.]+),[-0-9.]+,([-0-9.]+)", l)
+    return (round(float(m.group(1))), round(float(m.group(2))))
+srv = gaps(sys.argv[1], "draws at client1", "a skeleton shoots at client1",
+        lambda l: "")
+cli = gaps(sys.argv[2], "skeldat: sound bow_draw at", "skeldat: sound bow at", at)
+assert srv and all(0.7 <= g <= 1.0 for g in srv), "the server's draws to shots %s" % srv
+assert cli and all(0.6 <= g <= 1.1 for g in cli), "the client's sounds %s" % cli
+assert "skeldat: a skeleton draws" in open(sys.argv[2], errors="replace").read(), "no pose"
+print("draws: %d shots %.2f-%.2f s after their draws" % (len(srv), min(srv), max(srv)))
+PY
 # 20. No sun in the bones ([SKELDAT_SUN_IN_BONES]): at noon on clean
 # ground two skeletons: one 6 from a player, at a bow's distance where
 # it stands, beside a bone block, which does not burn; one 20 off with no
@@ -1052,7 +1084,8 @@ grep -aq "the skeleton (1) dies" "$s1" && grep -aq "an arrow from client1 hits t
 ! grep -aq "client1 digs" "$s1" || fail "the bow dug ($s1)"
 grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not picked up ($s1)"
 # [SKELDAT_BOW_SOUNDS] Each draw squeaks on the drawer's own (the server
-# sends it to the others only); each shot chops: the player's on its own
+# sends it to the others only; the skeleton's draws placed,
+# [SKELDAT_SKELETON_DRAW]); each shot chops: the player's on its own
 # client at the release, not from the server ([SKELDAT_BOW_SOUND_TUNE]),
 # the skeleton's from the server; an arrow sticking lands. The sounds'
 # self-check: the arrow's 4x louder, the draw's mids halved, the release
@@ -1060,7 +1093,7 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 b1="$t/bow1.log"
 skel=$(grep -ac "a skeleton shoots at client1" "$s1")
 [ "$(grep -ac "skeldat: sound bow_draw (own)" "$b1")" = "$draws" ] &&
-	! grep -aq "skeldat: sound bow_draw at" "$b1" &&
+	[ "$(grep -ac "skeldat: sound bow_draw at" "$b1")" = "$(grep -ac "skeleton ([0-9]*) draws at" "$s1")" ] &&
 	[ "$(grep -ac "skeldat: sound bow (own)" "$b1")" = "$#" ] &&
 	[ "$(grep -ac "skeldat: sound bow at" "$b1")" = "$skel" ] && [ "$skel" -ge 1 ] &&
 	grep -aq "skeldat: sound arrow_land at" "$b1" &&
@@ -2113,6 +2146,44 @@ grep -aq "skeldat: the world w that ran at exit is gone: the menu" "$t/srv43d.lo
 	! grep -aq "ran at exit\|skeldat: resumed" "$t/srv43e.log" ||
 	fail "a deleted world's name ($t/srv43d.log, $t/srv43e.log)"
 echo "the world at exit: w1 resumed, the menu after its close, a deleted one's name dropped"
+# 40. The sounds heard ([SKELDAT_SOUNDS_HEARD]): two clients at noon,
+# one with a bow; its arrow shot into the ground at its feet sticks and
+# is picked up. The shooter's client hears the landing "near 16" and its
+# pickup as its own; the other the landing and the pickup placed, neither
+# near nor own. The sounds' level line has pickup's peak 0.90.
+log44="$t/srv44.log"
+BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 3 1" \
+	start_server "$log44" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv44" -C "$t/srv.cache" -l 3 || fail "the server ($log44)"
+CHECK_PIDS+=($SERVER_PID)
+{ echo "$placed"; echo "delay 8000"; echo "look 0 -60"; echo "delay 500"
+	echo "mouse_down left"; echo "delay 2500"; echo "mouse_up left"
+	echo "delay 4000"; echo quit; } > "$t/snd1.cmds"
+# The other steps back, out of the arrow's reach
+printf '%s\n' "$placed" "keydown S" "delay 1500" "keyup S" "delay 14000" quit \
+	> "$t/snd2.cmds"
+client snd1 "$t/snd1.cmds"
+p1=$CLIENT
+# The first to join has the bow (the test's give)
+wait_for_log "$t/snd1.log" "skeldat: placed at" 300 || fail "the shooter not placed ($t/snd1.log)"
+client snd2 "$t/snd2.cmds"
+wait $p1 || fail "the shooter's drive ($t/snd1.log)"
+wait $CLIENT || fail "the other's drive ($t/snd2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "picks up an arrow" "$log44" &&
+	grep -aq "skeldat: sound arrow_land at .* near 16" "$t/snd1.log" &&
+	grep -aq "skeldat: sound_own pickup" "$t/snd1.log" &&
+	! grep -aq "skeldat: sound pickup at" "$t/snd1.log" &&
+	grep -aq "skeldat: sound arrow_land at" "$t/snd2.log" &&
+	! grep -aq "near 16\|sound_own" "$t/snd2.log" &&
+	grep -aq "skeldat: sound pickup at" "$t/snd2.log" ||
+	fail "the shooter's own and the other's placed sounds ($log44, $t/snd1.log, $t/snd2.log)"
+grep -aq "levels: pickup peak 0.90 " "$t/snd1.log" ||
+	fail "no level line with pickup's peak ($t/snd1.log)"
+echo "sounds heard: $(grep -a "levels: " "$t/snd1.log" | head -1 | sed 's/.*levels: //; s/, the draw.*//')"
 # 41. The world's making over its map ([SKELDAT_MAKING_MAP]): a new 512
 # world of seed 2. client1 joined before the making waits in the stripes
 # (world_menu's wait) over the map: its first packet 8 x 8 footprints,
@@ -2157,5 +2228,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the making over its map"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map"
 # vim: set noet ts=4 sw=4:

@@ -586,8 +586,11 @@ struct Players: public luanti_session::Game, public MobsHost
 					break;
 			}
 		});
-		for(auto &pair : picked)
-			sound("pickup", pair.second.x_, pair.second.y_, pair.second.z_);
+		for(auto &pair : picked){
+			sound("pickup", pair.second.x_, pair.second.y_, pair.second.z_,
+					pair.first);
+			sound_own(pair.first, "pickup");
+		}
 	}
 
 	void dig(size_t peer, Player &pl, int x, int y, int z)
@@ -830,6 +833,19 @@ struct Players: public luanti_session::Game, public MobsHost
 		for(size_t peer : shown)
 			if(peer != except)
 				network::send(world.server, peer, "skeldat:sound", buf);
+	}
+
+	void sound_own(size_t peer, const char *moment)
+	{
+		if(shown.count(peer))
+			network::send(world.server, peer, "skeldat:sound_own", moment);
+	}
+	void sound_near(size_t peer, const char *moment, float x, float y, float z)
+	{
+		char buf[100];
+		snprintf(buf, sizeof buf, "%s %.2f %.2f %.2f near 16", moment, x, y, z);
+		if(shown.count(peer))
+			network::send(world.server, peer, "skeldat:sound", buf);
 	}
 
 	// A client's click at a mob: what the player holds hits it, from no

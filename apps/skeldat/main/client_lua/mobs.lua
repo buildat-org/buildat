@@ -11,7 +11,9 @@
 --   local mobs = run_script_file("main/mobs.lua")(game, sounds)
 -- game.light_units: the frame's light (init.lua's update_sky), and
 -- game.sky_light builtin/luanti's rules that light an object by it.
--- simplified: no death animation and no bow drawn; boxes axis-aligned
+-- A skeleton drawing its bow ([SKELDAT_SKELETON_DRAW], the node's var
+-- "skeldat_draw") holds both arms forward.
+-- simplified: no death animation and no bow in its hands; boxes axis-aligned
 -- for pointing (a boar is pointed at as a square); unlit, flat by the
 -- light where it stands -- no sun direction on its sides, no shadow
 local magic = require("buildat/extension/urho3d")
@@ -57,15 +59,16 @@ local function box(quads, f, tw, th, x0, y0, z0, x1, y1, z1)
 end
 
 -- The kinds: a skin, the parts (a pivot in pixels, a box around it, the
--- skin's faces, and how it swings), and the box a click finds it in
+-- skin's faces, how it swings, and true for an arm), and the box a click
+-- finds it in
 local KINDS = {
 	skeldat_skeleton = {texture = "main/skeleton.png", tw = 64, th = 32,
 		half = 0.35, height = 2,
 		parts = {
 			{0, 24, 0, {-4, 0, -4, 4, 8, 4}, skin(0, 0, 8, 8, 8)},
 			{0, 12, 0, {-4, 0, -2, 4, 12, 2}, skin(16, 16, 8, 12, 4)},
-			{-5, 24, 0, {-1, -12, -1, 1, 0, 1}, skin(40, 16, 2, 12, 2), 1},
-			{5, 24, 0, {-1, -12, -1, 1, 0, 1}, skin(40, 16, 2, 12, 2), -1},
+			{-5, 24, 0, {-1, -12, -1, 1, 0, 1}, skin(40, 16, 2, 12, 2), 1, true},
+			{5, 24, 0, {-1, -12, -1, 1, 0, 1}, skin(40, 16, 2, 12, 2), -1, true},
 			{-2, 12, 0, {-1, -12, -1, 1, 0, 1}, skin(0, 16, 2, 12, 2), -1},
 			{2, 12, 0, {-1, -12, -1, 1, 0, 1}, skin(0, 16, 2, 12, 2), 1},
 		}},
@@ -137,12 +140,13 @@ return function(game, sounds)
 			local quads, b = {}, p[4]
 			box(quads, p[5], kind.tw, kind.th, b[1], b[2], b[3], b[4], b[5], b[6])
 			build(child, quads, mat)
-			parts[#parts + 1] = {node = child, swing = p[6]}
+			parts[#parts + 1] = {node = child, swing = p[6], arm = p[7]}
 		end
 		local pos = node.worldPosition
 		local m = {node = node, kind = kind, parts = parts,
 			mat = mat, last = magic.Vector3(pos.x, pos.y, pos.z), phase = 0,
-			light_t = 0, hurt = node:GetVar("skeldat_hurt"):GetInt(), red_t = 0}
+			light_t = 0, hurt = node:GetVar("skeldat_hurt"):GetInt(), red_t = 0,
+			draw = 0, drawing = false}
 		mobs[node:GetID()] = m
 		return m
 	end
@@ -243,9 +247,21 @@ return function(game, sounds)
 				m.last = magic.Vector3(p.x, p.y, p.z)
 				m.phase = m.phase + speed * dt * 5
 				local a = math.sin(m.phase) * math.min(1, speed) * 35
+				-- The draw's pose, eased in and out over 0.15 s: the arms
+				-- from the swing to forward, -90 about the shoulder's x
+				local drawing = m.node:GetVar("skeldat_draw"):GetInt() == 1
+				if drawing ~= m.drawing then
+					m.drawing = drawing
+					log:info("skeldat: a skeleton " .. (drawing and "draws"
+							or "lowers its arms"))
+				end
+				m.draw = math.max(0, math.min(1, m.draw +
+						(drawing and dt or -dt) / 0.15))
 				for _, part in ipairs(m.parts) do
 					if part.swing then
-						part.node.rotation = magic.Quaternion(a * part.swing, 0, 0)
+						local k = part.arm and m.draw or 0
+						part.node.rotation = magic.Quaternion(
+								a * part.swing * (1 - k) - 90 * k, 0, 0)
 					end
 				end
 			end
@@ -299,12 +315,14 @@ return function(game, sounds)
 		game.send_luanti("punch_object", {tostring(id)}, {"array", "string"})
 	end
 
-	-- A sound by name at a place, heard from up to 24 voxels, or far
+	-- A sound by name at a place, heard from up to 24 voxels, or far; from
+	-- near (2) at its full level. [SKELDAT_SOUNDS_HEARD] The falloff
+	-- straight (rolloff 1, Urho's is 2): at 30 of 48, 0.39 rather than 0.15
 	local playing = {}
 	-- [SKELDAT_BOW_SOUNDS] An arrow lands mostly 20 to 40 off; a shot
 	-- heard to 32 ([SKELDAT_BOW_SOUND_TUNE])
 	local FAR = {arrow_land = 48, bow = 32}
-	function M.play_at(moment, x, y, z, gain, far)
+	function M.play_at(moment, x, y, z, gain, far, near)
 		local sound = sounds.pick(moment)
 		if not sound then
 			return
@@ -313,21 +331,39 @@ return function(game, sounds)
 		node.position = magic.Vector3(x, y, z)
 		local src = node:CreateComponent("SoundSource3D")
 		src.soundType = magic.SOUND_EFFECT
-		src.nearDistance = 2
+		src.nearDistance = near or 2
 		src.farDistance = far or FAR[moment] or 24
+		src.rolloffFactor = 1
 		src.gain = gain or 1
 		src:Play(sound)
 		playing[#playing + 1] = {node = node, t = 5}
 	end
 	buildat.sub_packet("skeldat:sound", function(data)
-		local moment, x, y, z = data:match("^(%S+) (%S+) (%S+) (%S+)$")
-		x, y, z = tonumber(x), tonumber(y), tonumber(z)
+		-- [SKELDAT_SOUNDS_HEARD] "near N": a shooter's own arrow, heard
+		-- from further (near N, far 64)
+		local moment, x, y, z, near = data:match(
+				"^(%S+) (%S+) (%S+) (%S+) ?n?e?a?r? ?(%d*)$")
+		x, y, z, near = tonumber(x), tonumber(y), tonumber(z), tonumber(near)
 		if not z then
 			return
 		end
-		log:info(string.format("skeldat: sound %s at %.1f,%.1f,%.1f", moment,
-				x, y, z))
-		M.play_at(moment, x, y, z)
+		log:info(string.format("skeldat: sound %s at %.1f,%.1f,%.1f%s", moment,
+				x, y, z, near and " near " .. near or ""))
+		M.play_at(moment, x, y, z, nil, near and 64, near)
+	end)
+	-- [SKELDAT_SOUNDS_HEARD] The picker's own pickup, not placed: a plain
+	-- SoundSource at its full level, as the draw's and the splash's own
+	-- simplified: one source, a second pickup cuts the first short
+	local own = replicate.main_scene:CreateChild("sound_own")
+	local own_src = own:CreateComponent("SoundSource")
+	own_src.soundType = magic.SOUND_EFFECT
+	buildat.sub_packet("skeldat:sound_own", function(moment)
+		local sound = sounds.pick(moment)
+		if not sound then
+			return
+		end
+		log:info("skeldat: sound_own " .. moment)
+		own_src:Play(sound)
 	end)
 	-- The bodiless skeletons out to the view ([SKELDAT_FAR_SKELETONS]):
 	-- skeldat:far, "x y z yaw" a line (the yaw in sixteenths of a turn),

@@ -224,6 +224,10 @@ struct Mob
 	uint8_t mode = WANDER;
 	float mode_t = 0; // seconds left of the mode
 	float vy = 0, speed = 0, shoot_t = 2, burn_t = 0, from_x = 0, from_z = 0;
+	// [SKELDAT_SKELETON_DRAW] Its bow's draw: seconds left, -1 none; and
+	// the node's "skeldat_draw" as last set
+	float draw_t = -1;
+	int draw_sent = 0;
 	uint32_t node_id = 0; // 0 asleep
 	float light_t = 0; // to the next light step
 	// Saved: the game day of its last marker skull; the coal in the
