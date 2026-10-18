@@ -197,7 +197,8 @@ grep -aq "ann's list main has 2147483647 slots; left out" "$t/1.log" ||
 	fail "the 2^31-1 slot list was not left out ($t/1.log)"
 got=$(ls "$saves" | LC_ALL=C sort | tr '\n' ' ')
 echo "the saves: $got"
-[ "$got" = "_server lw wt wt_2 " ] || fail "the saves: $got"
+# _chat: builtin/chat's own ([VANILLA_CHAT_MIN]), beside accounts' _server
+[ "$got" = "_chat _server lw wt wt_2 " ] || fail "the saves: $got"
 [ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left: $(ls -R "$t/c/apps/vanilla/vanilla_transfer")"
 [ -n "$(find "$t" -name escape.txt)" ] && fail "the ../ entry landed"
 echo "ok: exported, imported as wt_2 alike; the bad zips refused with nothing kept; a Luanti world imported and started"
