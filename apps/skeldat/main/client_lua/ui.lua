@@ -308,18 +308,26 @@ local function click(x, y, button)
 	end
 	local p = win.el.position
 	x, y = x - p.x, y - p.y
-	-- [SKELDAT_INV_TAP_OUT] Outside the window: closed, as by its key (a
-	-- touchscreen has no other way out); a picked stack stays in its slot
-	if x < 0 or y < 0 or x >= win.el.width or y >= win.el.height then
-		close()
-		return true
-	end
 	local u = 18 * scale()
 	local hit = nil
 	for _, sl in ipairs(win.slots) do
 		if x >= sl.x and y >= sl.y and x < sl.x + u and y < sl.y + u then
 			hit = sl
 		end
+	end
+	-- [SKELDAT_INV_DESELECT] On no slot, in the window or out of it, a
+	-- picked stack is let go (it stays in its slot), and that is all
+	if not hit and win.sel then
+		win.sel = nil
+		log:info("inventory: let go")
+		draw()
+		return true
+	end
+	-- [SKELDAT_INV_TAP_OUT] Outside the window: closed, as by its key (a
+	-- touchscreen has no other way out)
+	if x < 0 or y < 0 or x >= win.el.width or y >= win.el.height then
+		close()
+		return true
 	end
 	if not hit then
 		return true
