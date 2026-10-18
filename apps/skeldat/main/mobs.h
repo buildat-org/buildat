@@ -210,9 +210,13 @@ struct Mobs
 			return;
 		Player *p = nullptr;
 		size_t peer = 0;
+		// The first placed (the lowest peer: the first to join, when two
+		// are placed by the time the world is in)
 		for(auto &pair : players)
-			if(pair.second.placed)
+			if(pair.second.placed){
 				p = &pair.second, peer = pair.first;
+				break;
+			}
 		if(!p)
 			return;
 		test_done = true;

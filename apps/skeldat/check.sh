@@ -2241,8 +2241,10 @@ echo "the world at exit: w1 resumed, the menu after its close, a deleted one's n
 # s and a day of 20 ([SKELDAT_CAVE_MUSIC_LIMIT]); the camera has the
 # sound listener the placed sounds need ([SKELDAT_LISTENER]).
 log44="$t/srv44.log"
+# At -3 -30: the own terrain level for 4 round (at 0 0 a pit the walks
+# did not leave)
 BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-3 -30" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 3 1" \
 	start_server "$log44" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -2253,8 +2255,8 @@ CHECK_PIDS+=($SERVER_PID)
 	echo "delay 4000"; echo quit; } > "$t/snd1.cmds"
 # The other steps back, out of the arrow's reach; after the pickup, a walk
 # to the side on the grass
-printf '%s\n' "$placed" "keydown S" "delay 1500" "keyup S" "delay 14000" \
-	"keydown D" "delay 2000" "keyup D" "delay 300" quit > "$t/snd2.cmds"
+printf '%s\n' "$placed" "keydown S" "delay 800" "keyup S" "delay 14700" \
+	"keydown D" "delay 800" "keyup D" "delay 1500" quit > "$t/snd2.cmds"
 client snd1 "$t/snd1.cmds"
 p1=$CLIENT
 # The first to join has the bow (the test's give)
