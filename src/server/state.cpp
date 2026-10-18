@@ -1396,6 +1396,61 @@ struct CState: public State, public interface::Server
 		ss_ held_by;  // why no more ran, the last time it held
 		sv_<std::thread> threads;
 
+		// [START_STRIPES_ETA] Each module's last good compile time on this
+		// machine, "<name> <seconds>" a line; an unknown one's estimate the
+		// known ones' mean, or 30 s. The share of the estimates done is the
+		// STATUS line's percentage, said once a second while compiling.
+		// simplified: kept by the module's name, not its hash; a module
+		// much changed is mis-estimated once
+		const ss_ times_path = g_server_config.get<ss_>("rccpp_build_path")+
+				"/compile_times.txt";
+		sm_<ss_, double> times;
+		{
+			std::ifstream f(times_path);
+			ss_ name;
+			double secs;
+			while(f>>name>>secs)
+				if(secs > 0)
+					times[name] = secs;
+		}
+		double mean = 0;
+		for(auto &pair : times)
+			mean += pair.second / times.size();
+		sm_<ss_, double> estimate;
+		double total = 0;
+		for(auto &item : todo){
+			auto it = times.find(item.first);
+			estimate[item.first] = it != times.end() ? it->second :
+					mean > 0 ? mean : 30;
+			total += estimate[item.first];
+		}
+		sm_<ss_, int64_t> started_us;
+		double done_estimates = 0;
+		int said_percent = 0;
+		int64_t said_us = 0;
+		// Under the mutex
+		auto status = [&](){
+			const int64_t now = interface::os::time_us();
+			double part = done_estimates;
+			for(auto &pair : started_us)
+				part += std::min((now - pair.second) / 1e6,
+						0.95 * estimate[pair.first]);
+			said_percent = std::max(said_percent,
+					(int)std::min(100.0, 100 * part / total));
+			said_us = now;
+			ss_ names;
+			for(const ss_ &name : running)
+				names += (names.empty() ? "" : ", ") + name;
+			log_i(MODULE, "STATUS Compiling %s (%zu of %zu, %d%%)",
+					cs(names), done + running.size(), todo.size(), said_percent);
+		};
+		auto wait_a_second = [&](std::unique_lock<std::mutex> &lock){
+			cv.wait_for(lock, std::chrono::seconds(1));
+			if(!running.empty() &&
+					interface::os::time_us() - said_us >= 1000000)
+				status();
+		};
+
 		// compile() reads the include directories; nothing changes them
 		// until every thread is joined
 		m_compiler->include_directories.push_back(m_modules_path);
@@ -1416,17 +1471,14 @@ struct CState: public State, public interface::Server
 					held_by = "memory ("+itos(avail / 1024 / 1024)+
 							" MiB available)";
 				}
-				cv.wait(lock);
+				wait_a_second(lock);
 			}
 			if(!failed.empty())
 				break;
 			running.insert(item.first);
 			most_running = std::max(most_running, running.size());
-			ss_ names;
-			for(const ss_ &name : running)
-				names += (names.empty() ? "" : ", ") + name;
-			log_i(MODULE, "STATUS Compiling %s (%zu of %zu)",
-					cs(names), done + running.size(), todo.size());
+			started_us[item.first] = interface::os::time_us();
+			status();
 			threads.emplace_back([&, item](){
 				const BuildJob &job = item.second;
 				interface::fs::create_directories(
@@ -1440,14 +1492,33 @@ struct CState: public State, public interface::Server
 				std::unique_lock<std::mutex> lock(mutex);
 				running.erase(item.first);
 				done++;
+				const double took = (interface::os::time_us() -
+						started_us[item.first]) / 1e6;
+				started_us.erase(item.first);
+				done_estimates += estimate[item.first];
+				if(ok)
+					times[item.first] = took;
 				if(!ok && failed.empty())
 					failed = item.first;
 				cv.notify_all();
 			});
 		}
+		{
+			std::unique_lock<std::mutex> lock(mutex);
+			while(!running.empty())
+				wait_a_second(lock);
+			if(failed.empty())
+				log_i(MODULE, "STATUS Compiled %zu modules (%zu of %zu, 100%%)",
+						done, done, todo.size());
+		}
 		for(std::thread &t : threads)
 			t.join();
 		m_compiler->include_directories.pop_back();
+		{
+			std::ofstream f(times_path);
+			for(auto &pair : times)
+				f<<pair.first<<" "<<pair.second<<"\n";
+		}
 
 		log_i(MODULE, "Compiled %zu of %zu modules, at most %zu at once%s",
 				done, todo.size(), most_running, held_by.empty() ? "" :

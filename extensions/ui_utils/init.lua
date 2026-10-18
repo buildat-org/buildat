@@ -2337,6 +2337,25 @@ local function load_open()
 		load_fit(s)
 		return a.kind, name
 	end
+	-- stage(text): stripe two as a line of its own, with the page glyph
+	-- ([START_STRIPES_ETA]: the launcher's start, the server's stage)
+	function api.stage(text)
+		local tex = glyph("page")
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+			s.icon.texture = tex
+		end
+		s.icon_tex = tex
+		s.name:SetText(text)
+		s.last.visible = true
+		load_fit(s)
+	end
+	-- release(): no longer taken, so the next join's lines are its own
+	-- ([START_STRIPES_ETA]: the launcher's start hands it to the join)
+	function api.release()
+		s.taken = false
+		log:info("load screen: released")
+	end
 	-- picture(data) -> w, h, or nil and why: a PNG or JPEG over the dark,
 	-- scaled to cover and centred, under the stripes. Decoded once into a
 	-- texture, no file ([LOADING_PIC_DECODE]).
@@ -2428,6 +2447,10 @@ function M.safe.join_screen(what, got, total)
 	if not load then
 		load = load_open()
 		log:info("load screen: made for the join")
+	end
+	-- One the launcher's start released ([START_STRIPES_ETA]) is the
+	-- join's from here
+	if not load.join_tick then
 		load.join_tick = magic.SubscribeToEvent("Update", function()
 			local s = load
 			if not s or s.taken then

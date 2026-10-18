@@ -157,6 +157,9 @@ end
 local function connect_or_show_error(address, fallbacks)
 	local ok, why = api.connect_start(address)
 	if not ok then
+		-- The start's stripes, handed to a join that is not coming
+		-- ([START_STRIPES_ETA])
+		pcall((ui_utils.safe or ui_utils).join_screen, "left")
 		show_error(why)
 		return
 	end
@@ -191,6 +194,7 @@ local function connect_or_show_error(address, fallbacks)
 			connect_or_show_error(fallbacks[1], rest)
 		else
 			log:info("connect_server() failed")
+			pcall((ui_utils.safe or ui_utils).join_screen, "left")
 			show_error(err)
 		end
 	end)
@@ -721,18 +725,28 @@ function M.show_connect_to_server()
 end
 
 local function show_starting(game)
-	local root, window = push_status_screen("starting_local_server",
-			"Starting "..game.."...")
-	-- What the server says it is doing, off the STATUS lines of its log
-	-- ([START_PROGRESS]): a first start compiles fourteen modules behind
-	-- this screen, and this is what makes that read as progress
-	local stage = window:CreateChild("Text")
-	stage:SetStyleAuto()
-	stage.text = ""
+	-- [START_STRIPES_ETA] The wait in the loading screen's stripes: stripe
+	-- one "Starting <game>..." and the compile's percentage, stripe two the
+	-- server's stage off its STATUS lines ([START_PROGRESS]) and its
+	-- seconds. The join takes the same screen over (release()), so there
+	-- is no frame between this and the game's own. The stack's root is
+	-- for its keys and its Update.
+	local root = uistack.main:push({desc = "starting_local_server"})
+	local screen = (ui_utils.safe or ui_utils).load_screen()
+	local title = "Starting "..game.."..."
+	screen.line(title)
+	local shown = title
+	log:info("launch_menu: start: "..title)
 
 	local t0 = api.get_time_us()
-	local last_status, last_status_at, last_poll = nil, t0, 0
+	local last_stage, last_stage_at, last_poll = nil, t0, 0
+	local percent = nil
 	local done = false
+	local function finish()
+		done = true
+		uistack.main:pop(root)
+		screen.close()
+	end
 	root:SubscribeToStackEvent("Update", function()
 		if done then
 			return
@@ -741,38 +755,48 @@ local function show_starting(game)
 		if port then
 			done = true
 			-- **This screen goes when the game comes** ([MENU_LEAVE]):
-			-- left on the stack, its window sat in the played world and
-			-- its Escape stopped the server instead of pausing
+			-- left on the stack, its root's Escape stopped the server
+			-- instead of pausing. The stripes stay for the join.
 			uistack.main:pop(root)
+			screen.release()
 			connect_or_show_error("localhost:"..port)
 			return
 		end
 		if not api.local_server_running() then
-			done = true
-			uistack.main:pop(root)
+			finish()
 			M.show_dead_server("The server exited while starting")
 			return
 		end
 		local now = api.get_time_us()
 		if now - last_poll > 250000 then
 			last_poll = now
-			if line ~= last_status then
-				last_status, last_status_at = line, now
+			-- "Compiling a, b (2 of 9, 45%)": the stage less its share
+			local p = line and line:match(", (%d+)%%%)$")
+			local stage = line and line:gsub(", %d+%%%)$", ")")
+			percent = p and tonumber(p) or percent
+			if stage ~= last_stage then
+				last_stage, last_stage_at = stage, now
 			end
+		end
+		local one = percent and title.." "..percent.."%" or title
+		if one ~= shown then
+			shown = one
+			screen.line(one)
+			log:info("launch_menu: start: "..one..(percent and " (compiling)" or ""))
 		end
 		-- The seconds since the stage began, always: a screen that sits
 		-- still while the user can only wait is the failure [FIRST_RUN]'s
 		-- run looks for
-		local secs = math.floor((now - last_status_at) / 1000000)
-		stage.text = (last_status or "Waiting for the server").."  "..secs.." s"
+		local secs = math.floor((now - last_stage_at) / 1000000)
+		screen.stage((last_stage or "Waiting for the server").."  "..secs.." s")
 		-- Not a fixed wait: a fresh compile of every module can outlast
-		-- one on a slow machine. A hang is no new status line for 120 s.
-		if now - last_status_at > 120 * 1000000 then
-			done = true
+		-- one on a slow machine. A hang is no new stage for 120 s: the
+		-- percentage moving every second is not progress by itself.
+		if now - last_stage_at > 120 * 1000000 then
 			api.stop_local_server()
-			uistack.main:pop(root)
+			finish()
 			show_error("Server did not start: no progress for 120 s"..
-					(last_status and (", last at \""..last_status.."\"") or ""))
+					(last_stage and (", last at \""..last_stage.."\"") or ""))
 		end
 	end)
 
@@ -782,9 +806,8 @@ local function show_starting(game)
 			return
 		end
 		if event_data:GetInt("Key") == KEY_ESCAPE then
-			done = true
 			api.stop_local_server()
-			uistack.main:pop(root)
+			finish()
 			-- **The launcher hears the cancel** ([RELEASE_RED] core.sh,
 			-- 2026-10-04): the room had stood down for the launch and
 			-- stayed stood down, its input with nobody, until told
