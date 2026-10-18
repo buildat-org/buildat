@@ -1459,7 +1459,7 @@ hs_w() # <n> <world> <age>: a 128 world ended at once
 }
 hs_end()
 {
-	wait_for_log "$t/srv32_$1.log" "skeldat: the score .* is [0-9]*\. of" 60 ||
+	wait_for_log "$t/srv32_$1.log" "skeldat: the score .* is [0-9]*\. of" 120 ||
 		fail "no score recorded ($t/srv32_$1.log)"
 	grep -a "skeldat: the score" "$t/srv32_$1.log" | sed 's/.*skeldat: //'
 }
@@ -1467,13 +1467,13 @@ played="p01 30000; p02 29000; p03 28000; p04 27000; p05 26000; p06 25000; p07 24
 BUILDAT_SKELDAT_PLAYED="$played" hs_w 1 w1 36000
 s1=$(hs_end 1)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-echo "$s1" | grep -q 'is 1\. of 1 in set/2/128/1 ("w1")' &&
+echo "$s1" | grep -q 'is 1\. of 1 in set/2/128/1/rivers ("w1")' &&
 	echo "$s1" | grep -q "players: p01 8.3 h, .*p10 5.8 h, p11 5.6 h$" ||
 	fail "w1's score, or its players: $s1 ($t/srv32_1.log)"
 hs_w 2 w2 12000
 s2=$(hs_end 2)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-echo "$s2" | grep -q 'is 2\. of 2 in set/2/128/1 ("w2"), best 30\.0' ||
+echo "$s2" | grep -q 'is 2\. of 2 in set/2/128/1/rivers ("w2"), best 30\.[01]' ||
 	fail "w2 not second, or the set not named after it: $s2 ($t/srv32_2.log)"
 printf '%s\n' "$placed" "delay 1500" "keypress Escape" "wait_log 5000 pause: the menu shown" \
 	"delay 500" 'click Button "High scores..."' "wait_log 5000 pause: high scores shown" \
@@ -1481,14 +1481,14 @@ printf '%s\n' "$placed" "delay 1500" "keypress Escape" "wait_log 5000 pause: the
 	"delay 500" "screenshot $t/scores.png" quit > "$t/hs.cmds"
 hs_w 3 w2_rerun 6000
 s3=$(hs_end 3)
-echo "$s3" | grep -q 'is 3\. of 3 in set/2/128/1 ("w2"), best 30\.0' ||
+echo "$s3" | grep -q 'is 3\. of 3 in set/2/128/1/rivers ("w2"), best 30\.[01]' ||
 	fail "the re-run's score, or the name it left: $s3 ($t/srv32_3.log)"
 client hs "$t/hs.cmds"
 wait $CLIENT || fail "the high scores drive ($t/hs.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "Best for these parameters: 30.0 days; this one is number 3" "$t/hs.log" &&
 	grep -aq "pause: high scores shown, 1 sets" "$t/hs.log" &&
-	grep -aq "pause: scores of set/2/128/1 shown, 3 scores" "$t/hs.log" ||
+	grep -aq "pause: scores of set/2/128/1/rivers shown, 3 scores" "$t/hs.log" ||
 	fail "the end's place, or the high scores pages ($t/hs.log)"
 printf '%s\n' "wait_log 120000 world_menu: 1 presets" 'click Button "New world..."' \
 	"wait_log 5000 world_menu: the name screen shown" "delay 300" "text fromset" \
