@@ -98,9 +98,15 @@ struct Scores
 		ss_ seed = "0";
 		store->get("seed", seed);
 		const int size = world.half * 2 * skeldat::bones::SECTION;
-		const ss_ key = "set/"+seed+"/"+itos(size)+"/"+itos(growth.speed_low);
+		// [SKELDAT_OWN_MAPGEN] The form in the key; a valleys world's keyed
+		// as before
+		ss_ form = "legacy_valleys";
+		store->get("terrain", form);
+		const ss_ key = "set/"+seed+"/"+itos(size)+"/"+itos(growth.speed_low)+
+				(form == "legacy_valleys" ? ss_() : "/"+form);
 		json::Value set = read_set(st, key);
 		set.set("seed", json::Value(seed));
+		set.set("terrain", json::Value(form));
 		set.set("size", json::Value((int64_t)size));
 		set.set("speed", json::Value((int64_t)growth.speed_low));
 		const ss_ rerun = "_rerun";
@@ -165,6 +171,10 @@ struct Scores
 			v.set("seed", json::Value(json::jstr(set, "seed")));
 			v.set("size", json::Value(json::jint(set, "size")));
 			v.set("speed", json::Value(json::jint(set, "speed")));
+			// A set from before the forms: Luanti's valleys made it
+			const ss_ terrain = json::jstr(set, "terrain");
+			v.set("terrain", json::Value(terrain.empty() ? ss_("legacy_valleys") :
+					terrain));
 			const double best = sc.at(0u).get("days").as_number();
 			v.set("best", json::Value(best));
 			sets.push_back({best, v});
@@ -186,15 +196,18 @@ struct Scores
 		for(unsigned i = 0; i < sets.size() && i < 20; i++){
 			const json::Value &v = sets.at(i);
 			char label[200];
-			snprintf(label, sizeof label, "%s: %d, %dx, seed %s, best %.1f days",
+			snprintf(label, sizeof label, "%s: %d, %dx, %s, seed %s, best %.1f days",
 					cs(json::jstr(v, "name")), (int)json::jint(v, "size"),
-					(int)json::jint(v, "speed"), cs(json::jstr(v, "seed")),
-					v.get("best").as_number());
+					(int)json::jint(v, "speed"), cs(json::jstr(v, "terrain")),
+					cs(json::jstr(v, "seed")), v.get("best").as_number());
 			world_menu::Preset p;
 			p.label = label;
 			p.options["seed"] = json::jstr(v, "seed");
 			p.options["size"] = itos(json::jint(v, "size"));
 			p.options["speed"] = itos(json::jint(v, "speed"));
+			// A valleys set's world is made on rivers now
+			if(mapgen::form_of(json::jstr(v, "terrain")) >= 0)
+				p.options["terrain"] = json::jstr(v, "terrain");
 			presets.push_back(p);
 		}
 		world_menu::access(world.server, [&](world_menu::Interface *i){

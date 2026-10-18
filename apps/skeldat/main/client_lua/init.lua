@@ -895,12 +895,17 @@ local function backdrop_noise(x, z)
 	return layer(48) * 0.7 + layer(16) * 0.3
 end
 buildat.sub_packet("skeldat:world", function(data)
-	local h, y0, y1, crest, low = data:match("^(%S+) (%S+) (%S+) (%S+) ?(%S*)$")
+	local h, y0, y1, crest, low, water, form =
+			data:match("^(%S+) (%S+) (%S+) (%S+) ?(%S*) ?(%S*) ?(%S*)$")
 	h, crest = tonumber(h), tonumber(crest)
 	if not crest or backdrop.node then
 		return
 	end
 	low = tonumber(low) or crest
+	-- [SKELDAT_OWN_MAPGEN] Water at the line where the hills are under it;
+	-- the sea's backdrop all water
+	water = tonumber(water)
+	local WATER_TILE = 100
 	game.world = {half = h, y0 = tonumber(y0), y1 = tonumber(y1)}
 	local t0 = buildat.get_time_us()
 	local C, R = 8, FAR_CLIP
@@ -926,7 +931,19 @@ buildat.sub_packet("skeldat:world", function(data)
 	local quads = {}
 	for z = -h - R, h + R - C, C do
 		for x = -h - R, h + R - C, C do
-			if x < -h or x >= h or z < -h or z >= h then
+			local outside = x < -h or x >= h or z < -h or z >= h
+			if outside and water and (form == "sea" or
+					math.min(height(x, z), height(x + C, z), height(x, z + C),
+					height(x + C, z + C)) < water + 0.5) then
+				local y = water + 0.5
+				quads[#quads + 1] = {tile = WATER_TILE,
+					p = {x - 0.5, y, z - 0.5, x + C - 0.5, y, z - 0.5,
+						x + C - 0.5, y, z + C - 0.5, x - 0.5, y, z + C - 0.5},
+					uv = {x / 4, z / 4, (x + C) / 4, z / 4, (x + C) / 4,
+						(z + C) / 4, x / 4, (z + C) / 4}}
+				sums[WATER_TILE] = {0, 1, 0}
+			end
+			if outside and form ~= "sea" then
 				local function v(px, pz)
 					return {px - 0.5, height(px, pz), pz - 0.5}
 				end
@@ -959,14 +976,19 @@ buildat.sub_packet("skeldat:world", function(data)
 	if t then
 		t.filterMode = magic.FILTER_NEAREST
 	end
+	local tw = magic.cache:GetResource("Texture2D", "main/water.png")
+	if tw then
+		tw.filterMode = magic.FILTER_NEAREST
+	end
 	local tiles = buildat.set_quad_geometry(backdrop.node, quads)
 	local cg = backdrop.node:GetComponent("CustomGeometry")
 	for i = 1, #tiles do
 		local m = magic.Material.new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
 				"luanti_client/res/LuantiUnlitMask.xml"))
-		if t then
-			m:SetTexture(magic.TU_DIFFUSE, t)
+		local tex = tiles[i] == WATER_TILE and tw or t
+		if tex then
+			m:SetTexture(magic.TU_DIFFUSE, tex)
 		end
 		cg:SetMaterial(i - 1, m)
 		local sum = sums[tiles[i]]
@@ -975,8 +997,9 @@ buildat.sub_packet("skeldat:world", function(data)
 	end
 	log:info(string.format("skeldat: the backdrop beyond the edge at %d, " ..
 			"%d quads in %d groups, %.1f ms; its rim at %.1f, the lowest " ..
-			"edge column %d", h, #quads, #tiles, (buildat.get_time_us() - t0) /
-			1000, height(-h, 0), low))
+			"edge column %d; %s, the water at %s", h, #quads, #tiles,
+			(buildat.get_time_us() - t0) / 1000, height(-h, 0), low,
+			form ~= "" and form or "-", tostring(water)))
 end)
 -- Lit as an object under the open sky, twice a second: the light with no
 -- sun, and the sun's by each group's slope to it. object_light gives the

@@ -335,8 +335,12 @@ struct Module: public interface::Module, public PlayersHost,
 			world_menu::Field speed{"speed", "Bone speed", "", "", false};
 			speed.choices = {{"1", "1x"}, {"2", "2x"}, {"5", "5x"},
 				{"10", "10x"}};
+			// [SKELDAT_OWN_MAPGEN] The form, the first the default
+			world_menu::Field terrain{"terrain", "Terrain", "", "", false};
+			terrain.choices = {{"rivers", "Rivers"}, {"plains", "Plains"},
+				{"lake", "Lake"}, {"sea", "Sea"}};
 			i->configure({"skeldat", {{"seed", "Seed", "", "empty: random"},
-					size, speed,
+					size, speed, terrain,
 					// The high score, written at the end (step_end())
 					{"ended", "The surface all bones after", "", "", true},
 					// Who played it, with their hours ([SKELDAT_HIGH_SCORES])
@@ -558,15 +562,17 @@ struct Module: public interface::Module, public PlayersHost,
 			seed = (uint32_t)std::stoul(env_seed);
 		m_store->set("seed", itos(seed));
 		// [SKELDAT_OWN_MAPGEN] The form: a world made before has none and
-		// was made by Luanti's valleys; a new one's rivers, or for a check
-		// BUILDAT_SKELDAT_TERRAIN's
-		// simplified: lake and sea are plains until their stage (4), and
-		// no menu field until stage 5
+		// was made by Luanti's valleys; a new one's the menu's pick, or for
+		// a check BUILDAT_SKELDAT_TERRAIN's, or rivers
 		if(!m_store->get("terrain", m_terrain.form)){
 			const char *env = getenv("BUILDAT_SKELDAT_TERRAIN");
+			ss_ picked;
+			m_save->store("world_menu")->get("terrain", picked);
 			m_terrain.form = !m_making ? "legacy_valleys" :
+					skeldat::mapgen::form_of(picked) >= 0 ? picked :
 					env && skeldat::mapgen::form_of(env) >= 0 ? env : "rivers";
 			m_store->set("terrain", m_terrain.form);
+			m_save->store("world_menu")->set("terrain", m_terrain.form);
 		}
 		if(m_store->get("day", v))
 			m_world.day = atof(v.c_str());
@@ -1023,13 +1029,14 @@ struct Module: public interface::Module, public PlayersHost,
 
 	// The world's size and its edge's mean crest, for the client's
 	// backdrop beyond the edge ([SKELDAT_EDGE_RIDGE]): "half y0 y1 crest
-	// low", half in voxels, low the lowest edge column's top
+	// low water form", half in voxels, low the lowest edge column's top,
+	// water the water line ([SKELDAT_OWN_MAPGEN])
 	void send_world(size_t peer)
 	{
 		std::ostringstream os;
 		os<<m_world.half * skeldat::bones::SECTION<<" "<<m_world.y0 * skeldat::bones::SECTION
 				<<" "<<(m_world.y1 + 1) * skeldat::bones::SECTION - 1<<" "<<m_edge_crest
-				<<" "<<m_edge_low;
+				<<" "<<m_edge_low<<" "<<m_terrain.water_level<<" "<<m_terrain.form;
 		network::send(m_server, peer, "skeldat:world", os.str());
 	}
 
@@ -1112,7 +1119,7 @@ struct Module: public interface::Module, public PlayersHost,
 		m_store->get("seed", seed);
 		m_server->tmp_store_data("skeldat:rerun", target+"\n"+seed+"\n"+
 				itos(m_world.half * 2 * skeldat::bones::SECTION)+"\n"+
-				itos(m_growth.speed_low));
+				itos(m_growth.speed_low)+"\n"+m_terrain.form);
 		network::access(m_server, [&](network::Interface *i){
 			for(network::PeerInfo::Id p : i->list_peers()){
 				i->send(p, "network:goodbye", "1The world is being made again "
@@ -1183,11 +1190,12 @@ struct Module: public interface::Module, public PlayersHost,
 		}
 		const ss_ data = m_server->tmp_restore_data("skeldat:rerun");
 		std::istringstream is(data);
-		ss_ name, seed, size, speed;
+		ss_ name, seed, size, speed, terrain;
 		std::getline(is, name);
 		std::getline(is, seed);
 		std::getline(is, size);
 		std::getline(is, speed);
+		std::getline(is, terrain);
 		if(name.empty()){
 			start(true);
 			return;
@@ -1204,6 +1212,9 @@ struct Module: public interface::Module, public PlayersHost,
 				menu->set("seed", seed);
 				menu->set("size", size);
 				menu->set("speed", speed);
+				// A valleys world's re-run is made on rivers
+				if(skeldat::mapgen::form_of(terrain) >= 0)
+					menu->set("terrain", terrain);
 				i->close(save);
 			}
 		});
