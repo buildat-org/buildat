@@ -1448,7 +1448,7 @@ struct Mobs
 		});
 		size_t j = 0;
 		sv_<Arrow> kept;
-		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; };
+		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; bool head; };
 		sv_<Hit> hits;
 		for(Arrow &a : arrows){
 			a.age += dt;
@@ -1482,8 +1482,20 @@ struct Mobs
 								y > my - 0.1f && y < my + MOB_HEIGHT[m.kind] + 0.1f){
 							const float v = std::sqrt(a.vx * a.vx + a.vy * a.vy +
 									a.vz * a.vz);
-							hits.push_back({kv.first, std::max(1, (int)std::lround(
-									BOW_DAMAGE * v)), a.peer, x, z});
+							// [SKELDAT_HEADSHOT] A skeleton's head, its top half
+							// voxel, the arrow's way passing within 0.3 of the
+							// middle (the head's 0.25 and the arrow's slack; the
+							// point tested is anywhere in the body's 0.5), kills
+							// it: its hp the damage
+							// simplified: a column over the body's middle, not the
+							// turned head's box
+							const float vh = std::hypot(a.vx, a.vz);
+							const float across = vh > 0 ? std::fabs((mx - x) * a.vz -
+									(mz - z) * a.vx) / vh : std::hypot(mx - x, mz - z);
+							const bool head = sk && y >= my + 1.5f && across < 0.3f;
+							hits.push_back({kv.first, head ? std::max(1, m.hp) :
+									std::max(1, (int)std::lround(BOW_DAMAGE * v)),
+									a.peer, x, z, head});
 							host.sound("arrow_hit", x, y, z, a.peer);
 							host.sound_near(a.peer, "arrow_hit", x, y, z);
 							gone = true;
@@ -1545,9 +1557,13 @@ struct Mobs
 			if(!all.count(h.key))
 				continue;
 			auto pl = players.find(h.peer);
-			log_i(MODULE, "skeldat: an arrow from %s hits the %s (%u) for %d",
-					pl != players.end() ? cs(pl->second.name) : "?",
-					MOB_KIND[all[h.key].kind], h.key, h.dmg);
+			if(h.head)
+				log_i(MODULE, "skeldat: %s's headshot kills the skeleton (%u)",
+						pl != players.end() ? cs(pl->second.name) : "?", h.key);
+			else
+				log_i(MODULE, "skeldat: an arrow from %s hits the %s (%u) for %d",
+						pl != players.end() ? cs(pl->second.name) : "?",
+						MOB_KIND[all[h.key].kind], h.key, h.dmg);
 			damage(h.key, h.dmg, h.peer, h.x, h.z);
 		}
 	}

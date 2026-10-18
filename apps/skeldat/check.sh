@@ -2310,6 +2310,28 @@ grep -aq "skeldat: bob dies at" "$log46" &&
 	grep -aq "skeldat: hp 20 " "$t/dead2.log" ||
 	fail "bob not back from the dead: $(grep -a "pause: the death\|skeldat: hp\|placed at" "$t/dead2.log" | sed 's/.*: skeldat: \|.*: pause: //' | tr '\n' ';') ($t/dead2.log, $log46)"
 echo "back dead: the death screen on the rejoin, Respawn placed bob"
+# 43. A headshot ([SKELDAT_HEADSHOT]): section 23's skeleton 6 ahead at
+# midnight, the launcher's client invulnerable; one full draw aimed 12
+# degrees up, at its head (1.5 to 2 over its feet), kills it. A body's
+# hit leaves it alive: section 23's first shot.
+log47="$t/srv47.log"
+BUILDAT_SKELDAT_WORLD=headshot BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 1 1; skeleton 0 6 marked" \
+	start_server "$log47" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv47" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log47)"
+CHECK_PIDS+=($SERVER_PID)
+{ echo "$placed"; toggle; echo "look 0 12"; echo "delay 1000"
+	shot 1200; echo "delay 1000"; echo quit; } > "$t/head.cmds"
+client head "$t/head.cmds"
+wait $CLIENT || fail "the headshot's drive ($t/head.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+[ "$(grep -ac "client1 shoots an arrow" "$log47")" = 1 ] &&
+	grep -aq "skeldat: client1's headshot kills the skeleton (1)" "$log47" &&
+	grep -aq "the skeleton (1) dies" "$log47" ||
+	fail "one arrow at the head did not kill: $(grep -a "client1 shoots\|hits the\|headshot" "$log47" | sed 's/.*skeldat: //' | tr '\n' ';') ($log47)"
+echo "a headshot: one arrow killed the skeleton"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
