@@ -496,24 +496,24 @@
 		});
 		for(size_t i = 0; i < n; i++){
 			bool ready = loaded[keys[i]];
-			if(ready && !self->m_chunks_pending.empty()){
+			if(ready && !self->m_world.m_chunks_pending.empty()){
 				using luanti_mapgen::chunk_index;
 				const int cx = chunk_index(p[i * 3]);
 				const int cy = chunk_index(p[i * 3 + 1]);
 				const int cz = chunk_index(p[i * 3 + 2]);
-				if(self->m_chunks_pending.count(chunk_key(cx, cy, cz))){
+				if(self->m_world.m_chunks_pending.count(World::chunk_key(cx, cy, cz))){
 					// Wanted now, so finished: what Luanti's emerge of a
 					// block does with its chunk
 					ready = false;
 					voxelworld::access(self->m_server, self->m_scene,
 							[&](voxelworld::Instance *world){
-						if(self->ask_chunk(world, cx, cy, cz, true))
-							self->m_chunks_to_run.push_back(
+						if(self->m_world.ask_chunk(world, cx, cy, cz, true))
+							self->m_world.m_chunks_to_run.push_back(
 									pv::Vector3DInt16(cx, cy, cz));
 					});
-					if(self->m_load_points_changed){
-						self->m_load_points_changed = false;
-						self->update_load_points();
+					if(self->m_world.m_load_points_changed){
+						self->m_world.m_load_points_changed = false;
+						self->m_world.update_load_points();
 					}
 				}
 			}
@@ -724,7 +724,7 @@
 		bool ok = false;
 		luanti_mapgen::access(self->m_server,
 				[&](luanti_mapgen::Interface *im){
-			ok = im->spawn_level(self->m_mapgen_params, x, z, level);
+			ok = im->spawn_level(self->m_world.m_mapgen_params, x, z, level);
 		});
 		if(!ok)
 			return 0;
@@ -762,7 +762,7 @@
 		if(self->m_biome_query == nullptr){
 			luanti_mapgen::access(self->m_server,
 					[&](luanti_mapgen::Interface *im){
-				self->m_biome_query = im->biome_query(self->m_mapgen_params);
+				self->m_biome_query = im->biome_query(self->m_world.m_mapgen_params);
 			});
 		}
 		if(self->m_biome_query != nullptr)

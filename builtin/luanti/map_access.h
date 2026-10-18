@@ -23,6 +23,8 @@ namespace luanti {
 
 namespace pv = PolyVox;
 
+// Floor division, because a section boundary is not at zero and C's
+// division rounds towards it
 static inline int32_t floordiv(int32_t a, int32_t b)
 {
 	return (a >= 0) ? (a / b) : -((-a + b - 1) / b);
@@ -34,6 +36,32 @@ static inline int64_t pos_key(int32_t x, int32_t y, int32_t z)
 	return ((int64_t)(x & 0x1fffff) << 42) |
 			((int64_t)(y & 0x1fffff) << 21) |
 			((int64_t)(z & 0x1fffff));
+}
+
+// The section a voxel is in, in sections of size; the origin's while the
+// size is not known
+static inline pv::Vector3DInt16 section_of(const pv::Vector3DInt32 &p,
+		const pv::Vector3DInt16 &size)
+{
+	if(size.getX() <= 0)
+		return pv::Vector3DInt16(0, 0, 0);
+	return pv::Vector3DInt16(
+			(int16_t)floordiv(p.getX(), size.getX()),
+			(int16_t)floordiv(p.getY(), size.getY()),
+			(int16_t)floordiv(p.getZ(), size.getZ()));
+}
+
+static inline uint64_t section_key(const pv::Vector3DInt16 &p)
+{
+	return (uint64_t)(uint16_t)p.getX() |
+			((uint64_t)(uint16_t)p.getY() << 16) |
+			((uint64_t)(uint16_t)p.getZ() << 32);
+}
+
+static inline pv::Vector3DInt16 section_from_key(uint64_t k)
+{
+	return pv::Vector3DInt16((int16_t)k, (int16_t)(k >> 16),
+			(int16_t)(k >> 32));
 }
 
 // Around what the engine calls for a player -- a dig, a place, a use, a

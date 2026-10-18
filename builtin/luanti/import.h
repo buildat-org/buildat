@@ -19,6 +19,7 @@
 #include "luanti/mapblock.h"
 #include "luanti/lua_util.h"
 #include "luanti/mapgen_params.h"
+#include "luanti/map_access.h"
 #include <sqlite3.h>
 #include <functional>
 extern "C" {
@@ -43,9 +44,6 @@ struct Importer
 	// The node metadata read in, written out for the sections nothing has
 	// loaded (the Module's)
 	std::function<void()> write_all_node_meta;
-	// The section a voxel is in, and its key (the Module's)
-	std::function<pv::Vector3DInt16(const pv::Vector3DInt32 &)> section_of_;
-	std::function<uint64_t(const pv::Vector3DInt16 &)> section_key_;
 	// What the importer resolved a Luanti node name to, so that a world of
 	// three hundred thousand blocks asks Lua once per name and not once per
 	// node
@@ -60,15 +58,11 @@ struct Importer
 			lua_State *&lua, interface::Mutex &lua_mutex,
 			storage::Store *&store, const pv::Vector3DInt16 &section_size,
 			const pv::Region &section_region, const bool &game_running,
-			MapgenParams &mapgen, std::function<void()> write_all_node_meta,
-			std::function<pv::Vector3DInt16(const pv::Vector3DInt32 &)>
-					section_of,
-			std::function<uint64_t(const pv::Vector3DInt16 &)> section_key):
+			MapgenParams &mapgen, std::function<void()> write_all_node_meta):
 		m_server(server), m_scene(scene), m_lua(lua), m_lua_mutex(lua_mutex),
 		m_store(store), m_section_size(section_size),
 		m_section_region(section_region), m_game_running(game_running),
-		m_mapgen(mapgen), write_all_node_meta(write_all_node_meta),
-		section_of_(section_of), section_key_(section_key)
+		m_mapgen(mapgen), write_all_node_meta(write_all_node_meta)
 	{}
 
 	void run_chunk_string(const ss_ &chunk, const ss_ &chunkname)
@@ -875,9 +869,9 @@ struct Importer
 				// generating the section and writing the blocks over it
 				// afterwards, which is the source kept open until every
 				// section it touches has been generated.
-				const pv::Vector3DInt16 sp = section_of_(
-						pv::Vector3DInt32(x0, y0, z0));
-				if(marked.insert(section_key_(sp)).second)
+				const pv::Vector3DInt16 sp = section_of(
+						pv::Vector3DInt32(x0, y0, z0), m_section_size);
+				if(marked.insert(section_key(sp)).second)
 					world->set_section_generated(sp);
 				world->set_volume(vol, true);
 				// What hangs off the nodes: a chest's contents, a sign's
