@@ -71,6 +71,25 @@ struct WorldView
 		return name == "air" ? ID_AIR : ID_IGNORE;
 	}
 
+	// [SKELDAT_MINING_HAZARDS] A second's harm by the voxels at the feet
+	// and the head: lava at either 4; a gas at the head by its share,
+	// poison ceil(4 * share / 255), volcanic one more (it burns). How it
+	// hurt in how.
+	int harm(uint32_t feet, uint32_t head, uint32_t head_param,
+			const char **how) const
+	{
+		const uint32_t lava = id_of("skeldat:lava");
+		if(feet == lava || head == lava){
+			*how = "burns in lava";
+			return 4;
+		}
+		const bool poison = head == id_of("skeldat:gas_poison");
+		if(!poison && head != id_of("skeldat:gas_volcanic"))
+			return 0;
+		*how = poison ? "breathes poison gas" : "breathes volcanic gas";
+		return (int)((4 * head_param + 254) / 255) + (poison ? 0 : 1);
+	}
+
 	const skeldat::NodeDef* node_of(uint32_t id) const
 	{
 		return id >= ID_NODE0 && id - ID_NODE0 < game.nodes.size() ?

@@ -14,7 +14,8 @@ struct MobsHost
 {
 	virtual Player* nearest(float x, float y, float z, float &d,
 			size_t *peer_out = nullptr) = 0;
-	virtual void hurt(size_t peer, Player &pl, int damage, const char *how) = 0;
+	virtual void hurt(size_t peer, Player &pl, int damage, const char *how,
+			bool drops = true) = 0;
 	virtual void send_inventory(size_t peer, const Player &pl) = 0;
 	virtual void send_position(size_t peer, Player &pl) = 0;
 	virtual void sound(const char *moment, float x, float y, float z,
@@ -707,7 +708,7 @@ struct Mobs
 		}
 		if(awake.empty())
 			return;
-		sv_<std::pair<uint32_t, int>> burnt;
+		sv_<std::pair<uint32_t, int>> burnt, harmed;
 		sv_<uint32_t> drowned, off_grass;
 		sv_<std::pair<uint32_t, Target>> shots, draws;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
@@ -865,6 +866,24 @@ struct Mobs
 				}
 				if(m.y < -1000)
 					burnt.push_back({key, 1000});
+				// [SKELDAT_MINING_HAZARDS] Lava and gas hurt a boar as a
+				// player, a second at a time
+				m.burn_t += dt;
+				if(m.burn_t >= 1){
+					m.burn_t = 0;
+					const int x = (int)std::floor(m.x + 0.5f),
+							y = (int)std::floor(m.y + 0.5f),
+							z = (int)std::floor(m.z + 0.5f);
+					const char *how = "";
+					const int harm = world.harm(world.wid(w, x, y, z),
+							world.wid(w, x, y + 1, z), world.format.param.get(
+							w->get_voxel(pv::Vector3DInt32(x, y + 1, z), true).data),
+							&how);
+					if(harm > 0){
+						log_i(MODULE, "skeldat: the boar (%u) %s", key, how);
+						harmed.push_back({key, harm});
+					}
+				}
 				// [SKELDAT_BOAR_GRASS] Its grass clock: the voxel under the
 				// feet grass sets it; a game day off grass and it dies
 				// simplified: the clock runs asleep too, read when awake
@@ -949,6 +968,9 @@ struct Mobs
 						MOB_KIND[all[b.first].kind], b.first);
 			damage(b.first, b.second, NOBODY, 0, 0);
 		}
+		for(auto &b : harmed)
+			if(all.count(b.first))
+				damage(b.first, b.second, NOBODY, 0, 0);
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
 			for(auto &kv : all){
 				Mob &m = kv.second;

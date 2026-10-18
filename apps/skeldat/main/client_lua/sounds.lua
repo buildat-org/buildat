@@ -108,6 +108,11 @@ M.TAKES = {
 	-- not in M.PEAK
 	pickup = {a = "blip1:CAANiiDJCLFAAqPb5AAAA2CpuAAf_AAcVbP__gZAASDf_gAWw5O"},
 
+	-- [SKELDAT_MINING_HAZARDS] The player hurt (gas, lava, drowning, a
+	-- hit): a short grunt
+	player_hurt = {a = layers(voiced(190, -0.12, 900, 0.16, 0.6),
+		burst(300, 1200, 0.05, 0.25))},
+
 	-- A boar hurt and dying
 	boar_hurt = {
 		a = voiced(150, -0.05, 650, 0.25, 0.6),

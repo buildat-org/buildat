@@ -527,7 +527,9 @@ struct Players: public luanti_session::Game, public MobsHost
 				cs(pl.name), speed, draw, eye.x_, eye.y_, eye.z_, off, pl.y);
 	}
 
-	void hurt(size_t peer, Player &pl, int damage, const char *how)
+	// drops: false, what the death drops is burnt (lava): gone
+	void hurt(size_t peer, Player &pl, int damage, const char *how,
+			bool drops = true)
 	{
 		if(damage <= 0 || pl.hp <= 0)
 			return;
@@ -540,15 +542,15 @@ struct Players: public luanti_session::Game, public MobsHost
 		pl.hp = std::max(0, pl.hp - damage);
 		log_i(MODULE, "skeldat: %s %s, %d hp left", cs(pl.name), how, pl.hp);
 		if(pl.hp == 0){
-			death_drops(pl);
+			death_drops(pl, !drops);
 			send_inventory(peer, pl);
 		}
 		send_stats(peer, pl);
 	}
 
 	// Half the non-empty stacks, rounded up, picked at random, dropped
-	// where the player died; nothing below the world
-	void death_drops(Player &pl)
+	// where the player died (burnt: gone); nothing below the world
+	void death_drops(Player &pl, bool burnt = false)
 	{
 		if(pl.y < world.y0 * skeldat::bones::SECTION)
 			return;
@@ -560,12 +562,14 @@ struct Players: public luanti_session::Game, public MobsHost
 		std::shuffle(full.begin(), full.end(), world.rand);
 		const size_t n = (full.size() + 1) / 2;
 		for(size_t i = 0; i < n; i++){
-			drops.drop(*full[i], pl.x + world.rnd() - 0.5f, pl.y + 0.5f,
-					pl.z + world.rnd() - 0.5f);
+			if(!burnt)
+				drops.drop(*full[i], pl.x + world.rnd() - 0.5f, pl.y + 0.5f,
+						pl.z + world.rnd() - 0.5f);
 			*full[i] = Stack();
 		}
-		log_i(MODULE, "skeldat: %s dies at %.1f,%.1f,%.1f, dropping %zu of "
-				"%zu stacks", cs(pl.name), pl.x, pl.y, pl.z, n, full.size());
+		log_i(MODULE, "skeldat: %s dies at %.1f,%.1f,%.1f, %s %zu of %zu "
+				"stacks", cs(pl.name), pl.x, pl.y, pl.z,
+				burnt ? "burning" : "dropping", n, full.size());
 	}
 
 	// What does not fit the player's inventory, dropped at its feet
@@ -987,17 +991,30 @@ struct Players: public luanti_session::Game, public MobsHost
 	}
 
 	// Drowning: a breath a second with the head in water, then a hit
-	// point; two breaths back a second out of it
+	// point; two breaths back a second out of it. And the hazards' harm
+	// ([SKELDAT_MINING_HAZARDS], world.harm())
 	void step_breath()
 	{
-		const uint32_t water = world.id_of("skeldat:water_source");
+		const uint32_t water = world.id_of("skeldat:water_source"),
+				pocket = world.id_of("skeldat:pocket_water");
 		for(auto &pair : all){
 			Player &pl = pair.second;
 			if(!pl.placed || pl.hp <= 0)
 				continue;
-			const bool under = world.id_at((int)std::floor(pl.x + 0.5f),
-					(int)std::floor(pl.y + 1.6f + 0.5f),
-					(int)std::floor(pl.z + 0.5f)) == water;
+			const int x = (int)std::floor(pl.x + 0.5f),
+					hy = (int)std::floor(pl.y + 1.6f + 0.5f),
+					z = (int)std::floor(pl.z + 0.5f);
+			const uint32_t head = world.id_at(x, hy, z);
+			const char *how = "";
+			const int harm = world.harm(world.id_at(x,
+					(int)std::floor(pl.y + 0.5f), z), head,
+					world.param_at(x, hy, z), &how);
+			if(harm > 0){
+				hurt(pair.first, pl, harm, how, ss_(how) != "burns in lava");
+				if(pl.hp <= 0)
+					continue;
+			}
+			const bool under = head == water || head == pocket;
 			const int was = pl.breath;
 			if(under && pl.breath > 0)
 				pl.breath--;

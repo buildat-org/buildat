@@ -173,7 +173,11 @@ end)
 
 buildat.sub_packet("skeldat:stats", function(data)
 	local hp, breath = data:match("^(%-?%d+) (%-?%d+)")
+	local was = game.stats.hp
 	game.stats.hp, game.stats.breath = tonumber(hp), tonumber(breath)
+	if game.stats.hp < was and game.hurt_sound then
+		game.hurt_sound()
+	end
 	log:info("skeldat: hp " .. hp .. " breath " .. breath)
 	game.changed()
 end)
@@ -583,7 +587,20 @@ game.sky_light = sky_light
 -- fog closes in with it, eased over about half a second; read four times
 -- a second, logged at each tenth.
 --
-local fog = {d = 0, want = 0, t = 0, logged = -1}
+local fog = {d = 0, want = 0, t = 0, logged = -1, g = 0}
+-- [SKELDAT_MINING_HAZARDS] The head in a gas: the fog its colour and
+-- close, eased in and out
+local GAS_FOG = {["skeldat:gas_poison"] = {0.3, 0.75, 0.25},
+	["skeldat:gas_volcanic"] = {0.9, 0.5, 0.15}}
+local function gas_here()
+	local v = voxelworld.get_static_voxel(buildat.Vector3(
+			math.floor(player.x + 0.5), math.floor(player.y + 1.6 + 0.5),
+			math.floor(player.z + 0.5)))
+	local reg = voxelworld.get_voxel_registry()
+	local def = v and reg:get_by_id(reg:id_of(v))
+	local name = def and def.name.block_name
+	return GAS_FOG[name] and name
+end
 local function danger_here()
 	local reg = voxelworld.get_voxel_registry()
 	local fx, fy, fz = math.floor(player.x + 0.5), math.floor(player.y + 0.5),
@@ -609,7 +626,13 @@ local function update_fog(dt)
 	if fog.t <= 0 then
 		fog.t = 0.25
 		fog.want = danger_here()
+		local gas = gas_here()
+		if gas ~= fog.in_gas then
+			log:info("skeldat: the head in " .. tostring(gas or "no gas"))
+		end
+		fog.in_gas, fog.gas = gas, gas or fog.gas
 	end
+	fog.g = fog.g + ((fog.in_gas and 1 or 0) - fog.g) * math.min(1, dt * 4)
 	fog.d = fog.d + (fog.want - fog.d) * math.min(1, dt * 2)
 	local tenth = math.floor(fog.d * 10 + 0.5)
 	if tenth ~= fog.logged then
@@ -620,6 +643,13 @@ local function update_fog(dt)
 	local fog_end = far - (far - 8) * fog.d
 	game.zone.fogEnd = fog_end
 	game.zone.fogStart = fog_end * (0.6 - 0.6 * fog.d)
+	if fog.g > 0.01 and fog.gas then
+		local c, k, f = GAS_FOG[fog.gas], fog.g, game.zone.fogColor
+		game.zone.fogColor = magic.Color(f.r + (c[1] - f.r) * k,
+				f.g + (c[2] - f.g) * k, f.b + (c[3] - f.b) * k)
+		game.zone.fogEnd = fog_end + (6 - fog_end) * k
+		game.zone.fogStart = game.zone.fogStart * (1 - k)
+	end
 end
 game.danger = function() return fog.d end
 
@@ -823,6 +853,16 @@ do
 		log:info("skeldat: " .. line)
 	else
 		log:error("skeldat: " .. tostring(line))
+	end
+end
+-- The player's own hurt, the stats' hp falling
+local hurt_source = scene:CreateChild("hurt"):CreateComponent("SoundSource")
+hurt_source.soundType = magic.SOUND_EFFECT
+function game.hurt_sound()
+	local s = sounds.pick("player_hurt")
+	if s then
+		hurt_source:Play(s)
+		log:info("skeldat: sound player_hurt (own)")
 	end
 end
 local mobs = load("main/mobs.lua")(game, sounds)

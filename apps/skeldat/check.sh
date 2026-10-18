@@ -1120,9 +1120,9 @@ skel=$(grep -ac "a skeleton shoots at client1" "$s1")
 	[ "$(grep -ac "skeldat: sound bow (own)" "$b1")" = "$#" ] &&
 	[ "$(grep -ac "skeldat: sound bow at" "$b1")" = "$skel" ] && [ "$skel" -ge 1 ] &&
 	grep -aq "skeldat: sound arrow_land at" "$b1" &&
-	grep -aq "skeldat: 176 sounds made" "$b1" &&
+	grep -aq "skeldat: 184 sounds made" "$b1" &&
 	grep -aq "skeldat: sounds: self-check passed, bow [0-9a-f]\{8\} " "$b1" ||
-	fail "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's, 22 sounds of 8 made ($b1)"
+	fail "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's, 23 sounds of 8 made ($b1)"
 echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(grep -a "sounds: self-check" "$b1" | head -1 | sed 's/.*skeldat: //')"
 [ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
 	fail "no stuck-arrow voxel, or not picked up after the restart: ${kept:-none} ($t/srv26_2.log)"
@@ -2428,14 +2428,16 @@ grep -aq "a cave_skeleton ($shooter) draws at client1" "$t/srv49_2.log" ||
 	fail "the saved cave skeleton not loaded or not shooting ($t/srv49_2.log)"
 echo "cave skeletons: the fight: $(grep -aE "the (cave_)?skeleton \([0-9]*\) dies" "$c1" | head -1 | sed 's/.*skeldat: //; s/ at .*//'); spawn searches $spots"
 # 46. The hazards ([SKELDAT_MINING_HAZARDS]) at noon: a 2x4x2 box of
-# full water and a 2x2x2 of poison gas by the player; the water spreads
-# and its volume (128 eighths) stays in every report; the server again on
-# the saved world reads the active set back and steps it.
+# full water 10 off the player; the water spreads and its volume (128
+# eighths) stays in every report. The player with a stack in a lava
+# pool burns 4 a second and dies, the stack burnt, not dropped, the hurt
+# sound heard; a boar in a box of poison gas breathes it. The server
+# again on the saved world reads the active set back and steps it.
 log50="$t/srv50.log"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=hazards BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
-		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "pocket poison -6 0 2 2 2; pocket water 4 0 2 4 2" || echo "place 0 0")" \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 5; pocket lava -2 -2 5 3 5; pocket poison -9 -1 3 3 3; boar -8 0; pocket water 10 0 2 4 2" || echo "place 0 0")" \
 		start_server "$t/srv50_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 		-D "$t/srv50" -C "$t/srv.cache" -l 3 ||
@@ -2457,6 +2459,12 @@ back=$(grep -a "skeldat: hazards: [0-9]* active read back" "$t/srv50_2.log" | se
 	grep -a "skeldat: hazards: .* stepped" "$t/srv50_2.log" | sed 's/.*skeldat: //' |
 		awk '$4 > 0 { s = 1 } END { exit !s }' ||
 	fail "the active set not read back (${back:-none}) or not stepped ($t/srv50_2.log)"
+grep -a "client1 burns in lava" "$h1" | head -1 | grep -q "16 hp left" &&
+	grep -aq "client1 dies at .*, burning 1 of 1 stacks" "$h1" &&
+	! grep -aq "a drop of skeldat:stone" "$h1" &&
+	grep -aq "skeldat: the boar ([0-9]*) breathes poison gas" "$h1" &&
+	grep -aq "skeldat: sound player_hurt (own)" "$t/hazards1.log" ||
+	fail "the lava's 4 a second, the stacks burnt, the boar's gas or the hurt sound ($h1, $t/hazards1.log)"
 echo "$first; ${back} active read back"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"

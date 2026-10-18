@@ -723,6 +723,23 @@ struct Module: public interface::Module, public PlayersHost,
 				id++){
 			luanti_registry::NodeDef d = m_terrain.luanti_def(id);
 			interface::VoxelDefinition v = builder.build(d, media);
+			// [SKELDAT_MINING_HAZARDS] A gas's share in four steps of its
+			// alpha, param2's top two bits: <tile>_q0..2.png, then its own
+			const skeldat::NodeDef *n = m_world.node_of(id);
+			if(n && n->shape == skeldat::GAS){
+				for(int q = 0; q < 4; q++){
+					interface::VoxelVariant var;
+					for(const auto &t : v.textures){
+						var.textures.push_back(t);
+						ss_ &r = var.textures.back().resource_name;
+						if(q < 3 && r.size() > 4)
+							r = r.substr(0, r.size() - 4)+"_q"+itos(q)+".png";
+					}
+					v.variants.push_back(var);
+				}
+				for(int p = 0; p < 256; p++)
+					v.variant_of_param[p] = (uint8_t)(p >> 6);
+			}
 			const interface::VoxelTypeId got = reg->add_voxel(v);
 			if(got != id)
 				throw Exception("skeldat: voxel "+d.name+" is id "+
