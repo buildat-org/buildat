@@ -653,8 +653,8 @@ function M.show_keys()
 			return true
 		end
 	end, {wheel = false})
-	nav:on_change(function(button, sel)
-		if sel then page.view:show(button) end
+	nav:on_change(function(button, sel, _, by_mouse)
+		if sel and not by_mouse then page.view:show(button) end
 	end)
 	log:info("launch_menu: keys, " .. #page.rows .. " rows")
 end

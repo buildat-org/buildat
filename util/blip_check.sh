@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-15)
-# covers: extensions/blip apps/blip_check
+# covers: extensions/blip apps/blip_check extensions/ui_utils/init.lua
 # [BLIP]: blip1's formats and imports in plain Lua
 # (extensions/blip/test/gen_test.lua); apps/blip_check's self-check,
 # plays, WAV header and speed runner natively and in the web client
@@ -11,7 +11,8 @@
 # saved as a WAV whose header is read back; its Import... dialog
 # ([BLIP_IMPORT_DIALOG]): a paste that does not read keeps it open with
 # the reason, Cancel changes nothing, and the user's blip.play("blip1:...")
-# pasted and imported closes it and is the designer's sound. -c runs are
+# pasted and imported closes it and is the designer's sound; a hover
+# over the sliders scrolls no view ([HOVER_NO_SCROLL]). -c runs are
 # muted.
 #   util/blip_check.sh
 set -u
@@ -72,6 +73,23 @@ PY
 [ "$(grep -ac "I blip *: designer: imported" "$t/designer.log")" = 1 ] &&
 	grep -aq "designer: the import dialog closed, imported" "$t/designer.log" ||
 	fail "the import dialog ($t/designer.log)"
+
+# [HOVER_NO_SCROLL] The sliders' view wheeled down, the mouse a pixel at a
+# time up over the sliders to Play: no hover scrolls it (each did, row by
+# row back to the top); Down from Play to the first slider, out of view,
+# still does
+{ echo "wait_log_any 30000 designer shown"; echo "delay 500"
+	echo "mouse_pos 600 330"; echo "delay 300"
+	for _ in $(seq 12); do echo "mouse_wheel -1"; echo "delay 50"; done
+	for y in $(seq 331 -1 247); do echo "mouse_pos 600 $y"; echo "delay 30"; done
+	echo "delay 300"; echo "keypress down"
+	echo "wait_log 5000 designer: the view scrolled to"; echo quit
+} > "$t/h.cmds"
+(cd "$here/Build" && timeout 120 bin/buildat -C "$t/c" -D "$t/u" -w 800x600 \
+	-l 3 -m launch_menu -a extension/blip/designer -c @"$t/h.cmds" \
+	> "$t/hover.log" 2>&1) || fail "the hover drive ($t/hover.log)"
+[ "$(grep -ac "I blip *: designer: the view scrolled to" "$t/hover.log")" = 1 ] ||
+	fail "a hover scrolled the sliders' view ($t/hover.log)"
 
 if [ ! -f "$here/web/buildat.wasm" ] ||
 		! command -v "${CHROME:-google-chrome}" > /dev/null; then

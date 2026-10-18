@@ -698,13 +698,13 @@ local function open_designer()
 	-- Its own colour copied: a property hands back a reference
 	local c = sliders[1].name.color
 	local text_color = magic.Color(c.r, c.g, c.b, c.a)
-	nav:on_change(function(_, selected, i)
+	nav:on_change(function(_, selected, i, by_mouse)
 		local sl = slider_at[i]
 		if not sl then
 			return
 		end
 		sl.name.color = selected and focus_color or text_color
-		if selected then
+		if selected and not by_mouse then
 			-- On the screen, against the panel less its clipped border
 			local panel = view.scrollPanel
 			local y = math.min(sl.row.screenPosition.y,
@@ -718,6 +718,8 @@ local function open_designer()
 			if move ~= 0 then
 				view.viewPosition = magic.IntVector2(0,
 						math.max(0, view.viewPosition.y + move))
+				log:info("designer: the view scrolled to " ..
+						view.viewPosition.y)
 			end
 		end
 	end)

@@ -234,7 +234,7 @@ local function button_menu_nav(root, options)
 		for i, item in ipairs(items) do
 			item.button.selected = (i == selected)
 			if on_change then
-				on_change(item.button, i == selected, i)
+				on_change(item.button, i == selected, i, by_mouse)
 			end
 		end
 	end
@@ -317,8 +317,9 @@ local function button_menu_nav(root, options)
 		magic.SubscribeToEvent(button, "HoverBegin",
 		function(self, event_type, event_data)
 			if not typing() and mouse_moved() then
-				select_i(i)
+				-- Before the selection: on_change is told it is a hover's
 				by_mouse = true
+				select_i(i)
 			end
 		end)
 		magic.SubscribeToEvent(button, "HoverEnd",
@@ -363,8 +364,10 @@ local function button_menu_nav(root, options)
 
 	-- What being the selected item looks like, for a menu whose buttons draw
 	-- more than their own style: an icon menu dims what is not selected. The
-	-- callback gets (button, selected, index) for every item whenever the
-	-- selection moves.
+	-- callback gets (button, selected, index, by_mouse) for every item
+	-- whenever the selection moves; by_mouse is a hover's, which scrolls no
+	-- view ([HOVER_NO_SCROLL]: a row half in view scrolled, and the next
+	-- row came under the mouse).
 	function nav:on_change(fn)
 		on_change = fn
 		apply()

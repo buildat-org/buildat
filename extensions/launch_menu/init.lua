@@ -688,13 +688,13 @@ local function home(query)
 	end)
 	on_typed(root, query, home)
 	save_menus(root, items)
-	nav:on_change(function(button, selected, index)
+	nav:on_change(function(button, selected, index, by_mouse)
 		local item = index and items[index]
 		if not (selected and item) then return end
 		local e = item.entry
 		desc.text = (e.badge and e.badge .. ": " or "") ..
 				(e.description or "")
-		view:show(button)
+		if not by_mouse then view:show(button) end
 	end)
 	log:info("launch_menu: " .. #items .. " rows" ..
 			(query ~= "" and " for \"" .. query .. "\"" or "") .. " in " ..
@@ -952,12 +952,12 @@ browse = function(kind, query, by, filter, focus_filter)
 	end)
 	on_typed(root, query, function(q) browse(kind, q, by, filter) end)
 	save_menus(root, items)
-	nav:on_change(function(button, selected, index)
+	nav:on_change(function(button, selected, index, by_mouse)
 		local item = index and items[index]
 		if not (selected and item) or item == current then return end
 		current = item
 		if not locked then fill(item.entry) end
-		view:show(button)
+		if not by_mouse then view:show(button) end
 	end)
 	if focus_filter and drop then
 		drop:SetFocus(true)
