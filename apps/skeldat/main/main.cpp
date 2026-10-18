@@ -626,6 +626,11 @@ struct Module: public interface::Module, public PlayersHost,
 			ids.ground[2] = m_world.id_of("skeldat:sand");
 			m_generator = new BonesGenerator(generator, m_world.format, m_world.bones,
 					m_terrain.mapgen.seed, ids);
+			m_generator->m_stone = m_world.id_of("skeldat:stone");
+			m_generator->m_pocket[0] = m_world.id_of("skeldat:pocket_water");
+			m_generator->m_pocket[1] = m_world.id_of("skeldat:gas_poison");
+			m_generator->m_pocket[2] = m_world.id_of("skeldat:lava");
+			m_generator->m_water_level = m_terrain.mapgen.water_level;
 			const char *fill = getenv("BUILDAT_SKELDAT_FILL");
 			m_generator->m_half_v = m_world.half * skeldat::bones::SECTION;
 			m_generator->m_fill = !fill ? 0 : ss_(fill) == "1" ? 1 :

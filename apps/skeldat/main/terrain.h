@@ -31,6 +31,11 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	// those with air over them, the surface (3)
 	int m_fill = 0;
 	PileIds m_ids;
+	// [SKELDAT_MINING_HAZARDS] The pockets: stone, the kinds (water, poison
+	// gas, lava) and the water level their depths are counted from
+	uint32_t m_stone = 0, m_pocket[3] = {};
+	int m_water_level = 1;
+	std::atomic<int> m_pockets{0};
 
 	BonesGenerator(worldgen::GeneratorInterface *inner,
 			const interface::VoxelFormat &format,
@@ -94,6 +99,91 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 					"at (%d, %d, %d)", made, lc.getX(), lc.getY(), lc.getZ());
 	}
 
+	// [SKELDAT_MINING_HAZARDS] At most one pocket a 32 cube (POCKET_CELL)
+	// of the section: a blob of 4 to 20 voxels grown in stone, kept only
+	// when every face round it is stone (sealed), made full (a liquid's
+	// volume 8, a gas's share 255). Water and poison gas from POCKET_DEPTH
+	// under the water level, lava too from POCKET_LAVA_DEPTH; a cell's
+	// chance POCKET_CHANCE at POCKET_LAVA_DEPTH, by the depth. Seeded by
+	// the cell, so a section made again is the same.
+	// simplified: the depth from the water level, not the surface over it
+	void pockets(interface::VoxelVolume &volume, const pv::Vector3DInt32 &lc,
+			const pv::Vector3DInt32 &uc)
+	{
+		const int C = POCKET_CELL;
+		for(int cz = lc.getZ(); cz + C - 1 <= uc.getZ(); cz += C)
+		for(int cy = lc.getY(); cy + C - 1 <= uc.getY(); cy += C)
+		for(int cx = lc.getX(); cx + C - 1 <= uc.getX(); cx += C)
+			pocket(volume, pv::Vector3DInt32(cx, cy, cz),
+					pv::Vector3DInt32(cx + C - 1, cy + C - 1, cz + C - 1));
+	}
+
+	void pocket(interface::VoxelVolume &volume, const pv::Vector3DInt32 &lc,
+			const pv::Vector3DInt32 &uc)
+	{
+		const int cy = (lc.getY() + uc.getY()) / 2,
+				depth = m_water_level - cy;
+		if(depth < POCKET_DEPTH || !m_stone)
+			return;
+		std::mt19937 r(m_salt ^ (uint32_t)(lc.getX() * 73856093) ^
+				(uint32_t)(lc.getY() * 19349663) ^ (uint32_t)(lc.getZ() * 83492791));
+		std::uniform_real_distribution<float> u(0, 1);
+		const float chance = std::min(0.9f,
+				POCKET_CHANCE * depth / POCKET_LAVA_DEPTH);
+		if(u(r) >= chance)
+			return;
+		const int kinds = depth >= POCKET_LAVA_DEPTH ? 3 : 2;
+		const int kind = (int)(r() % kinds);
+		auto id_at = [&](int x, int y, int z){
+			return m_format.id.get(volume.getVoxelAt(x, y, z).data);
+		};
+		auto in = [&](int x, int y, int z){
+			return x > lc.getX() && y > lc.getY() && z > lc.getZ() &&
+					x < uc.getX() && y < uc.getY() && z < uc.getZ();
+		};
+		sv_<pv::Vector3DInt32> blob;
+		std::set<std::tuple<int, int, int>> has;
+		const int x0 = lc.getX() + 2 + (int)(r() % (uc.getX() - lc.getX() - 3)),
+				y0 = lc.getY() + 2 + (int)(r() % (uc.getY() - lc.getY() - 3)),
+				z0 = lc.getZ() + 2 + (int)(r() % (uc.getZ() - lc.getZ() - 3));
+		if(!in(x0, y0, z0) || id_at(x0, y0, z0) != m_stone)
+			return;
+		blob.push_back(pv::Vector3DInt32(x0, y0, z0));
+		has.insert(std::make_tuple(x0, y0, z0));
+		static const int D[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+				{0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+		const size_t want = 4 + r() % 17;
+		for(int tries = 0; tries < 200 && blob.size() < want; tries++){
+			const pv::Vector3DInt32 b = blob[r() % blob.size()];
+			const int *d = D[r() % 6];
+			const int x = b.getX() + d[0], y = b.getY() + d[1], z = b.getZ() + d[2];
+			if(!in(x, y, z) || id_at(x, y, z) != m_stone ||
+					has.count(std::make_tuple(x, y, z)))
+				continue;
+			blob.push_back(pv::Vector3DInt32(x, y, z));
+			has.insert(std::make_tuple(x, y, z));
+		}
+		if(blob.size() < 4)
+			return;
+		for(const pv::Vector3DInt32 &b : blob)
+			for(const auto &d : D){
+				const int x = b.getX() + d[0], y = b.getY() + d[1],
+						z = b.getZ() + d[2];
+				if(!has.count(std::make_tuple(x, y, z)) && id_at(x, y, z) != m_stone)
+					return;
+			}
+		for(const pv::Vector3DInt32 &b : blob){
+			uint32_t word = volume.getVoxelAt(b).data;
+			m_format.id.set(word, m_pocket[kind]);
+			m_format.param.set(word, kind == 1 ? 255u : 7u);
+			volume.setVoxelAt(b, VoxelInstance(word));
+		}
+		m_pockets++;
+		static const char *KIND[] = {"water", "poison gas", "lava"};
+		log_i(MODULE, "skeldat: a %s pocket of %zu at %d,%d,%d", KIND[kind],
+				blob.size(), x0, y0, z0);
+	}
+
 	pv::Vector3DInt32 get_padding_voxels()
 	{
 		return m_inner->get_padding_voxels();
@@ -109,6 +199,7 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 				&uc = r.getUpperCorner();
 		const pv::Vector3DInt32 pad = m_inner->get_padding_voxels();
 		piles(volume, lc + pad, uc - pad, uc.getY());
+		pockets(volume, lc + pad, uc - pad);
 		// The highest voxel made, for the world's bounds' check
 		for(int32_t y = uc.getY() - pad.getY(); y > m_top &&
 				y >= lc.getY() + pad.getY(); y--){
@@ -197,7 +288,8 @@ struct Terrain
 			d.tiles[i] = n.tiles[i];
 		d.param_type_light = n.shape != skeldat::CUBE;
 		// Leaves let light in but not the sun, as Luanti's do
-		d.sunlight = n.shape == skeldat::NODEBOX || n.shape == skeldat::TORCH;
+		d.sunlight = n.shape == skeldat::NODEBOX || n.shape == skeldat::TORCH ||
+				n.shape == skeldat::GAS;
 		switch(n.shape){
 		case skeldat::CUBE:
 			break;
@@ -206,7 +298,7 @@ struct Terrain
 			d.alpha_clip = true;
 			break;
 		case skeldat::LIQUID:
-			d.drawtype = "liquid";
+			d.drawtype = n.flowing ? "flowingliquid" : "liquid";
 			d.liquid_group = n.name;
 			d.walkable = false;
 			d.swimmable = true;
@@ -219,6 +311,13 @@ struct Terrain
 				d.collision_box = n.boxes;
 			else
 				d.walkable = false;
+			break;
+		case skeldat::GAS:
+			// Translucent; its faces against its own kind dropped, as glass's
+			d.drawtype = "glasslike";
+			d.alpha_blend = true;
+			d.walkable = false;
+			d.pointable = 0;
 			break;
 		case skeldat::TORCH:
 			d.drawtype = "torchlike";

@@ -40,7 +40,9 @@ struct ItemDef
 	bool node = false;
 };
 
-enum Shape { CUBE, ALLFACES, LIQUID, NODEBOX, TORCH };
+// GAS: a mining hazard's gas ([SKELDAT_MINING_HAZARDS]), drawn translucent,
+// walked and seen through, its share in param2
+enum Shape { CUBE, ALLFACES, LIQUID, NODEBOX, TORCH, GAS };
 
 struct NodeDef
 {
@@ -62,6 +64,10 @@ struct NodeDef
 	bool walkable = true;
 	int light_source = 0;
 	bool falling = false;
+	// A liquid of constant volume ([SKELDAT_MINING_HAZARDS]): its volume in
+	// param2, 0..7 for 1..8 eighths, drawn at that level (Luanti's flowing
+	// liquid's); the generator's water is a still source
+	bool flowing = false;
 };
 
 struct Recipe
@@ -398,6 +404,26 @@ inline Game make_game()
 			g.items.erase(n.name);
 		} else
 			g.items[n.name].image = "main/lantern_active.png";
+	}
+	// [SKELDAT_MINING_HAZARDS] The pockets in the rock: water and lava of
+	// constant volume (param2 the volume less one), poison and volcanic
+	// gas (param2 the share, 1..255). None is an item or dug.
+	for(const char *name : {"pocket_water", "lava"}){
+		const bool lava = ss_(name) == "lava";
+		NodeDef &n = node(name, lava ? "Lava" : "Water", {lava ? "lava" : "water"},
+				{}, "-");
+		n.shape = LIQUID;
+		n.flowing = true;
+		if(lava)
+			n.light_source = 13;
+		g.items.erase(n.name);
+	}
+	for(const char *name : {"gas_poison", "gas_volcanic"}){
+		NodeDef &n = node(name, ss_(name) == "gas_poison" ? "Poison Gas" :
+				"Volcanic Gas", {name}, {}, "-");
+		n.shape = GAS;
+		n.walkable = false;
+		g.items.erase(n.name);
 	}
 	// The table and the furnace show their fronts
 	g.items["skeldat:table"].image = "main/table_front.png";

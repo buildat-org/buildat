@@ -703,7 +703,8 @@ struct Players: public luanti_session::Game, public MobsHost
 					b != world.id_of("skeldat:water_source"));
 		}
 		if(!n || !(here_id == ID_AIR || here_id == world.stuck_id || (here &&
-				here->shape == skeldat::LIQUID)) || !beside ||
+				(here->shape == skeldat::LIQUID || here->shape == skeldat::GAS))) ||
+				!beside ||
 				!reaches(pl, x, y, z))
 			return;
 		if(n->shape != skeldat::TORCH){

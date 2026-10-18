@@ -317,7 +317,7 @@ struct WorldView
 			return;
 		const skeldat::NodeDef *n = node_of(id);
 		const bool ground = !n || (n->shape != skeldat::LIQUID &&
-				n->shape != skeldat::TORCH);
+				n->shape != skeldat::TORCH && n->shape != skeldat::GAS);
 		top_y[c] = ground ? (int8_t)y : NO_GROUND;
 		top_b[c] = (uint8_t)bones;
 	}

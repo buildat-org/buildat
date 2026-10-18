@@ -313,6 +313,14 @@ static const float DROP_REACH = 3.0f;
 // A drop's dropper walked this far from it, it is anyone's
 static const float DROP_AWAY = 3.0f;
 
+// [SKELDAT_MINING_HAZARDS] The pockets in the rock (terrain.h): water and
+// poison gas from POCKET_DEPTH under the water level, lava from
+// POCKET_LAVA_DEPTH; at most one a POCKET_CELL cube, its chance
+// POCKET_CHANCE at POCKET_LAVA_DEPTH (about one in a 32 cube), more
+// deeper, at most 0.9 (the user's to tune)
+static const int POCKET_DEPTH = 8, POCKET_LAVA_DEPTH = 24, POCKET_CELL = 32;
+static const float POCKET_CHANCE = 1.0f;
+
 // Where something stands in a column (Module::ground())
 struct Ground
 {
