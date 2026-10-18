@@ -1519,7 +1519,8 @@ echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | 
 # shot by its lift; the Inventory button opens it, two taps craft and
 # move the sticks to main:10, a finger on main:11 slid onto main:10 and
 # a second finger's tap there picks up half, a tap on main:11 puts it
-# down. More's Skateboard ([SKELDAT_TOUCH_BOARD]) tapped twice turns
+# down; a tap outside the window closes it ([SKELDAT_INV_TAP_OUT], the
+# slots' taps did not). More's Skateboard ([SKELDAT_TOUCH_BOARD]) tapped twice turns
 # the board off and on. simplified: a tap on a mob, the board's brake
 # by the stick and the pause menu's buttons by tap are not driven: the
 # first is the place's own branch, the others are the keys' and the UI's.
@@ -1554,7 +1555,9 @@ CHECK_PIDS+=($SERVER_PID)
 	echo "finger_down 1 333 253"; echo "delay 200"; echo "finger_move 1 310 253"
 	echo "delay 200"; echo "finger_down 2 400 420"; echo "delay 100"
 	echo "finger_up 2"; echo "delay 200"; echo "finger_up 1"; echo "delay 500"
-	echo "tap 333 253"; echo "delay 700"; echo "keypress Escape"; echo "delay 500"
+	echo "tap 333 253"; echo "delay 700"
+	# [SKELDAT_INV_TAP_OUT] closed by a tap outside it
+	echo "tap 400 30"; echo "wait_log 3000 inventory: closed"; echo "delay 500"
 	# More, then its sixth entry (Drop, Fly, Fast, Noclip, HUD, Skateboard)
 	# twice: at this UI scale of 1.25 five fit, the sixth heads a second
 	# column to the left
@@ -1588,7 +1591,8 @@ grep -aq "client1 places skeldat:dirt" "$log34" && grep -aq "dig: done at" "$t/t
 	grep -aq "skeldat: the bow drawn" "$t/touch.log" &&
 	grep -aq "client1 shoots an arrow at" "$log34" ||
 	fail "the tap's place, the held finger's dig, or the bow ($log34, $t/touch.log)"
-grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.log" &&
+[ "$(grep -ac "skeldat *: inventory: closed" "$t/touch.log")" = 1 ] &&
+	grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.log" &&
 	grep -aq "inventory: move 2 skeldat:stick main:10 -> main:11" "$t/touch.log" ||
 	fail "the inventory by finger ($t/touch.log)"
 board=$(grep -a "touch: Skateboard\|skeldat: the skateboard " "$t/touch.log" |

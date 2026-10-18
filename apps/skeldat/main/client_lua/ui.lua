@@ -308,6 +308,12 @@ local function click(x, y, button)
 	end
 	local p = win.el.position
 	x, y = x - p.x, y - p.y
+	-- [SKELDAT_INV_TAP_OUT] Outside the window: closed, as by its key (a
+	-- touchscreen has no other way out); a picked stack stays in its slot
+	if x < 0 or y < 0 or x >= win.el.width or y >= win.el.height then
+		close()
+		return true
+	end
 	local u = 18 * scale()
 	local hit = nil
 	for _, sl in ipairs(win.slots) do
