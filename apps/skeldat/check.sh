@@ -2128,16 +2128,18 @@ echo "$river" | grep -q "^3," || fail "the bridge short of the far bank ($log41)
 # there, not taken until the player walks to it; a stone dropped by Q is
 # not taken back until the player has walked 3 off it and back
 log42="$t/srv42.log"
+# At -32 -30: the own terrain level round it, a few back (where it drops,
+# a walk back puts the player on the board) and along +z
 BUILDAT_SKELDAT_WORLD=loot BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-32 -30" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="give skeldat:stone 5 1; drop 2.5 0 skeldat:dirt 1; drop -3.5 0 skeldat:cobble 1; boar 0 4 hp 1" \
 	start_server "$log42" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv42" -C "$t/srv.cache" -l 3 || fail "the server ($log42)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "look 0 -5" "delay 1000" "screenshot $t/loot_boar.png" "mouse_down left" "delay 100" \
+printf '%s\n' "$placed" "look 0 -13" "delay 1000" "screenshot $t/loot_boar.png" "mouse_down left" "delay 100" \
 	"mouse_up left" "delay 2000" "keypress Q" "delay 2000" "keydown S" \
-	"delay 1500" "keyup S" "keydown W" "delay 3000" "keyup W" "delay 1000" \
+	"delay 800" "keyup S" "keydown W" "delay 3000" "keyup W" "delay 1000" \
 	quit > "$t/loot.cmds"
 client loot "$t/loot.cmds"
 wait $CLIENT || fail "the loot's drive ($t/loot.log)"
