@@ -1564,8 +1564,11 @@ echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | 
 # by the stick and the pause menu's buttons by tap are not driven: the
 # first is the place's own branch, the others are the keys' and the UI's.
 log34="$t/srv34.log"
+# At -32 -34: the strokes walk some 20 to +z, the own terrain level there
+# for 30 (a slope lets the board run on, and the place's ground drops
+# out of reach)
 BUILDAT_SKELDAT_WORLD=touch BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-32 -34" \
 	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3; give skeldat:dirt 10 1; give skeldat:bow 1 1; give skeldat:arrow 10 1" \
 	start_server "$log34" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
