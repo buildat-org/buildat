@@ -114,6 +114,15 @@ struct Session
 
 	void join(const ss_ &name, size_t peer, bool admin)
 	{
+		// A name back on a new peer before its old peer's leave was taken
+		// (the module busy in a long tick): that leave first, or it would
+		// come after and remove the new player by its name
+		for(auto &it : m_names){
+			if(it.second == name && it.first != peer){
+				left(it.first);
+				break;
+			}
+		}
 		m_names[peer] = name;
 		m_game.place_player(name, peer);
 		m_loading[peer] = 0;
