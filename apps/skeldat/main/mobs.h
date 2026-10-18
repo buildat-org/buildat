@@ -285,7 +285,10 @@ struct Mobs
 			it>>dx>>dz;
 			if(kind == "marker"){
 				// "marker dx dz [node [dy]]": a marker skull, or the node,
-				// on the ground there, or dy over that (-1 the ground's top)
+				// on the ground there, or dy over that (-1 the ground's top);
+				// the ground looked for from 2 over the player's feet down
+				// to 16 under them, or from the column's top over that if
+				// it is higher (markers stacked by dy 0)
 				ss_ name;
 				int dy = -1000;
 				it>>name>>dy;
@@ -293,7 +296,9 @@ struct Mobs
 				const int x = (int)std::floor(p->x + dx + 0.5f),
 						z = (int)std::floor(p->z + dz + 0.5f);
 				int y = (int)std::floor(p->y + 0.5f) + 2;
-				while(y > (int)std::floor(p->y + 0.5f) - 3 &&
+				for(int up = 0; up < 32 && world.id_at(x, y, z) != ID_AIR; up++)
+					y++;
+				while(y > (int)std::floor(p->y + 0.5f) - 16 &&
 						world.id_at(x, y - 1, z) == ID_AIR)
 					y--;
 				if(dy > -1000)

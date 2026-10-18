@@ -733,11 +733,11 @@ toggle() # the admin page's toggle, from the game
 # A guest's name goes by its connection: the rejoin, client1 again, on
 # the server started again. The water from the feet to over the head,
 # placed from the top (each one's ground found under the air), walled
-# in by stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first, also
-# from the top
+# in by stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first, 5
+# markers stacked a column
 water=""
 for d in "1 0" "-1 0" "0 1" "0 -1"; do
-	for y in 4 3 2 1 0; do water="$water marker $d skeldat:stone $y;"; done
+	for y in 0 1 2 3 4; do water="$water marker $d skeldat:stone 0;"; done
 done
 water="$water marker 0 0 skeldat:water_source 3; marker 0 0 skeldat:water_source 2; marker 0 0 skeldat:water_source 1; marker 0 0 skeldat:water_source 0"
 for n in 1 2; do
@@ -2086,16 +2086,18 @@ echo "the skateboard: off by F, kept in $(basename "$(dirname "$kept_file")")/bo
 # own (level: markers follow the ground's top; 94 long, z -30..63, so a
 # skeleton's detours do not take it round an end), the walk's
 # waypoint past it, builds a line at one height over the water; one on a
-# stone tower 8 high, its goal section off the -x side, builds down the
+# stone tower 8 high at x 18..23 (8 markers stacked a column; no tree
+# near), its goal section off
+# the -x side, builds down the
 # face, top first. Their "finds a way to" are the walk's waypoints
 log41="$t/srv41.log"
 seen=$(echo 'level 3 -30 8 94 skeldat:water_source -1; '
-for z in $(seq -45 -40); do for x in $(seq 10 15); do for y in $(seq 0 7); do
-	printf 'marker %d %d skeldat:stone %d; ' $x $z $y; done; done; done)
+for z in $(seq -45 -40); do for x in $(seq 18 23); do for y in $(seq 0 7); do
+	printf 'marker %d %d skeldat:stone 0; ' $x $z; done; done; done)
 BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
-	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 12 -42 marked goal -40 -42; place 100 0" \
+	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 20 -42 marked goal -40 -42; place 100 0" \
 	start_server "$log41" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv41" -C "$t/srv.cache" -l 3 || fail "the server ($log41)"
