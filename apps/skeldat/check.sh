@@ -2339,6 +2339,34 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	grep -aq "the skeleton (1) dies" "$log47" ||
 	fail "one arrow at the head did not kill: $(grep -a "client1 shoots\|hits the\|headshot" "$log47" | sed 's/.*skeldat: //' | tr '\n' ';') ($log47)"
 echo "a headshot: one arrow killed the skeleton"
+# 44. Boars kept to the grass ([SKELDAT_BOAR_GRASS]), a game day of 20 s:
+# a boar on a stone (the ground's top 6 east made stone) dies off the
+# grass with no drops, one on the grass 6 west lives the day; 200 boar
+# spawn searches round the player find spots, and those under a cover
+# (leaves pass sky light 15) are refused.
+log48="$t/srv48.log"
+BUILDAT_SKELDAT_WORLD=boars BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=20 \
+	BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="marker 6 0 skeldat:stone -1; boar 6 0; boar -6 0; boar_spots 200" \
+	start_server "$log48" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv48" -C "$t/srv.cache" -l 3 || fail "the server ($log48)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 28000" quit > "$t/boars.cmds"
+client boars "$t/boars.cmds"
+wait $CLIENT || fail "the boars' drive ($t/boars.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+stone=$(grep -a "test: a boar (" "$log48" | head -1 | sed 's/.*boar (\([0-9]*\)).*/\1/')
+grass=$(grep -a "test: a boar (" "$log48" | sed -n 2p | sed 's/.*boar (\([0-9]*\)).*/\1/')
+spots=$(grep -a "boar spawn searches" "$log48" | sed 's/.*searches, //')
+[ -n "$stone" ] && grep -aq "the boar ($stone) dies off the grass" "$log48" &&
+	[ -n "$grass" ] && ! grep -aq "the boar ($grass) dies" "$log48" &&
+	! grep -aq "a drop of" "$log48" ||
+	fail "the boar on stone ($stone) not dead off the grass, the one on grass ($grass) dead, or drops ($log48)"
+[ "$(echo "$spots" | awk '{ print ($1 > 0) }')" = 1 ] ||
+	fail "no boar spawn spot: $spots ($log48)"
+echo "boars: the one on stone died off the grass; spawn searches $spots"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"

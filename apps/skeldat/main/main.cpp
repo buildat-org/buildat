@@ -583,6 +583,8 @@ struct Module: public interface::Module, public PlayersHost,
 			const uint32_t k = (uint32_t)atol(key.c_str() + 4);
 			if(m_store->get(key, v) && m.load(v)){
 				m.light_t = m_world.rnd() * m_mobs.light_step;
+				if(m.grass_t < 0)
+					m.grass_t = m_world.t;
 				m_mobs.all[k] = m;
 				m_mobs.next_mob = std::max(m_mobs.next_mob, k + 1);
 			}

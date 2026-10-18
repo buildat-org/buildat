@@ -87,6 +87,20 @@ struct Mobs
 	// boar on grass under the open sky, a skeleton on a floor no light
 	// reaches -- or on any floor where the danger d is DAYLIGHT_DANGER or
 	// more
+	// [SKELDAT_BOAR_GRASS] No walkable voxel from y + 2 to the world's top:
+	// a shaft's floor in the ground, lit by its sky light 15, is not open
+	// simplified: a straight column; under an overhang open beside it is
+	// a cave
+	size_t covered = 0; // the spots it refused, for the test's count
+	bool open_sky(voxelworld::Instance *w, int x, int y, int z)
+	{
+		const int top = (world.y1 + 1) * skeldat::bones::SECTION - 1;
+		for(int yy = y + 2; yy <= top; yy++)
+			if(world.walkable(w, x, yy, z))
+				return false;
+		return true;
+	}
+
 	bool spawn_spot(voxelworld::Instance *w, uint8_t kind, const Player &p,
 			float d, float out[3])
 	{
@@ -104,6 +118,11 @@ struct Mobs
 					continue;
 				int sky, lamp;
 				world.light(w, x, y, z, sky, lamp);
+				if(kind == BOAR && below == grass && sky == 15 &&
+						!open_sky(w, x, y, z)){
+					covered++;
+					continue;
+				}
 				if(kind == BOAR ? below == grass && sky == 15 :
 						d >= DAYLIGHT_DANGER || std::max(sky, lamp) <= 3){
 					out[0] = (float)x, out[1] = y - 0.5f, out[2] = (float)z;
@@ -163,6 +182,7 @@ struct Mobs
 				m.x = s[0], m.y = s[1], m.z = s[2];
 				m.hp = MOB_HP[kind];
 				m.yaw = world.rnd() * 2 * (float)M_PI;
+				m.grass_t = world.t;
 				const uint32_t k = next_mob++;
 				all[k] = m;
 				awake++;
@@ -202,6 +222,21 @@ struct Mobs
 				host.send_position(peer, *p);
 				log_i(MODULE, "skeldat: test: %s placed at %d,%d,%d",
 						cs(p->name), x, y, z);
+				continue;
+			}
+			if(kind == "boar_spots"){
+				// [SKELDAT_BOAR_GRASS] "boar_spots n": n boar spawn searches
+				// round the player, counted
+				int n = 0, found = 0;
+				it>>n;
+				covered = 0;
+				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+					float out[3];
+					for(int i = 0; i < n; i++)
+						found += spawn_spot(w, BOAR, *p, 0, out);
+				});
+				log_i(MODULE, "skeldat: test: %d boar spawn searches, %d found, "
+						"%zu covered spots refused", n, found, covered);
 				continue;
 			}
 			if(kind == "give"){
@@ -357,6 +392,7 @@ struct Mobs
 			m.hp = MOB_HP[m.kind];
 			m.yaw = (float)M_PI;
 			m.mode_t = 30;
+			m.grass_t = world.t;
 			// "... marked": its marker skull placed today, so it places
 			// none beside itself, which would keep the sun off it.
 			// "... seed dx dz n": n night's blocks, the first at that
@@ -617,7 +653,7 @@ struct Mobs
 		if(awake.empty())
 			return;
 		sv_<std::pair<uint32_t, int>> burnt;
-		sv_<uint32_t> drowned;
+		sv_<uint32_t> drowned, off_grass;
 		sv_<std::pair<uint32_t, size_t>> shots, draws;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
@@ -739,6 +775,15 @@ struct Mobs
 				}
 				if(m.y < -1000)
 					burnt.push_back({key, 1000});
+				// [SKELDAT_BOAR_GRASS] Its grass clock: the voxel under the
+				// feet grass sets it; a game day off grass and it dies
+				// simplified: the clock runs asleep too, read when awake
+				if(world.wid(w, (int)std::floor(m.x + 0.5f),
+						(int)std::floor(m.y + 0.51f) - 1,
+						(int)std::floor(m.z + 0.5f)) == world.id_of("skeldat:grass"))
+					m.grass_t = world.t;
+				else if(world.t - m.grass_t > world.day_s)
+					off_grass.push_back(key);
 			}
 		});
 		for(uint32_t key : awake){
@@ -779,6 +824,18 @@ struct Mobs
 			Mob &m = all[key];
 			m.x = m.bx, m.y = m.by, m.z = m.bz;
 			damage(key, 1000, NOBODY, 0, 0, true);
+		}
+		// No drops, no hurt: removed with its death sound
+		for(uint32_t key : off_grass){
+			Mob &m = all[key];
+			log_i(MODULE, "skeldat: the boar (%u) dies off the grass at %.1f,%.1f,%.1f",
+					key, m.x, m.y, m.z);
+			host.sound("boar_death", m.x, m.y, m.z);
+			if(m.node_id)
+				remove_node(m.node_id);
+			if(store)
+				store->remove("mob/"+itos(key));
+			all.erase(key);
 		}
 		for(auto &b : burnt){
 			if(!all.count(b.first))
@@ -848,6 +905,7 @@ struct Mobs
 		m.hp = MOB_HP[SKELETON];
 		m.yaw = world.rnd() * 2 * (float)M_PI;
 		m.light_t = world.rnd() * light_step;
+		m.grass_t = world.t;
 		all[next_mob++] = m;
 		return true;
 	}

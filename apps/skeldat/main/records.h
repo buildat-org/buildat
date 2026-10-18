@@ -234,6 +234,10 @@ struct Mob
 	// lantern it carries, -1 none ([SKELDAT_FIGHT_BACK])
 	double marker_day = -1e9;
 	int carry_coal = -1;
+	// Saved: a boar's grass clock, the game time (world.t) it last stood
+	// on grass ([SKELDAT_BOAR_GRASS]); -1 from a line without it, the
+	// load's time put in
+	double grass_t = -1;
 	// Not saved, a light one's: the footprint picked at sunrise or sunset
 	// (-1 none), the night's bone blocks left and the column of the next
 	int goal_fp = -1, quota = 0, seed_x = 0, seed_z = 0;
@@ -257,12 +261,15 @@ struct Mob
 	ss_ save() const {
 		std::ostringstream os;
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
-				marker_day<<" "<<carry_coal;
+				marker_day<<" "<<carry_coal<<" "<<grass_t;
 		return os.str();
 	}
 	bool load(const ss_ &s){
 		int k = -1;
-		std::istringstream(s)>>k>>x>>y>>z>>yaw>>hp>>marker_day>>carry_coal;
+		std::istringstream is(s);
+		is>>k>>x>>y>>z>>yaw>>hp>>marker_day>>carry_coal;
+		if(!(is>>grass_t))
+			grass_t = -1;
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON) && hp > 0;
 	}
