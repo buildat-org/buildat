@@ -92,10 +92,15 @@ end
 --      over the onset and 0.4 s after
 --   d  the first splash (8ed80d008's figures)
 --   e  the noisy one (9bace1b16's figures)
+--   f  round 2 ([SKELDAT_SPLASH_RETAKE]): halfway between a and c, each
+--      figure at its midpoint (a's spray at 0.35, c's rumble at 1.5, the
+--      fizz 0.025, 22 bubbles of 300 Hz to 2.2 kHz rising 10 to 25%, the
+--      thump 0.15, 2 droplets). simplified: the figures' midpoint, not
+--      the sound's; the user's ear says which way to move
 -- simplified: the figures are first guesses, to tune by ear; the
 -- droplets' band stops at the filter's 4.4 kHz (a fifth of the rate)
 M.SPLASH_TAKE = "a" -- the pick, live until the user's ([USER_INPUT])
-M.SPLASH_TAKES = {"a", "b", "c", "d", "e"}
+M.SPLASH_TAKES = {"a", "b", "c", "d", "e", "f"}
 M.SPLASH_SIZE = 1
 function M.splash_ramp(speed)
 	return math.max(0.06, math.min(1.2, M.SPLASH_SIZE / math.max(speed, 0.01)))
@@ -217,6 +222,13 @@ function M.splash(synth, take, v, ramp, hard)
 		wash(3.0 * loud, nil, 300, 0.6, 0.05)
 		wash(0.05, 3000, nil, 0.3)
 		bubbles(30, 0.01, 0.04, 300, 1500, 0.1, 0.2, 0.4, 0.12)
+	elseif take == "f" then
+		wash(0.35 * loud, nil, {3000, 500, 0.45}, 0.5)
+		wash(1.5 * loud, nil, 300, 0.6, 0.05)
+		wash(0.025, 3000, nil, 0.3)
+		bubbles(22, 0.01, 0.04, 300, 2200, 0.1, 0.25, 0.3, 0.16)
+		thump(0.15 * loud)
+		droplets(2, 1500, 0.15)
 	elseif take == "d" then
 		plop(0.8 * loud)
 		wash(0.4 * loud, nil, {3000, 400, 0.4}, 0.5)
@@ -505,9 +517,10 @@ function M.self_test(synth)
 	-- ramp (25 ms at least: noise under 300 Hz swings over 10 ms more than
 	-- its rise) reaching 90% of its peak at the ramp (+-20%) at 1 and 10
 	-- voxels a second; b's and c's energy between 500 Hz and 2 kHz under
-	-- 30% of the whole; the pick's hashes at 3 a second. Every figure
-	-- first, then the failures together
-	local onsets, mids, bad = {}, {}, {}
+	-- 30% of the whole, f's between a's and c's ([SKELDAT_SPLASH_RETAKE]);
+	-- the pick's hashes at 3 a second. Every figure first, then the
+	-- failures together
+	local onsets, mids, share_of, bad = {}, {}, {}, {}
 	for _, take in ipairs(M.SPLASH_TAKES) do
 		for _, speed in ipairs({1, 10}) do
 			local ramp = M.splash_ramp(speed)
@@ -535,7 +548,7 @@ function M.self_test(synth)
 						.. "the ramp %.2f", take, at, ramp)
 			end
 		end
-		if take == "b" or take == "c" then
+		if take == "a" or take == "b" or take == "c" or take == "f" then
 			local b = M.splash(synth, take, 1, M.splash_ramp(3), false)
 			local band = synth.buffer(b:len())
 			band:mix(b, 0, 0, b:len(), 1)
@@ -547,11 +560,18 @@ function M.self_test(synth)
 			end
 			local share = energy(band) / energy(b)
 			mids[#mids + 1] = string.format("%s %.2f", take, share)
-			if share >= 0.3 then
+			share_of[take] = share
+			if (take == "b" or take == "c") and share >= 0.3 then
 				bad[#bad + 1] = string.format("take %s's mids %.2f of its "
 						.. "energy", take, share)
 			end
 		end
+	end
+	local lo = math.min(share_of.a, share_of.c)
+	local hi = math.max(share_of.a, share_of.c)
+	if share_of.f <= lo or share_of.f >= hi then
+		bad[#bad + 1] = string.format("take f's mids %.2f, not between a's "
+				.. "and c's", share_of.f)
 	end
 	assert(#bad == 0, "board sound: " .. table.concat(bad, "; ") ..
 			" (onsets " .. table.concat(onsets, ", ") .. ", mids " ..

@@ -1719,11 +1719,15 @@ function play_splash(speed, source, who)
 	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f, onset "
 			.. "%.2f s%s", who, speed, gain, ramp, hard and ", hard" or ""))
 end
--- "event skeldat_splash_takes": every take at 1, 3 and 10 a second, soft
--- and hard, into the client's exports as WAVs, for the user's ear
--- ([SKELDAT_SPLASH_TAKES]; nothing played)
-magic.SubscribeToEvent("command_seq:skeldat_splash_takes", function()
-	for _, take in ipairs(board_sound.SPLASH_TAKES) do
+-- "event skeldat_splash_takes [take ...]": those takes (every one with
+-- none) at 1, 3 and 10 a second, soft and hard, into the client's exports
+-- as WAVs, for the user's ear ([SKELDAT_SPLASH_TAKES]; nothing played)
+magic.SubscribeToEvent("command_seq:skeldat_splash_takes", function(_, d)
+	local takes = {}
+	for take in d:GetString("Param"):gmatch("%S+") do
+		takes[#takes + 1] = take
+	end
+	for _, take in ipairs(#takes > 0 and takes or board_sound.SPLASH_TAKES) do
 		for _, speed in ipairs({1, 3, 10}) do
 			for _, hard in ipairs({false, true}) do
 				local name = string.format("%s_%d_%s.wav", take, speed,
