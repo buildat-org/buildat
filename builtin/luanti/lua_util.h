@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //
 // Lua table helpers the module's parts share ([LUANTI_MODULAR]); the
-// table is on top of the stack.
+// table is on top of the stack, and a chunk run with a traceback.
 #pragma once
 #include "core/types.h"
+#include "interface/mutex.h"
 extern "C" {
 #include <lua.h>
 }
@@ -90,6 +91,40 @@ static inline void table_six_numbers(lua_State *L, const char *key, float out[6]
 		lua_pop(L, 1);
 	}
 	lua_pop(L, 1);
+}
+
+// What a traceback is added by; lua_pcall's error handler
+static inline int l_traceback(lua_State *L)
+{
+	const char *msg = lua_tostring(L, 1);
+	lua_getglobal(L, "debug");
+	lua_getfield(L, -1, "traceback");
+	lua_remove(L, -2);
+	lua_pushstring(L, msg ? msg : "(non-string error)");
+	lua_pushinteger(L, 2);
+	lua_call(L, 2, 1);
+	return 1;
+}
+
+// A chunk run in the game's Lua, with a traceback; throws on an error
+static inline void run_chunk_string(lua_State *L, interface::Mutex &mutex,
+		const ss_ &chunk, const ss_ &chunkname)
+{
+	interface::MutexScope ms(mutex);
+	int base = lua_gettop(L);
+	lua_pushcfunction(L, l_traceback);
+	if(luaL_loadbuffer(L, chunk.c_str(), chunk.size(),
+			chunkname.c_str()) != 0){
+		ss_ err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
+		lua_settop(L, base);
+		throw Exception("luanti: cannot load "+chunkname+": "+err);
+	}
+	if(lua_pcall(L, 0, 0, base + 1) != 0){
+		ss_ err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
+		lua_settop(L, base);
+		throw Exception("luanti: error in "+chunkname+":\n"+err);
+	}
+	lua_settop(L, base);
 }
 
 }

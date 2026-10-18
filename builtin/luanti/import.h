@@ -2,8 +2,79 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //
-// The Luanti world importer, included by luanti.cpp inside struct Module
-// ([SPLITS]: moved out as it was).
+// The Luanti world importer ([LUANTI_MODULAR]: a part of the Module, owning
+// the import's path and the ids it has looked up, with references to the
+// game's Lua state, the save, the world's sections and the mapgen's
+// settings; the node metadata it read is written out by the Module).
+#pragma once
+#include "core/types.h"
+#include "core/log.h"
+#include "interface/mutex.h"
+#include "interface/server.h"
+#include "interface/fs.h"
+#include "interface/voxel.h"
+#include "storage/api.h"
+#include "voxelworld/api.h"
+#include "main_context/api.h"
+#include "luanti/mapblock.h"
+#include "luanti/lua_util.h"
+#include "luanti/mapgen_params.h"
+#include <sqlite3.h>
+#include <functional>
+extern "C" {
+#include <lua.h>
+}
+
+namespace luanti {
+
+namespace pv = PolyVox;
+
+struct Importer
+{
+	interface::Server *&m_server;
+	main_context::SceneReference &m_scene;
+	lua_State *&m_lua;
+	interface::Mutex &m_lua_mutex;
+	storage::Store *&m_store;
+	const pv::Vector3DInt16 &m_section_size;
+	const pv::Region &m_section_region;
+	const bool &m_game_running;
+	MapgenParams &m_mapgen;
+	// The node metadata read in, written out for the sections nothing has
+	// loaded (the Module's)
+	std::function<void()> write_all_node_meta;
+	// The section a voxel is in, and its key (the Module's)
+	std::function<pv::Vector3DInt16(const pv::Vector3DInt32 &)> section_of_;
+	std::function<uint64_t(const pv::Vector3DInt16 &)> section_key_;
+	// What the importer resolved a Luanti node name to, so that a world of
+	// three hundred thousand blocks asks Lua once per name and not once per
+	// node
+	sm_<ss_, std::pair<uint32_t, bool>> m_import_ids;
+	// The Luanti world this one is being made out of, if any: set before
+	// run_game() and read into the world from inside it, once the game's
+	// nodes exist and before anything has asked for a section. See
+	// read_luanti_world().
+	ss_ m_import_path;
+
+	Importer(interface::Server *&server, main_context::SceneReference &scene,
+			lua_State *&lua, interface::Mutex &lua_mutex,
+			storage::Store *&store, const pv::Vector3DInt16 &section_size,
+			const pv::Region &section_region, const bool &game_running,
+			MapgenParams &mapgen, std::function<void()> write_all_node_meta,
+			std::function<pv::Vector3DInt16(const pv::Vector3DInt32 &)>
+					section_of,
+			std::function<uint64_t(const pv::Vector3DInt16 &)> section_key):
+		m_server(server), m_scene(scene), m_lua(lua), m_lua_mutex(lua_mutex),
+		m_store(store), m_section_size(section_size),
+		m_section_region(section_region), m_game_running(game_running),
+		m_mapgen(mapgen), write_all_node_meta(write_all_node_meta),
+		section_of_(section_of), section_key_(section_key)
+	{}
+
+	void run_chunk_string(const ss_ &chunk, const ss_ &chunkname)
+	{
+		luanti::run_chunk_string(m_lua, m_lua_mutex, chunk, chunkname);
+	}
 
 	// A read-only sqlite database and a statement, closed and finalized
 	// however their scope is left: an import that throws halfway through
@@ -804,9 +875,9 @@
 				// generating the section and writing the blocks over it
 				// afterwards, which is the source kept open until every
 				// section it touches has been generated.
-				const pv::Vector3DInt16 sp = section_of(
+				const pv::Vector3DInt16 sp = section_of_(
 						pv::Vector3DInt32(x0, y0, z0));
-				if(marked.insert(section_key(sp)).second)
+				if(marked.insert(section_key_(sp)).second)
 					world->set_section_generated(sp);
 				world->set_volume(vol, true);
 				// What hangs off the nodes: a chest's contents, a sign's
@@ -991,3 +1062,7 @@
 		if(!taken.empty())
 			log_i(MODULE, "The imported world is made with %s", cs(taken));
 	}
+};
+
+}
+// vim: set noet ts=4 sw=4:
