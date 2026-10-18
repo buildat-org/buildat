@@ -1133,7 +1133,8 @@ echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(gr
 # back over the first ride, which goes on straight ([SKELDAT_BOARD_KEYS];
 # W held over it, so Camera steer leaves it, [SKELDAT_CAMERA_STEER]). The server pulls
 # back none of it, and pulls back a board the drive forces to 35 on the
-# flat. client2 sees client1 on a board and lying flat, then walks into
+# flat. No steps on the board, steps again walking off it ([SKELDAT_BOARD_NO_STEPS]).
+# client2 sees client1 on a board and lying flat, then walks into
 # a ring of water 2 round the spawn and splashes ([SKELDAT_BOARD_WATER]).
 log27="$t/srv27.log"
 ring=$(for x in -2 -1 0 1 2; do for z in -2 -1 0 1 2; do
@@ -1163,6 +1164,10 @@ keydown S
 wait_log 10000 skeldat: walking
 keyup S
 delay 1500
+keydown A
+delay 1000
+keyup A
+delay 500
 event skeldat_board 35
 delay 3000
 quit
@@ -1197,6 +1202,13 @@ awk -v top="${top:-0}" -v flew="${flew:-0}" -v wall="${wall:-0}" -v v="${brake% 
 		flew >= 0.5 && wall > 20 && wall < 29.5 && v > 10 && s - b >= 0 &&
 		s - b <= v * v / 48 + 1.5) }' ||
 	fail "the board's run: top $top, flew $flew, the wall at $wall, braked from $brake to $stop ($c1)"
+# [SKELDAT_BOARD_NO_STEPS] steps between "on the board" and "walking at": none;
+# after the brake's stop, the walk to the side steps
+steps=$(awk '/skeldat: on the board/ { on = 1 } /skeldat: walking at/ { on = 0; w++ }
+	/skeldat: step / { if (on) b++; else if (w == 2) a++ }
+	END { print b + 0, a + 0 }' "$c1")
+[ "${steps% *}" = 0 ] && [ "${steps#* }" -ge 1 ] ||
+	fail "steps on the board ${steps% *}, after it ${steps#* } ($c1)"
 cheat=$(grep -a "the board forced to" "$c1" | head -1 | awk '{print $3}')
 first_pull=$(grep -a "pulled back" "$log27" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] && [ -n "$first_pull" ] && [[ ! "$first_pull" < "$cheat" ]] &&

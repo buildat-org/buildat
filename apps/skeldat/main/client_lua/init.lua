@@ -1637,11 +1637,14 @@ local function update_touch()
 end
 
 --
--- The steps: one each 1.6 voxels walked on the ground
+-- The steps: one each 1.6 voxels walked on the ground, none on the
+-- board, whose distance is not counted ([SKELDAT_BOARD_NO_STEPS])
 --
 local step = {d = 0, x = nil, z = nil}
 local function update_steps()
-	if step.x and player.on_ground then
+	if player.board then
+		step.d = 0
+	elseif step.x and player.on_ground then
 		step.d = step.d + math.sqrt((player.x - step.x) ^ 2 +
 				(player.z - step.z) ^ 2)
 		if step.d >= 1.6 then
@@ -1649,6 +1652,7 @@ local function update_steps()
 			local p = buildat.Vector3(math.floor(player.x + 0.5),
 					math.floor(player.y - 0.4), math.floor(player.z + 0.5))
 			local def = voxel_def(voxelworld.get_static_voxel(p))
+			log:info("skeldat: step " .. tostring(def and def.name.block_name))
 			node_sound("step", def and def.name.block_name, p, 0.5)
 		end
 	end
