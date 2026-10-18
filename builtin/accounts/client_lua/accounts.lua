@@ -795,6 +795,18 @@ buildat.sub_packet("accounts:login_result", function(data)
 	M.close()
 	magic.ui:SetFocusElement(nil)
 	log:info("Joined as " .. tostring(M.name))
+	-- [ACCOUNT_WHO] How, as sent. simplified: a TOTP wait's resend
+	-- reads as the kept login
+	local l = last_login or {}
+	M.login_how = M.hello["local"] == 1 and "local" or
+			(l[6] or "") ~= "" and "Starport ID" or
+			(l[4] or "") ~= "" and "kept login" or
+			(l[3] or "") ~= "" and "password and setup code" or "password"
+	log:info("accounts: logged in as " .. tostring(M.name) .. " by " ..
+			M.login_how)
+	-- For the game's own instances of this file (who())
+	buildat.storage_write("name", M.name or "")
+	buildat.storage_write("login_how", M.login_how)
 	-- A login that was not an ID's: the next join asks, not the ID
 	-- ([ID_AUTO_JOIN])
 	if last_login and (last_login[6] or "") == "" then
@@ -953,14 +965,32 @@ end
 function M.logout()
 	forget_id_here()
 	local token = buildat.storage_read("token") or ""
-	if token ~= "" then
-		buildat.send_packet("accounts:logout",
-				cereal.binary_output({text = token}, TEXT))
-	end
 	buildat.storage_write("token", "")
 	buildat.storage_write("keep", "0")
-	buildat.leave()
+	if token == "" then
+		return buildat.leave()
+	end
+	-- [ACCOUNT_WHO] The leave on the server's answer (the token ended
+	-- there), or a second on: a disconnect at once could drop the packet
+	-- and leave the token valid for the next join
+	buildat.send_packet("accounts:logout",
+			cereal.binary_output({text = token}, TEXT))
+	local t0 = buildat.get_time_us()
+	M.logging_out = magic.SubscribeToEvent("Update", function()
+		if buildat.get_time_us() - t0 > 1000000 then
+			log:info("accounts: logout not answered in 1 s")
+			buildat.leave()
+		end
+	end)
 end
+buildat.sub_packet("accounts:logged_out", function()
+	if M.logging_out then
+		magic.UnsubscribeFromEvent("Update", M.logging_out)
+		M.logging_out = nil
+		log:info("accounts: logged out")
+		buildat.leave()
+	end
+end)
 
 -- [STARPORT_CLOSE] An app's own way out: "Exit to launcher?", Exit
 -- logging out. Only where leave() goes to a launcher (can_exit): on the
@@ -1237,6 +1267,19 @@ end
 -- [ESC_ACCOUNT]: My account, in the Server window, as the top right
 -- Account button opens it; `back` is what its Back draws again (nothing:
 -- it closes)
+-- [ACCOUNT_WHO] The account in and how, or nil: this instance's login,
+-- or (a game's instance that did not log in, logged_in set) the join's
+function M.who()
+	if M.name and M.name ~= "" then
+		return M.name, M.login_how
+	end
+	if not M.logged_in then
+		return nil
+	end
+	local name = buildat.storage_read("name") or ""
+	local how = buildat.storage_read("login_how") or ""
+	return name ~= "" and name or nil, how ~= "" and how or nil
+end
 M.show_account = function(back)
 	M.server_window("account", back or function() end)
 end
@@ -1488,8 +1531,12 @@ end)
 -- local game's).
 account_page = function(back, message)
 	local w = open_page("account", "My account", back)
-	if M.name and M.name ~= "" then
-		page_text(w, "Logged in as " .. M.name, DIM)
+	-- [ACCOUNT_WHO] How, and the role
+	local name, how = M.who()
+	if name then
+		page_text(w, "Logged in as " .. name .. (how and " (" .. how .. ")"
+				or "") .. (M.users and M.users.level and ", " ..
+				M.level_name(M.users.level) or ""), DIM)
 	end
 	if message then
 		page_text(w, message, WARN)

@@ -19,8 +19,11 @@
 #      and an invite code that does not exist;
 #   5. the same server without a token takes the loopback client as local
 #      (no password, no code): the contrast that gives 3 its teeth;
-#   6. a kept login logs in by its token, and an admin's password reset
-#      ends it ("The saved login has ended");
+#   6. a kept login logs in by its token, said so ("by kept login", the
+#      client's and the server's), and an admin's password reset ends it
+#      ("The saved login has ended"); [ACCOUNT_WHO] Log out ends it too:
+#      its token, sent again by a copy of the client's storage, is
+#      refused;
 #   7. with TOTP on (the secret put in the store), a wrong code is refused
 #      and counted, and the right one joins.
 # That a correct password is refused while the wait is non-zero (on_login
@@ -168,8 +171,30 @@ rejoin(){
 		-l 3 -o sound_mute=1 -c @"$t/seq" > "$t/$1.re.log" 2>&1
 	nolog "$t/$1.re.log"
 }
+cp -r "$t/k1" "$t/k1out"; cp -r "$t/k1" "$t/k1old"
 c=$(rejoin k1)
 echo "$c" | grep -qF "Joined as erin" || fail "the kept login did not log in
+$(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+echo "$c" | grep -qF "accounts: logged in as erin by kept login" &&
+	nolog "$srv_log" | grep -q "erin joined from .* by kept login" ||
+	fail "the kept login's way not said
+$(echo "$c" | grep -iE 'logged in|joined' | tail -3)"
+# erin is the admin: the Server window opens at the ntfy question; its
+# Account page has Log out
+printf '%s\n' "wait_log_any 15000 Joined as" \
+	"wait_log_any 10000 server window: the page ntfy" "delay 500" \
+	'click Button "Account"' "wait_log 5000 server window: the page account" \
+	"delay 500" 'click Button "Log out"' "wait_log_any 5000 accounts: logged out" \
+	quit > "$t/seq"
+timeout 30 bin/buildat -o launch_ui=launch_menu -s "127.0.0.1:$port" -D "$t/k1out" \
+	-w 640x480 -u 1 -l 3 -o sound_mute=1 -c @"$t/seq" > "$t/k1out.log" 2>&1
+# Log out leaves the game, so the client's status is not the drive's
+grep -aq "accounts: logged out" "$t/k1out.log" || fail "Log out not answered
+$(grep -aiE 'logged|log out|server window' "$t/k1out.log" | tail -5)"
+nolog "$srv_log" | grep -q "erin logged out" || fail "the server did not end the token"
+c=$(rejoin k1old "Login refused")
+echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
+	fail "a kept login outlived Log out
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 "" \
 	"admin script: done")
@@ -216,4 +241,4 @@ c=$(BUILDAT_JOIN_TOTP=$(totp 0) join o2 erin otherpass123 0 "")
 echo "$c" | grep -qF "Joined as erin" || fail "the right TOTP code did not join
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
 
-echo "PASS: wrong passwords counted and locked; the owner token gates is_local; wrong setup and invite codes refused and counted; a kept login ends with the password; a wrong TOTP code refused and counted"
+echo "PASS: wrong passwords counted and locked; the owner token gates is_local; wrong setup and invite codes refused and counted; a kept login said so and ended by the password and by Log out; a wrong TOTP code refused and counted"

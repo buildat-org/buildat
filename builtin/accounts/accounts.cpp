@@ -777,7 +777,8 @@ struct Module: public interface::Module, public Interface
 			for(const char *name : {"accounts:hello", "accounts:login_result",
 					"accounts:users", "accounts:admin_result",
 					"accounts:passwd_result", "accounts:totp_result",
-					"accounts:link_result", "accounts:stats"})
+					"accounts:link_result", "accounts:stats",
+					"accounts:logged_out"})
 				inetwork->declare(name,
 						network::Interface::Channel::LatestOnly);
 		});
@@ -2100,7 +2101,12 @@ struct Module: public interface::Module, public Interface
 					interface::sha256::calculate(token)), pack(kept));
 			log_i(MODULE, "%s is kept logged in", cs(name));
 		}
-		log_i(MODULE, "%s joined from %s", cs(name), cs(peer.address));
+		// [ACCOUNT_WHO] And how
+		const char *how = local ? "local" : !id.sub.empty() ? "Starport ID" :
+				by_password ? (code.empty() ? "password" :
+				"password and setup code") : "kept login";
+		log_i(MODULE, "%s joined from %s by %s", cs(name), cs(peer.address),
+				how);
 		peer.name = name;
 		stats_joined(peer);
 		reply("");
@@ -2447,6 +2453,9 @@ struct Module: public interface::Module, public Interface
 			m_store->remove(key);
 			log_i(MODULE, "%s logged out", cs(kept.name));
 		}
+		// [ACCOUNT_WHO] The client leaves on this, so the token is gone by
+		// then
+		send(packet.sender, "accounts:logged_out", "");
 	}
 
 	// **Linking a Starport ID to one's own account** (10g): its logins land
