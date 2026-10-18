@@ -1053,8 +1053,8 @@ grep -aq "client1 picks up an arrow" "$s1" || fail "the arrow at the feet not pi
 # sends it to the others only); each shot chops: the player's on its own
 # client at the release, not from the server ([SKELDAT_BOW_SOUND_TUNE]),
 # the skeleton's from the server; an arrow sticking lands. The sounds'
-# self-check: the release and the arrow's 4x louder, the draw's mids
-# halved
+# self-check: the arrow's 4x louder, the draw's mids halved, the release
+# the user's blip ([SKELDAT_BOW_RELEASE_PICK]) hashed
 b1="$t/bow1.log"
 skel=$(grep -ac "a skeleton shoots at client1" "$s1")
 [ "$(grep -ac "skeldat: sound bow_draw (own)" "$b1")" = "$draws" ] &&
@@ -1063,7 +1063,7 @@ skel=$(grep -ac "a skeleton shoots at client1" "$s1")
 	[ "$(grep -ac "skeldat: sound bow at" "$b1")" = "$skel" ] && [ "$skel" -ge 1 ] &&
 	grep -aq "skeldat: sound arrow_land at" "$b1" &&
 	grep -aq "skeldat: 168 sounds made" "$b1" &&
-	grep -aq "skeldat: sounds: self-check passed" "$b1" ||
+	grep -aq "skeldat: sounds: self-check passed, bow [0-9a-f]\{8\} " "$b1" ||
 	fail "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's, 21 sounds of 8 made ($b1)"
 echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(grep -a "sounds: self-check" "$b1" | head -1 | sed 's/.*skeldat: //')"
 [ -n "$kept" ] && grep -aq "client1 picks up an arrow at ${kept% *}.0,[-0-9.]*,${kept#* }.0" "$t/srv26_2.log" ||
