@@ -128,7 +128,7 @@ server() # <log> [args]: the world "w" at seed 2, noon, 256 x 64 x 256
 }
 client() # <name> <cmds>, in the background: its PID in $CLIENT
 {
-	timeout 480 "$b" -C "$t/c_$1" -D "$t/u_$1" -w 800x500 -l 3 \
+	timeout 480 "$b" -C "$t/c_$1" -D "$t/u_$1" -w "${CLIENT_SIZE:-800x500}" -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$2" \
 		> "$t/$1.log" 2>&1 &
 	CLIENT=$!
@@ -1516,6 +1516,15 @@ CHECK_PIDS+=($SERVER_PID)
 } > "$t/touch.cmds"
 BUILDAT_TOUCH=1 client touch "$t/touch.cmds"
 wait $CLIENT || fail "the touch drive ($t/touch.log)"
+# [SKELDAT_HUD_PORTRAIT] Upright, 400 x 900: the HUD's scale is 2 (the
+# windows' 1), the hotbar 364 wide from x 18, and a tap on slot 9 (x 360)
+# selects it
+printf '%s\n' "$placed" "delay 1500" "tap 360 876" "delay 500" \
+	"screenshot $t/portrait.png" quit > "$t/portrait.cmds"
+CLIENT_SIZE=400x900 BUILDAT_TOUCH=1 client portrait "$t/portrait.cmds"
+wait $CLIENT || fail "the upright drive ($t/portrait.log)"
+grep -aq "touch: hotbar slot 9" "$t/portrait.log" ||
+	fail "slot 9 of the upright hotbar not tapped ($t/portrait.log, $t/portrait.png)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 strokes=$(grep -a "skeldat: the stick pushed" "$t/touch.log" | sed 's/.*pushed \([0-9.]*\) moved \([0-9.]*\)/\1 \2/' | tr '\n' ' ')
 turned=$(grep -a "skeldat: touch turned" "$t/touch.log" | head -1 | sed 's/.*turned \([-0-9.]*\) .*/\1/')

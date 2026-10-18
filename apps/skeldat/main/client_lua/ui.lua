@@ -62,12 +62,32 @@ local function text(parent, s, x, y, size)
 	return t
 end
 
+-- The windows' scale: a window's 320 with room about it, or the height's
+local function scale_of(w, h)
+	return math.max(1, math.floor(math.min(w / 320, h / 220)))
+end
+-- [SKELDAT_HUD_PORTRAIT] The HUD's own: the hotbar's 182 and 4 each side,
+-- so an upright phone's is the width's; whole numbers, the pictures being
+-- pixel art. simplified: the height's 220 stays, a very short and wide
+-- window is as before
+local function hud_scale_of(w, h)
+	return math.max(1, math.floor(math.min(w / 190, h / 220)))
+end
+assert(hud_scale_of(1080, 2400) == 5 and scale_of(1080, 2400) == 3)
+assert(hud_scale_of(1920, 1080) == 4 and scale_of(1920, 1080) == 4)
+assert(hud_scale_of(320, 240) == 1 and scale_of(320, 240) == 1)
 local function scale()
 	local r = magic.ui.root
-	return math.max(1, math.floor(math.min(r.width / 320, r.height / 220)))
+	return scale_of(r.width, r.height)
 end
--- The outline's width goes by it too (init.lua)
+local function hud_scale()
+	local r = magic.ui.root
+	return hud_scale_of(r.width, r.height)
+end
+-- The outline's width goes by it too (init.lua); the touch hotbar's taps
+-- by the HUD's
 game.ui_scale = scale
+game.hud_scale = hud_scale
 
 -- An item in a 16-pixel square at x, y, its count at the corner
 local function draw_stack(parent, str, x, y, s)
@@ -98,7 +118,7 @@ local hud_drawn = nil
 -- Where the HUD's skateboard icon is: its top left, in UI pixels, and
 -- its size; and whether a point is on it (a tap, [SKELDAT_TOUCH])
 function M.board_icon_rect()
-	local r, s = magic.ui.root, scale()
+	local r, s = magic.ui.root, hud_scale()
 	local x0 = math.floor((r.width - 182 * s) / 2)
 	local y0 = r.height - 23 * s
 	return x0 + 83 * s, y0 - 2 * s - 16 * s, 16 * s
@@ -131,7 +151,7 @@ function M.draw_hud()
 	if not shown then
 		return
 	end
-	local s = scale()
+	local s = hud_scale()
 	if game.ended then
 		-- Wrapped to the screen, each line centred
 		local t = text(hud, game.ended, 0, 8 * s, 8 * s)

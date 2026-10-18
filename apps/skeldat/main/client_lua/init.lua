@@ -1547,10 +1547,10 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		end,
 		inventory = function() ui.open("inventory") end,
 		chat = function() game.chat() end,
-		-- ui.lua's hotbar: 9 slots of 20 at its scale, a pixel off the
-		-- bottom
+		-- ui.lua's hotbar: 9 slots of 20 at the HUD's scale, a pixel off
+		-- the bottom
 		hotbar = function()
-			local sc = game.ui_scale()
+			local sc = game.hud_scale()
 			return 9, 20 * sc, sc
 		end,
 		-- The HUD's skateboard icon, a tap target too
