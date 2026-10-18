@@ -1663,6 +1663,11 @@ struct Module: public interface::Module, public PlayersHost,
 			for(int i = 0; i < 9; i++)
 				m_hz_ids[i] = m_world.id_of(names[i]);
 		}
+		// For a check of what stands in water, not of its flow: the step
+		// off (the settling of a new world still runs)
+		static const bool still = getenv("BUILDAT_SKELDAT_STILL_WATER");
+		if(still)
+			return;
 		// Four times a second: a gas's cells come due at their own
 		// offsets, and each access's commit writes out every chunk touched
 		if(m_world.t < m_hz_next_t || (m_hz_pending.empty() &&

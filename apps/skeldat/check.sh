@@ -1009,10 +1009,11 @@ grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
 # 21. Water ([SKELDAT_SKELETON_WATER]): at midnight a skeleton put in a
 # pool dies at once, its drops on the ground; one 12 off across a pond's
 # row 10 off, wanting a bow's distance (9), is held by the water, not in it
+# (the water still: BUILDAT_SKELDAT_STILL_WATER, the liquid step off)
 log24="$t/srv24.log"
 pond=$(for x in -4 -3 -2 -1 0 1 2 3 4; do printf 'marker %d 10 skeldat:water_source; ' $x; done)
 BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
+	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_STILL_WATER=1 \
 	BUILDAT_SKELDAT_TEST="${pond}marker 0 -6 skeldat:water_source; skeleton 0 12 marked; skeleton 0 -6 marked" \
 	start_server "$log24" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -1035,16 +1036,16 @@ grep -aq "a skeleton shoots at client1" "$log24" &&
 # night's block is across a pond 6 wide build one bridge of 6 blocks and
 # then walk across; one lured to a lantern on a platform 5 up builds a
 # stair and takes it; one whose block is behind a wall it can walk round
-# builds nothing
+# builds nothing (at x 10, the own terrain's trees clear of it)
 log25="$t/srv25.log"
 ways=$(for z in $(seq -7 7); do for x in 3 4 5 6 7 8; do
 	printf 'marker %d %d skeldat:water_source -1; ' $x $z; done; done
 for z in -1 0 1; do for x in -9 -8 -7; do printf 'marker %d %d skeldat:stone 4; ' $x $z; done; done
-for x in -3 -2 -1 0 1 2 3; do for y in 0 1 2; do printf 'marker %d -14 skeldat:stone %d; ' $x $y; done; done)
-BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+for x in 7 8 9 10 11 12 13; do for y in 0 1 2; do printf 'marker %d -14 skeldat:stone %d; ' $x $y; done; done)
+BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
-	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 0 -11 marked seed 0 -17 1; place 100 0" \
+	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 10 -11 marked seed 10 -17 1; place 100 0" \
 	start_server "$log25" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv25" -C "$t/srv.cache" -l 3 || fail "the server ($log25)"
@@ -1189,7 +1190,7 @@ EOF
 printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
 	"delay 500" "keydown W" "wait_log 5000 skeldat: a splash at" "keyup W" \
 	"delay 500" quit > "$t/board2.cmds"
-BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
+BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="${ring}course -40 -20" \
 	start_server "$log27" "STATUS Listening" 300 auto \
@@ -2084,7 +2085,7 @@ log41="$t/srv41.log"
 seen=$(echo 'level 3 -30 8 94 skeldat:water_source -1; '
 for z in $(seq -45 -40); do for x in $(seq 10 15); do for y in $(seq 0 7); do
 	printf 'marker %d %d skeldat:stone %d; ' $x $z $y; done; done; done)
-BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
 	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 12 -42 marked goal -40 -42; place 100 0" \
