@@ -1400,6 +1400,8 @@
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")
 			lua_pushinteger(L, o.server_log_level);
+		else if(name.compare(0, 4, "fov.") == 0 && o.fov.count(name.substr(4)))
+			lua_pushinteger(L, o.fov.at(name.substr(4)));
 		else
 			lua_pushnil(L);
 		return 1;
@@ -1712,14 +1714,23 @@
 #endif
 	}
 
-	// list_preferences() -> {name, ...}
+	// list_preferences() -> {name, ...}: the fixed ones, then each
+	// fov.<app> that is set
 	static int l_list_preferences(lua_State *L)
 	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
 		const char **names = preference_names();
 		lua_newtable(L);
-		for(int i = 0; names[i]; i++){
+		int i = 0;
+		for(; names[i]; i++){
 			lua_pushstring(L, names[i]);
 			lua_rawseti(L, -2, i + 1);
+		}
+		for(auto &kv : self->m_options.fov){
+			lua_pushstring(L, ("fov."+kv.first).c_str());
+			lua_rawseti(L, -2, ++i);
 		}
 		return 1;
 	}

@@ -320,6 +320,17 @@ function M.show_pause(o)
 		o.view:set_far_clip(v)
 		log:info("view range " .. v .. ", saved")
 	end)
+	-- [FOV_SETTING] The user's, vanilla's too (its game settings window)
+	local fov = buildat.get_preference("fov.luanti") or 72
+	local fovs = {}
+	for _, v in ipairs({60, 66, 72, 80, 90, 100, 110, 120}) do
+		fovs[#fovs + 1] = {v .. " degrees", v}
+	end
+	menu:add_dropdown("Field of view", fovs, fov, function(v)
+		buildat.set_preference("fov.luanti", v)
+		o.view.set_base_fov(v)
+		log:info("field of view " .. v)
+	end)
 	M.add_sensitivity(menu, s)
 	menu:add("Settings...", function()
 		close()

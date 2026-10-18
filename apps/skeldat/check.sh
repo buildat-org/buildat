@@ -248,6 +248,8 @@ surveyed()
 }
 surveyed "$s" 0
 grep -aq "client1 is a player" "$s" || fail "client1 was not a player ($s)"
+# [FOV_SETTING]: the camera's baseline, 72 unset
+grep -aq "skeldat: field of view 72 at start" "$t/a1.log" || fail "the field of view at start ($t/a1.log)"
 first_pull=$(grep -a "pulled back" "$s" | head -1 | awk '{print $3}')
 cheat=$(grep -a "modes set by the drive: fly" "$t/a1.log" | head -1 | awk '{print $3}')
 [ -n "$cheat" ] || fail "the drive set no modes ($t/a1.log)"

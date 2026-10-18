@@ -392,6 +392,22 @@ function M.show()
 		menu:add(button, function() show_launch_uis(uis, now) end)
 	end
 
+	-- **The apps' fields of view** ([FOV_SETTING]): set in a game's own
+	-- settings window; here each one set, and a press resets it to the
+	-- app's default
+	for _, name in ipairs(api.list_preferences()) do
+		local app = name:match("^fov%.(.+)$")
+		if app then
+			local b, bt = make_row(menu.window, "Field of view, " .. app .. ": " ..
+					tostring(api.get_preference(name)) .. "  (reset)")
+			menu:add(b, function()
+				api.set_preference(name, "default")
+				log:info("engine settings: " .. name .. " reset")
+				bt.text = "Field of view, " .. app .. ": default"
+			end)
+		end
+	end
+
 	menu:add("Back", function()
 		uistack.main:pop(root)
 	end)
@@ -816,9 +832,43 @@ function M.show_game(o, app_key, extra)
 					text(w, note, "dim")
 				end
 			end
+			-- The game's field of view ([FOV_SETTING], declare_fov)
+			local fov = group[1] == "Video" and o.fov
+			if fov then
+				local name = "fov." .. fov.app
+				local now = api.get_preference(name) or fov.default
+				local values = {60, 66, 72, 80, 90, 100, 110, 120}
+				-- One from -o or the file that is not a step, shown as it is
+				local listed = false
+				for _, v in ipairs(values) do listed = listed or v == now end
+				if not listed then
+					values[#values + 1] = now
+					table.sort(values)
+				end
+				local choices = {}
+				for i, v in ipairs(values) do
+					choices[i] = {v .. " degrees", v}
+				end
+				dropdown(w, "Field of view", choices, now, function(v)
+					local ok, err = api.set_preference(name, v)
+					log:info("game settings: " .. name .. " " .. v)
+					if not ok then
+						log:warning(name .. ": " .. tostring(err))
+					elseif fov.on_change then
+						local ok2, err2 = pcall(fov.on_change, v)
+						if not ok2 then
+							log:warning("declare_fov's on_change: " ..
+									tostring(err2))
+						end
+					end
+				end)
+			end
 		end)
 		for _, pref in ipairs(rows) do
 			shown[#shown + 1] = pref.name
+		end
+		if group[1] == "Video" and o.fov then
+			shown[#shown + 1] = "fov." .. o.fov.app
 		end
 	end
 

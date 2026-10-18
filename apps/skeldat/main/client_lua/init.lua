@@ -359,7 +359,16 @@ local camera_node = scene:CreateChild("Camera")
 local camera = camera_node:CreateComponent("Camera")
 camera.nearClip = 0.05
 camera.farClip = FAR_CLIP
-magic.keep_fov(camera, 72)
+-- [FOV_SETTING] The user's for skeldat, 72 unless set; the bow's draw
+-- narrows it each frame (fov_for there follows a turned screen too)
+local hand = nil -- main/hand.lua's, made below
+local fov = buildat.declare_fov("skeldat", 72, function(v)
+	fov = v
+	hand:set_fov(v)
+	log:info("skeldat: field of view " .. v)
+end)
+log:info("skeldat: field of view " .. fov .. " at start")
+camera.fov = magic.fov_for(fov)
 do
 	local viewport = magic.Viewport:new(scene, camera)
 	magic.set_preferred_viewports({viewport})
@@ -373,8 +382,8 @@ voxel_shading.set_camera(camera_node)
 -- The wielded item before the eye ([SKELDAT_BOW]): hand.lua, the bow's
 -- draw the left button's while it holds a bow and an arrow is there; the
 -- server times the shot itself
-local hand = load("main/hand.lua").new(camera_node, load("main/wield.lua"),
-		game)
+hand = load("main/hand.lua").new(camera_node, load("main/wield.lua"),
+		game, fov)
 local BOW_DRAW, BOW_MIN = 1, 0.1 -- main.cpp's
 local bow = {t = nil, light = nil, light_t = 0}
 
@@ -1995,7 +2004,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	hand:update(hud_on and not dead and item ~= "" and item or nil, draw,
 			has_arrow(), bow.light)
 	local ease = draw > 0 and draw * draw * (3 - 2 * draw) or 0
-	camera.fov = magic.fov_for(72) * (1 - 0.1 * ease)
+	camera.fov = magic.fov_for(fov) * (1 - 0.1 * ease)
 	ui.draw_hud()
 end)
 

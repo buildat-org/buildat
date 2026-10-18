@@ -105,7 +105,10 @@ local sun_height_now, day_factor_now, predawn_now = 0, 0, 0
 -- Luanti's own default, and what extensions/luanti_client uses
 -- (BASE_FOV = 72): the two are compared frame against frame, and nothing in
 -- a frame lines up while the cameras see different amounts of the world
-local CAMERA_FOV = 72
+-- [FOV_SETTING] The user's, "luanti" (luanti_client's too); its changes
+-- are taken below the camera's packet
+local CAMERA_FOV = buildat.declare_fov("luanti", 72)
+log:info("luanti: field of view " .. CAMERA_FOV .. " at start")
 -- The viewing range's default ([VIEW_RANGE]); the setting replaces it
 local FAR_CLIP = 120
 local VIEW_DIR = {x = -0.7, y = -0.55, z = -0.7}
@@ -2446,6 +2449,20 @@ luanti.sub_camera(function(c)
 	-- Luanti's own unit here is BS, which is ten units to the node
 	eye_offset = {x = (c.eye.x or 0) / 10, y = (c.eye.y or 0) / 10,
 			z = (c.eye.z or 0) / 10}
+end)
+-- The settings window's field of view: the baseline, under the server's
+-- set_fov as the packet's. simplified: held zoom gives way to it until
+-- the zoom key is next pressed
+buildat.declare_fov("luanti", 72, function(v)
+	CAMERA_FOV = v
+	log:info("luanti: field of view " .. v)
+	if camera then
+		local c = luanti.camera()
+		keys.fov_want = (c.fov and c.fov > 0) and (c.is_multiplier and
+				CAMERA_FOV * c.fov or c.fov) or CAMERA_FOV
+		camera.fov = magic.fov_for(keys.fov_want)
+		WIELD.place(camera.fov)
+	end
 end)
 -- Nothing moves until the server says where the player is: what it answers
 -- with is the spawn, or where the last run left them, and a client that

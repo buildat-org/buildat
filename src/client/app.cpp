@@ -490,6 +490,30 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			opt->default_username = value;
 			continue;
 		}
+		// fov.<app>: an app's id, and "default" takes it out
+		if(key.compare(0, 4, "fov.") == 0){
+			const ss_ app = key.substr(4);
+			bool ok = !app.empty() && app.size() <= 64;
+			for(char c : app)
+				if(!(isalnum((unsigned char)c) || c == '_' || c == '-'))
+					ok = false;
+			if(!ok){
+				*error = key+": not an app's id";
+				return false;
+			}
+			if(value == "default"){
+				opt->fov.erase(app);
+				continue;
+			}
+			char *end = nullptr;
+			long v = strtol(value.c_str(), &end, 10);
+			if(value.empty() || *end != '\0' || v < 30 || v > 140){
+				*error = key+": "+value+" is not 30 to 140 degrees";
+				return false;
+			}
+			opt->fov[app] = (int)v;
+			continue;
+		}
 		if(key == "render_scale" && value == "auto"){
 			opt->graphics.render_scale_auto = true;
 			continue;
@@ -619,6 +643,14 @@ static void check_parse_preference_options()
 			!app::parse_preference_options("ui_size=auto", &o, &err) ||
 			!o.ui_size_auto)
 		throw Exception("parse_preference_options: ui_size's values");
+	if(!app::parse_preference_options("fov.skeldat=90", &o, &err) ||
+			o.fov["skeldat"] != 90 ||
+			app::parse_preference_options("fov.skeldat=500", &o, &err) ||
+			app::parse_preference_options("fov.a/b=90", &o, &err) ||
+			app::parse_preference_options("fov.=90", &o, &err) ||
+			!app::parse_preference_options("fov.skeldat=default", &o, &err) ||
+			o.fov.count("skeldat"))
+		throw Exception("parse_preference_options: fov.<app>'s values");
 	if(app::parse_preference_options("nonesuch=1", &o, &err))
 		throw Exception("parse_preference_options: took an unknown key");
 }
@@ -846,6 +878,14 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	if(jdu.is_string())
 		items += ss_()+(items.empty()?"":",")+"default_username="+
 				jdu.as_string();
+	const json::Value &jfov = o.get("fov");
+	if(jfov.is_object()){
+		for(json::Iterator it(jfov); it.valid(); it.next()){
+			if(it.value().is_integer())
+				items += ss_()+(items.empty()?"":",")+"fov."+it.key()+"="+
+						itos(it.value().as_integer());
+		}
+	}
 	if(!items.empty()){
 		app::Options parsed = *opt;
 		if(!app::parse_preference_options(items, &parsed, &pref_err))
@@ -924,6 +964,12 @@ static void save_preferences(const app::Options &opt)
 	o.set("server_log_level", opt.server_log_level);
 	o.set("launch_ui", opt.launch_ui);
 	o.set("default_username", opt.default_username);
+	if(!opt.fov.empty()){
+		json::Value f = json::object();
+		for(auto &kv : opt.fov)
+			f.set(kv.first.c_str(), kv.second);
+		o.set("fov", f);
+	}
 	o.save_file(preferences_path().c_str());
 }
 

@@ -191,12 +191,17 @@ local function build_bow(cg, d, arrow)
 end
 
 -- The wielded item's node under camera_node; wield is wield.lua, game
--- init.lua's shared state (game.items for the pictures)
-function M.new(camera_node, wield, game)
+-- init.lua's shared state (game.items for the pictures), fov the camera's
+-- baseline (h:set_fov again when it changes)
+function M.new(camera_node, wield, game, fov)
 	local h = {node = camera_node:CreateChild("hand"), shapes = {},
 		item = nil, draw = -1, arrow = nil, light = nil}
 	local holder = h.node:CreateChild("item")
-	local base = wield.place(h.node, 72)
+	local base = wield.place(h.node, fov)
+	-- Where it rests for another field of view ([FOV_SETTING])
+	function h:set_fov(f)
+		base = wield.place(h.node, f)
+	end
 
 	local function material(texture, colour)
 		local m = magic.Material.new()

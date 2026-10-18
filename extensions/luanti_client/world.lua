@@ -703,6 +703,16 @@ function M.new(magic, buildat, log, options)
 	-- else. TOCLIENT_FOV can ask for degrees or for a multiplier of this,
 	-- over a transition time, which is what a game zooms with.
 	local BASE_FOV = 72
+	-- [FOV_SETTING] The user's, "luanti" (vanilla's too), and the
+	-- settings window's changes under the server's last set_fov.
+	-- simplified: a held zoom gives way to it
+	function self.set_base_fov(v)
+		BASE_FOV = v
+		local f = self.fov_server or {}
+		self:set_fov(f.fov, f.is_multiplier, 0)
+	end
+	BASE_FOV = buildat.declare_fov("luanti", 72, self.set_base_fov)
+	log:info("luanti_client: field of view " .. BASE_FOV .. " at start")
 	-- **The fov wanted, and the camera's** (user, 2026-09-30): the degrees
 	-- are of the screen's short side, a portrait phone's width, which
 	-- fov_for turns into the camera's vertical fov; set again each frame so

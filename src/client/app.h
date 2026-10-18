@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
 #include "core/types.h"
+#include <map>
 
 namespace Urho3D {
 	class Context;
@@ -122,6 +123,10 @@ namespace app
 		// user types it once and not once per game. Luanti's rule for a
 		// name: 1 to 20 letters, digits, _ and -.
 		ss_ default_username = "User";
+		// **A field of view per app** ([FOV_SETTING]): "fov.<app>", the
+		// degrees of the app's most common camera, 30 to 140; an app
+		// unset here has its own default (buildat.declare_fov)
+		std::map<ss_, int> fov;
 	};
 
 	// Parses "k=v[,k=v...]" on top of whatever *opt already holds. Returns

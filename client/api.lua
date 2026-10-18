@@ -1124,6 +1124,11 @@ local function a_preference(name)
 	if type(name) ~= "string" then
 		return false
 	end
+	-- fov.<app> ([FOV_SETTING]): any app's, set or not; the parser checks
+	-- the id and the value
+	if name:match("^fov%.[%w_%-]+$") then
+		return true
+	end
 	for _, k in ipairs(__buildat_list_preferences()) do
 		if k == name then
 			return true
@@ -2014,6 +2019,22 @@ end
 -- builtin's own (accounts' Server), in every game's window, until the
 -- connection ends.
 local game_settings, game_settings_extra = nil, {}
+-- **A field of view per app** ([FOV_SETTING]): declare_fov(app, default,
+-- on_change) -> degrees, the preference fov.<app> or default. The
+-- baseline of the app's most common camera, which the app scales or
+-- replaces as it needs; the user's, so the game settings window's Video
+-- section gets a "Field of view" row for it, and on_change(degrees) is
+-- called when that row changes it. Until the connection ends.
+local game_fov = nil
+buildat.safe.declare_fov = function(app, default, on_change)
+	if type(app) ~= "string" or not app:match("^[%w_%-]+$") or #app > 64 or
+			type(default) ~= "number" then
+		return nil, "declare_fov(app, default[, on_change]): an id and degrees"
+	end
+	game_fov = {app = app, default = default,
+		on_change = type(on_change) == "function" and on_change or nil}
+	return __buildat_get_preference("fov." .. app) or default
+end
 buildat.safe.show_game_settings = function(o)
 	if type(o) ~= "table" then
 		return false, "show_game_settings{on_close =, sections =}"
@@ -2024,8 +2045,8 @@ buildat.safe.show_game_settings = function(o)
 	end
 	game_settings = game_settings or launch_grid.screens("preferences.lua")
 	game_settings.show_game({on_close = o.on_close,
-		sections = type(o.sections) == "table" and o.sections or nil},
-		served_key_app(), extra)
+		sections = type(o.sections) == "table" and o.sections or nil,
+		fov = game_fov}, served_key_app(), extra)
 	return true
 end
 -- show_game_keys{on_close = f}: the window's keys page alone, for a game
@@ -2056,6 +2077,7 @@ end
 -- the window, whose game is gone
 function __buildat_game_settings_reset()
 	game_settings_extra = {}
+	game_fov = nil
 	if game_settings then
 		game_settings.close_game()
 	end

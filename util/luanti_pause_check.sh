@@ -4,7 +4,8 @@
 # covers: extensions/luanti_client/settings.lua show_pause, init.lua leave()
 # [LUANTI_PAUSE]: luanti_client's pause menu is a screen on the UI stack.
 # On a local devtest Luanti server: Escape opens it, the view range is
-# picked from its dropdown (120 -> 200, saved), Escape closes it, and a
+# picked from its dropdown (120 -> 200, saved), the field of view from its
+# own ([FOV_SETTING]: 72 -> 80, fov.luanti), Escape closes it, and a
 # quit with it open takes it down with the session (leave() popped the session's root
 # from under it before: "Wrong current_top_root").
 # Needs luanti in PATH and devtest in the desk's games.
@@ -47,7 +48,7 @@ delay 500
 keypress Escape
 wait_log 5000 pause: the menu shown
 delay 300
-mouse_pos 380 343
+mouse_pos 380 332
 mouse_click left
 wait_log 5000 dropdown_
 # the popup's list takes keys some frames after it opens (a Down 7 ms
@@ -58,6 +59,15 @@ keypress Down
 delay 200
 keypress Return
 wait_log 5000 view range 200, saved
+delay 300
+mouse_pos 420 354
+mouse_click left
+wait_log 5000 dropdown_
+delay 500
+keypress Down
+delay 200
+keypress Return
+wait_log 5000 field of view 80
 event scan
 keypress Escape
 wait_log 5000 pause: closed

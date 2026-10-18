@@ -478,6 +478,16 @@ buildat.set_preference(name, value) -> true, or false and why
   default_username is the name an app offers when it asks for one -- and
   set_preference refuses it. A launch extension, which is the user's, can set
   them.
+- fov.<app> ([FOV_SETTING]): an app's field of view, 30 to 140 degrees, in
+  settings.json as "fov": {"skeldat": 90}, -o fov.skeldat=90 for a run;
+  "default" takes it out. list_preferences() lists those that are set.
+buildat.declare_fov(app, default[, on_change]) -> degrees
+- The preference fov.<app>, or default when it is not set: the baseline of
+  the app's most common camera, which the app scales or replaces as it needs
+  (a zoom, a server's set_fov). It also puts a "Field of view" row for that
+  app in the game settings window's Video section until the connection
+  ends; on_change(degrees) is called when the row changes it. vanilla and
+  luanti_client share "luanti".
 - extensions/launch_menu/preferences.lua is the screen over these.
 
 buildat.read_image(resource_name) -> width, height, rgba
@@ -1153,7 +1163,9 @@ is refused in the sandbox. Apps have "Effect", "Music", "Ambient" and
 
 Shadow quality, texture and material quality, filtering, FOV and draw distance
 are deliberately not here: each one changes what the app looks like or what a
-player can see, and the app is the one that should say.
+player can see, and the app is the one that should say. The exception is a
+field of view's baseline per app (fov.<app>, declare_fov): the user's, while
+what the app does from it -- a zoom, a fixed fov of its own -- is the app's.
 
 The launch menu has a page of them, in extensions/launch_menu/preferences.lua. It
 is a page of widgets over buildat.get_preference() and set_preference() and

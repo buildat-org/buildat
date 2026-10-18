@@ -15,7 +15,7 @@
 #      section; Server... opens the Server window and Escape comes back;
 #      Open to LAN opens it; Escape goes back to the pause menu.
 #   3. Vanilla on the minimal game: the pause menu's Settings... has the
-#      game's keys.
+#      game's keys, and its field of view ([FOV_SETTING]: 72 unset).
 #   4. The web client (Firefox, util/web_drive.sh; skipped without it):
 #      floorplanner's Client settings... with the web's rows.
 # Screenshots in $t (KEEP_TMP=1 keeps it).
@@ -191,7 +191,9 @@ pids="$SERVER_PID"
 client -C "$t/cvc" -D "$t/uvc" -s 127.0.0.1:"$SERVER_PORT" \
 	-c @"$t/v.cmds" > "$t/vc.log" 2>&1 ||
 	fail "vanilla's drive ($t/vc.log: $(drove "$t/vc.log"))"
-grep -aq "Game settings shown: View, Sound, .*, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
+# [FOV_SETTING]: its Video section has the field of view, 72 unset
+seen "luanti: field of view 72 at start" "$t/vc.log" "vanilla's field of view"
+grep -aq "Game settings shown: View, Sound, .*, fov.luanti, [1-9][0-9]* of the game's keys" "$t/vc.log" ||
 	fail "vanilla's Settings... ($(grep -a "Game settings shown\|Command seq" "$t/vc.log" | tail -2))"
 kill $pids; pids=
 
