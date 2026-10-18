@@ -451,9 +451,22 @@ prebuild_modules() {
 	srv=$!
 	echo "prebuild: compiling the builtin modules into the archive's cache ($log)"
 	if ! wait_for_line "$log" "$srv" "Listening at" 900; then
+		kill -9 "$srv" 2>/dev/null
+		# [WIN_PREBUILD_AS] A compiler that could not start a program of
+		# its own ("cannot execute 'as'" under Wine, one module of 17 in
+		# v0.7.31's run, the same compiler having built the rest): the run
+		# once more, the modules built kept in the cache; a second such
+		# failure fails as any other
+		if [ -z "${PREBUILD_RETRIED:-}" ] && grep -q "cannot execute" "$log"; then
+			echo "prebuild: a compile could not start a program; once more:"
+			grep "cannot execute" "$log" | head -3
+			mv "$log" "$log.first"
+			[ -n "$wine" ] && { "$wine"server -k 2>/dev/null || true; }
+			PREBUILD_RETRIED=1 prebuild_modules "$stage" "$name"
+			return $?
+		fi
 		echo "prebuild: the server did not listen; its log's end:"
 		tail -20 "$log"
-		kill -9 "$srv" 2>/dev/null
 		return 1
 	fi
 	if grep -q "Failed to build module" "$log"; then
