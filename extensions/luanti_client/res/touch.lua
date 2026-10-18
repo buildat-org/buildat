@@ -159,9 +159,15 @@ return function(o)
 	for _, r in ipairs(o.more or {}) do
 		rest[#rest + 1] = {r[1], nil, r[2]}
 	end
+	-- As many as fit above the bottom, then a column further left
+	-- (800 x 500 at a UI scale of 1.25 fits five). simplified: from the
+	-- height at the start; a window resized later keeps its columns
+	local rows = math.max(1, math.floor((magic.ui.root.height - TOP - 44 - 8)
+			/ 52))
 	for i, r in ipairs(rest) do
-		local b = button(r[1], magic.HA_RIGHT, magic.VA_TOP, -16,
-				TOP + i * 52, 90, 44, r[3] or key(r[2]))
+		local col, row = math.floor((i - 1) / rows), (i - 1) % rows + 1
+		local b = button(r[1], magic.HA_RIGHT, magic.VA_TOP, -16 - col * 98,
+				TOP + row * 52, 90, 44, r[3] or key(r[2]))
 		b.visible = false
 		more[#more + 1] = b
 		if r[4] then

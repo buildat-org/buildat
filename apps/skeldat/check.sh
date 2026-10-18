@@ -1471,9 +1471,10 @@ echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | 
 # shot by its lift; the Inventory button opens it, two taps craft and
 # move the sticks to main:10, a finger on main:11 slid onto main:10 and
 # a second finger's tap there picks up half, a tap on main:11 puts it
-# down. simplified: a tap on a mob, the board's brake by the stick and
-# the pause menu's buttons by tap are not driven: the first is the
-# place's own branch, the others are the keys' and the UI's.
+# down. More's Skateboard ([SKELDAT_TOUCH_BOARD]) tapped twice turns
+# the board off and on. simplified: a tap on a mob, the board's brake
+# by the stick and the pause menu's buttons by tap are not driven: the
+# first is the place's own branch, the others are the keys' and the UI's.
 log34="$t/srv34.log"
 BUILDAT_SKELDAT_WORLD=touch BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
@@ -1506,6 +1507,11 @@ CHECK_PIDS+=($SERVER_PID)
 	echo "delay 200"; echo "finger_down 2 400 420"; echo "delay 100"
 	echo "finger_up 2"; echo "delay 200"; echo "finger_up 1"; echo "delay 500"
 	echo "tap 333 253"; echo "delay 700"; echo "keypress Escape"; echo "delay 500"
+	# More, then its sixth entry (Drop, Fly, Fast, Noclip, HUD, Skateboard)
+	# twice: at this UI scale of 1.25 five fit, the sixth heads a second
+	# column to the left
+	echo "tap 739 94"; echo "delay 500"; echo "tap 601 182"; echo "delay 500"
+	echo "tap 601 182"; echo "delay 500"
 	echo quit
 } > "$t/touch.cmds"
 BUILDAT_TOUCH=1 client touch "$t/touch.cmds"
@@ -1528,6 +1534,10 @@ grep -aq "client1 places skeldat:dirt" "$log34" && grep -aq "dig: done at" "$t/t
 grep -aq "inventory: move 4 skeldat:stick craftresult:1 -> main:10" "$t/touch.log" &&
 	grep -aq "inventory: move 2 skeldat:stick main:10 -> main:11" "$t/touch.log" ||
 	fail "the inventory by finger ($t/touch.log)"
+board=$(grep -a "touch: Skateboard\|skeldat: the skateboard " "$t/touch.log" |
+	sed 's/.*\(touch: Skateboard\|skateboard o[nf]*\)$/\1/' | tr '\n' '|')
+[ "$board" = "touch: Skateboard|skateboard off|touch: Skateboard|skateboard on|" ] ||
+	fail "More's Skateboard: $board ($t/touch.log)"
 echo "touch: strokes (push, moved) $strokes, a 50 pixel drag turned $turned degrees"
 # 32. The picker's worlds and pause ([SKELDAT_WORLD_ADMIN]): 128 worlds of
 # seed 2 on a launcher's server (-u launcher=1: a client on 127.0.0.1 is

@@ -1527,7 +1527,10 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		on_key = on_key,
 		BIND = {drop = {key = key.drop}, fly = {key = key.fly},
 			fast = {key = key.fast}, noclip = {key = key.noclip}},
-		more = {{"HUD", function() hud_on = not hud_on end}},
+		-- [SKELDAT_TOUCH_BOARD] the skateboard's toggle, F's, beside the
+		-- icon's tap that nothing tells of
+		more = {{"HUD", function() hud_on = not hud_on end},
+			{"Skateboard", game.toggle_board}},
 		pause = open_pause,
 		place = function()
 			if pointed_mob then
