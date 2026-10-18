@@ -357,6 +357,14 @@ local placed = false
 
 local camera_node = scene:CreateChild("Camera")
 local camera = camera_node:CreateComponent("Camera")
+-- [SKELDAT_LISTENER] Where the placed sounds (mobs.lua's SoundSource3Ds,
+-- in this scene) are heard from: with no listener Urho3D attenuates them
+-- to silence. The plain SoundSources need none.
+if magic.audio then
+	magic.audio.listener = camera_node:CreateComponent("SoundListener")
+	assert(magic.audio.listener, "skeldat: no sound listener after setting it")
+	log:info("skeldat: the sound listener on the camera")
+end
 camera.nearClip = 0.05
 camera.farClip = FAR_CLIP
 -- [FOV_SETTING] The user's for skeldat, 72 unless set; the bow's draw

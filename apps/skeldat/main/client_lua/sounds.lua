@@ -101,19 +101,9 @@ M.TAKES = {
 	step_wood = {a = layers(tone("triangle", 220, 0.03, 0.35, -0.03),
 			burst(nil, 900, 0.015, 0.25, {base_freq = 0.35}))},
 
-	-- Picking an item up
-	pickup = {
-		a = v{wave = "sine", base_freq = hz(600), freq_ramp = 0.25,
-			env_decay = secs(0.1), volume = 0.4},
-		b = layers(v{wave = "sine", base_freq = hz(880),
-				env_sustain = secs(0.02), env_decay = secs(0.2), volume = 0.3},
-			at(0.06, v{wave = "sine", base_freq = hz(1320),
-				env_sustain = secs(0.02), env_decay = secs(0.25),
-				volume = 0.3})),
-		c = layers(v{wave = "sine", base_freq = hz(280), freq_ramp = 0.45,
-				env_decay = secs(0.06), volume = 0.5},
-			burst(3000, nil, 0.01, 0.25)),
-	},
+	-- Picking an item up: the user's own ([SKELDAT_PICKUP_TAKE]), as made:
+	-- not in M.PEAK
+	pickup = {a = "blip1:CAANiiDJCLFAAqPb5AAAA2CpuAAf_AAcVbP__gZAASDf_gAWw5O"},
 
 	-- A boar hurt and dying
 	boar_hurt = {
@@ -205,8 +195,7 @@ M.VARY = 0.15
 -- Before that, driven to DRIVE times their peak through a soft clip
 -- (tanh's): a noise burst's peak is one sample, and scaled by it alone
 -- the rest stayed quiet
--- [SKELDAT_SOUNDS_HEARD] And the pickup's, not heard as made
-M.PEAK = {arrow_land = 0.9, arrow_hit = 0.9, pickup = 0.9}
+M.PEAK = {arrow_land = 0.9, arrow_hit = 0.9}
 M.DRIVE = 4
 M.RATE = 44100
 
@@ -291,12 +280,16 @@ function M.self_check(blip, synth)
 		end
 		return math.sqrt(e / n)
 	end
-	local bow = M.render(blip, synth, "bow", gen.params(M.TAKES.bow[M.PICK.bow]))
-	local h = 0
-	for i = 0, bow:len() - 1 do
-		h = (h * 31 + math.floor(bow:get(i) * 32767)) % 4294967296
+	-- The user's own takes, hashed: the bow's release and the pickup
+	for _, name in ipairs({"bow", "pickup"}) do
+		local b = M.render(blip, synth, name,
+				gen.params(M.TAKES[name][M.PICK[name]]))
+		local h = 0
+		for i = 0, b:len() - 1 do
+			h = (h * 31 + math.floor(b:get(i) * 32767)) % 4294967296
+		end
+		out[#out + 1] = string.format("%s %08x (%d samples)", name, h, b:len())
 	end
-	out[#out + 1] = string.format("bow %08x (%d samples)", h, bow:len())
 	for _, name in ipairs({"arrow_land", "arrow_hit"}) do
 		local now = M.render(blip, synth, name,
 				gen.params(M.TAKES[name][M.PICK[name]]))
@@ -331,9 +324,6 @@ function M.self_check(blip, synth)
 		end
 		levels[#levels + 1] = string.format("%s peak %.2f rms %.3f", name,
 				peak_of(b), math.sqrt(e / math.max(1, b:len())))
-		if name == "pickup" and math.abs(peak_of(b) - 0.9) > 0.01 then
-			bad[#bad + 1] = levels[#levels]
-		end
 	end
 	out[#out + 1] = "levels: " .. table.concat(levels, ", ")
 	local now = mids(gen.render(gen.params(M.TAKES.bow_draw[M.PICK.bow_draw]),

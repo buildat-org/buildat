@@ -2168,7 +2168,9 @@ echo "the world at exit: w1 resumed, the menu after its close, a deleted one's n
 # one with a bow; its arrow shot into the ground at its feet sticks and
 # is picked up. The shooter's client hears the landing "near 16" and its
 # pickup as its own; the other the landing and the pickup placed, neither
-# near nor own. The sounds' level line has pickup's peak 0.90.
+# near nor own. The sounds' self check hashes the pickup, the user's take
+# as made, and logs its level ([SKELDAT_PICKUP_TAKE]); the camera has the
+# sound listener the placed sounds need ([SKELDAT_LISTENER]).
 log44="$t/srv44.log"
 BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
@@ -2199,8 +2201,10 @@ grep -aq "picks up an arrow" "$log44" &&
 	! grep -aq "near 16\|sound_own" "$t/snd2.log" &&
 	grep -aq "skeldat: sound pickup at" "$t/snd2.log" ||
 	fail "the shooter's own and the other's placed sounds ($log44, $t/snd1.log, $t/snd2.log)"
-grep -aq "levels: pickup peak 0.90 " "$t/snd1.log" ||
-	fail "no level line with pickup's peak ($t/snd1.log)"
+grep -aqE "self-check passed, bow [0-9a-f]{8} \([0-9]+ samples\), pickup [0-9a-f]{8} " "$t/snd1.log" &&
+	grep -aq "levels: pickup peak " "$t/snd1.log" &&
+	grep -aq "skeldat: the sound listener on the camera" "$t/snd1.log" ||
+	fail "no pickup hash, level line or sound listener ($t/snd1.log)"
 echo "sounds heard: $(grep -a "levels: " "$t/snd1.log" | head -1 | sed 's/.*levels: //; s/, the draw.*//')"
 # 41. The world's making over its map ([SKELDAT_MAKING_MAP]): a new 512
 # world of seed 2. client1 joined before the making waits in the stripes
