@@ -175,7 +175,7 @@ keydown Space
 delay 2500
 keyup Space
 delay 1500
-event skeldat_modes fast
+event skeldat_modes fly fast
 keydown W
 keydown Space
 delay 2500
@@ -336,7 +336,7 @@ wait_log 5000 pause: the menu closed
 look 118 0
 keypress K
 keydown Space
-delay 1500
+delay 5000
 keyup Space
 keypress H
 keypress J
@@ -347,7 +347,9 @@ keypress J
 keypress H
 keypress K
 delay 2000
-look 118 -70
+look 118 -89
+keypress 2
+delay 500
 mouse_down left
 delay 6000
 mouse_up left
@@ -366,7 +368,9 @@ keypress Return
 delay 2000
 quit
 EOF
-server "$t/srv2.log" -u launcher=1
+# A stone pick for client1 (alone, the first in): the zone's ground can
+# be a bone pile, which a hand does not dig
+BUILDAT_SKELDAT_TEST="populate; give skeldat:stone_pick 1 1" server "$t/srv2.log" -u launcher=1
 client a2 "$t/a2.cmds"; a=$CLIENT
 wait_for_log "$t/srv2.log" "mutes client2" 300 || fail "no mute ($t/a2.log)"
 client b2 "$t/b2.cmds"; bpid=$CLIENT

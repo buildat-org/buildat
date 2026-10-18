@@ -255,6 +255,9 @@ struct Mobs
 						"%zu covered spots refused", n, MOB_KIND[k], found, covered);
 				continue;
 			}
+			// The world's own mobs kept (main.cpp's populate())
+			if(kind == "populate")
+				continue;
 			if(kind == "give"){
 				// "give item n k": k stacks of n into the player's main
 				int n = 0, k = 1;

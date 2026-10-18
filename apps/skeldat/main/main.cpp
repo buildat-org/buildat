@@ -924,9 +924,10 @@ struct Module: public interface::Module, public PlayersHost,
 			m_edge_crest = n ? (float)(sum / n) + 1 : 0;
 			m_edge_low = n ? low : 0;
 		}
-		// Not in a check's own set of mobs (TEST: no spawning; the bench,
-		// 0 an empty world)
-		if(m_mobs.test.empty() && !getenv("BUILDAT_SKELDAT_SKELETONS"))
+		// Not in a check's own set of mobs (TEST: no spawning, unless it
+		// names "populate"; the bench, 0 an empty world)
+		if((m_mobs.test.empty() || m_mobs.test.find("populate") != ss_::npos) &&
+				!getenv("BUILDAT_SKELDAT_SKELETONS"))
 			m_mobs.populate();
 		for(size_t t = 0; t < 8 * bench && added < bench; t++)
 			added += m_mobs.add_skeleton(false);
