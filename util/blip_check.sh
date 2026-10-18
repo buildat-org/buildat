@@ -8,7 +8,11 @@
 # (Chrome, skipped without web/ or Chrome), the web held to the budget
 # (8 voices mixed under 20 ms a second of audio, the slowest preset made
 # in under 4 ms); and the designer opened from its tile, a sound made and
-# saved as a WAV whose header is read back. -c runs are muted.
+# saved as a WAV whose header is read back; its Import... dialog
+# ([BLIP_IMPORT_DIALOG]): a paste that does not read keeps it open with
+# the reason, Cancel changes nothing, and the user's blip.play("blip1:...")
+# pasted and imported closes it and is the designer's sound. -c runs are
+# muted.
 #   util/blip_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -23,16 +27,35 @@ printf 'wait_log_any 150000 blip check: done\nquit\n' > "$t/c.cmds"
 echo "native:"; lines "$t/native.log"
 grep -aq "blip check: self-check ok" "$t/native.log" || fail "native self-check"
 
-# The designer: laser, Save WAV, the file's header
+# The designer: laser, Save WAV, the file's header; the import dialog
+BLIP_USER=blip1:DKQJcEhPmjsAAWJdHAAg0gzGkFVgRAAgZoMLf7dwZLFd8gAfstafl1sAAAA
 cat > "$t/d.cmds" <<C
 wait_log_any 30000 designer shown
 click Button "laser"
 wait_log 5000 designer: laser
 click Button "Save WAV"
 wait_log 5000 designer: saved
+click Button "Import..."
+wait_log 5000 designer: the import dialog shown
+delay 300
+text {wave = "sine", os.exit()}
+click Button "Import"
+wait_log 5000 designer: the import dialog: not a sound table
+delay 300
+click Button "Cancel"
+wait_log 5000 designer: the import dialog closed, cancelled
+click Button "Import..."
+wait_log 5000 designer: the import dialog shown
+delay 300
+text blip.play("$BLIP_USER")
+screenshot $t/import.png
+click Button "Import"
+wait_log 5000 designer: imported blip1: $BLIP_USER
+delay 500
+screenshot $t/imported.png
 quit
 C
-(cd "$here/Build" && timeout 90 bin/buildat -C "$t/c" -D "$t/u" -w 800x600 \
+(cd "$here/Build" && timeout 120 bin/buildat -C "$t/c" -D "$t/u" -w 800x600 \
 	-l 3 -m launch_menu -a extension/blip/designer -c @"$t/d.cmds" \
 	> "$t/designer.log" 2>&1) || fail "the designer drive ($t/designer.log)"
 python3 - "$t"/u/exports/blip_*.wav <<'PY' || fail "the designer's WAV"
@@ -45,6 +68,10 @@ assert (n16, pcm, ch, rate, bps, align, bits) == (16, 1, 1, 44100, 88200, 2, 16)
 assert size == len(d) - 8 and dlen == len(d) - 44 and dlen > 0
 print("designer: %s, %.3f s" % (sys.argv[1].rsplit("/", 1)[1], dlen / 88200))
 PY
+# Cancel imported nothing: the one import is the user's
+[ "$(grep -ac "I blip *: designer: imported" "$t/designer.log")" = 1 ] &&
+	grep -aq "designer: the import dialog closed, imported" "$t/designer.log" ||
+	fail "the import dialog ($t/designer.log)"
 
 if [ ! -f "$here/web/buildat.wasm" ] ||
 		! command -v "${CHROME:-google-chrome}" > /dev/null; then

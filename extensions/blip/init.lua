@@ -757,17 +757,13 @@ local function open_designer()
 		say("saved " .. table.concat(saved, ", "))
 	end)
 
-	-- The imports: an .sfs picked, or jsfxr's string or JSON pasted
+	-- The imports: an .sfs picked, or a sound pasted into Import...'s
+	-- dialog ([BLIP_IMPORT_DIALOG])
 	local im = row()
 	local picking = false
 	button(im, "Import .sfs", function()
 		picking = api.pick_file(".sfs")
 	end)
-	local edit = im:CreateChild("LineEdit")
-	edit:SetStyleAuto()
-	edit.textCopyable = true
-	edit.textSelectable = true
-	edit:SetFixedSize(150, 26)
 	local function imported(p, dropped, from)
 		if not p then
 			say("not imported from " .. from .. ": " .. tostring(dropped))
@@ -778,21 +774,69 @@ local function open_designer()
 				"'s sound, not the same" .. (#dropped > 0 and
 				("; dropped " .. table.concat(dropped, ", ")) or "")
 	end
-	button(im, "Import jsfxr", function()
-		-- A blip1 string as it is, its layers and all
-		local text = edit:GetText():match("^%s*(.-)%s*$")
-		if text:sub(1, 6) == "blip1:" then
-			local ok, p = pcall(gen.params, text)
-			if ok then
-				set_sound(p, "imported")
-			else
-				say("not a blip1 sound: " .. tostring(p))
-			end
-			return
+	-- Over the designer: a field to paste into, Import and Cancel (and
+	-- Escape); a paste that does not read keeps it open, the reason
+	-- under the field
+	local function import_dialog()
+		local droot = uistack.main:push({desc = "blip import"})
+		droot.defaultStyle = root.defaultStyle
+		local dw = droot:CreateChild("Window")
+		dw:SetStyleAuto()
+		dw:SetLayout(LM_VERTICAL, 6, magic.IntRect(10, 10, 10, 10))
+		text(dw, "Import a sound")
+		local field = dw:CreateChild("LineEdit")
+		field:SetStyleAuto()
+		field.multiLine = true
+		field.clipBorder = magic.IntRect(3, 3, 3, 3)
+		field.textSelectable = true
+		field.textCopyable = true
+		field:SetFixedSize(math.min(480, ui_w - 40), 140)
+		text(dw, "A blip1 string, a sound table or the code Copy makes;\n" ..
+				"or jsfxr's string or JSON")
+		local why = text(dw, "", field.width)
+		why:SetWordwrap(true)
+		local brow = dw:CreateChild("UIElement")
+		brow:SetLayout(LM_HORIZONTAL, 6, magic.IntRect(0, 0, 0, 0))
+		local function dbutton(label)
+			local b = brow:CreateChild("Button")
+			b:SetStyleAuto()
+			b:SetName(label)
+			b:SetFixedHeight(28)
+			b:SetLayout(LM_HORIZONTAL, 0, magic.IntRect(8, 2, 8, 2))
+			text(b, label)
+			return b
 		end
-		local p, dropped = import.text(edit:GetText())
-		imported(p, dropped, "jsfxr")
-	end)
+		local import_b, cancel_b = dbutton("Import"), dbutton("Cancel")
+		local function close_dialog(what)
+			uistack.main:pop(droot)
+			log:info("designer: the import dialog closed, " .. what)
+		end
+		local function read()
+			local p, dropped, from = import.pasted(field:GetText())
+			if not p then
+				why.text = tostring(dropped)
+				log:info("designer: the import dialog: " .. why.text)
+				return
+			end
+			close_dialog("imported")
+			if from == "jsfxr" then
+				imported(p, dropped, from)
+			else
+				set_sound(p, "imported " .. from)
+			end
+		end
+		ui_utils.bind_button_menu(droot, {{import_b, read},
+				{cancel_b, function() close_dialog("cancelled") end}},
+				function(key)
+			if key == KEY_ESCAPE and magic.input:GetKeyPress(key) then
+				close_dialog("cancelled")
+				return true
+			end
+		end)
+		field:SetFocus(true)
+		log:info("designer: the import dialog shown")
+	end
+	button(im, "Import...", import_dialog)
 	local on_update = state.on_update
 	state.on_update = function()
 		on_update()

@@ -9,6 +9,11 @@
 -- counterpart is dropped and named.
 --   sfs(data)   sfxr's .sfs, its file versions 100 to 102
 --   text(s)     jsfxr's link string (the part after "#") or its JSON
+--   pasted(s)   [BLIP_IMPORT_DIALOG] the first blip1 string in s (as in
+--               blip.play("blip1:...")), else its first sound table
+--               (read as data by lua_table, never run), else jsfxr's
+--   lua_table(s, at)  the table constructor at s's index at: names,
+--               strings, numbers, booleans and tables, nothing else
 -- Each -> a blip1 parameter table and the list of what was dropped, or
 -- nil and why. Run as a function of the generator:
 --   local import = run_extension_file("import.lua")(gen)
@@ -234,6 +239,158 @@ function I.text(s)
 		return from_json(s)
 	end
 	return from_b58(s:match("#(.*)$") or s)
+end
+
+-- A table constructor read as data: -> the table and the index after
+-- it, or nil and why. No calls, no operators but a number's minus
+local ESCAPES = {n = "\n", t = "\t", r = "\r", a = "\a", b = "\b",
+	f = "\f", v = "\v", ["\\"] = "\\", ['"'] = '"', ["'"] = "'",
+	["\n"] = "\n"}
+function I.lua_table(s, at)
+	local i = at or 1
+	local function skip()
+		while true do
+			local _, e = s:find("^%s+", i)
+			if e then i = e + 1 end
+			if s:sub(i, i + 1) ~= "--" then
+				return
+			end
+			i = (s:find("\n", i, true) or #s) + 1
+		end
+	end
+	local value
+	local function str()
+		local q, out = s:sub(i, i), {}
+		i = i + 1
+		while i <= #s do
+			local c = s:sub(i, i)
+			if c == q then
+				i = i + 1
+				return table.concat(out)
+			elseif c == "\\" then
+				local n = s:sub(i + 1, i + 1)
+				local digits = s:match("^%d%d?%d?", i + 1)
+				if digits then
+					out[#out + 1] = string.char(tonumber(digits) % 256)
+					i = i + 1 + #digits
+				elseif ESCAPES[n] then
+					out[#out + 1] = ESCAPES[n]
+					i = i + 2
+				else
+					error("an escape \\" .. n .. " at " .. i, 0)
+				end
+			elseif c == "\n" then
+				break
+			else
+				out[#out + 1] = c
+				i = i + 1
+			end
+		end
+		error("a string not closed", 0)
+	end
+	local function tbl()
+		local t, n = {}, 0
+		i = i + 1
+		while true do
+			skip()
+			if s:sub(i, i) == "}" then
+				i = i + 1
+				return t
+			end
+			local key
+			local name, e = s:match("^([%a_][%w_]*)%s*=()", i)
+			if name and s:sub(e, e) ~= "=" then
+				key, i = name, e
+			elseif s:sub(i, i) == "[" then
+				i = i + 1
+				skip()
+				key = value()
+				skip()
+				local e2 = s:match("^%]%s*=()", i)
+				if not e2 or s:sub(e2, e2) == "=" then
+					error("a key's ] = expected at " .. i, 0)
+				end
+				i = e2
+			end
+			skip()
+			local v = value()
+			if key == nil then
+				n = n + 1
+				key = n
+			end
+			t[key] = v
+			skip()
+			local c = s:sub(i, i)
+			if c == "," or c == ";" then
+				i = i + 1
+			elseif c ~= "}" then
+				error(", or } expected at " .. i, 0)
+			end
+		end
+	end
+	function value()
+		local c = s:sub(i, i)
+		if c == "{" then
+			return tbl()
+		elseif c == '"' or c == "'" then
+			return str()
+		end
+		local num = s:match("^-?%s*0[xX]%x+", i) or
+				s:match("^-?%s*%d*%.?%d+[eE][-+]?%d+", i) or
+				s:match("^-?%s*%d+%.?%d*", i) or s:match("^-?%s*%.%d+", i)
+		if num then
+			i = i + #num
+			return tonumber((num:gsub("%s", "")))
+		end
+		local word = s:match("^[%a_][%w_]*", i)
+		if word == "true" or word == "false" then
+			i = i + #word
+			return word == "true"
+		end
+		error("a value expected at " .. i .. (word and (", not " .. word) or ""), 0)
+	end
+	skip()
+	if s:sub(i, i) ~= "{" then
+		return nil, "no { at " .. i
+	end
+	local ok, t = pcall(tbl)
+	if not ok then
+		return nil, t
+	end
+	return t, i
+end
+
+function I.pasted(s)
+	if type(s) ~= "string" then
+		return nil, "no text"
+	end
+	local b = s:match("blip1:[%w%-_+]+")
+	if b then
+		local ok, p = pcall(G.params, b)
+		if not ok then
+			return nil, "not a blip1 sound: " .. tostring(p)
+		end
+		return p, {}, "blip1"
+	end
+	local why = {}
+	local start = s:find("{", 1, true)
+	if start then
+		local t, err = I.lua_table(s, start)
+		if t then
+			local ok, p = pcall(G.params, t)
+			if ok then
+				return p, {}, "a sound table"
+			end
+			err = tostring(p)
+		end
+		why[#why + 1] = "not a sound table: " .. err
+	end
+	local p, dropped = I.text(s)
+	if p then
+		return p, dropped, "jsfxr"
+	end
+	why[#why + 1] = "not jsfxr's: " .. tostring(dropped)
+	return nil, table.concat(why, "; ")
 end
 
 return I

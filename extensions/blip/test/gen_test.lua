@@ -139,10 +139,37 @@ assert(G.pack(G.vary(r, 2, 0.3)) == G.pack(v), "a variant is the same twice")
 local same = G.vary(r, 5, 0)
 assert(same.base_freq == r.base_freq and same.seed ~= r.seed, "no nudge")
 
+-- [BLIP_IMPORT_DIALOG] What the Import dialog reads
+local user = "blip1:DKQJcEhPmjsAAWJdHAAg0gzGkFVgRAAgZoMLf7dwZLFd8gAfstafl1sAAAA"
+local got, _, from = I.pasted('blip.play("' .. user .. '")\n')
+assert(got and from == "blip1" and G.pack(got) == user, "the user's paste")
+-- Copy's table form of a sound of layers, comments and all
+local src = "-- a sound\nlocal s = " .. G.table_source(G.to_table(r)) ..
+		"\nblip.play(s)"
+got, _, from = I.pasted(src)
+assert(got and from == "a sound table" and G.pack(got) == G.pack(r),
+		"the table form of layers: " .. tostring(got and G.pack(got) or _))
+local t = assert(I.lua_table([[{1, -2.5, 0x10, 1e-3, "a\"b\65", [ "k" ] = true;
+	n = {x = false}, }]]))
+assert(t[1] == 1 and t[2] == -2.5 and t[3] == 16 and t[4] == 0.001 and
+		t[5] == 'a"bA' and t.k == true and t.n.x == false, "the table reader")
+-- Never run: a call is refused, and nothing ran
+local ran = false
+_G.blip_import_ran = function() ran = true end
+for _, evil in ipairs({'{wave = "sine", os.exit()}',
+		"{wave = blip_import_ran()}", "{x = 1 + 1}", '{wave = ("sine")}'}) do
+	local q, why = I.pasted(evil)
+	assert(not q and why:find("not a sound table"), evil .. ": " .. tostring(why))
+end
+assert(not ran, "a pasted call ran")
+-- jsfxr's JSON as import.text reads it
+assert(G.pack(assert(I.pasted(json))) == G.pack(assert(I.text(json))), "jsfxr's JSON")
+assert(not I.pasted("nothing here"), "nothing")
+
 if bad > 0 then
 	print("FAIL: " .. bad .. " mapped to another blip1")
 	os.exit(1)
 end
 print("PASS: sfxr 100-102 and jsfxr's link and JSON decode and map; " ..
-		"the forms round-trip, layers and all")
+		"the forms round-trip, layers and all; a paste reads, a call is refused")
 -- vim: set noet ts=4 sw=4:
