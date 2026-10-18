@@ -8,6 +8,9 @@
 --
 -- Driven by builtin/luanti/test/surface_light.sh.
 core.settings:set("time_speed", "0")
+-- The terrain this was written against: devtest's v7, which a new world
+-- no longer gets by default (valleys)
+core.settings:set("mg_name", "v7")
 core.after(0, function() core.set_timeofday(0.5) end)
 
 local COLUMNS = 9      -- a 3x3 of columns around the player

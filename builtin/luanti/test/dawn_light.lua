@@ -2,6 +2,9 @@
 -- [DAWN_LIGHT]: the hours the user named, one after another, so that a
 -- client can shoot each of them. The three probed hours are in the list
 -- too: they are what must not move.
+-- The terrain this was written against: devtest's v7, which a new world
+-- no longer gets by default (valleys)
+core.settings:set("mg_name", "v7")
 local HOURS = {"0200", "0400", "0430", "0500", "0545", "1900", "1930",
 		"2000", "2030"}
 

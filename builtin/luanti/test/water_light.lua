@@ -9,6 +9,9 @@
 --   BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=water_light_check \
 --   BUILDAT_LUANTI_LUA=builtin/luanti/test/water_light.lua \
 --   bin/buildat_server -m ../apps/vanilla -D ../user
+-- The terrain this was written against: devtest's v7, which a new world
+-- no longer gets by default (valleys)
+core.settings:set("mg_name", "v7")
 local LEN = 10
 local DEPTH = 10
 local base = nil
