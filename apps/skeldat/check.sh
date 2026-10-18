@@ -1919,6 +1919,45 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "skeldat: the skateboard off (kept)" "$t/toggle.log" ||
 	fail "the client started again did not read the board's off ($t/toggle.log)"
 echo "the skateboard: off by F, kept in $(basename "$(dirname "$kept_file")")/board_off"
+# 37. Bridges on the long walk ([SKELDAT_BRIDGES_SEEN]), as 22 at night:
+# a skeleton whose goal section (x < 0) is past a river 8 wide in its
+# own (level: markers follow the ground's top; 94 long, z -30..63, so a
+# skeleton's detours do not take it round an end), the walk's
+# waypoint past it, builds a line at one height over the water; one on a
+# stone tower 8 high, its goal section off the -x side, builds down the
+# face, top first. Their "finds a way to" are the walk's waypoints
+log41="$t/srv41.log"
+seen=$(echo 'level 3 -30 8 94 skeldat:water_source -1; '
+for z in $(seq -45 -40); do for x in $(seq 10 15); do for y in $(seq 0 7); do
+	printf 'marker %d %d skeldat:stone %d; ' $x $z $y; done; done; done)
+BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
+	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
+	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 12 -42 marked goal -40 -42; place 100 0" \
+	start_server "$log41" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv41" -C "$t/srv.cache" -l 3 || fail "the server ($log41)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 60000" quit > "$t/seen.cmds"
+client seen "$t/seen.cmds"
+wait $CLIENT || fail "the bridges' drive ($t/seen.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+set -- $(grep -a "test: a skeleton (" "$log41" | sed 's/.*(\([0-9]*\)).*/\1/')
+river=$(grep -a "skeleton ($1) builds" "$log41" | sed 's/.* at //')
+cliff=$(grep -a "skeleton ($2) builds" "$log41" | sed 's/.* at //')
+echo "bridges: the river $(echo $river); the cliff $(echo $cliff)"
+grep -a "skeleton ($1) finds a way to\|skeleton ($2) finds a way to" "$log41" | head -4
+# the river: 7 or more at one height, over x 3..10 (one off the bank
+# allowed for where it starts; the first may be at a higher bank's)
+[ "$(echo "$river" | awk -F, '$1 >= 2 && $1 <= 11 {print $2}' | sort | uniq -c |
+	sort -rn | awk 'NR == 1 {print $1}')" -ge 7 ] 2>/dev/null ||
+	fail "no line over the river ($log41)"
+# to the far bank: the last column's (x 3) built
+echo "$river" | grep -q "^3," || fail "the bridge short of the far bank ($log41)"
+# the cliff: 3 or more, and the heights never going up
+[ "$(echo "$cliff" | grep -c .)" -ge 3 ] &&
+	echo "$cliff" | cut -d, -f2 | awk 'NR > 1 && $1 > p {exit 1} {p = $1}' ||
+	fail "no blocks down the cliff, top first ($log41)"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1926,5 +1965,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk"
 # vim: set noet ts=4 sw=4:

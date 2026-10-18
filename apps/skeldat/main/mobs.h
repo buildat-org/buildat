@@ -60,6 +60,11 @@ struct Mobs
 	size_t sweep = 0;
 	float sweep_t = 0, hour_t = 0;
 	double light_us = 0;
+	// The next goal walk's search's game time (WALK_SEARCH_WAIT), and
+	// whose it is: the longest waiting of the last step's
+	double walk_search_t = 0;
+	uint32_t walk_next = 0;
+	bool walk_queued = false;
 	size_t light_steps = 0, woken = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
 	// spawning of its own, and the mobs named at x, z from the first
@@ -240,6 +245,27 @@ struct Mobs
 						"a marker skull" : cs(name), cs(pos_key(x, y, z)));
 				continue;
 			}
+			if(kind == "level"){
+				// [SKELDAT_BRIDGES_SEEN] "level dx dz w d node dy": the node
+				// at the player's feet + dy over w x d columns from there,
+				// and air 6 over it, so a river's water is at one height
+				ss_ name;
+				int w = 0, d = 0, dy = 0;
+				it>>w>>d>>name>>dy;
+				const uint32_t id = world.id_of(name);
+				const int x0 = (int)std::floor(p->x + dx + 0.5f),
+						z0 = (int)std::floor(p->z + dz + 0.5f),
+						y = (int)std::floor(p->y + 0.5f) + dy;
+				for(int z = z0; z < z0 + d; z++)
+				for(int x = x0; x < x0 + w; x++){
+					world.set_node(x, y, z, id);
+					for(int k = 1; k <= 6; k++)
+						world.set_node(x, y + k, z, ID_AIR);
+				}
+				log_i(MODULE, "skeldat: test: %s at y %d over %d,%d %dx%d",
+						cs(name), y, x0, z0, w, d);
+				continue;
+			}
 			if(kind == "course"){
 				// [SKELDAT_SKATEBOARD] "course dx dz": a board's course of
 				// stone from there along +x, 5 wide, its heights over the
@@ -329,6 +355,13 @@ struct Mobs
 				if(flag == "lure")
 					m.goal_fp = (int)world.footprint((int)std::floor(m.x + 0.5f),
 							(int)std::floor(m.z + 0.5f));
+				// "... goal dx dz": the footprint there its goal, to walk to
+				if(flag == "goal"){
+					float gx = 0, gz = 0;
+					it>>gx>>gz;
+					m.goal_fp = (int)world.footprint((int)std::floor(p->x + gx +
+							0.5f), (int)std::floor(p->z + gz + 0.5f));
+				}
 				if(flag == "seed"){
 					float sx = 0, sz = 0;
 					it>>sx>>sz>>m.quota;
@@ -783,6 +816,30 @@ struct Mobs
 		return false;
 	}
 
+	// [SKELDAT_BRIDGES_SEEN] The goal walk's waypoint: the ground column
+	// (not water) nearest the point WAYPOINT columns along the
+	// straight line from x, z to tx, tz (or tx, tz if nearer), within 6 of
+	// it; tx, tz and ty (its top + 1, the feet) set to it. Left as they
+	// are, ty unset, with none. simplified: nearest the point, not the line
+	void waypoint(int x, int z, int &tx, int &tz, int &ty)
+	{
+		const float dx = (float)(tx - x), dz = (float)(tz - z);
+		const float d = std::sqrt(dx * dx + dz * dz);
+		const float k = d > WAYPOINT ? WAYPOINT / d : 1;
+		const int px = x + (int)std::lround(dx * k),
+				pz = z + (int)std::lround(dz * k);
+		for(int r = 0; r <= 6; r++)
+		for(int oz = -r; oz <= r; oz++)
+		for(int ox = -r; ox <= r;
+				ox += (r == 0 || std::abs(oz) == r) ? 1 : 2 * r){
+			const long c = world.column(px + ox, pz + oz);
+			if(c < 0 || world.top_y[c] == NO_GROUND)
+				continue;
+			tx = px + ox, tz = pz + oz, ty = world.top_y[c] + 1;
+			return;
+		}
+	}
+
 	// At sunrise and sunset each skeleton picks, of its footprint and the
 	// eight round it, the one with the most marker skulls: its own on a
 	// tie, a random one when all have none; at sunset its night's bone
@@ -892,6 +949,24 @@ struct Mobs
 		struct Take { uint32_t key; pv::Vector3DInt32 at; };
 		sv_<Take> takes;
 		const auto lanterns = furnaces.lanterns_by_footprint();
+		// The goal walk's search: the one that waited longest in the last
+		// step, if it is refused again (or the first, with none waiting)
+		const uint32_t walk_turn = walk_next;
+		const bool walk_any = walk_queued;
+		walk_queued = false;
+		double walk_best = 0;
+		auto take_walk_search = [&](uint32_t key, Mob &m){
+			if(m.walk_want_t <= 0)
+				m.walk_want_t = world.t;
+			if(world.t >= walk_search_t && (!walk_any || key == walk_turn)){
+				walk_search_t = world.t + WALK_SEARCH_WAIT;
+				m.walk_want_t = 0;
+				return true;
+			}
+			if(!walk_queued || m.walk_want_t < walk_best)
+				walk_next = key, walk_queued = true, walk_best = m.walk_want_t;
+			return false;
+		};
 		// The light form's next feet at (x, z): the column's top, or for
 		// one with a body the ground round its own height (a cave, an
 		// overhang), as the body walks; -1e9 for none
@@ -952,6 +1027,7 @@ struct Mobs
 			// What it must stand next to, for a way built to it: -1e9 for
 			// a footprint's middle, which is no such target
 			int ty = -1000000000;
+			bool goal_walk = false;
 			// A burning lantern in its footprint: to it, and taken
 			// Or on its way built to one, which may cross out of it
 			const bool home = own >= 0 && (own == m.goal_fp ||
@@ -994,17 +1070,21 @@ struct Mobs
 						ty = world.top_y[c] + 1;
 				}
 			}
-			if(!to || ty < -1000)
-				m.route.clear();
-			if(!m.route.empty()){
-				follow_route(kv.first, m);
-				continue;
-			}
 			if(!to && m.goal_fp >= 0 && own != m.goal_fp){
 				const int w = 2 * world.half;
 				to = true;
 				tx = (m.goal_fp % w - world.half) * S + S / 2;
 				tz = (m.goal_fp / w - world.half) * S + S / 2;
+				// [SKELDAT_BRIDGES_SEEN] Toward a waypoint on the way, which
+				// a refused step searches a way to, built if it must be
+				waypoint(mx, mz, tx, tz, ty);
+				goal_walk = true;
+			}
+			if(!to || ty < -1000)
+				m.route.clear();
+			if(!m.route.empty()){
+				follow_route(kv.first, m);
+				continue;
 			}
 			if(m.detour > 0)
 				m.detour--;
@@ -1022,6 +1102,7 @@ struct Mobs
 			if(!stray && y <= m.y + 1.01f && y >= m.y - 2.01f)
 				m.x = (float)x, m.z = (float)z, m.y = y;
 			else if(to && ty > -1000 && world.t >= m.search_t &&
+					(!goal_walk || take_walk_search(kv.first, m)) &&
 					search_way(kv.first, m, vp::P(tx, ty, tz)))
 				m.detour = 0;
 			else {

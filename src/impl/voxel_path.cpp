@@ -6,6 +6,7 @@
 #include <cmath>
 #include <limits>
 #include <queue>
+#include <tuple>
 
 namespace interface
 {
@@ -203,8 +204,22 @@ Result find(const Field &f, const P &from, const P &to, const Rules &r)
 		auto relax = [&](const P &t, float cost, const P *block = nullptr){
 			const size_t j = f.index(t.x, t.y, t.z);
 			const float gj = g[i] + cost;
-			if(gj >= g[j] || gj + h(t) > limit)
+			if(gj > g[j] + 1e-4f || gj + h(t) > limit)
 				return;
+			// [SKELDAT_BRIDGES_SEEN] Ways of the same cost: the one through
+			// the lowest x, then z, then y, whatever the order they came
+			// in, so searches toward one place build the same line
+			if(gj >= g[j] - 1e-4f){
+				const P q = unindex((size_t)parent[j]);
+				if(parent[j] < 0 || std::make_tuple(s.x, s.z, s.y) >=
+						std::make_tuple(q.x, q.z, q.y))
+					return;
+				parent[j] = (int32_t)i;
+				if(!placed.empty())
+					placed[j] = block ? (int64_t)f.index(block->x, block->y,
+							block->z) : -1;
+				return;
+			}
 			g[j] = gj;
 			parent[j] = (int32_t)i;
 			if(!placed.empty())
@@ -410,6 +425,26 @@ bool self_test()
 		assert(c.found && c.blocks.size() == 2 && c.blocks[0].z == c.blocks[1].z);
 		Result again = find(f, P(0, 5, 0), P(10, 5, 0), r);
 		assert(again.blocks[0] == c.blocks[0] && again.blocks[1] == c.blocks[1]);
+		r.build_cost = 0;
+	}
+	{
+		// Two bridges of the same cost, either side of a wall across a pit
+		// 2 wide: the one by position, at the lower z, from either end
+		Field f;
+		f.resize(P(0, 0, 0), 8, 8, 3);
+		for(int z = 0; z < 3; z++)
+			for(int x = 0; x < 8; x++)
+				for(int y = 0; y < 8; y++)
+					if(x >= 3 && x <= 4 ? z == 1 : y <= 3)
+						f.set(x, y, z, SOLID);
+		r.build_cost = 6;
+		for(int way = 0; way < 2; way++){
+			const P a(way ? 7 : 0, 4, 1), b(way ? 0 : 7, 4, 1);
+			Result t = find(f, a, b, r);
+			assert(t.found && t.blocks.size() == 2);
+			for(const P &p : t.blocks)
+				assert(p.z == 0 && p.y == 3);
+		}
 		r.build_cost = 0;
 	}
 	return true;

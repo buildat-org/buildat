@@ -193,6 +193,11 @@ static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
 static const float BUILD_COST = 6, BUILD_WAIT = 5;
 static const int BUILD_RANGE = 32;
 static const size_t BUILD_CAP = 20000;
+// [SKELDAT_BRIDGES_SEEN] The goal walk's waypoint WAYPOINT columns ahead,
+// and one goal walk's search in the world every WALK_SEARCH_WAIT game
+// seconds: each skeleton's own made the light step 15x dearer
+static const int WAYPOINT = 12;
+static const float WALK_SEARCH_WAIT = 1;
 // A burning lantern's sphere ([SKELDAT_FIGHT_BACK]): no bones grow in it,
 // each of its section's expansions takes LANTERN_RETRACT off a voxel
 // (three times the growth: full bones gone in 5) and a bone block goes in
@@ -242,6 +247,8 @@ struct Mob
 	interface::voxel_path::P build_at;
 	bool build = false, built = false;
 	double search_t = 0;
+	// Since when it waits for a goal walk's search (0: it does not)
+	double walk_want_t = 0;
 
 	ss_ save() const {
 		std::ostringstream os;
