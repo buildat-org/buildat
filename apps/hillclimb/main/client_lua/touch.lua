@@ -90,7 +90,7 @@ return function(o)
 	local M = {map = map, area = area, pinch = pinch, input = nil}
 	local stick = nil -- {id, x0, y0} of the finger holding it
 	-- The orbit's fingers, two at most: {id, x, y} each; simplified: the
-	-- area is not drawn, a faint line under it if it is not found
+	-- area is not drawn; a faint line under it if it proves hard to find
 	local orbit = {}
 	local buttons = {}
 
