@@ -544,6 +544,22 @@ inline Heightmap make_heightmap(const Params &p)
 	if(p.form == SEA)
 		bias_sea(p, m);
 	erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
+	// The erosion's specks out: each column clamped into the min..max of
+	// its four neighbours (a single cell's sub-voxel bump or pit rounds to
+	// a voxel), what it carved kept (a blur would soften the channels)
+	const std::vector<float> eroded = m.h;
+	for(int z = -p.half; z < p.half; z++)
+		for(int x = -p.half; x < p.half; x++){
+			float lo = 1e9f, hi = -1e9f;
+			for(int i = 0; i < 4; i++){
+				const int nx = x + (i == 0) - (i == 1), nz = z + (i == 2) - (i == 3);
+				if(!m.in(nx, nz))
+					continue;
+				lo = std::min(lo, eroded[m.index(nx, nz)]);
+				hi = std::max(hi, eroded[m.index(nx, nz)]);
+			}
+			m.at(x, z) = std::min(hi, std::max(lo, m.at(x, z)));
+		}
 	// Within the world: a floor of 8 under the ground, 8 of air over it
 	for(float &v : m.h)
 		v = std::min((float)p.top - 8, std::max((float)p.bottom + 8, v));
@@ -745,6 +761,27 @@ int main()
 			else
 				assert(wet <= all / 8 && water > m.flags.size() / 20);
 		}
+	// No specks: a plains column's voxel over or under all its four
+	// neighbours' is a ridge's or a pit's end, rare
+	{
+		Params p;
+		p.seed = 1, p.half = 128;
+		const Heightmap m = make_heightmap(p);
+		size_t specks = 0;
+		for(int z = -p.half + 1; z < p.half - 1; z++)
+			for(int x = -p.half + 1; x < p.half - 1; x++){
+				const int h = (int)std::floor(m.at(x, z));
+				int over = 0, under = 0;
+				for(int i = 0; i < 4; i++){
+					const int n = (int)std::floor(m.at(x + (i == 0) - (i == 1),
+							z + (i == 2) - (i == 3)));
+					over += h > n, under += h < n;
+				}
+				specks += over == 4 || under == 4;
+			}
+		printf("mapgen: plains, seed 1: %zu specks\n", specks);
+		assert(specks < (size_t)m.width() * m.width() / 1000);
+	}
 	// The caves: a few percent of the rock, the same twice
 	{
 		size_t n = 0, all = 0;
