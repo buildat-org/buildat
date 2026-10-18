@@ -1516,7 +1516,9 @@ BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv33" -C "$t/srv.cache" -l 3 || fail "the server ($log33)"
 CHECK_PIDS+=($SERVER_PID)
-again='keypress Escape
+again='wait_log 120000 skeldat: The bones cover the whole surface
+delay 500
+keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 click Button "Play again"
