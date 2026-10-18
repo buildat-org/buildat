@@ -403,7 +403,10 @@ echo "  Escape: the menu, no input under it, settings and back, leave"
 # slope in fourth, the same on the right half, full down backs it; Start
 # (the column's top) resets with no stick, the car at the start again (a
 # quarter up and a half across: first gear, steer 44); Menu opens the
-# pause menu
+# pause menu. [HC_TOUCH_ORBIT] a drag in the top third (100 pixels, 80
+# HUD ones) turns the yaw 24 degrees, a pinch there from 80 to 160
+# pixels apart halves the distance, and the stick (third gear) with a
+# drag back at once does both
 mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
@@ -421,6 +424,28 @@ delay 1500
 finger_down 1 200 200
 finger_move 1 200 450
 delay 3000
+finger_up 1
+delay 1000
+finger_down 3 300 80
+finger_move 3 400 80
+delay 300
+finger_up 3
+wait_log 3000 hillclimb: camera yaw 224 pitch 20 dist 12.0 m
+finger_down 3 300 80
+finger_down 4 380 80
+delay 200
+finger_move 4 460 80
+delay 300
+finger_up 4
+finger_up 3
+wait_log 3000 hillclimb: camera yaw 224 pitch 20 dist 6.0 m
+finger_down 1 200 300
+finger_move 1 200 240
+finger_down 3 300 80
+finger_move 3 200 80
+delay 2000
+finger_up 3
+wait_log 3000 hillclimb: camera yaw 200 pitch 20 dist 6.0 m
 finger_up 1
 delay 1000
 tap 724 50
@@ -452,11 +477,13 @@ set -- $climbs
 [ $# -eq 3 ] && [ "${1%%:*}" = 4 ] && [ "${2%%:*}" = 4 ] && [ "${3%%:*}" = 0 ] &&
 	awk -v a="${1#*:}" -v b="${2#*:}" -v c="${3#*:}" 'BEGIN { exit !(a > 5 && b > 5 && c < -1) }' ||
 	fail "the stick's drives (gear:metres) $climbs ($t/touch.log)"
-start=$(echo "$in" | sed -n '/^0 0 0 0 0 1 0|/,$p' | grep '^1 0 0 0 1 0 4[0-9]|' | head -1)
+start=$(echo "$in" | sed -n '/^0 0 0 0 [0-9] 1 0|/,$p' | grep '^1 0 0 0 1 0 4[0-9]|' | head -1)
 grep -aq "touch: Start" "$t/touch.log" && [ -n "$start" ] &&
 	awk -v z="${start#*|}" 'BEGIN { exit !(z < 5) }' &&
 	grep -aq "touch: Menu" "$t/touch.log" && grep -aq "pause: the menu shown" "$t/touch.log" ||
 	fail "Start (no stick, the car at the start: ${start:-none}) or Menu ($t/touch.log)"
+echo "$in" | grep -q '^1 0 0 0 3 0 0|' ||
+	fail "the stick in third under the orbit's drag ($t/touch.log)"
 echo "  touch: the stick's drives (gear:metres) $climbs; Start, then first gear at z ${start#*|} m"
 echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds"
 # vim: set noet ts=4 sw=4:

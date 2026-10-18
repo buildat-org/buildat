@@ -945,6 +945,13 @@ end
 
 pause = load("main/pause.lua")({hill_menu = open_hill_menu,
 	chat = open_chat, keys = read_keys})
+-- The orbit about the car: dragged with the left button, the wheel the
+-- distance
+local yaw, pitch, dist = 200, 20, 12 * U
+local function set_dist(v)
+	dist = math.max(3 * U, math.min(80 * U, v))
+end
+
 -- simplified: the Tab menu, opened from the pause menu, takes keys only
 if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	touch = load("main/touch.lua")({
@@ -960,15 +967,27 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 					watch.id == nil
 		end,
 		visible = function() return not chat_open and not pause.held() end,
+		-- [HC_TOUCH_ORBIT] The camera's area: as the mouse's drag, a HUD
+		-- pixel 0.3 degrees
+		observing = function() return watch.id ~= nil end,
+		camera = function()
+			return not menu and not chat_open and not pause.held()
+		end,
+		orbit = function(dx, dy)
+			yaw = (yaw + dx * 0.3) % 360
+			pitch = math.max(-10, math.min(85, pitch + dy * 0.3))
+		end,
+		zoom = function(r) set_dist(dist * r) end,
+		orbit_end = function()
+			log:info(string.format("hillclimb: camera yaw %.0f pitch %.0f "
+					.. "dist %.1f m", yaw, pitch, dist / U))
+		end,
 	})
 end
 
--- The orbit about the car: dragged with the left button, the wheel the
--- distance
-local yaw, pitch, dist = 200, 20, 12 * U
 magic.SubscribeToEvent("MouseWheel", function(_, d)
 	local w = d:GetInt("Wheel")
-	dist = math.max(3 * U, math.min(80 * U, dist * (w > 0 and 0.85 or 1.18)))
+	set_dist(dist * (w > 0 and 0.85 or 1.18))
 end)
 
 magic.SubscribeToEvent("Update", function(_, d)
@@ -1004,7 +1023,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	local watched = observed()
 	draw_hud(watched or cars[own_id])
 	local m = magic.input:GetMouseMove()
-	-- A finger is a mouse's to SDL too: on a touchscreen it is the stick's
+	-- A finger is a mouse's to SDL too: on a touchscreen touch.lua orbits
 	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) and
 			not pause.held() and not touch then
 		yaw = (yaw + m.x * 0.3) % 360

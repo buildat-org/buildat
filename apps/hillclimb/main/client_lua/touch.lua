@@ -5,15 +5,19 @@
 -- hillclimb's touch controls ([HC_TOUCH]), on a touchscreen
 -- (BUILDAT_TOUCH=1): one stick and three buttons, its own (not
 -- luanti_client's touch.lua: Luanti's scheme, and apps do not consume
--- each other). A finger down anywhere but on a button is the stick,
--- centred where it landed; a second finger while one holds it does
--- nothing. Across steers, up is the accelerator in the gear picked by
+-- each other). A finger down below the top third (not on a button) is
+-- the stick, centred where it landed; a second one there while one holds
+-- it does nothing. Across steers, up is the accelerator in the gear picked by
 -- how far, a little down brakes, a lot down reverses (M.map).
 --   local touch = run_script_file("main/touch.lua")(o)
 -- o: start(), chat(), menu() the buttons' actions; active() whether a
 -- finger takes the stick (driving, and no menu or window up); visible()
 -- whether the buttons show. touch.input is {accel, brake, steer, gear}
 -- (gear nil: unchanged) while the stick is held, else nil.
+-- [HC_TOUCH_ORBIT] The screen's top third (observing, all of it) is the
+-- camera's: a finger dragged there is o.orbit(dx, dy) in HUD pixels, two
+-- pinched there o.zoom(ratio) for the distance, and o.orbit_end() once
+-- the last of them lifts; o.observing() whether there is no car to drive.
 local magic = require("buildat/extension/urho3d")
 local log = buildat.Logger("hillclimb")
 
@@ -46,7 +50,28 @@ local function map(x, y)
 	return true, false, steer, g
 end
 
+-- [HC_TOUCH_ORBIT] Whose a finger landing at fy (0 the top, 1 the
+-- bottom of the screen) is
+local function area(fy, observing)
+	return (observing or fy < 1 / 3) and "orbit" or "stick"
+end
+-- The distance's factor for a pinch from d0 to d1 pixels apart: apart is
+-- nearer
+local function pinch(d0, d1)
+	return d1 > 0 and d0 / d1 or 1
+end
+local function in_rect(x, y, px, py, sx, sy)
+	return x >= px and y >= py and x < px + sx and y < py + sy
+end
+
 do
+	assert(area(0.2, false) == "orbit" and area(0.5, false) == "stick")
+	assert(area(0.5, true) == "orbit" and area(0.9, true) == "orbit")
+	assert(math.abs(pinch(200, 400) - 0.5) < 1e-9)
+	assert(pinch(400, 200) == 2 and pinch(100, 0) == 1)
+	-- A button's rect wins over the area: it is asked first
+	assert(in_rect(700, 20, 690, 16, 90, 48))
+	assert(not in_rect(689, 20, 690, 16, 90, 48))
 	local function is(x, y, accel, brake, steer, gear)
 		local a, b, s, g = map(x, y)
 		assert(a == accel and b == brake and math.abs(s - steer) < 0.01 and
@@ -62,8 +87,11 @@ do
 end
 
 return function(o)
-	local M = {map = map, input = nil}
+	local M = {map = map, area = area, pinch = pinch, input = nil}
 	local stick = nil -- {id, x0, y0} of the finger holding it
+	-- The orbit's fingers, two at most: {id, x, y} each; simplified: the
+	-- area is not drawn, a faint line under it if it is not found
+	local orbit = {}
 	local buttons = {}
 
 	local function ui_point(x, y)
@@ -117,8 +145,7 @@ return function(o)
 	local function over_buttons(ux, uy)
 		for _, b in ipairs(buttons) do
 			local p, s = b.screenPosition, b.size
-			if b.visible and ux >= p.x and uy >= p.y and ux < p.x + s.x and
-					uy < p.y + s.y then
+			if b.visible and in_rect(ux, uy, p.x, p.y, s.x, s.y) then
 				return true
 			end
 		end
@@ -141,9 +168,35 @@ return function(o)
 				math.floor(stick.y0 + dy * k - 24))
 	end
 
+	local function apart()
+		local dx, dy = orbit[1].x - orbit[2].x, orbit[1].y - orbit[2].y
+		return math.sqrt(dx * dx + dy * dy)
+	end
+	local function orbit_of(id)
+		for i, f in ipairs(orbit) do
+			if f.id == id then return i, f end
+		end
+	end
+	local function orbit_release()
+		if #orbit > 0 then
+			orbit = {}
+			o.orbit_end()
+		end
+	end
+
 	magic.SubscribeToEvent("TouchBegin", function(_, d)
 		local ux, uy = ui_point(d:GetInt("X"), d:GetInt("Y"))
-		if stick or not o.active() or over_buttons(ux, uy) then
+		if over_buttons(ux, uy) then
+			return
+		end
+		if area(d:GetInt("Y") / magic.graphics.height, o.observing()) ==
+				"orbit" then
+			if #orbit < 2 and o.camera() then
+				orbit[#orbit + 1] = {id = d:GetInt("TouchID"), x = ux, y = uy}
+			end
+			return
+		end
+		if stick or not o.active() then
 			return
 		end
 		stick = {id = d:GetInt("TouchID"), x0 = ux, y0 = uy}
@@ -152,11 +205,34 @@ return function(o)
 		move(ux, uy)
 	end)
 	magic.SubscribeToEvent("TouchMove", function(_, d)
+		local i, f = orbit_of(d:GetInt("TouchID"))
+		if f then
+			local ux, uy = ui_point(d:GetInt("X"), d:GetInt("Y"))
+			if #orbit == 2 then
+				-- Two down: the pinch's, and no turn
+				local d0 = apart()
+				f.x, f.y = ux, uy
+				o.zoom(pinch(d0, apart()))
+			else
+				o.orbit(ux - f.x, uy - f.y)
+				f.x, f.y = ux, uy
+			end
+			return
+		end
 		if stick and d:GetInt("TouchID") == stick.id then
 			move(ui_point(d:GetInt("X"), d:GetInt("Y")))
 		end
 	end)
 	magic.SubscribeToEvent("TouchEnd", function(_, d)
+		local i = orbit_of(d:GetInt("TouchID"))
+		if i then
+			-- One lifted, the other orbits on
+			table.remove(orbit, i)
+			if #orbit == 0 then
+				o.orbit_end()
+			end
+			return
+		end
 		if stick and d:GetInt("TouchID") == stick.id then
 			release()
 		end
@@ -167,6 +243,9 @@ return function(o)
 	magic.SubscribeToEvent("Update", function()
 		if stick and not o.active() then
 			release()
+		end
+		if not o.camera() then
+			orbit_release()
 		end
 		local want = o.visible()
 		if want ~= shown then
