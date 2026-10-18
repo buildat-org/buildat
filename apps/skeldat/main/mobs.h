@@ -324,7 +324,9 @@ struct Mobs
 			if(kind == "level"){
 				// [SKELDAT_BRIDGES_SEEN] "level dx dz w d node dy": the node
 				// at the player's feet + dy over w x d columns from there,
-				// and air 6 over it, so a river's water is at one height
+				// and air 6 over it, so a river's water is at one height;
+				// stone under it down to the ground (where the ground is
+				// lower, nothing walks under the water)
 				ss_ name;
 				int w = 0, d = 0, dy = 0;
 				it>>w>>d>>name>>dy;
@@ -337,6 +339,8 @@ struct Mobs
 					world.set_node(x, y, z, id);
 					for(int k = 1; k <= 6; k++)
 						world.set_node(x, y + k, z, ID_AIR);
+					for(int k = 1; k <= 32 && world.id_at(x, y - k, z) == ID_AIR; k++)
+						world.set_node(x, y - k, z, world.id_of("skeldat:stone"));
 				}
 				log_i(MODULE, "skeldat: test: %s at y %d over %d,%d %dx%d",
 						cs(name), y, x0, z0, w, d);

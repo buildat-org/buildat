@@ -2110,10 +2110,11 @@ river=$(grep -a "skeleton ($1) builds" "$log41" | sed 's/.* at //')
 cliff=$(grep -a "skeleton ($2) builds" "$log41" | sed 's/.* at //')
 echo "bridges: the river $(echo $river); the cliff $(echo $cliff)"
 grep -a "skeleton ($1) finds a way to\|skeleton ($2) finds a way to" "$log41" | head -4
-# the river: 7 or more at one height, over x 3..10 (one off the bank
-# allowed for where it starts; the first may be at a higher bank's)
+# the river: 6 or more at one height, over x 3..10 (one off the bank
+# allowed for where it starts; the first and the last may climb to a
+# higher bank's, the own terrain's banks uneven)
 [ "$(echo "$river" | awk -F, '$1 >= 2 && $1 <= 11 {print $2}' | sort | uniq -c |
-	sort -rn | awk 'NR == 1 {print $1}')" -ge 7 ] 2>/dev/null ||
+	sort -rn | awk 'NR == 1 {print $1}')" -ge 6 ] 2>/dev/null ||
 	fail "no line over the river ($log41)"
 # to the far bank: the last column's (x 3) built
 echo "$river" | grep -q "^3," || fail "the bridge short of the far bank ($log41)"
