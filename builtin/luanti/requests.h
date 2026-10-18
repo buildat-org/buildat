@@ -180,7 +180,7 @@
 			// Scale 1: an object's model is scaled by its visual_size,
 			// which is the client's to apply and is not the same number
 			// for two objects of one kind
-			const sv_<interface::VoxelQuad> quads = mesh_quads(name, 1.0f,
+			const sv_<interface::VoxelQuad> quads = m_registry.mesh_quads(name, 1.0f,
 					frame);
 			nums.reserve(quads.size() * 21);
 			for(const interface::VoxelQuad &q : quads){

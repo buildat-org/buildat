@@ -85,6 +85,7 @@ extern "C" {
 // The Module's parts ([LUANTI_MODULAR]), after MODULE, which they log as
 #include "luanti/lua_util.h"
 #include "luanti/mapgen_params.h"
+#include "luanti/registry.h"
 
 using interface::Event;
 namespace pv = PolyVox;
@@ -96,112 +97,6 @@ namespace luanti {
 
 
 using main_context::SceneReference;
-
-// A colour for a node that has no texture yet, from its name, so that two
-// nodes are two colours and the same node is the same colour between runs.
-// M3 replaces every one of these with the node's real tiles; until then a
-// world is legible as blocks of colour, which is what M2 has to show.
-static void node_colour(const ss_ &name, uint8_t rgb[3])
-{
-	uint32_t h = 2166136261u;
-	for(char c : name){
-		h ^= (uint8_t)c;
-		h *= 16777619u;
-	}
-	// Kept well below white: these are albedo, and a game lighting a scene
-	// in HDR with a tone curve over it turns anything near white into a
-	// flat blown-out surface. 0.12 to 0.55 is roughly what the hand-drawn
-	// voxel textures in this tree sit at.
-	rgb[0] = 30 + (h & 0x6f);
-	rgb[1] = 30 + ((h >> 8) & 0x6f);
-	rgb[2] = 30 + ((h >> 16) & 0x6f);
-}
-
-// A media file's name as the client knows it. A namespace of its own, and
-// not the module's own "luanti/", because that is where client_file serves a
-// module's client_lua from: a game with a texture called module.lua would
-// otherwise land on top of this module's client half.
-static ss_ media_resource_name(const ss_ &file_name)
-{
-	return "luanti_media/"+file_name;
-}
-
-// A tile that is a texture modifier gets a name of its own, by what it is:
-// the same expression in two node definitions is one texture. The client is
-// what composes it; see the texmods packet.
-static ss_ texmod_resource_name(const ss_ &expr)
-{
-	uint32_t h = 2166136261u;
-	for(char c : expr){
-		h ^= (uint8_t)c;
-		h *= 16777619u;
-	}
-	char buf[48];
-	snprintf(buf, sizeof buf, "luanti_texmod/%08x.png", h);
-	return buf;
-}
-
-static ss_ node_texture_name(const ss_ &name)
-{
-	uint32_t h = 2166136261u;
-	for(char c : name){
-		h ^= (uint8_t)c;
-		h *= 16777619u;
-	}
-	char buf[32];
-	snprintf(buf, sizeof buf, "luanti_gen/node_%08x.png", (unsigned)h);
-	return buf;
-}
-
-
-
-// One picture placed into a "[combine:WxH:x,y=file:x,y=file" expression
-struct CombinePlace
-{
-	int x = 0, y = 0;
-	ss_ name;
-};
-
-// What that expression says, or false if it is not one: no nesting, and
-// what is placed is a file name rather than a modifier of its own. See
-// palette_image(), which is the only thing that needs a modifier composed
-// on this side at all.
-static bool parse_combine(const ss_ &expr, int &w_out, int &h_out,
-		sv_<CombinePlace> &out)
-{
-	static const ss_ COMBINE = "[combine:";
-	if(expr.compare(0, COMBINE.size(), COMBINE) != 0)
-		return false;
-	sv_<ss_> parts;
-	for(size_t at = COMBINE.size(); at <= expr.size(); ){
-		size_t end = expr.find(':', at);
-		if(end == ss_::npos)
-			end = expr.size();
-		parts.push_back(expr.substr(at, end - at));
-		at = end + 1;
-	}
-	int w = 0, h = 0;
-	if(parts.empty() || sscanf(cs(parts[0]), "%dx%d", &w, &h) != 2 ||
-			w <= 0 || h <= 0 || w > 1024 || h > 1024)
-		return false;
-	sv_<CombinePlace> places;
-	for(size_t i = 1; i < parts.size(); i++){
-		CombinePlace place;
-		int file_at = 0;
-		if(sscanf(cs(parts[i]), "%d,%d=%n", &place.x, &place.y,
-				&file_at) < 2 || file_at <= 0 ||
-				(size_t)file_at >= parts[i].size())
-			return false;
-		place.name = parts[i].substr(file_at);
-		places.push_back(place);
-	}
-	if(places.empty())
-		return false;
-	out = places;
-	w_out = w;
-	h_out = h;
-	return true;
-}
 
 // A sampling profiler for the module's Lua, behind BUILDAT_LUANTI_LUAPROF.
 //
@@ -808,10 +703,10 @@ struct Module: public interface::Module, public luanti::Interface,
 	// The media the game shipped, name -> path: a tile naming one can be
 	// handed to the client as it is, and a palette has to be read here
 	sm_<ss_, ss_> m_served_media;
-	// The colours of each palette that has been read, by file name
-	sm_<ss_, sv_<uint32_t>> m_palettes;
-	// How many frames each animated tile's strip holds, by tile name
-	sm_<ss_, size_t> m_frame_counts;
+	Registry m_registry{m_server, m_lua, m_lua_mutex, m_served_media,
+			m_texmods, [this](const sv_<ss_> &names){
+				serve_node_textures(names);
+			}};
 
 	// The write-behind buffer. core.set_node writes here and voxelworld sees
 	// it once per Luanti step, inside a single access() -- one commit covers
@@ -2365,7 +2260,7 @@ struct Module: public interface::Module, public luanti::Interface,
 			// two light nibbles, param2 above them. Nothing is packed by
 			// hand anywhere in this module because of this line.
 			reg->set_format(interface::VoxelFormat::luanti());
-			build_voxel_registry(reg);
+			m_registry.build_voxel_registry(reg);
 			// After the registry and before anything asks for a section: the
 			// save stores node names and the run owns the numbering, so the
 			// content ids the mods asked for while loading are the ids this
@@ -3414,7 +3309,6 @@ struct Module: public interface::Module, public luanti::Interface,
 
 	// core.__voxel_defs() -> add_voxel(), in id order, with a solid colour
 	// each until M3 brings the real tiles
-	#include "registry.h"
 
 	// The game's own media, named the way Luanti names it: by basename and
 	// nothing else, because a tile string says "default_stone.png" and says

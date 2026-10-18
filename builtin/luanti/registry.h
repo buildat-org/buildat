@@ -3,8 +3,162 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 //
 // What builtin/luanti reads the node definitions and the game's media with
-// for node_registry.h's builder, included by luanti.cpp inside struct
-// Module ([SPLITS]).
+// for node_registry.h's builder ([LUANTI_MODULAR]: a part of the Module,
+// owning the palettes and the frame counts it has read, with references to
+// the game's Lua state and the media the game run serves).
+#pragma once
+#include "core/types.h"
+#include "core/log.h"
+#include "interface/mutex.h"
+#include "interface/server.h"
+#include "interface/voxel.h"
+#include "main_context/api.h"
+#include "luanti/node_registry.h"
+#include "luanti/lua_util.h"
+#include <Image.h>
+#include <MemoryBuffer.h>
+#include <Context.h>
+#include <fstream>
+#include <sstream>
+#include <functional>
+extern "C" {
+#include <lua.h>
+}
+
+namespace luanti {
+
+namespace magic = Urho3D;
+
+// A colour for a node that has no texture yet, from its name, so that two
+// nodes are two colours and the same node is the same colour between runs.
+// M3 replaces every one of these with the node's real tiles; until then a
+// world is legible as blocks of colour, which is what M2 has to show.
+static void node_colour(const ss_ &name, uint8_t rgb[3])
+{
+	uint32_t h = 2166136261u;
+	for(char c : name){
+		h ^= (uint8_t)c;
+		h *= 16777619u;
+	}
+	// Kept well below white: these are albedo, and a game lighting a scene
+	// in HDR with a tone curve over it turns anything near white into a
+	// flat blown-out surface. 0.12 to 0.55 is roughly what the hand-drawn
+	// voxel textures in this tree sit at.
+	rgb[0] = 30 + (h & 0x6f);
+	rgb[1] = 30 + ((h >> 8) & 0x6f);
+	rgb[2] = 30 + ((h >> 16) & 0x6f);
+}
+
+// A media file's name as the client knows it. A namespace of its own, and
+// not the module's own "luanti/", because that is where client_file serves a
+// module's client_lua from: a game with a texture called module.lua would
+// otherwise land on top of this module's client half.
+static ss_ media_resource_name(const ss_ &file_name)
+{
+	return "luanti_media/"+file_name;
+}
+
+// A tile that is a texture modifier gets a name of its own, by what it is:
+// the same expression in two node definitions is one texture. The client is
+// what composes it; see the texmods packet.
+static ss_ texmod_resource_name(const ss_ &expr)
+{
+	uint32_t h = 2166136261u;
+	for(char c : expr){
+		h ^= (uint8_t)c;
+		h *= 16777619u;
+	}
+	char buf[48];
+	snprintf(buf, sizeof buf, "luanti_texmod/%08x.png", h);
+	return buf;
+}
+
+static ss_ node_texture_name(const ss_ &name)
+{
+	uint32_t h = 2166136261u;
+	for(char c : name){
+		h ^= (uint8_t)c;
+		h *= 16777619u;
+	}
+	char buf[32];
+	snprintf(buf, sizeof buf, "luanti_gen/node_%08x.png", (unsigned)h);
+	return buf;
+}
+
+
+
+// One picture placed into a "[combine:WxH:x,y=file:x,y=file" expression
+struct CombinePlace
+{
+	int x = 0, y = 0;
+	ss_ name;
+};
+
+// What that expression says, or false if it is not one: no nesting, and
+// what is placed is a file name rather than a modifier of its own. See
+// palette_image(), which is the only thing that needs a modifier composed
+// on this side at all.
+static bool parse_combine(const ss_ &expr, int &w_out, int &h_out,
+		sv_<CombinePlace> &out)
+{
+	static const ss_ COMBINE = "[combine:";
+	if(expr.compare(0, COMBINE.size(), COMBINE) != 0)
+		return false;
+	sv_<ss_> parts;
+	for(size_t at = COMBINE.size(); at <= expr.size(); ){
+		size_t end = expr.find(':', at);
+		if(end == ss_::npos)
+			end = expr.size();
+		parts.push_back(expr.substr(at, end - at));
+		at = end + 1;
+	}
+	int w = 0, h = 0;
+	if(parts.empty() || sscanf(cs(parts[0]), "%dx%d", &w, &h) != 2 ||
+			w <= 0 || h <= 0 || w > 1024 || h > 1024)
+		return false;
+	sv_<CombinePlace> places;
+	for(size_t i = 1; i < parts.size(); i++){
+		CombinePlace place;
+		int file_at = 0;
+		if(sscanf(cs(parts[i]), "%d,%d=%n", &place.x, &place.y,
+				&file_at) < 2 || file_at <= 0 ||
+				(size_t)file_at >= parts[i].size())
+			return false;
+		place.name = parts[i].substr(file_at);
+		places.push_back(place);
+	}
+	if(places.empty())
+		return false;
+	out = places;
+	w_out = w;
+	h_out = h;
+	return true;
+}
+
+struct Registry
+{
+	interface::Server *&m_server;
+	lua_State *&m_lua;
+	interface::Mutex &m_lua_mutex;
+	// The media the game shipped, name -> path, and the texture modifiers
+	// the client composes, resource -> expression: the game run's
+	sm_<ss_, ss_> &m_served_media;
+	sm_<ss_, ss_> &m_texmods;
+	// The tiles that wear a generated colour, served by the game run
+	std::function<void(const sv_<ss_> &)> serve_node_textures;
+	// The colours of each palette that has been read, by file name
+	sm_<ss_, sv_<uint32_t>> m_palettes;
+	// How many frames each animated tile's strip holds, by tile name
+	sm_<ss_, size_t> m_frame_counts;
+
+	Registry(interface::Server *&server, lua_State *&lua,
+			interface::Mutex &lua_mutex, sm_<ss_, ss_> &served_media,
+			sm_<ss_, ss_> &texmods,
+			std::function<void(const sv_<ss_> &)> serve_node_textures):
+		m_server(server), m_lua(lua), m_lua_mutex(lua_mutex),
+		m_served_media(served_media), m_texmods(texmods),
+		serve_node_textures(serve_node_textures)
+	{}
 
 	// A tile the client can load as it stands: a plain file name the game
 	// shipped. Anything with a texture modifier in it -- ^ for an overlay,
@@ -278,8 +432,8 @@
 	// The game's media, as node_registry.h's builder asks for it
 	struct GameMedia: luanti_registry::Media
 	{
-		Module *m;
-		GameMedia(Module *m): m(m){}
+		Registry *m;
+		GameMedia(Registry *m): m(m){}
 		ss_ texture(const ss_ &tile){ return m->texture_of_tile(tile); }
 		size_t frame_count(const ss_ &tile, float aspect)
 		{ return m->tile_frame_count(tile, aspect); }
@@ -342,7 +496,8 @@
 		d.palette = table_string(L, "palette");
 		d.mesh = table_string(L, "mesh");
 		d.raillike_group = (int)table_number(L, "raillike_group", 0);
-		d.liquid_range = (int)table_number(L, "liquid_range", LIQUID_LEVELS);
+		d.liquid_range = (int)table_number(L, "liquid_range",
+				luanti_shapes::LIQUID_LEVELS);
 		// What the node glows with, which is what lamp light floods from; a
 		// Luanti game's mechanics read that light
 		d.light_source = (uint8_t)std::min(15.0,
@@ -426,3 +581,7 @@
 					in_registry, n);
 		}
 	}
+};
+
+}
+// vim: set noet ts=4 sw=4:
