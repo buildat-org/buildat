@@ -1668,16 +1668,105 @@ end
 --
 local music = load("main/music.lua")
 music.new(magic, log, scene)
-local mood = {now = nil, seen = nil, held = 0, since = 0}
+local mood = {now = nil, seen = nil, held = 0, since = 0, dark = false,
+	dark_t = 0}
+-- [SKELDAT_CAVE_MUSIC_DARK] Dark air near (x, y, z): an open voxel with no
+-- sky or lamp light, reached through open voxels in 24 steps (2000
+-- visited at most), or anywhere within 6 through the rock. at(x, y, z)
+-- gives open, dark for a voxel, nil where the map is not loaded
+-- simplified: the walk's 24 is steps through air, not a straight distance
+function mood.dark_near(at, x, y, z)
+	local seen, q, head = {}, {{x, y, z, 0}}, 1
+	local function key(a, b, c)
+		return (a + 4096) * 67108864 + (b + 4096) * 8192 + (c + 4096)
+	end
+	seen[key(x, y, z)] = true
+	local visited = 0
+	while head <= #q and visited < 2000 do
+		local c = q[head]
+		head = head + 1
+		visited = visited + 1
+		local open, dark = at(c[1], c[2], c[3])
+		if open and dark then
+			return true
+		end
+		if open and c[4] < 24 then
+			for _, d in ipairs({{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0},
+					{0, 0, 1}, {0, 0, -1}}) do
+				local a, b, e = c[1] + d[1], c[2] + d[2], c[3] + d[3]
+				local k = key(a, b, e)
+				if not seen[k] then
+					seen[k] = true
+					q[#q + 1] = {a, b, e, c[4] + 1}
+				end
+			end
+		end
+	end
+	for dz = -6, 6 do
+		for dy = -6, 6 do
+			for dx = -6, 6 do
+				local open, dark = at(x + dx, y + dy, z + dz)
+				if open and dark then
+					return true
+				end
+			end
+		end
+	end
+	return false
+end
+-- The made-up caves of the plan's check: a passage 1 wide and 2 high
+-- along x, lit to its dark part at 20 or 30; sealed dark air 4 or 10
+-- behind its side wall
+do
+	local function cave(dark_x, pocket_z)
+		return function(x, y, z)
+			if pocket_z and x == 0 and y == 1 and z == pocket_z then
+				return true, true
+			end
+			if z == 0 and (y == 1 or y == 2) and x >= 0 and x <= 40 then
+				return true, dark_x ~= nil and x >= dark_x
+			end
+			return false, false
+		end
+	end
+	local got = {mood.dark_near(cave(20), 0, 1, 0),
+		mood.dark_near(cave(30), 0, 1, 0), mood.dark_near(cave(nil, 4), 0, 1, 0),
+		mood.dark_near(cave(nil, 10), 0, 1, 0)}
+	if got[1] and not got[2] and got[3] and not got[4] then
+		log:info("skeldat: cave dark: self test passed")
+	else
+		log:error("skeldat: cave dark: self test failed: " ..
+				table.concat({tostring(got[1]), tostring(got[2]),
+					tostring(got[3]), tostring(got[4])}, " "))
+	end
+end
 local function mood_here()
 	if mood.since < 5 then
 		return nil
 	end
-	local v = voxelworld.get_static_voxel(buildat.Vector3(
-			math.floor(player.x + 0.5), math.floor(player.y + 1.6 + 0.5),
-			math.floor(player.z + 0.5)))
-	if v ~= nil and voxelworld.get_voxel_registry():light_sky_of(v) < 8 then
-		return "caves"
+	local hx, hy, hz = math.floor(player.x + 0.5),
+			math.floor(player.y + 1.6 + 0.5), math.floor(player.z + 0.5)
+	local v = voxelworld.get_static_voxel(buildat.Vector3(hx, hy, hz))
+	local reg = voxelworld.get_voxel_registry()
+	if v ~= nil and reg:light_sky_of(v) < 8 then
+		-- [SKELDAT_CAVE_MUSIC_DARK] and dark air near, looked for every
+		-- 0.5 s, the answer kept between
+		if mood.dark_t <= 0 then
+			mood.dark_t = 0.5
+			mood.dark = mood.dark_near(function(x, y, z)
+				local w = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+				if w == nil then
+					return false, false
+				end
+				local def = reg:get_by_id(reg:id_of(w))
+				local open = def ~= nil and not def.physically_solid
+				return open, open and reg:light_sky_of(w) == 0 and
+						reg:light_lamp_of(w) == 0
+			end, hx, hy, hz)
+		end
+		if mood.dark then
+			return "caves"
+		end
 	end
 	if fog.want >= 0.5 then
 		return "danger"
@@ -1688,6 +1777,7 @@ local function mood_here()
 end
 local function update_music(dt)
 	mood.since = mood.since + dt
+	mood.dark_t = mood.dark_t - dt
 	local m = mood_here()
 	if m ~= mood.seen then
 		mood.seen, mood.held = m, 0

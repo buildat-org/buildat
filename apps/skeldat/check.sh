@@ -2207,7 +2207,9 @@ echo "the world at exit: w1 resumed, the menu after its close, a deleted one's n
 # pickup as its own; the other the landing and the pickup placed, neither
 # near nor own. The sounds' self check hashes the pickup, the user's take
 # as made, and logs its level ([SKELDAT_PICKUP_TAKE]), and the step on
-# grass, and the other steps on grass ([SKELDAT_STEP_GRASS]); the camera has the
+# grass, and the other steps on grass ([SKELDAT_STEP_GRASS]); the cave
+# music's dark air search passes its self test of the plan's made-up caves
+# ([SKELDAT_CAVE_MUSIC_DARK]); the camera has the
 # sound listener the placed sounds need ([SKELDAT_LISTENER]).
 log44="$t/srv44.log"
 BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
@@ -2243,8 +2245,9 @@ grep -aq "picks up an arrow" "$log44" &&
 grep -aqE "self-check passed, bow [0-9a-f]{8} \([0-9]+ samples\), pickup [0-9a-f]{8} \([0-9]+ samples\), step_grass [0-9a-f]{8} " "$t/snd1.log" &&
 	grep -aq "skeldat: step skeldat:grass" "$t/snd2.log" &&
 	grep -aq "levels: pickup peak " "$t/snd1.log" &&
-	grep -aq "skeldat: the sound listener on the camera" "$t/snd1.log" ||
-	fail "no pickup or step_grass hash, level line, sound listener or step on grass ($t/snd1.log, $t/snd2.log)"
+	grep -aq "skeldat: the sound listener on the camera" "$t/snd1.log" &&
+	grep -aq "skeldat: cave dark: self test passed" "$t/snd1.log" ||
+	fail "no pickup or step_grass hash, level line, sound listener, step on grass or cave dark self test ($t/snd1.log, $t/snd2.log)"
 echo "sounds heard: $(grep -a "levels: " "$t/snd1.log" | head -1 | sed 's/.*levels: //; s/, the draw.*//')"
 # 41. The world's making over its map ([SKELDAT_MAKING_MAP]): a new 512
 # world of seed 2. client1 joined before the making waits in the stripes
