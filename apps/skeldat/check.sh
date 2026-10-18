@@ -1895,8 +1895,10 @@ echo "skip: to dawn $dawn"
 # moon matched between them keep their angle from it -- the median change
 # under half a degree over five or more (the old turn about Z: 1.4)
 log38="$t/srv38.log"
+# At 1 5: nothing higher toward the moon and no tree near, on the own
+# terrain (by the spawn a hill hid half the moon)
 BUILDAT_SKELDAT_WORLD=sky BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.98 BUILDAT_SKELDAT_DAY=240 \
+	BUILDAT_SKELDAT_TIME=0.98 BUILDAT_SKELDAT_DAY=240 BUILDAT_SKELDAT_SPAWN="1 5" \
 	start_server "$log38" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv38" -C "$t/srv.cache" -l 3 || fail "the server ($log38)"
