@@ -1242,3 +1242,156 @@
 				"luanti:player_formspec", flat);
 		return 0;
 	}
+
+	// __luanti_accounts(cmd, a, b): Luanti's kicks and bans, which are
+	// builtin/accounts' ([VANILLA_PUBLIC] 4). A player's name is their
+	// account's.
+	//   "kick", name, reason -> "" when done, else why not
+	//   "ban", name          -> the same
+	//   "unban", name or address -> the same
+	//   "ban_list"           -> "name|address, ..."
+	//   "ip", name           -> the address, or ""
+	static int l_accounts(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const ss_ cmd = luaL_checkstring(L, 1);
+		const ss_ a = luaL_optstring(L, 2, "");
+		const ss_ b = luaL_optstring(L, 3, "");
+		ss_ out;
+		accounts::access(self->m_server, [&](accounts::Interface *i){
+			const accounts::PeerId peer = a.empty() ? 0 : i->find_peer(a);
+			// A world's privileges reach this server's accounts: kick and
+			// ban leave an admin alone, and unban lifts what a world banned,
+			// not an admin's ban ([SECURITY_RUN_1])
+			if(cmd == "kick"){
+				if(!peer)
+					out = a+" is not here";
+				else if(i->is_admin(a))
+					out = "An admin is not kicked";
+				else
+					i->kick(peer, b.empty() ? "Kicked" : b);
+			} else if(cmd == "ban"){
+				out = i->ban(a, "the game");
+			} else if(cmd == "unban"){
+				out = i->unban(a, "the game");
+			} else if(cmd == "ban_list"){
+				for(const ss_ &ban : i->ban_list())
+					out += (out.empty() ? "" : ", ")+ban;
+			} else if(cmd == "ip"){
+				out = peer ? i->address_of(peer) : "";
+			}
+		});
+		lua_pushstring(L, out.c_str());
+		return 1;
+	}
+
+	// __luanti_forceload(x, y, z, wanted) -> whether it is kept now
+	static int l_forceload(lua_State *L)
+	{
+		Module *self = module_of(L);
+		const int32_t x = (int32_t)luaL_checkinteger(L, 1);
+		const int32_t y = (int32_t)luaL_checkinteger(L, 2);
+		const int32_t z = (int32_t)luaL_checkinteger(L, 3);
+		const bool wanted = lua_toboolean(L, 4) != 0;
+		if(self->m_section_size.getX() <= 0){
+			lua_pushboolean(L, 0);
+			return 1;
+		}
+		const uint64_t key = section_key(
+				self->section_of(pv::Vector3DInt32(x, y, z)));
+		if(wanted){
+			self->m_world.m_forceloaded[key]++;
+		} else {
+			auto it = self->m_world.m_forceloaded.find(key);
+			if(it != self->m_world.m_forceloaded.end() && --it->second <= 0)
+				self->m_world.m_forceloaded.erase(it);
+		}
+		log_v(MODULE, "forceload: %zu sections kept",
+				self->m_world.m_forceloaded.size());
+		// The points are pushed once a step; this only says what they are
+		lua_pushboolean(L, wanted ? 1 : 0);
+		return 1;
+	}
+
+	// __luanti_progress(text): the mod loader saying which mod it is on
+	static int l_progress(lua_State *L)
+	{
+		Module *self = module_of(L);
+		size_t len = 0;
+		const char *p = luaL_checklstring(L, 1, &len);
+		self->progress(ss_(p ? p : "", len));
+		return 0;
+	}
+
+	// Every C function the game's Lua has, as the globals bootstrap.lua
+	// and the vendored builtin call ([LUANTI_MODULAR]: out of run_game())
+	void register_lua_functions()
+	{
+		set_global_cfunction("__luanti_log", l_log);
+		set_global_cfunction("__luanti_accounts", l_accounts);
+		set_global_cfunction("__luanti_get_us_time", l_get_us_time);
+		set_global_cfunction("__luanti_list_dir", l_list_dir);
+		set_global_cfunction("__luanti_path_exists", l_path_exists);
+		set_global_cfunction("__luanti_create_directories", l_create_directories);
+		set_global_cfunction("__luanti_encode_png", l_encode_png);
+		set_global_cfunction("__luanti_sha1", l_sha1);
+		set_global_cfunction("__luanti_sha256", l_sha256);
+		set_global_cfunction("__luanti_compress", l_compress);
+		set_global_cfunction("__luanti_decompress", l_decompress);
+		set_global_cfunction("__luanti_refshot_mark", l_refshot_mark);
+		set_global_cfunction("__luanti_emit", l_emit);
+		set_global_cfunction("__luanti_set_node", l_set_node);
+		set_global_cfunction("__luanti_get_node", l_get_node);
+		set_global_cfunction("__luanti_region_to_world", l_region_to_world);
+		set_global_cfunction("__luanti_get_region", l_get_region);
+		set_global_cfunction("__luanti_get_region_data", l_get_region_data);
+		set_global_cfunction("__luanti_set_region_data", l_set_region_data);
+		set_global_cfunction("__luanti_noise_value", l_noise_value);
+		set_global_cfunction("__luanti_noise_map", l_noise_map);
+		set_global_cfunction("__luanti_bounded_pcall", l_bounded_pcall);
+		set_global_cfunction("__luanti_forceload", l_forceload);
+		set_global_cfunction("__luanti_active_boxes", l_active_boxes);
+		set_global_cfunction("__luanti_loaded_boxes", l_loaded_boxes);
+		set_global_cfunction("__luanti_find_ids", l_find_ids);
+		set_global_cfunction("__luanti_liquid_edges", l_liquid_edges);
+		set_global_cfunction("__luanti_find_nodes", l_find_nodes);
+		set_global_cfunction("__luanti_ids_at", l_ids_at);
+		set_global_cfunction("__luanti_show_objects_to", l_show_objects_to);
+		set_global_cfunction("__luanti_show_object_props_to",
+				l_show_object_props_to);
+		set_global_cfunction("__luanti_send_inventory", l_send_inventory);
+		set_global_cfunction("__luanti_send_player_pos", l_send_player_pos);
+		set_global_cfunction("__luanti_spawn_level", l_spawn_level);
+		set_global_cfunction("__luanti_biome_at", l_biome_at);
+		set_global_cfunction("__luanti_relight", l_relight);
+		set_global_cfunction("__luanti_send_chat", l_send_chat);
+		set_global_cfunction("__luanti_send_hud", l_send_hud);
+		set_global_cfunction("__luanti_send_physics", l_send_physics);
+		set_global_cfunction("__luanti_send_privs", l_send_privs);
+		set_global_cfunction("__luanti_send_camera", l_send_camera);
+		set_global_cfunction("__luanti_send_modes", l_send_modes);
+		set_global_cfunction("__luanti_send_day_night", l_send_day_night);
+		set_global_cfunction("__luanti_send_sound", l_send_sound);
+		set_global_cfunction("__luanti_sound_file", l_sound_file);
+		set_global_cfunction("__luanti_sound_files", l_sound_files);
+		set_global_cfunction("__luanti_add_media", l_add_media);
+		set_global_cfunction("__luanti_lua_profile", l_lua_profile);
+		set_global_cfunction("__luanti_copy_ints", l_copy_ints);
+		set_global_cfunction("__luanti_nest_2d", l_nest_2d);
+		set_global_cfunction("__luanti_nest_3d", l_nest_3d);
+		set_global_cfunction("__luanti_send_particles", l_send_particles);
+		set_global_cfunction("__luanti_send_sky", l_send_sky);
+		set_global_cfunction("__luanti_send_lights", l_send_lights);
+		set_global_cfunction("__luanti_send_time", l_send_time);
+		set_global_cfunction("__luanti_show_formspec", l_show_formspec);
+		set_global_cfunction("__luanti_request_shutdown", l_request_shutdown);
+		set_global_cfunction("__luanti_player_formspec", l_player_formspec);
+		set_global_cfunction("__luanti_send_node_inventory",
+				l_send_node_inventory);
+		set_global_cfunction("__luanti_progress", l_progress);
+		set_global_cfunction("__luanti_step_peak", l_step_peak);
+		set_global_cfunction("__luanti_flush_node_writes",
+				l_flush_node_writes);
+		set_global_cfunction("__luanti_loaded_at", l_loaded_at);
+		set_global_cfunction("__luanti_section_state", l_section_state);
+	}

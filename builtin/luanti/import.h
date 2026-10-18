@@ -1058,5 +1058,45 @@ struct Importer
 	}
 };
 
+// The import's and the registry's self tests, run at start
+inline void check_params()
+{
+	// The LBM list a Luanti world carries, which decides what this
+	// module leaves alone in an imported world
+	assert(Importer::lbm_names_of("a:one~0;b:two~1234;") == "a:one;b:two;");
+	assert(Importer::lbm_names_of("a:one~0") == "a:one;");
+	assert(Importer::lbm_names_of("") == "");
+	// A name with no time is not a record and is dropped rather than
+	// taken as a name, and a record with no name is dropped too
+	assert(Importer::lbm_names_of("nope;a:one~0;") == "a:one;");
+	assert(Importer::lbm_names_of("~5;") == "");
+
+	// A palette named as a "[combine" expression is the picture it
+	// places, cut to the size it names
+	{
+		int w = 0, h = 0;
+		sv_<CombinePlace> places;
+		assert(parse_combine(
+				"[combine:16x2:0,0=mcl_core_palette_foliage.png",
+				w, h, places));
+		assert(w == 16 && h == 2);
+		assert(places.size() == 1);
+		assert(places[0].x == 0 && places[0].y == 0);
+		assert(places[0].name == "mcl_core_palette_foliage.png");
+		places.clear();
+		assert(parse_combine("[combine:4x4:0,0=a.png:1,2=b.png",
+				w, h, places));
+		assert(places.size() == 2);
+		assert(places[1].x == 1 && places[1].y == 2 &&
+				places[1].name == "b.png");
+		places.clear();
+		assert(!parse_combine("mcl_core_palette_grass.png", w, h, places));
+		assert(!parse_combine("[multiply:#ff0000", w, h, places));
+		assert(!parse_combine("[combine:16x2", w, h, places));
+		assert(!parse_combine("[combine:16x2:0,0=", w, h, places));
+		assert(!parse_combine("[combine:0x0:0,0=a.png", w, h, places));
+	}
+}
+
 }
 // vim: set noet ts=4 sw=4:
