@@ -535,8 +535,7 @@ struct MapgenParams
 		ss_ names;
 		if(m_store)
 			m_store->get("lbm_introduced", names);
-		lua_pushstring(m_lua, names.c_str());
-		lua_setglobal(m_lua, "__luanti_lbm_introduced");
+		set_global_string(m_lua, "__luanti_lbm_introduced", names);
 	}
 
 	ss_ mapgen_name()

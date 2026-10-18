@@ -87,6 +87,7 @@ extern "C" {
 #include "luanti/mapgen_params.h"
 #include "luanti/registry.h"
 #include "luanti/import.h"
+#include "luanti/clock.h"
 
 using interface::Event;
 namespace pv = PolyVox;
@@ -577,10 +578,9 @@ struct Module: public interface::Module, public luanti::Interface,
 	bool m_had_node_meta = false;
 	// The same for the players; a world nobody has been in stays that way
 	bool m_had_players = false;
-	// [COMPAT_BREAK_07] 8h: a players row or a clock this cannot read (a
-	// newer Buildat's) is kept rather than written over
+	// [COMPAT_BREAK_07] 8h: a players row this cannot read (a newer
+	// Buildat's) is kept rather than written over
 	bool m_players_unreadable = false;
-	bool m_clock_unreadable = false;
 	// Which client a player is, so that what is sent to one has somewhere to
 	// go, and which player a client is, for what comes back. Whoever names a
 	// player says which peer it is; see add_player().
@@ -944,7 +944,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		flush_node_writes();
 		sv_<std::pair<ss_, ss_>> writes;
 		m_save_sink = &writes;
-		save_clock();
+		m_clock.save_clock();
 		save_players();
 		copy_loaded_meta();
 		m_save_sink = nullptr;
@@ -1024,135 +1024,11 @@ struct Module: public interface::Module, public luanti::Interface,
 		}
 	}
 
-	// The clock, in the save's object store beside the map: a world put down
-	// at dusk is picked up at dusk. Luanti keeps the same three numbers in
-	// its env_meta.txt.
-	// Written with every checkpoint ([SAVE_CHECKPOINT]), as Luanti writes
-	// its own with the map.
-	// The world's seed, which a mapgen is a function of. Luanti keeps it in
-	// map_meta.txt and makes one up when a world is created; here it is in
-	// the save beside the clock, and the importer takes the imported world's
-	// if it has one. What reads it is core.get_mapgen_setting("seed") and
-	// the block seed every on_generated is given.
-	int64_t m_seed = 0;
-	// Whether this save is one nobody has opened before; see load_seed()
-	bool m_world_is_new = false;
-	MapgenParams m_mapgen{m_lua, m_lua_mutex, m_store, m_world_is_new};
-
-	void load_seed()
-	{
-		ss_ data;
-		if(m_store && m_store->get("seed", data) && !data.empty()){
-			// Unsigned, because Luanti's is: a world's seed is a u64 there
-			// and half of them do not fit in the signed one this keeps. The
-			// bits are what a mapgen is a function of, so they are what is
-			// kept.
-			m_seed = (int64_t)strtoull(data.c_str(), nullptr, 10);
-		} else {
-			// The first thing a world is asked for is its seed, so a save
-			// with none is a save nobody has played yet. What that decides
-			// is what mapgen it gets; see MapgenParams::mapgen_name().
-			m_world_is_new = true;
-			// Luanti's own fixed_map_seed, which is what makes one world the
-			// same world twice: a benchmark that generates terrain has to
-			// generate the same terrain, and a bug report about a place has
-			// to be able to name it. Read the way Luanti reads it -- only
-			// when a world is being made, never over one that has a seed.
-			const ss_ fixed = m_mapgen.setting_string("fixed_map_seed");
-			if(!fixed.empty()){
-				m_seed = (int64_t)strtoull(fixed.c_str(), nullptr, 10);
-				log_i(MODULE, "The world's seed is fixed_map_seed, %s",
-						cs(itos(m_seed)));
-			} else {
-				// Somewhere nobody has been before: the clock is what there
-				// is to be random with here, and a world is seeded once
-				m_seed = (int64_t)interface::os::time_us();
-				m_seed ^= (int64_t)(size_t)this;
-			}
-			if(m_store)
-				m_store->set("seed", itos(m_seed));
-		}
-		set_global_string("__luanti_world_seed", itos(m_seed));
-		log_v(MODULE, "The world's seed is %s", cs(itos(m_seed)));
-	}
-
-	void set_seed(int64_t seed)
-	{
-		m_seed = seed;
-		if(m_store)
-			m_store->set("seed", itos(m_seed));
-		set_global_string("__luanti_world_seed", itos(m_seed));
-	}
-
-	// A scripted run cannot wait for morning, and two pictures taken at
-	// different hours are not comparable -- which is what the reference
-	// comparison in doc/plan/luanti_module_plan.md is. Spelled the way
-	// extensions/luanti_client spells them, because it is the other half of
-	// that comparison: BUILDAT_LUANTI_FORCE_TIME is a Luanti time of day
-	// (0..24000, so 9000 is mid-morning) and BUILDAT_LUANTI_FORCE_DAY is
-	// noon without having to remember 12000.
-	//
-	// The clock stops as well as moves: a screenshot taken a minute into a
-	// run should be the same picture as one taken at the start, and
-	// time_speed is Luanti's own way of saying so.
-	void force_clock()
-	{
-		const char *t = getenv("BUILDAT_LUANTI_FORCE_TIME");
-		const char *d = getenv("BUILDAT_LUANTI_FORCE_DAY");
-		double tod = -1.0;
-		if(t != nullptr && t[0] != '\0')
-			tod = atof(t) / 24000.0;
-		else if(d != nullptr && d[0] != '\0')
-			tod = 0.5;
-		if(tod < 0.0)
-			return;
-		char buf[200];
-		snprintf(buf, sizeof buf,
-				"core.set_timeofday(%f) "
-				"core.settings:set('time_speed', '0') "
-				"core.__send_time()", tod);
-		run_chunk_string(buf, "force_clock");
-		log_i(MODULE, "The clock is pinned at %.0f of Luanti's 24000 and "
-				"does not run", tod * 24000.0);
-	}
-
-	void load_clock()
-	{
-		if(!m_store)
-			return;
-		ss_ data;
-		if(!m_store->get("clock", data))
-			return;
-		double time_of_day = 0.5, game_time = 0.0;
-		int32_t day_count = 0;
-		{
-			std::istringstream is(data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			uint8_t version = 0;
-			ar(version);
-			// A newer one is kept as it is, not reset to noon
-			if(version != 1){
-				log_e(MODULE, "The save's clock is version %i and this build "
-						"reads 1; it is not written over", (int)version);
-				m_clock_unreadable = true;
-				return;
-			}
-			ar(time_of_day, game_time, day_count);
-		}
-		lua_State *L = m_lua;
-		interface::MutexScope ms(m_lua_mutex);
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__set_clock");
-		lua_pushnumber(L, time_of_day);
-		lua_pushnumber(L, game_time);
-		lua_pushnumber(L, day_count);
-		if(lua_pcall(L, 3, 0, 0) != 0)
-			log_w(MODULE, "__set_clock(): %s", lua_tostring(L, -1));
-		lua_settop(L, base);
-		log_v(MODULE, "Clock read from the save: day %i, time %.4f, "
-				"%.0f seconds played", (int)day_count, time_of_day, game_time);
-	}
+	// [LUANTI_MODULAR] clock.h's and mapgen_params.h's, each with the
+	// other's
+	GameClock m_clock{m_lua, m_lua_mutex, m_store, m_mapgen,
+			[this](const ss_ &key, const ss_ &value){ store_set(key, value); }};
+	MapgenParams m_mapgen{m_lua, m_lua_mutex, m_store, m_clock.m_world_is_new};
 
 	// Step 5c of doc/plan/world_persistence_plan.md: what hangs off the
 	// voxels -- a chest's contents, a sign's text -- goes into the save
@@ -1446,34 +1322,6 @@ struct Module: public interface::Module, public luanti::Interface,
 		lua_settop(L, base);
 		m_had_players = (n != 0);
 		log_v(MODULE, "Players read from the save: %i", n);
-	}
-
-	void save_clock()
-	{
-		if(!m_store || !m_lua || m_clock_unreadable)
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__get_clock");
-		if(lua_pcall(L, 0, 3, 0) != 0){
-			log_w(MODULE, "__get_clock(): %s", lua_tostring(L, -1));
-			lua_settop(L, base);
-			return;
-		}
-		double time_of_day = lua_tonumber(L, -3);
-		double game_time = lua_tonumber(L, -2);
-		int32_t day_count = (int32_t)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar((uint8_t)1, time_of_day, game_time, day_count);
-		}
-		store_set("clock", os.str());
-		log_v(MODULE, "Clock written to the save: day %i, time %.4f, "
-				"%.0f seconds played", (int)day_count, time_of_day, game_time);
 	}
 
 	// The server ticks at 30 Hz and Luanti steps at 0.09 s, so a tick's
@@ -2255,7 +2103,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		// generator is a function of and gets one back.
 		luanti_mapgen::Params params;
 		params.mgname = m_mapgen.mapgen_name();
-		params.seed = m_seed;
+		params.seed = m_clock.m_seed;
 		params.singlenode_word = singlenode_word();
 		params.content_ids = m_mapgen.content_ids_by_name();
 		params.node_props = m_mapgen.mapgen_node_props();
@@ -2667,7 +2515,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		run_on_generated_box(x0, y0, z0, x0 + CHUNK_NODES - 1,
 				y0 + CHUNK_NODES - 1, z0 + CHUNK_NODES - 1,
 				luanti_mapgen::chunk_blockseed(c.getX(), c.getY(), c.getZ(),
-						m_seed),
+						m_clock.m_seed),
 				gennotify_string(events), maps);
 		auto pins = m_chunk_pins.find(chunk_key(c.getX(), c.getY(), c.getZ()));
 		if(pins != m_chunk_pins.end()){
@@ -2894,7 +2742,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	// from: the world's seed and where the block is
 	int32_t block_seed(const pv::Vector3DInt16 &p)
 	{
-		return (int32_t)(uint32_t)((uint64_t)m_seed % 0x100000000ULL) +
+		return (int32_t)(uint32_t)((uint64_t)m_clock.m_seed % 0x100000000ULL) +
 				(int32_t)p.getZ() * 38134234 +
 				(int32_t)p.getY() * 42123 +
 				(int32_t)p.getX() * 23;
@@ -3669,8 +3517,8 @@ struct Module: public interface::Module, public luanti::Interface,
 		m_pending_lua.clear();
 		// Before the mods load, because a mod can ask the time while it
 		// does, and after the builtin, because that is where the clock is
-		load_clock();
-		load_seed();
+		m_clock.load_clock();
+		m_clock.load_seed();
 		// Which mapgen this world is, before the mods load, because a mod
 		// reads it while it loads -- VoxeLibre registers no biomes at all
 		// for a singlenode world. The save's own answer, which for an
@@ -3732,7 +3580,7 @@ struct Module: public interface::Module, public luanti::Interface,
 
 		// Last, so that it is the hour whatever the save or the imported
 		// world said
-		force_clock();
+		m_clock.force_clock();
 
 		m_server->emit_event("luanti:game_loaded", new GameLoaded(m_scene));
 	}

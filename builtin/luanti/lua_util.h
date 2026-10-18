@@ -106,6 +106,14 @@ static inline int l_traceback(lua_State *L)
 	return 1;
 }
 
+// A global string in the game's Lua
+static inline void set_global_string(lua_State *L, const char *name,
+		const ss_ &value)
+{
+	lua_pushstring(L, value.c_str());
+	lua_setglobal(L, name);
+}
+
 // A chunk run in the game's Lua, with a traceback; throws on an error
 static inline void run_chunk_string(lua_State *L, interface::Mutex &mutex,
 		const ss_ &chunk, const ss_ &chunkname)
