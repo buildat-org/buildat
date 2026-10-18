@@ -1122,7 +1122,8 @@ echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(gr
 # ramp of 2 and lands, lying flat (Shift held from the boarding on) goes
 # through a wall's hole one high, and a wall of 3 stops it; walked off the side down
 # 8 onto a flat, S stops it within the brake's reach. The camera looks
-# back over the first ride, which goes on straight ([SKELDAT_BOARD_KEYS]). The server pulls
+# back over the first ride, which goes on straight ([SKELDAT_BOARD_KEYS];
+# W held over it, so Camera steer leaves it, [SKELDAT_CAMERA_STEER]). The server pulls
 # back none of it, and pulls back a board the drive forces to 35 on the
 # flat. client2 sees client1 on a board and lying flat, then walks into
 # a ring of water 2 round the spawn and splashes ([SKELDAT_BOARD_WATER]).
@@ -1138,11 +1139,11 @@ look 90 0
 delay 1000
 keydown W
 wait_log 5000 skeldat: on the board
-keyup W
 look 270 0
 keydown Left Shift
 wait_log 20000 skeldat: walking
 keyup Left Shift
+keyup W
 delay 1000
 look 0 0
 delay 500

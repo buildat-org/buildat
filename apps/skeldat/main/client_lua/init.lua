@@ -1343,6 +1343,9 @@ end
 function game.board_off()
 	return player.board_off
 end
+-- [SKELDAT_CAMERA_STEER] The board turns toward the look unless forward
+-- is held; the player's choice, on by default
+player.camera_steer = buildat.storage_read("camera_steer") ~= "0"
 function game.toggle_board()
 	player.board_off = not player.board_off
 	buildat.storage_write("board_off", player.board_off and "1" or "0")
@@ -1588,6 +1591,14 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 	log:info("skeldat: touch controls on, look sensitivity " ..
 			touch.sensitivity)
 end
+game.settings_sections[#game.settings_sections + 1] = {title = "Skateboard",
+		draw = function(_, sui)
+	sui.toggle("Camera steer", player.camera_steer, function(on)
+		player.camera_steer = on
+		buildat.storage_write("camera_steer", on and "1" or "0")
+		log:info("skeldat: camera steer " .. (on and "on" or "off"))
+	end)
+end}
 -- A finger held still, and its lift: the left button's press and release;
 -- and the stick's strokes logged, where each starts and ends
 local touch_dig, touch_turned, touch_turn_t, stroke = false, nil, 0, nil
@@ -1862,7 +1873,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		pitch = math.max(-89, math.min(89, pitch + m.y * 0.12))
 	end
 	local dead = game.stats.hp <= 0
-	local fx, fz, r, speed = 0, 0, 0, nil
+	local fx, fz, r, speed, forward = 0, 0, 0, nil, false
 	local s, c = math.sin(math.rad(yaw)), math.cos(math.rad(yaw))
 	if not dead then
 		local f = (down("forward") and 1 or 0) - (down("back") and 1 or 0)
@@ -1871,14 +1882,17 @@ magic.SubscribeToEvent("Update", function(_, d)
 		-- speed; on the board its sideways push steers, and pulled back
 		-- (touch.lua's held back) it brakes
 		local stick = touch and not held and touch.stick
+		forward = down("forward")
 		if stick and (stick.x ~= 0 or stick.y ~= 0) then
 			f, r = -stick.y, stick.x
 			speed = math.sqrt(f * f + r * r)
+			forward = -stick.y > 0.3
 		end
 		fx, fz = s * f + c * r, c * f - s * r
 	end
 	-- [SKELDAT_SKATEBOARD] On the board the left and right keys turn it
-	-- ([SKELDAT_BOARD_KEYS]; the look is free) and the back key brakes;
+	-- ([SKELDAT_BOARD_KEYS]), toward the look with Camera steer and
+	-- forward not held ([SKELDAT_CAMERA_STEER]); the back key brakes;
 	-- the board's own box under the feet
 	if board_cheat then
 		player.board = player.board or {k = 0}
@@ -1890,7 +1904,8 @@ magic.SubscribeToEvent("Update", function(_, d)
 		player:update(dt, {x = fx, z = fz, speed = speed,
 				jump = not dead and down("jump"),
 				sneak = not dead and down("sneak"), fast = player.fast,
-				turn = r, brake = not dead and down("back")})
+				turn = r, brake = not dead and down("back"),
+				look_x = s, look_z = c, forward = forward})
 	end
 	local b = player.board
 	if (b ~= nil) ~= board_shown then

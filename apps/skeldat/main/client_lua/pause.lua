@@ -288,9 +288,10 @@ return function(game, declare_keys)
 				.. "place it to lure them where you want.",
 		"The bow (three sticks and three bones; arrows: a bone over a "
 				.. "stick): hold the left button to draw, release to shoot.",
-		"Walking fast down a step you ride a skateboard: left and right "
-				.. "steer, back brakes, jump jumps (once more in the air), "
-				.. "sneak lies flat.",
+		"Walking fast down a step you ride a skateboard: it turns where "
+				.. "you look; with forward held, left and right steer "
+				.. "(Camera steer, in the settings). Back brakes, jump "
+				.. "jumps (once more in the air), sneak lies flat.",
 	}
 	local function show_intro(days)
 		close()

@@ -822,11 +822,23 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		self.board = nil
 	end
 	-- The turn keys' angle this step, at a rate falling with the speed
-	-- s; on the ground twice the air's (the user's)
+	-- s; on the ground twice the air's (the user's). [SKELDAT_CAMERA_STEER]
+	-- self.camera_steer, forward not held (wish.forward): toward the look
+	-- (wish.look_x, look_z) turned by the turn keys' 90 degrees -- held
+	-- since the mount too (wish.steer) -- at the rate of a full turn,
+	-- stopping on it, the shorter way round
 	local function turn_angle(wish, dt, s)
-		local t = math.max(-1, math.min(1, wish.turn or 0))
-		return t * M.BOARD_TURN / (1 + s / 8) * dt *
+		local rate = M.BOARD_TURN / (1 + s / 8) * dt *
 				(self.on_ground and 2 or 1)
+		local b = self.board
+		if self.camera_steer and wish.look_x and not wish.forward and b then
+			local t = math.max(-1, math.min(1, wish.steer or wish.turn or 0))
+			local d = math.atan2(wish.look_x, wish.look_z) + t * math.pi / 2 -
+					math.atan2(b.hx, b.hz)
+			d = (d + math.pi) % (2 * math.pi) - math.pi
+			return math.max(-rate, math.min(rate, d))
+		end
+		return math.max(-1, math.min(1, wish.turn or 0)) * rate
 	end
 	local function turn(wish, dt)
 		local b = self.board
@@ -880,7 +892,9 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			w[k] = v
 		end
 		if held.turn ~= 0 then
-			w.turn = 0
+			-- [SKELDAT_CAMERA_STEER] still the camera steer's: walking
+			-- right onto the board, it goes on to the right
+			w.steer, w.turn = wish.turn, 0
 		end
 		if held.brake then
 			w.brake = false
@@ -1429,6 +1443,40 @@ do
 			"board keys: in the air turned " .. turned .. " (not " .. want ..
 			"), speed " .. hs0 .. " to " .. hs1)
 	run(flat, {x = 0, z = 0}, 2)
+	-- [SKELDAT_CAMERA_STEER] On, at 6 heading +x: forward not held, to
+	-- the look (+z) at the turn's rate and not past it; forward held, the
+	-- look does not turn it; the right key, to the look's right (looking
+	-- -x: +z); off, the look does not. Strafing off the edge with it on,
+	-- the held right key keeps the look's right (+x) as the target.
+	local cam = M.new(columns(function() return -1 end))
+	cam.camera_steer = true
+	local function steered(wish, seconds, s)
+		board(cam, 0, -0.5, s or 6)
+		run(cam, wish, seconds)
+		return heading(cam)
+	end
+	local rate = 2 * M.BOARD_TURN / (1 + 6 / 8)
+	local h = steered({x = 0, z = 0, look_x = 0, look_z = 1}, 0.1)
+	assert(math.pi / 2 - h > 0.5 * rate * 0.1 and math.pi / 2 - h <=
+			rate * 0.1 + 1e-9, "camera steer: turned " .. (math.pi / 2 - h) ..
+			" in 0.1 s, the rate " .. rate * 0.1)
+	h = steered({x = 0, z = 0, look_x = 0, look_z = 1}, 1.5)
+	assert(math.abs(h) < 1e-9, "camera steer: not on the look but " .. h)
+	h = steered({x = 0, z = 0, look_x = 0, look_z = 1, forward = true}, 0.5)
+	assert(math.abs(h - math.pi / 2) < 1e-9,
+			"camera steer: forward held, the look turned it to " .. h)
+	h = steered({x = 0, z = 0, look_x = -1, look_z = 0, turn = 1}, 1.5)
+	assert(math.abs(h) < 1e-9, "camera steer: right, not to the look's right but " .. h)
+	cam.camera_steer = false
+	h = steered({x = 0, z = 0, look_x = 0, look_z = 1}, 0.5)
+	assert(math.abs(h - math.pi / 2) < 1e-9, "camera steer: off, the look turned it")
+	local cs = M.new(columns(function(x) return x < 1 and 0 or -1 end))
+	cs.camera_steer = true
+	cs:set_position(-2, 0.5, 0)
+	run(cs, {x = 1, z = 0, look_x = 0, look_z = 1, turn = 1}, 1.5)
+	assert(cs.board and math.abs(heading(cs) - math.pi / 2) < 0.03,
+			"camera steer: the strafe's mount turned to " ..
+			(cs.board and heading(cs) or "no board"))
 	-- [SKELDAT_BOARD_PUSH] The jump: 1.2 times the walk's height, added
 	-- to vy; one more in the air on a new press, none after it until the
 	-- ground; a strafe jump with a turn key; a landing on a climb keeping
