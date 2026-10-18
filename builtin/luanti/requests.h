@@ -55,8 +55,8 @@
 
 	void on_fields(const network::Packet &packet)
 	{
-		auto who = m_peer_players.find(packet.sender);
-		if(who == m_peer_players.end())
+		auto who = m_players.m_peer_players.find(packet.sender);
+		if(who == m_players.m_peer_players.end())
 			return;
 		sv_<ss_> flat;
 		try {
@@ -93,8 +93,8 @@
 	// what the move is; lua/entity.lua says what they mean.
 	void on_inv_action(const network::Packet &packet)
 	{
-		auto who = m_peer_players.find(packet.sender);
-		if(who == m_peer_players.end())
+		auto who = m_players.m_peer_players.find(packet.sender);
+		if(who == m_players.m_peer_players.end())
 			return;
 		sv_<ss_> flat;
 		try {

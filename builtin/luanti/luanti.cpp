@@ -92,6 +92,7 @@ extern "C" {
 #include "luanti/map_access.h"
 #include "luanti/world.h"
 #include "luanti/game_media.h"
+#include "luanti/players.h"
 
 using interface::Event;
 namespace pv = PolyVox;
@@ -543,17 +544,6 @@ struct Module: public interface::Module, public luanti::Interface,
 	// Seconds until the startup tables are served as files a second time;
 	// see the tick
 	float m_startup_files_wait = 5.0f;
-	// Whether the save has players in it; a world nobody has been in stays
-	// that way
-	bool m_had_players = false;
-	// [COMPAT_BREAK_07] 8h: a players row this cannot read (a newer
-	// Buildat's) is kept rather than written over
-	bool m_players_unreadable = false;
-	// Which client a player is, so that what is sent to one has somewhere to
-	// go, and which player a client is, for what comes back. Whoever names a
-	// player says which peer it is; see add_player().
-	sm_<ss_, size_t> m_player_peers;
-	sm_<size_t, ss_> m_peer_players;
 	bool m_game_running = false;
 	// What load_lua() was handed before run_game(), in the order it came
 	sv_<std::pair<ss_, ss_>> m_pending_lua;
@@ -579,11 +569,10 @@ struct Module: public interface::Module, public luanti::Interface,
 					-MAP_LIMIT_SECTIONS),
 			pv::Vector3DInt32(MAP_LIMIT_SECTIONS, MAP_LIMIT_SECTIONS,
 					MAP_LIMIT_SECTIONS)};
-	// Where each player is, in voxels. Written by set_player_pos() a few
-	// times a second and read once a step; it is what the world streams
-	// around, and what says which sections are active.
-	sm_<ss_, pv::Vector3DInt32> m_player_pos;
 	pv::Vector3DInt16 m_section_size{0, 0, 0};
+	// [LUANTI_MODULAR] players.h's
+	Players m_players{m_lua, m_lua_mutex, m_store, m_section_size,
+			[this](const ss_ &key, const ss_ &value){ store_set(key, value); }};
 	// [LUANTI_MODULAR] map_access.h's
 	MapAccess m_map{m_server, m_scene};
 	void set_region_map(RegionMap *map)
@@ -804,7 +793,6 @@ struct Module: public interface::Module, public luanti::Interface,
 	// while voxelworld's thread waits for it.
 	sv_<std::pair<ss_, ss_>> *m_save_sink = nullptr;
 	float m_checkpoint_accum = 0.0f;
-	ss_ m_players_written;
 
 	void store_set(const ss_ &key, const ss_ &value)
 	{
@@ -823,7 +811,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		sv_<std::pair<ss_, ss_>> writes;
 		m_save_sink = &writes;
 		m_clock.save_clock();
-		save_players();
+		m_players.save_players();
 		m_meta.copy_loaded_meta();
 		m_save_sink = nullptr;
 		const int64_t t1 = interface::os::time_us();
@@ -888,68 +876,6 @@ struct Module: public interface::Module, public luanti::Interface,
 			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++)
 				m_world.m_chunks_run.erase(World::chunk_key(cx, cy, cz));
 		}
-	}
-
-	// The players, in the save beside the node metadata and written the same
-	// way: what a player carries is item strings as well. lua/entity.lua says
-	// what one row is.
-	void save_players()
-	{
-		if(!m_store || !m_lua || m_players_unreadable)
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__save_players");
-		if(lua_pcall(L, 0, 2, 0) != 0){
-			log_w(MODULE, "__save_players(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return;
-		}
-		size_t len = 0;
-		const char *p = lua_tolstring(L, -2, &len);
-		ss_ data(p ? p : "", p ? len : 0);
-		int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		if(n == 0 && !m_had_players)
-			return; // Nothing to write and nothing there to clear
-		m_had_players = (n != 0);
-		if(data == m_players_written)
-			return; // A checkpoint with nobody moving
-		m_players_written = data;
-		store_set("players", data);
-		log_v(MODULE, "Players written to the save: %i", n);
-	}
-
-	void load_players()
-	{
-		if(!m_store || !m_lua)
-			return;
-		ss_ data;
-		if(!m_store->get("players", data))
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__load_players");
-		lua_pushlstring(L, data.c_str(), data.size());
-		// One this cannot read is kept as it is: the next checkpoint
-		// would otherwise drop every player not online
-		if(lua_pcall(L, 1, 1, 0) != 0 || lua_isnil(L, -1)){
-			log_e(MODULE, "The save's players cannot be read (%s); they are "
-					"not written over", lua_isstring(L, -1) ?
-					lua_tostring(L, -1) : "a newer Buildat's, or broken");
-			m_players_unreadable = true;
-			lua_settop(L, base);
-			return;
-		}
-		int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		m_had_players = (n != 0);
-		log_v(MODULE, "Players read from the save: %i", n);
 	}
 
 	// The server ticks at 30 Hz and Luanti steps at 0.09 s, so a tick's
@@ -1074,27 +1000,6 @@ struct Module: public interface::Module, public luanti::Interface,
 		return luanti::section_of(p, m_section_size);
 	}
 
-	// The active range is a section around a player and nothing where there
-	// is none, which is what stops a furnace on the other side of the world
-	// from firing into a section nobody has loaded
-	void check_active_range()
-	{
-		sm_<ss_, pv::Vector3DInt32> saved;
-		saved.swap(m_player_pos);
-		assert(!is_section_active(pv::Vector3DInt16(0, 0, 0)));
-		m_player_pos["__check"] = pv::Vector3DInt32(0, 0, 0);
-		assert(is_section_active(pv::Vector3DInt16(0, 0, 0)));
-		assert(is_section_active(pv::Vector3DInt16(1, 0, -1)));
-		assert(!is_section_active(pv::Vector3DInt16(2, 0, 0)));
-		// A player one voxel the other side of a boundary is in the section
-		// that side of it, and the range goes with them
-		m_player_pos["__check"] = pv::Vector3DInt32(-1, 0, 0);
-		assert(is_section_active(pv::Vector3DInt16(-2, 0, 0)));
-		assert(!is_section_active(pv::Vector3DInt16(1, 0, 0)));
-		m_player_pos = saved;
-		log_v(MODULE, "check_active_range: the range is where the players are");
-	}
-
 	// __luanti_accounts(cmd, a, b): Luanti's kicks and bans, which are
 	// builtin/accounts' ([VANILLA_PUBLIC] 4). A player's name is their
 	// account's.
@@ -1164,23 +1069,6 @@ struct Module: public interface::Module, public luanti::Interface,
 		lua_pushboolean(L, wanted ? 1 : 0);
 		return 1;
 	}
-
-	// Luanti's active_block_range: what is near a player is what steps.
-	// Nobody near it means nothing runs in it, which is Luanti's answer too
-	// -- a world with no players in it is a world where nothing happens.
-	bool is_section_active(const pv::Vector3DInt16 &section_p)
-	{
-		for(const auto &pair : m_player_pos){
-			pv::Vector3DInt16 c = section_of(pair.second);
-			if(std::abs((int32_t)section_p.getX() - c.getX()) <= World::ACTIVE_RADIUS &&
-					std::abs((int32_t)section_p.getY() - c.getY()) <= World::ACTIVE_RADIUS &&
-					std::abs((int32_t)section_p.getZ() - c.getZ()) <= World::ACTIVE_RADIUS)
-				return true;
-		}
-		return false;
-	}
-
-	// Lua
 
 	ss_ module_path()
 	{
@@ -1370,7 +1258,7 @@ struct Module: public interface::Module, public luanti::Interface,
 					voxelworld::Instance::LIGHT_LAMP, true);
 		});
 
-		check_active_range();
+		m_players.check_active_range();
 
 		// After the world, because a section is what the metadata is now
 		// written per and the section size comes from voxelworld
@@ -1647,7 +1535,7 @@ struct Module: public interface::Module, public luanti::Interface,
 			[this](){ m_meta.write_all_node_meta(); }};
 	// [LUANTI_MODULAR] world.h's
 	World m_world{m_server, m_scene, m_lua, m_lua_mutex, m_section_size,
-			m_player_pos, m_player_peers, m_game_running, m_map, m_clock,
+			m_players.m_player_pos, m_players.m_player_peers, m_game_running, m_map, m_clock,
 			m_mapgen, m_importer,
 			[this](const ss_ &chunk){ return node_action(chunk); }};
 	void on_section_generated(const worldgen::SectionGenerated &event)
@@ -1851,7 +1739,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		// The node metadata is not read here any more: it comes back with
 		// the section it is in, and the migrate_node_meta() below is what an
 		// older save's one blob of it becomes.
-		load_players();
+		m_players.load_players();
 		run_chunk_string("core.__check_players() "
 				"core.__check_inventory_move() "
 				"core.__check_bone_hand() "
@@ -1959,25 +1847,14 @@ struct Module: public interface::Module, public luanti::Interface,
 	// by. The callbacks a mod registers for a join and a leave run here.
 	void add_player(const ss_ &name, size_t peer)
 	{
-		place_peer(name, peer);
+		m_players.place_peer(name, peer);
 		node_action("core.__add_player(\""+lua_quoted(name)+"\") return true");
 	}
 
 	void place_player(const ss_ &name, size_t peer)
 	{
-		place_peer(name, peer);
+		m_players.place_peer(name, peer);
 		node_action("core.__place_player(\""+lua_quoted(name)+"\") return true");
-	}
-
-	void place_peer(const ss_ &name, size_t peer)
-	{
-		m_player_peers[name] = peer;
-		m_peer_players[peer] = name;
-		// At the origin until the client says otherwise, which is where a
-		// player is put anyway and what keeps the world around them loaded
-		// from the moment they are one
-		if(!m_player_pos.count(name))
-			m_player_pos[name] = pv::Vector3DInt32(0, 0, 0);
 	}
 
 	void set_admin(const ss_ &name, bool admin)
@@ -2000,14 +1877,14 @@ struct Module: public interface::Module, public luanti::Interface,
 	{
 		node_action("core.__remove_player(\""+lua_quoted(name)+
 				"\") return true");
-		auto it = m_player_peers.find(name);
-		if(it != m_player_peers.end()){
-			m_peer_players.erase(it->second);
+		auto it = m_players.m_player_peers.find(name);
+		if(it != m_players.m_player_peers.end()){
+			m_players.m_peer_players.erase(it->second);
 			m_peer_mode.erase(it->second);
-			m_player_peers.erase(it);
+			m_players.m_player_peers.erase(it);
 		}
 		// The world stops being kept loaded around where they were
-		m_player_pos.erase(name);
+		m_players.m_player_pos.erase(name);
 	}
 
 	void set_player_pos(const ss_ &name, float x, float y, float z,
@@ -2026,7 +1903,7 @@ struct Module: public interface::Module, public luanti::Interface,
 			return;
 		// What the world streams around and what is active near; the step
 		// reads it, so this only writes it down
-		m_player_pos[name] = pv::Vector3DInt32(
+		m_players.m_player_pos[name] = pv::Vector3DInt32(
 				(int32_t)std::floor(x), (int32_t)std::floor(y),
 				(int32_t)std::floor(z));
 		char buf[256];

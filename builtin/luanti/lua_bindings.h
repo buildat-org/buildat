@@ -293,7 +293,7 @@
 		if(lua_gettop(L) >= 5 && lua_toboolean(L, 5))
 			flat.push_back("1");
 		sv_<ss_> names;
-		for(const auto &pair : self->m_player_peers)
+		for(const auto &pair : self->m_players.m_player_peers)
 			names.push_back(pair.first);
 		for(const ss_ &n : names)
 			self->send_to_player(n, "luanti:refshot_mark", flat);
@@ -544,7 +544,7 @@
 				[&](voxelworld::Instance *world){
 			for(const pv::Vector3DInt16 &section_p :
 					world->get_loaded_sections()){
-				if(!self->is_section_active(section_p))
+				if(!self->m_players.is_section_active(section_p))
 					continue;
 				pv::Region r = world->get_section_region_voxels(section_p);
 				const int32_t v[6] = {
@@ -614,8 +614,8 @@
 			v[i] = lua_tonumber(L, -1);
 			lua_pop(L, 1);
 		}
-		auto it = self->m_player_peers.find(ss_(name_p, name_len));
-		if(it == self->m_player_peers.end())
+		auto it = self->m_players.m_player_peers.find(ss_(name_p, name_len));
+		if(it == self->m_players.m_player_peers.end())
 			return 0;
 		std::ostringstream os(std::ios::binary);
 		{
@@ -831,7 +831,7 @@
 		snprintf(stamp, sizeof stamp, "%lld", (long long)interface::os::time_us());
 		flat.push_back(stamp);
 		sv_<ss_> names;
-		for(const auto &pair : self->m_player_peers)
+		for(const auto &pair : self->m_players.m_player_peers)
 			names.push_back(pair.first);
 		for(const ss_ &n : names)
 			self->send_to_player(n, "luanti:time", flat);
@@ -1149,7 +1149,7 @@
 			// A copy, because a client that drops out while this is going
 			// out would otherwise change the map underneath it
 			sv_<ss_> names;
-			for(const auto &pair : self->m_player_peers)
+			for(const auto &pair : self->m_players.m_player_peers)
 				names.push_back(pair.first);
 			for(const ss_ &n : names)
 				self->send_to_player(n, "luanti:chat", flat);
@@ -1169,8 +1169,8 @@
 	void send_to_player(const ss_ &name, const ss_ &packet_name,
 			const sv_<ss_> &flat)
 	{
-		auto it = m_player_peers.find(name);
-		if(it == m_player_peers.end())
+		auto it = m_players.m_player_peers.find(name);
+		if(it == m_players.m_player_peers.end())
 			return;
 		std::ostringstream os(std::ios::binary);
 		{
