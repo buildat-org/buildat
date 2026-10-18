@@ -69,7 +69,7 @@
 		}
 		if(flat.empty())
 			return;
-		PlayerCause cause(m_by_player);
+		PlayerCause cause(m_map.m_by_player);
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
@@ -488,15 +488,15 @@
 			lua_rawseti(L, -2, (int)si);
 		}
 		if(n_sets == 0 || x1 < x0 || y1 < y0 || z1 < z0 ||
-				!box_ok(x0, y0, z0, x1, y1, z1))
+				!MapAccess::box_ok(x0, y0, z0, x1, y1, z1))
 			return 1;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
-		if(volume > (double)MAX_REGION_VOXELS){
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS){
 			// Lua's own formatting, which has no %.0f in it
 			return luaL_error(L, "find_ids(): %s voxels is more than the "
 					"%d this reads at once", cs(itos((int64_t)volume)),
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		}
 		// A Luanti node id is 16 bits, so which sets an id is in is one word
 		// per id and the test in the loop is one load
@@ -520,7 +520,7 @@
 		if(!any)
 			return 1;
 		sv_<uint32_t> words;
-		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		self->m_map.read_region(x0, y0, z0, x1, y1, z1, words);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		int n[32] = {0};
 		size_t i = 0;
@@ -567,15 +567,15 @@
 		luaL_checktype(L, 7, LUA_TTABLE);
 		luaL_checktype(L, 8, LUA_TTABLE);
 		lua_newtable(L);
-		if(!box_ok(x0, y0, z0, x1, y1, z1) || x1 - x0 < 2 || z1 - z0 < 2 ||
+		if(!MapAccess::box_ok(x0, y0, z0, x1, y1, z1) || x1 - x0 < 2 || z1 - z0 < 2 ||
 				y1 < y0)
 			return 1;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
-		if(volume > (double)MAX_REGION_VOXELS)
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS)
 			return luaL_error(L, "liquid_edges(): %s voxels is more than "
 					"the %d this reads at once", cs(itos((int64_t)volume)),
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		// Bit 0: a liquid; bit 1: floodable
 		sv_<uint8_t> kind(65536, 0);
 		for(int arg = 7; arg <= 8; arg++){
@@ -589,7 +589,7 @@
 			}
 		}
 		sv_<uint32_t> words;
-		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		self->m_map.read_region(x0, y0, z0, x1, y1, z1, words);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		const size_t sx = x1 - x0 + 1, sy = y1 - y0 + 1;
 		auto at = [&](int32_t x, int32_t y, int32_t z) -> uint16_t {
@@ -661,15 +661,15 @@
 		luaL_checktype(L, 7, LUA_TTABLE);
 		lua_newtable(L); // positions
 		lua_newtable(L); // ids at each
-		if(x1 < x0 || y1 < y0 || z1 < z0 || !box_ok(x0, y0, z0, x1, y1, z1))
+		if(x1 < x0 || y1 < y0 || z1 < z0 || !MapAccess::box_ok(x0, y0, z0, x1, y1, z1))
 			return 2;
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
-		if(volume > (double)MAX_REGION_VOXELS){
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS){
 			// Lua's own formatting, which has no %.0f in it
 			return luaL_error(L, "find_nodes(): %s voxels is more than the "
 					"%d this reads at once", cs(itos((int64_t)volume)),
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		}
 		// A Luanti node id is 16 bits, so wanted-or-not is one byte per id
 		// and the test in the loop is one load
@@ -688,7 +688,7 @@
 		if(!any)
 			return 2;
 		sv_<uint32_t> words;
-		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		self->m_map.read_region(x0, y0, z0, x1, y1, z1, words);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		int n_pos = 0, n_hit = 0;
 		size_t i = 0;
@@ -719,20 +719,20 @@
 		int32_t x1 = luaL_checkinteger(L, 4);
 		int32_t y1 = luaL_checkinteger(L, 5);
 		int32_t z1 = luaL_checkinteger(L, 6);
-		if(x1 < x0 || y1 < y0 || z1 < z0 || !box_ok(x0, y0, z0, x1, y1, z1)){
+		if(x1 < x0 || y1 < y0 || z1 < z0 || !MapAccess::box_ok(x0, y0, z0, x1, y1, z1)){
 			lua_newtable(L);
 			return 1;
 		}
 		double volume = (double)(x1 - x0 + 1) * (double)(y1 - y0 + 1) *
 				(double)(z1 - z0 + 1);
-		if(volume > (double)MAX_REGION_VOXELS){
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS){
 			// Lua's own formatting, which has no %.0f in it
 			return luaL_error(L, "get_region(): %s voxels is more than the "
 					"%d this reads at once", cs(itos((int64_t)volume)),
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		}
 		sv_<uint32_t> words;
-		self->read_region(x0, y0, z0, x1, y1, z1, words);
+		self->m_map.read_region(x0, y0, z0, x1, y1, z1, words);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		lua_createtable(L, (int)words.size(), 0);
 		for(size_t i = 0; i < words.size(); i++){

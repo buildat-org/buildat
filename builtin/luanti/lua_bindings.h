@@ -142,20 +142,20 @@
 		for(int i = 0; i < 6; i++)
 			p[i] = luaL_checkinteger(L, i + 1);
 		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2] ||
-				!box_ok(p[0], p[1], p[2], p[3], p[4], p[5])){
+				!MapAccess::box_ok(p[0], p[1], p[2], p[3], p[4], p[5])){
 			for(int i = 0; i < 3; i++)
 				lua_newtable(L);
 			return 3;
 		}
 		double volume = (double)(p[3] - p[0] + 1) * (double)(p[4] - p[1] + 1) *
 				(double)(p[5] - p[2] + 1);
-		if(volume > (double)MAX_REGION_VOXELS){
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS){
 			return luaL_error(L, "get_region_data(): %.0f voxels is more "
 					"than the %d this reads at once", volume,
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		}
 		sv_<uint32_t> words;
-		self->read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
+		self->m_map.read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		const int n = (int)words.size();
 		lua_createtable(L, n, 0);
@@ -183,7 +183,7 @@
 	static int l_set_region_data(lua_State *L)
 	{
 		Module *self = module_of(L);
-		self->drop_read_cache();
+		self->m_map.drop_read_cache();
 		int32_t p[6];
 		for(int i = 0; i < 6; i++)
 			p[i] = luaL_checkinteger(L, i + 1);
@@ -194,26 +194,26 @@
 		// ([WIELDLIGHT_STALE]); see voxelworld's set_volume()
 		const bool exact_light = has_p1 && lua_toboolean(L, 10);
 		if(p[3] < p[0] || p[4] < p[1] || p[5] < p[2] ||
-				!box_ok(p[0], p[1], p[2], p[3], p[4], p[5]))
+				!MapAccess::box_ok(p[0], p[1], p[2], p[3], p[4], p[5]))
 			return 0;
 		const double volume = (double)(p[3] - p[0] + 1) *
 				(double)(p[4] - p[1] + 1) * (double)(p[5] - p[2] + 1);
-		if(volume > (double)MAX_REGION_VOXELS){
+		if(volume > (double)MapAccess::MAX_REGION_VOXELS){
 			return luaL_error(L, "set_region_data(): %.0f voxels is more "
 					"than the %d this writes at once", volume,
-					(int)MAX_REGION_VOXELS);
+					(int)MapAccess::MAX_REGION_VOXELS);
 		}
 		if(!self->m_scene)
 			return 0;
 		// What is already buffered is part of the map; a region write that
 		// went in before it would be overwritten by the older value
-		self->flush_node_writes();
+		self->m_map.flush_node_writes();
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		// Read what is there first when the caller is only replacing some of
 		// the planes, so that the light and the param2 it left out survive
 		sv_<uint32_t> words;
 		if(!has_p1 || !has_p2)
-			self->read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
+			self->m_map.read_region(p[0], p[1], p[2], p[3], p[4], p[5], words);
 		else
 			words.assign((size_t)volume, 0);
 		size_t i = 0;
@@ -241,19 +241,19 @@
 		// A box in a body's region ([BODY_INTERACT]): the body's owner
 		// takes the words voxel by voxel; the map has nothing there
 		if(p[1] >= REGION_Y){
-			if(self->m_region_map){
+			if(self->m_map.m_region_map){
 				i = 0;
 				for(int32_t z = p[2]; z <= p[5]; z++)
 				for(int32_t y = p[1]; y <= p[4]; y++)
 				for(int32_t x = p[0]; x <= p[3]; x++, i++)
-					self->m_region_map->set(x, y, z, words[i]);
+					self->m_map.m_region_map->set(x, y, z, words[i]);
 			}
 			return 0;
 		}
 		interface::VoxelVolume vol(pv::Region(
 				pv::Vector3DInt32(p[0], p[1], p[2]),
 				pv::Vector3DInt32(p[3], p[4], p[5])));
-		self->note_gen_write(vol.getEnclosingRegion());
+		self->m_map.note_gen_write(vol.getEnclosingRegion());
 		i = 0;
 		for(int32_t z = p[2]; z <= p[5]; z++)
 		for(int32_t y = p[1]; y <= p[4]; y++)
@@ -261,7 +261,7 @@
 			vol.setVoxelAt(x, y, z, interface::VoxelInstance(words[i]));
 		voxelworld::access(self->m_server, self->m_scene,
 				[&](voxelworld::Instance *world){
-			world->set_cause(self->m_by_player ? "a player" : "");
+			world->set_cause(self->m_map.m_by_player ? "a player" : "");
 			world->set_volume(vol, true, exact_light);
 			world->set_cause("");
 		});
@@ -334,7 +334,7 @@
 		f.light_sky.set(word, param1 & 0x0f);
 		f.light_lamp.set(word, (param1 >> 4) & 0x0f);
 		f.param.set(word, param2 & 0xff);
-		self->buffer_node_write(x, y, z, word);
+		self->m_map.buffer_node_write(x, y, z, word);
 		return 0;
 	}
 
@@ -343,7 +343,7 @@
 	// buffer has landed; see read_node()
 	static int l_flush_node_writes(lua_State *L)
 	{
-		module_of(L)->flush_node_writes();
+		module_of(L)->m_map.flush_node_writes();
 		return 0;
 	}
 
@@ -356,8 +356,8 @@
 		float y = (float)luaL_checknumber(L, 2);
 		float z = (float)luaL_checknumber(L, 3);
 		float wx, wy, wz;
-		if(!self->m_region_map || y < REGION_Y ||
-				!self->m_region_map->to_world(x, y, z, wx, wy, wz))
+		if(!self->m_map.m_region_map || y < REGION_Y ||
+				!self->m_map.m_region_map->to_world(x, y, z, wx, wy, wz))
 			return 0;
 		lua_pushnumber(L, wx);
 		lua_pushnumber(L, wy);
@@ -372,7 +372,7 @@
 		int32_t x = luaL_checkinteger(L, 1);
 		int32_t y = luaL_checkinteger(L, 2);
 		int32_t z = luaL_checkinteger(L, 3);
-		uint32_t word = self->read_node(x, y, z);
+		uint32_t word = self->m_map.read_node(x, y, z);
 		const interface::VoxelFormat f = interface::VoxelFormat::luanti();
 		lua_pushinteger(L, (lua_Integer)f.id.get(word));
 		lua_pushinteger(L, (lua_Integer)(f.light_sky.get(word) |
@@ -402,7 +402,7 @@
 			return 1;
 		// Whatever was written and not flushed is what a reader should see,
 		// the same way read_node() does it
-		self->flush_node_writes();
+		self->m_map.flush_node_writes();
 		sv_<int32_t> p(n3);
 		for(size_t i = 0; i < n3; i++){
 			lua_rawgeti(L, 1, (int)i + 1);
@@ -681,7 +681,7 @@
 	static int l_relight(lua_State *L)
 	{
 		Module *self = module_of(L);
-		self->drop_read_cache();
+		self->m_map.drop_read_cache();
 		int32_t p[6];
 		for(int i = 0; i < 6; i++)
 			p[i] = (int32_t)luaL_checknumber(L, i + 1);
@@ -689,7 +689,7 @@
 			return 0;
 		// What is buffered is part of the map, and the light is worked out
 		// from what is in the map
-		self->flush_node_writes();
+		self->m_map.flush_node_writes();
 		const pv::Region region(pv::Vector3DInt32(p[0], p[1], p[2]),
 				pv::Vector3DInt32(p[3], p[4], p[5]));
 		// Later, under the tick's budget, not inside the mod's own step
