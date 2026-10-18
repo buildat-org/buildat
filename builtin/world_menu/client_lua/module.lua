@@ -36,14 +36,18 @@ local M = {}
 local own_root = nil
 local filter = ""
 
--- The waiting screen's line, which a progress text replaces in place
-local waiting_line = nil
+-- The waiting screen's load screen and text, which a progress text
+-- replaces in place
+local waiting_screen, waiting_message = nil, nil
 local function pop()
 	if own_root then
 		uistack.main:pop(own_root)
 		own_root = nil
 	end
-	waiting_line = nil
+	if waiting_screen then
+		waiting_screen.close()
+		waiting_screen = nil
+	end
 end
 -- [SKELDAT_WORLD_ADMIN] M.on_close(): the app's, called when the menu
 -- shown in a running world goes away (Back, or Play on that world)
@@ -304,28 +308,64 @@ end
 --
 
 -- extra: {label, fn} for a button over Leave the game, or nil
+-- [SKELDAT_MAKING_MAP] The wait in the stripes: ui_utils' load screen
+-- (the join's taken over, so no frame between the two), the message on
+-- its line with the seconds after it, and the buttons a row in the
+-- bottom right corner, off the stripes and their gap (the user's,
+-- 2026-10-18). It closes with the screen (pop()). An app draws over the dark
+-- with load_screen().backdrop() (skeldat's map of the making).
 local waiting_extra = nil
 local function waiting(message, extra)
-	if waiting_line and own_root and (extra and extra[1]) == waiting_extra then
-		waiting_line:SetText(message)
+	waiting_message = message
+	if waiting_screen and own_root and (extra and extra[1]) == waiting_extra then
 		return
 	end
 	waiting_extra = extra and extra[1]
 	local root = own_push("waiting")
-	local menu = ui_utils.vertical_menu(root, {min_width = fit(420)})
-	menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-	waiting_line = text_on(menu.window, message)
-	-- And the seconds under it, so the screen moves while the user can
-	-- only wait ([FIRST_RUN]: a screen still for 4 s fails a driven run)
-	local secs = text_on(menu.window, "")
-	local t0 = buildat.get_time_us()
-	root:SubscribeToStackEvent("Update", function()
-		secs:SetText(math.floor((buildat.get_time_us() - t0) / 1000000) .. " s")
-	end)
-	if extra then
-		menu:add(extra[1], extra[2])
+	if not root.defaultStyle then
+		root.defaultStyle = magic.cache:GetResource("XMLFile",
+				"ui_utils/res/style.xml")
 	end
-	menu:add("Leave the game", function() buildat.leave() end)
+	local screen = ui_utils.load_screen()
+	waiting_screen = screen
+	-- The seconds, so the screen moves while the user can only wait
+	-- ([FIRST_RUN]: a screen still for 4 s fails a driven run)
+	local t0, shown = buildat.get_time_us(), nil
+	local function line()
+		local s = string.format("%s... %d s",
+				(waiting_message:gsub("%.+$", "")),
+				math.floor((buildat.get_time_us() - t0) / 1000000))
+		if s ~= shown then
+			shown = s
+			screen.line(s)
+		end
+	end
+	line()
+	root:SubscribeToStackEvent("Update", line)
+	local row = root:CreateChild("UIElement")
+	row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+	row:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
+	row:SetPosition(-16, -16)
+	local items = {}
+	local function add(label, action)
+		local b = row:CreateChild("Button")
+		b:SetStyleAuto()
+		b:SetName("Button")
+		b:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(12, 0, 12, 0))
+		b.minHeight = 28
+		local t = b:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t.text = label
+		t:SetTextAlignment(magic.HA_CENTER)
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		items[#items + 1] = {b, action}
+	end
+	if extra then
+		add(extra[1], extra[2])
+	end
+	add("Leave the game", function() buildat.leave() end)
+	ui_utils.bind_button_menu(root, items)
 	magic.input:SetMouseVisible(true, "a menu screen")
 end
 

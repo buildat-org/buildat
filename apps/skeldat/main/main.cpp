@@ -85,6 +85,7 @@ using Urho3D::M_RADTODEG;
 #include "drops.h"
 #include "terrain.h"
 #include "bones_growth.h"
+#include "making_map.h"
 #include "scores.h"
 #include "mobs.h"
 #include "players.h"
@@ -143,6 +144,8 @@ struct Module: public interface::Module, public PlayersHost,
 	// Asked of worldgen and not merged yet: a section is loaded (empty)
 	// before it is generated
 	std::set<ss_> m_awaiting;
+	// [SKELDAT_MAKING_MAP] The making as a map to the waiting (making_map.h)
+	MakingMap m_making_map{m_world, m_growth, m_waiting, m_awaiting};
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -411,6 +414,8 @@ struct Module: public interface::Module, public PlayersHost,
 			world_menu::access(m_server, [&](world_menu::Interface *i){
 				i->show(peer);
 			});
+			// A world coming in: its map so far ([SKELDAT_MAKING_MAP])
+			m_making_map.start(peer);
 		}
 	}
 
@@ -699,6 +704,8 @@ struct Module: public interface::Module, public PlayersHost,
 			return;
 		m_growth.sections.insert(m_world.section_key(e.section_p));
 		m_growth.recount.insert(m_world.section_key(e.section_p));
+		if(!m_world.ready)
+			m_making_map.loaded(e.section_p);
 		// The world coming in ([SKELDAT_BOUNDED_WORLD]): a line every
 		// sixteenth, and the time it took
 		const size_t all = m_world.all_sections();
@@ -736,11 +743,9 @@ struct Module: public interface::Module, public PlayersHost,
 		m_world.ready = true;
 		m_terrain.find_spawn();
 		const int64_t t0 = interface::os::time_us();
-		m_growth.flooded.assign(m_world.footprints(), 0);
-		const size_t cols = m_world.footprints() * skeldat::bones::SECTION *
-				skeldat::bones::SECTION;
-		m_world.top_y.assign(cols, NO_GROUND);
-		m_world.top_b.assign(cols, 0);
+		// The top map's columns, made at the first section in
+		// ([SKELDAT_MAKING_MAP]), and some of them swept since
+		m_making_map.begin();
 		size_t bench = 0;
 		if(const char *env = getenv("BUILDAT_SKELDAT_SKELETONS"))
 			bench = (size_t)atol(env);
@@ -754,10 +759,21 @@ struct Module: public interface::Module, public PlayersHost,
 				m_mobs.markers[m_world.footprint(mx * skeldat::bones::SECTION,
 						mz * skeldat::bones::SECTION)] = mn;
 		size_t added = 0;
+		// The edge made now, on a new world, changes the outermost
+		// footprints' tops: those swept again
+		ss_ edge_v;
+		const bool edge_new = m_store && !m_store->get("edge", edge_v);
 		m_terrain.make_edge();
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
-			for(size_t i = 0; i < m_world.footprints(); i++)
-				m_growth.sweep(w, i);
+			// Those the making's map did not sweep ([SKELDAT_MAKING_MAP])
+			const int n = 2 * m_world.half;
+			for(size_t i = 0; i < m_world.footprints(); i++){
+				const int sx = (int)(i % n), sz = (int)(i / n);
+				const bool edge = sx == 0 || sz == 0 || sx == n - 1 ||
+						sz == n - 1;
+				if(m_making_map.state[i] != 2 || (edge_new && edge))
+					m_making_map.sweep(w, i);
+			}
 			// For a check: that many more light skeletons, anywhere
 		});
 		{
@@ -797,6 +813,7 @@ struct Module: public interface::Module, public PlayersHost,
 		});
 		log_i(MODULE, "skeldat: the world is in, %.1f s",
 				(interface::os::time_us() - m_start_us) / 1e6);
+		m_making_map.end();
 		for(size_t peer : m_waiting)
 			m_players.show(peer);
 		m_waiting.clear();
@@ -825,6 +842,7 @@ struct Module: public interface::Module, public PlayersHost,
 		m_players.shown.erase(peer);
 		m_waiting.erase(peer);
 		m_joining.erase(peer);
+		m_making_map.started.erase(peer);
 		m_world.load_points_dirty = true;
 	}
 
@@ -1218,6 +1236,10 @@ struct Module: public interface::Module, public PlayersHost,
 	{
 		if(!m_world.scene)
 			return;
+		// [SKELDAT_MAKING_MAP] The footprints whose sections are all in,
+		// on the tick for the same reason as below
+		if(!m_world.ready && m_save)
+			m_making_map.step();
 		// Every section loaded and generated: on the tick, after the
 		// requests the last loads made are in m_awaiting
 		if(!m_world.ready && m_save && m_growth.sections.size() == m_world.all_sections() &&

@@ -2084,6 +2084,43 @@ grep -aq "skeldat: the world w that ran at exit is gone: the menu" "$t/srv43d.lo
 	! grep -aq "ran at exit\|skeldat: resumed" "$t/srv43e.log" ||
 	fail "a deleted world's name ($t/srv43d.log, $t/srv43e.log)"
 echo "the world at exit: w1 resumed, the menu after its close, a deleted one's name dropped"
+# 41. The world's making over its map ([SKELDAT_MAKING_MAP]): a new 512
+# world of seed 2. client1 joined before the making waits in the stripes
+# (world_menu's wait) over the map: its first packet 8 x 8 footprints,
+# footprints mapped as they come in, a screenshot a few seconds in, off
+# once the world is in, and then placed. client2, joined half way, gets
+# what was mapped before it in one go and ends with the same footprints.
+# simplified: the screenshots are for the eye, not compared
+log45="$t/srv45.log"
+BUILDAT_SKELDAT_WORLD=making BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="4 -1 0" \
+	start_server "$log45" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv45" -C "$t/srv.cache" -l 3 || fail "the server ($log45)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "wait_log 120000 making_map: first packet" "delay 3000" \
+	"screenshot $t/making1.png" "$placed" \
+	"delay 500" quit > "$t/mk1.cmds"
+printf '%s\n' "wait_log 120000 making_map: first packet" "delay 1000" \
+	"screenshot $t/making2.png" "$placed" \
+	"delay 500" quit > "$t/mk2.cmds"
+client mk1 "$t/mk1.cmds"
+p1=$CLIENT
+wait_for_log "$log45" "sections loaded" 300 || fail "the making did not start ($log45)"
+client mk2 "$t/mk2.cmds"
+wait $p1 || fail "the first client's wait ($t/mk1.log)"
+wait $CLIENT || fail "the second client's wait ($t/mk2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+m1=$(grep -ac "making_map: footprint .* mapped" "$t/mk1.log")
+m2=$(grep -ac "making_map: footprint .* mapped" "$t/mk2.log")
+# "off" is logged right before "placed at": checked after, as a wait for
+# it could start after the placing
+grep -aq "making_map: first packet, 8 x 8 footprints" "$t/mk1.log" &&
+	grep -aq "making_map: off" "$t/mk1.log" &&
+	grep -aq "making_map: off" "$t/mk2.log" &&
+	grep -aq "world_menu: the wait shown" "$t/mk1.log" &&
+	[ "$m1" -ge 1 ] && [ "$m1" = "$m2" ] ||
+	fail "the making's map: client1 $m1 footprints mapped, client2 $m2 ($t/mk1.log, $t/mk2.log)"
+echo "the making's map: $m1 footprints mapped on each, $(grep -a "the world is in" "$log45" | sed 's/.*skeldat: //')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -2091,5 +2128,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the making over its map"
 # vim: set noet ts=4 sw=4:

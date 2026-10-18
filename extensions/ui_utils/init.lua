@@ -2188,6 +2188,14 @@ local function load_fit(s)
 	s.box:SetPosition(0, top)
 	s.last:SetFixedSize(w, h2)
 	s.last:SetPosition(0, top + h1 + lh)
+	-- [SKELDAT_MAKING_MAP] The backdrop fitted whole and centred, seen in
+	-- the gap between the stripes (the user's, 2026-10-18)
+	local b = s.back
+	if b and b.tex.width > 0 and b.tex.height > 0 then
+		local k = math.min(w / b.tex.width, h / b.tex.height)
+		b.el:SetFixedSize(math.floor(b.tex.width * k), math.floor(b.tex.height * k))
+		b.el.imageRect = magic.IntRect(0, 0, b.tex.width, b.tex.height)
+	end
 	-- The icon as tall as the stripe allows; a picture kept to its
 	-- proportions in that square
 	local side = h2 - math.floor(size / 2)
@@ -2352,6 +2360,29 @@ local function load_open()
 		load_fit(s)
 		return img.width, img.height
 	end
+	-- backdrop(tex) ([SKELDAT_MAKING_MAP]): a texture the game owns and
+	-- writes, over the dark and under the stripes, fitted whole (not
+	-- covered as picture()'s), centred, its pixels kept square; nil
+	-- takes it off
+	function api.backdrop(tex)
+		-- Nothing on a screen closed meanwhile (world_menu's wait goes
+		-- before an app's "off" comes)
+		if load ~= s or (s.back and s.back.tex == tex) then
+			return
+		end
+		if s.back then
+			s.back.el:Remove()
+			s.back = nil
+		end
+		if tex then
+			tex.filterMode = magic.FILTER_NEAREST
+			local el = s.screen:CreateChild("BorderImage")
+			el.texture = tex
+			el:SetAlignment(HA_CENTER, VA_CENTER)
+			s.back = {el = el, tex = tex}
+		end
+		load_fit(s)
+	end
 	function api.close()
 		if load ~= s then
 			return
@@ -2367,7 +2398,7 @@ local function load_open()
 end
 
 -- load_screen() -> the loading screen up, taken over: {line, wait_line,
--- arrival, picture, close}; a new one if none is
+-- arrival, picture, backdrop, close}; a new one if none is
 function M.safe.load_screen()
 	if not load then
 		load = load_open()

@@ -370,7 +370,10 @@ struct BonesGrowth
 
 	// Footprint i's columns into the top map, and its columns at FLOOD or
 	// more into flooded
-	void sweep(voxelworld::Instance *w, size_t i)
+	// also(x, z, y, id): each column's top as it is read
+	// ([SKELDAT_MAKING_MAP]'s map, from the same one read)
+	void sweep(voxelworld::Instance *w, size_t i,
+			std::function<void(int, int, int, uint32_t)> also = nullptr)
 	{
 		const int sx = (int)(i % (2 * world.half)) - world.half,
 				sz = (int)(i / (2 * world.half)) - world.half;
@@ -384,6 +387,8 @@ struct BonesGrowth
 			const uint32_t b = world.bones.get(v);
 			world.set_top(x, z, y, id, b);
 			n += (int)b >= skeldat::bones::FLOOD;
+			if(also)
+				also(x, z, y, id);
 		});
 		flooded[i] = n;
 	}
