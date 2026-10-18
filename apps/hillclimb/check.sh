@@ -360,8 +360,10 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "a local server, rounds every 0 s" "$t/loc.log" || fail "a local game has rounds ($t/loc.log)"
 echo "  a public server: a player's params refused, rounds of 10 min; a local game none"
 # Escape's menu ([HC_PAUSE_MENU]): W held through it sends nothing while
-# it is up; Settings... comes back to it; Leave the game leaves (with -s
-# there is no launcher under the game: the client disconnects and exits)
+# it is up; Settings... comes back to it, its Server... the way to the
+# Server window ([HC_TOUCH_SERVER]: no corner button); Leave the game
+# leaves (with -s there is no launcher under the game: the client
+# disconnects and exits)
 mp_server pause BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 cat > "$t/pause.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
@@ -374,6 +376,11 @@ delay 1000
 screenshot $t/pause.png
 click Button "Settings..."
 wait_log 5000 pause: settings shown
+delay 1000
+click Button "Server..."
+delay 1500
+keypress Escape
+wait_log 5000 server window: closed
 delay 1000
 keypress Escape
 wait_log 5000 pause: the menu shown

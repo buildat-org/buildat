@@ -8,5 +8,8 @@ local _, err, accounts = buildat.run_script_file("accounts/accounts.lua")
 if type(accounts) ~= "table" then
 	error("hillclimb: could not load accounts.lua: " .. tostring(err))
 end
+-- [HC_TOUCH_SERVER] No corner Server button: it lay over the touch
+-- column's Start, and the pause menu's Settings... has the Server window
+accounts.no_account_button()
 accounts.start({title = "hillclimb"})
 -- vim: set noet ts=4 sw=4:
