@@ -311,6 +311,9 @@ inline Game make_game()
 	{
 		NodeDef &n = node("water_source", "Water", {"water"}, {}, "-");
 		n.shape = LIQUID;
+		// [SKELDAT_OWN_MAPGEN] All water in the liquid step: its volume in
+		// param2, 1..7 eighths, 0 (an old world's) full
+		n.flowing = true;
 		g.items.erase(n.name);
 	}
 	node("coal_ore", "Coal Ore", {"coal_ore"}, {{"cracky", 3}},

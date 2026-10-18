@@ -24,11 +24,13 @@ namespace mapgen {
 // The tuning numbers (the user's to try): erosion's droplets a column and
 // a droplet's steps at most; the caves' threshold (a voxel is a tunnel
 // where both noises are within it of 0) and the spreads of their noises;
-// the chance of a tree on a grass column
+// the chance of a tree on a grass column; the plains' water
 static const float DROPLETS_PER_COLUMN = 0.5f;
 static const int DROPLET_STEPS = 48;
 static const float CAVE_WIDTH = 0.05f, CAVE_SPREAD_XZ = 40, CAVE_SPREAD_Y = 24;
 static const float TREE_CHANCE = 0.006f;
+// The plains' water table: the height this share of the columns is under
+static const float WATER_SHARE = 0.1f;
 
 enum Form { RIVERS, PLAINS, LAKE, SEA };
 static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea"};
@@ -227,6 +229,17 @@ inline Heightmap make_heightmap(const Params &p)
 	for(float &v : m.h)
 		v = std::min((float)p.top - 8, std::max((float)p.bottom + 8, v));
 	return m;
+}
+
+// The water line: plains' water table, the height a WATER_SHARE of the
+// columns are under (the plan's "a third up the ground's range" put half
+// a 128 world under one lake; the user's plains have ponds)
+inline int water_line(const Heightmap &m)
+{
+	std::vector<float> h = m.h;
+	const size_t i = (size_t)(WATER_SHARE * (h.size() - 1));
+	std::nth_element(h.begin(), h.begin() + i, h.end());
+	return (int)std::floor(h[i]);
 }
 
 // A noodle cave's voxel: two 3D noises both near 0

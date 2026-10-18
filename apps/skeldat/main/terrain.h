@@ -17,13 +17,16 @@
 // ores scattered by a hash of the section and the seed (Luanti's scatter:
 // clusters of 3x3x3 by scarcity); the trees on grass, a tree's leaves only
 // into air and its trunk over them, each section placing its own part of
-// any tree within 2 of it. The sky's light down each column to its
-// first voxel; the rest is voxelworld's relight of a new world.
-// simplified: no water; it comes with the water fill (the plan's stage 2)
+// any tree within 2 of it. The water: a column whose ground is under the
+// water line filled with full water (param2 0) from over its ground up to
+// the line (the plains' water table, a basin open to the sky; caves are
+// under the ground and not filled). The sky's light down each column to
+// its first voxel; the rest is voxelworld's relight of a new world.
 struct SkeldatGenerator: public worldgen::GeneratorInterface
 {
 	struct Ids {
-		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0;
+		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0,
+				water = 0;
 	};
 	struct Ore {
 		uint32_t id;
@@ -107,7 +110,7 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 			const int g = in ? ground(x, z) : m_p.bottom;
 			const bool sandy = beach(g);
 			for(int y = lc.getY(); y <= uc.getY(); y++){
-				uint32_t id = ID_AIR;
+				uint32_t id = y > g && y <= m_p.water_level ? m_ids.water : ID_AIR;
 				if(y <= m_p.bottom)
 					id = m_ids.stone;
 				else if(y <= g){
@@ -347,7 +350,8 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 		for(const pv::Vector3DInt32 &b : blob){
 			uint32_t word = volume.getVoxelAt(b).data;
 			m_format.id.set(word, m_pocket[kind]);
-			m_format.param.set(word, kind == 1 ? 255u : 7u);
+			// Full: water's 0, lava's 7 (eighths less one), a gas's 255
+			m_format.param.set(word, kind == 1 ? 255u : kind == 2 ? 7u : 0u);
 			volume.setVoxelAt(b, VoxelInstance(word));
 		}
 		m_pockets++;
@@ -528,8 +532,15 @@ struct Terrain
 		p.form = std::max(0, mapgen::form_of(form));
 		const int64_t t0 = interface::os::time_us();
 		auto map = std::make_shared<const mapgen::Heightmap>(mapgen::make_heightmap(p));
-		log_i(MODULE, "skeldat: the heightmap (%s) made in %.1f ms", cs(form),
-				(interface::os::time_us() - t0) / 1e3);
+		// The water line: plains' water table (mapgen.h's water_line(); a
+		// world made before keeps the valleys' line)
+		if(form != "legacy_valleys"){
+			p.water_level = mapgen::water_line(*map);
+			water_level = p.water_level;
+		}
+		log_i(MODULE, "skeldat: the heightmap (%s) made in %.1f ms, the water "
+				"line at %d", cs(form), (interface::os::time_us() - t0) / 1e3,
+				water_level);
 		SkeldatGenerator::Ids ids;
 		ids.stone = world.id_of("skeldat:stone");
 		ids.dirt = world.id_of("skeldat:dirt");
@@ -537,6 +548,7 @@ struct Terrain
 		ids.sand = world.id_of("skeldat:sand");
 		ids.tree = world.id_of("skeldat:tree");
 		ids.leaves = world.id_of("skeldat:leaves");
+		ids.water = world.id_of("skeldat:water_source");
 		sv_<SkeldatGenerator::Ore> ores = {
 			{world.id_of("skeldat:coal_ore"), 8 * 8 * 8, 8, 64},
 			// 64 high, each still under the surface (11 and up)

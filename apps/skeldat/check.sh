@@ -2431,7 +2431,7 @@ grep -aq "a cave_skeleton ($shooter) draws at client1" "$t/srv49_2.log" ||
 echo "cave skeletons: the fight: $(grep -aE "the (cave_)?skeleton \([0-9]*\) dies" "$c1" | head -1 | sed 's/.*skeldat: //; s/ at .*//'); spawn searches $spots"
 # 46. The hazards ([SKELDAT_MINING_HAZARDS]) at noon: a 2x4x2 box of
 # full water 10 off the player; the water spreads and its volume (128
-# eighths) stays in every report. The player with a stack in a lava
+# eighths) stays in every report, less what evaporates. The player with a stack in a lava
 # pool burns 4 a second and dies, the stack burnt, not dropped, the hurt
 # sound heard; a boar in a box of poison gas breathes it. The server
 # again on the saved world reads the active set back and steps it.
@@ -2452,10 +2452,14 @@ for n in 1 2; do
 	cat "$t/srv50_$n.log" >> "$log50"
 done
 h1="$t/srv50_1.log"
-volumes=$(grep -a "skeldat: hazards: .* water volume" "$h1" | sed 's/.*water volume //' | sort -u | tr '\n' ' ')
+volumes=$(grep -a "skeldat: hazards: .* water volume" "$h1" | sed 's/.*water volume //' | tr '\n' ' ')
 first=$(grep -a "skeldat: hazards: .* water volume" "$h1" | head -1 | sed 's/.*skeldat: //')
-[ "$volumes" = "128 " ] && echo "$first" | awk '{ exit !($4 > 0) }' ||
-	fail "the water's volume not kept at 128 ($volumes), or nothing stepped: $first ($h1)"
+# Kept but for what evaporates under the open sky ([SKELDAT_OWN_MAPGEN]):
+# never more, and not 8 less
+echo "$volumes" | awk '{ for(i = 1; i <= NF; i++) if($i > 128 || $i < 120 ||
+		(i > 1 && $i > $(i - 1))) exit 1; exit !(NF >= 2) }' &&
+	echo "$first" | awk '{ exit !($4 > 0) }' ||
+	fail "the water's volume not kept at 128 less what evaporates ($volumes), or nothing stepped: $first ($h1)"
 back=$(grep -a "skeldat: hazards: [0-9]* active read back" "$t/srv50_2.log" | sed 's/.*hazards: \([0-9]*\).*/\1/')
 [ "${back:-0}" -gt 0 ] &&
 	grep -a "skeldat: hazards: .* stepped" "$t/srv50_2.log" | sed 's/.*skeldat: //' |

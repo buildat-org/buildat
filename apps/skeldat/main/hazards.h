@@ -23,8 +23,9 @@
 //   itself fell straight back by the down rule).
 // - A gas: a random neighbour; air -> both the gas at half the share,
 //   the same gas -> both the mean; a share under GAS_MIN is air.
-// - Lava beside water is stone; pocket water beside the sea is taken in;
-//   lava beside air turns that air into volcanic gas, one step in
+// - Lava beside water is stone; water under open sky (air over it at
+//   the sky's light 15) loses an eighth, one step in evaporate_one_in
+//   ([SKELDAT_OWN_MAPGEN]); lava beside air turns that air into volcanic gas, one step in
 //   LAVA_GAS_ONE_IN.
 // Pure: no Buildat, no module; main.cpp hands it the cells. Self test:
 //   g++ -std=c++11 -DSKELDAT_HAZARDS_TEST -x c++ apps/skeldat/main/hazards.h -o /tmp/skeldat_hazards && /tmp/skeldat_hazards
@@ -56,6 +57,12 @@ static const int GAS_MIN = 8, LAVA_GAS_ONE_IN = 600, PRESSURE_MAX = 4,
 // LAVA_HARM; a gas at the head GAS_HARM at 255 (ceil by the share),
 // volcanic one more
 static const int LAVA_HARM = 4, GAS_HARM = 4;
+// Water under open sky loses an eighth one step in EVAPORATE_ONE_IN
+// (an active cell's: a pond at rest stays); the world's settling at its
+// making is SETTLE_STEPS water steps with evaporation SETTLE_EVAPORATE
+// times as fast ([SKELDAT_OWN_MAPGEN])
+static const int EVAPORATE_ONE_IN = 2000, SETTLE_STEPS = 2000,
+		SETTLE_EVAPORATE = 10;
 // The pockets in the rock (terrain.h): water and poison gas from
 // POCKET_DEPTH under the water level, lava from POCKET_LAVA_DEPTH; at most
 // one a POCKET_CELL cube, its chance POCKET_CHANCE at POCKET_LAVA_DEPTH
@@ -63,13 +70,16 @@ static const int LAVA_HARM = 4, GAS_HARM = 4;
 static const int POCKET_DEPTH = 8, POCKET_LAVA_DEPTH = 24, POCKET_CELL = 32;
 static const float POCKET_CHANCE = 1.0f;
 
-enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC, SEA };
-// amount: a liquid's eighths (1..8), a gas's share (1..255)
+enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC };
+// amount: a liquid's eighths (1..8), a gas's share (1..255); sky: air's
+// light from the sky, 0..15 (read, never written)
 struct Cell {
 	uint8_t kind = SOLID;
 	uint8_t amount = 0;
+	uint8_t sky = 0;
 	Cell(){}
-	Cell(uint8_t kind, uint8_t amount = 0): kind(kind), amount(amount){}
+	Cell(uint8_t kind, uint8_t amount = 0, uint8_t sky = 0):
+		kind(kind), amount(amount), sky(sky){}
 };
 inline bool liquid(uint8_t k){ return k == WATER || k == LAVA; }
 inline bool gas(uint8_t k){ return k == POISON || k == VOLCANIC; }
@@ -96,6 +106,7 @@ struct Hazards
 	std::function<Cell(int, int, int)> get;
 	std::function<void(int, int, int, const Cell &)> set;
 	std::mt19937 rng{12345};
+	int evaporate_one_in = EVAPORATE_ONE_IN;
 	std::unordered_set<uint64_t> active;
 	typedef std::pair<double, uint64_t> Due;
 	std::priority_queue<Due, std::vector<Due>, std::greater<Due>> due;
@@ -235,17 +246,23 @@ struct Hazards
 	{
 		const uint8_t k = c.kind;
 		bool moved = false;
-		// Lava beside water is stone; pocket water beside the sea is
-		// taken in
-		for(const auto &d : SIX){
-			const Cell n = get(x + d[0], y + d[1], z + d[2]);
-			if(k == LAVA && (n.kind == WATER || n.kind == SEA)){
-				put(x, y, z, Cell(SOLID));
-				return false;
-			}
-			if(k == WATER && n.kind == SEA){
-				put(x, y, z, Cell(AIR));
-				return false;
+		// Lava beside water is stone
+		if(k == LAVA)
+			for(const auto &d : SIX)
+				if(get(x + d[0], y + d[1], z + d[2]).kind == WATER){
+					put(x, y, z, Cell(SOLID));
+					return false;
+				}
+		// Water under open sky evaporates
+		if(k == WATER){
+			const Cell over = get(x, y + 1, z);
+			if(over.kind == AIR && over.sky >= 15 &&
+					(int)(rng() % (uint32_t)evaporate_one_in) == 0){
+				c.amount--;
+				put(x, y, z, c.amount ? c : Cell(AIR));
+				if(!c.amount)
+					return false;
+				moved = true;
 			}
 		}
 		// Down
@@ -440,6 +457,23 @@ int main()
 			h.step(h.now + 0.5);
 		assert(m.get(0, 0, 0).kind == AIR);
 		printf("hazards: gas 255 -> 127 + 127; a share of 7 is air\n");
+	}
+	// Evaporation: under the sky's 15 a woken cell loses its eighths; under
+	// less it keeps them
+	{
+		Map m;
+		m.set(0, 0, 0, Cell(WATER, 8));
+		m.set(0, 1, 0, Cell(AIR, 0, 15));
+		m.set(3, 0, 0, Cell(WATER, 8));
+		m.set(3, 1, 0, Cell(AIR, 0, 14));
+		Hazards h = bind(m);
+		h.evaporate_one_in = 1;
+		for(int i = 0; i < 20; i++){
+			h.wake(0, 0, 0), h.wake(3, 0, 0);
+			h.step(h.now + 1);
+		}
+		assert(m.get(0, 0, 0).kind == AIR && m.get(3, 0, 0).amount == 8);
+		printf("hazards: evaporation under the open sky only\n");
 	}
 	// 3. Lava's volcanic gas: its chance a step over 10^6 steps
 	{
