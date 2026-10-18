@@ -733,12 +733,13 @@ toggle() # the admin page's toggle, from the game
 # A guest's name goes by its connection: the rejoin, client1 again, on
 # the server started again. The water from the feet to over the head,
 # placed from the top (each one's ground found under the air), walled
-# in by stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first
+# in by stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first, also
+# from the top
 water=""
 for d in "1 0" "-1 0" "0 1" "0 -1"; do
-	for y in 0 1 2 3 4; do water="$water marker $d skeldat:stone $y;"; done
+	for y in 4 3 2 1 0; do water="$water marker $d skeldat:stone $y;"; done
 done
-water="$water marker 0 0 skeldat:water_source 3; marker 0 0 skeldat:water_source 2; marker 0 0 skeldat:water_source 1"
+water="$water marker 0 0 skeldat:water_source 3; marker 0 0 skeldat:water_source 2; marker 0 0 skeldat:water_source 1; marker 0 0 skeldat:water_source 0"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
@@ -769,7 +770,7 @@ grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 # Continue goes back to it ([SKELDAT_DEATH_PAUSE]), then the same by its
 # Pause menu button ([SKELDAT_DEATH_MENU_BUTTON]).
 log17="$t/srv17.log"
-printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
+printf '%s\n' "$placed" "delay 2000" "look 0 -89" "mouse_down left" \
 	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
 	"delay 1500" "look 0 -40" "delay 500" "screenshot $t/drops.png" \
 	"wait_log 60000 pause: the death screen shown" "delay 25000" quit \
