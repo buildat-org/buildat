@@ -605,8 +605,8 @@ BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" 
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
-	"delay 600" "mouse_up left" "delay 800" "look 90 -60" "delay 500" \
+printf '%s\n' "$placed" "delay 1500" "look 0 -35" "delay 500" "mouse_down left" \
+	"delay 600" "mouse_up left" "delay 800" "look 0 -35" "delay 500" \
 	"mouse_down right" "delay 150" "mouse_up right" "delay 800" \
 	"screenshot $t/take.png" "delay 14000" quit > "$t/take.cmds"
 client take "$t/take.cmds"
