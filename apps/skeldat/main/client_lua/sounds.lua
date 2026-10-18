@@ -100,6 +100,9 @@ M.TAKES = {
 			burst(nil, 400, 0.02, 0.35, {base_freq = 0.3}))},
 	step_wood = {a = layers(tone("triangle", 220, 0.03, 0.35, -0.03),
 			burst(nil, 900, 0.015, 0.25, {base_freq = 0.35}))},
+	-- A step on grass: the user's own ([SKELDAT_STEP_GRASS]), four
+	-- layers, as made: not in M.PEAK
+	step_grass = {a = "blip1:DJ2KrAAKrWKAAmJf_AAAAf_AAAAf_AAf_f_NIkgInDSd8PLHLCNAAAA__AA+AaDFVDsAAJ2WKAAmJf_AAAAf_AAAAf_AAf_f_PLkgInAAd8S4HLCN+ATDNiBpAARpWKAAf_f_AAAAf_AAAAf_AAf_f_ZBlUInGKZBGkHLCN+B3DNiBpAAL5WKAAf_f_AAAAf_AAAAf_AAf_f_ZBlUInGKZBLFHLCNAAAAVVAA"},
 
 	-- Picking an item up: the user's own ([SKELDAT_PICKUP_TAKE]), as made:
 	-- not in M.PEAK
@@ -280,8 +283,9 @@ function M.self_check(blip, synth)
 		end
 		return math.sqrt(e / n)
 	end
-	-- The user's own takes, hashed: the bow's release and the pickup
-	for _, name in ipairs({"bow", "pickup"}) do
+	-- The user's own takes, hashed: the bow's release, the pickup and the
+	-- step on grass
+	for _, name in ipairs({"bow", "pickup", "step_grass"}) do
 		local b = M.render(blip, synth, name,
 				gen.params(M.TAKES[name][M.PICK[name]]))
 		local h = 0

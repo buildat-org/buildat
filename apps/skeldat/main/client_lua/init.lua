@@ -969,7 +969,8 @@ local function node_sound(what, name, p, gain)
 	local kind = material_of(name)
 	if what == "step" and kind then
 		kind = (name == "skeldat:gravel" or name == "skeldat:sand") and
-				"gravel" or kind == "leaves" and "earth" or kind
+				"gravel" or name == "skeldat:grass" and "grass" or
+				kind == "leaves" and "earth" or kind
 	end
 	if kind then
 		mobs.play_at(what .. "_" .. kind, p.x, p.y, p.z, gain)
