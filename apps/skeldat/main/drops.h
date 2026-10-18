@@ -102,7 +102,10 @@ struct Drops
 						d.vx = d.vz = 0;
 					else
 						d.x = nx, d.z = nz;
-					const float ny = d.y + d.vy * dt;
+					// Under a voxel a step, so the check below meets each:
+					// a join's long tick dropped stacks through the ground.
+					// simplified: slower than its speed on a long tick
+					const float ny = d.y + std::max(d.vy * dt, -0.9f);
 					const int vy = (int)std::floor(ny + 0.5f);
 					if(d.vy < 0 && world.walkable(w, (int)std::floor(d.x + 0.5f),
 							vy, (int)std::floor(d.z + 0.5f))){

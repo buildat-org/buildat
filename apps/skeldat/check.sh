@@ -1958,6 +1958,46 @@ echo "$river" | grep -q "^3," || fail "the bridge short of the far bank ($log41)
 [ "$(echo "$cliff" | grep -c .)" -ge 3 ] &&
 	echo "$cliff" | cut -d, -f2 | awk 'NR > 1 && $1 > p {exit 1} {p = $1}' ||
 	fail "no blocks down the cliff, top first ($log41)"
+# 38. Loot on the ground ([SKELDAT_LOOT_GROUND]) at noon: a drop 2.5 off
+# is picked up where the player stands, one 3.5 off is not; a boar at 1
+# hp 4 ahead (a voxel up: aimed level) killed by a hit leaves its meat
+# there, not taken until the player walks to it; a stone dropped by Q is
+# not taken back until the player has walked 3 off it and back
+log42="$t/srv42.log"
+BUILDAT_SKELDAT_WORLD=loot BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="give skeldat:stone 5 1; drop 2.5 0 skeldat:dirt 1; drop -3.5 0 skeldat:cobble 1; boar 0 4 hp 1" \
+	start_server "$log42" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv42" -C "$t/srv.cache" -l 3 || fail "the server ($log42)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "look 0 -5" "delay 1000" "screenshot $t/loot_boar.png" "mouse_down left" "delay 100" \
+	"mouse_up left" "delay 2000" "keypress Q" "delay 2000" "keydown S" \
+	"delay 1500" "keyup S" "keydown W" "delay 3000" "keyup W" "delay 1000" \
+	quit > "$t/loot.cmds"
+client loot "$t/loot.cmds"
+wait $CLIENT || fail "the loot's drive ($t/loot.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -a "dies at\|picks up\|a drop of" "$log42" | sed 's/.*skeldat: //'
+python3 -I - "$log42" <<'PY' || fail "the loot on the ground ($log42)"
+import sys, re
+lines = open(sys.argv[1], errors="replace").read().split("\n")
+def ts(l):
+    m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
+def at(s):
+    return [ts(l) for l in lines if s in l]
+assert at("client1 picks up 1 skeldat:dirt"), "the drop 2.5 off not picked up"
+assert not at("picks up 1 skeldat:cobble"), "the drop 3.5 off picked up"
+died = [ts(l) for l in lines if re.search(r"the boar \(\d+\) dies at .*, drops on the ground \[skeldat:meat_raw", l)]
+assert died, "the boar's meat not dropped on the ground"
+meat = [ts(l) for l in lines if re.search(r"client1 picks up \d skeldat:meat_raw", l)]
+assert meat and meat[0] - died[0] > 3, "the meat taken %s after the kill" % (meat and "%.1f s" % (meat[0] - died[0]))
+q = at("a drop of skeldat:stone at")
+stone = at("client1 picks up 1 skeldat:stone")
+assert q and stone and stone[0] - q[0] > 2.5, "the Q drop taken back %s" % (stone and q and "%.1f s after" % (stone[0] - q[0]))
+print("ok: the meat taken %.1f s after the kill, the stone %.1f s after Q" % (meat[0] - died[0], stone[0] - q[0]))
+PY
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -1965,5 +2005,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground"
 # vim: set noet ts=4 sw=4:

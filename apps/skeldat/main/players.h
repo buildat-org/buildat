@@ -568,7 +568,7 @@ struct Players: public luanti_session::Game, public MobsHost
 						(pl.y + 0.5f - d.y) * (pl.y + 0.5f - d.y) +
 						(pl.z - d.z) * (pl.z - d.z));
 				if(pl.name == d.owner){
-					if(dist > 2 * DROP_REACH)
+					if(dist > DROP_AWAY)
 						d.owner.clear();
 					continue;
 				}

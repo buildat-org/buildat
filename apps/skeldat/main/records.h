@@ -293,7 +293,9 @@ struct Drop
 	// not picked up, and resting it is a skull voxel
 	bool seed = false;
 };
-static const float DROP_REACH = 1.5f;
+static const float DROP_REACH = 3.0f;
+// A drop's dropper walked this far from it, it is anyone's
+static const float DROP_AWAY = 3.0f;
 
 // Where something stands in a column (Module::ground())
 struct Ground

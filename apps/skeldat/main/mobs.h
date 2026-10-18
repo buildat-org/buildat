@@ -15,7 +15,6 @@ struct MobsHost
 	virtual Player* nearest(float x, float y, float z, float &d,
 			size_t *peer_out = nullptr) = 0;
 	virtual void hurt(size_t peer, Player &pl, int damage, const char *how) = 0;
-	virtual void give_or_drop(Player &pl, const Stack &st) = 0;
 	virtual void send_inventory(size_t peer, const Player &pl) = 0;
 	virtual void send_position(size_t peer, Player &pl) = 0;
 	virtual void sound(const char *moment, float x, float y, float z,
@@ -245,6 +244,15 @@ struct Mobs
 						"a marker skull" : cs(name), cs(pos_key(x, y, z)));
 				continue;
 			}
+			if(kind == "drop"){
+				// [SKELDAT_LOOT_GROUND] "drop dx dz item n": a stack dropped
+				// there, no one's
+				int n = 1;
+				ss_ name;
+				it>>name>>n;
+				drops.drop(Stack(name, n), p->x + dx, p->y + 0.5f, p->z + dz);
+				continue;
+			}
 			if(kind == "level"){
 				// [SKELDAT_BRIDGES_SEEN] "level dx dz w d node dy": the node
 				// at the player's feet + dy over w x d columns from there,
@@ -352,6 +360,8 @@ struct Mobs
 			while(it>>flag){
 				if(flag == "marked")
 					m.marker_day = world.t / world.day_s;
+				if(flag == "hp")
+					it>>m.hp;
 				if(flag == "lure")
 					m.goal_fp = (int)world.footprint((int)std::floor(m.x + 0.5f),
 							(int)std::floor(m.z + 0.5f));
@@ -451,10 +461,10 @@ struct Mobs
 	}
 
 	// hp off a mob, by a player's hit or by the sun (by NOBODY); it dies at
-	// 0, and what it drops goes into the killer's inventory, what does not
-	// fit to the ground at the killer
+	// 0, and what it drops is left on the ground at it, for anyone to pick
+	// up ([SKELDAT_LOOT_GROUND])
 	static const size_t NOBODY = (size_t)-1;
-	// ground_drops: with no killer, its drops left on the ground
+	// ground_drops: with no killer, its drops left on the ground too
 	void damage(uint32_t key, int hp, size_t by, float bx, float bz,
 			bool ground_drops = false)
 	{
@@ -475,18 +485,15 @@ struct Mobs
 		const sv_<Stack> dropped = loot(m);
 		for(const Stack &s : dropped)
 			list += (list.empty() ? "" : ", ") + s.str();
-		if(killer != players.end()){
+		const bool ground = killer != players.end() || ground_drops;
+		if(ground)
 			for(const Stack &s : dropped)
-				host.give_or_drop(killer->second, s);
-			host.send_inventory(by, killer->second);
-		} else {
-			if(ground_drops)
-				for(const Stack &s : dropped)
-					drops.drop(s, m.x + world.rnd() - 0.5f, m.y + 0.5f, m.z + world.rnd() - 0.5f);
+				drops.drop(s, m.x + world.rnd() - 0.5f, m.y + 0.5f, m.z + world.rnd() - 0.5f);
+		if(killer == players.end())
 			leave_lantern(m);
-		}
-		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops [%s]",
-				MOB_KIND[m.kind], key, m.x, m.y, m.z, cs(list));
+		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops %s[%s]",
+				MOB_KIND[m.kind], key, m.x, m.y, m.z, ground ? "on the ground " : "",
+				cs(list));
 		host.sound(m.kind == BOAR ? "boar_death" : "skeleton_death", m.x, m.y, m.z);
 		if(m.node_id)
 			remove_node(m.node_id);
