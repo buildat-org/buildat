@@ -96,6 +96,8 @@ if bad: sys.exit("\n".join(bad))
 ' "$m" || fail "an item's picture missing or empty"
 $cc -DSKELDAT_BONES_TEST -x c++ "$m/bones.h" -o "$t/bones" && "$t/bones" ||
 	fail "bones.h's self test"
+$cc -DSKELDAT_HAZARDS_TEST -x c++ "$m/hazards.h" -o "$t/hazards" && "$t/hazards" ||
+	fail "hazards.h's self test"
 $cc -DSKELDAT_MOVE_TEST -x c++ "$m/move_check.h" -x none \
 	"$here/src/impl/voxel_path.cpp" -o "$t/move" && "$t/move" ||
 	fail "move_check.h's self test"
@@ -2425,6 +2427,37 @@ spots=$(grep -a "cave_skeleton spawn searches" "$c1" | sed 's/.*searches, //')
 grep -aq "a cave_skeleton ($shooter) draws at client1" "$t/srv49_2.log" ||
 	fail "the saved cave skeleton not loaded or not shooting ($t/srv49_2.log)"
 echo "cave skeletons: the fight: $(grep -aE "the (cave_)?skeleton \([0-9]*\) dies" "$c1" | head -1 | sed 's/.*skeldat: //; s/ at .*//'); spawn searches $spots"
+# 46. The hazards ([SKELDAT_MINING_HAZARDS]) at noon: a 2x4x2 box of
+# full water and a 2x2x2 of poison gas by the player; the water spreads
+# and its volume (128 eighths) stays in every report; the server again on
+# the saved world reads the active set back and steps it.
+log50="$t/srv50.log"
+for n in 1 2; do
+	BUILDAT_SKELDAT_WORLD=hazards BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "pocket poison -6 0 2 2 2; pocket water 4 0 2 4 2" || echo "place 0 0")" \
+		start_server "$t/srv50_$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv50" -C "$t/srv.cache" -l 3 ||
+		fail "the server ($t/srv50_$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "delay $([ $n = 1 ] && echo 22000 || echo 12000)" quit > "$t/hazards$n.cmds"
+	client hazards$n "$t/hazards$n.cmds"
+	wait $CLIENT || fail "the hazards' drive $n ($t/hazards$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	cat "$t/srv50_$n.log" >> "$log50"
+done
+h1="$t/srv50_1.log"
+volumes=$(grep -a "skeldat: hazards: .* water volume" "$h1" | sed 's/.*water volume //' | sort -u | tr '\n' ' ')
+first=$(grep -a "skeldat: hazards: .* water volume" "$h1" | head -1 | sed 's/.*skeldat: //')
+[ "$volumes" = "128 " ] && echo "$first" | awk '{ exit !($4 > 0) }' ||
+	fail "the water's volume not kept at 128 ($volumes), or nothing stepped: $first ($h1)"
+back=$(grep -a "skeldat: hazards: [0-9]* active read back" "$t/srv50_2.log" | sed 's/.*hazards: \([0-9]*\).*/\1/')
+[ "${back:-0}" -gt 0 ] &&
+	grep -a "skeldat: hazards: .* stepped" "$t/srv50_2.log" | sed 's/.*skeldat: //' |
+		awk '$4 > 0 { s = 1 } END { exit !s }' ||
+	fail "the active set not read back (${back:-none}) or not stepped ($t/srv50_2.log)"
+echo "$first; ${back} active read back"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"
@@ -2432,5 +2465,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas"
 # vim: set noet ts=4 sw=4:

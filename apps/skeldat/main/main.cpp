@@ -51,6 +51,7 @@
 #include "game.h"
 #include "bones.h"
 #include "move_check.h"
+#include "hazards.h"
 #include <Scene.h>
 #include <Image.h>
 #include <Node.h>
@@ -146,6 +147,22 @@ struct Module: public interface::Module, public PlayersHost,
 	std::set<ss_> m_awaiting;
 	// [SKELDAT_MAKING_MAP] The making as a map to the waiting (making_map.h)
 	MakingMap m_making_map{m_world, m_growth, m_waiting, m_awaiting};
+	// [SKELDAT_MINING_HAZARDS] The pockets' liquids and gases (hazards.h):
+	// the rules read and write through m_hz_w, the access the step holds.
+	// A change not the step's own (a dig, a placing) is pending until the
+	// next step wakes the hazards in it and round it.
+	skeldat::hazards::Hazards m_hazards;
+	voxelworld::Instance *m_hz_w = nullptr;
+	std::vector<uint64_t> m_hz_pending;
+	std::unordered_map<uint64_t, skeldat::hazards::Cell> m_hz_seen;
+	uint32_t m_hz_ids[6] = {}; // pocket_water lava gas_poison gas_volcanic water_source stone
+	// The rules' time and with voxelworld's commit of their changes (most
+	// of it: ~5 ms a second for 100 voxels changed, the step's 0.6 ms)
+	int64_t m_hz_us = 0, m_hz_step_us = 0;
+	double m_hz_next_t = 0;
+	size_t m_hz_steps = 0;
+	// A test's watched box (the "pocket" test): its water volume reported
+	int m_hz_watch[6] = {0, 0, 0, -1, -1, -1};
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -157,6 +174,35 @@ struct Module: public interface::Module, public PlayersHost,
 		// decay (AreaField.glsl). wetness is only the slot it rides in.
 		m_world.format.wetness = m_world.bones;
 		m_furnaces.changed = [this](const ss_ &at){ m_players.send_furnace(at); };
+		bind_hazards();
+		// [SKELDAT_MINING_HAZARDS] "pocket <water|lava|poison> dx dz w h d": a
+		// box of the full kind on the ground at the player's offset, its
+		// surroundings watched (water's volume in the report)
+		m_mobs.test_more = [this](const ss_ &kind, std::istream &it,
+				Player &p){
+			if(kind != "pocket")
+				return false;
+			ss_ what;
+			int dx = 0, dz = 0, bw = 2, bh = 2, bd = 2;
+			it>>what>>dx>>dz>>bw>>bh>>bd;
+			step_hazards(); // the ids
+			const int x0 = (int)std::floor(p.x) + dx,
+					z0 = (int)std::floor(p.z) + dz, y0 = (int)std::floor(p.y);
+			const uint32_t id = what == "lava" ? m_hz_ids[1] :
+					what == "poison" ? m_hz_ids[2] : m_hz_ids[0];
+			const uint32_t param = what == "poison" ? 255 : 7;
+			for(int x = x0; x < x0 + bw; x++)
+			for(int y = y0; y < y0 + bh; y++)
+			for(int z = z0; z < z0 + bd; z++)
+				m_world.set_node(x, y, z, id, param);
+			const int r = 12;
+			const int box[6] = {x0 - r, y0 - r, z0 - r, x0 + bw + r, y0 + bh + r,
+					z0 + bd + r};
+			std::copy(box, box + 6, m_hz_watch);
+			log_i(MODULE, "skeldat: test: a %s pocket %dx%dx%d at %d,%d,%d",
+					what.c_str(), bw, bh, bd, x0, y0, z0);
+			return true;
+		};
 		// What is kept by the voxel: the stuck arrows (saved), the marker
 		// skulls a footprint, and the sections whose tops are counted
 		// again (the top may have moved to another section of the column)
@@ -556,6 +602,14 @@ struct Module: public interface::Module, public PlayersHost,
 			while(is>>c>>day)
 				m_mobs.hole_day[c] = day;
 		}
+		if(m_store->get("hazards_active", v)){
+			std::istringstream is(v);
+			uint64_t k;
+			while(is>>k)
+				m_hz_pending.push_back(k);
+			log_i(MODULE, "skeldat: hazards: %zu active read back",
+					m_hz_pending.size());
+		}
 		if(m_store->get("markers", v)){
 			std::istringstream is(v);
 			int all = 0;
@@ -885,6 +939,12 @@ struct Module: public interface::Module, public PlayersHost,
 			for(auto &kv : m_mobs.hole_day)
 				hs<<kv.first<<" "<<kv.second<<" ";
 			m_store->set("holes", hs.str());
+			std::ostringstream as;
+			for(uint64_t k : m_hazards.active)
+				as<<k<<" ";
+			for(uint64_t k : m_hz_pending)
+				as<<k<<" ";
+			m_store->set("hazards_active", as.str());
 		});
 	}
 
@@ -1343,6 +1403,8 @@ struct Module: public interface::Module, public PlayersHost,
 					m_played[pair.second.name] += dtime;
 		step_end();
 		m_mobs.step_arrows(dtime);
+		if(m_world.ready)
+			step_hazards();
 		m_players.step_drops(dtime);
 		m_mobs.ai_t += dtime;
 		if(m_mobs.ai_t >= 0.1f){
@@ -1398,6 +1460,136 @@ struct Module: public interface::Module, public PlayersHost,
 		m_furnaces.step(dtime, m_world.day_s);
 	}
 
+	// [SKELDAT_MINING_HAZARDS] The rules on the voxels: a voxel's cell by
+	// its id (a liquid's param2 its eighths less one, a gas's its share),
+	// outside the world solid; a cell back as its id. Lava gone solid is
+	// stone.
+	void bind_hazards()
+	{
+		using namespace skeldat::hazards;
+		m_hazards.get = [this](int x, int y, int z){
+			// Read once a step: the rules read the same cells over and over
+			auto hit = m_hz_seen.find(key(x, y, z));
+			if(hit != m_hz_seen.end())
+				return hit->second;
+			Cell c = read_cell(x, y, z);
+			m_hz_seen[key(x, y, z)] = c;
+			return c;
+		};
+		m_hazards.set = [this](int x, int y, int z, const Cell &c){
+			uint32_t id = ID_AIR, param = 0;
+			switch(c.kind){
+			case WATER: id = m_hz_ids[0], param = c.amount - 1u; break;
+			case LAVA: id = m_hz_ids[1], param = c.amount - 1u; break;
+			case POISON: id = m_hz_ids[2], param = c.amount; break;
+			case VOLCANIC: id = m_hz_ids[3], param = c.amount; break;
+			case SOLID: id = m_hz_ids[5]; break;
+			default: break;
+			}
+			m_world.set_node_in(m_hz_w, x, y, z, id, param);
+			m_hz_seen[key(x, y, z)] = c;
+		};
+		// Any other change wakes what is there and round it
+		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
+				uint32_t id){
+			if(m_hz_w || old == id)
+				return;
+			m_hz_pending.push_back(key(x, y, z));
+			for(const auto &d : SIX)
+				m_hz_pending.push_back(key(x + d[0], y + d[1], z + d[2]));
+		});
+	}
+
+	skeldat::hazards::Cell read_cell(int x, int y, int z)
+	{
+		using namespace skeldat::hazards;
+		const int S = skeldat::bones::SECTION;
+		if(m_world.column(x, z) < 0 || y < m_world.y0 * S ||
+				y >= (m_world.y1 + 1) * S)
+			return Cell(SOLID);
+		const uint32_t d = m_hz_w->get_voxel(pv::Vector3DInt32(x, y, z),
+				true).data;
+		const uint32_t id = m_world.format.id.get(d),
+				param = m_world.format.param.get(d);
+		if(id == ID_AIR)
+			return Cell(AIR);
+		if(id == m_hz_ids[0])
+			return Cell(WATER, (uint8_t)(param % 8 + 1));
+		if(id == m_hz_ids[1])
+			return Cell(LAVA, (uint8_t)(param % 8 + 1));
+		if(id == m_hz_ids[2] || id == m_hz_ids[3])
+			return Cell(id == m_hz_ids[2] ? POISON : VOLCANIC,
+					(uint8_t)std::max(1u, param));
+		if(id == m_hz_ids[4])
+			return Cell(SEA);
+		return Cell(SOLID);
+	}
+
+	void step_hazards()
+	{
+		using namespace skeldat::hazards;
+		if(!m_hz_ids[5]){
+			const char *names[6] = {"skeldat:pocket_water", "skeldat:lava",
+					"skeldat:gas_poison", "skeldat:gas_volcanic",
+					"skeldat:water_source", "skeldat:stone"};
+			for(int i = 0; i < 6; i++)
+				m_hz_ids[i] = m_world.id_of(names[i]);
+		}
+		// Four times a second: a gas's cells come due at their own
+		// offsets, and each access's commit writes out every chunk touched
+		if(m_world.t < m_hz_next_t || (m_hz_pending.empty() &&
+				(m_hazards.due.empty() || m_hazards.due.top().first > m_world.t)))
+			return;
+		m_hz_next_t = m_world.t + skeldat::hazards::TICK;
+		const int64_t t0 = interface::os::time_us();
+		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+			m_hz_w = w;
+			m_hazards.now = m_world.t;
+			// Only the hazards among the woken: air and rock never move
+			for(uint64_t k : m_hz_pending){
+				int x, y, z;
+				unkey(k, x, y, z);
+				const uint8_t kind = m_hazards.get(x, y, z).kind;
+				if(liquid(kind) || gas(kind))
+					m_hazards.wake(x, y, z);
+			}
+			m_hz_pending.clear();
+			m_hz_steps += m_hazards.step(m_world.t);
+			m_hz_step_us = std::max(m_hz_step_us, interface::os::time_us() - t0);
+			m_hz_w = nullptr;
+			m_hz_seen.clear();
+		});
+		m_hz_us += interface::os::time_us() - t0;
+	}
+
+	// The 10 s report: the set, the time, the watched box's water
+	void report_hazards()
+	{
+		using namespace skeldat::hazards;
+		if(m_hazards.active.empty() && !m_hz_steps && m_hz_watch[3] < 0)
+			return;
+		int volume = -1;
+		if(m_hz_watch[3] >= 0)
+			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+				m_hz_w = w;
+				volume = 0;
+				for(int x = m_hz_watch[0]; x <= m_hz_watch[3]; x++)
+				for(int y = m_hz_watch[1]; y <= m_hz_watch[4]; y++)
+				for(int z = m_hz_watch[2]; z <= m_hz_watch[5]; z++){
+					const Cell c = m_hazards.get(x, y, z);
+					if(c.kind == WATER)
+						volume += c.amount;
+				}
+				m_hz_w = nullptr;
+				m_hz_seen.clear();
+			});
+		log_i(MODULE, "skeldat: hazards: %zu active, %zu stepped, a step %.3f ms "
+				"at most, %.3f ms a second with the commits, water volume %d",
+				m_hazards.active.size(), m_hz_steps, m_hz_step_us / 1e3,
+				m_hz_us / 1e3 / 10, volume);
+		m_hz_steps = 0, m_hz_us = 0, m_hz_step_us = 0;
+	}
+
 	void save_and_report()
 	{
 		save();
@@ -1415,6 +1607,7 @@ struct Module: public interface::Module, public PlayersHost,
 				"put back", skeletons, full, m_mobs.woken, m_mobs.light_steps,
 				m_mobs.light_us / 1e3 / 10, m_mobs.body_puts);
 		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
+		report_hazards();
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();
 		for(auto &pair : m_players.all)

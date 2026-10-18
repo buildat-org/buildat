@@ -136,24 +136,31 @@ struct WorldView
 	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0,
 			int bones_ = -1)
 	{
-		const pv::Vector3DInt32 p(x, y, z);
 		voxelworld::access(server, scene, [&](voxelworld::Instance *w){
-			interface::VoxelSample v = w->get_sample(p, true);
-			uint32_t &word = v.planes[0];
-			const uint32_t old = format.id.get(word);
-			word = 0;
-			format.id.set(word, id);
-			format.param.set(word, param);
-			if(id == ID_AIR || id == marker || id == stuck_id)
-				bones.set(v, 0);
-			// A stuck arrow's voxel coming or going keeps no bones given
-			if(!(old != id && (old == stuck_id || id == stuck_id)) && bones_ >= 0)
-				bones.set(v, (uint32_t)bones_);
-			for(auto &f : on_set)
-				f(x, y, z, old, id);
-			w->set_sample(p, v);
-			rescan_column(w, x, z);
+			set_node_in(w, x, y, z, id, param, bones_);
 		});
+	}
+
+	// set_node() inside an open access (the hazards' step, many at once)
+	void set_node_in(voxelworld::Instance *w, int x, int y, int z, uint32_t id,
+			uint32_t param = 0, int bones_ = -1)
+	{
+		const pv::Vector3DInt32 p(x, y, z);
+		interface::VoxelSample v = w->get_sample(p, true);
+		uint32_t &word = v.planes[0];
+		const uint32_t old = format.id.get(word);
+		word = 0;
+		format.id.set(word, id);
+		format.param.set(word, param);
+		if(id == ID_AIR || id == marker || id == stuck_id)
+			bones.set(v, 0);
+		// A stuck arrow's voxel coming or going keeps no bones given
+		if(!(old != id && (old == stuck_id || id == stuck_id)) && bones_ >= 0)
+			bones.set(v, (uint32_t)bones_);
+		for(auto &f : on_set)
+			f(x, y, z, old, id);
+		w->set_sample(p, v);
+		rescan_column(w, x, z);
 	}
 
 	static int floor_div(int a, int b){ return a >= 0 ? a / b : -((-a + b - 1) / b); }

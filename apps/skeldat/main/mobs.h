@@ -76,6 +76,8 @@ struct Mobs
 	// sets the bones of the ground voxel at x, z
 	ss_ test;
 	bool test_done = false;
+	// A test item another part knows (the hazards' "pocket"): true if taken
+	std::function<bool(const ss_ &, std::istream &, Player &)> test_more;
 
 	Mobs(WorldView &world, std::map<size_t, Player> &players, MobsHost &host,
 			Drops &drops, BonesGrowth &growth, Furnaces &furnaces):
@@ -219,6 +221,8 @@ struct Mobs
 			std::istringstream it(item);
 			ss_ kind;
 			it>>kind;
+			if(test_more && test_more(kind, it, *p))
+				continue;
 			if(kind == "place"){
 				// "place x z": the player moved onto that column's top
 				int x = 0, z = 0;
