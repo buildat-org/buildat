@@ -368,6 +368,23 @@ mp_server pause BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 cat > "$t/pause.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 delay 3000
+keypress Tab
+wait_log 5000 hillclimb: the hill menu shown
+delay 500
+keypress Down
+delay 200
+keypress Return
+delay 500
+keypress Down
+delay 200
+keypress Return
+wait_log 3000 hillclimb: the hill menu: steep
+delay 300
+$(for i in 1 2 3 4 5 6 7; do echo keypress Down; echo delay 150; done)
+screenshot $t/hill_menu.png
+keypress Return
+wait_log 5000 hillclimb: the hill menu sends params
+delay 3000
 keydown W
 delay 1500
 keypress Escape
@@ -406,6 +423,12 @@ seq=$(grep -a " hillclim: \(pause: \|hillclimb: input \)" "$t/pause.log" |
 want="W1|pause: the menu shown|W0|pause: the menu closed|pause: settings shown|pause: settings closed|pause: the menu shown|pause: the menu closed|W1|W0|pause: the menu shown|pause: leave|"
 [ "${seq#W0|}" = "$want" ] && grep -aq "leave: no launcher" "$t/pause.log" ||
 	fail "the pause menu: $seq ($t/pause.log)"
+# [HC_HILL_MENU] Tab's window by its keys: Down to Steepness, its next
+# choice, Down to Make it: the params sent with that steepness
+steep=$(grep -a "hillclimb: the hill menu: steep " "$t/pause.log" | sed 's/.*steep //')
+sent=$(grep -a "hillclimb: the hill menu sends params " "$t/pause.log" | sed 's/.*params //')
+[ -n "$steep" ] && [ "$(echo "$sent" | awk '{print $2}')" = "$steep" ] ||
+	fail "the hill menu: steepness ${steep:-none}, sent ${sent:-none} ($t/pause.log)"
 echo "  Escape: the menu, no input under it, settings and back, leave"
 # [HC_TOUCH] BUILDAT_TOUCH=1 at 800x500 (a UI scale of 1.25: the ring's
 # 65 pixels are 81): a stick pushed full up on the left drives up the
@@ -417,7 +440,8 @@ echo "  Escape: the menu, no input under it, settings and back, leave"
 # pixels apart halves the distance, and the stick (third gear) with a
 # drag back at once does both. [HC_STICK_AXES] up is twice the travel
 # (2R, 162 pixels): a push 3R up and R/2 across keeps its steer, 0.44 in
-# fourth
+# fourth. [HC_HILL_MENU] Menu, The hill..., Steepness's dropdown tapped,
+# a choice, Make it: the params sent with it
 mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
@@ -477,6 +501,17 @@ delay 500
 tap 724 190
 wait_log 5000 pause: the menu shown
 delay 500
+click Button "The hill..."
+wait_log 5000 hillclimb: the hill menu shown
+delay 1000
+tap 455 148
+delay 1000
+tap 430 273
+wait_log 3000 hillclimb: the hill menu: steep
+delay 500
+tap 400 397
+wait_log 5000 hillclimb: the hill menu sends params
+delay 500
 quit
 C
 BUILDAT_TOUCH=1 mp_client touch "$t/touch.cmds"
@@ -498,6 +533,10 @@ grep -aq "touch: Start" "$t/touch.log" && [ -n "$start" ] &&
 	awk -v z="${start#*|}" 'BEGIN { exit !(z < 5) }' &&
 	grep -aq "touch: Menu" "$t/touch.log" && grep -aq "pause: the menu shown" "$t/touch.log" ||
 	fail "Start (no stick, the car at the start: ${start:-none}) or Menu ($t/touch.log)"
+steep=$(grep -a "hillclimb: the hill menu: steep " "$t/touch.log" | sed 's/.*steep //')
+sent=$(grep -a "hillclimb: the hill menu sends params " "$t/touch.log" | sed 's/.*params //')
+[ -n "$steep" ] && [ "$steep" != 15 ] && [ "$(echo "$sent" | awk '{print $2}')" = "$steep" ] ||
+	fail "the hill menu by touch: steepness ${steep:-none}, sent ${sent:-none} ($t/touch.log)"
 echo "$in" | grep -q '^1 0 0 0 4 0 4[0-9]|' ||
 	fail "a push past the top cut the steer ($t/touch.log)"
 echo "$in" | grep -q '^1 0 0 0 3 0 0|' ||

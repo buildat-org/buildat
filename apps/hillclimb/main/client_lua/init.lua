@@ -15,6 +15,9 @@ local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
+local ui_utils = require("buildat/extension/ui_utils")
+local uistack = require("buildat/extension/uistack")
+uistack = uistack.safe or uistack
 local log = buildat.Logger("hillclimb")
 
 local function load(name)
@@ -627,7 +630,7 @@ local function down(id)
 	return key[id] ~= 0 and magic.input:GetKeyDown(key[id])
 end
 local gear = 2
-local menu = nil -- the menu, {sel, values} while open: no driving
+local menu = nil -- the menu, {values, root} while open: no driving
 -- [HC_MULTIPLAYER] 6: the chat, builtin/chat's, its console
 -- builtin/accounts' (skeldat's); open: no driving
 local chat = require("buildat/module/chat")
@@ -738,9 +741,6 @@ buildat.sub_packet("hillclimb:results", function(data)
 	log:info("hillclimb: the round's results:" .. (data == "" and " no runs"
 			or data:gsub("\n", "; ")))
 end)
-local menu_text = text(12, 150, 16)
-menu_text.visible = false
-
 -- "<rank of the last finish or -1>", then a line each, "time finished
 -- unfinished date name" (main.cpp send_ranking), under the hill and the
 -- payload now picked; the counts the runs ended on the hill before
@@ -781,28 +781,31 @@ local MENU = {
 		900, 1800}, show = function(v)
 			return v == 0 and "never" or (v / 60 .. " min") end},
 }
-local function menu_draw()
-	local lines = {"The hill and the car (Up/Down, Left/Right; Enter: make it;"
-			.. " Tab: close)", ""}
-	for i, m in ipairs(MENU) do
-		local v = menu.values[m.id]
-		lines[#lines + 1] = string.format("%s %-16s %s%s",
-				i == menu.sel and ">" or " ", m.label,
-				m.show and m.show(v) or tostring(v), m.unit or "")
+-- [HC_HILL_MENU] A setting's choices for its dropdown: a list's entries,
+-- a range's min..max by step, as {label, value}; the current value in
+-- its place when it is between the steps (day 172 of a 7-day step)
+local function menu_choices(m, current)
+	local out = {}
+	local function add(v)
+		out[#out + 1] = {(m.show and m.show(v) or tostring(v)) ..
+				(m.unit or ""), v}
 	end
-	menu_text:SetText(table.concat(lines, "\n"))
-end
-local function menu_change(dir)
-	local m = MENU[menu.sel]
-	local v = menu.values[m.id]
+	local vs = {}
 	if m.list then
-		local i = 1
-		for j, x in ipairs(m.list) do if x == v then i = j end end
-		v = m.list[(i - 1 + dir) % #m.list + 1]
+		for _, v in ipairs(m.list) do vs[#vs + 1] = v end
 	else
-		v = math.max(m.min, math.min(m.max, v + dir * m.step))
+		for i = 0, math.floor((m.max - m.min) / m.step + 0.5) do
+			vs[#vs + 1] = m.min + i * m.step
+		end
 	end
-	menu.values[m.id] = v
+	local found = false
+	for _, v in ipairs(vs) do found = found or v == current end
+	if not found and current then
+		vs[#vs + 1] = current
+		table.sort(vs)
+	end
+	for _, v in ipairs(vs) do add(v) end
+	return out
 end
 local function pressed(name)
 	return magic.input:GetKeyPress(name)
@@ -820,45 +823,102 @@ magic.SubscribeToEvent("command_seq:hillclimb_params", function(_, d)
 	buildat.send_packet("hillclimb:params", d:GetString("Param"))
 	log:info("hillclimb: the drive sends params " .. d:GetString("Param"))
 end)
--- The Tab menu, or why not
+-- The Tab menu ([HC_HILL_MENU]: a window, a row a setting), or why not
+local function close_hill_menu()
+	if not menu then
+		return
+	end
+	ui_utils.close_dropdowns()
+	uistack.main:pop(menu.root)
+	menu = nil
+	-- A clicked button stays the focus, and Space would press it again
+	magic.ui:SetFocusElement(nil)
+	log:info("hillclimb: the hill menu closed")
+end
 local function open_hill_menu()
 	if picks and not hill.may_pick then
 		hud_note = {text = "Only an admin picks the hill here",
 			t = scene.elapsedTime}
-	elseif picks then
-		local values = {}
-		for k, v in pairs(picks) do values[k] = v end
-		menu = {sel = 1, values = values}
+		return
+	elseif not picks or menu then
+		return
 	end
+	local values = {}
+	for k, v in pairs(picks) do values[k] = v end
+	menu = {values = values, root = uistack.main:push({desc = "hill"})}
+	-- Rows of 24 four apart: the whole of it on a 400 high UI (800 x 500
+	-- at a UI scale of 1.25)
+	local m = ui_utils.vertical_menu(menu.root, {min_width = 340,
+		min_height = 24, spacing = 4,
+		padding = magic.IntRect(10, 6, 10, 6)})
+	m.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	local title = m.window:CreateChild("Text")
+	title:SetStyleAuto()
+	title.text = "The hill and the car"
+	title:SetFontSize(16)
+	-- The seed: its digits typed, 1..999999, anything else back to the
+	-- last good one when it loses the focus; and Random
+	local row = m.window:CreateChild("UIElement")
+	row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+	row:SetFixedHeight(24)
+	local label = row:CreateChild("Text")
+	label:SetStyleAuto()
+	label.text = "Seed"
+	label.verticalAlignment = magic.VA_CENTER
+	local edit = row:CreateChild("LineEdit")
+	edit:SetStyleAuto()
+	edit:SetFixedWidth(110)
+	edit.text = tostring(values.seed)
+	local function seed_read()
+		local n = tonumber(edit.text)
+		if n and n == math.floor(n) and n >= 1 and n <= 999999 then
+			values.seed = n
+		end
+		edit.text = tostring(values.seed)
+	end
+	magic.SubscribeToEvent(edit, "Defocused", seed_read)
+	magic.SubscribeToEvent(edit, "TextFinished", seed_read)
+	local random = row:CreateChild("Button")
+	random:SetStyleAuto()
+	random:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(8, 0, 8, 0))
+	local rt = random:CreateChild("Text")
+	rt:SetStyleAuto()
+	rt.text = "Random"
+	rt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+	m:add(random, function()
+		values.seed = math.random(1, 999999)
+		edit.text = tostring(values.seed)
+	end)
+	for i = 2, #MENU do
+		local e = MENU[i]
+		m:add_dropdown(e.label, menu_choices(e, values[e.id]), values[e.id],
+				function(v)
+			values[e.id] = v
+			log:info("hillclimb: the hill menu: " .. e.id .. " " .. v)
+		end, {label_width = 130, height = 24})
+	end
+	m:add("Make it", function()
+		seed_read()
+		local v = values
+		local params = string.format("%d %d %d %d %g %g %g %d", v.seed,
+				v.steep, v.length, v.payload, v.lat, v.day, v.hour, v.interval)
+		buildat.send_packet("hillclimb:params", params)
+		log:info("hillclimb: the hill menu sends params " .. params)
+		close_hill_menu()
+	end, true)
+	m:add("Close", close_hill_menu)
+	log:info("hillclimb: the hill menu shown")
 end
 local function menu_keys()
-	if pressed(magic.KEY_TAB) then
+	-- Tab opens and closes it; a dropdown's popup has the keys first
+	if pressed(magic.KEY_TAB) and not ui_utils.dropdown_open() then
 		if menu then
-			menu = nil
+			close_hill_menu()
 		else
 			open_hill_menu()
 		end
 	end
-	menu_text.visible = menu ~= nil
 	board.visible = menu == nil
-	if not menu then
-		return
-	end
-	if pressed(magic.KEY_UP) then menu.sel = (menu.sel - 2) % #MENU + 1 end
-	if pressed(magic.KEY_DOWN) then menu.sel = menu.sel % #MENU + 1 end
-	if pressed(magic.KEY_LEFT) then menu_change(-1) end
-	if pressed(magic.KEY_RIGHT) then menu_change(1) end
-	if pressed(magic.KEY_RETURN) then
-		local v = menu.values
-		buildat.send_packet("hillclimb:params", string.format(
-				"%d %d %d %d %g %g %g %d", v.seed, v.steep, v.length,
-				v.payload, v.lat, v.day, v.hour, v.interval))
-		menu = nil
-		menu_text.visible = false
-		board.visible = true
-		return
-	end
-	menu_draw()
 end
 
 local GEARS = {[0] = "R", "1", "2", "3", "4"}
@@ -958,7 +1018,7 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		start = function() touch_reset = true end,
 		chat = function() open_chat() end,
 		menu = function()
-			menu = nil
+			close_hill_menu()
 			pause.open()
 		end,
 		-- Driving (not observing), no menu or window up
@@ -1003,9 +1063,9 @@ magic.SubscribeToEvent("Update", function(_, d)
 	-- pause menu opened or closed (not while the chat or the settings
 	-- window has it)
 	if pressed(magic.KEY_ESCAPE) and not chat_open and not (pause.held() and
-			not pause.escape_closes()) then
+			not pause.escape_closes()) and not ui_utils.dropdown_open() then
 		if menu then
-			menu = nil
+			close_hill_menu()
 		elseif pause.shown() then
 			pause.close()
 		else
