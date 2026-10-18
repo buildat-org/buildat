@@ -967,6 +967,8 @@ function M.logout()
 	local token = buildat.storage_read("token") or ""
 	buildat.storage_write("token", "")
 	buildat.storage_write("keep", "0")
+	-- [WEB_LEFT_DIALOG] What the web page says after it
+	buildat.set_leave_reason("You logged out.")
 	if token == "" then
 		return buildat.leave()
 	end

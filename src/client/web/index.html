@@ -595,6 +595,29 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			if(document.fullscreenElement && document.exitFullscreen)
 				document.exitFullscreen();
 		},
+		// [WEB_LEFT_DIALOG] The game left by its own choice (Log out,
+		// Leave the game) with no launcher under it: why, and Reconnect
+		// (a reload; after a log out the join asks again). Not a lost
+		// connection: no reload on a return, no /health polling.
+		onLeft: function(why){
+			load.style.display = 'none';
+			status.innerHTML = '';
+			status.appendChild(document.createTextNode(
+				(why || 'You left the game.') + '\n\n'));
+			var b = document.createElement('button');
+			b.textContent = 'Reconnect';
+			b.style.font = 'inherit';
+			b.style.padding = '8px 24px';
+			b.style.pointerEvents = 'auto';
+			b.onclick = function(){ location.reload(); };
+			status.appendChild(b);
+			status.style.background = 'rgba(0,0,0,0.75)';
+			status.style.padding = '16px';
+			if(document.exitPointerLock)
+				document.exitPointerLock();
+			if(document.fullscreenElement && document.exitFullscreen)
+				document.exitFullscreen();
+		},
 	};
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
 	// browser's focus is on it while a LineEdit has the game's, holding the

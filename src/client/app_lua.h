@@ -2380,6 +2380,16 @@
 		CApp *self = (CApp*)lua_touserdata(L, -1);
 		lua_pop(L, 1);
 
+#ifdef __EMSCRIPTEN__
+		// [WEB_LEFT_DIALOG] The page says why (the leave's reason: "You
+		// logged out.", "You left the game.") with a Reconnect, as a lost
+		// connection's dialog does
+		const char *why = lua_isstring(L, 1) ? lua_tostring(L, 1) : "";
+		EM_ASM({
+			if(Module['onLeft'])
+				Module['onLeft'](UTF8ToString($0));
+		}, why);
+#endif
 		// Exiting a game exits the client, also when started from the
 		// launcher: the menu's Urho3D/Lua state is not resettable in place.
 		self->shutdown();

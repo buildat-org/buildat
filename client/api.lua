@@ -114,7 +114,8 @@ buildat.get_env           = __buildat_get_env
 buildat.create_directories = __buildat_create_directories -- unsafe only
 buildat.set_watchdog_seconds = __buildat_set_watchdog_seconds -- unsafe only
 
-buildat.safe.disconnect    = __buildat_disconnect
+-- No text of the caller's: the web page's dialog says it ([WEB_LEFT_DIALOG])
+buildat.safe.disconnect    = function() __buildat_disconnect() end
 buildat.safe.set_reload_on_return = __buildat_set_reload_on_return
 buildat.safe.set_web_fullscreen = __buildat_set_web_fullscreen
 -- **The extension this client was booted with as its launcher**, which
@@ -278,6 +279,9 @@ buildat.safe.can_leave_to_launcher = function()
 	return launcher_under_game()
 end
 buildat.safe.leave = function()
+	-- [WEB_LEFT_DIALOG] Why, for the web page's dialog: the reason set
+	-- (Log out's), else a plain leave's
+	local why = leave_reason or "You left the game."
 	leave_reason = nil
 	if not leave_to_launcher() then
 		-- **Said out loud, because the quiet version of this is a dead
@@ -289,7 +293,7 @@ buildat.safe.leave = function()
 		log:info("leave: no launcher to go back to (" ..
 				tostring(__buildat_menu_extension_name) ..
 				"); disconnecting")
-		__buildat_disconnect()
+		__buildat_disconnect(why)
 	end
 end
 --
