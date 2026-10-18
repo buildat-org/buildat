@@ -1705,7 +1705,9 @@ echo "worlds and pause: day $paused over 10 s paused, w1 closed at $closed and b
 # pick logged once, the expansions those due for the game time skipped
 # (within 5%), no hit points lost; the wall time logged. Then a skip to
 # sunrise stopped from the menu stands between the two. (A player's skip
-# refused: 32's server with no launcher.)
+# refused: 32's server with no launcher.) [SKELDAT_SKIP_DAWN] The skip
+# to sunrise again, whole: it ends at 05:00 (day 0.2083), the sunrise's
+# pick not in it; the menu's skip then is to sunset.
 log37="$t/srv37.log"
 BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
 	BUILDAT_SKELDAT_TIME=0.5 start_server "$log37" "STATUS Listening" 300 auto \
@@ -1734,6 +1736,25 @@ delay 300
 click Button "Stop skipping"
 wait_log 5000 skeldat: running
 delay 1000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Skip to sunrise"
+wait_log 5000 skeldat: skipping to sunrise
+wait_log 120000 skeldat: running
+delay 1000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Skip to sunset"
+wait_log 5000 skeldat: skipping to sunset
+delay 500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 300
+click Button "Stop skipping"
+wait_log 5000 skeldat: running
+delay 1000
 quit
 EOF
 client skip "$t/skip.cmds"
@@ -1752,6 +1773,13 @@ echo "$done_line" | awk '{ d = $10 + 0; e = $11 + 0; due = substr($13, 2) + 0
 	fail "client1 hurt in a skip ($log37)"
 echo "$stopped" | awk '{ d = $10 + 0; exit !(d > 0.751 || d < 0.249) }' ||
 	fail "the stopped skip did not stand between: $stopped ($log37)"
+dawn=$(grep -a "the skip to sunrise done" "$log37" | sed 's/.*done: //')
+echo "$dawn" | awk '{ d = $10 + 0; exit !(d >= 0.2083 && d < 0.2085) }' ||
+	fail "the skip to dawn: ${dawn:-none} ($log37)"
+[ "$(awk '/skips to dawn \(05:00\)/ { on = 1 } /the skip to sunrise done/ { on = 0 } on && /skeldat: sunrise: / { n++ } END { print n + 0 }' "$log37")" = 0 ] &&
+	[ "$(grep -ac "client1 skips to sunset" "$log37")" = 2 ] ||
+	fail "the sunrise's pick in the skip to dawn, or no skip to sunset after it ($log37)"
+echo "skip: to dawn $dawn"
 # 34. The stars round the moon's axis ([STARS_AXIS]): at 23:31 in a
 # 128 world, the camera fixed on the moon high in the south, two
 # screenshots 5 s (30 game minutes, DAY 240) apart: the stars near the

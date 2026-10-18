@@ -413,14 +413,16 @@ return function(game, declare_keys)
 				close()
 			end)
 			-- [SKELDAT_SKIP_TIME] To the next sunset by day, sunrise by
-			-- night (game.day 0.25..0.75 is the day), or Stop
+			-- night, or Stop; [SKELDAT_SKIP_DAWN] the night's to 05:00
+			-- (0.25 - 1/24), and the day's from there
 			if game.skipping then
 				menu:add("Stop skipping", function()
 					game.send("skip", "stop")
 					close()
 				end)
 			elseif not game.ended and not held then
-				local day = (game.day or 0.5) >= 0.25 and (game.day or 0.5) < 0.75
+				local d = game.day or 0.5
+				local day = d >= 0.25 - 1 / 24 and d < 0.75
 				menu:add(day and "Skip to sunset" or "Skip to sunrise", function()
 					game.send("skip", "on")
 					close()

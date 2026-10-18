@@ -153,17 +153,23 @@ struct Admin
 			paused = pause_auto = false;
 			paused_by.clear();
 		}
-		const bool day = world.day >= 0.25 && world.day < 0.75;
-		const double target = day ? 0.75 : 0.25;
-		// A hair past it, so the phase turns in the skip
-		skip_left = skip_total =
-				(std::fmod(target - world.day + 1.0, 1.0) + 1e-5) * world.day_s;
+		// [SKELDAT_SKIP_DAWN] The night's skip ends at 05:00, an hour
+		// before sunrise, as the sky brightens; the choice turns there
+		// too, so a skip asked at 05:30 is to sunset
+		const double DAWN = 0.25 - 1.0 / 24;
+		const bool day = world.day >= DAWN && world.day < 0.75;
+		const double target = day ? 0.75 : DAWN;
+		// To sunset a hair past it, so the phase turns in the skip; to
+		// dawn none, the sunrise's phase an hour of game time after it
+		skip_left = skip_total = (std::fmod(target - world.day + 1.0, 1.0) +
+				(day ? 1e-5 : 0.0)) * world.day_s;
+		// "sunrise" stays the packet's word (send_paused())
 		skip_to = day ? "sunset" : "sunrise";
 		skip_by = players.name_of(peer);
 		skip_us = skip_sent_us = interface::os::time_us();
 		skip_expansions = growth.expansions;
 		pause_refused.clear();
-		const ss_ line = skip_by+" skips to "+skip_to;
+		const ss_ line = skip_by+" skips to "+(day ? "sunset" : "dawn (05:00)");
 		log_i(MODULE, "skeldat: %s: %.1f s of game time, day %.4f", cs(line),
 				skip_total, world.day);
 		chat::access(world.server, [&](chat::Interface *c){ c->say(line); });
