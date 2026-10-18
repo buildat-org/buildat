@@ -3,9 +3,10 @@
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //
 // skeldat ([SKELDAT]): skelenti made fresh in Buildat, no Luanti game under
-// it. The rules are game.h's; this is the world they run in -- Luanti's own
-// valleys mapgen (builtin/luanti_mapgen) fed skelenti's biomes, ores and
-// trees, voxelworld keeping the light and the saves -- and the players: where
+// it. The rules are game.h's; this is the world they run in -- its own
+// generator (terrain.h, mapgen.h: [SKELDAT_OWN_MAPGEN]) with skelenti's
+// ground, ores and trees, voxelworld keeping the light and the saves -- and
+// the players: where
 // they are, what they carry, what they dig, place, craft and cook.
 //
 // The world: until one runs, a joining client gets builtin/world_menu and
@@ -16,9 +17,9 @@
 // (the checks; a server nobody sits at).
 //
 // The voxel word is Luanti's cut (VoxelFormat::luanti(): the id, the sky
-// and the lamp light, param2), which is what the mapgen writes, and a
+// and the lamp light, param2), which is what the generator writes, and a
 // second plane of 8 bits, "bones", whose low 4 are the bones field
-// (bones.h): seeded by the mapgen in the danger zones, grown a section at
+// (bones.h): seeded by the generator in the danger zones, grown a section at
 // a time, and drawn as skelenti's danger (the format's first modifier). The mobs, skelenti's,
 // read the danger off it: where a skeleton spawns and whether the sun
 // burns it.
@@ -39,7 +40,6 @@
 #include "accounts/api.h"
 #include "chat/api.h"
 #include "client_file/api.h"
-#include "luanti_mapgen/api.h"
 #include "main_context/api.h"
 #include "moderation/api.h"
 #include "network/api.h"
@@ -52,6 +52,7 @@
 #include "bones.h"
 #include "move_check.h"
 #include "hazards.h"
+#include "mapgen.h"
 #include <Scene.h>
 #include <Image.h>
 #include <Node.h>
@@ -145,6 +146,10 @@ struct Module: public interface::Module, public PlayersHost,
 	// Asked of worldgen and not merged yet: a section is loaded (empty)
 	// before it is generated
 	std::set<ss_> m_awaiting;
+	// Sections still to relight ([SKELDAT_OWN_MAPGEN], a new world), and
+	// since when
+	size_t m_relight_left = 0;
+	int64_t m_relight_t0 = 0;
 	// [SKELDAT_MAKING_MAP] The making as a map to the waiting (making_map.h)
 	MakingMap m_making_map{m_world, m_growth, m_waiting, m_awaiting};
 	// [SKELDAT_MINING_HAZARDS] The pockets' liquids and gases (hazards.h):
@@ -542,6 +547,14 @@ struct Module: public interface::Module, public PlayersHost,
 		else if(env_seed && env_seed[0])
 			seed = (uint32_t)std::stoul(env_seed);
 		m_store->set("seed", itos(seed));
+		// [SKELDAT_OWN_MAPGEN] The form: a world made before has none and
+		// was made by Luanti's valleys
+		// simplified: plains for every new world until the other forms
+		// are in (the plan's stages 3 and 4) and the menu's field (5)
+		if(!m_store->get("terrain", m_terrain.form)){
+			m_terrain.form = m_making ? "plains" : "legacy_valleys";
+			m_store->set("terrain", m_terrain.form);
+		}
 		if(m_store->get("day", v))
 			m_world.day = atof(v.c_str());
 		m_world.marker = m_world.id_of("skeldat:marker_skull");
@@ -662,11 +675,8 @@ struct Module: public interface::Module, public PlayersHost,
 	void create_world(uint32_t seed)
 	{
 		m_world.scene = main_context::create_scene(m_server);
-		m_terrain.mapgen = m_terrain.mapgen_params(seed);
-		worldgen::GeneratorInterface *generator = nullptr;
-		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *i){
-			generator = i->create_generator(m_terrain.mapgen);
-		});
+		m_terrain.seed = seed;
+		worldgen::GeneratorInterface *generator = m_terrain.make_generator();
 		// Before the voxelworld, or its first requests are lost
 		worldgen::access(m_server, [&](worldgen::Interface *i){
 			i->create_instance(m_world.scene);
@@ -679,12 +689,12 @@ struct Module: public interface::Module, public PlayersHost,
 			ids.ground[1] = m_world.id_of("skeldat:dirt");
 			ids.ground[2] = m_world.id_of("skeldat:sand");
 			m_generator = new BonesGenerator(generator, m_world.format, m_world.bones,
-					m_terrain.mapgen.seed, ids);
+					m_terrain.seed, ids);
 			m_generator->m_stone = m_world.id_of("skeldat:stone");
 			m_generator->m_pocket[0] = m_world.id_of("skeldat:pocket_water");
 			m_generator->m_pocket[1] = m_world.id_of("skeldat:gas_poison");
 			m_generator->m_pocket[2] = m_world.id_of("skeldat:lava");
-			m_generator->m_water_level = m_terrain.mapgen.water_level;
+			m_generator->m_water_level = m_terrain.water_level;
 			const char *fill = getenv("BUILDAT_SKELDAT_FILL");
 			m_generator->m_half_v = m_world.half * skeldat::bones::SECTION;
 			m_generator->m_fill = !fill ? 0 : ss_(fill) == "1" ? 1 :
@@ -704,8 +714,9 @@ struct Module: public interface::Module, public PlayersHost,
 			reg->set_format(m_world.format);
 			build_registry(reg);
 			w->set_save(m_save, "main");
-			// The mapgen lights what it builds; voxelworld keeps it up as
-			// the world changes, the torches' too
+			// The generator lights the columns down to the ground and a new
+			// world is relit when it is in (world_in()); voxelworld keeps
+			// it up as the world changes, the torches' too
 			w->set_light_maintained(voxelworld::Instance::LIGHT_SKY, true);
 			w->set_light_maintained(voxelworld::Instance::LIGHT_LAMP, true);
 		});
@@ -846,6 +857,18 @@ struct Module: public interface::Module, public PlayersHost,
 		const bool edge_new = m_store && !m_store->get("edge", edge_v);
 		m_terrain.make_edge();
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+			// [SKELDAT_OWN_MAPGEN] A new world's light worked out from what
+			// is in it (caves, overhangs, the lava pockets' own), sections
+			// at a time on the ticks
+			if(edge_new){
+				const int S = skeldat::bones::SECTION;
+				w->relight_region_later(pv::Region(
+						-m_world.half * S, m_world.y0 * S, -m_world.half * S,
+						m_world.half * S - 1, (m_world.y1 + 1) * S - 1,
+						m_world.half * S - 1));
+				m_relight_left = 1;
+				m_relight_t0 = interface::os::time_us();
+			}
 			// Those the making's map did not sweep ([SKELDAT_MAKING_MAP])
 			const int n = 2 * m_world.half;
 			for(size_t i = 0; i < m_world.footprints(); i++){
@@ -1337,6 +1360,16 @@ struct Module: public interface::Module, public PlayersHost,
 		if(!m_world.ready && m_save && m_growth.sections.size() == m_world.all_sections() &&
 				m_awaiting.empty())
 			world_in();
+		// A new world's relight, under a budget a tick (more for the
+		// sections by a player)
+		if(m_relight_left){
+			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+				m_relight_left = w->relight_stale(8000, 30000, 2);
+			});
+			if(!m_relight_left)
+				log_i(MODULE, "skeldat: the world relit in %.1f s",
+						(interface::os::time_us() - m_relight_t0) / 1e6);
+		}
 		// [SKELDAT_WORLD_ADMIN] Paused: the world's clock and every step of
 		// the game stand; the sections load and send, the session takes
 		// the joins

@@ -1,14 +1,186 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
-// [SKELDAT_MODULAR] **The world's making**: the generator's bones and
-// piles on Luanti's mapgen, the mapgen's parameters and the nodes as
-// Luanti sees them, the spawn, and what the made world is reported as
-// (the survey, the edge's check, the admin's map).
+// [SKELDAT_MODULAR] **The world's making**: skeldat's own generator
+// ([SKELDAT_OWN_MAPGEN], off mapgen.h's heightmap), the bones and piles
+// on it, the nodes as Luanti's registry sees them, the spawn, and what the
+// made world is reported as (the survey, the edge's check, the admin's
+// map).
 // Included by main.cpp inside namespace skeldat, after drops.h
 #pragma once
 
-// The mapgen's section, skelenti's bone piles on its ground (bones.h's
-// pile()), and its bones seeded by the place's danger: every voxel that is
+// [SKELDAT_OWN_MAPGEN] A section off the whole world's heightmap
+// (mapgen.h, shared and read only): stone, 3 of dirt and grass on top --
+// sand for all 4 where the ground is within 1 of the water line or under
+// it -- the bottom layer stone; the noodle caves carved (none in the
+// bottom 2, none within 4 under a ground below the water line, and the
+// ground voxel by the exact noise, the rest by a lattice every 4); the
+// ores scattered by a hash of the section and the seed (Luanti's scatter:
+// clusters of 3x3x3 by scarcity); the trees on grass, a tree's leaves only
+// into air and its trunk over them, each section placing its own part of
+// any tree within 2 of it. The sky's light down each column to its
+// first voxel; the rest is voxelworld's relight of a new world.
+// simplified: no water; it comes with the water fill (the plan's stage 2)
+struct SkeldatGenerator: public worldgen::GeneratorInterface
+{
+	struct Ids {
+		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0;
+	};
+	struct Ore {
+		uint32_t id;
+		int scarcity, num, y_max;
+	};
+	interface::VoxelFormat m_format;
+	std::shared_ptr<const mapgen::Heightmap> m_map;
+	mapgen::Params m_p;
+	Ids m_ids;
+	sv_<Ore> m_ores;
+
+	SkeldatGenerator(const interface::VoxelFormat &format,
+			std::shared_ptr<const mapgen::Heightmap> map, const mapgen::Params &p,
+			const Ids &ids, const sv_<Ore> &ores):
+		m_format(format), m_map(map), m_p(p), m_ids(ids), m_ores(ores){}
+
+	int ground(int x, int z) const { return (int)std::floor(m_map->at(x, z)); }
+	bool beach(int g) const { return g <= m_p.water_level + 1; }
+	// Caves may carve here: off the bottom 2 and not within 4 under a ground
+	// below the water line
+	bool carvable(int y, int g) const
+	{
+		return y > m_p.bottom + 1 && !(g < m_p.water_level && y >= g - 4);
+	}
+	// A tree on the column: on grass, which is not carved
+	bool has_tree(int x, int z) const
+	{
+		if(!m_map->in(x, z) || !mapgen::tree_at(x, z, m_p.seed))
+			return false;
+		const int g = ground(x, z);
+		return !beach(g) && !(carvable(g, g) && mapgen::cave((float)x,
+				(float)g, (float)z, m_p.seed));
+	}
+
+	void generate(main_context::SceneReference scene,
+			const pv::Vector3DInt16 &section_p, interface::VoxelVolume &volume)
+	{
+		const pv::Region &r = volume.getEnclosingRegion();
+		const pv::Vector3DInt32 &lc = r.getLowerCorner(), &uc = r.getUpperCorner();
+		auto word_of = [&](uint32_t id, int sky){
+			uint32_t w = 0;
+			m_format.id.set(w, id);
+			m_format.light_sky.set(w, (uint32_t)sky);
+			return w;
+		};
+		// The caves' two noises on a lattice every 4 over the region
+		const int G = 4;
+		const int gx = (uc.getX() - lc.getX()) / G + 2,
+				gy = (uc.getY() - lc.getY()) / G + 2,
+				gz = (uc.getZ() - lc.getZ()) / G + 2;
+		sv_<float> na((size_t)gx * gy * gz), nb(na.size());
+		for(int k = 0; k < gz; k++)
+		for(int j = 0; j < gy; j++)
+		for(int i = 0; i < gx; i++){
+			const float x = (float)(lc.getX() + i * G), y = (float)(lc.getY() + j * G),
+					z = (float)(lc.getZ() + k * G);
+			const size_t n = ((size_t)k * gy + j) * gx + i;
+			na[n] = mapgen::fbm3(x / mapgen::CAVE_SPREAD_XZ, y / mapgen::CAVE_SPREAD_Y,
+					z / mapgen::CAVE_SPREAD_XZ, m_p.seed + 7001, 2, 0.5f);
+			nb[n] = mapgen::fbm3(x / mapgen::CAVE_SPREAD_XZ, y / mapgen::CAVE_SPREAD_Y,
+					z / mapgen::CAVE_SPREAD_XZ, m_p.seed + 9103, 2, 0.5f);
+		}
+		auto lerp3 = [&](const sv_<float> &v, int x, int y, int z){
+			const int ox = x - lc.getX(), oy = y - lc.getY(), oz = z - lc.getZ();
+			const int i = ox / G, j = oy / G, k = oz / G;
+			const float tx = (ox % G) / (float)G, ty = (oy % G) / (float)G,
+					tz = (oz % G) / (float)G;
+			auto at = [&](int a, int b, int c){
+				return v[((size_t)(k + c) * gy + (j + b)) * gx + (i + a)];
+			};
+			const float x00 = at(0, 0, 0) + (at(1, 0, 0) - at(0, 0, 0)) * tx,
+					x10 = at(0, 1, 0) + (at(1, 1, 0) - at(0, 1, 0)) * tx,
+					x01 = at(0, 0, 1) + (at(1, 0, 1) - at(0, 0, 1)) * tx,
+					x11 = at(0, 1, 1) + (at(1, 1, 1) - at(0, 1, 1)) * tx;
+			const float y0 = x00 + (x10 - x00) * ty, y1 = x01 + (x11 - x01) * ty;
+			return y0 + (y1 - y0) * tz;
+		};
+		for(int z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int x = lc.getX(); x <= uc.getX(); x++){
+			const bool in = m_map->in(x, z);
+			const int g = in ? ground(x, z) : m_p.bottom;
+			const bool sandy = beach(g);
+			for(int y = lc.getY(); y <= uc.getY(); y++){
+				uint32_t id = ID_AIR;
+				if(y <= m_p.bottom)
+					id = m_ids.stone;
+				else if(y <= g){
+					const bool carved = carvable(y, g) && (y == g ?
+							mapgen::cave((float)x, (float)y, (float)z, m_p.seed) :
+							std::fabs(lerp3(na, x, y, z)) < mapgen::CAVE_WIDTH &&
+							std::fabs(lerp3(nb, x, y, z)) < mapgen::CAVE_WIDTH);
+					id = carved ? ID_AIR : y == g ? (sandy ? m_ids.sand : m_ids.grass) :
+							y >= g - 3 ? (sandy ? m_ids.sand : m_ids.dirt) : m_ids.stone;
+				}
+				volume.setVoxelAt(x, y, z, VoxelInstance(word_of(id, 0)));
+			}
+		}
+		// The ores
+		std::mt19937 rnd(m_p.seed ^ (uint32_t)(section_p.getX() * 73856093) ^
+				(uint32_t)(section_p.getY() * 19349663) ^
+				(uint32_t)(section_p.getZ() * 83492791));
+		const size_t voxels = volume.voxel_count();
+		for(const Ore &o : m_ores){
+			const size_t clusters = voxels / (size_t)o.scarcity;
+			for(size_t c = 0; c < clusters; c++){
+				const int x0 = lc.getX() + (int)(rnd() % (uint32_t)(uc.getX() - lc.getX() - 1)),
+						y0 = lc.getY() + (int)(rnd() % (uint32_t)(uc.getY() - lc.getY() - 1)),
+						z0 = lc.getZ() + (int)(rnd() % (uint32_t)(uc.getZ() - lc.getZ() - 1));
+				for(int i = 0; i < 27; i++){
+					if((int)(rnd() % 27) >= o.num || y0 + i / 9 > o.y_max)
+						continue;
+					const int x = x0 + i % 3, y = y0 + i / 9, z = z0 + (i / 3) % 3;
+					if(m_format.id.get(volume.getVoxelAt(x, y, z).data) == m_ids.stone)
+						volume.setVoxelAt(x, y, z, VoxelInstance(word_of(o.id, 0)));
+				}
+			}
+		}
+		// The trees within 2 of the section: leaves first, then the trunks
+		for(int pass = 2; pass >= 1; pass--)
+		for(int tz = lc.getZ() - 2; tz <= uc.getZ() + 2; tz++)
+		for(int tx = lc.getX() - 2; tx <= uc.getX() + 2; tx++){
+			if(!has_tree(tx, tz))
+				continue;
+			const int g = ground(tx, tz);
+			if(g + 6 < lc.getY() || g + 1 > uc.getY())
+				continue;
+			for(int dz = -2; dz <= 2; dz++)
+			for(int dy = 0; dy < 6; dy++)
+			for(int dx = -2; dx <= 2; dx++){
+				const int x = tx + dx, y = g + 1 + dy, z = tz + dz;
+				if(mapgen::tree_part(dx, dy, dz) != pass || !r.containsPoint(pv::Vector3DInt32(x, y, z)))
+					continue;
+				if(pass == 2 && m_format.id.get(volume.getVoxelAt(x, y, z).data) != ID_AIR)
+					continue;
+				volume.setVoxelAt(x, y, z, VoxelInstance(word_of(
+						pass == 1 ? m_ids.tree : m_ids.leaves, 0)));
+			}
+		}
+		// The sky down each column to its first voxel; a column whose
+		// ground is over the section is dark in it
+		for(int z = lc.getZ(); z <= uc.getZ(); z++)
+		for(int x = lc.getX(); x <= uc.getX(); x++){
+			if(m_map->in(x, z) && ground(x, z) > uc.getY())
+				continue;
+			for(int y = uc.getY(); y >= lc.getY(); y--){
+				uint32_t w = volume.getVoxelAt(x, y, z).data;
+				if(m_format.id.get(w) != ID_AIR)
+					break;
+				m_format.light_sky.set(w, 15);
+				volume.setVoxelAt(x, y, z, VoxelInstance(w));
+			}
+		}
+	}
+};
+
+// The section's voxels (SkeldatGenerator), skelenti's bone piles on its
+// ground (bones.h's pile()), and its bones seeded by the place's danger: every voxel that is
 // not air in a column at bones::SEED_DANGER or more, a pile's too. Runs on
 // worldgen's worker thread, so it touches nothing but the volume.
 struct BonesGenerator: public worldgen::GeneratorInterface
@@ -253,7 +425,12 @@ struct Terrain
 	storage::Save *&save;
 	storage::Store *&store;
 	Drops &drops;
-	luanti_mapgen::Params mapgen;
+	// The world's seed and water line ([SKELDAT_OWN_MAPGEN] set at its
+	// start: 20 in a world 64 high, 1 in one 128 high) and its form
+	// (mapgen.h's, or "legacy_valleys": made by Luanti's valleys before)
+	uint32_t seed = 0;
+	int water_level = 1;
+	ss_ form;
 	bool spawn_ready = false;
 
 	Terrain(WorldView &world, storage::Save *&save, storage::Store *&store,
@@ -262,7 +439,7 @@ struct Terrain
 	{}
 
 	// A voxel id's node as Luanti would have it defined, which is what
-	// builtin/luanti's registry builder and the mapgen read
+	// builtin/luanti's registry builder reads
 	luanti_registry::NodeDef luanti_def(uint32_t id)
 	{
 		luanti_registry::NodeDef d;
@@ -334,153 +511,43 @@ struct Terrain
 		return d;
 	}
 
-	luanti_mapgen::Params mapgen_params(uint32_t seed)
+	// [SKELDAT_OWN_MAPGEN] The generator: the heightmap made now (once a
+	// start, the same for the seed, the size and the form), the ids and
+	// the ores' table (Luanti's scatter numbers, as the valleys had them)
+	SkeldatGenerator *make_generator()
 	{
-		luanti_mapgen::Params mp;
-		mp.mgname = "valleys";
-		mp.seed = seed;
-		// A world 64 high ([SKELDAT_WORLD_SIZES]) is y 0..63, its water at
-		// 20; one 128 high is y -64..63, water at 1
+		const int S = skeldat::bones::SECTION;
 		const bool low = world.y0 >= 0;
-		const int wl = low ? 20 : 1, lift = wl - 1;
-		mp.water_level = wl;
-		mp.section_size = skeldat::bones::SECTION;
-		// The terrain's spreads by the world's width, not under 128, so a
-		// small world still has a valley and a hill
-		const float width = 2.0f * world.half * skeldat::bones::SECTION,
-				th_spread = std::max(128.0f, width),
-				vd_spread = std::max(128.0f, width / 2);
-		// The valleys squeezed into the world's 128 voxels of height
-		// ([SKELDAT_BOUNDED_WORLD]): over 1024² at seeds 1-12 the top
-		// solid voxel is at -6..54, where the defaults' is at -67..258.
-		// Spreads, seeds, octaves and the rest are the mapgen's defaults.
-		auto noise = [&](const char *name, float offset, float scale,
-				float spread, int32_t seed, int32_t octaves, float persist){
-			luanti_mapgen::Params::NoiseParams np;
-			np.given = true;
-			np.offset = offset;
-			np.scale = scale;
-			np.spread_x = np.spread_y = np.spread_z = spread;
-			np.seed = seed;
-			np.octaves = octaves;
-			np.persist = persist;
-			mp.noises[name] = np;
+		water_level = low ? 20 : 1;
+		mapgen::Params p;
+		p.seed = seed;
+		p.half = world.half * S;
+		p.bottom = world.y0 * S;
+		p.top = (world.y1 + 1) * S - 1;
+		p.water_level = water_level;
+		p.form = std::max(0, mapgen::form_of(form));
+		const int64_t t0 = interface::os::time_us();
+		auto map = std::make_shared<const mapgen::Heightmap>(mapgen::make_heightmap(p));
+		log_i(MODULE, "skeldat: the heightmap (%s) made in %.1f ms", cs(form),
+				(interface::os::time_us() - t0) / 1e3);
+		SkeldatGenerator::Ids ids;
+		ids.stone = world.id_of("skeldat:stone");
+		ids.dirt = world.id_of("skeldat:dirt");
+		ids.grass = world.id_of("skeldat:grass");
+		ids.sand = world.id_of("skeldat:sand");
+		ids.tree = world.id_of("skeldat:tree");
+		ids.leaves = world.id_of("skeldat:leaves");
+		sv_<SkeldatGenerator::Ore> ores = {
+			{world.id_of("skeldat:coal_ore"), 8 * 8 * 8, 8, 64},
+			// 64 high, each still under the surface (11 and up)
+			{world.id_of("skeldat:iron_ore"), 10 * 10 * 10, 5, low ? 14 : 0},
+			{world.id_of("skeldat:diamond_ore"), 15 * 15 * 15, 4, low ? 6 : -48},
+			{world.id_of("skeldat:gravel"), 16 * 16 * 16, 20, 64},
+			{world.id_of("skeldat:dirt"), 16 * 16 * 16, 20, low ? 4 : -32},
 		};
-		// 64 high: over seeds 1-12 the top solid voxel at 11..44 (the
-		// survey as for the 128 one, at widths 256 and 128)
-		if(low){
-			noise("mgvalleys_np_terrain_height", 22, 10, th_spread, 5202, 6,
-					0.4f);
-			noise("mgvalleys_np_valley_depth", 1.5f, 0.8f, vd_spread, -1914,
-					1, 1.0f);
-		} else {
-			noise("mgvalleys_np_terrain_height", 8, 12, th_spread, 5202, 6,
-					0.4f);
-			noise("mgvalleys_np_valley_depth", 2.5f, 1.2f, vd_spread, -1914,
-					1, 1.0f);
-		}
-		noise("mgvalleys_np_inter_valley_slope", 0.3f, 0.3f, 128, 746, 1,
-				1.0f);
-		for(size_t i = 0; i < world.game.nodes.size(); i++)
-			mp.content_ids[world.game.nodes[i].name] = (uint32_t)i + ID_NODE0;
-		mp.content_ids["air"] = ID_AIR;
-		mp.content_ids["ignore"] = ID_IGNORE;
-		mp.content_ids["unknown"] = ID_UNKNOWN;
-		const uint32_t stone = world.id_of("skeldat:stone"),
-				water = world.id_of("skeldat:water_source");
-		mp.content_ids["mapgen_stone"] = stone;
-		mp.content_ids["mapgen_water_source"] = water;
-		mp.content_ids["mapgen_river_water_source"] = water;
-		mp.content_ids["mapgen_cobble"] = world.id_of("skeldat:cobble");
-		for(uint32_t id = ID_AIR; id < ID_NODE0 + world.game.nodes.size(); id++)
-			if(id == ID_AIR || world.node_of(id))
-				mp.node_props[id] = luanti_registry::mapgen_props(luanti_def(id));
-		auto biome = [&](const ss_ &name, const ss_ &top, int depth_top,
-				const ss_ &filler, int depth_filler, const ss_ &riverbed,
-				int y_min, int y_max){
-			luanti_mapgen::Params::Biome b;
-			b.name = name;
-			b.c_top = world.id_of(top);
-			b.c_filler = world.id_of(filler);
-			b.c_stone = stone;
-			b.c_water_top = b.c_water = b.c_river_water = water;
-			b.c_riverbed = riverbed.empty() ? stone : world.id_of(riverbed);
-			b.c_dust = b.c_dungeon = b.c_dungeon_alt = b.c_dungeon_stair =
-					ID_IGNORE;
-			b.depth_top = depth_top;
-			b.depth_filler = depth_filler;
-			b.depth_riverbed = riverbed.empty() ? 0 : 2;
-			b.y_min = y_min;
-			b.y_max = y_max;
-			b.heat_point = b.humidity_point = 50;
-			mp.biomes.push_back(b);
-		};
-		biome("grassland", "skeldat:grass", 1, "skeldat:dirt", 3,
-				"skeldat:sand", 4 + lift, 31000);
-		biome("beach", "skeldat:sand", 1, "skeldat:sand", 2, "skeldat:sand",
-				-6 + lift, 3 + lift);
-		biome("seabed", "skeldat:gravel", 1, "skeldat:sand", 2, "",
-				-31000, -7 + lift);
-		auto ore = [&](const ss_ &name, int scarcity, int num, int y_max,
-				int y_min){
-			luanti_mapgen::Params::Ore o;
-			o.name = name;
-			o.c_ore = world.id_of(name);
-			o.c_wherein = {stone};
-			o.clust_scarcity = scarcity;
-			o.clust_num_ores = num;
-			o.clust_size = 3;
-			o.y_min = y_min;
-			o.y_max = y_max;
-			mp.ores.push_back(o);
-		};
-		ore("skeldat:coal_ore", 8 * 8 * 8, 8, 64, -31000);
-		// 64 high, each still under the surface (11 and up)
-		ore("skeldat:iron_ore", 10 * 10 * 10, 5, low ? 14 : 0, -31000);
-		ore("skeldat:diamond_ore", 15 * 15 * 15, 4, low ? 6 : -48, -31000);
-		ore("skeldat:gravel", 16 * 16 * 16, 20, 64, -31000);
-		ore("skeldat:dirt", 16 * 16 * 16, 20, 64, low ? 4 : -32);
-		// A tree, 5x6x5: a trunk of four, leaves around its top two and
-		// over it
-		luanti_mapgen::Params::Decoration d;
-		d.name = "skeldat:tree";
-		d.type = "schematic";
-		d.c_place_on = {world.id_of("skeldat:grass")};
-		d.sidelen = 16;
-		d.fill_ratio = 0.006f;
-		d.biomes = {"grassland"};
-		d.y_min = 4 + lift;
-		d.y_max = 200;
-		d.flags = "place_center_x, place_center_z";
-		// Luanti puts a schematic's layer 0 at the place_on node, and the
-		// force-placed trunk took the grass: one up, the trunk on it
-		// ([SKELDAT_TREE_DEPTH])
-		d.place_offset_y = 1;
-		d.rotation = "random";
-		luanti_mapgen::Params::Schematic &s = d.schematic;
-		s.given = true;
-		s.size_x = 5; s.size_y = 6; s.size_z = 5;
-		s.node_names = {"skeldat:tree", "skeldat:leaves", "air"};
-		for(int z = 0; z < 5; z++) for(int y = 0; y < 6; y++)
-		for(int x = 0; x < 5; x++){
-			const bool trunk = x == 2 && z == 2 && y < 4;
-			const bool edge = (x == 0 || x == 4) && (z == 0 || z == 4);
-			const bool inner = x >= 1 && x <= 3 && z >= 1 && z <= 3;
-			const bool leaf = ((y == 2 || y == 3) && !edge) ||
-					(y == 4 && inner) ||
-					(y == 5 && (x == 2 || z == 2) && inner);
-			s.ids.push_back(trunk ? 0 : leaf ? 1 : 2);
-			// Half the probability, and force_place in the high bit, as
-			// a .mts file holds it
-			s.param1.push_back(trunk ? 127 + 128 : leaf ? 127 : 0);
-			s.param2.push_back(0);
-		}
-		mp.decorations.push_back(d);
-		return mp;
+		return new SkeldatGenerator(world.format, map, p, ids, ores);
 	}
 
-	// Luanti's spawn search: out from the origin until the mapgen says a
-	// column is land, kept in the save so that it does not move
 	// Where a player starts, found on the world once it is in: a dry
 	// column near the origin with no bones, not a tree top, read off the
 	// voxels (valleys' own spawn level refuses any ground over water level
@@ -529,15 +596,15 @@ struct Terrain
 				world.spawn[2] = (float)ez;
 				spawn_ready = true;
 			}
-			std::mt19937 r(mapgen.seed);
+			std::mt19937 r(seed);
 			for(int i = 0; i < 4000 && !spawn_ready; i++){
 				const int range = std::min(32 + i / 4, world.half * SECTION - 16);
 				const int x = (int)(r() % (2 * range)) - range;
 				const int z = (int)(r() % (2 * range)) - range;
 				int feet = 0;
-				if(!ground(x, z, feet) || feet < mapgen.water_level + 1 ||
+				if(!ground(x, z, feet) || feet < water_level + 1 ||
 						seed_value(skeldat::bones::danger(
-						(uint32_t)mapgen.seed, (float)x, (float)z,
+						seed, (float)x, (float)z,
 						world.half * SECTION)) > 0)
 					continue;
 				world.spawn[0] = (float)x;

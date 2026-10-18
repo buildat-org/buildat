@@ -98,6 +98,8 @@ $cc -DSKELDAT_BONES_TEST -x c++ "$m/bones.h" -o "$t/bones" && "$t/bones" ||
 	fail "bones.h's self test"
 $cc -DSKELDAT_HAZARDS_TEST -x c++ "$m/hazards.h" -o "$t/hazards" && "$t/hazards" ||
 	fail "hazards.h's self test"
+$cc -O2 -DSKELDAT_MAPGEN_TEST -x c++ "$m/mapgen.h" -o "$t/mapgen" && "$t/mapgen" ||
+	fail "mapgen.h's self test"
 $cc -DSKELDAT_MOVE_TEST -x c++ "$m/move_check.h" -x none \
 	"$here/src/impl/voxel_path.cpp" -o "$t/move" && "$t/move" ||
 	fail "move_check.h's self test"
