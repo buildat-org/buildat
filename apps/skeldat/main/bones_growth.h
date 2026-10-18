@@ -347,9 +347,13 @@ struct BonesGrowth
 			return;
 		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
 			const int S = skeldat::bones::SECTION;
+			// A column not all loaded yet: counted again later (a section
+			// left out keeps the world from ending)
 			for(int y = sy; y <= world.y1; y++)
-				if(!w->is_section_loaded(pv::Vector3DInt16(sx, y, sz)))
+				if(!w->is_section_loaded(pv::Vector3DInt16(sx, y, sz))){
+					recount.insert(key);
 					return;
+				}
 			const pv::Region r(pv::Vector3DInt32(sx * S, sy * S, sz * S),
 					pv::Vector3DInt32(sx * S + S - 1, world.y1 * S + S - 1,
 					sz * S + S - 1));

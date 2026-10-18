@@ -1582,15 +1582,22 @@ struct Module: public interface::Module, public PlayersHost,
 			case SOLID: id = m_hz_ids[5]; break;
 			default: break;
 			}
-			// [SKELDAT_OWN_MAPGEN] A liquid flowing into air takes the bones
-			// of what it covers, and one emptied to air leaves its bones on
-			// what it covered, so a running river's top is not bare again
-			// each time its water moves (and a world with one can end)
+			// [SKELDAT_OWN_MAPGEN] A liquid flowing into air takes the most
+			// bones of what it covers and of its sides (where it came from),
+			// and one emptied to air leaves its bones on what it covered, so
+			// a running river's top is not bare again each time its water
+			// moves (and a world with one can end)
 			int b = -1;
 			const pv::Vector3DInt32 under(x, y - 1, z);
 			const bool liquid_was = was == m_hz_ids[0] || was == m_hz_ids[1];
-			if(was == ID_AIR && (c.kind == WATER || c.kind == LAVA))
+			if(was == ID_AIR && (c.kind == WATER || c.kind == LAVA)){
 				b = (int)m_world.bones.get(m_hz_w->get_sample(under, true));
+				for(int i = 0; i < 4; i++){
+					const pv::Vector3DInt32 side(x + (i == 0) - (i == 1), y,
+							z + (i == 2) - (i == 3));
+					b = std::max(b, (int)m_world.bones.get(m_hz_w->get_sample(side, true)));
+				}
+			}
 			else if(liquid_was && c.kind == AIR){
 				const uint32_t mine = m_world.bones.get(m_hz_w->get_sample(
 						pv::Vector3DInt32(x, y, z), true));
