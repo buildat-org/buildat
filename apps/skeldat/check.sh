@@ -2390,8 +2390,10 @@ echo "a headshot: one arrow killed the skeleton"
 # spawn searches round the player find spots, and those under a cover
 # (leaves pass sky light 15) are refused.
 log48="$t/srv48.log"
+# At 0 -32: the own terrain's grass level 7 each way, no tree near (at
+# 0 0 the west boar stood on a tree)
 BUILDAT_SKELDAT_WORLD=boars BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=20 \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 -32" BUILDAT_SKELDAT_DAY=20 \
 	BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="marker 6 0 skeldat:stone -1; boar 6 0; boar -6 0; boar_spots 200" \
 	start_server "$log48" "STATUS Listening" 300 auto \
