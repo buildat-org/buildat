@@ -1726,10 +1726,12 @@ function play_splash(speed, source, who)
 	local ramp = board_sound.splash_ramp(speed)
 	local src = source or splash.own
 	src.gain = gain
+	local noise = board_sound.splash_noise(speed)
 	src:Play(board_sound.to_sound(magic, board_sound.splash(buildat.synth,
-			board_sound.SPLASH_TAKE, splash.n, ramp, hard)))
+			board_sound.SPLASH_TAKE, splash.n, ramp, hard, noise)))
 	log:info(string.format("skeldat: %s splash at %.1f, gain %.2f, onset "
-			.. "%.2f s%s", who, speed, gain, ramp, hard and ", hard" or ""))
+			.. "%.2f s, noise %.2f%s", who, speed, gain, ramp, noise,
+			hard and ", hard" or ""))
 end
 -- "event skeldat_splash_takes [take ...]": those takes (every one with
 -- none) at 1, 3 and 10 a second, soft and hard, into the client's exports
@@ -1744,9 +1746,11 @@ magic.SubscribeToEvent("command_seq:skeldat_splash_takes", function(_, d)
 			for _, hard in ipairs({false, true}) do
 				local name = string.format("%s_%d_%s.wav", take, speed,
 						hard and "hard" or "soft")
+				-- [SKELDAT_SPLASH_F] f's noise by the speed, as played
 				local path, err = buildat.save_file(name, board_sound.wav(
 						board_sound.splash(buildat.synth, take, 1,
-						board_sound.splash_ramp(speed), hard)))
+						board_sound.splash_ramp(speed), hard,
+						take == "f" and board_sound.splash_noise(speed) or nil)))
 				log:info("skeldat: splash take " .. name .. ": " ..
 						tostring(path or err))
 			end

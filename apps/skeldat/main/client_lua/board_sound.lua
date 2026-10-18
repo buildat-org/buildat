@@ -99,11 +99,26 @@ end
 --      the sound's; the user's ear says which way to move
 -- simplified: the figures are first guesses, to tune by ear; the
 -- droplets' band stops at the filter's 4.4 kHz (a fifth of the rate)
-M.SPLASH_TAKE = "a" -- the pick, live until the user's ([USER_INPUT])
+-- The pick: f, the user's of round 2 ([SKELDAT_SPLASH_F])
+M.SPLASH_TAKE = "f"
 M.SPLASH_TAKES = {"a", "b", "c", "d", "e", "f"}
 M.SPLASH_SIZE = 1
 function M.splash_ramp(speed)
 	return math.max(0.06, math.min(1.2, M.SPLASH_SIZE / math.max(speed, 0.01)))
+end
+-- [SKELDAT_SPLASH_F] Take f's noise (its washes and its thump) by the
+-- speed into the water: whole from 10 a second, less energetic slower.
+-- simplified: speed / 10, a straight line from the user's "ok at 10"; the
+-- ear may want it steeper, or a floor other than 0.2
+function M.splash_noise(speed)
+	return math.max(0.2, math.min(1, speed / 10))
+end
+local function peak_of(b)
+	local peak = 0
+	for i = 0, b:len() - 1 do
+		peak = math.max(peak, math.abs(b:get(i)))
+	end
+	return peak
 end
 local function energy(b)
 	local e = 0
@@ -112,8 +127,9 @@ local function energy(b)
 	end
 	return e
 end
--- take, v 1..4, ramp in seconds, hard -> a buffer, its peak 1
-function M.splash(synth, take, v, ramp, hard)
+-- take, v 1..4, ramp in seconds, hard, noise (f's: its noise's share,
+-- 1 when nil) -> a buffer, its peak 1 at noise 1
+function M.splash(synth, take, v, ramp, hard, noise)
 	local R = M.RATE
 	local L = math.floor((ramp + 0.7) * R)
 	local r0 = math.floor(ramp * R)
@@ -125,6 +141,11 @@ function M.splash(synth, take, v, ramp, hard)
 	end
 	local seed = 2000 + 100 * v
 	local out, t = synth.buffer(L), synth.buffer(L)
+	-- [SKELDAT_SPLASH_F] f's noise in a buffer of its own when it is cut:
+	-- scaled as the whole would be, so that the bubbles keep their level
+	noise = noise or 1
+	local nb = take == "f" and noise < 1 and synth.buffer(L) or nil
+	local noise_out = nb or out
 	-- Noise rising over the onset and falling over decay; lo and hi the
 	-- high and low passes, hi a number or {from, to, over} (seconds from
 	-- the onset's end: the sweep is held at from until then); knee: down
@@ -147,7 +168,7 @@ function M.splash(synth, take, v, ramp, hard)
 		b:envelope{points = knee and {{0, 0}, {ramp, 1}, {ramp + knee, 0.5},
 				{ramp + decay, 0}} or {{0, 0}, {ramp, 1}, {ramp + decay, 0}},
 				rate = R}
-		out:mix(b, 0, 0, L, gain)
+		noise_out:mix(b, 0, 0, L, gain)
 	end
 	-- A sine plop at the onset's end, falling
 	local function plop(gain)
@@ -164,7 +185,7 @@ function M.splash(synth, take, v, ramp, hard)
 		t:noise{kind = "white", seed = seed, rate = R, n = n}
 		t:filter{type = "low", cutoff = 250, resonance = 0, rate = R, n = n}
 		t:envelope{points = {{0, 1}, {0.05, 0}}, rate = R, n = n}
-		out:mix(t, 0, math.min(r0, L - n), n, gain)
+		noise_out:mix(t, 0, math.min(r0, L - n), n, gain)
 	end
 	-- n rising chirps of len_lo..len_hi s at f_lo..f_hi Hz, rising by
 	-- rise_lo..rise_hi of themselves, over the onset and after s more;
@@ -241,7 +262,18 @@ function M.splash(synth, take, v, ramp, hard)
 		bubbles(8, 0.005, 0.015, 1000, 4000, 0.05, 0.15, 0.3, 0.05, true)
 		droplets(4 + math.floor(rand() * 5), 1500, 0.15)
 	end
-	normalise(out)
+	if nb then
+		local full = synth.buffer(L)
+		full:mix(out, 0, 0, L, 1)
+		full:mix(nb, 0, 0, L, 1)
+		local peak = peak_of(full)
+		out:mix(nb, 0, 0, L, noise)
+		if peak > 0 then
+			out:gain(1 / peak)
+		end
+	else
+		normalise(out)
+	end
 	return out
 end
 -- A buffer as a 16-bit mono WAV file's bytes
@@ -439,16 +471,16 @@ end
 -- The self-check: chunks at fixed seeds hashed against the committed
 -- figures (the blocks are the same everywhere, src/lua_bindings/synth.cpp),
 -- the hits a second within 10% of 25 s, and the air silent; and the
--- splashes' (SPLASH_HASHES, the pick at 3 a second, soft 1..4 then hard
--- 1..4).
+-- splashes' (SPLASH_HASHES, the pick at 3 a second with its noise, soft
+-- 1..4 then hard 1..4).
 -- -> a line for the log; raises on a failure
 -- At s 0, 4 and 8, then the two air runs' last chunks; 0 and the air are
 -- the silent chunk's hash
 M.HASHES = "02cfd07dc33f6da3 830566adb5d45b54 1406c9e09c71c22c " ..
 		"02cfd07dc33f6da3 02cfd07dc33f6da3"
-M.SPLASH_HASHES = "6d62a6033ad91117 d2bb7d918cda10c1 f8d972f271298ee6 " ..
-		"c99e4b092abd19d7 82a84073437eb8d5 bf2d9817f3d74dcd afdde1491fa1119d " ..
-		"d9b3e107b6d984e1"
+M.SPLASH_HASHES = "efbdc5aac947d639 cf5616f66af7b981 5bd1699d4aac4ec5 " ..
+		"b335e0b10cb67670 6c33ea2a5c1ed928 89159739cb4bac7e f5a2fdaf6a2b96b7 " ..
+		"f0228ba8086abc51"
 function M.self_test(synth)
 	local grains = M.grains(synth)
 	local hashes = {}
@@ -576,11 +608,43 @@ function M.self_test(synth)
 	assert(#bad == 0, "board sound: " .. table.concat(bad, "; ") ..
 			" (onsets " .. table.concat(onsets, ", ") .. ", mids " ..
 			table.concat(mids, ", ") .. ")")
+	-- [SKELDAT_SPLASH_F] At 10 a second f is as it was (noise 1); at 1 its
+	-- energy under 300 Hz and over 3 kHz (the noise's) the noise figure
+	-- squared of the whole's, +-20%, and the bubbles' band kept: what
+	-- the noise left of it there within 1%. simplified: the bubbles are
+	-- read in their band, not rendered alone
+	do
+		local r10 = M.splash_ramp(10)
+		assert(M.splash(synth, "f", 1, r10, false, M.splash_noise(10)):hash()
+				== M.splash(synth, "f", 1, r10, false):hash(),
+				"board sound: f at 10 a second not as it was")
+		local r1, n1 = M.splash_ramp(1), M.splash_noise(1)
+		local was = M.splash(synth, "f", 1, r1, false)
+		local now = M.splash(synth, "f", 1, r1, false, n1)
+		local function band(b, lo, hi)
+			local c = synth.buffer(b:len())
+			c:mix(b, 0, 0, b:len(), 1)
+			for _ = 1, 2 do
+				if hi then
+					c:filter{type = "low", cutoff = hi, resonance = 0, rate = M.RATE}
+				end
+				if lo then
+					c:filter{type = "high", cutoff = lo, resonance = 0, rate = M.RATE}
+				end
+			end
+			return energy(c)
+		end
+		local k = (band(now, nil, 300) + band(now, 3000, nil)) /
+				(band(was, nil, 300) + band(was, 3000, nil))
+		assert(k > 0.8 * n1 * n1 and k < 1.2 * n1 * n1, string.format(
+				"board sound: f's noise at 1 a second %.3f of it, want %.3f",
+				k, n1 * n1))
+	end
 	local splash = {}
 	for _, hard in ipairs({false, true}) do
 		for v = 1, 4 do
 			splash[#splash + 1] = M.splash(synth, M.SPLASH_TAKE, v,
-					M.splash_ramp(3), hard):hash()
+					M.splash_ramp(3), hard, M.splash_noise(3)):hash()
 		end
 	end
 	splash = table.concat(splash, " ")
