@@ -1993,11 +1993,13 @@ aim_server() # <log> [the eye's shift]
 quick() { printf '%s\n' "mouse_down left" "delay 300" "mouse_up left" "delay $1"; }
 { echo "$placed"; echo "wait_log 60000 skeldat: placed at (-40.0,"
 	echo "delay 1500"; echo "look 90 0"; echo "delay 1000"; echo "keydown W"
-	echo "wait_log 5000 skeldat: on the board"; echo "keyup W"
+	# W held over the ride: with it Camera steer leaves the board on its
+	# way while the look turns ([SKELDAT_CAMERA_STEER])
+	echo "wait_log 5000 skeldat: on the board"
 	echo "delay 600"; echo "look 0 0"
 	quick 130; quick 160; quick 110; quick 190; quick 150
 	echo "keydown Left Shift"; echo "delay 700"; quick 200
-	echo "keyup Left Shift"; echo "delay 1500"; echo quit; } > "$t/aim1.cmds"
+	echo "keyup Left Shift"; echo "keyup W"; echo "delay 1500"; echo quit; } > "$t/aim1.cmds"
 aim_server "$log39"
 client aim1 "$t/aim1.cmds"
 wait $CLIENT || fail "the ride's drive ($t/aim1.log)"
