@@ -110,7 +110,7 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	void pockets(interface::VoxelVolume &volume, const pv::Vector3DInt32 &lc,
 			const pv::Vector3DInt32 &uc)
 	{
-		const int C = POCKET_CELL;
+		const int C = hazards::POCKET_CELL;
 		for(int cz = lc.getZ(); cz + C - 1 <= uc.getZ(); cz += C)
 		for(int cy = lc.getY(); cy + C - 1 <= uc.getY(); cy += C)
 		for(int cx = lc.getX(); cx + C - 1 <= uc.getX(); cx += C)
@@ -123,16 +123,16 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	{
 		const int cy = (lc.getY() + uc.getY()) / 2,
 				depth = m_water_level - cy;
-		if(depth < POCKET_DEPTH || !m_stone)
+		if(depth < hazards::POCKET_DEPTH || !m_stone)
 			return;
 		std::mt19937 r(m_salt ^ (uint32_t)(lc.getX() * 73856093) ^
 				(uint32_t)(lc.getY() * 19349663) ^ (uint32_t)(lc.getZ() * 83492791));
 		std::uniform_real_distribution<float> u(0, 1);
 		const float chance = std::min(0.9f,
-				POCKET_CHANCE * depth / POCKET_LAVA_DEPTH);
+				hazards::POCKET_CHANCE * depth / hazards::POCKET_LAVA_DEPTH);
 		if(u(r) >= chance)
 			return;
-		const int kinds = depth >= POCKET_LAVA_DEPTH ? 3 : 2;
+		const int kinds = depth >= hazards::POCKET_LAVA_DEPTH ? 3 : 2;
 		const int kind = (int)(r() % kinds);
 		auto id_at = [&](int x, int y, int z){
 			return m_format.id.get(volume.getVoxelAt(x, y, z).data);

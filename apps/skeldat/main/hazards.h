@@ -52,6 +52,16 @@ static const size_t STEP_CAP = 256;
 static const double TICK = 0.25;
 static const int GAS_MIN = 8, LAVA_GAS_ONE_IN = 600, PRESSURE_MAX = 4,
 		PRESSURE_REACH = 64;
+// The harm a second (WorldView::harm()): lava at the feet or the head
+// LAVA_HARM; a gas at the head GAS_HARM at 255 (ceil by the share),
+// volcanic one more
+static const int LAVA_HARM = 4, GAS_HARM = 4;
+// The pockets in the rock (terrain.h): water and poison gas from
+// POCKET_DEPTH under the water level, lava from POCKET_LAVA_DEPTH; at most
+// one a POCKET_CELL cube, its chance POCKET_CHANCE at POCKET_LAVA_DEPTH
+// (about one in a 32 cube), more deeper, at most 0.9
+static const int POCKET_DEPTH = 8, POCKET_LAVA_DEPTH = 24, POCKET_CELL = 32;
+static const float POCKET_CHANCE = 1.0f;
 
 enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC, SEA };
 // amount: a liquid's eighths (1..8), a gas's share (1..255)

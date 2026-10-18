@@ -81,13 +81,14 @@ struct WorldView
 		const uint32_t lava = id_of("skeldat:lava");
 		if(feet == lava || head == lava){
 			*how = "burns in lava";
-			return 4;
+			return hazards::LAVA_HARM;
 		}
 		const bool poison = head == id_of("skeldat:gas_poison");
 		if(!poison && head != id_of("skeldat:gas_volcanic"))
 			return 0;
 		*how = poison ? "breathes poison gas" : "breathes volcanic gas";
-		return (int)((4 * head_param + 254) / 255) + (poison ? 0 : 1);
+		return (int)((hazards::GAS_HARM * head_param + 254) / 255) +
+				(poison ? 0 : 1);
 	}
 
 	const skeldat::NodeDef* node_of(uint32_t id) const
