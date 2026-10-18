@@ -137,6 +137,9 @@ client() # <name> <cmds>, in the background: its PID in $CLIENT
 placed='wait_log 300000 skeldat: placed at'
 # The opening dialog holds a new player's keys: off but in its own run (28)
 export BUILDAT_SKELDAT_INTRO=0 BUILDAT_SKELDAT_STARTER=0
+# The scripted clients in as "client<peer>" with no login ([SKELDAT_LOGIN];
+# the login of every public join is builtin/world_menu/check.sh's)
+export BUILDAT_SKELDAT_GUEST_JOIN=1
 
 # 1. Two players
 cat > "$t/a1.cmds" <<EOF

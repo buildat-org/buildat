@@ -111,8 +111,9 @@ done
 # [WORLD_MENU_ADMIN] skeldat on a public server (no launcher=1), no world
 # and no admin: bob's join is refused, told of the setup code; boss joins
 # with the code, is admin and gets the menu; bob joins again and waits
-# for an admin; boss makes a world and bob goes in with it; carl,
-# arriving to the running world, goes in with no join
+# for an admin; boss makes a world and bob goes in with it. [SKELDAT_LOGIN]
+# carl, arriving to the running world with no login, gets the login page
+# and is not placed; dave, logging in, goes in as dave
 pub=$t/skeldat_public
 BUILDAT_SKELDAT_WORLD= start_server "$t/pub.srv.log" "STATUS Listening" 300 \
 	auto "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -154,12 +155,21 @@ printf '%s\n' "wait_log 30000 world_menu: the wait shown: Waiting for an admin" 
 	"wait_log 300000 skeldat: placed at" "quit" > "$t/bob.cmds"
 pub_client bob "$t/pub.bob.log" "$t/bob.cmds" || fail "bob: the drive ($t/pub.bob.log)"
 wait $boss || fail "boss: the drive ($t/pub.boss.log)"
-printf '%s\n' "wait_log 120000 skeldat: placed at" "quit" > "$t/carl.cmds"
-pub_client "" "$t/pub.carl.log" "$t/carl.cmds" || fail "carl: the drive ($t/pub.carl.log)"
-grep -aq "accounts: the login page shown\|world_menu: the wait shown" \
-	"$t/pub.carl.log" && fail "carl: joined or waited in a running world ($t/pub.carl.log)"
+printf '%s\n' "wait_log 60000 accounts: the login page shown" "delay 3000" \
+	"quit" > "$t/carl.cmds"
+run_client 60 "$t/pub.carl.log" timeout 400 "$b" -C "$pub/ccarl" \
+	-D "$pub/ucarl" -w 1100x700 -l 3 -o sound_mute=1 \
+	-s "127.0.0.1:$SERVER_PORT" -c @"$t/carl.cmds" ||
+	fail "carl: no login page in a running world ($t/pub.carl.log)"
+grep -aq "skeldat: placed at" "$t/pub.carl.log" &&
+	fail "carl: placed with no login ($t/pub.carl.log)"
+printf '%s\n' "wait_log 120000 skeldat: placed at" "quit" > "$t/dave.cmds"
+pub_client dave "$t/pub.dave.log" "$t/dave.cmds" || fail "dave: the drive ($t/pub.dave.log)"
+grep -aq "skeldat: dave joins at" "$t/pub.srv.log" &&
+	grep -aq "skeldat: boss is an admin" "$t/pub.srv.log" ||
+	fail "dave not in as dave, or boss not an admin ($t/pub.srv.log)"
 kill $pub_pid; wait $pub_pid 2>/dev/null
-echo "  skeldat public: bob told of the setup code, boss admin by it made the world, bob and carl in"
+echo "  skeldat public: bob told of the setup code, boss admin by it made the world, bob in; carl with no login at the login page, dave in by his"
 
 # vanilla: its own New save... screens, then the shared list's Rename and
 # Delete

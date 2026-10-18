@@ -387,15 +387,15 @@ struct Module: public interface::Module, public PlayersHost,
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
-		if(m_world.ready){
-			m_players.show(peer);
-			return;
-		}
-		// [WORLD_MENU_ADMIN] On a public server, while no world is picked,
-		// the join first: only an admin picks one, and the first admin is
-		// made with the setup code. on_login() goes on from there. A world
-		// being made lets a guest wait for it, as a running one lets it in
-		bool joined = m_starting;
+		// [SKELDAT_LOGIN] On a public server every join logs in first,
+		// whatever the world's state ([WORLD_MENU_ADMIN]: only an admin
+		// picks a world, the first made with the setup code); on_login()
+		// goes on from there. The launcher's own game lets its clients in
+		// as "client<peer>". simplified: BUILDAT_SKELDAT_GUEST_JOIN=1 (the
+		// server's environment, check.sh's) lets them in so too, for the
+		// scripted clients' names
+		bool joined = getenv("BUILDAT_SKELDAT_GUEST_JOIN") &&
+				ss_(getenv("BUILDAT_SKELDAT_GUEST_JOIN")) == "1";
 		accounts::access(m_server, [&](accounts::Interface *i){
 			joined = joined || i->launched() || !i->name_of(peer).empty();
 		});
@@ -405,7 +405,10 @@ struct Module: public interface::Module, public PlayersHost,
 					"buildat.run_script_file(\"main/join.lua\")");
 			return;
 		}
-		menu_or_wait(peer);
+		if(m_world.ready)
+			m_players.show(peer);
+		else
+			menu_or_wait(peer);
 	}
 
 	void menu_or_wait(size_t peer)
