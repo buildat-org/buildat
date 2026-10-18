@@ -11,6 +11,9 @@ core.settings:set("time_speed", "0")
 -- The terrain this was written against: devtest's v7, which a new world
 -- no longer gets by default (valleys)
 core.settings:set("mg_name", "v7")
+-- And one seed, whose spawn is on land by the origin: a random one put it
+-- far off now and then, and twelve seconds did not load it
+core.settings:set("fixed_map_seed", "3")
 core.after(0, function() core.set_timeofday(0.5) end)
 
 local COLUMNS = 9      -- a 3x3 of columns around the player
@@ -50,9 +53,17 @@ end
 
 core.register_on_joinplayer(function(player)
 	local base = player:get_pos()
-	core.after(12, function()
+	-- Read once the ground has loaded: twelve seconds, then up to six
+	-- more tries five apart while no column finds a surface
+	local waits = 0
+	local function measure()
 		core.set_timeofday(0.5)
-		local before = read(base)
+		local before, missing = read(base)
+		if missing == COLUMNS and waits < 6 then
+			waits = waits + 1
+			core.after(5, measure)
+			return
+		end
 		core.log("action", "surface_light: before " .. before)
 		-- **The box's top has to be under the loaded column**, which is
 		-- the shape the fault had: a relight with no sky source of its
@@ -75,5 +86,6 @@ core.register_on_joinplayer(function(player)
 			core.log("action", "surface_light: done")
 			core.chat_send_all("surface_light: done")
 		end)
-	end)
+	end
+	core.after(12, measure)
 end)
