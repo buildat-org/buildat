@@ -88,6 +88,7 @@ extern "C" {
 #include "luanti/registry.h"
 #include "luanti/import.h"
 #include "luanti/clock.h"
+#include "luanti/node_meta.h"
 
 using interface::Event;
 namespace pv = PolyVox;
@@ -573,10 +574,8 @@ struct Module: public interface::Module, public luanti::Interface,
 	// ([FIRST_RUN]). Answered on client_file:files_transmitted.
 	std::set<network::PeerInfo::Id> m_texmods_waiting;
 	std::set<network::PeerInfo::Id> m_files_transmitted;
-	// Whether the save has node metadata in it, so that a world that has
-	// none does not get a blob written for it every shutdown
-	bool m_had_node_meta = false;
-	// The same for the players; a world nobody has been in stays that way
+	// Whether the save has players in it; a world nobody has been in stays
+	// that way
 	bool m_had_players = false;
 	// [COMPAT_BREAK_07] 8h: a players row this cannot read (a newer
 	// Buildat's) is kept rather than written over
@@ -921,10 +920,6 @@ struct Module: public interface::Module, public luanti::Interface,
 	// a batch() held here around world->save() would hold the save's lock
 	// while voxelworld's thread waits for it.
 	sv_<std::pair<ss_, ss_>> *m_save_sink = nullptr;
-	// What the last checkpoint wrote for a loaded section's metadata, so an
-	// unchanged one is not written again; a section that unloads writes its
-	// own and leaves this
-	std::map<ss_, ss_> m_meta_written;
 	float m_checkpoint_accum = 0.0f;
 	ss_ m_players_written;
 
@@ -946,7 +941,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		m_save_sink = &writes;
 		m_clock.save_clock();
 		save_players();
-		copy_loaded_meta();
+		m_meta.copy_loaded_meta();
 		m_save_sink = nullptr;
 		const int64_t t1 = interface::os::time_us();
 		storage::Store *store = m_store;
@@ -967,186 +962,28 @@ struct Module: public interface::Module, public luanti::Interface,
 					writes.size());
 	}
 
-	// The metadata of every loaded section, left in memory (unlike
-	// save_section_meta(), which is the section leaving)
-	void copy_loaded_meta()
-	{
-		if(!m_store || !m_lua || !m_scene || m_section_size.getX() <= 0)
-			return;
-		sv_<pv::Vector3DInt16> sections;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
-			sections = world->get_loaded_sections();
-		});
-		std::map<ss_, ss_> now;
-		{
-			interface::MutexScope ms(m_lua_mutex);
-			lua_State *L = m_lua;
-			int base = lua_gettop(L);
-			lua_getglobal(L, "core");
-			lua_getfield(L, -1, "__regroup_node_meta");
-			lua_pushinteger(L, m_section_size.getX());
-			if(lua_pcall(L, 1, 2, 0) != 0){
-				log_w(MODULE, "__regroup_node_meta(): %s",
-						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-				lua_settop(L, base);
-				return;
-			}
-			if(lua_istable(L, -2)){
-				const size_t count = lua_objlen(L, -2);
-				for(size_t i = 1; i + 1 <= count; i += 2){
-					size_t kl = 0, vl = 0;
-					lua_rawgeti(L, -2, (int)i);
-					const char *k = lua_tolstring(L, -1, &kl);
-					lua_rawgeti(L, -3, (int)i + 1);
-					const char *v = lua_tolstring(L, -1, &vl);
-					now["node_meta/"+ss_(k ? k : "", kl)] = ss_(v ? v : "", vl);
-					lua_pop(L, 2);
-				}
-			}
-			lua_settop(L, base);
-		}
-		for(const pv::Vector3DInt16 &section_p : sections){
-			const ss_ key = section_meta_key(section_p);
-			auto it = now.find(key);
-			const ss_ data = it == now.end() ? ss_() : it->second;
-			auto was = m_meta_written.find(key);
-			if(was != m_meta_written.end() && was->second == data)
-				continue;
-			// Not known yet and nothing here: clear only what the save has
-			ss_ old;
-			if(was == m_meta_written.end() && data.empty() &&
-					(!m_store->get(key, old) || old.empty())){
-				m_meta_written[key] = "";
-				continue;
-			}
-			store_set(key, data);
-			m_meta_written[key] = data;
-		}
-	}
-
+	// [LUANTI_MODULAR] node_meta.h's
+	NodeMeta m_meta{m_server, m_scene, m_lua, m_lua_mutex, m_store,
+			m_section_size,
+			[this](const ss_ &key, const ss_ &value){ store_set(key, value); }};
 	// [LUANTI_MODULAR] clock.h's and mapgen_params.h's, each with the
 	// other's
 	GameClock m_clock{m_lua, m_lua_mutex, m_store, m_mapgen,
 			[this](const ss_ &key, const ss_ &value){ store_set(key, value); }};
 	MapgenParams m_mapgen{m_lua, m_lua_mutex, m_store, m_clock.m_world_is_new};
 
-	// Step 5c of doc/plan/world_persistence_plan.md: what hangs off the
-	// voxels -- a chest's contents, a sign's text -- goes into the save
-	// beside the clock. One blob, because the world is the sections a mod
-	// can reach; lua/bootstrap.lua names the upgrade path where it builds it.
-	void save_node_meta()
-	{
-		if(!m_store || !m_lua)
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__save_node_meta");
-		if(lua_pcall(L, 0, 2, 0) != 0){
-			log_w(MODULE, "__save_node_meta(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return;
-		}
-		ss_ data = lua_tostring(L, -2) ? lua_tostring(L, -2) : "";
-		int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		if(n == 0 && !m_had_node_meta)
-			return; // Nothing to write and nothing there to clear
-		m_had_node_meta = (n != 0);
-		m_store->set("node_meta", data);
-		log_v(MODULE, "Node metadata written to the save: %i positions", n);
-	}
-
-	// What hangs off the voxels of one section, in the save under a key of
-	// its own: a section that unloads takes its metadata with it and brings
-	// it back when it returns, which is how Luanti keeps a block's metadata
-	// with the block. See step 5c of doc/plan/world_persistence_plan.md.
-	ss_ section_meta_key(const pv::Vector3DInt16 &p)
-	{
-		return ss_()+"node_meta/"+itos(p.getX())+","+itos(p.getY())+","+
-				itos(p.getZ());
-	}
-
-	void save_section_meta(const pv::Vector3DInt16 &section_p)
-	{
-		if(!m_store || !m_lua || m_section_size.getX() <= 0)
-			return;
-		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
-				sz = m_section_size.getZ();
-		const int32_t x0 = (int32_t)section_p.getX() * sx;
-		const int32_t y0 = (int32_t)section_p.getY() * sy;
-		const int32_t z0 = (int32_t)section_p.getZ() * sz;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__take_node_meta");
-		lua_pushinteger(L, x0);
-		lua_pushinteger(L, y0);
-		lua_pushinteger(L, z0);
-		lua_pushinteger(L, x0 + sx - 1);
-		lua_pushinteger(L, y0 + sy - 1);
-		lua_pushinteger(L, z0 + sz - 1);
-		if(lua_pcall(L, 6, 2, 0) != 0){
-			log_w(MODULE, "__take_node_meta(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return;
-		}
-		size_t len = 0;
-		const char *p = lua_tolstring(L, -2, &len);
-		const ss_ data(p ? p : "", p ? len : 0);
-		const int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		const ss_ key = section_meta_key(section_p);
-		m_meta_written.erase(key);
-		if(n == 0){
-			// Nothing there, and what the save holds is older than that
-			ss_ old;
-			if(m_store->get(key, old))
-				m_store->set(key, "");
-			return;
-		}
-		m_store->set(key, data);
-		log_v(MODULE, "%i node metadata written with section (%i, %i, %i)", n,
-				(int)section_p.getX(), (int)section_p.getY(),
-				(int)section_p.getZ());
-	}
-
-	void load_section_meta(const pv::Vector3DInt16 &section_p)
-	{
-		if(!m_store || !m_lua)
-			return;
-		ss_ data;
-		if(!m_store->get(section_meta_key(section_p), data) || data.empty())
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__load_node_meta");
-		lua_pushlstring(L, data.c_str(), data.size());
-		if(lua_pcall(L, 1, 1, 0) != 0){
-			log_w(MODULE, "__load_node_meta(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-		}
-		lua_settop(L, base);
-	}
-
 	void on_section_loaded(const voxelworld::SectionLoaded &event)
 	{
 		if(!m_game_running || event.scene != m_scene)
 			return;
-		load_section_meta(event.section_p);
+		m_meta.load_section_meta(event.section_p);
 	}
 
 	void on_section_unloaded(const voxelworld::SectionUnloaded &event)
 	{
 		if(!m_game_running || event.scene != m_scene)
 			return;
-		save_section_meta(event.section_p);
+		m_meta.save_section_meta(event.section_p);
 	}
 
 	// [SAVE_LIMIT] A trimmed section's metadata goes with it
@@ -1154,13 +991,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	{
 		if(!m_store || event.scene != m_scene)
 			return;
-		m_store->batch([&](){
-			for(const pv::Vector3DInt16 &p : event.sections){
-				const ss_ key = section_meta_key(p);
-				m_store->remove(key);
-				m_meta_written.erase(key);
-			}
-		});
+		m_meta.forget(event.sections);
 		// Made again, they are new terrain: a mod's on_generated runs over
 		// their mapchunks again as it did the first time
 		using luanti_mapgen::chunk_index;
@@ -1174,92 +1005,6 @@ struct Module: public interface::Module, public luanti::Interface,
 			for(int cx = chunk_index(x0); cx <= chunk_index(x0 + sx - 1); cx++)
 				m_chunks_run.erase(chunk_key(cx, cy, cz));
 		}
-	}
-
-	// Everything the Lua half holds, grouped by the section each position
-	// is in and written; what is in memory is left there. What wants this
-	// is the importer -- a world it read metadata for is mostly sections
-	// nothing has loaded -- and the migration below.
-	size_t write_all_node_meta()
-	{
-		if(!m_store || !m_lua || m_section_size.getX() <= 0)
-			return 0;
-		sv_<ss_> flat;
-		int n = 0;
-		{
-			interface::MutexScope ms(m_lua_mutex);
-			lua_State *L = m_lua;
-			int base = lua_gettop(L);
-			lua_getglobal(L, "core");
-			lua_getfield(L, -1, "__regroup_node_meta");
-			lua_pushinteger(L, m_section_size.getX());
-			if(lua_pcall(L, 1, 2, 0) != 0){
-				log_w(MODULE, "__regroup_node_meta(): %s",
-						lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-				lua_settop(L, base);
-				return 0;
-			}
-			n = (int)lua_tonumber(L, -1);
-			if(lua_istable(L, -2)){
-				const size_t count = lua_objlen(L, -2);
-				for(size_t i = 1; i <= count; i++){
-					lua_rawgeti(L, -2, (int)i);
-					size_t len = 0;
-					const char *p = lua_tolstring(L, -1, &len);
-					flat.push_back(ss_(p ? p : "", p ? len : 0));
-					lua_pop(L, 1);
-				}
-			}
-			lua_settop(L, base);
-		}
-		for(size_t i = 0; i + 1 < flat.size(); i += 2)
-			m_store->set("node_meta/"+flat[i], flat[i + 1]);
-		log_v(MODULE, "%i node metadata over %zu sections", n,
-				flat.size() / 2);
-		return flat.size() / 2;
-	}
-
-	// A save written when the metadata was one blob for the whole world:
-	// read it, write it out per section, and only then drop the blob, so
-	// that a crash in the middle leaves the blob to be read again.
-	void migrate_node_meta()
-	{
-		if(!m_store || !m_lua)
-			return;
-		ss_ data;
-		if(!m_store->get("node_meta", data) || data.empty())
-			return;
-		log_i(MODULE, "The save's node metadata is one blob; writing it out "
-				"per section");
-		load_node_meta();
-		write_all_node_meta();
-		m_store->set("node_meta", "");
-		m_had_node_meta = false;
-	}
-
-	void load_node_meta()
-	{
-		if(!m_store || !m_lua)
-			return;
-		ss_ data;
-		if(!m_store->get("node_meta", data))
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__load_node_meta");
-		lua_pushlstring(L, data.c_str(), data.size());
-		if(lua_pcall(L, 1, 1, 0) != 0){
-			log_w(MODULE, "__load_node_meta(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return;
-		}
-		int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		m_had_node_meta = (n != 0);
-		log_v(MODULE, "Node metadata read from the save: %i positions", n);
 	}
 
 	// The players, in the save beside the node metadata and written the same
@@ -2178,7 +1923,7 @@ struct Module: public interface::Module, public luanti::Interface,
 
 		// After the world, because a section is what the metadata is now
 		// written per and the section size comes from voxelworld
-		migrate_node_meta();
+		m_meta.migrate_node_meta();
 	}
 
 	// The client half asks for these once it has loaded, rather than being
@@ -3334,7 +3079,7 @@ struct Module: public interface::Module, public luanti::Interface,
 	// [LUANTI_MODULAR] import.h's
 	Importer m_importer{m_server, m_scene, m_lua, m_lua_mutex, m_store,
 			m_section_size, m_section_region, m_game_running, m_mapgen,
-			[this](){ write_all_node_meta(); },
+			[this](){ m_meta.write_all_node_meta(); },
 			[this](const pv::Vector3DInt32 &p){ return section_of(p); },
 			[](const pv::Vector3DInt16 &p){ return section_key(p); }};
 	void import_world(const ss_ &luanti_world_path)
@@ -3532,7 +3277,7 @@ struct Module: public interface::Module, public luanti::Interface,
 		// After the mods, because what the metadata holds is item strings
 		// and a mod's items have to be registered for one to mean anything.
 		// The node metadata is not read here any more: it comes back with
-		// the section it is in, and migrate_node_meta() below is what an
+		// the section it is in, and the migrate_node_meta() below is what an
 		// older save's one blob of it becomes.
 		load_players();
 		run_chunk_string("core.__check_players() "
