@@ -753,7 +753,8 @@ grep -aq "client1 sets client1: invulnerable on" "$log16" &&
 # started again: 18 on the ground; the respawn at the same column picks
 # them all up, one pickup sound a tick ([SKELDAT_BOW_SOUNDS]). Before the
 # respawn, Escape opens the pause menu over the death screen and
-# Continue goes back to it ([SKELDAT_DEATH_PAUSE]).
+# Continue goes back to it ([SKELDAT_DEATH_PAUSE]), then the same by its
+# Pause menu button ([SKELDAT_DEATH_MENU_BUTTON]).
 log17="$t/srv17.log"
 printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 	"delay 2500" "mouse_up left" "delay 1000" "look 0 0" "keypress Q" \
@@ -763,6 +764,9 @@ printf '%s\n' "$placed" "delay 2000" "look 0 -60" "mouse_down left" \
 printf '%s\n' "wait_log 300000 pause: the death screen shown" "delay 1000" \
 	"keypress Escape" "wait_log 5000 pause: the menu shown" "delay 500" \
 	"screenshot $t/death_pause.png" 'click Button "Continue"' \
+	"wait_log 5000 pause: back to the death screen" "delay 500" \
+	'click Button "Pause menu"' "wait_log 5000 pause: the menu shown" \
+	"delay 500" 'click Button "Continue"' \
 	"wait_log 5000 pause: back to the death screen" "delay 500" \
 	'click Button "Respawn"' "delay 3000" quit > "$t/drops2.cmds"
 for n in 1 2; do
@@ -792,6 +796,10 @@ grep -aq "client1 dies at .*, dropping 18 of 36 stacks" "$t/srv17_1.log" &&
 grep -aq "client1 paused the world (the pause menu)" "$t/srv17_2.log" &&
 	grep -aq "client1 resumed the world (the pause menu)" "$t/srv17_2.log" ||
 	fail "the pause menu over the death screen did not pause ($t/srv17_2.log, $t/drops.log)"
+# [SKELDAT_DEATH_MENU_BUTTON] its Pause menu button the same, no respawn
+[ "$(grep -ac "client1 paused the world (the pause menu)" "$t/srv17_2.log")" = 2 ] &&
+	[ "$(grep -ac "skeldat *: pause: back to the death screen" "$t/drops.log")" = 2 ] ||
+	fail "the death screen's Pause menu button ($t/srv17_2.log, $t/drops.log)"
 grep -aq "skeldat: 18 drops on the ground" "$t/srv17_2.log" &&
 	[ $(grep -acE "client1 picks up 9[89] skeldat:stone" "$t/srv17_2.log") = 18 ] ||
 	fail "the drops not kept over the restart, or not picked up ($t/srv17_2.log)"

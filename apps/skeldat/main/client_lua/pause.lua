@@ -478,6 +478,8 @@ return function(game, declare_keys)
 		menu:add("Respawn", function()
 			game.send("respawn", "")
 		end, true)
+		-- [SKELDAT_DEATH_MENU_BUTTON] What Escape does
+		menu:add("Pause menu", function() open() end)
 		menu:add("Leave the game", function() buildat.leave() end)
 		-- Escape does not close it: the menu over it
 		death = {root = droot, window = menu.window}
