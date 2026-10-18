@@ -350,5 +350,46 @@ mp_server loc BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "a local server, rounds every 0 s" "$t/loc.log" || fail "a local game has rounds ($t/loc.log)"
 echo "  a public server: a player's params refused, rounds of 10 min; a local game none"
+# Escape's menu ([HC_PAUSE_MENU]): W held through it sends nothing while
+# it is up; Settings... comes back to it; Leave the game leaves (with -s
+# there is no launcher under the game: the client disconnects and exits)
+mp_server pause BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
+cat > "$t/pause.cmds" <<C
+wait_log 120000 hillclimb: this client's car is
+delay 3000
+keydown W
+delay 1500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 1000
+screenshot $t/pause.png
+click Button "Settings..."
+wait_log 5000 pause: settings shown
+delay 1000
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+keypress Escape
+wait_log 5000 pause: the menu closed
+delay 1000
+keyup W
+delay 500
+keypress Escape
+wait_log 5000 pause: the menu shown
+delay 500
+click Button "Leave the game"
+wait_log 5000 pause: leave
+delay 2000
+quit
+C
+mp_client pause "$t/pause.cmds"
+wait $CLIENT
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+seq=$(grep -a " hillclim: \(pause: \|hillclimb: input \)" "$t/pause.log" |
+	sed 's/.* hillclim: //; s/hillclimb: input \(.\) .*/W\1/' | tr '\n' '|')
+want="W1|pause: the menu shown|W0|pause: the menu closed|pause: settings shown|pause: settings closed|pause: the menu shown|pause: the menu closed|W1|W0|pause: the menu shown|pause: leave|"
+[ "${seq#W0|}" = "$want" ] && grep -aq "leave: no launcher" "$t/pause.log" ||
+	fail "the pause menu: $seq ($t/pause.log)"
+echo "  Escape: the menu, no input under it, settings and back, leave"
 echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds"
 # vim: set noet ts=4 sw=4:

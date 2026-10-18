@@ -8,8 +8,9 @@
 -- (physical_sky.sun_toward), the car as the server moves it (main.cpp,
 -- car.h) drawn as its tyres, wheels and axles, the keys sent to the
 -- server, a camera orbiting the car, the time trial's clock and ranking,
--- and the menu (Tab) picking the hill, the payload and the hour. A world
--- unit is one voxel, 125 mm (main/hill.h).
+-- the menu (Tab) picking the hill, the payload and the hour, and the
+-- pause menu (Escape, main/pause.lua). A world unit is one voxel, 125 mm
+-- (main/hill.h).
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
@@ -613,13 +614,15 @@ local KEYS = {
 	{id = "chat", label = "Chat", default = "T", shared = "chat"},
 }
 local key = {}
-do
+-- Again after the settings window, where they may have changed
+local function read_keys()
 	local names = buildat.declare_keys(nil, "hillclimb", KEYS)
 	for _, k in ipairs(KEYS) do
 		local name = type(names) == "table" and names[k.id] or k.default
 		key[k.id] = magic.input:GetKeyFromName(name)
 	end
 end
+read_keys()
 local function down(id)
 	return key[id] ~= 0 and magic.input:GetKeyDown(key[id])
 end
@@ -642,7 +645,8 @@ do
 		log:warning("hillclimb: no accounts.lua: " .. tostring(err))
 	end
 end
-local function open_chat()
+-- after: run when it closes (the pause menu's way back)
+local function open_chat(after)
 	if not accounts or chat_open then
 		return
 	end
@@ -652,10 +656,14 @@ local function open_chat()
 		chat_open = false
 		magic.ui:SetFocusElement(nil)
 		log:info("hillclimb: the chat closed")
+		if after then
+			after()
+		end
 	end
 	accounts.chat_page(back)
 	log:info("hillclimb: the chat shown")
 end
+local pause = nil -- main/pause.lua's, made below
 local sent, sent_t = nil, 0
 -- "accel brake left right gear reset" (main.cpp on_input), sent when it
 -- changes and twice a second besides
@@ -665,11 +673,15 @@ local function send_input()
 	end
 	if down("reverse") then gear = 0 end
 	local function b(id)
-		return not menu and not chat_open and down(id) and 1 or 0
+		return not menu and not chat_open and not pause.held() and down(id)
+				and 1 or 0
 	end
 	local msg = string.format("%d %d %d %d %d %d", b("accel"), b("brake"),
 			b("left"), b("right"), gear, b("reset"))
 	local now = scene.elapsedTime
+	if msg ~= sent then
+		log:info("hillclimb: input " .. msg)
+	end
 	if msg ~= sent or now - sent_t > 0.5 then
 		buildat.send_packet("hillclimb:input", msg)
 		sent, sent_t = msg, now
@@ -791,17 +803,23 @@ magic.SubscribeToEvent("command_seq:hillclimb_params", function(_, d)
 	buildat.send_packet("hillclimb:params", d:GetString("Param"))
 	log:info("hillclimb: the drive sends params " .. d:GetString("Param"))
 end)
+-- The Tab menu, or why not
+local function open_hill_menu()
+	if picks and not hill.may_pick then
+		hud_note = {text = "Only an admin picks the hill here",
+			t = scene.elapsedTime}
+	elseif picks then
+		local values = {}
+		for k, v in pairs(picks) do values[k] = v end
+		menu = {sel = 1, values = values}
+	end
+end
 local function menu_keys()
 	if pressed(magic.KEY_TAB) then
 		if menu then
 			menu = nil
-		elseif picks and not hill.may_pick then
-			hud_note = {text = "Only an admin picks the hill here",
-				t = scene.elapsedTime}
-		elseif picks then
-			local values = {}
-			for k, v in pairs(picks) do values[k] = v end
-			menu = {sel = 1, values = values}
+		else
+			open_hill_menu()
 		end
 	end
 	menu_text.visible = menu ~= nil
@@ -867,7 +885,7 @@ local function draw_hud(watched)
 		lines[#lines + 1] = hud_note.text
 	end
 	lines[#lines + 1] = "Tab: the hill and the car   Backspace: back to the "
-			.. "start   T: chat"
+			.. "start   T: chat   Esc: menu"
 	hud:SetText(table.concat(lines, "\n"))
 	if picks and board.visible then
 		local rows = {}
@@ -903,6 +921,9 @@ local function draw_hud(watched)
 	chat_text:SetText(table.concat(shown, "\n"))
 end
 
+pause = load("main/pause.lua")({hill_menu = open_hill_menu,
+	chat = open_chat, keys = read_keys})
+
 -- The orbit about the car: dragged with the left button, the wheel the
 -- distance
 local yaw, pitch, dist = 200, 20, 12 * U
@@ -920,17 +941,32 @@ magic.SubscribeToEvent("Update", function(_, d)
 	light_outside(dt)
 	voxel_shading.update(dt)
 	draw_cars()
-	if not chat_open and not menu and pressed(key.chat) then
+	-- [HC_PAUSE_MENU] Escape: the Tab menu closed if it is open, else the
+	-- pause menu opened or closed (not while the chat or the settings
+	-- window has it)
+	if pressed(magic.KEY_ESCAPE) and not chat_open and not (pause.held() and
+			not pause.escape_closes()) then
+		if menu then
+			menu = nil
+		elseif pause.shown() then
+			pause.close()
+		else
+			pause.open()
+		end
+	end
+	if not chat_open and not menu and not pause.held() and
+			pressed(key.chat) then
 		open_chat()
 	end
-	if not chat_open then
+	if not chat_open and not pause.held() then
 		menu_keys()
 	end
 	send_input()
 	local watched = observed()
 	draw_hud(watched or cars[own_id])
 	local m = magic.input:GetMouseMove()
-	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) then
+	if magic.input:GetMouseButtonDown(magic.MOUSEB_LEFT) and
+			not pause.held() then
 		yaw = (yaw + m.x * 0.3) % 360
 		pitch = math.max(-10, math.min(85, pitch + m.y * 0.3))
 	end
