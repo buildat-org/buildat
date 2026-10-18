@@ -72,6 +72,10 @@ struct World
 	ss_ gameid;
 };
 
+// The Module's parts ([VANILLA_MODULAR]), each holding what only it uses
+#include "common.h"
+#include "access.h"
+
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
@@ -127,10 +131,11 @@ struct Module: public interface::Module
 	// A public server's chat: per peer, how full the bucket is and when it
 	// was last looked at (see on_chat)
 	std::map<network::PeerInfo::Id, std::pair<double, int64_t>> m_chat_bucket;
-	static constexpr double CHAT_BURST = 5;
 	// Who has joined, by the account name their player has
 	std::map<network::PeerInfo::Id, ss_> m_names;
 	std::set<network::PeerInfo::Id> m_join_sent;
+	// [VANILLA_MODULAR] access.h's
+	Access m_access{m_server, m_public, m_names};
 
 	void init()
 	{
@@ -149,49 +154,60 @@ struct Module: public interface::Module
 		sub(m_server, "accounts:privs", &Module::on_accounts_privs);
 		sub(m_server, "network:client_disconnected",
 				&Module::on_client_disconnected);
-		// The launcher's and the game's own packets, "main:<name>"
-		typedef void (Module::*Handler)(const network::Packet&);
-		static const std::pair<const char*, Handler> PACKETS[] = {
-			{"get_saves", &Module::on_get_saves},
-			{"save_info", &Module::on_save_info},
-			{"set_world_flags", &Module::on_set_world_flags},
-			{"get_game_settings", &Module::on_get_game_settings},
-			{"set_game_settings", &Module::on_set_game_settings},
-			{"get_perf_settings", &Module::on_get_perf_settings},
-			{"set_perf_settings", &Module::on_set_perf_settings},
-			{"delete", &Module::on_delete},
-			{"rename", &Module::on_rename},
-			{"open", &Module::on_open},
-			{"create", &Module::on_create},
-			{"get_imports", &Module::on_get_imports},
-			{"get_settings", &Module::on_get_settings},
-			{"set_settings", &Module::on_set_settings},
-			{"contentdb_query", &Module::on_contentdb_query},
-			{"contentdb_install", &Module::on_contentdb_install},
-			{"get_world_mods", &Module::on_get_world_mods},
-			{"set_world_mods", &Module::on_set_world_mods},
-			{"remove_mod", &Module::on_remove_mod},
-			{"restart_world", &Module::on_restart_world},
-			{"stop_world", &Module::on_stop_world},
-			{"trim", &Module::on_trim},
-			{"export", &Module::on_export},
-			{"export_part", &Module::on_export_part},
-			{"import_begin", &Module::on_import_begin},
-			{"import_data", &Module::on_import_data},
-			{"import_mods_answer", &Module::on_import_mods_answer},
-			{"transfer_cancel", &Module::on_transfer_cancel},
-			{"get_world_txp", &Module::on_get_world_txp},
-			{"set_world_txp", &Module::on_set_world_txp},
-			{"remove_txp", &Module::on_remove_txp},
-			{"import_game", &Module::on_import_game},
-			{"import_world", &Module::on_import_world},
-			{"chat", &Module::on_chat},
+		// The launcher's and the game's own packets, "main:<name>", the
+		// parts' and the Module's
+		const std::pair<const char*,
+				std::function<void(const network::Packet&)>> PACKETS[] = {
+			{"get_saves", on(*this, &Module::on_get_saves)},
+			{"save_info", on(*this, &Module::on_save_info)},
+			{"set_world_flags", on(*this, &Module::on_set_world_flags)},
+			{"get_game_settings", on(*this, &Module::on_get_game_settings)},
+			{"set_game_settings", on(*this, &Module::on_set_game_settings)},
+			{"get_perf_settings", on(*this, &Module::on_get_perf_settings)},
+			{"set_perf_settings", on(*this, &Module::on_set_perf_settings)},
+			{"delete", on(*this, &Module::on_delete)},
+			{"rename", on(*this, &Module::on_rename)},
+			{"open", on(*this, &Module::on_open)},
+			{"create", on(*this, &Module::on_create)},
+			{"get_imports", on(*this, &Module::on_get_imports)},
+			{"get_settings", on(*this, &Module::on_get_settings)},
+			{"set_settings", on(*this, &Module::on_set_settings)},
+			{"contentdb_query", on(*this, &Module::on_contentdb_query)},
+			{"contentdb_install", on(*this, &Module::on_contentdb_install)},
+			{"get_world_mods", on(*this, &Module::on_get_world_mods)},
+			{"set_world_mods", on(*this, &Module::on_set_world_mods)},
+			{"remove_mod", on(*this, &Module::on_remove_mod)},
+			{"restart_world", on(*this, &Module::on_restart_world)},
+			{"stop_world", on(*this, &Module::on_stop_world)},
+			{"trim", on(*this, &Module::on_trim)},
+			{"export", on(*this, &Module::on_export)},
+			{"export_part", on(*this, &Module::on_export_part)},
+			{"import_begin", on(*this, &Module::on_import_begin)},
+			{"import_data", on(*this, &Module::on_import_data)},
+			{"import_mods_answer", on(*this, &Module::on_import_mods_answer)},
+			{"transfer_cancel", on(*this, &Module::on_transfer_cancel)},
+			{"get_world_txp", on(*this, &Module::on_get_world_txp)},
+			{"set_world_txp", on(*this, &Module::on_set_world_txp)},
+			{"remove_txp", on(*this, &Module::on_remove_txp)},
+			{"import_game", on(*this, &Module::on_import_game)},
+			{"import_world", on(*this, &Module::on_import_world)},
+			{"chat", on(*this, &Module::on_chat)},
 		};
 		for(const auto &packet : PACKETS)
-			sub(m_server, ss_("network:packet_received/main:")+packet.first,
+			sub<network::Packet>(m_server,
+					ss_("network:packet_received/main:")+packet.first,
 					packet.second);
 	}
 
+	// A part's packet handler, as sub() takes one
+	template<typename P>
+	static std::function<void(const network::Packet&)> on(P &part,
+			void (P::*handler)(const network::Packet&))
+	{
+		return [&part, handler](const network::Packet &p){
+			(part.*handler)(p);
+		};
+	}
 
 	// A Luanti player per client. The name is this game's to choose and the
 	// client does not send one, so it is the peer's number: what it is for
@@ -224,7 +240,7 @@ struct Module: public interface::Module
 		// builtin/accounts); anyone else who reaches the game -- another
 		// user on this machine, or the LAN once it is opened -- is an
 		// ordinary player ([SECURITY_RUN_1])
-		if(m_named_peer == 0 && is_owner(peer))
+		if(m_named_peer == 0 && is_owner(m_server, peer))
 			m_named_peer = peer;
 		if(m_named_peer != peer)
 			return "client"+itos(peer);
@@ -250,98 +266,16 @@ struct Module: public interface::Module
 
 	// Public mode ([VANILLA_PUBLIC])
 
-	// A save a world may be: not _server, which is builtin/accounts', nor
-	// any other name beginning with _
-	static bool is_world_name(const ss_ &name)
-	{
-		return !name.empty() && name[0] != '_';
-	}
-
-	// The launcher's own client, on the launcher's server
-	bool is_owner(network::PeerInfo::Id peer)
-	{
-		bool local = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			local = i->is_local(peer);
-		});
-		return local;
-	}
-
-	bool is_admin(network::PeerInfo::Id peer)
-	{
-		auto it = m_names.find(peer);
-		if(it == m_names.end())
-			return false;
-		bool admin = false;
-		accounts::access(m_server, [&](accounts::Interface *i){
-			admin = i->is_admin(it->second);
-		});
-		return admin;
-	}
-
-	// What the world menu may do: anything on the launcher's server, and an
-	// admin's on a public one
-	bool may_manage(network::PeerInfo::Id peer)
-	{
-		if(m_public ? is_admin(peer) : is_owner(peer))
-			return true;
-		menu_error(peer, "Only an admin manages this server's worlds");
-		return false;
-	}
-
-	// The launcher's server's alone: the server's own disk and settings
-	bool local_only(network::PeerInfo::Id peer)
-	{
-		if(!m_public && is_owner(peer))
-			return true;
-		menu_error(peer, m_public ? "Not on a public server" :
-				"Only the player who started this game");
-		return false;
-	}
-
-	// [VANILLA_PUBLIC] 5: the world a public server runs, which an admin
-	// chose and it starts at boot
-	ss_ public_world_file()
-	{
-		return m_server->get_config().get<ss_>("user_path")+"/apps/"+
-				m_server->get_app_id()+"/public_world";
-	}
-
-	ss_ read_public_world()
-	{
-		std::ifstream f(public_world_file());
-		ss_ name;
-		std::getline(f, name);
-		return is_world_name(name) ? name : "";
-	}
-
-	// note: [VANILLA_STOP] who stopped it, on the line after an empty name
-	void write_public_world(const ss_ &name, const ss_ &note = "")
-	{
-		interface::fs::create_directories(
-				interface::fs::strip_file_name(public_world_file()));
-		std::ofstream f(public_world_file());
-		f<<name<<"\n"<<note<<"\n";
-	}
-	ss_ read_stop_note()
-	{
-		std::ifstream f(public_world_file());
-		ss_ name, note;
-		std::getline(f, name);
-		std::getline(f, note);
-		return name.empty() ? note : "";
-	}
-
 	// Another world, by restarting: everyone is told, the choice is kept
 	// for the next start, and the server exits with RESTART_STATUS, which
 	// the script that runs it takes as start again at once
 	void switch_world(const ss_ &name, network::PeerInfo::Id by)
 	{
 		if(name == m_world_name){
-			menu_message(by, name+" is the world running");
+			menu_message(m_server, by, name+" is the world running");
 			return;
 		}
-		write_public_world(name);
+		write_public_world(m_server, name);
 		log_i(MODULE, "%s switches the world to %s", cs(m_names[by]), cs(name));
 		if(m_scene){
 			luanti::access(m_server, [&](luanti::Interface *i){
@@ -351,13 +285,6 @@ struct Module: public interface::Module
 		}
 		// A moment for that to reach everyone before the connections go
 		m_restart_in = 1.5f;
-	}
-
-	// A path on the server, as a message says it: the launcher's own user
-	// may be told where, and a public server's users are not
-	ss_ where(const ss_ &path)
-	{
-		return m_public ? ss_("(on the server)") : path;
 	}
 
 	// In through the join: the world when there is one; else the world
@@ -376,13 +303,13 @@ struct Module: public interface::Module
 			return;
 		}
 		m_waiting_peers.push_back(login.peer);
-		if(is_admin(login.peer)){
+		if(m_access.is_admin(login.peer)){
 			m_shown_menu.insert(login.peer);
 			network::send(m_server, login.peer, "core:run_script",
 					"buildat.run_script_file(\"main/menu.lua\")");
 			return;
 		}
-		const ss_ note = read_stop_note();
+		const ss_ note = read_stop_note(m_server);
 		sv_<ss_> values{note.empty() ? "No world is running on this server "
 				"yet: an admin chooses one. You are in as soon as they have." :
 				note+". No world is running: you are in as soon as an admin "
@@ -405,9 +332,10 @@ struct Module: public interface::Module
 		accounts::access(m_server, [&](accounts::Interface *i){
 			is_local = i->is_local(peer);
 		});
-		sv_<ss_> values{m_public ? "1" : "0", is_admin(peer) ? "1" : "0",
-				m_world_name, is_local ? "1" : "0",
-				m_world_name.empty() ? "" : gameid_of_save(m_world_name)};
+		sv_<ss_> values{m_public ? "1" : "0",
+				m_access.is_admin(peer) ? "1" : "0",
+				m_world_name, is_local ? "1" : "0", m_world_name.empty() ? "" :
+				gameid_of_save(m_server, m_world_name)};
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
@@ -422,7 +350,7 @@ struct Module: public interface::Module
 		send_account(login.peer);
 		if(!m_public || !m_scene)
 			return;
-		const bool admin = is_admin(login.peer);
+		const bool admin = m_access.is_admin(login.peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
 			if(i->player_in_world(login.peer))
 				i->set_admin(login.name, admin);
@@ -435,7 +363,8 @@ struct Module: public interface::Module
 	// the script and ahead of the world, so that it is there from the start
 	void send_loading_picture(network::PeerInfo::Id peer)
 	{
-		const ss_ game_path = find_game(gameid_of_save(m_world_name));
+		const ss_ game_path = find_game(m_server,
+				gameid_of_save(m_server, m_world_name));
 		const ss_ dir = game_path+"/menu";
 		sv_<ss_> names;
 		for(const auto &n : game_path.empty() ? sv_<interface::fs::Node>() :
@@ -535,18 +464,6 @@ struct Module: public interface::Module
 		});
 	}
 
-	// What a player who may not talk is told, "" if they may. Static: the
-	// world's chat asks it on builtin/luanti's thread
-	static ss_ chat_refusal(interface::Server *server, size_t peer,
-			const ss_ &name)
-	{
-		ss_ why;
-		chat::access(server, [&](chat::Interface *i){
-			i->may_talk(peer, name, &why);
-		});
-		return why;
-	}
-
 	void on_game_loaded(const luanti::GameLoaded &event)
 	{
 		m_scene = event.scene;
@@ -566,8 +483,8 @@ struct Module: public interface::Module
 				// script waits for; "" before an admin has chosen a world
 				ss_ title;
 				if(!m_world_name.empty()){
-					const ss_ gameid = gameid_of_save(m_world_name);
-					const ss_ game_path = find_game(gameid);
+					const ss_ gameid = gameid_of_save(m_server, m_world_name);
+					const ss_ game_path = find_game(m_server, gameid);
 					title = game_path.empty() ? gameid :
 							read_game_title(game_path);
 				}
@@ -587,7 +504,7 @@ struct Module: public interface::Module
 		}
 		if(!m_scene){
 			// Waiting for an admin to choose a world
-			if(m_public && !is_admin(event.recipient))
+			if(m_public && !m_access.is_admin(event.recipient))
 				return;
 			if(!m_shown_menu.insert(event.recipient).second)
 				return;
@@ -625,7 +542,8 @@ struct Module: public interface::Module
 	// the owner's alone, since anyone else's would choose for the owner
 	void on_launch_untrusted(const network::Packet &packet)
 	{
-		if(m_public || !is_owner(packet.sender) || packet.data.size() > 4096)
+		if(m_public || !is_owner(m_server, packet.sender) ||
+				packet.data.size() > 4096)
 			return;
 		m_launch = packet.data;
 		m_launch_sent = true;
@@ -633,11 +551,11 @@ struct Module: public interface::Module
 
 	void on_get_saves(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		// Holding no world, the launcher may keep this server for its
 		// next launch of the app (start_world() takes it back)
-		if(!m_public && !m_starting && is_owner(packet.sender)){
+		if(!m_public && !m_starting && is_owner(m_server, packet.sender)){
 			network::send(m_server, packet.sender, "launch:reusable", "1");
 		}
 		// **A launch that named a save opens it and never draws a menu**
@@ -658,7 +576,7 @@ struct Module: public interface::Module
 			if(save != "" && m_launched_param_save && !in_world)
 				return;
 			if(save != "" && !m_launched_param_save){
-				ss_ gameid = gameid_of_save(save);
+				ss_ gameid = gameid_of_save(m_server, save);
 				if(gameid == ""){
 					log_w(MODULE, "untrusted_launch: save %s does not say"
 							" which game it needs", cs(save));
@@ -724,10 +642,10 @@ struct Module: public interface::Module
 		flat.push_back(itos(saves.size()));
 		for(size_t i = 0; i < saves.size(); i++){
 			flat.push_back(saves[i]);
-			flat.push_back(gameid_of_save(saves[i]));
+			flat.push_back(gameid_of_save(m_server, saves[i]));
 			flat.push_back(sizes[i]);
 		}
-		for(const ss_ &id : list_apps())
+		for(const ss_ &id : list_apps(m_server))
 			flat.push_back(id);
 		std::ostringstream os(std::ios::binary);
 		{
@@ -737,8 +655,8 @@ struct Module: public interface::Module
 		// Each game's mapgens for the new-world screen, ahead of the lists
 		// that screen is reached from: [gameid, "v7,v5,...", ...]
 		sv_<ss_> mapgens;
-		for(const ss_ &id : list_apps()){
-			const ss_ game_path = find_game(id);
+		for(const ss_ &id : list_apps(m_server)){
+			const ss_ game_path = find_game(m_server, id);
 			if(game_path.empty())
 				continue;
 			ss_ joined;
@@ -766,57 +684,6 @@ struct Module: public interface::Module
 					m_starting ? m_world_name : ss_());
 			inetwork->send(packet.sender, "main:saves", os.str());
 		});
-	}
-
-	// A save records which Luanti game it needs, as a key in the save rather
-	// than in a world.mt: which save and which game it needs were always two
-	// facts pretending to be one.
-	ss_ gameid_of_save(const ss_ &name)
-	{
-		ss_ gameid;
-		storage::access(m_server, [&](storage::Interface *istorage){
-			storage::Save *save = istorage->open(name);
-			if(!save)
-				return;
-			save->store("main")->get("gameid", gameid);
-			istorage->close(save);
-		});
-		return gameid;
-	}
-
-	// world.mt's lines as key -> value; a missing file is empty
-	static std::map<ss_, ss_> read_world_mt(const ss_ &path)
-	{
-		std::map<ss_, ss_> out;
-		std::ifstream f(path);
-		ss_ line;
-		while(std::getline(f, line)){
-			const size_t eq = line.find('=');
-			if(eq == ss_::npos)
-				continue;
-			ss_ k = line.substr(0, eq), v = line.substr(eq + 1);
-			auto trim = [](ss_ &t){
-				while(!t.empty() && isspace((unsigned char)t.back())) t.pop_back();
-				size_t i = 0;
-				while(i < t.size() && isspace((unsigned char)t[i])) i++;
-				t = t.substr(i);
-			};
-			trim(k); trim(v);
-			if(!k.empty())
-				out[k] = v;
-		}
-		return out;
-	}
-	// The file written back with these keys set, the other lines kept
-	static void write_world_mt(const ss_ &path, const std::map<ss_, ss_> &set)
-	{
-		std::map<ss_, ss_> all = read_world_mt(path);
-		for(const auto &kv : set)
-			all[kv.first] = kv.second;
-		interface::fs::create_directories(interface::fs::strip_file_name(path));
-		std::ofstream f(path, std::ios::trunc);
-		for(const auto &kv : all)
-			f << kv.first << " = " << kv.second << "\n";
 	}
 
 	// [GAME_SETTINGS]: an option a game's mods declare in settingtypes.txt,
@@ -970,46 +837,17 @@ struct Module: public interface::Module
 		walk(game_path+"/mods", 3);
 		return out;
 	}
-	// The save's directory, and its gameid when asked, or false
-	bool save_dir(const ss_ &name, ss_ &path, ss_ *gameid = nullptr)
-	{
-		if(!is_world_name(name))
-			return false;
-		storage::access(m_server, [&](storage::Interface *istorage){
-			storage::Save *save = istorage->open(name);
-			if(save){
-				path = save->path();
-				if(gameid)
-					save->store("main")->get("gameid", *gameid);
-				istorage->close(save);
-			}
-		});
-		return !path.empty();
-	}
 	// The save's directory and its game's settings, or false
 	bool save_settings(const ss_ &name, ss_ &path, sv_<GameSetting> &out)
 	{
 		ss_ gameid;
-		if(!save_dir(name, path, &gameid))
+		if(!save_dir(m_server, name, path, &gameid))
 			return false;
-		const ss_ game_path = gameid.empty() ? "" : find_game(gameid);
+		const ss_ game_path = gameid.empty() ? "" : find_game(m_server, gameid);
 		if(path.empty() || game_path.empty())
 			return false;
 		out = game_settings(game_path);
 		return true;
-	}
-	sv_<ss_> read_packet_strings(const network::Packet &packet)
-	{
-		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "%s: %s", cs(packet.name), e.what());
-			values.clear();
-		}
-		return values;
 	}
 	// main:game_settings {name, note, then per setting name, label, type,
 	// default, the enum's values or "min max", the world's value or ""}
@@ -1022,7 +860,7 @@ struct Module: public interface::Module
 		ss_ path;
 		sv_<GameSetting> settings;
 		// An answer either way: the client waits on it
-		const bool found = perf ? save_dir(name, path) :
+		const bool found = perf ? save_dir(m_server, name, path) :
 				save_settings(name, path, settings);
 		if(perf)
 			settings = perf_settings();
@@ -1053,7 +891,7 @@ struct Module: public interface::Module
 	// main:get_game_settings {name}
 	void on_get_game_settings(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(!values.empty())
@@ -1063,7 +901,7 @@ struct Module: public interface::Module
 	// key one the game declares and each value one it takes
 	void on_set_game_settings(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		ss_ path;
@@ -1221,27 +1059,11 @@ struct Module: public interface::Module
 	// main:get_perf_settings {name}
 	void on_get_perf_settings(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(!values.empty())
 			send_game_settings(packet, values[0], "", true);
-	}
-	// [SAVE_LIMIT] Empty with room for need more bytes, else why not
-	ss_ no_room(int64_t need = 0)
-	{
-		int64_t used = 0, limit = 0, room = 0;
-		storage::access(m_server, [&](storage::Interface *i){
-			used = i->used_bytes();
-			limit = i->limit_bytes();
-			room = i->room_bytes();
-		});
-		if(limit <= 0 || room > need)
-			return "";
-		char buf[100];
-		snprintf(buf, sizeof buf, "Not enough room: %.1f of %.1f MB used",
-				used / 1e6, limit / 1e6);
-		return buf;
 	}
 
 	// storage:over_limit: the downloads in the cache first, then the running
@@ -1373,18 +1195,13 @@ struct Module: public interface::Module
 		}
 		return out;
 	}
-	static ss_ mb_text(int64_t bytes)
-	{
-		char buf[32];
-		snprintf(buf, sizeof buf, "%.1f MB", bytes / 1000000.0);
-		return buf;
-	}
 	void send_trim_info(network::PeerInfo::Id peer, const ss_ &save,
 			const ss_ &note)
 	{
 		if(!m_scene || !m_world_save || save != m_world_name){
-			send_strings(peer, "main:trim_info", {save, "Trimming works on "
-					"the world running: start "+save+" first."});
+			send_strings(m_server, peer, "main:trim_info", {save,
+					"Trimming works on the world running: start "+save+
+					" first."});
 			return;
 		}
 		sv_<voxelworld::SectionStat> stats;
@@ -1413,11 +1230,11 @@ struct Module: public interface::Module
 			flat.push_back(itos((lo[a] - 1) * sz[a]));
 		for(int a = 0; a < 3; a++)
 			flat.push_back(itos((hi[a] + 2) * sz[a] - 1));
-		send_strings(peer, "main:trim_info", flat);
+		send_strings(m_server, peer, "main:trim_info", flat);
 	}
 	void on_trim(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(values.size() < 2)
@@ -1441,7 +1258,7 @@ struct Module: public interface::Module
 					", "+itos(pick.altered)+" of them with player builds" :
 					ss_())+"; generated again if visited."+skipped};
 			flat.insert(flat.end(), req.begin(), req.end());
-			send_strings(packet.sender, "main:trim_ask", flat);
+			send_strings(m_server, packet.sender, "main:trim_ask", flat);
 			return;
 		}
 		if(verb != "do")
@@ -1512,7 +1329,8 @@ struct Module: public interface::Module
 	{
 		if(m_transfer.peer == 0)
 			return true;
-		menu_error(peer, "Another transfer is running: "+ss_(m_transfer.import ?
+		menu_error(m_server, peer,
+				"Another transfer is running: "+ss_(m_transfer.import ?
 				"an import" : "an export of "+m_transfer.name)+". Try again "
 				"once it is done.");
 		return false;
@@ -1538,12 +1356,12 @@ struct Module: public interface::Module
 	}
 	void on_export(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender) || !transfer_free(packet.sender))
+		if(!m_access.may_manage(packet.sender) || !transfer_free(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		ss_ path;
-		if(values.empty() || !save_dir(values[0], path))
-			return menu_error(packet.sender, "No such save");
+		if(values.empty() || !save_dir(m_server, values[0], path))
+			return menu_error(m_server, packet.sender, "No such save");
 		const ss_ save = values[0];
 		const ss_ dir = transfer_dir();
 		interface::fs::remove_all(dir);
@@ -1588,7 +1406,8 @@ struct Module: public interface::Module
 		interface::fs::remove_all(dir+"/store");
 		if(!err.empty()){
 			end_transfer();
-			return menu_error(packet.sender, "Exporting "+save+" failed: "+
+			return menu_error(m_server, packet.sender,
+					"Exporting "+save+" failed: "+
 					unpathed(err));
 		}
 		m_transfer.peer = packet.sender;
@@ -1597,7 +1416,7 @@ struct Module: public interface::Module
 		log_i(MODULE, "Exporting %s: %zu files, %lld kB, made in %d ms",
 				cs(save), files.size(), (long long)(m_transfer.size / 1024),
 				(int)((interface::os::time_us() - t0) / 1000));
-		send_strings(packet.sender, "main:export_ready",
+		send_strings(m_server, packet.sender, "main:export_ready",
 				{save, itos(m_transfer.size)});
 	}
 	void on_export_part(const network::Packet &packet)
@@ -1616,9 +1435,11 @@ struct Module: public interface::Module
 		is.read(&data[0], data.size());
 		if((size_t)is.gcount() != data.size()){
 			end_transfer();
-			return menu_error(packet.sender, "The export's file went away");
+			return menu_error(m_server, packet.sender,
+					"The export's file went away");
 		}
-		send_strings(packet.sender, "main:export_data", {itos(offset), data});
+		send_strings(m_server, packet.sender, "main:export_data",
+				{itos(offset), data});
 		if(offset + (int64_t)data.size() >= m_transfer.size){
 			log_i(MODULE, "Exported %s", cs(m_transfer.name));
 			end_transfer();
@@ -1626,15 +1447,16 @@ struct Module: public interface::Module
 	}
 	void on_import_begin(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender) || !transfer_free(packet.sender))
+		if(!m_access.may_manage(packet.sender) || !transfer_free(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(values.size() < 2)
 			return;
 		const int64_t size = atoll(values[1].c_str());
-		const ss_ full = no_room(size);
+		const ss_ full = no_room(m_server, size);
 		if(size <= 0 || !full.empty())
-			return menu_error(packet.sender, size <= 0 ? ss_("An empty file") :
+			return menu_error(m_server, packet.sender,
+					size <= 0 ? ss_("An empty file") :
 					full+"; the zip is "+mb_text(size)+". Delete a world or "
 					"a game first.");
 		// The save's name from the file's: letters, digits, _ and -
@@ -1654,7 +1476,7 @@ struct Module: public interface::Module
 		m_transfer.size = size;
 		log_i(MODULE, "Importing %s: %lld kB coming", cs(values[0]),
 				(long long)(size / 1024));
-		send_strings(packet.sender, "main:import_next", {"0"});
+		send_strings(m_server, packet.sender, "main:import_next", {"0"});
 	}
 	void on_import_data(const network::Packet &packet)
 	{
@@ -1665,7 +1487,8 @@ struct Module: public interface::Module
 				values[1].empty() || m_transfer.done +
 				(int64_t)values[1].size() > m_transfer.size){
 			end_transfer();
-			return menu_error(packet.sender, "The import's parts came out "
+			return menu_error(m_server, packet.sender,
+					"The import's parts came out "
 					"of order; nothing was kept");
 		}
 		{
@@ -1675,7 +1498,7 @@ struct Module: public interface::Module
 		}
 		m_transfer.done += values[1].size();
 		if(m_transfer.done < m_transfer.size){
-			send_strings(packet.sender, "main:import_next",
+			send_strings(m_server, packet.sender, "main:import_next",
 					{itos(m_transfer.done)});
 			return;
 		}
@@ -1688,7 +1511,7 @@ struct Module: public interface::Module
 	{
 		end_transfer();
 		if(!err.empty())
-			menu_error(peer, "Importing "+m_transfer_last+" failed: "+
+			menu_error(m_server, peer, "Importing "+m_transfer_last+" failed: "+
 					unpathed(err)+". Nothing was kept.");
 	}
 	// The admin's answer about the zip's world mods: kept, or removed
@@ -1769,7 +1592,7 @@ struct Module: public interface::Module
 						mods.push_back(e.name);
 			if(mods.size() > 1){
 				m_transfer.mods_root = root;
-				send_strings(peer, "main:import_mods", mods);
+				send_strings(m_server, peer, "main:import_mods", mods);
 				return "";
 			}
 		}
@@ -1779,7 +1602,7 @@ struct Module: public interface::Module
 	ss_ import_root(network::PeerInfo::Id peer, const ss_ &root)
 	{
 		const bool buildat_save = interface::fs::path_exists(root+"/save.sqlite");
-		const ss_ name = free_save_name(m_transfer.name);
+		const ss_ name = free_save_name(m_server, m_transfer.name);
 		if(name.empty())
 			return "no free name for "+m_transfer.name;
 		if(!buildat_save){
@@ -1807,7 +1630,7 @@ struct Module: public interface::Module
 			// Another file system: copied
 			size_t done = 0;
 			ss_ err;
-			if(!copy_tree(root, to, done, 0, peer, err)){
+			if(!copy_tree(m_server, root, to, done, 0, peer, err)){
 				interface::fs::remove_all(to);
 				return "could not move it into the saves: "+err;
 			}
@@ -1829,39 +1652,20 @@ struct Module: public interface::Module
 			return "its store does not read as a Buildat save";
 		}
 		storage::access(m_server, [&](storage::Interface *i){ i->remeasure(); });
-		menu_message(peer, "Imported "+name+" (game "+gameid+")"+
-				(find_game(gameid).empty() ? "; the game is not installed" : ""));
-		return "";
-	}
-	// name, or name_2, _3... where no save is
-	ss_ free_save_name(const ss_ &name)
-	{
-		ss_ path;
-		for(int i = 1; i < 1000; i++){
-			const ss_ n = i == 1 ? name : name+"_"+itos(i);
-			bool valid = false;
-			storage::access(m_server, [&](storage::Interface *istorage){
-				valid = istorage->valid_name(n);
-			});
-			if(!valid)
-				return "";
-			path.clear();
-			if(!save_dir(n, path) && !interface::fs::path_exists(
-					m_server->get_config().get<ss_>("user_path")+"/apps/"+
-					m_server->get_app_id()+"/saves/"+n))
-				return n;
-		}
+		menu_message(m_server, peer, "Imported "+name+" (game "+gameid+")"+
+				(find_game(m_server, gameid).empty() ?
+				"; the game is not installed" : ""));
 		return "";
 	}
 
 	// main:set_perf_settings {name, key, value, ...}
 	void on_set_perf_settings(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		ss_ path;
-		if(values.empty() || !save_dir(values[0], path))
+		if(values.empty() || !save_dir(m_server, values[0], path))
 			return;
 		const sv_<GameSetting> settings = perf_settings();
 		std::map<ss_, ss_> edits;
@@ -1911,7 +1715,7 @@ struct Module: public interface::Module
 	// keys; the size the directory's.
 	void on_save_info(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -1944,7 +1748,7 @@ struct Module: public interface::Module
 			const ss_ path = save->path();
 			istorage->close(save);
 			flat.push_back("game"); flat.push_back(gameid);
-			const ss_ game_path = find_game(gameid);
+			const ss_ game_path = find_game(m_server, gameid);
 			flat.push_back("title");
 			flat.push_back(game_path.empty() ? gameid : read_game_title(game_path));
 			flat.push_back("seed"); flat.push_back(seed);
@@ -2020,7 +1824,7 @@ struct Module: public interface::Module
 	// save's world.mt, which core.settings reads when the world loads
 	void on_set_world_flags(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -2056,7 +1860,7 @@ struct Module: public interface::Module
 	// <date>, not removed; the list is sent again
 	void on_delete(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -2070,7 +1874,8 @@ struct Module: public interface::Module
 		if(values.empty() || !is_world_name(values[0]))
 			return;
 		if(m_starting && values[0] == m_world_name){
-			menu_error(packet.sender, "The world that is running is not "
+			menu_error(m_server, packet.sender,
+					"The world that is running is not "
 					"deleted");
 			return;
 		}
@@ -2083,7 +1888,8 @@ struct Module: public interface::Module
 			}
 		});
 		if(path.empty()){
-			menu_error(packet.sender, "There is no save called "+values[0]);
+			menu_error(m_server, packet.sender,
+					"There is no save called "+values[0]);
 			return;
 		}
 		const ss_ trash = interface::fs::strip_file_name(path)+"/trash";
@@ -2093,18 +1899,19 @@ struct Module: public interface::Module
 		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
 		const ss_ to = trash+"/"+values[0]+"-"+date;
 		if(rename(path.c_str(), to.c_str()) != 0){
-			menu_error(packet.sender, "Could not move "+where(path)+" to "+
-					where(to));
+			menu_error(m_server, packet.sender,
+					"Could not move "+m_access.where(path)+" to "+
+					m_access.where(to));
 			return;
 		}
 		log_i(MODULE, "Save %s moved to %s", cs(values[0]), cs(to));
-		menu_message(packet.sender, values[0]+" moved to the trash");
+		menu_message(m_server, packet.sender, values[0]+" moved to the trash");
 	}
 
 	// [WORLD_MENU] [name, to]
 	void on_rename(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -2119,7 +1926,8 @@ struct Module: public interface::Module
 				!is_world_name(values[1]))
 			return;
 		if(m_starting && values[0] == m_world_name){
-			menu_error(packet.sender, "The world that is running is not "
+			menu_error(m_server, packet.sender,
+					"The world that is running is not "
 					"renamed");
 			return;
 		}
@@ -2128,30 +1936,12 @@ struct Module: public interface::Module
 			ok = istorage->rename(values[0], values[1]);
 		});
 		if(!ok){
-			menu_error(packet.sender, values[0]+" was not renamed: "
+			menu_error(m_server, packet.sender, values[0]+" was not renamed: "
 					"is there a save called "+values[1]+" already?");
 			return;
 		}
 		log_i(MODULE, "Save %s renamed %s", cs(values[0]), cs(values[1]));
-		menu_message(packet.sender, values[0]+" renamed "+values[1]);
-	}
-
-	sv_<ss_> list_apps()
-	{
-		sv_<ss_> out;
-		ss_ dir = luanti_path()+"/games";
-		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
-			if(!n.is_directory || n.name == "." || n.name == "..")
-				continue;
-			if(interface::fs::path_exists(dir+"/"+n.name+"/game.conf"))
-				out.push_back(n.name);
-		}
-		// The one buildat ships, so that there is something to choose
-		// without a Luanti installation
-		if(interface::fs::path_exists(bundled_game_path()+"/game.conf"))
-			out.push_back("minimal");
-		std::sort(out.begin(), out.end());
-		return out;
+		menu_message(m_server, packet.sender, values[0]+" renamed "+values[1]);
 	}
 
 	//
@@ -2171,7 +1961,7 @@ struct Module: public interface::Module
 	// ([LUANTI_IMPORT_FOLDER]).
 	ss_ settings_path()
 	{
-		return luanti_path()+"/settings.json";
+		return luanti_path(m_server)+"/settings.json";
 	}
 	// One string value of settings.json's top level, or "" when absent
 	ss_ read_setting(const ss_ &key)
@@ -2301,7 +2091,7 @@ struct Module: public interface::Module
 	{
 		// Set by hand only, so kept through the settings screen's save
 		const ss_ web_range = read_web_view_range();
-		interface::fs::create_directories(luanti_path());
+		interface::fs::create_directories(luanti_path(m_server));
 		std::ofstream f(settings_path(), std::ios::trunc);
 		f << "{\"render_mode\": \"" << mode << "\", \"view_range\": \""
 				<< view_range << "\", ";
@@ -2609,7 +2399,7 @@ struct Module: public interface::Module
 
 	void on_contentdb_query(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -2628,7 +2418,7 @@ struct Module: public interface::Module
 		// is installed here, by the package it came from if ContentDB's
 		if(values.size() >= 3 && values[1] == "mod"){
 			job->type = "mod";
-			const ss_ game = find_game(values[2]);
+			const ss_ game = find_game(m_server, values[2]);
 			if(!game.empty()){
 				std::ifstream f(game+"/.buildat_source");
 				ss_ source;
@@ -2652,7 +2442,7 @@ struct Module: public interface::Module
 
 	void on_contentdb_install(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -2683,17 +2473,6 @@ struct Module: public interface::Module
 				values.size() >= 3 && values[2] == "txp" ? "txp" : "game");
 	}
 
-	// A ContentDB name is a directory: letters, digits, _ and - only
-	static bool contentdb_name_ok(const ss_ &v)
-	{
-		if(v.empty())
-			return false;
-		for(char c : v)
-			if(!isalnum((unsigned char)c) && c != '_' && c != '-')
-				return false;
-		return true;
-	}
-
 	// The mod's hard dependencies that neither the world's game nor an
 	// installed mod gives, found on a thread; poll_contentdb() asks the
 	// client about them, or installs at once when there are none
@@ -2701,11 +2480,12 @@ struct Module: public interface::Module
 			const ss_ &name, const ss_ &gameid)
 	{
 		if(!contentdb_name_ok(author) || !contentdb_name_ok(name)){
-			menu_error(peer, "Not a ContentDB name: "+author+"/"+name);
+			menu_error(m_server, peer,
+					"Not a ContentDB name: "+author+"/"+name);
 			return;
 		}
-		if(interface::fs::path_exists(mods_path()+"/"+name)){
-			menu_error(peer, name+" is already installed");
+		if(interface::fs::path_exists(mods_path(m_server)+"/"+name)){
+			menu_error(m_server, peer, name+" is already installed");
 			return;
 		}
 		Job *job = new Job();
@@ -2714,13 +2494,14 @@ struct Module: public interface::Module
 		job->q = author+"/"+name;
 		job->gameid = gameid;
 		sv_<ModInfo> mods;
-		const ss_ game = find_game(gameid);
+		const ss_ game = find_game(m_server, gameid);
 		if(!game.empty())
 			scan_mods(game+"/mods", "", mods);
 		scan_all_mods(mods);
 		for(const ModInfo &m : mods)
 			job->provided.insert(m.name);
-		send_progress(peer, "Asking ContentDB what "+name+" needs...");
+		send_progress(m_server, peer,
+				"Asking ContentDB what "+name+" needs...");
 		start_job(job);
 	}
 
@@ -2733,20 +2514,23 @@ struct Module: public interface::Module
 		for(const ss_ *v : {&author, &name}){
 			for(char c : *v){
 				if(!isalnum((unsigned char)c) && c != '_' && c != '-'){
-					menu_error(packet.sender, "Not a ContentDB name: "+*v);
+					menu_error(m_server, packet.sender,
+							"Not a ContentDB name: "+*v);
 					return;
 				}
 			}
 		}
-		const ss_ to = install_root(type)+"/"+name;
+		const ss_ to = install_root(m_server, type)+"/"+name;
 		if(interface::fs::path_exists(to)){
-			menu_error(packet.sender, name+" is already installed. Remove "+
-					where(to)+" yourself if you mean to replace it.");
+			menu_error(m_server, packet.sender,
+					name+" is already installed. Remove "+
+					m_access.where(to)+" yourself if you mean to replace it.");
 			return;
 		}
-		const ss_ full = no_room();
+		const ss_ full = no_room(m_server);
 		if(!full.empty()){
-			menu_error(packet.sender, full+". Delete a world or a game first.");
+			menu_error(m_server, packet.sender,
+					full+". Delete a world or a game first.");
 			return;
 		}
 		Job *job = new Job();
@@ -2758,16 +2542,16 @@ struct Module: public interface::Module
 		storage::access(m_server, [&](storage::Interface *i){
 			job->room = i->room_bytes();
 		});
-		job->no_room = no_room(INT64_MAX);
+		job->no_room = no_room(m_server, INT64_MAX);
 		const ss_ cache = m_server->get_config().get<ss_>("cache_path")+
 				"/luanti/contentdb";
 		interface::fs::create_directories(cache);
 		job->zip_path = cache+"/"+author+"_"+name+".zip";
 		// A mod's outside mods/, where the loader would find it half done
-		job->into_dir = type == "mod" ? luanti_path()+"/mods.installing/"+
-				name : type == "txp" ? luanti_path()+
+		job->into_dir = type == "mod" ? luanti_path(m_server)+
+				"/mods.installing/"+name : type == "txp" ? luanti_path(m_server)+
 				"/texture_packs.installing/"+name : to+".installing";
-		send_progress(packet.sender, "Fetching "+name+"...");
+		send_progress(m_server, packet.sender, "Fetching "+name+"...");
 		start_job(job);
 	}
 
@@ -2778,11 +2562,14 @@ struct Module: public interface::Module
 			Job *job = m_contentdb_jobs[i];
 			if(!job->done){
 				if(job->kind == Job::INSTALL && job->phase == 1)
-					send_progress(job->peer, "Unpacking "+job->name+"...");
+					send_progress(m_server, job->peer,
+							"Unpacking "+job->name+"...");
 				else if(job->kind == Job::INSTALL && job->phase == 2)
-					send_progress(job->peer, "Installing "+job->name+"...");
+					send_progress(m_server, job->peer,
+							"Installing "+job->name+"...");
 				else if(job->kind == Job::INSTALL && job->total > 0){
-					send_progress(job->peer, "Downloading "+job->name+": "+
+					send_progress(m_server, job->peer,
+							"Downloading "+job->name+": "+
 							itos(job->got * 100 / job->total)+"%");
 				}
 				i++;
@@ -2811,7 +2598,7 @@ struct Module: public interface::Module
 				if(job->kind == Job::INSTALL)
 					log_i(MODULE, "Installing %s failed: %s", cs(job->name),
 							cs(job->error));
-				menu_error(job->peer, (job->kind == Job::LIST ?
+				menu_error(m_server, job->peer, (job->kind == Job::LIST ?
 						"ContentDB: " : "Installing "+job->name+" failed: ")+
 						job->error);
 				continue;
@@ -2837,7 +2624,7 @@ struct Module: public interface::Module
 				}
 				log_i(MODULE, "contentdb: %s needs %zu more", cs(job->q),
 						job->picks.size());
-				send_strings(job->peer, "main:contentdb_deps", flat);
+				send_strings(m_server, job->peer, "main:contentdb_deps", flat);
 				continue;
 			}
 			if(job->kind == Job::PICTURE){
@@ -2868,7 +2655,7 @@ struct Module: public interface::Module
 					tops++;
 				}
 			}
-			const ss_ to = install_root(job->type)+"/"+job->name;
+			const ss_ to = install_root(m_server, job->type)+"/"+job->name;
 			const bool at_top = interface::fs::path_exists(job->into_dir+
 					"/init.lua") || interface::fs::path_exists(job->into_dir+
 					"/modpack.conf") || interface::fs::path_exists(job->into_dir+
@@ -2878,8 +2665,9 @@ struct Module: public interface::Module
 					job->into_dir;
 			interface::fs::create_directories(interface::fs::strip_file_name(to));
 			if(rename(from.c_str(), to.c_str()) != 0){
-				menu_error(job->peer, "Installing "+job->name+" failed: cannot "
-						"rename "+where(from));
+				menu_error(m_server, job->peer,
+						"Installing "+job->name+" failed: cannot "
+						"rename "+m_access.where(from));
 				continue;
 			}
 			if(from != job->into_dir)
@@ -2892,7 +2680,8 @@ struct Module: public interface::Module
 			storage::access(m_server, [&](storage::Interface *i){
 				i->remeasure();
 			});
-			menu_message(job->peer, job->name+" installed from ContentDB");
+			menu_message(m_server, job->peer,
+					job->name+" installed from ContentDB");
 		}
 	}
 
@@ -2904,7 +2693,8 @@ struct Module: public interface::Module
 				sajson::parse(sajson::dynamic_allocation(),
 				sajson::string(json.c_str(), json.size()));
 		if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY){
-			menu_error(peer, "ContentDB answered with something that is not "
+			menu_error(m_server, peer,
+					"ContentDB answered with something that is not "
 					"a list");
 			return;
 		}
@@ -2963,32 +2753,6 @@ struct Module: public interface::Module
 		}
 	}
 
-	void send_strings(network::PeerInfo::Id peer, const ss_ &name,
-			const sv_<ss_> &values)
-	{
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		network::send(m_server, peer, name, os.str());
-	}
-
-	// Where ContentDB's installs of a type go
-	ss_ install_root(const ss_ &type)
-	{
-		return type == "mod" ? mods_path() : type == "txp" ? txp_path() :
-				luanti_path()+"/games";
-	}
-
-	// [WORLD_TXP] The server's texture packs, under luanti/texture_packs,
-	// and each world's one of them in its world.mt as
-	// buildat_texture_pack; the luanti module serves that one's files in
-	// place of the game's (builtin/luanti/media.h)
-	ss_ txp_path()
-	{
-		return luanti_path()+"/texture_packs";
-	}
 	sv_<ss_> worlds_with_txp(const ss_ &name)
 	{
 		sv_<ss_> out;
@@ -2999,7 +2763,7 @@ struct Module: public interface::Module
 		for(const storage::SaveInfo &info : infos){
 			ss_ path;
 			if(info.name.empty() || info.name[0] == '_' ||
-					!save_dir(info.name, path))
+					!save_dir(m_server, info.name, path))
 				continue;
 			if(read_world_mt(path+"/luanti/world.mt")["buildat_texture_pack"] ==
 					name)
@@ -3013,26 +2777,26 @@ struct Module: public interface::Module
 			const ss_ &note)
 	{
 		ss_ path;
-		if(!save_dir(save, path)){
-			send_strings(peer, "main:world_txp", {save, "No such world.",
-					"", "0"});
+		if(!save_dir(m_server, save, path)){
+			send_strings(m_server, peer, "main:world_txp",
+					{save, "No such world.", "", "0"});
 			return;
 		}
 		sv_<ss_> flat{save, note,
 				read_world_mt(path+"/luanti/world.mt")["buildat_texture_pack"],
 				m_public && save == m_world_name ? "1" : "0"};
 		sv_<ss_> names;
-		for(const auto &n : interface::fs::list_directory(txp_path()))
+		for(const auto &n : interface::fs::list_directory(txp_path(m_server)))
 			if(n.is_directory && contentdb_name_ok(n.name))
 				names.push_back(n.name);
 		std::sort(names.begin(), names.end());
 		flat.insert(flat.end(), names.begin(), names.end());
-		send_strings(peer, "main:world_txp", flat);
+		send_strings(m_server, peer, "main:world_txp", flat);
 	}
 	// main:get_world_txp {save}
 	void on_get_world_txp(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(!values.empty())
@@ -3042,15 +2806,15 @@ struct Module: public interface::Module
 	// next start, as a mod
 	void on_set_world_txp(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		ss_ path;
-		if(values.size() < 2 || !save_dir(values[0], path))
+		if(values.size() < 2 || !save_dir(m_server, values[0], path))
 			return;
 		const ss_ &name = values[1];
 		if(!name.empty() && (!contentdb_name_ok(name) ||
-				!interface::fs::path_exists(txp_path()+"/"+name)))
+				!interface::fs::path_exists(txp_path(m_server)+"/"+name)))
 			return send_world_txp(packet.sender, values[0], name+
 					" is not installed.");
 		write_world_mt(path+"/luanti/world.mt",
@@ -3064,12 +2828,12 @@ struct Module: public interface::Module
 	// world has it
 	void on_remove_txp(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(values.size() < 2 || !contentdb_name_ok(values[1]))
 			return;
-		const ss_ dir = txp_path()+"/"+values[1];
+		const ss_ dir = txp_path(m_server)+"/"+values[1];
 		if(!interface::fs::path_exists(dir))
 			return send_world_txp(packet.sender, values[0], values[1]+
 					" is not installed.");
@@ -3079,7 +2843,7 @@ struct Module: public interface::Module
 		if(!users.empty())
 			return send_world_txp(packet.sender, values[0], values[1]+
 					" is not removed: the texture pack of "+users+".");
-		const ss_ trash = luanti_path()+"/trash";
+		const ss_ trash = luanti_path(m_server)+"/trash";
 		interface::fs::create_directories(trash);
 		time_t now = time(NULL);
 		char date[32];
@@ -3087,20 +2851,12 @@ struct Module: public interface::Module
 		const ss_ to = trash+"/txp_"+values[1]+"-"+date;
 		if(rename(dir.c_str(), to.c_str()) != 0)
 			return send_world_txp(packet.sender, values[0], "Could not move "+
-					where(dir)+" to "+where(to));
+					m_access.where(dir)+" to "+m_access.where(to));
 		log_i(MODULE, "Texture pack %s moved to %s", cs(values[1]), cs(to));
 		send_world_txp(packet.sender, values[0], values[1]+
 				" moved to the trash.");
 	}
 
-	// [WORLD_MODS] The server's mods, under luanti/mods as the games are
-	// under luanti/games, and each world's choice of them in its world.mt
-	// as Luanti writes it: load_mod_<name> = true or false. The luanti
-	// module's modloader.lua loads the chosen ones.
-	ss_ mods_path()
-	{
-		return luanti_path()+"/mods";
-	}
 	struct ModInfo {
 		ss_ name, pack, dir; // pack: the modpack's directory name, or ""
 		sv_<ss_> depends;
@@ -3114,7 +2870,7 @@ struct Module: public interface::Module
 		scan_mods(m_server->get_module_path("luanti")+"/mods", "", out);
 		for(size_t i = from; i < out.size(); i++)
 			out[i].builtin = true;
-		scan_mods(mods_path(), "", out);
+		scan_mods(mods_path(m_server), "", out);
 	}
 	// The wield lights that write the map's light, which wield_light
 	// replaces: a world with one is recommended wield_light
@@ -3184,7 +2940,7 @@ struct Module: public interface::Module
 		for(const storage::SaveInfo &info : infos){
 			ss_ path;
 			if(info.name.empty() || info.name[0] == '_' ||
-					!save_dir(info.name, path))
+					!save_dir(m_server, info.name, path))
 				continue;
 			if(read_world_mt(path+"/luanti/world.mt")["load_mod_"+mod] == "true")
 				out.push_back(info.name);
@@ -3199,16 +2955,16 @@ struct Module: public interface::Module
 			const ss_ &note)
 	{
 		ss_ path, gameid;
-		if(!save_dir(save, path, &gameid)){
-			send_strings(peer, "main:world_mods", {save, "No such world.",
-					"", "0"});
+		if(!save_dir(m_server, save, path, &gameid)){
+			send_strings(m_server, peer, "main:world_mods",
+					{save, "No such world.", "", "0"});
 			return;
 		}
 		std::map<ss_, ss_> mt = read_world_mt(path+"/luanti/world.mt");
 		std::set<ss_> game_mods;
 		{
 			sv_<ModInfo> g;
-			const ss_ game = find_game(gameid);
+			const ss_ game = find_game(m_server, gameid);
 			if(!game.empty())
 				scan_mods(game+"/mods", "", g);
 			for(const ModInfo &m : g)
@@ -3266,7 +3022,7 @@ struct Module: public interface::Module
 				for(const ss_ &v : {name, ss_(), ss_("missing"), ss_()})
 					flat.push_back(v);
 		}
-		send_strings(peer, "main:world_mods", flat);
+		send_strings(m_server, peer, "main:world_mods", flat);
 	}
 	// What keeps a world's mods from loading: one with a game mod's name,
 	// or a hard dependency nothing gives. "" when they load (a cycle is
@@ -3300,7 +3056,7 @@ struct Module: public interface::Module
 	// main:get_world_mods {save}
 	void on_get_world_mods(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(!values.empty())
@@ -3311,17 +3067,17 @@ struct Module: public interface::Module
 	// and one it needs that is not installed is said and nothing changes
 	void on_set_world_mods(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		ss_ path, gameid;
-		if(values.size() < 3 || !save_dir(values[0], path, &gameid))
+		if(values.size() < 3 || !save_dir(m_server, values[0], path, &gameid))
 			return;
 		const bool on = values[2] == "1";
 		sv_<ModInfo> mods, game;
 		scan_all_mods(mods);
-		if(!find_game(gameid).empty())
-			scan_mods(find_game(gameid)+"/mods", "", game);
+		if(!find_game(m_server, gameid).empty())
+			scan_mods(find_game(m_server, gameid)+"/mods", "", game);
 		std::set<ss_> game_mods;
 		for(const ModInfo &m : game)
 			game_mods.insert(m.name);
@@ -3371,18 +3127,18 @@ struct Module: public interface::Module
 	// its trash, when no world turns it on
 	void on_remove_mod(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(values.size() < 2)
 			return;
 		sv_<ModInfo> mods;
-		scan_mods(mods_path(), "", mods);
+		scan_mods(mods_path(m_server), "", mods);
 		ss_ dir, users;
 		for(const ModInfo &m : mods){
 			if(m.name != values[1] && m.pack != values[1])
 				continue;
-			dir = m.pack.empty() ? m.dir : mods_path()+"/"+m.pack;
+			dir = m.pack.empty() ? m.dir : mods_path(m_server)+"/"+m.pack;
 			for(const ss_ &w : worlds_enabling(m.name))
 				users += (users.find(w) != ss_::npos ? "" :
 						ss_(users.empty() ? "" : ", ")+w);
@@ -3393,7 +3149,7 @@ struct Module: public interface::Module
 		if(!users.empty())
 			return send_world_mods(packet.sender, values[0], values[1]+
 					" is not removed: on in "+users+".");
-		const ss_ trash = luanti_path()+"/trash";
+		const ss_ trash = luanti_path(m_server)+"/trash";
 		interface::fs::create_directories(trash);
 		time_t now = time(NULL);
 		char date[32];
@@ -3401,7 +3157,7 @@ struct Module: public interface::Module
 		const ss_ to = trash+"/mod_"+values[1]+"-"+date;
 		if(rename(dir.c_str(), to.c_str()) != 0)
 			return send_world_mods(packet.sender, values[0], "Could not move "+
-					where(dir)+" to "+where(to));
+					m_access.where(dir)+" to "+m_access.where(to));
 		log_i(MODULE, "Mod %s moved to %s", cs(values[1]), cs(to));
 		send_world_mods(packet.sender, values[0], values[1]+
 				" moved to the trash.");
@@ -3412,7 +3168,7 @@ struct Module: public interface::Module
 	// restart of its process waits for [VANILLA_STOP]
 	void on_restart_world(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		const sv_<ss_> values = read_packet_strings(packet);
 		if(values.empty() || !m_public || values[0] != m_world_name)
@@ -3435,14 +3191,14 @@ struct Module: public interface::Module
 	// works on the running world); a launcher's own game is left instead
 	void on_stop_world(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender) || !m_public || !m_scene)
+		if(!m_access.may_manage(packet.sender) || !m_public || !m_scene)
 			return;
 		const ss_ who = m_names[packet.sender];
 		log_i(MODULE, "%s stops the world %s", cs(who), cs(m_world_name));
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->chat_send("", who+" stops the server's world");
 		});
-		write_public_world("", "Stopped by an admin ("+who+")");
+		write_public_world(m_server, "", "Stopped by an admin ("+who+")");
 		m_restart_in = 1.5f;
 	}
 
@@ -3454,7 +3210,7 @@ struct Module: public interface::Module
 	// removes, and sends the result
 	void on_set_settings(const network::Packet &packet)
 	{
-		if(!local_only(packet.sender))
+		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -3523,25 +3279,7 @@ struct Module: public interface::Module
 
 	ss_ import_folder()
 	{
-		return luanti_path()+"/import";
-	}
-
-	// Whether a directory can be listed: one the box denies lists as empty,
-	// as an empty one does
-	static bool listable(const ss_ &path)
-	{
-#ifdef _WIN32
-		// simplified: not told apart on Windows, where an empty listing is
-		// said as one; FindFirstFile's error is the upgrade
-		(void)path;
-		return true;
-#else
-		DIR *d = opendir(path.c_str());
-		if(!d)
-			return false;
-		closedir(d);
-		return true;
-#endif
+		return luanti_path(m_server)+"/import";
 	}
 
 	sv_<ss_> import_roots()
@@ -3618,73 +3356,6 @@ struct Module: public interface::Module
 		return out;
 	}
 
-	// game.conf's name, which is the title to show; the directory's name is
-	// the gameid and is what the game is installed as
-	static ss_ read_game_title(const ss_ &game_path)
-	{
-		return read_conf_value(game_path+"/game.conf", {"name", "title"});
-	}
-
-	// The first of `keys` a Luanti .conf file sets, or ""
-	static ss_ read_conf_value(const ss_ &file, const sv_<ss_> &keys)
-	{
-		std::ifstream f(file);
-		if(!f.good())
-			return "";
-		ss_ line;
-		while(std::getline(f, line)){
-			size_t eq = line.find('=');
-			if(eq == ss_::npos)
-				continue;
-			ss_ key = line.substr(0, eq);
-			ss_ value = line.substr(eq + 1);
-			auto trim = [](ss_ &s){
-				while(!s.empty() && isspace((unsigned char)s.front()))
-					s.erase(s.begin());
-				while(!s.empty() && isspace((unsigned char)s.back()))
-					s.pop_back();
-			};
-			trim(key);
-			trim(value);
-			if(std::find(keys.begin(), keys.end(), key) != keys.end())
-				return value;
-		}
-		return "";
-	}
-
-	// The mapgens a new world of this game may have, the one it gets
-	// unless told otherwise first: Luanti's world-creation dialog offers
-	// game.conf's allowed_mapgens less its disallowed_mapgens and selects
-	// the game's minetest.conf mg_name ([GAME_CONF_MAPGENS]). In the menu's
-	// order, official's default first.
-	static sv_<ss_> game_mapgens(const ss_ &game_path)
-	{
-		auto list = [&](const char *key){
-			std::set<ss_> out;
-			std::istringstream is(read_conf_value(game_path+"/game.conf", {key}));
-			ss_ name;
-			while(std::getline(is, name, ',')){
-				name.erase(0, name.find_first_not_of(" \t"));
-				name.erase(name.find_last_not_of(" \t") + 1);
-				if(!name.empty())
-					out.insert(name);
-			}
-			return out;
-		};
-		const std::set<ss_> allowed = list("allowed_mapgens");
-		const std::set<ss_> disallowed = list("disallowed_mapgens");
-		sv_<ss_> out;
-		for(const char *name : {"valleys", "v7", "v5", "carpathian", "flat",
-				"fractal", "v6", "singlenode"})
-			if((allowed.empty() || allowed.count(name)) && !disallowed.count(name))
-				out.push_back(name);
-		const ss_ chosen = read_conf_value(game_path+"/minetest.conf", {"mg_name"});
-		auto it = std::find(out.begin(), out.end(), chosen);
-		if(it != out.end())
-			std::rotate(out.begin(), it, it + 1);
-		return out;
-	}
-
 	// A game to import, found by its id. The first root that has one wins,
 	// which is the order import_roots() is in. Empty when there is none --
 	// the client names what it wants and the server finds it again, because
@@ -3728,11 +3399,11 @@ struct Module: public interface::Module
 	// second over two hundred and fifty directories.
 	void on_get_imports(const network::Packet &packet)
 	{
-		if(!local_only(packet.sender))
+		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> games;
 		sv_<ss_> worlds;
-		sv_<ss_> installed = list_apps();
+		sv_<ss_> installed = list_apps(m_server);
 		auto is_installed = [&](const ss_ &gameid){
 			for(const ss_ &id : installed){
 				if(id == gameid)
@@ -3825,73 +3496,6 @@ struct Module: public interface::Module
 		network::send(m_server, packet.sender, "main:imports", os.str());
 	}
 
-	// One line to whoever is waiting, which is the same channel the mod
-	// loading uses; see start_world()
-	void send_progress(network::PeerInfo::Id peer, const ss_ &line)
-	{
-		if(peer == 0)
-			return;
-		sv_<ss_> values{line};
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		const ss_ data = os.str();
-		network::send(m_server, peer, "main:progress", data);
-	}
-
-	// Everything under from into to, saying how far along it is every so
-	// often. Returns false on the first file it cannot write, because half a
-	// game installed is worse than none.
-	bool copy_tree(const ss_ &from, const ss_ &to, size_t &done, size_t total,
-			network::PeerInfo::Id peer, ss_ &error)
-	{
-		if(!interface::fs::create_directories(to)){
-			error = "cannot make "+to;
-			return false;
-		}
-		for(const interface::fs::Node &n :
-				interface::fs::list_directory(from)){
-			if(n.name == "." || n.name == "..")
-				continue;
-			const ss_ src = from+"/"+n.name;
-			const ss_ dst = to+"/"+n.name;
-			if(n.is_directory){
-				if(!copy_tree(src, dst, done, total, peer, error))
-					return false;
-				continue;
-			}
-			if(!interface::fs::copy_file(src, dst)){
-				error = "cannot copy "+src;
-				return false;
-			}
-			done++;
-			// Not every file: a game is thousands of them and a line per
-			// file is more work than the copying
-			if(done % 200 == 0 || done == total){
-				send_progress(peer, "Copying: "+itos(done)+"/"+itos(total)+
-						" files");
-			}
-		}
-		return true;
-	}
-
-	static size_t count_files(const ss_ &path)
-	{
-		size_t n = 0;
-		for(const interface::fs::Node &node :
-				interface::fs::list_directory(path)){
-			if(node.name == "." || node.name == "..")
-				continue;
-			if(node.is_directory)
-				n += count_files(path+"/"+node.name);
-			else
-				n++;
-		}
-		return n;
-	}
-
 	// A game is copied into buildat's own games directory, and **refuses to
 	// overwrite one that is there**: removing an installed game is the
 	// user's own business outside buildat. Copying over the top would leave
@@ -3899,7 +3503,7 @@ struct Module: public interface::Module
 	// a recursive delete under user/ driven by a menu.
 	void on_import_game(const network::Packet &packet)
 	{
-		if(!local_only(packet.sender))
+		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -3915,35 +3519,41 @@ struct Module: public interface::Module
 		const ss_ gameid = values[0];
 		const ss_ from = find_importable_game(gameid);
 		if(from.empty()){
-			menu_error(packet.sender, "There is no game called "+gameid+
+			menu_error(m_server, packet.sender,
+					"There is no game called "+gameid+
 					" to import");
 			return;
 		}
-		const ss_ to = luanti_path()+"/games/"+gameid;
+		const ss_ to = luanti_path(m_server)+"/games/"+gameid;
 		if(interface::fs::path_exists(to)){
-			menu_error(packet.sender, gameid+" is already installed. Remove "+
+			menu_error(m_server, packet.sender,
+					gameid+" is already installed. Remove "+
 					to+" yourself if you mean to replace it.");
 			return;
 		}
 		log_i(MODULE, "Importing game %s from %s", cs(gameid), cs(from));
-		send_progress(packet.sender, "Copying "+gameid+"...");
+		send_progress(m_server, packet.sender, "Copying "+gameid+"...");
 		const size_t total = count_files(from);
 		size_t done = 0;
 		ss_ error;
 		// Into a directory of its own beside the destination first, so that
 		// a copy that fails half way does not look like an installed game
 		const ss_ partial = to+".importing";
-		if(!copy_tree(from, partial, done, total, packet.sender, error)){
-			menu_error(packet.sender, "Importing "+gameid+" failed: "+error);
+		if(!copy_tree(m_server, from, partial, done, total, packet.sender,
+				error)){
+			menu_error(m_server, packet.sender,
+					"Importing "+gameid+" failed: "+error);
 			return;
 		}
 		if(rename(partial.c_str(), to.c_str()) != 0){
-			menu_error(packet.sender, "Importing "+gameid+" failed: cannot "
+			menu_error(m_server, packet.sender,
+					"Importing "+gameid+" failed: cannot "
 					"rename "+partial);
 			return;
 		}
 		log_i(MODULE, "Imported game %s: %zu files", cs(gameid), done);
-		menu_message(packet.sender, gameid+" imported: "+itos(done)+" files");
+		menu_message(m_server, packet.sender,
+				gameid+" imported: "+itos(done)+" files");
 	}
 
 	// A world is not copied: it becomes a save, through the importer that
@@ -3951,7 +3561,7 @@ struct Module: public interface::Module
 	// picking and the name.
 	void on_import_world(const network::Packet &packet)
 	{
-		if(!local_only(packet.sender))
+		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -3967,14 +3577,15 @@ struct Module: public interface::Module
 		const ss_ world_name = values[0];
 		const ss_ from = find_importable_world(world_name);
 		if(from.empty()){
-			menu_error(packet.sender, "There is no world called "+world_name+
+			menu_error(m_server, packet.sender,
+					"There is no world called "+world_name+
 					" to import");
 			return;
 		}
 		const ss_ err = import_luanti_world(packet.sender, from, world_name,
 				values[1]);
 		if(!err.empty())
-			menu_error(packet.sender, err);
+			menu_error(m_server, packet.sender, err);
 	}
 	// A Luanti world's folder into a new save, and the world started: the
 	// import folder's and a zip's ([WORLD_TRIM_MOVE]). An error's text, or
@@ -3983,7 +3594,7 @@ struct Module: public interface::Module
 			const ss_ &world_name, const ss_ &save_name)
 	{
 		const ss_ gameid = read_gameid(from);
-		if(find_game(gameid).empty())
+		if(find_game(m_server, gameid).empty())
 			return world_name+" wants the game "+gameid+", which is not "
 					"installed. Import that first.";
 		bool valid = false;
@@ -3992,7 +3603,7 @@ struct Module: public interface::Module
 		});
 		if(!valid)
 			return "\""+save_name+"\" is not a name a save can have";
-		const ss_ full = no_room();
+		const ss_ full = no_room(m_server);
 		if(!full.empty())
 			return full+". Delete a world or a game first.";
 		// Before the save is made, which start_world would leave empty
@@ -4020,7 +3631,7 @@ struct Module: public interface::Module
 	// opening the old one.
 	void on_open(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -4036,36 +3647,25 @@ struct Module: public interface::Module
 		ss_ name = values[0];
 		if(!is_world_name(name))
 			return;
-		ss_ gameid = gameid_of_save(name);
+		ss_ gameid = gameid_of_save(m_server, name);
 		if(gameid == ""){
-			menu_error(packet.sender, "The save "+name+" does not say which"
+			menu_error(m_server, packet.sender,
+					"The save "+name+" does not say which"
 					" game it needs");
 			return;
 		}
 		if(m_public && m_starting){
 			if(name == m_world_name)
-				return menu_message(packet.sender, name+" is running already");
+				return menu_message(m_server, packet.sender,
+						name+" is running already");
 			return switch_world(name, packet.sender);
 		}
 		start_world(gameid, name, packet.sender);
 	}
 
-	// The mapgens Luanti ships. A world's mg_name comes from the menu, so
-	// it is checked against this before it is written into world.mt
-	// ([NEW_WORLD_FORM]).
-	static bool is_mapgen_name(const ss_ &name)
-	{
-		for(const char *n : {"v7", "v5", "valleys", "carpathian", "flat",
-				"fractal", "v6", "singlenode"}){
-			if(name == n)
-				return true;
-		}
-		return false;
-	}
-
 	void on_create(const network::Packet &packet)
 	{
-		if(!may_manage(packet.sender))
+		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
 		try {
@@ -4084,12 +3684,14 @@ struct Module: public interface::Module
 			valid = valid && istorage->valid_name(name);
 		});
 		if(!valid){
-			menu_error(packet.sender, "\""+name+"\" is not a name a save can"
+			menu_error(m_server, packet.sender,
+					"\""+name+"\" is not a name a save can"
 					" have");
 			return;
 		}
-		if(find_game(gameid).empty()){
-			menu_error(packet.sender, "There is no game called "+gameid);
+		if(find_game(m_server, gameid).empty()){
+			menu_error(m_server, packet.sender,
+					"There is no game called "+gameid);
 			return;
 		}
 		// A third value is the seed the menu was given, or empty for a
@@ -4100,13 +3702,15 @@ struct Module: public interface::Module
 		// choosing after it
 		for(char c : seed){
 			if((unsigned char)c < 0x20 || c == 0x7f){
-				menu_error(packet.sender, "A seed is one line of text");
+				menu_error(m_server, packet.sender,
+						"A seed is one line of text");
 				return;
 			}
 		}
-		const ss_ full = no_room();
+		const ss_ full = no_room(m_server);
 		if(!full.empty()){
-			menu_error(packet.sender, full+". Delete a world or a game first.");
+			menu_error(m_server, packet.sender,
+					full+". Delete a world or a game first.");
 			return;
 		}
 		storage::Save *save = nullptr;
@@ -4141,51 +3745,20 @@ struct Module: public interface::Module
 			}
 		});
 		if(!save){
-			menu_error(packet.sender, "There is already a save called "+name);
+			menu_error(m_server, packet.sender,
+					"There is already a save called "+name);
 			return;
 		}
 		// While a world runs, one world at a time: made, and run by
 		// switching to it (a launcher's game: by the launcher, through
 		// its menu's Play, [PAUSE_WORLDS_LOCAL])
 		if(m_starting){
-			menu_message(packet.sender, "The world "+name+" was made: run it "
+			menu_message(m_server, packet.sender,
+					"The world "+name+" was made: run it "
 					"to switch to it");
 			return;
 		}
 		start_world(gameid, name, packet.sender);
-	}
-
-	// The same dialog for something that went right, which is not a warning
-	// in the log and is otherwise the same thing
-	// A message is news -- a game installed, a world imported -- shown
-	// over the list it changed; an error is a dialog the user has to
-	// close ([FIRST_RUN]: a driven run fails on any dialog, so news is
-	// not one)
-	void menu_message(network::PeerInfo::Id peer, const ss_ &message)
-	{
-		log_i(MODULE, "%s", cs(message));
-		send_menu_message(peer, message, "main:menu_message");
-	}
-
-	void menu_error(network::PeerInfo::Id peer, const ss_ &message)
-	{
-		log_w(MODULE, "%s", cs(message));
-		send_menu_message(peer, message, "main:menu_error");
-	}
-
-	void send_menu_message(network::PeerInfo::Id peer, const ss_ &message,
-			const ss_ &packet = "main:menu_error")
-	{
-		if(peer == 0)
-			return;
-		sv_<ss_> values;
-		values.push_back(message);
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		network::send(m_server, peer, packet, os.str());
 	}
 
 	void show_world_to(network::PeerInfo::Id peer)
@@ -4216,7 +3789,7 @@ struct Module: public interface::Module
 		send_account(peer);
 		// Placed only: in the world once the client has it loaded
 		// ([JOIN_WHEN_LOADED]); the player is the module's from here
-		const bool admin = m_public && is_admin(peer);
+		const bool admin = m_public && m_access.is_admin(peer);
 		luanti::access(m_server, [&](luanti::Interface *i){
 			i->join_player(player_name_of(peer), peer, admin);
 		});
@@ -4227,103 +3800,6 @@ struct Module: public interface::Module
 				i->join(peer, player_name_of(peer));
 			});
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
-	}
-
-	// Under the user path, not the cache: a Luanti game the user installed
-	// and a world they have played are things they chose, and the cache is
-	// what the program can recreate by itself. See
-	// doc/plan/world_persistence_plan.md. What vanilla shares with other
-	// apps, read-only to them ([PROCESS_SANDBOX]): the games, the texture
-	// packs, settings.json. Was <user>/luanti, moved at start by
-	// interface::fs::migrate_user_apps().
-	ss_ luanti_path()
-	{
-		return m_server->get_config().get<ss_>("user_path")+"/shared/vanilla";
-	}
-	// The imported Luanti worlds are vanilla's own: they hold their
-	// players' password hashes
-	ss_ worlds_path()
-	{
-		return m_server->get_config().get<ss_>("user_path")+"/apps/vanilla/worlds";
-	}
-
-	// world.mt's gameid, or "" for a directory that has no world.mt
-	static ss_ read_gameid(const ss_ &world_path)
-	{
-		std::ifstream f(world_path+"/world.mt");
-		if(!f.good())
-			return "";
-		ss_ line;
-		while(std::getline(f, line)){
-			size_t eq = line.find('=');
-			if(eq == ss_::npos)
-				continue;
-			ss_ key = line.substr(0, eq);
-			ss_ value = line.substr(eq + 1);
-			auto trim = [](ss_ &s){
-				while(!s.empty() && isspace((unsigned char)s.front()))
-					s.erase(s.begin());
-				while(!s.empty() && isspace((unsigned char)s.back()))
-					s.pop_back();
-			};
-			trim(key);
-			trim(value);
-			// Minetest Game's worlds were made as "minetest", which is
-			// minetest_game since 5.8, as Luanti reads it too
-			// ([LUANTI_IMPORT_FOLDER])
-			if(key == "gameid")
-				return value == "minetest" ? ss_("minetest_game") : value;
-		}
-		return "";
-	}
-
-	sv_<World> list_worlds()
-	{
-		sv_<World> worlds;
-		ss_ dir = worlds_path();
-		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
-			if(!n.is_directory || n.name == "." || n.name == "..")
-				continue;
-			World w;
-			w.name = n.name;
-			w.path = dir+"/"+n.name;
-			w.gameid = read_gameid(w.path);
-			if(w.gameid == ""){
-				log_w(MODULE, "%s has no world.mt; skipping", cs(w.path));
-				continue;
-			}
-			worlds.push_back(w);
-		}
-		return worlds;
-	}
-
-	// buildat ships one Luanti game of its own, so that the module can be run
-	// and looked at without a Luanti installation. It is also what the visual
-	// check uses, since a fixture somebody has to install is a fixture that
-	// is different on every machine.
-	ss_ bundled_game_path()
-	{
-		return m_server->get_module_path("luanti")+"/minimal_game";
-	}
-
-	ss_ find_game(const ss_ &gameid)
-	{
-		// A directory's name and nothing else: a client sends it, and
-		// "../.." was any directory with a game.conf, whose mods then ran
-		// ([SECURITY_RUN_1])
-		if(gameid.empty() || gameid.find_first_not_of(
-				"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-				"0123456789_-") != ss_::npos)
-			return "";
-		ss_ path = luanti_path()+"/games/"+gameid;
-		if(interface::fs::path_exists(path+"/game.conf"))
-			return path;
-		if(gameid == "minimal"){
-			path = bundled_game_path();
-			if(interface::fs::path_exists(path+"/game.conf"))
-				return path;
-		}
-		return "";
 	}
 
 	// Without one of these the game waits for a menu choice; with one it
@@ -4435,12 +3911,12 @@ struct Module: public interface::Module
 			launched_game = "";
 		if(!(wanted_game && wanted_game[0]) && !launched_game.empty())
 			wanted_game = launched_game.c_str();
-		if(m_public && !read_public_world().empty() &&
-				!gameid_of_save(read_public_world()).empty()){
+		if(m_public && !read_public_world(m_server).empty() &&
+				!gameid_of_save(m_server, read_public_world(m_server)).empty()){
 			// The world an admin chose ([VANILLA_PUBLIC] 5), over the
 			// environment, which is then the first boot's
-			world_name = read_public_world();
-			gameid = gameid_of_save(world_name);
+			world_name = read_public_world(m_server);
+			gameid = gameid_of_save(m_server, world_name);
 		} else if(wanted_game && wanted_game[0]){
 			gameid = wanted_game;
 			// The save is named after the game unless something says
@@ -4453,7 +3929,7 @@ struct Module: public interface::Module
 			// A Luanti world directory, read for the one thing it knows that
 			// nothing else does -- which game it wants. What is run is a
 			// buildat save of the same name.
-			for(const World &w : list_worlds()){
+			for(const World &w : list_worlds(m_server)){
 				if(w.name == wanted_world){
 					gameid = w.gameid;
 					world_name = w.name;
@@ -4487,7 +3963,7 @@ struct Module: public interface::Module
 				log_i(MODULE, "start_world: %s is already starting",
 						cs(world_name));
 			else
-				menu_error(peer, "A world is already starting");
+				menu_error(m_server, peer, "A world is already starting");
 			return;
 		}
 		auto refuse = [&](const ss_ &message){
@@ -4501,19 +3977,20 @@ struct Module: public interface::Module
 				m_server->shutdown(1, message);
 				return;
 			}
-			menu_error(peer, message);
+			menu_error(m_server, peer, message);
 		};
-		ss_ game_path = find_game(gameid);
+		ss_ game_path = find_game(m_server, gameid);
 		if(game_path.empty()){
 			refuse("World "+world_name+" wants game "+gameid+
-					", which is not in "+where(luanti_path()+"/games"));
+					", which is not in "+
+					m_access.where(luanti_path(m_server)+"/games"));
 			return;
 		}
 		// [WORLD_MODS] A world whose mods cannot load does not start, and
 		// the menu says why, as Luanti refuses it
 		{
 			ss_ save_path;
-			const ss_ problem = save_dir(world_name, save_path) ?
+			const ss_ problem = save_dir(m_server, world_name, save_path) ?
 					world_mods_problem(game_path, save_path) : "";
 			if(!problem.empty()){
 				refuse(world_name+": "+problem);
@@ -4545,7 +4022,7 @@ struct Module: public interface::Module
 			network::send(m_server, peer, "launch:reusable", "0");
 		}
 		if(m_public)
-			write_public_world(world_name);
+			write_public_world(m_server, world_name);
 
 		// [FAVICON] the game's own icon in the browser tab, when it has one,
 		// and [PAGE_TITLE] its title on the tab
@@ -4596,7 +4073,7 @@ struct Module: public interface::Module
 				m_server->shutdown(1, message);
 				return;
 			}
-			menu_error(peer, message);
+			menu_error(m_server, peer, message);
 			return;
 		}
 		// Which game a save needs is the save's to remember, so that the
@@ -4642,8 +4119,8 @@ struct Module: public interface::Module
 			ss_ error;
 			if(interface::fs::path_exists(import_from+"/worldmods") &&
 					!interface::fs::path_exists(wm) &&
-					!copy_tree(import_from+"/worldmods", wm, done, 0, peer,
-					error))
+					!copy_tree(m_server, import_from+"/worldmods", wm, done, 0,
+					peer, error))
 				log_w(MODULE, "The world's mods: %s", cs(error));
 			const ss_ mt_path = save->path()+"/luanti/world.mt";
 			std::map<ss_, ss_> mine = read_world_mt(mt_path), set;
@@ -4686,8 +4163,8 @@ struct Module: public interface::Module
 			if(m_public)
 				i->load_lua("core.__public = true", "vanilla_public");
 			// The mods world.mt's load_mod_ lines choose from ([WORLD_MODS])
-			i->load_lua("core.__luanti_mods_path = [==["+mods_path()+"]==]",
-					"vanilla_mods");
+			i->load_lua("core.__luanti_mods_path = [==["+mods_path(m_server)+
+					"]==]", "vanilla_mods");
 			apply_default_preset(save->path());
 			if(m_public)
 				i->set_chat_limit(CHAT_BURST);
@@ -4696,9 +4173,9 @@ struct Module: public interface::Module
 				return chat_refusal(server, peer, name);
 			});
 			luanti::Interface::Paths paths;
-			paths.settings_file = luanti_path()+"/settings.json";
-			paths.base_textures = luanti_path()+"/textures/base/pack";
-			paths.texture_packs = luanti_path()+"/texture_packs";
+			paths.settings_file = luanti_path(m_server)+"/settings.json";
+			paths.base_textures = luanti_path(m_server)+"/textures/base/pack";
+			paths.texture_packs = luanti_path(m_server)+"/texture_packs";
 			i->set_paths(paths);
 			i->run_game(game_path, save);
 		});
