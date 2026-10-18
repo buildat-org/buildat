@@ -159,10 +159,12 @@ struct Module: public interface::Module, public PlayersHost,
 	skeldat::hazards::Hazards m_hazards;
 	voxelworld::Instance *m_hz_w = nullptr;
 	std::vector<uint64_t> m_hz_pending;
+	// The sections the step changed, to be counted again (save_and_report)
+	std::set<ss_> m_hz_recount;
 	std::unordered_map<uint64_t, skeldat::hazards::Cell> m_hz_seen;
 	// water_source lava gas_poison gas_volcanic pocket_water (stage 1's
-	// worlds', read as water) stone
-	uint32_t m_hz_ids[6] = {};
+	// worlds', read as water) stone water_spring water_drain lava_spring
+	uint32_t m_hz_ids[9] = {};
 	// The rules' time and with voxelworld's commit of their changes (most
 	// of it: ~5 ms a second for 100 voxels changed, the step's 0.6 ms)
 	int64_t m_hz_us = 0, m_hz_step_us = 0;
@@ -237,9 +239,15 @@ struct Module: public interface::Module, public PlayersHost,
 						"%ld %ld", m_mobs.markers[f], f % (2 * m_world.half) -
 						m_world.half, f / (2 * m_world.half) - m_world.half);
 			}
+			// The count is by the ids: a liquid's eighths changing is not
+			// counted again; the liquid step's own changes are counted
+			// every 10 s ([SKELDAT_OWN_MAPGEN]: a river's every step)
+			if(old == id)
+				return;
 			const int S = skeldat::bones::SECTION;
+			std::set<ss_> &into = m_hz_w ? m_hz_recount : m_growth.recount;
 			for(int sy = m_world.y0; sy <= m_world.y1; sy++)
-				m_growth.recount.insert(pos_key(WorldView::floor_div(x, S), sy,
+				into.insert(pos_key(WorldView::floor_div(x, S), sy,
 						WorldView::floor_div(z, S)));
 		});
 	}
@@ -550,11 +558,14 @@ struct Module: public interface::Module, public PlayersHost,
 			seed = (uint32_t)std::stoul(env_seed);
 		m_store->set("seed", itos(seed));
 		// [SKELDAT_OWN_MAPGEN] The form: a world made before has none and
-		// was made by Luanti's valleys
-		// simplified: plains for every new world until the other forms
-		// are in (the plan's stages 3 and 4) and the menu's field (5)
+		// was made by Luanti's valleys; a new one's rivers, or for a check
+		// BUILDAT_SKELDAT_TERRAIN's
+		// simplified: lake and sea are plains until their stage (4), and
+		// no menu field until stage 5
 		if(!m_store->get("terrain", m_terrain.form)){
-			m_terrain.form = m_making ? "plains" : "legacy_valleys";
+			const char *env = getenv("BUILDAT_SKELDAT_TERRAIN");
+			m_terrain.form = !m_making ? "legacy_valleys" :
+					env && skeldat::mapgen::form_of(env) >= 0 ? env : "rivers";
 			m_store->set("terrain", m_terrain.form);
 		}
 		if(m_store->get("day", v))
@@ -696,6 +707,7 @@ struct Module: public interface::Module, public PlayersHost,
 			m_generator->m_pocket[0] = m_world.id_of("skeldat:water_source");
 			m_generator->m_pocket[1] = m_world.id_of("skeldat:gas_poison");
 			m_generator->m_pocket[2] = m_world.id_of("skeldat:lava");
+			m_generator->m_lava_spring = m_world.id_of("skeldat:lava_spring");
 			m_generator->m_water_level = m_terrain.water_level;
 			const char *fill = getenv("BUILDAT_SKELDAT_FILL");
 			m_generator->m_half_v = m_world.half * skeldat::bones::SECTION;
@@ -1537,6 +1549,18 @@ struct Module: public interface::Module, public PlayersHost,
 			return c;
 		};
 		m_hazards.set = [this](int x, int y, int z, const Cell &c){
+			// A spring or a drain stays one: what is put in a drain is gone,
+			// a water spring is full again; a lava spring keeps its eighths
+			const uint32_t was = m_world.format.id.get(m_hz_w->get_voxel(
+					pv::Vector3DInt32(x, y, z), true).data);
+			if(was == m_hz_ids[6] || was == m_hz_ids[7])
+				return;
+			if(was == m_hz_ids[8]){
+				const uint32_t eighths = c.kind == LAVA ? c.amount : 1;
+				m_world.set_node_in(m_hz_w, x, y, z, was, eighths - 1);
+				m_hz_seen[key(x, y, z)] = read_cell(x, y, z);
+				return;
+			}
 			uint32_t id = ID_AIR, param = 0;
 			switch(c.kind){
 			case WATER: id = m_hz_ids[0], param = c.amount == 8 ? 0 : c.amount; break;
@@ -1578,6 +1602,17 @@ struct Module: public interface::Module, public PlayersHost,
 			return Cell(WATER, (uint8_t)(param == 0 || param > 8 ? 8 : param));
 		if(id == m_hz_ids[4])
 			return Cell(WATER, (uint8_t)(param % 8 + 1));
+		// [SKELDAT_OWN_MAPGEN] A spring always full, a drain always room, a
+		// lava spring its eighths (less one in param2, at least 1)
+		if(id == m_hz_ids[6])
+			return Cell(WATER, 8);
+		if(id == m_hz_ids[7])
+			return Cell(AIR);
+		if(id == m_hz_ids[8]){
+			Cell c(LAVA, (uint8_t)(param % 8 + 1));
+			c.spring = true;
+			return c;
+		}
 		if(id == m_hz_ids[1])
 			return Cell(LAVA, (uint8_t)(param % 8 + 1));
 		if(id == m_hz_ids[2] || id == m_hz_ids[3])
@@ -1590,10 +1625,11 @@ struct Module: public interface::Module, public PlayersHost,
 	{
 		using namespace skeldat::hazards;
 		if(!m_hz_ids[5]){
-			const char *names[6] = {"skeldat:water_source", "skeldat:lava",
+			const char *names[9] = {"skeldat:water_source", "skeldat:lava",
 					"skeldat:gas_poison", "skeldat:gas_volcanic",
-					"skeldat:pocket_water", "skeldat:stone"};
-			for(int i = 0; i < 6; i++)
+					"skeldat:pocket_water", "skeldat:stone", "skeldat:water_spring",
+					"skeldat:water_drain", "skeldat:lava_spring"};
+			for(int i = 0; i < 9; i++)
 				m_hz_ids[i] = m_world.id_of(names[i]);
 		}
 		// Four times a second: a gas's cells come due at their own
@@ -1623,12 +1659,62 @@ struct Module: public interface::Module, public PlayersHost,
 		m_hz_us += interface::os::time_us() - t0;
 	}
 
+	// The water's voxels and volume (out[0], out[1]) over the world; with
+	// wake, those with room under or beside them woken (the count woken)
+	size_t count_water(voxelworld::Instance *w, size_t *out, bool wake)
+	{
+		using namespace skeldat::hazards;
+		const int S = skeldat::bones::SECTION;
+		size_t woken = 0;
+		for(int sz = -m_world.half; sz < m_world.half; sz++)
+		for(int sy = m_world.y0; sy <= m_world.y1; sy++)
+		for(int sx = -m_world.half; sx < m_world.half; sx++){
+			const interface::VoxelVolume vol = w->get_volume(pv::Region(
+					pv::Vector3DInt32(sx * S, sy * S, sz * S),
+					pv::Vector3DInt32(sx * S + S - 1, sy * S + S - 1,
+					sz * S + S - 1)));
+			for(int z = sz * S; z < sz * S + S; z++)
+			for(int y = sy * S; y < sy * S + S; y++)
+			for(int x = sx * S; x < sx * S + S; x++){
+				const uint32_t d = vol.getVoxelAt(x, y, z).data;
+				if(m_world.format.id.get(d) != m_hz_ids[0])
+					continue;
+				const uint32_t p = m_world.format.param.get(d);
+				out[0]++, out[1] += p == 0 || p > 8 ? 8 : p;
+				if(!wake)
+					continue;
+				// Room under it or beside it (a voxel outside the
+				// section read as room: woken and looked at)
+				bool room = false;
+				for(int i = 0; i < 6 && !room; i++){
+					if(SIX[i][1] > 0)
+						continue;
+					const int nx = x + SIX[i][0], ny = y + SIX[i][1],
+							nz = z + SIX[i][2];
+					if(nx < sx * S || ny < sy * S || nz < sz * S ||
+							nx >= sx * S + S || nz >= sz * S + S){
+						room = true;
+						break;
+					}
+					const uint32_t nd = vol.getVoxelAt(nx, ny, nz).data;
+					const uint32_t nid = m_world.format.id.get(nd);
+					const uint32_t np = m_world.format.param.get(nd);
+					room = nid == ID_AIR || (nid == m_hz_ids[0] &&
+							np != 0 && np < 8);
+				}
+				if(room)
+					m_hazards.wake(x, y, z), woken++;
+			}
+		}
+		return woken;
+	}
+
 	// [SKELDAT_OWN_MAPGEN] **The settling** of a new world's water: every
 	// water voxel with room beside or under it woken, then the liquid step
-	// with no cap a step, SETTLE_STEPS water steps or until all are at
-	// rest, evaporation SETTLE_EVAPORATE times as fast; what still moves
-	// goes on in the game at its cap. The water's voxels and volume, before
-	// and after.
+	// with no cap a step, SETTLE_STEPS water steps (SETTLE_MS at most) or
+	// until all are at rest, evaporation SETTLE_EVAPORATE times as fast;
+	// what still moves goes on in the game at its cap. The water's voxels
+	// and volume, before and after.
 	void settle_water()
 	{
 		using namespace skeldat::hazards;
@@ -1640,53 +1726,11 @@ struct Module: public interface::Module, public PlayersHost,
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			m_hz_w = w;
 			m_hazards.now = m_world.t;
-			// voxels, volume
-			auto count = [&](size_t *out, bool wake){
-				for(int sz = -m_world.half; sz < m_world.half; sz++)
-				for(int sy = m_world.y0; sy <= m_world.y1; sy++)
-				for(int sx = -m_world.half; sx < m_world.half; sx++){
-					const interface::VoxelVolume vol = w->get_volume(pv::Region(
-							pv::Vector3DInt32(sx * S, sy * S, sz * S),
-							pv::Vector3DInt32(sx * S + S - 1, sy * S + S - 1,
-							sz * S + S - 1)));
-					for(int z = sz * S; z < sz * S + S; z++)
-					for(int y = sy * S; y < sy * S + S; y++)
-					for(int x = sx * S; x < sx * S + S; x++){
-						const uint32_t d = vol.getVoxelAt(x, y, z).data;
-						if(m_world.format.id.get(d) != m_hz_ids[0])
-							continue;
-						const uint32_t p = m_world.format.param.get(d);
-						out[0]++, out[1] += p == 0 || p > 8 ? 8 : p;
-						if(!wake)
-							continue;
-						// Room under it or beside it (a voxel outside the
-						// section read as room: woken and looked at)
-						bool room = false;
-						for(int i = 0; i < 6 && !room; i++){
-							if(SIX[i][1] > 0)
-								continue;
-							const int nx = x + SIX[i][0], ny = y + SIX[i][1],
-									nz = z + SIX[i][2];
-							if(nx < sx * S || ny < sy * S || nz < sz * S ||
-									nx >= sx * S + S || nz >= sz * S + S){
-								room = true;
-								break;
-							}
-							const uint32_t nd = vol.getVoxelAt(nx, ny, nz).data;
-							const uint32_t nid = m_world.format.id.get(nd);
-							const uint32_t np = m_world.format.param.get(nd);
-							room = nid == ID_AIR || (nid == m_hz_ids[0] &&
-									np != 0 && np < 8);
-						}
-						if(room)
-							m_hazards.wake(x, y, z), woken++;
-					}
-				}
-			};
-			count(before, true);
+			woken = count_water(w, before, true);
 			m_hazards.evaporate_one_in = EVAPORATE_ONE_IN / SETTLE_EVAPORATE;
 			double t = m_world.t;
-			for(; rounds < (size_t)SETTLE_STEPS && !m_hazards.due.empty(); rounds++){
+			for(; rounds < (size_t)SETTLE_STEPS && !m_hazards.due.empty() &&
+					interface::os::time_us() - t0 < SETTLE_MS * 1000; rounds++){
 				t += WATER_PERIOD;
 				m_hazards.step(t, (size_t)-1);
 				m_hz_seen.clear();
@@ -1699,7 +1743,7 @@ struct Module: public interface::Module, public PlayersHost,
 			m_hazards.active.clear();
 			m_hazards.due = decltype(m_hazards.due)();
 			m_hazards.now = m_world.t;
-			count(after, false);
+			count_water(w, after, false);
 			m_hz_w = nullptr;
 		});
 		log_i(MODULE, "skeldat: water: %zu voxels, %zu volume made; %zu voxels, "
@@ -1754,6 +1798,16 @@ struct Module: public interface::Module, public PlayersHost,
 				m_mobs.light_us / 1e3 / 10, m_mobs.body_puts);
 		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
 		report_hazards();
+		m_growth.recount.insert(m_hz_recount.begin(), m_hz_recount.end());
+		m_hz_recount.clear();
+		// For a check: the world's water, a scan of every section
+		if(getenv("BUILDAT_SKELDAT_WATER_REPORT") && m_world.ready){
+			size_t n[2] = {0, 0};
+			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+				count_water(w, n, false);
+			});
+			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume", n[0], n[1]);
+		}
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();
 		for(auto &pair : m_players.all)

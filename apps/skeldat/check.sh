@@ -2437,7 +2437,7 @@ echo "cave skeletons: the fight: $(grep -aE "the (cave_)?skeleton \([0-9]*\) die
 # again on the saved world reads the active set back and steps it.
 log50="$t/srv50.log"
 for n in 1 2; do
-	BUILDAT_SKELDAT_WORLD=hazards BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_WORLD=hazards BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TERRAIN=plains \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 5; pocket lava -2 -2 5 3 5; pocket poison -9 -1 3 3 3; boar -8 0; pocket water 10 0 2 4 2" || echo "place 0 0")" \
 		start_server "$t/srv50_$n.log" "STATUS Listening" 300 auto \

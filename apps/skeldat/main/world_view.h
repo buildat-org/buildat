@@ -27,6 +27,10 @@ struct WorldView
 	// stays put until a player wakes it; a voxel read for each of its steps
 	// was ~66 us, the world being too big for voxelworld's chunk buffers
 	sv_<int8_t> top_y;
+	// The top voxel's y whatever it is (water too): a change under it
+	// leaves the column's top as it is ([SKELDAT_OWN_MAPGEN]: the liquid
+	// step's writes)
+	sv_<int8_t> top_any;
 	sv_<uint8_t> top_b;
 	bool footprints_ready = false;
 	// The time of day, 0 to 1 (0.5 noon)
@@ -180,7 +184,11 @@ struct WorldView
 		for(auto &f : on_set)
 			f(x, y, z, old, id);
 		w->set_sample(p, v);
-		rescan_column(w, x, z);
+		// The top is by the ids, and a change under it leaves it
+		const long c = column(x, z);
+		if(old != id && (c < 0 || top_any.empty() || top_any[c] == NO_GROUND ||
+				y >= top_any[c]))
+			rescan_column(w, x, z);
 	}
 
 	static int floor_div(int a, int b){ return a >= 0 ? a / b : -((-a + b - 1) / b); }
@@ -346,6 +354,7 @@ struct WorldView
 		const bool ground = !n || (n->shape != skeldat::LIQUID &&
 				n->shape != skeldat::TORCH && n->shape != skeldat::GAS);
 		top_y[c] = ground ? (int8_t)y : NO_GROUND;
+		top_any[c] = (int8_t)y;
 		top_b[c] = (uint8_t)bones;
 	}
 

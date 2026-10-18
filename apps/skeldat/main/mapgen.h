@@ -4,8 +4,9 @@
 //
 // skeldat's own map generator's pure parts ([SKELDAT_OWN_MAPGEN]): the
 // whole world's heightmap, made once at the world's start before any
-// section, its form's bias and droplet erosion; the noodle caves; where a
-// tree stands. terrain.h's SkeldatGenerator reads them a section at a time
+// section, its form's bias and droplet erosion, and its water a column
+// (the plains' table, the rivers' channels, their springs and drains);
+// the noodle caves; where a tree stands. terrain.h's SkeldatGenerator reads them a section at a time
 // on worldgen's workers (read only, so shared).
 // Pure: no Buildat, no module. Self test:
 //   g++ -std=c++11 -O2 -DSKELDAT_MAPGEN_TEST -x c++ apps/skeldat/main/mapgen.h -o /tmp/skeldat_mapgen && /tmp/skeldat_mapgen
@@ -31,6 +32,13 @@ static const float CAVE_WIDTH = 0.05f, CAVE_SPREAD_XZ = 40, CAVE_SPREAD_Y = 24;
 static const float TREE_CHANCE = 0.006f;
 // The plains' water table: the height this share of the columns is under
 static const float WATER_SHARE = 0.1f;
+// The rivers: one, two from a world 512 wide; a channel's water this deep
+// (its top over its bed), its banks RIVER_BANK over its bed (the water
+// and the liquid step's pressure, which pushes a falling river's water up
+// to 4 over its own top, kept in) and its bed falling at least RIVER_FALL
+// from the inlet to the outlet
+static const int RIVER_DEPTH = 2, RIVER_BANK = 7, RIVER_FALL = 8,
+		TWO_RIVERS_FROM = 512;
 
 enum Form { RIVERS, PLAINS, LAKE, SEA };
 static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea"};
@@ -114,10 +122,33 @@ struct Params {
 	int form = PLAINS;
 };
 
-// The ground's height a column, float; x and z from -half to half - 1
+// What a column is, besides its height
+enum ColumnFlags: uint8_t {
+	WATER = 1, // water over the ground, up to water_top
+	CHANNEL = 2, // a river's channel: its bed gravel
+	SPRING = 4, // its water voxels springs (a river's inlet)
+	DRAIN = 8, // its water voxels drains (a river's outlet)
+	SHORE = 16, // within 2 of water, and not 2 over it: sand
+	NEAR_WATER = 32, // within 2 of water: no tree
+};
+static const int16_t NO_WATER = -32768;
+
+// A river: its path from the inlet (index 0) to the outlet, a point
+// every half voxel, and its bed's height along it
+struct River {
+	std::vector<float> x, z, bed;
+};
+
+// The ground's height a column, float; x and z from -half to half - 1;
+// the water's top voxel and the flags a column
 struct Heightmap {
 	int half = 0;
 	std::vector<float> h;
+	std::vector<int16_t> water;
+	std::vector<uint8_t> flags;
+	// The rivers made (their beds as carved)
+	std::vector<River> rivers;
+	size_t index(int x, int z) const { return (size_t)(z + half) * width() + (x + half); }
 	int width() const { return 2 * half; }
 	float &at(int x, int z){ return h[(size_t)(z + half) * width() + (x + half)]; }
 	float at(int x, int z) const { return h[(size_t)(z + half) * width() + (x + half)]; }
@@ -208,29 +239,6 @@ inline void erode(Heightmap &m, uint32_t seed, size_t droplets)
 	}
 }
 
-// The heightmap: fractal noise with spreads by the world's width, the
-// form's bias, then erosion. Plains: no bias.
-// simplified: the rivers, lake and sea biases come in their stages; until
-// then every form is plains
-inline Heightmap make_heightmap(const Params &p)
-{
-	Heightmap m;
-	m.half = p.half;
-	const int w = m.width();
-	m.h.assign((size_t)w * w, 0);
-	const float range = (float)(p.top - p.bottom);
-	const float mean = p.water_level + 0.15f * range, amp = 0.3f * range;
-	const float spread = std::max(128.0f, (float)w) / 2;
-	for(int z = -p.half; z < p.half; z++)
-		for(int x = -p.half; x < p.half; x++)
-			m.at(x, z) = mean + amp * fbm2(x / spread, z / spread, p.seed, 6, 0.45f);
-	erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
-	// Within the world: a floor of 8 under the ground, 8 of air over it
-	for(float &v : m.h)
-		v = std::min((float)p.top - 8, std::max((float)p.bottom + 8, v));
-	return m;
-}
-
 // The water line: plains' water table, the height a WATER_SHARE of the
 // columns are under (the plan's "a third up the ground's range" put half
 // a 128 world under one lake; the user's plains have ponds)
@@ -240,6 +248,181 @@ inline int water_line(const Heightmap &m)
 	const size_t i = (size_t)(WATER_SHARE * (h.size() - 1));
 	std::nth_element(h.begin(), h.begin() + i, h.end());
 	return (int)std::floor(h[i]);
+}
+
+// One or two rivers edge to edge: a line between two points of the edge
+// on different sides (opposite, 7 in 10), bent by low-frequency noise;
+// the inlet the end whose ground is higher, the bed falling from under it
+// to under the outlet's, by RIVER_FALL at least, and kept 3 under the
+// lowest ground passed
+inline std::vector<River> plan_rivers(const Params &p, const Heightmap &m)
+{
+	std::vector<River> out;
+	const int w = m.width();
+	std::mt19937 r(p.seed ^ 0x81ee5);
+	std::uniform_real_distribution<float> u(0, 1);
+	const int n = w >= TWO_RIVERS_FROM ? 2 : 1;
+	for(int k = 0; k < n; k++){
+		auto edge = [&](int side, float t, float &x, float &z){
+			const float a = -p.half + t * (w - 1);
+			x = side == 0 ? -p.half : side == 1 ? p.half - 1 : a;
+			z = side == 2 ? -p.half : side == 3 ? p.half - 1 : a;
+		};
+		const int sa = (int)(r() % 4);
+		const int sb = u(r) < 0.7f ? (sa ^ 1) : (sa < 2 ? 2 + (int)(r() % 2) : (int)(r() % 2));
+		float ax, az, bx, bz;
+		edge(sa, 0.25f + 0.5f * u(r), ax, az);
+		edge(sb, 0.25f + 0.5f * u(r), bx, bz);
+		const float ha = m.at((int)ax, (int)az), hb = m.at((int)bx, (int)bz);
+		if(hb > ha)
+			std::swap(ax, bx), std::swap(az, bz);
+		const float len = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+		const float nx = -(bz - az) / len, nz = (bx - ax) / len;
+		float bed_in = std::max(ha, hb) - 3, bed_out = std::min(ha, hb) - 3;
+		bed_out = std::max((float)p.bottom + 12, std::min(bed_out, bed_in - RIVER_FALL));
+		bed_in = std::min((float)p.top - 16, std::max(bed_in, bed_out + RIVER_FALL));
+		River river;
+		const int steps = (int)(len * 2);
+		for(int i = 0; i <= steps; i++){
+			const float t = (float)i / steps;
+			const float bend = std::sin(3.14159f * t) * len * 0.15f *
+					fbm2(t * 3, (float)k * 7.3f, p.seed + 4441, 3, 0.5f);
+			const float x = ax + (bx - ax) * t + nx * bend,
+					z = az + (bz - az) * t + nz * bend;
+			river.x.push_back(std::min(p.half - 1.0f, std::max((float)-p.half, x)));
+			river.z.push_back(std::min(p.half - 1.0f, std::max((float)-p.half, z)));
+			river.bed.push_back(std::floor(bed_in + (bed_out - bed_in) * t));
+		}
+		// Under the ground all along: no lower than the ground passed so far
+		// less 3 (a river along a line over a basin was a raised channel the
+		// water left)
+		float low = 1e9f;
+		for(size_t i = 0; i < river.bed.size(); i++){
+			low = std::min(low, std::floor(m.at((int)river.x[i], (int)river.z[i])) - 3);
+			river.bed[i] = std::max((float)p.bottom + 12, std::min(river.bed[i], low));
+		}
+		out.push_back(river);
+	}
+	return out;
+}
+
+// The channel's and the valley's half widths: 1.5..3 and 12..24 by the
+// world's width up to 1024
+inline float channel_half(int w){ return 1.5f + 1.5f * std::min(1.0f, w / 1024.0f); }
+inline float valley_half(int w){ return 12 + 12 * std::min(1.0f, w / 1024.0f); }
+
+// Each river point's disc: fn(x, z, i, d) for the columns within rad of
+// it (the same column many times, by each point near it)
+template<typename F>
+inline void along(const Heightmap &m, const River &river, float rad, F fn)
+{
+	for(size_t i = 0; i < river.x.size(); i++){
+		const int r = (int)std::ceil(rad);
+		for(int z = (int)river.z[i] - r; z <= (int)river.z[i] + r; z++)
+			for(int x = (int)river.x[i] - r; x <= (int)river.x[i] + r; x++){
+				if(!m.in(x, z))
+					continue;
+				const float d = std::sqrt((x - river.x[i]) * (x - river.x[i]) +
+						(z - river.z[i]) * (z - river.z[i]));
+				if(d <= rad)
+					fn(x, z, i, d);
+			}
+	}
+}
+
+// The water's top a column and the flags round it: the shore and the
+// columns near water
+inline void mark_shores(Heightmap &m)
+{
+	for(int z = -m.half; z < m.half; z++)
+		for(int x = -m.half; x < m.half; x++){
+			const size_t c = m.index(x, z);
+			if(!(m.flags[c] & WATER))
+				continue;
+			for(int dz = -2; dz <= 2; dz++)
+				for(int dx = -2; dx <= 2; dx++){
+					if(!m.in(x + dx, z + dz))
+						continue;
+					const size_t n = m.index(x + dx, z + dz);
+					m.flags[n] |= NEAR_WATER;
+					if(m.at(x + dx, z + dz) <= m.water[c] + 1)
+						m.flags[n] |= SHORE;
+				}
+		}
+}
+
+// The heightmap: fractal noise with spreads by the world's width, the
+// form's bias, then erosion, then the water.
+// - plains: no bias; the water table (water_line()) over every column
+//   under it;
+// - rivers: plan_rivers()' valleys lowered along them before the erosion,
+//   their channels' beds set again after it (so a river still falls) and
+//   their banks raised to RIVER_BANK over the bed where lower, the
+//   channel's columns RIVER_DEPTH of water over the bed; its columns at
+//   the world's edge springs at the inlet, drains at the outlet.
+// simplified: the lake and sea biases come in their stage; until then
+// they are plains
+inline Heightmap make_heightmap(const Params &p)
+{
+	Heightmap m;
+	m.half = p.half;
+	const int w = m.width();
+	m.h.assign((size_t)w * w, 0);
+	m.water.assign(m.h.size(), NO_WATER);
+	m.flags.assign(m.h.size(), 0);
+	const float range = (float)(p.top - p.bottom);
+	const float mean = p.water_level + 0.15f * range, amp = 0.3f * range;
+	const float spread = std::max(128.0f, (float)w) / 2;
+	for(int z = -p.half; z < p.half; z++)
+		for(int x = -p.half; x < p.half; x++)
+			m.at(x, z) = mean + amp * fbm2(x / spread, z / spread, p.seed, 6, 0.45f);
+	std::vector<River> &rivers = m.rivers;
+	const float ch = channel_half(w), vh = valley_half(w);
+	if(p.form == RIVERS){
+		rivers = plan_rivers(p, m);
+		// The valley: the channel's bed, its banks rising from RIVER_BANK
+		// over it
+		for(const River &river : rivers)
+			along(m, river, vh, [&](int x, int z, size_t i, float d){
+				const float k = std::max(0.0f, (d - ch) / (vh - ch));
+				m.at(x, z) = std::min(m.at(x, z), d <= ch ? river.bed[i] :
+						river.bed[i] + RIVER_BANK + k * k * 40);
+			});
+	}
+	erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
+	// Within the world: a floor of 8 under the ground, 8 of air over it
+	for(float &v : m.h)
+		v = std::min((float)p.top - 8, std::max((float)p.bottom + 8, v));
+	if(p.form == RIVERS){
+		for(const River &river : rivers)
+			along(m, river, ch, [&](int x, int z, size_t i, float){
+				const size_t c = m.index(x, z);
+				// The lowest bed a column is under (a bend's points overlap)
+				if(m.flags[c] & CHANNEL)
+					m.h[c] = std::min(m.h[c], river.bed[i]);
+				else
+					m.h[c] = river.bed[i];
+				m.flags[c] |= CHANNEL | WATER;
+				m.water[c] = (int16_t)(m.h[c] + RIVER_DEPTH);
+				if(x == -p.half || x == p.half - 1 || z == -p.half || z == p.half - 1)
+					m.flags[c] |= i < river.x.size() / 2 ? SPRING : DRAIN;
+			});
+		// The banks: the 2 columns beside a channel RIVER_BANK over its bed
+		// at least (a levee where the ground falls away, or erosion took it)
+		for(const River &river : rivers)
+			along(m, river, ch + 2, [&](int x, int z, size_t i, float){
+				const size_t c = m.index(x, z);
+				if(!(m.flags[c] & CHANNEL))
+					m.h[c] = std::max(m.h[c], river.bed[i] + RIVER_BANK);
+			});
+	} else {
+		const int line = water_line(m);
+		for(size_t c = 0; c < m.h.size(); c++)
+			if(std::floor(m.h[c]) < line)
+				m.flags[c] |= WATER, m.water[c] = (int16_t)line;
+	}
+	mark_shores(m);
+	return m;
 }
 
 // A noodle cave's voxel: two 3D noises both near 0
@@ -334,6 +517,29 @@ int main()
 					(clock() - t0) * 1000.0 / CLOCKS_PER_SEC);
 			assert(lo >= p.bottom + 8 && hi <= p.top - 8 && hi - lo > 16);
 		}
+	// Rivers at 256, seeds 1-8: each channel's bed falls inlet to outlet,
+	// a spring and a drain at its ends
+	for(uint32_t seed = 1; seed <= 8; seed++){
+		Params p;
+		p.seed = seed, p.half = 128, p.form = RIVERS;
+		Heightmap m = make_heightmap(p);
+		const std::vector<River> &rivers = m.rivers;
+		size_t springs = 0, drains = 0, channel = 0;
+		for(uint8_t f : m.flags)
+			springs += (f & SPRING) != 0, drains += (f & DRAIN) != 0,
+			channel += (f & CHANNEL) != 0;
+		for(const River &r : rivers){
+			assert(r.bed.front() >= r.bed.back() + RIVER_FALL);
+			for(size_t i = 1; i < r.bed.size(); i++)
+				assert(r.bed[i] <= r.bed[i - 1]);
+		}
+		// Each channel column at most its river's bed there
+		if(seed == 1)
+			printf("mapgen: rivers, seed 1: %zu channel columns, %zu springs, "
+					"%zu drains, the bed %.0f -> %.0f\n", channel, springs,
+					drains, rivers[0].bed.front(), rivers[0].bed.back());
+		assert(springs > 0 && drains > 0);
+	}
 	// The caves: a few percent of the rock, the same twice
 	{
 		size_t n = 0, all = 0;

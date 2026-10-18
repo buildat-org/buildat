@@ -76,6 +76,7 @@ struct MakingMap
 		const size_t cols = world.footprints() * skeldat::bones::SECTION *
 				skeldat::bones::SECTION;
 		world.top_y.assign(cols, NO_GROUND);
+		world.top_any.assign(cols, NO_GROUND);
 		world.top_b.assign(cols, 0);
 		growth.flooded.assign(world.footprints(), 0);
 		state.assign(world.footprints(), 0);

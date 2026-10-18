@@ -428,6 +428,20 @@ inline Game make_game()
 		n.walkable = false;
 		g.items.erase(n.name);
 	}
+	// [SKELDAT_OWN_MAPGEN] A river's spring (always full) and drain (what
+	// goes in is gone), drawn as water; a lava spring, lava a cube that is
+	// mined to nothing (stone's drop)
+	for(const char *name : {"water_spring", "water_drain"}){
+		NodeDef &n = node(name, "Water", {"water"}, {}, "-");
+		n.shape = LIQUID;
+		g.items.erase(n.name);
+	}
+	{
+		NodeDef &n = node("lava_spring", "Lava Spring", {"lava"},
+				{{"cracky", 3}}, "skeldat:cobble");
+		n.light_source = 13;
+		g.items.erase(n.name);
+	}
 	// The table and the furnace show their fronts
 	g.items["skeldat:table"].image = "main/table_front.png";
 	g.items["skeldat:furnace"].image = "main/furnace_front.png";

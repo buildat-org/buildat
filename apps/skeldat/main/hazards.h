@@ -23,6 +23,8 @@
 //   itself fell straight back by the down rule).
 // - A gas: a random neighbour; air -> both the gas at half the share,
 //   the same gas -> both the mean; a share under GAS_MIN is air.
+// - A lava spring regains an eighth a step while under 8 (the binding
+//   keeps a water spring full and a drain empty: [SKELDAT_OWN_MAPGEN]).
 // - Lava beside water is stone; water under open sky (air over it at
 //   the sky's light 15) loses an eighth, one step in evaporate_one_in
 //   ([SKELDAT_OWN_MAPGEN]); lava beside air turns that air into volcanic gas, one step in
@@ -63,6 +65,11 @@ static const int LAVA_HARM = 4, GAS_HARM = 4;
 // times as fast ([SKELDAT_OWN_MAPGEN])
 static const int EVAPORATE_ONE_IN = 2000, SETTLE_STEPS = 2000,
 		SETTLE_EVAPORATE = 10;
+// The settling stops after SETTLE_MS of the server's time as well (what
+// still moves goes on in the game)
+static const int SETTLE_MS = 5000;
+// A lava pocket has a lava spring one in LAVA_SPRING_ONE_IN
+static const int LAVA_SPRING_ONE_IN = 8;
 // The pockets in the rock (terrain.h): water and poison gas from
 // POCKET_DEPTH under the water level, lava from POCKET_LAVA_DEPTH; at most
 // one a POCKET_CELL cube, its chance POCKET_CHANCE at POCKET_LAVA_DEPTH
@@ -72,11 +79,13 @@ static const float POCKET_CHANCE = 1.0f;
 
 enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC };
 // amount: a liquid's eighths (1..8), a gas's share (1..255); sky: air's
-// light from the sky, 0..15 (read, never written)
+// light from the sky, 0..15; spring: a lava spring's (read, never
+// written: the binding keeps what the voxel is)
 struct Cell {
 	uint8_t kind = SOLID;
 	uint8_t amount = 0;
 	uint8_t sky = 0;
+	bool spring = false;
 	Cell(){}
 	Cell(uint8_t kind, uint8_t amount = 0, uint8_t sky = 0):
 		kind(kind), amount(amount), sky(sky){}
@@ -235,6 +244,15 @@ struct Hazards
 	bool step_cell(int x, int y, int z)
 	{
 		Cell c = get(x, y, z);
+		// A lava spring ([SKELDAT_OWN_MAPGEN]) regains an eighth a step of
+		// its own: only what moved out of it (a water spring is the
+		// binding's: always full)
+		if(c.spring && c.amount < 8){
+			c.amount++;
+			put(x, y, z, c);
+			step_liquid(x, y, z, c);
+			return true;
+		}
 		if(liquid(c.kind))
 			return step_liquid(x, y, z, c);
 		if(gas(c.kind))

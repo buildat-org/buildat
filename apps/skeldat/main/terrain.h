@@ -10,23 +10,24 @@
 
 // [SKELDAT_OWN_MAPGEN] A section off the whole world's heightmap
 // (mapgen.h, shared and read only): stone, 3 of dirt and grass on top --
-// sand for all 4 where the ground is within 1 of the water line or under
-// it -- the bottom layer stone; the noodle caves carved (none in the
-// bottom 2, none within 4 under a ground below the water line, and the
-// ground voxel by the exact noise, the rest by a lattice every 4); the
+// sand for all 4 under water and on its shore, a river channel's bed
+// gravel -- the bottom layer stone; the noodle caves carved (none in the
+// bottom 2, none within 4 under water, and the ground voxel by the exact
+// noise, the rest by a lattice every 4); the
 // ores scattered by a hash of the section and the seed (Luanti's scatter:
 // clusters of 3x3x3 by scarcity); the trees on grass, a tree's leaves only
 // into air and its trunk over them, each section placing its own part of
-// any tree within 2 of it. The water: a column whose ground is under the
-// water line filled with full water (param2 0) from over its ground up to
-// the line (the plains' water table, a basin open to the sky; caves are
-// under the ground and not filled). The sky's light down each column to
-// its first voxel; the rest is voxelworld's relight of a new world.
+// any tree within 2 of it (none within 2 of water). The water: a column
+// the heightmap gives water filled with full water (param2 0) from over
+// its ground up to its top (caves are under the ground and not filled);
+// a river's inlet column springs, its outlet column drains. The sky's
+// light down each column to its first voxel; the rest is voxelworld's
+// relight of a new world.
 struct SkeldatGenerator: public worldgen::GeneratorInterface
 {
 	struct Ids {
 		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0,
-				water = 0;
+				water = 0, gravel = 0, spring = 0, drain = 0;
 	};
 	struct Ore {
 		uint32_t id;
@@ -44,21 +45,26 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 		m_format(format), m_map(map), m_p(p), m_ids(ids), m_ores(ores){}
 
 	int ground(int x, int z) const { return (int)std::floor(m_map->at(x, z)); }
-	bool beach(int g) const { return g <= m_p.water_level + 1; }
-	// Caves may carve here: off the bottom 2 and not within 4 under a ground
-	// below the water line
-	bool carvable(int y, int g) const
+	uint8_t flags(int x, int z) const
 	{
-		return y > m_p.bottom + 1 && !(g < m_p.water_level && y >= g - 4);
+		return m_map->in(x, z) ? m_map->flags[m_map->index(x, z)] : 0;
 	}
-	// A tree on the column: on grass, which is not carved
+	// Caves may carve here: off the bottom 2 and not within 4 under water
+	bool carvable(int y, int g, uint8_t f) const
+	{
+		return y > m_p.bottom + 1 && !((f & mapgen::WATER) && y >= g - 4);
+	}
+	// A tree on the column: on grass, which is not carved, and not within
+	// 2 of water
 	bool has_tree(int x, int z) const
 	{
 		if(!m_map->in(x, z) || !mapgen::tree_at(x, z, m_p.seed))
 			return false;
 		const int g = ground(x, z);
-		return !beach(g) && !(carvable(g, g) && mapgen::cave((float)x,
-				(float)g, (float)z, m_p.seed));
+		const uint8_t f = flags(x, z);
+		return !(f & (mapgen::WATER | mapgen::SHORE | mapgen::NEAR_WATER)) &&
+				!(carvable(g, g, f) && mapgen::cave((float)x, (float)g, (float)z,
+				m_p.seed));
 	}
 
 	void generate(main_context::SceneReference scene,
@@ -108,17 +114,23 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 		for(int x = lc.getX(); x <= uc.getX(); x++){
 			const bool in = m_map->in(x, z);
 			const int g = in ? ground(x, z) : m_p.bottom;
-			const bool sandy = beach(g);
+			const uint8_t f = flags(x, z);
+			const bool sandy = f & (mapgen::WATER | mapgen::SHORE);
+			const int wt = f & mapgen::WATER ? m_map->water[m_map->index(x, z)] : g;
+			const uint32_t water = f & mapgen::SPRING ? m_ids.spring :
+					f & mapgen::DRAIN ? m_ids.drain : m_ids.water;
+			const uint32_t top = f & mapgen::CHANNEL ? m_ids.gravel :
+					sandy ? m_ids.sand : m_ids.grass;
 			for(int y = lc.getY(); y <= uc.getY(); y++){
-				uint32_t id = y > g && y <= m_p.water_level ? m_ids.water : ID_AIR;
+				uint32_t id = y > g && y <= wt ? water : ID_AIR;
 				if(y <= m_p.bottom)
 					id = m_ids.stone;
 				else if(y <= g){
-					const bool carved = carvable(y, g) && (y == g ?
+					const bool carved = carvable(y, g, f) && (y == g ?
 							mapgen::cave((float)x, (float)y, (float)z, m_p.seed) :
 							std::fabs(lerp3(na, x, y, z)) < mapgen::CAVE_WIDTH &&
 							std::fabs(lerp3(nb, x, y, z)) < mapgen::CAVE_WIDTH);
-					id = carved ? ID_AIR : y == g ? (sandy ? m_ids.sand : m_ids.grass) :
+					id = carved ? ID_AIR : y == g ? top :
 							y >= g - 3 ? (sandy ? m_ids.sand : m_ids.dirt) : m_ids.stone;
 				}
 				volume.setVoxelAt(x, y, z, VoxelInstance(word_of(id, 0)));
@@ -208,7 +220,7 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 	PileIds m_ids;
 	// [SKELDAT_MINING_HAZARDS] The pockets: stone, the kinds (water, poison
 	// gas, lava) and the water level their depths are counted from
-	uint32_t m_stone = 0, m_pocket[3] = {};
+	uint32_t m_stone = 0, m_pocket[3] = {}, m_lava_spring = 0;
 	int m_water_level = 1;
 	std::atomic<int> m_pockets{0};
 
@@ -347,17 +359,22 @@ struct BonesGenerator: public worldgen::GeneratorInterface
 				if(!has.count(std::make_tuple(x, y, z)) && id_at(x, y, z) != m_stone)
 					return;
 			}
+		// [SKELDAT_OWN_MAPGEN] A lava pocket's first voxel a lava spring, one
+		// pocket in LAVA_SPRING_ONE_IN
+		const bool spring = kind == 2 && m_lava_spring &&
+				r() % hazards::LAVA_SPRING_ONE_IN == 0;
 		for(const pv::Vector3DInt32 &b : blob){
 			uint32_t word = volume.getVoxelAt(b).data;
-			m_format.id.set(word, m_pocket[kind]);
+			m_format.id.set(word, spring && &b == &blob[0] ? m_lava_spring :
+					m_pocket[kind]);
 			// Full: water's 0, lava's 7 (eighths less one), a gas's 255
 			m_format.param.set(word, kind == 1 ? 255u : kind == 2 ? 7u : 0u);
 			volume.setVoxelAt(b, VoxelInstance(word));
 		}
 		m_pockets++;
 		static const char *KIND[] = {"water", "poison gas", "lava"};
-		log_i(MODULE, "skeldat: a %s pocket of %zu at %d,%d,%d", KIND[kind],
-				blob.size(), x0, y0, z0);
+		log_i(MODULE, "skeldat: a %s pocket of %zu at %d,%d,%d%s", KIND[kind],
+				blob.size(), x0, y0, z0, spring ? ", a lava spring" : "");
 	}
 
 	pv::Vector3DInt32 get_padding_voxels()
@@ -435,6 +452,8 @@ struct Terrain
 	uint32_t seed = 0;
 	int water_level = 1;
 	ss_ form;
+	// The heightmap the generator reads (for the edge's cut and the rivers)
+	std::shared_ptr<const mapgen::Heightmap> heightmap;
 	bool spawn_ready = false;
 
 	Terrain(WorldView &world, storage::Save *&save, storage::Store *&store,
@@ -532,8 +551,10 @@ struct Terrain
 		p.form = std::max(0, mapgen::form_of(form));
 		const int64_t t0 = interface::os::time_us();
 		auto map = std::make_shared<const mapgen::Heightmap>(mapgen::make_heightmap(p));
+		heightmap = map;
 		// The water line: plains' water table (mapgen.h's water_line(); a
-		// world made before keeps the valleys' line)
+		// world made before keeps the valleys' line); the pockets' depths
+		// and the spawn's dry ground are by it
 		if(form != "legacy_valleys"){
 			p.water_level = mapgen::water_line(*map);
 			water_level = p.water_level;
@@ -549,6 +570,9 @@ struct Terrain
 		ids.tree = world.id_of("skeldat:tree");
 		ids.leaves = world.id_of("skeldat:leaves");
 		ids.water = world.id_of("skeldat:water_source");
+		ids.gravel = world.id_of("skeldat:gravel");
+		ids.spring = world.id_of("skeldat:water_spring");
+		ids.drain = world.id_of("skeldat:water_drain");
 		sv_<SkeldatGenerator::Ore> ores = {
 			{world.id_of("skeldat:coal_ore"), 8 * 8 * 8, 8, 64},
 			// 64 high, each still under the surface (11 and up)
@@ -757,6 +781,10 @@ struct Terrain
 					const int d = std::min(std::min(x + h, h - 1 - x),
 							std::min(z + h, h - 1 - z));
 					if(d >= EDGE_COLUMNS)
+						continue;
+					// [SKELDAT_OWN_MAPGEN] Cut where a river's channel meets it
+					if(heightmap && heightmap->in(x, z) && (heightmap->flags[
+							heightmap->index(x, z)] & mapgen::CHANNEL))
 						continue;
 					// The ground: the top voxel that is not air or water
 					int g = top;
