@@ -2498,6 +2498,66 @@ grep -a "client1 burns in lava" "$h1" | head -1 | grep -q "16 hp left" &&
 	grep -aq "skeldat: sound player_hurt (own)" "$t/hazards1.log" ||
 	fail "the lava's 4 a second, the stacks burnt, the boar's gas or the hurt sound ($h1, $t/hazards1.log)"
 echo "$first; ${back} active read back"
+# 47. The own map generator's forms ([SKELDAT_OWN_MAPGEN]): a 128 world
+# of each, the server alone for 2 minutes, its water reported every 10 s
+# (BUILDAT_SKELDAT_WATER_REPORT): made and settled; on rivers the
+# springs and the drains about even (the volume within 5% of the first
+# report's); on sea the level drain holds the line (within 3%); plains
+# and lake have no spring, their volume never more. A lava spring on the
+# ground adds lava; one walled in by stone adds none.
+# simplified: 2 minutes where the plan has 10, the margins to match
+forms=""
+for form in rivers sea plains lake; do
+	BUILDAT_SKELDAT_WORLD=$form BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+		BUILDAT_SKELDAT_TERRAIN=$form BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 \
+		start_server "$t/srv51_$form.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv51" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv51_$form.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	wait_for_log "$t/srv51_$form.log" "the world is in" 120 ||
+		fail "the $form world not made ($t/srv51_$form.log)"
+	sleep 120
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	f="$t/srv51_$form.log"
+	grep -aq "skeldat: the heightmap ($form) made" "$f" &&
+		grep -aq "skeldat: water: .* after the settling" "$f" ||
+		fail "the $form world not made and settled ($f)"
+	vols=$(grep -a "skeldat: water: [0-9]* voxels, [0-9]* volume;" "$f" | sed 's/.*voxels, \([0-9]*\) volume.*/\1/' | tr '\n' ' ')
+	case $form in
+	rivers) margin=0.05 rise=1;;
+	sea) margin=0.03 rise=1;;
+	*) margin=0.05 rise=0;;
+	esac
+	echo "$vols" | awk -v m=$margin -v r=$rise '{ if(NF < 8) exit 1
+		for(i = 2; i <= NF; i++){ d = ($i - $1) / $1; if(d > m || d < -m) exit 1
+			if(!r && $i > $(i - 1)) exit 1 } }' ||
+		fail "the $form water not kept: $vols ($f)"
+	forms="$forms $form $(echo $vols | awk '{ printf "%d->%d", $1, $NF }');"
+done
+for n in 1 2; do
+	# The spring 4 ahead (at -2 -32 plains are level there); walled: stone
+	# 2 high on its 4 sides and 1 on it
+	walls=""
+	[ $n = 2 ] && walls="$(for d in "1 4" "-1 4" "0 3" "0 5"; do echo "marker $d skeldat:stone 0; marker $d skeldat:stone 0;"; done) marker 0 4 skeldat:stone 0"
+	BUILDAT_SKELDAT_WORLD=lava$n BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+		BUILDAT_SKELDAT_TERRAIN=plains BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 \
+		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-2 -32" \
+		BUILDAT_SKELDAT_TEST="marker 0 4 skeldat:lava_spring 0; $walls" \
+		start_server "$t/srv51_lava$n.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv51_lava$n" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv51_lava$n.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "delay 60000" quit > "$t/lava$n.cmds"
+	client lava$n "$t/lava$n.cmds"
+	wait $CLIENT || fail "the lava spring's drive $n ($t/lava$n.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+lava() { grep -a "skeldat: water: .* lava voxels" "$t/srv51_lava$1.log" | sed 's/.*; \([0-9]*\) lava voxels/\1/' | tr '\n' ' '; }
+l1=$(lava 1) l2=$(lava 2)
+echo "$l1" | awk '{ exit !(NF >= 4 && $NF > $2 + 4) }' &&
+	echo "$l2" | awk '{ for(i = 3; i <= NF; i++) if($i != $2) exit 1; exit !(NF >= 4) }' ||
+	fail "the lava spring: on the ground $l1, walled in $l2 ($t/srv51_lava1.log, $t/srv51_lava2.log)"
+echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
 echo "skeletons: clean: $clean; flooded, after the player: $(echo "$last" | sed 's/.*skeldat: //'); the world with 2000 added: $light"

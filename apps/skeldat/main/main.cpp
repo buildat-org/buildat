@@ -1695,8 +1695,9 @@ struct Module: public interface::Module, public PlayersHost,
 		m_hz_us += interface::os::time_us() - t0;
 	}
 
-	// The water's voxels and volume (out[0], out[1]) over the world; with
-	// wake, those with room under or beside them woken (the count woken)
+	// The water's voxels and volume (out[0], out[1]) and the lava's voxels
+	// (out[2]) over the world; with wake, the water's with room under or
+	// beside them woken (the count woken)
 	size_t count_water(voxelworld::Instance *w, size_t *out, bool wake)
 	{
 		using namespace skeldat::hazards;
@@ -1713,6 +1714,7 @@ struct Module: public interface::Module, public PlayersHost,
 			for(int y = sy * S; y < sy * S + S; y++)
 			for(int x = sx * S; x < sx * S + S; x++){
 				const uint32_t d = vol.getVoxelAt(x, y, z).data;
+				out[2] += m_world.format.id.get(d) == m_hz_ids[1];
 				if(m_world.format.id.get(d) != m_hz_ids[0])
 					continue;
 				const uint32_t p = m_world.format.param.get(d);
@@ -1756,7 +1758,7 @@ struct Module: public interface::Module, public PlayersHost,
 		const int64_t t0 = interface::os::time_us();
 		const int S = skeldat::bones::SECTION;
 		size_t woken = 0, rounds = 0, left = 0;
-		size_t before[2] = {0, 0}, after[2] = {0, 0};
+		size_t before[3] = {0, 0, 0}, after[3] = {0, 0, 0};
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			m_hz_w = w;
 			m_hazards.now = m_world.t;
@@ -1836,11 +1838,12 @@ struct Module: public interface::Module, public PlayersHost,
 		m_hz_recount.clear();
 		// For a check: the world's water, a scan of every section
 		if(getenv("BUILDAT_SKELDAT_WATER_REPORT") && m_world.ready){
-			size_t n[2] = {0, 0};
+			size_t n[3] = {0, 0, 0};
 			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 				count_water(w, n, false);
 			});
-			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume", n[0], n[1]);
+			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume; %zu lava voxels",
+					n[0], n[1], n[2]);
 		}
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();
