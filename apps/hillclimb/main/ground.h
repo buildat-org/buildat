@@ -429,7 +429,7 @@ int main()
 	// The first ground back as it was made
 	gr.restore();
 	assert(g.top(x, z) == t && gr.undo.empty());
-	for(int zz = hill::Hill::BANK_W; zz <= z + 5; zz++)
+	for(int zz = 0; zz <= z + 5; zz++)
 		assert(g.top(x, zz) == hill::Hill::BASE);
 	// A stone rests back as voxels
 	Ground g3(g, h);

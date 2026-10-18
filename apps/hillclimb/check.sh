@@ -5,14 +5,19 @@
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
 # same hill, the slope's angle, the pads flat and long enough, the track
-# 8 m, sand with stones), the client Lua parsing, and three drives with
+# 10 m with no banks, sand with stones, the ground outside flush with the
+# edge), the client Lua parsing, and drives with
 # no client (BUILDAT_HILLCLIMB_DRIVE): the car settling on its springs,
 # lower with a payload, each gear's top speed, the brake, a slope
 # climbed and one past the sand's grip stalled; then 2 t in fourth at 25,
 # 31 and 37 degrees climbing or spinning, never stalled ([HC_POWER]); the time trial's times
 # kept per hill and payload in order, and a hill picked again; the
 # ground (main/ground.h's own self test too): a rut dug by wheels spun in
-# place, stones loose that roll down and rest.
+# place, stones loose that roll down and rest. [HC_OPEN_EDGES]: a car
+# steered off the side up the slope put back to a pose 2 to 3 s old, out
+# of the ground, and driving on; off the top's end the same; one parked a
+# minute never put back, nor the flat's; a stone thrown off the edge
+# removed.
 #   apps/hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -38,7 +43,8 @@ cd "$here/Build"
 # servers at once met ("Failed to bind socket")
 port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
-	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10)
+	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
+	[parked]=12)
 drive()
 {
 	local name=$1; shift
@@ -56,8 +62,9 @@ drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)
 drive flat BUILDAT_HILLCLIMB_START="5 -30 180" \
 	BUILDAT_HILLCLIMB_DRIVE="0:4 3:W1 9:W2 15:W3 21:W4 27:S4 31:Q" &
 # The time trial: 22 degrees climbed in second, the gear a car starts in
-# ([HC_DEFAULTS]: no gear key before it), held at the top by the end's
-# bank; again in fourth, faster; then a hill of 15 degrees and 30 m
+# ([HC_DEFAULTS]: no gear key before it), kept on the top by being put
+# back as it goes off the end ([HC_OPEN_EDGES]); again in fourth,
+# faster; then a hill of 15 degrees and 30 m
 drive climb BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 31:S2 \
 33:B 34:W4 50:S4 52:4H15/30 54:W4 66:Q" &
 # 40 degrees with 2 t aboard in first: past the sand's grip, it stalls,
@@ -72,6 +79,11 @@ drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
 	BUILDAT_HILLCLIMB_START="6.21 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
 drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
 	BUILDAT_HILLCLIMB_START="2.1 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
+# [HC_OPEN_EDGES] Up the slope in second, steered right from 7 s: off the
+# side, put back; a minute parked on the bottom pad, a stone thrown off
+# the left edge at 1 s
+drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
+drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 60:Q" &
 wait
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
@@ -168,20 +180,46 @@ end = at(flat, 30.5)
 want(end["v"] < 0.05 and end["shaft"] == 0, "braked to a stop from 5 m/s: v %.2f" % end["v"])
 top = max(l["z"] for l in climb if l["t"] < 31)
 want(top > 56, "22 degrees climbed to the top pad (z 56 m): %.1f" % top)
-want(at(climb, 30.5)["y"] > 20, "held on the top by the end's bank: y %.1f m" % at(climb, 30.5)["y"])
 log = open("%s/climb.log" % d, errors="replace").read()
+# [HC_OPEN_EDGES] Off the top's end (the area 62 m long), put back onto it
+ends = [float(m) for m in re.findall(r"drive's car put back, the pose \S+ s "
+    r"old, off the track at \S+,(\S+) m", log)]
+# (the first: later the 30 m hill's end is nearer)
+want(at(climb, 30.5)["y"] > 20 and ends and ends[0] > 60,
+    "kept on the top, put back off its end: y %.1f m, off at z %s" % (
+    at(climb, 30.5)["y"], ends[:3]))
+side = open("%s/side.log" % d, errors="replace").read()
+back = re.findall(r"drive's car put back, the pose (\S+) s old, off the track "
+    r"at (\S+),(\S+) m, to (\S+),(\S+),(\S+) m, lifted (\d+) voxels", side)
+sl = lines("side")
+if back:
+    age, ox, oz, tx, ty, tz, lifted = [float(x) for x in back[0]]
+    after = [l for l in sl if l["t"] > 0]
+    moved = max(abs(l["x"] - tx) + abs(l["z"] - tz) for l in sl[-3:])
+    want(2 <= age <= 3 and ox > 8 and 0 < tx < 10 and moved > 1,
+        "off the side at x %.2f, z %.1f m: put back to a pose %.1f s old at "
+        "x %.2f, z %.1f, lifted %d voxels, and driven on %.1f m" % (
+        ox, oz, age, tx, tz, lifted, moved))
+else:
+    want(False, "off the side: never put back")
+want("put back" not in open("%s/parked.log" % d, errors="replace").read() and
+    "put back" not in open("%s/flat.log" % d, errors="replace").read(),
+    "a car parked a minute, and the flat's off the area's end, never put back")
+want(re.search(r"rock 1 left the area at -?\S+,\S+ m, removed",
+    open("%s/parked.log" % d, errors="replace").read()) is not None,
+    "a stone thrown off the edge removed")
 fins = re.findall(r"hillclimb: finish (\S+) s on (\S+), rank (\S+); the ranking:(.*)", log)
 for f in fins:
     print("    finish %s s on %s rank %s; ranking%s" % f)
 want(len(fins) == 3, "three runs timed: %d" % len(fins))
 if len(fins) == 3:
-    k22 = "v3/seed1/steep22/length50/sand/payload0/"
+    k22 = "v4/seed1/steep22/length50/sand/payload0/"
     t1, t2 = float(fins[0][0]), float(fins[1][0])
     want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
         "second gear's time, then fourth's faster, under the hill's key")
     want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
         "the second run first in the ranking, the first beside it")
-    want(fins[2][1] == "v3/seed1/steep15/length30/sand/payload0/" and
+    want(fins[2][1] == "v4/seed1/steep15/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
 want("hillclimb: the hill, seed 1, 15 degrees, 30 m long" in log, "the hill made again from the pick")
 spin = [l for l in stall if 22 <= l["t"] <= 25]

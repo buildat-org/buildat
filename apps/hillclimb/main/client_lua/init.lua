@@ -85,25 +85,201 @@ end
 voxelworld.set_camera(camera_node)
 voxel_shading.set_camera(camera_node)
 
--- The land around, level with the bottom pad (a voxel's centre is its
--- integer position, so the pad's top is half a voxel over the start's y
--- - 1) and a tenth of a voxel under it so the pad draws over it: the
--- hill does not float. Its colour is a linear albedo over pi, the units
--- the pbr voxels are lit in, by eye against the sand.
--- simplified: a plain colour, no texture (Material has no UV transform
--- in the whitelist); a textured ground is the shader param UOffset's
-local ground = scene:CreateChild("Ground")
-ground.scale = magic.Vector3(1000 * U, 1, 1000 * U)
-ground.enabled = false
-do
-	local model = ground:CreateComponent("StaticModel")
-	model.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
+-- [HC_OPEN_EDGES] **The land around**: the server's outside() heights
+-- (hillclimb:outside, main.cpp outside_packet) as one static mesh of
+-- quads with a hole where the voxels are, 2 m cells near and 8 m far;
+-- each quad by its slope into one of nine groups (flat, and four compass
+-- ways at two tilts), a material each, lit as an object with no sun plus
+-- the sun by the group's normal, as skeldat's backdrop is (its own copy:
+-- apps do not consume each other). Sand-textured. And the fence along
+-- the area's edge on it: posts every 2 m, white with a red band, and two
+-- red-and-white ribbons between them, drawn only.
+local hill = nil -- the server's hillclimb:hill, below
+local outside = {node = nil, fence = nil, groups = {}, light_t = 0}
+local light_units = nil
+local function lit_mat(r, g, b, texture)
 	local m = magic.Material:new()
-	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTexture.xml"))
-	m:SetShaderParameter("MatDiffColor", magic.Color(0.12, 0.10, 0.06))
+	m:SetTechnique(0, magic.cache:GetResource("Technique", texture and
+			"Techniques/Diff.xml" or "Techniques/NoTexture.xml"))
+	if texture then
+		m:SetTexture(magic.TU_DIFFUSE, magic.cache:GetResource("Texture2D",
+				texture))
+	end
+	m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b))
 	m:SetShaderParameter("MatSpecColor", magic.Color(0, 0, 0))
-	model.material = m
+	return m
+end
+local FENCE = {white = lit_mat(0.8, 0.8, 0.78), red = lit_mat(0.6, 0.04, 0.03),
+	ribbon = lit_mat(1, 1, 1, "main/ribbon.png")}
+-- The fence: a post at each grid point along the area's edge, half a
+-- voxel out from it, on the ground there; ribbons between the posts at
+-- 0.5 and 0.9 m, sagging 3 cm at their middles
+local function make_fence(xs, zs, hs, area)
+	local quads = {}
+	local function box(tile, x, y, z, w, h)
+		local x0, x1, z0, z1 = x - w / 2, x + w / 2, z - w / 2, z + w / 2
+		local y1 = y + h
+		local function q(a, b, c, d)
+			quads[#quads + 1] = {tile = tile, p = {a[1], a[2], a[3], b[1], b[2],
+				b[3], c[1], c[2], c[3], d[1], d[2], d[3]}, uv = {0, 0, 1, 0, 1, 1, 0, 1}}
+		end
+		q({x0, y, z0}, {x1, y, z0}, {x1, y1, z0}, {x0, y1, z0})
+		q({x1, y, z0}, {x1, y, z1}, {x1, y1, z1}, {x1, y1, z0})
+		q({x1, y, z1}, {x0, y, z1}, {x0, y1, z1}, {x1, y1, z1})
+		q({x0, y, z1}, {x0, y, z0}, {x0, y1, z0}, {x0, y1, z1})
+		q({x0, y1, z0}, {x1, y1, z0}, {x1, y1, z1}, {x0, y1, z1})
+	end
+	-- The edge's points, round the area in order, each pushed out
+	local ring = {}
+	local function at(i, j, ox, oz)
+		ring[#ring + 1] = {xs[i] + ox, hs[(j - 1) * #xs + i], zs[j] + oz}
+	end
+	for i = area.i0, area.i1 do at(i, area.j0, 0, -0.5) end
+	for j = area.j0 + 1, area.j1 do at(area.i1, j, 0.5, 0) end
+	for i = area.i1 - 1, area.i0, -1 do at(i, area.j1, 0, 0.5) end
+	for j = area.j1 - 1, area.j0 + 1, -1 do at(area.i0, j, -0.5, 0) end
+	for k, p in ipairs(ring) do
+		box(1, p[1], p[2], p[3], 0.06 * U, 1.0 * U)
+		box(2, p[1], p[2] + 0.75 * U, p[3], 0.07 * U, 0.12 * U)
+		local n = ring[k % #ring + 1]
+		local len = math.sqrt((n[1] - p[1]) ^ 2 + (n[3] - p[3]) ^ 2) / U
+		for _, at_y in ipairs({0.5, 0.9}) do
+			local mid = {(p[1] + n[1]) / 2, (p[2] + n[2]) / 2 + (at_y - 0.03) * U,
+				(p[3] + n[3]) / 2}
+			local a = {p[1], p[2] + at_y * U, p[3]}
+			local b = {n[1], n[2] + at_y * U, n[3]}
+			local w = 0.08 * U
+			for _, seg in ipairs({{a, mid, 0, len / 2}, {mid, b, len / 2, len}}) do
+				local u, v = seg[1], seg[2]
+				quads[#quads + 1] = {tile = 3, p = {u[1], u[2], u[3], v[1], v[2],
+					v[3], v[1], v[2] + w, v[3], u[1], u[2] + w, u[3]},
+					uv = {seg[3] * 4, 1, seg[4] * 4, 1, seg[4] * 4, 0, seg[3] * 4, 0}}
+			end
+		end
+	end
+	if outside.fence then
+		outside.fence:Remove()
+	end
+	outside.fence = scene:CreateChild("Fence")
+	local tiles = buildat.set_quad_geometry(outside.fence, quads)
+	local cg = outside.fence:GetComponent("CustomGeometry")
+	local mats = {FENCE.white, FENCE.red, FENCE.ribbon}
+	for i, tile in ipairs(tiles) do
+		cg:SetMaterial(i - 1, mats[tile])
+	end
+	return #ring
+end
+buildat.sub_packet("hillclimb:outside", function(data)
+	local v = {}
+	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	local nx, nz = v[1], v[2]
+	if not nz or #v ~= 2 + nx + nz + nx * nz then
+		log:warning("hillclimb: the outside's packet does not add up")
+		return
+	end
+	local t0 = buildat.get_time_us()
+	local xs, zs, hs = {}, {}, {}
+	for i = 1, nx do xs[i] = v[2 + i] end
+	for j = 1, nz do zs[j] = v[2 + nx + j] end
+	for k = 1, nx * nz do hs[k] = v[2 + nx + nz + k] end
+	-- The area's edges are lines of the grid: its first and last lines
+	-- are where -0.5 and the size's are
+	local area = {}
+	for i, x in ipairs(xs) do
+		if math.abs(x + 0.5) < 0.01 then area.i0 = i end
+		if hill and math.abs(x - (hill.size.x - 0.5)) < 0.01 then area.i1 = i end
+	end
+	for j, z in ipairs(zs) do
+		if math.abs(z + 0.5) < 0.01 then area.j0 = j end
+		if hill and math.abs(z - (hill.size.z - 0.5)) < 0.01 then area.j1 = j end
+	end
+	if not (area.i0 and area.i1 and area.j0 and area.j1) then
+		log:warning("hillclimb: the outside's packet has no area edges")
+		return
+	end
+	local function group(nx_, ny, nz_)
+		if ny > 0.97 then
+			return 0
+		end
+		local way = math.abs(nx_) > math.abs(nz_) and (nx_ > 0 and 0 or 2) or
+				(nz_ > 0 and 1 or 3)
+		return 1 + way + (ny < 0.8 and 4 or 0)
+	end
+	local sums, quads = {}, {}
+	for j = 1, nz - 1 do
+		for i = 1, nx - 1 do
+			if i < area.i0 or i >= area.i1 or j < area.j0 or j >= area.j1 then
+				local function p(a, b)
+					return {xs[a], hs[(b - 1) * nx + a], zs[b]}
+				end
+				local a, b, c, d = p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1)
+				local ux, uy, uz = c[1] - a[1], c[2] - a[2], c[3] - a[3]
+				local wx, wy, wz = d[1] - b[1], d[2] - b[2], d[3] - b[3]
+				local n1, n2, n3 = uy * wz - uz * wy, uz * wx - ux * wz,
+						ux * wy - uy * wx
+				local l = math.sqrt(n1 * n1 + n2 * n2 + n3 * n3)
+				if n2 < 0 then
+					l = -l
+				end
+				n1, n2, n3 = n1 / l, n2 / l, n3 / l
+				local gi = group(n1, n2, n3)
+				local sum = sums[gi] or {0, 0, 0}
+				sum[1], sum[2], sum[3] = sum[1] + n1, sum[2] + n2, sum[3] + n3
+				sums[gi] = sum
+				quads[#quads + 1] = {tile = gi,
+					p = {a[1], a[2], a[3], b[1], b[2], b[3], c[1], c[2], c[3],
+						d[1], d[2], d[3]},
+					uv = {a[1] / U, a[3] / U, b[1] / U, b[3] / U, c[1] / U,
+						c[3] / U, d[1] / U, d[3] / U}}
+			end
+		end
+	end
+	if outside.node then
+		outside.node:Remove()
+	end
+	outside.node = scene:CreateChild("Outside")
+	local tex = magic.cache:GetResource("Texture2D", "main/sand.png")
+	if tex then
+		tex.filterMode = magic.FILTER_NEAREST
+	end
+	local tiles = buildat.set_quad_geometry(outside.node, quads)
+	local cg = outside.node:GetComponent("CustomGeometry")
+	outside.groups = {}
+	for i = 1, #tiles do
+		local m = magic.Material.new()
+		m:SetTechnique(0, magic.cache:GetResource("Technique",
+				"luanti_client/res/LuantiUnlitMask.xml"))
+		if tex then
+			m:SetTexture(magic.TU_DIFFUSE, tex)
+		end
+		cg:SetMaterial(i - 1, m)
+		local sum = sums[tiles[i]]
+		local l = math.sqrt(sum[1] ^ 2 + sum[2] ^ 2 + sum[3] ^ 2)
+		outside.groups[i] = {mat = m, n = {sum[1] / l, sum[2] / l, sum[3] / l}}
+	end
+	outside.light_t = 0
+	local posts = make_fence(xs, zs, hs, area)
+	log:info(string.format("hillclimb: the outside, %d quads in %d groups, " ..
+			"%d fence posts, %.1f ms", #quads, #tiles, posts,
+			(buildat.get_time_us() - t0) / 1000))
+end)
+-- Lit as an object under the open sky, twice a second: the light with no
+-- sun, and the sun's by each group's slope to it (object_light gives the
+-- sun at a half: twice its share is the sun's whole)
+local function light_outside(dt)
+	outside.light_t = outside.light_t - dt
+	if not outside.node or outside.light_t > 0 or not light_units then
+		return
+	end
+	outside.light_t = 0.5
+	local r0, g0, b0 = sky_light.object_light(light_units, 1, 0, true)
+	local r1, g1, b1 = sky_light.object_light(light_units, 1, 0)
+	local d = sun_node.enabled and sun_node.direction or magic.Vector3(0, 1, 0)
+	for _, gr in ipairs(outside.groups) do
+		local k = 2 * math.max(0, -(gr.n[1] * d.x + gr.n[2] * d.y + gr.n[3] * d.z))
+		gr.mat:SetShaderParameter("MatDiffColor", magic.Color(r0 + (r1 - r0) * k,
+				g0 + (g1 - g0) * k, b0 + (b1 - b0) * k, 1))
+	end
 end
 
 -- What the server says (main.cpp hill_packet): the hill's size, where the
@@ -111,7 +287,6 @@ end
 -- the steepness, the length and the payload; whether this client may
 -- pick ([HC_MULTIPLAYER] 2: an admin on a public server) and the rounds'
 -- interval, seconds. Again whenever the menu makes another hill.
-local hill = nil
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
 	local v = {}
@@ -125,8 +300,6 @@ buildat.sub_packet("hillclimb:hill", function(data)
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
 		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0}
 	hill.may_pick = v[14] ~= 0
-	ground.position = magic.Vector3(v[4], v[5] - 0.6, v[3] / 2)
-	ground.enabled = true
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees, %d m, %d kg", v[1], v[2], v[3], v[7],
 			v[8], v[9], v[10], v[11], v[12], v[13]))
@@ -190,6 +363,11 @@ local function update_sky()
 			(1 - day) * (1 - day))
 	sky:set_cloud_lit(sky_light.cloud_lit(CLOUD, zenith, horizon, h, 1))
 	sky_light.apply(voxel_shading, zone, magic, t)
+	-- For the land around (light_outside), in the frame's units
+	light_units = {ambient = t.ambient, bounce = {r = t.sky.r * PHYS.bounce,
+		g = t.sky.g * PHYS.bounce, b = t.sky.b * PHYS.bounce}, lamp = t.lamp,
+		sun = {r = t.sun_level * t.sun_color.r, g = t.sun_level * t.sun_color.g,
+			b = t.sun_level * t.sun_color.b}}
 	-- The open sky everywhere: the fog is the horizon (sky_light.fog's seen 1)
 	zone.fogColor = magic.Color(horizon.r, horizon.g, horizon.b)
 	local now = scene.elapsedTime
@@ -509,9 +687,10 @@ local function text(x, y, size)
 	return t
 end
 local hud = text(12, 10, 18)
-local board = text(12, 120, 15)
+-- Under the HUD's five lines at most (a round's and a note's with the rest)
+local board = text(12, 150, 15)
 -- The chat's last lines, and the round's results, a while each
-local chat_text = text(12, 330, 15)
+local chat_text = text(12, 360, 15)
 local chat_lines = {}
 table.insert(chat.listeners, function(line)
 	chat_lines[#chat_lines + 1] = {line = line, t = buildat.get_time_us()}
@@ -530,7 +709,7 @@ buildat.sub_packet("hillclimb:results", function(data)
 	log:info("hillclimb: the round's results:" .. (data == "" and " no runs"
 			or data:gsub("\n", "; ")))
 end)
-local menu_text = text(12, 120, 16)
+local menu_text = text(12, 150, 16)
 menu_text.visible = false
 
 -- "<rank of the last finish or -1>", then a line each, "time finished
@@ -600,6 +779,11 @@ local function pressed(name)
 	return magic.input:GetKeyPress(name)
 end
 local hud_note = nil
+-- [HC_OPEN_EDGES] "Off the track": the car put back (main.cpp)
+buildat.sub_packet("hillclimb:note", function(data)
+	hud_note = {text = data, t = scene.elapsedTime}
+	log:info("hillclimb: note: " .. data)
+end)
 -- A drive's own: "event hillclimb_params <the packet>", sent whether or
 -- not this client may pick, as a modified client would (the refusal's
 -- check)
@@ -733,6 +917,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		return
 	end
 	update_sky()
+	light_outside(dt)
 	voxel_shading.update(dt)
 	draw_cars()
 	if not chat_open and not menu and pressed(key.chat) then
