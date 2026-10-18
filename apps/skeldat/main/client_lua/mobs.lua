@@ -90,6 +90,14 @@ local KINDS = {
 		}},
 }
 
+-- [SKELDAT_CAVE_SKELETON] A cave skeleton: the skeleton's parts and skin,
+-- the bone a little brown -- a tint over the light it stands in
+-- simplified: a tint, not a skin of its own; one when it reads as dirty
+KINDS.skeldat_cave_skeleton = {tint = {0.85, 0.72, 0.55}}
+for k, v in pairs(KINDS.skeldat_skeleton) do
+	KINDS.skeldat_cave_skeleton[k] = v
+end
+
 -- An unlit cut-out (builtin/luanti's objects' technique)
 local function material(texture)
 	local m = magic.Material.new()
@@ -269,7 +277,9 @@ return function(game, sounds)
 				m.light_t = 0.25
 				local r, g, b = light_at(magic.Vector3(p.x, p.y + 0.5, p.z))
 				if r then
-					local c = magic.Color(r, g, b, 1)
+					local t = m.kind and m.kind.tint
+					local c = t and magic.Color(r * t[1], g * t[2], b * t[3], 1) or
+							magic.Color(r, g, b, 1)
 					if m.red_t and m.red_t > 0 then
 						local k = (r + g + b) / 3
 						c = magic.Color(k * 1.5 + 0.3, k * 0.4, k * 0.4, 1)

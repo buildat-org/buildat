@@ -123,7 +123,11 @@ struct Mobs
 					covered++;
 					continue;
 				}
+				// [SKELDAT_CAVE_SKELETON] A cave skeleton: unlit, and the
+				// column over it closed
 				if(kind == BOAR ? below == grass && sky == 15 :
+						kind == CAVE_SKELETON ? std::max(sky, lamp) <= 3 &&
+							!open_sky(w, x, y, z) :
 						d >= DAYLIGHT_DANGER || std::max(sky, lamp) <= 3){
 					out[0] = (float)x, out[1] = y - 0.5f, out[2] = (float)z;
 					return true;
@@ -146,7 +150,7 @@ struct Mobs
 			size_t awake = 0;
 			for(auto &kv : all)
 				awake += kv.second.node_id != 0;
-			for(uint8_t kind : {BOAR, SKELETON}){
+			for(uint8_t kind : {BOAR, SKELETON, CAVE_SKELETON}){
 				if(awake >= MAX_MOBS)
 					return;
 				if(kind == BOAR && (world.day < 0.25 || world.day > 0.75))
@@ -159,9 +163,13 @@ struct Mobs
 						near++;
 				}
 				// A skeleton by the danger: more tries, more of them
-				if(near >= (kind == SKELETON ? 1 + (size_t)(5 * d) : MAX_NEAR))
+				if(near >= (kind == SKELETON ? 1 + (size_t)(5 * d) :
+						kind == CAVE_SKELETON ? 2 : MAX_NEAR))
 					continue;
 				if(kind == SKELETON && world.rnd() > 0.1f + 0.9f * d)
+					continue;
+				// One try in ten a spawn tick, by day or night
+				if(kind == CAVE_SKELETON && world.rnd() > 0.1f)
 					continue;
 				float s[3];
 				bool found = false;
@@ -175,7 +183,8 @@ struct Mobs
 					if(std::fabs(kv.second.x - s[0]) < 32 &&
 							std::fabs(kv.second.z - s[2]) < 32)
 						area++;
-				if(area >= (kind == SKELETON ? 2 + (size_t)(8 * d) : MAX_AREA))
+				if(area >= (kind == SKELETON ? 2 + (size_t)(8 * d) :
+						kind == CAVE_SKELETON ? 4 : MAX_AREA))
 					continue;
 				Mob m;
 				m.kind = kind;
@@ -224,19 +233,21 @@ struct Mobs
 						cs(p->name), x, y, z);
 				continue;
 			}
-			if(kind == "boar_spots"){
+			if(kind == "boar_spots" || kind == "cave_spots"){
 				// [SKELDAT_BOAR_GRASS] "boar_spots n": n boar spawn searches
-				// round the player, counted
+				// round the player, counted; "cave_spots n" a cave
+				// skeleton's ([SKELDAT_CAVE_SKELETON])
+				const uint8_t k = kind == "boar_spots" ? BOAR : CAVE_SKELETON;
 				int n = 0, found = 0;
 				it>>n;
 				covered = 0;
 				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
 					float out[3];
 					for(int i = 0; i < n; i++)
-						found += spawn_spot(w, BOAR, *p, 0, out);
+						found += spawn_spot(w, k, *p, 0, out);
 				});
-				log_i(MODULE, "skeldat: test: %d boar spawn searches, %d found, "
-						"%zu covered spots refused", n, found, covered);
+				log_i(MODULE, "skeldat: test: %d %s spawn searches, %d found, "
+						"%zu covered spots refused", n, MOB_KIND[k], found, covered);
 				continue;
 			}
 			if(kind == "give"){
@@ -377,7 +388,8 @@ struct Mobs
 				continue;
 			}
 			Mob m;
-			m.kind = kind == "skeleton" ? SKELETON : BOAR;
+			m.kind = kind == "skeleton" ? SKELETON :
+					kind == "cave_skeleton" ? CAVE_SKELETON : BOAR;
 			m.x = p->x + dx, m.y = p->y, m.z = p->z + dz;
 			voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
 				Ground g = world.ground(w, m.x, m.y + 2, m.z, MOB_HEIGHT[m.kind]);
@@ -456,6 +468,16 @@ struct Mobs
 		id = 0;
 	}
 
+	// [SKELDAT_CAVE_SKELETON] What a skeleton fights (target_of()): a
+	// player (peer) or a mob (key), where it is and its name for the log
+	struct Target {
+		float x = 0, y = 0, z = 0, d = 1e9f;
+		size_t peer = 0;
+		uint32_t mob = 0;
+		bool is_mob = false;
+		ss_ name;
+	};
+
 	// [SKELDAT_SKELETON_DRAW] The bow drawn this long before the shot;
 	// the next draw 0.7 to 2.2 s after it, 1.5 to 3 between the shots
 	// with the draw
@@ -469,7 +491,7 @@ struct Mobs
 		log_i(MODULE, "skeldat: a skeleton (%u) lets its draw go: %s", key, why);
 	}
 
-	void shoot(const Mob &m, const Player &p)
+	void shoot(const Mob &m, const Target &p)
 	{
 		const float dx = p.x - m.x, dz = p.z - m.z;
 		const float h = std::sqrt(dx*dx + dz*dz);
@@ -487,9 +509,10 @@ struct Mobs
 			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
 			a.node_id = n->GetID();
 		});
+		a.shooter = m.kind;
 		arrows.push_back(a);
 		host.sound("bow", m.x, m.y + 1.5f, m.z);
-		log_i(MODULE, "skeldat: a skeleton shoots at %s", cs(p.name));
+		log_i(MODULE, "skeldat: a %s shoots at %s", MOB_KIND[m.kind], cs(p.name));
 	}
 
 	sv_<Stack> loot(const Mob &m)
@@ -582,10 +605,38 @@ struct Mobs
 		return false;
 	}
 
+	// [SKELDAT_CAVE_SKELETON] What a skeleton fights: the nearest of a
+	// living player and a woken skeleton of the other kind (a bone
+	// skeleton's body, a cave skeleton), from the mob's x, y, z
+	Target target_of(const Mob &m)
+	{
+		Target t;
+		float d;
+		size_t peer = 0;
+		if(const Player *p = host.nearest(m.x, m.y, m.z, d, &peer)){
+			t.x = p->x, t.y = p->y, t.z = p->z, t.d = d;
+			t.peer = peer, t.name = p->name;
+		}
+		const uint8_t foe = m.kind == SKELETON ? CAVE_SKELETON : SKELETON;
+		for(auto &kv : all){
+			const Mob &o = kv.second;
+			if(o.kind != foe || !o.node_id || o.hp <= 0)
+				continue;
+			const float e = std::sqrt((o.bx - m.x) * (o.bx - m.x) +
+					(o.by - m.y) * (o.by - m.y) + (o.bz - m.z) * (o.bz - m.z));
+			if(e < t.d){
+				t.x = o.bx, t.y = o.by, t.z = o.bz, t.d = e;
+				t.peer = 0, t.mob = kv.first, t.is_mob = true;
+				t.name = ss_("the ")+MOB_KIND[foe]+" ("+itos(kv.first)+")";
+			}
+		}
+		return t;
+	}
+
 	// The body after its light form ([SKELDAT_LIGHT_PRIMARY]): toward it
 	// at BODY_SPEED, a step up as a jump, falling; put on it when BODY_LAG
 	// off. It faces the player it fights, else the way it goes
-	void step_body(voxelworld::Instance *w, Mob &m, const Player *p, float dt)
+	void step_body(voxelworld::Instance *w, Mob &m, const Target *p, float dt)
 	{
 		const int h = MOB_HEIGHT[SKELETON];
 		const float dx = m.x - m.bx, dz = m.z - m.bz,
@@ -654,7 +705,7 @@ struct Mobs
 			return;
 		sv_<std::pair<uint32_t, int>> burnt;
 		sv_<uint32_t> drowned, off_grass;
-		sv_<std::pair<uint32_t, size_t>> shots, draws;
+		sv_<std::pair<uint32_t, Target>> shots, draws;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
 		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
@@ -667,16 +718,56 @@ struct Mobs
 					continue;
 				// What it wants: a heading and a speed
 				m.mode_t -= dt;
-				float d;
-				size_t peer = 0;
-				const Player *p = host.nearest(m.x, m.y, m.z, d, &peer);
+				const Target tg = m.kind != BOAR ? target_of(m) : Target();
+				const Target *p = tg.d < 1e9f ? &tg : nullptr;
+				const float d = tg.d;
+				// The draw, then the shot at the target as it is then
+				// ([SKELDAT_SKELETON_DRAW]); a cave skeleton's the same
+				auto fight = [&](){
+					m.mode = FIGHT;
+					if(m.draw_t >= 0){
+						m.draw_t -= dt;
+						if(m.draw_t <= 0){
+							shots.push_back({key, tg});
+							m.draw_t = -1;
+							m.shoot_t = 0.7f + world.rnd() * 1.5f;
+						}
+					} else {
+						m.shoot_t -= dt;
+						if(m.shoot_t <= 0 && d < 14){
+							m.draw_t = DRAW_S;
+							draws.push_back({key, tg});
+						}
+					}
+				};
+				// The sun burns a skeleton of either kind unless bones are
+				// round it, water kills it
+				auto burns = [&](float x, float y, float z){
+					if(here.sun >= 12){
+						m.burn_t += dt;
+						if(m.burn_t >= 1){
+							m.burn_t = 0;
+							if(world.sun_safe(w, x, y, z) == 0)
+								burnt.push_back({key, 2});
+						}
+					}
+					if(m.y < -1000)
+						burnt.push_back({key, 1000});
+				};
+				auto in_water = [&](float x, float y, float z){
+					const int bx = (int)std::floor(x + 0.5f),
+							by = (int)std::floor(y + 0.5f),
+							bz = (int)std::floor(z + 0.5f);
+					return world.is_water(w, bx, by, bz) ||
+							world.is_water(w, bx, by + 1, bz);
+				};
 				if(m.kind == SKELETON){
 					// The light form decides (step_light()); here the
 					// fight's sight and bow, and the body after it
 					if(p && d < 16){
 						// Its first sight of a player: a marker skull, one
 						// a game day ([SKELDAT_SKELETON_SIM])
-						if(m.mode != FIGHT && !growth.ended){
+						if(!tg.is_mob && m.mode != FIGHT && !growth.ended){
 							int at[3];
 							if(world.t / world.day_s - m.marker_day < 1.0 / growth.speed)
 								log_i(MODULE, "skeldat: a skeleton (%u) sees "
@@ -688,23 +779,7 @@ struct Mobs
 								m.marker_day = world.t / world.day_s;
 							}
 						}
-						m.mode = FIGHT;
-						// [SKELDAT_SKELETON_DRAW] The draw, then the shot
-						// at the player as they are then
-						if(m.draw_t >= 0){
-							m.draw_t -= dt;
-							if(m.draw_t <= 0){
-								shots.push_back({key, peer});
-								m.draw_t = -1;
-								m.shoot_t = 0.7f + world.rnd() * 1.5f;
-							}
-						} else {
-							m.shoot_t -= dt;
-							if(m.shoot_t <= 0 && d < 14){
-								m.draw_t = DRAW_S;
-								draws.push_back({key, peer});
-							}
-						}
+						fight();
 					} else {
 						let_go(key, m, "the player out of 16");
 						if(m.mode == FIGHT)
@@ -713,29 +788,32 @@ struct Mobs
 					step_body(w, m, p, dt);
 					// [SKELDAT_SKELETON_WATER] Its body in water, the feet's
 					// voxel or the one over them: dead at once
-					const int bx = (int)std::floor(m.bx + 0.5f),
-							by = (int)std::floor(m.by + 0.5f),
-							bz = (int)std::floor(m.bz + 0.5f);
-					if(world.is_water(w, bx, by, bz) || world.is_water(w, bx, by + 1, bz)){
+					if(in_water(m.bx, m.by, m.bz)){
 						drowned.push_back(key);
 						continue;
 					}
 					// The sun burns it, unless bones are round its light
 					// form
-					if(here.sun >= 12){
-						m.burn_t += dt;
-						if(m.burn_t >= 1){
-							m.burn_t = 0;
-							if(world.sun_safe(w, m.x, m.y, m.z) == 0)
-								burnt.push_back({key, 2});
-						}
-					}
-					if(m.y < -1000)
-						burnt.push_back({key, 1000});
+					burns(m.x, m.y, m.z);
 					continue;
 				}
+				// [SKELDAT_CAVE_SKELETON] A cave skeleton in a fight stands,
+				// turned to its target; out of it, a boar's wander
+				bool stands = false;
+				if(m.kind == CAVE_SKELETON){
+					if(p && d < 16){
+						fight();
+						m.yaw = std::atan2(p->x - m.x, p->z - m.z);
+						stands = true;
+					} else {
+						let_go(key, m, "the target out of 16");
+						if(m.mode == FIGHT)
+							m.mode = WANDER, m.mode_t = 0;
+					}
+				}
 				float move_yaw = m.yaw, speed = 0;
-				if(m.mode == FLEE && m.mode_t > 0){
+				if(stands){
+				} else if(m.mode == FLEE && m.mode_t > 0){
 					m.yaw = move_yaw = std::atan2(m.x - m.from_x, m.z - m.from_z);
 					speed = MOB_SPEED[m.kind][1];
 				} else {
@@ -773,6 +851,14 @@ struct Mobs
 					m.vy -= GRAVITY * dt;
 					m.y += m.vy * dt;
 				}
+				if(m.kind == CAVE_SKELETON){
+					m.bx = m.x, m.by = m.y, m.bz = m.z;
+					if(in_water(m.x, m.y, m.z))
+						drowned.push_back(key);
+					else
+						burns(m.x, m.y, m.z);
+					continue;
+				}
 				if(m.y < -1000)
 					burnt.push_back({key, 1000});
 				// [SKELDAT_BOAR_GRASS] Its grass clock: the voxel under the
@@ -800,27 +886,41 @@ struct Mobs
 					"%d,%d,%d on seeing %s", k.key, k.p[0], k.p[1], k.p[2],
 					cs(k.seen));
 		}
+		// The target as it is now: a player still there, a mob still alive
+		auto now = [&](Target &t){
+			if(t.is_mob){
+				auto o = all.find(t.mob);
+				if(o == all.end())
+					return false;
+				t.x = o->second.bx, t.y = o->second.by, t.z = o->second.bz;
+				return true;
+			}
+			auto p = players.find(t.peer);
+			if(p == players.end())
+				return false;
+			t.x = p->second.x, t.y = p->second.y, t.z = p->second.z;
+			return true;
+		};
 		for(auto &s : draws){
 			auto m = all.find(s.first);
-			auto p = players.find(s.second);
-			if(m == all.end() || p == players.end())
+			if(m == all.end() || !now(s.second))
 				continue;
 			host.sound("bow_draw", m->second.bx, m->second.by + 1.5f, m->second.bz);
-			log_i(MODULE, "skeldat: a skeleton (%u) draws at %s", s.first,
-					cs(p->second.name));
+			log_i(MODULE, "skeldat: a %s (%u) draws at %s",
+					MOB_KIND[m->second.kind], s.first, cs(s.second.name));
 		}
 		for(auto &s : shots){
 			auto m = all.find(s.first);
-			auto p = players.find(s.second);
-			if(m == all.end() || p == players.end())
+			if(m == all.end() || !now(s.second))
 				continue;
 			// From the body
 			Mob b = m->second;
 			b.x = b.bx, b.y = b.by, b.z = b.bz;
-			shoot(b, p->second);
+			shoot(b, s.second);
 		}
 		for(uint32_t key : drowned){
-			log_i(MODULE, "skeldat: the skeleton (%u) is in water", key);
+			log_i(MODULE, "skeldat: the %s (%u) is in water",
+					MOB_KIND[all[key].kind], key);
 			Mob &m = all[key];
 			m.x = m.bx, m.y = m.by, m.z = m.bz;
 			damage(key, 1000, NOBODY, 0, 0, true);
@@ -841,7 +941,8 @@ struct Mobs
 			if(!all.count(b.first))
 				continue;
 			if(b.second < 1000)
-				log_i(MODULE, "skeldat: the skeleton (%u) burns", b.first);
+				log_i(MODULE, "skeldat: the %s (%u) burns",
+						MOB_KIND[all[b.first].kind], b.first);
 			damage(b.first, b.second, NOBODY, 0, 0);
 		}
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
@@ -1120,8 +1221,9 @@ struct Mobs
 			// Fighting: a bow's distance, between 3 and 9, that a sword's
 			// reach can still close
 			if(m.node_id && m.mode == FIGHT){
-				float d;
-				const Player *p = host.nearest(m.x, m.y, m.z, d);
+				const Target t = target_of(m);
+				const Target *p = t.d < 1e9f ? &t : nullptr;
+				const float d = t.d;
 				if(!p || (d >= 3 && d <= 9))
 					continue;
 				m.yaw = std::atan2(p->x - m.x, p->z - m.z) +
@@ -1506,7 +1608,9 @@ struct Mobs
 		});
 		size_t j = 0;
 		sv_<Arrow> kept;
-		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; bool head; };
+		// by: the shooting mob's kind, -1 a player
+		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; bool head;
+			int by; };
 		sv_<Hit> hits;
 		for(Arrow &a : arrows){
 			a.age += dt;
@@ -1529,11 +1633,14 @@ struct Mobs
 				const float f = k ? 1.0f : 0.5f;
 				const float x = a.x + a.vx * dt * f, y = a.y + a.vy * dt * f,
 						z = a.z + a.vz * dt * f;
-				// A player's hits the mobs, as a hit by the player
-				if(a.by_player){
+				// A player's hits the mobs, as a hit by the player; a
+				// skeleton's the other skeleton kind's ([SKELDAT_CAVE_SKELETON])
+				{
 					for(auto &kv : all){
 						const Mob &m = kv.second;
-						const bool sk = m.kind == SKELETON;
+						if(!a.by_player && (m.kind == BOAR || m.kind == a.shooter))
+							continue;
+						const bool sk = m.kind != BOAR;
 						const float mx = sk ? m.bx : m.x, my = sk ? m.by : m.y,
 								mz = sk ? m.bz : m.z;
 						if(m.node_id && std::hypot(mx - x, mz - z) < 0.5f &&
@@ -1550,12 +1657,20 @@ struct Mobs
 							const float vh = std::hypot(a.vx, a.vz);
 							const float across = vh > 0 ? std::fabs((mx - x) * a.vz -
 									(mz - z) * a.vx) / vh : std::hypot(mx - x, mz - z);
-							const bool head = sk && y >= my + 1.5f && across < 0.3f;
+							// A player's: a skeleton's at the other kind's head
+							// would end their fight at once
+							const bool head = a.by_player && sk && y >= my + 1.5f &&
+									across < 0.3f;
 							hits.push_back({kv.first, head ? std::max(1, m.hp) :
 									std::max(1, (int)std::lround(BOW_DAMAGE * v)),
-									a.peer, x, z, head});
-							host.sound("arrow_hit", x, y, z, a.peer);
-							host.sound_near(a.peer, "arrow_hit", x, y, z);
+									a.by_player ? a.peer : NOBODY, x, z, head,
+									a.by_player ? -1 : (int)a.shooter});
+							if(a.by_player){
+								host.sound("arrow_hit", x, y, z, a.peer);
+								host.sound_near(a.peer, "arrow_hit", x, y, z);
+							} else {
+								host.sound("arrow_hit", x, y, z);
+							}
 							gone = true;
 							break;
 						}
@@ -1563,7 +1678,7 @@ struct Mobs
 				}
 				for(auto &pair : players){
 					Player &pl = pair.second;
-					if(!a.by_player && pl.placed && pl.hp > 0 &&
+					if(!gone && !a.by_player && pl.placed && pl.hp > 0 &&
 							std::hypot(pl.x - x, pl.z - z) < 0.45f &&
 							y > pl.y - 0.1f && y < pl.y + 1.85f){
 						host.hurt(pair.first, pl, 2 + world.rand() % 3,
@@ -1615,14 +1730,16 @@ struct Mobs
 			if(!all.count(h.key))
 				continue;
 			auto pl = players.find(h.peer);
+			const ss_ by = h.by >= 0 ? ss_("a ")+MOB_KIND[h.by] :
+					pl != players.end() ? pl->second.name : ss_("?");
 			if(h.head)
-				log_i(MODULE, "skeldat: %s's headshot kills the skeleton (%u)",
-						pl != players.end() ? cs(pl->second.name) : "?", h.key);
+				log_i(MODULE, "skeldat: %s's headshot kills the %s (%u)",
+						cs(by), MOB_KIND[all[h.key].kind], h.key);
 			else
 				log_i(MODULE, "skeldat: an arrow from %s hits the %s (%u) for %d",
-						pl != players.end() ? cs(pl->second.name) : "?",
-						MOB_KIND[all[h.key].kind], h.key, h.dmg);
-			damage(h.key, h.dmg, h.peer, h.x, h.z);
+						cs(by), MOB_KIND[all[h.key].kind], h.key, h.dmg);
+			// A skeleton's kill leaves the drops on the ground, as a player's
+			damage(h.key, h.dmg, h.peer, h.x, h.z, h.by >= 0);
 		}
 	}
 

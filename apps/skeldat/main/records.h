@@ -150,13 +150,15 @@ struct Furnace
 // daylight unless the bones around it are thick. Nodes in the scene that
 // replicate to every client (client_lua/mobs.lua dresses them). A mob is
 // saved in the store as "mob/<n>", "kind x y z yaw hp"; an arrow is not.
-enum MobKind: uint8_t { BOAR = 0, SKELETON = 1 };
+// [SKELDAT_CAVE_SKELETON] A cave skeleton: a boar's kind of mob (no light
+// form) with a bone skeleton's fight, against players and bone skeletons
+enum MobKind: uint8_t { BOAR = 0, SKELETON = 1, CAVE_SKELETON = 2 };
 enum MobMode: uint8_t { WANDER = 0, FLEE = 1, FIGHT = 2 };
-static const char *MOB_KIND[] = {"boar", "skeleton"};
-static const int MOB_HP[] = {10, 20};
-static const int MOB_HEIGHT[] = {1, 2};
+static const char *MOB_KIND[] = {"boar", "skeleton", "cave_skeleton"};
+static const int MOB_HP[] = {10, 20, 20};
+static const int MOB_HEIGHT[] = {1, 2, 2};
 // Walking, and fleeing or fighting, in voxels a second
-static const float MOB_SPEED[][2] = {{1.2f, 3.5f}, {1.0f, 1.8f}};
+static const float MOB_SPEED[][2] = {{1.2f, 3.5f}, {1.0f, 1.8f}, {1.0f, 1.8f}};
 static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 		ARROW_SPEED = 18.0f;
 // [SKELDAT_BOW] A player's bow: full drawn in BOW_DRAW s, the arrow at
@@ -271,7 +273,7 @@ struct Mob
 		if(!(is>>grass_t))
 			grass_t = -1;
 		kind = (uint8_t)k;
-		return (k == BOAR || k == SKELETON) && hp > 0;
+		return (k == BOAR || k == SKELETON || k == CAVE_SKELETON) && hp > 0;
 	}
 };
 
@@ -283,6 +285,9 @@ struct Arrow
 	// A player's ([SKELDAT_BOW]): it hits mobs, not players
 	bool by_player = false;
 	size_t peer = 0;
+	// A mob's: its kind, whose own kind and boars it does not hit
+	// ([SKELDAT_CAVE_SKELETON])
+	uint8_t shooter = SKELETON;
 	// Stuck: the voxel it went into and the one it sticks out into
 	int sx = 0, sy = 0, sz = 0, fx = 0, fy = 0, fz = 0;
 };
