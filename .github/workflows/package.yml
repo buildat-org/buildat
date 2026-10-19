@@ -78,13 +78,6 @@ jobs:
           name: windows-luanti-archive
           path: Build/package/out/*-win64-luanti.zip
           if-no-files-found: error
-      # The runtime variants ([WIN_DLL_INIT]), artifacts and not the
-      # release's: the one that answers the desktop becomes the packaging
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-runtime-variants
-          path: Build/package/out/*-win64-runtimes-*.zip
-          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

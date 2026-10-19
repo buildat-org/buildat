@@ -41,7 +41,6 @@ docker run --rm -i \
 	-v "$ccache_dir:/ccache:z" -e CCACHE_DIR=/ccache \
 	-e "BUILDAT_GIT_HASH=$hash" \
 	-e "JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}" \
-	-e "WIN_VARIANTS=${WIN_VARIANTS:-1}" \
 	-e KEEP_TMP=1 \
 	"$image" bash -c "
 		set -eu

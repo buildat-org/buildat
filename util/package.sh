@@ -842,18 +842,6 @@ windows)
 	smoke_test_wine "$a"
 	i=$(make_installer "buildat-$version-win64") || exit 1
 	echo "installer: $i"
-	# The runtime variant beside it, until it answers the desktop's
-	# 0xc0000142 and becomes the packaging ([WIN_DLL_INIT]): the three
-	# runtime DLLs from the cross toolchain that built the binaries
-	# rather than from the shipped winlibs tree. WIN_VARIANTS=0 skips it.
-	# (A static-runtime variant was tried and does not link: see
-	# BUILDAT_RUNTIME_DLLS in CMakeLists.txt.)
-	if [ "${WIN_VARIANTS:-1}" != 0 ]; then
-		b=$(make_one "buildat-$version-win64-runtimes-toolchain" \
-			"${win_args[@]}" -DBUILDAT_RUNTIME_DLLS=toolchain)
-		echo "archive: $b"
-		check_imports "$b"
-	fi
 	# The "Luanti only" archive ([LUANTI_BUILD]): the same build tree
 	# installed again with BUILDAT_LUANTI_ONLY (apps/vanilla alone, no
 	# compiler), and the modules the full archive's prebuild compiled
