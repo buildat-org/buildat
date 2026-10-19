@@ -139,16 +139,7 @@ function M.in_app()
 	return false
 end
 
--- A local server that died: the last lines of its log and where the
--- whole of it is, so a crash's backtrace is on the screen and not just
--- gone ([START_PROGRESS]). on_close runs when the dialog is closed.
-function M.show_dead_server(title, on_close)
-	local path, tail = api.local_server_log_tail(20)
-	ui_utils.show_message_dialog(title.."\n\n"..tail..
-			"\nThe full log is at "..path, on_close)
-	-- What a check waits for
-	log:info("dead server shown: " .. title)
-end
+M.show_dead_server = ui_utils.show_dead_server
 
 -- The connect runs on a worker and this screen polls it
 -- ([BOX_PLAYTEST_2] 12): a blocking connect froze the frame

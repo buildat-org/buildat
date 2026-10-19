@@ -40,15 +40,10 @@ function M.boot(action)
 	end
 end
 
--- A local server that died, the same as launch_menu's: the last lines of
--- its log and where the whole of it is, so a crash's backtrace is on the
--- screen and not just gone ([START_PROGRESS]).
+-- A local server that died: ui_utils' dialog, as launch_menu's
 function M.show_dead_server(title, on_close)
 	local ui_utils = require("buildat/extension/ui_utils")
-	ui_utils = ui_utils.safe or ui_utils
-	local path, tail = api.local_server_log_tail(20)
-	ui_utils.show_message_dialog(title .. "\n\n" .. tail ..
-			"\nThe full log is at " .. path, on_close)
+	return (ui_utils.safe or ui_utils).show_dead_server(title, on_close)
 end
 
 return M

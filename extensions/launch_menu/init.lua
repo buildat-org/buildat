@@ -1175,13 +1175,7 @@ function M.in_app()
 	return false
 end
 
-function M.show_dead_server(title, on_close)
-	local path, tail = api.local_server_log_tail(20)
-	ui_utils.show_message_dialog(title .. "\n\n" .. tail ..
-			"\nThe full log is at " .. path, on_close)
-	-- What a check waits for
-	log:info("dead server shown: " .. title)
-end
+M.show_dead_server = ui_utils.show_dead_server
 
 local function to_home()
 	if uistack.main.stack[1] then

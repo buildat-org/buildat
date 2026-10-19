@@ -1776,6 +1776,18 @@ function M.safe.menu_button(parent, before, opts)
 	return box
 end
 
+-- A local server that died ([START_PROGRESS]): the last lines of its log
+-- and where the whole of it is, so a crash's backtrace is on the screen
+-- and not just gone; on_close runs when the dialog is closed. Logged as
+-- "dead server shown", which checks wait for. launch_menu's and
+-- launch_world's.
+function M.safe.show_dead_server(title, on_close)
+	local path, tail = (buildat.safe or buildat).local_server_log_tail(20)
+	M.safe.show_message_dialog(title .. "\n\n" .. tail ..
+			"\nThe full log is at " .. path, on_close)
+	log:info("dead server shown: " .. title)
+end
+
 -- copy, if given, is put on the clipboard by a "Copy" button above "Ok"
 -- ([LOG_REACH]: a caught error's full text); written only, on the user's
 -- own click, as SetClipboardText is
