@@ -71,8 +71,16 @@ end
 -- name is the player name last used on that server ([BOX_PLAYTEST_2] 4),
 -- "" for none. A row with no server column is from before
 -- [CONSENT_PER_SERVER] and is dropped: it was every server's.
-local function load_store()
+-- [USER_FILES_ATOMIC] Read once and kept: a request's check reads the
+-- copy. A write reads the file again first (load_store(true)), so another
+-- client's answers since are kept
+local store_copy = nil
+local function load_store(fresh)
+	if store_copy and not fresh then
+		return store_copy
+	end
 	local entries = {}
+	store_copy = entries
 	local file = io.open(store_path, "r")
 	if not file then
 		return entries
@@ -107,12 +115,8 @@ local function save_store(entries)
 		table.insert(keys, k)
 	end
 	table.sort(keys)
-	local file, err = io.open(store_path, "w")
-	if not file then
-		log:error("Cannot write "..store_path..": "..tostring(err))
-		return
-	end
-	file:write("accepted,address,description,created,last_attempt,name,icon,server\n")
+	store_copy = entries
+	local out = {"accepted,address,description,created,last_attempt,name,icon,server\n"}
 	-- A row is a line: the reader splits on them, and a field with a line
 	-- break in it -- a name a server's script set -- was a second row
 	-- nobody accepted ([SECURITY_RUN_1])
@@ -121,7 +125,7 @@ local function save_store(entries)
 	end
 	for _, k in ipairs(keys) do
 		local e = entries[k]
-		file:write(table.concat({
+		out[#out + 1] = table.concat({
 			q(e.accepted and "true" or "false"),
 			q(e.uri),
 			q(e.description),
@@ -130,13 +134,19 @@ local function save_store(entries)
 			q(e.name or ""),
 			q(e.icon or ""),
 			q(e.server),
-		}, ",").."\n")
+		}, ",").."\n"
 	end
-	file:close()
+	local ok, err = buildat.write_file_atomic(store_path, table.concat(out))
+	if not ok then
+		log:error("Cannot write "..store_path..": "..tostring(err))
+		return
+	end
+	-- What a check counts
+	log:info("network: the consent store written")
 end
 
 local function store_answer(server, uri, accepted, description, old_entry)
-	local entries = load_store()
+	local entries = load_store(true)
 	local now = os.time()
 	entries[key(server, uri)] = {
 		accepted = accepted,
@@ -153,12 +163,31 @@ local function store_answer(server, uri, accepted, description, old_entry)
 	save_store(entries)
 end
 
+-- A request's touch: written only when the stored one is over a day old
+-- (the 7-day expiry the finest reader of it), not every icon fetch
+local TOUCH_S = 24 * 3600
 local function touch_entry(server, uri)
-	local entries = load_store()
-	local e = entries[key(server, uri)]
+	local e = load_store()[key(server, uri)]
+	if not e or os.time() - e.last_attempt <= TOUCH_S then
+		return
+	end
+	local entries = load_store(true)
+	e = entries[key(server, uri)]
 	if e then
 		e.last_attempt = os.time()
 		save_store(entries)
+	end
+end
+-- For a check: BUILDAT_TEST_CONSENT_TOUCH="<uri> <n>", n touches of the
+-- row with no server at the start, as n icon fetches would
+do
+	local t = __buildat_get_env("BUILDAT_TEST_CONSENT_TOUCH")
+	local uri, n = (t or ""):match("^(%S+) (%d+)$")
+	for _ = 1, tonumber(n) or 0 do
+		touch_entry("", uri)
+	end
+	if uri then
+		log:info("network: " .. n .. " touches of " .. uri .. " done")
 	end
 end
 
@@ -1032,7 +1061,7 @@ function M.remember_server(uri, sha)
 			(type(sha) ~= "string" or not sha:match("^%x+$") or #sha ~= 64)) then
 		return false
 	end
-	local entries = load_store()
+	local entries = load_store(true)
 	local e = entries[key("", uri)]
 	local now = os.time()
 	if not e then
@@ -1056,7 +1085,7 @@ function M.safe.set_address_name(uri, name)
 	if type(uri) ~= "string" or type(name) ~= "string" or #name > 64 then
 		return false
 	end
-	local entries = load_store()
+	local entries = load_store(true)
 	local found = false
 	for _, e in pairs(entries) do
 		if e.uri == uri then

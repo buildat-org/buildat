@@ -37,14 +37,14 @@ grep -qx "installed/someone.old_app/play" "$c/launch_seen.csv" ||
 	fail "the app not seen on the first start"
 mkdir -p "$c/shared/vanilla/games/newgame/mods"
 start r2
-[ "$(history)" = "builtin/luanti/newgame " ] || fail "the game: $(history)"
+[ "$(history)" = "app/vanilla/newgame " ] || fail "the game: $(history)"
 sleep 1; app new_app 1.0 # the history's times are seconds: a later one
 start r3
-[ "$(history)" = "installed/someone.new_app@1.0/play builtin/luanti/newgame " ] ||
+[ "$(history)" = "installed/someone.new_app@1.0/play app/vanilla/newgame " ] ||
 	fail "the app: $(history)"
 app new_app 1.1
 start r4
-[ "$(history)" = "installed/someone.new_app@1.0/play builtin/luanti/newgame " ] ||
+[ "$(history)" = "installed/someone.new_app@1.0/play app/vanilla/newgame " ] ||
 	fail "a new version noted: $(history)"
 cp "$t/r3.png" "$here/local/installed_recent.png"
 rm -rf "$t"

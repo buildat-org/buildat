@@ -66,12 +66,11 @@ end
 local function write_meta(name, m)
 	m.engine_api = m.engine_api or __buildat_aitta_dev("engine_api")
 	local text = assert(network.write_json(m, true))
-	local f, err = io.open(USER .. "/dev_apps/" .. name .. "/meta.json", "wb")
-	if not f then
+	local ok, err = buildat.write_file_atomic(USER .. "/dev_apps/" .. name ..
+			"/meta.json", text .. "\n")
+	if not ok then
 		return false, err
 	end
-	f:write(text .. "\n")
-	f:close()
 	return true
 end
 

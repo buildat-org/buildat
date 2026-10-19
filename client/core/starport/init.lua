@@ -128,15 +128,12 @@ end
 
 local function write_json_file(path, v)
 	local text = assert(network.write_json(v))
-	local f, err = io.open(path .. ".tmp", "wb")
-	if not f then
+	local ok, err = buildat.write_file_atomic(path, text)
+	if not ok then
 		log:warning("Cannot write " .. path .. ": " .. tostring(err))
 		return false
 	end
-	f:write(text)
-	f:close()
-	os.remove(path)
-	return os.rename(path .. ".tmp", path)
+	return true
 end
 
 local function managed_path()

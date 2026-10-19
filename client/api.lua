@@ -310,6 +310,42 @@ end
 -- The list itself is built by sandboxed launcher files behind
 -- `ctx.launch` already ([LAUNCH_GRID]), so this is one step further
 -- out, not a new reach.
+-- **A user file written whole or not at all** ([USER_FILES_ATOMIC]): the
+-- text to path..".tmp", closed, then renamed over the path, so a crash or
+-- a kill mid-write leaves the old file as it was. Where a rename does not
+-- replace a file (Windows), the old one is removed first: a crash between
+-- the two leaves the new text in the .tmp. true, or nil and the error.
+-- BUILDAT_TEST_ATOMIC_STOP=<file name>: that file's write stops after the
+-- .tmp, as a crash there would, and says nothing more to the caller (a
+-- check's)
+function buildat.write_file_atomic(path, text)
+	local tmp = path .. ".tmp"
+	local f, err = io.open(tmp, "wb")
+	if not f then
+		return nil, err
+	end
+	local ok, werr = f:write(text)
+	f:close()
+	if not ok then
+		os.remove(tmp)
+		return nil, werr
+	end
+	local stop = buildat.get_env("BUILDAT_TEST_ATOMIC_STOP")
+	if stop and stop ~= "" and path:sub(-#stop - 1) == "/" .. stop then
+		log:info("write_file_atomic: stopped after " .. tmp .. " (a check's)")
+		return true
+	end
+	if os.rename(tmp, path) then
+		return true
+	end
+	os.remove(path)
+	local renamed, rerr = os.rename(tmp, path)
+	if not renamed then
+		return nil, rerr
+	end
+	return true
+end
+
 local launch_runs = {}
 local save_runs = {} -- [SAVE_CONTEXT_MENU] key -> launch_grid.for_save's
 local launch_grid = dofile(__buildat_get_path("share") ..
@@ -355,15 +391,14 @@ local function launch_history_note(key)
 		if a.t ~= b.t then return a.t > b.t end
 		return a.k < b.k
 	end)
-	local f = io.open(__buildat_get_path("user") .. "/launch_history.csv", "w")
-	if not f then
-		log:warning("launch: cannot write the launch history")
-		return
-	end
+	local out = {}
 	for i = 1, math.min(#rows, LAUNCH_HISTORY_MAX) do
-		f:write(rows[i].t .. " " .. rows[i].k .. "\n")
+		out[#out + 1] = rows[i].t .. " " .. rows[i].k .. "\n"
 	end
-	f:close()
+	if not buildat.write_file_atomic(__buildat_get_path("user") ..
+			"/launch_history.csv", table.concat(out)) then
+		log:warning("launch: cannot write the launch history")
+	end
 end
 
 -- **A game or an app just installed is on the recent list**
@@ -632,12 +667,9 @@ local function storage_write_in(name, data, domain)
 				" names are kept already"
 	end
 	__buildat_create_directories(dir)
-	local f = io.open(path, "wb")
-	if not f then
-		return false, "storage_write: could not open " .. name
+	if not buildat.write_file_atomic(path, data) then
+		return false, "storage_write: could not write " .. name
 	end
-	f:write(data)
-	f:close()
 	return true
 end
 buildat.safe.storage_read = function(name)
@@ -1817,13 +1849,11 @@ local function key_store_save()
 			end
 		end
 	end
-	local f = io.open(key_store_path(), "w")
-	if not f then
+	if not buildat.write_file_atomic(key_store_path(),
+			table.concat(out, "\n") .. "\n") then
 		log:warning("keys: cannot write " .. key_store_path())
 		return false
 	end
-	f:write(table.concat(out, "\n") .. "\n")
-	f:close()
 	return true
 end
 -- What an action's key is and where it comes from
