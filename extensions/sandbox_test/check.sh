@@ -22,7 +22,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/sandbox_test"; mkdir -p "$out"
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 # "q" pressed on the launch UI, then "w" and "e" into the Starport ID
 # dialog's fields (the overlay's "Starport ID..." at the top right). The

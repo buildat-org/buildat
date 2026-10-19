@@ -29,7 +29,7 @@ rm -f "$out"/*.png
 lua "$here/extensions/launch_world/room.lua" || exit 1
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 
 # **Waits, not delays**: the room says when it is up ("the room hums"),

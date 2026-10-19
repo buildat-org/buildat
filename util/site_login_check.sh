@@ -16,7 +16,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp site_login; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here"
@@ -140,4 +140,4 @@ assert mac == hmac.new(bytes.fromhex(secret), b"buildat-token-1\n" + p.encode(),
 assert json.loads(base64.urlsafe_b64decode(p + "=" * (-len(p) % 4)))["sub"] == sub
 PY
 echo "ok: the site's page got the token from the Starport's window ($t/01_authorize.png)"
-echo "PASS"
+echo "PASS: every step above held"

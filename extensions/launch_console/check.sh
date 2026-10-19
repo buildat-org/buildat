@@ -16,7 +16,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_console"; mkdir -p "$out"
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 # **`text`, not `keypress`**: a LineEdit fills from SDL's text input
 # rather than from key events, so a scripted keypress moves the focus

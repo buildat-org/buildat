@@ -243,12 +243,13 @@ for name in $runners; do
 	done
 	verdict=$(grep -aE "^(PASS|FAIL|SKIP):" "$log" | tail -1)
 	known_flaky=$(grep -c "^# flaky:" "$path")
-	case "$rc" in
-	0) pass=$((pass + 1)); state=pass ;;
-	# 77 is the contract's "could not run"; 2 is what the runners have
-	# always used for "a server or client is already up", which is the
-	# same thing said the old way
-	77|2) skip=$((skip + 1)); state=skip ;;
+	# Both the status and the verdict ([RUN_ALL_VERDICT]): a SKIP: line is
+	# a skip whatever the status, 77 is the contract's "could not run", a
+	# pass is 0 with a PASS: line. 0 with no PASS: or 2 with no SKIP: (bash
+	# on a syntax error) fails.
+	case "$rc:${verdict%%:*}" in
+	*:SKIP|77:*) skip=$((skip + 1)); state=skip ;;
+	0:PASS) pass=$((pass + 1)); state=pass ;;
 	*) if [ "$known_flaky" -gt 0 ]; then
 			flaky=$((flaky + 1)); state=flaky
 		else

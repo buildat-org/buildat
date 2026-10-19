@@ -33,7 +33,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp package_media; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 trap check_cleanup EXIT
@@ -295,4 +295,4 @@ grep -q "$(sha256sum < "$d/aitta_page/1.jpg" | cut -d' ' -f1)" "$t/m2.html" ||
 	fail "the screenshot from aitta_page/"
 grep -aq 'scan p2: .*text "aitta_page' "$t/dev.log" && fail "aitta_page/ in the files packed"
 echo "ok: the Developer screen's page sent ($t/dev_page.png)"
-echo "PASS"
+echo "PASS: every step above held"

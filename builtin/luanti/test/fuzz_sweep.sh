@@ -69,3 +69,4 @@ for run in $RUNS; do
 	echo "| $seed | $game | $min | $verdict${what:+ ($what)} | ${step:-<0.25 s} | ${frame:-?} | |" >> "$table"
 	tail -1 "$table" >&2
 done
+echo "PASS: the campaign ran; each run's verdict is its row in $table"

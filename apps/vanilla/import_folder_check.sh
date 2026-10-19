@@ -20,8 +20,8 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
-[ -z "${BUILDAT_UNCONFINED:-}" ] || { echo "SKIP: BUILDAT_UNCONFINED is set; this is the sandboxed case"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
+[ -z "${BUILDAT_UNCONFINED:-}" ] || skip "BUILDAT_UNCONFINED is set; this is the sandboxed case"
 check_tmp import_folder; t=$CHECK_TMP
 cd "$here/Build"
 

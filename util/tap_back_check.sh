@@ -165,7 +165,7 @@ grep -aq "launch_menu: unlocked" "$t/log2" || fail "Down did not let go"
 [ "$(p 2)" != '"Join a Buildat server"' ] || fail "the panel stayed locked after Down"
 echo "ok: a click on nothing is Back above the first screen, and nothing on it; a click locks a row"
 
-[ -f web/buildat.wasm ] || { echo "PASS (web part skipped: no web/)"; exit 0; }
+[ -f web/buildat.wasm ] || { echo "PASS: (web part skipped: no web/)"; exit 0; }
 timeout 300 util/web_drive.sh firefox play util/tap_back_web.json "$t/web" \
 	> "$t/web.out" 2>&1 || { cp "$t/web.out" "$t/log"; fail "web_drive"; }
 for want in "settings: depth 2" "after Back: depth 1 http" "after tap: depth 1" \

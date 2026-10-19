@@ -156,7 +156,9 @@ start_server()
 #   exit 77  the check could not run at all -- media that is not there, a
 #            server already up, a game that is not installed
 #
-# and a last line beginning PASS:, FAIL: or SKIP: saying which.
+# and a last line beginning PASS:, FAIL: or SKIP: saying which. run_all
+# reads both ([RUN_ALL_VERDICT]): a SKIP: line is a skip whatever the
+# status, and 0 with no PASS: line, or bash's 2 on a syntax error, fails.
 #
 # **The trap this is for**: a runner that prints its verdict and then goes
 # on to list its pictures or grep its log exits with *that* command's

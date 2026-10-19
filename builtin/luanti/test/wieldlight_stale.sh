@@ -21,8 +21,8 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
-[ -d "$G" ] || { echo "SKIP: no mineclone2"; exit 0; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -d "$G" ] || skip "no mineclone2"
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp wieldlight_stale; t=$CHECK_TMP
 trap check_cleanup EXIT
 mkdir -p "$t/srv/shared/vanilla/games"

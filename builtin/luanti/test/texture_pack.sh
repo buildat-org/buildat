@@ -17,11 +17,11 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/texture_pack"
 mkdir -p "$out"
 pack="$BUILDAT_USER_PATH/shared/vanilla/texture_packs/buildat_check_pack"
-[ -e "$pack" ] && { echo "$pack is in the way" >&2; exit 2; }
+[ -e "$pack" ] && { echo "SKIP: $pack is in the way"; exit 77; }
 save=buildat_test_texture_pack
 cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 mkdir -p "$pack"
 trap 'rm -rf "$pack"' EXIT

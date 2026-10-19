@@ -16,7 +16,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp fov; t=$CHECK_TMP
 cd "$here/Build"
 client(){ timeout 240 bin/buildat -w 1100x1000 -u 1 -l 3 -o sound_mute=1 "$@"; }

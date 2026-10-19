@@ -16,7 +16,7 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp starport_close; t=$CHECK_TMP
 
 cd "$here/Build"
@@ -76,4 +76,4 @@ serve aitta
 drive BUILDAT_AITTA "$t/aitta.log" "$(join)click Button \"×\"\nwait_log 5000 accounts: exit dialog\ndelay 500\nscreenshot $t/aitta_dialog.png\nkeypress Return\nwait_log 10000 launch_menu: back to Home\nquit\n" -D "$t/cl3"
 left "$t/aitta.log" || fail "Aitta's × and Enter did not leave"
 echo "ok: Aitta's × then Enter exits"
-echo PASS
+echo "PASS: every step above held"

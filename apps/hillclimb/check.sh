@@ -278,7 +278,7 @@ PY
 # simplified: the leader's 2 s hold is the client's own few lines, not
 # driven (one car runs here); an admin's params on a public server are
 # the drives' H (peer 0), as above
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "PASS (no display: the clients skipped)"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "PASS: (no display: the clients skipped)"; exit 0; }
 mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 {
 	local name=$1 vars=$2; shift 2

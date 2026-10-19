@@ -93,3 +93,4 @@ for k in sorted(set(o) | set(b), key=lambda k: -max(o.get(k, 0), b.get(k, 0))):
 	a, c = o.get(k, 0), b.get(k, 0) * scale
 	print("%-40s %10d %10d %7s" % (k, a, c, "%.2f" % (c / a) if a else "new"))
 PY
+[ $? = 0 ] && echo "PASS: measured; the table above is the result"

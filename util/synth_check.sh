@@ -23,7 +23,7 @@ echo "native: $(line "$t/native.log")"
 grep -aq "synth self-check: ok" "$t/native.log" || fail "native ($t/native.log)"
 if [ ! -f "$here/web/buildat.wasm" ] ||
 		! command -v "${CHROME:-google-chrome}" > /dev/null; then
-	echo "PASS (native; the web SKIPPED: no web/ or Chrome)"; exit 0
+	echo "PASS: (native; the web SKIPPED: no web/ or Chrome)"; exit 0
 fi
 cat > "$t/steps.json" <<'J'
 [

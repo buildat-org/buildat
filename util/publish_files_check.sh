@@ -14,14 +14,14 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 t=$(mktemp -d)
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT
 fail(){ echo "FAIL: $*"; KEEP_TMP=1; exit 1; }
 a=$t/u/dev_apps/genvaders
 mkdir -p "$t/u/dev_apps"
 cp -r "$here/user/dev_apps/genvaders" "$a" 2>/dev/null ||
-	{ echo "SKIP: no user/dev_apps/genvaders"; exit 0; }
+	skip "no user/dev_apps/genvaders"
 rm -rf "$a/.git"
 mkdir -p "$a/many"
 for i in $(seq -w 1 50); do echo x > "$a/many/f$i.txt"; done

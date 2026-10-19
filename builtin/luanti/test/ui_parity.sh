@@ -25,7 +25,7 @@ out="$here/local/ui_parity"; mkdir -p "$out"
 luanti=~/projects/luanti; bin=$luanti/bin/luanti-refshots
 W=1024; H=768
 if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
-	echo "a client or a Luanti server is already running" >&2; exit 2
+	echo "SKIP: a client or a Luanti server is already running"; exit 77
 fi
 rm -f "$out"/*.png
 

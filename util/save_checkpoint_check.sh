@@ -12,7 +12,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp save_checkpoint; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
@@ -75,4 +75,4 @@ wait_for_log "$t/b.log" "checkpoint_check: " 60 || fail "nothing read ($t/b.log)
 grep -aq "checkpoint_check: floor:leaves, kept yes, glass true" "$t/b.log" ||
 	fail "lost: $(grep -a "checkpoint_check: " "$t/b.log" | sed 's/.*check: //')"
 echo "ok: the node, its field and the item are there after the restart"
-echo "PASS"
+echo "PASS: every step above held"

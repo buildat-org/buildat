@@ -29,7 +29,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp save_limit; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
@@ -299,4 +299,4 @@ esac
 h1=$(echo "$line" | sed 's/ .*//'); h0=$(echo "$line" | sed 's/.*(first \([0-9]*\)).*/\1/')
 [ "$h1" = "$h0" ] || fail "made again differently: $line"
 echo "ok: the player's node kept; the walked land and the water's made again as generated"
-echo "PASS"
+echo "PASS: every step above held"

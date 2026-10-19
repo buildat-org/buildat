@@ -18,7 +18,7 @@ me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/new_world"; mkdir -p "$out"
 saves="$BUILDAT_USER_PATH/apps/vanilla/saves"
 if check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null; then
-	echo "a client or a server is already running" >&2; exit 2
+	echo "SKIP: a client or a server is already running"; exit 77
 fi
 # The name the screen is refused: a directory under the saves is enough,
 # because storage refuses a name whose path is there

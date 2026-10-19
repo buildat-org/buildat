@@ -18,7 +18,7 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 cd "$(dirname "$0")/.."
 for c in weston xclip; do
-	command -v $c > /dev/null || { echo "SKIP: no $c"; exit 0; }
+	command -v $c > /dev/null || skip "no $c"
 done
 check_tmp os_clipboard; t=$CHECK_TMP
 trap check_cleanup EXIT

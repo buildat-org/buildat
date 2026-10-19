@@ -216,5 +216,5 @@ PY
 read -r sa5 _ _ < <(tok alice "$ida" alice)
 [ "$sa5" = "$want" ] || fail "a fleet with no stored scope: sub $sa5, not fleet:<id>'s $want"
 echo "ok: the founded fleet's scope is A's; a fleet from before has fleet:<id>"
-echo PASS
+echo "PASS: every step above held"
 # vim: set noet ts=4 sw=4:

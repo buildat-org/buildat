@@ -13,7 +13,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp keep_on_top; t=$CHECK_TMP
 trap check_cleanup EXIT
 start_server "$t/srv.log" "STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \

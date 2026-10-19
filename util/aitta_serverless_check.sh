@@ -24,7 +24,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp aitta_serverless; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 trap check_cleanup EXIT
@@ -155,4 +155,4 @@ r = page.index("<details><summary>Report</summary><form")
 assert page.index("</form></details>", r) > r
 EOF
 echo "ok: Host at, on the apps only, only when set"
-echo "PASS"
+echo "PASS: every step above held"

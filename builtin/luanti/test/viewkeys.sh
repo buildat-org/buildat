@@ -30,7 +30,7 @@ user=${VIEWKEYS_USER:-$BUILDAT_USER_PATH}
 cli_user=()
 [ -n "${VIEWKEYS_USER:-}" ] && cli_user=(-D "$VIEWKEYS_USER")
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 rm -rf "$user/apps/vanilla/saves/$save"
 BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \

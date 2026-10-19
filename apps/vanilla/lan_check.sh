@@ -104,7 +104,7 @@ if [ "$before" = "127.0.0.1:$port" ] && echo "$after" | grep -q "127.0.0.1:$port
 		[ "$owners" = 1 ] && [ "$wrong" = 1 ] && [ "$refused" = 2 ] &&
 		[ "$announced" = 1 ] &&
 		[ "$stopped" = yes ]; then
-	echo PASS
+	echo "PASS: every step above held"
 else
 	echo "logs in $out"
 	echo FAIL

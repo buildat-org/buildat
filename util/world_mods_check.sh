@@ -18,9 +18,9 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 curl -s -m 10 -o /dev/null https://content.luanti.org/api/packages/?limit=1 ||
-	{ echo "SKIP: no network"; exit 0; }
+	skip "no network"
 check_tmp world_mods; t=$CHECK_TMP
 trap check_cleanup EXIT
 d=$t/u

@@ -118,7 +118,7 @@ click(d, "Game keys: Defaults")
 els = scan("f")
 row = els and find(els, "Walk forward")
 if not row or not row[5].startswith("W"): fail("Defaults did not put W back: " + str(row and row[5]))
-print("PASS")
+print("PASS: every step above held")
 write("quit")
 PY
 status=$?

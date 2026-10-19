@@ -18,7 +18,7 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp hearth_open_here; t=$CHECK_TMP
 
 cd "$here/Build"

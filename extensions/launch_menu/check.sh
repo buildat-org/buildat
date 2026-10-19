@@ -19,7 +19,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/launch_uis"; mkdir -p "$out"
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 names=""
 for f in "$here"/extensions/*/launch_ui.txt; do

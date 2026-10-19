@@ -20,7 +20,7 @@ cd "$here/Build"
 # A server of an earlier run still shutting down would be read as this
 # run's; wait for it
 for i in $(seq 1 300); do check_pgrep buildat_server >/dev/null || break; sleep 0.2; done
-check_pgrep buildat_server >/dev/null && { echo "FAIL: a buildat_server is running" >&2; exit 2; }
+check_pgrep buildat_server >/dev/null && { echo "SKIP: a buildat_server is running"; exit 77; }
 fifo="$tmp/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 cli=""
 trap '[ -n "${KEEP_TMP:-}" ] && echo "kept $tmp" >&2 || rm -rf "$tmp"; exec 3>&- 2>/dev/null; kill "$cli" 2>/dev/null; check_pkill -INT buildat_server 2>/dev/null' EXIT
@@ -132,7 +132,7 @@ if server_pids() != kept:
 errors = [l for l in open(log, "rb").read().decode("utf-8", "replace").splitlines()
           if " E " in l[:40] or "Exception" in l]
 if errors: fail("error lines: " + errors[0][:200])
-print("PASS")
+print("PASS: every step above held")
 write("quit")
 PY
 status=$?

@@ -28,13 +28,13 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here/Build"
 [ -x bin/buildat_server ] || { echo "FAIL: no bin/buildat_server"; exit 1; }
 [ -x bin/buildat ] || { echo "FAIL: no bin/buildat"; exit 1; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 
 SP=https://starport.buildat.org
 # Reach the Starport first; a network-less run would read as the very failure
 # this checks for, so skip instead of failing.
 curl -sS -o /dev/null --max-time 8 "$SP/api/v1/list" ||
-	{ echo "SKIP: $SP not reachable"; exit 0; }
+	skip "$SP not reachable"
 
 t=$(mktemp -d)
 srv=

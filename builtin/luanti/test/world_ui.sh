@@ -160,7 +160,7 @@ wait(r"launch_menu: \d+ rows", 10)
 els = scan("esc")
 if not (els and find(els, "Browse") and not find(els, "Creative mode")):
     fail("Escape did not leave the world screen for the menu; saw " + ", ".join(e[5] for e in els or [])[:200])
-print("PASS (creative_mode was %s before; false now; Escape back to the menu)" % before)
+print("PASS: (creative_mode was %s before; false now; Escape back to the menu)" % before)
 write("quit")
 PY
 status=$?

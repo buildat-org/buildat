@@ -23,10 +23,10 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
-[ -d "$G" ] || { echo "SKIP: no mineclone2"; exit 0; }
-command -v "${CHROME:-google-chrome}" > /dev/null || { echo "SKIP: no Chrome"; exit 0; }
-[ -f "$here/web/buildat.wasm" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 0; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -d "$G" ] || skip "no mineclone2"
+command -v "${CHROME:-google-chrome}" > /dev/null || skip "no Chrome"
+[ -f "$here/web/buildat.wasm" ] || skip "no web/ (util/build_web.sh)"
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp hud_density; t=$CHECK_TMP
 trap check_cleanup EXIT
 d=$t/srv

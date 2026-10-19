@@ -16,7 +16,7 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here/Build"
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 t=$(mktemp -d)
 srv= cli=
 trap '[ -n "$cli" ] && kill $cli 2>/dev/null; [ -n "$srv" ] && kill $srv 2>/dev/null; [ -n "${KEEP_TMP:-}" ] && echo "kept $t" || rm -rf "${t:?}"' EXIT

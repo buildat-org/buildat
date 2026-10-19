@@ -121,4 +121,4 @@ grep -q "0.0.3-.*: failed (not a tar of modules)" "$t/serve.log" || fail "the re
 [ ! -e "$t/servecache/apps/x.so" ] || fail "../x.so written"
 curl -s -m 5 "http://127.0.0.1:$P/health" | grep -q . || fail "not serving"
 echo "ok: a tar reaching outside refused, 0.0.1 still serving"
-echo "PASS"
+echo "PASS: every step above held"

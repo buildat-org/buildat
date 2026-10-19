@@ -14,7 +14,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp debug_info_priv; t=$CHECK_TMP
 lsrv=
 trap '[ -n "$lsrv" ] && kill $lsrv 2>/dev/null; check_cleanup' EXIT
@@ -98,7 +98,7 @@ echo "ok: vanilla"
 # luanti_client
 G="$BUILDAT_USER_PATH/shared/vanilla/games/devtest"
 if ! command -v luanti > /dev/null || [ ! -d "$G" ]; then
-	echo "PASS (vanilla; luanti_client SKIPPED: no luanti or devtest)"
+	echo "PASS: (vanilla; luanti_client SKIPPED: no luanti or devtest)"
 	exit 0
 fi
 mkdir -p "$t/games" "$t/w/worldmods/dp"

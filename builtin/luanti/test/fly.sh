@@ -104,7 +104,7 @@ back=$(python3 -c "print(1 if float('$last' or 99) < float('$flying' or 0) - 2 e
 # (official's rule); the server's hold-down is the backstop for a client
 # that does not, so its count is printed and not required
 if [ "$up" = 1 ] && [ "$note" -ge 1 ] && [ "$back" = 1 ]; then
-	echo PASS
+	echo "PASS: every step above held"
 else
 	echo FAIL
 	exit 1

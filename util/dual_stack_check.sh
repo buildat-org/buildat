@@ -9,7 +9,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 cd "$(dirname "$0")/.."
-ip -6 addr show lo 2>/dev/null | grep -q "::1" || { echo "SKIP: no ::1"; exit 0; }
+ip -6 addr show lo 2>/dev/null | grep -q "::1" || skip "no ::1"
 t=$(mktemp -d)
 trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null; rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; tail -20 "$t/log"; exit 1; }

@@ -235,5 +235,7 @@ for n, what in enumerate(["long", "mouth", "shaft", "up"], 1):
     wall = ImageStat.Stat(im.crop((w // 2 - 300, h // 2 - 40, w // 2 - 200, h // 2 + 40))).mean[0]
     print("%-5s far end %5.1f  wall %5.1f" % (what, end, wall))
 PY
+rc=$?
 grep -a "cave gate\|tunnel_sky: step" "$out/cli.log" 2>/dev/null | grep -o "tunnel_sky: step [0-9]$\|cave gate.*" | tail -50
+[ $rc = 0 ] && echo "PASS: measured; the lumas above are the result"
 # vim: set noet ts=4 sw=4:

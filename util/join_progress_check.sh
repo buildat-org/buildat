@@ -18,8 +18,8 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/mineclone2"
-[ -d "$G" ] || { echo "SKIP: no mineclone2"; exit 0; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -d "$G" ] || skip "no mineclone2"
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp join_progress; t=$CHECK_TMP
 trap 'kill -CONT $SERVER_PID 2>/dev/null; check_cleanup' EXIT
 mkdir -p "$t/srv/shared/vanilla/games"

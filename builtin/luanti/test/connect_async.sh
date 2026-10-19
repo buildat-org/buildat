@@ -15,7 +15,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/connect_async"; mkdir -p "$out"
 if check_pgrep buildat >/dev/null; then
-	echo "a client is already running" >&2; exit 2
+	echo "SKIP: a client is already running"; exit 77
 fi
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 # **The menu by name, not by preference** (2026-09-24): this drives

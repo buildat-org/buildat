@@ -36,7 +36,7 @@ tmp=$(mktemp -d "/tmp/buildat_menu_keys.XXXXXX")
 trap 'if [ -n "${KEEP_TMP:-}" ]; then echo "kept $tmp" >&2; else rm -rf "$tmp"; fi' EXIT
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "a client is already running" >&2; exit 2
+	echo "SKIP: a client is already running"; exit 77
 fi
 fifo="$tmp/cmds.fifo"; mkfifo "$fifo"
 # **The menu by name, not by preference** (2026-09-24): this drives
@@ -160,7 +160,7 @@ elif still > CARET:
 	ok = False
 else:
 	print("ok: the list stays while a field has the focus (%d pixels)" % still)
-print("PASS" if ok else "FAIL")
+print("PASS: every step above held" if ok else "FAIL: see above")
 sys.exit(0 if ok else 1)
 PY
 status=$?

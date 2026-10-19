@@ -23,9 +23,9 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-command -v "${CHROME:-google-chrome}" > /dev/null || { echo "SKIP: no Chrome"; exit 0; }
-[ -f "$here/web/buildat.wasm" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 0; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+command -v "${CHROME:-google-chrome}" > /dev/null || skip "no Chrome"
+[ -f "$here/web/buildat.wasm" ] || skip "no web/ (util/build_web.sh)"
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp sk_web_lock; t=$CHECK_TMP
 trap check_cleanup EXIT
 BUILDAT_SKELDAT_WORLD=wl BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_TIME=0.5 \

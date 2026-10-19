@@ -106,7 +106,7 @@ mouse_key=$(grep -ac "mouse visible (the mouse key)" "$tmp/cli.log")
 echo "focus: the mouse key under alt+tab freed the mouse $mouse_key times"
 if [ "$regained" -ge 11 ] && [ "$mouse_key" = 0 ] &&
 		[ "$last" = "mouse hidden (focus regained)" ]; then
-	echo PASS
+	echo "PASS: every step above held"
 else
 	echo FAIL
 	exit 1

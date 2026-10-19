@@ -146,4 +146,4 @@ printf 'wait_log 30000 Entered the plan\ndelay 1500\nkeypress Escape\nwait_log 5
 MAY_FAIL=1 CMDS="$tmp/cd4" client d d4.log "" BUILDAT_FP_PLAN=pd
 grep -aq 'Button "Plan settings..." at .*: covered by Text "" "dropdown_[0-9]*: Viewing"' "$tmp/d4.log" ||
 	fail "a covered click not refused ($tmp/d4.log)"
-echo "PASS"
+echo "PASS: every step above held"

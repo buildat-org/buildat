@@ -13,7 +13,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp server_stats; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
@@ -54,4 +54,4 @@ client helper helppass12 stats "wait_log_any 20000 admin request: stats" "wait_l
 grep -a "admin request: stats" "$t/helper.log" | grep -qv wait_log && [ -z "$(said helper)" ] ||
 	fail "the helper's stats ($t/helper.log)"
 echo "ok: a moderator's answered, a helper's refused"
-echo "PASS"
+echo "PASS: every step above held"

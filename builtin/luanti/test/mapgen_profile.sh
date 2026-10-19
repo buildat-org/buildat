@@ -16,7 +16,7 @@ save=buildat_test_mapgen_profile
 MINUTES="${MINUTES:-2}"
 cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 # A world nobody has generated before, which is the case the item is about
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"

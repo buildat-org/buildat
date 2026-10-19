@@ -132,7 +132,7 @@ for i in range(50):
 if '"distant_detail": "half"' not in kept:
     fail("the file does not carry half (an old install's half did not "
          "start at Full, or the pick was lost): " + kept[:200])
-print("PASS")
+print("PASS: every step above held")
 write("quit")
 PY
 status=$?

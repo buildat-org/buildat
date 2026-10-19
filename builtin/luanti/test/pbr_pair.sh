@@ -205,6 +205,6 @@ for n in range(1, 8):
     side.save("%s/side_%d.png" % (out, n))
 for b in bad:
     print("FAIL: " + b)
-print("FAIL" if bad else "PASS")
+print("FAIL: see above" if bad else "PASS: every step above held")
 sys.exit(1 if bad else 0)
 PY

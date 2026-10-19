@@ -106,7 +106,7 @@ if stage == "launch":
     if not (els and find(els, "Servers used")): fail("no used list; saw " + ", ".join(e[5] for e in els or [])[:300])
     write("screenshot " + out + "/launch_connect.png")
     wait_for(["Wrote screenshot " + out + "/launch_connect.png"], 10)
-    print("PASS (launch)")
+    print("PASS: (launch)")
 else:
     b = find(els, "Official list")
     if not b: fail("no Official list button; saw " + ", ".join(e[5] for e in els)[:300])
@@ -133,7 +133,7 @@ else:
     els = scan("e")
     addr = [e for e in els if e[0] == "LineEdit" and ":" in e[5]]
     if not addr: fail("the pick did not fill the address")
-    print("PASS (luanti_client): %s, %d rows, picked %s" % (st[5], len(rows), addr[0][5]))
+    print("PASS: (luanti_client): %s, %d rows, picked %s" % (st[5], len(rows), addr[0][5]))
 write("quit")
 PY
 	local status=$?
@@ -150,7 +150,7 @@ STAGE=luanti_client run -m luanti_client || {
 	exit 1
 }
 # **The canonical last line** ([CI_RUNS]'s contract): the stages print
-# "PASS (launch)" and "PASS (luanti_client)", which run_all.sh's
+# "PASS: (launch)" and "PASS: (luanti_client)", which run_all.sh's
 # "^(PASS|FAIL|SKIP):" does not read, so the run had no verdict anybody
 # could see -- the exit status alone (2026-09-25)
 echo "PASS: both clients list servers and a pick fills the address"

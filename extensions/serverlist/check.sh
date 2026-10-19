@@ -29,7 +29,7 @@ port=30778
 trap 'kill ${mirror:-} ${r1:-} ${r2:-} 2>/dev/null' EXIT
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 cat > "$out/list/list" <<'JSON'
 {"list": [

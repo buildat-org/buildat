@@ -19,9 +19,9 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 G="$BUILDAT_USER_PATH/shared/vanilla/games/devtest"
-[ -d "$G" ] || { echo "SKIP: no devtest"; exit 0; }
-command -v luanti > /dev/null || { echo "SKIP: no luanti"; exit 0; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -d "$G" ] || skip "no devtest"
+command -v luanti > /dev/null || skip "no luanti"
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 tmp=$(mktemp -d "/tmp/buildat_discuss.XXXXXX")
 SP=29681
 HE=29682

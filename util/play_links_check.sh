@@ -206,4 +206,4 @@ grep -q "BUILDAT_JOIN is not host:port" "$tmp/c3.log" ||
 	fail "a bad one not refused ($tmp/c3.log)"
 grep -q "A link asks" "$tmp/c3.log" && fail "a bad one went into the script"
 echo "ok: another shape refused"
-echo "PASS"
+echo "PASS: every step above held"

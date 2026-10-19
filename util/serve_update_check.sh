@@ -304,4 +304,4 @@ tail -n +"$from" "$t/serve.log" | grep -q "stopping floorplanner" ||
 	fail "t4 did not go once the client left ($t/serve.log)"
 tail -n +"$from" "$t/serve.log" | grep -q "warning" && fail "warned with nobody on"
 echo "ok: t4 waited while a client was on, and went once it left"
-echo "PASS"
+echo "PASS: every step above held"

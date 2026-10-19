@@ -17,7 +17,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp serve_delisted; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 groups=()
@@ -126,4 +126,4 @@ curl -s -m 5 "http://127.0.0.1:$SP/health" | grep -q . ||
 	fail "not serving with the list unreadable"
 pgrep -f "installed/tester/pt/1.0.1" > /dev/null || fail "1.0.1 stopped"
 echo "ok: the list unreadable said, 1.0.1 runs on"
-echo "PASS"
+echo "PASS: every step above held"

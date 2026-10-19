@@ -14,7 +14,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp server_caps; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
@@ -101,4 +101,4 @@ grep -aq "player1 joined" "$t/a.log" || fail "the first player did not join ($t/
 grep -aq "Login of player2 refused: the server is full" "$t/a.log" ||
 	fail "the second player let in ($t/a.log)"
 echo "ok: the second player refused"
-echo "PASS"
+echo "PASS: every step above held"

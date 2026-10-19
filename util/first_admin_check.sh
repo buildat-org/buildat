@@ -17,7 +17,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp first_admin; t=$CHECK_TMP
 trap check_cleanup EXIT
 cd "$here/Build"
@@ -98,4 +98,4 @@ serve "$t/c" "$t/c.log"
 grep -aq 'first_admin: expected "name' "$t/c.log" &&
 	grep -aq "setup code [A-Z0-9]" "$t/c.log" || fail "a malformed one ($t/c.log)"
 echo "ok: a malformed one said, the log's code instead"
-echo "PASS"
+echo "PASS: every step above held"

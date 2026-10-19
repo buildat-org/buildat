@@ -12,7 +12,7 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here"
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; cp "$t/log" /tmp/local_server_reuse.log; exit 1; }

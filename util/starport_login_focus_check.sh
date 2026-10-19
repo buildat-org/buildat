@@ -109,4 +109,4 @@ grep -v " __app   : " "$tmp/out.log" | grep -q "Asking the user about" &&
 drive_ok "$tmp/out.log"
 cp "$tmp/out.png" "$here/local/starport_login_focus_out.png" 2>/dev/null
 echo "ok: signed out, Return signs nothing in (typed name: local/starport_login_focus_out.png)"
-echo "PASS"
+echo "PASS: every step above held"

@@ -132,7 +132,7 @@ awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_
 
 cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 # KEEP_SAVE=1 walks the save that is there: one an older Buildat wrote, or
 # the last run's reopened

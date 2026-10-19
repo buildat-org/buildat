@@ -15,7 +15,7 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp hearth_close; t=$CHECK_TMP
 
 cd "$here/Build"
@@ -80,4 +80,4 @@ grep -av "command: " "$t/straight.log" | grep -aq "hearth: exit dialog" &&
 grep -av "command: \|wait_log" "$t/straight.log" | grep -aq "server window: " ||
 	fail "Escape did not open My account"
 echo "ok: with no launcher, no × and Escape is My account"
-echo PASS
+echo "PASS: every step above held"

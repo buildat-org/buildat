@@ -50,7 +50,7 @@ keys=$(grep -a "scan scan: keys" "$tmp/cli.log" | tail -1 | grep -o "forward=[^ 
 echo "keys: $keys; before $before, after $after"
 echo "logs in $tmp"
 if [ "$keys" = "forward=U*" ] && [ -n "$before" ] && [ "$before" != "$after" ]; then
-	echo PASS
+	echo "PASS: every step above held"
 else
 	echo FAIL
 	exit 1

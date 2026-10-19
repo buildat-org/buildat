@@ -26,7 +26,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 cd "$here/Build"
 [ -x bin/buildat_server ] || { echo "FAIL: no bin/buildat_server"; exit 1; }
 [ -x bin/buildat ] || { echo "FAIL: no bin/buildat"; exit 1; }
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 
 t=$(mktemp -d)
 srv=

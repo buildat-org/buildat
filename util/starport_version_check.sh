@@ -182,4 +182,4 @@ assert re.match(r"^\d+(\.\d+)+$", v["version"]) and v["url"].startswith("https:/
 else
 	echo "skipped: the GitHub adapter (no answer: $(echo "$out" | tail -1))"
 fi
-echo "PASS"
+echo "PASS: every step above held"

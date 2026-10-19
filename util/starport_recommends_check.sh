@@ -153,4 +153,4 @@ s = json.load(open(sys.argv[1]))
 assert s["ignored_aittas"] == [sys.argv[2]], s["ignored_aittas"]
 PY
 echo "ok: closing the dialog ignores"
-echo "PASS"
+echo "PASS: every step above held"

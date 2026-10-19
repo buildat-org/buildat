@@ -21,7 +21,7 @@ save=buildat_test_dawn
 hours="0200 0400 0430 0500 0545 1900 1930 2000 2030"
 cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 rm -rf "$BUILDAT_USER_PATH/apps/vanilla/saves/$save"
 # unlit: the mode with no auto-exposure in its path, so a shot is the light

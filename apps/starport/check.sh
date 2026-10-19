@@ -491,4 +491,4 @@ pids+=($SERVER_PID)
 [ "$(addrs)" = 0 ] ||
 	fail "$(addrs) login or session addresses kept past retention_days (sp2.log)"
 echo "ok: the daily pass clears login and session addresses past the retention"
-echo PASS
+echo "PASS: every step above held"

@@ -56,7 +56,7 @@ lua "$here/extensions/launch_world/room.lua" || exit 1
 trap check_cleanup EXIT
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 
 # **An empty lobby shows one sensible pick, said as one** ([LAUNCH_WORLD]

@@ -44,4 +44,4 @@ cmp -s "$t/a/apps/aitta/health_token.txt" "$t/b/apps/aitta/health_token.txt" ||
 grep -aqi "error\|corrupt\|malformed" "$t/b.log" && fail "the copy's log ($t/b.log)"
 echo "ok: a server on the copy has the admin and the token"
 
-echo "PASS"
+echo "PASS: every step above held"

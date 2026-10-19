@@ -82,7 +82,7 @@ esac
 
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null ||
 		pgrep -x luanti-refshots >/dev/null; then
-	echo "a server or client is already running" >&2; exit 2
+	echo "SKIP: a server or client is already running"; exit 77
 fi
 srv=""; cli=""
 trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null' EXIT

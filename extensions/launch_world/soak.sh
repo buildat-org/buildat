@@ -34,7 +34,7 @@ MINUTES="${MINUTES:-3}"
 GROW="${GROW:-25}"
 cd "$here/Build"
 if check_pgrep buildat >/dev/null; then
-	echo "SKIP: a buildat client is already running" >&2; exit 2
+	echo "SKIP: SKIP: a buildat client is already running"; exit 77
 fi
 # The room's own save is left alone: this places and digs a great many
 # voxels and the player's room is not the place for them

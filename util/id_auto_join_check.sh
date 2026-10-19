@@ -17,7 +17,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
+[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 check_tmp id_auto_join; t=$CHECK_TMP
 cd "$here"
 
@@ -124,4 +124,4 @@ join "$t/u" "$t/j6.log" "wait_log_any 30000 accounts: the login page shown\ndela
 by_itself "$t/j6.log" && fail "after a password login the join signed in by itself"
 grep -aq "Joined as" "$t/j6.log" && fail "the join after a password login joined: $(grep -a 'Joined' "$t/j6.log")"
 echo "ok: a password login dropped the mark; the next join asked"
-echo PASS
+echo "PASS: every step above held"

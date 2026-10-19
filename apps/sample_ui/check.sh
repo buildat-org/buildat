@@ -14,7 +14,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 out="$here/local/sample_ui"; mkdir -p "$out"
 cd "$here/Build"
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
-	echo "a buildat server or client is already running" >&2; exit 2
+	echo "SKIP: a buildat server or client is already running"; exit 77
 fi
 bin/buildat_server -m ../apps/sample_ui -P 29793 -l 3 > "$out/srv.log" 2>&1 &
 for i in $(seq 1 60); do
