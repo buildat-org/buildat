@@ -53,6 +53,8 @@
 # The eighteenth, the world's edge: a hillside, a wall nothing digs.
 # The nineteenth, a skeleton's body following its light form.
 #   apps/skeldat/check.sh
+#   SECTIONS="12 33" apps/skeldat/check.sh   # those alone
+#   SECTIONS=list apps/skeldat/check.sh      # the sections
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -60,7 +62,44 @@ check_tmp skeldat; t=$CHECK_TMP
 b="$here/Build/bin/buildat"
 m="$here/apps/skeldat/main"
 
-# The rules
+# [SKELDAT_CHECK_SECTIONS] Each section is its lines from its "# N." to the
+# next header, run by eval. SECTIONS="12 33" runs those after the shared
+# setup, and what they stand on (2 runs in 1's save, 39 in 32's), each
+# under an "== section N" line; unset, all in the file's order and then
+# the summary. 0 is the rules' own tests.
+sec() # <header>: its lines, to the next header
+{
+	awk -v h="# $1" 'index($0, h) == 1 { on = 1; print; next }
+		/^# ([0-9]+\. |The shared setup|The summary)/ { on = 0 } on' "$0"
+}
+all=$(awk '/^# [0-9]+\. / { print $2 + 0 }' "$0")
+if [ "${SECTIONS:-}" = list ]; then
+	awk '/^# [0-9]+\. / { print substr($0, 3) }' "$0"
+	exit 0
+fi
+want=" $(echo ${SECTIONS:-$all}) "
+for n in $want; do
+	echo "$all" | grep -qx "$n" || fail "no section $n (SECTIONS=list names them)"
+done
+case $want in *" 2 "*) want="${want}1 ";; esac
+case $want in *" 39 "*) want="${want}32 ";; esac
+for n in $all; do
+	case $want in *" $n "*) ;; *) continue ;; esac
+	if [ $n != 0 ] && [ -z "${shared:-}" ]; then
+		shared=1
+		eval "$(sec "The shared setup")"
+	fi
+	echo "== section $n"
+	eval "$(sec "$n. ")"
+done
+if [ -n "${SECTIONS:-}" ]; then
+	echo "PASS: skeldat's sections$want"
+	exit 0
+fi
+eval "$(sec "The summary")"
+exit
+
+# 0. The rules' own tests
 cc="g++ -std=c++11 -Wno-pragma-once-outside-header -I$here/src"
 $cc -DSKELDAT_GAME_TEST -x c++ "$m/game.h" -o "$t/game" && "$t/game" ||
 	fail "game.h's self test"
@@ -113,6 +152,7 @@ luajit -e "assert(dofile('$m/client_lua/hand.lua').self_test())" ||
 luajit -e "dofile('$m/client_lua/player.lua')" ||
 	fail "player.lua's self test (the walk's and the board's)"
 
+# The shared setup: what the sections after 0 use
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display for the runs"
 # The spawn at (0, 72) in a 256 world: clean ground, half way to the
 # edge's bones (seed 2's, biased away from the origin: bones.h's
@@ -150,6 +190,15 @@ export BUILDAT_SKELDAT_INTRO=0 BUILDAT_SKELDAT_STARTER=0
 # The scripted clients in as "client<peer>" with no login ([SKELDAT_LOGIN];
 # the login of every public join is builtin/world_menu/check.sh's)
 export BUILDAT_SKELDAT_GUEST_JOIN=1
+
+# The water from the feet to over the head, 4 markers stacked, walled in by
+# stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first, 5 markers
+# stacked a column: 13's, 14's, 15's and 42's
+water=""
+for d in "1 0" "-1 0" "0 1" "0 -1"; do
+	for y in 0 1 2 3 4; do water="$water marker $d skeldat:stone 0;"; done
+done
+water="$water$(for y in 0 1 2 3; do echo " marker 0 0 skeldat:water_source 0;"; done)"
 
 # 1. Two players. client1's pause menu, after its chat page, closed by a
 # click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin first
@@ -751,14 +800,7 @@ toggle() # the admin page's toggle, from the game
 { echo "$placed"; toggle; echo "delay 8000"; echo quit; } > "$t/inv1.cmds"
 { echo "$placed"; echo "delay 3000"; toggle; echo "delay 4000"; echo quit; } > "$t/inv2.cmds"
 # A guest's name goes by its connection: the rejoin, client1 again, on
-# the server started again. The water from the feet to over the head,
-# 4 markers stacked, walled in by stone (water flows,
-# [SKELDAT_OWN_MAPGEN]), the walls first, 5 markers stacked a column
-water=""
-for d in "1 0" "-1 0" "0 1" "0 -1"; do
-	for y in 0 1 2 3 4; do water="$water marker $d skeldat:stone 0;"; done
-done
-water="$water$(for y in 0 1 2 3; do echo " marker 0 0 skeldat:water_source 0;"; done)"
+# the server started again, in the shared setup's water
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
@@ -3042,7 +3084,7 @@ lake55() { # log; the caller's env with it
 		BUILDAT_SKELDAT_EXPAND=0.3 \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($log)"
+		-D "$t/srv59" -C "$t/srv.cache" -l 3 || fail "the server ($log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
 BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_TEST="$lb" lake55 "$t/srv55.log"
@@ -3076,12 +3118,13 @@ BUILDAT_SKELDAT_WORLD=lakeend BUILDAT_SKELDAT_TERRAIN=lake BUILDAT_SKELDAT_SEED=
 	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 BUILDAT_SKELDAT_EXPAND=0.3 \
 	start_server "$t/srv55_end.log" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv55_end.log)"
+	-D "$t/srv59" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv55_end.log)"
 CHECK_PIDS+=($SERVER_PID)
 wait_for_log "$t/srv55_end.log" "every column's top has bones: the world ends after" 90 ||
 	fail "the lake world with a bare bed did not end ($t/srv55_end.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "skeldat: water: [1-9][0-9]* voxels" "$t/srv55_end.log" || fail "the lake world had no water ($t/srv55_end.log)"
+# The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
