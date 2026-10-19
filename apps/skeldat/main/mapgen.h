@@ -32,6 +32,10 @@ static const float CAVE_WIDTH = 0.05f, CAVE_SPREAD_XZ = 40, CAVE_SPREAD_Y = 24;
 static const float TREE_CHANCE = 0.006f;
 // The plains' water table: the height this share of the columns is under
 static const float WATER_SHARE = 0.1f;
+// The flat form (mostly for checks): its ground this far over the base
+// water line, no tree within FLAT_TREE_CLEAR of the origin, no cave
+// within FLAT_CAVE_ROOF under the ground
+static const int FLAT_OVER_WATER = 4, FLAT_TREE_CLEAR = 24, FLAT_CAVE_ROOF = 4;
 // The rivers: one, two from a world 512 wide; a channel's water this deep
 // (its top over its bed), its banks RIVER_BANK over its bed (the water
 // and the liquid step's pressure, which pushes a falling river's water up
@@ -50,11 +54,11 @@ static const int SEA_DEPTH = 8, ISLAND_FROM = 26, SPRING_ONE_IN = 4,
 static const int SEA_BONES = 48;
 static const float LAKE_GAP = 0.125f, SEA_ZONE = 0.35f;
 
-enum Form { RIVERS, PLAINS, LAKE, SEA };
-static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea"};
+enum Form { RIVERS, PLAINS, LAKE, SEA, FLAT };
+static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea", "flat"};
 inline int form_of(const std::string &name)
 {
-	for(int i = 0; i < 4; i++)
+	for(int i = 0; i < 5; i++)
 		if(name == FORM_NAMES[i])
 			return i;
 	return -1;
@@ -380,6 +384,8 @@ inline void mark_shores(Heightmap &m)
 //   none in its outer 6), and one a side forced near the edge; the water every column under the line
 //   joined to the edge, the edge's columns level drains over it; a spring
 //   on the highest column of some islands.
+// - flat: one height, FLAT_OVER_WATER over the base water line; no
+//   erosion and no water.
 inline void bias_lake(const Params &p, Heightmap &m, float mean, float amp)
 {
 	const int w = m.width();
@@ -525,7 +531,8 @@ inline Heightmap make_heightmap(const Params &p)
 	const float spread = std::max(128.0f, (float)w) / 2;
 	for(int z = -p.half; z < p.half; z++)
 		for(int x = -p.half; x < p.half; x++)
-			m.at(x, z) = mean + amp * fbm2(x / spread, z / spread, p.seed, 6, 0.45f);
+			m.at(x, z) = p.form == FLAT ? p.water_level + FLAT_OVER_WATER + 0.5f :
+					mean + amp * fbm2(x / spread, z / spread, p.seed, 6, 0.45f);
 	std::vector<River> &rivers = m.rivers;
 	const float ch = channel_half(w), vh = valley_half(w);
 	if(p.form == RIVERS){
@@ -543,7 +550,8 @@ inline Heightmap make_heightmap(const Params &p)
 		bias_lake(p, m, mean, amp);
 	if(p.form == SEA)
 		bias_sea(p, m);
-	erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
+	if(p.form != FLAT)
+		erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
 	// The erosion's specks out: each column clamped into the min..max of
 	// its four neighbours (a single cell's sub-voxel bump or pit rounds to
 	// a voxel), what it carved kept (a blur would soften the channels)
@@ -716,6 +724,14 @@ int main()
 					(clock() - t0) * 1000.0 / CLOCKS_PER_SEC);
 			assert(lo >= p.bottom + 8 && hi <= p.top - 8 && hi - lo > 16);
 		}
+	// Flat: one height, dry
+	{
+		Params p;
+		p.seed = 1, p.half = 128, p.form = FLAT;
+		const Heightmap m = make_heightmap(p);
+		for(size_t c = 0; c < m.h.size(); c++)
+			assert(m.h[c] == m.h[0] && !(m.flags[c] & WATER));
+	}
 	// Rivers at 256, seeds 1-8: each channel's bed falls inlet to outlet,
 	// a spring and a drain at its ends
 	for(uint32_t seed = 1; seed <= 8; seed++){

@@ -49,16 +49,21 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 	{
 		return m_map->in(x, z) ? m_map->flags[m_map->index(x, z)] : 0;
 	}
-	// Caves may carve here: off the bottom 2 and not within 4 under water
+	// Caves may carve here: off the bottom 2 and not within 4 under water;
+	// on flat not within FLAT_CAVE_ROOF under the ground
 	bool carvable(int y, int g, uint8_t f) const
 	{
-		return y > m_p.bottom + 1 && !((f & mapgen::WATER) && y >= g - 4);
+		return y > m_p.bottom + 1 && !((f & mapgen::WATER) && y >= g - 4) &&
+				!(m_p.form == mapgen::FLAT && y > g - mapgen::FLAT_CAVE_ROOF);
 	}
 	// A tree on the column: on grass, which is not carved, and not within
-	// 2 of water
+	// 2 of water; on flat none near the origin (the spawn)
 	bool has_tree(int x, int z) const
 	{
 		if(!m_map->in(x, z) || !mapgen::tree_at(x, z, m_p.seed))
+			return false;
+		if(m_p.form == mapgen::FLAT && x * x + z * z <
+				mapgen::FLAT_TREE_CLEAR * mapgen::FLAT_TREE_CLEAR)
 			return false;
 		const int g = ground(x, z);
 		const uint8_t f = flags(x, z);

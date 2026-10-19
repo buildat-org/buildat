@@ -21,7 +21,8 @@ struct BonesGrowth
 	// none, by the section the top is in, counted again after an
 	// expansion, a dig or a place; at none in all the world ends, its days
 	// the high score, and nothing changes in it after. What is under the
-	// tops does not count.
+	// tops does not count, nor a column whose top is a liquid (water,
+	// lava: [SKELDAT_OWN_MAPGEN], the land alone).
 	std::map<ss_, int64_t> bare;
 	// The total of bare once a game day, the last few: (day, count)
 	std::deque<std::pair<double, int64_t>> bare_days;
@@ -33,8 +34,10 @@ struct BonesGrowth
 	double section_period = skeldat::bones::SECTION_PERIOD;
 	// The columns whose top voxel has FLOOD bones or more, a section's
 	// footprint each (x then z from -half), swept one a second; the
-	// skeletons' count adjusted every game hour
-	sv_<int> flooded;
+	// skeletons' count adjusted every game hour; and the columns whose top
+	// is not a liquid ([SKELDAT_OWN_MAPGEN]: the share flooded is of the
+	// land)
+	sv_<int> flooded, land;
 	// Expansions owed: due at random by the period
 	double expand_due = 0;
 	size_t expansions = 0, expand_changed = 0, grown = 0;
@@ -363,17 +366,20 @@ struct BonesGrowth
 			for(int x = sx * S; x < sx * S + S; x++)
 			for(int y = world.y1 * S + S - 1; y >= sy * S; y--){
 				const interface::VoxelSample v = vol.sample_at(x, y, z);
-				if(!world.holds_bones(world.format.id.get(v)))
+				const uint32_t id = world.format.id.get(v);
+				if(!world.holds_bones(id))
 					continue;
-				n += y < sy * S + S && world.bones.get(v) == 0;
+				const skeldat::NodeDef *def = world.node_of(id);
+				n += y < sy * S + S && world.bones.get(v) == 0 &&
+						!(def && def->shape == skeldat::LIQUID);
 				break;
 			}
 			bare[key] = n;
 		});
 	}
 
-	// Footprint i's columns into the top map, and its columns at FLOOD or
-	// more into flooded
+	// Footprint i's columns into the top map, its columns at FLOOD or more
+	// into flooded and those not topped by a liquid into land
 	// also(x, z, y, id): each column's top as it is read
 	// ([SKELDAT_MAKING_MAP]'s map, from the same one read)
 	void sweep(voxelworld::Instance *w, size_t i,
@@ -385,16 +391,20 @@ struct BonesGrowth
 		for(int z = sz * S; z < sz * S + S; z++)
 		for(int x = sx * S; x < sx * S + S; x++)
 			world.set_top(x, z, NO_GROUND, ID_IGNORE, 0);
-		int n = 0;
+		int n = 0, l = 0;
 		world.each_top(w, sx, sz, [&](int x, int z, int y, uint32_t id,
 				const interface::VoxelSample &v){
 			const uint32_t b = world.bones.get(v);
 			world.set_top(x, z, y, id, b);
-			n += (int)b >= skeldat::bones::FLOOD;
+			const skeldat::NodeDef *def = world.node_of(id);
+			const bool liquid = def && def->shape == skeldat::LIQUID;
+			n += (int)b >= skeldat::bones::FLOOD && !liquid;
+			l += !liquid;
 			if(also)
 				also(x, z, y, id);
 		});
 		flooded[i] = n;
+		land[i] = l;
 	}
 
 	static bool valid_speed(int s)

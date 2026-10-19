@@ -79,6 +79,7 @@ struct MakingMap
 		world.top_any.assign(cols, NO_GROUND);
 		world.top_b.assign(cols, 0);
 		growth.flooded.assign(world.footprints(), 0);
+		growth.land.assign(world.footprints(), 0);
 		state.assign(world.footprints(), 0);
 		maps.assign(world.footprints(), ss_());
 		for(size_t peer : waiting)

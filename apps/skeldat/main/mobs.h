@@ -1540,12 +1540,16 @@ struct Mobs
 		n = 0;
 		for(auto &kv : all)
 			n += kv.second.kind == SKELETON;
-		int64_t flooded = 0;
+		int64_t flooded = 0, land = 0;
 		for(int c : growth.flooded)
 			flooded += c;
+		for(int c : growth.land)
+			land += c;
 		const double columns = (double)world.footprints() *
 				skeldat::bones::SECTION * skeldat::bones::SECTION;
-		f = flooded / columns;
+		// Of the land ([SKELDAT_OWN_MAPGEN]: a sea's water is never
+		// flooded); the count by the world's size
+		f = land > 0 ? (double)flooded / land : 0;
 		return (size_t)std::lround((SKELETONS_MIN +
 				(SKELETONS_MAX - SKELETONS_MIN) * f) * columns / (1024. * 1024.));
 	}
@@ -1622,7 +1626,7 @@ struct Mobs
 				}
 			}
 		}
-		log_i(MODULE, "skeldat: %zu skeletons, the target %zu (%.3f of the "
+		log_i(MODULE, "skeldat: %zu skeletons, the target %zu (%.3f of the land's "
 				"columns flooded); %zu added, %zu let die", n + added - died,
 				target, f, added, died);
 	}
