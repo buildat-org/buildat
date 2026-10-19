@@ -31,6 +31,10 @@ local last_saves, last_save_games = {}, {}
 -- numbers: used, limit (0 for none), saves, shared, cache
 local save_bytes = {}
 local disk = nil
+-- [WORLD_MENU_TRASH] {{entry, name, date}}, main:trash's
+-- simplified: every game's list shows the whole trash; an entry's game
+-- would be read from its world.mt
+local trash = {}
 -- Whole MB, 1000000 bytes: --max-disk-mb's unit
 local function mb(bytes)
 	return string.format("%d MB", math.floor((bytes + 500000) / 1000000))
@@ -426,6 +430,15 @@ function draw(saves, save_games)
 		delete = function(name)
 			waiting("Moving " .. name .. " to the trash...")
 			one("main:delete", name)
+		end,
+		trash = trash,
+		trash_restore = function(entry)
+			waiting("Restoring...")
+			one("main:trash_restore", entry)
+		end,
+		trash_delete = function(entry)
+			waiting("Deleting...")
+			one("main:trash_delete", entry)
 		end,
 		-- Over the HUD and the hotbar (priority 10) when over the world
 		push = function(kind)
@@ -1926,6 +1939,15 @@ buildat.sub_packet("main:disk", function(data)
 		disk[i] = tonumber(values[i]) or 0
 	end
 	log:info("menu: disk " .. disk[1] .. " of " .. disk[2])
+end)
+
+buildat.sub_packet("main:trash", function(data)
+	local values = cereal.binary_input(data, {"array", "string"})
+	trash = {}
+	for i = 1, #values - 2, 3 do
+		trash[#trash + 1] = {entry = values[i], name = values[i + 1],
+			date = values[i + 2]}
+	end
 end)
 
 buildat.sub_packet("main:saves", function(data)

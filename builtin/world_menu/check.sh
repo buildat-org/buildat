@@ -7,8 +7,10 @@
 # server, a world made through New world... (skeldat's with the seed
 # typed and the size picked from its choices; vanilla's New save..., the
 # minimal game) and played; on
-# the server started again, the world listed, renamed and deleted (to
-# vanilla's trash), the list empty after. skeldat started with the
+# the server started again, the world listed, renamed and deleted to the
+# trash ([WORLD_MENU_TRASH]): the list shows it marked; restored and played
+# (vanilla: restored), deleted again and from the trash for good, the
+# trash empty after. skeldat started with the
 # launcher's save= ([SKELDAT_LAUNCH_WORLD]): a missing one is the menu,
 # an existing one played says Loading, "world" starts with no list.
 # menu=worlds world= ([SKELDAT_SAVE_WORLD_MENU]): the menu with that
@@ -125,20 +127,42 @@ for app in skeldat demo_skelenti; do
 		"wait_log 5000 world_menu: the name screen shown" "delay 300" \
 		"text renamed" "delay 300" 'click Button "Rename"' \
 		"wait_log 10000 world_menu: the list shown, 1 worlds" "delay 300" \
-		'click Button "Delete..."' "delay 500" 'click Button "Delete"' \
-		"wait_log 10000 world_menu: the list shown, 0 worlds" "quit" \
-		> "$t/$short.cmds2"
+		'click Button "Delete..."' "delay 500" 'click Button "Move to the trash"' \
+		"wait_log 10000 world_menu: the list shown, 0 worlds, 1 in the trash" \
+		"delay 300" "screenshot $t/$short.trash.png" \
+		'click Button "renamed (in the trash*"' "wait_log 5000 confirm dialog: The world renamed" \
+		"delay 300" 'click Button "Restore"' \
+		"wait_log 10000 world_menu: the list shown, 1 worlds, 0 in the trash" "delay 300" \
+		'click Button "renamed"' "wait_log 5000 world_menu: the list shown" \
+		"delay 300" 'click Button "Play"' \
+		"wait_log 180000 $([ $short = skeldat ] && echo 'skeldat: placed at' ||
+			echo 'load: the world is in')" "quit" > "$t/$short.cmds2"
 	run $app 2 "$t/$short.cmds2"
 	grep -aq 'world_menu: "world" renamed "renamed"' "$t/$app.srv2.log" &&
-		grep -aq 'world_menu: "renamed" deleted' "$t/$app.srv2.log" ||
-		fail "$short: not renamed and deleted ($t/$app.srv2.log)"
-	[ ! -e "$t/$app/srv/apps/$app/saves/renamed" ] ||
+		grep -aq 'world_menu: "renamed" moved to the trash' "$t/$app.srv2.log" &&
+		grep -aq 'world_menu: "renamed-[0-9_-]*" restored as "renamed"' "$t/$app.srv2.log" &&
+		grep -aq "$short: the world \"renamed\" starts" "$t/$app.srv2.log" ||
+		fail "$short: not renamed, trashed, restored and played ($t/$app.srv2.log)"
+	# [WORLD_MENU_TRASH] Deleted again, and from the trash for good
+	printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
+		'click Button "renamed"' "wait_log 5000 world_menu: the list shown" \
+		"delay 300" 'click Button "Delete..."' "delay 500" 'click Button "Move to the trash"' \
+		"wait_log 10000 world_menu: the list shown, 0 worlds, 1 in the trash" "delay 300" \
+		'click Button "renamed (in the trash*"' "wait_log 5000 confirm dialog: The world renamed" \
+		"delay 300" 'click Button "Delete permanently"' \
+		"wait_log 10000 world_menu: the list shown, 0 worlds, 0 in the trash" "quit" \
+		> "$t/$short.cmds3"
+	run $app 3 "$t/$short.cmds3"
+	grep -aq 'world_menu: "renamed-[0-9_-]*" deleted for good' "$t/$app.srv3.log" ||
+		fail "$short: not deleted from the trash ($t/$app.srv3.log)"
+	[ ! -e "$t/$app/srv/apps/$app/saves/renamed" ] &&
+		[ -z "$(ls -A "$t/$app/srv/apps/$app/saves/trash")" ] ||
 		fail "$short: the deleted world's directory is still there"
 	# [SKELDAT_HIGH_SCORES] Presets: none for an app that sets none, nor
 	# for skeldat with no score yet
 	grep -aq "world_menu: 0 presets" "$t/$app.cli1.log" ||
 		fail "$short: presets in the list ($t/$app.cli1.log)"
-	echo "  $short: made (and played), renamed, deleted"
+	echo "  $short: made (and played), renamed, to the trash, restored and played, deleted for good"
 done
 # [WORLD_MENU_ADMIN] skeldat on a public server (no launcher=1), no world
 # and no admin: bob's join is refused, told of the setup code; boss joins
@@ -224,6 +248,23 @@ run vanilla 2 "$t/vanilla.cmds2"
 grep -aq "Save world renamed renamed" "$t/vanilla.srv2.log" &&
 	grep -aq "Save renamed moved to .*/trash/renamed-" "$t/vanilla.srv2.log" ||
 	fail "vanilla: not renamed and trashed ($t/vanilla.srv2.log)"
-echo "  vanilla: made (and played), renamed, moved to the trash"
-echo "PASS: the world menu in skeldat, skelenti and vanilla: a world made, played, renamed and deleted; on a public server an admin by the setup code picks"
+# [WORLD_MENU_TRASH] vanilla's list shows its trash: restored, trashed
+# again and deleted for good
+printf '%s\n' "wait_log 120000 menu: 0 saves" "delay 1000" \
+	'click Button "renamed (in the trash*"' "wait_log 5000 confirm dialog: The world renamed" \
+	"delay 300" 'click Button "Restore"' "wait_log 10000 menu: 1 saves" "delay 1000" \
+	'click Button "renamed   *"' "wait_log 10000 menu: the world renamed shown" \
+	"delay 300" 'click Button "Delete..."' "delay 500" 'click Button "Move to the trash"' \
+	"wait_log 10000 menu: 0 saves" "delay 1000" \
+	'click Button "renamed (in the trash*"' "wait_log 5000 confirm dialog: The world renamed" \
+	"delay 300" 'click Button "Delete permanently"' "wait_log 10000 menu: renamed deleted for good" \
+	"quit" > "$t/vanilla.cmds3"
+run vanilla 3 "$t/vanilla.cmds3"
+grep -aq "renamed restored" "$t/vanilla.srv3.log" &&
+	grep -aq "renamed deleted for good" "$t/vanilla.srv3.log" ||
+	fail "vanilla: not restored and deleted from the trash ($t/vanilla.srv3.log)"
+[ -z "$(ls -A "$t/vanilla/srv/apps/vanilla/saves/trash")" ] ||
+	fail "vanilla: the trash not empty after its delete"
+echo "  vanilla: made (and played), renamed, moved to the trash, restored, deleted for good"
+echo "PASS: the world menu in skeldat, skelenti and vanilla: a world made, played, renamed, to the trash and back, deleted for good; on a public server an admin by the setup code picks"
 # vim: set noet ts=4 sw=4:

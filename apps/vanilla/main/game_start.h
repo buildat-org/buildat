@@ -200,7 +200,7 @@ struct GameStart
 			// answers to a script's own request: main:account and
 			// main:join_title follow the run_script that starts their
 			// reader, and ahead of it they would find nobody.
-			for(const char *name : {"main:menu", "main:disk",
+			for(const char *name : {"main:menu", "main:disk", "main:trash",
 					"main:running_world", "main:saves",
 					"main:save_info", "main:imports", "main:settings",
 					"main:progress",

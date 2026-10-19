@@ -1895,7 +1895,8 @@ end
 -- it was "Force kill", its first user's, and a deletion asked that);
 -- no_label the second's, "Cancel" when absent
 -- options: yes_focused (yes has the focus, not Cancel), yes_key (a key that
--- answers yes, as the quit dialog's Q)
+-- answers yes, as the quit dialog's Q), also = {label, fn} (a third button
+-- between the two, [WORLD_MENU_TRASH]'s)
 function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label, options)
 	options = options or {}
 	local root = uistack.main:push({desc="show_confirm_dialog"})
@@ -1936,6 +1937,20 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 	yes_text.text = yes_label or "Yes"
 	yes_text:SetTextAlignment(HA_CENTER)
 
+	local also_button
+	if options.also then
+		also_button = window:CreateChild("Button")
+		also_button:SetName("Button")
+		also_button:SetStyleAuto()
+		also_button:SetLayout(LM_VERTICAL, 10, magic.IntRect(0, 0, 0, 0))
+		also_button.minHeight = 20
+		local t = also_button:CreateChild("Text")
+		t:SetName("ButtonText")
+		t:SetStyleAuto()
+		t.text = options.also[1]
+		t:SetTextAlignment(HA_CENTER)
+	end
+
 	local no_button = window:CreateChild("Button")
 	no_button:SetName("Button")
 	no_button:SetStyleAuto()
@@ -1949,10 +1964,15 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 
 	-- The menu's keys ([MENU_KEYS]): the arrows, Enter, and
 	-- Escape on "Cancel", the way back
-	M.safe.bind_button_menu(root, {
-		{yes_button, function() finish(true) end},
-		{no_button, function() finish(false) end},
-	}, function(key)
+	local items = {{yes_button, function() finish(true) end}}
+	if also_button then
+		items[#items + 1] = {also_button, function()
+			uistack.main:pop(root)
+			options.also[2]()
+		end}
+	end
+	items[#items + 1] = {no_button, function() finish(false) end}
+	M.safe.bind_button_menu(root, items, function(key)
 		for _, k in ipairs(options.yes_keys or {options.yes_key}) do
 			if key == k then
 				finish(true)

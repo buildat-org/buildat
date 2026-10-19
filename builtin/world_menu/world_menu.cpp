@@ -47,6 +47,8 @@ struct Module: public interface::Module, public Interface
 			{"create", &Module::on_create},
 			{"rename", &Module::on_rename},
 			{"delete", &Module::on_delete},
+			{"trash_delete", &Module::on_trash_delete},
+			{"trash_restore", &Module::on_trash_restore},
 			{"close", &Module::on_close},
 		};
 		for(const auto &packet : PACKETS)
@@ -237,6 +239,7 @@ struct Module: public interface::Module, public Interface
 		}
 		out.set("presets", presets);
 		json::Value worlds = json::array();
+		json::Value trash = json::array();
 		if(pick){
 			storage::access(m_server, [&](storage::Interface *i){
 				sv_<storage::SaveInfo> infos = i->list();
@@ -265,9 +268,20 @@ struct Module: public interface::Module, public Interface
 					w.set("options", options);
 					worlds.append(w);
 				}
+				// [WORLD_MENU_TRASH] What delete moved to the trash
+				for(const storage::TrashInfo &t : i->list_trash()){
+					if(t.name.empty() || t.name[0] == '_')
+						continue;
+					json::Value e = json::object();
+					e.set("entry", t.entry);
+					e.set("name", t.name);
+					e.set("date", t.date);
+					trash.append(e);
+				}
 			});
 		}
 		out.set("worlds", worlds);
+		out.set("trash", trash);
 		if(pick && !m_select.empty()){
 			out.set("selected", m_select);
 			log_i(MODULE, "world_menu: \"%s\" selected", cs(m_select));
@@ -400,13 +414,49 @@ struct Module: public interface::Module, public Interface
 		const ss_ name = jstr(read(packet), "name");
 		if(refused_running(packet, name))
 			return;
+		ss_ note;
 		storage::access(m_server, [&](storage::Interface *i){
-			if(is_world(i, name) && exists(i, name)){
-				log_i(MODULE, "world_menu: \"%s\" deleted", cs(name));
-				i->remove(name);
+			if(is_world(i, name) && exists(i, name) && !i->trash(name).empty()){
+				log_i(MODULE, "world_menu: \"%s\" moved to the trash", cs(name));
+				note = name+" moved to the trash";
 			}
 		});
-		send_list(packet.sender);
+		send_list(packet.sender, note);
+	}
+
+	// [WORLD_MENU_TRASH] A trashed world deleted for good, or back
+	void on_trash_delete(const network::Packet &packet)
+	{
+		if(!may_pick(packet))
+			return;
+		const ss_ entry = jstr(read(packet), "entry");
+		ss_ note;
+		storage::access(m_server, [&](storage::Interface *i){
+			if(i->remove_trashed(entry)){
+				log_i(MODULE, "world_menu: \"%s\" deleted for good", cs(entry));
+				note = "Deleted for good";
+			}
+		});
+		send_list(packet.sender, note);
+	}
+
+	void on_trash_restore(const network::Packet &packet)
+	{
+		if(!may_pick(packet))
+			return;
+		const ss_ entry = jstr(read(packet), "entry");
+		ss_ note;
+		storage::access(m_server, [&](storage::Interface *i){
+			const ss_ name = i->restore(entry);
+			if(name.empty())
+				return;
+			log_i(MODULE, "world_menu: \"%s\" restored as \"%s\"", cs(entry),
+					cs(name));
+			const ss_ was = storage::trash_info(entry).name;
+			note = name == was ? name+" restored" :
+					was+" restored as "+name+" (the name was taken)";
+		});
+		send_list(packet.sender, note);
 	}
 };
 

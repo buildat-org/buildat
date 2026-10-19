@@ -605,7 +605,10 @@ announce_soon (what the listing is derived from changed).
 builtin/storage/api.h -- storage::Interface: the saves. open(name) /
 create(name) (split on purpose: a typo cannot start a new game) -> Save*,
 close, list() -> SaveInfo (name, modified_us), remove, rename(from, to),
-valid_name. A Save
+valid_name; trash(name) (moved to saves/trash/<name>-<date>, its entry
+back), list_trash() -> TrashInfo (entry, name, date), remove_trashed(entry),
+restore(entry) (the name it has now: its own, or the entry's if taken);
+storage::trash_info(entry) reads an entry's name and date. A Save
 has path() and store(name) -> Store, a sqlite object store with get / set /
 remove / list / batch, that modules keep their data in under
 <user>/apps/<app_id>/saves/<name>. storage::pack(value) / unpack(data,
@@ -706,7 +709,7 @@ builtin/moderation/api.h: Host, save, name, subject, members, severity, threshol
 builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, set_has_admin, access, serve_brand
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, emit_after_next_sync, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
-builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, Interface, open, create, close, rename, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
+builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, TrashInfo, trash_info, Interface, open, create, close, rename, trash, list_trash, remove_trashed, restore, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
 builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, get_unknown_voxels, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, num_buffers_loaded, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access, v
 builtin/world_menu/api.h: PeerId, Field, Config, Preset, Play, Close, Interface, configure, show, set_running, progress, set_presets, show_running, is_picker, select, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access

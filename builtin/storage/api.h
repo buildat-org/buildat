@@ -80,6 +80,26 @@ namespace storage
 		int64_t bytes = 0;
 	};
 
+	// [WORLD_MENU_TRASH] A save in the trash: its entry (the directory's
+	// name in trash/, "<name>-<YYYY-MM-DD_HHMMSS>"), the save's name and
+	// that date ("" for an entry not named so)
+	struct TrashInfo
+	{
+		ss_ entry, name, date;
+	};
+	inline TrashInfo trash_info(const ss_ &entry)
+	{
+		TrashInfo t;
+		t.entry = t.name = entry;
+		// "-YYYY-MM-DD_HHMMSS" at the end
+		const size_t n = entry.size();
+		if(n > 18 && entry[n - 18] == '-' && entry[n - 7] == '_'){
+			t.name = entry.substr(0, n - 18);
+			t.date = entry.substr(n - 17);
+		}
+		return t;
+	}
+
 	struct Interface
 	{
 		// Split on purpose: neither call can do the other's job by accident,
@@ -96,6 +116,17 @@ namespace storage
 		// [WORLD_MENU] The save named `to` from now on; false if `from` is no
 		// save or is open, or `to` is invalid or taken
 		virtual bool rename(const ss_ &from, const ss_ &to) = 0;
+		// [WORLD_MENU_TRASH] The save moved to trash/<name>-<date> beside the
+		// saves: its entry, "" if not moved (no such save, open, or the
+		// rename failed). Nothing empties the trash on its own
+		virtual ss_ trash(const ss_ &name) = 0;
+		// What is in the trash, the newest first
+		virtual sv_<TrashInfo> list_trash() = 0;
+		// The entry deleted for good
+		virtual bool remove_trashed(const ss_ &entry) = 0;
+		// The entry back as its save's name, or as the entry's own if that
+		// is taken: the name it has now, "" if not restored
+		virtual ss_ restore(const ss_ &entry) = 0;
 		// false if it has a path separator, a leading dot, or anything else
 		// that would make it something other than one directory name
 		virtual bool valid_name(const ss_ &name) = 0;

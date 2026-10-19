@@ -18,6 +18,8 @@
 #include <cstring>
 #include <cerrno>
 #include <map>
+#include <algorithm>
+#include <ctime>
 #ifdef _WIN32
 	#include <direct.h>
 #else
@@ -713,6 +715,11 @@ struct Module: public interface::Module, public Interface
 			throw Exception("storage check: valid_name accepted a bad name");
 		if(!valid_name("my save") || !valid_name("world_1"))
 			throw Exception("storage check: valid_name refused a good name");
+		// [WORLD_MENU_TRASH] An entry's name and date; the trash's own name
+		const TrashInfo t = trash_info("my world-2026-10-19_120000");
+		if(t.name != "my world" || t.date != "2026-10-19_120000" ||
+				trash_info("odd").name != "odd" || valid_name("trash"))
+			throw Exception("storage check: the trash's names");
 	}
 
 	// Interface
@@ -724,6 +731,9 @@ struct Module: public interface::Module, public Interface
 		if(name.empty() || name.size() > 200)
 			return false;
 		if(name[0] == '.')
+			return false;
+		// [WORLD_MENU_TRASH] The trash's directory beside the saves
+		if(name == "trash")
 			return false;
 		if(name[name.size()-1] == '.' || name[name.size()-1] == ' ')
 			return false; // Windows quietly strips these
@@ -922,6 +932,76 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		return true;
+	}
+
+	// [WORLD_MENU_TRASH] trash/<entry>, vanilla's layout ([WORLD_MENU])
+	ss_ trash(const ss_ &name)
+	{
+		if(!valid_name(name))
+			return "";
+		const ss_ path = m_saves_path+"/"+name;
+		if(!interface::fs::path_exists(path+"/save.sqlite"))
+			return "";
+		for(const up_<CSave> &save : m_open)
+			if(save->m_path == path){
+				log_w(MODULE, "trash(): [%s] is open", cs(path));
+				return "";
+			}
+		time_t now = time(NULL);
+		char date[32];
+		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
+		const ss_ entry = name+"-"+date;
+		interface::fs::create_directories(m_saves_path+"/trash");
+		const ss_ to = m_saves_path+"/trash/"+entry;
+		if(interface::fs::path_exists(to) || std::rename(path.c_str(), to.c_str()) != 0){
+			log_w(MODULE, "trash(): [%s] to [%s] failed", cs(path), cs(to));
+			return "";
+		}
+		log_i(MODULE, "Save %s moved to %s", cs(name), cs(to));
+		return entry;
+	}
+
+	sv_<TrashInfo> list_trash()
+	{
+		sv_<TrashInfo> out;
+		for(const interface::fs::Node &n :
+				interface::fs::list_directory(m_saves_path+"/trash"))
+			if(n.is_directory && n.name != "." && n.name != ".." &&
+					valid_name(n.name))
+				out.push_back(trash_info(n.name));
+		std::sort(out.begin(), out.end(), [](const TrashInfo &a,
+				const TrashInfo &b){ return a.date > b.date; });
+		return out;
+	}
+
+	bool remove_trashed(const ss_ &entry)
+	{
+		const ss_ path = m_saves_path+"/trash/"+entry;
+		if(!valid_name(entry) || !interface::fs::path_exists(path))
+			return false;
+		if(!remove_directory_tree(path)){
+			log_w(MODULE, "remove_trashed(): [%s] was not fully removed", cs(path));
+			return false;
+		}
+		log_i(MODULE, "Trashed save %s deleted", cs(entry));
+		return true;
+	}
+
+	ss_ restore(const ss_ &entry)
+	{
+		const ss_ path = m_saves_path+"/trash/"+entry;
+		if(!valid_name(entry) || !interface::fs::path_exists(path))
+			return "";
+		ss_ name = trash_info(entry).name;
+		if(!valid_name(name) || interface::fs::path_exists(m_saves_path+"/"+name))
+			name = entry;
+		const ss_ to = m_saves_path+"/"+name;
+		if(interface::fs::path_exists(to) || std::rename(path.c_str(), to.c_str()) != 0){
+			log_w(MODULE, "restore(): [%s] to [%s] failed", cs(path), cs(to));
+			return "";
+		}
+		log_i(MODULE, "Trashed save %s restored as %s", cs(entry), cs(name));
+		return name;
 	}
 
 	void* get_interface()

@@ -18,7 +18,9 @@
 -- filter reads, the name by default); selected (the menu writes it back,
 -- and calls on_select(name)); empty (the text for no worlds); new_label;
 -- play(name), new(), rename(name, to) (nil: no Rename), delete(name),
--- delete_text(name), delete_yes; play_label(name); back() (Escape and the
+-- delete_text(name), delete_yes; trash = {{entry, name, date}} (what
+-- delete moved to the trash, listed after the worlds), trash_restore(entry)
+-- and trash_delete(entry) ([WORLD_MENU_TRASH]); play_label(name); back() (Escape and the
 -- ×); push(kind) -> root, the app's own screen pushed for "worlds" and
 -- "rename"; and what the app adds: footer(left) under the list,
 -- under(add, left) after New, panel(add, right, name, head) before Play,
@@ -226,7 +228,7 @@ function M.open(spec)
 	list:SetFixedSize(fit(520), narrow() and
 			math.max(100, math.floor(magic.ui.root.height * 0.18)) or 520)
 	local rows = {}
-	for _, w in ipairs(shown) do
+	local function add_row(label)
 		local row = list.contentElement:CreateChild("Button")
 		row:SetStyleAuto()
 		row:SetName("Button")
@@ -236,8 +238,12 @@ function M.open(spec)
 		local t = row:CreateChild("Text")
 		t:SetName("ButtonText")
 		t:SetStyleAuto()
-		t:SetText(w.label or w.name)
+		t:SetText(label)
 		t:SetTextAlignment(magic.HA_LEFT)
+		return row
+	end
+	for _, w in ipairs(shown) do
+		local row = add_row(w.label or w.name)
 		rows[w.name] = row
 		menu:add(row, function()
 			if spec.selected == w.name then
@@ -249,7 +255,30 @@ function M.open(spec)
 		end)
 		list:AddItem(row)
 	end
-	if #shown == 0 then
+	-- [WORLD_MENU_TRASH] The trash after the worlds, marked with the day
+	-- it went there; a click asks Restore, Delete permanently or Cancel
+	local trashed = 0
+	for _, e in ipairs(spec.trash or {}) do
+		if M.matches(e.name, filter) then
+			trashed = trashed + 1
+			local when = e.date ~= "" and (", " .. e.date:sub(1, 10) .. " " ..
+					e.date:sub(12, 13) .. ":" .. e.date:sub(14, 15)) or ""
+			local row = add_row(e.name .. " (in the trash" .. when .. ")")
+			menu:add(row, function()
+				ui_utils.show_confirm_dialog("The world " .. e.name ..
+						" is in the trash" .. when .. ".", function()
+					log:info("world_menu: restore " .. e.entry)
+					spec.trash_restore(e.entry)
+				end, function() end, "Restore", "Cancel", {also = {
+					"Delete permanently", function()
+						log:info("world_menu: delete permanently " .. e.entry)
+						spec.trash_delete(e.entry)
+					end}})
+			end)
+			list:AddItem(row)
+		end
+	end
+	if #shown == 0 and trashed == 0 then
 		text_on(left, #spec.worlds == 0 and (spec.empty or "No worlds yet") or
 				"Nothing matches")
 	end
@@ -284,12 +313,12 @@ function M.open(spec)
 		end
 		add_right("Delete...", function()
 			ui_utils.show_confirm_dialog(spec.delete_text and
-					spec.delete_text(name) or ("Delete the world " .. name ..
-					"? It cannot be undone."), function()
+					spec.delete_text(name) or ("Move the world " .. name ..
+					" to the trash?"), function()
 				log:info("world_menu: delete " .. name)
 				select(nil)
 				spec.delete(name)
-			end, function() end, spec.delete_yes or "Delete", "Keep")
+			end, function() end, spec.delete_yes or "Move to the trash", "Keep")
 		end)
 		-- The selected row in view and in focus
 		if rows[name] then
@@ -299,7 +328,8 @@ function M.open(spec)
 	end
 	magic.input:SetMouseVisible(true, "a menu screen")
 	-- What a check waits for
-	log:info("world_menu: the list shown, " .. #spec.worlds .. " worlds")
+	log:info("world_menu: the list shown, " .. #spec.worlds .. " worlds, " ..
+			#(spec.trash or {}) .. " in the trash")
 	return out
 end
 
@@ -514,7 +544,16 @@ buildat.sub_packet("world_menu:list", function(data)
 	end
 	served.delete = function(name)
 		send("delete", {name = name})
-		waiting("Deleting " .. name .. "...")
+		waiting("Moving " .. name .. " to the trash...")
+	end
+	served.trash = state.trash or {}
+	served.trash_restore = function(entry)
+		send("trash_restore", {entry = entry})
+		waiting("Restoring...")
+	end
+	served.trash_delete = function(entry)
+		send("trash_delete", {entry = entry})
+		waiting("Deleting...")
 	end
 	served.under = function(add)
 		if running then

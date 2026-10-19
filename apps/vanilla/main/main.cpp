@@ -191,6 +191,8 @@ struct Module: public interface::Module
 			{"set_perf_settings",
 					on(m_game_settings, &GameSettings::on_set_perf_settings)},
 			{"delete", on(m_saves, &Saves::on_delete)},
+			{"trash_delete", on(m_saves, &Saves::on_trash_delete)},
+			{"trash_restore", on(m_saves, &Saves::on_trash_restore)},
 			{"rename", on(m_saves, &Saves::on_rename)},
 			{"open", on(m_saves, &Saves::on_open)},
 			{"create", on(m_saves, &Saves::on_create)},

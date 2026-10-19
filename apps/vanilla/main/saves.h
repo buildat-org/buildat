@@ -201,7 +201,16 @@ struct Saves
 		// --max-disk-mb, for the line under the list: used, limit (0 for
 		// none), saves, shared, cache, in bytes
 		sv_<ss_> disk;
+		// [WORLD_MENU_TRASH] What delete moved to the trash: entry, name,
+		// date each
+		sv_<ss_> trash;
 		storage::access(m_server, [&](storage::Interface *istorage){
+			for(const storage::TrashInfo &t : istorage->list_trash())
+				if(!t.name.empty() && t.name[0] != '_'){
+					trash.push_back(t.entry);
+					trash.push_back(t.name);
+					trash.push_back(t.date);
+				}
 			const storage::Usage u = istorage->usage();
 			for(int64_t v : {u.total(), istorage->limit_bytes(), u.saves,
 					u.shared, u.cache})
@@ -255,9 +264,15 @@ struct Saves
 			cereal::PortableBinaryOutputArchive ar(dos);
 			ar(disk);
 		}
+		std::ostringstream tos(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(tos);
+			ar(trash);
+		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(packet.sender, "main:game_mapgens", mos.str());
 			inetwork->send(packet.sender, "main:disk", dos.str());
+			inetwork->send(packet.sender, "main:trash", tos.str());
 			// [WORLDS_SELECTED] The world running, "" for none: the menu
 			// selects it
 			inetwork->send(packet.sender, "main:running_world",
@@ -539,7 +554,7 @@ struct Saves
 	}
 
 	// main:delete <name>: the save's directory moved to saves/trash/<name>-
-	// <date>, not removed; the list is sent again
+	// <date> (storage's trash(), [WORLD_MENU_TRASH]), not removed
 	void on_delete(const network::Packet &packet)
 	{
 		if(!m_access.may_manage(packet.sender))
@@ -561,34 +576,55 @@ struct Saves
 					"deleted");
 			return;
 		}
-		ss_ path;
+		ss_ entry;
 		storage::access(m_server, [&](storage::Interface *istorage){
-			storage::Save *save = istorage->open(values[0]);
-			if(save){
-				path = save->path();
-				istorage->close(save);
-			}
+			entry = istorage->trash(values[0]);
 		});
-		if(path.empty()){
+		if(entry.empty()){
 			menu_error(m_server, packet.sender,
-					"There is no save called "+values[0]);
+					"Could not move "+values[0]+" to the trash");
 			return;
 		}
-		const ss_ trash = interface::fs::strip_file_name(path)+"/trash";
-		interface::fs::create_directories(trash);
-		time_t now = time(NULL);
-		char date[32];
-		strftime(date, sizeof date, "%Y-%m-%d_%H%M%S", localtime(&now));
-		const ss_ to = trash+"/"+values[0]+"-"+date;
-		if(rename(path.c_str(), to.c_str()) != 0){
-			menu_error(m_server, packet.sender,
-					"Could not move "+m_access.where(path)+" to "+
-					m_access.where(to));
-			return;
-		}
-		log_i(MODULE, "Save %s moved to %s", cs(values[0]), cs(to));
 		menu_message(m_server, packet.sender, values[0]+" moved to the trash");
 	}
+
+	// [WORLD_MENU_TRASH] main:trash_delete <entry>, main:trash_restore
+	// <entry>: a trashed save deleted for good, or back
+	void on_trash(const network::Packet &packet, bool restore)
+	{
+		if(!m_access.may_manage(packet.sender))
+			return;
+		sv_<ss_> values;
+		try {
+			std::istringstream is(packet.data, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			ar(values);
+		} catch(std::exception &e){
+			log_w(MODULE, "main:trash: %s", e.what());
+			return;
+		}
+		if(values.empty())
+			return;
+		const ss_ was = storage::trash_info(values[0]).name;
+		ss_ name;
+		bool ok = false;
+		storage::access(m_server, [&](storage::Interface *istorage){
+			if(restore)
+				ok = !(name = istorage->restore(values[0])).empty();
+			else
+				ok = istorage->remove_trashed(values[0]);
+		});
+		if(!ok){
+			menu_error(m_server, packet.sender, "Could not "+ss_(restore ?
+					"restore " : "delete ")+was);
+			return;
+		}
+		menu_message(m_server, packet.sender, !restore ? was+" deleted for good" :
+				name == was ? was+" restored" :
+				was+" restored as "+name+" (the name was taken)");
+	}
+	void on_trash_delete(const network::Packet &packet){ on_trash(packet, false); }
+	void on_trash_restore(const network::Packet &packet){ on_trash(packet, true); }
 
 	// [WORLD_MENU] [name, to]
 	void on_rename(const network::Packet &packet)
