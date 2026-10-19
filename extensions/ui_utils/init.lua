@@ -1357,10 +1357,16 @@ local message_handle = nil
 -- holding it and its label when there is one.
 local drops = {} -- live dropdowns
 local drops_update, drops_sub -- below
+-- Errors for a removed one
+local function drop_state(d)
+	return d.showPopup, d.visible == true
+end
 local drop_serial = 0
 local drop_labels = {} -- by the dropdown's name: {label, row, fill, width}
 local drop_setters = {} -- by the dropdown's name: {dropdown, dropdown_set's}
-local drop_was = {} -- by the dropdown's name: its popup up last frame
+-- By the dropdown: {up, y, width, root_h, scale}, its popup up last frame
+-- and what its layout was last made for
+local drop_was = {}
 function M.safe.dropdown(parent, choices, current, on_choose, options)
 	options = options or {}
 	local h = options.height or 28
@@ -1564,17 +1570,33 @@ drops_update = function()
 		drop_open = false
 		return
 	end
+	-- [REWORK_1019_PERF] client 4: one guarded read a frame of each;
+	-- the layout below is made again only when what it is made from
+	-- changed (300 us a frame with 12 dropdowns when it was every frame)
 	local open, kept = false, {}
-	local root_h = magic.ui.root.height
+	local root_h, sc = magic.ui.root.height, magic.ui.scale
 	for _, d in ipairs(drops) do
-		if not gone(d) then
+		local ok, up, vis = pcall(drop_state, d)
+		if not ok then
+			drop_was[d] = nil
+		else
 			kept[#kept + 1] = d
-			-- Said as it changes, for a check that taps them ([TAP_DROPDOWN])
-			if (drop_was[d:GetName()] or false) ~= d.showPopup then
-				drop_was[d:GetName()] = d.showPopup
-				log:info(d:GetName() .. (d.showPopup and " open" or " closed"))
+			local was = drop_was[d]
+			if not was then
+				was = {false}
+				drop_was[d] = was
 			end
-			if d.showPopup then
+			-- Said as it changes, for a check that taps them ([TAP_DROPDOWN])
+			if was[1] ~= up then
+				was[1] = up
+				was[2] = nil
+				log:info(d:GetName() .. (up and " open" or " closed"))
+			end
+			local y, w = nil, nil
+			if not up and vis then
+				y, w = d.screenPosition.y, d.width
+			end
+			if up then
 				open = true
 				-- Opened by a click, the press gives the focus back to
 				-- the dropdown after the popup took it: the arrows went
@@ -1582,7 +1604,9 @@ drops_update = function()
 				if d:HasFocus() then
 					d.listView:SetFocus(true)
 				end
-			elseif shown(d) then
+			elseif vis and (was[2] ~= y or was[3] ~= w or was[4] ~= root_h or
+					was[5] ~= sc) then
+				was[2], was[3], was[4], was[5] = y, w, root_h, sc
 				if d.placeholder.width ~= d.width - 28 then
 					d.placeholder:SetFixedWidth(d.width - 28)
 				end
@@ -1591,7 +1615,6 @@ drops_update = function()
 				-- (each advance rounded at the drawn size), taken as 0.7
 				-- px a letter; exact would be measuring at that size
 				local l = drop_labels[d:GetName()]
-				local sc = magic.ui.scale
 				local lw = l and l[4] + (sc < 1 and
 						math.ceil(#l[1].text * 0.7 / sc) or 0)
 				if lw and l[1].width ~= lw then
@@ -1600,13 +1623,16 @@ drops_update = function()
 						l[2]:SetFixedWidth(lw + 10 + d.width)
 					end
 				end
-				local y = d.screenPosition.y
 				-- simplified: the popup's frame is taken as 8 px
 				d.popup.maxHeight = math.max(root_h - y - d.height, y) - 8
 			end
 		end
 	end
+	local pruned = #kept < #drops
 	drops, drop_open = kept, open
+	if not pruned then
+		return
+	end
 	for name, l in pairs(drop_labels) do
 		if gone(l[2]) then
 			drop_labels[name] = nil
@@ -1684,16 +1710,34 @@ function M.safe.close_glyph(parent, window, on_close)
 		if on_close then on_close() else uistack.press_back() end
 	end)
 	local sub
+	-- [REWORK_1019_PERF] client 5: read each frame in one guarded call,
+	-- written only where it differs; the position against the glyph's
+	-- own, which a parent's layout moves back
+	local function read()
+		local w, p, at = window.screenPosition, parent.screenPosition,
+				b.position
+		return w.x - p.x + window.width - 40, w.y - p.y, window.visible,
+				window.priority + 1, at.x, at.y
+	end
+	local lvis, lpri
 	local function place()
-		if gone(b) or gone(window) then
+		local ok, x, y, vis, pri, bx, by = pcall(read)
+		if not ok then
 			magic.UnsubscribeFromEvent("Update", sub)
 			if not gone(b) then b:Remove() end
 			return
 		end
-		local w, p = window.screenPosition, parent.screenPosition
-		b:SetPosition(w.x - p.x + window.width - 40, w.y - p.y)
-		b.visible = window.visible
-		b.priority = window.priority + 1
+		if x ~= bx or y ~= by then
+			b:SetPosition(x, y)
+		end
+		if vis ~= lvis then
+			lvis = vis
+			b.visible = vis
+		end
+		if pri ~= lpri then
+			lpri = pri
+			b.priority = pri
+		end
 	end
 	sub = magic.SubscribeToEvent("Update", place)
 	place()
