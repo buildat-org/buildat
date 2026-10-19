@@ -487,6 +487,7 @@ struct Mobs
 		m.draw_t = -1, m.draw_sent = 0, m.boat_sent = -1;
 		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 		m.dry_t = world.t, m.swim_t = 0, m.swim_to = false;
+		m.lying_sent = -1;
 		activated++;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
@@ -549,6 +550,31 @@ struct Mobs
 			const int d = water_depth(w, x0 + dx, y0, z0 + dz);
 			if(dry ? d == 0 && world.ground(w, (float)(x0 + dx), m.y + 1,
 					(float)(z0 + dz), MOB_HEIGHT[BOAR]).found : d < DEEP_WATER){
+				*x = (float)(x0 + dx), *z = (float)(z0 + dz);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// [SKELDAT_BOAR_SLEEP] The nearest feet voxel round a boar, ring by
+	// ring from its own within BOAR_SHADE_SEARCH, in medium shade: dry
+	// ground to lie on whose stored sky light is under 15 (not the open
+	// sky) and over 3 (not a cave's dark). Its middle in *x, *z
+	static constexpr int BOAR_SHADE_SEARCH = 16;
+	bool boar_shade(voxelworld::Instance *w, const Mob &m, float *x, float *z)
+	{
+		const int x0 = (int)std::floor(m.x + 0.5f), z0 = (int)std::floor(m.z + 0.5f);
+		for(int r = 0; r <= BOAR_SHADE_SEARCH; r++)
+		for(int dz = -r; dz <= r; dz++)
+		for(int dx = -r; dx <= r; dx += (std::abs(dz) == r ? 1 : 2 * r)){
+			const Ground g = world.ground(w, (float)(x0 + dx), m.y,
+					(float)(z0 + dz), MOB_HEIGHT[BOAR]);
+			if(!g.found || g.water)
+				continue;
+			int sky, lamp;
+			world.light(w, x0 + dx, (int)std::floor(g.y + 0.5f), z0 + dz, sky, lamp);
+			if(sky > 3 && sky < 15){
 				*x = (float)(x0 + dx), *z = (float)(z0 + dz);
 				return true;
 			}
@@ -1144,6 +1170,58 @@ struct Mobs
 					if(wet)
 						speed *= 0.5f;
 				}
+				// [SKELDAT_BOAR_SLEEP] The game-hour after sunset a boar walks
+				// to the nearest medium shade (straight: a boar has no
+				// routes) and lies down there; none found, or not there by
+				// the hour's end, it lies down where it is. It gets up an
+				// hour before sunrise, or hurt, or where water reaches it
+				// simplified: a walk straight to the shade, blocked, waits
+				// for the hour's end
+				if(m.kind == BOAR){
+					const double hour = 1.0 / 24;
+					const bool shade_hour = world.day >= 0.75 &&
+							world.day < 0.75 + hour;
+					const bool night = world.day >= 0.75 + hour ||
+							world.day < 0.25 - hour;
+					const bool fleeing = m.mode == FLEE && m.mode_t > 0;
+					auto lie = [&](){
+						m.sleep = 2;
+						int sky, lamp;
+						world.light(w, fx, fy, fz, sky, lamp);
+						log_i(MODULE, "skeldat: the boar (%u) lies down at "
+								"%.1f,%.1f,%.1f, its sky light %d", key, m.x, m.y,
+								m.z, sky);
+					};
+					if(wet || fleeing || !(shade_hour || night)){
+						if(m.sleep == 2)
+							log_i(MODULE, "skeldat: the boar (%u) gets up%s", key,
+									wet ? " in water" : fleeing ? ", hurt" : "");
+						m.sleep = 0;
+					} else if(m.sleep != 2){
+						if(m.sleep == 0 && shade_hour){
+							m.sleep = 1;
+							m.shade_to = boar_shade(w, m, &m.shade_x, &m.shade_z);
+							if(m.shade_to)
+								log_i(MODULE, "skeldat: the boar (%u) goes to the "
+										"shade at %.0f,%.0f", key, m.shade_x, m.shade_z);
+							else
+								log_i(MODULE, "skeldat: the boar (%u) finds no shade",
+										key);
+						}
+						if(m.sleep == 1 && shade_hour){
+							if(m.shade_to && std::hypot(m.shade_x - m.x,
+									m.shade_z - m.z) > 0.4f){
+								m.yaw = move_yaw = std::atan2(m.shade_x - m.x,
+										m.shade_z - m.z);
+								speed = MOB_SPEED[BOAR][0];
+							} else if(m.shade_to)
+								lie();
+						} else
+							lie();
+					}
+					if(m.sleep == 2)
+						speed = 0;
+				}
 				// Where it can go: a step up, or down to a fall; a wall or a
 				// drop past three turns it
 				const float nx = m.x + std::sin(move_yaw) * speed * dt,
@@ -1345,6 +1423,12 @@ struct Mobs
 					n->SetVar(Urho3D::StringHash("skeldat_boat"),
 							Urho3D::Variant((int)m.boat));
 					m.boat_sent = m.boat;
+				}
+				const int lying = m.sleep == 2;
+				if(lying != m.lying_sent){
+					n->SetVar(Urho3D::StringHash("skeldat_lying"),
+							Urho3D::Variant(lying));
+					m.lying_sent = lying;
 				}
 				const int drawing = m.draw_t >= 0;
 				if(drawing != m.draw_sent){

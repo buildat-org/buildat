@@ -280,6 +280,20 @@ return function(game, sounds)
 					log:info("skeldat: a skeleton " .. (boat and "on" or "off")
 							.. " a boat (" .. m.node:GetID() .. ")")
 				end
+				-- [SKELDAT_BOAR_SLEEP] Lying: the body down by the legs'
+				-- length onto the ground, the legs folded flat under it
+				local lying = m.node:GetVar("skeldat_lying"):GetInt() == 1
+				if lying ~= (m.lying == true) then
+					m.lying = lying
+					local down = lying and -6 / 16 or 6 / 16
+					for _, part in ipairs(m.parts) do
+						local q = part.node.position
+						part.node.position = magic.Vector3(q.x, q.y + down, q.z)
+					end
+					m.light_t = 0
+					log:info("skeldat: a boar " .. (lying and "lies down" or
+							"gets up") .. " (" .. m.node:GetID() .. ")")
+				end
 				local drawing = m.node:GetVar("skeldat_draw"):GetInt() == 1
 				if drawing ~= m.drawing then
 					m.drawing = drawing
@@ -289,7 +303,9 @@ return function(game, sounds)
 				m.draw = math.max(0, math.min(1, m.draw +
 						(drawing and dt or -dt) / 0.15))
 				for _, part in ipairs(m.parts) do
-					if part.swing then
+					if part.swing and m.lying then
+						part.node.rotation = magic.Quaternion(90 * part.swing, 0, 0)
+					elseif part.swing then
 						local k = part.arm and m.draw or 0
 						part.node.rotation = magic.Quaternion(
 								a * part.swing * (1 - k) - 90 * k, 0, 0)

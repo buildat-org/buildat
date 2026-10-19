@@ -341,13 +341,22 @@ struct Mob
 	double dry_t = 0, stay_t = 0, swim_t = 0;
 	bool swim_to = false, swim_dry = false, floated = false;
 	uint8_t water = 0; // for the log: 0 out, 1 in, 2 over deep water
+	// [SKELDAT_BOAR_SLEEP] A boar's night: 0 up, 1 walking to its shade
+	// (shade_to: one was found, at shade_x, shade_z), 2 asleep, lying
+	// where it is. Saved: asleep. Not saved: the node's "skeldat_lying"
+	// as last set
+	uint8_t sleep = 0;
+	bool shade_to = false;
+	float shade_x = 0, shade_z = 0;
+	int lying_sent = -1;
 	float swim_x = 0, swim_z = 0;
 
 	ss_ save() const {
 		std::ostringstream os;
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
 				marker_day<<" "<<carry_coal<<" "<<grass_t<<" "<<boat<<" "<<aim<<" "<<
-				boat_x<<" "<<boat_z<<" "<<shore_days<<" "<<boarded_t;
+				boat_x<<" "<<boat_z<<" "<<shore_days<<" "<<boarded_t<<" "<<
+				(sleep == 2);
 		return os.str();
 	}
 	bool load(const ss_ &s){
@@ -361,6 +370,11 @@ struct Mob
 		// A boat saved before its boarding time was: aboard since the start
 		else if(!(is>>boarded_t))
 			boarded_t = 0;
+		else {
+			int asleep = 0;
+			is>>asleep;
+			sleep = asleep ? 2 : 0;
+		}
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON || k == CAVE_SKELETON) && hp > 0;
 	}
