@@ -21,7 +21,7 @@ printf 'x\0buildat-git-hash:0123456789ab\0y' > "$t/unknown"
 by(){ local f=$1; shift; env "$@" bash -c '. "$1/util/check_lib.sh"; check_build native "$2"' _ \
 	"$here" "$f" 2>&1; }
 o=$(by "$t/old") && fail "an old build passed"
-echo "$o" | grep -q "^FAIL: the build is older than the tree: rebuild (.* is of $old; changed since: src/" ||
+echo "$o" | grep -q "^FAIL: the build is older than the tree: rebuild (.* is of $old; changed since: .*src/" ||
 	fail "the old build's line: $o"
 o=$(by "$t/head") || fail "HEAD's build failed: $o"
 o=$(by "$t/none") && fail "a build with no hash passed"

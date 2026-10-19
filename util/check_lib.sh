@@ -105,8 +105,7 @@ export -f check_pgrep check_pkill
 #   check_build [web] [file]   file: read in place of the build's (a check)
 check_build()
 {
-	local root f h changed paths="src 3rdparty CMakeLists.txt"
-	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+	local root=$_check_root f h changed paths="src 3rdparty CMakeLists.txt"
 	f=$root/Build/lib/libbuildat_core.so
 	if [ "${1:-}" = web ]; then
 		f=$root/web/buildat.wasm paths="$paths client extensions builtin"
