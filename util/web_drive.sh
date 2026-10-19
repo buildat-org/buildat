@@ -19,6 +19,7 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+check_build web
 [ $# -ge 3 ] || { sed -n '2,7p' "$0" | sed 's/^# *//' >&2; exit 2; }
 browser=$1 game=$2 steps=$(cd "$(dirname "$3")" && pwd)/$(basename "$3")
 out=${4:-$(mktemp -d "${TMPDIR:-/tmp}/web_drive.XXXXXX")}

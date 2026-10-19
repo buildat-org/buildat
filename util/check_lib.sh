@@ -92,6 +92,43 @@ check_pkill()
 # For a python body's subprocess: bash -c "check_pgrep buildat_server"
 export -f check_pgrep check_pkill
 
+# **A check fails on a build older than the tree** ([BUILD_IS_TREE]): the
+# git hash the build was made at (Build/lib/libbuildat_core.so's, which
+# both binaries load; "web": web/buildat.wasm's) and
+# git's diff from it to HEAD over what that build compiled in -- natively
+# src, 3rdparty and CMakeLists.txt; the web bundle packs the client's Lua
+# too. Called by start_server and run_client before their first start and
+# by util/web_drive.sh. BUILDAT_STALE_OK=1 lets a deliberate run through.
+# A hash git does not know (a git archive, a rebased build) is passed.
+# simplified: uncommitted changes are not seen, the hash being a commit's;
+# the binary's "-dirty" marker is the upgrade if that ever matters.
+#   check_build [web] [file]   file: read in place of the build's (a check)
+check_build()
+{
+	local root f h changed paths="src 3rdparty CMakeLists.txt"
+	root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+	f=$root/Build/lib/libbuildat_core.so
+	if [ "${1:-}" = web ]; then
+		f=$root/web/buildat.wasm paths="$paths client extensions builtin"
+	elif [ -z "${2:-}" ]; then
+		[ -z "${CHECK_BUILD_DONE:-}" ] || return 0
+		CHECK_BUILD_DONE=1
+	fi
+	f=${2:-$f}
+	[ -f "$f" ] || return 0
+	h=$(grep -aom1 'buildat-git-hash:[0-9a-z-]*' "$f" | sed 's/^buildat-git-hash://;s/-dirty$//')
+	[ -n "$h" ] || h=none
+	changed=$(git -C "$root" diff --name-only "$h" HEAD -- $paths 2>/dev/null) ||
+		{ [ "$h" = none ] || return 0; changed="(built before [BUILD_IS_TREE])"; }
+	[ -n "$changed" ] || return 0
+	changed=$(echo $changed | cut -c1-300)
+	if [ -n "${BUILDAT_STALE_OK:-}" ]; then
+		echo "check_build: BUILDAT_STALE_OK: ${f#"$root"/} is of $h; changed since: $changed" >&2
+		return 0
+	fi
+	fail "the build is older than the tree: rebuild (${f#"$root"/} is of $h; changed since: $changed)"
+}
+
 # **A check's server, started and waited for** ([CHECK_START_SERVER]):
 #
 #   start_server <log> <ready-regex> <timeout_s> <port|auto> <command...>
@@ -118,6 +155,7 @@ start_server()
 {
 	local log=$1 ready=$2 timeout=$3 port=$4 _i
 	shift 4
+	check_build
 	if [ "$port" = auto ]; then
 		for _i in $(seq 50); do
 			port=$((29700 + RANDOM % 300))
@@ -280,6 +318,7 @@ run_client()
 {
 	local stall=$1 log=$2
 	shift 2
+	check_build
 	: > "$log"
 	"$@" > "$log" 2>&1 &
 	# quiet counts tenths of a second: the poll is short so the run ends
