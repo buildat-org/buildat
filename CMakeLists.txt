@@ -430,8 +430,12 @@ else()
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/os.cpp)
 	set(BUILDAT_CORE_SRCS ${BUILDAT_CORE_SRCS} src/impl/linux/fs.cpp)
 endif()
+# Read in autodetect.cpp only: on that file alone, so the package's
+# portable tree and its xdg tree share every other object in ccache
+# ([REWORK_1019_PERF] build 5)
 if(PORTABLE)
-	add_definitions(-DBUILDAT_PORTABLE)
+	set_source_files_properties(src/boot/autodetect.cpp PROPERTIES
+		COMPILE_DEFINITIONS BUILDAT_PORTABLE)
 endif()
 # The version and the git hash, generated into a source of the core library
 # at configure and again on every build ([VERSION]); see util/version.cmake
