@@ -25,10 +25,10 @@ local light_flood = buildat.run_extension_file("light.lua")
 local voxel_light = require("buildat/extension/voxel_light")
 local sky_model = buildat.run_extension_file("res/sky_model.lua")
 local skybox = buildat.run_extension_file("res/skybox.lua")
--- The particles drawn and the sounds played, vanilla's too
--- ([LUANTI_SHARED_1019])
-local particle_draw = buildat.run_extension_file("res/particle_draw.lua")
-local sound_play = buildat.run_extension_file("res/sound_play.lua")
+-- The particles drawn and the sounds played, through vanilla's own
+-- res/particle_draw.lua and res/sound_play.lua ([LUANTI_SHARED_1019])
+local world_particles = buildat.run_extension_file("world_particles.lua")
+local world_sounds = buildat.run_extension_file("world_sounds.lua")
 local world_pointing = buildat.run_extension_file("world_pointing.lua")
 local world_object_meshes =
 		buildat.run_extension_file("world_object_meshes.lua")
@@ -872,36 +872,8 @@ function M.new(magic, buildat, log, options)
 	-- object follows it, and the sounds are above that.
 	local object_nodes = {}
 
-	-- res/sound_play.lua plays them; spec is what sounds.lua read out of
-	-- PLAY_SOUND and resource the name of one file of the group it asked
-	-- for -- picking which one is the caller's, because which files there
-	-- are is the media's business
-	local sounds = sound_play({magic = magic, sounds = sounds_proto,
-		scene = function()
-			return scene
-		end,
-		object_pos = function(id)
-			local at = object_nodes[id]
-			return at and at.at_x and magic.Vector3(at.at_x,
-					at.at_y + (at.offset or 0), at.at_z)
-		end,
-	})
-	function self:play_sound(id, spec, resource)
-		return sounds.play(id, spec,
-				magic.cache:GetResource("Sound", resource)) ~= nil
-	end
-	function self:stop_sound(id)
-		sounds.stop(id)
-	end
-	function self:fade_sound(id, step, gain)
-		sounds.fade(id, step, gain)
-	end
-	function self:update_sounds(dtime)
-		sounds.update(dtime, camera_node.worldPosition)
-	end
-	function self:sound_count()
-		return sounds.count()
-	end
+	-- self:play_sound() and the rest (world_sounds.lua)
+	world_sounds(self, magic, scene, camera_node, sounds_proto, object_nodes)
 
 	-- Which family of connecting nodes each node id belongs to.
 	--
@@ -2136,184 +2108,13 @@ function M.new(magic, buildat, log, options)
 		entry.material:SetShaderParameter("MatDiffColor", c)
 	end
 
-	local SPRITE_VISUALS, build_item_cube, object_template =
-			world_object_meshes(self, magic, scene, game_texture,
+	-- What an object is drawn as: self:set_object() (world_object_meshes.lua)
+	world_object_meshes(self, magic, scene, game_texture,
 			pbr and magic.cache:GetResource("Technique",
 			"luanti_client/res/PBRLitAlphaMask.xml") or object_technique,
-			texture)
-
-	-- What an object is drawn as.
-	--
-	-- simplified: an object whose visual is a mesh this can read is drawn as
-	-- that mesh in its rest pose -- BONE, KEYS and ANIM are not read, so a
-	-- mob stands still -- a sprite visual is a billboard, and everything
-	-- else is a box with the object's first texture on it. A box wearing a
-	-- cow's texture reads as a cow where nothing at all reads as nothing at
-	-- all, which is what the models Urho3D cannot read fall back to.
-	--
-	-- obj is what objects.lua parsed; resource(obj) says what it is drawn
-	-- wearing, as a resource name, or nil for an object whose texture is not
-	-- there yet, and as the six tiles of a node or the quads of a model when
-	-- it is one of those.
-	function self:set_object(obj, resource)
-		local props = obj.props
-		-- An item that is a node comes back with the six tiles it is drawn
-		-- with as well; then it is a small cube of them rather than a
-		-- picture of one
-		local own, tiles, mesh = resource(obj)
-		local cube = tiles ~= nil
-		local meshed = not cube and mesh ~= nil
-		local sprite = not cube and not meshed and props ~= nil and
-				SPRITE_VISUALS[props.visual] or false
-		local entry = object_nodes[obj.id]
-		-- A visual that changed changes which component draws it
-		if entry and (entry.sprite ~= sprite or entry.cube ~= cube or
-				entry.meshed ~= meshed) then
-			scene:RemoveChild(entry.node)
-			entry = nil
-			object_nodes[obj.id] = nil
-		end
-		if not entry then
-			-- A mesh is a copy of its kind's template, which carries the
-			-- geometry and the materials already; everything else is built
-			-- on a node of its own
-			local template = meshed and object_template(mesh) or nil
-			local node = template and template.node:Clone() or
-					scene:CreateChild("object_"..obj.id)
-			entry = {node = node, sprite = sprite, cube = cube,
-					meshed = meshed}
-			if template then
-				node.enabled = true
-				entry.textured = true
-				entry.materials = template.materials
-				entry.model = node:GetComponent("CustomGeometry")
-				-- The clone's own materials: a Material made in Lua has no
-				-- resource name, so it is not an attribute Urho3D can copy
-				for i = 1, #template.materials do
-					entry.model:SetMaterial(i - 1, template.materials[i])
-				end
-			elseif cube then
-				entry.model, entry.materials = build_item_cube(node, tiles)
-				entry.textured = true
-			elseif sprite then
-				local set = node:CreateComponent("BillboardSet")
-				set.numBillboards = 1
-				-- Turned about Y only: a sprite that also leans back when
-				-- the camera looks down does not read as standing in the
-				-- world
-				set.faceCameraMode = magic.FC_ROTATE_Y
-				set.castShadows = false
-				set.sorted = true
-				local billboard = set:GetBillboard(0)
-				billboard.position = magic.Vector3(0, 0, 0)
-				billboard.enabled = true
-				set:Commit()
-				entry.model = set
-				entry.billboard = billboard
-			else
-				local model = node:CreateComponent("StaticModel")
-				model:SetModel(box_model)
-				model.castShadows = false
-				entry.model = model
-			end
-			object_nodes[obj.id] = entry
-		end
-		-- Where it is and how big: the object's collision box, which is in
-		-- nodes and is not centred on the object's own position
-		local sx, sy, sz = 0.6, 1.8, 0.6
-		local cy = 0.9
-		if props and props.collision_min and props.collision_max then
-			sx = math.max(0.05, props.collision_max[1] - props.collision_min[1])
-			sy = math.max(0.05, props.collision_max[2] - props.collision_min[2])
-			sz = math.max(0.05, props.collision_max[3] - props.collision_min[3])
-			cy = (props.collision_max[2] + props.collision_min[2]) / 2
-		end
-		-- Only the stand-in box is centred on its collision box: Luanti
-		-- draws a model, a sprite and a cube at the position itself, and
-		-- the selection box is about that ([OBJECT_SELECTION_BOX])
-		if cube or meshed or sprite then cy = 0 end
-		entry.offset = cy
-		if cube then
-			-- Drawn at the size the object asked for rather than at what
-			-- it collides with, the same as a sprite. visual_size is what
-			-- Luanti scales the item mesh by, and a dropped node comes out
-			-- at about a third of a node, which is what its 0.4 is.
-			--
-			-- simplified: Luanti's own chain to a final size runs through
-			-- the wield mesh's own scale factors; this takes visual_size as
-			-- it is, which lands in the same place for a dropped node.
-			local v = props and props.visual_size or nil
-			entry.node.scale = magic.Vector3(
-					math.max(0.05, v and v[1] or 1),
-					math.max(0.05, v and v[2] or 1),
-					math.max(0.05, v and v[3] or v and v[1] or 1))
-			-- How fast it turns, in degrees a second; automatic_rotate is
-			-- radians a second
-			entry.spin = (props and props.automatic_rotate or 0) *
-					180 / math.pi
-		elseif meshed then
-			-- A model is drawn at the size the object asked for, the same as
-			-- a sprite: what it collides with is not what it looks like.
-			--
-			-- An object's model is authored in Luanti's own scene units,
-			-- where a node is ten across, and visual_size scales it in those.
-			-- Everything here is in nodes, so the tenth is the conversion. A
-			-- node's "mesh" drawtype is the other way round -- authored one
-			-- unit to the node -- which is why shapes.lua does not do this.
-			local v = props and props.visual_size or nil
-			local to_nodes = 1 / 10
-			entry.node.scale = magic.Vector3(
-					math.max(0.005, (v and v[1] or 1) * to_nodes),
-					math.max(0.005, (v and v[2] or 1) * to_nodes),
-					math.max(0.005, (v and v[3] or v and v[1] or 1) *
-							to_nodes))
-		elseif sprite then
-			-- A billboard is sized by itself, and by what the object asked
-			-- for rather than by what it collides with: a dropped item's
-			-- collision box is a whole node and its picture is not
-			local w = props.visual_size and props.visual_size[1] or 1
-			local h = props.visual_size and props.visual_size[2] or 1
-			entry.node.scale = magic.Vector3(1, 1, 1)
-			entry.billboard.size = magic.Vector2(math.max(0.05, w) / 2,
-					math.max(0.05, h) / 2)
-			entry.model:Commit()
-		else
-			entry.node.scale = magic.Vector3(sx, sy, sz)
-		end
-		entry.node.position = magic.Vector3(obj.position[1],
-				obj.position[2] + cy, obj.position[3])
-		entry.at_x, entry.at_y, entry.at_z = obj.position[1], obj.position[2],
-				obj.position[3]
-		-- A cube of its own is turned by its spin below and by nothing else
-		if not entry.spin or entry.spin == 0 then
-			entry.node.rotation = magic.Quaternion(0, -(obj.yaw or 0), 0)
-			entry.at_yaw = obj.yaw or 0
-		end
-		entry.lit_at = daylight and math.floor(daylight * 256)
-		light_object(entry, obj.position[1], obj.position[2], obj.position[3])
-
-		-- Cleared whatever the object is drawn as: a cube's tiles go on
-		-- once, and a flag left set would rebuild it every frame
-		local was_stale = obj.visual_stale
-		obj.visual_stale = false
-		if not cube and not meshed and (was_stale or not entry.textured) then
-			-- An object whose texture is not there yet wears the placeholder
-			-- rather than nothing: a box with no material at all is drawn
-			-- flat white, which reads as a hole in the world
-			local name = own or (not entry.material and texture)
-			if name then
-				local material = magic.Material.new()
-				material:SetTechnique(0, object_technique)
-				material:SetTexture(0, game_texture(name))
-				entry.model.material = material
-				entry.material = material
-				entry.light_key = nil
-				-- The placeholder does not count as textured: the object's
-				-- own texture may still turn up
-				entry.textured = own ~= nil
-			end
-		end
-	end
+			texture, {object_nodes = object_nodes, box_model = box_model,
+			box_technique = object_technique, light_object = light_object,
+			daylight = function() return daylight end})
 
 	-- A particle's light ([VANILLA_WEATHER] 5), as vanilla's: its
 	-- emitter's, as an object's; full glow is a light, white, and on pbr the
@@ -2332,76 +2133,9 @@ function M.new(magic, buildat, log, options)
 		end
 		return self.node_solid[id] == true
 	end
-	-- res/particle_draw.lua draws them, over its own record: this turns
-	-- particles.lua's into it. resolve(name) turns a texture string into a
-	-- resource name, or nil for one that has not arrived.
-	local particle_objects = nil
-	local drawn = particle_draw({magic = magic, particles = particles,
-		log = log, glow_full = psky.GLOW_FULL, solid_at = solid_at,
-		light_color = particle_light,
-		scene = function()
-			return scene
-		end,
-		texture = function(name)
-			return game_texture(name, magic.FILTER_NEAREST_ANISOTROPIC)
-		end,
-		attached_pos = function(id)
-			local obj = particle_objects and particle_objects[id]
-			if obj and obj.is_self then
-				-- The player's own object: the server sends no position
-				-- for it, and where the player is is where the camera is
-				local p = camera_node.position
-				return p.x, p.y, p.z
-			elseif obj and obj.position then
-				return obj.position[1], obj.position[2], obj.position[3]
-			end
-		end,
-	})
-	-- set_particle_spawner(id, p, resolve): p nil takes the spawner away,
-	-- which is what DELETE_PARTICLESPAWNER does. What is drawn of a tween is
-	-- its start.
-	function self:set_particle_spawner(id, p, resolve)
-		if p == nil then
-			drawn.spawner(id, nil)
-			return
-		end
-		local pos, vel, acc = p.pos.start, p.vel.start, p.acc.start
-		drawn.spawner(id, {
-			texture = p.texture ~= "" and resolve(p.texture) or nil,
-			amount = p.amount, time = p.time, vertical = p.vertical,
-			attached = p.attached ~= nil and p.attached ~= 0 and
-					p.attached or nil,
-			pos_min = pos.min, pos_max = pos.max,
-			vel_min = vel.min, vel_max = vel.max,
-			acc_min = acc.min, acc_max = acc.max,
-			exp_min = p.exptime.start.min, exp_max = p.exptime.start.max,
-			size_min = p.size.start.min, size_max = p.size.start.max,
-			animation = p.animation, glow = p.glow,
-			collision = p.collision,
-			collision_removal = p.collision_removal,
-		})
-	end
-	-- One particle the server picked itself
-	function self:add_particle(p, resolve)
-		drawn.single({
-			texture = p.texture ~= "" and resolve(p.texture) or nil,
-			pos_min = p.pos, pos_max = p.pos, vel_min = p.vel,
-			vel_max = p.vel, acc_min = p.acc, acc_max = p.acc,
-			exp_min = p.exptime, exp_max = p.exptime,
-			size_min = p.size, size_max = p.size,
-			vertical = p.vertical, animation = p.animation, glow = p.glow,
-		})
-	end
-	-- objects is what the client has parsed, keyed by object id, so that a
-	-- spawner attached to one can be moved to where that one is now; it may
-	-- be nil for a caller that has none
-	function self:update_particles(dtime, objects)
-		particle_objects = objects
-		drawn.update(dtime)
-	end
-	function self:particle_count()
-		return drawn.count()
-	end
+	-- self:set_particle_spawner() and the rest (world_particles.lua)
+	world_particles(self, magic, log, scene, camera_node, particles,
+			psky.GLOW_FULL, particle_light, solid_at, game_texture)
 
 	function self:remove_object(id)
 		local entry = object_nodes[id]
