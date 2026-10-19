@@ -123,9 +123,16 @@ covers_of() {   # $1 path, $2 name
 	*) echo "builtin/luanti/**" ;;
 	esac
 }
-# What it costs: the last measured run, else its own seed, else a minute
+# What it costs: the last measured run, else its own seed, else a minute.
+# The log read once ([REWORK_1019_PERF] build 9)
+declare -A last_cost
+if [ -f "$costs" ]; then
+	while read -r n c _; do
+		last_cost[$n]=$c
+	done < "$costs"
+fi
 cost_of() {   # $1 path, $2 name
-	c=$(grep -a "^$2 " "$costs" 2>/dev/null | tail -1 | awk '{print $2}')
+	c=${last_cost[$2]:-}
 	[ -n "$c" ] || c=$(sed -n 's/^# cost: *\([0-9]*\).*/\1/p' "$1" | head -1)
 	echo "${c:-60}"
 }
@@ -141,6 +148,14 @@ if [ -n "$changed" ]; then
 	# line would otherwise be expanded against the directory it names
 	# the moment it leaves a command substitution
 	set -f
+	# Each runner's patterns ("**" as "*") and cost once, not per file
+	# ([REWORK_1019_PERF] build 9: 7.8 s for 27 files when per file)
+	declare -A pats cost
+	for name in $runners; do
+		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		pats[$name]=$(covers_of "$path" "$name" | sed 's/\*\*/*/g')
+		cost[$name]=$(cost_of "$path" "$name")
+	done
 	for f in $files; do
 		# **A document is not code and wants no runner** ([SMOKE_PICK]):
 		# doc/ and the plan are read by people, and listing them as
@@ -151,13 +166,11 @@ if [ -n "$changed" ]; then
 		esac
 		best=""; best_cost=999999
 		for name in $runners; do
-			path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
-			for pat in $(covers_of "$path" "$name"); do
-				pat=$(echo "$pat" | sed 's/\*\*/*/g')
+			for pat in ${pats[$name]}; do
 				# shellcheck disable=SC2254
 				case "$f" in
 				$pat)
-					c=$(cost_of "$path" "$name")
+					c=${cost[$name]}
 					if [ "$c" -lt "$best_cost" ]; then best=$name; best_cost=$c; fi
 					;;
 				esac
@@ -243,11 +256,7 @@ for name in $runners; do
 	# older than that and is left alone ([CI_RUNS] (6): a flake is
 	# quarantined, not papered over -- this is neither, it is the
 	# harness cleaning up after itself).
-	for w in $(seq 1 150); do
-		check_pgrep buildat >/dev/null || check_pgrep buildat_server >/dev/null ||
-			break
-		sleep 0.2
-	done
+	wait_quiet 30 2>/dev/null
 	for p in $(check_pgrep buildat) $(check_pgrep buildat_server); do
 		age=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
 		[ -n "$age" ] || continue
