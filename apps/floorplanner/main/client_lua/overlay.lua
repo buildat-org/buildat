@@ -361,18 +361,53 @@ local function draw_overlay()
 			end
 		end
 	end
-	-- The primary object's gaps to the walls
+	-- [FP_VOXEL_ALONE] A volume on its own: its width, height and depth as
+	-- lines along the edges from its corner nearest the camera, in place
+	-- of the gaps to the walls
+	local box = S.alone and M.voxel_size_box(S.alone.id)
+	if box then
+		local c = {}
+		for a, k in ipairs({"x", "y", "z"}) do
+			c[a] = math.abs(W(box[a]) - S.pos[k]) < math.abs(W(box[a + 3]) - S.pos[k])
+					and box[a] or box[a + 3]
+		end
+		local sizes = {}
+		for a = 1, 3 do
+			local e = {c[1], c[2], c[3]}
+			e[a] = c[a] == box[a] and box[a + 3] or box[a]
+			local mid = {(c[1] + e[1]) / 2, (c[2] + e[2]) / 2, (c[3] + e[3]) / 2}
+			sizes[a] = math.floor(math.abs(e[a] - c[a]) + 0.5)
+			debug:AddLine(magic.Vector3(W(c[1]), W(c[2]), W(c[3])),
+					magic.Vector3(W(e[1]), W(e[2]), W(e[3])), magic.Color(0.2, 0.6, 1.0), false)
+			world_label(mid[1], mid[2], mid[3], mm_text(sizes[a]))
+		end
+		local t = string.format("%d x %d x %d mm", sizes[1], sizes[2], sizes[3])
+		if M.alone_lines ~= t then
+			M.alone_lines = t
+			E.log:info("voxel alone: size lines " .. t)
+		end
+	else
+		M.alone_lines = nil
+	end
+	-- The primary object's gaps to the walls (logged, as a count, when they
+	-- change)
+	local gaps = 0
 	if S.primary and S.sel[S.primary] == "instance" and E.inst_data[S.primary] and
-			not E.inst_data[S.primary].hosted and not S.drag then
+			not E.inst_data[S.primary].hosted and not S.drag and not S.alone then
 		local it = E.inst_data[S.primary]
 		for _, g in ipairs(wall_gaps(S.primary)) do
 			if g.gap and g.gap > 0 then
+				gaps = gaps + 1
 				local ax, az = it.x + g.dir[1] * g.half, it.z + g.dir[2] * g.half
 				local bx, bz = ax + g.dir[1] * g.gap, az + g.dir[2] * g.gap
 				line(ax, az, bx, bz, magic.Color(0.2, 0.6, 1.0))
 				world_label((ax + bx) / 2, 0, (az + bz) / 2, mm_text(g.gap))
 			end
 		end
+	end
+	if M.gaps_shown ~= gaps then
+		M.gaps_shown = gaps
+		E.log:info("fp gaps: " .. gaps .. " shown")
 	end
 	-- The lines a dragged node was straightened onto (M.angle_snap), each
 	-- wall's angle and length on it

@@ -1094,6 +1094,44 @@ local function voxel_bounds(def)
 	return b
 end
 
+-- **[FP_VOXEL_ALONE] A volume's size as it stands**: the box of its cells'
+-- corners turned by its pitch, yaw and roll, {x0, y0, z0, x1, y1, z1} in
+-- the layout's mm, and its cells in its own axes; nil with no voxels
+function M.voxel_size_box(id)
+	local e = doc.ents[id]
+	local it = E.inst_data[id]
+	local b = e and voxel_bounds(e.ints.def)
+	if not b or not it then
+		return nil
+	end
+	local sz = doc.ents[e.ints.def].ints.voxel_size
+	local box = {math.huge, math.huge, math.huge, -math.huge, -math.huge, -math.huge}
+	for _, cx in ipairs({b[1] * sz, (b[4] + 1) * sz}) do
+		for _, cy in ipairs({b[2] * sz, (b[5] + 1) * sz}) do
+			for _, cz in ipairs({b[3] * sz, (b[6] + 1) * sz}) do
+				local x, y, z = geom.rot(cx, cy, cz, it.pitch, it.yaw, it.roll)
+				local p = {it.ox + x, it.oy + y, it.oz + z}
+				for a = 1, 3 do
+					box[a] = math.min(box[a], p[a])
+					box[a + 3] = math.max(box[a + 3], p[a])
+				end
+			end
+		end
+	end
+	return box, {b[4] - b[1] + 1, b[5] - b[2] + 1, b[6] - b[3] + 1}
+end
+function M.voxel_size_text(id)
+	local box, n = M.voxel_size_box(id)
+	if not box then
+		return "Size: no voxels"
+	end
+	local function r(a)
+		return math.floor(box[a + 3] - box[a] + 0.5)
+	end
+	return string.format("Size %d x %d x %d mm (%d x %d x %d voxels)", r(1),
+			r(2), r(3), n[1], n[2], n[3])
+end
+
 -- Whether anything is selected that the movement keys would move: the
 -- Nodes tool's nodes, else the selection
 function M.selected_any()
@@ -2486,6 +2524,100 @@ local function set_view(v)
 	refresh_panels()
 end
 
+-- **[FP_VOXEL_ALONE] On its own**: the selected volume the only thing of
+-- the plan drawn, ALONE_LIFT over the ground at its own x and z (the view's
+-- instance data, rebuild.lua; the document as it is), overcast at noon,
+-- in 3D with the camera going round its middle: the movement keys left and
+-- right round it and up and down over it (pitch -80..80), ALONE_TURN
+-- degrees a second, the wheel and a pinch in and out (its size x 0.6 to
+-- x 6). Out of it by the toggle, Escape, another tool or another selection,
+-- the view, the camera and the light back as they were.
+M.ALONE_TURN = 360
+function M.alone_extent()
+	local it = S.alone and E.inst_data[S.alone.id]
+	return it and math.max(it.ex, it.ey, it.ez, 300) or 1000
+end
+function M.alone_center()
+	local it = E.inst_data[S.alone.id]
+	return it and {x = W(it.x), y = W(it.y), z = W(it.z)} or S.pos
+end
+function M.alone_clamp(dist)
+	local s = W(M.alone_extent())
+	return math.max(s * 0.6, math.min(s * 6, dist))
+end
+function M.alone_camera()
+	local c = M.alone_center()
+	S.pitch = math.max(-80, math.min(80, S.pitch))
+	local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
+	local d = S.alone.dist
+	S.pos = {x = c.x - fx * d, y = c.y - fy * d, z = c.z - fz * d}
+end
+function M.enter_alone(id)
+	if S.alone or not E.inst_data[id] then
+		return
+	end
+	S.alone = {id = id, prev = {view = S.view, yaw = S.yaw, pitch = S.pitch,
+			pos = {x = S.pos.x, y = S.pos.y, z = S.pos.z}}}
+	if S.view ~= "3d" then
+		set_view("3d")
+	end
+	S.pitch = 30
+	S.daylight_key = nil
+	S.dirty = true
+end
+function M.leave_alone()
+	local a = S.alone
+	if not a then
+		return
+	end
+	S.alone = nil
+	for _, n in ipairs(M.alone_roots()) do
+		n:SetDeepEnabled(true)
+	end
+	place.shown = {}
+	if S.view ~= a.prev.view then
+		set_view(a.prev.view)
+	end
+	S.pos, S.yaw, S.pitch = a.prev.pos, a.prev.yaw, a.prev.pitch
+	S.daylight_key = nil
+	S.dirty = true
+	refresh_panels()
+	log:info("voxel alone: left")
+end
+function M.alone_roots()
+	return {walls_node, caps_node, overhead_node, pieces_node, images_node,
+			decals_node, lamps_node}
+end
+-- After a rebuild and each frame: everything of the plan hidden (once a
+-- rebuild) but the volume's mesh
+function M.apply_alone()
+	local a = S.alone
+	if not a then
+		return
+	end
+	if not a.hidden then
+		a.hidden = true
+		for _, n in ipairs(M.alone_roots()) do
+			n:SetDeepEnabled(false)
+		end
+	end
+	local m = E.voxel_meshes[a.id]
+	if m then
+		m.node.enabled = true
+	end
+	if not a.dist then
+		a.dist = M.alone_clamp(W(M.alone_extent()) * 2)
+	end
+	local n = #E.built
+	for _ in pairs(E.voxel_meshes) do
+		n = n + 1
+	end
+	if not a.logged then
+		a.logged = true
+		log:info(string.format("voxel alone: %d, %d nodes hidden", a.id, n - 1))
+	end
+end
+
 -- A view the user picked: 3D takes its own camera back. (On M: the chunk
 -- is at Lua's limit of 200 locals.)
 -- "3d_here": 3D from the camera there is -- walking's as it is, the plan
@@ -2795,6 +2927,20 @@ function M.voxel_mode_dropdown()
 	end) end)
 end
 
+-- [FP_VOXEL_ALONE] Editing a volume in the plan or on its own
+function M.voxel_alone_dropdown(id)
+	panel.keep(function() return panel.dropdown(props, "View", {
+		{"In the plan", "plan"}, {"On its own", "alone"}},
+		S.alone and "alone" or "plan", function(v)
+		if v == "alone" and not S.alone then
+			M.enter_alone(id)
+		elseif v == "plan" and S.alone then
+			M.leave_alone()
+		end
+		refresh_panels()
+	end) end)
+end
+
 local function build_props()
 	if props then
 		panel.discard(props)
@@ -3061,6 +3207,7 @@ local function build_props()
 		heading("Voxels " .. sel.id .. ": " .. n .. (links > 1 and
 				("   linked x" .. links) or ""))
 		int_field(i.def, "Voxel mm", "voxel_size", p.voxel_size)
+		panel.label(props, M.voxel_size_text(sel.id))
 		int_field(sel.id, "X mm", "x", i.x)
 		int_field(sel.id, "Z mm", "z", i.z)
 		panel.field(props, "Yaw deg", i.yaw / 1000, function(t)
@@ -3094,6 +3241,7 @@ local function build_props()
 		panel.label(props, "digs, Shift+click gives a voxel the entry")
 		if S.tool == "voxel" then
 			M.voxel_mode_dropdown()
+			M.voxel_alone_dropdown(sel.id)
 		end
 		panel.button(props, "Copy (Ctrl+D)", function() copy_selected(false) end)
 		panel.button(props, "Linked clone (Ctrl+L)", function()
@@ -5149,8 +5297,8 @@ do
 				magic.input:SetMouseMode(magic.MM_RELATIVE)
 			end
 			if S.view == "3d" then
-				-- Orbiting what is pointed
-				local p = camera_pivot(true)
+				-- Orbiting what is pointed, or the volume on its own
+				local p = S.alone and M.alone_center() or camera_pivot(true)
 				if p then
 					S.orbit = p
 					magic.input:SetMouseMode(magic.MM_RELATIVE)
@@ -5412,6 +5560,8 @@ do
 			S.pos = {x = S.pos.x + math.sin(yaw) * math.cos(pitch) * notches,
 					y = S.pos.y - math.sin(pitch) * notches,
 					z = S.pos.z + math.cos(yaw) * math.cos(pitch) * notches}
+		elseif S.alone and S.alone.dist then
+			S.alone.dist = M.alone_clamp(S.alone.dist * f)
 		elseif S.view == "2d" then
 			-- Zoom about the cursor: the point under it stays under it
 			local x0, z0 = cursor_floor()
@@ -5496,7 +5646,8 @@ do
 			S.dirty = true
 			-- Two fingers in 3D orbit round the plan's middle (a finger's
 			-- own point is what should move, user) and pinch toward it
-			local p = S.view == "3d" and (M.plan_middle() or camera_pivot(true))
+			local p = S.alone and M.alone_center() or
+					S.view == "3d" and (M.plan_middle() or camera_pivot(true))
 			S.gesture = {pivot = p or nil, dist = p and geom.len(geom.len(
 					p.x - S.pos.x, p.y - S.pos.y), p.z - S.pos.z) or 5}
 		end
@@ -5570,6 +5721,10 @@ do
 			local fx, fy, fz = geom.rot(0, 0, 1, S.pitch, S.yaw, 0)
 			local zoom = S.gesture.dist * (1 - d0 / d1)
 			S.gesture.dist = S.gesture.dist - zoom
+			if S.alone and S.alone.dist then
+				S.gesture.dist = M.alone_clamp(S.gesture.dist)
+				S.alone.dist = S.gesture.dist
+			end
 			S.pos = {x = S.pos.x + fx * zoom, y = S.pos.y + fy * zoom,
 					z = S.pos.z + fz * zoom}
 		end
@@ -5813,6 +5968,8 @@ do
 		elseif S.place_copy then
 			S.place_copy = nil
 			S.dirty = true
+		elseif S.alone then
+			M.leave_alone()
 		elseif S.paused then
 			close_pause()
 		elseif S.picker and S.picker.fit and S.picker.fit.adding then
@@ -6094,6 +6251,15 @@ local function move_camera(dt)
 		local rate = (S.shift and 180 or 60) * dt
 		S.yaw = S.yaw + turn * rate
 		S.pitch = math.max(-89, math.min(89, S.pitch - tilt * rate))
+	end
+	-- [FP_VOXEL_ALONE] Round the volume (M.alone_camera puts the camera)
+	if S.alone then
+		if not S.paused then
+			local rate = M.ALONE_TURN * dt
+			S.yaw = S.yaw + r * rate
+			S.pitch = math.max(-80, math.min(80, S.pitch + f * rate))
+		end
+		return
 	end
 	if S.view == "walk" then
 		if S.stick then
@@ -7103,7 +7269,9 @@ function M.wb_tick(dt)
 	local fx, fz = math.sin(math.rad(S.yaw)), math.cos(math.rad(S.yaw))
 	local id
 	for _, ahead in ipairs({0, 300, 600}) do
-		id = id or room_at(S.pos.x * 1000 + fx * ahead, S.pos.z * 1000 + fz * ahead)
+		-- Outdoors always for a volume on its own ([FP_VOXEL_ALONE])
+		id = id or not S.alone and room_at(S.pos.x * 1000 + fx * ahead,
+				S.pos.z * 1000 + fz * ahead) or nil
 	end
 	local slot = id and M.room_slot[id]
 	local pr = slot and M.probe_rows[slot]
@@ -7267,11 +7435,12 @@ function M.update(dt)
 	end
 	M.save_view(dt)
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
-	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
-	-- a layout's nodes hold its walls and objects as children.
+	-- The floors above hidden in 3D, when the layouts menu says so, and
+	-- every layout but a volume on its own ([FP_VOXEL_ALONE]). Deep: a
+	-- layout's nodes hold its walls and objects as children.
 	place.shown = place.shown or {}
 	for id, parts in pairs(place.parts) do
-		local shown = not (S.hide_above and S.view == "3d" and
+		local shown = not S.alone and not (S.hide_above and S.view == "3d" and
 				place.above and place.above[id])
 		if place.shown[id] ~= shown then
 			place.shown[id] = shown
@@ -7280,6 +7449,7 @@ function M.update(dt)
 			end
 		end
 	end
+	M.apply_alone()
 	move_camera(dt)
 	-- A viewport's camera does not move: whatever moved it, it is put back
 	local vp = S.vp and doc.ents[S.vp]
@@ -7299,6 +7469,14 @@ function M.update(dt)
 				pitch = S.pitch}
 	elseif S.view == "walk" then
 		S.walk.yaw, S.walk.pitch = S.yaw, S.pitch
+	end
+	-- [FP_VOXEL_ALONE] Out of it when the tool or the selection changes
+	if S.alone and (S.tool ~= "voxel" or S.primary ~= S.alone.id or
+			not E.inst_data[S.alone.id]) then
+		M.leave_alone()
+	end
+	if S.alone and S.alone.dist then
+		M.alone_camera()
 	end
 	place_cameras()
 	send_presence(dt)
@@ -7558,6 +7736,82 @@ function M.start(d)
 			M.send_shown({{op = "set", ent = {id = e.id, ints = {x = e.ints.x + 1000}}},
 					{op = "set", ent = {id = 999999999, ints = {x = 0}}}})
 		end
+	end)
+	-- [FP_VOXEL_ALONE] For a check: "event fp_volume x z w h d size", a
+	-- volume of w x h x d voxels of size mm at (x, z), selected under the
+	-- voxel tool; "event fp_yaw deg", its yaw turned; "event fp_alone
+	-- on|off"; "event fp_voxel_mode place|dig"; "event fp_cells", its
+	-- cells, its size and the camera logged
+	magic.SubscribeToEvent("command_seq:fp_volume", function(_, d)
+		local v = {}
+		for w in d:GetString("Param"):gmatch("%S+") do
+			v[#v + 1] = tonumber(w)
+		end
+		local def, inst = doc.placeholder(), doc.placeholder()
+		send({
+			{op = "create", ent = {id = def, type = "definition", ints = {
+					kind = KIND.voxel, voxel_size = v[6]}}},
+			{op = "create", ent = {id = inst, type = "instance", ints = {def = def,
+					x = v[1], z = v[2], offset = 0}}},
+		}, function(err)
+			if err ~= "" then
+				return
+			end
+			local cells = {}
+			for x = 0, v[3] - 1 do
+				for y = 0, v[4] - 1 do
+					for z = 0, v[5] - 1 do
+						cells[doc.voxel_key(x, y, z)] = default_material()
+					end
+				end
+			end
+			doc.set_voxels(S.real[def], cells)
+			set_tool("voxel")
+			S.sel, S.primary = {[S.real[inst]] = "instance"}, S.real[inst]
+			S.voxel_mode = "place"
+			refresh_panels()
+			log:info("fp_volume: " .. S.real[inst])
+		end)
+	end)
+	magic.SubscribeToEvent("command_seq:fp_yaw", function(_, d)
+		local e = doc.ents[S.primary or 0]
+		if e then
+			send({{op = "set", ent = {id = e.id, ints = {yaw = (e.ints.yaw or 0) +
+					tonumber(d:GetString("Param")) * 1000}}}})
+		end
+	end)
+	magic.SubscribeToEvent("command_seq:fp_alone", function(_, d)
+		if d:GetString("Param") == "on" then
+			M.enter_alone(S.primary)
+		else
+			M.leave_alone()
+		end
+		refresh_panels()
+	end)
+	magic.SubscribeToEvent("command_seq:fp_voxel_mode", function(_, d)
+		S.voxel_mode = d:GetString("Param")
+	end)
+	magic.SubscribeToEvent("command_seq:fp_cells", function()
+		local e = doc.ents[S.primary or 0]
+		if not e then
+			return
+		end
+		local cells = {}
+		for key in pairs(doc.voxels[e.ints.def] or {}) do
+			local x, y, z = doc.voxel_cell(key)
+			cells[#cells + 1] = string.format("%d,%d,%d", x, y, z)
+		end
+		table.sort(cells)
+		local n = #E.built
+		for _ in pairs(E.voxel_meshes) do
+			n = n + 1
+		end
+		log:info(string.format("fp_cells: %s; %s; camera %.1f %.1f %.2f %.2f %.2f "
+				.. "dist %s; %d nodes, %s; %s; sky %s %s", table.concat(cells, " "),
+				M.voxel_size_text(e.id), S.yaw, S.pitch, S.pos.x, S.pos.y, S.pos.z,
+				S.alone and S.alone.dist and string.format("%.2f", S.alone.dist) or "-",
+				n, S.view, S.alone and "alone" or "plan", tostring(M.sun().sky),
+				tostring(M.sun().minute)))
 	end)
 	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing

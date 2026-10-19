@@ -96,6 +96,12 @@ local function build_inst_data()
 					(lz0 + lz1) / 2, pitch, yaw, roll)
 			local ex, ey, ez = geom.rot(lx1 - lx0, ly1 - ly0, lz1 - lz0, pitch, 0,
 					roll)
+			-- [FP_VOXEL_ALONE] On its own: its bottom ALONE_LIFT over the
+			-- ground, for everything that reads where it is
+			if S.alone and S.alone.id == e.id then
+				local bottom = oy + cy - math.abs(ey) / 2
+				oy = oy + (-place.current().y + M.ALONE_LIFT - bottom)
+			end
 			it = {x = ox + cx, y = oy + cy, z = oz + cz, yaw = yaw, pitch = pitch,
 					roll = roll, ex = math.abs(ex), ey = math.abs(ey),
 					ez = math.abs(ez), hx = (lx1 - lx0) / 2, hy = (ly1 - ly0) / 2,
@@ -210,8 +216,9 @@ local function update_voxel_meshes(seen)
 			local e = E.doc.ents[id].ints
 			local def = e.def
 			local on = lamp_on(id)
-			-- and the room it stands in, for the sky's share ([FP_DAYLIGHT])
-			local occ = M.inst_occlusion(it)
+			-- and the room it stands in, for the sky's share ([FP_DAYLIGHT]);
+			-- on its own outdoors ([FP_VOXEL_ALONE])
+			local occ = (S.alone and S.alone.id == id) and 0 or M.inst_occlusion(it)
 			local key = (E.doc.voxel_version[def] or 0) .. ":" .. E.palette_gen ..
 					":" .. it.size .. ":" .. def .. ":" .. e.align .. ":" ..
 					tostring(on) .. ":" .. occ
@@ -1943,6 +1950,10 @@ rebuild = function()
 	ground_node.position = magic.Vector3(0, W(-cur.y), 0)
 	pieces_node.enabled = S.view ~= "2d"
 	caps_node.enabled = S.view == "2d"
+	if S.alone then
+		S.alone.hidden = nil
+		M.apply_alone()
+	end
 	S.daylight_key = nil
 	S.dirty = false
 	M.lap("rest")
@@ -2043,9 +2054,19 @@ M.UNLIT = {ambient = magic.Color(0.55, 0.55, 0.58),
 -- ("Saved"), or a copy of them this client changes for its own view and
 -- sends nowhere ("Temporary", S.sun_temp, for the plan it was made in),
 -- which a viewer may change too
+M.ALONE_LIFT = 5000
 function M.sun()
 	local t = S.sun_temp
 	local base = (t and t.plan == E.doc.plan_name) and t or settings()
+	-- [FP_VOXEL_ALONE] A volume on its own: overcast at noon, still
+	if S.alone then
+		local t2 = {}
+		for k, v in pairs(base) do
+			t2[k] = v
+		end
+		t2.sky, t2.minute, t2.lapse = 1, 720, 0
+		return t2
+	end
 	-- A viewport that recalls its moment: its day and minute, still
 	local vp = S.vp and E.doc.ents[S.vp]
 	if vp and vp.ints.recall == 1 then
