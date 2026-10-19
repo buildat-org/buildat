@@ -256,8 +256,21 @@ return function(game, sounds)
 				local dx, dz = p.x - m.last.x, p.z - m.last.z
 				local speed = dt > 0 and math.sqrt(dx * dx + dz * dz) / dt or 0
 				m.last = magic.Vector3(p.x, p.y, p.z)
+				-- [SKELDAT_BOAT_STAND] On a boat it stands: the boat
+				-- moves, the limbs stay at rest
+				local aboard = m.node:GetVar("skeldat_boat"):GetInt() == 1
+				local moving = speed
+				if aboard then
+					speed = 0
+				end
 				m.phase = m.phase + speed * dt * 5
 				local a = math.sin(m.phase) * math.min(1, speed) * 35
+				if aboard and moving > 0.2 and not m.stood then
+					m.stood = true
+					log:info(string.format("skeldat: a skeleton stands on its "
+							.. "moving boat (%d), its limbs at %d degrees",
+							m.node:GetID(), a))
+				end
 				-- The draw's pose, eased in and out over 0.15 s: the arms
 				-- from the swing to forward, -90 about the shoulder's x
 				-- [SKELDAT_BOATS] On a boat: a flat box under it in the

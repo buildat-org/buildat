@@ -3016,6 +3016,9 @@ grep -aq "skeldat: a skeleton ([0-9]*) takes to a boat" "$log58" ||
 	fail "no skeleton took to a boat ($log58)"
 grep -aq "skeldat: a skeleton on a boat" "$t/boats1.log" ||
 	fail "the client drew no boat ($t/boats1.log)"
+# [SKELDAT_BOAT_STAND] Standing on it as it moves, not walking
+grep -aq "skeldat: a skeleton stands on its moving boat ([0-9]*), its limbs at 0 degrees" "$t/boats1.log" ||
+	fail "the skeleton on the moving boat not standing ($t/boats1.log)"
 boats "$t/srv58_2.log" boats2 170000
 boat=$(python3 -I - "$log58" "$t/srv58_2.log" <<'PY'
 import sys, re
