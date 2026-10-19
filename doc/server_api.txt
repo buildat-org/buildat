@@ -58,7 +58,8 @@ on_tick(const interface::TickEvent&); a handler with no parameter takes
 none). A type that is no Event::Private does not compile, an event that
 carries another throws, and a second handler for one name throws. A
 handler on another object names its type: sub<network::Packet>(m_server,
-name, [&](const network::Packet &p){ ... }). The older way still works:
+name, [&](const network::Packet &p){ ... }). The older way still works
+(use sub() instead):
 server->sub_event(this, Event::t(name)) in init() and an event() of the
 module's own listing EVENT_VOIDN("core:start", on_start) and
 EVENT_TYPEN("core:tick", on_tick, interface::TickEvent) (event.h); a
@@ -117,9 +118,9 @@ interface/server.h -- interface::Server, the one object a module holds
   true (a missing module is an error)
 - access_module_optional(name, cb): the same, but false and cb not called
   when the module is not loaded
-- sub_event(module, type), emit_event(Event) and the two templates
-  emit_event(type) / emit_event(type, new PrivateT(...)): the private is
-  owned by the event
+- sub_event(module, type) (use sub() instead), emit_event(Event) and the
+  two templates emit_event(type) / emit_event(type, new PrivateT(...)):
+  the private is owned by the event
 - tmp_store_data / tmp_restore_data: a named blob that survives a reload
 - add_file_path(name, path) / get_file_path(name): the file namespace the
   client mirrors (builtin/client_file serves it); "" when not found
@@ -149,10 +150,10 @@ interface/event.h -- interface::Event: a Type (an integer from
 Event::t("name"), the global registry's) and an optional Private, the
 payload struct deriving from Event::Private. EventRegistry names types
 (find(name) answers 0 for a name with no type yet, without making one, for
-a name off the network); getGlobalEventRegistry(). The EVENT_VOIDN / EVENT_TYPEN macros are the
-dispatch inside event(), looking their type up once (a static per site);
-EVENT_DISPATCH_VOID / EVENT_DISPATCH_TYPE take a Type already looked up. A
-match returns from event() after its handler ([EVENT_DISPATCH]), so work
+a name off the network); getGlobalEventRegistry(). The EVENT_VOIDN /
+EVENT_TYPEN macros (use sub() instead) are the dispatch inside event(),
+looking their type up once (a static per site); EVENT_DISPATCH_VOID takes a
+Type already looked up. A match returns from event() after its handler ([EVENT_DISPATCH]), so work
 for every event goes in a caller of a function that holds only the list;
 an event with no payload or the wrong one throws.
 
@@ -333,7 +334,8 @@ at render time. The bits a layout leaves unbound (each one's comment in
 voxel.h names them) are the game's: bound to a field of its own in a copy of
 the layout before set_format(), not grown into later. VoxelInstance's
 legacy06_id(), legacy06_skylight() and legacy06_lamplight() are
-buildat_legacy_06()'s bits by hand, right only for a world that set it.
+buildat_legacy_06()'s bits by hand, right only for a world that set it
+(use the buildat_legacy_06() format's id_of() / light_pair() instead).
 
 **A saved world opened under another format** (voxelworld; the rule is
 world_persistence_plan.md's "The format, and migration"). The engine moves
@@ -418,7 +420,8 @@ CustomGeometry; the LOD pair (generate_voxel_lod_volume /
 generate_voxel_lod_geometry / set_voxel_lod_geometry); the physics boxes
 (generate_voxel_physics_boxes -> TemporaryBox, set_voxel_physics_boxes);
 HorizonMap and column_heights (the terrain's own occlusion of the sky,
-[PBR_FIT]); the old fixed path set_8bit_voxel_geometry; preload_textures.
+[PBR_FIT]); the old fixed path set_8bit_voxel_geometry (use
+set_voxel_geometry instead); preload_textures.
 
 
 builtin, the modules' interfaces
@@ -638,11 +641,6 @@ runs on the pool and may access other modules; the result is merged into
 the world), enable(), get_num_sections_queued(); events QueueModifiedEvent,
 SectionGenerated.
 
-builtin/ground_plane_lighting/api.h -- ground_plane_lighting::Interface:
-create_instance / get_instance / delete_instance per scene; an Instance's
-set_yst / get_yst is the ground plane's height per column, the older
-lighting the small games use.
-
 builtin/luanti_mapgen/api.h -- luanti_mapgen::Interface: Luanti's mapgens
 in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), take_gennotify()
 and take_maps() -> the GennotifyEvents and maps a generation produced, per
@@ -667,8 +665,7 @@ the client's luanti:* input packets are the module's and its leave removes
 the player; player_in_world(peer). The bridge to the game's Lua:
 call_json(name, json) calls core.<name>(value) with a JSON value in and
 out, and core.buildat_emit(name, value) in the game's Lua is the event
-"luanti:app:<name>" (AppEvent, the value as JSON); call_string_list(name)
-is the older call for a list of strings. The rest: add_player,
+"luanti:app:<name>" (AppEvent, the value as JSON). The rest: add_player,
 place_player, set_admin, chat_send, remove_player, set_player_pos,
 player_fell, dig_node, punch_node, place_node, use_wielded, drop_wielded,
 punch_object, set_wield_index, chat_message, set_chat_limit, get_scene,
@@ -691,9 +688,8 @@ up here as a diff.
 builtin/accounts/api.h: PeerId, Login, level_name, Interface, name_of, find_peer, find_peers, set_multiple_logins, address_of, is_admin, exists, check_kept, account_names, is_local, launched, set_lan_name, kick, ban, unban, ban_list, create_account, check_password, set_password, delete_account, totp_on, check_totp, totp_begin, totp_confirm, totp_off, totp_uri, reported_bans, registration_open, linked_count, can_mail, mail, level, set_level, report_storage, storage_budget, notify, access
 builtin/chat/api.h: Interface, join, leave, say, set_default_min, may_talk, access
 builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_file_path, add_file_paths, get_server_icon, access, serve_extension
-builtin/ground_plane_lighting/api.h: SceneReference, Instance, set_yst, get_yst, Interface, create_instance, delete_instance, get_instance, access
 builtin/loader/api.h: Interface, activate, get_module_info, access
-builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, set_chat_gate, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_string_list, call_json, set_server_physics, set_generated_sounds, access
+builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, set_chat_gate, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_json, set_server_physics, set_generated_sounds, access
 builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
 builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, open_groups, group, decide, audit_log, appeal, appeals, decide_appeal, access
@@ -711,7 +707,7 @@ interface/atlas_cereal.h: serialize, r
 interface/bignum.h: add, mul, mod, sub_mod, mul_mod, mod_exp, random_bytes
 interface/compress.h: compress_zlib, decompress_zlib, compress_deflate_raw, decompress_deflate_raw, compress_zstd, decompress_zstd, zstd_frame_size
 interface/debug.h: log_current_backtrace, log_exception_backtrace, StoredBacktrace, get_current_backtrace, get_exception_backtrace, log_backtrace, ThreadBacktrace, log_backtrace_chain, watchdog_alive, watchdog_on_freeze, set_crash_dump_dir, crash_dump_untold, SigConfig, init_signal_handlers
-interface/event.h: EVENT_DISPATCH_VOID, EVENT_DISPATCH_TYPE, EVENT_VOIDN, EVENT_TYPEN, Event, Type, Private, ~Private, t, EventRegistry, type, find, name, getGlobalEventRegistry
+interface/event.h: EVENT_DISPATCH_VOID, EVENT_VOIDN, EVENT_TYPEN, Event, Type, Private, ~Private, t, EventRegistry, type, find, name, getGlobalEventRegistry
 interface/file_watch.h: FileWatch, ~FileWatch, add, get_fds, report_fd, update, createFileWatch
 interface/fs.h: Node, list_directory, create_directories, get_cwd, get_absolute_path, is_inside_path, path_exists, copy_file, remove_all, rename, write_file, migrate_user_apps, file_size, directory_tree_size, icon_png_ok, read_icon_png, check_file_extension, strip_file_extension, strip_file_name
 interface/http.h: http_get, http_post, send_mail, mail_supported, http_download

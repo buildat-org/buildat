@@ -318,12 +318,6 @@ namespace luanti
 		// The scene the map is in, or null until luanti:game_loaded
 		virtual SceneReference get_scene() = 0;
 
-		// core.<name>() called and its result read as a list of strings:
-		// how a module beside this one asks the game's Lua a question of
-		// its own -- a function it registered through load_lua() -- once
-		// the game is loaded. Empty on an error, which is logged.
-		virtual sv_<ss_> call_string_list(const ss_ &name) = 0;
-
 		// [LUANTI_APP_GLUE] core.<name>(value) called, the value and the
 		// result as JSON ("null" for none): the one way an app's C++ reaches
 		// any of the game's functions -- its own, handed in by load_lua(),

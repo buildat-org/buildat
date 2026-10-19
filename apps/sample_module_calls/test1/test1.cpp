@@ -17,12 +17,9 @@ struct Module: public interface::Module
 {
 	interface::Server *m_server;
 
-	Event::Type m_EventType_test1_thing; // You can cache these for more speed
-
 	Module(interface::Server *server):
 		interface::Module(MODULE),
-		m_server(server),
-		m_EventType_test1_thing(Event::t("test1:thing"))
+		m_server(server)
 	{
 		log_v(MODULE, "test1 construct");
 	}
@@ -35,26 +32,11 @@ struct Module: public interface::Module
 	void init()
 	{
 		log_v(MODULE, "test1 init");
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, m_EventType_test1_thing);
-		m_server->sub_event(this, Event::t("network:client_connected"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
-		m_server->sub_event(this, Event::t("network:packet_received"));
-	}
-
-	void event(const Event::Type &type, const Event::Private *p)
-	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_DISPATCH_TYPE(m_EventType_test1_thing, on_thing, Thing)
-		EVENT_TYPEN("network:client_connected", on_client_connected,
-				network::NewClient)
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
-		EVENT_TYPEN("network:packet_received", on_packet_received, network::Packet)
-	}
-
-	void on_start()
-	{
+		sub(m_server, "test1:thing", &Module::on_thing);
+		sub(m_server, "network:client_connected", &Module::on_client_connected);
+		sub(m_server, "client_file:files_transmitted",
+				&Module::on_files_transmitted);
+		sub(m_server, "network:packet_received", &Module::on_packet_received);
 	}
 
 	void on_thing(const Thing &thing)
@@ -105,7 +87,7 @@ struct Module: public interface::Module
 
 	void on_packet_received(const network::Packet &packet)
 	{
-		log_i(MODULE, "test1::on_packet_received: name=%zu, size=%zu",
+		log_i(MODULE, "test1::on_packet_received: name=%s, size=%zu",
 				cs(packet.name), packet.data.size());
 	}
 };

@@ -275,7 +275,8 @@ buildat.set_quad_geometry(node, quads) -> {tile, ...}
   every quad; a posed model is one build per frame ([OBJECT_MESH])
 buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, voxel_reg, atlas_reg,
   ox, oy, oz)
-- The old fixed-format path, kept for the small games: one byte a voxel.
+- The old fixed-format path, kept for the small games: one byte a voxel
+  (use buildat.set_voxel_geometry instead).
   ox, oy, oz is where the block's (0, 0, 0) sits in the world, which a voxel
   of uv_scale > 1 takes its slice of the texture repeat from ([WORLD_UV]);
   required, and a block with no world position (a body, a model) passes

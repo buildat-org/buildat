@@ -899,11 +899,6 @@ struct Module: public interface::Module, public luanti::Interface,
 				(sneak ? "true" : "false")+")");
 	}
 
-	sv_<ss_> call_string_list(const ss_ &name)
-	{
-		return string_list_from_lua(name.c_str());
-	}
-
 	ss_ call_json(const ss_ &name, const ss_ &json)
 	{
 		interface::MutexScope ms(m_lua_mutex);

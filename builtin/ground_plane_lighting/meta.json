@@ -1,7 +1,0 @@
-{
-	"dependencies": [
-		{"module": "voxelworld"},
-		{"module": "network"},
-		{"module": "client_lua"}
-	]
-}

@@ -9,17 +9,6 @@
 // function that holds only the list.
 #define EVENT_DISPATCH_VOID(event_type, handler) \
 	if(type == event_type){handler(); return; }
-#define EVENT_DISPATCH_TYPE(event_type, handler, param_type) \
-	if(type == event_type){ \
-		auto p0 = dynamic_cast<const param_type*>(p); \
-		if(p0) handler(*p0); \
-		else if(p == nullptr) throw Exception(ss_()+"Missing parameter to "+ \
-				__PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
-				#param_type ")"); \
-		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
-					  "::" #handler " (expected " #param_type ")"); \
-		return; \
-	}
 // The name's type looked up once a site: the name is a literal, and a type
 // is never freed
 #define EVENT_VOIDN(name, handler) { \
@@ -29,7 +18,16 @@
 #define EVENT_TYPEN(name, handler, param_type) { \
 	static const interface::Event::Type event_type_ = \
 			interface::Event::t(name); \
-	EVENT_DISPATCH_TYPE(event_type_, handler, param_type) }
+	if(type == event_type_){ \
+		auto p0 = dynamic_cast<const param_type*>(p); \
+		if(p0) handler(*p0); \
+		else if(p == nullptr) throw Exception(ss_()+"Missing parameter to "+ \
+				__PRETTY_FUNCTION__+"::" #handler " (parameter type: " \
+				#param_type ")"); \
+		else throw Exception(ss_()+"Invalid parameter to "+__PRETTY_FUNCTION__+ \
+					  "::" #handler " (expected " #param_type ")"); \
+		return; \
+	} }
 
 namespace interface
 {

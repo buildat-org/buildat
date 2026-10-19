@@ -18,9 +18,10 @@ cat > "$t/c.cpp" <<'CPP'
 struct Param { virtual ~Param(){} };
 static int called = 0;
 static void handler(const Param &){ called++; }
-static void dispatch(int type, const Param *p)
+interface::Event::Type interface::Event::t(const ss_ &){ return 1; }
+static void dispatch(interface::Event::Type type, const Param *p)
 {
-	EVENT_DISPATCH_TYPE(1, handler, Param)
+	EVENT_TYPEN("x", handler, Param)
 }
 int main()
 {

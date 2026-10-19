@@ -23,6 +23,7 @@
 #include "interface/voxel.h"
 #include "interface/voxel_volume.h"
 #include "luanti/api.h"
+#include "core/json.h"
 #include "voxelworld/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
@@ -229,13 +230,15 @@ struct Module: public interface::Module
 			log_i(MODULE, "%s is plane %i: %s", STATE_PLANE, m_state_plane,
 					cs(world->get_voxel_reg()->get_format().dump()));
 		});
-		sv_<ss_> flat;
+		ss_ r;
 		luanti::access(m_server, [&](luanti::Interface *i){
-			flat = i->call_string_list("__voxel_physics_props");
+			r = i->call_json("__voxel_physics_props", "null");
 		});
+		const json::Value flat = json::load_string(r.empty() ? "null" : r.c_str());
 		size_t structural = 0;
-		for(const ss_ &line : flat){
-			std::istringstream is(line);
+		for(unsigned int n = 0; flat.is_array() && n < flat.size(); n++){
+			const json::Value &line = flat.at(n);
+			std::istringstream is(line.is_string() ? line.as_string() : "");
 			int id = 0, s = 0, span = 0, density = 0, capacity = 0;
 			is >> id >> s >> span >> density >> capacity;
 			if(id < 0 || id > 65535)
