@@ -71,6 +71,8 @@ struct Mobs
 	uint32_t walk_next = 0;
 	bool walk_queued = false;
 	size_t light_steps = 0, woken = 0;
+	// [SKELDAT_SUN_SHELTER] Steps refused for the sun, for the report
+	size_t sun_kept = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
 	// spawning of its own, and the mobs named at x, z from the first
 	// player placed, once, standing still for half a minute; "bones 1 0 8"
@@ -851,12 +853,34 @@ struct Mobs
 					if(m.y < -1000)
 						burnt.push_back({key, 1000});
 				};
+				// Water at the feet or the head; lava not ([SKELDAT_SUN_SHELTER]:
+				// it burns, as it does a boar, 4 hp a second)
+				const uint32_t lava = world.id_of("skeldat:lava");
 				auto in_water = [&](float x, float y, float z){
 					const int bx = (int)std::floor(x + 0.5f),
 							by = (int)std::floor(y + 0.5f),
 							bz = (int)std::floor(z + 0.5f);
-					return world.is_water(w, bx, by, bz) ||
-							world.is_water(w, bx, by + 1, bz);
+					return (world.is_water(w, bx, by, bz) &&
+							world.wid(w, bx, by, bz) != lava) ||
+							(world.is_water(w, bx, by + 1, bz) &&
+							world.wid(w, bx, by + 1, bz) != lava);
+				};
+				auto in_lava = [&](float x, float y, float z){
+					const int bx = (int)std::floor(x + 0.5f),
+							by = (int)std::floor(y + 0.5f),
+							bz = (int)std::floor(z + 0.5f);
+					if(world.wid(w, bx, by, bz) != lava &&
+							world.wid(w, bx, by + 1, bz) != lava){
+						m.lava_t = 0;
+						return;
+					}
+					m.lava_t += dt;
+					if(m.lava_t >= 1){
+						m.lava_t = 0;
+						log_i(MODULE, "skeldat: the %s (%u) burns in lava",
+								MOB_KIND[m.kind], key);
+						harmed.push_back({key, hazards::LAVA_HARM});
+					}
 				};
 				if(m.kind == SKELETON){
 					// The light form decides (step_light()); here the
@@ -889,6 +913,7 @@ struct Mobs
 						drowned.push_back(key);
 						continue;
 					}
+					in_lava(m.bx, m.by, m.bz);
 					// The sun burns it, unless bones are round its light
 					// form
 					burns(m.x, m.y, m.z);
@@ -973,8 +998,10 @@ struct Mobs
 					m.bx = m.x, m.by = m.y, m.bz = m.z;
 					if(in_water(m.x, m.y, m.z))
 						drowned.push_back(key);
-					else
+					else {
 						burns(m.x, m.y, m.z);
+						in_lava(m.x, m.y, m.z);
+					}
 					continue;
 				}
 				if(m.y < -1000)
@@ -1295,6 +1322,93 @@ struct Mobs
 		}
 	}
 
+	// [SKELDAT_SUN_SHELTER] Whether the sun is a danger to a bone skeleton
+	// now: from SHELTER_DAWN before sunrise (world.sun()'s 0.23) to sunset
+	bool sun_danger() const
+	{
+		return world.day >= 0.23 - SHELTER_DAWN && world.day <= 0.77;
+	}
+	// Whether feet at (x, y, z) would burn by day: the voxel's sky light 12
+	// or more and no bones round it (world.sun_safe()); for a light form
+	// with no body the column top's, under the sky, safe at FLOOD
+	bool exposed(const Mob &m, int x, float y, int z)
+	{
+		if(!m.node_id){
+			const long c = world.column(x, z);
+			return c >= 0 && world.top_b[c] < skeldat::bones::FLOOD;
+		}
+		bool out = false;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			out = exposed_in(w, x, y, z);
+		});
+		return out;
+	}
+	bool exposed_in(voxelworld::Instance *w, int x, float y, int z)
+	{
+		int sky, lamp;
+		world.light(w, x, (int)std::floor(y + 0.5f), z, sky, lamp);
+		return sky >= 12 && world.sun_safe(w, (float)x, y, (float)z) == 0;
+	}
+	// Rule 1: a step to (x, y, z) refused while the sun is a danger, the
+	// skeleton safe where it stands and the step not
+	// simplified: the step's voxel only; a sunlit one between is not read
+	bool sun_refuses(const Mob &m, int x, float y, int z)
+	{
+		if(!sun_danger() || !exposed(m, x, y, z) ||
+				exposed(m, (int)std::floor(m.x + 0.5f), m.y,
+				(int)std::floor(m.z + 0.5f)))
+			return false;
+		sun_kept++;
+		return true;
+	}
+	// Rule 2: m out in the sun while it is a danger, at most every
+	// SHELTER_WAIT: the nearest feet voxels within SHELTER_RANGE that are
+	// not exposed (for a body, on the ground within a step up and three
+	// down of its own height; for a light form, column tops at FLOOD), a
+	// way searched to each of the first SHELTER_TRIES until one is found
+	bool seek_shelter(uint32_t key, Mob &m)
+	{
+		const int mx = (int)std::floor(m.x + 0.5f), mz = (int)std::floor(m.z + 0.5f);
+		if(!sun_danger() || world.t < m.shelter_t || !exposed(m, mx, m.y, mz))
+			return false;
+		m.shelter_t = world.t + SHELTER_WAIT;
+		sv_<vp::P> found;
+		// The columns in rings, in one access for a body's voxels
+		auto scan = [&](voxelworld::Instance *w){
+			for(int r = 1; r <= SHELTER_RANGE && (int)found.size() < SHELTER_TRIES; r++)
+			for(int dz = -r; dz <= r && (int)found.size() < SHELTER_TRIES; dz++)
+			for(int dx = -r; dx <= r && (int)found.size() < SHELTER_TRIES;
+					dx += (std::abs(dz) == r ? 1 : 2 * r)){
+				const int x = mx + dx, z = mz + dz;
+				if(w){
+					const Ground g = world.ground(w, (float)x, m.y, (float)z,
+							MOB_HEIGHT[SKELETON]);
+					if(g.found && !g.water && !exposed_in(w, x, g.y, z))
+						found.push_back(vp::P(x, (int)std::floor(g.y + 1.0f), z));
+					continue;
+				}
+				const long c = world.column(x, z);
+				if(c >= 0 && world.top_y[c] != NO_GROUND &&
+						world.top_b[c] >= skeldat::bones::FLOOD)
+					found.push_back(vp::P(x, world.top_y[c] + 1, z));
+			}
+		};
+		if(m.node_id)
+			voxelworld::access(world.server, world.scene, scan);
+		else
+			scan(nullptr);
+		for(const vp::P &at : found)
+			if(search_way(key, m, at, SHOT_CAP, false)){
+				log_i(MODULE, "skeldat: a skeleton (%u) finds shelter at %d,%d,%d",
+						key, at.x, at.y, at.z);
+				m.shelter_route = true;
+				return true;
+			}
+		log_i(MODULE, "skeldat: a skeleton (%u) finds no shelter (%zu places "
+				"tried)", key, found.size());
+		return false;
+	}
+
 	void step_light(float dt)
 	{
 		const int64_t t0 = interface::os::time_us();
@@ -1357,6 +1471,17 @@ struct Mobs
 					mz = (int)std::floor(m.z + 0.5f);
 			if(!growth.ended)
 				drop_into_holes(mx, mz);
+			// [SKELDAT_SUN_SHELTER] On its way to shelter, or looking for one
+			if(m.shelter_route && !m.route.empty()){
+				follow_route(kv.first, m);
+				continue;
+			}
+			m.shelter_route = false;
+			if(seek_shelter(kv.first, m)){
+				m.shot_route = false;
+				follow_route(kv.first, m);
+				continue;
+			}
 			// Fighting: a bow's distance, between 3 and 9, that a sword's
 			// reach can still close
 			if(m.node_id && m.mode == FIGHT){
@@ -1396,7 +1521,7 @@ struct Mobs
 				const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
 						z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
 				const float y = next_y(m, x, z);
-				if(y <= m.y + 1.01f && y >= m.y - 2.01f)
+				if(y <= m.y + 1.01f && y >= m.y - 2.01f && !sun_refuses(m, x, y, z))
 					m.x = (float)x, m.z = (float)z, m.y = y;
 				continue;
 			}
@@ -1482,9 +1607,12 @@ struct Mobs
 			// Wandering, it keeps to its footprint
 			const bool stray = !to && m.goal_fp >= 0 && own == m.goal_fp &&
 					world.footprint(x, z) != m.goal_fp;
-			if(!stray && y <= m.y + 1.01f && y >= m.y - 2.01f)
+			// A step into the sun is a wall's, with no way searched past it
+			const bool sunny = !stray && y <= m.y + 1.01f && y >= m.y - 2.01f &&
+					sun_refuses(m, x, y, z);
+			if(!stray && !sunny && y <= m.y + 1.01f && y >= m.y - 2.01f)
 				m.x = (float)x, m.z = (float)z, m.y = y;
-			else if(to && ty > -1000 && world.t >= m.search_t &&
+			else if(!sunny && to && ty > -1000 && world.t >= m.search_t &&
 					(!goal_walk || take_walk_search(kv.first, m)) &&
 					search_way(kv.first, m, vp::P(tx, ty, tz)))
 				m.detour = 0;
@@ -1611,9 +1739,10 @@ struct Mobs
 			if(c >= 0 && world.top_y[c] != NO_GROUND)
 				y = world.top_y[c] + 0.5f;
 		}
-		// The world changed under it, or a column top that is not the way
+		// The world changed under it, or a column top that is not the way;
+		// or a step into the sun ([SKELDAT_SUN_SHELTER])
 		if(std::abs(n.x - mx) > 1 || std::abs(n.z - mz) > 1 ||
-				std::fabs(y - (n.y - 0.5f)) > 0.01f){
+				std::fabs(y - (n.y - 0.5f)) > 0.01f || sun_refuses(m, n.x, y, n.z)){
 			m.route.clear();
 			return;
 		}
@@ -2000,3 +2129,6 @@ struct Mobs
 	}
 };
 // vim: set noet ts=4 sw=4:
+
+
+

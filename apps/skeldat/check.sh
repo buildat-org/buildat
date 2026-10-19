@@ -2653,8 +2653,100 @@ assert gap >= 2.9, gap
 print("open: the shot %.1f s after the try; sealed: %d skeletons trying, %d tries, the least gap %.1f s" %
       (shots[0] - to[0], len(tries), sum(len(v) for v in tries.values()), gap))
 PY
+# 49. Out of the sun ([SKELDAT_SUN_SHELTER]): at 0.17 of a 600 s day
+# (the dawn's search from 0.19, 11 s on, when the rooms' light is in;
+# sunrise at 0.23, 36 s on), flat ground. Two rooms of stone, 3 x 3 inside,
+# walls 3 high, a door 2 high, a roof, whose back rows the sky lights 11
+# at most; every skeleton 20 or more from the player, so none fights. A
+# skeleton 8 from the first room's door: "finds shelter", and no burn
+# after sunrise; one 25 off in the open: "finds no shelter", and it
+# burns; one in the second room's back row: none of its steps out of it
+# by day (the report's steps kept out of the sun), no burn; a cave
+# skeleton in the open: no shelter line. A skeleton in lava (walled in)
+# burns in lava 4 hp a second (two burns a second apart at least: a test
+# marker over a voxel not loaded yet floats, and the lava can run out), no
+# "is in water"; one in water dies at once.
+# room <x> <z> <door side x|z>: the inside x-1..x+1, z-1..z+1, its door on
+# the -x or -z wall's middle
+room() {
+	local x=$1 z=$2 dx dz
+	for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
+		[ ${dx#-} -lt 2 ] && [ ${dz#-} -lt 2 ] && continue
+		if { [ $3 = x ] && [ $dx = -2 ] && [ $dz = 0 ]; } ||
+				{ [ $3 = z ] && [ $dz = -2 ] && [ $dx = 0 ]; }; then
+			printf 'marker %d %d skeldat:stone 2; ' $((x + dx)) $((z + dz))
+		else
+			for k in 1 2 3; do printf 'marker %d %d skeldat:stone 0; ' $((x + dx)) $((z + dz)); done
+		fi
+	done; done
+	for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
+		if [ ${dx#-} -lt 2 ] && [ ${dz#-} -lt 2 ]; then
+			printf 'marker %d %d skeldat:stone 3; ' $((x + dx)) $((z + dz))
+		else
+			printf 'marker %d %d skeldat:stone 0; ' $((x + dx)) $((z + dz))
+		fi
+	done; done
+}
+# The lava 3 x 3 in a stone ring 2 high, which keeps it in and the
+# skeleton in it
+lava=$(for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
+	if [ ${dx#-} -lt 2 ] && [ ${dz#-} -lt 2 ]; then continue; fi
+	printf 'marker %d %d skeldat:stone 0; marker %d %d skeldat:stone 0; ' \
+		$((-20 + dx)) $((-20 + dz)) $((-20 + dx)) $((-20 + dz)); done; done
+	for d in "-1 -1" "0 -1" "1 -1" "-1 0" "0 0" "1 0" "-1 1" "0 1" "1 1"; do
+	set -- $d; printf 'marker %d %d skeldat:lava; ' $((-20 + $1)) $((-20 + $2)); done)
+test="$(room 30 0 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
+test="${test}skeleton 22 0; skeleton -25 0; skeleton 0 31; cave_skeleton 0 -25; skeleton -20 -20; skeleton 20 -20"
+log53="$t/srv53.log"
+BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.17 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_DAY=600 BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$test" \
+	start_server "$log53" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv53" -C "$t/srv.cache" -l 3 || fail "the server ($log53)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 100000" quit > "$t/sun.cmds"
+client sun "$t/sun.cmds"
+wait $CLIENT || fail "the sun's drive ($t/sun.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+sun=$(python3 -I - "$log53" <<'PY'
+import sys, re
+lines = open(sys.argv[1], errors="replace").read().split("\n")
+keys = {}
+for l in lines:
+    m = re.search(r"skeldat: test: a (skeleton|cave_skeleton) \((\d+)\) at ([-0-9.]+),[-0-9.]+,([-0-9.]+)", l)
+    if m:
+        keys[(round(float(m.group(3))), round(float(m.group(4))))] = m.group(2)
+def has(pat, k):
+    return any(re.search(pat % k, l) for l in lines)
+def count(pat, k):
+    return sum(1 for l in lines if re.search(pat % k, l))
+shel, none, inside, cave, lava, water = (keys.get(p) for p in
+        [(22, 0), (-25, 0), (0, 31), (0, -25), (-20, -20), (20, -20)])
+assert all([shel, none, inside, cave, lava, water]), keys
+assert has(r"a skeleton \(%s\) finds shelter at", shel), "no shelter found"
+assert not has(r"the skeleton \(%s\) burns$", shel), "the sheltered one burnt"
+assert has(r"a skeleton \(%s\) finds no shelter", none), "no 'no shelter'"
+assert has(r"the skeleton \(%s\) burns$", none), "the one in the open did not burn"
+assert not has(r"the skeleton \(%s\) burns$", inside), "the one inside burnt"
+assert not has(r"skeleton \(%s\) finds", cave), "a cave skeleton looked for shelter"
+kept = sum(int(m.group(1)) for l in lines for m in [re.search(r"(\d+) steps kept out of the sun", l)] if m)
+assert kept > 0, "no step kept out of the sun"
+def ts(l):
+    m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
+lt = [ts(l) for l in lines if re.search(r"the skeleton \(%s\) burns in lava" % lava, l)]
+n = len(lt)
+gaps = [b - a for a, b in zip(lt, lt[1:])]
+assert n >= 2 and all(0.8 < g < 1.4 for g in gaps), ("lava", lt)
+assert not has(r"the skeleton \(%s\) is in water", lava), "the one in lava drowned"
+assert has(r"the skeleton \(%s\) is in water", water), "the one in water"
+print("shelter found by %s, %d steps kept out, lava burnt %d times" % (shel, kept, n))
+PY
+) || fail "out of the sun: $sun ($log53)"
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
+echo "out of the sun: $sun"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"

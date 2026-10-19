@@ -1831,9 +1831,11 @@ struct Module: public interface::Module, public PlayersHost,
 				skeletons++, full += kv.second.node_id != 0;
 		log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
 				"light steps and the sweep, %.2f ms a second; %zu bodies "
-				"put back", skeletons, full, m_mobs.woken, m_mobs.light_steps,
-				m_mobs.light_us / 1e3 / 10, m_mobs.body_puts);
+				"put back; %zu steps kept out of the sun", skeletons, full,
+				m_mobs.woken, m_mobs.light_steps, m_mobs.light_us / 1e3 / 10,
+				m_mobs.body_puts, m_mobs.sun_kept);
 		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
+		m_mobs.sun_kept = 0;
 		report_hazards();
 		m_growth.recount.insert(m_hz_recount.begin(), m_hz_recount.end());
 		m_hz_recount.clear();

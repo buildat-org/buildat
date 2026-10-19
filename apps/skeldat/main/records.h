@@ -200,6 +200,14 @@ static const size_t BUILD_CAP = 20000;
 // with SHOT_CAP cells expanded at most and no building
 static const float SHOT_WAIT = 3;
 static const size_t SHOT_CAP = 400;
+// [SKELDAT_SUN_SHELTER] A bone skeleton out in the sun from SHELTER_DAWN
+// of a day before sunrise looks for shelter at most every SHELTER_WAIT
+// game seconds: the first SHELTER_TRIES feet voxels within SHELTER_RANGE
+// columns that the sun does not reach, nearest first, a way searched to
+// each (SHOT_CAP cells, no building) until one is found
+static const double SHELTER_DAWN = 1.0 / 24;
+static const float SHELTER_WAIT = 5;
+static const int SHELTER_RANGE = 16, SHELTER_TRIES = 24;
 // [SKELDAT_BRIDGES_SEEN] The goal walk's waypoint WAYPOINT columns ahead,
 // and one goal walk's search in the world every WALK_SEARCH_WAIT game
 // seconds: each skeleton's own made the light step 15x dearer
@@ -270,6 +278,11 @@ struct Mob
 	bool no_shot = false, shot_route = false;
 	double shot_try_t = 0, spot_t = 0;
 	float spot_x = 0, spot_z = 0;
+	// [SKELDAT_SUN_SHELTER] Its route one to a shelter; that search's next
+	// game time; its lava's second. Not saved
+	bool shelter_route = false;
+	double shelter_t = 0;
+	float lava_t = 0;
 
 	ss_ save() const {
 		std::ostringstream os;
