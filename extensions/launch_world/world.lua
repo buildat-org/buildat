@@ -852,20 +852,6 @@ local function apply_technique(node)
 	end
 end
 
--- **Where a voxel is, in the scene: on its own index.** A voxel spans
--- [v - 0.5, v + 0.5], and everything else in the room -- the orbs, the
--- lights, a pocket's mouth -- is already placed at a plain index, so
--- this is the convention and the mesher's block is what was moved to
--- meet it (see mesh_chunk). One place for it, and one for the inverse.
-local function at_voxel(x, y, z)
-	return magic.Vector3(x, y, z)
-end
-
--- And back: which voxel a point in the scene is in: the nearest index.
-local function voxel_of(p)
-	return math.floor(p + 0.5)
-end
-
 -- **Everything the room puts on ui.root, in one list.** A game's own
 -- screens come up over the room and the room's must go away while they
 -- are there -- and come back after ([MENU_CONTEXT]). The client sweeps
@@ -1738,8 +1724,6 @@ local floor_mat = material(magic.Color(1, 1, 1, 1), 0.18, 0.0,
 -- stone silhouettes against it.
 local BAYS = room.BAYS
 local BAY_Z = room.BAY_Z
-local function bay_u(i) return room.bay_u(i - 1) end
-local function bay_y(i) return room.bay_y(i - 1) end
 
 -- **An orb is as big as its game** (the plan: 1.2 to 1.8 voxels across,
 -- from the game's own size). `list_apps()` answers a directory tree's

@@ -243,20 +243,6 @@ struct Hazards
 		return n;
 	}
 
-	// The surface over a liquid cell's column, in eighths (y * 8 + 8 a
-	// full cell's top)
-	int own_top(int x, int y, int z, uint8_t k)
-	{
-		for(int yy = y; yy <= y + 64; yy++){
-			const Cell c = get(x, yy, z);
-			if(c.kind != k)
-				return yy * 8;
-			if(c.amount < 8)
-				return yy * 8 + c.amount;
-		}
-		return (y + 65) * 8;
-	}
-
 	// The felt surface at a cell of liquid k: the highest column top among
 	// the full cells connected to it (itself if full, else those beside
 	// and under it), each capped PRESSURE_MAX over the cells on its way;

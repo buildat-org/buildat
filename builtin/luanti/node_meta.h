@@ -35,9 +35,6 @@ struct NodeMeta
 	// A value written to the save, now or with the next checkpoint (the
 	// Module's)
 	std::function<void(const ss_ &, const ss_ &)> store_set;
-	// Whether the save has node metadata in it, so that a world that has
-	// none does not get a blob written for it every shutdown
-	bool m_had_node_meta = false;
 	// What the last checkpoint wrote for a loaded section's metadata, so an
 	// unchanged one is not written again; a section that unloads writes its
 	// own and leaves this
@@ -106,35 +103,6 @@ struct NodeMeta
 			store_set(key, data);
 			m_meta_written[key] = data;
 		}
-	}
-
-	// Step 5c of doc/plan/world_persistence_plan.md: what hangs off the
-	// voxels -- a chest's contents, a sign's text -- goes into the save
-	// beside the clock. One blob, because the world is the sections a mod
-	// can reach; lua/bootstrap.lua names the upgrade path where it builds it.
-	void save_node_meta()
-	{
-		if(!m_store || !m_lua)
-			return;
-		interface::MutexScope ms(m_lua_mutex);
-		lua_State *L = m_lua;
-		int base = lua_gettop(L);
-		lua_getglobal(L, "core");
-		lua_getfield(L, -1, "__save_node_meta");
-		if(lua_pcall(L, 0, 2, 0) != 0){
-			log_w(MODULE, "__save_node_meta(): %s",
-					lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
-			lua_settop(L, base);
-			return;
-		}
-		ss_ data = lua_tostring(L, -2) ? lua_tostring(L, -2) : "";
-		int n = (int)lua_tonumber(L, -1);
-		lua_settop(L, base);
-		if(n == 0 && !m_had_node_meta)
-			return; // Nothing to write and nothing there to clear
-		m_had_node_meta = (n != 0);
-		m_store->set("node_meta", data);
-		log_v(MODULE, "Node metadata written to the save: %i positions", n);
 	}
 
 	// What hangs off the voxels of one section, in the save under a key of
@@ -283,7 +251,6 @@ struct NodeMeta
 		load_node_meta();
 		write_all_node_meta();
 		m_store->set("node_meta", "");
-		m_had_node_meta = false;
 	}
 
 	void load_node_meta()
@@ -307,7 +274,6 @@ struct NodeMeta
 		}
 		int n = (int)lua_tonumber(L, -1);
 		lua_settop(L, base);
-		m_had_node_meta = (n != 0);
 		log_v(MODULE, "Node metadata read from the save: %i positions", n);
 	}
 };

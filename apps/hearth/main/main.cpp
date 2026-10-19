@@ -805,20 +805,13 @@ struct Module: public interface::Module
 		i.b(v.stringify()).step();
 	}
 
-	// An account's level, the admin's included, for a link it posted:
-	// looked up when the link is shown, so one trusted now has its old
-	// links trusted too
-	int level_of(const ss_ &name)
-	{
-		return level(name);
-	}
-
 	// A ticket's link is shown when its domain is whitelisted, or whoever
-	// set it may post links now
+	// set it may post links now: the level looked up when the link is
+	// shown, so one trusted now has its old links trusted too
 	bool link_shown(const ss_ &link, const ss_ &by)
 	{
 		return !link.empty() && (tracker_domains().count(url_host(link)) ||
-				level_of(by) >= LV_MEMBER);
+				level(by) >= LV_MEMBER);
 	}
 
 	// The patches a message links to (/f/<id>), their text inline, at most
@@ -1767,9 +1760,10 @@ struct Module: public interface::Module
 			json::Value v = json::object();
 			v.set("thread", m_new_messages[i]);
 			v.set("message", m_new_messages[i + 1]);
+			const ss_ nv = v.stringify();
 			for(auto &pv : m_viewing)
 				if(pv.second == m_new_messages[i])
-					out.emplace_back(pv.first, "hr:new", v.stringify());
+					out.emplace_back(pv.first, "hr:new", nv);
 			Q a(m_db, "SELECT t.topic, ifnull(p.parent, 0), m.author, "
 					"m.created FROM messages m JOIN threads t ON "
 					"t.id = m.thread LEFT JOIN topics p ON p.id = t.topic "
@@ -1783,8 +1777,9 @@ struct Module: public interface::Module
 			act.set("parent", a.i(1));
 			act.set("author", a.s(2));
 			act.set("time", a.i(3));
+			const ss_ av = act.stringify();
 			for(network::PeerId p : m_joined)
-				out.emplace_back(p, "hr:activity", act.stringify());
+				out.emplace_back(p, "hr:activity", av);
 		}
 		for(const ss_ &account : m_notified){
 			sv_<network::PeerId> peers;
@@ -3355,7 +3350,7 @@ struct Module: public interface::Module
 				// the admin's or a moderator's
 				Q o(m_db, "SELECT uploader FROM files WHERE id = ?");
 				o.b(id);
-				if(o.step() && level_of(o.s(0)) >= lv){
+				if(o.step() && level(o.s(0)) >= lv){
 					above = true;
 					continue;
 				}

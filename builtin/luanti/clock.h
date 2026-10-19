@@ -96,14 +96,6 @@ struct GameClock
 		log_v(MODULE, "The world's seed is %s", cs(itos(m_seed)));
 	}
 
-	void set_seed(int64_t seed)
-	{
-		m_seed = seed;
-		if(m_store)
-			m_store->set("seed", itos(m_seed));
-		set_global_string(m_lua, "__luanti_world_seed", itos(m_seed));
-	}
-
 	// A scripted run cannot wait for morning, and two pictures taken at
 	// different hours are not comparable -- which is what the reference
 	// comparison in doc/plan/luanti_module_plan.md is. Spelled the way

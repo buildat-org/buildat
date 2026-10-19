@@ -2236,22 +2236,6 @@ function core.__take_node_meta(x0, y0, z0, x1, y1, z1)
 	return core.serialize(out), n
 end
 
--- Everything there is, whatever section it is in. What still wants this is
--- the migration below: a save written when the metadata was one blob for
--- the whole world.
-function core.__save_node_meta()
-	local out = {}
-	local n = 0
-	for key, meta in pairs(node_meta) do
-		local saved = save_one_meta(meta)
-		if saved then
-			out[key] = saved
-			n = n + 1
-		end
-	end
-	return core.serialize(out), n
-end
-
 -- The same, grouped by the section each position is in: what the one-blob
 -- save is turned into, once, the first time a world made by an older build
 -- is opened. The key is the section, as "x,y,z".

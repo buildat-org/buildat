@@ -1773,14 +1773,6 @@ struct Module: public interface::Module
 				"You cannot edit this plan";
 	}
 
-	// Each of a user's clients hears the new privileges
-	void send_privs_to_user(const ss_ &user)
-	{
-		for(auto &pair : m_peers)
-			if(pair.second.name == user)
-				send_privs(pair.first);
-	}
-
 	void on_set_editing(const network::Packet &packet)
 	{
 		uint8_t on = 0;
