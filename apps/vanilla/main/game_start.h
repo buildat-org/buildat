@@ -493,13 +493,7 @@ struct GameStart
 			i->set_progress_handler([this, peer](const ss_ &line){
 				if(peer == 0)
 					return;
-				sv_<ss_> values{line};
-				std::ostringstream os(std::ios::binary);
-				{
-					cereal::PortableBinaryOutputArchive ar(os);
-					ar(values);
-				}
-				const ss_ data = os.str();
+				const ss_ data = storage::pack(sv_<ss_>{line});
 				network::send(m_server, peer, "main:progress", data);
 			});
 			// What the world is made out of goes in before it is made, and

@@ -638,12 +638,8 @@ struct Importer
 			flat.push_back(v);
 		for(const ss_ &v : worlds)
 			flat.push_back(v);
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
-		network::send(m_server, packet.sender, "main:imports", os.str());
+		const ss_ packed = storage::pack(flat);
+		network::send(m_server, packet.sender, "main:imports", packed);
 	}
 
 	// A game is copied into buildat's own games directory, and **refuses to
@@ -656,12 +652,8 @@ struct Importer
 		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:import_game: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:import_game: could not be read");
 			return;
 		}
 		if(values.empty())
@@ -714,12 +706,8 @@ struct Importer
 		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:import_world: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:import_world: could not be read");
 			return;
 		}
 		if(values.size() < 2)

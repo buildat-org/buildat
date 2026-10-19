@@ -392,27 +392,22 @@ static void write_settings(interface::Server *server, const ss_ &mode,
 
 static void send_settings(interface::Server *server, network::PeerInfo::Id peer)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		sv_<ss_> list;
-		ss_ mode = read_render_mode(server);
-		list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
-		list.push_back("view_range="+read_view_range(server));
-		const ss_ web_range = read_web_view_range(server);
-		if(!web_range.empty())
-			list.push_back("web_view_range="+web_range);
-		list.push_back("lod_detail="+read_lod_detail(server));
-		list.push_back("view_bobbing_amount="+read_view_bobbing(server));
-		// The back view centred or over the shoulder ([OVER_SHOULDER])
-		list.push_back("third_person_shoulder="+
-				(read_setting(server, "third_person_shoulder") == "1" ?
-				ss_("1") : ss_("0")));
-		for(const ss_ &row : read_key_rows(server))
-			list.push_back(row);
-		ar(list);
-	}
-	network::send(server, peer, "main:settings", os.str());
+	sv_<ss_> list;
+	ss_ mode = read_render_mode(server);
+	list.push_back("render_mode="+(mode.empty() ? ss_("pbr") : mode));
+	list.push_back("view_range="+read_view_range(server));
+	const ss_ web_range = read_web_view_range(server);
+	if(!web_range.empty())
+		list.push_back("web_view_range="+web_range);
+	list.push_back("lod_detail="+read_lod_detail(server));
+	list.push_back("view_bobbing_amount="+read_view_bobbing(server));
+	// The back view centred or over the shoulder ([OVER_SHOULDER])
+	list.push_back("third_person_shoulder="+
+			(read_setting(server, "third_person_shoulder") == "1" ?
+			ss_("1") : ss_("0")));
+	for(const ss_ &row : read_key_rows(server))
+		list.push_back(row);
+	network::send(server, peer, "main:settings", storage::pack(list));
 }
 
 struct GameSettings
@@ -462,13 +457,9 @@ struct GameSettings
 					it == mt.end() ? ss_() : it->second})
 				flat.push_back(x);
 		}
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
+		const ss_ packed = storage::pack(flat);
 		network::send(m_server, packet.sender, perf ? "main:perf_settings" :
-				"main:game_settings", os.str());
+				"main:game_settings", packed);
 	}
 
 	// main:get_game_settings {name}
@@ -679,12 +670,8 @@ struct GameSettings
 		if(!m_access.local_only(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:set_settings: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:set_settings: could not be read");
 			return;
 		}
 		sv_<std::pair<ss_, ss_>> keys;

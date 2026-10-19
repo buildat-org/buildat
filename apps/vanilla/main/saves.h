@@ -236,11 +236,7 @@ struct Saves
 		}
 		for(const ss_ &id : list_apps(m_server))
 			flat.push_back(id);
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
+		const ss_ packed = storage::pack(flat);
 		// Each game's mapgens for the new-world screen, ahead of the lists
 		// that screen is reached from: [gameid, "v7,v5,...", ...]
 		sv_<ss_> mapgens;
@@ -254,30 +250,18 @@ struct Saves
 			mapgens.push_back(id);
 			mapgens.push_back(joined);
 		}
-		std::ostringstream mos(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(mos);
-			ar(mapgens);
-		}
-		std::ostringstream dos(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(dos);
-			ar(disk);
-		}
-		std::ostringstream tos(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(tos);
-			ar(trash);
-		}
+		const ss_ mapgens_packed = storage::pack(mapgens);
+		const ss_ disk_packed = storage::pack(disk);
+		const ss_ trash_packed = storage::pack(trash);
 		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(packet.sender, "main:game_mapgens", mos.str());
-			inetwork->send(packet.sender, "main:disk", dos.str());
-			inetwork->send(packet.sender, "main:trash", tos.str());
+			inetwork->send(packet.sender, "main:game_mapgens", mapgens_packed);
+			inetwork->send(packet.sender, "main:disk", disk_packed);
+			inetwork->send(packet.sender, "main:trash", trash_packed);
 			// [WORLDS_SELECTED] The world running, "" for none: the menu
 			// selects it
 			inetwork->send(packet.sender, "main:running_world",
 					m_starting ? m_world_name : ss_());
-			inetwork->send(packet.sender, "main:saves", os.str());
+			inetwork->send(packet.sender, "main:saves", packed);
 		});
 	}
 
@@ -415,12 +399,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:save_info: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:save_info: could not be read");
 			return;
 		}
 		if(values.empty())
@@ -450,25 +430,20 @@ struct Saves
 			flat.push_back(game_path.empty() ? gameid : read_game_title(game_path));
 			flat.push_back("seed"); flat.push_back(seed);
 			flat.push_back("mapgen"); flat.push_back(mg_name);
-			if(clock.size() > 1){
-				try {
-					std::istringstream is(clock, std::ios::binary);
-					cereal::PortableBinaryInputArchive ar(is);
-					uint8_t version = 0; double tod = 0, gt = 0; int32_t days = 0;
-					ar(version, tod, gt, days);
-					flat.push_back("day"); flat.push_back(itos(days));
-					char buf[16];
-					snprintf(buf, sizeof buf, "%02d:%02d", (int)(tod * 24) % 24,
-							(int)(tod * 24 * 60) % 60);
-					flat.push_back("time"); flat.push_back(buf);
-					// As text: the sandbox has no os.date and no clock
-					char played[32];
-					if(gt >= 3600)
-						snprintf(played, sizeof played, "%.1f h", gt / 3600);
-					else
-						snprintf(played, sizeof played, "%d min", (int)(gt / 60));
-					flat.push_back("played"); flat.push_back(played);
-				} catch(std::exception &){}
+			uint8_t version = 0; double tod = 0, gt = 0; int32_t days = 0;
+			if(clock.size() > 1 && storage::unpack(clock, version, tod, gt, days)){
+				flat.push_back("day"); flat.push_back(itos(days));
+				char buf[16];
+				snprintf(buf, sizeof buf, "%02d:%02d", (int)(tod * 24) % 24,
+						(int)(tod * 24 * 60) % 60);
+				flat.push_back("time"); flat.push_back(buf);
+				// As text: the sandbox has no os.date and no clock
+				char played[32];
+				if(gt >= 3600)
+					snprintf(played, sizeof played, "%.1f h", gt / 3600);
+				else
+					snprintf(played, sizeof played, "%d min", (int)(gt / 60));
+				flat.push_back("played"); flat.push_back(played);
 			}
 			flat.push_back("sections"); flat.push_back(itos((int64_t)sections));
 			flat.push_back("bytes");
@@ -509,12 +484,8 @@ struct Saves
 			flag("creative_mode", "false");
 			flag("enable_damage", "true");
 		});
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
-		network::send(m_server, packet.sender, "main:save_info", os.str());
+		const ss_ packed = storage::pack(flat);
+		network::send(m_server, packet.sender, "main:save_info", packed);
 	}
 
 	// main:set_world_flags <name> <creative_mode> <enable_damage>: into the
@@ -524,12 +495,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:set_world_flags: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:set_world_flags: could not be read");
 			return;
 		}
 		if(values.size() < 3 || !is_world_name(values[0]))
@@ -560,12 +527,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:delete: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:delete: could not be read");
 			return;
 		}
 		if(values.empty() || !is_world_name(values[0]))
@@ -595,12 +558,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:trash: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:trash: could not be read");
 			return;
 		}
 		if(values.empty())
@@ -632,12 +591,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:rename: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:rename: could not be read");
 			return;
 		}
 		if(values.size() != 2 || !is_world_name(values[0]) ||
@@ -670,12 +625,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:open: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:open: could not be read");
 			return;
 		}
 		if(values.empty())
@@ -704,12 +655,8 @@ struct Saves
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:create: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:create: could not be read");
 			return;
 		}
 		if(values.size() < 2)

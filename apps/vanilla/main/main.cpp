@@ -331,12 +331,8 @@ struct Module: public interface::Module
 				"yet: an admin chooses one. You are in as soon as they have." :
 				note+". No world is running: you are in as soon as an admin "
 				"starts one."};
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		network::send(m_server, login.peer, "main:join_wait", os.str());
+		const ss_ packed = storage::pack(values);
+		network::send(m_server, login.peer, "main:join_wait", packed);
 	}
 
 	// What the client shows of the server's: whether it is a public one,
@@ -353,12 +349,8 @@ struct Module: public interface::Module
 				m_access.is_admin(peer) ? "1" : "0",
 				m_world_name, is_local ? "1" : "0", m_world_name.empty() ? "" :
 				gameid_of_save(m_server, m_world_name)};
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		network::send(m_server, peer, "main:account", os.str());
+		const ss_ packed = storage::pack(values);
+		network::send(m_server, peer, "main:account", packed);
 	}
 
 	// A server admin has every privilege in the world ([VANILLA_PUBLIC] 3)
@@ -403,12 +395,8 @@ struct Module: public interface::Module
 			log_i(MODULE, "loading picture: %s of %zu (%zu bytes)", cs(name),
 					names.size(), values.empty() ? 0 : values[1].size());
 		}
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(values);
-		}
-		network::send(m_server, peer, "luanti:loading_picture", os.str());
+		const ss_ packed = storage::pack(values);
+		network::send(m_server, peer, "luanti:loading_picture", packed);
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -435,12 +423,8 @@ struct Module: public interface::Module
 		if(!(m_public && !m_scene && m_names.count(packet.sender)))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:chat: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:chat: could not be read");
 			return;
 		}
 		if(values.empty() || values[0].empty())
@@ -450,14 +434,10 @@ struct Module: public interface::Module
 		const ss_ why = chat_refusal(m_server, packet.sender,
 				player_name_of(packet.sender));
 		if(!why.empty()){
-			std::ostringstream os(std::ios::binary);
-			{
-				cereal::PortableBinaryOutputArchive ar(os);
-				ar(sv_<ss_>{"("+why+")"});
-			}
+			const ss_ packed = storage::pack(sv_<ss_>{"("+why+")"});
 			log_i(MODULE, "%s's line refused: %s",
 					cs(player_name_of(packet.sender)), cs(why));
-			network::send(m_server, packet.sender, "main:chat_line", os.str());
+			network::send(m_server, packet.sender, "main:chat_line", packed);
 			return;
 		}
 		// **A public server's chat is limited** ([VANILLA_PUBLIC] 8): a
@@ -470,14 +450,10 @@ struct Module: public interface::Module
 		if(b.first + 1 > CHAT_BURST)
 			return;
 		b.first += 1;
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(sv_<ss_>{"<"+player_name_of(packet.sender)+"> "+message});
-		}
+		const ss_ packed = storage::pack(sv_<ss_>{"<"+player_name_of(packet.sender)+"> "+message});
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(const auto &kv : m_names)
-				inetwork->send(kv.first, "main:chat_line", os.str());
+				inetwork->send(kv.first, "main:chat_line", packed);
 		});
 	}
 
@@ -505,16 +481,12 @@ struct Module: public interface::Module
 					title = game_path.empty() ? gameid :
 							read_game_title(game_path);
 				}
-				std::ostringstream os(std::ios::binary);
-				{
-					cereal::PortableBinaryOutputArchive ar(os);
-					ar(sv_<ss_>{title});
-				}
+				const ss_ packed = storage::pack(sv_<ss_>{title});
 				network::access(m_server, [&](network::Interface *inetwork){
 					inetwork->send(event.recipient, "core:run_script",
 							"buildat.run_script_file(\"main/join.lua\")");
 					inetwork->send(event.recipient, "main:join_title",
-							os.str());
+							packed);
 				});
 			}
 			return;

@@ -139,12 +139,8 @@ static bool save_dir(interface::Server *server, const ss_ &name, ss_ &path,
 static sv_<ss_> read_packet_strings(const network::Packet &packet)
 {
 	sv_<ss_> values;
-	try {
-		std::istringstream is(packet.data, std::ios::binary);
-		cereal::PortableBinaryInputArchive ar(is);
-		ar(values);
-	} catch(std::exception &e){
-		log_w(MODULE, "%s: %s", cs(packet.name), e.what());
+	if(!storage::unpack(packet.data, values)){
+		log_w(MODULE, "%s: %s", cs(packet.name), "could not be read");
 		values.clear();
 	}
 	return values;
@@ -210,12 +206,8 @@ static void send_strings(interface::Server *server, network::PeerInfo::Id peer,
 		const ss_ &name,
 		const sv_<ss_> &values)
 {
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar(values);
-	}
-	network::send(server, peer, name, os.str());
+	const ss_ packed = storage::pack(values);
+	network::send(server, peer, name, packed);
 }
 
 // Whether a directory can be listed: one the box denies lists as empty,
@@ -292,13 +284,7 @@ static void send_progress(interface::Server *server, network::PeerInfo::Id peer,
 {
 	if(peer == 0)
 		return;
-	sv_<ss_> values{line};
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar(values);
-	}
-	const ss_ data = os.str();
+	const ss_ data = storage::pack(sv_<ss_>{line});
 	network::send(server, peer, "main:progress", data);
 }
 
@@ -375,12 +361,8 @@ static void send_menu_message(interface::Server *server,
 		return;
 	sv_<ss_> values;
 	values.push_back(message);
-	std::ostringstream os(std::ios::binary);
-	{
-		cereal::PortableBinaryOutputArchive ar(os);
-		ar(values);
-	}
-	network::send(server, peer, packet, os.str());
+	const ss_ packed = storage::pack(values);
+	network::send(server, peer, packet, packed);
 }
 
 // The same dialog for something that went right, which is not a warning

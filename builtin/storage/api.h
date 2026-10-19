@@ -150,25 +150,26 @@ namespace storage
 		});
 	}
 
-	// A value as a store holds it, and back: cereal's portable binary.
-	// unpack() is false for data that does not read as a T
-	template<typename T>
-	ss_ pack(const T &value)
+	// Values as a store holds them, or a packet carries them, and back:
+	// cereal's portable binary, one after another (pack(a, b) is what
+	// ar(a, b) wrote). unpack() is false for data that does not read as them
+	template<typename... T>
+	ss_ pack(const T &... values)
 	{
 		std::ostringstream os(std::ios::binary);
 		{
 			cereal::PortableBinaryOutputArchive ar(os);
-			ar(value);
+			ar(values...);
 		}
 		return os.str();
 	}
-	template<typename T>
-	bool unpack(const ss_ &data, T &value)
+	template<typename... T>
+	bool unpack(const ss_ &data, T &... values)
 	{
 		try {
 			std::istringstream is(data, std::ios::binary);
 			cereal::PortableBinaryInputArchive ar(is);
-			ar(value);
+			ar(values...);
 			return true;
 		} catch(std::exception &e){
 			return false;

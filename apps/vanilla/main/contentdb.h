@@ -285,12 +285,8 @@ struct ContentDB
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:contentdb_query: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:contentdb_query: could not be read");
 			return;
 		}
 		Job *job = new Job();
@@ -329,12 +325,8 @@ struct ContentDB
 		if(!m_access.may_manage(packet.sender))
 			return;
 		sv_<ss_> values;
-		try {
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(values);
-		} catch(std::exception &e){
-			log_w(MODULE, "main:contentdb_install: %s", e.what());
+		if(!storage::unpack(packet.data, values)){
+			log_w(MODULE, "main:contentdb_install: could not be read");
 			return;
 		}
 		if(values.size() < 2)
@@ -517,13 +509,9 @@ struct ContentDB
 				client_file::access(m_server, [&](client_file::Interface *i){
 					i->add_file_path(job->name, job->zip_path);
 				});
-				std::ostringstream os(std::ios::binary);
-				{
-					cereal::PortableBinaryOutputArchive ar(os);
-					ar(sv_<ss_>{job->name});
-				}
+				const ss_ packed = storage::pack(sv_<ss_>{job->name});
 				network::send(m_server, job->peer, "main:contentdb_picture",
-						os.str());
+						packed);
 				continue;
 			}
 			// The zip's one top-level directory is the game; renamed into
@@ -602,12 +590,8 @@ struct ContentDB
 			for(size_t n = 0; n < 5; n++)
 				flat.push_back(f[n]);
 		}
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(flat);
-		}
-		network::send(m_server, peer, "main:contentdb_list", os.str());
+		const ss_ packed = storage::pack(flat);
+		network::send(m_server, peer, "main:contentdb_list", packed);
 		// The pictures after the list, one job each, so a slow one holds
 		// nothing but its own row ([CONTENTDB_LIST]); on the wire the row
 		// names its picture "contentdb/<author>_<name>.png"
