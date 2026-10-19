@@ -2600,6 +2600,59 @@ l1=$(lava 1) l2=$(lava 2)
 echo "$l1" | awk '{ exit !(NF >= 4 && $NF > $2 + 4) }' &&
 	echo "$l2" | awk '{ for(i = 3; i <= NF; i++) if($i != $2) exit 1; exit !(NF >= 4) }' ||
 	fail "the lava spring: on the ground $l1, walled in $l2 ($t/srv51_lava1.log, $t/srv51_lava2.log)"
+# 48. A clear shot ([SKELDAT_CLEAR_SHOT]): a player at midnight in a box
+# of stone 3 high round it and over it, the box open at +x (1 0), a
+# skeleton 4 x and -5 z off, its straight shot through the wall. No shot
+# while blocked; "has no clear shot ... to (...)", then a shot within 15 s
+# of it. The box sealed and 30 skeletons round it: no shot, each one's
+# "no spot" tries 3 s apart at least; the light step's time logged.
+box() {
+	for d in "1 1" "0 1" "-1 1" "-1 0" "-1 -1" "0 -1" "1 -1" ${1:+"$1"}; do
+		printf 'marker %s skeldat:stone 0; marker %s skeldat:stone 0; marker %s skeldat:stone 0; ' "$d" "$d" "$d"
+	done
+	for dx in -1 0 1; do for dz in -1 0 1; do printf 'marker %d %d skeldat:stone 3; ' $dx $dz; done; done
+}
+ring=$(for i in $(seq 0 29); do awk -v i=$i 'BEGIN { a = i * 6.2832 / 30; r = 5 + i % 4
+	printf "skeleton %d %d; ", r * sin(a), r * cos(a) }'; done)
+for run in open sealed; do
+	if [ $run = open ]; then test="$(box "")skeleton 4 -5"; else test="$(box "1 0")$ring"; fi
+	BUILDAT_SKELDAT_WORLD=shot_$run BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" \
+		BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$test" \
+		start_server "$t/srv52_$run.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv52_$run" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv52_$run.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "delay 25000" quit > "$t/shot_$run.cmds"
+	client shot_$run "$t/shot_$run.cmds"
+	wait $CLIENT || fail "the clear shot's drive ($t/shot_$run.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+done
+python3 -I - "$t/srv52_open.log" "$t/srv52_sealed.log" <<'PY' || fail "the clear shot ($t/srv52_open.log, $t/srv52_sealed.log)"
+import sys, re
+def ts(l):
+    m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
+o = open(sys.argv[1], errors="replace").read().split("\n")
+to = [ts(l) for l in o if re.search(r"has no clear shot at client1, to \(", l)]
+shots = [ts(l) for l in o if "a skeleton shoots at client1" in l]
+assert to, "no try with a spot"
+assert shots and shots[0] > to[0] and shots[0] - to[0] < 15, (to[:3], shots[:3])
+s = open(sys.argv[2], errors="replace").read().split("\n")
+assert not any("shoots at client1" in l for l in s), "a shot out of the sealed box"
+tries = {}
+for l in s:
+    m = re.search(r"a skeleton \((\d+)\) has no clear shot at client1, no spot", l)
+    if m:
+        tries.setdefault(m.group(1), []).append(ts(l))
+assert len(tries) >= 10, tries
+gap = min(b - a for v in tries.values() for a, b in zip(v, v[1:]))
+assert gap >= 2.9, gap
+print("open: the shot %.1f s after the try; sealed: %d skeletons trying, %d tries, the least gap %.1f s" %
+      (shots[0] - to[0], len(tries), sum(len(v) for v in tries.values()), gap))
+PY
+shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
+echo "a clear shot, sealed with 30: $shotlight"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"

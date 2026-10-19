@@ -512,6 +512,69 @@ struct Mobs
 		log_i(MODULE, "skeldat: a skeleton (%u) lets its draw go: %s", key, why);
 	}
 
+	// [SKELDAT_CLEAR_SHOT] Whether the arc shoot() flies from a body at
+	// (x, y, z) to p, its spread left out, meets no solid voxel (leaves and
+	// bone blocks solid, water not): sampled every 0.25 of its flat
+	// distance
+	bool clear_shot(voxelworld::Instance *w, float x, float y, float z,
+			const Target &p)
+	{
+		const float dx = p.x - x, dz = p.z - z;
+		const float h = std::sqrt(dx*dx + dz*dz);
+		if(h < 0.5f)
+			return true;
+		const float ax = x + dx / h * 0.6f, ay = y + 1.5f, az = z + dz / h * 0.6f;
+		const float t = h / ARROW_SPEED;
+		const float vy = (p.y + 1.2f - ay) / t + 0.5f * ARROW_GRAVITY * t;
+		for(float s = 0; s < h - 0.6f; s += 0.25f){
+			const float ts = s / ARROW_SPEED;
+			const int vx = (int)std::floor(ax + dx / h * s + 0.5f),
+					vyy = (int)std::floor(ay + vy * ts -
+					0.5f * ARROW_GRAVITY * ts * ts + 0.5f),
+					vz = (int)std::floor(az + dz / h * s + 0.5f);
+			if(world.walkable(w, vx, vyy, vz))
+				return false;
+		}
+		return true;
+	}
+
+	// [SKELDAT_CLEAR_SHOT] A standing spot near m with a clear shot at p:
+	// 8 headings at 2, then at 4, on the column's ground round its height,
+	// 3 to 12 from p; its feet voxel in at
+	// simplified: within 4 only; a player behind a long wall is not
+	// reached (a wider ring, or a search toward p's sight, the upgrade)
+	bool shot_spot(voxelworld::Instance *w, const Mob &m, const Target &p,
+			int at[3])
+	{
+		for(int r : {2, 4})
+			for(int i = 0; i < 8; i++){
+				const float a = i * (float)M_PI / 4;
+				const int x = (int)std::floor(m.x + std::sin(a) * r + 0.5f),
+						z = (int)std::floor(m.z + std::cos(a) * r + 0.5f);
+				const float d = std::hypot(p.x - x, p.z - z);
+				if(d < 3 || d > 12)
+					continue;
+				const Ground g = world.ground(w, (float)x, m.y, (float)z,
+						MOB_HEIGHT[m.kind]);
+				if(!g.found || g.water || !clear_shot(w, (float)x, g.y, (float)z, p))
+					continue;
+				at[0] = x, at[1] = (int)std::floor(g.y + 1.0f), at[2] = z;
+				return true;
+			}
+		return false;
+	}
+	void log_shot_try(uint32_t key, const Mob &m, const Target &p,
+			const int *at, const char *none)
+	{
+		if(at)
+			log_i(MODULE, "skeldat: a %s (%u) has no clear shot at %s, to "
+					"(%d %d %d)", MOB_KIND[m.kind], key, cs(p.name), at[0],
+					at[1], at[2]);
+		else
+			log_i(MODULE, "skeldat: a %s (%u) has no clear shot at %s, %s",
+					MOB_KIND[m.kind], key, cs(p.name), none);
+	}
+
 	void shoot(const Mob &m, const Target &p)
 	{
 		const float dx = p.x - m.x, dz = p.z - m.z;
@@ -743,12 +806,20 @@ struct Mobs
 				const Target *p = tg.d < 1e9f ? &tg : nullptr;
 				const float d = tg.d;
 				// The draw, then the shot at the target as it is then
-				// ([SKELDAT_SKELETON_DRAW]); a cave skeleton's the same
+				// ([SKELDAT_SKELETON_DRAW]); a cave skeleton's the same.
+				// Both on a clear shot only ([SKELDAT_CLEAR_SHOT]): a
+				// blocked one looked at again in 0.5 s, a draw that ends
+				// on one let go
 				auto fight = [&](){
 					m.mode = FIGHT;
 					if(m.draw_t >= 0){
 						m.draw_t -= dt;
 						if(m.draw_t <= 0){
+							if(!clear_shot(w, m.x, m.y, m.z, tg)){
+								let_go(key, m, "no clear shot");
+								m.no_shot = true;
+								return;
+							}
 							shots.push_back({key, tg});
 							m.draw_t = -1;
 							m.shoot_t = 0.7f + world.rnd() * 1.5f;
@@ -756,6 +827,11 @@ struct Mobs
 					} else {
 						m.shoot_t -= dt;
 						if(m.shoot_t <= 0 && d < 14){
+							if(!clear_shot(w, m.x, m.y, m.z, tg)){
+								m.no_shot = true;
+								m.shoot_t = 0.5f;
+								return;
+							}
 							m.draw_t = DRAW_S;
 							draws.push_back({key, tg});
 						}
@@ -820,12 +896,30 @@ struct Mobs
 				}
 				// [SKELDAT_CAVE_SKELETON] A cave skeleton in a fight stands,
 				// turned to its target; out of it, a boar's wander
-				bool stands = false;
+				bool stands = false, to_spot = false;
 				if(m.kind == CAVE_SKELETON){
 					if(p && d < 16){
 						fight();
 						m.yaw = std::atan2(p->x - m.x, p->z - m.z);
 						stands = true;
+						// [SKELDAT_CLEAR_SHOT] No route search: a spot with
+						// a clear shot walked to straight, for 3 s at most
+						if(m.no_shot && world.t >= m.shot_try_t){
+							m.shot_try_t = world.t + SHOT_WAIT;
+							m.no_shot = false;
+							int at[3];
+							const bool found = shot_spot(w, m, *p, at);
+							log_shot_try(key, m, *p, found ? at : nullptr, "no spot");
+							if(found)
+								m.spot_x = (float)at[0], m.spot_z = (float)at[2],
+								m.spot_t = world.t + 3;
+						}
+						if(world.t < m.spot_t){
+							if(std::hypot(m.spot_x - m.x, m.spot_z - m.z) < 0.3f)
+								m.spot_t = 0;
+							else
+								stands = false, to_spot = true;
+						}
 					} else {
 						let_go(key, m, "the target out of 16");
 						if(m.mode == FIGHT)
@@ -834,6 +928,9 @@ struct Mobs
 				}
 				float move_yaw = m.yaw, speed = 0;
 				if(stands){
+				} else if(to_spot){
+					move_yaw = std::atan2(m.spot_x - m.x, m.spot_z - m.z);
+					speed = MOB_SPEED[m.kind][0];
 				} else if(m.mode == FLEE && m.mode_t > 0){
 					m.yaw = move_yaw = std::atan2(m.x - m.from_x, m.z - m.from_z);
 					speed = MOB_SPEED[m.kind][1];
@@ -1266,6 +1363,32 @@ struct Mobs
 				const Target t = target_of(m);
 				const Target *p = t.d < 1e9f ? &t : nullptr;
 				const float d = t.d;
+				// [SKELDAT_CLEAR_SHOT] On its way to a spot with a clear
+				// shot; or, its shot blocked, a try for one
+				if(m.shot_route && !m.route.empty()){
+					follow_route(kv.first, m);
+					continue;
+				}
+				m.shot_route = false;
+				if(p && m.no_shot && world.t >= m.shot_try_t){
+					m.shot_try_t = world.t + SHOT_WAIT;
+					m.no_shot = false;
+					int at[3];
+					bool found = false;
+					voxelworld::access(world.server, world.scene,
+							[&](voxelworld::Instance *w){
+						found = shot_spot(w, m, *p, at);
+					});
+					if(!found)
+						log_shot_try(kv.first, m, *p, nullptr, "no spot");
+					else if(search_way(kv.first, m, vp::P(at[0], at[1], at[2]),
+							SHOT_CAP, false)){
+						m.shot_route = true;
+						log_shot_try(kv.first, m, *p, at, nullptr);
+					} else
+						log_shot_try(kv.first, m, *p, nullptr, "no way");
+					continue;
+				}
 				if(!p || (d >= 3 && d <= 9))
 					continue;
 				m.yaw = std::atan2(p->x - m.x, p->z - m.z) +
@@ -1384,10 +1507,13 @@ struct Mobs
 	// a walking one, or one with bone blocks to build, its route up to the
 	// first of them. false for none, and it waits BUILD_WAIT to look again.
 	// A light form with no body walks the column tops, so under them is
-	// solid to it
-	bool search_way(uint32_t key, Mob &m, const vp::P &goal)
+	// solid to it. A spot's way ([SKELDAT_CLEAR_SHOT]): cap cells at most,
+	// no building, search_t left as it is
+	bool search_way(uint32_t key, Mob &m, const vp::P &goal,
+			size_t cap = BUILD_CAP, bool build = true)
 	{
-		m.search_t = world.t + BUILD_WAIT;
+		if(build)
+			m.search_t = world.t + BUILD_WAIT;
 		const vp::P from((int)std::floor(m.x + 0.5f),
 				(int)std::floor(m.y + 1.0f), (int)std::floor(m.z + 0.5f));
 		if(std::abs(goal.x - from.x) > BUILD_RANGE ||
@@ -1426,8 +1552,8 @@ struct Mobs
 		r.body_height = MOB_HEIGHT[SKELETON];
 		r.step_up = 1;
 		r.max_fall = 2;
-		r.build_cost = BUILD_COST;
-		r.max_expanded = BUILD_CAP;
+		r.build_cost = build ? BUILD_COST : 0;
+		r.max_expanded = cap;
 		const vp::Result res = vp::find(f, from, goal, r);
 		if(!res.found || res.path.size() < 2)
 			return false;

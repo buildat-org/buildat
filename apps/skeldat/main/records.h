@@ -195,6 +195,11 @@ static const int NIGHT_BLOCKS = 3, SEED_RANGE = 24;
 static const float BUILD_COST = 6, BUILD_WAIT = 5;
 static const int BUILD_RANGE = 32;
 static const size_t BUILD_CAP = 20000;
+// [SKELDAT_CLEAR_SHOT] A skeleton with no clear shot tries for a spot that
+// has one at most every SHOT_WAIT game seconds, the way to it searched
+// with SHOT_CAP cells expanded at most and no building
+static const float SHOT_WAIT = 3;
+static const size_t SHOT_CAP = 400;
 // [SKELDAT_BRIDGES_SEEN] The goal walk's waypoint WAYPOINT columns ahead,
 // and one goal walk's search in the world every WALK_SEARCH_WAIT game
 // seconds: each skeleton's own made the light step 15x dearer
@@ -259,6 +264,12 @@ struct Mob
 	double search_t = 0;
 	// Since when it waits for a goal walk's search (0: it does not)
 	double walk_want_t = 0;
+	// [SKELDAT_CLEAR_SHOT] Its shot found blocked since its last try for a
+	// spot; that try's next game time; its route one to such a spot; a
+	// cave skeleton's spot, walked to straight until spot_t. Not saved
+	bool no_shot = false, shot_route = false;
+	double shot_try_t = 0, spot_t = 0;
+	float spot_x = 0, spot_z = 0;
 
 	ss_ save() const {
 		std::ostringstream os;
