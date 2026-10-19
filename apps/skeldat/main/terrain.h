@@ -83,12 +83,15 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 			m_format.light_sky.set(w, (uint32_t)sky);
 			return w;
 		};
-		// The caves' two noises on a lattice every 4 over the region
+		// The caves' noises on a lattice every 4 over the region: the
+		// tunnels' two and their width's, the caverns'
+		// ([SKELDAT_CAVES_ROOMY])
 		const int G = 4;
 		const int gx = (uc.getX() - lc.getX()) / G + 2,
 				gy = (uc.getY() - lc.getY()) / G + 2,
 				gz = (uc.getZ() - lc.getZ()) / G + 2;
-		sv_<float> na((size_t)gx * gy * gz), nb(na.size());
+		sv_<float> na((size_t)gx * gy * gz), nb(na.size()), nw(na.size()),
+				nc(na.size());
 		for(int k = 0; k < gz; k++)
 		for(int j = 0; j < gy; j++)
 		for(int i = 0; i < gx; i++){
@@ -99,6 +102,8 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 					z / mapgen::CAVE_SPREAD_XZ, m_p.seed + 7001, 2, 0.5f);
 			nb[n] = mapgen::fbm3(x / mapgen::CAVE_SPREAD_XZ, y / mapgen::CAVE_SPREAD_Y,
 					z / mapgen::CAVE_SPREAD_XZ, m_p.seed + 9103, 2, 0.5f);
+			nw[n] = mapgen::cave_width_noise(x, y, z, m_p.seed);
+			nc[n] = mapgen::cavern_noise(x, y, z, m_p.seed);
 		}
 		auto lerp3 = [&](const sv_<float> &v, int x, int y, int z){
 			const int ox = x - lc.getX(), oy = y - lc.getY(), oz = z - lc.getZ();
@@ -135,10 +140,18 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 				if(y <= m_p.bottom)
 					id = m_ids.stone;
 				else if(y <= g){
-					const bool carved = carvable(y, g, f) && (y == g ?
-							mapgen::cave((float)x, (float)y, (float)z, m_p.seed) :
-							std::fabs(lerp3(na, x, y, z)) < mapgen::CAVE_WIDTH &&
-							std::fabs(lerp3(nb, x, y, z)) < mapgen::CAVE_WIDTH);
+					bool carved = false;
+					if(carvable(y, g, f)){
+						if(y == g)
+							carved = mapgen::cave((float)x, (float)y, (float)z, m_p.seed);
+						else {
+							const float w = mapgen::cave_width(lerp3(nw, x, y, z));
+							carved = (std::fabs(lerp3(na, x, y, z)) < w &&
+									std::fabs(lerp3(nb, x, y, z)) < w) ||
+									lerp3(nc, x, y, z) > mapgen::cavern_threshold(y,
+									m_p.bottom, g);
+						}
+					}
 					id = carved ? ID_AIR : y == g ? top :
 							y >= g - 3 ? (sandy ? m_ids.sand : m_ids.dirt) : m_ids.stone;
 				}

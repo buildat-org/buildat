@@ -24,11 +24,21 @@ namespace mapgen {
 
 // The tuning numbers (the user's to try): erosion's droplets a column and
 // a droplet's steps at most; the caves' threshold (a voxel is a tunnel
-// where both noises are within it of 0) and the spreads of their noises;
-// the chance of a tree on a grass column; the plains' water
+// where both noises are within it of 0: [SKELDAT_CAVES_ROOMY] a voxel's
+// own, CAVE_WIDTH_MIN..MAX by a slow noise) and the spreads of their
+// noises; the chance of a tree on a grass column; the plains' water
 static const float DROPLETS_PER_COLUMN = 0.5f;
 static const int DROPLET_STEPS = 48;
-static const float CAVE_WIDTH = 0.05f, CAVE_SPREAD_XZ = 40, CAVE_SPREAD_Y = 24;
+static const float CAVE_WIDTH_MIN = 0.035f, CAVE_WIDTH_MAX = 0.085f,
+		CAVE_WIDTH_SPREAD = 90, CAVE_SPREAD_XZ = 80, CAVE_SPREAD_Y = 48;
+// [SKELDAT_CAVES_ROOMY] The caverns: where a noise of these spreads is
+// over CAVERN_THRESHOLD, in a band from CAVERN_FLOOR over the world's
+// bottom to CAVERN_DEPTH under the ground, the threshold raised by
+// CAVERN_TAPER_RISE over the band's top and bottom CAVERN_TAPER (closed
+// before its ends). The numbers are the playtests' to correct (the user).
+static const float CAVERN_SPREAD_XZ = 64, CAVERN_SPREAD_Y = 32,
+		CAVERN_THRESHOLD = 0.4f, CAVERN_TAPER_RISE = 0.4f;
+static const int CAVERN_FLOOR = 4, CAVERN_DEPTH = 12, CAVERN_TAPER = 6;
 static const float TREE_CHANCE = 0.006f;
 // The plains' water table: the height this share of the columns is under
 static const float WATER_SHARE = 0.1f;
@@ -691,15 +701,46 @@ inline Heightmap make_heightmap(const Params &p)
 }
 
 // A noodle cave's voxel: two 3D noises both near 0
+// [SKELDAT_CAVES_ROOMY] The tunnels' width at a voxel from its noise
+// (cave_width_noise()): squeezes and wider stretches along a tunnel
+inline float cave_width_noise(float x, float y, float z, uint32_t seed)
+{
+	return fbm3(x / CAVE_WIDTH_SPREAD, y / CAVE_WIDTH_SPREAD,
+			z / CAVE_WIDTH_SPREAD, seed + 333, 2, 0.5f);
+}
+inline float cave_width(float n)
+{
+	return (CAVE_WIDTH_MIN + CAVE_WIDTH_MAX) / 2 + (CAVE_WIDTH_MAX -
+			CAVE_WIDTH_MIN) / 2 * std::max(-1.0f, std::min(1.0f, 2 * n));
+}
 inline bool cave(float x, float y, float z, uint32_t seed)
 {
 	const float a = fbm3(x / CAVE_SPREAD_XZ, y / CAVE_SPREAD_Y,
 			z / CAVE_SPREAD_XZ, seed + 7001, 2, 0.5f);
-	if(std::fabs(a) >= CAVE_WIDTH)
+	if(std::fabs(a) >= CAVE_WIDTH_MAX)
+		return false;
+	const float w = cave_width(cave_width_noise(x, y, z, seed));
+	if(std::fabs(a) >= w)
 		return false;
 	const float b = fbm3(x / CAVE_SPREAD_XZ, y / CAVE_SPREAD_Y,
 			z / CAVE_SPREAD_XZ, seed + 9103, 2, 0.5f);
-	return std::fabs(b) < CAVE_WIDTH;
+	return std::fabs(b) < w;
+}
+// [SKELDAT_CAVES_ROOMY] The caverns' noise, and its threshold at y in a
+// column of ground g over a world from bottom (over 1 outside the band:
+// none)
+inline float cavern_noise(float x, float y, float z, uint32_t seed)
+{
+	return fbm3(x / CAVERN_SPREAD_XZ, y / CAVERN_SPREAD_Y,
+			z / CAVERN_SPREAD_XZ, seed + 4441, 3, 0.5f);
+}
+inline float cavern_threshold(int y, int bottom, int g)
+{
+	const int lo = bottom + CAVERN_FLOOR, hi = g - CAVERN_DEPTH;
+	if(y < lo || y > hi)
+		return 2;
+	const float d = (float)std::min(y - lo, hi - y);
+	return CAVERN_THRESHOLD + CAVERN_TAPER_RISE * std::max(0.0f, 1 - d / CAVERN_TAPER);
 }
 
 // Whether a tree stands on the column's ground (if that is grass)
@@ -993,6 +1034,94 @@ int main()
 			}
 		printf("mapgen: plains, seed 1: %zu specks\n", specks);
 		assert(specks < (size_t)m.width() * m.width() / 1000);
+	}
+	// [SKELDAT_CAVES_ROOMY] The tunnels, a 256 x 48 x 256 block at seeds
+	// 1-3: the rock hollowed 1-5%, their floor (a cave voxel on solid) 3
+	// wide (its narrower run of x and z) and 3 high on 55% of it or more.
+	// Measured 2026-10-19: 1.46-3.99%, 64-79% (the old caves 1.4-2.5%,
+	// 20-27%; the plan's 0.04-0.10 hollowed 2.0-5.6%, so the widths are
+	// 0.035-0.085 to keep the rock about as it was)
+	for(uint32_t seed = 1; seed <= 3; seed++){
+		const int W = 256, H = 48;
+		std::vector<char> v((size_t)W * H * W);
+		auto at = [&](int x, int y, int z) -> char & {
+			return v[((size_t)z * H + y) * W + x];
+		};
+		size_t hollow = 0;
+		for(int z = 0; z < W; z++)
+			for(int y = 0; y < H; y++)
+				for(int x = 0; x < W; x++)
+					hollow += at(x, y, z) = cave((float)x, (float)y - 60, (float)z, seed);
+		size_t floor = 0, roomy = 0;
+		for(int z = 1; z < W - 1; z++)
+			for(int y = 1; y < H - 1; y++)
+				for(int x = 1; x < W - 1; x++){
+					if(!at(x, y, z) || at(x, y - 1, z))
+						continue;
+					floor++;
+					auto run = [&](int dx, int dy, int dz){
+						int n = 1;
+						for(int s : {-1, 1})
+							for(int i = 1;; i++){
+								const int a = x + s * dx * i, b = y + s * dy * i, c = z + s * dz * i;
+								if(a < 0 || b < 0 || c < 0 || a >= W || b >= H || c >= W ||
+										!at(a, b, c))
+									break;
+								n++;
+							}
+						return n;
+					};
+					roomy += std::min(run(1, 0, 0), run(0, 0, 1)) >= 3 && run(0, 1, 0) >= 3;
+				}
+		printf("mapgen: caves, seed %u: %.2f%% of the rock, their floor 3 wide "
+				"and 3 high on %.0f%%\n", seed, 100.0 * hollow / v.size(),
+				100.0 * roomy / floor);
+		assert(hollow * 100 >= v.size() && hollow * 100 <= v.size() * 5 &&
+				roomy * 100 >= floor * 55);
+	}
+	// [SKELDAT_CAVES_ROOMY] The caverns, a band 40 high (the ground well
+	// over it) 256 across at seeds 1-3: 0.7-10% of it, 4 rooms of 500
+	// voxels or more. Measured 2026-10-19 at seeds 1-3: 2.65, 7.35, 1.32%,
+	// the largest rooms 44k, 148k, 19k voxels (the lowest octave, 64
+	// across, sets the share; at 0.45, seeds 1-8: 0.7-6%)
+	for(uint32_t seed = 1; seed <= 3; seed++){
+		const int W = 256, H = 40, bottom = -64;
+		std::vector<char> v((size_t)W * H * W);
+		auto idx = [&](int x, int y, int z){ return ((size_t)z * H + y) * W + x; };
+		size_t n = 0;
+		for(int z = 0; z < W; z++)
+			for(int y = 0; y < H; y++)
+				for(int x = 0; x < W; x++){
+					const int wy = bottom + CAVERN_FLOOR + y;
+					n += v[idx(x, y, z)] = cavern_noise((float)x, (float)wy, (float)z, seed) >
+							cavern_threshold(wy, bottom, bottom + CAVERN_FLOOR + H - 1 + CAVERN_DEPTH);
+				}
+		size_t rooms = 0, largest = 0;
+		std::vector<size_t> todo;
+		for(size_t i = 0; i < v.size(); i++){
+			if(v[i] != 1)
+				continue;
+			size_t size = 0;
+			todo.assign(1, i), v[i] = 2;
+			while(!todo.empty()){
+				const size_t c = todo.back();
+				todo.pop_back(), size++;
+				const int x = (int)(c % W), y = (int)(c / W % H), z = (int)(c / W / H);
+				for(int d = 0; d < 6; d++){
+					const int a = x + (d == 0) - (d == 1), b = y + (d == 2) - (d == 3),
+							e = z + (d == 4) - (d == 5);
+					if(a < 0 || b < 0 || e < 0 || a >= W || b >= H || e >= W ||
+							v[idx(a, b, e)] != 1)
+						continue;
+					v[idx(a, b, e)] = 2, todo.push_back(idx(a, b, e));
+				}
+			}
+			rooms += size >= 500, largest = std::max(largest, size);
+		}
+		printf("mapgen: caverns, seed %u: %.2f%% of the band, %zu rooms of 500 "
+				"voxels or more, the largest %zu\n", seed, 100.0 * n / v.size(),
+				rooms, largest);
+		assert(n * 1000 >= v.size() * 7 && n * 10 <= v.size() && rooms >= 4);
 	}
 	// The caves: a few percent of the rock, the same twice
 	{
