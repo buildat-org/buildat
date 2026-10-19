@@ -48,6 +48,31 @@ local function aitta_installed()
 	return have
 end
 
+-- **A release fetched and installed** ([REWORK_1019_FIXES] client 10):
+-- its signature and archive from its Aitta, both checked by their look
+-- before the install -- the signature JSON, the archive a zip ("PK"); a
+-- refusal (a playtest's ticket gone, an error page) is said as `refused`.
+-- done(dir) or done(nil, why, "fetch"|"install"). o: description (the
+-- network's leave), query ("?ticket=..."), review (installed apart),
+-- refused.
+local function fetch_install(aitta, sha256, o, done)
+	local base = aitta .. "/api/v1/aitta/archive/" .. tostring(sha256)
+	local options = {description = o.description}
+	local refused = o.refused or "the Aitta refused it"
+	network.http_get(base .. ".sig" .. (o.query or ""), function(sig, e1)
+		if not sig or not sig:match("^%s*{") then
+			return done(nil, sig and refused or tostring(e1), "fetch")
+		end
+		network.http_get(base .. ".zip" .. (o.query or ""), function(zip, e2)
+			if not zip or zip:sub(1, 2) ~= "PK" then
+				return done(nil, zip and refused or tostring(e2), "fetch")
+			end
+			local dir, why = __buildat_aitta_install(zip, sig, aitta, o.review)
+			done(dir, why, "install")
+		end, options)
+	end, options)
+end
+
 -- **A report on a release** ([AITTA_REPORTS]), to its Aitta: a reason
 -- and what is wrong, with this client's report key for that Aitta where
 -- the settings send keys (the Starport settings' report key, by the Aitta's address)
@@ -330,38 +355,31 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	end
 	local function install(p, play)
 		local rel, k = p.rel, p.key
-		local base = rel.aitta .. "/api/v1/aitta/archive/" .. tostring(rel.sha256)
 		say("Fetching " .. k .. "...")
-		local options = {description = "Aitta (install)"}
-		network.http_get(base .. ".sig", function(sig, err1)
-			if not sig then
-				return say("Could not fetch: " .. tostring(err1), WARN)
+		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)"},
+				function(dir, why, stage)
+			if stage == "fetch" then
+				return say("Could not fetch: " .. why, WARN)
 			end
-			network.http_get(base .. ".zip", function(zip, err2)
-				if not zip then
-					return say("Could not fetch: " .. tostring(err2), WARN)
-				end
-				local dir, why = __buildat_aitta_install(zip, sig, rel.aitta)
-				if dir and play then
-					return play_installed(k, rel.version)
-				end
-				-- Read before the grid's refresh, which takes the page down
-				local q = search:GetText()
-				uistack.main:pop(root)
-				-- The grid behind, with the new tile on it
-				local menu = dir and buildat.menu_extension()
-				if menu and type(menu.refresh) == "function" then
-					menu.refresh()
-				end
-				aitta_page(dir and ("Installed " .. k .. " " ..
-						tostring(rel.version) .. (rel.kind == "extension" and
-						(": the extension " .. tostring(rel.author) .. "__" ..
-						tostring(rel.name) .. ", in the sandbox") or
-						": it is on the grid")) or
-						("Not installed: " .. tostring(why)),
-						q, on_discuss, filter, by, k)
-			end, options)
-		end, options)
+			if dir and play then
+				return play_installed(k, rel.version)
+			end
+			-- Read before the grid's refresh, which takes the page down
+			local q = search:GetText()
+			uistack.main:pop(root)
+			-- The grid behind, with the new tile on it
+			local menu = dir and buildat.menu_extension()
+			if menu and type(menu.refresh) == "function" then
+				menu.refresh()
+			end
+			aitta_page(dir and ("Installed " .. k .. " " ..
+					tostring(rel.version) .. (rel.kind == "extension" and
+					(": the extension " .. tostring(rel.author) .. "__" ..
+					tostring(rel.name) .. ", in the sandbox") or
+					": it is on the grid")) or
+					("Not installed: " .. tostring(why)),
+					q, on_discuss, filter, by, k)
+		end)
 	end
 	local selected = nil
 	local last_click = {}
@@ -626,38 +644,24 @@ function M.playtest(offer, start)
 			"? Not reviewed. It is installed apart, under your user " ..
 			"folder's review/, and runs in the server's sandbox.", function()
 		log:info("playtest: yes, " .. id)
-		local base = offer.aitta .. "/api/v1/aitta/archive/" .. offer.sha256
-		local function failed(why)
-			log:warning("playtest: " .. id .. ": " .. tostring(why))
-			ui.show_message_dialog("Not installed: " .. tostring(why))
-		end
 		-- The network's own leave for the Aitta's address is asked as for
 		-- any fetch, once
-		local options = {description = "Aitta (playtest)"}
-		network.http_get(base .. ".sig?ticket=" .. offer.ticket, function(sig, e1)
-			if not sig or not sig:match("^%s*{") then
-				return failed(sig and "the ticket was refused" or e1)
+		fetch_install(offer.aitta, offer.sha256, {description = "Aitta (playtest)",
+				query = "?ticket=" .. offer.ticket, review = true,
+				refused = "the ticket was refused"}, function(dir, why)
+			if not dir then
+				log:warning("playtest: " .. id .. ": " .. tostring(why))
+				return ui.show_message_dialog("Not installed: " .. tostring(why))
 			end
-			network.http_get(base .. ".zip?ticket=" .. offer.ticket,
-					function(zip, e2)
-				if not zip or zip:sub(1, 2) ~= "PK" then
-					return failed(zip and "the ticket was refused" or e2)
-				end
-				local dir, why = __buildat_aitta_install(zip, sig, offer.aitta,
-						true)
-				if not dir then
-					return failed(why)
-				end
-				local author, name, version = id:match("^(.-)/(.-)/(.*)$")
-				local app = "review:" .. author .. "." .. name .. "@" .. version
-				log:info("playtest: installed " .. app .. " in " .. dir)
-				local menu = buildat.menu_extension()
-				if menu and type(menu.refresh) == "function" then
-					menu.refresh()
-				end
-				start(app)
-			end, options)
-		end, options)
+			local author, name, version = id:match("^(.-)/(.-)/(.*)$")
+			local app = "review:" .. author .. "." .. name .. "@" .. version
+			log:info("playtest: installed " .. app .. " in " .. dir)
+			local menu = buildat.menu_extension()
+			if menu and type(menu.refresh) == "function" then
+				menu.refresh()
+			end
+			start(app)
+		end)
 	end, function()
 		log:info("playtest: no, " .. id)
 	end, "Playtest", "Cancel")
@@ -681,24 +685,13 @@ function M.run_serverless(key)
 			return play_installed(key, best.version)
 		end
 		if best then
-			local base = best.aitta .. "/api/v1/aitta/archive/" ..
-					tostring(best.sha256)
-			local options = {description = "Aitta (install)"}
-			network.http_get(base .. ".sig", function(sig, e1)
-				if not sig then
-					return failed(tostring(e1))
+			fetch_install(best.aitta, best.sha256, {description = "Aitta (install)"},
+					function(dir, why)
+				if not dir then
+					return failed(tostring(why))
 				end
-				network.http_get(base .. ".zip", function(zip, e2)
-					if not zip then
-						return failed(tostring(e2))
-					end
-					local dir, why = __buildat_aitta_install(zip, sig, best.aitta)
-					if not dir then
-						return failed(tostring(why))
-					end
-					play_installed(key, best.version)
-				end, options)
-			end, options)
+				play_installed(key, best.version)
+			end)
 			return
 		end
 		for version, _ in pairs(have or {}) do
