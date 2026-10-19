@@ -2417,7 +2417,9 @@ spots=$(grep -a "boar spawn searches" "$log48" | sed 's/.*searches, //')
 	fail "no boar spawn spot: $spots ($log48)"
 echo "boars: the one on stone died off the grass; spawn searches $spots"
 # 45. Cave skeletons ([SKELDAT_CAVE_SKELETON]) at midnight, the launcher's
-# client invulnerable: one 8 ahead draws and shoots at the player; a bone
+# client invulnerable: one 8 behind draws and shoots at the player (level
+# with it on the spawn's hill: one 8 ahead stands under the hill's brow,
+# with no clear shot, [SKELDAT_CLEAR_SHOT]); a bone
 # skeleton and a cave skeleton 10 apart, 30 off the player, fight until
 # one is dead. 200 cave skeleton spawn searches round the player find
 # spots under a cover. The server again on the saved world: the cave
@@ -2428,7 +2430,7 @@ log49="$t/srv49.log"
 for n in 1 2; do
 	BUILDAT_SKELDAT_WORLD=cave BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
-		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "cave_skeleton 0 8; skeleton 0 30 marked; cave_skeleton 10 30; cave_spots 200" || echo "place 0 0")" \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "cave_skeleton 0 -8; skeleton 0 30 marked; cave_skeleton 10 30; cave_spots 200" || echo "place 0 0")" \
 		start_server "$t/srv49_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 		-D "$t/srv49" -C "$t/srv.cache" -l 3 -u launcher=1 ||
