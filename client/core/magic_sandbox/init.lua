@@ -360,7 +360,7 @@ function M.safe_to_unsafe(safe_thing, valid_types, what)
 			end
 		end
 		-- **A table vector** ([VECTOR_NAMES]): a buildat.Vector3 or a plain
-		-- {x=, y=, z=} where a Vector3 goes, made one as from_buildat does.
+		-- {x=, y=, z=} where a Vector3 goes, made a Vector3 of its x, y, z.
 		-- Read raw: no sandbox __index runs here
 		if type_of_thing == "table" then
 			for _, valid_type in ipairs(valid_types) do

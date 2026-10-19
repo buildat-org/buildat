@@ -299,11 +299,6 @@ function M.define(dst, util)
 		function(x, y, z)
 			return util.wrap_instance("Vector3", Vector3(x, y, z))
 		end),
-		class = {
-			from_buildat = function(v)
-				return util.wrap_instance("Vector3", Vector3(v.x, v.y, v.z))
-			end,
-		},
 		instance = {
 			Length = util.self_function(
 					"Length", {"number"}, {"Vector3"}),
@@ -417,12 +412,6 @@ function M.define(dst, util)
 		function(x, y, z)
 			return util.wrap_instance("IntVector3", IntVector3(x, y, z))
 		end),
-		class = {
-			from_buildat = function(v)
-				return util.wrap_instance("IntVector3",
-						IntVector3(v.x, v.y, v.z))
-			end,
-		},
 		instance = {
 			Length = util.self_function("Length", {"number"},
 					{"IntVector3"}),

@@ -869,7 +869,6 @@ buildat.Vector2(x, y) / buildat.Vector2(v) -> {x, y}
   these, or any table with numeric x, y (and z), as it takes a
   magic.Vector3: node.position = buildat.Vector3(1, 2, 3). A table
   without them is refused, the error naming the property or argument.
-  magic.Vector3.from_buildat(v) stays.
 
 
 Safe interfaces of built-in extensions
@@ -2263,7 +2262,7 @@ magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
 magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseLocked, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
 magic.IntVector2: x, y
-magic.IntVector3: Length, from_buildat, x, y, z
+magic.IntVector3: Length, x, y, z
 magic.JSON_ARRAY: 
 magic.JSON_BOOL: 
 magic.JSON_NULL: 
@@ -2882,7 +2881,7 @@ magic.VS:
 magic.Variant: GetBool, GetBuffer, GetInt, GetString, IsEmpty
 magic.VariantMap: GetBool, GetBuffer, GetFloat, GetInt, GetPtr, GetString, SetBool, SetBuffer, SetFloat, SetInt, SetPtr, SetString
 magic.Vector2: Length, Normalized, x, y
-magic.Vector3: CrossProduct, Length, Normalized, from_buildat, x, y, z
+magic.Vector3: CrossProduct, Length, Normalized, x, y, z
 magic.Vector4: DotProduct, Length, w, x, y, z
 magic.VectorBuffer: Clear, GetSize, ReadFloat, ReadInt, ReadString, ReadVector3, WriteFloat, WriteShort, eof, new, size
 magic.VertexBuffer: SetData, SetShadowed, SetSize, elementMask, new, vertexCount, vertexSize
