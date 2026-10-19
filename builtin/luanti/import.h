@@ -17,10 +17,12 @@
 #include "voxelworld/api.h"
 #include "main_context/api.h"
 #include "luanti/mapblock.h"
+#include "luanti/api.h"
 #include "luanti/lua_util.h"
 #include "luanti/mapgen_params.h"
 #include "luanti/map_access.h"
 #include <sqlite3.h>
+#include "storage/sqlite_stmt.h"
 #include <functional>
 extern "C" {
 #include <lua.h>
@@ -81,14 +83,8 @@ struct Importer
 		~SqlDb(){ sqlite3_close(p); }
 		operator sqlite3*() const { return p; }
 	};
-	struct SqlStmt {
-		sqlite3_stmt *p = nullptr;
-		SqlStmt() = default;
-		SqlStmt(const SqlStmt&) = delete;
-		SqlStmt& operator=(const SqlStmt&) = delete;
-		~SqlStmt(){ sqlite3_finalize(p); }
-		operator sqlite3_stmt*() const { return p; }
-	};
+	// A statement: storage's wrapper, prepared by hand (sqlite_stmt.h)
+	typedef sqlite_stmt::Stmt SqlStmt;
 
 	// The id this run gave a Luanti node name, or the one "unknown" has.
 	// Asked of Lua, because the aliases and the content ids are its tables.
@@ -275,7 +271,7 @@ struct Importer
 		auto query = [&](const char *sql,
 				const std::function<void(sqlite3_stmt*)> &row){
 			SqlStmt st;
-			if(sqlite3_prepare_v2(db, sql, -1, &st.p, nullptr) != SQLITE_OK){
+			if(st.prepare(db, sql) != SQLITE_OK){
 				log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 						sqlite3_errmsg(db));
 				return;
@@ -538,9 +534,8 @@ struct Importer
 			return;
 		}
 		SqlStmt st;
-		if(sqlite3_prepare_v2(db,
-				"SELECT modname, key, value FROM entries ORDER BY modname",
-				-1, &st.p, nullptr) != SQLITE_OK){
+		if(st.prepare(db,
+				"SELECT modname, key, value FROM entries ORDER BY modname") != SQLITE_OK){
 			log_w(MODULE, "import_world(): %s: %s", cs(db_path),
 					sqlite3_errmsg(db));
 			return;
@@ -739,12 +734,10 @@ struct Importer
 		// newer by three columns. Luanti reads both and so does this.
 		SqlStmt st;
 		bool by_xyz = false;
-		rc = sqlite3_prepare_v2(db, "SELECT pos, data FROM blocks", -1, &st.p,
-				nullptr);
+		rc = st.prepare(db, "SELECT pos, data FROM blocks");
 		if(rc != SQLITE_OK){
 			by_xyz = true;
-			rc = sqlite3_prepare_v2(db, "SELECT x, y, z, data FROM blocks",
-					-1, &st.p, nullptr);
+			rc = st.prepare(db, "SELECT x, y, z, data FROM blocks");
 		}
 		if(rc != SQLITE_OK){
 			ss_ err = sqlite3_errmsg(db);

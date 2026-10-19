@@ -64,6 +64,7 @@
 #include "accounts/api.h"
 #include "starport_announce/api.h"
 #include <sqlite3.h>
+#include "storage/sqlite_stmt.h"
 #include <ctime>
 #include <cstring>
 #include <set>
@@ -247,44 +248,14 @@ static ss_ time_text(int64_t t)
 	return buf;
 }
 
-// One statement: values bound in order, columns read by index
-struct Q
+// One statement: values bound in order, columns read by index; prepared
+// once and kept (storage/sqlite_stmt.h), or with `cached` false for SQL
+// made with values in it
+static sqlite_stmt::Cache g_stmts;
+struct Q: public sqlite_stmt::Stmt
 {
-	sqlite3 *db;
-	sqlite3_stmt *st = nullptr;
-	int n = 0;
-	Q(sqlite3 *db, const char *sql): db(db)
-	{
-		if(sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK)
-			throw Exception(ss_("hearth: ")+sqlite3_errmsg(db)+" in "+sql);
-	}
-	~Q(){ sqlite3_finalize(st); }
-	Q& b(int64_t v){ sqlite3_bind_int64(st, ++n, v); return *this; }
-	Q& blob(const ss_ &v)
-	{
-		sqlite3_bind_blob(st, ++n, v.data(), (int)v.size(), SQLITE_TRANSIENT);
-		return *this;
-	}
-	Q& b(const ss_ &v)
-	{
-		sqlite3_bind_text(st, ++n, v.data(), (int)v.size(), SQLITE_TRANSIENT);
-		return *this;
-	}
-	bool step()
-	{
-		const int rc = sqlite3_step(st);
-		if(rc == SQLITE_ROW)
-			return true;
-		if(rc == SQLITE_DONE)
-			return false;
-		throw Exception(ss_("hearth: ")+sqlite3_errmsg(db));
-	}
-	int64_t i(int col){ return sqlite3_column_int64(st, col); }
-	ss_ s(int col)
-	{
-		const char *p = (const char*)sqlite3_column_text(st, col);
-		return p ? ss_(p, sqlite3_column_bytes(st, col)) : ss_();
-	}
+	Q(sqlite3 *db, const char *sql, bool cached = true):
+		Stmt(db, cached ? &g_stmts : nullptr, sql, "hearth: "){}
 };
 
 static const char *SCHEMA =
@@ -666,6 +637,7 @@ struct Module: public interface::Module
 		m_rwake.notify_all();
 		if(m_rthread.joinable())
 			m_rthread.join();
+		g_stmts.finalize_all();
 		if(m_db)
 			sqlite3_close(m_db);
 	}
@@ -724,7 +696,7 @@ struct Module: public interface::Module
 		// A file from before a column (2026-10-04's first ones)
 		for(const char *const *c : COLUMNS_ADDED){
 			Q cols(m_db, (ss_("SELECT count(*) FROM pragma_table_info('")+
-					c[0]+"') WHERE name = '"+c[1]+"'").c_str());
+					c[0]+"') WHERE name = '"+c[1]+"'").c_str(), false);
 			cols.step();
 			if(cols.i(0) == 0){
 				exec((ss_("ALTER TABLE ")+c[0]+" ADD COLUMN "+c[1]+" "+c[2])
@@ -1344,7 +1316,7 @@ struct Module: public interface::Module
 
 	void exec(const char *sql)
 	{
-		Q q(m_db, sql);
+		Q q(m_db, sql, false);
 		q.step();
 	}
 
@@ -2473,7 +2445,7 @@ struct Module: public interface::Module
 		std::set<int64_t> unread;
 		const ss_ sql = "SELECT id FROM threads WHERE id IN (" + ids + ") AND "
 				UNREAD("threads");
-		Q q(m_db, sql.c_str());
+		Q q(m_db, sql.c_str(), false);
 		q.b(name).b(since(name));
 		while(q.step())
 			unread.insert(q.i(0));

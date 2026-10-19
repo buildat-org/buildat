@@ -11,6 +11,7 @@
 #include "interface/os.h"
 #include "core/json.h"
 #include <sqlite3.h>
+#include "storage/sqlite_stmt.h"
 #include "core/version.h"
 #include <fstream>
 #include <sys/stat.h>
@@ -59,81 +60,8 @@ static void check(sqlite3 *db, int rc, const char *what)
 	throw SqliteError(msg);
 }
 
-// A prepared statement out of the connection's cache, by the SQL's own
-// address (they are string literals): prepared once per connection and
-// reset when let go. It used to be prepared per use on the reasoning that
-// sqlite's prepare is not the expensive part of a batch, and a perf of
-// VoxeLibre's world generation put 8% of the server in sqlite's parser
-// under set() ([WORLDGEN_DRIFT], 2026-09-19). Held under the save's mutex
-// like every use of the connection, so one statement is in use at a time.
-struct StmtCache
-{
-	std::map<const char*, sqlite3_stmt*> by_sql;
-	// Before the connection closes: a statement finalized after that is
-	// an error, and one not finalized before it keeps the close from
-	// closing
-	void finalize_all()
-	{
-		for(auto &p : by_sql)
-			sqlite3_finalize(p.second);
-		by_sql.clear();
-	}
-};
-struct Stmt
-{
-	sqlite3 *db = nullptr;
-	sqlite3_stmt *stmt = nullptr;
-
-	Stmt(sqlite3 *db, StmtCache &cache, const char *sql): db(db)
-	{
-		auto it = cache.by_sql.find(sql);
-		if(it != cache.by_sql.end()){
-			stmt = it->second;
-			return;
-		}
-		check(db, sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr), sql);
-		cache.by_sql[sql] = stmt;
-	}
-	~Stmt()
-	{
-		if(stmt){
-			sqlite3_reset(stmt);
-			sqlite3_clear_bindings(stmt);
-		}
-	}
-	void bind(int i, const ss_ &v)
-	{
-		check(db, sqlite3_bind_blob(stmt, i, v.c_str(), (int)v.size(),
-				SQLITE_TRANSIENT), "bind");
-	}
-	void bind_text(int i, const ss_ &v)
-	{
-		check(db, sqlite3_bind_text(stmt, i, v.c_str(), (int)v.size(),
-				SQLITE_TRANSIENT), "bind");
-	}
-	bool step()
-	{
-		int rc = sqlite3_step(stmt);
-		check(db, rc, "step");
-		return rc == SQLITE_ROW;
-	}
-	ss_ column_blob(int i)
-	{
-		const void *p = sqlite3_column_blob(stmt, i);
-		int n = sqlite3_column_bytes(stmt, i);
-		if(!p || n <= 0)
-			return "";
-		return ss_((const char*)p, (size_t)n);
-	}
-	ss_ column_text(int i)
-	{
-		const unsigned char *p = sqlite3_column_text(stmt, i);
-		int n = sqlite3_column_bytes(stmt, i);
-		if(!p || n <= 0)
-			return "";
-		return ss_((const char*)p, (size_t)n);
-	}
-};
+// Statements prepared once per connection: sqlite_stmt.h
+typedef sqlite_stmt::Stmt Stmt;
 
 struct CStore: public Store
 {
@@ -163,7 +91,7 @@ struct CSave: public Save
 	int m_batch_depth = 0;
 	std::map<ss_, up_<CStore>> m_stores;
 	// The prepared statements, finalized before the connection closes
-	StmtCache m_stmts;
+	sqlite_stmt::Cache m_stmts;
 
 	// in_memory is for the self-check: everything above the sqlite calls is
 	// the same, and nothing is left on anyone's disk.
@@ -298,8 +226,8 @@ struct CSave: public Save
 
 	int64_t pragma(const char *sql)
 	{
-		Stmt st(m_db, m_stmts, sql);
-		return st.step() ? atoll(st.column_text(0).c_str()) : 0;
+		Stmt st(m_db, &m_stmts, sql, "storage: ");
+		return st.step() ? atoll(st.s(0).c_str()) : 0;
 	}
 
 	int64_t bytes()
@@ -346,34 +274,36 @@ struct CSave: public Save
 bool CStore::get(const ss_ &key, ss_ &value_out)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db, m_save->m_stmts,
-			"SELECT value FROM store WHERE store=? AND key=?");
-	st.bind_text(1, m_name);
-	st.bind_text(2, key);
+	Stmt st(m_save->m_db, &m_save->m_stmts,
+			"SELECT value FROM store WHERE store=? AND key=?", "storage: ");
+	st.b(m_name);
+	st.b(key);
 	if(!st.step())
 		return false;
-	value_out = st.column_blob(0);
+	value_out = st.blob_at(0);
 	return true;
 }
 
 void CStore::set(const ss_ &key, const ss_ &value)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db, m_save->m_stmts,
+	Stmt st(m_save->m_db, &m_save->m_stmts,
 			"INSERT INTO store (store, key, value) VALUES (?, ?, ?)"
-			" ON CONFLICT(store, key) DO UPDATE SET value=excluded.value");
-	st.bind_text(1, m_name);
-	st.bind_text(2, key);
-	st.bind(3, value);
+			" ON CONFLICT(store, key) DO UPDATE SET value=excluded.value",
+			"storage: ");
+	st.b(m_name);
+	st.b(key);
+	st.blob(value);
 	st.step();
 }
 
 void CStore::remove(const ss_ &key)
 {
 	interface::MutexScope ms(m_save->m_mutex);
-	Stmt st(m_save->m_db, m_save->m_stmts, "DELETE FROM store WHERE store=? AND key=?");
-	st.bind_text(1, m_name);
-	st.bind_text(2, key);
+	Stmt st(m_save->m_db, &m_save->m_stmts,
+			"DELETE FROM store WHERE store=? AND key=?", "storage: ");
+	st.b(m_name);
+	st.b(key);
 	st.step();
 }
 
@@ -384,11 +314,11 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	// can seek to, and it does not have to care what LIKE thinks % means
 	sv_<ss_> result;
 	if(prefix.empty()){
-		Stmt st(m_save->m_db, m_save->m_stmts,
-				"SELECT key FROM store WHERE store=? ORDER BY key");
-		st.bind_text(1, m_name);
+		Stmt st(m_save->m_db, &m_save->m_stmts,
+				"SELECT key FROM store WHERE store=? ORDER BY key", "storage: ");
+		st.b(m_name);
 		while(st.step())
-			result.push_back(st.column_text(0));
+			result.push_back(st.s(0));
 		return result;
 	}
 	ss_ upper = prefix;
@@ -398,11 +328,11 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	if(i == 0){
 		// Every byte is 0xff, so there is no next string; fall back to a
 		// scan of the store
-		Stmt st(m_save->m_db, m_save->m_stmts,
-				"SELECT key FROM store WHERE store=? ORDER BY key");
-		st.bind_text(1, m_name);
+		Stmt st(m_save->m_db, &m_save->m_stmts,
+				"SELECT key FROM store WHERE store=? ORDER BY key", "storage: ");
+		st.b(m_name);
 		while(st.step()){
-			ss_ key = st.column_text(0);
+			ss_ key = st.s(0);
 			if(key.compare(0, prefix.size(), prefix) == 0)
 				result.push_back(key);
 		}
@@ -410,14 +340,14 @@ sv_<ss_> CStore::list(const ss_ &prefix)
 	}
 	upper.resize(i);
 	upper[i-1] = (char)((unsigned char)upper[i-1] + 1);
-	Stmt st(m_save->m_db, m_save->m_stmts,
+	Stmt st(m_save->m_db, &m_save->m_stmts,
 			"SELECT key FROM store WHERE store=? AND key>=? AND key<?"
-			" ORDER BY key");
-	st.bind_text(1, m_name);
-	st.bind_text(2, prefix);
-	st.bind_text(3, upper);
+			" ORDER BY key", "storage: ");
+	st.b(m_name);
+	st.b(prefix);
+	st.b(upper);
 	while(st.step())
-		result.push_back(st.column_text(0));
+		result.push_back(st.s(0));
 	return result;
 }
 
