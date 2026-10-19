@@ -112,41 +112,6 @@ sp_<CommonVolume> deserialize_volume_int32(
 	return volume;
 }
 
-sp_<CommonVolume> deserialize_volume_8bit(
-		const luabind::object &buffer_o, lua_State *L)
-{
-	TRY_GET_SANDBOX_STUFF(buf, 1, VectorBuffer);
-
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_checkcppstring(L, 1);
-	else
-		data.assign((const char*)buf->GetData(), buf->GetSize());
-
-	up_<pv::RawVolume<uint8_t>> volume_8bit =
-			interface::deserialize_volume_8bit(data);
-	// Data it could not read: nil, as deserialize_volume answers
-	if(!volume_8bit)
-		return nullptr;
-
-	auto region = volume_8bit->getEnclosingRegion();
-
-	sp_<CommonVolume> volume(new CommonVolume(region));
-
-	auto &lc = region.getLowerCorner();
-	auto &uc = region.getUpperCorner();
-	for(int z = lc.getZ(); z <= uc.getZ(); z++){
-		for(int y = lc.getY(); y <= uc.getY(); y++){
-			for(int x = lc.getX(); x <= uc.getX(); x++){
-				uint8_t v = volume_8bit->getVoxelAt(x, y, z);
-				volume->setVoxelAt(x, y, z, VoxelInstance(v));
-			}
-		}
-	}
-
-	return volume;
-}
-
 // Marches rays through a set of chunk volumes and reports what each one ran
 // into. This exists because doing it in Lua costs a call per voxel per ray:
 // the sky visibility sampler in builtin/voxel_shading was spending half a
@@ -787,7 +752,6 @@ void init_voxel_volume(lua_State *L)
 		,
 		LUABIND_FUNC(deserialize_volume),
 		LUABIND_FUNC(deserialize_volume_int32),
-		LUABIND_FUNC(deserialize_volume_8bit),
 		// An opaque handle: a job in flight, with nothing to call on it.
 		// cast_voxel_rays_collect() is what asks whether it has finished.
 		class_<RayJob, bases<>, sp_<RayJob>>("__buildat_VoxelRayJob")

@@ -7,27 +7,7 @@
 
 	// Apps-specific lua functions
 
-	// connect_server(address: string) -> status: bool, error: string or nil
-	static int l_connect_server(lua_State *L)
-	{
-		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
-		CApp *self = (CApp*)lua_touserdata(L, -1);
-		lua_pop(L, 1);
-
-		ss_ address = lua_bindings::lua_tocppstring(L, 1);
-
-		self->remember_menu_ui();
-		ss_ error;
-		bool ok = self->m_state->connect(to_local_pipe(address), &error);
-		lua_pushboolean(L, ok);
-		if(ok)
-			lua_pushnil(L);
-		else
-			lua_pushstring(L, error.c_str());
-		return 2;
-	}
-
-	// connect_server_start(address: string): the same connect on a worker,
+	// connect_server_start(address: string): the connect on a worker,
 	// so that the frame keeps drawing while it runs ([BOX_PLAYTEST_2] 12).
 	// connect_server_poll() is what says how it went.
 	static int l_connect_server_start(lua_State *L)
@@ -2659,15 +2639,6 @@
 			web_dgram_close(id);
 		}
 #endif
-		return 0;
-	}
-
-	// set_watchdog_seconds(n): how long without a frame before the
-	// watchdog logs this thread's stack; 0 puts the default (10) back
-	static int l_set_watchdog_seconds(lua_State *L)
-	{
-		int n = (int)luaL_optinteger(L, 1, 0);
-		g_watchdog_seconds = n > 0 ? n : 10;
 		return 0;
 	}
 

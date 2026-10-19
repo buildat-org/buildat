@@ -3,12 +3,6 @@
 -- Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 local log = buildat.Logger("__client/api")
 
-buildat.connect_server    = __buildat_connect_server
--- The connect on a worker, polled from a frame handler: the blocking one
--- froze the waiting screen for as long as the connect took
--- ([BOX_PLAYTEST_2] 12)
-buildat.connect_server_start = __buildat_connect_server_start
-buildat.connect_server_poll  = __buildat_connect_server_poll
 buildat.list_apps        = __buildat_list_apps
 -- list_saves([app]) -> {{app=, name=, modified=}, ...}, newest first.
 -- The saves on disk, enumerated without a server, since a launcher has
@@ -25,14 +19,9 @@ buildat.list_installed_games = __buildat_list_installed_games
 buildat.safe.list_installed_games = __buildat_list_installed_games
 buildat.start_local_server = __buildat_start_local_server
 buildat.stop_local_server = __buildat_stop_local_server
-buildat.request_stop_local_server = __buildat_request_stop_local_server
-buildat.force_kill_local_server = __buildat_force_kill_local_server
-buildat.local_server_ready = __buildat_local_server_ready
-buildat.local_server_port = __buildat_local_server_port
 buildat.local_server_running = __buildat_local_server_running
--- The last STATUS line of the local server's log, and its tail for a
--- dialog about one that died ([START_PROGRESS])
-buildat.local_server_status = __buildat_local_server_status
+-- The local server's log's tail, for a dialog about one that died
+-- ([START_PROGRESS])
 buildat.local_server_log_tail = __buildat_local_server_log_tail
 buildat.extension_path    = __buildat_extension_path
 buildat.get_time_us       = __buildat_get_time_us
@@ -62,7 +51,6 @@ buildat.bignum = {
 	mul_mod = __buildat_bignum_mul_mod,
 	mod_exp = __buildat_bignum_mod_exp,
 }
-buildat.set_ui_scale      = __buildat_set_ui_scale
 buildat.get_ui_scale      = __buildat_get_ui_scale
 buildat.logical_size      = __buildat_logical_size
 -- The fraction of the window size the user asked 3D viewports to be rendered
@@ -91,12 +79,9 @@ buildat.add_resource_dir  = __buildat_add_resource_dir
 -- Into <user>/screenshots, named by the date and the time; see
 -- l_take_screenshot() in src/client/app.cpp for why this is in the sandbox.
 buildat.take_screenshot   = __buildat_take_screenshot
--- save_file, exported_files, read_exported, pick_file, picked_file: files a
--- game hands the user and takes from them; buildat.safe's below has no
--- listing or reading of <user>/exports
+-- save_file, pick_file, picked_file: files a game hands the user and
+-- takes from them; neither table lists or reads <user>/exports
 buildat.save_file         = __buildat_save_file
-buildat.exported_files    = __buildat_exported_files
-buildat.read_exported     = __buildat_read_exported
 buildat.pick_file         = __buildat_pick_file
 buildat.picked_file       = __buildat_picked_file
 -- dump_meshes([atlas_json], [node]) -> the file name, or nil and why not. Same sandbox rule
@@ -111,8 +96,6 @@ buildat.compose_image     = __buildat_compose_image
 -- whoever has to look at them rather than draw them.
 buildat.read_image        = __buildat_read_image
 buildat.get_env           = __buildat_get_env
-buildat.create_directories = __buildat_create_directories -- unsafe only
-buildat.set_watchdog_seconds = __buildat_set_watchdog_seconds -- unsafe only
 
 -- No text of the caller's: the web page's dialog says it ([WEB_LEFT_DIALOG])
 buildat.safe.disconnect    = function() __buildat_disconnect() end
@@ -2281,7 +2264,6 @@ buildat.safe.get_file_content = function(name)
 	end
 	return __buildat_get_file_content(name)
 end
-buildat.safe.set_ui_scale  = __buildat_set_ui_scale
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.logical_size  = __buildat_logical_size
 -- keyboard_height() -> the on-screen keyboard's height in UI pixels, 0 with
@@ -2342,7 +2324,6 @@ buildat.safe.Volume        = __buildat_Volume
 buildat.safe.pack_voxel_volume        = __buildat_pack_voxel_volume
 buildat.safe.deserialize_volume       = __buildat_deserialize_volume
 buildat.safe.deserialize_volume_int32 = __buildat_deserialize_volume_int32
-buildat.safe.deserialize_volume_8bit  = __buildat_deserialize_volume_8bit
 -- cast_voxel_rays(args): marches rays through voxel data. args.directions is a
 -- flat array of numbers, three to a ray. With args.rays_per_cell set,
 -- consecutive rays are one cell's and what comes back is their average

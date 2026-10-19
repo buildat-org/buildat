@@ -81,9 +81,9 @@ buildat.packet_us -> {total, worst, worst_name}
 buildat.run_script_file(name)
 - Run a script file gotten from the server, in the sandbox environment
 
-buildat.set_ui_scale(scale)
-- The UI's scale; <= 0 restores the automatic one (the short side over 1080)
 buildat.get_ui_scale() -> number
+- The UI's scale: the user's ui_size, or the automatic one (the short side
+  over 1080)
 buildat.logical_size() -> w, h
 - The frame a scan's and a command sequence's pixels are in: the -w size in a
   scripted client ([SEQ_FIXED_SIZE]), the window otherwise
@@ -147,8 +147,8 @@ buildat.get_ui_size() -> the UI scale now, automatic
 buildat.set_ui_size(scale or "auto") -> ok, err
 - A third preference an app may write: ui_size (see "Engine settings"), for
   the same reason as render_scale. "auto", the default, follows the window
-  (the short side over 1080); a scale is 0.5 to 3. It takes at once, and a
-  set_ui_scale() of the app's own wins over it.
+  (the short side over 1080); a scale is 0.5 to 3. It takes at once, and an
+  app's own magic.ui.scale (UI:SetScale) wins over it.
 
 buildat.get_web_address_bar() -> "hide" or "show", nil natively
 buildat.set_web_address_bar("hide" or "show") -> ok, err
@@ -176,8 +176,6 @@ buildat.save_file_parts(name) -> a writer, or nil and why not
   w.cancel() drops the parts. pick_file(accept, true) reads one the same
   way: picked_file() then gives name, reader, with reader.size,
   reader.read(offset, len) (at most 16 MiB) and reader.close().
-buildat.exported_files() -> {name, ...}
-buildat.read_exported(name) -> data, or nil and why not
 buildat.pick_file([accept]) -> true
 buildat.picked_file() -> name, data once a picked file is read, else nil;
   nil and why once the user picked nothing or it could not be read
@@ -185,10 +183,9 @@ buildat.picked_file() -> name, data once a picked file is read, else nil;
   take_screenshot rule: the client picks where. Natively <user>/exports
   (save_file never overwrites); on the web the browser's download and file
   picker. At most 64 MiB a file.
-- exported_files and read_exported are the extension environment's only
-  ([SECURITY_RUN_1]): every server's game exports into the one directory,
-  so the sandbox gets the file the user picks and no listing. Its
-  pick_file opens the browser's picker on the web and natively the
+- No listing or reading of <user>/exports ([SECURITY_RUN_1]): every
+  server's game exports into the one directory, so a game gets the file
+  the user picks. pick_file opens the browser's picker on the web and natively the
   client's own list of <user>/exports (client/core/network's
   pick_export).
 buildat.qr_code(text) -> modules, side; or nil
@@ -211,15 +208,9 @@ buildat.set_web_fullscreen(bool)
   allows it from one); leaving is at once. Off by default; nothing natively.
 
 buildat.get_cache_path() -> string (sandbox only, see below)
-buildat.create_directories(path) -> bool (unsafe Lua only)
-- The directory and its parents, for trusted Lua keeping a file of its own
-  under the user path; a path is not a thing an app gets to name
-buildat.set_watchdog_seconds(n) (unsafe Lua only)
-- How long without a frame before the watchdog logs this thread's stack;
-  0 puts the default (10) back. A screen that waits lowers it. Apart from
-  that, on Linux 30 s without a frame errors the running script out to its
-  pcall, and a compiled loop that does not stop then ends the client at
-  60 s (exit 3).
+- The watchdog: 10 s without a frame logs the main thread's stack; on
+  Linux 30 s errors the running script out to its pcall, and a compiled
+  loop that does not stop then ends the client at 60 s (exit 3).
 - In the sandbox as they are (decided 2026-09-13): what they give sandboxed
   code is "write files under the cache and make them loadable", which a server
   can already do through client_file. The cache-path check in each is
@@ -251,7 +242,7 @@ buildat.Region(x0, y0, z0, x1, y1, z1), buildat.Volume(region) -> a volume
   (:set_voxel_at, :get_voxel_at, :get_plane_at, :serialize)
 buildat.pack_voxel_volume(args) -> string
 buildat.deserialize_volume(data) -> Volume, and the typed
-buildat.deserialize_volume_int32(data), buildat.deserialize_volume_8bit(data)
+buildat.deserialize_volume_int32(data)
 buildat.set_voxel_geometry(node, volume_data, voxel_reg, atlas_reg
   [, use_skylight [, set_up_materials [, horizon [, origin]]]])
 - The mesher, on a worker thread; the node's CustomGeometry is replaced when
@@ -415,9 +406,6 @@ extension's load must be inert until something calls through its safe table
 
 API specific to the extension environment:
 
-buildat.connect_server(address)
-- Address may include port in format "host:port" or "[host]:port"
-
 buildat.list_apps() -> {{name, size, kind}, ...}, the apps under apps/
   and the installed ones; kind is the app's main/meta.json "kind" (or its
   base's): world, arena, app, other, experiment, check, or "" for none
@@ -439,17 +427,7 @@ buildat.start_local_server(app [, launch]) -> ok, error
   cache/local_server_<port>.log at info ([START_PROGRESS]).
 buildat.stop_local_server()
 - SIGTERM and a wait for the port to be released
-buildat.request_stop_local_server()
-- SIGTERM and no wait
-buildat.force_kill_local_server()
-buildat.local_server_ready() -> bool
-- Alive, and its port answers -- which it does only once every module is
-  built and loaded
 buildat.local_server_running() -> bool
-buildat.local_server_port() -> string
-buildat.local_server_status() -> string or nil
-- The last "STATUS ..." line of the local server's log, read from where the
-  last call left off: "Compiling luanti (14 of 15)", "Listening".
 buildat.local_server_log_tail([lines]) -> path, text
 - The log's last lines (20 by default, each cut at 160 characters), for a
   dialog about a server that died.
@@ -496,11 +474,6 @@ buildat.read_image(resource_name) -> width, height, rgba
 
 buildat.extension_path(name) -> the extension's directory
 
-buildat.connect_server_start(address), buildat.connect_server_poll() -> state
-- The connect off the frame: start it, then poll from an Update handler until
-  it answers. The blocking connect_server() freezes the frame for as long as
-  the connect takes ([BOX_PLAYTEST_2] 12). The sandbox has these as
-  connect_start/connect_poll.
 buildat.list_saves(app) -> {{name, ...}, ...}, the saves of one app
 buildat.launch_ui_sandboxed(name) -> bool
 - Whether that launch UI's launch_ui.txt asks to be run in the sandbox. The
@@ -2928,5 +2901,5 @@ extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
 extension.test: f
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----

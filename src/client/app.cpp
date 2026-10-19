@@ -2528,7 +2528,6 @@ struct CApp: public App, public magic::Application
 		lua_setglobal(L, "__buildat_" #name); \
 }
 
-		DEF_BUILDAT_FUNC(connect_server)
 		DEF_BUILDAT_FUNC(keep_server_icon)
 		DEF_BUILDAT_FUNC(keep_package_media)
 		DEF_BUILDAT_FUNC(connect_server_start)
@@ -2583,7 +2582,6 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
 		DEF_BUILDAT_FUNC(count_files)
-		DEF_BUILDAT_FUNC(set_watchdog_seconds)
 		DEF_BUILDAT_FUNC(set_reload_on_return)
 		DEF_BUILDAT_FUNC(set_web_fullscreen)
 		DEF_BUILDAT_FUNC(web_authorize)
