@@ -35,19 +35,6 @@ using magic::Component;
 
 namespace replicate {
 
-static ss_ dump(const magic::VectorBuffer &buf)
-{
-	std::ostringstream os(std::ios::binary);
-	os<<"[";
-	for(size_t i = 0; i < buf.GetBuffer().Size(); i++){
-		if(i != 0)
-			os<<", ";
-		os<<cs(buf.GetBuffer().At(i));
-	}
-	os<<"]";
-	return os.str();
-}
-
 static ss_ buf_to_string(const magic::VectorBuffer &buf)
 {
 	return ss_((const char*)&buf.GetBuffer().Front(), buf.GetBuffer().Size());
@@ -683,18 +670,6 @@ struct Module: public interface::Module, public replicate::Interface
 		});
 		m_pending_sends.clear();
 	}
-
-	/*void send_to_all(const ss_ &name, const magic::VectorBuffer &buf)
-	{
-		log_i(MODULE, "%s: Update size: %zu, data=%s",
-				cs(name), buf.GetBuffer().Size(), cs(dump(buf)));
-		ss_ data = buf_to_string(buf);
-		network::access(m_server, [&](network::Interface * inetwork){
-			auto peers = inetwork->list_peers();
-			for(auto &peer : peers)
-				inetwork->send(peer, name, data);
-		});
-	}*/
 
 	// Interface
 

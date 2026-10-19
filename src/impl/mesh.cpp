@@ -201,43 +201,6 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 }
 
 template<typename VoxelType>
-		class IsQuadNeededByRegistryPhysics
-{
-	interface::VoxelRegistry *m_voxel_reg;
-	VoxelFmt m_fmt;
-	// NOTE: The voxel type id is used directly as PolyVox material value
-public:
-	IsQuadNeededByRegistryPhysics(interface::VoxelRegistry *voxel_reg):
-		m_voxel_reg(voxel_reg), m_fmt(voxel_reg)
-	{}
-	IsQuadNeededByRegistryPhysics(): // PolyVox wants this
-		m_voxel_reg(nullptr)
-	{}
-	bool operator()(VoxelType back, VoxelType front, uint32_t &materialToUse)
-	{
-		if(m_voxel_reg == nullptr)
-			throw Exception("IsQuadNeededByRegistryPhysics not initialized");
-		const interface::CachedVoxelDefinition *back_def =
-				m_voxel_reg->get_cached(back);
-		const interface::CachedVoxelDefinition *front_def =
-				m_voxel_reg->get_cached(front);
-		if(!back_def)
-			throw Exception(ss_()+"Undefined voxel: back="+
-					itos(m_fmt.id_of(back)));
-		if(!front_def)
-			throw Exception(ss_()+"Undefined voxel: front="+
-					itos(m_fmt.id_of(front)));
-		if(!back_def || !back_def->physically_solid)
-			return false;
-		if(!front_def || !front_def->physically_solid){
-			materialToUse = 1; // Doesn't matter
-			return true;
-		}
-		return false;
-	}
-};
-
-template<typename VoxelType>
 		class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;

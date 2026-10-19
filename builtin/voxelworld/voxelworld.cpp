@@ -942,12 +942,8 @@ struct CInstance: public voxelworld::Instance
 				replicate::PeerJoinedScene);
 		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
 				replicate::PeerLeftScene);
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
 		EVENT_TYPEN("network:packet_received/voxelworld:set_send_distance",
 				on_set_send_distance, network::Packet)
-		/*EVENT_TYPEN("network:packet_received/voxelworld:get_section",
-				on_get_section, network::Packet)*/
 	}
 
 	// How long one tick may spend building chunks' collision boxes; see
@@ -1121,25 +1117,6 @@ struct CInstance: public voxelworld::Instance
 	{
 		m_clients_initialized.erase(event.peer);
 	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
-	}
-
-	// TODO: How should nodes be filtered for replication?
-	// TODO: Generally the client wants roughly one section, but isn't
-	//       positioned at the middle of a section
-	/*void on_get_section(const network::Packet &packet)
-	{
-		pv::Vector3DInt16 section_p;
-		{
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(section_p);
-		}
-		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
-				packet.sender, PV3I_PARAMS(section_p));
-	}*/
 
 	void initialize_peer(replicate::PeerId peer)
 	{
@@ -3344,22 +3321,17 @@ struct Module: public interface::Module, public voxelworld::Interface
 		if(keep_loaded_wanted())
 			log_i(MODULE, "BUILDAT_VOXELWORLD_KEEP_LOADED: nothing is "
 					"unloaded this run");
-		// NOTE: These also apply to CInstances
-		m_server->sub_event(this, Event::t("core:start"));
-		m_server->sub_event(this, Event::t("core:unload"));
+		// NOTE: These also apply to CInstances, which handle the tick and
+		// the peers' events
 		m_server->sub_event(this, Event::t("core:shutdown"));
 		// [USER_DIR_COPY] An operator's save_now: what shutdown saves
 		m_server->sub_event(this, Event::t("core:save"));
-		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("replicate:peer_joined_scene"));
 		m_server->sub_event(this, Event::t("replicate:peer_left_scene"));
-		m_server->sub_event(this, Event::t("client_file:files_transmitted"));
 		m_server->sub_event(this, Event::t("main_context:scene_deleted"));
 		m_server->sub_event(this, Event::t(
 				"network:packet_received/voxelworld:set_send_distance"));
-		/*m_server->sub_event(this, Event::t(
-					"network:packet_received/voxelworld:get_section"));*/
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -3374,41 +3346,10 @@ struct Module: public interface::Module, public voxelworld::Interface
 	// The handlers' list, which returns at its match
 	void dispatch(const Event::Type &type, const Event::Private *p)
 	{
-		EVENT_VOIDN("core:start", on_start)
-		EVENT_VOIDN("core:unload", on_unload)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
 		EVENT_VOIDN("core:save", on_shutdown)
-		EVENT_VOIDN("core:continue", on_continue)
-		EVENT_TYPEN("core:tick", on_tick, interface::TickEvent)
-		EVENT_TYPEN("replicate:peer_joined_scene", on_peer_joined_scene,
-				replicate::PeerJoinedScene);
-		EVENT_TYPEN("replicate:peer_left_scene", on_peer_left_scene,
-				replicate::PeerLeftScene);
-		EVENT_TYPEN("client_file:files_transmitted", on_files_transmitted,
-				client_file::FilesTransmitted)
 		EVENT_TYPEN("main_context:scene_deleted", on_scene_deleted,
 				main_context::SceneDeleted);
-	}
-
-	void on_start()
-	{
-	}
-
-	void unload_node(Scene *scene, uint node_id)
-	{
-		log_d(MODULE, "Unloading node %i", node_id);
-		Node *n = scene->GetNode(node_id);
-		if(!n){
-			log_w(MODULE, "Cannot unload node %i: Not found in scene", node_id);
-			return;
-		}
-		// Remove RigidBody first to speed up removal of CollisionShapes
-		RigidBody *body = n->GetComponent<RigidBody>();
-		if(body)
-			n->RemoveComponent(body);
-		// Remove everything else
-		n->RemoveAllComponents();
-		n->Remove();
 	}
 
 	// The server is going away. A world with a save gets one last flush; one
@@ -3418,85 +3359,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 	{
 		for(auto &pair : m_instances)
 			pair.second->save();
-	}
-
-	void on_unload()
-	{
-		log_v(MODULE, "on_unload()");
-
-		// TODO
-
-		/*commit();
-
-		// Remove everything managed by us from the scene
-		main_context::access(m_server, [&](main_context::Interface *imc){
-			Scene *scene = imc->check_scene();
-			size_t progress = 0;
-			for(auto &sector_pair: m_sections){
-				log_v(MODULE, "Unloading nodes... %i%%",
-						100 * progress / m_sections.size());
-				progress++;
-				for(auto &section_pair: sector_pair.second){
-					Section &section = section_pair.second;
-
-					auto region = section.node_ids->getEnclosingRegion();
-					auto lc = region.getLowerCorner();
-					auto uc = region.getUpperCorner();
-					for(int z = lc.getZ(); z <= uc.getZ(); z++){
-						for(int y = lc.getY(); y <= uc.getY(); y++){
-							for(int x = lc.getX(); x <= uc.getX(); x++){
-								uint id = section.node_ids->getVoxelAt(x, y, z);
-								section.node_ids->setVoxelAt(x, y, z, 0);
-								unload_node(scene, id);
-							}
-						}
-					}
-				}
-			}
-			log_v(MODULE, "Unloading nodes... 100%%");
-		});
-
-		// Store voxel registry and stuff
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(m_voxel_reg->serialize());
-		}
-		m_server->tmp_store_data("voxelworld:restore_info", os.str());*/
-	}
-
-	void on_continue()
-	{
-		// TODO
-
-		/*// Restore voxel registry and stuff
-				ss_ data = m_server->tmp_restore_data("voxelworld:restore_info");
-		ss_ voxel_reg_data;
-		{
-			std::istringstream is(data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(voxel_reg_data);
-		}
-		m_voxel_reg->deserialize(voxel_reg_data);*/
-
-		// Start up normally
-		on_start();
-	}
-
-	void on_tick(const interface::TickEvent &event)
-	{
-	}
-
-	void on_peer_joined_scene(const replicate::PeerJoinedScene &event)
-	{
-	}
-
-	void on_peer_left_scene(const replicate::PeerLeftScene &event)
-	{
-	}
-
-	void on_files_transmitted(const client_file::FilesTransmitted &event)
-	{
 	}
 
 	void on_scene_deleted(const main_context::SceneDeleted &event)
@@ -3511,21 +3373,6 @@ struct Module: public interface::Module, public voxelworld::Interface
 			}
 		}
 	}
-
-	/*// TODO: How should nodes be filtered for replication?
-	// TODO: Generally the client wants roughly one section, but isn't
-	//       positioned at the middle of a section
-			void on_get_section(const network::Packet &packet)
-	{
-		pv::Vector3DInt16 section_p;
-		{
-			std::istringstream is(packet.data, std::ios::binary);
-			cereal::PortableBinaryInputArchive ar(is);
-			ar(section_p);
-		}
-		log_v(MODULE, "C%i: on_get_section(): " PV3I_FORMAT,
-				packet.sender, PV3I_PARAMS(section_p));
-		}*/
 
 	// Interface
 
