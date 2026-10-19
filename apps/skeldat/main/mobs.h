@@ -1773,6 +1773,38 @@ struct Mobs
 		return days >= BOAT_BONED_DAYS || top_b == 0 ||
 				(days >= BOAT_BARE_DAYS && top_b < skeldat::bones::FLOOD);
 	}
+	// [SKELDAT_BOAT_LAND_SKULL] A skull at full bones over the top of the
+	// landing column (x, z), or of a land neighbour's, where that voxel is
+	// air and outside a burning lantern's sphere: the bones spread from
+	// it, and it keeps the sun off the skeleton beside it
+	bool land_skull(int x, int z, int at[3])
+	{
+		const uint32_t skull = world.id_of("skeldat:skull");
+		const int R2 = LANTERN_RADIUS * LANTERN_RADIUS;
+		for(int i = 0; i < 9; i++){
+			const int cx = x + (i == 0 ? 0 : (i - 1) % 3 - 1),
+					cz = z + (i == 0 ? 0 : (i - 1) / 3 - 1);
+			if((i > 0 && cx == x && cz == z) || !land_top(cx, cz) ||
+					water_top(cx, cz))
+				continue;
+			const int cy = world.top_y[world.column(cx, cz)] + 1;
+			if(world.id_at(cx, cy, cz) != ID_AIR)
+				continue;
+			bool lit = false;
+			for(const pv::Vector3DInt32 &l : furnaces.lanterns_in(pv::Region(
+					cx, cy, cz, cx, cy, cz))){
+				const int dx = cx - l.getX(), dy = cy - l.getY(), dz = cz - l.getZ();
+				lit = lit || dx * dx + dy * dy + dz * dz <= R2;
+			}
+			if(lit)
+				continue;
+			world.set_node(cx, cy, cz, skull, world.rand() % 4,
+					skeldat::bones::MAX);
+			at[0] = cx, at[1] = cy, at[2] = cz;
+			return true;
+		}
+		return false;
+	}
 	// A boat's light step: at night beside a shore it may land on (by its
 	// age, boat_shore_ok()) out of BOAT_HOME of where it boarded, onto it;
 	// by day waiting there; else a step on the water toward such a shore
@@ -1806,10 +1838,17 @@ struct Mobs
 			m.boat = false;
 			m.x = (float)sx, m.z = (float)sz;
 			m.y = world.top_y[world.column(sx, sz)] + 0.5f;
+			// The body steps ashore with it: left over the water, the
+			// water took it as the boat went
+			m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
+			int at[3];
+			const bool skull = land_skull(sx, sz, at);
 			log_i(MODULE, "skeldat: a skeleton (%u) lands at (%d %d)%s, "
-					"%.1f days on its boat", key, sx, sz, sb == 0 ? "" :
+					"%.1f days on its boat, %s", key, sx, sz, sb == 0 ? "" :
 					sb >= skeldat::bones::FLOOD ? ", a bone block" :
-					", a shore with bones", days);
+					", a shore with bones", days, skull ? cs("a skull at "+
+					itos(at[0])+","+itos(at[1])+","+itos(at[2])) :
+					"no room for a skull");
 			return;
 		}
 		const float want = sd < (1 << 30) ? std::atan2((float)(sx - mx),

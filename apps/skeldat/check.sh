@@ -3037,7 +3037,11 @@ lx, lz = int(l.group(1)), int(l.group(2))
 assert (lx - 0) ** 2 + (lz - 45) ** 2 >= 144, ("landed near home", lx, lz)
 for log in (a, b[:l.start()]):
     assert not re.search(r"the skeleton \(%s\) (burns|is in water)" % k, log), "burnt or drowned"
-print("a boat from %s,%s, aim %s; landed at %d %d" % (m.group(1), m.group(2), m.group(3), lx, lz))
+# [SKELDAT_BOAT_LAND_SKULL] A skull by the landing, and no burning after
+sk = re.search(r"a skeleton \(%s\) lands at .*, a skull at (-?\d+),-?\d+,(-?\d+)" % k, b)
+assert sk and abs(int(sk.group(1)) - lx) <= 1 and abs(int(sk.group(2)) - lz) <= 1, ("no skull by the landing", sk and sk.groups())
+assert not re.search(r"the skeleton \(%s\) burns" % k, b[l.end():]), "it burnt by its skull"
+print("a boat from %s,%s, aim %s; landed at %d %d, a skull at %s,%s" % (m.group(1), m.group(2), m.group(3), lx, lz, sk.group(1), sk.group(2)))
 PY
 ) || fail "boats ($log58, $t/srv58_2.log)"
 # [SKELDAT_BOAT_FAULTS] Boats by their age, at night: a pond from 10 ahead
@@ -3054,6 +3058,23 @@ bt54a="$bt54a; bones -10 41 3; bones -9 41 15; bones 0 41 3; bones 1 41 15; bone
 bt54a="$bt54a; skeleton -10 40 boat 1 -10 28.6; skeleton 0 40 boat 3 0 28.6"
 bt54a="$bt54a; skeleton 10 40 boat 5 10 28.6; skeleton 0 12 boat 0.5 0 9"
 W54=boatage T54=0.85 D54=600 boats "$t/srv58_age.log" boats_age 30000 "$bt54a"
+# [SKELDAT_BOAT_LAND_SKULL] Its skull keeps the sun off: B's boat alone,
+# a 600 s day from 0.15, so it lands before the dawn (0.19, 23 s in) on
+# a bare shore, a skull beside it; into the day (0.30), it does not burn
+bt54s="level -30 10 61 31 $W -1; level -30 42 61 29 $W -1; level -30 41 20 1 $W -1"
+bt54s="$bt54s; level -8 41 8 1 $W -1; level 2 41 28 1 $W -1; bones 0 41 3"
+bt54s="$bt54s; skeleton 0 40 boat 3 0 28.6"
+W54=boatskull T54=0.15 D54=600 boats "$t/srv58_skull.log" boats_skull 90000 "$bt54s"
+skull=$(python3 -I - "$t/srv58_skull.log" <<'PY'
+import sys, re
+a = open(sys.argv[1], errors="replace").read()
+k = re.search(r"skeldat: test: a skeleton \((\d+)\) at", a).group(1)
+l = re.search(r"a skeleton \(%s\) lands at \((-?\d+) (-?\d+)\).*, a skull at (-?\d+),(-?\d+),(-?\d+)" % k, a)
+assert l, "no landing with a skull"
+assert not re.search(r"the skeleton \(%s\) (burns|is in water)" % k, a[l.end():]), "it burnt or drowned by its skull"
+print("landed at %s %s, a skull at %s,%s,%s, no burning into the day" % l.groups())
+PY
+) || fail "the landing's skull ($t/srv58_skull.log)"
 age=$(python3 -I - "$t/srv58_age.log" <<'PY'
 import sys, re
 a = open(sys.argv[1], errors="replace").read()
@@ -3256,7 +3277,7 @@ echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
 echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
-echo "boats: $boat; a skull's call: $call; by age: $age"
+echo "boats: $boat; a skull's call: $call; by age: $age; the landing's skull: $skull"
 echo "under water: $wet grown into the pond, its map $pond; a lake world with a bare bed ended"
 echo "boars in water: $swim; $left"
 echo "boars asleep: $asleep"
