@@ -31,6 +31,8 @@ struct WorldView
 	// leaves the column's top as it is ([SKELDAT_OWN_MAPGEN]: the liquid
 	// step's writes)
 	sv_<int8_t> top_any;
+	// [SKELDAT_BOATS] The top voxel water (not lava)
+	sv_<uint8_t> top_w;
 	sv_<uint8_t> top_b;
 	bool footprints_ready = false;
 	// The time of day, 0 to 1 (0.5 noon)
@@ -357,6 +359,8 @@ struct WorldView
 				n->shape != skeldat::TORCH && n->shape != skeldat::GAS);
 		top_y[c] = ground ? (int8_t)y : NO_GROUND;
 		top_any[c] = (int8_t)y;
+		top_w[c] = n && n->shape == skeldat::LIQUID &&
+				n->name.compare(0, 13, "skeldat:water") == 0;
 		top_b[c] = (uint8_t)bones;
 	}
 

@@ -242,6 +242,7 @@ struct Module: public interface::Module, public PlayersHost,
 		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
 				uint32_t id, uint32_t){
 			m_trees.on_set(x, y, z, old, id);
+			m_mobs.green_set(x, y, z, old, id);
 		});
 		// What is kept by the voxel: the stuck arrows (saved), the marker
 		// skulls a footprint, and the sections whose tops are counted
@@ -724,6 +725,7 @@ struct Module: public interface::Module, public PlayersHost,
 			m_mobs.stuck.insert(key.substr(6));
 		m_drops.store = m_store;
 		m_mobs.store = m_store;
+		m_mobs.green_init();
 		m_drops.load();
 		if(const char *env = getenv("BUILDAT_SKELDAT_TEST"))
 			m_mobs.test = env;

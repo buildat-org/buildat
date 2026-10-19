@@ -468,7 +468,7 @@ struct Mobs
 	{
 		if(m.mode == FIGHT)
 			m.mode = WANDER, m.mode_t = 0;
-		m.draw_t = -1, m.draw_sent = 0;
+		m.draw_t = -1, m.draw_sent = 0, m.boat_sent = -1;
 		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 		woken++;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
@@ -906,6 +906,17 @@ struct Mobs
 						if(m.mode == FIGHT)
 							m.mode = WANDER;
 					}
+					// [SKELDAT_BOATS] On a boat: the body on the light form
+					// at the body's speed, over the water; no drowning, no sun
+					if(m.boat){
+						const float dx = m.x - m.bx, dz = m.z - m.bz,
+								flat = std::sqrt(dx * dx + dz * dz);
+						const float k = flat > 0 ? std::min(1.0f, BODY_SPEED * dt / flat) : 1;
+						m.bx += dx * k, m.bz += dz * k, m.by = m.y;
+						if(flat > 0.05f && !(p && m.mode == FIGHT))
+							m.yaw = std::atan2(dx, dz);
+						continue;
+					}
 					step_body(w, m, p, dt);
 					// [SKELDAT_SKELETON_WATER] Its body in water, the feet's
 					// voxel or the one over them: dead at once
@@ -1128,6 +1139,11 @@ struct Mobs
 							Urho3D::Variant(m.hurt));
 					m.hurt_sent = m.hurt;
 				}
+				if((int)m.boat != m.boat_sent){
+					n->SetVar(Urho3D::StringHash("skeldat_boat"),
+							Urho3D::Variant((int)m.boat));
+					m.boat_sent = m.boat;
+				}
 				const int drawing = m.draw_t >= 0;
 				if(drawing != m.draw_sent){
 					n->SetVar(Urho3D::StringHash("skeldat_draw"),
@@ -1223,6 +1239,214 @@ struct Mobs
 		}
 	}
 
+	// [SKELDAT_BOATS] The green skulls, kept by the voxel (main.cpp's
+	// on_set): "x,y,z" keys, saved as "green_skulls"
+	std::set<ss_> green;
+	uint32_t green_id = ID_IGNORE;
+	void green_init()
+	{
+		green_id = world.id_of("skeldat:green_skull");
+		ss_ v;
+		if(store && store->get("green_skulls", v)){
+			std::istringstream is(v);
+			ss_ k;
+			while(is>>k)
+				green.insert(k);
+		}
+		for(auto &kv : all)
+			if(kv.second.boat)
+				log_i(MODULE, "skeldat: a skeleton (%u) on a boat at %.0f,%.0f, "
+						"aim %.2f", kv.first, kv.second.x, kv.second.z, kv.second.aim);
+	}
+	void green_set(int x, int y, int z, uint32_t old, uint32_t id)
+	{
+		if(old == id || (old != green_id && id != green_id))
+			return;
+		if(id == green_id)
+			green.insert(pos_key(x, y, z));
+		else
+			green.erase(pos_key(x, y, z));
+		ss_ v;
+		for(const ss_ &k : green)
+			v += k + " ";
+		if(store)
+			store->set("green_skulls", v);
+	}
+	bool water_top(int x, int z) const
+	{
+		const long c = world.column(x, z);
+		return c >= 0 && world.top_w[c];
+	}
+	bool land_top(int x, int z) const
+	{
+		const long c = world.column(x, z);
+		return c >= 0 && world.top_y[c] != NO_GROUND;
+	}
+	// Stuck by water at (x, z): a water top within 2, and from it a ray
+	// (every 45 degrees) over BOAT_ACROSS water tops with no land
+	bool stuck_by_water(int x, int z) const
+	{
+		for(int d = 0; d < 8; d++){
+			const int sx = (d == 0 || d == 1 || d == 7) - (d >= 3 && d <= 5),
+					sz = (d >= 1 && d <= 3) - (d >= 5 && d <= 7);
+			int k = 1;
+			while(k <= 2 && !water_top(x + sx * k, z + sz * k))
+				k++;
+			if(k > 2)
+				continue;
+			int n = 0;
+			while(n < BOAT_ACROSS && water_top(x + sx * (k + n), z + sz * (k + n)))
+				n++;
+			if(n == BOAT_ACROSS)
+				return true;
+		}
+		return false;
+	}
+	// At sunrise: each bone skeleton's count of sunrises stuck by water,
+	// and at BOAT_DAYS a green skull beside it
+	void boats_sunrise()
+	{
+		sv_<std::pair<uint32_t, vp::P>> skulls;
+		for(auto &kv : all){
+			Mob &m = kv.second;
+			if(m.kind != SKELETON || m.boat)
+				continue;
+			const int mx = (int)std::floor(m.x + 0.5f), mz = (int)std::floor(m.z + 0.5f);
+			if(!stuck_by_water(mx, mz)){
+				m.shore_days = 0;
+				continue;
+			}
+			if(++m.shore_days < BOAT_DAYS)
+				continue;
+			m.shore_days = 0;
+			bool near = false;
+			for(const ss_ &k : green){
+				int x, y, z;
+				if(sscanf(k.c_str(), "%d,%d,%d", &x, &y, &z) == 3 &&
+						std::abs(x - mx) <= GREEN_SKULL_APART &&
+						std::abs(z - mz) <= GREEN_SKULL_APART)
+					near = true;
+			}
+			for(auto &s : skulls)
+				near = near || (std::abs(s.second.x - mx) <= GREEN_SKULL_APART &&
+						std::abs(s.second.z - mz) <= GREEN_SKULL_APART);
+			int at[3];
+			bool found = false;
+			if(!near)
+				voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+					found = marker_spot(w, m, at);
+				});
+			if(found)
+				skulls.push_back({kv.first, vp::P(at[0], at[1], at[2])});
+		}
+		for(auto &s : skulls){
+			world.set_node(s.second.x, s.second.y, s.second.z, green_id);
+			log_i(MODULE, "skeldat: a skeleton (%u) places a green skull at "
+					"%d,%d,%d", s.first, s.second.x, s.second.y, s.second.z);
+		}
+	}
+	// At sunset: the boats' new aims (not the ones boarding now), then
+	// each green skull's one skeleton onto a boat
+	void boats_sunset()
+	{
+		for(auto &kv : all)
+			if(kv.second.boat){
+				kv.second.aim = world.rnd() * 2 * (float)M_PI;
+				log_i(MODULE, "skeldat: a skeleton (%u) on a boat aims %.2f",
+						kv.first, kv.second.aim);
+			}
+		const std::set<ss_> skulls = green;
+		for(const ss_ &k : skulls){
+			int x, y, z;
+			if(sscanf(k.c_str(), "%d,%d,%d", &x, &y, &z) != 3)
+				continue;
+			// The water within BOAT_NEAR: the nearest for the boat; within 6
+			// their mean, the aim away from the shore
+			int wx = 0, wz = 0, best = 1 << 30;
+			float ax = 0, az = 0;
+			for(int dz = -6; dz <= 6; dz++)
+			for(int dx = -6; dx <= 6; dx++){
+				if(!water_top(x + dx, z + dz))
+					continue;
+				ax += dx, az += dz;
+				const int d = dx * dx + dz * dz;
+				if(std::max(std::abs(dx), std::abs(dz)) <= BOAT_NEAR && d < best)
+					best = d, wx = x + dx, wz = z + dz;
+			}
+			if(best == 1 << 30)
+				continue;
+			uint32_t key = 0;
+			float kd = 1e9f;
+			for(auto &kv : all){
+				const Mob &m = kv.second;
+				const float d = std::hypot(m.x - x, m.z - z);
+				if(m.kind == SKELETON && !m.boat && d <= BOAT_NEAR && d < kd)
+					kd = d, key = kv.first;
+			}
+			if(kd > BOAT_NEAR)
+				continue;
+			Mob &m = all[key];
+			m.boat = true;
+			m.aim = std::atan2(ax, az);
+			m.boat_x = (float)x, m.boat_z = (float)z;
+			m.x = (float)wx, m.z = (float)wz;
+			m.y = world.top_any[world.column(wx, wz)] + 0.5f;
+			m.route.clear();
+			m.shelter_route = m.shot_route = false;
+			log_i(MODULE, "skeldat: a skeleton (%u) takes to a boat at %d,%d, "
+					"aim %.2f", key, wx, wz, m.aim);
+		}
+	}
+	// A boat's light step: at night beside a bare shore (or a boned one
+	// with no bare one seen) away from home, onto it; else a step on the
+	// water toward a bare shore seen within BOAT_SHORE, or its aim
+	void step_boat(uint32_t key, Mob &m)
+	{
+		const int mx = (int)std::floor(m.x + 0.5f), mz = (int)std::floor(m.z + 0.5f);
+		const bool home = std::hypot(m.x - m.boat_x, m.z - m.boat_z) < BOAT_HOME;
+		// The nearest shore column seen (land beside water), bare first
+		int sx = 0, sz = 0, sd = 1 << 30;
+		bool bare = false;
+		for(int dz = -BOAT_SHORE; dz <= BOAT_SHORE; dz++)
+		for(int dx = -BOAT_SHORE; dx <= BOAT_SHORE; dx++){
+			const int x = mx + dx, z = mz + dz;
+			if(!land_top(x, z) || std::hypot(x - m.boat_x, z - m.boat_z) < BOAT_HOME)
+				continue;
+			if(!water_top(x + 1, z) && !water_top(x - 1, z) &&
+					!water_top(x, z + 1) && !water_top(x, z - 1))
+				continue;
+			const bool b = world.top_b[world.column(x, z)] == 0;
+			const int d = dx * dx + dz * dz;
+			if((b && !bare) || (b == bare && d < sd))
+				sd = d, sx = x, sz = z, bare = b;
+		}
+		if(sd <= 2 && !home && !sun_danger()){
+			m.boat = false;
+			m.x = (float)sx, m.z = (float)sz;
+			m.y = world.top_y[world.column(sx, sz)] + 0.5f;
+			log_i(MODULE, "skeldat: a skeleton (%u) lands at (%d %d)%s", key,
+					sx, sz, bare ? "" : ", a shore with bones");
+			return;
+		}
+		// Waiting by day beside the shore it means to land on
+		if(sd <= 2)
+			return;
+		const float want = sd < (1 << 30) ? std::atan2((float)(sx - mx),
+				(float)(sz - mz)) : m.aim;
+		for(int t = 0; t < 6; t++){
+			const float yaw = want + (world.rnd() - 0.5f) * (t == 0 ? 0.6f :
+					2 * (float)M_PI);
+			const int x = (int)std::floor(m.x + std::sin(yaw) + 0.5f),
+					z = (int)std::floor(m.z + std::cos(yaw) + 0.5f);
+			if((x == mx && z == mz) || !water_top(x, z))
+				continue;
+			m.yaw = yaw;
+			m.x = (float)x, m.z = (float)z;
+			m.y = world.top_any[world.column(x, z)] + 0.5f;
+			return;
+		}
+	}
+
 	// At sunrise and sunset each skeleton picks, of its footprint and the
 	// eight round it, the one with the most marker skulls: its own on a
 	// tie, a random one when all have none; at sunset its night's bone
@@ -1236,6 +1460,10 @@ struct Mobs
 		sv_<int> lure = markers;
 		for(auto &pair : furnaces.lanterns_by_footprint())
 			lure[pair.first] += LANTERN_LURE * (int)pair.second.size();
+		if(sunset)
+			boats_sunset();
+		else
+			boats_sunrise();
 		for(auto &kv : all){
 			Mob &m = kv.second;
 			if(m.kind != SKELETON)
@@ -1469,6 +1697,15 @@ struct Mobs
 			light_steps++;
 			const int mx = (int)std::floor(m.x + 0.5f),
 					mz = (int)std::floor(m.z + 0.5f);
+			// [SKELDAT_BOATS] A boat's own step, every 1/BOAT_SPEED
+			if(m.boat){
+				m.boat_t += step;
+				if(m.boat_t >= step / BOAT_SPEED - 0.001f){
+					m.boat_t = 0;
+					step_boat(kv.first, m);
+				}
+				continue;
+			}
 			if(!growth.ended)
 				drop_into_holes(mx, mz);
 			// [SKELDAT_SUN_SHELTER] On its way to shelter, or looking for one
@@ -1869,7 +2106,7 @@ struct Mobs
 						});
 					if(safe < 0 && c >= 0)
 						safe = world.top_b[c] >= skeldat::bones::FLOOD;
-					if(m.kind != SKELETON || m.node_id || c < 0 || safe){
+					if(m.kind != SKELETON || m.node_id || c < 0 || safe || m.boat){
 						++it;
 						continue;
 					}

@@ -260,6 +260,26 @@ return function(game, sounds)
 				local a = math.sin(m.phase) * math.min(1, speed) * 35
 				-- The draw's pose, eased in and out over 0.15 s: the arms
 				-- from the swing to forward, -90 about the shoulder's x
+				-- [SKELDAT_BOATS] On a boat: a flat box under it in the
+				-- planks' texture ([SKELDAT_BOARD_WOOD]'s), lit as it is
+				local boat = m.node:GetVar("skeldat_boat"):GetInt() == 1
+				if boat ~= (m.boat ~= nil) then
+					if boat then
+						m.boat = m.node:CreateChild("boat")
+						m.boat.position = magic.Vector3(0, -0.1, 0)
+						m.boat.scale = magic.Vector3(0.9, 0.3, 1.8)
+						local model = m.boat:CreateComponent("StaticModel")
+						model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+						m.boat_mat = material("main/wood.png")
+						model.material = m.boat_mat
+						m.light_t = 0
+					else
+						m.boat:Remove()
+						m.boat, m.boat_mat = nil, nil
+					end
+					log:info("skeldat: a skeleton " .. (boat and "on" or "off")
+							.. " a boat (" .. m.node:GetID() .. ")")
+				end
 				local drawing = m.node:GetVar("skeldat_draw"):GetInt() == 1
 				if drawing ~= m.drawing then
 					m.drawing = drawing
@@ -288,6 +308,10 @@ return function(game, sounds)
 						c = magic.Color(k * 1.5 + 0.3, k * 0.4, k * 0.4, 1)
 					end
 					m.mat:SetShaderParameter("MatDiffColor", c)
+					if m.boat_mat then
+						m.boat_mat:SetShaderParameter("MatDiffColor",
+								magic.Color(r, g, b, 1))
+					end
 				end
 			end
 		end

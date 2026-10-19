@@ -358,6 +358,16 @@ inline Game make_game()
 			t = "main/marker_" + t.substr(5);
 		g.items[n.name].image = "main/marker_skull_front.png";
 	}
+	// [SKELDAT_BOATS] Where skeletons take to boats: the skull in green;
+	// dug, nothing; not an item
+	{
+		bones("green_skull", "Green Skull", "skull_front",
+				{-4, -6, -4, 4, 0, 4, -3, -8, -4, 3, -6, 1}, "-");
+		NodeDef &n = g.nodes.back();
+		for(ss_ &t : n.tiles)
+			t = "main/green_" + t.substr(5);
+		g.items.erase(n.name);
+	}
 	// An arrow stuck for good ([SKELDAT_BOW]): the shaft out of the face
 	// it went into, the head buried, two vanes; walked through, dug or
 	// picked up as an arrow (main.cpp), not an item

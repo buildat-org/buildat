@@ -236,6 +236,18 @@ static const float DAYLIGHT_DANGER = 0.5f;
 static const int APPLE_TREE_SHARE = 4, DECAY_RANGE = 4;
 static const float DECAY_PER_SECOND = 1;
 
+// [SKELDAT_BOATS] A bone skeleton within 2 of a water top, from where a
+// ray every 45 degrees over the water meets no land for BOAT_ACROSS, at
+// BOAT_DAYS sunrises running, places a green skull (none within
+// GREEN_SKULL_APART). At each sunset a green skull with water within
+// BOAT_NEAR puts the nearest bone skeleton within BOAT_NEAR on a boat: at
+// BOAT_SPEED of the walk on water tops alone, immune to the sun, turned to
+// a bare shore seen within BOAT_SHORE, landing beside one at night, not
+// within BOAT_HOME of where it boarded
+static const int BOAT_ACROSS = 10, BOAT_DAYS = 2, GREEN_SKULL_APART = 32,
+		BOAT_NEAR = 4, BOAT_SHORE = 8, BOAT_HOME = 12;
+static const float BOAT_SPEED = 0.5f;
+
 struct Mob
 {
 	uint8_t kind = BOAR;
@@ -289,11 +301,19 @@ struct Mob
 	bool shelter_route = false;
 	double shelter_t = 0;
 	float lava_t = 0;
+	// [SKELDAT_BOATS] Saved: on a boat, its aim (a yaw), where it boarded;
+	// its sunrises stuck by water running. Not saved: the node's
+	// "skeldat_boat" as last set
+	bool boat = false;
+	float aim = 0, boat_x = 0, boat_z = 0;
+	int shore_days = 0, boat_sent = -1;
+	float boat_t = 0; // since its last step
 
 	ss_ save() const {
 		std::ostringstream os;
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
-				marker_day<<" "<<carry_coal<<" "<<grass_t;
+				marker_day<<" "<<carry_coal<<" "<<grass_t<<" "<<boat<<" "<<aim<<" "<<
+				boat_x<<" "<<boat_z<<" "<<shore_days;
 		return os.str();
 	}
 	bool load(const ss_ &s){
@@ -302,6 +322,8 @@ struct Mob
 		is>>k>>x>>y>>z>>yaw>>hp>>marker_day>>carry_coal;
 		if(!(is>>grass_t))
 			grass_t = -1;
+		else if(!(is>>boat>>aim>>boat_x>>boat_z>>shore_days))
+			boat = false, shore_days = 0;
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON || k == CAVE_SKELETON) && hp > 0;
 	}

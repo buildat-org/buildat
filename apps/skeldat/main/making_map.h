@@ -77,6 +77,7 @@ struct MakingMap
 				skeldat::bones::SECTION;
 		world.top_y.assign(cols, NO_GROUND);
 		world.top_any.assign(cols, NO_GROUND);
+		world.top_w.assign(cols, 0);
 		world.top_b.assign(cols, 0);
 		growth.flooded.assign(world.footprints(), 0);
 		growth.land.assign(world.footprints(), 0);
