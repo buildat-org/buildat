@@ -35,7 +35,8 @@ local disk = nil
 -- simplified: every game's list shows the whole trash; an entry's game
 -- would be read from its world.mt
 local trash = {}
--- Whole MB, 1000000 bytes: --max-disk-mb's unit
+-- Whole MB, 1000000 bytes: --max-disk-mb's unit, so the disk line reads
+-- in the limit's own numbers (not format_bytes(), whose MB is 1024 KB)
 local function mb(bytes)
 	return string.format("%d MB", math.floor((bytes + 500000) / 1000000))
 end
@@ -600,35 +601,8 @@ function draw(saves, save_games)
 	end
 end
 
--- How big it is, the way buildat's own game menu says it: see
--- format_bytes() in extensions/launch_menu/screens.lua, which this is the same
--- ladder as. A menu that says nothing about size is a menu that cannot tell
--- a moment's copy from a minute's.
-local function format_bytes(n)
-	n = math.floor(tonumber(n) or 0)
-	if n < 1024 then
-		return n .. " B"
-	end
-	local kb = n / 1024
-	if kb < 1024 then
-		if kb < 10 then
-			return string.format("%.1f KB", kb)
-		end
-		return math.floor(kb + 0.5) .. " KB"
-	end
-	local mb = kb / 1024
-	if mb < 1024 then
-		if mb < 10 then
-			return string.format("%.1f MB", mb)
-		end
-		return math.floor(mb + 0.5) .. " MB"
-	end
-	local gb = mb / 1024
-	if gb < 10 then
-		return string.format("%.1f GB", gb)
-	end
-	return math.floor(gb + 0.5) .. " GB"
-end
+-- How big it is, the way buildat's own menus say it (ui_utils)
+local format_bytes = (ui_utils.safe or ui_utils).format_bytes
 
 -- The screen the two import buttons lead to. Both are a list of what was
 -- found with a line each, and both can go back to the save list.

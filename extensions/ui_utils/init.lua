@@ -41,6 +41,24 @@ function M.safe.db_text(db)
 end
 assert(M.safe.db_text(0) == "0 dB (100%)" and M.safe.db_text(-6) == "-6 dB (66%)"
 		and M.safe.db_text(-3) == "-3 dB (81%)" and M.safe.db_text(-33) == "off")
+-- format_bytes(n): how big it is, the way the menus say it -- "512 B",
+-- "4.2 KB", "35 MB", "1.6 GB", 1024 a step, one decimal under ten. A menu
+-- that says nothing about size cannot tell a moment's copy from a minute's.
+function M.safe.format_bytes(n)
+	n = math.floor(tonumber(n) or 0)
+	local units, i = {"B", "KB", "MB", "GB"}, 1
+	while n >= 1024 and i < #units do
+		n, i = n / 1024, i + 1
+	end
+	if i == 1 then
+		return n .. " B"
+	end
+	return n < 10 and string.format("%.1f %s", n, units[i]) or
+			math.floor(n + 0.5) .. " " .. units[i]
+end
+assert(M.safe.format_bytes(512) == "512 B" and M.safe.format_bytes(4300) == "4.2 KB"
+		and M.safe.format_bytes(36700160) == "35 MB"
+		and M.safe.format_bytes(1717986918) == "1.6 GB")
 
 function M.safe.rgb(name)
 	return unpack(colors[name])

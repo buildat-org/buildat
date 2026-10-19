@@ -33,24 +33,7 @@ local function show_error(message)
 	ui_utils.show_message_dialog(message)
 end
 
-local function format_bytes(n)
-	n = math.floor(tonumber(n) or 0)
-	if n < 1024 then
-		return n.." B"
-	end
-	local kb = n / 1024
-	if kb < 1024 then
-		if kb < 10 then
-			return string.format("%.1f KB", kb)
-		end
-		return math.floor(kb + 0.5).." KB"
-	end
-	local mb = kb / 1024
-	if mb < 10 then
-		return string.format("%.1f MB", mb)
-	end
-	return math.floor(mb + 0.5).." MB"
-end
+local format_bytes = ui_utils.format_bytes
 
 local MENU_BUTTON_WIDTH = 200
 
