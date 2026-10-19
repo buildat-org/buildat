@@ -2238,19 +2238,9 @@ end)
 -- clock decides". The sun still goes where the time says.
 M.day_night_override = nil
 
-local day_night_subs = {}
-
-function M.sub_day_night(f)
-	day_night_subs[#day_night_subs + 1] = f
-	f(M.day_night_override)
-end
-
 buildat.sub_packet("luanti:daynight", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	M.day_night_override = tonumber(values[1] or "")
-	for _, f in ipairs(day_night_subs) do
-		f(M.day_night_override)
-	end
 end)
 
 -- What time it is in the world, as the server last said: the fraction of a
@@ -2359,10 +2349,6 @@ end
 -- What the player may do, the server's list on join and on every change
 -- ([FLY_MODES]); privs.fly and the rest are true when held
 M.privs = {}
-local privs_subs = {}
-function M.sub_privs(f)
-	privs_subs[#privs_subs + 1] = f
-end
 buildat.sub_packet("luanti:privs", function(data)
 	local values = cereal.binary_input(data, {"array", "string"})
 	local privs = {}
@@ -2371,9 +2357,6 @@ buildat.sub_packet("luanti:privs", function(data)
 	end
 	M.privs = privs
 	log:info("privileges: " .. table.concat(values, ", "))
-	for _, f in ipairs(privs_subs) do
-		f(privs)
-	end
 end)
 
 -- The fly, fast and noclip the player left on in this world, once on join
@@ -3388,20 +3371,6 @@ function M.open_player_inventory()
 		-- What a check waits for
 		log:info("form: the inventory opened")
 	end
-end
-
--- A form of the client's own: the game describes it the way a server would
--- and draws it through the same renderer, and the fields a button sends go
--- to the handler rather than out. What wants one is a menu that is about the
--- client rather than about the game -- the launcher's pause menu. The
--- handler is called with quit = "true" when the player closed it.
-function M.show_local_form(spec, handler)
-	show_form("", spec, nil, handler)
-end
-
--- The open form closed by the game itself, the way its Escape would
-function M.close_form()
-	S():close(true)
 end
 
 -- A click, from whoever is reading the mouse: "left", "right" or

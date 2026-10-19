@@ -2900,6 +2900,5 @@ extension.blip: pack, params, play, play_cached, preset, self_check, sound, stre
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
-extension.test: f
 extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----
