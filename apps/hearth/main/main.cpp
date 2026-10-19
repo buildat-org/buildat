@@ -2259,42 +2259,25 @@ struct Module: public interface::Module
 
 	void on_req(const network::Packet &packet)
 	{
-		const json::Value q = json::load_string(packet.data.c_str());
-		json::Value res = json::object();
-		res.set("id", q.get("id"));
 		ss_ name;
 		accounts::access(m_server, [&](accounts::Interface *a){
 			name = a->name_of(packet.sender);
 		});
-		ss_ error;
-		json::Value result;
-		if(!m_db)
-			error = "Hearth is not ready";
-		else if(name.empty())
-			error = "join first";
-		else {
+		network::answer_request(m_server, packet, "hr:res", name,
+				m_db ? "" : "Hearth is not ready", [&](const json::Value &q){
 			m_joined.insert(packet.sender);
 			try {
 				exec("BEGIN");
-				result = handle(name, level(name), jstr(q, "cmd"), q,
-						packet.sender);
+				const json::Value result = handle(name, level(name), jstr(q, "cmd"),
+						q, packet.sender);
 				exec("COMMIT");
-			} catch(std::exception &e){
+				return result;
+			} catch(std::exception &){
 				sqlite3_exec(m_db, "ROLLBACK", nullptr, nullptr, nullptr);
 				m_new_messages.clear();
 				m_notified.clear();
-				error = e.what();
+				throw;
 			}
-		}
-		res.set("ok", error.empty());
-		if(error.empty())
-			res.set("result", result);
-		else {
-			res.set("code", "refused");
-			res.set("error", error);
-		}
-		network::access(m_server, [&](network::Interface *iface){
-			iface->send(packet.sender, "hr:res", res.stringify());
 		});
 		push();
 	}

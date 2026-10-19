@@ -8,6 +8,7 @@
 #include "interface/server_config.h"
 #include "interface/sha256.h"
 #include "interface/os.h"
+#include "core/json.h"
 #include <functional>
 #include <cstdint>
 
@@ -363,6 +364,48 @@ namespace network
 			const ss_ &name, const ss_ &data)
 	{
 		access(server, [&](Interface *i){ i->send(recipient, name, data); });
+	}
+
+	// **A client's JSON request answered** ([REWORK_1019_FIXES] apps 11),
+	// the envelope Starport, Hearth and Aitta share: {"id": the request's,
+	// "ok": true, "result": handle's} or {"id", "ok": false, "code":
+	// "refused", "error": why}, sent as res_name. Refused before handle
+	// runs: not_ready when it is not empty (the app is not up), a peer with
+	// no account name (join first), a request that is not an object; what
+	// handle throws is the refusal's text.
+	//   network::answer_request(m_server, packet, "sp:res", name,
+	//       m_save ? "" : "Starport is not ready",
+	//       [&](const json::Value &req){ return handle(name, req); });
+	inline void answer_request(interface::Server *server, const Packet &packet,
+			const char *res_name, const ss_ &name, const ss_ &not_ready,
+			const std::function<json::Value(const json::Value &)> &handle)
+	{
+		const json::Value req = json::load_string(packet.data.c_str());
+		json::Value res = json::object();
+		res.set("id", req.get("id"));
+		ss_ error;
+		json::Value result;
+		if(!not_ready.empty())
+			error = not_ready;
+		else if(name.empty())
+			error = "join first";
+		else if(!req.is_object())
+			error = "not a request";
+		else {
+			try {
+				result = handle(req);
+			} catch(std::exception &e){
+				error = e.what();
+			}
+		}
+		res.set("ok", error.empty());
+		if(error.empty())
+			res.set("result", result);
+		else {
+			res.set("code", "refused");
+			res.set("error", error);
+		}
+		send(server, packet.sender, res_name, res.stringify());
 	}
 
 	// [HTML_BRAND]'s font or logo for /brand/<name>, answered; false when

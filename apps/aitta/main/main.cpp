@@ -2003,9 +2003,6 @@ struct Module: public interface::Module, public moderation::Host
 
 	void on_req(const network::Packet &packet)
 	{
-		const json::Value q = json::load_string(packet.data.c_str());
-		json::Value res = json::object();
-		res.set("id", q.get("id"));
 		ss_ name;
 		bool admin = false, reviewer = false;
 		accounts::access(m_server, [&](accounts::Interface *a){
@@ -2014,37 +2011,18 @@ struct Module: public interface::Module, public moderation::Host
 			reviewer = !name.empty() &&
 					a->level(name) >= accounts::LV_MODERATOR;
 		});
-		ss_ error;
-		json::Value result;
-		if(!m_save)
-			error = "Aitta is not ready";
-		else if(name.empty())
-			error = "join first";
-		else {
-			try {
-				const ss_ cmd = jstr(q, "cmd");
-				if(cmd.compare(0, 7, "review_") == 0 || cmd == "playtest" ||
-						cmd.compare(0, 4, "mod_") == 0){
-					if(!reviewer)
-						throw Exception("for the reviewers: this server's "
-								"moderators and admins");
-					result = cmd.compare(0, 4, "mod_") == 0 ?
-							handle_mod(name, cmd, q) : handle_review(name, cmd, q);
-				} else
-					result = handle(name, admin, reviewer, cmd, q);
-			} catch(std::exception &e){
-				error = e.what();
+		network::answer_request(m_server, packet, "ai:res", name,
+				m_save ? "" : "Aitta is not ready", [&](const json::Value &q){
+			const ss_ cmd = jstr(q, "cmd");
+			if(cmd.compare(0, 7, "review_") == 0 || cmd == "playtest" ||
+					cmd.compare(0, 4, "mod_") == 0){
+				if(!reviewer)
+					throw Exception("for the reviewers: this server's "
+							"moderators and admins");
+				return cmd.compare(0, 4, "mod_") == 0 ?
+						handle_mod(name, cmd, q) : handle_review(name, cmd, q);
 			}
-		}
-		res.set("ok", error.empty());
-		if(error.empty())
-			res.set("result", result);
-		else {
-			res.set("code", "refused");
-			res.set("error", error);
-		}
-		network::access(m_server, [&](network::Interface *iface){
-			iface->send(packet.sender, "ai:res", res.stringify());
+			return handle(name, admin, reviewer, cmd, q);
 		});
 	}
 

@@ -2899,35 +2899,10 @@ struct Module: public interface::Module, public moderation::Host
 
 	void on_req(const network::Packet &packet)
 	{
-		const json::Value req = json::load_string(packet.data.c_str());
-		json::Value res = json::object();
-		res.set("id", req.get("id"));
 		const ss_ name = account_of(packet.sender);
-		ss_ error;
-		json::Value result;
-		if(!m_save)
-			error = "Starport is not ready";
-		else if(name.empty())
-			error = "join first";
-		else if(!req.is_object())
-			error = "not a request";
-		else {
-			try {
-				result = handle(name, jstr(req, "cmd"), req);
-			} catch(std::exception &e){
-				error = e.what();
-			}
-		}
-		if(error.empty()){
-			res.set("ok", true);
-			res.set("result", result);
-		} else {
-			res.set("ok", false);
-			res.set("code", "refused");
-			res.set("error", error);
-		}
-		network::access(m_server, [&](network::Interface *iface){
-			iface->send(packet.sender, "sp:res", res.stringify());
+		network::answer_request(m_server, packet, "sp:res", name,
+				m_save ? "" : "Starport is not ready", [&](const json::Value &req){
+			return handle(name, jstr(req, "cmd"), req);
 		});
 	}
 
