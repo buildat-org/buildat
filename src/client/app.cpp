@@ -420,6 +420,55 @@ static void web_text_sync(magic::UI *ui)
 			e->IsMultiLine() ? 1 : 0, purpose.CString(),
 			u ? u->GetText().CString() : nullptr);
 }
+
+// **The fields a tap can open a keyboard on** ([WEB_TAP_KEYBOARD]): a
+// phone's browser opens its on-screen keyboard only for a focus made in the
+// user's own touch event, and web_text_sync() focuses the stand-in a frame
+// after it. So on a page with a touchscreen the editable LineEdits shown
+// are given to the page whenever they change, "x,y,w,h,secret;" each in
+// the canvas's pixels, the topmost last; index.html's touchend focuses the
+// stand-in for the one tapped, inside the event.
+// simplified: a field under another window counts as tapped; the next
+// frame's sync takes the stand-in away again if the engine did not focus it
+static void web_fields_publish(magic::UI *ui)
+{
+	// A touchscreen by what the page says, or by a touch it has seen
+	static bool touch = false;
+	if(!touch)
+		touch = EM_ASM_INT({ return ('ontouchstart' in window) ||
+				navigator.maxTouchPoints > 0 || Module.buildatTouched ||
+				(window.matchMedia && matchMedia('(pointer: coarse)').matches) ?
+				1 : 0; });
+	if(!touch)
+		return;
+	const float k = ui->GetScale();
+	ss_ out;
+	char buf[96];
+	magic::PODVector<magic::UIElement*> all;
+	for(magic::UIElement *root : {ui->GetRoot(), ui->GetRootModalElement()}){
+		if(!root)
+			continue;
+		all.Clear();
+		root->GetChildren(all, true);
+		for(magic::UIElement *c : all){
+			if(c->GetType() != magic::LineEdit::GetTypeStatic() || !c->IsEditable() ||
+					!c->IsVisibleEffective())
+				continue;
+			magic::LineEdit *e = static_cast<magic::LineEdit*>(c);
+			const magic::IntVector2 p = e->GetScreenPosition(), s = e->GetSize();
+			snprintf(buf, sizeof buf, "%d,%d,%d,%d,%d;", (int)(p.x_ * k),
+					(int)(p.y_ * k), (int)(s.x_ * k), (int)(s.y_ * k),
+					!e->IsTextCopyable() || e->GetEchoCharacter() ? 1 : 0);
+			out += buf;
+		}
+	}
+	static ss_ last = "-";
+	if(out == last)
+		return;
+	last = out;
+	EM_ASM({ if(window.buildatText) buildatText.fields(UTF8ToString($0)); },
+			out.c_str());
+}
 #endif
 
 namespace app {
@@ -3500,6 +3549,7 @@ struct CApp: public App, public magic::Application
 			lua_sethook(L, nullptr, 0, 0);
 #ifdef __EMSCRIPTEN__
 		web_text_sync(GetSubsystem<magic::UI>());
+		web_fields_publish(GetSubsystem<magic::UI>());
 		web_idle_step();
 		// [TAP_BACK] the browser's Back, each one Escape (index.html)
 		for(int n = EM_ASM_INT({ var n = Module.buildatBack | 0;

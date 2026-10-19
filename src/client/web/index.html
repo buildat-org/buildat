@@ -715,8 +715,66 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		el.dataset.sel = a + ',' + b;
 		actions.push('s' + chars(v, a) + ',' + (chars(v, b) - chars(v, a)));
 	}
+	// The stand-in for a field, shown at its box (canvas pixels)
+	function place(secret, x, y, w, h){
+		var want = secret ? pw : ta;
+		if(want !== el){
+			el.style.display = 'none';
+			el.value = '';
+			el = want;
+			active = false;
+			composing = false;
+		}
+		var k = canvas.clientWidth / canvas.width;
+		var st = el.style;
+		var box = [x * k, y * k, w * k, h * k].map(Math.round).join(',');
+		if(el.dataset.box !== box){
+			el.dataset.box = box;
+			var b = box.split(',');
+			st.left = b[0] + 'px'; st.top = b[1] + 'px';
+			st.width = b[2] + 'px'; st.height = b[3] + 'px';
+		}
+		if(!active){
+			active = true;
+			st.display = 'block';
+		}
+		if(document.activeElement !== el)
+			el.focus({preventScroll: true});
+	}
+	// **A tap on a field focuses its stand-in in the tap's own event**
+	// ([WEB_TAP_KEYBOARD]): a phone's browser opens its keyboard only for a
+	// focus the user's touch made, and the engine's own (sync()) comes a
+	// frame later. The engine gives the fields shown (app.cpp
+	// web_fields_publish()), the topmost last.
+	var fields = [];
+	document.addEventListener('touchstart', function(){
+		if(window.Module)
+			Module.buildatTouched = 1;
+	}, true);
+	canvas.addEventListener('touchend', function(e){
+		var t = e.changedTouches[0];
+		if(!t || !fields.length)
+			return;
+		var r = canvas.getBoundingClientRect();
+		var x = (t.clientX - r.left) * canvas.width / canvas.clientWidth,
+				y = (t.clientY - r.top) * canvas.height / canvas.clientHeight;
+		for(var i = fields.length - 1; i >= 0; i--){
+			var f = fields[i];
+			if(x >= f[0] && x < f[0] + f[2] && y >= f[1] && y < f[1] + f[3]){
+				place(f[4] === 1, f[0], f[1], f[2], f[3]);
+				console.log('buildatText: a field focused in the tap: ' +
+						(document.activeElement === el ? el.id : 'not focused'));
+				return;
+			}
+		}
+	}, true);
 	window.buildatText = {
 		take: function(){ return actions.length ? actions.shift() : null; },
+		fields: function(s){
+			fields = s.split(';').filter(Boolean).map(function(f){
+				return f.split(',').map(Number);
+			});
+		},
 		sync: function(x, y, w, h, text, start, len, editable, secret, multi,
 				purpose, user){
 			if(x === null){
@@ -728,29 +786,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 				}
 				return;
 			}
-			var want = secret ? pw : ta;
-			if(want !== el){
-				el.style.display = 'none';
-				el.value = '';
-				el = want;
-				active = false;
-				composing = false;
-			}
-			var k = canvas.clientWidth / canvas.width;
-			var st = el.style;
-			var box = [x * k, y * k, w * k, h * k].map(Math.round).join(',');
-			if(el.dataset.box !== box){
-				el.dataset.box = box;
-				var b = box.split(',');
-				st.left = b[0] + 'px'; st.top = b[1] + 'px';
-				st.width = b[2] + 'px'; st.height = b[3] + 'px';
-			}
-			if(!active){
-				active = true;
-				st.display = 'block';
-			}
-			if(document.activeElement !== el)
-				el.focus({preventScroll: true});
+			place(secret, x, y, w, h);
 			el.readOnly = !editable;
 			el.dataset.multi = multi ? '1' : '';
 			if(el.getAttribute('autocomplete') !== (purpose || 'off'))
