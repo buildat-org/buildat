@@ -2672,14 +2672,18 @@ PY
 # sunrise at 0.23, 36 s on), flat ground. Two rooms of stone, 3 x 3 inside,
 # walls 3 high, a door 2 high, a roof, whose back rows the sky lights 11
 # at most; every skeleton 20 or more from the player, so none fights. A
-# skeleton 8 from the first room's door: "finds shelter", and no burn
+# skeleton 12 from the first room's door: "finds shelter", and no burn
 # after sunrise; one 25 off in the open: "finds no shelter", and it
 # burns; one in the second room's back row: none of its steps out of it
 # by day (the report's steps kept out of the sun), no burn; a cave
 # skeleton in the open: no shelter line. A skeleton in lava (walled in)
 # burns in lava 4 hp a second (two burns a second apart at least: a test
 # marker over a voxel not loaded yet floats, and the lava can run out), no
-# "is in water"; one in water dies at once.
+# "is in water"; one in water dies at once. The fixtures clear of seed
+# 2's trees (tree_at; (29,3) and (-23,-22) the nearest), whose sections
+# can be made after a marker went up and put a crown through a room. The
+# sheltering one far enough that its walk before the search (12 s) brings
+# it into no shade (8 from the door it was once found never exposed).
 # room <x> <z> <door side x|z>: the inside x-1..x+1, z-1..z+1, its door on
 # the -x or -z wall's middle
 room() {
@@ -2706,11 +2710,11 @@ room() {
 lava=$(for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
 	if [ ${dx#-} -lt 2 ] && [ ${dz#-} -lt 2 ]; then continue; fi
 	printf 'marker %d %d skeldat:stone 0; marker %d %d skeldat:stone 0; ' \
-		$((-20 + dx)) $((-20 + dz)) $((-20 + dx)) $((-20 + dz)); done; done
+		$((-12 + dx)) $((-20 + dz)) $((-12 + dx)) $((-20 + dz)); done; done
 	for d in "-1 -1" "0 -1" "1 -1" "-1 0" "0 0" "1 0" "-1 1" "0 1" "1 1"; do
-	set -- $d; printf 'marker %d %d skeldat:lava; ' $((-20 + $1)) $((-20 + $2)); done)
-test="$(room 30 0 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
-test="${test}skeleton 22 0; skeleton -25 0; skeleton 0 31; cave_skeleton 0 -25; skeleton -20 -20; skeleton 20 -20"
+	set -- $d; printf 'marker %d %d skeldat:lava; ' $((-12 + $1)) $((-20 + $2)); done)
+test="$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
+test="${test}skeleton 16 -14; skeleton -25 0; skeleton 0 31; cave_skeleton 0 -25; skeleton -12 -20; skeleton 20 -20"
 log53="$t/srv53.log"
 BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.17 BUILDAT_SKELDAT_SPAWN="0 0" \
@@ -2736,7 +2740,7 @@ def has(pat, k):
 def count(pat, k):
     return sum(1 for l in lines if re.search(pat % k, l))
 shel, none, inside, cave, lava, water = (keys.get(p) for p in
-        [(22, 0), (-25, 0), (0, 31), (0, -25), (-20, -20), (20, -20)])
+        [(16, -14), (-25, 0), (0, 31), (0, -25), (-12, -20), (20, -20)])
 assert all([shel, none, inside, cave, lava, water]), keys
 assert has(r"a skeleton \(%s\) finds shelter at", shel), "no shelter found"
 assert not has(r"the skeleton \(%s\) burns$", shel), "the sheltered one burnt"
@@ -2834,6 +2838,69 @@ for time in 0.5 0; do
 		grep -aq "skeldat: on the board" "$t/wood_$time.log" ||
 		fail "no wooden board ($t/wood_$time.log)"
 done
+# 53. Apple trees, leaf decay and saplings ([SKELDAT_APPLE_TREES]): flat
+# ground, a 60 s day from 0.6 (midnights 24 s and 84 s on), fixtures set
+# by the player's feet ("set dx dy dz node"):
+# - decay: a log column of 4 at +10 (out of reach of the apple's log at
+#   2, 2), five leaves, an apple and an apple
+#   branch round its top, then the logs set to air: the 7 go a voxel a
+#   second ("leaf decay: N queued, M gone"), an apple dropped; a control:
+#   leaves beside a log at -6 (a log over them set and taken away, so they
+#   are queued) stay;
+# - an apple at the eye 2 ahead, a log 2 from it: the player digs it, an
+#   apple in hand and an apple branch left, an apple again at the first
+#   midnight;
+# - on the row 6 behind: a sapling (grows at the first midnight, a tree at
+#   the second), an apple sapling (likewise, its tree 3 to 6 apples), a
+#   sapling on stone (gone at the first midnight, no drop) and one under a
+#   roof 3 over it (sky light 14: waits both nights).
+# Generated apple trees are the mapgen self-test's (one in 4, 3 to 6 each).
+# The decay's step time under 5 ms a second (1.1 to 1.8 measured: a centre's
+# 9x9x9 read voxel by voxel).
+log57="$t/srv57.log"
+tr53="set 10 0 0 skeldat:tree; set 10 1 0 skeldat:tree; set 10 2 0 skeldat:tree; set 10 3 0 skeldat:tree"
+tr53="$tr53; set 9 3 0 skeldat:leaves; set 11 3 0 skeldat:leaves; set 10 3 1 skeldat:leaves"
+tr53="$tr53; set 10 3 -1 skeldat:leaves; set 10 4 0 skeldat:leaves; set 9 3 1 skeldat:apple_fruit"
+tr53="$tr53; set 11 3 1 skeldat:apple_branch"
+tr53="$tr53; set 10 0 0 air; set 10 1 0 air; set 10 2 0 air; set 10 3 0 air"
+tr53="$tr53; set -6 0 0 skeldat:tree; set -6 1 0 skeldat:tree; set -5 1 0 skeldat:leaves"
+tr53="$tr53; set -6 2 0 skeldat:tree; set -6 2 0 air"
+tr53="$tr53; set 2 0 2 skeldat:tree; set 0 1 2 skeldat:apple_fruit"
+tr53="$tr53; set 0 0 -6 skeldat:sapling; set 6 0 -6 skeldat:apple_sapling"
+tr53="$tr53; set -6 -1 -6 skeldat:stone; set -6 0 -6 skeldat:sapling"
+tr53="$tr53; set 3 0 -6 skeldat:sapling; set 3 3 -6 skeldat:stone"
+BUILDAT_SKELDAT_WORLD=trees BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.6 BUILDAT_SKELDAT_DAY=60 \
+	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$tr53" \
+	start_server "$log57" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv57" -C "$t/srv.cache" -l 3 || fail "the server ($log57)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 2000" "look 0 0" "delay 500" "mouse_down left" \
+	"delay 1500" "mouse_up left" "delay 85000" quit > "$t/trees.cmds"
+client trees "$t/trees.cmds"
+wait $CLIENT || fail "the trees' drive ($t/trees.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+python3 -I - "$log57" <<'PY' || fail "apple trees, decay or saplings ($log57)"
+import sys, re
+log = open(sys.argv[1], errors="replace").read()
+gone = sum(int(m) for m in re.findall(r"leaf decay: \d+ queued, (\d+) gone", log))
+assert gone == 7, ("gone", gone)
+ms = [float(m) for m in re.findall(r"leaf decay: .*?([\d.]+) ms a second", log)]
+assert ms and max(ms) < 5, ms
+assert "a drop of skeldat:apple at" in log, "no apple dropped by decay"
+assert re.search(r"client1 digs skeldat:apple_fruit at", log), "the apple not dug"
+nights = re.findall(r"(\d+) saplings grew at midnight \((\d+) trees\); (\d+) apples again, "
+        r"(\d+) off soil gone, (\d+) waiting", log)
+assert len(nights) >= 2, nights
+assert nights[0] == ("2", "0", "1", "1", "1"), nights[0]
+assert nights[1] == ("2", "2", "0", "0", "1"), nights[1]
+a = re.findall(r"an apple tree grew at \S+, (\d+) apples", log)
+assert len(a) == 1 and 3 <= int(a[0]) <= 6, a
+assert len(re.findall(r" a tree grew at ", log)) == 1
+print("decay %d gone, %.3f ms a second at most; nights %s; the apple tree's %s apples"
+        % (gone, max(ms), nights[:2], a[0]))
+PY
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
