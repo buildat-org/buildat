@@ -1147,6 +1147,8 @@ end
 local BOARD_BIT = 65536
 -- [SKELDAT_BOARD_PRONE] main.cpp's PRONE_BIT
 local PRONE_BIT = 131072
+-- The node and its "Box", which holds the model: a node's enabled does not
+-- reach its children ([SKELDAT_BOARD_HIDE]), so show_board() sets both
 local function board_box(parent)
 	local node = parent:CreateChild("Board")
 	local box = node:CreateChild("Box")
@@ -1154,7 +1156,11 @@ local function board_box(parent)
 	box.scale = magic.Vector3(0.3, 0.08, 1.0)
 	box:CreateComponent("StaticModel").model =
 			magic.cache:GetResource("Model", "Models/Box.mdl")
-	return node
+	return node, box
+end
+local function show_board(node, box, on)
+	node.enabled = on
+	box.enabled = on
 end
 
 --
@@ -1177,8 +1183,9 @@ buildat.sub_packet("skeldat:players", function(data)
 				body.scale = magic.Vector3(0.6, 1.75, 0.6)
 				local model = body:CreateComponent("StaticModel")
 				model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
-				o = {node = node, board = board_box(node)}
-				o.board.enabled = false
+				o = {node = node}
+				o.board, o.board_box = board_box(node)
+				show_board(o.board, o.board_box, false)
 				others[name] = o
 			end
 			-- [SKELDAT_BOARD_KEYS] A rider is turned along its travel, the
@@ -1197,7 +1204,7 @@ buildat.sub_packet("skeldat:players", function(data)
 						" stands"))
 			end
 			if o.board.enabled ~= (on_board == "1") then
-				o.board.enabled = on_board == "1"
+				show_board(o.board, o.board_box, on_board == "1")
 				log:info("skeldat: " .. name .. (o.board.enabled and
 						" rides a board" or " walks"))
 			end
@@ -2052,8 +2059,8 @@ end
 --
 -- The frame
 --
-local board_node = board_box(scene)
-board_node.enabled = false
+local board_node, board_model = board_box(scene)
+show_board(board_node, board_model, false)
 local board_shown, board_top, board_log_t = false, 0, 0
 local board_braking, board_air = false, 0
 -- For a check, a cheat the server's movement check should pull back:
@@ -2161,8 +2168,12 @@ magic.SubscribeToEvent("Update", function(_, d)
 		log:info("skeldat: " .. (b and "on the board" or "walking") ..
 				string.format(" at (%.1f, %.1f, %.1f)", player.x, player.y,
 				player.z))
+		show_board(board_node, board_model, b ~= nil)
+		if not b then
+			log:info("skeldat: the board hidden: " .. tostring(board_node.enabled) ..
+					" " .. tostring(board_model.enabled))
+		end
 	end
-	board_node.enabled = b ~= nil
 	update_rolls(b)
 	if b and down("back") and not board_braking then
 		board_braking = true

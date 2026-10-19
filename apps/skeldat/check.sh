@@ -1155,7 +1155,8 @@ echo "the bow's sounds: $draws draws, $# shots and $skel of the skeleton's; $(gr
 # back none of it, and pulls back a board the drive forces to 35 on the
 # flat. No steps on the board, steps again walking off it ([SKELDAT_BOARD_NO_STEPS]).
 # client2 sees client1 on a board and lying flat, then walks into
-# a ring of water 2 round the spawn and splashes ([SKELDAT_BOARD_WATER]).
+# a ring of water 2 round the spawn and splashes ([SKELDAT_BOARD_WATER]),
+# and sees client1 walk when its ride ends ([SKELDAT_BOARD_HIDE]).
 log27="$t/srv27.log"
 ring=$(for x in -2 -1 0 1 2; do for z in -2 -1 0 1 2; do
 	[ ${x#-} = 2 ] || [ ${z#-} = 2 ] && printf 'marker %d %d skeldat:water_source; ' $x $z
@@ -1194,7 +1195,7 @@ quit
 EOF
 printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
 	"delay 500" "keydown W" "wait_log 5000 skeldat: a splash at" "keyup W" \
-	"delay 500" quit > "$t/board2.cmds"
+	"wait_log_any 30000 skeldat: client1 walks" "delay 500" quit > "$t/board2.cmds"
 BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="${ring}course -40 -20" \
@@ -1270,6 +1271,12 @@ grep -aq "skeldat: a splash at [0-9.]*, gain 0\.[0-9]*, onset [0-9.]* s, noise 0
 	fail "client2's splash ($t/board2.log)"
 grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 	fail "client2 did not see client1 on a board ($t/board2.log)"
+# [SKELDAT_BOARD_HIDE] the board hidden when the ride ends, its box too:
+# the own and the other's
+grep -aq "skeldat: the board hidden: false false" "$t/board1.log" ||
+	fail "client1's board not hidden after the ride ($t/board1.log)"
+grep -aq "skeldat: client1 walks" "$t/board2.log" ||
+	fail "client2 did not see client1's board go ($t/board2.log)"
 # 25. Free-running ([SERVER_FREE_RUN]): a 128 world, no player, at the
 # real constants with --free-run. A game day (1200 s) after the world is
 # in passes in well under its time, and its expansions are the day's (4
