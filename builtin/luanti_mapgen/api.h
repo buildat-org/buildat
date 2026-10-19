@@ -298,9 +298,6 @@ namespace luanti_mapgen
 		virtual worldgen::GeneratorInterface* create_generator(
 				const Params &params) = 0;
 
-		// Which mapgens this build has. "singlenode" is always one of them.
-		virtual sv_<ss_> list_mapgens() = 0;
-
 		// The level a player can stand at above (x, z), out of the mapgen's
 		// own noise and generating nothing -- Luanti's
 		// Mapgen::getSpawnLevelAtPoint(), which is what its spawn search

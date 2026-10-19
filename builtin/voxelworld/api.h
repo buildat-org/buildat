@@ -239,13 +239,6 @@ namespace voxelworld
 		// mapchunk; a generator with a larger one would want its own.
 		virtual size_t trim_to(int64_t target_bytes, int altered_days = -1) = 0;
 
-		// Voxel types the save holds that this game does not register. They
-		// are kept, drawn with the definitions the save carries and tinted,
-		// so an old world still looks like itself -- but the game no longer
-		// supports them, and this is how a game says so on screen instead of
-		// leaving someone to walk into it.
-		virtual sv_<interface::VoxelName> get_unknown_voxels() = 0;
-
 		virtual void add_commit_hook(up_<CommitHook> hook) = 0;
 
 		virtual pv::Vector3DInt16 get_section_size_voxels() = 0;
@@ -464,8 +457,6 @@ namespace voxelworld
 		// a writer that will ask for a relight of everything it touched
 		// anyway, whose flood was the same work twice ([STEP_SLICE])
 		virtual void set_light_deferred(bool on) = 0;
-
-		virtual size_t num_buffers_loaded() = 0;
 
 		virtual void commit() = 0;
 

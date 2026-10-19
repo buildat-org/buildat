@@ -802,11 +802,6 @@ namespace interface
 		// the rest are left unbound.
 		size_t surface_modifiers(VoxelField out[VOXEL_SURFACE_MODIFIERS]) const;
 
-		bool any_surface_modifier() const {
-			VoxelField slots[VOXEL_SURFACE_MODIFIERS];
-			return surface_modifiers(slots) != 0;
-		}
-
 		// The same cut: the same planes, and every role in the same place.
 		// What asks is a save, deciding whether the chunks it holds are in
 		// the format the world is running now.

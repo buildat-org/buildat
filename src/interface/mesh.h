@@ -22,13 +22,6 @@ namespace interface
 		using namespace Urho3D;
 		namespace pv = PolyVox;
 
-		// Create a model from 8-bit voxel data, using a voxel registry, without
-		// textures or normals, based on the physically_solid flag.
-		// Returns nullptr if there is no geometry
-		Model* create_8bit_voxel_physics_model(Context *context,
-				int w, int h, int d, const ss_ &source_data,
-				VoxelRegistry *voxel_reg);
-
 		// Set custom geometry from 8-bit voxel data, using a voxel registry.
 		// uv_origin is where this block's (0, 0, 0) sits in the world, which
 		// is what a voxel of uv_scale > 1 takes its slice of the repeat from
@@ -37,15 +30,6 @@ namespace interface
 				int w, int h, int d, const ss_ &source_data,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				const pv::Vector3DInt32 &uv_origin = pv::Vector3DInt32(0, 0, 0));
-
-		// Create a model from voxel volume, using a voxel registry, without
-		// textures or normals, based on the physically_solid flag.
-		// Returns nullptr if there is no geometry
-		// Volume should be padded by one voxel on each edge
-		// NOTE: volume is non-const due to PolyVox deficiency
-		Model* create_voxel_physics_model(Context *context,
-				VoxelVolume &volume,
-				VoxelRegistry *voxel_reg);
 
 		// Voxel geometry generation
 

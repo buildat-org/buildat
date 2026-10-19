@@ -1291,17 +1291,6 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 				section_z), out);
 	}
 
-	sv_<ss_> list_mapgens()
-	{
-		sv_<ss_> out{"singlenode"};
-		for(int i = 0; i < (int)MAPGEN_INVALID; i++){
-			const char *name = Mapgen::getMapgenName((MapgenType)i);
-			if(name && ss_(name) != "singlenode")
-				out.push_back(name);
-		}
-		return out;
-	}
-
 	void* get_interface()
 	{
 		return dynamic_cast<Interface*>(this);

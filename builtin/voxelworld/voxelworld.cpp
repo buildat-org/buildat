@@ -13,7 +13,6 @@
 #include "interface/event.h"
 #include "interface/mesh.h"
 #include "interface/voxel.h"
-#include "interface/block.h"
 #include "interface/voxel_volume.h"
 #include "interface/voxel_cereal.h"
 #include "interface/voxel_cereal_legacy.h"
@@ -284,7 +283,6 @@ struct CInstance: public voxelworld::Instance
 	// Accessing any of these outside of Server::access_scene is disallowed
 	sp_<interface::AtlasRegistry> m_atlas_reg;
 	sp_<interface::VoxelRegistry> m_voxel_reg;
-	sp_<interface::BlockRegistry> m_block_reg;
 
 	sv_<up_<CommitHook>> m_commit_hooks;
 
@@ -477,7 +475,6 @@ struct CInstance: public voxelworld::Instance
 	up_<interface::VoxelRegistry> m_saved_reg;
 	// The game's, for a width change in a saved chunk (set_migration())
 	interface::VoxelMigration *m_migration = nullptr;
-	sv_<interface::VoxelName> m_unknown_voxels;
 	// The formats the save's chunks are in, indexed by the tag a chunk row
 	// carries, and which of them new chunks are written in
 	sv_<interface::VoxelFormat> m_save_formats;
@@ -494,7 +491,6 @@ struct CInstance: public voxelworld::Instance
 		m_physics_enabled(physics_enabled)
 	{
 		m_voxel_reg.reset(interface::createVoxelRegistry());
-		m_block_reg.reset(interface::createBlockRegistry(m_voxel_reg.get()));
 
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Context *context = imc->get_context();
@@ -3200,11 +3196,6 @@ struct CInstance: public voxelworld::Instance
 					pair.second));
 		}
 		m_committed_nodes.clear();
-	}
-
-	size_t num_buffers_loaded()
-	{
-		return m_total_buffers_loaded;
 	}
 
 	void set_light_maintained(LightField field, bool maintained)

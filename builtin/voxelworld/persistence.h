@@ -680,7 +680,6 @@
 				"game does not register. It is kept and drawn with the "
 				"definition the save carries, tinted.",
 				cs(m_world_name), cs(name.dump()));
-		m_unknown_voxels.push_back(name);
 		return m_voxel_reg->get(id);
 	}
 
@@ -853,11 +852,6 @@
 			return;
 		m_store->set(registry_key(), m_voxel_reg->serialize());
 		m_registry_saved_to = m_names_synced_to;
-	}
-
-	sv_<interface::VoxelName> get_unknown_voxels()
-	{
-		return m_unknown_voxels;
 	}
 
 	void save()

@@ -276,34 +276,6 @@ struct CAtlasRegistry: public AtlasRegistry
 		return add_segment_unlocked(segment_def);
 	}
 
-	const AtlasDefinition* get_atlas_definition(uint atlas_id)
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		return get_atlas_definition_unlocked(atlas_id);
-	}
-
-	const AtlasDefinition* get_atlas_definition_unlocked(uint atlas_id)
-	{
-		if(atlas_id == ATLAS_UNDEFINED)
-			return nullptr;
-		if(atlas_id >= m_defs.size())
-			return nullptr;
-		return &m_defs[atlas_id];
-	}
-
-	const AtlasSegmentDefinition* get_segment_definition(
-			const AtlasSegmentReference &ref)
-	{
-		std::lock_guard<std::mutex> lock(m_mutex);
-		const AtlasDefinition *atlas =
-				get_atlas_definition_unlocked(ref.atlas_id);
-		if(!atlas)
-			return nullptr;
-		if(ref.segment_id >= atlas->segments.size())
-			return nullptr;
-		return &atlas->segments[ref.segment_id];
-	}
-
 	// Sends one box of an atlas image to its texture, at every mip level.
 	//
 	// SetData(image) would send the whole atlas, and there are three of them

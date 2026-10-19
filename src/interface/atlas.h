@@ -132,11 +132,6 @@ namespace interface
 		virtual const AtlasSegmentReference find_or_add_segment(
 				const AtlasSegmentDefinition &segment_def) = 0;
 
-		virtual const AtlasDefinition* get_atlas_definition(
-				uint atlas_id) = 0;
-		virtual const AtlasSegmentDefinition* get_segment_definition(
-				const AtlasSegmentReference &ref) = 0;
-
 		virtual const AtlasCache* get_atlas_cache(uint atlas_id) = 0;
 
 		virtual const AtlasSegmentCache* get_texture(

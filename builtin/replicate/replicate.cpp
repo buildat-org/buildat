@@ -68,7 +68,6 @@ struct Module: public interface::Module, public replicate::Interface
 	//       without an actual Connection object (which we don't want to use)
 	sm_<PeerId, PeerState> m_peers;
 
-	sv_<Event> m_events_to_emit_after_next_sync;
 
 	// Per scene: which nodes a peer gets. Empty means every node, which is
 	// what every scene did before there was a filter.
@@ -206,11 +205,6 @@ struct Module: public interface::Module, public replicate::Interface
 	void on_tick(const interface::TickEvent &event)
 	{
 		sync_changes();
-
-		for(Event &event : m_events_to_emit_after_next_sync){
-			m_server->emit_event(std::move(event));
-		}
-		m_events_to_emit_after_next_sync.clear();
 	}
 
 	void sync_changes()
@@ -803,11 +797,6 @@ struct Module: public interface::Module, public replicate::Interface
 					ps.scene_state.dirtyNodes_.Insert(id);
 			}
 		});
-	}
-
-	void emit_after_next_sync(Event event)
-	{
-		m_events_to_emit_after_next_sync.push_back(std::move(event));
 	}
 
 	void sync_node_immediate(

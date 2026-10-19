@@ -85,8 +85,6 @@ namespace replicate
 		virtual void refresh_peer_nodes(
 				main_context::SceneReference scene_ref, PeerId peer) = 0;
 
-		virtual void emit_after_next_sync(Event event) = 0;
-
 		virtual void sync_node_immediate(
 				main_context::SceneReference scene_ref, uint node_id) = 0;
 	};

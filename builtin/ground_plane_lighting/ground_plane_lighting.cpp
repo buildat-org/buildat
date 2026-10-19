@@ -12,7 +12,6 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
-#include "interface/block.h"
 #include "interface/voxel_volume.h"
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
