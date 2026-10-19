@@ -43,7 +43,8 @@ port=30030
 ( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
 	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
 srv=$!
-trap 'kill "$srv" 2>/dev/null; check_cleanup' EXIT
+# check_cleanup waits for it to exit: the next check skips while it runs
+CHECK_PIDS+=($srv)
 for i in $(seq 1 600); do
 	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
 	kill -0 "$srv" 2>/dev/null || break
