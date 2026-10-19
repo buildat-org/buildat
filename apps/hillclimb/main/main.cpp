@@ -15,7 +15,8 @@
 // parameters and the payload, with the player's name and how worn the
 // hill was. The client's menu picks them (hillclimb:params); the hill is
 // then made again in the same world. The parameters the server starts
-// with: BUILDAT_HILLCLIMB_SEED, _STEEP (degrees), _LENGTH (the slope's
+// with: BUILDAT_HILLCLIMB_SEED, _STEEP (degrees), _STEEP_VAR (degrees, its
+// variance over the slope, [HC_STEEP_NOISE]), _LENGTH (the slope's
 // run, m), _LATITUDE (degrees), _DAY (1..365), _TIME (hours, solar) and
 // _PAYLOAD (kg); _FEATURES=0, no pits or rocks; _INTERVAL, the rounds'
 // in seconds (a check's).
@@ -105,6 +106,7 @@ static float env_or(const char *name, float def)
 // What a player may pick ([HILLCLIMB] 3), which the server holds a
 // client's pick to; the world's region is the largest of these hills
 static const int STEEP_MIN = 5, STEEP_MAX = 40;
+static const int VAR_MIN = 0, VAR_MAX = 10; // [HC_STEEP_NOISE]
 static const int LENGTH_MIN = 20, LENGTH_MAX = 60;
 static const int PAYLOADS[] = {0, 500, 1000, 2000};
 // [HC_MULTIPLAYER] The rounds' intervals, seconds: never, or minutes
@@ -254,7 +256,9 @@ struct Module: public interface::Module
 	void init()
 	{
 		m_params.seed = (uint32_t)env_or("BUILDAT_HILLCLIMB_SEED", 1);
-		m_params.steep_deg = env_or("BUILDAT_HILLCLIMB_STEEP", 29);
+		m_params.steep_deg = env_or("BUILDAT_HILLCLIMB_STEEP", 27);
+		m_params.steep_var_deg = std::fmin(VAR_MAX, std::fmax(VAR_MIN,
+				(int)env_or("BUILDAT_HILLCLIMB_STEEP_VAR", 4)));
 		m_params.length_m = env_or("BUILDAT_HILLCLIMB_LENGTH", 50);
 		// For the car's checks: a hill with no pits or rocks
 		m_params.features = env_or("BUILDAT_HILLCLIMB_FEATURES", 1) != 0;
@@ -373,7 +377,8 @@ struct Module: public interface::Module
 		// The region is the largest hill's, in sections of 64 voxels; the
 		// hill's own are pinned (make_hill)
 		hill::Params most;
-		most.steep_deg = STEEP_MAX;
+		// [HC_STEEP_NOISE] As steep as a variance can make it, all of it
+		most.steep_deg = STEEP_MAX + VAR_MAX;
 		most.length_m = LENGTH_MAX;
 		const hill::Hill big(most);
 		const int S = 64;
@@ -455,9 +460,10 @@ struct Module: public interface::Module
 						x * S + S / 2, y * S + S / 2, z * S + S / 2), 0, 0, 0, 0));
 			w->set_load_points(pins);
 		});
-		log_i(MODULE, "hillclimb: the hill, seed %u, %.0f degrees, %.0f m "
+		log_i(MODULE, "hillclimb: the hill, seed %u, %.0f degrees +-%.0f, %.0f m "
 				"long, %.1f m high; %dx%dx%d voxels", m_params.seed,
-				m_params.steep_deg, m_params.length_m, h.rise / hill::U,
+				m_params.steep_deg, m_params.steep_var_deg, m_params.length_m,
+				h.rise / hill::U,
 				h.size_x(), h.size_y(), h.size_z());
 	}
 
@@ -724,7 +730,8 @@ struct Module: public interface::Module
 					&length) == 2){
 				on_params(network::Packet(0, "hillclimb:params", itos(
 						m_params.seed) + " " + itos(steep) + " " + itos(length) +
-						" " + itos((int)m_payload) + " 60 172 14"));
+						" " + itos((int)m_payload) + " 60 172 14 -1 " +
+						itos((int)m_params.steep_var_deg)));
 			}
 		}
 		if(keys.find('Q') != ss_::npos){
@@ -1009,13 +1016,15 @@ struct Module: public interface::Module
 	// v2 ([HC_PITS_ROCKS], [HC_POWER]): a hill with pits and rocks, a car
 	// of twice the power. v3 ([HC_MULTIPLAYER]): an entry's value is
 	// "name\tdate\tfinished\tunfinished", the runs ended on the hill before
-	// it started. v4 ([HC_OPEN_EDGES]): the track 10 m wide, no banks. The
-	// times before are kept under the old keys, not shown.
+	// it started. v4 ([HC_OPEN_EDGES]): the track 10 m wide, no banks. v5
+	// ([HC_STEEP_NOISE]): the steepness's variance in the key. The times
+	// before are kept under the old keys, not shown.
 	ss_ ranking_prefix() const
 	{
 		char buf[128];
-		snprintf(buf, sizeof buf, "v4/seed%u/steep%d/length%d/sand/payload%d/",
-				m_params.seed, (int)m_params.steep_deg, (int)m_params.length_m,
+		snprintf(buf, sizeof buf, "v5/seed%u/steep%d/var%d/length%d/sand/payload%d/",
+				m_params.seed, (int)m_params.steep_deg,
+				(int)m_params.steep_var_deg, (int)m_params.length_m,
 				(int)m_payload);
 		return buf;
 	}
@@ -1334,7 +1343,7 @@ struct Module: public interface::Module
 		return ok;
 	}
 
-	// "seed steep length payload latitude day hour [interval]" from the
+	// "seed steep length payload latitude day hour [interval [var]]" from the
 	// menu, held to what a player may pick; made when worldgen is idle
 	// (on_tick). On a public server the seed is the round's: kept.
 	void on_params(const network::Packet &packet)
@@ -1348,17 +1357,20 @@ struct Module: public interface::Module
 		}
 		std::istringstream is(packet.data);
 		long long seed = 0;
-		int steep = 0, length = 0, payload = -1, interval = -1;
+		int steep = 0, length = 0, payload = -1, interval = -1,
+				var = (int)m_params.steep_var_deg;
 		float lat = 0, day = 0, hour = 0;
 		if(!(is >> seed >> steep >> length >> payload >> lat >> day >> hour))
 			return;
-		is >> interval;
+		if(is >> interval)
+			is >> var;
 		bool payload_ok = false, interval_ok = interval == -1;
 		for(int w : PAYLOADS)
 			payload_ok = payload_ok || w == payload;
 		for(int w : INTERVALS)
 			interval_ok = interval_ok || w == interval;
 		if(seed < 1 || seed > 999999 || steep < STEEP_MIN || steep > STEEP_MAX ||
+				var < VAR_MIN || var > VAR_MAX ||
 				length < LENGTH_MIN || length > LENGTH_MAX || !payload_ok ||
 				!interval_ok || !(lat >= -80 && lat <= 80) ||
 				!(day >= 1 && day <= 365) || !(hour >= 0 && hour <= 24))
@@ -1375,6 +1387,7 @@ struct Module: public interface::Module
 		m_pending_params.seed = m_public && packet.sender != 0 ?
 				m_params.seed : (uint32_t)seed;
 		m_pending_params.steep_deg = (float)steep;
+		m_pending_params.steep_var_deg = (float)var;
 		m_pending_params.length_m = (float)length;
 		m_pending_params.features = m_params.features;
 		m_pending_payload = (float)payload;
@@ -1398,6 +1411,7 @@ struct Module: public interface::Module
 		const hill::Params &np = m_pending_params;
 		bool hill_changed = np.seed != m_params.seed ||
 				np.steep_deg != m_params.steep_deg ||
+				np.steep_var_deg != m_params.steep_var_deg ||
 				np.length_m != m_params.length_m;
 		m_params = np;
 		m_latitude = m_pending_look[0];
@@ -1437,17 +1451,17 @@ struct Module: public interface::Module
 	// What the client draws by: the hill's size and where the car starts,
 	// in voxels, the place and the hour, and the menu's picks: the seed,
 	// the steepness, the length and the payload; whether this peer may
-	// pick, and the rounds' interval in seconds
+	// pick, the rounds' interval in seconds and the steepness's variance
 	ss_ hill_packet(size_t peer)
 	{
 		const hill::Hill h(m_params);
 		char buf[256];
-		snprintf(buf, sizeof buf, "%d %d %d %d %d %d %g %g %g %u %d %d %d %d %d",
+		snprintf(buf, sizeof buf, "%d %d %d %d %d %d %g %g %g %u %d %d %d %d %d %d",
 				h.size_x(), h.size_y(), h.size_z(), h.size_x() / 2,
 				hill::Hill::BASE + 1, hill::Hill::PAD / 2, m_latitude, m_day,
 				m_time, m_params.seed, (int)m_params.steep_deg,
 				(int)m_params.length_m, (int)m_payload, may_pick(peer) ? 1 : 0,
-				(int)m_interval);
+				(int)m_interval, (int)m_params.steep_var_deg);
 		return buf;
 	}
 

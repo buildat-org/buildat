@@ -53,16 +53,17 @@ cd "$here/Build"
 port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
-	[parked]=12)
+	[parked]=12 [varied]=13)
 drive()
 {
 	local name=$1; shift
 	# The car's own drives on a hill with no pits or rocks (the rock's
-	# below sets them on again)
+	# below sets them on again), its steepness even ([HC_STEEP_NOISE]:
+	# the varied one's below sets its variance)
 	# The modules compiled once (warm, below), each drive a copy
 	[ -d "$t/warm/c" ] && [ "$name" != warm ] && mkdir -p "$t/$name" &&
 		cp -a "$t/warm/c" "$t/$name/c"
-	env BUILDAT_HILLCLIMB_FEATURES=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
+	env BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP_VAR=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
 		-C "$t/$name/c" -P $((port_base + PORT[$name])) -l 3 > "$t/$name.log" 2>&1
 }
 drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)"
@@ -84,9 +85,9 @@ drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 # 0.74 m in radius, and nothing else below it near these lines
 # ("hill_test 6 29 50"): from the bottom pad in second with the left
 # wheels on its line, and on a line 3 m to its left
-drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
+drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLCLIMB_STEEP=29 \
 	BUILDAT_HILLCLIMB_START="6.21 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
-drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 \
+drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLCLIMB_STEEP=29 \
 	BUILDAT_HILLCLIMB_START="2.1 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
 # [HC_OPEN_EDGES] Up the slope in second, steered right from 7 s: off the
 # side, put back; a minute parked on the bottom pad, a stone thrown off
@@ -104,13 +105,17 @@ done
 # 15 degrees and 20 m, a run reset (unfinished), one finished, one more
 drive counts BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 3:B 4:W 25:B 26:W 50:Q" &
+# [HC_STEEP_NOISE] The default hill, 27 degrees varied by 4, climbed in
+# second
+drive varied BUILDAT_HILLCLIMB_STEEP=27 BUILDAT_HILLCLIMB_STEEP_VAR=4 \
+	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 70:Q" &
 # 8 cars on one hill, the same keys: the step's cost
 drive cars8 BUILDAT_HILLCLIMB_CARS=8 BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 12:Q" &
 wait
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
 # The default hill ([HC_DEFAULTS])
-grep -aq "hillclimb: the hill, seed 1, 29 degrees, 50 m long" "$t/flat.log" ||
-	fail "no hill made, or not at 29 degrees by default ($t/flat.log)"
+grep -aq "hillclimb: the hill, seed 1, 27 degrees +-0, 50 m long" "$t/flat.log" ||
+	fail "no hill made, or not at 27 degrees by default ($t/flat.log)"
 python3 -I - "$t" <<'PY' || fail "the car (logs in $t)"
 import re, sys
 d = sys.argv[1]
@@ -222,15 +227,18 @@ for f in fins:
     print("    finish %s s on %s rank %s; ranking%s" % f)
 want(len(fins) == 3, "three runs timed: %d" % len(fins))
 if len(fins) == 3:
-    k22 = "v4/seed1/steep22/length50/sand/payload0/"
+    k22 = "v5/seed1/steep22/var0/length50/sand/payload0/"
     t1, t2 = float(fins[0][0]), float(fins[1][0])
     want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
         "second gear's time, then fourth's faster, under the hill's key")
     want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
         "the second run first in the ranking, the first beside it")
-    want(fins[2][1] == "v4/seed1/steep15/length30/sand/payload0/" and
+    want(fins[2][1] == "v5/seed1/steep15/var0/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
-want("hillclimb: the hill, seed 1, 15 degrees, 30 m long" in log, "the hill made again from the pick")
+want("hillclimb: the hill, seed 1, 15 degrees +-0, 30 m long" in log, "the hill made again from the pick")
+vfin = re.findall(r"hillclimb: finish (\S+) s on (\S+),", open("%s/varied.log" % d, errors="replace").read())
+want(vfin and vfin[0][1] == "v5/seed1/steep27/var4/length50/sand/payload0/",
+    "27 degrees varied by 4 climbed in second: %s" % (vfin[:1] or "no finish"))
 spin = [l for l in stall if 22 <= l["t"] <= 25]
 want(max(l["z"] for l in stall) < 12 and all("1" in l["slip"] for l in spin),
     "40 degrees with 2 t stalls, its wheels slipping: z %.1f, slip %s" % (
@@ -297,7 +305,7 @@ mp_client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CHECK_PIDS+=($CLIENT)
 }
 mp_server mp "BUILDAT_HILLCLIMB_INTERVAL=20 BUILDAT_HILLCLIMB_FEATURES=0
-	BUILDAT_HILLCLIMB_STEEP=22" -u launcher=1
+	BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
 cat > "$t/mp1.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 wait_log 120000 car drawn as a ghost
@@ -380,7 +388,7 @@ delay 200
 keypress Return
 wait_log 3000 hillclimb: the hill menu: steep
 delay 300
-$(for i in 1 2 3 4 5 6 7; do echo keypress Down; echo delay 150; done)
+$(for i in 1 2 3 4 5 6 7 8; do echo keypress Down; echo delay 150; done)
 screenshot $t/hill_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params
@@ -442,7 +450,8 @@ echo "  Escape: the menu, no input under it, settings and back, leave"
 # (2R, 162 pixels): a push 3R up and R/2 across keeps its steer, 0.44 in
 # fourth. [HC_HILL_MENU] Menu, The hill..., Steepness's dropdown tapped,
 # a choice, Make it: the params sent with it
-mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15" -u launcher=1
+mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15
+	BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 delay 3000
@@ -504,12 +513,12 @@ delay 500
 click Button "The hill..."
 wait_log 5000 hillclimb: the hill menu shown
 delay 1000
-tap 455 148
+tap 455 133
 delay 1000
-tap 430 273
+tap 430 258
 wait_log 3000 hillclimb: the hill menu: steep
 delay 500
-tap 400 397
+tap 400 412
 wait_log 5000 hillclimb: the hill menu sends params
 delay 500
 quit

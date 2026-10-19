@@ -19,6 +19,11 @@
 // across) 1.5 m deep, then a fill nobody sees.
 // The slope's angle is the middle's; its ends ease in and out over 2 m,
 // so the car does not meet a kink at either pad.
+// [HC_STEEP_NOISE] The angle varies over the slope by up to steep_var_deg
+// either way, a smooth 2D noise of about 10 m waves: the local angle at
+// (x, z) is steep_deg + steep_var_deg * n(x, z), and each column's height
+// that angle's rise summed up the hill, so the steepness, not the height,
+// is what varies (and the hill tilts a little sideways).
 // [HC_PITS_ROCKS] On the slope, about one feature each 6 m: pits, bowls
 // in the sand at its angle of repose, and rocks poking up from it, each
 // left out where it would leave a cross-section less than 3 m free.
@@ -39,6 +44,9 @@ struct Params
 {
 	uint32_t seed = 1;
 	float steep_deg = 22; // the middle's slope
+	// [HC_STEEP_NOISE] The largest local departure from it, 0 to 10; 0 an
+	// even slope (the game's default is main.cpp's)
+	float steep_var_deg = 0;
 	float length_m = 50;  // the slope's run along Z
 	bool features = true; // pits and rocks ([HC_PITS_ROCKS]); off for a check
 	// simplified: sand with pebbles is the only terrain; rocky, muddy and
@@ -57,7 +65,11 @@ struct Hill
 	static const int BUMP = 1;         // the surface's undulation, voxels
 	int run = 0;                       // the slope's run
 	float k = 0;                       // the middle's rise per voxel
-	float rise = 0;
+	float rise = 0;                    // the highest column's
+	static const int VAR_CELL = 5 * U; // the steepness noise's cells
+	// [HC_STEEP_NOISE] With a variance: each column's profile at every
+	// whole z, size_z() + 1 a column
+	std::vector<float> prof;
 
 	// [HC_PITS_ROCKS] A pit or a rock, in voxels: its centre (x, z, and a
 	// rock's y; a voxel's centre at +0.5, as a pebble's) and radius, and a
@@ -76,8 +88,43 @@ struct Hill
 		k = std::tan(p.steep_deg * PI / 180);
 		// Each eased end rises half of what a straight one would
 		rise = k * (run - EASE);
+		if(p.steep_var_deg > 0)
+			vary();
 		if(p.features)
 			place_features();
+	}
+
+	// [HC_STEEP_NOISE] n(x, z) in -1..1: value noise, stretched by 1.5 so
+	// that its extremes are reached, and clamped
+	float steep_noise(float x, float z) const
+	{
+		const float n = 1.5f * (2 * noise(x, z, VAR_CELL, 3) - 1);
+		return n < -1 ? -1 : n > 1 ? 1 : n;
+	}
+	// The local angle's tangent at (x, z) on the slope's middle
+	float local_k(float x, float z) const
+	{
+		return std::tan((p.steep_deg + p.steep_var_deg * steep_noise(x, z)) *
+				PI / 180);
+	}
+	// The profile tables: the rate, the even slope's eased one with k the
+	// local angle's, summed along z by the midpoint of each voxel
+	void vary()
+	{
+		const int nz = size_z() + 1;
+		prof.assign((size_t)TRACK_W * nz, 0);
+		rise = 0;
+		for(int x = 0; x < TRACK_W; x++){
+			float h = 0;
+			for(int z = 0; z < nz; z++){
+				prof[(size_t)x * nz + z] = h;
+				const float u = z + 0.5f - PAD;
+				float ease = u <= 0 || u >= run ? 0 : u < EASE ? u / EASE :
+						u > run - EASE ? (run - u) / EASE : 1;
+				h += ease * local_k((float)x, z + 0.5f);
+			}
+			rise = std::max(rise, h);
+		}
 	}
 
 	int size_x() const { return TRACK_W; }
@@ -88,8 +135,23 @@ struct Hill
 	int top_z0() const { return PAD + run; }
 	// The surface's height over the bottom pad at z, unbumped: the slope's
 	// rise integrated, its rate easing from 0 to k over EASE at each end
-	float profile(float z) const
+	// [HC_STEEP_NOISE] At column x: with a variance from the tables,
+	// interpolated between their columns and rows; with none the same for
+	// every x
+	float profile(float x, float z) const
 	{
+		if(!prof.empty()){
+			const int nz = size_z() + 1;
+			const float cx = std::fmin(std::fmax(x, 0.0f), TRACK_W - 1.0f),
+					cz = std::fmin(std::fmax(z, 0.0f), (float)(nz - 1));
+			const int x0 = std::min((int)cx, TRACK_W - 2),
+					z0 = std::min((int)cz, nz - 2);
+			const float tx = cx - x0, tz = cz - z0;
+			auto at = [&](int a, int b){ return prof[(size_t)a * nz + b]; };
+			const float a = at(x0, z0) + (at(x0, z0 + 1) - at(x0, z0)) * tz,
+					b = at(x0 + 1, z0) + (at(x0 + 1, z0 + 1) - at(x0 + 1, z0)) * tz;
+			return a + (b - a) * tx;
+		}
 		float u = z - PAD;
 		if(u <= 0)
 			return 0;
@@ -216,7 +278,7 @@ struct Hill
 	// BUMP, faded in from its ends, and dips into the pits
 	float height(float x, float z) const
 	{
-		float h = BASE + profile(z + 0.5f);
+		float h = BASE + profile(x, z + 0.5f);
 		float u = (z + 0.5f - PAD) / (float)EASE;
 		float w = u <= 0 ? 0 : u >= 1 ? 1 : u;
 		float v = (top_z0() - z - 0.5f) / (float)EASE;
@@ -446,6 +508,28 @@ int main(int argc, char **argv)
 		}
 	}
 	assert(pits > 50 && rocks > 50);
+	// [HC_STEEP_NOISE] 27 degrees varied by 4: the local angle along the
+	// slope's middle (the profile's, under the bump) within 27 +- 4 and
+	// spread over most of it; the same seed the same ground; each column's
+	// top pad flat at its own height
+	Params vp;
+	vp.steep_deg = 27, vp.steep_var_deg = 4, vp.features = false;
+	const Hill v(vp), v2(vp);
+	float lo = 90, hi = 0;
+	for(int x = 0; x < Hill::TRACK_W; x++)
+	for(int z = v.slope_z0() + Hill::EASE; z < v.top_z0() - Hill::EASE; z++){
+		const float deg = std::atan(v.profile((float)x, z + 1.0f) -
+				v.profile((float)x, (float)z)) * 180 / PI;
+		assert(deg >= 23 - 0.01f && deg <= 31 + 0.01f);
+		lo = std::fmin(lo, deg), hi = std::fmax(hi, deg);
+		assert(v.surface(x, z) == v2.surface(x, z));
+	}
+	assert(lo < 24 && hi > 30);
+	for(int x = 0; x < Hill::TRACK_W; x++)
+	for(int z = v.top_z0(); z < v.size_z(); z++)
+		assert(v.surface(x, z) == v.surface(x, v.top_z0()));
+	assert(v.size_y() > v.surface(0, v.top_z0()) && v.rise > 0);
+	printf("hill.h: 27 degrees varied by 4: local angles %.1f to %.1f\n", lo, hi);
 	printf("hill.h: self test passed; %dx%dx%d voxels, rise %.1f m, "
 			"%.1f%% stones in the shell; 50 hills, %d pits and %d rocks; the "
 			"outside flush with the edge within %.2f voxels\n",

@@ -289,8 +289,9 @@ end
 -- What the server says (main.cpp hill_packet): the hill's size, where the
 -- car starts, in voxels; the latitude, the day and the hour; the seed,
 -- the steepness, the length and the payload; whether this client may
--- pick ([HC_MULTIPLAYER] 2: an admin on a public server) and the rounds'
--- interval, seconds. Again whenever the menu makes another hill.
+-- pick ([HC_MULTIPLAYER] 2: an admin on a public server), the rounds'
+-- interval, seconds, and the steepness's variance ([HC_STEEP_NOISE]).
+-- Again whenever the menu makes another hill.
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
 	local v = {}
@@ -302,11 +303,12 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		target = magic.Vector3(v[4], v[5], v[6]),
 		lat = v[7], day = v[8], time = v[9]}
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
-		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0}
+		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0,
+		steep_var = v[16] or 0}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
-			.. "%g h; seed %d, %d degrees, %d m, %d kg", v[1], v[2], v[3], v[7],
-			v[8], v[9], v[10], v[11], v[12], v[13]))
+			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
+			v[7], v[8], v[9], v[10], v[11], v[16] or 0, v[12], v[13]))
 end)
 
 -- The sky's hue by the sun's height, skeldat's hue_of_hour (copied)
@@ -768,6 +770,9 @@ local MENU = {
 	{id = "seed", label = "Seed", min = 1, max = 999999, step = 1},
 	{id = "steep", label = "Steepness", min = 5, max = 40, step = 1,
 		unit = " degrees"},
+	-- [HC_STEEP_NOISE] How far it varies over the slope, either way
+	{id = "steep_var", label = "Steepness varies", min = 0, max = 10,
+		step = 1, unit = " degrees", show = function(v) return "+-" .. v end},
 	{id = "length", label = "Length", min = 20, max = 60, step = 5,
 		unit = " m"},
 	{id = "payload", label = "Payload", list = {0, 500, 1000, 2000},
@@ -900,8 +905,9 @@ local function open_hill_menu()
 	m:add("Make it", function()
 		seed_read()
 		local v = values
-		local params = string.format("%d %d %d %d %g %g %g %d", v.seed,
-				v.steep, v.length, v.payload, v.lat, v.day, v.hour, v.interval)
+		local params = string.format("%d %d %d %d %g %g %g %d %d", v.seed,
+				v.steep, v.length, v.payload, v.lat, v.day, v.hour, v.interval,
+				v.steep_var)
 		buildat.send_packet("hillclimb:params", params)
 		log:info("hillclimb: the hill menu sends params " .. params)
 		close_hill_menu()
