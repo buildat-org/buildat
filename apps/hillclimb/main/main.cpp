@@ -34,8 +34,10 @@
 // hill's parameters are an admin's. Rounds: at an interval (never, or 1
 // to 30 minutes; 10 by default), counted from the
 // first player's drive, the players still driving get an extra interval
-// and the rest observe; then the results, and the hill made anew with a
-// new seed.
+// and the rest observe; then the results, and the hill made anew: its
+// worn ground as generated, the same parameters and seed ([HC_SCORES]:
+// the seed is 1 at the start, BUILDAT_HILLCLIMB_SEED for a check, and
+// changes only by the hill menu).
 //
 // For the check, with no client: BUILDAT_HILLCLIMB_DRIVE, steps of
 // "<seconds>:<keys>" from the car's start, each held until the next --
@@ -67,6 +69,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/os.h"
+#include "core/json.h"
 #include "hill.h"
 #include "car.h"
 #include "ground.h"
@@ -85,7 +88,6 @@
 #include <deque>
 #include <mutex>
 #include <map>
-#include <random>
 #include <ctime>
 #define MODULE "main"
 
@@ -130,6 +132,8 @@ static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
 // The cars' collision layer: they touch the world and the stones, not
 // each other
 static const unsigned CAR_LAYER = 2;
+// [HC_SCORES] The ranking's key version: v6 has no seed in it
+static const char *SCORES_VERSION = "v6";
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
@@ -243,7 +247,6 @@ struct Module: public interface::Module
 	enum Round { R_WAITING, R_RUNNING, R_EXTRA, R_RESULTS } m_round = R_WAITING;
 	float m_interval = 0, m_round_t = 0, m_round_sent = 0;
 	bool m_public = true;
-	std::mt19937 m_rand{(uint32_t)std::time(nullptr)};
 	// Sent the join (accounts), not yet in
 	std::set<size_t> m_joining;
 	float m_start_x = 0, m_start_z = 0, m_start_yaw = 0; // m, m, degrees
@@ -311,6 +314,8 @@ struct Module: public interface::Module
 		sub(m_server, "network:packet_received/hillclimb:params",
 				&Module::on_params);
 		sub(m_server, "accounts:login", &Module::on_login);
+		sub(m_server, "network:packet_received/hillclimb:scores",
+				&Module::on_scores);
 	}
 
 	// A texture of 16 pixels square, a colour and a grain, no file behind it
@@ -436,6 +441,7 @@ struct Module: public interface::Module
 		});
 		if(!m_save)
 			log_w(MODULE, "hillclimb: no ranking: the save would not open");
+		read_old_scores();
 		// [HC_MULTIPLAYER] A public server is one not started by the
 		// launcher for its own client, as vanilla works it out
 		bool refused = false;
@@ -749,6 +755,13 @@ struct Module: public interface::Module
 		// What a step does once, when it comes
 		if(step != m_drive_step){
 			m_drive_step = step;
+			// L: the High scores page's answers logged ([HC_SCORES])
+			if(keys.find('L') != ss_::npos){
+				log_i(MODULE, "hillclimb: scores sets %s", cs(scores_answer(
+						"sets").stringify()));
+				log_i(MODULE, "hillclimb: scores set %s", cs(scores_answer(
+						"set "+ranking_prefix()).stringify()));
+			}
 			if(keys.find('B') != ss_::npos)
 				for(auto &kv : m_players)
 					if(kv.first == 0 || kv.first >= BOT_PEER)
@@ -1132,25 +1145,28 @@ struct Module: public interface::Module
 	// of twice the power. v3 ([HC_MULTIPLAYER]): an entry's value is
 	// "name\tdate\tfinished\tunfinished", the runs ended on the hill before
 	// it started. v4 ([HC_OPEN_EDGES]): the track 10 m wide, no banks. v5
-	// ([HC_STEEP_NOISE]): the steepness's variance in the key. The times
-	// before are kept under the old keys, not shown.
-	// [HC_CIRCUIT] A circuit's: every parameter that shapes it but the
-	// seed (in the entry, [HC_SCORES]) and the round's interval; its keys
-	// then the laps, most first, and the round's clock at the last lap
+	// ([HC_STEEP_NOISE]): the steepness's variance in the key. v6
+	// ([HC_SCORES]): no seed in it, the race's kind; the seed in the entry,
+	// "name\tdate\tfinished\tunfinished\tseed". The times before are kept
+	// under the old keys, shown on the High scores page; v4's and v5's read
+	// into v6 (scores.h).
+	// [HC_CIRCUIT] A circuit's: every parameter that shapes it and the
+	// round's interval; its keys then the laps, most first, and the round's
+	// clock at the last lap
 	ss_ ranking_prefix() const
 	{
 		char buf[192];
 		if(m_params.circuit){
-			snprintf(buf, sizeof buf, "v5/circuit/steep%d/var%d/length%d/width%d/"
-					"lane%d/switch%d/round%d/sand/payload%d/",
+			snprintf(buf, sizeof buf, "%s/circuit/steep%d/var%d/length%d/width%d/"
+					"lane%d/switch%d/round%d/sand/payload%d/", SCORES_VERSION,
 					(int)m_params.steep_deg, (int)m_params.steep_var_deg,
 					(int)m_params.length_m, (int)m_params.width_m,
 					(int)m_params.lane_m, m_params.switchbacks, (int)m_interval,
 					(int)m_payload);
 			return buf;
 		}
-		snprintf(buf, sizeof buf, "v5/seed%u/steep%d/var%d/length%d/sand/payload%d/",
-				m_params.seed, (int)m_params.steep_deg,
+		snprintf(buf, sizeof buf, "%s/straight/steep%d/var%d/length%d/sand/"
+				"payload%d/", SCORES_VERSION, (int)m_params.steep_deg,
 				(int)m_params.steep_var_deg, (int)m_params.length_m,
 				(int)m_payload);
 		return buf;
@@ -1317,9 +1333,8 @@ struct Module: public interface::Module
 			if(m_round_t >= m_interval || !driving)
 				end_round();
 		} else if(m_round == R_RESULTS && m_round_t >= 5){
-			// The hill anew: a new seed, the rest as they are
+			// The hill anew: as it was made, the seed kept
 			m_pending_params = m_params;
-			m_pending_params.seed = 1 + m_rand() % 999999;
 			m_pending_payload = m_payload;
 			m_pending_look[0] = m_latitude;
 			m_pending_look[1] = m_day;
@@ -1617,8 +1632,17 @@ struct Module: public interface::Module
 		m_day = m_pending_look[1];
 		m_time = m_pending_look[2];
 		m_payload = m_pending_payload;
-		if(hill_changed)
+		if(hill_changed){
 			make_hill();
+		} else {
+			// The same hill as it was made: the ground smoothed, the stones
+			// gone (a round's end, [HC_SCORES])
+			if(m_ground && m_ground->changed())
+				m_ground->restore();
+			clear_rocks();
+			log_i(MODULE, "hillclimb: the hill as it was made, seed %u",
+					m_params.seed);
+		}
 		// Every car at the start, nobody observing, the round waiting
 		for(auto &kv : m_players){
 			Player &pl = kv.second;
@@ -1629,9 +1653,8 @@ struct Module: public interface::Module
 			reset_race(pl);
 			pl.observing = false;
 		}
-		// A new hill counts its own runs, the ones cut short above not
-		if(hill_changed)
-			m_hill_finished = m_hill_unfinished = 0;
+		// A fresh hill counts its own runs, the ones cut short above not
+		m_hill_finished = m_hill_unfinished = 0;
 		m_round = R_WAITING;
 		m_round_t = 0;
 		for(size_t peer : m_peers){
@@ -1765,6 +1788,8 @@ struct Module: public interface::Module
 		if(m_joining.erase(login.peer))
 			add_player(login.peer, login.name);
 	}
+
+#include "scores.h"
 };
 
 extern "C" {

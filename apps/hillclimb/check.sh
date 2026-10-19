@@ -60,7 +60,7 @@ cd "$here/Build"
 port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
-	[parked]=12 [varied]=13 [circuit]=14 [cut]=15)
+	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17)
 drive()
 {
 	local name=$1; shift
@@ -118,7 +118,7 @@ turns=$(grep -a "hillclimb: drive passed turn" "$c" | head -4 | sed 's/.*turn \(
 [ "$turns" = "1 2 3 4 " ] && grep -aq "hillclimb: drive's lap 1 at" "$c" ||
 	fail "the circuit: turns '$turns' in order, then a lap ($c)"
 res=$(grep -aA2 "hillclimb: round over:" "$c" | tail -2 | tr '\n' '|')
-grep -aq "finish .* on v5/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
+grep -aq "finish .* on v6/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
 	echo "$res" | grep -Eq '^1 laps [0-9.]+ drive\|0 laps [0-9.]+ drive1\|$' ||
 	fail "the circuit's round: '$res', or its key ($c)"
 grep -aq "hillclimb: drive's car put back" "$t/cut.log" && ! grep -aq "'s lap" "$t/cut.log" ||
@@ -140,7 +140,44 @@ drive varied BUILDAT_HILLCLIMB_STEEP=27 BUILDAT_HILLCLIMB_STEEP_VAR=4 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 70:Q" &
 # 8 cars on one hill, the same keys: the step's cost
 drive cars8 BUILDAT_HILLCLIMB_CARS=8 BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 12:Q" &
+# [HC_SCORES] A save with eleven v4 times (seed 7) of the hill of 15
+# degrees and 20 m; on it a run finished on seed 1 and the round of 30 s
+# over; then L, the High scores page's answers
+(
+	drive scores0 BUILDAT_HILLCLIMB_DRIVE="0:Q"
+	mkdir -p "$t/scores"; cp -a "$t/scores0/u" "$t/scores/u"
+	# As a save from before: no mark of the times read
+	{ echo "DELETE FROM store WHERE store = 'settings' AND key = 'scores_v6';"
+	for i in $(seq 30 40); do
+		echo "INSERT INTO store VALUES('times', 'v4/seed7/steep15/length20/sand/payload0/0000${i}000/$i', 'old$i	2026-10-01	0	0');"
+	done; } | sqlite3 "$t/scores/u/apps/hillclimb/saves/ranking/save.sqlite"
+	drive scores BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
+		BUILDAT_HILLCLIMB_INTERVAL=30 BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 35:S 44:L 45:Q"
+) &
 wait
+python3 -I - "$t/scores.log" <<'PY' || fail "the high scores ($t/scores.log)"
+import json, re, sys
+log = open(sys.argv[1], errors="replace").read()
+def after(what):
+    m = re.search(re.escape(what) + r" (\{.*\})", log)
+    return json.loads(m.group(1)) if m else {}
+sets, one = after("hillclimb: scores sets").get("sets", []), after("hillclimb: scores set").get("set", {})
+new = "v6/straight/steep15/var0/length20/sand/payload0/"
+by = {s["key"]: s for s in sets}
+ok = ("11 times with a seed read into v6" in log and
+    re.search(r"round over:", log) and
+    re.search(r"round over:[\s\S]*the hill as it was made, seed 1", log) and
+    not re.search(r"the hill, seed (?!1,)", log) and
+    sets and sets[0]["key"] == new and sets[0]["current"] and by[new]["count"] == 12 and
+    by.get("v4/seed7/steep15/length20/sand/payload0/", {}).get("count") == 11 and
+    not by["v4/seed7/steep15/length20/sand/payload0/"]["drivable"] and
+    one.get("key") == new and len(one.get("entries", [])) == 12 and
+    one["entries"][0]["seed"] == 1 and one["entries"][-1]["seed"] == 7)
+print("  the high scores: %s; the set %s, %d entries, seeds %s" % (
+    ["%s (%d)" % (s["name"], s["count"]) for s in sets], one.get("key"),
+    len(one.get("entries", [])), sorted({e["seed"] for e in one.get("entries", [])})))
+sys.exit(0 if ok else 1)
+PY
 grep -a "hillclimb: the hill" "$t/flat.log" | sed 's/.*hillclimb: /  /'
 # The default hill ([HC_DEFAULTS])
 grep -aq "hillclimb: the hill, seed 1, 27 degrees +-0, 50 m long" "$t/flat.log" ||
@@ -256,17 +293,17 @@ for f in fins:
     print("    finish %s s on %s rank %s; ranking%s" % f)
 want(len(fins) == 3, "three runs timed: %d" % len(fins))
 if len(fins) == 3:
-    k22 = "v5/seed1/steep22/var0/length50/sand/payload0/"
+    k22 = "v6/straight/steep22/var0/length50/sand/payload0/"
     t1, t2 = float(fins[0][0]), float(fins[1][0])
     want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
         "second gear's time, then fourth's faster, under the hill's key")
     want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
         "the second run first in the ranking, the first beside it")
-    want(fins[2][1] == "v5/seed1/steep15/var0/length30/sand/payload0/" and
+    want(fins[2][1] == "v6/straight/steep15/var0/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
 want("hillclimb: the hill, seed 1, 15 degrees +-0, 30 m long" in log, "the hill made again from the pick")
 vfin = re.findall(r"hillclimb: finish (\S+) s on (\S+),", open("%s/varied.log" % d, errors="replace").read())
-want(vfin and vfin[0][1] == "v5/seed1/steep27/var4/length50/sand/payload0/",
+want(vfin and vfin[0][1] == "v6/straight/steep27/var4/length50/sand/payload0/",
     "27 degrees varied by 4 climbed in second: %s" % (vfin[:1] or "no finish"))
 spin = [l for l in stall if 22 <= l["t"] <= 25]
 want(max(l["z"] for l in stall) < 12 and all("1" in l["slip"] for l in spin),
@@ -317,9 +354,9 @@ PY
 # client1 drives through client2's car standing at the start (the cars do
 # not touch) and is still driving at 20 s, when client2, not driving,
 # observes it; client1 never observes; client1's finish ends the round:
-# the results, and the hill anew with another seed. Then a client on a
-# public server is refused the hill's parameters, and a local game with
-# no interval has no rounds.
+# the results, and the hill anew as it was made, seed 1 kept
+# ([HC_SCORES]). Then a client on a public server is refused the hill's
+# parameters, and a local game's rounds are 10 minutes too.
 # simplified: the leader's 2 s hold is the client's own few lines, not
 # driven (one car runs here); an admin's params on a public server are
 # the drives' H (peer 0), as above
@@ -385,9 +422,11 @@ grep -aq "hillclimb: $n1 finished in" "$m" &&
 grep -aq "hillclimb: observing $n1" "$t/mp2.log" &&
 	! sed -n "/hillclimb: the round's results/q;p" "$t/mp1.log" | grep -av " __app   : " | grep -aq "hillclimb: observing" ||
 	fail "client2 not observing client1, or client1 observing before the results ($t/mp1.log, $t/mp2.log)"
-seeds=$(grep -a "hillclimb: the hill, seed" "$m" | sed 's/.*seed \([0-9]*\),.*/\1/' | tr '\n' ' ')
-set -- $seeds
-[ $# -ge 2 ] && [ "$1" != "$2" ] || fail "the hill not made anew: seeds $seeds ($m)"
+# [HC_SCORES] The hill made anew after the round: as it was, seed 1 kept
+seeds=$(grep -a "hillclimb: the hill, seed\|hillclimb: the hill as it was made, seed" "$m" |
+	sed 's/.*seed \([0-9]*\).*/\1/' | tr '\n' ' ')
+grep -aq "hillclimb: the hill as it was made, seed 1" "$m" && [ "$seeds" = "1 1 " ] ||
+	fail "the hill not made anew with its seed: seeds $seeds ($m)"
 grep -aq "hillclimb: the round's results:.*$n1" "$t/mp2.log" || fail "client2 shown no results ($t/mp2.log)"
 echo "  two cars: $n1 and $n2, ghosts both ways; the round: $n1's run, $n2 observing; seeds $seeds"
 mp_server pub BUILDAT_HILLCLIMB_FEATURES=0

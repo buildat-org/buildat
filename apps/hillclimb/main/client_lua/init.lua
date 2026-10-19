@@ -1072,8 +1072,26 @@ local function draw_hud(watched)
 	chat_text:SetText(table.concat(shown, "\n"))
 end
 
+-- [HC_SCORES] A High scores set's parameters made the hill, the seed,
+-- the place and the hour kept, as the hill menu sends them
+local function drive_set(set)
+	if not picks then
+		return
+	end
+	local v = picks
+	local c = set.circuit and 1 or 0
+	local params = string.format("%d %d %d %d %g %g %g %d %d %d %d %d %d",
+			v.seed, set.steep or v.steep, set.length or v.length,
+			set.payload or 0, v.lat, v.day, v.hour,
+			c == 1 and (set.round or 600) or v.interval, set.var or 0, c,
+			set.width or v.width, set.lane or v.lane,
+			set.switch or v.switchbacks)
+	buildat.send_packet("hillclimb:params", params)
+	log:info("hillclimb: the high scores' set sends params " .. params)
+end
 pause = load("main/pause.lua")({hill_menu = open_hill_menu,
-	chat = open_chat, keys = read_keys})
+	chat = open_chat, keys = read_keys, drive = drive_set,
+	may_pick = function() return hill ~= nil and hill.may_pick end})
 -- The orbit about the car: dragged with the left button, the wheel the
 -- distance
 local yaw, pitch, dist = 200, 20, 12 * U
