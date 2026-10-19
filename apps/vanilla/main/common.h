@@ -117,16 +117,19 @@ static std::map<ss_, ss_> read_world_mt(const ss_ &path)
 	return out;
 }
 
-// The file written back with these keys set, the other lines kept
+// The file written back with these keys set, the other lines kept; whole
+// or not at all (interface::fs::write_file)
 static void write_world_mt(const ss_ &path, const std::map<ss_, ss_> &set)
 {
 	std::map<ss_, ss_> all = read_world_mt(path);
 	for(const auto &kv : set)
 		all[kv.first] = kv.second;
 	interface::fs::create_directories(interface::fs::strip_file_name(path));
-	std::ofstream f(path, std::ios::trunc);
+	ss_ text;
 	for(const auto &kv : all)
-		f << kv.first << " = " << kv.second << "\n";
+		text += kv.first+" = "+kv.second+"\n";
+	if(!interface::fs::write_file(path, text))
+		log_w(MODULE, "vanilla: could not write %s", cs(path));
 }
 
 // The save's directory, and its gameid when asked, or false
@@ -476,34 +479,16 @@ static ss_ worlds_path(interface::Server *server)
 	return server->get_config().get<ss_>("user_path")+"/apps/vanilla/worlds";
 }
 
-// world.mt's gameid, or "" for a directory that has no world.mt
+// world.mt's gameid, or "" for a directory that has no world.mt.
+// Minetest Game's worlds were made as "minetest", which is minetest_game
+// since 5.8, as Luanti reads it too ([LUANTI_IMPORT_FOLDER])
 static ss_ read_gameid(const ss_ &world_path)
 {
-	std::ifstream f(world_path+"/world.mt");
-	if(!f.good())
+	const std::map<ss_, ss_> mt = read_world_mt(world_path+"/world.mt");
+	auto it = mt.find("gameid");
+	if(it == mt.end())
 		return "";
-	ss_ line;
-	while(std::getline(f, line)){
-		size_t eq = line.find('=');
-		if(eq == ss_::npos)
-			continue;
-		ss_ key = line.substr(0, eq);
-		ss_ value = line.substr(eq + 1);
-		auto trim = [](ss_ &s){
-			while(!s.empty() && isspace((unsigned char)s.front()))
-				s.erase(s.begin());
-			while(!s.empty() && isspace((unsigned char)s.back()))
-				s.pop_back();
-		};
-		trim(key);
-		trim(value);
-		// Minetest Game's worlds were made as "minetest", which is
-		// minetest_game since 5.8, as Luanti reads it too
-		// ([LUANTI_IMPORT_FOLDER])
-		if(key == "gameid")
-			return value == "minetest" ? ss_("minetest_game") : value;
-	}
-	return "";
+	return it->second == "minetest" ? ss_("minetest_game") : it->second;
 }
 
 static sv_<World> list_worlds(interface::Server *server)

@@ -755,12 +755,9 @@ struct Saves
 			if(save){
 				save->store("main")->set("gameid", gameid);
 				save->store("main")->set("created", itos((int64_t)time(NULL)));
-				if(!seed.empty()){
-					const ss_ dir = save->path()+"/luanti";
-					interface::fs::create_directories(dir);
-					std::ofstream f(dir+"/world.mt", std::ios::app);
-					f<<"fixed_map_seed = "<<seed<<"\n";
-				}
+				if(!seed.empty())
+					write_world_mt(save->path()+"/luanti/world.mt",
+							{{"fixed_map_seed", seed}});
 				// The fourth and fifth are the new world's Creative mode
 				// and Enable damage ([WORLD_LIST]); official's defaults
 				// when absent

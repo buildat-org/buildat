@@ -421,12 +421,9 @@ struct GameStart
 				// menu's third value is, so a scripted run on both engines
 				// is of one world
 				const char *seed = getenv("BUILDAT_LUANTI_SEED");
-				if(save && seed && seed[0]){
-					const ss_ dir = save->path()+"/luanti";
-					interface::fs::create_directories(dir);
-					std::ofstream f(dir+"/world.mt", std::ios::app);
-					f<<"fixed_map_seed = "<<seed<<"\n";
-				}
+				if(save && seed && seed[0])
+					write_world_mt(save->path()+"/luanti/world.mt",
+							{{"fixed_map_seed", seed}});
 			}
 		});
 		return save;
