@@ -1007,9 +1007,6 @@ struct Importer
 		storage::Store *store = save->store("luanti");
 		if(!store)
 			return;
-		std::ifstream ifs(luanti_world_path+"/map_meta.txt");
-		if(!ifs.good())
-			return;
 		// The names on this side, for the four of Luanti's that mean
 		// something to this module's mapgen
 		static const sm_<ss_, ss_> WANTED = {
@@ -1019,25 +1016,11 @@ struct Importer
 			{"mg_flags", "mg_flags"},
 		};
 		ss_ taken;
-		ss_ line;
-		while(std::getline(ifs, line)){
-			size_t eq = line.find('=');
-			if(eq == ss_::npos)
+		for(const auto &kv : read_conf(luanti_world_path+"/map_meta.txt")){
+			auto it = WANTED.find(kv.first);
+			if(it == WANTED.end() || kv.second.empty())
 				continue;
-			ss_ key = line.substr(0, eq);
-			while(!key.empty() && (key.back() == ' ' || key.back() == '\t'))
-				key.pop_back();
-			auto it = WANTED.find(key);
-			if(it == WANTED.end())
-				continue;
-			ss_ value = line.substr(eq + 1);
-			size_t begin = value.find_first_not_of(" \t");
-			if(begin == ss_::npos)
-				continue;
-			value = value.substr(begin);
-			while(!value.empty() && (value.back() == ' ' ||
-					value.back() == '\t' || value.back() == '\r'))
-				value.pop_back();
+			const ss_ &value = kv.second;
 			ss_ have;
 			if(store->get(it->second, have) && !have.empty())
 				continue; // The save's own, and it was here first

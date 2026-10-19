@@ -93,27 +93,13 @@ static ss_ gameid_of_save(interface::Server *server, const ss_ &name)
 	return gameid;
 }
 
-// world.mt's lines as key -> value; a missing file is empty
+// world.mt's lines as key -> value, the last of a key winning; a missing
+// file is empty
 static std::map<ss_, ss_> read_world_mt(const ss_ &path)
 {
 	std::map<ss_, ss_> out;
-	std::ifstream f(path);
-	ss_ line;
-	while(std::getline(f, line)){
-		const size_t eq = line.find('=');
-		if(eq == ss_::npos)
-			continue;
-		ss_ k = line.substr(0, eq), v = line.substr(eq + 1);
-		auto trim = [](ss_ &t){
-			while(!t.empty() && isspace((unsigned char)t.back())) t.pop_back();
-			size_t i = 0;
-			while(i < t.size() && isspace((unsigned char)t[i])) i++;
-			t = t.substr(i);
-		};
-		trim(k); trim(v);
-		if(!k.empty())
-			out[k] = v;
-	}
+	for(const auto &kv : luanti::read_conf(path))
+		out[kv.first] = kv.second;
 	return out;
 }
 
@@ -250,30 +236,12 @@ static bool listable(const ss_ &path)
 #endif
 }
 
-// The first of `keys` a Luanti .conf file sets, or ""
+// The first of `keys` a Luanti .conf file sets, in the file's order, or ""
 static ss_ read_conf_value(const ss_ &file, const sv_<ss_> &keys)
 {
-	std::ifstream f(file);
-	if(!f.good())
-		return "";
-	ss_ line;
-	while(std::getline(f, line)){
-		size_t eq = line.find('=');
-		if(eq == ss_::npos)
-			continue;
-		ss_ key = line.substr(0, eq);
-		ss_ value = line.substr(eq + 1);
-		auto trim = [](ss_ &s){
-			while(!s.empty() && isspace((unsigned char)s.front()))
-				s.erase(s.begin());
-			while(!s.empty() && isspace((unsigned char)s.back()))
-				s.pop_back();
-		};
-		trim(key);
-		trim(value);
-		if(std::find(keys.begin(), keys.end(), key) != keys.end())
-			return value;
-	}
+	for(const auto &kv : luanti::read_conf(file))
+		if(std::find(keys.begin(), keys.end(), kv.first) != keys.end())
+			return kv.second;
 	return "";
 }
 

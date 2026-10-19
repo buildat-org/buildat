@@ -6,6 +6,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include <functional>
+#include <fstream>
 
 namespace main_context
 {
@@ -21,6 +22,35 @@ namespace storage
 namespace luanti
 {
 	using main_context::SceneReference;
+
+	// A Luanti .conf file's "key = value" lines (world.mt, game.conf,
+	// map_meta.txt), in the file's order: each side trimmed of whitespace
+	// as Luanti's Settings::parseConfigLine does, "#" comments and lines
+	// with no "=" skipped; none for a missing file. One reader for vanilla
+	// and the import ([REWORK_1019_FIXES] luanti 9).
+	// simplified: no multi-line """ values, which no file read here has
+	inline sv_<std::pair<ss_, ss_>> read_conf(const ss_ &path)
+	{
+		sv_<std::pair<ss_, ss_>> out;
+		std::ifstream f(path);
+		ss_ line;
+		auto trim = [](const ss_ &s){
+			size_t a = 0, b = s.size();
+			while(a < b && isspace((unsigned char)s[a])) a++;
+			while(b > a && isspace((unsigned char)s[b - 1])) b--;
+			return s.substr(a, b - a);
+		};
+		while(std::getline(f, line)){
+			const ss_ t = trim(line);
+			const size_t eq = t.find('=');
+			if(t.empty() || t[0] == '#' || eq == ss_::npos)
+				continue;
+			const ss_ k = trim(t.substr(0, eq));
+			if(!k.empty())
+				out.emplace_back(k, trim(t.substr(eq + 1)));
+		}
+		return out;
+	}
 
 	// The game's mods have loaded, the voxel registry is built and the map
 	// exists. The scene is the module's own: it is what knows the world's
