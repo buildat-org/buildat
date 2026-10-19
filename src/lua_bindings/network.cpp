@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "lua_bindings/util.h"
 #include "core/log.h"
+#include "interface/tcpsocket.h"
 #ifdef _WIN32
 	#include "ports/windows_sockets.h"
 #else
@@ -83,28 +84,6 @@ static bool would_block()
 #endif
 }
 
-static bool connect_in_progress()
-{
-#ifdef _WIN32
-	return WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-	return errno == EINPROGRESS;
-#endif
-}
-
-static bool set_nonblocking(int fd)
-{
-#ifdef _WIN32
-	u_long on = 1;
-	return ioctlsocket(fd, FIONBIO, &on) == 0;
-#else
-	int flags = fcntl(fd, F_GETFL, 0);
-	if(flags == -1)
-		return false;
-	return fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
-#endif
-}
-
 struct LuaSocket
 {
 	int m_fd = -1;
@@ -137,37 +116,6 @@ struct LuaSocket
 		close();
 	}
 
-	// Waits until the non-blocking connect() on m_fd finishes
-	bool wait_connected()
-	{
-		struct timeval tv;
-		tv.tv_sec = TCP_CONNECT_TIMEOUT_MS / 1000;
-		tv.tv_usec = (TCP_CONNECT_TIMEOUT_MS % 1000) * 1000;
-		fd_set wfds;
-		FD_ZERO(&wfds);
-		FD_SET(m_fd, &wfds);
-		int r = select(m_fd + 1, NULL, &wfds, NULL, &tv);
-		if(r == 0){
-			m_error = "connect timed out";
-			return false;
-		}
-		if(r < 0){
-			m_error = "select: "+last_socket_error();
-			return false;
-		}
-		int so_error = 0;
-		socklen_t len = sizeof(so_error);
-		if(getsockopt(m_fd, SOL_SOCKET, SO_ERROR, (char*)&so_error, &len) != 0){
-			m_error = "getsockopt: "+last_socket_error();
-			return false;
-		}
-		if(so_error != 0){
-			m_error = "connect: "+ss_(strerror(so_error));
-			return false;
-		}
-		return true;
-	}
-
 	bool connect_to(const ss_ &host, const ss_ &port)
 	{
 		struct addrinfo hints;
@@ -187,7 +135,7 @@ struct LuaSocket
 				m_error = "socket: "+last_socket_error();
 				continue;
 			}
-			if(!set_nonblocking(fd)){
+			if(!interface::set_nonblocking_fd(fd, true)){
 				m_error = "failed to set socket non-blocking";
 				close_socket_fd(fd);
 				continue;
@@ -207,13 +155,15 @@ struct LuaSocket
 			}
 			// UDP connect() only sets the default peer; it does not block.
 			// It also makes the socket drop datagrams from anyone else.
-			if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
-				break;
-			if(!m_udp && connect_in_progress()){
-				if(wait_connected()) // Sets m_error if it fails
+			if(m_udp){
+				if(connect(fd, res->ai_addr, res->ai_addrlen) == 0)
 					break;
-			} else {
 				m_error = "connect: "+last_socket_error();
+			} else {
+				m_error = interface::connect_wait(fd, res->ai_addr,
+						res->ai_addrlen, TCP_CONNECT_TIMEOUT_MS);
+				if(m_error.empty())
+					break;
 			}
 			close();
 		}

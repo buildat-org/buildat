@@ -3,6 +3,8 @@
 #pragma once
 #include "core/types.h"
 
+struct sockaddr;
+
 namespace interface
 {
 	struct TCPSocket
@@ -32,8 +34,17 @@ namespace interface
 
 	TCPSocket* createTCPSocket(int fd = -1);
 
-	// Quiet connect attempt; does not keep the socket.
+	// Quiet connect attempt (50 ms); does not keep the socket.
 	bool probe_connect(const ss_ &address, const ss_ &port);
+
+	// A socket made non-blocking (on) or blocking again
+	bool set_nonblocking_fd(int fd, bool on);
+	// connect() made non-blocking and waited on for timeout_ms at most: ""
+	// when connected, else why not, the server's sandbox refusing the port
+	// named. The socket is left non-blocking. The web's is a WebSocket,
+	// connected at once and opened later.
+	ss_ connect_wait(int fd, const struct sockaddr *addr, size_t addrlen,
+			int timeout_ms);
 
 	// This machine's IPv4 address on the network its default route is on,
 	// what someone on the LAN reaches it by; "" without one. Sends nothing.

@@ -110,6 +110,66 @@ std::string address_bytes_to_string(const sv_<uchar> &ip)
 	return os.str();
 }
 
+bool set_nonblocking_fd(int fd, bool on)
+{
+#ifdef _WIN32
+	u_long v = on ? 1 : 0;
+	return ioctlsocket(fd, FIONBIO, &v) == 0;
+#else
+	int flags = fcntl(fd, F_GETFL, 0);
+	if(flags == -1)
+		return false;
+	return fcntl(fd, F_SETFL, on ? flags | O_NONBLOCK : flags & ~O_NONBLOCK) == 0;
+#endif
+}
+
+ss_ connect_wait(int fd, const struct sockaddr *addr, size_t addrlen,
+		int timeout_ms)
+{
+	if(!set_nonblocking_fd(fd, true))
+		return "failed to set the socket non-blocking";
+	if(connect(fd, addr, (socklen_t)addrlen) == 0)
+		return "";
+#ifdef _WIN32
+	const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+	const bool pending = errno == EINPROGRESS;
+#endif
+	if(!pending){
+#ifndef _WIN32
+		// [PROCESS_SANDBOX]: the box refuses a port at once
+		if(errno == EACCES && addr->sa_family != AF_UNIX){
+			const int p = ntohs(addr->sa_family == AF_INET6 ?
+					((const sockaddr_in6*)addr)->sin6_port :
+					((const sockaddr_in*)addr)->sin_port);
+			return "the server's sandbox refused port "+std::to_string(p)+
+					"; its admin allows it with --connect-ports";
+		}
+		return "connect: "+ss_(strerror(errno));
+#else
+		return "connect: winsock error "+std::to_string(WSAGetLastError());
+#endif
+	}
+#ifdef __EMSCRIPTEN__
+	// The web client's socket is a WebSocket ([WEB_CLIENT]): a select
+	// cannot wait for it to open, and it need not, because what is sent
+	// before it is open is queued for it. A server that is not there shows
+	// as the connection closing.
+	return "";
+#else
+	fd_set wfds;
+	FD_ZERO(&wfds);
+	FD_SET(fd, &wfds);
+	struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
+	if(select(fd + 1, NULL, &wfds, NULL, &tv) <= 0)
+		return "connect: no answer in "+std::to_string(timeout_ms)+" ms";
+	int soerr = 0;
+	socklen_t len = sizeof(soerr);
+	if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr, &len) != 0)
+		return "connect: getsockopt failed";
+	return soerr == 0 ? "" : "connect: "+ss_(strerror(soerr));
+#endif
+}
 
 struct CTCPSocket: public TCPSocket
 {
@@ -150,74 +210,6 @@ struct CTCPSocket: public TCPSocket
 		}
 		return true;
 	}
-	static bool connect_with_timeout(int fd, const struct sockaddr *addr,
-			socklen_t addrlen, int timeout_ms)
-	{
-#ifdef _WIN32
-		u_long on = 1;
-		ioctlsocket(fd, FIONBIO, &on);
-#else
-		const int flags = fcntl(fd, F_GETFL, 0);
-		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-#endif
-		bool ok = false;
-		int r = connect(fd, addr, addrlen);
-		if(r == 0){
-			ok = true;
-		} else {
-#ifdef _WIN32
-			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-			const bool pending = errno == EINPROGRESS;
-#endif
-#ifdef __EMSCRIPTEN__
-			// The web client's socket is a WebSocket ([WEB_CLIENT]): a
-			// select cannot wait for it to open, and it need not, because
-			// what is sent before it is open is queued for it. A server
-			// that is not there shows as the connection closing.
-			if(pending)
-				ok = true;
-			else
-#endif
-			if(pending){
-				fd_set wfds;
-				FD_ZERO(&wfds);
-				FD_SET(fd, &wfds);
-				struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
-				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
-					int soerr = 0;
-					socklen_t len = sizeof(soerr);
-					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
-							&len) == 0 && soerr == 0)
-						ok = true;
-					else
-						std::cerr<<"connect: error "<<soerr<<std::endl;
-				} else {
-					std::cerr<<"connect: no answer in "<<timeout_ms<<" ms"<<std::endl;
-				}
-			} else {
-#ifndef _WIN32
-				// [PROCESS_SANDBOX]: the box refuses a port at once
-				if(errno == EACCES && addr->sa_family != AF_UNIX){
-					const int p = ntohs(addr->sa_family == AF_INET6 ?
-							((const sockaddr_in6*)addr)->sin6_port :
-							((const sockaddr_in*)addr)->sin_port);
-					std::cerr<<"connect: the server's sandbox refused port "<<p<<
-							"; its admin allows it with --connect-ports"<<std::endl;
-				} else
-#endif
-				std::cerr<<"connect: "<<strerror(errno)<<std::endl;
-			}
-		}
-#ifdef _WIN32
-		on = 0;
-		ioctlsocket(fd, FIONBIO, &on);
-#else
-		fcntl(fd, F_SETFL, flags);
-#endif
-		return ok;
-	}
-
 	bool connect_fd(const ss_ &address, const ss_ &port)
 	{
 		close_fd();
@@ -261,8 +253,11 @@ struct CTCPSocket: public TCPSocket
 			// retried for seconds, and nothing in the frame loop ran.
 			// Non-blocking, a select of five seconds, then blocking again
 			// for the stream the socket is used as ([WIN8_START] 14).
-			if(!connect_with_timeout(try_fd, res->ai_addr, res->ai_addrlen,
-					5000)){
+			const ss_ why = connect_wait(try_fd, res->ai_addr,
+					res->ai_addrlen, 5000);
+			if(!why.empty() || !set_nonblocking_fd(try_fd, false)){
+				std::cerr<<(why.empty() ? "failed to set the socket blocking" :
+						why)<<std::endl;
 				closesocket(try_fd);
 				continue;
 			}
@@ -458,21 +453,7 @@ struct CTCPSocket: public TCPSocket
 	}
 	bool set_nonblocking(bool nonblocking)
 	{
-		if(m_fd == -1)
-			return false;
-#ifdef _WIN32
-		u_long on = nonblocking ? 1 : 0;
-		return ioctlsocket(m_fd, FIONBIO, &on) == 0;
-#else
-		int flags = fcntl(m_fd, F_GETFL, 0);
-		if(flags == -1)
-			return false;
-		if(nonblocking)
-			flags |= O_NONBLOCK;
-		else
-			flags &= ~O_NONBLOCK;
-		return fcntl(m_fd, F_SETFL, flags) == 0;
-#endif
+		return m_fd != -1 && set_nonblocking_fd(m_fd, nonblocking);
 	}
 	// What fits, and how much that was. A socket whose buffer is full is not
 	// an error: nothing goes, `sent` is zero and the caller keeps the rest.
@@ -609,12 +590,7 @@ int lan_socket(bool listen)
 	int fd = socket(AF_INET, SOCK_DGRAM, 0);
 	if(fd == -1)
 		return -1;
-#ifdef _WIN32
-	u_long on = 1;
-	ioctlsocket(fd, FIONBIO, &on);
-#else
-	fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
-#endif
+	set_nonblocking_fd(fd, true);
 	bool ok = true;
 	if(listen){
 		// Two clients on one machine both hear it
@@ -721,35 +697,7 @@ bool probe_connect(const ss_ &address, const ss_ &port)
 		int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 		if(fd == -1)
 			continue;
-#ifdef _WIN32
-		u_long on = 1;
-		ioctlsocket(fd, FIONBIO, &on);
-#else
-		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
-#endif
-		int r = connect(fd, res->ai_addr, res->ai_addrlen);
-		if(r == 0){
-			ok = true;
-		} else {
-#ifdef _WIN32
-			const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-			const bool pending = errno == EINPROGRESS;
-#endif
-			if(pending){
-				fd_set wfds;
-				FD_ZERO(&wfds);
-				FD_SET(fd, &wfds);
-				struct timeval tv = {0, 50000};
-				if(select(fd + 1, NULL, &wfds, NULL, &tv) > 0){
-					int soerr = 0;
-					socklen_t len = sizeof(soerr);
-					if(getsockopt(fd, SOL_SOCKET, SO_ERROR, (char*)&soerr,
-							&len) == 0 && soerr == 0)
-						ok = true;
-				}
-			}
-		}
+		ok = connect_wait(fd, res->ai_addr, res->ai_addrlen, 50).empty();
 		closesocket(fd);
 		if(ok)
 			break;
