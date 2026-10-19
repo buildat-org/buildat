@@ -139,6 +139,12 @@ client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CHECK_PIDS+=($CLIENT)
 }
 placed='wait_log 300000 skeldat: placed at'
+# The worlds a drive walks, shoots or builds in are flat
+# (BUILDAT_SKELDAT_TERRAIN=flat, [SKELDAT_OWN_MAPGEN]: one height, no tree
+# within 24 of the spawn, no cave open at the ground), so their spots
+# stay as the generator changes; the rest are of the generated forms
+# (rivers but where named), which the survey, the end, the high scores
+# and the forms' own section (47) look at
 # The opening dialog holds a new player's keys: off but in its own run (28)
 export BUILDAT_SKELDAT_INTRO=0 BUILDAT_SKELDAT_STARTER=0
 # The scripted clients in as "client<peer>" with no login ([SKELDAT_LOGIN];
@@ -479,7 +485,7 @@ echo "$night" | awk 'NR == 1 { a = $2 } NR == 2 { b = $2; n = $3 }
 mark() # <log>: the small world "mark" at midnight, MARK_TEST its test
 {
 	local log=$1
-	BUILDAT_SKELDAT_WORLD=mark BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_WORLD=mark BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_TEST="${MARK_TEST:-}" \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -598,15 +604,15 @@ grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
 # and leaves it where it died, its bones dropped; the player digs a
 # marker skull and places it again
 log13="$t/srv13.log"
-BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
 	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1 marked; marker 0 1" \
 	start_server "$log13" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 1500" "look 0 -35" "delay 500" "mouse_down left" \
-	"delay 600" "mouse_up left" "delay 800" "look 0 -35" "delay 500" \
+printf '%s\n' "$placed" "delay 1500" "look 0 -60" "delay 500" "mouse_down left" \
+	"delay 600" "mouse_up left" "delay 800" "look 0 -60" "delay 500" \
 	"mouse_down right" "delay 150" "mouse_up right" "delay 800" \
 	"screenshot $t/take.png" "delay 14000" quit > "$t/take.cmds"
 client take "$t/take.cmds"
@@ -629,7 +635,7 @@ grep -a "marker skulls in the footprint" "$log13" | sed 's/.*: \([0-9]*\) marker
 # crack's frames climbing to the last ones and gone with the dig; the
 # next dig cut off by looking at the sky, its crack gone and no dig
 log14="$t/srv14.log"
-BUILDAT_SKELDAT_WORLD=dig BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=dig BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log14" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -684,7 +690,7 @@ echo "sizes:$sizes"
 # flight off (an admin's, the launcher's client), a landing at over the
 # old tolerance (14) and no hp lost
 log15="$t/srv15.log"
-BUILDAT_SKELDAT_WORLD=craft BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=craft BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
 	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3" \
 	start_server "$log15" "STATUS Listening" 300 auto \
@@ -740,7 +746,7 @@ for d in "1 0" "-1 0" "0 1" "0 -1"; do
 done
 water="$water$(for y in 0 1 2 3; do echo " marker 0 0 skeldat:water_source 0;"; done)"
 for n in 1 2; do
-	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "$water")" \
 		start_server "$t/srv16_$n.log" "STATUS Listening" 300 auto \
@@ -783,7 +789,7 @@ printf '%s\n' "wait_log 300000 pause: the death screen shown" "delay 1000" \
 	"wait_log 5000 pause: back to the death screen" "delay 500" \
 	'click Button "Respawn"' "delay 3000" quit > "$t/drops2.cmds"
 for n in 1 2; do
-	BUILDAT_SKELDAT_WORLD=drops BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_WORLD=drops BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.25 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=40 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 99 36; $water")" \
 		start_server "$t/srv17_$n.log" "STATUS Listening" 300 auto \
@@ -938,7 +944,7 @@ echo "$rim" | sed 's/.*its rim at \([-0-9.]*\), the lowest edge column \([-0-9]*
 # pose's "a skeleton draws". simplified: the draw let go is not driven (a
 # player cannot walk from 9 out past 16 in its 0.8 s)
 log22="$t/srv22.log"
-BUILDAT_SKELDAT_WORLD=body BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=body BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 	BUILDAT_SKELDAT_TEST="skeleton 0 12" \
 	start_server "$log22" "STATUS Listening" 300 auto \
@@ -988,7 +994,7 @@ PY
 # skull a skeleton puts in the next column on seeing a player would keep
 # the sun off it too
 log23="$t/srv23.log"
-BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 	BUILDAT_SKELDAT_TEST="skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
 	start_server "$log23" "STATUS Listening" 300 auto \
@@ -1011,7 +1017,7 @@ grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
 # (the water still: BUILDAT_SKELDAT_STILL_WATER, the liquid step off)
 log24="$t/srv24.log"
 pond=$(for x in -4 -3 -2 -1 0 1 2 3 4; do printf 'marker %d 10 skeldat:water_source; ' $x; done)
-BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_STILL_WATER=1 \
 	BUILDAT_SKELDAT_TEST="${pond}marker 0 -6 skeldat:water_source; skeleton 0 12 marked; skeleton 0 -6 marked" \
 	start_server "$log24" "STATUS Listening" 300 auto \
@@ -1041,7 +1047,7 @@ ways=$(for z in $(seq -7 7); do for x in 3 4 5 6 7 8; do
 	printf 'marker %d %d skeldat:water_source -1; ' $x $z; done; done
 for z in -1 0 1; do for x in -9 -8 -7; do printf 'marker %d %d skeldat:stone 4; ' $x $z; done; done
 for x in 7 8 9 10 11 12 13; do for y in 0 1 2; do printf 'marker %d -14 skeldat:stone %d; ' $x $y; done; done)
-BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
 	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 10 -11 marked seed 10 -17 1; place 100 0" \
@@ -1081,16 +1087,16 @@ shot()
 	printf '%s\n' "mouse_down left" "delay $1" ${2:+"screenshot $2"} \
 		"mouse_up left" "delay 1500"
 }
-{ echo "$placed"; toggle; echo "look 0 0"; echo "delay 1000"
+{ echo "$placed"; toggle; echo "look 0 -5"; echo "delay 1000"
 	echo "screenshot $t/bow_rest.png"
-	shot 1200 "$t/bow_full.png"; shot 450 "$t/bow_half.png"; shot 50
+	shot 1200 "$t/bow_full.png"; shot 450 "$t/bow_half.png"; shot 10
 	shot 1200; shot 1200
 	echo "look 0 -60"; shot 2500
 	echo "look 90 0"; shot 1200; shot 1200; shot 1200; shot 1200; shot 1200
 	echo "delay 66000"; echo quit; } > "$t/bow1.cmds"
 printf '%s\n' "$placed" "delay 3000" quit > "$t/bow2.cmds"
 for n in 1 2; do
-	BUILDAT_SKELDAT_WORLD=bow BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_WORLD=bow BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:bow 1 1; give skeldat:arrow 6 1; skeleton 0 6 marked" || echo "place ${kept:-0 0}")" \
 		start_server "$t/srv26_$n.log" "STATUS Listening" 300 auto \
@@ -1189,7 +1195,7 @@ EOF
 printf '%s\n' "$placed" "wait_log 60000 skeldat: client1 lies flat" \
 	"delay 500" "keydown W" "wait_log 5000 skeldat: a splash at" "keyup W" \
 	"delay 500" quit > "$t/board2.cmds"
-BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
+BUILDAT_SKELDAT_WORLD=board BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 2" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="${ring}course -40 -20" \
 	start_server "$log27" "STATUS Listening" 300 auto \
@@ -1272,7 +1278,7 @@ grep -aq "skeldat: client1 rides a board" "$t/board2.log" ||
 # turned away, and with --lan-announce the server does not start.
 free()
 {
-	BUILDAT_SKELDAT_WORLD=free BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
+	BUILDAT_SKELDAT_WORLD=free BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
 		start_server "$t/srv28_$1.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 		-D "$t/srv28" -C "$t/srv.cache" -l 3 "${@:2}" || fail "the server ($t/srv28_$1.log)"
@@ -1315,7 +1321,7 @@ lines=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { 
 log29="$t/srv29.log"
 shaft=$(for d in $(seq 10 -1 1); do printf 'marker 3 0 air -%d; ' $d; done)
 { echo "$placed"; toggle; echo "delay 90000"; echo quit; } > "$t/hole.cmds"
-BUILDAT_SKELDAT_WORLD=hole BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=hole BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="${shaft}skeleton 1 0 marked" \
 	start_server "$log29" "STATUS Listening" 300 auto \
@@ -1563,11 +1569,8 @@ echo "re-run: w to w_rerun, w_rerun again: $(ls "$t/srv33/apps/skeldat/saves" | 
 # by the stick and the pause menu's buttons by tap are not driven: the
 # first is the place's own branch, the others are the keys' and the UI's.
 log34="$t/srv34.log"
-# At -32 -34: the strokes walk some 20 to +z, the own terrain level there
-# for 30 (a slope lets the board run on, and the place's ground drops
-# out of reach)
-BUILDAT_SKELDAT_WORLD=touch BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-32 -34" \
+BUILDAT_SKELDAT_WORLD=touch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
 	BUILDAT_SKELDAT_TEST="craft 1 skeldat:wood 3; craft 4 skeldat:wood 3; give skeldat:dirt 10 1; give skeldat:bow 1 1; give skeldat:arrow 10 1" \
 	start_server "$log34" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -1894,10 +1897,8 @@ echo "skip: to dawn $dawn"
 # moon matched between them keep their angle from it -- the median change
 # under half a degree over five or more (the old turn about Z: 1.4)
 log38="$t/srv38.log"
-# At 1 5: nothing higher toward the moon and no tree near, on the own
-# terrain (by the spawn a hill hid half the moon)
-BUILDAT_SKELDAT_WORLD=sky BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.98 BUILDAT_SKELDAT_DAY=240 BUILDAT_SKELDAT_SPAWN="1 5" \
+BUILDAT_SKELDAT_WORLD=sky BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.98 BUILDAT_SKELDAT_DAY=240 BUILDAT_SKELDAT_SPAWN="0 0" \
 	start_server "$log38" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv38" -C "$t/srv.cache" -l 3 || fail "the server ($log38)"
@@ -2002,7 +2003,7 @@ log39="$t/srv39.log"
 aim_server() # <log> [the eye's shift]
 {
 	local log=$1
-	BUILDAT_SKELDAT_EYE_SHIFT=${2:-0} BUILDAT_SKELDAT_WORLD=aim BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_EYE_SHIFT=${2:-0} BUILDAT_SKELDAT_WORLD=aim BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="2 -1 2" BUILDAT_SKELDAT_TIME=0.5 \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 20 1; course -40 -20" \
@@ -2093,7 +2094,7 @@ log41="$t/srv41.log"
 seen=$(echo 'level 3 -30 8 94 skeldat:water_source -1; '
 for z in $(seq -45 -40); do for x in $(seq 18 23); do for y in $(seq 0 7); do
 	printf 'marker %d %d skeldat:stone 0; ' $x $z; done; done; done)
-BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
 	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 20 -42 marked goal -40 -42; place 100 0" \
@@ -2128,10 +2129,8 @@ echo "$river" | grep -q "^3," || fail "the bridge short of the far bank ($log41)
 # there, not taken until the player walks to it; a stone dropped by Q is
 # not taken back until the player has walked 3 off it and back
 log42="$t/srv42.log"
-# At -32 -30: the own terrain level round it, a few back (where it drops,
-# a walk back puts the player on the board) and along +z
-BUILDAT_SKELDAT_WORLD=loot BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-32 -30" BUILDAT_SKELDAT_SKELETONS=0 \
+BUILDAT_SKELDAT_WORLD=loot BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="give skeldat:stone 5 1; drop 2.5 0 skeldat:dirt 1; drop -3.5 0 skeldat:cobble 1; boar 0 4 hp 1" \
 	start_server "$log42" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -2241,10 +2240,8 @@ echo "the world at exit: w1 resumed, the menu after its close, a deleted one's n
 # s and a day of 20 ([SKELDAT_CAVE_MUSIC_LIMIT]); the camera has the
 # sound listener the placed sounds need ([SKELDAT_LISTENER]).
 log44="$t/srv44.log"
-# At -3 -30: the own terrain level for 4 round (at 0 0 a pit the walks
-# did not leave)
-BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-3 -30" BUILDAT_SKELDAT_SKELETONS=0 \
+BUILDAT_SKELDAT_WORLD=sounds BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 3 1" \
 	start_server "$log44" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -2326,7 +2323,7 @@ echo "the making's map: $m1 footprints mapped on each, $(grep -a "the world is i
 # has "My account (bob)...", accounts' page, whose Back comes back to
 # the menu ([SKELDAT_PAUSE_ACCOUNT]).
 log46="$t/srv46.log"
-BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_SEED=2 \
+BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 \
 	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="$water" \
@@ -2367,14 +2364,14 @@ echo "back dead: the death screen on the rejoin, Respawn placed bob"
 # degrees up, at its head (1.5 to 2 over its feet), kills it. A body's
 # hit leaves it alive: section 23's first shot.
 log47="$t/srv47.log"
-BUILDAT_SKELDAT_WORLD=headshot BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=headshot BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 1 1; skeleton 0 6 marked" \
 	start_server "$log47" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv47" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log47)"
 CHECK_PIDS+=($SERVER_PID)
-{ echo "$placed"; toggle; echo "look 0 12"; echo "delay 1000"
+{ echo "$placed"; toggle; echo "look 0 3"; echo "delay 1000"
 	shot 1200; echo "delay 1000"; echo quit; } > "$t/head.cmds"
 client head "$t/head.cmds"
 wait $CLIENT || fail "the headshot's drive ($t/head.log)"
@@ -2390,10 +2387,8 @@ echo "a headshot: one arrow killed the skeleton"
 # spawn searches round the player find spots, and those under a cover
 # (leaves pass sky light 15) are refused.
 log48="$t/srv48.log"
-# At 0 -32: the own terrain's grass level 7 each way, no tree near (at
-# 0 0 the west boar stood on a tree)
-BUILDAT_SKELDAT_WORLD=boars BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 -32" BUILDAT_SKELDAT_DAY=20 \
+BUILDAT_SKELDAT_WORLD=boars BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=20 \
 	BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="marker 6 0 skeldat:stone -1; boar 6 0; boar -6 0; boar_spots 200" \
 	start_server "$log48" "STATUS Listening" 300 auto \
@@ -2537,13 +2532,13 @@ for form in rivers sea plains lake; do
 	forms="$forms $form $(echo $vols | awk '{ printf "%d->%d", $1, $NF }');"
 done
 for n in 1 2; do
-	# The spring 4 ahead (at -2 -32 plains are level there); walled: stone
+	# The spring 4 ahead, on flat; walled: stone
 	# 2 high on its 4 sides and 1 on it
 	walls=""
 	[ $n = 2 ] && walls="$(for d in "1 4" "-1 4" "0 3" "0 5"; do echo "marker $d skeldat:stone 0; marker $d skeldat:stone 0;"; done) marker 0 4 skeldat:stone 0"
 	BUILDAT_SKELDAT_WORLD=lava$n BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
-		BUILDAT_SKELDAT_TERRAIN=plains BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 \
-		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="-2 -32" \
+		BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 \
+		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
 		BUILDAT_SKELDAT_TEST="marker 0 4 skeldat:lava_spring 0; $walls" \
 		start_server "$t/srv51_lava$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
