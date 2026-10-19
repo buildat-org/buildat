@@ -1073,9 +1073,12 @@ grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
 # (the water still: BUILDAT_SKELDAT_STILL_WATER, the liquid step off)
 log24="$t/srv24.log"
 pond=$(for x in -4 -3 -2 -1 0 1 2 3 4; do printf 'marker %d 10 skeldat:water_source; ' $x; done)
+# The pool 3 x 3 round the skeleton: its light form steps off a single
+# voxel of water before the body is woken in it
+pool=$(for x in -1 0 1; do for z in -7 -6 -5; do printf 'marker %d %d skeldat:water_source; ' $x $z; done; done)
 BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_STILL_WATER=1 \
-	BUILDAT_SKELDAT_TEST="${pond}marker 0 -6 skeldat:water_source; skeleton 0 12 marked; skeleton 0 -6 marked" \
+	BUILDAT_SKELDAT_TEST="${pond}${pool}skeleton 0 12 marked; skeleton 0 -6 marked" \
 	start_server "$log24" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv24" -C "$t/srv.cache" -l 3 || fail "the server ($log24)"
