@@ -98,7 +98,8 @@ for k, v in pairs(KINDS.skeldat_skeleton) do
 	KINDS.skeldat_cave_skeleton[k] = v
 end
 
--- An unlit cut-out (builtin/luanti's objects' technique)
+-- An unlit cut-out (builtin/luanti's objects' technique); and whether
+-- the texture was found
 local function material(texture)
 	local m = magic.Material.new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
@@ -108,7 +109,7 @@ local function material(texture)
 		t.filterMode = magic.FILTER_NEAREST
 		m:SetTexture(magic.TU_DIFFUSE, t)
 	end
-	return m
+	return m, t ~= nil
 end
 
 local function build(node, quads, mat)
@@ -137,6 +138,8 @@ return function(game, sounds)
 		return game.sky_light.object_light(game.light_units,
 				reg:light_sky_of(v) / 15, reg:light_lamp_of(v) / 15)
 	end
+	-- [SKELDAT_BOARD_WOOD] Both for the skateboards (init.lua)
+	M.material, M.light_at = material, light_at
 
 	-- The kind's parts on node, and its entry in mobs
 	local function wear(node, kind)

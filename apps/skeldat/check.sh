@@ -2798,6 +2798,28 @@ out=$(grep -a "water puts out a torch at" "$log55" | head -1 | sed 's/.*at (\(.*
 grep -aq "client1's torch into skeldat:water_source at .* refused" "$log55" &&
 	! grep -aq "client1 places skeldat:torch" "$log55" ||
 	fail "a torch placed into water ($log55)"
+# 52. A wooden board ([SKELDAT_BOARD_WOOD]): flat ground at noon and at
+# midnight, the board forced on at a walk's speed (event skeldat_board 1),
+# a boar beside it, the look straight down: "the board's material
+# main/wood.png" logged, a shot of each ($t/board_wood_<time>.png), the
+# board lit as the boar is.
+for time in 0.5 0; do
+	BUILDAT_SKELDAT_WORLD=wood_$time BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=$time BUILDAT_SKELDAT_SPAWN="0 0" \
+		BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="boar 1 1" \
+		start_server "$t/srv56_$time.log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv56_$time" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv56_$time.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "delay 3000" "event skeldat_board 1" "look 0 -70" \
+		"delay 1500" "screenshot $t/board_wood_$time.png" quit > "$t/wood_$time.cmds"
+	client wood_$time "$t/wood_$time.cmds"
+	wait $CLIENT || fail "the wooden board's drive ($t/wood_$time.log)"
+	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+	grep -aq "skeldat: the board's material main/wood.png" "$t/wood_$time.log" &&
+		grep -aq "skeldat: on the board" "$t/wood_$time.log" ||
+		fail "no wooden board ($t/wood_$time.log)"
+done
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"

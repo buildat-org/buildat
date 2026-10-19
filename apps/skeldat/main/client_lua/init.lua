@@ -1151,15 +1151,29 @@ local BOARD_BIT = 65536
 -- [SKELDAT_BOARD_PRONE] main.cpp's PRONE_BIT
 local PRONE_BIT = 131072
 -- The node and its "Box", which holds the model: a node's enabled does not
--- reach its children ([SKELDAT_BOARD_HIDE]), so show_board() sets both
+-- reach its children ([SKELDAT_BOARD_HIDE]), so show_board() sets both.
+-- [SKELDAT_BOARD_WOOD] Of the planks, the objects' unlit cut-out
+-- (mobs.lua's), its own material, tinted by board_light() as an object
+-- is where it stands.
+-- simplified: Box.mdl puts the whole texture on each face, the top's
+-- planks stretched 3.3 times along it; a UV scale or a model of its own
+-- is the upgrade
 local function board_box(parent)
 	local node = parent:CreateChild("Board")
 	local box = node:CreateChild("Box")
 	box.position = magic.Vector3(0, 0.04, 0)
 	box.scale = magic.Vector3(0.3, 0.08, 1.0)
-	box:CreateComponent("StaticModel").model =
-			magic.cache:GetResource("Model", "Models/Box.mdl")
-	return node, box
+	local model = box:CreateComponent("StaticModel")
+	model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	local mat, found = mobs.material("main/wood.png")
+	model.material = mat
+	return node, box, mat, found
+end
+local function board_light(mat, x, y, z)
+	local r, g, b = mobs.light_at(magic.Vector3(x, y + 0.5, z))
+	if r then
+		mat:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
+	end
 end
 local function show_board(node, box, on)
 	node.enabled = on
@@ -1187,7 +1201,7 @@ buildat.sub_packet("skeldat:players", function(data)
 				local model = body:CreateComponent("StaticModel")
 				model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 				o = {node = node}
-				o.board, o.board_box = board_box(node)
+				o.board, o.board_box, o.board_mat = board_box(node)
 				show_board(o.board, o.board_box, false)
 				others[name] = o
 			end
@@ -1212,6 +1226,9 @@ buildat.sub_packet("skeldat:players", function(data)
 						" rides a board" or " walks"))
 			end
 			x, y, z = tonumber(x), tonumber(y), tonumber(z)
+			if o.board.enabled then
+				board_light(o.board_mat, x, y, z)
+			end
 			local now = buildat.get_time_us()
 			if o.x then
 				local dx, dz = x - o.x, z - o.z
@@ -2062,8 +2079,14 @@ end
 --
 -- The frame
 --
-local board_node, board_model = board_box(scene)
+local board_node, board_model, board_mat, board_wood = board_box(scene)
 show_board(board_node, board_model, false)
+log:info("skeldat: the board's material " .. (board_wood and "main/wood.png" or
+		"has no main/wood.png"))
+-- On game: the Update handler below is at Lua's 60 upvalues
+function game.light_own_board()
+	board_light(board_mat, player.x, player.y, player.z)
+end
 local board_shown, board_top, board_log_t = false, 0, 0
 local board_braking, board_air = false, 0
 -- For a check, a cheat the server's movement check should pull back:
@@ -2240,6 +2263,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	end
 	if b then
 		board_node.position = magic.Vector3(player.x, player.y, player.z)
+		game.light_own_board()
 		board_node.rotation = magic.Quaternion(
 				-math.deg(math.atan(b.k)), math.deg(math.atan2(b.hx, b.hz)), 0)
 		if b.s > board_top then
