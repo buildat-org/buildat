@@ -3127,6 +3127,69 @@ wait_for_log "$t/srv55_end.log" "every column's top has bones: the world ends af
 	fail "the lake world with a bare bed did not end ($t/srv55_end.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "skeldat: water: [1-9][0-9]* voxels" "$t/srv55_end.log" || fail "the lake world had no water ($t/srv55_end.log)"
+# 56. Boars in water ([SKELDAT_BOAR_SWIM]), flat ground, still water. A
+# 120 s day from 0.62: a pond 13 x 13 a voxel deep with a middle 5 x 5 four
+# deep; boar W on its shallow rim floats, is never over the deep middle,
+# and is out of the water within a quarter day (30 s, and the swim);
+# boar D in the middle swims for shallower water; boar N in a pit of
+# water walled 3 high, from before sunset (15.6 s in), is gone at sunrise
+# (75.6 s), no drop. Then at 0.3 of a long day: a boar over a pond 4
+# deep and one in a pool a voxel deep, the client gone 3 s after: no
+# player within SLEEP, the deep one is gone, the shallow one kept.
+sw="level 4 -6 13 13 skeldat:water_source -1; level 8 -2 5 5 skeldat:stone -5"
+for dy in -4 -3 -2 -1; do sw="$sw; level 8 -2 5 5 skeldat:water_source $dy"; done
+sw="$sw; level -2 10 5 5 skeldat:stone 2; level -1 11 3 3 skeldat:water_source -1"
+sw="$sw; boar 6 4; boar 10 0; boar 0 12"
+swim56() { # log, client name, delay ms, fixtures
+	BUILDAT_SKELDAT_WORLD=$2 BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=${T56:-0.62} \
+		BUILDAT_SKELDAT_DAY=${D56:-120} BUILDAT_SKELDAT_STILL_WATER=1 \
+		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$4" \
+		start_server "$1" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv60" -C "$t/srv.cache" -l 3 || fail "the server ($1)"
+	CHECK_PIDS+=($SERVER_PID)
+	printf '%s\n' "$placed" "delay $3" quit > "$t/$2.cmds"
+	client $2 "$t/$2.cmds"
+	wait $CLIENT || fail "the boars' drive $2 ($t/$2.log)"
+}
+swim56 "$t/srv60.log" swim 85000 "$sw"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+swim=$(python3 -I - "$t/srv60.log" <<'PY'
+import sys, re
+a = open(sys.argv[1], errors="replace").read()
+W, D, N = re.findall(r"skeldat: test: a boar \((\d+)\) at", a)
+f = re.search(r"the boar \(%s\) floats, its feet at ([-0-9.]+), the water's top at (-?\d+)" % W, a)
+assert f, "W did not float"
+assert 0.6 < int(f.group(2)) + 0.5 - float(f.group(1)) < 0.9, ("W not at the top", f.groups())
+assert not re.search(r"the boar \(%s\) is over deep water" % W, a), "W went over the deep middle"
+o = re.search(r"the boar \(%s\) is out of the water after (\d+) s" % W, a)
+assert o and int(o.group(1)) <= 50, ("W not out within a quarter day and the swim", o and o.group(1))
+assert re.search(r"the boar \(%s\) swims for shallower water" % D, a), "D did not swim for shallower water"
+assert re.search(r"the boar \(%s\) spent the night in water" % N, a), "N not gone at sunrise"
+assert not re.search(r"the boar \(%s\) is out of the water" % N, a), "N got out of the pit"
+assert "a drop of" not in a, "a drop"
+print("W floated (feet %s, top %s), out after %s s; D swam for shallower water; N gone at sunrise" %
+	(f.group(1), f.group(2), o.group(1)))
+PY
+) || fail "boars in water ($t/srv60.log)"
+deep="level 6 -5 11 11 skeldat:stone -5"
+for dy in -4 -3 -2 -1; do deep="$deep; level 6 -5 11 11 skeldat:water_source $dy"; done
+deep="$deep; level -12 -2 5 5 skeldat:water_source -1; boar 11 0; boar -10 0"
+T56=0.3 D56=2400 swim56 "$t/srv60_deep.log" swim_deep 3000 "$deep"
+wait_for_log "$t/srv60_deep.log" "left in deep water" 20 ||
+	fail "the boar over deep water not gone with no player near ($t/srv60_deep.log)"
+sleep 2
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+left=$(python3 -I - "$t/srv60_deep.log" <<'PY'
+import sys, re
+a = open(sys.argv[1], errors="replace").read()
+E, S = re.findall(r"skeldat: test: a boar \((\d+)\) at", a)
+assert re.search(r"the boar \(%s\) left in deep water" % E, a), "E kept"
+assert not re.search(r"the boar \(%s\) left in deep water" % S, a), "S gone from shallow water"
+print("the deep one gone, the shallow one kept")
+PY
+) || fail "boars left in water ($t/srv60_deep.log)"
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
@@ -3135,6 +3198,7 @@ echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
 echo "boats: $boat; a skull's call: $call; by age: $age"
 echo "under water: $wet grown into the pond, its map $pond; a lake world with a bare bed ended"
+echo "boars in water: $swim; $left"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"
@@ -3144,5 +3208,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats, bones off a lake's bed and none in its water"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats, bones off a lake's bed and none in its water, boars swimming"
 # vim: set noet ts=4 sw=4:

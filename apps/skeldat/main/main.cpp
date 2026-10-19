@@ -292,7 +292,7 @@ struct Module: public interface::Module, public PlayersHost,
 		sub(m_server, "core:unload", &Module::on_unload);
 		sub(m_server, "core:continue", &Module::on_continue);
 		sub(m_server, "core:tick", &Module::on_tick);
-		sub(m_server, "core:shutdown", &Module::save);
+		sub(m_server, "core:shutdown", &Module::on_shutdown);
 		sub(m_server, "client_file:files_transmitted",
 				&Module::on_files_transmitted);
 		sub(m_server, "network:client_disconnected",
@@ -1180,12 +1180,21 @@ struct Module: public interface::Module, public PlayersHost,
 
 	// The old instance: the world saved and closed, out of every module
 	// that held it
+	// [SKELDAT_BOAR_SWIM] A boar still stepped in deep water is not kept
+	void on_shutdown()
+	{
+		if(m_world.scene)
+			m_mobs.leave_deep_water();
+		save();
+	}
+
 	void on_unload()
 	{
 		if(!m_world.scene)
 			return;
 		log_i(MODULE, "skeldat: the world \"%s\" closed for a reload, day "
 				"%.4f", cs(m_world_name), m_world.day);
+		m_mobs.leave_deep_water();
 		save();
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			w->commit();

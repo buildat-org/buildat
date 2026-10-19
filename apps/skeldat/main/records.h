@@ -331,6 +331,16 @@ struct Mob
 	// sun's shelter took it, for the log
 	int call_tries = 0;
 	bool call_sheltered = false;
+	// [SKELDAT_BOAR_SWIM] A boar's: the game time it was last out of the
+	// water (set when woken); until when it keeps out of the water after a
+	// swim back; the column it swims for and when that is looked for
+	// again. Not saved
+	// simplified: a restart forgets the swim; a night in water counts
+	// from the wake
+	double dry_t = 0, stay_t = 0, swim_t = 0;
+	bool swim_to = false, swim_dry = false, floated = false;
+	uint8_t water = 0; // for the log: 0 out, 1 in, 2 over deep water
+	float swim_x = 0, swim_z = 0;
 
 	ss_ save() const {
 		std::ostringstream os;

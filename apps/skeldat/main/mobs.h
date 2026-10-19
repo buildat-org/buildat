@@ -486,6 +486,7 @@ struct Mobs
 			m.mode = WANDER, m.mode_t = 0;
 		m.draw_t = -1, m.draw_sent = 0, m.boat_sent = -1;
 		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
+		m.dry_t = world.t, m.swim_t = 0, m.swim_to = false;
 		woken++;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
@@ -505,6 +506,94 @@ struct Mobs
 				n->Remove();
 		});
 		id = 0;
+	}
+
+	// [SKELDAT_BOAR_SWIM] Water this deep or deeper a boar keeps out of; a
+	// boar floats with its feet BOAR_FLOAT under the top water voxel's
+	// surface, swims at half its walk, heads for dry ground after
+	// BOAR_SWIM_DAYS in the water and keeps out of it BOAR_STAY_DAYS after;
+	// the columns it looks for within BOAR_SHORE_SEARCH
+	static constexpr int DEEP_WATER = 3, BOAR_SHORE_SEARCH = 16;
+	static constexpr float BOAR_FLOAT = 0.75f;
+	static constexpr double BOAR_SWIM_DAYS = 0.25, BOAR_STAY_DAYS = 0.125;
+
+	// The water in column (x, z) from y + 2 down: how many voxels deep from
+	// its top (*top) to the bed, 0 when the first voxel that is not air is
+	// not water. Lava is no water
+	int water_depth(voxelworld::Instance *w, int x, int y, int z,
+			int *top = nullptr)
+	{
+		const uint32_t lava = world.id_of("skeldat:lava");
+		int t = y + 2;
+		while(t > y - 40 && world.wid(w, x, t, z) == ID_AIR)
+			t--;
+		if(top)
+			*top = t;
+		int n = 0;
+		while(n < 40 && world.is_water(w, x, t - n, z) &&
+				world.wid(w, x, t - n, z) != lava)
+			n++;
+		return n;
+	}
+
+	// The nearest column round a boar, ring by ring: dry ground it can
+	// stand on, or water less than DEEP_WATER deep. Its middle in *x, *z
+	bool boar_column(voxelworld::Instance *w, const Mob &m, bool dry,
+			float *x, float *z)
+	{
+		const int x0 = (int)std::floor(m.x + 0.5f), y0 = (int)std::floor(m.y + 0.5f),
+				z0 = (int)std::floor(m.z + 0.5f);
+		for(int r = 1; r <= BOAR_SHORE_SEARCH; r++)
+		for(int dz = -r; dz <= r; dz++)
+		for(int dx = -r; dx <= r; dx += (std::abs(dz) == r ? 1 : 2 * r)){
+			const int d = water_depth(w, x0 + dx, y0, z0 + dz);
+			if(dry ? d == 0 && world.ground(w, (float)(x0 + dx), m.y + 1,
+					(float)(z0 + dz), MOB_HEIGHT[BOAR]).found : d < DEEP_WATER){
+				*x = (float)(x0 + dx), *z = (float)(z0 + dz);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// A boar gone with no drops and no hurt, its death sound where it was
+	// unless quiet; why it went logged
+	void vanish(uint32_t key, const char *why, bool quiet = false)
+	{
+		Mob &m = all[key];
+		log_i(MODULE, "skeldat: the boar (%u) %s at %.1f,%.1f,%.1f", key, why,
+				m.x, m.y, m.z);
+		if(!quiet)
+			host.sound("boar_death", m.x, m.y, m.z);
+		if(m.node_id)
+			remove_node(m.node_id);
+		if(store)
+			store->remove("mob/"+itos(key));
+		all.erase(key);
+	}
+
+	// A boar stepped in water DEEP_WATER deep or more: gone, not kept, as
+	// it goes out of the step and when the world closes ([SKELDAT_BOAR_SWIM])
+	bool in_deep_water(const Mob &m)
+	{
+		bool deep = false;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			deep = water_depth(w, (int)std::floor(m.x + 0.5f),
+					(int)std::floor(m.y + 0.5f), (int)std::floor(m.z + 0.5f)) >=
+					DEEP_WATER;
+		});
+		return deep;
+	}
+
+	void leave_deep_water()
+	{
+		sv_<uint32_t> gone;
+		for(auto &kv : all)
+			if(kv.second.kind == BOAR && kv.second.node_id &&
+					in_deep_water(kv.second))
+				gone.push_back(kv.first);
+		for(uint32_t key : gone)
+			vanish(key, "left in deep water", true);
 	}
 
 	// [SKELDAT_CAVE_SKELETON] What a skeleton fights (target_of()): a
@@ -782,7 +871,7 @@ struct Mobs
 	void step_mobs(float dt)
 	{
 		// Wake what a player is near, put to sleep what none is
-		sv_<uint32_t> awake;
+		sv_<uint32_t> awake, left_deep;
 		size_t full = 0;
 		for(auto &kv : all)
 			full += kv.second.node_id != 0;
@@ -796,6 +885,8 @@ struct Mobs
 				full++;
 			}
 			else if(m.node_id && d > SLEEP){
+				if(m.kind == BOAR && in_deep_water(m))
+					left_deep.push_back(kv.first);
 				remove_node(m.node_id);
 				log_v(MODULE, "skeldat: the %s (%u) sleeps", MOB_KIND[m.kind],
 						kv.first);
@@ -803,10 +894,12 @@ struct Mobs
 			if(m.node_id)
 				awake.push_back(kv.first);
 		}
+		for(uint32_t key : left_deep)
+			vanish(key, "left in deep water", true);
 		if(awake.empty())
 			return;
 		sv_<std::pair<uint32_t, int>> burnt, harmed;
-		sv_<uint32_t> drowned, off_grass;
+		sv_<uint32_t> drowned, off_grass, wet_night;
 		sv_<std::pair<uint32_t, Target>> shots, draws;
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
@@ -998,27 +1091,119 @@ struct Mobs
 					}
 					move_yaw = m.yaw, speed = m.speed;
 				}
+				// [SKELDAT_BOAR_SWIM] A boar in water swims at half its
+				// walk; a quarter day in, it swims for dry ground, and over
+				// deep water for a shallower column; out of it, deep water
+				// turns it as a wall does, and after a swim back any water
+				// for a while
+				const int fx = (int)std::floor(m.x + 0.5f),
+						fy = (int)std::floor(m.y + 0.5f),
+						fz = (int)std::floor(m.z + 0.5f);
+				const int depth = m.kind == BOAR ? water_depth(w, fx, fy, fz) : 0;
+				const bool wet = depth > 0 && world.is_water(w, fx, fy, fz) &&
+						world.wid(w, fx, fy, fz) != lava;
+				bool heading = false;
+				if(m.kind == BOAR){
+					const uint8_t was = m.water;
+					m.water = !wet ? 0 : depth >= DEEP_WATER ? 2 : 1;
+					if(was == 0 && m.water)
+						log_i(MODULE, "skeldat: the boar (%u) swims, the water %d deep",
+								key, depth);
+					if(was == 1 && m.water == 2)
+						log_i(MODULE, "skeldat: the boar (%u) is over deep water",
+								key);
+					if(!wet){
+						if(was)
+							log_i(MODULE, "skeldat: the boar (%u) is out of the water "
+									"after %.0f s", key, world.t - m.dry_t);
+						if(world.t - m.dry_t > BOAR_SWIM_DAYS * world.day_s)
+							m.stay_t = world.t + BOAR_STAY_DAYS * world.day_s;
+						m.dry_t = world.t;
+						m.floated = false;
+					}
+					const bool shore = wet &&
+							world.t - m.dry_t > BOAR_SWIM_DAYS * world.day_s;
+					if((shore || (wet && depth >= DEEP_WATER)) && m.mode != FLEE){
+						if(world.t >= m.swim_t){
+							const bool was_to = m.swim_to;
+							m.swim_t = world.t + 2;
+							m.swim_to = boar_column(w, m, shore, &m.swim_x, &m.swim_z);
+							if(m.swim_to && (!was_to || m.swim_dry != shore))
+								log_i(MODULE, "skeldat: the boar (%u) swims for %s at "
+										"%.0f,%.0f", key, shore ? "dry ground" :
+										"shallower water", m.swim_x, m.swim_z);
+							m.swim_dry = shore;
+						}
+						if(m.swim_to){
+							m.yaw = move_yaw = std::atan2(m.swim_x - m.x, m.swim_z - m.z);
+							speed = MOB_SPEED[BOAR][0];
+							heading = true;
+						}
+					} else
+						m.swim_to = false, m.swim_t = 0;
+					if(wet)
+						speed *= 0.5f;
+				}
 				// Where it can go: a step up, or down to a fall; a wall or a
 				// drop past three turns it
 				const float nx = m.x + std::sin(move_yaw) * speed * dt,
 						nz = m.z + std::cos(move_yaw) * speed * dt;
 				Ground to;
 				const Ground *under = &here;
-				if(speed > 0){
+				const int nfx = (int)std::floor(nx + 0.5f),
+						nfz = (int)std::floor(nz + 0.5f);
+				bool keep_out = false, swims_on = false;
+				if(m.kind == BOAR && speed > 0 && (nfx != fx || nfz != fz)){
+					const int nd = water_depth(w, nfx, fy, nfz);
+					keep_out = !heading && m.mode != FLEE && nd > 0 &&
+							((nd >= DEEP_WATER && depth < DEEP_WATER) ||
+							(!wet && world.t < m.stay_t));
+					swims_on = wet && world.is_water(w, nfx, fy, nfz) &&
+							world.wid(w, nfx, fy, nfz) != lava;
+				}
+				if(keep_out){
+					if(m.mode == WANDER)
+						m.yaw = world.rnd() * 2 * (float)M_PI;
+				} else if(speed > 0){
 					to = world.ground(w, nx, m.y, nz, h);
-					if(to.found && to.y <= m.y + 1.01f){
+					if(swims_on && !(to.found && to.y <= m.y + 1.01f && to.y > m.y)){
+						m.x = nx, m.z = nz;
+					} else if(to.found && to.y <= m.y + 1.01f){
 						m.x = nx, m.z = nz;
 						m.y = std::max(m.y, to.y);
 						under = &to;
 					} else if(m.mode == WANDER)
 						m.yaw = world.rnd() * 2 * (float)M_PI;
 				}
-				if(under->found){
-					if(m.y > under->y + 0.001f){
-						m.vy -= GRAVITY * dt;
-						m.y = std::max(under->y, m.y + m.vy * dt);
+				// [SKELDAT_BOAR_SWIM] A boar over water floats, its back at
+				// the top, bobbing: down to it as it falls, up to it slower
+				int top = 0;
+				float float_y = -1e9f;
+				if(m.kind == BOAR){
+					const int cx = (int)std::floor(m.x + 0.5f),
+							cz = (int)std::floor(m.z + 0.5f);
+					if(water_depth(w, cx, (int)std::floor(m.y + 0.5f), cz, &top) > 0 &&
+							top >= (int)std::floor(m.y + 0.5f) - 1)
+						float_y = top + 0.5f - BOAR_FLOAT +
+								0.04f * std::sin((float)world.t * 2.5f + key);
+				}
+				const bool floats = float_y > -1e8f &&
+						(!under->found || float_y > under->y);
+				if(floats && m.y <= float_y + 0.001f){
+					m.vy = 0;
+					m.y = std::min(float_y, m.y + 1.5f * dt);
+					if(!m.floated && m.y >= float_y - 0.05f){
+						m.floated = true;
+						log_i(MODULE, "skeldat: the boar (%u) floats, its feet at "
+								"%.2f, the water's top at %d", key, m.y, top);
 					}
-					if(m.y <= under->y)
+				} else if(under->found || floats){
+					const float rest = floats ? float_y : under->y;
+					if(m.y > rest + 0.001f){
+						m.vy -= GRAVITY * dt;
+						m.y = std::max(rest, m.y + m.vy * dt);
+					}
+					if(m.y <= rest)
 						m.vy = 0;
 				} else {
 					m.vy -= GRAVITY * dt;
@@ -1063,6 +1248,11 @@ struct Mobs
 					m.grass_t = world.t;
 				else if(world.t - m.grass_t > world.day_s)
 					off_grass.push_back(key);
+				// [SKELDAT_BOAR_SWIM] In the water since before the last
+				// sunset: gone at sunrise
+				else if(wet && world.day >= 0.25 && world.day < 0.75 &&
+						m.dry_t <= world.t - (world.day + 0.25) * world.day_s)
+					wet_night.push_back(key);
 			}
 		});
 		for(uint32_t key : awake){
@@ -1119,17 +1309,10 @@ struct Mobs
 			damage(key, 1000, NOBODY, 0, 0, true);
 		}
 		// No drops, no hurt: removed with its death sound
-		for(uint32_t key : off_grass){
-			Mob &m = all[key];
-			log_i(MODULE, "skeldat: the boar (%u) dies off the grass at %.1f,%.1f,%.1f",
-					key, m.x, m.y, m.z);
-			host.sound("boar_death", m.x, m.y, m.z);
-			if(m.node_id)
-				remove_node(m.node_id);
-			if(store)
-				store->remove("mob/"+itos(key));
-			all.erase(key);
-		}
+		for(uint32_t key : off_grass)
+			vanish(key, "dies off the grass");
+		for(uint32_t key : wet_night)
+			vanish(key, "spent the night in water");
 		for(auto &b : burnt){
 			if(!all.count(b.first))
 				continue;
