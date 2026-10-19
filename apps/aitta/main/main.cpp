@@ -227,8 +227,57 @@ struct Module: public interface::Module, public moderation::Host
 	}
 
 	storage::Store* store(const char *name){ return m_save->store(name); }
+	// [REWORK_1019_PERF] apps 1: the releases parsed once and kept, as
+	// Starport's listings ([DB_INDEXES]): the list, the front page, every
+	// archive download and every icon read all of them. Written through
+	// put() only; by key, so a package's are a prefix range.
+	std::map<ss_, json::Value> m_releases;
+	bool m_releases_read = false;
+	// A release's archive sha256 and its icon's and screenshot's, to the
+	// keys of the releases that name them
+	std::multimap<ss_, ss_> m_rel_by_hash, m_rel_by_media;
+	const std::map<ss_, json::Value>& releases_map()
+	{
+		if(!m_releases_read){
+			for(const ss_ &k : store("releases")->list("")){
+				ss_ text;
+				if(store("releases")->get(k, text))
+					m_releases[k] = json::load_string(text.c_str());
+			}
+			m_releases_read = true;
+			index_releases();
+		}
+		return m_releases;
+	}
+	// simplified: rebuilt whole on every put; a put is a publish or a
+	// moderator's act, rare beside the reads
+	void index_releases()
+	{
+		m_rel_by_hash.clear();
+		m_rel_by_media.clear();
+		for(auto &p : m_releases){
+			m_rel_by_hash.emplace(jstr(p.second, "sha256"), p.first);
+			for(const char *f : {"icon", "screenshot"})
+				if(!jstr(p.second, f).empty())
+					m_rel_by_media.emplace(jstr(p.second, f), p.first);
+		}
+	}
+	sv_<ss_> release_keys(const ss_ &prefix)
+	{
+		sv_<ss_> keys;
+		for(auto it = releases_map().lower_bound(prefix); it !=
+				m_releases.end() && it->first.compare(0, prefix.size(),
+				prefix) == 0; ++it)
+			keys.push_back(it->first);
+		return keys;
+	}
+
 	json::Value load(const char *store_name, const ss_ &key)
 	{
+		if(ss_(store_name) == "releases"){
+			auto it = releases_map().find(key);
+			return it == m_releases.end() ? json::Value() : it->second;
+		}
 		ss_ text;
 		if(!store(store_name)->get(key, text))
 			return json::Value();
@@ -237,12 +286,18 @@ struct Module: public interface::Module, public moderation::Host
 	void put(const char *store_name, const ss_ &key, const json::Value &v)
 	{
 		store(store_name)->set(key, v.stringify());
+		if(ss_(store_name) == "releases"){
+			releases_map();
+			m_releases[key] = v;
+			index_releases();
+		}
 	}
 	// A setting, its default where the save has none
 	json::Value setting(const char *k)
 	{
+		static const json::Value defaults = default_settings();
 		const json::Value &v = m_settings.get(k);
-		return v.is_undefined() ? default_settings().get(k) : v;
+		return v.is_undefined() ? defaults.get(k) : v;
 	}
 
 	ss_ get(const char *store_name, const ss_ &key)
@@ -282,7 +337,7 @@ struct Module: public interface::Module, public moderation::Host
 			iface->claim_http_path("/p/");
 			iface->claim_http_path("/brand/");
 		});
-		log_i(MODULE, "Aitta: %zu releases", store("releases")->list("").size());
+		log_i(MODULE, "Aitta: %zu releases", releases_map().size());
 	}
 
 	// -----------------------------------------------------------------------
@@ -373,8 +428,8 @@ struct Module: public interface::Module, public moderation::Host
 	json::Value releases(bool with_delisted)
 	{
 		json::Value list = json::array();
-		for(const ss_ &k : store("releases")->list("")){
-			json::Value rel = load("releases", k);
+		for(auto &p : releases_map()){
+			const json::Value &rel = p.second;
 			if(!with_delisted && (rel.get("delisted").is_true() ||
 					rel.get("hidden").is_true()))
 				continue;
@@ -404,8 +459,8 @@ struct Module: public interface::Module, public moderation::Host
 		// [AITTA_REPORTS] And what is out of it, with why: a client notes
 		// it on the tile of one it has installed
 		json::Value out = json::array();
-		for(const ss_ &k : store("releases")->list("")){
-			const json::Value rel = load("releases", k);
+		for(auto &p : releases_map()){
+			const json::Value &rel = p.second;
 			if(!rel.get("delisted").is_true() && !rel.get("hidden").is_true())
 				continue;
 			json::Value o = json::object();
@@ -908,11 +963,12 @@ struct Module: public interface::Module, public moderation::Host
 	// A delisted release's files are not served either
 	bool listed_hash(const ss_ &sha)
 	{
-		for(const ss_ &k : store("releases")->list("")){
-			json::Value rel = load("releases", k);
-			if(jstr(rel, "sha256") == sha)
-				return !rel.get("delisted").is_true() &&
-						!rel.get("hidden").is_true();
+		releases_map();
+		auto it = m_rel_by_hash.find(sha);
+		if(it != m_rel_by_hash.end()){
+			const json::Value &rel = m_releases[it->second];
+			return !rel.get("delisted").is_true() &&
+					!rel.get("hidden").is_true();
 		}
 		return false;
 	}
@@ -936,10 +992,10 @@ struct Module: public interface::Module, public moderation::Host
 	{
 		bool listed = false;
 		if(is_hex(sha, 64))
-			for(const ss_ &k : store("releases")->list("")){
-				const json::Value rel = load("releases", k);
-				if((jstr(rel, "icon") == sha || jstr(rel, "screenshot") == sha) &&
-						!rel.get("delisted").is_true() &&
+			for(auto it = (releases_map(), m_rel_by_media.find(sha)); it !=
+					m_rel_by_media.end() && it->first == sha; ++it){
+				const json::Value &rel = m_releases[it->second];
+				if(!rel.get("delisted").is_true() &&
 						!rel.get("hidden").is_true())
 					listed = true;
 			}
@@ -1320,7 +1376,7 @@ struct Module: public interface::Module, public moderation::Host
 		if(!get("delisted_packages", pkg).empty())
 			return refuse(r, pkg+" is delisted here: see your statements on "
 					"Aitta's page");
-		if(store("releases")->list(pkg+"/").empty())
+		if(release_keys(pkg+"/").empty())
 			return refuse(r, "no release of "+pkg+" here: publish one first");
 		const json::Value old = load("pages", pkg);
 		if(old.is_object() && p.get("time_ms").as_number() <=
@@ -1456,7 +1512,7 @@ struct Module: public interface::Module, public moderation::Host
 	json::Value review_base(const json::Value &rel)
 	{
 		json::Value best;
-		for(const ss_ &k : store("releases")->list(jstr(rel, "author")+"/"+
+		for(const ss_ &k : release_keys(jstr(rel, "author")+"/"+
 				jstr(rel, "name")+"/")){
 			const json::Value o = load("releases", k);
 			// simplified: by publish time in seconds; two releases of one
@@ -1882,7 +1938,7 @@ struct Module: public interface::Module, public moderation::Host
 			}
 			put("pages", id, rel);
 		}
-		for(const ss_ &k : page ? sv_<ss_>() : store("releases")->list(pkg)){
+		for(const ss_ &k : page ? sv_<ss_>() : release_keys(pkg)){
 			json::Value o = load("releases", k);
 			if(k != id && action != "delist_package")
 				continue;
@@ -1948,7 +2004,7 @@ struct Module: public interface::Module, public moderation::Host
 			rel.set("delisted_why", "");
 			put("pages", id, rel);
 		}
-		for(const ss_ &k : page ? sv_<ss_>() : store("releases")->list(pkg)){
+		for(const ss_ &k : page ? sv_<ss_>() : release_keys(pkg)){
 			json::Value o = load("releases", k);
 			if(k != id && action != "package delisted")
 				continue;
