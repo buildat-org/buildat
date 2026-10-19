@@ -250,7 +250,24 @@ local urho_SubscribeToEvent = SubscribeToEvent
 SubscribeToEvent = nil
 UnsubscribeFromEvent = nil
 
-local sandbox_callback_to_global_function_name = {}
+-- **What a subscription keeps, it lets go** ([CLIENT_CALLBACK_LEAK]): a
+-- callback is held by what calls it -- a global one by its mux entry, an
+-- object's through object_callbacks -- and by nothing else, so a closed
+-- screen's closures (and the screen they hold) go with it. Weak: an entry
+-- here is only for an unsubscribe given the callback.
+local sandbox_callback_to_global_function_name = setmetatable({},
+		{__mode = "k"})
+-- An object subscription's delivery by its name. Urho3D resolves the name
+-- to a function once, at the subscribe, and keeps that function for the
+-- script's life, so what it gets is a stub that looks the delivery up
+-- here; the entry goes when the element is removed (ElementRemoved below)
+-- and comes back if it is added again (a re-parent).
+-- simplified: the stub and Urho3D's LuaFunction for its name stay, about
+-- 150 bytes a subscription; the upgrade is a LuaScript call that drops a
+-- name's function once its sender is destroyed.
+local object_callbacks = {}
+-- The unsafe object -> {name = true}: which entries go with it
+local object_callback_names = setmetatable({}, {__mode = "k"})
 local next_sandbox_global_function_i = 1
 local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
 -- Set around add_global_event_handler() by a subscription made from the
@@ -505,7 +522,7 @@ function Safe.SubscribeToEvent(x, y, z)
 			callback(got_event_type, safe_event_data)
 		end
 	end)
-	_G[global_callback_name] = function(event_type_thing, unsafe_event_data)
+	local deliver = function(event_type_thing, unsafe_event_data)
 		-- **Keys typed into a secret field are nobody else's**
 		-- ([SECURITY_RUN_1]): a script's KeyDown is every key pressed,
 		-- with its shift, so it read a Starport password as it was typed
@@ -536,12 +553,25 @@ function Safe.SubscribeToEvent(x, y, z)
 	end
 	if object then
 		local unsafe_object = getmetatable(object).unsafe
+		object_callbacks[global_callback_name] = deliver
+		local names = object_callback_names[unsafe_object]
+		if not names then
+			names = {}
+			object_callback_names[unsafe_object] = names
+		end
+		names[global_callback_name] = true
+		_G[global_callback_name] = function(a, b)
+			local f = object_callbacks[global_callback_name]
+			if f then
+				return f(a, b)
+			end
+		end
 		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
+		_G[global_callback_name] = nil
 	else
 		from_sandbox = subscriber_in_sandbox
 		from_sandbox_owner = subscriber_in_sandbox and sandbox_owner() or nil
-		add_global_event_handler(sub_event_type, global_callback_name,
-				_G[global_callback_name])
+		add_global_event_handler(sub_event_type, global_callback_name, deliver)
 		from_sandbox, from_sandbox_owner = false, nil
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
@@ -792,6 +822,13 @@ end)
 -- counter on the C++ side.
 
 local removed_wrappers = setmetatable({}, {__mode = "k"})
+-- The removed element -> its subtree's parked deliveries, by name, until
+-- the next Update: a re-parent adds it back within the same C++ call.
+-- Strong: a delivery holds its element, and a weak key it held would never
+-- go (LuaJIT's weak tables are not ephemerons).
+-- simplified: an element C++ keeps and adds back later (a hidden popup)
+-- has lost its subscriptions; none of the tree's subscribe inside one
+local removed_callbacks = {}
 
 -- The removed subtree, walked while it is whole; the wrappers are then
 -- found by lookup and nothing of theirs is called -- a wrapper
@@ -819,6 +856,21 @@ add_global_event_handler("ElementRemoved", "__buildat_ui_dead",
 		if focus and gone[focus] then
 			ui:SetFocusElement(nil)
 		end
+		-- Its subscriptions' deliveries, parked: dropped with the element,
+		-- or put back by an add
+		local parked = {}
+		for element in pairs(gone) do
+			local names = object_callback_names[element]
+			if names then
+				for name in pairs(names) do
+					parked[name] = object_callbacks[name]
+					object_callbacks[name] = nil
+				end
+			end
+		end
+		if next(parked) then
+			removed_callbacks[removed] = parked
+		end
 		for element in pairs(gone) do
 			local wrappers = magic_sandbox.live[element]
 			if wrappers then
@@ -836,9 +888,41 @@ add_global_event_handler("ElementRemoved", "__buildat_ui_dead",
 		removed_wrappers[removed] = set
 	end)
 
+add_global_event_handler("Update", "__buildat_ui_parked", function()
+	if next(removed_callbacks) then
+		removed_callbacks = {}
+	end
+end)
+
+-- `event luamem` in a driven run ([CLIENT_CALLBACK_LEAK]): Lua's memory
+-- after a full collect and the subscriptions held, for a check that a
+-- closed screen is let go
+add_global_event_handler("command_seq:luamem", "__buildat_luamem", function()
+	collectgarbage("collect")
+	collectgarbage("collect")
+	local globals, held = 0, 0
+	for k in pairs(_G) do
+		if type(k) == "string" and k:find("^__buildat_sandbox_callback_") then
+			globals = globals + 1
+		end
+	end
+	for _ in pairs(object_callbacks) do
+		held = held + 1
+	end
+	log:info(string.format("luamem: %d KB, %d callback globals, %d object "
+			.. "callbacks held", collectgarbage("count"), globals, held))
+end)
+
 add_global_event_handler("ElementAdded", "__buildat_ui_dead",
 	function(_, data)
 		local added = data["Element"]:GetPtr("UIElement")
+		local parked = removed_callbacks[added]
+		if parked then
+			removed_callbacks[added] = nil
+			for name, f in pairs(parked) do
+				object_callbacks[name] = f
+			end
+		end
 		local set = removed_wrappers[added]
 		if not set then return end
 		removed_wrappers[added] = nil

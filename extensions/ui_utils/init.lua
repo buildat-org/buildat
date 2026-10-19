@@ -1104,19 +1104,30 @@ function M.safe.list_view(parent, width, height, options)
 		function view:show(e) outer:show(e) end
 		return view
 	end
+	-- The views whose screens are gone let go of their handlers: one that
+	-- never fires again (TouchMove with no touchscreen) unsubscribed only
+	-- itself, and held its screen ([CLIENT_CALLBACK_LEAK])
+	for n, v in pairs(list_views) do
+		if v.subs and gone(v.viewport) then
+			list_views[n] = nil
+			for e, sub in pairs(v.subs) do
+				magic.UnsubscribeFromEvent(e, sub)
+			end
+		end
+	end
 	local viewport = parent:CreateChild("UIElement")
 	viewport.clipChildren = true
 	viewport.enabled = true
 	local list = viewport:CreateChild("UIElement")
 	list:SetFixedWidth(width)
 	list.enabled = true
-	local view = {viewport = viewport, list = list}
+	local subs = {}
+	local view = {viewport = viewport, list = list, subs = subs}
 	-- keyboard_page knows it by its name as a view that scrolls
 	list_view_serial = list_view_serial + 1
 	local name = "list_view_" .. list_view_serial
 	viewport:SetName(name)
 	list_views[name] = view
-	local subs = {}
 	local function on(event, fn)
 		subs[event] = magic.SubscribeToEvent(event, function(t, d)
 			if gone(viewport) then
