@@ -78,7 +78,8 @@ struct Spec
 	float gear_torque[GEARS] = {18000, 24000, 16000, 11000, 9000};
 	float engine_brake = 0.3f; // of the gear's torque, pedal up
 	float brake_torque = 30000; // over the strongest gear's
-	float steer_max = 0.6f, steer_rate = 0.8f; // rad, rad/s
+	// rad, rad/s ([HC_STEER_FAST]: full lock in 0.375 s, twice as fast)
+	float steer_max = 0.6f, steer_rate = 1.6f;
 	float pedal_rate = 0.7f;   // per second: the gentle ramps
 };
 
@@ -300,7 +301,19 @@ int main()
 				c.spec.steer_max);
 		return 1;
 	}
-	printf("car.h: self test passed\n");
+	// [HC_STEER_FAST] Full lock from straight within 0.4 s, at 240 Hz
+	car::Car d(car::Spec(), 0);
+	in.steer = 1;
+	int n = 0;
+	while(d.steer < d.spec.steer_max - 1e-5f && n < 1000){
+		d.controls(in, 1.0f / 240);
+		n++;
+	}
+	if(n / 240.0f > 0.4f){
+		printf("car.h: full lock took %.3f s\n", n / 240.0f);
+		return 1;
+	}
+	printf("car.h: self test passed; full lock in %.3f s\n", n / 240.0f);
 	return 0;
 }
 #endif
