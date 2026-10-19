@@ -1984,12 +1984,12 @@ struct Module: public interface::Module, public PlayersHost,
 		for(auto &kv : m_mobs.all)
 			if(kv.second.kind == SKELETON)
 				skeletons++, full += kv.second.node_id != 0;
-		log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu woken; %zu "
+		log_i(MODULE, "skeldat: %zu skeletons, %zu full, %zu activated; %zu "
 				"light steps and the sweep, %.2f ms a second; %zu bodies "
 				"put back; %zu steps kept out of the sun", skeletons, full,
-				m_mobs.woken, m_mobs.light_steps, m_mobs.light_us / 1e3 / 10,
+				m_mobs.activated, m_mobs.light_steps, m_mobs.light_us / 1e3 / 10,
 				m_mobs.body_puts, m_mobs.sun_kept);
-		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
+		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.activated = 0, m_mobs.body_puts = 0;
 		m_mobs.sun_kept = 0;
 		m_trees.report(10);
 		report_hazards();

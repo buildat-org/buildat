@@ -24,7 +24,7 @@ struct WorldView
 	// Each column's top voxel, its y (NO_GROUND for none, or water) and
 	// its bones, from the sweep and every set_node: what a light skeleton
 	// walks on. simplified: the top only, so a light skeleton in a cave
-	// stays put until a player wakes it; a voxel read for each of its steps
+	// stays put until a player makes it active; a voxel read for each of its steps
 	// was ~66 us, the world being too big for voxelworld's chunk buffers
 	sv_<int8_t> top_y;
 	// The top voxel's y whatever it is (water too): a change under it

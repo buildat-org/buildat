@@ -23,8 +23,8 @@
 # stone bare, and started again it stays ended and says so to its player.
 # The fourth, the skeletons over a world of 4 x 2 x 4 sections: a clean
 # one's count grows at night to its target, no further; a flooded one
-# has a higher target, and a player among 200 light skeletons wakes some,
-# which sleep again when it leaves, none lost. 2000 light
+# has a higher target, and a player among 200 light skeletons makes some
+# active, dormant again when it leaves, none lost. 2000 light
 # skeletons added to the first world, restarted headless: their step time.
 # The fifth, a skeleton's marker skull: one on its first sight of a
 # player, none on its next that day, the count kept in the save.
@@ -466,10 +466,10 @@ grep -aq "pulled back" "$s" && fail "the admin was pulled back ($s)"
 grep -aE "skeldat: fog for danger (0\.[5-9]|1)" "$t/a2.log" | grep -q . ||
 	fail "no fog in the zone ($t/a2.log)"
 grep -aq "skeldat: mood danger" "$t/a2.log" || fail "no danger music ($t/a2.log)"
-# Spawned there, or one of the populated world's woken by the player
+# Spawned there, or one of the populated world's made active by the player
 # ([SKELDAT_START_SKELETONS]: the zone's own count can leave no room)
 grep -aE "a skeleton \([0-9]*\) spawns at .*, danger (0\.[5-9]|1)|skeletons, [1-9][0-9]* full" "$s" |
-	grep -q . || fail "no skeleton spawned or woken in the zone ($s)"
+	grep -q . || fail "no skeleton spawned or active in the zone ($s)"
 grep -aq "client1 digs .*, dropping nothing" "$s" ||
 	fail "no dig in the zone that drops nothing ($s)"
 # 3. The end: a world of 2 x 2 x 2 sections made with bones on its
@@ -590,8 +590,8 @@ clean=$(grep -a "skeletons, the target" "$log5" | tail -1 | sed 's/.*skeldat: //
 grep -a "skeletons, the target" "$log5" | awk '$8 > $12 + 0 { bad = 1 } END { exit !bad }' &&
 	fail "the count went past the target ($log5)"
 # Every voxel flooded, a higher target; 200 light skeletons at midnight
-# (the dying is in the morning), a player among them a while: some wake
-# and sleep again, none lost
+# (the dying is in the morning), a player among them a while: some made
+# active and dormant again, none lost
 log6="$t/srv6.log"
 BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_FILL=1 \
 	BUILDAT_SKELDAT_SKELETONS=200 BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_DAY=240 \
@@ -608,8 +608,8 @@ for i in $(seq 60); do
 	sleep 0.5
 done
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aE "skeldat: [0-9]+ skeletons, [0-9]+ full, [1-9][0-9]* woken" "$log6" | grep -q . ||
-	fail "no skeleton woke by the player ($log6)"
+grep -aE "skeldat: [0-9]+ skeletons, [0-9]+ full, [1-9][0-9]* activated" "$log6" | grep -q . ||
+	fail "no skeleton made active by the player ($log6)"
 last=$(grep -a "skeletons, [0-9]* full" "$log6" | tail -1)
 echo "$last" | grep -qE "skeldat: (2[0-9][0-9]) skeletons, 0 full" ||
 	fail "after the player: $last ($log6)"
@@ -924,9 +924,10 @@ grep -aq "skeldat: populated" "$t/srv19_2.log" &&
 grep -aq "the world \"pop\" starts, seed 2, 0 furnaces, $(echo "$pop" | awk "{ print \$4 }") mobs" \
 	"$t/srv19_2.log" || fail "not the same skeletons loaded: $pop ($t/srv19_2.log)"
 # 17. Far skeletons ([SKELDAT_FAR_SKELETONS]): nine light skeletons in a
-# row 52 voxels ahead (past WAKE), their steps slowed to 30 s: the client
+# row 52 voxels ahead (past ACTIVE_WITHIN), their steps slowed to 30 s: the client
 # draws as many as the server sends; started again at midnight (by day
-# the woken burn) with the player placed 7 from them, they wake, have
+# the active ones burn) with the player placed 7 from them, they are made
+# active, have
 # bodies, and the far list is empty
 log20="$t/srv20.log"
 T=; for x in -16 -12 -8 -4 0 4 8 12 16; do T="$T skeleton $x 52;"; done
@@ -954,7 +955,7 @@ sent=$(grep -a "far skeletons to client1" "$t/srv20_1.log" | tail -1 | sed 's/.*
 # (the nine may then shoot the player dead, and asleep again be far)
 grep -aq "skeldat: 0 far skeletons to client1" "$t/srv20_2.log" &&
 	grep -aq "skeldat: a skeleton ([0-9]*) is here" "$t/far2.log" ||
-	fail "the near skeletons not woken out of the far list ($t/srv20_2.log)"
+	fail "the near skeletons not made active out of the far list ($t/srv20_2.log)"
 far="9 drawn and sent; $(grep -a "skeldat: [0-9]* far skeletons drawn" "$t/far1.log" | tail -1 | sed 's/.*(//; s/)//')"
 # 18. The edge ([SKELDAT_EDGE_RIDGE]) in 128 x 64 x 128 at dusk: made
 # once (the hillside's blocks and the outermost column's wall); with a
@@ -1074,7 +1075,7 @@ grep -aq "test: skeldat:bone_block at" "$log23" && [ -n "$safe" ] &&
 log24="$t/srv24.log"
 pond=$(for x in -4 -3 -2 -1 0 1 2 3 4; do printf 'marker %d 10 skeldat:water_source; ' $x; done)
 # The pool 3 x 3 round the skeleton: its light form steps off a single
-# voxel of water before the body is woken in it
+# voxel of water before the body is made active in it
 pool=$(for x in -1 0 1; do for z in -7 -6 -5; do printf 'marker %d %d skeldat:water_source; ' $x $z; done; done)
 BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_STILL_WATER=1 \

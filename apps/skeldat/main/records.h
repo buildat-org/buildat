@@ -168,20 +168,21 @@ static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 static const float BOW_DRAW = 1, BOW_SPEED = 30, BOW_MIN = 0.1f,
 		BOW_DAMAGE = 0.3f, ARROW_REACH = 1.5f, ARROW_STUCK = 60;
 static const int BOW_USES = 250;
-// Awake within WAKE of a player, asleep (saved, not stepped) past SLEEP
-static const float WAKE = 48, SLEEP = 64;
+// Active (stepped) within ACTIVE_WITHIN of a player, dormant (saved, not
+// stepped) past DORMANT_PAST of every player
+static const float ACTIVE_WITHIN = 48, DORMANT_PAST = 64;
 // A skeleton near a player ([SKELDAT_LIGHT_PRIMARY]): its light form's
 // step, the body's speed after it (faster than the light form's, so it
 // keeps up) and how far behind the body is put back on it (across; up or
 // down three times that)
 static const float NEAR_STEP = 0.5f, BODY_SPEED = 2.6f, BODY_LAG = 3;
-// simplified: one cap for the awake ones and one per 64-voxel area;
+// simplified: one cap for the active ones and one per 64-voxel area;
 // MAX_AREA and MAX_NEAR are a boar's, a skeleton's go by the danger
 static const size_t MAX_MOBS = 120, MAX_AREA = 6, MAX_NEAR = 3;
 // The skeletons over the whole world ([SKELDAT_SKELETON_SIM]): from
 // SKELETONS_MIN on clean ground to SKELETONS_MAX with every column's top
 // at FLOOD, in a world of 1024 x 1024 columns (a smaller one has fewer);
-// asleep ("light"), one steps a voxel every LIGHT_STEP seconds
+// dormant ("light"), one steps a voxel every LIGHT_STEP seconds
 // (BUILDAT_SKELDAT_LIGHT_STEP for a check); at night it places 1 to
 // NIGHT_BLOCKS bone blocks on clean ground within SEED_RANGE columns
 static const float SKELETONS_MIN = 500, SKELETONS_MAX = 2000,
@@ -271,7 +272,7 @@ struct Mob
 	// the node's "skeldat_draw" as last set
 	float draw_t = -1;
 	int draw_sent = 0;
-	uint32_t node_id = 0; // 0 asleep
+	uint32_t node_id = 0; // 0 dormant
 	float light_t = 0; // to the next light step
 	// Saved: the game day of its last marker skull; the coal in the
 	// lantern it carries, -1 none ([SKELDAT_FIGHT_BACK])
@@ -287,7 +288,7 @@ struct Mob
 	int detour = 0; // steps left on a heading round what blocked it
 	bool seeding = false;
 	int hurt = 0, hurt_sent = 0;
-	// A skeleton's body, awake ([SKELDAT_LIGHT_PRIMARY]): x, y, z are its
+	// A skeleton's body, active ([SKELDAT_LIGHT_PRIMARY]): x, y, z are its
 	// light form, which decides; the body walks after it, put there when
 	// BODY_LAG behind. Not saved
 	float bx = 0, by = 0, bz = 0, bvy = 0;
@@ -332,11 +333,11 @@ struct Mob
 	int call_tries = 0;
 	bool call_sheltered = false;
 	// [SKELDAT_BOAR_SWIM] A boar's: the game time it was last out of the
-	// water (set when woken); until when it keeps out of the water after a
+	// water (set when made active); until when it keeps out of the water after a
 	// swim back; the column it swims for and when that is looked for
 	// again. Not saved
 	// simplified: a restart forgets the swim; a night in water counts
-	// from the wake
+	// from its activation
 	double dry_t = 0, stay_t = 0, swim_t = 0;
 	bool swim_to = false, swim_dry = false, floated = false;
 	uint8_t water = 0; // for the log: 0 out, 1 in, 2 over deep water

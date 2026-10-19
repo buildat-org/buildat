@@ -72,7 +72,7 @@ struct Mobs
 	double walk_search_t = 0;
 	uint32_t walk_next = 0;
 	bool walk_queued = false;
-	size_t light_steps = 0, woken = 0;
+	size_t light_steps = 0, activated = 0;
 	// [SKELDAT_SUN_SHELTER] Steps refused for the sun, for the report
 	size_t sun_kept = 0;
 	// BUILDAT_SKELDAT_TEST, for the checks: "boar 0 3; skeleton 0 9" -- no
@@ -154,11 +154,11 @@ struct Mobs
 			voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
 				d = world.danger(w, p.x, p.y, p.z);
 			});
-			size_t awake = 0;
+			size_t active = 0;
 			for(auto &kv : all)
-				awake += kv.second.node_id != 0;
+				active += kv.second.node_id != 0;
 			for(uint8_t kind : {BOAR, SKELETON, CAVE_SKELETON}){
-				if(awake >= MAX_MOBS)
+				if(active >= MAX_MOBS)
 					return;
 				if(kind == BOAR && (world.day < 0.25 || world.day > 0.75))
 					continue;
@@ -201,7 +201,7 @@ struct Mobs
 				m.grass_t = world.t;
 				const uint32_t k = next_mob++;
 				all[k] = m;
-				awake++;
+				active++;
 				log_i(MODULE, "skeldat: a %s (%u) spawns at %.1f,%.1f,%.1f, "
 						"danger %.2f", MOB_KIND[kind], k, m.x, m.y, m.z, d);
 			}
@@ -480,14 +480,14 @@ struct Mobs
 	}
 
 	// Woken, it has seen nothing yet
-	void wake(Mob &m)
+	void activate(Mob &m)
 	{
 		if(m.mode == FIGHT)
 			m.mode = WANDER, m.mode_t = 0;
 		m.draw_t = -1, m.draw_sent = 0, m.boat_sent = -1;
 		m.bx = m.x, m.by = m.y, m.bz = m.z, m.bvy = 0;
 		m.dry_t = world.t, m.swim_t = 0, m.swim_to = false;
-		woken++;
+		activated++;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild(
 					Urho3D::String("skeldat_")+MOB_KIND[m.kind]);
@@ -797,7 +797,7 @@ struct Mobs
 	}
 
 	// [SKELDAT_CAVE_SKELETON] What a skeleton fights: the nearest of a
-	// living player and a woken skeleton of the other kind (a bone
+	// living player and an active skeleton of the other kind (a bone
 	// skeleton's body, a cave skeleton), from the mob's x, y, z
 	Target target_of(const Mob &m)
 	{
@@ -870,8 +870,8 @@ struct Mobs
 
 	void step_mobs(float dt)
 	{
-		// Wake what a player is near, put to sleep what none is
-		sv_<uint32_t> awake, left_deep;
+		// Activate what a player is near, make dormant what none is
+		sv_<uint32_t> active, left_deep;
 		size_t full = 0;
 		for(auto &kv : all)
 			full += kv.second.node_id != 0;
@@ -880,23 +880,23 @@ struct Mobs
 			float d;
 			host.nearest(m.x, m.y, m.z, d);
 			// simplified: the first in key order past MAX_MOBS wait
-			if(!m.node_id && d < WAKE && full < MAX_MOBS){
-				wake(m);
+			if(!m.node_id && d < ACTIVE_WITHIN && full < MAX_MOBS){
+				activate(m);
 				full++;
 			}
-			else if(m.node_id && d > SLEEP){
+			else if(m.node_id && d > DORMANT_PAST){
 				if(m.kind == BOAR && in_deep_water(m))
 					left_deep.push_back(kv.first);
 				remove_node(m.node_id);
-				log_v(MODULE, "skeldat: the %s (%u) sleeps", MOB_KIND[m.kind],
+				log_v(MODULE, "skeldat: the %s (%u) goes dormant", MOB_KIND[m.kind],
 						kv.first);
 			}
 			if(m.node_id)
-				awake.push_back(kv.first);
+				active.push_back(kv.first);
 		}
 		for(uint32_t key : left_deep)
 			vanish(key, "left in deep water", true);
-		if(awake.empty())
+		if(active.empty())
 			return;
 		sv_<std::pair<uint32_t, int>> burnt, harmed;
 		sv_<uint32_t> drowned, off_grass, wet_night;
@@ -904,7 +904,7 @@ struct Mobs
 		struct Mark { uint32_t key; int p[3]; ss_ seen; };
 		sv_<Mark> marks;
 		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
-			for(uint32_t key : awake){
+			for(uint32_t key : active){
 				Mob &m = all[key];
 				const int h = MOB_HEIGHT[m.kind];
 				// Where the map is not loaded yet, it waits
@@ -1241,7 +1241,7 @@ struct Mobs
 				}
 				// [SKELDAT_BOAR_GRASS] Its grass clock: the voxel under the
 				// feet grass sets it; a game day off grass and it dies
-				// simplified: the clock runs asleep too, read when awake
+				// simplified: the clock runs dormant too, read when active
 				if(world.wid(w, (int)std::floor(m.x + 0.5f),
 						(int)std::floor(m.y + 0.51f) - 1,
 						(int)std::floor(m.z + 0.5f)) == world.id_of("skeldat:grass"))
@@ -1255,7 +1255,7 @@ struct Mobs
 					wet_night.push_back(key);
 			}
 		});
-		for(uint32_t key : awake){
+		for(uint32_t key : active){
 			auto it = all.find(key);
 			pv::Vector3DInt32 at;
 			if(it != all.end() && it->second.kind == SKELETON &&
@@ -1356,7 +1356,7 @@ struct Mobs
 		});
 	}
 
-	// A light skeleton on a random column past SLEEP of every player: on
+	// A light skeleton on a random column past DORMANT_PAST of every player: on
 	// one at FLOOD, its footprint picked by its flooded columns, or
 	// anywhere (on_bones false)
 	bool add_skeleton(bool on_bones)
@@ -1382,7 +1382,7 @@ struct Mobs
 		const float y = world.top_y[c] + 0.5f;
 		float d;
 		host.nearest((float)x, y, (float)z, d);
-		if(d < SLEEP)
+		if(d < DORMANT_PAST)
 			return false;
 		Mob m;
 		m.kind = SKELETON;
