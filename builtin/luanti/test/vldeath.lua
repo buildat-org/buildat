@@ -1,4 +1,5 @@
 -- SPDX-License-Identifier: Apache-2.0 OR MIT
+-- Run by hand, by the command below; no runner references it.
 -- Does a VoxeLibre player die and come back whole? set_hp(0) runs the
 -- game's on_dieplayer (mcl_death_drop over every list it registered) and
 -- respawn() its on_respawnplayer (mcl_sprint over its mod channel), and
