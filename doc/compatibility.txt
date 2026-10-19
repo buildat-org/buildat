@@ -14,6 +14,19 @@ client/core/starport's semver_cmp for precedence).
 - A patch release only adds: anything new on the wire is behind a feature
   name in the hello (below), so an older patch of the same minor still
   plays with it.
+  The one exception, 2026-10-19, for the young 0.7: 0.7.52 drops API
+  names no app on Aitta called (the API review, compatibility_plan.md's
+  [API_REVIEW_07]). Client: 15 buildat.* (13 aliases of __buildat_*
+  functions, set_ui_scale, deserialize_volume_8bit), extensions test and
+  experimental, luanti's module.lua sub_day_night, sub_privs,
+  show_local_form and close_form, magic.Vector3.from_buildat and
+  magic.IntVector3.from_buildat. Server: block.h (BlockRegistry),
+  atlas get_atlas_definition and get_segment_definition, mesh
+  create_8bit_voxel_physics_model and create_voxel_physics_model,
+  replicate emit_after_next_sync, voxelworld get_unknown_voxels and
+  num_buffers_loaded, luanti_mapgen list_mapgens, voxel.h
+  any_surface_modifier, EVENT_DISPATCH_TYPE, luanti call_string_list,
+  builtin/ground_plane_lighting. engine_api stays 2.
 - A minor may break: it may raise the protocol minimum, the engine API
   minimum and a save's format.
 - A pre-release (1.2.0-rc.1) is offered as an update only to a client

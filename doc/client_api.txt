@@ -196,6 +196,11 @@ buildat.dump_meshes([atlas_json]) -> file name, or nil and why not
 - The scene's CustomGeometry in world space, what the client already drew,
   into <user>/meshdumps ([PATH_TRACE_REF]).
 
+buildat.write_file_atomic(path, text) -> true, or nil and the error
+- The core's, not the sandbox's: a user file written whole or not at all,
+  the text to path..".tmp" and renamed over the path, so a crash mid-write
+  leaves the old file ([USER_FILES_ATOMIC]).
+
 buildat.add_resource_dir(path) -> bool
 - Puts a directory on Urho3D's resource search path, so files written there can
   be asked of the resource cache by name. Only directories under the client's
