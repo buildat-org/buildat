@@ -484,6 +484,12 @@ buildat.sub_packet("world_menu:list", function(data)
 	end
 	served.title = state.title .. ": which world?"
 	served.worlds = state.worlds
+	-- [SKELDAT_SAVE_WORLD_MENU] The world the launch named, once: the
+	-- server sends it in one list only, so a click after stands
+	if (state.selected or "") ~= "" then
+		served.selected = state.selected
+		log:info("world_menu: " .. state.selected .. " selected")
+	end
 	-- [SKELDAT_WORLD_ADMIN] Shown in a running world: it marked, Back
 	-- and Close world; a refusal said over the list
 	local running = (state.running or "") ~= "" and state.running or nil

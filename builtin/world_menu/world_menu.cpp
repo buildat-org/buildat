@@ -25,6 +25,8 @@ struct Module: public interface::Module, public Interface
 	// The running world's name while a picker has the menu in it
 	ss_ m_running_name;
 	ss_ m_progress;
+	// select()'s world, until a picker's list has had it
+	ss_ m_select;
 	// Who has the client half, and who has the menu up
 	std::set<PeerId> m_scripted, m_shown;
 
@@ -94,6 +96,19 @@ struct Module: public interface::Module, public Interface
 	bool is_picker(PeerId peer)
 	{
 		return picker(peer);
+	}
+
+	void select(const ss_ &name)
+	{
+		bool ok = false;
+		storage::access(m_server, [&](storage::Interface *i){
+			ok = is_world(i, name) && exists(i, name);
+		});
+		if(!ok){
+			log_w(MODULE, "world_menu: no world \"%s\" to select", cs(name));
+			return;
+		}
+		m_select = name;
 	}
 
 	void set_running(bool running)
@@ -253,6 +268,11 @@ struct Module: public interface::Module, public Interface
 			});
 		}
 		out.set("worlds", worlds);
+		if(pick && !m_select.empty()){
+			out.set("selected", m_select);
+			log_i(MODULE, "world_menu: \"%s\" selected", cs(m_select));
+			m_select.clear();
+		}
 		network::send(m_server, peer, "world_menu:list", out.stringify());
 	}
 

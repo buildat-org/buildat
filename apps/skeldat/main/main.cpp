@@ -363,6 +363,18 @@ struct Module: public interface::Module, public PlayersHost,
 			if(!save.empty() && !start_world(save, false))
 				log_w(MODULE, "skeldat: the launch's save \"%s\" is no world: "
 						"the menu", cs(save));
+			// [SKELDAT_SAVE_WORLD_MENU] menu=worlds: no world started, and
+			// world= selected in the menu
+			const ss_ u = m_server->get_config().get<ss_>("untrusted_launch");
+			if(interface::launch_param(u, "menu") == "worlds"){
+				const ss_ want = interface::launch_param(u, "world", &refused);
+				if(refused)
+					log_w(MODULE, "skeldat: the launch's world refused");
+				if(!want.empty())
+					world_menu::access(m_server, [&](world_menu::Interface *i){
+						i->select(want);
+					});
+			}
 			// [SKELDAT_RESUME_WORLD] No launcher at all (a dedicated
 			// server): the world that ran at the last exit, if one did
 			ss_ kept;

@@ -32,7 +32,8 @@
 // ({name, to}), world_menu:delete ({name}), world_menu:close. Server to
 // client: world_menu:list (JSON: {title, may_pick, wait, running, note,
 // fields: [{key, label, default, hint, ask, choices: [[value, label]]}],
-// worlds: [{name, bytes, options}], presets: [{label, options}]}; wait:
+// worlds: [{name, bytes, options}], presets: [{label, options}],
+// selected: the world to select, once (select())}; wait:
 // the progress text, if any; running: the running world's name, if the
 // menu is shown in it; note: a refusal to say), world_menu:up.
 // **Presets** ([SKELDAT_HIGH_SCORES]): option sets the app offers on the
@@ -107,6 +108,10 @@ namespace world_menu
 		// Whether the peer picks the worlds: the launcher's own client, or
 		// an admin's account
 		virtual bool is_picker(PeerId peer) = 0;
+		// [SKELDAT_SAVE_WORLD_MENU] The world `name` selected in the next
+		// list a picker gets (its `selected`), once; a name that is no
+		// world is logged and selects nothing
+		virtual void select(const ss_ &name) = 0;
 	};
 
 	inline bool access(interface::Server *server,

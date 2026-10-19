@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~6 min (2026-10-17)
-# covers: builtin/world_menu/** builtin/storage/storage.cpp apps/vanilla/main/client_lua/menu.lua apps/skeldat/main/client_lua/join.lua
+# covers: builtin/world_menu/** builtin/storage/storage.cpp apps/skeldat/launcher/init.lua apps/vanilla/main/client_lua/menu.lua apps/skeldat/main/client_lua/join.lua
 # [WORLD_MENU]: the shared world menu in skeldat, skelenti and vanilla,
 # driven by the launcher's own client (-u launcher=1). In each, on a fresh
 # server, a world made through New world... (skeldat's with the seed
@@ -11,6 +11,8 @@
 # vanilla's trash), the list empty after. skeldat started with the
 # launcher's save= ([SKELDAT_LAUNCH_WORLD]): a missing one is the menu,
 # an existing one played says Loading, "world" starts with no list.
+# menu=worlds world= ([SKELDAT_SAVE_WORLD_MENU]): the menu with that
+# world selected, none for a missing one.
 # skeldat on a public server: the admin made by the setup code picks
 # ([WORLD_MENU_ADMIN]).
 #   builtin/world_menu/check.sh
@@ -86,6 +88,36 @@ for app in skeldat demo_skelenti; do
 			! grep -aq "world_menu: the list shown" "$t/$app.clil2.log" ||
 			fail "skeldat: save=world not started without the menu ($t/$app.srvl2.log)"
 		echo "  skeldat: the launch's save= started, a missing one the menu, Loading said"
+		# [SKELDAT_SAVE_WORLD_MENU] A save's "World menu..." (its launcher's
+		# for_save entry): menu=worlds world=<save>. A copy of "world" as
+		# "other", newer, listed first: world=world the menu with "world"
+		# selected and no world started until its Play; world=nosuch the
+		# menu with none selected
+		luajit -e "local e = dofile('$here/apps/skeldat/launcher/init.lua')({launch = function(a)
+			assert(a.app == 'skeldat' and a.params.menu == 'worlds' and a.params.world == 'w1') end})
+			for _, x in ipairs(e) do if x.for_save then assert(x.label == 'World menu...'); x.run('w1'); return end end
+			error('no for_save entry')" || fail "skeldat: the launcher's World menu... entry"
+		cp -r "$t/$app/srv/apps/$app/saves/world" "$t/$app/srv/apps/$app/saves/other"
+		touch "$t/$app/srv/apps/$app/saves/other"
+		printf '%s\n' "wait_log 120000 world_menu: the list shown, 2 worlds" \
+			"delay 500" "screenshot $t/skeldat.selected.png" 'click Button "Play"' \
+			"wait_log 180000 skeldat: placed at" "quit" > "$t/skeldat.cmds_l3"
+		run $app l3 "$t/skeldat.cmds_l3" "$(printf 'launcher=1\nmenu=worlds\nworld=world')"
+		grep -aq "world_menu: world selected" "$t/$app.clil3.log" &&
+			sed -n '/world_menu: "world" selected/,$p' "$t/$app.srvl3.log" |
+				grep -aq 'the world "world" starts' &&
+			! sed -n '1,/world_menu: "world" selected/p' "$t/$app.srvl3.log" |
+				grep -aq 'the world ".*" starts' ||
+			fail "skeldat: world=world not selected, or a world started before its Play ($t/$app.srvl3.log)"
+		printf '%s\n' "wait_log 120000 world_menu: the list shown, 2 worlds" \
+			"delay 1000" "quit" > "$t/skeldat.cmds_l4"
+		run $app l4 "$t/skeldat.cmds_l4" "$(printf 'launcher=1\nmenu=worlds\nworld=nosuch')"
+		grep -aq 'no world "nosuch" to select' "$t/$app.srvl4.log" &&
+			! grep -aq "world_menu: .* selected" "$t/$app.clil4.log" &&
+			! grep -aq 'the world ".*" starts' "$t/$app.srvl4.log" ||
+			fail "skeldat: world=nosuch selected something or started a world ($t/$app.srvl4.log)"
+		rm -r "$t/$app/srv/apps/$app/saves/other"
+		echo "  skeldat: World menu... with its save selected, none for a missing one"
 	fi
 	printf '%s\n' "wait_log 120000 world_menu: the list shown, 1 worlds" \
 		'click Button "world"' "wait_log 5000 world_menu: the list shown" \
