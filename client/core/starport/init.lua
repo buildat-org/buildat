@@ -201,10 +201,17 @@ local function save_state()
 	write_json_file(STATE_PATH, state)
 end
 
--- The managed file's word over the user's, read every time: an
--- administrator's change counts without a restart
+-- The managed file's word over the user's, read again after a second: an
+-- administrator's change counts without a restart. Not every call: the
+-- launcher's overlay asks for effective() twice every half second
+-- ([REWORK_1019_PERF] client 12)
+local managed_read, managed_at = nil, nil
 local function managed()
-	return read_json(managed_path()) or {}
+	local now = buildat.get_time_us()
+	if not managed_at or now - managed_at > 1000000 then
+		managed_read, managed_at = read_json(managed_path()) or {}, now
+	end
+	return managed_read
 end
 
 -- [WEB_ID_TRUST]: where the server says it is listed (set_web_starports)

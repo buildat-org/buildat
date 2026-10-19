@@ -1299,14 +1299,28 @@ end
 -- get F9.
 local trust_shown = true
 local trust_in_game = nil
+-- What the rows' visibility was last written for: show, id_rows, its
+-- length, trust_sample
+local rows_applied = {}
 -- **A local save is a game from its start** ([LOCAL_SAVE_STARPORT]): the
 -- launcher's "Starting <game>..." screen is up (launch_menu's
 -- screens.lua), or the connecting screen
 -- that follows it, before there is a server address to go by
 local was_launching = false
+-- The stack walked again only when it changed ([REWORK_1019_PERF] client
+-- 12). simplified: by its length and its top; a screen renamed in place,
+-- or one replaced at the same depth by a wrapper at the same address, is
+-- not seen until the next push or pop
+local launch_seen = {}
 local function launching_local()
 	local us = package.loaded["buildat/core/uistack"]
 	local stack = us and us.main and us.main.stack or {}
+	local n, top = #stack, stack[#stack]
+	if launch_seen[1] == stack and launch_seen[2] == n and
+			launch_seen[3] == top then
+		return was_launching
+	end
+	launch_seen[1], launch_seen[2], launch_seen[3] = stack, n, top
 	local starting, connecting = false, false
 	for _, e in ipairs(stack) do
 		local ok, name = pcall(function() return e:GetName() end)
@@ -1408,12 +1422,18 @@ Safe.SubscribeToEvent("Update", function(_, event_data)
 				tostring(trust_in_game) .. ")")
 	end
 	-- The colour's own line only until the starport extension is there
-	-- to build the buttons on the colour
-	if trust_sample then
-		trust_sample.visible = show and #id_rows == 0
-	end
-	for _, r in ipairs(id_rows) do
-		r.visible = show
+	-- to build the buttons on the colour. Written as it changes: a row is
+	-- made with its visibility
+	if show ~= rows_applied[1] or id_rows ~= rows_applied[2] or
+			#id_rows ~= rows_applied[3] or trust_sample ~= rows_applied[4] then
+		rows_applied[1], rows_applied[2], rows_applied[3], rows_applied[4] =
+				show, id_rows, #id_rows, trust_sample
+		if trust_sample then
+			trust_sample.visible = show and #id_rows == 0
+		end
+		for _, r in ipairs(id_rows) do
+			r.visible = show
+		end
 	end
 	if show then
 		id_timer = id_timer + (event_data and event_data:GetFloat("TimeStep") or 0)
