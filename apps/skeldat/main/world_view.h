@@ -41,7 +41,8 @@ struct WorldView
 	std::array<uint32_t, 4> sun_ids{};
 	// set_node's listeners: (x, y, z, the old id, the new), inside the
 	// voxel world's access
-	sv_<std::function<void(int, int, int, uint32_t, uint32_t)>> on_set;
+	// (x, y, z, the old id, the new id, the old param)
+	sv_<std::function<void(int, int, int, uint32_t, uint32_t, uint32_t)>> on_set;
 	// The random numbers every part draws from
 	std::mt19937 rand{std::random_device{}()};
 	// The server's clock, seconds; the world's own, seconds of game time
@@ -172,7 +173,8 @@ struct WorldView
 		const pv::Vector3DInt32 p(x, y, z);
 		interface::VoxelSample v = w->get_sample(p, true);
 		uint32_t &word = v.planes[0];
-		const uint32_t old = format.id.get(word);
+		const uint32_t old = format.id.get(word),
+				old_param = format.param.get(word);
 		word = 0;
 		format.id.set(word, id);
 		format.param.set(word, param);
@@ -182,7 +184,7 @@ struct WorldView
 		if(!(old != id && (old == stuck_id || id == stuck_id)) && bones_ >= 0)
 			bones.set(v, (uint32_t)bones_);
 		for(auto &f : on_set)
-			f(x, y, z, old, id);
+			f(x, y, z, old, id, old_param);
 		w->set_sample(p, v);
 		// The top is by the ids, and a change under it leaves it
 		const long c = column(x, z);

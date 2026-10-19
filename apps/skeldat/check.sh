@@ -2744,9 +2744,65 @@ assert has(r"the skeleton \(%s\) is in water", water), "the one in water"
 print("shelter found by %s, %d steps kept out, lava burnt %d times" % (shel, kept, n))
 PY
 ) || fail "out of the sun: $sun ($log53)"
+# 50. A placed voxel pushes its water aside ([SKELDAT_DISPLACE]): a 2x4x2
+# pocket of full water 10 off the player (128 eighths, watched as in 46),
+# 10 stone put into its water by the test's markers (set_node, the hook a
+# player's place goes through too): "8 of water displaced" 10 times, and
+# the watched volume 120 to 128 in every report (only evaporation takes,
+# an eighth at a time; lost, it would be 48).
+# simplified: the markers, not a player's aimed places
+stones=$(for c in "10 0 3" "11 0 3" "10 1 2" "11 1 2"; do set -- $c
+	for d in $(seq 1 $3); do printf 'marker %d %d skeldat:stone -%d; ' $1 $2 $d; done; done)
+log54="$t/srv54.log"
+BUILDAT_SKELDAT_WORLD=displace BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TERRAIN=plains BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="pocket water 10 0 2 4 2; $stones" \
+	start_server "$log54" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv54" -C "$t/srv.cache" -l 3 || fail "the server ($log54)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 22000" quit > "$t/displace.cmds"
+client displace "$t/displace.cmds"
+wait $CLIENT || fail "the displacing drive ($t/displace.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+pushed=$(grep -ac "skeldat: hazards: 8 of water displaced from" "$log54")
+dvol=$(grep -a "skeldat: hazards: .* water volume" "$log54" | sed 's/.*water volume //' | tr '\n' ' ')
+[ "$pushed" = 10 ] && ! grep -aq "of water lost at" "$log54" &&
+	echo "$dvol" | awk '{ for(i = 1; i <= NF; i++) if($i > 128 || $i < 120) exit 1; exit !(NF >= 2) }' ||
+	fail "the water pushed aside: $pushed displaced, volumes $dvol ($log54)"
+# 51. Water puts out a torch ([SKELDAT_WATER_TORCH]): flat ground, a
+# torch 2 off the player beside a 2x2x2 pocket of water (sunk a voxel,
+# its top layer flowing out): "water puts out a torch", a torch dropped
+# there, and in the next report that voxel's lamp light 0. The player
+# stands in a 1x2x1 pocket (the lower voxel walled by the ground, so it
+# stays water) with 2 torches in hand, looking straight down: the torch
+# into the water refused, none placed.
+log55="$t/srv55.log"
+BUILDAT_SKELDAT_WORLD=torch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="give skeldat:torch 2 1; marker 3 0 skeldat:torch; pocket water 4 0 2 2 2; pocket water 0 0 1 2 1" \
+	start_server "$log55" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($log55)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 2000" "look 0 -89" "delay 500" "mouse_down right" \
+	"delay 100" "mouse_up right" "delay 21000" quit > "$t/torch.cmds"
+client torch "$t/torch.cmds"
+wait $CLIENT || fail "the torch's drive ($t/torch.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+out=$(grep -a "water puts out a torch at" "$log55" | head -1 | sed 's/.*at (\(.*\))/\1/')
+[ -n "$out" ] && grep -aq "a drop of skeldat:torch" "$log55" &&
+	grep -aq "the torch put out at ($out): lamp light 0" "$log55" ||
+	fail "the torch not put out, dropped, or its light left: ${out:-none} ($log55)"
+grep -aq "client1's torch into skeldat:water_source at .* refused" "$log55" &&
+	! grep -aq "client1 places skeldat:torch" "$log55" ||
+	fail "a torch placed into water ($log55)"
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
+echo "displaced: $pushed stones into water, the volume $dvol"
+echo "a torch put out at $out"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"

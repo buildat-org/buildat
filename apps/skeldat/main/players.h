@@ -711,6 +711,12 @@ struct Players: public luanti_session::Game, public MobsHost
 				!beside ||
 				!reaches(pl, x, y, z))
 			return;
+		// [SKELDAT_WATER_TORCH] No torch into a liquid
+		if(n->shape == skeldat::TORCH && here && here->shape == skeldat::LIQUID){
+			log_i(MODULE, "skeldat: %s's torch into %s at %s refused",
+					cs(pl.name), cs(here->name), cs(pos_key(x, y, z)));
+			return;
+		}
 		if(n->shape != skeldat::TORCH){
 			for(auto &pair : all){
 				const Player &o = pair.second;

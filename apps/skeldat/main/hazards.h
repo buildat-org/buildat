@@ -68,6 +68,9 @@ static const int EVAPORATE_ONE_IN = 2000, SETTLE_STEPS = 2000,
 // The settling stops after SETTLE_MS of the server's time as well (what
 // still moves goes on in the game)
 static const int SETTLE_MS = 5000;
+// [SKELDAT_DISPLACE] A placed voxel's liquid or gas looks for room in at
+// most DISPLACE_CAP voxels
+static const size_t DISPLACE_CAP = 64;
 // A lava pocket has a lava spring one in LAVA_SPRING_ONE_IN
 static const int LAVA_SPRING_ONE_IN = 8;
 // The pockets in the rock (terrain.h): water and poison gas from
@@ -80,18 +83,23 @@ static const float POCKET_CHANCE = 1.0f;
 enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC };
 // amount: a liquid's eighths (1..8), a gas's share (1..255); sky: air's
 // light from the sky, 0..15; spring: a lava or water spring's (read,
-// never written: the binding keeps what the voxel is)
+// never written: the binding keeps what the voxel is); drain: air that
+// takes what is put in it and keeps none (the same); torch: a torch's
+// voxel, air to a liquid (which puts it out: the binding's) and solid to
+// a gas ([SKELDAT_WATER_TORCH])
 struct Cell {
 	uint8_t kind = SOLID;
 	uint8_t amount = 0;
 	uint8_t sky = 0;
-	bool spring = false;
+	bool spring = false, drain = false, torch = false;
 	Cell(){}
 	Cell(uint8_t kind, uint8_t amount = 0, uint8_t sky = 0):
 		kind(kind), amount(amount), sky(sky){}
 };
 inline bool liquid(uint8_t k){ return k == WATER || k == LAVA; }
 inline bool gas(uint8_t k){ return k == POISON || k == VOLCANIC; }
+// Air a gas goes into: not a torch's
+inline bool open_air(const Cell &c){ return c.kind == AIR && !c.torch; }
 
 inline uint64_t key(int x, int y, int z)
 {
@@ -121,6 +129,8 @@ struct Hazards
 	std::priority_queue<Due, std::vector<Due>, std::greater<Due>> due;
 	double now = 0;
 	size_t stepped = 0, gassed = 0;
+	// [SKELDAT_DISPLACE] Eighths or shares that found no room, all told
+	size_t lost = 0;
 
 	static double period(uint8_t k){
 		return k == LAVA ? LAVA_PERIOD : gas(k) ? GAS_PERIOD : WATER_PERIOD;
@@ -151,6 +161,67 @@ struct Hazards
 	{
 		set(x, y, z, c);
 		touch(x, y, z);
+	}
+
+	// **[SKELDAT_DISPLACE] A placed voxel's liquid or gas, c, pushed aside**
+	// from (x, y, z): out through the six neighbours, passing only through
+	// the same kind (anything else, a drain and the world's edge stop it),
+	// a distance at a time, a liquid's higher voxels of a distance first
+	// (a displaced pond rises): the same kind with room takes what fits,
+	// air the rest (a liquid 8 at most, a gas all of it) and is not
+	// passed through; DISPLACE_CAP voxels looked at at most. What is left
+	// is lost, counted in lost, and returned.
+	// simplified: to the nearest room, not spread evenly; the step levels it
+	int displace(int x, int y, int z, const Cell &c)
+	{
+		if(!liquid(c.kind) && !gas(c.kind))
+			return 0;
+		const int full = liquid(c.kind) ? 8 : 255;
+		int left = c.amount;
+		std::unordered_set<uint64_t> seen{key(x, y, z)};
+		std::vector<uint64_t> ring, next;
+		auto round = [&](int a, int b, int d){
+			for(const auto &o : SIX)
+				if(seen.insert(key(a + o[0], b + o[1], d + o[2])).second)
+					next.push_back(key(a + o[0], b + o[1], d + o[2]));
+		};
+		round(x, y, z);
+		size_t looked = 0;
+		while(left > 0 && !next.empty() && looked < DISPLACE_CAP){
+			ring.swap(next);
+			next.clear();
+			if(liquid(c.kind))
+				std::stable_sort(ring.begin(), ring.end(), [](uint64_t a, uint64_t b){
+					int ax, ay, az, bx, by, bz;
+					unkey(a, ax, ay, az), unkey(b, bx, by, bz);
+					return ay > by;
+				});
+			for(uint64_t k : ring){
+				if(left == 0 || looked == DISPLACE_CAP)
+					break;
+				looked++;
+				int a, b, d;
+				unkey(k, a, b, d);
+				Cell n = get(a, b, d);
+				if(n.drain || (n.torch && gas(c.kind)))
+					continue;
+				if(n.kind == AIR){
+					const int m = std::min(left, full);
+					put(a, b, d, Cell(c.kind, (uint8_t)m));
+					left -= m;
+				} else if(n.kind == c.kind){
+					const int m = std::min(left, full - n.amount);
+					if(m > 0){
+						n.amount = (uint8_t)(n.amount + m);
+						put(a, b, d, n);
+						left -= m;
+					}
+					round(a, b, d);
+				}
+			}
+		}
+		lost += left;
+		return left;
 	}
 
 	// Steps what is due at time t, at most cap; the count stepped
@@ -353,10 +424,10 @@ struct Hazards
 		if(k == LAVA){
 			bool air = false;
 			for(const auto &d : SIX)
-				air = air || get(x + d[0], y + d[1], z + d[2]).kind == AIR;
+				air = air || open_air(get(x + d[0], y + d[1], z + d[2]));
 			if(air && (int)(rng() % LAVA_GAS_ONE_IN) == 0){
 				const auto &d = SIX[rng() % 6];
-				if(get(x + d[0], y + d[1], z + d[2]).kind == AIR){
+				if(open_air(get(x + d[0], y + d[1], z + d[2]))){
 					put(x + d[0], y + d[1], z + d[2], Cell(VOLCANIC, 255));
 					gassed++;
 				}
@@ -378,7 +449,7 @@ struct Hazards
 		const auto &d = SIX[rng() % 6];
 		const int nx = x + d[0], ny = y + d[1], nz = z + d[2];
 		const Cell n = get(nx, ny, nz);
-		if(n.kind == AIR){
+		if(open_air(n)){
 			const uint8_t h = (uint8_t)(c.amount / 2);
 			const Cell g = h < GAS_MIN ? Cell(AIR) : Cell(c.kind, h);
 			put(x, y, z, g);
@@ -394,7 +465,7 @@ struct Hazards
 		// Still with something to mix with
 		for(const auto &e : SIX){
 			const Cell o = get(x + e[0], y + e[1], z + e[2]);
-			if(o.kind == AIR || (o.kind == c.kind && o.amount != c.amount))
+			if(open_air(o) || (o.kind == c.kind && o.amount != c.amount))
 				return true;
 		}
 		return false;
@@ -548,6 +619,73 @@ int main()
 			assert(full >= 2);
 		else
 			assert(high_at <= 1 + PRESSURE_MAX);
+	}
+	// 5. [SKELDAT_DISPLACE] A basin 3x3 inside, 2 deep, the bottom full,
+	// the top half: a bottom voxel stone, its 8 in the rest
+	{
+		Map m;
+		for(int x = 0; x < 3; x++) for(int z = 0; z < 3; z++){
+			m.set(x, 0, z, Cell(WATER, 8));
+			m.set(x, 1, z, Cell(WATER, 4));
+			for(int y = 2; y < 4; y++)
+				m.set(x, y, z, Cell(AIR));
+		}
+		const int before = m.sum(WATER);
+		Hazards h = bind(m);
+		const Cell c = m.get(1, 0, 1);
+		m.set(1, 0, 1, Cell(SOLID));
+		assert(h.displace(1, 0, 1, c) == 0 && m.sum(WATER) == before);
+		// A full sealed 3x3x3 but for an air voxel at its top: the air
+		// takes it
+		Map s;
+		for(int x = 0; x < 3; x++) for(int y = 0; y < 3; y++)
+		for(int z = 0; z < 3; z++)
+			s.set(x, y, z, Cell(WATER, 8));
+		s.set(1, 2, 1, Cell(AIR));
+		Hazards hs = bind(s);
+		s.set(1, 0, 1, Cell(SOLID));
+		assert(hs.displace(1, 0, 1, Cell(WATER, 8)) == 0 &&
+				s.get(1, 2, 1).kind == WATER && s.get(1, 2, 1).amount == 8);
+		// 128 of poison in a room of air: 128 in a neighbour
+		Map g;
+		for(int x = 0; x < 3; x++) for(int y = 0; y < 3; y++)
+		for(int z = 0; z < 3; z++)
+			g.set(x, y, z, Cell(AIR));
+		g.set(1, 1, 1, Cell(SOLID));
+		Hazards hg = bind(g);
+		assert(hg.displace(1, 1, 1, Cell(POISON, 128)) == 0 && g.sum(POISON) == 128);
+		// A full sealed pocket of 27: the middle's 8 lost and counted
+		s.set(1, 2, 1, Cell(WATER, 8));
+		s.set(1, 0, 1, Cell(WATER, 8));
+		s.set(1, 1, 1, Cell(SOLID));
+		assert(hs.displace(1, 1, 1, Cell(WATER, 8)) == 8 && hs.lost == 8 &&
+				s.sum(WATER) == 26 * 8);
+		// A drain stops it and takes nothing
+		Map dr;
+		dr.set(0, 0, 0, Cell(WATER, 8));
+		Cell drain(AIR);
+		drain.drain = true;
+		dr.set(1, 0, 0, drain);
+		Hazards hd = bind(dr);
+		dr.set(0, 0, 0, Cell(SOLID));
+		assert(hd.displace(0, 0, 0, Cell(WATER, 8)) == 8);
+		// [SKELDAT_WATER_TORCH] Water flows into a torch beside it; poison
+		// beside one does not
+		Map tm;
+		tm.set(0, 0, 0, Cell(WATER, 8));
+		tm.set(0, 0, 5, Cell(POISON, 255));
+		Cell torch(AIR);
+		torch.torch = true;
+		tm.set(1, 0, 0, torch);
+		tm.set(1, 0, 5, torch);
+		Hazards ht = bind(tm);
+		ht.touch(0, 0, 0), ht.touch(0, 0, 5);
+		run(ht, 20);
+		assert(tm.get(1, 0, 0).kind == WATER && tm.get(1, 0, 5).torch &&
+				tm.sum(POISON) == 255);
+		printf("hazards: displaced: a pond's sum kept, a sealed box's air "
+				"filled, a gas into air, a full pocket's 8 lost, a drain no room; "
+				"water into a torch, poison not\n");
 	}
 	printf("hazards: self test passed\n");
 	return 0;

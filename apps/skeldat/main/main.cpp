@@ -164,13 +164,18 @@ struct Module: public interface::Module, public PlayersHost,
 	std::unordered_map<uint64_t, skeldat::hazards::Cell> m_hz_seen;
 	// water_source lava gas_poison gas_volcanic pocket_water (stage 1's
 	// worlds', read as water) stone water_spring water_drain lava_spring
-	// level_drain
-	uint32_t m_hz_ids[10] = {};
+	// level_drain torch
+	uint32_t m_hz_ids[11] = {};
+	// [SKELDAT_WATER_TORCH] Torches the water put out in the step, their
+	// drops after it; and since the report, for its lamp light then
+	std::vector<std::array<int, 3>> m_hz_out, m_hz_out_seen;
 	// The rules' time and with voxelworld's commit of their changes (most
 	// of it: ~5 ms a second for 100 voxels changed, the step's 0.6 ms)
 	int64_t m_hz_us = 0, m_hz_step_us = 0;
 	double m_hz_next_t = 0;
 	size_t m_hz_steps = 0;
+	// [SKELDAT_DISPLACE] The cells placed voxels replaced, for the step
+	std::vector<std::pair<uint64_t, skeldat::hazards::Cell>> m_hz_displaced;
 	// A test's watched box (the "pocket" test): its water volume reported
 	int m_hz_watch[6] = {0, 0, 0, -1, -1, -1};
 
@@ -217,7 +222,7 @@ struct Module: public interface::Module, public PlayersHost,
 		// skulls a footprint, and the sections whose tops are counted
 		// again (the top may have moved to another section of the column)
 		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
-				uint32_t id){
+				uint32_t id, uint32_t){
 			const uint32_t stuck = m_world.stuck_id;
 			if(old != id && (old == stuck || id == stuck)){
 				const ss_ k = pos_key(x, y, z);
@@ -1586,6 +1591,10 @@ struct Module: public interface::Module, public PlayersHost,
 				m_hz_seen[key(x, y, z)] = read_cell(x, y, z);
 				return;
 			}
+			// [SKELDAT_WATER_TORCH] Water over a torch puts it out: its
+			// drop after the step; lava burns it
+			if(was == m_hz_ids[10] && c.kind == WATER)
+				m_hz_out.push_back({{x, y, z}});
 			uint32_t id = ID_AIR, param = 0;
 			switch(c.kind){
 			case WATER: id = m_hz_ids[0], param = c.amount == 8 ? 0 : c.amount; break;
@@ -1598,11 +1607,19 @@ struct Module: public interface::Module, public PlayersHost,
 			m_world.set_node_in(m_hz_w, x, y, z, id, param);
 			m_hz_seen[key(x, y, z)] = c;
 		};
-		// Any other change wakes what is there and round it
+		// Any other change wakes what is there and round it.
+		// [SKELDAT_DISPLACE] A voxel placed (not air) over a liquid or gas
+		// of another kind: what was there queued, pushed aside at the step
 		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
-				uint32_t id){
+				uint32_t id, uint32_t old_param){
 			if(m_hz_w || old == id)
 				return;
+			if(m_hz_ids[5] && id != ID_AIR){
+				const Cell was = cell_of(old, old_param, 0),
+						now = cell_of(id, 0, 0);
+				if((liquid(was.kind) || gas(was.kind)) && now.kind != was.kind)
+					m_hz_displaced.push_back({key(x, y, z), was});
+			}
 			m_hz_pending.push_back(key(x, y, z));
 			for(const auto &d : SIX)
 				m_hz_pending.push_back(key(x + d[0], y + d[1], z + d[2]));
@@ -1618,10 +1635,17 @@ struct Module: public interface::Module, public PlayersHost,
 			return Cell(SOLID);
 		const uint32_t d = m_hz_w->get_voxel(pv::Vector3DInt32(x, y, z),
 				true).data;
-		const uint32_t id = m_world.format.id.get(d),
-				param = m_world.format.param.get(d);
+		return cell_of(m_world.format.id.get(d), m_world.format.param.get(d),
+				(uint8_t)m_world.format.light_sky.get(d));
+	}
+
+	// A voxel's cell by its id and param (read_cell(); the ids once the
+	// step has run)
+	skeldat::hazards::Cell cell_of(uint32_t id, uint32_t param, uint8_t sky)
+	{
+		using namespace skeldat::hazards;
 		if(id == ID_AIR)
-			return Cell(AIR, 0, (uint8_t)m_world.format.light_sky.get(d));
+			return Cell(AIR, 0, sky);
 		// Water's eighths, 0 (an old world's) full
 		if(id == m_hz_ids[0])
 			return Cell(WATER, (uint8_t)(param == 0 || param > 8 ? 8 : param));
@@ -1634,8 +1658,11 @@ struct Module: public interface::Module, public PlayersHost,
 			c.spring = true;
 			return c;
 		}
-		if(id == m_hz_ids[7] || id == m_hz_ids[9])
-			return Cell(AIR);
+		if(id == m_hz_ids[7] || id == m_hz_ids[9]){
+			Cell c(AIR);
+			c.drain = true;
+			return c;
+		}
 		if(id == m_hz_ids[8]){
 			Cell c(LAVA, (uint8_t)(param % 8 + 1));
 			c.spring = true;
@@ -1646,6 +1673,11 @@ struct Module: public interface::Module, public PlayersHost,
 		if(id == m_hz_ids[2] || id == m_hz_ids[3])
 			return Cell(id == m_hz_ids[2] ? POISON : VOLCANIC,
 					(uint8_t)std::max(1u, param));
+		if(id == m_hz_ids[10]){
+			Cell c(AIR);
+			c.torch = true;
+			return c;
+		}
 		return Cell(SOLID);
 	}
 
@@ -1653,11 +1685,12 @@ struct Module: public interface::Module, public PlayersHost,
 	{
 		using namespace skeldat::hazards;
 		if(!m_hz_ids[5]){
-			const char *names[10] = {"skeldat:water_source", "skeldat:lava",
+			const char *names[11] = {"skeldat:water_source", "skeldat:lava",
 					"skeldat:gas_poison", "skeldat:gas_volcanic",
 					"skeldat:pocket_water", "skeldat:stone", "skeldat:water_spring",
-					"skeldat:water_drain", "skeldat:lava_spring", "skeldat:level_drain"};
-			for(int i = 0; i < 10; i++)
+					"skeldat:water_drain", "skeldat:lava_spring", "skeldat:level_drain",
+					"skeldat:torch"};
+			for(int i = 0; i < 11; i++)
 				m_hz_ids[i] = m_world.id_of(names[i]);
 		}
 		// For a check of what stands in water, not of its flow: the step
@@ -1675,6 +1708,22 @@ struct Module: public interface::Module, public PlayersHost,
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			m_hz_w = w;
 			m_hazards.now = m_world.t;
+			// [SKELDAT_DISPLACE] What placed voxels pushed aside, first
+			for(const auto &p : m_hz_displaced){
+				int x, y, z;
+				unkey(p.first, x, y, z);
+				const int lost = m_hazards.displace(x, y, z, p.second);
+				const char *what = p.second.kind == WATER ? "water" :
+						p.second.kind == LAVA ? "lava" : p.second.kind == POISON ?
+						"poison gas" : "volcanic gas";
+				if(lost > 0)
+					log_i(MODULE, "skeldat: hazards: %d of %s lost at (%d %d %d), "
+							"no room within %zu", lost, what, x, y, z, DISPLACE_CAP);
+				else
+					log_i(MODULE, "skeldat: hazards: %d of %s displaced from "
+							"(%d %d %d)", (int)p.second.amount, what, x, y, z);
+			}
+			m_hz_displaced.clear();
 			// Only the hazards among the woken: air and rock never move
 			for(uint64_t k : m_hz_pending){
 				int x, y, z;
@@ -1690,6 +1739,14 @@ struct Module: public interface::Module, public PlayersHost,
 			m_hz_seen.clear();
 		});
 		m_hz_us += interface::os::time_us() - t0;
+		for(const auto &p : m_hz_out){
+			log_i(MODULE, "skeldat: water puts out a torch at (%d %d %d)", p[0],
+					p[1], p[2]);
+			m_drops.drop(Stack("skeldat:torch"), (float)p[0], (float)p[1],
+					(float)p[2]);
+			m_hz_out_seen.push_back(p);
+		}
+		m_hz_out.clear();
 	}
 
 	// The water's voxels and volume (out[0], out[1]) and the lava's voxels
@@ -1810,6 +1867,17 @@ struct Module: public interface::Module, public PlayersHost,
 				m_hz_w = nullptr;
 				m_hz_seen.clear();
 			});
+		// [SKELDAT_WATER_TORCH] A put-out torch's voxel's lamp light, by
+		// now relit
+		for(const auto &p : m_hz_out_seen){
+			int sky = 0, lamp = 0;
+			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+				m_world.light(w, p[0], p[1], p[2], sky, lamp);
+			});
+			log_i(MODULE, "skeldat: hazards: the torch put out at (%d %d %d): "
+					"lamp light %d", p[0], p[1], p[2], lamp);
+		}
+		m_hz_out_seen.clear();
 		log_i(MODULE, "skeldat: hazards: %zu active, %zu stepped, a step %.3f ms "
 				"at most, %.3f ms a second with the commits, water volume %d",
 				m_hazards.active.size(), m_hz_steps, m_hz_step_us / 1e3,
