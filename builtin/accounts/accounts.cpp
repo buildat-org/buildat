@@ -596,8 +596,11 @@ struct Module: public interface::Module, public Interface
 	storage::Store *m_store = nullptr;
 	AccessSettings m_access;
 	ss_ m_setup_code;
-	// The log has said how a locked-out operator gets back in
-	bool m_said_locked_out = false;
+	// Whether a readable admin was looked for once: the log says how a
+	// locked-out operator gets back in
+	bool m_checked_locked_out = false;
+	// admin_count()'s answer, -1 when an auth/ row has changed since
+	int m_admins = -1;
 	bool m_launched = false;
 	// The token the launcher started this server with (main.cpp takes it
 	// out of the environment), and the peers that showed it: the
@@ -1421,6 +1424,7 @@ struct Module: public interface::Module, public Interface
 			stats_hour().made++;
 		}
 		m_store->set("auth/"+name, pack(account));
+		m_admins = -1;
 	}
 
 	// [FP_ABUSE] The apps' storage by app, then by account
@@ -1543,6 +1547,8 @@ struct Module: public interface::Module, public Interface
 
 	int admin_count()
 	{
+		if(m_admins >= 0)
+			return m_admins;
 		int n = 0;
 		for(const ss_ &key : m_store->list("auth/")){
 			Account account;
@@ -1553,7 +1559,7 @@ struct Module: public interface::Module, public Interface
 			if(!get_account(key.substr(5), account) || account.has("admin"))
 				n++;
 		}
-		return n;
+		return m_admins = n;
 	}
 
 	// A server with no admin is claimed with a code from its log: on a
@@ -1566,7 +1572,8 @@ struct Module: public interface::Module, public Interface
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->set_has_admin(admin);
 		});
-		if(admin && !m_said_locked_out){
+		if(admin && !m_checked_locked_out){
+			m_checked_locked_out = true;
 			// [COMPAT_CHECKS]: the operator whose only admin record does
 			// not read is locked out (fail closed); how to get back in
 			sv_<ss_> unreadable_names;
@@ -1579,7 +1586,6 @@ struct Module: public interface::Module, public Interface
 					readable_admin = true;
 			}
 			if(!readable_admin){
-				m_said_locked_out = true;
 				ss_ names;
 				for(const ss_ &n : unreadable_names)
 					names += (names.empty() ? "" : ", ")+n;
@@ -2293,6 +2299,7 @@ struct Module: public interface::Module, public Interface
 			for(PeerId t : targets)
 				kick(t, "the account was deleted by "+by);
 			m_store->remove("auth/"+r.name);
+			m_admins = -1;
 			// Its Starport IDs' links, and what waited for approval (10g)
 			unlink_all(r.name);
 			m_store->remove("approval/"+r.name);
@@ -2348,6 +2355,7 @@ struct Module: public interface::Module, public Interface
 			if(r.cmd == "turn_away"){
 				unlink_all(r.name);
 				m_store->remove("auth/"+r.name);
+				m_admins = -1;
 			}
 			log_i(MODULE, "%s: %s's Starport ID %s", cs(by), cs(r.name),
 					r.cmd == "approve" ? "let in" : "turned away");
@@ -3373,6 +3381,7 @@ struct Module: public interface::Module, public Interface
 		if(!exists(name))
 			return "No such account";
 		m_store->remove("auth/"+name);
+		m_admins = -1;
 		m_store->remove("totp/"+name);
 		m_store->remove("totp_pending/"+name);
 		m_store->remove("level/"+name);
