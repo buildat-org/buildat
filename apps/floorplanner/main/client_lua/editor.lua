@@ -4318,7 +4318,7 @@ refresh_panels = function()
 end
 M.refresh_panels = function() refresh_panels() end
 -- [FP_MOVE_FAST] A move's: only the selection's props show what it
--- changed (the toolbar 20 ms and the palette 30 ms in the Torkkola plan,
+-- changed (the toolbar 20 ms and the palette 30 ms in the large plan,
 -- the props 3-14)
 function M.refresh_props()
 	S.props_stale = false

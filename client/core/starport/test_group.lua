@@ -7,7 +7,7 @@
 local dir = arg[0]:match("^(.*)/") or "."
 local g = dofile(dir .. "/group.lua")
 
-local fleet = {id = "f1", name = "Torkkola", description = "builders"}
+local fleet = {id = "f1", name = "Lakeside", description = "builders"}
 local servers = {
 	{address = "a:1", name = "Alone", players = 2},
 	{address = "b:1", name = "Creative", players = 1, fleet = fleet},

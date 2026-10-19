@@ -2,9 +2,9 @@
 # tier: full
 # cost: ~2 min (2026-10-19)
 # covers: apps/floorplanner/main/client_lua/editor.lua apps/floorplanner/main/client_lua/rebuild.lua apps/floorplanner/main/client_lua/init.lua
-# [FP_MOVE_FAST]: a move's time in a complex plan. The Torkkola plan
-# (user/exports/Torkkola_suunnitelma1_2026-10-06.fpplan, the user's: SKIP
-# without it) imported through the plans page; for a piece of furniture, a
+# [FP_MOVE_FAST]: a move's time in a complex plan. The large plan
+# (apps/floorplanner/test/large_plan.fpplan) imported through the plans
+# page; for a piece of furniture, a
 # door and a wall node in turn ("event fp_select"), five W presses and a
 # 2 s drag in the plan view, then the drags in 3D under PBR. The editor
 # logs each key step's time from the key to the frame showing it and each
@@ -22,12 +22,11 @@ set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "SKIP: no display"; exit 0; }
-plan=Torkkola_suunnitelma1_2026-10-06.fpplan
-[ -f "$here/user/exports/$plan" ] || { echo "SKIP: no $plan in user/exports"; exit 0; }
+plan=large_plan.fpplan
 check_tmp fp_move; t=$CHECK_TMP
 trap check_cleanup EXIT
 mkdir -p "$t/u/exports"
-cp "$here/user/exports/$plan" "$t/u/exports/"
+cp "$here/apps/floorplanner/test/$plan" "$t/u/exports/"
 # A 2 s drag from the window's middle, where fp_select puts the thing
 drag() {
 	echo "mouse_pos 550 500"; echo "delay 300"; echo "mouse_down left"
@@ -107,4 +106,4 @@ for d, u in zip(downs, ups):
     assert any(u < t < u + 1.5 for t in lit), ("no lighting after a 3D drag", u, lit)
 print("two steps %d -> %d mm, a refused move put back" % (a[2], b[2]))
 PY
-echo "PASS: a move in the Torkkola plan under 100 ms, shown at once, put back when refused"
+echo "PASS: a move in the large plan under 100 ms, shown at once, put back when refused"

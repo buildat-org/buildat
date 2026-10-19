@@ -2027,10 +2027,10 @@ local STARPORT_HELP = {
 	"listing; a dropdown with a red ? is a choice not made yet, which the "..
 	"Starport refuses (its status then says which). Unlisted, they may be "..
 	"left out: the name is then the server's address.",
-	"Name: what the list shows, 1 to 60 characters. Example: Torkkola "..
+	"Name: what the list shows, 1 to 60 characters. Example: Lakeside "..
 	"builders' plans.",
 	"Description: a sentence or two, up to 500 characters. Example: A shared "..
-	"floor plan for the Torkkola house; visitors welcome to look.",
+	"floor plan for the lakeside house; visitors welcome to look.",
 	"Public address: where players reach this server. Empty: the address "..
 	"the announce comes from, and this server's own port. Behind a proxy "..
 	"with TLS, its https:// address, which clients join by a secure "..
