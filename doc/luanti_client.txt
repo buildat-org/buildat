@@ -171,6 +171,10 @@ goes the clouds' colour, its horizon and the fog a third of the zenith's
 brightness as an overcast sky is, and pbr's auto exposure aims lower so a
 storm does not meter back up to a clear day. These rules are
 extensions/physical_sky's, and vanilla's client uses the same ones.
+extensions/sky_render puts them together with extensions/voxel_light's
+light rules and the render path that meters and tone maps the frame, for
+builtin/luanti's client loop, apps/skeldat and apps/hillclimb to apply each
+to its own scene; it keeps no state of its own.
 
 There is a floor under it while the sun is down. The sky is the only ambient
 there is here, and a game's night sky can be black -- VoxeLibre paints one --

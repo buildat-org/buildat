@@ -76,3 +76,13 @@ Taken out of `extensions/launch_world` on purpose (2026-09-24 and
   games stand in a formation on one wall, each with its name beside it.
 - The room as the default launch UI is not a goal (2026-10-04); the
   default is launch_menu (2026-10-06).
+
+An app's settings sections set apart from the client's own
+-----------------------------------------------------------
+Decided against 2026-10-10 (user; security run 4, finding 16), not to be
+raised again. An app's section in the client's Settings window
+(show_game_settings) can title itself anything and hold a LineEdit, so
+it can look like one of the client's own controls. The run showed no
+reach past the existing defense: an app's field has no trust colour
+([TRUST_COLOR]), the colour picked at start that the client's own
+Starport fields are drawn in, which no script can read.

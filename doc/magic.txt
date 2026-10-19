@@ -484,3 +484,37 @@ and snow do not fall through a roof or into the ground. The map is a ring
 indexed by world column, so an emitter that follows the player sets only
 the row it gains. One lookup a particle a frame. The members are appended
 at the class's end. doc/client_api.txt has the Lua side.
+
+A touch opens a dropdown on its lift ([TAP_DROPDOWN], 6ce20ac2)
+---------------------------------------------------------------
+Source/Urho3D/UI/Menu.cpp, Source/Urho3D/UI/UI.h
+
+A Menu with a popup (a DropDownList) toggled it on the press. For a touch
+it now does on the release, as a button's tap does, so a drag begun on a
+dropdown in a ScrollView, which disables it before the lift, scrolls the
+view and opens nothing. A mouse still opens on the press.
+UI::IsUsingTouchInput() says which the last pointer input was.
+util/tap_dropdown_check.sh.
+
+Ctrl+V falls back to the primary selection ([PASTE_PRIMARY], 7898b77b)
+----------------------------------------------------------------------
+Source/ThirdParty/SDL/src/video/x11/SDL_x11clipboard.c
+
+X11_GetClipboardText reads CLIPBOARD as before and, when that gives no
+text, PRIMARY the same way. PRIMARY's read gives up after the same second
+but does not, as the CLIPBOARD read's timeout does, set both selections
+to "". util/os_clipboard_check.sh.
+
+The audio buffers' lengths ([SKELDAT_BOARD_SOUND_LAG], e1769237;
+[SKELDAT_BOARD_SOUND_FAULT], c8ee43b3)
+----------------------------------------------------------------
+Source/Urho3D/Audio/{Audio,SoundSource}.{cpp,h},
+LuaScript/pkgs/Audio/{Audio,SoundSource}.pkg
+
+SoundSource.streamBufferLength, milliseconds (20 to 1000, for the next
+Play() of a stream; upstream's fixed STREAM_BUFFER_LENGTH by default):
+shorter is less delay, longer survives a slower main thread. Audio's
+read-only bufferLengthMs and fragmentLengthMs: the device buffer SDL gave
+and a mixing fragment, 0 with no mode; the mode's log line names the
+buffer. skeldat's board sound sizes its stream by them. The members are
+appended at the classes' ends.

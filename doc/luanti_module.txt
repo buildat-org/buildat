@@ -141,7 +141,18 @@ Luanti with buildat bolted to the side.
                         one of them) -- those four plain headers other
                         modules include too,
                         mapgen_params.h (what a vendored mapgen is told),
-                        import.h (the world importer), mapblock.h.
+                        import.h (the world importer), mapblock.h, and
+                        the Module's parts, each owning its own state
+                        ([LUANTI_MODULAR]): clock.h (the clock and the
+                        seed), world.h (making the world and keeping it
+                        loaded), map_access.h (the map as the Lua reads
+                        and writes it), node_meta.h (node metadata in the
+                        save), players.h (the players and their peers),
+                        game_media.h (the media as clients get it),
+                        game_run.h (run_game() and the world it makes),
+                        lua_lib.h (the profiler, the step watchdog and the
+                        rest the Lua gets beside the bindings) and
+                        lua_util.h (the parts' Lua table helpers).
     lua/bootstrap.lua   What the vendored builtin expects to find already
                         registered: the core table, paths, settings, the
                         content id allocator, mod storage, and the stub list.
@@ -224,6 +235,14 @@ preset is Custom. "Server performance..." in the world menu (for a running
 server's admin, the pause menu's "Worlds...") is the form. Each client is
 sent the objects within active_object_send_range_blocks of its player (in
 64-node sections, 1 to 16), and their looks as they come into range.
+
+Beside the preset and not part of it: buildat_texture_pack, the world's
+one of the server's texture packs (<shared>/vanilla/texture_packs; its
+files served in place of the game's, [WORLD_TXP]), and what the world
+gives up when the app is over --max-disk-mb ([SAVE_LIMIT]):
+buildat_forget_unchanged (true; land nobody changed) and
+buildat_forget_builds_days (0; builds nobody has visited in that many
+days too, 0 never).
 
 Fly, fast and noclip are kept in the player's meta per save and handed
 back on join. Distant terrain is drawn at full detail by default (the

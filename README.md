@@ -41,7 +41,9 @@ Starport listing takes it as its kind unless `starport.json` names one.
 * Games (world, arena): `vanilla` (Luanti games), `demo_digger`,
   `demo_bomber_drone` (a drone over demo_digger's terrain),
   `demo_board_game`, `demo_skelenti` (a Luanti game in a Buildat app),
-  `sample_vanilla_falling_blocks` (vanilla with voxel bodies that fall).
+  `sample_vanilla_falling_blocks` (vanilla with voxel bodies that fall),
+  `skeldat` (a bounded voxel world that bones and skeletons take over),
+  `hillclimb` (a hill-climb time trial on generated ground).
 * Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
 * Other: `play`, which serves the web client and has no game of its own:
   its page starts on the launch menu (a Starport lists its origin in
@@ -53,7 +55,7 @@ Starport listing takes it as its kind unless `starport.json` names one.
   sandbox must contain), `sample_lighting_scene` (in one section or
   eight), `sample_luanti_glue`, `sample_falling_blocks`,
   `sample_server_entities`, `sample_client_scene`, `sample_ui`,
-  `sample_module_calls`.
+  `sample_module_calls`, `blip_check` (extensions/blip's sounds).
 
 Further reading:
 
@@ -249,6 +251,10 @@ can still catch a save's SQLite database apart from its `-wal`; stop it
 for that. The secrets in it: `apps/<app>/saves/_server` (password
 hashes, TOTP secrets, the SMTP password), `starport_state.json` and
 `starport_claim.txt` (the listing), `health_token.txt`.
+A running world is written every `--save-interval` seconds (5.3; a hard
+stop loses at most that), and `--max-disk-mb` caps what an app writes:
+over it a world forgets land nobody changed. `bin/buildat_server --help`
+lists the rest.
 
 On Linux the server confines itself before it loads an app (Landlock and
 seccomp): the app writes `<user>/apps/<app>`, its own `<user>/shared/<app>`
