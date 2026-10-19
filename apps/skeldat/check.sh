@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~21 min (2026-10-17)
+# cost: ~24 min (2026-10-19)
 # covers: apps/skeldat/** extensions/luanti_client/res/touch.lua builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -3021,12 +3021,74 @@ assert not re.search(r"a skeleton \(%s\) places a marker skull" % ks[3], a), "a 
 print("1 day: %s; 3 days: %s; 5 days: %s; no marker from a boat" % (A or "on the water", B, C))
 PY
 ) || fail "boats by their age ($t/srv58_age.log)"
+# 55. Water holds no bones ([SKELDAT_BONES_UNDERWATER]): flat ground at
+# noon with the bones at full at x >= 0 (FILL=half), a pond 16 x 16 and 8
+# deep dug into them (its water put over voxels that had bones, its bed
+# stone at full), a section's expansion every 0.3 s at 10x: bones grown
+# into the water off the bed; the world started again with its map
+# (BUILDAT_SKELDAT_SURVEY): every column of the pond is water with no
+# bones, so no pile on the surface and no bones carried up. Then a lake
+# world with bones on its surface alone (FILL=surface, the lake's bed
+# bare), a section's expansion every 0.3 s: it ends, the bed not waited
+# for. (A shore the water drained off gets its bones through the ground
+# now, not the water: at the default pace that took longer than 90 s.)
+lb="level 4 -8 16 16 skeldat:stone -9"
+for dy in -8 -7 -6 -5 -4 -3 -2 -1; do lb="$lb; level 4 -8 16 16 skeldat:water_source $dy"; done
+lake55() { # log; the caller's env with it
+	local log=$1
+	BUILDAT_SKELDAT_WORLD=lakebed BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_DAY=600 \
+		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_SPEED=10 \
+		BUILDAT_SKELDAT_EXPAND=0.3 \
+		start_server "$log" "STATUS Listening" 300 auto \
+		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+		-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($log)"
+	CHECK_PIDS+=($SERVER_PID)
+}
+BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_TEST="$lb" lake55 "$t/srv55.log"
+printf '%s\n' "$placed" "delay 40000" quit > "$t/lakebed.cmds"
+client lakebed "$t/lakebed.cmds"
+wait $CLIENT || fail "the lake bed's drive ($t/lakebed.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+wet=$(grep -a "skeldat: bones: " "$t/srv55.log" | tail -1 | sed 's/.*; \([0-9]*\) grown into a liquid.*/\1/')
+[ "${wet:-0}" -ge 5 ] || fail "bones grown into the pond off its bed: ${wet:-none} ($t/srv55.log)"
+BUILDAT_SKELDAT_SURVEY=1 lake55 "$t/srv55_map.log"
+wait_for_log "$t/srv55_map.log" "skeldat: the map written to" 120 || fail "the lake bed's map ($t/srv55_map.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+pond=$(python3 -I - "$t/srv55.log" "$(grep -a "skeldat: the map written to" "$t/srv55_map.log" | sed 's/.*written to //')" <<'PY'
+import sys, re
+from PIL import Image
+a = open(sys.argv[1], errors="replace").read()
+m = re.findall(r"skeldat: test: skeldat:water_source at y -?\d+ over (-?\d+),(-?\d+) (\d+)x(\d+)", a)
+assert m, "no pond"
+x0, z0, w, d = map(int, m[-1])
+im = Image.open(sys.argv[2]).convert("RGB")
+W = im.size[0]; h = W // 2
+bad = [(x, z, im.getpixel((x + h, W - 1 - (z + h))))
+	for z in range(z0, z0 + d) for x in range(x0, x0 + w)
+	if im.getpixel((x + h, W - 1 - (z + h))) != (40, 80, 200)]
+assert not bad, "the pond's columns not clean water: %d, %s" % (len(bad), bad[:4])
+print("%dx%d at %d,%d all clean water" % (w, d, x0, z0))
+PY
+) || fail "the lake bed's map ($t/srv55_map.log)"
+BUILDAT_SKELDAT_WORLD=lakeend BUILDAT_SKELDAT_TERRAIN=lake BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=surface BUILDAT_SKELDAT_SPEED=2 \
+	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 BUILDAT_SKELDAT_EXPAND=0.3 \
+	start_server "$t/srv55_end.log" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv55_end.log)"
+CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$t/srv55_end.log" "every column's top has bones: the world ends after" 90 ||
+	fail "the lake world with a bare bed did not end ($t/srv55_end.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: water: [1-9][0-9]* voxels" "$t/srv55_end.log" || fail "the lake world had no water ($t/srv55_end.log)"
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
 echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
 echo "boats: $boat; a skull's call: $call; by age: $age"
+echo "under water: $wet grown into the pond, its map $pond; a lake world with a bare bed ended"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"
@@ -3036,5 +3098,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats, bones off a lake's bed and none in its water"
 # vim: set noet ts=4 sw=4:

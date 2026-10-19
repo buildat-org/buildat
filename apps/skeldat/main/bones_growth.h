@@ -40,7 +40,7 @@ struct BonesGrowth
 	sv_<int> flooded, land;
 	// Expansions owed: due at random by the period
 	double expand_due = 0;
-	size_t expansions = 0, expand_changed = 0, grown = 0;
+	size_t expansions = 0, expand_changed = 0, grown = 0, grown_wet = 0;
 	// [SKELDAT_BONE_SPEED] The bones' speed, 1, 2, 5 or 10: the rule's
 	// runs in each expansion and the skeletons' bone work scaled by it;
 	// the lowest the world has been at, which its score names; the rule's
@@ -208,6 +208,12 @@ struct BonesGrowth
 				const size_t i = box.at(x, y, z);
 				box.air[i] = !world.holds_bones(id);
 				box.b[i] = (uint8_t)world.bones.get(v);
+				// A liquid's or gas's bones from before
+				// [SKELDAT_BONES_UNDERWATER]: gone, and flood nothing
+				const skeldat::NodeDef *def = world.node_of(id);
+				if(def && (def->shape == skeldat::LIQUID ||
+						def->shape == skeldat::GAS))
+					box.b[i] = 0;
 				any = any || box.b[i] != 0;
 			}
 			if(!any)
@@ -294,10 +300,12 @@ struct BonesGrowth
 		});
 	}
 
-	// Bones off the voxels at MAX with air over them, now and then
-	// (bones::GROW_ONE_IN): a bone block on a bone block stacks to
+	// Bones off the voxels at MAX with air, a liquid or a gas over them, now
+	// and then (bones::GROW_ONE_IN): a bone block on a bone block stacks to
 	// STACK_MAX; a skull, two or a bone tops nothing. Not into a burning
-	// lantern's sphere (`guard`, empty when none reaches the box)
+	// lantern's sphere (`guard`, empty when none reaches the box). A liquid
+	// or gas grown into is displaced as a placed voxel's is (set_node_in's
+	// on_set, [SKELDAT_DISPLACE]), so a pile rises from a lake's bed
 	void grow(voxelworld::Instance *w, const interface::VoxelVolume &vol,
 			const skeldat::bones::Box &box, const sv_<uint8_t> &guard)
 	{
@@ -316,7 +324,10 @@ struct BonesGrowth
 				continue;
 			const int32_t px = lc.getX() + x, py = lc.getY() + y,
 					pz = lc.getZ() + z;
-			if(world.format.id.get(vol.sample_at(px, py + 1, pz)) != ID_AIR)
+			const uint32_t over = world.format.id.get(vol.sample_at(px, py + 1, pz));
+			const skeldat::NodeDef *od = world.node_of(over);
+			if(over != ID_AIR && !(od && (od->shape == skeldat::LIQUID ||
+					od->shape == skeldat::GAS)))
 				continue;
 			const uint32_t id = world.format.id.get(vol.sample_at(px, py, pz));
 			if(id == tops[0] || id == tops[1] || id == tops[2])
@@ -330,12 +341,10 @@ struct BonesGrowth
 				top = tops[world.rand() % 3];
 			else if(height > 0 && world.rand() % 3 == 0)
 				top = tops[world.rand() % 3];
-			interface::VoxelSample v;
-			world.format.id.set(v.planes[0], top);
-			world.format.param.set(v.planes[0], top == block ? 0 : world.rand() % 4);
-			world.bones.set(v, MAX);
-			w->set_sample(pv::Vector3DInt32(px, py + 1, pz), v);
+			world.set_node_in(w, px, py + 1, pz, top,
+					top == block ? 0 : world.rand() % 4, MAX);
 			grown++;
+			grown_wet += over != ID_AIR;
 		}
 	}
 
@@ -367,11 +376,14 @@ struct BonesGrowth
 			for(int y = world.y1 * S + S - 1; y >= sy * S; y--){
 				const interface::VoxelSample v = vol.sample_at(x, y, z);
 				const uint32_t id = world.format.id.get(v);
+				// A liquid on top: the column is not the land's, and its bed
+				// is not counted either; a gas is passed as air is
+				const skeldat::NodeDef *def = world.node_of(id);
+				if(def && def->shape == skeldat::LIQUID)
+					break;
 				if(!world.holds_bones(id))
 					continue;
-				const skeldat::NodeDef *def = world.node_of(id);
-				n += y < sy * S + S && world.bones.get(v) == 0 &&
-						!(def && def->shape == skeldat::LIQUID);
+				n += y < sy * S + S && world.bones.get(v) == 0;
 				break;
 			}
 			bare[key] = n;
@@ -398,7 +410,9 @@ struct BonesGrowth
 			world.set_top(x, z, y, id, b);
 			const skeldat::NodeDef *def = world.node_of(id);
 			const bool liquid = def && def->shape == skeldat::LIQUID;
-			n += (int)b >= skeldat::bones::FLOOD && !liquid;
+			// simplified: a gas on top counts as land with no bones (the
+			// count passes it); the ground under it read when it matters
+			n += (int)b >= skeldat::bones::FLOOD && world.holds_bones(id);
 			l += !liquid;
 			if(also)
 				also(x, z, y, id);

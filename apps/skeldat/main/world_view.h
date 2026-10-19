@@ -316,16 +316,19 @@ struct WorldView
 		return g;
 	}
 
-	// A voxel that can have bones: not air, a marker skull or a lantern
+	// A voxel that can have bones: not air, a liquid, a gas, a marker skull
+	// or a lantern ([SKELDAT_BONES_UNDERWATER]: water is air to the rule)
 	bool holds_bones(uint32_t id)
 	{
 		if(lantern_ids[0] == ID_IGNORE){
 			lantern_ids[0] = id_of("skeldat:lantern");
 			lantern_ids[1] = id_of("skeldat:lantern_active");
 		}
-		return id != ID_AIR && id != ID_IGNORE && id != marker &&
-				id != lantern_ids[0] && id != lantern_ids[1] &&
-				id != stuck_id;
+		if(id == ID_AIR || id == ID_IGNORE || id == marker ||
+				id == lantern_ids[0] || id == lantern_ids[1] || id == stuck_id)
+			return false;
+		const skeldat::NodeDef *n = node_of(id);
+		return !n || (n->shape != skeldat::LIQUID && n->shape != skeldat::GAS);
 	}
 
 	// The footprint (x, z) is in, its index in a per-footprint list; -1

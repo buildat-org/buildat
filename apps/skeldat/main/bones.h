@@ -41,9 +41,11 @@ static const int NO_DROP = 3;
 static const float SEED_DANGER = 0.5f;
 // Seconds of game time between a section's expansions, on average
 static const double SECTION_PERIOD = 150;
-// Bones grow off a voxel at MAX with air over it (user, 2026-10-15): the
-// chance a section's expansion grows one there, on top a bone block (to
-// STACK_MAX high) or a skull, two or a bone lying (main.cpp's expand()).
+// Bones grow off a voxel at MAX with air over it (user, 2026-10-15), or a
+// liquid or gas, which hold no bones ([SKELDAT_BONES_UNDERWATER]: a pile
+// rises from a lake's bed): the chance a section's expansion grows one
+// there, on top a bone block (to STACK_MAX high) or a skull, two or a bone
+// lying (bones_growth.h's grow()).
 // About two an expansion where a section's whole ground is at MAX.
 static const int GROW_ONE_IN = 2048, STACK_MAX = 4;
 
@@ -291,6 +293,20 @@ int main()
 		expand(box);
 		assert(box.b[box.at(3, 2, 2)] == 0 && box.b[box.at(2, 3, 2)] == 1);
 		assert(box.b[box.at(1, 2, 2)] == 3);
+	}
+	// [SKELDAT_BONES_UNDERWATER] A water column over a floor at MAX: the
+	// water is air to the rule, so no bones rise through it; the floor
+	// keeps MAX for the piles to grow off
+	{
+		Box box(5, 7, 5);
+		box.b[box.at(2, 1, 2)] = MAX;
+		for(int y = 2; y < 6; y++)
+			box.air[box.at(2, y, 2)] = 1;
+		for(int k = 0; k < 40; k++)
+			expand(box);
+		for(int y = 2; y < 6; y++)
+			assert(box.b[box.at(2, y, 2)] == 0);
+		assert(box.b[box.at(2, 1, 2)] == MAX);
 	}
 	// Nothing to do in a section with no bones near it
 	{

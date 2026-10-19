@@ -1968,8 +1968,9 @@ struct Module: public interface::Module, public PlayersHost,
 		// The pace, for whoever tunes it
 		log_i(MODULE, "skeldat: bones: %zu expansions so far, %zu voxels "
 				"changed, %zu grown, %zu sections loaded, %zu rule runs "
-				"at %dx", m_growth.expansions, m_growth.expand_changed, m_growth.grown,
-				m_growth.sections.size(), m_growth.rule_runs, m_growth.speed);
+				"at %dx; %zu grown into a liquid or gas", m_growth.expansions,
+				m_growth.expand_changed, m_growth.grown, m_growth.sections.size(),
+				m_growth.rule_runs, m_growth.speed, m_growth.grown_wet);
 		size_t skeletons = 0, full = 0;
 		for(auto &kv : m_mobs.all)
 			if(kv.second.kind == SKELETON)
