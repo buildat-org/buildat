@@ -1018,8 +1018,8 @@ struct Module: public interface::Module, public moderation::Host
 	int fleet_members(const ss_ &fid, const ss_ &but)
 	{
 		int n = 0;
-		for(const ss_ &id : listing_ids())
-			n += id != but && jstr(load("listings", id), "fleet") == fid;
+		for(auto &p : listings())
+			n += p.first != but && jstr(p.second, "fleet") == fid;
 		return n;
 	}
 
@@ -1030,10 +1030,10 @@ struct Module: public interface::Module, public moderation::Host
 		if(jstr(l, "pool").empty())
 			return;
 		const json::Value mine = effective(l);
-		for(const ss_ &id : listing_ids()){
-			if(id == jstr(l, "id"))
+		for(auto &p : listings()){
+			if(p.first == jstr(l, "id"))
 				continue;
-			const json::Value o = load("listings", id);
+			const json::Value &o = p.second;
 			if(jstr(o, "fleet") != jstr(l, "fleet") ||
 					jstr(o, "pool") != jstr(l, "pool") ||
 					o.get("pool_mismatch").is_true())
@@ -1060,9 +1060,9 @@ struct Module: public interface::Module, public moderation::Host
 		if(fid.empty())
 			return {jstr(g, "listing")};
 		sv_<ss_> out;
-		for(const ss_ &id : listing_ids())
-			if(jstr(load("listings", id), "fleet") == fid)
-				out.push_back(id);
+		for(auto &p : listings())
+			if(jstr(p.second, "fleet") == fid)
+				out.push_back(p.first);
 		return out;
 	}
 
@@ -2716,8 +2716,8 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value l = load("listings", jstr(b, "listing"));
 		const ss_ address = jstr(b, "address");
 		if(!l.is_object() && !address.empty()){
-			for(const ss_ &lid : listing_ids()){
-				const json::Value o = load("listings", lid);
+			for(auto &p : listings()){
+				const json::Value &o = p.second;
 				if(jstr(o, "verify") == "ok" && jstr(o, "status") != "banned" &&
 						jstr(o, "host")+":"+itos(jint(o, "port")) == address){
 					l = o;
@@ -2781,8 +2781,8 @@ struct Module: public interface::Module, public moderation::Host
 		const int64_t t = now_s();
 		if(t >= m_next_reverify){
 			m_next_reverify = t + 6 * 3600;
-			for(const ss_ &id : listing_ids()){
-				const json::Value l = load("listings", id);
+			for(auto &p : listings()){
+				const json::Value &l = p.second;
 				if(l.is_object() && t - jint(l, "last_announce") < 900)
 					queue_verify(l);
 			}
@@ -2819,7 +2819,7 @@ struct Module: public interface::Module, public moderation::Host
 		// record of them
 		int gone = 0;
 		for(const ss_ &id : listing_ids()){
-			const json::Value l = load("listings", id);
+			const json::Value &l = m_listings[id];
 			if(t - jint(l, "last_announce") >
 					(good_standing(jstr(l, "owner")) ? 365 : 30) * 86400 &&
 					jstr(l, "status") == "active" &&
@@ -2863,10 +2863,11 @@ struct Module: public interface::Module, public moderation::Host
 				put("sessions", k, s);
 		}
 		// A delisting for a time runs out
-		for(const ss_ &id : listing_ids()){
-			json::Value l = load("listings", id);
-			const int64_t until = jint(l, "status_until");
+		for(auto &p : listings()){
+			const int64_t until = jint(p.second, "status_until");
 			if(until > 0 && until <= t){
+				const ss_ &id = p.first;
+				json::Value l = p.second;
 				l.set("status", "active");
 				l.set("status_until", (int64_t)0);
 				put("listings", id, l);
@@ -3035,8 +3036,8 @@ struct Module: public interface::Module, public moderation::Host
 				ss_());
 		r.set("email_confirmation", setting("email_confirmation").is_true());
 		json::Value ls = json::array();
-		for(const ss_ &id : listing_ids()){
-			const json::Value l = load("listings", id);
+		for(auto &p : listings()){
+			const json::Value &l = p.second;
 			if(jstr(l, "owner") == name)
 				ls.append(listing_summary(l));
 		}
@@ -3717,8 +3718,8 @@ struct Module: public interface::Module, public moderation::Host
 			return;
 		int n = 0;
 		const int64_t t = now_s();
-		for(const ss_ &id : listing_ids()){
-			const json::Value o = load("listings", id);
+		for(auto &p : listings()){
+			const json::Value &o = p.second;
 			if(jstr(o, "owner") != owner)
 				continue;
 			const json::Value &s = o.get("strikes");
@@ -3767,8 +3768,9 @@ struct Module: public interface::Module, public moderation::Host
 		json::Value out = json::array();
 		ss_ s = search;
 		std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-		for(const ss_ &id : listing_ids()){
-			const json::Value l = load("listings", id);
+		for(auto &p : listings()){
+			const ss_ &id = p.first;
+			const json::Value &l = p.second;
 			ss_ hay = jstr(l, "name")+" "+jstr(l, "id")+" "+jstr(l, "owner")+
 					" "+jstr(l, "host");
 			std::transform(hay.begin(), hay.end(), hay.begin(), ::tolower);
