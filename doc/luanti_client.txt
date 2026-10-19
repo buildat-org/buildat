@@ -283,6 +283,9 @@ itemdef.lua     ITEMDEF: what an item is, and what a tool can dig
 inventory.lua   TOCLIENT_INVENTORY: what the player is carrying
 res/hud.lua     The HUD the server describes, and the flags that turn this
                 client's own off; the luanti module serves the same file
+res/sound_play.lua, res/particle_draw.lua
+                The sounds played and the particles drawn; vanilla's
+                client runs the same files
 res/sounds.lua  PLAY_SOUND and friends, and the sound groups a game's media
                 falls into; the luanti module runs its fade_step
 res/particles.lua The particle packets; the luanti module runs its
@@ -295,8 +298,8 @@ res/texmod.lua  Luanti's texture modifier language, as compose_image()
                 operations; the luanti module serves the same file
 world.lua       The scene: a node per map block, with buildat's voxel mesher
                 on it, and the voxel registry the node definitions build;
-                world_particles.lua, world_sounds.lua, world_pointing.lua
-                (what the camera points at, its box and the crack) and
+                world_pointing.lua (what the camera points at, its box
+                and the crack) and
                 world_object_meshes.lua (what an object is drawn with) are
                 parts of its M.new, called with what they need
 engine_test.lua Checks of the engine primitives, run at boot
@@ -781,7 +784,9 @@ position is a node in the scene with a SoundSource3D on it and the listener
 rides the camera; a local one is a plain SoundSource. A sound attached to an
 object starts where the object is and follows it, which is what a mob's own
 noises want. FADE_SOUND moves the gain by its step a second and a sound faded
-to nothing stops.
+to nothing stops. A positioned sound's gain is Luanti's: three times the
+asked one over the distance from one node out, never over 1, with Urho3D's
+own attenuation off and its panning kept.
 
 What that does not do yet: PLAY_SOUND's start_time is ignored, because
 seeking is not in the sandbox's SoundSource -- a game uses that for

@@ -1571,19 +1571,13 @@ end)
 -- takes its node with it. The scene is the game's, the same one the objects
 -- are drawn in; nothing plays until a game has said which.
 --
--- The drawing half is extensions/luanti_client's world.lua, near enough
--- verbatim; what is different is the shape of the message, which is this
--- module's own -- see lua/sound.lua.
+-- Played by extensions/luanti_client's res/sound_play.lua, the
+-- extension's own too ([LUANTI_SHARED_1019]); what is this module's is the
+-- shape of the message -- see lua/sound.lua -- and the Sounds the app made.
 
--- A positioned sound at Luanti's gain ([SOUND_GAIN_LUANTI]): three
--- times the asked one, over the distance from 1 node out (OpenAL's
--- inverse distance, clamped), never over 1 (AL_MAX_GAIN) -- the world
--- against the music as in Luanti. Urho3D's own attenuation is off (near
--- and far beyond any world), its panning kept.
--- One table: the main chunk is at Lua's 200 locals. ear: where the
--- listener was at the last update.
+-- One table: the main chunk is at Lua's 200 locals.
 -- generated: media name -> a Sound the app made ([SKELENTI_SOUNDS]).
-local snd = {NO_ATTENUATION = 1e9, ear = nil, generated = {}}
+local snd = {generated = {}}
 
 -- set_sound(media_name, sound): a Sound the app made, played wherever
 -- the media file of that name would be -- the server's half is
@@ -1591,24 +1585,23 @@ local snd = {NO_ATTENUATION = 1e9, ear = nil, generated = {}}
 function M.set_sound(name, sound)
 	snd.generated[name] = sound
 end
-local handle_sounds = {}
 
-function snd.heard(entry)
-	if not entry.positional or not snd.ear then
-		return entry.gain
-	end
-	local d = (entry.node.position - snd.ear):Length()
-	return math.min(1, 3 * entry.gain / math.max(d, 1))
-end
+-- The locations and one step of a fade, the extension's ([LUANTI_SHARED])
+local _, _, sounds_proto = buildat.run_script_file("luanti/sounds.lua")
+snd.play = select(3, buildat.run_script_file("luanti/sound_play.lua"))({
+	magic = magic, sounds = sounds_proto,
+	scene = function()
+		return object_scene
+	end,
+	object_pos = function(id)
+		local at = object_nodes[id]
+		return at and at.node.position
+	end,
+})
+snd.location = {["local"] = sounds_proto.LOCAL, object = sounds_proto.OBJECT}
 
 local function stop_sound(handle)
-	local entry = handle_sounds[handle]
-	if entry == nil then
-		return
-	end
-	handle_sounds[handle] = nil
-	entry.source:Stop()
-	entry.node:Remove()
+	snd.play.stop(handle)
 end
 
 local function play_sound(handle, name, gain, pitch, loop, fade, location,
@@ -1622,49 +1615,21 @@ local function play_sound(handle, name, gain, pitch, loop, fade, location,
 		log:warning("luanti:sound: no sound \"" .. name .. "\"")
 		return
 	end
-	sound.looped = loop
-	local node = object_scene:CreateChild("sound")
-	local source
-	local follows = location == "object" and object_id ~= "0" and
-			object_id or nil
-	if location == "local" then
-		source = node:CreateComponent("SoundSource")
-	else
-		local at = follows and object_nodes[follows]
-		node.position = at and at.node.position or magic.Vector3(x, y, z)
-		source = node:CreateComponent("SoundSource3D")
-		source.nearDistance = snd.NO_ATTENUATION
-		source.farDistance = snd.NO_ATTENUATION
+	local source = snd.play.play(handle, {gain = gain, pitch = pitch,
+			loop = loop, fade = fade,
+			location = snd.location[location] or sounds_proto.POSITION,
+			pos = {x, y, z}, object_id = object_id}, sound)
+	if source == nil then
+		return
 	end
-	source.soundType = magic.SOUND_EFFECT
-	local entry = {node = node, source = source, started = false,
-			object_id = follows, positional = location ~= "local"}
-	-- A fade on the packet means it starts silent and comes up to the gain
-	-- it asked for
-	if fade > 0 then
-		entry.target = gain
-		entry.step = fade
-		gain = 0
-	end
-	entry.gain = gain
-	source.gain = snd.heard(entry)
-	if pitch > 0 and pitch ~= 1 then
-		source.frequency = sound.frequency * pitch
-	end
-	source:Play(sound)
 	log:debug(string.format("luanti:sound: %s gain %.3f %s heard at %.3f",
 			name, gain, location, source.gain))
 	-- A loop is a game's music or ambience: few, and what a check waits for
 	if loop then
 		log:info("luanti:sound: " .. name .. " looped")
 	end
-	stop_sound(handle)
-	handle_sounds[handle] = entry
 end
 
--- One step of a fade, the extension's ([LUANTI_SHARED])
-local _, _, sounds_proto = buildat.run_script_file("luanti/sounds.lua")
-local fade_step = sounds_proto.fade_step
 
 -- **A footstep** ([NO_SOUND], 2026-09-25): official Luanti plays these
 -- in the engine off the player's own movement, so nothing on the wire
@@ -1825,33 +1790,7 @@ end
 -- that have finished. The game calls this every frame.
 -- ear: where the listener is, for the positioned sounds' gain
 function M.update_sounds(dtime, ear)
-	snd.ear = ear or snd.ear
-	for handle, entry in pairs(handle_sounds) do
-		local follow = entry.object_id and object_nodes[entry.object_id]
-		if follow then
-			entry.node.position = follow.node.position
-		end
-		if entry.target then
-			local gain, done = fade_step(entry.gain, entry.target, entry.step,
-					dtime)
-			entry.gain = gain
-			if done then
-				entry.target = nil
-				if gain <= 0 then
-					stop_sound(handle)
-				end
-			end
-		end
-		-- Not on the frame it started: a source has not been mixed yet and
-		-- says it is not playing
-		if handle_sounds[handle] then
-			entry.source.gain = snd.heard(entry)
-			if entry.started and not entry.source.playing then
-				stop_sound(handle)
-			end
-			entry.started = true
-		end
-	end
+	snd.play.update(dtime, ear)
 end
 
 buildat.sub_packet("luanti:sound", function(data)
@@ -1864,193 +1803,25 @@ buildat.sub_packet("luanti:sound", function(data)
 	elseif v[1] == "stop" then
 		stop_sound(v[2])
 	elseif v[1] == "fade" then
-		local entry = handle_sounds[v[2]]
-		if entry then
-			entry.step = tonumber(v[3]) or 1
-			entry.target = tonumber(v[4]) or 0
-		end
+		snd.play.fade(v[2], tonumber(v[3]) or 1, tonumber(v[4]) or 0)
 	end
 end)
 
 --
 -- The particles
 --
--- An Urho3D ParticleEmitter per spawner, and one of a single particle that
--- fires once. The drawing is extensions/luanti_client's world.lua near
--- enough verbatim -- what is different is the shape of the message, which
--- is lua/particles.lua's and says what each index is.
+-- Drawn by extensions/luanti_client's res/particle_draw.lua, the
+-- extension's own too ([LUANTI_SHARED_1019]); what is this module's is the
+-- record, which is lua/particles.lua's and says what each index is.
 
-local SINGLE_PARTICLE_MAX = 128
-local DYING_SPAWNERS_MAX = 32
-local PARTICLE_FRAMES_MAX = 64
--- A particle's size is in Luanti's scene units, where a node is ten across;
--- everything here is in nodes
-local PARTICLE_SIZE_TO_NODES = 1 / 10
-
-local particle_nodes = {}     -- spawner id -> what draws it
-local dying_spawners = {}     -- ones whose particles are still expiring
-local single_particles = {}
-
-local function particle_frames(effect, tex, anim, ttl)
-	if tex == nil or anim.type == 0 then
-		return
-	end
-	local frames = {}
-	local step = nil
-	if anim.type == 1 then
-		-- A vertical strip. One frame is as tall as the image is wide,
-		-- times the aspect the game asked for.
-		local frame_h = tex.width / anim.aspect_w * anim.aspect_h
-		local count = frame_h > 0 and
-				math.floor(tex.height / frame_h + 0.5) or 1
-		if count < 2 then
-			return
-		end
-		for i = 0, count - 1 do
-			frames[#frames + 1] = {0, i / count, 1, (i + 1) / count}
-		end
-		-- Luanti's length is the whole animation
-		step = anim.length / count
-	elseif anim.type == 2 then
-		-- A sheet, left to right and then down, which is the order Luanti
-		-- numbers its frames in
-		local across = math.max(1, anim.frames_w)
-		local down = math.max(1, anim.frames_h)
-		if across * down < 2 then
-			return
-		end
-		for y = 0, down - 1 do
-			for x = 0, across - 1 do
-				frames[#frames + 1] = {x / across, y / down,
-						(x + 1) / across, (y + 1) / down}
-			end
-		end
-		-- And here it is the length of one frame
-		step = anim.length
-	end
-	if step == nil or step <= 0 then
-		return
-	end
-	local at, i, added = 0, 1, 0
-	while at < ttl and added < PARTICLE_FRAMES_MAX do
-		local f = frames[i]
-		effect:AddTextureTime(magic.Rect(f[1], f[2], f[3], f[4]), at)
-		at = at + step
-		i = i % #frames + 1
-		added = added + 1
-	end
-end
-
--- What velocity range a direction box holds, the extension's
--- ([LUANTI_SHARED])
+-- What velocity range a direction box holds and the floor maps, the
+-- extension's ([LUANTI_SHARED])
 local _, _, particles_proto = buildat.run_script_file("luanti/particles.lua")
 -- One table, the main chunk being at Lua's 200 locals: the sky model's
--- flash and full glow ([VANILLA_WEATHER]), and light() below
+-- flash and full glow ([VANILLA_WEATHER]), the drawing, and eye: where the
+-- player is, for a spawner attached to their own object
 local pt = {sky = select(3, buildat.run_script_file("luanti/sky_model.lua")),
 		phys = select(3, buildat.run_script_file("physical_sky/init.lua"))}
-
-local function middle(a, b)
-	return {(a[1] + b[1]) / 2, (a[2] + b[2]) / 2, (a[3] + b[3]) / 2}
-end
-
--- The effect is handed to the emitter by the caller, once it has set the
--- fields that differ between a spawner and a single particle: assigning the
--- same effect twice is a no-op in Urho3D, so everything has to be on it
--- before it goes on.
-local particle_materials = {}
-local function particle_effect(resource, amount, ttl_min, ttl_max, size_min,
-		size_max, vel_min, vel_max, acc, active_time, anim, glow)
-	local effect = magic.ParticleEffect.new()
-	-- One material a texture, made the first time it is drawn and kept
-	-- here, which is also what keeps it alive: every particle of a snow
-	-- storm made its own, and that was half of what a particle cost
-	-- ([PACKET_STALL], 2026-10-03). A particle at full glow is a light
-	-- and has one of its own, unfogged (res/ParticleGlow.xml)
-	local full = (glow or 0) >= pt.phys.GLOW_FULL
-	local key = full and resource .. "#glow" or resource
-	local cached = particle_materials[key]
-	local material = cached and cached.material
-	local tex = cached and cached.tex
-	if not cached then
-		material = magic.Material.new()
-		tex = magic.cache:GetResource("Texture2D", resource)
-		if tex then
-			-- Nearest magnification and mipmapped minification, the way
-			-- extensions/luanti_client's particles are: crisp up close, and
-			-- a particle far away is not a sparkle of whichever texel won
-			-- ([RENDER_SURVEY], texture filtering)
-			tex.filterMode = magic.FILTER_NEAREST_ANISOTROPIC
-			material:SetTexture(0, tex)
-		end
-		-- Particles are blended rather than cut out -- smoke and a spark
-		-- are soft-edged -- and unlit, like the objects. Urho3D ships the
-		-- technique.
-		material:SetTechnique(0, magic.cache:GetResource("Technique",
-				full and "luanti_client/res/ParticleGlow.xml" or
-				"Techniques/DiffUnlitParticleAlpha.xml"))
-		-- **Held by the resource cache, not by this table** ([PARTICLE_SEGV]):
-		-- a Material made in Lua lives only while the engine holds it, so
-		-- when the last effect using one went it was freed, and the next
-		-- particle of that texture handed the freed one to SetMaterial --
-		-- SIGSEGV in RefCounted. The cache's reference keeps it.
-		magic.cache:AddManualResource(material, "luanti_particle/" ..
-				key:gsub("[^%w%._%-/]", "_"):gsub("%.%.", "_"))
-		particle_materials[key] = {material = material, tex = tex}
-	end
-	effect.material = material
-	effect.numParticles = amount
-	effect.relative = false
-	effect.scaled = true
-	effect.sorted = true
-	-- A fresh emitter is not in view until it has a particle in it, and
-	-- Urho3D does not update an emitter that is out of view: without this
-	-- the first particle is never emitted and nothing is ever seen
-	effect.updateInvisible = true
-	-- White, and only white: a particle with no colour frame at all comes
-	-- out as one anyway, but saying so is what keeps it that way
-	effect:AddColorTime(magic.Color(1, 1, 1, 1), 0)
-	particle_frames(effect, tex, anim, ttl_max)
-	effect.minTimeToLive = ttl_min
-	effect.maxTimeToLive = ttl_max
-	-- Luanti's size is the whole particle across and a billboard's is half
-	-- of one side, so a rain drop's size of 4 is four tenths of a node
-	local half = PARTICLE_SIZE_TO_NODES / 2
-	effect:SetMinParticleSize(magic.Vector2(size_min * half, size_min * half))
-	effect:SetMaxParticleSize(magic.Vector2(size_max * half, size_max * half))
-	effect:SetMinDirection(magic.Vector3(vel_min[1], vel_min[2], vel_min[3]))
-	effect:SetMaxDirection(magic.Vector3(vel_max[1], vel_max[2], vel_max[3]))
-	local near, far = particles_proto.speed_range(vel_min, vel_max)
-	effect.minVelocity = near
-	effect.maxVelocity = far
-	effect:SetConstantForce(magic.Vector3(acc[1], acc[2], acc[3]))
-	effect.dampingForce = 0
-	-- An active time with no inactive time after it is one burst and then
-	-- nothing, which is what a spawner with a time and a single particle
-	-- both are. Zero active time never stops, which is what a spawner with
-	-- no time is.
-	effect.activeTime = active_time
-	effect.inactiveTime = 0
-	return effect, material
-end
-
--- What makes two spawners the same spawner: everything about them that this
--- draws. A game that takes its spawner away and adds it again -- VoxeLibre's
--- weather does, twenty times a second -- gets the emitter it had back rather
--- than a new one, which is what keeps its rain falling in a stream instead
--- of in fifty-millisecond bursts.
-local function spawner_signature(p)
-	local n = {p.texture, p.amount, p.time, p.attached, p.vertical and 1 or 0}
-	for _, v in ipairs({p.pos_min, p.pos_max, p.vel_min, p.vel_max,
-			p.acc_min, p.acc_max}) do
-		for i = 1, 3 do
-			n[#n + 1] = string.format("%g", v[i])
-		end
-	end
-	for _, v in ipairs({p.exp_min, p.exp_max, p.size_min, p.size_max}) do
-		n[#n + 1] = string.format("%g", v)
-	end
-	return table.concat(n, "/")
-end
 
 -- A node's solidity for a particle floor map: nil where the map has not
 -- arrived
@@ -2062,242 +1833,41 @@ function pt.solid_at(x, y, z)
 	return solid(voxelworld.get_voxel_registry(), v)
 end
 
--- **A particle's light** ([VANILLA_WEATHER] 5): Luanti's is its node's,
--- raised to its glow. Here the emitter's, at its middle, as a sprite
--- object's (M.light_color(): the parity modes' flat light, pbr's in its
--- units). A spawner has a material of its own and the light goes on its
--- colour, unclipped; a single particle shares its texture's, and the light
--- is the effect's colour, which Urho3D applies to the live particles too
--- but which is 8-bit and stops at 1. Full glow is a light: white, and on
--- pbr the flash's radiance, on the (glow) material's colour. simplified:
--- one light for the emitter's whole box, and a lit object's flat share of
--- the sun rather than a lit technique on pbr and shadows; set again when it
--- moves by a 255th.
-function pt.light(entry)
-	local c
-	if (entry.glow or 0) >= pt.phys.GLOW_FULL then
-		local f = M.light_units and pt.phys.flash_radiance() or 1
-		c = magic.Color(f, f, f, 1)
-		if not entry.own_material then
-			entry.material:SetShaderParameter("MatDiffColor", c)
-			c = magic.Color(1, 1, 1, 1)
+pt.draw = select(3, buildat.run_script_file("luanti/particle_draw.lua"))({
+	magic = magic, particles = particles_proto, log = log,
+	glow_full = pt.phys.GLOW_FULL, solid_at = pt.solid_at,
+	scene = function()
+		return object_scene
+	end,
+	texture = function(resource)
+		return magic.cache:GetResource("Texture2D", resource)
+	end,
+	-- **A particle's light** ([VANILLA_WEATHER] 5), as a sprite object's
+	-- (M.light_color(): the parity modes' flat light, pbr's in its units);
+	-- full glow is white, and on pbr the flash's radiance
+	light_color = function(x, y, z, glow)
+		if (glow or 0) >= pt.phys.GLOW_FULL then
+			local f = M.light_units and pt.phys.flash_radiance() or 1
+			return magic.Color(f, f, f, 1)
 		end
-	else
-		local p = entry.node.position
-		c = M.light_color(p.x, p.y, p.z, false, false, entry.glow)
-		if c == nil then
-			return
-		end
-	end
-	local o = entry.lit
-	if o and math.abs(c.r - o.r) < 1 / 255 and math.abs(c.g - o.g) < 1 / 255
-			and math.abs(c.b - o.b) < 1 / 255 then
-		return
-	end
-	entry.lit = c
-	if entry.own_material then
-		entry.material:SetShaderParameter("MatDiffColor", c)
-		return
-	end
-	entry.effect:SetNumColorFrames(0)
-	entry.effect:AddColorTime(magic.Color(c.r, c.g, c.b, 1), 0)
-end
-
-local function remove_spawner(id)
-	local old = particle_nodes[id]
-	if old == nil then
-		return
-	end
-	particle_nodes[id] = nil
-	-- The particles a spawner has already made outlive it, which is what
-	-- Luanti does: its own particles are not owned by the spawner that made
-	-- them. So the emitter stops emitting and the node goes when the last
-	-- particle it made has expired.
-	if old.emitter then
-		old.emitter.emitting = false
-	end
-	old.life = old.ttl_max + 0.2
-	old.attached = nil
-	dying_spawners[#dying_spawners + 1] = old
-	-- A cap, because each of these holds a pool of billboards: the oldest
-	-- goes, which is the one whose particles are nearest the end of their
-	-- lives anyway
-	while #dying_spawners > DYING_SPAWNERS_MAX do
-		table.remove(dying_spawners, 1).node:Remove()
-	end
-end
-
-local function add_spawner(id, p)
-	local resource = texture_of(p.texture)
-	log:debug("luanti:particles: spawner " .. id .. " " .. p.texture ..
-			" -> " .. tostring(resource) .. ", attached " ..
-			tostring(p.attached))
-	if resource == nil or object_scene == nil then
-		return
-	end
-	local pos = middle(p.pos_min, p.pos_max)
-	-- The same spawner as one that was taken away a moment ago: pick its
-	-- emitter back up where it left off
-	local signature = spawner_signature(p)
-	for i, e in ipairs(dying_spawners) do
-		if e.signature == signature then
-			table.remove(dying_spawners, i)
-			if e.emitter then
-				e.emitter.emitting = true
-			end
-			e.life = p.time > 0 and (p.time + p.exp_max + 0.5) or nil
-			e.attached = p.attached ~= "0" and p.attached or nil
-			e.offset = pos
-			particle_nodes[id] = e
-			return
-		end
-	end
-	local node = object_scene:CreateChild("particles")
-	node.position = magic.Vector3(pos[1], pos[2], pos[3])
-	local amount = math.max(1, math.min(p.amount, 1000))
-	local effect, material = particle_effect(resource, amount,
-			math.max(0.01, p.exp_min), math.max(0.01, p.exp_max),
-			math.max(0.001, p.size_min), math.max(0.001, p.size_max),
-			p.vel_min, p.vel_max, middle(p.acc_min, p.acc_max), p.time,
-			p.animation, p.glow)
-	-- What the emitter box is: the position range, which the node sits in
-	-- the middle of
-	effect.emitterType = 1 -- EMITTER_BOX
-	effect:SetEmitterSize(magic.Vector3(
-			math.max(0, p.pos_max[1] - p.pos_min[1]),
-			math.max(0, p.pos_max[2] - p.pos_min[2]),
-			math.max(0, p.pos_max[3] - p.pos_min[3])))
-	-- Luanti spawns amount particles over time seconds, and amount a second
-	-- when there is no time at all
-	local rate = p.time > 0 and amount / p.time or amount
-	effect.minEmissionRate = rate
-	effect.maxEmissionRate = rate
-	-- A spawner's own copy of the material, for its light on the
-	-- material's colour: a vertex colour is 8-bit and stops at 1, and pbr's
-	-- daylight is well past it (pt.light())
-	material = material:Clone()
-	effect.material = material
-	local emitter = node:CreateComponent("ParticleEmitter")
-	emitter.effect = effect
-	emitter.emitting = true
-	emitter.castShadows = false
-	-- Luanti's vertical particle is an upright quad turned to the player
-	-- about Y rather than one facing the camera, which is what makes a rain
-	-- drop look like a falling drop rather than a blob
-	if p.vertical then
-		emitter.faceCameraMode = magic.FC_ROTATE_Y
-	end
-	-- Collision, for what falls: a floor map (luanti/particles.lua)
-	local floor = nil
-	if p.collision and particles_proto.falls(p.vel_min, p.vel_max,
-			p.acc_min, p.acc_max) then
-		local lo, hi = p.pos_min, p.pos_max
-		floor = particles_proto.floor_new(emitter,
-				{lo[1] - pos[1], lo[2] - pos[2], lo[3] - pos[3]},
-				{hi[1] - pos[1], hi[2] - pos[2], hi[3] - pos[3]},
-				p.collision_removal)
-	end
-	-- The effect and its material are kept for as long as the emitter is:
-	-- both were made in Lua, and a Lua-made Urho3D object is destroyed when
-	-- the last Lua reference to it goes, whatever the engine still holds.
-	particle_nodes[id] = {node = node, emitter = emitter, effect = effect,
-			material = material, own_material = true, signature = signature,
-			glow = p.glow, floor = floor,
-			life = p.time > 0 and (p.time + p.exp_max + 0.5) or nil,
-			attached = p.attached ~= "0" and p.attached or nil,
-			offset = pos, ttl_max = math.max(0.01, p.exp_max)}
-end
-
-local function add_single(p)
-	if #single_particles >= SINGLE_PARTICLE_MAX then
-		return
-	end
-	local resource = texture_of(p.texture)
-	if resource == nil or object_scene == nil then
-		return
-	end
-	local ttl = math.max(0.01, p.exp_min)
-	local node = object_scene:CreateChild("particle")
-	node.position = magic.Vector3(p.pos_min[1], p.pos_min[2], p.pos_min[3])
-	local effect, material = particle_effect(resource, 1, ttl, ttl,
-			math.max(0.001, p.size_min), math.max(0.001, p.size_max),
-			p.vel_min, p.vel_max, middle(p.acc_min, p.acc_max), 0.05,
-			p.animation, p.glow)
-	effect.emitterType = 0 -- EMITTER_SPHERE, of no size
-	effect:SetEmitterSize(magic.Vector3(0, 0, 0))
-	effect.minEmissionRate = 100
-	effect.maxEmissionRate = 100
-	local emitter = node:CreateComponent("ParticleEmitter")
-	emitter.effect = effect
-	emitter.emitting = true
-	emitter.castShadows = false
-	if p.vertical then
-		emitter.faceCameraMode = magic.FC_ROTATE_Y
-	end
-	local entry = {node = node, life = ttl + 0.5, effect = effect,
-			material = material, glow = p.glow}
-	pt.light(entry)
-	single_particles[#single_particles + 1] = entry
-end
-
--- Ages the emitters and takes away the ones that are done with. A spawner
--- with no time of its own is not aged: the server deletes it. The game calls
--- this every frame.
--- eye is where the player is, for a spawner attached to their own object --
--- which is not one this client draws; see lua/particles.lua. It may be nil
--- for a game that has no player of its own.
-function M.update_particles(dtime, eye)
-	for id, entry in pairs(particle_nodes) do
-		-- A spawner attached to an object has its positions relative to
-		-- that object and follows it; a game's weather is a spawner
-		-- attached to the player
-		local p = nil
-		if entry.attached == "self" then
-			p = eye
-		elseif entry.attached then
-			local at = object_nodes[entry.attached]
-			p = at and at.node.position or nil
-		end
+		return M.light_color(x, y, z, false, false, glow)
+	end,
+	-- "self" is the player's own object, which is not one this client
+	-- draws; see lua/particles.lua
+	attached_pos = function(id)
+		local at = object_nodes[id]
+		local p = id == "self" and pt.eye or at and at.node.position
 		if p then
-			entry.node.position = magic.Vector3(p.x + entry.offset[1],
-					p.y + entry.offset[2], p.z + entry.offset[3])
+			return p.x, p.y, p.z
 		end
-		pt.light(entry)
-		if entry.floor then
-			local q = entry.node.position
-			particles_proto.floor_update(entry.floor, entry.emitter, q.x,
-					q.y, q.z, pt.solid_at, 400)
-		end
-		if entry.life then
-			entry.life = entry.life - dtime
-			if entry.life <= 0 then
-				entry.node:Remove()
-				particle_nodes[id] = nil
-			end
-		end
-	end
-	local d = 1
-	while d <= #dying_spawners do
-		local entry = dying_spawners[d]
-		entry.life = entry.life - dtime
-		if entry.life <= 0 then
-			entry.node:Remove()
-			table.remove(dying_spawners, d)
-		else
-			d = d + 1
-		end
-	end
-	local i = 1
-	while i <= #single_particles do
-		local entry = single_particles[i]
-		entry.life = entry.life - dtime
-		if entry.life <= 0 then
-			entry.node:Remove()
-			table.remove(single_particles, i)
-		else
-			i = i + 1
-		end
-	end
+	end,
+})
+
+-- The game calls this every frame. eye is where the player is; it may be
+-- nil for a game that has no player of its own.
+function M.update_particles(dtime, eye)
+	pt.eye = eye
+	pt.draw.update(dtime)
 end
 
 -- The record lua/particles.lua sends, by index
@@ -2331,13 +1901,21 @@ end
 
 buildat.sub_packet("luanti:particles", function(data)
 	local v = cereal.binary_input(data, {"array", "string"})
+	if v[1] == "delete" then
+		pt.draw.spawner(v[2], nil)
+		return
+	end
+	local p = parse_particles(v)
+	local texture = p.texture
+	p.texture = texture_of(texture)
+	p.attached = p.attached ~= "0" and p.attached or nil
 	if v[1] == "spawner" then
-		remove_spawner(v[2])
-		add_spawner(v[2], parse_particles(v))
+		log:debug("luanti:particles: spawner " .. v[2] .. " " .. texture ..
+				" -> " .. tostring(p.texture) .. ", attached " ..
+				tostring(p.attached))
+		pt.draw.spawner(v[2], p)
 	elseif v[1] == "particle" then
-		add_single(parse_particles(v))
-	elseif v[1] == "delete" then
-		remove_spawner(v[2])
+		pt.draw.single(p)
 	end
 end)
 

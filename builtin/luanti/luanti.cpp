@@ -216,7 +216,8 @@ struct Module: public interface::Module, public luanti::Interface,
 	// served under the module's own client namespace so a game's client
 	// half runs it by name ([VIEW_BOB]: camera_motion.lua; [EXT_SETTINGS]:
 	// key_editor.lua; [EXT_HUD_PARITY]: minimap.lua; [EXT_HOTBAR]:
-	// hotbar.lua; [LUANTI_SHARED]: texmod.lua, formspec.lua). At start rather
+	// hotbar.lua; [LUANTI_SHARED]: texmod.lua, formspec.lua;
+	// [LUANTI_SHARED_1019]: sound_play.lua, particle_draw.lua). At start rather
 	// than with a game's media: a menu-only connection (the settings
 	// screen, [MENU_CONTEXT]) runs no game and draws the key editor.
 	void serve_shared_lua()
@@ -226,9 +227,9 @@ struct Module: public interface::Module, public luanti::Interface,
 		for(const char *name : {"camera_motion.lua", "key_editor.lua",
 				"minimap.lua", "hotbar.lua", "texmod.lua",
 				"formspec.lua", "formspec_ui.lua", "hud.lua", "hud_draw.lua",
-				"sounds.lua", "particles.lua", "form_session.lua",
-				"item_shape.lua", "sky_model.lua", "touch.lua", "skybox.lua",
-				"chat_line.lua"}){
+				"sounds.lua", "particles.lua", "sound_play.lua",
+				"particle_draw.lua", "form_session.lua", "item_shape.lua",
+				"sky_model.lua", "touch.lua", "skybox.lua", "chat_line.lua"}){
 			const ss_ path = shared+"/"+name;
 			if(interface::fs::path_exists(path)){
 				client_file::access(m_server, [&](client_file::Interface *i){

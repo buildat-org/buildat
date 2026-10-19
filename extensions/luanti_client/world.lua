@@ -25,8 +25,10 @@ local light_flood = buildat.run_extension_file("light.lua")
 local voxel_light = require("buildat/extension/voxel_light")
 local sky_model = buildat.run_extension_file("res/sky_model.lua")
 local skybox = buildat.run_extension_file("res/skybox.lua")
-local world_particles = buildat.run_extension_file("world_particles.lua")
-local world_sounds = buildat.run_extension_file("world_sounds.lua")
+-- The particles drawn and the sounds played, vanilla's too
+-- ([LUANTI_SHARED_1019])
+local particle_draw = buildat.run_extension_file("res/particle_draw.lua")
+local sound_play = buildat.run_extension_file("res/sound_play.lua")
 local world_pointing = buildat.run_extension_file("world_pointing.lua")
 local world_object_meshes =
 		buildat.run_extension_file("world_object_meshes.lua")
@@ -865,20 +867,41 @@ function M.new(magic, buildat, log, options)
 	camera_node:CreateComponent("SoundListener")
 	magic.audio.listener = camera_node:GetComponent("SoundListener")
 
-	-- How far a positioned sound carries. Luanti leaves this to OpenAL's
-	-- defaults, which are in its own units; these are nodes.
-	local SOUND_NEAR = 2.0
-	local SOUND_FAR = 48.0
-
-	local sounds = {}
-
 	-- A scene node per object, kept by id. Declared here rather than with
 	-- the rest of the object code below because a sound attached to an
 	-- object follows it, and the sounds are above that.
 	local object_nodes = {}
 
-	world_sounds(self, magic, scene, sounds_proto, SOUND_NEAR, SOUND_FAR,
-			sounds, object_nodes)
+	-- res/sound_play.lua plays them; spec is what sounds.lua read out of
+	-- PLAY_SOUND and resource the name of one file of the group it asked
+	-- for -- picking which one is the caller's, because which files there
+	-- are is the media's business
+	local sounds = sound_play({magic = magic, sounds = sounds_proto,
+		scene = function()
+			return scene
+		end,
+		object_pos = function(id)
+			local at = object_nodes[id]
+			return at and at.at_x and magic.Vector3(at.at_x,
+					at.at_y + (at.offset or 0), at.at_z)
+		end,
+	})
+	function self:play_sound(id, spec, resource)
+		return sounds.play(id, spec,
+				magic.cache:GetResource("Sound", resource)) ~= nil
+	end
+	function self:stop_sound(id)
+		sounds.stop(id)
+	end
+	function self:fade_sound(id, step, gain)
+		sounds.fade(id, step, gain)
+	end
+	function self:update_sounds(dtime)
+		sounds.update(dtime, camera_node.worldPosition)
+	end
+	function self:sound_count()
+		return sounds.count()
+	end
 
 	-- Which family of connecting nodes each node id belongs to.
 	--
@@ -2007,10 +2030,6 @@ function M.new(magic, buildat, log, options)
 	local object_technique = magic.cache:GetResource("Technique",
 			"luanti_client/res/UnlitAlphaMask.xml")
 	local box_model = magic.cache:GetResource("Model", "Models/Box.mdl")
-	-- Particles are blended rather than cut out -- smoke and a spark are
-	-- soft-edged -- and unlit, like the objects. Urho3D ships the technique.
-	local particle_technique = magic.cache:GetResource("Technique",
-			"Techniques/DiffUnlitParticleAlpha.xml")
 
 	-- The light an object is drawn in. Its texture goes on unlit -- the
 	-- entities of this game are drawn unlit in Luanti's own client too, and
@@ -2313,8 +2332,76 @@ function M.new(magic, buildat, log, options)
 		end
 		return self.node_solid[id] == true
 	end
-	world_particles(self, magic, log, scene, camera_node, game_texture,
-			particle_technique, particles, particle_light, solid_at)
+	-- res/particle_draw.lua draws them, over its own record: this turns
+	-- particles.lua's into it. resolve(name) turns a texture string into a
+	-- resource name, or nil for one that has not arrived.
+	local particle_objects = nil
+	local drawn = particle_draw({magic = magic, particles = particles,
+		log = log, glow_full = psky.GLOW_FULL, solid_at = solid_at,
+		light_color = particle_light,
+		scene = function()
+			return scene
+		end,
+		texture = function(name)
+			return game_texture(name, magic.FILTER_NEAREST_ANISOTROPIC)
+		end,
+		attached_pos = function(id)
+			local obj = particle_objects and particle_objects[id]
+			if obj and obj.is_self then
+				-- The player's own object: the server sends no position
+				-- for it, and where the player is is where the camera is
+				local p = camera_node.position
+				return p.x, p.y, p.z
+			elseif obj and obj.position then
+				return obj.position[1], obj.position[2], obj.position[3]
+			end
+		end,
+	})
+	-- set_particle_spawner(id, p, resolve): p nil takes the spawner away,
+	-- which is what DELETE_PARTICLESPAWNER does. What is drawn of a tween is
+	-- its start.
+	function self:set_particle_spawner(id, p, resolve)
+		if p == nil then
+			drawn.spawner(id, nil)
+			return
+		end
+		local pos, vel, acc = p.pos.start, p.vel.start, p.acc.start
+		drawn.spawner(id, {
+			texture = p.texture ~= "" and resolve(p.texture) or nil,
+			amount = p.amount, time = p.time, vertical = p.vertical,
+			attached = p.attached ~= nil and p.attached ~= 0 and
+					p.attached or nil,
+			pos_min = pos.min, pos_max = pos.max,
+			vel_min = vel.min, vel_max = vel.max,
+			acc_min = acc.min, acc_max = acc.max,
+			exp_min = p.exptime.start.min, exp_max = p.exptime.start.max,
+			size_min = p.size.start.min, size_max = p.size.start.max,
+			animation = p.animation, glow = p.glow,
+			collision = p.collision,
+			collision_removal = p.collision_removal,
+		})
+	end
+	-- One particle the server picked itself
+	function self:add_particle(p, resolve)
+		drawn.single({
+			texture = p.texture ~= "" and resolve(p.texture) or nil,
+			pos_min = p.pos, pos_max = p.pos, vel_min = p.vel,
+			vel_max = p.vel, acc_min = p.acc, acc_max = p.acc,
+			exp_min = p.exptime, exp_max = p.exptime,
+			size_min = p.size, size_max = p.size,
+			vertical = p.vertical, animation = p.animation, glow = p.glow,
+		})
+	end
+	-- objects is what the client has parsed, keyed by object id, so that a
+	-- spawner attached to one can be moved to where that one is now; it may
+	-- be nil for a caller that has none
+	function self:update_particles(dtime, objects)
+		particle_objects = objects
+		drawn.update(dtime)
+	end
+	function self:particle_count()
+		return drawn.count()
+	end
 
 	function self:remove_object(id)
 		local entry = object_nodes[id]
