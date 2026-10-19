@@ -134,21 +134,57 @@ function M.dig_capabilities(lists, wield_index, items)
 	if not items then
 		return nil
 	end
-	local function caps_of(stack)
-		local def = stack and items[stack.name]
-		return def and def.tool_capabilities or nil
-	end
 	local wielded = M.slot(lists, "main", wield_index)
-	local caps = caps_of(wielded)
-	if caps then
-		return caps, wielded
+	local def = wielded and items[wielded.name]
+	if def and def.tool_capabilities then
+		return def.tool_capabilities, wielded
 	end
-	caps = caps_of(M.slot(lists, "hand", 1))
-	if caps then
-		return caps, wielded
+	return M.hand_capabilities(lists, items), wielded
+end
+
+-- The hand slot's capabilities, or the empty item's: what a dig falls back
+-- to when the wielded tool cannot dig the node (Game::handleDigging: "If
+-- not diggable, try hand digging (in case the tool is not useful)")
+function M.hand_capabilities(lists, items)
+	local hand = M.slot(lists, "hand", 1)
+	local def = hand and items[hand.name]
+	if def and def.tool_capabilities then
+		return def.tool_capabilities
 	end
 	local empty = items[""]
-	return empty and empty.tool_capabilities or nil, wielded
+	return empty and empty.tool_capabilities or nil
+end
+
+-- How long the wielded stack takes on a node of these groups and the group
+-- it went by, or nil: dig_time is itemdef.dig_time. A tool that cannot dig
+-- the node digs it as the hand would -- a wooden pickaxe on a log never
+-- ended its dig (00dc7624, builtin/luanti's module.lua the same)
+function M.dig_time(lists, wield_index, items, groups, dig_time)
+	local caps, held = M.dig_capabilities(lists, wield_index, items)
+	local time, group = dig_time(groups, caps)
+	local own = held and items[held.name]
+	if time == nil and own and own.tool_capabilities then
+		return dig_time(groups, M.hand_capabilities(lists, items))
+	end
+	return time, group
+end
+
+-- How far the player reaches, Luanti's getToolRange(): the wielded item's
+-- own range, the hand slot's item's (or the empty item's) when it has
+-- none, and default when neither says
+function M.range(lists, wield_index, items, default)
+	local function range_of(name)
+		local def = items and items[name]
+		return def and def.range or -1
+	end
+	local held = M.slot(lists, "main", wield_index)
+	local range = range_of(held and held.name)
+	if range >= 0 then
+		return range
+	end
+	local hand = M.slot(lists, "hand", 1)
+	range = range_of(hand and items and items[hand.name] and hand.name or "")
+	return range >= 0 and range or default
 end
 
 return M

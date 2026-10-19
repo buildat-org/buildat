@@ -1546,21 +1546,8 @@ local function show_client(host, port, name, password, mode, origin)
 			return inventory.slot(inv, "main", wield_index)
 		end
 
-		local function dig_capabilities()
-			return (inventory.dig_capabilities(inv, wield_index, item_defs))
-		end
-
 		local function reach()
-			local held = wielded()
-			local def = held and item_defs and item_defs[held.name]
-			if def and def.range and def.range > 0 then
-				return def.range
-			end
-			local empty = item_defs and item_defs[""]
-			if empty and empty.range and empty.range > 0 then
-				return empty.range
-			end
-			return POINT_RANGE
+			return inventory.range(inv, wield_index, item_defs, POINT_RANGE)
 		end
 
 		local function node_def_at(p)
@@ -1818,8 +1805,9 @@ local function show_client(host, port, name, password, mode, origin)
 				-- all, and then nothing is ever completed: the server would
 				-- refuse it as digging the undiggable
 				local time, group = nil, nil
-				if def then
-					time, group = itemdef.dig_time(def.groups, dig_capabilities())
+				if def and item_defs then
+					time, group = inventory.dig_time(inv, wield_index, item_defs,
+							def.groups, itemdef.dig_time)
 				end
 				dig = {
 					under = pointed_under, above = pointed_above, elapsed = 0,

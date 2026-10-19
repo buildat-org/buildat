@@ -1287,6 +1287,37 @@ assert(caps.name == "hand", "inventory: the hand slot's capabilities")
 caps = inventory.dig_capabilities({main = {items = {}}}, 1, items)
 assert(caps.name == "empty", "inventory: the empty item's capabilities")
 
+do
+	-- A tool that cannot dig a node digs it as the hand would: a wooden pickaxe
+	-- on a log ([REWORK_1019_FIXES] luanti 2, the module's 00dc7624)
+	local dig_items = {
+		[""] = {tool_capabilities = {groupcaps = {}}, range = -1},
+		["mcl_meshhand:hand"] = {range = 5, tool_capabilities = {groupcaps = {
+				handy = {maxlevel = 1, times = {[1] = 3.5}}}}},
+		["mcl_tools:pick_wood"] = {range = -1, tool_capabilities = {groupcaps = {
+				pickaxey = {maxlevel = 1, times = {[1] = 1.5}}}}},
+		["mcl_tools:shears"] = {range = 3, tool_capabilities = {groupcaps = {}}},
+	}
+	local dig_lists = {
+		main = {items = {{name = "mcl_tools:pick_wood", count = 1},
+				{name = "mcl_tools:shears", count = 1}}},
+		hand = {items = {{name = "mcl_meshhand:hand", count = 1}}},
+	}
+	local log_groups = {handy = 1, axey = 1}
+	assert(inventory.dig_time(dig_lists, 1, dig_items, {pickaxey = 1},
+			itemdef.dig_time) == 1.5, "inventory: the pickaxe's own dig")
+	local t, g = inventory.dig_time(dig_lists, 1, dig_items, log_groups,
+			itemdef.dig_time)
+	assert(t == 3.5 and g == "handy", "inventory: a pickaxe on a log digs as the hand")
+	assert(inventory.dig_time(dig_lists, 1, dig_items, {unbreakable = 1},
+			itemdef.dig_time) == nil, "inventory: nothing digs the undiggable")
+	-- The range: the hand slot's when the wielded item says none; the item's own
+	assert(inventory.range(dig_lists, 1, dig_items, 4) == 5, "inventory: the hand's range")
+	assert(inventory.range(dig_lists, 2, dig_items, 4) == 3, "inventory: the item's range")
+	assert(inventory.range({main = {items = {}}}, 1, dig_items, 4) == 4,
+			"inventory: no range said")
+end
+
 print("inventory: ok")
 
 --
