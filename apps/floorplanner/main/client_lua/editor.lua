@@ -434,6 +434,12 @@ local function viewport_for(v)
 			"main/deferred_ssao.xml" or "RenderPaths/Deferred.xml"))
 	if pbr then
 		M.daylight.pbr_render_path(rp)
+		-- [FP_WHITE_CONNECT] fp_frame.xml's textures made first: a frame
+		-- drawn without one clears its name from the command for good
+		-- (Urho3D's View::FindNamedTexture), and the white read from
+		-- whatever is bound washes the view out until a reconnect
+		M.probes_init()
+		M.wb_init()
 	end
 	vp.renderPath = rp
 	return vp
@@ -7248,24 +7254,31 @@ end
 -- probes' rows and how far between (the cube mode); and a white's colour
 -- (worked out probes', or outdoors).
 -- simplified: under plain PBR without probes, the outdoor white
+-- fp_wb made, outdoors and white to start with
+function M.wb_init()
+	if M.wb then
+		return M.wb
+	end
+	local image = magic.Image:new()
+	assert(image:SetSize(2, 1, 4), "the white's image")
+	image:SetPixel(0, 0, magic.Color(0, 0, 0, 1))
+	image:SetPixel(1, 0, magic.Color(1, 1, 1, 1))
+	local texture = magic.Texture2D:new()
+	texture:SetNumLevels(1)
+	texture.filterMode = magic.FILTER_NEAREST
+	assert(texture:SetData(image), "the white's texture")
+	assert(magic.cache:AddManualResource(texture, "fp_wb"), "the white in the cache")
+	M.kept[#M.kept + 1] = image
+	M.kept[#M.kept + 1] = texture
+	M.wb = {image = image, texture = texture}
+	return M.wb
+end
 function M.wb_tick(dt)
 	if not M.pbr_now() then
 		return
 	end
 	M.probes_init()
-	local w = M.wb
-	if not w then
-		local image = magic.Image:new()
-		assert(image:SetSize(2, 1, 4), "the white's image")
-		local texture = magic.Texture2D:new()
-		texture:SetNumLevels(1)
-		texture.filterMode = magic.FILTER_NEAREST
-		assert(magic.cache:AddManualResource(texture, "fp_wb"), "the white in the cache")
-		M.kept[#M.kept + 1] = image
-		M.kept[#M.kept + 1] = texture
-		w = {image = image, texture = texture}
-		M.wb = w
-	end
+	local w = M.wb_init()
 	local fx, fz = math.sin(math.rad(S.yaw)), math.cos(math.rad(S.yaw))
 	local id
 	for _, ahead in ipairs({0, 300, 600}) do
@@ -7490,7 +7503,7 @@ function M.update(dt)
 	M.apply_daylight()
 	if M.probe_what then
 		M.probe_add("daylight", (buildat.get_time_us() - daylight_t) / 1000)
-		M.probe_ready()
+		M.probe_key_ready()
 	end
 	M.probes_tick()
 	M.wb_tick(dt)
@@ -7886,12 +7899,13 @@ end
 
 -- [FP_MOVE_FAST] The check's measures, once "event fp_select" named what is
 -- measured: a key step's time from the key (M.probe_start) to the frame
--- after the one that has its moved state built (M.probe_ready), and each
+-- after the one that has its moved state built (M.probe_key_ready; not
+-- M.probe or M.probe_ready, rebuild.lua's probes' [FP_WHITE_CONNECT]), and each
 -- frame's time over a drag; logged as "fp move: <what> <view> key N ms" and
 -- "... drag frames p50 N p95 N ms", with the rebuilds', the lighting's,
 -- the panels' and the round trip's times in between
 function M.probe_add(k, ms)
-	local p = M.probe_drag or M.probe
+	local p = M.probe_drag or M.probe_key
 	if p and ms > 0.05 then
 		p[k] = (p[k] or 0) + ms
 		p[k .. "_n"] = (p[k .. "_n"] or 0) + 1
@@ -7911,11 +7925,11 @@ function M.probe_start(id)
 	for k, v in pairs(e and e.ints or {}) do
 		before[k] = v
 	end
-	M.probe = {t0 = buildat.get_time_us(), view = S.view, id = id,
+	M.probe_key = {t0 = buildat.get_time_us(), view = S.view, id = id,
 			before = before}
 end
-function M.probe_ready()
-	local p = M.probe
+function M.probe_key_ready()
+	local p = M.probe_key
 	if not p or p.ready or S.dirty then
 		return
 	end
@@ -7929,11 +7943,11 @@ function M.probe_ready()
 end
 function M.probe_frame()
 	local now = buildat.get_time_us()
-	local p = M.probe
+	local p = M.probe_key
 	if p and p.ready then
 		log:info(string.format("fp move: %s %s key %.1f ms; %s", M.probe_what,
 				p.view, (now - p.t0) / 1000, probe_parts(p)))
-		M.probe = nil
+		M.probe_key = nil
 	end
 	local d = S.drag
 	if d and (d.kind == "move" or d.kind == "node") then

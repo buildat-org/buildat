@@ -1024,16 +1024,30 @@ end
 -- 16 bits in two bytes, 4 mm a step from -131 m; the axis 16 bits from -1
 -- to 1.
 M.ROOM_TABLE_ROWS = 256
-function M.room_bounce(tx, h, tz, light)
-	M.bounce_args = {tx, h, tz, light}
-	local image = M.room_table_image
-	if not image then
-		image = magic.Image:new()
+-- The table's image and texture, the texture held by the cache and read by
+-- name by the grid's pass (fp_grid.xml): made, empty, before the grid's
+-- view is, which drops a name it does not find on its first frame for
+-- good ([FP_WHITE_CONNECT])
+function M.room_table_init()
+	if not M.room_table then
+		local image = magic.Image:new()
 		assert(image:SetSize(8, M.ROOM_TABLE_ROWS, 4), "room table image")
+		image:Clear(magic.Color(0, 0, 0, 0))
 		assert(magic.cache:AddManualResource(image, "fp_room_table_image"),
 				"room table image in the cache")
-		M.room_table_image = image
+		local texture = magic.Texture2D:new()
+		texture:SetNumLevels(1)
+		assert(texture:SetData(image), "room table texture")
+		texture.filterMode = magic.FILTER_NEAREST
+		assert(magic.cache:AddManualResource(texture, "fp_room_table"),
+				"room table in the cache")
+		M.room_table_image, M.room_table = image, texture
 	end
+	return M.room_table_image, M.room_table
+end
+function M.room_bounce(tx, h, tz, light)
+	M.bounce_args = {tx, h, tz, light}
+	local image, texture = M.room_table_init()
 	-- The texels as one list (buildat.set_image_data), four numbers each
 	local W8 = 8
 	local v = {}
@@ -1094,16 +1108,6 @@ function M.room_bounce(tx, h, tz, light)
 		v[(row * W8 + 7) * 4 + 3] = (M.row_owner[row] or 0) / 255
 	end
 	buildat.set_image_data(image, v)
-	local texture = M.room_table
-	if not texture then
-		texture = magic.Texture2D:new()
-		texture:SetNumLevels(1)
-		-- Held by the cache, and read by name by the grid's pass
-		-- (fp_grid.xml)
-		assert(magic.cache:AddManualResource(texture, "fp_room_table"),
-				"room table in the cache")
-		M.room_table = texture
-	end
 	assert(texture:SetData(image), "room table texture")
 	texture.filterMode = magic.FILTER_NEAREST
 	for _, m in ipairs({lit_material, glass_material}) do
@@ -1390,6 +1394,7 @@ local function probes_init()
 	-- GRID_Y * GRID_V, what a surface's light is read from in both modes;
 	-- drawn from either mode's cells, which are there by name before
 	M.cpu_cells_init()
+	M.room_table_init()
 	local grid = magic.Texture2D:new()
 	grid:SetNumLevels(1)
 	assert(grid:SetSize(48, PROBE_ROWS * 24, f16, magic.TEXTURE_RENDERTARGET),
