@@ -303,10 +303,12 @@ inline Game make_game()
 			{{"choppy", 2}, {"tree", 1}});
 	node("wood", "Planks", {"wood"}, {{"choppy", 3}, {"wood", 1}});
 	{
+		// [SKELDAT_APPLE_TREES] Its sapling now and then, nothing
+		// otherwise: the apples are the apple trees' voxels
 		NodeDef &n = node("leaves", "Leaves", {"leaves"},
-				{{"snappy", 3}, {"leaves", 1}}, "skeldat:apple");
+				{{"snappy", 3}, {"leaves", 1}}, "skeldat:sapling");
 		n.shape = ALLFACES;
-		n.drop_rarity = 12;
+		n.drop_rarity = 20;
 	}
 	{
 		NodeDef &n = node("water_source", "Water", {"water"}, {}, "-");
@@ -443,6 +445,44 @@ inline Game make_game()
 		n.light_source = 13;
 		g.items.erase(n.name);
 	}
+	// [SKELDAT_APPLE_TREES] An apple tree's leaves (a sapling knows its
+	// kind by them); an apple hanging in them, dug an apple and an apple
+	// branch left (main.cpp), which is nothing to see or touch and an
+	// apple again at midnight; the saplings, half a voxel tall, grown one
+	// voxel, then a tree of their kind (main.cpp's trees)
+	{
+		NodeDef &n = node("apple_leaves", "Apple Tree Leaves", {"leaves"},
+				{{"snappy", 3}, {"leaves", 1}}, "skeldat:apple_sapling");
+		n.shape = ALLFACES;
+		n.drop_rarity = 20;
+	}
+	{
+		NodeDef &n = node("apple_fruit", "Apple", {"apple"},
+				{{"snappy", 3}, {"dig_immediate", 3}}, "skeldat:apple");
+		n.shape = NODEBOX;
+		n.walkable = false;
+		n.boxes = {-3 / 16.0f, -3 / 16.0f, -3 / 16.0f, 3 / 16.0f, 3 / 16.0f, 3 / 16.0f};
+		g.items.erase(n.name);
+	}
+	{
+		NodeDef &n = node("apple_branch", "Apple Branch", {"leaves"}, {}, "-");
+		n.walkable = false;
+		g.items.erase(n.name);
+	}
+	for(int apple = 0; apple < 2; apple++)
+		for(int grown = 0; grown < 2; grown++){
+			const ss_ kind = apple ? "apple_sapling" : "sapling";
+			NodeDef &n = node(kind + (grown ? "_grown" : ""), ss_(apple ?
+					"Apple Tree Sapling" : "Sapling") + (grown ? " (grown)" : ""),
+					{kind}, {{"snappy", 3}, {"dig_immediate", 3}},
+					grown ? "skeldat:" + kind : "");
+			n.shape = NODEBOX;
+			n.walkable = false;
+			n.boxes = {-5 / 16.0f, -0.5f, -5 / 16.0f, 5 / 16.0f, grown ? 0.5f : 0.0f,
+					5 / 16.0f};
+			if(grown)
+				g.items.erase(n.name);
+		}
 	// The table and the furnace show their fronts
 	g.items["skeldat:table"].image = "main/table_front.png";
 	g.items["skeldat:furnace"].image = "main/furnace_front.png";

@@ -653,7 +653,10 @@ struct Players: public luanti_session::Game, public MobsHost
 		}
 		pl.dig_at = "";
 		const int bones = world.bones_at(x, y, z);
-		world.set_node(x, y, z, ID_AIR);
+		// [SKELDAT_APPLE_TREES] A dug apple leaves its branch, an apple
+		// again at midnight
+		world.set_node(x, y, z, n->name == "skeldat:apple_fruit" ?
+				world.id_of("skeldat:apple_branch") : ID_AIR);
 		if(cap && cap->uses > 0){
 			tool.wear += skeldat::WEAR_MAX / cap->uses;
 			if(tool.wear >= skeldat::WEAR_MAX)
@@ -706,7 +709,9 @@ struct Players: public luanti_session::Game, public MobsHost
 			beside = beside || (b != ID_AIR && b != ID_IGNORE &&
 					b != world.id_of("skeldat:water_source"));
 		}
-		if(!n || !(here_id == ID_AIR || here_id == world.stuck_id || (here &&
+		// An apple branch is built over as air is ([SKELDAT_APPLE_TREES])
+		if(!n || !(here_id == ID_AIR || here_id == world.stuck_id ||
+				(here && here->name == "skeldat:apple_branch") || (here &&
 				(here->shape == skeldat::LIQUID || here->shape == skeldat::GAS))) ||
 				!beside ||
 				!reaches(pl, x, y, z))
@@ -734,6 +739,9 @@ struct Players: public luanti_session::Game, public MobsHost
 			static const uint32_t FACE[4] = {0, 1, 2, 3};
 			param = FACE[q];
 		}
+		// [SKELDAT_APPLE_TREES] Placed leaves never decay: param2's 1
+		if(n->groups.count("leaves"))
+			param = 1;
 		world.set_node(x, y, z, id, param);
 		log_i(MODULE, "skeldat: %s places %s at %s", cs(pl.name),
 				cs(n->name), cs(pos_key(x, y, z)));

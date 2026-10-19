@@ -763,6 +763,37 @@ inline int tree_part(int dx, int dy, int dz)
 	return leaf ? 2 : 0;
 }
 
+// [SKELDAT_APPLE_TREES] Whether the tree on a column is an apple tree, one
+// in share
+inline bool apple_tree_at(int x, int z, uint32_t seed, int share)
+{
+	return (int)((lattice(x, 78, z, seed) + 1) * 0.5f * share) == 0;
+}
+
+// An apple tree's apples: 3 to 6 of the leaves on its crown's outside (its
+// lower two layers, the outer ring but the corners, a side open to air),
+// the ones whose hash is lowest for the tree at (tx, tz)
+inline bool tree_fruit(int tx, int tz, uint32_t seed, int dx, int dy, int dz)
+{
+	auto outer = [](int dx, int dy, int dz){
+		return (dy == 2 || dy == 3) && (std::abs(dx) == 2 || std::abs(dz) == 2) &&
+				tree_part(dx, dy, dz) == 2;
+	};
+	if(!outer(dx, dy, dz))
+		return false;
+	auto h = [&](int dx, int dy, int dz){
+		return lattice(tx * 8 + dx, 79 + dy, tz * 8 + dz, seed);
+	};
+	const int count = 3 + (int)((lattice(tx, 80, tz, seed) + 1) * 0.5f * 4) % 4;
+	const float mine = h(dx, dy, dz);
+	int below = 0;
+	for(int y = 2; y <= 3; y++)
+		for(int z = -2; z <= 2; z++)
+			for(int x = -2; x <= 2; x++)
+				below += outer(x, y, z) && h(x, y, z) < mine;
+	return below < count;
+}
+
 } // namespace mapgen
 } // namespace skeldat
 
@@ -1142,6 +1173,29 @@ int main()
 				n += tree_at(x, z, 2);
 		printf("mapgen: trees on %.3f%% of the columns\n", n / 2500.0);
 		assert(n > 250000 * TREE_CHANCE * 0.7 && n < 250000 * TREE_CHANCE * 1.3);
+	}
+	// [SKELDAT_APPLE_TREES] About one tree in 4 an apple tree, each with 3
+	// to 6 apples on its crown's outside
+	{
+		size_t apple = 0, all = 0, fruit_min = 99, fruit_max = 0;
+		for(int z = 0; z < 2000; z += 3)
+			for(int x = 0; x < 2000; x += 3){
+				if(!tree_at(x, z, 2))
+					continue;
+				all++;
+				if(!apple_tree_at(x, z, 2, 4))
+					continue;
+				apple++;
+				size_t f = 0;
+				for(int dy = 0; dy < 6; dy++)
+					for(int dz = -2; dz <= 2; dz++)
+						for(int dx = -2; dx <= 2; dx++)
+							f += tree_fruit(x, z, 2, dx, dy, dz);
+				fruit_min = std::min(fruit_min, f), fruit_max = std::max(fruit_max, f);
+			}
+		printf("mapgen: %zu of %zu trees apple trees, %zu to %zu apples each\n",
+				apple, all, fruit_min, fruit_max);
+		assert(apple * 5 > all && apple * 3 < all && fruit_min == 3 && fruit_max == 6);
 	}
 	printf("mapgen: self test passed\n");
 	return 0;

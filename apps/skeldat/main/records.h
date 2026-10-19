@@ -229,6 +229,12 @@ static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
 static const float DAYLIGHT_DANGER = 0.5f;
+// [SKELDAT_APPLE_TREES] One generated tree in APPLE_TREE_SHARE is an apple
+// tree; a leaf with no log within DECAY_RANGE goes, DECAY_PER_SECOND tested
+// a second (the slowness is the cost's cap: one box read a second, and one
+// to queue). Leaves drop their sapling one dig in 20 (game.h).
+static const int APPLE_TREE_SHARE = 4, DECAY_RANGE = 4;
+static const float DECAY_PER_SECOND = 1;
 
 struct Mob
 {

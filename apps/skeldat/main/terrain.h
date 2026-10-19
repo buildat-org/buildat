@@ -27,7 +27,8 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 {
 	struct Ids {
 		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0,
-				water = 0, gravel = 0, spring = 0, drain = 0, level_drain = 0;
+				water = 0, gravel = 0, spring = 0, drain = 0, level_drain = 0,
+				apple_leaves = 0, apple_fruit = 0;
 	};
 	struct Ore {
 		uint32_t id;
@@ -187,6 +188,9 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 			const int g = ground(tx, tz);
 			if(g + 6 < lc.getY() || g + 1 > uc.getY())
 				continue;
+			// [SKELDAT_APPLE_TREES] One in APPLE_TREE_SHARE an apple tree
+			const bool apple = mapgen::apple_tree_at(tx, tz, m_p.seed,
+					APPLE_TREE_SHARE);
 			for(int dz = -2; dz <= 2; dz++)
 			for(int dy = 0; dy < 6; dy++)
 			for(int dx = -2; dx <= 2; dx++){
@@ -195,8 +199,10 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 					continue;
 				if(pass == 2 && m_format.id.get(volume.getVoxelAt(x, y, z).data) != ID_AIR)
 					continue;
-				volume.setVoxelAt(x, y, z, VoxelInstance(word_of(
-						pass == 1 ? m_ids.tree : m_ids.leaves, 0)));
+				volume.setVoxelAt(x, y, z, VoxelInstance(word_of(pass == 1 ?
+						m_ids.tree : !apple ? m_ids.leaves : mapgen::tree_fruit(tx,
+						tz, m_p.seed, dx, dy, dz) ? m_ids.apple_fruit :
+						m_ids.apple_leaves, 0)));
 			}
 		}
 		// The sky down each column to its first voxel; a column whose
@@ -512,6 +518,16 @@ struct Terrain
 		// Leaves let light in but not the sun, as Luanti's do
 		d.sunlight = n.shape == skeldat::NODEBOX || n.shape == skeldat::TORCH ||
 				n.shape == skeldat::GAS;
+		// [SKELDAT_APPLE_TREES] An apple branch: nothing to see or touch,
+		// built over as air is (for now: the user)
+		if(n.name == "skeldat:apple_branch"){
+			d.drawtype = "airlike";
+			d.walkable = false;
+			d.pointable = 0;
+			d.sunlight = true;
+			d.floodable = true;
+			return d;
+		}
 		switch(n.shape){
 		case skeldat::CUBE:
 			break;
@@ -600,6 +616,8 @@ struct Terrain
 		ids.sand = world.id_of("skeldat:sand");
 		ids.tree = world.id_of("skeldat:tree");
 		ids.leaves = world.id_of("skeldat:leaves");
+		ids.apple_leaves = world.id_of("skeldat:apple_leaves");
+		ids.apple_fruit = world.id_of("skeldat:apple_fruit");
 		ids.water = world.id_of("skeldat:water_source");
 		ids.gravel = world.id_of("skeldat:gravel");
 		ids.spring = world.id_of("skeldat:water_spring");
@@ -858,7 +876,8 @@ struct Terrain
 						const uint32_t id = world.format.id.get(vol.sample_at(x, y, z));
 						const skeldat::NodeDef *n = world.node_of(id);
 						if(id == ID_AIR || (n && (n->shape == skeldat::LIQUID ||
-								n->name == "skeldat:leaves")))
+								n->groups.count("leaves") ||
+								n->name.compare(0, 13, "skeldat:apple") == 0)))
 							put(x, y, z, block), blocks++;
 					}
 					if(d == 0)

@@ -85,6 +85,7 @@ using Urho3D::M_RADTODEG;
 #include "world_view.h"
 #include "furnaces.h"
 #include "drops.h"
+#include "trees.h"
 #include "terrain.h"
 #include "bones_growth.h"
 #include "making_map.h"
@@ -128,6 +129,8 @@ struct Module: public interface::Module, public PlayersHost,
 	size_t m_worldgen_queue = 0;
 	// The stacks on the ground (drops.h)
 	Drops m_drops{m_world};
+	// [SKELDAT_APPLE_TREES] Leaf decay and the saplings
+	Trees m_trees{m_world, m_drops};
 	// The world's making (terrain.h)
 	Terrain m_terrain{m_world, m_save, m_store, m_drops};
 	// The players, what they do and the session (players.h)
@@ -195,6 +198,23 @@ struct Module: public interface::Module, public PlayersHost,
 		// surroundings watched (water's volume in the report)
 		m_mobs.test_more = [this](const ss_ &kind, std::istream &it,
 				Player &p){
+			// [SKELDAT_APPLE_TREES] "set dx dy dz node": the node (or air)
+			// at that offset from the player's feet voxel
+			if(kind == "set"){
+				int dx = 0, dy = 0, dz = 0;
+				ss_ name;
+				it>>dx>>dy>>dz>>name;
+				const int x = (int)std::floor(p.x + 0.5f) + dx,
+						y = (int)std::floor(p.y + 0.5f) + dy,
+						z = (int)std::floor(p.z + 0.5f) + dz;
+				const uint32_t id = m_world.id_of(name);
+				if(id != ID_IGNORE){
+					m_world.set_node(x, y, z, id);
+					log_i(MODULE, "skeldat: test: set %s at %s", cs(name),
+							cs(pos_key(x, y, z)));
+				}
+				return true;
+			}
 			if(kind != "pocket")
 				return false;
 			ss_ what;
@@ -218,6 +238,11 @@ struct Module: public interface::Module, public PlayersHost,
 					what.c_str(), bw, bh, bd, x0, y0, z0);
 			return true;
 		};
+		// [SKELDAT_APPLE_TREES] Logs and leaves changed, saplings placed
+		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
+				uint32_t id, uint32_t){
+			m_trees.on_set(x, y, z, old, id);
+		});
 		// What is kept by the voxel: the stuck arrows (saved), the marker
 		// skulls a footprint, and the sections whose tops are counted
 		// again (the top may have moved to another section of the column)
@@ -682,6 +707,8 @@ struct Module: public interface::Module, public PlayersHost,
 			m_world.day = atof(env_time);
 		m_furnaces.store = m_store;
 		m_furnaces.load();
+		m_trees.store = m_store;
+		m_trees.init();
 		for(const ss_ &key : m_store->list("mob/")){
 			Mob m;
 			const uint32_t k = (uint32_t)atol(key.c_str() + 4);
@@ -1495,7 +1522,15 @@ struct Module: public interface::Module, public PlayersHost,
 	{
 		m_world.time += dtime;
 		m_world.t += dtime;
+		const double was_day = m_world.day;
 		m_world.day = std::fmod(m_world.day + dtime / m_world.day_s, 1.0);
+		// [SKELDAT_APPLE_TREES] Midnight passed, a skip's too
+		if(m_world.ready && m_world.day < was_day){
+			m_trees.seed = m_terrain.seed;
+			m_trees.midnight();
+		}
+		if(m_world.ready)
+			m_trees.step(dtime);
 		if(!m_growth.ended)
 			step_bones(dtime);
 		if(!m_growth.ended && m_world.ready)
@@ -1904,6 +1939,7 @@ struct Module: public interface::Module, public PlayersHost,
 				m_mobs.body_puts, m_mobs.sun_kept);
 		m_mobs.light_us = 0, m_mobs.light_steps = 0, m_mobs.woken = 0, m_mobs.body_puts = 0;
 		m_mobs.sun_kept = 0;
+		m_trees.report(10);
 		report_hazards();
 		m_growth.recount.insert(m_hz_recount.begin(), m_hz_recount.end());
 		m_hz_recount.clear();
