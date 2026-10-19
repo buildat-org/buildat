@@ -25,10 +25,8 @@ dofile(dir .. "/classes.lua")
 dofile(dir .. "/colorspec.lua")
 dofile(dir .. "/misc.lua")
 local modlist = dofile(dir .. "/modlist.lua")
-dofile(dir .. "/objmesh.lua")
-dofile(dir .. "/b3dmesh.lua")
 dofile(dir .. "/json.lua")
-dofile(dir .. "/gltfmesh.lua")
+__luanti_shared_path = dir .. "/../../../extensions/luanti_client/res"
 dofile(dir .. "/mesh.lua")
 
 local function check(name, f)
@@ -278,8 +276,8 @@ check("conf parsing", function()
 end)
 
 -- What the module reads out of a "mesh" node's model: the readers
--- themselves are checked in extensions/luanti_client/test.lua, where they
--- were written, so this is the flattening -- a quad is twenty-one numbers,
+-- themselves are checked in extensions/luanti_client/test.lua, beside
+-- them, so this is the flattening -- a quad is twenty-one numbers,
 -- a material is the tile of the same number counted from zero, and
 -- visual_scale multiplies every corner.
 check("mesh quads", function()
@@ -355,7 +353,7 @@ check("b3d keys between frames", function()
 	local body = le32(1) .. node
 	local b3d = "BB3D" .. le32(#body + 4) .. body
 	local function x_at(frame)
-		return core.__b3dmesh.parse(b3d, frame)[1].p[1]
+		return dofile(__luanti_shared_path .. "/b3dmesh.lua").parse(b3d, frame)[1].p[1]
 	end
 	assert(x_at(nil) == 0, "the bind pose")
 	assert(math.abs(x_at(5) - 5) < 1e-6, "frame 5 is " .. x_at(5))

@@ -9,11 +9,15 @@
 -- once, while the registry is built, and from there it is a shape like any
 -- other: a chunk of lanterns costs what a chunk of cubes costs.
 --
--- The readers beside this file are objmesh.lua and b3dmesh.lua, copied out
--- of extensions/luanti_client where they were written for this same mesher,
--- and gltfmesh.lua, which was written here. Between them they cover all but
--- the .x of devtest's thirty mesh references, and a node that names one of
--- those keeps the cube it had.
+-- The readers are extensions/luanti_client/res/'s, the ones luanti_client
+-- reads its models with too ([LUANTI_SHARED_1019]): mesh_read.lua picks one
+-- by the extension. Between them they cover all but the .x of devtest's
+-- thirty mesh references, and a node that names one of those keeps the cube
+-- it had.
+local meshes = dofile(__luanti_shared_path .. "/mesh_read.lua")(
+		function(name) return dofile(__luanti_shared_path .. "/" .. name) end,
+		function(text) return core.parse_json(text, nil, true) end,
+		function(text) return core.decode_base64(text) end)
 
 -- core.__mesh_quads(name, data, scale) -> a flat array of numbers, and how
 -- many faces were neither triangles nor quads. Each quad is 21 numbers: the
@@ -22,15 +26,7 @@
 -- frame: an object's model posed at that frame of its animation; only
 -- .b3d carries one ([OBJECT_MESH])
 function core.__mesh_quads(name, data, scale, frame)
-	local lower = tostring(name):lower()
-	local read = nil
-	if lower:match("%.obj$") then
-		read = core.__objmesh.parse
-	elseif lower:match("%.b3d$") then
-		read = core.__b3dmesh.parse
-	elseif lower:match("%.gltf$") or lower:match("%.glb$") then
-		read = core.__gltfmesh.parse
-	end
+	local read = meshes.reader(name)
 	if read == nil then
 		return nil, 0
 	end
@@ -44,7 +40,7 @@ function core.__mesh_quads(name, data, scale, frame)
 	if type(quads) ~= "table" or #quads == 0 then
 		return nil, 0
 	end
-	core.__objmesh.scale(quads, scale)
+	meshes.scale(quads, scale)
 	local out = {}
 	local n = 0
 	for i = 1, #quads do

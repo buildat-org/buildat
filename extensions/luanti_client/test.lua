@@ -52,14 +52,14 @@ local nodedef = dofile(dir.."/nodedef.lua")
 local media = dofile(dir.."/media.lua")
 local shapes = dofile(dir.."/shapes.lua")
 local hud = dofile(dir.."/res/hud.lua")
-local b3dmesh = dofile(dir.."/b3dmesh.lua")
+local b3dmesh = dofile(dir.."/res/b3dmesh.lua")
 local luanti_client = dofile(dir.."/client.lua")
 local sounds = dofile(dir.."/res/sounds.lua")
 local particles = dofile(dir.."/res/particles.lua")
 local light = dofile(dir.."/light.lua")
 local itemdef = dofile(dir.."/itemdef.lua")
 local nodemeta = dofile(dir.."/nodemeta.lua")
-local objmesh = dofile(dir.."/objmesh.lua")
+local objmesh = dofile(dir.."/res/objmesh.lua")
 local voxel_light = dofile(dir.."/../voxel_light/init.lua")
 
 local function dump_name(s)
@@ -1536,8 +1536,18 @@ local det = serialize.writer():u8(objects.CMD_ATTACH_TO):s16(0)
 objects.apply_message(obj, serialize.reader(det))
 assert(obj.attached_to == nil, "objects: detaching brings it back")
 
+-- The animation's first frame is what the model is posed at
+local anim = serialize.writer():u8(objects.CMD_SET_ANIMATION):f32(10)
+		:f32(30):f32(15):f32(0):u8(0):data()
+obj.visual_stale = nil
+objects.apply_message(obj, serialize.reader(anim))
+assert(obj.anim_frame == 10 and obj.visual_stale, "objects: the first frame")
+obj.visual_stale = nil
+objects.apply_message(obj, serialize.reader(anim))
+assert(not obj.visual_stale, "objects: the same animation again redraws")
+
 -- A message this does not implement leaves the object alone
-local unknown = serialize.writer():u8(objects.CMD_SET_ANIMATION)
+local unknown = serialize.writer():u8(objects.CMD_PUNCHED)
 		:raw(string.rep("\0", 20)):data()
 objects.apply_message(obj, serialize.reader(unknown))
 assert(obj.props.visual == "mesh", "objects: an unknown message broke it")

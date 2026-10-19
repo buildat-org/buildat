@@ -52,8 +52,10 @@ local player = buildat.run_extension_file("player.lua")
 local texmod = buildat.run_extension_file("res/texmod.lua")
 local itemdef = buildat.run_extension_file("itemdef.lua")
 local inventory = buildat.run_extension_file("inventory.lua")
-local objmesh = buildat.run_extension_file("objmesh.lua")
-local b3dmesh = buildat.run_extension_file("b3dmesh.lua")
+-- The model readers, the module's too ([LUANTI_SHARED_1019])
+local meshes = buildat.run_extension_file("res/mesh_read.lua")(
+		function(name) return buildat.run_extension_file("res/"..name) end,
+		network.parse_json, texmod.base64_decode)
 local luanti_hud = buildat.run_extension_file("res/hud.lua")
 luanti_hud.draw = buildat.run_extension_file("res/hud_draw.lua")
 -- On the HUD module's table rather than a local of its own: the connect
@@ -801,7 +803,7 @@ local function show_client(host, port, name, password, mode, origin)
 		-- every voxel that faces a different way asks for the same one.
 		-- The scale is part of the key because two definitions can draw one
 		-- model at different sizes.
-		local meshes = {}
+		local mesh_cache = {}
 		local meshes_read = 0
 
 		read_mesh = function(def)
@@ -814,32 +816,30 @@ local function show_client(host, port, name, password, mode, origin)
 				return nil
 			end
 			local scale = def.visual_scale ~= 0 and def.visual_scale or 1
-			local key = name.."@"..tostring(scale)
-			local quads = meshes[key]
+			-- An object's model is posed at its animation's first frame
+			local frame = def.frame
+			local key = name.."@"..tostring(scale).."@"..tostring(frame)
+			local quads = mesh_cache[key]
 			if quads == nil then
-				local lower = name:lower()
-				-- .obj is text and .b3d is Blitz3D's chunks; the other
-				-- formats Luanti takes (.x, .gltf, .glb) nothing here reads
-				local read = nil
-				if lower:match("%.obj$") then
-					read = objmesh.parse
-				elseif lower:match("%.b3d$") then
-					read = b3dmesh.parse
-				end
+				-- .obj, .b3d, .gltf and .glb; .x nothing here reads
+				local read = meshes.reader(name)
 				if not read then
-					meshes[key] = false
+					mesh_cache[key] = false
 					return nil
 				end
 				local text = buildat.cache_read(server_key.."/"..name)
 				if not text then
-					meshes[key] = false
+					mesh_cache[key] = false
 					return nil
 				end
-				local parsed, why, skipped = read(text)
+				local ok, parsed, why, skipped = pcall(read, text, frame)
+				if not ok then
+					parsed, why = nil, parsed
+				end
 				if not parsed or #parsed == 0 then
 					log:warning("mesh "..name.." has no faces this reads"..
 							(type(why) == "string" and ": "..why or ""))
-					meshes[key] = false
+					mesh_cache[key] = false
 					return nil
 				end
 				skipped = skipped or 0
@@ -852,9 +852,11 @@ local function show_client(host, port, name, password, mode, origin)
 				for _, q in ipairs(parsed) do
 					q.tile = math.min(q.group, 6)
 				end
-				quads = objmesh.scale(parsed, scale)
-				meshes[key] = quads
+				quads = meshes.scale(parsed, scale)
+				mesh_cache[key] = quads
 				meshes_read = meshes_read + 1
+				log:info("model "..name..(frame and " posed at frame "..
+						frame or "")..": "..#quads.." quads")
 			end
 			return quads or nil
 		end
@@ -1239,12 +1241,13 @@ local function show_client(host, port, name, password, mode, origin)
 						textures[1] or props.wield_item
 				return of_item(item), item_tiles(item)
 			end
-			-- An object drawn as its own model: the quads out of the .b3d
-			-- or .obj, and one texture per material. A model this cannot
-			-- read, or whose first texture has not arrived, falls back to
-			-- the box below.
+			-- An object drawn as its own model: the quads out of its model
+			-- posed at its animation's first frame, and one texture per
+			-- material. A model this cannot read, or whose first texture
+			-- has not arrived, falls back to the box below.
 			if props.visual == "mesh" and props.mesh and props.mesh ~= "" then
-				local quads = read_mesh({mesh = props.mesh, visual_scale = 1})
+				local quads = read_mesh({mesh = props.mesh, visual_scale = 1,
+						frame = obj.anim_frame})
 				if quads then
 					local tiles = {}
 					for i = 1, #(textures or {}) do
@@ -1252,9 +1255,10 @@ local function show_client(host, port, name, password, mode, origin)
 					end
 					if tiles[1] then
 						-- The name is what the world keys one built mesh by,
-						-- so that every mob of a kind is a copy of one
+						-- so that every mob of a kind in one pose is a copy
+						-- of one
 						return tiles[1], nil, {quads = quads, tiles = tiles,
-								name = props.mesh}
+								name = props.mesh.."@"..tostring(obj.anim_frame)}
 					end
 				end
 			end

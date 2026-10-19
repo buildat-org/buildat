@@ -235,8 +235,8 @@ the same; this is what the rendering latitude is for.
 A node is drawn as a cube with its own six textures when its draw type is a
 cube (normal, glasslike, allfaces, a liquid source), and as the quads of its
 own shape when it is not: a node box, a plant, a torch, a sign, a rail, a
-flowing liquid, or an .obj model. What is left is one grey placeholder cube --
-a node whose model is in a format objmesh.lua does not read, and one whose
+flowing liquid, or a model. What is left is one grey placeholder cube --
+a node whose model is in a format res/mesh_read.lua does not read (.x), and one whose
 texture is a modifier expression texmod.lua does not reduce.
 
 The network dialog of extension/network asks about the address the first time;
@@ -262,11 +262,13 @@ shapes.lua      Luanti's node shapes, as the quads a voxel definition takes
 surface.lua     What a node's surface is made of, guessed from its definition:
                 the six numbers per texture segment the atlas turns into
                 normal and spec maps
-objmesh.lua     Wavefront .obj, as the quads a voxel's shape is made of
-b3dmesh.lua     Blitz3D .b3d, the same
 nodemeta.lua    A node's metadata: what a chest holds, what a sign says
 light.lua       The light around a node that changed, worked out here
 res/            What the client itself ships: the placeholder textures, and
+                the Lua vanilla's module and client run too (mesh_read.lua
+                and the model readers beside it: .obj, .b3d posed at a
+                frame, .gltf and .glb; the HUD, forms, particles, sounds),
+                and
                 the shaders and techniques this world is drawn with. Urho3D
                 finds them because share_path/extensions is a resource dir,
                 and a technique names a shader with a path of its own so it
@@ -531,9 +533,10 @@ What is done
   says they are. Their textures are drawn without smoothing, like the voxel
   atlas's: a Luanti game's textures are pixel art and interpolating them is
   wrong at every size. An object whose visual is a mesh is drawn as that mesh --
-  the .b3d and .obj readers the node meshes use, one geometry per material so
-  each wears the texture the object gave for it -- in its rest pose, because
-  the animation chunks are not read. A dropped node is a small cube of the
+  the model readers the node meshes use, one geometry per material so
+  each wears the texture the object gave for it -- a .b3d posed at the first
+  frame of the object's animation, as vanilla draws it; the animation does
+  not play. A dropped node is a small cube of the
   node's six tiles, turning at the rate the object asked for, and everything
   else is a box wearing the object's first texture, which reads as the thing
   where nothing at all reads as nothing at all.
@@ -627,7 +630,7 @@ sign and a rail as quads, through VoxelDefinition.shape -- a list of quads per
 voxel that buildat's mesher copies into the chunk's mesh, so a chunk full of
 fences costs what a chunk of cubes costs. shapes.lua builds those quads and
 the engine knows nothing about node boxes. A node whose draw type is a mesh
-gets the quads of its model, read out of the .obj by objmesh.lua, and is drawn
+gets the quads of its model, read by res/mesh_read.lua, and is drawn
 from both sides because a node mesh is usually a shell whose inside is meant
 to be seen.
 

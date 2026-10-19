@@ -12,9 +12,10 @@
 -- into a table of objects; what to draw for one is the caller's business.
 --
 -- What is read of an object's properties is what it takes to put something
--- where it is and give it the right texture and size. The rest -- animations,
--- bone positions, attachments, physics overrides -- is skipped, which is what
--- makes this survive the messages it does not implement.
+-- where it is and give it the right texture and size, and the first frame
+-- of its animation. The rest -- the animation playing, bone positions --
+-- is skipped, which is what makes this survive the messages it does not
+-- implement.
 
 local M = {}
 
@@ -120,6 +121,16 @@ function M.apply_message(obj, r)
 			groups[name] = r:s16()
 		end
 		obj.armor_groups = groups
+	elseif cmd == M.CMD_SET_ANIMATION then
+		-- The frames a model plays (AO_CMD_SET_ANIMATION, GenericCAO's
+		-- reader): what is drawn is the model posed at the first of them,
+		-- as vanilla's module draws it ([LUANTI_SHARED_1019]). The speed,
+		-- the blend and the loop after them are not read.
+		local first = r:f32()
+		if first ~= obj.anim_frame then
+			obj.anim_frame = first
+			obj.visual_stale = true
+		end
 	elseif cmd == M.CMD_SET_TEXTURE_MOD then
 		obj.texture_mod = r:string()
 		obj.visual_stale = true
