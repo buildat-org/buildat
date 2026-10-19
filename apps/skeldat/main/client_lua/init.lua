@@ -1486,6 +1486,13 @@ magic.SubscribeToEvent("KeyDown", function(_, d)
 			return
 		end
 		if k == magic.KEY_ESCAPE then
+			-- [SKELDAT_PAUSE_CLOSE] The browser grants no pointer lock
+			-- from a key: on the web the pause menu stays
+			if web and held.on.no_escape then
+				log:info("pause: Escape kept on the web: click Continue or " ..
+						"off the menu")
+				return
+			end
 			held.close()
 		end
 		return

@@ -151,7 +151,8 @@ export BUILDAT_SKELDAT_INTRO=0 BUILDAT_SKELDAT_STARTER=0
 # the login of every public join is builtin/world_menu/check.sh's)
 export BUILDAT_SKELDAT_GUEST_JOIN=1
 
-# 1. Two players
+# 1. Two players. client1's pause menu, after its chat page, closed by a
+# click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin first
 cat > "$t/a1.cmds" <<EOF
 $placed
 wait_log 60000 chat: <client2> hello from client2
@@ -166,7 +167,13 @@ delay 1000
 click Button "Close"
 wait_log 5000 pause: the menu shown
 delay 500
-keypress Escape
+mouse_pos 338 250
+delay 100
+mouse_click left
+delay 1000
+mouse_pos 10 10
+delay 100
+mouse_click left
 wait_log 5000 pause: the menu closed
 delay 1000
 look -90 0
@@ -230,6 +237,13 @@ wait_for_log "$t/srv1.log" "client1 joins" 330 || fail "client1 did not join ($t
 client b1 "$t/b1.cmds"; bpid=$CLIENT
 wait $a || fail "client1's drive ($t/a1.log)"
 wait $bpid
+# [SKELDAT_PAUSE_CLOSE] A click on the pause menu's own margin leaves it
+# open; one off it (at 10,10) is Continue (the walk after it is the
+# world's keys again)
+awk '/command: mouse_pos 10 10/ { off = 1 } /pause: a click off the menu/ { n++; if(!off) bad = 1 }
+	off && /pause: the menu closed/ { closed = 1 }
+	END { exit !(n == 1 && !bad && closed) }' "$t/a1.log" ||
+	fail "the pause menu not closed by a click off it alone ($t/a1.log)"
 # The whole world in memory ([SKELDAT_BOUNDED_WORLD]): the server's size
 rss=$(ps -o rss= -p $SERVER_PID)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -2834,5 +2848,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board"
 # vim: set noet ts=4 sw=4:

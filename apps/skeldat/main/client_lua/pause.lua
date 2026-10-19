@@ -462,7 +462,19 @@ return function(game, declare_keys)
 		menu:add("How to play...", function() game.send("intro", "") end)
 		menu:add("High scores...", function() game.send("scores", "list") end)
 		menu:add("Leave the game", function() buildat.leave() end)
-		game.hold(close, menu.window)
+		-- [SKELDAT_PAUSE_CLOSE] A click off the menu is Continue, in the
+		-- click's own event (the gesture a browser grants a pointer lock
+		-- from); on the web Escape keeps it (init.lua: no_escape)
+		game.hold(close, menu.window, nil, {no_escape = true,
+				click = function(x, y)
+			local rp, sp = magic.ui.root.position, menu.window.screenPosition
+			x, y = x + rp.x - sp.x, y + rp.y - sp.y
+			if x < 0 or y < 0 or x >= menu.window.width or
+					y >= menu.window.height then
+				log:info("pause: a click off the menu")
+				close()
+			end
+		end})
 		game.send("pause", "auto on")
 		log:info("pause: the menu shown")
 	end
