@@ -1933,6 +1933,9 @@ rebuild = function()
 	if ms > 30 and M.drag_is_light(S.drag) then
 		S.drag.light = true
 	end
+	if M.probe_what then
+		M.probe_add("rebuild", ms)
+	end
 	if ms > 30 then
 		local parts = {}
 		for _, k in ipairs(M.lap_order) do

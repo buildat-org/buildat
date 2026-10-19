@@ -117,6 +117,7 @@ function doc.send(ops, done, kind)
 				ints = ints, strs = e.strs or {}, lists = e.lists or {}}}
 	end
 	doc.pending[seq] = {kind = kind, merge = doc.merge_tag,
+			sent = buildat.get_time_us(),
 			done = done or function(err)
 		if err ~= "" then
 			doc.notice("Refused: " .. err)
@@ -342,6 +343,10 @@ buildat.sub_packet("fp:changes", function(data)
 	local own = c.seq >= 0 and doc.pending[c.seq]
 	if own then
 		own.inverse = inverse_of(c)
+		-- [FP_MOVE_FAST] The round trip, for a check's measures
+		if doc.on_round_trip then
+			doc.on_round_trip((buildat.get_time_us() - own.sent) / 1000)
+		end
 	end
 	local changed = {}
 	for _, e in ipairs(c.ents) do

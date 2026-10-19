@@ -4154,6 +4154,7 @@ refresh_panels = function()
 		return
 	end
 	S.panels_stale = false
+	local t0 = buildat.get_time_us()
 	build_toolbar()
 	-- Viewing ([FP_VIEW_EDIT]): the panels show everything and change
 	-- nothing
@@ -4162,6 +4163,9 @@ refresh_panels = function()
 	build_palette()
 	place.build_window()
 	panel.view_only = false
+	if M.probe_what then
+		M.probe_add("panels", (buildat.get_time_us() - t0) / 1000)
+	end
 end
 M.refresh_panels = function() refresh_panels() end
 
@@ -4716,6 +4720,9 @@ do
 		M.drag_slides(d, sel)
 		M.slide_deltas(d)
 		S.drag = d
+		if M.probe_what then
+			M.probe_start(next(inst) or next(nodes))
+		end
 		-- One undo step for the selection's moves by the keys (user)
 		doc.merge_tag = "keys " .. M.sel_gen
 		end_drag()
@@ -7213,6 +7220,9 @@ function M.update(dt)
 	if S.suspended then
 		return
 	end
+	if M.probe_what then
+		M.probe_frame()
+	end
 	M.save_view(dt)
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
 	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
@@ -7256,7 +7266,12 @@ function M.update(dt)
 	elseif S.dirty then
 		rebuild()
 	end
+	local daylight_t = buildat.get_time_us()
 	M.apply_daylight()
+	if M.probe_what then
+		M.probe_add("daylight", (buildat.get_time_us() - daylight_t) / 1000)
+		M.probe_ready()
+	end
 	M.probes_tick()
 	M.wb_tick(dt)
 	M.refdump_tick(dt)
@@ -7378,6 +7393,11 @@ function M.start(d)
 		S.dirty = true
 		refresh_panels()
 	end
+	doc.on_round_trip = function(ms)
+		if M.probe_what then
+			M.probe_add("rtt", ms)
+		end
+	end
 	-- A press off an open dropdown closes it, and one on the view does
 	-- nothing else
 	-- None of the input is the editor's under the plans page (M.suspend):
@@ -7424,6 +7444,52 @@ function M.start(d)
 				keep[1], keep[2], keep[3], keep[4], keep[5]
 		S.draw = nil
 		log:info("A wall made by the drive")
+	end)
+	-- [FP_MOVE_FAST] For a check: "event fp_select <what> [view]", what
+	-- being furniture (a box), door or node (a wall's), the first of it in
+	-- the current layout by id selected (a node by the Nodes tool), the
+	-- view (2d or 3d) picked and both cameras on it -- the plan view
+	-- centred there, the 3D one 2.2 m over its floor looking down -- and
+	-- the moves from then on measured (M.probe_frame)
+	magic.SubscribeToEvent("command_seq:fp_select", function(_, d)
+		local what, view = d:GetString("Param"):match("^(%S+) ?(%S*)$")
+		if view and view ~= "" then
+			M.pick_view(view)
+		end
+		local pick
+		for _, e in ipairs(of_type(what == "node" and "node" or "instance")) do
+			local i = e.ints
+			local def = what ~= "node" and doc.ents[i.def]
+			if (i.layout or 0) == (doc.layout or 0) and (what == "node" or
+					def and def.ints.kind == (what == "door" and KIND.door or
+					KIND.box)) then
+				pick = e
+				break
+			end
+		end
+		if not pick then
+			log:info("fp_select: no " .. what)
+			return
+		end
+		local x, z = pick.ints.x, pick.ints.z
+		if what == "node" then
+			set_tool("node")
+			S.nodes = {[pick.id] = true}
+		else
+			set_tool("select")
+			S.sel, S.primary = {[pick.id] = "instance"}, pick.id
+			local it = E.inst_data[pick.id]
+			x, z = it and it.x or x, it and it.z or z
+		end
+		local lay = doc.ents[doc.layout or 0]
+		local y = lay and lay.ints.y or 0
+		S.cx, S.cz = x, z
+		S.pos = {x = W(x), y = W(y) + 2.2, z = W(z)}
+		S.yaw, S.pitch = 0, 89.9
+		M.probe_what = what
+		S.dirty = true
+		refresh_panels()
+		log:info(string.format("fp_select: %s %d at %d %d", what, pick.id, x, z))
 	end)
 	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing
@@ -7494,6 +7560,79 @@ function M.start(d)
 	-- A phone's address bar away from the first tap, until the menu
 	buildat.set_web_fullscreen(true)
 	log:info("Editor started")
+end
+
+-- [FP_MOVE_FAST] The check's measures, once "event fp_select" named what is
+-- measured: a key step's time from the key (M.probe_start) to the frame
+-- after the one that has its moved state built (M.probe_ready), and each
+-- frame's time over a drag; logged as "fp move: <what> <view> key N ms" and
+-- "... drag frames p50 N p95 N ms", with the rebuilds', the lighting's,
+-- the panels' and the round trip's times in between
+function M.probe_add(k, ms)
+	local p = M.probe_drag or M.probe
+	if p and ms > 0.05 then
+		p[k] = (p[k] or 0) + ms
+		p[k .. "_n"] = (p[k .. "_n"] or 0) + 1
+	end
+end
+local function probe_parts(p)
+	local out = {}
+	for _, k in ipairs({"rebuild", "daylight", "panels", "rtt"}) do
+		out[#out + 1] = string.format("%s %d %.1f ms", k, p[k .. "_n"] or 0,
+				p[k] or 0)
+	end
+	return table.concat(out, ", ")
+end
+function M.probe_start(id)
+	local e = doc.ents[id]
+	local before = {}
+	for k, v in pairs(e and e.ints or {}) do
+		before[k] = v
+	end
+	M.probe = {t0 = buildat.get_time_us(), view = S.view, id = id,
+			before = before}
+end
+function M.probe_ready()
+	local p = M.probe
+	if not p or p.ready or S.dirty then
+		return
+	end
+	local e = doc.ents[p.id]
+	for k, v in pairs(e and e.ints or {}) do
+		if p.before[k] ~= v then
+			p.ready = true
+			return
+		end
+	end
+end
+function M.probe_frame()
+	local now = buildat.get_time_us()
+	local p = M.probe
+	if p and p.ready then
+		log:info(string.format("fp move: %s %s key %.1f ms; %s", M.probe_what,
+				p.view, (now - p.t0) / 1000, probe_parts(p)))
+		M.probe = nil
+	end
+	local d = S.drag
+	if d and (d.kind == "move" or d.kind == "node") then
+		if not M.probe_drag then
+			M.probe_drag = {frames = {}, view = S.view}
+		elseif M.frame_t then
+			local f = M.probe_drag.frames
+			f[#f + 1] = (now - M.frame_t) / 1000
+		end
+	elseif M.probe_drag and not d then
+		local q = M.probe_drag
+		local f = q.frames
+		table.sort(f)
+		if #f > 0 then
+			log:info(string.format("fp move: %s %s drag frames p50 %.1f p95 %.1f "
+					.. "ms (%d frames); %s", M.probe_what, q.view,
+					f[math.ceil(#f * 0.5)], f[math.ceil(#f * 0.95)], #f, probe_parts(q)))
+		end
+		M.probe_drag = nil
+	end
+	M.frame_t = now
 end
 
 return M
