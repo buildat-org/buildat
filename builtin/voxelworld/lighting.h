@@ -302,11 +302,7 @@
 				mark_section_stale(section_p);
 				return nullptr;
 			}
-			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-					m_sections_with_loaded_buffers.end(), section,
-					std::greater<Section*>());
-			if(it == m_sections_with_loaded_buffers.end() || *it != section)
-				m_sections_with_loaded_buffers.insert(it, section);
+			list_loaded(section);
 			m_light_section = section;
 			m_light_section_p = section_p;
 		}

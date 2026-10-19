@@ -3242,12 +3242,25 @@ struct CInstance: public voxelworld::Instance
 				new NodeVolumeUpdated(m_scene_ref, node_id, true, chunk_p));
 	}
 
-	// The buffer a voxel is in and where in it, or nullptr. What set_voxel(),
-	// set_sample() and get_sample() all start with; each of them used to
-	// carry its own copy of this.
+	// A section with a buffer in memory, listed (once, in descending order)
+	// so that unload_old_buffers() and the commit see it
+	void list_loaded(Section *section)
+	{
+		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
+				m_sections_with_loaded_buffers.end(), section,
+				std::greater<Section*>());
+		if(it == m_sections_with_loaded_buffers.end() || *it != section)
+			m_sections_with_loaded_buffers.insert(it, section);
+	}
+
+	// The buffer a voxel is in and where in it, or nullptr; the section and
+	// the chunk too when asked. What set_voxel(), get_voxel(), set_sample()
+	// and get_sample() all start with; each of them used to carry its own
+	// copy of this.
 	ChunkBuffer* buffer_for(const pv::Vector3DInt32 &p,
 			pv::Vector3DInt32 *voxel_p_out, bool disable_warnings,
-			const char *what)
+			const char *what, Section **section_out = nullptr,
+			pv::Vector3DInt32 *chunk_p_out = nullptr)
 	{
 		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
 		pv::Vector3DInt16 section_p =
@@ -3279,13 +3292,11 @@ struct CInstance: public voxelworld::Instance
 				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
 				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
 		);
-
-		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>());
-		if(it == m_sections_with_loaded_buffers.end() || *it != section)
-			m_sections_with_loaded_buffers.insert(it, section);
-
+		list_loaded(section);
+		if(section_out)
+			*section_out = section;
+		if(chunk_p_out)
+			*chunk_p_out = chunk_p;
 		return &buf;
 	}
 
@@ -3368,11 +3379,7 @@ struct CInstance: public voxelworld::Instance
 			buf.dirty = true;
 			m_total_buffers_dirty++;
 		}
-		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
-		if(it == m_sections_with_loaded_buffers.end() || *it != section)
-			m_sections_with_loaded_buffers.insert(it, section);
+		list_loaded(section);
 	}
 
 	// A chunk's buffer, loaded if it is not, and its section listed so that
@@ -3387,11 +3394,7 @@ struct CInstance: public voxelworld::Instance
 				&m_total_buffers_loaded);
 		if(!buf.volume)
 			return nullptr;
-		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
-		if(it == m_sections_with_loaded_buffers.end() || *it != section)
-			m_sections_with_loaded_buffers.insert(it, section);
+		list_loaded(section);
 		return &buf;
 	}
 
@@ -3538,40 +3541,14 @@ struct CInstance: public voxelworld::Instance
 		// Don't log here; this is a too busy place for even ignored log calls
 		/*log_t(MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i",
 				PV3I_PARAMS(p), v.data);*/
-		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
-		pv::Vector3DInt16 section_p =
-				container_coord16(chunk_p, m_section_size_chunks);
-		Section *section = get_section_of_chunk(chunk_p);
-		if(section == nullptr){
-			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
-					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: No section "
-					PV3I_FORMAT " for chunk " PV3I_FORMAT,
-					PV3I_PARAMS(p), v.data, PV3I_PARAMS(section_p),
-					PV3I_PARAMS(chunk_p));
+		pv::Vector3DInt32 voxel_p, chunk_p;
+		Section *section = nullptr;
+		ChunkBuffer *bufp = buffer_for(p, &voxel_p, disable_warnings,
+				"set_voxel", &section, &chunk_p);
+		if(bufp == nullptr)
 			return;
-		}
-
+		ChunkBuffer &buf = *bufp;
 		note_cause(section);
-
-		// Unload stuff if needed
-		maintain_maximum_buffer_limit();
-
-		// Set in buffer
-		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-				&m_total_buffers_loaded);
-		if(!buf.volume){
-			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
-					MODULE, "set_voxel() p=" PV3I_FORMAT ", v=%i: Couldn't get "
-					"buffer volume for chunk " PV3I_FORMAT " in section "
-					PV3I_FORMAT, PV3I_PARAMS(p), v.data, PV3I_PARAMS(chunk_p),
-					PV3I_PARAMS(section_p));
-			return;
-		}
-		pv::Vector3DInt32 voxel_p(
-				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
-				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
-				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
-		);
 		VoxelInstance nv = v;
 		if(m_light_maintained[LIGHT_SKY]){
 			// The whole voxel, because which definition it wears can depend
@@ -3707,12 +3684,7 @@ struct CInstance: public voxelworld::Instance
 			}
 			}
 			}
-
-			auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-					m_sections_with_loaded_buffers.end(), section,
-					std::greater<Section*>());
-			if(it == m_sections_with_loaded_buffers.end() || *it != section)
-				m_sections_with_loaded_buffers.insert(it, section);
+			list_loaded(section);
 		}
 		}
 		}
@@ -4413,48 +4385,12 @@ struct CInstance: public voxelworld::Instance
 
 	VoxelInstance get_voxel(const pv::Vector3DInt32 &p, bool disable_warnings)
 	{
-		pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
-		pv::Vector3DInt16 section_p =
-				container_coord16(chunk_p, m_section_size_chunks);
-		Section *section = get_section_of_chunk(chunk_p);
-		if(section == nullptr){
-			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
-					MODULE, "get_voxel() p=" PV3I_FORMAT ": No section "
-					PV3I_FORMAT " for chunk " PV3I_FORMAT,
-					PV3I_PARAMS(p), PV3I_PARAMS(section_p),
-					PV3I_PARAMS(chunk_p));
+		pv::Vector3DInt32 voxel_p;
+		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
+				"get_voxel");
+		if(buf == nullptr)
 			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
-		}
-
-		// Unload stuff if needed
-		maintain_maximum_buffer_limit();
-
-		// Get from buffer
-		ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
-				&m_total_buffers_loaded);
-		if(!buf.volume){
-			log_(disable_warnings ? CORE_DEBUG : CORE_WARNING,
-					MODULE, "get_voxel() p=" PV3I_FORMAT ": Couldn't get "
-					"buffer volume for chunk " PV3I_FORMAT " in section "
-					PV3I_FORMAT, PV3I_PARAMS(p), PV3I_PARAMS(chunk_p),
-					PV3I_PARAMS(section_p));
-			return VoxelInstance(interface::VOXELTYPEID_UNDEFINED);
-		}
-		pv::Vector3DInt32 voxel_p(
-				p.getX() - chunk_p.getX() * m_chunk_size_voxels.getX(),
-				p.getY() - chunk_p.getY() * m_chunk_size_voxels.getY(),
-				p.getZ() - chunk_p.getZ() * m_chunk_size_voxels.getZ()
-		);
-		VoxelInstance v = buf.volume->getVoxelAt(voxel_p);
-
-		// Set section buffer loaded flag
-		auto it = std::lower_bound(m_sections_with_loaded_buffers.begin(),
-				m_sections_with_loaded_buffers.end(), section,
-				std::greater<Section*>()); // position in descending order
-		if(it == m_sections_with_loaded_buffers.end() || *it != section)
-			m_sections_with_loaded_buffers.insert(it, section);
-
-		return v;
+		return buf->volume->getVoxelAt(voxel_p);
 	}
 };
 
