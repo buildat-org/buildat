@@ -227,7 +227,8 @@ struct Module: public interface::Module, public luanti::Interface,
 				"minimap.lua", "hotbar.lua", "texmod.lua",
 				"formspec.lua", "formspec_ui.lua", "hud.lua", "hud_draw.lua",
 				"sounds.lua", "particles.lua", "form_session.lua",
-				"item_shape.lua", "sky_model.lua", "touch.lua", "skybox.lua"}){
+				"item_shape.lua", "sky_model.lua", "touch.lua", "skybox.lua",
+				"chat_line.lua"}){
 			const ss_ path = shared+"/"+name;
 			if(interface::fs::path_exists(path)){
 				client_file::access(m_server, [&](client_file::Interface *i){

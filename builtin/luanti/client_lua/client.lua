@@ -1101,9 +1101,6 @@ draw_hotbar()
 
 magic.ui:SetFocusElement(nil)
 
--- The chat's
-local CHAT_STYLE = magic.cache:GetResource("XMLFile",
-		"ui_utils/res/style.xml")
 -- [LOAD_SHOWN]: said again every 0.5 s ([LOADING_STRIPES]), with the
 -- whole seconds, so that the line changes while the server sends nothing
 -- **And what comes** ([JOIN_PROGRESS], user 2026-10-11: "0 of 125" stood
@@ -3007,48 +3004,24 @@ luanti.sub_chat(function(line, lines)
 	end
 end)
 
-local function close_chat()
-	if chat_input then
-		chat_input:Remove()
-		chat_input = nil
-		magic.ui:SetFocusElement(nil)
+-- The line itself: luanti_client's dialog with Send and Cancel, at the top
+-- on a touchscreen, out from under its keyboard ([VANILLA_CHAT_TOUCH];
+-- luanti/chat_line.lua). chat_input says it is up.
+local chat_line = (function(ok, err, m)
+	if not ok or type(m) ~= "function" then
+		error("luanti: could not load chat_line.lua: " .. tostring(err))
 	end
-end
-
-local function open_chat()
-	if chat_input then
-		return
-	end
-	chat_input = magic.ui.root:CreateChild("LineEdit")
-	-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
-	chat_input.textCopyable = true
-	chat_input.textSelectable = true
-	chat_input.defaultStyle = CHAT_STYLE
-	chat_input:SetStyleAuto()
-	chat_input.horizontalAlignment = magic.HA_LEFT
-	chat_input.verticalAlignment = magic.VA_BOTTOM
-	chat_input.size = magic.IntVector2(
-			math.min(560, magic.ui.root.width - 16), 26)
-	chat_input:SetPosition(8, -8)
-	chat_input.enabled = true
-	chat_input:SetText("")
-	chat_input:SetFocus(true)
-	-- What a check waits for, as luanti_client's
-	log:info("chat: the line opened")
-end
-
-local function send_chat()
-	if not chat_input then
-		return
-	end
-	local text = chat_input:GetText()
-	close_chat()
-	if text == nil or text == "" then
-		return
-	end
-	buildat.send_packet("luanti:chat",
-			cereal.binary_output({text}, {"array", "string"}))
-end
+	return m
+end)(buildat.run_script_file("luanti/chat_line.lua"))({
+	touch = function() return keys.touch ~= nil end,
+	send = function(text)
+		buildat.send_packet("luanti:chat",
+				cereal.binary_output({text}, {"array", "string"}))
+	end,
+	on_open = function() chat_input = true end,
+	on_close = function() chat_input = nil end,
+})
+local open_chat, close_chat = chat_line.open, chat_line.close
 
 --
 -- The HUD a game draws itself: luanti/hud_draw.lua, the renderer both
@@ -3492,7 +3465,7 @@ end)(buildat.run_script_file("luanti/scan.lua"))({
 		local eye = camera_node.worldPosition
 		yaw, pitch = angles_from_dir({x = x - eye.x, y = y - eye.y, z = z - eye.z})
 	end,
-	chat_text = function() return chat_input and chat_input:GetText() end,
+	chat_text = chat_line.text,
 	hud_rect = function(e)
 		local el = e.__placed
 		if not el then
@@ -3899,13 +3872,23 @@ end)
 -- only thing here that cares.
 magic.SubscribeToEvent("UIMouseClick", function(event_type, event_data)
 	-- A touchscreen's taps are clicked by luanti/touch.lua
-	if not luanti.form_open() or keys.touch then
+	if keys.touch then
 		return
 	end
 	local button = event_data:GetInt("Button")
 	-- Less the root's own position: a scripted client's root sits in a
 	-- letterbox ([SEQ_FIXED_SIZE]) and a form's rectangles are the root's
 	local rp = magic.ui.root.position
+	if chat_input then
+		if button == magic.MOUSEB_LEFT then
+			chat_line.click(event_data:GetInt("X") - rp.x,
+					event_data:GetInt("Y") - rp.y)
+		end
+		return
+	end
+	if not luanti.form_open() then
+		return
+	end
 	luanti.click(event_data:GetInt("X") - rp.x, event_data:GetInt("Y") - rp.y,
 			button == magic.MOUSEB_RIGHT and "right" or
 			button == magic.MOUSEB_MIDDLE and "middle" or "left")
@@ -3951,10 +3934,9 @@ keys.on_key = function(key)
 	-- A form takes escape to close itself; what is left is this game's own
 	-- While a line is being typed the keys are that line's, which is why
 	-- this is before everything else
+	-- Enter is the field's TextFinished and Escape the line's own
 	if chat_input then
-		if key == magic.KEY_RETURN or key == magic.KEY_KP_ENTER then
-			send_chat()
-		elseif key == BIND.menu.key then
+		if key == BIND.menu.key then
 			close_chat()
 		end
 		return
@@ -4639,11 +4621,17 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 			local _, _, slot, margin = hotbar_metrics()
 			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
 		end,
-		form_open = luanti.form_open,
+		-- The chat line is a form to the fingers: a tap on its boxes
+		-- (Send, Cancel), no look and no place
+		form_open = function() return luanti.form_open() or chat_input ~= nil end,
 		-- The finger as the mouse's left button on a form: the press
 		-- picks up, the moves carry (and drag a scrollbar's thumb), the
 		-- lift puts down, a second finger's tap is a right click
 		form_press = function(x, y)
+			if chat_input then
+				chat_line.click(x, y)
+				return
+			end
 			luanti.hover(x, y, true)
 			luanti.click(x, y, "left")
 		end,

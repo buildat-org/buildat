@@ -3262,176 +3262,26 @@ local function show_client(host, port, name, password, mode, origin)
 
 		-- The line the player types in: a dialog with a text field and the
 		-- two buttons a player expects, because a bare line edit at the
-		-- bottom of the screen is not something anyone can find.
-		--
-		-- The field is a LineEdit rather than something built here: editing a
-		-- line -- the cursor, selection, backspace, paste -- is what Urho3D's
-		-- own already does. Enter arrives as its TextFinished, because a
-		-- stack event handler does not fire while it has the focus.
-		local chat_window = nil
-		local chat_input_cb = nil
-		local chat_key_cb = nil
-		local chat_buttons = nil
-
-		local function close_chat()
-			if not chat_input then
-				return
-			end
-			if chat_input_cb then
-				magic.UnsubscribeFromEvent(chat_input, "TextFinished",
-						chat_input_cb)
-				chat_input_cb = nil
-			end
-			if chat_key_cb then
-				magic.UnsubscribeFromEvent("KeyDown", chat_key_cb)
-				chat_key_cb = nil
-			end
-			chat_window:Remove()
-			chat_window = nil
-			chat_input = nil
-			chat_buttons = nil
-			if not form_on() then
-				mouse_look(true, "the chat closed")
-			end
-		end
-
-		local function send_chat()
-			local text = chat_input:GetText()
-			log:verbose("chat: sending \""..text.."\"")
-			close_chat()
-			if text ~= "" then
-				client:send_chat(text)
-			end
-		end
-
-		function open_chat()
-			if chat_input then
-				return
-			end
-			log:info("chat: the line opened")
-			local ui_root = magic.ui.root
-			local w = math.min(560, ui_root.width - 40)
-			local h = 96
-			local ox = math.floor((ui_root.width - w) / 2)
-			-- Above the hotbar and the chat log, which are what is at the
-			-- bottom of the screen; on a touchscreen at the top, out from
-			-- under the on-screen keyboard, over the chat
-			-- ([TOUCH_CHAT_CLUTTER])
-			local oy = ui_root.height - h - 180
-			if settings.touch then
-				oy = 8
-			end
-
-			chat_window = ui_root:CreateChild("BorderImage")
-			-- The style is inherited by everything under it, which is what
-			-- the line edit's own text needs to have a font at all
-			chat_window.defaultStyle = style
-			chat_window.texture = magic.cache:GetResource("Texture2D",
-					"luanti_client/res/white.png")
-			chat_window.color = magic.Color(0.10, 0.10, 0.13, 0.95)
-			chat_window.size = magic.IntVector2(w, h)
-			chat_window:SetPosition(ox, oy)
-			-- Over the chat and the touch controls (50)
-			chat_window.priority = 60
-			-- An element Urho3D has not been told is enabled is not hit by a
-			-- click, and then no click event carries a position at all
-			chat_window.enabled = true
-
-			local caption = chat_window:CreateChild("Text")
-			caption.defaultStyle = style
-			caption:SetStyleAuto()
-			caption.text = "Say something (a line starting with / is a"..
-					" command)"
-			caption:SetFontSize(12)
-			caption:SetPosition(12, 10)
-			caption.color = magic.Color(0.8, 0.8, 0.85)
-
-			chat_input = chat_window:CreateChild("LineEdit")
-			-- Ctrl+C and Ctrl+V in the field, which Urho3D does itself ([NEW_WORLD_FORM])
-			chat_input.textCopyable = true
-			chat_input.textSelectable = true
-			chat_input.defaultStyle = style
-			chat_input:SetStyleAuto()
-			chat_input:SetPosition(12, 30)
-			-- size rather than fixedWidth/fixedHeight: the parent has no
-			-- layout to size it, and the element stays 0x0
-			chat_input.size = magic.IntVector2(w - 24, 26)
-			chat_input.enabled = true
-			-- A box of its own, so the field is visible before anything has
-			-- been typed into it
-			chat_input.texture = magic.cache:GetResource("Texture2D",
-					"luanti_client/res/white.png")
-			chat_input.color = magic.Color(0.02, 0.02, 0.03, 0.9)
-			chat_input:SetText("")
-			chat_input:SetFocus(true)
-
-			-- The two buttons, as boxes with a word in them: what a click
-			-- landed on is worked out from the rectangles, the same way a
-			-- form's buttons are, rather than from Urho3D's own button
-			-- events, which do not reach the sandbox with a position
-			chat_buttons = {origin = {ox, oy}, items = {}}
-			local bw, bh = 90, 26
-			local by = h - bh - 10
-			local labels = {{"Send", w - 12 - bw * 2 - 8, send_chat},
-					{"Cancel", w - 12 - bw, close_chat}}
-			-- The Declutter checkbox, a touchscreen's, at the left
-			if settings.touch then
-				labels[#labels + 1] = {(declutter and "[x]" or "[ ]") ..
-						" Declutter", 12, function()
-					set_declutter(not declutter)
-					local t = chat_buttons.declutter
-					t.text = (declutter and "[x]" or "[ ]") .. " Declutter"
-				end, 110}
-			end
-			for _, b in ipairs(labels) do
-				local bw = b[4] or bw
-				local box = chat_window:CreateChild("BorderImage")
-				box.texture = magic.cache:GetResource("Texture2D",
-						"luanti_client/res/white.png")
-				box.color = magic.Color(0.30, 0.30, 0.38, 0.95)
-				box.size = magic.IntVector2(bw, bh)
-				box:SetPosition(b[2], by)
-				box.enabled = true
-				local t = box:CreateChild("Text")
-				t.defaultStyle = style
-				t:SetStyleAuto()
-				t.text = b[1]
-				t:SetFontSize(13)
-				t:SetAlignment(HA_CENTER, VA_CENTER)
-				if b[4] then
-					chat_buttons.declutter = t
+		-- bottom of the screen is not something anyone can find
+		-- (res/chat_line.lua, vanilla's too). chat_input says it is up.
+		local chat_line = buildat.run_extension_file("res/chat_line.lua")({
+			touch = function() return settings.touch ~= nil end,
+			send = function(text) client:send_chat(text) end,
+			on_open = function()
+				chat_input = true
+				mouse_look(false, "the chat opened")
+			end,
+			on_close = function()
+				chat_input = nil
+				if not form_on() then
+					mouse_look(true, "the chat closed")
 				end
-				chat_buttons.items[#chat_buttons.items + 1] =
-						{x = b[2], y = by, w = bw, h = bh, action = b[3]}
-			end
-
-			mouse_look(false, "the chat opened")
-			chat_input_cb = magic.SubscribeToEvent(chat_input, "TextFinished",
-					send_chat)
-			-- Escape cancels. A plain subscription, because the line edit has
-			-- the focus and the stack's own handler is then quiet.
-			chat_key_cb = magic.SubscribeToEvent("KeyDown",
-					function(event_type, event_data)
-				if event_data:GetInt("Key") == KEY_ESCAPE then
-					close_chat()
-				end
-			end)
-		end
-
-		local function chat_click(x, y)
-			if not chat_buttons then
-				return
-			end
-			local lx = x - chat_buttons.origin[1]
-			local ly = y - chat_buttons.origin[2]
-			for _, b in ipairs(chat_buttons.items) do
-				if lx >= b.x and lx < b.x + b.w and
-						ly >= b.y and ly < b.y + b.h then
-					b.action()
-					return
-				end
-			end
-		end
+			end,
+			declutter = {get = function() return declutter end,
+				set = set_declutter},
+		})
+		local close_chat, chat_click = chat_line.close, chat_line.click
+		open_chat = chat_line.open
 
 		-- The right button's, and a touchscreen's tap
 		local function place_or_activate()
