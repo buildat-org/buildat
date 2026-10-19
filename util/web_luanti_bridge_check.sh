@@ -19,7 +19,7 @@ tmp=$(mktemp -d "/tmp/buildat_bridge.XXXXXX")
 PLAY=29711
 LIST=29713
 LUANTI=30041
-luanti=~/projects/luanti
+luanti=$LUANTI
 bin=${LUANTI_BIN:-$luanti/bin/luanti}
 pids=()
 cleanup() {

@@ -12,12 +12,12 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-luanti=~/projects/luanti
-bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
+luanti=$LUANTI
+bin=$LUANTI_SERVER_BIN
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 [ -f "$luanti/games/devtest/game.conf" ] || skip "no $luanti/games/devtest"
-if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
-	skip "a client or a Luanti server is already running"
+if check_pgrep buildat >/dev/null; then
+	skip "a check's client is already running"
 fi
 check_build
 check_tmp particle_draw; t=$CHECK_TMP
@@ -106,12 +106,9 @@ printf '%s\n' "gameid = devtest" "backend = sqlite3" "player_backend = sqlite3" 
 cp "$t/fixture.lua" "$work/worldmods/pd/init.lua"
 printf 'name = pd\n' > "$work/worldmods/pd/mod.conf"
 printf '%s\n' "enable_damage = false" "mute_sound = true" > "$t/luanti.conf"
-port=30031
-( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
-	--config "$t/luanti.conf" > "$t/luanti_srv.log" 2>&1 ) &
-CHECK_PIDS+=($!)
-wait_for_log "$t/luanti_srv.log" "Server for gameid" 120 ||
+start_luanti_server "$work" "$t/luanti.conf" "$t/luanti_srv.log" ||
 	fail "the Luanti server did not come up ($t/luanti_srv.log)"
+port=$LUANTI_PORT
 cmds "$t/ext.png" > "$t/ext.cmds"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=pd \
 	BUILDAT_LUANTI_CONNECT=1 timeout 200 \

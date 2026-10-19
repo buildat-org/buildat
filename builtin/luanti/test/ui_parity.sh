@@ -22,7 +22,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/ui_parity"; mkdir -p "$out"
-luanti=~/projects/luanti; bin=$luanti/bin/luanti-refshots
+luanti=$LUANTI; bin=$LUANTI_SERVER_BIN
 W=1024; H=768
 if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
 	echo "SKIP: a client or a Luanti server is already running"; exit 77

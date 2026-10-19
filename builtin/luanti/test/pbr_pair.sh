@@ -20,7 +20,7 @@ set -u
 . "$(dirname "$0")/../../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/pbr_pair"; mkdir -p "$out"
-luanti=~/projects/luanti
+luanti=$LUANTI
 bin=${LUANTI_BIN:-$luanti/bin/luanti}
 which=${1:-both}
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then

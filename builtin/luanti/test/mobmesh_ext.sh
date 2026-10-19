@@ -16,11 +16,11 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/mobmesh_ext"; mkdir -p "$out"
-luanti=~/projects/luanti
-bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
+luanti=$LUANTI
+bin=$LUANTI_SERVER_BIN
 [ -x "$bin" ] || { echo "SKIP: no $bin"; exit 77; }
-if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
-	echo "SKIP: a client or a Luanti server is already running"; exit 77
+if check_pgrep buildat >/dev/null; then
+	echo "SKIP: a check's client is already running"; exit 77
 fi
 check_build
 check_tmp mobmesh_ext; work=$CHECK_TMP/world
@@ -39,19 +39,9 @@ cp "$me/mobmesh.lua" "$work/worldmods/mobmesh/init.lua"
 printf 'name = mobmesh\n' > "$work/worldmods/mobmesh/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
-port=30030
-( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
-	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-srv=$!
-# check_cleanup waits for it to exit: the next check skips while it runs
-CHECK_PIDS+=($srv)
-for i in $(seq 1 600); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	kill -0 "$srv" 2>/dev/null || break
-	sleep 0.2
-done
-grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
-	{ echo "FAIL: the Luanti server did not come up ($out/luanti_srv.log)"; exit 1; }
+start_luanti_server "$work" "$out/luanti.conf" "$out/luanti_srv.log" ||
+	fail "the Luanti server did not come up ($out/luanti_srv.log)"
+port=$LUANTI_PORT
 # mobmesh.lua puts the player twice: on the stage 6 s after the join, then
 # beside the zombie 16 s later. simplified: as mobmesh.sh, delays after
 # the first placing rather than a line for the stage

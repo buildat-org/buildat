@@ -28,8 +28,8 @@ GAME="${GAME:-mineclone2}"
 SECONDS_GIVEN="${SECONDS_GIVEN:-20}"
 out="$here/local/episode/$EPISODE"
 mkdir -p "$out"
-luanti=~/projects/luanti
-bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
+luanti=$LUANTI
+bin=$LUANTI_SERVER_BIN
 
 # The client's part: what the episode is, written to its stdin at ready
 case "$EPISODE" in
@@ -80,8 +80,7 @@ esac
 	echo "rawset(_G, \"EPISODE_SECONDS\", $SECONDS_GIVEN)"
 	cat "$me/episode.lua"; } > "$out/fixture.lua"
 
-if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null ||
-		pgrep -x luanti-refshots >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a server or client is already running"; exit 77
 fi
 srv=""; cli=""
@@ -142,18 +141,9 @@ printf 'name = episode\n' > "$work/worldmods/episode/mod.conf"
 # official counts breath only under damage.
 { echo "fixed_map_seed = 1"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
-port=30030
-( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
-	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-srv=$!
-# "Server for gameid ... listening" is the server taking connections
-for i in $(seq 1 600); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	kill -0 "$srv" 2>/dev/null || break
-	sleep 0.2
-done
-grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null ||
-	{ echo "the Luanti server did not come up" >&2; exit 1; }
+start_luanti_server "$work" "$out/luanti.conf" "$out/luanti_srv.log" ||
+	{ kill $LUANTI_PID 2>/dev/null; echo "FAIL: the Luanti server did not come up ($out/luanti_srv.log)"; exit 1; }
+srv=$LUANTI_PID port=$LUANTI_PORT
 fifo="$out/extension_stdin"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ep \
 	BUILDAT_LUANTI_CONNECT=1 \

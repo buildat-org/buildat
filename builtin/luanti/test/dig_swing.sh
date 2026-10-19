@@ -93,7 +93,7 @@ assert not bad, "; ".join(bad)
 PY
 }
 run_ext(){
-	local luanti=~/projects/luanti work="$out/ext_world" port
+	local luanti=$LUANTI work="$out/ext_world" port
 	local bin=${LUANTI_BIN:-$luanti/bin/luanti}
 	[ -x "$bin" ] || skip "no Luanti server at $bin"
 	rm -rf "$work"; mkdir -p "$work/worldmods/dig_swing"

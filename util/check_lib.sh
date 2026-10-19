@@ -150,6 +150,39 @@ port_taken()
 {
 	ss -Hltnu "( sport = :$1 )" 2>/dev/null | grep -q .
 }
+# **The official Luanti server** ([LUANTI_SERVER_START]): the tree in
+# LUANTI (~/projects/luanti) and its server LUANTI_SERVER_BIN (LUANTI_BIN
+# when given, as the runners took it, else that tree's bin/luanti-refshots).
+#   start_luanti_server <world> <config> <log> [timeout s, 120]
+# Up when its log says so and its port is bound; its address allowed to
+# the client (check_allow). Sets LUANTI_PID -- in
+# CHECK_PIDS, which check_cleanup stops -- and LUANTI_PORT, a free one, so
+# two runs at once neither collide nor stop each other's; 1 if it did not
+# come up
+LUANTI=${LUANTI:-$HOME/projects/luanti}
+LUANTI_SERVER_BIN=${LUANTI_BIN:-$LUANTI/bin/luanti-refshots}
+start_luanti_server()
+{
+	local _i
+	for _i in $(seq 50); do
+		LUANTI_PORT=$((30000 + RANDOM % 1000))
+		port_taken $LUANTI_PORT || break
+	done
+	# The client connects only to an address it was told is fine
+	check_allow "udp://127.0.0.1:$LUANTI_PORT"
+	( cd "$LUANTI" && exec "$LUANTI_SERVER_BIN" --server --world "$1" \
+		--port "$LUANTI_PORT" --config "$2" > "$3" 2>&1 ) &
+	LUANTI_PID=$!
+	CHECK_PIDS+=($LUANTI_PID)
+	for _i in $(seq $((${4:-120} * 5))); do
+		grep -q "Server for gameid" "$3" 2>/dev/null && port_taken $LUANTI_PORT &&
+			return 0
+		kill -0 $LUANTI_PID 2>/dev/null || return 1
+		sleep 0.2
+	done
+	return 1
+}
+
 start_server()
 {
 	local log=$1 ready=$2 timeout=$3 port=$4 _i

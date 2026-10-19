@@ -57,7 +57,7 @@ extension) set_name="extension_${MODE}_r$RANGE" ;;
 *) echo "CLIENT must be luanti or extension, got: $CLIENT" >&2; exit 2 ;;
 esac
 out="$shots_root/$set_name"
-luanti=~/projects/luanti
+luanti=$LUANTI
 # The patched client, branch buildat-refshots: no mouse look, no pointer grab,
 # no pausing when unfocused, no damage. A run shares the desktop, and every
 # one of those cost pictures before the branch existed. Build it with

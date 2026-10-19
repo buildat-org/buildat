@@ -20,7 +20,7 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 which=${1:-vanilla}; range=${2:-40}; mode=${3:-pbr}
 out="$here/local/tunnel_sky/${which}_${mode}_r$range"; mkdir -p "$out"
-luanti=~/projects/luanti
+luanti=$LUANTI
 bin=${LUANTI_BIN:-$luanti/bin/luanti}
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a client or a server is already running"; exit 77

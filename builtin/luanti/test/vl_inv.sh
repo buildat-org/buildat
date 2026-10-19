@@ -27,11 +27,10 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 out="$here/local/vl_inv"; mkdir -p "$out"
 ref="$here/local/luanti_inventory_reference"
-luanti=~/projects/luanti
-bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
+luanti=$LUANTI
+bin=$LUANTI_SERVER_BIN
 which=${1:-both}
-if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null ||
-		pgrep -x luanti-refshots >/dev/null; then
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	echo "SKIP: a client or a server is already running"; exit 77
 fi
 fixture='core.settings:set("creative_mode", "false")
@@ -204,7 +203,7 @@ run_vanilla(){
 }
 
 run_ext(){
-	local o="$out/ext" work="$out/ext/world" port=30031
+	local o="$out/ext" work="$out/ext/world"
 	[ -x "$bin" ] || { echo "SKIP: no Luanti server at $bin"; exit 77; }
 	rm -rf "$o"; mkdir -p "$work/worldmods/vl_inv"
 	printf 'gameid = mineclone2\nbackend = sqlite3\nplayer_backend = sqlite3\nauth_backend = sqlite3\nmod_storage_backend = sqlite3\nworld_name = vl_inv\ncreative_mode = false\nenable_damage = false\nserver_announce = false\n' \
@@ -213,19 +212,10 @@ run_ext(){
 	printf 'name = vl_inv\n' > "$work/worldmods/vl_inv/mod.conf"
 	printf 'fixed_map_seed = 1\nenable_damage = false\nmute_sound = true\n' \
 		> "$o/luanti.conf"
-	check_allow "udp://127.0.0.1:$port"
-	( cd "$luanti" && exec "$bin" --server --world "$work" --port "$port" \
-		--config "$o/luanti.conf" > "$o/luanti_srv.log" 2>&1 ) &
-	local srv=$!
-	pids+=($srv)
-	# Up to two minutes for VoxeLibre to load, while the server lives
-	for _i in $(seq 1 600); do
-		grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null && break
-		kill -0 "$srv" 2>/dev/null || break
-		sleep 0.2
-	done
-	grep -q "Server for gameid" "$o/luanti_srv.log" 2>/dev/null ||
+	start_luanti_server "$work" "$o/luanti.conf" "$o/luanti_srv.log" ||
 		fail "the Luanti server did not come up ($o/luanti_srv.log)"
+	local srv=$LUANTI_PID port=$LUANTI_PORT
+	pids+=($srv)
 	cmds "$o" "wait_log 120000 voxel types have their own textures" > "$o/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=vi \
 		BUILDAT_LUANTI_CONNECT=1 timeout 240 \

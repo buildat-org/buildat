@@ -12,10 +12,10 @@ set -u
 here=$(cd "$(dirname "$0")/../../.." && pwd)
 me=$(cd "$(dirname "$0")" && pwd)
 out="$here/local/scroll_ext"; mkdir -p "$out"
-luanti=~/projects/luanti
-bin=${LUANTI_BIN:-$luanti/bin/luanti-refshots}
-if check_pgrep buildat >/dev/null || pgrep -x luanti-refshots >/dev/null; then
-	echo "SKIP: a client or a Luanti server is already running"; exit 77
+luanti=$LUANTI
+bin=$LUANTI_SERVER_BIN
+if check_pgrep buildat >/dev/null; then
+	echo "SKIP: a check's client is already running"; exit 77
 fi
 work="$out/luanti_world"
 rm -rf "$work"; mkdir -p "$work/worldmods/scroll"
@@ -33,18 +33,9 @@ cp "$me/scroll.lua" "$work/worldmods/scroll/init.lua"
 printf 'name = scroll\n' > "$work/worldmods/scroll/mod.conf"
 { echo "fixed_map_seed = 5"; echo "time_speed = 0"; echo "enable_damage = false"
 	echo "mute_sound = true"; } > "$out/luanti.conf"
-port=30030
-( cd "$luanti" && "$bin" --server --world "$work" --port "$port" \
-	--config "$out/luanti.conf" > "$out/luanti_srv.log" 2>&1 ) &
-sub=$!
-# "Server for gameid=... listening on": up, or the server gone
-for i in $(seq 1 600); do
-	grep -q "Server for gameid" "$out/luanti_srv.log" 2>/dev/null && break
-	kill -0 $sub 2>/dev/null || break
-	sleep 0.2
-done
-srv=$(pgrep -x luanti-refshots | head -1)
-[ -n "$srv" ] || { echo "the Luanti server did not come up" >&2; exit 1; }
+start_luanti_server "$work" "$out/luanti.conf" "$out/luanti_srv.log" ||
+	{ kill $LUANTI_PID 2>/dev/null; echo "FAIL: the Luanti server did not come up ($out/luanti_srv.log)"; exit 1; }
+srv=$LUANTI_PID port=$LUANTI_PORT
 trap 'kill "$srv" 2>/dev/null; kill "${cli:-}" 2>/dev/null' EXIT
 fifo="$out/cmds.fifo"; rm -f "$fifo"; mkfifo "$fifo"
 BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=drop \

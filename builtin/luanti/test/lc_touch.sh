@@ -20,7 +20,7 @@ rm -rf "$out"; mkdir -p "$out"
 PLAY=29721
 LIST=29723
 LUANTI=30051
-luanti=~/projects/luanti
+luanti=$LUANTI
 bin=${LUANTI_BIN:-$luanti/bin/luanti}
 [ -x "$bin" ] || { echo "SKIP: no Luanti server at $bin"; exit 77; }
 [ -f "$here/web/buildat.wasm" ] || { echo "SKIP: no web/ (util/build_web.sh)"; exit 77; }
