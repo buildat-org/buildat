@@ -1977,7 +1977,9 @@ struct Module: public interface::Module, public moderation::Host
 		c += "</p>\n";
 		// What an open report is about: its listing, or a whole fleet
 		std::set<ss_> reported;
-		for(const ss_ &gid : store("groups")->list("")){
+		sv_<ss_> open;
+		mod_do([&](moderation::Interface *m){ open = m->open_groups(this); });
+		for(const ss_ &gid : open){
 			const json::Value g = load("groups", gid);
 			if(jstr(g, "state") != "open")
 				continue;
@@ -3098,8 +3100,9 @@ struct Module: public interface::Module, public moderation::Host
 		r.set("blocklist_offers", offers);
 		if(mod){
 			int64_t groups = 0;
-			for(const ss_ &gid : store("groups")->list(""))
-				groups += jstr(load("groups", gid), "state") == "open";
+			mod_do([&](moderation::Interface *m){
+				groups = m->open_groups(this).size();
+			});
 			r.set("queue", groups);
 			r.set("open_appeals", open_appeals);
 		}

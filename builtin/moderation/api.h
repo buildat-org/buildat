@@ -104,6 +104,9 @@ namespace moderation
 		// The moderators' commands; a refusal throws
 		// The open groups, the most urgent first
 		virtual json::Value queue(Host *h) = 0;
+		// The open groups' ids, from an index: their count without
+		// queue()'s reading of each
+		virtual sv_<ss_> open_groups(Host *h) = 0;
 		// {group, reports (who reported left out), history}
 		virtual json::Value group(Host *h, const ss_ &gid) = 0;
 		// {group, decision (dismiss, uphold), ...the action's}

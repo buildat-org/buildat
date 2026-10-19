@@ -91,7 +91,7 @@ struct Module: public interface::Module, public Interface
 		reps.append(jstr(rep, "id"));
 		g.set("reports", reps);
 		g.set("weight", group_weight(h, g));
-		put(h, "groups", gid, g);
+		put_group(h, g);
 		auto_act(h, g);
 	}
 
@@ -138,6 +138,35 @@ struct Module: public interface::Module, public Interface
 		index(h)->set("open", std::to_string(open));
 		return open;
 	}
+	// [REWORK_1019_PERF] apps 4: the open groups' ids as "open_group/<id>"
+	// rows, kept by put_group(), so the queue and its count do not parse
+	// every group ever opened; listed once on a save that has none yet
+	void put_group(Host *h, const json::Value &g)
+	{
+		const ss_ gid = jstr(g, "id");
+		put(h, "groups", gid, g);
+		open_groups(h);
+		if(jstr(g, "state") == "open")
+			index(h)->set("open_group/"+gid, "");
+		else
+			index(h)->remove("open_group/"+gid);
+	}
+	sv_<ss_> open_groups(Host *h)
+	{
+		ss_ v;
+		if(!index(h)->get("open_groups", v)){
+			index(h)->batch([&](){
+				for(const ss_ &id : keys(h, "groups"))
+					if(jstr(load(h, "groups", id), "state") == "open")
+						index(h)->set("open_group/"+id, "");
+				index(h)->set("open_groups", "1");
+			});
+		}
+		sv_<ss_> ids;
+		for(const ss_ &k : index(h)->list("open_group/"))
+			ids.push_back(k.substr(11));
+		return ids;
+	}
 	// Once a day: held reports (spam, never in a group) gone after 30
 	// days, and the texts' counts of the days before
 	void sweep(Host *h)
@@ -183,7 +212,7 @@ struct Module: public interface::Module, public Interface
 		if(fields.is_object())
 			for(json::Iterator it(fields); it.valid(); it.next())
 				g.set(it.key(), it.value());
-		put(h, "groups", gid, g);
+		put_group(h, g);
 		return g;
 	}
 
@@ -220,7 +249,7 @@ struct Module: public interface::Module, public Interface
 				(want == "hide" && jstr(g, "auto") == "delist"))
 			return;
 		g.set("auto", want);
-		put(h, "groups", jstr(g, "id"), g);
+		put_group(h, g);
 		const ss_ reason = jstr(g, "reason");
 		const ss_ text = "Automatic, pending a moderator's review: reports of "
 				"\""+reason+"\" weighing "+std::to_string(w).substr(0, 4)+
@@ -299,7 +328,7 @@ struct Module: public interface::Module, public Interface
 		struct Item { double priority; json::Value g; };
 		std::vector<Item> items;
 		const int64_t t = now_s();
-		for(const ss_ &id : keys(h, "groups")){
+		for(const ss_ &id : open_groups(h)){
 			json::Value g = load(h, "groups", id);
 			if(jstr(g, "state") != "open")
 				continue;
@@ -401,7 +430,7 @@ struct Module: public interface::Module, public Interface
 		g.set("decided", decision);
 		g.set("decided_by", by);
 		g.set("decided_at", t);
-		put(h, "groups", jstr(g, "id"), g);
+		put_group(h, g);
 	}
 
 	json::Value audit_log(Host *h)

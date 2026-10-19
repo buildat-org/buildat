@@ -2146,7 +2146,7 @@ struct Module: public interface::Module, public moderation::Host
 			if(reviewer){
 				v.set("unreviewed", unreviewed_count());
 				moderation::access(m_server, [&](moderation::Interface *m){
-					v.set("open_reports", (int64_t)m->queue(this).size());
+					v.set("open_reports", (int64_t)m->open_groups(this).size());
 				});
 			}
 			const ss_ author = get("owners", name);
