@@ -43,7 +43,8 @@ Starport listing takes it as its kind unless `starport.json` names one.
   `demo_board_game`, `demo_skelenti` (a Luanti game in a Buildat app),
   `sample_vanilla_falling_blocks` (vanilla with voxel bodies that fall),
   `skeldat` (a bounded voxel world that bones and skeletons take over),
-  `hillclimb` (a hill-climb time trial on generated ground).
+  `hillclimb` (laps of a circuit on a hill, or a timed climb, on generated
+  ground).
 * Apps: `starport`, `aitta`, `hearth`, `floorplanner`.
 * Other: `play`, which serves the web client and has no game of its own:
   its page starts on the launch menu (a Starport lists its origin in

@@ -18,6 +18,13 @@
 # of the ground, and driving on; off the top's end the same; one parked a
 # minute never put back, nor the flat's; a stone thrown off the edge
 # removed. [HC_PAUSE_MENU] and [HC_TOUCH]: driven clients at the end.
+# [HC_CIRCUIT] hill.h's self test draws the loop at 0, 50 and 100%
+# switchbacks for lanes of 4, 6 and 8 m into the run's directory
+# (circuit_<lane>_<switchbacks>.pgm, from above); a flat circuit driven
+# round by P: its turns in order, a lap, a 60 s round ranking the two
+# cars by laps under the circuit's key; one cut into the middle put back,
+# no lap. The drives before it on the straight hill (_MODE=straight: the
+# circuit is the default).
 #   apps/hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -27,7 +34,7 @@ app="$here/apps/hillclimb"
 
 g++ -std=c++11 -O1 -DHILL_TEST -x c++ "$app/main/hill.h" -o "$t/hill_test" \
 	2> "$t/hill_build.log" || fail "hill.h self test did not build: $(head -3 "$t/hill_build.log")"
-"$t/hill_test" || fail "hill.h self test"
+"$t/hill_test" "$t" || fail "hill.h self test"
 g++ -std=c++11 -O1 -DGROUND_TEST -x c++ "$app/main/ground.h" -o "$t/ground_test" \
 	2> "$t/ground_build.log" || fail "ground.h self test did not build: $(head -3 "$t/ground_build.log")"
 "$t/ground_test" || fail "ground.h self test"
@@ -53,7 +60,7 @@ cd "$here/Build"
 port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
-	[parked]=12 [varied]=13)
+	[parked]=12 [varied]=13 [circuit]=14 [cut]=15)
 drive()
 {
 	local name=$1; shift
@@ -63,7 +70,8 @@ drive()
 	# The modules compiled once (warm, below), each drive a copy
 	[ -d "$t/warm/c" ] && [ "$name" != warm ] && mkdir -p "$t/$name" &&
 		cp -a "$t/warm/c" "$t/$name/c"
-	env BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP_VAR=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
+	env BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_FEATURES=0 \
+		BUILDAT_HILLCLIMB_STEEP_VAR=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
 		-C "$t/$name/c" -P $((port_base + PORT[$name])) -l 3 > "$t/$name.log" 2>&1
 }
 drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)"
@@ -94,7 +102,28 @@ drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLC
 # the left edge at 1 s
 drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 60:Q" &
+# [HC_CIRCUIT] A flat circuit 24 m wide and 30 long, no switchbacks: two
+# cars steered round by P (the second slower), a 60 s round; and one
+# turned left off the start into the middle
+circuit="BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5
+	BUILDAT_HILLCLIMB_WIDTH=24 BUILDAT_HILLCLIMB_LENGTH=30
+	BUILDAT_HILLCLIMB_SWITCHBACKS=0 BUILDAT_HILLCLIMB_INTERVAL=60"
+# shellcheck disable=SC2086 # the assignments, split
+drive circuit $circuit BUILDAT_HILLCLIMB_CARS=2 BUILDAT_HILLCLIMB_DRIVE="0:P 64:Q" &
+# shellcheck disable=SC2086
+drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
 wait
+c="$t/circuit.log"
+turns=$(grep -a "hillclimb: drive passed turn" "$c" | head -4 | sed 's/.*turn \([0-9]*\) of.*/\1/' | tr '\n' ' ')
+[ "$turns" = "1 2 3 4 " ] && grep -aq "hillclimb: drive's lap 1 at" "$c" ||
+	fail "the circuit: turns '$turns' in order, then a lap ($c)"
+res=$(grep -aA2 "hillclimb: round over:" "$c" | tail -2 | tr '\n' '|')
+grep -aq "finish .* on v5/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
+	echo "$res" | grep -Eq '^1 laps [0-9.]+ drive\|0 laps [0-9.]+ drive1\|$' ||
+	fail "the circuit's round: '$res', or its key ($c)"
+grep -aq "hillclimb: drive's car put back" "$t/cut.log" && ! grep -aq "'s lap" "$t/cut.log" ||
+	fail "the cut into the middle: not put back, or a lap ($t/cut.log)"
+echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back"
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do
@@ -261,9 +290,17 @@ rests = {m[0]: [float(v) for v in m[1:4]] + [int(m[4])] for m in re.findall(
     r"loose, (\d+) voxels", slog)}
 say = ["%s: y %.2f -> %.2f, %d voxels" % (k, loose[k][1], rests[k][1],
     rests[k][3]) for k in sorted(rests) if k in loose]
-# Rock 1 is the one K dropped on the slope's lower third
-want("1" in rests and rests["1"][1] < loose["1"][1] - 1 and rests["1"][3] > 0,
-    "a stone on the slope rolled down and rested as voxels: %s" % say)
+# Rock 1 is the one K dropped on the slope's lower third: down the
+# slope, resting lower or gone off the bottom's end (its way is chaotic:
+# dropped at 10 s rather than 2 it went off the side, before
+# [HC_CIRCUIT] too); a stone at rest made voxels again
+left = {m.group(1): (float(m.group(2)), float(m.group(3))) for m in re.finditer(
+    r"rock (\d+) left the area at (\S+),(\S+) m", slog)}
+want(("1" in rests and rests["1"][1] < loose["1"][1] - 1) or
+    ("1" in left and left["1"][1] < 0),
+    "the stone dropped on the slope rolled down: %s; left %s" % (say, left))
+want(any(r[3] > 0 for r in rests.values()),
+    "a stone came to rest as voxels: %s" % say)
 want(len(loose) >= 2, "the spinning tyres loosened stones: %d" % (len(loose) - 1))
 us = [int(m) for m in re.findall(r"tick_us=(\d+)",
     open("%s/climb.log" % d, errors="replace").read())]
@@ -289,7 +326,7 @@ PY
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "PASS: (no display: the clients skipped)"; exit 0; }
 mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 {
-	local name=$1 vars=$2; shift 2
+	local name=$1 vars="BUILDAT_HILLCLIMB_MODE=straight $2"; shift 2
 	mkdir -p "$t/$name"; cp -a "$t/warm/c" "$t/$name/c"
 	# shellcheck disable=SC2086 # the assignments, split
 	start_server "$t/$name.log" "STATUS Listening" 300 auto env $vars \
@@ -365,8 +402,8 @@ grep -aq "hillclimb: params from .* refused: not an admin" "$t/pub.log" &&
 	fail "a non-admin's params not refused, or the public rounds not 10 min ($t/pub.log)"
 mp_server loc BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "a local server, rounds every 0 s" "$t/loc.log" || fail "a local game has rounds ($t/loc.log)"
-echo "  a public server: a player's params refused, rounds of 10 min; a local game none"
+grep -aq "a local server, rounds every 600 s" "$t/loc.log" || fail "a local game's rounds not 10 min ($t/loc.log)"
+echo "  a public server: a player's params refused; rounds of 10 min, a local game's too"
 # Escape's menu ([HC_PAUSE_MENU]): W held through it sends nothing while
 # it is up; Settings... comes back to it, its Server... the way to the
 # Server window ([HC_TOUCH_SERVER]: no corner button); Leave the game
@@ -388,7 +425,7 @@ delay 200
 keypress Return
 wait_log 3000 hillclimb: the hill menu: steep
 delay 300
-$(for i in 1 2 3 4 5 6 7 8; do echo keypress Down; echo delay 150; done)
+$(for i in 1 2 3 4 5 6 7 8 9; do echo keypress Down; echo delay 150; done)
 screenshot $t/hill_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params
@@ -513,12 +550,12 @@ delay 500
 click Button "The hill..."
 wait_log 5000 hillclimb: the hill menu shown
 delay 1000
-tap 455 133
+tap 455 116
 delay 1000
-tap 430 258
+tap 430 241
 wait_log 3000 hillclimb: the hill menu: steep
 delay 500
-tap 400 412
+tap 400 430
 wait_log 5000 hillclimb: the hill menu sends params
 delay 500
 quit

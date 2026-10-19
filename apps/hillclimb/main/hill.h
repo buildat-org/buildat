@@ -27,6 +27,14 @@
 // [HC_PITS_ROCKS] On the slope, about one feature each 6 m: pits, bowls
 // in the sand at its angle of repose, and rocks poking up from it, each
 // left out where it would leave a cross-section less than 3 m free.
+// [HC_CIRCUIT] A circuit: the area width_m wide, and on it a loop of
+// lanes lane_m wide, each a straight strip along X or Z: right across
+// the bottom, up the right side, left across the top, down the left side,
+// the start line in the bottom lane's middle. A share of the slope's
+// height (switchbacks) climbed by zigzags, the way up's in the right
+// half, the way down's in the left, where along the slope by the seed.
+// Every voxel is ground (the middle as well: see the done note); off the
+// lanes is off the track, as off the area is (on_track()).
 #pragma once
 #include <algorithm>
 #include <cmath>
@@ -49,6 +57,11 @@ struct Params
 	float steep_var_deg = 0;
 	float length_m = 50;  // the slope's run along Z
 	bool features = true; // pits and rocks ([HC_PITS_ROCKS]); off for a check
+	// [HC_CIRCUIT] A circuit, its area's width, its lanes' and the share
+	// of the slope climbed by switchbacks, 0 to 100
+	bool circuit = false;
+	float width_m = 40, lane_m = 7;
+	int switchbacks = 50;
 	// simplified: sand with pebbles is the only terrain; rocky, muddy and
 	// vegetated are later ([HILLCLIMB] 5)
 };
@@ -59,7 +72,8 @@ struct Hill
 	// In voxels
 	static const int PAD = 6 * U;      // each flat pad, longer than the car
 	static const int EASE = 2 * U;     // the slope's ends, eased
-	static const int TRACK_W = 10 * U;
+	static const int TRACK_W = 10 * U; // the straight hill's
+	int track_w = TRACK_W;             // the area's width
 	static const int SHELL = 12;       // sand's depth, 1.5 m
 	static const int BASE = 2 * U;     // the bottom pad's surface over y 0
 	static const int BUMP = 1;         // the surface's undulation, voxels
@@ -82,16 +96,294 @@ struct Hill
 	static const int TOP_CLEAR = 4 * U;     // none this near the top pad
 	static constexpr float REPOSE = 0.67f;  // tan 34 degrees, sand's
 
+	// [HC_CIRCUIT] The loop: its turns, path[0] the start line's middle
+	// (a voxel's centre at its integer position, as everywhere), and a
+	// lane's width; a lane each segment, as a box from the segment
+	// stretched by half a lane every way
+	struct V2 { float x, z; };
+	std::vector<V2> path;
+	float lane = 0;
+	struct Box { float x0, z0, x1, z1; };
+	std::vector<Box> lanes;
+	// A fence, along X or Z or a relief's diagonal, the area's edge's with
+	// none
+	struct Fence { float x0, z0, x1, z1; };
+	std::vector<Fence> fences;
+	// A turn's inner corner cut off (user, 2026-10-19: "the inner corners
+	// need a bit of a relief (when one fits) as the car's turning radius
+	// isn't that great"): the triangle from the corner c along both inner
+	// fences, a and b its two ways out of the corner
+	struct Relief { V2 c, a, b; float leg; };
+	std::vector<Relief> reliefs;
+
 	Hill(const Params &params): p(params)
 	{
+		if(p.circuit)
+			track_w = std::max(1, (int)std::lround(p.width_m * U));
 		run = (int)std::lround(p.length_m * U);
 		k = std::tan(p.steep_deg * PI / 180);
 		// Each eased end rises half of what a straight one would
 		rise = k * (run - EASE);
 		if(p.steep_var_deg > 0)
 			vary();
+		if(p.circuit){
+			make_path();
+		} else {
+			// The area's edges
+			const float x1 = size_x() - 0.5f, z1 = size_z() - 0.5f;
+			fences = {{-0.5f, -0.5f, x1, -0.5f}, {x1, -0.5f, x1, z1},
+					{-0.5f, z1, x1, z1}, {-0.5f, -0.5f, -0.5f, z1}};
+		}
 		if(p.features)
 			place_features();
+	}
+
+	// [HC_CIRCUIT] The loop, in the area's own frame first (0 to its size
+	// across its edges), moved by half a voxel at the end
+	void make_path()
+	{
+		const float W = (float)track_w, Z = (float)size_z();
+		const float w = std::fmin(p.lane_m * U, W / 2), h = w / 2, xm = W / 2;
+		lane = w;
+		// The runs across the slope a way's zigzag can have, an even
+		// number: from a lane over the bottom one to a lane under the top
+		// one; none where a half is under two lanes
+		int most = W / 2 >= 2 * w && Z >= 3 * w ? (int)((Z - 3 * w) / w) + 1 : 0;
+		most &= ~1;
+		const int n = 2 * (int)std::lround(p.switchbacks / 100.0f * most / 2);
+		const float first = h + w, last = Z - h - w - (n - 1) * w;
+		const float up = first + unit(1, 0, 0, 211) * (last - first);
+		const float down = Z - h - w - unit(2, 0, 0, 211) * (last - first);
+		std::vector<V2> v;
+		v.push_back({xm, h});
+		v.push_back({W - h, h});
+		for(int k = 0; k < n; k++){
+			const float z = up + k * w;
+			v.push_back({k % 2 ? xm + h : W - h, z});
+			v.push_back({k % 2 ? W - h : xm + h, z});
+		}
+		v.push_back({W - h, Z - h});
+		v.push_back({h, Z - h});
+		for(int k = 0; k < n; k++){
+			const float z = down - k * w;
+			v.push_back({k % 2 ? xm - h : h, z});
+			v.push_back({k % 2 ? h : xm - h, z});
+		}
+		v.push_back({h, h});
+		// Each lane's box; its two sides fenced, each side stopped at the
+		// inner corner of a turn and carried to the outer one
+		std::vector<Fence> f;
+		const size_t m = v.size();
+		for(size_t i = 0; i < m; i++){
+			const V2 a = v[i], b = v[(i + 1) % m];
+			const V2 prev = v[(i + m - 1) % m], next = v[(i + 2) % m];
+			lanes.push_back({std::fmin(a.x, b.x) - h, std::fmin(a.z, b.z) - h,
+					std::fmax(a.x, b.x) + h, std::fmax(a.z, b.z) + h});
+			auto dir = [](V2 p0, V2 p1){
+				const float dx = p1.x - p0.x, dz = p1.z - p0.z,
+						l = std::sqrt(dx * dx + dz * dz);
+				return V2{dx / l, dz / l};
+			};
+			const V2 d = dir(a, b), din = dir(prev, a), dout = dir(b, next);
+			for(int side = -1; side <= 1; side += 2){
+				const V2 nm = {-d.z * side, d.x * side};
+				// Toward the turn is its inside: short; away, its outside
+				auto ext = [&](float toward){
+					return std::fabs(toward) < 0.01f ? 0 : toward > 0 ? -h : h;
+				};
+				const float e0 = ext(-(nm.x * din.x + nm.z * din.z)),
+						e1 = ext(nm.x * dout.x + nm.z * dout.z);
+				f.push_back({a.x + nm.x * h - d.x * e0, a.z + nm.z * h - d.z * e0,
+						b.x + nm.x * h + d.x * e1, b.z + nm.z * h + d.z * e1});
+			}
+		}
+		// Two lanes side by side share one: the same line's overlapping
+		// stretches made one
+		for(Fence &a : f){
+			if(a.x0 > a.x1 || a.z0 > a.z1){
+				std::swap(a.x0, a.x1);
+				std::swap(a.z0, a.z1);
+			}
+		}
+		std::sort(f.begin(), f.end(), [](const Fence &a, const Fence &b){
+			const bool ax = a.z0 == a.z1, bx = b.z0 == b.z1;
+			if(ax != bx) return ax;
+			const float ka = ax ? a.z0 : a.x0, kb = bx ? b.z0 : b.x0;
+			if(std::fabs(ka - kb) > 0.01f) return ka < kb;
+			return (ax ? a.x0 : a.z0) < (bx ? b.x0 : b.z0);
+		});
+		for(const Fence &a : f){
+			if(!fences.empty()){
+				Fence &l = fences.back();
+				const bool ax = a.z0 == a.z1, lx = l.z0 == l.z1;
+				if(ax == lx && std::fabs(ax ? a.z0 - l.z0 : a.x0 - l.x0) < 0.01f &&
+						(ax ? a.x0 <= l.x1 + 0.01f : a.z0 <= l.z1 + 0.01f)){
+					l.x1 = std::fmax(l.x1, a.x1);
+					l.z1 = std::fmax(l.z1, a.z1);
+					continue;
+				}
+			}
+			fences.push_back(a);
+		}
+		// The reliefs, half a lane each way: where the triangle is off every
+		// lane and in the area, it is track and its long side the fence;
+		// where it is all lane already (a hairpin's tip, the fence between
+		// the two ways the car may cross anyway), that fence is cut back
+		const float leg = h;
+		std::vector<V2> trimmed;
+		for(size_t i = 1; i < m; i++){
+			const V2 c0 = v[i], pv = v[i - 1], nx = v[(i + 1) % m];
+			auto unit_of = [](V2 p0, V2 p1){
+				const float dx = p1.x - p0.x, dz = p1.z - p0.z,
+						l = std::sqrt(dx * dx + dz * dz);
+				return V2{dx / l, dz / l};
+			};
+			const V2 din = unit_of(pv, c0), dout = unit_of(c0, nx);
+			const Relief r = {{c0.x + (dout.x - din.x) * h, c0.z + (dout.z - din.z) * h},
+					{-din.x, -din.z}, dout, leg};
+			// Off every lane: a box in the triangle's own frame (its legs
+			// are along X and Z) clear of a + b < leg; in the area: its
+			// corners. All lane: every point a quarter voxel apart in one.
+			bool fits = true;
+			for(const Box &bx : lanes){
+				auto along = [&](V2 d, float &lo, float &hi){
+					const float p0 = (bx.x0 - r.c.x) * d.x + (bx.z0 - r.c.z) * d.z,
+							p1 = (bx.x1 - r.c.x) * d.x + (bx.z1 - r.c.z) * d.z;
+					lo = std::fmin(p0, p1), hi = std::fmax(p0, p1);
+				};
+				float a0, a1, b0, b1;
+				along(r.a, a0, a1);
+				along(r.b, b0, b1);
+				fits = fits && !(a1 > 0.01f && b1 > 0.01f &&
+						std::fmax(a0, 0.0f) + std::fmax(b0, 0.0f) < leg - 0.01f);
+			}
+			for(int k = 0; k < 3; k++){
+				const float x = r.c.x + (k == 1 ? r.a.x : k == 2 ? r.b.x : 0) * leg,
+						z = r.c.z + (k == 1 ? r.a.z : k == 2 ? r.b.z : 0) * leg;
+				fits = fits && x >= -0.01f && x <= W + 0.01f && z >= -0.01f &&
+						z <= Z + 0.01f;
+			}
+			// ... and off another corner's (two across a thin middle)
+			bool tip = true;
+			for(float a = 0.25f; a < leg; a += 0.25f)
+			for(float b = 0.25f; a + b < leg; b += 0.25f){
+				const float x = r.c.x + r.a.x * a + r.b.x * b,
+						z = r.c.z + r.a.z * a + r.b.z * b;
+				bool in = false;
+				for(const Box &bx : lanes)
+					in = in || (x > bx.x0 && x < bx.x1 && z > bx.z0 && z < bx.z1);
+				tip = tip && in;
+				for(const Relief &o : reliefs){
+					const float oa = (x - o.c.x) * o.a.x + (z - o.c.z) * o.a.z,
+							ob = (x - o.c.x) * o.b.x + (z - o.c.z) * o.b.z;
+					fits = fits && !(oa > 0 && ob > 0 && oa + ob < o.leg);
+				}
+			}
+			bool done = false;
+			for(const V2 &t : trimmed)
+				done = done || (std::fabs(t.x - r.c.x) < 0.01f &&
+						std::fabs(t.z - r.c.z) < 0.01f);
+			if(!(fits || tip) || done)
+				continue;
+			trimmed.push_back(r.c);
+			for(Fence &e : fences){
+				for(int end = 0; end < 2; end++){
+					float &ex = end ? e.x1 : e.x0, &ez = end ? e.z1 : e.z0;
+					const float ox = end ? e.x0 : e.x1, oz = end ? e.z0 : e.z1;
+					if(std::fabs(ex - r.c.x) > 0.01f || std::fabs(ez - r.c.z) > 0.01f)
+						continue;
+					const float l = std::fabs(ox - ex) + std::fabs(oz - ez);
+					const float t = std::fmin(leg, l) / l;
+					ex += (ox - ex) * t;
+					ez += (oz - ez) * t;
+				}
+			}
+			if(fits){
+				reliefs.push_back(r);
+				fences.push_back({r.c.x + r.a.x * leg, r.c.z + r.a.z * leg,
+						r.c.x + r.b.x * leg, r.c.z + r.b.z * leg});
+			}
+		}
+		// The ones a turn left with no length
+		fences.erase(std::remove_if(fences.begin(), fences.end(),
+				[](const Fence &e){
+			return std::fabs(e.x1 - e.x0) + std::fabs(e.z1 - e.z0) < 0.01f;
+		}), fences.end());
+		// Into the voxels' frame
+		for(Relief &r : reliefs)
+			r.c.x -= 0.5f, r.c.z -= 0.5f;
+		for(V2 &q : v)
+			q.x -= 0.5f, q.z -= 0.5f;
+		for(Box &b : lanes)
+			b.x0 -= 0.5f, b.z0 -= 0.5f, b.x1 -= 0.5f, b.z1 -= 0.5f;
+		for(Fence &e : fences)
+			e.x0 -= 0.5f, e.z0 -= 0.5f, e.x1 -= 0.5f, e.z1 -= 0.5f;
+		path = v;
+	}
+	// Whether (x, z) is in a lane, or with none (the straight hill) over the
+	// area
+	bool on_track(float x, float z) const
+	{
+		if(!p.circuit)
+			return over(x, z);
+		for(const Box &b : lanes)
+			if(x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1)
+				return true;
+		for(const Relief &r : reliefs){
+			const float a = (x - r.c.x) * r.a.x + (z - r.c.z) * r.a.z,
+					b = (x - r.c.x) * r.b.x + (z - r.c.z) * r.b.z;
+			if(a >= 0 && b >= 0 && a + b <= r.leg)
+				return true;
+		}
+		return false;
+	}
+	// Where a car starts, in voxels and degrees about Y: the bottom pad's
+	// middle facing up, or the circuit's start line 3 m ahead facing +X
+	void start(float &x, float &z, float &yaw) const
+	{
+		if(!p.circuit){
+			x = size_x() / 2.0f, z = PAD / 2.0f, yaw = 0;
+			return;
+		}
+		x = path[0].x - 3 * U, z = path[0].z, yaw = 90;
+	}
+	// A lap: each turn passed in order -- in the square its two lanes
+	// share, or in its inner corner's relief triangle, which every way
+	// from the one lane into the other goes through -- then the start line
+	// crossed toward +X in the bottom lane. A cut across a fence the lanes
+	// share misses a turn; one backwards crosses the line the other way.
+	struct Lap { size_t next = 1; int laps = 0; float x = 0; bool at = false; };
+	bool lap_step(Lap &l, float x, float z) const
+	{
+		if(path.size() < 2)
+			return false;
+		bool lap = false;
+		if(l.next < path.size()){
+			const float h = lane / 2;
+			const V2 v = path[l.next], pv = path[l.next - 1],
+					nx = path[(l.next + 1) % path.size()];
+			auto unit_of = [](V2 p0, V2 p1){
+				const float dx = p1.x - p0.x, dz = p1.z - p0.z,
+						l = std::sqrt(dx * dx + dz * dz);
+				return V2{dx / l, dz / l};
+			};
+			const V2 din = unit_of(pv, v), dout = unit_of(v, nx);
+			const float cx = v.x + (dout.x - din.x) * h, cz = v.z + (dout.z - din.z) * h;
+			const float a = -(x - cx) * din.x - (z - cz) * din.z,
+					b = (x - cx) * dout.x + (z - cz) * dout.z;
+			if((std::fabs(x - v.x) <= h && std::fabs(z - v.z) <= h) ||
+					(a >= 0 && b >= 0 && a + b <= h))
+				l.next++;
+		}
+		if(l.at && l.x < path[0].x && x >= path[0].x &&
+				z < path[0].z + lane / 2 && l.next == path.size()){
+			l.laps++;
+			l.next = 1;
+			lap = true;
+		}
+		l.x = x;
+		l.at = true;
+		return lap;
 	}
 
 	// [HC_STEEP_NOISE] n(x, z) in -1..1: value noise, stretched by 1.5 so
@@ -112,9 +404,9 @@ struct Hill
 	void vary()
 	{
 		const int nz = size_z() + 1;
-		prof.assign((size_t)TRACK_W * nz, 0);
+		prof.assign((size_t)track_w * nz, 0);
 		rise = 0;
-		for(int x = 0; x < TRACK_W; x++){
+		for(int x = 0; x < track_w; x++){
 			float h = 0;
 			for(int z = 0; z < nz; z++){
 				prof[(size_t)x * nz + z] = h;
@@ -127,7 +419,7 @@ struct Hill
 		}
 	}
 
-	int size_x() const { return TRACK_W; }
+	int size_x() const { return track_w; }
 	int size_z() const { return 2 * PAD + run; }
 	int size_y() const { return BASE + (int)std::ceil(rise) + BUMP + 8; }
 	// Where the slope starts and where the top pad does, along Z
@@ -142,9 +434,9 @@ struct Hill
 	{
 		if(!prof.empty()){
 			const int nz = size_z() + 1;
-			const float cx = std::fmin(std::fmax(x, 0.0f), TRACK_W - 1.0f),
+			const float cx = std::fmin(std::fmax(x, 0.0f), track_w - 1.0f),
 					cz = std::fmin(std::fmax(z, 0.0f), (float)(nz - 1));
-			const int x0 = std::min((int)cx, TRACK_W - 2),
+			const int x0 = std::max(0, std::min((int)cx, track_w - 2)),
 					z0 = std::min((int)cz, nz - 2);
 			const float tx = cx - x0, tz = cz - z0;
 			auto at = [&](int a, int b){ return prof[(size_t)a * nz + b]; };
@@ -208,17 +500,35 @@ struct Hill
 			best = std::max(best, b.first - at);
 			at = std::max(at, b.second);
 		}
-		best = std::max(best, (float)TRACK_W - at);
+		best = std::max(best, (float)track_w - at);
 		return (int)std::floor(best);
 	}
 	// The features from the seed: a slot each FEATURE_EVERY along the
 	// slope (off the pads and the eased ends, TOP_CLEAR from the top), a
 	// pit or a rock at random in it, left out where it would touch
-	// another or close a row to under FREE_W
+	// another or close a row to under FREE_W.
+	// [HC_CIRCUIT] As many to the area as on the straight hill, each
+	// inside a lane leaving FREE_W of it beside, a lane from a turn's
+	// corner and FREE_W from another
+	bool in_lane(const Feature &f) const
+	{
+		if(lane - 2 * f.r < FREE_W)
+			return false;
+		for(const V2 &q : path){
+			const float dx = f.x - 0.5f - q.x, dz = f.z - 0.5f - q.z;
+			if(dx * dx + dz * dz < lane * lane)
+				return false;
+		}
+		for(const Box &b : lanes)
+			if(f.x - 0.5f - f.r >= b.x0 && f.x - 0.5f + f.r <= b.x1 &&
+					f.z - 0.5f - f.r >= b.z0 && f.z - 0.5f + f.r <= b.z1)
+				return true;
+		return false;
+	}
 	void place_features()
 	{
 		const float lo = PAD + EASE, hi = top_z0() - TOP_CLEAR;
-		const int n = (int)((hi - lo) / FEATURE_EVERY);
+		const int n = (int)((hi - lo) / FEATURE_EVERY * track_w / TRACK_W);
 		for(int i = 0; i < n; i++){
 			Feature f;
 			f.kind = unit(i, 0, 0, 101) < 0.5f ? PIT : ROCK;
@@ -228,16 +538,19 @@ struct Hill
 					(0.4f + 0.5f * unit(i, 1, 0, 101)) * U;
 			f.depth = (0.3f + 0.4f * unit(i, 2, 0, 101)) * U;
 			f.z = lo + f.r + (i + unit(i, 3, 0, 101)) * (hi - lo - 2 * f.r) / n;
-			f.x = f.r + unit(i, 4, 0, 101) * (TRACK_W - 2 * f.r);
+			f.x = f.r + unit(i, 4, 0, 101) * (track_w - 2 * f.r);
 			f.y = 0;
-			bool ok = f.z + f.r <= hi;
+			bool ok = f.z + f.r <= hi && (!p.circuit || in_lane(f));
+			const float apart = p.circuit ? FREE_W : U;
 			for(const Feature &g : features){
 				float dx = f.x - g.x, dz = f.z - g.z;
-				ok = ok && dx * dx + dz * dz > (f.r + g.r + U) * (f.r + g.r + U);
+				ok = ok && dx * dx + dz * dz > (f.r + g.r + apart) *
+						(f.r + g.r + apart);
 			}
 			std::vector<Feature> with = features;
 			with.push_back(f);
-			for(int z = (int)(f.z - f.r); ok && z <= (int)(f.z + f.r); z++)
+			for(int z = (int)(f.z - f.r); ok && !p.circuit && z <= (int)(f.z + f.r);
+					z++)
 				ok = free_width(with, z) >= FREE_W;
 			if(!ok)
 				continue;
@@ -530,6 +843,171 @@ int main(int argc, char **argv)
 		assert(v.surface(x, z) == v.surface(x, v.top_z0()));
 	assert(v.size_y() > v.surface(0, v.top_z0()) && v.rise > 0);
 	printf("hill.h: 27 degrees varied by 4: local angles %.1f to %.1f\n", lo, hi);
+	// [HC_CIRCUIT] 48 m wide, 30 m of slope: at lanes of 4, 6 and 8 m and
+	// switchbacks at 0, 50 and 100%, the loop inside the area, no two
+	// lanes but neighbours overlapping (so it does not cross itself and
+	// each lane is its width), the middle (the area off the lanes) shrinking
+	// as the switchbacks grow; each drawn from above into argv[1]'s
+	// directory, if given, as circuit_<lane>_<switchbacks>.pgm (lanes grey,
+	// fences black, the middle white, the turns' corners dark grey)
+	auto middle = [](const Hill &c){
+		int off = 0;
+		for(int z = 0; z < c.size_z(); z++)
+		for(int x = 0; x < c.size_x(); x++)
+			off += !c.on_track((float)x, (float)z);
+		return off;
+	};
+	auto check_path = [](const Hill &c){
+		const size_t m = c.lanes.size();
+		assert(m == c.path.size() && m >= 4);
+		for(size_t i = 0; i < m; i++){
+			const Hill::Box &a = c.lanes[i];
+			assert(a.x0 >= -0.51f && a.z0 >= -0.51f && a.x1 <= c.size_x() - 0.49f &&
+					a.z1 <= c.size_z() - 0.49f);
+			assert(std::fabs(std::fmin(a.x1 - a.x0, a.z1 - a.z0) - c.lane) < 0.01f);
+			for(size_t j = i + 2; j < m; j++){
+				if(i == 0 && j == m - 1)
+					continue;
+				const Hill::Box &b = c.lanes[j];
+				const float ox = std::fmin(a.x1, b.x1) - std::fmax(a.x0, b.x0),
+						oz = std::fmin(a.z1, b.z1) - std::fmax(a.z0, b.z0);
+				if(ox > 0.01f && oz > 0.01f)
+					fprintf(stderr, "lanes %zu and %zu overlap\n", i, j);
+				assert(!(ox > 0.01f && oz > 0.01f));
+			}
+		}
+		// No fence through a lane: a fence is on lanes' edges only
+		for(const Hill::Fence &f : c.fences){
+			const float len = std::fabs(f.x1 - f.x0) + std::fabs(f.z1 - f.z0);
+			for(float t = 0; t <= len; t += 1){
+				const float x = f.x0 + (f.x1 - f.x0) * t / len,
+						z = f.z0 + (f.z1 - f.z0) * t / len;
+				for(const Hill::Box &b : c.lanes)
+					assert(!(x > b.x0 + 0.01f && x < b.x1 - 0.01f &&
+							z > b.z0 + 0.01f && z < b.z1 - 0.01f));
+			}
+		}
+	};
+	for(float lane_m : {4.0f, 6.0f, 8.0f}){
+		int prev = 1 << 30, at0 = 0, at100 = 0;
+		size_t turns0 = 0, turns100 = 0;
+		for(int sw : {0, 50, 100}){
+			Params cp;
+			cp.circuit = true, cp.width_m = 48, cp.lane_m = lane_m;
+			cp.length_m = 30, cp.switchbacks = sw, cp.steep_deg = 18;
+			cp.features = false;
+			const Hill c(cp);
+			check_path(c);
+			const int mid = middle(c);
+			assert(mid <= prev);
+			prev = mid;
+			(sw == 0 ? at0 : at100) = mid;
+			(sw == 0 ? turns0 : turns100) = c.path.size();
+			if(argc == 2){
+				char name[256];
+				snprintf(name, sizeof name, "%s/circuit_%.0f_%d.pgm", argv[1],
+						lane_m, sw);
+				FILE *f = fopen(name, "wb");
+				assert(f);
+				fprintf(f, "P5 %d %d 255\n", c.size_x(), c.size_z());
+				std::vector<unsigned char> px((size_t)c.size_x() * c.size_z());
+				for(int z = 0; z < c.size_z(); z++)
+				for(int x = 0; x < c.size_x(); x++)
+					px[(size_t)(c.size_z() - 1 - z) * c.size_x() + x] =
+							c.on_track((float)x, (float)z) ? 160 : 255;
+				auto dot = [&](float x, float z, unsigned char v){
+					const int ix = std::min(c.size_x() - 1, std::max(0, (int)std::lround(x))),
+							iz = std::min(c.size_z() - 1, std::max(0, (int)std::lround(z)));
+					if(ix >= 0 && ix < c.size_x() && iz >= 0 && iz < c.size_z())
+						px[(size_t)(c.size_z() - 1 - iz) * c.size_x() + ix] = v;
+				};
+				for(const Hill::Fence &e : c.fences){
+					const float len = std::fabs(e.x1 - e.x0) + std::fabs(e.z1 - e.z0);
+					for(float t = 0; t <= len; t += 0.5f)
+						dot(e.x0 + (e.x1 - e.x0) * t / len, e.z0 + (e.z1 - e.z0) *
+								t / len, 0);
+				}
+				for(const Hill::V2 &q : c.path)
+					for(int d = -2; d <= 2; d++)
+						dot(q.x + d, q.z, 80), dot(q.x, q.z + d, 80);
+				fwrite(px.data(), 1, px.size(), f);
+				fclose(f);
+			}
+			printf("hill.h: circuit 48 m, lanes %.0f m, switchbacks %d%%: %zu "
+					"turns, %zu fences, the middle %.0f m2\n", lane_m, sw,
+					c.path.size() - 1, c.fences.size(), mid / (float)(U * U));
+		}
+		assert(at100 < at0 && turns100 > turns0);
+	}
+	// The plain loop: the area's edge and the middle's, eight fences
+	Params pl;
+	pl.circuit = true, pl.switchbacks = 0, pl.features = false;
+	const Hill loop(pl);
+	// The plain loop's four inner corners relieved: a diagonal each
+	assert(loop.fences.size() == 12 && loop.path.size() == 5 &&
+			loop.reliefs.size() == 4);
+	{
+		const Hill::Relief &r = loop.reliefs[0];
+		const float x = r.c.x + (r.a.x + r.b.x) * r.leg / 4,
+				z = r.c.z + (r.a.z + r.b.z) * r.leg / 4;
+		assert(loop.on_track(x, z));
+		assert(!loop.on_track(x + (r.a.x + r.b.x) * r.leg,
+				z + (r.a.z + r.b.z) * r.leg));
+	}
+	assert(!loop.on_track(loop.size_x() / 2.0f, loop.size_z() / 2.0f));
+	assert(loop.on_track(loop.path[0].x, loop.path[0].z));
+	// The default circuit: 40 m, 7 m lanes, 50%: hairpins each way. Laps
+	// by its centre line: two laps driven, two counted; backwards none; the
+	// way up's hairpin cut across the fence it shares, none
+	Params dp;
+	dp.circuit = true, dp.steep_deg = 18, dp.steep_var_deg = 4, dp.length_m = 40;
+	const Hill d(dp);
+	check_path(d);
+	assert(d.size_x() == 40 * U && d.path.size() > 5);
+	auto drive = [&](const std::vector<Hill::V2> &pts, int loops){
+		Hill::Lap l;
+		float sx, sz, yaw;
+		d.start(sx, sz, yaw);
+		Hill::V2 at = {sx, sz};
+		std::vector<Hill::V2> route;
+		for(int k = 0; k < loops; k++)
+			for(const Hill::V2 &q : pts)
+				route.push_back(q);
+		route.push_back(pts[0]);
+		for(const Hill::V2 &q : route){
+			const float dx = q.x - at.x, dz = q.z - at.z;
+			const int n = (int)(std::sqrt(dx * dx + dz * dz) / 2) + 1;
+			for(int i = 1; i <= n; i++)
+				d.lap_step(l, at.x + dx * i / n, at.z + dz * i / n);
+			at = q;
+		}
+		return l.laps;
+	};
+	assert(drive(d.path, 2) == 2);
+	std::vector<Hill::V2> back(d.path.rbegin(), d.path.rend());
+	back.insert(back.begin(), d.path[0]);
+	assert(drive(back, 2) == 0);
+	std::vector<Hill::V2> cut;
+	for(size_t i = 0; i < d.path.size(); i++)
+		if(!(i >= 2 && i <= 5))  // the way up's hairpin: its four turns
+			cut.push_back(d.path[i]);
+	assert(d.path[2].x == d.path[1].x && d.path[5].x == d.path[1].x);
+	assert(drive(cut, 2) == 0);
+	// [HC_CIRCUIT] Pits and rocks over 20 seeds, each in a lane
+	int in_lanes = 0;
+	for(uint32_t seed = 1; seed <= 20; seed++){
+		Params fp = dp;
+		fp.seed = seed, fp.features = true;
+		const Hill h(fp);
+		for(const Hill::Feature &f : h.features){
+			assert(h.in_lane(f) && h.on_track(f.x - 0.5f, f.z - 0.5f));
+			in_lanes++;
+		}
+	}
+	assert(in_lanes > 10);
+	printf("hill.h: the default circuit %zu turns, %zu fences, %zu reliefs; 20 "
+			"seeds, %d pits and rocks in its lanes\n", d.path.size() - 1,
+			d.fences.size(), d.reliefs.size(), in_lanes);
 	printf("hill.h: self test passed; %dx%dx%d voxels, rise %.1f m, "
 			"%.1f%% stones in the shell; 50 hills, %d pits and %d rocks; the "
 			"outside flush with the edge within %.2f voxels\n",

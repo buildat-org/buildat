@@ -5,5 +5,5 @@
 	"engine_api": 2,
 	"license_code": "Apache-2.0",
 	"license_media": "CC0-1.0",
-	"description": "A hill-climb time trial on generated voxel ground."
+	"description": "Laps of a circuit on a hill, or a timed climb, on generated voxel ground."
 }

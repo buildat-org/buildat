@@ -95,9 +95,10 @@ voxel_shading.set_camera(camera_node)
 -- each quad by its slope into one of nine groups (flat, and four compass
 -- ways at two tilts), a material each, lit as an object with no sun plus
 -- the sun by the group's normal, as skeldat's backdrop is (its own copy:
--- apps do not consume each other). Sand-textured. And the fence along
--- the area's edge on it: posts every 2 m, white with a red band, and two
--- red-and-white ribbons between them, drawn only.
+-- apps do not consume each other). Sand-textured. And the fences
+-- (hillclimb:fences: the area's edge, or a circuit's lanes' sides): posts
+-- every 2 m at most, white with a red band, and two red-and-white ribbons
+-- between them, drawn only.
 local hill = nil -- the server's hillclimb:hill, below
 local outside = {node = nil, fence = nil, groups = {}, light_t = 0}
 local light_units = nil
@@ -115,10 +116,10 @@ local function lit_mat(r, g, b, texture)
 end
 local FENCE = {white = lit_mat(0.8, 0.8, 0.78), red = lit_mat(0.6, 0.04, 0.03),
 	ribbon = lit_mat(1, 1, 1, "main/ribbon.png")}
--- The fence: a post at each grid point along the area's edge, half a
--- voxel out from it, on the ground there; ribbons between the posts at
--- 0.5 and 0.9 m, sagging 3 cm at their middles
-local function make_fence(xs, zs, hs, area)
+-- The fences: a post at each point the server sends, on the ground
+-- there; ribbons between a line's posts at 0.5 and 0.9 m, sagging 3 cm at
+-- their middles
+local function make_fence(lines)
 	local quads = {}
 	local function box(tile, x, y, z, w, h)
 		local x0, x1, z0, z1 = x - w / 2, x + w / 2, z - w / 2, z + w / 2
@@ -133,31 +134,26 @@ local function make_fence(xs, zs, hs, area)
 		q({x0, y, z1}, {x0, y, z0}, {x0, y1, z0}, {x0, y1, z1})
 		q({x0, y1, z0}, {x1, y1, z0}, {x1, y1, z1}, {x0, y1, z1})
 	end
-	-- The edge's points, round the area in order, each pushed out
-	local ring = {}
-	local function at(i, j, ox, oz)
-		ring[#ring + 1] = {xs[i] + ox, hs[(j - 1) * #xs + i], zs[j] + oz}
-	end
-	for i = area.i0, area.i1 do at(i, area.j0, 0, -0.5) end
-	for j = area.j0 + 1, area.j1 do at(area.i1, j, 0.5, 0) end
-	for i = area.i1 - 1, area.i0, -1 do at(i, area.j1, 0, 0.5) end
-	for j = area.j1 - 1, area.j0 + 1, -1 do at(area.i0, j, -0.5, 0) end
-	for k, p in ipairs(ring) do
-		box(1, p[1], p[2], p[3], 0.06 * U, 1.0 * U)
-		box(2, p[1], p[2] + 0.75 * U, p[3], 0.07 * U, 0.12 * U)
-		local n = ring[k % #ring + 1]
-		local len = math.sqrt((n[1] - p[1]) ^ 2 + (n[3] - p[3]) ^ 2) / U
-		for _, at_y in ipairs({0.5, 0.9}) do
-			local mid = {(p[1] + n[1]) / 2, (p[2] + n[2]) / 2 + (at_y - 0.03) * U,
-				(p[3] + n[3]) / 2}
-			local a = {p[1], p[2] + at_y * U, p[3]}
-			local b = {n[1], n[2] + at_y * U, n[3]}
-			local w = 0.08 * U
-			for _, seg in ipairs({{a, mid, 0, len / 2}, {mid, b, len / 2, len}}) do
-				local u, v = seg[1], seg[2]
-				quads[#quads + 1] = {tile = 3, p = {u[1], u[2], u[3], v[1], v[2],
-					v[3], v[1], v[2] + w, v[3], u[1], u[2] + w, u[3]},
-					uv = {seg[3] * 4, 1, seg[4] * 4, 1, seg[4] * 4, 0, seg[3] * 4, 0}}
+	local posts = 0
+	for _, line in ipairs(lines) do
+		for k, p in ipairs(line) do
+			posts = posts + 1
+			box(1, p[1], p[2], p[3], 0.06 * U, 1.0 * U)
+			box(2, p[1], p[2] + 0.75 * U, p[3], 0.07 * U, 0.12 * U)
+			local n = line[k + 1]
+			local len = n and math.sqrt((n[1] - p[1]) ^ 2 + (n[3] - p[3]) ^ 2) / U
+			for _, at_y in ipairs(n and {0.5, 0.9} or {}) do
+				local mid = {(p[1] + n[1]) / 2, (p[2] + n[2]) / 2 + (at_y - 0.03) * U,
+					(p[3] + n[3]) / 2}
+				local a = {p[1], p[2] + at_y * U, p[3]}
+				local b = {n[1], n[2] + at_y * U, n[3]}
+				local w = 0.08 * U
+				for _, seg in ipairs({{a, mid, 0, len / 2}, {mid, b, len / 2, len}}) do
+					local u, v = seg[1], seg[2]
+					quads[#quads + 1] = {tile = 3, p = {u[1], u[2], u[3], v[1], v[2],
+						v[3], v[1], v[2] + w, v[3], u[1], u[2] + w, u[3]},
+						uv = {seg[3] * 4, 1, seg[4] * 4, 1, seg[4] * 4, 0, seg[3] * 4, 0}}
+				end
 			end
 		end
 	end
@@ -171,8 +167,20 @@ local function make_fence(xs, zs, hs, area)
 	for i, tile in ipairs(tiles) do
 		cg:SetMaterial(i - 1, mats[tile])
 	end
-	return #ring
+	return posts
 end
+-- "x y z ..." a post each, ";" between the lines (main.cpp fences_packet)
+buildat.sub_packet("hillclimb:fences", function(data)
+	local lines = {}
+	for l in data:gmatch("[^;]+") do
+		local v, line = {}, {}
+		for w in l:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+		for i = 1, #v - 2, 3 do line[#line + 1] = {v[i], v[i + 1], v[i + 2]} end
+		lines[#lines + 1] = line
+	end
+	log:info(string.format("hillclimb: %d fences, %d posts", #lines,
+			make_fence(lines)))
+end)
 buildat.sub_packet("hillclimb:outside", function(data)
 	local v = {}
 	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
@@ -262,10 +270,8 @@ buildat.sub_packet("hillclimb:outside", function(data)
 		outside.groups[i] = {mat = m, n = {sum[1] / l, sum[2] / l, sum[3] / l}}
 	end
 	outside.light_t = 0
-	local posts = make_fence(xs, zs, hs, area)
 	log:info(string.format("hillclimb: the outside, %d quads in %d groups, " ..
-			"%d fence posts, %.1f ms", #quads, #tiles, posts,
-			(buildat.get_time_us() - t0) / 1000))
+			"%.1f ms", #quads, #tiles, (buildat.get_time_us() - t0) / 1000))
 end)
 -- Lit as an object under the open sky, twice a second: the light with no
 -- sun, and the sun's by each group's slope to it (object_light gives the
@@ -290,7 +296,8 @@ end
 -- car starts, in voxels; the latitude, the day and the hour; the seed,
 -- the steepness, the length and the payload; whether this client may
 -- pick ([HC_MULTIPLAYER] 2: an admin on a public server), the rounds'
--- interval, seconds, and the steepness's variance ([HC_STEEP_NOISE]).
+-- interval, seconds, and the steepness's variance ([HC_STEEP_NOISE]);
+-- [HC_CIRCUIT] whether a circuit, its width and lanes (m), switchbacks (%).
 -- Again whenever the menu makes another hill.
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
@@ -304,7 +311,8 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		lat = v[7], day = v[8], time = v[9]}
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
 		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0,
-		steep_var = v[16] or 0}
+		steep_var = v[16] or 0, circuit = v[17] or 0, width = v[18] or 40,
+		lane = v[19] or 7, switchbacks = v[20] or 50}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
@@ -743,9 +751,11 @@ buildat.sub_packet("hillclimb:results", function(data)
 	log:info("hillclimb: the round's results:" .. (data == "" and " no runs"
 			or data:gsub("\n", "; ")))
 end)
--- "<rank of the last finish or -1>", then a line each, "time finished
--- unfinished date name" (main.cpp send_ranking), under the hill and the
--- payload now picked; the counts the runs ended on the hill before
+-- "<rank of the last finish or -1>", then a line each, "time laps
+-- finished unfinished date name" (main.cpp send_ranking), under the hill
+-- and the payload now picked; laps -1 on the straight hill, a circuit's
+-- time the round's clock at the last lap; the counts the runs ended on the
+-- hill before
 local ranking = {last = -1, entries = {}}
 buildat.sub_packet("hillclimb:ranking", function(data)
 	local first = true
@@ -755,10 +765,11 @@ buildat.sub_packet("hillclimb:ranking", function(data)
 			ranking.last = tonumber(line) or -1
 			first = false
 		else
-			local t, f, u, date, name = line:match(
-					"^(%S+) (%d+) (%d+) (%S+) (.+)$")
+			local t, laps, f, u, date, name = line:match(
+					"^(%S+) (%-?%d+) (%d+) (%d+) (%S+) (.+)$")
 			if t then
 				ranking.entries[#ranking.entries + 1] = {t = tonumber(t),
+					laps = tonumber(laps),
 					fin = tonumber(f), unfin = tonumber(u), date = date,
 					name = name}
 			end
@@ -775,6 +786,13 @@ local MENU = {
 		step = 1, unit = " degrees", show = function(v) return "+-" .. v end},
 	{id = "length", label = "Length", min = 20, max = 60, step = 5,
 		unit = " m"},
+	-- [HC_CIRCUIT] A circuit's own, shown in that mode
+	{id = "width", label = "Width", min = 12, max = 60, step = 2, unit = " m",
+		circuit = true},
+	{id = "lane", label = "Lane width", min = 4, max = 12, step = 1,
+		unit = " m", circuit = true},
+	{id = "switchbacks", label = "Switchbacks", min = 0, max = 100, step = 10,
+		unit = "%", circuit = true},
 	{id = "payload", label = "Payload", list = {0, 500, 1000, 2000},
 		unit = " kg"},
 	{id = "lat", label = "Latitude", min = -80, max = 80, step = 5,
@@ -785,6 +803,15 @@ local MENU = {
 	{id = "interval", label = "Rounds", list = {0, 60, 120, 180, 300, 600,
 		900, 1800}, show = function(v)
 			return v == 0 and "never" or (v / 60 .. " min") end},
+	-- [HC_CIRCUIT] The race: the straight climb or laps of a circuit;
+	-- picking it brings its defaults
+	{id = "circuit", label = "Race", list = {0, 1}, show = function(v)
+		return v == 1 and "Circuit" or "Straight" end},
+}
+local MODE_DEFAULTS = {
+	[0] = {steep = 27, steep_var = 4, length = 50},
+	[1] = {steep = 18, steep_var = 4, length = 40, width = 40, lane = 7,
+		switchbacks = 50},
 }
 -- [HC_HILL_MENU] A setting's choices for its dropdown: a list's entries,
 -- a range's min..max by step, as {label, value}; the current value in
@@ -828,7 +855,9 @@ magic.SubscribeToEvent("command_seq:hillclimb_params", function(_, d)
 	buildat.send_packet("hillclimb:params", d:GetString("Param"))
 	log:info("hillclimb: the drive sends params " .. d:GetString("Param"))
 end)
--- The Tab menu ([HC_HILL_MENU]: a window, a row a setting), or why not
+-- The Tab menu ([HC_HILL_MENU]: a window, a row a setting), or why not;
+-- menu_values, its values to open again with (another race picked)
+local menu_values = nil
 local function close_hill_menu()
 	if not menu then
 		return
@@ -849,12 +878,14 @@ local function open_hill_menu()
 		return
 	end
 	local values = {}
-	for k, v in pairs(picks) do values[k] = v end
+	for k, v in pairs(menu_values or picks) do values[k] = v end
+	menu_values = nil
 	menu = {values = values, root = uistack.main:push({desc = "hill"})}
 	-- Rows of 24 four apart: the whole of it on a 400 high UI (800 x 500
-	-- at a UI scale of 1.25)
+	-- at a UI scale of 1.25); a circuit's three rows more, 20 two apart
+	local row_h = values.circuit == 1 and 20 or 24
 	local m = ui_utils.vertical_menu(menu.root, {min_width = 340,
-		min_height = 24, spacing = 4,
+		min_height = row_h, spacing = values.circuit == 1 and 2 or 4,
 		padding = magic.IntRect(10, 6, 10, 6)})
 	m.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local title = m.window:CreateChild("Text")
@@ -865,7 +896,7 @@ local function open_hill_menu()
 	-- last good one when it loses the focus; and Random
 	local row = m.window:CreateChild("UIElement")
 	row:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
-	row:SetFixedHeight(24)
+	row:SetFixedHeight(row_h)
 	local label = row:CreateChild("Text")
 	label:SetStyleAuto()
 	label.text = "Seed"
@@ -896,18 +927,33 @@ local function open_hill_menu()
 	end)
 	for i = 2, #MENU do
 		local e = MENU[i]
-		m:add_dropdown(e.label, menu_choices(e, values[e.id]), values[e.id],
-				function(v)
-			values[e.id] = v
-			log:info("hillclimb: the hill menu: " .. e.id .. " " .. v)
-		end, {label_width = 130, height = 24})
+		local choices = menu_choices(e, values[e.id])
+		-- A circuit's rounds end: "never" not offered
+		if e.id == "interval" and values.circuit == 1 and choices[1][2] == 0 then
+			table.remove(choices, 1)
+		end
+		if values.circuit == 1 or not e.circuit then
+			m:add_dropdown(e.label, choices, values[e.id], function(v)
+				values[e.id] = v
+				log:info("hillclimb: the hill menu: " .. e.id .. " " .. v)
+				-- Another race: its defaults, the menu again with its rows
+				-- (on the next frame, out of the dropdown's own event)
+				if e.id == "circuit" then
+					for k, d in pairs(MODE_DEFAULTS[v]) do values[k] = d end
+					if v == 1 and values.interval == 0 then
+						values.interval = 600
+					end
+					menu_values = values
+				end
+			end, {label_width = 130, height = row_h})
+		end
 	end
 	m:add("Make it", function()
 		seed_read()
 		local v = values
-		local params = string.format("%d %d %d %d %g %g %g %d %d", v.seed,
-				v.steep, v.length, v.payload, v.lat, v.day, v.hour, v.interval,
-				v.steep_var)
+		local params = string.format("%d %d %d %d %g %g %g %d %d %d %d %d %d",
+				v.seed, v.steep, v.length, v.payload, v.lat, v.day, v.hour,
+				v.interval, v.steep_var, v.circuit, v.width, v.lane, v.switchbacks)
 		buildat.send_packet("hillclimb:params", params)
 		log:info("hillclimb: the hill menu sends params " .. params)
 		close_hill_menu()
@@ -917,6 +963,10 @@ local function open_hill_menu()
 end
 local function menu_keys()
 	-- Tab opens and closes it; a dropdown's popup has the keys first
+	if menu and menu_values then
+		close_hill_menu()
+		open_hill_menu()
+	end
 	if pressed(magic.KEY_TAB) and not ui_utils.dropdown_open() then
 		if menu then
 			close_hill_menu()
@@ -954,6 +1004,16 @@ local function draw_hud(watched)
 			race == 4 and "Out of time: did not finish" or
 			string.format("Finished in %.2f s. %s: another run", t,
 			touch and "Start" or "Backspace")
+	-- [HC_CIRCUIT] Laps, to the round's end
+	local circuit = picks and picks.circuit == 1
+	local laps = b.v[20] or 0
+	if circuit and race == 1 then
+		state = string.format("Laps: %d", laps)
+	elseif circuit and race == 2 then
+		state = string.format("%d laps in the round", laps)
+	elseif circuit and race == 0 then
+		state = (touch and "The stick up" or "W") .. " starts your laps"
+	end
 	if watched and watched ~= own and watched.states[2] then
 		state = string.format("Observing %s: %.2f s", watched.name,
 				watched.states[2].v[18])
@@ -984,15 +1044,18 @@ local function draw_hud(watched)
 						": did not finish") or ("  " .. l)
 			end
 		else
-			rows[1] = string.format("Best on this hill with %d kg:",
-					picks.payload)
+			rows[1] = string.format("Best on this %s with %d kg:",
+					circuit and "circuit" or "hill", picks.payload)
 			for i, e in ipairs(ranking.entries) do
 				-- How worn the hill was when the run started
 				local worn = (e.fin + e.unfin == 0) and "fresh" or
 						string.format("after %d runs (%d finished)",
 						e.fin + e.unfin, e.fin)
-				rows[#rows + 1] = string.format("%s%2d. %7.2f s  %s, %s",
-						i - 1 == ranking.last and ">" or " ", i, e.t, e.name, worn)
+				local mark = i - 1 == ranking.last and ">" or " "
+				rows[#rows + 1] = (e.laps or -1) >= 0 and string.format(
+						"%s%2d. %3d laps, the last at %7.2f s  %s", mark, i, e.laps,
+						e.t, e.name) or string.format("%s%2d. %7.2f s  %s, %s",
+						mark, i, e.t, e.name, worn)
 			end
 			if #ranking.entries == 0 then
 				rows[#rows + 1] = "  (none yet)"
