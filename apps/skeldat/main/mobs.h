@@ -407,6 +407,8 @@ struct Mobs
 					interface::VoxelSample sample = w->get_sample(v, true);
 					world.bones.set(sample, (uint32_t)value);
 					w->set_sample(v, sample);
+					// Its column's top_b too, which the boats read
+					world.rescan_column(w, x, z);
 				});
 				log_i(MODULE, "skeldat: test: bones %d at %d,%d,%d", value,
 						x, y, z);
@@ -449,6 +451,18 @@ struct Mobs
 					it>>gx>>gz;
 					m.goal_fp = (int)world.footprint((int)std::floor(p->x + gx +
 							0.5f), (int)std::floor(p->z + gz + 0.5f));
+				}
+				// [SKELDAT_BOAT_FAULTS] "... boat days hx hz": on a boat that
+				// boarded days ago at the player + hx, hz
+				if(flag == "boat"){
+					double days = 0;
+					float hx = 0, hz = 0;
+					it>>days>>hx>>hz;
+					m.boat = true;
+					m.boarded_t = world.t - days * world.day_s;
+					m.boat_x = p->x + hx, m.boat_z = p->z + hz;
+					if(c >= 0)
+						m.y = world.top_any[c] + 0.5f;
 				}
 				if(flag == "seed"){
 					float sx = 0, sz = 0;
@@ -890,7 +904,10 @@ struct Mobs
 					if(p && d < 16){
 						// Its first sight of a player: a marker skull, one
 						// a game day ([SKELDAT_SKELETON_SIM])
-						if(!tg.is_mob && m.mode != FIGHT && !growth.ended){
+						// [SKELDAT_BOAT_FAULTS] None from a boat: where it
+						// goes is somewhere skeletons may not have been
+						if(!tg.is_mob && m.mode != FIGHT && !growth.ended &&
+								!m.boat){
 							int at[3];
 							if(world.t / world.day_s - m.marker_day < 1.0 / growth.speed)
 								log_i(MODULE, "skeldat: a skeleton (%u) sees "
@@ -1391,6 +1408,7 @@ struct Mobs
 			m.boat = true;
 			m.aim = std::atan2(ax, az);
 			m.boat_x = (float)x, m.boat_z = (float)z;
+			m.boarded_t = world.t;
 			m.x = (float)wx, m.z = (float)wz;
 			m.y = world.top_any[world.column(wx, wz)] + 0.5f;
 			m.route.clear();
@@ -1406,8 +1424,10 @@ struct Mobs
 			m.called = m.call_route = false;
 			if(!m.boat)
 				log_i(MODULE, "skeldat: a called skeleton (%u) did not make it, "
-						"%.0f from %d,%d", kv.first, std::hypot(m.x - m.call_at.x,
-						m.z - m.call_at.z), m.call_at.x, m.call_at.z);
+						"%.0f from %d,%d, %d searches%s", kv.first,
+						std::hypot(m.x - m.call_at.x, m.z - m.call_at.z),
+						m.call_at.x, m.call_at.z, m.call_tries,
+						m.call_sheltered ? ", sheltered" : "");
 		}
 	}
 	// [SKELDAT_SKULL_CALL] An hour before sunset: each green skull calls the
@@ -1430,36 +1450,73 @@ struct Mobs
 			}
 			if(best == 1 << 30)
 				continue;
-			uint32_t key = 0;
-			float kd = 1e9f;
+			// [SKELDAT_BOAT_FAULTS] The nearest with a way there: the nearest
+			// alone was often across water or up a cliff from it, and stood
+			// where it was called until sunset. One within BOAT_NEAR boards
+			// without walking.
+			const vp::P at(sx, world.top_y[world.column(sx, sz)] + 1, sz);
+			std::vector<std::pair<float, uint32_t>> near;
 			for(auto &kv : all){
 				const Mob &m = kv.second;
 				const float d = std::hypot(m.x - x, m.z - z);
-				if(m.kind == SKELETON && !m.boat && !m.called && d <= BOAT_CALL &&
-						d < kd)
-					kd = d, key = kv.first;
+				if(m.kind == SKELETON && !m.boat && !m.called && d <= BOAT_CALL)
+					near.push_back({d, kv.first});
 			}
-			if(kd > BOAT_CALL)
+			std::sort(near.begin(), near.end());
+			uint32_t key = 0;
+			float kd = 1e9f;
+			bool way = false;
+			for(size_t i = 0; i < near.size() && i < BOAT_CALL_TRIES; i++){
+				Mob &m = all[near[i].second];
+				way = near[i].first > BOAT_NEAR &&
+						search_way(near[i].second, m, at, BUILD_CAP, false);
+				if(way || near[i].first <= BOAT_NEAR){
+					kd = near[i].first, key = near[i].second;
+					break;
+				}
+			}
+			if(kd > BOAT_CALL){
+				if(!near.empty())
+					log_i(MODULE, "skeldat: a green skull at %d,%d,%d calls no "
+							"skeleton: none of the %zu nearest of %zu within %d "
+							"has a way to %d,%d,%d", x, y, z, std::min(near.size(),
+							BOAT_CALL_TRIES), near.size(), BOAT_CALL, at.x, at.y,
+							at.z);
 				continue;
+			}
 			Mob &m = all[key];
 			m.called = true;
-			m.call_at = vp::P(sx, world.top_y[world.column(sx, sz)] + 1, sz);
-			m.call_route = false;
+			m.call_at = at;
+			// The way searched is its route already
+			m.call_route = way;
+			if(way)
+				m.shelter_route = m.shot_route = false;
+			m.call_sheltered = false;
 			m.call_t = 0;
+			m.call_tries = 0;
 			log_i(MODULE, "skeldat: a green skull at %d,%d,%d calls a skeleton "
 					"(%u), %.0f away", x, y, z, key, kd);
 		}
 	}
-	// A boat's light step: at night beside a bare shore (or a boned one
-	// with no bare one seen) away from home, onto it; else a step on the
-	// water toward a bare shore seen within BOAT_SHORE, or its aim
+	// [SKELDAT_BOAT_FAULTS] The bones a boat of `days` lands on: under
+	// BOAT_BARE_DAYS none, under BOAT_BONED_DAYS any but a bone block,
+	// then any
+	static bool boat_shore_ok(int top_b, double days)
+	{
+		return days >= BOAT_BONED_DAYS || top_b == 0 ||
+				(days >= BOAT_BARE_DAYS && top_b < skeldat::bones::FLOOD);
+	}
+	// A boat's light step: at night beside a shore it may land on (by its
+	// age, boat_shore_ok()) out of BOAT_HOME of where it boarded, onto it;
+	// by day waiting there; else a step on the water toward such a shore
+	// seen within BOAT_SHORE, or its aim
 	void step_boat(uint32_t key, Mob &m)
 	{
 		const int mx = (int)std::floor(m.x + 0.5f), mz = (int)std::floor(m.z + 0.5f);
-		const bool home = std::hypot(m.x - m.boat_x, m.z - m.boat_z) < BOAT_HOME;
-		// The nearest shore column seen (land beside water), bare first
-		int sx = 0, sz = 0, sd = 1 << 30;
-		bool bare = false;
+		const double days = (world.t - m.boarded_t) / world.day_s;
+		// The shore column seen (land beside water) it may land on, the
+		// barest and then the nearest
+		int sx = 0, sz = 0, sd = 1 << 30, sb = 0;
 		for(int dz = -BOAT_SHORE; dz <= BOAT_SHORE; dz++)
 		for(int dx = -BOAT_SHORE; dx <= BOAT_SHORE; dx++){
 			const int x = mx + dx, z = mz + dz;
@@ -1468,22 +1525,26 @@ struct Mobs
 			if(!water_top(x + 1, z) && !water_top(x - 1, z) &&
 					!water_top(x, z + 1) && !water_top(x, z - 1))
 				continue;
-			const bool b = world.top_b[world.column(x, z)] == 0;
+			const int b = world.top_b[world.column(x, z)];
+			if(!boat_shore_ok(b, days))
+				continue;
 			const int d = dx * dx + dz * dz;
-			if((b && !bare) || (b == bare && d < sd))
-				sd = d, sx = x, sz = z, bare = b;
+			if(sd == 1 << 30 || b < sb || (b == sb && d < sd))
+				sd = d, sx = x, sz = z, sb = b;
 		}
-		if(sd <= 2 && !home && !sun_danger()){
+		if(sd <= 2){
+			// Waiting by day beside the shore it means to land on
+			if(sun_danger())
+				return;
 			m.boat = false;
 			m.x = (float)sx, m.z = (float)sz;
 			m.y = world.top_y[world.column(sx, sz)] + 0.5f;
-			log_i(MODULE, "skeldat: a skeleton (%u) lands at (%d %d)%s", key,
-					sx, sz, bare ? "" : ", a shore with bones");
+			log_i(MODULE, "skeldat: a skeleton (%u) lands at (%d %d)%s, "
+					"%.1f days on its boat", key, sx, sz, sb == 0 ? "" :
+					sb >= skeldat::bones::FLOOD ? ", a bone block" :
+					", a shore with bones", days);
 			return;
 		}
-		// Waiting by day beside the shore it means to land on
-		if(sd <= 2)
-			return;
 		const float want = sd < (1 << 30) ? std::atan2((float)(sx - mx),
 				(float)(sz - mz)) : m.aim;
 		for(int t = 0; t < 6; t++){
@@ -1519,7 +1580,8 @@ struct Mobs
 			boats_sunrise();
 		for(auto &kv : all){
 			Mob &m = kv.second;
-			if(m.kind != SKELETON)
+			// [SKELDAT_BOAT_FAULTS] The markers draw no boat
+			if(m.kind != SKELETON || m.boat)
 				continue;
 			n++;
 			const long own = world.footprint((int)std::floor(m.x + 0.5f),
@@ -1768,6 +1830,14 @@ struct Mobs
 			}
 			m.shelter_route = false;
 			if(seek_shelter(kv.first, m)){
+				// [SKELDAT_BOAT_FAULTS] What keeps a called one from its call
+				if(m.called && !m.call_sheltered){
+					m.call_sheltered = true;
+					log_i(MODULE, "skeldat: a called skeleton (%u) goes to shelter "
+							"from the sun, %.0f from %d,%d", kv.first,
+							std::hypot(m.x - m.call_at.x, m.z - m.call_at.z),
+							m.call_at.x, m.call_at.z);
+				}
 				m.shot_route = m.call_route = false;
 				follow_route(kv.first, m);
 				continue;
@@ -1784,10 +1854,17 @@ struct Mobs
 				if(std::hypot(m.x - m.call_at.x, m.z - m.call_at.z) > 1.5f &&
 						world.t >= m.call_t){
 					m.call_t = world.t + SHELTER_WAIT;
+					m.call_tries++;
 					if(search_way(kv.first, m, m.call_at, BUILD_CAP, false)){
 						m.call_route = true;
+						log_i(MODULE, "skeldat: a called skeleton (%u) has a way of "
+								"%zu to %d,%d,%d", kv.first, m.route.size(),
+								m.call_at.x, m.call_at.y, m.call_at.z);
 						follow_route(kv.first, m);
-					}
+					} else if(m.call_tries == 1)
+						log_i(MODULE, "skeldat: a called skeleton (%u) at %.0f,%.0f,%.0f "
+								"finds no way to %d,%d,%d", kv.first, m.x, m.y, m.z,
+								m.call_at.x, m.call_at.y, m.call_at.z);
 				}
 				continue;
 			}
@@ -1951,8 +2028,16 @@ struct Mobs
 	{
 		if(build)
 			m.search_t = world.t + BUILD_WAIT;
-		const vp::P from((int)std::floor(m.x + 0.5f),
+		vp::P from((int)std::floor(m.x + 0.5f),
 				(int)std::floor(m.y + 1.0f), (int)std::floor(m.z + 0.5f));
+		// [SKELDAT_BOAT_FAULTS] One with no body is on its column's top: its
+		// y lags a column the bones grew under it, which started the search
+		// in solid
+		if(!m.node_id){
+			const long c = world.column(from.x, from.z);
+			if(c >= 0 && world.top_y[c] != NO_GROUND)
+				from.y = world.top_y[c] + 1;
+		}
 		if(std::abs(goal.x - from.x) > BUILD_RANGE ||
 				std::abs(goal.z - from.z) > BUILD_RANGE)
 			return false;

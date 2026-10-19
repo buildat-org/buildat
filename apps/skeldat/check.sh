@@ -2958,7 +2958,8 @@ a = open(sys.argv[1], errors="replace").read()
 k = re.search(r"skeldat: test: a skeleton \((\d+)\) at", a).group(1)
 c = re.search(r"a green skull at \S+ calls a skeleton \(%s\), (\d+) away" % k, a)
 assert c, "no call"
-w = re.search(r"a skeleton \(%s\) finds a way to -?\d+,\d+,6[34]:" % k, a[c.end():])
+# The way is searched as the skull calls, before the call's line
+w = re.search(r"a skeleton \(%s\) finds a way to -?\d+,\d+,6[34]:" % k, a)
 assert w or int(c.group(1)) <= 4, ("no way to the call from", c.group(1))
 b = re.search(r"a skeleton \(%s\) takes to a boat" % k, a)
 assert b and b.start() > c.start(), "the called skeleton took no boat"
@@ -2990,12 +2991,42 @@ for log in (a, b[:l.start()]):
 print("a boat from %s,%s, aim %s; landed at %d %d" % (m.group(1), m.group(2), m.group(3), lx, lz))
 PY
 ) || fail "boats ($log58, $t/srv58_2.log)"
+# [SKELDAT_BOAT_FAULTS] Boats by their age, at night: a pond from 10 ahead
+# with ground islands in its row 41 -- a boned shore (3) and a bone-block
+# one (15) beside a boat a day old (A, -10) and one 3 days old (B, 0), a
+# bone-block one beside a boat 5 days old (C, 10) -- each boat 11.4 from
+# where it boarded and its shores 12 and more, which a boat once waited
+# beside forever. A lands on neither, B on the boned one, C on the bone
+# block. D, a boat 12 from the player, places no marker skull on seeing it.
+W=skeldat:water_source
+bt54a="level -30 10 61 31 $W -1; level -30 42 61 29 $W -1; level -30 41 20 1 $W -1"
+bt54a="$bt54a; level -8 41 8 1 $W -1; level 2 41 8 1 $W -1; level 11 41 20 1 $W -1"
+bt54a="$bt54a; bones -10 41 3; bones -9 41 15; bones 0 41 3; bones 1 41 15; bones 10 41 15"
+bt54a="$bt54a; skeleton -10 40 boat 1 -10 28.6; skeleton 0 40 boat 3 0 28.6"
+bt54a="$bt54a; skeleton 10 40 boat 5 10 28.6; skeleton 0 12 boat 0.5 0 9"
+W54=boatage T54=0.85 D54=600 boats "$t/srv58_age.log" boats_age 30000 "$bt54a"
+age=$(python3 -I - "$t/srv58_age.log" <<'PY'
+import sys, re
+a = open(sys.argv[1], errors="replace").read()
+ks = re.findall(r"skeldat: test: a skeleton \((\d+)\) at", a)
+assert len(ks) == 4, ks
+def landed(k):
+    m = re.search(r"a skeleton \(%s\) lands at \((-?\d+) (-?\d+)\)" % k, a)
+    return m and (int(m.group(1)), int(m.group(2)))
+A, B, C = landed(ks[0]), landed(ks[1]), landed(ks[2])
+assert A not in ((-10, 41), (-9, 41)), ("a day-old boat landed on bones", A)
+assert B == (0, 41), ("a 3-day boat not on the boned shore", B)
+assert C == (10, 41), ("a 5-day boat not on the bone block", C)
+assert not re.search(r"a skeleton \(%s\) places a marker skull" % ks[3], a), "a boat placed a marker"
+print("1 day: %s; 3 days: %s; 5 days: %s; no marker from a boat" % (A or "on the water", B, C))
+PY
+) || fail "boats by their age ($t/srv58_age.log)"
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
 echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
-echo "boats: $boat; a skull's call: $call"
+echo "boats: $boat; a skull's call: $call; by age: $age"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"

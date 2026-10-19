@@ -247,10 +247,16 @@ static const float DECAY_PER_SECOND = 1;
 static const int BOAT_ACROSS = 10, BOAT_DAYS = 2, GREEN_SKULL_APART = 32,
 		BOAT_NEAR = 4, BOAT_SHORE = 8, BOAT_HOME = 12;
 static const float BOAT_SPEED = 0.5f;
+// [SKELDAT_BOAT_FAULTS] A boat lands, in game days since it boarded: under
+// BOAT_BARE_DAYS on a shore with no bones, under BOAT_BONED_DAYS on any but
+// a bone block, then on any
+static const double BOAT_BARE_DAYS = 2, BOAT_BONED_DAYS = 4;
 // [SKELDAT_SKULL_CALL] An hour before sunset each green skull calls the
 // nearest boatless bone skeleton within BOAT_CALL, not called already, to
 // its water side
 static const int BOAT_CALL = 24;
+// [SKELDAT_BOAT_FAULTS] How many of the nearest a skull tries for a way
+static const size_t BOAT_CALL_TRIES = 6;
 
 struct Mob
 {
@@ -306,11 +312,13 @@ struct Mob
 	double shelter_t = 0;
 	float lava_t = 0;
 	// [SKELDAT_BOATS] Saved: on a boat, its aim (a yaw), where it boarded;
-	// its sunrises stuck by water running. Not saved: the node's
-	// "skeldat_boat" as last set
+	// its sunrises stuck by water running; when it boarded (game time,
+	// [SKELDAT_BOAT_FAULTS]). Not saved: the node's "skeldat_boat" as last
+	// set
 	bool boat = false;
 	float aim = 0, boat_x = 0, boat_z = 0;
 	int shore_days = 0, boat_sent = -1;
+	double boarded_t = 0;
 	float boat_t = 0; // since its last step
 	// [SKELDAT_SKULL_CALL] Called to a green skull: the spot by its water,
 	// its route one there, that search's next game time. Not saved
@@ -319,12 +327,16 @@ struct Mob
 	bool called = false, call_route = false;
 	interface::voxel_path::P call_at;
 	double call_t = 0;
+	// [SKELDAT_BOAT_FAULTS] Its searches since the call, and whether the
+	// sun's shelter took it, for the log
+	int call_tries = 0;
+	bool call_sheltered = false;
 
 	ss_ save() const {
 		std::ostringstream os;
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
 				marker_day<<" "<<carry_coal<<" "<<grass_t<<" "<<boat<<" "<<aim<<" "<<
-				boat_x<<" "<<boat_z<<" "<<shore_days;
+				boat_x<<" "<<boat_z<<" "<<shore_days<<" "<<boarded_t;
 		return os.str();
 	}
 	bool load(const ss_ &s){
@@ -335,6 +347,9 @@ struct Mob
 			grass_t = -1;
 		else if(!(is>>boat>>aim>>boat_x>>boat_z>>shore_days))
 			boat = false, shore_days = 0;
+		// A boat saved before its boarding time was: aboard since the start
+		else if(!(is>>boarded_t))
+			boarded_t = 0;
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON || k == CAVE_SKELETON) && hp > 0;
 	}
