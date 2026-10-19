@@ -789,6 +789,18 @@ assert(math.abs(p.x - (2.5 - player.RADIUS)) < 1e-6,
 		"player: walked to x = "..p.x)
 assert(p.vx == 0, "player: still has speed into the wall")
 
+-- An analog stick pushed halfway walks at half the speed, the module's
+-- wish.speed ([REWORK_1019_FIXES] luanti 3); toward -x, away from the wall
+do
+	local full, half = player.new(is_solid), player.new(is_solid)
+	full:set_position(0, 0.5, 0)
+	half:set_position(0, 0.5, 0)
+	settle(full, 20, {x = -1, z = 0})
+	settle(half, 20, {x = -1, z = 0, speed = 0.5})
+	assert(math.abs(half.vx / full.vx - 0.5) < 1e-3,
+			"player: half a push at "..half.vx.." against "..full.vx)
+end
+
 -- Walking at the wall at an angle slides along it rather than stopping
 p:set_position(0, 0.5, 0)
 settle(p, 200, {x = 1, z = 1})

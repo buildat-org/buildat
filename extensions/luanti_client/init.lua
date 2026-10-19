@@ -2865,6 +2865,15 @@ local function show_client(host, port, name, password, mode, origin)
 				wish.x, wish.z = wish.x - fz, wish.z + fx
 				keys = keys + luanti.KEY_LEFT
 			end
+			-- Luanti's analog stick, as builtin/luanti's client.lua: its
+			-- direction, and its length (0..1) the speed; the key bits
+			-- above stay its four directions'
+			local stick = touch and touch.stick
+			if stick and (stick.x ~= 0 or stick.y ~= 0) then
+				wish.x = -stick.y * fx + stick.x * fz
+				wish.z = -stick.y * fz - stick.x * fx
+				wish.speed = math.sqrt(stick.x * stick.x + stick.y * stick.y)
+			end
 			if wish.jump then keys = keys + luanti.KEY_JUMP end
 			if wish.sneak then keys = keys + luanti.KEY_SNEAK end
 			if wish.fast then keys = keys + luanti.KEY_AUX1 end
