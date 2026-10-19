@@ -27,7 +27,7 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 {
 	struct Ids {
 		uint32_t stone = 0, dirt = 0, grass = 0, sand = 0, tree = 0, leaves = 0,
-				water = 0, gravel = 0, spring = 0, drain = 0;
+				water = 0, gravel = 0, spring = 0, drain = 0, level_drain = 0;
 	};
 	struct Ore {
 		uint32_t id;
@@ -124,13 +124,14 @@ struct SkeldatGenerator: public worldgen::GeneratorInterface
 			const int wt = f & mapgen::WATER ? m_map->water[m_map->index(x, z)] : g;
 			const uint32_t water = f & mapgen::SPRING ? m_ids.spring :
 					f & mapgen::DRAIN ? m_ids.drain : m_ids.water;
-			// The sea's edge: drains over its water
-			const int drain_top = f & mapgen::LEVEL_DRAIN ? wt + 3 : wt;
+			// The sea's edge: a drain drawn as nothing over its water
+			// ([SKELDAT_LOW_BANKS]: the sea flat into the backdrop's)
+			const int drain_top = f & mapgen::LEVEL_DRAIN ? wt + 1 : wt;
 			const uint32_t top = f & mapgen::CHANNEL ? m_ids.gravel :
 					sandy ? m_ids.sand : m_ids.grass;
 			for(int y = lc.getY(); y <= uc.getY(); y++){
 				uint32_t id = y > g && y <= wt ? water :
-						y > wt && y <= drain_top ? m_ids.drain : ID_AIR;
+						y > wt && y <= drain_top ? m_ids.level_drain : ID_AIR;
 				if(y <= m_p.bottom)
 					id = m_ids.stone;
 				else if(y <= g){
@@ -506,6 +507,15 @@ struct Terrain
 			d.alpha_clip = true;
 			break;
 		case skeldat::LIQUID:
+			// [SKELDAT_LOW_BANKS] The sea's edge drain: a liquid to the
+			// game (the end, the routes), nothing to the eye and the sun
+			if(n.name == "skeldat:level_drain"){
+				d.drawtype = "airlike";
+				d.walkable = false;
+				d.pointable = 0;
+				d.sunlight = true;
+				break;
+			}
 			d.drawtype = n.flowing ? "flowingliquid" : "liquid";
 			d.liquid_group = n.name;
 			d.walkable = false;
@@ -581,6 +591,7 @@ struct Terrain
 		ids.gravel = world.id_of("skeldat:gravel");
 		ids.spring = world.id_of("skeldat:water_spring");
 		ids.drain = world.id_of("skeldat:water_drain");
+		ids.level_drain = world.id_of("skeldat:level_drain");
 		sv_<SkeldatGenerator::Ore> ores = {
 			{world.id_of("skeldat:coal_ore"), 8 * 8 * 8, 8, 64},
 			// 64 high, each still under the surface (11 and up)

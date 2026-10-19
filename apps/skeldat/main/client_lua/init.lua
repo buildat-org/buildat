@@ -903,8 +903,11 @@ buildat.sub_packet("skeldat:world", function(data)
 	end
 	low = tonumber(low) or crest
 	-- [SKELDAT_OWN_MAPGEN] Water at the line where the hills are under it;
-	-- the sea's backdrop all water
+	-- the sea's backdrop all water, at the voxels' water surface: the
+	-- line's top face, less the mesher's sag (LIQUID_SAG, mesh.cpp: an
+	-- eighth) ([SKELDAT_LOW_BANKS])
 	water = tonumber(water)
+	local water_y = water and water + 0.5 - 1 / 8
 	local WATER_TILE = 100
 	game.world = {half = h, y0 = tonumber(y0), y1 = tonumber(y1)}
 	local t0 = buildat.get_time_us()
@@ -935,7 +938,7 @@ buildat.sub_packet("skeldat:world", function(data)
 			if outside and water and (form == "sea" or
 					math.min(height(x, z), height(x + C, z), height(x, z + C),
 					height(x + C, z + C)) < water + 0.5) then
-				local y = water + 0.5
+				local y = water_y
 				quads[#quads + 1] = {tile = WATER_TILE,
 					p = {x - 0.5, y, z - 0.5, x + C - 0.5, y, z - 0.5,
 						x + C - 0.5, y, z + C - 0.5, x - 0.5, y, z + C - 0.5},
@@ -997,9 +1000,9 @@ buildat.sub_packet("skeldat:world", function(data)
 	end
 	log:info(string.format("skeldat: the backdrop beyond the edge at %d, " ..
 			"%d quads in %d groups, %.1f ms; its rim at %.1f, the lowest " ..
-			"edge column %d; %s, the water at %s", h, #quads, #tiles,
-			(buildat.get_time_us() - t0) / 1000, height(-h, 0), low,
-			form ~= "" and form or "-", tostring(water)))
+			"edge column %d; %s, the water at %s, drawn at %s", h, #quads,
+			#tiles, (buildat.get_time_us() - t0) / 1000, height(-h, 0), low,
+			form ~= "" and form or "-", tostring(water), tostring(water_y)))
 end)
 -- Lit as an object under the open sky, twice a second: the light with no
 -- sun, and the sun's by each group's slope to it. object_light gives the

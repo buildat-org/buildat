@@ -2503,11 +2503,13 @@ echo "$first; ${back} active read back"
 # 47. The own map generator's forms ([SKELDAT_OWN_MAPGEN]): a 128 world
 # of each, the server alone for 2 minutes, its water reported every 10 s
 # (BUILDAT_SKELDAT_WATER_REPORT): made and settled; on rivers the
-# volume within 8% of the first report's (the plan's balance not met:
-# the springs outrun the drain, +20% in 10 minutes measured, the channel
-# rising and spilling into a basin; [SKELDAT_LOW_BANKS] reworks the
-# rivers); on sea the level drain holds the line (within 3%); plains
-# and lake have no spring, their volume never more. A lava spring on the
+# volume within 8% of the first report's (the springs of low pressure,
+# [SKELDAT_LOW_BANKS]: 8234 -> 7999 in 2 minutes measured, 2026-10-19;
+# before, pushing the river over its banks, +20% in 10); on sea the level drain holds the line (within 3%); plains
+# and lake have no spring, their volume never more. On sea the edge's
+# drains are the voxel over the line alone ([SKELDAT_LOW_BANKS]), drawn as
+# nothing, and the client's backdrop water at the voxels' surface (the
+# line's top face less the mesher's eighth of sag). A lava spring on the
 # ground adds lava; one walled in by stone adds none.
 # simplified: 2 minutes where the plan has 10, the margins to match
 forms=""
@@ -2520,6 +2522,11 @@ for form in rivers sea plains lake; do
 	CHECK_PIDS+=($SERVER_PID)
 	wait_for_log "$t/srv51_$form.log" "the world is in" 120 ||
 		fail "the $form world not made ($t/srv51_$form.log)"
+	if [ $form = sea ]; then
+		printf '%s\n' "$placed" "delay 2000" quit > "$t/sea.cmds"
+		client sea "$t/sea.cmds"
+		wait $CLIENT || fail "the sea's drive ($t/sea.log)"
+	fi
 	sleep 120
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	f="$t/srv51_$form.log"
@@ -2537,6 +2544,14 @@ for form in rivers sea plains lake; do
 			if(!r && $i > $(i - 1)) exit 1 } }' ||
 		fail "the $form water not kept: $vols ($f)"
 	forms="$forms $form $(echo $vols | awk '{ printf "%d->%d", $1, $NF }');"
+	if [ $form = sea ]; then
+		grep -aq "skeldat: water: .* lava voxels; [1-9][0-9]* edge drains, 0 off the line" "$f" ||
+			fail "the sea's edge drains not on the line's voxel over it ($f)"
+		grep -a "skeldat: the backdrop beyond the edge" "$t/sea.log" |
+			sed 's/.*the water at \([-0-9.]*\), drawn at \([-0-9.]*\).*/\1 \2/' |
+			awk '{ exit !(NF == 2 && $2 == $1 + 0.375) }' ||
+			fail "the sea's backdrop water not at the voxels' surface ($t/sea.log)"
+	fi
 done
 for n in 1 2; do
 	# The spring 4 ahead, on flat; walled: stone
@@ -2556,7 +2571,7 @@ for n in 1 2; do
 	wait $CLIENT || fail "the lava spring's drive $n ($t/lava$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 done
-lava() { grep -a "skeldat: water: .* lava voxels" "$t/srv51_lava$1.log" | sed 's/.*; \([0-9]*\) lava voxels/\1/' | tr '\n' ' '; }
+lava() { grep -a "skeldat: water: .* lava voxels" "$t/srv51_lava$1.log" | sed 's/.*; \([0-9]*\) lava voxels.*/\1/' | tr '\n' ' '; }
 l1=$(lava 1) l2=$(lava 2)
 echo "$l1" | awk '{ exit !(NF >= 4 && $NF > $2 + 4) }' &&
 	echo "$l2" | awk '{ for(i = 3; i <= NF; i++) if($i != $2) exit 1; exit !(NF >= 4) }' ||

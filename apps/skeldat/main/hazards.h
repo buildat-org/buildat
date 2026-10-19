@@ -79,8 +79,8 @@ static const float POCKET_CHANCE = 1.0f;
 
 enum Kind: uint8_t { AIR, SOLID, WATER, LAVA, POISON, VOLCANIC };
 // amount: a liquid's eighths (1..8), a gas's share (1..255); sky: air's
-// light from the sky, 0..15; spring: a lava spring's (read, never
-// written: the binding keeps what the voxel is)
+// light from the sky, 0..15; spring: a lava or water spring's (read,
+// never written: the binding keeps what the voxel is)
 struct Cell {
 	uint8_t kind = SOLID;
 	uint8_t amount = 0;
@@ -198,9 +198,12 @@ struct Hazards
 		// breach at a pocket's foot stands at most PRESSURE_MAX over it
 		std::vector<uint64_t> todo;
 		std::unordered_map<uint64_t, int> cap;
+		// A water spring pushes from itself alone: the river under it does
+		// not feel its height ([SKELDAT_LOW_BANKS], low pressure)
 		auto add = [&](int a, int b, int c, int via){
 			const Cell n = get(a, b, c);
-			if(n.kind != k || n.amount != 8)
+			if(n.kind != k || n.amount != 8 || (n.spring && k == WATER &&
+					!(a == x && b == y && c == z)))
 				return;
 			const int v = std::min(via, b * 8 + 8 + PRESSURE_MAX * 8);
 			auto it = cap.find(key(a, b, c));

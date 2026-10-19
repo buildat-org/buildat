@@ -37,11 +37,11 @@ static const float WATER_SHARE = 0.1f;
 // within FLAT_CAVE_ROOF under the ground
 static const int FLAT_OVER_WATER = 4, FLAT_TREE_CLEAR = 24, FLAT_CAVE_ROOF = 4;
 // The rivers: one, two from a world 512 wide; a channel's water this deep
-// (its top over its bed), its banks RIVER_BANK over its bed (the water
-// and the liquid step's pressure, which pushes a falling river's water up
-// to 4 over its own top, kept in) and its bed falling at least RIVER_FALL
-// from the inlet to the outlet
-static const int RIVER_DEPTH = 2, RIVER_BANK = 7, RIVER_FALL = 8,
+// (its top over its bed), its banks RIVER_BANK over its bed (the water's
+// top 1 under the ground beside: [SKELDAT_LOW_BANKS], an overflow where
+// the liquid step's pressure pushes it over is fine) and its bed falling
+// at least RIVER_FALL from the inlet to the outlet
+static const int RIVER_DEPTH = 2, RIVER_BANK = RIVER_DEPTH + 1, RIVER_FALL = 8,
 		TWO_RIVERS_FROM = 512;
 // The lake: its bed SEA_DEPTH under the line at the middle; the edge
 // raised but for LAKE_GAP of the perimeter. The sea: the edge's
@@ -144,7 +144,7 @@ enum ColumnFlags: uint8_t {
 	DRAIN = 8, // its water voxels drains (a river's outlet)
 	SHORE = 16, // within 2 of water, and not 2 over it: sand
 	NEAR_WATER = 32, // within 2 of water: no tree
-	LEVEL_DRAIN = 64, // the 3 voxels over its water drains (the sea's edge)
+	LEVEL_DRAIN = 64, // the voxel over its water a drain (the sea's edge)
 };
 static const int16_t NO_WATER = -32768;
 
@@ -581,18 +581,25 @@ inline Heightmap make_heightmap(const Params &p)
 				else
 					m.h[c] = river.bed[i];
 				m.flags[c] |= CHANNEL | WATER;
-				m.water[c] = (int16_t)(m.h[c] + RIVER_DEPTH);
+				m.water[c] = (int16_t)std::floor(m.h[c] + RIVER_DEPTH);
 				if(x == -p.half || x == p.half - 1 || z == -p.half || z == p.half - 1)
 					m.flags[c] |= i < river.x.size() / 2 ? SPRING : DRAIN;
 			});
-		// The banks: the 2 columns beside a channel RIVER_BANK over its bed
-		// at least (a levee where the ground falls away, or erosion took it)
+		// The banks: the 2 columns beside a channel RIVER_BANK over the
+		// highest bed passing (over every bed of the channel columns beside
+		// it, whose points are within its reach), a levee where the ground
+		// falls away or erosion took it, cut down where its sediment raised
+		// it ([SKELDAT_LOW_BANKS])
+		std::vector<float> bank(m.h.size(), -1e9f);
 		for(const River &river : rivers)
 			along(m, river, ch + 2, [&](int x, int z, size_t i, float){
 				const size_t c = m.index(x, z);
 				if(!(m.flags[c] & CHANNEL))
-					m.h[c] = std::max(m.h[c], river.bed[i] + RIVER_BANK);
+					bank[c] = std::max(bank[c], river.bed[i] + RIVER_BANK);
 			});
+		for(size_t c = 0; c < m.h.size(); c++)
+			if(bank[c] > -1e9f)
+				m.h[c] = bank[c];
 	} else if(p.form == LAKE || p.form == SEA){
 		const int line = p.water_level;
 		std::vector<size_t> seeds;
@@ -748,7 +755,31 @@ int main()
 			for(size_t i = 1; i < r.bed.size(); i++)
 				assert(r.bed[i] <= r.bed[i - 1]);
 		}
-		// Each channel column at most its river's bed there
+		// [SKELDAT_LOW_BANKS] A channel column's water top 1 under the
+		// lowest ground beside it (its non-channel neighbours) or more, on
+		// 95% of those that have one
+		size_t low = 0, one = 0, sided = 0;
+		for(int z = -128; z < 128; z++)
+			for(int x = -128; x < 128; x++){
+				if(!(m.flags[m.index(x, z)] & CHANNEL))
+					continue;
+				int beside = 1 << 30;
+				for(int i = 0; i < 4; i++){
+					const int nx = x + (i == 0) - (i == 1), nz = z + (i == 2) - (i == 3);
+					if(m.in(nx, nz) && !(m.flags[m.index(nx, nz)] & CHANNEL))
+						beside = std::min(beside, (int)std::floor(m.at(nx, nz)));
+				}
+				if(beside == 1 << 30)
+					continue;
+				sided++;
+				low += m.water[m.index(x, z)] <= beside - 1;
+				one += m.water[m.index(x, z)] == beside - 1;
+			}
+		if(seed <= 4)
+			printf("mapgen: rivers, seed %u: the water 1 under the bank or more "
+					"on %.1f%% of %zu bank columns, just 1 on %.1f%%\n", seed,
+					100.0 * low / sided, sided, 100.0 * one / sided);
+		assert(seed > 4 || low >= sided * 95 / 100);
 		if(seed == 1)
 			printf("mapgen: rivers, seed 1: %zu channel columns, %zu springs, "
 					"%zu drains, the bed %.0f -> %.0f\n", channel, springs,

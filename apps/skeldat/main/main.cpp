@@ -164,7 +164,8 @@ struct Module: public interface::Module, public PlayersHost,
 	std::unordered_map<uint64_t, skeldat::hazards::Cell> m_hz_seen;
 	// water_source lava gas_poison gas_volcanic pocket_water (stage 1's
 	// worlds', read as water) stone water_spring water_drain lava_spring
-	uint32_t m_hz_ids[9] = {};
+	// level_drain
+	uint32_t m_hz_ids[10] = {};
 	// The rules' time and with voxelworld's commit of their changes (most
 	// of it: ~5 ms a second for 100 voxels changed, the step's 0.6 ms)
 	int64_t m_hz_us = 0, m_hz_step_us = 0;
@@ -1565,7 +1566,7 @@ struct Module: public interface::Module, public PlayersHost,
 			// a water spring is full again; a lava spring keeps its eighths
 			const uint32_t was = m_world.format.id.get(m_hz_w->get_voxel(
 					pv::Vector3DInt32(x, y, z), true).data);
-			if(was == m_hz_ids[6] || was == m_hz_ids[7])
+			if(was == m_hz_ids[6] || was == m_hz_ids[7] || was == m_hz_ids[9])
 				return;
 			if(was == m_hz_ids[8]){
 				const uint32_t eighths = c.kind == LAVA ? c.amount : 1;
@@ -1616,9 +1617,12 @@ struct Module: public interface::Module, public PlayersHost,
 			return Cell(WATER, (uint8_t)(param % 8 + 1));
 		// [SKELDAT_OWN_MAPGEN] A spring always full, a drain always room, a
 		// lava spring its eighths (less one in param2, at least 1)
-		if(id == m_hz_ids[6])
-			return Cell(WATER, 8);
-		if(id == m_hz_ids[7])
+		if(id == m_hz_ids[6]){
+			Cell c(WATER, 8);
+			c.spring = true;
+			return c;
+		}
+		if(id == m_hz_ids[7] || id == m_hz_ids[9])
 			return Cell(AIR);
 		if(id == m_hz_ids[8]){
 			Cell c(LAVA, (uint8_t)(param % 8 + 1));
@@ -1637,11 +1641,11 @@ struct Module: public interface::Module, public PlayersHost,
 	{
 		using namespace skeldat::hazards;
 		if(!m_hz_ids[5]){
-			const char *names[9] = {"skeldat:water_source", "skeldat:lava",
+			const char *names[10] = {"skeldat:water_source", "skeldat:lava",
 					"skeldat:gas_poison", "skeldat:gas_volcanic",
 					"skeldat:pocket_water", "skeldat:stone", "skeldat:water_spring",
-					"skeldat:water_drain", "skeldat:lava_spring"};
-			for(int i = 0; i < 9; i++)
+					"skeldat:water_drain", "skeldat:lava_spring", "skeldat:level_drain"};
+			for(int i = 0; i < 10; i++)
 				m_hz_ids[i] = m_world.id_of(names[i]);
 		}
 		// For a check of what stands in water, not of its flow: the step
@@ -1696,6 +1700,10 @@ struct Module: public interface::Module, public PlayersHost,
 			for(int x = sx * S; x < sx * S + S; x++){
 				const uint32_t d = vol.getVoxelAt(x, y, z).data;
 				out[2] += m_world.format.id.get(d) == m_hz_ids[1];
+				// [SKELDAT_LOW_BANKS] The sea edge's drains, and those not
+				// on the line's voxel over it
+				if(m_world.format.id.get(d) == m_hz_ids[9])
+					out[3]++, out[4] += y != m_terrain.water_level + 1;
 				if(m_world.format.id.get(d) != m_hz_ids[0])
 					continue;
 				const uint32_t p = m_world.format.param.get(d);
@@ -1739,7 +1747,7 @@ struct Module: public interface::Module, public PlayersHost,
 		const int64_t t0 = interface::os::time_us();
 		const int S = skeldat::bones::SECTION;
 		size_t woken = 0, rounds = 0, left = 0;
-		size_t before[3] = {0, 0, 0}, after[3] = {0, 0, 0};
+		size_t before[5] = {}, after[5] = {};
 		voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 			m_hz_w = w;
 			m_hazards.now = m_world.t;
@@ -1819,12 +1827,12 @@ struct Module: public interface::Module, public PlayersHost,
 		m_hz_recount.clear();
 		// For a check: the world's water, a scan of every section
 		if(getenv("BUILDAT_SKELDAT_WATER_REPORT") && m_world.ready){
-			size_t n[3] = {0, 0, 0};
+			size_t n[5] = {};
 			voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
 				count_water(w, n, false);
 			});
-			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume; %zu lava voxels",
-					n[0], n[1], n[2]);
+			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume; %zu lava voxels; "
+					"%zu edge drains, %zu off the line", n[0], n[1], n[2], n[3], n[4]);
 		}
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();

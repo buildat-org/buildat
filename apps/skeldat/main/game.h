@@ -429,9 +429,10 @@ inline Game make_game()
 		g.items.erase(n.name);
 	}
 	// [SKELDAT_OWN_MAPGEN] A river's spring (always full) and drain (what
-	// goes in is gone), drawn as water; a lava spring, lava a cube that is
-	// mined to nothing (stone's drop)
-	for(const char *name : {"water_spring", "water_drain"}){
+	// goes in is gone), drawn as water, and the sea edge's drain, drawn as
+	// nothing (terrain.h); a lava spring, lava a cube that is mined to
+	// nothing (stone's drop)
+	for(const char *name : {"water_spring", "water_drain", "level_drain"}){
 		NodeDef &n = node(name, "Water", {"water"}, {}, "-");
 		n.shape = LIQUID;
 		g.items.erase(n.name);
