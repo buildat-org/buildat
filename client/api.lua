@@ -2541,9 +2541,6 @@ buildat.safe.VOXEL_RAY = {
 buildat.safe.SpatialUpdateQueue = function()
 	local internal = __buildat_SpatialUpdateQueue()
 	return {
-		update = function(self, ...)
-			return internal:update(...)
-		end,
 		set_p = function(self, ...)
 			return internal:set_p(...)
 		end,
@@ -2576,9 +2573,6 @@ buildat.safe.SpatialUpdateQueue = function()
 		end,
 		get_length = function(self, ...)
 			return internal:get_length(...)
-		end,
-		is_sorting = function(self)
-			return internal:is_sorting()
 		end,
 		set_p = function(self, safe_p)
 			if not getmetatable(safe_p) or

@@ -155,12 +155,6 @@ struct SpatialUpdateQueue
 		m_best_valid = true;
 	}
 
-	void update(int max_operations)
-	{
-		// Nothing waits to be re-put any more: see the note on m_items
-		(void)max_operations;
-	}
-
 	void set_p(const Vector3 &p)
 	{
 		if(p != m_p){
@@ -281,13 +275,6 @@ struct SpatialUpdateQueue
 	size_t get_length()
 	{
 		return m_items.size();
-	}
-
-	// There is no sort to be in the middle of any more; kept because the
-	// client asks before it decides that nothing is due
-	bool is_sorting()
-	{
-		return false;
 	}
 };
 
@@ -463,12 +450,6 @@ struct LuaSUQ
 		delete *(LuaSUQ**)(lua_touserdata(L, 1));
 		return 0;
 	}
-	static int l_update(lua_State *L){
-		LuaSUQ *o = internal_checkobject(L, 1);
-		int max_operations = luaL_checkinteger(L, 2);
-		o->internal.update(max_operations);
-		return 0;
-	}
 	static int l_set_p(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		tolua_Error tolua_err;
@@ -577,11 +558,6 @@ struct LuaSUQ
 		lua_pushnumber(L, v);
 		return 1;
 	}
-	static int l_is_sorting(lua_State *L){
-		LuaSUQ *o = internal_checkobject(L, 1);
-		lua_pushboolean(L, o->internal.is_sorting());
-		return 1;
-	}
 	static int l_get_length(lua_State *L){
 		LuaSUQ *o = internal_checkobject(L, 1);
 		int l = o->internal.get_length();
@@ -624,7 +600,6 @@ struct LuaSUQ
 		lua_pop(L, 1); // drop metatable_L
 
 		// fill method_table_L
-		DEF_METHOD(update);
 		DEF_METHOD(set_p);
 		DEF_METHOD(set_dir);
 		DEF_METHOD(put);
@@ -634,7 +609,6 @@ struct LuaSUQ
 		DEF_METHOD(peek_next_value);
 		DEF_METHOD(find);
 		DEF_METHOD(get_length);
-		DEF_METHOD(is_sorting);
 
 		// drop method_table_L
 		lua_pop(L, 1);

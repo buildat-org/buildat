@@ -228,7 +228,7 @@ buildat.set_watchdog_seconds(n) (unsafe Lua only)
 
 buildat.SpatialUpdateQueue() -> queue
 - :put(p, near_weight, near_trigger_d, far_weight, far_trigger_d, value),
-  :set_p(p), :update(...), :get(), :peek_next_f(), :peek_next_fw(): a queue
+  :set_p(p), :get(), :peek_next_f(), :peek_next_fw(): a queue
   of things at positions that hands them out nearest first from where :set_p
   last said the viewer is. voxelworld's chunk meshing runs on one.
 

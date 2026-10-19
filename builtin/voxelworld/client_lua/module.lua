@@ -760,9 +760,6 @@ function sub_events()
 		-- Which way they look is part of the order now: what is in front
 		-- of them is what they are waiting to see
 		node_update_queue:set_dir(camera_dir)
-		-- Scale queue update operations according to the handling time of the
-		-- rest of the processing
-		node_update_queue:update(max_handling_time_us / 50 + 1)
 
 		-- The count of undrawn chunks within 2 of the camera not moving
 		-- for two seconds while the queue holds anything names the front
@@ -775,8 +772,7 @@ function sub_events()
 			stuck_checked_us = current_us
 			local undrawn = M.undrawn_around(camera_p, 2)
 			if undrawn > 0 and undrawn == stuck_undrawn and
-					(node_update_queue:get_length() > 0 or
-					node_update_queue:is_sorting()) then
+					node_update_queue:get_length() > 0 then
 				stuck_seconds = stuck_seconds + 1
 			else
 				stuck_seconds, stuck_said = 0, false
@@ -817,12 +813,11 @@ function sub_events()
 					end end end
 				end
 				log:warning(string.format("mesh queue: %d undrawn within 2 " ..
-						"for %d s: %d queued, sorting %s, front f=%s fw=%s %s " ..
+						"for %d s: %d queued, front f=%s fw=%s %s " ..
 						"node %s; %d pops in the window, %d distinct, last %s " ..
 						"node %s f=%s at %.0f; nearest undrawn node %s at %.0f%s; " ..
 						"camera %.0f,%.0f,%.0f", undrawn, stuck_seconds,
 						node_update_queue:get_length(),
-						tostring(node_update_queue:is_sorting()),
 						tostring(f0), tostring(node_update_queue:peek_next_fw()),
 						v and v.type or "-", tostring(v and v.node_id or "-"),
 						stuck_pops.n, stuck_pops.distinct,
@@ -1091,12 +1086,8 @@ function M.counts()
 		-- nothing more where it is standing**, which is a far more useful
 		-- question than how long the queue is. A world pinned by a
 		-- forceloading fixture keeps thousands of chunks queued that are
-		-- nowhere near the camera. **After a jump the queue re-sorts over
-		-- frames**, and until it has, its head says nothing: a picture taken
-		-- on those frames had the far chunks of the new place still waiting.
-		next_mesh_f = node_update_queue and
-				(node_update_queue:is_sorting() and 0 or
-				node_update_queue:peek_next_f()) or nil,
+		-- nowhere near the camera.
+		next_mesh_f = node_update_queue and node_update_queue:peek_next_f() or nil,
 		voxel_types = voxel_reg and voxel_reg:get_count() or 0,
 	}
 end
