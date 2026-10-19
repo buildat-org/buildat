@@ -247,6 +247,10 @@ static const float DECAY_PER_SECOND = 1;
 static const int BOAT_ACROSS = 10, BOAT_DAYS = 2, GREEN_SKULL_APART = 32,
 		BOAT_NEAR = 4, BOAT_SHORE = 8, BOAT_HOME = 12;
 static const float BOAT_SPEED = 0.5f;
+// [SKELDAT_SKULL_CALL] An hour before sunset each green skull calls the
+// nearest boatless bone skeleton within BOAT_CALL, not called already, to
+// its water side
+static const int BOAT_CALL = 24;
 
 struct Mob
 {
@@ -308,6 +312,13 @@ struct Mob
 	float aim = 0, boat_x = 0, boat_z = 0;
 	int shore_days = 0, boat_sent = -1;
 	float boat_t = 0; // since its last step
+	// [SKELDAT_SKULL_CALL] Called to a green skull: the spot by its water,
+	// its route one there, that search's next game time. Not saved
+	// simplified: a restart in the call hour drops the call; the skull
+	// calls again the next evening
+	bool called = false, call_route = false;
+	interface::voxel_path::P call_at;
+	double call_t = 0;
 
 	ss_ save() const {
 		std::ostringstream os;

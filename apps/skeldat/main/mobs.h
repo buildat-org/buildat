@@ -44,6 +44,8 @@ struct Mobs
 	float light_step = LIGHT_STEP;
 	// Day 1, night 0, -1 before the world is in; the night's bone blocks
 	int phase = -1;
+	// [SKELDAT_SKULL_CALL] In the hour before sunset
+	bool calling = false;
 	size_t night_blocks = 0;
 	uint32_t next_mob = 1;
 	std::vector<Arrow> arrows;
@@ -1396,6 +1398,57 @@ struct Mobs
 			log_i(MODULE, "skeldat: a skeleton (%u) takes to a boat at %d,%d, "
 					"aim %.2f", key, wx, wz, m.aim);
 		}
+		// [SKELDAT_SKULL_CALL] The called that did not make it, let go
+		for(auto &kv : all){
+			Mob &m = kv.second;
+			if(!m.called)
+				continue;
+			m.called = m.call_route = false;
+			if(!m.boat)
+				log_i(MODULE, "skeldat: a called skeleton (%u) did not make it, "
+						"%.0f from %d,%d", kv.first, std::hypot(m.x - m.call_at.x,
+						m.z - m.call_at.z), m.call_at.x, m.call_at.z);
+		}
+	}
+	// [SKELDAT_SKULL_CALL] An hour before sunset: each green skull calls the
+	// nearest boatless bone skeleton within BOAT_CALL not called already to
+	// its water side, the nearest land top beside a water top within 2
+	void boats_call()
+	{
+		for(const ss_ &k : green){
+			int x, y, z;
+			if(sscanf(k.c_str(), "%d,%d,%d", &x, &y, &z) != 3)
+				continue;
+			int sx = 0, sz = 0, best = 1 << 30;
+			for(int dz = -2; dz <= 2; dz++)
+			for(int dx = -2; dx <= 2; dx++){
+				const int ax = x + dx, az = z + dz, d = dx * dx + dz * dz;
+				if((dx || dz) && d < best && land_top(ax, az) && !water_top(ax, az) &&
+						(water_top(ax + 1, az) || water_top(ax - 1, az) ||
+						water_top(ax, az + 1) || water_top(ax, az - 1)))
+					best = d, sx = ax, sz = az;
+			}
+			if(best == 1 << 30)
+				continue;
+			uint32_t key = 0;
+			float kd = 1e9f;
+			for(auto &kv : all){
+				const Mob &m = kv.second;
+				const float d = std::hypot(m.x - x, m.z - z);
+				if(m.kind == SKELETON && !m.boat && !m.called && d <= BOAT_CALL &&
+						d < kd)
+					kd = d, key = kv.first;
+			}
+			if(kd > BOAT_CALL)
+				continue;
+			Mob &m = all[key];
+			m.called = true;
+			m.call_at = vp::P(sx, world.top_y[world.column(sx, sz)] + 1, sz);
+			m.call_route = false;
+			m.call_t = 0;
+			log_i(MODULE, "skeldat: a green skull at %d,%d,%d calls a skeleton "
+					"(%u), %.0f away", x, y, z, key, kd);
+		}
 	}
 	// A boat's light step: at night beside a bare shore (or a boned one
 	// with no bare one seen) away from home, onto it; else a step on the
@@ -1715,8 +1768,27 @@ struct Mobs
 			}
 			m.shelter_route = false;
 			if(seek_shelter(kv.first, m)){
-				m.shot_route = false;
+				m.shot_route = m.call_route = false;
 				follow_route(kv.first, m);
+				continue;
+			}
+			// [SKELDAT_SKULL_CALL] Called: on its way to the skull's water,
+			// a way searched again after the sun's shelter took it off it,
+			// and standing there until sunset
+			if(m.called){
+				if(m.call_route && !m.route.empty()){
+					follow_route(kv.first, m);
+					continue;
+				}
+				m.call_route = false;
+				if(std::hypot(m.x - m.call_at.x, m.z - m.call_at.z) > 1.5f &&
+						world.t >= m.call_t){
+					m.call_t = world.t + SHELTER_WAIT;
+					if(search_way(kv.first, m, m.call_at, BUILD_CAP, false)){
+						m.call_route = true;
+						follow_route(kv.first, m);
+					}
+				}
 				continue;
 			}
 			// Fighting: a bow's distance, between 3 and 9, that a sword's

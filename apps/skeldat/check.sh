@@ -2927,8 +2927,9 @@ bt54="level -1 44 3 3 skeldat:bone_block -1; level -35 10 71 34 skeldat:water_so
 bt54="$bt54; level -35 47 71 34 skeldat:water_source -1; level -35 44 34 3 skeldat:water_source -1"
 bt54="$bt54; level 2 44 34 3 skeldat:water_source -1; skeleton 0 45"
 boats() { # log, client name, delay ms[, the test's fixtures]
-	BUILDAT_SKELDAT_WORLD=boats BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
-		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.2 BUILDAT_SKELDAT_DAY=60 \
+	BUILDAT_SKELDAT_WORLD=${W54:-boats} BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=${T54:-0.2} \
+		BUILDAT_SKELDAT_DAY=${D54:-60} \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="${4-}" \
 		start_server "$1" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -2940,6 +2941,30 @@ boats() { # log, client name, delay ms[, the test's fixtures]
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 }
 boats "$log58" boats1 160000 "$bt54"
+# [SKELDAT_SKULL_CALL] A strip of bones 3 x 21 into the pond, a green skull
+# at its far end and a skeleton 14 short of it; a 600 s day from 0.6617: the
+# call an hour before sunset 28 s in, about 7 s after the fixtures, the
+# boarding at sunset 53 s in. The skeleton is in the sun and wanders the
+# strip meanwhile, so the call's distance varies: a way to the skull's
+# water is searched unless it is within BOAT_NEAR already
+bt54c="level -1 44 3 21 skeldat:bone_block -1; level -35 10 71 34 skeldat:water_source -1"
+bt54c="$bt54c; level -35 65 71 16 skeldat:water_source -1; level -35 44 34 21 skeldat:water_source -1"
+bt54c="$bt54c; level 2 44 34 21 skeldat:water_source -1; marker 0 64 skeldat:green_skull"
+bt54c="$bt54c; skeleton 0 50"
+W54=skullcall T54=0.6617 D54=600 boats "$t/srv58_call.log" boats_call 75000 "$bt54c"
+call=$(python3 -I - "$t/srv58_call.log" <<'PY'
+import sys, re
+a = open(sys.argv[1], errors="replace").read()
+k = re.search(r"skeldat: test: a skeleton \((\d+)\) at", a).group(1)
+c = re.search(r"a green skull at \S+ calls a skeleton \(%s\), (\d+) away" % k, a)
+assert c, "no call"
+w = re.search(r"a skeleton \(%s\) finds a way to -?\d+,\d+,6[34]:" % k, a[c.end():])
+assert w or int(c.group(1)) <= 4, ("no way to the call from", c.group(1))
+b = re.search(r"a skeleton \(%s\) takes to a boat" % k, a)
+assert b and b.start() > c.start(), "the called skeleton took no boat"
+print("called from %s, boarded" % c.group(1))
+PY
+) || fail "the skull's call ($t/srv58_call.log)"
 grep -aq "skeldat: a skeleton ([0-9]*) takes to a boat" "$log58" ||
 	fail "no skeleton took to a boat ($log58)"
 grep -aq "skeldat: a skeleton on a boat" "$t/boats1.log" ||
@@ -2970,7 +2995,7 @@ echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
 echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
-echo "boats: $boat"
+echo "boats: $boat; a skull's call: $call"
 echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"

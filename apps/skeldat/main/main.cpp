@@ -1577,6 +1577,11 @@ struct Module: public interface::Module, public PlayersHost,
 			if(phase != m_mobs.phase)
 				m_mobs.pick_footprints(phase == 0);
 			m_mobs.phase = phase;
+			// [SKELDAT_SKULL_CALL] The hour before sunset
+			const bool calling = m_world.day >= 0.75 - 1.0 / 24 && m_world.day < 0.75;
+			if(calling && !m_mobs.calling)
+				m_mobs.boats_call();
+			m_mobs.calling = calling;
 			m_mobs.hour_t += dtime;
 			if(m_mobs.hour_t >= m_world.day_s / 24){
 				m_mobs.hour_t = 0;
