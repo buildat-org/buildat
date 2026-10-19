@@ -152,7 +152,7 @@ pause() { # dir log listed extra_cmds...
 # then the page <page> and the scripted requests' answer (the first is
 # 1001), in either order
 discuss() { # first page
-	echo "mouse_pos 400 377"; echo "mouse_click left"
+	echo "mouse_pos 400 386"; echo "mouse_click left"
 	echo "wait_log 30000 Connect succeeded (127.0.0.1:$HE)"
 	if [ "$1" = 1 ]; then
 		# A settle after the line: the prompt laid out before the click
