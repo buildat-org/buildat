@@ -2075,6 +2075,11 @@ magic.SubscribeToEvent("command_seq:skeldat_board", function(_, d)
 	log:info("skeldat: the board forced to " .. tostring(board_cheat) ..
 			" by the drive")
 end)
+-- For a check: "event skeldat_where" logs where the player is
+magic.SubscribeToEvent("command_seq:skeldat_where", function()
+	log:info(string.format("skeldat: where (%.1f, %.1f, %.1f)", player.x,
+			player.y, player.z))
+end)
 local send_t = 0
 -- Where the player is, to the server: every 0.1 s, and at a bow's release
 -- ([SKELDAT_BOW_AIM]: the server's copy fresh for the arrow's check).

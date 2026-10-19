@@ -53,6 +53,9 @@ static const int SEA_DEPTH = 8, ISLAND_FROM = 26, SPRING_ONE_IN = 4,
 // The sea's bone start: its islands within SEA_BONES of the edge
 static const int SEA_BONES = 48;
 static const float LAKE_GAP = 0.125f, SEA_ZONE = 0.35f;
+// The sea's and the lake's land at most this over its lowest neighbour
+// (the water line the floor): [SKELDAT_COASTS], a walkable shore
+static const float SHORE_SLOPE = 0.7f;
 
 enum Form { RIVERS, PLAINS, LAKE, SEA, FLAT };
 static const char *FORM_NAMES[] = {"rivers", "plains", "lake", "sea", "flat"};
@@ -367,7 +370,8 @@ inline void mark_shores(Heightmap &m)
 }
 
 // The heightmap: fractal noise with spreads by the world's width, the
-// form's bias, then erosion, then the water.
+// form's bias, then erosion, a blur and (sea, lake) a slope limit, then
+// the water.
 // - plains: no bias; the water table (water_line()) over every column
 //   under it;
 // - rivers: plan_rivers()' valleys lowered along them before the erosion,
@@ -375,8 +379,9 @@ inline void mark_shores(Heightmap &m)
 //   their banks raised to RIVER_BANK over the bed where lower, the
 //   channel's columns RIVER_DEPTH of water over the bed; its columns at
 //   the world's edge springs at the inlet, drains at the outlet.
-// - lake: the middle pushed under the water line by a radial falloff,
-//   islands where the noise stays over it; the edge raised but for a gap
+// - lake: the middle pushed under the water line within a radius
+//   shifted by noise, islands where two noises are over their
+//   thresholds; the edge raised but for a gap
 //   of LAKE_GAP of the perimeter; the water every column under the line
 //   joined to the middle;
 // - sea: all of it SEA_DEPTH under the line but the islands, large and
@@ -395,13 +400,20 @@ inline void bias_lake(const Params &p, Heightmap &m, float mean, float amp)
 	for(int z = -p.half; z < p.half; z++)
 		for(int x = -p.half; x < p.half; x++){
 			float &h = m.at(x, z);
+			// [SKELDAT_COASTS] A radius shifted by noise: arms, bays and
+			// peninsulas
 			const float rr = std::sqrt((float)x * x + (float)z * z) / p.half;
-			const float k = std::max(0.0f, std::min(1.0f, (0.7f - rr) / 0.5f));
+			const float v = 0.65f - rr + 0.8f * fbm2(x / 45.0f, z / 45.0f,
+					p.seed + 91, 4, 0.55f);
+			const float k = std::max(0.0f, std::min(1.0f, v / 0.15f));
 			h -= k * k * (3 - 2 * k) * (mean - line + SEA_DEPTH + 0.3f * amp);
-			// Some small islands in it
-			const float small = fbm2(x / 16.0f, z / 16.0f, p.seed + 78, 2, 0.5f);
-			if(k > 0.5f && small > 0.55f)
-				h = std::max(h, line + 1 + (small - 0.55f) * 30);
+			// Islands in it, larger and small
+			const float big = fbm2(x / 40.0f, z / 40.0f, p.seed + 79, 3, 0.5f),
+					small = fbm2(x / 14.0f, z / 14.0f, p.seed + 78, 2, 0.5f);
+			if(v > 0.12f && big > 0.3f)
+				h = std::max(h, line + 1 + (big - 0.3f) * 30);
+			if(v > 0.12f && small > 0.6f)
+				h = std::max(h, line + 1 + (small - 0.6f) * 30);
 			// The edge's lift, but in the gap: the perimeter's coordinate
 			const int e = std::min(std::min(x + p.half, p.half - 1 - x),
 					std::min(z + p.half, p.half - 1 - z));
@@ -552,6 +564,23 @@ inline Heightmap make_heightmap(const Params &p)
 		bias_sea(p, m);
 	if(p.form != FLAT)
 		erode(m, p.seed, (size_t)(DROPLETS_PER_COLUMN * w * w));
+	// [SKELDAT_COASTS] One 3x3 blur (1 2 1): the erosion's sub-voxel
+	// ripples out of the contours, its change to the ground kept
+	{
+		const std::vector<float> eroded = m.h;
+		for(int z = -p.half; z < p.half; z++)
+			for(int x = -p.half; x < p.half; x++){
+				float sum = 0, n = 0;
+				for(int dz = -1; dz <= 1; dz++)
+					for(int dx = -1; dx <= 1; dx++){
+						if(!m.in(x + dx, z + dz))
+							continue;
+						const float k = (float)((2 - std::abs(dx)) * (2 - std::abs(dz)));
+						sum += k * eroded[m.index(x + dx, z + dz)], n += k;
+					}
+				m.at(x, z) = sum / n;
+			}
+	}
 	// The erosion's specks out: each column clamped into the min..max of
 	// its four neighbours (a single cell's sub-voxel bump or pit rounds to
 	// a voxel), what it carved kept (a blur would soften the channels)
@@ -567,6 +596,29 @@ inline Heightmap make_heightmap(const Params &p)
 				hi = std::max(hi, eroded[m.index(nx, nz)]);
 			}
 			m.at(x, z) = std::min(hi, std::max(lo, m.at(x, z)));
+		}
+	// [SKELDAT_COASTS] The sea's and the lake's land no more than
+	// SHORE_SLOPE over its lowest neighbour, a column under the line
+	// counted at it: chamfer passes both ways until nothing changes
+	// simplified: islands become cones and plateaus of that slope, no
+	// cliff on them; a limit within some columns of the water alone is the
+	// upgrade if the inland is wanted rougher
+	if(p.form == SEA || p.form == LAKE)
+		for(bool changed = true; changed;){
+			changed = false;
+			for(int pass = 0; pass < 2; pass++)
+				for(int i = 0; i < w * w; i++){
+					const int j = pass ? w * w - 1 - i : i;
+					const int x = j % w - p.half, z = j / w - p.half;
+					float lo = 1e9f;
+					for(int d = 0; d < 4; d++){
+						const int nx = x + (d == 0) - (d == 1), nz = z + (d == 2) - (d == 3);
+						if(m.in(nx, nz))
+							lo = std::min(lo, std::max((float)p.water_level, m.at(nx, nz)));
+					}
+					if(m.at(x, z) > lo + SHORE_SLOPE + 1e-4f)
+						m.at(x, z) = lo + SHORE_SLOPE, changed = true;
+				}
 		}
 	// Within the world: a floor of 8 under the ground, 8 of air over it
 	for(float &v : m.h)
@@ -808,6 +860,119 @@ int main()
 			else
 				assert(wet <= all / 8 && water > m.flags.size() / 20);
 		}
+	// [SKELDAT_COASTS] Sea and lake at 256, seeds 1-4, both heights: no
+	// land column within 4 of water a step of 2 or more over a land
+	// neighbour (one at the line or over: a dry hollow under it is a pit
+	// the limit does not see, as its floor is the line); the lake 15-45% water, its outer shore (islands filled,
+	// an 8-voxel cell water when half its columns are) 1.4 times a
+	// circle's of its area at least
+	for(int form : {SEA, LAKE})
+		for(uint32_t seed = 1; seed <= 4; seed++)
+			for(bool tall : {true, false}){
+				Params p;
+				p.seed = seed, p.half = 128, p.form = form;
+				p.bottom = tall ? -64 : 0, p.water_level = tall ? 1 : 20;
+				const Heightmap m = make_heightmap(p);
+				const int w = m.width();
+				auto wet = [&](int x, int z){ return (m.flags[m.index(x, z)] & WATER) != 0; };
+				size_t steep = 0, shore = 0, water = 0;
+				for(int z = -128; z < 128; z++)
+					for(int x = -128; x < 128; x++){
+						water += wet(x, z);
+						if(wet(x, z))
+							continue;
+						bool near = false;
+						for(int dz = -4; dz <= 4 && !near; dz++)
+							for(int dx = -4; dx <= 4 && !near; dx++)
+								near = m.in(x + dx, z + dz) && wet(x + dx, z + dz);
+						if(!near)
+							continue;
+						shore++;
+						const int h = (int)std::floor(m.at(x, z));
+						bool s = false;
+						for(int d = 0; d < 4; d++){
+							const int nx = x + (d == 0) - (d == 1), nz = z + (d == 2) - (d == 3);
+							s = s || (m.in(nx, nz) && !wet(nx, nz) &&
+									m.at(nx, nz) >= p.water_level &&
+									h - (int)std::floor(m.at(nx, nz)) >= 2);
+						}
+						steep += s;
+					}
+				float ratio = 0;
+				if(form == LAKE){
+					// The 8-voxel cells, water joined to the edge-free
+					// outside filled: what the outside does not reach is
+					// the lake's, islands and all
+					const int C = 8, n = w / C;
+					std::vector<char> cell((size_t)n * n, 0), out((size_t)n * n, 0);
+					for(int cz = 0; cz < n; cz++)
+						for(int cx = 0; cx < n; cx++){
+							int k = 0;
+							for(int z = 0; z < C; z++)
+								for(int x = 0; x < C; x++)
+									k += wet(cx * C + x - 128, cz * C + z - 128);
+							cell[(size_t)cz * n + cx] = k * 2 >= C * C;
+						}
+					std::vector<int> todo;
+					for(int a = 0; a < n; a++)
+						for(int c : {a, (n - 1) * n + a, a * n, a * n + n - 1})
+							if(!cell[c] && !out[c])
+								out[c] = 1, todo.push_back(c);
+					while(!todo.empty()){
+						const int c = todo.back();
+						todo.pop_back();
+						const int cx = c % n, cz = c / n;
+						for(int d = 0; d < 4; d++){
+							const int nx = cx + (d == 0) - (d == 1), nz = cz + (d == 2) - (d == 3);
+							if(nx < 0 || nz < 0 || nx >= n || nz >= n)
+								continue;
+							const int k = nz * n + nx;
+							if(!cell[k] && !out[k])
+								out[k] = 1, todo.push_back(k);
+						}
+					}
+					size_t area = 0, edges = 0;
+					for(int cz = 0; cz < n; cz++)
+						for(int cx = 0; cx < n; cx++){
+							if(out[(size_t)cz * n + cx])
+								continue;
+							area++;
+							for(int d = 0; d < 4; d++){
+								const int nx = cx + (d == 0) - (d == 1), nz = cz + (d == 2) - (d == 3);
+								edges += nx < 0 || nz < 0 || nx >= n || nz >= n ||
+										out[(size_t)nz * n + nx];
+							}
+						}
+					ratio = area ? edges / (2 * std::sqrt(3.14159f * area)) : 0;
+				}
+				printf("mapgen: %s, seed %u, %s: %zu of %zu shore columns steep, "
+						"%.0f%% water, the shore %.2f a circle's\n", FORM_NAMES[form],
+						seed, tall ? "tall" : "short", steep, shore,
+						100.0 * water / m.h.size(), ratio);
+				assert(steep == 0);
+				if(form == LAKE)
+					assert(water * 100 >= m.h.size() * 15 && water * 100 <= m.h.size() * 45 &&
+							ratio >= 1.4f);
+			}
+	// [SKELDAT_COASTS] Contours: a plains column's floor over or under both
+	// its x neighbours' (a wobble) on 1% of the columns at most, at 256,
+	// seeds 1-3: measured 2026-10-19 unblurred 2.9-3.6%, blurred 0.44-0.69%
+	// (the plan's count read 1.28-1.44 and 0.18-0.28)
+	for(uint32_t seed = 1; seed <= 3; seed++){
+		Params p;
+		p.seed = seed, p.half = 128;
+		const Heightmap m = make_heightmap(p);
+		size_t wobbles = 0;
+		for(int z = -128; z < 128; z++)
+			for(int x = -127; x < 127; x++){
+				const int h = (int)std::floor(m.at(x, z)),
+						a = (int)std::floor(m.at(x - 1, z)), b = (int)std::floor(m.at(x + 1, z));
+				wobbles += (h > a && h > b) || (h < a && h < b);
+			}
+		printf("mapgen: plains, seed %u: wobbles on %.2f%% of the columns\n",
+				seed, 100.0 * wobbles / m.h.size());
+		assert(wobbles * 100 <= m.h.size());
+	}
 	// No specks: a plains column's voxel over or under all its four
 	// neighbours' is a ridge's or a pit's end, rare
 	{

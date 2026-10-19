@@ -2571,11 +2571,36 @@ for n in 1 2; do
 	wait $CLIENT || fail "the lava spring's drive $n ($t/lava$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 done
+# [SKELDAT_COASTS] Onto an island: the sea at 128 (seed 2), spawned on an
+# island at 0 -4 (a spawn over water is at the world's top), walked 4 s
+# south into the sea, then W and Space held north: the player in the water
+# (2 over the line at most), then 3 over it within 12 s (its shore no
+# cliff).
+printf '%s\n' "$placed" "delay 1500" "look 180 0" "keydown W" "delay 4000" \
+	"keyup W" "delay 1000" "event skeldat_where" "look 0 0" "keydown W" \
+	"keydown Space" > "$t/coast.cmds"
+for i in $(seq 24); do printf '%s\n' "delay 500" "event skeldat_where" >> "$t/coast.cmds"; done
+printf '%s\n' "keyup Space" "keyup W" quit >> "$t/coast.cmds"
+BUILDAT_SKELDAT_WORLD=coast BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
+	BUILDAT_SKELDAT_TERRAIN=sea BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_SPAWN="0 -4" \
+	start_server "$t/srv51_coast.log" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv51_coast" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv51_coast.log)"
+CHECK_PIDS+=($SERVER_PID)
+client coast "$t/coast.cmds"
+wait $CLIENT || fail "the coast's drive ($t/coast.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+ys=$(grep -a "skeldat: where (" "$t/coast.log" | sed 's/.*where ([-0-9.]*, \([-0-9.]*\),.*/\1/' | tr '\n' ' ')
+coast=$(echo $ys | awk '{ m = $2; for(i = 2; i <= NF; i++) if($i > m) m = $i; print $1 " -> " m }')
+echo $ys | awk '{ exit !(NF >= 20 && $1 <= 2) }' &&
+	echo $ys | awk '{ for(i = 2; i <= NF; i++) if($i >= 4) exit 0; exit 1 }' ||
+	fail "the island not climbed from the sea: $ys ($t/coast.log)"
 lava() { grep -a "skeldat: water: .* lava voxels" "$t/srv51_lava$1.log" | sed 's/.*; \([0-9]*\) lava voxels.*/\1/' | tr '\n' ' '; }
 l1=$(lava 1) l2=$(lava 2)
 echo "$l1" | awk '{ exit !(NF >= 4 && $NF > $2 + 4) }' &&
 	echo "$l2" | awk '{ for(i = 3; i <= NF; i++) if($i != $2) exit 1; exit !(NF >= 4) }' ||
 	fail "the lava spring: on the ground $l1, walled in $l2 ($t/srv51_lava1.log, $t/srv51_lava2.log)"
+echo "an island climbed to $coast"
 echo "forms:$forms lava spring: open $(echo $l1 | awk '{ print $2 "->" $NF }'), walled $(echo $l2 | awk '{ print $2 "->" $NF }')"
 echo "a night: $(echo $night)"
 echo "lanterns: $lantern"
