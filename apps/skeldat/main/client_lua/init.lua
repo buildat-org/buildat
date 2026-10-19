@@ -2096,12 +2096,45 @@ function bow.send_where()
 		{"sent_us", "double"}})
 end
 local was_held = false
+-- **[SKELDAT_WEB_LOCK_LOST] On the web the pointer lock is the browser's**:
+-- with no window over the game and the mouse meant to be in the world, a
+-- lock held (was) and let go opens the pause menu at once, and one asked
+-- for and not given in 0.5 s (t) too; its Continue or a click off it is
+-- the click the browser grants a new lock from. A window's own ungrab
+-- clears them, so its close's ask has its 0.5 s. Luanti's client's rule.
+local lock = {was = false, t = 0}
+-- The mouse's move m while it is the world's (nil: no window and the
+-- mouse not the world's, which clears them); a move with no lock is none.
+-- On game: the Update handler below is at Lua's 60 upvalues
+function game.lock_move(m, dt)
+	if not m then
+		lock.was, lock.t = false, 0
+		return
+	end
+	if not web then
+		return m
+	end
+	if magic.input:IsMouseLocked() then
+		lock.was, lock.t = true, 0
+		return m
+	end
+	lock.t = lock.t + dt
+	if lock.was or lock.t > 0.5 then
+		log:info("pause: the pointer lock " .. (lock.was and "lost" or "not given"))
+		lock.was, lock.t = false, 0
+		open_pause()
+	end
+	return {x = 0, y = 0}
+end
 magic.SubscribeToEvent("Update", function(_, d)
 	local dt = d:GetFloat("TimeStep")
 	if (held ~= nil) ~= was_held then
 		was_held = held ~= nil
 		set_mouse_in_world(not was_held)
 		dig = nil
+	end
+	if held or not mouse_in_world or not placed then
+		game.lock_move()
 	end
 	update_sky(dt)
 	voxel_shading.update(dt)
@@ -2131,7 +2164,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 		end
 		touch.yaw, touch.pitch = 0, 0
 	elseif mouse_in_world and not held then
-		local m = magic.input:GetMouseMove()
+		local m = game.lock_move(magic.input:GetMouseMove(), dt)
 		yaw = (yaw + m.x * 0.12) % 360
 		pitch = math.max(-89, math.min(89, pitch + m.y * 0.12))
 	end
