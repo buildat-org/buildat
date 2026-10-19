@@ -2522,7 +2522,8 @@ echo "$first; ${back} active read back"
 # volume within 8% of the first report's (the springs of low pressure,
 # [SKELDAT_LOW_BANKS]: 8234 -> 7999 in 2 minutes measured, 2026-10-19;
 # before, pushing the river over its banks, +20% in 10); on sea the level drain holds the line (within 3%); plains
-# and lake have no spring, their volume never more. On sea the edge's
+# and lake have no spring, their volume never more. Rivers: riffles made
+# ([SKELDAT_RIVER_RIFFLES]), the pools' tops logged. On sea the edge's
 # drains are the voxel over the line alone ([SKELDAT_LOW_BANKS]), drawn as
 # nothing, and the client's backdrop water at the voxels' surface (the
 # line's top face less the mesher's eighth of sag). A lava spring on the
@@ -2560,6 +2561,14 @@ for form in rivers sea plains lake; do
 			if(!r && $i > $(i - 1)) exit 1 } }' ||
 		fail "the $form water not kept: $vols ($f)"
 	forms="$forms $form $(echo $vols | awk '{ printf "%d->%d", $1, $NF }');"
+	# [SKELDAT_RIVER_RIFFLES] Riffles in the channels; the pools' tops at
+	# the last report against the intended, read and not held to a figure
+	if [ $form = rivers ]; then
+		grep -aq "skeldat: the heightmap (rivers) made .*, [1-9][0-9]* riffles" "$f" ||
+			fail "no riffles in the rivers ($f)"
+		echo "rivers: $(grep -ao "[0-9]* riffles" "$f" | head -1); the pools: $(grep -a "skeldat: water: \|skeldat: river .* pool" "$f" |
+			awk '/water:/ { s = ""; next } { sub(/.*skeldat: /, ""); s = s $0 "; " } END { print s }')"
+	fi
 	if [ $form = sea ]; then
 		grep -aq "skeldat: water: .* lava voxels; [1-9][0-9]* edge drains, 0 off the line" "$f" ||
 			fail "the sea's edge drains not on the line's voxel over it ($f)"

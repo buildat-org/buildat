@@ -606,9 +606,13 @@ struct Terrain
 			p.water_level = mapgen::water_line(*map);
 			water_level = p.water_level;
 		}
+		size_t riffles = 0;
+		for(const mapgen::River &r : map->rivers)
+			for(size_t i = 0; i < r.riffle.size(); i++)
+				riffles += r.riffle[i] && (i == 0 || !r.riffle[i - 1]);
 		log_i(MODULE, "skeldat: the heightmap (%s) made in %.1f ms, the water "
-				"line at %d", cs(form), (interface::os::time_us() - t0) / 1e3,
-				water_level);
+				"line at %d, %zu riffles", cs(form), (interface::os::time_us() - t0) / 1e3,
+				water_level, riffles);
 		SkeldatGenerator::Ids ids;
 		ids.stone = world.id_of("skeldat:stone");
 		ids.dirt = world.id_of("skeldat:dirt");

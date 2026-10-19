@@ -1784,6 +1784,41 @@ struct Module: public interface::Module, public PlayersHost,
 		m_hz_out.clear();
 	}
 
+	// [SKELDAT_RIVER_RIFFLES] For a check: each river's pools (its path
+	// between riffles), at the middle point's column the water's top voxel
+	// and its eighths, and the top intended
+	void report_pools()
+	{
+		const auto map = m_terrain.heightmap;
+		if(!map)
+			return;
+		for(size_t k = 0; k < map->rivers.size(); k++){
+			const skeldat::mapgen::River &r = map->rivers[k];
+			for(size_t a = 0, j = 0; a < r.riffle.size(); j++){
+				size_t b = a;
+				while(b < r.riffle.size() && !r.riffle[b])
+					b++;
+				const size_t i = (a + b) / 2;
+				const int x = (int)r.x[i], z = (int)r.z[i];
+				const int want = map->water[map->index(x, z)];
+				int top = -1000;
+				uint32_t p = 0;
+				voxelworld::access(m_server, m_world.scene, [&](voxelworld::Instance *w){
+					for(int y = want + 6; y > want - 6 && top == -1000; y--){
+						const uint32_t d = w->get_voxel(pv::Vector3DInt32(x, y, z), true).data;
+						if(m_world.format.id.get(d) == m_hz_ids[0])
+							top = y, p = m_world.format.param.get(d);
+					}
+				});
+				log_i(MODULE, "skeldat: river %zu pool %zu at %d,%d: top %d (%u/8), "
+						"intended %d", k, j, x, z, top, p == 0 || p > 8 ? 8 : p, want);
+				while(b < r.riffle.size() && r.riffle[b])
+					b++;
+				a = b;
+			}
+		}
+	}
+
 	// The water's voxels and volume (out[0], out[1]) and the lava's voxels
 	// (out[2]) over the world; with wake, the water's with room under or
 	// beside them woken (the count woken)
@@ -1951,6 +1986,7 @@ struct Module: public interface::Module, public PlayersHost,
 			});
 			log_i(MODULE, "skeldat: water: %zu voxels, %zu volume; %zu lava voxels; "
 					"%zu edge drains, %zu off the line", n[0], n[1], n[2], n[3], n[4]);
+			report_pools();
 		}
 		if(m_furnaces.report)
 			m_furnaces.report_lanterns();

@@ -53,6 +53,14 @@ static const int FLAT_OVER_WATER = 4, FLAT_TREE_CLEAR = 24, FLAT_CAVE_ROOF = 4;
 // at least RIVER_FALL from the inlet to the outlet
 static const int RIVER_DEPTH = 2, RIVER_BANK = RIVER_DEPTH + 1, RIVER_FALL = 8,
 		TWO_RIVERS_FROM = 512;
+// [SKELDAT_RIVER_RIFFLES] Riffles: where a noise along a river's path is
+// over RIFFLE_THRESHOLD the bed rises to RIFFLE_UNDER under the water's
+// intended top; the noise's spread from the rivers' whole length, about
+// RIFFLES_PER_MAP on the map; none within RIFFLE_END of a river's ends.
+// simplified: the rise all or nothing (RIVER_DEPTH 2 leaves one voxel to
+// rise); a deeper river would want it to follow the noise
+static const float RIFFLES_PER_MAP = 3, RIFFLE_THRESHOLD = 0.35f;
+static const int RIFFLE_UNDER = 1, RIFFLE_END = 16;
 // The lake: its bed SEA_DEPTH under the line at the middle; the edge
 // raised but for LAKE_GAP of the perimeter. The sea: the edge's
 // SEA_ZONE of the half width pushed to SEA_DEPTH under the line, an
@@ -165,6 +173,10 @@ static const int16_t NO_WATER = -32768;
 // every half voxel, and its bed's height along it
 struct River {
 	std::vector<float> x, z, bed;
+	// [SKELDAT_RIVER_RIFFLES] The noise's spread, and a riffle under the
+	// point (on the path's line)
+	float riffle_spread = 1;
+	std::vector<uint8_t> riffle;
 };
 
 // The ground's height a column, float; x and z from -half to half - 1;
@@ -332,6 +344,36 @@ inline std::vector<River> plan_rivers(const Params &p, const Heightmap &m)
 		out.push_back(river);
 	}
 	return out;
+}
+
+// [SKELDAT_RIVER_RIFFLES] Whether the river k's channel rises d off its
+// path at the point i: the noise along the path (half a voxel a point), a
+// little of d in it for an uneven crest
+inline bool riffle_at(const River &r, int k, size_t i, float d, uint32_t seed)
+{
+	const float s = i * 0.5f;
+	if(s < RIFFLE_END || s > (r.x.size() - 1) * 0.5f - RIFFLE_END)
+		return false;
+	return value2(s / r.riffle_spread, 0.5f + 0.08f * d, seed + 6007 +
+			(uint32_t)k * 31) > RIFFLE_THRESHOLD;
+}
+// The spread: one-octave value noise is over the threshold in runs about
+// q (1 - q) a lattice cell, q its share over it; 1.4 more for the ends
+// left out and the runs that merge (a mean of 3.08 riffles over 36 maps
+// measured, 1 to 6 a map)
+inline void plan_riffles(std::vector<River> &rivers, uint32_t seed)
+{
+	float len = 0;
+	for(const River &r : rivers)
+		len += (r.x.size() - 1) * 0.5f;
+	const float q = (1 - RIFFLE_THRESHOLD) / 2;
+	for(size_t k = 0; k < rivers.size(); k++){
+		River &r = rivers[k];
+		r.riffle_spread = len * q * (1 - q) / RIFFLES_PER_MAP / 1.4f;
+		r.riffle.assign(r.x.size(), 0);
+		for(size_t i = 0; i < r.x.size(); i++)
+			r.riffle[i] = riffle_at(r, (int)k, i, 0, seed);
+	}
 }
 
 // The channel's and the valley's half widths: 1.5..3 and 12..24 by the
@@ -559,6 +601,7 @@ inline Heightmap make_heightmap(const Params &p)
 	const float ch = channel_half(w), vh = valley_half(w);
 	if(p.form == RIVERS){
 		rivers = plan_rivers(p, m);
+		plan_riffles(rivers, p.seed);
 		// The valley: the channel's bed, its banks rising from RIVER_BANK
 		// over it
 		for(const River &river : rivers)
@@ -634,6 +677,16 @@ inline Heightmap make_heightmap(const Params &p)
 	for(float &v : m.h)
 		v = std::min((float)p.top - 8, std::max((float)p.bottom + 8, v));
 	if(p.form == RIVERS){
+		// [SKELDAT_RIVER_RIFFLES] A channel column's riffle by its nearest
+		// point, raised after its water top is set
+		std::vector<float> near(m.h.size(), 1e9f);
+		std::vector<uint8_t> rise(m.h.size(), 0);
+		for(size_t k = 0; k < rivers.size(); k++)
+			along(m, rivers[k], ch, [&](int x, int z, size_t i, float d){
+				const size_t c = m.index(x, z);
+				if(d < near[c])
+					near[c] = d, rise[c] = riffle_at(rivers[k], (int)k, i, d, p.seed);
+			});
 		for(const River &river : rivers)
 			along(m, river, ch, [&](int x, int z, size_t i, float){
 				const size_t c = m.index(x, z);
@@ -662,6 +715,9 @@ inline Heightmap make_heightmap(const Params &p)
 		for(size_t c = 0; c < m.h.size(); c++)
 			if(bank[c] > -1e9f)
 				m.h[c] = bank[c];
+		for(size_t c = 0; c < m.h.size(); c++)
+			if(rise[c])
+				m.h[c] = m.water[c] - RIFFLE_UNDER;
 	} else if(p.form == LAKE || p.form == SEA){
 		const int line = p.water_level;
 		std::vector<size_t> seeds;
@@ -910,6 +966,30 @@ int main()
 					drains, rivers[0].bed.front(), rivers[0].bed.back());
 		assert(springs > 0 && drains > 0);
 	}
+	// [SKELDAT_RIVER_RIFFLES] Rivers at 128, 256 and 1024, seeds 1-4: 1 to
+	// 6 riffles on a map and 2.5 to 4 on the mean, none at the ends, their
+	// columns' ground RIFFLE_UNDER under the water's top
+	size_t riffles = 0;
+	for(int half : {64, 128, 512})
+		for(uint32_t seed = 1; seed <= 4; seed++){
+			Params p;
+			p.seed = seed, p.half = half, p.form = RIVERS;
+			const Heightmap m = make_heightmap(p);
+			size_t n = 0, raised = 0;
+			for(const River &r : m.rivers){
+				for(size_t i = 0; i < r.riffle.size(); i++)
+					n += r.riffle[i] && (i == 0 || !r.riffle[i - 1]);
+				assert(!r.riffle.front() && !r.riffle.back());
+			}
+			for(size_t c = 0; c < m.h.size(); c++)
+				if((m.flags[c] & CHANNEL) && std::floor(m.h[c]) == m.water[c] - RIFFLE_UNDER)
+					raised++;
+			printf("mapgen: rivers at %d, seed %u: %zu riffles, %zu columns\n",
+					2 * half, seed, n, raised);
+			assert(n >= 1 && n <= 6 && raised > 0);
+			riffles += n;
+		}
+	assert(riffles >= 30 && riffles <= 48);
 	// A sea's edge columns water over 90% of the perimeter, a lake's dry
 	// over 7/8, at 256, seeds 1-4
 	for(int form : {LAKE, SEA})
