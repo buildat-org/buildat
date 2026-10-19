@@ -289,6 +289,7 @@ function ObjectRef:set_properties(props)
 		end
 		o.props[k] = v
 	end
+	o.look_dirty = true
 	if props.hp_max and o.hp > props.hp_max then
 		o.hp = props.hp_max
 	end
@@ -459,6 +460,7 @@ function ObjectRef:set_sprite(start_frame, num_frames, framelength, select_x_by_
 		local f = start_frame or {x = 0, y = 0}
 		o.sprite = {x = math.floor(tonumber(f.x) or 0),
 				y = math.floor(tonumber(f.y) or 0)}
+		o.look_dirty = true
 	end
 end
 
@@ -473,6 +475,7 @@ function ObjectRef:set_animation(frame_range, frame_speed, frame_blend, frame_lo
 		o.animation = {x = range.x or 1, y = range.y or 1,
 				speed = frame_speed or 15, blend = frame_blend or 0,
 				loop = frame_loop ~= false}
+		o.look_dirty = true
 	end
 end
 
@@ -486,6 +489,7 @@ function ObjectRef:set_animation_frame_speed(frame_speed)
 	local s = tonumber(frame_speed)
 	if o and o.animation and s then
 		o.animation.speed = s > 0 and 2 ^ (math.floor(math.log(s) / math.log(2) * 4 + 0.5) / 4) or 0
+		o.look_dirty = true
 	end
 end
 
@@ -3576,22 +3580,39 @@ local function show_objects(dtime)
 		return
 	end
 	objects_due = OBJECTS_INTERVAL
-	-- Every object's record and look once, then each player's share
+	local range = object_send_range()
+	local here = {}
+	for _, o in pairs(objects) do
+		if o.player_name then
+			here[o.player_name] = o.pos
+		end
+	end
+	-- Within some player's range ([REWORK_1019_PERF] luanti 8): the rest
+	-- cost a distance per player and nothing else
+	local function wanted(at)
+		for _, p in pairs(here) do
+			local dx, dy, dz = at.x - p.x, at.y - p.y, at.z - p.z
+			if dx * dx + dy * dy + dz * dz <= range * range then
+				return true
+			end
+		end
+		return false
+	end
+	-- Every wanted object's record and look once, then each player's share
 	local recs = {}
 	for id, o in pairs(objects) do
 		local box = o.props.collisionbox or DEFAULT_PROPERTIES.collisionbox
 		if o.props.is_visible == false then
 			box = nil
 		end
-		if box then
+		local at = box and drawn_pos_of(o, 0)
+		if at and wanted(at) then
 			-- The node is at the middle of the box and scaled to its size,
 			-- and a zero side would be a node nobody can see anyway
 			local sx = math.max(box[4] - box[1], 0.05)
 			local sy = math.max(box[5] - box[2], 0.05)
 			local sz = math.max(box[6] - box[3], 0.05)
-			local at = drawn_pos_of(o, 0)
 			local a = o.attached_to
-			local kind, texture, detail = appearance_of(o)
 			-- Whether a ray may hit it: Luanti's pointable. VoxeLibre's
 			-- wieldview rides at its player's feet with pointable false,
 			-- and a client that did not know stood punching it instead of
@@ -3604,20 +3625,30 @@ local function show_objects(dtime)
 			-- is aimed at and framed. A model and a sprite are drawn at
 			-- the position itself, as Luanti draws them. In the look, which
 			-- goes out when it changes, rather than in every packet.
-			local sel = o.props.selectionbox or box
-			local look = {kind, texture, detail or "",
-				(o.props.pointable ~= false) and "1" or "0",
-				string.format("%g %g %g %g %g %g %g %g %g",
-					(box[1] + box[4]) / 2, (box[2] + box[5]) / 2,
-					(box[3] + box[6]) / 2, sel[1] or 0, sel[2] or 0,
-					sel[3] or 0, sel[4] or 0, sel[5] or 0, sel[6] or 0)}
-			local was = sent_appearance[id]
-			if not was or was[1] ~= look[1] or was[2] ~= look[2] or
-					was[3] ~= look[3] or was[4] ~= look[4] or
-					was[5] ~= look[5] then
-				sent_appearance[id] = look
-			else
-				look = was
+			--
+			-- Made again only when set_properties, set_sprite or an
+			-- animation setter marked it dirty ([REWORK_1019_PERF] luanti
+			-- 8). simplified: a property table a mod changes in place after
+			-- handing it over is not seen until its next setter call
+			local look = sent_appearance[id]
+			if not look or o.look_dirty then
+				o.look_dirty = false
+				local kind, texture, detail = appearance_of(o)
+				local sel = o.props.selectionbox or box
+				look = {kind, texture, detail or "",
+					(o.props.pointable ~= false) and "1" or "0",
+					string.format("%g %g %g %g %g %g %g %g %g",
+						(box[1] + box[4]) / 2, (box[2] + box[5]) / 2,
+						(box[3] + box[6]) / 2, sel[1] or 0, sel[2] or 0,
+						sel[3] or 0, sel[4] or 0, sel[5] or 0, sel[6] or 0)}
+				local was = sent_appearance[id]
+				if not was or was[1] ~= look[1] or was[2] ~= look[2] or
+						was[3] ~= look[3] or was[4] ~= look[4] or
+						was[5] ~= look[5] then
+					sent_appearance[id] = look
+				else
+					look = was
+				end
 			end
 			recs[#recs + 1] = {id = id, at = at, look = look, v = {id,
 				at.x + (box[1] + box[4]) / 2,
@@ -3646,13 +3677,6 @@ local function show_objects(dtime)
 	for id, _ in pairs(sent_appearance) do
 		if objects[id] == nil then
 			sent_appearance[id] = nil
-		end
-	end
-	local range = object_send_range()
-	local here = {}
-	for _, o in pairs(objects) do
-		if o.player_name then
-			here[o.player_name] = o.pos
 		end
 	end
 	for name in pairs(sent_to) do
