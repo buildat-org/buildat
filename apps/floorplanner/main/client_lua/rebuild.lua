@@ -593,6 +593,7 @@ do
 		local p = E.doc.ents[entry].ints
 		local node = P.lamps:CreateChild("lamp")
 		E.built[#E.built + 1] = node
+		M.own_node(node)
 		node.position = magic.Vector3(W(x), W(y), W(z))
 		local light = node:CreateComponent("Light")
 		light.lightType = magic.LIGHT_POINT
@@ -613,6 +614,7 @@ build_lamps = function()
 		return
 	end
 	for id, it in pairs(E.inst_data) do
+		M.geo_owner = id
 		if lamp_on(id) and not it.hosted then
 			local def = E.doc.ents[it.def].ints
 			if it.voxel then
@@ -651,6 +653,7 @@ build_lamps = function()
 			end
 		end
 	end
+	M.geo_owner = nil
 end
 
 end
@@ -1484,9 +1487,21 @@ function M.lap(name)
 	M.laps[name] = (M.laps[name] or 0) + (t - M.lap_t) / 1000
 	M.lap_t = t
 end
+-- [FP_MOVE_FAST] The nodes built for an instance alone, which a drag of it
+-- moves (M.rebuild_light): its box or stairs, its caps and its lamp's
+-- light; M.geo_owner the instance being built, for geometry()
+function M.own_node(node)
+	local id = M.geo_owner
+	if id then
+		local l = E.inst_nodes[id] or {}
+		l[#l + 1] = node
+		E.inst_nodes[id] = l
+	end
+end
 local function build_layout(seen_voxels, wells)
 	E.solids = {}
 	E.wall_data = {}
+	E.inst_nodes = {}
 	for _, e in ipairs(of_type("wall")) do
 		local w = e.ints
 		local ax, az = node_pos(w.a)
@@ -1511,6 +1526,7 @@ local function build_layout(seen_voxels, wells)
 	local function geometry(parent)
 		local node = parent:CreateChild("")
 		E.built[#E.built + 1] = node
+		M.own_node(node)
 		local g = {node = node}
 		TRI_LISTS[g] = {}
 		return g, node
@@ -1719,6 +1735,8 @@ local function build_layout(seen_voxels, wells)
 		kind = it.hosted and "openings" or "objects"
 		local def = E.doc.ents[it.def].ints
 		local e = E.doc.ents[id].ints
+		M.geo_owner = (def.kind == KIND.box or def.kind == KIND.stairs) and id
+				or nil
 		local occ, a, b = M.inst_occlusion(it)
 		M.tri_occ = occ
 		-- A door's or a window's faces each their own room (commit):
@@ -1782,6 +1800,7 @@ local function build_layout(seen_voxels, wells)
 		end
 	end
 	M.tri_occ, M.tri_occ_fn, M.tri_sides = 0, occ_fn, nil
+	M.geo_owner = nil
 	-- A floor is something to stand on, when walking up to another layout
 	for _, r in pairs(E.room_data) do
 		for _, pts in ipairs(r.floor or {}) do
@@ -1930,7 +1949,8 @@ rebuild = function()
 	-- A slow one in the log, by its parts, for what a drag costs
 	-- ([FP_DRAG_COST]); a drag rebuilds each frame
 	local ms = (buildat.get_time_us() - t0) / 1000
-	if ms > 30 and M.drag_is_light(S.drag) then
+	local light = M.drag_is_light(S.drag)
+	if light == "moved" or (light and ms > 30) then
 		S.drag.light = true
 	end
 	if M.probe_what then
@@ -1951,22 +1971,61 @@ end
 -- of it only places the instances again, which the plan view's symbols,
 -- the outlines and the gaps are drawn from; the walls' holes and the 3D
 -- meshes stay where they were until the release (end_drag rebuilds)
+-- **[FP_MOVE_FAST] A drag of boxes, stairs and voxel volumes alone moves
+-- their nodes** ("moved", at once): each frame the instances placed again
+-- and their own nodes (E.inst_nodes, a volume's mesh) put by how far they
+-- went, the rest of the scene kept until the release. "hosted" with a
+-- door or a window among them, the rule above.
+-- simplified: a moved stair does not cut the floors over it again until
+-- the release; another client's preview still rebuilds in full
 function M.drag_is_light(d)
 	if not d or d.kind ~= "move" or next(d.nodes) or not next(d.inst) then
 		return false
 	end
+	local hosted = false
 	for id in pairs(d.inst) do
 		local it = E.inst_data[id]
-		if not (it and it.hosted) then
+		local kind = it and E.doc.ents[it.def].ints.kind
+		if not it or not (it.hosted or kind == KIND.box or kind == KIND.stairs or
+				kind == KIND.voxel) then
 			return false
 		end
+		hosted = hosted or it.hosted
 	end
-	return true
+	return hosted and "hosted" or "moved"
 end
 function M.rebuild_light()
+	local d = S.drag
+	-- Where the moved ones' nodes were built, before the drag's first
+	-- light frame (a position copied: the property follows the node)
+	if d and not d.bases then
+		d.bases = {}
+		for id in pairs(d.inst or {}) do
+			local it = E.inst_data[id]
+			local nodes = {}
+			for _, n in ipairs(E.inst_nodes and E.inst_nodes[id] or {}) do
+				local p = n.position
+				nodes[#nodes + 1] = {n, magic.Vector3(p.x, p.y, p.z)}
+			end
+			d.bases[id] = it and {x = it.x, z = it.z, nodes = nodes}
+		end
+	end
 	-- The current layout's, which rebuild() made last
 	build_inst_data()
 	place.layers[#place.layers].insts = E.inst_data
+	for id, b in pairs(d and d.bases or {}) do
+		local it = E.inst_data[id]
+		if it then
+			local ox, oz = W(it.x - b.x), W(it.z - b.z)
+			for _, nb in ipairs(b.nodes) do
+				nb[1].position = magic.Vector3(nb[2].x + ox, nb[2].y, nb[2].z + oz)
+			end
+			local vm = voxel_meshes[id]
+			if vm and it.ox then
+				vm.node.position = magic.Vector3(W(it.ox), W(it.oy), W(it.oz))
+			end
+		end
+	end
 	S.dirty = false
 end
 end
@@ -2039,6 +2098,7 @@ end
 function M.pbr_now()
 	return S.lighting ~= "unlit" and S.view ~= "2d"
 end
+M.MOVE_LIGHT_WAIT = 0.3
 function M.apply_daylight()
 	local pbr = M.pbr_now()
 	local st = settings()
@@ -2055,13 +2115,20 @@ function M.apply_daylight()
 	end
 	local key = string.format("%s %.1f %d %d %d %d %d %d", tostring(pbr), minute,
 			st.north, st.latitude, day, M.sun().ground, st.treeline, M.sun().sky or 0)
-	if key == S.daylight_key then
+	-- [FP_MOVE_FAST] While things move -- a drag, or key steps less than
+	-- MOVE_LIGHT_WAIT apart -- the lighting stays as it was (the rooms'
+	-- bounce and the bake are the cost), redone that long after the last
+	if key == S.daylight_key or (pbr and M.sky and M.move_t and
+			buildat.get_time_us() - M.move_t < M.MOVE_LIGHT_WAIT * 1e6) then
 		if pbr and M.sky then
 			M.sky:flush()
 		end
 		return
 	end
 	S.daylight_key = key
+	if pbr and M.probe_what then
+		log:info("fp daylight: computed in " .. S.view)
+	end
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetShaderParameter("Pbr", pbr and 1 or 0)
 	end

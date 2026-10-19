@@ -80,14 +80,29 @@ function doc.set_editing(on)
 			or 0}, {"object", {"on", "byte"}}))
 end
 
+-- [FP_MOVE_FAST] Each type's entities by id, made on the first call after
+-- a change to which entities there are (doc.types_changed); a call gets
+-- its own copy of the list
+local by_type = nil
+function doc.types_changed()
+	by_type = nil
+end
 function doc.of_type(type)
-	local out = {}
-	for id, e in pairs(doc.ents) do
-		if e.type == type then
-			out[#out + 1] = e
+	if not by_type then
+		by_type = {}
+		for _, e in pairs(doc.ents) do
+			local l = by_type[e.type] or {}
+			l[#l + 1] = e
+			by_type[e.type] = l
+		end
+		for _, l in pairs(by_type) do
+			table.sort(l, function(a, b) return a.id < b.id end)
 		end
 	end
-	table.sort(out, function(a, b) return a.id < b.id end)
+	local out = {}
+	for k, e in ipairs(by_type[type] or {}) do
+		out[k] = e
+	end
 	return out
 end
 
@@ -100,8 +115,10 @@ end
 -- in it may refer to; done(error, placeholders) gets the real ids.
 local OP_CODES = {create = 0, set = 1, delete = 2, restore = 3}
 local LAYERED = {node = true, instance = true, image = true}
--- kind: nil for an edit, "undo" or "redo" for what undoes one
-function doc.send(ops, done, kind)
+-- kind: nil for an edit, "undo" or "redo" for what undoes one. apply
+-- ([FP_MOVE_FAST]): its sets put into the replica at once, as the server
+-- will, so the change is shown without waiting for it (doc.apply_sets)
+function doc.send(ops, done, kind, apply)
 	local seq = doc.next_seq
 	doc.next_seq = seq + 1
 	local wire = {}
@@ -117,7 +134,7 @@ function doc.send(ops, done, kind)
 				ints = ints, strs = e.strs or {}, lists = e.lists or {}}}
 	end
 	doc.pending[seq] = {kind = kind, merge = doc.merge_tag,
-			sent = buildat.get_time_us(),
+			sent = buildat.get_time_us(), before = apply and doc.apply_sets(ops),
 			done = done or function(err)
 		if err ~= "" then
 			doc.notice("Refused: " .. err)
@@ -144,6 +161,7 @@ end
 buildat.sub_packet("fp:snapshot", function(data)
 	local ents = cereal.binary_input(data, {"array", ENTITY})
 	doc.ents = {}
+	doc.types_changed()
 	local changed = {}
 	for _, e in ipairs(ents) do
 		doc.ents[e.id] = e
@@ -175,6 +193,50 @@ local function copy(t)
 		o[k] = type(v) == "table" and copy(v) or v
 	end
 	return o
+end
+
+local PARTS = {"ints", "strs", "lists"}
+-- Whether two entities are the same, field for field
+local function same_ent(a, b)
+	if not a or not b or a.type ~= b.type then
+		return false
+	end
+	for _, part in ipairs(PARTS) do
+		for k, v in pairs(a[part]) do
+			if not same(b[part][k], v) then
+				return false
+			end
+		end
+		for k in pairs(b[part]) do
+			if a[part][k] == nil then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- [FP_MOVE_FAST] A batch's sets into the replica before the server has
+-- them (doc.send's apply): id -> the entity as it was, for the undo's
+-- inverse and to put back if the batch is refused. Nobody is notified;
+-- the caller rebuilds what it shows. The server's echo of the same values
+-- notifies nobody either (fp:changes).
+-- simplified: a refusal puts back the entity as it was before this
+-- batch, over a later local batch's change to it
+function doc.apply_sets(ops)
+	local before = {}
+	for _, op in ipairs(ops) do
+		local e = op.op == "set" and doc.ents[op.ent.id]
+		if e then
+			before[e.id] = before[e.id] or copy(e)
+			for _, part in ipairs(PARTS) do
+				for k, v in pairs(op.ent[part] or {}) do
+					e[part][k] = type(v) == "table" and copy(v) or v
+				end
+			end
+		end
+	end
+	return before
 end
 
 -- **Edits that are one undo step** (user, 2026-10-06: the movement keys'
@@ -220,10 +282,12 @@ end
 -- replica before it: what it deleted is restored, what it made is
 -- deleted, and each changed field is set back. `expect` is what a field
 -- was left at, so an undo can skip one somebody else has changed since.
-local function inverse_of(c)
+-- before: the entities as they were before a batch put into the replica
+-- at once (doc.apply_sets)
+local function inverse_of(c, before)
 	local restores, sets, deletes = {}, {}, {}
 	for _, e in ipairs(c.ents) do
-		local old = doc.ents[e.id]
+		local old = before and before[e.id] or doc.ents[e.id]
 		if not old then
 			deletes[#deletes + 1] = {op = "delete", ent = {id = e.id}}
 		else
@@ -342,21 +406,28 @@ buildat.sub_packet("fp:changes", function(data)
 	local c = cereal.binary_input(data, CHANGES)
 	local own = c.seq >= 0 and doc.pending[c.seq]
 	if own then
-		own.inverse = inverse_of(c)
+		own.inverse = inverse_of(c, own.before)
 		-- [FP_MOVE_FAST] The round trip, for a check's measures
 		if doc.on_round_trip then
 			doc.on_round_trip((buildat.get_time_us() - own.sent) / 1000)
 		end
 	end
+	-- What the replica has already (doc.apply_sets) is no change
 	local changed = {}
 	for _, e in ipairs(c.ents) do
+		if not same_ent(doc.ents[e.id], e) then
+			changed[#changed + 1] = e.id
+		end
 		doc.ents[e.id] = e
-		changed[#changed + 1] = e.id
 	end
 	for _, id in ipairs(c.deleted) do
 		doc.ents[id] = nil
 	end
-	notify(changed, c.deleted)
+	-- The lists hold the entities' tables, which these replaced
+	doc.types_changed()
+	if #changed > 0 or #c.deleted > 0 then
+		notify(changed, c.deleted)
+	end
 end)
 
 buildat.sub_packet("fp:batch_result", function(data)
@@ -365,6 +436,18 @@ buildat.sub_packet("fp:batch_result", function(data)
 	doc.pending[r.seq] = nil
 	if not p then
 		return
+	end
+	-- A refused batch that was shown at once is put back
+	if r.error ~= "" and p.before and next(p.before) then
+		local ids = {}
+		for id, e in pairs(p.before) do
+			if doc.ents[id] then
+				doc.ents[id] = e
+				ids[#ids + 1] = id
+			end
+		end
+		doc.types_changed()
+		notify(ids, {})
 	end
 	-- An edit is undone by its inverse; an undo is redone by its own, and
 	-- a redo undone again

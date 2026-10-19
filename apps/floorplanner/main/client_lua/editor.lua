@@ -1216,7 +1216,7 @@ do
 		return id
 	end
 
-	send = function(ops, done)
+	send = function(ops, done, apply)
 		doc.send(ops, function(err, placeholders)
 			for ph, id in pairs(placeholders) do
 				S.real[ph] = id
@@ -1227,7 +1227,7 @@ do
 			if done then
 				done(err)
 			end
-		end)
+		end, nil, apply)
 	end
 
 	local function wall_fields(w)
@@ -4154,6 +4154,7 @@ refresh_panels = function()
 		return
 	end
 	S.panels_stale = false
+	S.props_stale = false
 	local t0 = buildat.get_time_us()
 	build_toolbar()
 	-- Viewing ([FP_VIEW_EDIT]): the panels show everything and change
@@ -4168,6 +4169,19 @@ refresh_panels = function()
 	end
 end
 M.refresh_panels = function() refresh_panels() end
+-- [FP_MOVE_FAST] A move's: only the selection's props show what it
+-- changed (the toolbar 20 ms and the palette 30 ms in the Torkkola plan,
+-- the props 3-14)
+function M.refresh_props()
+	S.props_stale = false
+	local t0 = buildat.get_time_us()
+	panel.view_only = not doc.can("edit")
+	build_props()
+	panel.view_only = false
+	if M.probe_what then
+		M.probe_add("panels", (buildat.get_time_us() - t0) / 1000)
+	end
+end
 
 -- The pause menu ([FP_EDITOR_MODULES]): what it reads of this file
 E.pause_win = nil
@@ -4597,8 +4611,21 @@ do
 	local function end_drag()
 		local d = S.drag
 		-- Built with the drag's last move, which this frame may not have
+		-- (a key step's never has), for the openings' places kept_ops
+		-- reads: only the instances' when no node moves ([FP_MOVE_FAST]).
+		-- A full build of it is the moved state, which the batch shown at
+		-- once then needs no rebuild for (M.send_shown)
+		local full = not d.light
 		if d.kind == "node" or d.kind == "move" then
-			rebuild()
+			M.move_t = buildat.get_time_us()
+		end
+		if (d.kind == "node" or d.kind == "move") and (S.dirty or d.keys) then
+			full = not (d.kind == "move" and not next(d.nodes))
+			if full then
+				rebuild()
+			else
+				M.rebuild_light()
+			end
 		end
 		S.drag = nil
 		S.dirty = true
@@ -4664,7 +4691,7 @@ do
 			else
 				local ops = {{op = "set", ent = {id = d.id, ints = {x = d.x, z = d.z}}}}
 				kept_ops(d, ops)
-				send(ops)
+				M.send_shown(ops, full)
 			end
 		elseif d.dx ~= 0 or d.dz ~= 0 or d.rehost then
 			local ops = {}
@@ -4693,8 +4720,18 @@ do
 							ints = {x = i.x + d.dx, z = i.z + d.dz}}}
 				end
 			end
-			send(ops)
+			M.send_shown(ops, full)
 		end
+	end
+
+	-- [FP_MOVE_FAST] A move's batch shown at once: into the replica, a
+	-- rebuild next frame unless the scene was built in full with the move
+	-- (built), and the props; the server's echo of it changes nothing, and
+	-- a refusal puts it back (doc.apply_sets)
+	function M.send_shown(ops, built)
+		send(ops, nil, true)
+		S.dirty = not built
+		S.props_stale = true
 	end
 
 	-- **The movement keys move the selection** in the plan view (a
@@ -4716,10 +4753,11 @@ do
 			return false
 		end
 		local d = {kind = "move", inst = inst, nodes = nodes, dx = dx, dz = dz,
-				moved = true}
+				moved = true, keys = true}
 		M.drag_slides(d, sel)
 		M.slide_deltas(d)
 		S.drag = d
+		M.move_t = buildat.get_time_us()
 		if M.probe_what then
 			M.probe_start(next(inst) or next(nodes))
 		end
@@ -7223,6 +7261,10 @@ function M.update(dt)
 	if M.probe_what then
 		M.probe_frame()
 	end
+	-- A move's time, for the lighting it defers (M.apply_daylight)
+	if S.drag and (S.drag.kind == "move" or S.drag.kind == "node") then
+		M.move_t = buildat.get_time_us()
+	end
 	M.save_view(dt)
 	cam3d.fov = M.fov_for(S.view == "walk" and S.walk_fov or 60)
 	-- The floors above hidden in 3D, when the layouts menu says so. Deep:
@@ -7284,6 +7326,8 @@ function M.update(dt)
 	E.fit_pause()
 	if S.panels_stale and not doc.typing() then
 		refresh_panels()
+	elseif S.props_stale and not doc.typing() then
+		M.refresh_props()
 	end
 	label_i = 0
 	-- No hints and no highlights while a viewport is shown clean
@@ -7446,8 +7490,9 @@ function M.start(d)
 		log:info("A wall made by the drive")
 	end)
 	-- [FP_MOVE_FAST] For a check: "event fp_select <what> [view]", what
-	-- being furniture (a box), door or node (a wall's), the first of it in
-	-- the current layout by id selected (a node by the Nodes tool), the
+	-- being furniture (the last box on the floor), door or node (a wall's;
+	-- the first) in the current layout by id selected (a node by the Nodes
+	-- tool), the
 	-- view (2d or 3d) picked and both cameras on it -- the plan view
 	-- centred there, the 3D one 2.2 m over its floor looking down -- and
 	-- the moves from then on measured (M.probe_frame)
@@ -7462,9 +7507,11 @@ function M.start(d)
 			local def = what ~= "node" and doc.ents[i.def]
 			if (i.layout or 0) == (doc.layout or 0) and (what == "node" or
 					def and def.ints.kind == (what == "door" and KIND.door or
-					KIND.box)) then
+					KIND.box) and (what == "door" or (i.offset or 0) == 0)) then
 				pick = e
-				break
+				if what ~= "furniture" then
+					break
+				end
 			end
 		end
 		if not pick then
@@ -7490,6 +7537,27 @@ function M.start(d)
 		S.dirty = true
 		refresh_panels()
 		log:info(string.format("fp_select: %s %d at %d %d", what, pick.id, x, z))
+	end)
+	-- "event fp_where": the selection's place logged, "fp_where: <id> <x>
+	-- <z> <along>", with the grid step; "event fp_bad_move": a move of it
+	-- 1000 mm in x shown at once in a batch the server refuses (a set of
+	-- an entity there is none of), which puts it back
+	local function probe_id()
+		return S.tool == "node" and next(S.nodes) or S.primary
+	end
+	magic.SubscribeToEvent("command_seq:fp_where", function()
+		local e = doc.ents[probe_id() or 0]
+		if e then
+			log:info(string.format("fp_where: %d %d %d %d grid %d", e.id, e.ints.x,
+					e.ints.z, e.ints.along or 0, grid_step()))
+		end
+	end)
+	magic.SubscribeToEvent("command_seq:fp_bad_move", function()
+		local e = doc.ents[probe_id() or 0]
+		if e then
+			M.send_shown({{op = "set", ent = {id = e.id, ints = {x = e.ints.x + 1000}}},
+					{op = "set", ent = {id = 999999999, ints = {x = 0}}}})
+		end
 	end)
 	magic.SubscribeToEvent("MouseButtonDown", live(function(_, data)
 		-- A viewport's hidden menus come back, and the click does nothing
