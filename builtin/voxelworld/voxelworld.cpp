@@ -4335,7 +4335,9 @@ struct CInstance: public voxelworld::Instance
 			update_skylight_now();
 		const int64_t t_light = interface::os::time_us();
 
-		if(m_sections_with_loaded_buffers.empty())
+		// Nothing written: most accesses only read, and the two walks
+		// below are over every loaded buffer ([REWORK_1019_PERF] engine 9)
+		if(m_sections_with_loaded_buffers.empty() || m_total_buffers_dirty == 0)
 			return;
 		log_d(MODULE, "Committing %zu dirty buffers in %zu sections",
 				m_total_buffers_dirty,
