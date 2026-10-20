@@ -536,6 +536,9 @@ do
 	end
 	served_globals.buildat = view(t)
 end
+-- The exploit search walks it as a root of its own (sandbox_scan,
+-- [SANDBOX_HUNT_1019]). Trusted only.
+__buildat_served_globals = served_globals
 
 -- And require: the extensions as anyone gets them, but the network one
 -- without what is the user's alone -- the addresses they have been to,
