@@ -327,9 +327,9 @@ buildat.sub_packet("hillclimb:hill", function(data)
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
 		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0,
 		steep_var = v[16] or 0, circuit = v[17] or 0, width = v[18] or 40,
-		lane = v[19] or 7, switchbacks = v[20] or 50, bearing = v[21] or 80,
-		dig = v[22] or 2, power = v[23] or 100, grip = v[24] or 60,
-		stones = v[25] or 35}
+		lane = v[19] or 7, switchbacks = v[20] or 50, bearing = v[21] or 30,
+		dig = v[22] or 6, power = v[23] or 150, grip = v[24] or 60,
+		stones = v[25] or 20}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
@@ -1230,7 +1230,8 @@ local function drive_set(set)
 	end
 	local v = picks
 	local c = set.circuit and 1 or 0
-	-- A knob not in the set's key is at its default
+	-- A knob not in the set's key is at the old firm soil's (main.cpp's
+	-- KNOBS' old)
 	local params = string.format(
 			"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d",
 			v.seed, set.steep or v.steep, set.length or v.length,

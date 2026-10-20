@@ -64,6 +64,14 @@ declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
 	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23)
+# [HC_SOFT_DEFAULTS] The car's drives on the firm soil they were tuned on
+# (80 kPa, dig 2, 100%, 35%; a ranking key with no knob parts), not the
+# game's soft default
+firm_soil="BUILDAT_HILLCLIMB_BEARING=80 BUILDAT_HILLCLIMB_DIG=2
+	BUILDAT_HILLCLIMB_POWER=100 BUILDAT_HILLCLIMB_STONES=35"
+# The game's defaults: the variables empty
+default_soil="BUILDAT_HILLCLIMB_BEARING= BUILDAT_HILLCLIMB_DIG=
+	BUILDAT_HILLCLIMB_POWER= BUILDAT_HILLCLIMB_STONES="
 drive()
 {
 	local name=$1; shift
@@ -73,8 +81,9 @@ drive()
 	# The modules compiled once (warm, below), each drive a copy
 	[ -d "$t/warm/c" ] && [ "$name" != warm ] && mkdir -p "$t/$name" &&
 		cp -a "$t/warm/c" "$t/$name/c"
+	# shellcheck disable=SC2086 # the assignments, split
 	env BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_FEATURES=0 \
-		BUILDAT_HILLCLIMB_STEEP_VAR=0 "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
+		BUILDAT_HILLCLIMB_STEEP_VAR=0 $firm_soil "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
 		-C "$t/$name/c" -P $((port_base + PORT[$name])) -l 3 > "$t/$name.log" 2>&1
 }
 drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)"
@@ -177,7 +186,7 @@ b="$t/back.log"
 grep -aq "hillclimb: drive at .*, turn 2 next, lanes 0\( 4\)\?$" "$b" &&
 	! grep -aq "missed turn\|put back" "$b" && grep -aq "hillclimb: drive's lap 1 at" "$b" ||
 	fail "backed past turn 1 into lane 0: not there, marked or put back, or no lap ($b)"
-echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven; backing past a turn and on to a lap; a climb changed $firm voxels at the defaults, $soft_n at the softest set"
+echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven; backing past a turn and on to a lap; a climb changed $firm voxels on the firm soil, $soft_n on the softest"
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do
@@ -441,7 +450,7 @@ PY
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || { echo "PASS: (no display: the clients skipped)"; exit 0; }
 mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 {
-	local name=$1 vars="BUILDAT_HILLCLIMB_MODE=straight $2"; shift 2
+	local name=$1 vars="BUILDAT_HILLCLIMB_MODE=straight $firm_soil $2"; shift 2
 	mkdir -p "$t/$name"; cp -a "$t/warm/c" "$t/$name/c"
 	# shellcheck disable=SC2086 # the assignments, split
 	start_server "$t/$name.log" "STATUS Listening" 300 auto env $vars \
@@ -593,8 +602,9 @@ sent=$(grep -a "hillclimb: the hill menu sends params " "$t/pause.log" | sed 's/
 	fail "the hill menu: steepness ${steep:-none}, sent ${sent:-none} ($t/pause.log)"
 echo "  Escape: the menu, no input under it, settings and back, leave"
 # [HC_SOFT_GROUND] The hill menu's second page: the sand's firmness a step
-# up, made; the server's hill line has it
-mp_server ground_srv "BUILDAT_HILLCLIMB_FEATURES=0" -u launcher=1
+# up, made; the server's hill line has it. [HC_SOFT_DEFAULTS] On the
+# game's default soil
+mp_server ground_srv "BUILDAT_HILLCLIMB_FEATURES=0 $default_soil" -u launcher=1
 cat > "$t/ground.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 delay 2000
@@ -611,7 +621,7 @@ delay 500
 keypress Down
 delay 200
 keypress Return
-wait_log 3000 hillclimb: the hill menu: bearing 90
+wait_log 3000 hillclimb: the hill menu: bearing 40
 delay 300
 $(for i in 1 2 3 4 5; do echo keypress Down; echo delay 150; done)
 screenshot $t/ground_menu.png
@@ -623,9 +633,11 @@ C
 mp_client ground "$t/ground.cmds"
 wait $CLIENT || fail "the ground page's drive ($t/ground.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "hillclimb: the hill as it was made, seed .*; sand 90 kPa, dig 2, power 100%, grip 0.60, stones 35%" \
+grep -aq "hillclimb: the hill, seed .* voxels; sand 30 kPa, dig 6, power 150%, grip 0.60, stones 20%" \
+	"$t/ground_srv.log" || fail "not the default soil ($t/ground_srv.log)"
+grep -aq "hillclimb: the hill as it was made, seed .*; sand 40 kPa, dig 6, power 150%, grip 0.60, stones 20%" \
 	"$t/ground_srv.log" || fail "the ground page's firmness not made ($t/ground_srv.log)"
-echo "  the hill menu's ground page: the sand's firmness made 90 kPa"
+echo "  the default soil 30 kPa; the hill menu's ground page: the sand's firmness made 40 kPa"
 # [HC_HUD_LAYOUT] The accelerator bound to Up in the key store: the start
 # prompt names it, centred across at 75% down; driving, with turn 1
 # missed (a circuit's car started past it), the prompt says that alone

@@ -138,11 +138,16 @@ static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
 // slid), the engine's power (% of the gears' torque), grip (the tyres'
 // mu, hundredths) and the stones' looseness (% of a stone's front open
 // to come free; its bed's mu with it). Grip works against the ruts: a
-// tyre that slips less digs less. The defaults are ground.h's and car.h's.
+// tyre that slips less digs less. The defaults are ground.h's Soil and
+// half again car.h's torque ([HC_SOFT_DEFAULTS]: the user's playtested set;
+// 80 kPa, dig 2, 100% and 35% before).
 // simplified: one sand for the whole hill ([HILLCLIMB] 5's terrains)
-struct Knob { const char *name; int def, min, max; };
-static const Knob KNOBS[] = {{"bearing", 80, 20, 100}, {"dig", 2, 1, 8},
-		{"power", 100, 50, 200}, {"grip", 60, 40, 100}, {"stones", 35, 15, 50}};
+// `old`: the firm soil before [HC_SOFT_DEFAULTS], what a ranking key with
+// no part for the knob was driven on
+struct Knob { const char *name; int def, min, max, old; };
+static const Knob KNOBS[] = {{"bearing", 30, 20, 100, 80}, {"dig", 6, 1, 8, 2},
+		{"power", 150, 50, 200, 100}, {"grip", 60, 40, 100, 60},
+		{"stones", 20, 15, 50, 35}};
 static const int N_KNOBS = 5;
 struct Knobs
 {
@@ -158,7 +163,7 @@ struct Knobs
 		s.bearing = v[0] * 1000.0f;
 		s.dig_rate = (float)v[1];
 		s.open_front = v[4] / 100.0f;
-		s.mu_bed = d.mu_bed * v[4] / KNOBS[4].def;
+		s.mu_bed = d.mu_bed * (v[4] / 100.0f) / d.open_front;
 	}
 	void spec(car::Spec &s) const
 	{
@@ -167,12 +172,13 @@ struct Knobs
 			s.gear_torque[i] = d.gear_torque[i] * v[2] / 100.0f;
 		s.mu = v[3] / 100.0f;
 	}
-	// The ranking key's parts after "sand/": the ones off their defaults
+	// The ranking key's parts after "sand/": the ones off the old firm
+	// soil's, so the times driven on it keep their keys
 	ss_ key() const
 	{
 		ss_ k;
 		for(int i = 0; i < N_KNOBS; i++)
-			if(v[i] != KNOBS[i].def)
+			if(v[i] != KNOBS[i].old)
 				k += ss_(KNOBS[i].name) + itos(v[i]) + "/";
 		return k;
 	}

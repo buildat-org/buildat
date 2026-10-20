@@ -87,17 +87,18 @@ struct Grid: public car::Ground
 	}
 };
 
-// The sand's and the stones' numbers, tuned by driving
+// The sand's and the stones' numbers, tuned by driving; [HC_SOFT_DEFAULTS]
+// the user's playtested set (main.cpp's knobs; 80 kPa, dig 2, a bed's mu
+// 0.6 at 35% open before)
 struct Soil
 {
-	float bearing = 80000;  // Pa: a 2 t car's tyres at about 65 kPa do not
-	                        // sink, with 2 t aboard at about 90 they do
+	float bearing = 30000;  // Pa: a 2 t car's tyres at about 65 kPa sink
 	float sink_rate = 3;    // voxels a second at twice the bearing
-	float dig_rate = 2;     // voxels per metre the tread slides
+	float dig_rate = 6;     // voxels per metre the tread slides
 	float throw_m = 0.5f;   // past the tyre, where the dug sand lands
 	float stone_kg = 5.1f;  // a voxel of stone, 2600 kg/m^3
-	float mu_bed = 0.6f;    // a stone on its bed
-	float open_front = 0.35f; // of a stone's voxels, free along the push
+	float mu_bed = 0.6f * 0.20f / 0.35f; // a stone on its bed
+	float open_front = 0.20f; // of a stone's voxels, free along the push
 };
 
 struct Change { int x, y, z; Voxel v; };

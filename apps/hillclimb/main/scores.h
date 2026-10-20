@@ -56,7 +56,7 @@
 		else
 			snprintf(buf, sizeof buf, "%d degrees +-%d, %d m, %s", at("steep"),
 					at("var"), at("length"), cs(load));
-		// [HC_SOFT_GROUND] The knobs off their defaults
+		// [HC_SOFT_GROUND] The knobs off the old firm soil, which the key holds
 		ss_ name = buf;
 		for(int i = 0; i < N_KNOBS; i++){
 			auto it = k.p.find(KNOBS[i].name);
