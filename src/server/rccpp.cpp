@@ -171,6 +171,21 @@ struct CCompiler: public Compiler
 		// ([WIN8_START] 9)
 		exec_opts.output_path = out_path + ".compile.log";
 		int exit_status = interface::process::shell_exec(command, exec_opts);
+		// [WIN_PACKAGE_052] gcc's own start of one of its programs failing
+		// ("cannot execute 'as'" / "...cc1plus.exe': CreateProcess"), the
+		// same compiler having built the modules before it: Wine's
+		// process start, now and then (the v0.7.31 prebuild, the v0.7.52
+		// smoke). Once more, logged; a second failure is the failure.
+		if(exit_status != 0){
+			std::ifstream f(exec_opts.output_path);
+			const ss_ said((std::istreambuf_iterator<char>(f)),
+					std::istreambuf_iterator<char>());
+			if(said.find("cannot execute") != ss_::npos){
+				log_w(MODULE, "The compiler could not start a program of its "
+						"own; once more: %s", cs(out_path));
+				exit_status = interface::process::shell_exec(command, exec_opts);
+			}
+		}
 		if(exit_status != 0){
 			log_w(MODULE, "Compile failed (exit %i): %s", exit_status,
 					cs(command));

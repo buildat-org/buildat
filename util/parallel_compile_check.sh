@@ -6,7 +6,8 @@
 # [PARALLEL_COMPILE]: apps/sample_module_calls's modules, from an empty build cache,
 # compiled side by side; with the memory reserve raised past what any
 # machine has, one at a time, said so; and a module that does not compile
-# fails the start, naming it.
+# fails the start, naming it; a compiler's "cannot execute" is tried once
+# more ([WIN_PACKAGE_052]).
 #
 #   util/parallel_compile_check.sh
 set -u
@@ -43,4 +44,17 @@ echo "this does not compile" >> "$t/app/test2/test2.cpp"
 run "$t/b3" "$t/app" "$t/3.log" && fail "a broken module started"
 grep -q "Error compiling module test2" "$t/3.log" ||
 	fail "the failure does not name test2: $(grep -i "fail\|error" "$t/3.log" | tail -3)"
-echo "PASS: $n at once; one under the reserve; test2's error named"
+# [WIN_PACKAGE_052] A compiler that could not start a program of its own
+# once is run once more: the first compile says what Wine's gcc said
+cat > "$t/cxx" <<SH
+#!/bin/sh
+case "\$*" in *" -shared "*) mkdir "$t/cxx.once" 2>/dev/null && { echo "c++: fatal error: cannot execute 'cc1plus': CreateProcess: No such file or directory"; exit 1; } ;; esac
+exec c++ "\$@"
+SH
+chmod +x "$t/cxx"
+BUILDAT_UNCONFINED=1 timeout 300 "$b" --compile-only -m "$here/apps/sample_module_calls" \
+	-D "$t/user" -r "$t/b4" -c "$t/cxx" > "$t/4.log" 2>&1 ||
+	fail "a compiler's one failed start failed the start: $(grep -a "W " "$t/4.log" | tail -3)"
+grep -q "could not start a program of its own; once more" "$t/4.log" ||
+	fail "no retry said: $(grep -a "W " "$t/4.log" | tail -3)"
+echo "PASS: $n at once; one under the reserve; test2's error named; a failed start retried"
