@@ -6,7 +6,8 @@
 # three Luanti games installed for vanilla, each its own icon, and five
 # saves: one of each game, one of a game not installed and one with no
 # game id. A search for each save puts it first; its row's icon is its
-# game's, and vanilla's grass block for the last two.
+# game's, and vanilla's grass block for the last two. A fourth game's
+# icon a link out of its directory: not copied ([SECURITY_RUN_7]).
 #
 #   extensions/launch_menu/save_icon_check.sh
 set -u
@@ -23,6 +24,13 @@ def c(t,d): return struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d)
 sys.stdout.buffer.write(b'\x89PNG\r\n\x1a\n'+c(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+c(b'IDAT',zlib.compress(b'\0'+bytes([$RANDOM%256,10,20])))+c(b'IEND',b''))" \
 		> "$u/shared/vanilla/games/$g/menu/icon.png"
 done
+# [SECURITY_RUN_7] A fourth game whose icon is a link to a picture of the
+# user's own, outside its directory (an app's box writes there): not
+# copied into the cache, where any script would read its pixels
+mkdir -p "$u/shared/vanilla/games/delta/menu"
+printf 'title = delta\n' > "$u/shared/vanilla/games/delta/game.conf"
+cp "$u/shared/vanilla/games/alpha/menu/icon.png" "$t/private.png"
+ln -s "$t/private.png" "$u/shared/vanilla/games/delta/menu/icon.png"
 save() { # name gameid (empty: none)
 	mkdir -p "$u/apps/vanilla/saves/$1"
 	sqlite3 "$u/apps/vanilla/saves/$1/save.sqlite" \
@@ -54,4 +62,6 @@ for s in gone none; do
 	[ "$i" = "vanilla/launcher/grass_block.png" ] ||
 		fail "sv_$s shows \"$i\", not vanilla's grass block"
 done
-echo "PASS: each save shows its game's icon, the grass block without one"
+[ ! -e "$t/cache/installed_games/vanilla/delta.png" ] ||
+	fail "a game's icon linked out of its directory was copied into the cache"
+echo "PASS: each save shows its game's icon, the grass block without one; a linked icon not copied"

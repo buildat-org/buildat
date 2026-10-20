@@ -183,9 +183,37 @@
 				interface::fs::file_size(to) !=
 				interface::fs::file_size(from)){
 			interface::fs::create_directories(root+"/"+family);
-			if(!interface::fs::copy_file(from, to)){
-				log_w(MODULE, "installed_game_icon(): cannot copy %s",
-						cs(from));
+			// [SECURITY_RUN_7] The game's directory is an app's box's to
+			// write: a link there to a picture of the user's own was copied
+			// into a resource dir, where any script reads its pixels. Read
+			// without following one (open_dir_under), as storage is
+			bool ok = false;
+#ifdef _WIN32
+			ok = interface::fs::copy_file(from, to);
+#else
+			ss_ last;
+			const int dir = open_dir_under(g_client_config.get<ss_>(
+					"user_path"), "shared/"+family+"/games/"+name+
+					"/menu/icon.png", last);
+			const int fd = dir < 0 ? -1 : openat(dir, last.c_str(),
+					O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+			if(dir >= 0)
+				close(dir);
+			if(fd >= 0){
+				ss_ data;
+				char buf[65536];
+				ssize_t n;
+				while((n = read(fd, buf, sizeof buf)) > 0)
+					data.append(buf, n);
+				close(fd);
+				std::ofstream f(to, std::ios::binary);
+				f << data;
+				ok = n == 0 && (bool)f.flush();
+			}
+#endif
+			if(!ok){
+				log_w(MODULE, "installed_game_icon(): cannot copy %s (a link "
+						"is not followed)", cs(from));
 				return "";
 			}
 		}
