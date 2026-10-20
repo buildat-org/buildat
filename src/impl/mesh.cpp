@@ -4,6 +4,7 @@
 #include "interface/voxel.h"
 #include "interface/voxel_selector.h"
 #include "core/log.h"
+#include "impl/liquid_corner.h"
 #include "interface/os.h"
 #include <cstdlib>
 #include <PolyVoxCore/SimpleVolume.h>
@@ -386,7 +387,7 @@ static const float AO_LEVELS_PBR[4] = {1.0f, 0.55f, 0.20f, 0.10f};
 // needs and there is no animation; the constant grows with one if it is ever
 // built.
 //
-// Taken off the corners after liquid_corner_top() has measured them, not off
+// Taken off the corners by liquid_corner() once it has measured them, not off
 // the levels it measures: those are compared against half a node to decide
 // which corners a flow reaches, and a sag in them would misread that. Every
 // vertex that sits on the surface follows the corner it stands at, so the
@@ -1547,70 +1548,49 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 			use_skylight, translucent_result, masked_result, horizon);
 }
 
-// How high a liquid's surface stands at one corner of a voxel: the average
-// of the surfaces of the up to four liquid columns that meet there. This is
-// Luanti's getCornerLevel, and what it is for is a surface that runs
-// continuously from one level to the next instead of stepping down.
-//
-// Two rules on top of the average, both Luanti's: a column with the same
-// liquid directly above it is full to the top of the voxel, because that is
-// a body of liquid rather than a surface; and a corner that two of the four
-// columns leave empty is at the bottom, which is what makes the edge of a
-// spill thin out rather than stand as a wall.
+// The four columns at a liquid voxel's corner, read for liquid_corner()
+// (liquid_corner.h, which holds the rules)
 static float liquid_corner_top(VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, const VoxelFmt &fmt, int x, int y, int z,
-		const interface::CachedVoxelDefinition *def, float def_top,
-		int dx, int dz)
+		const interface::CachedVoxelDefinition *def, int dx, int dz)
 {
 	const int off[4][2] = {{0, 0}, {dx, 0}, {0, dz}, {dx, dz}};
-	float sum = 0.0f;
-	int count = 0;
-	int empty = 0;
+	auto same = [&](int cx, int cy, int cz){
+		VoxelSample v = volume.sample_at(cx, cy, cz);
+		const interface::CachedVoxelDefinition *d =
+				fmt.undefined(v) ? nullptr : voxel_reg->get_cached(v);
+		return d != nullptr && d->is_liquid &&
+				d->shape_group == def->shape_group;
+	};
+	LiquidColumn c[4];
 	for(size_t i = 0; i < 4; i++){
 		int cx = x + off[i][0];
 		int cz = z + off[i][1];
-		VoxelSample av = volume.sample_at(cx, y + 1, cz);
-		const interface::CachedVoxelDefinition *adef =
-				fmt.undefined(av) ? nullptr : voxel_reg->get_cached(av);
-		if(adef != nullptr && adef->is_liquid &&
-				adef->shape_group == def->shape_group)
-			return 0.5f;
+		c[i].above = same(cx, y + 1, cz);
 		VoxelSample cv = volume.sample_at(cx, y, cz);
 		const interface::CachedVoxelDefinition *cdef =
 				fmt.undefined(cv) ? nullptr : voxel_reg->get_cached(cv);
 		if(cdef == nullptr)
 			continue;
 		if(cdef->is_liquid && cdef->shape_group == def->shape_group){
-			// A source stands full height and says so for the whole corner,
-			// without being averaged in: Luanti's getCornerLevel() returns
-			// there and then ("Source always has the full height"). A
-			// source whose param2 is something else -- VoxeLibre's water
+			// A source whose param2 is something else -- VoxeLibre's water
 			// carries its palette index there -- used to be read as a
 			// variant and averaged with the flow beside it, and the shore
-			// sagged into the flow ([WATER_LIGHT] 3).
-			if(cdef->liquid_is_source)
-				return 0.5f;
-			// How high a flowing column stands is its own param's business:
-			// Luanti puts the level in param2. The mean is of the flowing
-			// columns alone.
-			const interface::VoxelVariant *cvar = fmt.param.bound() ?
-					cdef->variant(fmt.param.get(cv)) : nullptr;
-			if(!cvar)
-				return 0.5f;
-			sum += cvar->liquid_top;
-			count++;
+			// sagged into the flow ([WATER_LIGHT] 3). How high a flowing
+			// column stands is its own param's business: Luanti puts the
+			// level in param2.
+			const interface::VoxelVariant *cvar =
+					cdef->liquid_is_source || !fmt.param.bound() ? nullptr :
+					cdef->variant(fmt.param.get(cv));
+			c[i].kind = cvar ? LiquidColumn::FLOW : LiquidColumn::SOURCE;
+			if(cvar)
+				c[i].top = cvar->liquid_top;
 		} else if(cdef->fully_empty){
-			empty++;
+			c[i].kind = LiquidColumn::EMPTY;
+			c[i].below = same(cx, y - 1, cz);
 		}
 	}
-	// Luanti's numbers: two air columns and the corner is at the bottom,
-	// a fiftieth up (0.2 / BS); no flowing column at all and it is at the
-	// middle
-	if(empty >= 2)
-		return -0.5f + 0.02f;
-	if(count == 0)
-		return 0.0f;
-	return sum / count;
+	return liquid_corner(c, LIQUID_SAG);
 }
 
 // Which of the six directions a connecting voxel's neighbours connect in, as
@@ -1845,9 +1825,8 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 					for(int ix = 0; ix < 2; ix++){
 						for(int iz = 0; iz < 2; iz++){
 							corner[ix][iz] = liquid_corner_top(volume,
-									voxel_reg, fmt, x, y, z, def, liquid_top,
-									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1) -
-									LIQUID_SAG;
+									voxel_reg, fmt, x, y, z, def,
+									ix == 0 ? -1 : 1, iz == 0 ? -1 : 1);
 						}
 					}
 				}

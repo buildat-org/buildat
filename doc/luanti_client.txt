@@ -680,7 +680,10 @@ the mesher moves the top corners of the shape to the average of the surfaces
 of the four columns that meet at each corner. That is Luanti's
 getCornerLevel, with its two rules -- a column with the same liquid above it
 is full to the top, and a corner two of the four columns leave empty drops to
-the bottom, which is what thins out the edge of a spill. It is the one thing
+the bottom, which is what thins out the edge of a spill -- and one of its own:
+a corner by an empty column over the same liquid drops to the bottom, where
+the liquid below stands, so a flow stepping down a node meets the surface
+under it (src/impl/liquid_corner.h). It is the one thing
 in the voxel registry the mesher works out per voxel rather than per
 definition.
 
