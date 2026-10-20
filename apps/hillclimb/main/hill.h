@@ -115,6 +115,14 @@ struct Hill
 	// fences, a and b its two ways out of the corner
 	struct Relief { V2 c, a, b; float leg; size_t turn; };
 	std::vector<Relief> reliefs;
+	// [HC_MISSED_TURN_MARK] A hairpin's opening: where its two turns share
+	// an inner corner, the fence between the ways in and out is cut back
+	// by half a lane and left open. Its two triangles, each a relief's
+	// shape: the way out's side (its first turn's corner) passes both
+	// turns, the way in's the second once the first is (user, 2026-10-20:
+	// "the line I drove should count as an acceptable turn"). n the first
+	struct Gap { Relief r; size_t n; bool out; };
+	std::vector<Gap> gaps;
 
 	Hill(const Params &params): p(params)
 	{
@@ -286,6 +294,13 @@ struct Hill
 			if(!(fits || tip) || done)
 				continue;
 			trimmed.push_back(r.c);
+			if(tip && !fits && i + 2 < m){
+				// The next turn's triangle from the same corner
+				const V2 n2 = v[i + 2];
+				const V2 d2 = unit_of(nx, n2);
+				gaps.push_back({r, i, true});
+				gaps.push_back({{r.c, {-dout.x, -dout.z}, d2, leg, i + 1}, i, false});
+			}
 			for(Fence &e : fences){
 				for(int end = 0; end < 2; end++){
 					float &ex = end ? e.x1 : e.x0, &ez = end ? e.z1 : e.z0;
@@ -312,6 +327,8 @@ struct Hill
 		// Into the voxels' frame
 		for(Relief &r : reliefs)
 			r.c.x -= 0.5f, r.c.z -= 0.5f;
+		for(Gap &g : gaps)
+			g.r.c.x -= 0.5f, g.r.c.z -= 0.5f;
 		for(V2 &q : v)
 			q.x -= 0.5f, q.z -= 0.5f;
 		for(Box &b : lanes)
@@ -390,6 +407,11 @@ struct Hill
 			if((std::fabs(x - v.x) <= h && std::fabs(z - v.z) <= h) ||
 					(a >= 0 && b >= 0 && a + b <= h))
 				l.next++;
+			else
+				for(const Gap &g : gaps)
+					if((l.next == g.n + 1 || (l.next == g.n && g.out)) &&
+							in_relief(g.r, x, z))
+						l.next = g.n + 2;
 		}
 		if(l.at && l.x < path[0].x && x >= path[0].x &&
 				z < path[0].z + lane / 2 && l.next == path.size()){
@@ -401,32 +423,47 @@ struct Hill
 		l.at = true;
 		return lap;
 	}
+	static bool in_relief(const Relief &r, float x, float z)
+	{
+		const float a = (x - r.c.x) * r.a.x + (z - r.c.z) * r.a.z,
+				b = (x - r.c.x) * r.b.x + (z - r.c.z) * r.b.z;
+		return a >= 0 && b >= 0 && a + b <= r.leg;
+	}
+	// Lane i (to turn i + 1), the start's straight the last
+	bool in_lane(size_t i, float x, float z) const
+	{
+		if(lanes.empty())
+			return false;
+		const Box &b = lanes[i % lanes.size()];
+		return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
+	}
 	// [HC_LAP_TURNS] Whether (x, z) is where a car on lap l may be: the
-	// lane to its next turn, the one after it (before the first turn, the
-	// start's straight behind the line too) and the reliefs of the next
-	// turn and the one passed. Elsewhere on the track, it crossed a fence
-	// two lanes share, and is put back as off the track is: no turn can
-	// be skipped
+	// lane to its next turn (before the first turn, the start's straight
+	// behind the line too) and the reliefs of the next turn and the one
+	// passed. Elsewhere on the track, it crossed a fence two lanes share:
+	// past a turn it did not pass ([HC_MISSED_TURN_MARK]: the lane after
+	// the next turn is not allowed, so a skip is seen at that turn)
 	bool in_lap_lanes(const Lap &l, float x, float z) const
 	{
 		const size_t m = lanes.size();
 		if(m == 0)
 			return true;
-		auto in = [&](size_t i){
-			const Box &b = lanes[i % m];
-			return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
-		};
-		if(in(l.next + m - 1) || in(l.next) || (l.next == 1 && in(m - 1)))
+		if(in_lane(l.next + m - 1, x, z) || (l.next == 1 && in_lane(m - 1, x, z)))
 			return true;
-		for(const Relief &r : reliefs){
-			if(r.turn != l.next && r.turn + 1 != l.next)
-				continue;
-			const float a = (x - r.c.x) * r.a.x + (z - r.c.z) * r.a.z,
-					b = (x - r.c.x) * r.b.x + (z - r.c.z) * r.b.z;
-			if(a >= 0 && b >= 0 && a + b <= r.leg)
+		for(const Relief &r : reliefs)
+			if((r.turn == l.next || r.turn + 1 == l.next) && in_relief(r, x, z))
 				return true;
-		}
+		// A hairpin's opening from before its first turn to after its second
+		for(const Gap &g : gaps)
+			if(l.next >= g.n && l.next <= g.n + 2 && in_relief(g.r, x, z))
+				return true;
 		return false;
+	}
+	// Turn n's square, the two lanes' shared one
+	Box turn_square(size_t n) const
+	{
+		const V2 v = path[n % path.size()];
+		return {v.x - lane / 2, v.z - lane / 2, v.x + lane / 2, v.z + lane / 2};
 	}
 
 	// [HC_STEEP_NOISE] n(x, z) in -1..1: value noise, stretched by 1.5 so
@@ -1069,6 +1106,44 @@ int main(int argc, char **argv)
 		assert(d.in_lap_lanes(l, x, z));
 		l.next = r.turn + 2;
 		assert(r.turn + 2 > d.path.size() || !d.in_lap_lanes(l, x, z));
+	}
+	// [HC_MISSED_TURN_MARK] The lane after the next turn is out of the
+	// lap's lanes (a connector a lane long ends on the lane before's box)
+	for(size_t k = 1; k + 1 < d.path.size(); k++){
+		const Hill::V2 p0 = d.path[k], p1 = d.path[k + 1];
+		if(std::fabs(p1.x - p0.x) + std::fabs(p1.z - p0.z) <= d.lane + 0.01f)
+			continue;
+		Hill::Lap l;
+		l.next = k;
+		assert(!d.in_lap_lanes(l, (p0.x + p1.x) / 2, (p0.z + p1.z) / 2));
+	}
+	// Each hairpin's opening: the user's line, from the way in through the
+	// open fence's gap into the way out, passes both turns, never out of
+	// the lap's lanes (2026-10-20's runs: turns 3-4 at x 27-30 m)
+	assert(d.gaps.size() == 4);
+	for(size_t g = 0; g < d.gaps.size(); g += 2){
+		const size_t n = d.gaps[g].n;
+		assert(d.gaps[g].out && !d.gaps[g + 1].out && d.gaps[g + 1].n == n);
+		auto mid = [&](const Hill::Relief &r){
+			return Hill::V2{r.c.x + (r.a.x + r.b.x) * r.leg / 3,
+					r.c.z + (r.a.z + r.b.z) * r.leg / 3};
+		};
+		const Hill::V2 in = mid(d.gaps[g + 1].r), out = mid(d.gaps[g].r);
+		// In the ways in and out, not the turns' squares
+		assert(d.in_lane(n - 1, in.x, in.z) && d.in_lane(n + 1, out.x, out.z));
+		const Hill::Box sq = d.turn_square(n);
+		assert(in.x < sq.x0 || in.x > sq.x1 || in.z < sq.z0 || in.z > sq.z1);
+		Hill::Lap l;
+		l.next = n;
+		const Hill::V2 pts[] = {d.path[n - 1], in, out, d.path[n + 2]};
+		for(int i = 0; i + 1 < 4; i++)
+			for(int j = 1; j <= 40; j++){
+				const float x = pts[i].x + (pts[i + 1].x - pts[i].x) * j / 40,
+						z = pts[i].z + (pts[i + 1].z - pts[i].z) * j / 40;
+				d.lap_step(l, x, z);
+				assert(d.in_lap_lanes(l, x, z));
+			}
+		assert(l.next == n + 3);
 	}
 	std::vector<Hill::V2> back(d.path.rbegin(), d.path.rend());
 	back.insert(back.begin(), d.path[0]);

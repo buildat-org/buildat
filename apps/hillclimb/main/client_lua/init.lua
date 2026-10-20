@@ -743,7 +743,7 @@ local function text(x, y, size)
 	return t
 end
 local hud = text(12, 10, 18)
--- Under the HUD's five lines at most (a round's and a note's with the rest)
+-- Under the HUD, however many lines it has (draw_hud places it)
 local board = text(12, 150, 15)
 -- The chat's last lines, and the round's results, a while each
 local chat_text = text(12, 360, 15)
@@ -863,6 +863,31 @@ local function typing()
 	return focus ~= nil and focus:GetTypeName() == "LineEdit"
 end
 local hud_note = nil
+-- [HC_MISSED_TURN_MARK] The turn this car went past without passing: its
+-- square a translucent red block until it is driven, then green for a
+-- second (main.cpp set_missed)
+local MISSED = {red = lit(0.9, 0.05, 0.03, 0.45), green = lit(0.1, 0.85, 0.15, 0.45)}
+local missed = nil -- {n, node, ok, t}
+buildat.sub_packet("hillclimb:missed", function(data)
+	if missed then
+		missed.node:Remove()
+		missed = nil
+	end
+	local ok, v = data:sub(1, 3) == "ok ", {}
+	for w in data:gmatch("[%d.-]+") do v[#v + 1] = tonumber(w) end
+	if #v < 6 then
+		log:info("hillclimb: no missed turn")
+		return
+	end
+	local n, x0, z0, x1, z1, y = v[1], v[2], v[3], v[4], v[5], v[6]
+	local node = scene:CreateChild("Missed turn")
+	part(node, "Box", ok and MISSED.green or MISSED.red,
+			magic.Vector3((x0 + x1) / 2, y + 1.5 * U, (z0 + z1) / 2),
+			magic.Vector3(x1 - x0, 4 * U, z1 - z0))
+			:GetComponent("StaticModel").castShadows = false
+	missed = {n = n, node = node, ok = ok, t = scene.elapsedTime}
+	log:info("hillclimb: turn " .. n .. (ok and " driven" or " missed"))
+end)
 -- [HC_OPEN_EDGES] "Off the track": the car put back (main.cpp)
 buildat.sub_packet("hillclimb:note", function(data)
 	hud_note = {text = data, t = scene.elapsedTime}
@@ -1046,7 +1071,13 @@ local function draw_hud(watched)
 				math.ceil(round.left)) or round.phase == 1 and f or
 				string.format(f, mmss(round.left))
 	end
-	if hud_note and scene.elapsedTime - hud_note.t < 3 then
+	if missed and missed.ok and scene.elapsedTime - missed.t > 1 then
+		missed.node:Remove()
+		missed = nil
+	end
+	if missed and not missed.ok then
+		lines[#lines + 1] = "Missed turn " .. missed.n
+	elseif hud_note and scene.elapsedTime - hud_note.t < 3 then
 		lines[#lines + 1] = hud_note.text
 	end
 	-- The touch controls' buttons say theirs
@@ -1055,6 +1086,7 @@ local function draw_hud(watched)
 				.. "the start   T: chat   Esc: menu"
 	end
 	hud:SetText(table.concat(lines, "\n"))
+	board:SetPosition(12, 10 + hud.height + 8)
 	if picks and board.visible then
 		local rows = {}
 		if results and scene.elapsedTime - results.t < 8 then

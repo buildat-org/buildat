@@ -245,6 +245,10 @@ struct Module: public interface::Module
 		int mark = -1;
 		// [HC_CIRCUIT] Its laps, and the round's clock at the last
 		hill::Hill::Lap lap;
+		// [HC_MISSED_TURN_MARK] The turn it went past without passing,
+		// marked on its client until it is driven or the car put back; 0
+		// none
+		size_t missed = 0;
 		float lap_t = 0;
 	};
 	static const size_t BOT_PEER = 1000000000;
@@ -571,6 +575,29 @@ struct Module: public interface::Module
 		pl.snap_t = -1;
 		pl.series = 0;
 		pl.mark = -1;
+		set_missed(pl, 0);
+	}
+	// [HC_MISSED_TURN_MARK] To its client: "N x0 z0 x1 z1 y", turn N's
+	// square in voxels and the ground there, marked; "ok ..." the same
+	// driven at last; "" none
+	void set_missed(Player &pl, size_t turn, bool ok = false)
+	{
+		const size_t was = pl.missed;
+		pl.missed = turn;
+		const size_t n = turn ? turn : was;
+		if(n == 0 || pl.peer == 0 || pl.peer >= BOT_PEER)
+			return;
+		ss_ s;
+		if(turn || ok){
+			const hill::Hill::Box b = m_hill->turn_square(n);
+			const int y = m_hill->surface((int)std::lround((b.x0 + b.x1) / 2),
+					(int)std::lround((b.z0 + b.z1) / 2));
+			char buf[100];
+			snprintf(buf, sizeof buf, "%zu %.1f %.1f %.1f %.1f %d", n, b.x0, b.z0,
+					b.x1, b.z1, y);
+			s = (ok ? "ok " : "")+ss_(buf);
+		}
+		network::send(m_server, pl.peer, "hillclimb:missed", s);
 	}
 	// [HC_PUT_BACK_FURTHER] A checkpoint passed (a circuit's turn, the
 	// straight hill's every 10 m of slope): the poses over 30 s old
@@ -660,17 +687,47 @@ struct Module: public interface::Module
 			}
 		}
 		// [HC_LAP_TURNS] A circuit's car whose middle is on the track but
-		// out of its lap's lanes crossed a fence two lanes share
+		// out of its lap's lanes went past its next turn without passing
+		// it. [HC_MISSED_TURN_MARK] That turn marked on its client, and the
+		// car put back only once it is past the turn after it: the mark
+		// seen for a whole lane first. Driven through, the mark is green
+		// for a second and gone.
 		const magic::Vector3 mid = n->GetWorldPosition();
-		const bool crossed = m_params.circuit && pl.race == RUNNING &&
-				m_hill->on_track(mid.x_, mid.z_) &&
-				!m_hill->in_lap_lanes(pl.lap, mid.x_, mid.z_);
+		const magic::Vector3 off = mid / U;
+		bool crossed = false;
+		if(m_params.circuit && pl.race == RUNNING){
+			if(pl.missed && pl.lap.next != pl.missed){
+				log_i(MODULE, "hillclimb: %s drove the missed turn %zu at "
+						"%.2f,%.2f m", cs(pl.name), pl.missed, off.x_, off.z_);
+				set_missed(pl, 0, true);
+			}
+			const bool track = m_hill->on_track(mid.x_, mid.z_);
+			if(!pl.missed && track && !m_hill->in_lap_lanes(pl.lap, mid.x_, mid.z_)){
+				log_i(MODULE, "hillclimb: %s missed turn %zu, past it at %.2f,%.2f m",
+						cs(pl.name), pl.lap.next, off.x_, off.z_);
+				set_missed(pl, pl.lap.next);
+			}
+			if(pl.missed){
+				hill::Hill::Lap ahead = pl.lap;
+				ahead.next = pl.missed + 1;
+				crossed = m_hill->lap_step(ahead, mid.x_, mid.z_) ||
+						ahead.next != pl.missed + 1 ||
+						(track && !m_hill->in_lap_lanes(ahead, mid.x_, mid.z_));
+			}
+		}
 		if(!crossed && !touches_outside(pl))
 			return;
-		const magic::Vector3 off = n->GetWorldPosition() / U;
+		const size_t missed = crossed ? pl.missed : 0;
 		if(crossed)
-			log_i(MODULE, "hillclimb: %s crossed a fence at %.2f,%.2f m, the "
-					"next turn %zu", cs(pl.name), off.x_, off.z_, pl.lap.next);
+			log_i(MODULE, "hillclimb: %s past the turn after the missed %zu at "
+					"%.2f,%.2f m", cs(pl.name), missed, off.x_, off.z_);
+		// For a missed turn, the newest pose before it, in the lane to it:
+		// one put-back ([HC_MISSED_TURN_MARK]), not a series past it
+		const Player::Snap *before_turn = nullptr;
+		for(const Player::Snap &c : pl.snaps)
+			if(missed && c.lap.next == missed &&
+					m_hill->in_lane(missed - 1, c.p.x_, c.p.z_))
+				before_turn = &c;
 		int back = -1;
 		if(pl.snaps.empty()){
 			place_car(pl);
@@ -681,13 +738,17 @@ struct Module: public interface::Module
 		} else {
 			// The k-th put-back in a row to the pose about 2k s before the
 			// first of them, none newer; with none that old, the oldest
-			if(pl.series++ == 0)
+			if(pl.series++ == 0 || before_turn)
 				pl.series_t = m_t;
 			const float before = pl.series_t - 2 * pl.series;
 			Player::Snap s = pl.snaps.front();
 			for(const Player::Snap &c : pl.snaps)
 				if(c.t <= before)
 					s = c;
+			if(before_turn){
+				s = *before_turn;
+				pl.series = 0;
+			}
 			n->SetWorldPosition(s.p);
 			n->SetWorldRotation(s.q);
 			pl.lap = s.lap;
@@ -711,11 +772,11 @@ struct Module: public interface::Module
 			pl.snap_t = m_t;
 			back = (int)std::lround(pl.series_t - s.t);
 		}
-		// [HC_LAP_TURNS] A fence crossed skips the next turn: named, the HUD
-		// quiet otherwise
-		// simplified: the turn's number, no pointer to it; the put-back
-		// already lands before it
-		const ss_ what = crossed ? "Missed turn "+itos(pl.lap.next) :
+		// The lap is the pose's: what it owes is what it shows
+		set_missed(pl, 0);
+		// [HC_LAP_TURNS] A missed turn named, the HUD quiet otherwise; the
+		// turn itself was marked from where it was missed
+		const ss_ what = crossed ? "Missed turn "+itos(missed) :
 				ss_("Off the track");
 		if(pl.peer != 0 && pl.peer < BOT_PEER)
 			network::send(m_server, pl.peer, "hillclimb:note", back < 0 ? what :

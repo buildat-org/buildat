@@ -63,7 +63,7 @@ port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
-	[series]=18 [fence]=19)
+	[series]=18 [fence]=19 [fixed]=20)
 drive()
 {
 	local name=$1; shift
@@ -119,12 +119,17 @@ drive circuit $circuit BUILDAT_HILLCLIMB_CARS=2 BUILDAT_HILLCLIMB_DRIVE="0:P 64:
 # shellcheck disable=SC2086
 drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
 # [HC_LAP_TURNS] A 40 m circuit of switchbacks, the car started in turn
-# 1's lane past it and driven up: across the fence its next lane shares
-# with the one above, put back
+# 1's lane past it and driven up. [HC_MISSED_TURN_MARK] Turn 1 marked at
+# once, the car not put back until it is past turn 2
 drive fence BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5 \
 	BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30 \
 	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6 \
 	BUILDAT_HILLCLIMB_START="36.9 7 0" BUILDAT_HILLCLIMB_DRIVE="0:W2 8:Q" &
+# ... and from there back down into turn 1: the mark cleared
+drive fixed BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5 \
+	BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30 \
+	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6 \
+	BUILDAT_HILLCLIMB_START="36.9 7 180" BUILDAT_HILLCLIMB_DRIVE="0:W1 5:Q" &
 wait
 c="$t/circuit.log"
 turns=$(grep -a "hillclimb: drive passed turn" "$c" | head -4 | sed 's/.*turn \([0-9]*\) of.*/\1/' | tr '\n' ' ')
@@ -137,10 +142,16 @@ grep -aq "finish .* on v6/circuit/steep5/var0/length30/width24/lane7/switch0/rou
 	fail "the circuit's round: '$res', or its key ($c)"
 grep -aq "hillclimb: drive's car put back" "$t/cut.log" && ! grep -aq "'s lap" "$t/cut.log" ||
 	fail "the cut into the middle: not put back, or a lap ($t/cut.log)"
-grep -aq "hillclimb: drive crossed a fence at .*, the next turn 1$" "$t/fence.log" &&
-	grep -aq "hillclimb: drive's car put back" "$t/fence.log" ||
-	fail "a fence crossed with turn 1 not passed: not put back ($t/fence.log)"
-echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a fence crossed put back"
+# The first three of the three kinds, in this order
+f=$(grep -ao "hillclimb: drive missed turn 1, past it\|hillclimb: drive past the turn after the missed 1\|hillclimb: drive's car put back" \
+	"$t/fence.log" | head -3 | tr '\n' '|')
+[ "$f" = "hillclimb: drive missed turn 1, past it|hillclimb: drive past the turn after the missed 1|hillclimb: drive's car put back|" ] ||
+	fail "turn 1 missed: '$f', not marked, then put back past turn 2 ($t/fence.log)"
+grep -aq "hillclimb: drive missed turn 1, past it" "$t/fixed.log" &&
+	grep -aq "hillclimb: drive drove the missed turn 1 at" "$t/fixed.log" &&
+	! grep -aq "put back" "$t/fixed.log" ||
+	fail "turn 1 missed and driven back to: not cleared ($t/fixed.log)"
+echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven"
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do
