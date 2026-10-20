@@ -711,6 +711,37 @@ __buildat_served_overrides = {
 	cache_read = function() return nil end,
 	-- The local server's log and its path are the user's ([SECURITY_RUN_7])
 	local_server_log_tail = function() return nil end,
+	-- **The user's listings and the launcher's verbs** ([SANDBOX_HUNT_1019]:
+	-- the hunt's served root found them in a stranger's reach). What is
+	-- installed and saved here, the launch UIs and their actions, the
+	-- preferences' names, the LAN's games, the local server, a connection
+	-- elsewhere, the page's address: none of a server's code uses them,
+	-- and each tells it about the user or moves them off the server
+	list_apps = function() return {} end,
+	list_saves = function() return {} end,
+	list_installed_games = function() return {} end,
+	list_launch_uis = function() return {} end,
+	list_preferences = function() return {} end,
+	launch_actions = function() return {} end,
+	save_actions = function() return {} end,
+	launch_ui_name = function() return nil end,
+	launch_ui_fell_back = function() return nil end,
+	provide_launch_interface = refused("provide_launch_interface"),
+	local_server_running = function() return false end,
+	-- The local server's port and its log's last line: to the server it
+	-- is (accounts' Open to LAN), not to a remote one
+	local_server_state = function()
+		if not buildat.safe.connected_locally() then
+			return nil
+		end
+		return buildat.safe.local_server_state()
+	end,
+	lan_servers = function() return {} end,
+	connect_start = refused("connect_start"),
+	connect_poll = refused("connect_poll"),
+	crash_dump_untold = function() return nil end,
+	get_web_address_bar = function() return nil end,
+	set_web_address_bar = refused("set_web_address_bar"),
 	cache_write = refused("cache_write"),
 	storage_read = function(name)
 		return storage_read_in(name, "server")
