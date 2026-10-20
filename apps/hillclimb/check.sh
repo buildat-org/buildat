@@ -63,7 +63,7 @@ port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
-	[series]=18 [fence]=19 [fixed]=20)
+	[series]=18 [fence]=19 [fixed]=20 [back]=21)
 drive()
 {
 	local name=$1; shift
@@ -118,6 +118,11 @@ circuit="BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5
 drive circuit $circuit BUILDAT_HILLCLIMB_CARS=2 BUILDAT_HILLCLIMB_DRIVE="0:P 64:Q" &
 # shellcheck disable=SC2086
 drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
+# [HC_BACKTRACK] Past turn 1, then backed round it into the lane before
+# (O: where it is), then driven on to a lap; a round long enough for it
+# shellcheck disable=SC2086
+drive back $circuit BUILDAT_HILLCLIMB_INTERVAL=120 \
+	BUILDAT_HILLCLIMB_DRIVE="0:P 7:S 8:SR 9:RWA 13:RW 17:RWO 19:S 20:P 72:Q" &
 # [HC_LAP_TURNS] A 40 m circuit of switchbacks, the car started in turn
 # 1's lane past it and driven up. [HC_MISSED_TURN_MARK] Turn 1 marked at
 # once, the car not put back until it is past turn 2
@@ -151,7 +156,11 @@ grep -aq "hillclimb: drive missed turn 1, past it" "$t/fixed.log" &&
 	grep -aq "hillclimb: drive drove the missed turn 1 at" "$t/fixed.log" &&
 	! grep -aq "put back" "$t/fixed.log" ||
 	fail "turn 1 missed and driven back to: not cleared ($t/fixed.log)"
-echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven"
+b="$t/back.log"
+grep -aq "hillclimb: drive at .*, turn 2 next, lanes 0\( 4\)\?$" "$b" &&
+	! grep -aq "missed turn\|put back" "$b" && grep -aq "hillclimb: drive's lap 1 at" "$b" ||
+	fail "backed past turn 1 into lane 0: not there, marked or put back, or no lap ($b)"
+echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven; backing past a turn and on to a lap"
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do

@@ -893,6 +893,22 @@ struct Module: public interface::Module
 				log_i(MODULE, "hillclimb: scores set %s", cs(scores_answer(
 						"set "+ranking_prefix()).stringify()));
 			}
+			// O: where each drive car is, its next turn and the lanes it
+			// is in ([HC_BACKTRACK]'s check)
+			if(keys.find('O') != ss_::npos && m_params.circuit)
+				for(auto &kv : m_players){
+					if((kv.first != 0 && kv.first < BOT_PEER) || !kv.second.body)
+						continue;
+					const magic::Vector3 q = kv.second.body->GetNode()->
+							GetWorldPosition();
+					ss_ in;
+					for(size_t i = 0; i < m_hill->lanes.size(); i++)
+						if(m_hill->in_lane(i, q.x_, q.z_))
+							in += " " + itos(i);
+					log_i(MODULE, "hillclimb: %s at %.2f,%.2f m, turn %zu next, "
+							"lanes%s", cs(kv.second.name), q.x_ / hill::U,
+							q.z_ / hill::U, kv.second.lap.next, cs(in));
+				}
 			if(keys.find('B') != ss_::npos)
 				for(auto &kv : m_players)
 					if(kv.first == 0 || kv.first >= BOT_PEER)

@@ -381,8 +381,10 @@ struct Hill
 		x = path[0].x - 3 * U, z = path[0].z, yaw = 90;
 	}
 	// A lap: each turn passed in order -- in the square its two lanes
-	// share, or in its inner corner's relief triangle, which every way
-	// from the one lane into the other goes through -- then the start line
+	// share, or in its inner corner's relief triangle where it has one
+	// ([HC_BACKTRACK]: a turn with none was counted from the triangle its
+	// relief would have, which can lie in the turn before's relief) -- or
+	// in a hairpin's opening, then the start line
 	// crossed toward +X in the bottom lane. A cut across a fence the lanes
 	// share misses a turn; one backwards crosses the line the other way.
 	struct Lap { size_t next = 1; int laps = 0; float x = 0; bool at = false; };
@@ -393,19 +395,11 @@ struct Hill
 		bool lap = false;
 		if(l.next < path.size()){
 			const float h = lane / 2;
-			const V2 v = path[l.next], pv = path[l.next - 1],
-					nx = path[(l.next + 1) % path.size()];
-			auto unit_of = [](V2 p0, V2 p1){
-				const float dx = p1.x - p0.x, dz = p1.z - p0.z,
-						l = std::sqrt(dx * dx + dz * dz);
-				return V2{dx / l, dz / l};
-			};
-			const V2 din = unit_of(pv, v), dout = unit_of(v, nx);
-			const float cx = v.x + (dout.x - din.x) * h, cz = v.z + (dout.z - din.z) * h;
-			const float a = -(x - cx) * din.x - (z - cz) * din.z,
-					b = (x - cx) * dout.x + (z - cz) * dout.z;
-			if((std::fabs(x - v.x) <= h && std::fabs(z - v.z) <= h) ||
-					(a >= 0 && b >= 0 && a + b <= h))
+			const V2 v = path[l.next];
+			bool in = std::fabs(x - v.x) <= h && std::fabs(z - v.z) <= h;
+			for(const Relief &r : reliefs)
+				in = in || (r.turn == l.next && in_relief(r, x, z));
+			if(in)
 				l.next++;
 			else
 				for(const Gap &g : gaps)
@@ -438,24 +432,30 @@ struct Hill
 		return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
 	}
 	// [HC_LAP_TURNS] Whether (x, z) is where a car on lap l may be: the
-	// lane to its next turn (before the first turn, the start's straight
-	// behind the line too) and the reliefs of the next turn and the one
-	// passed. Elsewhere on the track, it crossed a fence two lanes share:
-	// past a turn it did not pass ([HC_MISSED_TURN_MARK]: the lane after
-	// the next turn is not allowed, so a skip is seen at that turn)
+	// lane to its next turn and every lane the lap has driven before it
+	// ([HC_BACKTRACK]: backing up past a passed turn is no miss; the turn
+	// stays passed and the next is still to pass), before the first turn
+	// the start's straight behind the line too, and the reliefs and
+	// openings of the turns up to the next. Elsewhere on the track, it
+	// crossed a fence two lanes share: past a turn it did not pass
+	// ([HC_MISSED_TURN_MARK]: the lane after the next turn is not allowed,
+	// so a skip is seen at that turn)
 	bool in_lap_lanes(const Lap &l, float x, float z) const
 	{
 		const size_t m = lanes.size();
 		if(m == 0)
 			return true;
-		if(in_lane(l.next + m - 1, x, z) || (l.next == 1 && in_lane(m - 1, x, z)))
+		for(size_t i = 0; i < l.next && i < m; i++)
+			if(in_lane(i, x, z))
+				return true;
+		if(l.next == 1 && in_lane(m - 1, x, z))
 			return true;
 		for(const Relief &r : reliefs)
-			if((r.turn == l.next || r.turn + 1 == l.next) && in_relief(r, x, z))
+			if(r.turn <= l.next && in_relief(r, x, z))
 				return true;
-		// A hairpin's opening from before its first turn to after its second
+		// A hairpin's opening from before its first turn on
 		for(const Gap &g : gaps)
-			if(l.next >= g.n && l.next <= g.n + 2 && in_relief(g.r, x, z))
+			if(l.next >= g.n && in_relief(g.r, x, z))
 				return true;
 		return false;
 	}
@@ -1104,8 +1104,35 @@ int main(int argc, char **argv)
 		assert(d.in_lap_lanes(l, x, z));
 		l.next = r.turn + 1;
 		assert(d.in_lap_lanes(l, x, z));
+		// [HC_BACKTRACK] Still the lap's once passed; not before its turn
+		// is the next
 		l.next = r.turn + 2;
-		assert(r.turn + 2 > d.path.size() || !d.in_lap_lanes(l, x, z));
+		assert(d.in_lap_lanes(l, x, z));
+		l.next = r.turn - 1;
+		assert(r.turn < 2 || !d.in_lap_lanes(l, x, z));
+	}
+	// [HC_BACKTRACK] Backing up from the lane to the next turn into the
+	// two lanes before it: the lap's lanes, the next turn still the next
+	for(size_t k = 3; k < d.path.size(); k++){
+		Hill::Lap l;
+		l.next = k;
+		for(size_t j = k - 2; j + 3 >= k; j--){
+			const Hill::V2 p0 = d.path[j], p1 = d.path[j + 1];
+			assert(d.in_lap_lanes(l, (p0.x + p1.x) / 2, (p0.z + p1.z) / 2));
+			d.lap_step(l, (p0.x + p1.x) / 2, (p0.z + p1.z) / 2);
+			assert(l.next == k);
+		}
+	}
+	// The user's run (2026-10-20, 17:35:13): turn 8 with no relief, its
+	// triangle in turn 7's: the car there with turn 8 next does not pass it
+	{
+		bool relief8 = false;
+		for(const Hill::Relief &r : d.reliefs)
+			relief8 = relief8 || r.turn == 8;
+		Hill::Lap l;
+		l.next = 8;
+		d.lap_step(l, 7.15f * U, 43.37f * U);
+		assert(relief8 || l.next == 8);
 	}
 	// [HC_MISSED_TURN_MARK] The lane after the next turn is out of the
 	// lap's lanes (a connector a lane long ends on the lane before's box)
