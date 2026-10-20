@@ -436,7 +436,7 @@ buildat.stop_local_server()
 buildat.local_server_running() -> bool
 buildat.local_server_log_tail([lines]) -> path, text
 - The log's last lines (20 by default, each cut at 160 characters), for a
-  dialog about a server that died.
+  launcher's dialog about a server that died; nil to code a server sent.
 
 buildat.random_bytes(n) -> n bytes
 - From the platform's cryptographic random source; 1...1024 bytes
@@ -2465,7 +2465,7 @@ magic.Material: Clone, SetShaderParameter, SetTechnique, SetTexture, cullMode, f
 magic.Matrix3: Equals, Inverse, Scale, Scaled, SetScale, ToString, Transpose, m00, m01, m02, m10, m11, m12, m20, m21, m22
 magic.Matrix3x4: Inverse, Rotation, Scale, SetScale, SetTranslation, ToString, Translation, m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23
 magic.Matrix4: Equals, Inverse, Rotation, RotationMatrix, Scale, SetRotation, SetScale, SetTranslation, ToMatrix3, ToString, Translation, Transpose, m00, m01, m02, m03, m10, m11, m12, m13, m20, m21, m22, m23, m30, m31, m32, m33
-magic.Menu: SetAccelerator, ShowPopup, acceleratorKey, acceleratorQualifiers, popup, popupOffset, showPopup
+magic.Menu: ShowPopup, popup, popupOffset, showPopup
 magic.Model: GetNumGeometries, SetBoundingBox, SetGeometry, SetGeometryCenter, SetNumGeometries, SetNumGeometryLodLevels, new
 magic.NUM_FRUSTUM_PLANES: 
 magic.NUM_FRUSTUM_VERTICES: 

@@ -2638,19 +2638,14 @@ function M.define(dst, util)
 		instance = {
 			ShowPopup = util.self_function("ShowPopup", {},
 					{"Menu", "boolean"}),
-			-- Which key opens it without the mouse. The qualifiers are
-			-- Urho3D's QUAL_ constants; 0 is none.
-			SetAccelerator = util.self_function("SetAccelerator", {},
-					{"Menu", "number", "number"}),
+			-- No SetAccelerator ([SECURITY_RUN_7]): a menu's key is heard
+			-- in any focused field, the client's own login among them
 		},
 		properties = {
 			popup = util.simple_property(dst.UIElement),
 			-- Where the popup lands relative to the menu
 			popupOffset = util.simple_property(dst.IntVector2),
 			showPopup = util.simple_property("boolean"),
-			-- Read-only: what SetAccelerator was given
-			acceleratorKey = util.simple_property("number"),
-			acceleratorQualifiers = util.simple_property("number"),
 		},
 	})
 

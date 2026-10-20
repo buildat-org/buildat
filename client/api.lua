@@ -709,6 +709,8 @@ __buildat_served_overrides = {
 	run_extension_file = refused("run_extension_file"),
 	read_extension_file = refused("read_extension_file"),
 	cache_read = function() return nil end,
+	-- The local server's log and its path are the user's ([SECURITY_RUN_7])
+	local_server_log_tail = function() return nil end,
 	cache_write = refused("cache_write"),
 	storage_read = function(name)
 		return storage_read_in(name, "server")
