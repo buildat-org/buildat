@@ -634,7 +634,7 @@ local function storage_read_in(name, domain)
 	if not user then
 		return nil
 	end
-	return __buildat_read_under(user, rel)
+	return (__buildat_read_under(user, rel)) -- nil, not nothing
 end
 local function storage_write_in(name, data, domain)
 	local path, dir = storage_path(name, domain)
