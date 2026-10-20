@@ -34,10 +34,18 @@ assert status("/?x=1") == 200, "/ with a query"
 assert status("/nope") == 404, "missing path"
 print("http ok")
 
-# The same file again with its ETag is a 304; deflate is what was asked for
-import zlib
-r = urllib.request.urlopen(urllib.request.Request(base + "/index.html",
-        headers={"Accept-Encoding": "deflate"}), timeout=5)
+# The same file again with its ETag is a 304; deflate is what was asked for.
+# The server makes a file's deflated copy in the background from its first
+# request and sends it plain until then: asked again until it is there, 5 s
+# at most ([WEB_DEFLATE_059]: a slow runner asked before it was)
+import time, zlib
+for _ in range(50):
+    r = urllib.request.urlopen(urllib.request.Request(base + "/index.html",
+            headers={"Accept-Encoding": "deflate"}), timeout=5)
+    if r.headers["Content-Encoding"] == "deflate":
+        break
+    r.read()
+    time.sleep(0.1)
 assert r.headers["Content-Encoding"] == "deflate", r.headers
 assert b"<html" in zlib.decompress(r.read()), "deflated index.html"
 etag = r.headers["ETag"]
