@@ -9,7 +9,7 @@
 // the noodle caves; where a tree stands. terrain.h's SkeldatGenerator reads them a section at a time
 // on worldgen's workers (read only, so shared).
 // Pure: no Buildat, no module. Self test:
-//   g++ -std=c++11 -O2 -DSKELDAT_MAPGEN_TEST -x c++ apps/skeldat/main/mapgen.h -o /tmp/skeldat_mapgen && /tmp/skeldat_mapgen
+//   g++ -std=c++11 -O2 -DSKELDAT_MAPGEN_TEST -Isrc -x c++ apps/skeldat/main/mapgen.h -o /tmp/skeldat_mapgen && /tmp/skeldat_mapgen
 //   (one line)
 #pragma once
 #include <algorithm>
@@ -18,6 +18,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include "interface/noise.h"
 
 namespace skeldat {
 namespace mapgen {
@@ -85,69 +86,12 @@ inline int form_of(const std::string &name)
 	return -1;
 }
 
-// A lattice point's value, -1 to 1
-inline float lattice(int32_t x, int32_t y, int32_t z, uint32_t seed)
-{
-	uint32_t h = seed * 0x9E3779B1u;
-	h ^= (uint32_t)x * 0x85EBCA6Bu;
-	h = (h ^ (h >> 15)) * 0x2C1B3C6Du;
-	h ^= (uint32_t)y * 0xC2B2AE35u;
-	h = (h ^ (h >> 13)) * 0x297A2D39u;
-	h ^= (uint32_t)z * 0x27D4EB2Fu;
-	h = (h ^ (h >> 16)) * 0x7FEB352Du;
-	h ^= h >> 15;
-	return (h & 0xffffff) / (float)0x7fffff - 1.0f;
-}
-inline float ease(float t){ return t * t * (3 - 2 * t); }
-
-// Value noise, -1 to 1, a lattice point every 1
-inline float value3(float x, float y, float z, uint32_t seed)
-{
-	const float fx = std::floor(x), fy = std::floor(y), fz = std::floor(z);
-	const int32_t ix = (int32_t)fx, iy = (int32_t)fy, iz = (int32_t)fz;
-	const float tx = ease(x - fx), ty = ease(y - fy), tz = ease(z - fz);
-	float c[2][2];
-	for(int dz = 0; dz < 2; dz++)
-		for(int dy = 0; dy < 2; dy++){
-			const float a = lattice(ix, iy + dy, iz + dz, seed),
-					b = lattice(ix + 1, iy + dy, iz + dz, seed);
-			c[dz][dy] = a + (b - a) * tx;
-		}
-	const float y0 = c[0][0] + (c[0][1] - c[0][0]) * ty,
-			y1 = c[1][0] + (c[1][1] - c[1][0]) * ty;
-	return y0 + (y1 - y0) * tz;
-}
-inline float value2(float x, float z, uint32_t seed)
-{
-	const float fx = std::floor(x), fz = std::floor(z);
-	const int32_t ix = (int32_t)fx, iz = (int32_t)fz;
-	const float tx = ease(x - fx), tz = ease(z - fz);
-	const float a = lattice(ix, 0, iz, seed), b = lattice(ix + 1, 0, iz, seed),
-			c = lattice(ix, 0, iz + 1, seed), d = lattice(ix + 1, 0, iz + 1, seed);
-	const float ab = a + (b - a) * tx, cd = c + (d - c) * tx;
-	return ab + (cd - ab) * tz;
-}
-// Octaves summed, each twice the frequency and persist the amplitude,
-// scaled back to -1..1
-inline float fbm2(float x, float z, uint32_t seed, int octaves, float persist)
-{
-	float sum = 0, amp = 1, norm = 0, f = 1;
-	for(int i = 0; i < octaves; i++){
-		sum += value2(x * f, z * f, seed + (uint32_t)i * 101) * amp;
-		norm += amp, amp *= persist, f *= 2;
-	}
-	return sum / norm;
-}
-inline float fbm3(float x, float y, float z, uint32_t seed, int octaves,
-		float persist)
-{
-	float sum = 0, amp = 1, norm = 0, f = 1;
-	for(int i = 0; i < octaves; i++){
-		sum += value3(x * f, y * f, z * f, seed + (uint32_t)i * 101) * amp;
-		norm += amp, amp *= persist, f *= 2;
-	}
-	return sum / norm;
-}
+// The noise is the engine's ([NOISE_API]), which is this file's as it was
+using interface::noise::lattice;
+using interface::noise::value2;
+using interface::noise::value3;
+using interface::noise::fbm2;
+using interface::noise::fbm3;
 
 // The world's shape: half its width (voxels), its bottom and top voxel,
 // the water line, the form

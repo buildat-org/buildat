@@ -11,7 +11,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
-#include "interface/noise.h"
+#include <random>
 #include <Scene.h>
 #include <Node.h>
 #include <RigidBody.h>
@@ -22,6 +22,12 @@
 
 namespace magic = Urho3D;
 namespace pv = PolyVox;
+
+// A number in [a, b] ([NOISE_API]: what PseudoRandom::range was)
+static int range(std::mt19937 &r, int a, int b)
+{
+	return a + (int)(r() % (uint32_t)(b - a + 1));
+}
 
 using interface::Event;
 using interface::VoxelInstance;
@@ -108,7 +114,7 @@ struct Module: public interface::Module
 	sv_<uint> m_piece_node_ids;
 	size_t m_next_piece = 0;
 	float m_drop_timer = 0.0f;
-	interface::PseudoRandom m_random{4242};
+	std::mt19937 m_random{4242};
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -254,7 +260,7 @@ struct Module: public interface::Module
 		auto idx = [&](int x, int y, int z){
 			return (size_t)((z * S + y) * S + x);
 		};
-		int target = m_random.range(PIECE_MIN_VOXELS, PIECE_MAX_VOXELS);
+		int target = range(m_random, PIECE_MIN_VOXELS, PIECE_MAX_VOXELS);
 		sv_<pv::Vector3DInt32> filled;
 		pv::Vector3DInt32 p(S/2, S/2, S/2);
 		data[idx(p.getX(), p.getY(), p.getZ())] = (char)PIECE_ID;
@@ -264,9 +270,9 @@ struct Module: public interface::Module
 		};
 		// Bounded because a shape that fills its box has nowhere left to grow
 		for(int tries = 0; (int)filled.size() < target && tries < 200; tries++){
-			const pv::Vector3DInt32 &f = filled[m_random.range(
+			const pv::Vector3DInt32 &f = filled[range(m_random,
 					0, (int)filled.size() - 1)];
-			const int *o = off[m_random.range(0, 5)];
+			const int *o = off[range(m_random, 0, 5)];
 			int x = f.getX() + o[0], y = f.getY() + o[1], z = f.getZ() + o[2];
 			if(x < 0 || y < 0 || z < 0 || x >= S || y >= S || z >= S)
 				continue;
@@ -347,8 +353,8 @@ struct Module: public interface::Module
 		m_next_piece = (m_next_piece + 1) % m_piece_node_ids.size();
 
 		float c = VOLUME_SIZE / 2.0f;
-		float x = c + m_random.range(-1000, 1000) / 1000.0f * DROP_SPREAD;
-		float z = c + m_random.range(-1000, 1000) / 1000.0f * DROP_SPREAD;
+		float x = c + range(m_random, -1000, 1000) / 1000.0f * DROP_SPREAD;
+		float z = c + range(m_random, -1000, 1000) / 1000.0f * DROP_SPREAD;
 
 		main_context::access(m_server, [&](main_context::Interface *imc)
 		{
@@ -358,8 +364,8 @@ struct Module: public interface::Module
 				return;
 			n->SetPosition(Vector3(x, DROP_HEIGHT, z));
 			n->SetRotation(Quaternion(
-					m_random.range(0, 360), m_random.range(0, 360),
-					m_random.range(0, 360)));
+					range(m_random, 0, 360), range(m_random, 0, 360),
+					range(m_random, 0, 360)));
 			RigidBody *body = n->GetComponent<RigidBody>();
 			if(body){
 				body->SetLinearVelocity(Vector3::ZERO);

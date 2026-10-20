@@ -289,8 +289,29 @@ namespace luanti_mapgen
 				float &heat_out, float &humidity_out) = 0;
 	};
 
+	// Luanti's own noise, as a mod's PerlinNoise and PerlinNoiseMap get it
+	// ([NOISE_API]): the vendored code, which keeps no state, so a caller
+	// holds this and asks it directly, as with BiomeQuery. The seed is the
+	// call's; the params' own is added to it, as Luanti does. Valid until
+	// this module is unloaded; see noise_query().
+	struct NoiseQuery
+	{
+		virtual ~NoiseQuery() {}
+		// One value; z is not read when !three_d
+		virtual float point(const Params::NoiseParams &np, int32_t seed,
+				float x, float y, float z, bool three_d) = 0;
+		// A map into out (sx * sy * sz values, or sx * sy with sz 0, the
+		// 2D map), x fastest, then y, then z
+		virtual void map(const Params::NoiseParams &np, int32_t seed,
+				float x, float y, float z, int sx, int sy, int sz,
+				float *out) = 0;
+	};
+
 	struct Interface
 	{
+		// The noise above
+		virtual NoiseQuery* noise_query() = 0;
+
 		// A generator for these parameters. It belongs to whoever is given
 		// it -- worldgen deletes the one it is handed -- and it holds a
 		// copy of everything it needs, because it runs in a thread with no

@@ -284,8 +284,16 @@ client ([FRONT_PAGES]; content already escaped); file(share_path, name,
 overpass_mono.ttf, logo.png from the share's client/data), so a page
 loads nothing from another origin.
 interface/zip.h -- zip_list(path) -> ZipEntry list, zip_extract(path, dir).
-interface/noise.h -- Luanti's noise as it is: PseudoRandom, NoiseParams,
-Noise (perlin, fbm, the 2D and 3D maps), easeCurve; builtin/luanti_mapgen's.
+interface/noise.h -- interface::noise, value noise for an app's generator,
+header only: value2/value3 (-1..1, a lattice point every 1), fbm2/fbm3
+(octaves of twice the frequency and persist the amplitude, scaled back to
+-1..1) and the ridged fbm2_abs/fbm3_abs (0..1), all with uint32_t seeds;
+lattice(x, y, z, seed), the hash under them. NoiseParams {offset, scale,
+spread_x, spread_y, spread_z, octaves, persist} (a brace list) with
+noise2(params, seed, x, z) / noise3(...) in world units, and fill2 /
+fill3 writing a region, a sample every 1, x fastest, into a caller's
+std::vector<float>. No random number source: std::mt19937 or the app's
+own. A Luanti game's noise is Luanti's, luanti_mapgen's NoiseQuery.
 
 Voxels
 ------
@@ -642,7 +650,7 @@ the world), enable(), get_num_sections_queued(); events QueueModifiedEvent,
 SectionGenerated.
 
 builtin/luanti_mapgen/api.h -- luanti_mapgen::Interface: Luanti's mapgens
-in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), take_gennotify()
+in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), noise_query() -> NoiseQuery (point, map: Luanti's own noise, what a mod's PerlinNoise gets), take_gennotify()
 and take_maps() -> the GennotifyEvents and maps a generation produced, per
 Luanti mapchunk: CHUNK_NODES 80 on a grid from CHUNK_OFFSET -32,
 chunk_index(node), chunk_blockseed() (the seed on_generated is given). The
@@ -690,7 +698,7 @@ builtin/chat/api.h: Interface, join, leave, say, set_default_min, may_talk, acce
 builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_file_path, add_file_paths, get_server_icon, access, serve_extension
 builtin/loader/api.h: Interface, activate, get_module_info, access
 builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, set_chat_gate, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_json, set_server_physics, set_generated_sounds, access
-builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, Interface, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
+builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, NoiseQuery, ~NoiseQuery, point, map, Interface, noise_query, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
 builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, open_groups, group, decide, audit_log, appeal, appeals, decide_appeal, access
 builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, set_has_admin, access, answer_request, serve_brand
@@ -718,7 +726,7 @@ interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, pre
 interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispatch, get_interface, check_interface, add_handler
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
-interface/noise.h: v3f, PseudoRandom, seed, next, range, NoiseParams, Noise, ~Noise, init, setSize, setSpreadFactor, setOctaves, resizeNoiseBuf, valueMap2D, valueMap3D, fbmMap2D, fbmMap2DModulated, fbmMap3D, transformNoiseMap, noise2d, noise3d, noise2d_value, noise3d_value, noise2d_fbm, noise2d_fbm_abs, noise3d_fbm, noise3d_fbm_abs, easeCurve, NoiseFbm2D, NoiseFbm2DNoTxfm, NoiseFbm2DPosOffset, NoiseFbm2DNoTxfmPosOffset, NoiseFbm3D
+interface/noise.h: lattice, ease, value3, value2, fbm2, fbm3, fbm2_abs, fbm3_abs, NoiseParams, noise2, noise3, fill2, fill3
 interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
 interface/packet_stream.h: InputBuffer, size, empty, begin, clear, append, PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, in_flight, output, send_new_types
 interface/polyvox_cereal.h: save, load

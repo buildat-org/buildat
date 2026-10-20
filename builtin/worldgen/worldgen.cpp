@@ -6,7 +6,6 @@
 #include "interface/event.h"
 #include "interface/mesh.h"
 #include "interface/voxel.h"
-#include "interface/noise.h"
 #include "interface/voxel_volume.h"
 #include "interface/thread.h"
 #include <mutex>

@@ -13,11 +13,14 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
+#include "interface/compress.h"
 #include "interface/polyvox_std.h"
 #include "interface/polyvox_cereal.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <random>
 #include <sstream>
 #define MODULE "main"
 
@@ -61,44 +64,31 @@ static const float VIEW_DIR_X = -1.0f;
 static const float VIEW_DIR_Y = -0.7f;
 static const float VIEW_DIR_Z = -1.0f;
 
-// Tuned so the surface keeps sky above it and rock below it across the volume.
-//
-// Retuned twice. First on 2026-09-14, when the noise hash stopped multiplying
-// in signed arithmetic: the same numbers that gave a surface at 19..45 gave
-// one at 7..17, and the amplitude and offset put the band back. That was not
-// enough -- the band was right and the *shape* was not, and the scene is
-// about a shape: the cave has to break out of a hillside, both because a
+// **The one-section scene is data** ([CHECK_BASELINE], [NOISE_API]): its
+// ground and trees are terrain.txt.gz, the scene as it was written
+// (2026-09-13), read at the start; the scene is a fixture that holds the
+// lighting still while the renderer is worked on, so its shape is not a
+// function of whatever a noise does this month. Its ground is the stored
+// height plus this, and its cave's mouth this far in from the far corner,
+// both as they were then.
+static const float SINGLE_GROUND_OFFSET = 0.0f;
+static const int SINGLE_MOUTH_INSET = 10;
+
+// **Eight sections are the engine's noise** (interface/noise.h). The scene
+// is about a shape: the cave has to break out of a hillside, both because a
 // mouth in flat ground is a hole in a floor and because the gradient is what
-// these scenes exist to photograph. With the field the fixed hash gives, the
-// mouth stood on flat ground (eight voxels along the cave the ground rose by
-// one) and the shaft that should break out well up the slope came out *below*
-// the mouth, so its cap sat on the mouth instead of up the hill.
-//
-// So the seed and the mouth's own corner are knobs here now, and the four of
-// them were searched together rather than derived: the field is
-// interface::Noise, which __luanti_noise_map() hands to Lua, so a probe can
-// try thousands of sets against what the scene needs -- a surface inside the
-// volume, a mouth part way up it, a cave that stays in the volume to its end,
-// a pond with a rim just above its water line, and ground that climbs at the
-// mouth. These are what came out: a surface at 18..45 where it used to be
-// 19..45, the ground climbing eight voxels over the first eight of the cave,
-// and the shaft breaking out thirteen voxels above the mouth.
-static const float TERRAIN_AMPLITUDE = 22.0f;
-
-// Shifts the terrain up or down in the volume. With the noise below, 15 puts
-// the surface at roughly y=18..45, averaging the middle of the volume. The
-// generator logs the range it actually got, so retune this by reading that.
-static const float GROUND_OFFSET = 15.0f;
-
-// Which field the terrain is. One number of a different field is one scene of
-// a different shape, and the shape is what is being chosen here; see above.
-static const int TERRAIN_SEED = 17;
-
-// How far in from the far corner of the volume the cave's mouth sits, before
-// the whole cave is rotated about the middle. It decides which part of the
-// hill the mouth lands in, so it is searched with the terrain rather than set
-// once.
-static const int CAVE_MOUTH_INSET = 14;
+// these scenes exist to photograph. So the seed, the offset and the mouth's
+// corner were searched together (2026-10-20, [NOISE_API], when the noise
+// became interface::noise's) for a surface inside the box, a mouth part way
+// up it, a cave that stays in the box to its end, ground that climbs at the
+// mouth and a shaft that breaks out well above it: a surface at 18..44, the
+// ground climbing eight voxels over the first eight of the cave, and the
+// shaft breaking out twelve above the mouth. The amplitude is the 22 it was
+// times the old sum's norm (1.66): the old fbm was not scaled back to -1..1.
+static const float TERRAIN_AMPLITUDE = 36.6f;
+static const float GROUND_OFFSET = 17.0f;
+static const int TERRAIN_SEED = 1820;
+static const int CAVE_MOUTH_INSET = 12;
 
 // How far from the mouth's own column a tree has to stand. A canopy is five
 // voxels across and both cave cameras look at the mouth, so one growing in
@@ -178,6 +168,78 @@ struct Worldgen: public worldgen::GeneratorInterface
 	pv::Vector3DInt32 bench_slab_centre;   // BENCH_SLAB_W x 2 x BENCH_SLAB_W
 	bool bench_valid = false;
 
+	// The one-section scene's ground (SCENE_SIZE squared, x fastest; the
+	// height before the offset) and the trees that were planted on it, as
+	// terrain.txt.gz has them; set before the generator is handed over
+	sv_<float> m_heights;
+	sv_<pv::Vector3DInt32> m_trees;
+
+	// terrain.txt.gz into the two above. Its own file, so read as such:
+	// a gzip's header, then the raw deflate it is
+	bool load_terrain(const ss_ &path)
+	{
+		std::ifstream f(path, std::ios::binary);
+		ss_ gz((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		if(gz.size() < 18 || (uint8_t)gz[0] != 0x1f || (uint8_t)gz[1] != 0x8b ||
+				gz[2] != 8){
+			log_w(MODULE, "%s: not a gzip", cs(path));
+			return false;
+		}
+		const uint8_t flags = gz[3];
+		size_t at = 10;
+		if(flags & 4) // FEXTRA
+			at += 2 + ((uint8_t)gz[10] | (uint8_t)gz[11] << 8);
+		for(uint8_t bit : {8, 16}) // FNAME, FCOMMENT
+			if(flags & bit)
+				at = gz.find('\0', at) + 1;
+		if(flags & 2) // FHCRC
+			at += 2;
+		if(at == 0 || at >= gz.size()){
+			log_w(MODULE, "%s: a gzip header with nothing after it", cs(path));
+			return false;
+		}
+		std::istringstream is(gz.substr(at), std::ios::binary);
+		std::ostringstream os(std::ios::binary);
+		try {
+			interface::decompress_deflate_raw(is, os, 1024 * 1024);
+		} catch(std::exception &e){
+			log_w(MODULE, "%s: %s", cs(path), e.what());
+			return false;
+		}
+		std::istringstream text(os.str());
+		ss_ line;
+		int w = 0, d = 0;
+		m_heights.clear();
+		m_trees.clear();
+		while(std::getline(text, line)){
+			std::istringstream ls(line);
+			ss_ key;
+			ls >> key;
+			if(key == "size"){
+				ls >> w >> d;
+			} else if(key == "h"){
+				float v = 0;
+				ls >> v;
+				m_heights.push_back(v);
+			} else if(key == "tree"){
+				int x = 0, y = 0, z = 0;
+				ls >> x >> y >> z;
+				m_trees.push_back(pv::Vector3DInt32(x, y, z));
+			}
+		}
+		if(w != SCENE_SIZE || d != SCENE_SIZE ||
+				m_heights.size() != (size_t)w * d){
+			log_w(MODULE, "%s: %ix%i and %zu heights; %i squared wanted",
+					cs(path), w, d, m_heights.size(), SCENE_SIZE);
+			m_heights.assign((size_t)SCENE_SIZE * SCENE_SIZE, 20.0f);
+			return false;
+		}
+		log_v(MODULE, "%s: %zu heights and %zu trees", cs(path),
+				m_heights.size(), m_trees.size());
+		return true;
+	}
+
 	void generate(SceneReference scene_ref,
 			const pv::Vector3DInt16 &section_p,
 			VoxelVolume &volume)
@@ -204,35 +266,40 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// voxel box reads as a tilt rather than as terrain. Starting at a
 			// wavelength of exactly the volume size puts one hill and one
 			// valley in the scene, and the octaves below it supply the detail.
-			interface::v3f spread(SCENE_SIZE, SCENE_SIZE, SCENE_SIZE);
-			// Digger's amplitude is set for its own much longer wavelength;
-			// at this one it would swing the surface across the whole volume.
-			interface::NoiseParams np(0, TERRAIN_AMPLITUDE, spread, 0, 5, 0.4);
-			interface::Noise noise(&np, TERRAIN_SEED, w, d);
+			const float spread = SCENE_SIZE;
+			const interface::noise::NoiseParams np = {0, TERRAIN_AMPLITUDE,
+					spread, spread, spread, 5, 0.4f};
 			// Sampled at scene coordinates, so the terrain under the cave is
-			// the same whichever world the scene is in
-			noise.fbmMap2D(nx0 - ox + spread.X/2, nz0 - oz + spread.Z/2);
-			noise.transformNoiseMap();
+			// the same whichever world the scene is in; one section's is
+			// the stored map
+			sv_<float> noise;
+			if(multi())
+				interface::noise::fill2(np, TERRAIN_SEED, nx0 - ox + spread/2,
+						nz0 - oz + spread/2, w, d, noise);
+			else
+				noise = m_heights;
+			const float ground_offset = multi() ? GROUND_OFFSET :
+					SINGLE_GROUND_OFFSET;
 
 			// Reported so GROUND_OFFSET and TERRAIN_AMPLITUDE can be retuned
 			// by reading it, rather than by deriving them at runtime
 			float nmin = 1e9f, nmax = -1e9f;
 			for(int i = 0; i < w * d; i++){
-				float n = noise.result[i];
+				float n = noise[i];
 				if(n < nmin) nmin = n;
 				if(n > nmax) nmax = n;
 			}
 			// Digger draws the topmost solid voxel at a+10, so a+11 is ground
 			log_v(MODULE, "noise [%.1f, %.1f] -> surface %.0f..%.0f",
-					nmin, nmax, nmin + GROUND_OFFSET + 11.0f,
-					nmax + GROUND_OFFSET + 11.0f);
+					nmin, nmax, nmin + ground_offset + 11.0f,
+					nmax + ground_offset + 11.0f);
 
 			auto have_column = [&](int x, int z){
 				return x >= nx0 && x < nx0 + w && z >= nz0 && z < nz0 + d;
 			};
 			auto surface_at = [&](int x, int z) -> float {
 				size_t i = (size_t)(z - nz0) * w + (x - nx0);
-				return noise.result[i] + GROUND_OFFSET + oy;
+				return noise[i] + ground_offset + oy;
 			};
 
 			// Everything is built into a local array first so that skylight
@@ -283,8 +350,9 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// The corner of the scene box, not of a section
 			float centre_x = ox + SCENE_SIZE / 2.0f;
 			float centre_z = oz + SCENE_SIZE / 2.0f;
-			float mox = (ox + SCENE_SIZE - 1 - CAVE_MOUTH_INSET) - centre_x;
-			float moz = (oz + SCENE_SIZE - 1 - CAVE_MOUTH_INSET) - centre_z;
+			const int inset = multi() ? CAVE_MOUTH_INSET : SINGLE_MOUTH_INSET;
+			float mox = (ox + SCENE_SIZE - 1 - inset) - centre_x;
+			float moz = (oz + SCENE_SIZE - 1 - inset) - centre_z;
 			int mouth_x = (int)std::floor(centre_x + rot_x(mox, moz) + 0.5f);
 			int mouth_z = (int)std::floor(centre_z + rot_z(mox, moz) + 0.5f);
 
@@ -312,25 +380,18 @@ struct Worldgen: public worldgen::GeneratorInterface
 						cz <= floor_div(uc.getZ() + M, TREE_CELL); cz++){
 				for(int cx = floor_div(lc.getX() - M, TREE_CELL);
 						cx <= floor_div(uc.getX() + M, TREE_CELL); cx++){
-					auto pr = interface::PseudoRandom(
-							TREE_SEED + cx * 73856093 + cz * 19349663);
-					int x = cx * TREE_CELL + pr.range(0, TREE_CELL - 1);
-					int z = cz * TREE_CELL + pr.range(0, TREE_CELL - 1);
+					std::mt19937 pr(TREE_SEED + cx * 73856093 + cz * 19349663);
+					int x = cx * TREE_CELL + (int)(pr() % TREE_CELL);
+					int z = cz * TREE_CELL + (int)(pr() % TREE_CELL);
 					if(!have_column(x, z) || in_doorway(x, z))
 						continue;
 					plant(x, (int)(surface_at(x, z) + 11.0f), z);
 				}
 				}
 			} else {
-				auto pr = interface::PseudoRandom(TREE_SEED);
-				for(int i = 0; i < W * D / 400; i++){
-					int x = pr.range(lc.getX() + 3, uc.getX() - 3);
-					int z = pr.range(lc.getZ() + 3, uc.getZ() - 3);
-					int y = (int)(surface_at(x, z) + 11.0f);
-					if(y < lc.getY() || y > uc.getY() - 8)
-						continue;
-					if(in_doorway(x, z))
-						continue;
+				// The ones that were planted, as stored
+				for(const pv::Vector3DInt32 &t : m_trees){
+					const int x = t.getX(), y = t.getY(), z = t.getZ();
 					plant(x, y, z);
 
 					// Keep the most central tree for benchmark 5, which looks
@@ -420,19 +481,16 @@ struct Worldgen: public worldgen::GeneratorInterface
 			float sz = mouth_z;
 			// Every section carves the whole cave and clips it, so every one
 			// of them needs the ground height at the mouth, which is only in
-			// the noise map of the sections the mouth is over. One extra
-			// sample of the same noise gives it to all of them -- all, since
-			// a map's value and a lone sample's differ in the last bits, and
-			// two sections carving from two heights leave a seam.
+			// the noise map of the sections the mouth is over: one sample of
+			// the same noise, which is what the map is made of, value for
+			// value
 			float mouth_surface;
 			if(!multi()){
 				mouth_surface = surface_at(mouth_x, mouth_z);
 			} else {
-				interface::Noise mouth_noise(&np, TERRAIN_SEED, 1, 1);
-				mouth_noise.fbmMap2D(mouth_x - ox + spread.X/2,
-						mouth_z - oz + spread.Z/2);
-				mouth_noise.transformNoiseMap();
-				mouth_surface = mouth_noise.result[0] + GROUND_OFFSET + oy;
+				mouth_surface = interface::noise::noise2(np, TERRAIN_SEED,
+						mouth_x - ox + spread/2, mouth_z - oz + spread/2) +
+						GROUND_OFFSET + oy;
 			}
 			float sy = mouth_surface + 11.0f + CAVE_RADIUS;
 
@@ -626,6 +684,9 @@ struct Module: public interface::Module
 		{
 			iworldgen->create_instance(m_main_scene);
 			m_worldgen = new Worldgen();
+			// A missing or broken file is said and the scene is flat
+			m_worldgen->load_terrain(m_server->get_module_path("main")+
+					"/../terrain.txt.gz");
 			iworldgen->get_instance(m_main_scene)->set_generator(m_worldgen);
 		});
 

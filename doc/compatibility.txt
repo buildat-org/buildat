@@ -26,7 +26,9 @@ client/core/starport's semver_cmp for precedence).
   replicate emit_after_next_sync, voxelworld get_unknown_voxels and
   num_buffers_loaded, luanti_mapgen list_mapgens, voxel.h
   any_surface_modifier, EVENT_DISPATCH_TYPE, luanti call_string_list,
-  builtin/ground_plane_lighting. engine_api stays 2.
+  builtin/ground_plane_lighting; interface/noise.h's Minetest noise
+  (NoiseParams, Noise, PseudoRandom, v3f, noise2d_*), its place taken by
+  interface::noise ([NOISE_API]). engine_api stays 2.
 - A minor may break: it may raise the protocol minimum, the engine API
   minimum and a save's format.
 - A pre-release (1.2.0-rc.1) is offered as an update only to a client

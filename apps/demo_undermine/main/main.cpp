@@ -10,6 +10,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
+#include <random>
 #include "interface/voxel_volume.h"
 #include <Scene.h>
 #include <Context.h>
@@ -42,6 +43,12 @@ using main_context::SceneReference;
 #include "interface/polyvox_cereal.h"
 
 namespace main {
+
+// A number in [a, b] ([NOISE_API]: what PseudoRandom::range was)
+static int range(std::mt19937 &r, int a, int b)
+{
+	return a + (int)(r() % (uint32_t)(b - a + 1));
+}
 
 using namespace Urho3D;
 
@@ -271,22 +278,25 @@ struct Worldgen: public worldgen::GeneratorInterface
 			log_t(MODULE, "on_generation_request(): uc: (%i, %i, %i)",
 					uc.getX(), uc.getY(), uc.getZ());
 
-			interface::v3f spread(160, 160, 160);
+			const float spread = 160;
 			// Retuned 2026-09-14 with demo_digger's, which this is; see the note
 			// there about the noise hash
-			interface::NoiseParams np(47, 37, spread, 0, 7, 0.4);
+			// [NOISE_API] The scale times the octaves' sum (1.664): the old fbm
+			// was not scaled back to -1..1
+			interface::noise::NoiseParams np = {47, 61.6, spread, spread, spread,
+					7, 0.4};
 
 			int w = uc.getX() - lc.getX() + 1;
 			int d = uc.getZ() - lc.getZ() + 1;
 
-			interface::Noise noise(&np, 3, w, d);
-			noise.fbmMap2D(lc.getX() + spread.X/2, lc.getZ() + spread.Z/2);
-			noise.transformNoiseMap(); // ?
+			sv_<float> noise;
+			interface::noise::fill2(np, 3, lc.getX() + spread/2,
+					lc.getZ() + spread/2, w, d, noise);
 
 			size_t noise_i = 0;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
 				for(int x = lc.getX(); x <= uc.getX(); x++){
-					double a = noise.result[noise_i];
+					double a = noise[noise_i];
 					noise_i++;
 					// Where the ground stops, in the same terms the layers
 					// below are written in
@@ -321,12 +331,12 @@ struct Worldgen: public worldgen::GeneratorInterface
 			// rule makes an event rather than a decoration
 			auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
 			int area = extent.getX() * extent.getZ();
-			auto pr = interface::PseudoRandom(13241);
+			std::mt19937 pr(13241);
 			for(int i = 0; i < area / 100; i++){
-				int x = pr.range(lc.getX(), uc.getX());
-				int z = pr.range(lc.getZ(), uc.getZ());
+				int x = range(pr, lc.getX(), uc.getX());
+				int z = range(pr, lc.getZ(), uc.getZ());
 				size_t ni = (z - lc.getZ()) * d + (x - lc.getX());
-				int y = (int)(noise.result[ni] + 11.0);
+				int y = (int)(noise[ni] + 11.0);
 				if(y < lc.getY() - 5 || y > uc.getY() - 5)
 					continue;
 				// The trunk would start in a pond

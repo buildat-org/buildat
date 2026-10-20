@@ -11,6 +11,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/noise.h"
+#include <random>
 #include "interface/voxel_volume.h"
 #include "interface/polyvox_numeric.h"
 #include "interface/polyvox_cereal.h"
@@ -31,6 +32,12 @@ using interface::VoxelVolume;
 using main_context::SceneReference;
 
 namespace main {
+
+// A number in [a, b] ([NOISE_API]: what PseudoRandom::range was)
+static int range(std::mt19937 &r, int a, int b)
+{
+	return a + (int)(r() % (uint32_t)(b - a + 1));
+}
 
 using namespace Urho3D;
 
@@ -85,30 +92,34 @@ struct Worldgen: public worldgen::GeneratorInterface
 		int w = uc.getX() - lc.getX() + 1;
 		int d = uc.getZ() - lc.getZ() + 1;
 
-		interface::v3f spread_h(280, 280, 280);
+		const float spread_h = 280;
 		// Retuned 2026-09-14: the noise hash used to multiply in signed
 		// arithmetic, so it came back biased and with about twice the swing
 		// -- the same numbers now give a terrain half as tall and much
 		// lower. The offset and the scale are what put the old ground back;
 		// the spawn line says where it landed, and it said y=61 before.
-		interface::NoiseParams np_h(27.4, 26, spread_h, 0, 5, 0.45);
-		interface::Noise noise_h(&np_h, 3, w, d);
-		noise_h.fbmMap2D(lc.getX() + spread_h.X/2,
-				lc.getZ() + spread_h.Z/2);
-		noise_h.transformNoiseMap();
+		// [NOISE_API] The scale times the octaves' sum (1.785): the old fbm
+		// was not scaled back to -1..1
+		interface::noise::NoiseParams np_h = {27.4, 46.4, spread_h, spread_h,
+				spread_h, 5, 0.45};
+		sv_<float> noise_h;
+		interface::noise::fill2(np_h, 3, lc.getX() + spread_h/2,
+				lc.getZ() + spread_h/2, w, d, noise_h);
 
-		interface::v3f spread_b(48, 48, 48);
-		interface::NoiseParams np_b(6.4, 6.3, spread_b, 11, 3, 0.5);
-		interface::Noise noise_b(&np_b, 3, w, d);
-		noise_b.fbmMap2D(lc.getX() + spread_b.X/2,
-				lc.getZ() + spread_b.Z/2);
-		noise_b.transformNoiseMap();
+		const float spread_b = 48;
+		// [NOISE_API] The scale times the octaves' sum (1.750): the old fbm
+		// was not scaled back to -1..1
+		interface::noise::NoiseParams np_b = {6.4, 11.0, spread_b, spread_b,
+				spread_b, 3, 0.5};
+		sv_<float> noise_b;
+		interface::noise::fill2(np_b, 3 + 11, lc.getX() + spread_b/2,
+				lc.getZ() + spread_b/2, w, d, noise_b);
 
 		size_t noise_i = 0;
 		for(int z = lc.getZ(); z <= uc.getZ(); z++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
-				float surface = 16.f + noise_h.result[noise_i] +
-						noise_b.result[noise_i];
+				float surface = 16.f + noise_h[noise_i] +
+						noise_b[noise_i];
 				noise_i++;
 				int ground_y = (int)std::floor(surface);
 				for(int y = lc.getY(); y <= uc.getY(); y++){
@@ -130,15 +141,15 @@ struct Worldgen: public worldgen::GeneratorInterface
 
 		auto extent = uc - lc + pv::Vector3DInt32(1, 1, 1);
 		int area = extent.getX() * extent.getZ();
-		auto pr = interface::PseudoRandom(
+		std::mt19937 pr(
 				13241 + section_p.getX() * 131 +
 				section_p.getZ() * 9176);
 		for(int i = 0; i < area / 110; i++){
-			int x = pr.range(lc.getX(), uc.getX());
-			int z = pr.range(lc.getZ(), uc.getZ());
+			int x = range(pr, lc.getX(), uc.getX());
+			int z = range(pr, lc.getZ(), uc.getZ());
 			size_t ti = (z-lc.getZ())*w + (x-lc.getX());
-			int ground_y = (int)std::floor(16.f + noise_h.result[ti] +
-					noise_b.result[ti]);
+			int ground_y = (int)std::floor(16.f + noise_h[ti] +
+					noise_b[ti]);
 			int y = ground_y + 1;
 			// A tree grows from the ground of this section; one whose ground
 			// is in the next section is that section's to place
@@ -148,7 +159,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 			if(y <= WATER_LEVEL)
 				continue;
 
-			int trunk = 3 + pr.range(0, 2);
+			int trunk = 3 + range(pr, 0, 2);
 			for(int y1 = y; y1 < y + trunk; y1++){
 				set_if_inside(volume, pv::Vector3DInt32(x, y1, z),
 						VoxelInstance(g_ids.tree));

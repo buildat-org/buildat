@@ -15,13 +15,27 @@
 		return self;
 	}
 
-	// set_node(x, y, z, id, param1, param2)
-	// The mapgen's noise, which is Luanti's own value noise: buildat
-	// vendored it for its own generators and this is the same code the Lua
-	// API is documented against. A mod's NoiseParams table, as the engine
-	// wants it.
+	// The mapgen's noise ([NOISE_API]): Luanti's own, luanti_mapgen's
+	// vendored code, through a query object taken once and asked directly
+	// as m_biome_query is (an access() a call would be a thread handoff per
+	// value). A mod's NoiseParams table, as Luanti reads it: lacunarity
+	// and flags too, the flags a string or a table of booleans
+	// (getflagsfield's two forms).
+	luanti_mapgen::NoiseQuery *m_noise_query = nullptr;
+
+	static luanti_mapgen::NoiseQuery* noise_query_of(Module *self)
+	{
+		if(self->m_noise_query == nullptr){
+			luanti_mapgen::access(self->m_server,
+					[&](luanti_mapgen::Interface *im){
+				self->m_noise_query = im->noise_query();
+			});
+		}
+		return self->m_noise_query;
+	}
+
 	static bool read_noise_params(lua_State *L, int idx,
-			interface::NoiseParams &np)
+			luanti_mapgen::Params::NoiseParams &np)
 	{
 		if(!lua_istable(L, idx))
 			return false;
@@ -33,11 +47,12 @@
 		};
 		np.offset = number("offset", 0.0f);
 		np.scale = number("scale", 1.0f);
-		np.seed = (int)number("seed", 0.0f);
-		np.octaves = (int)number("octaves", 3.0f);
+		np.seed = (int32_t)number("seed", 0.0f);
+		np.octaves = (int32_t)number("octaves", 3.0f);
 		// Luanti calls it persistence and took "persist" before that
 		np.persist = number("persistence", number("persist", 0.6f));
-		np.spread = interface::v3f(100.0f, 100.0f, 100.0f);
+		np.lacunarity = number("lacunarity", 2.0f);
+		np.spread_x = np.spread_y = np.spread_z = 100.0f;
 		lua_getfield(L, idx, "spread");
 		if(lua_istable(L, -1)){
 			const int t = lua_gettop(L);
@@ -48,38 +63,54 @@
 				lua_pop(L, 1);
 				return v;
 			};
-			np.spread.X = axis("x", 100.0f);
-			np.spread.Y = axis("y", np.spread.X);
-			np.spread.Z = axis("z", np.spread.X);
+			np.spread_x = axis("x", 100.0f);
+			np.spread_y = axis("y", np.spread_x);
+			np.spread_z = axis("z", np.spread_x);
+		}
+		lua_pop(L, 1);
+		np.flags.clear();
+		lua_getfield(L, idx, "flags");
+		if(lua_type(L, -1) == LUA_TSTRING){
+			np.flags = lua_tostring(L, -1);
+		} else if(lua_istable(L, -1)){
+			const int t = lua_gettop(L);
+			lua_pushnil(L);
+			while(lua_next(L, t) != 0){
+				if(lua_type(L, -2) == LUA_TSTRING && lua_isboolean(L, -1)){
+					if(!np.flags.empty())
+						np.flags += ",";
+					np.flags += ss_(lua_toboolean(L, -1) ? "" : "no")+
+							lua_tostring(L, -2);
+				}
+				lua_pop(L, 1);
+			}
 		}
 		lua_pop(L, 1);
 		if(np.octaves < 1)
 			np.octaves = 1;
 		if(np.octaves > 16)
 			np.octaves = 16;
-		if(np.spread.X == 0.0f) np.spread.X = 1.0f;
-		if(np.spread.Y == 0.0f) np.spread.Y = 1.0f;
-		if(np.spread.Z == 0.0f) np.spread.Z = 1.0f;
+		if(np.spread_x == 0.0f) np.spread_x = 1.0f;
+		if(np.spread_y == 0.0f) np.spread_y = 1.0f;
+		if(np.spread_z == 0.0f) np.spread_z = 1.0f;
 		return true;
 	}
 
 	// __luanti_noise_value(np, seed, x, y [, z]) -> one value of it
 	static int l_noise_value(lua_State *L)
 	{
-		interface::NoiseParams np;
+		luanti_mapgen::Params::NoiseParams np;
 		if(!read_noise_params(L, 1, np))
 			return luaL_error(L, "noise: a NoiseParams table is wanted");
-		const int seed = (int)luaL_checkinteger(L, 2) + np.seed;
-		const float x = (float)luaL_checknumber(L, 3) / np.spread.X;
-		const float y = (float)luaL_checknumber(L, 4) / np.spread.Y;
-		float v;
-		if(lua_isnoneornil(L, 5)){
-			v = interface::noise2d_fbm(x, y, seed, np.octaves, np.persist);
-		} else {
-			const float z = (float)luaL_checknumber(L, 5) / np.spread.Z;
-			v = interface::noise3d_fbm(x, y, z, seed, np.octaves, np.persist);
-		}
-		lua_pushnumber(L, np.offset + v * np.scale);
+		const int32_t seed = (int32_t)luaL_checkinteger(L, 2);
+		const float x = (float)luaL_checknumber(L, 3);
+		const float y = (float)luaL_checknumber(L, 4);
+		const bool three_d = !lua_isnoneornil(L, 5);
+		const float z = three_d ? (float)luaL_checknumber(L, 5) : 0.0f;
+		luanti_mapgen::NoiseQuery *q = noise_query_of(module_of(L));
+		if(!q)
+			return luaL_error(L, "noise: no luanti_mapgen");
+		lua_pushnumber(L, q->point(np, seed, x, y, z, three_d));
 		return 1;
 	}
 
@@ -92,10 +123,10 @@
 	// array made fresh (extra_ordinance's mapgen, 2026-10-03).
 	static int l_noise_map(lua_State *L)
 	{
-		interface::NoiseParams np;
+		luanti_mapgen::Params::NoiseParams np;
 		if(!read_noise_params(L, 1, np))
 			return luaL_error(L, "noise: a NoiseParams table is wanted");
-		const int seed = (int)luaL_checkinteger(L, 2);
+		const int32_t seed = (int32_t)luaL_checkinteger(L, 2);
 		const float x = (float)luaL_checknumber(L, 3);
 		const float y = (float)luaL_checknumber(L, 4);
 		const float z = (float)luaL_checknumber(L, 5);
@@ -114,13 +145,11 @@
 		if(n > 16.0 * 1024 * 1024)
 			return luaL_error(L, "noise: %s values is more than this makes "
 					"at once", cs(itos((int64_t)n)));
-		interface::Noise noise(&np, seed, sx, sy, sz > 0 ? sz : 1);
-		float *result;
-		if(sz > 0)
-			result = noise.fbmMap3D(x, y, z);
-		else
-			result = noise.fbmMap2D(x, y);
-		noise.transformNoiseMap();
+		luanti_mapgen::NoiseQuery *q = noise_query_of(module_of(L));
+		if(!q)
+			return luaL_error(L, "noise: no luanti_mapgen");
+		sv_<float> result((size_t)n);
+		q->map(np, seed, x, y, z, sx, sy, sz, result.data());
 		if(lua_istable(L, 9))
 			lua_pushvalue(L, 9);
 		else
@@ -746,8 +775,10 @@
 
 	void on_module_unloaded(const interface::ModuleUnloadedEvent &event)
 	{
-		if(event.name == "luanti_mapgen")
+		if(event.name == "luanti_mapgen"){
 			m_biome_query = nullptr;
+			m_noise_query = nullptr;
+		}
 	}
 
 	static int l_biome_at(lua_State *L)

@@ -33,7 +33,6 @@
 #include "interface/sha1.h"
 #include "interface/sha256.h"
 #include "interface/compress.h"
-#include "interface/noise.h"
 #include "luanti/mapblock.h"
 #include "luanti/shapes.h"
 #include "luanti/node_registry.h"

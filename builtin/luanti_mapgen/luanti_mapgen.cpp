@@ -204,6 +204,30 @@ static void read_noise_params(const luanti_mapgen::Params::NoiseParams &src,
 	out.flags = (out.flags & ~mask) | set;
 }
 
+// [NOISE_API] Luanti's noise for builtin/luanti's Lua: one of these for
+// the module, nothing in it but the vendored functions
+struct CNoiseQuery: public luanti_mapgen::NoiseQuery
+{
+	float point(const luanti_mapgen::Params::NoiseParams &src, int32_t seed,
+			float x, float y, float z, bool three_d)
+	{
+		NoiseParams np;
+		read_noise_params(src, np);
+		return three_d ? NoiseFractal3D(&np, x, y, z, seed) :
+				NoiseFractal2D(&np, x, y, seed);
+	}
+	void map(const luanti_mapgen::Params::NoiseParams &src, int32_t seed,
+			float x, float y, float z, int sx, int sy, int sz, float *out)
+	{
+		NoiseParams np;
+		read_noise_params(src, np);
+		Noise noise(&np, seed, sx, sy, sz > 0 ? sz : 1);
+		const float *r = sz > 0 ? noise.noiseMap3D(x, y, z) :
+				noise.noiseMap2D(x, y);
+		std::copy(r, r + (size_t)sx * sy * (sz > 0 ? sz : 1), out);
+	}
+};
+
 static bool deco_type_of(const ss_ &name, DecorationType &out)
 {
 	if(name == "simple") out = DECO_SIMPLE;
@@ -1249,6 +1273,12 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	BiomeQuery* biome_query(const Params &params)
 	{
 		return query_generator(params);
+	}
+
+	CNoiseQuery m_noise_query;
+	NoiseQuery* noise_query()
+	{
+		return &m_noise_query;
 	}
 
 	// Interface
