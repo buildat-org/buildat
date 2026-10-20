@@ -641,7 +641,12 @@ buildat.sub_packet("starport:where", function(data)
 	end
 end)
 
-buildat.sub_packet("accounts:hello", function(data)
+-- **The join's own** ([WEB_JOIN_054]): the hello and the login's result
+-- are subscribed by start(), not here. A game loads a second instance for
+-- its menus and marks it logged in; a packet goes to whichever subscribed
+-- last, and when the server ran the game's script after the join's, that
+-- instance took the hello and drew no login page
+local function on_hello(data)
 	M.hello = cereal.binary_input(data, HELLO)
 	if draw_sidebar then
 		draw_sidebar()
@@ -654,6 +659,7 @@ buildat.sub_packet("accounts:hello", function(data)
 	-- Said again when an admin changes who may register: a user who has
 	-- joined already has nothing to do with it
 	if M.logged_in then
+		log:info("hello: logged in already")
 		return
 	end
 	-- A scripted or second client can skip the dialog
@@ -664,6 +670,9 @@ buildat.sub_packet("accounts:hello", function(data)
 	-- With a name and a password too, "That's my account"'s login
 	if auto_starport and auto_starport ~= "" and not M.auto_tried then
 		M.auto_tried = true
+		-- Every branch says which it took ([WEB_JOIN_054]: a web join
+		-- stopped after the hello with no line to tell why)
+		log:info("Logging in by " .. env .. "_STARPORT")
 		M.name = auto_name
 		send_login(auto_name or "", buildat.get_env(env .. "_PASSWORD") or "",
 				buildat.get_env(env .. "_CODE") or "", nil,
@@ -675,6 +684,7 @@ buildat.sub_packet("accounts:hello", function(data)
 	if auto_name and not M.auto_tried then
 		M.auto_tried = true
 		M.name = auto_name
+		log:info("Logging in as " .. auto_name .. " by " .. env .. "_NAME")
 		send_login(auto_name, buildat.get_env(env .. "_PASSWORD") or "",
 				buildat.get_env(env .. "_CODE") or "", nil,
 				buildat.get_env(env .. "_KEEP") == "1",
@@ -713,9 +723,9 @@ buildat.sub_packet("accounts:hello", function(data)
 	else
 		show_login(nil)
 	end
-end)
+end
 
-buildat.sub_packet("accounts:login_result", function(data)
+local function on_login_result(data)
 	local outer = cereal.binary_input(data, LOGIN_RESULT)
 	local r = outer.r
 	if outer.name ~= "" then
@@ -849,7 +859,7 @@ buildat.sub_packet("accounts:login_result", function(data)
 	-- [ACCOUNT_BUTTON]: the corner way in, unless the app placed its own
 	-- (it calls M.no_account_button(), by now if so)
 	show_account_button()
-end)
+end
 
 buildat.sub_packet("accounts:users", function(data)
 	M.users = cereal.binary_input(data, USERS)
@@ -3517,6 +3527,8 @@ end
 -- The join: the server's hello brings the dialog, or the scripted login
 function M.start(o)
 	opts = o or {}
+	buildat.sub_packet("accounts:hello", on_hello)
+	buildat.sub_packet("accounts:login_result", on_login_result)
 	buildat.send_packet("accounts:get_hello", "")
 end
 

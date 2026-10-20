@@ -1,0 +1,17 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "accounts: the login page shown", 120],
+	["wait", 800],
+	["click", 600, 566],
+	["wait", 1500],
+	["type", "tester"],
+	["key", "Tab"],
+	["type", "smokepass"],
+	["key", "Tab"],
+	["type", "smokepass"],
+	["key", "Tab"],
+	["type", "${SETUP_CODE}"],
+	["click", 600, 582],
+	["waitlog", "Joined as tester", 30],
+	["waitlog", "hillclimb: this client's car is [0-9]", 30]
+]

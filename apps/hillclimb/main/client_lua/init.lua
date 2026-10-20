@@ -856,6 +856,12 @@ end
 local function pressed(name)
 	return magic.input:GetKeyPress(name)
 end
+-- A key typed into a field is the field's ([WEB_JOIN_054]: the setup code's
+-- "T" opened the chat over the login page)
+local function typing()
+	local focus = magic.ui.focusElement
+	return focus ~= nil and focus:GetTypeName() == "LineEdit"
+end
 local hud_note = nil
 -- [HC_OPEN_EDGES] "Off the track": the car put back (main.cpp)
 buildat.sub_packet("hillclimb:note", function(data)
@@ -1173,7 +1179,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 			pause.open()
 		end
 	end
-	if not chat_open and not menu and not pause.held() and
+	if not chat_open and not menu and not pause.held() and not typing() and
 			pressed(key.chat) then
 		open_chat()
 	end
