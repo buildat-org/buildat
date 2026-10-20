@@ -103,9 +103,9 @@ drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLC
 # side, put back; a minute parked on the bottom pad, a stone thrown off
 # the left edge at 1 s
 drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
-# [HC_PUT_BACK_FURTHER] The same, steered right on: off the side again
-# and again, each put back 2 s further
-drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 40:Q" &
+# [HC_PUT_BACK_FURTHER] The same, steered right three times: off the
+# side, then up past the 10 m mark and off again, then off once more
+drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 9:W2 14:W2D 16:W2 22:W2D 24:W2 32:Q" &
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 60:Q" &
 # [HC_CIRCUIT] A flat circuit 24 m wide and 30 long, no switchbacks: two
 # cars steered round by P (the second slower), a 60 s round; and one
@@ -289,15 +289,19 @@ if back:
 else:
     want(False, "off the side: never put back")
 # [HC_PUT_BACK_FURTHER] Put back k in a row: the pose 2k to 2k + 1 s
-# before the first; a 10 m mark passed between starts the count again
+# before the first, or with none that old the oldest; a 10 m mark passed
+# between starts the count again (1, the mark, 1, 2)
 ser = re.findall(r"drive passed \d+ m|drive's car put back \((\d+) in a "
     r"row\), the pose (\S+) s before", open("%s/series.log" % d,
     errors="replace").read())
-want(len([k for k, a in ser if k]) >= 3 and all(not k or
-    2 * int(k) <= float(a) <= 2 * int(k) + 1.05 for k, a in ser),
-    "put back in a row, 2 s further each: %s" % ser)
+backs = [(int(k), float(a)) for k, a in ser if k]
+oldest = max([a for k, a in backs] or [0])
+want(len(backs) >= 3 and max(k for k, a in backs) >= 2 and all(2 * k <= a <= 2 * k + 1.05 or
+    (a == oldest and a < 2 * k) for k, a in backs),
+    "put back in a row, 2 s further each, then the oldest: %s" % ser)
 want(all(int(k) == (int(p[0]) + 1 if p[0] else 1) for p, (k, a) in zip(
-    [("", "")] + ser, ser) if k), "the count from 1 after a mark: %s" % ser)
+    [("", "")] + ser, ser) if k) and any(not k for k, a in ser[1:-1]),
+    "the count from 1 after a mark: %s" % ser)
 want("put back" not in open("%s/parked.log" % d, errors="replace").read() and
     "put back" not in open("%s/flat.log" % d, errors="replace").read(),
     "a car parked a minute, and the flat's off the area's end, never put back")
