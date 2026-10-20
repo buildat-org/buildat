@@ -559,7 +559,9 @@ grep -aq "hillclimb: the hill as it was made, seed 1" "$m" && [ "$seeds" = "1 1 
 	fail "the hill not made anew with its seed: seeds $seeds ($m)"
 grep -aq "hillclimb: the round's results:.*$n1" "$t/mp2.log" || fail "client2 shown no results ($t/mp2.log)"
 echo "  two cars: $n1 and $n2, ghosts both ways; the round: $n1's run, $n2 observing; seeds $seeds"
-mp_server pub BUILDAT_HILLCLIMB_FEATURES=0
+# [HC_STARPORT] Its Starport a dead local port: the admin's IDs turned on
+# announce to nothing real
+mp_server pub "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9"
 # [HC_GUEST_PLAY] The player in by "Play as a guest": guest1 with a car;
 # a registration as guest7 refused
 printf '%s\n' "wait_log 120000 accounts: the login page shown" \
@@ -572,6 +574,15 @@ BUILDAT_JOIN_NAME=guest7 BUILDAT_JOIN_PASSWORD=guest7pass BUILDAT_JOIN_CREATE=1 
 	mp_client mp4 "$t/mp4.cmds"
 wait $c3 || fail "the public client ($t/mp3.log)"
 wait $CLIENT || fail "the guest7 client ($t/mp4.log)"
+# [HC_STARPORT] An admin (the setup code's) turns Starport IDs on from
+# the Server window's setting: the hello then says they are taken
+code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/pub.log" | head -1)
+printf '%s\n' "wait_log_any 60000 admin script: done" \
+	"wait_log_any 20000 hello: Starport IDs taken" quit > "$t/mp5.cmds"
+BUILDAT_JOIN_NAME=adm BUILDAT_JOIN_PASSWORD=admpass123 BUILDAT_JOIN_CREATE=1 \
+BUILDAT_JOIN_CODE=$code BUILDAT_JOIN_ADMIN="setting starport_ids anyone" \
+	mp_client mp5 "$t/mp5.cmds"
+wait $CLIENT || fail "the admin's Starport IDs ($t/mp5.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "hillclimb: params from .* refused: not an admin" "$t/pub.log" &&
 	! grep -aq "hillclimb: the hill, seed 1, 15 degrees" "$t/pub.log" &&
@@ -584,6 +595,10 @@ grep -aq "joined as a guest, guest1" "$t/pub.log" &&
 grep -aq 'Login refused: "guest7" is kept' "$t/mp4.log" ||
 	fail "guest7 registered ($t/mp4.log)"
 echo "  a guest: guest1 by one press, with a car; guest7 refused to registration"
+grep -aq "hello: Starport IDs not taken" "$t/mp5.log" &&
+	grep -aq "admin result: Announced, unlisted, to https://127.0.0.1:9" "$t/mp5.log" ||
+	fail "Starport IDs not turned on by the admin ($t/mp5.log)"
+echo "  Starport: IDs off at first, an admin turns them on (starport_announce loaded)"
 mp_server loc BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "a local server, rounds every 600 s" "$t/loc.log" || fail "a local game's rounds not 10 min ($t/loc.log)"

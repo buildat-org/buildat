@@ -13,6 +13,7 @@
 		{"module": "voxel_shading"},
 		{"module": "worldgen"},
 		{"module": "accounts"},
+		{"module": "starport_announce"},
 		{"module": "moderation"},
 		{"module": "chat"},
 		{"module": "world_menu"}
