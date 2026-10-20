@@ -24,7 +24,10 @@ VoxelVolume::VoxelVolume(const pv::Region &region,
 	m_planes(planes),
 	m_w(region.getWidthInVoxels()),
 	m_h(region.getHeightInVoxels()),
-	m_d(region.getDepthInVoxels())
+	m_d(region.getDepthInVoxels()),
+	m_lx(region.getLowerCorner().getX()),
+	m_ly(region.getLowerCorner().getY()),
+	m_lz(region.getLowerCorner().getZ())
 {
 	m_data.resize(m_planes.size());
 }
@@ -286,8 +289,27 @@ VoxelSample VoxelVolume::sample_at(int32_t x, int32_t y, int32_t z) const
 		return out;
 	const size_t n = m_data.size() < VOXEL_MAX_PLANES ?
 			m_data.size() : VOXEL_MAX_PLANES;
-	for(size_t i = 0; i < n; i++)
-		out.planes[i] = plane_at((uint8_t)i, x, y, z);
+	// The bounds and the index once, not once per plane (plane_at's)
+	const size_t at = index_of(x, y, z);
+	for(size_t i = 0; i < n; i++){
+		const sv_<uint8_t> &bytes = m_data[i];
+		if(bytes.empty())
+			continue;
+		switch(m_planes[i].bits){
+		case 8:
+			out.planes[i] = bytes[at];
+			break;
+		case 16:
+			out.planes[i] = (uint32_t)bytes[at * 2] |
+					((uint32_t)bytes[at * 2 + 1] << 8);
+			break;
+		default: {
+			const uint8_t *p = &bytes[at * 4];
+			out.planes[i] = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+					((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+		}
+		}
+	}
 	return out;
 }
 

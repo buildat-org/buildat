@@ -18,6 +18,8 @@
 //   ["type", text]          as typed, character by character
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, or one character
+//   ["holdkey", name, ms]   a key held down for ms: a car driven
+//                           (Firefox only)
 //   ["selall"]              Ctrl+A
 //   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
 //   ["click", x, y]         left button, in CSS pixels
@@ -182,6 +184,11 @@ async function firefox() {
 				wait: "complete"}),
 		type: t => keys([...t].flatMap(press)),
 		key: k => keys(press(KEYS[k] ? KEYS[k][0] : k)),
+		holdkey: (k, ms) => {
+			const v = KEYS[k] ? KEYS[k][0] : k;
+			return keys([{type: "keyDown", value: v},
+					{type: "pause", duration: ms}, {type: "keyUp", value: v}]);
+		},
 		chord: ch => {
 			const [mods, k] = chordOf(ch);
 			const v = mods.map(m => MODS[m][0]);

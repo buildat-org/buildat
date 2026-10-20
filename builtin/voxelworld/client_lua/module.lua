@@ -295,6 +295,11 @@ local HORIZON_FLUSH_US = 5000000
 local horizon_cols = {}   -- "x,z" -> {chunks = {cy = local string}, merged = string or nil, changed_us}
 local horizon_dirty = {}  -- "x,z" -> time_us the column last moved
 local horizon_meshed_us = {}  -- node id -> time_us its geometry was last made
+-- node id -> true: changed since its heights were last read; read at its
+-- remesh, once however many changes came before it ([HC_WEB_CHOPPY]: read
+-- in each change, 7-13 ms each in a browser, with the remesh a second or
+-- two behind the changes)
+local horizon_pending = {}
 local horizon_none_row = nil
 
 local function horizon_key(cx, cz)
@@ -462,7 +467,7 @@ function sub_events()
 		local values = cereal.binary_input(data, {"object",
 			{"node_id", "int32_t"},
 		})
-		log:info("voxelworld:node_volume_updated: "..dump(values))
+		log:debug("voxelworld:node_volume_updated: "..values.node_id)
 		node_volume_cache[values.node_id] = nil -- Clear cache
 		local node = replicate.main_scene:GetNode(values.node_id)
 		-- The server's answer to a predicted write ([PREDICTION]): a
@@ -497,8 +502,8 @@ function sub_events()
 				end
 			end
 		end
-		if node and not node:GetVar("buildat_voxel_data"):IsEmpty() then
-			note_horizon(node, true)
+		if node then
+			horizon_pending[values.node_id] = true
 		end
 		-- A chunk the player had predicted a write into is the answer to
 		-- something they did, and it goes before the world's own churn
@@ -547,6 +552,10 @@ function sub_events()
 			-- shader reading the packed one ([LOD_LIGHT])
 			local horizon = nil
 			local t0 = buildat.get_time_us()
+			if horizon_pending[node:GetID()] then
+				horizon_pending[node:GetID()] = nil
+				note_horizon(node, true)
+			end
 			if M.horizon and M.use_skylight and M.chunk_size_voxels and
 					M.chunk_size_voxels.x == HORIZON_CHUNK then
 				horizon = horizon_map_for((buildat.Vector3(node_p) /

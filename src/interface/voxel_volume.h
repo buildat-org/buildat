@@ -177,20 +177,16 @@ namespace interface
 
 		bool contains(int32_t x, int32_t y, int32_t z) const
 		{
-			const pv::Vector3DInt32 &lc = m_region.getLowerCorner();
-			return x >= lc.getX() && y >= lc.getY() && z >= lc.getZ() &&
-					x - lc.getX() < m_w && y - lc.getY() < m_h &&
-					z - lc.getZ() < m_d;
+			return x >= m_lx && y >= m_ly && z >= m_lz &&
+					x - m_lx < m_w && y - m_ly < m_h && z - m_lz < m_d;
 		}
 
 	private:
 		friend class VoxelVolume::Sampler;
 		size_t index_of(int32_t x, int32_t y, int32_t z) const
 		{
-			const pv::Vector3DInt32 &lc = m_region.getLowerCorner();
-			return (size_t)(x - lc.getX()) +
-					(size_t)(y - lc.getY()) * m_w +
-					(size_t)(z - lc.getZ()) * m_w * m_h;
+			return (size_t)(x - m_lx) + (size_t)(y - m_ly) * m_w +
+					(size_t)(z - m_lz) * m_w * m_h;
 		}
 
 		pv::Region m_region{pv::Vector3DInt32(0, 0, 0),
@@ -199,6 +195,9 @@ namespace interface
 		// One entry per plane; empty means nothing has written it
 		sv_<sv_<uint8_t>> m_data;
 		int32_t m_w = 0, m_h = 0, m_d = 0;
+		// m_region's lower corner: its getter is a call into PolyVox, and
+		// contains() and index_of() run per voxel ([HC_WEB_CHOPPY])
+		int32_t m_lx = 0, m_ly = 0, m_lz = 0;
 	};
 
 	// A volume seen as samples rather than as words, for PolyVox.
