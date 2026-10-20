@@ -203,6 +203,14 @@ function M.wrap_class(type_name, def)
 		end
 		meta.__newindex = function(table, key, value)
 			if meta.dead then error(meta.dead, 2) end
+			-- [SECURITY_RUN_7] A client's secret field is written by the code
+			-- that made it only: a script that walked the UI to it set its
+			-- text, and swapped the password typed into the Starport ID
+			-- dialog for one it knew, or capped its length
+			if type_name == "LineEdit" and not meta.trusted_reader and
+					M.is_secret_field(unsafe) then
+				error("a client's secret field is not a script's to write", 2)
+			end
 			if def.custom_newindex then
 				return def.custom_newindex(safe, key, value)
 			end

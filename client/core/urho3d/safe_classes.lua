@@ -2064,7 +2064,18 @@ function M.define(dst, util)
 				end
 				raw:SetName(name)
 			end,
-			SetText = util.self_function("SetText", {}, {"UIElement", "string"}),
+			-- Not into a client's secret field by any wrapper but its maker's
+			-- ([SECURITY_RUN_7]; the property's guard is magic_sandbox's)
+			SetText = function(self, text)
+				local m = getmetatable(self)
+				local raw = m and m.unsafe
+				if raw ~= nil and magic_sandbox.is_secret_field(raw) and
+						not m.trusted_reader then
+					error("a client's secret field is not a script's to write")
+				end
+				return util.self_function("SetText", {},
+						{"UIElement", "string"})(self, text)
+			end,
 			-- Text::SetFont(Font*, float size), and **the size is the
 			-- argument that was missing**: without it in the signature the
 			-- sandbox dropped it and every caller drew at Urho3D's own

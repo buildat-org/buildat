@@ -93,6 +93,13 @@ if grep -aq "launch sandbox: polled [we]" "$out/cli.log"; then
 	echo "FAIL: a script polled a key typed into the Starport ID dialog"
 	exit 1
 fi
+# [SECURITY_RUN_7] The dialog's password field written by the script:
+# its text, SetText and its length, each refused
+if ! grep -aq "launch sandbox: secret field writes refused: 3" "$out/cli.log"; then
+	echo "FAIL: a script wrote the Starport ID dialog's password field --" \
+			"$(grep -a "secret field" "$out/cli.log" | tr '\n' ' ')"
+	exit 1
+fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field"
 exit 0

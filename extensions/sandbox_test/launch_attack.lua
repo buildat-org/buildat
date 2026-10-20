@@ -120,11 +120,43 @@ function M.run()
 	-- here (it must be seen: the poll works) and one into the Starport ID
 	-- dialog's field (it must not: a secret field's keys are nobody
 	-- else's, polled or not)
+	-- **Writing the secret field** ([SECURITY_RUN_7]): once the Starport
+	-- ID dialog is up, its password field walked to and written three
+	-- ways; a write that lands could swap what the user typed for a
+	-- password the script knows. Each must be refused.
+	local wrote = false
 	magic.SubscribeToEvent("Update", function()
 		for key = 97, 122 do
 			if magic.input:GetKeyPress(key) then
 				log:info("launch sandbox: polled " .. string.char(key))
 			end
+		end
+		-- GetChild() takes no recursive flag: walked by index
+		local function find(el, depth)
+			if el:GetName() == "__trusted_secret" then return el end
+			if depth > 12 then return nil end
+			for i = 0, el:GetNumChildren() - 1 do
+				local c = el:GetChild(i)
+				local f = c and find(c, depth + 1)
+				if f then return f end
+			end
+		end
+		local e = not wrote and find(magic.ui.root, 0)
+		if e then
+			wrote = true
+			local refused = 0
+			for name, w in pairs({
+				text = function() e.text = "known" end,
+				SetText = function() e:SetText("known") end,
+				maxLength = function() e.maxLength = 1 end,
+			}) do
+				if pcall(w) then
+					log:warning("launch sandbox: wrote the secret field by " .. name)
+				else
+					refused = refused + 1
+				end
+			end
+			log:info("launch sandbox: secret field writes refused: " .. refused)
 		end
 	end)
 	-- The one line a check reads
