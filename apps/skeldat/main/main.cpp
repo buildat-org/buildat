@@ -1260,8 +1260,11 @@ struct Module: public interface::Module, public PlayersHost,
 		storage::access(m_server, [&](storage::Interface *i){
 			for(const storage::SaveInfo &info : i->list())
 				if(info.name == name){
-					i->remove(name);
-					log_i(MODULE, "skeldat: re-run: deleted %s", cs(name));
+					// [SECURITY_RUN_7] Any player starts a re-run: the old
+					// one to the trash, where the world menu restores it
+					const ss_ to = i->trash(name);
+					log_i(MODULE, "skeldat: re-run: %s to the trash (%s)", cs(name),
+							to.empty() ? "failed" : cs(to));
 				}
 			storage::Save *save = i->create(name);
 			if(save){
