@@ -362,7 +362,12 @@ struct Session
 			}
 			b.first += 1;
 		}
-		if(m_chat_gate && values[0][0] != '/'){
+		// [SECURITY_RUN_7] A command is not chat, but /me and /msg are
+		// simplified: a game's own commands that speak are not gated
+		const ss_ &line = values[0];
+		const bool speaks = line[0] != '/' || line == "/me" ||
+				line.compare(0, 4, "/me ") == 0 || line.compare(0, 5, "/msg ") == 0;
+		if(m_chat_gate && speaks){
 			const ss_ why = m_chat_gate(packet.sender, name);
 			if(!why.empty()){
 				log_i("luanti", "%s's line refused: %s", cs(name), cs(why));
