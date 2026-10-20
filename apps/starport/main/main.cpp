@@ -99,23 +99,6 @@ static bool same(const ss_ &a, const ss_ &b)
 	return d == 0;
 }
 
-// One address counts once: an IPv4 address's /24, an IPv6 one's /48 (the
-// first three groups)
-static ss_ subnet_of(const ss_ &addr)
-{
-	if(addr.find(':') != ss_::npos){
-		size_t at = 0;
-		for(int i = 0; i < 3 && at != ss_::npos; i++){
-			at = addr.find(':', at);
-			if(at != ss_::npos)
-				at++;
-		}
-		return at == ss_::npos ? addr : addr.substr(0, at);
-	}
-	const size_t dot = addr.rfind('.');
-	return dot == ss_::npos ? addr : addr.substr(0, dot);
-}
-
 static const json::Value& jget(const json::Value &v, const char *k)
 {
 	return v.get(k);
@@ -1592,8 +1575,10 @@ struct Module: public interface::Module, public moderation::Host
 				"a key whose reports were mostly rejected" : "";
 	}
 
-	// [STARPORT] 7: one per address range, and all the new keys of a burst
-	// together as one
+	// [STARPORT] 7: one per address range -- an IPv4 /24, an IPv6 /48,
+	// however the address was written ([SECURITY_RUN_7]: by its text,
+	// 2001:db8::1 and 2001:db8:0:1::5 were two) -- and all the new keys of
+	// a burst together as one
 	ss_ bucket(const json::Value &rep)
 	{
 		if(rep.get("trusted").is_true())
@@ -1601,7 +1586,8 @@ struct Module: public interface::Module, public moderation::Host
 		const json::Value k = load("keys", jstr(rep, "key"));
 		const bool fresh = !k.is_object() ||
 				day_of(now_s()) - jint(k, "first_day") < 2;
-		return fresh ? "fresh" : "net:"+subnet_of(jstr(rep, "address"));
+		return fresh ? "fresh" : "net:"+network::address_bin(
+				jstr(rep, "address"), 3);
 	}
 
 	json::Value auto_act(const json::Value &g, const ss_ &id,

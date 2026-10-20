@@ -18,8 +18,9 @@ namespace network
 
 	// The block an address is counted in for a limit against floods:
 	// IPv4 by /24 ("1.2.3.0/24", an IPv4-mapped one too), IPv6 by /64
-	// ("2001:db8:0:1::/64"); anything else as it is
-	inline ss_ address_bin(ss_ a)
+	// ("2001:db8:0:1::/64"), or by v6_groups groups of it (3: a /48, one
+	// network); anything else as it is
+	inline ss_ address_bin(ss_ a, int v6_groups = 4)
 	{
 		const size_t zone = a.find('%');
 		if(zone != ss_::npos)
@@ -55,7 +56,7 @@ namespace network
 			g.push_back("0");
 		g.insert(g.end(), t.begin(), t.end());
 		ss_ out;
-		for(size_t i = 0; i < 4 && i < g.size(); i++){
+		for(size_t i = 0; i < (size_t)v6_groups && i < g.size(); i++){
 			ss_ x = g[i];
 			for(char &c : x)
 				c = tolower((unsigned char)c);
@@ -63,7 +64,7 @@ namespace network
 				x.erase(0, 1);
 			out += x+":";
 		}
-		return out+":/64";
+		return out+":/"+itos(16 * v6_groups);
 	}
 
 	// What a per-address limit or ban keys an address by: IPv4 as it is,

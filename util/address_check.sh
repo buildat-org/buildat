@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: ~2s (2026-10-08)
-# covers: src/interface/address.h
+# covers: src/interface/address.h builtin/network/api.h
 # [REWORK_FIXES]: host:port and URL parsing, the one copy every caller uses.
 #   util/address_check.sh
 set -eu
@@ -57,4 +57,23 @@ int main()
 }
 CPP
 c++ -std=c++11 -I"$here/src" -I"$here" "$t/c.cpp" -o "$t/c" && "$t/c"
-echo "PASS: host:port and URLs parsed as one"
+# [SECURITY_RUN_7] network::address_bin: a block however the address is
+# written, a /48 given three groups (Starport's report buckets)
+cat > "$t/b.cpp" <<'CPP'
+#include "network/api.h"
+#include <cassert>
+int main()
+{
+	using network::address_bin;
+	assert(address_bin("1.2.3.4") == "1.2.3.0/24");
+	assert(address_bin("::ffff:1.2.3.4") == "1.2.3.0/24");
+	assert(address_bin("2001:db8:0:1::5") == "2001:db8:0:1::/64");
+	assert(address_bin("2001:db8::1", 3) == address_bin("2001:db8:0:1::5", 3));
+	assert(address_bin("2001:DB8:0000:1::5", 3) == "2001:db8:0::/48");
+	assert(address_bin("1.2.3.4", 3) == "1.2.3.0/24");
+	return 0;
+}
+CPP
+c++ -std=c++11 -I"$here/src" -I"$here/builtin" -I"$here" \
+	-I"$here/3rdparty/cereal/include" "$t/b.cpp" -o "$t/b" && "$t/b"
+echo "PASS: host:port and URLs parsed as one; an address's block however it is written"
