@@ -2,7 +2,7 @@
 	["nav", "${URL}"],
 	["waitlog", "accounts: the login page shown", 120],
 	["wait", 800],
-	["click", 600, 566],
+	["click", 600, 585],
 	["wait", 1500],
 	["type", "tester"],
 	["key", "Tab"],
