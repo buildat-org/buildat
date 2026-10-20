@@ -774,7 +774,9 @@ end
 -- down; the ranking bottom left, the chat over it
 local status = panel(9, "focus")
 local hint = panel(9)
-local prompt = panel(9, "main")
+-- [HC_PROMPT_SIZE] the amber one at 18, twice the rest (the HUD's size
+-- before [HC_HUD_LAYOUT] halved it)
+local prompt = panel(18, "main")
 local board = panel(8)
 -- The chat's last lines, and the round's results, a while each
 local chat_text = panel(8)
