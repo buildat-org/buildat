@@ -566,6 +566,41 @@ sent=$(grep -a "hillclimb: the hill menu sends params " "$t/pause.log" | sed 's/
 [ -n "$steep" ] && [ "$(echo "$sent" | awk '{print $2}')" = "$steep" ] ||
 	fail "the hill menu: steepness ${steep:-none}, sent ${sent:-none} ($t/pause.log)"
 echo "  Escape: the menu, no input under it, settings and back, leave"
+# [HC_HUD_LAYOUT] The accelerator bound to Up in the key store: the start
+# prompt names it, centred across at 75% down; driving, with turn 1
+# missed (a circuit's car started past it), the prompt says that alone
+mp_server hud "BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_FEATURES=0
+	BUILDAT_HILLCLIMB_STEEP=5 BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30
+	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6
+	BUILDAT_HILLCLIMB_START=36.9,7,180" -u launcher=1
+mkdir -p "$t/u_hud"
+printf 'shared\tmove.forward\tUp\n' > "$t/u_hud/keys.txt"
+cat > "$t/hud.cmds" <<C
+wait_log 120000 hillclimb: this client's car is
+wait_log 20000 hillclimb: the prompt centred at
+delay 1000
+screenshot $t/hud_start.png
+keydown Up
+wait_log 10000 Missed turn 1
+delay 500
+screenshot $t/hud_driving.png
+keyup Up
+quit
+C
+mp_client hud "$t/hud.cmds"
+wait $CLIENT || fail "the HUD's drive ($t/hud.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+python3 -I - "$t/hud.log" <<'PY' || fail "the HUD's prompt ($t/hud.log)"
+import re, sys
+said = re.findall(r"hillclimb: the prompt centred at (-?\d+),(-?\d+) of (\d+)x(\d+): (.*)",
+    open(sys.argv[1], errors="replace").read())
+start = [s for s in said if s[4].startswith("Up starts your laps")]
+ok = bool(start) and all(abs(int(x) - int(w) / 2) <= 1 and
+    abs(int(y) - 0.75 * int(h)) <= 1 for x, y, w, h, _ in start)
+ok = ok and any(s[4] == "Missed turn 1" for s in said[said.index(start[0]):])
+print("  the HUD: %s" % " / ".join(s[4] for s in said))
+sys.exit(0 if ok else 1)
+PY
 # [HC_TOUCH] BUILDAT_TOUCH=1 at 800x500 (a UI scale of 1.25: the ring's
 # 65 pixels are 81): a stick pushed full up on the left drives up the
 # slope in fourth, the same on the right half, full down backs it; Start

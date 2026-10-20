@@ -641,12 +641,15 @@ local KEYS = {
 	{id = "chat", label = "Chat", default = "T", shared = "chat"},
 }
 local key = {}
+-- [HC_HUD_LAYOUT] Each one's name as bound, for the texts that name it
+local key_name = {}
 -- Again after the settings window, where they may have changed
 local function read_keys()
 	local names = buildat.declare_keys(nil, "hillclimb", KEYS)
 	for _, k in ipairs(KEYS) do
 		local name = type(names) == "table" and names[k.id] or k.default
 		key[k.id] = magic.input:GetKeyFromName(name)
+		key_name[k.id] = name
 	end
 end
 read_keys()
@@ -735,18 +738,44 @@ end
 --
 -- The clock, the ranking and the menu
 --
-local function text(x, y, size)
-	local t = magic.ui.root:CreateChild("Text")
+-- [HC_HUD_LAYOUT] A text on the brand's background, a box sized to it;
+-- hidden while it says nothing. draw_hud places each.
+local PAD = 4
+local function panel(size, colour)
+	local bg = magic.ui.root:CreateChild("BorderImage")
+	bg.color = magic.Color(ui_utils.rgb("background"))
+	local t = bg:CreateChild("Text")
 	t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), size)
-	t:SetTextEffect(magic.TE_SHADOW)
-	t:SetPosition(x, y)
-	return t
+	t:SetPosition(PAD, PAD)
+	if colour then
+		t.color = magic.Color(ui_utils.rgb(colour))
+	end
+	bg.visible = false
+	return {bg = bg, t = t, shown = true}
 end
-local hud = text(12, 10, 18)
--- Under the HUD, however many lines it has (draw_hud places it)
-local board = text(12, 150, 15)
+local function set_panel(p, s, x, y)
+	p.bg.visible = p.shown and s ~= ""
+	if s == "" then
+		return
+	end
+	p.t:SetText(s)
+	p.bg:SetFixedSize(p.t.width + 2 * PAD, p.t.height + 2 * PAD)
+	-- A function of the size: where it goes
+	if type(x) == "function" then
+		x, y = x(p.bg.width, p.bg.height)
+	end
+	p.bg:SetPosition(math.floor(x), math.floor(y))
+end
+-- The state the player is at, brand cyan, top left; the bound keys under
+-- it; what asks the player to act or wait, brand amber, across at 75%
+-- down; the ranking bottom left, the chat over it
+local status = panel(9, "focus")
+local hint = panel(9)
+local prompt = panel(9, "main")
+local board = panel(8)
 -- The chat's last lines, and the round's results, a while each
-local chat_text = text(12, 360, 15)
+local chat_text = panel(8)
+local said_prompt = nil
 local chat_lines = {}
 table.insert(chat.listeners, function(line)
 	chat_lines[#chat_lines + 1] = {line = line, t = buildat.get_time_us()}
@@ -1019,12 +1048,12 @@ local function menu_keys()
 			open_hill_menu()
 		end
 	end
-	board.visible = menu == nil
+	board.shown = menu == nil
 end
 
 local GEARS = {[0] = "R", "1", "2", "3", "4"}
-local ROUND = {"Round: the clock starts with the first drive",
-	"Round: %d:%02d left", "Extra time: %d:%02d left to finish",
+local ROUND = {"The round's clock starts with the first drive",
+	"Round %d:%02d left", "Extra time %d:%02d",
 	"The round is over; a new hill in %d s"}
 local function mmss(x)
 	x = math.max(0, math.floor(x))
@@ -1033,61 +1062,82 @@ end
 -- What is watched: this client's car, or observing, the leader's
 local function draw_hud(watched)
 	local own = cars[own_id]
-	local b, a = own and own.states[2], own and own.states[1]
+	local b = own and own.states[2]
 	if b == nil then
 		return
 	end
-	local speed = 0
-	if a and b.t > a.t then
-		local dx, dy, dz = b.v[1] - a.v[1], b.v[2] - a.v[2], b.v[3] - a.v[3]
-		speed = math.sqrt(dx * dx + dy * dy + dz * dz) / (b.t - a.t) / U
-	end
 	local race, t = b.v[17], b.v[18]
-	local state = race == 0 and (touch and "The stick up starts the clock"
-			or "W starts the clock") or race == 1 and "" or
-			race == 3 and "The hill is being made" or
-			race == 4 and "Out of time: did not finish" or
-			string.format("Finished in %.2f s. %s: another run", t,
-			touch and "Start" or "Backspace")
-	-- [HC_CIRCUIT] Laps, to the round's end
 	local circuit = picks and picks.circuit == 1
 	local laps = b.v[20] or 0
-	if circuit and race == 1 then
-		state = string.format("Laps: %d", laps)
-	elseif circuit and race == 2 then
-		state = string.format("%d laps in the round", laps)
-	elseif circuit and race == 0 then
-		state = (touch and "The stick up" or "W") .. " starts your laps"
+	-- [HC_HUD_LAYOUT] The middle: what asks for an action or a wait;
+	-- while driving only a missed turn and the server's notes
+	local go = touch and "The stick up" or key_name.accel
+	local ask = {}
+	if race == 0 then
+		ask[1] = go .. (circuit and " starts your laps" or " starts the clock")
+	elseif race == 2 then
+		ask[1] = circuit and string.format("%d laps in the round", laps) or
+				string.format("Finished in %.2f s. %s: another run", t,
+				touch and "Start" or key_name.reset)
+	elseif race == 3 then
+		ask[1] = "The hill is being made"
+	elseif race == 4 then
+		ask[1] = "Out of time: did not finish"
 	end
-	if watched and watched ~= own and watched.states[2] then
-		state = string.format("Observing %s: %.2f s", watched.name,
-				watched.states[2].v[18])
-	end
-	local lines = {string.format("Gear %s   %4.1f m/s   %6.2f s",
-			GEARS[b.v[16]] or "?", speed, t), state}
-	if round.phase > 0 then
-		local f = ROUND[round.phase]
-		lines[#lines + 1] = round.phase == 4 and string.format(f,
-				math.ceil(round.left)) or round.phase == 1 and f or
-				string.format(f, mmss(round.left))
+	if race ~= 1 and (round.phase == 1 or round.phase == 4) then
+		ask[#ask + 1] = round.phase == 4 and string.format(ROUND[4],
+				math.ceil(round.left)) or ROUND[1]
 	end
 	if missed and missed.ok and scene.elapsedTime - missed.t > 1 then
 		missed.node:Remove()
 		missed = nil
 	end
 	if missed and not missed.ok then
-		lines[#lines + 1] = "Missed turn " .. missed.n
+		ask[#ask + 1] = "Missed turn " .. missed.n
 	elseif hud_note and scene.elapsedTime - hud_note.t < 3 then
-		lines[#lines + 1] = hud_note.text
+		ask[#ask + 1] = hud_note.text
 	end
-	-- The touch controls' buttons say theirs
-	if not touch then
-		lines[#lines + 1] = "Tab: the hill and the car   Backspace: back to "
-				.. "the start   T: chat   Esc: menu"
+	-- The status line: laps, the round's clock, the gear, the time
+	local line = {}
+	if watched and watched ~= own and watched.states[2] then
+		line[1] = string.format("Observing %s: %.2f s", watched.name,
+				watched.states[2].v[18])
+	else
+		if circuit and race == 1 then
+			line[#line + 1] = string.format("Laps: %d", laps)
+		end
+		if round.phase == 2 or round.phase == 3 then
+			line[#line + 1] = string.format(ROUND[round.phase], mmss(round.left))
+		elseif race == 1 and round.phase == 1 then
+			line[#line + 1] = ROUND[1]
+		end
+		line[#line + 1] = "Gear " .. (GEARS[b.v[16]] or "?")
+		line[#line + 1] = string.format("%.2f s", t)
 	end
-	hud:SetText(table.concat(lines, "\n"))
-	board:SetPosition(12, 10 + hud.height + 8)
-	if picks and board.visible then
+	local W, H = magic.ui.root.width, magic.ui.root.height
+	set_panel(status, table.concat(line, "   "), 12, 10)
+	-- The keys as bound, no more; the touch controls' buttons say theirs
+	-- simplified: the most important ones fixed here; a game's own list
+	-- when a second game wants one
+	hint.shown = not touch
+	local k = key_name
+	set_panel(hint, string.format("%s %s %s %s  %s %s %s %s  %s  %s  Tab  %s  Esc",
+			k.accel, k.left, k.brake, k.right, k.gear1, k.gear2, k.gear3,
+			k.gear4, k.reverse, k.reset, k.chat), 12,
+			10 + (status.bg.visible and status.bg.height + 4 or 0))
+	local said = table.concat(ask, "\n")
+	set_panel(prompt, said, function(w, h)
+		return (W - w) / 2, H * 0.75 - h / 2
+	end)
+	if said ~= said_prompt then
+		said_prompt = said
+		-- Its middle, which a check holds to the screen's
+		log:info(string.format("hillclimb: the prompt centred at %d,%d of %dx%d: %s",
+				prompt.bg.position.x + prompt.bg.width / 2,
+				prompt.bg.position.y + prompt.bg.height / 2, W, H,
+				(said:gsub("\n", " | "))))
+	end
+	if picks then
 		local rows = {}
 		if results and scene.elapsedTime - results.t < 8 then
 			rows[1] = "The round's results:"
@@ -1113,7 +1163,9 @@ local function draw_hud(watched)
 				rows[#rows + 1] = "  (none yet)"
 			end
 		end
-		board:SetText(table.concat(rows, "\n"))
+		set_panel(board, table.concat(rows, "\n"), function(w, h)
+			return 12, H - h - 10
+		end)
 	end
 	local now, shown = buildat.get_time_us(), {}
 	for _, c in ipairs(chat_lines) do
@@ -1121,7 +1173,10 @@ local function draw_hud(watched)
 			shown[#shown + 1] = c.line
 		end
 	end
-	chat_text:SetText(table.concat(shown, "\n"))
+	local over = board.bg.visible and board.bg.position.y or H
+	set_panel(chat_text, table.concat(shown, "\n"), function(w, h)
+		return 12, over - h - 6
+	end)
 end
 
 -- [HC_SCORES] A High scores set's parameters made the hill, the seed,

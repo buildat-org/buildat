@@ -28,6 +28,7 @@ local colors = {
 	error = {1, 0.36, 0.36},       -- #ff5c5c
 	focus = {0.149, 0.851, 1},     -- #26d9ff
 	main = {1, 0.62, 0.122},       -- #ff9e1f, the main button
+	background = {0.106, 0.106, 0.133}, -- #1b1b22, the web page's
 }
 -- db_text(db): a sound volume as it is shown, "-6 dB (66%)" ([VOLUME_PERCENT]);
 -- -33 and under is "off". The percent is loudness, 2^(dB/10): -10 dB is

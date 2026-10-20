@@ -305,7 +305,10 @@ struct Module: public interface::Module
 		m_payload = std::fmax(0, std::fmin(2000,
 				env_or("BUILDAT_HILLCLIMB_PAYLOAD", 0)));
 		if(const char *s = getenv("BUILDAT_HILLCLIMB_START")){
-			std::istringstream is(s);
+			// "x z yaw", or "x,z,yaw" where a space would split the variable
+			ss_ v = s;
+			std::replace(v.begin(), v.end(), ',', ' ');
+			std::istringstream is(v);
 			m_start_set = (bool)(is >> m_start_x >> m_start_z >> m_start_yaw);
 		}
 		if(const char *s = getenv("BUILDAT_HILLCLIMB_DRIVE")){

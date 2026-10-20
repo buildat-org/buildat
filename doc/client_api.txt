@@ -1465,7 +1465,7 @@ db_text(db) -> text
   -33 and under "off" ([VOLUME_PERCENT]).
 rgb(name) -> r, g, b
 - The menus' colours ([MENU_BRAND]): "text", "dim", "warn", "error",
-  "focus", "main"; magic.Color(ui_utils.rgb("error")).
+  "focus", "main", "background" (the web page's); magic.Color(ui_utils.rgb("error")).
 The look is ui_utils/res/style.xml, Buildat's (the same as its web
 pages'), each element type styled by SetStyleAuto(); a screen's one main
 button (OK, Join, Play, Log in) is el:SetStyle("PrimaryButton") instead.
