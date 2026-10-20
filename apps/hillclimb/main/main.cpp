@@ -88,6 +88,8 @@
 #include <set>
 #include <memory>
 #include <deque>
+#include <cctype>
+#include <algorithm>
 #include <mutex>
 #include <map>
 #include <ctime>
@@ -131,6 +133,57 @@ static const int WIDTH_MIN = 12, WIDTH_MAX = 60, LANE_MIN = 4, LANE_MAX = 12;
 static const int PAYLOADS[] = {0, 500, 1000, 2000};
 // [HC_MULTIPLAYER] The rounds' intervals, seconds: never, or minutes
 static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
+// [HC_SOFT_GROUND] How the ground gives and how the car drives into it,
+// the hill menu's: the sand's bearing (kPa), digging (voxels per metre
+// slid), the engine's power (% of the gears' torque), grip (the tyres'
+// mu, hundredths) and the stones' looseness (% of a stone's front open
+// to come free; its bed's mu with it). Grip works against the ruts: a
+// tyre that slips less digs less. The defaults are ground.h's and car.h's.
+// simplified: one sand for the whole hill ([HILLCLIMB] 5's terrains)
+struct Knob { const char *name; int def, min, max; };
+static const Knob KNOBS[] = {{"bearing", 80, 20, 100}, {"dig", 2, 1, 8},
+		{"power", 100, 50, 200}, {"grip", 60, 40, 100}, {"stones", 35, 15, 50}};
+static const int N_KNOBS = 5;
+struct Knobs
+{
+	int v[N_KNOBS];
+	Knobs(){ for(int i = 0; i < N_KNOBS; i++) v[i] = KNOBS[i].def; }
+	bool operator!=(const Knobs &o) const
+	{
+		return !std::equal(v, v + N_KNOBS, o.v);
+	}
+	void soil(ground::Soil &s) const
+	{
+		const ground::Soil d;
+		s.bearing = v[0] * 1000.0f;
+		s.dig_rate = (float)v[1];
+		s.open_front = v[4] / 100.0f;
+		s.mu_bed = d.mu_bed * v[4] / KNOBS[4].def;
+	}
+	void spec(car::Spec &s) const
+	{
+		const car::Spec d;
+		for(int i = 0; i < car::GEARS; i++)
+			s.gear_torque[i] = d.gear_torque[i] * v[2] / 100.0f;
+		s.mu = v[3] / 100.0f;
+	}
+	// The ranking key's parts after "sand/": the ones off their defaults
+	ss_ key() const
+	{
+		ss_ k;
+		for(int i = 0; i < N_KNOBS; i++)
+			if(v[i] != KNOBS[i].def)
+				k += ss_(KNOBS[i].name) + itos(v[i]) + "/";
+		return k;
+	}
+	ss_ text() const
+	{
+		char buf[128];
+		snprintf(buf, sizeof buf, "sand %d kPa, dig %d, power %d%%, grip %.2f, "
+				"stones %d%%", v[0], v[1], v[2], v[3] / 100.0f, v[4]);
+		return buf;
+	}
+};
 // The cars' collision layer: they touch the world and the stones, not
 // each other
 static const unsigned CAR_LAYER = 2;
@@ -179,6 +232,7 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 	SceneReference m_scene = nullptr;
 	hill::Params m_params;
+	Knobs m_knobs;
 	float m_latitude = 60, m_day = 172, m_time = 14;
 	up_<hill::Hill> m_hill;
 	std::shared_ptr<ground::Grid> m_grid;
@@ -208,6 +262,7 @@ struct Module: public interface::Module
 	// A pick from the menu, made when worldgen has nothing queued
 	bool m_pending = false;
 	hill::Params m_pending_params;
+	Knobs m_pending_knobs;
 	float m_pending_look[3] = {0, 0, 0};
 	float m_pending_payload = 0;
 	// The time trial; OUT: the round ended the run ("did not finish")
@@ -297,6 +352,13 @@ struct Module: public interface::Module
 		m_params.lane_m = std::fmin(m_params.width_m / 2,
 				env_or("BUILDAT_HILLCLIMB_LANE", 7));
 		m_params.switchbacks = (int)env_or("BUILDAT_HILLCLIMB_SWITCHBACKS", 50);
+		// [HC_SOFT_GROUND] _BEARING, _DIG, _POWER, _GRIP, _STONES
+		for(int i = 0; i < N_KNOBS; i++){
+			ss_ e = "BUILDAT_HILLCLIMB_" + ss_(KNOBS[i].name);
+			std::transform(e.begin(), e.end(), e.begin(), ::toupper);
+			m_knobs.v[i] = std::max(KNOBS[i].min, std::min(KNOBS[i].max,
+					(int)env_or(e.c_str(), (float)KNOBS[i].def)));
+		}
 		// For the car's checks: a hill with no pits or rocks
 		m_params.features = env_or("BUILDAT_HILLCLIMB_FEATURES", 1) != 0;
 		m_latitude = env_or("BUILDAT_HILLCLIMB_LATITUDE", 60);
@@ -501,6 +563,7 @@ struct Module: public interface::Module
 		m_grid = std::make_shared<ground::Grid>(h);
 		m_worldgen->set(m_grid);
 		m_ground.reset(new ground::Ground(*m_grid, h));
+		m_knobs.soil(m_ground->soil);
 		m_outside = outside_packet(h);
 		m_fences = fences_packet(h);
 		m_ground_live = false;
@@ -536,10 +599,10 @@ struct Module: public interface::Module
 						lp.p.getY() / S, lp.p.getZ() / S));
 		});
 		log_i(MODULE, "hillclimb: the hill, seed %u, %.0f degrees +-%.0f, %.0f m "
-				"long, %.1f m high; %dx%dx%d voxels", m_params.seed,
+				"long, %.1f m high; %dx%dx%d voxels; %s", m_params.seed,
 				m_params.steep_deg, m_params.steep_var_deg, m_params.length_m,
 				h.rise / hill::U,
-				h.size_x(), h.size_y(), h.size_z());
+				h.size_x(), h.size_y(), h.size_z(), cs(m_knobs.text()));
 		if(m_params.circuit)
 			log_i(MODULE, "hillclimb: a circuit %.0f m wide, lanes of %.1f m, "
 					"switchbacks %d%%: %zu turns, %zu fences", m_params.width_m,
@@ -830,7 +893,9 @@ struct Module: public interface::Module
 		// A run cannot start in a round's extra time
 		pl.observing = m_round == R_EXTRA || m_round == R_RESULTS;
 		main_context::access(m_server, m_scene, [&](magic::Scene *scene){
-			pl.car.reset(new car::Car(car::Spec(), m_payload));
+			car::Spec spec;
+			m_knobs.spec(spec);
+			pl.car.reset(new car::Car(spec, m_payload));
 			const car::Spec &s = pl.car->spec;
 			// Local: the client draws the car from hillclimb:car
 			magic::Node *n = scene->CreateChild("Car", magic::LOCAL);
@@ -1329,17 +1394,17 @@ struct Module: public interface::Module
 		char buf[192];
 		if(m_params.circuit){
 			snprintf(buf, sizeof buf, "%s/circuit/steep%d/var%d/length%d/width%d/"
-					"lane%d/switch%d/round%d/sand/payload%d/", SCORES_VERSION,
+					"lane%d/switch%d/round%d/sand/%spayload%d/", SCORES_VERSION,
 					(int)m_params.steep_deg, (int)m_params.steep_var_deg,
 					(int)m_params.length_m, (int)m_params.width_m,
 					(int)m_params.lane_m, m_params.switchbacks, (int)m_interval,
-					(int)m_payload);
+					cs(m_knobs.key()), (int)m_payload);
 			return buf;
 		}
 		snprintf(buf, sizeof buf, "%s/straight/steep%d/var%d/length%d/sand/"
-				"payload%d/", SCORES_VERSION, (int)m_params.steep_deg,
+				"%spayload%d/", SCORES_VERSION, (int)m_params.steep_deg,
 				(int)m_params.steep_var_deg, (int)m_params.length_m,
-				(int)m_payload);
+				cs(m_knobs.key()), (int)m_payload);
 		return buf;
 	}
 
@@ -1507,6 +1572,7 @@ struct Module: public interface::Module
 			// The hill anew: as it was made, the seed kept
 			m_pending_params = m_params;
 			m_pending_payload = m_payload;
+			m_pending_knobs = m_knobs;
 			m_pending_look[0] = m_latitude;
 			m_pending_look[1] = m_day;
 			m_pending_look[2] = m_time;
@@ -1713,7 +1779,7 @@ struct Module: public interface::Module
 	}
 
 	// "seed steep length payload latitude day hour [interval [var [circuit
-	// width lane switchbacks]]]" from the menu, held to what a player may
+	// width lane switchbacks [bearing dig power grip stones]]]]" from the menu, held to what a player may
 	// pick; made when worldgen is idle (on_tick). On a public server the
 	// seed is the round's: kept. [HC_CIRCUIT] A circuit's rounds never
 	// "never"; its lanes at most half its width.
@@ -1735,8 +1801,18 @@ struct Module: public interface::Module
 			return;
 		int circuit = m_params.circuit, width = (int)m_params.width_m,
 				lane = (int)m_params.lane_m, sw = m_params.switchbacks;
-		if(is >> interval && is >> var)
-			is >> circuit >> width >> lane >> sw;
+		Knobs knobs = m_knobs;
+		if(is >> interval && is >> var && is >> circuit >> width >> lane >> sw){
+			Knobs k;
+			bool all = true;
+			for(int i = 0; i < N_KNOBS && all; i++)
+				all = !!(is >> k.v[i]);
+			if(all)
+				knobs = k;
+		}
+		for(int i = 0; i < N_KNOBS; i++)
+			if(knobs.v[i] < KNOBS[i].min || knobs.v[i] > KNOBS[i].max)
+				return;
 		if(circuit && interval == -1 && m_interval <= 0)
 			interval = 600;
 		if((circuit != 0 && circuit != 1) || width < WIDTH_MIN ||
@@ -1774,6 +1850,7 @@ struct Module: public interface::Module
 		m_pending_params.lane_m = (float)lane;
 		m_pending_params.switchbacks = sw;
 		m_pending_payload = (float)payload;
+		m_pending_knobs = knobs;
 		m_pending_look[0] = lat;
 		m_pending_look[1] = day;
 		m_pending_look[2] = hour;
@@ -1803,6 +1880,7 @@ struct Module: public interface::Module
 		m_day = m_pending_look[1];
 		m_time = m_pending_look[2];
 		m_payload = m_pending_payload;
+		m_knobs = m_pending_knobs;
 		if(hill_changed){
 			make_hill();
 		} else {
@@ -1811,14 +1889,16 @@ struct Module: public interface::Module
 			if(m_ground && m_ground->changed())
 				m_ground->restore();
 			clear_rocks();
-			log_i(MODULE, "hillclimb: the hill as it was made, seed %u",
-					m_params.seed);
+			m_knobs.soil(m_ground->soil);
+			log_i(MODULE, "hillclimb: the hill as it was made, seed %u; %s",
+					m_params.seed, cs(m_knobs.text()));
 		}
 		// Every car at the start, nobody observing, the round waiting
 		for(auto &kv : m_players){
 			Player &pl = kv.second;
 			main_context::access(m_server, [&](main_context::Interface *){
 				pl.car->payload = m_payload;
+				m_knobs.spec(pl.car->spec);
 				pl.body->SetMass(pl.car->mass());
 			});
 			reset_race(pl);
@@ -1845,7 +1925,8 @@ struct Module: public interface::Module
 	// in voxels, the place and the hour, and the menu's picks: the seed,
 	// the steepness, the length and the payload; whether this peer may
 	// pick, the rounds' interval in seconds and the steepness's variance;
-	// [HC_CIRCUIT] whether a circuit, its width, lanes and switchbacks
+	// [HC_CIRCUIT] whether a circuit, its width, lanes and switchbacks;
+	// [HC_SOFT_GROUND] the knobs
 	ss_ hill_packet(size_t peer)
 	{
 		const hill::Hill &h = *m_hill;
@@ -1859,7 +1940,10 @@ struct Module: public interface::Module
 				(int)m_params.length_m, (int)m_payload, may_pick(peer) ? 1 : 0,
 				(int)m_interval, (int)m_params.steep_var_deg, m_params.circuit ? 1 : 0,
 				(int)m_params.width_m, (int)m_params.lane_m, m_params.switchbacks);
-		return buf;
+		ss_ out = buf;
+		for(int i = 0; i < N_KNOBS; i++)
+			out += " " + itos(m_knobs.v[i]);
+		return out;
 	}
 	// The fences (hill.h): a line of posts each, 2 m apart at most, on the
 	// ground, "x y z" in voxels each, ";" between the lines

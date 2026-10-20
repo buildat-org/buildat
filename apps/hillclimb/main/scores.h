@@ -56,10 +56,25 @@
 		else
 			snprintf(buf, sizeof buf, "%d degrees +-%d, %d m, %s", at("steep"),
 					at("var"), at("length"), cs(load));
+		// [HC_SOFT_GROUND] The knobs off their defaults
+		ss_ name = buf;
+		for(int i = 0; i < N_KNOBS; i++){
+			auto it = k.p.find(KNOBS[i].name);
+			if(it == k.p.end())
+				continue;
+			static const char *f[N_KNOBS] = {", sand %d kPa", ", dig %d",
+					", power %d%%", ", grip %.2f", ", stones %d%%"};
+			char t[32];
+			if(i == 3)
+				snprintf(t, sizeof t, f[i], it->second / 100.0);
+			else
+				snprintf(t, sizeof t, f[i], it->second);
+			name += t;
+		}
 		// An older version's: its seed, which its key held
 		if(k.version != SCORES_VERSION)
-			return k.version+", seed "+itos(at("seed"))+": "+buf;
-		return buf;
+			return k.version+", seed "+itos(at("seed"))+": "+name;
+		return name;
 	}
 	// An entry: "name\tdate\tfinished\tunfinished[\tseed]"
 	static json::Value entry_of(const KeyParts &k, const ss_ &value)

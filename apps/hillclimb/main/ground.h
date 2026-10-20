@@ -435,6 +435,40 @@ int main()
 	Ground g3(g, h);
 	g3.rest(car::V3(20, 40, 100), 1.3f);
 	assert(g.at(20, 40, 100) == hill::STONE && !g3.changes.empty());
+	// [HC_SOFT_GROUND] The knobs' ends (main.cpp's KNOBS): an empty 2 t
+	// car's tyre at rest for 2 s sinks in sand of 20 kPa, not of 100; a
+	// tyre sliding 1 m/s for 2 s digs 4 times as much at 8 as at 2 (steps
+	// of 1/256 s, which add up exactly)
+	auto at_rest = [&](float kpa, int cx){
+		Ground gk(g, h);
+		gk.soil.bearing = kpa * 1000;
+		car::Wheel w;
+		w.at = car::V3(cx / U, (hill::Hill::BASE + 0.5f) / U, 30 / U);
+		w.axle = car::V3(1, 0, 0);
+		w.load = 2000 * 9.81f / 4;
+		for(int i = 0; i < 512; i++)
+			gk.wheel(0, w, spec, U, 1.0f / 256);
+		return gk.sunk;
+	};
+	const int soft = at_rest(20, 25), firm = at_rest(100, 55);
+	auto sliding = [&](float rate, int cx){
+		Ground gk(g, h);
+		gk.soil.dig_rate = rate;
+		car::Wheel w;
+		w.at = car::V3(cx / U, (hill::Hill::BASE + 0.5f) / U, 40 / U);
+		w.axle = car::V3(1, 0, 0);
+		w.load = 2000 * 9.81f / 4;
+		w.slipping = true;
+		w.slide = car::V3(0, 0, -1);
+		for(int i = 0; i < 512; i++)
+			gk.wheel(0, w, spec, U, 1.0f / 256);
+		return gk.dug;
+	};
+	const int dug2 = sliding(2, 25), dug8 = sliding(8, 55);
+	printf("ground.h: at rest, %d sunk at 20 kPa, %d at 100; sliding, %d dug "
+			"at 2, %d at 8\n", soft, firm, dug2, dug8);
+	assert(soft >= 1 && firm == 0);
+	assert(dug2 > 0 && dug8 == 4 * dug2);
 	printf("ground.h: self test passed\n");
 	return 0;
 }

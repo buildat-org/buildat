@@ -63,7 +63,7 @@ port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
-	[series]=18 [fence]=19 [fixed]=20 [back]=21)
+	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23)
 drive()
 {
 	local name=$1; shift
@@ -108,6 +108,15 @@ drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
 # side, then up past the 10 m mark and off again, then off once more
 drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 9:W2 14:W2D 16:W2 22:W2D 24:W2 32:Q" &
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 2:SG 60:Q" &
+# [HC_SOFT_GROUND] Up a hill of 15 degrees and 20 m in second, the knobs at
+# their defaults and at the softest set; the finish names the key
+soft="BUILDAT_HILLCLIMB_BEARING=20 BUILDAT_HILLCLIMB_DIG=8
+	BUILDAT_HILLCLIMB_POWER=200 BUILDAT_HILLCLIMB_GRIP=40 BUILDAT_HILLCLIMB_STONES=15"
+drive firm BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
+	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
+# shellcheck disable=SC2086
+drive soft $soft BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
+	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
 # [HC_CIRCUIT] A flat circuit 24 m wide and 30 long, no switchbacks: two
 # cars steered round by P (the second slower), a 60 s round; and one
 # turned left off the start into the middle
@@ -156,11 +165,19 @@ grep -aq "hillclimb: drive missed turn 1, past it" "$t/fixed.log" &&
 	grep -aq "hillclimb: drive drove the missed turn 1 at" "$t/fixed.log" &&
 	! grep -aq "put back" "$t/fixed.log" ||
 	fail "turn 1 missed and driven back to: not cleared ($t/fixed.log)"
+changed() { grep -ao 'ground=[0-9/]*' "$1" | tail -1 | tr '=/' '  ' |
+	awk '{print $2 + $3 + $4}'; }
+firm=$(changed "$t/firm.log") soft_n=$(changed "$t/soft.log")
+grep -aq "voxels; sand 20 kPa, dig 8, power 200%, grip 0.40, stones 15%" "$t/soft.log" &&
+	grep -aq "finish .* on v6/straight/steep15/var0/length20/sand/bearing20/dig8/power200/grip40/stones15/payload0/" "$t/soft.log" &&
+	grep -aq "finish .* on v6/straight/steep15/var0/length20/sand/payload0/" "$t/firm.log" &&
+	[ "${soft_n:-0}" -gt $(( ${firm:-0} + 100 )) ] ||
+	fail "the softest set: ${soft_n:-?} voxels changed against ${firm:-?}, or its hill line or key ($t/soft.log)"
 b="$t/back.log"
 grep -aq "hillclimb: drive at .*, turn 2 next, lanes 0\( 4\)\?$" "$b" &&
 	! grep -aq "missed turn\|put back" "$b" && grep -aq "hillclimb: drive's lap 1 at" "$b" ||
 	fail "backed past turn 1 into lane 0: not there, marked or put back, or no lap ($b)"
-echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven; backing past a turn and on to a lap"
+echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a missed turn marked, put back past the next, cleared when driven; backing past a turn and on to a lap; a climb changed $firm voxels at the defaults, $soft_n at the softest set"
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do
@@ -575,10 +592,44 @@ sent=$(grep -a "hillclimb: the hill menu sends params " "$t/pause.log" | sed 's/
 [ -n "$steep" ] && [ "$(echo "$sent" | awk '{print $2}')" = "$steep" ] ||
 	fail "the hill menu: steepness ${steep:-none}, sent ${sent:-none} ($t/pause.log)"
 echo "  Escape: the menu, no input under it, settings and back, leave"
+# [HC_SOFT_GROUND] The hill menu's second page: the sand's firmness a step
+# up, made; the server's hill line has it
+mp_server ground_srv "BUILDAT_HILLCLIMB_FEATURES=0" -u launcher=1
+cat > "$t/ground.cmds" <<C
+wait_log 120000 hillclimb: this client's car is
+delay 2000
+keypress Tab
+wait_log 5000 hillclimb: the hill menu shown
+delay 500
+click Button "Ground and car..."
+wait_log 5000 hillclimb: the hill menu shown (the ground and the car)
+delay 500
+keypress Down
+delay 200
+keypress Return
+delay 500
+keypress Down
+delay 200
+keypress Return
+wait_log 3000 hillclimb: the hill menu: bearing 90
+delay 300
+$(for i in 1 2 3 4 5; do echo keypress Down; echo delay 150; done)
+screenshot $t/ground_menu.png
+keypress Return
+wait_log 5000 hillclimb: the hill menu sends params
+delay 3000
+quit
+C
+mp_client ground "$t/ground.cmds"
+wait $CLIENT || fail "the ground page's drive ($t/ground.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "hillclimb: the hill as it was made, seed .*; sand 90 kPa, dig 2, power 100%, grip 0.60, stones 35%" \
+	"$t/ground_srv.log" || fail "the ground page's firmness not made ($t/ground_srv.log)"
+echo "  the hill menu's ground page: the sand's firmness made 90 kPa"
 # [HC_HUD_LAYOUT] The accelerator bound to Up in the key store: the start
 # prompt names it, centred across at 75% down; driving, with turn 1
 # missed (a circuit's car started past it), the prompt says that alone
-mp_server hud "BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_FEATURES=0
+mp_server hud_srv "BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_FEATURES=0
 	BUILDAT_HILLCLIMB_STEEP=5 BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30
 	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6
 	BUILDAT_HILLCLIMB_START=36.9,7,180" -u launcher=1

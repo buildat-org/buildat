@@ -311,8 +311,9 @@ end
 -- the steepness, the length and the payload; whether this client may
 -- pick ([HC_MULTIPLAYER] 2: an admin on a public server), the rounds'
 -- interval, seconds, and the steepness's variance ([HC_STEEP_NOISE]);
--- [HC_CIRCUIT] whether a circuit, its width and lanes (m), switchbacks (%).
--- Again whenever the menu makes another hill.
+-- [HC_CIRCUIT] whether a circuit, its width and lanes (m), switchbacks (%);
+-- [HC_SOFT_GROUND] the sand's bearing (kPa), digging, power (%), grip
+-- (hundredths) and stones (%). Again whenever the menu makes another hill.
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
 	local v = {}
@@ -326,7 +327,9 @@ buildat.sub_packet("hillclimb:hill", function(data)
 	picks = {seed = v[10], steep = v[11], length = v[12], payload = v[13],
 		lat = v[7], day = v[8], hour = v[9], interval = v[15] or 0,
 		steep_var = v[16] or 0, circuit = v[17] or 0, width = v[18] or 40,
-		lane = v[19] or 7, switchbacks = v[20] or 50}
+		lane = v[19] or 7, switchbacks = v[20] or 50, bearing = v[21] or 80,
+		dig = v[22] or 2, power = v[23] or 100, grip = v[24] or 60,
+		stones = v[25] or 35}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
@@ -838,6 +841,19 @@ local MENU = {
 		unit = "%", circuit = true},
 	{id = "payload", label = "Payload", list = {0, 500, 1000, 2000},
 		unit = " kg"},
+	-- [HC_SOFT_GROUND] How the ground gives (main.cpp's KNOBS), the menu's
+	-- second page: softer sand sinks under the car's weight, more digging
+	-- throws more where a tyre spins, more power spins them more; more grip
+	-- slips and digs less
+	{id = "bearing", label = "Sand firmness", min = 20, max = 100, step = 10,
+		unit = " kPa", ground = true},
+	{id = "dig", label = "Digging", min = 1, max = 8, step = 1, ground = true},
+	{id = "power", label = "Engine power", min = 50, max = 200, step = 10,
+		unit = "%", ground = true},
+	{id = "grip", label = "Grip", min = 40, max = 100, step = 5, ground = true,
+		show = function(v) return string.format("%.2f", v / 100) end},
+	{id = "stones", label = "Loose stones", min = 15, max = 50, step = 5,
+		unit = "% open", ground = true},
 	{id = "lat", label = "Latitude", min = -80, max = 80, step = 5,
 		unit = " degrees"},
 	{id = "day", label = "Day of the year", min = 1, max = 365, step = 7},
@@ -930,7 +946,7 @@ magic.SubscribeToEvent("command_seq:hillclimb_params", function(_, d)
 	log:info("hillclimb: the drive sends params " .. d:GetString("Param"))
 end)
 -- The Tab menu ([HC_HILL_MENU]: a window, a row a setting), or why not;
--- menu_values, its values to open again with (another race picked)
+-- menu_values, its values to open again with (another race or page picked)
 local menu_values = nil
 local function close_hill_menu()
 	if not menu then
@@ -964,7 +980,8 @@ local function open_hill_menu()
 	m.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 	local title = m.window:CreateChild("Text")
 	title:SetStyleAuto()
-	title.text = "The hill and the car"
+	local ground = values.page == "ground"
+	title.text = ground and "The ground and the car" or "The hill"
 	title:SetFontSize(16)
 	-- The seed: its digits typed, 1..999999, anything else back to the
 	-- last good one when it loses the focus; and Random
@@ -1006,7 +1023,8 @@ local function open_hill_menu()
 		if e.id == "interval" and values.circuit == 1 and choices[1][2] == 0 then
 			table.remove(choices, 1)
 		end
-		if values.circuit == 1 or not e.circuit then
+		if (e.ground or false) == ground and (values.circuit == 1 or
+				not e.circuit) then
 			m:add_dropdown(e.label, choices, values[e.id], function(v)
 				values[e.id] = v
 				log:info("hillclimb: the hill menu: " .. e.id .. " " .. v)
@@ -1025,15 +1043,40 @@ local function open_hill_menu()
 	m:add("Make it", function()
 		seed_read()
 		local v = values
-		local params = string.format("%d %d %d %d %g %g %g %d %d %d %d %d %d",
+		local params = string.format(
+				"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d",
 				v.seed, v.steep, v.length, v.payload, v.lat, v.day, v.hour,
-				v.interval, v.steep_var, v.circuit, v.width, v.lane, v.switchbacks)
+				v.interval, v.steep_var, v.circuit, v.width, v.lane, v.switchbacks,
+				v.bearing, v.dig, v.power, v.grip, v.stones)
 		buildat.send_packet("hillclimb:params", params)
 		log:info("hillclimb: the hill menu sends params " .. params)
 		close_hill_menu()
 	end, true)
-	m:add("Close", close_hill_menu)
-	log:info("hillclimb: the hill menu shown")
+	-- The other page, these values kept (on the next frame, as above), on
+	-- one row with Close: the window as high as it was, its rows where
+	-- the touch check taps them
+	local last = m.window:CreateChild("UIElement")
+	last:SetLayout(magic.LM_HORIZONTAL, 10, magic.IntRect(0, 0, 0, 0))
+	for _, b in ipairs({
+		{ground and "Back to the hill" or "Ground and car...",
+			function()
+				seed_read()
+				values.page = not ground and "ground" or nil
+				menu_values = values
+			end},
+		{"Close", close_hill_menu}}) do
+		local button = last:CreateChild("Button")
+		button:SetStyleAuto()
+		button:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(8, 0, 8, 0))
+		button:SetFixedHeight(row_h)
+		local t = button:CreateChild("Text")
+		t:SetStyleAuto()
+		t.text = b[1]
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		m:add(button, b[2])
+	end
+	log:info("hillclimb: the hill menu shown" ..
+			(ground and " (the ground and the car)" or ""))
 end
 local function menu_keys()
 	-- Tab opens and closes it; a dropdown's popup has the keys first
@@ -1187,12 +1230,15 @@ local function drive_set(set)
 	end
 	local v = picks
 	local c = set.circuit and 1 or 0
-	local params = string.format("%d %d %d %d %g %g %g %d %d %d %d %d %d",
+	-- A knob not in the set's key is at its default
+	local params = string.format(
+			"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d",
 			v.seed, set.steep or v.steep, set.length or v.length,
 			set.payload or 0, v.lat, v.day, v.hour,
 			c == 1 and (set.round or 600) or v.interval, set.var or 0, c,
 			set.width or v.width, set.lane or v.lane,
-			set.switch or v.switchbacks)
+			set.switch or v.switchbacks, set.bearing or 80, set.dig or 2,
+			set.power or 100, set.grip or 60, set.stones or 35)
 	buildat.send_packet("hillclimb:params", params)
 	log:info("hillclimb: the high scores' set sends params " .. params)
 end
