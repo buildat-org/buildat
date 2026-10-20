@@ -560,15 +560,30 @@ grep -aq "hillclimb: the hill as it was made, seed 1" "$m" && [ "$seeds" = "1 1 
 grep -aq "hillclimb: the round's results:.*$n1" "$t/mp2.log" || fail "client2 shown no results ($t/mp2.log)"
 echo "  two cars: $n1 and $n2, ghosts both ways; the round: $n1's run, $n2 observing; seeds $seeds"
 mp_server pub BUILDAT_HILLCLIMB_FEATURES=0
-printf '%s\n' "wait_log 120000 hillclimb: the hill" "delay 1000" \
+# [HC_GUEST_PLAY] The player in by "Play as a guest": guest1 with a car;
+# a registration as guest7 refused
+printf '%s\n' "wait_log 120000 accounts: the login page shown" \
+	'click Button "Play as a guest"' \
+	"wait_log 120000 hillclimb: this client's car is" \
 	"event hillclimb_params 1 15 30 0 60 172 14" "delay 1000" quit > "$t/mp3.cmds"
-mp_client mp3 "$t/mp3.cmds"
-wait $CLIENT || fail "the public client ($t/mp3.log)"
+mp_client mp3 "$t/mp3.cmds"; c3=$CLIENT
+printf '%s\n' "wait_log 120000 Login refused:" quit > "$t/mp4.cmds"
+BUILDAT_JOIN_NAME=guest7 BUILDAT_JOIN_PASSWORD=guest7pass BUILDAT_JOIN_CREATE=1 \
+	mp_client mp4 "$t/mp4.cmds"
+wait $c3 || fail "the public client ($t/mp3.log)"
+wait $CLIENT || fail "the guest7 client ($t/mp4.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "hillclimb: params from .* refused: not an admin" "$t/pub.log" &&
 	! grep -aq "hillclimb: the hill, seed 1, 15 degrees" "$t/pub.log" &&
 	grep -aq "a public server, rounds every 600 s" "$t/pub.log" ||
 	fail "a non-admin's params not refused, or the public rounds not 10 min ($t/pub.log)"
+grep -aq "joined as a guest, guest1" "$t/pub.log" &&
+	grep -aq "hillclimb: guest1's car (1)" "$t/pub.log" &&
+	grep -aq "accounts: logged in as guest1 by guest" "$t/mp3.log" ||
+	fail "no guest1 with a car ($t/pub.log, $t/mp3.log)"
+grep -aq 'Login refused: "guest7" is kept' "$t/mp4.log" ||
+	fail "guest7 registered ($t/mp4.log)"
+echo "  a guest: guest1 by one press, with a car; guest7 refused to registration"
 mp_server loc BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "a local server, rounds every 600 s" "$t/loc.log" || fail "a local game's rounds not 10 min ($t/loc.log)"

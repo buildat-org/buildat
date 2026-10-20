@@ -76,6 +76,11 @@ namespace accounts
 		// kick, a ban, a reset password and a deleted account then reach
 		// every connection of the name.
 		virtual void set_multiple_logins(bool on) = 0;
+		// [HC_GUEST_PLAY] Whether a peer may join as a guest: no account,
+		// "guest<n>" (the next free number this run), trust level LV_NEW,
+		// the same accounts:login; the login window offers it. Off by
+		// default
+		virtual void set_guests(bool on) = 0;
 		// Its address, as the network module has it (a trusted proxy's
 		// X-Forwarded-For included)
 		virtual ss_ address_of(PeerId peer) = 0;

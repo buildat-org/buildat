@@ -52,7 +52,9 @@ local LOGIN_RESULT = {"object", {"r", {"object", {"error", "string"},
 		{"token", "string"}}}, {"name", "string"}}
 local HELLO = {"object", {"local", "byte"}, {"setup", "byte"},
 		{"open_registration", "byte"}, {"starport", "byte"},
-		{"announce", "byte"}, {"version", "string"}}
+		{"announce", "byte"}, {"version", "string"},
+		-- [HC_GUEST_PLAY] the app lets a guest in
+		{"guests", "byte"}}
 local ADMIN = {"object", {"cmd", "string"}, {"name", "string"},
 		{"arg", "string"}, {"on", "byte"}}
 local USERS = {"object",
@@ -157,6 +159,14 @@ local token_tried = false
 
 -- The last login sent, for the TOTP code it may turn out to need
 local last_login = nil
+-- [HC_GUEST_PLAY] The join asked was a guest's: nothing of it kept
+local guest_join = false
+local function join_as_guest()
+	guest_join = true
+	last_login = nil
+	log:info("accounts: joining as a guest")
+	buildat.send_packet("accounts:guest", "")
+end
 
 -- The ID token of a login that links it to the account ([ID_CLAIM_ACCOUNT]:
 -- a name and a token both), or nil
@@ -522,6 +532,19 @@ show_login = function(error_text)
 	if code then
 		magic.SubscribeToEvent(code, "TextFinished", function() join() end)
 	end
+	-- [HC_GUEST_PLAY] Where the app lets guests in: one press, nothing
+	-- typed, nothing kept
+	if not is_local and M.hello and M.hello.guests == 1 then
+		local gb = w:CreateChild("Button")
+		gb:SetStyleAuto()
+		gb.minHeight = 30
+		gb:SetFocusMode(magic.FM_FOCUSABLE)
+		local gt = gb:CreateChild("Text")
+		gt:SetStyleAuto()
+		gt:SetText("Play as a guest")
+		gt:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		magic.SubscribeToEvent(gb, "Released", function() join_as_guest() end)
+	end
 	-- [ACCOUNT_CREATE]: making an account is its own window
 	if not is_local then
 		local cb = w:CreateChild("Button")
@@ -681,7 +704,12 @@ local function on_hello(data)
 		return
 	end
 	local token = buildat.storage_read("token") or ""
-	if auto_name and not M.auto_tried then
+	-- [HC_GUEST_PLAY] A scripted guest (<env>_GUEST=1)
+	if buildat.get_env(env .. "_GUEST") == "1" and M.hello.guests == 1 and
+			not M.auto_tried then
+		M.auto_tried = true
+		join_as_guest()
+	elseif auto_name and not M.auto_tried then
 		M.auto_tried = true
 		M.name = auto_name
 		log:info("Logging in as " .. auto_name .. " by " .. env .. "_NAME")
@@ -805,6 +833,17 @@ local function on_login_result(data)
 	M.close()
 	magic.ui:SetFocusElement(nil)
 	log:info("Joined as " .. tostring(M.name))
+	if guest_join then
+		-- Nothing kept: the next join's window has the user's own name;
+		-- no admin script or ntfy, which need an account
+		M.login_how = "guest"
+		log:info("accounts: logged in as " .. tostring(M.name) .. " by guest")
+		-- No account button: a guest has no account to manage
+		if M.on_joined then
+			M.on_joined(M.name)
+		end
+		return
+	end
 	-- [ACCOUNT_WHO] How, as sent. simplified: a TOTP wait's resend
 	-- reads as the kept login
 	local l = last_login or {}

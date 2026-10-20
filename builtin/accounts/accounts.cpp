@@ -398,16 +398,22 @@ static bool valid_name(const ss_ &name)
 
 // A name no new account takes: "client<digits>" is what an app calls a
 // peer that has not logged in (apps/vanilla's player_name_of), and an
-// account of that name was the same player to it ([SECURITY_RUN_1]).
-// One already made keeps logging in.
+// account of that name was the same player to it ([SECURITY_RUN_1]);
+// "guest<digits>" a guest's ([HC_GUEST_PLAY]). One already made keeps
+// logging in.
 static bool reserved_name(const ss_ &name)
 {
-	if(name.size() < 7 || upper(name.substr(0, 6)) != "CLIENT")
-		return false;
-	for(size_t i = 6; i < name.size(); i++)
-		if(!isdigit((unsigned char)name[i]))
-			return false;
-	return true;
+	for(const char *prefix : {"CLIENT", "GUEST"}){
+		const size_t n = strlen(prefix);
+		if(name.size() <= n || upper(name.substr(0, n)) != prefix)
+			continue;
+		bool digits = true;
+		for(size_t i = n; i < name.size(); i++)
+			digits = digits && isdigit((unsigned char)name[i]);
+		if(digits)
+			return true;
+	}
+	return false;
 }
 
 struct Hello
@@ -424,9 +430,12 @@ struct Hello
 	uint8_t announce = 0;
 	// [SERVER_VERSION]: "0.6.75-ea7eb9e33", for the Server window
 	ss_ version;
+	// [HC_GUEST_PLAY] the app lets a peer in as a guest (set_guests)
+	uint8_t guests = 0;
 	template<class Archive>
 	void serialize(Archive &archive){
-		archive(local, setup, open_registration, starport, announce, version);
+		archive(local, setup, open_registration, starport, announce, version,
+				guests);
 	}
 };
 
@@ -583,6 +592,7 @@ static ss_ size_text(uint64_t bytes)
 struct Peer
 {
 	ss_ name; // empty until joined
+	bool guest = false; // [HC_GUEST_PLAY] joined as a guest, no account
 	ss_ address;
 	bool web = false;
 	int failures = 0;
@@ -722,7 +732,7 @@ struct Module: public interface::Module, public Interface
 				"accounts:admin", "accounts:passwd", "accounts:logout",
 				"accounts:totp", "accounts:link_starport",
 				"accounts:unlink_starport", "accounts:open_lan",
-				"accounts:ntfy"})
+				"accounts:ntfy", "accounts:guest"})
 			m_server->sub_event(this,
 					Event::t(ss_("network:packet_received/")+name));
 	}
@@ -757,6 +767,8 @@ struct Module: public interface::Module, public Interface
 				on_unlink_starport, network::Packet)
 		EVENT_TYPEN("network:packet_received/accounts:open_lan",
 				on_open_lan, network::Packet)
+		EVENT_TYPEN("network:packet_received/accounts:guest", on_guest,
+				network::Packet)
 	}
 
 	// One key of what the launcher asked for through the server's -u
@@ -869,6 +881,14 @@ struct Module: public interface::Module, public Interface
 	}
 
 	bool m_multiple_logins = false;
+	// [HC_GUEST_PLAY] Whether the app lets guests in, and the last guest's
+	// number this run
+	bool m_guests = false;
+	int m_last_guest = 0;
+	void set_guests(bool on)
+	{
+		m_guests = on;
+	}
 	void set_multiple_logins(bool on)
 	{
 		m_multiple_logins = on;
@@ -1673,6 +1693,7 @@ struct Module: public interface::Module, public Interface
 		h.setup = !h.local && !m_setup_code.empty();
 		h.open_registration = m_access.open_registration;
 		h.version = ss_(BUILDAT_VERSION) + "-" + BUILDAT_GIT_HASH;
+		h.guests = m_guests;
 		starport_announce::access(m_server,
 				[&](starport_announce::Interface *s){
 			h.starport = s->accepts_ids() ? 1 : 0;
@@ -2013,8 +2034,8 @@ struct Module: public interface::Module, public Interface
 				return reply("There is no account named \""+name+"\". Use "
 						"\"Create a new account\" to make one.");
 			if(reserved_name(name))
-				return reply("\""+name+"\" is kept for a client that has "
-						"not logged in; choose another name");
+				return reply("\""+name+"\" is kept for a client or a "
+						"guest; choose another name");
 			sv_<ss_> privs;
 			if(local){
 				// The first admin of the launcher's server is its own user
@@ -2122,6 +2143,55 @@ struct Module: public interface::Module, public Interface
 		m_server->emit_event("accounts:login", new Login(packet.sender, name));
 		send_users_to_staff();
 		ntfy_ask(packet.sender, name);
+	}
+
+	// [HC_GUEST_PLAY] A guest: no account and nothing to type -- the next
+	// free "guest<n>" this run, at LV_NEW (no account has a level), with
+	// the same accounts:login an account's join gives. An address ban and
+	// a full server hold as for a login.
+	void on_guest(const network::Packet &packet)
+	{
+		auto pit = m_peers.find(packet.sender);
+		if(pit == m_peers.end() || !m_store)
+			return;
+		Peer &peer = pit->second;
+		ss_ name;
+		auto reply = [&](const ss_ &error){
+			send(packet.sender, "accounts:login_result",
+					pack(std::make_pair(std::make_pair(error, ss_()),
+					error.empty() ? name : ss_())));
+		};
+		if(!peer.name.empty())
+			return reply("Already joined");
+		if(!m_guests)
+			return reply("This server does not take guests");
+		const ss_ why = banned("", peer.address);
+		if(!why.empty()){
+			log_i(MODULE, "A guest from %s refused: %s", cs(peer.address),
+					cs(why));
+			return reply(why);
+		}
+		const int max_players = atoi(m_server->get_config().get<ss_>(
+				"max_players").c_str());
+		if(max_players > 0){
+			int joined = 0;
+			for(auto &it : m_peers)
+				joined += !it.second.name.empty();
+			if(joined >= max_players)
+				return reply("The server is full ("+itos(max_players)+
+						" players)");
+		}
+		do
+			name = "guest"+itos(++m_last_guest);
+		while(exists(name) || find_peer(name) != 0);
+		log_i(MODULE, "%zu joined as a guest, %s, from %s", packet.sender,
+				cs(name), cs(peer.address));
+		peer.name = name;
+		peer.guest = true;
+		stats_joined(peer);
+		reply("");
+		m_server->emit_event("accounts:login", new Login(packet.sender, name));
+		send_users_to_staff();
 	}
 
 	// The admin's
@@ -2416,6 +2486,7 @@ struct Module: public interface::Module, public Interface
 		std::pair<ss_, ss_> pw;
 		auto it = m_peers.find(packet.sender);
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest ||
 				!unpack(packet.data, pw))
 			return;
 		const ss_ name = it->second.name;
@@ -2450,6 +2521,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(packet.sender);
 		ss_ tok;
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest ||
 				!unpack(packet.data, tok))
 			return;
 		const ss_ key = "token/"+interface::sha256::hex(
@@ -2472,7 +2544,8 @@ struct Module: public interface::Module, public Interface
 	void on_link_starport(const network::Packet &packet)
 	{
 		auto it = m_peers.find(packet.sender);
-		if(!m_store || it == m_peers.end() || it->second.name.empty())
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest)
 			return;
 		const ss_ name = it->second.name;
 		auto result = [&](const ss_ &text){
@@ -2512,7 +2585,8 @@ struct Module: public interface::Module, public Interface
 	void on_unlink_starport(const network::Packet &packet)
 	{
 		auto it = m_peers.find(packet.sender);
-		if(!m_store || it == m_peers.end() || it->second.name.empty())
+		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest)
 			return;
 		const ss_ name = it->second.name;
 		const ss_ key = "starport_of/"+name+"/"+packet.data;
@@ -2626,6 +2700,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(packet.sender);
 		TotpRequest req;
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest ||
 				!unpack(packet.data, req))
 			return;
 		const ss_ name = it->second.name;
@@ -2833,6 +2908,7 @@ struct Module: public interface::Module, public Interface
 		auto it = m_peers.find(packet.sender);
 		sv_<ss_> q;
 		if(!m_store || it == m_peers.end() || it->second.name.empty() ||
+				it->second.guest ||
 				!unpack(packet.data, q) || q.empty())
 			return;
 		const ss_ name = it->second.name;

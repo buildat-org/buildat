@@ -485,6 +485,10 @@ struct Module: public interface::Module
 	void on_start()
 	{
 		serve_media();
+		// [HC_GUEST_PLAY] "Play as a guest" on the login window
+		accounts::access(m_server, [&](accounts::Interface *i){
+			i->set_guests(true);
+		});
 		m_scene = main_context::create_scene(m_server);
 		// Before voxelworld, or its first generation requests are lost
 		m_worldgen = new Worldgen();
