@@ -188,6 +188,7 @@ struct Module: public interface::Module
 	// every section: its workers read the grid until then
 	up_<ground::Ground> m_ground;
 	bool m_ground_live = false;
+	uint64_t m_made_us = 0; // when make_hill queued the sections
 	float m_flush_t = 0;
 	int m_flushes = 0; // since the last car line: commits, so remeshes
 	// The stones come loose, as bodies until they rest
@@ -495,6 +496,7 @@ struct Module: public interface::Module
 		m_outside = outside_packet(h);
 		m_fences = fences_packet(h);
 		m_ground_live = false;
+		m_made_us = interface::os::time_us();
 		clear_rocks();
 		const int S = 64;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
@@ -1038,6 +1040,9 @@ struct Module: public interface::Module
 				queued = i->get_num_sections_queued();
 			});
 			m_ground_live = queued == 0;
+			if(m_ground_live)
+				log_i(MODULE, "hillclimb: the ground generated in %.2f s",
+						(interface::os::time_us() - m_made_us) / 1e6);
 		}
 		const float U = hill::U;
 		main_context::access(m_server, [&](main_context::Interface *){
