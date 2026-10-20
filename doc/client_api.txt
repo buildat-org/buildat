@@ -2262,7 +2262,7 @@ magic.IM_LINEAR:
 magic.IM_SPLINE: 
 magic.INSIDE: 
 magic.INTERSECTS: 
-magic.Image: Clear, FlipHorizontal, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
+magic.Image: Clear, FlipVertical, GetPixel, Resize, SetPixel, SetPixelInt, SetSize, components, compressed, height, new, width
 magic.IndexBuffer: SetData, SetShadowed, SetSize, indexCount, indexSize, new
 magic.Input: GetKeyDown, GetKeyFromName, GetKeyName, GetKeyPress, GetMouseButtonDown, GetMouseMove, GetMousePosition, GetQualifierDown, IsMouseLocked, IsMouseVisible, SetMouseMode, SetMouseVisible, mouseVisible
 magic.IntRect: bottom, left, right, top
@@ -2523,7 +2523,7 @@ magic.Rect: max, min
 magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled
 magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, SetTextureName, enabled, pass, type
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
-magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numViewports, occluderSizeThreshold, shadowMapSize, shadowQuality
+magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, occluderSizeThreshold, shadowMapSize, shadowQuality
 magic.Resource: name
 magic.ResourceCache: AddManualResource, Exists, GetResource
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width
@@ -2850,7 +2850,7 @@ magic.Texture2D: GetRenderSurface, SetData, SetSize, new
 magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
-magic.UI: GetScale, SetClipboardText, SetFocusElement, SetScale, SetUseSystemClipboard, focusElement, root, scale
+magic.UI: GetScale, SetClipboardText, SetFocusElement, SetUseSystemClipboard, focusElement, root, scale
 magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 

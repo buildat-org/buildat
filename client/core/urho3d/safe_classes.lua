@@ -1929,7 +1929,6 @@ function M.define(dst, util)
 		},
 		properties = {
 			HDRRendering = util.simple_property("boolean"),
-			numViewports = util.simple_property("number"),
 			-- Shadows are a renderer-wide setting and not a light's: how big
 			-- the shadow map is, how it is filtered (Urho3D's ShadowQuality),
 			-- and whether any are drawn at all
@@ -2855,10 +2854,6 @@ function M.define(dst, util)
 					end
 				end
 			),
-			SetScale = util.wrap_function({"UI", "number"},
-				function(self, scale)
-					__buildat_set_ui_scale(scale)
-				end),
 			GetScale = util.self_function(
 					"GetScale", {"number"}, {"UI"}),
 			-- **Putting text on the clipboard, and never taking it off**
@@ -2913,12 +2908,11 @@ function M.define(dst, util)
 				get = function(current_value)
 					return current_value
 				end,
-				set = function(new_value)
-					if type(new_value) ~= "number" then
-						error("UI.scale must be a number")
-					end
-					__buildat_set_ui_scale(new_value)
-					return new_value
+				-- Read-only ([SECURITY_RUN_7]): what a server set outlived
+				-- the connection, the launcher and the trust overlay drawn
+				-- at its scale; no script in the tree set it
+				set = function()
+					error("UI.scale is read-only", 2)
 				end,
 			},
 		},
@@ -3061,8 +3055,6 @@ function M.define(dst, util)
 			Clear = util.self_function("Clear", {}, {"Image", "Color"}),
 			FlipVertical = util.self_function("FlipVertical", {"boolean"},
 					{"Image"}),
-			FlipHorizontal = util.self_function("FlipHorizontal",
-					{"boolean"}, {"Image"}),
 		},
 		properties = {
 			-- All read-only in Urho3D: what the image turned out to be

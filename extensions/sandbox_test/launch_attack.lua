@@ -98,6 +98,19 @@ local ATTEMPTS = {
 		buildat.launch = function() end
 		return true
 	end},
+	-- [SECURITY_RUN_7]: the UI's scale outlived the connection, and two
+	-- members no game used were off the whitelist with it
+	{"set the UI's scale", function()
+		magic.ui.scale = 0.25
+		return true
+	end},
+	{"Image:FlipHorizontal", function()
+		return magic.Image:new().FlipHorizontal
+	end},
+	{"set the renderer's numViewports", function()
+		magic.renderer.numViewports = 100000
+		return true
+	end},
 	{"rewrite string.format", function()
 		string.format = function() end
 		return true
