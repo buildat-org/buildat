@@ -9,6 +9,10 @@
 # C++ sets the player's hp through the bridge's call and reads 5 back
 # (7, less the 2 of the punch the call also gives), and hears the punch through
 # on_punchplayer's emit; the loop's HUD stage is the app's stub.
+# The place has 8 s to land: minimal_game's map self-test runs in one
+# luanti tick once its sections are generated, which can be mid-drive,
+# and that tick took 5.4 s here (2026-10-20), the place packet queued
+# behind it.
 #   apps/sample_luanti_glue/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -22,7 +26,7 @@ CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "wait_log 120000 hud stub:" "delay 3000" "look 0 -30" \
 	"keydown w" "delay 1200" "keyup w" "delay 500" \
 	"mouse_down left" "delay 3000" "mouse_up left" "delay 500" \
-	"look 0 -45" "delay 300" "mouse_click right" "delay 1500" "screenshot $t/shot.png" "quit" > "$t/cmds"
+	"look 0 -45" "delay 300" "mouse_click right" "delay 8000" "screenshot $t/shot.png" "quit" > "$t/cmds"
 run_client 60 "$t/cli.log" timeout 300 "$here/Build/bin/buildat" -C "$t/c" \
 	-D "$t/u" -w 800x500 -l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" \
 	-c @"$t/cmds" || fail "the drive ($t/cli.log)"
