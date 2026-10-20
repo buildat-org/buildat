@@ -199,6 +199,7 @@ extern "C" {
 #include <cstring>
 #ifndef _WIN32
 #include <unistd.h>
+#include <fcntl.h>
 #include <limits.h>
 #endif
 // windows.h, which SDL and Urho3D pull in above, does #define interface
@@ -2582,6 +2583,8 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(get_path)
 		DEF_BUILDAT_FUNC(create_directories)
 		DEF_BUILDAT_FUNC(count_files)
+		DEF_BUILDAT_FUNC(read_under)
+		DEF_BUILDAT_FUNC(write_under)
 		DEF_BUILDAT_FUNC(set_reload_on_return)
 		DEF_BUILDAT_FUNC(set_web_fullscreen)
 		DEF_BUILDAT_FUNC(web_authorize)

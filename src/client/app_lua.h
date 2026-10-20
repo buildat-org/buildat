@@ -2651,6 +2651,124 @@
 		return 1;
 	}
 
+	// [SECURITY_RUN_7] A storage file under a trusted directory, each part
+	// of rel ("apps/<app>/client/<name>") opened without following a link:
+	// a local game's box writes in <user>/apps/<app> and may leave a link
+	// there at any moment, so a check before the open would race. The
+	// directory of the last part's descriptor, or -1.
+	// simplified: on Windows the path as it is (a link needs a privilege
+	// a box does not have)
+	static int open_dir_under(const ss_ &base, const ss_ &rel, ss_ &last)
+	{
+#ifdef _WIN32
+		(void)base; (void)rel; (void)last;
+		return -1;
+#else
+		int fd = open(base.c_str(), O_DIRECTORY | O_CLOEXEC);
+		size_t a = 0, b;
+		while(fd >= 0 && (b = rel.find('/', a)) != ss_::npos){
+			const ss_ part = rel.substr(a, b - a);
+			const int next = part.empty() || part == "." || part == ".." ? -1 :
+					openat(fd, part.c_str(), O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+			close(fd);
+			fd = next;
+			a = b + 1;
+		}
+		last = rel.substr(a);
+		return fd;
+#endif
+	}
+	// read_under(base, rel) -> the file's content, or nil
+	static int l_read_under(lua_State *L)
+	{
+		const ss_ base = lua_bindings::lua_tocppstring(L, 1),
+				rel = lua_bindings::lua_tocppstring(L, 2);
+#ifdef _WIN32
+		std::ifstream f(base+"/"+rel, std::ios::binary);
+		if(!f)
+			return 0;
+		std::ostringstream os;
+		os << f.rdbuf();
+		const ss_ data = os.str();
+#else
+		ss_ name;
+		const int dir = open_dir_under(base, rel, name);
+		const int fd = dir < 0 ? -1 : openat(dir, name.c_str(),
+				O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+		if(dir >= 0)
+			close(dir);
+		if(fd < 0)
+			return 0;
+		ss_ data;
+		char buf[65536];
+		ssize_t n;
+		while((n = read(fd, buf, sizeof buf)) > 0)
+			data.append(buf, n);
+		close(fd);
+		if(n < 0)
+			return 0;
+#endif
+		lua_pushlstring(L, data.c_str(), data.size());
+		return 1;
+	}
+	// write_under(base, rel, data) -> true, or nil and why: written to
+	// <name>.tmp and renamed over the name, a link at either not followed
+	static int l_write_under(lua_State *L)
+	{
+		const ss_ base = lua_bindings::lua_tocppstring(L, 1),
+				rel = lua_bindings::lua_tocppstring(L, 2),
+				data = lua_bindings::lua_tocppstring(L, 3);
+		ss_ err;
+#ifdef _WIN32
+		const ss_ path = base+"/"+rel, tmp = path+".tmp";
+		{
+			std::ofstream f(tmp, std::ios::binary);
+			f << data;
+			if(!f.flush())
+				err = tmp+": could not write";
+		}
+		if(err.empty()){
+			// A rename does not replace a file here: the old one goes first
+			remove(path.c_str());
+			if(rename(tmp.c_str(), path.c_str()) != 0)
+				err = path+": could not rename";
+		}
+#else
+		ss_ name;
+		const int dir = open_dir_under(base, rel, name);
+		const ss_ tmp = name+".tmp";
+		int fd = dir < 0 ? -1 : openat(dir, tmp.c_str(), O_WRONLY | O_CREAT |
+				O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+		if(fd < 0){
+			err = dir < 0 ? "a directory on the way is not there or a link" :
+					tmp+": "+strerror(errno);
+		} else {
+			size_t done = 0;
+			while(done < data.size()){
+				const ssize_t n = write(fd, data.c_str() + done, data.size() - done);
+				if(n <= 0)
+					break;
+				done += n;
+			}
+			if(close(fd) != 0 || done < data.size())
+				err = tmp+": could not write";
+			else if(renameat(dir, tmp.c_str(), dir, name.c_str()) != 0)
+				err = name+": "+strerror(errno);
+			if(!err.empty())
+				unlinkat(dir, tmp.c_str(), 0);
+		}
+		if(dir >= 0)
+			close(dir);
+#endif
+		if(!err.empty()){
+			lua_pushnil(L);
+			lua_pushstring(L, err.c_str());
+			return 2;
+		}
+		lua_pushboolean(L, true);
+		return 1;
+	}
+
 	// count_files(path) -> the number of entries in the directory
 	static int l_count_files(lua_State *L)
 	{

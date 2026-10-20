@@ -6,7 +6,8 @@
 # BUILDAT_RUN. A small app (client_main, a texture in client_data):
 #   1. As dev:sl: buildat.serverless() true, a packet sent twice said
 #      once, the texture loaded, a stored value written; Escape leaves it
-#      to the launcher's Home. Again: the value read back.
+#      to the launcher's Home. Again: the value read back. The stored
+#      file made a link out: not followed ([SECURITY_RUN_7]).
 #   2. Published to a local Aitta as tester/sl with "serverless": true,
 #      BUILDAT_RUN=tester/sl with that Aitta in the settings: installed
 #      (the signature checked) and run.
@@ -66,6 +67,18 @@ done
 run "$t/b.log" dev:sl "$t/cmds"
 grep -aq "sl: stored 1" "$t/b.log" || fail "the stored value not read back"
 echo "ok: run as dev:sl, the packet said once, the texture, stored and read back, left to Home"
+# [SECURITY_RUN_7] The stored file swapped for a link out of the app's
+# directory, as a local game's box could: not read through, and the
+# write replaces the link, the file it pointed to left as it was
+f=$(find "$t/u/apps" -path "*/client/n" | head -1)
+[ -n "$f" ] || fail "no stored file under $t/u/apps"
+echo secret > "$t/secret"
+rm "$f" && ln -s "$t/secret" "$f"
+run "$t/l.log" dev:sl "$t/cmds"
+grep -aq "sl: stored nil" "$t/l.log" && grep -aq "sl: write true" "$t/l.log" &&
+	[ "$(cat "$t/secret")" = secret ] && [ ! -L "$f" ] && [ "$(cat "$f")" = 1 ] ||
+	fail "a link in the app's storage followed ($t/l.log)"
+echo "ok: a link in its storage not followed"
 
 # 2. From an Aitta
 start_server "$t/srv.log" "setup code" 60 auto \

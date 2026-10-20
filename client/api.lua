@@ -617,18 +617,24 @@ local function storage_path(name, domain)
 	end
 	return dir .. "/" .. name, dir
 end
+-- [SECURITY_RUN_7] The path as the user directory and the rest, which
+-- read_under and write_under open without following a link: a local
+-- game's box writes in its <user>/apps/<app> and could leave one where
+-- the client reads or writes
+local function under_user(path)
+	local user = __buildat_get_path("user")
+	if path:sub(1, #user + 1) ~= user .. "/" then
+		return nil
+	end
+	return user, path:sub(#user + 2)
+end
 local function storage_read_in(name, domain)
 	local path = storage_path(name, domain)
-	if not path then
+	local user, rel = under_user(path or "")
+	if not user then
 		return nil
 	end
-	local f = io.open(path, "rb")
-	if not f then
-		return nil
-	end
-	local data = f:read("*a")
-	f:close()
-	return data
+	return __buildat_read_under(user, rel)
 end
 local function storage_write_in(name, data, domain)
 	local path, dir = storage_path(name, domain)
@@ -642,16 +648,20 @@ local function storage_write_in(name, data, domain)
 		return false, "storage_write: " .. #data .. " bytes is over the " ..
 				STORAGE_MAX .. " a launcher may keep"
 	end
-	local old = io.open(path, "rb")
-	if old then
-		old:close()
-	elseif __buildat_count_files(dir) >= STORAGE_FILES_MAX then
+	local user, rel = under_user(path)
+	if not user then
+		return false, "storage_write: not under the user directory"
+	end
+	if not __buildat_read_under(user, rel) and
+			__buildat_count_files(dir) >= STORAGE_FILES_MAX then
 		return false, "storage_write: " .. STORAGE_FILES_MAX ..
 				" names are kept already"
 	end
 	__buildat_create_directories(dir)
-	if not buildat.write_file_atomic(path, data) then
-		return false, "storage_write: could not write " .. name
+	local ok, err = __buildat_write_under(user, rel, data)
+	if not ok then
+		return false, "storage_write: could not write " .. name .. ": " ..
+				tostring(err)
 	end
 	return true
 end
