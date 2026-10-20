@@ -7,7 +7,9 @@
 # compiled side by side; with the memory reserve raised past what any
 # machine has, one at a time, said so; and a module that does not compile
 # fails the start, naming it; a compiler's "cannot execute" is tried once
-# more ([WIN_PACKAGE_052]).
+# more ([WIN_PACKAGE_052]). [COMPILE_SLOTS]: with every shared slot held
+# by another process, one at a time; with a slot directory that is not
+# the user's own, one at a time and said so.
 #
 #   util/parallel_compile_check.sh
 set -u
@@ -19,6 +21,9 @@ t=$(mktemp -d)
 trap 'rm -rf "$t"' EXIT
 fail(){ echo "FAIL: $*"; exit 1; }
 cd "$here/Build"
+# The check's own slots, not the other servers' on this desk
+mkdir -m 0700 "$t/slots"
+export BUILDAT_COMPILE_SLOTS="$t/slots"
 run(){ # build dir, app, log
 	BUILDAT_UNCONFINED=1 timeout 300 "$b" --compile-only -m "$2" \
 		-D "$t/user" -r "$1" > "$3" 2>&1
@@ -57,4 +62,25 @@ BUILDAT_UNCONFINED=1 timeout 300 "$b" --compile-only -m "$here/apps/sample_modul
 	fail "a compiler's one failed start failed the start: $(grep -a "W " "$t/4.log" | tail -3)"
 grep -q "could not start a program of its own; once more" "$t/4.log" ||
 	fail "no retry said: $(grep -a "W " "$t/4.log" | tail -3)"
-echo "PASS: $n at once; one under the reserve; test2's error named; a failed start retried"
+# [COMPILE_SLOTS] Every slot held by another process: the server's first
+# compile needs none, the rest wait for one
+holders=""
+for i in $(seq 0 $(( $(nproc) / 2 > 1 ? $(nproc) / 2 - 1 : 0 ))); do
+	flock -n "$t/slots/slot$i" sleep 300 &
+	holders="$holders $!"
+done
+run "$t/b5" "$here/apps/sample_module_calls" "$t/5.log"
+s=$?
+# shellcheck disable=SC2086 # the PIDs, split
+kill $holders 2>/dev/null
+[ $s = 0 ] || fail "the start failed with the slots held: $(tail -3 "$t/5.log")"
+grep -q "at most 1 at once, no more for the slots other servers' compiles share" "$t/5.log" ||
+	fail "not one at a time with the slots held: $(grep "Compiled" "$t/5.log")"
+# A slot directory others may read: not used, one at a time
+mkdir -m 0755 "$t/open"
+BUILDAT_COMPILE_SLOTS="$t/open" run "$t/b6" "$here/apps/sample_module_calls" "$t/6.log" ||
+	fail "the start failed with no slots: $(tail -3 "$t/6.log")"
+grep -q "is not this user's own directory; compiling one module at a time" "$t/6.log" &&
+	grep -q "at most 1 at once, no more for no compile slots" "$t/6.log" ||
+	fail "no slots: not one at a time, or not said: $(grep "slot\|Compiled" "$t/6.log")"
+echo "PASS: $n at once; one under the reserve; test2's error named; a failed start retried; one at a time with the slots held or none"

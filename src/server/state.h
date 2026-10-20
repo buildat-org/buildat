@@ -25,6 +25,10 @@ namespace server
 		ModuleNotFoundException(const ss_ &msg): Exception(msg){}
 	};
 
+	// [COMPILE_SLOTS] The compile slots this user's servers share, opened
+	// before the box (which has no /tmp); see state.cpp
+	void open_compile_slots();
+
 	struct State
 	{
 		virtual ~State(){}

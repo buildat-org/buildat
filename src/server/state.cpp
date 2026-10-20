@@ -37,6 +37,10 @@
 	#include <windows.h>
 #else
 	#include <sched.h>
+	#include <fcntl.h>
+	#include <sys/file.h>
+	#include <sys/stat.h>
+	#include <unistd.h>
 #endif
 #define MODULE "__state"
 
@@ -64,6 +68,88 @@ static size_t usable_cores()
 	if(sched_getaffinity(0, sizeof set, &set) == 0)
 		return std::max(1, CPU_COUNT(&set));
 	return std::max(1u, std::thread::hardware_concurrency());
+#endif
+}
+
+// [COMPILE_SLOTS] Compiles beyond each server's first take a slot shared
+// by every server of this user on the machine, so that servers started
+// together run half the cores' compilers between them, not each (six at
+// once ran ~50 cc1plus and filled the RAM, 2026-10-20). A slot is a file
+// in /tmp/buildat-compile-<uid> (0700, ours, not a link), held by flock
+// for one compile; a server that dies lets go of its locks. The files
+// are opened before the box, which has no /tmp, and kept open; a lock on
+// an open file is not the box's to refuse. Whatever fails -- the
+// directory, a file, a lock -- the server still runs one compiler: its
+// first needs no slot.
+// simplified: per user, not per machine; a server of another user is
+// not counted. An app's module runs in the process and could hold the
+// slots, which slows other servers' compiles to one at a time, no more.
+// simplified: no slots on Windows, the per-process limit as before
+static sv_<int> g_compile_slots;
+#ifndef _WIN32
+static bool g_compile_slots_opened = false;
+static std::mutex g_compile_slots_mutex;
+static std::set<int> g_compile_slots_held; // by this process
+#endif
+void open_compile_slots()
+{
+#ifndef _WIN32
+	if(g_compile_slots_opened)
+		return;
+	g_compile_slots_opened = true;
+	// BUILDAT_COMPILE_SLOTS another directory (the check's own)
+	const char *env = getenv("BUILDAT_COMPILE_SLOTS");
+	const ss_ dir = env && *env ? ss_(env) : "/tmp/buildat-compile-"+itos(getuid());
+	mkdir(dir.c_str(), 0700);
+	struct stat st;
+	if(lstat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) ||
+			st.st_uid != getuid() || (st.st_mode & 077)){
+		log_w(MODULE, "Compile slots: %s is not this user's own directory; "
+				"compiling one module at a time", cs(dir));
+		return;
+	}
+	cpu_set_t set;
+	const int cores = sched_getaffinity(0, sizeof set, &set) == 0 ?
+			CPU_COUNT(&set) : (int)std::thread::hardware_concurrency();
+	for(int i = 0; i < std::max(1, cores / 2); i++){
+		const int fd = open((dir+"/slot"+itos(i)).c_str(),
+				O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+		if(fd >= 0)
+			g_compile_slots.push_back(fd);
+	}
+	if(g_compile_slots.empty())
+		log_w(MODULE, "Compile slots: none could be opened in %s; compiling "
+				"one module at a time", cs(dir));
+#endif
+}
+// A free slot taken: its fd, or -1 (none free, or none at all). On
+// Windows 0: no slots, none needed.
+static int take_compile_slot()
+{
+#ifdef _WIN32
+	return 0;
+#else
+	std::lock_guard<std::mutex> lock(g_compile_slots_mutex);
+	for(int fd : g_compile_slots){
+		// A lock this process holds would be granted again: skip those
+		if(g_compile_slots_held.count(fd))
+			continue;
+		if(flock(fd, LOCK_EX | LOCK_NB) == 0){
+			g_compile_slots_held.insert(fd);
+			return fd;
+		}
+	}
+	return -1;
+#endif
+}
+static void give_compile_slot(int fd)
+{
+#ifndef _WIN32
+	if(fd < 0)
+		return;
+	std::lock_guard<std::mutex> lock(g_compile_slots_mutex);
+	flock(fd, LOCK_UN);
+	g_compile_slots_held.erase(fd);
 #endif
 }
 
@@ -1454,10 +1540,13 @@ struct CState: public State, public interface::Server
 		// compile() reads the include directories; nothing changes them
 		// until every thread is joined
 		m_compiler->include_directories.push_back(m_modules_path);
+		// [COMPILE_SLOTS] Past the first, each compile a shared slot's
+		open_compile_slots();
 		for(auto &item : todo){
 			std::unique_lock<std::mutex> lock(mutex);
 			// The running ones counted again on purpose: one just started
 			// has not reached its peak
+			int slot = -1;
 			for(;;){
 				if(!failed.empty() || running.empty())
 					break;
@@ -1465,11 +1554,17 @@ struct CState: public State, public interface::Server
 					held_by = "the cores";
 				} else {
 					const int64_t avail = available_memory();
-					if(avail < 0 || avail >=
-							(int64_t)(running.size() + 1) * peak + reserve)
+					if(avail >= 0 && avail <
+							(int64_t)(running.size() + 1) * peak + reserve){
+						held_by = "memory ("+itos(avail / 1024 / 1024)+
+								" MiB available)";
+					} else if((slot = take_compile_slot()) >= 0){
 						break;
-					held_by = "memory ("+itos(avail / 1024 / 1024)+
-							" MiB available)";
+					} else {
+						held_by = g_compile_slots.empty() ? ss_("no compile "
+								"slots: one at a time") :
+								ss_("the slots other servers' compiles share");
+					}
 				}
 				wait_a_second(lock);
 			}
@@ -1479,12 +1574,13 @@ struct CState: public State, public interface::Server
 			most_running = std::max(most_running, running.size());
 			started_us[item.first] = interface::os::time_us();
 			status();
-			threads.emplace_back([&, item](){
+			threads.emplace_back([&, item, slot](){
 				const BuildJob &job = item.second;
 				interface::fs::create_directories(
 						interface::fs::strip_file_name(job.build_dst));
 				bool ok = m_compiler->compile(job.init_cpp_path, job.build_dst,
 						job.extra_cxxflags, job.extra_ldflags);
+				give_compile_slot(slot);
 				if(ok){
 					std::ofstream f(job.hashfile_path);
 					f<<job.hash_hex;

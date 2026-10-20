@@ -25,7 +25,10 @@ builtin/loader first, and it reads the rest. Once the load order is
 known, the modules whose build is not current are compiled side by side,
 the largest first, on at most half the usable cores, each further
 compiler only while free memory covers 1 GiB for each running one plus a
-1 GiB reserve (BUILDAT_COMPILE_RESERVE_MB raises it); loading and init()
+1 GiB reserve (BUILDAT_COMPILE_RESERVE_MB raises it), and each beyond a
+server's first only with one of the half-the-cores slots all of the
+user's servers share (/tmp/buildat-compile-<uid>, or
+BUILDAT_COMPILE_SLOTS; none usable, one at a time); loading and init()
 stay one at a time, in order. --compile-only compiles and loads them,
 then exits (1 naming the module that failed).
 

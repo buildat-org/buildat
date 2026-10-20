@@ -462,6 +462,8 @@ int main(int argc, char *argv[])
 		log_w(MODULE, "--sim-clock: the calendar is what %s says", cs(path));
 	}
 
+	// [COMPILE_SLOTS] Opened where /tmp still is, before the box
+	server::open_compile_slots();
 	// [PROCESS_SANDBOX]: the box, before anything of the app is loaded.
 	// Where it cannot be made the server refuses to start (decided
 	// 2026-10-02), and says how to start it anyway.
