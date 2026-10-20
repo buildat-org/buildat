@@ -337,6 +337,22 @@ struct Hill
 		}
 		return false;
 	}
+	// [HC_HOLLOW_MIDDLE] Whether the column of sections (sx, sz), 64 voxels
+	// a side, is all middle: no column of it, nor within two voxels of
+	// it, on the track. Such a section is never loaded (main.cpp's pins);
+	// the client draws the land there. A straight hill has none.
+	static const int SECTION = 64;
+	bool hollow_section(int sx, int sz) const
+	{
+		if(!p.circuit)
+			return false;
+		const int M = 2;
+		for(int z = sz * SECTION - M; z < (sz + 1) * SECTION + M; z++)
+			for(int x = sx * SECTION - M; x < (sx + 1) * SECTION + M; x++)
+				if(on_track((float)x, (float)z))
+					return false;
+		return true;
+	}
 	// Where a car starts, in voxels and degrees about Y: the bottom pad's
 	// middle facing up, or the circuit's start line 3 m ahead facing +X
 	void start(float &x, float &z, float &yaw) const
@@ -956,6 +972,29 @@ int main(int argc, char **argv)
 	}
 	assert(!loop.on_track(loop.size_x() / 2.0f, loop.size_z() / 2.0f));
 	assert(loop.on_track(loop.path[0].x, loop.path[0].z));
+	// [HC_HOLLOW_MIDDLE] A 60 m circuit of 6 m lanes at 0%: its middle's
+	// whole sections hollow, every section a lane touches kept
+	{
+		Params hp;
+		hp.circuit = true, hp.switchbacks = 0, hp.features = false;
+		hp.width_m = 60, hp.lane_m = 6, hp.length_m = 60;
+		const Hill h(hp);
+		const int S = Hill::SECTION;
+		int hollow = 0, kept = 0;
+		for(int sz = 0; sz <= (h.size_z() - 1) / S; sz++)
+			for(int sx = 0; sx <= (h.size_x() - 1) / S; sx++){
+				bool lane = false;
+				for(int z = sz * S; z < (sz + 1) * S && !lane; z++)
+					for(int x = sx * S; x < (sx + 1) * S && !lane; x++)
+						lane = h.on_track((float)x, (float)z);
+				const bool hs = h.hollow_section(sx, sz);
+				assert(!(lane && hs));
+				hollow += hs, kept += !hs;
+			}
+		// 60 m is 480 voxels, 7.5 sections; lanes of 48 voxels round it
+		assert(hollow >= 4 * 4 && kept > 0);
+		assert(!loop.hollow_section(0, 0));
+	}
 	// The default circuit: 40 m, 7 m lanes, 50%: hairpins each way. Laps
 	// by its centre line: two laps driven, two counted; backwards none; the
 	// way up's hairpin cut across the fence it shares, none

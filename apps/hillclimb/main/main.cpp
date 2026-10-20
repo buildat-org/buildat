@@ -490,12 +490,24 @@ struct Module: public interface::Module
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			for(const pv::Vector3DInt16 &sp : w->get_loaded_sections())
 				w->unload_section(sp);
+			// [HC_HOLLOW_MIDDLE] A circuit's middle, off every lane, is left
+			// out: never loaded, generated or sent; the client draws the
+			// land there
 			sv_<voxelworld::LoadPoint> pins;
+			int hollow = 0;
 			for(int z = 0; z <= (h.size_z() - 1) / S; z++)
-			for(int y = 0; y <= (h.size_y() - 1) / S; y++)
-			for(int x = 0; x <= (h.size_x() - 1) / S; x++)
-				pins.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
-						x * S + S / 2, y * S + S / 2, z * S + S / 2), 0, 0, 0, 0));
+			for(int x = 0; x <= (h.size_x() - 1) / S; x++){
+				if(h.hollow_section(x, z)){
+					hollow++;
+					continue;
+				}
+				for(int y = 0; y <= (h.size_y() - 1) / S; y++)
+					pins.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+							x * S + S / 2, y * S + S / 2, z * S + S / 2), 0, 0, 0, 0));
+			}
+			if(hollow)
+				log_i(MODULE, "hillclimb: %d section columns of the middle left "
+						"out", hollow);
 			w->set_load_points(pins);
 			// Asked for now, not by the streamer's later passes: the ground
 			// goes live when worldgen's queue is empty
@@ -1718,7 +1730,9 @@ struct Module: public interface::Module
 	// outside() the cars are put back by: "nx nz", nx lines across x and
 	// nz along z, then the heights row by row along z, all in voxels. Lines
 	// at the area's edges (-0.5 and size - 0.5), 2 m apart inside it and
-	// out to 20 m, 4 m to 60 m, 8 m to 150 m
+	// out to 20 m, 4 m to 60 m, 8 m to 150 m. [HC_HOLLOW_MIDDLE]: inside,
+	// a line on every section's edge too, and at the end "n sx sz ...",
+	// the section columns left out, which the client draws as land
 	static ss_ outside_packet(const hill::Hill &h)
 	{
 		const float M = hill::U;
@@ -1731,8 +1745,15 @@ struct Module: public interface::Module
 			for(size_t i = out.size(); i-- > 0;)
 				v.push_back(e0 - out[i]);
 			const int n = std::max(1, (int)std::lround((e1 - e0) / (2 * M)));
+			sv_<float> in;
 			for(int i = 0; i <= n; i++)
-				v.push_back(e0 + (e1 - e0) * i / n);
+				in.push_back(e0 + (e1 - e0) * i / n);
+			const int S = hill::Hill::SECTION;
+			for(int k = 1; k * S - 0.5f < e1; k++)
+				in.push_back(k * S - 0.5f);
+			std::sort(in.begin(), in.end());
+			in.erase(std::unique(in.begin(), in.end()), in.end());
+			v.insert(v.end(), in.begin(), in.end());
 			for(float d : out)
 				v.push_back(e1 + d);
 			return v;
@@ -1749,6 +1770,14 @@ struct Module: public interface::Module
 			snprintf(buf, sizeof buf, " %.1f", h.outside(x, z));
 			os << buf;
 		}
+		const int S = hill::Hill::SECTION;
+		std::ostringstream hs;
+		int n = 0;
+		for(int z = 0; z <= (h.size_z() - 1) / S; z++)
+		for(int x = 0; x <= (h.size_x() - 1) / S; x++)
+			if(h.hollow_section(x, z))
+				hs << " " << x << " " << z, n++;
+		os << " " << n << hs.str();
 		return os.str();
 	}
 	void send_hill(size_t peer)

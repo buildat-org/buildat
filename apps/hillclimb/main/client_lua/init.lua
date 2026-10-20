@@ -184,8 +184,11 @@ end)
 buildat.sub_packet("hillclimb:outside", function(data)
 	local v = {}
 	for w in data:gmatch("%S+") do v[#v + 1] = tonumber(w) end
+	-- [HC_HOLLOW_MIDDLE] After the heights: "n sx sz ...", the section
+	-- columns the server left out, drawn as land here
 	local nx, nz = v[1], v[2]
-	if not nz or #v ~= 2 + nx + nz + nx * nz then
+	local nh = nz and v[3 + nx + nz + nx * nz]
+	if not nh or #v ~= 3 + nx + nz + nx * nz + 2 * nh then
 		log:warning("hillclimb: the outside's packet does not add up")
 		return
 	end
@@ -194,6 +197,16 @@ buildat.sub_packet("hillclimb:outside", function(data)
 	for i = 1, nx do xs[i] = v[2 + i] end
 	for j = 1, nz do zs[j] = v[2 + nx + j] end
 	for k = 1, nx * nz do hs[k] = v[2 + nx + nz + k] end
+	local hollow = {}
+	for k = 1, nh do
+		local base = 3 + nx + nz + nx * nz + 2 * (k - 1)
+		hollow[v[base + 1] .. " " .. v[base + 2]] = true
+	end
+	local function in_hollow(i, j)
+		local sx = math.floor(((xs[i] + xs[i + 1]) / 2 + 0.5) / 64)
+		local sz = math.floor(((zs[j] + zs[j + 1]) / 2 + 0.5) / 64)
+		return hollow[sx .. " " .. sz]
+	end
 	-- The area's edges are lines of the grid: its first and last lines
 	-- are where -0.5 and the size's are
 	local area = {}
@@ -220,7 +233,8 @@ buildat.sub_packet("hillclimb:outside", function(data)
 	local sums, quads = {}, {}
 	for j = 1, nz - 1 do
 		for i = 1, nx - 1 do
-			if i < area.i0 or i >= area.i1 or j < area.j0 or j >= area.j1 then
+			if i < area.i0 or i >= area.i1 or j < area.j0 or j >= area.j1 or
+					in_hollow(i, j) then
 				local function p(a, b)
 					return {xs[a], hs[(b - 1) * nx + a], zs[b]}
 				end
