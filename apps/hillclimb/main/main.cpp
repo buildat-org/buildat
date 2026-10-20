@@ -260,6 +260,12 @@ struct Module: public interface::Module
 		magic::RigidBody *body;
 		float radius, still = 0, age = 0;
 		magic::Vector3 from;
+		// [HC_STONE_KICK] Its voxels to rest as and its mass; a tyre on it
+		// this tick, and whether a push was logged
+		int voxels = 0;
+		float kg = 0;
+		bool touched = false, pushed = false;
+		float pushed_t = -1; // when a tyre last pushed it
 	};
 	sv_<Rock> m_rocks;
 	sv_<ground::Loose> m_loose;
@@ -994,6 +1000,7 @@ struct Module: public interface::Module
 						(float)z);
 				l.radius = 1.3f;
 				l.kg = 9 * m_ground->soil.stone_kg;
+				l.voxels = 9;
 				// J: thrown toward the left edge, a metre off, at 3 m/s
 				if(keys.find('J') != ss_::npos)
 					l.velocity = car::V3(-3, 0, 0);
@@ -1008,6 +1015,20 @@ struct Module: public interface::Module
 						(float)z);
 				l.radius = 1.3f;
 				l.kg = 9 * m_ground->soil.stone_kg;
+				l.voxels = 9;
+				m_loose.push_back(l);
+			}
+			// E: one dropped on the bottom pad ahead of the car's left
+			// wheels, 2.5 m ahead of its centre ([HC_STONE_KICK]'s check)
+			if(keys.find('E') != ss_::npos){
+				ground::Loose l;
+				int x = m_hill->size_x() / 2 - (int)(0.8f * hill::U),
+						z = hill::Hill::PAD / 2 + (int)(2.5f * hill::U);
+				l.centre = car::V3((float)x, m_hill->surface(x, z) + 3.0f,
+						(float)z);
+				l.radius = 1.3f;
+				l.kg = 9 * m_ground->soil.stone_kg;
+				l.voxels = 9;
 				m_loose.push_back(l);
 			}
 			size_t h = keys.find('H');
@@ -1173,6 +1194,7 @@ struct Module: public interface::Module
 		if(m_ground_live){
 			for(int k = 0; k < 4; k++)
 				m_ground->wheel(k, pl.car->wheel[k], pl.car->spec, U, dt);
+			push_rocks(pl, dt);
 			// Made bodies after the flush that takes their voxels out of
 			// the world's boxes (ground_tick), not inside them
 			for(const ground::Loose &l : m_ground->loose)
@@ -1185,6 +1207,63 @@ struct Module: public interface::Module
 			pl.body->ApplyForce(magic::Vector3(w.force.x, w.force.y,
 					w.force.z) * U, magic::Vector3(w.at.x, w.at.y,
 					w.at.z) * U - p);
+		}
+	}
+
+	// [HC_STONE_KICK] A loose stone a tyre is pushing -- its body within
+	// the tyre's radius and its own of the hub, ahead along the tyre's
+	// travel -- goes ahead at the tyre's speed; the car takes the stone's
+	// sliding friction back at the tyre, and as the push starts what
+	// bringing it to the tyre's speed took, so a 30 kg stone slows a 2 t
+	// car a little and one of its weight stops it. Not that again each
+	// substep: a stone wedged in a rut, sent off and stopped every
+	// substep, was a wall.
+	// simplified: a contact force at the tyre, not a collision shape for it
+	void push_rocks(Player &pl, float dt)
+	{
+		const float U = hill::U;
+		const car::Spec &s = pl.car->spec;
+		const magic::Vector3 p = pl.body->GetNode()->GetWorldPosition();
+		for(Rock &r : m_rocks){
+			const magic::Vector3 rp = r.node->GetWorldPosition() / U;
+			for(int k = 0; k < 4; k++){
+				const car::Wheel &w = pl.car->wheel[k];
+				if(w.load <= 0)
+					continue;
+				const car::V3 hub = w.at + w.normal * s.tyre_r;
+				const car::V3 d = car::V3(rp.x_, rp.y_, rp.z_) - hub;
+				if(d.length() > s.tyre_r + r.radius / U)
+					continue;
+				r.touched = true;
+				const car::V3 hv(w.vel.x, 0, w.vel.z);
+				const float tv = hv.length();
+				if(tv < 0.3f)
+					continue;
+				const car::V3 dir = hv * (1 / tv);
+				if(d.dot(dir) <= 0)
+					continue;
+				const magic::Vector3 md(dir.x, 0, dir.z);
+				const magic::Vector3 rv = r.body->GetLinearVelocity() / U;
+				// At most the tyre's own speed to give it: one coming at the
+				// tyre is stopped and carried, not thrown back
+				const float dv = std::fmax(0, tv - std::fmax(0, rv.DotProduct(md)));
+				if(dv > 0){
+					r.body->SetLinearVelocity((rv + md * dv) * U);
+					r.body->Activate();
+				}
+				const bool starts = m_t - r.pushed_t > 2.5f * dt;
+				r.pushed_t = m_t;
+				const float back = (starts ? r.kg * dv / dt : 0) +
+						m_ground->soil.mu_bed * r.kg * 9.81f;
+				pl.body->ApplyForce(-md * back * U,
+						magic::Vector3(w.at.x, w.at.y, w.at.z) * U - p);
+				if(!r.pushed){
+					r.pushed = true;
+					log_i(MODULE, "hillclimb: rock %d pushed by %s's tyre %d, "
+							"%.0f kg, %.0f N back", r.id, cs(pl.name), k, r.kg,
+							back);
+				}
+			}
 		}
 	}
 
@@ -1214,8 +1293,18 @@ struct Module: public interface::Module
 				r.age += dt;
 				bool still = r.body->GetLinearVelocity().Length() < 0.1f * U &&
 						r.body->GetAngularVelocity().Length() < 1.0f;
-				r.still = still ? r.still + dt : 0;
 				magic::Vector3 p = r.node->GetWorldPosition();
+				// [HC_STONE_KICK] Not while a tyre or a chassis touches it
+				bool touching = r.touched;
+				r.touched = false;
+				for(auto &kv : m_players){
+					const car::Spec &s = kv.second.car->spec;
+					const float reach = 0.5f * std::sqrt(s.box_w * s.box_w +
+							s.box_h * s.box_h + s.box_l * s.box_l) * U + r.radius;
+					touching = touching || (kv.second.body->GetNode()->
+							GetWorldPosition() - p).Length() < reach;
+				}
+				r.still = still && !touching ? r.still + dt : 0;
 				// [HC_OPEN_EDGES] Off the voxel area: gone, nothing out
 				// there to rest in
 				if(!m_hill->over(p.x_, p.z_)){
@@ -1225,13 +1314,15 @@ struct Module: public interface::Module
 					m_rocks.erase(m_rocks.begin() + i);
 					continue;
 				}
-				// simplified: one that has not stopped in 8 s (held under the
-				// car, rocking) rests where it is
-				if(r.still < 1 && r.age < 8 && p.y_ > -U){
+				// simplified: one that has not stopped in 8 s (rocking) rests
+				// where it is, but not under a car ([HC_STONE_KICK]: still
+				// 2 s, 1 before)
+				if(p.y_ > -U && (touching || (r.still < 2 && r.age < 8))){
 					i++;
 					continue;
 				}
-				int n = m_ground->rest(car::V3(p.x_, p.y_, p.z_), r.radius);
+				int n = m_ground->rest(car::V3(p.x_, p.y_, p.z_), r.radius,
+						r.voxels);
 				log_i(MODULE, "hillclimb: rock %d rests at %.2f,%.2f,%.2f m, "
 						"%.2f m from where it came loose, %d voxels", r.id,
 						p.x_ / U, p.y_ / U, p.z_ / U, (p - r.from).Length() / U, n);
@@ -1283,10 +1374,15 @@ struct Module: public interface::Module
 					SetSphere(2 * l.radius);
 			r.body->SetLinearVelocity(magic::Vector3(l.velocity.x,
 					l.velocity.y, l.velocity.z) * U);
+			r.voxels = l.voxels;
+			r.kg = l.kg;
 			m_rocks.push_back(r);
 			log_i(MODULE, "hillclimb: rock %d loose at %.2f,%.2f,%.2f m, %d "
 					"voxels, %.0f kg", r.id, l.centre.x / U, l.centre.y / U,
 					l.centre.z / U, l.voxels, l.kg);
+			if(l.tyre >= 0)
+				log_i(MODULE, "hillclimb: rock %d kicked by tyre %d, %.0f kg, "
+						"a push of %.0f N", r.id, l.tyre, l.kg, l.push);
 		}
 	}
 

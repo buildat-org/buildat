@@ -17,14 +17,19 @@
 // - **it settles**: a sand voxel over a drop of two voxels or more slides
 //   down it (steeper than about 60 degrees on the grid; the hill's own
 //   slope is never that), each move a few columns at most.
-// Stones (hill.h's pebbles, a few voxels each): one under a slipping tyre
-// comes loose whole when its front along the slide is open and the
-// tyre's share of the push beats its friction on its bed; its voxels
-// leave the grid as a Loose for main.cpp to make a body of.
+// Stones (hill.h's pebbles, a few voxels each, and [HC_STONE_KICK] the
+// ones that came loose and rested, which the ground keeps a table of):
+// one lying on the ground (touching sand at its sides by two faces or
+// fewer) in a tyre's path is kicked loose by the push over its sliding
+// friction; one in the sand comes out only under a slipping tyre, when
+// its front along the push is open and the push beats its bed (user,
+// 2026-10-20: the ones in the sand are not to plop out as you drive). Its voxels leave the grid
+// as a Loose for main.cpp to make a body of.
 #pragma once
 #include "hill.h"
 #include "car.h"
 #include <vector>
+#include <algorithm>
 #include <unordered_map>
 #include <cmath>
 
@@ -111,6 +116,8 @@ struct Loose
 	float radius = 1, kg = 0;
 	V3 velocity;
 	int voxels = 0;
+	int tyre = -1;    // [HC_STONE_KICK] the tyre that kicked it, or dug
+	float push = 0;   // N, what freed it
 };
 
 struct Ground
@@ -125,6 +132,17 @@ struct Ground
 	static const int SETTLE_BUDGET = 48;
 	// What each changed voxel was when the hill was made, for restore()
 	std::unordered_map<size_t, uint8_t> undo;
+	// [HC_STONE_KICK] The stones that came loose and rested: each one's
+	// voxels and radius, and which one a voxel is of (hill.h's pebble_of
+	// knows the generated ones only)
+	struct Stone { float r; std::vector<size_t> vox; };
+	std::unordered_map<int, Stone> stones;
+	std::unordered_map<size_t, int> stone_at;
+	int next_stone = 1;
+	size_t idx(int x, int y, int z) const
+	{
+		return ((size_t)z * g.sy + y) * g.sx + x;
+	}
 
 	Ground(Grid &grid, const hill::Hill &hill): g(grid), h(hill){}
 
@@ -209,14 +227,34 @@ struct Ground
 		return cols;
 	}
 
-	// A stone at (x, y, z) under a slipping tyre pushing with `push` N
-	// along `dir`: loose if its front is open and the push beats its bed
-	bool loosen(int x, int y, int z, const V3 &dir, float push)
+	// The stone a STONE voxel is of: its voxels and radius, and the rested
+	// one's id (0 for a generated one)
+	bool stone_of(int x, int y, int z, std::vector<Change> &stone, V3 &centre,
+			float &r, int &id) const
 	{
-		float cx, cy, cz, r;
+		stone.clear();
+		if(g.at(x, y, z) != hill::STONE)
+			return false;
+		auto it = stone_at.find(idx(x, y, z));
+		if(it != stone_at.end()){
+			id = it->second;
+			const Stone &st = stones.at(id);
+			r = st.r;
+			V3 sum;
+			for(size_t i : st.vox){
+				int px = (int)(i % g.sx), py = (int)(i / g.sx % g.sy),
+						pz = (int)(i / g.sx / g.sy);
+				stone.push_back(Change{px, py, pz, hill::STONE});
+				sum = sum + V3((float)px, (float)py, (float)pz);
+			}
+			centre = sum * (1.0f / stone.size());
+			return true;
+		}
+		id = 0;
+		float cx, cy, cz;
 		if(!h.pebble_of(x, y, z, cx, cy, cz, r))
 			return false;
-		std::vector<Change> stone;
+		centre = V3(cx, cy, cz);
 		int R = (int)std::ceil(r) + 1;
 		for(int k = -R; k <= R; k++)
 		for(int j = -R; j <= R; j++)
@@ -225,28 +263,73 @@ struct Ground
 					pz = (int)std::lround(cz) + k;
 			float a, b, c, rr;
 			if(g.at(px, py, pz) == hill::STONE &&
+					!stone_at.count(idx(px, py, pz)) &&
 					h.pebble_of(px, py, pz, a, b, c, rr) &&
 					a == cx && b == cy && c == cz)
 				stone.push_back(Change{px, py, pz, hill::STONE});
 		}
-		if(stone.empty())
-			return false;
-		// Open along the push: the voxel past each one is air or the stone
-		int sx = std::fabs(dir.x) > std::fabs(dir.z) ? (dir.x > 0 ? 1 : -1) : 0;
-		int sz = sx == 0 ? (dir.z > 0 ? 1 : -1) : 0;
-		int open = 0;
-		for(const Change &s : stone){
-			Voxel past = g.at(s.x + sx, s.y, s.z + sz);
-			open += past == hill::AIR || past == hill::STONE;
-		}
-		float kg = soil.stone_kg * stone.size();
-		if(open < soil.open_front * stone.size() ||
-				push < soil.mu_bed * kg * 9.81f)
-			return false;
+		return !stone.empty();
+	}
+
+	// [HC_STONE_KICK] How many of a stone's faces beside it touch solid
+	// ground that is not the stone: two or fewer, it lies on the ground
+	// rather than in it
+	int contact(const std::vector<Change> &stone) const
+	{
+		static const int D[4][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1},
+				{0, 0, -1}};
+		int n = 0;
 		for(const Change &s : stone)
+			for(auto &d : D){
+				int x = s.x + d[0], y = s.y + d[1], z = s.z + d[2];
+				bool own = false;
+				for(const Change &o : stone)
+					own = own || (o.x == x && o.y == y && o.z == z);
+				n += !own && g.solid(x, y, z);
+			}
+		return n;
+	}
+
+	// A stone at (x, y, z) pushed with `push` N along `dir`: loose if what
+	// holds it gives -- lying on the ground, its sliding friction; in it,
+	// its front open and its bed's friction, and never by a `kick`
+	bool loosen(int x, int y, int z, const V3 &dir, float push,
+			bool kick = false)
+	{
+		std::vector<Change> stone;
+		V3 c;
+		float r;
+		int id;
+		if(!stone_of(x, y, z, stone, c, r, id))
+			return false;
+		float kg = soil.stone_kg * stone.size();
+		// simplified: lying loose, all its weight on the ground it slides on
+		if(contact(stone) <= 2){
+			if(push < soil.mu_bed * kg * 9.81f)
+				return false;
+		} else if(kick){
+			return false;
+		} else {
+			// Open along the push: the voxel past each one is air or the stone
+			int sx = std::fabs(dir.x) > std::fabs(dir.z) ? (dir.x > 0 ? 1 : -1) : 0;
+			int sz = sx == 0 ? (dir.z > 0 ? 1 : -1) : 0;
+			int open = 0;
+			for(const Change &s : stone){
+				Voxel past = g.at(s.x + sx, s.y, s.z + sz);
+				open += past == hill::AIR || past == hill::STONE;
+			}
+			if(open < soil.open_front * stone.size() ||
+					push < soil.mu_bed * kg * 9.81f)
+				return false;
+		}
+		for(const Change &s : stone){
 			set(s.x, s.y, s.z, hill::AIR);
+			stone_at.erase(idx(s.x, s.y, s.z));
+		}
+		stones.erase(id);
 		Loose l;
-		l.centre = V3(cx, cy, cz);
+		l.centre = c;
+		l.push = push;
 		l.radius = r;
 		l.kg = kg;
 		l.voxels = (int)stone.size();
@@ -271,6 +354,33 @@ struct Ground
 		float speed = w.slide.length();
 		if(w.slipping)
 			s.dig += speed * dt * soil.dig_rate;
+		// [HC_STONE_KICK] A stone lying on the ground the tyre is on, from
+		// its patch's back to its front: kicked along its travel with the
+		// tyre's grip, slipping or not; one try a substep
+		V3 hv(w.vel.x, 0, w.vel.z);
+		const float tv = hv.length();
+		if(tv > 0.3f){
+			const V3 dir = hv * (1 / tv);
+			const float back = len / 2 * u, front = spec.tyre_r * u;
+			const int y0 = (int)std::floor(at.y) + 1,
+					y1 = (int)std::floor(at.y + spec.tyre_r * u);
+			bool tried = false;
+			for(auto &c : patch(at + dir * ((front - back) / 2), w.axle,
+					spec.tyre_w * u / 2, (front + back) / 2)){
+				for(int y = y0; y <= y1 && !tried; y++){
+					if(g.at(c.first, y, c.second) != hill::STONE)
+						continue;
+					tried = true;
+					if(loosen(c.first, y, c.second, dir, spec.mu * w.load,
+							true)){
+						loose.back().velocity = dir * tv;
+						loose.back().tyre = i;
+					}
+				}
+				if(tried)
+					break;
+			}
+		}
 		// A voxel at a time; a substep moves one of each at most
 		if(s.sink >= 1){
 			s.sink -= 1;
@@ -337,30 +447,47 @@ struct Ground
 		}
 		undo.clear();
 		loose.clear();
+		stones.clear();
+		stone_at.clear();
 		dug = sunk = slid = freed = 0;
 		for(Wheel &w : wheels)
 			w = Wheel();
 	}
 	bool changed() const { return !undo.empty(); }
 
-	// A stone that has come to rest, back into the grid: the air within its
-	// radius of where it lies; how many voxels that was
-	int rest(const V3 &centre, float radius)
+	// A stone that has come to rest, back into the grid: its `voxels` (a
+	// whole sphere of its radius if 0), the air nearest where it lies --
+	// [HC_STONE_KICK] as many as it had, not every air voxel in its
+	// sphere -- and in the table, to come loose again; how many it was
+	int rest(const V3 &centre, float radius, int voxels = 0)
 	{
-		int n = 0;
-		int R = (int)std::ceil(radius);
+		std::vector<std::pair<float, size_t>> air;
+		int R = (int)std::ceil(radius) + 2;
 		for(int k = -R; k <= R; k++)
 		for(int j = -R; j <= R; j++)
 		for(int i = -R; i <= R; i++){
 			int x = (int)std::lround(centre.x) + i, y = (int)std::lround(centre.y) + j,
 					z = (int)std::lround(centre.z) + k;
 			V3 d = V3((float)x, (float)y, (float)z) - centre;
-			if(d.length() <= radius && g.inside(x, y, z) &&
-					g.at(x, y, z) == hill::AIR){
-				set(x, y, z, hill::STONE);
-				n++;
-			}
+			if(g.inside(x, y, z) && g.at(x, y, z) == hill::AIR &&
+					(voxels > 0 || d.length() <= radius))
+				air.push_back({d.length(), idx(x, y, z)});
 		}
+		std::sort(air.begin(), air.end());
+		if(voxels > 0 && (int)air.size() > voxels)
+			air.resize(voxels);
+		Stone st;
+		st.r = radius;
+		for(auto &a : air){
+			int x = (int)(a.second % g.sx), y = (int)(a.second / g.sx % g.sy),
+					z = (int)(a.second / g.sx / g.sy);
+			set(x, y, z, hill::STONE);
+			st.vox.push_back(a.second);
+			stone_at[a.second] = next_stone;
+		}
+		const int n = (int)st.vox.size();
+		if(n > 0)
+			stones[next_stone++] = st;
 		return n;
 	}
 };
@@ -470,6 +597,58 @@ int main()
 			"at 2, %d at 8\n", soft, firm, dug2, dug8);
 	assert(soft >= 1 && firm == 0);
 	assert(dug2 > 0 && dug8 == 4 * dug2);
+	// [HC_STONE_KICK] A rested stone keeps its count and comes loose again
+	{
+		const int B = hill::Hill::BASE;
+		Ground gs(g, h);
+		const int n = gs.rest(car::V3(40.2f, B + 1.3f, 34), 1.2f, 6);
+		assert(n == 6 && gs.stones.size() == 1);
+		assert(gs.loosen(40, B + 1, 34, car::V3(1, 0, 0), 1e4f));
+		assert(gs.loose.back().voxels == 6 && gs.stones.empty() &&
+				gs.stone_at.empty() && g.at(40, B + 1, 34) == hill::AIR);
+		// One touching by a face: its sliding friction frees it, less not
+		gs.rest(car::V3(46, B + 1, 34), 0.5f, 1);
+		const float slide = gs.soil.mu_bed * gs.soil.stone_kg * 9.81f;
+		assert(!gs.loosen(46, B + 1, 34, car::V3(1, 0, 0), slide * 0.9f));
+		assert(gs.loosen(46, B + 1, 34, car::V3(1, 0, 0), slide * 1.1f));
+		// A bedded one as before: its front shut, no push frees it
+		bool found = false;
+		std::vector<Change> st;
+		car::V3 c;
+		float r;
+		int id;
+		for(int z = 20; z < 44 && !found; z++)
+		for(int x = 10; x < 70 && !found; x++)
+		for(int y = g.top(x, z) - 2; y > g.top(x, z) - 8 && !found; y--){
+			if(!gs.stone_of(x, y, z, st, c, r, id) || gs.contact(st) <= 2)
+				continue;
+			int open = 0;
+			for(const Change &v : st)
+				open += g.at(v.x + 1, v.y, v.z) == hill::AIR ||
+						g.at(v.x + 1, v.y, v.z) == hill::STONE;
+			if(open >= gs.soil.open_front * st.size())
+				continue;
+			found = true;
+			assert(!gs.loosen(x, y, z, car::V3(1, 0, 0), 1e9f));
+			assert(!gs.loosen(x, y, z, car::V3(1, 0, 0), 1e9f, true));
+		}
+		assert(found);
+		// A tyre rolling at 2 m/s, not slipping, kicks a stone lying ahead
+		gs.rest(car::V3(66, B + 1.3f, 32), 1.2f, 6);
+		car::Wheel w;
+		w.at = car::V3(66 / U, (B + 0.5f) / U, 30 / U);
+		w.axle = car::V3(1, 0, 0);
+		w.load = 2000 * 9.81f / 4;
+		w.vel = car::V3(0, 0, 2);
+		const size_t before = gs.loose.size();
+		gs.wheel(1, w, spec, U, 1.0f / 256);
+		assert(gs.loose.size() == before + 1 && gs.loose.back().tyre == 1 &&
+				gs.loose.back().voxels == 6 && gs.loose.back().velocity.z > 1.9f);
+		gs.restore();
+		printf("ground.h: a rested stone (6 voxels) loose again; one by a face "
+				"at %.0f N; a bedded one held; one kicked by a rolling tyre\n",
+				slide);
+	}
 	printf("ground.h: self test passed\n");
 	return 0;
 }

@@ -63,7 +63,7 @@ port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
-	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23)
+	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23 [kick]=24)
 # [HC_SOFT_DEFAULTS] The car's drives on the firm soil they were tuned on
 # (80 kPa, dig 2, 100%, 35%; a ranking key with no knob parts), not the
 # game's soft default
@@ -121,6 +121,12 @@ drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 2:SG 60:Q" &
 # their defaults and at the softest set; the finish names the key
 soft="BUILDAT_HILLCLIMB_BEARING=20 BUILDAT_HILLCLIMB_DIG=8
 	BUILDAT_HILLCLIMB_POWER=200 BUILDAT_HILLCLIMB_GRIP=40 BUILDAT_HILLCLIMB_STONES=15"
+# [HC_STONE_KICK] At the default soil: a stone dropped ahead of the left
+# wheels rests as its 9 voxels, then the car driven over it kicks it
+# loose again, is held back by it as it pushes it, and finishes
+# shellcheck disable=SC2086
+drive kick $default_soil BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
+	BUILDAT_HILLCLIMB_DRIVE="0:S 1:SE 7:W2 22:Q" &
 drive firm BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
 # shellcheck disable=SC2086
@@ -182,6 +188,22 @@ grep -aq "voxels; sand 20 kPa, dig 8, power 200%, grip 0.40, stones 15%" "$t/sof
 	grep -aq "finish .* on v6/straight/steep15/var0/length20/sand/payload0/" "$t/firm.log" &&
 	[ "${soft_n:-0}" -gt $(( ${firm:-0} + 100 )) ] ||
 	fail "the softest set: ${soft_n:-?} voxels changed against ${firm:-?}, or its hill line or key ($t/soft.log)"
+python3 -I - "$t/kick.log" <<'PY' || fail "the stone kicked ($t/kick.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+rest = re.search(r"rock 1 rests at (\S+),\S+,(\S+) m, \S+ m from where it came loose, 9 voxels", log)
+again = [m for m in re.finditer(r"rock (\d+) loose at (\S+),\S+,(\S+) m, 9 voxels", log)
+    if m.group(1) != "1" and rest and abs(float(m.group(2)) - float(rest.group(1))) < 0.2 and
+    abs(float(m.group(3)) - float(rest.group(2))) < 0.2]
+n = again[0].group(1) if again else "?"
+kicked = re.search(r"rock %s kicked by tyre (\d), (\d+) kg, a push of (\d+) N" % n, log)
+pushed = re.search(r"rock %s pushed by drive's tyre \d, \d+ kg, (\d+) N back" % n, log)
+fin = re.search(r"hillclimb: finish (\S+) s on", log)
+print("  a rested stone: %s; kicked loose again as rock %s: %s; held the car back by %s N; finished in %s s" % (
+    "9 voxels" if rest else "none", n, kicked.group(0) if kicked else "no",
+    pushed.group(1) if pushed else "no", fin.group(1) if fin else "never"))
+sys.exit(0 if rest and kicked and pushed and int(pushed.group(1)) > 0 and fin else 1)
+PY
 b="$t/back.log"
 grep -aq "hillclimb: drive at .*, turn 2 next, lanes 0\( 4\)\?$" "$b" &&
 	! grep -aq "missed turn\|put back" "$b" && grep -aq "hillclimb: drive's lap 1 at" "$b" ||

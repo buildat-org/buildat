@@ -111,8 +111,9 @@ struct Wheel
 	// This substep's force on the chassis and where it acts
 	V3 force, at;
 	// For the ground (ground.h): the tread's velocity over the ground,
-	// m/s, the contact's normal and the axle
-	V3 slide, normal, axle;
+	// m/s, the contact's normal and the axle; [HC_STONE_KICK] the
+	// contact point's own velocity, m/s (the tyre's travel)
+	V3 slide, normal, axle, vel;
 };
 
 // Voxels are (x, y, z) with centres at integers, `u` of them to the metre
@@ -227,6 +228,7 @@ struct Car
 			w.force = V3();
 			w.at = hub;
 			w.slide = V3();
+			w.vel = V3();
 			w.axle = axle;
 			if(d <= 0){
 				w.load = w.spring = w.brush_x = w.brush_y = 0;
@@ -269,6 +271,7 @@ struct Car
 			w.force = n * f + cx * fx + cy * fy;
 			w.at = at;
 			w.slide = cx * slip_x + cy * slip_y;
+			w.vel = v;
 			w.normal = n;
 			ground_torque += fx * s.tyre_r;
 		}
