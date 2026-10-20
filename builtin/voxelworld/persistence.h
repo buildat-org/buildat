@@ -519,9 +519,18 @@
 		}
 		m_store = save->store("voxelworld");
 		m_world_name = world_name;
-		load_name_table();
-		load_format_table();
-		load_stale_sections();
+		// A save this build does not read (a 0.7 development build's name
+		// table) throws to the game; the tables half read here were then
+		// used by the next section load, which aborted the server
+		// (remap_volume_ids' map[0] == 0). No save, then the game is told.
+		try {
+			load_name_table();
+			load_format_table();
+			load_stale_sections();
+		} catch(...){
+			set_save(nullptr, "");
+			throw;
+		}
 	}
 
 	// The save holds something this build must not overwrite: a chunk in a
