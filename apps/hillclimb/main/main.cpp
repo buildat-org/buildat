@@ -53,7 +53,8 @@
 // and outside it hill.h's outside() is the ground, which the client
 // draws from the heights sent (hillclimb:outside). Nothing collides with
 // it: a car whose tyre or chassis corner touches it is put back to its
-// pose 2 to 3 s before, and a stone that leaves the area is removed.
+// pose 2 to 3 s before (each further one in a row 2 s further back,
+// [HC_PUT_BACK_FURTHER]), and a stone that leaves the area is removed.
 #include "core/log.h"
 #include "client_file/api.h"
 #include "network/api.h"
@@ -228,10 +229,19 @@ struct Module: public interface::Module
 		// The hill's ended runs when this run started
 		int fin_at = 0, unfin_at = 0;
 		// [HC_OPEN_EDGES] Its pose once a second while its four tyres are
-		// over the voxel area, the last three: the oldest is 2 to 3 s back
-		struct Snap { magic::Vector3 p; magic::Quaternion q; float t; };
+		// over the voxel area; [HC_PUT_BACK_FURTHER] the ones over 30 s old
+		// dropped only at a checkpoint. The put-backs in a row since the
+		// last checkpoint, and when the first of them was; the straight
+		// hill's last 10 m mark passed
+		// [HC_LAP_TURNS] With the lap as it was there, which a put-back
+		// takes back with the pose
+		struct Snap { magic::Vector3 p; magic::Quaternion q; float t;
+				hill::Hill::Lap lap; };
 		std::deque<Snap> snaps;
 		float snap_t = -1;
+		int series = 0;
+		float series_t = 0;
+		int mark = -1;
 		// [HC_CIRCUIT] Its laps, and the round's clock at the last
 		hill::Hill::Lap lap;
 		float lap_t = 0;
@@ -557,6 +567,17 @@ struct Module: public interface::Module
 		pl.car->shaft = pl.car->pedal = pl.car->brake = pl.car->steer = 0;
 		pl.snaps.clear();
 		pl.snap_t = -1;
+		pl.series = 0;
+		pl.mark = -1;
+	}
+	// [HC_PUT_BACK_FURTHER] A checkpoint passed (a circuit's turn, the
+	// straight hill's every 10 m of slope): the poses over 30 s old
+	// dropped, the put-backs' count from zero again
+	void checkpoint(Player &pl)
+	{
+		while(!pl.snaps.empty() && m_t - pl.snaps.front().t > 30)
+			pl.snaps.pop_front();
+		pl.series = 0;
 	}
 
 	// [HC_OPEN_EDGES] The car's tyres' hubs (each at its spring's
@@ -614,7 +635,8 @@ struct Module: public interface::Module
 	// Each substep: a pose kept a second after the last while every tyre
 	// is over the area; touching the outside (a tyre's hub over the edge
 	// is: its bottom is the ground's height there), the car put back to
-	// the oldest, still, lifted a voxel at a time out of the ground (it may
+	// the pose 2 s before (4, 6 ... s for the next in a row,
+	// [HC_PUT_BACK_FURTHER]), still, lifted a voxel at a time out of the ground (it may
 	// have been dug since) and a voxel more; with none, the start. The run
 	// goes on. In main_context's access.
 	void edges_step(Player &pl)
@@ -628,22 +650,45 @@ struct Module: public interface::Module
 			if(over){
 				pl.snap_t = m_t;
 				pl.snaps.push_back(Player::Snap{n->GetWorldPosition(),
-						n->GetWorldRotation(), m_t});
-				if(pl.snaps.size() > 3)
+						n->GetWorldRotation(), m_t, pl.lap});
+				// simplified: an hour's poses at most with no checkpoint
+				// passed (a car parked); past it the oldest go
+				if(pl.snaps.size() > 3600)
 					pl.snaps.pop_front();
 			}
 		}
-		if(!touches_outside(pl))
+		// [HC_LAP_TURNS] A circuit's car whose middle is on the track but
+		// out of its lap's lanes crossed a fence two lanes share
+		const magic::Vector3 mid = n->GetWorldPosition();
+		const bool crossed = m_params.circuit && pl.race == RUNNING &&
+				m_hill->on_track(mid.x_, mid.z_) &&
+				!m_hill->in_lap_lanes(pl.lap, mid.x_, mid.z_);
+		if(!crossed && !touches_outside(pl))
 			return;
 		const magic::Vector3 off = n->GetWorldPosition() / U;
+		if(crossed)
+			log_i(MODULE, "hillclimb: %s crossed a fence at %.2f,%.2f m, the "
+					"next turn %zu", cs(pl.name), off.x_, off.z_, pl.lap.next);
+		int back = -1;
 		if(pl.snaps.empty()){
 			place_car(pl);
+			pl.lap.next = 1;
+			pl.lap.at = false;
 			log_i(MODULE, "hillclimb: %s's car put back to the start, off the "
 					"track at %.2f,%.2f m", cs(pl.name), off.x_, off.z_);
 		} else {
-			const Player::Snap s = pl.snaps.front();
+			// The k-th put-back in a row to the pose about 2k s before the
+			// first of them, none newer; with none that old, the oldest
+			if(pl.series++ == 0)
+				pl.series_t = m_t;
+			const float before = pl.series_t - 2 * pl.series;
+			Player::Snap s = pl.snaps.front();
+			for(const Player::Snap &c : pl.snaps)
+				if(c.t <= before)
+					s = c;
 			n->SetWorldPosition(s.p);
 			n->SetWorldRotation(s.q);
+			pl.lap = s.lap;
 			int lifted = 0;
 			while(lifted < 8 * U && tyre_in_ground(pl)){
 				n->SetWorldPosition(n->GetWorldPosition() + magic::Vector3(0, 1, 0));
@@ -655,17 +700,18 @@ struct Module: public interface::Module
 			pl.body->Activate();
 			pl.car->shaft = 0;
 			const magic::Vector3 to = n->GetWorldPosition() / U;
-			log_i(MODULE, "hillclimb: %s's car put back, the pose %.1f s old, "
-					"off the track at %.2f,%.2f m, to %.2f,%.2f,%.2f m, lifted %d "
-					"voxels", cs(pl.name), m_t - s.t, off.x_, off.z_, to.x_, to.y_,
-					to.z_, lifted);
+			log_i(MODULE, "hillclimb: %s's car put back (%d in a row), the "
+					"pose %.1f s before the first, off the track at %.2f,%.2f m, "
+					"to %.2f,%.2f,%.2f m, lifted %d voxels", cs(pl.name), pl.series,
+					pl.series_t - s.t, off.x_, off.z_, to.x_, to.y_, to.z_, lifted);
 			// The poses kept as they are (lifted again if it is put back
-			// again before newer ones push the oldest out), the next a
-			// second from here
+			// to one again), the next a second from here
 			pl.snap_t = m_t;
+			back = (int)std::lround(pl.series_t - s.t);
 		}
 		if(pl.peer != 0 && pl.peer < BOT_PEER)
-			network::send(m_server, pl.peer, "hillclimb:note", "Off the track");
+			network::send(m_server, pl.peer, "hillclimb:note", back < 0 ?
+					ss_("Off the track") : "Off the track: back "+itos(back)+" s");
 	}
 
 	void setup_physics()
@@ -1134,10 +1180,12 @@ struct Module: public interface::Module
 			const magic::Vector3 p = n->GetWorldPosition();
 			const size_t was = pl.lap.next;
 			if(m_hill->lap_step(pl.lap, p.x_, p.z_)){
+				checkpoint(pl);
 				pl.lap_t = m_round_t;
 				log_i(MODULE, "hillclimb: %s's lap %d at %.2f s of the round",
 						cs(pl.name), pl.lap.laps, pl.lap_t);
 			} else if(pl.lap.next != was){
+				checkpoint(pl);
 				log_i(MODULE, "hillclimb: %s passed turn %zu of %zu", cs(pl.name),
 						was, m_hill->path.size() - 1);
 			}
@@ -1147,6 +1195,14 @@ struct Module: public interface::Module
 		const hill::Hill &h = *m_hill;
 		magic::Vector3 rear = n->GetWorldPosition() + n->GetWorldRotation() *
 				magic::Vector3(0, 0, -pl.car->spec.wheelbase / 2 * hill::U);
+		const int mark = (int)std::floor((n->GetWorldPosition().z_ -
+				h.slope_z0()) / (10 * hill::U));
+		if(mark > pl.mark){
+			if(pl.mark >= 0)
+				log_i(MODULE, "hillclimb: %s passed %d m", cs(pl.name), mark * 10);
+			pl.mark = mark;
+			checkpoint(pl);
+		}
 		if(rear.z_ >= h.top_z0() - 0.5f)
 			finish(pl);
 	}

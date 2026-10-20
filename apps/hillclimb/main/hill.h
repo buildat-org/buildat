@@ -113,7 +113,7 @@ struct Hill
 	// need a bit of a relief (when one fits) as the car's turning radius
 	// isn't that great"): the triangle from the corner c along both inner
 	// fences, a and b its two ways out of the corner
-	struct Relief { V2 c, a, b; float leg; };
+	struct Relief { V2 c, a, b; float leg; size_t turn; };
 	std::vector<Relief> reliefs;
 
 	Hill(const Params &params): p(params)
@@ -240,7 +240,7 @@ struct Hill
 			};
 			const V2 din = unit_of(pv, c0), dout = unit_of(c0, nx);
 			const Relief r = {{c0.x + (dout.x - din.x) * h, c0.z + (dout.z - din.z) * h},
-					{-din.x, -din.z}, dout, leg};
+					{-din.x, -din.z}, dout, leg, i};
 			// Off every lane: a box in the triangle's own frame (its legs
 			// are along X and Z) clear of a + b < leg; in the area: its
 			// corners. All lane: every point a quarter voxel apart in one.
@@ -400,6 +400,33 @@ struct Hill
 		l.x = x;
 		l.at = true;
 		return lap;
+	}
+	// [HC_LAP_TURNS] Whether (x, z) is where a car on lap l may be: the
+	// lane to its next turn, the one after it (before the first turn, the
+	// start's straight behind the line too) and the reliefs of the next
+	// turn and the one passed. Elsewhere on the track, it crossed a fence
+	// two lanes share, and is put back as off the track is: no turn can
+	// be skipped
+	bool in_lap_lanes(const Lap &l, float x, float z) const
+	{
+		const size_t m = lanes.size();
+		if(m == 0)
+			return true;
+		auto in = [&](size_t i){
+			const Box &b = lanes[i % m];
+			return x >= b.x0 && x <= b.x1 && z >= b.z0 && z <= b.z1;
+		};
+		if(in(l.next + m - 1) || in(l.next) || (l.next == 1 && in(m - 1)))
+			return true;
+		for(const Relief &r : reliefs){
+			if(r.turn != l.next && r.turn + 1 != l.next)
+				continue;
+			const float a = (x - r.c.x) * r.a.x + (z - r.c.z) * r.a.z,
+					b = (x - r.c.x) * r.b.x + (z - r.c.z) * r.b.z;
+			if(a >= 0 && b >= 0 && a + b <= r.leg)
+				return true;
+		}
+		return false;
 	}
 
 	// [HC_STEEP_NOISE] n(x, z) in -1..1: value noise, stretched by 1.5 so
@@ -1003,8 +1030,11 @@ int main(int argc, char **argv)
 	const Hill d(dp);
 	check_path(d);
 	assert(d.size_x() == 40 * U && d.path.size() > 5);
+	// [HC_LAP_TURNS] crossed: the steps out of the lap's lanes
+	int crossed = 0;
 	auto drive = [&](const std::vector<Hill::V2> &pts, int loops){
 		Hill::Lap l;
+		crossed = 0;
 		float sx, sz, yaw;
 		d.start(sx, sz, yaw);
 		Hill::V2 at = {sx, sz};
@@ -1016,13 +1046,30 @@ int main(int argc, char **argv)
 		for(const Hill::V2 &q : route){
 			const float dx = q.x - at.x, dz = q.z - at.z;
 			const int n = (int)(std::sqrt(dx * dx + dz * dz) / 2) + 1;
-			for(int i = 1; i <= n; i++)
-				d.lap_step(l, at.x + dx * i / n, at.z + dz * i / n);
+			for(int i = 1; i <= n; i++){
+				const float x = at.x + dx * i / n, z = at.z + dz * i / n;
+				d.lap_step(l, x, z);
+				// (off the track is the put-back's own)
+				crossed += d.on_track(x, z) && !d.in_lap_lanes(l, x, z);
+			}
 			at = q;
 		}
 		return l.laps;
 	};
-	assert(drive(d.path, 2) == 2);
+	assert(drive(d.path, 2) == 2 && crossed == 0);
+	// A relief's middle is in the lap's lanes before its turn and after
+	assert(!d.reliefs.empty());
+	for(const Hill::Relief &r : d.reliefs){
+		const float x = r.c.x + (r.a.x + r.b.x) * r.leg / 3,
+				z = r.c.z + (r.a.z + r.b.z) * r.leg / 3;
+		Hill::Lap l;
+		l.next = r.turn;
+		assert(d.in_lap_lanes(l, x, z));
+		l.next = r.turn + 1;
+		assert(d.in_lap_lanes(l, x, z));
+		l.next = r.turn + 2;
+		assert(r.turn + 2 > d.path.size() || !d.in_lap_lanes(l, x, z));
+	}
 	std::vector<Hill::V2> back(d.path.rbegin(), d.path.rend());
 	back.insert(back.begin(), d.path[0]);
 	assert(drive(back, 2) == 0);
@@ -1031,7 +1078,7 @@ int main(int argc, char **argv)
 		if(!(i >= 2 && i <= 5))  // the way up's hairpin: its four turns
 			cut.push_back(d.path[i]);
 	assert(d.path[2].x == d.path[1].x && d.path[5].x == d.path[1].x);
-	assert(drive(cut, 2) == 0);
+	assert(drive(cut, 2) == 0 && crossed > 0);
 	// [HC_CIRCUIT] Pits and rocks over 20 seeds, each in a lane
 	int in_lanes = 0;
 	for(uint32_t seed = 1; seed <= 20; seed++){

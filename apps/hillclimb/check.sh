@@ -17,7 +17,9 @@
 # steered off the side up the slope put back to a pose 2 to 3 s old, out
 # of the ground, and driving on; off the top's end the same; one parked a
 # minute never put back, nor the flat's; a stone thrown off the edge
-# removed. [HC_PAUSE_MENU] and [HC_TOUCH]: driven clients at the end.
+# removed; [HC_PUT_BACK_FURTHER] one steered off again and again put
+# back 2 s further each time, from 1 again past a 10 m mark.
+# [HC_PAUSE_MENU] and [HC_TOUCH]: driven clients at the end.
 # [HC_CIRCUIT] hill.h's self test draws the loop at 0, 50 and 100%
 # switchbacks for lanes of 4, 6 and 8 m into the run's directory
 # (circuit_<lane>_<switchbacks>.pgm, from above); a flat circuit driven
@@ -101,6 +103,9 @@ drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLC
 # side, put back; a minute parked on the bottom pad, a stone thrown off
 # the left edge at 1 s
 drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
+# [HC_PUT_BACK_FURTHER] The same, steered right on: off the side again
+# and again, each put back 2 s further
+drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 40:Q" &
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 60:Q" &
 # [HC_CIRCUIT] A flat circuit 24 m wide and 30 long, no switchbacks: two
 # cars steered round by P (the second slower), a 60 s round; and one
@@ -115,8 +120,9 @@ drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
 wait
 c="$t/circuit.log"
 turns=$(grep -a "hillclimb: drive passed turn" "$c" | head -4 | sed 's/.*turn \([0-9]*\) of.*/\1/' | tr '\n' ' ')
-[ "$turns" = "1 2 3 4 " ] && grep -aq "hillclimb: drive's lap 1 at" "$c" ||
-	fail "the circuit: turns '$turns' in order, then a lap ($c)"
+[ "$turns" = "1 2 3 4 " ] && grep -aq "hillclimb: drive's lap 1 at" "$c" &&
+	! grep -aq "crossed a fence" "$c" ||
+	fail "the circuit: turns '$turns' in order, then a lap, no fence crossed ($c)"
 res=$(grep -aA2 "hillclimb: round over:" "$c" | tail -2 | tr '\n' '|')
 grep -aq "finish .* on v6/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
 	echo "$res" | grep -Eq '^1 laps [0-9.]+ drive\|0 laps [0-9.]+ drive1\|$' ||
@@ -262,15 +268,15 @@ top = max(l["z"] for l in climb if l["t"] < 31)
 want(top > 56, "22 degrees climbed to the top pad (z 56 m): %.1f" % top)
 log = open("%s/climb.log" % d, errors="replace").read()
 # [HC_OPEN_EDGES] Off the top's end (the area 62 m long), put back onto it
-ends = [float(m) for m in re.findall(r"drive's car put back, the pose \S+ s "
-    r"old, off the track at \S+,(\S+) m", log)]
+ends = [float(m) for m in re.findall(r"drive's car put back \(\d+ in a row\), "
+    r"the pose \S+ s before the first, off the track at \S+,(\S+) m", log)]
 # (the first: later the 30 m hill's end is nearer)
 want(at(climb, 30.5)["y"] > 20 and ends and ends[0] > 60,
     "kept on the top, put back off its end: y %.1f m, off at z %s" % (
     at(climb, 30.5)["y"], ends[:3]))
 side = open("%s/side.log" % d, errors="replace").read()
-back = re.findall(r"drive's car put back, the pose (\S+) s old, off the track "
-    r"at (\S+),(\S+) m, to (\S+),(\S+),(\S+) m, lifted (\d+) voxels", side)
+back = re.findall(r"drive's car put back \(\d+ in a row\), the pose (\S+) s "
+    r"before the first, off the track at (\S+),(\S+) m, to (\S+),(\S+),(\S+) m, lifted (\d+) voxels", side)
 sl = lines("side")
 if back:
     age, ox, oz, tx, ty, tz, lifted = [float(x) for x in back[0]]
@@ -282,6 +288,16 @@ if back:
         ox, oz, age, tx, tz, lifted, moved))
 else:
     want(False, "off the side: never put back")
+# [HC_PUT_BACK_FURTHER] Put back k in a row: the pose 2k to 2k + 1 s
+# before the first; a 10 m mark passed between starts the count again
+ser = re.findall(r"drive passed \d+ m|drive's car put back \((\d+) in a "
+    r"row\), the pose (\S+) s before", open("%s/series.log" % d,
+    errors="replace").read())
+want(len([k for k, a in ser if k]) >= 3 and all(not k or
+    2 * int(k) <= float(a) <= 2 * int(k) + 1.05 for k, a in ser),
+    "put back in a row, 2 s further each: %s" % ser)
+want(all(int(k) == (int(p[0]) + 1 if p[0] else 1) for p, (k, a) in zip(
+    [("", "")] + ser, ser) if k), "the count from 1 after a mark: %s" % ser)
 want("put back" not in open("%s/parked.log" % d, errors="replace").read() and
     "put back" not in open("%s/flat.log" % d, errors="replace").read(),
     "a car parked a minute, and the flat's off the area's end, never put back")
