@@ -715,8 +715,12 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		el.dataset.sel = a + ',' + b;
 		actions.push('s' + chars(v, a) + ',' + (chars(v, b) - chars(v, a)));
 	}
-	// The stand-in for a field, shown at its box (canvas pixels)
-	function place(secret, x, y, w, h){
+	// The stand-in for a field, shown at its box (canvas pixels). `tap`: in
+	// a tap's own event, focused anew even when it has the focus -- the
+	// engine's focus (a login window's name field) came from a frame, for
+	// which iOS opens no keyboard, and a focus() on the focused element
+	// does nothing ([WEB_TAP_KEYBOARD_IOS])
+	function place(secret, x, y, w, h, tap){
 		var want = secret ? pw : ta;
 		if(want !== el){
 			el.style.display = 'none';
@@ -738,6 +742,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			active = true;
 			st.display = 'block';
 		}
+		if(tap && document.activeElement === el)
+			el.blur();
 		if(document.activeElement !== el)
 			el.focus({preventScroll: true});
 	}
@@ -747,6 +753,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// frame later. The engine gives the fields shown (app.cpp
 	// web_fields_publish()), the topmost last.
 	var fields = [];
+	// **The tap's focus held** ([WEB_TAP_KEYBOARD_IOS]): until the engine
+	// reports the tapped field, at most `held` frames, a sync of no field
+	// or of another (the engine before it has had the tap) leaves the
+	// stand-in be. Taking it away was a blur, which on iOS closes the
+	// keyboard the tap opened, and the engine's own focus a frame later
+	// opens none there. `tapped` is the field's box.
+	var held = 0, tapped = '';
 	document.addEventListener('touchstart', function(){
 		if(window.Module)
 			Module.buildatTouched = 1;
@@ -761,7 +774,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		for(var i = fields.length - 1; i >= 0; i--){
 			var f = fields[i];
 			if(x >= f[0] && x < f[0] + f[2] && y >= f[1] && y < f[1] + f[3]){
-				place(f[4] === 1, f[0], f[1], f[2], f[3]);
+				place(f[4] === 1, f[0], f[1], f[2], f[3], true);
+				held = 10;
+				tapped = f.slice(0, 4).join(',');
 				console.log('buildatText: a field focused in the tap: ' +
 						(document.activeElement === el ? el.id : 'not focused'));
 				return;
@@ -777,6 +792,14 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		},
 		sync: function(x, y, w, h, text, start, len, editable, secret, multi,
 				purpose, user){
+			if(held > 0){
+				if(x !== null && [x, y, w, h].map(Math.floor).join(',') === tapped)
+					held = 0;
+				else {
+					held--;
+					return;
+				}
+			}
 			if(x === null){
 				if(active){
 					active = false;
@@ -806,6 +829,14 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		},
 	};
 	document.addEventListener('selectionchange', selected);
+	// For the phone's Web Inspector: what took the focus off a stand-in
+	[ta, pw].forEach(function(e){
+		e.addEventListener('blur', function(ev){
+			var to = ev.relatedTarget;
+			console.log('buildatText: ' + e.id + ' blurred, the focus to ' +
+					(to ? to.id || to.tagName : 'none'));
+		});
+	});
 	// The native field's word rule ([TEXT_KEYS], LineEdit.cpp WordLeft):
 	// back over what is not a word, then the word, any non-ASCII a letter;
 	// a line break is a step of its own, with the spaces before it.
