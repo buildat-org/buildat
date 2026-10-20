@@ -73,7 +73,7 @@ BUILDAT_FP_NAME=owner client -C "$t/ca" -D "$t/ua" -a app/floorplanner/play \
 apid=$!
 pids="$pids $apid"
 for _ in $(seq 450); do
-	grep -aq "Open to LAN: Open to the LAN at" "$t/a.log" && break
+	grep -aq "accounts: Open to LAN: Open to the LAN at" "$t/a.log" && break
 	kill -0 $apid 2>/dev/null ||
 		fail "the host's drive ended ($(grep -a "Command sequence failed" "$t/a.log" | tail -1))"
 	sleep 0.2
