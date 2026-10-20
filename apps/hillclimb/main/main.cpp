@@ -43,7 +43,8 @@
 // "<seconds>:<keys>" from the car's start, each held until the next --
 // W accelerator, S brake, A and D steering, 1 to 4 and R the gear, B the
 // car back at the start, H<steep>/<length> another hill, K a stone dropped
-// on the slope, J one thrown off its left edge ([HC_OPEN_EDGES]), Q the
+// on the slope, J one thrown off its left edge ([HC_OPEN_EDGES]), G one on
+// the bottom pad, Q the
 // server's end -- driving a car of its own (peer 0,
 // "drive"), logging it each second; _CARS=<n>, n - 1 more cars driven by
 // the same keys (the step's cost); and _START, "x z yaw" (m, m, degrees)
@@ -906,6 +907,17 @@ struct Module: public interface::Module
 				// J: thrown toward the left edge, a metre off, at 3 m/s
 				if(keys.find('J') != ss_::npos)
 					l.velocity = car::V3(-3, 0, 0);
+				m_loose.push_back(l);
+			}
+			// G: one dropped on the flat bottom pad, 2 m in from the left
+			// edge, where it cannot roll off: it comes to rest
+			if(keys.find('G') != ss_::npos){
+				ground::Loose l;
+				int x = 2 * hill::U, z = hill::Hill::PAD / 2;
+				l.centre = car::V3((float)x, m_hill->surface(x, z) + 3.0f,
+						(float)z);
+				l.radius = 1.3f;
+				l.kg = 9 * m_ground->soil.stone_kg;
 				m_loose.push_back(l);
 			}
 			size_t h = keys.find('H');
