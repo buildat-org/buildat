@@ -7846,8 +7846,12 @@ function M.start(d)
 		-- the panels used with the view (props, palette): a press on any
 		-- of them is not the background.
 		-- simplified: the mouse's (a finger's made-up one included); the
-		-- builtin accounts pages the menu opens keep their Back
+		-- builtin accounts pages the menu opens keep their Back. Where the
+		-- press is, not the last move: a press with no move before it in
+		-- the frame (a tap, a scripted click) was judged by an old spot
 		local sc = magic.ui.scale
+		local mp = magic.input:GetMousePosition()
+		S.mx, S.my = mp.x, mp.y
 		local ux, uy = S.mx / sc, S.my / sc
 		if S.paused and E.pause_win and not panel.over({E.pause_win}, ux, uy) then
 			S.close_on_up = "pause menu"
