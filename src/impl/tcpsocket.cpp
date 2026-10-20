@@ -157,6 +157,12 @@ ss_ connect_wait(int fd, const struct sockaddr *addr, size_t addrlen,
 	// as the connection closing.
 	return "";
 #else
+#ifndef _WIN32
+	// [SECURITY_RUN_7] An fd past FD_SETSIZE is a write past the end of the
+	// fd_set, on the stack (select_handler.h)
+	if(fd >= FD_SETSIZE)
+		return "connect: too many files open";
+#endif
 	fd_set wfds;
 	FD_ZERO(&wfds);
 	FD_SET(fd, &wfds);
@@ -492,6 +498,13 @@ struct CTCPSocket: public TCPSocket
 		tv.tv_sec = 0;
 		tv.tv_usec = timeout_us;
 
+#ifndef _WIN32
+		// [SECURITY_RUN_7] Past FD_SETSIZE, a write past the fd_set
+		if(m_fd >= FD_SETSIZE){
+			log_w("tcpsocket", "fd %d past FD_SETSIZE, not waited on", m_fd);
+			return false;
+		}
+#endif
 		fd_set rfds;
 		FD_ZERO(&rfds);
 		int fd_max = m_fd;

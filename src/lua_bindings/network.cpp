@@ -333,6 +333,15 @@ struct LuaSocket
 				std::this_thread::sleep_for(std::chrono::milliseconds(5));
 				continue;
 			}
+#ifndef _WIN32
+			// [SECURITY_RUN_7] A script's many sockets: past FD_SETSIZE,
+			// a write past the fd_set on the stack
+			if(fd >= FD_SETSIZE){
+				std::lock_guard<std::mutex> lock(m_mutex);
+				m_thread_error = "too many files open";
+				return;
+			}
+#endif
 			fd_set rfds;
 			FD_ZERO(&rfds);
 			FD_SET(fd, &rfds);
