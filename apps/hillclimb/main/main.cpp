@@ -709,9 +709,15 @@ struct Module: public interface::Module
 			pl.snap_t = m_t;
 			back = (int)std::lround(pl.series_t - s.t);
 		}
+		// [HC_LAP_TURNS] A fence crossed skips the next turn: named, the HUD
+		// quiet otherwise
+		// simplified: the turn's number, no pointer to it; the put-back
+		// already lands before it
+		const ss_ what = crossed ? "Missed turn "+itos(pl.lap.next) :
+				ss_("Off the track");
 		if(pl.peer != 0 && pl.peer < BOT_PEER)
-			network::send(m_server, pl.peer, "hillclimb:note", back < 0 ?
-					ss_("Off the track") : "Off the track: back "+itos(back)+" s");
+			network::send(m_server, pl.peer, "hillclimb:note", back < 0 ? what :
+					what+": back "+itos(back)+" s");
 	}
 
 	void setup_physics()
