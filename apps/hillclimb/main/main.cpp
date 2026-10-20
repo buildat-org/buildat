@@ -1160,6 +1160,11 @@ struct Module: public interface::Module
 		// simplified: a long tick is cut to a quarter second of substeps;
 		// the car slows with the server rather than jumping
 		int n = (int)std::lround(std::fmin(event.dtime, 0.25f) / dt);
+		// A check's drive: a 30 Hz tick's substeps whatever the tick took,
+		// so the ground's once-a-tick work (stones resting, commits) falls
+		// at the same times under load, and a drive goes the same way
+		if(!m_drive.empty())
+			n = SUBSTEPS_HZ / 30;
 		const uint64_t t0 = interface::os::time_us();
 		main_context::access(m_server, [&](main_context::Interface *){
 			for(int i = 0; i < n; i++){
