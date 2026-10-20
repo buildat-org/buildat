@@ -17,6 +17,7 @@
 #include <sddl.h>
 #undef interface
 #include "interface/tcpsocket.h"
+#include "interface/os.h"
 #include <algorithm>
 #include <atomic>
 #include <mutex>
@@ -102,11 +103,8 @@ ss_ local_server_pipe(const ss_ &app, const ss_ &port)
 	// A server started unboxed listens on loopback as before: by
 	// --unconfined, or with the Windows box off
 	// (src/server/confine_windows.cpp)
-	const char *unconfined = getenv("BUILDAT_UNCONFINED");
-	const char *box = getenv("BUILDAT_WINDOWS_SANDBOX");
-	if(!box)
-		box = getenv("BUILDAT_WINDOWS_BOX");
-	if((unconfined && ss_(unconfined) == "1") || (box && ss_(box) == "0"))
+	if(interface::os::unconfined_by_env() ||
+			interface::os::windows_sandbox_off_by_env())
 		return "";
 	const ss_ name_a = "buildat."+app;
 	std::wstring name(name_a.begin(), name_a.end());

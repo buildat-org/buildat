@@ -882,13 +882,10 @@
 		// An app from a release is someone else's code: never started with
 		// the box off ([AITTA_MVP])
 		{
-			const char *u = getenv("BUILDAT_UNCONFINED");
-			const char *w = getenv("BUILDAT_WINDOWS_SANDBOX");
-			if(!w)
-				w = getenv("BUILDAT_WINDOWS_BOX");
 			if((!installed_app_dir(game).empty() ||
 					!review_app_dir(game).empty()) &&
-					((u && ss_(u) == "1") || (w && ss_(w) == "0"))){
+					(interface::os::unconfined_by_env() ||
+					interface::os::windows_sandbox_off_by_env())){
 				lua_pushboolean(L, false);
 				lua_pushstring(L, "An installed app runs only in the server's\n"
 						"sandbox, and it is off here\n(BUILDAT_UNCONFINED=1 or "

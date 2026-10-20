@@ -86,8 +86,7 @@ int main(int argc, char *argv[])
 
 	// [PROCESS_SANDBOX]: --unconfined, taken out before getopt, which
 	// knows no long options; BUILDAT_UNCONFINED=1 says the same
-	bool unconfined = getenv("BUILDAT_UNCONFINED") &&
-			ss_(getenv("BUILDAT_UNCONFINED")) == "1";
+	bool unconfined = interface::os::unconfined_by_env();
 	// --connect-ports P,Q: what a boxed server may connect to beyond
 	// buildat's own ports; also BUILDAT_CONNECT_PORTS
 	if(getenv("BUILDAT_CONNECT_PORTS"))

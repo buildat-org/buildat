@@ -3,6 +3,7 @@
 #pragma once
 #include "core/types.h"
 #include <ctime>
+#include <cstdlib>
 
 namespace interface
 {
@@ -27,6 +28,23 @@ namespace interface
 			return tmv;
 		}
 		void sleep_us(int us);
+		// [PROCESS_SANDBOX] What the environment says of the server's
+		// sandbox, read here for the server and the client both
+		// ([REWORK_SWEEP_1019] engine 4): BUILDAT_UNCONFINED=1 turns it
+		// off on every system, BUILDAT_WINDOWS_SANDBOX=0 the Windows one
+		// (BUILDAT_WINDOWS_BOX=0, its name before [SANDBOX_WORDING])
+		inline bool unconfined_by_env()
+		{
+			const char *u = getenv("BUILDAT_UNCONFINED");
+			return u && ss_(u) == "1";
+		}
+		inline bool windows_sandbox_off_by_env()
+		{
+			const char *w = getenv("BUILDAT_WINDOWS_SANDBOX");
+			if(!w)
+				w = getenv("BUILDAT_WINDOWS_BOX");
+			return w && ss_(w) == "0";
+		}
 		ss_ get_current_exe_path();
 		// name without extension; looks next to the current executable
 		ss_ get_sibling_exe_path(const ss_ &name);

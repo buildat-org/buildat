@@ -15,6 +15,7 @@
 #include "core/log.h"
 #include "interface/fs.h"
 #include "ports/windows_minimal.h"
+#include "interface/os.h"
 #include <userenv.h>
 #include <sddl.h>
 #include <aclapi.h>
@@ -224,11 +225,7 @@ static ss_ confine_child(core::Config &config, const ss_ &module_path)
 // (client/pipe_stream.cpp), and the server runs as before and says so.
 bool windows_box_wanted()
 {
-	// BUILDAT_WINDOWS_BOX is the name it had before [SANDBOX_WORDING]
-	const char *on = getenv("BUILDAT_WINDOWS_SANDBOX");
-	if(!on)
-		on = getenv("BUILDAT_WINDOWS_BOX");
-	return !(on && ss_(on) == "0");
+	return !interface::os::windows_sandbox_off_by_env();
 }
 
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
