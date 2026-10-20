@@ -527,7 +527,15 @@ struct Module: public interface::Module, public moderation::Host
 		if(!key.empty()){
 			if(!is_hex(key, 64))
 				return answer("key: 64 hex digits", "");
-			h = interface::sha256::hex(interface::sha256::calculate(key));
+			// Starport's hash, of the key's bytes ([SECURITY_RUN_7]); a
+			// report made before keeps the old one, which status reads
+			h = moderation::key_hash(key);
+			// The key's record (its upheld and rejected, a mute) under the
+			// old hash comes along, once
+			const json::Value was = load("reporters",
+					moderation::key_hash(key, true));
+			if(was.is_object() && !load("reporters", h).is_object())
+				put("reporters", h, was);
 			if(!m_hits.ok("report_key", h, 5, 3600))
 				return answer("too many reports from this key; try later", "");
 		}
@@ -556,25 +564,16 @@ struct Module: public interface::Module, public moderation::Host
 	// state, outcome}
 	void http_report_status(const network::HttpRequest &r)
 	{
+		// Up to a hundred lookups a request, and nobody needs to log in:
+		// Starport's limit ([SECURITY_RUN_7]; there was none here)
+		if(!m_hits.ok("report_status", network::address_key(r.address), 30,
+				60))
+			return refuse(r, "asked too often");
 		const json::Value b = json::load_string(r.body.c_str());
-		const ss_ key = jstr(b, "key");
-		if(!is_hex(key, 64))
-			return refuse(r, "key: 64 hex digits");
-		const ss_ h = interface::sha256::hex(interface::sha256::calculate(key));
-		const json::Value &ids = b.get("receipts");
-		json::Value out = json::array();
-		for(unsigned i = 0; ids.is_array() && i < ids.size() && i < 100; i++){
-			if(!ids.at(i).is_string())
-				continue;
-			const json::Value rep = load("reports", ids.at(i).as_string());
-			if(!rep.is_object() || jstr(rep, "key") != h)
-				continue;
-			json::Value o = json::object();
-			o.set("receipt", jstr(rep, "id"));
-			o.set("state", jstr(rep, "state"));
-			o.set("outcome", jstr(rep, "outcome"));
-			out.append(o);
-		}
+		json::Value out;
+		const ss_ err = moderation::report_status(store("reports"), b, out);
+		if(!err.empty())
+			return refuse(r, err);
 		json::Value v = json::object();
 		v.set("ok", true);
 		v.set("reports", out);
@@ -2088,24 +2087,13 @@ struct Module: public interface::Module, public moderation::Host
 			const json::Value &q)
 	{
 		json::Value v;
+		bool done = false;
 		moderation::access(m_server, [&](moderation::Interface *m){
-			if(cmd == "mod_queue")
-				v = m->queue(this);
-			else if(cmd == "mod_group")
-				v = m->group(this, jstr(q, "group"));
-			else if(cmd == "mod_decide"){
-				m->decide(this, name, q);
-				v = json::Value(true);
-			} else if(cmd == "mod_audit")
-				v = m->audit_log(this);
-			else if(cmd == "mod_appeals")
-				v = m->appeals(this);
-			else if(cmd == "mod_decide_appeal"){
-				m->decide_appeal(this, name, q);
-				v = json::Value(true);
-			} else
-				throw Exception("no such command: "+cmd);
+			done = moderation::moderator_command(m, this, name,
+					cmd.substr(4), q, v);
 		});
+		if(!done)
+			throw Exception("no such command: "+cmd);
 		return v;
 	}
 

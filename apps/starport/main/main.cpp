@@ -1483,7 +1483,7 @@ struct Module: public interface::Module, public moderation::Host
 				return;
 			}
 			key_seen(key);
-			h = hex(interface::sha256::calculate(unhex(key)));
+			h = moderation::key_hash(key);
 			if(!m_rates.ok("report_key", h, 5, 3600)){
 				refuse(r, "too many reports from this key; try later");
 				return;
@@ -1769,25 +1769,11 @@ struct Module: public interface::Module, public moderation::Host
 			refuse(r, "asked too often", "too_often");
 			return;
 		}
-		const ss_ key = jstr(b, "key");
-		if(!is_hex(key, 64)){
-			refuse(r, "key: 64 hex digits");
+		json::Value out;
+		const ss_ err = moderation::report_status(store("reports"), b, out);
+		if(!err.empty()){
+			refuse(r, err);
 			return;
-		}
-		const ss_ h = hex(interface::sha256::calculate(unhex(key)));
-		json::Value out = json::array();
-		const json::Value &ids = b.get("receipts");
-		for(unsigned i = 0; ids.is_array() && i < ids.size() && i < 100; i++){
-			if(!ids.at(i).is_string())
-				continue;
-			const json::Value rep = load("reports", ids.at(i).as_string());
-			if(!rep.is_object() || jstr(rep, "key") != h)
-				continue;
-			json::Value o = json::object();
-			o.set("receipt", jstr(rep, "id"));
-			o.set("state", jstr(rep, "state"));
-			o.set("outcome", jstr(rep, "outcome"));
-			out.append(o);
 		}
 		json::Value v = json::object();
 		v.set("ok", true);
@@ -2963,34 +2949,19 @@ struct Module: public interface::Module, public moderation::Host
 		if(!mod)
 			throw Exception("for moderators");
 		json::Value r;
-		if(cmd == "queue"){
-			mod_do([&](moderation::Interface *m){ r = m->queue(this); });
-			return r;
-		}
 		if(cmd == "group")
 			return cmd_group(jstr(q, "group"));
-		if(cmd == "decide"){
-			mod_do([&](moderation::Interface *m){ m->decide(this, name, q); });
-			return json::Value(true);
-		}
+		// queue, decide, audit, appeals, decide_appeal: as Aitta's
+		bool done = false;
+		mod_do([&](moderation::Interface *m){
+			done = moderation::moderator_command(m, this, name, cmd, q, r);
+		});
+		if(done)
+			return r;
 		if(cmd == "act")
 			return cmd_act(name, q);
 		if(cmd == "listings")
 			return cmd_listings(jstr(q, "search"));
-		if(cmd == "audit"){
-			mod_do([&](moderation::Interface *m){ r = m->audit_log(this); });
-			return r;
-		}
-		if(cmd == "appeals"){
-			mod_do([&](moderation::Interface *m){ r = m->appeals(this); });
-			return r;
-		}
-		if(cmd == "decide_appeal"){
-			mod_do([&](moderation::Interface *m){
-				m->decide_appeal(this, name, q);
-			});
-			return json::Value(true);
-		}
 		if(cmd == "suspend_id"){
 			mod_do([&](moderation::Interface *m){
 				suspend_id(m, name, jstr(q, "id"), jint(q, "days"),

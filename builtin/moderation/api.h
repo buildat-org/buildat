@@ -5,6 +5,7 @@
 #include "interface/server.h"
 #include "interface/module.h"
 #include "storage/api.h"
+#include "interface/sha256.h"
 #include <functional>
 
 // **Moderation** ([MODERATION_MODULE], from Starport's [STARPORT] 5 to 7):
@@ -121,6 +122,74 @@ namespace moderation
 		virtual void decide_appeal(Host *h, const ss_ &by,
 				const json::Value &q) = 0;
 	};
+
+	// **What both hosts answer alike** ([SECURITY_RUN_7], [REWORK_SWEEP_1019]
+	// apps 5: Starport's and Aitta's copies had drifted). A reporter's key,
+	// 64 hex digits, as a report keeps it: the sha256 of its bytes; legacy,
+	// of its hex text, which Aitta's reports before 2026-10-20 carry.
+	inline ss_ key_hash(const ss_ &key_hex, bool legacy = false)
+	{
+		using namespace interface::sha256;
+		return hex(calculate(legacy ? key_hex : unhex(key_hex)));
+	}
+
+	// report_status: {key, receipts: [id...]} -> each of the key's reports'
+	// {receipt, state, outcome}, at most a hundred looked up, from the
+	// app's "reports" store; "" or what was wrong with the request. A
+	// limit by address is the caller's.
+	inline ss_ report_status(storage::Store *reports, const json::Value &b,
+			json::Value &out)
+	{
+		const ss_ key = json::jstr(b, "key");
+		if(!interface::sha256::is_hex(key, 64))
+			return "key: 64 hex digits";
+		const ss_ h = key_hash(key), old = key_hash(key, true);
+		out = json::array();
+		const json::Value &ids = b.get("receipts");
+		for(unsigned i = 0; ids.is_array() && i < ids.size() && i < 100; i++){
+			ss_ text;
+			if(!ids.at(i).is_string() ||
+					!reports->get(ids.at(i).as_string(), text))
+				continue;
+			const json::Value rep = json::load_string(text.c_str());
+			const ss_ k = json::jstr(rep, "key");
+			if(!rep.is_object() || k.empty() || (k != h && k != old))
+				continue;
+			json::Value o = json::object();
+			o.set("receipt", json::jstr(rep, "id"));
+			o.set("state", json::jstr(rep, "state"));
+			o.set("outcome", json::jstr(rep, "outcome"));
+			out.append(o);
+		}
+		return "";
+	}
+
+	// The moderators' commands both hosts have, by their names without
+	// the host's prefix: queue, group, decide, audit, appeals,
+	// decide_appeal. False for another; a host's own (Starport's group)
+	// is answered before this is asked.
+	inline bool moderator_command(Interface *m, Host *host,
+			const ss_ &name, const ss_ &cmd, const json::Value &q,
+			json::Value &out)
+	{
+		if(cmd == "queue")
+			out = m->queue(host);
+		else if(cmd == "group")
+			out = m->group(host, json::jstr(q, "group"));
+		else if(cmd == "decide"){
+			m->decide(host, name, q);
+			out = json::Value(true);
+		} else if(cmd == "audit")
+			out = m->audit_log(host);
+		else if(cmd == "appeals")
+			out = m->appeals(host);
+		else if(cmd == "decide_appeal"){
+			m->decide_appeal(host, name, q);
+			out = json::Value(true);
+		} else
+			return false;
+		return true;
+	}
 
 	inline bool access(interface::Server *server,
 			std::function<void(moderation::Interface*)> cb)
