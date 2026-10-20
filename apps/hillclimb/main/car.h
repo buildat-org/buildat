@@ -120,6 +120,9 @@ struct Wheel
 struct Ground
 {
 	virtual bool solid(int x, int y, int z) const = 0;
+	// [HC_SAND_VOLUME] How far a solid voxel's sphere sits lower, voxels:
+	// a partly full sand voxel's missing share
+	virtual float drop(int x, int y, int z) const { return 0; }
 	virtual ~Ground(){}
 };
 
@@ -195,6 +198,18 @@ struct Car
 			float pen = R + rv - dist;
 			if(pen <= 0 || dist < 1e-4f || !g.solid(x, y, z))
 				continue;
+			// Lowered, it can only be met less deep
+			if(const float dy = g.drop(x, y, z)){
+				d.y -= dy;
+				a = d.dot(axle);
+				if(std::fabs(a) > hw + rv)
+					continue;
+				radial = d - axle * a;
+				dist = radial.length();
+				pen = R + rv - dist;
+				if(pen <= 0 || dist < 1e-4f)
+					continue;
+			}
 			deepest = std::fmax(deepest, pen);
 			sum = sum - radial * (pen / dist);
 		}

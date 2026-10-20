@@ -125,8 +125,10 @@ soft="BUILDAT_HILLCLIMB_BEARING=20 BUILDAT_HILLCLIMB_DIG=8
 # wheels rests as its 9 voxels, then the car driven over it kicks it
 # loose again, is held back by it as it pushes it, and finishes
 # shellcheck disable=SC2086
+# [HC_SAND_VOLUME] V before and after: the sand's volume kept, no lone
+# full voxel on the pad behind the start
 drive kick $default_soil BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
-	BUILDAT_HILLCLIMB_DRIVE="0:S 1:SE 7:W2 22:Q" &
+	BUILDAT_HILLCLIMB_DRIVE="0:SV 1:SE 7:W2 21:V 22:Q" &
 drive firm BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
 # shellcheck disable=SC2086
@@ -207,7 +209,10 @@ fin = re.search(r"hillclimb: finish (\S+) s on", log)
 print("  a rested stone: %s; kicked loose again as rock %s: %s; held the car back by %s N; finished in %s s" % (
     "9 voxels" if rest else "none", n, kicked.group(0) if kicked else "no",
     pushed.group(1) if pushed else "no", fin.group(1) if fin else "never"))
-sys.exit(0 if rest and kicked and pushed and int(pushed.group(1)) > 0 and fin else 1)
+vol = re.findall(r"hillclimb: sand (\d+) eighths; behind the start (\d+) columns", log)
+print("  the sand's volume at the start and the end: %s" % vol)
+sys.exit(0 if rest and kicked and pushed and int(pushed.group(1)) > 0 and fin and
+    len(vol) == 2 and vol[0][0] == vol[1][0] and vol[1][1] == "0" else 1)
 PY
 python3 -I - "$t/keep.log" <<'PY' || fail "Backspace mid-lap ($t/keep.log)"
 import re, sys
@@ -437,8 +442,8 @@ ruts = [int(x) for x in re.findall(r"rut=(\d+)", slog)]
 # On 40 degrees, past sand's angle of repose, a pit refills from above as
 # it is dug: a voxel deep at least (ground.h's self test digs two on the
 # flat)
-want(g and g[-1] >= 30 and max(ruts) >= 1,
-    "spun in place, the wheels dug a rut: %d voxels dug, %d deep" % (
+want(g and g[-1] >= 30 * 8 and max(ruts) >= 1,
+    "spun in place, the wheels dug a rut: %d eighths dug, %d deep" % (
     g[-1] if g else 0, max(ruts) if ruts else 0))
 loose = {m[0]: [float(v) for v in m[1:4]] for m in re.findall(
     r"rock (\d+) loose at (\S+),(\S+),(\S+) m", slog)}

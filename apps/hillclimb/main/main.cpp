@@ -224,7 +224,7 @@ struct Worldgen: public worldgen::GeneratorInterface
 		for(int y = lc.getY(); y <= uc.getY(); y++)
 		for(int x = lc.getX(); x <= uc.getX(); x++)
 			volume.setVoxelAt(pv::Vector3DInt32(x, y, z),
-					VoxelInstance(id_of(m_hill.at(x, y, z))));
+					VoxelInstance(id_of(m_hill.drawn(x, y, z))));
 	}
 };
 
@@ -988,6 +988,25 @@ struct Module: public interface::Module
 							"lanes%s", cs(kv.second.name), q.x_ / hill::U,
 							q.z_ / hill::U, kv.second.lap.next, cs(in));
 				}
+			// V: the sand's volume, and the bottom pad behind the start's
+			// columns a voxel over all their neighbours ([HC_SAND_VOLUME])
+			if(keys.find('V') != ss_::npos && m_grid){
+				const ground::Grid &g = *m_grid;
+				long long eighths = 0;
+				for(size_t i = 0; i < g.v.size(); i++)
+					if(g.v[i] == hill::SAND)
+						eighths += g.f[i];
+				int lone = 0;
+				for(int z = 1; z < hill::Hill::PAD / 2; z++)
+				for(int x = 1; x + 1 < g.sx; x++){
+					const int h = g.height8(x, z);
+					lone += h - std::max(std::max(g.height8(x + 1, z),
+							g.height8(x - 1, z)), std::max(g.height8(x, z + 1),
+							g.height8(x, z - 1))) >= 8;
+				}
+				log_i(MODULE, "hillclimb: sand %lld eighths; behind the start %d "
+						"columns a voxel over their neighbours", eighths, lone);
+			}
 			// Z: each drive car's Backspace as a player's ([HC_RESET_KEEP_GROUND])
 			if(keys.find('Z') != ss_::npos)
 				for(auto &kv : m_players)
