@@ -295,6 +295,8 @@ struct Module: public interface::Module
 		float race_t = 0;
 		int last_rank = -1;
 		bool reset = false, observing = false;
+		// [HC_RESET_KEEP_GROUND] This reset only moves the car
+		bool keep_ground = false;
 		// The hill's ended runs when this run started
 		int fin_at = 0, unfin_at = 0;
 		// [HC_OPEN_EDGES] Its pose once a second while its four tyres are
@@ -986,6 +988,11 @@ struct Module: public interface::Module
 							"lanes%s", cs(kv.second.name), q.x_ / hill::U,
 							q.z_ / hill::U, kv.second.lap.next, cs(in));
 				}
+			// Z: each drive car's Backspace as a player's ([HC_RESET_KEEP_GROUND])
+			if(keys.find('Z') != ss_::npos)
+				for(auto &kv : m_players)
+					if(kv.first == 0 || kv.first >= BOT_PEER)
+						backspace(kv.second);
 			if(keys.find('B') != ss_::npos)
 				for(auto &kv : m_players)
 					if(kv.first == 0 || kv.first >= BOT_PEER)
@@ -1618,13 +1625,17 @@ struct Module: public interface::Module
 		pl.race_t = 0;
 		pl.last_rank = -1;
 		pl.reset = true;
+		pl.keep_ground = false;
 	}
 	void do_reset(Player &pl)
 	{
 		pl.reset = false;
 		// One car: the hill as it was made again, as before there were
-		// more; with more the ground is everyone's ([HC_MULTIPLAYER] 1)
-		if(m_players.size() == 1){
+		// more; with more the ground is everyone's ([HC_MULTIPLAYER] 1).
+		// Not when only the car goes back ([HC_RESET_KEEP_GROUND])
+		const bool keep = pl.keep_ground;
+		pl.keep_ground = false;
+		if(m_players.size() == 1 && !keep){
 			if(m_ground && m_ground->changed())
 				m_ground->restore();
 			clear_rocks();
@@ -1632,6 +1643,13 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *){
 			place_car(pl);
 		});
+		if(keep){
+			const magic::Vector3 q = pl.body->GetNode()->GetWorldPosition() /
+					hill::U;
+			log_i(MODULE, "hillclimb: %s back to the start at %.2f,%.2f m, the "
+					"ground kept: %d laps, %zu voxels changed", cs(pl.name), q.x_,
+					q.z_, pl.lap.laps, m_ground ? m_ground->undo.size() : 0);
+		}
 	}
 
 	//
@@ -1855,13 +1873,23 @@ struct Module: public interface::Module
 		pl.input.steer = (is >> steer) ? car::clampf(steer / 100.0f, -1, 1) :
 				(r != 0) - (l != 0);
 		pl.input.gear = (car::Gear)g;
-		// [HC_CIRCUIT] A circuit's run is the round's: the car back at the
-		// start with its laps, the lap under way from its first turn
-		if(reset && !pl.reset && m_params.circuit && pl.race == RUNNING){
+		if(reset)
+			backspace(pl);
+	}
+	// [HC_CIRCUIT] A circuit's run is the round's: the car back at the
+	// start with its laps, the lap under way from its first turn, and
+	// ([HC_RESET_KEEP_GROUND]) the ground as it is: a way to get unstuck.
+	// Otherwise a new run, on the hill as it was made.
+	void backspace(Player &pl)
+	{
+		if(pl.reset)
+			return;
+		if(m_params.circuit && pl.race == RUNNING){
 			pl.lap.next = 1;
 			pl.lap.at = false;
+			pl.keep_ground = true;
 			pl.reset = true;
-		} else if(reset && !pl.reset){
+		} else {
 			reset_race(pl);
 		}
 	}

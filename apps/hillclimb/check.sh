@@ -63,7 +63,7 @@ port_base=$((29700 + RANDOM % 280))
 declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 	[over25]=6 [over31]=7 [over37]=8 [counts]=9 [cars8]=10 [side]=11
 	[parked]=12 [varied]=13 [circuit]=14 [cut]=15 [scores0]=16 [scores]=17
-	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23 [kick]=24)
+	[series]=18 [fence]=19 [fixed]=20 [back]=21 [firm]=22 [soft]=23 [kick]=24 [keep]=25)
 # [HC_SOFT_DEFAULTS] The car's drives on the firm soil they were tuned on
 # (80 kPa, dig 2, 100%, 35%; a ranking key with no knob parts), not the
 # game's soft default
@@ -142,6 +142,11 @@ circuit="BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5
 drive circuit $circuit BUILDAT_HILLCLIMB_CARS=2 BUILDAT_HILLCLIMB_DRIVE="0:P 64:Q" &
 # shellcheck disable=SC2086
 drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
+# [HC_RESET_KEEP_GROUND] On the default soil, a lap by P, then Backspace
+# (Z) mid-lap: the car at the start, the lap and the ruts kept
+# shellcheck disable=SC2086
+drive keep $circuit $default_soil BUILDAT_HILLCLIMB_INTERVAL=120 \
+	BUILDAT_HILLCLIMB_DRIVE="0:P 52:PZ 53:P 56:Q" &
 # [HC_BACKTRACK] Past turn 1, then backed round it into the lane before
 # (O: where it is), then driven on to a lap; a round long enough for it
 # shellcheck disable=SC2086
@@ -203,6 +208,17 @@ print("  a rested stone: %s; kicked loose again as rock %s: %s; held the car bac
     "9 voxels" if rest else "none", n, kicked.group(0) if kicked else "no",
     pushed.group(1) if pushed else "no", fin.group(1) if fin else "never"))
 sys.exit(0 if rest and kicked and pushed and int(pushed.group(1)) > 0 and fin else 1)
+PY
+python3 -I - "$t/keep.log" <<'PY' || fail "Backspace mid-lap ($t/keep.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+start = re.search(r"car t=0\.0 pos=(\S+),\S+,(\S+) ", log)
+back = re.search(r"drive back to the start at (\S+),(\S+) m, the ground kept: (\d+) laps, (\d+) voxels changed", log)
+ok = (start and back and abs(float(back.group(1)) - float(start.group(1))) < 0.5 and
+    abs(float(back.group(2)) - float(start.group(2))) < 0.5 and back.group(3) == "1" and
+    int(back.group(4)) > 0 and "the hill as it was made" not in log)
+print("  Backspace mid-lap: %s" % (back.group(0) if back else "not logged"))
+sys.exit(0 if ok else 1)
 PY
 b="$t/back.log"
 grep -aq "hillclimb: drive at .*, turn 2 next, lanes 0\( 4\)\?$" "$b" &&
