@@ -48,16 +48,20 @@ core.register_item(":", {type = "none", wield_image = "blank.png",
 core.register_on_joinplayer(function(player)
 	player:set_pos({x = -10, y = 0.5, z = -10})
 end)
--- For check.sh: what the player did, in the log; the floor mod's own
--- self-tests dig and place with nobody doing them
+-- For check.sh: what the player did, in the log and told to them, which
+-- is what the client's drive waits for; the floor mod's own self-tests
+-- dig and place with nobody doing them
 core.register_on_dignode(function(_, node, digger)
 	if digger and digger:is_player() then
 		core.log("action", "glue: dug " .. node.name)
+		core.chat_send_player(digger:get_player_name(), "glue: dug " .. node.name)
 	end
 end)
 core.register_on_placenode(function(_, node, placer)
 	if placer and placer:is_player() then
 		core.log("action", "glue: placed " .. node.name)
+		core.chat_send_player(placer:get_player_name(),
+				"glue: placed " .. node.name)
 	end
 end)
 local since = 0

@@ -9,10 +9,10 @@
 # C++ sets the player's hp through the bridge's call and reads 5 back
 # (7, less the 2 of the punch the call also gives), and hears the punch through
 # on_punchplayer's emit; the loop's HUD stage is the app's stub.
-# The place has 8 s to land: minimal_game's map self-test runs in one
-# luanti tick once its sections are generated, which can be mid-drive,
-# and that tick took 5.4 s here (2026-10-20), the place packet queued
-# behind it.
+# The drive waits for the game's chat line on the dig and the place, not
+# a time: minimal_game's map self-test runs in one luanti tick once its
+# sections are generated, which can be mid-drive, and that tick took
+# 5.4 s here (2026-10-20), the place packet queued behind it.
 #   apps/sample_luanti_glue/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -23,10 +23,11 @@ start_server "$t/srv.log" "glue: the world is up" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/sample_luanti_glue" \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "wait_log 120000 hud stub:" "delay 3000" "look 0 -30" \
-	"keydown w" "delay 1200" "keyup w" "delay 500" \
-	"mouse_down left" "delay 3000" "mouse_up left" "delay 500" \
-	"look 0 -45" "delay 300" "mouse_click right" "delay 8000" "screenshot $t/shot.png" "quit" > "$t/cmds"
+printf '%s\n' "wait_log 120000 hud stub:" "wait_log 60000 , 0 undrawn within" "look 0 -30" \
+	"keydown w" "delay 1000" "keyup w" "delay 500" \
+	"mouse_down left" "wait_log 30000 chat: glue: dug " "mouse_up left" "delay 500" \
+	"look 0 -45" "delay 300" "mouse_click right" "wait_log 30000 chat: glue: placed " \
+	"screenshot $t/shot.png" "quit" > "$t/cmds"
 run_client 60 "$t/cli.log" timeout 300 "$here/Build/bin/buildat" -C "$t/c" \
 	-D "$t/u" -w 800x500 -l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" \
 	-c @"$t/cmds" || fail "the drive ($t/cli.log)"
