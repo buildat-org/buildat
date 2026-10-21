@@ -151,6 +151,30 @@ namespace interface
 				const HorizonMap *horizon = nullptr,
 				const pv::Vector3DInt32 *uv_origin = nullptr);
 
+		// **The same in slices** ([WEB_MAIN_THREAD]): the web client has no
+		// worker threads and a chunk's mesh, one call, was a frame's hitch
+		// of tens of milliseconds. Each call goes on from where the last
+		// stopped -- the voxels a z layer at a time, then the faces 64 at a
+		// time, then the shapes -- until `until_us` (os::time_us()) has
+		// passed, and gives true once the mesh is whole. A step always
+		// makes progress. The arguments are the same on every call.
+		struct VoxelGeometryJob
+		{
+			struct State;
+			up_<State> s;
+			VoxelGeometryJob();
+			~VoxelGeometryJob();
+		};
+		bool generate_voxel_geometry_step(VoxelGeometryJob &job,
+				int64_t until_us, sm_<uint, TemporaryGeometry> &result,
+				VoxelVolume &volume,
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false,
+				sm_<uint, TemporaryGeometry> *translucent_result = nullptr,
+				sm_<uint, TemporaryGeometry> *masked_result = nullptr,
+				const HorizonMap *horizon = nullptr,
+				const pv::Vector3DInt32 *uv_origin = nullptr);
+
 		// **A cheap stand-in shape for the occlusion buffer**
 		// ([CLIENT_FRAME]). A chunk's drawn mesh is thousands of triangles
 		// of surface detail saying what a few quads would, and Urho3D

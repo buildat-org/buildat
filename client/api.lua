@@ -2741,6 +2741,15 @@ function buildat.safe.column_heights(safe_buffer, ...)
 	return __buildat_column_heights(buffer, ...)
 end
 
+-- horizon_merge(cys, heights, chunk) -> string; see src/lua_bindings/mesh.cpp
+function buildat.safe.horizon_merge(cys, heights, chunk)
+	if type(cys) ~= "string" or type(heights) ~= "string" or
+			type(chunk) ~= "number" then
+		error("horizon_merge: two strings and a number")
+	end
+	return __buildat_horizon_merge(cys, heights, math.floor(chunk))
+end
+
 function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 	if not getmetatable(safe_node) or
 			getmetatable(safe_node).type_name ~= "Node" then

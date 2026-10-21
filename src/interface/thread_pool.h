@@ -26,6 +26,10 @@ namespace interface
 			virtual void request_stop() = 0;
 			virtual void join() = 0;
 			virtual void run_post() = 0;
+			// Microseconds since the last call: the threaded part run
+			// inline (no workers: the web client) and post()
+			// ([WEB_MAIN_THREAD]'s frame split)
+			virtual void take_times(int64_t *inline_us, int64_t *post_us) = 0;
 		};
 
 		ThreadPool* createThreadPool();

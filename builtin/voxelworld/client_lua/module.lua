@@ -311,28 +311,16 @@ local function int16_char(v)
 	return string.char(v % 256, math.floor(v / 256) % 256)
 end
 
-local function int16_at(str, i)   -- 0-based entry
-	local lo, hi = string.byte(str, i * 2 + 1, i * 2 + 2)
-	local v = lo + hi * 256
-	if v >= 32768 then v = v - 65536 end
-	return v
-end
-
 local function horizon_merge(col)
-	local out = {}
-	local n = HORIZON_CHUNK * HORIZON_CHUNK
-	for i = 0, n - 1 do
-		local best = HORIZON_NONE
-		for cy, str in pairs(col.chunks) do
-			local h = int16_at(str, i)
-			if h ~= HORIZON_NONE then
-				local w = cy * HORIZON_CHUNK + h
-				if w > best then best = w end
-			end
-		end
-		out[i + 1] = int16_char(best)
+	-- In C++ ([WEB_MAIN_THREAD]): 1024 reads a chunk here were most of a
+	-- remesh's Lua in a browser
+	local cys, hs = {}, {}
+	for cy, str in pairs(col.chunks) do
+		cys[#cys + 1] = int16_char(cy)
+		hs[#hs + 1] = str
 	end
-	return table.concat(out)
+	return buildat.horizon_merge(table.concat(cys), table.concat(hs),
+			HORIZON_CHUNK)
 end
 
 -- A chunk's heights have arrived or changed

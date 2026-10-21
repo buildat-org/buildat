@@ -7,6 +7,7 @@
 #include "interface/voxel_volume.h"
 #include "interface/thread_pool.h"
 #include "interface/os.h"
+#include <atomic>
 #include <c55/os.h>
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -219,16 +220,68 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 				*volume, voxel_reg.get(), atlas_reg.get(), false,
 				interface::os::time_us() + 1500, preload_cursor);
 	}
-	// Called repeatedly from worker thread until returns true
+	// Called repeatedly from worker thread until returns true: 2 ms at a
+	// time, so that the web client's pool, which runs this on the frame's
+	// own thread, can stop between them ([WEB_MAIN_THREAD])
+	interface::mesh::VoxelGeometryJob job;
 	bool thread()
 	{
-		generate_voxel_geometry(
+		if(!interface::mesh::generate_voxel_geometry_step(job,
+				interface::os::time_us() + 2000,
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
 				use_skylight, &alpha_geoms, &masked_geoms, horizon.get(),
-				uv_origin.get());
+				uv_origin.get()))
+			return false;
+		slice_check();
 		interface::mesh::generate_occluder(occluder, *volume,
 				voxel_reg.get());
 		return true;
+	}
+	// BUILDAT_MESH_SLICE_CHECK=1 (util/mesh_slice_check.sh): the chunk
+	// meshed again whole and in the smallest slices, each against what
+	// the task made; a line every 100 chunks and one for each that differs
+	void slice_check()
+	{
+		static const bool on = [](){
+			const char *e = getenv("BUILDAT_MESH_SLICE_CHECK");
+			return e && ss_(e) == "1";
+		}();
+		if(!on)
+			return;
+		typedef sm_<uint, interface::mesh::TemporaryGeometry> Geoms;
+		Geoms wa, wb, wc, sa, sb, sc;
+		interface::mesh::generate_voxel_geometry(wa, *volume, voxel_reg.get(),
+				atlas_reg.get(), use_skylight, &wb, &wc, horizon.get(),
+				uv_origin.get());
+		interface::mesh::VoxelGeometryJob small;
+		int steps = 1;
+		while(!interface::mesh::generate_voxel_geometry_step(small, 0, sa,
+				*volume, voxel_reg.get(), atlas_reg.get(), use_skylight, &sb,
+				&sc, horizon.get(), uv_origin.get()))
+			steps++;
+		auto same = [](Geoms &x, Geoms &y){
+			if(x.size() != y.size())
+				return false;
+			for(auto &kv : x){
+				auto it = y.find(kv.first);
+				if(it == y.end())
+					return false;
+				auto &u = kv.second.vertex_data, &v = it->second.vertex_data;
+				if(u.Size() != v.Size() || (u.Size() != 0 &&
+						memcmp(&u[0], &v[0], u.Size() * sizeof u[0]) != 0))
+					return false;
+			}
+			return true;
+		};
+		static std::atomic<int> n_same(0), n_differ(0);
+		const bool ok = same(wa, sa) && same(wb, sb) && same(wc, sc) &&
+				same(wa, temp_geoms) && same(wb, alpha_geoms) &&
+				same(wc, masked_geoms);
+		const int n = ok ? ++n_same : ++n_differ;
+		if(!ok || n % 100 == 0)
+			log_i(MODULE, "mesh slice check: %i the same, %i differ "
+					"(this one %i steps, %s)", (int)n_same, (int)n_differ,
+					steps, ok ? "the same" : "DIFFERS");
 	}
 	// Called repeatedly from main thread until returns true
 	bool post()
@@ -673,6 +726,41 @@ ss_ column_heights(const luabind::object &buffer_o,
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
 }
 
+// horizon_merge(cys, heights, chunk) -> a string of chunk*chunk int16: a
+// chunk column's tops out of its chunks' column_heights(), each the
+// highest of them in world rows (cy * chunk + its own), HORIZON_NONE where
+// none has one. `cys` is the chunks' y as int16, `heights` their
+// column_heights() strings in the same order. voxelworld's Lua did this,
+// and a column's 1024 reads were most of a remesh's Lua in a browser
+// ([WEB_MAIN_THREAD]).
+ss_ horizon_merge(const ss_ &cys, const ss_ &heights, int chunk)
+{
+	if(chunk < 1 || chunk > 256)
+		throw Exception("horizon_merge: chunk out of range");
+	const size_t n = (size_t)chunk * chunk;
+	const size_t k = cys.size() / 2;
+	if(cys.size() % 2 != 0 || heights.size() != k * n * 2)
+		throw Exception("horizon_merge: the sizes do not add up");
+	auto at = [](const ss_ &s, size_t i){
+		int16_t v;
+		memcpy(&v, s.data() + i * 2, 2);
+		return v;
+	};
+	sv_<int16_t> out(n, interface::mesh::HORIZON_NONE);
+	for(size_t c = 0; c < k; c++){
+		const int cy = at(cys, c);
+		for(size_t i = 0; i < n; i++){
+			const int16_t h = at(heights, c * n + i);
+			if(h == interface::mesh::HORIZON_NONE)
+				continue;
+			const int w = cy * chunk + h;
+			if(w > out[i])
+				out[i] = (int16_t)w;
+		}
+	}
+	return ss_((const char*)out.data(), n * sizeof(int16_t));
+}
+
 // set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic cells
 // as the node's CustomGeometry, one geometry, a face wherever a cell's
 // neighbour is empty -- a face's normal, the colour (r, g, b, a) and the
@@ -931,6 +1019,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_line_geometry),
 			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(column_heights),
+			LUABIND_FUNC(horizon_merge),
 			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_mesh_alpha_nibbles),
 			LUABIND_FUNC(set_8bit_voxel_geometry),

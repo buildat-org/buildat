@@ -210,9 +210,14 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// admin's chat -- or connected to another server inside this one's
 	// origin. No command-line flag passes through.
 	var flags = {log: '-l', scale: '-u', pref: '-o'};
+	// ?frame_split=1: the frame's split logged every 10 s
+	// ([WEB_MAIN_THREAD]); a log line, nothing else
+	var frame_split = false;
 	query.forEach(function(value, key){
 		if(flags.hasOwnProperty(key))
 			args.push(flags[key], value);
+		else if(key === 'frame_split')
+			frame_split = value === '1';
 		else if(key !== 'server')
 			console.log('Not taken from the address: ' + key);
 	});
@@ -478,6 +483,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
 			if(join)
 				Module.ENV.BUILDAT_JOIN = join;
+			if(frame_split)
+				Module.ENV.BUILDAT_FRAME_SPLIT = '1';
 			if(open_)
 				Module.ENV.BUILDAT_OPEN = open_;
 			if(run)

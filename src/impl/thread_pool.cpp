@@ -218,13 +218,26 @@ struct CThreadPool: public ThreadPool
 	}
 
 	// With no workers (the web client, which has no threads: [WEB_CLIENT])
-	// the threaded part runs here, on the calling thread, a slice a frame.
-	// simplified: one task at a time and whole; a task whose thread() is
-	// longer than the slice still takes all of it.
-	static const int64_t INLINE_BUDGET_US = 8000;
+	// the threaded part runs here, on the calling thread, a slice a frame:
+	// a thread() call at a time, and a task not done when the slice is
+	// over goes on next frame ([WEB_MAIN_THREAD]; a chunk's mesh steps in
+	// 2 ms). simplified: a task whose single thread() call is long still
+	// takes all of it.
+	static const int64_t INLINE_BUDGET_US = 4000;
+	int64_t m_inline_us = 0, m_post_us = 0;
+	void take_times(int64_t *inline_us, int64_t *post_us)
+	{
+		*inline_us = m_inline_us;
+		*post_us = m_post_us;
+		m_inline_us = m_post_us = 0;
+	}
 	void run_inline()
 	{
 		const int64_t t0 = get_timeofday_us();
+		struct Count {
+			int64_t t0, &sum;
+			~Count(){ sum += get_timeofday_us() - t0; }
+		} count{t0, m_inline_us};
 		while(get_timeofday_us() - t0 < INLINE_BUDGET_US){
 			up_<Task> current;
 			{
@@ -234,13 +247,17 @@ struct CThreadPool: public ThreadPool
 				current = std::move(m_input_queue.front());
 				m_input_queue.pop_front();
 			}
+			bool done = true;
 			try {
-				while(!current->thread());
+				done = current->thread();
 			} catch(std::exception &e){
 				log_w(MODULE, "Inline task failed: %s", e.what());
 			}
 			interface::MutexScope ms(m_mutex);
-			m_output_queue.push_back(std::move(current));
+			if(done)
+				m_output_queue.push_back(std::move(current));
+			else
+				m_input_queue.push_front(std::move(current));
 		}
 	}
 
@@ -254,6 +271,10 @@ struct CThreadPool: public ThreadPool
 			run_inline();
 
 		int64_t t1 = get_timeofday_us();
+		struct Count {
+			int64_t t0, &sum;
+			~Count(){ sum += get_timeofday_us() - t0; }
+		} count{t1, m_post_us};
 		size_t queue_size = 0;
 		size_t post_count = 0;
 		bool last_was_partly_procesed = false;

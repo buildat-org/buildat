@@ -1631,6 +1631,10 @@ struct CApp: public App, public magic::Application
 #else
 		m_thread_pool->start(4); // TODO: Configurable
 #endif
+		{
+			const char *e = getenv("BUILDAT_FRAME_SPLIT");
+			m_split.on = e && ss_(e) == "1";
+		}
 
 		interface::fs::create_directories(
 				g_client_config.get<ss_>("cache_path")+"/server_icons");
@@ -1729,6 +1733,8 @@ struct CApp: public App, public magic::Application
 				URHO3D_HANDLER(CApp, on_post_render_update));
 		SubscribeToEvent(magic::E_ENDRENDERING,
 				URHO3D_HANDLER(CApp, on_end_rendering));
+		SubscribeToEvent(magic::E_BEGINRENDERING,
+				URHO3D_HANDLER(CApp, on_begin_rendering));
 		SubscribeToEvent(magic::E_KEYDOWN, URHO3D_HANDLER(CApp, on_keydown));
 		for(magic::StringHash e : {magic::E_KEYUP, magic::E_MOUSEBUTTONDOWN,
 				magic::E_MOUSEBUTTONUP, magic::E_TOUCHBEGIN, magic::E_TOUCHEND})
@@ -2815,6 +2821,92 @@ struct CApp: public App, public magic::Application
 
 	#include "command_seq_run.h"
 
+	// [WEB_MAIN_THREAD] BUILDAT_FRAME_SPLIT=1 (the page's ?frame_split=1):
+	// every 10 s, the frames' mean, 95th percentile and worst, and the
+	// main thread's ms a second in the packets with the Lua they run
+	// (State::update), the pool's threaded part run inline (the web's
+	// meshing) and its post() (the meshes' buffers made and uploaded)
+	struct FrameSplit {
+		bool on = false;
+		int64_t last_us = 0, start_us = 0, packets_us = 0, inline_us = 0,
+				post_us = 0;
+		// The frame's own, for a long one's line
+		int64_t prev_packets_us = 0;
+		// The render, between Urho3D's BeginRendering and EndRendering:
+		// the last frame's, at each frame_split()
+		int64_t render_t0 = 0, render_us = 0, render_sum_us = 0;
+		int long_said = 0;
+		sv_<int64_t> frames;
+		// Each frame's parts, for their own 95th percentiles
+		sv_<int64_t> f_packets, f_inline, f_post, f_render, f_rest;
+	} m_split;
+	void frame_split()
+	{
+		if(!m_split.on)
+			return;
+		const int64_t now = get_timeofday_us();
+		int64_t in = 0, post = 0;
+		m_thread_pool->take_times(&in, &post);
+		m_split.inline_us += in;
+		m_split.post_us += post;
+		if(m_split.last_us != 0){
+			const int64_t f = now - m_split.last_us;
+			m_split.frames.push_back(f);
+			// A long frame says what it was not (the parts measured here)
+			// -- the rest is the render and the Lua of the frame's events
+			const int64_t pk = m_split.packets_us - m_split.prev_packets_us;
+			m_split.f_packets.push_back(pk);
+			m_split.f_inline.push_back(in);
+			m_split.f_post.push_back(post);
+			m_split.f_render.push_back(m_split.render_us);
+			m_split.f_rest.push_back(f - pk - in - post - m_split.render_us);
+			if(f > 100000 && m_split.long_said < 30){
+				m_split.long_said++;
+				log_i(MODULE, "frame split: a frame of %.0f ms: packets %.1f, "
+						"mesh inline %.1f, post %.1f", f / 1e3, pk / 1e3,
+						in / 1e3, post / 1e3);
+			}
+		} else
+			m_split.start_us = now;
+		m_split.last_us = now;
+		m_split.prev_packets_us = m_split.packets_us;
+		m_split.render_sum_us += m_split.render_us;
+		m_split.render_us = 0;
+		const double secs = (now - m_split.start_us) / 1e6;
+		if(secs < 10 || m_split.frames.empty())
+			return;
+		sv_<int64_t> &f = m_split.frames;
+		std::sort(f.begin(), f.end());
+		int64_t sum = 0;
+		for(int64_t v : f)
+			sum += v;
+		auto p95 = [](sv_<int64_t> &v){
+			if(v.empty())
+				return 0.0;
+			std::sort(v.begin(), v.end());
+			const double r = v[(size_t)(v.size() * 0.95)] / 1e3;
+			v.clear();
+			return r;
+		};
+		const double pp = p95(m_split.f_packets), pi = p95(m_split.f_inline),
+				po = p95(m_split.f_post), pd = p95(m_split.f_render),
+				pr = p95(m_split.f_rest);
+		log_i(MODULE, "frame split: %zu frames in %.1f s, mean %.1f ms, p95 "
+				"%.1f, worst %.1f; ms/s: packets %.1f, mesh inline %.1f, "
+				"post %.1f, render %.1f; a frame's p95: packets %.1f, mesh "
+				"inline %.1f, post %.1f, render %.1f, the rest (the frame's "
+				"Lua, the browser) %.1f", f.size(), secs, sum / 1e3 / f.size(),
+				f[(size_t)(f.size() * 0.95)] / 1e3, f.back() / 1e3,
+				m_split.packets_us / 1e3 / secs, m_split.inline_us / 1e3 / secs,
+				m_split.post_us / 1e3 / secs, m_split.render_sum_us / 1e3 / secs,
+				pp, pi, po, pd, pr);
+		m_split.render_sum_us = 0;
+		f.clear();
+		m_split.start_us = now;
+		m_split.packets_us = m_split.inline_us = m_split.post_us = 0;
+		m_split.prev_packets_us = 0;
+	}
+
 	void on_update(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		// A frame: the watchdog hears it, and logs this thread's stack
@@ -2878,7 +2970,9 @@ struct CApp: public App, public magic::Application
 			// as an Update with nothing in it ([FRAME_PEAK])
 			magic::AutoProfileBlock profiler_block(
 					GetSubsystem<magic::Profiler>(), "Buildat|State::update");
+			const int64_t t0 = get_timeofday_us();
 			m_state->update();
+			m_split.packets_us += get_timeofday_us() - t0;
 		}
 
 		{
@@ -2886,6 +2980,7 @@ struct CApp: public App, public magic::Application
 					GetSubsystem<magic::Profiler>(), "Buildat|ThreadPool::post");
 			m_thread_pool->run_post();
 		}
+		frame_split();
 
 #ifdef DEBUG_CORE_TIMING
 		int64_t t1 = get_timeofday_us();
@@ -2908,9 +3003,19 @@ struct CApp: public App, public magic::Application
 			m_scene->GetComponent<magic::PhysicsWorld>()->DrawDebugGeometry(true);
 	}
 
+	void on_begin_rendering(
+			magic::StringHash event_type, magic::VariantMap &event_data)
+	{
+		if(m_split.on)
+			m_split.render_t0 = get_timeofday_us();
+	}
 	void on_end_rendering(
 			magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		if(m_split.on && m_split.render_t0 != 0){
+			m_split.render_us += get_timeofday_us() - m_split.render_t0;
+			m_split.render_t0 = 0;
+		}
 		if(m_pending_screenshot.empty())
 			return;
 		ss_ path = m_pending_screenshot;
