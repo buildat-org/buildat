@@ -24,6 +24,12 @@
 //   voxel (steeper than about 45 degrees; the hill's own slope is never
 //   that), or over its neighbours' mean by more than half a voxel (a lone
 //   lump), gives half the difference to the lowest, a few moves at most.
+// [HC_WET_SAND] Under the loose top, wet packed sand: a tyre on it sinks
+// by its own bearing (the cars' do not), digs it at a third of the rate,
+// and what it digs is broken up: it lands as loose sand, and a wet voxel
+// dug part away is loose sand once anything lands on it. A wet column
+// settles only over its lowest neighbour by more than 4 voxels, so a
+// rut's walls of it stand.
 // Stones (hill.h's pebbles, a few voxels each, and [HC_STONE_KICK] the
 // ones that came loose and rested, which the ground keeps a table of):
 // one lying on the ground (touching sand at its sides by two faces or
@@ -78,7 +84,8 @@ struct Grid: public car::Ground
 	Voxel drawn(int x, int y, int z) const
 	{
 		Voxel t = at(x, y, z);
-		return t == hill::SAND && fill(x, y, z) < 4 ? hill::AIR : t;
+		return (t == hill::SAND || t == hill::WET) && fill(x, y, z) < 4 ?
+				hill::AIR : t;
 	}
 	// car.h's: how far a voxel's sphere is lowered by what it lacks
 	float drop(int x, int y, int z) const override
@@ -138,6 +145,11 @@ struct Soil
 	float stone_kg = 5.1f;  // a voxel of stone, 2600 kg/m^3
 	float mu_bed = 0.6f * 0.20f / 0.35f; // a stone on its bed
 	float open_front = 0.20f; // of a stone's voxels, free along the push
+	// [HC_WET_SAND] The wet sand's: its bearing, its digging's share of
+	// the loose sand's, and the drop it stands to, eighths
+	float wet_bearing = 150000;
+	float wet_dig = 1 / 3.0f;
+	int wet_drop8 = 4 * 8;
 };
 
 struct Change { int x, y, z; Voxel v; };
@@ -199,27 +211,31 @@ struct Ground
 				g.fill(x, y, z) << 8)});
 	}
 	// [HC_SAND_VOLUME] A sand voxel's eighths, 0 its air; voxelworld
-	// told when it crosses half
+	// told when it crosses half. [HC_WET_SAND] A wet one stays wet
 	void set_fill(int x, int y, int z, int n)
 	{
-		if(!g.inside(x, y, z) || (n > 0 && g.at(x, y, z) != hill::SAND &&
-				g.at(x, y, z) != hill::AIR))
+		const Voxel cur = g.at(x, y, z);
+		if(!g.inside(x, y, z) || (n > 0 && cur != hill::SAND &&
+				cur != hill::WET && cur != hill::AIR))
 			return;
 		const Voxel was = g.drawn(x, y, z);
 		keep_undo(x, y, z);
-		g.set(x, y, z, n > 0 ? hill::SAND : hill::AIR);
+		g.set(x, y, z, n > 0 ? (cur == hill::WET ? hill::WET : hill::SAND) :
+				hill::AIR);
 		g.f[idx(x, y, z)] = (uint8_t)n;
 		const Voxel now = g.drawn(x, y, z);
 		if(now != was)
 			changes.push_back(Change{x, y, z, now});
 	}
-	// Up to n eighths off a column's top sand; what was taken
-	int take(int x, int z, int n)
+	// Up to n eighths off a column's top sand, [HC_WET_SAND] the wet too
+	// when `wet` (a dig, a wet wall's settling); what was taken
+	int take(int x, int z, int n, bool wet = false)
 	{
 		int taken = 0;
 		while(taken < n){
 			const int t = g.top(x, z);
-			if(t < 0 || g.at(x, t, z) != hill::SAND)
+			if(t < 0 || !(g.at(x, t, z) == hill::SAND ||
+					(wet && g.at(x, t, z) == hill::WET)))
 				break;
 			const int f = g.fill(x, t, z), k = std::min(f, n - taken);
 			set_fill(x, t, z, f - k);
@@ -234,6 +250,12 @@ struct Ground
 		int done = 0;
 		while(done < n && g.inside(x, 0, z)){
 			const int t = g.top(x, z);
+			// [HC_WET_SAND] A wet voxel dug part away, broken up by what lands
+			if(t >= 0 && g.at(x, t, z) == hill::WET && g.fill(x, t, z) < 8){
+				const int f = g.fill(x, t, z);
+				set_fill(x, t, z, 0);
+				set_fill(x, t, z, f);
+			}
 			if(t >= 0 && g.at(x, t, z) == hill::SAND && g.fill(x, t, z) < 8){
 				const int f = g.fill(x, t, z), k = std::min(8 - f, n - done);
 				set_fill(x, t, z, f + k);
@@ -250,11 +272,11 @@ struct Ground
 	}
 	// n eighths from one column to another; what moved (none lost: what
 	// the other cannot take goes back)
-	int move(int x, int z, int tx, int tz, int n)
+	int move(int x, int z, int tx, int tz, int n, bool wet = false)
 	{
 		if(!g.inside(tx, 0, tz))
 			return 0;
-		const int taken = take(x, z, n), done = put(tx, tz, taken);
+		const int taken = take(x, z, n, wet), done = put(tx, tz, taken);
 		if(done < taken)
 			put(x, z, taken - done);
 		return done;
@@ -290,11 +312,14 @@ struct Ground
 					best = i;
 				}
 			}
-			if(best < 0 || !(h8 - low > 8 || h8 * n - sum > 4 * n))
+			const int t = g.top(c.first, c.second);
+			const bool wet = g.at(c.first, t, c.second) == hill::WET;
+			if(best < 0 || (wet ? h8 - low <= soil.wet_drop8 :
+					!(h8 - low > 8 || h8 * n - sum > 4 * n)))
 				continue;
 			int nx = c.first + D[best][0], nz = c.second + D[best][1];
 			const int moved = move(c.first, c.second, nx, nz,
-					std::max(1, (h8 - low) / 2));
+					std::max(1, (h8 - low) / 2), wet);
 			if(moved == 0)
 				continue;
 			budget--;
@@ -449,10 +474,14 @@ struct Ground
 		float len = 2 * std::sqrt(2 * spec.tyre_r * defl);
 		float pressure = w.load / (spec.tyre_w * std::fmax(len, 0.05f));
 		V3 at = w.at * u;
-		s.sink += std::fmax(0, pressure / soil.bearing - 1) * soil.sink_rate * dt;
+		// [HC_WET_SAND] Wet sand under the hub: its bearing and digging
+		const int hx = (int)std::lround(at.x), hz = (int)std::lround(at.z);
+		const bool wet = g.at(hx, g.top(hx, hz), hz) == hill::WET;
+		s.sink += std::fmax(0, pressure / (wet ? soil.wet_bearing :
+				soil.bearing) - 1) * soil.sink_rate * dt;
 		float speed = w.slide.length();
 		if(w.slipping)
-			s.dig += speed * dt * soil.dig_rate;
+			s.dig += speed * dt * soil.dig_rate * (wet ? soil.wet_dig : 1);
 		// [HC_STONE_KICK] A stone lying on the ground the tyre is on, from
 		// its patch's back to its front: kicked along its travel with the
 		// tyre's grip, slipping or not; one try a substep
@@ -506,7 +535,8 @@ struct Ground
 			for(auto &c : cols){
 				int t = g.top(c.first, c.second);
 				Voxel v = g.at(c.first, t, c.second);
-				if(v == hill::SAND && g.height8(c.first, c.second) > by){
+				if((v == hill::SAND || v == hill::WET) &&
+						g.height8(c.first, c.second) > by){
 					by = g.height8(c.first, c.second);
 					bx = c.first;
 					bz = c.second;
@@ -532,7 +562,7 @@ struct Ground
 			const float lx = at.x + dir.x * d, lz = at.z + dir.z * d;
 			const int x0 = (int)std::floor(lx), z0 = (int)std::floor(lz);
 			const float fx = lx - x0, fz = lz - z0;
-			const int taken = take(bx, bz, dig8);
+			const int taken = take(bx, bz, dig8, true);
 			int left = taken;
 			const float wt[4] = {(1 - fx) * (1 - fz), fx * (1 - fz),
 					(1 - fx) * fz, fx * fz};
@@ -638,11 +668,12 @@ int main()
 	w.at = car::V3(x / U, (t + 0.5f) / U, z / U);
 	w.axle = car::V3(1, 0, 0);
 	w.slide = car::V3(0, 0, -1.2f); // the tread backwards, m/s
-	// [HC_SAND_VOLUME] All the sand's eighths, before and after
+	// [HC_SAND_VOLUME] All the sand's eighths, before and after, the
+	// wet's with it ([HC_WET_SAND])
 	auto sand = [&](){
 		long long n = 0;
 		for(size_t i = 0; i < g.v.size(); i++)
-			if(g.v[i] == hill::SAND)
+			if(g.v[i] == hill::SAND || g.v[i] == hill::WET)
 				n += g.f[i];
 		return n;
 	};
@@ -775,6 +806,62 @@ int main()
 		printf("ground.h: a rested stone (6 voxels) loose again; one by a face "
 				"at %.0f N; a bedded one held; one kicked by a rolling tyre\n",
 				slide);
+	}
+	// [HC_WET_SAND] On a hill wet to the top: an empty 2 t car's tyre at
+	// rest does not sink at the default bearing; sliding 1 m/s for 2 s it
+	// digs a third of what it digs in loose sand, the dug sand lands
+	// loose, none lost; a 3-voxel wall of wet sand stands, one of loose
+	// sand does not
+	{
+		const int B = hill::Hill::BASE;
+		hill::Params wp = p, lp = p;
+		wp.loose = 0;
+		lp.loose = hill::Hill::SHELL;
+		hill::Hill wh(wp), lh(lp);
+		Grid wg(wh), lg(lh);
+		auto run = [&](Grid &gg, const hill::Hill &hh, bool slide){
+			Ground gk(gg, hh);
+			car::Wheel w;
+			w.at = car::V3(25 / U, (B + 0.5f) / U, 40 / U);
+			w.axle = car::V3(1, 0, 0);
+			w.load = 2000 * 9.81f / 4;
+			w.slipping = slide;
+			w.slide = car::V3(0, 0, slide ? -1 : 0);
+			for(int i = 0; i < 512; i++)
+				gk.wheel(0, w, spec, U, 1.0f / 256);
+			return slide ? gk.dug : gk.sunk;
+		};
+		assert(wg.at(25, B, 40) == hill::WET && lg.at(25, B, 40) == hill::SAND);
+		auto vol = [](const Grid &gg, Voxel t){
+			long long n = 0;
+			for(size_t i = 0; i < gg.v.size(); i++)
+				if(gg.v[i] == t)
+					n += gg.f[i];
+			return n;
+		};
+		const long long w0 = vol(wg, hill::WET) + vol(wg, hill::SAND);
+		const long long dry0 = vol(wg, hill::SAND);
+		const int wet_sunk = run(wg, wh, false), wet_dug = run(wg, wh, true);
+		const int loose_dug = run(lg, lh, true);
+		assert(wet_sunk == 0);
+		assert(wet_dug > 0 && wet_dug * 2 < loose_dug &&
+				wet_dug * 4 > loose_dug);
+		assert(vol(wg, hill::WET) + vol(wg, hill::SAND) == w0 &&
+				vol(wg, hill::SAND) == dry0 + wet_dug);
+		// The walls: a column 3 voxels over its neighbours at x 60, settled
+		auto wall = [&](Grid &gg, const hill::Hill &hh){
+			Ground gk(gg, hh);
+			const Voxel t = gg.at(60, B, 60);
+			for(int y = B + 1; y <= B + 3; y++)
+				gg.set(60, y, 60, t);
+			gk.settle(60, 60);
+			return gg.top(60, 60) - B;
+		};
+		const int wet_wall = wall(wg, wh), loose_wall = wall(lg, lh);
+		printf("ground.h: wet sand: %d sunk at rest, %d dug against %d in "
+				"loose; a 3-voxel wall %d high wet, %d loose\n", wet_sunk,
+				wet_dug, loose_dug, wet_wall, loose_wall);
+		assert(wet_wall == 3 && loose_wall < 3);
 	}
 	// [HC_SAND_VOLUME] A voxel's worth dropped on flat ground spreads: no
 	// column left over its neighbours' mean by more than half a voxel

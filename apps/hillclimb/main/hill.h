@@ -46,7 +46,8 @@ namespace hill {
 static const int U = 8; // voxels to the metre
 static const float PI = 3.14159265f;
 
-enum Voxel { AIR, SAND, STONE, FILL };
+// [HC_WET_SAND] WET: the wet, packed sand under the loose top's
+enum Voxel { AIR, SAND, STONE, FILL, WET };
 
 struct Params
 {
@@ -62,6 +63,9 @@ struct Params
 	bool circuit = false;
 	float width_m = 40, lane_m = 7;
 	int switchbacks = 50;
+	// [HC_WET_SAND] The loose dry sand's depth over the wet, voxels, 0 to
+	// 8 (the shell's 12 all loose before it)
+	int loose = 3;
 	// simplified: sand with pebbles is the only terrain; rocky, muddy and
 	// vegetated are later ([HILLCLIMB] 5)
 };
@@ -763,7 +767,9 @@ struct Hill
 			return rock_at(x, y, z) ? STONE : AIR;
 		if(y <= s - SHELL)
 			return FILL;
-		return pebble(x, y, z) ? STONE : SAND;
+		if(pebble(x, y, z))
+			return STONE;
+		return y > s - p.loose ? SAND : WET;
 	}
 };
 
@@ -833,12 +839,28 @@ int main(int argc, char **argv)
 		assert(a.at(x, s + 1, z) == AIR || a.rock_at(x, s + 1, z));
 		assert(a.at(x, s, z) != AIR && a.at(x, s, z) != FILL);
 		for(int y = s - Hill::SHELL + 1; y <= s; y++){
-			sand += a.at(x, y, z) == SAND;
-			stone += a.at(x, y, z) == STONE;
+			const Voxel v = a.at(x, y, z);
+			sand += v == SAND || v == WET;
+			stone += v == STONE;
+			// [HC_WET_SAND] Loose over the top p.loose, wet under it
+			assert(v == STONE || v == (y > s - p.loose ? SAND : WET));
 		}
 		assert(a.at(x, s - Hill::SHELL, z) == FILL);
 	}
 	assert(stone > sand / 50 && stone < sand / 2);
+	// [HC_WET_SAND] No loose layer: wet to the top; all of it, no wet
+	{
+		Params w = p;
+		w.loose = 0;
+		Hill d(w);
+		const int x = 40, z = d.size_z() / 2, s = d.surface(x, z);
+		for(int y = s - Hill::SHELL + 1; y <= s; y++)
+			assert(d.at(x, y, z) == STONE || d.at(x, y, z) == WET);
+		w.loose = Hill::SHELL;
+		Hill e(w);
+		for(int y = s - Hill::SHELL + 1; y <= s; y++)
+			assert(e.at(x, y, z) == STONE || e.at(x, y, z) == SAND);
+	}
 	// The car's start (main.cpp: the pad's middle) on the pad: the rear
 	// tyre's back 1.4 + 0.4 m behind it
 	assert(Hill::PAD / 2 - (int)std::ceil(1.8f * U) >= 0);

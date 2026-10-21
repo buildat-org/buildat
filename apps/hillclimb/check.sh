@@ -173,7 +173,7 @@ turns=$(grep -a "hillclimb: drive passed turn" "$c" | head -4 | sed 's/.*turn \(
 	! grep -aq "crossed a fence" "$c" ||
 	fail "the circuit: turns '$turns' in order, then a lap, no fence crossed ($c)"
 res=$(grep -aA2 "hillclimb: round over:" "$c" | tail -2 | tr '\n' '|')
-grep -aq "finish .* on v6/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
+grep -aq "finish .* on v7/circuit/steep5/var0/length30/width24/lane7/switch0/round60/sand/payload0/, rank 0" "$c" &&
 	echo "$res" | grep -Eq '^1 laps [0-9.]+ drive\|0 laps [0-9.]+ drive1\|$' ||
 	fail "the circuit's round: '$res', or its key ($c)"
 grep -aq "hillclimb: drive's car put back" "$t/cut.log" && ! grep -aq "'s lap" "$t/cut.log" ||
@@ -191,8 +191,8 @@ changed() { grep -ao 'ground=[0-9/]*' "$1" | tail -1 | tr '=/' '  ' |
 	awk '{print $2 + $3 + $4}'; }
 firm=$(changed "$t/firm.log") soft_n=$(changed "$t/soft.log")
 grep -aq "voxels; sand 20 kPa, dig 8, power 200%, grip 0.40, stones 15%" "$t/soft.log" &&
-	grep -aq "finish .* on v6/straight/steep15/var0/length20/sand/bearing20/dig8/power200/grip40/stones15/payload0/" "$t/soft.log" &&
-	grep -aq "finish .* on v6/straight/steep15/var0/length20/sand/payload0/" "$t/firm.log" &&
+	grep -aq "finish .* on v7/straight/steep15/var0/length20/sand/bearing20/dig8/power200/grip40/stones15/payload0/" "$t/soft.log" &&
+	grep -aq "finish .* on v7/straight/steep15/var0/length20/sand/payload0/" "$t/firm.log" &&
 	[ "${soft_n:-0}" -gt $(( ${firm:-0} + 100 )) ] ||
 	fail "the softest set: ${soft_n:-?} voxels changed against ${firm:-?}, or its hill line or key ($t/soft.log)"
 python3 -I - "$t/kick.log" <<'PY' || fail "the stone kicked ($t/kick.log)"
@@ -211,8 +211,13 @@ print("  a rested stone: %s; kicked loose again as rock %s: %s; held the car bac
     pushed.group(1) if pushed else "no", fin.group(1) if fin else "never"))
 vol = re.findall(r"hillclimb: sand (\d+) eighths; behind the start (\d+) columns", log)
 print("  the sand's volume at the start and the end: %s" % vol)
+# [HC_WET_SAND] At the defaults the ruts stop at the wet sand: none deeper
+# than the loose layer and a voxel
+deep = re.findall(r"the deepest (\d+) eighths under the hill as made, loose (\d+)", log)
+print("  the deepest under the hill as made, eighths, and the loose layer, voxels: %s" % deep)
 sys.exit(0 if rest and kicked and pushed and int(pushed.group(1)) > 0 and fin and
-    len(vol) == 2 and vol[0][0] == vol[1][0] and vol[1][1] == "0" else 1)
+    len(vol) == 2 and vol[0][0] == vol[1][0] and vol[1][1] == "0" and
+    len(deep) == 2 and int(deep[1][0]) <= (int(deep[1][1]) + 1) * 8 else 1)
 PY
 python3 -I - "$t/keep.log" <<'PY' || fail "Backspace mid-lap ($t/keep.log)"
 import re, sys
@@ -269,17 +274,21 @@ def after(what):
     m = re.search(re.escape(what) + r" (\{.*\})", log)
     return json.loads(m.group(1)) if m else {}
 sets, one = after("hillclimb: scores sets").get("sets", []), after("hillclimb: scores set").get("set", {})
-new = "v6/straight/steep15/var0/length20/sand/payload0/"
+# [HC_WET_SAND] The run under v7's key, the old times read into v6's
+# (the all-loose hill's, as theirs), neither of those drivable
+new = "v7/straight/steep15/var0/length20/sand/payload0/"
+v6 = "v6/straight/steep15/var0/length20/sand/payload0/"
 by = {s["key"]: s for s in sets}
 ok = ("11 times with a seed read into v6" in log and
     re.search(r"round over:", log) and
     re.search(r"round over:[\s\S]*the hill as it was made, seed 1", log) and
     not re.search(r"the hill, seed (?!1,)", log) and
-    sets and sets[0]["key"] == new and sets[0]["current"] and by[new]["count"] == 12 and
+    sets and sets[0]["key"] == new and sets[0]["current"] and by[new]["count"] == 1 and
+    by.get(v6, {}).get("count") == 11 and not by[v6]["drivable"] and
     by.get("v4/seed7/steep15/length20/sand/payload0/", {}).get("count") == 11 and
     not by["v4/seed7/steep15/length20/sand/payload0/"]["drivable"] and
-    one.get("key") == new and len(one.get("entries", [])) == 12 and
-    one["entries"][0]["seed"] == 1 and one["entries"][-1]["seed"] == 7)
+    one.get("key") == new and len(one.get("entries", [])) == 1 and
+    one["entries"][0]["seed"] == 1)
 print("  the high scores: %s; the set %s, %d entries, seeds %s" % (
     ["%s (%d)" % (s["name"], s["count"]) for s in sets], one.get("key"),
     len(one.get("entries", [])), sorted({e["seed"] for e in one.get("entries", [])})))
@@ -416,17 +425,17 @@ for f in fins:
     print("    finish %s s on %s rank %s; ranking%s" % f)
 want(len(fins) == 3, "three runs timed: %d" % len(fins))
 if len(fins) == 3:
-    k22 = "v6/straight/steep22/var0/length50/sand/payload0/"
+    k22 = "v7/straight/steep22/var0/length50/sand/payload0/"
     t1, t2 = float(fins[0][0]), float(fins[1][0])
     want(fins[0][1] == k22 and fins[1][1] == k22 and 20 < t1 < 40 and t2 < t1,
         "second gear's time, then fourth's faster, under the hill's key")
     want(fins[1][2] == "0" and fins[1][3].split() == [fins[1][0], fins[0][0]],
         "the second run first in the ranking, the first beside it")
-    want(fins[2][1] == "v6/straight/steep15/var0/length30/sand/payload0/" and
+    want(fins[2][1] == "v7/straight/steep15/var0/length30/sand/payload0/" and
         fins[2][3].split() == [fins[2][0]], "the other hill's run under its own key")
 want("hillclimb: the hill, seed 1, 15 degrees +-0, 30 m long" in log, "the hill made again from the pick")
 vfin = re.findall(r"hillclimb: finish (\S+) s on (\S+),", open("%s/varied.log" % d, errors="replace").read())
-want(vfin and vfin[0][1] == "v6/straight/steep18/var4/length50/sand/payload0/",
+want(vfin and vfin[0][1] == "v7/straight/steep18/var4/length50/sand/payload0/",
     "18 degrees varied by 4 climbed in second: %s" % (vfin[:1] or "no finish"))
 # Its wheels slip at times: on loose sand at 40 degrees they catch now and
 # then, and a run stalled with them gripping for most of 22-25 s
@@ -696,7 +705,7 @@ delay 200
 keypress Return
 wait_log 3000 hillclimb: the hill menu: bearing 40
 delay 300
-$(for i in 1 2 3 4 5; do echo keypress Down; echo delay 150; done)
+$(for i in 1 2 3 4 5 6 7; do echo keypress Down; echo delay 150; done)
 screenshot $t/ground_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params

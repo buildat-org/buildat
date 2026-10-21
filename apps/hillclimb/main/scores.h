@@ -63,7 +63,8 @@
 			if(it == k.p.end())
 				continue;
 			static const char *f[N_KNOBS] = {", sand %d kPa", ", dig %d",
-					", power %d%%", ", grip %.2f", ", stones %d%%"};
+					", power %d%%", ", grip %.2f", ", stones %d%%",
+					", loose %d", ", wet %d kPa"};
 			char t[32];
 			if(i == 3)
 				snprintf(t, sizeof t, f[i], it->second / 100.0);
@@ -199,13 +200,15 @@
 	}
 
 	// The times under the keys with a seed (v4: no variance; v5) copied
-	// once under the seedless key of their parameters, the seed into the
-	// entry; the old keys left as they are
+	// once under v6's seedless key of their parameters, the seed into the
+	// entry; the old keys left as they are. v6, not the current: its hill
+	// was all loose sand, as theirs ([HC_WET_SAND])
 	void read_old_scores()
 	{
+		static const char *SEEDLESS = "v6";
 		storage::Store *settings = m_save ? m_save->store("settings") : nullptr;
 		ss_ done;
-		if(!settings || settings->get("scores_"+ss_(SCORES_VERSION), done))
+		if(!settings || settings->get("scores_"+ss_(SEEDLESS), done))
 			return;
 		storage::Store *st = m_save->store("times");
 		int copied = 0;
@@ -217,7 +220,7 @@
 					continue;
 				char nk[192];
 				snprintf(nk, sizeof nk, "%s/straight/steep%d/var%d/length%d/sand/"
-						"payload%d/%09lld/%lld", SCORES_VERSION, k.p["steep"],
+						"payload%d/%09lld/%lld", SEEDLESS, k.p["steep"],
 						k.p.count("var") ? k.p["var"] : 0, k.p["length"],
 						k.p["payload"], k.rest[0], k.rest[1]);
 				ss_ v, there;
@@ -227,8 +230,8 @@
 				copied++;
 			}
 		}
-		settings->set("scores_"+ss_(SCORES_VERSION), itos(copied));
+		settings->set("scores_"+ss_(SEEDLESS), itos(copied));
 		log_i(MODULE, "hillclimb: %d times with a seed read into %s's sets",
-				copied, SCORES_VERSION);
+				copied, SEEDLESS);
 	}
 // vim: set noet ts=4 sw=4:

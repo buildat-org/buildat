@@ -141,14 +141,19 @@ static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
 // tyre that slips less digs less. The defaults are ground.h's Soil and
 // half again car.h's torque ([HC_SOFT_DEFAULTS]: the user's playtested set;
 // 80 kPa, dig 2, 100% and 35% before).
-// simplified: one sand for the whole hill ([HILLCLIMB] 5's terrains)
+// [HC_WET_SAND] And the layers: the loose sand's depth (voxels, 0 to 1 m)
+// over the wet, and the wet sand's bearing (kPa); "bearing" and "dig" are
+// the loose sand's. A new loose depth makes the hill anew.
 // `old`: the firm soil before [HC_SOFT_DEFAULTS], what a ranking key with
-// no part for the knob was driven on
+// no part for the knob was driven on; the layers' are their defaults, the
+// key's version (v7) telling the all-loose hill's times apart
 struct Knob { const char *name; int def, min, max, old; };
 static const Knob KNOBS[] = {{"bearing", 30, 20, 100, 80}, {"dig", 6, 1, 8, 2},
 		{"power", 150, 50, 200, 100}, {"grip", 60, 40, 100, 60},
-		{"stones", 20, 15, 50, 35}};
-static const int N_KNOBS = 5;
+		{"stones", 20, 15, 50, 35}, {"loose", 3, 0, 8, 3},
+		{"wet", 150, 50, 300, 150}};
+static const int N_KNOBS = 7;
+static const int KNOB_LOOSE = 5;
 struct Knobs
 {
 	int v[N_KNOBS];
@@ -164,6 +169,7 @@ struct Knobs
 		s.dig_rate = (float)v[1];
 		s.open_front = v[4] / 100.0f;
 		s.mu_bed = d.mu_bed * (v[4] / 100.0f) / d.open_front;
+		s.wet_bearing = v[6] * 1000.0f;
 	}
 	void spec(car::Spec &s) const
 	{
@@ -186,15 +192,17 @@ struct Knobs
 	{
 		char buf[128];
 		snprintf(buf, sizeof buf, "sand %d kPa, dig %d, power %d%%, grip %.2f, "
-				"stones %d%%", v[0], v[1], v[2], v[3] / 100.0f, v[4]);
+				"stones %d%%, loose %d, wet %d kPa", v[0], v[1], v[2],
+				v[3] / 100.0f, v[4], v[5], v[6]);
 		return buf;
 	}
 };
 // The cars' collision layer: they touch the world and the stones, not
 // each other
 static const unsigned CAR_LAYER = 2;
-// [HC_SCORES] The ranking's key version: v6 has no seed in it
-static const char *SCORES_VERSION = "v6";
+// [HC_SCORES] The ranking's key version: v6 has no seed in it; v7 the
+// layered sand's ([HC_WET_SAND]), v6's hill all loose
+static const char *SCORES_VERSION = "v7";
 
 struct Worldgen: public worldgen::GeneratorInterface
 {
@@ -441,6 +449,7 @@ struct Module: public interface::Module
 		static const uint8_t SAND[3] = {196, 174, 128};
 		static const uint8_t STONE[3] = {128, 124, 116};
 		static const uint8_t FILL[3] = {120, 98, 72};
+		static const uint8_t WET[3] = {150, 122, 84}; // [HC_WET_SAND]
 		// [HC_OPEN_EDGES] The fence's ribbon: red and white diagonal
 		// stripes, 4 pixels wide
 		const int S = 16;
@@ -458,6 +467,7 @@ struct Module: public interface::Module
 			i->add_file_content("main/sand.png", texture(1, SAND, 14));
 			i->add_file_content("main/stone.png", texture(2, STONE, 18));
 			i->add_file_content("main/fill.png", texture(3, FILL, 10));
+			i->add_file_content("main/wet_sand.png", texture(4, WET, 12));
 			i->add_file_content("main/ribbon.png", ribbon);
 		});
 	}
@@ -526,6 +536,7 @@ struct Module: public interface::Module
 			add_voxel(reg, "sand", "main/sand.png", true, 0.95f);
 			add_voxel(reg, "stone", "main/stone.png", true, 0.7f);
 			add_voxel(reg, "fill", "main/fill.png", true, 0.95f);
+			add_voxel(reg, "wet_sand", "main/wet_sand.png", true, 0.9f);
 			w->set_skylight_enabled(false); // id_of(): all in the sky's
 		});
 		// The grid before worldgen runs: its workers read it
@@ -576,6 +587,7 @@ struct Module: public interface::Module
 	// second for the default hill (-O1)
 	void make_hill()
 	{
+		m_params.loose = m_knobs.v[KNOB_LOOSE];
 		m_hill.reset(new hill::Hill(m_params));
 		const hill::Hill &h = *m_hill;
 		m_grid = std::make_shared<ground::Grid>(h);
@@ -993,12 +1005,13 @@ struct Module: public interface::Module
 							q.z_ / hill::U, kv.second.lap.next, cs(in));
 				}
 			// V: the sand's volume, and the bottom pad behind the start's
-			// columns a voxel over all their neighbours ([HC_SAND_VOLUME])
+			// columns a voxel over all their neighbours ([HC_SAND_VOLUME]);
+			// [HC_WET_SAND] the deepest column under the hill as made, eighths
 			if(keys.find('V') != ss_::npos && m_grid){
 				const ground::Grid &g = *m_grid;
 				long long eighths = 0;
 				for(size_t i = 0; i < g.v.size(); i++)
-					if(g.v[i] == hill::SAND)
+					if(g.v[i] == hill::SAND || g.v[i] == hill::WET)
 						eighths += g.f[i];
 				int lone = 0;
 				for(int z = 1; z < hill::Hill::PAD / 2; z++)
@@ -1008,8 +1021,15 @@ struct Module: public interface::Module
 							g.height8(x - 1, z)), std::max(g.height8(x, z + 1),
 							g.height8(x, z - 1))) >= 8;
 				}
+				int deepest = 0;
+				for(int z = 0; z < g.sz; z++)
+				for(int x = 0; x < g.sx; x++)
+					deepest = std::max(deepest, (m_hill->surface(x, z) + 1) * 8 -
+							g.height8(x, z));
 				log_i(MODULE, "hillclimb: sand %lld eighths; behind the start %d "
-						"columns a voxel over their neighbours", eighths, lone);
+						"columns a voxel over their neighbours; the deepest %d "
+						"eighths under the hill as made, loose %d", eighths, lone,
+						deepest, m_params.loose);
 			}
 			// Z: each drive car's Backspace as a player's ([HC_RESET_KEEP_GROUND])
 			if(keys.find('Z') != ss_::npos)
@@ -1522,7 +1542,8 @@ struct Module: public interface::Module
 	// ([HC_SCORES]): no seed in it, the race's kind; the seed in the entry,
 	// "name\tdate\tfinished\tunfinished\tseed". The times before are kept
 	// under the old keys, shown on the High scores page; v4's and v5's read
-	// into v6 (scores.h).
+	// into v6 (scores.h). v7 ([HC_WET_SAND]): the sand in two layers, their
+	// knobs in the key.
 	// [HC_CIRCUIT] A circuit's: every parameter that shapes it and the
 	// round's interval; its keys then the laps, most first, and the round's
 	// clock at the last lap
@@ -1937,7 +1958,7 @@ struct Module: public interface::Module
 	}
 
 	// "seed steep length payload latitude day hour [interval [var [circuit
-	// width lane switchbacks [bearing dig power grip stones]]]]" from the menu, held to what a player may
+	// width lane switchbacks [bearing dig power grip stones loose wet]]]]" from the menu, held to what a player may
 	// pick; made when worldgen is idle (on_tick). On a public server the
 	// seed is the round's: kept. [HC_CIRCUIT] A circuit's rounds never
 	// "never"; its lanes at most half its width.
@@ -2032,7 +2053,8 @@ struct Module: public interface::Module
 				np.steep_var_deg != m_params.steep_var_deg ||
 				np.length_m != m_params.length_m || np.circuit != m_params.circuit ||
 				np.width_m != m_params.width_m || np.lane_m != m_params.lane_m ||
-				np.switchbacks != m_params.switchbacks;
+				np.switchbacks != m_params.switchbacks ||
+				m_pending_knobs.v[KNOB_LOOSE] != m_knobs.v[KNOB_LOOSE];
 		m_params = np;
 		m_latitude = m_pending_look[0];
 		m_day = m_pending_look[1];

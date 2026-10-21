@@ -313,7 +313,9 @@ end
 -- interval, seconds, and the steepness's variance ([HC_STEEP_NOISE]);
 -- [HC_CIRCUIT] whether a circuit, its width and lanes (m), switchbacks (%);
 -- [HC_SOFT_GROUND] the sand's bearing (kPa), digging, power (%), grip
--- (hundredths) and stones (%). Again whenever the menu makes another hill.
+-- (hundredths) and stones (%); [HC_WET_SAND] the loose sand's depth
+-- (voxels) and the wet sand's bearing (kPa). Again whenever the menu
+-- makes another hill.
 local picks = nil -- the menu's values, from the server's
 buildat.sub_packet("hillclimb:hill", function(data)
 	local v = {}
@@ -329,7 +331,7 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		steep_var = v[16] or 0, circuit = v[17] or 0, width = v[18] or 40,
 		lane = v[19] or 7, switchbacks = v[20] or 50, bearing = v[21] or 30,
 		dig = v[22] or 6, power = v[23] or 150, grip = v[24] or 60,
-		stones = v[25] or 20}
+		stones = v[25] or 20, loose = v[26] or 3, wet = v[27] or 150}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
@@ -856,6 +858,13 @@ local MENU = {
 		show = function(v) return string.format("%.2f", v / 100) end},
 	{id = "stones", label = "Loose stones", min = 15, max = 50, step = 5,
 		unit = "% open", ground = true},
+	-- [HC_WET_SAND] The loose dry sand's depth over the wet, packed sand,
+	-- and how firm the wet sand is
+	{id = "loose", label = "Loose sand", min = 0, max = 8, step = 1,
+		ground = true, show = function(v)
+			return string.format("%d cm", math.floor(v * 12.5 + 0.5)) end},
+	{id = "wet", label = "Wet sand", min = 50, max = 300, step = 25,
+		unit = " kPa", ground = true},
 	{id = "lat", label = "Latitude", min = -80, max = 80, step = 5,
 		unit = " degrees"},
 	{id = "day", label = "Day of the year", min = 1, max = 365, step = 7},
@@ -1046,10 +1055,10 @@ local function open_hill_menu()
 		seed_read()
 		local v = values
 		local params = string.format(
-				"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d",
+				"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d %d %d",
 				v.seed, v.steep, v.length, v.payload, v.lat, v.day, v.hour,
 				v.interval, v.steep_var, v.circuit, v.width, v.lane, v.switchbacks,
-				v.bearing, v.dig, v.power, v.grip, v.stones)
+				v.bearing, v.dig, v.power, v.grip, v.stones, v.loose, v.wet)
 		buildat.send_packet("hillclimb:params", params)
 		log:info("hillclimb: the hill menu sends params " .. params)
 		close_hill_menu()
@@ -1235,13 +1244,14 @@ local function drive_set(set)
 	-- A knob not in the set's key is at the old firm soil's (main.cpp's
 	-- KNOBS' old)
 	local params = string.format(
-			"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d",
+			"%d %d %d %d %g %g %g %d %d %d %d %d %d %d %d %d %d %d %d %d",
 			v.seed, set.steep or v.steep, set.length or v.length,
 			set.payload or 0, v.lat, v.day, v.hour,
 			c == 1 and (set.round or 600) or v.interval, set.var or 0, c,
 			set.width or v.width, set.lane or v.lane,
 			set.switch or v.switchbacks, set.bearing or 80, set.dig or 2,
-			set.power or 100, set.grip or 60, set.stones or 35)
+			set.power or 100, set.grip or 60, set.stones or 35,
+			set.loose or 3, set.wet or 150)
 	buildat.send_packet("hillclimb:params", params)
 	log:info("hillclimb: the high scores' set sends params " .. params)
 end
