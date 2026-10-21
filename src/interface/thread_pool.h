@@ -14,6 +14,10 @@ namespace interface
 			virtual bool pre() = 0;
 			// Called repeatedly from worker thread until returns true
 			virtual bool thread() = 0;
+			// The same with a deadline, for a pool that runs it on the
+			// frame's own thread (the web client's): a task that can stop
+			// between slices stops at until_us ([WEB_MAIN_THREAD])
+			virtual bool thread_until(int64_t){ return thread(); }
 			// Called repeatedly from main thread until returns true
 			virtual bool post() = 0;
 		};
@@ -26,6 +30,10 @@ namespace interface
 			virtual void request_stop() = 0;
 			virtual void join() = 0;
 			virtual void run_post() = 0;
+			// Tasks added and not through post() yet, the ones a worker
+			// holds aside: for a caller that should wait rather than add
+			// more than the pool keeps up with ([WEB_MAIN_THREAD])
+			virtual size_t get_backlog() = 0;
 			// Microseconds since the last call: the threaded part run
 			// inline (no workers: the web client) and post()
 			// ([WEB_MAIN_THREAD]'s frame split)

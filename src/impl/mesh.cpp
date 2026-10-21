@@ -30,6 +30,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #define MODULE "mesh"
 
 namespace magic = Urho3D;
@@ -1033,15 +1034,23 @@ bool preload_textures_sliced(VoxelVolume &volume,
 	// 80 ms ([CLIENT_FRAME], measured 2026-09-26); every eighth voxel
 	// costs a few thousand clock reads over a chunk and bounds it.
 	const int CLOCK_EVERY = 8;
+	// A run of the same sample is one lookup: the lookups were most of a
+	// remesh's 2 ms in a browser ([WEB_MAIN_THREAD])
+	VoxelSample last;
+	bool have_last = false;
 	for(; cursor.z <= uc.getZ(); cursor.z++){
 		for(; cursor.y <= uc.getY(); cursor.y++){
 			for(; cursor.x <= uc.getX(); cursor.x++){
 				VoxelSample v = volume.sample_at(cursor.x, cursor.y, cursor.z);
-				const interface::CachedVoxelDefinition *def =
-						voxel_reg->get_cached(v, atlas_reg, with_lod);
-				if(!def)
-					throw Exception(ss_()+"Undefined voxel: "+
-							itos(fmt.id_of(v)));
+				if(!have_last || memcmp(&v, &last, sizeof v) != 0){
+					const interface::CachedVoxelDefinition *def =
+							voxel_reg->get_cached(v, atlas_reg, with_lod);
+					if(!def)
+						throw Exception(ss_()+"Undefined voxel: "+
+								itos(fmt.id_of(v)));
+					last = v;
+					have_last = true;
+				}
 				if(++cursor.since_clock >= CLOCK_EVERY){
 					cursor.since_clock = 0;
 					if(interface::os::time_us() >= deadline_us){
@@ -1086,7 +1095,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result,
 		sm_<uint, TemporaryGeometry> *masked_result,
-		const HorizonMap *horizon);
+		const HorizonMap *horizon, int z);
 
 // Which of the three geometries a voxel's faces go in: the solid one, the
 // blended one, or the one cut out by its texture. A definition is at most
@@ -1251,11 +1260,23 @@ sv_<int16_t> column_heights(VoxelVolume &volume, VoxelRegistry *voxel_reg)
 	const int z0 = lc.getZ() + 1, z1 = uc.getZ() - 1;
 	const int w = x1 - x0 + 1, d = z1 - z0 + 1;
 	sv_<int16_t> raw((size_t)w * d, HORIZON_NONE);
+	// A run of the same sample is one lookup ([WEB_MAIN_THREAD])
+	VoxelSample last;
+	bool have_last = false, last_occludes = false;
+	auto occludes = [&](int x, int y, int z){
+		const VoxelSample v = volume.sample_at(x, y, z);
+		if(!have_last || memcmp(&v, &last, sizeof v) != 0){
+			last_occludes = occludes_sky(volume, voxel_reg, fmt,
+					pv::Vector3DInt32(x, y, z));
+			last = v;
+			have_last = true;
+		}
+		return last_occludes;
+	};
 	for(int z = z0; z <= z1; z++){
 		for(int x = x0; x <= x1; x++){
 			for(int y = y1; y >= y0; y--){
-				if(occludes_sky(volume, voxel_reg, fmt,
-						pv::Vector3DInt32(x, y, z))){
+				if(occludes(x, y, z)){
 					raw[(size_t)(z - z0) * w + (x - x0)] = (int16_t)(y - y0);
 					break;
 				}
@@ -1305,7 +1326,7 @@ void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 
 struct VoxelGeometryJob::State
 {
-	int stage = 0; // the voxels, the faces, done
+	int stage = 0; // the voxels, the faces, the shapes, done
 	int32_t z = 0;
 	size_t face = 0;
 	pv::SurfaceMesh<pv::PositionMaterialNormal> mesh;
@@ -1328,7 +1349,7 @@ bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 		job.s->z = volume.getEnclosingRegion().getLowerCorner().getZ();
 	}
 	VoxelGeometryJob::State &st = *job.s;
-	if(st.stage == 2)
+	if(st.stage == 3)
 		return true;
 	const VoxelFmt fmt(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> &pv_mesh = st.mesh;
@@ -1611,10 +1632,22 @@ bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 		}
 	}
 
-	generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
-			use_skylight, translucent_result, masked_result, horizon);
-	st.stage = 2;
-	st.mesh.clear();
+	if(st.stage == 1){
+		st.stage = 2;
+		st.mesh.clear();
+		st.z = volume.getEnclosingRegion().getLowerCorner().getZ() + 1;
+		if(interface::os::time_us() >= until_us)
+			return false;
+	}
+	// The shaped voxels, a z layer at a time as well
+	while(st.z <= volume.getEnclosingRegion().getUpperCorner().getZ() - 1){
+		generate_voxel_shapes(result, volume, voxel_reg, fmt, atlas_reg,
+				use_skylight, translucent_result, masked_result, horizon,
+				st.z++);
+		if(interface::os::time_us() >= until_us)
+			return false;
+	}
+	st.stage = 3;
 	return true;
 }
 
@@ -1747,7 +1780,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 		bool use_skylight,
 		sm_<uint, TemporaryGeometry> *translucent_result,
 		sm_<uint, TemporaryGeometry> *masked_result,
-		const HorizonMap *horizon)
+		const HorizonMap *horizon, int z)
 {
 	const bool packed_alpha = horizon != nullptr;
 	const pv::Region &region = volume.getEnclosingRegion();
@@ -1757,7 +1790,7 @@ static void generate_voxel_shapes(sm_<uint, TemporaryGeometry> &result,
 	const float h = volume.getHeight() - 2;
 	const float d = volume.getDepth() - 2;
 
-	for(int z = lc.getZ() + 1; z <= uc.getZ() - 1; z++){
+	{
 		for(int y = lc.getY() + 1; y <= uc.getY() - 1; y++){
 			for(int x = lc.getX() + 1; x <= uc.getX() - 1; x++){
 				VoxelSample v = volume.sample_at(x, y, z);

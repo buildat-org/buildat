@@ -224,18 +224,27 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// time, so that the web client's pool, which runs this on the frame's
 	// own thread, can stop between them ([WEB_MAIN_THREAD])
 	interface::mesh::VoxelGeometryJob job;
+	bool meshed = false;
 	bool thread()
 	{
-		if(!interface::mesh::generate_voxel_geometry_step(job,
-				interface::os::time_us() + 2000,
+		return thread_until(interface::os::time_us() + 2000);
+	}
+	bool thread_until(int64_t until_us)
+	{
+		if(meshed){
+			// A step of its own, the occluder: up to 2 ms on the web
+			interface::mesh::generate_occluder(occluder, *volume,
+					voxel_reg.get());
+			return true;
+		}
+		if(!interface::mesh::generate_voxel_geometry_step(job, until_us,
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
 				use_skylight, &alpha_geoms, &masked_geoms, horizon.get(),
 				uv_origin.get()))
 			return false;
 		slice_check();
-		interface::mesh::generate_occluder(occluder, *volume,
-				voxel_reg.get());
-		return true;
+		meshed = true;
+		return false;
 	}
 	// BUILDAT_MESH_SLICE_CHECK=1 (util/mesh_slice_check.sh): the chunk
 	// meshed again whole and in the smallest slices, each against what
@@ -726,6 +735,18 @@ ss_ column_heights(const luabind::object &buffer_o,
 	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
 }
 
+// mesh_backlog() -> the meshes (and the other tasks) added and not done
+// yet: the web client meshes on the frame's own thread, a slice a frame,
+// and voxelworld waits while this is long rather than queue meshes that
+// would wait anyway ([WEB_MAIN_THREAD])
+int mesh_backlog(lua_State *L)
+{
+	lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
+	lua_pop(L, 1);
+	return (int)buildat_app->get_thread_pool()->get_backlog();
+}
+
 // horizon_merge(cys, heights, chunk) -> a string of chunk*chunk int16: a
 // chunk column's tops out of its chunks' column_heights(), each the
 // highest of them in world rows (cy * chunk + its own), HORIZON_NONE where
@@ -1020,6 +1041,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(horizon_merge),
+			LUABIND_FUNC(mesh_backlog),
 			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_mesh_alpha_nibbles),
 			LUABIND_FUNC(set_8bit_voxel_geometry),

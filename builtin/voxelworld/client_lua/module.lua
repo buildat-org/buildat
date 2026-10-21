@@ -67,6 +67,8 @@ local MESH_BUDGET_CAP_US = 15000
 -- chunks queued at 14 a second and its 90 s ran out ([MISSING_CHUNK]'s
 -- "never drew", 2026-09-21). Five milliseconds a frame keeps 60 fps.
 local MESH_BUDGET_FLOOR_US = 5000
+-- The meshes waiting in the pool past which no more are added
+local MESH_BACKLOG_MAX = 4
 
 local LOD_THRESHOLD = 0.2
 -- How the update queue orders what it has: it sorts by distance divided by
@@ -216,6 +218,11 @@ local modified_warned = {}
 
 -- NOTE: node can be nil, meaning that it was cached to be nil
 local static_node_cache = {} -- {z: {y: {x: {node:, fetched:}}}} (chunk_p)
+-- Whether a chunk node arrived that the cache did not take (before the
+-- init, which clears it): until then every arrival and removal is in the
+-- cache, and a chunk with none there has no node -- no octree query, which
+-- was 30 ms for undrawn_around's 125 chunks in a browser ([WEB_MAIN_THREAD])
+local static_seen, static_untracked = false, false
 -- Chunk node id -> its geometry has been built at least once; see
 -- M.is_chunk_drawn()
 local geometry_done = {}
@@ -253,6 +260,7 @@ buildat.sub_packet("voxelworld:init", function(data)
 	-- Clear caches
 	node_volume_cache = {}
 	static_node_cache = {}
+	static_untracked = static_seen
 
 	-- What this client wants sent to it; see M.send_distance -- and
 	-- nothing until the game says it may ([TEXMOD_RACE])
@@ -829,7 +837,19 @@ function sub_events()
 			end
 		end
 
+		-- One more only when one like the last fits in what is left: a
+		-- remesh is 4 ms on the web (deserialising, the horizon note, the
+		-- task), and two of them over a 5 ms budget made the frame's p95
+		-- ([WEB_MAIN_THREAD])
 		for i = 1, 10 do -- Usually there is time only for a few
+			-- Not while the pool has meshes enough waiting: the web
+			-- client meshes a slice a frame on its own thread, and a load
+			-- queued twice what it meshed, each a 4 ms Lua call for a
+			-- mesh that then waited ([WEB_MAIN_THREAD])
+			if buildat.mesh_backlog() >= MESH_BACKLOG_MAX then
+				break
+			end
+			local item_t0 = buildat.get_time_us()
 			local f = node_update_queue:peek_next_f()
 			local fw = node_update_queue:peek_next_fw()
 			local did_update = false
@@ -910,7 +930,9 @@ function sub_events()
 				--node_update_queue.queue = {} -- For testing
 			end
 			-- Check this at the end of the loop so at least one is handled
-			if not did_update or buildat.get_time_us() >= stop_at_us then
+			local item_t1 = buildat.get_time_us()
+			if not did_update or
+					item_t1 + (item_t1 - item_t0) >= stop_at_us then
 				log:debug("Handled "..i.." node updates")
 				break
 			end
@@ -931,6 +953,10 @@ function sub_events()
 		if not node:GetVar("buildat_voxel_data"):IsEmpty() then
 			note_horizon(node, false)
 			queue_initial_node_update(node)
+		end
+		if node:GetVar("buildat_static"):GetBool() == true then
+			static_seen = true
+			static_untracked = static_untracked or not M.chunk_size_voxels
 		end
 		if node:GetVar("buildat_static"):GetBool() == true and
 				M.chunk_size_voxels then
@@ -1196,23 +1222,22 @@ function M.get_static_node(chunk_p)
 		if cache.node then
 			local live = replicate.main_scene:GetNode(cache.node:GetID())
 			if live then
-				log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
 				return live
 			end
 			cache.node = nil
 			cache.fetched = false
 		elseif buildat.get_time_us() - (cache.fetched_us or 0) <
 				NEGATIVE_CACHE_US then
-			log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (cache)")
 			return nil
 		end
 	end
-	log:trace("get_static_node(): chunk_p="..chunk_p:dump().." (no cache)")
+	if not static_untracked then
+		return nil
+	end
 	-- NOTE: Chunks are positioned by their center position, and chunks are
 	--       aligned to a grid offset by half their size from global origin
 	local chunk_center_p = chunk_p * M.chunk_size_voxels +
 			M.chunk_size_voxels / 2
-	log:trace("get_static_node(): chunk_center_p="..chunk_center_p:dump())
 
 	-- Find the static node
 	local scene = replicate.main_scene
@@ -1220,17 +1245,13 @@ function M.get_static_node(chunk_p)
 	local clearance = magic.Vector3(1,1,1)
 	local find_lc = chunk_center_p - clearance
 	local find_uc = chunk_center_p + clearance
-	log:trace("get_static_node(): find_lc="..find_lc:dump())
-	log:trace("get_static_node(): find_uc="..find_uc:dump())
 	local result = octree:GetDrawables(magic.BoundingBox(find_lc, find_uc))
-	log:trace("get_static_node(): result="..dump(result))
 	-- NOTE: The result will contain all kinds of global things like zones and
 	--       lights
 	-- NOTE: Static nodes can be distinguished by the user variable
 	--       buildat_static=true
 	local node = nil
 	for _, v in ipairs(result) do
-		--log:trace("get_static_node(): result node:GetName()="..v.node:GetName())
 		local buildat_static_var = v.node:GetVar("buildat_static")
 		if buildat_static_var:GetBool() == true then
 			node = v.node
@@ -1240,13 +1261,6 @@ function M.get_static_node(chunk_p)
 	cache.node = node
 	cache.fetched = true
 	cache.fetched_us = buildat.get_time_us()
-	if node == nil then
-		log:trace("get_static_node(): static node "..chunk_p:dump()..
-				" not found")
-		for _, v in ipairs(result) do
-			log:trace("get_static_node(): * not "..v.node:GetName())
-		end
-	end
 	return node
 end
 

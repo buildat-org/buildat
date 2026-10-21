@@ -221,9 +221,15 @@ struct CThreadPool: public ThreadPool
 	// the threaded part runs here, on the calling thread, a slice a frame:
 	// a thread() call at a time, and a task not done when the slice is
 	// over goes on next frame ([WEB_MAIN_THREAD]; a chunk's mesh steps in
-	// 2 ms). simplified: a task whose single thread() call is long still
-	// takes all of it.
+	// 2 ms, and stops at the budget's end). simplified: a task whose single
+	// thread() call is long still takes all of it.
 	static const int64_t INLINE_BUDGET_US = 4000;
+	size_t get_backlog()
+	{
+		interface::MutexScope ms(m_mutex);
+		return m_pre_queue.size() + m_input_queue.size() +
+				m_output_queue.size();
+	}
 	int64_t m_inline_us = 0, m_post_us = 0;
 	void take_times(int64_t *inline_us, int64_t *post_us)
 	{
@@ -249,7 +255,7 @@ struct CThreadPool: public ThreadPool
 			}
 			bool done = true;
 			try {
-				done = current->thread();
+				done = current->thread_until(t0 + INLINE_BUDGET_US);
 			} catch(std::exception &e){
 				log_w(MODULE, "Inline task failed: %s", e.what());
 			}

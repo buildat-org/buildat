@@ -2839,6 +2839,10 @@ struct CApp: public App, public magic::Application
 		sv_<int64_t> frames;
 		// Each frame's parts, for their own 95th percentiles
 		sv_<int64_t> f_packets, f_inline, f_post, f_render, f_rest;
+		// The update phase (BeginFrame to PostRenderUpdate) and the time
+		// from EndRendering to the next BeginFrame
+		int64_t begin_t = 0, end_render_t = 0;
+		sv_<int64_t> f_phase, f_outside;
 	} m_split;
 	void frame_split()
 	{
@@ -2891,15 +2895,24 @@ struct CApp: public App, public magic::Application
 		const double pp = p95(m_split.f_packets), pi = p95(m_split.f_inline),
 				po = p95(m_split.f_post), pd = p95(m_split.f_render),
 				pr = p95(m_split.f_rest);
+		auto mean = [](const sv_<int64_t> &v){
+			int64_t t = 0;
+			for(int64_t x : v)
+				t += x;
+			return v.empty() ? 0.0 : t / 1e3 / v.size();
+		};
+		const double mph = mean(m_split.f_phase), mou = mean(m_split.f_outside);
+		const double pph = p95(m_split.f_phase), pou = p95(m_split.f_outside);
 		log_i(MODULE, "frame split: %zu frames in %.1f s, mean %.1f ms, p95 "
 				"%.1f, worst %.1f; ms/s: packets %.1f, mesh inline %.1f, "
 				"post %.1f, render %.1f; a frame's p95: packets %.1f, mesh "
 				"inline %.1f, post %.1f, render %.1f, the rest (the frame's "
-				"Lua, the browser) %.1f", f.size(), secs, sum / 1e3 / f.size(),
+				"Lua, the browser) %.1f; the update phase mean %.1f, p95 %.1f; "
+				"outside the frame mean %.1f, p95 %.1f", f.size(), secs, sum / 1e3 / f.size(),
 				f[(size_t)(f.size() * 0.95)] / 1e3, f.back() / 1e3,
 				m_split.packets_us / 1e3 / secs, m_split.inline_us / 1e3 / secs,
 				m_split.post_us / 1e3 / secs, m_split.render_sum_us / 1e3 / secs,
-				pp, pi, po, pd, pr);
+				pp, pi, po, pd, pr, mph, pph, mou, pou);
 		m_split.render_sum_us = 0;
 		f.clear();
 		m_split.start_us = now;
@@ -2993,12 +3006,24 @@ struct CApp: public App, public magic::Application
 
 	void on_begin_frame(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		if(m_split.on){
+			// The time outside the engine's frame: the browser's, until
+			// it hands the page the next animation frame
+			const int64_t now = get_timeofday_us();
+			if(m_split.end_render_t != 0)
+				m_split.f_outside.push_back(now - m_split.end_render_t);
+			m_split.begin_t = now;
+		}
 		command_seq_tick();
 	}
 
 	void on_post_render_update(
 			magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		// The update phase: every Update handler, the game's Lua among
+		// them, the scene's and physics' own, up to the render
+		if(m_split.on && m_split.begin_t != 0)
+			m_split.f_phase.push_back(get_timeofday_us() - m_split.begin_t);
 		if(m_draw_debug_geometry)
 			m_scene->GetComponent<magic::PhysicsWorld>()->DrawDebugGeometry(true);
 	}
@@ -3013,7 +3038,8 @@ struct CApp: public App, public magic::Application
 			magic::StringHash event_type, magic::VariantMap &event_data)
 	{
 		if(m_split.on && m_split.render_t0 != 0){
-			m_split.render_us += get_timeofday_us() - m_split.render_t0;
+			m_split.end_render_t = get_timeofday_us();
+			m_split.render_us += m_split.end_render_t - m_split.render_t0;
 			m_split.render_t0 = 0;
 		}
 		if(m_pending_screenshot.empty())
