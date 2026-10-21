@@ -331,7 +331,7 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		steep_var = v[16] or 0, circuit = v[17] or 0, width = v[18] or 40,
 		lane = v[19] or 7, switchbacks = v[20] or 50, bearing = v[21] or 30,
 		dig = v[22] or 6, power = v[23] or 150, grip = v[24] or 60,
-		stones = v[25] or 20, loose = v[26] or 3, wet = v[27] or 150}
+		stones = v[25] or 20, loose = v[26] or 1, wet = v[27] or 150}
 	hill.may_pick = v[14] ~= 0
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],

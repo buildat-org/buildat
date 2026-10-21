@@ -64,8 +64,8 @@ struct Params
 	float width_m = 40, lane_m = 7;
 	int switchbacks = 50;
 	// [HC_WET_SAND] The loose dry sand's depth over the wet, voxels, 0 to
-	// 8 (the shell's 12 all loose before it)
-	int loose = 3;
+	// 8 (the shell's 12 all loose before it); [HC_LOOSE_DEFAULT] one
+	int loose = 1;
 	// simplified: sand with pebbles is the only terrain; rocky, muddy and
 	// vegetated are later ([HILLCLIMB] 5)
 };

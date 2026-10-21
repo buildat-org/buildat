@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~80 s (2026-10-16)
+# cost: ~5 min (2026-10-21)
 # covers: apps/hillclimb/** extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
@@ -26,7 +26,9 @@
 # round by P: its turns in order, a lap, a 60 s round ranking the two
 # cars by laps under the circuit's key; one cut into the middle put back,
 # no lap. The drives before it on the straight hill (_MODE=straight: the
-# circuit is the default).
+# circuit is the default). [HC_STONE_WALL] The lap at the defaults (keep):
+# no stone standing out of the sand held against a tyre that pushed it
+# harder than its friction.
 #   apps/hillclimb/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -67,11 +69,14 @@ declare -A PORT=([warm]=0 [flat]=1 [climb]=2 [stall]=3 [rock]=4 [beside]=5
 # [HC_SOFT_DEFAULTS] The car's drives on the firm soil they were tuned on
 # (80 kPa, dig 2, 100%, 35%; a ranking key with no knob parts), not the
 # game's soft default
+# [HC_LOOSE_DEFAULT] And the loose sand three voxels deep, as they were
+# when it came ([HC_WET_SAND]), a key with no "loose" part
 firm_soil="BUILDAT_HILLCLIMB_BEARING=80 BUILDAT_HILLCLIMB_DIG=2
-	BUILDAT_HILLCLIMB_POWER=100 BUILDAT_HILLCLIMB_STONES=35"
+	BUILDAT_HILLCLIMB_POWER=100 BUILDAT_HILLCLIMB_STONES=35
+	BUILDAT_HILLCLIMB_LOOSE=3"
 # The game's defaults: the variables empty
 default_soil="BUILDAT_HILLCLIMB_BEARING= BUILDAT_HILLCLIMB_DIG=
-	BUILDAT_HILLCLIMB_POWER= BUILDAT_HILLCLIMB_STONES="
+	BUILDAT_HILLCLIMB_POWER= BUILDAT_HILLCLIMB_STONES= BUILDAT_HILLCLIMB_LOOSE="
 drive()
 {
 	local name=$1; shift
@@ -228,6 +233,14 @@ ok = (start and back and abs(float(back.group(1)) - float(start.group(1))) < 0.5
     abs(float(back.group(2)) - float(start.group(2))) < 0.5 and back.group(3) == "1" and
     int(back.group(4)) > 0 and "the hill as it was made" not in log)
 print("  Backspace mid-lap: %s" % (back.group(0) if back else "not logged"))
+# [HC_STONE_WALL] A lap at the defaults: no stone standing out of the sand
+# held against a tyre that pushed it harder than its friction
+held = re.findall(r"held against tyre \d+: its contact (\d+) of (\d+) faces, its "
+    r"centre (\S+) voxels over the sand, a push of (\d+) N against (-?\d+)", log)
+wall = [h for h in held if float(h[2]) > 0 and int(h[3]) > int(h[4])]
+print("  stones held against a tyre in the lap: %d, standing out and pushed past their friction: %s" % (
+    len(held), wall))
+ok = ok and not wall
 sys.exit(0 if ok else 1)
 PY
 b="$t/back.log"
@@ -617,7 +630,7 @@ echo "  a public server: a player's params refused; rounds of 10 min, a local ga
 # Server window ([HC_TOUCH_SERVER]: no corner button); Leave the game
 # leaves (with -s there is no launcher under the game: the client
 # disconnects and exits)
-mp_server pause BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
+mp_server pause_srv BUILDAT_HILLCLIMB_FEATURES=0 -u launcher=1
 cat > "$t/pause.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 delay 3000
@@ -767,7 +780,7 @@ PY
 # (2R, 162 pixels): a push 3R up and R/2 across keeps its steer, 0.44 in
 # fourth. [HC_HILL_MENU] Menu, The hill..., Steepness's dropdown tapped,
 # a choice, Make it: the params sent with it
-mp_server touch "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15
+mp_server touch_srv "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15
 	BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is

@@ -92,6 +92,7 @@
 #include <algorithm>
 #include <mutex>
 #include <map>
+#include <tuple>
 #include <ctime>
 #define MODULE "main"
 
@@ -146,11 +147,13 @@ static const int INTERVALS[] = {0, 60, 120, 180, 300, 600, 900, 1800};
 // the loose sand's. A new loose depth makes the hill anew.
 // `old`: the firm soil before [HC_SOFT_DEFAULTS], what a ranking key with
 // no part for the knob was driven on; the layers' are their defaults, the
-// key's version (v7) telling the all-loose hill's times apart
+// key's version (v7) telling the all-loose hill's times apart.
+// [HC_LOOSE_DEFAULT] The loose sand one voxel deep by default; 3 before,
+// what a v7 key with no "loose" part was driven on
 struct Knob { const char *name; int def, min, max, old; };
 static const Knob KNOBS[] = {{"bearing", 30, 20, 100, 80}, {"dig", 6, 1, 8, 2},
 		{"power", 150, 50, 200, 100}, {"grip", 60, 40, 100, 60},
-		{"stones", 20, 15, 50, 35}, {"loose", 3, 0, 8, 3},
+		{"stones", 20, 15, 50, 35}, {"loose", 1, 0, 8, 3},
 		{"wet", 150, 50, 300, 150}};
 static const int N_KNOBS = 7;
 static const int KNOB_LOOSE = 5;
@@ -349,6 +352,8 @@ struct Module: public interface::Module
 	sv_<std::pair<float, ss_>> m_drive;
 	int m_drive_step = -1;
 	float m_t = 0, m_logged = -1;
+	// [HC_STONE_WALL] When a stone's refused kick was last logged
+	std::map<std::tuple<int, int, int>, float> m_held_t;
 	// The physics' time per tick since the last car line, for the check
 	uint64_t m_step_us = 0;
 	int m_step_ticks = 0;
@@ -1255,6 +1260,21 @@ struct Module: public interface::Module
 			for(const ground::Loose &l : m_ground->loose)
 				m_loose.push_back(l);
 			m_ground->loose.clear();
+			// [HC_STONE_WALL] A kick refused, once a second a stone
+			for(const ground::Held &h : m_ground->held){
+				float &t = m_held_t[std::make_tuple((int)std::floor(h.centre.x),
+						(int)std::floor(h.centre.y), (int)std::floor(h.centre.z))];
+				if(t > 0 && m_t - t < 1)
+					continue;
+				t = m_t;
+				log_i(MODULE, "hillclimb: stone at %.2f,%.2f,%.2f m held against "
+						"tyre %d: its contact %d of %d faces, its centre %.2f "
+						"voxels over the sand, a push of %.0f N against %.0f "
+						"(-1: in the sand)", h.centre.x / U, h.centre.y / U,
+						h.centre.z / U, h.tyre, h.contact, h.faces, h.over,
+						h.push, h.need);
+			}
+			m_ground->held.clear();
 		}
 		for(const car::Wheel &w : pl.car->wheel){
 			if(w.load <= 0)

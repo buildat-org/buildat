@@ -33,8 +33,9 @@
 // Stones (hill.h's pebbles, a few voxels each, and [HC_STONE_KICK] the
 // ones that came loose and rested, which the ground keeps a table of):
 // one lying on the ground (touching sand at its sides by two faces or
-// fewer) in a tyre's path is kicked loose by the push over its sliding
-// friction; one in the sand comes out only under a slipping tyre, when
+// fewer, or [HC_STONE_WALL] its centre over the sand around it: sunk a
+// layer, sand thrown against it) in a tyre's path is kicked loose by the
+// push over its sliding friction, and a refused kick is kept for the log; one in the sand comes out only under a slipping tyre, when
 // its front along the push is open and the push beats its bed (user,
 // 2026-10-20: the ones in the sand are not to plop out as you drive). Its voxels leave the grid
 // as a Loose for main.cpp to make a body of.
@@ -91,6 +92,21 @@ struct Grid: public car::Ground
 	float drop(int x, int y, int z) const override
 	{
 		return (8 - fill(x, y, z)) / 8.0f;
+	}
+	// [HC_STONE_WALL] car.h's: a stone's voxel at most 2 over the sand
+	// beside it is ridden up, not hit -- a buried stone's top sticking
+	// out; a rock's higher voxels stay a wall
+	bool ramp(int x, int y, int z) const override
+	{
+		if(at(x, y, z) != hill::STONE)
+			return false;
+		static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+		for(auto &d : D){
+			const int t = top(x + d[0], z + d[1]);
+			if(t >= y - 2 && at(x + d[0], t, z + d[1]) != hill::STONE)
+				return true;
+		}
+		return false;
 	}
 	// A column's height in eighths over y 0's bottom: its top voxel's
 	// fill counted
@@ -166,6 +182,16 @@ struct Loose
 	float push = 0;   // N, what freed it
 };
 
+// [HC_STONE_WALL] A kick a stone did not give to: where it is (voxels),
+// its side faces touching ground of all it has, how far its centre is
+// over the sand around it (voxels), the push and what held it (N)
+struct Held
+{
+	V3 centre;
+	int tyre = -1, contact = 0, faces = 0;
+	float over = 0, push = 0, need = 0;
+};
+
 struct Ground
 {
 	Grid &g;
@@ -174,6 +200,7 @@ struct Ground
 	struct Wheel { float sink = 0, dig = 0; int side = 1; } wheels[4];
 	std::vector<Change> changes; // for voxelworld, main.cpp takes them
 	std::vector<Loose> loose;    // for Bullet, main.cpp takes them
+	std::vector<Held> held;      // for the log, main.cpp takes them
 	// For the log: eighths dug, sunk and slid ([HC_SAND_VOLUME]), stones freed
 	int dug = 0, sunk = 0, slid = 0, freed = 0;
 	static const int SETTLE_BUDGET = 48;
@@ -414,9 +441,50 @@ struct Ground
 		return n;
 	}
 
+	// [HC_STONE_WALL] How far a stone's centre is over the sand around it,
+	// voxels: the mean of its voxels' y against the mean surface of the
+	// columns beside its footprint (a full top voxel's top at its y + 0.5)
+	float over(const std::vector<Change> &stone) const
+	{
+		static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+		float cy = 0, sum = 0;
+		int n = 0;
+		for(const Change &s : stone)
+			cy += s.y;
+		cy /= stone.size();
+		for(const Change &s : stone)
+			for(auto &d : D){
+				const int x = s.x + d[0], z = s.z + d[1];
+				bool own = false;
+				for(const Change &o : stone)
+					own = own || (o.x == x && o.z == z);
+				if(own)
+					continue;
+				sum += g.height8(x, z) / 8.0f - 0.5f;
+				n++;
+			}
+		return n > 0 ? cy - sum / n : 0;
+	}
+	// Its side faces, its own neighbours not counted
+	static int faces(const std::vector<Change> &stone)
+	{
+		static const int D[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+		int n = 0;
+		for(const Change &s : stone)
+			for(auto &d : D){
+				bool own = false;
+				for(const Change &o : stone)
+					own = own || (o.x == s.x + d[0] && o.y == s.y &&
+							o.z == s.z + d[1]);
+				n += !own;
+			}
+		return n;
+	}
+
 	// A stone at (x, y, z) pushed with `push` N along `dir`: loose if what
 	// holds it gives -- lying on the ground, its sliding friction; in it,
-	// its front open and its bed's friction, and never by a `kick`
+	// its front open and its bed's friction, and never by a `kick`. A kick
+	// refused is kept in `held`
 	bool loosen(int x, int y, int z, const V3 &dir, float push,
 			bool kick = false)
 	{
@@ -427,12 +495,27 @@ struct Ground
 		if(!stone_of(x, y, z, stone, c, r, id))
 			return false;
 		float kg = soil.stone_kg * stone.size();
-		// simplified: lying loose, all its weight on the ground it slides on
-		if(contact(stone) <= 2){
-			if(push < soil.mu_bed * kg * 9.81f)
-				return false;
-		} else if(kick){
+		const int touching = contact(stone);
+		const float out = over(stone);
+		auto refuse = [&](float need){
+			if(kick){
+				Held h;
+				h.centre = c;
+				h.contact = touching;
+				h.faces = faces(stone);
+				h.over = out;
+				h.push = push;
+				h.need = need;
+				held.push_back(h);
+			}
 			return false;
+		};
+		// simplified: lying loose, all its weight on the ground it slides on
+		if(touching <= 2 || out > 0){
+			if(push < soil.mu_bed * kg * 9.81f)
+				return refuse(soil.mu_bed * kg * 9.81f);
+		} else if(kick){
+			return refuse(-1);
 		} else {
 			// Open along the push: the voxel past each one is air or the stone
 			int sx = std::fabs(dir.x) > std::fabs(dir.z) ? (dir.x > 0 ? 1 : -1) : 0;
@@ -503,6 +586,8 @@ struct Ground
 							true)){
 						loose.back().velocity = dir * tv;
 						loose.back().tyre = i;
+					} else if(!held.empty() && held.back().tyre < 0){
+						held.back().tyre = i;
 					}
 				}
 				if(tried)
@@ -594,6 +679,7 @@ struct Ground
 		}
 		undo.clear();
 		loose.clear();
+		held.clear();
 		stones.clear();
 		stone_at.clear();
 		dug = sunk = slid = freed = 0;
@@ -648,6 +734,9 @@ int main()
 {
 	using namespace ground;
 	hill::Params p;
+	// The loose sand's own ways, three voxels of it ([HC_WET_SAND]'s first
+	// default; [HC_LOOSE_DEFAULT] made it one)
+	p.loose = 3;
 	hill::Hill h(p);
 	Grid g(h);
 	Ground gr(g, h);
@@ -862,6 +951,85 @@ int main()
 				"loose; a 3-voxel wall %d high wet, %d loose\n", wet_sunk,
 				wet_dug, loose_dug, wet_wall, loose_wall);
 		assert(wet_wall == 3 && loose_wall < 3);
+	}
+	// [HC_STONE_WALL] A 12-voxel stone (2x2, 3 high) sunk one layer, sand
+	// thrown against one side: touching by 10 faces, its centre over the
+	// sand, a rolling tyre's push kicks it; a 16-voxel one three quarters
+	// buried (its top a voxel out) is held, the refusal kept; a quarter
+	// car rolling at 2 m/s over its top loses under a fifth of its speed,
+	// over one 2 voxels out (a 25 cm bump, car.h's ramp) under half
+	{
+		const int B = hill::Hill::BASE;
+		Ground gw(g, h);
+		auto place = [&](int x0, int z0, int y0, int layers){
+			Ground::Stone st;
+			st.r = 1;
+			for(int y = y0; y < y0 + layers; y++)
+			for(int dz = 0; dz < 2; dz++)
+			for(int dx = 0; dx < 2; dx++){
+				gw.set(x0 + dx, y, z0 + dz, hill::STONE);
+				const size_t i = gw.idx(x0 + dx, y, z0 + dz);
+				st.vox.push_back(i);
+				gw.stone_at[i] = gw.next_stone;
+			}
+			gw.stones[gw.next_stone++] = st;
+		};
+		const float push = spec.mu * 2000 * 9.81f / 4;
+		place(12, 24, B, 3);
+		gw.set(14, B + 1, 24, hill::SAND);
+		gw.set(14, B + 1, 25, hill::SAND);
+		std::vector<Change> st;
+		car::V3 c;
+		float r;
+		int id;
+		assert(gw.stone_of(12, B + 1, 24, st, c, r, id));
+		const int sunk_contact = gw.contact(st), sunk_faces = gw.faces(st);
+		const float sunk_over = gw.over(st);
+		assert(sunk_contact > 2 && sunk_over > 0);
+		assert(gw.loosen(12, B + 1, 24, car::V3(1, 0, 0), push, true));
+		place(12, 40, B - 2, 4);
+		assert(gw.stone_of(12, B + 1, 40, st, c, r, id) && gw.over(st) < 0);
+		assert(!gw.loosen(12, B + 1, 40, car::V3(0, 0, 1), push, true));
+		assert(gw.held.size() == 1 && gw.held[0].over < 0 &&
+				gw.held[0].contact == gw.contact(st) && gw.held[0].faces == 32);
+		// The quarter car: a hub of 500 kg on the tyre and spring in
+		// series, its damper, rolling along z over the stone's top, driven
+		// toward 2 m/s by the tyre's grip (mu times its load)
+		place(30, 40, B - 1, 4); // 2 voxels out
+		const float m = 500, k = spec.k_spring * spec.k_tyre /
+				(spec.k_spring + spec.k_tyre);
+		const float R = spec.tyre_r * U;
+		float after[2];
+		for(int j = 0; j < 2; j++){
+		car::V3 hub(j ? 31 : 13, B + 0.5f + R - 0.02f * U, 30), vel(0, 0, 2);
+		after[j] = 2;
+		for(int i = 0; i < 240 * 8 && hub.z < 50; i++){
+			const float dt = 1.0f / 240;
+			car::V3 n;
+			const float d = car::Car::contact(g, U, hub, car::V3(1, 0, 0),
+					spec.tyre_r, spec.tyre_w, n);
+			car::V3 f(0, -9.81f * m, 0);
+			if(d > 0){
+				const float vn = vel.dot(n);
+				const float load = std::fmax(0, k * d - spec.c_damp * vn);
+				f = f + n * load;
+				f.z += std::fmin(spec.mu * load * n.y,
+						std::fmax(0, (2 - vel.z) * m / 0.2f));
+			}
+			vel = vel + f * (dt / m);
+			hub = hub + vel * (dt * U);
+			after[j] = std::fmin(after[j], vel.z);
+		}
+		assert(hub.z >= 50);
+		}
+		printf("ground.h: a stone sunk a layer (%d of %d faces touching, its "
+				"centre %.2f voxels over the sand) kicked; one three quarters "
+				"buried held; rolled over at 2 m/s, at least %.2f m/s over a top "
+				"1 voxel out, %.2f over 2\n", sunk_contact, sunk_faces,
+				sunk_over, after[0], after[1]);
+		assert(after[0] > 2 * 0.8f && after[1] > 2 * 0.5f);
+		gw.restore();
+		assert(g.at(12, B, 40) == hill::SAND && gw.held.empty());
 	}
 	// [HC_SAND_VOLUME] A voxel's worth dropped on flat ground spreads: no
 	// column left over its neighbours' mean by more than half a voxel

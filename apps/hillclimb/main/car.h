@@ -123,6 +123,10 @@ struct Ground
 	// [HC_SAND_VOLUME] How far a solid voxel's sphere sits lower, voxels:
 	// a partly full sand voxel's missing share
 	virtual float drop(int x, int y, int z) const { return 0; }
+	// [HC_STONE_WALL] A voxel the tyre rides up rather than hits: its
+	// contact's normal at most 27 degrees off up (a slope of 1 in 2, which
+	// sand's grip, mu 0.6, climbs)
+	virtual bool ramp(int x, int y, int z) const { return false; }
 	virtual ~Ground(){}
 };
 
@@ -211,7 +215,14 @@ struct Car
 					continue;
 			}
 			deepest = std::fmax(deepest, pen);
-			sum = sum - radial * (pen / dist);
+			V3 dir = radial * (-1 / dist);
+			if(dir.y > 0 && g.ramp(x, y, z)){
+				const float h = std::sqrt(dir.x * dir.x + dir.z * dir.z),
+						cap = dir.y * 0.5f;
+				if(h > cap)
+					dir = V3(dir.x * cap / h, dir.y, dir.z * cap / h).normalized();
+			}
+			sum = sum + dir * pen;
 		}
 		if(deepest <= 0)
 			return 0;
