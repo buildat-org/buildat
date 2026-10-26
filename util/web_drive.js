@@ -19,10 +19,10 @@
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, or one character
 //   ["holdkey", name, ms]   a key held down for ms: a car driven
-//                           (Firefox only)
 //   ["selall"]              Ctrl+A
 //   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
 //   ["click", x, y]         left button, in CSS pixels
+//   ["click", x, y, ms, b]  button b (0 left, 1 middle, 2 right) held ms
 //   ["mouse", x, y]         the pointer there, no button
 //   ["wheel", x, y, dy]     the mouse wheel turned over x, y by dy CSS
 //                           pixels (positive scrolls down); it moves no
@@ -198,10 +198,10 @@ async function firefox() {
 		},
 		selall: () => keys([{type: "keyDown", value: ""},
 				...press("a"), {type: "keyUp", value: ""}]),
-		click: (x, y) => c.send("input.performActions", {context: ctx,
-				actions: [{type: "pointer", id: "m", actions: [
-				{type: "pointerMove", x, y}, {type: "pointerDown", button: 0},
-				{type: "pause", duration: 50}, {type: "pointerUp", button: 0}]}]}),
+		click: (x, y, ms = 50, button = 0) => c.send("input.performActions",
+				{context: ctx, actions: [{type: "pointer", id: "m", actions: [
+				{type: "pointerMove", x, y}, {type: "pointerDown", button},
+				{type: "pause", duration: ms}, {type: "pointerUp", button}]}]}),
 		mouse: (x, y) => c.send("input.performActions", {context: ctx,
 				actions: [{type: "pointer", id: "m", actions: [
 				{type: "pointerMove", x, y}]}]}),
@@ -285,7 +285,7 @@ async function chrome() {
 	if (touch)
 		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
 				maxTouchPoints: 5});
-	const key = async (k, mods = 0) => {
+	const key = async (k, mods = 0, ms = 0) => {
 		// A digit's code is Digit2, not Key2, which SDL maps to nothing
 		const [, code, vk] = KEYS[k] || [k, (/[0-9]/.test(k) ? "Digit" :
 				"Key") + k.toUpperCase(), k.toUpperCase().charCodeAt(0)];
@@ -294,6 +294,8 @@ async function chrome() {
 		await c.send("Input.dispatchKeyEvent", Object.assign({type: "rawKeyDown"}, base));
 		if (!KEYS[k] && mods === 0)
 			await c.send("Input.dispatchKeyEvent", {type: "char", text: k});
+		if (ms)
+			await new Promise(r => setTimeout(r, ms));
 		await c.send("Input.dispatchKeyEvent", Object.assign({type: "keyUp"}, base));
 	};
 	let loaded = null;
@@ -312,15 +314,20 @@ async function chrome() {
 				await key(ch);
 		},
 		key: k => key(k),
+		holdkey: (k, ms) => key(k, 0, ms),
 		selall: () => key("a", 2),
 		chord: ch => {
 			const [mods, k] = chordOf(ch);
 			return key(k, mods.reduce((a, m) => a | MODS[m][1], 0));
 		},
-		click: async (x, y) => {
-			for (const type of ["mouseMoved", "mousePressed", "mouseReleased"])
+		click: async (x, y, ms = 0, b = 0) => {
+			const button = ["left", "middle", "right"][b];
+			for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+				if (type === "mouseReleased" && ms)
+					await new Promise(r => setTimeout(r, ms));
 				await c.send("Input.dispatchMouseEvent", {type, x, y,
-						button: "left", clickCount: 1});
+						button, clickCount: 1});
+			}
 		},
 		mouse: (x, y) => c.send("Input.dispatchMouseEvent", {type: "mouseMoved",
 				x, y}),
