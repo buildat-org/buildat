@@ -73,18 +73,20 @@ fi
 case "$browser" in
 	firefox)
 		mkdir -p "$out/profile"
+		# Muted, as the native checks' sound_mute=1
+		echo 'user_pref("media.volume_scale", "0.0");' > "$out/profile/user.js"
 		# TOUCH=1: a phone's pointer -- (pointer: coarse), which the page
 		# reads as a touchscreen, and touch events for the "tap" step
 		[ "${TOUCH:-}" = 1 ] && printf '%s\n' \
 			'user_pref("ui.primaryPointerCapabilities", 1);' \
-			'user_pref("dom.w3c_touch_events.enabled", 1);' > "$out/profile/user.js"
+			'user_pref("dom.w3c_touch_events.enabled", 1);' >> "$out/profile/user.js"
 		MOZ_HEADLESS=1 setsid "${FIREFOX:-firefox}" --headless \
 				--remote-debugging-port="$bport" --profile "$out/profile" \
 				--no-remote about:blank > "$out/browser.log" 2>&1 &
 		pids+=($!)
 		ready="WebDriver BiDi listening" ;;
 	chrome)
-		setsid "${CHROME:-google-chrome}" --headless=new \
+		setsid "${CHROME:-google-chrome}" --headless=new --mute-audio \
 				--remote-debugging-port="$bport" --user-data-dir="$out/profile" \
 				--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
 				--window-size=1200,800 about:blank > "$out/browser.log" 2>&1 &
