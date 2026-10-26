@@ -1580,8 +1580,8 @@ echo "high scores: $s3"
 # told the world is made again (a client with a launcher rejoins by it;
 # these are started with -s and are only disconnected), the module
 # reloaded and "w_rerun" made with w's seed, size and speed, w kept; a
-# client joining is placed in it; its own Play again deletes and makes
-# w_rerun again, no w_rerun_rerun.
+# client joining is placed in it; its own Play again moves w_rerun to the
+# trash and makes it again, no w_rerun_rerun.
 log33="$t/srv33.log"
 BUILDAT_SKELDAT_WORLD=w BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 	BUILDAT_SKELDAT_FILL=surface start_server "$log33" "STATUS Listening" 300 auto \
@@ -1605,8 +1605,8 @@ grep -aq "Disconnected from server: The world is being made again as w_rerun" "$
 printf '%s\n' "$placed" "delay 1500" "$again" quit > "$t/rr2.cmds"
 client rr2 "$t/rr2.cmds"
 wait $CLIENT
-wait_for_log "$log33" "re-run: deleted w_rerun" 120 ||
-	fail "the second re-run did not delete w_rerun ($log33, $t/rr2.log)"
+wait_for_log "$log33" "re-run: w_rerun to the trash" 120 ||
+	fail "the second re-run did not move w_rerun to the trash ($log33, $t/rr2.log)"
 wait_for_log "$log33" "the world is in" 120
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "client1 starts a re-run as w_rerun" "$log33" &&
