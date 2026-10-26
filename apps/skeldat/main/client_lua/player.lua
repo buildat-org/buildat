@@ -1177,6 +1177,11 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		local steps = math.ceil(dtime / max_step)
 		local part = dtime / steps
 		for _ = 1, steps do
+			-- [SKELDAT_BOARD_OFF_STOPS] Turned off while riding: off it
+			-- at once, its speed the walk's to stop or walk on with
+			if self.board and self.board_off then
+				leave_board()
+			end
 			if self.board then
 				board_step(part, wish)
 			else
@@ -1434,13 +1439,37 @@ do
 	walker:set_position(-2, 0.5, 0)
 	run(walker, walk, 1)
 	assert(walker.board, "board: on again, the walk off the edge did not take it")
-	-- The brake: from 10, a stop within 10^2 / (2 * brake) and a bit
+	-- [SKELDAT_BOARD_OFF_STOPS] Turned off while riding at 10: off after
+	-- one step at about its speed, then stopped as a walk stops (10^2 /
+	-- (2 * the walk's deceleration); on the flat the board never would);
+	-- in the air the flight kept, across and down
 	local flat = M.new(columns(function() return -1 end))
+	board(flat, 0, -0.5, 10)
+	flat.board_off = true
+	flat:update(1 / 60, {x = 0, z = 0, look_x = 1, look_z = 0})
+	assert(not flat.board and flat.vx > 9 and math.abs(flat.vz) < 1e-6,
+			"board off: still riding, or its speed not the walk's " .. flat.vx)
+	local x0, still = flat.x, nil
+	run(flat, {x = 0, z = 0, look_x = 1, look_z = 0}, 3, function(pl)
+		still = still or (pl.vx * pl.vx + pl.vz * pl.vz < 1e-6 and pl.x)
+	end)
+	local walk_stop = 100 / (2 * 10 * M.DEFAULT_MOVEMENT.acceleration_default)
+	assert(still and still - x0 < walk_stop + 0.1,
+			"board off: no walk's stop " .. tostring(still and still - x0))
+	local flyer = M.new(columns(function() return -1 end))
+	board(flyer, 0, 5, 10)
+	flyer.on_ground, flyer.vx, flyer.vy = false, 10, -2
+	flyer.board_off = true
+	flyer:update(1 / 60, {x = 0, z = 0, look_x = 1, look_z = 0})
+	assert(not flyer.board and flyer.vx > 9 and flyer.vy < -2,
+			"board off in the air: the flight not kept " .. flyer.vx .. " " .. flyer.vy)
+	-- The brake: from 10, a stop within 10^2 / (2 * brake) and a bit
+	flat = M.new(columns(function() return -1 end))
 	board(flat, 0, -0.5, 10)
 	run(flat, {x = 0, z = 0, look_x = 1, look_z = 0}, 0.5)
 	assert(flat.board and math.abs(flat.board.s - 10) < 1e-6,
 			"board: the flat slows it")
-	local x0 = flat.x
+	x0 = flat.x
 	run(flat, {x = 0, z = 0, brake = true, look_x = 1, look_z = 0}, 3)
 	assert(not flat.board and flat.x - x0 < 100 / (2 * M.BOARD_BRAKE) + 1,
 			"board: the brake does not stop it")
