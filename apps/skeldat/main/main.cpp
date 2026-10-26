@@ -238,6 +238,36 @@ struct Module: public interface::Module, public PlayersHost,
 					what.c_str(), bw, bh, bd, x0, y0, z0);
 			return true;
 		};
+		// [SKELDAT_SPAWN_STUCK_2] The player whose box (client player.lua's
+		// 0.3 by 1.75) a voxel is in, or nullptr: the bones grow around it,
+		// and a walkable voxel set there by anything else is logged, with
+		// who set it.
+		// simplified: bones_growth.h and mobs.h's direct set_sample() calls
+		// are not heard
+		auto in_box = [this](int x, int y, int z) -> const Player* {
+			for(auto &it : m_players.all){
+				const Player &pl = it.second;
+				if(pl.placed && x + 0.5f > pl.x - 0.3f && x - 0.5f < pl.x + 0.3f &&
+						y + 0.5f > pl.y && y - 0.5f < pl.y + 1.75f &&
+						z + 0.5f > pl.z - 0.3f && z - 0.5f < pl.z + 0.3f)
+					return &pl;
+			}
+			return nullptr;
+		};
+		m_growth.occupied = [in_box](int x, int y, int z){
+			return in_box(x, y, z) != nullptr;
+		};
+		m_world.on_set.push_back([this, in_box](int x, int y, int z,
+				uint32_t old, uint32_t id, uint32_t){
+			const skeldat::NodeDef *n = m_world.node_of(id);
+			if(old == id || id == ID_AIR || (n && !n->walkable))
+				return;
+			if(const Player *pl = in_box(x, y, z))
+				log_w(MODULE, "skeldat: %s set inside %s's box at (%d, %d, %d)"
+						" by %s:%d, the player at (%.2f, %.2f, %.2f)",
+						cs(n ? n->name : itos(id)), cs(pl->name), x, y, z,
+						m_world.set_by, m_world.set_by_line, pl->x, pl->y, pl->z);
+		});
 		// [SKELDAT_APPLE_TREES] Logs and leaves changed, saplings placed
 		m_world.on_set.push_back([this](int x, int y, int z, uint32_t old,
 				uint32_t id, uint32_t){

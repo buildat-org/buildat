@@ -13,6 +13,9 @@ struct BonesGrowth
 {
 	WorldView &world;
 	Furnaces &furnaces;
+	// A voxel inside a player's box, which nothing grows into
+	// ([SKELDAT_SPAWN_STUCK_2]); main.cpp's
+	std::function<bool(int, int, int)> occupied;
 	// The loaded sections: the whole world, once it is in
 	// ([SKELDAT_BOUNDED_WORLD]: no catch-up, nothing is ever away)
 	std::set<ss_> sections;
@@ -303,7 +306,8 @@ struct BonesGrowth
 	// Bones off the voxels at MAX with air, a liquid or a gas over them, now
 	// and then (bones::GROW_ONE_IN): a bone block on a bone block stacks to
 	// STACK_MAX; a skull, two or a bone tops nothing. Not into a burning
-	// lantern's sphere (`guard`, empty when none reaches the box). A liquid
+	// lantern's sphere (`guard`, empty when none reaches the box), nor into a
+	// player (`occupied`). A liquid
 	// or gas grown into is displaced as a placed voxel's is (set_node_in's
 	// on_set, [SKELDAT_DISPLACE]), so a pile rises from a lake's bed
 	void grow(voxelworld::Instance *w, const interface::VoxelVolume &vol,
@@ -328,6 +332,8 @@ struct BonesGrowth
 			const skeldat::NodeDef *od = world.node_of(over);
 			if(over != ID_AIR && !(od && (od->shape == skeldat::LIQUID ||
 					od->shape == skeldat::GAS)))
+				continue;
+			if(occupied && occupied(px, py + 1, pz))
 				continue;
 			const uint32_t id = world.format.id.get(vol.sample_at(px, py, pz));
 			if(id == tops[0] || id == tops[1] || id == tops[2])

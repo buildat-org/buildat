@@ -979,9 +979,13 @@ function sub_events()
 			local chunk_p = (buildat.Vector3(p) /
 					M.chunk_size_voxels):Floor()
 			local cache = M.get_static_node_cache(chunk_p)
-			cache.node = nil
-			cache.fetched = false
-			horizon_forget_chunk(chunk_p)
+			-- A chunk's new node can arrive before its old one goes: the
+			-- entry is then the new one's, kept ([SKELDAT_SPAWN_STUCK_2])
+			if not cache.node or cache.node:GetID() == node_id then
+				cache.node = nil
+				cache.fetched = false
+				horizon_forget_chunk(chunk_p)
+			end
 		end
 	end)
 end

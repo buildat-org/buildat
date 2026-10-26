@@ -403,7 +403,93 @@ local bow = {t = nil, light = nil, light_t = 0}
 -- box have all arrived and the player stands: where they are, and in what; then once they
 -- are 2 voxels from there (one stuck in a wall never is)
 local around_due, placed_us_around, walk_from = false, 0, nil
+
+-- [SKELDAT_SPAWN_STUCK_2] A walking key held and the player not moving
+-- for 1 s, or the box inside a voxel for 1 s (a step up is inside for a
+-- moment): once per episode, the position and,
+-- for each voxel the box touches and the ones a step from it, what the
+-- collision read there and why, and when that voxel's chunk last arrived.
+-- simplified: the keyboard's keys only; a touch stick held is not read
+local chunk_arrived = {} -- chunk node ID -> buildat.get_time_us()
+voxelworld.sub_geometry_update(function(node)
+	chunk_arrived[node:GetID()] = buildat.get_time_us()
+end)
+local stuck = {x = nil, z = nil, since = 0, inside_since = nil, said = false}
+local function solid_why(x, y, z)
+	if y > WORLD_TOP then
+		return "air (over the top)"
+	end
+	local p = buildat.Vector3(x, y, z)
+	local chunk_p = voxelworld.get_chunk_position(p)
+	local node = chunk_p and voxelworld.get_static_node(chunk_p)
+	local at = node and chunk_arrived[node:GetID()]
+	local when = not node and "no chunk node" or at and
+			string.format("chunk in %.1f s ago", (buildat.get_time_us() - at) / 1e6)
+			or "chunk arrival not seen"
+	local v = voxelworld.get_static_voxel(p)
+	if v == nil then
+		return "SOLID: nil (not loaded), " .. when
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local id = reg:id_of(v)
+	if id == 0 then
+		return "SOLID: id 0, " .. when
+	end
+	local def = reg:get_by_id(id)
+	if def == nil then
+		return "SOLID: id " .. id .. " with no definition, " .. when
+	end
+	return (def.physically_solid and "SOLID: " or "free: ") .. (def.name and
+			def.name.block_name or ("id " .. id)) .. ", " .. when
+end
+local function watch_stuck()
+	local i = magic.input
+	local walking = i:GetKeyDown(magic.KEY_W) or i:GetKeyDown(magic.KEY_A) or
+			i:GetKeyDown(magic.KEY_S) or i:GetKeyDown(magic.KEY_D) or
+			i:GetKeyDown(magic.KEY_SPACE)
+	local now = buildat.get_time_us()
+	local moved = stuck.x == nil or math.abs(player.x - stuck.x) > 0.05 or
+			math.abs(player.z - stuck.z) > 0.05
+	if moved or not walking then
+		stuck.x, stuck.z, stuck.since = player.x, player.z, now
+	end
+	-- Inside a voxel counts once the voxels around a placing are in, and
+	-- off the board (it rides a step's edge as a slope, partly in it)
+	local ix = not around_due and not player.board and player:inside()
+	if not ix then
+		stuck.inside_since = nil
+	elseif not stuck.inside_since then
+		stuck.inside_since = now
+	end
+	ix = ix and now - stuck.inside_since >= 1e6
+	walking = walking and now - stuck.since >= 1e6
+	if not ix and not walking then
+		stuck.said = false
+		return
+	end
+	if stuck.said then
+		return
+	end
+	stuck.said = true
+	local cx, cy, cz = math.floor(player.x + 0.5), math.floor(player.y + 0.5),
+			math.floor(player.z + 0.5)
+	-- The feet's voxel read solid is the fault itself; a wall walked
+	-- into is not
+	log:warning(string.format("skeldat: stuck at (%.2f, %.2f, %.2f)%s%s, " ..
+			"the feet's voxel %s; %s, %s, v (%.2f, %.2f, %.2f)", player.x,
+			player.y, player.z, walking and ", walking 1 s" or "",
+			ix and ", inside a voxel" or "", solid_why(cx, cy, cz),
+			player.board and "on the board" or "walking",
+			player.on_ground and "on the ground" or "in the air",
+			player.vx or 0, player.vy or 0, player.vz or 0))
+	for y = cy - 1, cy + 2 do for x = cx - 2, cx + 2 do for z = cz - 2, cz + 2 do
+		log:warning(string.format("skeldat: stuck: (%d, %d, %d) %s", x, y, z,
+				solid_why(x, y, z)))
+	end end end
+end
+
 local function watch_around()
+	watch_stuck()
 	if walk_from then
 		local dx, dz = player.x - walk_from[1], player.z - walk_from[2]
 		if dx * dx + dz * dz >= 4 then

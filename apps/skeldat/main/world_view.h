@@ -45,6 +45,9 @@ struct WorldView
 	// voxel world's access
 	// (x, y, z, the old id, the new id, the old param)
 	sv_<std::function<void(int, int, int, uint32_t, uint32_t, uint32_t)>> on_set;
+	// The function and line of set_node()'s caller, while on_set runs
+	const char *set_by = "";
+	int set_by_line = 0;
 	// The random numbers every part draws from
 	std::mt19937 rand{std::random_device{}()};
 	// The server's clock, seconds; the world's own, seconds of game time
@@ -160,18 +163,23 @@ struct WorldView
 
 	// The bones stay with what is there, and go with it when it is dug; the
 	// parts hear of the change (on_set) before it is written
+	// who, line: the caller, for the on_set hooks ([SKELDAT_SPAWN_STUCK_2])
 	void set_node(int x, int y, int z, uint32_t id, uint32_t param = 0,
-			int bones_ = -1)
+			int bones_ = -1, const char *who = __builtin_FUNCTION(),
+			int line = __builtin_LINE())
 	{
 		voxelworld::access(server, scene, [&](voxelworld::Instance *w){
-			set_node_in(w, x, y, z, id, param, bones_);
+			set_node_in(w, x, y, z, id, param, bones_, who, line);
 		});
 	}
 
 	// set_node() inside an open access (the hazards' step, many at once)
 	void set_node_in(voxelworld::Instance *w, int x, int y, int z, uint32_t id,
-			uint32_t param = 0, int bones_ = -1)
+			uint32_t param = 0, int bones_ = -1,
+			const char *who = __builtin_FUNCTION(), int line = __builtin_LINE())
 	{
+		set_by = who;
+		set_by_line = line;
 		const pv::Vector3DInt32 p(x, y, z);
 		interface::VoxelSample v = w->get_sample(p, true);
 		uint32_t &word = v.planes[0];

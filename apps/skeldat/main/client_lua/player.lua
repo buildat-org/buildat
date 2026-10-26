@@ -843,6 +843,20 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		return move_axis({self.x, top + 0.01, self.z}, axis, d, is_solid,
 				self.height)
 	end
+	-- [SKELDAT_SPAWN_STUCK_2] Off the board, out of what the box is in,
+	-- onto it: the board rides a step's edge as a slope, lower than the
+	-- higher column, and lands on the surface's mix; a box left inside a
+	-- voxel walks on in it
+	local function lift_out()
+		-- simplified: four voxels up at most; a box deeper stays where it is
+		for _ = 1, 4 do
+			local ix, _, _, top = self:inside()
+			if not ix then
+				return
+			end
+			self.y = top
+		end
+	end
 	local function leave_board()
 		local b = self.board
 		if self.on_ground then
@@ -850,6 +864,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			self.vx, self.vz = b.hx * b.s * c, b.hz * b.s * c
 		end
 		self.board = nil
+		lift_out()
 	end
 	-- The turn keys' angle this step, at a rate falling with the speed
 	-- s; on the ground twice the air's (the user's). [SKELDAT_CAMERA_STEER]
@@ -970,6 +985,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			-- Into a wall: walking
 			if (b.hx ~= 0 and self.vx == 0) or (b.hz ~= 0 and self.vz == 0) then
 				self.board = nil
+				lift_out()
 			end
 			return
 		end
@@ -1000,6 +1016,7 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 			if (bx and bz) or (bx and math.abs(b.hx) > 0.9) or
 					(bz and math.abs(b.hz) > 0.9) then
 				self.board, self.vx, self.vz = nil, 0, 0
+				lift_out()
 				return
 			elseif bx then
 				b.s, b.hx, b.hz, dx = b.s * math.abs(b.hz), 0,
@@ -1335,6 +1352,22 @@ do
 	assert(plain.x < 2.7 and plain.y < 1,
 			"player: a node was walked up without autojump")
 	assert(ducked.x < 2.7, "player: autojump jumped into a ceiling")
+
+	-- [SKELDAT_SPAWN_STUCK_2] The board stopped head on with the box in a
+	-- wall (its step's-edge slope lower than the column): off it, on top,
+	-- not inside
+	local walled = function(x, y, z) return y <= 0 or (x >= 2 and y <= 2) end
+	local rider = M.new(walled)
+	rider:set_position(1.75, 0.5, 0)
+	rider.on_ground = true
+	rider.board = {s = 5, hx = 1, hz = 0, k = 0,
+			held = {turn = 0, brake = false}}
+	for _ = 1, 20 do
+		rider:update(0.05, {x = 1, z = 0})
+	end
+	assert(not rider.board and not rider:inside(),
+			"player: off the board inside a voxel at (" .. rider.x .. ", " ..
+			rider.y .. ", " .. rider.z .. ")")
 
 	-- And what a mod has multiplied the movement by: no gravity is no
 	-- falling at all, and twice the speed is twice as fast once the
