@@ -158,9 +158,18 @@ static void set_platform_data_paths(core::Config &config)
 	// name, so a cached file under a path given with one is never found and
 	// the world draws black. simplified: only such a path is rewritten, so
 	// a Windows path keeps its backslashes.
+	// And a relative one ([CLIENT_RELATIVE_CACHE]): Urho3D's resource
+	// paths and the client's own reads went from different directories,
+	// and a relative -C found no served resource (the sky's cube nil).
+	// simplified: not on Windows, where get_absolute_path() has no drive
 	for(const char *k : {"cache_path", "user_path"}){
 		const ss_ p = config.get<ss_>(k);
-		if(p.find("..") != ss_::npos)
+#ifndef _WIN32
+		const bool relative = !p.empty() && p[0] != '/';
+#else
+		const bool relative = false;
+#endif
+		if(p.find("..") != ss_::npos || relative)
 			config.set(k, interface::fs::get_absolute_path(p));
 	}
 }
