@@ -114,6 +114,11 @@ const KEYS = {
 	Down: ["", "ArrowDown", 40], Left: ["", "ArrowLeft", 37],
 	Right: ["", "ArrowRight", 39],
 };
+// An unshifted punctuation mark's code and virtual key, a US keyboard's
+const PUNCT = {".": ["Period", 190], ",": ["Comma", 188], "-": ["Minus", 189],
+	"/": ["Slash", 191], ";": ["Semicolon", 186], "=": ["Equal", 187],
+	"'": ["Quote", 222], "[": ["BracketLeft", 219], "]": ["BracketRight", 221],
+	"\\": ["Backslash", 220], "`": ["Backquote", 192]};
 // A chord's modifiers: WebDriver's key value, CDP's modifier bit
 const MODS = {Alt: ["\uE00A", 1], Ctrl: ["\uE009", 2], Shift: ["\uE008", 8]};
 const chordOf = c => {
@@ -291,11 +296,13 @@ async function chrome() {
 		Shift: ["Shift", "ShiftLeft", 16]};
 	const key = async (k, mods = [], ms = 0) => {
 		// A digit's code is Digit2, not Key2, which SDL maps to nothing; a
-		// punctuation mark has neither (its char code as a key is another
-		// key: "." is 46, Delete), only its char
+		// punctuation mark's is a US keyboard's (its char code as a key is
+		// another key: "." is 46, Delete); a shifted one (":") has only its
+		// char
 		const [, code, vk] = KEYS[k] || (/[0-9a-z]/i.test(k) ? [k,
 				(/[0-9]/.test(k) ? "Digit" : "Key") + k.toUpperCase(),
-				k.toUpperCase().charCodeAt(0)] : [k, "", 0]);
+				k.toUpperCase().charCodeAt(0)] : PUNCT[k] ? [k].concat(PUNCT[k]) :
+				[k, "", 0]);
 		const name = KEYS[k] ? (k === "Space" ? " " : code) : k;
 		const bits = mods.reduce((a, m) => a | MODS[m][1], 0);
 		const base = {key: name, code, windowsVirtualKeyCode: vk, modifiers: bits};
