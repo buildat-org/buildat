@@ -3268,6 +3268,10 @@ do
 	material:SetTechnique(0, magic.cache:GetResource("Technique",
 			"luanti_client/res/LuantiFrame.xml"))
 	local c = magic.Color(0.10, 0.10, 0.10)
+	-- Unlit reads iTexCoord whatever NOUV says, and a buffer without one
+	-- left the last draw's in place: Firefox refused the draw ("Vertex
+	-- fetch requires 288, but attribs only supply 18"; [GLUE_VERTEX_FETCH])
+	local uv = magic.Vector2(0, 0)
 	local drawn = nil
 	frame_boxes = function(boxes)
 		local key = {}
@@ -3288,6 +3292,7 @@ do
 			for _, v in ipairs({a, b, cc, cc, d, a, a, d, cc, cc, b, a}) do
 				geometry:DefineVertex(v)
 				geometry:DefineColor(c)
+				geometry:DefineTexCoord(uv)
 			end
 		end
 		for _, box in ipairs(boxes) do
