@@ -99,9 +99,22 @@ return function(game, declare_keys)
 
 	-- The admin's menu: the server's answers redraw the page they are for
 	local admin = {page = nil, players = {}, name = nil, main = {},
-		audit = {}, give = nil}
+		audit = {}, give = nil, start = {}}
 	local function admin_send(cmd)
 		game.send("admin", cmd)
+	end
+	-- Every item as a dropdown's choices, by name
+	local function admin_item_choices()
+		local names = {}
+		for name in pairs(game.items) do
+			names[#names + 1] = name
+		end
+		table.sort(names)
+		local choices = {}
+		for i, name in ipairs(names) do
+			choices[i] = {game.items[name].desc or name, name}
+		end
+		return choices
 	end
 	local function admin_page()
 		if root then
@@ -128,16 +141,8 @@ return function(game, declare_keys)
 					end)
 				end
 			end
-			local names = {}
-			for name in pairs(game.items) do
-				names[#names + 1] = name
-			end
-			table.sort(names)
-			local choices = {}
-			for i, name in ipairs(names) do
-				choices[i] = {game.items[name].desc or name, name}
-			end
-			admin.give = admin.give or names[1]
+			local choices = admin_item_choices()
+			admin.give = admin.give or choices[1][2]
 			menu:add_dropdown("Item", choices, admin.give, function(v)
 				admin.give = v
 			end)
@@ -162,6 +167,59 @@ return function(game, declare_keys)
 			text("The world from above, +x right and +z up; the whiter, the" ..
 					" more bones")
 			text(admin.map or "Writing...")
+			back = function()
+				admin.page = "players"
+				admin_send("players")
+			end
+		elseif admin.page == "start" then
+			-- [SKELDAT_START_ITEMS] What a new player is given, changed
+			-- here as a whole list
+			local function set(list)
+				local parts = {"set_start_items"}
+				for _, st in ipairs(list) do
+					parts[#parts + 1] = st[1] .. " " .. st[2]
+				end
+				admin_send(table.concat(parts, " "))
+			end
+			text("What a new player starts with")
+			if admin.start_refused then
+				text("Not an item: " .. admin.start_refused)
+			end
+			if #admin.start == 0 then
+				text("Nothing.")
+			end
+			for i, st in ipairs(admin.start) do
+				local item = game.items[st[1]]
+				menu:add(string.format("Remove %s x%d", item and item.desc or
+						st[1], st[2]), function()
+					local list = {}
+					for j, other in ipairs(admin.start) do
+						if j ~= i then
+							list[#list + 1] = other
+						end
+					end
+					set(list)
+				end)
+			end
+			local choices = admin_item_choices()
+			admin.give = admin.give or choices[1][2]
+			menu:add_dropdown("Item", choices, admin.give, function(v)
+				admin.give = v
+			end)
+			menu:add("Add one", function()
+				local list, found = {}, false
+				for _, st in ipairs(admin.start) do
+					local n = st[2]
+					if st[1] == admin.give then
+						n, found = n + 1, true
+					end
+					list[#list + 1] = {st[1], n}
+				end
+				if not found then
+					list[#list + 1] = {admin.give, 1}
+				end
+				set(list)
+			end)
 			back = function()
 				admin.page = "players"
 				admin_send("players")
@@ -197,6 +255,10 @@ return function(game, declare_keys)
 				admin.page = "audit"
 				admin_send("audit")
 			end)
+			menu:add("New players' items", function()
+				admin.page, admin.start_refused = "start", nil
+				admin_send("start_items")
+			end)
 			back = function()
 				admin.page = nil
 				uistack.main:pop(root)
@@ -220,6 +282,15 @@ return function(game, declare_keys)
 			admin.speed = head:match("^players (%d+)") or admin.speed
 		elseif head == "audit" then
 			admin.audit = lines
+		elseif head:match("^start_items") then
+			admin.start = {}
+			for _, l in ipairs(lines) do
+				local n, c = l:match("^(%S+) (%d+)$")
+				if n then
+					admin.start[#admin.start + 1] = {n, tonumber(c)}
+				end
+			end
+			admin.start_refused = head:match("refused (%S+)")
 		elseif head == "map" then
 			admin.map = lines[1]
 		elseif head:match("^inv ") then
@@ -230,12 +301,22 @@ return function(game, declare_keys)
 			end
 			admin.invulnerable = lines[2] == "invulnerable=1"
 		end
+		local start = {}
+		for _, st in ipairs(head:match("^start_items") and admin.start or {}) do
+			start[#start + 1] = st[1] .. " " .. st[2]
+		end
 		log:info("pause: admin got " .. head ..
 				(admin.invulnerable and head:match("^inv ") and
-				", invulnerable" or ""))
+				", invulnerable" or "") .. (head:match("^start_items") and
+				": " .. table.concat(start, ", ") or ""))
 		if admin.page and root then
 			admin_page()
 		end
+	end)
+	-- For a check: "event skeldat_admin <command>" sends it as the menu
+	-- would, one the menu cannot (an unknown item's name)
+	magic.SubscribeToEvent("command_seq:skeldat_admin", function(_, d)
+		admin_send(d:GetString("Param"))
 	end)
 	local function open_admin()
 		admin.page = "players"

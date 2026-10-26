@@ -69,7 +69,8 @@ struct Players: public luanti_session::Game, public MobsHost
 		Player &pl = all[peer];
 		pl.name = name;
 		ss_ v;
-		if(save->store("skeldat_players")->get(name, v))
+		const bool fresh = !save->store("skeldat_players")->get(name, v);
+		if(!fresh)
 			pl.load(v);
 		else
 			pl.intro = !getenv("BUILDAT_SKELDAT_INTRO") ||
@@ -84,6 +85,16 @@ struct Players: public luanti_session::Game, public MobsHost
 			respawn(peer, pl);
 		else
 			send_position(peer, pl);
+		// [SKELDAT_START_ITEMS] Once, at the first join in this world
+		if(fresh){
+			ss_ given;
+			for(const Stack &st : start_items()){
+				give_or_drop(pl, st);
+				given += " "+st.str();
+			}
+			log_i(MODULE, "skeldat: %s, new, starts with%s", cs(name),
+					given.empty() ? " nothing" : cs(given));
+		}
 		send_inventory(peer, pl);
 		send_stats(peer, pl);
 		send_time(peer);
@@ -596,6 +607,23 @@ struct Players: public luanti_session::Game, public MobsHost
 		log_i(MODULE, "skeldat: %s dies at %.1f,%.1f,%.1f, %s %zu of %zu "
 				"stacks", cs(pl.name), pl.x, pl.y, pl.z,
 				burnt ? "burning" : "dropping", n, full.size());
+	}
+
+	// [SKELDAT_START_ITEMS] What a new player is given: "name count" pairs
+	// in the world's skeldat store, a bow and an arrow when never set
+	// (BUILDAT_SKELDAT_START_ITEMS instead, for the checks: theirs empty)
+	std::vector<Stack> start_items()
+	{
+		const char *env = getenv("BUILDAT_SKELDAT_START_ITEMS");
+		ss_ v = env ? env : "skeldat:bow 1 skeldat:arrow 1";
+		save->store("skeldat")->get("start_items", v);
+		std::istringstream is(v);
+		std::vector<Stack> out;
+		ss_ n;
+		int c = 0;
+		while(is>>n>>c)
+			out.push_back(Stack(n, c));
+		return out;
 	}
 
 	// What does not fit the player's inventory, dropped at its feet

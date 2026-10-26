@@ -190,6 +190,9 @@ export BUILDAT_SKELDAT_INTRO=0 BUILDAT_SKELDAT_STARTER=0
 # The scripted clients in as "client<peer>" with no login ([SKELDAT_LOGIN];
 # the login of every public join is builtin/world_menu/check.sh's)
 export BUILDAT_SKELDAT_GUEST_JOIN=1
+# [SKELDAT_START_ITEMS] New players given nothing, the drives' slots as
+# they were; 42 and 58 take the default
+export BUILDAT_SKELDAT_START_ITEMS=
 
 # The water from the feet to over the head, 4 markers stacked, walled in by
 # stone (water flows, [SKELDAT_OWN_MAPGEN]), the walls first, 5 markers
@@ -2388,14 +2391,16 @@ echo "the making's map: $m1 footprints mapped on each, $(grep -a "the world is i
 # server: the death screen again, and Respawn places bob with full hp.
 # Before it, the pause menu over the death screen ([SKELDAT_DEATH_PAUSE])
 # has "My account (bob)...", accounts' page, whose Back comes back to
-# the menu ([SKELDAT_PAUSE_ACCOUNT]).
+# the menu ([SKELDAT_PAUSE_ACCOUNT]). [SKELDAT_START_ITEMS] At the default:
+# bob's first join gives a bow and an arrow, the death and the rejoin
+# nothing more.
 log46="$t/srv46.log"
 BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 \
 	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="$water" \
 	start_server "$log46" "STATUS Listening" 300 auto \
-	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	env -u BUILDAT_SKELDAT_START_ITEMS "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv46" -C "$t/srv.cache" -l 3 || fail "the server ($log46)"
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$log46" | head -1)
@@ -2425,7 +2430,10 @@ kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "skeldat: bob dies at" "$log46" &&
 	grep -aq "skeldat: hp 20 " "$t/dead2.log" ||
 	fail "bob not back from the dead: $(grep -a "pause: the death\|skeldat: hp\|placed at" "$t/dead2.log" | sed 's/.*: skeldat: \|.*: pause: //' | tr '\n' ';') ($t/dead2.log, $log46)"
-echo "back dead: the death screen on the rejoin, Respawn placed bob"
+[ "$(grep -ac "starts with" "$log46")" = 1 ] &&
+	grep -aq "skeldat: bob, new, starts with skeldat:bow skeldat:arrow$" "$log46" ||
+	fail "bob's start items: $(grep -a "starts with" "$log46" | sed 's/.*skeldat: //' | tr '\n' ';') ($log46)"
+echo "back dead: the death screen on the rejoin, Respawn placed bob; given a bow and an arrow once"
 # 43. A headshot ([SKELDAT_HEADSHOT]): section 23's skeleton 6 ahead at
 # midnight, the launcher's client invulnerable; one full draw aimed 12
 # degrees up, at its head (1.5 to 2 over its feet), kills it. A body's
@@ -3271,6 +3279,38 @@ print("shade at %s,%s, lying at %.1f,%.1f with sky light %d; lying after the res
 	(s.group(1), s.group(2), x, z, sky))
 PY
 ) || fail "the boar's sleep ($t/srv61.log, $t/srv61_2.log)"
+# 58. The new players' items ([SKELDAT_START_ITEMS]): the admin's menu
+# shows the default, a bow and an arrow; an unknown item's name refused
+# (sent as the menu cannot, by the drive's event), the list kept; the bow
+# removed. client1, new, got the two; client2, joining after, the arrow.
+log62="$t/srv62.log"
+BUILDAT_SKELDAT_WORLD=start BUILDAT_SKELDAT_TERRAIN=flat \
+	BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.5 \
+	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
+	start_server "$log62" "STATUS Listening" 300 auto \
+	env -u BUILDAT_SKELDAT_START_ITEMS "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv62" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log62)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1000" "keypress Escape" "wait_log 5000 pause: the menu shown" \
+	"delay 500" 'click Button "Admin..."' "wait_log 30000 pause: admin got players" \
+	"delay 500" "click Button \"New players' items\"" \
+	"wait_log 30000 pause: admin got start_items: skeldat:bow 1, skeldat:arrow 1" \
+	"event skeldat_admin set_start_items skeldat:nonesuch 1" \
+	"wait_log 30000 pause: admin got start_items refused skeldat:nonesuch: skeldat:bow 1, skeldat:arrow 1" \
+	"delay 500" 'click Button "Remove*"' \
+	"wait_log 30000 pause: admin got start_items: skeldat:arrow 1" quit > "$t/start1.cmds"
+printf '%s\n' "$placed" quit > "$t/start2.cmds"
+client start1 "$t/start1.cmds"
+wait $CLIENT || fail "the start items' admin drive ($t/start1.log)"
+client start2 "$t/start2.cmds"
+wait $CLIENT || fail "the second new player's drive ($t/start2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "skeldat: client1, new, starts with skeldat:bow skeldat:arrow$" "$log62" &&
+	grep -aq "start items refused: no item skeldat:nonesuch" "$log62" &&
+	grep -aq "client1 sets new players: start items: skeldat:arrow 1$" "$log62" &&
+	grep -aq "skeldat: client2, new, starts with skeldat:arrow$" "$log62" ||
+	fail "the start items: $(grep -a "starts with\|start items" "$log62" | sed 's/.*skeldat: //' | tr '\n' ';') ($log62)"
+echo "start items: client1 a bow and an arrow; an unknown item refused; the bow removed, client2 an arrow"
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"

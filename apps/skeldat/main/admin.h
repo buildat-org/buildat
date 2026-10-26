@@ -270,6 +270,9 @@ struct Admin
 	//   take <name> <slot>         -> the view again
 	//   invulnerable <name> on|off -> the view again
 	//   audit                      -> audit\n<ts by action whom text> a line
+	//   start_items                -> start_items\n<item count> a line
+	//   set_start_items [<item count>]... -> the same, "start_items refused
+	//                                 <name>" for an unknown item
 	// simplified: the players on the server now, not the save's others
 	void on_admin(const network::Packet &packet)
 	{
@@ -309,6 +312,42 @@ struct Admin
 				}
 			});
 			network::send(world.server, peer, "skeldat:admin", os.str());
+			return;
+		}
+		// [SKELDAT_START_ITEMS] The new players' items: "start_items" ->
+		// "start_items [refused <name>]\n<item> <count> a line"; "set_start_items
+		// [<item> <count>]..." sets them (none: nothing given), each name a
+		// known item and its count up to a stack, else the whole refused
+		if(cmd == "start_items" || cmd == "set_start_items"){
+			ss_ refused;
+			if(cmd == "set_start_items"){
+				std::istringstream in(packet.data);
+				in>>cmd;
+				ss_ item, list;
+				int count = 0;
+				while(in>>item){
+					if(!(in>>count) || !world.game.item(item)){
+						refused = item;
+						break;
+					}
+					count = std::max(1, std::min(count,
+							world.game.stack_max(item)));
+					list += (list.empty() ? "" : " ")+item+" "+itos(count);
+				}
+				if(refused.empty()){
+					save->store("skeldat")->set("start_items", list);
+					audit(me->second.name, "new players", "set", "start items: "+
+							(list.empty() ? ss_("nothing") : list));
+				} else {
+					log_i(MODULE, "skeldat: %s's start items refused: no item %s",
+							cs(me->second.name), cs(refused));
+				}
+			}
+			ss_ out = "start_items"+(refused.empty() ? ss_() :
+					" refused "+refused)+"\n";
+			for(const Stack &st : players.start_items())
+				out += st.name+" "+itos(st.count)+"\n";
+			network::send(world.server, peer, "skeldat:admin", out);
 			return;
 		}
 		size_t to = 0;
