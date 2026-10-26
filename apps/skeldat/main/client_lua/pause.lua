@@ -377,12 +377,16 @@ return function(game, declare_keys)
 	local function show_intro(days)
 		close()
 		root = uistack.main:push({desc = "intro"})
-		local menu = ui_utils.vertical_menu(root, {min_width = 460})
+		-- [SKELDAT_TOUCH_HOW_TO_PLAY] As wide as a wide screen has room
+		-- for, so as short: at the touch UI size one column of 440 was
+		-- taller than a 1200x800 window
+		local width = math.max(440, math.min(760, magic.ui.root.width - 60))
+		local menu = ui_utils.vertical_menu(root, {min_width = width + 20})
 		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
 		local function line(text)
 			local t = menu.window:CreateChild("Text")
 			t:SetStyleAuto()
-			t:SetFixedWidth(440)
+			t:SetFixedWidth(width)
 			t:SetWordwrap(true)
 			t:SetText(text)
 		end

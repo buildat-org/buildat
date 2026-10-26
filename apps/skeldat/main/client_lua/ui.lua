@@ -113,6 +113,9 @@ end
 --
 local hud = magic.ui.root:CreateChild("UIElement")
 hud:SetFixedSize(magic.ui.root.width, magic.ui.root.height)
+-- [SKELDAT_TOUCH_HOW_TO_PLAY] Under the menus (uistack's, the same root,
+-- priority 0, which an unstable sort put under the hotbar)
+hud.priority = -1
 local hud_drawn = nil
 
 -- Where the HUD's skateboard icon is: its top left, in UI pixels, and
