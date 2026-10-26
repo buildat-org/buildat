@@ -311,6 +311,32 @@ struct Players: public luanti_session::Game, public MobsHost
 	// Where the server puts the player: the movement check's base too
 	void send_position(size_t peer, Player &pl)
 	{
+		// [SKELDAT_WEB_SPAWN_STUCK] Never into a wall: a place whose feet
+		// are in a solid voxel (the spawn built over since it was found)
+		// goes up its column to the first feet and head free; the client
+		// standing inside it was pulled back to it again and again. An
+		// unloaded voxel on the way leaves it where it was.
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			const int x = (int)std::floor(pl.x + 0.5f),
+					z = (int)std::floor(pl.z + 0.5f),
+					y0 = (int)std::floor(pl.y + 0.5f),
+					top = (world.y1 + 1) * skeldat::bones::SECTION - 2;
+			int y = y0;
+			while(y < top && (world.walkable(w, x, y, z) ||
+					world.walkable(w, x, y + 1, z))){
+				if(world.wid(w, x, y, z) == ID_IGNORE ||
+						world.wid(w, x, y + 1, z) == ID_IGNORE)
+					return;
+				if(y == y0 && !world.walkable(w, x, y, z))
+					return; // the feet free: the head's is not a wall
+				y++;
+			}
+			if(y != y0){
+				log_i(MODULE, "skeldat: %s's place (%.1f, %.1f, %.1f) in a "
+						"wall, lifted to y %d", cs(pl.name), pl.x, pl.y, pl.z, y);
+				pl.y = (float)y;
+			}
+		});
 		// Its range follows ([SKELDAT_RESPAWN_LOAD]): the moves' own check
 		// sees no section change, the place having been set here already,
 		// and a respawned player's range stayed where it died

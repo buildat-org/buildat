@@ -399,11 +399,46 @@ hand = load("main/hand.lua").new(camera_node, load("main/wield.lua"),
 local BOW_DRAW, BOW_MIN = 1, 0.1 -- main.cpp's
 local bow = {t = nil, light = nil, light_t = 0}
 
+-- [SKELDAT_WEB_SPAWN_STUCK] After a placing, once the voxels around the
+-- box have all arrived and the player stands: where they are, and in what; then once they
+-- are 2 voxels from there (one stuck in a wall never is)
+local around_due, placed_us_around, walk_from = false, 0, nil
+local function watch_around()
+	if walk_from then
+		local dx, dz = player.x - walk_from[1], player.z - walk_from[2]
+		if dx * dx + dz * dz >= 4 then
+			log:info(string.format("skeldat: walked 2 from the placing, at " ..
+					"(%.1f, %.1f, %.1f)", player.x, player.y, player.z))
+			walk_from = nil
+		end
+	end
+	if not around_due or not player.on_ground then
+		return
+	end
+	local reg = voxelworld.get_voxel_registry()
+	local cx, cy, cz = math.floor(player.x + 0.5), math.floor(player.y + 0.5),
+			math.floor(player.z + 0.5)
+	for y = cy - 1, cy + 2 do for x = cx - 1, cx + 1 do for z = cz - 1, cz + 1 do
+		local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
+		if v == nil or reg:id_of(v) == 0 then
+			return
+		end
+	end end end
+	around_due = false
+	local ix, iy, iz, top = player:inside()
+	log:info(string.format("skeldat: the voxels around arrived %.1f s after " ..
+			"the placing, the player at (%.2f, %.2f, %.2f), %s",
+			(buildat.get_time_us() - placed_us_around) / 1e6, player.x,
+			player.y, player.z, ix and string.format("inside the voxel at " ..
+			"(%d, %d, %d), its top %.2f", ix, iy, iz, top) or "inside no voxel"))
+end
+
 -- A placing (the join, a respawn) until the chunks within 2 of the camera
 -- are drawn, said once ([SKELDAT_RESPAWN_LOAD]): when the first of them
 -- came, and the last; checked ten times a second
 local placed_us, near_first, near_check, near_ready = nil, nil, 0, false
 local function watch_near(dt)
+	watch_around()
 	near_check = near_check - dt
 	if not placed_us or near_check > 0 then
 		return
@@ -460,6 +495,15 @@ local places = 0
 buildat.sub_packet("skeldat:position", function(data)
 	local x, y, z, yw = data:match("^(%S+) (%S+) (%S+) (%S+)")
 	player:set_position(tonumber(x), tonumber(y), tonumber(z))
+	-- [SKELDAT_WEB_SPAWN_STUCK] What the placing had under it
+	local feet = voxelworld.get_static_voxel(buildat.Vector3(
+			math.floor(player.x + 0.5), math.floor(player.y + 0.5),
+			math.floor(player.z + 0.5)))
+	log:info(string.format("skeldat: placing sent (%s, %s, %s), lifted " ..
+			"%.2f, the feet's voxel %s", x, y, z, player.y - tonumber(y),
+			feet == nil and "not arrived" or "here"))
+	around_due, placed_us_around = true, buildat.get_time_us()
+	walk_from = {player.x, player.z}
 	places = (places + 1) % 256
 	yaw = tonumber(yw) or 0
 	if not placed then

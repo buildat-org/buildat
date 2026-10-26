@@ -340,6 +340,36 @@ function M.new(is_solid, is_liquid, is_climbable, resistance_at, groups_at)
 		end
 	end
 
+	-- [SKELDAT_WEB_SPAWN_STUCK] The voxel the box is inside of, the
+	-- highest: its x, y, z and the top of what overlaps there, or nil
+	function self:inside()
+		local h = self.height or M.HEIGHT
+		local lo = {self.x - M.RADIUS, self.y, self.z - M.RADIUS}
+		local hi = {self.x + M.RADIUS, self.y + h, self.z + M.RADIUS}
+		local E = 1e-6
+		for y = cell_hi(hi[2]), cell_lo(lo[2]), -1 do
+			for x = cell_lo(lo[1]), cell_hi(hi[1]) do
+				for z = cell_lo(lo[3]), cell_hi(hi[3]) do
+					local what = is_solid(x, y, z)
+					if what then
+						local top
+						for _, b in ipairs(what == true and CUBE or what) do
+							if x + b[4] > lo[1] + E and x + b[1] < hi[1] - E and
+									y + b[5] > lo[2] + E and y + b[2] < hi[2] - E and
+									z + b[6] > lo[3] + E and z + b[3] < hi[3] - E then
+								top = math.max(top or -math.huge, y + b[5])
+							end
+						end
+						if top then
+							return x, y, z, top
+						end
+					end
+				end
+			end
+		end
+		return nil
+	end
+
 	-- A push the server gave the player, out of TOCLIENT_PLAYER_SPEED: an
 	-- explosion, a jump pad, being hit. It is added to the speed once, as
 	-- Luanti adds it, and then the physics has it: the vertical part is what
