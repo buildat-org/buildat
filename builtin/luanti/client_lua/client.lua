@@ -3772,6 +3772,14 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	if mouse_in_world then
 		keys.web_lock(true)
 	end
+	-- An app with no pause menu of its own: Escape, or a lost lock, let
+	-- the mouse go (open_pause_menu's stand-in), and a click in the world
+	-- is what takes it back -- and only that ([GLUE_NO_RESUME])
+	if not mouse_in_world and not (luanti.app and luanti.app.pause) and
+			not luanti.form_open() and not keys.touch and not load_wait then
+		set_mouse_in_world(true, "a click")
+		return
+	end
 	local button = event_data:GetInt("Button")
 	if button ~= magic.MOUSEB_LEFT and button ~= magic.MOUSEB_RIGHT then
 		return
