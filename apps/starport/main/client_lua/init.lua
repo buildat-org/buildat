@@ -236,13 +236,24 @@ end
 
 -- "me" asked again, the sidebar drawn with it, and `draw` after
 local function refresh(draw)
+	-- The window at once, not at the reply: the ntfy question at a login
+	-- comes between, and is shown in it, as Aitta's ([NTFY_ASK_OVER_GAME];
+	-- [STARPORT_NTFY_LATER_BLACK]: opened by the question it was a game's,
+	-- and its Later closed it to black). The Overview again with the
+	-- reply's counts, unless another page is up by then.
+	if not accounts.frame then
+		accounts.server_window("overview", nil,
+				accounts.can_exit and accounts.can_exit() and
+				accounts.ask_exit or nil)
+		draw = function()
+			if accounts.server_current() == "overview" then
+				accounts.server_show("overview")
+			end
+		end
+	end
 	req("me", {}, function(r)
 		me = r
-		if not accounts.frame then
-			accounts.server_window("overview", nil,
-					accounts.can_exit and accounts.can_exit() and
-					accounts.ask_exit or nil)
-		else
+		if accounts.frame then
 			accounts.server_sidebar()
 			if draw then
 				draw()
@@ -259,6 +270,10 @@ end
 
 overview_page = function()
 	req("overview", {}, function(ov)
+		-- Another page meanwhile (the ntfy question at a login)
+		if accounts.server_current() ~= "overview" then
+			return
+		end
 		local w = open("Overview", overview_page)
 		local n = me.notice
 		if type(n) == "table" and s(n.text) ~= "" then

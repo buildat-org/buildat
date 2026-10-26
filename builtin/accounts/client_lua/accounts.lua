@@ -3103,9 +3103,9 @@ draw_sidebar = function()
 			if not sw.refit then
 				return
 			end
-			local key, on_close = sw.current, sw.on_close
+			local key, on_close, on_exit = sw.current, sw.on_close, sw.on_exit
 			server_close(true)
-			M.server_window(key, on_close)
+			M.server_window(key, on_close, on_exit)
 		end)
 	end
 end
