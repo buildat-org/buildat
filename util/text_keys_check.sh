@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
-# cost: ~45 s (2026-10-10)
-# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua
+# cost: ~75 s (2026-10-26)
+# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua util/web_drive.js
 # [TEXT_KEYS], the text field's keys and clicks, by the ui scan's text,
 # cursor and selection after each step:
 #   1. Single-line, launch_menu's "Join a Buildat server" Address: Ctrl+A
@@ -134,15 +134,19 @@ JS
 else
 	echo "skip: no node for the web page's word rule"
 fi
-# The web client's name field in Firefox (web/ from util/build_web.sh)
-if [ -f "$here/web/buildat.js" ] && command -v firefox > /dev/null; then
-	"$here/util/web_drive.sh" firefox floorplanner "$here/util/text_keys_web.json" \
-		"$t/web" > "$t/web.out" 2>&1 || fail "the web drive: $(tail -3 "$t/web.out")"
-	got=$(grep -a "^eval: " "$t/web.out" | tr '\n' '|')
-	[ "$got" = 'eval: "typed alpha beta"|eval: "word alpha "|eval: "undone alpha beta"|eval: "redone alpha "|' ] ||
-		fail "the web field: $got"
-	echo "ok: the web client: Alt+Backspace, Ctrl+Z and Ctrl+Shift+Z in a field"
-else
-	echo "skip: no web/ or no firefox for the web field"
-fi
+# The web client's name field in Firefox and Chrome (web/ from
+# util/build_web.sh): Chrome's chords are web_drive's own key events, the
+# modifiers pressed as keys of their own
+for br in firefox google-chrome; do
+	if [ -f "$here/web/buildat.js" ] && command -v $br > /dev/null; then
+		"$here/util/web_drive.sh" ${br#google-} floorplanner "$here/util/text_keys_web.json" \
+			"$t/web_$br" > "$t/web_$br.out" 2>&1 || fail "the $br drive: $(tail -3 "$t/web_$br.out")"
+		got=$(grep -a "^eval: " "$t/web_$br.out" | tr '\n' '|')
+		[ "$got" = 'eval: "typed alpha beta"|eval: "word alpha "|eval: "undone alpha beta"|eval: "redone alpha "|' ] ||
+			fail "the web field in $br: $got"
+		echo "ok: the web client in $br: Alt+Backspace, Ctrl+Z and Ctrl+Shift+Z in a field"
+	else
+		echo "skip: no web/ or no $br for the web field"
+	fi
+done
 echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; the web client's Alt+Backspace and undo (see $t/*.png)"

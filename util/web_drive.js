@@ -285,18 +285,32 @@ async function chrome() {
 	if (touch)
 		await c.send("Emulation.setTouchEmulationEnabled", {enabled: true,
 				maxTouchPoints: 5});
-	const key = async (k, mods = 0, ms = 0) => {
-		// A digit's code is Digit2, not Key2, which SDL maps to nothing
-		const [, code, vk] = KEYS[k] || [k, (/[0-9]/.test(k) ? "Digit" :
-				"Key") + k.toUpperCase(), k.toUpperCase().charCodeAt(0)];
+	// A chord's modifiers as keys of their own: SDL keeps Ctrl's state from
+	// its key's events, not from the flag on the key pressed with it
+	const MODKEYS = {Alt: ["Alt", "AltLeft", 18], Ctrl: ["Control", "ControlLeft", 17],
+		Shift: ["Shift", "ShiftLeft", 16]};
+	const key = async (k, mods = [], ms = 0) => {
+		// A digit's code is Digit2, not Key2, which SDL maps to nothing; a
+		// punctuation mark has neither (its char code as a key is another
+		// key: "." is 46, Delete), only its char
+		const [, code, vk] = KEYS[k] || (/[0-9a-z]/i.test(k) ? [k,
+				(/[0-9]/.test(k) ? "Digit" : "Key") + k.toUpperCase(),
+				k.toUpperCase().charCodeAt(0)] : [k, "", 0]);
 		const name = KEYS[k] ? (k === "Space" ? " " : code) : k;
-		const base = {key: name, code, windowsVirtualKeyCode: vk, modifiers: mods};
+		const bits = mods.reduce((a, m) => a | MODS[m][1], 0);
+		const base = {key: name, code, windowsVirtualKeyCode: vk, modifiers: bits};
+		for (const m of mods)
+			await c.send("Input.dispatchKeyEvent", {type: "rawKeyDown", key: MODKEYS[m][0],
+					code: MODKEYS[m][1], windowsVirtualKeyCode: MODKEYS[m][2], modifiers: bits});
 		await c.send("Input.dispatchKeyEvent", Object.assign({type: "rawKeyDown"}, base));
-		if (!KEYS[k] && mods === 0)
+		if (!KEYS[k] && mods.length === 0)
 			await c.send("Input.dispatchKeyEvent", {type: "char", text: k});
 		if (ms)
 			await new Promise(r => setTimeout(r, ms));
 		await c.send("Input.dispatchKeyEvent", Object.assign({type: "keyUp"}, base));
+		for (const m of mods.slice().reverse())
+			await c.send("Input.dispatchKeyEvent", {type: "keyUp", key: MODKEYS[m][0],
+					code: MODKEYS[m][1], windowsVirtualKeyCode: MODKEYS[m][2], modifiers: 0});
 	};
 	let loaded = null;
 	c.on(d => {
@@ -314,11 +328,11 @@ async function chrome() {
 				await key(ch);
 		},
 		key: k => key(k),
-		holdkey: (k, ms) => key(k, 0, ms),
-		selall: () => key("a", 2),
+		holdkey: (k, ms) => key(k, [], ms),
+		selall: () => key("a", ["Ctrl"]),
 		chord: ch => {
 			const [mods, k] = chordOf(ch);
-			return key(k, mods.reduce((a, m) => a | MODS[m][1], 0));
+			return key(k, mods);
 		},
 		click: async (x, y, ms = 0, b = 0) => {
 			const button = ["left", "middle", "right"][b];
