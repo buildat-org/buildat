@@ -36,7 +36,10 @@ struct Module: public interface::Module
 		sub(m_server, "network:client_connected", &Module::on_client_connected);
 		sub(m_server, "client_file:files_transmitted",
 				&Module::on_files_transmitted);
-		sub(m_server, "network:packet_received", &Module::on_packet_received);
+		// A client's packet is an event of its own name; one no module
+		// subscribed to is dropped by the network module
+		sub(m_server, "network:packet_received/test1:box_added",
+				&Module::on_packet_received);
 	}
 
 	void on_thing(const Thing &thing)
