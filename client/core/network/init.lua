@@ -819,6 +819,7 @@ local function web_dgram(bridge, host, port)
 	return s
 end
 
+local TCP_OPEN_WAIT_S = 10
 local function open_socket(is_udp, host, port, cb)
 	local bridge = is_udp and __buildat_get_env("BUILDAT_LUANTI_BRIDGE")
 	local socket = bridge and web_dgram(bridge, host, tostring(port)) or
@@ -829,7 +830,32 @@ local function open_socket(is_udp, host, port, cb)
 		return
 	end
 	local uri = (is_udp and "udp://" or "tcp://")..host..":"..port
-	cb(is_udp and wrap_udp(socket, uri) or wrap_tcp(socket, uri))
+	local function done()
+		cb(is_udp and wrap_udp(socket, uri) or wrap_tcp(socket, uri))
+	end
+	-- [WEB_TCP_CONNECT_FALSE] The web's TCP is a WebSocket that opens a
+	-- moment later or fails: answered when it does, a frame at a time
+	local state = not is_udp and socket.connect_state and
+			socket:connect_state() or "open"
+	if state == "open" then
+		done()
+		return
+	end
+	local since, sub = os.time(), nil
+	sub = magic.SubscribeToEvent("Update", function()
+		state = socket:connect_state()
+		if state == "pending" and os.time() - since < TCP_OPEN_WAIT_S then
+			return
+		end
+		magic.UnsubscribeFromEvent("Update", sub)
+		if state == "open" then
+			done()
+		else
+			socket:close()
+			cb(nil, state == "pending" and "connect: no answer in "..
+					TCP_OPEN_WAIT_S.." s" or state)
+		end
+	end)
 end
 
 -- cb(socket, error): socket is nil if the connection was not made or the user

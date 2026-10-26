@@ -14,6 +14,7 @@
 	#include <netinet/in.h>
 	#include <netinet/tcp.h>
 	#include <netdb.h>
+	#include <poll.h>
 #endif
 #include <luabind/luabind.hpp>
 #include <string.h>
@@ -191,6 +192,26 @@ struct LuaSocket
 	bool good() const
 	{
 		return m_fd != -1;
+	}
+
+	// [WEB_TCP_CONNECT_FALSE] "open", "pending" or what failed. The web's
+	// socket is a WebSocket that opens after connect() has returned (see
+	// connect_wait()), and one to a port nobody is on was called connected;
+	// a native one is open by then or not there at all.
+	ss_ connect_state() const
+	{
+		if(m_fd == -1)
+			return m_error.empty() ? "closed" : m_error;
+#ifdef __EMSCRIPTEN__
+		struct pollfd p = {m_fd, POLLOUT, 0};
+		if(poll(&p, 1, 0) < 0)
+			return "poll: "+last_socket_error();
+		if(p.revents & (POLLERR | POLLHUP))
+			return "connect: refused or closed";
+		if(!(p.revents & POLLOUT))
+			return "pending";
+#endif
+		return "open";
 	}
 
 	ss_ error() const
@@ -429,6 +450,7 @@ void init_network(lua_State *L)
 		class_<LuaSocket, bases<>, sp_<LuaSocket>>("Socket")
 			.def("good", &LuaSocket::good)
 			.def("error", &LuaSocket::error)
+			.def("connect_state", &LuaSocket::connect_state)
 			.def("address", &LuaSocket::address)
 			.def("peer_ip", &LuaSocket::peer_ip)
 			.def("peer_port", &LuaSocket::peer_port)
