@@ -483,6 +483,7 @@ struct GameStart
 	void run_game(const ss_ &game_path, storage::Save *save,
 			const ss_ &import_from, network::PeerInfo::Id peer)
 	{
+		ss_ failed;
 		luanti::access(m_server, [&](luanti::Interface *i){
 			// What the server is doing, to whoever is waiting for the world:
 			// a game of 220 mods takes minutes, and "Creating <name>..."
@@ -523,8 +524,46 @@ struct GameStart
 			paths.base_textures = luanti_path(m_server)+"/textures/base/pack";
 			paths.texture_packs = luanti_path(m_server)+"/texture_packs";
 			i->set_paths(paths);
-			i->run_game(game_path, save);
+			try {
+				i->run_game(game_path, save);
+			} catch(std::exception &e){
+				failed = e.what();
+			}
 		});
+		// [VANILLA_GAME_LOAD_FAILS] Told to whoever waits, as a refusal is:
+		// thrown out of here it dropped the packet, and the player stood
+		// at "loading" for good. The Lua is half loaded, so the world
+		// stays starting; another one starts in a new server.
+		if(failed.empty())
+			return;
+		const ss_ message = "The world "+m_world_name+" could not start: "+
+				start_error_line(failed)+". Leave to start another.";
+		if(peer == 0 && m_public)
+			log_e(MODULE, "%s", cs(message));
+		else if(peer == 0)
+			m_server->shutdown(1, message);
+		else
+			menu_error(m_server, peer, message);
+	}
+
+	// What a player can read of a failed start: the Lua error's first
+	// line, without the "luanti: error in <file>:" over it, the traceback
+	// under it and the directories before the file
+	static ss_ start_error_line(const ss_ &what)
+	{
+		std::istringstream is(what);
+		ss_ line, out;
+		while(std::getline(is, line)){
+			if(line.empty() || line.compare(0, 16, "luanti: error in") == 0)
+				continue;
+			out = line;
+			break;
+		}
+		if(out.empty())
+			out = what;
+		const size_t lua = out.find(".lua:");
+		const size_t slash = lua == ss_::npos ? ss_::npos : out.rfind('/', lua);
+		return slash == ss_::npos ? out : out.substr(slash + 1);
 	}
 };
 // vim: set noet ts=4 sw=4:

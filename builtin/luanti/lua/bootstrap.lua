@@ -1666,9 +1666,13 @@ local __find_ids = __luanti_find_ids
 local __find_nodes = __luanti_find_nodes
 
 local function to_pos(pos)
-	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0
-	return math.floor(pos.x + 0.5), math.floor(pos.y + 0.5),
-			math.floor(pos.z + 0.5)
+	-- Luanti rounds, it does not truncate: -0.4 is 0 and not 0. And a
+	-- coordinate that is not there is 0, as read_v3s16's lua_tonumber()
+	-- makes it: voxelgarden's leafdecay hands get_node() its cache's
+	-- {pos, name} pair, and Luanti reads the origin.
+	return math.floor((tonumber(pos.x) or 0) + 0.5),
+			math.floor((tonumber(pos.y) or 0) + 0.5),
+			math.floor((tonumber(pos.z) or 0) + 0.5)
 end
 
 -- Luanti takes a node as a name or as a table with one, and fills in the two

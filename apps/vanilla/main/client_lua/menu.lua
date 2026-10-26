@@ -975,6 +975,10 @@ function draw_new_save_name(gameid, state)
 	if state.error then
 		local why = menu.window:CreateChild("Text")
 		why:SetStyleAuto()
+		-- Wrapped: a world that could not start says the game's Lua error,
+		-- and one line of it ran the screen off both sides
+		why:SetFixedWidth(math.min(560, magic.ui.root.width - 60))
+		why:SetWordwrap(true)
 		why:SetText(state.error)
 		why.color = magic.Color(rgb("error"))
 	end

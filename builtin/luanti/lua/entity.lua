@@ -869,6 +869,25 @@ function PlayerRef:get_meta()
 	return o and o.meta or nil
 end
 
+-- [VANILLA_GAME_LOAD_FAILS] And the deprecated attributes, which Luanti
+-- 5.13 still has (l_object.cpp): the player's meta by another name, nil
+-- for one not set, and a nil value removes it. voxelgarden's hunger reads
+-- them each step.
+function PlayerRef:get_attribute(attr)
+	local meta = self:get_meta()
+	if not meta or not meta:contains(attr) then
+		return nil
+	end
+	return meta:get_string(attr)
+end
+
+function PlayerRef:set_attribute(attr, value)
+	local meta = self:get_meta()
+	if meta then
+		meta:set_string(attr, value == nil and "" or tostring(value))
+	end
+end
+
 function PlayerRef:get_inventory()
 	local o = state_of(self)
 	return o and o.inventory or nil

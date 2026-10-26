@@ -351,28 +351,31 @@ local function startup_packet(name, file, fn)
 	end
 end
 
+-- [VANILLA_GAME_LOAD_FAILS] Composed a slice a frame, not all in the call
+-- that brings them: extra_ordinance's 1024-pixel JPEGs took 0.7 s each, and
+-- 34 of them in one call were stopped by the watchdog at 30 s with the
+-- module half loaded. The world waits for the last of them as it did.
+local texmod_queue = {}
+local texmod_counts = nil
+-- In the call: what every game here has, so their textures are there before
+-- the rest of the module runs, as they always were; a frame's after it
+local TEXMOD_CALL_US, TEXMOD_SLICE_US = 2000000, 50000
+local texmods_step
 local function texmods_from_data(data)
 	local values = cereal.binary_input(data, {"array", "string"})
-	local n = 0
-	local failed = 0
+	-- Already a queue: the frames have it, and a second call (the packet
+	-- after the served file) held the client two seconds more
+	local busy = #texmod_queue > 0
 	-- The pairs are flat: a resource name and then the expression it is for
 	for i = 1, #values - 1, 2 do
-		local resource = values[i]
-		local expr = values[i + 1]
-		if composed[expr] ~= resource then
-			local got = compose(expr, resource)
-			if got == resource then
-				n = n + 1
-			else
-				-- Either the expression uses something texmod.lua does not
-				-- build, or a file it names is not here
-				log:info("texmod: a flat colour for \"" ..
-						string.sub(expr, 1, 60) .. "\"")
-				write_fallback(resource, expr)
-				failed = failed + 1
-			end
-		end
+		texmod_queue[#texmod_queue + 1] = {values[i], values[i + 1]}
 	end
+	texmod_counts = texmod_counts or {n = 0, failed = 0}
+	if not busy then
+		texmods_step(TEXMOD_CALL_US)
+	end
+end
+local function texmods_finish(n, failed)
 	texmods_done = true
 	log:info("luanti:texmods: " .. n .. " textures composed, " .. failed ..
 			" could not be")
@@ -387,6 +390,40 @@ local function texmods_from_data(data)
 		voxelworld.remesh_all()
 	end
 end
+texmods_step = function(budget_us)
+	local c = texmod_counts
+	if not c then
+		return
+	end
+	local t0 = buildat.get_time_us()
+	while #texmod_queue > 0 and buildat.get_time_us() - t0 < budget_us do
+		local resource, expr = texmod_queue[1][1], texmod_queue[1][2]
+		table.remove(texmod_queue, 1)
+		if composed[expr] ~= resource then
+			local got = compose(expr, resource)
+			if got == resource then
+				c.n = c.n + 1
+			else
+				-- Either the expression uses something texmod.lua does not
+				-- build, or a file it names is not here
+				log:info("texmod: a flat colour for \"" ..
+						string.sub(expr, 1, 60) .. "\"")
+				write_fallback(resource, expr)
+				c.failed = c.failed + 1
+			end
+		end
+	end
+	if #texmod_queue == 0 then
+		texmod_counts = nil
+		texmods_finish(c.n, c.failed)
+	elseif budget_us == TEXMOD_CALL_US then
+		log:info("luanti:texmods: " .. #texmod_queue ..
+				" left after the call, composed a frame at a time")
+	end
+end
+magic.SubscribeToEvent("Update", function()
+	texmods_step(TEXMOD_SLICE_US)
+end)
 
 buildat.sub_packet("luanti:texmods", function(data)
 	texmods_from_data(data)
