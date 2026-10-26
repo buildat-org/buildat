@@ -3848,7 +3848,13 @@ magic.SubscribeToEvent("MouseWheel", function(event_type, event_data)
 	if chat_input then
 		return
 	end
-	set_wield(wield_index - event_data:GetInt("Wheel"))
+	-- One slot a wheel event, by its sign: a browser's touchpad says
+	-- several steps at once, which set_wield's wrap made the first or the
+	-- last slot
+	local wheel = event_data:GetInt("Wheel")
+	if wheel ~= 0 then
+		set_wield(wield_index - (wheel > 0 and 1 or -1))
+	end
 end)
 
 -- Where the mouse is, which a tooltip needs and GetMouseMove does not say:
