@@ -1737,10 +1737,14 @@ end
 -- stops the reading at water a camera is not in
 local function cave_light(x, y, z)
 	local v = voxelworld.get_static_voxel(buildat.Vector3(x, y, z))
-	if v == nil then
+	local reg = voxelworld.get_voxel_registry()
+	-- Ignore (id 0): not arrived, or arrived before its generator filled
+	-- it -- nothing, as the extension's sampler reads it, and not unlit air
+	-- ([LUANTI_DARK_JOIN]: a spawn generated ten seconds after the join
+	-- read as a cave and the sky went dark)
+	if v == nil or reg:id_of(v) == 0 then
 		return nil
 	end
-	local reg = voxelworld.get_voxel_registry()
 	local def = reg:get_by_id(reg:id_of(v))
 	if def and def.physically_solid and not def.transmits_light then
 		return false
@@ -2710,9 +2714,14 @@ function frame_peak.note(dt)
 		load_wait.t = load_wait.t + dt
 		-- [LOAD_OWN_CHUNK] The chunk the player is in, not the 125 round
 		-- it: the rest comes in under play (a phone sat at 40 of 125)
+		-- [LUANTI_DARK_JOIN] And generated where the player is: the server
+		-- sends a section before its generator has filled it, all ignore,
+		-- and a spawn can take ten seconds more
 		if load_wait.first and (load_wait.t - load_wait.first >= 60 or
 				player_placed and voxelworld.undrawn_around(
-				buildat.Vector3(player.x, player.y, player.z), 0) == 0) then
+				buildat.Vector3(player.x, player.y, player.z), 0) == 0 and
+				voxelworld.get_voxel_registry():id_of(voxelworld.get_static_voxel(
+				buildat.Vector3(player.x, player.y, player.z))) ~= 0) then
 			load_wait_end()
 		end
 	end
