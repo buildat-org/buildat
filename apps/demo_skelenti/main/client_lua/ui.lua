@@ -247,6 +247,18 @@ local function click(x, y, button)
 	end
 	local p = win.el.position
 	x, y = x - p.x, y - p.y
+	-- [SKELENTI_TOUCH_INVENTORY] Off the window: a stack picked up is put
+	-- back, else the window closes -- a touchscreen's way out, which had
+	-- only Escape and E, and its buttons go while a window holds the world
+	if x < 0 or y < 0 or x >= win.el.width or y >= win.el.height then
+		if win.sel then
+			win.sel = nil
+			draw()
+		else
+			close()
+		end
+		return true
+	end
 	local u = 18 * scale()
 	local hit = nil
 	for _, sl in ipairs(win.slots) do
