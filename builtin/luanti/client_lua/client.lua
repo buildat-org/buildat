@@ -4631,7 +4631,7 @@ if buildat.get_env("BUILDAT_TOUCH") == "1" then
 		place = function() keys.touch_place = true end,
 		set_wield = set_wield,
 		inventory = function() keys.on_key(BIND.inventory.key) end,
-		chat = function() keys.open_chat() end,
+		chat = function() keys.on_key(BIND.chat.key) end,
 		hotbar = function()
 			local _, _, slot, margin = hotbar_metrics()
 			return (luanti.hotbar and luanti.hotbar.count) or 8, slot, margin
