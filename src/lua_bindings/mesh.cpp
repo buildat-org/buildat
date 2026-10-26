@@ -473,6 +473,7 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 		// NOTE: Could be split in two calls
 		volume = interface::deserialize_volume(data);
 	}
+	bool urgent() const { return true; }
 	// Called repeatedly from main thread until returns true
 	bool pre()
 	{

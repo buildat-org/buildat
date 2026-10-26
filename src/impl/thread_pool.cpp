@@ -124,7 +124,10 @@ struct CThreadPool: public ThreadPool
 			return;
 		}
 		interface::MutexScope ms(m_mutex);
-		m_input_queue.push_back(std::move(task));
+		if(task->urgent())
+			m_input_queue.push_front(std::move(task));
+		else
+			m_input_queue.push_back(std::move(task));
 		m_tasks_sem.post();
 	}
 

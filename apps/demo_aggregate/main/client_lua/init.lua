@@ -244,8 +244,19 @@ end
 -- the feet and a RigidBody on that chunk (set_voxel_physics_boxes).
 local function floor_has_collision()
 	local p = player_node:GetWorldPosition()
-	local floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25, p.z)
-	local v = voxelworld.get_static_voxel(floor)
+	-- The first voxel down that is not air, within two: the spawn is a
+	-- voxel and a half over the ground on purpose (see the server's
+	-- try_resolve_spawn), and a check of the voxel at the feet alone held
+	-- the player there for good once the tunnel's air had arrived
+	-- ([AGGREGATE_CHROME_NO_PHYSICS])
+	local floor, v
+	for down = 0, 2 do
+		floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25 - down, p.z)
+		v = voxelworld.get_static_voxel(floor)
+		if v.id >= 2 then
+			break
+		end
+	end
 	if v.id < 2 then
 		return false
 	end

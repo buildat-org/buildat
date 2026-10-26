@@ -78,7 +78,14 @@ local LOD_THRESHOLD = 0.2
 -- front of any new one that is not a hundred times closer -- was tried on
 -- 2026-09-14 against a dug voxel that stays drawn, and changed nothing
 -- measurable. Whatever that fault is, it is not the order of this queue.
-local INITIAL_PHYSICS_NEAR_WEIGHT = 1.0
+--
+-- The physics ones are on the geometry's scale (see the puts), and a
+-- chunk's first collision twice: before its mesh and before the mesh of
+-- one at up to twice its distance ([AGGREGATE_CHROME_NO_PHYSICS]). A
+-- changed one stays even with the mesh: a world that changes its own
+-- voxels near the player re-queues it every few frames, and at twice it
+-- took all of the web's pool from the meshes.
+local INITIAL_PHYSICS_NEAR_WEIGHT = 2.0
 local MODIFIED_PHYSICS_NEAR_WEIGHT = 1.0
 
 local INITIAL_GEOMETRY_NEAR_WEIGHT = 0.15
@@ -451,8 +458,15 @@ function sub_events()
 			current_lod = 0,
 			node_id = node:GetID(),
 		})
+		-- Weighed on the geometry's scale ([AGGREGATE_CHROME_NO_PHYSICS]):
+		-- by its own trigger distance a chunk's first collision sorted
+		-- behind every geometry item within a few hundred voxels, and in a
+		-- world whose own changes keep the near chunks queued -- demo_
+		-- aggregate's water, meshed a slice a frame on the web -- the floor
+		-- under the player came up over two minutes late
 		node_update_queue:put(node:GetWorldPosition(),
-				INITIAL_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
+				INITIAL_PHYSICS_NEAR_WEIGHT * M.camera_far_clip * 1.2 /
+						M.physics_distance, M.physics_distance, nil, nil, {
 			type = "physics",
 			node_id = node:GetID(),
 		})
@@ -846,7 +860,11 @@ function sub_events()
 			-- client meshes a slice a frame on its own thread, and a load
 			-- queued twice what it meshed, each a 4 ms Lua call for a
 			-- mesh that then waited ([WEB_MAIN_THREAD])
-			if buildat.mesh_backlog() >= MESH_BACKLOG_MAX then
+			-- A collision goes in anyway, ahead of the meshes in the
+			-- pool (SetPhysicsBoxesTask::urgent)
+			local next_v = node_update_queue:peek_next_value()
+			if buildat.mesh_backlog() >= MESH_BACKLOG_MAX and
+					not (next_v and next_v.type == "physics") then
 				break
 			end
 			local item_t0 = buildat.get_time_us()
@@ -1065,8 +1083,12 @@ function queue_modified_node_update(node, prompt, player)
 		current_lod = 0,
 		node_id = node:GetID(),
 	}, player)
+	-- On the geometry's scale, as queue_initial_node_update's: a world
+	-- that changes its own voxels left the collision under the player
+	-- that many seconds behind what it drew, and the player fell through
 	node_update_queue:put(node:GetWorldPosition(),
-			MODIFIED_PHYSICS_NEAR_WEIGHT, M.physics_distance, nil, nil, {
+			MODIFIED_PHYSICS_NEAR_WEIGHT * M.camera_far_clip * 1.2 /
+					M.physics_distance, M.physics_distance, nil, nil, {
 		type = "physics",
 		node_id = node:GetID(),
 	}, player)

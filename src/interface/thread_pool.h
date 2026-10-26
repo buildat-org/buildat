@@ -20,6 +20,11 @@ namespace interface
 			virtual bool thread_until(int64_t){ return thread(); }
 			// Called repeatedly from main thread until returns true
 			virtual bool post() = 0;
+			// Ahead of the waiting ones rather than behind them: a chunk's
+			// collision behind four meshes run a slice a frame (the web)
+			// was seconds stale under the player
+			// ([AGGREGATE_CHROME_NO_PHYSICS])
+			virtual bool urgent() const { return false; }
 		};
 
 		struct ThreadPool
