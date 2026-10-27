@@ -542,9 +542,10 @@ function sub_events()
 		local far_trigger_d = nil
 		local far_weight = nil
 
+		local reg, sky = voxel_reg, M.use_skylight
 		local function set_up_materials()
 			for _, cb in ipairs(material_update_cbs) do
-				cb(node)
+				cb(node, reg)
 			end
 		end
 
@@ -557,6 +558,13 @@ function sub_events()
 			near_trigger_d = 1.2 * M.camera_far_clip
 			near_weight = 0.4
 		else
+			-- A game's second look for this chunk, or the plain one
+			if M.chunk_look then
+				local r, s = M.chunk_look(node)
+				if r then
+					reg, sky = r, s
+				end
+			end
 			-- The same map for every LOD: a far chunk meshed without one
 			-- kept the constant bounce and the plain alpha layout under a
 			-- shader reading the packed one ([LOD_LIGHT])
@@ -566,7 +574,7 @@ function sub_events()
 				horizon_pending[node:GetID()] = nil
 				note_horizon(node, true)
 			end
-			if M.horizon and M.use_skylight and M.chunk_size_voxels and
+			if M.horizon and sky and M.chunk_size_voxels and
 					M.chunk_size_voxels.x == HORIZON_CHUNK then
 				horizon = horizon_map_for((buildat.Vector3(node_p) /
 						M.chunk_size_voxels):Floor())
@@ -584,7 +592,7 @@ function sub_events()
 							M.chunk_size_voxels):Floor() * M.chunk_size_voxels
 				end
 				buildat.set_voxel_geometry(
-						node, data, voxel_reg, atlas_reg, M.use_skylight,
+						node, data, reg, atlas_reg, sky,
 						set_up_materials, horizon, origin)
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 				note_slow_mesh(node, t1, 0, 1)
@@ -594,8 +602,8 @@ function sub_events()
 						M.camera_far_clip * 1.4)
 				far_weight = 0.5
 			else
-				buildat.set_voxel_lod_geometry(lod, node, data, voxel_reg,
-						atlas_reg, M.use_skylight, set_up_materials, horizon)
+				buildat.set_voxel_lod_geometry(lod, node, data, reg,
+						atlas_reg, sky, set_up_materials, horizon)
 				M.frame_us.mesh = M.frame_us.mesh + buildat.get_time_us() - t1
 				note_slow_mesh(node, t1, 0, lod)
 
@@ -1109,6 +1117,13 @@ function M.get_voxel_registry_used()
 	return voxel_reg
 end
 
+-- The same for some chunks only: function(node) returning the registry and
+-- use_skylight that chunk is meshed with, or nil for the plain ones. The
+-- game remeshes what it changes with remesh_all(filter). A material callback
+-- is given the registry its mesh was built with: the mesh is done on a
+-- worker, and the look may have changed again by then.
+M.chunk_look = nil
+
 -- What a line of detail wants to know about the world: how many chunks this
 -- client holds, how many are waiting for a mesh, and how many voxel types
 -- the registry it was sent has. A count that is not the server's is a fault
@@ -1142,20 +1157,24 @@ function M.counts()
 end
 
 -- Every chunk that is loaded, queued for a new mesh. The queue is spatial, so
--- what the camera is looking at is rebuilt first and the rest follows.
-function M.remesh_all()
+-- what the camera is looking at is rebuilt first and the rest follows. With
+-- filter(node, x, y, z), given the chunk's position in chunks, only the
+-- chunks it returns true for.
+function M.remesh_all(filter)
 	local n = 0
-	for _, ztable in pairs(static_node_cache) do
-		for _, ytable in pairs(ztable) do
-			for _, cache in pairs(ytable) do
-				if cache.node then
+	for z, ztable in pairs(static_node_cache) do
+		for y, ytable in pairs(ztable) do
+			for x, cache in pairs(ytable) do
+				if cache.node and (not filter or filter(cache.node, x, y, z)) then
 					queue_modified_node_update(cache.node)
 					n = n + 1
 				end
 			end
 		end
 	end
-	log:info("voxelworld.remesh_all(): "..n.." chunks")
+	if n > 0 or not filter then
+		log:info("voxelworld.remesh_all(): "..n.." chunks")
+	end
 	return n
 end
 

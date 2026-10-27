@@ -857,7 +857,7 @@ end
 -- main.cpp for why they cost no storage. Mode 0 is off.
 local VIEW_NAMES = {"load", "support", "danger"}
 local view_regs = {}
-local play_reg = nil
+local is_view_reg = {}
 local view_mode = 0
 
 buildat.sub_packet("main:view_registry", function(data)
@@ -868,6 +868,7 @@ buildat.sub_packet("main:view_registry", function(data)
 	local reg = buildat.createVoxelRegistry()
 	reg:deserialize(values.data)
 	view_regs[values.mode + 1] = reg
+	is_view_reg[reg] = true
 	log:info("view registry "..(VIEW_NAMES[values.mode + 1] or
 			values.mode)..": "..reg:dump_format())
 end)
@@ -877,8 +878,66 @@ end)
 -- voxel_shading's own material callback, so this is the one that wins.
 local VIEW_TECHNIQUE = "Techniques/NoTextureUnlitVCol.xml"
 
-voxelworld.sub_material_update(function(node)
-	if view_mode == 0 then
+-- A view is drawn on the chunks within VIEW_RADIUS of the camera only: a
+-- remesh of every loaded chunk took a minute ([AGGREGATE_VIEW_LEFTOVER]). A
+-- chunk keeps its look until a chunk's width past it, so the edge does not
+-- churn. "x,y,z" in chunks -> the mode its mesh was asked for, absent the
+-- plain: by position and not by node, so that the check over every chunk
+-- calls nothing in the sandbox (by node it was 30 ms).
+local VIEW_RADIUS = 80
+local VIEW_KEEP = 32
+local chunk_view = {}
+local view_check_t = 0
+
+local function chunk_key(node)
+	local p = (buildat.Vector3(node:GetWorldPosition()) /
+			voxelworld.chunk_size_voxels):Floor()
+	return p.x..","..p.y..","..p.z
+end
+
+-- The chunks whose look is not the one they want, marked and remeshed
+local function view_remesh()
+	local cs = voxelworld.chunk_size_voxels
+	local c = camera_node:GetWorldPosition()
+	local sx, sy, sz, cx, cy, cz = cs.x, cs.y, cs.z, c.x, c.y, c.z
+	return voxelworld.remesh_all(function(node, x, y, z)
+		local key = x..","..y..","..z
+		local have = chunk_view[key]
+		local want = 0
+		if view_mode ~= 0 then
+			local dx = (x + 0.5) * sx - cx
+			local dy = (y + 0.5) * sy - cy
+			local dz = (z + 0.5) * sz - cz
+			local r = have == view_mode and VIEW_RADIUS + VIEW_KEEP or
+					VIEW_RADIUS
+			if dx*dx + dy*dy + dz*dz < r*r then
+				want = view_mode
+			end
+		end
+		if want == (have or 0) then
+			return false
+		end
+		chunk_view[key] = want ~= 0 and want or nil
+		-- A chunk with nothing drawn, air or solid through, looks the same
+		-- either way: most of the radius at the overlook
+		local cg = node:GetComponent("CustomGeometry")
+		return (cg and cg:GetMaterial(0)) ~= nil or
+				node:GetChild("alpha") ~= nil or node:GetChild("masked") ~= nil
+	end)
+end
+
+voxelworld.chunk_look = function(node)
+	local mode = chunk_view[chunk_key(node)]
+	if mode then
+		-- The vertex colour is the band, so nothing else may be in it:
+		-- with skylight on, a view of a dark mine is a dark mine
+		return view_regs[mode], false
+	end
+end
+
+voxelworld.sub_material_update(function(node, reg)
+	-- A key, not ==: the registry's userdata has no __eq
+	if not is_view_reg[reg] then
 		return
 	end
 	local cg = node:GetComponent("CustomGeometry")
@@ -906,13 +965,8 @@ local function set_view_mode(mode)
 		return
 	end
 	view_mode = mode
-	play_reg = play_reg or voxelworld.get_voxel_registry()
-	voxelworld.set_voxel_registry(mode ~= 0 and view_regs[mode] or play_reg)
-	-- The vertex colour is the band, so nothing else may be in it: with
-	-- skylight on, a view of a dark mine is a dark mine
-	voxelworld.use_skylight = (mode == 0)
-	voxelworld.remesh_all()
-	log:info("view: "..(mode == 0 and "off" or VIEW_NAMES[mode]))
+	log:info("view: "..(mode == 0 and "off" or VIEW_NAMES[mode])..", "..
+			view_remesh().." chunks")
 end
 
 buildat.sub_packet("main:structure_placed", function(data)
@@ -1147,6 +1201,13 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	-- Samples how much sky the camera can see, per direction, which is what
 	-- dims the reflected sky under ground; see builtin/voxel_shading
 	voxel_shading.update(dt)
+
+	-- A view's radius follows the camera, a few times a second
+	view_check_t = view_check_t + dt
+	if view_check_t >= 0.25 and (view_mode ~= 0 or next(chunk_view)) then
+		view_check_t = 0
+		view_remesh()
+	end
 
 	-- Nothing is pointed at while a building is being placed: the marker
 	-- would sit inside the preview and the buttons mean something else
