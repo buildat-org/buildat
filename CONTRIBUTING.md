@@ -58,6 +58,16 @@ wants no such line.
 Assets follow the same rule, written down where they sit:
 `extensions/luanti_client/res/LICENSE` is how it is done.
 
+Binary files
+------------
+
+A small binary file is fine in the tree, and a medium one if it will
+not change: an icon, a texture, a test fixture. What is not committed is
+a binary that is rebuilt from a source in the tree -- a `.wasm`, a
+compiled library, an archive -- since it changes whole on every edit and
+grows the repository for nothing; it is built where it is used. A copy
+of a file already in the tree costs nothing, as git stores it once.
+
 Checks
 ------
 
