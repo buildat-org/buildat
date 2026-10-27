@@ -26,6 +26,7 @@
 #include "chat/api.h"
 #include "starport_announce/api.h"
 #include <cstdlib>
+#include <cctype>
 #include <sys/stat.h>
 #ifndef _WIN32
 #include <dirent.h>
@@ -266,23 +267,30 @@ struct Module: public interface::Module
 	// choosing one there is the shape this ends up as.
 	ss_ player_name_of(network::PeerInfo::Id peer)
 	{
-		// A public server's players are its accounts ([VANILLA_PUBLIC] 3)
-		if(m_public){
+		// A public server's players are its accounts ([VANILLA_PUBLIC] 3),
+		// and so are a LAN game's but the singleplayer ([GUEST_NAME_REUSE]:
+		// "client<peer>" came again after a restart, with the earlier
+		// player's save)
+		if(m_public || !is_named(peer)){
 			auto it = m_names.find(peer);
 			return it != m_names.end() ? it->second : "client"+itos(peer);
 		}
+		return named_name();
+	}
+	ss_ named_name()
+	{
 		const char *name = getenv("BUILDAT_LUANTI_NAME");
-		if(name == nullptr || name[0] == '\0')
-			name = "singleplayer";
-		// The singleplayer is the launcher's own client (its owner token,
-		// builtin/accounts); anyone else who reaches the game -- another
-		// user on this machine, or the LAN once it is opened -- is an
-		// ordinary player ([SECURITY_RUN_1])
+		return name == nullptr || name[0] == '\0' ? "singleplayer" : name;
+	}
+	// The singleplayer is the launcher's own client (its owner token,
+	// builtin/accounts); anyone else who reaches the game -- another user
+	// on this machine, or the LAN once it is opened -- is an ordinary
+	// player ([SECURITY_RUN_1]), in by the join's login
+	bool is_named(network::PeerInfo::Id peer)
+	{
 		if(m_named_peer == 0 && is_owner(m_server, peer))
 			m_named_peer = peer;
-		if(m_named_peer != peer)
-			return "client"+itos(peer);
-		return name;
+		return m_named_peer == peer;
 	}
 
 	void on_client_disconnected(const network::OldClient &old_client)
@@ -309,8 +317,10 @@ struct Module: public interface::Module
 	// chosen one
 	void on_accounts_login(const accounts::Login &login)
 	{
-		if(!m_public)
+		if(!m_public){
+			on_lan_login(login);
 			return;
+		}
 		m_names[login.peer] = login.name;
 		chat::access(m_server, [&](chat::Interface *i){
 			i->join(login.peer, login.name);
@@ -332,6 +342,35 @@ struct Module: public interface::Module
 				note+". No world is running: you are in as soon as an admin "
 				"starts one."};
 		const ss_ packed = storage::pack(values);
+		network::send(m_server, login.peer, "main:join_wait", packed);
+	}
+
+	// [GUEST_NAME_REUSE] A LAN player's join: the world under their
+	// account's name, never the singleplayer's
+	void on_lan_login(const accounts::Login &login)
+	{
+		if(!m_join_sent.count(login.peer) || m_names.count(login.peer))
+			return;
+		auto lower = [](ss_ s){
+			for(char &c : s)
+				c = (char)tolower((unsigned char)c);
+			return s;
+		};
+		if(lower(login.name) == lower(named_name())){
+			log_i(MODULE, "%s: the singleplayer's name, held", cs(login.name));
+			const ss_ packed = storage::pack(sv_<ss_>{login.name+
+					" is this game's own player: join with another account"});
+			network::send(m_server, login.peer, "main:join_wait", packed);
+			return;
+		}
+		m_names[login.peer] = login.name;
+		if(m_scene){
+			show_world_to(login.peer);
+			return;
+		}
+		m_waiting_peers.push_back(login.peer);
+		const ss_ packed = storage::pack(sv_<ss_>{"No world is running yet: "
+				"you are in as soon as the host starts one."});
 		network::send(m_server, login.peer, "main:join_wait", packed);
 	}
 
@@ -468,9 +507,11 @@ struct Module: public interface::Module
 
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
-		// A public server's client joins first ([VANILLA_PUBLIC] 2), and
+		// A public server's client joins first ([VANILLA_PUBLIC] 2), as
+		// does a LAN game's but the singleplayer ([GUEST_NAME_REUSE]), and
 		// what it is shown after is on_accounts_login's
-		if(m_public && !m_names.count(event.recipient)){
+		if((m_public || !is_named(event.recipient)) &&
+				!m_names.count(event.recipient)){
 			if(m_join_sent.insert(event.recipient).second){
 				// The join's title is the Luanti game running, which the
 				// script waits for; "" before an admin has chosen a world
@@ -492,8 +533,9 @@ struct Module: public interface::Module
 			return;
 		}
 		if(!m_scene){
-			// Waiting for an admin to choose a world
-			if(m_public && !m_access.is_admin(event.recipient))
+			// Waiting for an admin, or the host, to choose a world
+			if(m_public ? !m_access.is_admin(event.recipient) :
+					!is_named(event.recipient))
 				return;
 			if(!m_shown_menu.insert(event.recipient).second)
 				return;

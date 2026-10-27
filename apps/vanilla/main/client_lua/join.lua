@@ -2,7 +2,8 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- A public server's first script ([VANILLA_PUBLIC] 2): the join, through
+-- A public server's first script ([VANILLA_PUBLIC] 2), and a LAN game's
+-- for all but the singleplayer ([GUEST_NAME_REUSE]): the join, through
 -- builtin/accounts. What comes after is the server's to send: the world,
 -- the world menu for an admin while there is none, or else a wait until an
 -- admin has chosen one.

@@ -5,7 +5,8 @@
 # [VANILLA_CHAT_MIN]: vanilla's chat is builtin/chat's "who may talk",
 # Residents and up by default on a public server, everyone in a LAN game.
 # On the minimal game:
-#   - the launcher's server: a Guest (a client not the owner's) talks;
+#   - the launcher's server: a Guest (a client not the owner's, in by the
+#     login since [GUEST_NAME_REUSE]) talks;
 #   - public, no world: a Guest's lobby line (the held page's Chat...)
 #     is refused;
 #   - public with the world: a Guest's line is refused, its /privs runs;
@@ -30,7 +31,7 @@ serve(){
 	local log=$1; shift
 	start_server "$log" \
 		"STATUS Listening" 120 $PORT "$here/Build/bin/buildat_server" "$@" \
-		-A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3 ||
+		-A 127.0.0.1 -m "$here/apps/vanilla" -D "${D:-$d}" -C "$t/c" -l 3 ||
 		fail "the server ($log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
@@ -41,15 +42,29 @@ said(){ grep -av "command: \|wait_log" "$1"; }
 say(){ printf 'keypress T\nwait_log 5000 chat: the line opened\ntext %s\nkeypress Return\nwait_log 10000 %s\n' "$1" "$2"; }
 
 # The launcher's own server: a Guest talks (an owner token the client
-# has not: without one any client from this machine is the owner)
+# has not: without one any client from this machine is the owner). Its
+# accounts of its own: the admin the setup code makes there, then the
+# Guest
 BUILDAT_OWNER_TOKEN=notthisclients BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=w \
-	serve "$t/lan.log" -u launcher=1
+	D=$t/lan serve "$t/lan.log" -u launcher=1
 wait_for_log "$t/lan.log" "The world is up" 120 || fail "the LAN world ($t/lan.log)"
+lan_code=$(grep -ao "setup code [A-Z0-9]*" "$t/lan.log" | head -1 | cut -d' ' -f3)
+printf 'wait_log_any 60000 Joined as\nquit\n' > "$t/lana.cmds"
+BUILDAT_JOIN_NAME=lanadmin BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_CODE=$lan_code run_client 60 "$t/lana.log" timeout 240 \
+	"$here/Build/bin/buildat" -C "$t/lcc" -D "$t/lau" -s 127.0.0.1:$PORT \
+	-w 800x450 -u 1 -l 3 -o sound_mute=1 -c @"$t/lana.cmds" ||
+	fail "the LAN admin's drive ($t/lana.log)"
 { echo "wait_log_any 60000 the world is in"; echo "delay 1000"
-	say "hello on the lan" "<client1> hello on the lan"; echo quit; } > "$t/lan.cmds"
-run_client 60 "$t/lanc.log" timeout 240 "$here/Build/bin/buildat" -C "$t/lcc" -D "$t/lcu" \
+	say "hello on the lan" "<languest> hello on the lan"; echo quit; } > "$t/lan.cmds"
+BUILDAT_JOIN_NAME=languest BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
+	run_client 60 "$t/lanc.log" timeout 240 "$here/Build/bin/buildat" -C "$t/lcc" -D "$t/lcu" \
 	-s 127.0.0.1:$PORT -w 800x450 -u 1 -l 3 -o sound_mute=1 -c @"$t/lan.cmds" ||
 	fail "the LAN guest's drive ($t/lanc.log: $(grep -a "Command sequence failed" "$t/lanc.log" | tail -1))"
+stop
+# The world the public starts below play
+BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=w serve "$t/w.log" -u launcher=1
+wait_for_log "$t/w.log" "The world is up" 120 || fail "the world ($t/w.log)"
 stop
 ! grep -aq "line refused" "$t/lan.log" || fail "a LAN guest refused ($t/lan.log)"
 echo "  a LAN game's Guest talks"

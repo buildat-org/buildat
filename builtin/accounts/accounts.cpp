@@ -754,6 +754,9 @@ struct Module: public interface::Module, public Interface
 			notify(LV_ADMIN, m_server->get_app_id()+": started again after "
 					"a crash", "");
 		m_store->set("running", "1");
+		ss_ last_guest;
+		if(m_store->get("last_guest", last_guest))
+			m_last_guest = atoi(last_guest.c_str());
 		migrate_records();
 		migrate_levels();
 		migrate_links();
@@ -818,7 +821,9 @@ struct Module: public interface::Module, public Interface
 
 	bool m_multiple_logins = false;
 	// [HC_GUEST_PLAY] Whether the app lets guests in, and the last guest's
-	// number this run
+	// number, kept in the store ([GUEST_NAME_REUSE]: a game keeps its
+	// saves by name, and a count from 1 each run gave a later guest an
+	// earlier one's)
 	bool m_guests = false;
 	int m_last_guest = 0;
 	void set_guests(bool on)
@@ -2082,7 +2087,7 @@ struct Module: public interface::Module, public Interface
 	}
 
 	// [HC_GUEST_PLAY] A guest: no account and nothing to type -- the next
-	// free "guest<n>" this run, at LV_NEW (no account has a level), with
+	// free "guest<n>", never one given before, at LV_NEW (no account has a level), with
 	// the same accounts:login an account's join gives. An address ban and
 	// a full server hold as for a login.
 	void on_guest(const network::Packet &packet)
@@ -2120,6 +2125,7 @@ struct Module: public interface::Module, public Interface
 		do
 			name = "guest"+itos(++m_last_guest);
 		while(exists(name) || find_peer(name) != 0);
+		m_store->set("last_guest", itos(m_last_guest));
 		log_i(MODULE, "%zu joined as a guest, %s, from %s", packet.sender,
 				cs(name), cs(peer.address));
 		peer.name = name;
