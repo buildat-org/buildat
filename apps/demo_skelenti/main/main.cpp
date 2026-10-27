@@ -45,6 +45,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <algorithm>
 #include <sstream>
 #define MODULE "main"
 
@@ -138,6 +139,8 @@ struct Module: public interface::Module
 	float m_ai_t = 0, m_spawn_t = 0, m_save_t = 0, m_field_t = 0;
 	// The middle of the danger grid each player was last sent, by name
 	std::map<ss_, std::pair<int, int>> m_field;
+	// Each shown peer's player name (show())
+	std::map<size_t, ss_> m_names;
 	// The world's own danger field (danger()), kept in its save
 	uint32_t m_salt = 0;
 	std::mt19937 m_rand{std::random_device{}()};
@@ -321,11 +324,20 @@ struct Module: public interface::Module
 		// simplified: decided at join; an account made admin mid-game gets
 		// them on its next join (vanilla's on_accounts_privs is the upgrade)
 		bool admin = false;
+		ss_ name;
 		accounts::access(m_server, [&](accounts::Interface *i){
-			admin = i->is_local(peer) || i->is_admin(i->name_of(peer));
+			name = i->name_of(peer);
+			admin = i->is_local(peer) || i->is_admin(name);
 		});
+		// A peer without an account is "client<peer>", which accounts keeps
+		// from new accounts (reserved_name()), as skeldat does: a name made
+		// of the peer id alone gave a later peer of that id this one's save
+		if(name.empty())
+			name = "client"+itos(peer);
+		m_names[peer] = name;
+		log_i(MODULE, "skelenti: peer %zu plays as %s", peer, cs(name));
 		luanti::access(m_server, [&](luanti::Interface *i){
-			i->join_player("player"+itos(peer), peer, admin);
+			i->join_player(name, peer, admin);
 		});
 		replicate::access(m_server, [&](replicate::Interface *i){
 			i->assign_scene_to_peer(m_scene, peer);
@@ -336,7 +348,8 @@ struct Module: public interface::Module
 	{
 		m_shown.erase(old.info.id);
 		m_waiting.erase(old.info.id);
-		m_field.erase("player"+itos(old.info.id));
+		m_field.erase(m_names[old.info.id]);
+		m_names.erase(old.info.id);
 		m_last_hit.erase(old.info.id);
 	}
 
@@ -479,10 +492,12 @@ struct Module: public interface::Module
 		if(it != m_field.end() && std::abs(it->second.first - cx) <
 				FIELD_N / 4 && std::abs(it->second.second - cz) < FIELD_N / 4)
 			return;
-		size_t peer = 0;
-		if(p.name.compare(0, 6, "player") != 0 ||
-				!(std::istringstream(p.name.substr(6)) >> peer))
+		auto pn = std::find_if(m_names.begin(), m_names.end(),
+				[&](const std::pair<const size_t, ss_> &kv){
+					return kv.second == p.name; });
+		if(pn == m_names.end())
 			return;
+		const size_t peer = pn->first;
 		m_field[p.name] = {cx, cz};
 		const int x0 = (cx - FIELD_N / 2) * FIELD_CELL;
 		const int z0 = (cz - FIELD_N / 2) * FIELD_CELL;
@@ -885,7 +900,10 @@ struct Module: public interface::Module
 	void on_punch(const network::Packet &packet)
 	{
 		uint id = atoi(packet.data.c_str());
-		ss_ name = "player"+itos(packet.sender);
+		auto n = m_names.find(packet.sender);
+		if(n == m_names.end())
+			return;
+		const ss_ name = n->second;
 		const Player *p = nullptr;
 		for(const Player &pl : m_players)
 			if(pl.name == name)

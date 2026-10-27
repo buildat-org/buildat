@@ -6,8 +6,7 @@
 -- module's loop only lets go of the mouse, and nothing takes it back.
 --   local open = run_script_file("main/pause.lua")
 -- returns the client loop's pause hook (luanti.run_client's app.pause).
--- simplified: no account pages; skelenti has no login (its players are
--- player<peer>), so there is no admin to show them to
+-- simplified: no account pages (skeldat's pause menu has them)
 local magic = require("buildat/extension/urho3d")
 local luanti = require("buildat/module/luanti")
 local ui_utils = require("buildat/extension/ui_utils")
