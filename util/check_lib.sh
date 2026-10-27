@@ -16,6 +16,11 @@ _check_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export BUILDAT_USER_PATH="${CHECK_USER_PATH:-$_check_root/local/check/user}"
 export BUILDAT_CACHE_PATH="$_check_root/local/check/cache"
 mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
+# A server or client a check starts goes when its parent does
+# ([CHECK_SERVER_ORPHANS]): a check SIGKILLed past its EXIT trap left its
+# server running. Started under `timeout N`, the parent is timeout, which
+# lives on up to N seconds.
+export BUILDAT_DIE_WITH_PARENT=1
 # The ci mode ([CI_TIER] 3): under BUILDAT_CI a client draws unlit unless
 # the runner names a mode -- a third to a quarter of pbr's cost on
 # llvmpipe (the item's table). Without the variable nothing changes.

@@ -4,6 +4,12 @@
 #include "core/types.h"
 #include <ctime>
 #include <cstdlib>
+#include <cstdio>
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#include <sys/prctl.h>
+#include <signal.h>
+#include <unistd.h>
+#endif
 
 namespace interface
 {
@@ -44,6 +50,35 @@ namespace interface
 			if(!w)
 				w = getenv("BUILDAT_WINDOWS_BOX");
 			return w && ss_(w) == "0";
+		}
+		// [CHECK_SERVER_ORPHANS] Gone with the process that started it,
+		// when BUILDAT_DIE_WITH_PARENT=1 asks (util/check_lib.sh exports
+		// it): a check SIGKILLed past its trap left its server running.
+		// SIGTERM, so the binary stops as on any SIGTERM. A death signal
+		// already set is kept: the launcher's local server has SIGKILL
+		// from process::start(). Linux only; checks run there. Exits if
+		// the parent is already gone.
+		// simplified: the direct parent only; under `timeout N` that is
+		// timeout, which outlives a killed check by up to N seconds.
+		// simplified: a parent dead before main() goes unseen (getppid is
+		// already the reaper); pass the check's PID if that bites.
+		inline void die_with_parent_if_asked()
+		{
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+			const char *v = getenv("BUILDAT_DIE_WITH_PARENT");
+			if(!v || ss_(v) != "1")
+				return;
+			int sig = 0;
+			if(prctl(PR_GET_PDEATHSIG, &sig) == 0 && sig != 0)
+				return;
+			const pid_t ppid = getppid();
+			if(prctl(PR_SET_PDEATHSIG, SIGTERM) != 0)
+				return;
+			if(getppid() != ppid){
+				fprintf(stderr, "The parent is gone; exiting\n");
+				exit(1);
+			}
+#endif
 		}
 		ss_ get_current_exe_path();
 		// name without extension; looks next to the current executable

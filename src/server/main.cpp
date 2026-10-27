@@ -371,6 +371,7 @@ int main(int argc, char *argv[])
 	}
 
 	signal_handler_init();
+	interface::os::die_with_parent_if_asked();
 
 	// **A boxed child takes the paths its parent settled**: detecting them
 	// writes where the box cannot, and the parent did it, the log and the

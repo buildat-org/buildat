@@ -483,6 +483,7 @@ int main(int argc, char *argv[])
 	}
 
 	signal_handler_init();
+	interface::os::die_with_parent_if_asked();
 
 	if(!boot::autodetect::detect_client_paths(config))
 		return 1;
