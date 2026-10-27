@@ -9,6 +9,7 @@
 #include "interface/event.h"
 #include "interface/os.h"
 #include "interface/packet_stream.h"
+#include "lua_bindings/tree_depth.h"
 #include <algorithm>
 #include "interface/magic_event.h"
 #include <Object.h>
@@ -367,12 +368,44 @@ struct Module: public interface::Module, public replicate::Interface
 		scene_state.dirtyNodes_.Erase(node_id);
 	}
 
+	// A node and, before it, the dirty nodes it depends on (its parent,
+	// and theirs). By a stack of its own ([SERVER_REPLICATE_DEPTH]): a
+	// recursion through the dependencies went once per level, and a
+	// 100000-node chain met at its bottom -- dirty nodes go in the order
+	// they were made -- overflowed replicate's thread's stack.
 	void sync_node(PeerId peer,
 			uint node_id, magic::HashSet<uint> &nodes_to_process,
 			magic::Scene *scene, magic::SceneReplicationState &scene_state)
 	{
 		if(!nodes_to_process.Erase(node_id))
 			return;
+		sv_<uint> stack{node_id};
+		while(!stack.empty()){
+			uint dep = 0;
+			if(Node *n = scene->GetNode(stack.back())){
+				auto &deps = n->GetDependencyNodes();
+				for(auto it = deps.Begin(); it != deps.End(); ++it){
+					uint id = (*it)->GetID();
+					if(scene_state.dirtyNodes_.Contains(id) &&
+							nodes_to_process.Erase(id)){
+						dep = id;
+						break;
+					}
+				}
+			}
+			if(dep){
+				stack.push_back(dep);
+				continue;
+			}
+			sync_one_node(peer, stack.back(), scene, scene_state);
+			stack.pop_back();
+		}
+	}
+
+	// One node, its dependencies already synced
+	void sync_one_node(PeerId peer, uint node_id,
+			magic::Scene *scene, magic::SceneReplicationState &scene_state)
+	{
 		log_d(MODULE, "sync_node(): node_id=%zu", node_id);
 		auto it = scene_state.nodeStates_.Find(node_id);
 		if(it == scene_state.nodeStates_.End()){
@@ -384,7 +417,7 @@ struct Module: public interface::Module, public replicate::Interface
 					scene_state.dirtyNodes_.Erase(node_id);
 					return;
 				}
-				sync_create_node(peer, n, nodes_to_process, scene, scene_state);
+				sync_create_node(peer, n, scene_state);
 			} else {
 				// Was already deleted
 				log_w(MODULE, "New node was already deleted: %zu", node_id);
@@ -404,22 +437,24 @@ struct Module: public interface::Module, public replicate::Interface
 			} else if(!peer_wants_node(peer, node_id)){
 				drop_node_from_peer(peer, n, node_id, scene_state);
 			} else {
-				sync_existing_node(peer, n, node_state, nodes_to_process,
-						scene, scene_state);
+				sync_existing_node(peer, n, node_state, scene_state);
 			}
 		}
 	}
 
+	// A node past the client's MAX_TREE_DEPTH, which it refuses: said once
+	// simplified: on create only; a node moved that deep is the client's to log
+	bool m_deep_logged = false;
 	void sync_create_node(PeerId peer, Node *node,
-			magic::HashSet<uint> &nodes_to_process,
-			Scene *scene, magic::SceneReplicationState &scene_state)
+			magic::SceneReplicationState &scene_state)
 	{
 		log_d(MODULE, "sync_create_node(): %zu", node->GetID());
-		auto &deps = node->GetDependencyNodes();
-		for(auto it = deps.Begin(); it != deps.End(); ++it){
-			uint node_id = (*it)->GetID();
-			if(scene_state.dirtyNodes_.Contains(node_id))
-				sync_node(peer, node_id, nodes_to_process, scene, scene_state);
+		if(!m_deep_logged &&
+				lua_bindings::tree_depth(node, MAX_TREE_DEPTH) > MAX_TREE_DEPTH){
+			m_deep_logged = true;
+			log_w(MODULE, "node %u is past %i levels deep: clients refuse it "
+					"and the nodes under it; later ones not logged",
+					node->GetID(), MAX_TREE_DEPTH);
 		}
 
 		magic::NodeReplicationState &node_state =
@@ -467,16 +502,9 @@ struct Module: public interface::Module, public replicate::Interface
 
 	void sync_existing_node(PeerId peer,
 			Node *node, magic::NodeReplicationState &node_state,
-			magic::HashSet<uint> &nodes_to_process,
-			Scene *scene, magic::SceneReplicationState &scene_state)
+			magic::SceneReplicationState &scene_state)
 	{
 		log_d(MODULE, "sync_existing_node(): %zu", node->GetID());
-		auto &deps = node->GetDependencyNodes();
-		for(auto it = deps.Begin(); it != deps.End(); ++it){
-			uint node_id = (*it)->GetID();
-			if(scene_state.dirtyNodes_.Contains(node_id))
-				sync_node(peer, node_id, nodes_to_process, scene, scene_state);
-		}
 
 		// Handle changed attributes
 		if(node_state.dirtyAttributes_.Count() || node_state.dirtyVars_.Size()){

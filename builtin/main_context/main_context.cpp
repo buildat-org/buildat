@@ -64,6 +64,26 @@ struct OpaqueSceneReference
 	OpaqueSceneReference(const SharedPtr<Scene> &scene): scene(scene){}
 };
 
+// Before a scene is dropped ([SERVER_REPLICATE_DEPTH]): Urho3D's
+// Node::RemoveChildren recurses once per level, and a server module's
+// 100000-node chain overflowed the stack at shutdown. A node more than 256
+// levels below where the walk last put one is moved up under the scene.
+static void flatten_deep_nodes(Scene *scene)
+{
+	sv_<std::pair<Node*, int>> stack{{scene, 0}};
+	while(!stack.empty()){
+		Node *n = stack.back().first;
+		int depth = stack.back().second;
+		stack.pop_back();
+		if(depth > 256){
+			scene->AddChild(n);
+			depth = 1;
+		}
+		for(auto &c : n->GetChildren())
+			stack.emplace_back(c.Get(), depth + 1);
+	}
+}
+
 struct Module: public interface::Module, public main_context::Interface
 {
 	interface::Server *m_server;
@@ -90,6 +110,9 @@ struct Module: public interface::Module, public main_context::Interface
 	~Module()
 	{
 		log_d(MODULE, "main_context destruct");
+		for(auto &it : m_scenes)
+			if(it.second->scene)
+				flatten_deep_nodes(it.second->scene);
 	}
 
 	void init()
@@ -253,6 +276,8 @@ struct Module: public interface::Module, public main_context::Interface
 		auto it = m_scenes.find(ref);
 		if(it == m_scenes.end())
 			return;
+		if(it->second->scene)
+			flatten_deep_nodes(it->second->scene);
 		it->second->scene.Reset();
 		m_server->emit_event("main_context:scene_deleted", new SceneDeleted(ref));
 	}
