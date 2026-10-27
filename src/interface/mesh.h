@@ -201,13 +201,6 @@ namespace interface
 		// For every mesh made after the call, in this process.
 		void set_alpha_nibbles(bool on);
 
-		// A chunk's column heights for a HorizonMap: the local y of the
-		// highest voxel with an edge material that is not a cutout, per
-		// column, HORIZON_NONE where the column has none; w*d int16_t in
-		// [z][x] order over the volume's inside (its padding left out).
-		sv_<int16_t> column_heights(VoxelVolume &volume,
-				VoxelRegistry *voxel_reg);
-
 		void set_voxel_geometry(CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
 				AtlasRegistry *atlas_reg);

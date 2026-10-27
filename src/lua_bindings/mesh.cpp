@@ -717,25 +717,6 @@ void clear_voxel_physics_boxes(const luabind::object &node_o)
 
 #define LUABIND_FUNC(name) def("__buildat_" #name, name)
 
-// column_heights(buffer, voxel_reg) -> a string of w*d int16, the local y
-// of each column's highest solid non-cutout voxel, HORIZON_NONE for none;
-// [z][x] over the chunk's inside. What a horizon map is built from; see
-// interface/mesh.h and [PBR_FIT] 2c.
-ss_ column_heights(const luabind::object &buffer_o,
-		sp_<VoxelRegistry> voxel_reg)
-{
-	lua_State *L = buffer_o.interpreter();
-	TRY_GET_TOLUA_STUFF(buf, 1, const VectorBuffer);
-	ss_ data;
-	if(buf == nullptr)
-		data = lua_checkcppstring(L, 1);
-	else
-		data.assign((const char*)buf->GetData(), buf->GetSize());
-	up_<VoxelVolume> volume = interface::deserialize_volume(data);
-	sv_<int16_t> h = interface::mesh::column_heights(*volume, voxel_reg.get());
-	return ss_((const char*)h.data(), h.size() * sizeof(int16_t));
-}
-
 // mesh_backlog() -> the meshes (and the other tasks) added and not done
 // yet: the web client meshes on the frame's own thread, a slice a frame,
 // and voxelworld waits while this is long rather than queue meshes that
@@ -749,10 +730,10 @@ int mesh_backlog(lua_State *L)
 }
 
 // horizon_merge(cys, heights, chunk) -> a string of chunk*chunk int16: a
-// chunk column's tops out of its chunks' column_heights(), each the
-// highest of them in world rows (cy * chunk + its own), HORIZON_NONE where
-// none has one. `cys` is the chunks' y as int16, `heights` their
-// column_heights() strings in the same order. voxelworld's Lua did this,
+// chunk column's tops out of its chunks' column heights, each the highest
+// of them in world rows (cy * chunk + its own), HORIZON_NONE where none has
+// one. `cys` is the chunks' y as int16, `heights` their heights strings
+// (voxelworld's column_heights()) in the same order. voxelworld's Lua did this,
 // and a column's 1024 reads were most of a remesh's Lua in a browser
 // ([WEB_MAIN_THREAD]).
 ss_ horizon_merge(const ss_ &cys, const ss_ &heights, int chunk)
@@ -1040,7 +1021,6 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_triangle_geometry),
 			LUABIND_FUNC(set_line_geometry),
 			LUABIND_FUNC(set_image_data),
-			LUABIND_FUNC(column_heights),
 			LUABIND_FUNC(horizon_merge),
 			LUABIND_FUNC(mesh_backlog),
 			LUABIND_FUNC(set_mesh_bounce),

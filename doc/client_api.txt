@@ -251,7 +251,7 @@ buildat.deserialize_volume_int32(data)
 buildat.set_voxel_geometry(node, volume_data, voxel_reg, atlas_reg
   [, use_skylight [, set_up_materials [, horizon [, origin]]]])
 - The mesher, on a worker thread; the node's CustomGeometry is replaced when
-  it is done. horizon is a HorizonMap string (see column_heights) for the
+  it is done. horizon is a HorizonMap string (see horizon_merge) for the
   terrain's own occlusion of the sky ([PBR_FIT]). origin, {x=, y=, z=} or a
   Vector3, is where the volume's inside (0, 0, 0) sits in the world, which a
   voxel of uv_scale > 1 takes its slice of the texture repeat from
@@ -291,15 +291,17 @@ buildat.get_voxel_data(node) -> string or nil
 - A chunk node's buildat_voxel_data var as a string, which is what a
   volume serializes to: for a client writing a voxel ahead of the server
   (voxelworld.set_static_voxel); the server's replication overwrites it
-buildat.column_heights(volume_data, voxel_reg) -> string
-- The local y of each column's highest solid non-cutout voxel, w*d int16 in
-  [z][x] order; what a horizon map is built from
 buildat.horizon_merge(cys, heights, chunk) -> string
-- A chunk column's tops out of its chunks' column_heights() strings,
+- A chunk column's tops out of its chunks' column heights strings,
   chunk*chunk int16 in world rows, each the highest of them, HORIZON_NONE
   where none has one. cys is the chunks' y as int16, heights their
-  column_heights() strings concatenated in the same order; chunk is the
-  chunk's width, 1...256.
+  column heights strings concatenated in the same order; chunk is the
+  chunk's width, 1...256. A chunk's column heights -- the local y of each
+  column's highest solid non-cutout voxel, w*d int16 in [z][x] order, each
+  the lowest of its 3x3 columns -- are voxelworld.column_heights(volume,
+  voxel_reg [, "lua"]) -> string, how ("lua" or the wasm's engine): its wasm/
+  ([CLIENT_WASM]; in the engine's C++ until 0.7.79), and the same in Lua
+  where the module is not there.
 buildat.mesh_backlog() -> number
 - The meshes and other pool tasks added and not done yet. The web client
   meshes on the frame's own thread a slice a frame, and voxelworld waits

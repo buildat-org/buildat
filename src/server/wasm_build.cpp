@@ -275,8 +275,8 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	const ss_ ld = config.get<ss_>("wasm_ld");
 	if(cc.empty() || ld.empty()){
 		log_e(MODULE, "%s has wasm/, and this server has no clang and wasm "
-				"linker to build it (tried %s); the module is refused. Install "
-				"clang and lld, or set BUILDAT_WASM_CC and BUILDAT_WASM_LD.",
+				"linker to build it (tried %s). Install clang and lld, or set "
+				"BUILDAT_WASM_CC and BUILDAT_WASM_LD.",
 				cs(module_name), cs(config.get<ss_>("wasm_tried")));
 		return "";
 	}
@@ -312,7 +312,7 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		ok = interface::fs::rename(tmp+"/out.wasm", out);
 	interface::fs::remove_all(tmp);
 	if(!ok){
-		log_e(MODULE, "%s: building wasm/ failed; the module is refused",
+		log_e(MODULE, "%s: building wasm/ failed",
 				cs(module_name));
 		return "";
 	}

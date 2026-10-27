@@ -5,6 +5,7 @@
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},
-		{"module": "client_data"}
+		{"module": "client_data"},
+		{"module": "voxelworld"}
 	]
 }

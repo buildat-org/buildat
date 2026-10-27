@@ -1249,66 +1249,6 @@ void generate_occluder(PODVector<Vector3> &result,
 	}
 }
 
-sv_<int16_t> column_heights(VoxelVolume &volume, VoxelRegistry *voxel_reg)
-{
-	const VoxelFmt fmt(voxel_reg);
-	const pv::Region r = volume.getEnclosingRegion();
-	// The inside of the padded volume
-	const pv::Vector3DInt32 lc = r.getLowerCorner(), uc = r.getUpperCorner();
-	const int x0 = lc.getX() + 1, x1 = uc.getX() - 1;
-	const int y0 = lc.getY() + 1, y1 = uc.getY() - 1;
-	const int z0 = lc.getZ() + 1, z1 = uc.getZ() - 1;
-	const int w = x1 - x0 + 1, d = z1 - z0 + 1;
-	sv_<int16_t> raw((size_t)w * d, HORIZON_NONE);
-	// A run of the same sample is one lookup ([WEB_MAIN_THREAD])
-	VoxelSample last;
-	bool have_last = false, last_occludes = false;
-	auto occludes = [&](int x, int y, int z){
-		const VoxelSample v = volume.sample_at(x, y, z);
-		if(!have_last || memcmp(&v, &last, sizeof v) != 0){
-			last_occludes = occludes_sky(volume, voxel_reg, fmt,
-					pv::Vector3DInt32(x, y, z));
-			last = v;
-			have_last = true;
-		}
-		return last_occludes;
-	};
-	for(int z = z0; z <= z1; z++){
-		for(int x = x0; x <= x1; x++){
-			for(int y = y1; y >= y0; y--){
-				if(occludes(x, y, z)){
-					raw[(size_t)(z - z0) * w + (x - x0)] = (int16_t)(y - y0);
-					break;
-				}
-			}
-		}
-	}
-	// Eroded by a 3x3 minimum: a tree trunk is one column and a bush a
-	// few, and a single column in the map blocks a whole eighth of the
-	// horizon from the next column over, which darkened a meadow beside
-	// its trees as much as a terrace under a mountain. Terrain is wide
-	// and survives; anything a column wide goes. simplified: a one-wide
-	// ridge goes with it.
-	sv_<int16_t> out((size_t)w * d, HORIZON_NONE);
-	for(int z = 0; z < d; z++){
-		for(int x = 0; x < w; x++){
-			int16_t m = 32767;
-			for(int dz = -1; dz <= 1; dz++){
-				for(int dx = -1; dx <= 1; dx++){
-					int xx = x + dx, zz = z + dz;
-					if(xx < 0 || zz < 0 || xx >= w || zz >= d)
-						continue;
-					int16_t h = raw[(size_t)zz * w + xx];
-					if(h < m)
-						m = h;
-				}
-			}
-			out[(size_t)z * w + x] = m;
-		}
-	}
-	return out;
-}
-
 void generate_voxel_geometry(sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &volume,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,

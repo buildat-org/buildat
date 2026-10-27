@@ -112,6 +112,8 @@ local end_of_update_processing_us = 0
 
 local voxel_reg = buildat.createVoxelRegistry()
 local atlas_reg = buildat.createAtlasRegistry()
+-- registry -> what column_heights() reads of it; emptied when one changes
+local occl_tables = {}
 
 -- Opt-in per world: shade static chunk geometry by the skylight the server
 -- stored in the voxel data. Off by default; a world that does not fill those
@@ -284,6 +286,7 @@ function M.registry_from_file()
 	local data = buildat.get_file_content("voxelworld/voxel_registry.bin")
 	local t1 = buildat.get_time_us()
 	voxel_reg:deserialize(data)
+	occl_tables = {}
 	log:info(string.format("the voxel registry from the served file, %d bytes"..
 			" (read %d ms, deserialized %d ms)", #data,
 			math.floor((t1 - t0) / 1000),
@@ -297,7 +300,7 @@ end)
 
 -- The terrain's horizon around each chunk, for the mesher's sky share
 -- ([PBR_FIT] 2c, the terrain scale). Per chunk column (x, z in chunks):
--- the heights of each chunk in it, out of buildat.column_heights(), and
+-- the heights of each chunk in it, out of M.column_heights(), and
 -- their merged world-y maximum as a string of 32x32 int16 the map is cut
 -- from. A column whose maximum moves -- a chunk arriving, a dig or a place
 -- that moves a top -- dirties the 3x3 chunk columns around it, and a
@@ -324,6 +327,133 @@ end
 local function int16_char(v)
 	if v < 0 then v = v + 65536 end
 	return string.char(v % 256, math.floor(v / 256) % 256)
+end
+
+-- A chunk's column tops ([CLIENT_WASM] step 6; the engine's
+-- buildat.column_heights before): the local y of each column's highest
+-- voxel that blocks the sky -- solid (edge_material_id) and not a cutout
+-- (alpha_masked) -- w*d int16 in [z][x] order over the volume's inside,
+-- HORIZON_NONE for none, then each the lowest of its 3x3 columns. In
+-- wasm/column_heights.c, and in column_heights_lua() where the module is
+-- not there (a client with no wasm, a server that could not build it) or
+-- stopped: the same steps, slower.
+-- simplified: the id read as the format's id field of the first plane, as
+-- voxel_reg:id_of() does; a look by rules (set_look_rules) or an id in
+-- another plane would want the registry's own lookup handed to Lua.
+local function occl_table(reg)
+	local t = occl_tables[reg]
+	if t then
+		return t
+	end
+	local n = reg:get_count()
+	local parts = {"\0"}
+	for id = 1, n do
+		local def = reg:get_by_id(id)
+		parts[#parts + 1] = (def and def.edge_material_id ~= 0 and
+				not def.alpha_masked) and "\1" or "\0"
+	end
+	local lo, hi = string.match(reg:dump_format(), ", id=(%d+)%.%.%.(%d+)")
+	t = {bytes = table.concat(parts), n = n + 1,
+		shift = lo and tonumber(lo) or 0,
+		width = lo and tonumber(hi) - tonumber(lo) + 1 or 0}
+	occl_tables[reg] = t
+	return t
+end
+
+local function column_heights_lua(vol, t)
+	local r = vol:get_enclosing_region()
+	local x0, y0, z0 = r.x0 + 1, r.y0 + 1, r.z0 + 1
+	local w, h, d = r.x1 - r.x0 - 1, r.y1 - r.y0 - 1, r.z1 - r.z0 - 1
+	if w <= 0 or d <= 0 then
+		return ""
+	end
+	local div, mod, bytes, n = 2 ^ t.shift, 2 ^ t.width, t.bytes, t.n
+	local raw = {}
+	for z = 0, d - 1 do
+		for x = 0, w - 1 do
+			local top = HORIZON_NONE
+			for y = h - 1, 0, -1 do
+				local word = vol:get_plane_at(0, x0 + x, y0 + y, z0 + z)
+				local id = t.width > 0 and math.floor(word / div) % mod or 1
+				if id ~= 0 and id < n and string.byte(bytes, id + 1) == 1 then
+					top = y
+					break
+				end
+			end
+			raw[z * w + x] = top
+		end
+	end
+	local out = {}
+	for z = 0, d - 1 do
+		for x = 0, w - 1 do
+			local m = 32767
+			for zz = math.max(z - 1, 0), math.min(z + 1, d - 1) do
+				for xx = math.max(x - 1, 0), math.min(x + 1, w - 1) do
+					m = math.min(m, raw[zz * w + xx])
+				end
+			end
+			out[#out + 1] = int16_char(m)
+		end
+	end
+	return table.concat(out)
+end
+
+-- The module, loaded at the first chunk; false once it is not there or
+-- has failed, and the Lua from then on
+local heights_wasm = nil
+local heights_table_in = nil  -- the table the module has
+local function heights_module()
+	if heights_wasm == nil then
+		local m, why = buildat.wasm_load("voxelworld")
+		if m and m:status() == "failed" then
+			local _, w = m:status()
+			m, why = nil, w
+		end
+		heights_wasm = m or false
+		if not m then
+			log:info("column heights in Lua: " .. tostring(why))
+		end
+	end
+	if heights_wasm and heights_wasm:status() == "failed" then
+		local _, w = heights_wasm:status()
+		log:warning("column heights in Lua from here on: " .. tostring(w))
+		heights_wasm = false
+	end
+	return heights_wasm or nil
+end
+
+-- engine: nil for the module where it can, "lua" for the Lua. Returns the
+-- heights and what made them: "lua", or the module's engine (m:status()'s:
+-- "compiled", "interpreter", "interpreter, compiling", "browser").
+function M.column_heights(vol, reg, engine)
+	local t = occl_table(reg)
+	local m = engine ~= "lua" and t.n <= 1048576 and heights_module()
+	if m and m:status() == "ready" then
+		local ok, r = pcall(function()
+			if heights_table_in ~= t then
+				heights_table_in = nil
+				m:write(m:call("vw_table"), t.bytes)
+				heights_table_in = t
+			end
+			local hd = m:handle(vol)
+			local ok2, len = pcall(m.call, m, "vw_column_heights", hd,
+					t.shift, t.width, t.n)
+			m:drop(hd)
+			if not ok2 then
+				error(len)
+			end
+			return len >= 0 and m:read(m:call("vw_out"), len) or nil
+		end)
+		if ok and r then
+			local _, how = m:status()
+			return r, how
+		end
+		if not ok then
+			log:warning("column heights in Lua from here on: " .. tostring(r))
+			heights_wasm = false
+		end
+	end
+	return column_heights_lua(vol, t), "lua"
 end
 
 local function horizon_merge(col)
@@ -435,8 +565,8 @@ function sub_events()
 		local chunk_p = (buildat.Vector3(node:GetWorldPosition()) /
 				M.chunk_size_voxels):Floor()
 		local t0 = buildat.get_time_us()
-		horizon_note_chunk(chunk_p, buildat.column_heights(data, voxel_reg),
-				moved)
+		horizon_note_chunk(chunk_p, M.column_heights(
+				buildat.deserialize_volume(data), voxel_reg), moved)
 		M.frame_us.horizon = M.frame_us.horizon + buildat.get_time_us() - t0
 	end
 

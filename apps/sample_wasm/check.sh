@@ -25,6 +25,8 @@
 # traps at the depth limit; one of huge frames (huge_frame/, 4000 values
 # held across each call) traps too: natively its compile is refused at the
 # cap and it stays in the interpreter. The client lives.
+# [CLIENT_WASM] step 6: builtin/voxelworld's column heights (its wasm/)
+# the same as its Lua fallback on four fixtures, in each engine.
 # [WASM_STACK_RLIMIT]: the refusal is cached, so the second run logs it
 # and does not compile huge_frame again; and a client under ulimit -s 2048
 # (too small for the compiled code's depth limit) keeps every module in
@@ -47,7 +49,7 @@
 #
 # tier: quick
 # cost: 39s (2026-10-27)
-# covers: client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
+# covers: builtin/voxelworld/wasm/** client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -64,7 +66,8 @@ client_lines()
 {
 	local log=$1
 	# The logger's tag is the name's first eight letters
-	grep -aE "sample_w: |wasm main: " "$log" | sed 's/.*\(sample_w: \|wasm main: \)/\1/'
+	grep -aE "sample_w: |wasm (main|voxelworld): " "$log" |
+		sed 's/.*\(sample_w: \|wasm main: \|wasm voxelworld: \)/\1/'
 	grep -aq "sample_w: wasm done: ok" "$log" ||
 		fail "the module's calls did not all come back right ($log)"
 	grep -aq "wasm main: reversed the buffer" "$log" ||
@@ -103,7 +106,9 @@ client_lines()
 			"sample_w: bench: the buffer reversed" \
 			"sample_w: a frame after the stops" \
 			"sample_w: held recursion trap at depth" \
-			"sample_w: huge frames (.*): .*trap"; do
+			"sample_w: huge frames (.*): .*trap" \
+			"sample_w: column heights: the wasm's and the Lua's the same" \
+			"wasm voxelworld: ready"; do
 		grep -aq "$want" "$log" || fail "no \"$want\" in $log"
 	done
 }
@@ -157,6 +162,7 @@ for want in "wasm main: ready (interpreter) while it compiles" \
 		"wasm main: moved to the compiled module" \
 		"sample_w: the state moved with the module: kept across the move, tick 3" \
 		"sample_w: engine: compiled" \
+		"sample_w: column heights: .*; compiled)" \
 		"wasm huge_frame: compiler: .*larger than 2048 bytes" \
 		"wasm huge_frame: .*it stays in the interpreter" \
 		"sample_w: huge frames (interpreter): "; do
@@ -169,7 +175,8 @@ run 2
 grep -aq "wasm/ is built (cache hit)" "$t/srv2.log" || fail "the server built wasm/ again"
 grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||
 	fail "the client compiled it again"
-grep -aq "sample_w: engine: compiled" "$t/cli2.log" || fail "not compiled in run 2"
+grep -aq "sample_w: engine: compiled" "$t/cli2.log" &&
+	grep -aq "sample_w: column heights: .*; compiled)" "$t/cli2.log" || fail "not compiled in run 2"
 grep -aq "wasm main: .*interpreter" "$t/cli2.log" && fail "the interpreter ran with the cache hit"
 # The compile refused in run 1, by its cached reason
 grep -aq "wasm huge_frame: compiler (cached): .*larger than 2048 bytes" "$t/cli2.log" ||
@@ -188,7 +195,8 @@ grep -aE "wasm main: (compiled module|moved to)" "$t/clis.log" &&
 # The compiler hidden: the interpreter runs it for good, the same checks
 run 3 BUILDAT_CHECK_WASM_INTERPRETER=1
 for want in "wasm main: ready (interpreter): no C compiler to build it with (hidden for a check)" \
-		"sample_w: engine: interpreter"; do
+		"sample_w: engine: interpreter" \
+		"sample_w: column heights: .*; interpreter)"; do
 	grep -aq "$want" "$t/cli3.log" || fail "no \"$want\" in $t/cli3.log"
 done
 grep -aE "wasm main: (compiling|compiled)" "$t/cli3.log" &&
@@ -205,8 +213,8 @@ env -u EMSDK -u RUSTUP_HOME -u BUILDAT_WASM_CC -u BUILDAT_WASM_LD \
 		HOME="$t/nohome" PATH=/nonexistent /usr/bin/timeout 60 \
 		bin/buildat_server -m ../apps/sample_wasm -l 3 -P "$SERVER_PORT" \
 		> "$t/srv4.log" 2>&1
-grep -aq "has wasm/, and this server has no clang and wasm linker.*the module is refused" \
-		"$t/srv4.log" || fail "a server with no toolchain did not refuse the module ($t/srv4.log)"
+grep -aq "has wasm/, and this server has no clang and wasm linker" "$t/srv4.log" &&
+		grep -aq ": no wasm; the module is refused" "$t/srv4.log" || fail "a server with no toolchain did not refuse the module ($t/srv4.log)"
 grep -aq "Listening at" "$t/srv4.log" && fail "a server with no toolchain started the app"
 echo "-- run 4, no toolchain"
 grep -a " E wasm    : " "$t/srv4.log" | sed 's/.*wasm    : //' | cut -c1-120

@@ -2761,21 +2761,6 @@ function buildat.safe.set_mesh_alpha_nibbles(on)
 	__buildat_set_mesh_alpha_nibbles(on == true)
 end
 
--- column_heights(buffer, voxel_reg) -> string; see src/lua_bindings/mesh.cpp
-function buildat.safe.column_heights(safe_buffer, ...)
-	local buffer
-	if type(safe_buffer) == 'string' then
-		buffer = safe_buffer
-	else
-		if not getmetatable(safe_buffer) or
-				getmetatable(safe_buffer).type_name ~= "VectorBuffer" then
-			error("safe_buffer is not a sandboxed VectorBuffer instance")
-		end
-		buffer = getmetatable(safe_buffer).unsafe
-	end
-	return __buildat_column_heights(buffer, ...)
-end
-
 -- horizon_merge(cys, heights, chunk) -> string; see src/lua_bindings/mesh.cpp
 function buildat.safe.horizon_merge(cys, heights, chunk)
 	if type(cys) ~= "string" or type(heights) ~= "string" or

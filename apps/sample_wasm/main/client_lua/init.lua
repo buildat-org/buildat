@@ -44,6 +44,9 @@ local endless_start = assert(buildat.wasm_load("endless_start"))
 -- A recursion of huge frames: a trap, not the client's stack overflowing
 -- ([WASM_FRAME_SIZE])
 local huge_frame = assert(buildat.wasm_load("huge_frame"))
+-- builtin/voxelworld's, whose column heights are checked against its Lua
+-- (step 6) once its compile is done and cached
+local voxelworld_wasm = assert(buildat.wasm_load("voxelworld"))
 
 local scene = magic.Scene()
 scene:CreateComponent("Octree")
@@ -82,7 +85,91 @@ local function traps(what, ...)
 	log:info(what..": "..tostring(err))
 end
 
+-- [CLIENT_WASM] step 6: voxelworld's column heights (its wasm/, which
+-- replaced the engine's buildat.column_heights) the same as its Lua
+-- fallback, bit for bit, on fixtures: an id at bits 20...31 with light
+-- below it, a volume not a cube, an id in the top bits (words past 2^31),
+-- and a format with no id; solid, cutout and empty types, undefined
+-- voxels, ids past the registry, columns with no top
+local function check_heights()
+	local voxelworld = require("buildat/module/voxelworld")
+	local seed = 12345
+	local function rnd(n)
+		seed = seed * 16807 % 2147483647
+		return seed % n
+	end
+	local engine
+	local function fixture(format, region, word_of)
+		local reg = buildat.createVoxelRegistry()
+		reg:set_format(format)
+		-- 1 solid, 2 a cutout, 3 empty, 4 solid
+		for i, kind in ipairs({"solid", "cutout", "empty", "solid"}) do
+			local def = buildat.VoxelDefinition()
+			def.name.block_name = "sample_wasm:v"..i
+			if kind ~= "empty" then
+				def.edge_material_id = buildat.VoxelDefinition.EDGEMATERIALID_GROUND
+			else
+				def.fully_empty = true
+			end
+			def.alpha_masked = kind == "cutout"
+			reg:add_voxel(def)
+		end
+		local r = region
+		local vol = buildat.Volume(buildat.Region(r[1], r[2], r[3], r[4],
+				r[5], r[6]))
+		for z = r[3], r[6] do
+			for x = r[1], r[4] do
+				local ground = r[2] + rnd(r[5] - r[2] + 3) - 1
+				for y = r[2], r[5] do
+					local id
+					if y <= ground then
+						id = ({0, 1, 1, 2, 3, 4, 4, 9})[rnd(8) + 1]
+					else
+						id = ({0, 0, 3, 3, 3, 3, 2, 1, 7})[rnd(9) + 1]
+						if id == 1 and rnd(4) ~= 0 then id = 3 end
+					end
+					vol:set_voxel_at(x, y, z, buildat.VoxelInstance(word_of(id)))
+				end
+			end
+		end
+		local a, how = voxelworld.column_heights(vol, reg)
+		local b = voxelworld.column_heights(vol, reg, "lua")
+		assert(how ~= "lua", "column heights not from the wasm")
+		engine = how
+		assert(#a == (r[4] - r[1] - 1) * (r[6] - r[3] - 1) * 2,
+				"column heights: "..#a.." bytes")
+		assert(a == b, "column heights: the wasm's and the Lua's differ")
+		local none, tops = 0, {}
+		for i = 1, #a, 2 do
+			local v = string.byte(a, i) + 256 * string.byte(a, i + 1)
+			if v == 32768 then none = none + 1 else tops[v] = true end
+		end
+		local n = 0
+		for _ in pairs(tops) do n = n + 1 end
+		return #a / 2, none, n
+	end
+	local low = function(id) return id * 1048576 + rnd(1048576) end
+	local cols, none, levels = 0, 0, 0
+	for _, f in ipairs({
+		{{id = {shift = 20, width = 12}, light_sky = {shift = 0, width = 4}},
+			{-1, -1, -1, 32, 32, 32}, low},
+		{{id = {shift = 20, width = 12}}, {0, 0, 0, 20, 9, 40}, low},
+		{"painted", {-3, 5, -3, 14, 30, 10},
+			function(id) return (id % 16) * 268435456 + rnd(268435456) end},
+		{{color = {shift = 0, width = 24}}, {0, 0, 0, 9, 9, 9},
+			function(id) return id == 0 and 0 or rnd(16777216) end},
+	}) do
+		local c, n, l = fixture(f[1], f[2], f[3])
+		cols, none, levels = cols + c, none + n, levels + l
+	end
+	assert(none > 0 and levels > 10, "column heights: a fixture too plain")
+	log:info("column heights: the wasm's and the Lua's the same on 4 "..
+			"fixtures ("..cols.." columns, "..none.." with no top, "..levels..
+			" heights; "..engine..")")
+end
+
 local function check()
+	check_heights()
 	assert(m:call("add", 2, 3) == 5, "add")
 	assert(m:call("add", 2147483647, 1) == -2147483648, "add wraps")
 	local x = m:call("mix", 1.5, 0.25, 1000000)
@@ -241,9 +328,11 @@ magic.SubscribeToEvent("Update", function()
 		end
 	end
 	if endless_start:status() == "loading" then return end
-	local hf_status, hf_detail = huge_frame:status()
-	if hf_status == "loading" or hf_detail == "interpreter, compiling" then
-		return
+	for _, one in ipairs({huge_frame, voxelworld_wasm}) do
+		local status, detail = one:status()
+		if status == "loading" or detail == "interpreter, compiling" then
+			return
+		end
 	end
 	log:info("engine: "..engine)
 	if moving then

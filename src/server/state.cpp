@@ -1299,13 +1299,24 @@ struct CState: public State, public interface::Server
 			m_module_info[info.name] = info;
 
 			// [CLIENT_WASM] The client's half of wasm/, built first: a module
-			// whose wasm/ does not build is refused before it starts
+			// whose wasm/ does not build is refused before it starts. A
+			// builtin is not: every game needs it, and its client Lua has a
+			// way without the .wasm, as on a client with no wasm (macOS)
 			if(interface::fs::path_exists(info.path+"/wasm")){
 				const ss_ wasm = build_module_wasm(g_server_config, info.name,
 						info.path);
-				if(wasm.empty())
+				const bool builtin = info.path.rfind(
+						get_builtin_modules_path()+"/", 0) == 0;
+				if(wasm.empty() && !builtin){
+					log_e(MODULE, "%s: no wasm; the module is refused",
+							cs(info.name));
 					return false;
-				m_module_wasm[info.name] = wasm;
+				}
+				if(wasm.empty())
+					log_w(MODULE, "%s: no wasm; a builtin, loaded without it "
+							"(its clients run their Lua instead)", cs(info.name));
+				else
+					m_module_wasm[info.name] = wasm;
 			}
 
 			if(!info.meta.disable_cpp){

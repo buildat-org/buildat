@@ -465,7 +465,8 @@ surface maps beside the diffuse, or not), describe_segments, update().
 interface/wasm_api.h -- what a module's wasm/ (C or C++) is written
 against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
 it loads the module (cached by the sources' hash; the module refused when
-there is no clang and wasm linker), client_data serves it as
+there is no clang and wasm linker, but a builtin is loaded without its
+.wasm and its client Lua does without), client_data serves it as
 <module>/<module>.wasm, and a client loads it with buildat.wasm_load()
 (client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call. The
 imports, all a module can call, general (they move bytes and do not know
@@ -498,8 +499,8 @@ TemporaryGeometry per atlas, set_voxel_geometry puts it on an Urho3D
 CustomGeometry; the LOD pair (generate_voxel_lod_volume /
 generate_voxel_lod_geometry / set_voxel_lod_geometry); the physics boxes
 (generate_voxel_physics_boxes -> TemporaryBox, set_voxel_physics_boxes);
-HorizonMap and column_heights (the terrain's own occlusion of the sky,
-[PBR_FIT]); the old fixed path set_8bit_voxel_geometry (use
+HorizonMap (the terrain's own occlusion of the sky, [PBR_FIT]; its column
+heights are voxelworld's wasm/); the old fixed path set_8bit_voxel_geometry (use
 set_voxel_geometry instead); preload_textures.
 
 
@@ -795,7 +796,7 @@ interface/http.h: http_get, http_post, send_mail, mail_supported, http_download
 interface/magic_event.h: MagicEvent
 interface/magic_event_handler.h: MagicEventHandler, emit_event, on_event
 interface/markup.h: to_html
-interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, VoxelGeometryJob, generate_voxel_geometry_step, generate_occluder, set_bounce_color, set_alpha_nibbles, column_heights, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, set_voxel_physics_boxes
+interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, VoxelGeometryJob, generate_voxel_geometry_step, generate_occluder, set_bounce_color, set_alpha_nibbles, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, set_voxel_physics_boxes
 interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispatch, get_interface, check_interface, add_handler
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
