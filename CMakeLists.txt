@@ -360,6 +360,10 @@ add_subdirectory("3rdparty/luabind-deboostified")
 # [CLIENT_WASM] the validator and wasm2c, for the client
 if(BUILD_CLIENT)
 	add_subdirectory("3rdparty/wabt")
+	# and the interpreter, for the native client on Linux
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
+		add_subdirectory("3rdparty/wamr")
+	endif()
 endif()
 
 include_directories("src")
@@ -618,6 +622,10 @@ if(BUILD_CLIENT)
 		${URHO3D_TOLUA_LIBRARY}
 		${LUA_LIBRARY}
 	)
+	# [CLIENT_WASM] The interpreter (step 4)
+	if(TARGET wamr)
+		target_link_libraries(${CLIENT_EXE_NAME} wamr)
+	endif()
 	# [CLIENT_WASM] The modules the client builds call the runtime in it
 	if(TARGET wasm_rt)
 		target_include_directories(${CLIENT_EXE_NAME} PRIVATE

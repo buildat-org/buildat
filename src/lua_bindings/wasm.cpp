@@ -15,6 +15,10 @@
 //   the .wasm, WABT, the compiler and the flags, and dlopen()ed. Its memory
 //   is checked by guard pages (8 GiB reserved per instance); a fault in
 //   them, while a call is in it, is a trap and not a crash.
+//   Until that is done, and for good with no compiler, WAMR's fast
+//   interpreter (3rdparty/wamr) runs the same bytes, the memory's bounds
+//   checked by its code; between two calls the module moves to the
+//   compiled one, its state copied (prepare_native()).
 // - on the web, the browser's own WebAssembly runs it, as an instance of
 //   its own with its own memory: the JS between (EM_JS below) passes
 //   numbers and copies bytes, and the module never sees the client's heap,
@@ -57,6 +61,7 @@
 #include "interface/fs.h"
 #include "wasm-rt-impl.h"
 #include "wasm-rt-exceptions.h"
+#include "wasm_export.h"
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -355,6 +360,16 @@ static const char *START = "buildat_start";
 // A call's budget, in the units above (about an instruction each): of
 // the order of a second of a tight loop on either client
 static const int64_t BUDGET = 4000000000;
+// The interpreter's (step 4): the same units, a sixteenth of them, as it
+// runs them up to 20 times slower than the compiled code (measured: 5 a
+// counter loop, 17 the toy's byte reversal, 4.5 a recursion, 1-2
+// memory.fill; a loop of nothing but the meter's own charge, the worst,
+// 2.5e8 in 0.9 s), so that a call that does not end freezes the client
+// about as long on either engine (with BUDGET, up to 27 s here: past the
+// client's 30 s watchdog with the rest of a frame)
+#if BUILDAT_WASM_NATIVE
+static const int64_t INTERP_BUDGET = BUDGET / 16;
+#endif
 // The bytes of memory.fill and its kind that count as one instruction
 static const int BULK_SHIFT = 4;
 // An import's charge, as a guess at its time in the same units: this for
@@ -502,6 +517,110 @@ static bool meter_module(wabt::Module &m, bool &has_start, ss_ &why)
 	return true;
 }
 
+#if BUILDAT_WASM_NATIVE
+// [CLIENT_WASM] step 4: natively, the module runs in WAMR's interpreter
+// while its compile is under way, and moves to the compiled one between
+// two calls: its memory and its mutable globals are copied over (the
+// meter's included), so the move is not a start over and not a budget
+// reset. The rest of an instance's state is what instantiation made, the
+// same in both, unless the module changes it: a dropped data segment
+// (only memory.init can tell) or a table changed by table.init or
+// table.copy (elem.drop only matters to table.init; table.set, .grow and
+// .fill need reference types, refused). A module using those, or with a
+// memory that is not exported as "memory" (which the compiled glue does
+// not reach), waits on its compile instead (MOVABLE below).
+
+// The mutable globals, exported for the move as buildat_g<index> (a name a
+// module cannot export: check_module()); the meter is exported already
+struct GlobalCopy {
+	ss_ name;
+	size_t size;
+};
+
+// The exports renamed to what the glue and the interpreter look up: f<i>
+// in the order of `exports`, mem for the memory named "memory", x<i>
+// others; so that no name of the server's reaches the C, and no name means
+// something to WAMR (__wasm_call_ctors, malloc, _initialize and others it
+// calls or uses by name). Then the mutable globals exported as above.
+static void prepare_native(wabt::Module &m, bool &has_memory,
+		sv_<GlobalCopy> &globals)
+{
+	using namespace wabt;
+	has_memory = false;
+	size_t fi = 0, xi = 0;
+	for(Export *e : m.exports){
+		if(e->name == METER || e->name == START){
+			// The meter's (meter_module()), named as the glue knows
+		} else if(e->kind == ExternalKind::Func){
+			e->name = "f"+itos(fi++);
+		} else if(e->kind == ExternalKind::Memory && e->name == "memory"){
+			e->name = "mem";
+			has_memory = true;
+		} else {
+			e->name = "x"+itos(xi++);
+		}
+	}
+	globals.clear();
+	for(Index i = 0; i < m.globals.size(); i++){
+		const Global *g = m.globals[i];
+		if(!g->mutable_)
+			continue;
+		const size_t size = g->type == Type::I64 || g->type == Type::F64 ? 8 : 4;
+		ss_ name = METER;
+		if(i != (Index)m.globals.size() - 1){ // the meter is the last
+			name = "buildat_g"+itos(i);
+			auto ge = std::make_unique<ExportModuleField>();
+			ge->export_.name = name;
+			ge->export_.kind = ExternalKind::Global;
+			ge->export_.var = Var(i, Location());
+			m.AppendField(std::move(ge));
+		}
+		globals.push_back({name, size});
+	}
+}
+
+// Whether a list uses an instruction whose state the move does not copy
+static bool uses_uncopied(const wabt::ExprList &l)
+{
+	using namespace wabt;
+	for(const Expr &e : l){
+		switch(e.type()){
+		case ExprType::MemoryInit:
+		case ExprType::TableInit:
+		case ExprType::TableCopy:
+			return true;
+		case ExprType::Block:
+			if(uses_uncopied(cast<BlockExpr>(&e)->block.exprs))
+				return true;
+			break;
+		case ExprType::Loop:
+			if(uses_uncopied(cast<LoopExpr>(&e)->block.exprs))
+				return true;
+			break;
+		case ExprType::If:
+			if(uses_uncopied(cast<IfExpr>(&e)->true_.exprs) ||
+					uses_uncopied(cast<IfExpr>(&e)->false_))
+				return true;
+			break;
+		default:
+			break;
+		}
+	}
+	return false;
+}
+
+// Whether the module's state can be moved to the compiled one (above)
+static bool movable(const wabt::Module &m, bool has_memory)
+{
+	if(!m.memories.empty() && !has_memory)
+		return false;
+	for(const wabt::Func *f : m.funcs)
+		if(uses_uncopied(f->exprs))
+			return false;
+	return true;
+}
+#endif
+
 struct Instance;
 static size_t g_instance_count = 0;
 // The live instances' handle tags (1 to 127)
@@ -522,7 +641,7 @@ static const rlim_t COMPILE_CPU_S = 120;
 static const rlim_t COMPILE_AS_BYTES = (rlim_t)2 << 30;
 // Bumped when the C this writes changes (the glue, or what meter_module()
 // adds), so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 4";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 5";
 
 extern "C" const char buildat_wasm_rt_h[];
 
@@ -535,6 +654,7 @@ typedef wasm_rt_memory_t* (*MemoryFn)(void*);
 typedef void (*CallFn)(void*, uint32_t, const uint64_t*, uint64_t*);
 typedef int64_t* (*MeterFn)(void*);
 typedef void (*StartFn)(void*);
+typedef void* (*GlobalFn)(void*, uint32_t);
 
 // The memories of the live instances, for the signal handler: a fault in
 // one, while a call is in wasm, is the module's out-of-bounds access.
@@ -620,6 +740,48 @@ static void runtime_init()
 	sigaction(SIGBUS, &sa, &g_old_bus);
 }
 
+// The interpreter's (WAMR's fast interpreter, 3rdparty/wamr) stack: its
+// frames and operand cells in one buffer of this size, so the call depth
+// is bounded by it (a frame of the toy's recursion takes about 88 bytes:
+// about 2000 of them, as the compiled code's 2000). Past it, a trap ("wasm
+// operand stack overflow"). The interpreter does not recurse natively for
+// a wasm call, so the client's own stack is not at stake.
+static const uint32_t INTERP_STACK = 176 << 10;
+
+static void interp_import(wasm_exec_env_t env, uint64_t *args);
+
+// WAMR, once: the system's allocator, wasm_api.h's imports as natives of
+// "buildat" (each with its signature, checked against the module's import
+// by WAMR as well), its log to errors only. No signal handler is set up:
+// the memory's bounds are checked by its code (3rdparty/wamr/CMakeLists.txt).
+static bool interp_init()
+{
+	static int done = 0;
+	if(done)
+		return done > 0;
+	done = -1;
+	RuntimeInitArgs args;
+	memset(&args, 0, sizeof args);
+	args.mem_alloc_type = Alloc_With_System_Allocator;
+	if(!wasm_runtime_full_init(&args))
+		return false;
+	wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
+	static ss_ sigs[IMP_COUNT];
+	static NativeSymbol syms[IMP_COUNT];
+	for(int k = 0; k < IMP_COUNT; k++){
+		sigs[k] = "("+ss_(IMPORTS[k].params, 'i')+")"+
+				(IMPORTS[k].result ? "i" : "");
+		syms[k].symbol = IMPORTS[k].name;
+		syms[k].func_ptr = (void*)interp_import;
+		syms[k].signature = sigs[k].c_str();
+		syms[k].attachment = (void*)(uintptr_t)k;
+	}
+	if(!wasm_runtime_register_natives_raw("buildat", syms, IMP_COUNT))
+		return false;
+	done = 1;
+	return true;
+}
+
 // The compiler: its path (execv takes one), its first --version line,
 // and wasm2c's recommended flags for it. Looked up once.
 struct Compiler {
@@ -696,7 +858,7 @@ static const Compiler& compiler()
 // freeing, its memory, and one call entry that unpacks numbers for each
 // export by index. Nothing in it comes from the module but types.
 static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
-		bool has_memory, bool has_start)
+		bool has_memory, bool has_start, const sv_<GlobalCopy> &globals)
 {
 	std::ostringstream os;
 	os<<"#include <string.h>\n#include <stdint.h>\n#include \"m.h\"\n"
@@ -731,6 +893,12 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		"(&((inst_t*)p)->m); }\n"
 		"BX void buildat_start(void *p){ "<<(has_start ? ss_("w2c_m_")+START+
 		"(&((inst_t*)p)->m);" : ss_("(void)p;"))<<" }\n"
+		// The mutable globals, for the move from the interpreter
+		"BX void *buildat_global(void *p, uint32_t k){\n"
+		"\tw2c_m *m = &((inst_t*)p)->m; (void)m;\n\tswitch(k){\n";
+	for(size_t k = 0; k < globals.size(); k++)
+		os<<"\tcase "<<k<<": return (void*)w2c_m_"<<globals[k].name<<"(m);\n";
+	os<<"\t}\n\treturn 0;\n}\n"
 		"BX void buildat_call(void *p, uint32_t f, const uint64_t *a, uint64_t *r){\n"
 		"\tw2c_m *m = &((inst_t*)p)->m;\n\t(void)a; (void)r; (void)F; (void)D; (void)FB; (void)DB;\n"
 		"\tswitch(f){\n";
@@ -948,7 +1116,24 @@ struct Instance {
 	FreeFn free_fn = nullptr;
 	CallFn call_fn = nullptr;
 	StartFn start_fn = nullptr;
-	int64_t *meter = nullptr; // the module's (meter_module())
+	int64_t *meter = nullptr; // the module's (meter_module()), the engine's
+	// which runs the module: the interpreter (WAMR) until the compiled
+	// module is there, or with no compiler, for good
+	enum Engine { NONE, INTERP, COMPILED } engine = NONE;
+	int64_t *c_meter = nullptr; // the compiled module's
+	GlobalFn global_fn = nullptr;
+	bool has_memory = false; // exported as "memory"
+	sv_<GlobalCopy> globals; // what the move copies (prepare_native())
+	// The interpreter's: the bytes (WAMR keeps pointers into them), the
+	// module, its instance, the stack it runs on, the exports by index
+	ss_ interp_bytes;
+	wasm_module_t wm = nullptr;
+	wasm_module_inst_t wi = nullptr;
+	wasm_exec_env_t we = nullptr;
+	wasm_memory_inst_t wmem = nullptr;
+	sv_<wasm_function_inst_t> wfuncs;
+	wasm_function_inst_t wstart = nullptr;
+	int64_t *i_meter = nullptr;
 #endif
 	bool has_start = false;
 	// What the import under way has cost (run_import())
@@ -1055,14 +1240,36 @@ struct Instance {
 		return true;
 	}
 
+#if BUILDAT_WASM_NATIVE
+	// The engine's memory: its bytes (null with none), its size
+	uint8_t* mem_data()
+	{
+		if(engine == INTERP)
+			return wmem ? (uint8_t*)wasm_memory_get_base_address(wmem) : nullptr;
+		return memory ? memory->data : nullptr;
+	}
+#endif
 	uint64_t memory_size()
 	{
 #if BUILDAT_WASM_NATIVE
+		if(engine == INTERP)
+			return wmem ? wasm_memory_get_cur_page_count(wmem) *
+					(uint64_t)wasm_memory_get_bytes_per_page(wmem) : 0;
 		return memory ? memory->size : 0;
 #elif defined(__EMSCRIPTEN__)
 		return (uint64_t)bw_memory_size(web_id);
 #else
 		return 0;
+#endif
+	}
+
+	// A call's budget on the engine running the module
+	int64_t budget()
+	{
+#if BUILDAT_WASM_NATIVE
+		return engine == INTERP ? INTERP_BUDGET : BUDGET;
+#else
+		return BUDGET;
 #endif
 	}
 
@@ -1095,7 +1302,7 @@ struct Instance {
 		if(len == 0)
 			return true;
 #if BUILDAT_WASM_NATIVE
-		memcpy(dst, memory->data + ptr, len);
+		memcpy(dst, mem_data() + ptr, len);
 		return true;
 #elif defined(__EMSCRIPTEN__)
 		return bw_copy(web_id, ptr, (int)(intptr_t)dst, (int)len, 0) == 0;
@@ -1110,7 +1317,7 @@ struct Instance {
 		if(len == 0)
 			return true;
 #if BUILDAT_WASM_NATIVE
-		memcpy(memory->data + ptr, src, len);
+		memcpy(mem_data() + ptr, src, len);
 		return true;
 #elif defined(__EMSCRIPTEN__)
 		return bw_copy(web_id, ptr, (int)(intptr_t)src, (int)len, 1) == 0;
@@ -1469,7 +1676,7 @@ struct Instance {
 		}
 		if(meter_get() < 0)
 			fail("stopped: its start function ran past its budget of "+
-					itos(BUDGET)+" (a loop that does not end?)");
+					itos(budget())+" (a loop that does not end?)");
 		else
 			fail("trap at start: "+trap);
 	}
@@ -1489,15 +1696,15 @@ struct Instance {
 		return r;
 	}
 
-	// The wasm call with a trap caught: 0, or the trap's code. what: 0
-	// instantiates, 1 calls export f, 2 the start function, those two with
-	// the meter at BUDGET. Nothing here with a destructor between the
-	// setjmp and the call.
+	// The compiled module's call with a trap caught: 0, or the trap's
+	// code. what: 0 instantiates, 1 calls export f, 2 the start function,
+	// those two with its meter at BUDGET. Nothing here with a destructor
+	// between the setjmp and the call.
 	static int trapping(Instance *in, int what, uint32_t f, const uint64_t *a,
 			uint64_t *r)
 	{
 		if(what != 0)
-			*in->meter = BUDGET;
+			*in->c_meter = BUDGET;
 		g_in_wasm = 1;
 		int code = wasm_rt_impl_try();
 		if(code == 0){
@@ -1515,87 +1722,352 @@ struct Instance {
 		return code;
 	}
 
-	void ready_from(const ss_ &so)
+	// The compiled module loaded and instantiated (its data segments
+	// written), its start function not run: true, or false with why
+	bool open_compiled(const ss_ &so, ss_ &why)
 	{
 		dl = dlopen(so.c_str(), RTLD_NOW | RTLD_LOCAL);
 		if(!dl){
 			const char *e = dlerror();
-			fail(ss_("dlopen: ")+(e ? e : "?"));
-			return;
+			why = ss_("dlopen: ")+(e ? e : "?");
+			return false;
 		}
 		free_fn = (FreeFn)dlsym(dl, "buildat_free");
 		call_fn = (CallFn)dlsym(dl, "buildat_call");
 		start_fn = (StartFn)dlsym(dl, "buildat_start");
+		global_fn = (GlobalFn)dlsym(dl, "buildat_global");
 		MemoryFn memory_fn = (MemoryFn)dlsym(dl, "buildat_memory");
 		MeterFn meter_fn = (MeterFn)dlsym(dl, "buildat_meter");
 		if(!free_fn || !call_fn || !memory_fn || !start_fn || !meter_fn ||
-				!dlsym(dl, "buildat_size") || !dlsym(dl, "buildat_instantiate")){
-			fail("the built module lacks its entry points");
-			return;
+				!global_fn || !dlsym(dl, "buildat_size") ||
+				!dlsym(dl, "buildat_instantiate")){
+			why = "the built module lacks its entry points";
+			return false;
 		}
 		runtime_init();
-		// The data segments are written here
-		int code = trapping(this, 0, 0, nullptr, nullptr);
+		const int code = trapping(this, 0, 0, nullptr, nullptr);
 		if(mem){
 			memory = memory_fn(mem);
-			meter = meter_fn(mem);
+			c_meter = meter_fn(mem);
 		}
-		if(code == 0 && has_start)
-			code = trapping(this, 2, 0, nullptr, nullptr);
-		if(code != 0){
-			started_or_failed(trap_reason.empty() ?
+		if(code != 0 || !mem){
+			why = "instantiation: "+(trap_reason.empty() ?
 					ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason);
-			return;
+			return false;
 		}
-		started_or_failed("");
+		return true;
 	}
 
-	// The compile's progress, read without waiting
+	void close_compiled()
+	{
+		if(mem){
+			if(free_fn)
+				free_fn(mem);
+			free(mem);
+		}
+		if(dl)
+			dlclose(dl);
+		mem = nullptr;
+		dl = nullptr;
+		memory = nullptr;
+		c_meter = nullptr;
+	}
+
+	// The compiled module as the engine from the start (no interpreter ran
+	// it): its start function run
+	void ready_from(const ss_ &so)
+	{
+		ss_ why;
+		if(!open_compiled(so, why)){
+			fail(why);
+			return;
+		}
+		engine = COMPILED;
+		meter = c_meter;
+		if(has_start){
+			const int code = trapping(this, 2, 0, nullptr, nullptr);
+			if(code != 0){
+				started_or_failed(trap_reason.empty() ?
+						ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason);
+				return;
+			}
+		}
+		started_or_failed("");
+		if(state == READY)
+			log_i(MODULE, "wasm %s: ready (compiled)", cs(name));
+	}
+
+	// WAMR's imports (interp_init()): the instance from the module
+	// instance's custom data, which import from the attachment
+	static void interp_native(wasm_exec_env_t env, uint64_t *args)
+	{
+		wasm_module_inst_t wi = wasm_runtime_get_module_inst(env);
+		Instance *self = (Instance*)wasm_runtime_get_custom_data(wi);
+		const uintptr_t which = (uintptr_t)wasm_runtime_get_function_attachment(
+				env);
+		if(!self || which >= IMP_COUNT){
+			wasm_runtime_set_exception(wi, "an import with no instance");
+			return;
+		}
+		uint32_t a[MAX_IMPORT_PARAMS] = {};
+		for(int i = 0; i < IMPORTS[which].params; i++)
+			a[i] = (uint32_t)args[i];
+		const uint32_t r = self->run_import((uint32_t)which, a);
+		// The interpreter checks for this after the native returns, and
+		// unwinds; l_call() reports trap_reason
+		if(!self->trap_reason.empty()){
+			wasm_runtime_set_exception(wi, "an import trapped");
+			return;
+		}
+		if(IMPORTS[which].result)
+			*(uint32_t*)args = r;
+	}
+
+	// The interpreter's call: "" or the trap. f is the export's index, or
+	// ~0 for the start function; the meter at BUDGET before.
+	ss_ interp_call(uint32_t f, const uint64_t *a, uint64_t *r)
+	{
+		*i_meter = INTERP_BUDGET;
+		wasm_val_t args[MAX_PARAMS], res[1];
+		memset(args, 0, sizeof args);
+		memset(res, 0, sizeof res);
+		wasm_function_inst_t fn = wstart;
+		uint32_t nargs = 0, nres = 0;
+		if(f != ~0u){
+			const ExportSig &s = exports[f];
+			fn = wfuncs[f];
+			nargs = (uint32_t)s.params.size();
+			nres = s.result ? 1 : 0;
+			for(uint32_t k = 0; k < nargs; k++){
+				switch(s.params[k]){
+				case 'i': args[k].kind = WASM_I32; args[k].of.i32 = (int32_t)a[k]; break;
+				case 'I': args[k].kind = WASM_I64; args[k].of.i64 = (int64_t)a[k]; break;
+				case 'f': {
+					args[k].kind = WASM_F32;
+					const uint32_t u = (uint32_t)a[k];
+					memcpy(&args[k].of.f32, &u, 4);
+					break;
+				}
+				case 'F':
+					args[k].kind = WASM_F64;
+					memcpy(&args[k].of.f64, &a[k], 8);
+					break;
+				}
+			}
+		}
+		if(wasm_runtime_call_wasm_a(we, fn, nres, res, nargs, args)){
+			if(nres && r){
+				switch(res[0].kind){
+				case WASM_I32: *r = (uint32_t)res[0].of.i32; break;
+				case WASM_I64: *r = (uint64_t)res[0].of.i64; break;
+				case WASM_F32: { uint32_t u; memcpy(&u, &res[0].of.f32, 4); *r = u; } break;
+				case WASM_F64: memcpy(r, &res[0].of.f64, 8); break;
+				default: break;
+				}
+			}
+			return "";
+		}
+		const char *e = wasm_runtime_get_exception(wi);
+		ss_ trap = e ? e : "?";
+		if(trap.compare(0, 11, "Exception: ") == 0)
+			trap = trap.substr(11);
+		wasm_runtime_clear_exception(wi);
+		return trap.empty() ? ss_("?") :
+				printable((const uint8_t*)trap.data(), trap.size());
+	}
+
+	// The module in the interpreter, its start function run: true (READY,
+	// or FAILED by its start function), or false with why (WAMR refused it)
+	bool start_interp(ss_ &why)
+	{
+		if(!interp_init()){
+			why = "the interpreter could not be set up";
+			return false;
+		}
+		char err[200] = "";
+		// WAMR's loader validates it again, and may write into the bytes
+		wm = wasm_runtime_load((uint8_t*)&interp_bytes[0],
+				(uint32_t)interp_bytes.size(), err, sizeof err);
+		if(wm)
+			wi = wasm_runtime_instantiate(wm, INTERP_STACK, 0, err, sizeof err);
+		if(wi){
+			wasm_runtime_set_custom_data(wi, this);
+			we = wasm_runtime_create_exec_env(wi, INTERP_STACK);
+		}
+		if(!we){
+			why = "the interpreter refused it: "+printable((const uint8_t*)err,
+					strnlen(err, sizeof err));
+			close_interp();
+			return false;
+		}
+		for(size_t i = 0; i < exports.size(); i++){
+			wfuncs.push_back(wasm_runtime_lookup_function(wi,
+					("f"+itos(i)).c_str()));
+			if(!wfuncs.back())
+				why = "the interpreter does not find an export";
+		}
+		if(has_start && !(wstart = wasm_runtime_lookup_function(wi, START)))
+			why = "the interpreter does not find the start function";
+		wasm_global_inst_t g;
+		if(wasm_runtime_get_export_global_inst(wi, METER, &g) &&
+				g.kind == WASM_I64 && g.is_mutable)
+			i_meter = (int64_t*)g.global_data;
+		else
+			why = "the interpreter does not find the meter";
+		if(has_memory && !(wmem = wasm_runtime_get_default_memory(wi)))
+			why = "the interpreter does not find the memory";
+		if(!why.empty()){
+			close_interp();
+			return false;
+		}
+		engine = INTERP;
+		meter = i_meter;
+		ss_ trap;
+		if(has_start){
+			in_call = true;
+			trap_reason.clear();
+			trap = interp_call(~0u, nullptr, nullptr);
+			in_call = false;
+			if(!trap_reason.empty())
+				trap = trap_reason;
+		}
+		started_or_failed(trap);
+		return true;
+	}
+
+	void close_interp()
+	{
+		if(we)
+			wasm_runtime_destroy_exec_env(we);
+		if(wi)
+			wasm_runtime_deinstantiate(wi);
+		if(wm)
+			wasm_runtime_unload(wm);
+		we = nullptr;
+		wi = nullptr;
+		wm = nullptr;
+		wmem = nullptr;
+		wfuncs.clear();
+		wstart = nullptr;
+		i_meter = nullptr;
+		if(engine == INTERP){
+			engine = NONE;
+			meter = nullptr;
+		}
+	}
+
+	// From the interpreter to the compiled module, between two calls: its
+	// memory, mutable globals and meter copied. A failure leaves it in the
+	// interpreter.
+	void move_to(const ss_ &so)
+	{
+		ss_ why;
+		bool ok = open_compiled(so, why);
+		const uint64_t bytes = memory_size();
+		if(ok && has_memory){
+			if(!memory || memory->page_size != 65536 || bytes % 65536 != 0){
+				ok = false;
+				why = "the memories do not match";
+			} else if(bytes / 65536 > memory->pages &&
+					wasm_rt_grow_memory(memory, bytes / 65536 - memory->pages) ==
+					(uint64_t)-1){
+				ok = false;
+				why = "the compiled module's memory could not grow to "+
+						itos(bytes)+" bytes";
+			} else if(memory->size != bytes){
+				ok = false;
+				why = "the memories' sizes do not match";
+			}
+		}
+		for(size_t k = 0; ok && k < globals.size(); k++){
+			wasm_global_inst_t g;
+			void *to = global_fn(mem, (uint32_t)k);
+			if(!to || !wasm_runtime_get_export_global_inst(wi,
+					globals[k].name.c_str(), &g)){
+				ok = false;
+				why = "a global is not found in both";
+			}
+		}
+		if(!ok){
+			close_compiled();
+			log_w(MODULE, "wasm %s: stays in the interpreter: %s", cs(name),
+					cs(why));
+			return;
+		}
+		if(bytes > 0)
+			memcpy(memory->data, mem_data(), bytes);
+		for(size_t k = 0; k < globals.size(); k++){
+			wasm_global_inst_t g;
+			wasm_runtime_get_export_global_inst(wi, globals[k].name.c_str(), &g);
+			memcpy(global_fn(mem, (uint32_t)k), g.global_data, globals[k].size);
+		}
+		close_interp();
+		engine = COMPILED;
+		meter = c_meter;
+		log_i(MODULE, "wasm %s: moved to the compiled module (%llu bytes of "
+				"memory and %zu globals copied); ready (compiled)", cs(name),
+				(unsigned long long)bytes, globals.size());
+	}
+
+	// The compile failed or could not start: the module stays in the
+	// interpreter if it runs there, else fails
+	void compile_failed(const ss_ &why)
+	{
+		compile.reset();
+		if(engine != INTERP){
+			fail(why);
+			return;
+		}
+		log_w(MODULE, "wasm %s: %s; it stays in the interpreter", cs(name),
+				cs(why));
+	}
+
+	// The compile's progress, read without waiting; between calls only
 	void poll()
 	{
-		if(state != LOADING || !compile)
+		if(!compile || state == FAILED || in_call)
 			return;
 		compile->poll();
 		if(compile->state == Compile::RUNNING)
 			return;
 		const sp_<Compile> c = std::move(compile);
 		if(c->state == Compile::FAILED){
-			fail(c->error);
+			compile_failed(c->error);
 			return;
 		}
-		ready_from(c->dir+"/module.so");
-		if(state == READY)
-			log_i(MODULE, "wasm %s: ready", cs(name));
+		if(engine == INTERP)
+			move_to(c->dir+"/module.so");
+		else
+			ready_from(c->dir+"/module.so");
 	}
 
+	// For checks only: the compiler hidden, as on a player-only archive,
+	// so that the interpreter runs the module for good
+	static bool compiler_hidden()
+	{
+		const char *e = getenv("BUILDAT_CHECK_WASM_INTERPRETER");
+		return e && *e && strcmp(e, "0") != 0;
+	}
+
+	// m is the module checked, metered and prepared (prepare_native()), its
+	// bytes as written from it in interp_bytes
 	void start_native(wabt::Module &m, const ss_ &hash_hex)
 	{
-		const Compiler &cc = compiler();
+		static const Compiler none;
+		const Compiler &cc = compiler_hidden() ? none : compiler();
+		has_imports = !m.imports.empty();
+		ss_ why;
 		if(cc.path.empty()){
-			fail("no C compiler to build it with (the server's lookup: "
-					"compiler/bin/c++, then c++ in PATH)");
-			return;
-		}
-		has_imports = false;
-		bool has_memory = false;
-		for(const wabt::Import *imp : m.imports)
-			if(imp->module_name == "buildat")
-				has_imports = true;
-		// The exports renamed to what the glue calls: f<i> in the order
-		// of `exports`, mem for the memory named "memory", x<i> others
-		size_t fi = 0, xi = 0;
-		for(wabt::Export *e : m.exports){
-			if(e->name == METER || e->name == START){
-				// The meter's (meter_module()), named as the glue knows
-			} else if(e->kind == wabt::ExternalKind::Func){
-				e->name = "f"+itos(fi++);
-			} else if(e->kind == wabt::ExternalKind::Memory &&
-					e->name == "memory"){
-				e->name = "mem";
-				has_memory = true;
-			} else {
-				e->name = "x"+itos(xi++);
+			if(start_interp(why)){
+				if(state == READY)
+					log_i(MODULE, "wasm %s: ready (interpreter): no C compiler "
+							"to build it with%s", cs(name), compiler_hidden() ?
+							" (hidden for a check)" : "");
+				return;
 			}
+			fail("no C compiler to build it with (the server's lookup: "
+					"compiler/bin/c++, then c++ in PATH), and "+why);
+			return;
 		}
 		const ss_ key = interface::sha1::hex(interface::sha1::calculate(
 				hash_hex+"\n"+WABT_VERSION_STRING+"\n"+GLUE_VERSION+"\n"+
@@ -1610,9 +2082,20 @@ struct Instance {
 			log_i(MODULE, "wasm %s: compiled module from the cache (%s)",
 					cs(name), cs(key.substr(0, 12)));
 			ready_from(dir+"/module.so");
-			if(state == READY)
-				log_i(MODULE, "wasm %s: ready", cs(name));
 			return;
+		}
+		// Not in the cache: the interpreter runs it while it compiles
+		if(!movable(m, has_memory)){
+			log_i(MODULE, "wasm %s: its state could not move to the compiled "
+					"module; it waits on its compile", cs(name));
+		} else if(start_interp(why)){
+			if(state != READY)
+				return; // its start function failed
+			log_i(MODULE, "wasm %s: ready (interpreter) while it compiles",
+					cs(name));
+		} else {
+			log_w(MODULE, "wasm %s: %s; it waits on its compile", cs(name),
+					cs(why));
 		}
 		// The same key compiling in this client: wait on it
 		for(auto it = g_compiles.begin(); it != g_compiles.end();)
@@ -1626,7 +2109,7 @@ struct Instance {
 		}
 		ss_ tmpl = root+"/"+key.substr(0, 32)+".XXXXXX";
 		if(!mkdtemp(&tmpl[0])){
-			fail("could not make a directory in "+root);
+			compile_failed("could not make a directory in "+root);
 			return;
 		}
 		compile.reset(new Compile());
@@ -1635,7 +2118,7 @@ struct Instance {
 		compile->tmp = tmpl;
 		const ss_ &tmp = compile->tmp;
 		if(wabt::Failed(wabt::GenerateNames(&m))){
-			fail("wasm2c could not name its functions");
+			compile_failed("wasm2c could not name its functions");
 			return;
 		}
 		// As wasm2c's own main: a name that cannot be applied is skipped
@@ -1646,7 +2129,7 @@ struct Instance {
 		std::vector<wabt::Stream*> c_streams = {&c_stream};
 		if(wabt::Failed(wabt::WriteC(std::move(c_streams), &h_stream,
 				&c_stream, "m.h", "", &m, wo))){
-			fail("wasm2c could not translate it");
+			compile_failed("wasm2c could not translate it");
 			return;
 		}
 		const auto &cb = c_stream.output_buffer().data;
@@ -1655,8 +2138,8 @@ struct Instance {
 				!interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) ||
 				!interface::fs::write_file(tmp+"/wasm-rt.h", buildat_wasm_rt_h) ||
 				!interface::fs::write_file(tmp+"/glue.c",
-						glue_c(exports, has_imports, has_memory, has_start))){
-			fail("could not write into "+tmp);
+						glue_c(exports, has_imports, has_memory, has_start, globals))){
+			compile_failed("could not write into "+tmp);
 			return;
 		}
 		// The command line is the client's: its compiler, its flags, file
@@ -1680,7 +2163,7 @@ struct Instance {
 		compile->started = std::chrono::steady_clock::now();
 		const pid_t pid = fork();
 		if(pid < 0){
-			fail("fork failed");
+			compile_failed("fork failed");
 			return;
 		}
 		if(pid == 0){
@@ -1719,13 +2202,8 @@ struct Instance {
 	{
 #if BUILDAT_WASM_NATIVE
 		compile.reset(); // killed if no other load waits on it
-		if(mem){
-			if(free_fn)
-				free_fn(mem);
-			free(mem);
-		}
-		if(dl)
-			dlclose(dl);
+		close_interp();
+		close_compiled();
 #endif
 #ifdef __EMSCRIPTEN__
 		if(web_id)
@@ -1745,6 +2223,13 @@ struct Instance {
 	}
 #endif
 };
+
+#if BUILDAT_WASM_NATIVE
+static void interp_import(wasm_exec_env_t env, uint64_t *args)
+{
+	Instance::interp_native(env, args);
+}
+#endif
 
 #ifdef __EMSCRIPTEN__
 // The module's imports, from bw_load()'s JS: the result, or -1 for a trap
@@ -1842,6 +2327,17 @@ static int l_wasm_load(lua_State *L)
 	luaL_getmetatable(L, META);
 	lua_setmetatable(L, -2);
 #if BUILDAT_WASM_NATIVE
+	// The bytes the interpreter runs, written from the module wasm2c
+	// translates: the same, metered and prepared
+	prepare_native(m, in->has_memory, in->globals);
+	wabt::MemoryStream prepared;
+	if(wabt::Failed(wabt::WriteBinaryModule(&prepared, &m,
+			wabt::WriteBinaryOptions(features(), true, false, false)))){
+		in->fail("the metered module could not be written");
+		return 1;
+	}
+	in->interp_bytes.assign(prepared.output_buffer().data.begin(),
+			prepared.output_buffer().data.end());
 	in->start_native(m, hash);
 #elif defined(__EMSCRIPTEN__)
 	ss_ names;
@@ -1885,7 +2381,10 @@ static int l_wasm_load(lua_State *L)
 	return 1;
 }
 
-// m:status() -> "loading" | "ready" | "failed", why
+// m:status() -> "loading" | "ready", engine | "failed", why; the engine
+// "compiled", "interpreter, compiling" (moved to the compiled module
+// between two calls once its compile is done), "interpreter" (for good)
+// or "browser"
 static int l_status(lua_State *L)
 {
 	Instance *in = check_instance(L);
@@ -1896,6 +2395,15 @@ static int l_status(lua_State *L)
 			in->state == Instance::READY ? "ready" : "failed");
 	if(in->state == Instance::FAILED){
 		lua_pushstring(L, in->error.c_str());
+		return 2;
+	}
+	if(in->state == Instance::READY){
+#if BUILDAT_WASM_NATIVE
+		lua_pushstring(L, in->engine == Instance::COMPILED ? "compiled" :
+				in->compile ? "interpreter, compiling" : "interpreter");
+#else
+		lua_pushstring(L, "browser");
+#endif
 		return 2;
 	}
 	return 1;
@@ -1966,9 +2474,13 @@ static int l_call(lua_State *L)
 	ss_ trap;
 #if BUILDAT_WASM_NATIVE
 	uint64_t r = 0;
-	const int code = Instance::trapping(in, 1, (uint32_t)index, args, &r);
-	if(code != 0)
-		trap = wasm_rt_strerror((wasm_rt_trap_t)code);
+	if(in->engine == Instance::INTERP){
+		trap = in->interp_call((uint32_t)index, args, &r);
+	} else {
+		const int code = Instance::trapping(in, 1, (uint32_t)index, args, &r);
+		if(code != 0)
+			trap = wasm_rt_strerror((wasm_rt_trap_t)code);
+	}
 	switch(sig.result){
 	case 'i': result = (int32_t)(uint32_t)r; break;
 	case 'I': result = (double)(int64_t)r; break;
@@ -1992,7 +2504,7 @@ static int l_call(lua_State *L)
 		// in its work, and its calls refused from now on
 		if(in->meter_get() < 0){
 			in->fail("stopped: "+fname+" ran past its budget of "+
-					itos(BUDGET)+" (a loop that does not end?)");
+					itos(in->budget())+" (a loop that does not end?)");
 			raise("wasm %s: %s: stopped: past its budget", in->name.c_str(),
 					fname.c_str());
 		}
@@ -2109,7 +2621,8 @@ static int l_read(lua_State *L)
 	check_range(L, in, ptr, len);
 	ss_ out((size_t)len, '\0');
 #if BUILDAT_WASM_NATIVE
-	memcpy(&out[0], in->memory->data + (size_t)ptr, (size_t)len);
+	if(len > 0)
+		memcpy(&out[0], in->mem_data() + (size_t)ptr, (size_t)len);
 #elif defined(__EMSCRIPTEN__)
 	if(len > 0 && bw_copy(in->web_id, ptr, (int)(intptr_t)&out[0], (int)len, 0))
 		raise("wasm %s: read past its memory", in->name.c_str());
@@ -2129,7 +2642,8 @@ static int l_write(lua_State *L)
 	const char *bytes = lua_tolstring(L, 3, &len);
 	check_range(L, in, ptr, (double)len);
 #if BUILDAT_WASM_NATIVE
-	memcpy(in->memory->data + (size_t)ptr, bytes, len);
+	if(len > 0)
+		memcpy(in->mem_data() + (size_t)ptr, bytes, len);
 #elif defined(__EMSCRIPTEN__)
 	if(len > 0 && bw_copy(in->web_id, ptr, (int)(intptr_t)bytes, (int)len, 1))
 		raise("wasm %s: write past its memory", in->name.c_str());

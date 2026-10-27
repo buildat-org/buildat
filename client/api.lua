@@ -2310,10 +2310,12 @@ end
 -- [CLIENT_WASM] A module's wasm/, which the server built and serves as
 -- <module>/<module>.wasm: wasm_load(module) -> the loaded module, or nil
 -- and why. It is validated and capped first; natively it is then compiled
--- (in the background, the first time; m:status() says when it is ready),
--- on the web the browser instantiates it. Each load is an instance of its
--- own, with its own memory. What the module object has:
---   m:status() -> "loading" | "ready" | "failed", why
+-- (in the background, the first time, while an interpreter runs it; with
+-- no compiler the interpreter only), on the web the browser instantiates
+-- it. Each load is an instance of its own, with its own memory. What the
+-- module object has:
+--   m:status() -> "loading" | "ready", engine | "failed", why; the engine
+--     "compiled", "interpreter, compiling", "interpreter" or "browser"
 --   m:call(export, numbers...) -> its one number, or nothing; a trap is a
 --     Lua error
 --   m:read(ptr, len) -> the bytes of its memory there, copied

@@ -21,6 +21,16 @@ end
 
 local m, why = buildat.wasm_load("main")
 assert(m, why)
+-- Step 4: natively with a compile under way, it is ready at once in the
+-- interpreter; state put in it now is still there once it has moved to the
+-- compiled module (checked below)
+local first_status, first_engine = m:status()
+log:info("main loaded: "..tostring(first_status)..", "..tostring(first_engine))
+local moving = first_engine == "interpreter, compiling"
+if moving then
+	m:write(m:call("buffer") + 2048, "kept across the move")
+	assert(m:call("tick") == 1 and m:call("tick") == 2, "tick")
+end
 -- A second instance of it, whose handles the first must refuse; loaded in
 -- the same frame, so that natively it waits on the first one's compile
 -- ([WASM_COMPILE_RACE])
@@ -89,7 +99,7 @@ local function check()
 	-- The module's, traps, after which it still answers
 	local ok, err = pcall(m.call, m, "recurse", 0)
 	assert(not ok, "the endless recursion trapped")
-	log:info("recursion trap: "..tostring(err))
+	log:info("recursion trap at depth "..m:call("depth")..": "..tostring(err))
 	ok, err = pcall(m.call, m, "peek", 4294967292)
 	assert(not ok, "the read past the memory trapped")
 	log:info("memory trap: "..tostring(err))
@@ -147,7 +157,9 @@ local function check()
 	-- Step 3, the meter: the hot loop's time, then a call that never ends
 	-- on each of three instances, each stopped, and the first still
 	-- answering
-	local rounds = 20000
+	-- (fewer in the interpreter, whose budget is a sixteenth: about as
+	-- long in time)
+	local rounds = select(2, m:status()) == "interpreter" and 4000 or 20000
 	log:info("bench: the buffer reversed "..rounds.." times in "..
 			m:call("bench", rounds).." ms")
 	for _, c in ipairs({{m2, "spin"}, {m3, "spin_fill"}, {m4, "spin_tree", 60}}) do
@@ -198,23 +210,40 @@ magic.SubscribeToEvent("Update", function()
 		end
 		return
 	end
-	local status, err = m:status()
-	if status == "loading" then return end
-	if status ~= "ready" then
-		stage = "done"
-		log:error("wasm done: failed: "..tostring(err))
-		return
-	end
-	for _, other in ipairs({m2, m3, m4}) do
-		local status2, err2 = other:status()
-		if status2 == "loading" then return end
-		if status2 ~= "ready" then
+	-- Each ready, and natively in the engine it stays in: compiled, or
+	-- the interpreter with no compiler (step 4)
+	local engine
+	for i, one in ipairs({m, m2, m3, m4}) do
+		local status, detail = one:status()
+		if status == "loading" or detail == "interpreter, compiling" then
+			return
+		end
+		if status ~= "ready" then
 			stage = "done"
-			log:error("wasm done: another load failed: "..tostring(err2))
+			log:error("wasm done: load "..i.." failed: "..tostring(detail))
+			return
+		end
+		engine = engine or detail
+		if detail ~= engine then
+			stage = "done"
+			log:error("wasm done: engines "..engine.." and "..detail)
 			return
 		end
 	end
 	if endless_start:status() == "loading" then return end
+	log:info("engine: "..engine)
+	if moving then
+		local kept = m:read(m:call("buffer") + 2048, 20)
+		local ticks = m:call("tick")
+		if engine ~= "compiled" or kept ~= "kept across the move" or
+				ticks ~= 3 then
+			stage = "done"
+			log:error("wasm done: the move lost the state: "..engine..", "..
+					kept..", "..ticks)
+			return
+		end
+		log:info("the state moved with the module: "..kept..", tick "..ticks)
+	end
 	local ok, e = pcall(check)
 	if not ok then
 		stage = "done"

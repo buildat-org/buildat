@@ -48,12 +48,27 @@ BUILDAT_WASM_EXPORT void flood(int n)
 		buildat_log(line, sizeof line - 1);
 }
 
-// Traps: a recursion with no end, and a read past the memory
+// Traps: a recursion with no end, and a read past the memory. How deep
+// the recursion went is kept for depth().
 static int (*volatile again)(int);
+static volatile int deepest;
 BUILDAT_WASM_EXPORT int recurse(int n)
 {
 	again = recurse;
+	deepest = n;
 	return again(n + 1) + 1;
+}
+BUILDAT_WASM_EXPORT int depth(void)
+{
+	return deepest;
+}
+
+// [CLIENT_WASM] step 4: state in the module's memory, which the move from
+// the interpreter to the compiled module keeps
+static int ticks;
+BUILDAT_WASM_EXPORT int tick(void)
+{
+	return ++ticks;
 }
 
 BUILDAT_WASM_EXPORT int peek(unsigned address)

@@ -881,22 +881,30 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   result). Natively it is then translated to C (wasm2c) and compiled by
   the system's compiler in a process of its own, killed past 3 minutes or
   2 GiB, the first time only: the result is cached in <cache>/wasm2c/.
-  On the web the browser instantiates it at once.
-- m:status() -> "loading" | "ready" | "failed", why. A native first load
-  is "loading" while it compiles; ask again on a later frame.
+  Until it is compiled, and for good where there is no compiler, the same
+  module runs in an interpreter (WAMR's, in the client), up to 20 times
+  slower; it moves to the compiled one between two calls, its memory and
+  globals with it. On the web the browser instantiates it at once.
+- m:status() -> "loading" | "ready", engine | "failed", why. The engine:
+  "compiled", "interpreter, compiling" (it moves to the compiled module
+  on its own), "interpreter" (no compiler: it stays there) or "browser".
+  A native first load of a module the interpreter cannot hand over (one
+  using memory.init, table.init or table.copy) is "loading" while it
+  compiles; ask again on a later frame.
 - m:call(export, numbers...) -> its result (an i32 read as signed), or
   nothing. The numbers are the export's parameters, as many as it has;
   an integer parameter takes an integral number in its range (i64
   exactly up to 2^53). A trap (an access past its memory, a division by
-  zero, a recursion deeper than 2000 calls natively or the browser's
-  limit on the web) is a Lua error, and the module can be called again
-  after it.
+  zero, a recursion deeper than 2000 calls natively (about as deep in the
+  interpreter, whose stack is 176 KiB) or the browser's limit on the web)
+  is a Lua error, and the module can be called again after it.
 - The meter: each call (and the module's start function, run as it
   loads) has a budget of 4e9, counted the same on both clients: a
   function's or a loop's instructions each time it is entered or goes
   round, memory.fill/copy/init and table.copy/init a sixteenth of their
   size, and the imports their work. That is about 0.1 s of the densest
-  loop and a second or more of most code, natively and on the web. A
+  loop and a second or more of most code, natively and on the web; in
+  the interpreter a sixteenth of it, about as long a time. A
   call past it traps, and the module is stopped: logged ("wasm <module>:
   stopped: <export> ran past its budget ..."), m:status() "failed", and
   its calls errors from then on; the client goes on. The metering costs

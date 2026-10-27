@@ -21,17 +21,24 @@
 # never ends (endless_start/, hand-written: clang makes no start
 # function) stopped as it loads; a module exporting the meter's name
 # (meter_name/) refused.
-# Natively it runs twice: the first builds on both sides (the
+# Step 4, the interpreter (WAMR): with its compile under way, a module is
+# ready at once in the interpreter, and moves to the compiled module
+# between two calls, its state with it (a buffer and a counter written
+# before, read after).
+# Natively it runs three times: the first builds on both sides (the
 # server's .wasm taken out of the app's cache, the client's cache a fresh
-# one), the second finds both built; then a server with no clang and wasm
-# linker refuses the module. The times are printed.
+# one) and shows the move; the second finds both built; the third hides
+# the compiler from the client (BUILDAT_CHECK_WASM_INTERPRETER), and the
+# same assertions pass in the interpreter. Then a server with no clang and
+# wasm linker refuses the module. The times are printed, the interpreter's
+# beside the compiled code's.
 #
 #   apps/sample_wasm/check.sh          # the native client
 #   apps/sample_wasm/check.sh web      # the web client, headless Chrome
 #
 # tier: quick
 # cost: 45s
-# covers: client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** apps/sample_wasm/** builtin/client_data/**
+# covers: client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -110,15 +117,17 @@ EOF
 fi
 
 cd "$here/Build"
-# One run: a server, a client with the given cache, the module's lines
+# One run: a server, a client with the given cache (and the environment
+# given after n), the module's lines
 run()
 {
 	local n=$1
+	shift
 	start_server "$t/srv$n.log" "Listening at" 120 auto bin/buildat_server \
 			-m ../apps/sample_wasm -l 3 || fail "the server did not come up"
 	CHECK_PIDS+=($SERVER_PID)
 	printf 'wait_log 60000 wasm done:\nquit\n' > "$t/cmds$n.txt"
-	run_client 60 "$t/cli$n.log" timeout 120 bin/buildat -C "$t/client_cache" \
+	run_client 60 "$t/cli$n.log" timeout 240 env "$@" bin/buildat -C "$t/client_cache" \
 			-s localhost:$SERVER_PORT -w 320x240 -l 3 -c @"$t/cmds$n.txt"
 	kill -INT "$SERVER_PID" 2>/dev/null
 	wait "$SERVER_PID" 2>/dev/null
@@ -131,6 +140,14 @@ run()
 run 1
 grep -aq "built wasm/ in" "$t/srv1.log" || fail "the server did not build wasm/"
 grep -aq "wasm main: compiled in" "$t/cli1.log" || fail "the client did not compile it"
+# Step 4: the interpreter while it compiled, then the move, state and all
+for want in "wasm main: ready (interpreter) while it compiles" \
+		"sample_w: main loaded: ready, interpreter, compiling" \
+		"wasm main: moved to the compiled module" \
+		"sample_w: the state moved with the module: kept across the move, tick 3" \
+		"sample_w: engine: compiled"; do
+	grep -aq "$want" "$t/cli1.log" || fail "no \"$want\" in $t/cli1.log"
+done
 # Two loads in one frame, one compile ([WASM_COMPILE_RACE])
 [ "$(grep -ac "wasm main: compiling (pid" "$t/cli1.log")" = 1 ] ||
 	fail "the two loads did not share one compile ($t/cli1.log)"
@@ -138,16 +155,31 @@ run 2
 grep -aq "wasm/ is built (cache hit)" "$t/srv2.log" || fail "the server built wasm/ again"
 grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||
 	fail "the client compiled it again"
+grep -aq "sample_w: engine: compiled" "$t/cli2.log" || fail "not compiled in run 2"
+grep -aq "wasm main: .*interpreter" "$t/cli2.log" && fail "the interpreter ran with the cache hit"
+# The compiler hidden: the interpreter runs it for good, the same checks
+run 3 BUILDAT_CHECK_WASM_INTERPRETER=1
+for want in "wasm main: ready (interpreter): no C compiler to build it with (hidden for a check)" \
+		"sample_w: engine: interpreter"; do
+	grep -aq "$want" "$t/cli3.log" || fail "no \"$want\" in $t/cli3.log"
+done
+grep -aE "wasm main: (compiling|compiled)" "$t/cli3.log" &&
+	fail "the client compiled with the compiler hidden"
+echo "-- compiled (run 2) and interpreter (run 3)"
+for n in 2 3; do
+	grep -aE "sample_w: (bench:|spin.* stopped after|recursion trap at depth)" \
+			"$t/cli$n.log" | sed 's/.*sample_w: //' | cut -c1-90
+done
 # A server with no clang and wasm linker refuses the module, saying so
 rm -f "$BUILDAT_CACHE_PATH"/apps/sample_wasm/rccpp_build/wasm/*.wasm
 mkdir -p "$t/nohome"
 env -u EMSDK -u RUSTUP_HOME -u BUILDAT_WASM_CC -u BUILDAT_WASM_LD \
 		HOME="$t/nohome" PATH=/nonexistent /usr/bin/timeout 60 \
 		bin/buildat_server -m ../apps/sample_wasm -l 3 -P "$SERVER_PORT" \
-		> "$t/srv3.log" 2>&1
+		> "$t/srv4.log" 2>&1
 grep -aq "has wasm/, and this server has no clang and wasm linker.*the module is refused" \
-		"$t/srv3.log" || fail "a server with no toolchain did not refuse the module ($t/srv3.log)"
-grep -aq "Listening at" "$t/srv3.log" && fail "a server with no toolchain started the app"
-echo "-- run 3, no toolchain"
-grep -a " E wasm    : " "$t/srv3.log" | sed 's/.*wasm    : //' | cut -c1-120
-echo "PASS: built, compiled, called and trapped; the imports and the boundary; both caches hit on the second run; refused with no toolchain"
+		"$t/srv4.log" || fail "a server with no toolchain did not refuse the module ($t/srv4.log)"
+grep -aq "Listening at" "$t/srv4.log" && fail "a server with no toolchain started the app"
+echo "-- run 4, no toolchain"
+grep -a " E wasm    : " "$t/srv4.log" | sed 's/.*wasm    : //' | cut -c1-120
+echo "PASS: built, compiled, called and trapped; the imports and the boundary; the interpreter before the compile, and the move; both caches hit on the second run; the same in the interpreter with no compiler; refused with no toolchain"
