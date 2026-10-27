@@ -122,6 +122,17 @@ static void build_ui()
 			constant("VA_CENTER").number);
 	g_label.text("Press me");
 	SubscribeToEvent(g_button, "Released");
+	// [BINDINGS_SETLAYOUT] A call with its optional arguments: a vertical
+	// layout spaced 4, two children 10 high, the second at y 14
+	{
+		UIElement box = root.CreateChild("UIElement").as<UIElement>();
+		for(int i = 0; i < 2; i++)
+			box.CreateChild("UIElement").as<UIElement>().SetFixedSize(10, 10);
+		box.SetLayout(constant("LM_VERTICAL").number, 4);
+		log_n("SetLayout: the second child at y ",
+				box.GetChild(1).as<UIElement>().position().y);
+		box.Remove();
+	}
 	log_n("ui root width: ", size.x);
 	log_n("ui root height: ", size.y);
 }

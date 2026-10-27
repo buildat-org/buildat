@@ -2147,8 +2147,11 @@ function M.define(dst, util)
 			SetLayout = util.wrap_function({"UIElement", "number",
 					{"number", "__nil"}, {"IntRect", "__nil"}},
 				function(self, mode, spacing, border)
+					-- Urho3D's own, unsafe: the sandbox's IntRect takes four
+					-- numbers, and this call is on the unsafe side
+					-- ([BINDINGS_SETLAYOUT]: without a border it raised)
 					spacing = spacing or 0
-					border = border or dst.IntRect()
+					border = border or IntRect()
 					self:SetLayout(mode, spacing, border)
 				end
 			),

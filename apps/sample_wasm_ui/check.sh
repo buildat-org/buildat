@@ -80,6 +80,7 @@ client_lines()
 	grep -aE "wasm (main|unlisted|wrong_sig): " "$log" | sed 's/.*wasm \([a-z_]*\): /\1: /' | cut -c1-160
 	for want in "wasm main: drew a cube and a window" \
 			"wasm main: the camera is at y*10: 15" \
+			"wasm main: SetLayout: the second child at y 14" \
 			"wasm main: the button was released: presses 1" \
 			"wasm main: the button reads: Pressed 1" \
 			"wasm main: the server answered echo: click 1" \
