@@ -16,9 +16,13 @@
 // when it does not, so a braked car stands on a slope instead of
 // creeping down it. All four wheels turn at one shaft speed (the
 // lockers), which the gear's governor drives toward its target.
+//
+// [CLIENT_WASM] step 5: in wasm/, the server's and the clients' alike --
+// main.cpp steps the cars with it, and each client predicts its own with
+// it in the module's .wasm (predict.cpp). Hence no libc: car_math.h's
+// maths, the same bits on both sides.
 #pragma once
-#include <cmath>
-#include <cstdint>
+#include "car_math.h"
 
 namespace car {
 
@@ -34,7 +38,7 @@ struct V3
 	V3 cross(const V3 &o) const {
 		return V3(y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x);
 	}
-	float length() const { return std::sqrt(dot(*this)); }
+	float length() const { return car_math::sqrtf_(dot(*this)); }
 	V3 normalized() const { float l = length(); return l > 0 ? *this * (1 / l) : *this; }
 };
 
@@ -42,7 +46,7 @@ static const float PI = 3.14159265f;
 static float clampf(float v, float a, float b){ return v < a ? a : v > b ? b : v; }
 // v moved toward t by at most d
 static float approach(float v, float t, float d){
-	return v < t ? std::fmin(v + d, t) : std::fmax(v - d, t);
+	return v < t ? car_math::fminf_(v + d, t) : car_math::fmaxf_(v - d, t);
 }
 
 enum Gear { REVERSE, G1, G2, G3, G4, GEARS };
@@ -163,13 +167,13 @@ struct Car
 		// Ackermann: the inner wheel on the tighter circle
 		for(int i = 0; i < 2; i++){
 			Wheel &w = wheel[i];
-			if(std::fabs(steer) < 1e-4f){
+			if(car_math::fabsf_(steer) < 1e-4f){
 				w.steer = 0;
 				continue;
 			}
-			float r = spec.wheelbase / std::tan(std::fabs(steer));
+			float r = spec.wheelbase / car_math::tanf_(car_math::fabsf_(steer));
 			bool inner = (steer > 0) == (i == 1);
-			float a = std::atan(spec.wheelbase / (r + (inner ? -1 : 1) *
+			float a = car_math::atanf_(spec.wheelbase / (r + (inner ? -1 : 1) *
 					spec.track / 2));
 			w.steer = steer > 0 ? a : -a;
 		}
@@ -182,12 +186,12 @@ struct Car
 	{
 		const float rv = 0.5f;               // a voxel's sphere, in voxels
 		const float R = r * u, hw = w * u / 2;
-		const int x0 = (int)std::floor(hub.x - R - 1),
-				x1 = (int)std::ceil(hub.x + R + 1);
-		const int y0 = (int)std::floor(hub.y - R - 1),
-				y1 = (int)std::ceil(hub.y + R + 1);
-		const int z0 = (int)std::floor(hub.z - R - 1),
-				z1 = (int)std::ceil(hub.z + R + 1);
+		const int x0 = (int)car_math::floorf_(hub.x - R - 1),
+				x1 = (int)car_math::ceilf_(hub.x + R + 1);
+		const int y0 = (int)car_math::floorf_(hub.y - R - 1),
+				y1 = (int)car_math::ceilf_(hub.y + R + 1);
+		const int z0 = (int)car_math::floorf_(hub.z - R - 1),
+				z1 = (int)car_math::ceilf_(hub.z + R + 1);
 		float deepest = 0;
 		V3 sum;
 		for(int z = z0; z <= z1; z++)
@@ -195,7 +199,7 @@ struct Car
 		for(int x = x0; x <= x1; x++){
 			V3 d = V3((float)x, (float)y, (float)z) - hub;
 			float a = d.dot(axle);
-			if(std::fabs(a) > hw + rv)
+			if(car_math::fabsf_(a) > hw + rv)
 				continue;
 			V3 radial = d - axle * a;
 			float dist = radial.length();
@@ -206,7 +210,7 @@ struct Car
 			if(const float dy = g.drop(x, y, z)){
 				d.y -= dy;
 				a = d.dot(axle);
-				if(std::fabs(a) > hw + rv)
+				if(car_math::fabsf_(a) > hw + rv)
 					continue;
 				radial = d - axle * a;
 				dist = radial.length();
@@ -214,10 +218,10 @@ struct Car
 				if(pen <= 0 || dist < 1e-4f)
 					continue;
 			}
-			deepest = std::fmax(deepest, pen);
+			deepest = car_math::fmaxf_(deepest, pen);
 			V3 dir = radial * (-1 / dist);
 			if(dir.y > 0 && g.ramp(x, y, z)){
-				const float h = std::sqrt(dir.x * dir.x + dir.z * dir.z),
+				const float h = car_math::sqrtf_(dir.x * dir.x + dir.z * dir.z),
 						cap = dir.y * 0.5f;
 				if(h > cap)
 					dir = V3(dir.x * cap / h, dir.y, dir.z * cap / h).normalized();
@@ -246,7 +250,7 @@ struct Car
 					p.forward * w.local.z;
 			// The wheel's own axes, turned by its steering about the
 			// chassis' up
-			float cs = std::cos(w.steer), sn = std::sin(w.steer);
+			float cs = car_math::cosf_(w.steer), sn = car_math::sinf_(w.steer);
 			V3 fwd = p.forward * cs + p.right * sn;
 			V3 axle = p.right * cs - p.forward * sn;
 			V3 n;
@@ -269,9 +273,9 @@ struct Car
 				f = s.k_spring * s.travel + s.k_tyre *
 						(d - s.travel * (1 + s.k_spring / s.k_tyre));
 			f += s.c_damp * -v.dot(n) * s.k_tyre / (s.k_spring + s.k_tyre);
-			f = std::fmax(0, f);
+			f = car_math::fmaxf_(0, f);
 			w.load = f;
-			w.spring = std::fmin(s.travel, f / s.k_spring);
+			w.spring = car_math::fminf_(s.travel, f / s.k_spring);
 			// The contact's own axes, in the ground's plane
 			V3 cx = (fwd - n * fwd.dot(n)).normalized();
 			V3 cy = n.cross(cx);
@@ -281,13 +285,13 @@ struct Car
 			w.brush_y += slip_y * dt;
 			float fx = -s.k_brush * w.brush_x - s.c_brush * slip_x;
 			float fy = -s.k_brush * w.brush_y - s.c_brush * slip_y;
-			float cap = s.mu * f, mag = std::sqrt(fx * fx + fy * fy);
+			float cap = s.mu * f, mag = car_math::sqrtf_(fx * fx + fy * fy);
 			w.slipping = mag > cap;
 			if(w.slipping){
 				fx *= cap / mag;
 				fy *= cap / mag;
 				// The tread holds what the cap leaves it
-				float k = cap / s.k_brush / std::fmax(1e-6f, std::sqrt(
+				float k = cap / s.k_brush / car_math::fmaxf_(1e-6f, car_math::sqrtf_(
 						w.brush_x * w.brush_x + w.brush_y * w.brush_y));
 				if(k < 1){
 					w.brush_x *= k;
@@ -308,15 +312,15 @@ struct Car
 		float drive = clampf(s.governor * (target - shaft), -cap, cap);
 		shaft += (drive - ground_torque) * dt / s.shaft_inertia;
 		float b = s.brake_torque * brake * dt / s.shaft_inertia;
-		shaft = std::fabs(shaft) <= b ? 0 : shaft - (shaft > 0 ? b : -b);
-		spin = std::fmod(spin + shaft * dt, 2 * PI);
+		shaft = car_math::fabsf_(shaft) <= b ? 0 : shaft - (shaft > 0 ? b : -b);
+		spin = car_math::fmodf_(spin + shaft * dt, 2 * PI);
 	}
 };
 
 } // namespace car
 
 #ifdef CAR_TEST
-// g++ -std=c++11 -DCAR_TEST -x c++ car.h: the steering's target
+// g++ -std=c++11 -DCAR_TEST -x c++ wasm/car.h: the steering's target
 #include <cstdio>
 int main()
 {
@@ -325,7 +329,7 @@ int main()
 	in.steer = 0.5f;
 	for(int i = 0; i < 100; i++)
 		c.controls(in, 0.05f);
-	if(std::fabs(c.steer - 0.5f * c.spec.steer_max) > 1e-5f){
+	if(car_math::fabsf_(c.steer - 0.5f * c.spec.steer_max) > 1e-5f){
 		printf("car.h: steer 0.5 gave %f rad, not half of %f\n", c.steer,
 				c.spec.steer_max);
 		return 1;

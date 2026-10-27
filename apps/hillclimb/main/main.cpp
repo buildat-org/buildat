@@ -73,7 +73,8 @@
 #include "interface/os.h"
 #include "core/json.h"
 #include "hill.h"
-#include "car.h"
+#include "wasm/car.h"
+#include "wasm/predict.h"
 #include "ground.h"
 #include <PhysicsWorld.h>
 #include <BulletDynamics/Dynamics/btDiscreteDynamicsWorld.h>
@@ -327,6 +328,14 @@ struct Module: public interface::Module
 		int series = 0;
 		float series_t = 0;
 		int mark = -1;
+		// [CLIENT_WASM] step 5: its client's prediction. The input's
+		// number (the client's), the substeps stepped under it, and the
+		// times the car was moved rather than driven (put back, reset);
+		// the inputs come in with the substep of the coming tick each
+		// takes effect at
+		uint32_t seq = 0, seq_steps = 0, jumps = 0;
+		struct Pending { car::Input in; uint32_t seq; int at; };
+		std::deque<Pending> pending;
 		// [HC_CIRCUIT] Its laps, and the round's clock at the last
 		hill::Hill::Lap lap;
 		// [HC_MISSED_TURN_MARK] The turn it went past without passing,
@@ -361,6 +370,11 @@ struct Module: public interface::Module
 	uint64_t m_step_us = 0;
 	int m_step_ticks = 0;
 	static const int SUBSTEPS_HZ = 240;
+	// [CLIENT_WASM] step 5: when the last tick began, and the time not yet
+	// stepped (a tick steps whole substeps)
+	uint64_t m_tick_us = 0;
+	float m_step_left = 0;
+	uint32_t m_selftest = 0;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -502,6 +516,10 @@ struct Module: public interface::Module
 
 	void on_start()
 	{
+		// [CLIENT_WASM] step 5: the car's step as this server built it
+		// (wasm/, natively), for the clients' .wasm to be checked against
+		m_selftest = hc_selftest();
+		log_i(MODULE, "hillclimb: the car's self test %08x (native)", m_selftest);
 		serve_media();
 		// [HC_GUEST_PLAY] "Play as a guest" on the login window
 		accounts::access(m_server, [&](accounts::Interface *i){
@@ -676,6 +694,7 @@ struct Module: public interface::Module
 		pl.body->SetAngularVelocity(magic::Vector3::ZERO);
 		pl.body->Activate();
 		pl.car->shaft = pl.car->pedal = pl.car->brake = pl.car->steer = 0;
+		pl.jumps++;
 		pl.snaps.clear();
 		pl.snap_t = -1;
 		pl.series = 0;
@@ -867,6 +886,7 @@ struct Module: public interface::Module
 			pl.body->SetAngularVelocity(magic::Vector3::ZERO);
 			pl.body->Activate();
 			pl.car->shaft = 0;
+			pl.jumps++;
 			const magic::Vector3 to = n->GetWorldPosition() / U;
 			log_i(MODULE, "hillclimb: %s's car put back (%d in a row), the "
 					"pose %.1f s before the first, off the track at %.2f,%.2f m, "
@@ -952,6 +972,7 @@ struct Module: public interface::Module
 		if(peer != 0 && peer < BOT_PEER){
 			// The hill went with on_files_transmitted
 			network::send(m_server, peer, "hillclimb:you", itos(pl.id));
+			send_setup(pl);
 			chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
 			send_ranking(peer);
 		}
@@ -1190,8 +1211,14 @@ struct Module: public interface::Module
 		const float U = hill::U;
 		const float dt = 1.0f / SUBSTEPS_HZ;
 		// simplified: a long tick is cut to a quarter second of substeps;
-		// the car slows with the server rather than jumping
-		int n = (int)std::lround(std::fmin(event.dtime, 0.25f) / dt);
+		// the car slows with the server rather than jumping. The part of a
+		// substep left over is the next tick's ([CLIENT_WASM] step 5: the
+		// car's time is the clock's, as its client's prediction's is; a
+		// rounding a tick ran up to 5% slow)
+		m_step_left = std::fmin(m_step_left + event.dtime, 0.25f);
+		int n = (int)(m_step_left / dt);
+		m_step_left -= n * dt;
+		m_tick_us = interface::os::time_us();
 		// A check's drive: a 30 Hz tick's substeps whatever the tick took,
 		// so the ground's once-a-tick work (stones resting, commits) falls
 		// at the same times under load, and a drive goes the same way
@@ -1202,8 +1229,10 @@ struct Module: public interface::Module
 			for(int i = 0; i < n; i++){
 				if(!m_drive.empty() && m_ground_live)
 					drive_step();
-				for(auto &kv : m_players)
+				for(auto &kv : m_players){
+					take_input(kv.second, i);
 					step_car(kv.second, dt);
+				}
 				m_physics->Update(dt);
 				if(m_ground_live){
 					m_t += dt;
@@ -1214,6 +1243,10 @@ struct Module: public interface::Module
 				}
 			}
 		});
+		// An input due past this tick's substeps is the next tick's first
+		for(auto &kv : m_players)
+			for(Player::Pending &p : kv.second.pending)
+				p.at = std::max(0, p.at - n);
 		if(m_ground_live)
 			step_round(n * dt);
 		m_step_us += interface::os::time_us() - t0;
@@ -1285,6 +1318,22 @@ struct Module: public interface::Module
 			pl.body->ApplyForce(magic::Vector3(w.force.x, w.force.y,
 					w.force.z) * U, magic::Vector3(w.at.x, w.at.y,
 					w.at.z) * U - p);
+		}
+		pl.seq_steps++;
+	}
+
+	// [CLIENT_WASM] step 5: the client's inputs due at substep i of this
+	// tick taken, in the order they came
+	void take_input(Player &pl, int i)
+	{
+		while(!pl.pending.empty() && pl.pending.front().at <= i){
+			const Player::Pending &p = pl.pending.front();
+			pl.input = p.in;
+			if(p.seq != pl.seq){
+				pl.seq = p.seq;
+				pl.seq_steps = 0;
+			}
+			pl.pending.pop_front();
 		}
 	}
 
@@ -1924,6 +1973,57 @@ struct Module: public interface::Module
 				for(const ss_ &l : lines)
 					i->send(peer, "hillclimb:car", l);
 		});
+		// [CLIENT_WASM] step 5: to each client its own car's state, for its
+		// prediction: "seq steps held jumps <predict::State's bytes, hex>"
+		for(auto &kv : m_players){
+			const Player &pl = kv.second;
+			if(pl.peer == 0 || pl.peer >= BOT_PEER || !m_peers.count(pl.peer))
+				continue;
+			magic::Node *n = pl.body->GetNode();
+			const magic::Vector3 p = n->GetWorldPosition();
+			const magic::Quaternion q = n->GetWorldRotation();
+			const magic::Vector3 v = pl.body->GetLinearVelocity(),
+					w = pl.body->GetAngularVelocity();
+			const car::Car &c = *pl.car;
+			const predict::State st = {{p.x_, p.y_, p.z_}, {q.w_, q.x_, q.y_,
+					q.z_}, {v.x_, v.y_, v.z_}, {w.x_, w.y_, w.z_}, c.shaft, c.spin,
+					c.pedal, c.brake, c.steer, {{c.wheel[0].brush_x,
+					c.wheel[0].brush_y}, {c.wheel[1].brush_x, c.wheel[1].brush_y},
+					{c.wheel[2].brush_x, c.wheel[2].brush_y}, {c.wheel[3].brush_x,
+					c.wheel[3].brush_y}}};
+			const bool held = !m_ground_live || pl.observing;
+			network::send(m_server, pl.peer, "hillclimb:state", itos(pl.seq)+" "+
+					itos(pl.seq_steps)+" "+itos(held)+" "+itos(pl.jumps)+" "+
+					hex(&st, sizeof st));
+		}
+	}
+
+	static ss_ hex(const void *data, size_t n)
+	{
+		static const char *D = "0123456789abcdef";
+		ss_ out;
+		for(size_t i = 0; i < n; i++){
+			const uint8_t b = ((const uint8_t*)data)[i];
+			out += D[b >> 4];
+			out += D[b & 15];
+		}
+		return out;
+	}
+
+	// [CLIENT_WASM] step 5: a client's car as its prediction needs it:
+	// "<the server's self test, hex> <predict::Setup's bytes, hex>"
+	void send_setup(const Player &pl)
+	{
+		if(pl.peer == 0 || pl.peer >= BOT_PEER)
+			return;
+		predict::Setup s;
+		s.spec = pl.car->spec;
+		s.payload = pl.car->payload;
+		s.base = hill::Hill::BASE;
+		char buf[16];
+		snprintf(buf, sizeof buf, "%08x", m_selftest);
+		network::send(m_server, pl.peer, "hillclimb:setup", ss_(buf)+" "+
+				hex(&s, sizeof s));
 	}
 
 	// "accel brake left right gear reset [steer]", each a number, to the
@@ -1939,12 +2039,25 @@ struct Module: public interface::Module
 		if(!(is >> a >> b >> l >> r >> g >> reset) || g < car::REVERSE ||
 				g >= car::GEARS)
 			return;
-		pl.input.accel = a != 0;
-		pl.input.brake = b != 0;
+		// [CLIENT_WASM] step 5: taken at the substep of the coming tick
+		// that this time is into the one under way (the tick steps the time
+		// since the last), so it lasts as long here as on the client that
+		// predicted it; numbered by the client (its 8th number)
+		Player::Pending p;
+		p.in.accel = a != 0;
+		p.in.brake = b != 0;
 		int steer = 0;
-		pl.input.steer = (is >> steer) ? car::clampf(steer / 100.0f, -1, 1) :
+		const bool has_steer = (bool)(is >> steer);
+		p.in.steer = has_steer ? car::clampf(steer / 100.0f, -1, 1) :
 				(r != 0) - (l != 0);
-		pl.input.gear = (car::Gear)g;
+		p.in.gear = (car::Gear)g;
+		long long seq = 0;
+		p.seq = has_steer && (is >> seq) ? (uint32_t)seq : 0;
+		p.at = (int)((interface::os::time_us() - m_tick_us) * SUBSTEPS_HZ /
+				1000000);
+		// simplified: a flood of inputs is cut at a second's ticks of them
+		if(pl.pending.size() < 64)
+			pl.pending.push_back(p);
 		if(reset)
 			backspace(pl);
 	}
@@ -2104,6 +2217,7 @@ struct Module: public interface::Module
 				m_knobs.spec(pl.car->spec);
 				pl.body->SetMass(pl.car->mass());
 			});
+			send_setup(pl);
 			reset_race(pl);
 			pl.observing = false;
 		}

@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~5 min (2026-10-21)
-# covers: apps/hillclimb/** extensions/physical_sky/init.lua extensions/sky_render/**
+# cost: ~10 min (2026-10-27)
+# covers: apps/hillclimb/** src/lua_bindings/wasm.cpp src/server/wasm_build.cpp extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
 # same hill, the slope's angle, the pads flat and long enough, the track
@@ -28,13 +28,69 @@
 # no lap. The drives before it on the straight hill (_MODE=straight: the
 # circuit is the default). [HC_STONE_WALL] The lap at the defaults (keep):
 # no stone standing out of the sand held against a tyre that pushed it
-# harder than its friction.
+# harder than its friction. [CLIENT_WASM] step 5: the car predicted on
+# its client by the module's .wasm, a lap compiled, from the client's
+# cache, in the interpreter, and with no wasm (the server's state alone);
+# "web": the lap in the web client instead (headless Firefox).
 #   apps/hillclimb/check.sh
+#   apps/hillclimb/check.sh web
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hillclimb; t=$CHECK_TMP
 app="$here/apps/hillclimb"
+
+# [CLIENT_WASM] step 5, below: a lap's prediction lines in a client's log
+pred_check() # <log> <engine at the self test, a regex>
+{
+	local log=$1 last n cm secs lat
+	grep -aq "the car's step from the wasm ($2), self test \([0-9a-f]*\), the server's \1: the same" "$log" ||
+		fail "not the car's step from the wasm ($2) with the server's self test ($log: $(grep -a "car's step from" "$log" | head -1 | sed 's/.*hillclimb: //'))"
+	grep -aq "hillclimb: the run finished in" "$log" || fail "no finish ($log)"
+	# The run's count, from the last line: under one correction over 1 cm
+	# each 2 s (the lap had 0 to 4 in 30 s, 2026-10-27)
+	last=$(grep -a "hillclim: hillclimb: prediction (" "$log" | tail -1 | sed 's/.*hillclimb: //')
+	set -- $(echo "$last" | sed -n 's/.*; \([0-9]*\) corrections, \([0-9]*\) over 1 cm, in \([0-9]*\) s$/\1 \2 \3/p')
+	[ $# = 3 ] && [ $(($2 * 2)) -le "$3" ] || fail "the corrections: $last ($log)"
+	n=$1 cm=$2 secs=$3
+	lat=$(grep -a "a key to 1 cm of the car's motion" "$log" | head -1 |
+		sed 's/.*motion: \([0-9]*\) ms predicted, \([0-9]*\) ms by.*/\1 \2/')
+	set -- $lat
+	[ $# = 2 ] && [ "$1" -le "$2" ] || fail "W to motion: ${lat:-no line} ($log)"
+	echo "  $n corrections, $cm over 1 cm, in $secs s; W to 1 cm: $1 ms predicted, $2 ms by the server's state"
+}
+
+# The same lap on the web (apps/hillclimb/check.sh web): the web client in
+# headless Firefox (util/web_drive.sh), the module the browser's instance
+if [ "${1:-}" = web ]; then
+	check_build web
+	start_server "$t/web_srv.log" "Listening at" 300 auto env \
+		BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_STEEP=22 \
+		BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP_VAR=0 \
+		BUILDAT_HILLCLIMB_BEARING=80 BUILDAT_HILLCLIMB_DIG=2 BUILDAT_HILLCLIMB_POWER=100 \
+		BUILDAT_HILLCLIMB_STONES=35 BUILDAT_HILLCLIMB_LOOSE=3 \
+		"$here/Build/bin/buildat_server" -m "$app" -D "$t/web_u" -C "$t/web_c" \
+		-W "$here/web" -l 3 -u launcher=1 || fail "the server ($t/web_srv.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	cat > "$t/lap.json" <<'J'
+[
+	["nav", "${URL}"],
+	["waitlog", "hillclimb: this client's car is [0-9]", 120],
+	["waitlog", "W starts the clock", 60],
+	["holdkey", "w", 40000],
+	["waitlog", "hillclimb: the run finished", 30],
+	["waitlog", "hillclimb: prediction [(]browser[)]", 15]
+]
+J
+	WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" "$here/util/web_drive.sh" \
+		firefox hillclimb "$t/lap.json" "$t/web" > "$t/web_drive.log" 2>&1 ||
+		fail "the web lap ($t/web_drive.log: $(tail -2 "$t/web_drive.log" | tr '\n' ' '))"
+	grep -aq "wasm main: ready (the browser's instance)" "$t/web/page.log" ||
+		fail "not the browser's instance ($t/web/page.log)"
+	pred_check "$t/web/page.log" "browser"
+	echo "PASS: a lap on the web, the car predicted from the wasm in the browser"
+	exit 0
+fi
 
 g++ -std=c++11 -O1 -DHILL_TEST -x c++ "$app/main/hill.h" -o "$t/hill_test" \
 	2> "$t/hill_build.log" || fail "hill.h self test did not build: $(head -3 "$t/hill_build.log")"
@@ -52,7 +108,7 @@ done
 # stdin, arg[1] being nil)
 luajit -e 'buildat = {Logger = function() end}; require = function() end' \
 	"$app/main/client_lua/touch.lua" || fail "touch.lua's self test"
-g++ -std=c++11 -O1 -DCAR_TEST -x c++ "$app/main/car.h" -o "$t/car_test" \
+g++ -std=c++11 -O1 -DCAR_TEST -x c++ "$app/main/wasm/car.h" -o "$t/car_test" \
 	2> "$t/car_build.log" || fail "car.h self test did not build: $(head -3 "$t/car_build.log")"
 "$t/car_test" || fail "car.h self test"
 
@@ -897,5 +953,58 @@ echo "$in" | grep -q '^1 0 0 0 4 0 4[0-9]|' ||
 echo "$in" | grep -q '^1 0 0 0 3 0 0|' ||
 	fail "the stick in third under the orbit's drag ($t/touch.log)"
 echo "  touch: the stick's drives (gear:metres) $climbs; Start, then first gear at z ${start#*|} m"
-echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds"
+# [CLIENT_WASM] step 5: the car predicted on its client by the module's
+# .wasm (main/wasm/predict.cpp: car.h's step, which the server runs
+# natively from the same files). The straight hill at 22 degrees climbed
+# to the finish, W held from the prompt: the client's self test is the
+# server's, bit for bit; the module runs in the interpreter while it
+# compiles, then compiled; the corrections are counted (pred_check); the
+# time from W to the car's first centimetre is less predicted than by the
+# server's state. Again with the client's cache: the compiled module
+# from it at once. Again with the compiler hidden
+# (BUILDAT_CHECK_WASM_INTERPRETER): the interpreter for good.
+mp_server pred_srv "BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_FEATURES=0
+	BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
+# (the prompt alone: on a hill already made it comes with the car's line,
+# before or after it; then a prediction line, so W is timed from a car the
+# prediction has)
+cat > "$t/pred.cmds" <<C
+wait_log 120000 W starts the clock
+wait_log 15000 hillclimb: prediction (
+keydown W
+wait_log 90000 hillclimb: the run finished
+keyup W
+wait_log 15000 hillclimb: prediction (
+quit
+C
+pred_run() # <name> [env...]: a lap, the client's cache c_pred's
+{
+	local name=$1; shift
+	timeout 300 env "$@" bin/buildat -C "$t/c_pred" -D "$t/u_$name" -w 800x500 \
+		-l 3 -o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$t/${PRED_CMDS:-pred}.cmds" \
+		> "$t/$name.log" 2>&1 || fail "the lap ($t/$name.log)"
+}
+pred_run pred1
+grep -aq "hillclimb: the car's step from the wasm now compiled" "$t/pred1.log" ||
+	fail "the module not moved to the compiled one ($t/pred1.log)"
+pred_check "$t/pred1.log" "interpreter, compiling"
+pred_run pred2
+grep -aq "wasm main: compiled module from the cache" "$t/pred2.log" ||
+	fail "the client's cache not hit ($t/pred2.log)"
+pred_check "$t/pred2.log" "compiled"
+pred_run pred3 BUILDAT_CHECK_WASM_INTERPRETER=1
+pred_check "$t/pred3.log" "interpreter"
+grep -a "hillclimb: prediction (interpreter)" "$t/pred3.log" | tail -1 | sed 's/.*; the steps/  the interpreter: the steps/; s/ a second;.*/ a second/'
+# No wasm (BUILDAT_CHECK_WASM_OFF: the module failed as on the Windows
+# client, which has none yet): the lap as before the module, the car as
+# the server sends it
+grep -v "hillclimb: prediction (" "$t/pred.cmds" > "$t/pred_off.cmds"
+PRED_CMDS=pred_off pred_run pred4 BUILDAT_CHECK_WASM_OFF=1
+grep -aq "hillclimb: no prediction, the car as the server sends it: wasm modules do not run on this platform yet" "$t/pred4.log" &&
+	grep -aq "hillclimb: the run finished in" "$t/pred4.log" &&
+	! grep -aq "hillclimb: prediction (" "$t/pred4.log" ||
+	fail "the lap with no wasm ($t/pred4.log)"
+echo "  no wasm: the lap driven by the server's state alone"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds, the car predicted from the wasm"
 # vim: set noet ts=4 sw=4:

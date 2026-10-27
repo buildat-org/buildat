@@ -120,6 +120,63 @@ ${WS_ROWS}\t{nullptr, nullptr},
 };
 }
 ")
+# [CLIENT_WASM] A module's wasm/: compiled into the server as its module
+# (state.cpp's native build of it), and built to <name>.wasm for its
+# clients with emsdk's clang and wasm-ld and the flags of
+# src/server/wasm_build.cpp, packed at /wasm, where this server looks
+# (wasm_build.cpp, BUILDAT_STATIC_MODULES)
+file(READ "${CMAKE_SOURCE_DIR}/src/server/wasm_build.cpp" WS_WB)
+string(REGEX MATCH "WASM_CFLAGS = \"([^\"]*)\"" _ "${WS_WB}")
+separate_arguments(WS_WASM_CFLAGS UNIX_COMMAND "${CMAKE_MATCH_1}")
+string(REGEX MATCH "WASM_LDFLAGS = \"([^\"]*)\"" _ "${WS_WB}")
+separate_arguments(WS_WASM_LDFLAGS UNIX_COMMAND "${CMAKE_MATCH_1}")
+set(WS_WASM_DIR "${CMAKE_BINARY_DIR}/client_wasm")
+set(WS_WASMS "")
+foreach(N ${WS_CPP_NAMES})
+	list(FIND WS_NAMES "${N}" I)
+	list(GET WS_DIRS ${I} D)
+	if(NOT IS_DIRECTORY "${D}/wasm")
+		continue()
+	endif()
+	if(NOT WS_CLANG)
+		find_program(WS_CLANG clang HINTS "$ENV{EMSDK}/upstream/bin" NO_DEFAULT_PATH)
+		find_program(WS_WASM_LD wasm-ld HINTS "$ENV{EMSDK}/upstream/bin" NO_DEFAULT_PATH)
+		if(NOT WS_CLANG OR NOT WS_WASM_LD)
+			message(FATAL_ERROR "${D}/wasm: no clang and wasm-ld in $ENV{EMSDK}/upstream/bin")
+		endif()
+	endif()
+	file(GLOB_RECURSE W_SRCS CONFIGURE_DEPENDS "${D}/wasm/*.c" "${D}/wasm/*.cc" "${D}/wasm/*.cpp")
+	file(GLOB_RECURSE W_ALL CONFIGURE_DEPENDS "${D}/wasm/*")
+	list(APPEND WS_SRCS ${W_SRCS})
+	set_property(SOURCE ${W_SRCS} "${D}/${N}.cpp" APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+	set(W_OBJS "")
+	set(W_CMDS "")
+	set(K 0)
+	foreach(S ${W_SRCS})
+		if(S MATCHES "\\.c$")
+			set(W_STD -std=c11)
+		else()
+			set(W_STD -std=c++17 -fno-exceptions -fno-rtti)
+		endif()
+		set(O "${WS_WASM_DIR}_obj/${N}.${K}.o")
+		list(APPEND W_CMDS COMMAND "${WS_CLANG}" ${WS_WASM_CFLAGS} ${W_STD}
+			"-I${CMAKE_SOURCE_DIR}/src" -c "${S}" -o "${O}")
+		list(APPEND W_OBJS "${O}")
+		math(EXPR K "${K} + 1")
+	endforeach()
+	add_custom_command(OUTPUT "${WS_WASM_DIR}/${N}.wasm"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${WS_WASM_DIR}" "${WS_WASM_DIR}_obj"
+		${W_CMDS}
+		COMMAND "${WS_WASM_LD}" ${WS_WASM_LDFLAGS} ${W_OBJS} -o "${WS_WASM_DIR}/${N}.wasm"
+		DEPENDS ${W_ALL} "${CMAKE_SOURCE_DIR}/src/interface/wasm_api.h"
+			"${CMAKE_SOURCE_DIR}/src/server/wasm_build.cpp"
+		COMMENT "${N}'s wasm/ for its clients")
+	list(APPEND WS_WASMS "${WS_WASM_DIR}/${N}.wasm")
+endforeach()
+if(WS_WASMS)
+	add_custom_target(web_server_client_wasm DEPENDS ${WS_WASMS})
+	add_dependencies(${SERVER_EXE_NAME} web_server_client_wasm)
+endif()
 target_sources(${SERVER_EXE_NAME} PRIVATE ${WS_TABLE} ${WS_SRCS})
 set_property(SOURCE ${WS_SRCS} APPEND PROPERTY COMPILE_DEFINITIONS
 	BUILDAT_WEB_MODULE)
@@ -180,6 +237,10 @@ endforeach()
 # app needs one
 if(EXISTS "${CMAKE_SOURCE_DIR}/extensions/luanti_client/res")
 	list(APPEND WS_LINK_FLAGS "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/extensions/luanti_client/res@/buildat/extensions/luanti_client/res")
+endif()
+if(WS_WASMS)
+	list(APPEND WS_LINK_FLAGS "SHELL:--preload-file ${WS_WASM_DIR}@/wasm")
+	set_property(TARGET ${SERVER_EXE_NAME} APPEND PROPERTY LINK_DEPENDS ${WS_WASMS})
 endif()
 target_link_options(${SERVER_EXE_NAME} PRIVATE ${WS_LINK_FLAGS})
 set_property(TARGET ${SERVER_EXE_NAME} APPEND PROPERTY

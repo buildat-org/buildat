@@ -33,6 +33,10 @@ local FAR_CLIP = 150 * U
 -- sky_model.lua, served by main.cpp ([SKY_RENDER_SHARED])
 local sky_model = load("luanti/sky_model.lua")
 local sky_light = load("sky_render/init.lua")
+-- [CLIENT_WASM] step 5: this client's car, predicted
+local predict = load("main/predict.lua")()
+buildat.sub_packet("hillclimb:setup", predict.setup)
+buildat.sub_packet("hillclimb:state", predict.state)
 local PHYS = sky_light.PHYS
 
 voxelworld.use_skylight = true
@@ -333,6 +337,7 @@ buildat.sub_packet("hillclimb:hill", function(data)
 		dig = v[22] or 6, power = v[23] or 150, grip = v[24] or 60,
 		stones = v[25] or 20, loose = v[26] or 1, wet = v[27] or 150}
 	hill.may_pick = v[14] ~= 0
+	predict.hill(v[1], v[2], v[3])
 	log:info(string.format("hillclimb: the hill %dx%dx%d, at %g N, day %g, "
 			.. "%g h; seed %d, %d degrees +-%d, %d m, %d kg", v[1], v[2], v[3],
 			v[7], v[8], v[9], v[10], v[11], v[16] or 0, v[12], v[13]))
@@ -519,6 +524,13 @@ buildat.sub_packet("hillclimb:car", function(data)
 	c.states[1] = c.states[2]
 	c.states[2] = {t = scene.elapsedTime, v = v}
 	c.node.enabled = true
+	if id == own_id then
+		predict.server_moved(v[1], v[2], v[3])
+		if v[17] == 2 and c.race ~= 2 then
+			log:info(string.format("hillclimb: the run finished in %.2f s", v[18]))
+		end
+		c.race = v[17]
+	end
 end)
 local car_pos = nil
 local function draw_car(c)
@@ -527,6 +539,14 @@ local function draw_car(c)
 		return
 	end
 	local a = c.states[1] or b
+	-- This client's own as predicted, with the server's race and the rest
+	local pv = c == cars[own_id] and predict.pose()
+	if pv then
+		for i = 16, #b.v do
+			pv[i] = b.v[i]
+		end
+		a, b = {t = 0, v = pv}, {t = 0, v = pv}
+	end
 	local span = math.max(1e-3, b.t - a.t)
 	local k = math.max(0, math.min(1, (scene.elapsedTime - b.t) / span))
 	local function mix(i) return a.v[i] + (b.v[i] - a.v[i]) * k end
@@ -702,10 +722,11 @@ local pause = nil -- main/pause.lua's, made below
 -- [HC_TOUCH] main/touch.lua's on a touchscreen, made below; its Start
 -- button's reset, sent once
 local touch, touch_reset = nil, false
-local sent, sent_t = nil, 0
--- "accel brake left right gear reset steer" (main.cpp on_input), sent
+local sent, sent_t, sent_seq = nil, 0, nil
+-- "accel brake left right gear reset steer seq" (main.cpp on_input), sent
 -- when it changes and twice a second besides; steer -100..100, the keys'
--- full lock or the touch stick's
+-- full lock or the touch stick's; seq the input's number, which the
+-- prediction times it by ([CLIENT_WASM] step 5)
 local function send_input()
 	for g = 1, 4 do
 		if down("gear" .. g) then gear = g end
@@ -725,6 +746,7 @@ local function send_input()
 		brake = st.brake and 1 or brake
 		steer = math.floor(st.steer * 100 + 0.5)
 	end
+	local seq = predict.input(accel, brake, steer, gear)
 	local msg = string.format("%d %d %d %d %d %d %d", accel, brake, left,
 			right, gear, touch_reset and 1 or b("reset"), steer)
 	touch_reset = false
@@ -734,9 +756,9 @@ local function send_input()
 		log:info(string.format("hillclimb: input %s at z %.1f m", msg,
 				car_pos and car_pos.z / U or 0))
 	end
-	if msg ~= sent or now - sent_t > 0.5 then
-		buildat.send_packet("hillclimb:input", msg)
-		sent, sent_t = msg, now
+	if msg ~= sent or seq ~= sent_seq or now - sent_t > 0.5 then
+		buildat.send_packet("hillclimb:input", msg .. " " .. seq)
+		sent, sent_t, sent_seq = msg, now, seq
 	end
 end
 
@@ -1311,6 +1333,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	update_sky()
 	light_outside(dt)
 	voxel_shading.update(dt)
+	predict.frame(dt)
 	draw_cars()
 	-- [HC_PAUSE_MENU] Escape: the Tab menu closed if it is open, else the
 	-- pause menu opened or closed (not while the chat or the settings
