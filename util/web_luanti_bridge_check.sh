@@ -1,5 +1,7 @@
 #!/bin/bash
-# tier: full
+# tier: broken
+# broken: back to full; the drive's click, stale against the search-style
+#   launcher, as web_play_check.sh's
 # cost: 120s (2026-10-04)
 # covers: apps/play/** builtin/network/network.cpp client/core/network/init.lua
 # [PLAY_PAGE] (c): the web client on apps/play's page reaches a Luanti
@@ -18,7 +20,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d "/tmp/buildat_bridge.XXXXXX")
 PLAY=29711
 LIST=29713
-LUANTI=30041
+LUANTI_PORT=30041
 luanti=$LUANTI
 bin=${LUANTI_BIN:-$luanti/bin/luanti}
 pids=()
@@ -34,12 +36,12 @@ mkdir -p "$tmp/world"
 printf 'gameid = devtest\nbackend = sqlite3\nserver_announce = false\n%s\n' "$WEB_WORLD_MT" \
 	> "$tmp/world/world.mt"
 printf 'mute_sound = true\n' > "$tmp/luanti.conf"
-"$bin" --server --world "$tmp/world" --port $LUANTI --config "$tmp/luanti.conf" \
+"$bin" --server --world "$tmp/world" --port $LUANTI_PORT --config "$tmp/luanti.conf" \
 	> "$tmp/luanti.log" 2>&1 &
 pids+=($!)
 mkdir -p "$tmp/list"
 printf '{"list": [{"address": "127.0.0.1", "port": %d, "name": "Listed"}]}' \
-	$((LUANTI + 1)) > "$tmp/list/list"
+	$((LUANTI_PORT + 1)) > "$tmp/list/list"
 python3 -m http.server -b 127.0.0.1 -d "$tmp/list" $LIST > "$tmp/list.log" 2>&1 &
 pids+=($!)
 BUILDAT_CONNECT_PORTS=$LIST BUILDAT_LUANTI_LIST=http://127.0.0.1:$LIST \
@@ -83,14 +85,14 @@ print(f[4:2 + f[1]].decode() if f[:1] == b"\x88" else "open")
 # Listed, but this machine's: a public page reaches public addresses
 # only ([SECURITY_RUN_3]), so a listed one is past the list check and
 # stopped at the next
-listed=$(ws 127.0.0.1:$((LUANTI + 1)) play.example)
+listed=$(ws 127.0.0.1:$((LUANTI_PORT + 1)) play.example)
 [ "$listed" = "not a public address" ] ||
 	fail "a listed private address: $listed ($tmp/play.log)"
-refused=$(ws 127.0.0.1:$LUANTI play.example)
-grep -q "not on Luanti's list (127.0.0.1:$LUANTI)" "$tmp/play.log" ||
+refused=$(ws 127.0.0.1:$LUANTI_PORT play.example)
+grep -q "not on Luanti's list (127.0.0.1:$LUANTI_PORT)" "$tmp/play.log" ||
 	fail "a public page reached this machine's server ($tmp/play.log)"
 # A Host claiming the page is local does not make its visitor so
-forged=$(ws 127.0.0.1:$LUANTI 127.0.0.1:$PLAY)
+forged=$(ws 127.0.0.1:$LUANTI_PORT 127.0.0.1:$PLAY)
 case "$forged" in *"public list"*) ;; *) fail "a forged local Host: $forged";; esac
 case "$refused" in *"public list"*) ;; *) fail "the refusal said: $refused";; esac
 echo "PASS: a local page reaches this machine's Luanti server through the bridge; a public one the listed servers only, told why otherwise"
