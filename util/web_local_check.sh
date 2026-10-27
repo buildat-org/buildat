@@ -57,6 +57,12 @@ end=$(date +%s.%N)
 page=$t/web/page.log
 grep -a "eval:" "$t/drive.log" | cut -c 1-300
 grep -a "server: .*network: .*ticks/s" "$page" | tail -3 | cut -c 9-
+# [WEB_LOCAL_MEMORY] The worker's malloc in use, ~140 MiB (2026-10-27,
+# flat over 10 minutes); a no-op delete linked in once took it to the 2 GiB
+# cap in seconds
+used=$(grep -ao "MiB, [0-9]* MiB in use" "$page" | tail -1 | awk '{print $2}')
+[ -n "$used" ] && [ "$used" -lt 512 ] ||
+	fail "the server's memory in use: ${used:-not logged} MiB, not under 512"
 grep -a "frame split" "$page" | tail -2 | cut -c 1-120
 grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
 grep -q "Connect succeeded (page:)" "$page" || fail "the client did not join by the page's stream"

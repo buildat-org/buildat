@@ -27,8 +27,10 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <malloc.h> // mallinfo()
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <emscripten/heap.h>
 #else
 #define EMSCRIPTEN_KEEPALIVE
 #define MAIN_THREAD_ASYNC_EM_ASM(...)
@@ -170,9 +172,17 @@ struct Module: public interface::Module, public network::Interface
 		if(m_said_us == 0)
 			m_said_us = now;
 		if(now - m_said_us >= 10000000){
+			// [WEB_LOCAL_MEMORY] The worker's memory: the wasm's (it only
+			// grows; the cap is MAXIMUM_MEMORY in util/web_server.cmake)
+			// and what malloc has handed out of it
+			size_t heap = 0;
+#ifdef __EMSCRIPTEN__
+			heap = emscripten_get_heap_size();
+#endif
 			log_i(MODULE, "network: %.1f ticks/s; the page's stream %zu "
-					"bytes in, %zu out", m_ticks * 1e6 / (now - m_said_us),
-					m_bytes_in, m_bytes_out);
+					"bytes in, %zu out; memory %zu MiB, %zu MiB in use",
+					m_ticks * 1e6 / (now - m_said_us), m_bytes_in, m_bytes_out,
+					heap >> 20, (size_t)mallinfo().uordblks >> 20);
 			m_said_us = now;
 			m_ticks = 0;
 			m_bytes_in = m_bytes_out = 0;
