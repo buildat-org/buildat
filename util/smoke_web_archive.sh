@@ -45,6 +45,16 @@ for i in $(seq 1 900); do
 done
 grep -q "Listening at" "$log" || { echo "smoke: no Listening in 900 s" >&2; tail -30 "$log" >&2; exit 1; }
 python3 "$here/util/test_web_transport.py" "127.0.0.1:$port"
+# [WEB_LOCAL_SERVER] An app's own server for the page is there, and its
+# page and files are served cross-origin isolated
+# simplified: hillclimb's alone, of util/package.sh's WEB_LOCAL_APPS
+for u in "/?local=hillclimb" /local/hillclimb/buildat_server.wasm; do
+	h=$(curl -s -m 30 -D - -o /dev/null "http://127.0.0.1:$port$u" | tr -d '\r')
+	echo "$h" | grep -q "^HTTP/1.1 200" &&
+		echo "$h" | grep -qi "^Cross-Origin-Embedder-Policy: require-corp" ||
+		{ echo "smoke: $u not served isolated: $(echo "$h" | head -1)" >&2; exit 1; }
+done
+echo "smoke: web/local/hillclimb served isolated"
 # **And the page runs** ([WEB_BLANK]): the transport test passed the 0.5.67
 # web client, which came up black -- its scripts raised in the browser's
 # Lua. A headless browser loads the page: the game's first script has to

@@ -625,7 +625,27 @@ build_web() {
 	for f in index.html buildat.js buildat.wasm buildat.data; do
 		[ -s "$here/web/$f" ] || { echo "web client: no web/$f" >&2; return 1; }
 	done
+	# [WEB_LOCAL_SERVER] Each app in WEB_LOCAL_APPS gets its own server in
+	# web/local/<app>/, which the page runs at ?local=<app>
+	local a
+	log="$root/build_web_server.log"
+	: > "$log"
+	for a in $WEB_LOCAL_APPS; do
+		echo "web server: util/build_web_server.sh $a ($log)" >&2
+		"$here/util/build_web_server.sh" "$a" -j "$jobs" >> "$log" 2>&1 || {
+			echo "the web server of $a did not build; its log's end:" >&2
+			tail -30 "$log" >&2; return 1; }
+		for f in js wasm data; do
+			[ -s "$here/web/local/$a/buildat_server.$f" ] ||
+				{ echo "web server: no web/local/$a/buildat_server.$f" >&2; return 1; }
+		done
+	done
 }
+
+# The apps whose modules all build for the web ("web": true in their
+# meta.json; util/web_server.cmake refuses the others)
+# simplified: named here; an app newly marked is added by hand
+WEB_LOCAL_APPS="hillclimb demo_aggregate skeldat"
 
 # The apps web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
 # one (user, 2026-09-29): the others ship as source, and on a box with no
@@ -718,6 +738,10 @@ make_web_archive() {
 	local src="$root/stage/$from" stage="$root/stage/$name"
 	rm -rf "$stage"; cp -a "$src" "$stage"
 	[ -s "$stage/web/buildat.wasm" ] || { echo "web archive: no web/ in the stage" >&2; return 1; }
+	for a in $WEB_LOCAL_APPS; do
+		[ -s "$stage/web/local/$a/buildat_server.wasm" ] ||
+			{ echo "web archive: no web/local/$a in the stage" >&2; return 1; }
+	done
 	if [ -n "$precompiled" ]; then
 		prebuild_apps "$stage" "$name" >&2 || return 1
 	else

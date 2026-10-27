@@ -59,7 +59,8 @@ docker run --rm -i \
 			cp \$d/build.log /out/logs/\$b.build.log 2>/dev/null; done
 		# The web client's build and the per-game prebuilds ([LINUX_SERVER])
 		# (a Windows run has neither; the script is set -e)
-		cp Build/package/build_web.log /out/logs/ 2>/dev/null || true
+		cp Build/package/build_web.log Build/package/build_web_server.log \
+			/out/logs/ 2>/dev/null || true
 		cp -r Build/package/stage/prebuild-apps-* /out/logs/ 2>/dev/null || true
 		# And the smoke tests' leavings, for reading a failure from outside:
 		# KEEP_TMP above keeps package.sh's trap from deleting them (the
