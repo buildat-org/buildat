@@ -259,6 +259,8 @@ bool RecursiveDelete(std::string path)
 	//return false;
 
 	pid_t child_pid = fork();
+	if(child_pid < 0)
+		return false;
 
 	if(child_pid == 0)
 	{
@@ -284,13 +286,14 @@ bool RecursiveDelete(std::string path)
 	else
 	{
 		// Parent
-		int child_status;
+		// Its own child only: wait() reaped any, and took the client's
+		// wasm compile that was running beside it ([CLIENT_WASM] step 6)
+		int child_status = 1;
 		pid_t tpid;
 		do {
-			tpid = wait(&child_status);
-			//if(tpid != child_pid) process_terminated(tpid);
-		} while(tpid != child_pid);
-		return (child_status == 0);
+			tpid = waitpid(child_pid, &child_status, 0);
+		} while(tpid < 0 && errno == EINTR);
+		return tpid == child_pid && child_status == 0;
 	}
 }
 
