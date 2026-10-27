@@ -12,7 +12,9 @@
 # reason; and two modules refused at the load, one importing a call the
 # list does not name (unlisted/), one a call of it with another signature
 # (wrong_sig/). deep/ makes 12000 nodes in chains (the c key) natively,
-# and its camera still holds them ([HOLD_REF_UAF]). Natively twice,
+# and its camera still holds them ([HOLD_REF_UAF]); on the web its w key
+# runs the browser's stack out inside a binding, which stops that module
+# and not the client ([WASM_WEB_IMPORT_DEPTH]). Natively twice,
 # compiled and in the interpreter; `web` in headless Chrome. The
 # generated files are checked against the generator.
 #
@@ -121,9 +123,18 @@ if [ $web = 1 ]; then
 	["key", "Space"],
 	["waitlog", "the server answered echo: key", 30],
 	["wait", 500],
-	["shot", "${OUT}/after.png"]
+	["shot", "${OUT}/after.png"],
+	["key", "w"],
+	["waitlog", "deep: limit", 60],
+	["waitlog", "the stack ran out inside the client during a binding", 60],
+	["key", "Space"],
+	["waitlog", "the server answered echo: key 2", 10]
 ]
 EOF
+	# [WASM_WEB_IMPORT_DEPTH] deep/'s w key: a sweep down from the
+	# browser's stack limit, until the stack runs out inside the client's
+	# own code during a binding. That module is stopped, and the client
+	# goes on: main/ still answers a key
 	"$here/util/web_drive.sh" chrome $app "$t/steps.json" "$t/web" > "$t/drive.log" 2>&1 ||
 		{ tail -20 "$t/drive.log"; fail "the web drive failed ($t/web)"; }
 	grep -a " I echo *: " "$t/web/server.log" | sed 's/.*echo *: //'

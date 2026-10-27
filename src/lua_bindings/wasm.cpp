@@ -730,6 +730,29 @@ static lua_State *g_L = nullptr;
 // A binding's Lua is running ([CLIENT_WASM_BINDINGS]): no wasm call starts
 // meanwhile, of this module or another, so that no import re-enters wasm
 static int g_import_depth = 0;
+#ifdef __EMSCRIPTEN__
+// [WASM_WEB_IMPORT_DEPTH] On the web the browser's stack can run out
+// inside the client's own code during a binding's Lua, and its RangeError
+// unwinds through the client to bw_call()'s catch: no destructor, no
+// lua_pcall's error path and no g_import_depth-- run. What lua_pcall would
+// restore is kept here while a binding runs, for l_wasm_call() to put back
+// (lua_unwind_restore(), with Lua's internals at the end of this file).
+struct LuaUnwind {
+	lua_State *L = nullptr;
+	ptrdiff_t top = 0, ci = 0, errfunc = 0;
+	void *error_jmp = nullptr;
+	unsigned short n_ccalls = 0;
+	unsigned char allowhook = 0;
+};
+static void lua_unwind_save(LuaUnwind &u, lua_State *L);
+static void lua_unwind_restore(const LuaUnwind &u);
+static struct {
+	bool active = false;
+	// The binding's Lua, and the client's main state, where Urho3D's event
+	// handlers run, if another
+	LuaUnwind call, main;
+} g_binding_unwind;
+#endif
 // The live instances' handle tags (1 to 127)
 static bool g_tag_used[128] = {};
 
@@ -1772,11 +1795,15 @@ EM_JS(int, bw_call, (int id, const char *name, const double *args,
 		var v = HEAPF64[(args >> 3) + i];
 		a.push(t[i] == 'I' ? BigInt(v) : v);
 	}
+	var sp = stackSave();
 	try {
 		var r = rec.inst.exports[UTF8ToString(name)].apply(null, a);
 		HEAPF64[out >> 3] = r === undefined ? 0 : Number(r);
 		return 0;
 	} catch (e) {
+		// Thrown in the client's own code under an import, the client's
+		// stack pointer is where that code left it
+		stackRestore(sp);
 		rec.err = String(e).substring(0, 300);
 		return 1;
 	}
@@ -2431,11 +2458,19 @@ struct Instance {
 			why = "the Lua stack is full";
 			return 0;
 		}
+#ifdef __EMSCRIPTEN__
+		lua_unwind_save(g_binding_unwind.call, L);
+		lua_unwind_save(g_binding_unwind.main, g_L != L ? g_L : nullptr);
+		g_binding_unwind.active = true;
+#endif
 		g_import_depth++;
 		lua_pushcfunction(L, binding_lua);
 		lua_pushlightuserdata(L, &c);
 		const int status = lua_pcall(L, 1, 0, 0);
 		g_import_depth--;
+#ifdef __EMSCRIPTEN__
+		g_binding_unwind.active = false;
+#endif
 		if(status != 0){
 			const char *e = lua_tostring(L, -1);
 			why = printable((const uint8_t*)(e ? e : "?"),
@@ -3623,6 +3658,22 @@ static int l_call(lua_State *L)
 	if(bw_call(in->web_id, sig.name.c_str(), plain, sig.params.c_str(),
 			n, &result) != 0)
 		trap = in->take_error();
+	// A binding's Lua unwound by the browser (above): the Lua states put
+	// back first, as nothing on L can run before; the module stopped, as
+	// the client's work for it may be anywhere
+	if(g_binding_unwind.active){
+		g_binding_unwind.active = false;
+		lua_unwind_restore(g_binding_unwind.call);
+		lua_unwind_restore(g_binding_unwind.main);
+		g_import_depth = 0;
+		in->in_call = false;
+		in->call_L = nullptr;
+		in->sent.clear();
+		in->fail("stopped: "+fname+": the stack ran out inside the client "
+				"during a binding ("+trap+")");
+		raise("wasm %s: %s: stopped: the stack ran out in a binding",
+				in->name.c_str(), fname.c_str());
+	}
 #endif
 	in->in_call = false;
 	in->call_L = nullptr;
@@ -3863,5 +3914,50 @@ void init_wasm(lua_State *L)
 #endif // BUILDAT_WASM_FUZZ
 
 } // namespace lua_bindings
+
+#if defined(__EMSCRIPTEN__) && !defined(BUILDAT_WASM_FUZZ)
+// Last in the file: Lua's internal headers define short macros. PUC Lua
+// 5.1, which the web client runs, built as C++ as this file is.
+#include <lstate.h>
+#include <ldo.h>
+#include <lfunc.h>
+namespace lua_bindings {
+// What luaD_pcall() keeps and puts back on an error
+static void lua_unwind_save(LuaUnwind &u, lua_State *L)
+{
+	u.L = L;
+	if(!L)
+		return;
+	u.top = savestack(L, L->top);
+	u.ci = saveci(L, L->ci);
+	u.errfunc = L->errfunc;
+	u.error_jmp = L->errorJmp;
+	u.n_ccalls = L->nCcalls;
+	u.allowhook = L->allowhook;
+}
+static void lua_unwind_restore(const LuaUnwind &u)
+{
+	lua_State *L = u.L;
+	if(!L)
+		return;
+	StkId oldtop = restorestack(L, u.top);
+	luaF_close(L, oldtop);
+	L->top = oldtop;
+	L->nCcalls = u.n_ccalls;
+	L->ci = restoreci(L, u.ci);
+	L->base = L->ci->base;
+	L->savedpc = L->ci->savedpc;
+	L->allowhook = u.allowhook;
+	L->errfunc = u.errfunc;
+	L->errorJmp = (struct lua_longjmp*)u.error_jmp;
+	// ldo.c's restore_stack_limit()
+	if(L->size_ci > LUAI_MAXCALLS){
+		int inuse = (int)(L->ci - L->base_ci);
+		if(inuse + 1 < LUAI_MAXCALLS)
+			luaD_reallocCI(L, LUAI_MAXCALLS);
+	}
+}
+} // namespace lua_bindings
+#endif
 // vim: set noet ts=4 sw=4:
 
