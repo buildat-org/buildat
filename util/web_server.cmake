@@ -6,7 +6,12 @@
 # The app's and the modules' directories are packed into the server's .data
 # at /buildat, as the share path.
 
-set(WS_APP_DIR "${CMAKE_SOURCE_DIR}/apps/${BUILDAT_WEB_SERVER_APP}")
+# An app of apps/ by its name, or one anywhere by its path (a check's fixture)
+if(IS_ABSOLUTE "${BUILDAT_WEB_SERVER_APP}")
+	set(WS_APP_DIR "${BUILDAT_WEB_SERVER_APP}")
+else()
+	set(WS_APP_DIR "${CMAKE_SOURCE_DIR}/apps/${BUILDAT_WEB_SERVER_APP}")
+endif()
 if(NOT EXISTS "${WS_APP_DIR}")
 	message(FATAL_ERROR "BUILDAT_WEB_SERVER_APP: no ${WS_APP_DIR}")
 endif()
@@ -25,6 +30,7 @@ endforeach()
 set(WS_NAMES "")
 set(WS_DIRS "")
 set(WS_CPP_NAMES "")
+set(WS_UNMARKED "")
 while(WS_TODO)
 	list(POP_FRONT WS_TODO D)
 	get_filename_component(N "${D}" NAME)
@@ -36,6 +42,12 @@ while(WS_TODO)
 	list(APPEND WS_DIRS "${D}")
 	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${D}/meta.json")
 	file(READ "${D}/meta.json" J)
+	# The gate: a module says it keeps to the web API ("web": true), unless
+	# a stand-in (<name>_web.cpp beside it) takes its place
+	string(JSON WEB ERROR_VARIABLE E GET "${J}" web)
+	if(NOT WEB AND NOT EXISTS "${D}/${N}_web.cpp")
+		list(APPEND WS_UNMARKED "${D}")
+	endif()
 	string(JSON CPP_OFF ERROR_VARIABLE E GET "${J}" disable_cpp)
 	if(NOT CPP_OFF)
 		list(APPEND WS_CPP_NAMES "${N}")
@@ -59,10 +71,18 @@ while(WS_TODO)
 		endforeach()
 	endif()
 endwhile()
+if(WS_UNMARKED)
+	string(REPLACE ";" "\n  " WS_UNMARKED "${WS_UNMARKED}")
+	message(FATAL_ERROR "${BUILDAT_WEB_SERVER_APP} cannot be built for the web: "
+		"these modules do not say \"web\": true in their meta.json "
+		"(doc/server_api.txt, \"The web API\"):\n  ${WS_UNMARKED}")
+endif()
 message(STATUS "Web server of ${BUILDAT_WEB_SERVER_APP}: ${WS_NAMES}")
 
-# The table, and each module's source. The network module is a stand-in
-# that accepts nobody: a browser has no listening socket.
+# The table, and each module's source: its stand-in where it has one
+# (network, accounts, starport_announce), else its own. Each is compiled
+# with BUILDAT_WEB_MODULE, under which the headers a module may not use
+# here (sockets, HTTP, processes) are an #error.
 set(WS_TABLE "${CMAKE_BINARY_DIR}/web_server_modules.cpp")
 set(WS_DECLS "")
 set(WS_ROWS "")
@@ -70,8 +90,8 @@ set(WS_SRCS "")
 foreach(N ${WS_CPP_NAMES})
 	list(FIND WS_NAMES "${N}" I)
 	list(GET WS_DIRS ${I} D)
-	if(N STREQUAL "network")
-		list(APPEND WS_SRCS "${D}/network_web.cpp")
+	if(EXISTS "${D}/${N}_web.cpp")
+		list(APPEND WS_SRCS "${D}/${N}_web.cpp")
 	else()
 		list(APPEND WS_SRCS "${D}/${N}.cpp")
 	endif()
@@ -90,6 +110,8 @@ ${WS_ROWS}\t{nullptr, nullptr},
 }
 ")
 target_sources(${SERVER_EXE_NAME} PRIVATE ${WS_TABLE} ${WS_SRCS})
+set_property(SOURCE ${WS_SRCS} APPEND PROPERTY COMPILE_DEFINITIONS
+	BUILDAT_WEB_MODULE)
 target_compile_definitions(${SERVER_EXE_NAME} PRIVATE BUILDAT_STATIC_MODULES RCCPP)
 # What rccpp hands a module: builtin/ and the app's directory
 target_include_directories(${SERVER_EXE_NAME} PRIVATE
@@ -108,6 +130,8 @@ set(WS_LINK_FLAGS
 	-sSTACK_SIZE=8388608 -sDEFAULT_PTHREAD_STACK_SIZE=2097152
 	-sFORCE_FILESYSTEM=1
 	-sEXIT_RUNTIME=1
+	# The page's way to stop it (main.cpp)
+	-sEXPORTED_FUNCTIONS=_main,_buildat_server_stop
 	-sASSERTIONS=1 -sEXCEPTION_STACK_TRACES=1
 	--profiling-funcs
 	"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/server/web/pre.js"

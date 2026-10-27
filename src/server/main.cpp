@@ -22,6 +22,10 @@
 #include <cstdlib> // srand()
 #include <signal.h>
 #include <malloc.h> // mallopt(), M_PERTURB
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <atomic>
+#endif
 #include <string.h> // strerror()
 #include <time.h> // struct timeval
 #define MODULE "main"
@@ -44,6 +48,17 @@ void shutdown_signal_handler(int sig)
 		(void)raise(sig);
 	}
 }
+
+#ifdef __EMSCRIPTEN__
+// [WEB_LOCAL_SERVER]: no signal reaches a server in a page. The page calls
+// Module._buildat_server_stop() from any thread, and the main loop shuts
+// down as on SIGTERM.
+static std::atomic<bool> g_stop_asked(false);
+extern "C" EMSCRIPTEN_KEEPALIVE void buildat_server_stop()
+{
+	g_stop_asked = true;
+}
+#endif
 
 void signal_handler_init()
 {
@@ -548,6 +563,14 @@ int main(int argc, char *argv[])
 				shutdown_reason = "Signal";
 				break;
 			}
+#ifdef __EMSCRIPTEN__
+			if(g_stop_asked){
+				log_i(MODULE, "The page asked the server to stop; shutting "
+						"down");
+				shutdown_reason = "Stopped by the page";
+				break;
+			}
+#endif
 			uint64_t current_us = get_timeofday_us();
 			int64_t delay_us = next_tick_us - current_us;
 			if(delay_us < 0)

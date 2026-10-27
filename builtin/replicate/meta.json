@@ -1,4 +1,5 @@
 {
+	"web": true,
 	"dependencies": [
 		{"module": "main_context"},
 		{"module": "network"}

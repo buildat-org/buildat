@@ -8,7 +8,6 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/os.h"
-#include "interface/tcpsocket.h"
 #include "interface/packet_stream.h"
 #include <algorithm>
 #include "interface/magic_event.h"

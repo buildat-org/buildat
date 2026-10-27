@@ -92,7 +92,7 @@ meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 "dependencies": [{"module": "network"}, {"module": "x", "optional":
 true}], "reverse_dependencies": [...], "disable_cpp": false,
 "client_main": "init.lua", "client_extensions": ["voxel_light"],
-"kind": "app"}. An app's module must say
+"kind": "app", "web": true}. An app's module must say
 engine_api, the engine API it is written for (interface::aitta::
 ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 {"engine_api": 2} is the minimum. A key the loader does not know
@@ -106,7 +106,27 @@ client, when its files first arrive (modules in load order).
 client_extensions names extensions (<share>/extensions/<name>) the
 server serves for the module's client scripts, which run that copy
 (buildat.run_script_file("<name>/init.lua")) rather than the client's
-bundled one: client_file::serve_extension().
+bundled one: client_file::serve_extension(). "web": true says the module
+keeps to the web API (below).
+
+**The web API** ([WEB_LOCAL_SERVER]): util/build_web_server.sh <app>
+builds the server with the app's modules compiled into it, to run in a
+browser (doc/architecture.txt, "Running a game in the browser"). It
+refuses an app any of whose modules, or the modules they depend on, does
+not say "web": true, naming each. There a module is compiled with
+BUILDAT_WEB_MODULE, under which interface/tcpsocket.h, http.h, process.h
+and select_handler.h are an #error: no sockets, HTTP or processes. Files
+are in Emscripten's file system, the app's directories packed into it.
+Three builtins have stand-ins there (<name>_web.cpp beside the module's
+own), so an app that depends on them builds unchanged: network accepts
+no connection yet (the page's own client is to be its one peer);
+accounts has one player, the first peer to connect, who joins by
+name alone (the first join's name, kept in the app's save "_server"), is
+is_local() and the admin, and has no passwords, invites, bans, guests or
+mail; starport_announce lists nothing and takes no Starport IDs.
+client_file watches no files there. The page stops the server by
+Module._buildat_server_stop(), as SIGTERM does natively (under node,
+SIGTERM and SIGINT call it).
 
 
 src/interface, the core

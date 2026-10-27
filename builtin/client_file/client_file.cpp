@@ -11,7 +11,9 @@
 #include "interface/compress.h"
 #include "interface/protocol.h"
 #include "interface/thread.h"
+#ifndef BUILDAT_WEB_MODULE
 #include "interface/select_handler.h"
+#endif
 #include "client_file/api.h"
 #include "network/api.h"
 #include "main_context/api.h"
@@ -119,8 +121,10 @@ struct Module: public interface::Module, public client_file::Interface
 	~Module()
 	{
 		log_d(MODULE, "client_file destruct");
-		m_thread->request_stop();
-		m_thread->join();
+		if(m_thread){
+			m_thread->request_stop();
+			m_thread->join();
+		}
 	}
 
 	void init()
@@ -135,11 +139,15 @@ struct Module: public interface::Module, public client_file::Interface
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:all_files_transferred"));
 
+		// [WEB_LOCAL_SERVER]: a web server's files never change under it, so
+		// it has no watch to wait on
+#ifndef BUILDAT_WEB_MODULE
 		// Don't start thread in constructor because in there this module is not
 		// guaranteed to be available by server->access_module()
 		m_thread.reset(interface::createThread(new FileWatchThread(this)));
 		m_thread->set_name("client_file/select");
 		m_thread->start();
+#endif
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -560,6 +568,7 @@ struct Module: public interface::Module, public client_file::Interface
 
 void FileWatchThread::run(interface::Thread *thread)
 {
+#ifndef BUILDAT_WEB_MODULE
 	interface::SelectHandler handler;
 
 	while(!thread->stop_requested()){
@@ -587,6 +596,7 @@ void FileWatchThread::run(interface::Thread *thread)
 			}
 		});
 	}
+#endif
 }
 
 void FileWatchThread::on_crash(interface::Thread *thread)

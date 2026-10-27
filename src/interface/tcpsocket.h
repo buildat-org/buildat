@@ -1,6 +1,11 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #pragma once
+#ifdef BUILDAT_WEB_MODULE
+// [WEB_LOCAL_SERVER]: a module of the server built for the web has no
+// sockets, HTTP or processes (doc/server_api.txt, "The web API")
+#error "interface/tcpsocket.h is not in the web server's module API"
+#endif
 #include "core/types.h"
 
 struct sockaddr;

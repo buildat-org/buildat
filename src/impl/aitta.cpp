@@ -270,7 +270,7 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 	static const char *known[] = {"engine_api", "kind", "comment",
 		"client_main", "client_extensions", "disable_cpp", "dependencies",
 		"reverse_dependencies", "cxxflags", "ldflags", "cxxflags_windows",
-		"ldflags_windows", "cxxflags_linux", "ldflags_linux"};
+		"ldflags_windows", "cxxflags_linux", "ldflags_linux", "web"};
 	for(json::Iterator it(v); it.valid(); it.next()){
 		const ss_ key = it.key();
 		bool ok = false;
@@ -280,6 +280,10 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 			return "meta.json: \""+key.substr(0, 40)+"\" is not a key this "
 					"Buildat knows";
 	}
+	// [WEB_LOCAL_SERVER]: the module keeps to the web API; read by the web
+	// server's build (util/web_server.cmake), not here
+	if(!v.get("web").is_undefined() && !v.get("web").is_boolean())
+		return "meta.json: \"web\" is true or false";
 	const json::Value &api = v.get("engine_api");
 	if(builtin && api.is_undefined())
 		return "";
