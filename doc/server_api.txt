@@ -102,7 +102,9 @@ like one of Buildat's (builtin/). A dependency is loaded first; a reverse
 dependency is loaded after this module and says the other may use this
 one. disable_cpp is a module with client halves only. client_main names a
 script in the module's client_lua/ that the engine runs once on each
-client, when its files first arrive (modules in load order).
+client, when its files first arrive (modules in load order); "wasm" names
+the engine's default instead (builtin/client_lua/client_lua/wasm_main.lua),
+which runs the module's .wasm and nothing else (interface/wasm_api.h).
 client_extensions names extensions (<share>/extensions/<name>) the
 server serves for the module's client scripts, which run that copy
 (buildat.run_script_file("<name>/init.lua")) rather than the client's
@@ -462,7 +464,7 @@ into atlases per size; add_segment / find_or_add_segment
 AtlasSegmentReference, get_atlas_cache / get_texture, set_surface_maps(bool) (the normal and
 surface maps beside the diffuse, or not), describe_segments, update().
 
-interface/wasm_api.h -- what a module's wasm/ (C or C++) is written
+interface/wasm_api.h -- what a module's wasm/ (C, C++ or Rust) is written
 against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
 it loads the module (cached by the sources' hash; the module refused when
 there is no clang and wasm linker, but a builtin is loaded without its
@@ -491,6 +493,36 @@ call, with the reason in the client's log. The server looks for the
 tools at its start: BUILDAT_WASM_CC and
 BUILDAT_WASM_LD, then clang and wasm-ld in PATH, then emsdk's and
 rustup's rust-lld.
+**Rust**: a wasm/ with a Cargo.toml is a crate (crate-type ["cdylib"],
+#![no_std]) depending on buildat_wasm = "0.1", the same imports with
+slices for pointer and length pairs, a parser of the default main's events
+and a panic handler that logs and traps (src/interface/rust/buildat_wasm;
+the server builds the module with that copy patched in). The server runs
+cargo build --release --offline for wasm32-unknown-unknown with a
+CARGO_HOME of its own, the C build's wasm features, the same maximum
+memory and panics aborting; so a module's crates are its own and path
+dependencies, not crates.io's. Cached by the hash of wasm/'s files (but
+target/) and buildat_wasm's. cargo is BUILDAT_CARGO, then PATH's, then
+$CARGO_HOME/bin's and ~/.cargo/bin's; without it, or without the
+wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown),
+the module is refused, the log saying which.
+**The default client_main** ("client_main": "wasm"): the engine's Lua
+loads the module's .wasm, makes a scene -- a camera, a directional light
+and 8 nodes, each with a CustomGeometry whose material shows the vertex
+colours times the node's own texture (white until set) -- and calls the
+exports frame(float dt) each frame (dt in seconds; the module takes its
+events there) and, once, the optional packets(), which returns a 0-ended
+string of the packet names (without "<module>:", space-separated) it is
+to be sent. An event is little-endian 32-bit words, the first its kind
+(BUILDAT_EVENT_*): START (camera, light, window width and height, n, then
+n pairs of a node and its texture, all handles), KEY_DOWN (key, repeat,
+qualifiers), KEY_UP (key), MOUSE_DOWN and MOUSE_UP (button), MOUSE_MOVE
+(x, y, dx, dy), WHEEL (steps), PACKET (the name's length, the name, then
+the data; at most 65536 bytes of it) and RESIZE (width, height); none
+longer than BUILDAT_EVENT_MAX. A key is Urho3D's code (SDL's: a letter is
+its lowercase ASCII). A trap in frame() is logged and the next frame
+calls it again; a module the meter stops is called no more. An export's
+name may not begin with buildat_.
 
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,
@@ -801,7 +833,7 @@ interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispat
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
 interface/noise.h: lattice, ease, value3, value2, fbm2, fbm3, fbm2_abs, fbm3_abs, NoiseParams, noise2, noise3, fill2, fill3
-interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, windows_sandbox_off_by_env, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
+interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, windows_sandbox_off_by_env, die_with_parent_if_asked, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
 interface/packet_stream.h: InputBuffer, size, empty, begin, clear, append, PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, in_flight, output, send_new_types
 interface/polyvox_cereal.h: save, load
 interface/polyvox_numeric.h: container_coord, container_coord16
@@ -825,7 +857,7 @@ interface/voxel_cereal_legacy.h: In, read_vector, read
 interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result, stands, settle, find, self_test
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
-interface/wasm_api.h: buildat_log, buildat_time_ms, buildat_voxels_size, buildat_voxels_read, buildat_geometry_set, buildat_texture_set, buildat_node_get, buildat_node_set, buildat_send_packet, buildat_event_take
+interface/wasm_api.h: buildat_log, buildat_time_ms, buildat_voxels_size, buildat_voxels_read, buildat_geometry_set, buildat_texture_set, buildat_node_get, buildat_node_set, buildat_send_packet, buildat_event_take, BUILDAT_EVENT_START, BUILDAT_EVENT_KEY_DOWN, BUILDAT_EVENT_KEY_UP, BUILDAT_EVENT_MOUSE_DOWN, BUILDAT_EVENT_MOUSE_UP, BUILDAT_EVENT_MOUSE_MOVE, BUILDAT_EVENT_WHEEL, BUILDAT_EVENT_PACKET, BUILDAT_EVENT_RESIZE, BUILDAT_EVENT_MAX
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write
 ---- end of the generated listing ----

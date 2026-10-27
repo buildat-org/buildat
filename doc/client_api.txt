@@ -873,8 +873,12 @@ buildat.safe.get_file_content(name) -> bytes or nil
   already runs a served file as code, so reading one's bytes is no wider.
 buildat.safe.wasm_load(module) -> m, or nil and why
 - A module's wasm/ ([CLIENT_WASM]): C or C++ against interface/wasm_api.h,
-  which the server builds with clang to a .wasm at its start and serves as
-  <module>/<module>.wasm. Each load is an instance of its own with its own
+  or Rust over its crate buildat_wasm, which the server builds with clang
+  (or cargo) to a .wasm at its start and serves as
+  <module>/<module>.wasm. A module whose meta.json says "client_main":
+  "wasm" needs no Lua for it: the engine's default client main loads it,
+  makes it a scene and calls its frame(dt) export with the input and its
+  packets queued as events (server_api.txt, interface/wasm_api.h). Each load is an instance of its own with its own
   memory. Before anything runs it is validated and capped, on both clients
   alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
   at most 1024 pages (64 MiB), wasm_api.h's imports the only ones (by
