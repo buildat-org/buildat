@@ -2326,6 +2326,15 @@ static int l_wasm_load(lua_State *L)
 	*ud = in;
 	luaL_getmetatable(L, META);
 	lua_setmetatable(L, -2);
+	// For checks only: the module failed as on a platform with no wasm
+	// yet (the Windows client), so a game's way without it is driven
+	if(const char *e = getenv("BUILDAT_CHECK_WASM_OFF")){
+		if(*e && strcmp(e, "0") != 0){
+			in->fail("wasm modules do not run on this platform yet (hidden for "
+					"a check)");
+			return 1;
+		}
+	}
 #if BUILDAT_WASM_NATIVE
 	// The bytes the interpreter runs, written from the module wasm2c
 	// translates: the same, metered and prepared
