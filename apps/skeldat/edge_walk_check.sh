@@ -64,6 +64,8 @@ judge native "$t/c.log" "$t/native.log"
 native=$(grep -ac "stuck at" "$t/c.log")
 
 # Firefox at 1200x800: the page's pointer lock as web_spawn_check.sh's
+# The how-to-play closed by its Escape: a click at Close's place missed
+# it once the dialog grew ([SKELDAT_EDGE_WALK_CLICK])
 command -v "${FIREFOX:-firefox}" > /dev/null && [ -f "$here/web/buildat.wasm" ] || {
 	echo "PASS: native walked the bones' edge a minute ($native stuck lines, none in open air or a voxel); Firefox skipped (no Firefox or web/)"
 	exit 0
@@ -74,7 +76,7 @@ python3 - "$stub" "$t/steps.json" <<'PY'
 import json, sys
 s = [["nav", "${URL}"], ["eval", sys.argv[1]],
 	["waitlog", "pause: how to play shown", 240], ["wait", 1000],
-	["click", 600, 761], ["waitlog", "pause: the menu closed", 10]]
+	["key", "Escape"], ["waitlog", "pause: the menu closed", 10]]
 for i in range(6):
 	for k in "wasd":
 		s += [["holdkey", k, 1000], ["key", "Space"], ["holdkey", k, 1000]]
