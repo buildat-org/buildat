@@ -530,6 +530,20 @@ mp_client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CLIENT=$!
 	CHECK_PIDS+=($CLIENT)
 }
+# [HC_HILL_SENT_TWICE] A join gets the hill, the outside, the fences
+# and its car each once (on a public server the hill's line again at the
+# login: an admin may pick then)
+once() # <client log> <hill lines>
+{
+	local n re p=
+	for re in "this client's car is [0-9]" "hillclimb: the outside, " \
+			"hillclimb: [0-9]* fences, " "hillclimb: the hill [0-9]"; do
+		n=$(grep -ac "$re" "$1")
+		[ "$re" = "hillclimb: the hill [0-9]" ] && [ "$n" = "$2" ] && continue
+		[ "$n" = 1 ] || p="$p '$re' $n times;"
+	done
+	[ -z "$p" ] || fail "a join's packets:$p ($1)"
+}
 mp_server mp "BUILDAT_HILLCLIMB_INTERVAL=20 BUILDAT_HILLCLIMB_FEATURES=0
 	BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
 cat > "$t/mp1.cmds" <<C
@@ -596,6 +610,7 @@ BUILDAT_JOIN_NAME=guest7 BUILDAT_JOIN_PASSWORD=guest7pass BUILDAT_JOIN_CREATE=1 
 	mp_client mp4 "$t/mp4.cmds"
 wait $c3 || fail "the public client ($t/mp3.log)"
 wait $CLIENT || fail "the guest7 client ($t/mp4.log)"
+once "$t/mp3.log" 2
 # [HC_STARPORT] An admin (the setup code's) turns Starport IDs on from
 # the Server window's setting: the hello then says they are taken
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/pub.log" | head -1)
@@ -756,6 +771,7 @@ quit
 C
 mp_client hud "$t/hud.cmds"
 wait $CLIENT || fail "the HUD's drive ($t/hud.log)"
+once "$t/hud.log" 1
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 python3 -I - "$t/hud.log" <<'PY' || fail "the HUD's prompt ($t/hud.log)"
 import re, sys

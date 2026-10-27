@@ -950,8 +950,8 @@ struct Module: public interface::Module
 				"payload; %zu cars", cs(name), pl.id, pl.car->spec.mass,
 				m_payload, m_players.size());
 		if(peer != 0 && peer < BOT_PEER){
+			// The hill went with on_files_transmitted
 			network::send(m_server, peer, "hillclimb:you", itos(pl.id));
-			send_hill(peer);
 			chat::access(m_server, [&](chat::Interface *c){ c->join(peer, name); });
 			send_ranking(peer);
 		}
@@ -2260,8 +2260,12 @@ struct Module: public interface::Module
 
 	void on_login(const accounts::Login &login)
 	{
-		if(m_joining.erase(login.peer))
-			add_player(login.peer, login.name);
+		if(!m_joining.erase(login.peer))
+			return;
+		// Only the hill's line again: an admin may pick now
+		network::send(m_server, login.peer, "hillclimb:hill",
+				hill_packet(login.peer));
+		add_player(login.peer, login.name);
 	}
 
 #include "scores.h"
