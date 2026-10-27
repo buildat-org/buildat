@@ -264,6 +264,8 @@ struct Module: public interface::Module
 	// every section: its workers read the grid until then
 	up_<ground::Ground> m_ground;
 	bool m_ground_live = false;
+	// The hill's sections (make_hill's pins)
+	sv_<pv::Vector3DInt16> m_sections;
 	uint64_t m_made_us = 0; // when make_hill queued the sections
 	float m_flush_t = 0;
 	int m_flushes = 0; // since the last car line: commits, so remeshes
@@ -649,10 +651,13 @@ struct Module: public interface::Module
 						"out", hollow);
 			w->set_load_points(pins);
 			// Asked for now, not by the streamer's later passes: the ground
-			// goes live when worldgen's queue is empty
-			for(const voxelworld::LoadPoint &lp : pins)
-				w->load_or_generate_section(pv::Vector3DInt16(lp.p.getX() / S,
+			// goes live when they are all made (generating())
+			m_sections.clear();
+			for(const voxelworld::LoadPoint &lp : pins){
+				m_sections.push_back(pv::Vector3DInt16(lp.p.getX() / S,
 						lp.p.getY() / S, lp.p.getZ() / S));
+				w->load_or_generate_section(m_sections.back());
+			}
 		});
 		log_i(MODULE, "hillclimb: the hill, seed %u, %.0f degrees +-%.0f, %.0f m "
 				"long, %.1f m high; %dx%dx%d voxels; %s", m_params.seed,
@@ -1398,17 +1403,31 @@ struct Module: public interface::Module
 	// The ground
 	//
 
+	// A section of the hill queued or still being made: worldgen's queue
+	// empties as its workers take the last ones, before they are in the
+	// world (a drive started with one not there, [HC_DRIVE_FLAKY])
+	bool generating()
+	{
+		size_t queued = 1;
+		worldgen::access(m_server, m_scene, [&](worldgen::Instance *i){
+			queued = i->get_num_sections_queued();
+		});
+		bool made = true;
+		if(queued == 0)
+			voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+				for(const pv::Vector3DInt16 &sp : m_sections)
+					made = made && w->is_section_generated(sp);
+			});
+		return queued > 0 || !made;
+	}
+
 	// Once a tick: the ground live when worldgen is done, the changes into
 	// the world at most five times a second (each a commit, which remeshes
 	// what it touched), the stones that have come to rest back to voxels
 	void ground_tick(float dt)
 	{
 		if(!m_ground_live){
-			size_t queued = 1;
-			worldgen::access(m_server, m_scene, [&](worldgen::Instance *i){
-				queued = i->get_num_sections_queued();
-			});
-			m_ground_live = queued == 0;
+			m_ground_live = !generating();
 			if(m_ground_live)
 				log_i(MODULE, "hillclimb: the ground generated in %.2f s",
 						(interface::os::time_us() - m_made_us) / 1e6);
@@ -2174,13 +2193,9 @@ struct Module: public interface::Module
 
 	void apply_pending()
 	{
-		size_t queued = 0;
-		worldgen::access(m_server, m_scene, [&](worldgen::Instance *i){
-			queued = i->get_num_sections_queued();
-		});
 		// A section still being made from the old grid would come back
 		// with the old hill in it
-		if(queued > 0)
+		if(generating())
 			return;
 		m_pending = false;
 		const hill::Params &np = m_pending_params;

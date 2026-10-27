@@ -142,10 +142,22 @@ drive()
 	# The modules compiled once (warm, below), each drive a copy
 	[ -d "$t/warm/c" ] && [ "$name" != warm ] && mkdir -p "$t/$name" &&
 		cp -a "$t/warm/c" "$t/$name/c"
-	# shellcheck disable=SC2086 # the assignments, split
-	env BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_FEATURES=0 \
-		BUILDAT_HILLCLIMB_STEEP_VAR=0 $firm_soil "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
-		-C "$t/$name/c" -P $((port_base + PORT[$name])) -l 3 > "$t/$name.log" 2>&1
+	# [HC_DRIVE_FLAKY] A port held by something else (a stray util/netsim.py
+	# had 29969): the server exits at once with no drive, and the check
+	# failed on whichever drive's lines were missing. Another free one then
+	local port=$((port_base + PORT[$name])) i
+	for i in $(seq 20); do
+		if ! port_taken $port; then
+			# shellcheck disable=SC2086 # the assignments, split
+			env BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_FEATURES=0 \
+				BUILDAT_HILLCLIMB_STEEP_VAR=0 $firm_soil "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
+				-C "$t/$name/c" -P $port -l 3 > "$t/$name.log" 2>&1
+			local rc=$?
+			grep -aq "Failed to bind socket" "$t/$name.log" || return $rc
+		fi
+		port=$((29700 + RANDOM % 300))
+	done
+	return 1
 }
 drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)"
 # On the flat past the hill's start, facing away: each gear's top speed,
@@ -793,11 +805,14 @@ $(for i in 1 2 3 4 5 6 7; do echo keypress Down; echo delay 150; done)
 screenshot $t/ground_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params
-delay 3000
+delay 1000
 quit
 C
 mp_client ground "$t/ground.cmds"
 wait $CLIENT || fail "the ground page's drive ($t/ground.log)"
+# Made once the hill before it is all there (generating() in main.cpp):
+# under load that was past a fixed 3 s ([HC_DRIVE_FLAKY])
+wait_for_log "$t/ground_srv.log" "hillclimb: the hill as it was made, seed .*; sand 40 kPa" 120
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "hillclimb: the hill, seed .* voxels; sand 30 kPa, dig 6, power 150%, grip 0.60, stones 20%" \
 	"$t/ground_srv.log" || fail "not the default soil ($t/ground_srv.log)"
@@ -807,6 +822,8 @@ echo "  the default soil 30 kPa; the hill menu's ground page: the sand's firmnes
 # [HC_HUD_LAYOUT] The accelerator bound to Up in the key store: the start
 # prompt names it, centred across at 75% down; driving, with turn 1
 # missed (a circuit's car started past it), the prompt says that alone
+# (the start prompt waited for by its words: under load the first one
+# was "The hill is being made", and Up went down before the hill was)
 mp_server hud_srv "BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_FEATURES=0
 	BUILDAT_HILLCLIMB_STEEP=5 BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30
 	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6
@@ -815,7 +832,7 @@ mkdir -p "$t/u_hud"
 printf 'shared\tmove.forward\tUp\n' > "$t/u_hud/keys.txt"
 cat > "$t/hud.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
-wait_log 20000 hillclimb: the prompt centred at
+wait_log 120000 Up starts your laps
 delay 1000
 screenshot $t/hud_start.png
 keydown Up
@@ -852,11 +869,13 @@ PY
 # (2R, 162 pixels): a push 3R up and R/2 across keeps its steer, 0.44 in
 # fourth. [HC_HILL_MENU] Menu, The hill..., Steepness's dropdown tapped,
 # a choice, Make it: the params sent with it
+# (the first push once the hill is made, as the HUD's above)
 mp_server touch_srv "BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP=15
 	BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
 cat > "$t/touch.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
-delay 3000
+wait_log 120000 The stick up starts the clock
+delay 1000
 finger_down 1 200 300
 finger_move 1 200 100
 delay 4000
