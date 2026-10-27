@@ -530,9 +530,10 @@ struct CState: public State
 		}
 		ss_ host;
 		ss_ port;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
 		// "pipe:<path>": a local server boxed in an AppContainer
-		// ([PROCESS_SANDBOX] B 2), which loopback does not reach
+		// ([PROCESS_SANDBOX] B 2), which loopback does not reach; on the
+		// web the page's own server ([WEB_LOCAL_SERVER])
 		if(address.compare(0, 5, "pipe:") == 0){
 			m_pipe = true;
 			m_wss.reset(client::create_pipe_stream());

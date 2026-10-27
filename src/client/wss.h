@@ -32,9 +32,10 @@ namespace client
 	};
 
 	Wss* create_wss(interface::TCPSocket *socket);
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
 	// A named pipe's stream ([PROCESS_SANDBOX] B 2): start() takes the
-	// pipe's full path as its host
+	// pipe's full path as its host. In a web page the stream to the page's
+	// own server in a worker ([WEB_LOCAL_SERVER]).
 	Wss* create_pipe_stream();
 #endif
 	// The pipe of the local server this client started, boxed on Windows

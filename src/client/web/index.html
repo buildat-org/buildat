@@ -164,6 +164,17 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// (the server serves it so: apps/play) and starts on the launch menu,
 	// which connects in place to the server the user picks
 	var server = host + ':' + port;
+	var query = new URLSearchParams(location.search);
+	// [WEB_LOCAL_SERVER] ?local=<app>: the app's own server, built for the
+	// web (util/build_web_server.sh) and served beside this page under
+	// local/<app>/, run in a worker of this page (start_local below) and
+	// joined through it. A query and not a hash: the server sends this
+	// page cross-origin isolated for it (the worker's threads share
+	// memory), and only for it, as an isolated page's popup has no opener
+	// (the Starport ID's sign-in).
+	var local_app = /^[A-Za-z0-9_]{1,64}$/.exec(query.get('local') || '');
+	if(local_app)
+		server = 'pipe:page';
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user',
 		'-w', window.innerWidth + 'x' + window.innerHeight];
@@ -172,7 +183,6 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// [PLAY_LINKS] the play page's ?server=host:port, a Starport's link:
 	// the launch menu joins it if a Starport in its settings lists it.
 	// Only that shape is taken; the client checks it again.
-	var query = new URLSearchParams(location.search);
 	var join = null;
 	var jm = /^([A-Za-z0-9.\-]{1,253}:[0-9]{1,5})$/.exec(query.get('server') || '');
 	if(!server && jm)
@@ -218,7 +228,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			args.push(flags[key], value);
 		else if(key === 'frame_split')
 			frame_split = value === '1';
-		else if(key !== 'server')
+		else if(key !== 'server' && key !== 'local')
 			console.log('Not taken from the address: ' + key);
 	});
 	// **Back in by itself** (user, 2026-09-30): a phone's browser drops
@@ -626,6 +636,59 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 				document.exitFullscreen();
 		},
 	};
+	// [WEB_LOCAL_SERVER] The local server's worker (src/server/web/pre.js
+	// says its messages), and the stream to it that the client reads
+	// (src/client/pipe_stream.cpp): what came in q, why it is gone in
+	// closed. Its storage is written out every 5 s and when the page is
+	// hidden, and the server is stopped when the page goes.
+	function start_local(app){
+		var p = Module.buildatPipe = {q: [], closed: null, gone: null};
+		var w = null;
+		p.open = function(){
+			p.q = [];
+			p.closed = p.gone;
+			if(w)
+				w.postMessage({op: 1});
+		};
+		p.send = function(d){
+			if(w)
+				w.postMessage({op: 0, d: d}, [d.buffer]);
+		};
+		p.close = function(){
+			if(w)
+				w.postMessage({op: 2});
+		};
+		if(!window.crossOriginIsolated){
+			p.gone = p.closed = 'this page is not cross-origin isolated, ' +
+					'which the local server needs';
+			return;
+		}
+		w = new Worker('local/' + app + '/buildat_server.js');
+		w.onmessage = function(e){
+			var m = e.data;
+			if(m.d)
+				p.q.push(m.d);
+			else if(m.log !== undefined)
+				console.log('server: ' + m.log);
+			else if(m.closed)
+				p.closed = 'the local server closed the connection';
+			else if(m.exit !== undefined)
+				p.gone = p.closed = 'the local server stopped (' + m.exit + ')';
+		};
+		w.onerror = function(e){
+			p.gone = p.closed = 'the local server did not start: ' +
+					(e.message || 'local/' + app + '/buildat_server.js');
+		};
+		document.addEventListener('visibilitychange', function(){
+			if(document.visibilityState === 'hidden')
+				w.postMessage({op: 'sync'});
+		});
+		window.addEventListener('pagehide', function(){
+			w.postMessage({op: 'stop'});
+		});
+	}
+	if(local_app)
+		start_local(local_app[0]);
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
 	// browser's focus is on it while a LineEdit has the game's, holding the
 	// field's text and selection. An IME and a touchscreen's keyboard type

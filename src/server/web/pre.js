@@ -24,3 +24,102 @@ Module.preRun.push(function(){
 		});
 	}
 });
+
+// **In a page** (src/client/web/index.html, ?local=<app>): this script is
+// the page's worker, and its threads' (ENVIRONMENT_IS_PTHREAD, which this
+// leaves alone). Its messages from the page, the only ones a dedicated
+// worker gets: {op: 0, d: bytes}, {op: 1} (the client opened the stream),
+// {op: 2} (closed it), {op: 'sync'} and {op: 'stop'}. To the page: {d:
+// bytes}, {closed: 1} (the server dropped the client), {log: line} and,
+// last, {exit: status}. The app's storage, /user, is kept in IndexedDB:
+// read before main(), written every 5 s, when the page asks and at the
+// end.
+// simplified: two tabs of the same app write over each other's /user; a
+// write is the files as they are at that moment, not a save's end (one
+// listed and gone before it was read is a logged error, and the next
+// write has it right); a sync after core:save if a save is ever lost
+if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
+		typeof process !== 'object'){
+	Module.arguments = ['--unconfined', '-l', '3', '-m', Module.buildatApp,
+		'-S', '/buildat', '-U', '/urho', '-D', '/user', '-C', '/cache',
+		// A local game: the page's player is in at once (hillclimb)
+		'-u', 'launcher=1'];
+	Module.print = function(t){ postMessage({log: t}); };
+	Module.printErr = Module.print;
+	var syncing = false, again = false, after = [];
+	var save = function(done){
+		if(done)
+			after.push(done);
+		if(syncing){
+			again = true;
+			return;
+		}
+		syncing = true;
+		again = false;
+		FS.syncfs(false, function(err){
+			syncing = false;
+			if(err)
+				postMessage({log: 'IndexedDB write: ' + err});
+			if(again)
+				return save();
+			var a = after;
+			after = [];
+			a.forEach(function(f){ f(); });
+		});
+	};
+	Module.preRun.push(function(){
+		FS.mkdir('/user');
+		FS.mount(FS.filesystems.IDBFS, {}, '/user');
+		addRunDependency('idbfs');
+		FS.syncfs(true, function(err){
+			if(err)
+				postMessage({log: 'IndexedDB read: ' + err});
+			removeRunDependency('idbfs');
+		});
+		setInterval(save, 5000);
+	});
+	var ready = false, held = [];
+	var take = function(m){
+		if(m.op === 'stop')
+			return Module._buildat_server_stop();
+		if(m.op === 'sync')
+			return save();
+		var d = m.d || new Uint8Array(0);
+		var p = Module._malloc(d.length + 1);
+		HEAPU8.set(d, p);
+		Module._buildat_stream_in(m.op, p, d.length);
+		Module._free(p);
+	};
+	self.addEventListener('message', function(e){
+		if(ready)
+			take(e.data);
+		else
+			held.push(e.data);
+	});
+	Module.onRuntimeInitialized = function(){
+		ready = true;
+		held.forEach(take);
+		held = [];
+	};
+	// Called by network_web.cpp when it has something for the page
+	Module.buildatStreamOut = function(){
+		for(;;){
+			var n = Module._buildat_stream_take();
+			if(n > 0){
+				var p = Module._buildat_stream_taken();
+				var d = HEAPU8.slice(p, p + n);
+				postMessage({d: d}, [d.buffer]);
+			} else if(n < 0){
+				postMessage({closed: 1});
+			} else {
+				break;
+			}
+		}
+	};
+	Module.onExit = function(status){
+		save(function(){ postMessage({exit: status}); });
+	};
+	Module.onAbort = function(what){
+		postMessage({exit: 'aborted: ' + what});
+	};
+}

@@ -31,6 +31,7 @@ set(WS_NAMES "")
 set(WS_DIRS "")
 set(WS_CPP_NAMES "")
 set(WS_UNMARKED "")
+set(WS_EXTS "")
 while(WS_TODO)
 	list(POP_FRONT WS_TODO D)
 	get_filename_component(N "${D}" NAME)
@@ -51,6 +52,16 @@ while(WS_TODO)
 	string(JSON CPP_OFF ERROR_VARIABLE E GET "${J}" disable_cpp)
 	if(NOT CPP_OFF)
 		list(APPEND WS_CPP_NAMES "${N}")
+	endif()
+	# The client extensions it serves (client_file::serve_extension), from
+	# the share path
+	string(JSON NEXT ERROR_VARIABLE E LENGTH "${J}" client_extensions)
+	if(NOT E AND NEXT GREATER 0)
+		math(EXPR LAST "${NEXT} - 1")
+		foreach(I RANGE ${LAST})
+			string(JSON X GET "${J}" client_extensions ${I})
+			list(APPEND WS_EXTS "${X}")
+		endforeach()
 	endif()
 	string(JSON NDEP ERROR_VARIABLE E LENGTH "${J}" dependencies)
 	if(E)
@@ -120,6 +131,11 @@ target_include_directories(${SERVER_EXE_NAME} PRIVATE
 target_include_directories(${SERVER_EXE_NAME} SYSTEM PRIVATE
 	"${URHO3D_HOME}/Source/ThirdParty/Bullet/src")
 
+# Where the app is in the packed tree, for pre.js's command line in a page
+file(RELATIVE_PATH WS_APP_REL "${CMAKE_SOURCE_DIR}" "${WS_APP_DIR}")
+set(WS_APP_JS "${CMAKE_BINARY_DIR}/web_server_app.js")
+file(CONFIGURE OUTPUT "${WS_APP_JS}" CONTENT
+"Module.buildatApp = '/buildat/${WS_APP_REL}';\n")
 set(WS_LINK_FLAGS
 	-fexceptions -pthread
 	# main() in a thread of its own: the page's (or node's) own thread
@@ -130,10 +146,14 @@ set(WS_LINK_FLAGS
 	-sSTACK_SIZE=8388608 -sDEFAULT_PTHREAD_STACK_SIZE=2097152
 	-sFORCE_FILESYSTEM=1
 	-sEXIT_RUNTIME=1
-	# The page's way to stop it (main.cpp)
-	-sEXPORTED_FUNCTIONS=_main,_buildat_server_stop
+	# The page's way to stop it (main.cpp), and its stream
+	# (builtin/network/network_web.cpp)
+	-sEXPORTED_FUNCTIONS=_main,_buildat_server_stop,_buildat_stream_in,_buildat_stream_take,_buildat_stream_taken,_malloc,_free
+	# The player's storage kept in the browser (pre.js)
+	-lidbfs.js
 	-sASSERTIONS=1 -sEXCEPTION_STACK_TRACES=1
 	--profiling-funcs
+	"SHELL:--pre-js ${WS_APP_JS}"
 	"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/server/web/pre.js"
 	"SHELL:--exclude-file *.swp"
 )
@@ -141,6 +161,12 @@ set(WS_PACKED "${WS_APP_DIR}")
 foreach(D ${WS_DIRS})
 	if(NOT D MATCHES "^${WS_APP_DIR}/")
 		list(APPEND WS_PACKED "${D}")
+	endif()
+endforeach()
+list(REMOVE_DUPLICATES WS_EXTS)
+foreach(X ${WS_EXTS})
+	if(EXISTS "${CMAKE_SOURCE_DIR}/extensions/${X}")
+		list(APPEND WS_PACKED "${CMAKE_SOURCE_DIR}/extensions/${X}")
 	endif()
 endforeach()
 foreach(D ${WS_PACKED})
@@ -157,4 +183,5 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/extensions/luanti_client/res")
 endif()
 target_link_options(${SERVER_EXE_NAME} PRIVATE ${WS_LINK_FLAGS})
 set_property(TARGET ${SERVER_EXE_NAME} APPEND PROPERTY
-	LINK_DEPENDS "${URHO3D_LIBRARY_FILE}" "${CMAKE_SOURCE_DIR}/src/server/web/pre.js")
+	LINK_DEPENDS "${URHO3D_LIBRARY_FILE}" "${CMAKE_SOURCE_DIR}/src/server/web/pre.js"
+	"${WS_APP_JS}")

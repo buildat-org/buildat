@@ -1,0 +1,12 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "server: .*Client 1 from the page connected", 120],
+	["waitlog", "hillclimb: this client's car is [0-9]", 60],
+	["eval", "'joined at ' + Math.round(performance.now()) + ' ms, isolated ' + crossOriginIsolated"],
+	["waitlog", "W starts your laps", 120],
+	["eval", "'the hill made at ' + Math.round(performance.now()) + ' ms'"],
+	["holdkey", "w", 8000],
+	["waitlog", "server: .*passed turn 1 of", 30],
+	["eval", "JSON.stringify(performance.getEntriesByType('resource').map(r => [r.name.replace(/.*\\//, ''), r.encodedBodySize, Math.round(r.responseEnd)]))"],
+	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15]
+]

@@ -225,6 +225,95 @@ LanRelay* start_lan_relay(const ss_ &address, const ss_ &port,
 }
 #else
 #include "client/wss.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <cstdlib>
+// [WEB_LOCAL_SERVER]: the page's own server, in a worker of the page
+// (src/server/web/pre.js), reached by "pipe:<anything>". The page keeps
+// the worker and Module.buildatPipe (src/client/web/index.html): what
+// came from the server in q, and why the stream is gone in closed.
+EM_JS(char*, page_pipe_open, (), {
+	var p = Module['buildatPipe'];
+	if(!p)
+		return stringToNewUTF8('this page runs no local server');
+	p.open();
+	return 0;
+});
+EM_JS(void, page_pipe_send, (const char *data, int n), {
+	Module['buildatPipe'].send(HEAPU8.slice(data, data + n));
+});
+// What came, its size, or -1 when the stream is gone (*why the reason)
+EM_JS(int, page_pipe_peek, (char **why), {
+	var p = Module['buildatPipe'];
+	if(p.q.length)
+		return p.q[0].length;
+	if(p.closed){
+		HEAPU32[why >> 2] = stringToNewUTF8(p.closed);
+		return -1;
+	}
+	return 0;
+});
+EM_JS(void, page_pipe_take, (char *to), {
+	HEAPU8.set(Module['buildatPipe'].q.shift(), to);
+});
+EM_JS(void, page_pipe_close, (), {
+	var p = Module['buildatPipe'];
+	if(p)
+		p.close();
+});
+namespace client {
+struct CPagePipe: public Wss
+{
+	bool m_open = false;
+	~CPagePipe()
+	{
+		if(m_open)
+			page_pipe_close();
+	}
+	ss_ start(const ss_ &, const ss_ &, const ss_ &)
+	{
+		char *why = page_pipe_open();
+		if(!why){
+			m_open = true;
+			return "";
+		}
+		const ss_ r = why;
+		free(why);
+		return r;
+	}
+	bool send(const ss_ &data)
+	{
+		page_pipe_send(data.data(), (int)data.size());
+		return true;
+	}
+	int read(ss_ &out, ss_ *why)
+	{
+		char *w = nullptr;
+		const int n = page_pipe_peek(&w);
+		if(n < 0){
+			*why = w ? w : "the local server is gone";
+			free(w);
+			return -1;
+		}
+		if(n > 0){
+			const size_t at = out.size();
+			out.resize(at + n);
+			page_pipe_take(&out[at]);
+		}
+		return n;
+	}
+	// Polled: there is no socket for the select
+	bool pending()
+	{
+		return true;
+	}
+};
+Wss* create_pipe_stream()
+{
+	return new CPagePipe();
+}
+}
+#endif
 namespace client {
 ss_ local_server_pipe(const ss_ &, const ss_ &){ return ""; }
 bool pipe_ready(const ss_ &){ return false; }

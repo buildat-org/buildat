@@ -118,15 +118,26 @@ BUILDAT_WEB_MODULE, under which interface/tcpsocket.h, http.h, process.h
 and select_handler.h are an #error: no sockets, HTTP or processes. Files
 are in Emscripten's file system, the app's directories packed into it.
 Three builtins have stand-ins there (<name>_web.cpp beside the module's
-own), so an app that depends on them builds unchanged: network accepts
-no connection yet (the page's own client is to be its one peer);
-accounts has one player, the first peer to connect, who joins by
+own), so an app that depends on them builds unchanged: network has one
+peer, the page's own client, over postMessage (only the page that made
+the worker can send to it); accounts has one player, the first peer to connect, who joins by
 name alone (the first join's name, kept in the app's save "_server"), is
 is_local() and the admin, and has no passwords, invites, bans, guests or
 mail; starport_announce lists nothing and takes no Starport IDs.
 client_file watches no files there. The page stops the server by
 Module._buildat_server_stop(), as SIGTERM does natively (under node,
 SIGTERM and SIGINT call it).
+
+The build is copied to web/local/<app>/, which the buildat server serves
+beside the web client. The web client's page opened as /?local=<app>
+runs it in a worker and joins it; the server is started with launcher=1
+(a local game), its storage (/user) kept in the browser's IndexedDB.
+That page and the local server's files are sent cross-origin isolated
+(Cross-Origin-Opener-Policy: same-origin, Cross-Origin-Embedder-Policy:
+require-corp), which the server's threads need; any other host of web/
+has to send the same. The page without ?local is not isolated: an
+isolated page's popup has no opener, and the Starport ID's sign-in is
+one. util/web_local_check.sh plays hillclimb so from static files.
 
 
 src/interface, the core
