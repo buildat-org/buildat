@@ -45,13 +45,20 @@ stub="(function(){ var held = null, refuse = false;
   if(held !== this) set(this); return Promise.resolve(); };
  document.exitPointerLock = function(){ if(held) set(null); };
  return 'stub'; })()"
+# The how-to-play's Close clicked, the lock's gesture (Escape closes it
+# but takes the lock away): at 1200x800 the dialog is centred and Close
+# its last row ([SKELDAT_WEB_CLICKS], 2026-10-27: y 652, 761 before the
+# dialog grew).
+# simplified: a fixed place; the dialog's text changed moves it, which
+# fails at the "mouse mode 1" wait. If that recurs, have pause.lua log
+# Close's screen rect and click that.
 lock='["eval", "'"'"'lock '"'"' + !!document.pointerLockElement"]'
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
  ["waitlog", "pause: how to play shown", 180], ["wait", 1500],
  ["eval", "$(echo "$stub" | tr "\n" " ")"],
- ["click", 600, 761], ["waitlog", "mouse mode 1 ", 10], ["wait", 1500],
+ ["click", 600, 652], ["waitlog", "mouse mode 1 ", 10], ["wait", 1500],
  $lock,
  ["eval", "document.exitPointerLock()"], ["waitlog", "pause: the menu shown", 10],
  ["wait", 1000], $lock,

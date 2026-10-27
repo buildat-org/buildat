@@ -9,7 +9,9 @@
 # out of the wall, the client stands in no voxel once the voxels around
 # have arrived, W held walks it 2 voxels off, and the server pulls it back
 # into no wall. Before, it stood inside the ground voxel, pulled back to
-# it once a second.
+# it once a second. The how-to-play closed by its Escape, as
+# edge_walk_check.sh's: a click at Close's place missed it once the
+# dialog grew ([SKELDAT_WEB_CLICKS]).
 #   apps/skeldat/web_spawn_check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -37,7 +39,7 @@ cat > "$t/steps.json" <<J
  ["nav", "\${URL}"],
  ["eval", "$(echo "$stub" | tr "\n" " ")"],
  ["waitlog", "pause: how to play shown", 240], ["wait", 1000],
- ["click", 600, 761], ["waitlog", "pause: the menu closed", 10],
+ ["key", "Escape"], ["waitlog", "pause: the menu closed", 10],
  ["holdkey", "w", 3000], ["waitlog", "skeldat: walked 2 from the placing", 10]
 ]
 J
