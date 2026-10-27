@@ -12,7 +12,7 @@
 # the buildat server's own serving of the same: the isolation headers
 # with ?local and on the local server's files, and not on the page
 # without it; and a page with no game (apps/play's) given the apps for
-# its launch menu. demo_aggregate (walked a step) and skeldat (a world
+# its launch menu. demo_aggregate (walked a second, its position line moved) and skeldat (a world
 # made in its menu, walked 2 voxels) are driven as hillclimb when
 # web/local/<app>/ is there. Needs web/ (util/build_web.sh) with
 # web/local/hillclimb/ (util/build_web_server.sh hillclimb).
@@ -79,8 +79,10 @@ if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
 	["nav", "${URL}"],
 	["waitlog", "server: .*Client 1 from the page connected", 120],
 	["waitlog", "player physics enabled", 120],
+	["waitlog", "demo_dig: player at", 10],
 	["eval", "'demo_aggregate playable at ' + Math.round(performance.now()) + ' ms'"],
 	["holdkey", "w", 1000],
+	["waitlog", "demo_dig: player at", 15],
 	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15]
 ]
 JSON
@@ -90,6 +92,15 @@ JSON
 		fail "demo_aggregate's drive ($t/aggregate.log: $(tail -2 "$t/aggregate.log" | tr '\n' ' '))"
 	grep -a "eval:" "$t/aggregate.log"
 	grep -a "server: .*network: .*ticks/s" "$t/aggregate/page.log" | tail -1 | cut -c 9-
+	# [AGGREGATE_WEB_WALK] The walk, from the client's position lines (the
+	# server is not told it): the first two, a second of W apart
+	grep -ao "player at ([-0-9., ]*)" "$t/aggregate/page.log" | head -2 > "$t/walk"
+	cat "$t/walk"
+	python3 - "$t/walk" <<'PY' || fail "demo_aggregate's player did not walk a voxel"
+import re, sys
+a, b = [list(map(float, re.findall(r"-?[0-9.]+", l))) for l in open(sys.argv[1])]
+sys.exit(0 if ((a[0] - b[0]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5 > 1 else 1)
+PY
 else
 	echo "no web/local/demo_aggregate: its drive skipped"
 fi

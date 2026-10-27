@@ -1194,9 +1194,23 @@ magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
 	end
 end)
 
+-- Where the player is: once physics is on, then every 10 s while it moves
+-- ([AGGREGATE_WEB_WALK]). The server is not told, so a drive reads the
+-- walk off this line, not off the network's bytes.
+local walk_log_t, walk_log_p = 10, nil
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	--log:info("Update")
 	local dt = event_data:GetFloat("TimeStep")
+
+	walk_log_t = walk_log_t + dt
+	if physics_enabled and walk_log_t >= 10 then
+		walk_log_t = 0
+		local p = player_node.position
+		if not walk_log_p or (p - walk_log_p):Length() > 0.1 then
+			log:info(string.format("player at (%.1f, %.1f, %.1f)", p.x, p.y, p.z))
+			walk_log_p = magic.Vector3(p.x, p.y, p.z)
+		end
+	end
 
 	-- Samples how much sky the camera can see, per direction, which is what
 	-- dims the reflected sky under ground; see builtin/voxel_shading
