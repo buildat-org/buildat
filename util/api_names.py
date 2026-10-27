@@ -125,7 +125,9 @@ def client_extensions():
 def server_headers():
     names = set()
     for fn in sorted(os.listdir(os.path.join(root, "src/interface"))):
-        if fn.endswith(".h"):
+        # buildat_client.h is the client's ([CLIENT_WASM_BINDINGS]),
+        # generated, and doc/client_api.txt lists its calls
+        if fn.endswith(".h") and fn != "buildat_client.h":
             names.add("interface/" + fn)
     for b in sorted(os.listdir(os.path.join(root, "builtin"))):
         if os.path.isfile(os.path.join(root, "builtin", b, "api.h")):

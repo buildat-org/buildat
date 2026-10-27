@@ -22,14 +22,15 @@
 # binding at the bottom of a recursion just under that depth has room
 # ([WASM_WEB_CALL_DEPTH]). Natively twice,
 # compiled and in the interpreter; `web` in headless Chrome. The
-# generated files are checked against the generator.
+# generated files (and client_api.txt's C++ spellings) are checked
+# against the generator.
 #
 #   apps/sample_wasm_ui/check.sh          # the native client
 #   apps/sample_wasm_ui/check.sh web      # the web client, headless Chrome
 #
 # tier: quick
 # cost: 30s (2026-10-27)
-# covers: util/gen_wasm_bindings.lua src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
+# covers: util/gen_wasm_bindings.lua doc/client_api.txt src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
