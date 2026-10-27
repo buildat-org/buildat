@@ -21,15 +21,14 @@ namespace server {
 
 // What the .wasm is built with; in its hash. Pinned features rather than
 // clang's default CPU, which grows with each release: these are in every
-// browser and in the client's validator.
-static const char *WASM_CFLAGS = "--target=wasm32 -O2 -nostdlib "
-		"-ffreestanding -fvisibility=hidden -mcpu=mvp -msign-ext "
-		"-mmutable-globals -mnontrapping-fptoint -mbulk-memory";
+// browser and in the client's validator. -ffp-contract=off as the
+// server's native build of the same files (state.cpp): no a * b + c made
+// one rounding on one side and two on the other ([CLIENT_WASM] step 5).
+// Each a single literal: util/web_server.cmake reads them from here.
+static const char *WASM_CFLAGS = "--target=wasm32 -O2 -nostdlib -ffreestanding -fvisibility=hidden -ffp-contract=off -mcpu=mvp -msign-ext -mmutable-globals -mnontrapping-fptoint -mbulk-memory";
 // The maximum memory is the client's cap (64 MiB): a module declares one,
 // and the client refuses one that does not
-static const char *WASM_LDFLAGS = "--no-entry --export-dynamic "
-		"--gc-sections --strip-all -O2 -z stack-size=65536 "
-		"--max-memory=67108864";
+static const char *WASM_LDFLAGS = "--no-entry --export-dynamic --gc-sections --strip-all -O2 -z stack-size=65536 --max-memory=67108864";
 
 static ss_ env(const char *name)
 {
@@ -261,7 +260,13 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		return prebuilt_dir+"/wasm/"+hash+".wasm";
 	}
 #ifdef BUILDAT_STATIC_MODULES
-	// [WEB_LOCAL_SERVER]: no compiler in a browser
+	// [WEB_LOCAL_SERVER]: no compiler in a browser. util/web_server.cmake
+	// builds each module's from the same sources as the server it packs,
+	// named by the module (rebuilt with them, so never stale)
+	if(interface::fs::path_exists(out_dir+"/"+module_name+".wasm")){
+		log_i(MODULE, "%s: wasm/ is built with this server", cs(module_name));
+		return out_dir+"/"+module_name+".wasm";
+	}
 	log_e(MODULE, "%s: wasm/ is not built, and this server cannot build it",
 			cs(module_name));
 	return "";

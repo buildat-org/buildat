@@ -1,6 +1,7 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include <condition_variable>
+#include <functional>
 #include <mutex>
 #include <cstdint>
 #include "state.h"
@@ -1027,6 +1028,44 @@ struct CState: public State, public interface::Server
 		sv_<ss_> files_to_hash = {init_cpp_path};
 		files_to_hash.insert(
 				files_to_hash.begin(), includes.begin(), includes.end());
+
+		// [CLIENT_WASM] step 5: wasm/'s C and C++, the code the clients run
+		// as a .wasm, compiled into the module too, so the server calls the
+		// same functions natively. A .c as C. No a * b + c fused into one
+		// rounding anywhere in the module, as in the .wasm (wasm_build.cpp):
+		// main.cpp inlines wasm/'s headers. The sources go on the one
+		// command line through the flags, before the module's own file.
+		// simplified: no import reaches the server (wasm_api.h's natively
+		// trap); a module whose wasm/ cannot build natively is refused
+		{
+			const ss_ wasm_dir = info.path+"/wasm";
+			sv_<ss_> sources;
+			std::function<void(const ss_ &)> scan = [&](const ss_ &dir){
+				for(const auto &n : interface::fs::list_directory(dir)){
+					const ss_ p = dir+"/"+n.name;
+					const size_t dot = n.name.rfind('.');
+					const ss_ ext = dot == ss_::npos ? "" : n.name.substr(dot);
+					if(n.is_directory)
+						scan(p);
+					else if(ext == ".c" || ext == ".cc" || ext == ".cpp")
+						sources.push_back(p);
+				}
+			};
+			if(interface::fs::path_exists(wasm_dir))
+				scan(wasm_dir);
+			std::sort(sources.begin(), sources.end());
+			sv_<ss_> include_dirs = m_compiler->include_directories;
+			include_dirs.push_back(m_modules_path);
+			if(!sources.empty())
+				extra_cxxflags += " -ffp-contract=off";
+			for(const ss_ &p : sources){
+				const bool c = p.size() > 2 && p.compare(p.size() - 2, 2, ".c") == 0;
+				extra_cxxflags += c ? " -x c "+p+" -x none" : " "+p;
+				files_to_hash.push_back(p);
+				for(const ss_ &i : list_includes(p, include_dirs))
+					files_to_hash.push_back(i);
+			}
+		}
 		// The optimization flags go in too; without them a cache built at a
 		// different level is kept and silently used
 		ss_ content_hash = hash_files(files_to_hash,

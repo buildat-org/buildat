@@ -28,12 +28,21 @@
 #define BUILDAT_WASM_EXTERN_C
 #endif
 
+#ifdef __wasm__
 // A function Lua can call: BUILDAT_WASM_EXPORT int add(int a, int b)
 #define BUILDAT_WASM_EXPORT BUILDAT_WASM_EXTERN_C \
 		__attribute__((visibility("default")))
 
 #define BUILDAT_WASM_IMPORT(name) BUILDAT_WASM_EXTERN_C \
 		__attribute__((import_module("buildat"), import_name(#name)))
+#else
+// The server compiles the same files natively into the module ([CLIENT_WASM]
+// step 5), which calls them as plain functions: an export is a function
+// of the module's own (hidden, as the rest of it), and the imports, which
+// are the client's, stop the server if reached (the bottom of this file).
+#define BUILDAT_WASM_EXPORT BUILDAT_WASM_EXTERN_C
+#define BUILDAT_WASM_IMPORT(name) static inline
+#endif
 
 // A line in the client's log, prefixed with the module's name. The bytes
 // are text; at most 1000 are shown.
@@ -95,3 +104,28 @@ void buildat_send_packet(const char *name, unsigned int name_len,
 // is taken only if it is at most cap; -1 with none.
 BUILDAT_WASM_IMPORT(event_take)
 int buildat_event_take(void *buf, unsigned int cap);
+
+#ifndef __wasm__
+static inline void buildat_log(const char *a, unsigned int b)
+{ (void)a; (void)b; __builtin_trap(); }
+static inline unsigned int buildat_time_ms(void){ __builtin_trap(); }
+static inline void buildat_voxels_size(int a, int b[6])
+{ (void)a; (void)b; __builtin_trap(); }
+static inline int buildat_voxels_read(int a, const int b[6], unsigned int *c,
+		unsigned int d){ (void)a; (void)b; (void)c; (void)d; __builtin_trap(); }
+static inline void buildat_geometry_set(int a, unsigned int b, const float *c,
+		unsigned int d, const unsigned int *e, unsigned int f)
+{ (void)a; (void)b; (void)c; (void)d; (void)e; (void)f; __builtin_trap(); }
+static inline void buildat_texture_set(int a, unsigned int b, unsigned int c,
+		const unsigned char *d, unsigned int e)
+{ (void)a; (void)b; (void)c; (void)d; (void)e; __builtin_trap(); }
+static inline void buildat_node_get(int a, float b[10])
+{ (void)a; (void)b; __builtin_trap(); }
+static inline void buildat_node_set(int a, const float b[10])
+{ (void)a; (void)b; __builtin_trap(); }
+static inline void buildat_send_packet(const char *a, unsigned int b,
+		const void *c, unsigned int d)
+{ (void)a; (void)b; (void)c; (void)d; __builtin_trap(); }
+static inline int buildat_event_take(void *a, unsigned int b)
+{ (void)a; (void)b; __builtin_trap(); }
+#endif
