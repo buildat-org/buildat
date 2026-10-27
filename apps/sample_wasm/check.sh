@@ -14,6 +14,13 @@
 # a pointer and length that wrap, an index past the vertices, a texture
 # past the cap. The module is loaded twice in one frame, and natively the
 # second load waits on the first one's compile ([WASM_COMPILE_RACE]).
+# Step 3, the meter: a hot loop's time (the buffer reversed), three calls
+# that never end (a loop, a loop of memory.fill, a recursion through a
+# function pointer) each stopped with its line, the module still callable
+# in another instance and a frame logged after; a start function that
+# never ends (endless_start/, hand-written: clang makes no start
+# function) stopped as it loads; a module exporting the meter's name
+# (meter_name/) refused.
 # Natively it runs twice: the first builds on both sides (the
 # server's .wasm taken out of the app's cache, the client's cache a fresh
 # one), the second finds both built; then a server with no clang and wasm
@@ -23,7 +30,7 @@
 #   apps/sample_wasm/check.sh web      # the web client, headless Chrome
 #
 # tier: quick
-# cost: 30s
+# cost: 45s
 # covers: client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -65,7 +72,14 @@ client_lines()
 			"a pointer and length that wrap: .*buildat.log: past the module's memory" \
 			"an index past the vertices: .*index 4 is past the 4 vertices" \
 			"a texture past the cap: .*8192x8192 is not 1 to 4096 across" \
-			"wasm main: trap: buildat.node_get: handle [0-9]* is stale"; do
+			"wasm main: trap: buildat.node_get: handle [0-9]* is stale" \
+			"meter_name refused: refused: an export's name begins with buildat_" \
+			"wasm main: stopped: spin ran past its budget" \
+			"wasm main: stopped: spin_fill ran past its budget" \
+			"wasm main: stopped: spin_tree ran past its budget" \
+			"wasm endless_start: stopped: its start function ran past its budget" \
+			"sample_w: bench: the buffer reversed" \
+			"sample_w: a frame after the stops"; do
 		grep -aq "$want" "$log" || fail "no \"$want\" in $log"
 	done
 }

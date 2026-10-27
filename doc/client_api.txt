@@ -876,7 +876,7 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   memory. Before anything runs it is validated and capped, on both clients
   alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
   at most 1024 pages (64 MiB), wasm_api.h's imports the only ones (by
-  name and signature); an export
+  name and signature, and no export named buildat_*); an export
   takes and returns i32, i64, f32 and f64 only (at most 16 of them, one
   result). Natively it is then translated to C (wasm2c) and compiled by
   the system's compiler in a process of its own, killed past 3 minutes or
@@ -891,6 +891,16 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   zero, a recursion deeper than 2000 calls natively or the browser's
   limit on the web) is a Lua error, and the module can be called again
   after it.
+- The meter: each call (and the module's start function, run as it
+  loads) has a budget of 4e9, counted the same on both clients: a
+  function's or a loop's instructions each time it is entered or goes
+  round, memory.fill/copy/init and table.copy/init a sixteenth of their
+  size, and the imports their work. That is about 0.1 s of the densest
+  loop and a second or more of most code, natively and on the web. A
+  call past it traps, and the module is stopped: logged ("wasm <module>:
+  stopped: <export> ran past its budget ..."), m:status() "failed", and
+  its calls errors from then on; the client goes on. The metering costs
+  about a quarter on a tight loop (a byte swap), less on most code.
 - m:read(ptr, len) -> bytes; m:write(ptr, bytes): copies between Lua and
   its memory. A range past its memory is an error. A buffer is passed by
   writing it where the module says (an export that returns a pointer) and
@@ -916,9 +926,7 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   ("wasm <module>: trap: buildat.<import>: ..."), and m:call() is an
   error saying it. No import calls Lua or wasm, and a call into a module
   from inside its own call is an error.
-- simplified: no Windows client yet (wasm_load says so), and no time
-  limit on a call: an endless loop freezes the client (the metering is
-  [CLIENT_WASM]'s step 3).
+- simplified: no Windows client yet (wasm_load says so).
 
 buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z}
 buildat.Vector2(x, y) / buildat.Vector2(v) -> {x, y}

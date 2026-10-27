@@ -5,13 +5,15 @@
 -- a buffer written, changed by the module and read back, and the traps;
 -- then the imports (step 2): a mesh and a texture from its memory, a node
 -- moved, a voxel volume read, a packet to the server and its answer back
--- as an event, and the boundary refusing what it must.
+-- as an event, and the boundary refusing what it must; and the meter
+-- (step 3) stopping calls and a start function that never end.
 -- apps/sample_wasm/check.sh reads the lines this logs.
 local log = buildat.Logger("sample_wasm")
 local magic = require("buildat/extension/urho3d")
 
--- A malformed and an oversized .wasm, refused before anything runs
-for _, name in ipairs({"malformed", "oversized"}) do
+-- A malformed and an oversized .wasm, and one exporting the meter's name,
+-- refused before anything runs
+for _, name in ipairs({"malformed", "oversized", "meter_name"}) do
 	local bad, why = buildat.wasm_load(name)
 	assert(not bad, name.." was loaded")
 	log:info(name.." refused: "..tostring(why))
@@ -24,6 +26,11 @@ assert(m, why)
 -- ([WASM_COMPILE_RACE])
 local m2 = buildat.wasm_load("main")
 assert(m2)
+-- Two more, each to be stopped by the meter in a call that never ends
+local m3 = assert(buildat.wasm_load("main"))
+local m4 = assert(buildat.wasm_load("main"))
+-- A start function that never ends: stopped as it loads
+local endless_start = assert(buildat.wasm_load("endless_start"))
 
 local scene = magic.Scene()
 scene:CreateComponent("Octree")
@@ -136,6 +143,34 @@ local function check()
 	box_is("after the traps", 1.5, 0, 0, 2.5, 1, 0)
 	assert(m:call("add", 40, 2) == 42, "callable after the import traps")
 
+	-- Step 3, the meter: the hot loop's time, then a call that never ends
+	-- on each of three instances, each stopped, and the first still
+	-- answering
+	local rounds = 20000
+	log:info("bench: the buffer reversed "..rounds.." times in "..
+			m:call("bench", rounds).." ms")
+	for _, c in ipairs({{m2, "spin"}, {m3, "spin_fill"}, {m4, "spin_tree", 60}}) do
+		local t0 = m:call("now")
+		local ok, err
+		if c[3] then
+			ok, err = pcall(c[1].call, c[1], c[2], c[3])
+		else
+			ok, err = pcall(c[1].call, c[1], c[2])
+		end
+		assert(not ok, c[2].." returned")
+		local status, why = c[1]:status()
+		assert(status == "failed" and why:find("past its budget"),
+				c[2]..": "..tostring(status)..", "..tostring(why))
+		assert(not pcall(c[1].call, c[1], "add", 1, 2), "called once stopped")
+		log:info(c[2].." stopped after "..(m:call("now") - t0).." ms: "..
+				tostring(err))
+	end
+	assert(m:call("add", 40, 2) == 42, "the first callable after the stops")
+	local status, why = endless_start:status()
+	assert(status == "failed" and why:find("start function ran past its budget"),
+			"endless_start: "..tostring(status)..", "..tostring(why))
+	log:info("endless_start: "..why)
+
 	-- A packet to the server; its answer comes back as an event
 	buildat.sub_packet("main:pong", function(data)
 		m:push(data)
@@ -146,9 +181,14 @@ end
 
 -- Natively the first load compiles in the background
 local stage = "loading"
+local frame_after = false
 magic.SubscribeToEvent("Update", function()
 	if stage == "done" then return end
 	if stage == "pong" then
+		if not frame_after then
+			frame_after = true
+			log:info("a frame after the stops")
+		end
 		local n = m:call("poll")
 		if n > 0 then
 			stage = "done"
@@ -164,13 +204,16 @@ magic.SubscribeToEvent("Update", function()
 		log:error("wasm done: failed: "..tostring(err))
 		return
 	end
-	local status2, err2 = m2:status()
-	if status2 == "loading" then return end
-	if status2 ~= "ready" then
-		stage = "done"
-		log:error("wasm done: the second load failed: "..tostring(err2))
-		return
+	for _, other in ipairs({m2, m3, m4}) do
+		local status2, err2 = other:status()
+		if status2 == "loading" then return end
+		if status2 ~= "ready" then
+			stage = "done"
+			log:error("wasm done: another load failed: "..tostring(err2))
+			return
+		end
 	end
+	if endless_start:status() == "loading" then return end
 	local ok, e = pcall(check)
 	if not ok then
 		stage = "done"

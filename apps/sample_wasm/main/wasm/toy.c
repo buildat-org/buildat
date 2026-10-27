@@ -170,3 +170,53 @@ BUILDAT_WASM_EXPORT void big_texture(int texture)
 {
 	buildat_texture_set(texture, 8192, 8192, pixels, 8192u * 8192u * 4u);
 }
+
+// [CLIENT_WASM] step 3: calls that never end, each stopped by the meter:
+// a loop, a loop of memory.fill (charged by its size), and a recursion
+// through a function pointer (call_indirect) with no loop in it
+BUILDAT_WASM_EXPORT void spin(void)
+{
+	volatile unsigned x = 0;
+	for(;;)
+		x++;
+}
+
+// (stop is never set: it keeps the fills from being dropped)
+static unsigned char wide[8 << 20];
+static volatile int stop;
+BUILDAT_WASM_EXPORT int spin_fill(void)
+{
+	for(unsigned i = 0; !stop; i++)
+		__builtin_memset(wide, (int)i, sizeof wide);
+	return wide[0];
+}
+
+static int (*volatile branch)(int);
+static int tree(int depth)
+{
+	return depth == 0 ? 1 : branch(depth - 1) + branch(depth - 1);
+}
+BUILDAT_WASM_EXPORT int spin_tree(int depth)
+{
+	branch = tree;
+	return tree(depth);
+}
+
+// The hot loop the meter's cost is measured on: the buffer reversed rounds
+// times; returns the milliseconds it took
+BUILDAT_WASM_EXPORT unsigned bench(unsigned rounds)
+{
+	const unsigned start = buildat_time_ms(), n = sizeof buf;
+	unsigned sum = 0;
+	for(unsigned r = 0; r < rounds; r++){
+		for(unsigned i = 0; i < n / 2; i++){
+			unsigned char t = buf[i];
+			buf[i] = buf[n - 1 - i];
+			buf[n - 1 - i] = t;
+		}
+		sum = sum * 31 + buf[r % n];
+	}
+	buf[0] ^= (unsigned char)sum;
+	return buildat_time_ms() - start;
+}
+

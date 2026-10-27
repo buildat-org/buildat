@@ -5,7 +5,8 @@
 // the client as a sandbox of its own, its exports called from Lua.
 //
 // Both clients first read the .wasm with WABT and refuse it past the caps
-// below. Then:
+// below, and meter it (meter_module(): a call past its budget traps, and
+// the module is stopped). Then:
 // - natively, wasm2c turns it into C (the client's own C: the export and
 //   function names are renamed to f0, f1, ... before it is written, and no
 //   name of the server's reaches the C or a command line), the system's
@@ -41,6 +42,8 @@
 #include <Image.h>
 #include "wabt/binary-reader-ir.h"
 #include "wabt/binary-reader.h"
+#include "wabt/binary-writer.h"
+#include "wabt/stream.h"
 #include "wabt/validator.h"
 #include "wabt/ir.h"
 #include "wabt/cast.h"
@@ -49,7 +52,6 @@
 #include "wabt/generate-names.h"
 #include "wabt/apply-names.h"
 #include "wabt/c-writer.h"
-#include "wabt/stream.h"
 #include "client/config.h"
 #include "boot/autodetect.h"
 #include "interface/fs.h"
@@ -168,15 +170,11 @@ static ss_ printable(const uint8_t *p, size_t n)
 	return r;
 }
 
-// Read, validate and cap; fills exports and whether it imports anything
-static bool check_module(const ss_ &bytes, wabt::Module &m,
-		sv_<ExportSig> &exports, bool &has_imports, ss_ &why)
+// What clang builds with the server's flags; nothing else is read. Bulk
+// memory stays (memory.fill and memory.copy, which the meter counts by
+// their sizes), and so does multi-value.
+static wabt::Features features()
 {
-	if(bytes.size() > MAX_BYTES){
-		why = "larger than "+itos(MAX_BYTES)+" bytes";
-		return false;
-	}
-	// What clang builds with the server's flags; nothing else is read
 	wabt::Features f;
 	f.disable_exceptions();
 	f.disable_simd();
@@ -188,6 +186,18 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 	f.disable_extended_const();
 	f.disable_reference_types();
 	f.disable_annotations();
+	return f;
+}
+
+// Read, validate and cap; fills exports and whether it imports anything
+static bool check_module(const ss_ &bytes, wabt::Module &m,
+		sv_<ExportSig> &exports, bool &has_imports, ss_ &why)
+{
+	if(bytes.size() > MAX_BYTES){
+		why = "larger than "+itos(MAX_BYTES)+" bytes";
+		return false;
+	}
+	const wabt::Features f = features();
 	wabt::Errors errors;
 	// No debug names: nothing of the server's is a C name
 	wabt::ReadBinaryOptions options(f, nullptr, false, true, true);
@@ -258,6 +268,11 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 	}
 	exports.clear();
 	for(const wabt::Export *e : m.exports){
+		// The meter's names (meter_module()), whatever their kind
+		if(e->name.compare(0, 8, "buildat_") == 0){
+			why = "an export's name begins with buildat_, the client's own";
+			return false;
+		}
 		// m:read() and m:write() reach the memory exported as "memory"
 		if(e->name == "memory" && e->kind != wabt::ExternalKind::Memory){
 			why = "\"memory\" is exported as something other than its memory";
@@ -302,6 +317,190 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 	return true;
 }
 
+// [CLIENT_WASM] step 3, the meter: a call that never ends must not freeze
+// the client (on the web, the tab). The module is rewritten before it is
+// translated (natively) or instantiated (on the web), so that both run the
+// same metered code: a global of its own, counted down, and a trap once it
+// is below zero.
+// - It is charged at each function's entry and at the top of each loop
+//   (where every back-edge lands: br, br_if and br_table alike), by the
+//   number of instructions of that region: the function's or the loop's
+//   own, those in a loop nested in it being that loop's. So every
+//   instruction run is charged at least once (an overcount, never an
+//   undercount), whatever the path, a call_indirect and a recursion
+//   included. Tail calls are not read (validation).
+// - memory.fill, memory.copy, memory.init, table.copy and table.init are
+//   charged by their sizes too (bytes / 16), before they run.
+// - The imports charge their own work (run_import()).
+// - The start function is not run by instantiation: it is exported as
+//   buildat_start and called as an export is, after it, with its budget.
+// - The meter is the defined global exported as buildat_meter, added
+//   after validation: the module's own code cannot name it (an index past
+//   the module's globals failed validation), and a module exporting a
+//   buildat_ name of its own is refused (check_module()). Its imports are
+//   wasm_api.h's functions only, so it cannot import a global either.
+// The client sets the meter to BUDGET before each call; the call that
+// ends with it below zero traps, and the module is stopped.
+// simplified: the meter is a global, loaded and stored at each charge,
+// which costs a tight loop about a quarter (a byte swap: 70 ms to 88 ms
+// natively, 72 to 92 on the web); a local copy kept in a register and
+// written back around calls and exits is the upgrade if that matters.
+// simplified: a unit is an instruction, not a time: the budget is about
+// 0.1 s of the densest loop measured and 1-2 s of a plain one (a counter,
+// memory.fill, a recursion), and a loop that misses the cache each round
+// takes longer per unit; a stop by the clock as well is the upgrade.
+static const char *METER = "buildat_meter";
+static const char *START = "buildat_start";
+// A call's budget, in the units above (about an instruction each): of
+// the order of a second of a tight loop on either client
+static const int64_t BUDGET = 4000000000;
+// The bytes of memory.fill and its kind that count as one instruction
+static const int BULK_SHIFT = 4;
+// An import's charge, as a guess at its time in the same units: this for
+// any, and its work on top (import_body())
+static const uint64_t IMPORT_COST = 200;
+
+// The instructions of a region: these, and those of their blocks and
+// ifs, but not those of a loop (its own region; the loop itself counts)
+static uint64_t region_cost(const wabt::ExprList &l)
+{
+	uint64_t n = 0;
+	for(const wabt::Expr &e : l){
+		n++;
+		if(const wabt::BlockExpr *b = wabt::dyn_cast<wabt::BlockExpr>(&e))
+			n += region_cost(b->block.exprs);
+		else if(const wabt::IfExpr *i = wabt::dyn_cast<wabt::IfExpr>(&e))
+			n += region_cost(i->true_.exprs) + region_cost(i->false_);
+	}
+	return n;
+}
+
+struct Meter {
+	wabt::Index global;
+	// The meter less (the i32 in local `scratch` >> BULK_SHIFT) when
+	// scratch is set, else less cost; then the trap if it is below zero
+	wabt::ExprList charge(uint64_t cost, wabt::Index scratch = ~0u)
+	{
+		using namespace wabt;
+		ExprList l;
+		const Var g(global, Location());
+		l.push_back(std::make_unique<GlobalGetExpr>(g));
+		if(scratch != ~0u){
+			l.push_back(std::make_unique<LocalGetExpr>(Var(scratch, Location())));
+			l.push_back(std::make_unique<ConvertExpr>(Opcode::I64ExtendI32U));
+			l.push_back(std::make_unique<ConstExpr>(Const::I64(BULK_SHIFT)));
+			l.push_back(std::make_unique<BinaryExpr>(Opcode::I64ShrU));
+		} else {
+			l.push_back(std::make_unique<ConstExpr>(Const::I64(cost)));
+		}
+		l.push_back(std::make_unique<BinaryExpr>(Opcode::I64Sub));
+		l.push_back(std::make_unique<GlobalSetExpr>(g));
+		l.push_back(std::make_unique<GlobalGetExpr>(g));
+		l.push_back(std::make_unique<ConstExpr>(Const::I64(0)));
+		l.push_back(std::make_unique<CompareExpr>(Opcode::I64LtS));
+		auto trap = std::make_unique<IfExpr>();
+		trap->true_.exprs.push_back(std::make_unique<UnreachableExpr>());
+		l.push_back(std::move(trap));
+		return l;
+	}
+
+	// A list's loops charged at their tops, its bulk operations by their
+	// sizes; scratch is the function's i32 for those, made on first use
+	void walk(wabt::Func *f, wabt::ExprList &l, wabt::Index &scratch)
+	{
+		using namespace wabt;
+		for(auto it = l.begin(); it != l.end(); ++it){
+			switch(it->type()){
+			case ExprType::Block:
+				walk(f, cast<BlockExpr>(&*it)->block.exprs, scratch);
+				break;
+			case ExprType::If:
+				walk(f, cast<IfExpr>(&*it)->true_.exprs, scratch);
+				walk(f, cast<IfExpr>(&*it)->false_, scratch);
+				break;
+			case ExprType::Loop: {
+				ExprList &body = cast<LoopExpr>(&*it)->block.exprs;
+				walk(f, body, scratch);
+				ExprList c = charge(region_cost(body) + 1);
+				body.splice(body.begin(), c);
+				break;
+			}
+			case ExprType::MemoryFill:
+			case ExprType::MemoryCopy:
+			case ExprType::MemoryInit:
+			case ExprType::TableCopy:
+			case ExprType::TableInit:
+			case ExprType::TableFill: {
+				// Each takes its size (an i32: no memory64, no table64)
+				// last, on the top of the stack
+				if(scratch == ~0u){
+					scratch = f->GetNumParamsAndLocals();
+					f->local_types.AppendDecl(Type::I32, 1);
+				}
+				ExprList c;
+				c.push_back(std::make_unique<LocalTeeExpr>(
+						Var(scratch, Location())));
+				ExprList rest = charge(0, scratch);
+				c.splice(c.end(), rest);
+				l.splice(it, c);
+				break;
+			}
+			default:
+				break;
+			}
+		}
+	}
+};
+
+// The module metered, as above; has_start whether it had a start function
+// (now its export START). Validated again after, so that a fault here is a
+// refusal and not a module that does something else.
+static bool meter_module(wabt::Module &m, bool &has_start, ss_ &why)
+{
+	using namespace wabt;
+	Meter meter;
+	meter.global = (Index)m.globals.size();
+	auto g = std::make_unique<GlobalModuleField>();
+	g->global.type = Type::I64;
+	g->global.mutable_ = true;
+	g->global.init_expr.push_back(std::make_unique<ConstExpr>(Const::I64(0)));
+	m.AppendField(std::move(g));
+	auto ge = std::make_unique<ExportModuleField>();
+	ge->export_.name = METER;
+	ge->export_.kind = ExternalKind::Global;
+	ge->export_.var = Var(meter.global, Location());
+	m.AppendField(std::move(ge));
+	for(Index i = m.num_func_imports; i < m.funcs.size(); i++){
+		Func *f = m.funcs[i];
+		Index scratch = ~0u;
+		meter.walk(f, f->exprs, scratch);
+		ExprList c = meter.charge(region_cost(f->exprs) + 1);
+		f->exprs.splice(f->exprs.begin(), c);
+	}
+	has_start = !m.starts.empty();
+	if(has_start){
+		const Var start = *m.starts[0];
+		m.starts.clear();
+		for(auto it = m.fields.begin(); it != m.fields.end(); ++it)
+			if(it->type() == ModuleFieldType::Start){
+				m.fields.erase(it);
+				break;
+			}
+		auto se = std::make_unique<ExportModuleField>();
+		se->export_.name = START;
+		se->export_.kind = ExternalKind::Func;
+		se->export_.var = start;
+		m.AppendField(std::move(se));
+	}
+	Errors errors;
+	if(Failed(ValidateModule(&m, &errors, features()))){
+		why = "not valid once metered: "+(errors.empty() ? ss_("?") :
+				errors[0].message.substr(0, 200));
+		return false;
+	}
+	return true;
+}
+
 struct Instance;
 static size_t g_instance_count = 0;
 // The live instances' handle tags (1 to 127)
@@ -320,8 +519,9 @@ static const char *WASM2C_DEFINES = "-DWASM_RT_SKIP_SIGNAL_RECOVERY=1 "
 static const int COMPILE_WALL_S = 180;
 static const rlim_t COMPILE_CPU_S = 120;
 static const rlim_t COMPILE_AS_BYTES = (rlim_t)2 << 30;
-// Bumped when the C this writes changes, so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 3";
+// Bumped when the C this writes changes (the glue, or what meter_module()
+// adds), so that the cache is not reused
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 4";
 
 extern "C" const char buildat_wasm_rt_h[];
 
@@ -332,6 +532,8 @@ typedef void (*InstantiateFn)(void*, void*, ImportFn);
 typedef void (*FreeFn)(void*);
 typedef wasm_rt_memory_t* (*MemoryFn)(void*);
 typedef void (*CallFn)(void*, uint32_t, const uint64_t*, uint64_t*);
+typedef int64_t* (*MeterFn)(void*);
+typedef void (*StartFn)(void*);
 
 // The memories of the live instances, for the signal handler: a fault in
 // one, while a call is in wasm, is the module's out-of-bounds access.
@@ -493,7 +695,7 @@ static const Compiler& compiler()
 // freeing, its memory, and one call entry that unpacks numbers for each
 // export by index. Nothing in it comes from the module but types.
 static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
-		bool has_memory)
+		bool has_memory, bool has_start)
 {
 	std::ostringstream os;
 	os<<"#include <string.h>\n#include <stdint.h>\n#include \"m.h\"\n"
@@ -524,6 +726,10 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		"BX void buildat_free(void *p){ wasm2c_m_free(&((inst_t*)p)->m); }\n"
 		"BX wasm_rt_memory_t *buildat_memory(void *p){ return "<<
 		(has_memory ? "w2c_m_mem(&((inst_t*)p)->m)" : "0")<<"; }\n"
+		"BX int64_t *buildat_meter(void *p){ return (int64_t*)w2c_m_"<<METER<<
+		"(&((inst_t*)p)->m); }\n"
+		"BX void buildat_start(void *p){ "<<(has_start ? ss_("w2c_m_")+START+
+		"(&((inst_t*)p)->m);" : ss_("(void)p;"))<<" }\n"
 		"BX void buildat_call(void *p, uint32_t f, const uint64_t *a, uint64_t *r){\n"
 		"\tw2c_m *m = &((inst_t*)p)->m;\n\t(void)a; (void)r; (void)F; (void)D; (void)FB; (void)DB;\n"
 		"\tswitch(f){\n";
@@ -714,6 +920,14 @@ EM_JS(int, bw_call, (int id, const char *name, const double *args,
 		return 1;
 	}
 });
+// The meter (meter_module()): set to v if set, and read
+EM_JS(double, bw_meter, (int id, int set, double v), {
+	var inst = Module.buildatWasm.list[id].inst;
+	var g = inst && inst.exports.buildat_meter;
+	if (!(g instanceof WebAssembly.Global)) return 0;
+	if (set) g.value = BigInt(v);
+	return Number(g.value);
+});
 EM_JS(void, bw_free, (int id), {
 	delete Module.buildatWasm.list[id];
 });
@@ -732,7 +946,12 @@ struct Instance {
 	wasm_rt_memory_t *memory = nullptr;
 	FreeFn free_fn = nullptr;
 	CallFn call_fn = nullptr;
+	StartFn start_fn = nullptr;
+	int64_t *meter = nullptr; // the module's (meter_module())
 #endif
+	bool has_start = false;
+	// What the import under way has cost (run_import())
+	uint64_t import_cost = 0;
 #ifdef __EMSCRIPTEN__
 	int web_id = 0;
 #endif
@@ -845,6 +1064,27 @@ struct Instance {
 #endif
 	}
 
+	// The meter (meter_module()), once the module is instantiated
+	int64_t meter_get()
+	{
+#if BUILDAT_WASM_NATIVE
+		return meter ? *meter : 0;
+#elif defined(__EMSCRIPTEN__)
+		return (int64_t)bw_meter(web_id, 0, 0);
+#else
+		return 0;
+#endif
+	}
+	void meter_set(int64_t v)
+	{
+#if BUILDAT_WASM_NATIVE
+		if(meter)
+			*meter = v;
+#elif defined(__EMSCRIPTEN__)
+		bw_meter(web_id, 1, (double)v);
+#endif
+	}
+
 	// The module's memory at [ptr, ptr+len), checked and copied
 	bool copy_in(uint32_t ptr, uint64_t len, void *dst)
 	{
@@ -885,9 +1125,18 @@ struct Instance {
 	{
 		try {
 			ss_ why;
+			import_cost = IMPORT_COST;
 			const uint32_t r = import_body(which, a, why);
-			if(why.empty())
-				return r;
+			if(why.empty()){
+				// Its work charged to the call's budget, as the module's
+				// own instructions are
+				const int64_t left = meter_get() - (int64_t)std::min<uint64_t>(
+						import_cost, BUDGET);
+				meter_set(left);
+				if(left >= 0)
+					return r;
+				why = "past the call's budget";
+			}
 			trap_reason = "buildat."+ss_(which < IMP_COUNT ?
 					IMPORTS[which].name : "?")+": "+why;
 		} catch(std::exception &e){
@@ -914,9 +1163,6 @@ struct Instance {
 	// Model with an IndexBuffer of its own when a mesh's size matters.
 	// simplified: a voxel read gives each voxel's first plane (the 32-bit
 	// word); a plane argument when a module wants another.
-	// simplified: the start function has no memory to give an import yet
-	// (natively and on the web the memory is known once instantiation
-	// returns), so an import with a pointer traps there.
 	uint32_t import_body(uint32_t which, const uint32_t *a, ss_ &why)
 	{
 		using namespace Urho3D;
@@ -930,6 +1176,7 @@ struct Instance {
 			}
 			uint8_t buf[MAX_LOG];
 			const size_t n = std::min<size_t>(a[1], MAX_LOG);
+			import_cost += 10000 + n; // a line written out
 			if(!copy_in(a[0], n, buf)){
 				why = PAST;
 				return 0;
@@ -997,6 +1244,7 @@ struct Instance {
 				why = PAST;
 				return 0;
 			}
+			import_cost += n * 16;
 			sv_<uint32_t> out(n);
 			size_t i = 0;
 			for(int64_t z = box[2]; z < (int64_t)box[2] + box[5]; z++)
@@ -1036,6 +1284,7 @@ struct Instance {
 				why = "the node has no CustomGeometry (its Lua makes one)";
 				return 0;
 			}
+			import_cost += nv * 12 + ni * 32;
 			sv_<float> verts(nv * 12);
 			sv_<uint32_t> idx(ni);
 			if(!copy_in(a[2], nv * 48, verts.data()) ||
@@ -1095,6 +1344,7 @@ struct Instance {
 						" bytes of textures";
 				return 0;
 			}
+			import_cost += bytes * 2;
 			// An Image, as the sandbox's Texture2D:SetData(image) takes:
 			// Urho3D keeps it for a device reset
 			SharedPtr<Image> image(new Image(tex->GetContext()));
@@ -1125,6 +1375,7 @@ struct Instance {
 						"its node is gone";
 				return 0;
 			}
+			import_cost += 1000;
 			float t[10];
 			if(which == IMP_NODE_GET){
 				const Vector3 p = node->GetPosition(), sc = node->GetScale();
@@ -1166,6 +1417,7 @@ struct Instance {
 				why = "more than "+itos(MAX_PACKETS)+" packets in a call";
 				return 0;
 			}
+			import_cost += nl + dl;
 			ss_ pname(nl, '\0'), data(dl, '\0');
 			if(!copy_in(a[0], nl, &pname[0]) || !copy_in(a[2], dl, &data[0])){
 				why = PAST;
@@ -1190,6 +1442,7 @@ struct Instance {
 				return 0;
 			}
 			const uint32_t n = (uint32_t)e.size();
+			import_cost += n;
 			event_bytes -= e.size();
 			events.pop_front();
 			return n;
@@ -1197,6 +1450,21 @@ struct Instance {
 		}
 		why = "no such import";
 		return 0;
+	}
+
+	// Instantiated, its start function run: ready, or with trap (the start
+	// function's) failed, stopped if it ran past its budget
+	void started_or_failed(const ss_ &trap)
+	{
+		if(trap.empty()){
+			state = READY;
+			return;
+		}
+		if(meter_get() < 0)
+			fail("stopped: its start function ran past its budget of "+
+					itos(BUDGET)+" (a loop that does not end?)");
+		else
+			fail("trap at start: "+trap);
 	}
 
 #if BUILDAT_WASM_NATIVE
@@ -1214,11 +1482,15 @@ struct Instance {
 		return r;
 	}
 
-	// The wasm call with a trap caught: 0, or the trap's code. Nothing
-	// here with a destructor between the setjmp and the call.
+	// The wasm call with a trap caught: 0, or the trap's code. what: 0
+	// instantiates, 1 calls export f, 2 the start function, those two with
+	// the meter at BUDGET. Nothing here with a destructor between the
+	// setjmp and the call.
 	static int trapping(Instance *in, int what, uint32_t f, const uint64_t *a,
 			uint64_t *r)
 	{
+		if(what != 0)
+			*in->meter = BUDGET;
 		g_in_wasm = 1;
 		int code = wasm_rt_impl_try();
 		if(code == 0){
@@ -1226,8 +1498,10 @@ struct Instance {
 				in->mem = calloc(1, ((SizeFn)dlsym(in->dl, "buildat_size"))());
 				((InstantiateFn)dlsym(in->dl, "buildat_instantiate"))(
 						in->mem, in, host_import);
-			} else {
+			} else if(what == 1){
 				in->call_fn(in->mem, f, a, r);
+			} else {
+				in->start_fn(in->mem);
 			}
 		}
 		g_in_wasm = 0;
@@ -1244,23 +1518,29 @@ struct Instance {
 		}
 		free_fn = (FreeFn)dlsym(dl, "buildat_free");
 		call_fn = (CallFn)dlsym(dl, "buildat_call");
+		start_fn = (StartFn)dlsym(dl, "buildat_start");
 		MemoryFn memory_fn = (MemoryFn)dlsym(dl, "buildat_memory");
-		if(!free_fn || !call_fn || !memory_fn ||
+		MeterFn meter_fn = (MeterFn)dlsym(dl, "buildat_meter");
+		if(!free_fn || !call_fn || !memory_fn || !start_fn || !meter_fn ||
 				!dlsym(dl, "buildat_size") || !dlsym(dl, "buildat_instantiate")){
 			fail("the built module lacks its entry points");
 			return;
 		}
 		runtime_init();
-		// The start function and the data segments run here
-		const int code = trapping(this, 0, 0, nullptr, nullptr);
-		if(mem)
+		// The data segments are written here
+		int code = trapping(this, 0, 0, nullptr, nullptr);
+		if(mem){
 			memory = memory_fn(mem);
+			meter = meter_fn(mem);
+		}
+		if(code == 0 && has_start)
+			code = trapping(this, 2, 0, nullptr, nullptr);
 		if(code != 0){
-			fail("trap at start: "+(trap_reason.empty() ?
-					ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason));
+			started_or_failed(trap_reason.empty() ?
+					ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason);
 			return;
 		}
-		state = READY;
+		started_or_failed("");
 	}
 
 	// The compile's progress, read without waiting
@@ -1298,7 +1578,9 @@ struct Instance {
 		// of `exports`, mem for the memory named "memory", x<i> others
 		size_t fi = 0, xi = 0;
 		for(wabt::Export *e : m.exports){
-			if(e->kind == wabt::ExternalKind::Func){
+			if(e->name == METER || e->name == START){
+				// The meter's (meter_module()), named as the glue knows
+			} else if(e->kind == wabt::ExternalKind::Func){
 				e->name = "f"+itos(fi++);
 			} else if(e->kind == wabt::ExternalKind::Memory &&
 					e->name == "memory"){
@@ -1366,7 +1648,7 @@ struct Instance {
 				!interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) ||
 				!interface::fs::write_file(tmp+"/wasm-rt.h", buildat_wasm_rt_h) ||
 				!interface::fs::write_file(tmp+"/glue.c",
-						glue_c(exports, has_imports, has_memory))){
+						glue_c(exports, has_imports, has_memory, has_start))){
 			fail("could not write into "+tmp);
 			return;
 		}
@@ -1528,10 +1810,18 @@ static int l_wasm_load(lua_State *L)
 		lua_pushstring(L, ("refused: "+why).c_str());
 		return 2;
 	}
+	bool has_start = false;
+	if(!meter_module(m, has_start, why)){
+		log_w(MODULE, "wasm %s: refused: %s", cs(name), cs(why));
+		lua_pushnil(L);
+		lua_pushstring(L, ("refused: "+why).c_str());
+		return 2;
+	}
 	const ss_ hash = interface::sha1::hex(interface::sha1::calculate(bytes));
 	log_i(MODULE, "wasm %s: %zu bytes, %zu exports, valid (%s)", cs(name),
 			bytes.size(), exports.size(), cs(hash.substr(0, 12)));
 	Instance *in = new Instance();
+	in->has_start = has_start;
 	g_instance_count++;
 	// A tag no live instance has: MAX_INSTANCES is below 127
 	for(uint32_t t = 1; t < 128 && !in->tag; t++)
@@ -1550,17 +1840,38 @@ static int l_wasm_load(lua_State *L)
 	ss_ names;
 	for(const ImportDef &d : IMPORTS)
 		names += ss_(names.empty() ? "" : ",")+d.name;
+	// The metered module is what the browser instantiates
+	wabt::MemoryStream metered;
+	if(wabt::Failed(wabt::WriteBinaryModule(&metered, &m,
+			wabt::WriteBinaryOptions(features(), true, false, false)))){
+		in->fail("the metered module could not be written");
+		return 1;
+	}
+	const auto &mb = metered.output_buffer().data;
 	in->web_id = bw_new();
-	bw_load(in->web_id, (const uint8_t*)bytes.data(), (int)bytes.size(),
-			(int)(intptr_t)in, names.c_str());
+	bw_load(in->web_id, mb.data(), (int)mb.size(), (int)(intptr_t)in,
+			names.c_str());
 	char *err = bw_take_error(in->web_id);
 	if(err){
 		in->fail(ss_("the browser: ")+err);
 		free(err);
-	} else {
-		in->state = Instance::READY;
-		log_i(MODULE, "wasm %s: ready (the browser's instance)", cs(name));
+		return 1;
 	}
+	ss_ trap;
+	if(has_start){
+		double unused = 0;
+		in->meter_set(BUDGET);
+		in->trap_reason.clear();
+		in->in_call = true;
+		if(bw_call(in->web_id, START, nullptr, "", 0, &unused) != 0)
+			trap = in->take_error();
+		in->in_call = false;
+		if(!in->trap_reason.empty())
+			trap = in->trap_reason;
+	}
+	in->started_or_failed(trap);
+	if(in->state == Instance::READY)
+		log_i(MODULE, "wasm %s: ready (the browser's instance)", cs(name));
 #else
 	in->fail("wasm modules do not run on this platform yet");
 #endif
@@ -1657,6 +1968,7 @@ static int l_call(lua_State *L)
 	case 'F': memcpy(&result, &r, 8); break;
 	}
 #elif defined(__EMSCRIPTEN__)
+	in->meter_set(BUDGET);
 	if(bw_call(in->web_id, sig.name.c_str(), plain, sig.params.c_str(),
 			n, &result) != 0)
 		trap = in->take_error();
@@ -1667,6 +1979,14 @@ static int l_call(lua_State *L)
 	if(!trap.empty()){
 		// What a call that trapped sent is dropped with it
 		in->sent.clear();
+		// Past its budget: the module is stopped, as it may be anywhere
+		// in its work, and its calls refused from now on
+		if(in->meter_get() < 0){
+			in->fail("stopped: "+fname+" ran past its budget of "+
+					itos(BUDGET)+" (a loop that does not end?)");
+			raise("wasm %s: %s: stopped: past its budget", in->name.c_str(),
+					fname.c_str());
+		}
 		raise("wasm %s: %s: trap: %s", in->name.c_str(), fname.c_str(),
 				trap.c_str());
 	}
@@ -1850,3 +2170,4 @@ void init_wasm(lua_State *L)
 
 } // namespace lua_bindings
 // vim: set noet ts=4 sw=4:
+
