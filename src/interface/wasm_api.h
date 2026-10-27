@@ -28,7 +28,14 @@
 #define BUILDAT_WASM_EXTERN_C
 #endif
 
-#ifdef __wasm__
+// BUILDAT_WASM_MODULE: this is the client's .wasm being built (clang
+// --target=wasm32), not the server's native build of the same files --
+// which on the web's server (Emscripten, [WEB_LOCAL_SERVER]) is wasm too
+#if defined(__wasm__) && !defined(__EMSCRIPTEN__)
+#define BUILDAT_WASM_MODULE 1
+#endif
+
+#ifdef BUILDAT_WASM_MODULE
 // A function Lua can call: BUILDAT_WASM_EXPORT int add(int a, int b)
 #define BUILDAT_WASM_EXPORT BUILDAT_WASM_EXTERN_C \
 		__attribute__((visibility("default")))
@@ -105,7 +112,7 @@ void buildat_send_packet(const char *name, unsigned int name_len,
 BUILDAT_WASM_IMPORT(event_take)
 int buildat_event_take(void *buf, unsigned int cap);
 
-#ifndef __wasm__
+#ifndef BUILDAT_WASM_MODULE
 static inline void buildat_log(const char *a, unsigned int b)
 { (void)a; (void)b; __builtin_trap(); }
 static inline unsigned int buildat_time_ms(void){ __builtin_trap(); }
