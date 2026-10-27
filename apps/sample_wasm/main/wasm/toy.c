@@ -40,6 +40,14 @@ BUILDAT_WASM_EXPORT unsigned reverse(unsigned n)
 	return sum;
 }
 
+// n lines in one call: the client writes the first 100 and says so once
+BUILDAT_WASM_EXPORT void flood(int n)
+{
+	static const char line[] = "flood";
+	for(int i = 0; i < n; i++)
+		buildat_log(line, sizeof line - 1);
+}
+
 // Traps: a recursion with no end, and a read past the memory
 static int (*volatile again)(int);
 BUILDAT_WASM_EXPORT int recurse(int n)

@@ -57,6 +57,12 @@ client_lines()
 	# ([GUARDED_LUA_ERROR]) and on the web, PUC Lua as C++ ([WEB_LUA_ERROR_EH])
 	grep -aq 'guarded luaL_error: decompress(): unknown format "nope"' "$log" ||
 		fail "a guarded binding's luaL_error lost its message"
+	# A call's log lines are capped, then one line says so
+	local floods
+	floods=$(grep -ac "wasm main: flood$" "$log")
+	[ "$floods" = 100 ] || fail "$floods lines of a 150-line call, not 100 ($log)"
+	grep -aq "wasm main: more than 100 lines in a call" "$log" ||
+		fail "no line saying a call's log was cut ($log)"
 	# Step 2: the imports, and the boundary's refusals with their reasons
 	local want
 	for want in "malformed refused: refused: not valid" \

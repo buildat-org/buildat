@@ -97,6 +97,7 @@ static const size_t MAX_EXPORTS = 1000;
 static const size_t MAX_PARAMS = 16;
 static const size_t MAX_INSTANCES = 32;
 static const size_t MAX_LOG = 1000;
+static const size_t MAX_LOG_LINES = 100; // in one call, then one "suppressed"
 // The imports' caps ([CLIENT_WASM] step 2), per module (instance)
 static const size_t MAX_HANDLES = 1024; // nodes, textures and volumes
 static const uint32_t MAX_GEOMETRIES = 16; // a node's
@@ -984,6 +985,7 @@ struct Instance {
 	std::deque<ss_> events;
 	size_t event_bytes = 0;
 	sv_<std::pair<ss_, ss_>> sent;
+	size_t logged = 0; // lines in this call
 
 	void fail(const ss_ &why)
 	{
@@ -1181,7 +1183,12 @@ struct Instance {
 				why = PAST;
 				return 0;
 			}
-			log_i(MODULE, "wasm %s: %s", cs(name), cs(printable(buf, n)));
+			if(++logged <= MAX_LOG_LINES)
+				log_i(MODULE, "wasm %s: %s", cs(name), cs(printable(buf, n)));
+			else if(logged == MAX_LOG_LINES + 1)
+				log_w(MODULE, "wasm %s: more than %zu lines in a call; the "
+						"rest of this call's are not written", cs(name),
+						MAX_LOG_LINES);
 			return 0;
 		}
 		case IMP_TIME_MS:
@@ -1954,6 +1961,7 @@ static int l_call(lua_State *L)
 	in->in_call = true;
 	in->trap_reason.clear();
 	in->sent.clear();
+	in->logged = 0;
 	double result = 0;
 	ss_ trap;
 #if BUILDAT_WASM_NATIVE
@@ -1979,6 +1987,7 @@ static int l_call(lua_State *L)
 	if(!trap.empty()){
 		// What a call that trapped sent is dropped with it
 		in->sent.clear();
+		in->logged = 0;
 		// Past its budget: the module is stopped, as it may be anywhere
 		// in its work, and its calls refused from now on
 		if(in->meter_get() < 0){

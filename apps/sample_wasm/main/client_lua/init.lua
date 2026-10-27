@@ -79,6 +79,7 @@ local function check()
 	local sum = m:call("reverse", 10)
 	assert(m:read(p, 10) == "msaw olleh", "the buffer reversed")
 	log:info("add(2, 3) = "..m:call("add", 2, 3)..", reverse checksum "..sum)
+	m:call("flood", 150)
 	-- Lua's own mistakes, refused before the module sees them
 	assert(not pcall(m.call, m, "add", 1), "too few numbers")
 	assert(not pcall(m.call, m, "add", 1.5, 2), "a fraction for an i32")
