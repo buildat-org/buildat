@@ -15,6 +15,23 @@ endif()
 if(NOT EXISTS "${WS_APP_DIR}")
 	message(FATAL_ERROR "BUILDAT_WEB_SERVER_APP: no ${WS_APP_DIR}")
 endif()
+# A variant's base ([GAME_BASE], interface::aitta::find_base): its modules
+# after the variant's own, and its directory packed beside it, where the
+# loader looks.
+# simplified: a plain name beside the app or in apps/; an installed
+# "<author>.<name>" base is not built here
+set(WS_BASE "")
+set(WS_BASE_DIR "")
+if(EXISTS "${WS_APP_DIR}/meta.json")
+	file(READ "${WS_APP_DIR}/meta.json" J)
+	string(JSON WS_BASE ERROR_VARIABLE E GET "${J}" base)
+endif()
+if(WS_BASE)
+	get_filename_component(WS_BASE_DIR "${WS_APP_DIR}/../${WS_BASE}" ABSOLUTE)
+	if(NOT EXISTS "${WS_BASE_DIR}/main/meta.json")
+		message(FATAL_ERROR "${WS_APP_DIR}: the base ${WS_BASE} is not beside it")
+	endif()
+endif()
 
 # The modules: builtin/loader, the app's own, and their dependencies, as
 # the loader resolves them. An app's module goes before a builtin of the
@@ -22,6 +39,10 @@ endif()
 # simplified: a meta.json's cxxflags are not read (none of these has any);
 # reverse_dependencies are not followed (no builtin has one)
 file(GLOB WS_APP_METAS CONFIGURE_DEPENDS "${WS_APP_DIR}/*/meta.json")
+if(WS_BASE_DIR)
+	file(GLOB WS_BASE_METAS CONFIGURE_DEPENDS "${WS_BASE_DIR}/*/meta.json")
+	list(APPEND WS_APP_METAS ${WS_BASE_METAS})
+endif()
 set(WS_TODO "${CMAKE_SOURCE_DIR}/builtin/loader")
 foreach(M ${WS_APP_METAS})
 	get_filename_component(D "${M}" DIRECTORY)
@@ -74,6 +95,8 @@ while(WS_TODO)
 			string(JSON OPT ERROR_VARIABLE E GET "${J}" dependencies ${I} optional)
 			if(EXISTS "${WS_APP_DIR}/${DN}/meta.json")
 				list(APPEND WS_TODO "${WS_APP_DIR}/${DN}")
+			elseif(WS_BASE_DIR AND EXISTS "${WS_BASE_DIR}/${DN}/meta.json")
+				list(APPEND WS_TODO "${WS_BASE_DIR}/${DN}")
 			elseif(EXISTS "${CMAKE_SOURCE_DIR}/builtin/${DN}/meta.json")
 				list(APPEND WS_TODO "${CMAKE_SOURCE_DIR}/builtin/${DN}")
 			elseif(NOT OPT)
@@ -120,19 +143,18 @@ ${WS_ROWS}\t{nullptr, nullptr},
 };
 }
 ")
-# [CLIENT_WASM] A module's wasm/: compiled into the server as its module
-# (state.cpp's native build of it), and built to <name>.wasm for its
-# clients with emsdk's clang and wasm-ld and the flags of
-# src/server/wasm_build.cpp, packed at /wasm, where this server looks
-# (wasm_build.cpp, BUILDAT_STATIC_MODULES)
-file(READ "${CMAKE_SOURCE_DIR}/src/server/wasm_build.cpp" WS_WB)
-string(REGEX MATCH "WASM_CFLAGS = \"([^\"]*)\"" _ "${WS_WB}")
-separate_arguments(WS_WASM_CFLAGS UNIX_COMMAND "${CMAKE_MATCH_1}")
-string(REGEX MATCH "WASM_LDFLAGS = \"([^\"]*)\"" _ "${WS_WB}")
-separate_arguments(WS_WASM_LDFLAGS UNIX_COMMAND "${CMAKE_MATCH_1}")
-set(WS_WASM_DIR "${CMAKE_BINARY_DIR}/client_wasm")
+# [CLIENT_WASM] A module's wasm/: its C and C++ compiled into the server as
+# its module (state.cpp's native build of it), and built to <name>.wasm for
+# its clients by util/prebuild_wasm.py (emsdk's clang and wasm-ld, or cargo
+# for a Rust wasm/, with the flags of src/server/wasm_build.cpp), packed at
+# /wasm, where this server looks (wasm_build.cpp, BUILDAT_STATIC_MODULES).
+# A module with "disable_cpp" has only the .wasm.
+# One directory per app: two apps' "main" are two files, and switching the
+# build between them does not pack the other's
+get_filename_component(WS_APP_NAME "${WS_APP_DIR}" NAME)
+set(WS_WASM_DIR "${CMAKE_BINARY_DIR}/client_wasm/${WS_APP_NAME}")
 set(WS_WASMS "")
-foreach(N ${WS_CPP_NAMES})
+foreach(N ${WS_NAMES})
 	list(FIND WS_NAMES "${N}" I)
 	list(GET WS_DIRS ${I} D)
 	if(NOT IS_DIRECTORY "${D}/wasm")
@@ -145,31 +167,27 @@ foreach(N ${WS_CPP_NAMES})
 			message(FATAL_ERROR "${D}/wasm: no clang and wasm-ld in $ENV{EMSDK}/upstream/bin")
 		endif()
 	endif()
-	file(GLOB_RECURSE W_SRCS CONFIGURE_DEPENDS "${D}/wasm/*.c" "${D}/wasm/*.cc" "${D}/wasm/*.cpp")
+	list(FIND WS_CPP_NAMES "${N}" CPP)
+	if(CPP GREATER -1)
+		file(GLOB_RECURSE W_SRCS CONFIGURE_DEPENDS "${D}/wasm/*.c" "${D}/wasm/*.cc" "${D}/wasm/*.cpp")
+		list(APPEND WS_SRCS ${W_SRCS})
+		set_property(SOURCE ${W_SRCS} "${D}/${N}.cpp" APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+	endif()
 	file(GLOB_RECURSE W_ALL CONFIGURE_DEPENDS "${D}/wasm/*")
-	list(APPEND WS_SRCS ${W_SRCS})
-	set_property(SOURCE ${W_SRCS} "${D}/${N}.cpp" APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
-	set(W_OBJS "")
-	set(W_CMDS "")
-	set(K 0)
-	foreach(S ${W_SRCS})
-		if(S MATCHES "\\.c$")
-			set(W_STD -std=c11)
-		else()
-			set(W_STD -std=c++17 -fno-exceptions -fno-rtti)
-		endif()
-		set(O "${WS_WASM_DIR}_obj/${N}.${K}.o")
-		list(APPEND W_CMDS COMMAND "${WS_CLANG}" ${WS_WASM_CFLAGS} ${W_STD}
-			"-I${CMAKE_SOURCE_DIR}/src" -c "${S}" -o "${O}")
-		list(APPEND W_OBJS "${O}")
-		math(EXPR K "${K} + 1")
-	endforeach()
+	list(FILTER W_ALL EXCLUDE REGEX "/wasm/target/")
+	set(W_DEPS ${W_ALL})
+	if(EXISTS "${D}/wasm/Cargo.toml")
+		file(GLOB_RECURSE W_CRATE CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/interface/rust/*")
+		list(FILTER W_CRATE EXCLUDE REGEX "/target/")
+		list(APPEND W_DEPS ${W_CRATE})
+	endif()
 	add_custom_command(OUTPUT "${WS_WASM_DIR}/${N}.wasm"
-		COMMAND ${CMAKE_COMMAND} -E make_directory "${WS_WASM_DIR}" "${WS_WASM_DIR}_obj"
-		${W_CMDS}
-		COMMAND "${WS_WASM_LD}" ${WS_WASM_LDFLAGS} ${W_OBJS} -o "${WS_WASM_DIR}/${N}.wasm"
-		DEPENDS ${W_ALL} "${CMAKE_SOURCE_DIR}/src/interface/wasm_api.h"
+		COMMAND python3 -I "${CMAKE_SOURCE_DIR}/util/prebuild_wasm.py" --by-name
+			"${WS_CLANG}" "${WS_WASM_LD}" "${CMAKE_SOURCE_DIR}/src/interface"
+			"${WS_WASM_DIR}" "${D}"
+		DEPENDS ${W_DEPS} "${CMAKE_SOURCE_DIR}/src/interface/wasm_api.h"
 			"${CMAKE_SOURCE_DIR}/src/server/wasm_build.cpp"
+			"${CMAKE_SOURCE_DIR}/util/prebuild_wasm.py"
 		COMMENT "${N}'s wasm/ for its clients")
 	list(APPEND WS_WASMS "${WS_WASM_DIR}/${N}.wasm")
 endforeach()
@@ -214,9 +232,9 @@ set(WS_LINK_FLAGS
 	"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/server/web/pre.js"
 	"SHELL:--exclude-file *.swp"
 )
-set(WS_PACKED "${WS_APP_DIR}")
+set(WS_PACKED "${WS_APP_DIR}" ${WS_BASE_DIR})
 foreach(D ${WS_DIRS})
-	if(NOT D MATCHES "^${WS_APP_DIR}/")
+	if(NOT D MATCHES "^${WS_APP_DIR}/" AND NOT (WS_BASE_DIR AND D MATCHES "^${WS_BASE_DIR}/"))
 		list(APPEND WS_PACKED "${D}")
 	endif()
 endforeach()

@@ -118,7 +118,10 @@ refuses an app any of whose modules, or the modules they depend on, does
 not say "web": true, naming each. There a module is compiled with
 BUILDAT_WEB_MODULE, under which interface/tcpsocket.h, http.h, process.h
 and select_handler.h are an #error: no sockets, HTTP or processes. Files
-are in Emscripten's file system, the app's directories packed into it.
+are in Emscripten's file system, the app's directories packed into it
+(a variant's base's too, a plain-named base beside it). A module's
+wasm/, C or Rust, "disable_cpp" or not, is built for its clients by
+util/prebuild_wasm.py with the server's flags and packed at /wasm.
 Three builtins have stand-ins there (<name>_web.cpp beside the module's
 own), so an app that depends on them builds unchanged: network has one
 peer, the page's own client, over postMessage (only the page that made

@@ -123,6 +123,36 @@ else
 	echo "no web/local/skeldat: its drive skipped"
 fi
 
+# [WASM_MAIN_WEB_PATHS] apps/sample_wasm_only(_rust), when built: a module
+# whose client is only the default client_main ("client_main": "wasm") and
+# its .wasm, C and Rust, built by util/web_server.cmake; the cube drawn, a
+# key sent to the worker's server and its answer back
+for app in sample_wasm_only sample_wasm_only_rust; do
+	if [ ! -f "$here/web/local/$app/buildat_server.wasm" ]; then
+		echo "no web/local/$app: its drive skipped"
+		continue
+	fi
+	cat > "$t/$app.json" << 'JSON'
+[
+	["nav", "${URL}"],
+	["waitlog", "wasm main: drew a cube", 120],
+	["key", "Space"],
+	["waitlog", "wasm main: the server answered echo: colour 1", 30]
+]
+JSON
+	WEB_DRIVE_URL="http://127.0.0.1:$p/?local=$app" \
+		bash "$here/util/web_drive.sh" firefox $app \
+		"$t/$app.json" "$t/$app" > "$t/$app.log" 2>&1 ||
+		fail "$app's drive ($t/$app.log: $(tail -2 "$t/$app.log" | tr '\n' ' '))"
+	grep -aq "wasm main: ready (the browser's instance)" "$t/$app/page.log" ||
+		fail "$app: not the browser's own instance"
+	grep -aq "server: .*key from the client's wasm: 1" "$t/$app/page.log" ||
+		fail "$app: the worker's server did not get the module's packet"
+	grep -aE "default client_main|wasm main: trap" "$t/$app/page.log" &&
+		fail "$app: the default client_main said something went wrong"
+	echo "$app: drawn by its .wasm, a key answered by the worker's server"
+done
+
 # The buildat server's serving: a page with no game (apps/play's), and
 # web/ as it is
 cd "$here/Build"
