@@ -1,8 +1,9 @@
 # WABT 1.0.42 (https://github.com/WebAssembly/wabt, release tarball
 # wabt-1.0.42.tar.xz, sha256 a76cda3c174a43097863a07fc0b0c202f770f53e
 # 21806ea2636f167d1ffb1e30), Apache 2.0 ([CLIENT_WASM]). Only what the
-# client uses is kept: the binary reader, the validator and wasm2c's C
-# writer (with its prebuilt templates), and wasm2c's runtime. No tools,
+# client uses is kept: the binary reader, the validator, wasm2c's C
+# writer (with its prebuilt templates), wasm2c's runtime, and the binary
+# writer (the metered module the web client instantiates). No tools,
 # tests, text format, interpreter or third_party beyond picosha2. Updated
 # by copying the same files out of a newer release; the files are as
 # released, this CMakeLists.txt is buildat's.
@@ -32,6 +33,7 @@ add_library(wabt STATIC
 	src/apply-names.cc
 	src/binary-reader-ir.cc
 	src/binary-reader.cc
+	src/binary-writer.cc
 	src/binary-reader-logging.cc
 	src/binary.cc
 	src/binding-hash.cc
