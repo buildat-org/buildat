@@ -333,7 +333,8 @@ bool CreateAllDirs(std::string path)
 	size_t pos;
 	std::vector<std::string> tocreate;
 	std::string basepath = path;
-	while(!PathExists(basepath))
+	// Empty is the root: "/user" leaves "" ahead of it
+	while(!basepath.empty() && !PathExists(basepath))
 	{
 		tocreate.push_back(basepath);
 		pos = basepath.rfind(DIR_DELIM_C);
