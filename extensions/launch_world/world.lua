@@ -571,10 +571,10 @@ local function material(colour, roughness, metallic, texture)
 	-- HDR here and one that does not
 	local pbr = env("BUILDAT_LAUNCH_NOPBR") == ""
 	local t = magic.cache:GetResource("Technique",
-			pbr and (texture and "Techniques/PBR/PBRDiff.xml" or
-			"Techniques/PBR/PBRNoTexture.xml") or
-			(texture and "Techniques/Diff.xml" or
-			"Techniques/NoTexture.xml"))
+			pbr and (texture and "own:Techniques/PBR/PBRDiff.xml" or
+			"own:Techniques/PBR/PBRNoTexture.xml") or
+			(texture and "own:Techniques/Diff.xml" or
+			"own:Techniques/NoTexture.xml"))
 	assert(t ~= nil, "the technique loaded")
 	m:SetTechnique(0, t)
 	if texture then m:SetTexture(magic.TU_DIFFUSE, texture) end
@@ -729,7 +729,10 @@ room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
 -- to send that module's client_data, so the client's resource router
 -- falls back to builtin/<module>/client_data for a name nobody announced;
 -- the mesher itself sets no technique, and a node without one is
--- invisible rather than unlit (2026-09-23).
+-- invisible rather than unlit (2026-09-23). By its own: name
+-- ([TRUSTED_LAUNCH_WAIT]), as every model, technique and effect here: the
+-- room draws on through a launch's wait, connected, and a server's file
+-- of the plain name would be reloaded into it in place.
 -- **The room's own variant of the voxel technique** ([LAUNCH_WORLD],
 -- 2026-09-24): the same shading with VOXELROOMPROBE compiled in, which
 -- is the answer to "is this cube map the sky, or this room?" -- the
@@ -737,7 +740,7 @@ room.id.floor_dark = add_voxel("floor_dark", "generated/floor_dark.png",
 -- a sky keeps the plain one, whose shader has none of it, which is what
 -- keeps [LOOK_CHECK]'s rule satisfiable rather than argued about.
 local VOXEL_TECHNIQUE = magic.cache:GetResource("Technique",
-		"voxel_shading/PBRVoxelRoom.xml")
+		"own:voxel_shading/PBRVoxelRoom.xml")
 assert(VOXEL_TECHNIQUE, "voxel_shading/PBRVoxelRoom.xml is in the cache")
 -- **What makes the voxels reflect.** `PBRVoxel` has image-based lighting
 -- (VOXELIBL), and it is gated three ways -- by a table of how much sky is
@@ -1036,7 +1039,7 @@ local function part(model, pos, scale, mat)
 	node.position = magic.Vector3(pos.x * U, pos.y * U, pos.z * U)
 	node.scale = magic.Vector3(scale.x * U, scale.y * U, scale.z * U)
 	local object = node:CreateComponent("StaticModel")
-	object.model = magic.cache:GetResource("Model", "Models/" .. model .. ".mdl")
+	object.model = magic.cache:GetResource("Model", "own:Models/" .. model .. ".mdl")
 	object.material = mat
 	object.castShadows = true
 	return node
@@ -1073,7 +1076,7 @@ local function ornamented(h, inlay, opts)
 	written_texture(nt, norm)
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/PBR/PBRDiffNormal.xml"))
+			"own:Techniques/PBR/PBRDiffNormal.xml"))
 	m:SetTexture(magic.TU_DIFFUSE, dt)
 	m:SetTexture(magic.TU_NORMAL, nt)
 	m:SetShaderParameter("MatDiffColor", magic.Color(1, 1, 1, 1))
@@ -1654,7 +1657,7 @@ local function etched(r, g, b, roughness, metallic, mark, icon)
 		if not t then return nil end
 		local m = magic.Material:new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
+				"own:Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
 		m:SetTexture(magic.TU_DIFFUSE, kept.white_tex)
 		m:SetTexture(magic.TU_SPECULAR, t)
 		m:SetShaderParameter("MatDiffColor", magic.Color(r, g, b, 1))
@@ -1669,7 +1672,7 @@ local function etched(r, g, b, roughness, metallic, mark, icon)
 		if not t then return nil end
 		local m = magic.Material:new()
 		m:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
+				"own:Techniques/PBR/PBRMetallicRoughDiffSpec.xml"))
 		-- The mark is the rough patch: its one is added to roughness,
 		-- its nought leaves the surface as the material says
 		m:SetTexture(magic.TU_DIFFUSE, kept.white_tex)
@@ -1690,8 +1693,8 @@ local function glow(colour, mark, icon)
 	-- One bit: nothing else survives an emissive multiplied by 26
 	local t = mark_texture(mark, icon, true, false, "glow")
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			t and "Techniques/DiffUnlit.xml" or
-			"Techniques/NoTextureUnlit.xml"))
+			t and "own:Techniques/DiffUnlit.xml" or
+			"own:Techniques/NoTextureUnlit.xml"))
 	if t then m:SetTexture(magic.TU_DIFFUSE, t) end
 	m:SetShaderParameter("MatDiffColor", colour)
 	kept[#kept + 1] = m
@@ -2097,7 +2100,7 @@ end
 do
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureUnlit.xml"))
+			"own:Techniques/NoTextureUnlit.xml"))
 	m:SetShaderParameter("MatDiffColor", magic.Color(5.2 * light_look.opening,
 			5.6 * light_look.opening, 6.4 * light_look.opening, 1))
 	kept[#kept + 1] = m
@@ -2109,7 +2112,7 @@ do
 	node.scale = magic.Vector3(room.OPEN_X1 - room.OPEN_X0 + 1, 0.3,
 			room.OPEN_Z1 - room.OPEN_Z0 + 1)
 	local o = node:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+	o.model = magic.cache:GetResource("Model", "own:Models/Box.mdl")
 	o.material = m
 	o.castShadows = false
 	log:info("the opening: " .. (room.OPEN_X1 - room.OPEN_X0 + 1) .. "x" ..
@@ -2674,7 +2677,7 @@ function apply_room_path(vp)
 		local rp = vp.renderPath:Clone()
 		for fx in want:gmatch("[^,]+") do
 			local xml = magic.cache:GetResource("XMLFile",
-					"PostProcess/" .. fx .. ".xml")
+					"own:PostProcess/" .. fx .. ".xml")
 			if xml then
 				local before = rp:GetNumCommands()
 				rp:Append(xml)
@@ -2857,10 +2860,10 @@ if light_look.far then
 	node.rotation = magic.Quaternion(90, magic.Vector3(1, 0, 0))
 	node.scale = magic.Vector3(1.6 * U, 0.06 * U, 1.6 * U)
 	local o = node:CreateComponent("StaticModel")
-	o.model = magic.cache:GetResource("Model", "Models/Cylinder.mdl")
+	o.model = magic.cache:GetResource("Model", "own:Models/Cylinder.mdl")
 	local m = magic.Material:new()
 	m:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTextureUnlit.xml"))
+			"own:Techniques/NoTextureUnlit.xml"))
 	m:SetShaderParameter("MatDiffColor", magic.Color(f.color[1] * f.emissive,
 			f.color[2] * f.emissive, f.color[3] * f.emissive, 1))
 	kept[#kept + 1] = m

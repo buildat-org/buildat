@@ -218,7 +218,11 @@
         <attribute name="Font Size" value="15" />
         <attribute name="Color" value="0.867 0.867 0.867" />
     </element>
+    <!-- The client's F10 debug HUD: its profiler's columns want a fixed
+         width font, Urho3D's default style's -->
     <element type="DebugHudText" style="Text" auto="false">
+        <attribute name="Font" value="Font;own:Fonts/Anonymous Pro.ttf" />
+        <attribute name="Font Size" value="11" />
         <attribute name="Text Effect" value="Shadow" />
     </element>
     <element type="ConsoleBackground" auto="false">

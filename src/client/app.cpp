@@ -1267,7 +1267,8 @@ public:
 	// styles, fonts and icons by it. Never a served file (a server
 	// announces any name it likes) and never the cache's resource dirs
 	// (sandboxed code writes there with compose_image()): the directories
-	// the client was installed with, or no file at all.
+	// the client was installed with, or no file at all. A builtin module's
+	// client_data is installed too (launch_world's voxel technique).
 	ss_ own_file(const ss_ &name)
 	{
 		if(name.empty() || name[0] == '/' || name[0] == '\\' ||
@@ -1281,7 +1282,7 @@ public:
 			if(interface::fs::path_exists(path))
 				return path;
 		}
-		return "";
+		return builtin_client_data(name);
 	}
 
 	void Route(magic::String &name, magic::ResourceRequest requestType)
@@ -2536,11 +2537,12 @@ struct CApp: public App, public magic::Application
 
 		boot_launcher();
 
-		// Create debug HUD
+		// Create debug HUD, on ui_utils' style: its references are own:
+		// too, so a served file does not restyle it ([TRUSTED_LAUNCH_WAIT])
 		magic::ResourceCache *magic_cache = GetSubsystem<magic::ResourceCache>();
 		magic::DebugHud *dhud = GetSubsystem<magic::Engine>()->CreateDebugHud();
 		dhud->SetDefaultStyle(magic_cache->GetResource<magic::XMLFile>(
-				"UI/DefaultStyle.xml"));
+				"own:ui_utils/res/style.xml"));
 
 		start_command_seq();
 	}
