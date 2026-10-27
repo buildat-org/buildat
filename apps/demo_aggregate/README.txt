@@ -97,9 +97,12 @@ The mine, for now
 -----------------
 
 The world is generated the way demo_digger's is -- fbm noise, a grass surface over
-dirt over rock, ponds in the hollows with sand shores, trees scattered over
-it -- with bedrock at the bottom as the one thing that cannot be dug and the
-thing support ultimately comes from.
+dirt over rock, sand shores, trees scattered over it -- with bedrock at the
+bottom as the one thing that cannot be dug and the thing support ultimately
+comes from. The ground sinks to a sea floor away from the middle, by a
+distance bent by a second noise, so the 192x192 area is an island with bays,
+headlands and islets in a sea that reaches every edge. You spawn near the
+origin.
 
 A tree is scenery that the same rules apply to: its trunk stands on the
 ground and its leaves hang off the trunk, so cutting through a trunk drops
@@ -122,7 +125,7 @@ Tab is a free camera: it goes where it is pointed, through anything, and
 nothing pulls it down. Turn it on before placing a structure and the camera
 takes itself somewhere the whole thing is in frame.
 
-G goes to the next place worth testing at: the pool site at (-79, 62, 167),
+G goes to the next place worth testing at: the pool site at (-31, 52, 45),
 a hollow where water can be poured and watched, and an overlook the spawn
 and anything built there is in frame from. See PLACES in
 main/client_lua/init.lua.

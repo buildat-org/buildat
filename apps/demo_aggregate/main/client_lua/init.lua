@@ -224,7 +224,7 @@ local player_node = scene:CreateChild("Player")
 local player_shape = player_node:CreateComponent("CollisionShape")
 do
 	-- Placeholder until main:spawn arrives with terrain height at this x,z
-	player_node.position = magic.Vector3(-5, 80, 257)
+	player_node.position = magic.Vector3(16, 80, -19)
 	player_node.direction = magic.Vector3(-1, 0, 0.4)
 	---[[
 	local body = player_node:CreateComponent("RigidBody")
@@ -551,10 +551,10 @@ local STRUCTURES = {
 -- place without one is somewhere to stand, and you arrive a couple of
 -- voxels up so you land on the ground rather than inside it.
 local PLACES = {
-	{name = "pooling site", p = {-79, 62, 167}},
+	{name = "pooling site", p = {-31, 52, 45}},
 	-- Far enough from the spawn to see a structure put up there whole,
 	-- which is where the B menu puts one if you have not moved
-	{name = "spawn overlook", p = {27, 71, 292}, look = {-32, 0, -35}},
+	{name = "spawn overlook", p = {-16, 85, -54}, look = {32, 0, 35}},
 }
 local place_i = 0
 

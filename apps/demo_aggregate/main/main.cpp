@@ -53,11 +53,32 @@ static int range(std::mt19937 &r, int a, int b)
 
 using namespace Urho3D;
 
-// Everything at or below this that the terrain did not fill is water. The
-// generator's surface runs from about y=13 to y=100 over the generated area,
-// and this line puts water in the lowest 6% of it: a handful of ponds in the
-// hollows rather than a sea with islands in it.
+// Everything at or below this that the terrain did not fill is water: the
+// sea around the island, and what is left of the land's hollows under it.
 static const int WATER_LEVEL = 25;
+
+// The island ([AGGREGATE_ISLAND]): the generated area's middle and half its
+// width (3x3 sections of 64, x and z -64..127), and the falloff that sinks the
+// ground to the sea floor between ISLAND_COAST0 and ISLAND_COAST1 of the half
+// width out. The distance is bent by a second x,z noise, so the coast has bays
+// and headlands, islets come up off it and the sea reaches in; the bend fades
+// out over the last fifth so that every edge is sea. On the way out the hills
+// are flattened to the noise's mean first, out to ISLAND_FLAT: a hill of 90
+// sunk to the sea over the falloff was a cliff all round the south coast.
+static const float ISLAND_MID = 32;
+static const float ISLAND_HALF = 96;
+static const float ISLAND_COAST0 = 0.55f;
+static const float ISLAND_COAST1 = 0.95f;
+static const float ISLAND_FLAT = 0.6f;
+static const float ISLAND_BEND = 1.2f;
+// The noise's a under the sea: a surface of 14, 11 under the water
+static const float SEA_FLOOR_A = 3.0f;
+
+static float smooth01(float e0, float e1, float v)
+{
+	float t = std::min(1.0f, std::max(0.0f, (v - e0) / (e1 - e0)));
+	return t * t * (3 - 2 * t);
+}
 
 // The bottom of the world, and the only thing in it that cannot be dug:
 // where support ultimately comes from.
@@ -812,6 +833,26 @@ struct Worldgen: public worldgen::GeneratorInterface
 			sv_<float> noise;
 			interface::noise::fill2(np, 3, lc.getX() + spread/2,
 					lc.getZ() + spread/2, w, d, noise);
+			// The island: the land sunk to the sea floor by a bent distance
+			// from the middle; trees read the same heights
+			interface::noise::NoiseParams bend_np = {0, ISLAND_BEND, 60, 60, 60,
+					5, 0.5};
+			sv_<float> bend;
+			interface::noise::fill2(bend_np, 11, lc.getX(), lc.getZ(), w, d,
+					bend);
+			for(int z = 0; z < d; z++){
+				for(int x = 0; x < w; x++){
+					size_t i = z * w + x;
+					float dx = (lc.getX() + x - ISLAND_MID) / ISLAND_HALF;
+					float dz = (lc.getZ() + z - ISLAND_MID) / ISLAND_HALF;
+					float r = std::sqrt(dx * dx + dz * dz);
+					float f = r - bend[i] * (1 - smooth01(0.8f, 1.0f, r));
+					float u = smooth01(0.0f, ISLAND_FLAT, f);
+					float t = smooth01(ISLAND_COAST0, ISLAND_COAST1, f);
+					float a = noise[i] * (1 - u) + np.offset * u;
+					noise[i] = a * (1 - t) + SEA_FLOOR_A * t;
+				}
+			}
 
 			size_t noise_i = 0;
 			for(int z = lc.getZ(); z <= uc.getZ(); z++){
@@ -945,8 +986,10 @@ struct Module: public interface::Module
 
 	SceneReference m_main_scene;
 
-	static const int SPAWN_X = -5;
-	static const int SPAWN_Z = 257;
+	// The nearest to the origin where the ground rises to -X: the tunnel
+	// goes through the ridge west of it and out on the slope to the coast
+	static const int SPAWN_X = 16;
+	static const int SPAWN_Z = -19;
 	static const int SPAWN_Y_MAX = 127;
 	static const int SPAWN_Y_MIN = -64;
 	static constexpr float PLAYER_HEIGHT = 1.7f;
@@ -1256,7 +1299,7 @@ struct Module: public interface::Module
 			//pv::Region region(-1, -1, -1, 1, 1, 1);
 			//pv::Region region(-2, -1, -2, 2, 1, 2);
 			//pv::Region region(-3, -1, -3, 3, 1, 3);
-			pv::Region region(-5, -1, 0, 0, 1, 5);
+			pv::Region region(-1, -1, -1, 1, 1, 1);
 			//pv::Region region(-5, -1, -5, 5, 1, 5);
 			//pv::Region region(-6, -1, -6, 6, 1, 6);
 			//pv::Region region(-8, -1, -8, 8, 1, 8);
