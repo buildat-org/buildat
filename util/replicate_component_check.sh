@@ -1,11 +1,15 @@
 #!/bin/bash
 # tier: full
-# cost: ~40 s (2026-10-12)
+# cost: ~45 s (2026-10-28)
 # covers: src/client/state.cpp builtin/replicate/replicate.cpp
 # [COMPAT_BREAK_07] 8e: a component added to a node the client already has
 # (replicate:create_component) and a change to its attributes after
 # (replicate:component_delta_update) reach the client. An app adds a Light
 # of brightness 2 to a node once the client has it, then makes it 5.
+# [REPLICATE_TREE_DEPTH]: then it sends replicate packets of its own, a
+# chain of 100000 nodes with a Light at its end and a move of a 1023-node chain under one 477
+# deep, and makes the Light 7: the client refuses past 1024 levels and
+# lives on.
 #   util/replicate_component_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -24,12 +28,15 @@ cat > "$a/main.cpp" <<'EOF'
 #include "core/log.h"
 #include "client_file/api.h"
 #include "replicate/api.h"
+#include "network/api.h"
 #include "main_context/api.h"
 #include "interface/module.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include <Scene.h>
 #include <Light.h>
+#include <Context.h>
+#include <VectorBuffer.h>
 #define MODULE "main"
 using namespace Urho3D;
 using interface::Event;
@@ -38,6 +45,8 @@ struct Module: public interface::Module
 	interface::Server *m_server;
 	main_context::SceneReference m_scene;
 	float m_since = -1;
+	network::PeerInfo::Id m_peer = 0;
+	Context *m_ctx = nullptr;
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server){}
 	void init()
@@ -58,6 +67,7 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			m_scene = imc->create_scene();
 			imc->check_scene(m_scene)->CreateChild("Lamp");
+			m_ctx = imc->check_scene(m_scene)->GetContext();
 		});
 	}
 	void on_files(const client_file::FilesTransmitted &e)
@@ -65,7 +75,60 @@ struct Module: public interface::Module
 		replicate::access(m_server, [&](replicate::Interface *ir){
 			ir->assign_scene_to_peer(m_scene, e.recipient);
 		});
+		m_peer = e.recipient;
 		m_since = 0;
+	}
+	// A node packet as a hostile server writes it: every network attribute
+	// default but the parent, which is the node parent_id (0: the scene)
+	ss_ node_packet(Context *ctx, uint id, uint parent_id, bool create,
+			bool light = false)
+	{
+		const Vector<AttributeInfo> *attrs =
+				ctx->GetNetworkAttributes(Node::GetTypeStatic());
+		VectorBuffer buf;
+		buf.WriteNetID(id);
+		buf.WriteUByte(0); // timestamp
+		PODVector<unsigned char> bits((attrs->Size() + 7) / 8);
+		for(auto &b : bits) b = 0;
+		VectorBuffer parent;
+		if(parent_id){
+			for(uint i = 0; i < attrs->Size(); i++)
+				if(attrs->At(i).name_ == "Network Parent Node")
+					bits[i / 8] |= 1 << (i % 8);
+			parent.WriteNetID(parent_id);
+		}
+		buf.Write(&bits[0], bits.Size());
+		if(parent_id)
+			buf.WriteBuffer(parent.GetBuffer());
+		buf.WriteVLE(0); // vars
+		if(create && !light)
+			buf.WriteVLE(0); // components
+		if(light){
+			// A Light the renderer places, which asks for the world
+			// transform: a recursion up the whole chain
+			const Vector<AttributeInfo> *la =
+					ctx->GetNetworkAttributes(Light::GetTypeStatic());
+			buf.WriteVLE(1);
+			buf.WriteStringHash(Light::GetTypeStatic());
+			buf.WriteNetID(id);
+			buf.WriteUByte(0);
+			for(uint i = 0; i < (la->Size() + 7) / 8; i++)
+				buf.WriteUByte(0);
+		}
+		return ss_((const char*)buf.GetData(), buf.GetSize());
+	}
+	void send_chain()
+	{
+		const uint B = 0x800000, N = 100000;
+		Context *ctx = m_ctx;
+		network::access(m_server, [&](network::Interface *inet){
+			for(uint i = 0; i < N; i++)
+				inet->send(m_peer, "replicate:create_node",
+						node_packet(ctx, B + i, i ? B + i - 1 : 0, true,
+								i == N - 1));
+			inet->send(m_peer, "replicate:node_delta_update",
+					node_packet(ctx, B + 1, B + 1500, false));
+		});
 	}
 	void on_tick(const interface::TickEvent &e)
 	{
@@ -73,12 +136,16 @@ struct Module: public interface::Module
 			return;
 		const float before = m_since;
 		m_since += e.dtime;
+		if(before < 6.5 && m_since >= 6.5)
+			send_chain();
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Node *n = imc->check_scene(m_scene)->GetChild("Lamp");
 			if(before < 3 && m_since >= 3)
 				n->CreateComponent<Light>()->SetBrightness(2);
 			if(before < 6 && m_since >= 6)
 				n->GetComponent<Light>()->SetBrightness(5);
+			if(before < 7 && m_since >= 7)
+				n->GetComponent<Light>()->SetBrightness(7);
 		});
 	}
 };
@@ -106,8 +173,8 @@ start_server "$t/srv.log" "STATUS Listening" 120 auto \
 	bin/buildat_server -m "$t/app" -D "$t/srv" -l 3 ||
 	fail "the server did not listen ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-# The app's 3 s and 6 s after the files are its own timers
-printf 'wait_log_any 20000 LAMP brightness 2\nwait_log 10000 LAMP brightness 5\nquit\n' > "$t/seq"
+# The app's 3, 6, 6.5 and 7 s after the files are its own timers
+printf 'wait_log_any 20000 LAMP brightness 2\nwait_log 10000 LAMP brightness 5\nwait_log 20000 LAMP brightness 7\nquit\n' > "$t/seq"
 timeout 60 bin/buildat -o launch_ui=launch_menu -s 127.0.0.1:$SERVER_PORT \
 	-D "$t/cl" -w 640x480 -l 3 -o sound_mute=1 -c @"$t/seq" > "$t/cl.log" 2>&1
 rc=$?
@@ -116,5 +183,14 @@ grep -q "LAMP brightness 2" "$t/said" ||
 	fail "the added Light did not reach the client ($t/cl.log)"
 grep -q "LAMP brightness 5" "$t/said" ||
 	fail "the Light's change did not reach the client ($t/cl.log)"
+# 0x800000 + 1024 is the first node 1025 levels deep; 0x800001 the moved one
+grep -q "create_node: node 8389632 refused: past 1024 levels" "$t/said" ||
+	fail "the client did not refuse the 1025th level ($t/cl.log)"
+grep -q "node_delta_update: node 8388609 refused: past 1024 levels" "$t/said" ||
+	fail "the client did not refuse the deep move ($t/cl.log)"
+[ "$(grep -c "refused: past 1024 levels" "$t/said")" = 2 ] ||
+	fail "each refusal kind not logged exactly once ($t/cl.log)"
+grep -q "LAMP brightness 7" "$t/said" ||
+	fail "the client did not live past the deep chain ($t/cl.log)"
 [ $rc = 0 ] || fail "the drive ($t/cl.log)"
-echo "PASS: a component added to a node the client has, and its change after, replicated"
+echo "PASS: a component added to a node the client has, and its change after, replicated; a replicated tree past 1024 levels refused"

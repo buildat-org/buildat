@@ -15,6 +15,7 @@
 #include "interface/compress.h"
 #include "interface/thread_pool.h"
 #include "lua_bindings/replicate.h"
+#include "lua_bindings/tree_depth.h"
 #include <c55/string_util.h>
 #include <c55/os.h> // get_timeofday_us()
 #include <cstdlib>
@@ -720,6 +721,32 @@ struct CState: public State
 	}
 
 	// A chunk's node is "static_(x, y, z)" (voxelworld's create_chunk_node)
+	// A replicated node's attributes read, and the node put back under its
+	// old parent if they moved it past MAX_TREE_DEPTH
+	// ([REPLICATE_TREE_DEPTH]): a server's chain, or a deep subtree moved,
+	// overflowed the stack in the engine's recursions over a tree. Logged
+	// once a packet kind; a chain past the cap is refused a node at a time.
+	bool m_deep_create_logged = false;
+	bool m_deep_move_logged = false;
+	void read_node_delta(Node *node, magic::MemoryBuffer &msg,
+			const char *packet, bool &logged)
+	{
+		magic::WeakPtr<Node> old_parent(node->GetParent());
+		node->ReadDeltaUpdate(msg);
+		if(node->GetParent() == old_parent.Get())
+			return;
+		if(lua_bindings::tree_depth(node, MAX_TREE_DEPTH) +
+				lua_bindings::tree_height(node, MAX_TREE_DEPTH) <=
+				MAX_TREE_DEPTH)
+			return;
+		Node *back = old_parent.Get();
+		(back ? back : m_app->get_scene())->AddChild(node);
+		if(!logged)
+			log_w(MODULE, "%s: node %u refused: past %i levels deep; later"
+					" ones not logged", packet, node->GetID(), MAX_TREE_DEPTH);
+		logged = true;
+	}
+
 	void node_arrived(Node *node)
 	{
 		int x, y, z;
@@ -1219,7 +1246,8 @@ void CState::setup_packet_handlers()
 			node->CreateComponent<SmoothedTransform>(magic::LOCAL);
 		}
 		// Read initial attributes
-		node->ReadDeltaUpdate(msg);
+		read_node_delta(node, msg, "replicate:create_node",
+				m_deep_create_logged);
 		node_arrived(node);
 		// Skip transition to first position
 		SmoothedTransform *transform = node->GetComponent<SmoothedTransform>();
@@ -1353,7 +1381,8 @@ void CState::setup_packet_handlers()
 		Node *node = scene->GetNode(node_id);
 		if(node){
 			log_d(MODULE, "Updating node %i (DeltaUpdate)", node_id);
-			node->ReadDeltaUpdate(msg);
+			read_node_delta(node, msg, "replicate:node_delta_update",
+					m_deep_move_logged);
 			node_arrived(node);
 			uint num_vars = msg.ReadVLE();
 			while(num_vars && !msg.IsEof()){

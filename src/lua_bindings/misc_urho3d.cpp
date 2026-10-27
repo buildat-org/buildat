@@ -6,8 +6,8 @@
 #include "client/app.h"
 #include "client/config.h"
 #include "interface/fs.h"
+#include "lua_bindings/tree_depth.h"
 #include <tolua++.h>
-#include <algorithm>
 #include <cstring>
 #include <vector>
 #include <Context.h>
@@ -408,44 +408,25 @@ static int l_hold_ref(lua_State *L)
 }
 
 // tree_depth(node_or_element, limit) -> how many levels it is below its
-// root, counted up to limit + 1 ([SANDBOX_TREE_DEPTH]). A walk up the
-// parents, as the sandbox's CreateChild asks of each parent: in Lua it
-// was a tolua call a level, and chains of a thousand took seconds.
+// root, counted up to limit + 1 ([SANDBOX_TREE_DEPTH]), as the sandbox's
+// CreateChild asks of each parent: in Lua it was a tolua call a level, and
+// chains of a thousand took seconds.
 static int l_tree_depth(lua_State *L)
 {
 	tolua_Error tolua_err;
 	int limit = luaL_checkinteger(L, 2);
-	int depth = 0;
 	TRY_GET_TOLUA_STUFF(node, 1, Node);
 	if(node){
-		for(Node *p = node->GetParent(); p && depth <= limit; p = p->GetParent())
-			depth++;
+		lua_pushinteger(L, tree_depth(node, limit));
 	} else {
 		GET_TOLUA_STUFF(element, 1, UIElement);
-		for(UIElement *p = element->GetParent(); p && depth <= limit;
-				p = p->GetParent())
-			depth++;
+		lua_pushinteger(L, tree_depth(element, limit));
 	}
-	lua_pushinteger(L, depth);
 	return 1;
 }
 
 // tree_height(element, limit) -> how many levels there are under a UI
-// element, counted up to limit + 1 ([SANDBOX_TREE_DEPTH]): what an
-// element moved under another adds to its depth. The recursion stops past
-// limit, so it is at most limit + 1 frames deep whatever the tree.
-static int tree_height(UIElement *e, int limit)
-{
-	int h = 0;
-	if(limit < 0)
-		return 0;
-	for(const SharedPtr<UIElement> &c : e->GetChildren()){
-		h = std::max(h, 1 + tree_height(c.Get(), limit - 1));
-		if(h > limit)
-			break;
-	}
-	return h;
-}
+// element, counted up to limit + 1 ([SANDBOX_TREE_DEPTH])
 static int l_tree_height(lua_State *L)
 {
 	tolua_Error tolua_err;
