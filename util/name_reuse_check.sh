@@ -8,6 +8,9 @@
 #     and again after a restart; a client without the owner's token (the
 #     LAN's) gets the login page and is not placed; one logging in as
 #     singleplayer is held; bob logging in plays as bob;
+#   - [DELETED_NAME_REUSE]: bob deleted by the admin (SinglePlayer, by the
+#     setup code), bob registered again is refused; the admin's add makes
+#     it again;
 #   - hillclimb's guests: a guest after a restart is not the guest
 #     before it (builtin/accounts keeps the counter).
 #   util/name_reuse_check.sh
@@ -57,6 +60,20 @@ BUILDAT_JOIN_NAME=SinglePlayer BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CR
 BUILDAT_JOIN_NAME=bob BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
 	drive lan_b "wait_log 120000 load: the world is in" ||
 	bad="$bad; bob not in ($t/lan_b.log)"
+# admin <name> <script>: SinglePlayer's admin requests
+admin(){
+	BUILDAT_JOIN_NAME=SinglePlayer BUILDAT_JOIN_PASSWORD=checkpass12 \
+		BUILDAT_JOIN_ADMIN="$2" drive "$1" "wait_log 60000 admin script: done"
+}
+admin del_b "delete bob" || bad="$bad; bob not deleted ($t/del_b.log)"
+BUILDAT_JOIN_NAME=bob BUILDAT_JOIN_PASSWORD=otherpass12 BUILDAT_JOIN_CREATE=1 \
+	drive lan_b2 "wait_log_any 60000 Login refused: " ||
+	bad="$bad; no refusal for bob again ($t/lan_b2.log)"
+grep -aq "Login refused: \"bob\" was a deleted account's" "$t/lan_b2.log" ||
+	bad="$bad; a deleted name registered again ($t/lan_b2.log)"
+admin add_b "add bob checkpass12" &&
+	grep -aq "admin result: The account bob was added" "$t/add_b.log" ||
+	bad="$bad; the admin's add of bob ($t/add_b.log)"
 stop
 # Who was placed: bob alone
 placed=$(grep -aoP "luanti  : Player \K\S+(?= joined)" "$t/v2.log" | tr '\n' ' ')
@@ -95,5 +112,5 @@ g1=$(hc h1) g2=$(hc h2)
 [ "$g1" != "$g2" ] || bad="$bad; $g1 again after the restart"
 
 [ -z "$bad" ] || fail "${bad#; }"
-echo "PASS: singleplayer kept, LAN clients log in (bob, not the host's name); guests $g1 then $g2"
+echo "PASS: singleplayer kept, LAN clients log in (bob, not the host's name); a deleted bob not registered again, the admin's add makes it; guests $g1 then $g2"
 # vim: set noet ts=4 sw=4:

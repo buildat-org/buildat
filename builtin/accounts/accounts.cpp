@@ -1425,9 +1425,20 @@ struct Module: public interface::Module, public Interface
 		return sum ? size_text(sum)+" ("+apps+")" : "";
 	}
 
+	// [DELETED_NAME_REUSE] A deleted account's name takes no new account:
+	// games keep saves by name, and a Starport ID's sub is its name's, so
+	// the next to take it got the earlier player's. The admin's "Add a
+	// user..." makes it again.
+	bool deleted(const ss_ &name)
+	{
+		ss_ v;
+		return m_store && m_store->get("deleted/"+name, v);
+	}
+
 	// The account gone: what is kept of it here, and the apps told
 	void account_deleted(const ss_ &name)
 	{
+		m_store->set("deleted/"+name, "");
 		m_store->remove("made/"+name);
 		m_store->remove("seen/"+name);
 		for(auto &app : m_storage)
@@ -1852,6 +1863,10 @@ struct Module: public interface::Module, public Interface
 					return refused("\""+name+"\" is kept for a client that "
 							"has not logged in: pick another name for this "
 							"community on the Starport");
+				if(deleted(name))
+					return refused("The name "+name+" was a deleted "
+							"account's on this server: pick another for this "
+							"community on the Starport");
 				if(exists(name))
 					return refused("The name "+name+" is taken on this server "
 							"by an account of its own: pick another for "
@@ -1977,6 +1992,10 @@ struct Module: public interface::Module, public Interface
 			if(reserved_name(name))
 				return reply("\""+name+"\" is kept for a client or a "
 						"guest; choose another name");
+			// simplified: the launcher's own user (the admin) takes it
+			if(!local && deleted(name))
+				return reply("\""+name+"\" was a deleted account's; "
+						"choose another name");
 			sv_<ss_> privs;
 			if(local){
 				// The first admin of the launcher's server is its own user
@@ -2124,7 +2143,7 @@ struct Module: public interface::Module, public Interface
 		}
 		do
 			name = "guest"+itos(++m_last_guest);
-		while(exists(name) || find_peer(name) != 0);
+		while(exists(name) || deleted(name) || find_peer(name) != 0);
 		m_store->set("last_guest", itos(m_last_guest));
 		log_i(MODULE, "%zu joined as a guest, %s, from %s", packet.sender,
 				cs(name), cs(peer.address));
@@ -3365,7 +3384,7 @@ struct Module: public interface::Module, public Interface
 		if(!valid_name(name) || reserved_name(name))
 			return "A name is 1 to 20 letters, digits, _ or -, and not "
 					"client<digits>";
-		if(exists(name))
+		if(exists(name) || deleted(name))
 			return "That name is taken";
 		if(password.size() < MIN_PASSWORD || password.size() > 100)
 			return "A password is "+itos((int)MIN_PASSWORD)+
