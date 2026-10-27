@@ -1,0 +1,13 @@
+# The Rust side of interface/wasm_api.h ([CLIENT_WASM]): a module's
+# client .wasm in Rust depends on it as buildat_wasm = "0.1"; the server
+# builds the module with this copy in its place (src/server/wasm_build.cpp)
+[package]
+name = "buildat_wasm"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[features]
+default = ["panic_handler"]
+# A panic logged and turned into a trap; off for a module with its own
+panic_handler = []

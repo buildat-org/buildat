@@ -30,6 +30,18 @@ static const char *WASM_CFLAGS = "--target=wasm32 -O2 -nostdlib -ffreestanding -
 // and the client refuses one that does not
 static const char *WASM_LDFLAGS = "--no-entry --export-dynamic --gc-sections --strip-all -O2 -z stack-size=65536 --max-memory=67108864";
 
+// A module's Rust (wasm/Cargo.toml), built by cargo: the same features as
+// the C flags (rustc's default CPU has reference types and multi-value,
+// which the client refuses; the standard library is built with them, and
+// its call_indirect's table index, a padded LEB that only reference types
+// read, is made one byte by --compress-relocations), the client's maximum
+// memory and the stack; panics abort (the client runs no unwinding).
+// Offline, with a CARGO_HOME of its own: buildat_wasm is the engine's copy (interface/rust/), patched
+// in for crates.io's name. simplified: no crates but path ones; fetching
+// a module's crates before the box is the upgrade. In the hash.
+static const char *RUST_FLAGS = "-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals,+nontrapping-fptoint,+bulk-memory -C link-arg=--max-memory=67108864 -C link-arg=-zstack-size=65536 -C link-arg=--compress-relocations -C strip=symbols";
+static const char *RUST_TARGET = "wasm32-unknown-unknown";
+
 static ss_ env(const char *name)
 {
 	return interface::process::get_environment_variable(name);
@@ -158,6 +170,37 @@ void find_wasm_toolchain(core::Config &config)
 	config.set("wasm_cc", cc);
 	config.set("wasm_ld", ld);
 	config.set("wasm_tried", tried_s);
+
+	// A module's Rust (wasm/Cargo.toml): cargo, by name as above, and
+	// rustup's home, which the box is given to read
+	sv_<ss_> cargo_tried;
+	ss_ cargo = env("BUILDAT_CARGO");
+	if(!cargo.empty() && !is_program(cargo)){
+		cargo_tried.push_back("BUILDAT_CARGO="+cargo);
+		cargo = "";
+	}
+	if(cargo.empty())
+		cargo = find_in_path("cargo", cargo_tried);
+	if(cargo.empty()){
+		sv_<ss_> c;
+		if(!env("CARGO_HOME").empty())
+			c.push_back(env("CARGO_HOME")+"/bin/cargo");
+		if(!home.empty())
+			c.push_back(home+"/.cargo/bin/cargo");
+		cargo = first_program(c, cargo_tried);
+	}
+	ss_ cargo_tried_s;
+	for(const ss_ &t : cargo_tried)
+		cargo_tried_s += (cargo_tried_s.empty() ? "" : ", ")+t;
+	ss_ rustup = env("RUSTUP_HOME");
+	if(rustup.empty() && !home.empty() &&
+			interface::fs::path_exists(home+"/.rustup"))
+		rustup = home+"/.rustup";
+	log_v(MODULE, "cargo: %s (tried %s)", cargo.empty() ? "missing" : cs(cargo),
+			cs(cargo_tried_s));
+	config.set("wasm_cargo", cargo);
+	config.set("wasm_cargo_tried", cargo_tried_s);
+	config.set("wasm_rustup", cargo.empty() ? "" : rustup);
 }
 
 static ss_ quote(const ss_ &s)
@@ -200,10 +243,12 @@ static bool ends_with(const ss_ &s, const char *e)
 	return s.size() >= n && s.compare(s.size() - n, n, e) == 0;
 }
 
-static bool run_logged(const ss_ &command, const ss_ &log_path)
+static bool run_logged(const ss_ &command, const ss_ &log_path,
+		const sm_<ss_, ss_> &env = {})
 {
 	interface::process::ExecOptions opts;
 	opts.output_path = log_path;
+	opts.env = env;
 	const int status = interface::process::shell_exec(command, opts);
 	if(status == 0)
 		return true;
@@ -216,6 +261,100 @@ static bool run_logged(const ss_ &command, const ss_ &log_path)
 	return false;
 }
 
+// wasm/ as a Rust crate: copied out (cargo writes Cargo.lock beside
+// Cargo.toml) and built by cargo; the .wasm's path, or "" and why logged
+static ss_ build_rust(const core::Config &config, const ss_ &module_name,
+		const ss_ &src_dir, const sv_<ss_> &files, const ss_ &crate_dir,
+		const ss_ &out_dir, const ss_ &hash)
+{
+	const ss_ cargo = config.get<ss_>("wasm_cargo");
+	if(cargo.empty()){
+		log_e(MODULE, "%s has wasm/ in Rust, and this server has no cargo to "
+				"build it (tried %s). Install Rust (rustup) and its %s target, "
+				"or set BUILDAT_CARGO.", cs(module_name),
+				cs(config.get<ss_>("wasm_cargo_tried")), RUST_TARGET);
+		return "";
+	}
+	const auto t0 = std::chrono::steady_clock::now();
+#ifdef _WIN32
+	const ss_ tmp = out_dir+"/"+hash+".tmp";
+	const ss_ rustc = interface::fs::strip_file_name(cargo)+"/rustc.exe";
+#else
+	const ss_ tmp = out_dir+"/"+hash+"."+itos(getpid())+".tmp";
+	const ss_ rustc = interface::fs::strip_file_name(cargo)+"/rustc";
+#endif
+	interface::fs::create_directories(tmp+"/src");
+	interface::fs::create_directories(tmp+"/cargo_home");
+	// The flags in cargo's own form, which goes over RUSTFLAGS and any
+	// config's: one byte 0x1f between them
+	ss_ flags = RUST_FLAGS;
+	std::replace(flags.begin(), flags.end(), ' ', '\x1f');
+	const sm_<ss_, ss_> env = {
+		{"CARGO_HOME", tmp+"/cargo_home"},
+		{"CARGO_ENCODED_RUSTFLAGS", flags},
+	};
+	bool ok = true;
+	ss_ why;
+	// The target installed: rustc names its library directory either way
+	if(ok){
+		ok = run_logged(quote(rustc)+" --print target-libdir --target "+
+				RUST_TARGET, tmp+"/rustc.log", env);
+		ss_ dir = read_file(tmp+"/rustc.log");
+		while(!dir.empty() && (dir.back() == '\n' || dir.back() == '\r'))
+			dir.pop_back();
+		if(!ok || dir.empty() || !interface::fs::path_exists(dir)){
+			ok = false;
+			why = ss_("cargo is there, and Rust's ")+RUST_TARGET+" target is "
+					"not (rustup target add "+RUST_TARGET+")";
+		}
+	}
+	for(size_t i = 0; ok && i < files.size(); i++){
+		const ss_ to = tmp+"/src/"+files[i];
+		interface::fs::create_directories(interface::fs::strip_file_name(to));
+		ok = interface::fs::copy_file(src_dir+"/"+files[i], to);
+		if(!ok)
+			why = "copying "+files[i]+" failed";
+	}
+	if(ok){
+		const ss_ command = quote(cargo)+" build --offline --release --target "+
+				RUST_TARGET+" --manifest-path "+quote(tmp+"/src/Cargo.toml")+
+				" --target-dir "+quote(tmp+"/target")+
+				" --config "+quote("patch.crates-io.buildat_wasm.path=\""+
+					crate_dir+"\"")+
+				" --config "+quote("profile.release.panic=\"abort\"");
+		ok = run_logged(command, tmp+"/cargo.log", env);
+		if(!ok)
+			why = "cargo failed";
+	}
+	// The cdylib's .wasm: the one there
+	ss_ built;
+	if(ok){
+		const ss_ dir = tmp+"/target/"+RUST_TARGET+"/release";
+		for(const auto &n : interface::fs::list_directory(dir))
+			if(!n.is_directory && ends_with(n.name, ".wasm"))
+				built = built.empty() ? dir+"/"+n.name : "?";
+		if(built.empty() || built == "?"){
+			ok = false;
+			why = built.empty() ? "cargo made no .wasm (crate-type = "
+					"[\"cdylib\"] in [lib])" : "cargo made more than one .wasm";
+		}
+	}
+	const ss_ out = out_dir+"/"+hash+".wasm";
+	if(ok)
+		ok = interface::fs::rename(built, out);
+	interface::fs::remove_all(tmp);
+	if(!ok){
+		log_e(MODULE, "%s: building wasm/ (Rust) failed: %s", cs(module_name),
+				cs(why));
+		return "";
+	}
+	const int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - t0).count();
+	log_i(MODULE, "%s: built wasm/ (Rust) in %i ms: %s (%zu bytes)",
+			cs(module_name), ms, cs(out), read_file(out).size());
+	return out;
+}
+
 ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		const ss_ &module_path)
 {
@@ -223,26 +362,47 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	sv_<ss_> files;
 	collect(src_dir, "", files);
 	std::sort(files.begin(), files.end());
+	// Rust: a crate, which cargo builds; its target/ is a build's, not a
+	// source
+	const bool rust = interface::fs::path_exists(src_dir+"/Cargo.toml");
+	if(rust)
+		files.erase(std::remove_if(files.begin(), files.end(),
+				[](const ss_ &f){ return f.compare(0, 7, "target/") == 0; }),
+				files.end());
 	sv_<ss_> sources;
 	for(const ss_ &f : files)
 		if(ends_with(f, ".c") || ends_with(f, ".cc") || ends_with(f, ".cpp"))
 			sources.push_back(f);
-	if(sources.empty()){
-		log_e(MODULE, "%s: wasm/ has no .c, .cc or .cpp", cs(module_name));
+	if(sources.empty() && !rust){
+		log_e(MODULE, "%s: wasm/ has no .c, .cc, .cpp or Cargo.toml",
+				cs(module_name));
 		return "";
 	}
 	const ss_ interface_path = config.get<ss_>("interface_path");
 	const ss_ include_dir = interface::fs::strip_file_name(interface_path);
+	const ss_ crate_dir = interface_path+"/rust/buildat_wasm";
 
 	// Keyed by what goes in: a name and its bytes per file, the header, the
-	// flags. Not the tools' versions, so that a prebuilt one serves a
-	// server without them.
+	// flags (and for Rust buildat_wasm's files). Not the tools' versions,
+	// so that a prebuilt one serves a server without them.
 	std::ostringstream key(std::ios::binary);
 	key<<"buildat wasm 1\n"<<WASM_CFLAGS<<"\n"<<WASM_LDFLAGS<<"\n";
 	key<<read_file(interface_path+"/wasm_api.h");
 	for(const ss_ &f : files){
 		const ss_ data = read_file(src_dir+"/"+f);
 		key<<f<<'\0'<<data.size()<<'\0'<<data;
+	}
+	if(rust){
+		key<<"rust 1\n"<<RUST_FLAGS<<"\n"<<RUST_TARGET<<"\n";
+		sv_<ss_> crate;
+		collect(crate_dir, "", crate);
+		std::sort(crate.begin(), crate.end());
+		for(const ss_ &f : crate){
+			if(f.compare(0, 7, "target/") == 0 || f == "Cargo.lock")
+				continue;
+			const ss_ data = read_file(crate_dir+"/"+f);
+			key<<f<<'\0'<<data.size()<<'\0'<<data;
+		}
 	}
 	const ss_ hash = interface::sha1::hex(interface::sha1::calculate(key.str()));
 
@@ -271,6 +431,9 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 			cs(module_name));
 	return "";
 #endif
+	if(rust)
+		return build_rust(config, module_name, src_dir, files, crate_dir,
+				out_dir, hash);
 	const ss_ cc = config.get<ss_>("wasm_cc");
 	const ss_ ld = config.get<ss_>("wasm_ld");
 	if(cc.empty() || ld.empty()){

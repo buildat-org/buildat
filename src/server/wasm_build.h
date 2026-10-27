@@ -13,12 +13,15 @@ namespace server
 	// --target=wasm32) and a wasm linker, set into the config as wasm_cc
 	// and wasm_ld. Looked for by name, nothing run: BUILDAT_WASM_CC and
 	// BUILDAT_WASM_LD, then PATH's clang and wasm-ld, then emsdk's
-	// (~/emsdk, $EMSDK) and rustup's rust-lld. Called before the box, which
-	// is then given their directories to read. Logs what it tried.
+	// (~/emsdk, $EMSDK) and rustup's rust-lld. And cargo, for a module's
+	// Rust (wasm_cargo: BUILDAT_CARGO, PATH's, $CARGO_HOME's, ~/.cargo's),
+	// with rustup's home (wasm_rustup). Called before the box, which is
+	// then given their directories to read. Logs what it tried.
 	void find_wasm_toolchain(core::Config &config);
 
 	// Builds <module_path>/wasm/ to <build_path>/wasm/<hash>.wasm, the hash
-	// being of its files, the API header and the flags, unless that file
+	// being of its files, the API header and the flags (and buildat_wasm's
+	// files: a wasm/ with a Cargo.toml is Rust, built by cargo), unless that file
 	// (or the prebuilt directory's) is there already. Returns the .wasm's
 	// path, or "" and logs why. The module's name is for the log only.
 	ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,

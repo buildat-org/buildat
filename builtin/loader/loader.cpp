@@ -354,8 +354,15 @@ struct Module: public interface::Module, public loader::Interface
 			return; // Already ran for this peer
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(const ss_ &script : m_client_mains){
-				inetwork->send(event.recipient, "core:run_script",
-						"buildat.run_script_file(\""+script+"\")");
+				// "wasm": the engine's default main for the module, which
+				// runs its .wasm ([CLIENT_WASM] step 7)
+				const size_t slash = script.find('/');
+				const ss_ code = script.compare(slash, ss_::npos, "/wasm") == 0 ?
+						"local _, _, main = buildat.run_script_file("
+						"\"client_lua/wasm_main.lua\")\nmain(\""+
+						script.substr(0, slash)+"\")" :
+						"buildat.run_script_file(\""+script+"\")";
+				inetwork->send(event.recipient, "core:run_script", code);
 			}
 		});
 	}

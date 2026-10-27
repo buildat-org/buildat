@@ -37,6 +37,9 @@ Config::Config()
 	set_default("wasm_cc", "");
 	set_default("wasm_ld", "");
 	set_default("wasm_tried", "");
+	set_default("wasm_cargo", "");
+	set_default("wasm_cargo_tried", "");
+	set_default("wasm_rustup", "");
 	set_default("network_address", "any");
 	set_default("network_port", "29500");
 	// The launcher's token for its own client, from BUILDAT_OWNER_TOKEN;

@@ -1,0 +1,14 @@
+# apps/sample_wasm_only's client in Rust (this app is a variant of it,
+# its echo/ module the base's). The server builds wasm/ with cargo for
+# wasm32-unknown-unknown, buildat_wasm being the engine's copy
+# (src/interface/rust/buildat_wasm).
+[package]
+name = "sample_wasm_only_rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+buildat_wasm = "0.1"

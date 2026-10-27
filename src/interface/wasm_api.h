@@ -112,6 +112,50 @@ void buildat_send_packet(const char *name, unsigned int name_len,
 BUILDAT_WASM_IMPORT(event_take)
 int buildat_event_take(void *buf, unsigned int cap);
 
+// **The default client_main** ([CLIENT_WASM] step 7): a module whose
+// meta.json says "client_main": "wasm" has no Lua of its own; the engine's
+// (builtin/client_lua/client_lua/wasm_main.lua) loads its .wasm, makes a
+// scene for it -- a camera, a directional light and 8 nodes, each with a
+// CustomGeometry whose material shows the vertex colours times the node's
+// own texture (white until set) -- and calls its exports:
+// - void frame(float dt): each frame, dt the seconds since the last one.
+//   The module takes its events here, with buildat_event_take(), and
+//   draws through the imports above. A trap is logged and the next frame
+//   calls it again; a module the meter stops is not called again.
+// - const char *packets(void), optional: the names of the packets it is
+//   sent, without "<module>:", separated by spaces, ending in a 0 byte
+//   (at most 4096 bytes); each comes to it as BUILDAT_EVENT_PACKET.
+// (An export's name may not begin with "buildat_": those are the
+// engine's.) It forwards nothing else: a module that wants Urho's UI
+// writes its own client Lua.
+//
+// Each event from it is little-endian 32-bit words, the first its kind:
+// - START, first, once: camera node, light node, the window's width and
+//   height in pixels, n (8), then n pairs of a mesh node and its texture.
+//   All are handles for the imports above.
+// - KEY_DOWN: key, repeat (1 for a key repeat), qualifiers (shift 1, ctrl
+//   2, alt 4). A key is Urho3D's (SDL's) code: a letter its lowercase
+//   ASCII, space 32. KEY_UP: key.
+// - MOUSE_DOWN, MOUSE_UP: button (left 1, middle 2, right 4).
+// - MOUSE_MOVE: x, y in window pixels, dx, dy. WHEEL: its steps, + up.
+// - PACKET: the name's length, then the name's bytes, then the data to the
+//   event's end.
+// - RESIZE: the window's width and height.
+// None is longer than BUILDAT_EVENT_MAX bytes: a buffer of that size
+// takes each (buildat_event_take() leaves one that does not fit queued).
+// Keys the client keeps (F9 to F12, and all while a password is typed)
+// do not come.
+#define BUILDAT_EVENT_START 1
+#define BUILDAT_EVENT_KEY_DOWN 2
+#define BUILDAT_EVENT_KEY_UP 3
+#define BUILDAT_EVENT_MOUSE_DOWN 4
+#define BUILDAT_EVENT_MOUSE_UP 5
+#define BUILDAT_EVENT_MOUSE_MOVE 6
+#define BUILDAT_EVENT_WHEEL 7
+#define BUILDAT_EVENT_PACKET 8
+#define BUILDAT_EVENT_RESIZE 9
+#define BUILDAT_EVENT_MAX (8 + 64 + 65536)
+
 #ifndef BUILDAT_WASM_MODULE
 static inline void buildat_log(const char *a, unsigned int b)
 { (void)a; (void)b; __builtin_trap(); }

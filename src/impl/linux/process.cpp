@@ -25,6 +25,22 @@ ss_ get_environment_variable(const ss_ &name)
 int shell_exec(const ss_ &command, const ExecOptions &opts)
 {
 	log_d(MODULE, "shell_exec(\"%s\")", cs(command));
+	// opts.env over the parent's environment, made before the fork: the
+	// child of a threaded process allocates nothing
+	sv_<ss_> env_strings;
+	sv_<char*> envp;
+	if(!opts.env.empty()){
+		for(char **e = environ; *e; e++){
+			const char *eq = strchr(*e, '=');
+			if(!eq || !opts.env.count(ss_(*e, eq - *e)))
+				env_strings.push_back(*e);
+		}
+		for(const auto &pair : opts.env)
+			env_strings.push_back(pair.first+"="+pair.second);
+		for(ss_ &e : env_strings)
+			envp.push_back(&e[0]);
+		envp.push_back(nullptr);
+	}
 	int f = fork();
 	if(f == 0){
 		if(!opts.output_path.empty()){
@@ -36,7 +52,11 @@ int shell_exec(const ss_ &command, const ExecOptions &opts)
 				close(fd);
 			}
 		}
-		execl("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr);
+		if(envp.empty())
+			execl("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr);
+		else
+			execle("/bin/sh", "sh", "-c", command.c_str(), (const char*)nullptr,
+					envp.data());
 		_exit(127);
 	}
 	int exit_status = 1;

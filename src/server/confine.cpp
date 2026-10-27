@@ -449,7 +449,12 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 			interface::fs::strip_file_name(interface::fs::strip_file_name(
 				config.get<ss_>("wasm_cc"))),
 			interface::fs::strip_file_name(interface::fs::strip_file_name(
-				config.get<ss_>("wasm_ld")))})
+				config.get<ss_>("wasm_ld"))),
+			// cargo (rustup's proxy, in ~/.cargo/bin) and the toolchains
+			// it runs, for a module's Rust; its CARGO_HOME is the build's
+			interface::fs::strip_file_name(interface::fs::strip_file_name(
+				config.get<ss_>("wasm_cargo"))),
+			config.get<ss_>("wasm_rustup")})
 		if(!p.empty())
 			rs.add_around(p, holes, FS_READ);
 	// The app's own, and what the other apps share, read only
