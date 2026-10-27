@@ -43,6 +43,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/html5.h>
+#include <emscripten/em_asm.h>
 #endif
 
 #include "../DebugNew.h"
@@ -353,7 +354,10 @@ Input::Input(Context* context) :
 #if defined(__ANDROID__)
     SDL_SetHint(SDL_HINT_ANDROID_SEPARATE_MOUSE_AND_TOUCH, "1");
 #elif defined(__EMSCRIPTEN__)
-    emscriptenInput_ = new EmscriptenInput(this);
+    // buildat [WEB_LOCAL_SERVER]: a headless engine in a worker or under
+    // node has no page to take the pointer lock and focus events from
+    if (EM_ASM_INT({ return typeof document !== 'undefined'; }))
+        emscriptenInput_ = new EmscriptenInput(this);
 #endif
 
     // Try to initialize right now, but skip if screen mode is not yet set

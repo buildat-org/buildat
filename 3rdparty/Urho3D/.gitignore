@@ -2,6 +2,7 @@
 /Build/
 # ...and the web client's ([WEB_CLIENT])
 /Build-web/
+/Build-webserver/
 # A place for a separate build with address sanitization instrumentation
 /Build-address
 

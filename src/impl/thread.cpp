@@ -72,7 +72,7 @@ struct CThread: public Thread
 		}
 		log_d(MODULE, "Thread started: %p (%s)", thread, cs(thread_name));
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 		// Set thread name
 		if(!thread_name.empty()){
 			ss_ limited_name = thread_name.size() <= 15 ?

@@ -27,7 +27,7 @@ namespace chat {
 // A player's lines fill a bucket that empties one a second; a line into a
 // full one is refused (vanilla's CHAT_BURST)
 static const double BURST = 5;
-static const size_t LINE_MAX = 400, KEEP = 50, REPORT_LINES = 30;
+static const size_t MAX_LINE = 400, KEEP = 50, REPORT_LINES = 30;
 static const double REPORT_EVERY_S = 30;
 static const char *MIN_NAMES[] = {"everyone", "member", "helper"};
 static const int MIN_LEVELS[] = {accounts::LV_NEW, accounts::LV_MEMBER,
@@ -278,7 +278,7 @@ struct Module: public interface::Module, public Interface,
 		if(what == "say"){
 			// One line, printable, not too long
 			ss_ text;
-			for(char c : packet.data.substr(0, LINE_MAX))
+			for(char c : packet.data.substr(0, MAX_LINE))
 				if((unsigned char)c >= 32 && c != 127)
 					text += c;
 			if(text.empty())

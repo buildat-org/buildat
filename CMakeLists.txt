@@ -20,9 +20,20 @@ set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
 # doc/plan/web_client_plan.md): configure a build directory of its own with
 # emsdk's emcmake (util/build_web.sh). No server, and no runtime-compiled
 # modules to share the engine and the core library with, so both are static.
+# The server for the web instead ([WEB_LOCAL_SERVER]): one app's modules
+# compiled ahead of time and linked into it, with pthreads, in a build
+# directory of its own (util/build_web_server.sh)
+set(BUILDAT_WEB_SERVER_APP "" CACHE STRING "Under emcc, build the server for this app instead of the client")
 if(EMSCRIPTEN)
 	set(BUILDAT_WEB TRUE)
-	set(BUILD_SERVER FALSE CACHE BOOL "Build server" FORCE)
+	if(BUILDAT_WEB_SERVER_APP)
+		set(BUILD_SERVER TRUE CACHE BOOL "Build server" FORCE)
+		set(BUILD_CLIENT FALSE CACHE BOOL "Build client" FORCE)
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
+	else()
+		set(BUILD_SERVER FALSE CACHE BOOL "Build server" FORCE)
+	endif()
 	# buildat throws, and Emscripten does not catch unless asked. Emscripten's
 	# clang also refuses one of luabind's templates GCC takes, and its libc
 	# has M_PI and the like only with _GNU_SOURCE, which g++ always defines.
@@ -104,6 +115,9 @@ endif()
 # next ordinary link fails. Found the hard way.
 if(SANITIZE)
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-${SANITIZE}")
+elseif(BUILDAT_WEB_SERVER_APP)
+	# Threads: every object of a pthreads link is built with them
+	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-webserver")
 elseif(BUILDAT_WEB)
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-web")
 else()
@@ -200,7 +214,9 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		-DURHO3D_PCH=FALSE
 		-DURHO3D_64BIT=${URHO3D_64BIT}
 	)
-	if(BUILDAT_WEB)
+	if(BUILDAT_WEB_SERVER_APP)
+		list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_THREADING=TRUE)
+	elseif(BUILDAT_WEB)
 		list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_GLES3=TRUE)
 	endif()
 	# Under Urho3D's MinGW toolchain the outer configure has exported the
@@ -688,6 +704,9 @@ if(BUILD_SERVER)
 		target_link_libraries(${SERVER_EXE_NAME} userenv)
 	else()
 		target_link_libraries(${SERVER_EXE_NAME} dl)
+	endif()
+	if(BUILDAT_WEB_SERVER_APP)
+		include(util/web_server.cmake)
 	endif()
 endif(BUILD_SERVER)
 

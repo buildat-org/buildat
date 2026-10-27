@@ -7,6 +7,7 @@
 	#include "ports/windows_compat.h" // usleep()
 #else
 	#include <sys/socket.h>
+	#include <sys/select.h> // not reached through the others under emcc
 	#include <unistd.h> // usleep()
 #endif
 #include <cstring> // strerror()

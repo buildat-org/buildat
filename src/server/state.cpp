@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "rccpp.h"
 #include "rccpp_util.h"
+#include "static_modules.h"
 #include "config.h"
 #include "interface/module.h"
 #include "interface/module_info.h"
@@ -61,7 +62,7 @@ namespace server {
 // servers run under one
 static size_t usable_cores()
 {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__EMSCRIPTEN__)
 	return std::max(1u, std::thread::hardware_concurrency());
 #else
 	cpu_set_t set;
@@ -93,7 +94,7 @@ static std::set<int> g_compile_slots_held; // by this process
 #endif
 void open_compile_slots()
 {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(BUILDAT_STATIC_MODULES)
 	if(g_compile_slots_opened)
 		return;
 	g_compile_slots_opened = true;
@@ -1124,6 +1125,18 @@ struct CState: public State, public interface::Server
 
 	interface::Module* build_module_u(const interface::ModuleInfo &info)
 	{
+#ifdef BUILDAT_STATIC_MODULES
+		// Linked in ([WEB_LOCAL_SERVER]): no compile, no cache, no reload
+		for(const StaticModule *sm = g_static_modules; sm->name; sm++){
+			if(info.name == sm->name){
+				log_i(MODULE, "STATUS Loading %s (%zu of %zu)", cs(info.name),
+						m_module_load_order.size() + 1, m_module_count);
+				return static_cast<interface::Module*>(sm->create(this));
+			}
+		}
+		log_w(MODULE, "Module %s is not in this build", cs(info.name));
+		return nullptr;
+#endif
 		ss_ init_cpp_path = info.path+"/"+info.name+".cpp";
 
 		// What this module is built out of. The build cache is keyed on all
@@ -1425,6 +1438,9 @@ struct CState: public State, public interface::Server
 	bool compile_modules(const sv_<interface::ModuleInfo> &infos,
 			ss_ *failed_module)
 	{
+#ifdef BUILDAT_STATIC_MODULES
+		return true;
+#endif
 		sv_<std::pair<ss_, BuildJob>> todo;
 		{
 			interface::MutexScope ms(m_modules_mutex);

@@ -282,6 +282,15 @@ turned input off. The focus that would have turned it back on does not
 bubble, so it stayed off until the browser window itself was focused
 again.
 
+The headless engine of the web server ([WEB_LOCAL_SERVER])
+----------------------------------------------------------
+Source/Urho3D/Input/Input.cpp
+
+Input makes its EmscriptenInput, whose pointer lock and focus listeners
+need the page's document, only where there is one: the server built for
+the web runs its engine in a worker or under node, where registering them
+threw.
+
 A multi-line LineEdit ([HEARTH_MVP], 752c6246)
 ----------------------------------------------
 UI/LineEdit.{cpp,h}, LuaScript/pkgs/UI/LineEdit.pkg

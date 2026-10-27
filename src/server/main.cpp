@@ -384,12 +384,20 @@ int main(int argc, char *argv[])
 		interface::debug::set_crash_dump_dir(config.get<ss_>("cache_path"),
 				"buildat_server_boxed");
 	} else {
+#ifdef BUILDAT_STATIC_MODULES
+		// [WEB_LOCAL_SERVER]: the page names every path, in a file system
+		// with no compiler, sources or engine data, and the log is the
+		// console's
+		interface::fs::create_directories(config.get<ss_>("user_path"));
+		interface::fs::create_directories(config.get<ss_>("cache_path"));
+#else
 		if(!boot::autodetect::detect_server_paths(config))
 			return 1;
 		boot::autodetect::open_log(config, "buildat_server", argv[0]);
 		if(!config.check_paths()){
 			return 1;
 		}
+#endif
 		interface::fs::migrate_user_apps(config.get<ss_>("user_path"));
 		// [FIRST_ADMIN]: the admin's file <user>/first_admin, one line, read
 		// here, where the box does not hide the user path's top level, and

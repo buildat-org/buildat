@@ -80,7 +80,10 @@
 #include <RigidBody.h>
 #include <CollisionShape.h>
 #include <Scene.h>
+// Linked into the web server, the engine's Image.cpp has it already
+#ifndef BUILDAT_STATIC_MODULES
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#endif
 #define STBI_WRITE_NO_STDIO
 #include <STB/stb_image_write.h>
 #include <cstdlib>
