@@ -141,6 +141,7 @@ EM_JS(void, web_dgram_close, (int id), {
 #include <fstream>
 #include "interface/aitta.h"
 #include "interface/sha256.h"
+#include "server/wasm_build.h"
 #include "interface/bignum.h"
 #include <sstream>
 #include <sqlite3.h> // save_value() ([SAVE_ICON])
@@ -1173,6 +1174,49 @@ static ss_ app_dir(const ss_ &id)
 	if(!review_app_dir(id).empty())
 		return review_app_dir(id);
 	return installed_app_dir(id);
+}
+
+// [WASM_MAIN_WEB_PATHS] A module's wasm/ built as a server builds it
+// (server::build_module_wasm: its tools, flags and cache key) into the
+// client's cache; the .wasm's path, or "" and why
+static ss_ build_client_wasm(const ss_ &module_dir, const ss_ &module,
+		ss_ *why)
+{
+	core::Config c;
+	c.set("interface_path",
+			g_client_config.get<ss_>("share_path")+"/src/interface");
+	c.set("rccpp_build_path",
+			g_client_config.get<ss_>("cache_path")+"/client_wasm_build");
+	c.set("rccpp_prebuilt_path", "");
+	server::find_wasm_toolchain(c);
+	const ss_ path = server::build_module_wasm(c, module, module_dir);
+	if(path.empty())
+		*why = "building its wasm/ failed (the log says why)";
+	return path;
+}
+
+namespace app {
+sv_<std::pair<ss_, ss_>> serverless_wasms(const ss_ &app_dir)
+{
+	json::json_error_t err;
+	if(!json::load_file((app_dir+"/meta.json").c_str(), &err).get(
+			"serverless").is_true())
+		return {};
+	sv_<std::pair<ss_, ss_>> out;
+	for(const auto &n : interface::fs::list_directory(app_dir)){
+		const ss_ md = app_dir+"/"+n.name;
+		const json::Value m = json::load_file((md+"/meta.json").c_str(), &err);
+		if(!n.is_directory || !m.get("client_main").is_string() ||
+				m.get("client_main").as_string() != "wasm")
+			continue;
+		ss_ why;
+		const ss_ path = build_client_wasm(md, n.name, &why);
+		if(path.empty())
+			throw Exception(n.name+": "+why);
+		out.push_back({n.name+"/"+n.name+".wasm", path});
+	}
+	return out;
+}
 }
 
 // [APP_CATEGORY] what an app says it is: main/meta.json's "kind", or its

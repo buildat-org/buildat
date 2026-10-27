@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~1 min (2026-10-10)
-# covers: src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/core/starport/init.lua client/core/aitta/init.lua extensions/launch_menu/screens.lua
+# covers: src/server/wasm_build.cpp src/impl/aitta.cpp src/client/app.cpp src/client/app_lua.h src/client/state.cpp client/api.lua client/packet.lua client/core/starport/init.lua client/core/aitta/init.lua extensions/launch_menu/screens.lua
 # [SERVERLESS_PLAY]: an app's client half with no server, natively, by
 # BUILDAT_RUN. A small app (client_main, a texture in client_data):
 #   1. As dev:sl: buildat.serverless() true, a packet sent twice said
@@ -11,6 +11,13 @@
 #   2. Published to a local Aitta as tester/sl with "serverless": true,
 #      BUILDAT_RUN=tester/sl with that Aitta in the settings: installed
 #      (the signature checked) and run.
+#   3. On the web: a play server's page (headless Chrome) with that Aitta
+#      in its starport.json, at #run=tester/sl: the same release run in
+#      the browser, cube drawn by the browser's instance of its .wasm.
+# Its second module, cube, is apps/sample_wasm_only's client: "client_main":
+# "wasm" and a wasm/ in C ([WASM_MAIN_WEB_PATHS]). As dev:sl the client
+# builds the .wasm; the release carries it, built at the pack, and the
+# installed package runs that one, never building its wasm/.
 #   util/serverless_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -23,6 +30,9 @@ app=$t/u/dev_apps/sl
 mkdir -p "$app/main/client_lua" "$app/main/client_data"
 cp "$here/3rdparty/Urho3D/bin/Data/Textures/LogoLarge.png" "$app/main/client_data/dot.png"
 echo '{"engine_api": 2, "kind": "app", "client_main": "init.lua"}' > "$app/main/meta.json"
+mkdir -p "$app/cube"
+cp -r "$here/apps/sample_wasm_only/main/wasm" "$app/cube/"
+echo '{"engine_api": 2, "client_main": "wasm"}' > "$app/cube/meta.json"
 printf '{"author": "tester", "name": "sl", "version": "1.0.0", "engine_api": 2,
 	"audience": "everyone", "license_code": "MIT", "license_media": "CC0-1.0",
 	"description": "a serverless check", "serverless": true}\n' > "$app/meta.json"
@@ -44,6 +54,7 @@ end)
 L
 cat > "$t/cmds" <<C
 wait_log_any 30000 sl: texture
+wait_log 30000 wasm cube: drew a cube
 keypress Escape
 wait_log 10000 launch_menu: back to Home
 quit
@@ -59,9 +70,11 @@ run(){ # log what cmds [env...]
 }
 run "$t/a.log" dev:sl "$t/cmds"
 for x in "sl: serverless true" "sl: stored nil" "sl: write true" \
-		"sl: texture 512" "launch_menu: back to Home"; do
+		"sl: texture 512" "launch_menu: back to Home" "wasm cube: drew a cube"; do
 	grep -aq "$x" "$t/a.log" || fail "first run: no \"$x\""
 done
+grep -aqE "cube: (built wasm/ in|wasm/ is built \(cache hit\))" "$t/a.log" ||
+	fail "the client did not build cube's wasm/"
 [ "$(grep -ac "serverless: sl:hello goes nowhere" "$t/a.log")" = 1 ] ||
 	fail "the packet not said once"
 run "$t/b.log" dev:sl "$t/cmds"
@@ -97,6 +110,7 @@ BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass
 	-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
 zip=$("$b" aitta pack "$app" "$t/key" "$t/out" 2>/dev/null) || fail "pack"
+unzip -l "$zip" | grep -q " cube/cube.wasm$" || fail "the release carries no cube/cube.wasm"
 "$b" aitta publish "$zip" 127.0.0.1:$P 2>&1 | grep -q "listed: tester/sl" ||
 	fail "publish"
 echo "{\"aittas\": [\"http://127.0.0.1:$P\"], \"filters\": {\"unreviewed\": true}}" > "$t/managed.json"
@@ -109,10 +123,38 @@ wait_log_any 20000 Asking the user about http://127.0.0.1:$P
 delay 1500
 keypress Return
 wait_log 20000 sl: texture
+wait_log 30000 wasm cube: drew a cube
 quit
 C
 run "$t/c.log" tester/sl "$t/aitta.cmds" BUILDAT_STARPORT_MANAGED="$t/managed.json"
 grep -aq "aitta: play tester.sl@1.0.0 serverless" "$t/c.log" &&
 	grep -aq "sl: serverless true" "$t/c.log" || fail "not run from the Aitta"
 [ -f "$t/u/installed/tester/sl/1.0.0/main/client_lua/init.lua" ] || fail "not installed"
-echo "PASS: run with no server by its id, a packet said once, its texture and storage, left to Home; installed from an Aitta by author/name and run"
+grep -aqE "cube: (built wasm/|wasm/ is built)" "$t/c.log" && fail "the installed package's wasm/ was built"
+echo "ok: installed from the Aitta and run, the .wasm the release's"
+
+# 3. On the web, from the same Aitta
+BUILDAT_LUANTI_LIST=http://127.0.0.1:9 BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9 \
+	start_server "$t/play.log" "Listening at" 120 auto \
+	bin/buildat_server -m ../apps/play -D "$t/play" -l 3 ||
+	fail "the play server did not start"
+CHECK_PIDS+=($SERVER_PID)
+PP=$SERVER_PORT
+set_js="FS.writeFile('/buildat/user/starport.json', JSON.stringify({aittas: ['http://127.0.0.1:$P'], filters: {unreviewed: true}})); FS.syncfs(false, function(){}); 'set'"
+cat > "$t/steps.json" <<J
+[["nav", "http://127.0.0.1:$PP/"],
+ ["waitlog", "launch_menu", 90],
+ ["eval", "$set_js"],
+ ["wait", 1000],
+ ["nav", "http://127.0.0.1:$PP/?again#run=tester/sl"],
+ ["waitlog", "Asking the user about", 90],
+ ["wait", 1000],
+ ["key", "Enter"],
+ ["waitlog", "wasm cube: drew a cube", 60]]
+J
+WEB_DRIVE_URL=http://127.0.0.1:$PP "$here/util/web_drive.sh" chrome play \
+	"$t/steps.json" "$t/web" > "$t/web.out" 2>&1 ||
+	fail "the web drive ($(tail -3 "$t/web.out"); $t/web)"
+grep -aq "wasm cube: ready (the browser's instance)" "$t/web/page.log" ||
+	fail "not the browser's instance ($t/web/page.log)"
+echo "PASS: run with no server by its id, a packet said once, its texture and storage, its wasm client_main drawn, left to Home; installed from an Aitta by author/name and run, natively and on the web, the .wasm the release's"

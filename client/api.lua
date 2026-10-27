@@ -1719,7 +1719,14 @@ buildat.serverless_play = function(id)
 	__buildat_set_serverless()
 	launch_grid.screens().game_running()
 	for _, name in ipairs(scripts) do
-		buildat.run_script_file(name)
+		-- "wasm": the engine's default main, as the loader sends it
+		local module = name:match("^([%w_]+)/wasm$")
+		if module then
+			local _, _, main = buildat.run_script_file("client_lua/wasm_main.lua")
+			main(module)
+		else
+			buildat.run_script_file(name)
+		end
 	end
 	return true
 end

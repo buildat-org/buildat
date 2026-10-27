@@ -580,6 +580,8 @@ if(BUILD_CLIENT)
 		src/lua_bindings/replicate.cpp
 		src/lua_bindings/synth.cpp
 		src/lua_bindings/wasm.cpp
+		# [WASM_MAIN_WEB_PATHS] a serverless app's .wasm (app::serverless_wasms)
+		src/server/wasm_build.cpp
 	)
 	# [CLIENT_WASM] wasm2c's runtime, linked in whole on Linux, and the
 	# files the client writes beside the C it compiles
@@ -671,6 +673,8 @@ if(BUILD_CLIENT)
 			"${CMAKE_SOURCE_DIR}/extensions@/buildat/extensions"
 			"${CMAKE_SOURCE_DIR}/builtin/luanti/client_data@/buildat/builtin/luanti/client_data"
 			"${CMAKE_SOURCE_DIR}/builtin/voxel_shading/client_data@/buildat/builtin/voxel_shading/client_data"
+			# A serverless app's default client_main ([WASM_MAIN_WEB_PATHS])
+			"${CMAKE_SOURCE_DIR}/builtin/client_lua/client_lua/wasm_main.lua@/buildat/builtin/client_lua/client_lua/wasm_main.lua"
 			"${URHO3D_HOME}/bin/CoreData@/urho/bin/CoreData"
 			"${URHO3D_HOME}/bin/Data@/urho/bin/Data"
 		)

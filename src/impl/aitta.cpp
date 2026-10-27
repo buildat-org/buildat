@@ -599,11 +599,16 @@ static ss_ zip_entries(const sv_<std::pair<ss_, ss_>> &files)
 	return out;
 }
 
-static ss_ zip_directory(const ss_ &dir)
+static ss_ zip_directory(const ss_ &dir,
+		const sv_<std::pair<ss_, ss_>> &built)
 {
 	sv_<std::pair<ss_, ss_>> files;
 	for(const ss_ &name : package_files(dir))
-		files.emplace_back(name, read_file(dir+"/"+name));
+		if(std::none_of(built.begin(), built.end(),
+				[&](const std::pair<ss_, ss_> &b){ return b.first == name; }))
+			files.emplace_back(name, read_file(dir+"/"+name));
+	for(const auto &b : built)
+		files.emplace_back(b.first, read_file(b.second));
 	return zip_entries(files);
 }
 
@@ -623,7 +628,8 @@ static ss_ write_signed(const ss_ &zip, const ss_ &key, const char *format,
 	return base+".zip";
 }
 
-ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
+ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
+		const sv_<std::pair<ss_, ss_>> &built)
 {
 	json::json_error_t e;
 	const json::Value m = json::load_file((app_dir+"/meta.json").c_str(), &e);
@@ -640,7 +646,7 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir)
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
 		throw Exception(app_dir+"/meta.json: "+media);
-	return write_signed(zip_directory(app_dir), read_file(key_path),
+	return write_signed(zip_directory(app_dir, built), read_file(key_path),
 			SIG_FORMAT, out_dir+"/"+m.get("author").as_string()+"-"+
 			m.get("name").as_string()+"-"+m.get("version").as_string());
 }

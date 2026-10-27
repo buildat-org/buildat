@@ -115,7 +115,10 @@ namespace interface
 
 		// Packs app_dir (meta.json at its root) into out_dir and signs it
 		// with the key in key_path. Returns the zip's path; throws why not.
-		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir);
+		// built: {name in the archive, file} added to it, over a file of
+		// the same name (a serverless package's .wasm, app::serverless_wasms)
+		ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
+				const sv_<std::pair<ss_, ss_>> &built = {});
 
 		// Checks a release -- the hash, the signature, the manifest, the
 		// engine API -- and unpacks it into

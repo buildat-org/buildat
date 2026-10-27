@@ -134,6 +134,14 @@ namespace app
 	// out of range; *opt is then partially applied and should be discarded.
 	bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error);
 
+	// [WASM_MAIN_WEB_PATHS] A "serverless": true package's client .wasm
+	// files, {"<module>/<module>.wasm", built file} for each module whose
+	// client_main is "wasm", for aitta::pack() to carry: a serverless run
+	// has no server to build them, and the web no compiler. Built with the
+	// server's tools and flags into the client's cache; throws why not.
+	// None for a package that is not serverless.
+	sv_<std::pair<ss_, ss_>> serverless_wasms(const ss_ &app_dir);
+
 	struct App
 	{
 		virtual ~App(){}

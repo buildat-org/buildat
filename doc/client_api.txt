@@ -436,7 +436,12 @@ buildat.serverless_play(id) -> true, or false and why
 - An app's client half with no server ([SERVERLESS_PLAY]): its files from
   its directory, the launcher's placeholder under it so that leave_app
   takes it down, its client_mains run with buildat.serverless() true. id as
-  list_apps() names it. The launcher's Play.
+  list_apps() names it. The launcher's Play. A "client_main": "wasm"
+  module's .wasm is the one its release carries (`buildat aitta pack` and
+  Publish build it into a "serverless": true package's archive as
+  <module>/<module>.wasm, with the server's tools and flags); for an app
+  of the tree or a dev app the client builds wasm/ itself. An installed
+  package's wasm/ is never built here.
 
 buildat.start_local_server(app [, launch]) -> ok, error
 - Starts buildat_server as a child on a free port with -m apps/<app>, and

@@ -78,8 +78,11 @@ static int aitta_main(int argc, char *argv[])
 			return 0;
 		}
 		if(verb == "pack" && argc == 4){
+			// The share and cache paths, for a serverless package's .wasm
+			if(!boot::autodetect::detect_client_paths(g_client_config))
+				throw Exception("the share and cache paths not found");
 			printf("%s\n", interface::aitta::pack(argv[1], argv[2],
-					argv[3]).c_str());
+					argv[3], app::serverless_wasms(argv[1])).c_str());
 			return 0;
 		}
 		// [AITTA_PACKAGE_PAGE] The package's page, packed beside its files

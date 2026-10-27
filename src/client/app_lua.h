@@ -632,7 +632,8 @@
 					throw Exception("no key for the author \""+author+"\" in "+
 							keys);
 				lua_pushstring(L, interface::aitta::pack(dir, key,
-						user+"/aitta_releases").c_str());
+						user+"/aitta_releases",
+						app::serverless_wasms(dir)).c_str());
 				return 1;
 			}
 			if(op == "page_read" || op == "page_pack"){
@@ -2238,8 +2239,31 @@
 				lua_pushstring(L, (id+": module "+m+": "+why).c_str());
 				return 2;
 			}
-			if(meta.get("client_main").is_string())
-				mains.push_back(m+"/"+meta.get("client_main").as_string());
+			if(!meta.get("client_main").is_string())
+				continue;
+			const ss_ main = meta.get("client_main").as_string();
+			mains.push_back(m+"/"+main);
+			// [WASM_MAIN_WEB_PATHS] The default client_main's .wasm: the one
+			// the release carries (app::serverless_wasms at its pack), else
+			// built from wasm/ for an app of the tree or the developer's.
+			// Never built for another's package: its build would run
+			// unboxed here, a Rust crate's build scripts with it.
+			if(main != "wasm")
+				continue;
+			ss_ wasm = md+"/"+m+".wasm", wasm_why;
+			if(!interface::fs::path_exists(wasm))
+				wasm = valid_app_name(id) || !dev_app_dir(id).empty() ?
+						build_client_wasm(md, m, &wasm_why) : "";
+			if(wasm.empty()){
+				lua_pushnil(L);
+				lua_pushstring(L, (id+": module "+m+": "+(wasm_why.empty() ?
+						"its release carries no "+m+".wasm" : wasm_why)).c_str());
+				return 2;
+			}
+			files.push_back({m+"/"+m+".wasm", wasm});
+			files.push_back({"client_lua/wasm_main.lua",
+					g_client_config.get<ss_>("share_path")+
+					"/builtin/client_lua/client_lua/wasm_main.lua"});
 		}
 		if(mains.empty()){
 			lua_pushnil(L);
