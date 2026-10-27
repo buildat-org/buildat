@@ -41,6 +41,9 @@ local m3 = assert(buildat.wasm_load("main"))
 local m4 = assert(buildat.wasm_load("main"))
 -- A start function that never ends: stopped as it loads
 local endless_start = assert(buildat.wasm_load("endless_start"))
+-- A recursion of huge frames: a trap, not the client's stack overflowing
+-- ([WASM_FRAME_SIZE])
+local huge_frame = assert(buildat.wasm_load("huge_frame"))
 
 local scene = magic.Scene()
 scene:CreateComponent("Octree")
@@ -100,6 +103,10 @@ local function check()
 	local ok, err = pcall(m.call, m, "recurse", 0)
 	assert(not ok, "the endless recursion trapped")
 	log:info("recursion trap at depth "..m:call("depth")..": "..tostring(err))
+	-- Frames just under the native cap ([WASM_FRAME_SIZE])
+	ok, err = pcall(m.call, m, "recurse_held", 0)
+	assert(not ok, "the recursion of held values trapped")
+	log:info("held recursion trap at depth "..m:call("depth")..": "..tostring(err))
 	ok, err = pcall(m.call, m, "peek", 4294967292)
 	assert(not ok, "the read past the memory trapped")
 	log:info("memory trap: "..tostring(err))
@@ -183,6 +190,9 @@ local function check()
 	assert(status == "failed" and why:find("start function ran past its budget"),
 			"endless_start: "..tostring(status)..", "..tostring(why))
 	log:info("endless_start: "..why)
+	ok, err = pcall(huge_frame.call, huge_frame, "deep", 100000)
+	assert(not ok, "the recursion of huge frames returned")
+	log:info("huge frames ("..select(2, huge_frame:status()).."): "..tostring(err))
 
 	-- A packet to the server; its answer comes back as an event
 	buildat.sub_packet("main:pong", function(data)
@@ -231,6 +241,10 @@ magic.SubscribeToEvent("Update", function()
 		end
 	end
 	if endless_start:status() == "loading" then return end
+	local hf_status, hf_detail = huge_frame:status()
+	if hf_status == "loading" or hf_detail == "interpreter, compiling" then
+		return
+	end
 	log:info("engine: "..engine)
 	if moving then
 		local kept = m:read(m:call("buffer") + 2048, 20)

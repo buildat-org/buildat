@@ -646,8 +646,14 @@ static bool g_tag_used[128] = {};
 // The C wasm2c makes is built with these (and on Linux the runtime linked
 // into the client with the first two: CMakeLists.txt). The call depth is
 // counted, so that a deep recursion is a trap, not a native stack
-// overflow: 2000 frames of wasm2c's C fit the main thread's stack (8 MiB
-// on Linux; buildat.exe's 8 MiB too, CMakeLists.txt).
+// overflow, and each native frame is capped by the compiler (MAX_FRAME,
+// compiler() below), as a frame's size is the module's to choose (its
+// locals, its operand stack, what the compiler inlines): 2000 frames of
+// at most 2 KiB (and the saved registers, about 64 bytes) take some 4.2
+// MiB of the main thread's 8 MiB (Linux's default; buildat.exe's 8 MiB
+// too, CMakeLists.txt), the rest for the client below the call and the
+// imports above it. A module past the cap is not compiled and stays in
+// the interpreter ([WASM_FRAME_SIZE]; hillclimb's largest is 608 bytes).
 // - Linux: guard pages (8 GiB reserved an instance), the runtime's own
 //   signal handler off, as this file's chains to the client's crash
 //   handler.
@@ -669,6 +675,7 @@ static const char *WASM2C_DEFINES = "-DWASM_RT_SKIP_SIGNAL_RECOVERY=1 "
 		"-DWASM_RT_STACK_DEPTH_COUNT=1 -DWASM_RT_MAX_CALL_STACK_DEPTH=2000";
 static const char *MODULE_FILE = "module.so";
 #endif
+static const int MAX_FRAME = 2048; // bytes, a native frame's
 // The time and memory a compile may take before it is killed
 static const int COMPILE_WALL_S = 180;
 static const uint64_t COMPILE_CPU_S = 120;
@@ -1237,10 +1244,16 @@ static const Compiler& compiler()
 		return c;
 	c.path = cmd;
 	// wasm2c/README.md: what keeps -O2 conformant (NaN quieting, a
-	// recursion trapping), per compiler; nothing that drops a check
+	// recursion trapping), per compiler; nothing that drops a check. And
+	// a frame past MAX_FRAME an error (WASM2C_DEFINES above), in each
+	// compiler's spelling: clang only warns of gcc's, so an unknown
+	// warning option is an error there too
 	c.flags = c.version.find("clang") != ss_::npos ?
-			"-O2 -fno-optimize-sibling-calls -frounding-math" :
-			"-O2 -fno-optimize-sibling-calls -frounding-math -fsignaling-nans";
+			"-O2 -fno-optimize-sibling-calls -frounding-math "
+			"-Werror=unknown-warning-option -Wframe-larger-than="+
+			itos(MAX_FRAME)+" -Werror=frame-larger-than" :
+			"-O2 -fno-optimize-sibling-calls -frounding-math -fsignaling-nans "
+			"-Werror=frame-larger-than="+itos(MAX_FRAME);
 	log_i(MODULE, "Compiler for wasm modules: %s (%s)", cs(c.path),
 			cs(c.version));
 	return c;

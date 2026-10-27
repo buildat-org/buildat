@@ -63,6 +63,30 @@ BUILDAT_WASM_EXPORT int depth(void)
 	return deepest;
 }
 
+// A recursion of frames just under the client's cap on a native frame
+// (MAX_FRAME, 2 KiB in wasm.cpp): 240 values held across each call, so
+// that 2000 of them trap at the depth limit and do not overflow the stack
+// ([WASM_FRAME_SIZE])
+static long long held[250];
+#define HOLD(i) long long h##i = held[i] * n;
+#define FOLD(i) s = (s ^ h##i) * 3 + 1;
+#define TEN(M, p) M(p##0) M(p##1) M(p##2) M(p##3) M(p##4) \
+		M(p##5) M(p##6) M(p##7) M(p##8) M(p##9)
+#define ALL(M) TEN(M, 1) TEN(M, 2) TEN(M, 3) TEN(M, 4) TEN(M, 5) TEN(M, 6) \
+		TEN(M, 7) TEN(M, 8) TEN(M, 9) TEN(M, 10) TEN(M, 11) TEN(M, 12) \
+		TEN(M, 13) TEN(M, 14) TEN(M, 15) TEN(M, 16) TEN(M, 17) TEN(M, 18) \
+		TEN(M, 19) TEN(M, 20) TEN(M, 21) TEN(M, 22) TEN(M, 23) TEN(M, 24)
+BUILDAT_WASM_EXPORT int recurse_held(int n)
+{
+	ALL(HOLD)
+	again = recurse_held;
+	deepest = n;
+	held[n % 250] = n;
+	long long s = again(n + 1);
+	ALL(FOLD)
+	return (int)s;
+}
+
 // [CLIENT_WASM] step 4: state in the module's memory, which the move from
 // the interpreter to the compiled module keeps
 static int ticks;

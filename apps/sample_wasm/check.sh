@@ -21,6 +21,10 @@
 # never ends (endless_start/, hand-written: clang makes no start
 # function) stopped as it loads; a module exporting the meter's name
 # (meter_name/) refused.
+# [WASM_FRAME_SIZE]: a recursion of frames just under the native frame cap
+# traps at the depth limit; one of huge frames (huge_frame/, 4000 values
+# held across each call) traps too: natively its compile is refused at the
+# cap and it stays in the interpreter. The client lives.
 # Step 4, the interpreter (WAMR): with its compile under way, a module is
 # ready at once in the interpreter, and moves to the compiled module
 # between two calls, its state with it (a buffer and a counter written
@@ -92,7 +96,9 @@ client_lines()
 			"wasm main: stopped: spin_tree ran past its budget" \
 			"wasm endless_start: stopped: its start function ran past its budget" \
 			"sample_w: bench: the buffer reversed" \
-			"sample_w: a frame after the stops"; do
+			"sample_w: a frame after the stops" \
+			"sample_w: held recursion trap at depth" \
+			"sample_w: huge frames (.*): .*trap"; do
 		grep -aq "$want" "$log" || fail "no \"$want\" in $log"
 	done
 }
@@ -145,7 +151,10 @@ for want in "wasm main: ready (interpreter) while it compiles" \
 		"sample_w: main loaded: ready, interpreter, compiling" \
 		"wasm main: moved to the compiled module" \
 		"sample_w: the state moved with the module: kept across the move, tick 3" \
-		"sample_w: engine: compiled"; do
+		"sample_w: engine: compiled" \
+		"wasm huge_frame: compiler: .*larger than 2048 bytes" \
+		"wasm huge_frame: .*it stays in the interpreter" \
+		"sample_w: huge frames (interpreter): "; do
 	grep -aq "$want" "$t/cli1.log" || fail "no \"$want\" in $t/cli1.log"
 done
 # Two loads in one frame, one compile ([WASM_COMPILE_RACE])
@@ -167,7 +176,7 @@ grep -aE "wasm main: (compiling|compiled)" "$t/cli3.log" &&
 	fail "the client compiled with the compiler hidden"
 echo "-- compiled (run 2) and interpreter (run 3)"
 for n in 2 3; do
-	grep -aE "sample_w: (bench:|spin.* stopped after|recursion trap at depth)" \
+	grep -aE "sample_w: (bench:|spin.* stopped after|.*recursion trap at depth|huge frames)" \
 			"$t/cli$n.log" | sed 's/.*sample_w: //' | cut -c1-90
 done
 # A server with no clang and wasm linker refuses the module, saying so
