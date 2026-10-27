@@ -104,8 +104,11 @@ local function open(opts)
 	-- a style up on the element's root, and an element whose root has
 	-- none is left exactly as it was -- which is why the scroll view
 	-- had no panel to clip with and the document drew over the hint.
+	-- **ui_utils' style, not Urho3D's DefaultStyle.xml**: that one names
+	-- its texture and font by plain names, which a connected game's
+	-- files of those names would answer; this one names them all own:.
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
-			"own:UI/DefaultStyle.xml")
+			"own:ui_utils/res/style.xml")
 	local left = panel(0, half, magic.Color(0.06, 0.07, 0.09, 1))
 	local right = panel(half, w - half, magic.Color(0.03, 0.04, 0.05, 1))
 
