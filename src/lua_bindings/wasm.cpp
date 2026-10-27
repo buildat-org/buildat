@@ -196,6 +196,15 @@ static const ValueDef VALUE_DEFS[] = {
 #include "lua_bindings/wasm_bindings.inc"
 #undef BUILDAT_VALUE
 };
+// The fields of the sandbox's whitelisted events (safe_events.lua), by
+// event, each in the order an event's payload carries them; "command_seq:"
+// is every event of that prefix
+struct EventFieldDef { const char *event, *field, *variant, *safe; };
+static const EventFieldDef EVENT_FIELDS[] = {
+#define BUILDAT_EVENT_FIELD(e, f, v, s) {e, f, v, s},
+#include "lua_bindings/wasm_bindings.inc"
+#undef BUILDAT_EVENT_FIELD
+};
 // A binding call's values, in and out, and how many
 static const size_t MAX_BINDING_BYTES = 1 << 20;
 static const unsigned int MAX_BINDING_VALUES = 32;
@@ -2569,6 +2578,15 @@ struct Instance {
 		return (uint32_t)c.out.size();
 	}
 
+	// Handles given for something that did not happen, dropped
+	void drop_all(const sv_<uint32_t> &given)
+	{
+		for(uint32_t h : given){
+			ss_ unused;
+			drop(h, unused);
+		}
+	}
+
 	// One binding call's state, for binding_lua()
 	struct BindingCall {
 		Instance *in = nullptr;
@@ -2742,17 +2760,62 @@ struct Instance {
 			lua_replace(L, fn);
 			lua_settop(L, fn);
 		} else {
-			// An object's event names the handle it was subscribed with
-			if(!strcmp(d.kind, "subscribe"))
+			// An object's event names the handle it was subscribed with;
+			// both kinds are given the event's fields, for its payload
+			if(!strcmp(d.kind, "subscribe")){
 				lua_pushnumber(L, first_handle);
+				push_event_fields(L, fn + 5);
+			} else if(!strcmp(d.kind, "subscribe_global")){
+				push_event_fields(L, fn + 4);
+			}
 			lua_call(L, lua_gettop(L) - fn, LUA_MULTRET);
 		}
 		// The results
-		const int results = lua_gettop(L) - fn + 1;
+		c.out.clear();
+		return encode_values(L, fn, lua_gettop(L) - fn + 1, c);
+	}
+
+	// The fields of the event named at idx, as {{field, variant, safe},
+	// ...}: an empty table for no such event (which the sandbox refuses)
+	static void push_event_fields(lua_State *L, int idx)
+	{
+		const char *event = lua_type(L, idx) == LUA_TSTRING ?
+				lua_tostring(L, idx) : "";
+		const char *prefix = "command_seq:";
+		const bool seq = strncmp(event, prefix, strlen(prefix)) == 0;
+		lua_newtable(L);
+		int k = 1;
+		for(const EventFieldDef &f : EVENT_FIELDS){
+			if(strcmp(f.event, seq ? prefix : event) != 0)
+				continue;
+			lua_newtable(L);
+			lua_pushstring(L, f.field);
+			lua_rawseti(L, -2, 1);
+			lua_pushstring(L, f.variant);
+			lua_rawseti(L, -2, 2);
+			lua_pushstring(L, f.safe);
+			lua_rawseti(L, -2, 3);
+			lua_rawseti(L, -2, k++);
+		}
+	}
+
+	// m:push(bytes, values...)'s values, encoded (encode_values)
+	static int push_encode_lua(lua_State *L)
+	{
+		BindingCall &c = *(BindingCall*)lua_touserdata(L, 1);
+		return encode_values(L, 2, lua_gettop(L) - 1, c);
+	}
+
+	// The values at first.. into c.out, as a call's results are (a count
+	// and each tagged), objects as new handles (c.given). Raises.
+	static int encode_values(lua_State *L, int first, int results,
+			BindingCall &c)
+	{
+		char err[200] = "";
 		if(results > (int)MAX_BINDING_VALUES)
 			return luaL_error(L, "more than %d results", (int)MAX_BINDING_VALUES);
-		c.out.assign(1, (char)results);
-		for(int r = fn; r < fn + results; r++){
+		c.out += (char)results;
+		for(int r = first; r < first + results; r++){
 			if(c.out.size() > MAX_BINDING_BYTES)
 				return luaL_error(L, "results of more than %d bytes",
 						(int)MAX_BINDING_BYTES);
@@ -3904,7 +3967,10 @@ static int l_bind(lua_State *L)
 	return 0;
 }
 
-// m:push(bytes): an event queued for the module (buildat_event_take())
+// m:push(bytes [, values...]): an event queued for the module
+// (buildat_event_take()). Values after the bytes are appended as a call's
+// results are encoded ([CLIENT_WASM_BINDINGS]: an event's payload), an
+// object as a new handle, which the module's event releases.
 static int l_push(lua_State *L)
 {
 	Instance *in = check_instance(L);
@@ -3912,12 +3978,40 @@ static int l_push(lua_State *L)
 		raise("wasm: push(bytes): bytes is not a string");
 	size_t len = 0;
 	const char *p = lua_tolstring(L, 2, &len);
+	const int values = lua_gettop(L) - 2;
+	Instance::BindingCall c;
+	c.in = in;
+	if(values > 0){
+		if(in->state == Instance::FAILED)
+			raise("wasm %s: stopped", in->name.c_str());
+		if(!lua_checkstack(L, values + 4))
+			raise("wasm %s: push: the Lua stack is full", in->name.c_str());
+		lua_pushcfunction(L, Instance::push_encode_lua);
+		lua_pushlightuserdata(L, &c);
+		for(int i = 0; i < values; i++)
+			lua_pushvalue(L, 3 + i);
+		if(lua_pcall(L, values + 1, 0, 0) != 0){
+			const ss_ e = lua_tostring(L, -1) ? lua_tostring(L, -1) : "?";
+			lua_pop(L, 1);
+			in->drop_all(c.given);
+			raise("wasm %s: push: %s", in->name.c_str(), e.c_str());
+		}
+	}
+	// With its payload no longer than wasm_api.h's BUILDAT_EVENT_MAX, the
+	// buffer buildat_client.h takes it into
+	if(values > 0 && len + c.out.size() > 8 + 64 + 65536){
+		in->drop_all(c.given);
+		raise("wasm %s: push: an event of %d bytes, past BUILDAT_EVENT_MAX",
+				in->name.c_str(), (int)(len + c.out.size()));
+	}
 	if(in->events.size() >= MAX_EVENTS ||
-			in->event_bytes + len > MAX_EVENT_BYTES)
+			in->event_bytes + len + c.out.size() > MAX_EVENT_BYTES){
+		in->drop_all(c.given);
 		raise("wasm %s: its event queue is full (%d events, %d bytes)",
 				in->name.c_str(), (int)MAX_EVENTS, (int)MAX_EVENT_BYTES);
-	in->events.emplace_back(p, len);
-	in->event_bytes += len;
+	}
+	in->events.emplace_back(ss_(p, len)+c.out);
+	in->event_bytes += len + c.out.size();
 	return 0;
 }
 

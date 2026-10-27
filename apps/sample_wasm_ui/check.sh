@@ -11,7 +11,8 @@
 # table (Octree:GetDrawables, Skeleton:GetBone, Skeleton.rootBone) read
 # by table_get. buildat.* verbs (time, version, sha1, storage, parse_json),
 # the magic table's (fov_for, render_scene_to_texture), a global event
-# subscribed and unsubscribed. Then the C++ twin of extensions/sandbox_test's refusals
+# subscribed and unsubscribed. Event payloads: Update's TimeStep,
+# SliderChanged's Element (a handle) and Value. Then the C++ twin of extensions/sandbox_test's refusals
 # for the calls the bindings cover (main/wasm/main.cpp's refuse()), each a
 # trap with its reason; and two modules refused at the load, one importing a call the
 # list does not name (unlisted/), one a call of it with another signature
@@ -104,6 +105,8 @@ client_lines()
 			"wasm main: parse_json: a has 3" \
 			"wasm main: magic: fov_for(60), a texture's width, a viewport generation: 60 64 1" \
 			"trap: buildat.buildat.SubscribeToEvent(string):string: " \
+			"wasm main: SliderChanged: value*10 25, element sample slider" \
+			"wasm main: global Update: its TimeStep in the payload" \
 			"trap: buildat.UI.scale=any: " \
 			"UI.scale is read-only" \
 			"trap: buildat.UIElement:SetStyleAuto(): not called on a UIElement" \

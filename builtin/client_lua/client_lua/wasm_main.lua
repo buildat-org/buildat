@@ -74,7 +74,9 @@ return function(module)
 	local pending = {}
 	local dropped = false
 	local errors = 0
-	local function push(bytes)
+	-- bytes, and values after them: an event's payload, which m:push
+	-- encodes (only an event of a running module has one)
+	local function push(bytes, ...)
 		if state == "loading" then
 			if #pending < PENDING_MAX then
 				table.insert(pending, bytes)
@@ -87,7 +89,7 @@ return function(module)
 			return
 		end
 		-- Past the queue's cap (the module takes none): dropped
-		if not pcall(m.push, m, bytes) then
+		if not pcall(m.push, m, bytes, ...) then
 			dropped = true
 		end
 	end
@@ -105,6 +107,19 @@ return function(module)
 	-- frame finds this served file's.
 	local function pass(...)
 		return ...
+	end
+	-- An event's whitelisted fields, as the sandbox handed them (data),
+	-- in the order wasm.cpp gives them: {{name, variant, safe}, ...}
+	local function payload(data, fields)
+		local values = {}
+		for i, f in ipairs(fields) do
+			if f[2] == "Ptr" then
+				values[i] = data:GetPtr(f[3], f[1])
+			else
+				values[i] = data["Get"..f[2]](data, f[1])
+			end
+		end
+		return unpack(values, 1, #fields)
 	end
 	m:bind(function(kind, class, member, ...)
 		if kind == "call" then
@@ -133,21 +148,23 @@ return function(module)
 		elseif kind == "subscribe" then
 			-- Each of the object's events of the name, to the queue with
 			-- the handle the module subscribed with
-			local object, event, handle = ...
+			local object, event, handle, fields = ...
 			if type(event) ~= "string" or #event > 64 then
 				error("SubscribeToEvent(object, name): a name")
 			end
-			magic.SubscribeToEvent(object, event, function()
-				push(words({EV_OBJECT, handle, #event})..event)
+			magic.SubscribeToEvent(object, event, function(_, _, data)
+				push(words({EV_OBJECT, handle, #event})..event,
+						payload(data, fields))
 			end)
 		elseif kind == "subscribe_global" then
 			-- A global event, to the queue with handle 0
-			local event = ...
+			local event, fields = ...
 			if type(event) ~= "string" or #event > 64 then
 				error("SubscribeToEvent(name): a name")
 			end
-			local name = magic.SubscribeToEvent(event, function()
-				push(words({EV_OBJECT, 0, #event})..event)
+			local name = magic.SubscribeToEvent(event, function(_, data)
+				push(words({EV_OBJECT, 0, #event})..event,
+						payload(data, fields))
 			end)
 			return name
 		elseif kind == "safe" then

@@ -151,7 +151,9 @@ void buildat_drop(int handle);
 // - RESIZE: the window's width and height.
 // - OBJECT ([CLIENT_WASM_BINDINGS], interface/buildat_client.h): an
 //   object's event the module subscribed to: the handle it subscribed
-//   with, the event's name's length, then the name's bytes.
+//   with (0 for a global event), the event's name's length, the name's
+//   bytes, then its whitelisted fields (none: nothing more), encoded as
+//   a binding's results are (buildat_client.h's Event::field).
 // None is longer than BUILDAT_EVENT_MAX bytes: a buffer of that size
 // takes each (buildat_event_take() leaves one that does not fit queued).
 // Keys the client keeps (F9 to F12, and all while a password is typed)

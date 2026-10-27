@@ -24,6 +24,8 @@ static float g_time;
 static char g_update_sub[64];
 static unsigned int g_update_sub_len;
 static int g_updates, g_updates_at_unsub = -1;
+static bool g_update_timestep;
+static Slider g_slider;
 
 // "<text><number>" into a buffer: its length
 static unsigned int with_n(char *buf, const char *text, int n)
@@ -126,6 +128,11 @@ static void build_ui()
 			constant("VA_CENTER").number);
 	g_label.text("Press me");
 	SubscribeToEvent(g_button, "Released");
+	// An event with a payload: SliderChanged's Element and Value
+	g_slider = root.CreateChild("Slider", "sample slider").as<Slider>();
+	g_slider.range(10);
+	SubscribeToEvent(g_slider, "SliderChanged");
+	g_slider.value(2.5);
 	// [BINDINGS_SETLAYOUT] A call with its optional arguments: a vertical
 	// layout spaced 4, two children 10 high, the second at y 14
 	{
@@ -168,16 +175,35 @@ static void on_global(const Event &e)
 	if(e.name() != "Update")
 		return;
 	g_updates++;
+	// Its payload: the TimeStep
+	if(e.fields == 1 && e.field[fields::Update::TimeStep].kind == Value::NUMBER &&
+			e.field[fields::Update::TimeStep].number > 0)
+		g_update_timestep = true;
 	if(g_updates == 3){
 		UnsubscribeFromEvent("Update", Str(g_update_sub, g_update_sub_len));
 		g_updates_at_unsub = g_updates;
 	}
 }
 
-static void on_object(const Event &e)
+static void on_object(Event &e)
 {
 	if(e.word(1) == 0){
 		on_global(e);
+		return;
+	}
+	// An event's payload: the slider and its value
+	if((unsigned int)e.word(1) == g_slider.handle() && e.name() == "SliderChanged"){
+		UIElement element = e.field[fields::SliderChanged::Element].as<UIElement>();
+		char buf[120];
+		unsigned int l = with_n(buf, "SliderChanged: value*10 ",
+				(int)(e.field[fields::SliderChanged::Value].number * 10 + 0.5));
+		const char mid[] = ", element ";
+		for(unsigned int i = 0; i < sizeof mid - 1; i++)
+			buf[l++] = mid[i];
+		const Str name = element.GetName();
+		for(unsigned int i = 0; i < name.size && l < sizeof buf; i++)
+			buf[l++] = name.data[i];
+		log(Str(buf, l));
 		return;
 	}
 	if((unsigned int)e.word(1) != g_button.handle() || e.name() != "Released")
@@ -406,6 +432,8 @@ static void values_and_tables()
 			g_updates_at_unsub);
 	l += with_n(buf + l, ", more after: ", g_updates - g_updates_at_unsub);
 	log(Str(buf, l));
+	log(g_update_timestep ? "global Update: its TimeStep in the payload" :
+			"global Update: NO TimeStep in the payload");
 }
 
 BUILDAT_WASM_EXPORT const char *packets(void)

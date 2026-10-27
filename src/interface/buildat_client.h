@@ -54,6 +54,8 @@
 		{ (void)a; (void)b; (void)c; (void)d; __builtin_trap(); }
 #endif
 
+// The most fields an event carries (Event::field)
+#define BUILDAT_EVENT_FIELDS_MAX 6
 // The values' kinds (6 above)
 #define BUILDAT_VALUE_VECTOR2 1
 #define BUILDAT_VALUE_VECTOR3 2
@@ -1470,9 +1472,10 @@ inline void put(Args &a, const Any &v)
 class Reply
 {
 public:
-	Reply(int len): m_n(len < 0 || (unsigned int)len > BUF ? 0 : (unsigned int)len)
+	Reply(int len, const unsigned char *buf = g_ret, unsigned int cap = BUF):
+			m_buf(buf), m_n(len < 0 || (unsigned int)len > cap ? 0 : (unsigned int)len)
 	{
-		m_left = m_n > 0 ? g_ret[0] : 0;
+		m_left = m_n > 0 ? m_buf[0] : 0;
 		m_i = 1;
 	}
 	~Reply(){ while(m_left) next(); }
@@ -1496,9 +1499,11 @@ public:
 	void get(Quaternion &o){ Value x = value(); if(x.kind == Value::VALUE && x.value_kind == 6) { o.w = (float)x.c[0]; o.x = (float)x.c[1]; o.y = (float)x.c[2]; o.z = (float)x.c[3]; } }
 	void get(Color &o){ Value x = value(); if(x.kind == Value::VALUE && x.value_kind == 7) { o.r = (float)x.c[0]; o.g = (float)x.c[1]; o.b = (float)x.c[2]; o.a = (float)x.c[3]; } }
 	void get(IntRect &o){ Value x = value(); if(x.kind == Value::VALUE && x.value_kind == 8) { o.left = (int)x.c[0]; o.top = (int)x.c[1]; o.right = (int)x.c[2]; o.bottom = (int)x.c[3]; } }
+	unsigned int left() const { return m_left; }
 private:
+	const unsigned char *m_buf;
 	unsigned int m_n, m_i, m_left;
-	unsigned int byte(){ return m_i < m_n ? g_ret[m_i++] : 0; }
+	unsigned int byte(){ return m_i < m_n ? m_buf[m_i++] : 0; }
 	unsigned int u32()
 	{
 		unsigned int v = 0;
@@ -1525,7 +1530,7 @@ private:
 			unsigned int len = u32();
 			if(len > m_n - m_i) len = m_n - m_i;
 			v.kind = Value::STRING;
-			v.string = Str((const char*)g_ret + m_i, len);
+			v.string = Str((const char*)m_buf + m_i, len);
 			m_i += len;
 			break; }
 		case 5: v.kind = Value::OBJECT; v.m_handle = u32(); break;
@@ -1557,12 +1562,17 @@ inline Reply call(Import f, const A&... a)
 } // namespace detail
 
 // An event from the queue (wasm_api.h's BUILDAT_EVENT_*): its kind and its
-// bytes; word(i) is its 32-bit word i (the kind is word 0)
+// bytes; word(i) is its 32-bit word i (the kind is word 0). An object's or
+// a global event (BUILDAT_EVENT_OBJECT) carries its whitelisted fields
+// after its name: field[buildat::fields::<event>::<field>] (an object
+// field is a handle, released with the event unless taken: .as<Node>())
 struct Event
 {
 	int kind = 0;
 	const unsigned char *data = nullptr;
 	unsigned int size = 0;
+	Value field[BUILDAT_EVENT_FIELDS_MAX];
+	unsigned int fields = 0;
 	int word(unsigned int i) const
 	{
 		if(4 * i + 4 > size) return 0;
@@ -1597,9 +1607,21 @@ inline bool next_event(Event &e)
 	const int n = buildat_event_take(detail::g_event, sizeof detail::g_event);
 	if(n < 4 || n > (int)sizeof detail::g_event)
 		return false;
+	for(unsigned int i = 0; i < e.fields; i++)
+		e.field[i] = Value();
+	e.fields = 0;
 	e.data = detail::g_event;
 	e.size = (unsigned int)n;
 	e.kind = e.word(0);
+	if(e.kind == BUILDAT_EVENT_OBJECT){
+		const int len = e.word(2);
+		if(len >= 0 && 12 + (unsigned int)len < e.size){
+			const unsigned int at = 12 + (unsigned int)len;
+			detail::Reply r((int)(e.size - at), detail::g_event + at, e.size - at);
+			while(r.left() && e.fields < BUILDAT_EVENT_FIELDS_MAX)
+				e.field[e.fields++] = r.value();
+		}
+	}
 	return true;
 }
 // A line in the client's log
@@ -4470,6 +4492,43 @@ public:
 	// RibbonTrail.width=number
 	void width(double a1) const;
 };
+
+// Each event's fields, as Event::field has them: fields::KeyDown::Key
+namespace fields {
+namespace ComponentAdded { enum { Component = 0, Node = 1, Scene = 2 }; }
+namespace ComponentRemoved { enum { Component = 0, Node = 1, Scene = 2 }; }
+namespace InputFocus { enum { Focus = 0 }; }
+namespace ItemClicked { enum { Button = 0, Element = 1, Item = 2, Selection = 3 }; }
+namespace ItemDeselected { enum { Element = 0, Selection = 1 }; }
+namespace ItemDoubleClicked { enum { Button = 0, Element = 1, Item = 2, Selection = 3 }; }
+namespace ItemSelected { enum { Element = 0, Selection = 1 }; }
+namespace KeyDown { enum { Key = 0, Qualifiers = 1, Repeat = 2 }; }
+namespace KeyUp { enum { Key = 0 }; }
+namespace MenuSelected { enum { Element = 0 }; }
+namespace MouseButtonDown { enum { Button = 0, Buttons = 1, Qualifiers = 2 }; }
+namespace MouseButtonUp { enum { Button = 0, Buttons = 1, Qualifiers = 2 }; }
+namespace MouseMove { enum { Buttons = 0, DX = 1, DY = 2, Qualifiers = 3, X = 4, Y = 5 }; }
+namespace MouseWheel { enum { Buttons = 0, Qualifiers = 1, Wheel = 2 }; }
+namespace NodeAdded { enum { Node = 0, Parent = 1, Scene = 2 }; }
+namespace NodeNameChanged { enum { Node = 0, Scene = 1 }; }
+namespace NodeRemoved { enum { Node = 0, Parent = 1, Scene = 2 }; }
+namespace PhysicsCollision { enum { BodyA = 0, BodyB = 1, Contacts = 2, NodeA = 3, NodeB = 4 }; }
+namespace PhysicsPostStep { enum { TimeStep = 0 }; }
+namespace PhysicsPreStep { enum { TimeStep = 0 }; }
+namespace PostRenderUpdate { enum { TimeStep = 0 }; }
+namespace ScreenMode { enum { Borderless = 0, Fullscreen = 1, Height = 2, Resizable = 3, Width = 4 }; }
+namespace ScrollBarChanged { enum { Element = 0, Value = 1 }; }
+namespace SelectionChanged { enum { Element = 0 }; }
+namespace SliderChanged { enum { Element = 0, Value = 1 }; }
+namespace SoundFinished { enum { Node = 0, Sound = 1, SoundSource = 2 }; }
+namespace TextInput { enum { Text = 0 }; }
+namespace TouchBegin { enum { TouchID = 0, X = 1, Y = 2 }; }
+namespace TouchEnd { enum { TouchID = 0, X = 1, Y = 2 }; }
+namespace TouchMove { enum { DX = 0, DY = 1, TouchID = 2, X = 3, Y = 4 }; }
+namespace UIMouseClick { enum { Button = 0, Buttons = 1, Qualifiers = 2, X = 3, Y = 4 }; }
+namespace Update { enum { TimeStep = 0 }; }
+namespace ViewChanged { enum { Element = 0, X = 1, Y = 2 }; }
+} // namespace fields
 
 // The singletons and the calls outside the classes
 // magic.cache:ResourceCache

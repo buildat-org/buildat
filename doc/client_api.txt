@@ -974,7 +974,10 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   table_len(t). The sandbox's constants are buildat::constant("KEY_SPACE").
   A global event (buildat::SubscribeToEvent("Update"), under the same
   whitelist) comes as BUILDAT_EVENT_OBJECT with handle 0; the call returns
-  the name buildat::UnsubscribeFromEvent(event, name) takes. Of buildat.*
+  the name buildat::UnsubscribeFromEvent(event, name) takes. An event's
+  whitelisted fields (safe_events.lua) come with it, in Event::field:
+  e.field[buildat::fields::SliderChanged::Value].number; an object field
+  is a handle, released with the event unless taken (.as<UIElement>()). Of buildat.*
   (as a server's code has them, its served overrides included) and the
   urho3d extension's own functions, those util/gen_wasm_bindings.lua
   lists in SAFE_VERBS and MAGIC_VERBS: the clocks, version, has, the
