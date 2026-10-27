@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~75 s (2026-10-27)
-# covers: src/server/web/pre.js builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
+# cost: ~75 s, ~2 min with demo_aggregate and skeldat (2026-10-27)
+# covers: src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
 # [WEB_LOCAL_SERVER]: hillclimb in the browser with its own server in a
 # worker of the page, and no buildat server: web/ served by a static
 # server that sends what the buildat server sends with ?local
@@ -12,8 +12,8 @@
 # the buildat server's own serving of the same: the isolation headers
 # with ?local and on the local server's files, and not on the page
 # without it.
-# demo_aggregate likewise, walked a step, when web/local/demo_aggregate/
-# is there. Needs web/ (util/build_web.sh) with web/local/hillclimb/
+# demo_aggregate (walked a step) and skeldat (a world made in its menu,
+# walked 2 voxels) likewise, when web/local/<app>/ is there. Needs web/ (util/build_web.sh) with web/local/hillclimb/
 # (util/build_web_server.sh hillclimb).
 #   util/web_local_check.sh
 set -u
@@ -87,6 +87,35 @@ else
 	echo "no web/local/demo_aggregate: its drive skipped"
 fi
 
+# skeldat's, when it is built: a new world made in the world menu, the
+# player in it walking 2 voxels. 1200x800 places the buttons; the pointer
+# lock is apps/skeldat/web_spawn_check.sh's stand-in.
+if [ -f "$here/web/local/skeldat/buildat_server.wasm" ]; then
+	cat > "$t/skeldat.json" << 'JSON'
+[
+	["nav", "${URL}"],
+	["eval", "(function(){ var held = null; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } HTMLCanvasElement.prototype.requestPointerLock = function(){ if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"],
+	["waitlog", "world_menu: the list shown", 120], ["wait", 500],
+	["click", 362, 725], ["waitlog", "world_menu: the name screen shown", 10],
+	["wait", 500], ["click", 580, 514],
+	["waitlog", "pause: how to play shown", 240],
+	["eval", "'skeldat playable at ' + Math.round(performance.now()) + ' ms'"],
+	["wait", 1000], ["click", 600, 653], ["waitlog", "pause: the menu closed", 10],
+	["holdkey", "w", 3000], ["waitlog", "skeldat: walked 2 from the placing", 10],
+	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15],
+	["eval", "new Promise(r => { const q = indexedDB.open('/user'); q.onerror = () => r('no IndexedDB'); q.onsuccess = () => { const g = q.result.transaction('FILE_DATA').objectStore('FILE_DATA').getAll(); g.onsuccess = () => r('skeldat kept ' + Math.round(g.result.reduce((n, e) => n + (e.contents ? e.contents.length : 0), 0) / 1024) + ' kB'); }; })"]
+]
+JSON
+	WEB_DRIVE_VIEWPORT=1200x800 WEB_DRIVE_URL="http://127.0.0.1:$p/?local=skeldat" \
+		bash "$here/util/web_drive.sh" firefox skeldat \
+		"$t/skeldat.json" "$t/skeldat" > "$t/skeldat.log" 2>&1 ||
+		fail "skeldat's drive ($t/skeldat.log: $(tail -2 "$t/skeldat.log" | tr '\n' ' '))"
+	grep -a "eval:" "$t/skeldat.log" | grep -v stub
+	grep -a "server: .*network: .*ticks/s" "$t/skeldat/page.log" | tail -1 | cut -c 9-
+else
+	echo "no web/local/skeldat: its drive skipped"
+fi
+
 # The buildat server's serving: a game of its own, and web/ as it is
 cd "$here/Build"
 start_server "$t/s.log" "STATUS Listening" 120 auto bin/buildat_server \
@@ -109,4 +138,4 @@ isolated "/" 200 && fail "/ is isolated: the Starport ID's popup loses its opene
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's if built; the buildat server isolates ?local and its files only"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server isolates ?local and its files only"

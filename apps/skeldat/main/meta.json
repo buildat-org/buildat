@@ -1,4 +1,5 @@
 {
+	"web": true,
 	"engine_api": 2,
 	"kind": "world",
 	"client_extensions": ["physical_sky", "sky_render"],
