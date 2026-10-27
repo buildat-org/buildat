@@ -186,6 +186,7 @@ foreach(N ${WS_NAMES})
 			"${WS_CLANG}" "${WS_WASM_LD}" "${CMAKE_SOURCE_DIR}/src/interface"
 			"${WS_WASM_DIR}" "${D}"
 		DEPENDS ${W_DEPS} "${CMAKE_SOURCE_DIR}/src/interface/wasm_api.h"
+			"${CMAKE_SOURCE_DIR}/src/interface/buildat_client.h"
 			"${CMAKE_SOURCE_DIR}/src/server/wasm_build.cpp"
 			"${CMAKE_SOURCE_DIR}/util/prebuild_wasm.py"
 		COMMENT "${N}'s wasm/ for its clients")

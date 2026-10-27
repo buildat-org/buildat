@@ -77,6 +77,9 @@ for module in sys.argv[5:]:
         files = [f for f in files if not f.startswith("target/")]
     key = b"buildat wasm 1\n" + cflags.encode() + b"\n" + ldflags.encode() + b"\n" + api
     key += keyed(wasm_dir, files)
+    # The generated bindings, for the modules that include them only
+    if any(b"buildat_client.h" in open(os.path.join(wasm_dir, f), "rb").read() for f in files):
+        key += b"bindings 1\n" + open(os.path.join(interface, "buildat_client.h"), "rb").read()
     if rust:
         key += b"rust 1\n" + rustflags.encode() + b"\n" + rust_target.encode() + b"\n"
         crate = sorted(collect(crate_dir), key=lambda s: s.encode())

@@ -2328,15 +2328,20 @@ end
 --   m:read(ptr, len) -> the bytes of its memory there, copied
 --   m:write(ptr, bytes): copied into its memory at ptr
 --   m:handle(object) -> a number the module's imports name the object by:
---     a Node, a Texture2D or a buildat.Volume (interface/wasm_api.h)
+--     a Node, a Texture2D or a buildat.Volume (interface/wasm_api.h), or
+--     any other object of the sandbox's for its bindings
+--     (interface/buildat_client.h); it keeps the object alive until it is
+--     dropped or the module is stopped
 --   m:drop(handle): the handle names nothing from now on
 --   m:push(bytes): an event queued for the module (buildat_event_take())
+--   m:bind(f): the dispatcher its bindings' calls are made through,
+--     f(kind, class, member, values...) (client_lua/wasm_main.lua's)
 -- A pointer and a length past its memory are an error, not a read.
 __buildat_wasm_methods.handle = function(m, object)
 	-- A sandboxed Urho3D object is a wrapper; a Volume is luabind's own
 	local mt = getmetatable(object)
 	local unsafe = type(mt) == "table" and rawget(mt, "unsafe")
-	return __buildat_wasm_handle(m, unsafe or object)
+	return __buildat_wasm_handle(m, unsafe or object, object)
 end
 buildat.safe.wasm_load = function(module)
 	if type(module) ~= "string" or not module:match("^[%w_]+$") then

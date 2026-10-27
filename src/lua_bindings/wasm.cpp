@@ -29,7 +29,11 @@
 // the glue, on the web the module's import object does through
 // buildat_wasm_import(). It checks every pointer and length against the
 // module's memory and copies the bytes, names objects by handles from a
-// table of the instance's own, and calls neither Lua nor wasm.
+// table of the instance's own, and calls neither Lua nor wasm -- but for
+// the bindings ([CLIENT_WASM_BINDINGS], binding_import()), which are calls
+// of the Lua sandbox's own list made through the module's dispatcher in
+// its sandbox, as its script would make them; no wasm call starts while
+// one runs (g_import_depth).
 //
 // Natively on Windows ([CLIENT_WASM_WINDOWS]) the same, but: the compile
 // is the package's MinGW in a job object (memory, CPU time and process
@@ -148,7 +152,7 @@ static const size_t MAX_EVENT_BYTES = 4 << 20; // queued
 enum {
 	IMP_LOG, IMP_TIME_MS, IMP_VOXELS_SIZE, IMP_VOXELS_READ, IMP_GEOMETRY_SET,
 	IMP_TEXTURE_SET, IMP_NODE_GET, IMP_NODE_SET, IMP_SEND_PACKET,
-	IMP_EVENT_TAKE, IMP_COUNT
+	IMP_EVENT_TAKE, IMP_DROP, IMP_COUNT
 };
 struct ImportDef { const char *name; int params; bool result; };
 static const ImportDef IMPORTS[IMP_COUNT] = {
@@ -162,8 +166,73 @@ static const ImportDef IMPORTS[IMP_COUNT] = {
 	{"node_set", 2, false},
 	{"send_packet", 4, false},
 	{"event_take", 2, true},
+	{"drop", 1, false},
 };
 static const int MAX_IMPORT_PARAMS = 6;
+
+// [CLIENT_WASM_BINDINGS] The imports generated from the Lua sandbox's own
+// list (util/gen_wasm_bindings.lua writes wasm_bindings.inc and
+// interface/buildat_client.h): each the call its name says -- "Node:
+// SetPosition(Vector3)", "Text.text=string" -- made through the module's
+// dispatcher, a Lua function in the module's sandbox (m:bind(), the
+// default client_main's), as a script's own call is: what Lua is refused,
+// these are refused. All are (args, args_len, ret, ret_cap) -> the
+// results' length, the values encoded as buildat_client.h says. Validation
+// allows exactly these names with that signature; each is then renamed
+// g<k> (k its index here), so that the C and the interpreter see no name
+// of the module's. The import's index is IMP_COUNT + k.
+struct BindingDef { const char *name, *kind, *cls, *member; };
+static const BindingDef BINDINGS[] = {
+#define BUILDAT_BINDING(n, k, c, m) {n, k, c, m},
+#include "lua_bindings/wasm_bindings.inc"
+#undef BUILDAT_BINDING
+};
+static const size_t BINDING_COUNT = sizeof BINDINGS / sizeof BINDINGS[0];
+static const size_t IMP_ALL = IMP_COUNT + BINDING_COUNT;
+// The values carried by their components (Vector3, Color, ...), by kind
+struct ValueDef { unsigned int kind; const char *cls; int n; const char *c[4]; };
+static const ValueDef VALUE_DEFS[] = {
+#define BUILDAT_VALUE(k, cls, n, a, b, c, d) {k, cls, n, {a, b, c, d}},
+#include "lua_bindings/wasm_bindings.inc"
+#undef BUILDAT_VALUE
+};
+// A binding call's values, in and out, and how many
+static const size_t MAX_BINDING_BYTES = 1 << 20;
+static const unsigned int MAX_BINDING_VALUES = 32;
+// Its charge, as IMPORT_COST: a call into the sandbox's Lua
+static const uint64_t BINDING_COST = 20000;
+
+static const char *import_name(size_t which)
+{
+	return which < IMP_COUNT ? IMPORTS[which].name :
+			which < IMP_ALL ? BINDINGS[which - IMP_COUNT].name : "?";
+}
+static int import_params(size_t which)
+{
+	return which < IMP_COUNT ? IMPORTS[which].params : 4;
+}
+static bool import_result(size_t which)
+{
+	return which < IMP_COUNT ? IMPORTS[which].result : true;
+}
+// The bindings' names by index; and their hash, which is in the compiled
+// module's cache key, as the indices are in its C
+static size_t binding_index(const ss_ &name)
+{
+	static std::map<ss_, size_t> m;
+	if(m.empty())
+		for(size_t k = 0; k < BINDING_COUNT; k++)
+			m[BINDINGS[k].name] = k;
+	auto it = m.find(name);
+	return it == m.end() ? BINDING_COUNT : it->second;
+}
+static ss_ bindings_hash()
+{
+	ss_ all;
+	for(const BindingDef &d : BINDINGS)
+		all += ss_(d.name)+"\n";
+	return interface::sha1::hex(interface::sha1::calculate(all));
+}
 
 struct ExportSig {
 	ss_ name;
@@ -243,20 +312,23 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 		why = "more than "+itos(MAX_FUNCS)+" functions";
 		return false;
 	}
-	// Exactly wasm_api.h's imports, by name and signature, each once
+	// Exactly wasm_api.h's imports and the bindings, by name and signature,
+	// each once; a binding renamed g<k>
 	has_imports = false;
-	bool seen[IMP_COUNT] = {};
-	for(const wabt::Import *imp : m.imports){
+	sv_<bool> seen(IMP_ALL, false);
+	for(wabt::Import *imp : m.imports){
 		const wabt::FuncImport *fi = wabt::dyn_cast<wabt::FuncImport>(imp);
-		int k = 0;
+		size_t k = 0;
 		while(k < IMP_COUNT && imp->field_name != IMPORTS[k].name)
 			k++;
-		bool ok = fi && imp->module_name == "buildat" && k < IMP_COUNT &&
+		if(k == IMP_COUNT)
+			k = IMP_COUNT + binding_index(imp->field_name);
+		bool ok = fi && imp->module_name == "buildat" && k < IMP_ALL &&
 				!seen[k];
 		if(ok){
 			const wabt::FuncSignature &s = fi->func.decl.sig;
-			ok = (int)s.param_types.size() == IMPORTS[k].params &&
-					s.result_types.size() == (IMPORTS[k].result ? 1u : 0u);
+			ok = (int)s.param_types.size() == import_params(k) &&
+					s.result_types.size() == (import_result(k) ? 1u : 0u);
 			for(wabt::Type t : s.param_types)
 				ok = ok && t == wabt::Type::I32;
 			for(wabt::Type t : s.result_types)
@@ -264,14 +336,17 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 		}
 		if(!ok){
 			why = "imports \""+imp->module_name.substr(0, 32)+"."+
-					imp->field_name.substr(0, 32)+"\", which is not one of "
-					"wasm_api.h's with its signature";
+					imp->field_name.substr(0, 120)+"\", which is not one of "
+					"wasm_api.h's or buildat_client.h's with its signature "
+					"(built for another engine API?)";
 			// Printable only: the names are the server's
 			why = printable((const uint8_t*)why.data(), why.size());
 			return false;
 		}
 		seen[k] = true;
 		has_imports = true;
+		if(k >= IMP_COUNT)
+			imp->field_name = "g"+itos(k - IMP_COUNT);
 	}
 	if(m.memories.size() > 1){
 		why = "more than one memory";
@@ -649,6 +724,12 @@ static bool movable(const wabt::Module &m, bool has_memory)
 #ifndef BUILDAT_WASM_FUZZ
 struct Instance;
 static size_t g_instance_count = 0;
+// The client's Lua (init_wasm()): the handles' and the dispatchers'
+// references are in its registry
+static lua_State *g_L = nullptr;
+// A binding's Lua is running ([CLIENT_WASM_BINDINGS]): no wasm call starts
+// meanwhile, of this module or another, so that no import re-enters wasm
+static int g_import_depth = 0;
 // The live instances' handle tags (1 to 127)
 static bool g_tag_used[128] = {};
 
@@ -722,7 +803,7 @@ static const DWORD COMPILE_PROCESSES = 16;
 #endif
 // Bumped when the C this writes changes (the glue, or what meter_module()
 // adds), so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 6";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 7";
 
 // wasm2c's runtime files the C is built with, as name, contents, name,
 // contents, ..., null (3rdparty/wabt/CMakeLists.txt): its headers, and on
@@ -1198,17 +1279,20 @@ static bool interp_init()
 	if(!wasm_runtime_full_init(&args))
 		return false;
 	wasm_runtime_set_log_level(WASM_LOG_LEVEL_ERROR);
-	static ss_ sigs[IMP_COUNT];
-	static NativeSymbol syms[IMP_COUNT];
-	for(int k = 0; k < IMP_COUNT; k++){
-		sigs[k] = "("+ss_(IMPORTS[k].params, 'i')+")"+
-				(IMPORTS[k].result ? "i" : "");
-		syms[k].symbol = IMPORTS[k].name;
+	static sv_<ss_> sigs(IMP_ALL), names(IMP_ALL);
+	static sv_<NativeSymbol> syms(IMP_ALL);
+	for(size_t k = 0; k < IMP_ALL; k++){
+		sigs[k] = "("+ss_(import_params(k), 'i')+")"+
+				(import_result(k) ? "i" : "");
+		names[k] = k < IMP_COUNT ? ss_(IMPORTS[k].name) :
+				"g"+itos(k - IMP_COUNT);
+		syms[k].symbol = names[k].c_str();
 		syms[k].func_ptr = (void*)interp_import;
 		syms[k].signature = sigs[k].c_str();
 		syms[k].attachment = (void*)(uintptr_t)k;
 	}
-	if(!wasm_runtime_register_natives_raw("buildat", syms, IMP_COUNT))
+	if(!wasm_runtime_register_natives_raw("buildat", syms.data(),
+			(uint32_t)IMP_ALL))
 		return false;
 	done = 1;
 	return true;
@@ -1301,8 +1385,9 @@ static const Compiler& compiler()
 // runtime is the DLL's own) that instantiates, runs the start function or
 // unpacks numbers for an export by index. Nothing in it comes from the
 // module but types.
-static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
-		bool has_memory, bool has_start, const sv_<GlobalCopy> &globals)
+static ss_ glue_c(const wabt::Module &m, const sv_<ExportSig> &exports,
+		bool has_imports, bool has_memory, bool has_start,
+		const sv_<GlobalCopy> &globals)
 {
 	std::ostringstream os;
 	os<<"#ifndef _WIN32\n#define _POSIX_C_SOURCE 200809L\n#endif\n" // sigsetjmp
@@ -1312,20 +1397,32 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		"#define BX __attribute__((visibility(\"default\")))\n#endif\n"
 		"typedef uint32_t (*imp_t)(void*, uint32_t, const uint32_t*, int*);\n"
 		"struct w2c_buildat { void *host; imp_t imp; };\n";
-	// Every import, whether the module has it or not: each hands its
+	// wasm_api.h's imports, whether the module has them or not, and the
+	// bindings it has (renamed g<k>: check_module()): each hands its
 	// numbers to the client's run_import(), and traps here when it says so
-	for(int k = 0; k < IMP_COUNT; k++){
-		const ImportDef &d = IMPORTS[k];
-		os<<(d.result ? "uint32_t" : "void")<<" w2c_buildat_"<<d.name<<
+	sv_<size_t> which;
+	for(size_t k = 0; k < IMP_COUNT; k++)
+		which.push_back(k);
+	for(const wabt::Import *imp : m.imports){
+		const ss_ &n = imp->field_name;
+		if(n.size() > 1 && n[0] == 'g' &&
+				n.find_first_not_of("0123456789", 1) == ss_::npos)
+			which.push_back(IMP_COUNT + (size_t)atoi(n.c_str() + 1));
+	}
+	for(size_t k : which){
+		const int params = import_params(k);
+		const bool result = import_result(k);
+		os<<(result ? "uint32_t" : "void")<<" w2c_buildat_"<<
+				(k < IMP_COUNT ? ss_(IMPORTS[k].name) : "g"+itos(k - IMP_COUNT))<<
 				"(struct w2c_buildat *b";
-		for(int i = 0; i < d.params; i++)
+		for(int i = 0; i < params; i++)
 			os<<", uint32_t a"<<i;
 		os<<"){ uint32_t a["<<MAX_IMPORT_PARAMS<<"] = {";
-		for(int i = 0; i < d.params; i++)
+		for(int i = 0; i < params; i++)
 			os<<(i ? ", a" : "a")<<i;
-		os<<(d.params ? "" : "0")<<"}; int t = 0; uint32_t r = b->imp(b->host, "<<
+		os<<(params ? "" : "0")<<"}; int t = 0; uint32_t r = b->imp(b->host, "<<
 				k<<", a, &t); if(t) wasm_rt_trap(WASM_RT_TRAP_UNREACHABLE); "<<
-				(d.result ? "return r;" : "(void)r;")<<" }\n";
+				(result ? "return r;" : "(void)r;")<<" }\n";
 	}
 	os<<"typedef struct { w2c_m m; struct w2c_buildat b; } inst_t;\n"
 		"static float F(uint64_t v){ uint32_t u = (uint32_t)v; float f; memcpy(&f, &u, 4); return f; }\n"
@@ -1749,9 +1846,14 @@ struct Instance {
 	// (another's handle names another tag), the generation the slot's
 	// when it was given (one dropped since is stale; a slot whose
 	// generation would wrap is not used again).
+	// Each holds what Lua handed for it (the sandbox's wrapper, or a Volume)
+	// by a reference in the registry, so that the object lives while the
+	// module has the handle, as a script's reference keeps it
+	// ([CLIENT_WASM_BINDINGS]); OBJECT is any other object of the list.
 	struct Slot {
-		enum Kind { NONE, NODE, TEXTURE, VOLUME } kind = NONE;
+		enum Kind { NONE, NODE, TEXTURE, VOLUME, OBJECT } kind = NONE;
 		uint32_t gen = 1;
+		int ref = LUA_NOREF;
 		Urho3D::WeakPtr<Urho3D::Node> node;
 		Urho3D::WeakPtr<Urho3D::Texture2D> texture;
 		std::weak_ptr<interface::VoxelVolume> volume;
@@ -1772,27 +1874,38 @@ struct Instance {
 	{
 		state = FAILED;
 		error = why;
+		release_refs();
 #if BUILDAT_WASM_NATIVE
 		compile.reset();
 #endif
 		log_w(MODULE, "wasm %s: %s", cs(name), cs(why));
 	}
 
-	// A new handle for an object, or 0 with the table full
+	// The module's dispatcher (m:bind()), a reference in the registry
+	int bind_ref = LUA_NOREF;
+	// The Lua running the module's call (m:call()), which its bindings'
+	// calls are made on; null outside a call
+	lua_State *call_L = nullptr;
+
+	// A new handle for an object, or 0 with the table full; ref is taken
+	// (released with the handle, or now if there is none)
 	uint32_t give(Slot::Kind kind, Urho3D::Node *node, Urho3D::Texture2D *tex,
-			const sp_<interface::VoxelVolume> &volume)
+			const sp_<interface::VoxelVolume> &volume, int ref = LUA_NOREF)
 	{
 		size_t i = 0;
 		while(i < slots.size() && (slots[i].kind != Slot::NONE ||
 				slots[i].gen > GEN_MAX))
 			i++;
 		if(i == slots.size()){
-			if(slots.size() >= MAX_HANDLES)
+			if(slots.size() >= MAX_HANDLES){
+				unref(ref);
 				return 0;
+			}
 			slots.emplace_back();
 		}
 		Slot &s = slots[i];
 		s.kind = kind;
+		s.ref = ref;
 		s.node = node;
 		s.texture = tex;
 		s.volume = volume;
@@ -1831,9 +1944,29 @@ struct Instance {
 			indices_all -= n;
 		texture_bytes_all -= s->texture_bytes;
 		const uint32_t gen = s->gen + 1;
+		const int ref = s->ref;
 		*s = Slot();
 		s->gen = gen;
+		unref(ref);
 		return true;
+	}
+
+	static void unref(int ref)
+	{
+		if(ref != LUA_NOREF && ref != LUA_REFNIL && g_L)
+			luaL_unref(g_L, LUA_REGISTRYINDEX, ref);
+	}
+
+	// A stopped or freed module's: what its handles kept alive goes (the
+	// handles stay, naming nothing; a stopped module makes no more calls)
+	void release_refs()
+	{
+		for(Slot &s : slots){
+			unref(s.ref);
+			s.ref = LUA_NOREF;
+		}
+		unref(bind_ref);
+		bind_ref = LUA_NOREF;
 	}
 
 #if BUILDAT_WASM_NATIVE
@@ -1923,8 +2056,8 @@ struct Instance {
 	}
 
 	// One import's work (IMPORTS[which], its numbers in a): its result, or
-	// trap_reason set. Calls neither Lua nor wasm, and lets no exception
-	// out: natively a trap is a longjmp, which must not cross a C++ frame
+	// trap_reason set. Calls no wasm, Lua only for a binding (in a
+	// pcall), and lets no exception out: natively a trap is a longjmp, which must not cross a C++ frame
 	// with something to destroy, so the caller traps after this returns.
 	uint32_t run_import(uint32_t which, const uint32_t *a)
 	{
@@ -1942,8 +2075,7 @@ struct Instance {
 					return r;
 				why = "past the call's budget";
 			}
-			trap_reason = "buildat."+ss_(which < IMP_COUNT ?
-					IMPORTS[which].name : "?")+": "+why;
+			trap_reason = "buildat."+ss_(import_name(which))+": "+why;
 		} catch(std::exception &e){
 			trap_reason = ss_("an import: ")+e.what();
 		} catch(...){
@@ -1958,11 +2090,10 @@ struct Instance {
 		return std::isfinite(v) && v <= max && v >= -max;
 	}
 
-	// simplified: a module makes no node or component of its own: Urho3D
+	// simplified: wasm_api.h's imports make no node or component: Urho3D
 	// sends E_NODEADDED and E_COMPONENTADDED to Lua's handlers as they are
-	// made, which would be a re-entry, so its Lua makes them and hands them
-	// over. An import that makes one wants those events queued for after
-	// the call.
+	// made, so a module makes them through its bindings (Node:CreateChild,
+	// which are Lua calls) or its Lua hands them over.
 	// simplified: a geometry's indices are expanded into CustomGeometry's
 	// vertex list (it has no index buffer), so the caps count indices; a
 	// Model with an IndexBuffer of its own when a mesh's size matters.
@@ -2241,6 +2372,9 @@ struct Instance {
 			sent.emplace_back(name+":"+pname, std::move(data));
 			return 0;
 		}
+		case IMP_DROP:
+			drop(a[0], why);
+			return 0;
 		case IMP_EVENT_TAKE: {
 			if(events.empty())
 				return (uint32_t)-1;
@@ -2258,8 +2392,346 @@ struct Instance {
 			return n;
 		}
 		}
+		if(which >= IMP_COUNT && which < IMP_ALL)
+			return binding_import(which - IMP_COUNT, a, why);
 		why = "no such import";
 		return 0;
+	}
+
+	// [CLIENT_WASM_BINDINGS] A binding's call: a[0], a[1] its values, a[2],
+	// a[3] the buffer for its results; the results' length
+	uint32_t binding_import(size_t k, const uint32_t *a, ss_ &why)
+	{
+		static const char *PAST = "past the module's memory";
+		if(a[1] > MAX_BINDING_BYTES){
+			why = "its values are more than "+itos(MAX_BINDING_BYTES)+" bytes";
+			return 0;
+		}
+		if((uint64_t)a[2] + a[3] > memory_size()){
+			why = PAST;
+			return 0;
+		}
+		if(!call_L || bind_ref == LUA_NOREF){
+			why = call_L ? "no dispatcher (the module runs under no "
+					"client_main that binds the calls: \"client_main\": \"wasm\")" :
+					"not in a call (the start function makes none)";
+			return 0;
+		}
+		BindingCall c;
+		c.in = this;
+		c.k = k;
+		c.args.resize(a[1]);
+		if(!copy_in(a[0], a[1], c.args.empty() ? nullptr : &c.args[0])){
+			why = PAST;
+			return 0;
+		}
+		lua_State *L = call_L;
+		const int top = lua_gettop(L);
+		if(!lua_checkstack(L, 8)){
+			why = "the Lua stack is full";
+			return 0;
+		}
+		g_import_depth++;
+		lua_pushcfunction(L, binding_lua);
+		lua_pushlightuserdata(L, &c);
+		const int status = lua_pcall(L, 1, 0, 0);
+		g_import_depth--;
+		if(status != 0){
+			const char *e = lua_tostring(L, -1);
+			why = printable((const uint8_t*)(e ? e : "?"),
+					e ? std::min<size_t>(strlen(e), 300) : 1);
+			lua_settop(L, top);
+			// What it was given in this call goes with it
+			for(uint32_t h : c.given){
+				ss_ unused;
+				drop(h, unused);
+			}
+			return 0;
+		}
+		lua_settop(L, top);
+		import_cost += BINDING_COST + c.args.size() + c.out.size();
+		if(c.out.size() > a[3]){
+			for(uint32_t h : c.given){
+				ss_ unused;
+				drop(h, unused);
+			}
+			why = "its results are "+itos(c.out.size())+" bytes, past the "
+					"buffer's "+itos(a[3]);
+			return 0;
+		}
+		if(!copy_out(a[2], c.out.data(), c.out.size())){
+			why = PAST;
+			return 0;
+		}
+		return (uint32_t)c.out.size();
+	}
+
+	// One binding call's state, for binding_lua()
+	struct BindingCall {
+		Instance *in = nullptr;
+		size_t k = 0;
+		ss_ args, out;
+		sv_<uint32_t> given; // handles made for its results
+	};
+
+	// Whether the value at idx is a wrapper of the sandbox's (a table whose
+	// metatable has the object it wraps), of class cls or one derived from
+	// it; the stack as it was
+	static bool wrapper_is(lua_State *L, int idx, const char *cls)
+	{
+		if(lua_type(L, idx) != LUA_TTABLE || !lua_getmetatable(L, idx))
+			return false;
+		const int mt = lua_gettop(L);
+		lua_pushstring(L, "unsafe");
+		lua_rawget(L, mt);
+		const bool wrapper = !lua_isnil(L, -1);
+		lua_settop(L, mt);
+		bool found = false;
+		// The class's meta, then its parents' (magic_sandbox's wrap_class)
+		lua_pushvalue(L, mt);
+		for(int depth = 0; wrapper && !found && depth < 32; depth++){
+			const int m = lua_gettop(L);
+			lua_getfield(L, m, "type_name");
+			found = lua_type(L, -1) == LUA_TSTRING &&
+					strcmp(lua_tostring(L, -1), cls) == 0;
+			lua_pop(L, 1);
+			lua_getfield(L, m, "inherited_from_by_wrapper");
+			if(lua_isnil(L, -1)){
+				lua_pop(L, 1);
+				lua_getfield(L, m, "inherited_from_in_sandbox");
+			}
+			if(lua_isnil(L, -1) || !lua_getmetatable(L, -1))
+				break;
+			lua_replace(L, m);
+			lua_settop(L, m);
+		}
+		lua_settop(L, mt - 1);
+		return found;
+	}
+
+	// Run under lua_pcall() by binding_import(): the values decoded and
+	// pushed, the dispatcher called, its results encoded. An error is the
+	// call's refusal. No C++ object with a destructor is alive across a
+	// call that can raise one (natively LuaJIT unwinds, on the web Lua
+	// longjmps).
+	static int binding_lua(lua_State *L)
+	{
+		BindingCall &c = *(BindingCall*)lua_touserdata(L, 1);
+		Instance *in = c.in;
+		const BindingDef &d = BINDINGS[c.k];
+		const uint8_t *p = (const uint8_t*)c.args.data();
+		const size_t n = c.args.size();
+		size_t i = 0;
+		char err[200] = "";
+		if(n < 1)
+			return luaL_error(L, "no values");
+		const unsigned int count = p[i++];
+		if(count > MAX_BINDING_VALUES)
+			return luaL_error(L, "more than %d values", (int)MAX_BINDING_VALUES);
+		if(!lua_checkstack(L, (int)count + 16))
+			return luaL_error(L, "the Lua stack is full");
+		lua_rawgeti(L, LUA_REGISTRYINDEX, in->bind_ref);
+		const int fn = lua_gettop(L);
+		lua_pushstring(L, d.kind);
+		lua_pushstring(L, d.cls);
+		lua_pushstring(L, d.member);
+		uint32_t first_handle = 0;
+		for(unsigned int v = 0; v < count; v++){
+			if(i >= n)
+				return luaL_error(L, "the values end before the %d said", count);
+			const uint8_t tag = p[i++];
+			auto need = [&](size_t len){ return n - i >= len; };
+			switch(tag){
+			case 0: lua_pushnil(L); break;
+			case 1: lua_pushboolean(L, 0); break;
+			case 2: lua_pushboolean(L, 1); break;
+			case 3: {
+				if(!need(8))
+					return luaL_error(L, "a number past the values' end");
+				double x;
+				memcpy(&x, p + i, 8);
+				i += 8;
+				lua_pushnumber(L, x);
+				break; }
+			case 4: {
+				if(!need(4))
+					return luaL_error(L, "a string past the values' end");
+				uint32_t len;
+				memcpy(&len, p + i, 4);
+				i += 4;
+				if(!need(len))
+					return luaL_error(L, "a string past the values' end");
+				lua_pushlstring(L, (const char*)p + i, len);
+				i += len;
+				break; }
+			case 5: {
+				if(!need(4))
+					return luaL_error(L, "a handle past the values' end");
+				uint32_t h;
+				memcpy(&h, p + i, 4);
+				i += 4;
+				int ref = LUA_NOREF;
+				{
+					ss_ why;
+					Slot *s = in->slot_of(h, why);
+					if(!s)
+						snprintf(err, sizeof err, "%s", why.c_str());
+					else if(s->ref == LUA_NOREF)
+						snprintf(err, sizeof err, "handle %u names nothing "
+								"the calls take", (unsigned)h);
+					else
+						ref = s->ref;
+				}
+				if(err[0])
+					return luaL_error(L, "%s", err);
+				if(v == 0)
+					first_handle = h;
+				lua_rawgeti(L, LUA_REGISTRYINDEX, ref);
+				break; }
+			case 6: {
+				if(!need(1))
+					return luaL_error(L, "a value past the values' end");
+				const unsigned int kind = p[i++];
+				const ValueDef *vd = nullptr;
+				for(const ValueDef &x : VALUE_DEFS)
+					if(x.kind == kind)
+						vd = &x;
+				if(!vd)
+					return luaL_error(L, "no value of kind %d", (int)kind);
+				if(!need(8 * (size_t)vd->n))
+					return luaL_error(L, "a value past the values' end");
+				// Made by the dispatcher, as a script makes one
+				lua_pushvalue(L, fn);
+				lua_pushstring(L, "value");
+				lua_pushstring(L, vd->cls);
+				lua_pushstring(L, "");
+				for(int j = 0; j < vd->n; j++){
+					double x;
+					memcpy(&x, p + i, 8);
+					i += 8;
+					lua_pushnumber(L, x);
+				}
+				lua_call(L, 3 + vd->n, 1);
+				break; }
+			default:
+				return luaL_error(L, "a value of kind %d", (int)tag);
+			}
+		}
+		if(i != n)
+			return luaL_error(L, "%d bytes after the values", (int)(n - i));
+		const bool on_object = !strcmp(d.kind, "call") || !strcmp(d.kind, "get")
+				|| !strcmp(d.kind, "set");
+		if(on_object && (count < 1 || !wrapper_is(L, fn + 4, d.cls)))
+			return luaL_error(L, "not called on a %s", d.cls);
+		// An object's event names the handle it was subscribed with
+		if(!strcmp(d.kind, "subscribe"))
+			lua_pushnumber(L, first_handle);
+		lua_call(L, lua_gettop(L) - fn, LUA_MULTRET);
+		// The results
+		const int results = lua_gettop(L) - fn + 1;
+		if(results > (int)MAX_BINDING_VALUES)
+			return luaL_error(L, "more than %d results", (int)MAX_BINDING_VALUES);
+		c.out.assign(1, (char)results);
+		for(int r = fn; r < fn + results; r++){
+			if(c.out.size() > MAX_BINDING_BYTES)
+				return luaL_error(L, "results of more than %d bytes",
+						(int)MAX_BINDING_BYTES);
+			switch(lua_type(L, r)){
+			case LUA_TNIL: c.out += '\0'; break;
+			case LUA_TBOOLEAN: c.out += (char)(lua_toboolean(L, r) ? 2 : 1); break;
+			case LUA_TNUMBER: {
+				const double x = lua_tonumber(L, r);
+				char b[9] = {3};
+				memcpy(b + 1, &x, 8);
+				c.out.append(b, 9);
+				break; }
+			case LUA_TSTRING: {
+				size_t len = 0;
+				const char *s = lua_tolstring(L, r, &len);
+				if(len > MAX_BINDING_BYTES)
+					return luaL_error(L, "a string of more than %d bytes",
+							(int)MAX_BINDING_BYTES);
+				const uint32_t l32 = (uint32_t)len;
+				char b[5] = {4};
+				memcpy(b + 1, &l32, 4);
+				c.out.append(b, 5);
+				c.out.append(s, len);
+				break; }
+			case LUA_TTABLE: {
+				if(!encode_object(L, r, c, err, sizeof err))
+					return luaL_error(L, "%s", err);
+				break; }
+			default:
+				return luaL_error(L, "a result of type %s, which the calls do not "
+						"carry", lua_typename(L, lua_type(L, r)));
+			}
+		}
+		return 0;
+	}
+
+	// A wrapper the dispatcher returned, into c.out: a value by its
+	// components, any other object as a new handle. false with err.
+	static bool encode_object(lua_State *L, int r, BindingCall &c, char *err,
+			size_t err_len)
+	{
+		Instance *in = c.in;
+		if(!lua_getmetatable(L, r)){
+			snprintf(err, err_len, "a table result, which the calls do not carry");
+			return false;
+		}
+		const int mt = lua_gettop(L);
+		lua_pushstring(L, "unsafe");
+		lua_rawget(L, mt);
+		const int unsafe = lua_gettop(L);
+		if(lua_isnil(L, unsafe)){
+			lua_settop(L, mt - 1);
+			snprintf(err, err_len, "a table result, which the calls do not carry");
+			return false;
+		}
+		lua_getfield(L, mt, "type_name");
+		const char *tn = lua_tostring(L, -1);
+		for(const ValueDef &vd : VALUE_DEFS){
+			if(!tn || strcmp(tn, vd.cls) != 0)
+				continue;
+			char b[2] = {6, (char)vd.kind};
+			c.out.append(b, 2);
+			for(int j = 0; j < vd.n; j++){
+				// Read as a script reads it: the property's get
+				lua_getfield(L, r, vd.c[j]);
+				const double x = lua_tonumber(L, -1);
+				lua_pop(L, 1);
+				char xb[8];
+				memcpy(xb, &x, 8);
+				c.out.append(xb, 8);
+			}
+			lua_settop(L, mt - 1);
+			return true;
+		}
+		tolua_Error te;
+		Slot::Kind kind = Slot::OBJECT;
+		Urho3D::Node *node = nullptr;
+		Urho3D::Texture2D *tex = nullptr;
+		if(lua_isuserdata(L, unsafe) && tolua_isusertype(L, unsafe, "Node", 0, &te)){
+			kind = Slot::NODE;
+			node = (Urho3D::Node*)tolua_tousertype(L, unsafe, 0);
+		} else if(lua_isuserdata(L, unsafe) &&
+				tolua_isusertype(L, unsafe, "Texture2D", 0, &te)){
+			kind = Slot::TEXTURE;
+			tex = (Urho3D::Texture2D*)tolua_tousertype(L, unsafe, 0);
+		}
+		lua_settop(L, mt - 1);
+		lua_pushvalue(L, r);
+		const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+		const uint32_t h = in->give(kind, node, tex, nullptr, ref);
+		if(!h){
+			snprintf(err, err_len, "more than %d handles", (int)MAX_HANDLES);
+			return false;
+		}
+		c.given.push_back(h);
+		char b[5] = {5};
+		memcpy(b + 1, &h, 4);
+		c.out.append(b, 5);
+		return true;
 	}
 
 	// Instantiated, its start function run: ready, or with trap (the start
@@ -2401,12 +2873,12 @@ struct Instance {
 		Instance *self = (Instance*)wasm_runtime_get_custom_data(wi);
 		const uintptr_t which = (uintptr_t)wasm_runtime_get_function_attachment(
 				env);
-		if(!self || which >= IMP_COUNT){
+		if(!self || which >= IMP_ALL){
 			wasm_runtime_set_exception(wi, "an import with no instance");
 			return;
 		}
 		uint32_t a[MAX_IMPORT_PARAMS] = {};
-		for(int i = 0; i < IMPORTS[which].params; i++)
+		for(int i = 0; i < import_params(which); i++)
 			a[i] = (uint32_t)args[i];
 		const uint32_t r = self->run_import((uint32_t)which, a);
 		// The interpreter checks for this after the native returns, and
@@ -2415,7 +2887,7 @@ struct Instance {
 			wasm_runtime_set_exception(wi, "an import trapped");
 			return;
 		}
-		if(IMPORTS[which].result)
+		if(import_result(which))
 			*(uint32_t*)args = r;
 	}
 
@@ -2693,6 +3165,7 @@ struct Instance {
 		}
 		const ss_ key = interface::sha1::hex(interface::sha1::calculate(
 				hash_hex+"\n"+WABT_VERSION_STRING+"\n"+GLUE_VERSION+"\n"+
+				bindings_hash()+"\n"+
 				cc.path+"\n"+cc.version+"\n"+cc.flags+"\n"+WASM2C_DEFINES));
 		// The cache, the user's alone; else no compiled module at all
 		const ss_ root = g_client_config.get<ss_>("cache_path")+"/wasm2c";
@@ -2792,7 +3265,7 @@ struct Instance {
 				ss_(cb.begin(), cb.end())) &&
 				interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) &&
 				interface::fs::write_file(tmp+"/glue.c",
-				glue_c(exports, has_imports, has_memory, has_start, globals));
+				glue_c(m, exports, has_imports, has_memory, has_start, globals));
 		for(const char *const *f = buildat_wasm_rt_files; *f; f += 2)
 			written = written && interface::fs::write_file(tmp+"/"+f[0], f[1]);
 		if(!written){
@@ -2848,6 +3321,7 @@ struct Instance {
 		if(web_id)
 			bw_free(web_id);
 #endif
+		release_refs();
 		g_tag_used[tag] = false;
 		g_instance_count--;
 	}
@@ -2926,6 +3400,9 @@ static int l_wasm_load(lua_State *L)
 {
 	const ss_ name = lua_checkcppstring(L, 1).substr(0, 64);
 	const ss_ bytes = lua_checkcppstring(L, 2);
+	// Its start function would run inside the import
+	if(g_import_depth > 0)
+		raise("wasm: loaded from inside a module's call to the client");
 	if(g_instance_count >= MAX_INSTANCES){
 		lua_pushnil(L);
 		lua_pushstring(L, "too many wasm modules loaded");
@@ -2991,6 +3468,8 @@ static int l_wasm_load(lua_State *L)
 	ss_ names;
 	for(const ImportDef &d : IMPORTS)
 		names += ss_(names.empty() ? "" : ",")+d.name;
+	for(size_t k = 0; k < BINDING_COUNT; k++)
+		names += ",g"+itos(k);
 	// The metered module is what the browser instantiates
 	wabt::MemoryStream metered;
 	if(wabt::Failed(wabt::WriteBinaryModule(&metered, &m,
@@ -3114,7 +3593,11 @@ static int l_call(lua_State *L)
 	(void)plain;
 	if(in->in_call)
 		raise("wasm %s: called from inside its own call", in->name.c_str());
+	if(g_import_depth > 0)
+		raise("wasm %s: called from inside a module's call to the client",
+				in->name.c_str());
 	in->in_call = true;
+	in->call_L = L;
 	in->trap_reason.clear();
 	in->sent.clear();
 	in->logged = 0;
@@ -3142,6 +3625,7 @@ static int l_call(lua_State *L)
 		trap = in->take_error();
 #endif
 	in->in_call = false;
+	in->call_L = nullptr;
 	if(!in->trap_reason.empty())
 		trap = in->trap_reason;
 	if(!trap.empty()){
@@ -3181,21 +3665,36 @@ static int l_call(lua_State *L)
 	return 1;
 }
 
-// __buildat_wasm_handle(m, object) -> a handle the module can use for the
-// object: a Node, a Texture2D (tolua's, unwrapped by api.lua) or a
-// buildat.Volume
+// __buildat_wasm_handle(m, object, safe) -> a handle the module can use
+// for the object: a Node, a Texture2D (tolua's, unwrapped by api.lua), a
+// buildat.Volume, or another of the sandbox's objects for the bindings
+// ([CLIENT_WASM_BINDINGS]); safe is what the script handed (the wrapper),
+// which the handle keeps, and the bindings' calls are made on
 static int l_handle(lua_State *L)
 {
 	Instance *in = check_instance(L);
+	if(in->state == Instance::FAILED)
+		raise("wasm %s: stopped", in->name.c_str());
 	tolua_Error err;
 	uint32_t h = 0;
+	lua_pushvalue(L, lua_isnoneornil(L, 3) ? 2 : 3);
+	const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+	bool wrapper = false;
+	if(lua_type(L, 3) == LUA_TTABLE && lua_getmetatable(L, 3)){
+		lua_pushstring(L, "unsafe");
+		lua_rawget(L, -2);
+		wrapper = !lua_isnil(L, -1);
+		lua_pop(L, 2);
+	}
 	if(lua_isuserdata(L, 2) && tolua_isusertype(L, 2, "Node", 0, &err)){
 		h = in->give(Instance::Slot::NODE,
-				(Urho3D::Node*)tolua_tousertype(L, 2, 0), nullptr, nullptr);
+				(Urho3D::Node*)tolua_tousertype(L, 2, 0), nullptr, nullptr, ref);
 	} else if(lua_isuserdata(L, 2) &&
 			tolua_isusertype(L, 2, "Texture2D", 0, &err)){
 		h = in->give(Instance::Slot::TEXTURE, nullptr,
-				(Urho3D::Texture2D*)tolua_tousertype(L, 2, 0), nullptr);
+				(Urho3D::Texture2D*)tolua_tousertype(L, 2, 0), nullptr, ref);
+	} else if(wrapper){
+		h = in->give(Instance::Slot::OBJECT, nullptr, nullptr, nullptr, ref);
 	} else {
 		sp_<interface::VoxelVolume> v;
 		if(lua_isuserdata(L, 2)){
@@ -3205,10 +3704,12 @@ static int l_handle(lua_State *L)
 			} catch(luabind::cast_failed&){
 			}
 		}
-		if(!v)
-			raise("wasm %s: handle(object): a Node, a Texture2D or a Volume",
-					in->name.c_str());
-		h = in->give(Instance::Slot::VOLUME, nullptr, nullptr, v);
+		if(!v){
+			Instance::unref(ref);
+			raise("wasm %s: handle(object): an object of the sandbox's or a "
+					"Volume", in->name.c_str());
+		}
+		h = in->give(Instance::Slot::VOLUME, nullptr, nullptr, v, ref);
 	}
 	if(!h)
 		raise("wasm %s: more than %d handles", in->name.c_str(),
@@ -3232,6 +3733,24 @@ static int l_drop(lua_State *L)
 	ss_ why;
 	if(!in->drop(handle_arg(L, 2), why))
 		raise("wasm %s: drop: %s", in->name.c_str(), why.c_str());
+	return 0;
+}
+
+// m:bind(f): the module's dispatcher ([CLIENT_WASM_BINDINGS]), through
+// which its calls of buildat_client.h are made: f(kind, class, member,
+// values...) -> results, in the module's sandbox (the default
+// client_main's)
+static int l_bind(lua_State *L)
+{
+	Instance *in = check_instance(L);
+	if(lua_type(L, 2) != LUA_TFUNCTION)
+		raise("wasm: bind(f): f is not a function");
+	if(in->state == Instance::FAILED)
+		raise("wasm %s: stopped", in->name.c_str());
+	lua_pushvalue(L, 2);
+	const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+	Instance::unref(in->bind_ref);
+	in->bind_ref = ref;
 	return 0;
 }
 
@@ -3309,6 +3828,7 @@ static int l_gc(lua_State *L)
 
 void init_wasm(lua_State *L)
 {
+	g_L = L;
 	luaL_newmetatable(L, META);
 	// Hidden from the sandbox's code, which has no getmetatable anyway
 	lua_pushboolean(L, 0);
@@ -3328,6 +3848,8 @@ void init_wasm(lua_State *L)
 	lua_setfield(L, -2, "drop");
 	lua_pushcfunction(L, guarded<l_push>);
 	lua_setfield(L, -2, "push");
+	lua_pushcfunction(L, guarded<l_bind>);
+	lua_setfield(L, -2, "bind");
 	// m:handle(object) is api.lua's, which unwraps a sandboxed object
 	lua_pushvalue(L, -1);
 	lua_setglobal(L, "__buildat_wasm_methods");

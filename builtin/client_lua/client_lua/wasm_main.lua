@@ -5,9 +5,11 @@
 -- "client_main": "wasm" has its client run by this instead of Lua of its
 -- own (the loader runs it with the module's name). It loads the module's
 -- .wasm, makes a scene for it to draw into and hands it the handles, and
--- forwards the frames, the input and the module's packets to it, and does
--- nothing else. The exports and the events' bytes are in
--- interface/wasm_api.h.
+-- forwards the frames, the input and the module's packets to it. The
+-- exports and the events' bytes are in interface/wasm_api.h.
+-- It also binds the module's calls of interface/buildat_client.h
+-- ([CLIENT_WASM_BINDINGS]): each is made here, in this sandbox, by the
+-- dispatcher below, as this module's own script would make it.
 local magic = require("buildat/extension/urho3d")
 
 -- The mesh nodes a module is handed, each with a CustomGeometry and a
@@ -17,7 +19,8 @@ local NODES = 8
 local PENDING_MAX = 256
 
 local EV_START, EV_KEY_DOWN, EV_KEY_UP, EV_MOUSE_DOWN, EV_MOUSE_UP,
-		EV_MOUSE_MOVE, EV_WHEEL, EV_PACKET, EV_RESIZE = 1, 2, 3, 4, 5, 6, 7, 8, 9
+		EV_MOUSE_MOVE, EV_WHEEL, EV_PACKET, EV_RESIZE, EV_OBJECT =
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 -- Little-endian 32-bit words
 local function words(t)
@@ -92,6 +95,50 @@ return function(module)
 		state = "stopped"
 		log:error("the default client_main stopped the module: "..why)
 	end
+
+	-- [CLIENT_WASM_BINDINGS] The module's calls, as wasm.cpp hands them:
+	-- what kind, the class and the member its import names, and the values
+	-- (an object as the wrapper its handle holds; a Vector3, Color, ...
+	-- made by "value" first). Each is the sandbox's own call, with its
+	-- checks; an error is the module's trap.
+	m:bind(function(kind, class, member, ...)
+		if kind == "call" then
+			local self = ...
+			return self[member](...)
+		elseif kind == "get" then
+			local self = ...
+			return self[member]
+		elseif kind == "set" then
+			local self, v = ...
+			self[member] = v
+		elseif kind == "static" then
+			local c = magic[class]
+			return c[member](c, ...)
+		elseif kind == "new" or kind == "value" then
+			return magic[class](...)
+		elseif kind == "global" then
+			return magic[member]
+		elseif kind == "constant" then
+			local v = magic[(...)]
+			if type(v) ~= "number" and type(v) ~= "string" then
+				error("constant("..tostring((...))..
+						"): not a number or a string of the sandbox's")
+			end
+			return v
+		elseif kind == "subscribe" then
+			-- Each of the object's events of the name, to the queue with
+			-- the handle the module subscribed with
+			local object, event, handle = ...
+			if type(event) ~= "string" or #event > 64 then
+				error("SubscribeToEvent(object, name): a name")
+			end
+			magic.SubscribeToEvent(object, event, function()
+				push(words({EV_OBJECT, handle, #event})..event)
+			end)
+		else
+			error("no such call: "..tostring(kind))
+		end
+	end)
 
 	-- The module's packets, by the names its packets() export lists
 	local function subscribe_packets()

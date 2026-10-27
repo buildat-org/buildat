@@ -1,0 +1,183 @@
+#!/bin/bash
+# apps/sample_wasm_ui: [CLIENT_WASM_BINDINGS]' first user, a module whose
+# client is C++ only, written against interface/buildat_client.h (the Lua
+# sandbox's classes as wasm imports) and run by the engine's default
+# client_main: a window with a button (Urho3D's UI), a cube it builds, a
+# key and packets both ways. The button is clicked: its Released event
+# reaches the module's queue, the module sets the button's text, reads it
+# back, and sends "main:click", which echo/ answers; space recolours the
+# cube and sends "main:key". Two screenshots: the cube orange, then green.
+# Then the C++ twin of extensions/sandbox_test's refusals for the calls
+# the bindings cover (main/wasm/main.cpp's refuse()), each a trap with its
+# reason; and two modules refused at the load, one importing a call the
+# list does not name (unlisted/), one a call of it with another signature
+# (wrong_sig/). Natively twice, compiled and in the interpreter; `web` in
+# headless Chrome. The generated files are checked against the generator.
+#
+#   apps/sample_wasm_ui/check.sh          # the native client
+#   apps/sample_wasm_ui/check.sh web      # the web client, headless Chrome
+#
+# tier: quick
+# cost: 30s (2026-10-27)
+# covers: util/gen_wasm_bindings.lua src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
+set -u
+. "$(dirname "$0")/../../util/check_lib.sh"
+here=$(cd "$(dirname "$0")/../.." && pwd)
+app=sample_wasm_ui
+web=0
+for a in "$@"; do
+	case "$a" in
+		web) web=1 ;;
+		*) echo "usage: $0 [web]" >&2; exit 2 ;;
+	esac
+done
+if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
+	skip "a buildat server or client is already running"
+fi
+check_tmp $app
+t=$CHECK_TMP
+
+# The generated bindings are what the generator makes of the list now
+lua=$(command -v luajit || command -v lua)
+if [ -n "$lua" ]; then
+	(cd "$here" && "$lua" util/gen_wasm_bindings.lua --check > "$t/gen.log" 2>&1) ||
+		{ cat "$t/gen.log"; fail "the generated bindings are stale: run util/gen_wasm_bindings.lua"; }
+else
+	echo "(no luajit or lua: the generated files not compared)"
+fi
+
+# The cube in a screenshot: the middle of the picture orange (red over
+# green), then green
+cube_is()
+{
+	python3 - "$1" "$2" <<'EOF' || fail "$1: the cube is not $2"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert("RGB")
+w, h = im.size
+r = g = b = n = 0
+for y in range(h * 2 // 5, h * 3 // 5):
+	for x in range(w * 2 // 5, w * 3 // 5):
+		p = im.getpixel((x, y))
+		r, g, b, n = r + p[0], g + p[1], b + p[2], n + 1
+r, g, b = r / n, g / n, b / n
+print("%s: the middle is %.0f %.0f %.0f" % (sys.argv[1].split("/")[-1], r, g, b))
+want = sys.argv[2]
+ok = r > 1.3 * g and r > 20 if want == "orange" else g > 1.3 * r and g > 20
+sys.exit(0 if ok else 1)
+EOF
+}
+
+# The module's lines, natively and on the web (the logger's tag is the
+# module's name), the refusals' traps and the two modules refused
+client_lines()
+{
+	local log=$1 want
+	grep -aE "wasm (main|unlisted|wrong_sig): " "$log" | sed 's/.*wasm \([a-z_]*\): /\1: /' | cut -c1-160
+	for want in "wasm main: drew a cube and a window" \
+			"wasm main: the camera is at y*10: 15" \
+			"wasm main: the button was released: presses 1" \
+			"wasm main: the button reads: Pressed 1" \
+			"wasm main: the server answered echo: click 1" \
+			"wasm main: space: the colour is now 1" \
+			"wasm main: the server answered echo: key 1" \
+			"wasm main: refusals: tried 11, got through: 0" \
+			"trap: buildat.UI.scale=any: " \
+			"UI.scale is read-only" \
+			"trap: buildat.UIElement:SetStyleAuto(): not called on a UIElement" \
+			"trap: buildat.Node.position:Vector3: handle 2130707455 is not this module's" \
+			"is stale (dropped)" \
+			"trap: buildat.buildat.SubscribeToEvent(UIElement|Node|Component,string): " \
+			"Event type is not whitelisted: \"NotAnEvent\"" \
+			"constant(Node): not a number or a string of the sandbox's" \
+			"trap: buildat.Node.position:Vector3: more than 32 values" \
+			"trap: buildat.magic.ui:UI: its results are 6 bytes, past the buffer's 1" \
+			"wasm unlisted: refused: imports \"buildat.Image:FlipHorizontal():boolean\", which is not one of" \
+			"wasm wrong_sig: refused: imports \"buildat.Node.position:Vector3\", which is not one of"; do
+		grep -aqF "$want" "$log" || fail "no \"$want\" in $log"
+	done
+	[ "$(grep -ac "wasm main: refusal: refused by its answer" "$log")" -eq 3 ] ||
+		fail "not the cache's three refused by their answers ($log)"
+	grep -a "GOT THROUGH" "$log" && fail "a refusal got through ($log)"
+	grep -aq "presses 2" "$log" && fail "one click read as two ($log)"
+	return 0
+}
+
+if [ $web = 1 ]; then
+	# The button is the top left third of the screen: clicked in its middle
+	cat > "$t/steps.json" <<'EOF'
+[
+	["viewport", 960, 600],
+	["nav", "${URL}"],
+	["waitlog", "drew a cube and a window", 120],
+	["waitlog", "refusals: tried", 30],
+	["wait", 500],
+	["shot", "${OUT}/before.png"],
+	["mouse", 240, 100],
+	["click", 240, 100],
+	["waitlog", "the server answered echo: click", 30],
+	["key", "Space"],
+	["waitlog", "the server answered echo: key", 30],
+	["wait", 500],
+	["shot", "${OUT}/after.png"]
+]
+EOF
+	"$here/util/web_drive.sh" chrome $app "$t/steps.json" "$t/web" > "$t/drive.log" 2>&1 ||
+		{ tail -20 "$t/drive.log"; fail "the web drive failed ($t/web)"; }
+	grep -a " I echo *: " "$t/web/server.log" | sed 's/.*echo *: //'
+	client_lines "$t/web/page.log"
+	grep -aq "wasm main: ready (the browser's instance)" "$t/web/page.log" ||
+		fail "not the browser's own instance"
+	grep -aq "click from the client's wasm: 1" "$t/web/server.log" ||
+		fail "the server did not get the module's click"
+	cube_is "$t/web/before.png" orange
+	cube_is "$t/web/after.png" green
+	echo "PASS: $app on the web: a C++ client through the bindings (a window, a button clicked, a cube, a key, packets both ways), the refusals refused"
+	exit 0
+fi
+
+cd "$here/Build"
+# run <n> <a command before quit> <env...>
+run()
+{
+	local n=$1 last=$2
+	shift 2
+	start_server "$t/srv$n.log" "Listening at" 120 auto bin/buildat_server \
+			-m ../apps/$app -l 3 || fail "the server did not come up"
+	CHECK_PIDS+=($SERVER_PID)
+	cat > "$t/cmds$n.txt" <<EOF
+expect_error the default client_main: no wasm: refused
+expect_error frame: wasm main: frame: trap
+wait_log 60000 drew a cube and a window
+wait_log 30000 refusals: tried
+delay 500
+screenshot $t/before$n.png
+click Button "Press me"
+wait_log 10000 the server answered echo: click
+keypress space
+wait_log 10000 the server answered echo: key
+delay 500
+screenshot $t/after$n.png
+$last
+quit
+EOF
+	run_client 60 "$t/cli$n.log" timeout 120 env "$@" bin/buildat -C "$t/client_cache" \
+			-s localhost:$SERVER_PORT -w 640x480 -l 3 -c @"$t/cmds$n.txt"
+	kill -INT "$SERVER_PID" 2>/dev/null
+	wait "$SERVER_PID" 2>/dev/null
+	echo "-- run $n"
+	grep -a " I echo *: " "$t/srv$n.log" | sed 's/.*echo *: //'
+	client_lines "$t/cli$n.log"
+	grep -aq "click from the client's wasm: 1" "$t/srv$n.log" ||
+		fail "the server did not get the module's click"
+	cube_is "$t/before$n.png" orange
+	cube_is "$t/after$n.png" green
+}
+# The compile (about a second) is waited for, so that the move is seen
+run 1 "wait_log 60000 ; ready (compiled)"
+grep -aqE "wasm main: (moved to the compiled module|compiled module from the cache)" "$t/cli1.log" ||
+	fail "not compiled in run 1 ($t/cli1.log)"
+run 2 "delay 0" BUILDAT_CHECK_WASM_INTERPRETER=1
+grep -aq "wasm main: ready (interpreter): no C compiler" "$t/cli2.log" ||
+	fail "not the interpreter in run 2 ($t/cli2.log)"
+echo "PASS: $app natively, compiled and in the interpreter: a C++ client through the bindings (a window, a button clicked, a cube, a key, packets both ways), the refusals refused"

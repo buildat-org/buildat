@@ -6,8 +6,9 @@
 // serves the .wasm to clients, which run it as a sandboxed module of its own
 // and call its exports from Lua (buildat.wasm_load(), doc/client_api.txt).
 //
-// The imports below are all a module can call, each checked by the client
-// (natively and on the web alike):
+// The imports below, and interface/buildat_client.h's (the Lua sandbox's
+// classes, [CLIENT_WASM_BINDINGS]), are all a module can call, each
+// checked by the client (natively and on the web alike):
 // - a pointer and a length are checked against the module's memory, and
 //   the bytes copied before they are used; one past it is a trap;
 // - nodes, textures and voxel volumes are handles (an int), given to the
@@ -112,6 +113,12 @@ void buildat_send_packet(const char *name, unsigned int name_len,
 BUILDAT_WASM_IMPORT(event_take)
 int buildat_event_take(void *buf, unsigned int cap);
 
+// The module is done with a handle ([CLIENT_WASM_BINDINGS]): it names
+// nothing from now on, and what it named is no longer kept alive by it. A
+// handle the module was not given, or one dropped, is a trap.
+BUILDAT_WASM_IMPORT(drop)
+void buildat_drop(int handle);
+
 // **The default client_main** ([CLIENT_WASM] step 7): a module whose
 // meta.json says "client_main": "wasm" has no Lua of its own; the engine's
 // (builtin/client_lua/client_lua/wasm_main.lua) loads its .wasm, makes a
@@ -126,8 +133,9 @@ int buildat_event_take(void *buf, unsigned int cap);
 //   sent, without "<module>:", separated by spaces, ending in a 0 byte
 //   (at most 4096 bytes); each comes to it as BUILDAT_EVENT_PACKET.
 // (An export's name may not begin with "buildat_": those are the
-// engine's.) It forwards nothing else: a module that wants Urho's UI
-// writes its own client Lua.
+// engine's.) It also binds interface/buildat_client.h's calls -- the Lua
+// sandbox's classes, the UI's included, as wasm imports
+// ([CLIENT_WASM_BINDINGS]) -- so that a module needs no Lua of its own.
 //
 // Each event from it is little-endian 32-bit words, the first its kind:
 // - START, first, once: camera node, light node, the window's width and
@@ -141,6 +149,9 @@ int buildat_event_take(void *buf, unsigned int cap);
 // - PACKET: the name's length, then the name's bytes, then the data to the
 //   event's end.
 // - RESIZE: the window's width and height.
+// - OBJECT ([CLIENT_WASM_BINDINGS], interface/buildat_client.h): an
+//   object's event the module subscribed to: the handle it subscribed
+//   with, the event's name's length, then the name's bytes.
 // None is longer than BUILDAT_EVENT_MAX bytes: a buffer of that size
 // takes each (buildat_event_take() leaves one that does not fit queued).
 // Keys the client keeps (F9 to F12, and all while a password is typed)
@@ -154,6 +165,7 @@ int buildat_event_take(void *buf, unsigned int cap);
 #define BUILDAT_EVENT_WHEEL 7
 #define BUILDAT_EVENT_PACKET 8
 #define BUILDAT_EVENT_RESIZE 9
+#define BUILDAT_EVENT_OBJECT 10
 #define BUILDAT_EVENT_MAX (8 + 64 + 65536)
 
 #ifndef BUILDAT_WASM_MODULE
@@ -179,4 +191,5 @@ static inline void buildat_send_packet(const char *a, unsigned int b,
 { (void)a; (void)b; (void)c; (void)d; __builtin_trap(); }
 static inline int buildat_event_take(void *a, unsigned int b)
 { (void)a; (void)b; __builtin_trap(); }
+static inline void buildat_drop(int a){ (void)a; __builtin_trap(); }
 #endif

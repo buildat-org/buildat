@@ -1,0 +1,1189 @@
+-- Buildat: util/gen_wasm_bindings.lua
+-- http://www.apache.org/licenses/LICENSE-2.0
+-- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+--
+-- [CLIENT_WASM_BINDINGS] The client's C++ bindings for wasm, generated
+-- from the Lua sandbox's own whitelist: client/core/urho3d/safe_classes.lua
+-- is run here with a stub `util` that records each class, method and
+-- property as the sandbox defines it (the same file the client runs), and
+-- VERBS below are the few calls outside it. Writes:
+-- - src/lua_bindings/wasm_bindings.inc: the client's table of the
+--   imports, by name, each with what the dispatcher calls (wasm.cpp);
+-- - src/interface/buildat_client.h: the C imports and a header-only C++
+--   layer over them (RAII handle classes, the Urho3D names as in Lua).
+-- An import's name carries its parameter and result types, so that a
+-- change in the list is a changed import, which an older .wasm fails on
+-- at instantiation. Run from the tree's root:
+--   luajit util/gen_wasm_bindings.lua      (or lua 5.2 to 5.4)
+-- and commit what it writes; `--check` writes nothing and fails if the
+-- committed files differ from what it would write.
+local CHECK = arg and arg[1] == "--check"
+local unpack = unpack or table.unpack
+local ROOT = "."
+local SAFE_CLASSES = ROOT.."/client/core/urho3d/safe_classes.lua"
+local OUT_INC = ROOT.."/src/lua_bindings/wasm_bindings.inc"
+local OUT_H = ROOT.."/src/interface/buildat_client.h"
+
+-- Classes carried by value (their components, as numbers) and not as
+-- handles: what they are made of, in the order their Lua constructors
+-- take them. The rest of the list's classes are handles.
+local VALUES = {
+	{name = "Vector2", c = {"x", "y"}},
+	{name = "Vector3", c = {"x", "y", "z"}},
+	{name = "Vector4", c = {"x", "y", "z", "w"}},
+	{name = "IntVector2", c = {"x", "y"}},
+	{name = "IntVector3", c = {"x", "y", "z"}},
+	{name = "Quaternion", c = {"w", "x", "y", "z"}},
+	{name = "Color", c = {"r", "g", "b", "a"}},
+	{name = "IntRect", c = {"left", "top", "right", "bottom"}},
+}
+local VALUE_OF = {}
+for i, v in ipairs(VALUES) do
+	v.id = i
+	VALUE_OF[v.name] = v
+end
+
+-- The calls outside safe_classes.lua: kind is what the dispatcher does
+-- (wasm_main.lua's), params and ret as in the list
+local VERBS = {
+	-- An object's event (the sandbox's SubscribeToEvent(object, name, f),
+	-- its whitelist of events): each comes to the module's queue as
+	-- BUILDAT_EVENT_OBJECT with the handle it was subscribed with
+	{kind = "subscribe", name = "SubscribeToEvent",
+			params = {{"UIElement", "Node", "Component"}, "string"}, ret = {}},
+	-- A number or string of the sandbox's globals (safe_globals.lua):
+	-- KEY_SPACE, LIGHT_DIRECTIONAL, ...
+	{kind = "constant", name = "constant", params = {"string"},
+			ret = {{"number", "string"}}},
+}
+
+--
+-- The list, as safe_classes.lua defines it
+--
+
+local function noop() end
+local function marker(name, def)
+	return setmetatable({}, {__class = name, type_name = name, def = def})
+end
+local function class_of(t)
+	local mt = type(t) == "table" and getmetatable(t)
+	return mt and mt.__class
+end
+
+local classes, by_name, globals = {}, {}, {}
+local util = {}
+local dst
+function util.wc(name, def)
+	local c = {name = name, def = def}
+	table.insert(classes, c)
+	by_name[name] = c
+	rawset(dst, name, marker(name, def))
+end
+function util.wrap_instance(name, _)
+	return setmetatable({}, {__instance_of = name})
+end
+function util.wrap_function(ret, params, f)
+	if type(params) == "function" and f == nil then
+		return {rec = "wrap", params = ret, f = params}
+	end
+	return {rec = "wrap", params = params, ret = ret, f = f}
+end
+function util.self_function(name, ret, params)
+	return {rec = "self", name = name, params = params, ret = ret}
+end
+function util.simple_property(types)
+	return {rec = "prop", types = types, get = true, set = true}
+end
+function util.read_only_property(types)
+	return {rec = "prop", types = types, get = true}
+end
+util.mouse = {}
+util.preferred_viewport = noop
+
+-- What safe_classes.lua reaches while it is defined: a logger, the
+-- sandbox's module, key constants and Urho's singletons
+local env = setmetatable({
+	buildat = {dump = tostring, Logger = function()
+		return {info = noop, warning = noop, error = noop, debug = noop}
+	end},
+	require = function()
+		return setmetatable({}, {__index = function() return noop end})
+	end,
+}, {__index = function(_, k)
+	if type(k) == "string" and k:match("^KEY_") then
+		return #k
+	end
+	return _G[k]
+end})
+env._G = env
+local chunk
+if setfenv then
+	chunk = assert(loadfile(SAFE_CLASSES))
+	setfenv(chunk, env)
+else
+	chunk = assert(loadfile(SAFE_CLASSES, "t", env))
+end
+-- dst: what the sandbox gets; a class is the marker its name stands for
+dst = setmetatable({}, {
+	__index = function(t, k)
+		return marker(k)
+	end,
+	__newindex = function(t, k, v)
+		local mt = getmetatable(v)
+		if mt and mt.__instance_of then
+			table.insert(globals, {name = k, class = mt.__instance_of})
+		end
+		rawset(t, k, v)
+	end,
+})
+chunk().define(dst, util)
+table.sort(globals, function(a, b) return a.name < b.name end)
+
+-- A type as the list has it, made one of: "number", "string", "boolean",
+-- a class's name, "__nil", or a list of those (alternatives); nil for one
+-- the bindings do not carry
+local function norm(t)
+	if type(t) == "string" then
+		if t == "number" or t == "string" or t == "boolean" or t == "__nil"
+				or t == "__to_nil" or by_name[t] then
+			return {t}
+		end
+		return nil
+	end
+	local c = class_of(t)
+	if c then
+		return by_name[c] and {c} or nil
+	end
+	if type(t) == "table" then
+		local r = {}
+		for _, x in ipairs(t) do
+			local n = norm(x)
+			if not n then
+				return nil
+			end
+			for _, y in ipairs(n) do
+				table.insert(r, y)
+			end
+		end
+		return #r > 0 and r or nil
+	end
+	return nil
+end
+
+-- A type's spelling in an import's name: alternatives with |, optional ?
+local function spell(alts)
+	local r, opt = {}, false
+	for _, a in ipairs(alts) do
+		if a == "__nil" then
+			opt = true
+		else
+			table.insert(r, a)
+		end
+	end
+	return table.concat(r, "|")..(opt and "?" or "")
+end
+
+-- Each call: {import = name, kind, class, member, self (a class or nil),
+-- params = {alts...}, ret = {alts...} or nil (any)}
+local calls, skipped = {}, {}
+local function skip(what, why)
+	table.insert(skipped, what..": "..why)
+end
+
+local function params_of(list, what)
+	local r = {}
+	for i, p in ipairs(list) do
+		local n = norm(p)
+		if not n then
+			return nil, "parameter "..i.." is of a type the bindings do not carry"
+		end
+		r[i] = n
+	end
+	return r
+end
+
+
+-- A result list as the record has it: the list, or nil for "whatever it
+-- returns" (none given, or "__safe"); false for a type not carried
+local function rets_of(list)
+	if list == nil then
+		return nil
+	end
+	local r = {}
+	for i, p in ipairs(list) do
+		if p == "__safe" then
+			return nil
+		end
+		local n = norm(p)
+		if not n then
+			return false
+		end
+		r[i] = n
+	end
+	return r
+end
+
+local function sig(params, first)
+	local s = {}
+	for i = first, #params do
+		table.insert(s, spell(params[i]))
+	end
+	return "("..table.concat(s, ",")..")"
+end
+local function ret_sig(ret)
+	if ret == nil then
+		return ":any"
+	end
+	if #ret == 0 then
+		return ""
+	end
+	local s = {}
+	for _, r in ipairs(ret) do
+		table.insert(s, spell(r))
+	end
+	return ":"..table.concat(s, ",")
+end
+
+-- A plain function's parameters, each "any" (it checks them itself), or
+-- nil when it takes a variable number
+local function plain_params(f, skip_first)
+	local info = debug.getinfo(f, "u")
+	if info.isvararg or info.nparams == nil then
+		return nil
+	end
+	local r = {}
+	for i = 1, info.nparams - (skip_first and 1 or 0) do
+		r[i] = {"any"}
+	end
+	return r
+end
+
+local function add_method(c, member, rec)
+	local what = c.name..":"..member
+	if type(rec) == "function" then
+		-- The list's own function, which checks what it is given itself
+		local params = plain_params(rec, true)
+		if not params then
+			return skip(what, "a function taking any number of values")
+		end
+		table.insert(calls, {import = what..sig(params, 1)..":any",
+				kind = "call", class = c.name, member = member, params = params})
+		return
+	end
+	if type(rec) ~= "table" or not rec.rec then
+		return skip(what, "not a function")
+	end
+	-- Its parameters with self first
+	local params, why = params_of(rec.params or {}, what)
+	if not params then
+		return skip(what, why)
+	end
+	if #params < 1 then
+		return skip(what, "no self")
+	end
+	local ret = rets_of(rec.ret)
+	if ret == false then
+		return skip(what, "a result of a type the bindings do not carry")
+	end
+	table.insert(calls, {import = what..sig(params, 2)..ret_sig(ret),
+			kind = "call", class = c.name, member = member,
+			params = {unpack(params, 2)}, ret = ret})
+end
+
+local function add_static(c, member, rec)
+	local what = c.name.."."..member
+	local params, ret
+	if type(rec) == "function" then
+		-- Called as Class:member(...), so the class is its first
+		params = plain_params(rec)
+		if not params then
+			return skip(what, "a function taking any number of values")
+		end
+		-- new() makes one of the class
+		if member == "new" and #params == 0 then
+			ret = {{c.name}}
+		elseif #params > 0 then
+			table.remove(params, 1)
+		end
+	elseif type(rec) == "table" and rec.rec == "wrap" then
+		local p, why = params_of(rec.params or {}, what)
+		if not p then
+			return skip(what, why)
+		end
+		-- The class itself, passed by Class:new(...), is dropped
+		if p[1] and p[1][1] == "__to_nil" then
+			table.remove(p, 1)
+		end
+		params = p
+		ret = rets_of(rec.ret)
+		if ret == false then
+			return skip(what, "a result of a type the bindings do not carry")
+		end
+		if member == "new" and ret == nil then
+			ret = {{c.name}}
+		end
+	else
+		return skip(what, "not a function")
+	end
+	table.insert(calls, {import = what..sig(params, 1)..ret_sig(ret),
+			kind = "static", class = c.name, member = member, params = params,
+			ret = ret})
+end
+
+local function add_constructor(c, rec)
+	local what = c.name
+	-- Values are made in the C++ itself (and by the dispatcher's "value")
+	if VALUE_OF[c.name] then
+		return
+	end
+	if type(rec) ~= "table" or rec.rec ~= "wrap" then
+		return skip(what.."()", "a constructor with no types in the list")
+	end
+	local params, why = params_of(rec.params or {}, what)
+	if not params then
+		return skip(what.."()", why)
+	end
+	table.insert(calls, {import = what..sig(params, 1)..":"..c.name,
+			kind = "new", class = c.name, member = "", params = params,
+			ret = {{c.name}}})
+end
+
+local function add_property(c, member, rec)
+	local what = c.name.."."..member
+	if type(rec) ~= "table" then
+		return skip(what, "not a property")
+	end
+	local t
+	if rec.rec == "prop" then
+		t = norm(rec.types)
+		if not t then
+			return skip(what, "of a type the bindings do not carry")
+		end
+	end
+	-- A property with a get and a set of its own (a rule on it) and no
+	-- type: read as whatever it is, written as anything (its set checks)
+	if rec.get then
+		table.insert(calls, {import = what..":"..(t and spell(t) or "any"),
+				kind = "get", class = c.name, member = member, params = {},
+				ret = t and {t} or nil})
+	end
+	if rec.set then
+		table.insert(calls, {import = what.."="..(t and spell(t) or "any"),
+				kind = "set", class = c.name, member = member,
+				params = {t or {"any"}}, ret = {}})
+	end
+end
+
+local function sorted_keys(t)
+	local k = {}
+	for name in pairs(t or {}) do
+		if type(name) == "string" then
+			table.insert(k, name)
+		end
+	end
+	table.sort(k)
+	return k
+end
+
+for _, v in ipairs(VALUES) do
+	local c = assert(by_name[v.name], v.name.." is not in the list")
+	for _, comp in ipairs(v.c) do
+		assert(c.def.properties and c.def.properties[comp], v.name.." has no "..
+				comp.." property to be read back by")
+	end
+end
+for _, c in ipairs(classes) do
+	local def = c.def
+	c.parent = class_of(def.inherited_from_by_wrapper)
+	if def.unsafe_constructor then
+		add_constructor(c, def.unsafe_constructor)
+	end
+	for _, k in ipairs(sorted_keys(def.class)) do
+		add_static(c, k, def.class[k])
+	end
+	if VALUE_OF[c.name] then
+		-- A struct in the C++, which does its own maths
+		skip(c.name, "its methods and operators: a value (the C++ does its "..
+				"own maths)")
+	else
+		for _, k in ipairs(sorted_keys(def.instance)) do
+			add_method(c, k, def.instance[k])
+		end
+		for _, k in ipairs(sorted_keys(def.properties)) do
+			add_property(c, k, def.properties[k])
+		end
+		for _, k in ipairs(sorted_keys(def.instance_meta)) do
+			skip(c.name.."."..k, "an operator")
+		end
+	end
+end
+for _, g in ipairs(globals) do
+	table.insert(calls, {import = "magic."..g.name..":"..g.class,
+			kind = "global", class = "", member = g.name, params = {},
+			ret = {{g.class}}})
+end
+for _, v in ipairs(VERBS) do
+	local params = assert(params_of(v.params, v.name))
+	local ret = rets_of(v.ret)
+	table.insert(calls, {import = "buildat."..v.name..sig(params, 1)..
+			ret_sig(ret), kind = v.kind, class = "", member = v.name,
+			params = params, ret = ret})
+end
+-- One import is one call
+local seen = {}
+for _, c in ipairs(calls) do
+	assert(not seen[c.import], "two calls are named "..c.import)
+	seen[c.import] = true
+end
+
+if arg and arg[1] == "--list" then
+	for _, c in ipairs(calls) do print(c.import) end
+	print("-- skipped:")
+	for _, s in ipairs(skipped) do print(s) end
+	print(#calls.." calls, "..#skipped.." skipped")
+	os.exit(0)
+end
+
+--
+-- The C++
+--
+
+local KEYWORDS = {}
+for w in ([[alignas alignof and and_eq asm auto bitand bitor bool break case
+		catch char char16_t char32_t class compl const constexpr const_cast
+		continue decltype default delete do double dynamic_cast else enum
+		explicit export extern false float for friend goto if inline int long
+		mutable namespace new noexcept not not_eq nullptr operator or or_eq
+		private protected public register reinterpret_cast return short signed
+		sizeof static static_assert static_cast struct switch template this
+		thread_local throw true try typedef typeid typename union unsigned
+		using virtual void volatile wchar_t while xor xor_eq]]):gmatch("%S+") do
+	KEYWORDS[w] = true
+end
+local function ident(s)
+	s = s:gsub("[^%w_]", "_")
+	return KEYWORDS[s] and s.."_" or s
+end
+
+-- The C import's name
+for _, c in ipairs(calls) do
+	local base
+	if c.kind == "call" then
+		base = c.class.."_"..c.member
+	elseif c.kind == "get" or c.kind == "set" then
+		base = c.class.."_"..c.kind.."_"..c.member
+	elseif c.kind == "static" then
+		base = c.class.."_static_"..c.member
+	elseif c.kind == "new" then
+		base = c.class.."_new"
+	elseif c.kind == "global" then
+		base = "global_"..c.member
+	else
+		base = "verb_"..c.member
+	end
+	c.c_name = "buildat_c_"..base:gsub("[^%w_]", "_")
+end
+local c_seen = {}
+for _, c in ipairs(calls) do
+	assert(not c_seen[c.c_name], "two calls are named "..c.c_name.." in C")
+	c_seen[c.c_name] = true
+end
+
+-- A parameter's C++ type, for one of its alternatives
+local function param_type(alt)
+	if alt == "number" then return "double" end
+	if alt == "string" then return "::buildat::Str" end
+	if alt == "boolean" then return "bool" end
+	if alt == "__nil" or alt == "__to_nil" then return "::buildat::Nil" end
+	if alt == "any" then return "const ::buildat::Any &" end
+	return "const ::buildat::"..alt.." &"
+end
+
+-- The overloads of a parameter list: each a list of C++ types, one for
+-- each alternative of each parameter, and the trailing optional ones left
+-- off; nil past MAX_OVERLOADS
+local MAX_OVERLOADS = 16
+local function overloads(params, all_given)
+	local lists = {{}}
+	local function extend(alts)
+		local r = {}
+		for _, l in ipairs(lists) do
+			for _, a in ipairs(alts) do
+				local n = {unpack(l)}
+				table.insert(n, param_type(a))
+				table.insert(r, n)
+			end
+		end
+		lists = r
+	end
+	-- The ones before the trailing optional ones are all given
+	local last_required = 0
+	for i, p in ipairs(params) do
+		local opt = false
+		for _, a in ipairs(p) do
+			if a == "__nil" or a == "__to_nil" then opt = true end
+		end
+		if not opt or all_given then last_required = i end
+	end
+	local result, seen_sig = {}, {}
+	local function take()
+		for _, l in ipairs(lists) do
+			local s = table.concat(l, ",")
+			if not seen_sig[s] then
+				seen_sig[s] = true
+				table.insert(result, l)
+			end
+		end
+	end
+	for i, p in ipairs(params) do
+		if i > last_required then
+			take()
+		end
+		local alts = {}
+		for _, a in ipairs(p) do
+			-- A trailing optional one is left off rather than given nil
+			if i <= last_required or (a ~= "__nil" and a ~= "__to_nil") then
+				table.insert(alts, a)
+			end
+		end
+		extend(alts)
+		if #lists > MAX_OVERLOADS then
+			return nil
+		end
+	end
+	take()
+	if #result > MAX_OVERLOADS then
+		return nil
+	end
+	return result
+end
+
+-- The C++ result: its type and how it is read from the reply (r)
+local function result_of(ret)
+	if ret == nil then
+		return "::buildat::Value", "return r.value();"
+	end
+	if #ret == 0 then
+		return "void", nil
+	end
+	if #ret > 1 then
+		return "::buildat::Values", "return r.values();"
+	end
+	local alts = {}
+	for _, a in ipairs(ret[1]) do
+		if a ~= "__nil" then table.insert(alts, a) end
+	end
+	if #alts ~= 1 then
+		return "::buildat::Value", "return r.value();"
+	end
+	local a = alts[1]
+	if a == "number" then return "double", "return r.number();" end
+	if a == "string" then return "::buildat::Str", "return r.string();" end
+	if a == "boolean" then return "bool", "return r.boolean();" end
+	if a == "any" then return "::buildat::Value", "return r.value();" end
+	if VALUE_OF[a] then
+		return "::buildat::"..a, "::buildat::"..a.." v{}; r.get(v); return v;"
+	end
+	return "::buildat::"..a, "return ::buildat::"..a.."(r.handle());"
+end
+
+local function args_text(types, self)
+	local decl, pass = {}, {}
+	if self then
+		table.insert(pass, "*this")
+	end
+	for i, t in ipairs(types) do
+		table.insert(decl, t.." a"..i)
+		table.insert(pass, "a"..i)
+	end
+	return table.concat(decl, ", "), table.concat(pass, ", ")
+end
+
+-- Members of classes and the free functions: declarations into the
+-- classes, definitions after them all
+local members = {} -- class name -> {lines}
+local free_decls, defs = {}, {}
+local member_names = {} -- class name -> {C++ name -> kind}
+local function cpp_name_of(c)
+	return c.kind == "new" and "make" or ident(c.member)
+end
+
+for _, c in ipairs(calls) do
+	local rtype, rbody = result_of(c.ret)
+	local name = cpp_name_of(c)
+	-- A setter is always given its value (nil as buildat::nil)
+	local ov = overloads(c.params, c.kind == "set")
+	if not ov then
+		skip(c.import, "more than "..MAX_OVERLOADS.." C++ overloads (only the "..
+				"C import)")
+	else
+		local in_class = c.kind == "call" or c.kind == "get" or c.kind == "set"
+		local is_static = c.kind == "static" or c.kind == "new"
+		local owner = (in_class or is_static) and c.class or nil
+		if owner then
+			member_names[owner] = member_names[owner] or {}
+			local prev = member_names[owner][name]
+			local key = (c.kind == "get" or c.kind == "set") and "property" or
+					c.kind
+			if prev and prev ~= key then
+				skip(c.import, "its C++ name "..name.." is another member's "..
+						"in "..owner.." (only the C import)")
+				goto next
+			end
+			member_names[owner][name] = key
+		end
+		if owner then
+			members[owner] = members[owner] or {}
+			table.insert(members[owner], "\t// "..c.import)
+		else
+			table.insert(free_decls, "// "..c.import)
+		end
+		for _, types in ipairs(ov) do
+			local decl, pass = args_text(types, in_class)
+			local call = "::buildat::detail::Reply r = ::buildat::detail::call("..
+					c.c_name..(pass ~= "" and ", "..pass or "")..");"
+			local body = rbody and call.." "..rbody or call.." (void)r;"
+			if owner then
+				table.insert(members[owner], "\t"..(is_static and "static " or "")..
+						rtype.." "..name.."("..decl..")"..(in_class and " const" or "")..";")
+				table.insert(defs, "inline "..rtype.." "..owner.."::"..name.."("..
+						decl..")"..(in_class and " const" or "").."{ "..body.." }")
+			else
+				table.insert(free_decls, rtype.." "..name.."("..decl..");")
+				table.insert(defs, "inline "..rtype.." "..name.."("..decl..")"..
+						"{ "..body.." }")
+			end
+		end
+	end
+	::next::
+end
+
+-- The classes, each after its parent
+local ordered, placed = {}, {}
+local function place(c)
+	if placed[c.name] then return end
+	placed[c.name] = true
+	if c.parent and by_name[c.parent] then
+		place(by_name[c.parent])
+	end
+	table.insert(ordered, c)
+end
+for _, c in ipairs(classes) do
+	if not VALUE_OF[c.name] then
+		place(c)
+	end
+end
+
+local H = {}
+local function w(s) table.insert(H, s) end
+w([[// Generated by util/gen_wasm_bindings.lua from client/core/urho3d/safe_classes.lua;
+// do not edit (edit the list or the generator, and run it again).
+// http://www.apache.org/licenses/LICENSE-2.0
+// Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+//
+// [CLIENT_WASM_BINDINGS] The client's API for a module's wasm/, generated
+// from the Lua sandbox's own list (client/core/urho3d/safe_classes.lua):
+// each class, method and property a client script may use is an import
+// here, and each goes to the very function a script's call goes to, with
+// its checks -- what Lua is refused, this is refused (a trap, its reason
+// in the client's log). Nothing the list does not name is here.
+//
+// The C imports (buildat_c_*) each take the call's values encoded in the
+// module's memory and a buffer for the results, and return the results'
+// length; the C++ below (namespace buildat) encodes and decodes them:
+// - a class of the list is a handle class (an RAII object: the handle is
+//   released, buildat_drop(), when it is destroyed or moved out of); while
+//   the module holds the handle the object is kept alive, as a Lua
+//   script's reference keeps it; a stopped module's handles are released.
+//   A method's or a property's result that is an object is a new handle.
+// - Vector2, Vector3, Vector4, IntVector2, IntVector3, Quaternion, Color
+//   and IntRect are plain structs, carried by value.
+// - a string is a Str (a pointer and a length, from a const char *, or any
+//   string type with data() and size()); a string result is a Str into a
+//   buffer the next call reuses.
+// - a call whose result the list does not type gives a Value.
+// - names are as in Lua: Node::SetPosition(); a property is two functions,
+//   node.position() and node.position(v); a constructor Class::make(...);
+//   Class:new() is Class::new_(); the singletons are buildat::ui(),
+//   buildat::cache(), ...
+// - an object's events: buildat::SubscribeToEvent(element, "Released")
+//   queues an event BUILDAT_EVENT_OBJECT for each (next_event() below).
+// The module must run under the engine's default client_main
+// ("client_main": "wasm"), which is what binds these to the sandbox;
+// they cannot be called from the start function (a trap).
+//
+// The values, as encoded (little-endian): a byte, how many; then each a
+// byte of its kind and what follows it: 0 nil, 1 false, 2 true, 3 a
+// number (a double), 4 a string (its length, 32 bits, and its bytes), 5 an
+// object (its handle, 32 bits), 6 a value (a byte, its kind's number
+// below, and its components as doubles).
+#pragma once
+#include "interface/wasm_api.h"
+
+#ifdef BUILDAT_WASM_MODULE
+#define BUILDAT_CLIENT_IMPORT(name, f) BUILDAT_WASM_EXTERN_C \
+		__attribute__((import_module("buildat"), import_name(name))) \
+		int f(const void *args, unsigned int args_len, void *ret, \
+		unsigned int ret_cap);
+#else
+// The server's native build of the same files: never called there
+#define BUILDAT_CLIENT_IMPORT(name, f) static inline int f(const void *a, \
+		unsigned int b, void *c, unsigned int d) \
+		{ (void)a; (void)b; (void)c; (void)d; __builtin_trap(); }
+#endif
+]])
+w("// The values' kinds (6 above)")
+for _, v in ipairs(VALUES) do
+	w("#define BUILDAT_VALUE_"..v.name:upper().." "..v.id)
+end
+w("")
+for _, c in ipairs(calls) do
+	w("BUILDAT_CLIENT_IMPORT(\""..c.import.."\", "..c.c_name..")")
+end
+w([[
+
+#ifdef __cplusplus
+#ifdef BUILDAT_WASM_MODULE
+// A module is never unloaded from inside, so its statics' destructors need
+// not run: their registration (a static object of a class below) does
+// nothing. There is no libc to have it.
+extern "C" __attribute__((weak)) int __cxa_atexit(void (*)(void*), void*, void*)
+{ return 0; }
+#endif
+namespace buildat {
+
+struct Nil {};
+static constexpr Nil nil{};
+
+// A string: bytes and their count, not owned
+struct Str
+{
+	const char *data;
+	unsigned int size;
+	Str(): data(""), size(0) {}
+	Str(const char *s): data(s), size(0) { while(s[size]) size++; }
+	Str(const char *s, unsigned int n): data(s), size(n) {}
+	template<class T, class = decltype(((const T*)0)->data() +
+			((const T*)0)->size())>
+	Str(const T &s): data(s.data()), size((unsigned int)s.size()) {}
+	bool operator==(Str o) const
+	{
+		if(o.size != size)
+			return false;
+		for(unsigned int i = 0; i < size; i++)
+			if(data[i] != o.data[i])
+				return false;
+		return true;
+	}
+	bool operator!=(Str o) const { return !(*this == o); }
+};
+]])
+for _, v in ipairs(VALUES) do
+	local t = v.name:match("^Int") and "int" or "float"
+	w("struct "..v.name.." { "..t.." "..table.concat(v.c, ", ").."; };")
+end
+w([[
+
+class Object;
+class Value;
+namespace detail {
+static const unsigned int BUF = 65536;
+inline unsigned char g_args[BUF];
+inline unsigned char g_ret[BUF];
+
+// The values of a call, into g_args
+struct Args
+{
+	unsigned int n = 1;
+	bool bad = false;
+	void byte(unsigned int v){ if(n < BUF) g_args[n++] = (unsigned char)v; else bad = true; }
+	void u32(unsigned int v){ for(int i = 0; i < 4; i++) byte(v >> (8 * i)); }
+	void f64(double v)
+	{
+		unsigned char b[8];
+		__builtin_memcpy(b, &v, 8);
+		for(int i = 0; i < 8; i++) byte(b[i]);
+	}
+	void str(Str s)
+	{
+		byte(4);
+		u32(s.size);
+		if(s.size > BUF - n){ bad = true; return; }
+		for(unsigned int i = 0; i < s.size; i++) g_args[n++] = (unsigned char)s.data[i];
+	}
+	void value(unsigned int kind, const double *c, int count)
+	{
+		byte(6);
+		byte(kind);
+		for(int i = 0; i < count; i++) f64(c[i]);
+	}
+};
+inline void put(Args &a, Nil){ a.byte(0); }
+inline void put(Args &a, bool v){ a.byte(v ? 2 : 1); }
+inline void put(Args &a, double v){ a.byte(3); a.f64(v); }
+inline void put(Args &a, float v){ put(a, (double)v); }
+inline void put(Args &a, int v){ put(a, (double)v); }
+inline void put(Args &a, unsigned int v){ put(a, (double)v); }
+inline void put(Args &a, Str v){ a.str(v); }
+inline void put(Args &a, const char *v){ a.str(Str(v)); }
+inline void put(Args &a, const Object &o);
+]])
+for _, v in ipairs(VALUES) do
+	local comps = {}
+	for i, comp in ipairs(v.c) do comps[i] = "(double)v."..comp end
+	w("inline void put(Args &a, const "..v.name.." &v){ double c[] = {"..
+			table.concat(comps, ", ").."}; a.value("..v.id..", c, "..#v.c.."); }")
+end
+w([[
+} // namespace detail
+
+// A value of a call the list does not type, or an argument of a function
+// that checks its own (Any)
+class Value
+{
+public:
+	enum Kind { NIL, BOOLEAN, NUMBER, STRING, OBJECT, VALUE };
+	Kind kind = NIL;
+	bool boolean = false;
+	double number = 0;
+	Str string;
+	unsigned int value_kind = 0; // BUILDAT_VALUE_*
+	double c[4] = {0, 0, 0, 0};
+
+	Value() {}
+	Value(Value &&o){ *this = static_cast<Value&&>(o); }
+	Value &operator=(Value &&o)
+	{
+		if(this != &o){
+			reset();
+			kind = o.kind; boolean = o.boolean; number = o.number;
+			string = o.string; value_kind = o.value_kind; m_handle = o.m_handle;
+			for(int i = 0; i < 4; i++) c[i] = o.c[i];
+			o.m_handle = 0;
+			o.kind = NIL;
+		}
+		return *this;
+	}
+	Value(const Value&) = delete;
+	Value &operator=(const Value&) = delete;
+	~Value(){ reset(); }
+	// An object: the handle, kept by this Value
+	unsigned int handle() const { return m_handle; }
+	// The object as a class of the list: T(value.release())
+	unsigned int release(){ unsigned int h = m_handle; m_handle = 0; return h; }
+	template<class T> T as(){ return T(release()); }
+	void reset(){ if(m_handle) buildat_drop((int)m_handle); m_handle = 0; }
+	unsigned int m_handle = 0;
+};
+
+// What a function that checks its own arguments is given: anything the
+// calls take
+struct Any
+{
+	enum Kind { NIL, BOOLEAN, NUMBER, STRING, OBJECT, VALUE } kind;
+	bool b = false;
+	double n = 0;
+	Str s;
+	unsigned int h = 0;
+	unsigned int vk = 0;
+	double c[4] = {0, 0, 0, 0};
+	int count = 0;
+	Any(Nil): kind(NIL) {}
+	Any(bool v): kind(BOOLEAN), b(v) {}
+	Any(double v): kind(NUMBER), n(v) {}
+	Any(float v): kind(NUMBER), n(v) {}
+	Any(int v): kind(NUMBER), n(v) {}
+	Any(unsigned int v): kind(NUMBER), n(v) {}
+	Any(const char *v): kind(STRING), s(v) {}
+	Any(Str v): kind(STRING), s(v) {}
+	Any(const Object &o);
+]])
+for _, v in ipairs(VALUES) do
+	local comps = {}
+	for i, comp in ipairs(v.c) do comps[i] = "c["..(i - 1).."] = v."..comp.."; " end
+	w("\tAny(const "..v.name.." &v): kind(VALUE), vk("..v.id.."), count("..#v.c..
+			") { "..table.concat(comps).."}")
+end
+w([[
+};
+
+// An object of the list's: its handle, released when this is destroyed
+class Object
+{
+public:
+	constexpr Object() {}
+	constexpr explicit Object(unsigned int handle): m_handle(handle) {}
+	Object(Object &&o): m_handle(o.m_handle){ o.m_handle = 0; }
+	Object &operator=(Object &&o)
+	{
+		if(this != &o){ reset(); m_handle = o.m_handle; o.m_handle = 0; }
+		return *this;
+	}
+	Object(const Object&) = delete;
+	Object &operator=(const Object&) = delete;
+	~Object(){ reset(); }
+	unsigned int handle() const { return m_handle; }
+	explicit operator bool() const { return m_handle != 0; }
+	// The handle, no longer released by this
+	unsigned int release(){ unsigned int h = m_handle; m_handle = 0; return h; }
+	void reset(){ if(m_handle) buildat_drop((int)m_handle); m_handle = 0; }
+	// The same object as another class of the list (a call on it that its
+	// class does not have is a trap)
+	template<class T> T as(){ return T(release()); }
+protected:
+	unsigned int m_handle = 0;
+};
+inline Any::Any(const Object &o): kind(OBJECT), h(o.handle()) {}
+
+// The values a call returns, when the list says it returns more than one
+struct Values
+{
+	Value v[4];
+	unsigned int count = 0;
+};
+
+namespace detail {
+inline void put(Args &a, const Object &o)
+{
+	if(!o.handle()){ a.byte(0); return; }
+	a.byte(5);
+	a.u32(o.handle());
+}
+inline void put(Args &a, const Any &v)
+{
+	switch(v.kind){
+	case Any::NIL: a.byte(0); break;
+	case Any::BOOLEAN: put(a, v.b); break;
+	case Any::NUMBER: put(a, v.n); break;
+	case Any::STRING: a.str(v.s); break;
+	case Any::OBJECT: if(v.h){ a.byte(5); a.u32(v.h); } else a.byte(0); break;
+	case Any::VALUE: a.value(v.vk, v.c, v.count); break;
+	}
+}
+
+// The reply of a call: its values, read in order. Those left unread are
+// released when it goes.
+class Reply
+{
+public:
+	Reply(int len): m_n(len < 0 || (unsigned int)len > BUF ? 0 : (unsigned int)len)
+	{
+		m_left = m_n > 0 ? g_ret[0] : 0;
+		m_i = 1;
+	}
+	~Reply(){ while(m_left) next(); }
+	Value value(){ return m_left ? next() : Value(); }
+	double number(){ Value v = value(); return v.kind == Value::NUMBER ? v.number : 0; }
+	bool boolean(){ Value v = value(); return v.kind == Value::BOOLEAN && v.boolean; }
+	Str string(){ Value v = value(); return v.kind == Value::STRING ? v.string : Str(); }
+	unsigned int handle(){ Value v = value(); return v.release(); }
+	Values values()
+	{
+		Values r;
+		while(m_left && r.count < 4) r.v[r.count++] = next();
+		return r;
+	}
+]])
+for _, v in ipairs(VALUES) do
+	local comps = {}
+	for i, comp in ipairs(v.c) do
+		comps[i] = "o."..comp.." = ("..(v.name:match("^Int") and "int" or "float")..
+				")x.c["..(i - 1).."]; "
+	end
+	w("\tvoid get("..v.name.." &o){ Value x = value(); if(x.kind == Value::VALUE && "..
+			"x.value_kind == "..v.id..") { "..table.concat(comps).."} }")
+end
+w([[
+private:
+	unsigned int m_n, m_i, m_left;
+	unsigned int byte(){ return m_i < m_n ? g_ret[m_i++] : 0; }
+	unsigned int u32()
+	{
+		unsigned int v = 0;
+		for(int i = 0; i < 4; i++) v |= byte() << (8 * i);
+		return v;
+	}
+	double f64()
+	{
+		unsigned char b[8];
+		for(int i = 0; i < 8; i++) b[i] = (unsigned char)byte();
+		double d;
+		__builtin_memcpy(&d, b, 8);
+		return d;
+	}
+	Value next()
+	{
+		m_left--;
+		Value v;
+		switch(byte()){
+		case 1: v.kind = Value::BOOLEAN; break;
+		case 2: v.kind = Value::BOOLEAN; v.boolean = true; break;
+		case 3: v.kind = Value::NUMBER; v.number = f64(); break;
+		case 4: {
+			unsigned int len = u32();
+			if(len > m_n - m_i) len = m_n - m_i;
+			v.kind = Value::STRING;
+			v.string = Str((const char*)g_ret + m_i, len);
+			m_i += len;
+			break; }
+		case 5: v.kind = Value::OBJECT; v.m_handle = u32(); break;
+		case 6: {
+			v.kind = Value::VALUE;
+			v.value_kind = byte();
+			static const int count[] = {0]]..(function()
+		local t = {}
+		for _, x in ipairs(VALUES) do t[#t + 1] = ", "..#x.c end
+		return table.concat(t)
+	end)()..[[};
+			const int k = v.value_kind < sizeof count / sizeof count[0] ?
+					count[v.value_kind] : 0;
+			for(int i = 0; i < k; i++) v.c[i] = f64();
+			break; }
+		default: break;
+		}
+		return v;
+	}
+};
+
+typedef int (*Import)(const void*, unsigned int, void*, unsigned int);
+template<class... A>
+inline Reply call(Import f, const A&... a)
+{
+	Args args;
+	g_args[0] = (unsigned char)sizeof...(A);
+	(put(args, a), ...);
+	if(args.bad)
+		__builtin_trap(); // past BUF: a string too long for one call
+	return Reply(f(g_args, args.n, g_ret, BUF));
+}
+} // namespace detail
+
+// An event from the queue (wasm_api.h's BUILDAT_EVENT_*): its kind and its
+// bytes; word(i) is its 32-bit word i (the kind is word 0)
+struct Event
+{
+	int kind = 0;
+	const unsigned char *data = nullptr;
+	unsigned int size = 0;
+	int word(unsigned int i) const
+	{
+		if(4 * i + 4 > size) return 0;
+		const unsigned char *p = data + 4 * i;
+		return (int)((unsigned int)p[0] | (unsigned int)p[1] << 8 |
+				(unsigned int)p[2] << 16 | (unsigned int)p[3] << 24);
+	}
+	// A packet's or an object event's name (word 2 its length), and a
+	// packet's data after it
+	Str name() const
+	{
+		const int at = kind == BUILDAT_EVENT_PACKET ? 8 : 12;
+		const int len = word(kind == BUILDAT_EVENT_PACKET ? 1 : 2);
+		if(len < 0 || at + (unsigned int)len > size) return Str();
+		return Str((const char*)data + at, (unsigned int)len);
+	}
+	Str packet_data() const
+	{
+		const int len = word(1);
+		if(kind != BUILDAT_EVENT_PACKET || len < 0 || 8 + (unsigned int)len > size)
+			return Str();
+		return Str((const char*)data + 8 + len, size - 8 - (unsigned int)len);
+	}
+};
+namespace detail {
+inline unsigned char g_event[BUILDAT_EVENT_MAX];
+}
+// The next event queued for the module, into e (its bytes valid until the
+// next of these): false with none. Called from frame().
+inline bool next_event(Event &e)
+{
+	const int n = buildat_event_take(detail::g_event, sizeof detail::g_event);
+	if(n < 4 || n > (int)sizeof detail::g_event)
+		return false;
+	e.data = detail::g_event;
+	e.size = (unsigned int)n;
+	e.kind = e.word(0);
+	return true;
+}
+// A line in the client's log
+inline void log(Str s){ buildat_log(s.data, s.size); }
+]])
+w("// The classes")
+for _, c in ipairs(ordered) do
+	w("class "..c.name..";")
+end
+w("")
+for _, c in ipairs(ordered) do
+	local parent = c.parent and by_name[c.parent] and c.parent or "Object"
+	w("class "..c.name..": public "..parent)
+	w("{")
+	w("public:")
+	w("\tconstexpr "..c.name.."() {}")
+	w("\tconstexpr explicit "..c.name.."(unsigned int handle): "..parent..
+			"(handle) {}")
+	for _, l in ipairs(members[c.name] or {}) do
+		w(l)
+	end
+	w("};")
+end
+w("")
+w("// The singletons and the calls outside the classes")
+for _, l in ipairs(free_decls) do
+	w(l)
+end
+w("")
+for _, d in ipairs(defs) do
+	w(d)
+end
+w([[
+
+} // namespace buildat
+#endif // __cplusplus]])
+
+local INC = {}
+table.insert(INC, "// Generated by util/gen_wasm_bindings.lua from "..
+		"client/core/urho3d/safe_classes.lua;\n// do not edit (edit the list "..
+		"or the generator, and run it again).\n"..
+		"// [CLIENT_WASM_BINDINGS] The imports src/interface/buildat_client.h "..
+		"declares, in its order:\n"..
+		"// BUILDAT_BINDING(import name, what the dispatcher does, class, member)\n"..
+		"// BUILDAT_VALUE(kind, class, components, names...)")
+table.insert(INC, "#ifdef BUILDAT_VALUE")
+for _, v in ipairs(VALUES) do
+	local names = {}
+	for i = 1, 4 do names[i] = v.c[i] and ("\""..v.c[i].."\"") or "nullptr" end
+	table.insert(INC, "BUILDAT_VALUE("..v.id..", \""..v.name.."\", "..#v.c..", "..
+			table.concat(names, ", ")..")")
+end
+table.insert(INC, "#endif")
+table.insert(INC, "#ifdef BUILDAT_BINDING")
+for _, c in ipairs(calls) do
+	table.insert(INC, "BUILDAT_BINDING(\""..c.import.."\", \""..c.kind.."\", \""..
+			c.class.."\", \""..c.member.."\")")
+end
+table.insert(INC, "#endif")
+
+local function emit(path, text)
+	local f = io.open(path, "rb")
+	local old = f and f:read("*a")
+	if f then f:close() end
+	if old == text then
+		return true
+	end
+	if CHECK then
+		io.stderr:write(path.." is not what util/gen_wasm_bindings.lua writes; "..
+				"run it again\n")
+		return false
+	end
+	f = assert(io.open(path, "wb"))
+	f:write(text)
+	f:close()
+	print("wrote "..path)
+	return true
+end
+local ok = emit(OUT_H, table.concat(H, "\n").."\n")
+ok = emit(OUT_INC, table.concat(INC, "\n").."\n") and ok
+print(#calls.." calls; not carried: "..#skipped)
+for _, s in ipairs(skipped) do
+	print("  "..s)
+end
+os.exit(ok and 0 or 1)

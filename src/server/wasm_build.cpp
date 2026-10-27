@@ -388,10 +388,16 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	std::ostringstream key(std::ios::binary);
 	key<<"buildat wasm 1\n"<<WASM_CFLAGS<<"\n"<<WASM_LDFLAGS<<"\n";
 	key<<read_file(interface_path+"/wasm_api.h");
+	bool bindings = false;
 	for(const ss_ &f : files){
 		const ss_ data = read_file(src_dir+"/"+f);
 		key<<f<<'\0'<<data.size()<<'\0'<<data;
+		bindings = bindings || data.find("buildat_client.h") != ss_::npos;
 	}
+	// [CLIENT_WASM_BINDINGS] The generated bindings, for the modules that
+	// include them only (the others' keys, and their prebuilt .wasm, stay)
+	if(bindings)
+		key<<"bindings 1\n"<<read_file(interface_path+"/buildat_client.h");
 	if(rust){
 		key<<"rust 1\n"<<RUST_FLAGS<<"\n"<<RUST_TARGET<<"\n";
 		sv_<ss_> crate;

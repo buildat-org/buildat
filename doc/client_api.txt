@@ -886,8 +886,9 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   packets queued as events (server_api.txt, interface/wasm_api.h). Each load is an instance of its own with its own
   memory. Before anything runs it is validated and capped, on both clients
   alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
-  at most 1024 pages (64 MiB), wasm_api.h's imports the only ones (by
-  name and signature, and no export named buildat_*); an export
+  at most 1024 pages (64 MiB), wasm_api.h's and buildat_client.h's
+  imports the only ones (by name and signature, and no export named
+  buildat_*); an export
   takes and returns i32, i64, f32 and f64 only (at most 16 of them, one
   result). Natively it is then translated to C (wasm2c) and compiled by
   the system's compiler in a process of its own, killed past 3 minutes or
@@ -926,10 +927,16 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   calling with the pointer and the length.
 - m:handle(object) -> a number: what the module's imports name a Node, a
   Texture2D or a buildat.Volume by (a chunk's: voxelworld's
-  get_volume(node)). The module reaches only what its Lua handed it; at
-  most 1024 handles a module. m:drop(handle): the handle names nothing
-  from now on. A handle is the instance's own: another instance's, a
+  get_volume(node)), or any other object of the sandbox's for the
+  bindings below. The module reaches only what its Lua handed it and what
+  its bindings' calls returned; at most 1024 handles a module. A handle
+  keeps its object alive, as a script's reference does, until it is
+  dropped (m:drop(handle), or the module's buildat_drop()) or the module
+  is stopped. A handle is the instance's own: another instance's, a
   dropped one and a made-up one are each a trap in the import.
+- m:bind(f): the dispatcher the module's bindings are called through
+  (below), f(kind, class, member, values...) -> results, a function of
+  the module's sandbox. The default client_main binds its own.
 - m:push(bytes): an event queued for the module, taken by its
   buildat_event_take() on its next call (at most 256 queued, 4 MiB). A
   packet for the module is pushed by its Lua's sub_packet handler.
@@ -943,8 +950,27 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   pointer and length is checked against the module's memory and the bytes
   copied; a refusal traps the call with its reason in the client's log
   ("wasm <module>: trap: buildat.<import>: ..."), and m:call() is an
-  error saying it. No import calls Lua or wasm, and a call into a module
-  from inside its own call is an error.
+  error saying it. No import of wasm_api.h calls Lua or wasm, and a call
+  into a module from inside its own call is an error.
+- **The bindings** ([CLIENT_WASM_BINDINGS], interface/buildat_client.h):
+  the classes, methods and properties this file's sandbox lists
+  (client/core/urho3d/safe_classes.lua) are each an import too, generated
+  from that list by util/gen_wasm_bindings.lua, with a header-only C++
+  layer over them: handle classes named as in Lua (buildat::Button,
+  node.position(v), ui().root(), Window::CreateChild), values (Vector3,
+  Color, ...) as structs, a call's untyped result as a buildat::Value. An
+  import's name is the call and its types ("Node.position=Vector3",
+  "UIElement:CreateChild(string,string?):any"), so a .wasm built against
+  another list fails at its load, the import named. Each call is made by
+  the module's dispatcher (m:bind) in its sandbox, the same function a
+  script's call reaches, with its checks: what Lua is refused is a trap
+  here, its reason logged. No wasm call starts while one runs. An
+  object's events come to the queue (buildat::SubscribeToEvent(element,
+  "Released"): BUILDAT_EVENT_OBJECT with the handle). Not carried yet:
+  operators and the value classes' methods (the C++ does its own maths),
+  results that are tables, the verbs of buildat.* but SubscribeToEvent
+  and the sandbox's constants (buildat::constant("KEY_SPACE")), and the
+  Rust crate's side. apps/sample_wasm_ui is a client in C++ only.
 - Natively the module is compiled with the system's C compiler (Linux)
   or the package's MinGW (Windows, which also has to ship cc1.exe), and
   runs in the interpreter until then and where there is none; on
