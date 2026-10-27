@@ -14,7 +14,7 @@
 #
 # It lies only about TCP's congestion window, which the cap stands in
 # for. Hundred-odd lines, asyncio, nothing else.
-import argparse, asyncio, random, socket, sys, time
+import argparse, asyncio, os, random, socket, sys, time
 
 RTO_MS = 200
 CHUNK = 4096
@@ -164,6 +164,18 @@ def main():
     if args.check:
         check()
         return
+    # [NETSIM_ORPHANS] Gone with the process that started it: a starter's
+    # trap misses a SIGKILL, and three proxies outlived theirs by hours
+    # holding check ports (2026-10-27). Linux only; the getppid() check
+    # covers a parent that died before the prctl.
+    # simplified: a parent dead during interpreter start goes unseen
+    # (getppid is then already the reaper); --parent PID if that bites.
+    if sys.platform.startswith("linux"):
+        import ctypes, signal
+        ppid = os.getppid()
+        ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+        if os.getppid() != ppid:
+            return
     try:
         asyncio.run(serve(args))
     except KeyboardInterrupt:
