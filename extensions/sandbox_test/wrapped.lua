@@ -382,4 +382,66 @@ do
 	log:info("wrapped: 60000 nodes made in chains under a collected scene")
 end
 
+-- [SANDBOX_TREE_DEPTH]: a chain as deep as a script can make, then the
+-- engine's recursions over it (Clone, GetWorldPosition, Remove). Without
+-- a cap a chain of tens of thousands overflowed the native stack; the
+-- CreateChild past the cap is refused with an error.
+do
+	local scene = magic.Scene()
+	local cur, made, err = scene, 0, nil
+	for _ = 1, 30000 do
+		local ok, r = pcall(function() return cur:CreateChild("d") end)
+		if not ok then err = r; break end
+		cur, made = r, made + 1
+	end
+	assert(err and tostring(err):find("deep"),
+			"a 30000 chain was not refused: " .. made .. " made")
+	local root = scene:GetChild(0)
+	root:Clone()
+	local _ = cur:GetWorldPosition()
+	root:Remove()
+	local ui_cur, ui_made, ui_err = magic.ui.root, 0, nil
+	for _ = 1, 30000 do
+		local ok, r = pcall(function()
+			return ui_cur:CreateChild("UIElement")
+		end)
+		if not ok then ui_err = r; break end
+		ui_cur, ui_made = r, ui_made + 1
+	end
+	assert(ui_err and tostring(ui_err):find("deep"),
+			"a 30000 UI chain was not refused: " .. ui_made .. " made")
+	magic.ui.root:GetChild(magic.ui.root:GetNumChildren() - 1):Remove()
+	-- A tree moved under another (a list's items, a view's content) is
+	-- refused past the cap as well: else two capped chains stacked
+	-- again and again
+	local base = magic.ui.root:CreateChild("UIElement")
+	local at = base
+	for _ = 1, 1000 do
+		at = at:CreateChild("UIElement")
+	end
+	local lv = at:CreateChild("ListView")
+	local item = magic.ui.root:CreateChild("UIElement")
+	local tip = item
+	for _ = 1, 100 do
+		tip = tip:CreateChild("UIElement")
+	end
+	local moves = 0
+	for _, f in ipairs({
+		function() lv:AddItem(item) end,
+		function() lv:InsertItem(0, item) end,
+		function() lv.contentElement = item end,
+	}) do
+		local ok, e = pcall(f)
+		assert(not ok and tostring(e):find("deep"),
+				"a deep tree was moved under a deep list: " .. tostring(e))
+		moves = moves + 1
+	end
+	lv:AddItem(magic.ui.root:CreateChild("Text"))
+	assert(lv.numItems == 1, "a shallow item was not added")
+	item:Remove()
+	base:Remove()
+	log:info("wrapped: chains refused at " .. made .. " nodes and " ..
+			ui_made .. " elements, " .. moves .. " deep moves refused")
+end
+
 return true

@@ -44,6 +44,41 @@ local function hidden_key(key)
 	return not MOVE_KEYS[key] and secret_focus()
 end
 
+-- **A tree no deeper than this** ([SANDBOX_TREE_DEPTH]): the engine
+-- recurses over a tree of nodes or elements on the native stack (Clone,
+-- GetWorldPosition, Remove, about 130-250 bytes a level, a UI layout
+-- more), so a chain of tens of thousands that a script made with
+-- CreateChild overflowed the 8 MiB stack and crashed the client. 1024
+-- levels are about 250 KB at 250 bytes a level: inside the 1 MiB a wasm
+-- binding has left at the module's depth limit ([WASM_BINDING_STACK]),
+-- with room for a level four times as costly, and far past any real
+-- scene or UI. A script makes a tree deeper by CreateChild, and by the
+-- moves below (a Clone is a sibling of the same depth). CreateChild's
+-- child is a leaf, its depth its parent's plus one: a walk up the
+-- parents, O(depth), in C++ (__buildat_tree_depth) since a tolua call a
+-- level made chains of a thousand cost seconds.
+local MAX_TREE_DEPTH = 1024
+local function check_tree_depth(parent)
+	if __buildat_tree_depth(parent, MAX_TREE_DEPTH) + 1 > MAX_TREE_DEPTH then
+		error("CreateChild: the tree is too deep (over " ..
+				MAX_TREE_DEPTH .. " levels)", 0)
+	end
+end
+-- An element and what is under it moved under another: ListView's and
+-- DropDownList's items, a ScrollView's content. A Menu's popup needs
+-- none: it is taken off its parent and shown under the modal root, one
+-- level down, so it is at most a level past the cap.
+local function check_tree_move(new_parent, element)
+	if new_parent == nil or element == nil then
+		return
+	end
+	if __buildat_tree_depth(new_parent, MAX_TREE_DEPTH) + 1 +
+			__buildat_tree_height(element, MAX_TREE_DEPTH) > MAX_TREE_DEPTH then
+		error("the tree would be too deep (over " ..
+				MAX_TREE_DEPTH .. " levels)", 0)
+	end
+end
+
 function M.define(dst, util)
 	util.wc("StringHash", {
 		unsafe_constructor = util.wrap_function({{"string"}},
@@ -1528,6 +1563,7 @@ function M.define(dst, util)
 			CreateChild = util.wrap_function({"Node", "string",
 					{"number", "__nil"}},
 				function(self, name, mode)
+					check_tree_depth(self)
 					if mode ~= nil then
 						return util.wrap_instance("Node", self:CreateChild(name, mode))
 					else
@@ -2005,6 +2041,7 @@ function M.define(dst, util)
 			CreateChild = util.wrap_function({"UIElement", "string",
 					{"string", "__nil"}},
 				function(self, element_type, name)
+					check_tree_depth(self)
 					return util.wrap_instance(element_type,
 							self:CreateChild(element_type, name))
 				end
@@ -2563,7 +2600,16 @@ function M.define(dst, util)
 		properties = {
 			-- How far into the content the top left corner is, in pixels
 			viewPosition = util.simple_property(dst.IntVector2),
-			contentElement = util.simple_property(dst.UIElement),
+			contentElement = (function()
+				local p = util.simple_property(dst.UIElement)
+				local set = p.set
+				p.set = function(v, what, raw)
+					local u = set(v, what)
+					check_tree_move(raw and raw:GetScrollPanel(), u)
+					return u
+				end
+				return p
+			end)(),
 			-- Read-only in Urho3D: the bars the view made for itself. A
 			-- write here is dropped rather than refused, which is the one
 			-- sharp edge of a property list.
@@ -2586,10 +2632,19 @@ function M.define(dst, util)
 	util.wc("ListView", {
 		inherited_from_by_wrapper = dst.ScrollView,
 		instance = {
-			AddItem = util.self_function("AddItem", {},
-					{"ListView", "UIElement"}),
-			InsertItem = util.self_function("InsertItem", {},
-					{"ListView", "number", "UIElement"}),
+			AddItem = util.wrap_function({}, {"ListView", "UIElement"},
+				function(self, item)
+					check_tree_move(self:GetContentElement(), item)
+					self:AddItem(item)
+				end
+			),
+			InsertItem = util.wrap_function({},
+					{"ListView", "number", "UIElement"},
+				function(self, index, item)
+					check_tree_move(self:GetContentElement(), item)
+					self:InsertItem(index, item)
+				end
+			),
 			-- simplified: the by-index form only. Urho3D also removes by
 			-- element, and the two are one overloaded name, which a type
 			-- check cannot tell apart from here; FindItem() turns an
@@ -2669,10 +2724,19 @@ function M.define(dst, util)
 	util.wc("DropDownList", {
 		inherited_from_by_wrapper = dst.Menu,
 		instance = {
-			AddItem = util.self_function("AddItem", {},
-					{"DropDownList", "UIElement"}),
-			InsertItem = util.self_function("InsertItem", {},
-					{"DropDownList", "number", "UIElement"}),
+			AddItem = util.wrap_function({}, {"DropDownList", "UIElement"},
+				function(self, item)
+					check_tree_move(self:GetListView():GetContentElement(), item)
+					self:AddItem(item)
+				end
+			),
+			InsertItem = util.wrap_function({},
+					{"DropDownList", "number", "UIElement"},
+				function(self, index, item)
+					check_tree_move(self:GetListView():GetContentElement(), item)
+					self:InsertItem(index, item)
+				end
+			),
 			-- simplified: the by-index form only, as ListView's is, the two
 			-- being one overloaded name that a type check cannot tell apart
 			RemoveItem = util.self_function("RemoveItem", {},

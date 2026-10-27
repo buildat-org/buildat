@@ -227,7 +227,7 @@ function M.wrap_class(type_name, def)
 						local property_def = super_def.properties[key]
 						if property_def.set then
 							local new_unsafe_value = property_def.set(value,
-								type_name.."."..key)
+								type_name.."."..key, unsafe)
 							unsafe[key] = new_unsafe_value
 							return
 						end
@@ -256,7 +256,7 @@ function M.wrap_class(type_name, def)
 						error("Property \""..key.."\" of "..type_name.." cannot be written")
 					end
 					local new_unsafe_value = property_def.set(value,
-							type_name.."."..key)
+							type_name.."."..key, unsafe)
 					unsafe[key] = new_unsafe_value
 					return
 				end
