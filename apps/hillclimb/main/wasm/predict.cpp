@@ -261,6 +261,7 @@ predict::State g_server;         // Lua writes the server's here
 predict::State g_hist[HIST];     // the state before each substep
 car::Input g_hist_in[HIST];      // and the input it took
 uint32_t g_now = 0;              // substeps stepped
+uint32_t g_valid = 0;            // the first one predicted from a state taken
 car::Input g_in;
 bool g_held = false;
 uint32_t g_scratch[34 * 34 * 34];
@@ -424,15 +425,17 @@ BUILDAT_WASM_EXPORT uint32_t hc_step(int n)
 // kept), 1 for a correction: the car set to it and the substeps since
 // stepped again with their inputs; 2 when it is taken as it is (force: the
 // car was put back; and with `at` not in the history, nothing stepped
-// again; 0xffffffff for an `at` not known).
+// again; 0xffffffff for an `at` not known; one before the last state taken
+// whole, whose history is not the server's car).
 BUILDAT_WASM_EXPORT int hc_correct(uint32_t at, int force)
 {
-	if(at > g_now || g_now - at >= HIST){
+	if(at > g_now || g_now - at >= HIST || at < g_valid){
 		g_sim.set(g_server);
 		// Ahead of this client (its frames late): its count is moved on;
 		// 0xffffffff is "not known"
 		if(at > g_now && at != 0xffffffffu)
 			g_now = at;
+		g_valid = g_now;
 		return 2;
 	}
 	if(!force){
@@ -450,6 +453,8 @@ BUILDAT_WASM_EXPORT int hc_correct(uint32_t at, int force)
 			return 0;
 	}
 	g_sim.set(g_server);
+	if(force)
+		g_valid = at;
 	const uint32_t now = g_now;
 	for(g_now = at; g_now < now;)
 		step(g_hist_in[g_now % HIST]);
