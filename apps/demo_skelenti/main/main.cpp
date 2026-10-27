@@ -9,7 +9,8 @@
 // The world: until one runs, a joining client gets builtin/world_menu,
 // whose choice -- a save to play or a new one -- comes back as
 // world_menu:play. The first save picked is the world for as long as the server runs; whoever
-// joins after goes straight in. BUILDAT_SKELENTI_WORLD=<name> skips the
+// joins after goes straight in, past the login (client_lua/join.lua) that
+// every join but the launcher's own client has. BUILDAT_SKELENTI_WORLD=<name> skips the
 // dialog, the save opened or made at the start (the checks; a server
 // nobody sits at). What is Buildat's own is here and in
 // client_lua/: the HUD, the inventory's drawing, and the mobs.
@@ -128,7 +129,8 @@ struct Module: public interface::Module
 	luanti::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
 	storage::Store *m_store = nullptr;
-	std::set<size_t> m_waiting, m_shown;
+	// m_joining: sent the login (main/join.lua), its accounts:login not in
+	std::set<size_t> m_waiting, m_shown, m_joining;
 	bool m_starting = false;
 	std::map<uint32_t, Mob> m_mobs;
 	uint32_t m_next_key = 1;
@@ -166,6 +168,7 @@ struct Module: public interface::Module
 		m_server->sub_event(this,
 				Event::t("network:packet_received/skelenti:punch"));
 		m_server->sub_event(this, Event::t("world_menu:play"));
+		m_server->sub_event(this, Event::t("accounts:login"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -179,6 +182,7 @@ struct Module: public interface::Module
 		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
 				network::OldClient)
 		EVENT_TYPEN("world_menu:play", on_world_play, world_menu::Play)
+		EVENT_TYPEN("accounts:login", on_login, accounts::Login)
 		EVENT_TYPEN("network:packet_received/skelenti:punch", on_punch,
 				network::Packet)
 	}
@@ -300,13 +304,41 @@ struct Module: public interface::Module
 		m_waiting.clear();
 	}
 
+	// [SKELENTI_LOGIN_GATE] Every join logs in first, as skeldat's
+	// ([SKELDAT_LOGIN]), but the launcher's own client, which plays as
+	// "client<peer>": a peer id comes again after a restart, so a name
+	// made of it gave a later peer an earlier one's save
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
+		const size_t peer = event.recipient;
+		bool joined = false;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			joined = i->is_local(peer) || !i->name_of(peer).empty();
+		});
+		if(!joined){
+			if(m_joining.insert(peer).second)
+				network::send(m_server, peer, "core:run_script",
+						"buildat.run_script_file(\"main/join.lua\")");
+			return;
+		}
+		enter(peer);
+	}
+
+	// A join's login (not world_menu's own, for a peer already in)
+	void on_login(const accounts::Login &login)
+	{
+		if(m_joining.erase(login.peer))
+			enter(login.peer);
+	}
+
+	// The world when it runs, else world_menu
+	void enter(size_t peer)
+	{
 		if(m_scene){
-			show(event.recipient);
-		} else if(m_waiting.insert(event.recipient).second){
+			show(peer);
+		} else if(m_waiting.insert(peer).second){
 			world_menu::access(m_server, [&](world_menu::Interface *i){
-				i->show(event.recipient);
+				i->show(peer);
 			});
 		}
 	}
@@ -348,6 +380,7 @@ struct Module: public interface::Module
 	{
 		m_shown.erase(old.info.id);
 		m_waiting.erase(old.info.id);
+		m_joining.erase(old.info.id);
 		m_field.erase(m_names[old.info.id]);
 		m_names.erase(old.info.id);
 		m_last_hit.erase(old.info.id);
