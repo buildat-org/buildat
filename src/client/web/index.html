@@ -175,6 +175,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	var local_app = /^[A-Za-z0-9_]{1,64}$/.exec(query.get('local') || '');
 	if(local_app)
 		server = 'pipe:page';
+	// The apps beside this page that have a server for it (local/<app>/),
+	// which the buildat server writes in here on a page with no game: the
+	// launch menu offers each, going to ?local=<app>
+	var local_apps = [];
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user',
 		'-w', window.innerWidth + 'x' + window.innerHeight];
@@ -511,6 +515,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			Module.ENV.BUILDAT_TOUCH = coarse ? '1' : '0';
 			if(join)
 				Module.ENV.BUILDAT_JOIN = join;
+			if(local_apps.length)
+				Module.ENV.BUILDAT_WEB_LOCAL_APPS = local_apps.join(' ');
 			if(frame_split)
 				Module.ENV.BUILDAT_FRAME_SPLIT = '1';
 			if(open_)
@@ -526,6 +532,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		buildatSyncFullscreen: sync_fullscreen,
 		buildatSetBackDepth: set_back_depth,
 		buildatLeavePage: leave_page,
+		buildatGoLocal: function(app){
+			if(/^[A-Za-z0-9_]{1,64}$/.test(app))
+				location.href = '?local=' + app;
+		},
 		buildatHideBarByDefault: function(){ return hide_by_default() ? 1 : 0; },
 		buildatInputAt: Date.now(),
 		print: function(t){ console.log(t); },

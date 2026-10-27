@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~75 s, ~2 min with demo_aggregate and skeldat (2026-10-27)
-# covers: src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
+# covers: client/launch_grid.lua src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
 # [WEB_LOCAL_SERVER]: hillclimb in the browser with its own server in a
 # worker of the page, and no buildat server: web/ served by a static
 # server that sends what the buildat server sends with ?local
@@ -11,10 +11,11 @@
 # A reload finds the saves kept in IndexedDB and opens them again. Then
 # the buildat server's own serving of the same: the isolation headers
 # with ?local and on the local server's files, and not on the page
-# without it.
-# demo_aggregate (walked a step) and skeldat (a world made in its menu,
-# walked 2 voxels) likewise, when web/local/<app>/ is there. Needs web/ (util/build_web.sh) with web/local/hillclimb/
-# (util/build_web_server.sh hillclimb).
+# without it; and a page with no game (apps/play's) given the apps for
+# its launch menu. demo_aggregate (walked a step) and skeldat (a world
+# made in its menu, walked 2 voxels) are driven as hillclimb when
+# web/local/<app>/ is there. Needs web/ (util/build_web.sh) with
+# web/local/hillclimb/ (util/build_web_server.sh hillclimb).
 #   util/web_local_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -116,13 +117,18 @@ else
 	echo "no web/local/skeldat: its drive skipped"
 fi
 
-# The buildat server's serving: a game of its own, and web/ as it is
+# The buildat server's serving: a page with no game (apps/play's), and
+# web/ as it is
 cd "$here/Build"
-start_server "$t/s.log" "STATUS Listening" 120 auto bin/buildat_server \
-	-m ../apps/demo_digger -D "$t/s" -C "$t/s.cache" -W "$here/web" -l 3 ||
+BUILDAT_LUANTI_LIST=http://127.0.0.1:9 \
+	start_server "$t/s.log" "STATUS Listening" 120 auto bin/buildat_server \
+	-m ../apps/play -D "$t/s" -C "$t/s.cache" -W "$here/web" -l 3 ||
 	fail "the server ($t/s.log)"
 CHECK_PIDS+=($SERVER_PID)
 u=http://127.0.0.1:$SERVER_PORT
+# Its page lists the apps it may run for the launch menu
+curl -s -m 10 "$u/" | grep -q "var local_apps = \[.*'hillclimb'" ||
+	fail "the page does not offer hillclimb to the launch menu"
 isolated()
 {
 	curl -s --path-as-is -m 10 -D - -o /dev/null "$u$1" | tr -d '\r' > "$t/h"
@@ -138,4 +144,4 @@ isolated "/" 200 && fail "/ is isolated: the Starport ID's popup loses its opene
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server isolates ?local and its files only"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates ?local and its files only"

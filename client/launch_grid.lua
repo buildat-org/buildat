@@ -225,6 +225,7 @@ local function run_launcher(log, source)
 end
 
 local KIND_ORDER = {menu = 0, app = 1, installed = 1, dev = 1, review = 1,
+	web_local = 1,
 	builtin = 2,
 	extension = 3}
 
@@ -505,6 +506,18 @@ function M.actions(log)
 				}
 			end
 		end
+	end
+	-- [WEB_LOCAL_SERVER] On a page with no game, the apps beside it that
+	-- run with a server of their own in the page: each goes to
+	-- ?local=<app>
+	for app in (__buildat_get_env("BUILDAT_WEB_LOCAL_APPS") or ""):gmatch(
+			"[A-Za-z0-9_]+") do
+		out[#out + 1] = {id = "play", label = app, kind = "web_local",
+			from = "web_local/" .. app, category = "app",
+			icon = "launch_menu/res/icon_local.png",
+			description = "Runs in this page with a server of its own: " ..
+					"a game for one, its saves kept in the browser",
+			run = function() __buildat_web_go_local(app) end}
 	end
 	table.sort(out, function(a, b)
 		if (a.order ~= nil) ~= (b.order ~= nil) then

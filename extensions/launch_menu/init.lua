@@ -294,8 +294,9 @@ local function gather()
 	for _, a in ipairs(actions) do
 		-- Locally started things need a local server, which a page has not.
 		-- Apps from Aitta stays: it lists the serverless ones there
-		-- ([AITTA_ON_WEB])
-		if not (web and (a.kind ~= "extension" or
+		-- ([AITTA_ON_WEB]); and the apps with a server in the page
+		-- ([WEB_LOCAL_SERVER])
+		if not (web and (a.kind ~= "extension" and a.kind ~= "web_local" or
 				a.key == "extension/launch_menu/local")) and
 				-- Its lists are this menu's Apps and Servers
 				a.key ~= "extension/launch_menu/local" then
@@ -311,7 +312,8 @@ local function gather()
 					cat == "game" and "Luanti" or
 					a.kind == "installed" and "Aitta" or
 					a.kind == "review" and "Playtest" or
-					a.kind == "dev" and "Dev" or nil
+					a.kind == "dev" and "Dev" or
+					a.kind == "web_local" and "In the browser" or nil
 			local e = add({label = a.label, kind = kind,
 				network = network, listed_by = a.listed_by,
 				badge = settings and "Settings" or badge,

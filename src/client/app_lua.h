@@ -1719,6 +1719,20 @@
 #endif
 	}
 
+	// [WEB_LOCAL_SERVER] web_go_local(app): on the web, the page goes to
+	// ?local=<app>, the app with its own server in the page (the page
+	// checks the name); nothing natively. The trusted side's only.
+	static int l_web_go_local(lua_State *L)
+	{
+#ifdef __EMSCRIPTEN__
+		EM_ASM({ Module.buildatGoLocal(UTF8ToString($0)); },
+				luaL_checkstring(L, 1));
+#else
+		(void)L;
+#endif
+		return 0;
+	}
+
 	// list_preferences() -> {name, ...}: the fixed ones, then each
 	// fov.<app> that is set
 	static int l_list_preferences(lua_State *L)

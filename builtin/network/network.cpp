@@ -1572,11 +1572,12 @@ struct Module: public interface::Module, public network::Interface
 			const ss_ &title)
 	{
 		const bool index = name == "index.html";
+		const ss_ apps = index && m_page_has_no_game ? local_apps() : "";
 		struct stat st;
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
 				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
 				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title+
-				(m_page_has_no_game ? "\n" : "")) >> 1)) : "")+
+				(m_page_has_no_game ? "\n"+apps : "")) >> 1)) : "")+
 				"\"" : "";
 		WebFile &wf = m_web_files[name];
 		if(!etag.empty() && wf.etag == etag)
@@ -1606,6 +1607,11 @@ struct Module: public interface::Module, public network::Interface
 			body.replace(sl, SERVER_LINE.size(), "var server = null;");
 		else if(index && m_page_has_no_game)
 			log_w(MODULE, "%s has no server line to set null", cs(path));
+		// [WEB_LOCAL_SERVER] And the apps it may run in the page
+		static const ss_ APPS_LINE = "var local_apps = [];";
+		const size_t al = apps.empty() ? ss_::npos : body.find(APPS_LINE);
+		if(al != ss_::npos)
+			body.replace(al, APPS_LINE.size(), "var local_apps = ["+apps+"];");
 		wf.body.reset(new ss_(std::move(body)));
 		wf.deflated.reset(new Deflated());
 		wf.etag = etag;
@@ -1621,6 +1627,26 @@ struct Module: public interface::Module, public network::Interface
 			out->done = true;
 		});
 		return &wf;
+	}
+
+	// [WEB_LOCAL_SERVER] The apps with a server for the page beside the web
+	// client, as a JavaScript list's items: 'a', 'b'. Only names that
+	// local_file() would serve.
+	ss_ local_apps()
+	{
+		sv_<ss_> names;
+		const ss_ dir = web_client_path()+"/local/";
+		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
+			const ss_ wasm = "/local/"+n.name+"/buildat_server.wasm";
+			if(n.is_directory && !web::local_file(wasm).first.empty() &&
+					interface::fs::path_exists(dir+n.name+"/buildat_server.wasm"))
+				names.push_back(n.name);
+		}
+		std::sort(names.begin(), names.end());
+		ss_ r;
+		for(const ss_ &n : names)
+			r += (r.empty() ? "'" : ", '")+n+"'";
+		return r;
 	}
 
 	ss_ web_client_path()
