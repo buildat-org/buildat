@@ -491,6 +491,31 @@ static const std::pair<ss_, ss_>* web_file(const ss_ &target)
 	return it == files.end() ? nullptr : &it->second;
 }
 
+// [WEB_LOCAL_SERVER] An app's server built for the web, which the page's
+// ?local=<app> runs in a worker: /local/<app>/buildat_server.{js,wasm,data}
+// from local/<app>/ beside the web client (util/build_web_server.sh puts
+// it there). Its name and its type, or ("", "").
+static std::pair<ss_, ss_> local_file(const ss_ &target)
+{
+	static const sm_<ss_, ss_> types = {
+		{"buildat_server.js", "application/javascript"},
+		{"buildat_server.wasm", "application/wasm"},
+		{"buildat_server.data", "application/octet-stream"},
+	};
+	if(target.compare(0, 7, "/local/") != 0)
+		return {};
+	const size_t sl = target.find('/', 7);
+	if(sl == ss_::npos || sl == 7 || sl - 7 > 64)
+		return {};
+	for(size_t i = 7; i < sl; i++)
+		if(!isalnum((unsigned char)target[i]) && target[i] != '_')
+			return {};
+	auto it = types.find(target.substr(sl + 1));
+	if(it == types.end())
+		return {};
+	return {target.substr(1), it->second};
+}
+
 static ss_ lower(ss_ s)
 {
 	for(char &c : s)
@@ -1464,7 +1489,11 @@ struct Module: public interface::Module, public network::Interface
 					favicon.size()) + favicon);
 			return true;
 		}
-		const std::pair<ss_, ss_> *wf_name = web::web_file(target);
+		const std::pair<ss_, ss_> local = web::local_file(target);
+		struct stat local_st;
+		const std::pair<ss_, ss_> *wf_name = local.first.empty() ?
+				web::web_file(target) : stat((web_client_path()+"/"+
+				local.first).c_str(), &local_st) == 0 ? &local : nullptr;
 		if(!wf_name){
 			ss_ body = "Not found\n";
 			peer.queue_raw(web::response("404 Not Found",
@@ -1492,8 +1521,17 @@ struct Module: public interface::Module, public network::Interface
 					"text/plain; charset=utf-8", body.size()) + body);
 			return true;
 		}
+		// [WEB_LOCAL_SERVER] The page that runs a local server, and the
+		// server's files, cross-origin isolated: its threads share memory.
+		// Only that page: an isolated page's popup has no opener, and the
+		// Starport ID's sign-in is one.
+		const bool isolated = !local.first.empty() ||
+				(index && !query_value(query, "local").empty());
+		const ss_ cache = (wf->etag.empty() ? "" : "ETag: "+wf->etag+"\r\n")+
+				(isolated ? "Cross-Origin-Opener-Policy: same-origin\r\n"
+				"Cross-Origin-Embedder-Policy: require-corp\r\n"
+				"Cross-Origin-Resource-Policy: same-origin\r\n" : "");
 		const ss_ &etag = wf->etag;
-		const ss_ cache = etag.empty() ? "" : "ETag: "+etag+"\r\n";
 		if(!etag.empty() && headers["if-none-match"].find(etag) != ss_::npos){
 			log_v(MODULE, "Peer %zu: %s not modified", peer.id, cs(path));
 			peer.queue_raw("HTTP/1.1 304 Not Modified\r\n"+cache+
