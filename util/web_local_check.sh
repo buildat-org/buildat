@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~70 s (2026-10-27)
+# cost: ~75 s (2026-10-27)
 # covers: src/server/web/pre.js builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
 # [WEB_LOCAL_SERVER]: hillclimb in the browser with its own server in a
 # worker of the page, and no buildat server: web/ served by a static
@@ -8,10 +8,12 @@
 # (cross-origin isolation), and opened at ?local=hillclimb in Firefox
 # (util/web_drive.sh). The client joins over the in-page stream, the car
 # is driven past the first turn, and the worker's server says its ticks.
-# Then the buildat server's own serving of the same: the isolation
-# headers with ?local and on the local server's files, and not on the
-# page without it.
-# Needs web/ (util/build_web.sh) with web/local/hillclimb/
+# A reload finds the saves kept in IndexedDB and opens them again. Then
+# the buildat server's own serving of the same: the isolation headers
+# with ?local and on the local server's files, and not on the page
+# without it.
+# demo_aggregate likewise, walked a step, when web/local/demo_aggregate/
+# is there. Needs web/ (util/build_web.sh) with web/local/hillclimb/
 # (util/build_web_server.sh hillclimb).
 #   util/web_local_check.sh
 set -u
@@ -63,6 +65,28 @@ grep -q "kept: .*/ranking/save.sqlite" "$t/drive.log" ||
 	fail "IndexedDB has no ranking save"
 echo "the drive: $(awk -v a="$start" -v b="$end" 'BEGIN{printf "%.1f", b - a}') s"
 
+# demo_aggregate's too, when it is built: in, on its feet and walking
+if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
+	cat > "$t/aggregate.json" << 'JSON'
+[
+	["nav", "${URL}"],
+	["waitlog", "server: .*Client 1 from the page connected", 120],
+	["waitlog", "player physics enabled", 120],
+	["eval", "'demo_aggregate playable at ' + Math.round(performance.now()) + ' ms'"],
+	["holdkey", "w", 1000],
+	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15]
+]
+JSON
+	WEB_DRIVE_URL="http://127.0.0.1:$p/?local=demo_aggregate" \
+		bash "$here/util/web_drive.sh" firefox demo_aggregate \
+		"$t/aggregate.json" "$t/aggregate" > "$t/aggregate.log" 2>&1 ||
+		fail "demo_aggregate's drive ($t/aggregate.log: $(tail -2 "$t/aggregate.log" | tr '\n' ' '))"
+	grep -a "eval:" "$t/aggregate.log"
+	grep -a "server: .*network: .*ticks/s" "$t/aggregate/page.log" | tail -1 | cut -c 9-
+else
+	echo "no web/local/demo_aggregate: its drive skipped"
+fi
+
 # The buildat server's serving: a game of its own, and web/ as it is
 cd "$here/Build"
 start_server "$t/s.log" "STATUS Listening" 120 auto bin/buildat_server \
@@ -85,4 +109,4 @@ isolated "/" 200 && fail "/ is isolated: the Starport ID's popup loses its opene
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn; the buildat server isolates ?local and its files only"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's if built; the buildat server isolates ?local and its files only"
