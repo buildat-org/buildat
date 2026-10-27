@@ -32,7 +32,7 @@ local DEFAULT_STARPORT = "https://starport.buildat.org"
 local DEFAULT_AITTA = "https://aitta.buildat.org"
 local STATE_PATH = __buildat_get_path("user") .. "/starport.json"
 local EXPORT_PATH = __buildat_get_path("user") .. "/starport_keys.json"
-local STYLE = "ui_utils/res/style.xml"
+local STYLE = "own:ui_utils/res/style.xml"
 
 local AUDIENCES = {"everyone", "teen", "adult"}
 local KINDS = {"world", "arena", "app", "other"}

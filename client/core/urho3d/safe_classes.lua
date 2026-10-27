@@ -13,8 +13,12 @@ local M = {}
 -- file on the machine (GetResource("Image", "/home/.../x.png") +
 -- Image:GetPixel exfiltrates it; Exists("/home/.../.ssh/id_rsa") tells it
 -- the file is there). A legitimate name is relative and has no "..":
--- textures, fonts, UI styles, "generated/..." from AddManualResource.
+-- textures, fonts, UI styles, "generated/..." from AddManualResource;
+-- "own:<name>" is the client's installed file of the name, which the
+-- trusted screens load by ([TRUSTED_SCREENS_OWN_FILES]; the router in
+-- src/client/app.cpp).
 local function resource_name_ok(name)
+	name = type(name) == "string" and name:match("^own:(.*)$") or name
 	return type(name) == "string" and name ~= "" and
 			name:sub(1, 1) ~= "/" and name:sub(1, 1) ~= "\\" and
 			not name:find("%.%.") and not name:find(":")

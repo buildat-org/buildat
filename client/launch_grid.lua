@@ -65,12 +65,12 @@ end
 local function menu_actions()
 	local out = {
 		{id = "local", label = "Local app", order = 1,
-			icon = "launch_menu/res/icon_local.png", resolved_icon = true,
+			icon = "own:launch_menu/res/icon_local.png", resolved_icon = true,
 			description = "Start an app on this machine",
 			run = function() M.screens().show_local_apps() end},
 		{id = "connect", label = "Join a Buildat server", order = 2,
 			category = "connect",
-			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
+			icon = "own:launch_menu/res/icon_network.png", resolved_icon = true,
 			description = "By its address, on this network or from the Starports",
 			run = function() M.screens().show_connect_to_server() end},
 	}
@@ -80,7 +80,7 @@ local function menu_actions()
 	if ok and type(aitta) == "table" then
 		out[#out + 1] = {id = "aitta", label = "Apps from Aitta", order = 3,
 			category = "catalog",
-			icon = "launch_menu/res/icon_network.png", resolved_icon = true,
+			icon = "own:launch_menu/res/icon_network.png", resolved_icon = true,
 			description = __buildat_get_env("BUILDAT_PAGE_HTTPS") ~= nil and
 					"Play apps others made that run in the browser" or
 					"Install apps others made: " ..
@@ -514,7 +514,7 @@ function M.actions(log)
 			"[A-Za-z0-9_]+") do
 		out[#out + 1] = {id = "play", label = app, kind = "web_local",
 			from = "web_local/" .. app, category = "app",
-			icon = "launch_menu/res/icon_local.png",
+			icon = "own:launch_menu/res/icon_local.png",
 			description = "Runs in this page with a server of its own: " ..
 					"a game for one, its saves kept in the browser",
 			run = function() __buildat_web_go_local(app) end}

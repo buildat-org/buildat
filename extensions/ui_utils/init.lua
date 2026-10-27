@@ -953,7 +953,7 @@ function M.safe.vertical_menu(root, options)
 	-- has its own style keeps it.
 	if not root.defaultStyle then
 		root.defaultStyle = magic.cache:GetResource("XMLFile",
-				options.style or "ui_utils/res/style.xml")
+				options.style or "own:ui_utils/res/style.xml")
 	end
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
@@ -1758,7 +1758,7 @@ end
 
 function M.safe.show_notice(text, copy, color)
 	local t = magic.ui.root:CreateChild("UIElement")
-	t.defaultStyle = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
+	t.defaultStyle = magic.cache:GetResource("XMLFile", "own:ui_utils/res/style.xml")
 	t:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
 	t:SetAlignment(HA_CENTER, VA_TOP)
 	t:SetPosition(0, 40 + 28 * #notices)
@@ -1821,7 +1821,7 @@ end
 function M.safe.menu_button(parent, before, opts)
 	local box = parent:CreateChild("UIElement")
 	box.defaultStyle = magic.cache:GetResource("XMLFile",
-			"ui_utils/res/style.xml")
+			"own:ui_utils/res/style.xml")
 	box:SetAlignment(HA_RIGHT, magic.VA_BOTTOM)
 	box:SetFixedSize(80, 30)
 	box:SetPosition(-10, -10)
@@ -1889,7 +1889,7 @@ function M.safe.show_message_dialog(message, on_close, copy)
 
 	local root = uistack.main:push({desc="show_message_dialog"})
 
-	local style = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
+	local style = magic.cache:GetResource("XMLFile", "own:ui_utils/res/style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -1991,7 +1991,7 @@ function M.safe.show_confirm_dialog(message, on_yes, on_no, yes_label, no_label,
 		root.priority = options.priority
 	end
 
-	local style = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
+	local style = magic.cache:GetResource("XMLFile", "own:ui_utils/res/style.xml")
 	root.defaultStyle = style
 
 	local window = root:CreateChild("Window")
@@ -2090,7 +2090,7 @@ function M.safe.show_notification(text, duration_s)
 
 	local window = magic.ui.root:CreateChild("Window")
 	window.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "ui_utils/res/style.xml")
+			"XMLFile", "own:ui_utils/res/style.xml")
 	window:SetStyleAuto()
 	window:SetName("show_notification window")
 	window:SetLayout(LM_VERTICAL, 0, magic.IntRect(10, 6, 10, 6))

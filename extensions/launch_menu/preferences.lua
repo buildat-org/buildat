@@ -630,7 +630,7 @@ end
 function M.show_keys()
 	local root = uistack.main:push({desc = "launch_menu keys"})
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
-			"ui_utils/res/style.xml")
+			"own:ui_utils/res/style.xml")
 	local width = math.min(magic.ui.root.width - 40, 760)
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
@@ -708,7 +708,7 @@ function M.show_game(o, app_key, extra)
 	g.win = win
 	-- Its own style, for a game whose root has none
 	win.defaultStyle = magic.cache:GetResource("XMLFile",
-			"ui_utils/res/style.xml")
+			"own:ui_utils/res/style.xml")
 	win:SetStyleAuto()
 	win.priority = 102
 	win:SetLayout(LM_VERTICAL, 8, magic.IntRect(12, 12, 12, 12))

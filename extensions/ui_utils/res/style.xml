@@ -1,6 +1,6 @@
 <elements>
     <element type="BorderImage" >
-        <attribute name="Texture" value="Texture2D;ui_utils/res/style.png" />
+        <attribute name="Texture" value="Texture2D;own:ui_utils/res/style.png" />
     </element>
     <element type="Button" style="BorderImage">
         <attribute name="Size" value="16 16" />
@@ -32,35 +32,35 @@
         <attribute name="Shapes">
             <variant type="Int" value="8" />
             <variant type="String" value="Normal" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="0 0 12 24" />
             <variant type="IntVector2" value="0 0" />
             <variant type="String" value="ResizeVertical" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="0 64 20 84" />
             <variant type="IntVector2" value="9 9" />
             <variant type="String" value="ResizeDiagonalTopRight" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="20 64 40 84" />
             <variant type="IntVector2" value="9 9" />
             <variant type="String" value="ResizeHorizontal" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="40 64 60 84" />
             <variant type="IntVector2" value="9 9" />
             <variant type="String" value="ResizeDiagonalTopLeft" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="60 64 80 84" />
             <variant type="IntVector2" value="9 9" />
             <variant type="String" value="RejectDrop" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="80 64 100 84" />
             <variant type="IntVector2" value="9 9" />
             <variant type="String" value="AcceptDrop" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="100 64 128 90" />
             <variant type="IntVector2" value="0 0" />
             <variant type="String" value="Busy" />
-            <variant type="ResourceRef" value="Image;Textures/UI.png" />
+            <variant type="ResourceRef" value="Image;own:Textures/UI.png" />
             <variant type="IntRect" value="128 64 148 85" />
             <variant type="IntVector2" value="9 9" />
         </attribute>
@@ -94,7 +94,7 @@
         <element type="Text" internal="true">
             <attribute name="Color" value="0.867 0.867 0.867 1" />
             <attribute name="Selection Color" value="0.2 0.224 0.353 1" />
-			<attribute name="Font" value="Font;Fonts/Overpass-Regular.ttf" />
+			<attribute name="Font" value="Font;own:Fonts/Overpass-Regular.ttf" />
 			<attribute name="Font Size" value="16" />
         </element>
         <element type="BorderImage" internal="true">
@@ -214,7 +214,7 @@
         <attribute name="Layout Spacing" value="4" />
     </element>
     <element type="Text">
-        <attribute name="Font" value="Font;Fonts/Overpass-Regular.ttf" />
+        <attribute name="Font" value="Font;own:Fonts/Overpass-Regular.ttf" />
         <attribute name="Font Size" value="15" />
         <attribute name="Color" value="0.867 0.867 0.867" />
     </element>
@@ -295,7 +295,7 @@
     </element>
     <element type="EditorMenuText" style="Text" auto="false" />
     <element type="EditorAttributeText" auto="false">
-        <attribute name="Font" value="Font;Fonts/Overpass-Regular.ttf" />
+        <attribute name="Font" value="Font;own:Fonts/Overpass-Regular.ttf" />
         <attribute name="Font Size" value="9" />
     </element>
     <element type="EditorEnumAttributeText" style="EditorAttributeText" auto="false">
@@ -339,7 +339,7 @@
         <attribute name="Border" value="6 2 2 2" />
     </element>
     <element type="ToolTipText" style="Text">
-        <attribute name="Font" value="Font;Fonts/Overpass-Regular.ttf" />
+        <attribute name="Font" value="Font;own:Fonts/Overpass-Regular.ttf" />
         <attribute name="Font Size" value="9" />
     </element>
     <element type="ViewportBorder" style="BorderImage">

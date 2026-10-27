@@ -1262,8 +1262,41 @@ public:
 		return path;
 	}
 
+	// **"own:<name>" is the client's own file of that name and nothing
+	// else** ([TRUSTED_SCREENS_OWN_FILES]): the trusted screens load their
+	// styles, fonts and icons by it. Never a served file (a server
+	// announces any name it likes) and never the cache's resource dirs
+	// (sandboxed code writes there with compose_image()): the directories
+	// the client was installed with, or no file at all.
+	ss_ own_file(const ss_ &name)
+	{
+		if(name.empty() || name[0] == '/' || name[0] == '\\' ||
+				name.find("..") != ss_::npos || name.find(':') != ss_::npos)
+			return "";
+		const ss_ share = g_client_config.get<ss_>("share_path");
+		const ss_ urho = g_client_config.get<ss_>("urho3d_path");
+		for(const ss_ &root : {share+"/client/data", share+"/extensions",
+				urho+"/bin/CoreData", urho+"/bin/Data"}){
+			ss_ path = interface::fs::get_absolute_path(root)+"/"+name;
+			if(interface::fs::path_exists(path))
+				return path;
+		}
+		return "";
+	}
+
 	void Route(magic::String &name, magic::ResourceRequest requestType)
 	{
+		if(name.StartsWith("own:")){
+			ss_ path = own_file(ss_(name.CString() + 4));
+			// Verbose, as a plain name's miss: a font asks for an .xml
+			// beside it whether there is one or not
+			if(path == "")
+				log_v(MODULE, "Resource route access: %s (no own file)",
+						name.CString());
+			// "" blocks the request: no fallback to any other file
+			name = path.c_str();
+			return;
+		}
 		if(!m_client){
 			ss_ builtin = builtin_client_data(ss_(name.CString()));
 			if(builtin != ""){

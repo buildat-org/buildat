@@ -248,7 +248,7 @@ local function gather()
 		if not ok then log:warning(tostring(why)) end
 	end
 	add({label = "Display and sound", kind = "action", badge = "Settings",
-		icon = "launch_menu/res/icon_preferences.png",
+		icon = "own:launch_menu/res/icon_preferences.png",
 		section = "Display and sound",
 		description = "What every app honours: the window, the sound, " ..
 				"the mouse, and which launch UI this is.",
@@ -257,7 +257,7 @@ local function gather()
 	console = console and (console.show and console or console.safe)
 	if console and console.show then
 		add({label = "Developer console", kind = "action",
-			icon = "launch_menu/res/icon_console.png",
+			icon = "own:launch_menu/res/icon_console.png",
 			badge = "Developer", section = "Developer",
 			description = "A Lua console in the sandbox, with the API " ..
 					"document beside it.",
@@ -268,7 +268,7 @@ local function gather()
 	aitta = aitta and (aitta.open_publish and aitta or aitta.safe)
 	if not web and aitta and aitta.open_publish then
 		add({label = "Publish an app or extension", kind = "action",
-			icon = "launch_menu/res/icon_local.png",
+			icon = "own:launch_menu/res/icon_local.png",
 			badge = "Developer", section = "Developer",
 			description = "Make one in your user folder, try it, then " ..
 					"pack, sign and publish it on an Aitta.",
@@ -465,7 +465,7 @@ end
 local function screen(desc, width, heading, query)
 	local root = uistack.main:push({desc = desc})
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
-			"ui_utils/res/style.xml")
+			"own:ui_utils/res/style.xml")
 	local window = root:CreateChild("Window")
 	window:SetStyleAuto()
 	window:SetLayout(LM_VERTICAL, 8, magic.IntRect(16, 12, 16, 12))

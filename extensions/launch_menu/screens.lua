@@ -23,7 +23,7 @@ local starport = require("buildat/core/starport")
 starport = starport.safe or starport
 local HA_CENTER, HA_LEFT, HA_RIGHT, KEY_ESCAPE, LM_HORIZONTAL, LM_VERTICAL, VA_CENTER =
 		magic.HA_CENTER, magic.HA_LEFT, magic.HA_RIGHT, magic.KEY_ESCAPE, magic.LM_HORIZONTAL, magic.LM_VERTICAL, magic.VA_CENTER
-local STYLE = "ui_utils/res/style.xml"
+local STYLE = "own:ui_utils/res/style.xml"
 -- The stack's placeholder while a game runs; uistack's scan stands aside
 -- for a top of this name
 local GAME_RUNNING = "empty (game is running)"
