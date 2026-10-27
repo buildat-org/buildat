@@ -14,14 +14,15 @@
 #   while its module does not say "web": true, naming the module; marked,
 #   it builds, and its module, playing two peers, finds the first to
 #   connect the local player and the admin, and the second neither.
-# Needs Build-webserver/ from util/build_web_server.sh, and node; the
+# Needs web/local/hillclimb/ from util/build_web_server.sh hillclimb (not
+# Build-webserver/, which holds whichever app was built last), and node; the
 # fixture needs emsdk as util/build_web_server.sh does.
 #   util/web_server_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-js="$here/Build-webserver/bin/buildat_server.js"
-[ -f "$js" ] || skip "no $js: run util/build_web_server.sh"
+js="$here/web/local/hillclimb/buildat_server.js"
+[ -f "$js" ] || skip "no $js: run util/build_web_server.sh hillclimb"
 command -v node > /dev/null || skip "no node"
 check_tmp web_server; t=$CHECK_TMP
 
