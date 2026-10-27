@@ -1852,6 +1852,8 @@ struct CApp: public App, public magic::Application
 	int run()
 	{
 		int r = magic::Application::Run();
+		// Before the Lua state's close, which is the Context's
+		lua_bindings::release_held_refs(true);
 		if(m_command_seq_failed)
 			return 1;
 		if(m_command_seq_active)
@@ -3089,6 +3091,7 @@ struct CApp: public App, public magic::Application
 
 	void on_begin_frame(magic::StringHash event_type, magic::VariantMap &event_data)
 	{
+		lua_bindings::release_held_refs();
 		if(m_split.on){
 			// The time outside the engine's frame: the browser's, until
 			// it hands the page the next animation frame

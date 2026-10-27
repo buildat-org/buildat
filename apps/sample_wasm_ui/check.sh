@@ -11,8 +11,10 @@
 # the bindings cover (main/wasm/main.cpp's refuse()), each a trap with its
 # reason; and two modules refused at the load, one importing a call the
 # list does not name (unlisted/), one a call of it with another signature
-# (wrong_sig/). Natively twice, compiled and in the interpreter; `web` in
-# headless Chrome. The generated files are checked against the generator.
+# (wrong_sig/). deep/ makes 12000 nodes in chains (the c key) natively,
+# and its camera still holds them ([HOLD_REF_UAF]). Natively twice,
+# compiled and in the interpreter; `web` in headless Chrome. The
+# generated files are checked against the generator.
 #
 #   apps/sample_wasm_ui/check.sh          # the native client
 #   apps/sample_wasm_ui/check.sh web      # the web client, headless Chrome
@@ -158,6 +160,8 @@ keypress space
 wait_log 10000 the server answered echo: key
 delay 500
 screenshot $t/after$n.png
+keypress c
+wait_log 60000 deep: chains done
 $last
 quit
 EOF
@@ -172,6 +176,11 @@ EOF
 		fail "the server did not get the module's click"
 	cube_is "$t/before$n.png" orange
 	cube_is "$t/after$n.png" green
+	# [HOLD_REF_UAF] deep/'s 12000 nodes in chains: the client lives, and
+	# the module's scene with them
+	grep -aq "Crash: SIG" "$t/cli$n.log" && fail "the client crashed ($t/cli$n.log)"
+	grep -aq "deep: chains done, on the camera 12$" "$t/cli$n.log" ||
+		fail "not 12 chains on deep's camera: $(grep -a "chains done" "$t/cli$n.log")"
 }
 # The compile (about a second) is waited for, so that the move is seen
 run 1 "wait_log 60000 ; ready (compiled)"

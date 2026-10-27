@@ -1,5 +1,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
+#include "lua_bindings/init.h"
 #include "lua_bindings/util.h"
 #include "core/log.h"
 #include "client/app.h"
@@ -7,6 +8,7 @@
 #include "interface/fs.h"
 #include <tolua++.h>
 #include <cstring>
+#include <vector>
 #include <Context.h>
 #include <Scene.h>
 #include <Image.h>
@@ -335,10 +337,37 @@ static int l_get_voxel_data(lua_State *L)
 // a reference held into Lua's close would outlive the Context.
 static const char *const HELD_ROOTS[] = {"RefCounted", "Resource",
 		"RenderPath", "Viewport", "RenderSurface", "SoundStream"};
+// **Released at the frame's start, not in the collector**
+// ([HOLD_REF_UAF]): a collection runs at any allocation, and a release
+// there that deletes a Scene detaches its whole tree, freeing every node
+// only its parent held -- one a binding had just made and not yet handed
+// to hold_ref (a script whose scene was collected under its nodes, 4000
+// CreateChild in). Nothing is deleted under Lua that way; the client
+// calls release_held_refs() at each frame's start, and from its own end
+// on the releases are made at once again (the Lua state's close). Never
+// destroyed: what an exit by another way left in it is not released after
+// the Context.
+static std::vector<SharedPtr<RefCounted>> &g_released =
+		*new std::vector<SharedPtr<RefCounted>>;
+static bool g_release_at_once = false;
 static int l_held_ref_gc(lua_State *L)
 {
-	((SharedPtr<RefCounted>*)lua_touserdata(L, 1))->~SharedPtr();
+	SharedPtr<RefCounted> *p = (SharedPtr<RefCounted>*)lua_touserdata(L, 1);
+	if(!g_release_at_once && *p)
+		g_released.push_back(*p);
+	p->~SharedPtr();
 	return 0;
+}
+void release_held_refs(bool from_now_at_once)
+{
+	// Swapped out first: a release that runs Lua can queue more
+	std::vector<SharedPtr<RefCounted>> v;
+	v.swap(g_released);
+	v.clear();
+	if(from_now_at_once){
+		g_release_at_once = true;
+		g_released.clear();
+	}
 }
 static int l_hold_ref(lua_State *L)
 {

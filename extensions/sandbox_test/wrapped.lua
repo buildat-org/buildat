@@ -363,4 +363,23 @@ do
 	log:info("wrapped: the table vectors' names, and one where a Vector3 goes")
 end
 
+-- [HOLD_REF_UAF]: chains of CreateChild, each wrapper dropped for the
+-- next, under a scene nothing refers to. The client crashed in hold_ref
+-- after a few thousand: the scene collected and deleted mid-call, its
+-- tree detached, a node just made freed before its wrapper held it.
+do
+	local top
+	do
+		local scene = magic.Scene()
+		top = scene:CreateChild("top")
+	end
+	for _ = 1, 60 do
+		local cur = top:CreateChild("chain")
+		for _ = 1, 1000 do
+			cur = cur:CreateChild("c")
+		end
+	end
+	log:info("wrapped: 60000 nodes made in chains under a collected scene")
+end
+
 return true

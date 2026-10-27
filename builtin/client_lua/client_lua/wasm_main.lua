@@ -173,6 +173,10 @@ return function(module)
 	end
 
 	magic.SubscribeToEvent("Update", function(_, d)
+		-- The scene held by this handler: a viewport keeps only a weak
+		-- reference, and a scene nothing refers to is collected, its
+		-- nodes detached under the module ([HOLD_REF_UAF])
+		local _ = scene
 		if state == "loading" then
 			local status, detail = m:status()
 			if status == "loading" then
