@@ -103,9 +103,9 @@ end
 buildat.safe.sub_packet = buildat.sub_packet
 
 function buildat.unsub_packet(cb)
-	for name, cb1 in pairs(buildat.packet_subs) do
+	for name, cb1 in pairs(packet_subs) do
 		if cb1 == cb then
-			packet_subs[cb] = nil
+			packet_subs[name] = nil
 		end
 	end
 end
