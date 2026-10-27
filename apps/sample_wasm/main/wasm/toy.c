@@ -52,3 +52,121 @@ BUILDAT_WASM_EXPORT int peek(unsigned address)
 {
 	return *(volatile int*)address;
 }
+
+// [CLIENT_WASM] step 2: the imports, from memory the module owns
+
+// A quad, 12 floats a vertex (position, normal, colour, texture
+// coordinate), and its two triangles
+static const float quad[4 * 12] = {
+	0, 0, 0,  0, 0, -1,  1, 1, 1, 1,  0, 1,
+	1, 0, 0,  0, 0, -1,  1, 1, 1, 1,  1, 1,
+	1, 1, 0,  0, 0, -1,  1, 1, 1, 1,  1, 0,
+	0, 1, 0,  0, 0, -1,  1, 1, 1, 1,  0, 0,
+};
+static const unsigned quad_indices[6] = {0, 2, 1, 0, 3, 2};
+// 2x2 RGBA: red, green, blue, white
+static const unsigned char pixels[16] = {
+	255, 0, 0, 255,  0, 255, 0, 255,  0, 0, 255, 255,  255, 255, 255, 255,
+};
+
+// The quad as the node's geometry, the pixels as the texture's
+BUILDAT_WASM_EXPORT void draw(int node, int texture)
+{
+	buildat_geometry_set(node, 0, quad, 4, quad_indices, 6);
+	buildat_texture_set(texture, 2, 2, pixels, sizeof pixels);
+}
+
+// The node moved by dx along x and turned to face -x; returns its new x
+// times 1000
+BUILDAT_WASM_EXPORT int move(int node, float dx)
+{
+	float t[10];
+	buildat_node_get(node, t);
+	t[0] += dx;
+	t[3] = 0; t[4] = 0; t[5] = 1; t[6] = 0; // 180 degrees about y
+	buildat_node_set(node, t);
+	buildat_node_get(node, t);
+	return (int)(t[0] * 1000.0f + (t[0] < 0 ? -0.5f : 0.5f));
+}
+
+// The volume's voxels: the sum of their ids (the low 16 bits) weighted by
+// position, and how many are not empty, as count * 1000000 + sum
+static unsigned voxels_buf[16 * 16 * 16];
+BUILDAT_WASM_EXPORT int voxels(int volume)
+{
+	int size[6];
+	buildat_voxels_size(volume, size);
+	if(size[3] * size[4] * size[5] > 16 * 16 * 16)
+		return -1;
+	const int n = buildat_voxels_read(volume, size, voxels_buf,
+			sizeof voxels_buf);
+	int count = 0, sum = 0;
+	for(int i = 0; i < n; i++){
+		if(voxels_buf[i] & 0xffff){
+			count++;
+			sum += (int)(voxels_buf[i] & 0xffff) * (i + 1);
+		}
+	}
+	return count * 1000000 + sum;
+}
+
+// A packet to the server, "main:ping"; it answers "main:pong"
+BUILDAT_WASM_EXPORT void ping(void)
+{
+	static const char name[] = "ping", data[] = "hello from wasm";
+	buildat_send_packet(name, sizeof name - 1, data, sizeof data - 1);
+}
+
+// The next event Lua queued, logged: its length, or -1 with none
+static char event_buf[256];
+BUILDAT_WASM_EXPORT int poll(void)
+{
+	const int n = buildat_event_take(event_buf, sizeof event_buf);
+	if(n >= 0 && n <= (int)sizeof event_buf){
+		static const char got[] = "event: ";
+		static char line[sizeof got - 1 + sizeof event_buf];
+		for(unsigned i = 0; i < sizeof got - 1; i++)
+			line[i] = got[i];
+		for(int i = 0; i < n; i++)
+			line[sizeof got - 1 + i] = event_buf[i];
+		buildat_log(line, sizeof got - 1 + n);
+	}
+	return n;
+}
+
+BUILDAT_WASM_EXPORT unsigned now(void)
+{
+	return buildat_time_ms();
+}
+
+// The boundary's checks: each of these traps in the import
+BUILDAT_WASM_EXPORT void use_node(int node)
+{
+	float t[10];
+	buildat_node_get(node, t);
+}
+
+// A pointer past the memory
+BUILDAT_WASM_EXPORT void bad_pointer(int node)
+{
+	buildat_node_get(node, (float*)0xfffffff0u);
+}
+
+// A pointer and length whose sum wraps in 32 bits
+BUILDAT_WASM_EXPORT void len_overflow(void)
+{
+	buildat_log((const char*)0xffffff00u, 0x200);
+}
+
+// An index past the vertices
+BUILDAT_WASM_EXPORT void bad_index(int node)
+{
+	static const unsigned idx[3] = {0, 1, 4};
+	buildat_geometry_set(node, 0, quad, 4, idx, 3);
+}
+
+// A texture past the cap
+BUILDAT_WASM_EXPORT void big_texture(int texture)
+{
+	buildat_texture_set(texture, 8192, 8192, pixels, 8192u * 8192u * 4u);
+}

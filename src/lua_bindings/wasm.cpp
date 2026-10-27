@@ -19,12 +19,26 @@
 //   numbers and copies bytes, and the module never sees the client's heap,
 //   table or Module.
 //
+// The imports (interface/wasm_api.h) are the same C++ on both clients
+// (run_import() below): natively wasm2c's import functions call it through
+// the glue, on the web the module's import object does through
+// buildat_wasm_import(). It checks every pointer and length against the
+// module's memory and copies the bytes, names objects by handles from a
+// table of the instance's own, and calls neither Lua nor wasm.
+//
 // simplified: the native build is Linux's (fork, rlimits, guard pages, a
 // signal handler); Windows refuses a module until the compile has a job
 // object and the traps a vectored handler.
 #include "lua_bindings/util.h"
 #include "core/log.h"
 #include "interface/sha1.h"
+#include "interface/voxel_volume.h"
+#include <tolua++.h>
+#include <luabind/luabind.hpp>
+#include <Node.h>
+#include <CustomGeometry.h>
+#include <Texture2D.h>
+#include <Image.h>
 #include "wabt/binary-reader-ir.h"
 #include "wabt/binary-reader.h"
 #include "wabt/validator.h"
@@ -56,6 +70,8 @@
 #include <emscripten.h>
 #endif
 #include <cctype>
+#include <deque>
+#include <memory>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -78,6 +94,42 @@ static const size_t MAX_EXPORTS = 1000;
 static const size_t MAX_PARAMS = 16;
 static const size_t MAX_INSTANCES = 32;
 static const size_t MAX_LOG = 1000;
+// The imports' caps ([CLIENT_WASM] step 2), per module (instance)
+static const size_t MAX_HANDLES = 1024; // nodes, textures and volumes
+static const uint32_t MAX_GEOMETRIES = 16; // a node's
+static const uint64_t MAX_INDICES = 196608; // a geometry's (and vertices)
+static const uint64_t MAX_INDICES_ALL = 1048576; // a module's, 48 MiB of C++
+		// and GPU vertices, as the CustomGeometry has no index buffer
+static const uint32_t MAX_TEXTURE_SIDE = 4096;
+static const uint64_t MAX_TEXTURE_BYTES = 64 << 20; // a module's
+static const uint64_t MAX_VOXELS = 4194304; // a read's
+static const size_t MAX_PACKET_NAME = 64;
+static const uint64_t MAX_PACKET = 65536;
+static const size_t MAX_PACKETS = 64; // sent in one call
+static const size_t MAX_EVENTS = 256; // queued
+static const size_t MAX_EVENT_BYTES = 4 << 20; // queued
+
+// What a module may import, all from "buildat", all i32 (wasm_api.h): the
+// parameters and whether it returns one. Validation allows exactly these.
+enum {
+	IMP_LOG, IMP_TIME_MS, IMP_VOXELS_SIZE, IMP_VOXELS_READ, IMP_GEOMETRY_SET,
+	IMP_TEXTURE_SET, IMP_NODE_GET, IMP_NODE_SET, IMP_SEND_PACKET,
+	IMP_EVENT_TAKE, IMP_COUNT
+};
+struct ImportDef { const char *name; int params; bool result; };
+static const ImportDef IMPORTS[IMP_COUNT] = {
+	{"log", 2, false},
+	{"time_ms", 0, true},
+	{"voxels_size", 2, false},
+	{"voxels_read", 4, true},
+	{"geometry_set", 6, false},
+	{"texture_set", 5, false},
+	{"node_get", 2, false},
+	{"node_set", 2, false},
+	{"send_packet", 4, false},
+	{"event_take", 2, true},
+};
+static const int MAX_IMPORT_PARAMS = 6;
 
 struct ExportSig {
 	ss_ name;
@@ -106,9 +158,18 @@ static bool export_name_ok(const ss_ &n)
 	return true;
 }
 
-// Read, validate and cap; fills exports and whether buildat.log is imported
+// The bytes a module logged, as one line of printable ASCII
+static ss_ printable(const uint8_t *p, size_t n)
+{
+	ss_ r;
+	for(size_t i = 0; i < n && i < MAX_LOG; i++)
+		r += (p[i] >= 32 && p[i] < 127) ? (char)p[i] : '?';
+	return r;
+}
+
+// Read, validate and cap; fills exports and whether it imports anything
 static bool check_module(const ss_ &bytes, wabt::Module &m,
-		sv_<ExportSig> &exports, bool &has_log, ss_ &why)
+		sv_<ExportSig> &exports, bool &has_imports, ss_ &why)
 {
 	if(bytes.size() > MAX_BYTES){
 		why = "larger than "+itos(MAX_BYTES)+" bytes";
@@ -140,22 +201,35 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 		why = "more than "+itos(MAX_FUNCS)+" functions";
 		return false;
 	}
-	has_log = false;
+	// Exactly wasm_api.h's imports, by name and signature, each once
+	has_imports = false;
+	bool seen[IMP_COUNT] = {};
 	for(const wabt::Import *imp : m.imports){
 		const wabt::FuncImport *fi = wabt::dyn_cast<wabt::FuncImport>(imp);
-		bool ok = fi && imp->module_name == "buildat" &&
-				imp->field_name == "log" && !has_log;
+		int k = 0;
+		while(k < IMP_COUNT && imp->field_name != IMPORTS[k].name)
+			k++;
+		bool ok = fi && imp->module_name == "buildat" && k < IMP_COUNT &&
+				!seen[k];
 		if(ok){
 			const wabt::FuncSignature &s = fi->func.decl.sig;
-			ok = s.param_types.size() == 2 && s.result_types.empty() &&
-					s.param_types[0] == wabt::Type::I32 &&
-					s.param_types[1] == wabt::Type::I32;
+			ok = (int)s.param_types.size() == IMPORTS[k].params &&
+					s.result_types.size() == (IMPORTS[k].result ? 1u : 0u);
+			for(wabt::Type t : s.param_types)
+				ok = ok && t == wabt::Type::I32;
+			for(wabt::Type t : s.result_types)
+				ok = ok && t == wabt::Type::I32;
 		}
 		if(!ok){
-			why = "imports something other than buildat.log(i32, i32)";
+			why = "imports \""+imp->module_name.substr(0, 32)+"."+
+					imp->field_name.substr(0, 32)+"\", which is not one of "
+					"wasm_api.h's with its signature";
+			// Printable only: the names are the server's
+			why = printable((const uint8_t*)why.data(), why.size());
 			return false;
 		}
-		has_log = true;
+		seen[k] = true;
+		has_imports = true;
 	}
 	if(m.memories.size() > 1){
 		why = "more than one memory";
@@ -227,17 +301,10 @@ static bool check_module(const ss_ &bytes, wabt::Module &m,
 	return true;
 }
 
-// The bytes a module logged, as one line of printable ASCII
-static ss_ printable(const uint8_t *p, size_t n)
-{
-	ss_ r;
-	for(size_t i = 0; i < n && i < MAX_LOG; i++)
-		r += (p[i] >= 32 && p[i] < 127) ? (char)p[i] : '?';
-	return r;
-}
-
 struct Instance;
 static size_t g_instance_count = 0;
+// The live instances' handle tags (1 to 127)
+static bool g_tag_used[128] = {};
 
 #if BUILDAT_WASM_NATIVE
 
@@ -253,13 +320,14 @@ static const int COMPILE_WALL_S = 180;
 static const rlim_t COMPILE_CPU_S = 120;
 static const rlim_t COMPILE_AS_BYTES = (rlim_t)2 << 30;
 // Bumped when the C this writes changes, so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 1";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 2";
 
 extern "C" const char buildat_wasm_rt_h[];
 
 // What a built module exports to the client (the glue below)
 typedef size_t (*SizeFn)(void);
-typedef void (*InstantiateFn)(void*, void*, void (*)(void*, uint32_t, uint32_t));
+typedef uint32_t (*ImportFn)(void*, uint32_t, const uint32_t*);
+typedef void (*InstantiateFn)(void*, void*, ImportFn);
 typedef void (*FreeFn)(void*);
 typedef wasm_rt_memory_t* (*MemoryFn)(void*);
 typedef void (*CallFn)(void*, uint32_t, const uint64_t*, uint64_t*);
@@ -423,24 +491,35 @@ static const Compiler& compiler()
 // The client's own C around wasm2c's: an instance's size, its making and
 // freeing, its memory, and one call entry that unpacks numbers for each
 // export by index. Nothing in it comes from the module but types.
-static ss_ glue_c(const sv_<ExportSig> &exports, bool has_log, bool has_memory)
+static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
+		bool has_memory)
 {
 	std::ostringstream os;
 	os<<"#include <string.h>\n#include <stdint.h>\n#include \"m.h\"\n"
 		"#define BX __attribute__((visibility(\"default\")))\n"
-		"struct w2c_buildat { void *host; void (*log)(void*, uint32_t, uint32_t); };\n";
-	if(has_log)
-		os<<"void w2c_buildat_log(struct w2c_buildat *b, uint32_t p, uint32_t n)"
-			"{ b->log(b->host, p, n); }\n";
+		"struct w2c_buildat { void *host; uint32_t (*imp)(void*, uint32_t, const uint32_t*); };\n";
+	// Every import, whether the module has it or not: each hands its
+	// numbers to the client's run_import()
+	for(int k = 0; k < IMP_COUNT; k++){
+		const ImportDef &d = IMPORTS[k];
+		os<<(d.result ? "uint32_t" : "void")<<" w2c_buildat_"<<d.name<<
+				"(struct w2c_buildat *b";
+		for(int i = 0; i < d.params; i++)
+			os<<", uint32_t a"<<i;
+		os<<"){ uint32_t a["<<MAX_IMPORT_PARAMS<<"] = {";
+		for(int i = 0; i < d.params; i++)
+			os<<(i ? ", a" : "a")<<i;
+		os<<(d.params ? "" : "0")<<"}; "<<(d.result ? "return " : "")<<"b->imp(b->host, "<<k<<", a); }\n";
+	}
 	os<<"typedef struct { w2c_m m; struct w2c_buildat b; } inst_t;\n"
 		"static float F(uint64_t v){ uint32_t u = (uint32_t)v; float f; memcpy(&f, &u, 4); return f; }\n"
 		"static double D(uint64_t v){ double d; memcpy(&d, &v, 8); return d; }\n"
 		"static uint64_t FB(float f){ uint32_t u; memcpy(&u, &f, 4); return u; }\n"
 		"static uint64_t DB(double d){ uint64_t u; memcpy(&u, &d, 8); return u; }\n"
 		"BX size_t buildat_size(void){ return sizeof(inst_t); }\n"
-		"BX void buildat_instantiate(void *p, void *host, void (*log)(void*, uint32_t, uint32_t)){\n"
-		"\tinst_t *i = (inst_t*)p; i->b.host = host; i->b.log = log;\n"
-		"\twasm2c_m_instantiate(&i->m"<<(has_log ? ", &i->b" : "")<<");\n}\n"
+		"BX void buildat_instantiate(void *p, void *host, uint32_t (*imp)(void*, uint32_t, const uint32_t*)){\n"
+		"\tinst_t *i = (inst_t*)p; i->b.host = host; i->b.imp = imp;\n"
+		"\twasm2c_m_instantiate(&i->m"<<(has_imports ? ", &i->b" : "")<<");\n}\n"
 		"BX void buildat_free(void *p){ wasm2c_m_free(&((inst_t*)p)->m); }\n"
 		"BX wasm_rt_memory_t *buildat_memory(void *p){ return "<<
 		(has_memory ? "w2c_m_mem(&((inst_t*)p)->m)" : "0")<<"; }\n"
@@ -478,58 +557,65 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_log, bool has_memory)
 
 #ifdef __EMSCRIPTEN__
 // The module as an instance of its own, from the page's JS: its own
-// memory, importing buildat.log only. What crosses is numbers, and bytes
-// copied between its memory and the client's heap by the JS here.
-EM_JS(int, bw_load, (const uint8_t *p, int n, int has_log), {
+// memory, importing wasm_api.h's functions only, each of which hands its
+// numbers to buildat_wasm_import() (run_import(), the C++ both clients
+// share) and throws its trap. What crosses is numbers, and bytes copied
+// between its memory and the client's heap by the JS here.
+EM_JS(int, bw_new, (void), {
 	var w = Module.buildatWasm || (Module.buildatWasm = {next: 1, list: {}});
 	var id = w.next++;
-	var rec = {inst: null, logs: [], err: ""};
-	w.list[id] = rec;
-	var text = function(ptr, len) {
-		var mem = rec.inst && rec.inst.exports.memory;
-		ptr >>>= 0; len >>>= 0;
-		if (!(mem instanceof WebAssembly.Memory) || ptr + len > mem.buffer.byteLength)
-			return "(log: past the module's memory)";
-		var b = new Uint8Array(mem.buffer, ptr, Math.min(len, 1000));
-		var s = "";
-		for (var i = 0; i < b.length; i++)
-			s += (b[i] >= 32 && b[i] < 127) ? String.fromCharCode(b[i]) : "?";
-		return s;
-	};
+	w.list[id] = {inst: null, err: ""};
+	return id;
+});
+// names: the imports' names, comma separated, in run_import()'s order
+EM_JS(void, bw_load, (int id, const uint8_t *p, int n, int host,
+		const char *names), {
+	var rec = Module.buildatWasm.list[id];
 	try {
 		var mod = new WebAssembly.Module(HEAPU8.slice(p, p + n));
-		var imports = {};
-		if (has_log)
-			imports.buildat = {log: function(ptr, len) { rec.logs.push(text(ptr, len)); }};
+		var imports = {buildat: {}};
+		UTF8ToString(names).split(",").forEach(function(name, k) {
+			imports.buildat[name] = function(a0, a1, a2, a3, a4, a5) {
+				var r = _buildat_wasm_import(host, k, a0 | 0, a1 | 0, a2 | 0,
+						a3 | 0, a4 | 0, a5 | 0);
+				if (r < 0)
+					throw new WebAssembly.RuntimeError("buildat." + name +
+							": trapped (the client's log says why)");
+				return r | 0;
+			};
+		});
 		rec.inst = new WebAssembly.Instance(mod, imports);
 	} catch (e) {
 		rec.err = String(e).substring(0, 300);
 	}
-	return id;
 });
-EM_JS(char*, bw_take, (int id, int what), {
+EM_JS(char*, bw_take_error, (int id), {
 	var rec = Module.buildatWasm.list[id];
-	var s = null;
-	if (what == 0 && rec.logs.length) s = rec.logs.shift();
-	if (what == 1 && rec.err) { s = rec.err; rec.err = ""; }
-	return s === null ? 0 : stringToNewUTF8(s);
+	var s = rec.err;
+	rec.err = "";
+	return s ? stringToNewUTF8(s) : 0;
 });
+// The memory's size: 0 with none, or while the start function runs (the
+// instance is not there yet)
 EM_JS(double, bw_memory_size, (int id), {
-	var mem = Module.buildatWasm.list[id].inst.exports.memory;
+	var inst = Module.buildatWasm.list[id].inst;
+	var mem = inst && inst.exports.memory;
 	return mem instanceof WebAssembly.Memory ? mem.buffer.byteLength : 0;
 });
 // to_module: copy n bytes from the heap at heap to the module's memory at
 // ptr, else the other way; the bounds checked here again
 EM_JS(int, bw_copy, (int id, double ptr, int heap, int n, int to_module), {
-	var mem = Module.buildatWasm.list[id].inst.exports.memory;
-	if (!(mem instanceof WebAssembly.Memory) || ptr < 0 || ptr + n > mem.buffer.byteLength) return 1;
+	var inst = Module.buildatWasm.list[id].inst;
+	var mem = inst && inst.exports.memory;
+	if (!(mem instanceof WebAssembly.Memory) || ptr < 0 || n < 0 ||
+			ptr + n > mem.buffer.byteLength) return 1;
 	var m = new Uint8Array(mem.buffer, ptr, n);
 	if (to_module) m.set(HEAPU8.subarray(heap, heap + n));
 	else HEAPU8.set(m, heap);
 	return 0;
 });
 // args: n doubles; types: a char per argument ('i', 'I', 'f', 'F'); the
-// result into *out. 0, or 1 with the error in bw_take(id, 1).
+// result into *out. 0, or 1 with the error in bw_take_error(id).
 EM_JS(int, bw_call, (int id, const char *name, const double *args,
 		const char *types, int n, double *out), {
 	var rec = Module.buildatWasm.list[id];
@@ -563,7 +649,7 @@ struct Instance {
 	ss_ tmp_so; // the compiler's output there, renamed once it is whole
 	pid_t pid = 0;
 	std::chrono::steady_clock::time_point started;
-	bool has_log = false;
+	bool has_imports = false;
 	void *dl = nullptr;
 	void *mem = nullptr;
 	wasm_rt_memory_t *memory = nullptr;
@@ -573,6 +659,35 @@ struct Instance {
 #ifdef __EMSCRIPTEN__
 	int web_id = 0;
 #endif
+	std::chrono::steady_clock::time_point loaded =
+			std::chrono::steady_clock::now();
+	// A call into the module is running: none other starts
+	bool in_call = false;
+	// An import refused what the module asked: the call traps with this
+	ss_ trap_reason;
+
+	// The handles: a table of the instance's own. A handle is
+	// tag << 24 | generation << 10 | slot; the tag is this instance's
+	// (another's handle names another tag), the generation the slot's
+	// when it was given (one dropped since is stale; a slot whose
+	// generation would wrap is not used again).
+	struct Slot {
+		enum Kind { NONE, NODE, TEXTURE, VOLUME } kind = NONE;
+		uint32_t gen = 1;
+		Urho3D::WeakPtr<Urho3D::Node> node;
+		Urho3D::WeakPtr<Urho3D::Texture2D> texture;
+		std::weak_ptr<interface::VoxelVolume> volume;
+		uint64_t indices[MAX_GEOMETRIES] = {}; // counted against the caps
+		uint64_t texture_bytes = 0;
+	};
+	static const uint32_t GEN_MAX = (1 << 14) - 1;
+	uint32_t tag = 0;
+	sv_<Slot> slots;
+	uint64_t indices_all = 0, texture_bytes_all = 0;
+	// Events Lua queued (m:push), and the packets the call sends
+	std::deque<ss_> events;
+	size_t event_bytes = 0;
+	sv_<std::pair<ss_, ss_>> sent;
 
 	void fail(const ss_ &why)
 	{
@@ -581,18 +696,442 @@ struct Instance {
 		log_w(MODULE, "wasm %s: %s", cs(name), cs(why));
 	}
 
+	// A new handle for an object, or 0 with the table full
+	uint32_t give(Slot::Kind kind, Urho3D::Node *node, Urho3D::Texture2D *tex,
+			const sp_<interface::VoxelVolume> &volume)
+	{
+		size_t i = 0;
+		while(i < slots.size() && (slots[i].kind != Slot::NONE ||
+				slots[i].gen > GEN_MAX))
+			i++;
+		if(i == slots.size()){
+			if(slots.size() >= MAX_HANDLES)
+				return 0;
+			slots.emplace_back();
+		}
+		Slot &s = slots[i];
+		s.kind = kind;
+		s.node = node;
+		s.texture = tex;
+		s.volume = volume;
+		return tag << 24 | s.gen << 10 | (uint32_t)i;
+	}
+
+	// The handle's slot, or null with why: a handle not given, one given
+	// and dropped, or another module's
+	Slot* slot_of(uint32_t h, ss_ &why)
+	{
+		const uint32_t t = h >> 24, gen = (h >> 10) & GEN_MAX, i = h & 1023;
+		if(t != tag){
+			why = "handle "+itos(h)+" is not this module's"+
+					(t >= 1 && t < 128 ? " (another module's)" : "");
+			return nullptr;
+		}
+		if(i >= slots.size() || gen == 0 || gen > slots[i].gen){
+			why = "handle "+itos(h)+" was never given";
+			return nullptr;
+		}
+		Slot &s = slots[i];
+		if(gen != s.gen || s.kind == Slot::NONE){
+			why = "handle "+itos(h)+" is stale (dropped)";
+			return nullptr;
+		}
+		return &s;
+	}
+
+	// m:drop(h): the slot free, its generation on
+	bool drop(uint32_t h, ss_ &why)
+	{
+		Slot *s = slot_of(h, why);
+		if(!s)
+			return false;
+		for(uint64_t n : s->indices)
+			indices_all -= n;
+		texture_bytes_all -= s->texture_bytes;
+		const uint32_t gen = s->gen + 1;
+		*s = Slot();
+		s->gen = gen;
+		return true;
+	}
+
+	uint64_t memory_size()
+	{
 #if BUILDAT_WASM_NATIVE
-	static void host_log(void *host, uint32_t p, uint32_t n)
+		return memory ? memory->size : 0;
+#elif defined(__EMSCRIPTEN__)
+		return (uint64_t)bw_memory_size(web_id);
+#else
+		return 0;
+#endif
+	}
+
+	// The module's memory at [ptr, ptr+len), checked and copied
+	bool copy_in(uint32_t ptr, uint64_t len, void *dst)
+	{
+		if((uint64_t)ptr + len > memory_size())
+			return false;
+		if(len == 0)
+			return true;
+#if BUILDAT_WASM_NATIVE
+		memcpy(dst, memory->data + ptr, len);
+		return true;
+#elif defined(__EMSCRIPTEN__)
+		return bw_copy(web_id, ptr, (int)(intptr_t)dst, (int)len, 0) == 0;
+#else
+		return false;
+#endif
+	}
+	bool copy_out(uint32_t ptr, const void *src, uint64_t len)
+	{
+		if((uint64_t)ptr + len > memory_size())
+			return false;
+		if(len == 0)
+			return true;
+#if BUILDAT_WASM_NATIVE
+		memcpy(memory->data + ptr, src, len);
+		return true;
+#elif defined(__EMSCRIPTEN__)
+		return bw_copy(web_id, ptr, (int)(intptr_t)src, (int)len, 1) == 0;
+#else
+		return false;
+#endif
+	}
+
+	// One import's work (IMPORTS[which], its numbers in a): its result, or
+	// trap_reason set. Calls neither Lua nor wasm, and lets no exception
+	// out: natively a trap is a longjmp, which must not cross a C++ frame
+	// with something to destroy, so the caller traps after this returns.
+	uint32_t run_import(uint32_t which, const uint32_t *a)
+	{
+		try {
+			ss_ why;
+			const uint32_t r = import_body(which, a, why);
+			if(why.empty())
+				return r;
+			trap_reason = "buildat."+ss_(which < IMP_COUNT ?
+					IMPORTS[which].name : "?")+": "+why;
+		} catch(std::exception &e){
+			trap_reason = ss_("an import: ")+e.what();
+		} catch(...){
+			trap_reason = "an import: an exception";
+		}
+		log_w(MODULE, "wasm %s: trap: %s", cs(name), cs(trap_reason));
+		return 0;
+	}
+
+	static bool finite_under(float v, float max)
+	{
+		return std::isfinite(v) && v <= max && v >= -max;
+	}
+
+	// simplified: a module makes no node or component of its own: Urho3D
+	// sends E_NODEADDED and E_COMPONENTADDED to Lua's handlers as they are
+	// made, which would be a re-entry, so its Lua makes them and hands them
+	// over. An import that makes one wants those events queued for after
+	// the call.
+	// simplified: a geometry's indices are expanded into CustomGeometry's
+	// vertex list (it has no index buffer), so the caps count indices; a
+	// Model with an IndexBuffer of its own when a mesh's size matters.
+	// simplified: a voxel read gives each voxel's first plane (the 32-bit
+	// word); a plane argument when a module wants another.
+	// simplified: the start function has no memory to give an import yet
+	// (natively and on the web the memory is known once instantiation
+	// returns), so an import with a pointer traps there.
+	uint32_t import_body(uint32_t which, const uint32_t *a, ss_ &why)
+	{
+		using namespace Urho3D;
+		static const char *PAST = "past the module's memory";
+		switch(which){
+		case IMP_LOG: {
+			// The whole range is checked; the first MAX_LOG bytes shown
+			if((uint64_t)a[0] + a[1] > memory_size()){
+				why = PAST;
+				return 0;
+			}
+			uint8_t buf[MAX_LOG];
+			const size_t n = std::min<size_t>(a[1], MAX_LOG);
+			if(!copy_in(a[0], n, buf)){
+				why = PAST;
+				return 0;
+			}
+			log_i(MODULE, "wasm %s: %s", cs(name), cs(printable(buf, n)));
+			return 0;
+		}
+		case IMP_TIME_MS:
+			return (uint32_t)std::chrono::duration_cast<
+					std::chrono::milliseconds>(
+					std::chrono::steady_clock::now() - loaded).count();
+		case IMP_VOXELS_SIZE:
+		case IMP_VOXELS_READ: {
+			Slot *s = slot_of(a[0], why);
+			if(!s)
+				return 0;
+			sp_<interface::VoxelVolume> v = s->volume.lock();
+			if(s->kind != Slot::VOLUME || !v){
+				why = s->kind != Slot::VOLUME ? "not a volume's handle" :
+						"its volume is gone";
+				return 0;
+			}
+			const PolyVox::Region &r = v->getEnclosingRegion();
+			const PolyVox::Vector3DInt32 lc = r.getLowerCorner(),
+					uc = r.getUpperCorner();
+			if(which == IMP_VOXELS_SIZE){
+				const int32_t out[6] = {lc.getX(), lc.getY(), lc.getZ(),
+						uc.getX() - lc.getX() + 1, uc.getY() - lc.getY() + 1,
+						uc.getZ() - lc.getZ() + 1};
+				if(!copy_out(a[1], out, sizeof out))
+					why = PAST;
+				return 0;
+			}
+			int32_t box[6];
+			if(!copy_in(a[1], sizeof box, box)){
+				why = PAST;
+				return 0;
+			}
+			for(int k = 3; k < 6; k++)
+				if(box[k] < 0 || (uint64_t)box[k] > MAX_VOXELS){
+					why = "a box's size is negative or past the cap";
+					return 0;
+				}
+			const uint64_t n = (uint64_t)box[3] * box[4] * box[5];
+			if(n > MAX_VOXELS){
+				why = "more than "+itos(MAX_VOXELS)+" voxels";
+				return 0;
+			}
+			const int64_t lo[3] = {lc.getX(), lc.getY(), lc.getZ()};
+			const int64_t hi[3] = {uc.getX(), uc.getY(), uc.getZ()};
+			for(int k = 0; k < 3; k++)
+				if(n > 0 && (box[k] < lo[k] ||
+						(int64_t)box[k] + box[k + 3] - 1 > hi[k])){
+					why = "the box is not inside the volume";
+					return 0;
+				}
+			if(n == 0)
+				return 0;
+			if(n * 4 > a[3]){
+				why = "out has room for "+itos(a[3])+" bytes, not "+
+						itos(n * 4);
+				return 0;
+			}
+			if((uint64_t)a[2] + n * 4 > memory_size()){
+				why = PAST;
+				return 0;
+			}
+			sv_<uint32_t> out(n);
+			size_t i = 0;
+			for(int64_t z = box[2]; z < (int64_t)box[2] + box[5]; z++)
+			for(int64_t y = box[1]; y < (int64_t)box[1] + box[4]; y++)
+			for(int64_t x = box[0]; x < (int64_t)box[0] + box[3]; x++)
+				out[i++] = v->getVoxelAt((int32_t)x, (int32_t)y, (int32_t)z).data;
+			if(!copy_out(a[2], out.data(), n * 4))
+				why = PAST;
+			return (uint32_t)n;
+		}
+		case IMP_GEOMETRY_SET: {
+			Slot *s = slot_of(a[0], why);
+			if(!s)
+				return 0;
+			Node *node = s->node.Get();
+			if(s->kind != Slot::NODE || !node){
+				why = s->kind != Slot::NODE ? "not a node's handle" :
+						"its node is gone";
+				return 0;
+			}
+			const uint32_t g = a[1];
+			const uint64_t nv = a[3], ni = a[5];
+			if(g >= MAX_GEOMETRIES || nv > MAX_INDICES || ni > MAX_INDICES ||
+					ni % 3 != 0){
+				why = "geometry "+itos(g)+", "+itos(nv)+" vertices, "+
+						itos(ni)+" indices: past the caps (geometry < "+
+						itos(MAX_GEOMETRIES)+", "+itos(MAX_INDICES)+
+						" each), or not triangles";
+				return 0;
+			}
+			if(indices_all - s->indices[g] + ni > MAX_INDICES_ALL){
+				why = "past the module's "+itos(MAX_INDICES_ALL)+" indices";
+				return 0;
+			}
+			CustomGeometry *cg = node->GetComponent<CustomGeometry>();
+			if(!cg){
+				why = "the node has no CustomGeometry (its Lua makes one)";
+				return 0;
+			}
+			sv_<float> verts(nv * 12);
+			sv_<uint32_t> idx(ni);
+			if(!copy_in(a[2], nv * 48, verts.data()) ||
+					!copy_in(a[4], ni * 4, idx.data())){
+				why = PAST;
+				return 0;
+			}
+			for(float f : verts)
+				if(!std::isfinite(f)){
+					why = "a vertex value is not finite";
+					return 0;
+				}
+			for(uint32_t k : idx)
+				if(k >= nv){
+					why = "index "+itos(k)+" is past the "+itos(nv)+
+							" vertices";
+					return 0;
+				}
+			if(cg->GetNumGeometries() <= g)
+				cg->SetNumGeometries(g + 1);
+			cg->BeginGeometry(g, TRIANGLE_LIST);
+			for(uint32_t k : idx){
+				const float *f = &verts[(size_t)k * 12];
+				cg->DefineVertex(Vector3(f[0], f[1], f[2]));
+				cg->DefineNormal(Vector3(f[3], f[4], f[5]));
+				cg->DefineColor(Color(f[6], f[7], f[8], f[9]));
+				cg->DefineTexCoord(Vector2(f[10], f[11]));
+			}
+			cg->Commit();
+			indices_all = indices_all - s->indices[g] + ni;
+			s->indices[g] = ni;
+			return 0;
+		}
+		case IMP_TEXTURE_SET: {
+			Slot *s = slot_of(a[0], why);
+			if(!s)
+				return 0;
+			Texture2D *tex = s->texture.Get();
+			if(s->kind != Slot::TEXTURE || !tex){
+				why = s->kind != Slot::TEXTURE ? "not a texture's handle" :
+						"its texture is gone";
+				return 0;
+			}
+			const uint32_t w = a[1], h = a[2];
+			if(w < 1 || h < 1 || w > MAX_TEXTURE_SIDE || h > MAX_TEXTURE_SIDE){
+				why = itos(w)+"x"+itos(h)+" is not 1 to "+
+						itos(MAX_TEXTURE_SIDE)+" across";
+				return 0;
+			}
+			const uint64_t bytes = (uint64_t)w * h * 4;
+			if(a[4] != bytes){
+				why = "len "+itos(a[4])+" is not width * height * 4";
+				return 0;
+			}
+			if(texture_bytes_all - s->texture_bytes + bytes > MAX_TEXTURE_BYTES){
+				why = "past the module's "+itos(MAX_TEXTURE_BYTES)+
+						" bytes of textures";
+				return 0;
+			}
+			// An Image, as the sandbox's Texture2D:SetData(image) takes:
+			// Urho3D keeps it for a device reset
+			SharedPtr<Image> image(new Image(tex->GetContext()));
+			if(!image->SetSize((int)w, (int)h, 4)){
+				why = "no image of that size";
+				return 0;
+			}
+			if(!copy_in(a[3], bytes, image->GetData())){
+				why = PAST;
+				return 0;
+			}
+			if(!tex->SetData(image, false)){
+				why = "the texture took no data";
+				return 0;
+			}
+			texture_bytes_all = texture_bytes_all - s->texture_bytes + bytes;
+			s->texture_bytes = bytes;
+			return 0;
+		}
+		case IMP_NODE_GET:
+		case IMP_NODE_SET: {
+			Slot *s = slot_of(a[0], why);
+			if(!s)
+				return 0;
+			Node *node = s->node.Get();
+			if(s->kind != Slot::NODE || !node){
+				why = s->kind != Slot::NODE ? "not a node's handle" :
+						"its node is gone";
+				return 0;
+			}
+			float t[10];
+			if(which == IMP_NODE_GET){
+				const Vector3 p = node->GetPosition(), sc = node->GetScale();
+				const Quaternion q = node->GetRotation();
+				const float out[10] = {p.x_, p.y_, p.z_, q.w_, q.x_, q.y_, q.z_,
+						sc.x_, sc.y_, sc.z_};
+				if(!copy_out(a[1], out, sizeof out))
+					why = PAST;
+				return 0;
+			}
+			if(!copy_in(a[1], sizeof t, t)){
+				why = PAST;
+				return 0;
+			}
+			for(float f : t)
+				if(!finite_under(f, 1e9f)){
+					why = "a transform value is not finite, or past 1e9";
+					return 0;
+				}
+			Quaternion q(t[3], t[4], t[5], t[6]);
+			if(q.LengthSquared() < 1e-12f){
+				why = "a zero rotation";
+				return 0;
+			}
+			q.Normalize();
+			node->SetTransform(Vector3(t[0], t[1], t[2]), q,
+					Vector3(t[7], t[8], t[9]));
+			return 0;
+		}
+		case IMP_SEND_PACKET: {
+			const uint32_t nl = a[1], dl = a[3];
+			if(nl < 1 || nl > MAX_PACKET_NAME || dl > MAX_PACKET){
+				why = "a name of "+itos(nl)+" bytes or data of "+itos(dl)+
+						": past the caps ("+itos(MAX_PACKET_NAME)+", "+
+						itos(MAX_PACKET)+")";
+				return 0;
+			}
+			if(sent.size() >= MAX_PACKETS){
+				why = "more than "+itos(MAX_PACKETS)+" packets in a call";
+				return 0;
+			}
+			ss_ pname(nl, '\0'), data(dl, '\0');
+			if(!copy_in(a[0], nl, &pname[0]) || !copy_in(a[2], dl, &data[0])){
+				why = PAST;
+				return 0;
+			}
+			for(char c : pname)
+				if(!isalnum((unsigned char)c) && c != '_'){
+					why = "a packet's name is not [A-Za-z0-9_]";
+					return 0;
+				}
+			sent.emplace_back(name+":"+pname, std::move(data));
+			return 0;
+		}
+		case IMP_EVENT_TAKE: {
+			if(events.empty())
+				return (uint32_t)-1;
+			const ss_ &e = events.front();
+			if(e.size() > a[1])
+				return (uint32_t)e.size();
+			if(!copy_out(a[0], e.data(), e.size())){
+				why = PAST;
+				return 0;
+			}
+			const uint32_t n = (uint32_t)e.size();
+			event_bytes -= e.size();
+			events.pop_front();
+			return n;
+		}
+		}
+		why = "no such import";
+		return 0;
+	}
+
+#if BUILDAT_WASM_NATIVE
+	// wasm2c's import functions (the glue) call this. A refused import
+	// traps here, once run_import() has returned: nothing of C++'s is
+	// left to destroy between here and trapping()'s setjmp.
+	static uint32_t host_import(void *host, uint32_t which, const uint32_t *a)
 	{
 		Instance *self = (Instance*)host;
-		wasm_rt_memory_t *m = self->memory;
-		if(!m || (uint64_t)p + n > m->size){
-			log_i(MODULE, "wasm %s: (log: past the module's memory)",
-					cs(self->name));
-			return;
-		}
-		log_i(MODULE, "wasm %s: %s", cs(self->name),
-				cs(printable(m->data + p, n)));
+		g_in_wasm = 0;
+		const uint32_t r = self->run_import(which, a);
+		g_in_wasm = 1;
+		if(!self->trap_reason.empty())
+			wasm_rt_trap(WASM_RT_TRAP_UNREACHABLE);
+		return r;
 	}
 
 	// The wasm call with a trap caught: 0, or the trap's code. Nothing
@@ -606,7 +1145,7 @@ struct Instance {
 			if(what == 0){
 				in->mem = calloc(1, ((SizeFn)dlsym(in->dl, "buildat_size"))());
 				((InstantiateFn)dlsym(in->dl, "buildat_instantiate"))(
-						in->mem, in, host_log);
+						in->mem, in, host_import);
 			} else {
 				in->call_fn(in->mem, f, a, r);
 			}
@@ -637,7 +1176,8 @@ struct Instance {
 		if(mem)
 			memory = memory_fn(mem);
 		if(code != 0){
-			fail(ss_("trap at start: ")+wasm_rt_strerror((wasm_rt_trap_t)code));
+			fail("trap at start: "+(trap_reason.empty() ?
+					ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason));
 			return;
 		}
 		state = READY;
@@ -693,11 +1233,11 @@ struct Instance {
 					"compiler/bin/c++, then c++ in PATH)");
 			return;
 		}
-		has_log = false;
+		has_imports = false;
 		bool has_memory = false;
 		for(const wabt::Import *imp : m.imports)
 			if(imp->module_name == "buildat")
-				has_log = true;
+				has_imports = true;
 		// The exports renamed to what the glue calls: f<i> in the order
 		// of `exports`, mem for the memory named "memory", x<i> others
 		size_t fi = 0, xi = 0;
@@ -751,7 +1291,7 @@ struct Instance {
 				!interface::fs::write_file(dir+"/m.h", ss_(hb.begin(), hb.end())) ||
 				!interface::fs::write_file(dir+"/wasm-rt.h", buildat_wasm_rt_h) ||
 				!interface::fs::write_file(dir+"/glue.c",
-						glue_c(exports, has_log, has_memory))){
+						glue_c(exports, has_imports, has_memory))){
 			fail("could not write into "+dir);
 			return;
 		}
@@ -831,37 +1371,34 @@ struct Instance {
 		if(web_id)
 			bw_free(web_id);
 #endif
+		g_tag_used[tag] = false;
 		g_instance_count--;
 	}
 
 #ifdef __EMSCRIPTEN__
-	void take_logs()
-	{
-		while(char *s = bw_take(web_id, 0)){
-			log_i(MODULE, "wasm %s: %s", cs(name), s);
-			free(s);
-		}
-	}
 	ss_ take_error()
 	{
-		char *s = bw_take(web_id, 1);
+		char *s = bw_take_error(web_id);
 		ss_ r = s ? s : "?";
 		free(s);
 		return r;
 	}
 #endif
-
-	uint64_t memory_size()
-	{
-#if BUILDAT_WASM_NATIVE
-		return memory ? memory->size : 0;
-#elif defined(__EMSCRIPTEN__)
-		return (uint64_t)bw_memory_size(web_id);
-#else
-		return 0;
-#endif
-	}
 };
+
+#ifdef __EMSCRIPTEN__
+// The module's imports, from bw_load()'s JS: the result, or -1 for a trap
+// (run_import() logged why, and the JS throws)
+extern "C" EMSCRIPTEN_KEEPALIVE double buildat_wasm_import(int host, int which,
+		int a0, int a1, int a2, int a3, int a4, int a5)
+{
+	Instance *in = (Instance*)(intptr_t)host;
+	const uint32_t a[MAX_IMPORT_PARAMS] = {(uint32_t)a0, (uint32_t)a1,
+			(uint32_t)a2, (uint32_t)a3, (uint32_t)a4, (uint32_t)a5};
+	const uint32_t r = in->run_import((uint32_t)which, a);
+	return in->trap_reason.empty() ? (double)r : -1.0;
+}
+#endif
 
 static const char *META = "buildat.wasm_module";
 
@@ -912,9 +1449,9 @@ static int l_wasm_load(lua_State *L)
 	}
 	wabt::Module m;
 	sv_<ExportSig> exports;
-	bool has_log = false;
+	bool has_imports = false;
 	ss_ why;
-	if(!check_module(bytes, m, exports, has_log, why)){
+	if(!check_module(bytes, m, exports, has_imports, why)){
 		log_w(MODULE, "wasm %s: refused: %s", cs(name), cs(why));
 		lua_pushnil(L);
 		lua_pushstring(L, ("refused: "+why).c_str());
@@ -925,6 +1462,11 @@ static int l_wasm_load(lua_State *L)
 			bytes.size(), exports.size(), cs(hash.substr(0, 12)));
 	Instance *in = new Instance();
 	g_instance_count++;
+	// A tag no live instance has: MAX_INSTANCES is below 127
+	for(uint32_t t = 1; t < 128 && !in->tag; t++)
+		if(!g_tag_used[t])
+			in->tag = t;
+	g_tag_used[in->tag] = true;
 	in->name = name;
 	in->exports = exports;
 	Instance **ud = (Instance**)lua_newuserdata(L, sizeof(Instance*));
@@ -934,10 +1476,13 @@ static int l_wasm_load(lua_State *L)
 #if BUILDAT_WASM_NATIVE
 	in->start_native(m, hash);
 #elif defined(__EMSCRIPTEN__)
-	in->web_id = bw_load((const uint8_t*)bytes.data(), (int)bytes.size(),
-			has_log ? 1 : 0);
-	in->take_logs();
-	char *err = bw_take(in->web_id, 1);
+	ss_ names;
+	for(const ImportDef &d : IMPORTS)
+		names += ss_(names.empty() ? "" : ",")+d.name;
+	in->web_id = bw_new();
+	bw_load(in->web_id, (const uint8_t*)bytes.data(), (int)bytes.size(),
+			(int)(intptr_t)in, names.c_str());
+	char *err = bw_take_error(in->web_id);
 	if(err){
 		in->fail(ss_("the browser: ")+err);
 		free(err);
@@ -1022,13 +1567,18 @@ static int l_call(lua_State *L)
 		}
 	}
 	(void)plain;
+	if(in->in_call)
+		raise("wasm %s: called from inside its own call", in->name.c_str());
+	in->in_call = true;
+	in->trap_reason.clear();
+	in->sent.clear();
 	double result = 0;
+	ss_ trap;
 #if BUILDAT_WASM_NATIVE
 	uint64_t r = 0;
 	const int code = Instance::trapping(in, 1, (uint32_t)index, args, &r);
 	if(code != 0)
-		raise("wasm %s: %s: trap: %s", in->name.c_str(),
-				fname.c_str(), wasm_rt_strerror((wasm_rt_trap_t)code));
+		trap = wasm_rt_strerror((wasm_rt_trap_t)code);
 	switch(sig.result){
 	case 'i': result = (int32_t)(uint32_t)r; break;
 	case 'I': result = (double)(int64_t)r; break;
@@ -1036,19 +1586,110 @@ static int l_call(lua_State *L)
 	case 'F': memcpy(&result, &r, 8); break;
 	}
 #elif defined(__EMSCRIPTEN__)
-	int rc = bw_call(in->web_id, sig.name.c_str(), plain, sig.params.c_str(),
-			n, &result);
-	in->take_logs();
-	if(rc != 0){
-		const ss_ e = in->take_error();
-		raise("wasm %s: %s: trap: %s", in->name.c_str(),
-				fname.c_str(), e.c_str());
-	}
+	if(bw_call(in->web_id, sig.name.c_str(), plain, sig.params.c_str(),
+			n, &result) != 0)
+		trap = in->take_error();
 #endif
+	in->in_call = false;
+	if(!in->trap_reason.empty())
+		trap = in->trap_reason;
+	if(!trap.empty()){
+		// What a call that trapped sent is dropped with it
+		in->sent.clear();
+		raise("wasm %s: %s: trap: %s", in->name.c_str(), fname.c_str(),
+				trap.c_str());
+	}
+	// The packets it sent, now that it has returned: through
+	// buildat.send_packet, as Lua's (a serverless app's go nowhere)
+	sv_<std::pair<ss_, ss_>> sent;
+	sent.swap(in->sent);
+	for(const auto &p : sent){
+		lua_getglobal(L, "buildat");
+		lua_getfield(L, -1, "send_packet");
+		lua_remove(L, -2);
+		lua_pushlstring(L, p.first.data(), p.first.size());
+		lua_pushlstring(L, p.second.data(), p.second.size());
+		if(lua_pcall(L, 2, 0, 0) != 0){
+			log_w(MODULE, "wasm %s: sending %s: %s", cs(in->name),
+					cs(p.first), lua_tostring(L, -1) ? lua_tostring(L, -1) : "?");
+			lua_pop(L, 1);
+		}
+	}
 	if(!sig.result)
 		return 0;
 	lua_pushnumber(L, result);
 	return 1;
+}
+
+// __buildat_wasm_handle(m, object) -> a handle the module can use for the
+// object: a Node, a Texture2D (tolua's, unwrapped by api.lua) or a
+// buildat.Volume
+static int l_handle(lua_State *L)
+{
+	Instance *in = check_instance(L);
+	tolua_Error err;
+	uint32_t h = 0;
+	if(lua_isuserdata(L, 2) && tolua_isusertype(L, 2, "Node", 0, &err)){
+		h = in->give(Instance::Slot::NODE,
+				(Urho3D::Node*)tolua_tousertype(L, 2, 0), nullptr, nullptr);
+	} else if(lua_isuserdata(L, 2) &&
+			tolua_isusertype(L, 2, "Texture2D", 0, &err)){
+		h = in->give(Instance::Slot::TEXTURE, nullptr,
+				(Urho3D::Texture2D*)tolua_tousertype(L, 2, 0), nullptr);
+	} else {
+		sp_<interface::VoxelVolume> v;
+		if(lua_isuserdata(L, 2)){
+			luabind::object o(luabind::from_stack(L, 2));
+			try {
+				v = luabind::object_cast<sp_<interface::VoxelVolume>>(o);
+			} catch(luabind::cast_failed&){
+			}
+		}
+		if(!v)
+			raise("wasm %s: handle(object): a Node, a Texture2D or a Volume",
+					in->name.c_str());
+		h = in->give(Instance::Slot::VOLUME, nullptr, nullptr, v);
+	}
+	if(!h)
+		raise("wasm %s: more than %d handles", in->name.c_str(),
+				(int)MAX_HANDLES);
+	lua_pushnumber(L, h);
+	return 1;
+}
+
+static uint32_t handle_arg(lua_State *L, int i)
+{
+	const double v = number(L, i);
+	if(!(v >= 0 && v <= 4294967295.0 && v == std::floor(v)))
+		raise("wasm: not a handle");
+	return (uint32_t)v;
+}
+
+// m:drop(handle): the module's handle no longer names the object
+static int l_drop(lua_State *L)
+{
+	Instance *in = check_instance(L);
+	ss_ why;
+	if(!in->drop(handle_arg(L, 2), why))
+		raise("wasm %s: drop: %s", in->name.c_str(), why.c_str());
+	return 0;
+}
+
+// m:push(bytes): an event queued for the module (buildat_event_take())
+static int l_push(lua_State *L)
+{
+	Instance *in = check_instance(L);
+	if(lua_type(L, 2) != LUA_TSTRING)
+		raise("wasm: push(bytes): bytes is not a string");
+	size_t len = 0;
+	const char *p = lua_tolstring(L, 2, &len);
+	if(in->events.size() >= MAX_EVENTS ||
+			in->event_bytes + len > MAX_EVENT_BYTES)
+		raise("wasm %s: its event queue is full (%d events, %d bytes)",
+				in->name.c_str(), (int)MAX_EVENTS, (int)MAX_EVENT_BYTES);
+	in->events.emplace_back(p, len);
+	in->event_bytes += len;
+	return 0;
 }
 
 // The module's memory at [ptr, ptr+len), checked against its size now
@@ -1121,8 +1762,17 @@ void init_wasm(lua_State *L)
 	lua_setfield(L, -2, "read");
 	lua_pushcfunction(L, guarded<l_write>);
 	lua_setfield(L, -2, "write");
+	lua_pushcfunction(L, guarded<l_drop>);
+	lua_setfield(L, -2, "drop");
+	lua_pushcfunction(L, guarded<l_push>);
+	lua_setfield(L, -2, "push");
+	// m:handle(object) is api.lua's, which unwraps a sandboxed object
+	lua_pushvalue(L, -1);
+	lua_setglobal(L, "__buildat_wasm_methods");
 	lua_setfield(L, -2, "__index");
 	lua_pop(L, 1);
+	lua_pushcfunction(L, guarded<l_handle>);
+	lua_setglobal(L, "__buildat_wasm_handle");
 	lua_pushcfunction(L, guarded<l_wasm_load>);
 	lua_setglobal(L, "__buildat_wasm_load");
 }

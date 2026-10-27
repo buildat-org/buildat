@@ -467,9 +467,27 @@ against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
 it loads the module (cached by the sources' hash; the module refused when
 there is no clang and wasm linker), client_data serves it as
 <module>/<module>.wasm, and a client loads it with buildat.wasm_load()
-(client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call;
-buildat_log(text, len) writes a line in the client's log. Nothing else
-yet. The server looks for the tools at its start: BUILDAT_WASM_CC and
+(client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call. The
+imports, all a module can call, general (they move bytes and do not know
+what they mean): buildat_log(text, len), a line in the client's log;
+buildat_time_ms(), whole milliseconds since the load; buildat_voxels_size
+and buildat_voxels_read, a volume's region and a box of its voxels (each
+one's first plane, 32 bits, x fastest) into the module's memory;
+buildat_geometry_set(node, geometry, vertices, count, indices, count), a
+triangle list of 12 floats a vertex (position, normal, colour, texture
+coordinate) as a node's CustomGeometry's geometry; buildat_texture_set,
+a texture's RGBA pixels; buildat_node_get and buildat_node_set, a node's
+transform as 10 floats (position, rotation w x y z, scale);
+buildat_send_packet(name, len, data, len), a packet "<module>:<name>" to
+the server; buildat_event_take(buf, cap), the next event its Lua queued.
+Nodes, textures and volumes are handles its Lua gave it (m:handle()).
+Caps, a module's: 1024 handles, 196608 indices a geometry and 1048576 in
+all, 16 geometries a node, 4096 pixels across and 64 MiB of textures,
+4194304 voxels a read, 64 packets a call of at most 65536 bytes and a
+name of 64. A pointer or length past the module's memory, a handle not
+its own, stale or of the wrong kind, and a cap passed each trap the
+call, with the reason in the client's log. The server looks for the
+tools at its start: BUILDAT_WASM_CC and
 BUILDAT_WASM_LD, then clang and wasm-ld in PATH, then emsdk's and
 rustup's rust-lld.
 
@@ -806,7 +824,7 @@ interface/voxel_cereal_legacy.h: In, read_vector, read
 interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result, stands, settle, find, self_test
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
-interface/wasm_api.h: buildat_log
+interface/wasm_api.h: buildat_log, buildat_time_ms, buildat_voxels_size, buildat_voxels_read, buildat_geometry_set, buildat_texture_set, buildat_node_get, buildat_node_set, buildat_send_packet, buildat_event_take
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write
 ---- end of the generated listing ----

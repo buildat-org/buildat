@@ -2318,7 +2318,17 @@ end
 --     Lua error
 --   m:read(ptr, len) -> the bytes of its memory there, copied
 --   m:write(ptr, bytes): copied into its memory at ptr
+--   m:handle(object) -> a number the module's imports name the object by:
+--     a Node, a Texture2D or a buildat.Volume (interface/wasm_api.h)
+--   m:drop(handle): the handle names nothing from now on
+--   m:push(bytes): an event queued for the module (buildat_event_take())
 -- A pointer and a length past its memory are an error, not a read.
+__buildat_wasm_methods.handle = function(m, object)
+	-- A sandboxed Urho3D object is a wrapper; a Volume is luabind's own
+	local mt = getmetatable(object)
+	local unsafe = type(mt) == "table" and rawget(mt, "unsafe")
+	return __buildat_wasm_handle(m, unsafe or object)
+end
 buildat.safe.wasm_load = function(module)
 	if type(module) ~= "string" or not module:match("^[%w_]+$") then
 		return nil, "wasm_load(module): a module's name"

@@ -6,9 +6,20 @@
 // serves the .wasm to clients, which run it as a sandboxed module of its own
 // and call its exports from Lua (buildat.wasm_load(), doc/client_api.txt).
 //
-// simplified: step 1 of [CLIENT_WASM] -- the export macro and a log line.
-// The voxel, geometry, transform, time and packet imports come with the
-// rest of the API (doc/plan/web_client_plan.md).
+// The imports below are all a module can call, each checked by the client
+// (natively and on the web alike):
+// - a pointer and a length are checked against the module's memory, and
+//   the bytes copied before they are used; one past it is a trap;
+// - nodes, textures and voxel volumes are handles (an int), given to the
+//   module by its own Lua (m:handle(object)); a handle the module was not
+//   given, one dropped or whose object is gone, and another module's are
+//   each a trap;
+// - none calls into Lua or back into wasm: what Lua has for the module
+//   (packets, input) is queued with m:push() and taken with
+//   buildat_event_take(), and the packets the module sends go out when the
+//   call it is in returns.
+// A trap stops the call that is running; Lua's m:call() is then an error,
+// and the client logs why.
 #pragma once
 
 #ifdef __cplusplus
@@ -21,8 +32,66 @@
 #define BUILDAT_WASM_EXPORT BUILDAT_WASM_EXTERN_C \
 		__attribute__((visibility("default")))
 
+#define BUILDAT_WASM_IMPORT(name) BUILDAT_WASM_EXTERN_C \
+		__attribute__((import_module("buildat"), import_name(#name)))
+
 // A line in the client's log, prefixed with the module's name. The bytes
 // are text; at most 1000 are shown.
-BUILDAT_WASM_EXTERN_C
-__attribute__((import_module("buildat"), import_name("log")))
+BUILDAT_WASM_IMPORT(log)
 void buildat_log(const char *text, unsigned int len);
+
+// Milliseconds since the module was loaded, whole ones (a coarse clock, on
+// purpose: see the plan's side channels). Wraps after 49 days.
+BUILDAT_WASM_IMPORT(time_ms)
+unsigned int buildat_time_ms(void);
+
+// A voxel volume's region (a handle Lua gave, of a buildat.Volume: a
+// chunk's is voxelworld's get_volume(node)): out[0..2] its lowest corner,
+// out[3..5] its size in voxels, x, y, z.
+BUILDAT_WASM_IMPORT(voxels_size)
+void buildat_voxels_size(int volume, int out[6]);
+
+// The voxels of a box of it -- box[0..2] its lowest corner, box[3..5] its
+// size, inside the volume's region -- as each voxel's first plane (a
+// VoxelInstance's 32 bits), x fastest, then y, then z, into out, which has
+// room for out_bytes. Returns how many it wrote. At most 4194304 voxels.
+BUILDAT_WASM_IMPORT(voxels_read)
+int buildat_voxels_read(int volume, const int box[6], unsigned int *out,
+		unsigned int out_bytes);
+
+// A vertex count of a vertex buffer, 12 floats a vertex (position, normal,
+// colour r, g, b, a, texture coordinate), and an index buffer of triangles
+// into it as a node's geometry number `geometry` (0 to 15). The node's
+// CustomGeometry is the one its Lua made, with the material it gave; one
+// geometry may have 196608 indices, a module 1048576 in all.
+BUILDAT_WASM_IMPORT(geometry_set)
+void buildat_geometry_set(int node, unsigned int geometry,
+		const float *vertices, unsigned int vertex_count,
+		const unsigned int *indices, unsigned int index_count);
+
+// A texture's size and pixels, RGBA, 8 bits each, rows from the top;
+// `len` is width * height * 4. At most 4096 across, and 64 MiB of
+// textures a module.
+BUILDAT_WASM_IMPORT(texture_set)
+void buildat_texture_set(int texture, unsigned int width, unsigned int height,
+		const unsigned char *rgba, unsigned int len);
+
+// A node's transform, in its parent's space, 10 floats: position x, y, z,
+// rotation w, x, y, z, scale x, y, z. A value that is not finite, or past
+// 1e9, is a trap.
+BUILDAT_WASM_IMPORT(node_get)
+void buildat_node_get(int node, float transform[10]);
+BUILDAT_WASM_IMPORT(node_set)
+void buildat_node_set(int node, const float transform[10]);
+
+// A packet to the server, named "<module>:<name>" (the module's own), sent
+// when the call this is in returns. A name is [A-Za-z0-9_] and at most 64
+// bytes, the data at most 65536; at most 64 packets a call.
+BUILDAT_WASM_IMPORT(send_packet)
+void buildat_send_packet(const char *name, unsigned int name_len,
+		const void *data, unsigned int data_len);
+
+// The oldest event Lua queued (m:push(bytes)) into buf: its length, which
+// is taken only if it is at most cap; -1 with none.
+BUILDAT_WASM_IMPORT(event_take)
+int buildat_event_take(void *buf, unsigned int cap);

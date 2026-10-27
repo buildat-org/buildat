@@ -875,7 +875,8 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   <module>/<module>.wasm. Each load is an instance of its own with its own
   memory. Before anything runs it is validated and capped, on both clients
   alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
-  at most 1024 pages (64 MiB), the log the only import; an export
+  at most 1024 pages (64 MiB), wasm_api.h's imports the only ones (by
+  name and signature); an export
   takes and returns i32, i64, f32 and f64 only (at most 16 of them, one
   result). Natively it is then translated to C (wasm2c) and compiled by
   the system's compiler in a process of its own, killed past 3 minutes or
@@ -894,8 +895,27 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   its memory. A range past its memory is an error. A buffer is passed by
   writing it where the module says (an export that returns a pointer) and
   calling with the pointer and the length.
-- The module logs with buildat_log(text, len), a line in the client's log
-  under its name. Nothing else of the client is reachable from it yet.
+- m:handle(object) -> a number: what the module's imports name a Node, a
+  Texture2D or a buildat.Volume by (a chunk's: voxelworld's
+  get_volume(node)). The module reaches only what its Lua handed it; at
+  most 1024 handles a module. m:drop(handle): the handle names nothing
+  from now on. A handle is the instance's own: another instance's, a
+  dropped one and a made-up one are each a trap in the import.
+- m:push(bytes): an event queued for the module, taken by its
+  buildat_event_take() on its next call (at most 256 queued, 4 MiB). A
+  packet for the module is pushed by its Lua's sub_packet handler.
+- The imports (interface/wasm_api.h, doc/server_api.txt): a log line,
+  a coarse clock (whole milliseconds), a volume's voxels read into its
+  memory, a vertex and index buffer from its memory as a node's geometry
+  (its CustomGeometry, which Lua makes and gives a material), a texture's
+  pixels, a node's transform read and set, packets sent (named
+  "<module>:<name>", sent through buildat.send_packet when the call
+  returns; a call that trapped sends none) and the events taken. Each
+  pointer and length is checked against the module's memory and the bytes
+  copied; a refusal traps the call with its reason in the client's log
+  ("wasm <module>: trap: buildat.<import>: ..."), and m:call() is an
+  error saying it. No import calls Lua or wasm, and a call into a module
+  from inside its own call is an error.
 - simplified: no Windows client yet (wasm_load says so), and no time
   limit on a call: an endless loop freezes the client (the metering is
   [CLIENT_WASM]'s step 3).
