@@ -76,6 +76,11 @@ run()
 run 1
 grep -aq "built wasm/ in" "$t/srv1.log" || fail "the server did not build wasm/"
 grep -aq "wasm main: compiled in" "$t/cli1.log" || fail "the client did not compile it"
+# LuaJIT's error out of guarded<> as it was raised ([GUARDED_LUA_ERROR]).
+# Not on the web: there PUC Lua's longjmp through the guard's try comes
+# out as a garbage error value (Emscripten's JS exceptions take it).
+grep -aq 'guarded luaL_error: decompress(): unknown format "nope"' "$t/cli1.log" ||
+	fail "a guarded binding's luaL_error lost its message"
 run 2
 grep -aq "wasm/ is built (cache hit)" "$t/srv2.log" || fail "the server built wasm/ again"
 grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||

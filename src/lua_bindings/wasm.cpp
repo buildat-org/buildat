@@ -866,7 +866,7 @@ struct Instance {
 static const char *META = "buildat.wasm_module";
 
 // The errors, as exceptions: guarded<> turns one into a Lua error with its
-// message, where a luaL_error() through it reads "unknown C++ exception"
+// message
 [[noreturn]] static void raise(const char *fmt, ...)
 {
 	char buf[400];

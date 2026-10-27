@@ -6,6 +6,9 @@
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
+#if __has_include(<luajit.h>)
+#include <luajit.h>
+#endif
 }
 
 namespace lua_bindings
@@ -26,6 +29,14 @@ namespace lua_bindings
 	//
 	// What comes out instead is an ordinary Lua error, which a pcall
 	// catches and which says what went wrong.
+	//
+	// LuaJIT (x64) raises its own errors -- luaL_error() in F -- as a
+	// foreign exception that catch(...) takes, and it must go on as it is
+	// or its message is lost ([GUARDED_LUA_ERROR]). LuaJIT turns any other
+	// non-std exception into a "C++ exception" Lua error itself. PUC Lua
+	// (the web build) raises by longjmp; Emscripten's JS exceptions take
+	// that through this try as a broken C++ exception, and the error value
+	// comes out as garbage (a known web fault, not handled here).
 	template<lua_CFunction F>
 	int guarded(lua_State *L)
 	{
@@ -36,7 +47,11 @@ namespace lua_bindings
 		} catch(std::exception &e){
 			lua_pushstring(L, e.what());
 		} catch(...){
+#ifdef LUAJIT_VERSION
+			throw;
+#else
 			lua_pushstring(L, "unknown C++ exception in a binding");
+#endif
 		}
 		return lua_error(L);
 	}
