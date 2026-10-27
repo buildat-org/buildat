@@ -747,7 +747,7 @@ interface/http.h: http_get, http_post, send_mail, mail_supported, http_download
 interface/magic_event.h: MagicEvent
 interface/magic_event_handler.h: MagicEventHandler, emit_event, on_event
 interface/markup.h: to_html
-interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, generate_occluder, set_bounce_color, set_alpha_nibbles, column_heights, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, set_voxel_physics_boxes
+interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, VoxelGeometryJob, generate_voxel_geometry_step, generate_occluder, set_bounce_color, set_alpha_nibbles, column_heights, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, set_voxel_physics_boxes
 interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispatch, get_interface, check_interface, add_handler
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
@@ -768,7 +768,7 @@ interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex, unhex, is_hex, hmac
 interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, listen_fd, connect_fd, bind_fd, accept_fd, send_fd, set_nonblocking, send_some, wait_data, get_local_address, get_remote_address, createTCPSocket, probe_connect, set_nonblocking_fd, connect_wait, local_lan_address, lan_socket, lan_send, lan_recv, lan_close
 interface/thread.h: ThreadedThing, ~ThreadedThing, run, on_crash, Thread, ~Thread, set_name, start, is_running, request_stop, stop_requested, join, get_name, ref_backtraces, set_caller_thread, get_caller_thread, get_current_thread, createThread, ThreadLocalKey, set, get
-interface/thread_pool.h: Task, ~Task, pre, thread, post, ThreadPool, ~ThreadPool, add_task, start, request_stop, join, run_post, createThreadPool
+interface/thread_pool.h: Task, ~Task, pre, thread, thread_until, post, urgent, ThreadPool, ~ThreadPool, add_task, start, request_stop, join, run_post, get_backlog, take_times, createThreadPool
 interface/urho3d_cereal.h: save, load
 interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, blocks, many_ids, painted, surfaces, luanti, buildat_legacy_06, preset, id_of, light_pair, surface_modifiers, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, legacy06_id, legacy06_skylight, legacy06_set_skylight, legacy06_lamplight, legacy06_set_lamplight
 interface/voxel_cereal.h: serialize, r, save, load

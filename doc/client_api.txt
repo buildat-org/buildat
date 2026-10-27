@@ -294,6 +294,12 @@ buildat.get_voxel_data(node) -> string or nil
 buildat.column_heights(volume_data, voxel_reg) -> string
 - The local y of each column's highest solid non-cutout voxel, w*d int16 in
   [z][x] order; what a horizon map is built from
+buildat.horizon_merge(cys, heights, chunk) -> string
+- A chunk column's tops out of its chunks' column_heights() strings,
+  chunk*chunk int16 in world rows, each the highest of them, HORIZON_NONE
+  where none has one. cys is the chunks' y as int16, heights their
+  column_heights() strings concatenated in the same order; chunk is the
+  chunk's width, 1...256.
 buildat.mesh_backlog() -> number
 - The meshes and other pool tasks added and not done yet. The web client
   meshes on the frame's own thread a slice a frame, and voxelworld waits
