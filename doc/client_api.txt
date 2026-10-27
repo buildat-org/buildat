@@ -934,7 +934,12 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   ("wasm <module>: trap: buildat.<import>: ..."), and m:call() is an
   error saying it. No import calls Lua or wasm, and a call into a module
   from inside its own call is an error.
-- simplified: no Windows client yet (wasm_load says so).
+- Natively the module is compiled with the system's C compiler (Linux)
+  or the package's MinGW (Windows, which also has to ship cc1.exe), and
+  runs in the interpreter until then and where there is none; on
+  Windows the compiled module checks its memory accesses explicitly
+  instead of by guard pages. A client on another platform (macOS) has
+  none: wasm_load's module fails, saying so.
 
 buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z}
 buildat.Vector2(x, y) / buildat.Vector2(v) -> {x, y}

@@ -8,3 +8,15 @@ void wasm_trap_delete(struct wasm_trap_t *trap)
 	(void)trap;
 	abort();
 }
+
+/* And on Windows, what platform_init.c calls from win_socket.c, which
+ * buildat leaves out with WASI: no sockets, so no winsock to start. */
+#ifdef _WIN32
+int init_winsock(void)
+{
+	return 0;
+}
+void deinit_winsock(void)
+{
+}
+#endif

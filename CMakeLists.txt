@@ -360,8 +360,8 @@ add_subdirectory("3rdparty/luabind-deboostified")
 # [CLIENT_WASM] the validator and wasm2c, for the client
 if(BUILD_CLIENT)
 	add_subdirectory("3rdparty/wabt")
-	# and the interpreter, for the native client on Linux
-	if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN)
+	# and the interpreter, for the native client on Linux and Windows
+	if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32) AND NOT EMSCRIPTEN)
 		add_subdirectory("3rdparty/wamr")
 	endif()
 endif()
@@ -581,9 +581,13 @@ if(BUILD_CLIENT)
 		src/lua_bindings/synth.cpp
 		src/lua_bindings/wasm.cpp
 	)
-	# [CLIENT_WASM] wasm2c's runtime, linked in whole on Linux
+	# [CLIENT_WASM] wasm2c's runtime, linked in whole on Linux, and the
+	# files the client writes beside the C it compiles
 	if(TARGET wasm_rt)
 		list(APPEND CLIENT_SRCS $<TARGET_OBJECTS:wasm_rt>)
+	endif()
+	if(TARGET wasm_rt_files)
+		list(APPEND CLIENT_SRCS $<TARGET_OBJECTS:wasm_rt_files>)
 	endif()
 
 	if(WIN32)
@@ -634,6 +638,17 @@ if(BUILD_CLIENT)
 			WASM_RT_SKIP_SIGNAL_RECOVERY=1 WASM_RT_STACK_DEPTH_COUNT=1)
 		target_link_options(${CLIENT_EXE_NAME} PRIVATE
 			-Wl,--dynamic-list=${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm_rt.dynlist)
+	endif()
+	# [CLIENT_WASM_WINDOWS] On Windows each module's DLL has the runtime in
+	# it, and the client reads its types only (the memory's); the main
+	# thread's stack is Linux's 8 MiB, which the modules' call depth of 2000
+	# is counted against (src/lua_bindings/wasm.cpp)
+	if(WIN32 AND TARGET wasm_rt_files)
+		target_include_directories(${CLIENT_EXE_NAME} PRIVATE
+			${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm2c)
+		target_compile_definitions(${CLIENT_EXE_NAME} PRIVATE
+			WASM_RT_MEMCHECK_BOUNDS_CHECK=1 WASM_RT_STACK_DEPTH_COUNT=1)
+		target_link_options(${CLIENT_EXE_NAME} PRIVATE -Wl,--stack,8388608)
 	endif()
 	#if(NOT WIN32)
 	#	target_link_libraries(${CLIENT_EXE_NAME}
@@ -951,9 +966,11 @@ if(BUILD_SERVER)
 		file(GLOB SC_LIBEXEC "${SC}/libexec/gcc/x86_64-w64-mingw32/*")
 		list(GET SC_LIBEXEC 0 SC_LIBEXEC_VER)
 		get_filename_component(SC_GCC_VER "${SC_LIBEXEC_VER}" NAME)
+		# cc1.exe: the C a client builds from a wasm module's wasm2c
+		# translation ([CLIENT_WASM_WINDOWS]), 30 MB
 		install(DIRECTORY "${SC_LIBEXEC_VER}/"
 			DESTINATION "${DST_COMPILER}/libexec/gcc/x86_64-w64-mingw32/${SC_GCC_VER}"
-			FILES_MATCHING PATTERN "cc1plus.exe" PATTERN "collect2.exe"
+			FILES_MATCHING PATTERN "cc1plus.exe" PATTERN "cc1.exe" PATTERN "collect2.exe"
 			PATTERN "*.dll" PATTERN "install-tools" EXCLUDE PATTERN "plugin" EXCLUDE)
 		install(DIRECTORY "${SC}/lib/gcc" DESTINATION "${DST_COMPILER}/lib")
 		# The C++ and libgcc import libraries beside lib/gcc: what -lstdc++

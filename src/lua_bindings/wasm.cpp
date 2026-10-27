@@ -31,9 +31,12 @@
 // module's memory and copies the bytes, names objects by handles from a
 // table of the instance's own, and calls neither Lua nor wasm.
 //
-// simplified: the native build is Linux's (fork, rlimits, guard pages, a
-// signal handler); Windows refuses a module until the compile has a job
-// object and the traps a vectored handler.
+// Natively on Windows ([CLIENT_WASM_WINDOWS]) the same, but: the compile
+// is the package's MinGW in a job object (memory, CPU time and process
+// caps, killed with the client), the module a DLL with wasm2c's runtime
+// in it (a DLL does not see the executable's symbols), and its memory
+// checked by wasm2c's explicit bounds checks instead of guard pages, so
+// that no exception handler is needed (WASM2C_DEFINES below says why).
 #include "lua_bindings/util.h"
 #include "core/log.h"
 #include "interface/sha1.h"
@@ -51,7 +54,7 @@
 #include "wabt/validator.h"
 #include "wabt/ir.h"
 #include "wabt/cast.h"
-#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#if (defined(__linux__) || defined(_WIN32)) && !defined(__EMSCRIPTEN__)
 #define BUILDAT_WASM_NATIVE 1
 #include "wabt/generate-names.h"
 #include "wabt/apply-names.h"
@@ -59,19 +62,31 @@
 #include "client/config.h"
 #include "boot/autodetect.h"
 #include "interface/fs.h"
-#include "wasm-rt-impl.h"
-#include "wasm-rt-exceptions.h"
 #include "wasm_export.h"
+#include <algorithm>
+#include <csignal>
+#include <fstream>
+#include <sstream>
+#ifdef _WIN32
+#include "wasm-rt.h"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "ports/windows_minimal.h"
+#include <sddl.h>
+#include <aclapi.h>
+// Defined again by those (objbase.h), and interface is this tree's namespace
+#undef interface
+#else
+#include "wasm-rt-impl.h"
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <fstream>
-#include <sstream>
+#endif
 #endif
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -628,33 +643,405 @@ static bool g_tag_used[128] = {};
 
 #if BUILDAT_WASM_NATIVE
 
-// The C wasm2c makes is built with these, and the runtime linked into the
-// client with the first two (CMakeLists.txt): the runtime's own signal
-// handler off, as this file's chains to the client's crash handler; the
-// call depth counted, so a deep recursion is a trap, not a native stack
-// overflow. 2000 frames of wasm2c's C fit the main thread's 8 MiB.
+// The C wasm2c makes is built with these (and on Linux the runtime linked
+// into the client with the first two: CMakeLists.txt). The call depth is
+// counted, so that a deep recursion is a trap, not a native stack
+// overflow: 2000 frames of wasm2c's C fit the main thread's stack (8 MiB
+// on Linux; buildat.exe's 8 MiB too, CMakeLists.txt).
+// - Linux: guard pages (8 GiB reserved an instance), the runtime's own
+//   signal handler off, as this file's chains to the client's crash
+//   handler.
+// - Windows ([CLIENT_WASM_WINDOWS]): wasm2c's explicit bounds checks, a
+//   compare and a branch an access. Guard pages there want a vectored
+//   exception handler that leaves the faulting frame for the trap: a
+//   longjmp from inside the handler unwinds through the system's exception
+//   dispatch, which Win64 does not support, and the supported way (the
+//   faulting context pointed at a trampoline) depends on the unwind data of
+//   the module's frames being right. A check in the C is correct by
+//   construction, shares no handler with the client's crash handler, and
+//   reserves no address space.
+#ifdef _WIN32
+static const char *WASM2C_DEFINES = "-DWASM_RT_MEMCHECK_BOUNDS_CHECK=1 "
+		"-DWASM_RT_STACK_DEPTH_COUNT=1 -DWASM_RT_MAX_CALL_STACK_DEPTH=2000";
+static const char *MODULE_FILE = "module.dll";
+#else
 static const char *WASM2C_DEFINES = "-DWASM_RT_SKIP_SIGNAL_RECOVERY=1 "
 		"-DWASM_RT_STACK_DEPTH_COUNT=1 -DWASM_RT_MAX_CALL_STACK_DEPTH=2000";
+static const char *MODULE_FILE = "module.so";
+#endif
 // The time and memory a compile may take before it is killed
 static const int COMPILE_WALL_S = 180;
-static const rlim_t COMPILE_CPU_S = 120;
-static const rlim_t COMPILE_AS_BYTES = (rlim_t)2 << 30;
+static const uint64_t COMPILE_CPU_S = 120;
+static const uint64_t COMPILE_MEM_BYTES = (uint64_t)2 << 30;
+#ifdef _WIN32
+// And the processes it may have at once (gcc, cc1, as, collect2, ld)
+static const DWORD COMPILE_PROCESSES = 16;
+#endif
 // Bumped when the C this writes changes (the glue, or what meter_module()
 // adds), so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 5";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 6";
 
-extern "C" const char buildat_wasm_rt_h[];
+// wasm2c's runtime files the C is built with, as name, contents, name,
+// contents, ..., null (3rdparty/wabt/CMakeLists.txt): its headers, and on
+// Windows its sources, as each module's DLL has the runtime in it
+extern "C" const char *const buildat_wasm_rt_files[];
 
 // What a built module exports to the client (the glue below)
+typedef uint32_t (*ImportFn)(void*, uint32_t, const uint32_t*, int*);
 typedef size_t (*SizeFn)(void);
-typedef uint32_t (*ImportFn)(void*, uint32_t, const uint32_t*);
-typedef void (*InstantiateFn)(void*, void*, ImportFn);
+typedef void (*BindFn)(void*, void*, ImportFn);
+typedef int (*TryFn)(void*, int, uint32_t, const uint64_t*, uint64_t*);
 typedef void (*FreeFn)(void*);
 typedef wasm_rt_memory_t* (*MemoryFn)(void*);
-typedef void (*CallFn)(void*, uint32_t, const uint64_t*, uint64_t*);
 typedef int64_t* (*MeterFn)(void*);
-typedef void (*StartFn)(void*);
 typedef void* (*GlobalFn)(void*, uint32_t);
+typedef uint64_t (*GrowFn)(void*, uint64_t);
+typedef const char* (*StrerrorFn)(int);
+
+// A call is in a compiled module (trapping() below)
+static volatile sig_atomic_t g_in_wasm = 0;
+
+#ifdef _WIN32
+
+static ss_ last_error()
+{
+	const DWORD e = GetLastError();
+	char buf[300] = "";
+	FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL, e, 0, buf, sizeof buf - 1, NULL);
+	ss_ r = buf;
+	while(!r.empty() && (r.back() == '\n' || r.back() == '\r' || r.back() == ' '))
+		r.pop_back();
+	return "error "+itos((int)e)+(r.empty() ? ss_() : ": "+r);
+}
+
+static void* lib_open(const ss_ &path, ss_ &why)
+{
+	void *h = (void*)LoadLibraryA(path.c_str());
+	if(!h)
+		why = "LoadLibrary: "+last_error();
+	return h;
+}
+static void* lib_sym(void *lib, const char *name)
+{
+	return (void*)GetProcAddress((HMODULE)lib, name);
+}
+static void lib_close(void *lib)
+{
+	FreeLibrary((HMODULE)lib);
+}
+static bool is_file(const ss_ &path)
+{
+	const DWORD a = GetFileAttributesA(path.c_str());
+	return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
+static bool is_program(const ss_ &path)
+{
+	return is_file(path);
+}
+
+static ss_ upper(ss_ s)
+{
+	for(char &c : s)
+		c = (char)toupper((unsigned char)c);
+	return s;
+}
+
+// A child of the client's ([CLIENT_WASM_WINDOWS]): args[0] the program,
+// each argument quoted (none here has a quote or ends in a backslash; one
+// that does is refused), in cwd (the client's when empty), its stdout and
+// stderr into out (an inheritable handle) and its stdin from NUL, those
+// two the only handles it inherits. Its environment is the client's with
+// the program's directory first in PATH (its tools' DLLs, as rccpp does)
+// and, when tmp is given, TMP and TEMP there. No window. In a job object
+// of its own, from before it runs: the compile's memory (a process's),
+// CPU time (the job's) and process count, no error dialog, and killed when
+// the job's last handle closes -- the client's, however it ends. process
+// and job are the caller's to close; false with why.
+static bool spawn(const sv_<ss_> &args, const ss_ &cwd, HANDLE out,
+		const ss_ &tmp, HANDLE &process, HANDLE &job, ss_ &why)
+{
+	process = job = NULL;
+	ss_ cmdline;
+	for(const ss_ &a : args){
+		if(a.find('"') != ss_::npos || (!a.empty() && a.back() == '\\')){
+			why = "an argument that cannot be quoted: "+a;
+			return false;
+		}
+		cmdline += (cmdline.empty() ? "\"" : " \"")+a+"\"";
+	}
+	// The environment block, sorted by name as CreateProcess asks
+	sv_<ss_> env;
+	ss_ path;
+	if(LPCH parent = GetEnvironmentStringsA()){
+		for(const char *e = parent; *e; e += strlen(e) + 1){
+			const ss_ v = e;
+			const ss_ name = upper(v.substr(0, v.find('=', 1)));
+			if(name == "PATH")
+				path = v.substr(5);
+			else if(tmp.empty() || (name != "TMP" && name != "TEMP"))
+				env.push_back(v);
+		}
+		FreeEnvironmentStringsA(parent);
+	}
+	const size_t slash = args[0].find_last_of("/\\");
+	env.push_back("PATH="+(slash == ss_::npos ? ss_() :
+			args[0].substr(0, slash)+";")+path);
+	if(!tmp.empty()){
+		env.push_back("TEMP="+tmp);
+		env.push_back("TMP="+tmp);
+	}
+	std::sort(env.begin(), env.end(), [](const ss_ &a, const ss_ &b){
+		return upper(a.substr(0, a.find('=', 1))) <
+				upper(b.substr(0, b.find('=', 1)));
+	});
+	sv_<char> block;
+	for(const ss_ &v : env)
+		block.insert(block.end(), v.c_str(), v.c_str() + v.size() + 1);
+	block.push_back(0);
+
+	JOBOBJECT_EXTENDED_LIMIT_INFORMATION info;
+	memset(&info, 0, sizeof info);
+	info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
+			JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION |
+			JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_JOB_TIME |
+			JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+	info.BasicLimitInformation.PerJobUserTimeLimit.QuadPart =
+			(LONGLONG)COMPILE_CPU_S * 10000000;
+	info.BasicLimitInformation.ActiveProcessLimit = COMPILE_PROCESSES;
+	info.ProcessMemoryLimit = (SIZE_T)COMPILE_MEM_BYTES;
+	job = CreateJobObjectA(NULL, NULL);
+	if(!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+			&info, sizeof info)){
+		why = "a job object for the compile's limits: "+last_error();
+		if(job)
+			CloseHandle(job);
+		job = NULL;
+		return false;
+	}
+
+	SECURITY_ATTRIBUTES sa;
+	memset(&sa, 0, sizeof sa);
+	sa.nLength = sizeof sa;
+	sa.bInheritHandle = TRUE;
+	HANDLE nul = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ |
+			FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+	HANDLE inherit[2] = {out, nul};
+	SIZE_T size = 0;
+	InitializeProcThreadAttributeList(NULL, 1, 0, &size);
+	sv_<char> attr_buf(size);
+	LPPROC_THREAD_ATTRIBUTE_LIST attrs =
+			(LPPROC_THREAD_ATTRIBUTE_LIST)attr_buf.data();
+	bool ok = nul != INVALID_HANDLE_VALUE &&
+			InitializeProcThreadAttributeList(attrs, 1, 0, &size);
+	const bool attrs_made = ok;
+	ok = ok && UpdateProcThreadAttribute(attrs, 0,
+			PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, NULL,
+			NULL);
+	STARTUPINFOEXA si;
+	memset(&si, 0, sizeof si);
+	si.StartupInfo.cb = sizeof si;
+	si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+	si.StartupInfo.hStdInput = nul;
+	si.StartupInfo.hStdOutput = out;
+	si.StartupInfo.hStdError = out;
+	si.lpAttributeList = attrs;
+	PROCESS_INFORMATION pi;
+	memset(&pi, 0, sizeof pi);
+	ok = ok && CreateProcessA(args[0].c_str(), &cmdline[0], NULL, NULL, TRUE,
+			CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+			block.data(), cwd.empty() ? NULL : cwd.c_str(), &si.StartupInfo, &pi);
+	if(!ok)
+		why = "CreateProcess: "+last_error();
+	if(attrs_made)
+		DeleteProcThreadAttributeList(attrs);
+	if(nul != INVALID_HANDLE_VALUE)
+		CloseHandle(nul);
+	// Never run without its limits
+	if(ok && !AssignProcessToJobObject(job, pi.hProcess)){
+		why = "the compile could not be put under its limits: "+last_error();
+		TerminateProcess(pi.hProcess, 1);
+		ok = false;
+	}
+	if(!ok){
+		if(pi.hProcess)
+			CloseHandle(pi.hProcess);
+		if(pi.hThread)
+			CloseHandle(pi.hThread);
+		CloseHandle(job);
+		job = NULL;
+		return false;
+	}
+	ResumeThread(pi.hThread);
+	CloseHandle(pi.hThread);
+	process = pi.hProcess;
+	return true;
+}
+
+// The compiler's first --version line, from a child under the same limits
+static ss_ compiler_version(const ss_ &cmd)
+{
+	SECURITY_ATTRIBUTES sa;
+	memset(&sa, 0, sizeof sa);
+	sa.nLength = sizeof sa;
+	sa.bInheritHandle = TRUE;
+	HANDLE rd = NULL, wr = NULL;
+	if(!CreatePipe(&rd, &wr, &sa, 65536))
+		return "";
+	SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+	HANDLE process = NULL, job = NULL;
+	ss_ why, out;
+	const bool ok = spawn({cmd, "--version"}, "", wr, "", process, job, why);
+	CloseHandle(wr);
+	if(ok){
+		const bool exited = WaitForSingleObject(process, 10000) == WAIT_OBJECT_0;
+		// Nothing of it left holding the pipe: the read ends
+		TerminateJobObject(job, 1);
+		WaitForSingleObject(process, 1000);
+		char buf[4096];
+		DWORD n = 0;
+		while(exited && out.size() < 65536 &&
+				ReadFile(rd, buf, sizeof buf, &n, NULL) && n > 0)
+			out.append(buf, n);
+		CloseHandle(process);
+		CloseHandle(job);
+	} else {
+		log_w(MODULE, "Compiler for wasm modules: %s: %s", cs(cmd), cs(why));
+	}
+	CloseHandle(rd);
+	return out.substr(0, out.find_first_of("\r\n"));
+}
+
+// A directory only this user can reach ([CLIENT_WASM] security: the cache
+// the client loads code from): made with a protected DACL granting this
+// user alone everything, inherited by what is made in it; or, there
+// already, a directory (not a link) whose owner is this user, the same
+// DACL set on it again. false with why.
+static bool private_dir(const ss_ &path, ss_ &why)
+{
+	HANDLE token = NULL;
+	union { TOKEN_USER user; char bytes[256]; } tu;
+	DWORD n = 0;
+	if(!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)){
+		why = "OpenProcessToken: "+last_error();
+		return false;
+	}
+	const bool got = GetTokenInformation(token, TokenUser, &tu, sizeof tu, &n);
+	CloseHandle(token);
+	char *sid = NULL;
+	if(!got || !ConvertSidToStringSidA(tu.user.User.Sid, &sid)){
+		why = "the user's SID: "+last_error();
+		return false;
+	}
+	const ss_ sddl = ss_("D:P(A;OICI;FA;;;")+sid+")";
+	LocalFree(sid);
+	PSECURITY_DESCRIPTOR sd = NULL;
+	if(!ConvertStringSecurityDescriptorToSecurityDescriptorA(sddl.c_str(),
+			SDDL_REVISION_1, &sd, NULL)){
+		why = "a security descriptor: "+last_error();
+		return false;
+	}
+	SECURITY_ATTRIBUTES sa;
+	memset(&sa, 0, sizeof sa);
+	sa.nLength = sizeof sa;
+	sa.lpSecurityDescriptor = sd;
+	bool ok = CreateDirectoryA(path.c_str(), &sa) != 0;
+	if(!ok && GetLastError() == ERROR_ALREADY_EXISTS){
+		const DWORD attr = GetFileAttributesA(path.c_str());
+		PSID owner = NULL;
+		PSECURITY_DESCRIPTOR osd = NULL;
+		BOOL present = FALSE, defaulted = FALSE;
+		PACL dacl = NULL;
+		DWORD e = 0;
+		if(attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY) ||
+				(attr & FILE_ATTRIBUTE_REPARSE_POINT)){
+			why = path+" is not a directory (or is a link)";
+		} else if((e = GetNamedSecurityInfoA(path.c_str(), SE_FILE_OBJECT,
+				OWNER_SECURITY_INFORMATION, &owner, NULL, NULL, NULL, &osd)) !=
+				ERROR_SUCCESS || !owner){
+			why = path+": its owner could not be read (error "+itos((int)e)+")";
+		} else if(!EqualSid(owner, tu.user.User.Sid)){
+			char *o = NULL;
+			ConvertSidToStringSidA(owner, &o);
+			why = path+" is owned by "+(o ? o : "?")+", not this user";
+			if(o)
+				LocalFree(o);
+		} else if(!GetSecurityDescriptorDacl(sd, &present, &dacl, &defaulted) ||
+				!present || (e = SetNamedSecurityInfoA((char*)path.c_str(),
+				SE_FILE_OBJECT, DACL_SECURITY_INFORMATION |
+				PROTECTED_DACL_SECURITY_INFORMATION, NULL, NULL, dacl, NULL)) !=
+				ERROR_SUCCESS){
+			why = path+": its permissions could not be set (error "+
+					itos((int)e)+")";
+		} else {
+			ok = true;
+		}
+		if(osd)
+			LocalFree(osd);
+	} else if(!ok){
+		why = "could not make "+path+": "+last_error();
+	}
+	LocalFree(sd);
+	return ok;
+}
+
+#else // Linux
+
+static void* lib_open(const ss_ &path, ss_ &why)
+{
+	void *h = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+	if(!h){
+		const char *e = dlerror();
+		why = ss_("dlopen: ")+(e ? e : "?");
+	}
+	return h;
+}
+static void* lib_sym(void *lib, const char *name)
+{
+	return dlsym(lib, name);
+}
+static void lib_close(void *lib)
+{
+	dlclose(lib);
+}
+static bool is_file(const ss_ &path)
+{
+	return access(path.c_str(), R_OK) == 0;
+}
+static bool is_program(const ss_ &path)
+{
+	return access(path.c_str(), X_OK) == 0;
+}
+
+static ss_ compiler_version(const ss_ &cmd)
+{
+	FILE *f = popen(("'"+cmd+"' --version 2>/dev/null").c_str(), "r");
+	char line[256] = "";
+	if(f){
+		if(!fgets(line, sizeof line, f))
+			line[0] = 0;
+		pclose(f);
+	}
+	ss_ v = line;
+	while(!v.empty() && (v.back() == '\n' || v.back() == '\r'))
+		v.pop_back();
+	return v;
+}
+
+// A directory only this user can reach ([CLIENT_WASM] security: the cache
+// the client loads code from): made 0700, or, there already, a directory
+// (not a link) of this user's, made 0700 again. false with why.
+static bool private_dir(const ss_ &path, ss_ &why)
+{
+	mkdir(path.c_str(), 0700);
+	struct stat st;
+	if(lstat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode) ||
+			st.st_uid != geteuid() || chmod(path.c_str(), 0700) != 0){
+		why = path+" is not a directory of this user's own";
+		return false;
+	}
+	return true;
+}
 
 // The memories of the live instances, for the signal handler: a fault in
 // one, while a call is in wasm, is the module's out-of-bounds access.
@@ -662,7 +1049,6 @@ typedef void* (*GlobalFn)(void*, uint32_t);
 // from the moment it exists, a start function's access included.
 struct Range { uintptr_t begin, end; };
 static Range g_ranges[MAX_INSTANCES];
-static volatile sig_atomic_t g_in_wasm = 0;
 static struct sigaction g_old_segv, g_old_bus;
 
 static void wasm_fault_handler(int sig, siginfo_t *si, void *ctx)
@@ -740,6 +1126,9 @@ static void runtime_init()
 	sigaction(SIGBUS, &sa, &g_old_bus);
 }
 
+
+#endif // _WIN32, Linux
+
 // The interpreter's (WAMR's fast interpreter, 3rdparty/wamr) stack: its
 // frames and operand cells in one buffer of this size, so the call depth
 // is bounded by it (a frame of the toy's recursion takes about 88 bytes:
@@ -782,8 +1171,8 @@ static bool interp_init()
 	return true;
 }
 
-// The compiler: its path (execv takes one), its first --version line,
-// and wasm2c's recommended flags for it. Looked up once.
+// The compiler: its path (execv and CreateProcess take one), its first
+// --version line, and wasm2c's recommended flags for it. Looked up once.
 struct Compiler {
 	ss_ path;
 	ss_ version;
@@ -799,48 +1188,51 @@ static const Compiler& compiler()
 	ss_ cmd = boot::autodetect::find_compiler_command();
 	if(cmd.empty())
 		return c;
-	if(cmd.find('/') == ss_::npos){
+#ifdef _WIN32
+	const ss_ exe = ".exe";
+	const char sep = ';';
+	const char *slashes = "/\\";
+	if(cmd.size() > 4 && upper(cmd.substr(cmd.size() - 4)) == ".EXE")
+		cmd.resize(cmd.size() - 4);
+#else
+	const ss_ exe = "";
+	const char sep = ':';
+	const char *slashes = "/";
+#endif
+	if(cmd.find_first_of(slashes) == ss_::npos){
 		const char *env = getenv("PATH");
 		ss_ path = env ? env : "";
 		size_t at = 0;
 		while(at <= path.size()){
-			size_t end = path.find(':', at);
+			size_t end = path.find(sep, at);
 			if(end == ss_::npos)
 				end = path.size();
 			const ss_ p = path.substr(at, end - at)+"/"+cmd;
-			if(end > at && access(p.c_str(), X_OK) == 0){
+			if(end > at && is_program(p+exe)){
 				cmd = p;
 				break;
 			}
 			at = end + 1;
 		}
 	}
-	if(cmd.find('/') == ss_::npos)
+	if(cmd.find_first_of(slashes) == ss_::npos)
 		return c;
 	// The C driver beside it: g++ (Fedora's 15) compiles C++ given -x c
 	for(const auto &p : sv_<std::pair<ss_, ss_>>{{"clang++", "clang"},
-			{"g++", "gcc"}, {"c++", "cc"}}){
+			{"g++", "gcc"}, {"c++", "cc"}, {"c++", "gcc"}}){
 		if(cmd.size() >= p.first.size() && cmd.compare(cmd.size() -
 				p.first.size(), p.first.size(), p.first) == 0){
 			const ss_ c_driver = cmd.substr(0, cmd.size() - p.first.size())+
 					p.second;
-			if(access(c_driver.c_str(), X_OK) == 0)
+			if(is_program(c_driver+exe)){
 				cmd = c_driver;
-			break;
+				break;
+			}
 		}
 	}
+	cmd += exe;
 	// The version, for the cache's key
-	FILE *f = popen(("'"+cmd+"' --version 2>/dev/null").c_str(), "r");
-	char line[256] = "";
-	if(f){
-		if(!fgets(line, sizeof line, f))
-			line[0] = 0;
-		pclose(f);
-	}
-	c.version = line;
-	while(!c.version.empty() && (c.version.back() == '\n' ||
-			c.version.back() == '\r'))
-		c.version.pop_back();
+	c.version = compiler_version(cmd);
 	if(c.version.empty())
 		return c;
 	c.path = cmd;
@@ -854,18 +1246,25 @@ static const Compiler& compiler()
 	return c;
 }
 
-// The client's own C around wasm2c's: an instance's size, its making and
-// freeing, its memory, and one call entry that unpacks numbers for each
-// export by index. Nothing in it comes from the module but types.
+// The client's own C around wasm2c's: an instance's size, its binding to
+// the client's import function, its making and freeing, its memory, and
+// one trapping entry (the runtime's setjmp is in it: on Windows the
+// runtime is the DLL's own) that instantiates, runs the start function or
+// unpacks numbers for an export by index. Nothing in it comes from the
+// module but types.
 static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		bool has_memory, bool has_start, const sv_<GlobalCopy> &globals)
 {
 	std::ostringstream os;
-	os<<"#include <string.h>\n#include <stdint.h>\n#include \"m.h\"\n"
-		"#define BX __attribute__((visibility(\"default\")))\n"
-		"struct w2c_buildat { void *host; uint32_t (*imp)(void*, uint32_t, const uint32_t*); };\n";
+	os<<"#ifndef _WIN32\n#define _POSIX_C_SOURCE 200809L\n#endif\n" // sigsetjmp
+		"#include <string.h>\n#include <stdint.h>\n#include \"m.h\"\n"
+		"#include \"wasm-rt-impl.h\"\n#include \"wasm-rt-exceptions.h\"\n"
+		"#ifdef _WIN32\n#define BX __declspec(dllexport)\n#else\n"
+		"#define BX __attribute__((visibility(\"default\")))\n#endif\n"
+		"typedef uint32_t (*imp_t)(void*, uint32_t, const uint32_t*, int*);\n"
+		"struct w2c_buildat { void *host; imp_t imp; };\n";
 	// Every import, whether the module has it or not: each hands its
-	// numbers to the client's run_import()
+	// numbers to the client's run_import(), and traps here when it says so
 	for(int k = 0; k < IMP_COUNT; k++){
 		const ImportDef &d = IMPORTS[k];
 		os<<(d.result ? "uint32_t" : "void")<<" w2c_buildat_"<<d.name<<
@@ -875,7 +1274,9 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		os<<"){ uint32_t a["<<MAX_IMPORT_PARAMS<<"] = {";
 		for(int i = 0; i < d.params; i++)
 			os<<(i ? ", a" : "a")<<i;
-		os<<(d.params ? "" : "0")<<"}; "<<(d.result ? "return " : "")<<"b->imp(b->host, "<<k<<", a); }\n";
+		os<<(d.params ? "" : "0")<<"}; int t = 0; uint32_t r = b->imp(b->host, "<<
+				k<<", a, &t); if(t) wasm_rt_trap(WASM_RT_TRAP_UNREACHABLE); "<<
+				(d.result ? "return r;" : "(void)r;")<<" }\n";
 	}
 	os<<"typedef struct { w2c_m m; struct w2c_buildat b; } inst_t;\n"
 		"static float F(uint64_t v){ uint32_t u = (uint32_t)v; float f; memcpy(&f, &u, 4); return f; }\n"
@@ -883,24 +1284,25 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		"static uint64_t FB(float f){ uint32_t u; memcpy(&u, &f, 4); return u; }\n"
 		"static uint64_t DB(double d){ uint64_t u; memcpy(&u, &d, 8); return u; }\n"
 		"BX size_t buildat_size(void){ return sizeof(inst_t); }\n"
-		"BX void buildat_instantiate(void *p, void *host, uint32_t (*imp)(void*, uint32_t, const uint32_t*)){\n"
-		"\tinst_t *i = (inst_t*)p; i->b.host = host; i->b.imp = imp;\n"
-		"\twasm2c_m_instantiate(&i->m"<<(has_imports ? ", &i->b" : "")<<");\n}\n"
+		"BX void buildat_bind(void *p, void *host, imp_t imp){\n"
+		"\tinst_t *i = (inst_t*)p; i->b.host = host; i->b.imp = imp; wasm_rt_init();\n}\n"
 		"BX void buildat_free(void *p){ wasm2c_m_free(&((inst_t*)p)->m); }\n"
 		"BX wasm_rt_memory_t *buildat_memory(void *p){ return "<<
 		(has_memory ? "w2c_m_mem(&((inst_t*)p)->m)" : "0")<<"; }\n"
+		"BX uint64_t buildat_grow(void *p, uint64_t pages){\n"
+		"\twasm_rt_memory_t *mem = buildat_memory(p);\n"
+		"\treturn mem ? wasm_rt_grow_memory(mem, pages) : (uint64_t)-1;\n}\n"
+		"BX const char *buildat_strerror(int code){ return wasm_rt_strerror((wasm_rt_trap_t)code); }\n"
 		"BX int64_t *buildat_meter(void *p){ return (int64_t*)w2c_m_"<<METER<<
 		"(&((inst_t*)p)->m); }\n"
-		"BX void buildat_start(void *p){ "<<(has_start ? ss_("w2c_m_")+START+
-		"(&((inst_t*)p)->m);" : ss_("(void)p;"))<<" }\n"
 		// The mutable globals, for the move from the interpreter
 		"BX void *buildat_global(void *p, uint32_t k){\n"
 		"\tw2c_m *m = &((inst_t*)p)->m; (void)m;\n\tswitch(k){\n";
 	for(size_t k = 0; k < globals.size(); k++)
 		os<<"\tcase "<<k<<": return (void*)w2c_m_"<<globals[k].name<<"(m);\n";
 	os<<"\t}\n\treturn 0;\n}\n"
-		"BX void buildat_call(void *p, uint32_t f, const uint64_t *a, uint64_t *r){\n"
-		"\tw2c_m *m = &((inst_t*)p)->m;\n\t(void)a; (void)r; (void)F; (void)D; (void)FB; (void)DB;\n"
+		"static void call(w2c_m *m, uint32_t f, const uint64_t *a, uint64_t *r){\n"
+		"\t(void)m; (void)a; (void)r; (void)F; (void)D; (void)FB; (void)DB;\n"
 		"\tswitch(f){\n";
 	for(size_t i = 0; i < exports.size(); i++){
 		const ExportSig &s = exports[i];
@@ -925,21 +1327,37 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 		}
 		os<<" break;\n";
 	}
-	os<<"\t}\n}\n";
+	os<<"\t}\n}\n"
+		// what: 0 instantiates, 1 calls export f, 2 runs the start function;
+		// 0, or the trap's code
+		"BX int buildat_try(void *p, int what, uint32_t f, const uint64_t *a, uint64_t *r){\n"
+		"\tinst_t *i = (inst_t*)p;\n"
+		"\tint code = wasm_rt_impl_try();\n"
+		"\tif(code == 0){\n"
+		"\t\tif(what == 0) wasm2c_m_instantiate(&i->m"<<
+		(has_imports ? ", &i->b" : "")<<");\n"
+		"\t\telse if(what == 1) call(&i->m, f, a, r);\n"
+		"\t\telse { "<<(has_start ? ss_("w2c_m_")+START+"(&i->m);" :
+		ss_(""))<<" }\n"
+		"\t}\n\treturn code;\n}\n";
 	return os.str();
 }
 
 // A compile of one key ([WASM_COMPILE_RACE]): the loads of the same module
 // in this client share it, and each waits on it. It writes into a
-// directory of its own (mkdtemp) and renames that whole into the cache
-// as <key>/ once the .so is built, so that another client compiling the
-// same key into the same cache never sees half a directory: whichever
-// renames first wins, the other takes the winner's.
+// directory of its own and renames that whole into the cache as <key>/
+// once the module is built, so that another client compiling the same key
+// into the same cache never sees half a directory: whichever renames first
+// wins, the other takes the winner's.
 struct Compile {
 	ss_ name; // the module's, for the log
 	ss_ dir; // <cache>/wasm2c/<key>, there once whole
 	ss_ tmp; // this compile's own, removed once done
+#ifdef _WIN32
+	HANDLE process = NULL, job = NULL;
+#else
 	pid_t pid = 0;
+#endif
 	std::chrono::steady_clock::time_point started;
 	enum State { RUNNING, DONE, FAILED } state = RUNNING;
 	ss_ error;
@@ -950,43 +1368,154 @@ struct Compile {
 		error = why;
 	}
 
+	// The compiler's command line, all the client's, run in tmp with its
+	// limits, its output into tmp/compile.log; false with why
+	bool start(sv_<ss_> args, ss_ &why)
+	{
+		started = std::chrono::steady_clock::now();
+		const ss_ log_path = tmp+"/compile.log";
+#ifdef _WIN32
+		SECURITY_ATTRIBUTES sa;
+		memset(&sa, 0, sizeof sa);
+		sa.nLength = sizeof sa;
+		sa.bInheritHandle = TRUE;
+		HANDLE log = CreateFileA(log_path.c_str(), GENERIC_WRITE,
+				FILE_SHARE_READ, &sa, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if(log == INVALID_HANDLE_VALUE){
+			why = "could not make "+log_path+": "+last_error();
+			return false;
+		}
+		const bool ok = spawn(args, tmp, log, tmp, process, job, why);
+		CloseHandle(log);
+		return ok;
+#else
+		std::vector<char*> argv;
+		for(ss_ &a : args)
+			argv.push_back(&a[0]);
+		argv.push_back(nullptr);
+		const pid_t p = fork();
+		if(p < 0){
+			why = "fork failed";
+			return false;
+		}
+		if(p == 0){
+			// The child: async-signal-safe calls only, then the compiler
+			setpgid(0, 0);
+			prctl(PR_SET_PDEATHSIG, SIGKILL);
+			struct rlimit as = {(rlim_t)COMPILE_MEM_BYTES,
+					(rlim_t)COMPILE_MEM_BYTES};
+			struct rlimit cpu = {(rlim_t)COMPILE_CPU_S, (rlim_t)COMPILE_CPU_S};
+			setrlimit(RLIMIT_AS, &as);
+			setrlimit(RLIMIT_CPU, &cpu);
+			if(chdir(tmp.c_str()) != 0)
+				_exit(126);
+			const int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
+					0600);
+			if(fd >= 0){
+				dup2(fd, 1);
+				dup2(fd, 2);
+			}
+			const int null = open("/dev/null", O_RDONLY);
+			if(null >= 0)
+				dup2(null, 0);
+			for(int i = 3; i < 1024; i++)
+				close(i);
+			execv(argv[0], argv.data());
+			_exit(127);
+		}
+		setpgid(p, p);
+		pid = p;
+		return true;
+#endif
+	}
+
+	// The child and anything it started, gone
+	void kill_child()
+	{
+#ifdef _WIN32
+		if(job)
+			TerminateJobObject(job, 1);
+		if(process){
+			WaitForSingleObject(process, 5000);
+			CloseHandle(process);
+		}
+		if(job)
+			CloseHandle(job);
+		process = job = NULL;
+#else
+		if(pid > 0){
+			kill(-pid, SIGKILL);
+			kill(pid, SIGKILL);
+			waitpid(pid, nullptr, 0);
+		}
+		pid = 0;
+#endif
+	}
+
+	// 1 while the child runs, 0 once it has succeeded, -1 failed with why
+	int child_state(ss_ &why)
+	{
+#ifdef _WIN32
+		if(WaitForSingleObject(process, 0) == WAIT_TIMEOUT)
+			return 1;
+		DWORD code = 1;
+		if(!GetExitCodeProcess(process, &code))
+			code = 1;
+		kill_child(); // what it started, if anything is left
+		if(code != 0){
+			why = "the compile failed (exit code "+itos((int)code)+
+					(code == ERROR_NOT_ENOUGH_QUOTA ? ", past its CPU time limit" :
+					"")+"; its log above)";
+			return -1;
+		}
+		return 0;
+#else
+		int status = 0;
+		const pid_t r = waitpid(pid, &status, WNOHANG);
+		if(r == 0)
+			return 1;
+		pid = 0;
+		if(r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0){
+			why = WIFSIGNALED(status) ? "the compile was killed (signal "+
+					itos(WTERMSIG(status))+"), past its limits?" :
+					"the compile failed (its log above)";
+			return -1;
+		}
+		return 0;
+#endif
+	}
+
 	// The child's progress, read without waiting
 	void poll()
 	{
 		if(state != RUNNING)
 			return;
-		int status = 0;
-		const pid_t r = waitpid(pid, &status, WNOHANG);
 		const int ms = (int)std::chrono::duration_cast<
 				std::chrono::milliseconds>(std::chrono::steady_clock::now() -
 				started).count();
-		if(r == 0){
+		ss_ why;
+		const int r = child_state(why);
+		if(r > 0){
 			if(ms > COMPILE_WALL_S * 1000){
-				kill(-pid, SIGKILL);
-				kill(pid, SIGKILL);
-				waitpid(pid, nullptr, 0);
-				pid = 0;
+				kill_child();
 				finish_failed("the compile took over "+itos(COMPILE_WALL_S)+
 						" s; killed");
 			}
 			return;
 		}
-		pid = 0;
-		if(r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0){
+		if(r < 0){
 			std::ifstream f(tmp+"/compile.log");
 			ss_ line;
 			for(int n = 0; std::getline(f, line) && n < 20; n++)
 				log_w(MODULE, "wasm %s: compiler: %s", cs(name), cs(line));
-			finish_failed(WIFSIGNALED(status) ? "the compile was killed "
-					"(signal "+itos(WTERMSIG(status))+"), past its limits?" :
-					"the compile failed (its log above)");
+			finish_failed(why);
 			return;
 		}
 		// Into place whole; a directory there already is another client's
 		// compile of the same key, as whole
 		if(rename(tmp.c_str(), dir.c_str()) == 0)
 			tmp.clear();
-		if(access((dir+"/module.so").c_str(), R_OK) != 0){
+		if(!is_file(dir+"/"+MODULE_FILE)){
 			finish_failed("the compiled module could not be put in "+dir);
 			return;
 		}
@@ -996,11 +1525,7 @@ struct Compile {
 
 	~Compile()
 	{
-		if(pid > 0){
-			kill(-pid, SIGKILL);
-			kill(pid, SIGKILL);
-			waitpid(pid, nullptr, 0);
-		}
+		kill_child();
 		if(!tmp.empty())
 			interface::fs::remove_all(tmp);
 	}
@@ -1114,8 +1639,9 @@ struct Instance {
 	void *mem = nullptr;
 	wasm_rt_memory_t *memory = nullptr;
 	FreeFn free_fn = nullptr;
-	CallFn call_fn = nullptr;
-	StartFn start_fn = nullptr;
+	TryFn try_fn = nullptr;
+	GrowFn grow_fn = nullptr;
+	StrerrorFn strerror_fn = nullptr;
 	int64_t *meter = nullptr; // the module's (meter_module()), the engine's
 	// which runs the module: the interpreter (WAMR) until the compiled
 	// module is there, or with no compiler, for good
@@ -1683,76 +2209,76 @@ struct Instance {
 
 #if BUILDAT_WASM_NATIVE
 	// wasm2c's import functions (the glue) call this. A refused import
-	// traps here, once run_import() has returned: nothing of C++'s is
-	// left to destroy between here and trapping()'s setjmp.
-	static uint32_t host_import(void *host, uint32_t which, const uint32_t *a)
+	// traps in the glue, once this has returned (*trap set): nothing of
+	// C++'s is left to destroy between there and buildat_try()'s setjmp.
+	static uint32_t host_import(void *host, uint32_t which, const uint32_t *a,
+			int *trap)
 	{
 		Instance *self = (Instance*)host;
 		g_in_wasm = 0;
 		const uint32_t r = self->run_import(which, a);
 		g_in_wasm = 1;
-		if(!self->trap_reason.empty())
-			wasm_rt_trap(WASM_RT_TRAP_UNREACHABLE);
+		*trap = !self->trap_reason.empty();
 		return r;
 	}
 
-	// The compiled module's call with a trap caught: 0, or the trap's
-	// code. what: 0 instantiates, 1 calls export f, 2 the start function,
-	// those two with its meter at BUDGET. Nothing here with a destructor
-	// between the setjmp and the call.
+	// The compiled module's call with a trap caught (the glue's
+	// buildat_try()): 0, or the trap's code. what: 0 instantiates, 1 calls
+	// export f, 2 the start function, those two with its meter at BUDGET.
 	static int trapping(Instance *in, int what, uint32_t f, const uint64_t *a,
 			uint64_t *r)
 	{
 		if(what != 0)
 			*in->c_meter = BUDGET;
 		g_in_wasm = 1;
-		int code = wasm_rt_impl_try();
-		if(code == 0){
-			if(what == 0){
-				in->mem = calloc(1, ((SizeFn)dlsym(in->dl, "buildat_size"))());
-				((InstantiateFn)dlsym(in->dl, "buildat_instantiate"))(
-						in->mem, in, host_import);
-			} else if(what == 1){
-				in->call_fn(in->mem, f, a, r);
-			} else {
-				in->start_fn(in->mem);
-			}
-		}
+		const int code = in->try_fn(in->mem, what, f, a, r);
 		g_in_wasm = 0;
 		return code;
+	}
+
+	// A trap's code as the runtime says it
+	ss_ trap_text(int code)
+	{
+		const char *t = strerror_fn ? strerror_fn(code) : nullptr;
+		return t ? ss_(t) : "trap "+itos(code);
 	}
 
 	// The compiled module loaded and instantiated (its data segments
 	// written), its start function not run: true, or false with why
 	bool open_compiled(const ss_ &so, ss_ &why)
 	{
-		dl = dlopen(so.c_str(), RTLD_NOW | RTLD_LOCAL);
-		if(!dl){
-			const char *e = dlerror();
-			why = ss_("dlopen: ")+(e ? e : "?");
+		dl = lib_open(so, why);
+		if(!dl)
 			return false;
-		}
-		free_fn = (FreeFn)dlsym(dl, "buildat_free");
-		call_fn = (CallFn)dlsym(dl, "buildat_call");
-		start_fn = (StartFn)dlsym(dl, "buildat_start");
-		global_fn = (GlobalFn)dlsym(dl, "buildat_global");
-		MemoryFn memory_fn = (MemoryFn)dlsym(dl, "buildat_memory");
-		MeterFn meter_fn = (MeterFn)dlsym(dl, "buildat_meter");
-		if(!free_fn || !call_fn || !memory_fn || !start_fn || !meter_fn ||
-				!global_fn || !dlsym(dl, "buildat_size") ||
-				!dlsym(dl, "buildat_instantiate")){
+		free_fn = (FreeFn)lib_sym(dl, "buildat_free");
+		try_fn = (TryFn)lib_sym(dl, "buildat_try");
+		grow_fn = (GrowFn)lib_sym(dl, "buildat_grow");
+		strerror_fn = (StrerrorFn)lib_sym(dl, "buildat_strerror");
+		global_fn = (GlobalFn)lib_sym(dl, "buildat_global");
+		SizeFn size_fn = (SizeFn)lib_sym(dl, "buildat_size");
+		BindFn bind_fn = (BindFn)lib_sym(dl, "buildat_bind");
+		MemoryFn memory_fn = (MemoryFn)lib_sym(dl, "buildat_memory");
+		MeterFn meter_fn = (MeterFn)lib_sym(dl, "buildat_meter");
+		if(!free_fn || !try_fn || !grow_fn || !strerror_fn || !global_fn ||
+				!size_fn || !bind_fn || !memory_fn || !meter_fn){
 			why = "the built module lacks its entry points";
 			return false;
 		}
+#ifndef _WIN32
 		runtime_init();
-		const int code = trapping(this, 0, 0, nullptr, nullptr);
-		if(mem){
-			memory = memory_fn(mem);
-			c_meter = meter_fn(mem);
+#endif
+		mem = calloc(1, size_fn());
+		if(!mem){
+			why = "out of memory";
+			return false;
 		}
-		if(code != 0 || !mem){
-			why = "instantiation: "+(trap_reason.empty() ?
-					ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason);
+		bind_fn(mem, this, host_import);
+		const int code = trapping(this, 0, 0, nullptr, nullptr);
+		memory = memory_fn(mem);
+		c_meter = meter_fn(mem);
+		if(code != 0){
+			why = "instantiation: "+(trap_reason.empty() ? trap_text(code) :
+					trap_reason);
 			return false;
 		}
 		return true;
@@ -1766,7 +2292,7 @@ struct Instance {
 			free(mem);
 		}
 		if(dl)
-			dlclose(dl);
+			lib_close(dl);
 		mem = nullptr;
 		dl = nullptr;
 		memory = nullptr;
@@ -1787,8 +2313,8 @@ struct Instance {
 		if(has_start){
 			const int code = trapping(this, 2, 0, nullptr, nullptr);
 			if(code != 0){
-				started_or_failed(trap_reason.empty() ?
-						ss_(wasm_rt_strerror((wasm_rt_trap_t)code)) : trap_reason);
+				started_or_failed(trap_reason.empty() ? trap_text(code) :
+						trap_reason);
 				return;
 			}
 		}
@@ -1969,7 +2495,7 @@ struct Instance {
 				ok = false;
 				why = "the memories do not match";
 			} else if(bytes / 65536 > memory->pages &&
-					wasm_rt_grow_memory(memory, bytes / 65536 - memory->pages) ==
+					grow_fn(mem, bytes / 65536 - memory->pages) ==
 					(uint64_t)-1){
 				ok = false;
 				why = "the compiled module's memory could not grow to "+
@@ -2036,9 +2562,9 @@ struct Instance {
 			return;
 		}
 		if(engine == INTERP)
-			move_to(c->dir+"/module.so");
+			move_to(c->dir+"/"+MODULE_FILE);
 		else
-			ready_from(c->dir+"/module.so");
+			ready_from(c->dir+"/"+MODULE_FILE);
 	}
 
 	// For checks only: the compiler hidden, as on a player-only archive,
@@ -2072,16 +2598,26 @@ struct Instance {
 		const ss_ key = interface::sha1::hex(interface::sha1::calculate(
 				hash_hex+"\n"+WABT_VERSION_STRING+"\n"+GLUE_VERSION+"\n"+
 				cc.path+"\n"+cc.version+"\n"+cc.flags+"\n"+WASM2C_DEFINES));
-		// The cache, the user's alone
+		// The cache, the user's alone; else no compiled module at all
 		const ss_ root = g_client_config.get<ss_>("cache_path")+"/wasm2c";
-		mkdir(g_client_config.get<ss_>("cache_path").c_str(), 0700);
-		mkdir(root.c_str(), 0700);
-		chmod(root.c_str(), 0700);
+		interface::fs::create_directories(g_client_config.get<ss_>(
+				"cache_path"));
+		if(!private_dir(root, why)){
+			ss_ why2;
+			if(start_interp(why2)){
+				if(state == READY)
+					log_w(MODULE, "wasm %s: ready (interpreter): not compiled, "
+							"as %s", cs(name), cs(why));
+				return;
+			}
+			fail("not compiled, as "+why+", and "+why2);
+			return;
+		}
 		const ss_ dir = root+"/"+key.substr(0, 32);
-		if(access((dir+"/module.so").c_str(), R_OK) == 0){
+		if(is_file(dir+"/"+MODULE_FILE)){
 			log_i(MODULE, "wasm %s: compiled module from the cache (%s)",
 					cs(name), cs(key.substr(0, 12)));
-			ready_from(dir+"/module.so");
+			ready_from(dir+"/"+MODULE_FILE);
 			return;
 		}
 		// Not in the cache: the interpreter runs it while it compiles
@@ -2107,8 +2643,19 @@ struct Instance {
 					cs(name), cs(key.substr(0, 12)));
 			return;
 		}
+		// This compile's own directory (in the private root)
 		ss_ tmpl = root+"/"+key.substr(0, 32)+".XXXXXX";
-		if(!mkdtemp(&tmpl[0])){
+#ifdef _WIN32
+		bool made = false;
+		for(unsigned i = 0; i < 100 && !made; i++){
+			tmpl = root+"/"+key.substr(0, 32)+"."+itos((int)GetCurrentProcessId())+
+					"."+itos((int)((GetTickCount() + i) & 0xffffff));
+			made = CreateDirectoryA(tmpl.c_str(), NULL) != 0;
+		}
+#else
+		const bool made = mkdtemp(&tmpl[0]) != nullptr;
+#endif
+		if(!made){
 			compile_failed("could not make a directory in "+root);
 			return;
 		}
@@ -2134,66 +2681,51 @@ struct Instance {
 		}
 		const auto &cb = c_stream.output_buffer().data;
 		const auto &hb = h_stream.output_buffer().data;
-		if(!interface::fs::write_file(tmp+"/m.c", ss_(cb.begin(), cb.end())) ||
-				!interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) ||
-				!interface::fs::write_file(tmp+"/wasm-rt.h", buildat_wasm_rt_h) ||
-				!interface::fs::write_file(tmp+"/glue.c",
-						glue_c(exports, has_imports, has_memory, has_start, globals))){
+		bool written = interface::fs::write_file(tmp+"/m.c",
+				ss_(cb.begin(), cb.end())) &&
+				interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) &&
+				interface::fs::write_file(tmp+"/glue.c",
+				glue_c(exports, has_imports, has_memory, has_start, globals));
+		for(const char *const *f = buildat_wasm_rt_files; *f; f += 2)
+			written = written && interface::fs::write_file(tmp+"/"+f[0], f[1]);
+		if(!written){
 			compile_failed("could not write into "+tmp);
 			return;
 		}
 		// The command line is the client's: its compiler, its flags, file
-		// names it chose
+		// names it chose. On Windows the runtime goes into the DLL, which
+		// is linked whole (-static: no MinGW DLL of the client's needed)
+#ifdef _WIN32
+		sv_<ss_> args = {cc.path, "-x", "c", "-std=c11", "-shared", "-static",
+				"-I."};
+#else
 		sv_<ss_> args = {cc.path, "-x", "c", "-std=c11", "-fPIC", "-shared",
 				"-fvisibility=hidden", "-I."};
+#endif
 		for(const char *flags : {cc.flags.c_str(), WASM2C_DEFINES}){
 			std::istringstream is(flags);
 			ss_ w;
 			while(is >> w)
 				args.push_back(w);
 		}
-		for(const ss_ &a : {ss_("-o"), ss_("module.so"), ss_("m.c"),
-				ss_("glue.c")})
+		for(const char *a : {"-o", MODULE_FILE, "m.c", "glue.c"})
 			args.push_back(a);
-		std::vector<char*> argv;
-		for(ss_ &a : args)
-			argv.push_back(&a[0]);
-		argv.push_back(nullptr);
-		const ss_ log_path = tmp+"/compile.log";
-		compile->started = std::chrono::steady_clock::now();
-		const pid_t pid = fork();
-		if(pid < 0){
-			compile_failed("fork failed");
+#ifdef _WIN32
+		for(const char *a : {"wasm-rt-impl.c", "wasm-rt-mem-impl.c",
+				"wasm-rt-exceptions-impl.c"})
+			args.push_back(a);
+#endif
+		if(!compile->start(args, why)){
+			compile_failed(why);
 			return;
 		}
-		if(pid == 0){
-			// The child: async-signal-safe calls only, then the compiler
-			setpgid(0, 0);
-			prctl(PR_SET_PDEATHSIG, SIGKILL);
-			struct rlimit as = {COMPILE_AS_BYTES, COMPILE_AS_BYTES};
-			struct rlimit cpu = {COMPILE_CPU_S, COMPILE_CPU_S};
-			setrlimit(RLIMIT_AS, &as);
-			setrlimit(RLIMIT_CPU, &cpu);
-			if(chdir(tmp.c_str()) != 0)
-				_exit(126);
-			const int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
-					0600);
-			if(fd >= 0){
-				dup2(fd, 1);
-				dup2(fd, 2);
-			}
-			const int null = open("/dev/null", O_RDONLY);
-			if(null >= 0)
-				dup2(null, 0);
-			for(int i = 3; i < 1024; i++)
-				close(i);
-			execv(argv[0], argv.data());
-			_exit(127);
-		}
-		setpgid(pid, pid);
-		compile->pid = pid;
 		g_compiles[key] = compile;
-		log_i(MODULE, "wasm %s: compiling (pid %i, %s)", cs(name), (int)pid,
+#ifdef _WIN32
+		const int pid = (int)GetProcessId(compile->process);
+#else
+		const int pid = (int)compile->pid;
+#endif
+		log_i(MODULE, "wasm %s: compiling (pid %i, %s)", cs(name), pid,
 				cs(key.substr(0, 12)));
 	}
 #endif
@@ -2327,7 +2859,7 @@ static int l_wasm_load(lua_State *L)
 	luaL_getmetatable(L, META);
 	lua_setmetatable(L, -2);
 	// For checks only: the module failed as on a platform with no wasm
-	// yet (the Windows client), so a game's way without it is driven
+	// (macOS), so a game's way without it is driven
 	if(const char *e = getenv("BUILDAT_CHECK_WASM_OFF")){
 		if(*e && strcmp(e, "0") != 0){
 			in->fail("wasm modules do not run on this platform yet (hidden for "
@@ -2488,7 +3020,7 @@ static int l_call(lua_State *L)
 	} else {
 		const int code = Instance::trapping(in, 1, (uint32_t)index, args, &r);
 		if(code != 0)
-			trap = wasm_rt_strerror((wasm_rt_trap_t)code);
+			trap = in->trap_text(code);
 	}
 	switch(sig.result){
 	case 'i': result = (int32_t)(uint32_t)r; break;

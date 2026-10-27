@@ -40,7 +40,7 @@ end
 return function()
 	local M = {}
 	local seq, last = 0, nil
-	-- No module (a platform without wasm yet: the Windows client), or one
+	-- No module (a platform without wasm: macOS), or one
 	-- that failed: the car as the server sends it, as before the module
 	local m, why = buildat.wasm_load("main")
 	if m and m:status() == "failed" then

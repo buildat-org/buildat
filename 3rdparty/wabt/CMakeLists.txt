@@ -72,26 +72,40 @@ target_compile_options(wabt PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-std=c++20 -fno-ex
 	-O2 -w -D__STDC_LIMIT_MACROS=1 -D__STDC_FORMAT_MACROS=1)
 set_target_properties(wabt PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-# wasm2c's runtime, for the native client on Linux ([CLIENT_WASM]): its
-# objects linked in whole and exported to the modules the client builds
-# (wasm_rt.dynlist), the defines the same as those modules are built with
-# (src/lua_bindings/wasm.cpp). The memory's allocation and freeing are
-# renamed, so that the client's own wrap them and keeps the ranges its
-# signal handler knows. And wasm-rt.h as a string, which the client
-# writes beside the C it compiles.
+# wasm2c's runtime, for the native client ([CLIENT_WASM]). The files the
+# client writes beside the C it compiles, as strings (wasm_rt_files.cc):
+# its headers, and on Windows the runtime's sources too, as each module's
+# DLL has the runtime in it ([CLIENT_WASM_WINDOWS]: a DLL does not see the
+# executable's symbols).
+# On Linux the runtime's objects are linked into the client whole and
+# exported to the modules it builds (wasm_rt.dynlist), the defines the same
+# as those modules are built with (src/lua_bindings/wasm.cpp). The memory's
+# allocation and freeing are renamed, so that the client's own wrap them
+# and keeps the ranges its signal handler knows.
+if(NOT EMSCRIPTEN)
+	set(WASM_RT_FILES wasm-rt.h wasm-rt-impl.h wasm-rt-exceptions.h)
+	if(WIN32)
+		list(APPEND WASM_RT_FILES wasm-rt-exceptions-impl.c wasm-rt-impl.c
+			wasm-rt-impl-tableops.inc wasm-rt-mem-impl.c
+			wasm-rt-mem-impl-helper.inc)
+	endif()
+	set(WASM_RT_CC "extern \"C\" const char *const buildat_wasm_rt_files[] = {\n")
+	foreach(f ${WASM_RT_FILES})
+		file(READ ${CMAKE_CURRENT_SOURCE_DIR}/wasm2c/${f} T)
+		string(REGEX REPLACE "(.[^\n]*\n)" "R\"w2c_template(\\1)w2c_template\"\n"
+			T "${T}")
+		string(APPEND WASM_RT_CC "\"${f}\",\n${T},\n")
+		set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+			${CMAKE_CURRENT_SOURCE_DIR}/wasm2c/${f})
+	endforeach()
+	file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/wasm_rt_files.cc "${WASM_RT_CC}0};\n")
+	add_library(wasm_rt_files OBJECT ${CMAKE_CURRENT_BINARY_DIR}/wasm_rt_files.cc)
+endif()
 if(NOT EMSCRIPTEN AND NOT WIN32)
-	file(READ ${CMAKE_CURRENT_SOURCE_DIR}/wasm2c/wasm-rt.h WASM_RT_H)
-	string(REGEX REPLACE "(.[^\n]*\n)" "R\"w2c_template(\\1)w2c_template\"\n"
-		WASM_RT_H "${WASM_RT_H}")
-	file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/wasm_rt_h.cc
-		"extern \"C\" const char buildat_wasm_rt_h[] =\n${WASM_RT_H};\n")
-	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-		${CMAKE_CURRENT_SOURCE_DIR}/wasm2c/wasm-rt.h)
 	add_library(wasm_rt OBJECT
 		wasm2c/wasm-rt-impl.c
 		wasm2c/wasm-rt-mem-impl.c
-		wasm2c/wasm-rt-exceptions-impl.c
-		${CMAKE_CURRENT_BINARY_DIR}/wasm_rt_h.cc)
+		wasm2c/wasm-rt-exceptions-impl.c)
 	target_compile_definitions(wasm_rt PUBLIC
 		WASM_RT_SKIP_SIGNAL_RECOVERY=1 WASM_RT_STACK_DEPTH_COUNT=1)
 	set_source_files_properties(wasm2c/wasm-rt-mem-impl.c PROPERTIES

@@ -995,9 +995,8 @@ pred_check "$t/pred2.log" "compiled"
 pred_run pred3 BUILDAT_CHECK_WASM_INTERPRETER=1
 pred_check "$t/pred3.log" "interpreter"
 grep -a "hillclimb: prediction (interpreter)" "$t/pred3.log" | tail -1 | sed 's/.*; the steps/  the interpreter: the steps/; s/ a second;.*/ a second/'
-# No wasm (BUILDAT_CHECK_WASM_OFF: the module failed as on the Windows
-# client, which has none yet): the lap as before the module, the car as
-# the server sends it
+# No wasm (BUILDAT_CHECK_WASM_OFF: the module failed as on a platform
+# with none): the lap as before the module, the car as the server sends it
 grep -v "hillclimb: prediction (" "$t/pred.cmds" > "$t/pred_off.cmds"
 PRED_CMDS=pred_off pred_run pred4 BUILDAT_CHECK_WASM_OFF=1
 grep -aq "hillclimb: no prediction, the car as the server sends it: wasm modules do not run on this platform yet" "$t/pred4.log" &&

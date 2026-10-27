@@ -8,7 +8,13 @@
 # runtime common to all engines, the memory allocator, and the platform
 # layer for Linux. No AOT, JIT, WASI, libc, threads, SIMD, GC, multi-module,
 # reference types, debugger or C API (the AOT headers stay, as the common
-# code includes them). Updated by copying the same files out of a newer
+# code includes them). The platform layers for Linux and, from the same
+# tarball ([CLIENT_WASM_WINDOWS]), for Windows: platform_init.c,
+# platform_internal.h, win_malloc.c, win_memmap.c, win_thread.c and
+# win_time.c of core/shared/platform/windows, and
+# core/shared/platform/common/memory/mremap.c (no WASI, so no win_file.c,
+# win_socket.c or win_clock.c; c_api_stub.c has the winsock init that
+# platform_init.c calls). Updated by copying the same files out of a newer
 # release; the files are as released, this CMakeLists.txt and c_api_stub.c
 # are buildat's.
 cmake_minimum_required(VERSION 3.10)
@@ -30,13 +36,6 @@ add_library(wamr STATIC
 	${W}/shared/mem-alloc/ems/ems_gc.c
 	${W}/shared/mem-alloc/ems/ems_hmu.c
 	${W}/shared/mem-alloc/ems/ems_kfc.c
-	${W}/shared/platform/linux/platform_init.c
-	${W}/shared/platform/common/posix/posix_blocking_op.c
-	${W}/shared/platform/common/posix/posix_malloc.c
-	${W}/shared/platform/common/posix/posix_memmap.c
-	${W}/shared/platform/common/posix/posix_sleep.c
-	${W}/shared/platform/common/posix/posix_thread.c
-	${W}/shared/platform/common/posix/posix_time.c
 	${W}/shared/utils/bh_assert.c
 	${W}/shared/utils/bh_bitmap.c
 	${W}/shared/utils/bh_common.c
@@ -50,6 +49,28 @@ add_library(wamr STATIC
 	# buildat's: the C API left out (wasm_c_api.c)
 	c_api_stub.c
 )
+if(WIN32)
+	target_sources(wamr PRIVATE
+		${W}/shared/platform/windows/platform_init.c
+		${W}/shared/platform/windows/win_malloc.c
+		${W}/shared/platform/windows/win_memmap.c
+		${W}/shared/platform/windows/win_thread.c
+		${W}/shared/platform/windows/win_time.c
+		${W}/shared/platform/common/memory/mremap.c)
+	set(WAMR_PLATFORM windows)
+	set(WAMR_PLATFORM_DEFS BH_PLATFORM_WINDOWS HAVE_STRUCT_TIMESPEC)
+else()
+	target_sources(wamr PRIVATE
+		${W}/shared/platform/linux/platform_init.c
+		${W}/shared/platform/common/posix/posix_blocking_op.c
+		${W}/shared/platform/common/posix/posix_malloc.c
+		${W}/shared/platform/common/posix/posix_memmap.c
+		${W}/shared/platform/common/posix/posix_sleep.c
+		${W}/shared/platform/common/posix/posix_thread.c
+		${W}/shared/platform/common/posix/posix_time.c)
+	set(WAMR_PLATFORM linux)
+	set(WAMR_PLATFORM_DEFS BH_PLATFORM_LINUX _GNU_SOURCE WASM_HAVE_MREMAP=1)
+endif()
 target_include_directories(wamr PUBLIC ${W}/iwasm/include)
 target_include_directories(wamr PRIVATE
 	${W}
@@ -58,7 +79,7 @@ target_include_directories(wamr PRIVATE
 	${W}/shared/utils
 	${W}/shared/mem-alloc
 	${W}/shared/platform/include
-	${W}/shared/platform/linux)
+	${W}/shared/platform/${WAMR_PLATFORM})
 # Everything not named here is off by config.h's defaults; these are the
 # ones that default on, or that are named for the record.
 # - The memory's bounds checked by the interpreter's own code on every
@@ -68,12 +89,10 @@ target_include_directories(wamr PRIVATE
 # - The memory as the module declares it (no shrinking to one big page
 #   by WAMR's guess of the heap's base).
 target_compile_definitions(wamr PRIVATE
-	BH_PLATFORM_LINUX
+	${WAMR_PLATFORM_DEFS}
 	BUILD_TARGET_X86_64
 	BH_MALLOC=wasm_runtime_malloc
 	BH_FREE=wasm_runtime_free
-	_GNU_SOURCE
-	WASM_HAVE_MREMAP=1
 	WASM_ENABLE_INTERP=1
 	WASM_ENABLE_FAST_INTERP=1
 	WASM_ENABLE_LABELS_AS_VALUES=1
