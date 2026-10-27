@@ -168,10 +168,125 @@ static void on_start(const Event &e)
 	log("drew a cube and a window");
 }
 
+// [CLIENT_WASM_BINDINGS] The secret field's twin of
+// extensions/sandbox_test (launch_attack.lua): the s key starts it. The
+// keys q, w and e are watched four ways -- the client_main's own KEY_DOWN,
+// a KeyDown and a TextInput subscription, Input:GetKeyPress each frame --
+// and the UI walked for the Starport ID dialog's password field, which
+// is then read, written, renamed and focused away from, one a frame.
+// The check presses q (seen four ways: the watching works), opens the
+// dialog, and types w and e into it: none of them may be seen, and each
+// attempt on the field is refused.
+static bool g_secret;
+static UIElement g_secret_field;
+static int g_secret_attempt, g_secret_through;
+static LineEdit g_own_field;
+static void secret_saw(char c, const char *how)
+{
+	if(!g_secret || (c != 'q' && c != 'w' && c != 'e'))
+		return;
+	char buf[80] = "secret: ";
+	unsigned int l = 8;
+	buf[l++] = c;
+	buf[l++] = ' ';
+	while(*how && l < sizeof buf)
+		buf[l++] = *how++;
+	log(Str(buf, l));
+}
+static UIElement find_secret(UIElement e, int depth)
+{
+	if(e.GetName() == "__trusted_secret")
+		return e;
+	if(depth > 12)
+		return UIElement();
+	const int n = (int)e.GetNumChildren();
+	for(int i = 0; i < n; i++){
+		UIElement c = e.GetChild(i).as<UIElement>();
+		if(!c)
+			continue;
+		UIElement f = find_secret(static_cast<UIElement&&>(c), depth + 1);
+		if(f)
+			return f;
+	}
+	return UIElement();
+}
+static const char *const SECRET_ATTEMPTS[] = {
+	"read its text",
+	"read it by GetText",
+	"write its text",
+	"write it by SetText",
+	"cap its maxLength",
+	"take its name away",
+	"focus a field of the module's own",
+};
+static const int SECRET_COUNT = sizeof SECRET_ATTEMPTS / sizeof SECRET_ATTEMPTS[0];
+static void secret_frame()
+{
+	if(!g_secret || g_secret_attempt > SECRET_COUNT)
+		return;
+	Value press;
+	for(const char *c = "qwe"; *c; c++){
+		press = input().GetKeyPress(*c);
+		if(press.kind == Value::BOOLEAN && press.boolean)
+			secret_saw(*c, "polled");
+	}
+	if(!g_secret_field){
+		g_secret_field = find_secret(ui().root(), 0);
+		if(!g_secret_field)
+			return;
+		log("secret: found the field");
+	}
+	const int k = g_secret_attempt++;
+	if(k == SECRET_COUNT){
+		char buf[60];
+		unsigned int l = with_n(buf, "secret: tried ", SECRET_COUNT);
+		l += with_n(buf + l, ", got through: ", g_secret_through);
+		log(Str(buf, l));
+		return;
+	}
+	char line[80] = "secret: ";
+	unsigned int l = 8;
+	for(const char *t = SECRET_ATTEMPTS[k]; *t && l < sizeof line; t++)
+		line[l++] = *t;
+	log(Str(line, l));
+	// A view of the field as a LineEdit, its handle not released by it
+	LineEdit field(g_secret_field.handle());
+	bool refused = false;
+	switch(k){
+	case 0: { Value t = field.text();
+		refused = t.kind == Value::STRING && t.string.size == 0; break; }
+	case 1: { Value t = field.GetText();
+		refused = t.kind == Value::STRING && t.string.size == 0; break; }
+	case 2: field.text("known"); break;
+	case 3: field.SetText("known"); break;
+	case 4: field.maxLength(1); break;
+	case 5: field.SetName("mine");
+		refused = field.GetName() == "__trusted_secret"; break;
+	case 6:
+		g_own_field = ui().root().CreateChild("LineEdit", "module field").
+				as<LineEdit>();
+		g_own_field.SetFocus(true);
+		refused = !g_own_field.HasFocus();
+		break;
+	}
+	field.release();
+	if(refused){
+		log("secret: refused by its answer");
+		return;
+	}
+	g_secret_through++;
+	log_n("secret: GOT THROUGH, attempt ", k);
+}
+
 // [CLIENT_WASM_BINDINGS] A global event (handle 0): Update, three of
 // them and unsubscribed
 static void on_global(const Event &e)
 {
+	if(e.name() == "KeyDown")
+		secret_saw((char)e.field[fields::KeyDown::Key].number,
+				"by a KeyDown subscription");
+	if(e.name() == "TextInput" && e.field[fields::TextInput::Text].string.size == 1)
+		secret_saw(e.field[fields::TextInput::Text].string.data[0], "by TextInput");
 	if(e.name() != "Update")
 		return;
 	g_updates++;
@@ -483,6 +598,13 @@ BUILDAT_WASM_EXPORT void frame(float dt)
 			on_start(e);
 			break;
 		case BUILDAT_EVENT_KEY_DOWN:
+			secret_saw((char)e.word(1), "by the client_main's KeyDown");
+			if(e.word(1) == 's' && !e.word(2) && g_cube && !g_secret){
+				g_secret = true;
+				SubscribeToEvent("KeyDown");
+				SubscribeToEvent("TextInput");
+				log("secret: watching");
+			}
 			// m: the costs again (natively once the compiled module runs)
 			if(e.word(1) == 'm' && !e.word(2) && g_cube)
 				measure(" (m)");
@@ -505,6 +627,7 @@ BUILDAT_WASM_EXPORT void frame(float dt)
 	if(!g_cube)
 		return;
 	refuse();
+	secret_frame();
 	g_time += dt;
 	// A turn about y, half an angle a second, through the bindings
 	const float h = g_time * 0.5f;

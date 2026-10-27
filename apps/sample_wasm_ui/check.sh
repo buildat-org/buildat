@@ -21,7 +21,11 @@
 # recurses until the module's count of the browser's stack traps, and a
 # binding at the bottom of a recursion just under that depth has room
 # ([WASM_WEB_CALL_DEPTH]). Natively twice,
-# compiled and in the interpreter; `web` in headless Chrome. budget/'s b
+# compiled and in the interpreter; `web` in headless Chrome. Natively the
+# s key starts the C++ twin of sandbox_test's secret-field cases: keys
+# typed into the Starport ID dialog reach the module by no event or poll,
+# and its password field is read as "" and not written, renamed or
+# focused away from. budget/'s b
 # key: a call of nothing but bindings is stopped by its budget near 50000
 # of them (BINDING_COST), and main/ logs what a binding costs. The
 # generated files (and client_api.txt's C++ spellings) are checked
@@ -152,6 +156,28 @@ budget_stopped()
 	return 0
 }
 
+# The secret field's twin (main.cpp's secret_frame(), natively: the web
+# client has no Starport ID dialog): q seen all four ways, w and e typed
+# into the dialog by none, each attempt on its password field refused
+secret_kept()
+{
+	local log=$1 how
+	for how in "polled" "by the client_main's KeyDown" "by a KeyDown subscription" \
+			"by TextInput"; do
+		grep -aq "wasm main: secret: q $how" "$log" ||
+			fail "q not seen $how before the dialog ($log)"
+	done
+	grep -aqE "wasm main: secret: [we] " "$log" &&
+		fail "a key typed into the Starport ID dialog reached the module ($log)"
+	grep -aq "wasm main: secret: tried 7, got through: 0" "$log" ||
+		fail "not the secret field's 7 attempts all refused ($log)"
+	[ "$(grep -ac "wasm main: secret: refused by its answer" "$log")" -eq 4 ] ||
+		fail "not the four refused by their answers ($log)"
+	[ "$(grep -ac "trap: .*a client's secret field is not a script's to write" "$log")" -ge 3 ] ||
+		fail "not the three writes trapped ($log)"
+	return 0
+}
+
 if [ $web = 1 ]; then
 	# The button is the top left third of the screen: clicked in its middle
 	cat > "$t/steps.json" <<'EOF'
@@ -233,9 +259,28 @@ wait_log 60000 deep: chains done
 keypress b
 wait_log 10000 wasm budget: stopped:
 $last
+keypress s
+wait_log 5000 secret: watching
+keypress q
+wait_log 5000 secret: q polled
+text q
+wait_log 5000 secret: q by TextInput
+keypress F9
+delay 300
+click Button "Starport ID..."
+wait_log 5000 starport: the ID login shown
+wait_log 10000 secret: tried
+keypress w
+text w
+keypress Tab
+keypress e
+text e
+delay 500
 quit
 EOF
-	run_client 60 "$t/cli$n.log" timeout 120 env "$@" bin/buildat -C "$t/client_cache" \
+	# The Starport ID dialog asks no real Starport
+	run_client 60 "$t/cli$n.log" timeout 120 env \
+			BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9 "$@" bin/buildat -C "$t/client_cache" \
 			-s localhost:$SERVER_PORT -w 640x480 -l 3 -c @"$t/cmds$n.txt"
 	kill -INT "$SERVER_PID" 2>/dev/null
 	wait "$SERVER_PID" 2>/dev/null
@@ -246,6 +291,7 @@ EOF
 	grep -a " I echo *: " "$t/srv$n.log" | sed 's/.*echo *: //'
 	client_lines "$t/cli$n.log"
 	budget_stopped "$t/cli$n.log"
+	secret_kept "$t/cli$n.log"
 	grep -aq "click from the client's wasm: 1" "$t/srv$n.log" ||
 		fail "the server did not get the module's click"
 	cube_is "$t/before$n.png" orange
