@@ -12,7 +12,9 @@
 # malformed .wasm (malformed/) and an oversized one (oversized/), another
 # instance's handle, a forged one, a stale one, a pointer past the memory,
 # a pointer and length that wrap, an index past the vertices, a texture
-# past the cap. Natively it runs twice: the first builds on both sides (the
+# past the cap. The module is loaded twice in one frame, and natively the
+# second load waits on the first one's compile ([WASM_COMPILE_RACE]).
+# Natively it runs twice: the first builds on both sides (the
 # server's .wasm taken out of the app's cache, the client's cache a fresh
 # one), the second finds both built; then a server with no clang and wasm
 # linker refuses the module. The times are printed.
@@ -109,6 +111,9 @@ run()
 run 1
 grep -aq "built wasm/ in" "$t/srv1.log" || fail "the server did not build wasm/"
 grep -aq "wasm main: compiled in" "$t/cli1.log" || fail "the client did not compile it"
+# Two loads in one frame, one compile ([WASM_COMPILE_RACE])
+[ "$(grep -ac "wasm main: compiling (pid" "$t/cli1.log")" = 1 ] ||
+	fail "the two loads did not share one compile ($t/cli1.log)"
 run 2
 grep -aq "wasm/ is built (cache hit)" "$t/srv2.log" || fail "the server built wasm/ again"
 grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||

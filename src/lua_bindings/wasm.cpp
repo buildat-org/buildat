@@ -71,6 +71,7 @@
 #endif
 #include <cctype>
 #include <deque>
+#include <map>
 #include <memory>
 #include <chrono>
 #include <cmath>
@@ -320,7 +321,7 @@ static const int COMPILE_WALL_S = 180;
 static const rlim_t COMPILE_CPU_S = 120;
 static const rlim_t COMPILE_AS_BYTES = (rlim_t)2 << 30;
 // Bumped when the C this writes changes, so that the cache is not reused
-static const char *GLUE_VERSION = "buildat-wasm2c-glue 2";
+static const char *GLUE_VERSION = "buildat-wasm2c-glue 3";
 
 extern "C" const char buildat_wasm_rt_h[];
 
@@ -553,6 +554,85 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 	return os.str();
 }
 
+// A compile of one key ([WASM_COMPILE_RACE]): the loads of the same module
+// in this client share it, and each waits on it. It writes into a
+// directory of its own (mkdtemp) and renames that whole into the cache
+// as <key>/ once the .so is built, so that another client compiling the
+// same key into the same cache never sees half a directory: whichever
+// renames first wins, the other takes the winner's.
+struct Compile {
+	ss_ name; // the module's, for the log
+	ss_ dir; // <cache>/wasm2c/<key>, there once whole
+	ss_ tmp; // this compile's own, removed once done
+	pid_t pid = 0;
+	std::chrono::steady_clock::time_point started;
+	enum State { RUNNING, DONE, FAILED } state = RUNNING;
+	ss_ error;
+
+	void finish_failed(const ss_ &why)
+	{
+		state = FAILED;
+		error = why;
+	}
+
+	// The child's progress, read without waiting
+	void poll()
+	{
+		if(state != RUNNING)
+			return;
+		int status = 0;
+		const pid_t r = waitpid(pid, &status, WNOHANG);
+		const int ms = (int)std::chrono::duration_cast<
+				std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+				started).count();
+		if(r == 0){
+			if(ms > COMPILE_WALL_S * 1000){
+				kill(-pid, SIGKILL);
+				kill(pid, SIGKILL);
+				waitpid(pid, nullptr, 0);
+				pid = 0;
+				finish_failed("the compile took over "+itos(COMPILE_WALL_S)+
+						" s; killed");
+			}
+			return;
+		}
+		pid = 0;
+		if(r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0){
+			std::ifstream f(tmp+"/compile.log");
+			ss_ line;
+			for(int n = 0; std::getline(f, line) && n < 20; n++)
+				log_w(MODULE, "wasm %s: compiler: %s", cs(name), cs(line));
+			finish_failed(WIFSIGNALED(status) ? "the compile was killed "
+					"(signal "+itos(WTERMSIG(status))+"), past its limits?" :
+					"the compile failed (its log above)");
+			return;
+		}
+		// Into place whole; a directory there already is another client's
+		// compile of the same key, as whole
+		if(rename(tmp.c_str(), dir.c_str()) == 0)
+			tmp.clear();
+		if(access((dir+"/module.so").c_str(), R_OK) != 0){
+			finish_failed("the compiled module could not be put in "+dir);
+			return;
+		}
+		log_i(MODULE, "wasm %s: compiled in %i ms", cs(name), ms);
+		state = DONE;
+	}
+
+	~Compile()
+	{
+		if(pid > 0){
+			kill(-pid, SIGKILL);
+			kill(pid, SIGKILL);
+			waitpid(pid, nullptr, 0);
+		}
+		if(!tmp.empty())
+			interface::fs::remove_all(tmp);
+	}
+};
+// The compiles under way in this client, by key
+static std::map<ss_, std::weak_ptr<Compile>> g_compiles;
+
 #endif // BUILDAT_WASM_NATIVE
 
 #ifdef __EMSCRIPTEN__
@@ -645,10 +725,7 @@ struct Instance {
 	enum State { LOADING, READY, FAILED } state = LOADING;
 	ss_ error;
 #if BUILDAT_WASM_NATIVE
-	ss_ dir; // the compile's directory in the cache
-	ss_ tmp_so; // the compiler's output there, renamed once it is whole
-	pid_t pid = 0;
-	std::chrono::steady_clock::time_point started;
+	sp_<Compile> compile; // while it is loading
 	bool has_imports = false;
 	void *dl = nullptr;
 	void *mem = nullptr;
@@ -693,6 +770,9 @@ struct Instance {
 	{
 		state = FAILED;
 		error = why;
+#if BUILDAT_WASM_NATIVE
+		compile.reset();
+#endif
 		log_w(MODULE, "wasm %s: %s", cs(name), cs(why));
 	}
 
@@ -1183,44 +1263,20 @@ struct Instance {
 		state = READY;
 	}
 
-	// The child compile's progress, read without waiting
+	// The compile's progress, read without waiting
 	void poll()
 	{
-		if(state != LOADING || pid <= 0)
+		if(state != LOADING || !compile)
 			return;
-		int status = 0;
-		const pid_t r = waitpid(pid, &status, WNOHANG);
-		const int ms = (int)std::chrono::duration_cast<
-				std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-				started).count();
-		if(r == 0){
-			if(ms > COMPILE_WALL_S * 1000){
-				kill(-pid, SIGKILL);
-				kill(pid, SIGKILL);
-				waitpid(pid, nullptr, 0);
-				pid = 0;
-				fail("the compile took over "+itos(COMPILE_WALL_S)+" s; killed");
-			}
+		compile->poll();
+		if(compile->state == Compile::RUNNING)
+			return;
+		const sp_<Compile> c = std::move(compile);
+		if(c->state == Compile::FAILED){
+			fail(c->error);
 			return;
 		}
-		pid = 0;
-		if(r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0){
-			std::ifstream f(dir+"/compile.log");
-			ss_ line;
-			for(int n = 0; std::getline(f, line) && n < 20; n++)
-				log_w(MODULE, "wasm %s: compiler: %s", cs(name), cs(line));
-			fail(WIFSIGNALED(status) ? "the compile was killed (signal "+
-					itos(WTERMSIG(status))+"), past its limits?" :
-					"the compile failed (its log above)");
-			return;
-		}
-		if(rename((dir+"/"+tmp_so).c_str(), (dir+"/module.so").c_str())
-				!= 0){
-			fail("the compiled module went missing");
-			return;
-		}
-		log_i(MODULE, "wasm %s: compiled in %i ms", cs(name), ms);
-		ready_from(dir+"/module.so");
+		ready_from(c->dir+"/module.so");
 		if(state == READY)
 			log_i(MODULE, "wasm %s: ready", cs(name));
 	}
@@ -1260,7 +1316,7 @@ struct Instance {
 		mkdir(g_client_config.get<ss_>("cache_path").c_str(), 0700);
 		mkdir(root.c_str(), 0700);
 		chmod(root.c_str(), 0700);
-		dir = root+"/"+key.substr(0, 32);
+		const ss_ dir = root+"/"+key.substr(0, 32);
 		if(access((dir+"/module.so").c_str(), R_OK) == 0){
 			log_i(MODULE, "wasm %s: compiled module from the cache (%s)",
 					cs(name), cs(key.substr(0, 12)));
@@ -1269,7 +1325,26 @@ struct Instance {
 				log_i(MODULE, "wasm %s: ready", cs(name));
 			return;
 		}
-		mkdir(dir.c_str(), 0700);
+		// The same key compiling in this client: wait on it
+		for(auto it = g_compiles.begin(); it != g_compiles.end();)
+			it = it->second.expired() ? g_compiles.erase(it) : std::next(it);
+		auto running = g_compiles.find(key);
+		if(running != g_compiles.end()){
+			compile = running->second.lock();
+			log_i(MODULE, "wasm %s: waiting on its compile under way (%s)",
+					cs(name), cs(key.substr(0, 12)));
+			return;
+		}
+		ss_ tmpl = root+"/"+key.substr(0, 32)+".XXXXXX";
+		if(!mkdtemp(&tmpl[0])){
+			fail("could not make a directory in "+root);
+			return;
+		}
+		compile.reset(new Compile());
+		compile->name = name;
+		compile->dir = dir;
+		compile->tmp = tmpl;
+		const ss_ &tmp = compile->tmp;
 		if(wabt::Failed(wabt::GenerateNames(&m))){
 			fail("wasm2c could not name its functions");
 			return;
@@ -1287,12 +1362,12 @@ struct Instance {
 		}
 		const auto &cb = c_stream.output_buffer().data;
 		const auto &hb = h_stream.output_buffer().data;
-		if(!interface::fs::write_file(dir+"/m.c", ss_(cb.begin(), cb.end())) ||
-				!interface::fs::write_file(dir+"/m.h", ss_(hb.begin(), hb.end())) ||
-				!interface::fs::write_file(dir+"/wasm-rt.h", buildat_wasm_rt_h) ||
-				!interface::fs::write_file(dir+"/glue.c",
+		if(!interface::fs::write_file(tmp+"/m.c", ss_(cb.begin(), cb.end())) ||
+				!interface::fs::write_file(tmp+"/m.h", ss_(hb.begin(), hb.end())) ||
+				!interface::fs::write_file(tmp+"/wasm-rt.h", buildat_wasm_rt_h) ||
+				!interface::fs::write_file(tmp+"/glue.c",
 						glue_c(exports, has_imports, has_memory))){
-			fail("could not write into "+dir);
+			fail("could not write into "+tmp);
 			return;
 		}
 		// The command line is the client's: its compiler, its flags, file
@@ -1305,19 +1380,17 @@ struct Instance {
 			while(is >> w)
 				args.push_back(w);
 		}
-		// Its own output name: another client may be compiling the same
-		tmp_so = "module."+itos(getpid())+".so.tmp";
-		for(const ss_ &a : {ss_("-o"), tmp_so, ss_("m.c"), ss_("glue.c")})
+		for(const ss_ &a : {ss_("-o"), ss_("module.so"), ss_("m.c"),
+				ss_("glue.c")})
 			args.push_back(a);
 		std::vector<char*> argv;
 		for(ss_ &a : args)
 			argv.push_back(&a[0]);
 		argv.push_back(nullptr);
-		const ss_ log_path = dir+"/compile.log";
-		started = std::chrono::steady_clock::now();
-		pid = fork();
+		const ss_ log_path = tmp+"/compile.log";
+		compile->started = std::chrono::steady_clock::now();
+		const pid_t pid = fork();
 		if(pid < 0){
-			pid = 0;
 			fail("fork failed");
 			return;
 		}
@@ -1329,7 +1402,7 @@ struct Instance {
 			struct rlimit cpu = {COMPILE_CPU_S, COMPILE_CPU_S};
 			setrlimit(RLIMIT_AS, &as);
 			setrlimit(RLIMIT_CPU, &cpu);
-			if(chdir(dir.c_str()) != 0)
+			if(chdir(tmp.c_str()) != 0)
 				_exit(126);
 			const int fd = open(log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
 					0600);
@@ -1346,6 +1419,8 @@ struct Instance {
 			_exit(127);
 		}
 		setpgid(pid, pid);
+		compile->pid = pid;
+		g_compiles[key] = compile;
 		log_i(MODULE, "wasm %s: compiling (pid %i, %s)", cs(name), (int)pid,
 				cs(key.substr(0, 12)));
 	}
@@ -1354,11 +1429,7 @@ struct Instance {
 	~Instance()
 	{
 #if BUILDAT_WASM_NATIVE
-		if(pid > 0){
-			kill(-pid, SIGKILL);
-			kill(pid, SIGKILL);
-			waitpid(pid, nullptr, 0);
-		}
+		compile.reset(); // killed if no other load waits on it
 		if(mem){
 			if(free_fn)
 				free_fn(mem);

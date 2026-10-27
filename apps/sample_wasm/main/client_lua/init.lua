@@ -19,9 +19,11 @@ end
 
 local m, why = buildat.wasm_load("main")
 assert(m, why)
--- A second instance of it, whose handles the first must refuse; loaded
--- once the first is ready, as natively it would compile the same files
-local m2
+-- A second instance of it, whose handles the first must refuse; loaded in
+-- the same frame, so that natively it waits on the first one's compile
+-- ([WASM_COMPILE_RACE])
+local m2 = buildat.wasm_load("main")
+assert(m2)
 
 local scene = magic.Scene()
 scene:CreateComponent("Octree")
@@ -162,10 +164,13 @@ magic.SubscribeToEvent("Update", function()
 		log:error("wasm done: failed: "..tostring(err))
 		return
 	end
-	if not m2 then
-		m2 = buildat.wasm_load("main")
+	local status2, err2 = m2:status()
+	if status2 == "loading" then return end
+	if status2 ~= "ready" then
+		stage = "done"
+		log:error("wasm done: the second load failed: "..tostring(err2))
+		return
 	end
-	if m2:status() == "loading" then return end
 	local ok, e = pcall(check)
 	if not ok then
 		stage = "done"
