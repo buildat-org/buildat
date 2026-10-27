@@ -693,6 +693,10 @@ static int l_compose_image(lua_State *L)
 				g_client_config.get<ss_>("cache_path")))
 			throw Exception("compose_image(): \""+path+
 					"\" is not under the cache path");
+		// Only a .png: the bytes are one, and a file under the cache can
+		// answer a plain-name load of a name no installed dir has
+		if(path.size() < 4 || path.compare(path.size() - 4, 4, ".png") != 0)
+			throw Exception("compose_image(): \""+path+"\" is not a .png");
 		// The directory the file goes in, made if it is not there. Sandboxed
 		// code has no way to make one and every caller would otherwise need
 		// one made for it; it is under the cache like the file itself.
