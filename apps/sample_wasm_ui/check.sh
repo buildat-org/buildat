@@ -21,7 +21,9 @@
 # recurses until the module's count of the browser's stack traps, and a
 # binding at the bottom of a recursion just under that depth has room
 # ([WASM_WEB_CALL_DEPTH]). Natively twice,
-# compiled and in the interpreter; `web` in headless Chrome. The
+# compiled and in the interpreter; `web` in headless Chrome. budget/'s b
+# key: a call of nothing but bindings is stopped by its budget near 50000
+# of them (BINDING_COST), and main/ logs what a binding costs. The
 # generated files (and client_api.txt's C++ spellings) are checked
 # against the generator.
 #
@@ -29,7 +31,7 @@
 #   apps/sample_wasm_ui/check.sh web      # the web client, headless Chrome
 #
 # tier: quick
-# cost: 30s (2026-10-27)
+# cost: 100s (2026-10-28)
 # covers: util/gen_wasm_bindings.lua doc/client_api.txt src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -132,6 +134,24 @@ client_lines()
 	return 0
 }
 
+# budget/'s b key: bindings until the call's budget stops it, near 50000
+# (BINDING_COST), on whichever engine ran it
+budget_stopped()
+{
+	local log=$1
+	grep -a "wasm budget: trap: " "$log" | head -1 | sed 's/.*wasm budget: /budget: /' | cut -c1-160
+	grep -aq "wasm budget: trap: buildat.Node:GetID():number: past the call's budget" "$log" ||
+		fail "budget/'s bindings not stopped by the budget ($log)"
+	# (the interpreter's budget, a sixteenth, also pays its own code's
+	# share of a call unscaled: there a few thousand fewer)
+	grep -aq "budget: 35000 calls" "$log" ||
+		fail "budget/ stopped before 35000 bindings ($log)"
+	grep -a "budget: [0-9]* calls" "$log" | tail -1 | sed 's/.*wasm budget: /budget: the last line: /'
+	grep -aqE "budget: (55000 calls|NOT STOPPED)" "$log" &&
+		fail "budget/ ran past 55000 bindings ($log)"
+	return 0
+}
+
 if [ $web = 1 ]; then
 	# The button is the top left third of the screen: clicked in its middle
 	cat > "$t/steps.json" <<'EOF'
@@ -153,7 +173,11 @@ if [ $web = 1 ]; then
 	["waitlog", "deep: limit", 60],
 	["waitlog", "deep: alive, root width", 60],
 	["key", "Space"],
-	["waitlog", "the server answered echo: key 2", 10]
+	["waitlog", "the server answered echo: key 2", 10],
+	["key", "m"],
+	["waitlog", "cost \\(m\\): ", 10],
+	["key", "b"],
+	["waitlog", "wasm budget: stopped: ", 10]
 ]
 EOF
 	# deep/'s w key: a recursion until it traps, then a sweep down from
@@ -166,6 +190,7 @@ EOF
 		{ tail -20 "$t/drive.log"; fail "the web drive failed ($t/web)"; }
 	grep -a " I echo *: " "$t/web/server.log" | sed 's/.*echo *: //'
 	client_lines "$t/web/page.log"
+	budget_stopped "$t/web/page.log"
 	grep -aq "wasm deep: frame: trap: call stack exhausted (past the web client's" \
 		"$t/web/page.log" || fail "deep/'s recursion not stopped by the stack count ($t/web)"
 	grep -aE "wasm deep: .*(RangeError|the stack ran out)" "$t/web/page.log" &&
@@ -192,6 +217,7 @@ run()
 	cat > "$t/cmds$n.txt" <<EOF
 expect_error the default client_main: no wasm: refused
 expect_error frame: wasm main: frame: trap
+expect_error the default client_main stopped the module
 wait_log 60000 drew a cube and a window
 wait_log 30000 refusals: tried
 delay 500
@@ -204,6 +230,8 @@ delay 500
 screenshot $t/after$n.png
 keypress c
 wait_log 60000 deep: chains done
+keypress b
+wait_log 10000 wasm budget: stopped:
 $last
 quit
 EOF
@@ -217,6 +245,7 @@ EOF
 	echo "-- run $n"
 	grep -a " I echo *: " "$t/srv$n.log" | sed 's/.*echo *: //'
 	client_lines "$t/cli$n.log"
+	budget_stopped "$t/cli$n.log"
 	grep -aq "click from the client's wasm: 1" "$t/srv$n.log" ||
 		fail "the server did not get the module's click"
 	cube_is "$t/before$n.png" orange
@@ -228,7 +257,9 @@ EOF
 		fail "not 12 chains on deep's camera: $(grep -a "chains done" "$t/cli$n.log")"
 }
 # The compile (about a second) is waited for, so that the move is seen
-run 1 "wait_log 60000 ; ready (compiled)"
+run 1 "wait_log 60000 ; ready (compiled)
+keypress m
+wait_log 10000 cost (m): "
 grep -aqE "wasm main: (moved to the compiled module|compiled module from the cache)" "$t/cli1.log" ||
 	fail "not compiled in run 1 ($t/cli1.log)"
 run 2 "delay 0" BUILDAT_CHECK_WASM_INTERPRETER=1

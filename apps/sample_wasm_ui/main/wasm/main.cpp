@@ -362,6 +362,38 @@ static void log_str(const char *text, Str s)
 	log(Str(buf, l));
 }
 
+// [CLIENT_WASM_BINDINGS] What a binding costs, against plain code: 2000
+// property reads (a Vector3 back), 2000 method calls (a number back), and
+// 10^7 rounds of a loop of the module's own (an LCG: its wasm is 7
+// instructions and the loop's charge), each in nanoseconds; the client's
+// log says them, BINDING_COST in wasm.cpp is set from them
+static unsigned int g_sink;
+static void measure(const char *what)
+{
+	const double t0 = get_time_us();
+	for(int i = 0; i < 2000; i++)
+		g_camera.position();
+	const double t1 = get_time_us();
+	for(int i = 0; i < 2000; i++)
+		g_camera.GetID();
+	const double t2 = get_time_us();
+	unsigned int x = g_sink;
+	for(int i = 0; i < 10000000; i++)
+		x = x * 1664525u + 1013904223u;
+	g_sink = x;
+	const double t3 = get_time_us();
+	const int ns[] = {(int)((t1 - t0) * 1000 / 2000), (int)((t2 - t1) * 1000 / 2000),
+			(int)((t3 - t2) * 1000 * 1000 / 10000000)};
+	char line[100] = "cost";
+	unsigned int l = 4;
+	while(*what && l < 60)
+		line[l++] = *what++;
+	const char tail[] = ": ns a property read, a method call, a thousand loop rounds:";
+	for(unsigned int i = 0; i < sizeof tail; i++)
+		line[l++] = tail[i];
+	log_ns(line, ns, 3);
+}
+
 // [CLIENT_WASM_BINDINGS] A value's methods, Matrix4's constructor and the
 // calls that return a table, once the octree has the scene's drawables
 static void values_and_tables()
@@ -434,6 +466,7 @@ static void values_and_tables()
 	log(Str(buf, l));
 	log(g_update_timestep ? "global Update: its TimeStep in the payload" :
 			"global Update: NO TimeStep in the payload");
+	measure("");
 }
 
 BUILDAT_WASM_EXPORT const char *packets(void)
@@ -450,6 +483,9 @@ BUILDAT_WASM_EXPORT void frame(float dt)
 			on_start(e);
 			break;
 		case BUILDAT_EVENT_KEY_DOWN:
+			// m: the costs again (natively once the compiled module runs)
+			if(e.word(1) == 'm' && !e.word(2) && g_cube)
+				measure(" (m)");
 			if(e.word(1) == 32 && !e.word(2) && g_cube){
 				g_colour++;
 				draw_cube();

@@ -914,7 +914,9 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   loads) has a budget of 4e9, counted the same on both clients: a
   function's or a loop's instructions each time it is entered or goes
   round, memory.fill/copy/init and table.copy/init a sixteenth of their
-  size, and the imports their work. That is about 0.1 s of the densest
+  size, and the imports their work (a binding of buildat_client.h 80000,
+  its share in the interpreter: some 50000 bindings a call, about a
+  second of them on the web). That is about 0.1 s of the densest
   loop and a second or more of most code, natively and on the web; in
   the interpreter a sixteenth of it, about as long a time. A
   call past it traps, and the module is stopped: logged ("wasm <module>:

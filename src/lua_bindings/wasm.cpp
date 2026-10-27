@@ -208,8 +208,17 @@ static const EventFieldDef EVENT_FIELDS[] = {
 // A binding call's values, in and out, and how many
 static const size_t MAX_BINDING_BYTES = 1 << 20;
 static const unsigned int MAX_BINDING_VALUES = 32;
-// Its charge, as IMPORT_COST: a call into the sandbox's Lua
-static const uint64_t BINDING_COST = 20000;
+// Its charge, as IMPORT_COST: a call into the sandbox's Lua, its time in
+// units of a compiled module's own code. Measured 2026-10-28
+// (apps/sample_wasm_ui's "cost" lines): a property read with a Vector3
+// back 6 us natively (compiled or interpreted alike) and 17-22 us on the
+// web, a method call with a number back 1-2 us and 7.5-9 us; plain code
+// runs about 12 units a ns natively compiled and 4-7 on the web. The web's
+// property read, 20 us at 4-5 units a ns, makes the budget (BUDGET) about
+// a second of nothing but bindings there, and 0.3 s natively. The
+// interpreter is charged its share (budget()), so that its smaller budget
+// holds as many.
+static const uint64_t BINDING_COST = 80000;
 
 static const char *import_name(size_t which)
 {
@@ -2561,7 +2570,8 @@ struct Instance {
 			return 0;
 		}
 		lua_settop(L, top);
-		import_cost += BINDING_COST + c.args.size() + c.out.size();
+		import_cost += BINDING_COST * (uint64_t)budget() / BUDGET +
+				c.args.size() + c.out.size();
 		if(c.out.size() > a[3]){
 			for(uint32_t h : c.given){
 				ss_ unused;
