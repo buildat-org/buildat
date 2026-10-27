@@ -32,6 +32,10 @@ kept = nil
 -- The key handler, declared here because the sandbox refuses a global
 -- that is first assigned from inside a function
 launch_console_key = nil
+-- A click, which leaves one text area's selection, and the wheel over the
+-- manual
+launch_console_click = nil
+launch_console_wheel = nil
 -- What the eval self-check leaves behind, declared for the sandbox
 console_self_check = nil
 
@@ -117,13 +121,15 @@ local function open(opts)
 	-- than re-laying anything out.
 	local lines = api_lines()
 	-- Where each line starts in the joined text, so a match can be
-	-- pointed at rather than merely scrolled to
+	-- pointed at rather than merely scrolled to: in characters, which is
+	-- what a selection counts, not bytes
+	local function chars(s) return #s:gsub("[\128-\191]", "") end
 	local line_at = {}
 	do
 		local at = 0
 		for i, line in ipairs(lines) do
 			line_at[i] = at
-			at = at + #line + 1
+			at = at + chars(line) + 1
 		end
 	end
 	-- **A field is dark with light text, like the rest of the column**
@@ -133,13 +139,13 @@ local function open(opts)
 	-- Built without SetStyleAuto, the way the ScrollView beside it
 	-- already is, with a cursor of its own since the style is what draws
 	-- one.
-	local function field(parent, x, y, w)
+	local function field(parent, x, y, w, h, colour)
 		local e = parent:CreateChild("LineEdit")
 		e.texture = white_tex
 		e.imageRect = magic.IntRect(0, 0, 2, 2)
-		e.color = magic.Color(0.13, 0.15, 0.18, 1)
+		e.color = colour or magic.Color(0.13, 0.15, 0.18, 1)
 		e:SetPosition(x, y)
-		e:SetFixedSize(w, 22)
+		e:SetFixedSize(w, h or 22)
 		e.textCopyable = true
 		e.textSelectable = true
 		local t = e.textElement
@@ -147,6 +153,8 @@ local function open(opts)
 			t:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
 			t:SetColor(color("text"))
 			t:SetPosition(4, 3)
+			-- A Text's selection is drawn in no colour until given one
+			t:SetSelectionColor(magic.Color(0.30, 0.42, 0.16, 1))
 		end
 		local cur = e.cursor
 		if cur then
@@ -202,22 +210,35 @@ local function open(opts)
 		-- of the column
 		view.scrollPanel.clipChildren = true
 	end
-	local doc = left:CreateChild("Text")
-	doc:SetSelectionColor(magic.Color(0.30, 0.42, 0.16, 1))
-	doc:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
-	doc:SetColor(color("text"))
+	-- **A text area is a LineEdit that cannot be typed into**
+	-- ([LAUNCH_CONSOLE_REFINE]): multi-line, so a drag selects across
+	-- rows, and out of the focus, so a click leaves the keyboard in the
+	-- field it was in and Tab still walks the two fields only. Its
+	-- selection is copied by this screen's own Ctrl+C below, since a
+	-- LineEdit copies only when it has the focus.
+	local function area(e)
+		e.editable = false
+		e.multiLine = true
+		e:SetFocusMode(magic.FM_NOTFOCUSABLE)
+		return e
+	end
+	-- **The manual as big as its text, inside the scroll view**: the
+	-- view keeps its bars and the search's scrolling by rows, and the
+	-- text does not wrap (a long line scrolls sideways, as before). Its
+	-- size is read before it is multi-line: a multi-line edit wraps at
+	-- its width, and this one is 1 px wide until then.
+	local doc = field(left, 0, 0, 1, 1, magic.Color(0.06, 0.07, 0.09, 1))
 	doc.text = table.concat(lines, "\n")
-	-- simplified: the document is read, not copied out of. A `Text`
-	-- does have a selection -- it is what the search's match is drawn
-	-- with below -- but it is set from code and not dragged with a
-	-- mouse, and `textCopyable` is a `LineEdit`'s. Copying a line out
-	-- wants either a LineEdit per line or a selection that follows the
-	-- pointer. The console's own answers are the same.
+	local doc_text = doc.textElement
+	local tw, th = doc_text.width, doc_text.height
+	doc:SetFixedSize(tw + 16, th + 6)
+	area(doc)
+	doc_text:SetWordwrap(false)
 	view.contentElement = doc
 
 	-- Which line the view is on, so a match can be scrolled to: a Text's
 	-- rows are its font's row height apart
-	local row_h = math.max(1, math.floor(doc.height / math.max(1, #lines)))
+	local row_h = math.max(1, math.floor(th / math.max(1, #lines)))
 	local function show_line(i)
 		view.viewPosition = magic.IntVector2(0,
 				math.max(0, (i - 1) * row_h - 40))
@@ -225,6 +246,10 @@ local function open(opts)
 	local found_at = 0
 	-- The line the search is pointing at, which is what Ctrl+C takes
 	local found_line = nil
+	-- Where the match starts, to tell it from a selection dragged
+	local found_sel = nil
+	-- Declared before find(), which clears its selection
+	local out_text
 	local function find(from, back)
 		local q = search.text:lower()
 		if q == "" then
@@ -241,7 +266,10 @@ local function open(opts)
 				-- **The match is pointed at, not only scrolled to**
 				-- (user): a line in the middle of a screenful is not
 				-- an answer until something says which one it is.
-				doc:SetSelection(line_at[i] + col - 1, #q)
+				found_sel = line_at[i] + chars(lines[i]:sub(1, col - 1))
+				doc_text:SetSelection(found_sel, chars(q))
+				-- One selection on the screen: the console's goes
+				out_text:ClearSelection()
 				-- What Ctrl+C would take: the line the match is on,
 				-- which is the unit a person reading an API wants
 				found_line = lines[i]
@@ -252,7 +280,7 @@ local function open(opts)
 			end
 		end
 		hint.text = "no line has " .. q
-		doc:ClearSelection()
+		doc_text:ClearSelection()
 		log:info("console: search " .. q .. " -> nothing")
 	end
 
@@ -262,18 +290,37 @@ local function open(opts)
 		"buildat " .. tostring(api.version and api.version() or ""),
 		"This is the sandbox every game runs in. Try: buildat.version()",
 		"",
+		-- **And one of several lines** ([LAUNCH_CONSOLE_REFINE]), which
+		-- runs as pasted: the field takes a paste's line breaks and Enter
+		-- runs it as one chunk.
+		-- simplified: the one-line field shows a pasted chunk's first
+		-- line, its caret on the last line's column; a field that grows
+		-- with its rows is the upgrade
+		"Or select these lines, Ctrl+C, then Ctrl+V and Enter below:",
+		"local blip = require(\"buildat/extension/blip\")",
+		"local p = blip.preset(\"powerup\", 3)",
+		"p.base_freq = p.base_freq * 1.5",
+		"blip.play(p, {gain = 0.5})",
+		"return blip.pack(p)",
+		"",
 	}
-	local out = right:CreateChild("Text")
-	out:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
-	out:SetPosition(MARGIN, MARGIN)
-	out:SetFixedWidth(w - half - 2 * MARGIN)
-	out:SetColor(color("text"))
-	out:SetWordwrap(true)
+	-- **Under the client's Starport buttons and beside the ×**: the
+	-- trusted overlay holds the screen's top right corner over anything
+	-- a launch UI draws, so the × is one of its rows lower, and the text
+	-- is narrower by it.
+	-- simplified: TOP is the overlay with no ID logged in (one row); with
+	-- IDs it grows a row each and covers the × (Escape still closes). A
+	-- verb saying where the overlay ends is the upgrade.
+	local TOP = 40
+	local out = area(field(right, MARGIN, TOP, w - half - 2 * MARGIN - 40,
+			h - 30 - TOP - MARGIN, magic.Color(0.03, 0.04, 0.05, 1)))
+	out_text = out.textElement
 	out.text = table.concat(out_lines, "\n")
 	local input = field(right, MARGIN, h - 30, w - half - 2 * MARGIN)
 	input:SetName("console_input")
 
-	local MAX_LINES = math.max(4, math.floor((h - 60) / (FONT + 4)))
+	-- The area follows its end, and the wheel scrolls back over these
+	local MAX_LINES = 500
 	local function say(text)
 		for line in tostring(text):gmatch("[^\n]+") do
 			out_lines[#out_lines + 1] = line
@@ -282,6 +329,7 @@ local function open(opts)
 			table.remove(out_lines, 1)
 		end
 		out.text = table.concat(out_lines, "\n")
+		out_text:ClearSelection()
 	end
 
 	-- One line in, one answer out. **`return` is added when the line is
@@ -290,15 +338,22 @@ local function open(opts)
 	local function run(line)
 		say("> " .. line)
 		local ok, a, b, c = api.eval("return " .. line, "=console")
-		if not ok and type(a) == "string" and a:find("'<eof>'") then
+		-- **Not an expression** -- `x = 1`, or a chunk starting `local`
+		-- ("unexpected symbol near 'local'") -- is run as statements. A
+		-- syntax error says " near "; one at run time does not, and is
+		-- not run twice.
+		if not ok and type(a) == "string" and a:find(" near ") then
 			ok, a, b, c = api.eval(line, "=console")
 		end
+		-- A pasted chunk's lines on one line of the log
+		local logged = line:gsub("\n", "; ")
 		if not ok then
 			say(tostring(a))
-			log:info("console: " .. line .. " ! " .. tostring(a))
+			log:info("console: " .. logged .. " ! " .. tostring(a))
 			return
 		end
 		if a == nil and b == nil then
+			log:info("console: " .. logged)
 			return
 		end
 		local parts = {}
@@ -310,7 +365,7 @@ local function open(opts)
 		say(answer)
 		-- In the log as well as on the screen: a session someone had is
 		-- worth as much in a bug report as anything else the client logs
-		log:info("console: " .. line .. " = " .. answer)
+		log:info("console: " .. logged .. " = " .. answer)
 	end
 
 	-- **Ctrl+C and Ctrl+V reach the OS clipboard**, not a copy of
@@ -324,19 +379,77 @@ local function open(opts)
 	-- **Declared at the top of the file, assigned here**: the sandbox
 	-- refuses a global first assigned from inside a function, and
 	-- SubscribeToEvent takes a name rather than a function
+	-- **Up and Down step through what was entered in a field**, the
+	-- draft kept as the newest entry ([LAUNCH_CONSOLE_REFINE]). A
+	-- one-line LineEdit leaves both keys to its screen.
+	local history = {console_search = {}, console_input = {}}
+	local function remember(name, text)
+		local hs = history[name]
+		if text ~= "" and hs[#hs] ~= text then
+			hs[#hs + 1] = text
+		end
+		hs.at = nil
+	end
+	local function step(name, e, d)
+		local hs = history[name]
+		local at = hs.at or #hs + 1
+		if at == #hs + 1 then
+			hs.draft = e.text
+		end
+		at = math.max(1, math.min(#hs + 1, at + d))
+		hs.at = at
+		e.text = at == #hs + 1 and hs.draft or hs[at]
+	end
+	-- The text a Text's selection covers, counted in characters
+	local function selected(t)
+		local n = t.selectionLength or 0
+		if n == 0 then
+			return nil
+		end
+		local s, from = t.text, t.selectionStart
+		local function byte_at(c)
+			local i = 0
+			for p in s:gmatch("()[^\128-\191]") do
+				if i == c then
+					return p
+				end
+				i = i + 1
+			end
+			return #s + 1
+		end
+		return s:sub(byte_at(from), byte_at(from + n) - 1)
+	end
+	local function stop()
+		magic.UnsubscribeFromEvent("KeyDown", "launch_console_key")
+		magic.UnsubscribeFromEvent("UIMouseClick", "launch_console_click")
+		magic.UnsubscribeFromEvent("MouseWheel", "launch_console_wheel")
+		root:Remove()
+		magic.ui:SetFocusElement(nil)
+	end
+	-- Escape and the × both: away over a room, out of the client as the
+	-- launch UI
+	local function close()
+		log:info("console: closed")
+		if opts.on_close then
+			stop()
+			opts.on_close()
+		else
+			api.quit()
+		end
+	end
+	-- **The × at the top right** ([CLOSE_GLYPH]), the menus' own
+	local corner = right:CreateChild("UIElement")
+	corner:SetPosition(0, TOP)
+	corner:SetFixedSize(w - half, 40)
+	local glyph = (ui_utils.safe or ui_utils).close_glyph
+	glyph(root, corner, close)
+	-- **Declared at the top of the file, assigned here**: the sandbox
+	-- refuses a global first assigned from inside a function, and
+	-- SubscribeToEvent takes a name rather than a function
 	launch_console_key = function(event_type, event_data)
 		local key = event_data:GetInt("Key")
 		if key == magic.KEY_ESCAPE then
-			if opts.on_close then
-				magic.UnsubscribeFromEvent("KeyDown",
-						"launch_console_key")
-				root:Remove()
-				magic.ui:SetFocusElement(nil)
-				log:info("console: closed")
-				opts.on_close()
-			else
-				api.quit()
-			end
+			close()
 			return
 		end
 		-- **Tab moves the keyboard between the two columns**, and it is
@@ -346,32 +459,7 @@ local function open(opts)
 		-- by Urho3D's in the same frame whenever the console had a root
 		-- of its own -- two handlers for one key, of which only one
 		-- can be last.
-		-- **Ctrl+C takes the line the search is pointing at**
-		-- ([LAUNCH_CONSOLE]'s done-when: text copies out of the
-		-- document). A `Text` has a selection and no copy of its own,
-		-- and the selection here is always a search hit, so the line it
-		-- is on is what goes to the clipboard -- the unit a person
-		-- reading an API actually wants, rather than the three words
-		-- they typed.
-		-- The qualifier off the event rather than the key state: Urho3D
-		-- names the two control keys separately and the event already
-		-- says which modifiers were down (QUAL_SHIFT 1, QUAL_CTRL 2,
-		-- QUAL_ALT 4; Lua 5.1 has no bitwise operators)
-		local qual = event_data:GetInt("Qualifiers") or 0
-		local ctrl = math.floor(qual / 2) % 2 == 1
-		if key == magic.KEY_C and ctrl then
-			if found_line and found_line ~= "" then
-				magic.ui:SetClipboardText(found_line)
-				hint.text = "copied the line"
-				log:info("console: copied " .. #found_line ..
-						" characters to the clipboard")
-			end
-			return
-		end
-		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then
-			return
-		end
-		-- **Whichever field has the keyboard is what Enter means**, asked
+		-- **Whichever field has the keyboard is what a key means**, asked
 		-- by name (playtest: the search did nothing). `focusElement`
 		-- hands back a **fresh wrapper table** each time it is read, so
 		-- comparing it to the element is comparing two different Lua
@@ -379,7 +467,52 @@ local function open(opts)
 		-- reached however well it was focused.
 		local focused = magic.ui.focusElement
 		local who = focused and focused:GetName() or ""
+		local e = who == "console_search" and search or
+				who == "console_input" and input or nil
+		-- The qualifier off the event rather than the key state: Urho3D
+		-- names the two control keys separately and the event already
+		-- says which modifiers were down (QUAL_SHIFT 1, QUAL_CTRL 2,
+		-- QUAL_ALT 4; Lua 5.1 has no bitwise operators)
+		local qual = event_data:GetInt("Qualifiers") or 0
+		local ctrl = math.floor(qual / 2) % 2 == 1
+		-- **Ctrl+C copies what is selected**: a field's own selection
+		-- Urho3D copies itself; a text area has no focus to copy with,
+		-- so its selection is copied here. A search hit copies the line
+		-- it is on -- the unit a person reading an API wants, rather
+		-- than the three words they typed.
+		if key == magic.KEY_C and ctrl then
+			if e and (e.textElement.selectionLength or 0) > 0 then
+				return
+			end
+			local text = selected(out_text)
+			if not text and found_line and found_line ~= "" and
+					doc_text.selectionStart == found_sel and
+					(doc_text.selectionLength or 0) > 0 then
+				text = found_line
+			end
+			text = text or selected(doc_text)
+			if text and text == found_line then
+				magic.ui:SetClipboardText(text)
+				hint.text = "copied the line"
+				log:info("console: copied " .. #text ..
+						" characters to the clipboard")
+			elseif text then
+				magic.ui:SetClipboardText(text)
+				hint.text = "copied"
+				log:info("console: copied a selection of " .. #text ..
+						" characters")
+			end
+			return
+		end
+		if e and (key == magic.KEY_UP or key == magic.KEY_DOWN) then
+			step(who, e, key == magic.KEY_UP and -1 or 1)
+			return
+		end
+		if key ~= magic.KEY_RETURN and key ~= magic.KEY_KP_ENTER then
+			return
+		end
 		if who == "console_search" then
+			remember(who, search.text)
 			local back = magic.input:GetKeyDown(magic.KEY_SHIFT) or
 					magic.input:GetKeyDown(magic.KEY_LSHIFT)
 			find(found_at, back)
@@ -389,19 +522,49 @@ local function open(opts)
 		if line == "" then
 			return
 		end
+		remember("console_input", line)
 		input.text = ""
 		run(line)
 	end
 	magic.SubscribeToEvent("KeyDown", "launch_console_key")
+	-- **One selection on the screen**: a click in one column leaves the
+	-- other's. Not the clicked one's: a triple click selects its line
+	-- before this hears of it.
+	launch_console_click = function(event_type, event_data)
+		if event_data:GetInt("X") < half then
+			out_text:ClearSelection()
+		else
+			doc_text:ClearSelection()
+		end
+	end
+	magic.SubscribeToEvent("UIMouseClick", "launch_console_click")
+	-- **The wheel over the manual scrolls the view**: a multi-line edit
+	-- takes the wheel before its scroll view does, and with nothing of
+	-- its own to scroll it does nothing with it -- and where the UI
+	-- hands the wheel to the focus (Windows), the field has it
+	launch_console_wheel = function(event_type, event_data)
+		local sc = magic.ui:GetScale()
+		local m = magic.input:GetMousePosition()
+		local x, y = m.x / sc, m.y / sc
+		local panel = view.scrollPanel
+		local p = panel.screenPosition
+		if x < p.x or y < p.y or x >= p.x + panel.width or
+				y >= p.y + panel.height then
+			return
+		end
+		local v = view.viewPosition
+		local vx, vy = v.x, v.y
+		view.viewPosition = magic.IntVector2(vx, math.max(0,
+				vy - event_data:GetInt("Wheel") * 3 * row_h))
+	end
+	magic.SubscribeToEvent("MouseWheel", "launch_console_wheel")
 	-- As the launch UI, a way back to the menu that needs no knowing
 	-- set_launch_ui(); over the room, Escape is that way already
 	if not opts.on_close then
 		local u = require("buildat/extension/ui_utils")
 		u = u.safe or u
 		local menu = u.menu_button(root, function()
-			magic.UnsubscribeFromEvent("KeyDown", "launch_console_key")
-			root:Remove()
-			magic.ui:SetFocusElement(nil)
+			stop()
 			log:info("console: closed for the menu")
 		end)
 		-- Above the input line, which runs the whole column's width

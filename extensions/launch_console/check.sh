@@ -7,7 +7,10 @@
 # seen in a picture: that eval runs in the caller's own environment, so
 # what one line leaves the next line sees; that a bad line is an answer
 # rather than a crash; that the document was found and read; and that a
-# line typed at the field is run.
+# line typed at the field is run. And [LAUNCH_CONSOLE_REFINE]: the
+# multi-line example selected with the mouse, copied, pasted and run
+# (muted: -o sound_mute=1, asserted), Up and Down in both fields, and the
+# x closing the console.
 #
 #   extensions/launch_console/check.sh
 set -u
@@ -25,6 +28,19 @@ fi
 # handlers run as they come (the focus cycle is Urho3D's UI::HandleKeyDown),
 # so nothing waits between them: each step waits for the console's answer.
 { echo "wait_log_any 30000 lines of the API document"
+	# **The example, as a person takes it**: dragged over in the console's
+	# answers (its five rows at 1280x720), Ctrl+C, Ctrl+V into the field
+	# and Enter. A drag is frames apart, hence the short delays.
+	echo "mouse_pos 646 111"; echo "delay 100"
+	echo "mouse_down left"; echo "delay 100"
+	echo "mouse_pos 900 150"; echo "delay 100"
+	echo "mouse_pos 1200 186"; echo "delay 100"
+	echo "mouse_up left"; echo "delay 100"
+	echo "keydown CTRL"; echo "keypress C"; echo "keyup CTRL"
+	echo "wait_log_any 5000 console: copied a selection of "
+	echo "keydown CTRL"; echo "keypress V"; echo "keyup CTRL"
+	echo "keypress Return"
+	echo "wait_log 5000 return blip.pack(p) = blip1:"
 	echo "text buildat.version()"
 	echo "keypress Return"
 	echo "wait_log 5000 console: buildat.version() = "
@@ -34,6 +50,14 @@ fi
 	echo "text #buildat.list_launch_uis()"
 	echo "keypress Return"
 	echo "wait_log 5000 console: #buildat.list_launch_uis() = "
+	# **History**: a draft survives Up and Down, and Up three times from
+	# it is the version line again
+	echo "text 1+"; echo "keypress Up"; echo "keypress Down"
+	echo "text 2"; echo "keypress Return"
+	echo "wait_log 5000 console: 1+2 = 3"
+	echo "keypress Up"; echo "keypress Up"; echo "keypress Up"
+	echo "keypress Return"
+	echo "wait_log 5000 console: buildat.version() = "
 	# **The search on the left**, which a playtest found did nothing:
 	# Tab moves the keyboard into it, a term is typed, and Enter has to
 	# move the view to a line that has it.
@@ -49,7 +73,7 @@ fi
 	echo "keydown CTRL"
 	echo "keypress C"
 	echo "keyup CTRL"
-	echo "wait_log_any 5000 console: copied "
+	echo "wait_log_any 5000 characters to the clipboard"
 	# **And Tab comes back to the console** ([LAUNCH_WORLD], 2026-09-24:
 	# whatever holds the screen owns the input). Tab is Urho3D's own
 	# focus cycle now, which is what works whether this screen was
@@ -60,10 +84,40 @@ fi
 	echo "text 7*6"
 	echo "keypress Return"
 	echo "wait_log 5000 console: 7*6 = "
-	echo "quit"; } > "$out/cmds.txt"
-bin/buildat -m launch_console -w 1280x720 -l 3 \
-	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1 ||
+	# The search's own history: another term, then Up twice is voxel
+	echo "keypress Tab"
+	echo "keydown CTRL"; echo "keypress A"; echo "keyup CTRL"
+	echo "text lua"; echo "keypress Return"
+	echo "wait_log 5000 console: search lua -> "
+	echo "keypress Up"; echo "keypress Up"; echo "keypress Return"
+	echo "wait_log 5000 console: search voxel -> "
+	echo "screenshot $out/console_after.png"
+	# **The x** at the top right, under the client's Starport buttons:
+	# as the launch UI it quits, as Escape does, and so the sequence is
+	# left unfinished -- the exit status says that, the log says the rest
+	echo "mouse_pos 1266 41"; echo "delay 100"
+	echo "mouse_click left"
+	echo "wait_log 5000 console: closed"; } > "$out/cmds.txt"
+bin/buildat -m launch_console -w 1280x720 -l 3 -o sound_mute=1 \
+	-c @"$out/cmds.txt" > "$out/cli.log" 2>&1
+if grep -aq "Command sequence failed" "$out/cli.log"; then
 	fail "the drive ($out/cli.log): $(grep -ao 'Command sequence failed.*' "$out/cli.log" | head -1)"
+fi
+grep -aq "preferences: .*sound_mute=1" "$out/cli.log" ||
+	fail "the run was not muted"
+grep -aq "close_glyph: closing" "$out/cli.log" &&
+	grep -aq "launch_c.*: console: closed$" "$out/cli.log" ||
+	fail "the x did not close the console"
+echo "the x closed the console"
+example=$(grep -a "launch_c.*: console: local blip = .* = blip1:" "$out/cli.log" |
+	head -1 | sed 's/.* = //')
+echo "the pasted example made and played ${example:-nothing}"
+[ -n "$example" ] || fail "the example did not run as pasted"
+again=$(grep -ac "launch_c.*: console: buildat.version() = " "$out/cli.log")
+[ "$again" -ge 2 ] || fail "Up did not bring an earlier line back ($again runs)"
+voxel=$(grep -ac "console: search voxel -> line" "$out/cli.log")
+[ "$voxel" -ge 2 ] || fail "Up in the search did not bring voxel back"
+echo "history: the version line ran $again times, the voxel search $voxel"
 back=$(grep -ac "console: 7\*6 = 42" "$out/cli.log")
 echo "the keyboard came back to the console $back times"
 if [ "$back" -lt 1 ]; then
