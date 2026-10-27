@@ -53,7 +53,7 @@ for run in $RUNS; do
 	if [ "$status" -eq 0 ]; then
 		if grep -q "^warning:" "$out/fuzz.log"; then verdict=warn; else verdict=ok; fi
 	else
-		verdict=FAIL
+		verdict=FAIL; failed="$failed $seed"
 	fi
 	{ echo "$verdict"; grep "^FAIL:\|^warning:" "$out/fuzz.log"; } > "$out/verdict.txt"
 	# The worst step: the server's rate-limited lines carry the phase.
@@ -69,4 +69,8 @@ for run in $RUNS; do
 	echo "| $seed | $game | $min | $verdict${what:+ ($what)} | ${step:-<0.25 s} | ${frame:-?} | |" >> "$table"
 	tail -1 "$table" >&2
 done
+if [ -n "${failed:-}" ]; then
+	echo "FAIL: seeds$failed failed; each run's verdict is its row in $table"
+	exit 1
+fi
 echo "PASS: the campaign ran; each run's verdict is its row in $table"
