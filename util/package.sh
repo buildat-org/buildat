@@ -206,6 +206,12 @@ smoke_test_wine() {
 		echo "smoke test under Wine: the shipped compiler built nothing (client_file was taken out of the cache)" >&2
 		"$wine"server -k 2>/dev/null || true; exit 1
 	fi
+	# [PACKAGE_PREBUILT_WASM] No clang for Windows here: the archive's own
+	if ! grep -q "voxelworld: wasm/ is \(built (cache hit)\|in the shared build\)" "$dir/srv.log"; then
+		echo "smoke test under Wine: voxelworld's .wasm not served from the archive's cache:" >&2
+		grep "voxelworld: wasm/\|has wasm/" "$dir/srv.log" | head -5 >&2
+		"$wine"server -k 2>/dev/null || true; exit 1
+	fi
 	if ! wait_for_line "$dir/srv.log" "$srv" "contentdb: fetched once" 60; then
 		echo "smoke test under Wine: the server's one ContentDB fetch never answered (http_get died or hangs)" >&2
 		"$wine"server -k 2>/dev/null || true; exit 1
@@ -242,6 +248,8 @@ smoke_test_wine() {
 		tail -20 "$dir/cli.log" >&2
 		read_crash "$dir/cli.log" || exit 1
 	fi
+	# Reported, not a verdict, as the commands' end above
+	echo "smoke test under Wine: the client's voxelworld wasm: $(grep -o "wasm voxelworld: [a-z (]*" "$dir/cli.log" | tr '\n' ';')"
 	echo "smoke test under Wine passed: the server compiled every module and generated a section, the client joined and drew"
 }
 
@@ -309,7 +317,9 @@ make_one() {
 	# rccpp_build/ goes out of the cache again. The smoke keeps the
 	# compiler's proof by building one module (see there).
 	case "$name" in
-		*portable*|*win64*) prebuild_modules "$stage" "$name" >&2 || return 1 ;;
+		*portable*|*win64*)
+			prebuild_wasm "$stage" >&2 || return 1
+			prebuild_modules "$stage" "$name" >&2 || return 1 ;;
 	esac
 	case "$name" in
 		*win64*)
@@ -319,6 +329,31 @@ make_one() {
 			tar -C "$stage/.." -czf "$out/$name.tar.gz" "$name"
 			echo "$out/$name.tar.gz" ;;
 	esac
+}
+
+# [PACKAGE_PREBUILT_WASM] Each builtin's and extension's wasm/ built into
+# the stage's cache/rccpp_build/wasm/, which a packaged server reads as its
+# shared build: one without clang and wasm-ld serves these (the client's
+# fast path) instead of none. util/prebuild_wasm.py names each as the
+# server does; a .wasm is the same on every platform, so the Windows
+# archive's are built here by Linux tools. Linux's image has emsdk's clang
+# and wasm-ld, Windows' Debian's clang and lld.
+# simplified: not the apps' (hillclimb's car): a game's own builds on a
+# server with the tools, as before; its dir in the find is the upgrade
+prebuild_wasm() {
+	local stage="$1" cc ld d mods=""
+	local em="${EMSDK:-$HOME/emsdk}/upstream/bin"
+	cc=${BUILDAT_WASM_CC:-$(command -v clang || echo "$em/clang")}
+	ld=${BUILDAT_WASM_LD:-$(command -v wasm-ld || ls /usr/lib/llvm-*/bin/wasm-ld 2>/dev/null | tail -1 || true)}
+	[ -n "$ld" ] || ld="$em/wasm-ld"
+	for d in "$stage"/builtin/*/wasm "$stage"/extensions/*/wasm; do
+		[ -d "$d" ] && mods="$mods ${d%/wasm}"
+	done
+	[ -n "$mods" ] || { echo "prebuild wasm: no wasm/ in the stage"; return 1; }
+	echo "prebuild wasm: $cc, $ld"
+	# shellcheck disable=SC2086 # the module dirs, split
+	python3 -I "$here/util/prebuild_wasm.py" "$cc" "$ld" "$stage/src/interface" \
+		"$stage/cache/rccpp_build/wasm" $mods
 }
 
 # [WIN_INSTALLER]: the per-user installer out of a Windows archive's stage
@@ -766,8 +801,11 @@ smoke_test() {
 	# The compiler's proof with a prebuilt cache ([PRECOMPILED]): one
 	# module's output taken out, so the start has to build it
 	rm -f "$unpacked"/cache/rccpp_build/*client_file*
+	# [PACKAGE_PREBUILT_WASM] With no wasm toolchain (the image's emsdk
+	# hidden), as on a box without clang: voxelworld's .wasm is the cache's
 	(cd "$unpacked" && BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=smoke \
 		BUILDAT_LUANTI_FETCH_ONCE=1 BUILDAT_CONTENTDB_URL="file://$dir/nowhere" \
+		EMSDK="$dir/nowhere" RUSTUP_HOME="$dir/nowhere" BUILDAT_WASM_CC= BUILDAT_WASM_LD= \
 		bin/buildat_server -u launcher=1 -m apps/vanilla -P "$port" -l 4 > "$dir/srv.log" 2>&1) &
 	local srv=$!
 	local i
@@ -813,6 +851,16 @@ smoke_test() {
 		tail -40 "$dir/cli.log" >&2
 		read_crash "$dir/cli.log"
 		exit 1
+	fi
+	if ! grep -q "No wasm toolchain" "$dir/srv.log"; then
+		echo "smoke test: a wasm toolchain in PATH here; the prebuilt .wasm not proven"
+	elif ! grep -q "voxelworld: wasm/ is \(built (cache hit)\|in the shared build\)" "$dir/srv.log" ||
+			! grep -q "wasm voxelworld: \(ready (compiled)\|moved to the compiled module\|compiled module from the cache\)" "$dir/cli.log"; then
+		echo "smoke test: voxelworld's .wasm not served from the archive's cache, or not compiled by the client:" >&2
+		grep -h "voxelworld: wasm/\|wasm voxelworld\|No wasm toolchain" "$dir/srv.log" "$dir/cli.log" | head -10 >&2
+		exit 1
+	else
+		echo "smoke test: with no wasm toolchain the server served voxelworld's prebuilt .wasm, the client ran it compiled"
 	fi
 	local mean
 	mean=$(magick "$dir/shot.png" -format '%[fx:mean]' info: 2>/dev/null || echo 0)

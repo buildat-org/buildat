@@ -61,4 +61,11 @@ RUN curl -sSL -o /tmp/curl.tar.xz "$CURL_URL" \
 		--disable-smb --disable-smtp --disable-telnet --disable-tftp \
 	&& make -j"$(nproc)" install-strip \
 	&& rm -rf /tmp/curl /tmp/curl.tar.xz
+# [PACKAGE_PREBUILT_WASM] The builtins' .wasm for the archive's cache
+# (util/prebuild_wasm.py; a .wasm is the same for every platform, and the
+# archive's server has no clang to build one): Debian's clang and lld,
+# python3 to run it. Linux's image has emsdk's instead
+RUN apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends \
+	clang lld python3 \
+	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /work
