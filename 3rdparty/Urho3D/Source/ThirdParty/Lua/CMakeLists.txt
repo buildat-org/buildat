@@ -33,8 +33,19 @@ if (READLINE_FOUND)
     list (APPEND LIBS ${READLINE_LIBRARIES})
 endif ()
 
+# buildat: on the web, compiled as C++ so that a Lua error is a C++ throw
+# (luaconf.h's LUAI_THROW) and not a longjmp. Emscripten's JS exception
+# handling loses a longjmp that passes through a C++ frame with a landing
+# pad: the call there returns as if nothing happened ([WEB_LUA_ERROR_EH])
+if (WEB)
+    set_source_files_properties (${CPP_FILES} PROPERTIES LANGUAGE CXX)
+endif ()
+
 # Setup target
 setup_library ()
+if (WEB)
+    target_compile_options (${TARGET_NAME} PRIVATE -fexceptions)
+endif ()
 
 # Install headers for building and using the Urho3D library (no direct dependencies but library user may need them)
 install_header_files (DIRECTORY src/ DESTINATION ${DEST_INCLUDE_DIR}/ThirdParty/Lua FILES_MATCHING PATTERN *.h)  # Note: the trailing slash is significant

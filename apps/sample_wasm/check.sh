@@ -37,6 +37,10 @@ client_lines()
 		fail "the module's calls did not all come back right ($log)"
 	grep -aq "wasm main: reversed the buffer" "$log" ||
 		fail "the module's log line did not reach the client's log"
+	# A luaL_error() out of guarded<> as it was raised: under LuaJIT
+	# ([GUARDED_LUA_ERROR]) and on the web, PUC Lua as C++ ([WEB_LUA_ERROR_EH])
+	grep -aq 'guarded luaL_error: decompress(): unknown format "nope"' "$log" ||
+		fail "a guarded binding's luaL_error lost its message"
 }
 
 if [ "${1:-}" = web ]; then
@@ -76,11 +80,6 @@ run()
 run 1
 grep -aq "built wasm/ in" "$t/srv1.log" || fail "the server did not build wasm/"
 grep -aq "wasm main: compiled in" "$t/cli1.log" || fail "the client did not compile it"
-# LuaJIT's error out of guarded<> as it was raised ([GUARDED_LUA_ERROR]).
-# Not on the web: there PUC Lua's longjmp through the guard's try comes
-# out as a garbage error value (Emscripten's JS exceptions take it).
-grep -aq 'guarded luaL_error: decompress(): unknown format "nope"' "$t/cli1.log" ||
-	fail "a guarded binding's luaL_error lost its message"
 run 2
 grep -aq "wasm/ is built (cache hit)" "$t/srv2.log" || fail "the server built wasm/ again"
 grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||

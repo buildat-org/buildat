@@ -34,9 +34,10 @@ namespace lua_bindings
 	// foreign exception that catch(...) takes, and it must go on as it is
 	// or its message is lost ([GUARDED_LUA_ERROR]). LuaJIT turns any other
 	// non-std exception into a "C++ exception" Lua error itself. PUC Lua
-	// (the web build) raises by longjmp; Emscripten's JS exceptions take
-	// that through this try as a broken C++ exception, and the error value
-	// comes out as garbage (a known web fault, not handled here).
+	// (the web build) is compiled as C++ and raises by throwing its
+	// lua_longjmp*, which the void* handler takes and passes on; as a
+	// longjmp, Emscripten lost it in any C++ frame with a landing pad
+	// ([WEB_LUA_ERROR_EH], Urho3D's Lua/CMakeLists.txt).
 	template<lua_CFunction F>
 	int guarded(lua_State *L)
 	{
@@ -46,6 +47,8 @@ namespace lua_bindings
 			return F(L);
 		} catch(std::exception &e){
 			lua_pushstring(L, e.what());
+		} catch(void*){
+			throw;
 		} catch(...){
 #ifdef LUAJIT_VERSION
 			throw;

@@ -159,6 +159,11 @@
 #define LUA_API __declspec(dllimport)
 #endif
 
+#elif defined(__cplusplus)
+
+/* buildat: compiled as C++ (the web build, CMakeLists.txt), with the C names */
+#define LUA_API		extern "C"
+
 #else
 
 #define LUA_API		extern

@@ -34,7 +34,7 @@ local function check()
 	log:info("memory trap: "..tostring(err))
 	assert(m:call("add", 40, 2) == 42, "callable after the traps")
 	-- A luaL_error() inside a guarded binding; check.sh reads its message
-	-- natively ([GUARDED_LUA_ERROR])
+	-- natively and on the web ([GUARDED_LUA_ERROR], [WEB_LUA_ERROR_EH])
 	ok, err = pcall(buildat.decompress, "x", "nope")
 	assert(not ok, "an unknown format")
 	log:info("guarded luaL_error: "..tostring(err))
