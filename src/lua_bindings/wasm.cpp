@@ -37,9 +37,11 @@
 // in it (a DLL does not see the executable's symbols), and its memory
 // checked by wasm2c's explicit bounds checks instead of guard pages, so
 // that no exception handler is needed (WASM2C_DEFINES below says why).
+// BUILDAT_WASM_FUZZ: util/fuzz/wasm_fuzz.cpp includes this file for the
+// checks, the meter and the preparation (to the end of movable()), with
+// none of the client: the instances, the compile and Lua are left out
+#ifndef BUILDAT_WASM_FUZZ
 #include "lua_bindings/util.h"
-#include "core/log.h"
-#include "interface/sha1.h"
 #include "interface/voxel_volume.h"
 #include <tolua++.h>
 #include <luabind/luabind.hpp>
@@ -47,6 +49,11 @@
 #include <CustomGeometry.h>
 #include <Texture2D.h>
 #include <Image.h>
+#else
+#include "core/types.h"
+#endif
+#include "core/log.h"
+#include "interface/sha1.h"
 #include "wabt/binary-reader-ir.h"
 #include "wabt/binary-reader.h"
 #include "wabt/binary-writer.h"
@@ -59,8 +66,10 @@
 #include "wabt/generate-names.h"
 #include "wabt/apply-names.h"
 #include "wabt/c-writer.h"
+#ifndef BUILDAT_WASM_FUZZ
 #include "client/config.h"
 #include "boot/autodetect.h"
+#endif
 #include "interface/fs.h"
 #include "wasm_export.h"
 #include <algorithm>
@@ -102,7 +111,7 @@
 #include <cstdarg>
 #define MODULE "wasm"
 
-#if BUILDAT_WASM_NATIVE
+#if BUILDAT_WASM_NATIVE && !defined(BUILDAT_WASM_FUZZ)
 extern client::Config g_client_config;
 #endif
 
@@ -637,6 +646,7 @@ static bool movable(const wabt::Module &m, bool has_memory)
 }
 #endif
 
+#ifndef BUILDAT_WASM_FUZZ
 struct Instance;
 static size_t g_instance_count = 0;
 // The live instances' handle tags (1 to 127)
@@ -3328,6 +3338,7 @@ void init_wasm(lua_State *L)
 	lua_pushcfunction(L, guarded<l_wasm_load>);
 	lua_setglobal(L, "__buildat_wasm_load");
 }
+#endif // BUILDAT_WASM_FUZZ
 
 } // namespace lua_bindings
 // vim: set noet ts=4 sw=4:

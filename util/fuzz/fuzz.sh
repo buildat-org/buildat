@@ -57,6 +57,13 @@ declare -A srcs=(
 	# FreeType compiled in whole (font_fuzz.cpp), its source list taken
 	# from its CMakeLists; no Urho3D needed
 	[font]=""
+	# [CLIENT_WASM] A module's .wasm through the client's checks, meter,
+	# WABT's writers and WAMR's interpreter (wasm_fuzz.cpp, which includes
+	# src/lua_bindings/wasm.cpp); WABT's C++ from its CMakeLists
+	[wasm]="src/core/log.cpp 3rdparty/c55lib/c55/os.cpp
+		$(sed -n '/^add_library(wabt STATIC/,/)/p' \
+			"$here/3rdparty/wabt/CMakeLists.txt" | grep -o 'src/[^ ]*\.cc' |
+			sed 's,^,3rdparty/wabt/,')"
 )
 ft=3rdparty/Urho3D/Source/ThirdParty/FreeType
 # C sources, compiled apart with the sanitizers and linked in
@@ -64,6 +71,11 @@ declare -A csrcs=(
 	[markup]="3rdparty/md4c/md4c.c"
 	[font]="$(sed -n '/^set (SOURCE_FILES/,/)/p' "$here/$ft/CMakeLists.txt" |
 			tr -d ' )' | grep '\.c$' | sed "s,^,$ft/,")"
+	# WABT's one C file and WAMR, Linux's platform layer (its CMakeLists)
+	[wasm]="3rdparty/wabt/src/opcode-code-table.c
+		$(sed -n '/^add_library(wamr STATIC/,/^)/p;/^else()/,/^endif()/p' \
+			"$here/3rdparty/wamr/CMakeLists.txt" | grep -o '\${W}/[^ ]*\.c\|c_api_stub\.c' |
+			sed 's,^\${W},3rdparty/wamr/core,;s,^c_api_stub,3rdparty/wamr/c_api_stub,')"
 )
 # Per-target sanitizers (undefined dropped where a dependency trips its
 # harmless checks). Default: address and undefined.
@@ -73,8 +85,12 @@ declare -A san=(
 	[font]="address"
 )
 # Extra flags for this target's C sources (csrcs)
+# WAMR's defines and include paths, as the client's build has them
+wflags=$here/Build/3rdparty/wamr/CMakeFiles/wamr.dir/flags.make
 declare -A cflags=(
 	[font]="-DFT2_BUILD_LIBRARY -I$here/$ft/include -fno-sanitize=shift -w"
+	# WAMR's interpreter reads its operands unaligned, by design
+	[wasm]="$(sed -n 's/^C_\(DEFINES\|INCLUDES\) = //p' "$wflags" 2>/dev/null) -I$here/3rdparty/wabt/include -I$here/Build/3rdparty/wabt/include -fno-sanitize=alignment -w"
 )
 declare -A libs=(
 	[compress]="-lz -lzstd"
@@ -90,6 +106,7 @@ declare -A libs=(
 	[markup]="-I$here/3rdparty/md4c"
 	[record]="-I$here/3rdparty/Urho3D/Source/ThirdParty/LuaJIT/src -L$here/3rdparty/Urho3D/Build/lib -lUrho3D -Wl,-rpath,$here/3rdparty/Urho3D/Build/lib"
 	[font]="-I$here/$ft/include -lz"
+	[wasm]="-lm -lpthread"
 )
 # Urho3D's own defines and include paths for the files compiled from it;
 # stb_image's JPEG decoder shifts negative values left, and a PNG's empty
@@ -107,6 +124,13 @@ declare -A extra=(
 	# result is clamped (noise out), no memory is touched
 	[sound]="$urho_extra -fno-sanitize=signed-integer-overflow,float-cast-overflow"
 	[font]="-I$here/$ft/include -w"
+	# WABT is C++20; the client's defines for wasm.cpp's wasm2c headers;
+	# WAMR's API header
+	[wasm]="-std=c++20 -w -D__STDC_LIMIT_MACROS=1 -D__STDC_FORMAT_MACROS=1
+		-DWASM_RT_SKIP_SIGNAL_RECOVERY=1 -DWASM_RT_STACK_DEPTH_COUNT=1
+		-I$here/3rdparty/wabt/include -I$here/Build/3rdparty/wabt/include
+		-I$here/3rdparty/wabt/third_party/picosha2 -I$here/3rdparty/wabt/wasm2c
+		-I$here/3rdparty/wamr/core/iwasm/include -fno-sanitize=alignment"
 )
 # A client loader a server feeds is fuzzed for memory corruption only. A
 # slow parse or a huge allocation sized by the file is a server denying
@@ -165,6 +189,13 @@ for t in $targets; do
 	build "$t" || { status=1; continue; }
 	mkdir -p "$out/$t/corpus" "$out/$t/crashes"
 	[ -d "$me/seeds/$t" ] && cp -n "$me/seeds/$t"/* "$out/$t/corpus/" 2>/dev/null
+	# [wasm]: the modules the servers of the checks built (sample_wasm's
+	# toy, voxelworld's, hillclimb's car, sample_wasm_only's in C and Rust)
+	# and sample_wasm's hand-written fixtures; built, not committed
+	[ "$t" = wasm ] && for f in "$here"/local/check/cache/apps/*/rccpp_build/wasm/*.wasm \
+			"$here"/apps/sample_wasm/*/client_data/*.wasm; do
+		[ -e "$f" ] && cp -n "$f" "$out/$t/corpus/$(sha1sum < "$f" | cut -c1-40)"
+	done
 	# Every crash kept before is replayed first. Only crash- and leak-:
 	# a fork-mode target (a client loader) keeps oom- and timeout-
 	# artifacts for the out-of-scope inputs it stepped past, which a plain

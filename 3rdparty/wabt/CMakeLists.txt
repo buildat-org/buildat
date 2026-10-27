@@ -6,7 +6,10 @@
 # writer (the metered module the web client instantiates). No tools,
 # tests, text format, interpreter or third_party beyond picosha2. Updated
 # by copying the same files out of a newer release; the files are as
-# released, this CMakeLists.txt is buildat's.
+# released, this CMakeLists.txt is buildat's, except for one patch, marked
+# "buildat:" (src/binary-reader.cc, ReadType: a typed reference's type code
+# with reference types off is an error, not an assertion; found by
+# util/fuzz/fuzz.sh's [wasm]), to be checked against a newer release.
 cmake_minimum_required(VERSION 3.10)
 
 set(WABT_VERSION_STRING "1.0.42")

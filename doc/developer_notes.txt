@@ -57,7 +57,10 @@ util/fuzz/ ([SECURITY_RUN_1]), its corpora and crashes kept under
 local/security/fuzz/:
 - fuzz.sh [seconds] [target ...]: libFuzzer harnesses (clang, ASan and
   UBSan) for compress, packet_stream, voxel_volume, json, zip, image,
-  markup (with an oracle for tags, attributes and link schemes) and font
+  markup (with an oracle for tags, attributes and link schemes), font
+  and wasm (a module's .wasm through the client's checks and meter,
+  WABT's writers and WAMR's interpreter; seeded with the .wasm the
+  checks' servers built, so run apps/sample_wasm/check.sh first)
 - proto_fuzz.sh: a server fuzzed by a peer (PUBLIC=1, APP=floorplanner,
   GAME=, BUILD=asan; CORPUS= mutates a session record_proxy.py recorded)
 - client_fuzz.sh: a client fuzzed by a hostile server; SANDBOX=1 sends

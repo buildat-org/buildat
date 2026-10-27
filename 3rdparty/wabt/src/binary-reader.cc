@@ -389,6 +389,10 @@ Result BinaryReader::ReadType(Type* out_value, const char* desc) {
           Type(static_cast<Type::Enum>(type), static_cast<Index>(heap_type));
     }
   } else {
+    // buildat: a typed reference's code with reference types off was made
+    // a Type that asserts (and without asserts a reference to type 0)
+    ERROR_IF(Type::EnumIsReferenceWithIndex(static_cast<Type::Enum>(type)),
+             "%s: a typed reference without reference types", desc);
     *out_value = static_cast<Type>(type);
   }
   return Result::Ok;
