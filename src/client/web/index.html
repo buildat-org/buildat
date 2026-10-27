@@ -442,7 +442,25 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			// sent, and what games store on the client, in IndexedDB. Read
 			// back before the client starts, written out every few seconds
 			// and when the page is hidden.
+			// The listing and the reads in one turn: IDBFS's own write
+			// waits for IndexedDB's list between them, and a file the
+			// client wrote or removed meanwhile was a half write or an
+			// error (src/server/web/pre.js has the same).
 			// simplified: the cache grows until the browser evicts the site
+			var idb = FS.filesystems.IDBFS, syncfs = idb.syncfs;
+			idb.syncfs = function(m, populate, done){
+				if(populate)
+					return syncfs(m, populate, done);
+				idb.getRemoteSet(m, function(err, remote){
+					if(err)
+						return done(err);
+					idb.getLocalSet(m, function(err, local){
+						if(err)
+							return done(err);
+						idb.reconcile(local, remote, done);
+					});
+				});
+			};
 			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/cache');
 			FS.mount(FS.filesystems.IDBFS, {}, '/buildat/user');
 			Module.addRunDependency('idbfs');
