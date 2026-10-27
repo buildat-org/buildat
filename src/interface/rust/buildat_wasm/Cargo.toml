@@ -11,3 +11,6 @@ license = "Apache-2.0"
 default = ["panic_handler"]
 # A panic logged and turned into a trap; off for a module with its own
 panic_handler = []
+# interface/buildat_client.h's calls, generated (src/client.rs): for a
+# module under the default client_main ([CLIENT_WASM_BINDINGS])
+client = []

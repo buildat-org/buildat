@@ -987,8 +987,12 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   hashes, compress, parse_json, storage_read/write, get_preference, the
   screen's sizes; render_scene_to_texture, image_set_data,
   image_load_data, fov_for, keep_fov. None that takes a Lua function or
-  table. Not carried yet: operators (the C++ does its own maths) and the
-  Rust crate's side. apps/sample_wasm_ui is a client in C++ only.
+  table. Not carried: operators (the C++ does its own maths).
+  apps/sample_wasm_ui is a client in C++ only. In Rust the same calls are
+  buildat_wasm's feature "client" (generated too: client::ui().root(),
+  text.set_text("x"), a parameter anything Put, NIL for one left off, a
+  string result a Str readable until the next call, an event's fields by
+  client::fields()); apps/sample_wasm_only_rust makes a few.
 - Natively the module is compiled with the system's C compiler (Linux)
   or the package's MinGW (Windows, which also has to ship cc1.exe), and
   runs in the interpreter until then and where there is none; on

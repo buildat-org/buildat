@@ -500,7 +500,9 @@ rustup's rust-lld.
 #![no_std]) depending on buildat_wasm = "0.1", the same imports with
 slices for pointer and length pairs, a parser of the default main's events
 and a panic handler that logs and traps (src/interface/rust/buildat_wasm;
-the server builds the module with that copy patched in). The server runs
+the server builds the module with that copy patched in). Its feature
+"client" is interface/buildat_client.h's calls in Rust, generated
+(client.rs: features = ["client"]; doc/client_api.txt). The server runs
 cargo build --release --offline for wasm32-unknown-unknown with a
 CARGO_HOME of its own, the C build's wasm features, the same maximum
 memory and panics aborting; so a module's crates are its own and path

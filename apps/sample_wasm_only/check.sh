@@ -9,7 +9,9 @@
 # (orange), then green after the key.
 # The same with `rust`: apps/sample_wasm_only_rust, a variant of this app
 # whose main/wasm/ is the same module in Rust (buildat_wasm), built by the
-# server with cargo; the same log lines and pictures. Natively each runs
+# server with cargo; the same log lines and pictures, and two more of its
+# calls of the client's classes (buildat_wasm's feature "client": a
+# Vector3's length, a Text's text set and read back, Update's payload). Natively each runs
 # twice: compiled (the first run moves from the interpreter to the
 # compiled module) and with the compiler hidden (the interpreter for
 # good). Then a server with no cargo refuses the Rust module, saying so.
@@ -76,6 +78,14 @@ client_lines()
 			"wasm main: the server answered echo: colour 1"; do
 		grep -aq "$want" "$log" || fail "no \"$want\" in $log"
 	done
+	# The Rust one also makes calls of the client's classes (buildat_wasm's
+	# feature "client", [CLIENT_WASM_BINDINGS])
+	if [ $app = sample_wasm_only_rust ]; then
+		for want in "wasm main: rust bindings: a Vector3's length 5, a Text reads back: true, its name empty: true" \
+				"wasm main: rust bindings: Update's TimeStep > 0: true"; do
+			grep -aq "$want" "$log" || fail "no \"$want\" in $log"
+		done
+	fi
 	grep -aE "default client_main|wasm main: trap|frame: " "$log" &&
 		fail "the default client_main said something went wrong ($log)"
 	return 0

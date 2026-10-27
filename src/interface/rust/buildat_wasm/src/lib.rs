@@ -35,8 +35,14 @@ pub mod sys {
 		pub fn send_packet(name: *const u8, name_len: u32, data: *const u8,
 				data_len: u32);
 		pub fn event_take(buf: *mut u8, cap: u32) -> i32;
+		pub fn drop(handle: i32);
 	}
 }
+
+/// [CLIENT_WASM_BINDINGS] interface/buildat_client.h's calls (the classes
+/// and verbs of the client's Lua sandbox), generated: the feature "client"
+#[cfg(feature = "client")]
+pub mod client;
 
 /// A node, a texture or a voxel volume, as the module was handed it
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -137,6 +143,7 @@ pub const EVENT_MOUSE_MOVE: i32 = 6;
 pub const EVENT_WHEEL: i32 = 7;
 pub const EVENT_PACKET: i32 = 8;
 pub const EVENT_RESIZE: i32 = 9;
+pub const EVENT_OBJECT: i32 = 10;
 
 /// The mesh nodes of a Start event, each with its texture
 #[derive(Clone, Copy, Debug)]
@@ -167,6 +174,10 @@ pub enum Event<'a> {
 	/// The name without "<module>:"
 	Packet { name: &'a [u8], data: &'a [u8] },
 	Resize { width: i32, height: i32 },
+	/// An object's event the module subscribed to (the feature "client"),
+	/// handle 0 for a global one: its name, and its fields as
+	/// client::fields() reads them
+	Object { handle: Handle, name: &'a [u8], fields: &'a [u8] },
 	/// A kind this crate does not know, or one too short for its kind
 	Other(&'a [u8]),
 }
@@ -207,6 +218,14 @@ impl<'a> Event<'a> {
 			}
 			EVENT_RESIZE if need(3) => Event::Resize { width: word(b, 1),
 					height: word(b, 2) },
+			EVENT_OBJECT if need(3) => {
+				let n = word(b, 2).max(0) as usize;
+				match b.get(12..12usize.saturating_add(n)) {
+					Some(name) => Event::Object { handle: Handle(word(b, 1)), name,
+							fields: &b[12 + n..] },
+					None => Event::Other(b),
+				}
+			}
 			_ => Event::Other(b),
 		}
 	}
@@ -285,6 +304,18 @@ mod tests {
 		// A name past the event's end
 		p[4] = 200;
 		assert!(matches!(Event::parse(&p), Event::Other(_)));
+		// An object's event: the handle, the name and the fields after it
+		let mut o = [0u8; 18];
+		o[..12].copy_from_slice(&words(&[EVENT_OBJECT, 7, 4])[..12]);
+		o[12..16].copy_from_slice(b"Name");
+		o[16..].copy_from_slice(&[1, 0]);
+		match Event::parse(&o) {
+			Event::Object { handle, name, fields } =>
+				assert_eq!((handle, name, fields), (Handle(7), &b"Name"[..], &[1u8, 0][..])),
+			e => panic!("{:?}", e),
+		}
+		o[8] = 100;
+		assert!(matches!(Event::parse(&o), Event::Other(_)));
 		assert!(matches!(Event::parse(&[]), Event::Other(_)));
 	}
 }

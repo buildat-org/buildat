@@ -11,4 +11,5 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-buildat_wasm = "0.1"
+# "client": interface/buildat_client.h's calls ([CLIENT_WASM_BINDINGS])
+buildat_wasm = { version = "0.1", features = ["client"] }

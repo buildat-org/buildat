@@ -36,7 +36,7 @@
 #
 # tier: quick
 # cost: 100s (2026-10-28)
-# covers: util/gen_wasm_bindings.lua doc/client_api.txt src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
+# covers: util/gen_wasm_bindings.lua doc/client_api.txt src/interface/rust/buildat_wasm/src/client.rs src/interface/buildat_client.h src/lua_bindings/wasm_bindings.inc src/lua_bindings/wasm.cpp builtin/client_lua/client_lua/wasm_main.lua client/core/urho3d/** client/api.lua src/interface/wasm_api.h apps/sample_wasm_ui/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)

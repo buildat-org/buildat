@@ -8,6 +8,7 @@
 #![no_std]
 
 use buildat_wasm::{self as b, Event, Handle};
+use buildat_wasm::client::{self as c, NIL};
 use core::fmt::Write;
 
 struct State {
@@ -15,9 +16,13 @@ struct State {
 	cube: Option<Handle>,
 	colour: u32,
 	time: f32,
+	// The Update subscription's name, its length
+	update: [u8; 64],
+	update_len: usize,
 }
 
-static mut STATE: State = State { camera: Handle(-1), cube: None, colour: 0, time: 0.0 };
+static mut STATE: State = State { camera: Handle(-1), cube: None, colour: 0, time: 0.0,
+		update: [0; 64], update_len: 0 };
 static mut EVENT: [u8; b::EVENT_MAX] = [0; b::EVENT_MAX];
 
 // A log line of at most 200 bytes, formatted
@@ -82,6 +87,20 @@ fn draw_cube(cube: Handle, colour: u32) {
 	b::geometry_set(cube, 0, &v, &ix);
 }
 
+// [CLIENT_WASM_BINDINGS] The client's classes from Rust (buildat_wasm's
+// feature "client"): a value's method, a Text made under the UI's root,
+// its text set and read back, and the global Update subscribed
+fn bindings(s: &mut State) {
+	let length = c::Vector3 { x: 3.0, y: 4.0, z: 0.0 }.Length();
+	let text = c::ui().root().CreateChild("Text", NIL).as_::<c::Text>();
+	text.set_text("from Rust");
+	let reads = text.text().eq("from Rust");
+	logf!("rust bindings: a Vector3's length {}, a Text reads back: {}, its name empty: {}",
+			length as i32, reads, text.GetName().is_empty());
+	text.Remove();
+	s.update_len = c::SubscribeToGlobalEvent("Update").copy_to(&mut s.update);
+}
+
 #[no_mangle]
 pub extern "C" fn packets() -> *const u8 {
 	b"echo\0".as_ptr()
@@ -102,6 +121,7 @@ pub extern "C" fn frame(dt: f32) {
 				b::node_set(camera, &[0., 1.5, -4., 0.98481, 0.17365, 0., 0., 1., 1., 1.]);
 				draw_cube(cube, s.colour);
 				logf!("drew a cube, handed nodes: {}", nodes.len());
+				bindings(s);
 			}
 			Event::KeyDown { key: 32, repeat: false, .. } => {
 				s.colour += 1;
@@ -110,6 +130,18 @@ pub extern "C" fn frame(dt: f32) {
 				}
 				logf!("space: the colour is now {}", s.colour % 3);
 				b::send_packet("key", &[b'0' + (s.colour % 3) as u8]);
+			}
+			// [CLIENT_WASM_BINDINGS] The global Update, once: its TimeStep
+			Event::Object { handle: Handle(0), name: b"Update", fields } => {
+				if s.update_len == 0 {
+					continue;
+				}
+				let f = c::fields(fields);
+				logf!("rust bindings: Update's TimeStep > 0: {}",
+						f.v[c::fields::Update::TimeStep].number() > 0.0);
+				let name = core::str::from_utf8(&s.update[..s.update_len]).unwrap_or("");
+				c::UnsubscribeFromEvent("Update", name);
+				s.update_len = 0;
 			}
 			Event::Packet { name, data } => {
 				let name = core::str::from_utf8(name).unwrap_or("?");
