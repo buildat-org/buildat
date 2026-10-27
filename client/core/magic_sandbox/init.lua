@@ -167,7 +167,7 @@ function M.wrap_class(type_name, def)
 							return safe_v
 						end
 						error("Property \""..key.."\" of "..type_name.."'s superclass "..
-								super_type_name.." cannot be read")
+								tostring(sandboxed_superclass_meta.type_name).." cannot be read")
 					end
 					class_meta0 = sandboxed_superclass_meta
 				else
@@ -184,7 +184,7 @@ function M.wrap_class(type_name, def)
 				local property_def = def.properties[key]
 				if property_def ~= nil then
 					if property_def.get == nil then
-						error("Property \""..name.."\" of "..type_name.." cannot be read")
+						error("Property \""..key.."\" of "..type_name.." cannot be read")
 					end
 					local current_unsafe_value = unsafe[key]
 					local safe_v = property_def.get(current_unsafe_value,
@@ -232,7 +232,7 @@ function M.wrap_class(type_name, def)
 							return
 						end
 						error("Property \""..key.."\" of "..type_name.."'s superclass "..
-								super_type_name.." cannot be written")
+								tostring(sandboxed_superclass_meta.type_name).." cannot be written")
 					end
 					class_meta0 = sandboxed_superclass_meta
 				else
@@ -253,7 +253,7 @@ function M.wrap_class(type_name, def)
 				local property_def = def.properties[key]
 				if property_def ~= nil then
 					if property_def.set == nil then
-						error("Property \""..name.."\" of "..type_name.." cannot be written")
+						error("Property \""..key.."\" of "..type_name.." cannot be written")
 					end
 					local new_unsafe_value = property_def.set(value,
 							type_name.."."..key)
