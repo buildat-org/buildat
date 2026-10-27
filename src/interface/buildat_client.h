@@ -97,6 +97,15 @@ BUILDAT_CLIENT_IMPORT("VariantMap:SetFloat(string,number):any", buildat_c_Varian
 BUILDAT_CLIENT_IMPORT("VariantMap:SetInt(string,number):any", buildat_c_VariantMap_SetInt)
 BUILDAT_CLIENT_IMPORT("VariantMap:SetPtr(string,Node|Component|UIElement):any", buildat_c_VariantMap_SetPtr)
 BUILDAT_CLIENT_IMPORT("VariantMap:SetString(string,string):any", buildat_c_VariantMap_SetString)
+BUILDAT_CLIENT_IMPORT("Quaternion:EulerAngles():any", buildat_c_Quaternion_EulerAngles)
+BUILDAT_CLIENT_IMPORT("Quaternion:Nlerp(Quaternion,number,boolean?):any", buildat_c_Quaternion_Nlerp)
+BUILDAT_CLIENT_IMPORT("Quaternion:PitchAngle():number", buildat_c_Quaternion_PitchAngle)
+BUILDAT_CLIENT_IMPORT("Quaternion:RollAngle():number", buildat_c_Quaternion_RollAngle)
+BUILDAT_CLIENT_IMPORT("Quaternion:Slerp(Quaternion,number):any", buildat_c_Quaternion_Slerp)
+BUILDAT_CLIENT_IMPORT("Quaternion:YawAngle():number", buildat_c_Quaternion_YawAngle)
+BUILDAT_CLIENT_IMPORT("Vector3:CrossProduct(Vector3):any", buildat_c_Vector3_CrossProduct)
+BUILDAT_CLIENT_IMPORT("Vector3:Length():number", buildat_c_Vector3_Length)
+BUILDAT_CLIENT_IMPORT("Vector3:Normalized():any", buildat_c_Vector3_Normalized)
 BUILDAT_CLIENT_IMPORT("Matrix3x4(Vector3?,Quaternion?,number|Vector3?):Matrix3x4", buildat_c_Matrix3x4_new)
 BUILDAT_CLIENT_IMPORT("Matrix3x4:Inverse():any", buildat_c_Matrix3x4_Inverse)
 BUILDAT_CLIENT_IMPORT("Matrix3x4:Rotation():any", buildat_c_Matrix3x4_Rotation)
@@ -129,6 +138,7 @@ BUILDAT_CLIENT_IMPORT("Matrix3x4.m22:number", buildat_c_Matrix3x4_get_m22)
 BUILDAT_CLIENT_IMPORT("Matrix3x4.m22=number", buildat_c_Matrix3x4_set_m22)
 BUILDAT_CLIENT_IMPORT("Matrix3x4.m23:number", buildat_c_Matrix3x4_get_m23)
 BUILDAT_CLIENT_IMPORT("Matrix3x4.m23=number", buildat_c_Matrix3x4_set_m23)
+BUILDAT_CLIENT_IMPORT("IntVector3:Length():number", buildat_c_IntVector3_Length)
 BUILDAT_CLIENT_IMPORT("Matrix3(number?,number?,number?,number?,number?,number?,number?,number?,number?):Matrix3", buildat_c_Matrix3_new)
 BUILDAT_CLIENT_IMPORT("Matrix3:Equals(Matrix3):boolean", buildat_c_Matrix3_Equals)
 BUILDAT_CLIENT_IMPORT("Matrix3:Inverse():any", buildat_c_Matrix3_Inverse)
@@ -200,6 +210,8 @@ BUILDAT_CLIENT_IMPORT("Matrix4.m32:number", buildat_c_Matrix4_get_m32)
 BUILDAT_CLIENT_IMPORT("Matrix4.m32=number", buildat_c_Matrix4_set_m32)
 BUILDAT_CLIENT_IMPORT("Matrix4.m33:number", buildat_c_Matrix4_get_m33)
 BUILDAT_CLIENT_IMPORT("Matrix4.m33=number", buildat_c_Matrix4_set_m33)
+BUILDAT_CLIENT_IMPORT("Vector4:DotProduct(Vector4):number", buildat_c_Vector4_DotProduct)
+BUILDAT_CLIENT_IMPORT("Vector4:Length():number", buildat_c_Vector4_Length)
 BUILDAT_CLIENT_IMPORT("Ray(Vector3,Vector3):Ray", buildat_c_Ray_new)
 BUILDAT_CLIENT_IMPORT("Ray:Define(Vector3,Vector3)", buildat_c_Ray_Define)
 BUILDAT_CLIENT_IMPORT("Ray:Distance(Vector3):number", buildat_c_Ray_Distance)
@@ -224,6 +236,8 @@ BUILDAT_CLIENT_IMPORT("Rect.max:Vector2", buildat_c_Rect_get_max)
 BUILDAT_CLIENT_IMPORT("Rect.max=Vector2", buildat_c_Rect_set_max)
 BUILDAT_CLIENT_IMPORT("Rect.min:Vector2", buildat_c_Rect_get_min)
 BUILDAT_CLIENT_IMPORT("Rect.min=Vector2", buildat_c_Rect_set_min)
+BUILDAT_CLIENT_IMPORT("Vector2:Length():number", buildat_c_Vector2_Length)
+BUILDAT_CLIENT_IMPORT("Vector2:Normalized():any", buildat_c_Vector2_Normalized)
 BUILDAT_CLIENT_IMPORT("BoundingBox(number|Vector3,number|Vector3):BoundingBox", buildat_c_BoundingBox_new)
 BUILDAT_CLIENT_IMPORT("BoundingBox.max:Vector3", buildat_c_BoundingBox_get_max)
 BUILDAT_CLIENT_IMPORT("BoundingBox.max=Vector3", buildat_c_BoundingBox_set_max)
@@ -234,6 +248,7 @@ BUILDAT_CLIENT_IMPORT("CascadeParameters(number,number,number,number,number,numb
 BUILDAT_CLIENT_IMPORT("Resource.name:any", buildat_c_Resource_get_name)
 BUILDAT_CLIENT_IMPORT("Component.enabled:boolean", buildat_c_Component_get_enabled)
 BUILDAT_CLIENT_IMPORT("Component.enabled=boolean", buildat_c_Component_set_enabled)
+BUILDAT_CLIENT_IMPORT("Octree:GetDrawables(BoundingBox):table", buildat_c_Octree_GetDrawables)
 BUILDAT_CLIENT_IMPORT("Drawable.castShadows:boolean", buildat_c_Drawable_get_castShadows)
 BUILDAT_CLIENT_IMPORT("Drawable.castShadows=boolean", buildat_c_Drawable_set_castShadows)
 BUILDAT_CLIENT_IMPORT("Drawable.worldBoundingBox:BoundingBox", buildat_c_Drawable_get_worldBoundingBox)
@@ -1073,7 +1088,9 @@ BUILDAT_CLIENT_IMPORT("ParticleEmitter.emitting:boolean", buildat_c_ParticleEmit
 BUILDAT_CLIENT_IMPORT("ParticleEmitter.emitting=boolean", buildat_c_ParticleEmitter_set_emitting)
 BUILDAT_CLIENT_IMPORT("ParticleEmitter.numParticles:number", buildat_c_ParticleEmitter_get_numParticles)
 BUILDAT_CLIENT_IMPORT("ParticleEmitter.numParticles=number", buildat_c_ParticleEmitter_set_numParticles)
+BUILDAT_CLIENT_IMPORT("Skeleton:GetBone(string|number):table?", buildat_c_Skeleton_GetBone)
 BUILDAT_CLIENT_IMPORT("Skeleton:GetNumBones():number", buildat_c_Skeleton_GetNumBones)
+BUILDAT_CLIENT_IMPORT("Skeleton:GetRootBone():table?", buildat_c_Skeleton_GetRootBone)
 BUILDAT_CLIENT_IMPORT("Skeleton.numBones:number", buildat_c_Skeleton_get_numBones)
 BUILDAT_CLIENT_IMPORT("Skeleton.numBones=number", buildat_c_Skeleton_set_numBones)
 BUILDAT_CLIENT_IMPORT("Skeleton.rootBone:any", buildat_c_Skeleton_get_rootBone)
@@ -1112,6 +1129,8 @@ BUILDAT_CLIENT_IMPORT("magic.time:Time", buildat_c_global_time)
 BUILDAT_CLIENT_IMPORT("magic.ui:UI", buildat_c_global_ui)
 BUILDAT_CLIENT_IMPORT("buildat.SubscribeToEvent(UIElement|Node|Component,string)", buildat_c_verb_SubscribeToEvent)
 BUILDAT_CLIENT_IMPORT("buildat.constant(string):number|string", buildat_c_verb_constant)
+BUILDAT_CLIENT_IMPORT("buildat.table_get(table,any):any", buildat_c_verb_table_get)
+BUILDAT_CLIENT_IMPORT("buildat.table_len(table):number", buildat_c_verb_table_len)
 
 #ifdef __cplusplus
 #ifdef BUILDAT_WASM_MODULE
@@ -1149,17 +1168,70 @@ struct Str
 	bool operator!=(Str o) const { return !(*this == o); }
 };
 
-struct Vector2 { float x, y; };
-struct Vector3 { float x, y, z; };
-struct Vector4 { float x, y, z, w; };
+class Value;
+class Table;
+struct Vector2;
+struct Vector3;
+struct Vector4;
+struct IntVector2;
+struct IntVector3;
+struct Quaternion;
+struct Color;
+struct IntRect;
+struct Vector2
+{
+	float x, y;
+	// Vector2:Length():number
+	double Length() const;
+	// Vector2:Normalized():any
+	::buildat::Value Normalized() const;
+};
+struct Vector3
+{
+	float x, y, z;
+	// Vector3:CrossProduct(Vector3):any
+	::buildat::Value CrossProduct(const ::buildat::Vector3 & a1) const;
+	// Vector3:Length():number
+	double Length() const;
+	// Vector3:Normalized():any
+	::buildat::Value Normalized() const;
+};
+struct Vector4
+{
+	float x, y, z, w;
+	// Vector4:DotProduct(Vector4):number
+	double DotProduct(const ::buildat::Vector4 & a1) const;
+	// Vector4:Length():number
+	double Length() const;
+};
 struct IntVector2 { int x, y; };
-struct IntVector3 { int x, y, z; };
-struct Quaternion { float w, x, y, z; };
+struct IntVector3
+{
+	int x, y, z;
+	// IntVector3:Length():number
+	double Length() const;
+};
+struct Quaternion
+{
+	float w, x, y, z;
+	// Quaternion:EulerAngles():any
+	::buildat::Value EulerAngles() const;
+	// Quaternion:Nlerp(Quaternion,number,boolean?):any
+	::buildat::Value Nlerp(const ::buildat::Quaternion & a1, double a2) const;
+	::buildat::Value Nlerp(const ::buildat::Quaternion & a1, double a2, bool a3) const;
+	// Quaternion:PitchAngle():number
+	double PitchAngle() const;
+	// Quaternion:RollAngle():number
+	double RollAngle() const;
+	// Quaternion:Slerp(Quaternion,number):any
+	::buildat::Value Slerp(const ::buildat::Quaternion & a1, double a2) const;
+	// Quaternion:YawAngle():number
+	double YawAngle() const;
+};
 struct Color { float r, g, b, a; };
 struct IntRect { int left, top, right, bottom; };
 
 class Object;
-class Value;
 namespace detail {
 static const unsigned int BUF = 65536;
 inline unsigned char g_args[BUF];
@@ -1310,6 +1382,24 @@ protected:
 	unsigned int m_handle = 0;
 };
 inline Any::Any(const Object &o): kind(OBJECT), h(o.handle()) {}
+
+// A table a call returned (Octree:GetDrawables(), Skeleton:GetBone()):
+// read by buildat::table_get(t, key) and table_len(t), each a call
+class Table: public Object
+{
+public:
+	constexpr Table() {}
+	constexpr explicit Table(unsigned int handle): Object(handle) {}
+};
+
+template<> inline Vector2 Value::as<Vector2>(){ Vector2 o{}; if(kind == VALUE && value_kind == 1) { o.x = (float)c[0]; o.y = (float)c[1]; } return o; }
+template<> inline Vector3 Value::as<Vector3>(){ Vector3 o{}; if(kind == VALUE && value_kind == 2) { o.x = (float)c[0]; o.y = (float)c[1]; o.z = (float)c[2]; } return o; }
+template<> inline Vector4 Value::as<Vector4>(){ Vector4 o{}; if(kind == VALUE && value_kind == 3) { o.x = (float)c[0]; o.y = (float)c[1]; o.z = (float)c[2]; o.w = (float)c[3]; } return o; }
+template<> inline IntVector2 Value::as<IntVector2>(){ IntVector2 o{}; if(kind == VALUE && value_kind == 4) { o.x = (int)c[0]; o.y = (int)c[1]; } return o; }
+template<> inline IntVector3 Value::as<IntVector3>(){ IntVector3 o{}; if(kind == VALUE && value_kind == 5) { o.x = (int)c[0]; o.y = (int)c[1]; o.z = (int)c[2]; } return o; }
+template<> inline Quaternion Value::as<Quaternion>(){ Quaternion o{}; if(kind == VALUE && value_kind == 6) { o.w = (float)c[0]; o.x = (float)c[1]; o.y = (float)c[2]; o.z = (float)c[3]; } return o; }
+template<> inline Color Value::as<Color>(){ Color o{}; if(kind == VALUE && value_kind == 7) { o.r = (float)c[0]; o.g = (float)c[1]; o.b = (float)c[2]; o.a = (float)c[3]; } return o; }
+template<> inline IntRect Value::as<IntRect>(){ IntRect o{}; if(kind == VALUE && value_kind == 8) { o.left = (int)c[0]; o.top = (int)c[1]; o.right = (int)c[2]; o.bottom = (int)c[3]; } return o; }
 
 // The values a call returns, when the list says it returns more than one
 struct Values
@@ -1814,6 +1904,40 @@ class Matrix4: public Object
 public:
 	constexpr Matrix4() {}
 	constexpr explicit Matrix4(unsigned int handle): Object(handle) {}
+	// Matrix4(number|Matrix3?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?,number?):Matrix4
+	static ::buildat::Matrix4 make();
+	static ::buildat::Matrix4 make(double a1);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1);
+	static ::buildat::Matrix4 make(double a1, double a2);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15);
+	static ::buildat::Matrix4 make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15, double a16);
+	static ::buildat::Matrix4 make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15, double a16);
 	// Matrix4:Equals(Matrix4):boolean
 	bool Equals(const ::buildat::Matrix4 & a1) const;
 	// Matrix4:Inverse():any
@@ -2030,6 +2154,8 @@ class Octree: public Component
 public:
 	constexpr Octree() {}
 	constexpr explicit Octree(unsigned int handle): Component(handle) {}
+	// Octree:GetDrawables(BoundingBox):table
+	::buildat::Table GetDrawables(const ::buildat::BoundingBox & a1) const;
 };
 class Drawable: public Component
 {
@@ -4218,8 +4344,13 @@ class Skeleton: public Object
 public:
 	constexpr Skeleton() {}
 	constexpr explicit Skeleton(unsigned int handle): Object(handle) {}
+	// Skeleton:GetBone(string|number):table?
+	::buildat::Table GetBone(::buildat::Str a1) const;
+	::buildat::Table GetBone(double a1) const;
 	// Skeleton:GetNumBones():number
 	double GetNumBones() const;
+	// Skeleton:GetRootBone():table?
+	::buildat::Table GetRootBone() const;
 	// Skeleton.numBones:number
 	double numBones() const;
 	// Skeleton.numBones=number
@@ -4321,6 +4452,10 @@ void SubscribeToEvent(const ::buildat::Node & a1, ::buildat::Str a2);
 void SubscribeToEvent(const ::buildat::Component & a1, ::buildat::Str a2);
 // buildat.constant(string):number|string
 ::buildat::Value constant(::buildat::Str a1);
+// buildat.table_get(table,any):any
+::buildat::Value table_get(const ::buildat::Table & a1, const ::buildat::Any & a2);
+// buildat.table_len(table):number
+double table_len(const ::buildat::Table & a1);
 
 inline ::buildat::StringHash StringHash::make(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_StringHash_new, a1); return ::buildat::StringHash(r.handle()); }
 inline ::buildat::VectorBuffer VectorBuffer::new_(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_VectorBuffer_static_new); return ::buildat::VectorBuffer(r.handle()); }
@@ -4358,6 +4493,16 @@ inline ::buildat::Value VariantMap::SetPtr(::buildat::Str a1, const ::buildat::N
 inline ::buildat::Value VariantMap::SetPtr(::buildat::Str a1, const ::buildat::Component & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_VariantMap_SetPtr, *this, a1, a2); return r.value(); }
 inline ::buildat::Value VariantMap::SetPtr(::buildat::Str a1, const ::buildat::UIElement & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_VariantMap_SetPtr, *this, a1, a2); return r.value(); }
 inline ::buildat::Value VariantMap::SetString(::buildat::Str a1, ::buildat::Str a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_VariantMap_SetString, *this, a1, a2); return r.value(); }
+inline ::buildat::Value Quaternion::EulerAngles() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_EulerAngles, *this); return r.value(); }
+inline ::buildat::Value Quaternion::Nlerp(const ::buildat::Quaternion & a1, double a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_Nlerp, *this, a1, a2); return r.value(); }
+inline ::buildat::Value Quaternion::Nlerp(const ::buildat::Quaternion & a1, double a2, bool a3) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_Nlerp, *this, a1, a2, a3); return r.value(); }
+inline double Quaternion::PitchAngle() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_PitchAngle, *this); return r.number(); }
+inline double Quaternion::RollAngle() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_RollAngle, *this); return r.number(); }
+inline ::buildat::Value Quaternion::Slerp(const ::buildat::Quaternion & a1, double a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_Slerp, *this, a1, a2); return r.value(); }
+inline double Quaternion::YawAngle() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Quaternion_YawAngle, *this); return r.number(); }
+inline ::buildat::Value Vector3::CrossProduct(const ::buildat::Vector3 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector3_CrossProduct, *this, a1); return r.value(); }
+inline double Vector3::Length() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector3_Length, *this); return r.number(); }
+inline ::buildat::Value Vector3::Normalized() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector3_Normalized, *this); return r.value(); }
 inline ::buildat::Matrix3x4 Matrix3x4::make(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_new); return ::buildat::Matrix3x4(r.handle()); }
 inline ::buildat::Matrix3x4 Matrix3x4::make(const ::buildat::Vector3 & a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_new, a1); return ::buildat::Matrix3x4(r.handle()); }
 inline ::buildat::Matrix3x4 Matrix3x4::make(const ::buildat::Vector3 & a1, const ::buildat::Quaternion & a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_new, a1, a2); return ::buildat::Matrix3x4(r.handle()); }
@@ -4395,6 +4540,7 @@ inline double Matrix3x4::m22() const{ ::buildat::detail::Reply r = ::buildat::de
 inline void Matrix3x4::m22(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_set_m22, *this, a1); (void)r; }
 inline double Matrix3x4::m23() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_get_m23, *this); return r.number(); }
 inline void Matrix3x4::m23(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3x4_set_m23, *this, a1); (void)r; }
+inline double IntVector3::Length() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_IntVector3_Length, *this); return r.number(); }
 inline ::buildat::Matrix3 Matrix3::make(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_new); return ::buildat::Matrix3(r.handle()); }
 inline ::buildat::Matrix3 Matrix3::make(double a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_new, a1); return ::buildat::Matrix3(r.handle()); }
 inline ::buildat::Matrix3 Matrix3::make(double a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_new, a1, a2); return ::buildat::Matrix3(r.handle()); }
@@ -4431,6 +4577,39 @@ inline double Matrix3::m21() const{ ::buildat::detail::Reply r = ::buildat::deta
 inline void Matrix3::m21(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_set_m21, *this, a1); (void)r; }
 inline double Matrix3::m22() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_get_m22, *this); return r.number(); }
 inline void Matrix3::m22(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix3_set_m22, *this, a1); (void)r; }
+inline ::buildat::Matrix4 Matrix4::make(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15, double a16){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16); return ::buildat::Matrix4(r.handle()); }
+inline ::buildat::Matrix4 Matrix4::make(const ::buildat::Matrix3 & a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11, double a12, double a13, double a14, double a15, double a16){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_new, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16); return ::buildat::Matrix4(r.handle()); }
 inline bool Matrix4::Equals(const ::buildat::Matrix4 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_Equals, *this, a1); return r.boolean(); }
 inline ::buildat::Value Matrix4::Inverse() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_Inverse, *this); return r.value(); }
 inline ::buildat::Value Matrix4::Rotation() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_Rotation, *this); return r.value(); }
@@ -4476,6 +4655,8 @@ inline double Matrix4::m32() const{ ::buildat::detail::Reply r = ::buildat::deta
 inline void Matrix4::m32(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_set_m32, *this, a1); (void)r; }
 inline double Matrix4::m33() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_get_m33, *this); return r.number(); }
 inline void Matrix4::m33(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Matrix4_set_m33, *this, a1); (void)r; }
+inline double Vector4::DotProduct(const ::buildat::Vector4 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector4_DotProduct, *this, a1); return r.number(); }
+inline double Vector4::Length() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector4_Length, *this); return r.number(); }
 inline ::buildat::Ray Ray::make(const ::buildat::Vector3 & a1, const ::buildat::Vector3 & a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Ray_new, a1, a2); return ::buildat::Ray(r.handle()); }
 inline void Ray::Define(const ::buildat::Vector3 & a1, const ::buildat::Vector3 & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Ray_Define, *this, a1, a2); (void)r; }
 inline double Ray::Distance(const ::buildat::Vector3 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Ray_Distance, *this, a1); return r.number(); }
@@ -4500,6 +4681,8 @@ inline ::buildat::Vector2 Rect::max() const{ ::buildat::detail::Reply r = ::buil
 inline void Rect::max(const ::buildat::Vector2 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Rect_set_max, *this, a1); (void)r; }
 inline ::buildat::Vector2 Rect::min() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Rect_get_min, *this); ::buildat::Vector2 v{}; r.get(v); return v; }
 inline void Rect::min(const ::buildat::Vector2 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Rect_set_min, *this, a1); (void)r; }
+inline double Vector2::Length() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector2_Length, *this); return r.number(); }
+inline ::buildat::Value Vector2::Normalized() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Vector2_Normalized, *this); return r.value(); }
 inline ::buildat::BoundingBox BoundingBox::make(double a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BoundingBox_new, a1, a2); return ::buildat::BoundingBox(r.handle()); }
 inline ::buildat::BoundingBox BoundingBox::make(double a1, const ::buildat::Vector3 & a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BoundingBox_new, a1, a2); return ::buildat::BoundingBox(r.handle()); }
 inline ::buildat::BoundingBox BoundingBox::make(const ::buildat::Vector3 & a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_BoundingBox_new, a1, a2); return ::buildat::BoundingBox(r.handle()); }
@@ -4515,6 +4698,7 @@ inline ::buildat::CascadeParameters CascadeParameters::make(double a1, double a2
 inline ::buildat::Value Resource::name() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Resource_get_name, *this); return r.value(); }
 inline bool Component::enabled() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Component_get_enabled, *this); return r.boolean(); }
 inline void Component::enabled(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Component_set_enabled, *this, a1); (void)r; }
+inline ::buildat::Table Octree::GetDrawables(const ::buildat::BoundingBox & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Octree_GetDrawables, *this, a1); return ::buildat::Table(r.handle()); }
 inline bool Drawable::castShadows() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_get_castShadows, *this); return r.boolean(); }
 inline void Drawable::castShadows(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_set_castShadows, *this, a1); (void)r; }
 inline ::buildat::BoundingBox Drawable::worldBoundingBox() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Drawable_get_worldBoundingBox, *this); return ::buildat::BoundingBox(r.handle()); }
@@ -5414,7 +5598,10 @@ inline bool ParticleEmitter::emitting() const{ ::buildat::detail::Reply r = ::bu
 inline void ParticleEmitter::emitting(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_ParticleEmitter_set_emitting, *this, a1); (void)r; }
 inline double ParticleEmitter::numParticles() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_ParticleEmitter_get_numParticles, *this); return r.number(); }
 inline void ParticleEmitter::numParticles(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_ParticleEmitter_set_numParticles, *this, a1); (void)r; }
+inline ::buildat::Table Skeleton::GetBone(::buildat::Str a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_GetBone, *this, a1); return ::buildat::Table(r.handle()); }
+inline ::buildat::Table Skeleton::GetBone(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_GetBone, *this, a1); return ::buildat::Table(r.handle()); }
 inline double Skeleton::GetNumBones() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_GetNumBones, *this); return r.number(); }
+inline ::buildat::Table Skeleton::GetRootBone() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_GetRootBone, *this); return ::buildat::Table(r.handle()); }
 inline double Skeleton::numBones() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_get_numBones, *this); return r.number(); }
 inline void Skeleton::numBones(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_set_numBones, *this, a1); (void)r; }
 inline ::buildat::Value Skeleton::rootBone() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Skeleton_get_rootBone, *this); return r.value(); }
@@ -5457,6 +5644,8 @@ inline void SubscribeToEvent(const ::buildat::UIElement & a1, ::buildat::Str a2)
 inline void SubscribeToEvent(const ::buildat::Node & a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_SubscribeToEvent, a1, a2); (void)r; }
 inline void SubscribeToEvent(const ::buildat::Component & a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_SubscribeToEvent, a1, a2); (void)r; }
 inline ::buildat::Value constant(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_constant, a1); return r.value(); }
+inline ::buildat::Value table_get(const ::buildat::Table & a1, const ::buildat::Any & a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_table_get, a1, a2); return r.value(); }
+inline double table_len(const ::buildat::Table & a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_table_len, a1); return r.number(); }
 
 } // namespace buildat
 #endif // __cplusplus

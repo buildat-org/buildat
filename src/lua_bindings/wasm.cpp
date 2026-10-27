@@ -2726,10 +2726,27 @@ struct Instance {
 				|| !strcmp(d.kind, "set");
 		if(on_object && (count < 1 || !wrapper_is(L, fn + 4, d.cls)))
 			return luaL_error(L, "not called on a %s", d.cls);
-		// An object's event names the handle it was subscribed with
-		if(!strcmp(d.kind, "subscribe"))
-			lua_pushnumber(L, first_handle);
-		lua_call(L, lua_gettop(L) - fn, LUA_MULTRET);
+		// A table a call returned, read here: a plain table only (no
+		// metatable, so no Lua runs), as a script reads it
+		const bool table_get = !strcmp(d.kind, "table_get");
+		if(table_get || !strcmp(d.kind, "table_len")){
+			if(count != (table_get ? 2u : 1u) || lua_type(L, fn + 4) != LUA_TTABLE ||
+					lua_getmetatable(L, fn + 4))
+				return luaL_error(L, "not called on a table a call returned");
+			if(table_get){
+				lua_pushvalue(L, fn + 5);
+				lua_rawget(L, fn + 4);
+			} else {
+				lua_pushnumber(L, (lua_Number)lua_objlen(L, fn + 4));
+			}
+			lua_replace(L, fn);
+			lua_settop(L, fn);
+		} else {
+			// An object's event names the handle it was subscribed with
+			if(!strcmp(d.kind, "subscribe"))
+				lua_pushnumber(L, first_handle);
+			lua_call(L, lua_gettop(L) - fn, LUA_MULTRET);
+		}
 		// The results
 		const int results = lua_gettop(L) - fn + 1;
 		if(results > (int)MAX_BINDING_VALUES)
@@ -2772,16 +2789,16 @@ struct Instance {
 		return 0;
 	}
 
-	// A wrapper the dispatcher returned, into c.out: a value by its
-	// components, any other object as a new handle. false with err.
+	// A table the dispatcher returned, into c.out: a value by its
+	// components, any other object or a plain table as a new handle.
+	// false with err.
 	static bool encode_object(lua_State *L, int r, BindingCall &c, char *err,
 			size_t err_len)
 	{
-		Instance *in = c.in;
-		if(!lua_getmetatable(L, r)){
-			snprintf(err, err_len, "a table result, which the calls do not carry");
-			return false;
-		}
+		// A plain table (Octree:GetDrawables(), Skeleton:GetBone()): a
+		// handle, read by table_get and table_len
+		if(!lua_getmetatable(L, r))
+			return give_ref(L, r, c, Slot::OBJECT, nullptr, nullptr, err, err_len);
 		const int mt = lua_gettop(L);
 		lua_pushstring(L, "unsafe");
 		lua_rawget(L, mt);
@@ -2823,9 +2840,16 @@ struct Instance {
 			tex = (Urho3D::Texture2D*)tolua_tousertype(L, unsafe, 0);
 		}
 		lua_settop(L, mt - 1);
+		return give_ref(L, r, c, kind, node, tex, err, err_len);
+	}
+
+	// The value at r held by a new handle, into c.out
+	static bool give_ref(lua_State *L, int r, BindingCall &c, Slot::Kind kind,
+			Urho3D::Node *node, Urho3D::Texture2D *tex, char *err, size_t err_len)
+	{
 		lua_pushvalue(L, r);
 		const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-		const uint32_t h = in->give(kind, node, tex, nullptr, ref);
+		const uint32_t h = c.in->give(kind, node, tex, nullptr, ref);
 		if(!h){
 			snprintf(err, err_len, "more than %d handles", (int)MAX_HANDLES);
 			return false;

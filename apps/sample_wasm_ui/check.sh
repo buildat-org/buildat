@@ -7,9 +7,11 @@
 # reaches the module's queue, the module sets the button's text, reads it
 # back, and sends "main:click", which echo/ answers; space recolours the
 # cube and sends "main:key". Two screenshots: the cube orange, then green.
-# Then the C++ twin of extensions/sandbox_test's refusals for the calls
-# the bindings cover (main/wasm/main.cpp's refuse()), each a trap with its
-# reason; and two modules refused at the load, one importing a call the
+# A value's methods, Matrix4's constructor, and the calls that return a
+# table (Octree:GetDrawables, Skeleton:GetBone, Skeleton.rootBone) read
+# by table_get. Then the C++ twin of extensions/sandbox_test's refusals
+# for the calls the bindings cover (main/wasm/main.cpp's refuse()), each a
+# trap with its reason; and two modules refused at the load, one importing a call the
 # list does not name (unlisted/), one a call of it with another signature
 # (wrong_sig/). deep/ makes 12000 nodes in chains (the c key) natively,
 # and its camera still holds them ([HOLD_REF_UAF]); on the web its w key
@@ -87,7 +89,14 @@ client_lines()
 			"wasm main: the server answered echo: click 1" \
 			"wasm main: space: the colour is now 1" \
 			"wasm main: the server answered echo: key 1" \
-			"wasm main: refusals: tried 11, got through: 0" \
+			"wasm main: refusals: tried 12, got through: 0" \
+			"wasm main: values: 5 1 90 3 10" \
+			"wasm main: matrix4: 5 6 7 1" \
+			"wasm main: GetDrawables: the cube's node among " \
+			"wasm main: GetRootBone: none with no model, bones 0" \
+			"wasm main: GetBone(1): Bip01_Footsteps" \
+			"wasm main: GetBone(1)'s node: Bip01_Footsteps" \
+			"wasm main: rootBone: Bip01" \
 			"trap: buildat.UI.scale=any: " \
 			"UI.scale is read-only" \
 			"trap: buildat.UIElement:SetStyleAuto(): not called on a UIElement" \
@@ -98,6 +107,7 @@ client_lines()
 			"constant(Node): not a number or a string of the sandbox's" \
 			"trap: buildat.Node.position:Vector3: more than 32 values" \
 			"trap: buildat.magic.ui:UI: its results are 6 bytes, past the buffer's 1" \
+			"trap: buildat.buildat.table_get(table,any):any: not called on a table a call returned" \
 			"wasm unlisted: refused: imports \"buildat.Image:FlipHorizontal():boolean\", which is not one of" \
 			"wasm wrong_sig: refused: imports \"buildat.Node.position:Vector3\", which is not one of"; do
 		grep -aqF "$want" "$log" || fail "no \"$want\" in $log"

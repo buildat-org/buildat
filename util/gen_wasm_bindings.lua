@@ -55,6 +55,12 @@ local VERBS = {
 	-- KEY_SPACE, LIGHT_DIRECTIONAL, ...
 	{kind = "constant", name = "constant", params = {"string"},
 			ret = {{"number", "string"}}},
+	-- A table a call returned (Octree:GetDrawables, Skeleton:GetBone): a
+	-- handle of its own, read by key (a plain table only; wasm.cpp reads
+	-- it, no Lua runs) and by its length
+	{kind = "table_get", name = "table_get", params = {"table", "any"}},
+	{kind = "table_len", name = "table_len", params = {"table"},
+			ret = {"number"}},
 }
 
 --
@@ -145,7 +151,7 @@ table.sort(globals, function(a, b) return a.name < b.name end)
 local function norm(t)
 	if type(t) == "string" then
 		if t == "number" or t == "string" or t == "boolean" or t == "__nil"
-				or t == "__to_nil" or by_name[t] then
+				or t == "__to_nil" or t == "table" or t == "any" or by_name[t] then
 			return {t}
 		end
 		return nil
@@ -401,20 +407,17 @@ for _, c in ipairs(classes) do
 	for _, k in ipairs(sorted_keys(def.class)) do
 		add_static(c, k, def.class[k])
 	end
-	if VALUE_OF[c.name] then
-		-- A struct in the C++, which does its own maths
-		skip(c.name, "its methods and operators: a value (the C++ does its "..
-				"own maths)")
-	else
-		for _, k in ipairs(sorted_keys(def.instance)) do
-			add_method(c, k, def.instance[k])
-		end
+	for _, k in ipairs(sorted_keys(def.instance)) do
+		add_method(c, k, def.instance[k])
+	end
+	-- A value's properties are its struct's fields
+	if not VALUE_OF[c.name] then
 		for _, k in ipairs(sorted_keys(def.properties)) do
 			add_property(c, k, def.properties[k])
 		end
-		for _, k in ipairs(sorted_keys(def.instance_meta)) do
-			skip(c.name.."."..k, "an operator")
-		end
+	end
+	for _, k in ipairs(sorted_keys(def.instance_meta)) do
+		skip(c.name.."."..k, "an operator (the C++ does its own maths)")
 	end
 end
 for _, g in ipairs(globals) do
@@ -496,13 +499,15 @@ local function param_type(alt)
 	if alt == "boolean" then return "bool" end
 	if alt == "__nil" or alt == "__to_nil" then return "::buildat::Nil" end
 	if alt == "any" then return "const ::buildat::Any &" end
+	if alt == "table" then return "const ::buildat::Table &" end
 	return "const ::buildat::"..alt.." &"
 end
 
 -- The overloads of a parameter list: each a list of C++ types, one for
 -- each alternative of each parameter, and the trailing optional ones left
 -- off; nil past MAX_OVERLOADS
-local MAX_OVERLOADS = 16
+-- (Matrix4's constructor, 33, is the most)
+local MAX_OVERLOADS = 40
 local function overloads(params, all_given)
 	local lists = {{}}
 	local function extend(alts)
@@ -581,6 +586,9 @@ local function result_of(ret)
 	if a == "string" then return "::buildat::Str", "return r.string();" end
 	if a == "boolean" then return "bool", "return r.boolean();" end
 	if a == "any" then return "::buildat::Value", "return r.value();" end
+	if a == "table" then
+		return "::buildat::Table", "return ::buildat::Table(r.handle());"
+	end
 	if VALUE_OF[a] then
 		return "::buildat::"..a, "::buildat::"..a.." v{}; r.get(v); return v;"
 	end
@@ -778,14 +786,30 @@ struct Str
 	bool operator!=(Str o) const { return !(*this == o); }
 };
 ]])
+w("class Value;")
+w("class Table;")
+for _, v in ipairs(VALUES) do
+	w("struct "..v.name..";")
+end
+-- A value's methods are calls as an object's are (Vector3::Length()): the
+-- struct stays an aggregate, Vector3{1, 2, 3}
 for _, v in ipairs(VALUES) do
 	local t = v.name:match("^Int") and "int" or "float"
-	w("struct "..v.name.." { "..t.." "..table.concat(v.c, ", ").."; };")
+	if members[v.name] then
+		w("struct "..v.name)
+		w("{")
+		w("\t"..t.." "..table.concat(v.c, ", ")..";")
+		for _, l in ipairs(members[v.name]) do
+			w(l)
+		end
+		w("};")
+	else
+		w("struct "..v.name.." { "..t.." "..table.concat(v.c, ", ").."; };")
+	end
 end
 w([[
 
 class Object;
-class Value;
 namespace detail {
 static const unsigned int BUF = 65536;
 inline unsigned char g_args[BUF];
@@ -934,6 +958,29 @@ protected:
 	unsigned int m_handle = 0;
 };
 inline Any::Any(const Object &o): kind(OBJECT), h(o.handle()) {}
+
+// A table a call returned (Octree:GetDrawables(), Skeleton:GetBone()):
+// read by buildat::table_get(t, key) and table_len(t), each a call
+class Table: public Object
+{
+public:
+	constexpr Table() {}
+	constexpr explicit Table(unsigned int handle): Object(handle) {}
+};
+]])
+-- A Value that is a Vector3, ... as its struct: value.as<Vector3>() (all
+-- zero for another kind)
+for _, v in ipairs(VALUES) do
+	local t = v.name:match("^Int") and "int" or "float"
+	local comps = {}
+	for i, comp in ipairs(v.c) do
+		comps[i] = "o."..comp.." = ("..t..")c["..(i - 1).."]; "
+	end
+	w("template<> inline "..v.name.." Value::as<"..v.name..">(){ "..v.name..
+			" o{}; if(kind == VALUE && value_kind == "..v.id..") { "..
+			table.concat(comps).."} return o; }")
+end
+w([[
 
 // The values a call returns, when the list says it returns more than one
 struct Values

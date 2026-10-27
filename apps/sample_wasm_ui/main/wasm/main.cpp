@@ -206,14 +206,18 @@ static const char *const ATTEMPTS[] = {
 	"a constant that is a class",
 	"values that do not parse",
 	"results past the buffer",
+	"a Node's handle as a table",
 };
 static const int ATTEMPT_COUNT = sizeof ATTEMPTS / sizeof ATTEMPTS[0];
 static int g_got_through;
+static void values_and_tables();
 
 static void refuse()
 {
 	if(g_attempt > ATTEMPT_COUNT)
 		return;
+	if(g_attempt == ATTEMPT_COUNT)
+		values_and_tables();
 	const int k = g_attempt++;
 	if(k == ATTEMPT_COUNT){
 		char buf[80];
@@ -258,6 +262,13 @@ static void refuse()
 		unsigned char none[1] = {0}, out[1];
 		buildat_c_global_ui(none, 1, out, 1);
 		break; }
+	case 11: {
+		// table_get reads only a plain table a call returned, not an
+		// object's wrapper
+		Table fake(g_camera.handle());
+		v = table_get(fake, "unsafe");
+		fake.release();
+		break; }
 	}
 	if(v.kind == Value::NIL || (v.kind == Value::BOOLEAN && !v.boolean)){
 		log("refusal: refused by its answer");
@@ -265,6 +276,81 @@ static void refuse()
 	}
 	g_got_through++;
 	log_n("refusal: GOT THROUGH, attempt ", k);
+}
+
+// A line of words and numbers: "<text> <n> <n>..."
+static void log_ns(const char *text, const int *n, int count)
+{
+	char buf[200];
+	unsigned int l = 0;
+	while(text[l] && l < 100){
+		buf[l] = text[l];
+		l++;
+	}
+	for(int i = 0; i < count; i++)
+		l += with_n(buf + l, " ", n[i]);
+	log(Str(buf, l));
+}
+static void log_str(const char *text, Str s)
+{
+	char buf[200];
+	unsigned int l = 0;
+	while(text[l] && l < 100){
+		buf[l] = text[l];
+		l++;
+	}
+	for(unsigned int i = 0; i < s.size && l < sizeof buf; i++)
+		buf[l++] = s.data[i];
+	log(Str(buf, l));
+}
+
+// [CLIENT_WASM_BINDINGS] A value's methods, Matrix4's constructor and the
+// calls that return a table, once the octree has the scene's drawables
+static void values_and_tables()
+{
+	const Vector3 cross = Vector3{1, 0, 0}.CrossProduct(Vector3{0, 1, 0}).
+			as<Vector3>();
+	const Vector3 euler = Quaternion{0.7071068f, 0, 0.7071068f, 0}.
+			EulerAngles().as<Vector3>();
+	const int v[] = {(int)Vector3{3, 4, 0}.Length(), (int)cross.z,
+			(int)(euler.y + 0.5f), (int)IntVector3{1, 2, 2}.Length(),
+			(int)Vector4{1, 2, 3, 4}.DotProduct(Vector4{1, 1, 1, 1})};
+	log_ns("values:", v, 5);
+	const Vector3 t = Matrix4::make(1, 0, 0, 5, 0, 1, 0, 6, 0, 0, 1, 7, 0, 0, 0, 1).
+			Translation().as<Vector3>();
+	const int m[] = {(int)t.x, (int)t.y, (int)t.z,
+			(int)Matrix4::make(Matrix3::make()).m00()};
+	log_ns("matrix4:", m, 4);
+
+	Scene scene = g_camera.scene();
+	Octree octree = scene.GetComponent("Octree").as<Octree>();
+	Table found = octree.GetDrawables(BoundingBox::make(Vector3{-3, -3, -3},
+			Vector3{3, 3, 3}));
+	const int n = (int)table_len(found);
+	bool cube = false;
+	for(int i = 1; i <= n; i++){
+		Table entry = table_get(found, i).as<Table>();
+		Node node = table_get(entry, "node").as<Node>();
+		if(node.handle() && node.GetName() == "Mesh1")
+			cube = true;
+	}
+	log_n(cube ? "GetDrawables: the cube's node among " :
+			"GetDrawables: no cube among ", n);
+
+	Node rigged = scene.CreateChild("rigged").as<Node>();
+	AnimatedModel am = rigged.CreateComponent("AnimatedModel").as<AnimatedModel>();
+	Skeleton empty = am.skeleton().as<Skeleton>();
+	log_n(empty.GetRootBone() ? "GetRootBone: a root with no model, bones " :
+			"GetRootBone: none with no model, bones ", (int)empty.GetNumBones());
+	am.model(cache().GetResource("Model", "Models/Jack.mdl").as<Model>());
+	Skeleton sk = am.skeleton().as<Skeleton>();
+	Table bone = sk.GetBone(1);
+	log_str("GetBone(1): ", table_get(bone, "name").string);
+	Node bone_node = table_get(bone, "node").as<Node>();
+	log_str("GetBone(1)'s node: ", bone_node.GetName());
+	Table root = sk.rootBone().as<Table>();
+	log_str("rootBone: ", table_get(root, "name").string);
+	rigged.Remove();
 }
 
 BUILDAT_WASM_EXPORT const char *packets(void)
