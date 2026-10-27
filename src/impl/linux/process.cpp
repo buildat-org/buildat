@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <cstring>
+#include <cstdlib>
 #include <vector>
 #ifdef __linux__
 #include <sys/prctl.h>
@@ -17,8 +18,8 @@ namespace process {
 
 ss_ get_environment_variable(const ss_ &name)
 {
-	// TODO
-	throw("get_environment_variable(): Not implemented");
+	const char *v = getenv(name.c_str());
+	return v ? v : "";
 }
 
 int shell_exec(const ss_ &command, const ExecOptions &opts)

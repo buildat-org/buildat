@@ -31,11 +31,9 @@ static const char *WASM_LDFLAGS = "--no-entry --export-dynamic "
 		"--gc-sections --strip-all -O2 -z stack-size=65536 "
 		"--max-memory=67108864";
 
-// interface::process::get_environment_variable() is not there on Linux
 static ss_ env(const char *name)
 {
-	const char *v = getenv(name);
-	return v ? v : "";
+	return interface::process::get_environment_variable(name);
 }
 
 static bool is_program(const ss_ &path)
