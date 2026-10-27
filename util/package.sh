@@ -64,6 +64,8 @@ gather_licenses() {
 			[ -f "$f" ] && cp "$f" "$lic/$name-$(basename "$f")"
 		done
 	done
+	# One a tree carries inside it, compiled into the client
+	cp "$here/3rdparty/wabt/third_party/picosha2/LICENSE" "$lic/wabt-picosha2-LICENSE"
 	[ -d "$stage/compiler/licenses" ] && cp -r "$stage/compiler/licenses" "$lic/mingw-w64"
 	return 0
 }

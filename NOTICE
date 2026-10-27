@@ -60,6 +60,13 @@ md4c 0.6.0 -- 3rdparty/md4c
   Copyright (c) 2016-2026 Martin Mitáš. MIT.
   Full text: 3rdparty/md4c/LICENSE
 
+WABT 1.0.42 -- 3rdparty/wabt (the binary reader, the validator, wasm2c and
+  its runtime; what was kept: 3rdparty/wabt/CMakeLists.txt)
+  Copyright WebAssembly Community Group participants. Apache-2.0.
+  Full text: 3rdparty/wabt/LICENSE
+  It carries PicoSHA2, Copyright (c) 2017 okdshin. MIT.
+  Full text: 3rdparty/wabt/third_party/picosha2/LICENSE
+
 c55lib -- 3rdparty/c55lib
   Copyright 2014 Perttu Ahola <celeron55@gmail.com>. Apache-2.0, the same
   terms as Buildat; it lives under 3rdparty because it is maintained apart.

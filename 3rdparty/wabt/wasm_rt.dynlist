@@ -1,0 +1,4 @@
+{
+	wasm_rt_*;
+	g_wasm_rt_*;
+};
