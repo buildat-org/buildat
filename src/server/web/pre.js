@@ -33,11 +33,11 @@ Module.preRun.push(function(){
 // bytes}, {closed: 1} (the server dropped the client), {log: line} and,
 // last, {exit: status}. The app's storage, /user, is kept in IndexedDB:
 // read before main(), written every 5 s, when the page asks and at the
-// end.
-// simplified: two tabs of the same app write over each other's /user; a
-// write is the files as they are at that moment, not a save's end (one
-// listed and gone before it was read is a logged error, and the next
-// write has it right); a sync after core:save if a save is ever lost
+// end, as one instant's files (see below): what a crash leaves, which
+// sqlite's WAL recovers. No event marks a finished save to wait for
+// (core:save is the operator's save_now; voxelworld checkpoints on its own
+// clock).
+// simplified: two tabs of the same app write over each other's /user
 if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		typeof process !== 'object'){
 	Module.arguments = ['--unconfined', '-l', '3', '-m', Module.buildatApp,
@@ -68,6 +68,25 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		});
 	};
 	Module.preRun.push(function(){
+		// IDBFS's own write lists the files, waits for IndexedDB's list and
+		// only then reads them, and a write between was half a save. Here
+		// the listing and the reads are in one turn of this thread, where
+		// the server's threads' file calls run (proxied), so none comes
+		// between. The same in src/client/web/index.html.
+		var idb = FS.filesystems.IDBFS, syncfs = idb.syncfs;
+		idb.syncfs = function(m, populate, done){
+			if(populate)
+				return syncfs(m, populate, done);
+			idb.getRemoteSet(m, function(err, remote){
+				if(err)
+					return done(err);
+				idb.getLocalSet(m, function(err, local){
+					if(err)
+						return done(err);
+					idb.reconcile(local, remote, done);
+				});
+			});
+		};
 		FS.mkdir('/user');
 		FS.mount(FS.filesystems.IDBFS, {}, '/user');
 		addRunDependency('idbfs');

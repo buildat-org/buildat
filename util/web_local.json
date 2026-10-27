@@ -8,5 +8,8 @@
 	["holdkey", "w", 8000],
 	["waitlog", "server: .*passed turn 1 of", 30],
 	["eval", "JSON.stringify(performance.getEntriesByType('resource').map(r => [r.name.replace(/.*\\//, ''), r.encodedBodySize, Math.round(r.responseEnd)]))"],
-	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15]
+	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15],
+	["eval", "new Promise(r => { const q = indexedDB.open('/user'); q.onerror = () => r('no IndexedDB'); q.onsuccess = () => { const g = q.result.transaction('FILE_DATA').objectStore('FILE_DATA').getAllKeys(); g.onsuccess = () => r('kept: ' + g.result.filter(k => /save[.]sqlite$/.test(k)).join(' ')); }; })"],
+	["nav", "${URL}"],
+	["waitlog", "hillclimb: this client's car is [0-9]", 120]
 ]

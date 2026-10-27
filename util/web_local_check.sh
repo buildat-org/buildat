@@ -57,6 +57,10 @@ grep -a "server: .*network: .*ticks/s" "$page" | tail -3 | cut -c 9-
 grep -a "frame split" "$page" | tail -2 | cut -c 1-120
 grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
 grep -q "Connect succeeded (page:)" "$page" || fail "the client did not join by the page's stream"
+grep -a "IndexedDB\|would not open\|cannot be opened\|malformed" "$page" &&
+	fail "a /user sync or a save failed"
+grep -q "kept: .*/ranking/save.sqlite" "$t/drive.log" ||
+	fail "IndexedDB has no ranking save"
 echo "the drive: $(awk -v a="$start" -v b="$end" 'BEGIN{printf "%.1f", b - a}') s"
 
 # The buildat server's serving: a game of its own, and web/ as it is
