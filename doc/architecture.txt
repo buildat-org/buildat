@@ -137,6 +137,9 @@ choice, not a rewrite.
   files, and threads only where the page has them; accounts is a local
   single player, the admin. The page's download and memory grow by a
   server. The native client starts a local server for this instead.
+  hillclimb, demo_aggregate and skeldat ship so in the Linux archives;
+  a page with no game (play.buildat.org's) offers them in its launch
+  menu, at /?local=<app>.
 - A small game whose rules all fit in wasm/ and Lua (a board game, an
   arcade game, a puzzle): a serverless release (aitta.txt), with no
   server at all. The page stays light, but the game has to be made that
@@ -329,6 +332,7 @@ The supported ones, kept from version to version as an option is:
 - BUILDAT_LUANTI_*: builtin/luanti's own (luanti_module.txt).
 
 Buildat sets BUILDAT_OWNER_TOKEN, BUILDAT_RUN, BUILDAT_OPEN,
-BUILDAT_PAGE_HTTPS and BUILDAT_TOUCH for its own processes. Every other
+BUILDAT_PAGE_HTTPS, BUILDAT_TOUCH and BUILDAT_WEB_LOCAL_APPS for its own
+processes. Every other
 BUILDAT_* a source reads is a check's or a developer's knob, which a
 release may change or drop without a word.
