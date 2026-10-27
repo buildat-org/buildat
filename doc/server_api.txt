@@ -462,6 +462,17 @@ into atlases per size; add_segment / find_or_add_segment
 AtlasSegmentReference, get_atlas_cache / get_texture, set_surface_maps(bool) (the normal and
 surface maps beside the diffuse, or not), describe_segments, update().
 
+interface/wasm_api.h -- what a module's wasm/ (C or C++) is written
+against ([CLIENT_WASM]): the server builds wasm/ with clang to a .wasm as
+it loads the module (cached by the sources' hash; the module refused when
+there is no clang and wasm linker), client_data serves it as
+<module>/<module>.wasm, and a client loads it with buildat.wasm_load()
+(client_api.txt). BUILDAT_WASM_EXPORT marks a function Lua may call;
+buildat_log(text, len) writes a line in the client's log. Nothing else
+yet. The server looks for the tools at its start: BUILDAT_WASM_CC and
+BUILDAT_WASM_LD, then clang and wasm-ld in PATH, then emsdk's and
+rustup's rust-lld.
+
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,
 use_skylight, translucent_result, masked_result, horizon) makes
@@ -781,7 +792,7 @@ interface/protocol.h: protocol_features, Hello, own, serialize, r, hello_data, o
 interface/record.h: RecordError, end, left, buf, byte, header, length
 interface/select_handler.h: SelectHandler, fd_open, bad_fd_error, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
-interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
+interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, get_module_wasm_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
 interface/server_config.h: ServerConfig, launch_param, launch_param_self_check
 interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex, unhex, is_hex, hmac
@@ -795,6 +806,7 @@ interface/voxel_cereal_legacy.h: In, read_vector, read
 interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result, stands, settle, find, self_test
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
+interface/wasm_api.h: buildat_log
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write
 ---- end of the generated listing ----

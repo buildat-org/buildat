@@ -10,6 +10,7 @@
 #include "server/config.h"
 #include "server/state.h"
 #include "server/confine.h"
+#include "server/wasm_build.h"
 #include "interface/server.h"
 #include "interface/debug.h"
 #include "interface/os.h"
@@ -487,6 +488,9 @@ int main(int argc, char *argv[])
 
 	// [COMPILE_SLOTS] Opened where /tmp still is, before the box
 	server::open_compile_slots();
+	// [CLIENT_WASM] Looked for before the box, which is given their
+	// directories to read
+	server::find_wasm_toolchain(config);
 	// [PROCESS_SANDBOX]: the box, before anything of the app is loaded.
 	// Where it cannot be made the server refuses to start (decided
 	// 2026-10-02), and says how to start it anyway.

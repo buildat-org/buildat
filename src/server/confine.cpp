@@ -442,7 +442,14 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 			config.get<ss_>("interface_path"), config.get<ss_>("urho3d_path"),
 			config.get<ss_>("web_client_path"), module_path,
 			interface::fs::strip_file_name(
-				config.get<ss_>("compiler_command"))})
+				config.get<ss_>("compiler_command")),
+			// [CLIENT_WASM] clang and the wasm linker, which may be emsdk's
+			// or rustup's under the home directory: the directory above
+			// bin/, where clang's own headers are
+			interface::fs::strip_file_name(interface::fs::strip_file_name(
+				config.get<ss_>("wasm_cc"))),
+			interface::fs::strip_file_name(interface::fs::strip_file_name(
+				config.get<ss_>("wasm_ld")))})
 		if(!p.empty())
 			rs.add_around(p, holes, FS_READ);
 	// The app's own, and what the other apps share, read only

@@ -8,6 +8,7 @@
 #include "core/log.h"
 #include "rccpp.h"
 #include "rccpp_util.h"
+#include "wasm_build.h"
 #include "static_modules.h"
 #include "config.h"
 #include "interface/module.h"
@@ -757,6 +758,8 @@ struct CState: public State, public interface::Server
 	interface::Mutex m_shutdown_mutex;
 
 	up_<rccpp::Compiler> m_compiler;
+	// [CLIENT_WASM] module name -> its built .wasm
+	sm_<ss_, ss_> m_module_wasm;
 	ss_ m_modules_path;
 
 	// Thread-local pointer to ModuleContainer of the module of each module
@@ -1256,6 +1259,16 @@ struct CState: public State, public interface::Server
 
 			m_module_info[info.name] = info;
 
+			// [CLIENT_WASM] The client's half of wasm/, built first: a module
+			// whose wasm/ does not build is refused before it starts
+			if(interface::fs::path_exists(info.path+"/wasm")){
+				const ss_ wasm = build_module_wasm(g_server_config, info.name,
+						info.path);
+				if(wasm.empty())
+					return false;
+				m_module_wasm[info.name] = wasm;
+			}
+
 			if(!info.meta.disable_cpp){
 				m = build_module_u(info);
 
@@ -1652,6 +1665,13 @@ struct CState: public State, public interface::Server
 	ss_ get_builtin_modules_path()
 	{
 		return g_server_config.get<ss_>("share_path")+"/builtin";
+	}
+
+	ss_ get_module_wasm_path(const ss_ &module_name)
+	{
+		interface::MutexScope ms(m_modules_mutex);
+		auto it = m_module_wasm.find(module_name);
+		return it == m_module_wasm.end() ? ss_() : it->second;
 	}
 
 	ss_ get_module_path(const ss_ &module_name)

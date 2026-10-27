@@ -33,6 +33,10 @@ Config::Config()
 	set_default("user_path", "");
 	set_default("urho3d_path", "");
 	set_default("compiler_command", "");
+	// [CLIENT_WASM] What builds a module's wasm/; server::find_wasm_toolchain()
+	set_default("wasm_cc", "");
+	set_default("wasm_ld", "");
+	set_default("wasm_tried", "");
 	set_default("network_address", "any");
 	set_default("network_port", "29500");
 	// The launcher's token for its own client, from BUILDAT_OWNER_TOKEN;

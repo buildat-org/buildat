@@ -869,6 +869,36 @@ buildat.safe.is_scripted() -> bool
 buildat.safe.get_file_content(name) -> bytes or nil
 - The bytes of a file the server served ([BLOCKED_MODULE]). The sandbox
   already runs a served file as code, so reading one's bytes is no wider.
+buildat.safe.wasm_load(module) -> m, or nil and why
+- A module's wasm/ ([CLIENT_WASM]): C or C++ against interface/wasm_api.h,
+  which the server builds with clang to a .wasm at its start and serves as
+  <module>/<module>.wasm. Each load is an instance of its own with its own
+  memory. Before anything runs it is validated and capped, on both clients
+  alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
+  at most 1024 pages (64 MiB), the log the only import; an export
+  takes and returns i32, i64, f32 and f64 only (at most 16 of them, one
+  result). Natively it is then translated to C (wasm2c) and compiled by
+  the system's compiler in a process of its own, killed past 3 minutes or
+  2 GiB, the first time only: the result is cached in <cache>/wasm2c/.
+  On the web the browser instantiates it at once.
+- m:status() -> "loading" | "ready" | "failed", why. A native first load
+  is "loading" while it compiles; ask again on a later frame.
+- m:call(export, numbers...) -> its result (an i32 read as signed), or
+  nothing. The numbers are the export's parameters, as many as it has;
+  an integer parameter takes an integral number in its range (i64
+  exactly up to 2^53). A trap (an access past its memory, a division by
+  zero, a recursion deeper than 2000 calls natively or the browser's
+  limit on the web) is a Lua error, and the module can be called again
+  after it.
+- m:read(ptr, len) -> bytes; m:write(ptr, bytes): copies between Lua and
+  its memory. A range past its memory is an error. A buffer is passed by
+  writing it where the module says (an export that returns a pointer) and
+  calling with the pointer and the length.
+- The module logs with buildat_log(text, len), a line in the client's log
+  under its name. Nothing else of the client is reachable from it yet.
+- simplified: no Windows client yet (wasm_load says so), and no time
+  limit on a call: an endless loop freezes the client (the metering is
+  [CLIENT_WASM]'s step 3).
 
 buildat.Vector3(x, y, z) / buildat.Vector3(v) -> {x, y, z}
 buildat.Vector2(x, y) / buildat.Vector2(v) -> {x, y}

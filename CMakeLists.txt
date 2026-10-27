@@ -357,6 +357,10 @@ add_subdirectory("3rdparty/qrcodegen")
 add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/md4c")
 add_subdirectory("3rdparty/luabind-deboostified")
+# [CLIENT_WASM] the validator and wasm2c, for the client
+if(BUILD_CLIENT)
+	add_subdirectory("3rdparty/wabt")
+endif()
 
 include_directories("src")
 include_directories("3rdparty/cereal/include")
@@ -571,7 +575,12 @@ if(BUILD_CLIENT)
 		src/lua_bindings/compress.cpp
 		src/lua_bindings/replicate.cpp
 		src/lua_bindings/synth.cpp
+		src/lua_bindings/wasm.cpp
 	)
+	# [CLIENT_WASM] wasm2c's runtime, linked in whole on Linux
+	if(TARGET wasm_rt)
+		list(APPEND CLIENT_SRCS $<TARGET_OBJECTS:wasm_rt>)
+	endif()
 
 	if(WIN32)
 		list(APPEND CLIENT_SRCS ${BUILDAT_RC})
@@ -580,6 +589,9 @@ if(BUILD_CLIENT)
 	# multiply-add where the source has a multiply and an add
 	set_source_files_properties(src/lua_bindings/synth.cpp PROPERTIES
 			COMPILE_OPTIONS "-ffp-contract=off")
+	# [CLIENT_WASM] WABT's headers are C++20
+	set_source_files_properties(src/lua_bindings/wasm.cpp PROPERTIES
+			COMPILE_OPTIONS "-std=c++20")
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 	# A GUI executable on Windows ([WIN8_START] 19): no console window,
 	# whose synchronous writes made the client pay a console write per
@@ -600,11 +612,21 @@ if(BUILD_CLIENT)
 		zstd
 		mbedtls
 		qrcodegen
+		wabt
 		luabind
 		Urho3D
 		${URHO3D_TOLUA_LIBRARY}
 		${LUA_LIBRARY}
 	)
+	# [CLIENT_WASM] The modules the client builds call the runtime in it
+	if(TARGET wasm_rt)
+		target_include_directories(${CLIENT_EXE_NAME} PRIVATE
+			${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm2c)
+		target_compile_definitions(${CLIENT_EXE_NAME} PRIVATE
+			WASM_RT_SKIP_SIGNAL_RECOVERY=1 WASM_RT_STACK_DEPTH_COUNT=1)
+		target_link_options(${CLIENT_EXE_NAME} PRIVATE
+			-Wl,--dynamic-list=${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm_rt.dynlist)
+	endif()
 	#if(NOT WIN32)
 	#	target_link_libraries(${CLIENT_EXE_NAME}
 	#		${LUA_LIBRARY}
@@ -683,6 +705,7 @@ if(BUILD_SERVER)
 		src/server/rccpp_util.cpp
 		src/server/confine.cpp
 		src/server/confine_windows.cpp
+		src/server/wasm_build.cpp
 	)
 	if(WIN32)
 		list(APPEND SERVER_SRCS ${BUILDAT_RC})

@@ -2307,6 +2307,28 @@ buildat.safe.get_file_content = function(name)
 	end
 	return __buildat_get_file_content(name)
 end
+-- [CLIENT_WASM] A module's wasm/, which the server built and serves as
+-- <module>/<module>.wasm: wasm_load(module) -> the loaded module, or nil
+-- and why. It is validated and capped first; natively it is then compiled
+-- (in the background, the first time; m:status() says when it is ready),
+-- on the web the browser instantiates it. Each load is an instance of its
+-- own, with its own memory. What the module object has:
+--   m:status() -> "loading" | "ready" | "failed", why
+--   m:call(export, numbers...) -> its one number, or nothing; a trap is a
+--     Lua error
+--   m:read(ptr, len) -> the bytes of its memory there, copied
+--   m:write(ptr, bytes): copied into its memory at ptr
+-- A pointer and a length past its memory are an error, not a read.
+buildat.safe.wasm_load = function(module)
+	if type(module) ~= "string" or not module:match("^[%w_]+$") then
+		return nil, "wasm_load(module): a module's name"
+	end
+	local bytes = __buildat_get_file_content(module.."/"..module..".wasm")
+	if not bytes then
+		return nil, "the server serves no wasm for "..module
+	end
+	return __buildat_wasm_load(module, bytes)
+end
 buildat.safe.get_ui_scale  = __buildat_get_ui_scale
 buildat.safe.logical_size  = __buildat_logical_size
 -- keyboard_height() -> the on-screen keyboard's height in UI pixels, 0 with

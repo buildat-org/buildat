@@ -80,6 +80,16 @@ struct Module: public interface::Module
 		ss_ client_data_path = module_path+"/client_data";
 		sv_<ss_> names;
 		collect_files(client_data_path, "", names);
+		// [CLIENT_WASM] The module's built wasm/, as <module>/<module>.wasm,
+		// which buildat.wasm_load(<module>) reads on the client
+		const ss_ wasm = m_server->get_module_wasm_path(module_name);
+		if(!wasm.empty()){
+			log_i(MODULE, "client_data: %s: %s.wasm", cs(module_name),
+					cs(module_name));
+			client_file::access(m_server, [&](client_file::Interface *i){
+				i->add_file_path(module_name+"/"+module_name+".wasm", wasm);
+			});
+		}
 		if(names.empty())
 			return;
 

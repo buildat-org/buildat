@@ -23,6 +23,7 @@ extern void init_network(lua_State *L);
 extern void init_crypto(lua_State *L);
 extern void init_compress(lua_State *L);
 extern void init_synth(lua_State *L);
+extern void init_wasm(lua_State *L);
 
 void init(lua_State *L)
 {
@@ -43,6 +44,7 @@ void init(lua_State *L)
 	init_crypto(L);
 	init_compress(L);
 	init_synth(L);
+	init_wasm(L);
 }
 
 } // namespace lua_bindingss

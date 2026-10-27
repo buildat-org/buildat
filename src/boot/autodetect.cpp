@@ -520,6 +520,20 @@ static bool detect_compiler_bin_paths(core::Config &config)
 	return true;
 }
 
+// [CLIENT_WASM] The native client builds a wasm module's C with the same
+// compiler the server builds modules with, found the same way, whether or
+// not it starts a server
+ss_ find_compiler_command()
+{
+	core::Config config;
+	sv_<ss_> roots;
+	generate_compiler_binary_dir_alternatives(roots);
+	if(!detect_paths(config, roots, compiler_bin_paths,
+			"Compiler binary directory"))
+		return "";
+	return config.get<ss_>("compiler_command");
+}
+
 // Client-only paths
 
 PathDefinition client_paths[] = {
