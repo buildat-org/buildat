@@ -491,8 +491,31 @@ static uint64_t region_cost(const wabt::ExprList &l)
 	return n;
 }
 
+// [WASM_WEB_CALL_DEPTH] On the web the browser's own stack holds the
+// module's frames, and nothing counted them: a recursion ran until the
+// browser's RangeError, which may come inside the client's own code during
+// a binding (l_wasm_call()). There the module also keeps an estimate of
+// the browser's stack its frames take, the global exported as
+// buildat_stack (as the meter, after validation): at each call a function
+// makes, its own frame's estimate is added before and taken off after, and
+// past WEB_STACK_LIMIT the call traps. The client sets it to 0 before each
+// call. A frame is estimated at WEB_FRAME_BASE and 8 bytes a parameter or
+// local, which is what Chrome takes (measured: a recursion of no locals
+// stopped at 17696 frames, one of 242 at 494: about 970 KiB), so the limit
+// leaves some 330 KiB for the client below the call and a binding above
+// it (the deepest, 75 KiB natively).
+// simplified: values a function holds on its operand stack across a call
+// are not counted, nor the deepest frame's own (it makes no call); past
+// the estimate the browser's RangeError stops it, as before
+// ([WASM_WEB_IMPORT_DEPTH]). Natively wasm2c and WAMR count the depth.
+static const char STACK[] = "buildat_stack";
+static const int64_t WEB_FRAME_BASE = 48;
+static const int64_t WEB_STACK_LIMIT = 640 << 10;
+
 struct Meter {
 	wabt::Index global;
+	wabt::Index stack = ~0u; // buildat_stack's, on the web
+	int64_t frame = 0; // the function's frame, estimated as above
 	// The meter less (the i32 in local `scratch` >> BULK_SHIFT) when
 	// scratch is set, else less cost; then the trap if it is below zero
 	wabt::ExprList charge(uint64_t cost, wabt::Index scratch = ~0u)
@@ -541,6 +564,34 @@ struct Meter {
 				body.splice(body.begin(), c);
 				break;
 			}
+			case ExprType::Call:
+			case ExprType::CallIndirect: {
+				if(stack == ~0u)
+					break;
+				const Var g(stack, Location());
+				ExprList c;
+				c.push_back(std::make_unique<GlobalGetExpr>(g));
+				c.push_back(std::make_unique<ConstExpr>(Const::I64(frame)));
+				c.push_back(std::make_unique<BinaryExpr>(Opcode::I64Add));
+				c.push_back(std::make_unique<GlobalSetExpr>(g));
+				c.push_back(std::make_unique<GlobalGetExpr>(g));
+				c.push_back(std::make_unique<ConstExpr>(
+						Const::I64(WEB_STACK_LIMIT)));
+				c.push_back(std::make_unique<CompareExpr>(Opcode::I64GtS));
+				auto trap = std::make_unique<IfExpr>();
+				trap->true_.exprs.push_back(std::make_unique<UnreachableExpr>());
+				c.push_back(std::move(trap));
+				l.splice(it, c);
+				ExprList after;
+				after.push_back(std::make_unique<GlobalGetExpr>(g));
+				after.push_back(std::make_unique<ConstExpr>(Const::I64(frame)));
+				after.push_back(std::make_unique<BinaryExpr>(Opcode::I64Sub));
+				after.push_back(std::make_unique<GlobalSetExpr>(g));
+				auto next = it;
+				++next;
+				l.splice(next, after);
+				break;
+			}
 			case ExprType::MemoryFill:
 			case ExprType::MemoryCopy:
 			case ExprType::MemoryInit:
@@ -575,6 +626,21 @@ static bool meter_module(wabt::Module &m, bool &has_start, ss_ &why)
 {
 	using namespace wabt;
 	Meter meter;
+#ifdef __EMSCRIPTEN__
+	{
+		meter.stack = (Index)m.globals.size();
+		auto sg = std::make_unique<GlobalModuleField>();
+		sg->global.type = Type::I64;
+		sg->global.mutable_ = true;
+		sg->global.init_expr.push_back(std::make_unique<ConstExpr>(Const::I64(0)));
+		m.AppendField(std::move(sg));
+		auto se = std::make_unique<ExportModuleField>();
+		se->export_.name = STACK;
+		se->export_.kind = ExternalKind::Global;
+		se->export_.var = Var(meter.stack, Location());
+		m.AppendField(std::move(se));
+	}
+#endif
 	meter.global = (Index)m.globals.size();
 	auto g = std::make_unique<GlobalModuleField>();
 	g->global.type = Type::I64;
@@ -589,6 +655,7 @@ static bool meter_module(wabt::Module &m, bool &has_start, ss_ &why)
 	for(Index i = m.num_func_imports; i < m.funcs.size(); i++){
 		Func *f = m.funcs[i];
 		Index scratch = ~0u;
+		meter.frame = WEB_FRAME_BASE + 8 * (int64_t)f->GetNumParamsAndLocals();
 		meter.walk(f, f->exprs, scratch);
 		ExprList c = meter.charge(region_cost(f->exprs) + 1);
 		f->exprs.splice(f->exprs.begin(), c);
@@ -1808,10 +1875,11 @@ EM_JS(int, bw_call, (int id, const char *name, const double *args,
 		return 1;
 	}
 });
-// The meter (meter_module()): set to v if set, and read
-EM_JS(double, bw_meter, (int id, int set, double v), {
+// An i64 global of meter_module()'s, buildat_meter or buildat_stack: set
+// to v if set, and read
+EM_JS(double, bw_global, (int id, const char *name, int set, double v), {
 	var inst = Module.buildatWasm.list[id].inst;
-	var g = inst && inst.exports.buildat_meter;
+	var g = inst && inst.exports[UTF8ToString(name)];
 	if (!(g instanceof WebAssembly.Global)) return 0;
 	if (set) g.value = BigInt(v);
 	return Number(g.value);
@@ -2035,7 +2103,7 @@ struct Instance {
 #if BUILDAT_WASM_NATIVE
 		return meter ? *meter : 0;
 #elif defined(__EMSCRIPTEN__)
-		return (int64_t)bw_meter(web_id, 0, 0);
+		return (int64_t)bw_global(web_id, METER, 0, 0);
 #else
 		return 0;
 #endif
@@ -2046,7 +2114,7 @@ struct Instance {
 		if(meter)
 			*meter = v;
 #elif defined(__EMSCRIPTEN__)
-		bw_meter(web_id, 1, (double)v);
+		bw_global(web_id, METER, 1, (double)v);
 #endif
 	}
 
@@ -3362,11 +3430,16 @@ struct Instance {
 	}
 
 #ifdef __EMSCRIPTEN__
+	// The browser's error of a call that failed, or the stack counter's
+	// trap ([WASM_WEB_CALL_DEPTH])
 	ss_ take_error()
 	{
 		char *s = bw_take_error(web_id);
 		ss_ r = s ? s : "?";
 		free(s);
+		if(bw_global(web_id, STACK, 0, 0) > WEB_STACK_LIMIT)
+			return "call stack exhausted (past the web client's "+
+					itos((int)(WEB_STACK_LIMIT >> 10))+" KiB of frames, estimated)";
 		return r;
 	}
 #endif
@@ -3526,6 +3599,7 @@ static int l_wasm_load(lua_State *L)
 	if(has_start){
 		double unused = 0;
 		in->meter_set(BUDGET);
+		bw_global(in->web_id, STACK, 1, 0);
 		in->trap_reason.clear();
 		in->in_call = true;
 		if(bw_call(in->web_id, START, nullptr, "", 0, &unused) != 0)
@@ -3655,6 +3729,7 @@ static int l_call(lua_State *L)
 	}
 #elif defined(__EMSCRIPTEN__)
 	in->meter_set(BUDGET);
+	bw_global(in->web_id, STACK, 1, 0);
 	if(bw_call(in->web_id, sig.name.c_str(), plain, sig.params.c_str(),
 			n, &result) != 0)
 		trap = in->take_error();
