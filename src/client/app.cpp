@@ -1675,13 +1675,6 @@ struct CApp: public App, public magic::Application
 				g_client_config.get<ss_>("cache_path")+"/package_media");
 		sv_<ss_> resource_paths = {
 			g_client_config.get<ss_>("share_path")+"/client/data",
-			g_client_config.get<ss_>("cache_path")+"/tmp",
-			// The icons native servers sent ([LAUNCH_WORLD] (4)): a PNG a
-			// file, named by its sha256, checked before it was kept
-			g_client_config.get<ss_>("cache_path")+"/server_icons",
-			// Aitta releases' icons and screenshots ([PACKAGE_MEDIA]), the
-			// same: named by the hash, checked before kept
-			g_client_config.get<ss_>("cache_path")+"/package_media",
 			g_client_config.get<ss_>("share_path")+"/extensions", // Could be unsafe
 			// The launch grid's icons: <name>/launcher/<icon>.png and a
 			// game's icon.png, resolved by the menu on the trusted side
@@ -1690,6 +1683,16 @@ struct CApp: public App, public magic::Application
 			g_client_config.get<ss_>("share_path")+"/builtin",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/CoreData",
 			g_client_config.get<ss_>("urho3d_path")+"/bin/Data",
+			// The cache's dirs last: sandboxed code writes under the cache
+			// (compose_image), and a file it writes must not take the name
+			// of an installed one ([CACHE_TMP_SHADOWS])
+			g_client_config.get<ss_>("cache_path")+"/tmp",
+			// The icons native servers sent ([LAUNCH_WORLD] (4)): a PNG a
+			// file, named by its sha256, checked before it was kept
+			g_client_config.get<ss_>("cache_path")+"/server_icons",
+			// Aitta releases' icons and screenshots ([PACKAGE_MEDIA]), the
+			// same: named by the hash, checked before kept
+			g_client_config.get<ss_>("cache_path")+"/package_media",
 		};
 		ss_ resource_paths_s;
 		for(const ss_ &path : resource_paths){
