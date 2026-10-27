@@ -100,7 +100,12 @@ return function(module)
 	-- what kind, the class and the member its import names, and the values
 	-- (an object as the wrapper its handle holds; a Vector3, Color, ...
 	-- made by "value" first). Each is the sandbox's own call, with its
-	-- checks; an error is the module's trap.
+	-- checks; an error is the module's trap. A verb is called from this
+	-- frame, not tail-called (pass), so that a gate reading its caller's
+	-- frame finds this served file's.
+	local function pass(...)
+		return ...
+	end
 	m:bind(function(kind, class, member, ...)
 		if kind == "call" then
 			local self = ...
@@ -135,6 +140,21 @@ return function(module)
 			magic.SubscribeToEvent(object, event, function()
 				push(words({EV_OBJECT, handle, #event})..event)
 			end)
+		elseif kind == "subscribe_global" then
+			-- A global event, to the queue with handle 0
+			local event = ...
+			if type(event) ~= "string" or #event > 64 then
+				error("SubscribeToEvent(name): a name")
+			end
+			local name = magic.SubscribeToEvent(event, function()
+				push(words({EV_OBJECT, 0, #event})..event)
+			end)
+			return name
+		elseif kind == "safe" then
+			-- This file's buildat: a server's (its served overrides)
+			return pass(buildat[member](...))
+		elseif kind == "magic" then
+			return pass(magic[member](...))
 		else
 			error("no such call: "..tostring(kind))
 		end

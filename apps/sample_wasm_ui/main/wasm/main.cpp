@@ -20,6 +20,10 @@ static Button g_button;
 static Text g_label;
 static int g_clicks, g_colour;
 static float g_time;
+// The global Update subscription's name, and its events
+static char g_update_sub[64];
+static unsigned int g_update_sub_len;
+static int g_updates, g_updates_at_unsub = -1;
 
 // "<text><number>" into a buffer: its length
 static unsigned int with_n(char *buf, const char *text, int n)
@@ -151,11 +155,31 @@ static void on_start(const Event &e)
 	log_n("the camera is at y*10: ", (int)(p.y * 10 + 0.5f));
 	draw_cube();
 	build_ui();
+	const Str sub = SubscribeToEvent("Update");
+	for(unsigned int i = 0; i < sub.size && i < sizeof g_update_sub; i++)
+		g_update_sub[g_update_sub_len++] = sub.data[i];
 	log("drew a cube and a window");
+}
+
+// [CLIENT_WASM_BINDINGS] A global event (handle 0): Update, three of
+// them and unsubscribed
+static void on_global(const Event &e)
+{
+	if(e.name() != "Update")
+		return;
+	g_updates++;
+	if(g_updates == 3){
+		UnsubscribeFromEvent("Update", Str(g_update_sub, g_update_sub_len));
+		g_updates_at_unsub = g_updates;
+	}
 }
 
 static void on_object(const Event &e)
 {
+	if(e.word(1) == 0){
+		on_global(e);
+		return;
+	}
 	if((unsigned int)e.word(1) != g_button.handle() || e.name() != "Released")
 		return;
 	g_clicks++;
@@ -207,6 +231,8 @@ static const char *const ATTEMPTS[] = {
 	"values that do not parse",
 	"results past the buffer",
 	"a Node's handle as a table",
+	"an environment variable not BUILDAT_-prefixed",
+	"a global event not on the whitelist",
 };
 static const int ATTEMPT_COUNT = sizeof ATTEMPTS / sizeof ATTEMPTS[0];
 static int g_got_through;
@@ -269,6 +295,12 @@ static void refuse()
 		v = table_get(fake, "unsafe");
 		fake.release();
 		break; }
+	case 12: {
+		const Str home = get_env("HOME");
+		if(!home.size)
+			v = Value();
+		break; }
+	case 13: SubscribeToEvent("NotAnEvent"); break;
 	}
 	if(v.kind == Value::NIL || (v.kind == Value::BOOLEAN && !v.boolean)){
 		log("refusal: refused by its answer");
@@ -351,6 +383,29 @@ static void values_and_tables()
 	Table root = sk.rootBone().as<Table>();
 	log_str("rootBone: ", table_get(root, "name").string);
 	rigged.Remove();
+
+	// buildat.* and the magic table's own functions
+	const bool timed = get_time_us() > 0;
+	Values version_ = version();
+	const Str digest = hex(sha1("abc"));
+	log_str(timed && version_.v[0].kind == Value::STRING ?
+			"verbs: a time and a version, sha1(abc) " : "verbs: NO time or version ",
+			digest);
+	Values wrote = storage_write("wasm_ui_check", "stored 1");
+	log_str(wrote.v[0].boolean ? "storage: wrote, read back " :
+			"storage: NOT written, read back ", storage_read("wasm_ui_check"));
+	Table json = parse_json("{\"a\": [10, 20, 30]}").v[0].as<Table>();
+	log_n("parse_json: a has ", (int)table_len(table_get(json, "a").as<Table>()));
+	Texture2D shot = render_scene_to_texture(scene, g_camera, 64, 32);
+	const int fov[] = {(int)fov_for(60), shot.handle() ? (int)shot.width() : -1,
+			(int)viewport_generation() > 0};
+	log_ns("magic: fov_for(60), a texture's width, a viewport generation:",
+			fov, 3);
+	char buf[100];
+	unsigned int l = with_n(buf, "global Update: unsubscribed at ",
+			g_updates_at_unsub);
+	l += with_n(buf + l, ", more after: ", g_updates - g_updates_at_unsub);
+	log(Str(buf, l));
 }
 
 BUILDAT_WASM_EXPORT const char *packets(void)

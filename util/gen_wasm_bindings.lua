@@ -61,7 +61,96 @@ local VERBS = {
 	{kind = "table_get", name = "table_get", params = {"table", "any"}},
 	{kind = "table_len", name = "table_len", params = {"table"},
 			ret = {"number"}},
+	-- A global event (the sandbox's SubscribeToEvent(name, f), its
+	-- whitelist): each comes to the queue as BUILDAT_EVENT_OBJECT with
+	-- handle 0. The result is the subscription's name, which
+	-- UnsubscribeFromEvent takes.
+	{kind = "subscribe_global", name = "SubscribeToEvent", cname =
+			"SubscribeToGlobalEvent", params = {"string"}, ret = {"string"}},
 }
+
+-- buildat.* (client/api.lua's buildat.safe, as a server's code has them:
+-- its served buildat, __buildat_served_overrides): kind "safe", called by
+-- the dispatcher as buildat[name](...). The types are as the functions
+-- check them themselves (a wrong one is their refusal); a result typed
+-- "any" is a Value. simplified: the ones a C++ client has a use for that
+-- take and give numbers, strings and booleans: none that takes a Lua
+-- function or table (sub_packet, provide_launch_interface, declare_fov:
+-- no call into the module from Lua; the packets come by the queue), none
+-- of the launcher's verbs, dialogs or voxel classes (Volume is
+-- wasm_api.h's). Another is a line here.
+local N, S, B, A = "number", "string", "boolean", "any"
+local OPT_N = {"number", "__nil"}
+local SAFE_VERBS = {
+	{"get_time_us", {}, {N}},
+	{"get_local_time", {}, {N, N, N, N}},
+	{"version", {}, {S, S}},
+	{"has", {S}, {B}},
+	{"serverless", {}, {B}},
+	{"is_scripted", {}, {B}},
+	{"connected_locally", {}, {B}},
+	{"connection_encrypted", {}, {B}},
+	{"server_address", {}, {{S, "__nil"}}},
+	{"get_locale", {}, {S}},
+	{"get_env", {S}, {{S, "__nil"}}},
+	{"display_density", {}, {N}},
+	{"logical_size", {}, {N, N}},
+	{"keyboard_height", {}, {N}},
+	{"get_ui_scale", {}, {N}},
+	{"received", {}, {N, N}},
+	{"mesh_backlog", {}, {N}},
+	{"in_flight", {}, {{"table", "__nil"}}},
+	{"last_arrival", {}, {{"table", "__nil"}}},
+	{"take_packet_us", {}, {"table"}},
+	{"sha1", {S}, {S}},
+	{"sha256", {S}, {S}},
+	{"hex", {S}, {S}},
+	{"random_bytes", {N}, {S}},
+	{"compress", {S, S, OPT_N}, {A}},
+	{"decompress", {S, S}, {A, A}},
+	{"parse_json", {S}, {A, A}},
+	{"storage_read", {S}, {{S, "__nil"}}},
+	{"storage_write", {S, S}, {B, {S, "__nil"}}},
+	{"get_preference", {S}, {A}},
+}
+-- Each is there (a renamed one is an error here, not a trap at run time)
+local function source_of(paths)
+	local all = {}
+	for _, path in ipairs(paths) do
+		local f = assert(io.open(ROOT.."/"..path, "rb"))
+		table.insert(all, f:read("*a"))
+		f:close()
+	end
+	return table.concat(all, "\n")
+end
+local CLIENT_LUA = source_of({"client/api.lua", "client/init.lua",
+		"client/packet.lua", "client/sandbox.lua"})
+for _, v in ipairs(SAFE_VERBS) do
+	assert(CLIENT_LUA:find("\nbuildat%.safe%."..v[1].."%s*="),
+			"buildat.safe."..v[1].." is not in client/*.lua")
+	table.insert(VERBS, {kind = "safe", name = v[1], params = v[2], ret = v[3]})
+end
+-- The urho3d extension's own functions (client/core/urho3d/init.lua's
+-- Safe.*, the magic table), kind "magic", as magic[name](...).
+-- set_preferred_viewports is left out: it takes a table, and the default
+-- client_main sets the module's viewport
+local MAGIC_VERBS = {
+	{"UnsubscribeFromEvent", {S, S}, {}},
+	{"render_scene_to_texture", {"Scene", "Node", N, N}, {"Texture2D"}},
+	{"image_set_data", {"Image", N, N, N, S}, {}},
+	{"image_load_data", {"Image", S, OPT_N}, {A}},
+	{"viewport_generation", {}, {N}},
+	{"fov_for", {N}, {N}},
+	{"keep_fov", {"Camera", N}, {}},
+}
+local URHO3D_LUA = source_of({"client/core/urho3d/init.lua"})
+for _, v in ipairs(MAGIC_VERBS) do
+	assert(URHO3D_LUA:find("\nSafe%."..v[1].."%s*=") or
+			URHO3D_LUA:find("\nfunction Safe%."..v[1].."%("),
+			"Safe."..v[1].." is not in client/core/urho3d/init.lua")
+	table.insert(VERBS, {kind = "magic", prefix = "magic", name = v[1],
+			params = v[2], ret = v[3]})
+end
 
 --
 -- The list, as safe_classes.lua defines it
@@ -428,9 +517,9 @@ end
 for _, v in ipairs(VERBS) do
 	local params = assert(params_of(v.params, v.name))
 	local ret = rets_of(v.ret)
-	table.insert(calls, {import = "buildat."..v.name..sig(params, 1)..
-			ret_sig(ret), kind = v.kind, class = "", member = v.name,
-			params = params, ret = ret})
+	table.insert(calls, {import = (v.prefix or "buildat").."."..v.name..
+			sig(params, 1)..ret_sig(ret), kind = v.kind, class = "",
+			member = v.name, params = params, ret = ret, cname = v.cname})
 end
 -- One import is one call
 local seen = {}
@@ -482,7 +571,7 @@ for _, c in ipairs(calls) do
 	elseif c.kind == "global" then
 		base = "global_"..c.member
 	else
-		base = "verb_"..c.member
+		base = "verb_"..(c.cname or c.member)
 	end
 	c.c_name = "buildat_c_"..base:gsub("[^%w_]", "_")
 end

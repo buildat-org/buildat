@@ -1131,6 +1131,44 @@ BUILDAT_CLIENT_IMPORT("buildat.SubscribeToEvent(UIElement|Node|Component,string)
 BUILDAT_CLIENT_IMPORT("buildat.constant(string):number|string", buildat_c_verb_constant)
 BUILDAT_CLIENT_IMPORT("buildat.table_get(table,any):any", buildat_c_verb_table_get)
 BUILDAT_CLIENT_IMPORT("buildat.table_len(table):number", buildat_c_verb_table_len)
+BUILDAT_CLIENT_IMPORT("buildat.SubscribeToEvent(string):string", buildat_c_verb_SubscribeToGlobalEvent)
+BUILDAT_CLIENT_IMPORT("buildat.get_time_us():number", buildat_c_verb_get_time_us)
+BUILDAT_CLIENT_IMPORT("buildat.get_local_time():number,number,number,number", buildat_c_verb_get_local_time)
+BUILDAT_CLIENT_IMPORT("buildat.version():string,string", buildat_c_verb_version)
+BUILDAT_CLIENT_IMPORT("buildat.has(string):boolean", buildat_c_verb_has)
+BUILDAT_CLIENT_IMPORT("buildat.serverless():boolean", buildat_c_verb_serverless)
+BUILDAT_CLIENT_IMPORT("buildat.is_scripted():boolean", buildat_c_verb_is_scripted)
+BUILDAT_CLIENT_IMPORT("buildat.connected_locally():boolean", buildat_c_verb_connected_locally)
+BUILDAT_CLIENT_IMPORT("buildat.connection_encrypted():boolean", buildat_c_verb_connection_encrypted)
+BUILDAT_CLIENT_IMPORT("buildat.server_address():string?", buildat_c_verb_server_address)
+BUILDAT_CLIENT_IMPORT("buildat.get_locale():string", buildat_c_verb_get_locale)
+BUILDAT_CLIENT_IMPORT("buildat.get_env(string):string?", buildat_c_verb_get_env)
+BUILDAT_CLIENT_IMPORT("buildat.display_density():number", buildat_c_verb_display_density)
+BUILDAT_CLIENT_IMPORT("buildat.logical_size():number,number", buildat_c_verb_logical_size)
+BUILDAT_CLIENT_IMPORT("buildat.keyboard_height():number", buildat_c_verb_keyboard_height)
+BUILDAT_CLIENT_IMPORT("buildat.get_ui_scale():number", buildat_c_verb_get_ui_scale)
+BUILDAT_CLIENT_IMPORT("buildat.received():number,number", buildat_c_verb_received)
+BUILDAT_CLIENT_IMPORT("buildat.mesh_backlog():number", buildat_c_verb_mesh_backlog)
+BUILDAT_CLIENT_IMPORT("buildat.in_flight():table?", buildat_c_verb_in_flight)
+BUILDAT_CLIENT_IMPORT("buildat.last_arrival():table?", buildat_c_verb_last_arrival)
+BUILDAT_CLIENT_IMPORT("buildat.take_packet_us():table", buildat_c_verb_take_packet_us)
+BUILDAT_CLIENT_IMPORT("buildat.sha1(string):string", buildat_c_verb_sha1)
+BUILDAT_CLIENT_IMPORT("buildat.sha256(string):string", buildat_c_verb_sha256)
+BUILDAT_CLIENT_IMPORT("buildat.hex(string):string", buildat_c_verb_hex)
+BUILDAT_CLIENT_IMPORT("buildat.random_bytes(number):string", buildat_c_verb_random_bytes)
+BUILDAT_CLIENT_IMPORT("buildat.compress(string,string,number?):any", buildat_c_verb_compress)
+BUILDAT_CLIENT_IMPORT("buildat.decompress(string,string):any,any", buildat_c_verb_decompress)
+BUILDAT_CLIENT_IMPORT("buildat.parse_json(string):any,any", buildat_c_verb_parse_json)
+BUILDAT_CLIENT_IMPORT("buildat.storage_read(string):string?", buildat_c_verb_storage_read)
+BUILDAT_CLIENT_IMPORT("buildat.storage_write(string,string):boolean,string?", buildat_c_verb_storage_write)
+BUILDAT_CLIENT_IMPORT("buildat.get_preference(string):any", buildat_c_verb_get_preference)
+BUILDAT_CLIENT_IMPORT("magic.UnsubscribeFromEvent(string,string)", buildat_c_verb_UnsubscribeFromEvent)
+BUILDAT_CLIENT_IMPORT("magic.render_scene_to_texture(Scene,Node,number,number):Texture2D", buildat_c_verb_render_scene_to_texture)
+BUILDAT_CLIENT_IMPORT("magic.image_set_data(Image,number,number,number,string)", buildat_c_verb_image_set_data)
+BUILDAT_CLIENT_IMPORT("magic.image_load_data(Image,string,number?):any", buildat_c_verb_image_load_data)
+BUILDAT_CLIENT_IMPORT("magic.viewport_generation():number", buildat_c_verb_viewport_generation)
+BUILDAT_CLIENT_IMPORT("magic.fov_for(number):number", buildat_c_verb_fov_for)
+BUILDAT_CLIENT_IMPORT("magic.keep_fov(Camera,number)", buildat_c_verb_keep_fov)
 
 #ifdef __cplusplus
 #ifdef BUILDAT_WASM_MODULE
@@ -4456,6 +4494,84 @@ void SubscribeToEvent(const ::buildat::Component & a1, ::buildat::Str a2);
 ::buildat::Value table_get(const ::buildat::Table & a1, const ::buildat::Any & a2);
 // buildat.table_len(table):number
 double table_len(const ::buildat::Table & a1);
+// buildat.SubscribeToEvent(string):string
+::buildat::Str SubscribeToEvent(::buildat::Str a1);
+// buildat.get_time_us():number
+double get_time_us();
+// buildat.get_local_time():number,number,number,number
+::buildat::Values get_local_time();
+// buildat.version():string,string
+::buildat::Values version();
+// buildat.has(string):boolean
+bool has(::buildat::Str a1);
+// buildat.serverless():boolean
+bool serverless();
+// buildat.is_scripted():boolean
+bool is_scripted();
+// buildat.connected_locally():boolean
+bool connected_locally();
+// buildat.connection_encrypted():boolean
+bool connection_encrypted();
+// buildat.server_address():string?
+::buildat::Str server_address();
+// buildat.get_locale():string
+::buildat::Str get_locale();
+// buildat.get_env(string):string?
+::buildat::Str get_env(::buildat::Str a1);
+// buildat.display_density():number
+double display_density();
+// buildat.logical_size():number,number
+::buildat::Values logical_size();
+// buildat.keyboard_height():number
+double keyboard_height();
+// buildat.get_ui_scale():number
+double get_ui_scale();
+// buildat.received():number,number
+::buildat::Values received();
+// buildat.mesh_backlog():number
+double mesh_backlog();
+// buildat.in_flight():table?
+::buildat::Table in_flight();
+// buildat.last_arrival():table?
+::buildat::Table last_arrival();
+// buildat.take_packet_us():table
+::buildat::Table take_packet_us();
+// buildat.sha1(string):string
+::buildat::Str sha1(::buildat::Str a1);
+// buildat.sha256(string):string
+::buildat::Str sha256(::buildat::Str a1);
+// buildat.hex(string):string
+::buildat::Str hex(::buildat::Str a1);
+// buildat.random_bytes(number):string
+::buildat::Str random_bytes(double a1);
+// buildat.compress(string,string,number?):any
+::buildat::Value compress(::buildat::Str a1, ::buildat::Str a2);
+::buildat::Value compress(::buildat::Str a1, ::buildat::Str a2, double a3);
+// buildat.decompress(string,string):any,any
+::buildat::Values decompress(::buildat::Str a1, ::buildat::Str a2);
+// buildat.parse_json(string):any,any
+::buildat::Values parse_json(::buildat::Str a1);
+// buildat.storage_read(string):string?
+::buildat::Str storage_read(::buildat::Str a1);
+// buildat.storage_write(string,string):boolean,string?
+::buildat::Values storage_write(::buildat::Str a1, ::buildat::Str a2);
+// buildat.get_preference(string):any
+::buildat::Value get_preference(::buildat::Str a1);
+// magic.UnsubscribeFromEvent(string,string)
+void UnsubscribeFromEvent(::buildat::Str a1, ::buildat::Str a2);
+// magic.render_scene_to_texture(Scene,Node,number,number):Texture2D
+::buildat::Texture2D render_scene_to_texture(const ::buildat::Scene & a1, const ::buildat::Node & a2, double a3, double a4);
+// magic.image_set_data(Image,number,number,number,string)
+void image_set_data(const ::buildat::Image & a1, double a2, double a3, double a4, ::buildat::Str a5);
+// magic.image_load_data(Image,string,number?):any
+::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2);
+::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2, double a3);
+// magic.viewport_generation():number
+double viewport_generation();
+// magic.fov_for(number):number
+double fov_for(double a1);
+// magic.keep_fov(Camera,number)
+void keep_fov(const ::buildat::Camera & a1, double a2);
 
 inline ::buildat::StringHash StringHash::make(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_StringHash_new, a1); return ::buildat::StringHash(r.handle()); }
 inline ::buildat::VectorBuffer VectorBuffer::new_(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_VectorBuffer_static_new); return ::buildat::VectorBuffer(r.handle()); }
@@ -5646,6 +5762,46 @@ inline void SubscribeToEvent(const ::buildat::Component & a1, ::buildat::Str a2)
 inline ::buildat::Value constant(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_constant, a1); return r.value(); }
 inline ::buildat::Value table_get(const ::buildat::Table & a1, const ::buildat::Any & a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_table_get, a1, a2); return r.value(); }
 inline double table_len(const ::buildat::Table & a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_table_len, a1); return r.number(); }
+inline ::buildat::Str SubscribeToEvent(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_SubscribeToGlobalEvent, a1); return r.string(); }
+inline double get_time_us(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_time_us); return r.number(); }
+inline ::buildat::Values get_local_time(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_local_time); return r.values(); }
+inline ::buildat::Values version(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_version); return r.values(); }
+inline bool has(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_has, a1); return r.boolean(); }
+inline bool serverless(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_serverless); return r.boolean(); }
+inline bool is_scripted(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_is_scripted); return r.boolean(); }
+inline bool connected_locally(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_connected_locally); return r.boolean(); }
+inline bool connection_encrypted(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_connection_encrypted); return r.boolean(); }
+inline ::buildat::Str server_address(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_server_address); return r.string(); }
+inline ::buildat::Str get_locale(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_locale); return r.string(); }
+inline ::buildat::Str get_env(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_env, a1); return r.string(); }
+inline double display_density(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_display_density); return r.number(); }
+inline ::buildat::Values logical_size(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_logical_size); return r.values(); }
+inline double keyboard_height(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_keyboard_height); return r.number(); }
+inline double get_ui_scale(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_ui_scale); return r.number(); }
+inline ::buildat::Values received(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_received); return r.values(); }
+inline double mesh_backlog(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_mesh_backlog); return r.number(); }
+inline ::buildat::Table in_flight(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_in_flight); return ::buildat::Table(r.handle()); }
+inline ::buildat::Table last_arrival(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_last_arrival); return ::buildat::Table(r.handle()); }
+inline ::buildat::Table take_packet_us(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_take_packet_us); return ::buildat::Table(r.handle()); }
+inline ::buildat::Str sha1(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_sha1, a1); return r.string(); }
+inline ::buildat::Str sha256(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_sha256, a1); return r.string(); }
+inline ::buildat::Str hex(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_hex, a1); return r.string(); }
+inline ::buildat::Str random_bytes(double a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_random_bytes, a1); return r.string(); }
+inline ::buildat::Value compress(::buildat::Str a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_compress, a1, a2); return r.value(); }
+inline ::buildat::Value compress(::buildat::Str a1, ::buildat::Str a2, double a3){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_compress, a1, a2, a3); return r.value(); }
+inline ::buildat::Values decompress(::buildat::Str a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_decompress, a1, a2); return r.values(); }
+inline ::buildat::Values parse_json(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_parse_json, a1); return r.values(); }
+inline ::buildat::Str storage_read(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_storage_read, a1); return r.string(); }
+inline ::buildat::Values storage_write(::buildat::Str a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_storage_write, a1, a2); return r.values(); }
+inline ::buildat::Value get_preference(::buildat::Str a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_get_preference, a1); return r.value(); }
+inline void UnsubscribeFromEvent(::buildat::Str a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_UnsubscribeFromEvent, a1, a2); (void)r; }
+inline ::buildat::Texture2D render_scene_to_texture(const ::buildat::Scene & a1, const ::buildat::Node & a2, double a3, double a4){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_render_scene_to_texture, a1, a2, a3, a4); return ::buildat::Texture2D(r.handle()); }
+inline void image_set_data(const ::buildat::Image & a1, double a2, double a3, double a4, ::buildat::Str a5){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_set_data, a1, a2, a3, a4, a5); (void)r; }
+inline ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_load_data, a1, a2); return r.value(); }
+inline ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2, double a3){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_load_data, a1, a2, a3); return r.value(); }
+inline double viewport_generation(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_viewport_generation); return r.number(); }
+inline double fov_for(double a1){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_fov_for, a1); return r.number(); }
+inline void keep_fov(const ::buildat::Camera & a1, double a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_keep_fov, a1, a2); (void)r; }
 
 } // namespace buildat
 #endif // __cplusplus

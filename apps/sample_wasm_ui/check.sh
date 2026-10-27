@@ -9,7 +9,9 @@
 # cube and sends "main:key". Two screenshots: the cube orange, then green.
 # A value's methods, Matrix4's constructor, and the calls that return a
 # table (Octree:GetDrawables, Skeleton:GetBone, Skeleton.rootBone) read
-# by table_get. Then the C++ twin of extensions/sandbox_test's refusals
+# by table_get. buildat.* verbs (time, version, sha1, storage, parse_json),
+# the magic table's (fov_for, render_scene_to_texture), a global event
+# subscribed and unsubscribed. Then the C++ twin of extensions/sandbox_test's refusals
 # for the calls the bindings cover (main/wasm/main.cpp's refuse()), each a
 # trap with its reason; and two modules refused at the load, one importing a call the
 # list does not name (unlisted/), one a call of it with another signature
@@ -89,7 +91,7 @@ client_lines()
 			"wasm main: the server answered echo: click 1" \
 			"wasm main: space: the colour is now 1" \
 			"wasm main: the server answered echo: key 1" \
-			"wasm main: refusals: tried 12, got through: 0" \
+			"wasm main: refusals: tried 14, got through: 0" \
 			"wasm main: values: 5 1 90 3 10" \
 			"wasm main: matrix4: 5 6 7 1" \
 			"wasm main: GetDrawables: the cube's node among " \
@@ -97,6 +99,11 @@ client_lines()
 			"wasm main: GetBone(1): Bip01_Footsteps" \
 			"wasm main: GetBone(1)'s node: Bip01_Footsteps" \
 			"wasm main: rootBone: Bip01" \
+			"wasm main: verbs: a time and a version, sha1(abc) a9993e364706816aba3e25717850c26c9cd0d89d" \
+			"wasm main: storage: wrote, read back stored 1" \
+			"wasm main: parse_json: a has 3" \
+			"wasm main: magic: fov_for(60), a texture's width, a viewport generation: 60 64 1" \
+			"trap: buildat.buildat.SubscribeToEvent(string):string: " \
 			"trap: buildat.UI.scale=any: " \
 			"UI.scale is read-only" \
 			"trap: buildat.UIElement:SetStyleAuto(): not called on a UIElement" \
@@ -112,8 +119,10 @@ client_lines()
 			"wasm wrong_sig: refused: imports \"buildat.Node.position:Vector3\", which is not one of"; do
 		grep -aqF "$want" "$log" || fail "no \"$want\" in $log"
 	done
-	[ "$(grep -ac "wasm main: refusal: refused by its answer" "$log")" -eq 3 ] ||
-		fail "not the cache's three refused by their answers ($log)"
+	[ "$(grep -ac "wasm main: refusal: refused by its answer" "$log")" -eq 4 ] ||
+		fail "not the four refused by their answers, the cache's and get_env's ($log)"
+	grep -aqE "wasm main: global Update: unsubscribed at 3, more after: [01]$" "$log" ||
+		fail "the global Update not unsubscribed after 3 ($log)"
 	grep -a "GOT THROUGH" "$log" && fail "a refusal got through ($log)"
 	grep -aq "presses 2" "$log" && fail "one click read as two ($log)"
 	return 0
@@ -198,6 +207,9 @@ EOF
 			-s localhost:$SERVER_PORT -w 640x480 -l 3 -c @"$t/cmds$n.txt"
 	kill -INT "$SERVER_PID" 2>/dev/null
 	wait "$SERVER_PID" 2>/dev/null
+	# The module's storage_write, kept per server address: removed
+	rm -f "$BUILDAT_USER_PATH/servers/localhost_$SERVER_PORT/wasm_ui_check"
+	rmdir "$BUILDAT_USER_PATH/servers/localhost_$SERVER_PORT" 2>/dev/null
 	echo "-- run $n"
 	grep -a " I echo *: " "$t/srv$n.log" | sed 's/.*echo *: //'
 	client_lines "$t/cli$n.log"

@@ -971,10 +971,18 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   result type returns a Value, value.as<Vector3>(). A result that is a
   plain table (Octree:GetDrawables, Skeleton:GetBone) is a
   buildat::Table handle, read by buildat::table_get(t, key) and
-  table_len(t). Not carried yet: operators (the C++ does its own maths),
-  the verbs of buildat.* but SubscribeToEvent and the sandbox's constants
-  (buildat::constant("KEY_SPACE")), and the Rust crate's side.
-  apps/sample_wasm_ui is a client in C++ only.
+  table_len(t). The sandbox's constants are buildat::constant("KEY_SPACE").
+  A global event (buildat::SubscribeToEvent("Update"), under the same
+  whitelist) comes as BUILDAT_EVENT_OBJECT with handle 0; the call returns
+  the name buildat::UnsubscribeFromEvent(event, name) takes. Of buildat.*
+  (as a server's code has them, its served overrides included) and the
+  urho3d extension's own functions, those util/gen_wasm_bindings.lua
+  lists in SAFE_VERBS and MAGIC_VERBS: the clocks, version, has, the
+  hashes, compress, parse_json, storage_read/write, get_preference, the
+  screen's sizes; render_scene_to_texture, image_set_data,
+  image_load_data, fov_for, keep_fov. None that takes a Lua function or
+  table. Not carried yet: operators (the C++ does its own maths) and the
+  Rust crate's side. apps/sample_wasm_ui is a client in C++ only.
 - Natively the module is compiled with the system's C compiler (Linux)
   or the package's MinGW (Windows, which also has to ship cc1.exe), and
   runs in the interpreter until then and where there is none; on
