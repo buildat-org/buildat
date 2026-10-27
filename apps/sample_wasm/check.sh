@@ -25,13 +25,18 @@
 # traps at the depth limit; one of huge frames (huge_frame/, 4000 values
 # held across each call) traps too: natively its compile is refused at the
 # cap and it stays in the interpreter. The client lives.
+# [WASM_STACK_RLIMIT]: the refusal is cached, so the second run logs it
+# and does not compile huge_frame again; and a client under ulimit -s 2048
+# (too small for the compiled code's depth limit) keeps every module in
+# the interpreter, where the deep recursions trap as well.
 # Step 4, the interpreter (WAMR): with its compile under way, a module is
 # ready at once in the interpreter, and moves to the compiled module
 # between two calls, its state with it (a buffer and a counter written
 # before, read after).
-# Natively it runs three times: the first builds on both sides (the
+# Natively it runs four times: the first builds on both sides (the
 # server's .wasm taken out of the app's cache, the client's cache a fresh
-# one) and shows the move; the second finds both built; the third hides
+# one) and shows the move; the second finds both built; the third is
+# under ulimit -s 2048 (above); the fourth hides
 # the compiler from the client (BUILDAT_CHECK_WASM_INTERPRETER), and the
 # same assertions pass in the interpreter. Then a server with no clang and
 # wasm linker refuses the module. The times are printed, the interpreter's
@@ -41,7 +46,7 @@
 #   apps/sample_wasm/check.sh web      # the web client, headless Chrome
 #
 # tier: quick
-# cost: 26s (2026-10-27)
+# cost: 39s (2026-10-27)
 # covers: client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -123,8 +128,8 @@ EOF
 fi
 
 cd "$here/Build"
-# One run: a server, a client with the given cache (and the environment
-# given after n), the module's lines
+# One run: a server, a client with the given cache (and the environment,
+# or a command it runs under, given after n), the module's lines
 run()
 {
 	local n=$1
@@ -166,6 +171,20 @@ grep -aq "wasm main: compiled module from the cache" "$t/cli2.log" ||
 	fail "the client compiled it again"
 grep -aq "sample_w: engine: compiled" "$t/cli2.log" || fail "not compiled in run 2"
 grep -aq "wasm main: .*interpreter" "$t/cli2.log" && fail "the interpreter ran with the cache hit"
+# The compile refused in run 1, by its cached reason
+grep -aq "wasm huge_frame: compiler (cached): .*larger than 2048 bytes" "$t/cli2.log" ||
+	fail "no cached refusal of huge_frame ($t/cli2.log)"
+grep -aq "wasm huge_frame: ready (interpreter): not compiled, as its compile was refused before (cached" \
+		"$t/cli2.log" || fail "huge_frame not in the interpreter by its cached refusal"
+grep -aq "wasm huge_frame: compiling" "$t/cli2.log" && fail "huge_frame compiled again"
+# A small stack: the interpreter, not a crash ([WASM_STACK_RLIMIT])
+run s bash -c 'ulimit -S -s 2048 && exec "$0" "$@"'
+for want in "wasm main: ready (interpreter): not compiled, as the stack has .* KiB left" \
+		"sample_w: engine: interpreter"; do
+	grep -aq "$want" "$t/clis.log" || fail "no \"$want\" in $t/clis.log"
+done
+grep -aE "wasm main: (compiled module|moved to)" "$t/clis.log" &&
+	fail "compiled code ran under ulimit -s 2048"
 # The compiler hidden: the interpreter runs it for good, the same checks
 run 3 BUILDAT_CHECK_WASM_INTERPRETER=1
 for want in "wasm main: ready (interpreter): no C compiler to build it with (hidden for a check)" \
@@ -191,4 +210,4 @@ grep -aq "has wasm/, and this server has no clang and wasm linker.*the module is
 grep -aq "Listening at" "$t/srv4.log" && fail "a server with no toolchain started the app"
 echo "-- run 4, no toolchain"
 grep -a " E wasm    : " "$t/srv4.log" | sed 's/.*wasm    : //' | cut -c1-120
-echo "PASS: built, compiled, called and trapped; the imports and the boundary; the interpreter before the compile, and the move; both caches hit on the second run; the same in the interpreter with no compiler; refused with no toolchain"
+echo "PASS: built, compiled, called and trapped; the imports and the boundary; the interpreter before the compile, and the move; both caches hit on the second run; the same in the interpreter with no compiler; refused with no toolchain; a refused compile cached; the interpreter under a small ulimit -s"

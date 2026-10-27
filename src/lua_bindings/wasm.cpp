@@ -81,6 +81,7 @@
 #include "wasm-rt-impl.h"
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -676,6 +677,31 @@ static const char *WASM2C_DEFINES = "-DWASM_RT_SKIP_SIGNAL_RECOVERY=1 "
 static const char *MODULE_FILE = "module.so";
 #endif
 static const int MAX_FRAME = 2048; // bytes, a native frame's
+// The stack a compiled module's deepest call needs free below the load's
+// own frame ([WASM_STACK_RLIMIT]): the 2000 frames above and their saved
+// registers, and 1 MiB for the imports above them and for a call made a
+// little deeper in the client than the load was
+static const size_t STACK_NEEDED = 2000 * (size_t)(MAX_FRAME + 64) + (1 << 20);
+#ifndef _WIN32
+// The stack left below this point on the calling thread, which runs the
+// module's calls too (the main thread: its size is RLIMIT_STACK's, read
+// by glibc, so a small ulimit -s shows here; with RLIM_INFINITY the room
+// up to the next mapping, which is plenty)
+static size_t stack_left()
+{
+	pthread_attr_t a;
+	void *lo = nullptr;
+	size_t size = 0;
+	if(pthread_getattr_np(pthread_self(), &a) != 0)
+		return 0;
+	const bool ok = pthread_attr_getstack(&a, &lo, &size) == 0;
+	pthread_attr_destroy(&a);
+	const char *here = (const char*)__builtin_frame_address(0);
+	if(!ok || here < (const char*)lo)
+		return 0;
+	return (size_t)(here - (const char*)lo);
+}
+#endif
 // The time and memory a compile may take before it is killed
 static const int COMPILE_WALL_S = 180;
 static const uint64_t COMPILE_CPU_S = 120;
@@ -1356,6 +1382,13 @@ static ss_ glue_c(const sv_<ExportSig> &exports, bool has_imports,
 	return os.str();
 }
 
+// A compile's cached refusal beside <cache>/wasm2c/<key>: a file of the
+// compiler's error lines. It only ever means "do not compile"; what is in
+// it is logged, made printable, and nothing else is read from it.
+static ss_ refused_path(const ss_ &dir)
+{
+	return dir+".refused";
+}
 // A compile of one key ([WASM_COMPILE_RACE]): the loads of the same module
 // in this client share it, and each waits on it. It writes into a
 // directory of its own and renames that whole into the cache as <key>/
@@ -1374,6 +1407,10 @@ struct Compile {
 	std::chrono::steady_clock::time_point started;
 	enum State { RUNNING, DONE, FAILED } state = RUNNING;
 	ss_ error;
+	// The compiler exited with an error, not killed past a limit: the same
+	// key fails the same way again ([WASM_STACK_RLIMIT]), and is not
+	// compiled again (refused_path())
+	bool refused = false;
 
 	void finish_failed(const ss_ &why)
 	{
@@ -1476,6 +1513,7 @@ struct Compile {
 			code = 1;
 		kill_child(); // what it started, if anything is left
 		if(code != 0){
+			refused = code != ERROR_NOT_ENOUGH_QUOTA;
 			why = "the compile failed (exit code "+itos((int)code)+
 					(code == ERROR_NOT_ENOUGH_QUOTA ? ", past its CPU time limit" :
 					"")+"; its log above)";
@@ -1489,6 +1527,7 @@ struct Compile {
 			return 1;
 		pid = 0;
 		if(r < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0){
+			refused = r > 0 && WIFEXITED(status);
 			why = WIFSIGNALED(status) ? "the compile was killed (signal "+
 					itos(WTERMSIG(status))+"), past its limits?" :
 					"the compile failed (its log above)";
@@ -1518,9 +1557,17 @@ struct Compile {
 		}
 		if(r < 0){
 			std::ifstream f(tmp+"/compile.log");
-			ss_ line;
-			for(int n = 0; std::getline(f, line) && n < 20; n++)
+			ss_ line, errors;
+			for(int n = 0; std::getline(f, line) && n < 20; n++){
 				log_w(MODULE, "wasm %s: compiler: %s", cs(name), cs(line));
+				if(line.find("error") != ss_::npos && errors.size() < 1000)
+					errors += line+"\n";
+			}
+			// The refusal kept by the key, its error lines the reason; put
+			// in place whole, as the module is
+			if(refused && interface::fs::write_file(tmp+"/refused",
+					errors.empty() ? why+"\n" : errors))
+				rename((tmp+"/refused").c_str(), refused_path(dir).c_str());
 			finish_failed(why);
 			return;
 		}
@@ -2588,6 +2635,20 @@ struct Instance {
 		return e && *e && strcmp(e, "0") != 0;
 	}
 
+	// Not to be compiled, for the reason given: the interpreter for good,
+	// or failed
+	void interp_for_good(const ss_ &reason)
+	{
+		ss_ why;
+		if(start_interp(why)){
+			if(state == READY)
+				log_w(MODULE, "wasm %s: ready (interpreter): not compiled, as %s",
+						cs(name), cs(reason));
+			return;
+		}
+		fail("not compiled, as "+reason+", and "+why);
+	}
+
 	// m is the module checked, metered and prepared (prepare_native()), its
 	// bytes as written from it in interp_bytes
 	void start_native(wabt::Module &m, const ss_ &hash_hex)
@@ -2596,6 +2657,18 @@ struct Instance {
 		const Compiler &cc = compiler_hidden() ? none : compiler();
 		has_imports = !m.imports.empty();
 		ss_ why;
+#ifndef _WIN32
+		// Too small a stack for the compiled code's depth limit (a small
+		// ulimit -s): the interpreter, whose stack is its own. On Windows
+		// the calls run on the main thread, linked at 8 MiB (CMakeLists.txt).
+		static const size_t left = stack_left();
+		if(left < STACK_NEEDED){
+			interp_for_good("the stack has "+itos((int)(left >> 10))+
+					" KiB left and the compiled code's call depth needs "+
+					itos((int)(STACK_NEEDED >> 10))+" (ulimit -s)");
+			return;
+		}
+#endif
 		if(cc.path.empty()){
 			if(start_interp(why)){
 				if(state == READY)
@@ -2631,6 +2704,17 @@ struct Instance {
 			log_i(MODULE, "wasm %s: compiled module from the cache (%s)",
 					cs(name), cs(key.substr(0, 12)));
 			ready_from(dir+"/"+MODULE_FILE);
+			return;
+		}
+		// Refused by an earlier compile of the same key: not compiled again
+		std::ifstream refused(refused_path(dir));
+		if(refused.good()){
+			ss_ line;
+			for(int n = 0; n < 5 && std::getline(refused, line); n++)
+				log_w(MODULE, "wasm %s: compiler (cached): %s", cs(name),
+						cs(printable((const uint8_t*)line.data(), line.size())));
+			interp_for_good("its compile was refused before (cached, "+
+					key.substr(0, 12)+")");
 			return;
 		}
 		// Not in the cache: the interpreter runs it while it compiles
