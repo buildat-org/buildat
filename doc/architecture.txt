@@ -41,6 +41,7 @@ module
 |-- meta.json     << Dependencies and build flags (see below)
 |-- <module>.cpp  << Server-side code
 |-- api.h         << Structures for interfacing between modules
+|-- wasm/         << Code run on the server and on the clients (below)
 |-- client_lua
 |   `-- init.lua  << Client-side code (by convention)
 `-- client_data
@@ -84,6 +85,7 @@ Example:
 	"engine_api": 2,
 	"cxxflags": "",
 	"ldflags": "-lsasl2",
+	"web": true,
 	"dependencies": [
 		{"module": "network"},
 		{"module": "plants", "optional": true},
@@ -96,6 +98,52 @@ Example:
 An app's module says engine_api, the engine API it is written for; the
 rest can be left out, and a key the loader does not know is refused
 (server_api.txt).
+
+"web": true says the module keeps to the server's web API (below), so an
+app whose modules all say it can be built to run its server in a browser.
+
+Code on both sides: wasm/
+-------------------------
+A module's wasm/ holds C or C++ written against interface/wasm_api.h
+and nothing else of the engine. The server compiles it natively into the
+module, so the module calls it as plain functions, and to a .wasm (with
+clang) that it serves to the clients with the module's files. The web
+client runs the .wasm in the browser. The native client translates it to
+C with wasm2c, builds that with the compiler it ships with, and caches
+the result by hash; until that is built, or with no compiler, an
+interpreter runs it. Either way it is sandboxed wasm: a client never runs
+native code a server made.
+
+wasm_api.h moves bytes and does not know what they mean: voxels into the
+module's memory, vertex and index buffers and texture bytes out of it,
+node transforms, time, logging and the module's own packets. Lua calls a
+wasm export with numbers and a buffer and gets numbers and a buffer back.
+Lua stays the glue; wasm/ takes the loops.
+
+Running a game in the browser
+-----------------------------
+Write the game as a normal server game, and put in wasm/ what is hot,
+shared or predicted. Running it in the browser is then a packaging
+choice, not a rewrite.
+
+- A client loop too slow in Lua (meshing, heightfields, particles):
+  wasm/. It is as fast on the web as natively.
+- The client predicting what the server decides (a car, a projectile),
+  to hide latency: the step in wasm/, run by the server module natively
+  and by the client in wasm, the server the authority.
+- An existing server game played alone in a browser, with no host: its
+  server and modules built to wasm and run in a Web Worker of the page.
+  The modules need "web": true: no sockets, http, processes or real
+  files, and threads only where the page has them; accounts is a local
+  single player, the admin. The page's download and memory grow by a
+  server. The native client starts a local server for this instead.
+- A small game whose rules all fit in wasm/ and Lua (a board game, an
+  arcade game, a puzzle): a serverless release (aitta.txt), with no
+  server at all. The page stays light, but the game has to be made that
+  way.
+
+These combine: a game in the browser's own server still predicts with
+its wasm/ on the client.
 
 Extension structure
 -------------------
