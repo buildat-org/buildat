@@ -13,8 +13,8 @@
 	["type", "${SETUP_CODE}"],
 	["click", 600, 582],
 	["waitlog", "Joined as tester", 30],
-	["waitlog", "hillclimb: this client's car is [0-9]", 30],
 	["waitlog", "hillclimb: the hill", 60],
+	["waitlog", "hillclimb: this client's car is [0-9]", 30],
 	["holdkey", "w", 10000],
 	["eval", "'driven'"]
 ]
