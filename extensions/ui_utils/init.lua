@@ -2223,8 +2223,8 @@ end
 -- places and sizes: what fit() does here, its stripes() does there.
 local load = nil
 local BRAND_PAGE = {0x1b / 255, 0x1b / 255, 0x22 / 255}
--- The glyphs, 16x16 pixel art written once under the cache: nothing a
--- game must have, and no font has them. index.html draws the same rows.
+-- The glyphs, 16x16 pixel art: nothing a game must have, and no font
+-- has them. index.html draws the same rows.
 local GLYPHS = {
 	note = {
 		"................", "......#########.", "......#########.",
@@ -2255,25 +2255,27 @@ local GLYPHS = {
 		"...#..#..#..#...", "....##.##.##....", "......####......",
 		"................"},
 }
-local glyphs_written = false
+-- **Made in memory, never a file** ([TRUSTED_SCREENS_REST]): a name
+-- such as load_glyphs/page.png would be a served file's while connected.
+-- The cache holds each under a name the sandbox cannot add (its own are
+-- under generated/), which keeps the texture alive.
+local glyphs = {}
 local function glyph(name)
-	if not glyphs_written then
-		glyphs_written = true
-		local dir = buildat.get_cache_path() .. "/ui_utils_res"
-		for n, rows in pairs(GLYPHS) do
-			local ops = {}
-			for y, row in ipairs(rows) do
-				for x0, x1 in row:gmatch("()#+()") do
-					ops[#ops + 1] = {op = "fill", color = {255, 255, 255, 255},
-							at = {x0 - 1, y - 1}, size = {x1 - x0, 1}}
-				end
+	if not glyphs[name] then
+		local img = magic.Image:new()
+		img:SetSize(16, 16, 4)
+		for y, row in ipairs(GLYPHS[name]) do
+			for x = 1, #row do
+				img:SetPixel(x - 1, y - 1, magic.Color(1, 1, 1,
+						row:sub(x, x) == "#" and 1 or 0))
 			end
-			buildat.compose_image({size = {16, 16}, ops = ops,
-					write = dir .. "/load_glyphs/" .. n .. ".png"})
 		end
-		buildat.add_resource_dir(dir)
+		local tex = magic.Texture2D:new()
+		tex:SetData(img)
+		magic.cache:AddManualResource(tex, "ui_utils/load_glyph/" .. name)
+		glyphs[name] = tex
 	end
-	return magic.cache:GetResource("Texture2D", "load_glyphs/" .. name .. ".png")
+	return glyphs[name]
 end
 
 local function load_fit(s)
@@ -2282,7 +2284,7 @@ local function load_fit(s)
 	-- The F5 info's size (user 2026-10-12), which fits a narrow window
 	local size = 13
 	if not s.font then
-		s.font = magic.cache:GetResource("Font", buildat.font_mono)
+		s.font = magic.cache:GetResource("Font", "own:" .. buildat.font_mono)
 		s.text:SetFont(s.font, size)
 		s.name:SetFont(s.font, size)
 	end

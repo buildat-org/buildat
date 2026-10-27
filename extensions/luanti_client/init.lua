@@ -3605,7 +3605,7 @@ end
 show_connect_dialog = function(address, name)
 	local root = uistack.main:push({desc="luanti_client connect"})
 	root.defaultStyle = magic.cache:GetResource(
-			"XMLFile", "ui_utils/res/style.xml")
+			"XMLFile", "own:ui_utils/res/style.xml")
 
 	-- **launch_menu's Servers layout** (playtest, 2026-10-07): a
 	-- title, the source and the filter, the list, and beside it the

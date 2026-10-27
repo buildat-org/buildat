@@ -105,7 +105,7 @@ local function open(opts)
 	-- none is left exactly as it was -- which is why the scroll view
 	-- had no panel to clip with and the document drew over the hint.
 	root.defaultStyle = magic.cache:GetResource("XMLFile",
-			"UI/DefaultStyle.xml")
+			"own:UI/DefaultStyle.xml")
 	local left = panel(0, half, magic.Color(0.06, 0.07, 0.09, 1))
 	local right = panel(half, w - half, magic.Color(0.03, 0.04, 0.05, 1))
 
@@ -141,7 +141,7 @@ local function open(opts)
 		e.textSelectable = true
 		local t = e.textElement
 		if t then
-			t:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
+			t:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
 			t:SetColor(color("text"))
 			t:SetPosition(4, 3)
 		end
@@ -165,7 +165,7 @@ local function open(opts)
 	-- own, so it ran past the column and was clipped -- and a label cut
 	-- off in the middle of explaining the controls is worse than none.
 	local hint = left:CreateChild("Text")
-	hint:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
+	hint:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
 	hint:SetPosition(MARGIN, h - 54)
 	hint:SetFixedWidth(half - 2 * MARGIN)
 	hint:SetColor(color("dim"))
@@ -201,7 +201,7 @@ local function open(opts)
 	end
 	local doc = left:CreateChild("Text")
 	doc:SetSelectionColor(magic.Color(0.30, 0.42, 0.16, 1))
-	doc:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
+	doc:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
 	doc:SetColor(color("text"))
 	doc.text = table.concat(lines, "\n")
 	-- simplified: the document is read, not copied out of. A `Text`
@@ -261,7 +261,7 @@ local function open(opts)
 		"",
 	}
 	local out = right:CreateChild("Text")
-	out:SetFont(magic.cache:GetResource("Font", buildat.font_mono), FONT)
+	out:SetFont(magic.cache:GetResource("Font", "own:" .. buildat.font_mono), FONT)
 	out:SetPosition(MARGIN, MARGIN)
 	out:SetFixedWidth(w - half - 2 * MARGIN)
 	out:SetColor(color("text"))
