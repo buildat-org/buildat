@@ -1531,9 +1531,17 @@ struct Module: public interface::Module, public network::Interface
 		// Only that page: an isolated page's popup has no opener, and the
 		// Starport ID's sign-in is one.
 		// [WEB_MESH_OFF_THREAD] And the threaded client's script, which its
-		// workers load too: an isolated page's worker needs the header
+		// workers load too: an isolated page's worker needs the header.
+		// The play page isolated for its threads where its address asks,
+		// ?isolated=1.
+		// simplified: asked for, not the default, until the Starport's
+		// /authorize can answer an isolated page (it posts to its opener,
+		// which an isolated page's popup has none of): then every page,
+		// the sign-in ending on a page of this server's that tells the
+		// game's by BroadcastChannel
 		const bool isolated = !local.first.empty() ||
-				(index && !query_value(query, "local").empty()) ||
+				(index && (!query_value(query, "local").empty() ||
+				query_value(query, "isolated") == "1")) ||
 				wf_name->first == "buildat_mt.js";
 		const ss_ cache = (wf->etag.empty() ? "" : "ETag: "+wf->etag+"\r\n")+
 				(isolated ? "Cross-Origin-Opener-Policy: same-origin\r\n"

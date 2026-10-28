@@ -2136,6 +2136,14 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 	local st = add_text(w, "")
 	local rr = add_row(w)
 	local function open()
+		-- [WEB_MESH_OFF_THREAD] An isolated page's window has no opener,
+		-- and /authorize answers its opener: it would wait forever
+		if __buildat_get_env("BUILDAT_ISOLATED") == "1" then
+			st.text = "This page runs with threads (cross-origin isolated), "..
+					"which the Starport's window cannot answer yet: open "..
+					"it without ?isolated=1 to sign in with the ID"
+			return
+		end
 		st.text = __buildat_web_authorize(url .. q) and
 				"Waiting for the Starport's window..." or
 				"The browser blocked the window: allow pop-ups for this "..

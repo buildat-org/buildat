@@ -154,7 +154,9 @@ server serves from by default; `buildat_server -W <dir>` serves another.
 workers: the page runs it where it is cross-origin isolated, and
 `buildat.*`, which meshes on the page's own thread, elsewhere. Behind an https reverse
 proxy the page connects over wss. Its address takes `?log=4` for a verbose
-log, `scale=` for the UI scale and `pref=<key>=<value>` (repeatable), and
+log, `scale=` for the UI scale, `pref=<key>=<value>` (repeatable) and
+`isolated=1` for the page cross-origin isolated (the client with
+threads; the Starport ID's sign-in does not work there yet), and
 nothing else of the command line: a link is anybody's to write. The server accepts a WebSocket only from its
 own page's origin.
 

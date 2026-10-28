@@ -150,9 +150,13 @@ file call between), which sqlite's WAL recovers as after a crash.
 That page and the local server's files are sent cross-origin isolated
 (Cross-Origin-Opener-Policy: same-origin, Cross-Origin-Embedder-Policy:
 require-corp), which the server's threads need; any other host of web/
-has to send the same. The page without ?local is not isolated: an
-isolated page's popup has no opener, and the Starport ID's sign-in is
-one. A page the server serves with no game of its own (apps/play's) is
+has to send the same. The play page is sent isolated as well, for the
+web client's mesh workers (buildat_mt), and the Starport ID's sign-in
+window, which has no opener there, ends on a page of the server's that
+tells the game's page; until the Starport's /authorize answers that way,
+the play page is isolated only where its address has ?isolated=1. The
+threaded client's script, buildat_mt.js, is sent with the same headers,
+which its workers need. A page the server serves with no game of its own (apps/play's) is
 given the apps that have web/local/<app>/, and its launch menu lists
 each under Apps, "In the browser", Play going to /?local=<app>.
 util/package.sh builds WEB_LOCAL_APPS (hillclimb, demo_aggregate,

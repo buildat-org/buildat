@@ -1,17 +1,19 @@
 #!/bin/bash
 # tier: full
 # cost: ~75 s, ~2 min with demo_aggregate and skeldat (2026-10-27)
-# covers: client/launch_grid.lua src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
+# covers: util/web_drive.js client/launch_grid.lua src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
 # [WEB_LOCAL_SERVER]: hillclimb in the browser with its own server in a
 # worker of the page, and no buildat server: web/ served by a static
 # server that sends what the buildat server sends with ?local
 # (cross-origin isolation), and opened at ?local=hillclimb in Firefox
 # (util/web_drive.sh). The client joins over the in-page stream, the car
 # is driven past the first turn, and the worker's server says its ticks.
-# A reload finds the saves kept in IndexedDB and opens them again. Then
+# A reload finds the saves kept in IndexedDB and opens them again; the
+# isolated page runs the client with threads (buildat_mt), and the same
+# drive runs in WebKit where Playwright's is installed. Then
 # the buildat server's own serving of the same: the isolation headers
-# with ?local and on the local server's files, and not on the page
-# without it; and a page with no game (apps/play's) given the apps for
+# with ?local and ?isolated=1, on the local server's files and
+# buildat_mt.js, and not on the page without them; and a page with no game (apps/play's) given the apps for
 # its launch menu. demo_aggregate (walked a second, its position line moved) and skeldat (a world
 # made in its menu, walked 2 voxels) are driven as hillclimb when
 # web/local/<app>/ is there. Needs web/ (util/build_web.sh) with
@@ -71,6 +73,24 @@ grep -a "IndexedDB\|would not open\|cannot be opened\|malformed" "$page" &&
 grep -q "kept: .*/ranking/save.sqlite" "$t/drive.log" ||
 	fail "IndexedDB has no ranking save"
 echo "the drive: $(awk -v a="$start" -v b="$end" 'BEGIN{printf "%.1f", b - a}') s"
+# [WEB_MESH_OFF_THREAD] An isolated page runs the client with threads
+if [ -f "$here/web/buildat_mt.js" ]; then
+	grep -aq "threads: [0-9]* mesh workers" "$page" ||
+		fail "the isolated page did not run the client with threads ($page)"
+fi
+# And the same drive in WebKit, Safari's engine (iOS has no other), where
+# Playwright's is installed
+if [ -d "${PLAYWRIGHT_NODE:-$HOME/.local/share/playwright-node}/node_modules/playwright" ]; then
+	WEB_DRIVE_URL="http://127.0.0.1:$p/?local=hillclimb&frame_split=1" \
+		bash "$here/util/web_drive.sh" webkit hillclimb \
+		"$here/util/web_local.json" "$t/webkit" > "$t/webkit.log" 2>&1 ||
+		fail "the WebKit drive ($t/webkit.log: $(tail -2 "$t/webkit.log" | tr '\n' ' '))"
+	grep -q "isolated true" "$t/webkit.log" || fail "WebKit's page was not cross-origin isolated"
+	[ ! -f "$here/web/buildat_mt.js" ] ||
+		grep -aq "threads: [0-9]* mesh workers" "$t/webkit/page.log" ||
+		fail "WebKit's isolated page did not run the client with threads"
+	echo "WebKit: $(grep -a "threads: " "$t/webkit/page.log" | head -1)"
+fi
 
 # demo_aggregate's too, when it is built: in, on its feet and walking
 if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
@@ -191,7 +211,13 @@ isolated "/local/hillclimb/buildat_server.js" 200 ||
 	fail "the local server's script is not isolated"
 isolated "/local/hillclimb/buildat_server.wasm" 200 || fail "the wasm is not isolated"
 isolated "/" 200 && fail "/ is isolated: the Starport ID's popup loses its opener"
+# [WEB_MESH_OFF_THREAD] the play page where it asks, and the threaded
+# client's script, which its workers load
+isolated "/?isolated=1" 200 || fail "/?isolated=1 is not isolated"
+isolated "/?isolated=0" 200 && fail "/?isolated=0 is isolated"
+[ ! -f "$here/web/buildat_mt.js" ] || isolated "/buildat_mt.js" 200 ||
+	fail "buildat_mt.js is not sent with the isolation headers"
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates ?local and its files only"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates ?local, ?isolated=1 and their files only"
