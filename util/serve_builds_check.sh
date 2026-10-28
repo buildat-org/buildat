@@ -10,6 +10,9 @@
 #   2. 0.0.2: 422, its log said; the server stays on 0.0.1.
 #   3. 0.0.3: a tar with ../x.so: refused, nothing written outside, on
 #      0.0.1 still.
+#   4. [AITTA_KIT_IN_RELEASE] 0.0.4 has an aitta_kit/ (the host answers
+#      404: compiled here): the server on it has BUILDAT_AITTA_CPP_KIT
+#      naming that version's kit; on 0.0.1, which has none, it had none.
 #   0. First: a BUILDS_URL that is http to a name, not a private address
 #      (127.evil.com, 192.168.1.1.evil.com) or a path that looks like one,
 #      stops the script at once ([SEC_RUN5_LEFTOVERS]).
@@ -45,9 +48,10 @@ with tarfile.open(sys.argv[1], "w") as t:
 ' "$t/evil.tar"
 
 P=$((29700 + RANDOM % 200)) BP=$((P + 1)) HP=$((P + 2))
-release(){ # <version>: its tar, and the list with it first
+release(){ # <version> [kit]: its tar, and the list with it first
 	local r="$t/rel/buildat-$1-check-linux-x86_64-web-precompiled" e
 	mkdir -p "$r"
+	[ -n "${2:-}" ] && mkdir "$r/aitta_kit" && echo '{}' > "$r/aitta_kit/kit.json"
 	for e in 3rdparty Build builtin client extensions src VERSION web util apps; do
 		ln -s "$here/$e" "$r/$e"
 	done
@@ -103,6 +107,14 @@ grep -q "asked BUILDS_URL for demo_board_game on buildat-0.0.1-.*: building" "$t
 grep -aq "No need to recompile" "$slog" && ! grep -aq "STATUS Compiling" "$slog" ||
 	fail "compiled here ($slog)"
 echo "ok: 202 twice, then the modules: nothing compiled here"
+# The server's environment (its boxed child's is the same)
+server_kit(){
+	local p
+	p=$(pgrep -f "buildat_server -m .* -P $P -D " | head -1)
+	[ -n "$p" ] || { echo "no server process"; return; }
+	tr '\0' '\n' < "/proc/$p/environ" | grep "^BUILDAT_AITTA_CPP_KIT=" || true
+}
+[ -z "$(server_kit)" ] || fail "a kit named on 0.0.1, which has none: $(server_kit)"
 
 # 2.
 release 0.0.2
@@ -121,4 +133,13 @@ grep -q "0.0.3-.*: failed (not a tar of modules)" "$t/serve.log" || fail "the re
 [ ! -e "$t/servecache/apps/x.so" ] || fail "../x.so written"
 curl -s -m 5 "http://127.0.0.1:$P/health" | grep -q . || fail "not serving"
 echo "ok: a tar reaching outside refused, 0.0.1 still serving"
+
+# 4.
+release 0.0.4 kit
+wait_for_log "$t/serve.log" "starting demo_board_game on port $P on buildat-0.0.4" 300 ||
+	fail "0.0.4 did not start ($t/serve.log)"
+want="BUILDAT_AITTA_CPP_KIT=$t/serve/versions/buildat-0.0.4-check-linux-x86_64-web-precompiled/aitta_kit"
+for _ in $(seq 50); do [ "$(server_kit)" = "$want" ] && break; sleep 0.2; done
+[ "$(server_kit)" = "$want" ] || fail "on 0.0.4 the kit is \"$(server_kit)\", not $want"
+echo "ok: on 0.0.4 the server's BUILDAT_AITTA_CPP_KIT is that version's kit"
 echo "PASS: every step above held"

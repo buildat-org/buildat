@@ -96,6 +96,12 @@
 # nothing. simplified: a server option -C (its cache elsewhere) is not
 # followed; BUILDAT_CACHE_PATH is.
 #
+# **An Aitta's C++ kit** ([AITTA_KIT_IN_RELEASE]): a release's aitta_kit/
+# (in its web-precompiled archive) is named in each server's
+# BUILDAT_AITTA_CPP_KIT (else it is left as it was), so an Aitta started here builds C++ packages for
+# the page with the kit of the version it runs; it needs the emsdk
+# doc/aitta.txt names at $EMSDK, else ~/emsdk.
+#
 # Environment: AITTA (above), POLL_SECONDS (300), UPDATE_MAX_WAIT (1800),
 # GITHUB_REPO (celeron55/buildat),
 # GITHUB_TOKEN (optional; unauthenticated, GitHub allows 60 asks an hour),
@@ -392,7 +398,11 @@ start(){
 	say "starting $game on port $port on $current, user ${users[$i]}"
 	echo "$current" > "$base/current"
 	running[$i]=$app
-	(cd "$dir" && BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
+	# [AITTA_KIT_IN_RELEASE] The version's own kit for an Aitta's C++
+	# servers for the page, where it has one
+	(cd "$dir" || exit 1
+		[ -f aitta_kit/kit.json ] && export BUILDAT_AITTA_CPP_KIT=$dir/aitta_kit
+		BUILDAT_SHARE_PORT=1 exec bin/buildat_server \
 			-m "$app" -P "$port" \
 			-D "${users[$i]}" "${args[@]}") \
 			> >(sed -u "s/^/[$id:$port] /" |

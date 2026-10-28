@@ -121,9 +121,13 @@ Aitta started with BUILDAT_AITTA_CPP_KIT naming a kit: the engine's
 server for packages (web/local/_aitta) as parts -- its objects,
 libraries, flags, headers and packed files, the .js and .wasm it made,
 and the emsdk version it was made with -- which util/build_web_server.sh
-"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit. The
-kit builds with the emsdk at $EMSDK, else ~/emsdk, on the Aitta host
-([AITTA_KIT_IN_RELEASE]), which must be the version it was made with:
+"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit. A
+release's linux-x86_64-web-precompiled archive carries the kit of its own
+web/local/_aitta in aitta_kit/ ([AITTA_KIT_IN_RELEASE]), and
+util/serve_latest_release.sh starts each server with BUILDAT_AITTA_CPP_KIT
+naming the running version's kit, so the kit moves with each release.
+The kit builds with the emsdk at $EMSDK, else ~/emsdk, on the Aitta host,
+which must be the version it was made with: a release's kit needs emsdk
 3.1.60 (util/docker/linux's EMSDK_VERSION), installed as
 
     git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
