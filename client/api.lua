@@ -2637,7 +2637,7 @@ buildat.safe.SpatialUpdateQueue = function()
 					getmetatable(safe_p).type_name ~= "Vector3" then
 				error("p is not a sandboxed Vector3 instance")
 			end
-			p = getmetatable(safe_p).unsafe
+			local p = getmetatable(safe_p).unsafe
 			return internal:put(p, near_weight, near_trigger_d,
 					far_weight, far_trigger_d, value, player)
 		end,
@@ -2664,7 +2664,7 @@ buildat.safe.SpatialUpdateQueue = function()
 					getmetatable(safe_p).type_name ~= "Vector3" then
 				error("p is not a sandboxed Vector3 instance")
 			end
-			p = getmetatable(safe_p).unsafe
+			local p = getmetatable(safe_p).unsafe
 			internal:set_p(p)
 		end,
 		-- Which way the camera looks, for the queue's view term. **A
@@ -2704,9 +2704,9 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
-	buffer = nil
+	local buffer = nil
 	if type(safe_buffer) == 'string' then
 		buffer = safe_buffer
 	else
@@ -2732,9 +2732,9 @@ function buildat.safe.set_voxel_geometry(safe_node, safe_buffer, voxel_reg,
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
-	buffer = nil
+	local buffer = nil
 	if type(safe_buffer) == 'string' then
 		buffer = safe_buffer
 	else
@@ -2808,9 +2808,9 @@ function buildat.safe.set_voxel_lod_geometry(lod, safe_node, safe_buffer, ...)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
-	buffer = nil
+	local buffer = nil
 	if type(safe_buffer) == 'string' then
 		buffer = safe_buffer
 	else
@@ -2904,7 +2904,7 @@ function buildat.safe.clear_voxel_geometry(safe_node)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
 	__buildat_clear_voxel_geometry(node)
 end
@@ -2914,9 +2914,9 @@ function buildat.safe.set_voxel_physics_boxes(safe_node, safe_buffer, ...)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
-	buffer = nil
+	local buffer = nil
 	if type(safe_buffer) == 'string' then
 		buffer = safe_buffer
 	else
@@ -2934,7 +2934,7 @@ function buildat.safe.clear_voxel_physics_boxes(safe_node)
 			getmetatable(safe_node).type_name ~= "Node" then
 		error("node is not a sandboxed Node instance")
 	end
-	node = getmetatable(safe_node).unsafe
+	local node = getmetatable(safe_node).unsafe
 
 	__buildat_clear_voxel_physics_boxes(node)
 end
