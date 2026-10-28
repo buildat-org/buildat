@@ -145,6 +145,162 @@ static bool write_file(const ss_ &path, const ss_ &data)
 	return f.good();
 }
 
+// [WEB_LOCAL_AITTA_CPP] A .wasm's imports, each its module, name, kind and
+// type as bytes (a function's or a tag's by its signature, not its index),
+// and its custom sections' names: "" or why it is not read so. A value
+// type outside the MVP's, SIMD's and the two reference types is refused.
+static ss_ wasm_imports(const ss_ &w, std::set<ss_> &imports,
+		std::set<ss_> &customs)
+{
+	if(w.size() < 8 || w.compare(0, 8, ss_("\0asm\1\0\0\0", 8)) != 0)
+		return "not a .wasm";
+	size_t i = 8;
+	bool cut = false;
+	auto byte = [&]() -> unsigned {
+		if(i >= w.size()){
+			cut = true;
+			return 0;
+		}
+		return (unsigned char)w[i++];
+	};
+	auto leb = [&]() -> uint64_t {
+		uint64_t r = 0;
+		for(int sh = 0; sh < 64 && !cut; sh += 7){
+			const unsigned b = byte();
+			r |= (uint64_t)(b & 0x7f) << sh;
+			if(!(b & 0x80))
+				return r;
+		}
+		cut = true;
+		return 0;
+	};
+	auto bytes = [&](uint64_t n) -> ss_ {
+		if(cut || n > w.size() - i){
+			cut = true;
+			return "";
+		}
+		i += n;
+		return w.substr(i - n, n);
+	};
+	sv_<ss_> types;
+	while(i < w.size() && !cut){
+		const unsigned id = byte();
+		const uint64_t n = leb();
+		if(cut || n > w.size() - i)
+			return "a section past the end";
+		const size_t end = i + n;
+		if(id == 0){
+			customs.insert(bytes(leb()));
+		} else if(id == 1){
+			for(uint64_t c = leb(); c > 0 && !cut; c--){
+				const size_t at = i;
+				if(byte() != 0x60)
+					return "a type not a function's";
+				for(int part = 0; part < 2; part++)
+					for(uint64_t k = leb(); k > 0 && !cut; k--){
+						const unsigned t = byte();
+						if(t != 0x7f && t != 0x7e && t != 0x7d && t != 0x7c &&
+								t != 0x7b && t != 0x70 && t != 0x6f)
+							return "a value type not known here";
+					}
+				types.push_back(w.substr(at, i - at));
+			}
+		} else if(id == 2){
+			for(uint64_t c = leb(); c > 0 && !cut; c--){
+				ss_ key = bytes(leb())+'\0';
+				key += bytes(leb())+'\0';
+				const unsigned kind = byte();
+				key += (char)kind;
+				const size_t at = i;
+				auto limits = [&](){
+					const unsigned flags = byte();
+					leb();
+					if(flags & 1)
+						leb();
+				};
+				if(kind == 0 || kind == 4){
+					if(kind == 4)
+						byte();
+					const uint64_t t = leb();
+					if(t >= types.size())
+						return "an import of a type not there";
+					key += types[t];
+				} else if(kind == 1){
+					byte();
+					limits();
+				} else if(kind == 2){
+					limits();
+				} else if(kind == 3){
+					byte();
+					byte();
+				} else {
+					return "an import of a kind not known here";
+				}
+				if(kind != 0 && kind != 4)
+					key += w.substr(at, i - at);
+				imports.insert(key);
+			}
+		}
+		if(!cut && id != 0 && id <= 2 && i != end)
+			return "a section not as long as it says";
+		i = end;
+	}
+	return cut ? "cut short" : "";
+}
+
+// [WEB_LOCAL_AITTA_CPP] A built server's .js against the kit's: the same
+// bytes but for the keys of ASM_CONSTS (the EM_ASM code, by its address),
+// each moved by one amount, the release's data before them. That amount in
+// shift, and "", or why not: then the release has JS of its own (EM_ASM,
+// EM_JS, a library) or was built otherwise.
+static ss_ js_shift(const ss_ &rel, const ss_ &ref, int64_t &shift)
+{
+	static const ss_ start = "var ASM_CONSTS={", stop = "};function ";
+	const size_t a = ref.find(start);
+	const size_t b = a == ss_::npos ? ss_::npos : ref.find(stop, a);
+	if(b == ss_::npos)
+		return "the kit's .js has no ASM_CONSTS";
+	bool have = false;
+	shift = 0;
+	size_t i = 0, j = 0;
+	while(i < ref.size() && j < rel.size()){
+		if(ref[i] == rel[j]){
+			i++;
+			j++;
+			continue;
+		}
+		// Where they part: within a number in both, which starts after
+		// "{" or "," in ASM_CONSTS and ends at ":"
+		size_t i0 = i;
+		while(i0 > 0 && isdigit((unsigned char)ref[i0 - 1]))
+			i0--;
+		const size_t j0 = j - (i - i0);
+		size_t i1 = i0, j1 = j0;
+		while(i1 < ref.size() && isdigit((unsigned char)ref[i1]))
+			i1++;
+		while(j1 < rel.size() && isdigit((unsigned char)rel[j1]))
+			j1++;
+		if(i0 < a + start.size() || i0 >= b || (ref[i0 - 1] != '{' &&
+				ref[i0 - 1] != ',') || i1 == i0 || j1 == j0 ||
+				i1 - i0 > 10 || j1 - j0 > 10 || i1 >= ref.size() ||
+				j1 >= rel.size() || ref[i1] != ':' || rel[j1] != ':')
+			return "its .js is not the engine's (at byte "+itos(j)+")";
+		const int64_t d = std::stoll(rel.substr(j0, j1 - j0)) -
+				std::stoll(ref.substr(i0, i1 - i0));
+		if(have && d != shift)
+			return "its EM_ASM code is not the engine's";
+		shift = d;
+		have = true;
+		i = i1;
+		j = j1;
+	}
+	if(i != ref.size() || j != rel.size())
+		return "its .js is not the engine's (its length)";
+	if(shift <= -1000000000 || shift >= 1000000000)
+		return "its EM_ASM code moved too far";
+	return "";
+}
+
 // The licences the official instance takes ([AITTA] decision 2): free
 // ones. An instance changes the list in its settings.
 static json::Value default_settings()
@@ -221,6 +377,11 @@ struct Module: public interface::Module, public moderation::Host
 	sv_<ss_> m_web_names; // what it is to build
 	interface::process::Handle m_web_proc;
 	int64_t m_web_started = 0;
+	// [WEB_LOCAL_AITTA_CPP] The kit its C++ servers for the page are
+	// linked from (BUILDAT_AITTA_CPP_KIT, util/aitta_cpp_build.py), or
+	// none; whether the one building has C++
+	ss_ m_cpp_kit;
+	bool m_web_cpp = false;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -355,6 +516,33 @@ struct Module: public interface::Module, public moderation::Host
 			iface->claim_http_path("/brand/");
 		});
 		log_i(MODULE, "Aitta: %zu releases", releases_map().size());
+		// [WEB_LOCAL_AITTA_CPP] A kit made by util/build_web_server.sh for
+		// this engine, on this host
+		if(const char *kit = getenv("BUILDAT_AITTA_CPP_KIT")){
+			if(interface::fs::path_exists(ss_(kit)+"/kit.json") &&
+					interface::fs::path_exists(ss_(kit)+"/ref/buildat_server.js")){
+				m_cpp_kit = kit;
+				log_i(MODULE, "C++ servers for the page: linked from %s", kit);
+				// Each engine its own: a server linked from another kit is
+				// linked again from this one
+				// simplified: the page of the engine before then runs none
+				const ss_ js = interface::sha256::hex(interface::sha256::calculate(
+						read_file(m_cpp_kit+"/ref/buildat_server.js")));
+				sv_<ss_> again;
+				for(auto &p : releases_map()){
+					const ss_ had = jstr(p.second.get("web_server"), "js");
+					if(!had.empty() && had != js)
+						again.push_back(p.first);
+				}
+				for(const ss_ &id : again){
+					json::Value rel = load("releases", id);
+					rel.set("web_build", "queued");
+					put("releases", id, rel);
+				}
+			} else {
+				log_w(MODULE, "BUILDAT_AITTA_CPP_KIT: no kit at %s", kit);
+			}
+		}
 		// [WEB_LOCAL_AITTA] The builds a stop left undone
 		for(auto &p : releases_map())
 			if(jstr(p.second, "web_build") == "queued")
@@ -695,7 +883,7 @@ struct Module: public interface::Module, public moderation::Host
 		sv_<ss_> out;
 		const ss_ play = get("play_url");
 		if(!play.empty() && (rel.get("serverless").is_true() ||
-				rel.get("web").is_true()))
+				rel.get("web").is_true() || rel.get("web_cpp").is_true()))
 			out.push_back("<a href=\""+html(play)+"/#run="+html(pkg)+"\">"
 					"Play in the browser</a>");
 		const ss_ host = get("app_hosting_provider");
@@ -732,7 +920,8 @@ struct Module: public interface::Module, public moderation::Host
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
 				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ||
-				rel.get("web").is_true() ? ", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
+				rel.get("web").is_true() || rel.get("web_cpp").is_true() ?
+				", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
 				", "+date((int64_t)rel.get("time")
 				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
 				itos(size / 1000)+" kB" :
@@ -1025,6 +1214,7 @@ struct Module: public interface::Module, public moderation::Host
 				for(json::Iterator it(w); it.valid(); it.next())
 					listed = listed || (it.value().is_string() &&
 							it.value().as_string() == sha);
+				listed = listed || jstr(p.second.get("web_server"), "wasm") == sha;
 			}
 		const ss_ data = listed ? read_file(m_archives+"/wasm/"+sha+".wasm") : "";
 		if(data.empty())
@@ -1158,6 +1348,9 @@ struct Module: public interface::Module, public moderation::Host
 	// meta.json, by a plain name) a .wasm on the server ("server_wasm") or
 	// none ("disable_cpp"), never C++; each dependency one of its own or a
 	// builtin that keeps to the web API ("web": true, or a stand-in).
+	// [WEB_LOCAL_AITTA_CPP] With a kit, a module may be C++ too, without
+	// flags of its own ("cxxflags"): Aitta links a server of the release's
+	// own for the page.
 	ss_ web_refusal(const ss_ &dir, const json::Value &m, const ss_ &lua51)
 	{
 		if(interface::aitta::kind_of(m) != "app")
@@ -1187,8 +1380,12 @@ struct Module: public interface::Module, public moderation::Host
 		for(const auto &mod : mods){
 			const json::Value &mm = mod.second;
 			if(jstr(mm.get("server_wasm"), "source").empty() &&
-					!mm.get("disable_cpp").is_true())
-				return "the module "+mod.first+" is C++";
+					!mm.get("disable_cpp").is_true()){
+				if(m_cpp_kit.empty())
+					return "the module "+mod.first+" is C++";
+				if(!mm.get("cxxflags").is_undefined())
+					return "the module "+mod.first+" has cxxflags";
+			}
 			const json::Value &deps = mm.get("dependencies");
 			for(unsigned i = 0; deps.is_array() && i < deps.size(); i++){
 				const ss_ d = jstr(deps.at(i), "module");
@@ -1238,6 +1435,7 @@ struct Module: public interface::Module, public moderation::Host
 		const ss_ sha = jstr(rel, "sha256");
 		m_web_job = m_tmp+"/web_"+sha;
 		m_web_names.clear();
+		m_web_cpp = false;
 		interface::fs::remove_all(m_web_job);
 		interface::fs::create_directories(m_web_job+"/src");
 		try {
@@ -1260,15 +1458,19 @@ struct Module: public interface::Module, public moderation::Host
 					"/meta.json").c_str(), &e);
 			if(!jstr(mm.get("server_wasm"), "source").empty())
 				m_web_names.push_back(n.name+".server.wasm");
+			else if(!mm.get("disable_cpp").is_true())
+				m_web_cpp = true;
 			if(interface::fs::path_exists(src+"/"+n.name+"/wasm"))
 				m_web_names.push_back(n.name+".wasm");
 		}
 #ifdef __linux__
 		m_web_started = now_s();
+		sv_<ss_> args = {"--build-wasm", m_web_job, m_server->get_config()
+				.get<ss_>("interface_path")};
+		if(m_web_cpp)
+			args.push_back(m_cpp_kit);
 		m_web_proc = interface::process::start(
-				interface::os::get_sibling_exe_path("buildat_server"),
-				{"--build-wasm", m_web_job, m_server->get_config().get<ss_>(
-				"interface_path")});
+				interface::os::get_sibling_exe_path("buildat_server"), args);
 		if(!m_web_proc.valid())
 			web_done(false);
 #else
@@ -1308,11 +1510,67 @@ struct Module: public interface::Module, public moderation::Host
 		return r;
 	}
 
+	// [WEB_LOCAL_AITTA_CPP] The release's own server, as the build left it
+	// in bin/, against the kit's (ref/): a .wasm of at most 32 MiB whose
+	// imports and custom sections are all the engine's own, and a .js that
+	// is the engine's but for where the EM_ASM code is. The page never runs
+	// this .js: it runs the .wasm with its local/_aitta/buildat_server.js,
+	// which the kit's is, so what the .wasm can reach is that .js's imports
+	// (the box's walls are the engine's own). Kept by its sha256; into
+	// out {wasm, js (the kit's .js's sha256, which the page compares with
+	// its own), shift}. "", or why not ("refused: ..." when one was built).
+	ss_ cpp_server_check(json::Value &out)
+	{
+		const size_t max = 32 << 20;
+		const ss_ w = read_built(m_web_job, "bin", "buildat_server.wasm", max + 1);
+		const ss_ js = read_built(m_web_job, "bin", "buildat_server.js", (8 << 20) + 1);
+		if(w.empty())
+			return "none was built";
+		if(w.size() > max)
+			return "refused: its .wasm is past 32 MiB";
+		const ss_ ref_js = read_file(m_cpp_kit+"/ref/buildat_server.js");
+		std::set<ss_> imports, customs, ref_imports, ref_customs;
+		ss_ why = wasm_imports(read_file(m_cpp_kit+"/ref/buildat_server.wasm"),
+				ref_imports, ref_customs);
+		if(!why.empty() || ref_js.empty())
+			return "the kit's own: "+(why.empty() ? ss_("no .js") : why);
+		why = wasm_imports(w, imports, customs);
+		if(!why.empty())
+			return "refused: "+why;
+		for(const ss_ &i : imports)
+			if(!ref_imports.count(i)){
+				ss_ name = i.substr(0, i.find('\0', i.find('\0') + 1));
+				std::replace(name.begin(), name.end(), '\0', '.');
+				for(char &c : name)
+					if(c < 32 || c > 126)
+						c = '?';
+				return "refused: it imports "+name.substr(0, 100)+", which "
+						"the engine's server does not, or not of that type";
+			}
+		for(const ss_ &c : customs)
+			if(!ref_customs.count(c))
+				return "refused: a custom section the engine's has not";
+		int64_t shift = 0;
+		why = js_shift(js, ref_js, shift);
+		if(!why.empty())
+			return "refused: "+why;
+		const ss_ h = interface::sha256::hex(interface::sha256::calculate(w));
+		interface::fs::create_directories(m_archives+"/wasm");
+		if(!write_file(m_archives+"/wasm/"+h+".wasm", w))
+			return "it could not be kept";
+		out = json::object();
+		out.set("wasm", h);
+		out.set("js", interface::sha256::hex(interface::sha256::calculate(ref_js)));
+		out.set("shift", shift);
+		return "";
+	}
+
 	void web_done(bool over)
 	{
 		json::Value rel = load("releases", m_web_id);
 		json::Value built = json::object();
-		bool ok = !over && rel.is_object() && !m_web_names.empty();
+		bool ok = !over && rel.is_object() && (!m_web_names.empty() ||
+				m_web_cpp);
 		for(const ss_ &f : m_web_names){
 			// The engine refuses a .wasm past 8 MiB (wasm/engine.h)
 			const ss_ data = ok ? read_built(m_web_job, "out", f,
@@ -1324,11 +1582,28 @@ struct Module: public interface::Module, public moderation::Host
 					write_file(m_archives+"/wasm/"+h+".wasm", data);
 			built.set(f.c_str(), h);
 		}
+		json::Value server;
+		if(ok && m_web_cpp){
+			const ss_ why = cpp_server_check(server);
+			if(!why.empty()){
+				log_w(MODULE, "web build of %s: its server: %s",
+						cs(m_web_id), cs(why));
+				ok = false;
+			}
+		}
 		if(rel.is_object()){
 			rel.set("web_build", ok ? "built" : "failed");
 			if(ok){
 				rel.set("web_wasm", built);
-				rel.set("web", true);
+				// [WEB_LOCAL_AITTA_CPP] "web_cpp", not "web": a client
+				// before it would run the release with the engine's server
+				// for packages, which has none of its C++
+				if(m_web_cpp){
+					rel.set("web_server", server);
+					rel.set("web_cpp", true);
+				} else {
+					rel.set("web", true);
+				}
 			}
 			put("releases", m_web_id, rel);
 		}

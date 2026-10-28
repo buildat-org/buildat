@@ -69,9 +69,9 @@ load is refused, another is listed with the problems as a warning
 A release can run in the browser with its server in the page
 ([WEB_LOCAL_AITTA]) when it is an app, not a variant, whose client Lua
 loads on the web, each of whose modules is a .wasm on the server side
-("server_wasm") or has no server side ("disable_cpp") -- no C++ -- and
-whose dependencies are its own modules or builtins that keep to the web
-API. Aitta builds such a release's .wasm itself after it is listed, one
+("server_wasm") or has no server side ("disable_cpp") -- or is C++ on an
+Aitta with a kit, below -- and whose dependencies are its own modules or
+builtins that keep to the web API. Aitta builds such a release's .wasm itself after it is listed, one
 release at a time, from the release's source (a release carries no
 .wasm): `buildat_server --build-wasm`, as the server builds them (cargo
 or clang to wasm32), in a box of the build's own (Linux: Landlock and
@@ -80,13 +80,41 @@ and the engine's headers and crates, writes its own directory, opens no
 socket and gets no environment of Aitta's; 300 s, 600 s of CPU and 4 GiB
 a process, 512 processes and threads at once (counted in the build's
 user namespace; a kernel before 5.14 counts the uid's across the host),
-two compiles at once. Every process the build starts ends
+two compiles at once, its directory at most 3 GiB and 200000 files
+(measured each second; past either the build ends). Every process the build starts ends
 with it: the build runs in a PID namespace of its own (an unprivileged
 user namespace); where the host allows none, nothing is built. A crate's dependencies are path ones
 (no network). Built, the release says "web": true and names each .wasm
 in "web_wasm" ({"<module>.server.wasm" or "<module>.wasm": its sha256});
 a failed build leaves it out of the page, Aitta's log saying why. An
 Aitta not on Linux builds none.
+
+C++ modules ([WEB_LOCAL_AITTA_CPP]) are built for the page only by an
+Aitta started with BUILDAT_AITTA_CPP_KIT naming a kit: the engine's
+server for packages (web/local/_aitta) as parts -- its objects,
+libraries, flags, headers and packed files, the .js and .wasm it made,
+and a link to the emsdk -- which util/build_web_server.sh
+"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit, on the
+Aitta host itself (the link reads the emsdk's cache there and cannot
+write to it). In the same build, in the same box, the kit's fixed script
+(util/aitta_cpp_build.py) compiles each C++ module (<name>_web.cpp or
+<name>.cpp, and its wasm/'s C and C++) with the kit's flags and none of
+the module's own -- a module with "cxxflags" is not for the page -- and
+links them with the kit's objects into a server of the release's own.
+Aitta then checks the output, not the source: the .wasm (at most 32 MiB)
+imports nothing the kit's does not, each of the same type, and has no
+custom section the kit's has not; its .js is the kit's but for where the
+EM_ASM code is (moved by one amount, the release's own data before it).
+So EM_ASM, EM_JS, emscripten_run_script and any library function the
+engine does not use are refused, whatever macro wrote them. Built, the
+release says "web_cpp": true (not "web": a client before this would run
+it without its C++) and "web_server": {wasm (its sha256), js (the kit's
+.js's sha256), shift}. The page never runs the release's .js: it runs
+the .wasm with its own web/local/_aitta/buildat_server.js, so the .wasm
+reaches what that .js's imports reach and no more; the check refuses
+early what could not run so. A kit of another engine version links every
+such release again at Aitta's start; until then the page of the new
+version runs none of them.
 
 A package of kind "extension" is a client extension: init.lua at its
 root, run in the client's sandbox like extensions/ (an app's client Lua
@@ -244,8 +272,9 @@ when the launcher next fetches that Aitta's list.
     POST /api/v1/aitta/report_status          {key, receipts}: outcomes
     GET  /api/v1/aitta/archive/<sha256>.zip|.sig a listed release's files
     GET  /api/v1/aitta/wasm/<sha256>.wasm     a .wasm built for a listed
-                                              release (its "web_wasm"),
-                                              with CORP cross-origin
+                                              release (its "web_wasm" or
+                                              "web_server"), with CORP
+                                              cross-origin
     GET  /api/v1/aitta/media/<sha256>         a listed release's icon or
                                               screenshot, image/png or
                                               image/jpeg by its bytes, or a
@@ -314,7 +343,14 @@ util/build_web_server.sh), in a worker, hands it the installed files and
 the .wasm, and the client joins it as it joins an app's own ?local=
 server; the modules' .wasm run on the browser's own wasm, checked,
 granted and metered as on a native server. The saves are kept in the
-browser.
+browser. A release with C++ ("web_cpp") has its own server .wasm, kept as
+.web/server.engine.wasm with .web/server.json: the page runs it with
+local/_aitta's .js when that .js is the one its Aitta's kit had (by
+sha256; else "built for another version of this page's engine"), the
+EM_ASM addresses moved by the release's shift (src/server/web/post.js).
+Its saves are an IndexedDB database of their own (/user/apps/<author>.
+<name> in the server's files; the rest of /user is memory): its C++
+reaches every file of the server, so no other app's saves are mounted.
 
 Running an installed app
 ------------------------

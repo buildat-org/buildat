@@ -50,6 +50,33 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 	// root, files: [[path under root, bytes], ...], wasm: [[name, bytes],
 	// ...]}, written before main() runs it from root, the .wasm into /wasm
 	var package_ = /[?&]package=1(&|$)/.test(self.location.search);
+	// [WEB_LOCAL_AITTA_CPP] ?server=<shift> as well: the package's own
+	// server .wasm (Aitta linked the engine's objects with its C++
+	// modules), sent as {server: bytes} with the files, is run in place of
+	// local/_aitta's own, by this script, whose imports Aitta checked it
+	// takes no more of (post.js moves the EM_ASM addresses). Its /user is
+	// its own app's directory only: the C++ reaches every file the server
+	// can, so no other app's saves are in reach (the rest of /user is
+	// memory, gone with the page).
+	var own_server = package_ &&
+			/[?&]server=-?[0-9]{1,9}(&|$)/.test(self.location.search);
+	var instantiate = null;
+	if(own_server)
+		Module.instantiateWasm = function(imports, receive){
+			instantiate = function(){
+				instantiate = null;
+				if(!(sent.server instanceof Uint8Array))
+					return abort('no server .wasm was sent');
+				WebAssembly.instantiate(sent.server, imports).then(function(r){
+					receive(r.instance, r.module);
+				}, function(e){
+					abort('the package\'s server .wasm: ' + e);
+				});
+			};
+			if(sent)
+				instantiate();
+			return {};
+		};
 	// [WEB_LOCAL_PLAYER_NAME] ?name=: the page's player's name, which
 	// builtin/accounts' web stand-in gives the page's client
 	var local_name = /[?&]name=([A-Za-z0-9_\-]{1,20})(&|$)/.exec(self.location.search);
@@ -116,8 +143,12 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 			waiting = true;
 			addRunDependency('files');
 		}
-		FS.mkdir('/user');
-		FS.mount(FS.filesystems.IDBFS, {}, '/user');
+		var app = own_server && /^\/installed\/([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)\//.exec(sent.root + '/');
+		if(own_server && !app)
+			return abort('not a package\'s root: ' + sent.root);
+		var user = app ? '/user/apps/' + app[1] + '.' + app[2] : '/user';
+		FS.mkdirTree(user);
+		FS.mount(FS.filesystems.IDBFS, {}, user);
 		addRunDependency('idbfs');
 		FS.syncfs(true, function(err){
 			if(err)
@@ -141,6 +172,8 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 	self.addEventListener('message', function(e){
 		if(package_ && !sent && e.data && e.data.op === 'files'){
 			sent = e.data;
+			if(instantiate)
+				instantiate();
 			if(waiting){
 				put_files();
 				removeRunDependency('files');

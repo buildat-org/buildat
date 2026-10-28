@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: ~40 s (2026-10-28)
-# covers: apps/aitta/main/main.cpp src/server/confine.cpp src/server/web/pre.js src/client/web/index.html client/core/aitta/init.lua builtin/network/network.cpp
+# cost: ~3 min (2026-10-28)
+# covers: apps/aitta/main/main.cpp src/server/confine.cpp src/server/web/pre.js src/server/web/post.js src/client/web/index.html client/core/aitta/init.lua builtin/network/network.cpp util/aitta_cpp_build.py
 # [WEB_LOCAL_AITTA]: a package whose server modules are .wasm, published
 # to a local (boxed) Aitta and played in the page.
 #   1. apps/sample_rust published as tester/rusty: Aitta builds its .wasm
@@ -20,19 +20,30 @@
 #   2d. A build script making files without end (to 300000, past the
 #      build's 200000): ended by the build's PID 1, which measures the job
 #      directory each second (RLIMIT_FSIZE caps one file only).
-#   3. A package with a C++ module: listed, not in the page.
+#   3. A package with a C++ module with cxxflags: listed, not in the page.
+#   3b. [WEB_LOCAL_AITTA_CPP] A package with a C++ module: Aitta links its
+#      own server from the kit (Build-webserver/aitta_kit) in the build's
+#      box, checks it against the kit's and lists it ("web_server"), served
+#      with CORS and CORP. Refused: EM_ASM, EM_JS, emscripten_run_script,
+#      an import the engine has not (emscripten_vibrate), one it has under
+#      another type, and an #include of a file outside the package (which
+#      Aitta's box reads).
 #   4. A play server's page (headless Chrome) with that Aitta in its
 #      settings, at #run=tester/rusty: installed, its .wasm fetched and
 #      checked, the page at ?local=tester.rusty@1.0.0 runs the engine's
 #      server for packages (web/local/_aitta) on it, the client joins it,
 #      the cube drawn and a key answered by the server's .wasm on the
-#      browser's wasm.
+#      browser's wasm. Then the C++ package, in headless Chrome and
+#      headless WebKit: its own server .wasm run by local/_aitta's .js, its
+#      C++ answering the client's packet.
 #   5. 2b again where the host gives the build no PID namespace
 #      (BUILDAT_BUILD_NO_PIDNS=1): not built, and nothing left. Aitta's
-#      records copied to a second one.
+#      records copied to a second one, which has no kit: the C++ package
+#      listed, not in the page.
 # Needs web/ (util/build_web.sh), web/local/_aitta
-# (util/build_web_server.sh "$PWD/src/server/web/_aitta"), cargo with the
-# wasm32-unknown-unknown target, and a display for the key's bind.
+# (util/build_web_server.sh "$PWD/src/server/web/_aitta", which makes the
+# kit too), cargo with the wasm32-unknown-unknown target, a display for the
+# key's bind, and Playwright's WebKit (util/web_drive.sh).
 #   util/aitta_web_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -40,6 +51,9 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 [ -f "$here/web/local/_aitta/buildat_server.wasm" ] ||
 	skip "no web/local/_aitta (util/build_web_server.sh \"\$PWD/src/server/web/_aitta\")"
+kit=$here/Build-webserver/aitta_kit
+[ -f "$kit/kit.json" ] && cmp -s "$kit/ref/buildat_server.js" "$here/web/local/_aitta/buildat_server.js" ||
+	skip "no kit of web/local/_aitta's build (util/build_web_server.sh \"\$PWD/src/server/web/_aitta\")"
 cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
 [ -x "$cargo" ] || skip "no cargo"
 [ -d "$("$(dirname "$cargo")/rustc" --print target-libdir --target wasm32-unknown-unknown 2>/dev/null)" ] ||
@@ -50,7 +64,7 @@ export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
 trap check_cleanup EXIT
 
 cd "$here/Build"
-AITTA_ENV_SECRET=1 start_server "$t/srv.log" "setup code" 60 auto \
+AITTA_ENV_SECRET=1 BUILDAT_AITTA_CPP_KIT=$kit start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -286,13 +300,131 @@ grep -aq "FILL made all" "$t/srv.log" && fail "fill made all its files"
 echo "ok: a build filling its directory is ended at its cap"
 
 # 3.
-mkdir -p "$t/cpp"
-cp -r "$here/apps/sample_module_calls/test1" "$t/cpp/"
-publish "$t/cpp" cpp
-grep -aq "tester/cpp/1.0.0 in the page: no, the module test1 is C++" "$t/srv.log" ||
-	fail "the C++ package not refused for the page ($t/srv.log)"
-release cpp | grep -q '"web"' && fail "the C++ package has a web build"
-echo "ok: a package with C++ is listed, not in the page"
+mkdir -p "$t/cpp/main/client_lua"
+cat > "$t/cpp/main/main.cpp" <<'EOF2'
+// The check's C++ server module: says hello, answers the client's ping
+#include "interface/module.h"
+#include "interface/server.h"
+#include "network/api.h"
+#include "core/log.h"
+#include <map>
+#include <stdexcept>
+// EVIL_TOP
+#define MODULE "main"
+namespace main_ {
+struct Module: public interface::Module
+{
+	interface::Server *m_server;
+	std::map<ss_, int> m_count;
+	Module(interface::Server *server): interface::Module(MODULE), m_server(server) {}
+	void init()
+	{
+		log_i(MODULE, "CPPSERVER hello from the release's C++");
+		// EVIL_INIT
+		sub(m_server, "network:packet_received/main:ping", &Module::on_ping);
+	}
+	void on_ping(const network::Packet &packet)
+	{
+		int n = 0;
+		try {
+			throw std::runtime_error("caught");
+		} catch(std::exception &e){
+			n = ++m_count[e.what()];
+		}
+		network::send(m_server, packet.sender, "main:pong",
+				"pong "+packet.data.substr(0, 40)+" "+std::to_string(n));
+	}
+};
+extern "C" {
+	BUILDAT_EXPORT void* createModule_main(interface::Server *server){
+		return (void*)(new Module(server));
+	}
+}
+}
+EOF2
+cat > "$t/cpp/main/client_lua/init.lua" <<'EOF2'
+local log = buildat.Logger("cpp")
+buildat.sub_packet("main:pong", function(data)
+	log:info("CPPPONG " .. data)
+end)
+buildat.send_packet("main:ping", "from the page")
+EOF2
+echo '{"engine_api": 2, "client_main": "init.lua", "dependencies": [{"module": "network"},
+	{"module": "client_lua"}, {"module": "client_data"}]}' > "$t/cpp/main/meta.json"
+mkdir -p "$t/flags"
+cp -r "$t/cpp/main" "$t/flags/"
+echo '{"engine_api": 2, "cxxflags": "-DX", "dependencies": [{"module": "network"}]}' \
+	> "$t/flags/main/meta.json"
+publish "$t/flags" flags
+grep -aq "tester/flags/1.0.0 in the page: no, the module main has cxxflags" "$t/srv.log" ||
+	fail "the C++ package with cxxflags not refused for the page ($t/srv.log)"
+release flags | grep -q '"web"\|"web_cpp"' && fail "the C++ package with cxxflags has a web build"
+echo "ok: a package whose C++ has flags of its own is listed, not in the page"
+
+# 3b. [WEB_LOCAL_AITTA_CPP] Its own server, and the refusals: each a copy
+# of cpp with a line put in. "outside" includes a file of Aitta's (by its
+# path, which a publisher would guess), valid C++, readable outside the box
+printf '#define OUTSIDE_SECRET "leaked"\n' > "$t/srv/apps/aitta/outside.h"
+cat "$t/srv/apps/aitta/outside.h" > /dev/null || fail "outside.h is not readable here"
+evil(){
+	mkdir -p "$t/$1"
+	cp -r "$t/cpp/main" "$t/$1/"
+	python3 - "$t/$1/main/main.cpp" "$2" "$3" <<'EOF2'
+import sys
+p, top, init = sys.argv[1:4]
+s = open(p).read().replace("// EVIL_TOP", top).replace("// EVIL_INIT", init)
+open(p, "w").write(s)
+EOF2
+}
+evil emasm "#include <emscripten.h>" 'EM_ASM({ console.log("EVIL EM_ASM"); });'
+evil emjs "#include <emscripten.h>
+EM_JS(void, evil_js, (), { console.log('EVIL EM_JS'); });" "evil_js();"
+evil runscript "#include <emscripten.h>" 'emscripten_run_script("console.log(1)");'
+evil vibrate "#include <emscripten/html5.h>" "emscripten_vibrate(1);"
+evil sig 'extern "C" __attribute__((import_module("env"), import_name("emscripten_date_now"))) int evil_now(int);' \
+	'log_i(MODULE, "%i", evil_now(1));'
+evil outside "#include \"$t/srv/apps/aitta/outside.h\"" 'log_i(MODULE, "%s", OUTSIDE_SECRET);'
+# One at a time: Aitta takes 30 uploads a minute from an address
+for n in cpp emasm emjs runscript vibrate sig outside; do
+	publish "$t/$n" $n
+	wait_for_log "$t/srv.log" "web build of tester/$n/1.0.0: " 300 ||
+		fail "no web build of $n ($t/srv.log)"
+done
+grep -aq "web build of tester/cpp/1.0.0: built" "$t/srv.log" ||
+	fail "cpp's server was not built: $(grep -a -A30 "web build of tester/cpp" "$t/srv.log" | tail -30)"
+release cpp > "$t/cpp.json"
+python3 - "$t/cpp.json" "$(sha256sum < "$here/web/local/_aitta/buildat_server.js" | cut -d' ' -f1)" \
+		> "$t/cpp.list" <<'EOF2' || fail "cpp's listing ($t/cpp.json)"
+import json, sys
+r = json.load(open(sys.argv[1]))
+s = r["web_server"]
+assert r["web_cpp"] is True and "web" not in r and r["web_build"] == "built" and r["web_wasm"] == {}, r
+assert s["js"] == sys.argv[2] and isinstance(s["shift"], int) and len(s["wasm"]) == 64, s
+print(s["wasm"], s["shift"])
+EOF2
+read -r sha shift < "$t/cpp.list"
+curl -s -D "$t/h" -o "$t/cpp.wasm" "http://127.0.0.1:$P/api/v1/aitta/wasm/$sha.wasm"
+tr -d '\r' < "$t/h" > "$t/h2"
+grep -qi "^Access-Control-Allow-Origin: \*" "$t/h2" &&
+	grep -qi "^Cross-Origin-Resource-Policy: cross-origin" "$t/h2" ||
+	fail "cpp's server: not served for an isolated page ($(cat "$t/h2"))"
+[ "$(sha256sum < "$t/cpp.wasm" | cut -d' ' -f1)" = "$sha" ] || fail "cpp's server is not $sha"
+echo "ok: cpp's server linked at publish ($(stat -c %s "$t/cpp.wasm") bytes, EM_ASM moved by $shift), listed and served"
+refused(){
+	grep -aq "web build of tester/$1/1.0.0: failed" "$t/srv.log" ||
+		fail "$1 was not refused: $(grep -a -A10 "web build of tester/$1" "$t/srv.log" | tail -10)"
+	grep -aq "$2" "$t/srv.log" || fail "$1: no \"$2\" in $t/srv.log"
+	release "$1" | grep -q '"web"\|"web_cpp"' && fail "$1 has a web build"
+	echo "ok: $1 refused: $(grep -aom1 "$2.*" "$t/srv.log" | cut -c1-120)"
+}
+refused emasm "web build of tester/emasm/1.0.0: its server: refused: its .js is not the engine's"
+refused emjs "web build of tester/emjs/1.0.0: its server: refused: it imports env.evil_js"
+refused runscript "web build of tester/runscript/1.0.0: its server: refused: it imports env.emscripten_run_script,"
+refused vibrate "web build of tester/vibrate/1.0.0: its server: refused: it imports env.emscripten_vibrate,"
+refused sig "web build of tester/sig/1.0.0: its server: refused: it imports env.emscripten_date_now,"
+refused outside "outside.h.*\(Permission denied\|not found\)"
+grep -aq "web build of tester/outside/1.0.0: its server: refused" "$t/srv.log" &&
+	fail "outside was linked: the include read past the box"
 
 # 4.
 BUILDAT_LUANTI_LIST=http://127.0.0.1:9 start_server "$t/play.log" "Listening at" 120 auto \
@@ -335,6 +467,41 @@ for want in "server: .*Loading module main from /installed/tester/rusty/1.0.0/ma
 		"server: .*wasm main: key from peer 1: count 1"; do
 	grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 done
+echo "ok: rusty played in the page (Chrome)"
+# The C++ package, in each browser (its own storage: installed afresh)
+for browser in chrome webkit; do
+	cat > "$t/steps_cpp.json" <<J
+[["nav", "http://127.0.0.1:$PP/"],
+ ["waitlog", "launch_menu", 90],
+ ["eval", "$set_js"],
+ ["nav", "http://127.0.0.1:$PP/?again#run=tester/cpp"],
+ ["waitlog", "Asking the user about", 90],
+ ["wait", 1000],
+ ["key", "Enter"],
+ ["waitlog", "local: asking the player's name", 60],
+ ["type", "tester"],
+ ["key", "Enter"],
+ ["waitlog", "local: tester.cpp@1.0.0 has its own server .wasm", 60],
+ ["eval", "'isolated ' + crossOriginIsolated + ' at ' + location.search"],
+ ["waitlog", "CPPSERVER hello", 120],
+ ["waitlog", "CPPPONG pong from the page 1", 60]]
+J
+	PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 \
+	NODE_PATH=$HOME/.local/share/playwright-node/node_modules \
+	WEB_DRIVE_URL=http://127.0.0.1:$PP "$here/util/web_drive.sh" $browser play \
+		"$t/steps_cpp.json" "$t/web_cpp_$browser" > "$t/web_cpp_$browser.out" 2>&1 ||
+		fail "the $browser drive of cpp ($(tail -3 "$t/web_cpp_$browser.out"); $t/web_cpp_$browser)"
+	page=$t/web_cpp_$browser/page.log
+	grep -q "isolated true at ?local=tester.cpp%401.0.0" "$t/web_cpp_$browser.out" ||
+		fail "$browser: not the package's isolated page"
+	for want in "server: .*Loading module main from /installed/tester/cpp/1.0.0/main" \
+			"server: .*CPPSERVER hello from the release's C++" \
+			"CPPPONG pong from the page 1"; do
+		grep -aq "$want" "$page" || fail "$browser: no \"$want\" in $page"
+	done
+	grep -aq "No EM_ASM constant\|aborted" "$page" && fail "$browser: $(grep -a "No EM_ASM\|aborted" "$page" | head -3)"
+	echo "ok: cpp played in the page ($browser): its own server, its C++ answering"
+done
 # 5. 2b where the host gives a build no PID namespace: the same Aitta,
 # its records copied, refusing the build
 kill $aitta_pid $play_pid
@@ -356,4 +523,9 @@ grep -aq "web build of tester/linger2/1.0.0: failed" "$t/srv2.log" &&
 left=$(pgrep -f "${tok}_" | tr '\n' ' ')
 [ -n "$left" ] && { CHECK_PIDS+=($left); fail "linger2 left processes: $left"; }
 echo "ok: without a PID namespace nothing is built"
-echo "PASS: Aitta builds a release's .wasm at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ for it, ends every process a build leaves; the page installs the release and runs it with the engine's server for packages, the client joined and a key answered"
+publish "$t/cpp" cpp2
+grep -aq "tester/cpp2/1.0.0 in the page: no, the module main is C++" "$t/srv2.log" ||
+	fail "the C++ package not refused for the page without a kit ($t/srv2.log)"
+release cpp2 | grep -q '"web"\|"web_cpp"' && fail "cpp2 has a web build without a kit"
+echo "ok: without a kit a package with C++ is listed, not in the page"
+echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ without a kit; ends every process a build leaves; the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"

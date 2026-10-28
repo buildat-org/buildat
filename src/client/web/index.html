@@ -750,7 +750,9 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// closed. Its storage is written out every 5 s and when the page is
 	// hidden, and the server is stopped when the page goes.
 	// package: {root, files, wasm} for the engine's server for packages
-	// (local/_aitta/), sent to it before its main() (src/server/web/pre.js)
+	// (local/_aitta/), sent to it before its main() (src/server/web/pre.js);
+	// with server and shift, the package's own server .wasm run by it
+	// ([WEB_LOCAL_AITTA_CPP])
 	function start_local(app, package_, name){
 		var p = Module.buildatPipe = {q: [], closed: null, gone: null};
 		var w = null;
@@ -774,10 +776,12 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			return;
 		}
 		w = new Worker('local/' + app + '/buildat_server.js?name=' +
-				encodeURIComponent(name) + (package_ ? '&package=1' : ''));
+				encodeURIComponent(name) + (package_ ? '&package=1' : '') +
+				(package_ && package_.server ? '&server=' + package_.shift : ''));
 		if(package_)
 			w.postMessage({op: 'files', root: package_.root,
-					files: package_.files, wasm: package_.wasm});
+					files: package_.files, wasm: package_.wasm,
+					server: package_.server});
 		w.onmessage = function(e){
 			var m = e.data;
 			if(m.d)
@@ -908,8 +912,47 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		files = files.filter(function(f){ return f[0].indexOf('.web/') !== 0; });
 		console.log('local: ' + m[0] + ', ' + files.length + ' files, ' +
 				wasm.length + ' .wasm');
-		start_local('_aitta', {root: '/installed/' + m[1] + '/' + m[2] + '/' +
-				m[3], files: files, wasm: wasm}, local_name);
+		var package_ = {root: '/installed/' + m[1] + '/' + m[2] + '/' +
+				m[3], files: files, wasm: wasm};
+		// [WEB_LOCAL_AITTA_CPP] Its own server .wasm, which its Aitta built
+		// for local/_aitta's .js as it was then (its sha256 in server.json):
+		// run only by that same .js
+		var own = null;
+		try {
+			own = JSON.parse(FS.readFile(dir + '/.web/server.json', {encoding: 'utf8'}));
+			package_.server = FS.readFile(dir + '/.web/server.engine.wasm');
+		} catch(e){}
+		if(!own)
+			return start_local('_aitta', package_, local_name);
+		// The client starts once this is settled
+		Module.addRunDependency('own_server');
+		var refuse = function(why){
+			console.warn('local: ' + m[0] + ': ' + why);
+			Module.buildatPipe = {q: [], closed: why, gone: why};
+			Module.removeRunDependency('own_server');
+		};
+		if(!package_.server || !/^-?[0-9]{1,9}$/.test(String(own.shift)) ||
+				!/^[0-9a-f]{64}$/.test(String(own.js)))
+			return refuse('its server is not installed whole');
+		package_.shift = own.shift;
+		fetch('local/_aitta/buildat_server.js').then(function(r){
+			return r.arrayBuffer();
+		}).then(function(b){
+			return crypto.subtle.digest('SHA-256', b);
+		}).then(function(h){
+			var hex = Array.prototype.map.call(new Uint8Array(h), function(x){
+				return ('0' + x.toString(16)).slice(-2);
+			}).join('');
+			if(hex !== own.js)
+				return refuse(m[0] + '\'s server was built for another ' +
+						'version of this page\'s engine');
+			console.log('local: ' + m[0] + ' has its own server .wasm, ' +
+					package_.server.length + ' bytes');
+			start_local('_aitta', package_, local_name);
+			Module.removeRunDependency('own_server');
+		}, function(e){
+			refuse('the engine\'s server for packages: ' + e);
+		});
 	}
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
 	// browser's focus is on it while a LineEdit has the game's, holding the

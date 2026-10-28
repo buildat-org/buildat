@@ -216,10 +216,12 @@ end
 
 -- [WEB_LOCAL_AITTA] A release whose server runs in the page: its modules
 -- are .wasm, which its Aitta built at publish ("web_wasm", the names the
--- page's server looks for and their sha256)
+-- page's server looks for and their sha256); or it has C++, linked into a
+-- server of its own ("web_cpp", "web_server", [WEB_LOCAL_AITTA_CPP])
 local function in_page(rel)
-	return ON_WEB and rel.serverless ~= true and rel.web == true and
-			type(rel.web_wasm) == "table"
+	return ON_WEB and rel.serverless ~= true and type(rel.web_wasm) == "table" and
+			(rel.web == true or (rel.web_cpp == true and
+			type(rel.web_server) == "table"))
 end
 
 -- [WEB_LOCAL_AITTA] An installed release run in the page: its .wasm
@@ -248,9 +250,37 @@ local function go_in_page(key, rel)
 		end
 		todo[#todo + 1] = {name = name, sha = sha:lower()}
 	end
+	-- [WEB_LOCAL_AITTA_CPP] Its own server .wasm, with its C++ modules,
+	-- which its Aitta linked for the page's engine: server.engine.wasm, a
+	-- name no module's .wasm has, and server.json, for the page (empty
+	-- without one)
+	local own = rel.web_server
+	local server_json = ""
+	if own ~= nil then
+		local sha, js, shift = type(own) == "table" and own.wasm,
+				type(own) == "table" and own.js,
+				type(own) == "table" and tonumber(own.shift)
+		if type(sha) ~= "string" or not sha:match("^%x+$") or #sha ~= 64 or
+				type(js) ~= "string" or not js:match("^%x+$") or #js ~= 64 or
+				not shift or shift ~= math.floor(shift) or
+				math.abs(shift) >= 1e9 then
+			return ui.show_message_dialog("Could not start " .. key ..
+					": its Aitta's list names its server wrongly")
+		end
+		todo[#todo + 1] = {name = "server.engine.wasm", sha = sha:lower()}
+		server_json = network.write_json({js = js:lower(),
+				shift = string.format("%d", shift)})
+	end
 	local left = #todo
 	local function next_one()
 		if left == 0 then
+			local f = io.open(dir .. "/server.json", "wb")
+			if not f then
+				return ui.show_message_dialog("Could not start " .. key ..
+						": server.json could not be written")
+			end
+			f:write(server_json)
+			f:close()
 			log:info("aitta: play " .. id .. " in the page")
 			return __buildat_web_go_local(id)
 		end
@@ -457,7 +487,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		ptext(p.key, nil, 18)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
 				"an extension" or "an app") .. ((rel.serverless == true or
-				rel.web == true) and ", runs in the browser" or "") .. ", by " ..
+				rel.web == true or rel.web_cpp == true) and
+				", runs in the browser" or "") .. ", by " ..
 				tostring(rel.author) .. "; " .. (rel.review == "reviewed" and
 				"reviewed" or "unreviewed"), DIM)
 		ptext(tostring(rel.license_code) .. " / " ..
