@@ -369,8 +369,8 @@ fi
 	# being voxels now, and
 	# a shot 900 ms later sometimes landed before the mesh did -- which
 	# read as "nothing wears the generated maps" (2026-09-23). The room
-	# says which way the toggle went once it has rebuilt
-	# (set_8bit_voxel_geometry is done when rebuild_room returns), so the
+	# says which way the toggle went once it has rebuilt (the last
+	# block's mesh on its node), so the
 	# wait is on that and the delay after it is the frame's.
 	# (Said inside the event, so a wait that starts after it is
 	# wait_log_any; each of the two is said once a run.)

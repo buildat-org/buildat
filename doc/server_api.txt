@@ -887,7 +887,7 @@ interface/http.h: http_get, http_post, send_mail, mail_supported, http_download
 interface/magic_event.h: MagicEvent
 interface/magic_event_handler.h: MagicEventHandler, emit_event, on_event
 interface/markup.h: to_html
-interface/mesh.h: set_8bit_voxel_geometry, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, VoxelGeometryJob, generate_voxel_geometry_step, generate_occluder, set_bounce_color, set_alpha_nibbles, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, set_voxel_physics_boxes
+interface/mesh.h: set_8bit_voxel_geometry, volume_from_8bit, TemporaryGeometry, PreloadCursor, preload_textures_sliced, preload_textures, HorizonMap, generate_voxel_geometry, VoxelGeometryJob, generate_voxel_geometry_step, generate_occluder, set_bounce_color, set_alpha_nibbles, set_voxel_geometry, generate_voxel_lod_volume, generate_voxel_lod_geometry, generate_voxel_lod_geometry_step, set_voxel_lod_geometry, TemporaryBox, generate_voxel_physics_boxes, PhysicsBoxesJob, generate_voxel_physics_boxes_step, set_voxel_physics_boxes
 interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispatch, get_interface, check_interface, add_handler
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope

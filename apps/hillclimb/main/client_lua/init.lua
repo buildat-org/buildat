@@ -52,6 +52,10 @@ voxel_shading.use_technique_set({
 	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
 })
 voxelworld.lod_distance = 4000
+-- No collision shapes for the chunks: nothing here collides with them (the
+-- car is the server's, and its prediction reads the volumes), and on the
+-- web their building was most of a frame ([WEB_MESH_SLICES])
+voxelworld.physics_distance = 1
 voxelworld.send_distance = FAR_CLIP
 
 local zone = scene:CreateChild("Zone"):CreateComponent("Zone")

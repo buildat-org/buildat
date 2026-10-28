@@ -30,6 +30,10 @@ namespace interface
 				int w, int h, int d, const ss_ &source_data,
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				const pv::Vector3DInt32 &uv_origin = pv::Vector3DInt32(0, 0, 0));
+		// The padded volume that meshes: the bytes as type ids, every voxel
+		// lit as if out in the open
+		up_<VoxelVolume> volume_from_8bit(int w, int h, int d,
+				const ss_ &source_data, VoxelRegistry *voxel_reg);
 
 		// Voxel geometry generation
 
@@ -230,6 +234,15 @@ namespace interface
 				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 				bool use_skylight = false,
 				const HorizonMap *horizon = nullptr);
+		// The same in slices, as generate_voxel_geometry_step()
+		// ([WEB_MESH_SLICES])
+		bool generate_voxel_lod_geometry_step(VoxelGeometryJob &job,
+				int64_t until_us, int lod,
+				sm_<uint, TemporaryGeometry> &result,
+				VoxelVolume &lod_volume,
+				VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+				bool use_skylight = false,
+				const HorizonMap *horizon = nullptr);
 
 		void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
 				const sm_<uint, TemporaryGeometry> &temp_geoms,
@@ -251,6 +264,20 @@ namespace interface
 		// Can be called from any thread
 		void generate_voxel_physics_boxes(
 				sv_<TemporaryBox> &result_boxes,
+				VoxelVolume &volume,
+				VoxelRegistry *voxel_reg);
+		// The same in slices ([WEB_MESH_SLICES]): the solidity a z layer
+		// a step, then the boxes, a box a step at least, until `until_us`
+		// has passed; true once the boxes are all there
+		struct PhysicsBoxesJob
+		{
+			struct State;
+			up_<State> s;
+			PhysicsBoxesJob();
+			~PhysicsBoxesJob();
+		};
+		bool generate_voxel_physics_boxes_step(PhysicsBoxesJob &job,
+				int64_t until_us, sv_<TemporaryBox> &result_boxes,
 				VoxelVolume &volume,
 				VoxelRegistry *voxel_reg);
 

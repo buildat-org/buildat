@@ -48,10 +48,18 @@ namespace lua_bindings {
 			result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
 
+struct SetVoxelGeometryTask;
+static void add_8bit_task(Node *node, int w, int h, int d, const ss_ &data,
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		int ox, int oy, int oz, const luabind::object &done_cb,
+		app::App *buildat_app);
+
+// done_cb, a function: made on the pool's tasks as a world's chunk is,
+// and done_cb() called once the geometry is on the node; else at once
 void set_8bit_voxel_geometry(const luabind::object &node_o,
 		int w, int h, int d, const luabind::object &buffer_o,
 		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
-		int ox, int oy, int oz)
+		int ox, int oy, int oz, const luabind::object &done_cb)
 {
 	lua_State *L = node_o.interpreter();
 
@@ -76,6 +84,12 @@ void set_8bit_voxel_geometry(const luabind::object &node_o,
 	app::App *buildat_app = (app::App*)lua_touserdata(L, -1);
 	lua_pop(L, 1);
 	Context *context = buildat_app->get_scene()->GetContext();
+
+	if(done_cb.is_valid() && luabind::type(done_cb) == LUA_TFUNCTION){
+		add_8bit_task(node, w, h, d, data, voxel_reg, atlas_reg, ox, oy, oz,
+				done_cb, buildat_app);
+		return;
+	}
 
 	CustomGeometry *cg = node->GetOrCreateComponent<CustomGeometry>(LOCAL);
 
@@ -159,6 +173,45 @@ static up_<interface::mesh::HorizonMap> parse_horizon(const ss_ &horizon_data,
 	return horizon;
 }
 
+// BUILDAT_MESH_SLICE_CHECK=1 (util/mesh_slice_check.sh): a task's result
+// against the same made whole and in the smallest slices
+typedef sm_<uint, interface::mesh::TemporaryGeometry> Geoms;
+static bool slice_check_on()
+{
+	static const bool on = [](){
+		const char *e = getenv("BUILDAT_MESH_SLICE_CHECK");
+		return e && ss_(e) == "1";
+	}();
+	return on;
+}
+static bool geoms_same(Geoms &x, Geoms &y)
+{
+	if(x.size() != y.size())
+		return false;
+	for(auto &kv : x){
+		auto it = y.find(kv.first);
+		if(it == y.end())
+			return false;
+		auto &u = kv.second.vertex_data, &v = it->second.vertex_data;
+		if(u.Size() != v.Size() || (u.Size() != 0 &&
+				memcmp(&u[0], &v[0], u.Size() * sizeof u[0]) != 0))
+			return false;
+	}
+	return true;
+}
+// "<what> slice check: N the same, M differ": a line every 100 and one
+// for each that differs
+static void slice_check_count(const char *what, bool ok)
+{
+	static std::atomic<int> counts[2][2];
+	const int k = ss_(what) == "lod" ? 1 : 0;
+	const int n_same = ok ? ++counts[k][0] : (int)counts[k][0];
+	const int n_differ = ok ? (int)counts[k][1] : ++counts[k][1];
+	if(!ok || n_same % 100 == 0)
+		log_i(MODULE, "%s slice check: %i the same, %i differ (this one %s)",
+				what, n_same, n_differ, ok ? "the same" : "DIFFERS");
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -193,6 +246,9 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// of uv_scale > 1 takes its slice of the repeat from ([WORLD_UV]); a
 	// world's chunk passes it whatever horizon is ([VOXEL_GEOMETRY_ORIGIN])
 	up_<PolyVox::Vector3DInt32> uv_origin;
+	// The translucent and masked faces on child nodes of their own; false:
+	// all on the node's own geometry, as set_8bit_voxel_geometry() has them
+	bool split = true;
 
 	SetVoxelGeometryTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
@@ -208,6 +264,17 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		// the textures are the part that used to take most of a second
 		// and they are pre()'s now, a slice at a time ([CLIENT_FRAME])
 		volume = interface::deserialize_volume(data);
+	}
+	// set_8bit_voxel_geometry()'s block, made into a volume by the caller
+	SetVoxelGeometryTask(Node *node, up_<VoxelVolume> volume,
+			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+			const luabind::object &done_cb,
+			up_<PolyVox::Vector3DInt32> uv_origin):
+		node(node), voxel_reg(voxel_reg), atlas_reg(atlas_reg),
+		use_skylight(true), material_cb(done_cb), volume(std::move(volume)),
+		uv_origin(std::move(uv_origin))
+	{
+		split = false;
 	}
 	interface::mesh::PreloadCursor preload_cursor;
 	// Called repeatedly from the main thread until it returns true: the
@@ -239,7 +306,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		}
 		if(!interface::mesh::generate_voxel_geometry_step(job, until_us,
 				temp_geoms, *volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, &alpha_geoms, &masked_geoms, horizon.get(),
+				use_skylight, split ? &alpha_geoms : nullptr,
+				split ? &masked_geoms : nullptr, horizon.get(),
 				uv_origin.get()))
 			return false;
 		slice_check();
@@ -248,49 +316,35 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	}
 	// BUILDAT_MESH_SLICE_CHECK=1 (util/mesh_slice_check.sh): the chunk
 	// meshed again whole and in the smallest slices, each against what
-	// the task made; a line every 100 chunks and one for each that differs
+	// the task made, and its collision boxes the same way; a line every
+	// 100 chunks and one for each that differs
 	void slice_check()
 	{
-		static const bool on = [](){
-			const char *e = getenv("BUILDAT_MESH_SLICE_CHECK");
-			return e && ss_(e) == "1";
-		}();
-		if(!on)
+		if(!slice_check_on())
 			return;
-		typedef sm_<uint, interface::mesh::TemporaryGeometry> Geoms;
 		Geoms wa, wb, wc, sa, sb, sc;
 		interface::mesh::generate_voxel_geometry(wa, *volume, voxel_reg.get(),
-				atlas_reg.get(), use_skylight, &wb, &wc, horizon.get(),
-				uv_origin.get());
+				atlas_reg.get(), use_skylight, split ? &wb : nullptr,
+				split ? &wc : nullptr, horizon.get(), uv_origin.get());
 		interface::mesh::VoxelGeometryJob small;
-		int steps = 1;
 		while(!interface::mesh::generate_voxel_geometry_step(small, 0, sa,
-				*volume, voxel_reg.get(), atlas_reg.get(), use_skylight, &sb,
-				&sc, horizon.get(), uv_origin.get()))
-			steps++;
-		auto same = [](Geoms &x, Geoms &y){
-			if(x.size() != y.size())
-				return false;
-			for(auto &kv : x){
-				auto it = y.find(kv.first);
-				if(it == y.end())
-					return false;
-				auto &u = kv.second.vertex_data, &v = it->second.vertex_data;
-				if(u.Size() != v.Size() || (u.Size() != 0 &&
-						memcmp(&u[0], &v[0], u.Size() * sizeof u[0]) != 0))
-					return false;
-			}
-			return true;
-		};
-		static std::atomic<int> n_same(0), n_differ(0);
-		const bool ok = same(wa, sa) && same(wb, sb) && same(wc, sc) &&
-				same(wa, temp_geoms) && same(wb, alpha_geoms) &&
-				same(wc, masked_geoms);
-		const int n = ok ? ++n_same : ++n_differ;
-		if(!ok || n % 100 == 0)
-			log_i(MODULE, "mesh slice check: %i the same, %i differ "
-					"(this one %i steps, %s)", (int)n_same, (int)n_differ,
-					steps, ok ? "the same" : "DIFFERS");
+				*volume, voxel_reg.get(), atlas_reg.get(), use_skylight,
+				split ? &sb : nullptr, split ? &sc : nullptr, horizon.get(),
+				uv_origin.get())){}
+		sv_<interface::mesh::TemporaryBox> bw, bs;
+		interface::mesh::generate_voxel_physics_boxes(bw, *volume,
+				voxel_reg.get());
+		interface::mesh::PhysicsBoxesJob pj;
+		while(!interface::mesh::generate_voxel_physics_boxes_step(pj, 0, bs,
+				*volume, voxel_reg.get())){}
+		bool boxes = bw.size() == bs.size();
+		for(size_t i = 0; boxes && i < bw.size(); i++)
+			boxes = bw[i].size == bs[i].size &&
+					bw[i].position == bs[i].position;
+		slice_check_count("mesh", geoms_same(wa, sa) && geoms_same(wb, sb) &&
+				geoms_same(wc, sc) && geoms_same(wa, temp_geoms) &&
+				geoms_same(wb, alpha_geoms) && geoms_same(wc, masked_geoms) &&
+				boxes);
 	}
 	// Called repeatedly from main thread until returns true
 	bool post()
@@ -395,12 +449,31 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 				*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
 				interface::os::time_us() + 1500, preload_cursor);
 	}
-	// Called repeatedly from worker thread until returns true
+	// Called repeatedly from worker thread until returns true: 2 ms at a
+	// time, as SetVoxelGeometryTask ([WEB_MESH_SLICES])
+	interface::mesh::VoxelGeometryJob job;
 	bool thread()
 	{
-		generate_voxel_lod_geometry(
+		return thread_until(interface::os::time_us() + 2000);
+	}
+	bool thread_until(int64_t until_us)
+	{
+		if(!interface::mesh::generate_voxel_lod_geometry_step(job, until_us,
 				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
-				use_skylight, horizon.get());
+				use_skylight, horizon.get()))
+			return false;
+		if(slice_check_on()){
+			Geoms whole, small;
+			interface::mesh::generate_voxel_lod_geometry(lod, whole,
+					*lod_volume, voxel_reg.get(), atlas_reg.get(),
+					use_skylight, horizon.get());
+			interface::mesh::VoxelGeometryJob j;
+			while(!interface::mesh::generate_voxel_lod_geometry_step(j, 0,
+					lod, small, *lod_volume, voxel_reg.get(), atlas_reg.get(),
+					use_skylight, horizon.get())){}
+			slice_check_count("lod", geoms_same(whole, small) &&
+					geoms_same(whole, temp_geoms));
+		}
 		return true;
 	}
 	// Called repeatedly from main thread until returns true
@@ -479,12 +552,17 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 	{
 		return true;
 	}
-	// Called repeatedly from worker thread until returns true
+	// Called repeatedly from worker thread until returns true: 2 ms at a
+	// time, as SetVoxelGeometryTask ([WEB_MESH_SLICES])
+	interface::mesh::PhysicsBoxesJob job;
 	bool thread()
 	{
-		interface::mesh::generate_voxel_physics_boxes(
-				result_boxes, *volume, voxel_reg.get());
-		return true;
+		return thread_until(interface::os::time_us() + 2000);
+	}
+	bool thread_until(int64_t until_us)
+	{
+		return interface::mesh::generate_voxel_physics_boxes_step(job,
+				until_us, result_boxes, *volume, voxel_reg.get());
 	}
 	// Called repeatedly from main thread until returns true
 	int post_step = 1;
@@ -607,6 +685,18 @@ void set_voxel_geometry(const luabind::object &node_o,
 	auto *thread_pool = buildat_app->get_thread_pool();
 
 	thread_pool->add_task(std::move(task));
+}
+
+static void add_8bit_task(Node *node, int w, int h, int d, const ss_ &data,
+		sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
+		int ox, int oy, int oz, const luabind::object &done_cb,
+		app::App *buildat_app)
+{
+	buildat_app->get_thread_pool()->add_task(up_<SetVoxelGeometryTask>(
+			new SetVoxelGeometryTask(node, interface::mesh::volume_from_8bit(
+				w, h, d, data, voxel_reg.get()), voxel_reg, atlas_reg, done_cb,
+			up_<PolyVox::Vector3DInt32>(new PolyVox::Vector3DInt32(
+				ox, oy, oz)))));
 }
 
 void set_voxel_lod_geometry(int lod, const luabind::object &node_o,

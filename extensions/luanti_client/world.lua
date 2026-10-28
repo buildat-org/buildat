@@ -104,9 +104,12 @@ local NODEDEF_ALPHAMODE_BLEND = 0
 -- but packing the volume and handing it over is not, so a burst of a hundred
 -- blocks arriving at once would otherwise be one long frame. One block is
 -- always meshed, so a block that costs more than the whole budget still gets
--- drawn.
+-- drawn -- unless the pool has MESH_BACKLOG_MAX waiting already, as
+-- voxelworld's: the web client meshes a slice a frame on its own thread,
+-- and a block handed over then only waits ([WEB_MESH_SLICES])
 local MESH_BUDGET_US = 4000
 local MESH_PER_FRAME = 8
+local MESH_BACKLOG_MAX = 4
 
 -- What the mesher is told each node id is. Only air is known without the node
 -- definitions, so everything else is the placeholder cube; CONTENT_IGNORE is
@@ -3661,6 +3664,9 @@ function M.new(magic, buildat, log, options)
 		local pairs_before = self:pair_voxel_count()
 		while meshed < MESH_PER_FRAME do
 			if meshed > 0 and buildat.get_time_us() - t0 >= MESH_BUDGET_US then
+				break
+			end
+			if buildat.mesh_backlog() >= MESH_BACKLOG_MAX then
 				break
 			end
 			local best_key, best_d = nil, nil

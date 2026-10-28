@@ -886,6 +886,10 @@ local blk = {
 	size = 16,
 	nodes = {},
 	checked = false,
+	-- Blocks on the pool's tasks not yet on their nodes, and what runs
+	-- once none is ([WEB_MESH_SLICES])
+	pending = 0,
+	on_done = nil,
 }
 rows = room.build()
 blk.nx = math.ceil(room.W / blk.size)
@@ -936,30 +940,40 @@ local function mesh_chunk(cx, cy, cz)
 				room.OY + y0 + h / 2 - 0.5, room.OZ + z0 + d / 2 - 0.5)
 		blk.nodes[key] = node
 	end
+	-- On the pool's tasks, as a world's chunk: on the web a slice a
+	-- frame, where the whole room in one call was a frame of its own
+	blk.pending = blk.pending + 1
 	api.set_8bit_voxel_geometry(node, w, h, d, blob, voxel_reg, atlas_reg,
-			room.OX + x0, room.OY + y0, room.OZ + z0)
-	apply_technique(node)
-	-- **The check that settles it**: the block's own bounding box against
-	-- the indices it was built from. A voxel spans half a unit each side
-	-- of its index, so the block stands inside the indices it was built
-	-- from. This is what three guesses at the selection box's position
-	-- could not tell apart. The first block with stone in it, since the
-	-- corner one is air.
-	if not blk.checked then
-		blk.checked = true
-		local bb = node:GetComponent("CustomGeometry").worldBoundingBox
-		local want = {room.OX + x0 - 0.5, room.OY + y0 - 0.5,
-				room.OZ + z0 - 0.5}
-		local got = {bb.min.x, bb.min.y, bb.min.z}
-		for i = 1, 3 do
-			assert(got[i] >= want[i] - 0.01,
-					("the meshed block starts at %.2f, outside %.2f, on " ..
-					"axis %d"):format(got[i], want[i], i))
+			room.OX + x0, room.OY + y0, room.OZ + z0, function()
+		apply_technique(node)
+		-- **The check that settles it**: the block's own bounding box
+		-- against the indices it was built from. A voxel spans half a unit
+		-- each side of its index, so the block stands inside the indices
+		-- it was built from. This is what three guesses at the selection
+		-- box's position could not tell apart. The first block with stone
+		-- in it, since the corner one is air.
+		if not blk.checked then
+			blk.checked = true
+			local bb = node:GetComponent("CustomGeometry").worldBoundingBox
+			local want = {room.OX + x0 - 0.5, room.OY + y0 - 0.5,
+					room.OZ + z0 - 0.5}
+			local got = {bb.min.x, bb.min.y, bb.min.z}
+			for i = 1, 3 do
+				assert(got[i] >= want[i] - 0.01,
+						("the meshed block starts at %.2f, outside %.2f, on " ..
+						"axis %d"):format(got[i], want[i], i))
+			end
+			log:info(("block %d sits on its indices: %.2f %.2f %.2f .. " ..
+					"%.2f %.2f %.2f"):format(key, bb.min.x, bb.min.y, bb.min.z,
+					bb.max.x, bb.max.y, bb.max.z))
 		end
-		log:info(("block %d sits on its indices: %.2f %.2f %.2f .. " ..
-				"%.2f %.2f %.2f"):format(key, bb.min.x, bb.min.y, bb.min.z,
-				bb.max.x, bb.max.y, bb.max.z))
-	end
+		blk.pending = blk.pending - 1
+		if blk.pending == 0 and blk.on_done then
+			local f = blk.on_done
+			blk.on_done = nil
+			f()
+		end
+	end)
 end
 function blk.all()
 	for cz = 0, blk.nz - 1 do
@@ -970,14 +984,23 @@ function blk.all()
 		end
 	end
 end
-blk.all()
+-- The whole room from room.lua's rows, done() once it is all on its nodes
+function blk.all_then(done)
+	blk.on_done = done
+	blk.all()
+	if blk.pending == 0 and blk.on_done then
+		blk.on_done = nil
+		done()
+	end
+end
+blk.all_then(function() log:info("room: meshed") end)
 
 -- The whole room again from room.lua's description: what wants it is the
 -- ornament toggle, which changes what a voxel is rather than what is
 -- drawn over it
-function rebuild_room()
+function rebuild_room(done)
 	rows = room.build()
-	blk.all()
+	blk.all_then(done or function() end)
 end
 blk.built = 0
 for _ in pairs(blk.nodes) do blk.built = blk.built + 1 end
@@ -5766,8 +5789,10 @@ function room_switch(what, arg)
 		-- the room again
 		ornament_on = not ornament_on
 		room.id.column = ornament_on and column_id or room.id.stone
-		rebuild_room()
-		log:info("ornament " .. (ornament_on and "on" or "off"))
+		-- Said once the room is meshed again
+		rebuild_room(function()
+			log:info("ornament " .. (ornament_on and "on" or "off"))
+		end)
 	elseif what == "still" then
 		still = not still
 		log:info("idle drift " .. (still and "frozen" or "running"))

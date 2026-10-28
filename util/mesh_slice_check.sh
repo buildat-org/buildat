@@ -6,8 +6,10 @@
 # runs them on the frame's own thread, 2 ms at a time) is the mesh made in
 # one go. hillclimb's client with BUILDAT_MESH_SLICE_CHECK=1 meshes each
 # chunk again whole and in the smallest slices (a z layer or 64 faces a
-# step) and compares the vertices byte for byte with what its task made;
-# 300 chunks, none differing.
+# step) and compares the vertices byte for byte with what its task made,
+# and its collision boxes whole and a box a step ([WEB_MESH_SLICES]);
+# 300 chunks, none differing. (A LOD task checks itself the same way,
+# "lod slice check", where a world has LOD: not hillclimb.)
 #   util/mesh_slice_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"

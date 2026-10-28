@@ -168,13 +168,23 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		const pv::Vector3DInt32 &uv_origin)
 {
+	up_<VoxelVolume> volume = volume_from_8bit(w, h, d, source_data,
+			voxel_reg);
+	return set_voxel_geometry(cg, context, *volume, voxel_reg, atlas_reg, true,
+			&uv_origin);
+}
+
+up_<VoxelVolume> volume_from_8bit(int w, int h, int d,
+		const ss_ &source_data, VoxelRegistry *voxel_reg)
+{
 	if(w < 0 || h < 0 || d < 0)
 		throw Exception("Negative dimension");
 	if(w * h * d != (int)source_data.size())
 		throw Exception("Mismatched data size");
-	VoxelVolume volume(pv::Region(
+	up_<VoxelVolume> volume_p(new VoxelVolume(pv::Region(
 			pv::Vector3DInt32(-1, -1, -1),
-			pv::Vector3DInt32(w, h, d)));
+			pv::Vector3DInt32(w, h, d))));
+	VoxelVolume &volume = *volume_p;
 	const VoxelFmt fmt(voxel_reg);
 	size_t i = 0;
 	for(int z = -1; z <= d; z++){
@@ -197,9 +207,7 @@ void set_8bit_voxel_geometry(CustomGeometry *cg, Context *context,
 			}
 		}
 	}
-
-	return set_voxel_geometry(cg, context, volume, voxel_reg, atlas_reg, true,
-			&uv_origin);
+	return volume_p;
 }
 
 template<typename VoxelType>
@@ -1274,6 +1282,45 @@ struct VoxelGeometryJob::State
 VoxelGeometryJob::VoxelGeometryJob(){}
 VoxelGeometryJob::~VoxelGeometryJob(){}
 
+// The extractor's faces a z layer at a time from st.z on, which is the
+// extractor's own outer loop: a layer's faces come out as they would in
+// one go, at positions from the layer's corner, so they are moved back by
+// its z. False when until_us passed first (a layer at least is done).
+static bool extract_layers(VoxelGeometryJob::State &st, VoxelVolume &volume,
+		IsQuadNeededByRegistry<VoxelSample> &iqn, int64_t until_us)
+{
+	pv::SurfaceMesh<pv::PositionMaterialNormal> &pv_mesh = st.mesh;
+	VoxelSampleView view(&volume);
+	const pv::Region r = volume.getEnclosingRegion();
+	const pv::Vector3DInt32 &lc = r.getLowerCorner();
+	const pv::Vector3DInt32 &uc = r.getUpperCorner();
+	while(st.z < uc.getZ()){
+		pv::SurfaceMesh<pv::PositionMaterialNormal> layer;
+		pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
+					IsQuadNeededByRegistry<VoxelSample>>
+				surfaceExtractor(&view, pv::Region(
+					pv::Vector3DInt32(lc.getX(), lc.getY(), st.z),
+					pv::Vector3DInt32(uc.getX(), uc.getY(), st.z + 1)),
+					&layer, iqn);
+		surfaceExtractor.execute();
+		const float dz = (float)(st.z - lc.getZ());
+		const uint32_t base = pv_mesh.getNoOfVertices();
+		for(pv::PositionMaterialNormal v : layer.getVertices()){
+			v.position = pv::Vector3DFloat(v.position.getX(),
+					v.position.getY(), v.position.getZ() + dz);
+			pv_mesh.addVertex(v);
+		}
+		const sv_<uint32_t> &li = layer.getIndices();
+		for(size_t i = 0; i + 2 < li.size(); i += 3)
+			pv_mesh.addTriangleCubic(base + li[i], base + li[i + 1],
+					base + li[i + 2]);
+		st.z++;
+		if(interface::os::time_us() >= until_us)
+			return false;
+	}
+	return true;
+}
+
 bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 		sm_<uint, TemporaryGeometry> &result,
 		VoxelVolume &volume,
@@ -1294,38 +1341,9 @@ bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 	const VoxelFmt fmt(voxel_reg);
 	pv::SurfaceMesh<pv::PositionMaterialNormal> &pv_mesh = st.mesh;
 	if(st.stage == 0){
-		// A z layer at a time, which is the extractor's own outer loop:
-		// a layer's faces come out as they would in one go, at positions
-		// from the layer's corner, so they are moved back by its z
 		IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg);
-		VoxelSampleView view(&volume);
-		const pv::Region r = volume.getEnclosingRegion();
-		const pv::Vector3DInt32 &lc = r.getLowerCorner();
-		const pv::Vector3DInt32 &uc = r.getUpperCorner();
-		while(st.z < uc.getZ()){
-			pv::SurfaceMesh<pv::PositionMaterialNormal> layer;
-			pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
-						IsQuadNeededByRegistry<VoxelSample>>
-					surfaceExtractor(&view, pv::Region(
-						pv::Vector3DInt32(lc.getX(), lc.getY(), st.z),
-						pv::Vector3DInt32(uc.getX(), uc.getY(), st.z + 1)),
-						&layer, iqn);
-			surfaceExtractor.execute();
-			const float dz = (float)(st.z - lc.getZ());
-			const uint32_t base = pv_mesh.getNoOfVertices();
-			for(pv::PositionMaterialNormal v : layer.getVertices()){
-				v.position = pv::Vector3DFloat(v.position.getX(),
-						v.position.getY(), v.position.getZ() + dz);
-				pv_mesh.addVertex(v);
-			}
-			const sv_<uint32_t> &li = layer.getIndices();
-			for(size_t i = 0; i + 2 < li.size(); i += 3)
-				pv_mesh.addTriangleCubic(base + li[i], base + li[i + 1],
-						base + li[i + 2]);
-			st.z++;
-			if(interface::os::time_us() >= until_us)
-				return false;
-		}
+		if(!extract_layers(st, volume, iqn, until_us))
+			return false;
 		st.stage = 1;
 	}
 
@@ -2185,14 +2203,32 @@ void generate_voxel_lod_geometry(int lod,
 		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
 		bool use_skylight, const HorizonMap *horizon)
 {
+	VoxelGeometryJob job;
+	generate_voxel_lod_geometry_step(job, INT64_MAX, lod, result, lod_volume,
+			voxel_reg, atlas_reg, use_skylight, horizon);
+}
+
+bool generate_voxel_lod_geometry_step(VoxelGeometryJob &job, int64_t until_us,
+		int lod, sm_<uint, TemporaryGeometry> &result,
+		VoxelVolume &lod_volume,
+		VoxelRegistry *voxel_reg, AtlasRegistry *atlas_reg,
+		bool use_skylight, const HorizonMap *horizon)
+{
+	if(!job.s){
+		job.s.reset(new VoxelGeometryJob::State());
+		job.s->z = lod_volume.getEnclosingRegion().getLowerCorner().getZ();
+	}
+	VoxelGeometryJob::State &st = *job.s;
+	if(st.stage == 3)
+		return true;
 	const VoxelFmt fmt(voxel_reg);
-	IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg, true);
-	pv::SurfaceMesh<pv::PositionMaterialNormal> pv_mesh;
-	VoxelSampleView lod_view(&lod_volume);
-	pv::CubicSurfaceExtractorWithNormals<VoxelSampleView,
-				IsQuadNeededByRegistry<VoxelSample>>
-			surfaceExtractor(&lod_view, lod_volume.getEnclosingRegion(), &pv_mesh, iqn);
-	surfaceExtractor.execute();
+	pv::SurfaceMesh<pv::PositionMaterialNormal> &pv_mesh = st.mesh;
+	if(st.stage == 0){
+		IsQuadNeededByRegistry<VoxelSample> iqn(voxel_reg, true);
+		if(!extract_layers(st, lod_volume, iqn, until_us))
+			return false;
+		st.stage = 1;
+	}
 
 	const sv_<uint32_t> &pv_indices = pv_mesh.getIndices();
 	const sv_<pv::PositionMaterialNormal> &pv_vertices = pv_mesh.getVertices();
@@ -2202,7 +2238,12 @@ void generate_voxel_lod_geometry(int lod,
 	int d = (lod_volume.getDepth() - 2) * lod - 2;
 
 	// Handle vertices face-by-face in order to copy indices at the same time
-	for(size_t pv_face_i = 0; pv_face_i < pv_vertices.size() / 4; pv_face_i++){
+	const size_t first_face = st.face;
+	for(; st.face < pv_vertices.size() / 4; st.face++){
+		const size_t pv_face_i = st.face;
+		if(pv_face_i != first_face && pv_face_i % 64 == 0 &&
+				interface::os::time_us() >= until_us)
+			return false;
 		size_t pv_vertex_i0 = pv_face_i * 4;
 		VoxelTypeId voxel_id0 = (VoxelTypeId)pv_vertices[pv_vertex_i0].material;
 		// We need to get this definition only once per face
@@ -2350,6 +2391,8 @@ void generate_voxel_lod_geometry(int lod,
 			}
 		}
 	}
+	st.stage = 3;
+	return true;
 }
 
 void set_voxel_lod_geometry(int lod, CustomGeometry *cg, Context *context,
@@ -2423,6 +2466,26 @@ void generate_voxel_physics_boxes(
 		VoxelVolume &volume_orig,
 		VoxelRegistry *voxel_reg)
 {
+	PhysicsBoxesJob job;
+	generate_voxel_physics_boxes_step(job, INT64_MAX, result_boxes,
+			volume_orig, voxel_reg);
+}
+
+struct PhysicsBoxesJob::State
+{
+	int stage = 0; // the solidity, the boxes, done
+	int z = 0; // the next layer of the solidity
+	int z0 = 0, sx = 0, sy = 0; // where the search for a box goes on
+	up_<pv::RawVolume<uint8_t>> volume;
+};
+PhysicsBoxesJob::PhysicsBoxesJob(){}
+PhysicsBoxesJob::~PhysicsBoxesJob(){}
+
+bool generate_voxel_physics_boxes_step(PhysicsBoxesJob &job, int64_t until_us,
+		sv_<TemporaryBox> &result_boxes,
+		VoxelVolume &volume_orig,
+		VoxelRegistry *voxel_reg)
+{
 	const VoxelFmt fmt(voxel_reg);
 	int w = volume_orig.getWidth() - 2;
 	int h = volume_orig.getHeight() - 2;
@@ -2432,7 +2495,21 @@ void generate_voxel_physics_boxes(
 	auto &lc = region.getLowerCorner();
 	auto &uc = region.getUpperCorner();
 
-	// Create a new volume which only holds the solidity of the voxels.
+	if(!job.s){
+		job.s.reset(new PhysicsBoxesJob::State());
+		job.s->z = lc.getZ();
+		job.s->z0 = lc.getZ();
+		job.s->sx = lc.getX();
+		job.s->sy = lc.getY();
+		job.s->volume.reset(new pv::RawVolume<uint8_t>(region));
+	}
+	PhysicsBoxesJob::State &st = *job.s;
+	if(st.stage == 2)
+		return true;
+	pv::RawVolume<uint8_t> &volume = *st.volume;
+
+	// Create a new volume which only holds the solidity of the voxels,
+	// a z layer a step.
 	//
 	// The padding is left out of it. A chunk volume carries one voxel of its
 	// neighbours on each side so that faces can be culled against them, but
@@ -2447,8 +2524,8 @@ void generate_voxel_physics_boxes(
 	// of the physics world for a frame or more. Without it, the list depends
 	// only on the chunk's own voxels and a neighbour arriving changes
 	// nothing.
-	pv::RawVolume<uint8_t> volume(region);
-	for(int z = lc.getZ(); z <= uc.getZ(); z++){
+	while(st.stage == 0 && st.z <= uc.getZ()){
+		const int z = st.z++;
 		for(int y = lc.getY(); y <= uc.getY(); y++){
 			for(int x = lc.getX(); x <= uc.getX(); x++){
 				if(x == lc.getX() || x == uc.getX() ||
@@ -2468,20 +2545,24 @@ void generate_voxel_physics_boxes(
 				volume.setVoxelAt(x, y, z, v);
 			}
 		}
+		if(interface::os::time_us() >= until_us)
+			return false;
 	}
+	st.stage = 1;
 
 	// Create minimal number of boxes to fill the solid voxels. Boxes can
 	// overlap. When a box is added, its voxels are set to value 2 in the
-	// temporary volume.
+	// temporary volume. A box a step at least.
 
-	for(int z0 = lc.getZ(); z0 <= uc.getZ(); z0++){
+	while(st.z0 <= uc.getZ()){
+		const int z0 = st.z0;
 		// Loop until this z0 plane is done, then handle the next one. The
 		// search goes on from where it found the last voxel: a voxel only
 		// ever goes from 1 to 2, so nothing before that is 1 any more, and
 		// starting over at the plane's corner for every box was the most
 		// of a chunk's cost on a VoxeLibre server ([VOXEL_PHYSICS_LAG])
-		int sx = lc.getX(), sy = lc.getY();
-		for(;;){
+		int &sx = st.sx, &sy = st.sy;
+		{
 			// Find a solid non-covered voxel (v=1) on the z0 plane
 			int x0 = INT_MAX;
 			int y0 = INT_MAX;
@@ -2495,7 +2576,13 @@ void generate_voxel_physics_boxes(
 					}
 				}
 			}
-			break; // Done
+			// The plane is done
+			st.z0++;
+			sx = lc.getX();
+			sy = lc.getY();
+			if(interface::os::time_us() >= until_us)
+				return false;
+			continue;
 		found_non_covered_voxel:
 			sx = x0;
 			sy = y0;
@@ -2578,7 +2665,11 @@ void generate_voxel_physics_boxes(
 			);
 			result_boxes.push_back(box);
 		}
+		if(interface::os::time_us() >= until_us)
+			return false;
 	}
+	st.stage = 2;
+	return true;
 }
 
 void set_voxel_physics_boxes(Node *node, Context *context,

@@ -2686,8 +2686,11 @@ end
 -- world, which is what a voxel of uv_scale > 1 takes its slice of the
 -- repeat from ([WORLD_UV]). Required ([VOXEL_GEOMETRY_ORIGIN]): a block
 -- with no world position passes 0, 0, 0.
+-- done_cb, a function: the block is meshed on the pool as a world's chunk
+-- is, a slice a frame on the web, and done_cb() is called once the geometry
+-- is on the node; without it the geometry is there when this returns
 function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
-		voxel_reg, atlas_reg, ox, oy, oz)
+		voxel_reg, atlas_reg, ox, oy, oz, done_cb)
 	if type(ox) ~= "number" or type(oy) ~= "number" or
 			type(oz) ~= "number" then
 		error("set_8bit_voxel_geometry(): the origin ox, oy, oz is required"..
@@ -2710,8 +2713,12 @@ function buildat.safe.set_8bit_voxel_geometry(safe_node, w, h, d, safe_buffer,
 		end
 		buffer = getmetatable(safe_buffer).unsafe
 	end
+	if done_cb ~= nil and type(done_cb) ~= "function" then
+		error("done_cb is not a function")
+	end
+	-- Every argument: luabind matches by count
 	__buildat_set_8bit_voxel_geometry(node, w, h, d, buffer,
-			voxel_reg, atlas_reg, ox, oy, oz)
+			voxel_reg, atlas_reg, ox, oy, oz, done_cb)
 end
 
 -- origin, {x=, y=, z=} or a Vector3, is where the volume's inside

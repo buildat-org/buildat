@@ -279,13 +279,15 @@ buildat.set_quad_geometry(node, quads) -> {tile, ...}
   order (the answer says which tile each geometry is), both windings of
   every quad; a posed model is one build per frame ([OBJECT_MESH])
 buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, voxel_reg, atlas_reg,
-  ox, oy, oz)
+  ox, oy, oz[, done_cb])
 - The old fixed-format path, kept for the small games: one byte a voxel
   (use buildat.set_voxel_geometry instead).
   ox, oy, oz is where the block's (0, 0, 0) sits in the world, which a voxel
   of uv_scale > 1 takes its slice of the texture repeat from ([WORLD_UV]);
   required, and a block with no world position (a body, a model) passes
-  0, 0, 0.
+  0, 0, 0. Without done_cb the geometry is on the node when this returns;
+  with it the block is meshed on the pool's tasks as a world's chunk is (a
+  slice a frame on the web) and done_cb() is called once it is there.
 buildat.set_voxel_data(node, data)
 buildat.get_voxel_data(node) -> string or nil
 - A chunk node's buildat_voxel_data var as a string, which is what a
