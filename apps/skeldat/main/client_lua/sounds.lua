@@ -194,6 +194,8 @@ M.PICK = {}
 for name in pairs(M.TAKES) do
 	M.PICK[name] = "a"
 end
+-- Round 2's boar_hurt c of skelenti's, the user's pick ([SKELENTI_SOUNDS_3])
+M.PICK.boar_hurt = "c"
 -- How far the variants are nudged apart (blip's vary: 0..1 of sfxr's
 -- mutate step)
 M.VARY = 0.15

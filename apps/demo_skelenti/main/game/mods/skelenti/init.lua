@@ -401,7 +401,8 @@ for name, def in pairs(core.registered_nodes) do
 			g.choppy and "wood" or g.snappy and "leaves"
 	if kind then
 		local step = (name == "skelenti:gravel" or name == "skelenti:sand") and
-				"gravel" or kind == "leaves" and "earth" or kind
+				"gravel" or name == "skelenti:grass" and "grass" or
+				kind == "leaves" and "earth" or kind
 		core.override_item(name, {sounds = {
 			dig = {name = "skelenti_dig_" .. kind, gain = 0.5},
 			dug = {name = "skelenti_dig_" .. kind, gain = 1.0},

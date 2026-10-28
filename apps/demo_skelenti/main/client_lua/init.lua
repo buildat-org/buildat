@@ -25,7 +25,8 @@ local mobs = load("main/mobs.lua")
 -- names) and the mobs'
 local sounds = load("main/sounds.lua")
 local t0 = buildat.get_time_us()
-local made = sounds.make(require("buildat/extension/blip"), luanti)
+local made = sounds.make(require("buildat/extension/blip"), luanti,
+		require("buildat/extension/urho3d"), buildat.synth)
 log:info(string.format("skelenti: %d sounds made in %.0f ms", made,
 		(buildat.get_time_us() - t0) / 1000))
 mobs.sounds = sounds

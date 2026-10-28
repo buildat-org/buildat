@@ -103,20 +103,13 @@ M.TAKES = {
 			burst(nil, 400, 0.02, 0.35, {base_freq = 0.3}))},
 	step_wood = {a = layers(tone("triangle", 220, 0.03, 0.35, -0.03),
 			burst(nil, 900, 0.015, 0.25, {base_freq = 0.35}))},
+	-- A step on grass: the user's own (skeldat's, [SKELDAT_STEP_GRASS]),
+	-- four layers, as made: not in M.PEAK
+	step_grass = {a = "blip1:DJ2KrAAKrWKAAmJf_AAAAf_AAAAf_AAf_f_NIkgInDSd8PLHLCNAAAA__AA+AaDFVDsAAJ2WKAAmJf_AAAAf_AAAAf_AAf_f_PLkgInAAd8S4HLCN+ATDNiBpAARpWKAAf_f_AAAAf_AAAAf_AAf_f_ZBlUInGKZBGkHLCN+B3DNiBpAAL5WKAAf_f_AAAAf_AAAAf_AAf_f_ZBlUInGKZBLFHLCNAAAAVVAA"},
 
-	-- Picking an item up
-	pickup = {
-		a = v{wave = "sine", base_freq = hz(600), freq_ramp = 0.25,
-			env_decay = secs(0.1), volume = 0.4},
-		b = layers(v{wave = "sine", base_freq = hz(880),
-				env_sustain = secs(0.02), env_decay = secs(0.2), volume = 0.3},
-			at(0.06, v{wave = "sine", base_freq = hz(1320),
-				env_sustain = secs(0.02), env_decay = secs(0.25),
-				volume = 0.3})),
-		c = layers(v{wave = "sine", base_freq = hz(280), freq_ramp = 0.45,
-				env_decay = secs(0.06), volume = 0.5},
-			burst(3000, nil, 0.01, 0.25)),
-	},
+	-- Picking an item up: the user's own (skeldat's, [SKELDAT_PICKUP_TAKE]),
+	-- as made: not in M.PEAK
+	pickup = {a = "blip1:CAANiiDJCLFAAqPb5AAAA2CpuAAf_AAcVbP__gZAASDf_gAWw5O"},
 
 	-- A boar hurt and dying
 	boar_hurt = {
@@ -159,24 +152,13 @@ M.TAKES = {
 			unpack(clacks(0.2, 10, 0.5, 0.45, 600))),
 	},
 
-	-- A bow loosed, and an arrow striking
-	bow = {
-		a = v{wave = "triangle", base_freq = hz(98), pluck = 0.97,
-			lpf_freq = lp(2500), env_sustain = secs(0.1),
-			env_decay = secs(0.3), volume = 0.8},
-		b = layers(v{wave = "saw", base_freq = hz(147), pluck = 0.95,
-				lpf_freq = lp(3000), env_sustain = secs(0.08),
-				env_decay = secs(0.22), volume = 0.7},
-			at(0.02, burst(2500, 5000, 0.15, 0.25,
-				{env_attack = secs(0.02)}))),
-		c = layers(v{wave = "triangle", base_freq = hz(73), pluck = 0.98,
-				lpf_freq = lp(1500), env_sustain = secs(0.15),
-				env_decay = secs(0.3), volume = 0.8},
-			tone("sine", 110, 0.15, 0.3, -0.04)),
-	},
+	-- A bow loosed: the user's own (skeldat's, [SKELDAT_BOW_RELEASE_PICK]),
+	-- as made: not in M.PEAK
+	bow = {a = "blip1:DKQJcEhPmjsAAWJdHAAg0gzGkFVgRAAgZoMLf7dwZLFd8gAfstafl1sAAAA"},
+	-- An arrow striking a mob or a player
 	arrow_hit = {
-		a = layers(tone("sine", 220, 0.1, 0.6, -0.3),
-			burst(nil, 2000, 0.01, 0.4)),
+		a = layers(tone("sine", 400, 0.1, 0.6, -0.3),
+			burst(600, 4000, 0.02, 0.8, {env_sustain = secs(0.06)})),
 		b = layers(tone("sine", 200, 0.07, 0.5, -0.3),
 			at(0.02, v{wave = "sine", base_freq = hz(240),
 				trem_depth = 1, trem_speed = sqrt(18 / 50),
@@ -192,23 +174,65 @@ M.PICK = {}
 for name in pairs(M.TAKES) do
 	M.PICK[name] = "a"
 end
+-- Round 2's boar_hurt c, the user's pick ([SKELENTI_SOUNDS_3]), as skeldat's
+M.PICK.boar_hurt = "c"
 -- How far the variants are nudged apart (blip's vary: 0..1 of sfxr's
 -- mutate step)
 M.VARY = 0.15
 
+-- As skeldat's: these rendered and scaled to this peak, driven to DRIVE
+-- times their peak through a soft clip (tanh's) first: a noise burst's
+-- peak is one sample, and scaled by it alone the rest stayed quiet
+M.PEAK = {arrow_hit = 0.9}
+M.DRIVE = 4
+M.RATE = 44100
+
 -- name -> its Sounds, once make() has run
 M.made = {}
 
+local function peak_of(b)
+	local m = 0
+	for i = 0, b:len() - 1 do
+		m = math.max(m, math.abs(b:get(i)))
+	end
+	return m
+end
+-- A take's samples, scaled to M.PEAK if it has one
+function M.render(blip, synth, name, p)
+	local b = blip.gen.render(p, M.RATE, synth)
+	local peak = M.PEAK[name] and peak_of(b) or 0
+	if peak > 0 then
+		local k = M.DRIVE / peak
+		for i = 0, b:len() - 1 do
+			-- tanh's Pade form, 1 at 3, where it is held
+			local x = math.max(-3, math.min(3, b:get(i) * k))
+			b:set(i, x * (27 + x * x) / (27 + 9 * x * x))
+		end
+		b:gain(M.PEAK[name] / peak_of(b))
+	end
+	return b
+end
+
 -- Renders each picked take's variants and hands them to the luanti
 -- client module. -> how many Sounds were made
-function M.make(blip, luanti)
+-- magic and synth: for the takes scaled to a peak (blip.sound otherwise)
+function M.make(blip, luanti, magic, synth)
 	local gen, n = blip.gen, 0
 	for name, takes in pairs(M.TAKES) do
 		local p = gen.params(takes[M.PICK[name]])
 		local list = {}
 		for i = 1, M.VARIANTS do
 			-- Variant 1 is the take as designed
-			list[i] = blip.sound(i == 1 and p or gen.vary(p, i, M.VARY))
+			local pv = i == 1 and p or gen.vary(p, i, M.VARY)
+			if M.PEAK[name] then
+				local vb = magic.VectorBuffer:new()
+				M.render(blip, synth, name, pv):to_shorts(vb)
+				list[i] = magic.Sound:new()
+				list[i]:SetFormat(M.RATE, true, false)
+				list[i]:SetData(vb)
+			else
+				list[i] = blip.sound(pv)
+			end
 			luanti.set_sound("skelenti_" .. name .. "." .. i .. ".ogg",
 					list[i])
 			n = n + 1
