@@ -310,13 +310,15 @@ end
 -- Running code in sandbox
 --
 
--- The environments a script's chunk runs in ([SAFE_CALLER_FRAME]:
--- buildat.eval runs code only in one of these). Trusted only. Not an
--- event runner's, made per subscription (__buildat_sandboxed_runner),
--- which kept this table growing.
+-- The environments a script's chunk runs in, each -> whose it is: an
+-- extension's name, "=served" or "=none" ([SAFE_CALLER_FRAME],
+-- [EXT_CALLER_FRAME]: buildat.eval runs code only in one of the buildat
+-- it was called through). Trusted only. Not an event runner's, made per
+-- subscription (__buildat_sandboxed_runner), which kept this table
+-- growing.
 local sandbox_envs = setmetatable({}, {__mode = "k"})
-function __buildat_is_sandbox_env(env)
-	return sandbox_envs[env] == true
+function __buildat_sandbox_env_owner(env)
+	return sandbox_envs[env]
 end
 local function wrap_globals(base_sandbox)
 	local sandbox = {}
@@ -355,9 +357,10 @@ local function wrap_globals(base_sandbox)
 	return sandbox
 end
 
-local function run_function_in_sandbox(untrusted_function, sandbox, own_globals)
+local function run_function_in_sandbox(untrusted_function, sandbox,
+		own_globals, owner)
 	sandbox = wrap_globals(sandbox)
-	sandbox_envs[sandbox] = true
+	sandbox_envs[sandbox] = owner or "=none"
 	for k, v in pairs(own_globals or {}) do
 		rawset(sandbox, k, v)
 	end
@@ -462,7 +465,7 @@ function __buildat_sandboxed_runner(untrusted_function)
 end
 
 local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,
-		own_globals)
+		own_globals, owner)
 	if untrusted_code:byte(1) == 27 then
 		return false, "binary bytecode prohibited", nil
 	end
@@ -470,12 +473,16 @@ local function run_code_in_sandbox(untrusted_code, sandbox, chunkname,
 	if not untrusted_function then
 		return false, message, nil
 	end
-	return run_function_in_sandbox(untrusted_function, sandbox, own_globals)
+	return run_function_in_sandbox(untrusted_function, sandbox, own_globals,
+			owner)
 end
 
-function __buildat_run_code_in_sandbox(untrusted_code, chunkname)
+-- extension: the one the code is, whose buildat and require it gets
+-- (__buildat_extension_globals), or nil for none
+function __buildat_run_code_in_sandbox(untrusted_code, chunkname, extension)
 	local status, err, retval = run_code_in_sandbox(
-			untrusted_code, __buildat_sandbox_environment, chunkname)
+			untrusted_code, __buildat_sandbox_environment, chunkname,
+			extension and __buildat_extension_globals(extension), extension)
 	if status == false then
 		log:error("Failed to run script:\n"..tostring(err))
 		local ok, why = pcall(__buildat_report_error, err)
@@ -494,7 +501,8 @@ __buildat_served_chunks["=server"] = true
 local served_globals = {}
 function __buildat_run_served_code(code, chunkname)
 	local status, err, retval = run_code_in_sandbox(
-			code, __buildat_sandbox_environment, chunkname, served_globals)
+			code, __buildat_sandbox_environment, chunkname, served_globals,
+			"=served")
 	if status == false then
 		log:error("Failed to run script:\n"..tostring(err))
 		local ok, why = pcall(__buildat_report_error, err)
@@ -583,6 +591,43 @@ do
 		end
 		return network_for_servers
 	end
+end
+-- **An extension's own buildat and require** ([EXT_CALLER_FRAME]), its
+-- name bound in, as the served ones are a server's: the verbs on its
+-- storage, cache and files (api.lua's __buildat_extension_overrides),
+-- and an extension that hands each one a table of its own
+-- (urho3d's sandboxed_for, whose subscriptions carry the name). Made
+-- once per extension. Trusted only.
+local extension_globals = {}
+local base_buildat = __buildat_sandbox_environment.buildat
+function __buildat_extension_globals(name)
+	assert(type(name) == "string" and name:match("^[%w_]+$"))
+	local g = extension_globals[name]
+	if g then
+		return g
+	end
+	local t = {}
+	for k, v in pairs(base_buildat) do
+		t[k] = v
+	end
+	for k, v in pairs(__buildat_extension_overrides(name)) do
+		t[k] = v
+	end
+	local real_require = __buildat_sandbox_environment.require
+	g = {
+		buildat = view(t),
+		require = function(req)
+			local m = real_require(req)
+			local ext = __buildat_extension_of(req)
+			local i = ext and __buildat_loaded_extension(ext)
+			if type(i) == "table" and type(i.sandboxed_for) == "function" then
+				return view(i.sandboxed_for(name))
+			end
+			return m
+		end,
+	}
+	extension_globals[name] = g
+	return g
 end
 __buildat_sandbox_environment.buildat =
 		view(__buildat_sandbox_environment.buildat)

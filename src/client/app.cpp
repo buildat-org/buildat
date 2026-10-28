@@ -2750,7 +2750,7 @@ struct CApp: public App, public magic::Application
 					// the launcher" finds no launcher and disconnects
 					// instead ([LAUNCH_SANDBOX], 2026-09-24)
 					"        ..\"buildat.provide_launch_interface(m)\\n\",\n"
-					"        '"+extname+"/init.lua')\n"
+					"        '"+extname+"/init.lua', '"+extname+"')\n"
 					"    if not ok then error(err) end\n"
 					"else\n"
 					"    local m = require('buildat/extension/"+extname+"')\n"

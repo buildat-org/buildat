@@ -521,49 +521,17 @@ local STORAGE_MAX = 4 * 1024 * 1024
 -- the disk 4 MiB at a time ([SECURITY_RUN_1])
 local STORAGE_FILES_MAX = 64
 
--- **Which extension is asking**, taken from the caller's chunk name
--- rather than from which launch UI the client booted. The two are the
--- same until one launch UI composes another ([TWO_AUDIENCES]' third
--- option): then the global says the composer and the code running says
--- the composed, and a room borrowed as a backdrop would read and write
--- the composer's storage and load the composer's files. Every chunk
--- these verbs can be called from is named "<extension>/<file>" by the
--- loader that ran it, which is what this reads.
-local function calling_extension(level)
-	local info = debug.getinfo(level or 3, "S")
-	local src = info and info.source or ""
-	-- **A sandboxed chunk** is named `<extension>/<file>` by the loader
-	-- that ran it
-	local name = src:match("^@?([%w_]+)/[%w_%-%.]+$") or
-			src:match("^@?([%w_]+)/[%w_%-]+/[%w_%-%.]+$")
-	if name then
-		return name
-	end
-	-- **And a trusted one is a path on disk**, which is what an
-	-- extension required by another extension is: the menu, required
-	-- by another, asked for its `preferences.lua` in the other's
-	-- directory, found nothing, answered nil, and the client aborted
-	-- eighty lines later ([MENU_FALLBACK], 2026-09-23). The same fault
-	-- the composition found, in the other direction.
-	name = src:match("[/\\]extensions[/\\]([%w_]+)[/\\]")
-	if name then
-		return name
-	end
-	return __buildat_menu_extension_name or "launch_menu"
-end
+-- **Which extension is asking is bound, not read** ([EXT_CALLER_FRAME]):
+-- the verbs below that act on "the calling extension's" storage, cache
+-- and files take its name as their first argument, and each extension
+-- is handed a buildat of its own with its name bound in
+-- (__buildat_extension_overrides, sandbox.lua's
+-- __buildat_extension_globals). Read from the caller's frame, a tail
+-- call or a pcall from a callback the client ran left no frame of the
+-- extension's, and the answer fell back to the launch UI.
 
 -- The chunks servers served, by name (sandbox.lua's run_script_file)
 __buildat_served_chunks = {}
-
--- Whose storage a call is in: "server" for game code a server sent, or the
--- launch extension's name. 1 is this, 2 the verb, 3 who called it.
-local function storage_domain()
-	local info = debug.getinfo(3, "S")
-	if __buildat_served_chunks[info and info.source or ""] then
-		return "server"
-	end
-	return calling_extension(4)
-end
 
 -- The user dir's own directories, which no extension's storage was
 local storage_not_moved = {apps = true, servers = true, installed = true,
@@ -578,8 +546,8 @@ local function storage_path(name, domain)
 	-- game_storage_dir() says, like a web page's localStorage: a game
 	-- started here has its game's, anything else its address's. A server's
 	-- chunks have a buildat of their own that says so (sandbox.lua's
-	-- __buildat_run_served_code); a launch extension is told by its
-	-- chunk's name.
+	-- __buildat_run_served_code), and an extension's its own
+	-- (__buildat_extension_overrides).
 	if domain == "server" then
 		local dir = __buildat_game_storage_dir()
 		if not dir then
@@ -665,14 +633,15 @@ local function storage_write_in(name, data, domain)
 	end
 	return true
 end
-buildat.safe.storage_read = function(name)
-	local domain = storage_domain()
-	return storage_read_in(name, domain)
+-- What runs in the sandbox as no extension and no server (an app's
+-- launcher file) has no storage, cache or files of its own
+local function unbound(verb)
+	return function()
+		return nil, verb .. ": called as no extension"
+	end
 end
-buildat.safe.storage_write = function(name, data)
-	local domain = storage_domain()
-	return storage_write_in(name, data, domain)
-end
+buildat.safe.storage_read = unbound("storage_read")
+buildat.safe.storage_write = unbound("storage_write")
 
 -- **What a server's chunks get instead** ([SECURITY_RUN_1]): the gates
 -- below read the calling frame, and a tail call or a verb passed as a
@@ -758,7 +727,7 @@ __buildat_served_overrides = {
 -- simplified: a cap per file and none on the whole; compose_image()
 -- already writes under the cache without one.
 local CACHE_FILE_MAX = 32 * 1024 * 1024
-local function cache_path(name)
+local function cache_path(who, name)
 	if type(name) ~= "string" or #name > 256 or name:find("%.%.") or
 			not (name:match("^[%w_%-%.]+$") or
 				name:match("^[%w_%-%.]+/[%w_%-%.]+$") or
@@ -766,20 +735,13 @@ local function cache_path(name)
 		return nil, "cache: a name of up to three segments of letters, " ..
 				"digits, _ - and ."
 	end
-	-- 1 is this, 2 cache_read or cache_write, 3 who called that. **Not
-	-- a server's**: a module named like an extension would be writing
-	-- that extension's media.
-	local info = debug.getinfo(3, "S")
-	if __buildat_served_chunks[info and info.source or ""] then
-		return nil, "cache: an extension's, not a server's"
-	end
-	local who = calling_extension(4)
+	-- A server's code has its own buildat, whose cache verbs refuse
 	local root = __buildat_get_path("cache") .. "/" .. who
 	local path = root .. "/" .. name
 	return path, path:match("^(.*)/[^/]+$")
 end
-buildat.safe.cache_read = function(name)
-	local path = cache_path(name)
+local function cache_read(who, name)
+	local path = cache_path(who, name)
 	if not path then
 		return nil
 	end
@@ -791,8 +753,8 @@ buildat.safe.cache_read = function(name)
 	f:close()
 	return data
 end
-buildat.safe.cache_write = function(name, data)
-	local path, dir = cache_path(name)
+local function cache_write(who, name, data)
+	local path, dir = cache_path(who, name)
 	if not path then
 		return false, dir
 	end
@@ -812,6 +774,8 @@ buildat.safe.cache_write = function(name, data)
 	f:close()
 	return true
 end
+buildat.safe.cache_read = unbound("cache_read")
+buildat.safe.cache_write = unbound("cache_write")
 
 -- **Connecting to a server**, which a launcher does on a worker and
 -- polls from a frame handler: the blocking one freezes the frame for as
@@ -1245,12 +1209,11 @@ end
 --
 -- A name is one file, `.lua`, or one in a subdirectory (`res/x.lua`),
 -- and not a path: an extension runs its own code and nobody else's.
-buildat.safe.run_extension_file = function(name)
+local function run_extension_file(who, name)
 	if type(name) ~= "string" or not (name:match("^[%w_%-]+%.lua$") or
 			name:match("^[%w_%-]+/[%w_%-]+%.lua$")) then
 		return nil, "run_extension_file(name): one .lua file, not a path"
 	end
-	local who = calling_extension()
 	local path = __buildat_extension_path(who) .. "/" .. name
 	local f = io.open(path, "rb")
 	if not f then
@@ -1262,7 +1225,7 @@ buildat.safe.run_extension_file = function(name)
 	local code = f:read("*a")
 	f:close()
 	local status, err, ret = __buildat_run_code_in_sandbox(code,
-			who .. "/" .. name)
+			who .. "/" .. name, who)
 	if not status then
 		return nil, err
 	end
@@ -1271,12 +1234,11 @@ end
 
 -- One of the calling extension's own files as text, by the same names
 -- ([BLIP]: the designer saves its generator's source for an app to copy)
-buildat.safe.read_extension_file = function(name)
+local function read_extension_file(who, name)
 	if type(name) ~= "string" or not (name:match("^[%w_%-]+%.lua$") or
 			name:match("^[%w_%-]+/[%w_%-]+%.lua$")) then
 		return nil, "read_extension_file(name): one .lua file, not a path"
 	end
-	local who = calling_extension()
 	local f = io.open(__buildat_extension_path(who) .. "/" .. name, "rb")
 	if not f then
 		return nil, "read_extension_file: no " .. name .. " in " .. who
@@ -1285,6 +1247,8 @@ buildat.safe.read_extension_file = function(name)
 	f:close()
 	return text
 end
+buildat.safe.run_extension_file = unbound("run_extension_file")
+buildat.safe.read_extension_file = unbound("read_extension_file")
 
 -- **The launch UIs this client has**, listed without running one:
 -- an extension says it is one by shipping `launch_ui.txt`, whose first
@@ -1303,7 +1267,9 @@ end
 --
 -- **Bytecode is refused**, as `run_code_in_sandbox` refuses it: a chunk
 -- beginning with byte 27 is how a string-eval escapes a LuaJIT sandbox.
-buildat.safe.eval = function(code, chunkname)
+-- owner is whose buildat it was called through, env and info its
+-- caller's environment and chunk, read by that buildat's own eval
+local function eval(owner, env, info, code, chunkname)
 	if type(code) ~= "string" then
 		return false, "eval(code): a string"
 	end
@@ -1315,13 +1281,13 @@ buildat.safe.eval = function(code, chunkname)
 	-- server -- reads the calling chunk's name, so a name of the caller's
 	-- choosing was a way to be someone else ([SECURITY_RUN_1]). The name
 	-- asked for is only what an error message says.
-	local info = debug.getinfo(2, "S")
 	local own = info and info.source or "=eval"
 	-- **And its environment a script's** ([SAFE_CALLER_FRAME]): through
 	-- a pcall, or any C function calling this, the frame read is the
-	-- client's own globals
-	local env = getfenv(2)
-	if not __buildat_is_sandbox_env(env) then
+	-- client's own globals. **And the same one's whose buildat this is**
+	-- ([EXT_CALLER_FRAME]): through a tail call from a function another
+	-- script calls, the frame read is that script's
+	if __buildat_sandbox_env_owner(env) ~= owner then
 		return false, "eval: called from outside a script's own code"
 	end
 	local f, err = loadstring(code, own)
@@ -1346,6 +1312,15 @@ buildat.safe.eval = function(code, chunkname)
 	end
 	return ok, unpack(r)
 end
+-- Each reads its caller's frame itself: level 2 is the caller only here
+local function eval_as(owner)
+	return function(code, chunkname)
+		return eval(owner, getfenv(2), debug.getinfo(2, "S"), code,
+				chunkname)
+	end
+end
+buildat.safe.eval = eval_as("=none")
+__buildat_served_overrides.eval = eval_as("=served")
 -- **The API document**, for a launch UI that shows it beside a console
 -- ([LAUNCH_CONSOLE]). One named file of the client's own documentation,
 -- read-only; not a way to read files.
@@ -1369,7 +1344,7 @@ end
 --
 -- **Only the listed ones**, so this names no code that is not already a
 -- launch UI, and a launch UI cannot compose itself.
-buildat.safe.compose_launch_ui = function(name, action)
+local function compose_launch_ui(who, name, action)
 	if type(name) ~= "string" then
 		return false, "compose_launch_ui(name): a string"
 	end
@@ -1377,7 +1352,7 @@ buildat.safe.compose_launch_ui = function(name, action)
 			not action:match("^[%w_/%-]*$")) then
 		return false, "compose_launch_ui: an action is a plain name"
 	end
-	if name == calling_extension() then
+	if name == who then
 		return false, "compose_launch_ui: a launch UI cannot compose itself"
 	end
 	local found = false
@@ -1397,11 +1372,9 @@ buildat.safe.compose_launch_ui = function(name, action)
 		end
 		local code = f:read("*a")
 		f:close()
-		-- The chunk is named after the extension, which is what the
-		-- verbs above read to know whose files and whose storage they
-		-- are being asked for
+		-- Run as that extension: its buildat is bound to its name
 		local ok, err, ret = __buildat_run_code_in_sandbox(code,
-				name .. "/init.lua")
+				name .. "/init.lua", name)
 		if not ok then
 			return false, err
 		end
@@ -1419,6 +1392,29 @@ buildat.safe.compose_launch_ui = function(name, action)
 	-- composition could not be left.
 	buildat.safe.provide_launch_interface(m)
 	return true
+end
+buildat.safe.compose_launch_ui = unbound("compose_launch_ui")
+
+-- An extension's own buildat's verbs, its name bound ([EXT_CALLER_FRAME]).
+-- Trusted only: sandbox.lua's __buildat_extension_globals calls it.
+function __buildat_extension_overrides(who)
+	local function bind(f)
+		return function(...) return f(who, ...) end
+	end
+	return {
+		storage_read = function(name)
+			return storage_read_in(name, who)
+		end,
+		storage_write = function(name, data)
+			return storage_write_in(name, data, who)
+		end,
+		cache_read = bind(cache_read),
+		cache_write = bind(cache_write),
+		run_extension_file = bind(run_extension_file),
+		read_extension_file = bind(read_extension_file),
+		compose_launch_ui = bind(compose_launch_ui),
+		eval = eval_as(who),
+	}
 end
 
 -- **Quitting**, which is a launch UI's own verb ([LAUNCH_SANDBOX]): the

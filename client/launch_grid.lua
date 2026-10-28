@@ -15,8 +15,8 @@ local ICON_FALLBACK = "buildat_logo.png"
 -- **The screens a game is started through**, extensions/launch_menu/
 -- screens.lua, run in the sandbox for each launch: every launch UI's game
 -- starts end there, and the file keeps no state, so a fresh copy is the
--- same as a kept one. Named after the extension, as its own loader
--- names it, so the verbs know whose file it is. file is another of
+-- same as a kept one. Run as the extension, as its own loader runs
+-- it, so the verbs know whose file it is. file is another of
 -- launch_menu's own the same way (preferences.lua).
 function M.screens(file)
 	file = file or "screens.lua"
@@ -28,7 +28,7 @@ function M.screens(file)
 	local code = f:read("*a")
 	f:close()
 	local ok, err, m = __buildat_run_code_in_sandbox(code,
-			"launch_menu/" .. file)
+			"launch_menu/" .. file, "launch_menu")
 	if not ok or type(m) ~= "table" then
 		error("launch_grid: launch_menu/" .. file .. ": " .. tostring(err))
 	end

@@ -287,21 +287,13 @@ local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
 -- Set around add_global_event_handler() by a subscription made through
 -- the sandbox's table (subscribe())
 local from_sandbox = false
--- **Which extension subscribed**, taken from its chunk name, so that
--- leaving a game can drop the game's handlers without dropping the
--- launcher's -- which are sandboxed too now ([LAUNCH_SANDBOX]), and
--- were going with them: after a return the room drew and answered
--- nothing (2026-09-23).
+-- **Which extension subscribed**, so that leaving a game can drop the
+-- game's handlers without dropping the launcher's -- which are sandboxed
+-- too now ([LAUNCH_SANDBOX]), and were going with them: after a return
+-- the room drew and answered nothing (2026-09-23). Bound into the
+-- extension's own table (M.sandboxed_for), not read from the stack
+-- ([EXT_CALLER_FRAME]).
 local from_sandbox_owner = nil
-local function sandbox_owner()
-	for level = 2, 6 do
-		local info = debug.getinfo(level, "S")
-		if not info then break end
-		local name = (info.source or ""):match("^@?([%w_]+)/[%w_%-%.]+$")
-		if name then return name end
-	end
-	return nil
-end
 local global_event_mux_installed = {}
 
 local function add_global_event_handler(event_type, cb_name, fn)
@@ -1190,20 +1182,24 @@ M.drop_handlers_of = drop_handlers_of
 M.safe = Safe
 -- **The sandbox's tables** ([SAFE_CALLER_FRAME]): Safe's, but a
 -- subscription is the sandbox's. An extension's carries the extension's
--- name, read from its chunk (sandbox_owner(); the loader names those);
--- a server's carries none, since a server names its own chunks, and
--- one named like the launch UI was kept past leaving. sandbox.lua's
--- require hands out these.
-M.sandboxed, M.served = {}, {}
-for k, v in pairs(Safe) do
-	M.sandboxed[k], M.served[k] = v, v
+-- name, bound when its table is made (sandboxed_for(name), which
+-- sandbox.lua's per-extension require hands out; [EXT_CALLER_FRAME]);
+-- a server's and one run as no extension carry none.
+local function sandbox_table(owner)
+	local t = {}
+	for k, v in pairs(Safe) do
+		t[k] = v
+	end
+	t.SubscribeToEvent = function(x, y, z)
+		return subscribe(true, owner, named(y, z) and getfenv(2), x, y, z)
+	end
+	return t
 end
-function M.sandboxed.SubscribeToEvent(x, y, z)
-	return subscribe(true, sandbox_owner(), named(y, z) and getfenv(2),
-			x, y, z)
-end
-function M.served.SubscribeToEvent(x, y, z)
-	return subscribe(true, nil, named(y, z) and getfenv(2), x, y, z)
+M.sandboxed, M.served = sandbox_table(nil), sandbox_table(nil)
+local sandboxed_of = {}
+function M.sandboxed_for(name)
+	sandboxed_of[name] = sandboxed_of[name] or sandbox_table(name)
+	return sandboxed_of[name]
 end
 M.unsafe = Unsafe
 

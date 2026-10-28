@@ -826,14 +826,19 @@ buildat.safe.compose_launch_ui(name, action) -> true, or false and why
 buildat.safe.run_extension_file(name) -> what the file returned
 - One named .lua file of the calling extension, run in the sandbox, or one in
   a subdirectory of it ("res/x.lua"). Not a path: an extension runs its own
-  code and nobody else's. A file that is not there raises.
+  code and nobody else's. A file that is not there raises. Which extension
+  it is, here and in read_extension_file, the storage and cache verbs and
+  compose_launch_ui, is the one whose buildat was called: each extension's
+  is its own. Code run as no extension (an app's launcher file) gets nil.
 buildat.safe.read_extension_file(name) -> its text, or nil and why not
 - One of the calling extension's own .lua files, by the names
   run_extension_file takes, as text: what an extension shows or saves of
   its own code (blip's designer saves its generator for an app to copy).
 buildat.safe.eval(code [, chunkname]) -> ok, results...
 - A line of Lua in the caller's own environment ([LAUNCH_CONSOLE]), so a
-  local on one line means what it means everywhere else. Bytecode is refused.
+  local on one line means what it means everywhere else. Bytecode is refused,
+  and so is a caller whose environment is not one of the same extension's
+  (or server's) as the buildat called.
   The chunk is named as its caller's whatever chunkname says, which only
   names it in an error message: the gates above read the chunk's name.
 buildat.safe.client_api_text() -> this document, or nil

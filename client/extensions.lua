@@ -57,10 +57,9 @@ local function load_sandboxed(name, path)
 	end
 	local code = f:read("*a")
 	f:close()
-	-- The chunk's name is what run_extension_file and storage_read take
-	-- the calling extension from
+	-- Run as the extension: its buildat is bound to its name
 	local ok, err, interface = __buildat_run_code_in_sandbox(code,
-			name.."/init.lua")
+			name.."/init.lua", name)
 	if not ok then
 		log:error("Extension "..name.." raised: "..tostring(err))
 		return nil
