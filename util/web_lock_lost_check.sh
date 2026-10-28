@@ -56,6 +56,11 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
+# A browser's page is never the launcher's own client: on its server it is
+# a LAN player, in by an account ([GUEST_NAME_REUSE]), the first one with
+# the setup code
+code=$(grep -ao "the setup code [A-Z0-9]*" "$t/srv.log" | awk '{print $4}' | head -1)
+[ -n "$code" ] || fail "no setup code ($t/srv.log)"
 stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
  function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
@@ -75,7 +80,13 @@ moves='["mouse", 600, 400], ["wait", 200], ["mouse", 700, 420], ["wait", 200],
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "lock_check: ready", 120], ["wait", 2000],
+ ["waitlog", "accounts: the login page shown", 120], ["wait", 800],
+ ["click", 600, 566], ["wait", 1000],
+ ["type", "locker"], ["key", "Tab"], ["type", "lockpass"], ["key", "Tab"],
+ ["type", "lockpass"], ["key", "Tab"], ["type", "$code"],
+ ["shot", "\${OUT}/create.png"], ["click", 600, 581],
+ ["waitlog", "accounts: logged in as locker", 30],
+ ["waitlog", "lock_check: ready", 120], ["wait", 1000],
  ["eval", "$(echo "$stub" | tr "\n" " ")"],
  ["click", 100, 700], ["waitlog", "pause: a press off the menu", 10],
  ["waitlog", "mouse mode 1 ", 10], ["wait", 500],
