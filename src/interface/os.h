@@ -44,6 +44,16 @@ namespace interface
 			const char *u = getenv("BUILDAT_UNCONFINED");
 			return u && ss_(u) == "1";
 		}
+		// [AITTA_KIT_IN_RELEASE] The emsdk an Aitta's C++ kit
+		// (BUILDAT_AITTA_CPP_KIT) builds with: $EMSDK, else ~/emsdk
+		inline ss_ aitta_kit_emsdk()
+		{
+			const char *e = getenv("EMSDK");
+			if(e && *e)
+				return e;
+			const char *h = getenv("HOME");
+			return h && *h ? ss_(h)+"/emsdk" : "";
+		}
 		inline bool windows_sandbox_off_by_env()
 		{
 			const char *w = getenv("BUILDAT_WINDOWS_SANDBOX");

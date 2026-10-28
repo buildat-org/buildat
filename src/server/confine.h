@@ -45,7 +45,8 @@ namespace server
 	// box and under its limits; what it said in <job>/log. 0 when each was
 	// built; nothing is built outside the box.
 	// [WEB_LOCAL_AITTA_CPP] kit: the engine's server for packages as parts
-	// (util/aitta_cpp_build.py), read in the box with the emsdk it names;
+	// (util/aitta_cpp_build.py), read in the box with the emsdk at $EMSDK,
+	// else ~/emsdk (interface::os::aitta_kit_emsdk());
 	// with one, the release's C++ modules linked into a server of its own,
 	// <job>/bin/buildat_server.{js,wasm}, by the kit's build.py.
 	int build_wasm_job(const ss_ &job, const ss_ &interface_path,

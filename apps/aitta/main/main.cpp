@@ -527,11 +527,34 @@ struct Module: public interface::Module, public moderation::Host
 		log_i(MODULE, "Aitta: %zu releases", releases_map().size());
 		// [WEB_LOCAL_AITTA_CPP] A kit made by util/build_web_server.sh for
 		// this engine, on this host
+		// [AITTA_KIT_IN_RELEASE] and with the emsdk version it was made
+		// with ($EMSDK, else ~/emsdk): another emscripten links a .js
+		// that is not the kit's, which each build would be refused for
 		if(const char *kit = getenv("BUILDAT_AITTA_CPP_KIT")){
-			if(interface::fs::path_exists(ss_(kit)+"/kit.json") &&
-					interface::fs::path_exists(ss_(kit)+"/ref/buildat_server.js")){
+			const ss_ emsdk = interface::os::aitta_kit_emsdk();
+			auto version = [](ss_ v){
+				const size_t a = v.find_first_not_of("\" \t\r\n");
+				const size_t b = v.find_last_not_of("\" \t\r\n");
+				return a == ss_::npos ? ss_() : v.substr(a, b - a + 1);
+			};
+			const ss_ need = version(jstr(json::load_string(read_file(
+					ss_(kit)+"/kit.json").c_str()), "emsdk"));
+			const ss_ have = version(read_file(
+					emsdk+"/upstream/emscripten/emscripten-version.txt"));
+			if(!interface::fs::path_exists(ss_(kit)+"/kit.json") ||
+					!interface::fs::path_exists(ss_(kit)+"/ref/buildat_server.js")){
+				log_w(MODULE, "BUILDAT_AITTA_CPP_KIT: no kit at %s", kit);
+			} else if(need.empty() || need != have){
+				log_e(MODULE, "BUILDAT_AITTA_CPP_KIT: the kit at %s needs "
+						"emsdk %s, and the emsdk at %s (EMSDK, else ~/emsdk) "
+						"is %s: C++ servers for the page are refused until "
+						"that emsdk is installed", kit, need.empty() ?
+						"(not recorded: make the kit again)" : cs(need),
+						cs(emsdk), have.empty() ? "not there" : cs(have));
+			} else {
 				m_cpp_kit = kit;
-				log_i(MODULE, "C++ servers for the page: linked from %s", kit);
+				log_i(MODULE, "C++ servers for the page: linked from %s, "
+						"with emsdk %s at %s", kit, cs(have), cs(emsdk));
 				// Each engine its own: a server linked from another kit is
 				// linked again from this one
 				// simplified: the page of the engine before then runs none
@@ -548,8 +571,6 @@ struct Module: public interface::Module, public moderation::Host
 					rel.set("web_build", "queued");
 					put("releases", id, rel);
 				}
-			} else {
-				log_w(MODULE, "BUILDAT_AITTA_CPP_KIT: no kit at %s", kit);
 			}
 		}
 		// [WEB_LOCAL_AITTA] The builds a stop left undone

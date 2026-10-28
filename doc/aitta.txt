@@ -120,10 +120,20 @@ C++ modules ([WEB_LOCAL_AITTA_CPP]) are built for the page only by an
 Aitta started with BUILDAT_AITTA_CPP_KIT naming a kit: the engine's
 server for packages (web/local/_aitta) as parts -- its objects,
 libraries, flags, headers and packed files, the .js and .wasm it made,
-and a link to the emsdk -- which util/build_web_server.sh
-"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit, on the
-Aitta host itself (the link reads the emsdk's cache there and cannot
-write to it). In the same build, in the same box, the kit's fixed script
+and the emsdk version it was made with -- which util/build_web_server.sh
+"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit. The
+kit builds with the emsdk at $EMSDK, else ~/emsdk, on the Aitta host
+([AITTA_KIT_IN_RELEASE]), which must be the version it was made with:
+3.1.60 (util/docker/linux's EMSDK_VERSION), installed as
+
+    git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
+    cd ~/emsdk && ./emsdk install 3.1.60 && ./emsdk activate 3.1.60
+
+Another version links a .js that is not the kit's: Aitta says at its
+start "the kit at ... needs emsdk 3.1.60, and the emsdk at ... is ..."
+and refuses C++ for the page until it is fixed. The build reads the
+emsdk's cache and cannot write to it; an emsdk installed as above has
+what it reads. In the same build, in the same box, the kit's fixed script
 (util/aitta_cpp_build.py) compiles each C++ module (<name>_web.cpp or
 <name>.cpp, and its wasm/'s C and C++) with the kit's flags and none of
 the module's own -- a module with "cxxflags" is not for the page -- and

@@ -7,6 +7,7 @@
 #include "core/log.h"
 #include "interface/fs.h"
 #include "interface/aitta.h"
+#include "interface/os.h"
 #include "core/json.h"
 #include <cstdio>
 #include <cstdlib>
@@ -644,6 +645,9 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	interface::fs::create_directories(job+"/tmp");
 	interface::fs::create_directories(job+"/build/wasm");
 	interface::fs::create_directories(job+"/out");
+	// [AITTA_KIT_IN_RELEASE] The kit's emsdk, found as Aitta found it
+	// (the environment is Aitta's until cleared below)
+	const ss_ emsdk = kit.empty() ? "" : real(interface::os::aitta_kit_emsdk());
 	// A build script reads the environment and may write it into the
 	// .wasm: only what the build needs
 	clearenv();
@@ -665,9 +669,8 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	const ss_ cc = config.get<ss_>("wasm_cc"), ld = config.get<ss_>("wasm_ld");
 	// [WEB_LOCAL_AITTA_CPP] The kit and its emsdk (python3 is the
 	// system's, under /usr)
-	const ss_ emsdk = kit.empty() ? "" : real(kit+"/emsdk");
 	if(!kit.empty() && (kit.find('\'') != ss_::npos || job.find('\'') !=
-			ss_::npos || emsdk.empty())){
+			ss_::npos || emsdk.find('\'') != ss_::npos || emsdk.empty())){
 		log_e("wasm", "the build: no kit with an emsdk at %s", cs(kit));
 		return 2;
 	}
@@ -760,7 +763,7 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	if(ok && !kit.empty()){
 		fflush(stdout);
 		ok = interface::process::shell_exec("/usr/bin/python3 -I '"+kit+
-				"/build.py' build '"+kit+"' '"+job+"'") == 0;
+				"/build.py' build '"+kit+"' '"+job+"' '"+emsdk+"'") == 0;
 		if(!ok)
 			log_e("wasm", "the build: the C++ server failed");
 	}
@@ -994,7 +997,9 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	// inside this box as well
 	if(const char *kit = getenv("BUILDAT_AITTA_CPP_KIT")){
 		rs.add_around(kit, holes, FS_READ);
-		rs.add_around(ss_(kit)+"/emsdk", holes, FS_READ);
+		const ss_ emsdk = interface::os::aitta_kit_emsdk();
+		if(!emsdk.empty())
+			rs.add_around(emsdk, holes, FS_READ);
 	}
 	auto net_rule = [&](uint64_t access, int port){
 		struct landlock_net_port_attr a;

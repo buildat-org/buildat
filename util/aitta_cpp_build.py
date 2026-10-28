@@ -8,16 +8,19 @@
 #     After util/build_web_server.sh built _aitta in <build dir>
 #     (Build-webserver): its objects, libraries, flags, headers, packed files
 #     and outputs copied into <kit dir>, which an Aitta names in
-#     BUILDAT_AITTA_CPP_KIT. kit/emsdk is a link to the emsdk it was built
-#     with, kit/build.py this script. Made on the Aitta host itself: the
-#     emsdk's cache there must have what the link reads (it cannot write
-#     there).
-#   python3 -I <kit>/build.py build <kit dir> <job dir>
+#     BUILDAT_AITTA_CPP_KIT; kit/build.py is this script. kit.json's
+#     "emsdk" is the emsdk version it was built with ($EMSDK's), which the
+#     Aitta host's emsdk must be ([AITTA_KIT_IN_RELEASE]: a release ships
+#     the kit, util/package.sh). The emsdk's cache there must have what
+#     the link reads (the build cannot write there); an emsdk installed by
+#     `emsdk install` has it.
+#   python3 -I <kit>/build.py build <kit dir> <job dir> <emsdk>
 #     In the build's box (src/server/confine.cpp, build_wasm_job()): the
 #     release in <job>/src; each C++ module compiled, the module table made
 #     and the server linked with the kit's flags into <job>/bin/
 #     buildat_server.{js,wasm}. Aitta then checks them against
-#     <kit>/ref/ (apps/aitta/main/main.cpp, cpp_server_check()).
+#     <kit>/ref/ (apps/aitta/main/main.cpp, cpp_server_check()). <emsdk>
+#     is Aitta's ($EMSDK, else ~/emsdk), of the kit's version.
 import json, os, re, shlex, shutil, subprocess, sys
 
 PLAIN = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -130,23 +133,35 @@ def make_kit(build, kit):
             i += 1
     for f in ("buildat_server.js", "buildat_server.wasm"):
         shutil.copyfile(os.path.join(build, "bin", f), os.path.join(kit, "ref", f))
-    emsdk = os.environ.get("EMSDK", "")
-    if not os.path.isfile(os.path.join(emsdk, ".emscripten")):
-        die("no emsdk in EMSDK (" + emsdk + ")")
-    os.symlink(os.path.realpath(emsdk), os.path.join(kit, "emsdk"))
+    k["emsdk"] = emsdk_version(os.environ.get("EMSDK", ""))
+    if not k["emsdk"]:
+        die("no emsdk in EMSDK (" + os.environ.get("EMSDK", "") + ")")
     json.dump(k, open(os.path.join(kit, "kit.json"), "w"), indent=1)
     shutil.copyfile(os.path.abspath(__file__), os.path.join(kit, "build.py"))
     print("kit: " + kit)
+
+# An emsdk's emscripten version ("3.1.60"), or "" where there is none;
+# Aitta reads the same file (apps/aitta/main/main.cpp)
+def emsdk_version(emsdk):
+    try:
+        v = open(os.path.join(emsdk, "upstream/emscripten/emscripten-version.txt")).read()
+    except OSError:
+        return ""
+    return v.strip().strip('"')
 
 def run(args, cwd):
     p = subprocess.run(args, cwd=cwd, stdin=subprocess.DEVNULL)
     if p.returncode != 0:
         die("%s failed (%d)" % (os.path.basename(args[0]), p.returncode))
 
-def build(kit, job):
+def build(kit, job, emsdk):
     kit, job = os.path.abspath(kit), os.path.abspath(job)
     k = json.load(open(os.path.join(kit, "kit.json")))
-    emsdk = os.path.realpath(os.path.join(kit, "emsdk"))
+    emsdk = os.path.realpath(emsdk)
+    # Another emscripten makes another .js, which Aitta would refuse
+    if emsdk_version(emsdk) != k.get("emsdk"):
+        die("the kit needs emsdk %s, %s is %s" % (k.get("emsdk"), emsdk,
+            emsdk_version(emsdk) or "no emsdk"))
     em = os.path.join(emsdk, "upstream/emscripten")
     # The emsdk's cache read where it is, but its locks and the link's
     # symbol lists written: a cache of the job's own beside it
@@ -230,7 +245,7 @@ def build(kit, job):
 
 if len(sys.argv) == 4 and sys.argv[1] == "kit":
     make_kit(sys.argv[2], sys.argv[3])
-elif len(sys.argv) == 4 and sys.argv[1] == "build":
-    build(sys.argv[2], sys.argv[3])
+elif len(sys.argv) == 5 and sys.argv[1] == "build":
+    build(sys.argv[2], sys.argv[3], sys.argv[4])
 else:
-    sys.exit("usage: aitta_cpp_build.py kit <build dir> <kit dir> | build <kit dir> <job dir>")
+    sys.exit("usage: aitta_cpp_build.py kit <build dir> <kit dir> | build <kit dir> <job dir> <emsdk>")
