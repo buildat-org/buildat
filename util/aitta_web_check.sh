@@ -22,7 +22,8 @@
 #      the cube drawn and a key answered by the server's .wasm on the
 #      browser's wasm.
 #   5. 2b again where the host gives the build no PID namespace
-#      (BUILDAT_BUILD_NO_PIDNS=1): Aitta's records copied to a second one.
+#      (BUILDAT_BUILD_NO_PIDNS=1): not built, and nothing left. Aitta's
+#      records copied to a second one.
 # Needs web/ (util/build_web.sh), web/local/_aitta
 # (util/build_web_server.sh "$PWD/src/server/web/_aitta"), cargo with the
 # wasm32-unknown-unknown target, and a display for the key's bind.
@@ -204,18 +205,13 @@ pub extern "C" fn linger() -> u32 { 1 }
 #[panic_handler]
 fn panic(_: &core::panic::PanicInfo) -> ! { loop {} }
 EOF
-# linger_left <name> <server log>: built, and nothing of it left
-linger_left(){
-	publish "$t/linger" $1
-	wait_for_log "$2" "web build of tester/$1/1.0.0: " 120 ||
-		fail "no web build of $1 ($2)"
-	grep -aq "web build of tester/$1/1.0.0: built" "$2" ||
-		fail "$1 was not built: $(grep -a -A20 "web build of tester/$1" "$2" | tail -20)"
-	left=$(pgrep -f "${tok}_" | tr '\n' ' ')
-	[ -n "$left" ] && { CHECK_PIDS+=($left); fail "$1's build left processes: $left"; }
-	return 0
-}
-linger_left linger "$t/srv.log"
+publish "$t/linger" linger
+wait_for_log "$t/srv.log" "web build of tester/linger/1.0.0: " 120 ||
+	fail "no web build of linger ($t/srv.log)"
+grep -aq "web build of tester/linger/1.0.0: built" "$t/srv.log" ||
+	fail "linger was not built: $(grep -a -A20 "web build of tester/linger" "$t/srv.log" | tail -20)"
+left=$(pgrep -f "${tok}_" | tr '\n' ' ')
+[ -n "$left" ] && { CHECK_PIDS+=($left); fail "the build left processes: $left"; }
 echo "ok: what a build script started ended with the build"
 
 # 3.
@@ -269,7 +265,7 @@ for want in "server: .*Loading module main from /installed/tester/rusty/1.0.0/ma
 	grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 done
 # 5. 2b where the host gives a build no PID namespace: the same Aitta,
-# its records copied, the build ending its leftovers itself
+# its records copied, refusing the build
 kill $aitta_pid $play_pid
 for p in $aitta_pid $play_pid; do
 	for i in $(seq 50); do kill -0 $p 2>/dev/null || break; sleep 0.2; done
@@ -280,6 +276,13 @@ BUILDAT_BUILD_NO_PIDNS=1 start_server "$t/srv2.log" "Listening at" 60 auto \
 	fail "the second Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
-linger_left linger2 "$t/srv2.log"
-echo "ok: without a PID namespace too"
+publish "$t/linger" linger2
+wait_for_log "$t/srv2.log" "web build of tester/linger2/1.0.0: " 120 ||
+	fail "no web build of linger2 ($t/srv2.log)"
+grep -aq "web build of tester/linger2/1.0.0: failed" "$t/srv2.log" &&
+	grep -aq "no PID namespace for it" "$t/srv2.log" ||
+	fail "linger2 was not refused for want of a PID namespace ($t/srv2.log)"
+left=$(pgrep -f "${tok}_" | tr '\n' ' ')
+[ -n "$left" ] && { CHECK_PIDS+=($left); fail "linger2 left processes: $left"; }
+echo "ok: without a PID namespace nothing is built"
 echo "PASS: Aitta builds a release's .wasm at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ for it, ends every process a build leaves; the page installs the release and runs it with the engine's server for packages, the client joined and a key answered"

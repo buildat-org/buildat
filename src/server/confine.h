@@ -33,11 +33,8 @@ namespace server
 	// .wasm (build_wasm_job() below): Linux only. Reads the
 	// system's programs and libraries and read_dirs, writes job_dir only;
 	// no socket, no TCP. Called once, with no thread started. "" or why
-	// not (then nothing is built). kill_all: the build has no PID
-	// namespace and ends what it leaves with kill(-1), which needs
-	// Landlock's signal scope; "" means it is there.
-	ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir,
-			bool kill_all);
+	// not (then nothing is built).
+	ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir);
 
 	// [WEB_LOCAL_AITTA] Aitta's build of a release's .wasm at publish, the
 	// server started as `buildat_server --build-wasm <job> <interface
