@@ -50,6 +50,9 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 	// root, files: [[path under root, bytes], ...], wasm: [[name, bytes],
 	// ...]}, written before main() runs it from root, the .wasm into /wasm
 	var package_ = /[?&]package=1(&|$)/.test(self.location.search);
+	// [WEB_LOCAL_PLAYER_NAME] ?name=: the page's player's name, which
+	// builtin/accounts' web stand-in gives the page's client
+	var local_name = /[?&]name=([A-Za-z0-9_\-]{1,20})(&|$)/.exec(self.location.search);
 	var sent = null, waiting = false;
 	var put_files = function(){
 		sent.files.forEach(function(f){
@@ -86,6 +89,8 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		});
 	};
 	Module.preRun.push(function(){
+		if(local_name)
+			ENV.BUILDAT_LOCAL_NAME = local_name[1];
 		// IDBFS's own write lists the files, waits for IndexedDB's list and
 		// only then reads them, and a write between was half a save. Here
 		// the listing and the reads are in one turn of this thread, where

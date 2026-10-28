@@ -1,5 +1,8 @@
 [
 	["nav", "${URL}"],
+	["waitlog", "local: asking the player's name", 60],
+	["type", "tester"],
+	["key", "Enter"],
 	["waitlog", "server: .*Client 1 from the page connected", 120],
 	["waitlog", "hillclimb: this client's car is [0-9]", 60],
 	["eval", "'joined at ' + Math.round(performance.now()) + ' ms, isolated ' + crossOriginIsolated"],

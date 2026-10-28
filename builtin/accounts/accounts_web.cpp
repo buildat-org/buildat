@@ -10,7 +10,11 @@
 // page's own client; the slot is held so that a second connection, if one
 // ever came, is never local and never joins. The name is the one the first
 // join gave, kept in the app's save "_server", store "accounts"; each later
-// join is that name whatever was typed.
+// join is that name whatever was typed. [WEB_LOCAL_PLAYER_NAME] A page
+// names its player (BUILDAT_LOCAL_NAME, src/server/web/pre.js): that name,
+// kept over the one before, and the page's client is in as it at once,
+// with no join (an app started by the launcher names a peer with no name
+// "client<peer>").
 // simplified: no passwords, invites, bans, levels below the admin, guests
 // or Starport IDs; the requests for them are refused or go unanswered
 #include "accounts/api.h"
@@ -23,6 +27,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include <cereal/types/utility.hpp>
+#include <cstdlib>
 #define MODULE "accounts"
 
 using interface::Event;
@@ -40,6 +45,7 @@ struct Module: public interface::Module, public Interface
 	ss_ m_name;
 	PeerId m_local = 0;
 	bool m_joined = false;
+	bool m_page_named = false;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -88,6 +94,14 @@ struct Module: public interface::Module, public Interface
 		}
 		m_store = save->store("accounts");
 		m_store->get("local_name", m_name);
+		const char *page = getenv("BUILDAT_LOCAL_NAME");
+		if(page && valid_name(page)){
+			m_page_named = true;
+			if(m_name != page){
+				m_name = page;
+				m_store->set("local_name", m_name);
+			}
+		}
 		log_i(MODULE, "accounts: the web server's: one player, %s, the admin",
 				m_name.empty() ? "named at the first join" : cs(m_name));
 	}
@@ -103,6 +117,11 @@ struct Module: public interface::Module, public Interface
 	{
 		if(m_local == 0){
 			m_local = client.info.id;
+			if(m_page_named){
+				m_joined = true;
+				log_i(MODULE, "%s is in, the page's player and the admin",
+						cs(m_name));
+			}
 			return;
 		}
 		log_w(MODULE, "Peer %i connected while peer %i is the player: it "

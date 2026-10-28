@@ -77,6 +77,7 @@ if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
 	cat > "$t/aggregate.json" << 'JSON'
 [
 	["nav", "${URL}"],
+	["waitlog", "local: asking the player's name", 60], ["type", "tester"], ["key", "Enter"],
 	["waitlog", "server: .*Client 1 from the page connected", 120],
 	["waitlog", "player physics enabled", 120],
 	["waitlog", "demo_dig: player at", 10],
@@ -112,6 +113,7 @@ if [ -f "$here/web/local/skeldat/buildat_server.wasm" ]; then
 	cat > "$t/skeldat.json" << 'JSON'
 [
 	["nav", "${URL}"],
+	["waitlog", "local: asking the player's name", 60], ["type", "tester"], ["key", "Enter"],
 	["eval", "(function(){ var held = null; Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }}); function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); } HTMLCanvasElement.prototype.requestPointerLock = function(){ if(held !== this) set(this); return Promise.resolve(); }; document.exitPointerLock = function(){ if(held) set(null); }; return 'stub'; })()"],
 	["waitlog", "world_menu: the list shown", 120], ["wait", 500],
 	["click", 362, 725], ["waitlog", "world_menu: the name screen shown", 10],
@@ -146,6 +148,7 @@ for app in sample_wasm_only sample_wasm_only_rust; do
 	cat > "$t/$app.json" << 'JSON'
 [
 	["nav", "${URL}"],
+	["waitlog", "local: asking the player's name", 60], ["type", "tester"], ["key", "Enter"],
 	["waitlog", "wasm main: drew a cube", 120],
 	["key", "Space"],
 	["waitlog", "wasm main: the server answered echo: colour 1", 30]

@@ -131,7 +131,11 @@ peer, the page's own client, over postMessage (only the page that made
 the worker can send to it); accounts has one player, the first peer to connect, who joins by
 name alone (the first join's name, kept in the app's save "_server"), is
 is_local() and the admin, and has no passwords, invites, bans, guests or
-mail; starport_announce lists nothing and takes no Starport IDs.
+mail. A ?local= page names its player ([WEB_LOCAL_PLAYER_NAME]): it asks
+the name once, keeps it in the browser's storage for every ?local= page
+of its origin (a "change" link while the page loads forgets it), and the
+page's client is in as that name at once (name_of() gives it), with no
+join. starport_announce lists nothing and takes no Starport IDs.
 client_file watches no files there. The page stops the server by
 Module._buildat_server_stop(), as SIGTERM does natively (under node,
 SIGTERM and SIGINT call it).

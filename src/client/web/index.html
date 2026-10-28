@@ -33,6 +33,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 #load canvas { image-rendering: pixelated; }
 #status { position: fixed; left: 0; right: 0; top: 40%; text-align: center;
 	color: #ddd; font: 16px sans-serif; white-space: pre-wrap; pointer-events: none; }
+/* [WEB_LOCAL_PLAYER_NAME] A ?local= page's player's name, asked once */
+#name { position: fixed; left: 0; right: 0; top: 15%; display: none;
+	text-align: center; color: #ddd; font: 16px 'Overpass Mono', monospace; }
+#name input, #name button { font: inherit; padding: 6px 10px; margin: 6px; }
+#name a { color: #26d9ff; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -46,6 +51,10 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 <div id="load"><div id="load1"></div><div id="load2"><canvas width="16"
 	height="16"></canvas><span></span></div></div>
 <div id="status"></div>
+<form id="name" autocomplete="off"><div id="name_ask">Your name in this browser's
+games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</button>
+<div id="name_why"></div></div><div id="name_as">Playing as <span></span> &middot;
+<a id="name_change">change</a></div></form>
 <script>
 (function(){
 	var status = document.getElementById('status');
@@ -124,6 +133,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		// and the client's screen is up from there
 		if(t === '' && Module.buildatUp){
 			load.style.display = 'none';
+			document.getElementById('name').style.display = 'none';
 			return;
 		}
 		// Emscripten's data download, "Downloading data... (a/b)"
@@ -480,8 +490,12 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			FS.syncfs(true, function(err){
 				if(err)
 					console.warn('IndexedDB read: ' + err);
-				if(local_pkg)
-					start_package(local_pkg);
+				idb_read = true;
+				if((local_app || local_pkg) && !Module.buildatPipe){
+					name_waited = true;
+					Module.addRunDependency('name');
+				}
+				start_named();
 				Module.removeRunDependency('idbfs');
 			});
 			var syncing = false, again = false, after = [];
@@ -697,7 +711,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// hidden, and the server is stopped when the page goes.
 	// package: {root, files, wasm} for the engine's server for packages
 	// (local/_aitta/), sent to it before its main() (src/server/web/pre.js)
-	function start_local(app, package_){
+	function start_local(app, package_, name){
 		var p = Module.buildatPipe = {q: [], closed: null, gone: null};
 		var w = null;
 		p.open = function(){
@@ -719,8 +733,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 					'which the local server needs';
 			return;
 		}
-		w = new Worker('local/' + app + '/buildat_server.js' +
-				(package_ ? '?package=1' : ''));
+		w = new Worker('local/' + app + '/buildat_server.js?name=' +
+				encodeURIComponent(name) + (package_ ? '&package=1' : ''));
 		if(package_)
 			w.postMessage({op: 'files', root: package_.root,
 					files: package_.files, wasm: package_.wasm});
@@ -747,8 +761,79 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			w.postMessage({op: 'stop'});
 		});
 	}
-	if(local_app)
-		start_local(local_app[0]);
+	// [WEB_LOCAL_PLAYER_NAME] The local server's player is named by this
+	// page: asked once, kept in the browser's storage (localStorage, this
+	// origin's) and used by every ?local= page after; "change" while the
+	// page loads forgets it and asks again. The worker gets it
+	// (BUILDAT_LOCAL_NAME, builtin/accounts/accounts_web.cpp).
+	// simplified: changed only while a page loads; a setting in the
+	// client's own menus is the upgrade
+	var NAME_KEY = 'buildat_local_name', NAME_RE = /^[A-Za-z0-9_\-]{1,20}$/;
+	var local_name = null, idb_read = false, name_waited = false;
+	var local_started = false;
+	function with_name(go){
+		var form = document.getElementById('name');
+		var n = '';
+		try { n = localStorage.getItem(NAME_KEY) || ''; } catch(e){}
+		function as(n){
+			document.getElementById('name_ask').style.display = 'none';
+			document.getElementById('name_as').style.display = '';
+			document.querySelector('#name_as span').textContent = n;
+			console.log('local: playing as ' + n);
+			go(n);
+		}
+		document.getElementById('name_change').onclick = function(){
+			try { localStorage.removeItem(NAME_KEY); } catch(e){}
+			location.reload();
+		};
+		form.style.display = 'block';
+		if(NAME_RE.test(n))
+			return as(n);
+		document.getElementById('name_as').style.display = 'none';
+		var input = document.getElementById('name_in');
+		form.onsubmit = function(){
+			var v = input.value.trim();
+			if(!NAME_RE.test(v)){
+				document.getElementById('name_why').textContent =
+						'1 to 20 letters, digits, - and _';
+				return false;
+			}
+			try { localStorage.setItem(NAME_KEY, v); } catch(e){}
+			form.onsubmit = function(){ return false; };
+			// The keys are the game's from here
+			input.blur();
+			canvas.focus();
+			as(v);
+			return false;
+		};
+		// Enter as the button, whatever sent the key
+		input.onkeydown = function(e){
+			if(e.key === 'Enter'){
+				e.preventDefault();
+				form.onsubmit();
+			}
+		};
+		console.log('local: asking the player\'s name');
+		input.focus();
+	}
+	// A package's files are read from the client's storage first
+	function start_named(){
+		if(local_started || local_name === null || (local_pkg && !idb_read))
+			return;
+		local_started = true;
+		if(local_app)
+			start_local(local_app[0], null, local_name);
+		else
+			start_package(local_pkg);
+		if(name_waited)
+			Module.removeRunDependency('name');
+		name_waited = false;
+	}
+	if(local_app || local_pkg)
+		with_name(function(n){
+			local_name = n;
+			start_named();
+		});
 	// [WEB_LOCAL_AITTA] The installed package's files, as the client's
 	// storage has them, to the worker at /installed/<author>/<name>/
 	// <version> (the server names its saves <author>.<name> by that), and
@@ -784,7 +869,7 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		console.log('local: ' + m[0] + ', ' + files.length + ' files, ' +
 				wasm.length + ' .wasm');
 		start_local('_aitta', {root: '/installed/' + m[1] + '/' + m[2] + '/' +
-				m[3], files: files, wasm: wasm});
+				m[3], files: files, wasm: wasm}, local_name);
 	}
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
 	// browser's focus is on it while a LineEdit has the game's, holding the

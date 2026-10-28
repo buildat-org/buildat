@@ -44,7 +44,8 @@ cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
 [ -x "$cargo" ] || skip "no cargo"
 [ -d "$("$(dirname "$cargo")/rustc" --print target-libdir --target wasm32-unknown-unknown 2>/dev/null)" ] ||
 	skip "no wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown)"
-if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
+# (the page's own run shares no window or port with another's)
+if [ $local = 0 ] && { check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; }; then
 	skip "a buildat server or client is already running"
 fi
 check_tmp sample_rust
@@ -99,6 +100,7 @@ if [ $local = 1 ]; then
 	cat > "$t/steps.json" <<EOF
 [
 	["nav", "\${URL}"],
+	["waitlog", "local: asking the player's name", 60], ["type", "tester"], ["key", "Enter"],
 	["waitlog", "drew a cube", 120],
 	["eval", "'isolated ' + crossOriginIsolated"],
 	["key", "Space"],
