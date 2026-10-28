@@ -59,7 +59,7 @@ declare -A srcs=(
 	[font]=""
 	# [CLIENT_WASM] A module's .wasm through the client's checks, meter,
 	# WABT's writers and WAMR's interpreter (wasm_fuzz.cpp, which includes
-	# src/lua_bindings/wasm.cpp); WABT's C++ from its CMakeLists
+	# src/wasm/engine.cpp); WABT's C++ from its CMakeLists
 	[wasm]="src/core/log.cpp 3rdparty/c55lib/c55/os.cpp
 		$(sed -n '/^add_library(wabt STATIC/,/)/p' \
 			"$here/3rdparty/wabt/CMakeLists.txt" | grep -o 'src/[^ ]*\.cc' |

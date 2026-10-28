@@ -123,13 +123,17 @@ cd "$here/Build"
 # the environment given), the module's lines and pictures
 run()
 {
-	local n=$1
+	local n=$1 compiled=
 	shift
+	# Compiled: the key after the move from the interpreter, which the
+	# Rust one's compile (about a second) can be behind the drive's end
+	[ $# = 0 ] && compiled="wait_log 30000 compiled module"
 	start_server "$t/srv$n.log" "Listening at" 120 auto bin/buildat_server \
 			-m ../apps/$app -l 3 || fail "the server did not come up"
 	CHECK_PIDS+=($SERVER_PID)
 	cat > "$t/cmds$n.txt" <<EOF
 wait_log 60000 drew a cube
+$compiled
 delay 500
 screenshot $t/before$n.png
 keypress space

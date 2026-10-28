@@ -357,10 +357,11 @@ add_subdirectory("3rdparty/qrcodegen")
 add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/md4c")
 add_subdirectory("3rdparty/luabind-deboostified")
-# [CLIENT_WASM] the validator and wasm2c, for the client
-if(BUILD_CLIENT)
+# [CLIENT_WASM] the validator and wasm2c, for the client and the server
+# ([SERVER_WASM]: src/wasm/engine.cpp)
+if(BUILD_CLIENT OR (BUILD_SERVER AND NOT EMSCRIPTEN))
 	add_subdirectory("3rdparty/wabt")
-	# and the interpreter, for the native client on Linux and Windows
+	# and the interpreter, natively on Linux and Windows
 	if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32) AND NOT EMSCRIPTEN)
 		add_subdirectory("3rdparty/wamr")
 	endif()
@@ -580,6 +581,7 @@ if(BUILD_CLIENT)
 		src/lua_bindings/replicate.cpp
 		src/lua_bindings/synth.cpp
 		src/lua_bindings/wasm.cpp
+		src/wasm/engine.cpp
 		# [WASM_MAIN_WEB_PATHS] a serverless app's .wasm (app::serverless_wasms)
 		src/server/wasm_build.cpp
 	)
@@ -600,8 +602,8 @@ if(BUILD_CLIENT)
 	set_source_files_properties(src/lua_bindings/synth.cpp PROPERTIES
 			COMPILE_OPTIONS "-ffp-contract=off")
 	# [CLIENT_WASM] WABT's headers are C++20
-	set_source_files_properties(src/lua_bindings/wasm.cpp PROPERTIES
-			COMPILE_OPTIONS "-std=c++20")
+	set_source_files_properties(src/lua_bindings/wasm.cpp src/wasm/engine.cpp
+			PROPERTIES COMPILE_OPTIONS "-std=c++20")
 	add_executable(${CLIENT_EXE_NAME} ${CLIENT_SRCS})
 	# A GUI executable on Windows ([WIN8_START] 19): no console window,
 	# whose synchronous writes made the client pay a console write per

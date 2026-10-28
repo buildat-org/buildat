@@ -49,7 +49,7 @@
 #
 # tier: quick
 # cost: 39s (2026-10-27)
-# covers: builtin/voxelworld/wasm/** client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
+# covers: builtin/voxelworld/wasm/** client/api.lua src/server/wasm_build.cpp src/lua_bindings/wasm.cpp src/wasm/** src/interface/wasm_api.h 3rdparty/wabt/** 3rdparty/wamr/** apps/sample_wasm/** builtin/client_data/**
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
