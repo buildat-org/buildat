@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: 3s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: client/sandbox.lua client/api.lua client/core/urho3d/** client/core/uistack/** src/lua_bindings/**
+# covers: client/sandbox.lua client/api.lua client/extensions.lua client/core/urho3d/** client/core/uistack/** src/lua_bindings/** extensions/sandbox_test_peer/**
 # (client/api.lua is the sandbox's own surface -- every verb this check
 # tries to reach past, and the ones wrapped.lua exercises)
 # [LAUNCH_SANDBOX]: **the hostile launch UI**. The launch UI is a slot
@@ -113,6 +113,24 @@ if ! grep -aq "wrapped: .* of the client's handlers kept.*through a pcall and a 
 			"$(grep -a "wrapped.lua\|is not the script's" "$out/cli.log" | tail -2 | tr '\n' ' ')"
 	exit 1
 fi
+# [EXT_CALLER_FRAME] Another extension (sandbox_test_peer) calling the
+# verbs on "its own" files, storage and cache through a tail call or a
+# pcall from a callback gets its own, nothing of the launch UI's, and
+# its eval does not run as the launch UI through a function it calls
+if ! grep -aq "sandbox_test_peer: 4 of 4 its own$" "$out/cli.log"; then
+	echo "FAIL: another extension got the launch UI's --" \
+			"$(grep -a "sandbox_test_peer: " "$out/cli.log" | head -1)"
+	exit 1
+fi
+if ! grep -aq "launch sandbox: another extension's writes in the launch UI's storage and cache: none" "$out/cli.log"; then
+	echo "FAIL: another extension wrote the launch UI's storage or cache --" \
+			"$(grep -a "another extension's writes" "$out/cli.log" | head -1)"
+	exit 1
+fi
+if ! grep -aq "launch sandbox: another extension's eval through a function of its own: refused" "$out/cli.log"; then
+	echo "FAIL: another extension's eval ran as the launch UI"
+	exit 1
+fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers and keeps none of its own past a pcall or a tail call"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers and keeps none of its own past a pcall or a tail call; another extension gets its own storage, cache and files and not the launch UI's"
 exit 0

@@ -148,7 +148,27 @@ function M.run()
 	-- ways; a write that lands could swap what the user typed for a
 	-- password the script knows. Each must be refused.
 	local wrote = false
+	-- [EXT_CALLER_FRAME] Another extension's tail calls write "peer_mark"
+	-- each frame (sandbox_test_peer); none may land in this launch UI's
+	-- storage or cache. Cleared first: the checks' user dir is kept.
+	buildat.storage_write("peer_mark", "")
+	buildat.cache_write("peer_mark", "")
+	local peer = require("buildat/extension/sandbox_test_peer")
+	local ran, text = peer.hook()
+	log:info("launch sandbox: another extension's eval through a function " ..
+			"of its own: " .. ((ran and type(text) == "string") and
+				"RAN AS THE LAUNCH UI" or "refused"))
+	local frames = 0
 	magic.SubscribeToEvent("Update", function()
+		frames = frames + 1
+		if frames == 3 then
+			local s, c = buildat.storage_read("peer_mark"),
+					buildat.cache_read("peer_mark")
+			log:info("launch sandbox: another extension's writes in the " ..
+					"launch UI's storage and cache: " ..
+					((s == "" and c == "") and "none" or
+						"WRITTEN (" .. tostring(s) .. ", " .. tostring(c) .. ")"))
+		end
 		for key = 97, 122 do
 			if magic.input:GetKeyPress(key) then
 				log:info("launch sandbox: polled " .. string.char(key))
