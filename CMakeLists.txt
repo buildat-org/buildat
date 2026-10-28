@@ -358,8 +358,9 @@ add_subdirectory("3rdparty/sqlite")
 add_subdirectory("3rdparty/md4c")
 add_subdirectory("3rdparty/luabind-deboostified")
 # [CLIENT_WASM] the validator and wasm2c, for the client and the server
-# ([SERVER_WASM]: src/wasm/engine.cpp)
-if(BUILD_CLIENT OR (BUILD_SERVER AND NOT EMSCRIPTEN))
+# ([SERVER_WASM]: src/wasm/engine.cpp; in the browser's server the
+# validator only, [WEB_LOCAL_AITTA])
+if(BUILD_CLIENT OR BUILD_SERVER)
 	add_subdirectory("3rdparty/wabt")
 	# and the interpreter, natively on Linux and Windows
 	if((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32) AND NOT EMSCRIPTEN)
@@ -736,26 +737,26 @@ if(BUILD_SERVER)
 		src/server/confine_windows.cpp
 		src/server/wasm_build.cpp
 	)
-	# [SERVER_WASM] a module that is a .wasm, on the client's runtime; not in
-	# the browser's server ([WEB_LOCAL_SERVER]) yet
-	if(NOT EMSCRIPTEN)
-		list(APPEND SERVER_SRCS src/wasm/engine.cpp src/server/wasm_module.cpp)
+	# [SERVER_WASM] a module that is a .wasm, on the client's runtime; in
+	# the browser's server on the browser's own wasm ([WEB_LOCAL_AITTA])
+	list(APPEND SERVER_SRCS src/wasm/engine.cpp src/server/wasm_module.cpp)
+	if(TARGET wasm_rt_files)
 		list(APPEND SERVER_SRCS $<TARGET_OBJECTS:wasm_rt_files>)
-		if(TARGET wasm_rt)
-			list(APPEND SERVER_SRCS $<TARGET_OBJECTS:wasm_rt>)
-		endif()
-		set_source_files_properties(src/wasm/engine.cpp PROPERTIES
-				COMPILE_OPTIONS "-std=c++20")
-		# The builtins' interfaces (network/api.h) it reaches modules through
-		set_source_files_properties(src/server/wasm_module.cpp PROPERTIES
-				INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/builtin")
 	endif()
+	if(TARGET wasm_rt)
+		list(APPEND SERVER_SRCS $<TARGET_OBJECTS:wasm_rt>)
+	endif()
+	set_source_files_properties(src/wasm/engine.cpp PROPERTIES
+			COMPILE_OPTIONS "-std=c++20")
+	# The builtins' interfaces (network/api.h) it reaches modules through
+	set_source_files_properties(src/server/wasm_module.cpp PROPERTIES
+			INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/builtin")
 	if(WIN32)
 		list(APPEND SERVER_SRCS ${BUILDAT_RC})
 	endif()
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+	target_link_libraries(${SERVER_EXE_NAME} wabt)
 	if(NOT EMSCRIPTEN)
-		target_link_libraries(${SERVER_EXE_NAME} wabt)
 		if(TARGET wamr)
 			target_link_libraries(${SERVER_EXE_NAME} wamr)
 		endif()

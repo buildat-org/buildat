@@ -16,10 +16,15 @@
 # while touching main/shared/ changes it; then a module whose .wasm imports what its meta.json
 # does not grant is refused, by name, and a server with no cargo refuses
 # the Rust modules, by name. With `web`: the same keys in the web client, headless
-# Chrome, against a native server.
+# Chrome, against a native server. With `local` ([WEB_LOCAL_AITTA]): the
+# server in the page too (?local=sample_rust, util/build_web_server.sh
+# sample_rust), its .wasm modules on the browser's wasm: the voxels, the
+# endless one stopped by the meter, a key answered, and the count going on
+# after a reload (the worker's storage in IndexedDB).
 #
 #   apps/sample_rust/check.sh        # the native client
 #   apps/sample_rust/check.sh web    # the web client
+#   apps/sample_rust/check.sh local  # the web client and its server in the page
 #
 # tier: quick
 # cost: 40s (2026-10-28)
@@ -27,11 +32,12 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-web=0
+web=0 local=0
 for a in "$@"; do
 	case "$a" in
 		web) web=1 ;;
-		*) echo "usage: $0 [web]" >&2; exit 2 ;;
+		local) local=1 ;;
+		*) echo "usage: $0 [web|local]" >&2; exit 2 ;;
 	esac
 done
 cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
@@ -75,6 +81,63 @@ server_lines()
 	grep -a "wasm \(main\|counter\): .*trap" "$log" && fail "a trap in $log"
 	return 0
 }
+
+if [ $local = 1 ]; then
+	[ -f "$here/web/local/sample_rust/buildat_server.wasm" ] ||
+		skip "no web/local/sample_rust (util/build_web_server.sh sample_rust)"
+	export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
+	# apps/play serves the page, isolated for ?local, and web/local/
+	cd "$here/Build"
+	BUILDAT_LUANTI_LIST=http://127.0.0.1:9 start_server "$t/play.log" \
+			"STATUS Listening" 120 auto bin/buildat_server -m ../apps/play \
+			-D "$t/play" -C "$t/play.cache" -W "$here/web" -l 3 ||
+		fail "the page's server ($t/play.log)"
+	CHECK_PIDS+=($SERVER_PID)
+	# After a key, a save in IndexedDB as new as the key (the worker writes
+	# /user every 5 s), then a reload and a key again
+	saved="new Promise(r => { const t0 = Date.now() - 1000; (function poll(){ const q = indexedDB.open('/user'); q.onsuccess = () => { const g = q.result.transaction('FILE_DATA').objectStore('FILE_DATA').getAll(); g.onsuccess = () => { const e = g.result.filter(x => x.contents && x.timestamp >= t0); if(e.length) r('saved at ' + Math.round(performance.now()) + ' ms'); else setTimeout(poll, 200); }; }; })(); })"
+	cat > "$t/steps.json" <<EOF
+[
+	["nav", "\${URL}"],
+	["waitlog", "drew a cube", 120],
+	["eval", "'isolated ' + crossOriginIsolated"],
+	["key", "Space"],
+	["waitlog", "moved: count", 30],
+	["eval", "$saved"],
+	["nav", "\${URL}"],
+	["waitlog", "drew a cube", 120],
+	["key", "Space"],
+	["waitlog", "moved: count", 30],
+	["wait", 500],
+	["shot", "\${OUT}/after.png"]
+]
+EOF
+	WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/?local=sample_rust" \
+		"$here/util/web_drive.sh" chrome sample_rust "$t/steps.json" "$t/local" > "$t/drive.log" 2>&1 ||
+		{ tail -20 "$t/drive.log"; fail "the drive failed ($t/local)"; }
+	page=$t/local/page.log
+	grep -a "eval:" "$t/drive.log" | cut -c 1-200
+	grep -a "server: .*wasm \(main\|counter\|endless\): " "$page" |
+		sed 's/.*wasm    : //' | cut -c1-120
+	grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
+	for want in "server: .*wasm main: ready (the browser's instance)" \
+			"server: .*wasm main: voxels: 32 read back, 17 of them rock" \
+			"server: .*wasm endless: stopped: init ran past its budget" \
+			"server: .*wasm main: key from peer "; do
+		grep -aq "$want" "$page" || fail "no \"$want\" in $page"
+	done
+	grep -a "server: .*wasm \(main\|counter\): .*trap" "$page" && fail "a trap in $page"
+	# The count after the reload goes on from the first page's
+	counts=$(grep -a "server: .*wasm main: key from peer" "$page" |
+		sed 's/.*count \([0-9]*\),.*/\1/' | tr '\n' ' ')
+	echo "the counts the page's server gave: $counts"
+	read -r c1 c2 <<< "$counts"
+	[ -n "${c2:-}" ] && [ "$c2" = $((c1 + 1)) ] ||
+		fail "the count did not go on over the reload ($counts)"
+	cube_x "$t/local/after.png" > /dev/null
+	echo "PASS: sample_rust with its server in the page: the .wasm modules on the browser's wasm, a key answered, the count kept over a reload"
+	exit 0
+fi
 
 if [ $web = 1 ]; then
 	cat > "$t/steps.json" <<'EOF'

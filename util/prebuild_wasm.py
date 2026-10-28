@@ -15,9 +15,9 @@
 # apps/hillclimb/main) or a "server_wasm" in its meta.json. A Rust crate
 # (Cargo.toml) is built by cargo as the server's build_rust() does, the
 # module's crates it depends on by path beside it: BUILDAT_CARGO, else cargo in PATH, else
-# ~/.cargo/bin/cargo. --by-name names each <module>.wasm instead, the name
-# the static web server looks for (util/web_server.cmake), and builds the
-# clients' wasm/ only.
+# ~/.cargo/bin/cargo. --by-name names each <module>.wasm (wasm/) and
+# <module>.server.wasm instead, the names the static web server looks for
+# (util/web_server.cmake).
 import hashlib, json, os, re, shutil, subprocess, sys, tempfile
 
 by_name = sys.argv[1:2] == ["--by-name"]
@@ -122,7 +122,8 @@ def build(module, source, server):
         key += b"server 1\n" + server_api
         if rust:
             key += engine_crate(server_crate_dir)
-    name = os.path.basename(os.path.normpath(module)) if by_name else hashlib.sha1(key).hexdigest()
+    name = os.path.basename(os.path.normpath(module)) + (".server" if server else "") \
+        if by_name else hashlib.sha1(key).hexdigest()
     target = os.path.join(out, name + ".wasm")
     if rust:
         cargo_build(module, source, files, target)
@@ -148,8 +149,8 @@ for module in sys.argv[5:]:
         built = True
     meta = os.path.join(module, "meta.json")
     source = os.path.exists(meta) and (json.load(open(meta)).get("server_wasm") or {}).get("source")
-    if source and not by_name:
+    if source:
         build(module, source, True)
         built = True
     if not built:
-        sys.exit("%s: no wasm/%s" % (module, "" if by_name else " and no server_wasm"))
+        sys.exit("%s: no wasm/ and no server_wasm" % module)

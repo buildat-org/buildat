@@ -542,20 +542,21 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		return prebuilt_dir+"/wasm/"+hash+".wasm";
 	}
 #ifdef BUILDAT_STATIC_MODULES
-	if(server){
-		log_e(MODULE, "%s: a server .wasm does not run in the browser's "
-				"server yet", cs(module_name));
-		return "";
-	}
 	// [WEB_LOCAL_SERVER]: no compiler in a browser. util/web_server.cmake
 	// builds each module's from the same sources as the server it packs,
-	// named by the module (rebuilt with them, so never stale)
-	if(interface::fs::path_exists(out_dir+"/"+module_name+".wasm")){
-		log_i(MODULE, "%s: wasm/ is built with this server", cs(module_name));
-		return out_dir+"/"+module_name+".wasm";
+	// named by the module (rebuilt with them, so never stale):
+	// <module>.wasm for wasm/, <module>.server.wasm for the server's
+	// ([WEB_LOCAL_AITTA]: or the page puts an Aitta package's there, as
+	// Aitta built them from the release)
+	const ss_ named = out_dir+"/"+module_name+(server ? ".server" : "")+
+			".wasm";
+	if(interface::fs::path_exists(named)){
+		log_i(MODULE, "%s: %s/ is built with this server", cs(module_name),
+				cs(source));
+		return named;
 	}
-	log_e(MODULE, "%s: wasm/ is not built, and this server cannot build it",
-			cs(module_name));
+	log_e(MODULE, "%s: %s/ is not built, and this server cannot build it",
+			cs(module_name), cs(source));
 	return "";
 #endif
 	if(rust)

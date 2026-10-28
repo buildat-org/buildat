@@ -117,13 +117,14 @@ keeps to the web API (below).
 builds the server with the app's modules compiled into it, to run in a
 browser (doc/architecture.txt, "Running a game in the browser"). It
 refuses an app any of whose modules, or the modules they depend on, does
-not say "web": true, naming each. There a module is compiled with
+not say "web": true or have a server_wasm, naming each. There a module is compiled with
 BUILDAT_WEB_MODULE, under which interface/tcpsocket.h, http.h, process.h
 and select_handler.h are an #error: no sockets, HTTP or processes. Files
 are in Emscripten's file system, the app's directories packed into it
 (a variant's base's too, a plain-named base beside it). A module's
 wasm/, C or Rust, "disable_cpp" or not, is built for its clients by
-util/prebuild_wasm.py with the server's flags and packed at /wasm.
+util/prebuild_wasm.py with the server's flags and packed at /wasm as
+<module>.wasm, and a server_wasm as <module>.server.wasm.
 Three builtins have stand-ins there (<name>_web.cpp beside the module's
 own), so an app that depends on them builds unchanged: network has one
 peer, the page's own client, over postMessage (only the page that made
@@ -571,9 +572,12 @@ are little-endian 32-bit words as the client's are: START, TICK (dtime,
 a float's bits), PEER_JOINED and PEER_LEFT (the peer), PACKET (the
 peer, the name's length, the name, the data). A trap is logged and the
 module goes on; a call past its budget (an import's work counts) stops
-the module and the server goes on. The web build does not run a server
-.wasm yet ([WEB_LOCAL_SERVER]): such a module leaves "web" out.
-apps/sample_rust is a module in Rust on both sides.
+the module and the server goes on. The web build runs it on the
+browser's own wasm ([WEB_LOCAL_AITTA]): the same checks, grants and
+meter, each module an instance of its own beside the server's wasm; the
+.wasm is built beforehand (util/prebuild_wasm.py), and such a module
+needs no "web": true. apps/sample_rust is a module in Rust on both
+sides.
 
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,

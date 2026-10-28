@@ -1791,8 +1791,11 @@ EM_JS(double, bw_global, (int id, const char *name, int set, double v), {
 	if (set) g.value = BigInt(v);
 	return Number(g.value);
 });
+// [WEB_LOCAL_AITTA] On the thread that made it; the server's modules each
+// have their own (a worker each), and one freed elsewhere finds no list
 EM_JS(void, bw_free, (int id), {
-	delete Module.buildatWasm.list[id];
+	var w = Module.buildatWasm;
+	if (w) delete w.list[id];
 });
 #endif
 

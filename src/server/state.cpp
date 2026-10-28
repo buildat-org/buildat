@@ -10,9 +10,7 @@
 #include "rccpp.h"
 #include "rccpp_util.h"
 #include "wasm_build.h"
-#if !defined(BUILDAT_STATIC_MODULES) && !defined(__EMSCRIPTEN__)
 #include "wasm_module.h"
-#endif
 #include "static_modules.h"
 #include "config.h"
 #include "interface/module.h"
@@ -1262,12 +1260,8 @@ struct CState: public State, public interface::Server
 	// the log says why it is refused
 	interface::Module* load_wasm_module_u(const interface::ModuleInfo &info)
 	{
-#if defined(BUILDAT_STATIC_MODULES) || defined(__EMSCRIPTEN__)
-		// [WEB_LOCAL_SERVER]: not yet; the browser's own wasm will run it
-		log_e(MODULE, "%s: a server .wasm does not run in the browser's "
-				"server yet; the module is refused", cs(info.name));
-		return nullptr;
-#else
+		// [WEB_LOCAL_AITTA] In the browser's server the .wasm is one built
+		// beforehand (wasm_build.cpp), run on the browser's own wasm
 		log_i(MODULE, "STATUS Loading %s (%zu of %zu)", cs(info.name),
 				m_module_load_order.size() + 1, m_module_count);
 		const ss_ wasm = build_module_wasm(g_server_config, info.name,
@@ -1284,7 +1278,6 @@ struct CState: public State, public interface::Server
 			log_e(MODULE, "%s: its .wasm is refused: %s", cs(info.name),
 					cs(why));
 		return m;
-#endif
 	}
 
 	// Can be used for loading hardcoded modules.
