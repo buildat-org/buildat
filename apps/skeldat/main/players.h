@@ -288,7 +288,7 @@ struct Players: public luanti_session::Game, public MobsHost
 		return pl != nullptr;
 	}
 
-	// Food is eaten
+	// Food is eaten; the crown put on or taken off ([SKELDAT_MORE_FUN])
 	bool use_wielded(const ss_ &name)
 	{
 		size_t peer;
@@ -296,6 +296,13 @@ struct Players: public luanti_session::Game, public MobsHost
 		if(!pl)
 			return false;
 		Stack &st = pl->main[pl->wield];
+		if(st.name == "skeldat:crown"){
+			pl->crown = !pl->crown;
+			log_i(MODULE, "skeldat: %s %s the crown", cs(pl->name),
+					pl->crown ? "puts on" : "takes off");
+			step_crown(peer, *pl, 0);
+			return true;
+		}
 		const skeldat::ItemDef *d = world.game.item(st.name);
 		if(!d || d->eat <= 0 || pl->hp >= HP_MAX)
 			return false;
@@ -364,10 +371,56 @@ struct Players: public luanti_session::Game, public MobsHost
 		network::send(world.server, peer, "skeldat:position", os.str());
 	}
 
+	// hp, breath and the crown: 0 not worn, 1 worn and out, 2 burning
 	void send_stats(size_t peer, const Player &pl)
 	{
 		network::send(world.server, peer, "skeldat:stats",
-				itos(pl.hp)+" "+itos(pl.breath));
+				itos(pl.hp)+" "+itos(pl.breath)+" "+
+				itos(pl.crown ? 1 + pl.crown_lit : 0));
+	}
+
+	// [SKELDAT_MORE_FUN] The crowns, every second of game time: a worn
+	// crown's coal burning down, the next taken from the main inventory;
+	// off when it is not in the main inventory (moved, dropped, snatched)
+	// or its wearer is dead. The burning ones' places to the furnaces
+	void step_crowns(float dt)
+	{
+		furnaces.crowns.clear();
+		for(auto &pair : all){
+			Player &pl = pair.second;
+			step_crown(pair.first, pl, dt);
+			if(pl.crown_lit)
+				furnaces.crowns.push_back(pv::Vector3DInt32(
+						(int)std::floor(pl.x + 0.5f), (int)std::floor(pl.y + 0.5f),
+						(int)std::floor(pl.z + 0.5f)));
+		}
+	}
+	void step_crown(size_t peer, Player &pl, float dt)
+	{
+		const bool was_on = pl.crown, was_lit = pl.crown_lit;
+		auto find = [&](const char *name){
+			return std::find_if(pl.main.begin(), pl.main.end(),
+					[&](const Stack &st){ return st.name == name; });
+		};
+		if(pl.crown && find("skeldat:crown") == pl.main.end())
+			pl.crown = false;
+		pl.crown_lit = false;
+		if(pl.crown && pl.placed && pl.hp > 0){
+			pl.crown_fuel = std::max(0.0f, pl.crown_fuel - dt);
+			auto coal = find("skeldat:coal");
+			if(pl.crown_fuel <= 0 && coal != pl.main.end()){
+				coal->take(1);
+				pl.crown_fuel = world.day_s / 24 * CROWN_HOURS;
+				send_inventory(peer, pl);
+				log_i(MODULE, "skeldat: %s's crown burns a coal", cs(pl.name));
+			}
+			pl.crown_lit = pl.crown_fuel > 0;
+		}
+		if(pl.crown == was_on && pl.crown_lit == was_lit)
+			return;
+		log_i(MODULE, "skeldat: %s's crown %s", cs(pl.name), !pl.crown ?
+				"is off" : pl.crown_lit ? "burns" : "is out of coal");
+		send_stats(peer, pl);
 	}
 
 	void send_time(size_t peer)
@@ -1052,7 +1105,7 @@ struct Players: public luanti_session::Game, public MobsHost
 				if(pair.first != to.first && o.placed && o.hp > 0)
 					os<<o.name<<" "<<o.x<<" "<<o.y<<" "<<o.z<<" "<<o.yaw
 							<<" "<<(o.skeleton ? 1 : 0)<<" "<<(o.board ? 1 : 0)
-							<<" "<<(o.prone ? 1 : 0)<<"\n";
+							<<" "<<(o.prone ? 1 : 0)<<" "<<(o.crown_lit ? 1 : 0)<<"\n";
 			}
 			network::send(world.server, to.first, "skeldat:players", os.str());
 		}

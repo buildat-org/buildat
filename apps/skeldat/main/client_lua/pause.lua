@@ -362,6 +362,12 @@ return function(game, declare_keys)
 		"Lanterns (iron and bones, filled with coal) stop the bones growing "
 				.. "around them and slowly push them back. Skeletons will try "
 				.. "to steal them.",
+		"The Bone Crown (three Deep Skulls, which skeletons deep down drop, "
+				.. "a diamond and two bone blocks), put on and off with a right click "
+				.. "while held, "
+				.. "is a lantern you wear: it burns coal from your inventory. "
+				.. "Skeletons shoot its wearer first, and snatch it if they "
+				.. "reach you.",
 		"Skeletons burn in daylight away from the bones, and die in water. "
 				.. "Killed, they drop bones and arrows.",
 		"Marker skulls: a skeleton that sees you leaves a red skull. At dawn "

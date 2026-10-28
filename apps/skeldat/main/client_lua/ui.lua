@@ -143,7 +143,7 @@ function M.draw_hud()
 		game.wield, r.width, r.height, table.concat(main, "|", 1,
 		math.min(9, #main)), game.item_texture("skeldat:stick") or "",
 		tostring(game.held()), game.ended or "",
-		tostring(game.board_off())}, ";")
+		tostring(game.board_off()), stats.crown or 0}, ";")
 	if sig == hud_drawn then
 		return
 	end
@@ -193,6 +193,11 @@ function M.draw_hud()
 	image(hud, tex("board_icon.png"), bx, by, 16 * s, 16 * s)
 	if game.board_off() then
 		image(hud, tex("board_cross.png"), bx, by, 16 * s, 16 * s)
+	end
+	-- [SKELDAT_MORE_FUN] The crown worn, over the board: dark out of coal
+	if (stats.crown or 0) > 0 then
+		image(hud, tex("crown.png"), bx, by - 17 * s, 16 * s, 16 * s,
+				stats.crown == 1 and magic.Color(0.3, 0.3, 0.3, 0.9) or nil)
 	end
 	if not game.held() then
 		local c = 15 * s

@@ -21,6 +21,11 @@ struct Furnaces
 	// every game hour
 	bool report = false;
 	float t = 0;
+	// [SKELDAT_MORE_FUN] The burning crowns, where their wearers are: a
+	// lantern's sphere each to the bones and the lure (not to a theft:
+	// the skeletons snatch a crown off its wearer, mobs.h). The players'
+	// step_crowns() sets it every second
+	sv_<pv::Vector3DInt32> crowns;
 
 	Furnaces(WorldView &world): world(world) {}
 
@@ -177,6 +182,13 @@ struct Furnaces
 					z - LANTERN_RADIUS <= uc.getZ())
 				out.push_back(pv::Vector3DInt32(x, y, z));
 		}
+		for(const pv::Vector3DInt32 &c : crowns)
+			if(c.getX() + LANTERN_RADIUS >= lc.getX() && c.getX() - LANTERN_RADIUS <=
+					uc.getX() && c.getY() + LANTERN_RADIUS >= lc.getY() &&
+					c.getY() - LANTERN_RADIUS <= uc.getY() &&
+					c.getZ() + LANTERN_RADIUS >= lc.getZ() &&
+					c.getZ() - LANTERN_RADIUS <= uc.getZ())
+				out.push_back(c);
 		return out;
 	}
 
@@ -190,6 +202,9 @@ struct Furnaces
 					parse_pos(pair.first, x, y, z) && world.footprint(x, z) >= 0)
 				out[world.footprint(x, z)].push_back(pv::Vector3DInt32(x, y, z));
 		}
+		for(const pv::Vector3DInt32 &c : crowns)
+			if(world.footprint(c.getX(), c.getZ()) >= 0)
+				out[world.footprint(c.getX(), c.getZ())].push_back(c);
 		return out;
 	}
 
@@ -249,39 +264,45 @@ struct Furnaces
 				cs(pos_key(x, y, z)), coal);
 	}
 
-	// For a check: each lantern's sphere, its voxels with bones, their
-	// mean and its bone blocks, a line each
+	// For a check: each lantern's sphere and each burning crown's, its
+	// voxels with bones, their mean and its bone blocks, a line each
 	void report_lanterns()
+	{
+		for(auto &pair : all){
+			int lx, ly, lz;
+			if(pair.second.lantern && parse_pos(pair.first, lx, ly, lz))
+				report_sphere("lantern at "+pair.first, lx, ly, lz,
+						pair.second.fuel_left > 0);
+		}
+		for(const pv::Vector3DInt32 &c : crowns)
+			report_sphere("crown at "+pos_key(c.getX(), c.getY(), c.getZ()),
+					c.getX(), c.getY(), c.getZ(), true);
+	}
+	void report_sphere(const ss_ &what, int lx, int ly, int lz, bool burning)
 	{
 		const uint32_t block = world.id_of("skeldat:bone_block");
 		const int R = LANTERN_RADIUS;
-		for(auto &pair : all){
-			int lx, ly, lz;
-			if(!pair.second.lantern || !parse_pos(pair.first, lx, ly, lz))
-				continue;
-			int n = 0, with = 0, blocks = 0;
-			double sum = 0;
-			voxelworld::access(world.server, world.scene,
-					[&](voxelworld::Instance *w){
-				for(int z = -R; z <= R; z++)
-				for(int y = -R; y <= R; y++)
-				for(int x = -R; x <= R; x++){
-					if(x * x + y * y + z * z > R * R)
-						continue;
-					const interface::VoxelSample v = w->get_sample(
-							pv::Vector3DInt32(lx + x, ly + y, lz + z), true);
-					const uint32_t id = world.format.id.get(v);
-					if(!world.holds_bones(id))
-						continue;
-					const uint32_t b = world.bones.get(v);
-					n++, with += b > 0, sum += b, blocks += id == block;
-				}
-			});
-			log_i(MODULE, "skeldat: the lantern at %s %s: %d voxels in %d, "
-					"%d with bones, mean %.2f, %d bone blocks", cs(pair.first),
-					pair.second.fuel_left > 0 ? "burning" : "out", n, R, with,
-					n ? sum / n : 0.0, blocks);
-		}
+		int n = 0, with = 0, blocks = 0;
+		double sum = 0;
+		voxelworld::access(world.server, world.scene,
+				[&](voxelworld::Instance *w){
+			for(int z = -R; z <= R; z++)
+			for(int y = -R; y <= R; y++)
+			for(int x = -R; x <= R; x++){
+				if(x * x + y * y + z * z > R * R)
+					continue;
+				const interface::VoxelSample v = w->get_sample(
+						pv::Vector3DInt32(lx + x, ly + y, lz + z), true);
+				const uint32_t id = world.format.id.get(v);
+				if(!world.holds_bones(id))
+					continue;
+				const uint32_t b = world.bones.get(v);
+				n++, with += b > 0, sum += b, blocks += id == block;
+			}
+		});
+		log_i(MODULE, "skeldat: the %s %s: %d voxels in %d, %d with bones, "
+				"mean %.2f, %d bone blocks", cs(what), burning ? "burning" : "out",
+				n, R, with, n ? sum / n : 0.0, blocks);
 	}
 
 	// For a check, BUILDAT_SKELDAT_LANTERNS="x z coal [block]; ...": a

@@ -1642,6 +1642,7 @@ struct Module: public interface::Module, public PlayersHost,
 		if(m_breath_t >= 1){
 			m_breath_t = 0;
 			m_players.step_breath();
+			m_players.step_crowns(1);
 		}
 		m_furnaces.step(dtime, m_world.day_s);
 	}

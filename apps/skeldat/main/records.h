@@ -83,6 +83,11 @@ struct Player
 	bool skeleton = false;
 	// No damage of any kind, the admin's toggle ([SKELDAT_INVULNERABLE])
 	bool invulnerable = false;
+	// [SKELDAT_MORE_FUN] The crown worn (a use of it toggles), and the game
+	// seconds left of the coal it burns, saved; burning now (worn, in the
+	// main inventory, a coal alight), not saved
+	bool crown = false, crown_lit = false;
+	float crown_fuel = 0;
 	// [SKELDAT_INTRO] New to the world (no save of it): the opening dialog
 	// once it is in; not with BUILDAT_SKELDAT_INTRO=0 (the checks' drives)
 	bool intro = false;
@@ -93,7 +98,7 @@ struct Player
 	ss_ save() const {
 		std::ostringstream os;
 		os<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<breath<<" "
-				<<invulnerable<<"\n";
+				<<invulnerable<<" "<<crown<<" "<<crown_fuel<<"\n";
 		for(auto *l : {&main, &craft, &craftresult}){
 			for(size_t i = 0; i < l->size(); i++)
 				os<<(i ? "|" : "")<<(*l)[i].str();
@@ -105,7 +110,8 @@ struct Player
 		std::istringstream is(s);
 		ss_ line;
 		std::getline(is, line);
-		std::istringstream(line)>>x>>y>>z>>yaw>>hp>>breath>>invulnerable;
+		std::istringstream(line)>>x>>y>>z>>yaw>>hp>>breath>>invulnerable
+				>>crown>>crown_fuel;
 		for(auto *l : {&main, &craft, &craftresult}){
 			std::getline(is, line);
 			std::istringstream ls(line);
@@ -226,6 +232,20 @@ static const int LANTERN_RADIUS = 8, LANTERN_RETRACT = 3,
 static const float LANTERN_HOURS = 4;
 // A burning lantern lures skeletons as LANTERN_LURE marker skulls do
 static const int LANTERN_LURE = 5;
+// [SKELDAT_MORE_FUN] **The crown**, the lantern carried: worn and burning
+// it is a lantern's sphere round its wearer (LANTERN_RADIUS, the same
+// retract and decay) and lures as one at sunrise and sunset. Its coal
+// comes from the wearer's main inventory, one every CROWN_HOURS game
+// hours (the lantern's 4: a coal holds as much ground either way); none
+// left, it does nothing. A bone skeleton's body within CROWN_SIGHT of a
+// burning crown fights its wearer before anyone nearer (16 otherwise),
+// closes in instead of keeping a bow's distance, and within CROWN_REACH
+// snatches it: carried, and dropped on the ground where it dies.
+// Picks: CROWN_SIGHT 24, a half more than its sight of a player, so a
+// crown draws them from further; CROWN_REACH 1.5, a lantern's reach
+// simplified: the lantern's radius and rates, one sphere rule; a crown of
+// its own radius is a radius a sphere in lanterns_in()
+static const float CROWN_HOURS = 4, CROWN_SIGHT = 24, CROWN_REACH = 1.5f;
 static const int8_t NO_GROUND = -128;
 // From this danger up a skeleton spawns in the light too, and the sun
 // does not burn it
@@ -278,6 +298,8 @@ struct Mob
 	// lantern it carries, -1 none ([SKELDAT_FIGHT_BACK])
 	double marker_day = -1e9;
 	int carry_coal = -1;
+	// [SKELDAT_MORE_FUN] A crown snatched from a player, saved
+	bool carry_crown = false;
 	// Saved: a boar's grass clock, the game time (world.t) it last stood
 	// on grass ([SKELDAT_BOAR_GRASS]); -1 from a line without it, the
 	// load's time put in
@@ -356,7 +378,7 @@ struct Mob
 		os<<(int)kind<<" "<<x<<" "<<y<<" "<<z<<" "<<yaw<<" "<<hp<<" "<<
 				marker_day<<" "<<carry_coal<<" "<<grass_t<<" "<<boat<<" "<<aim<<" "<<
 				boat_x<<" "<<boat_z<<" "<<shore_days<<" "<<boarded_t<<" "<<
-				(sleep == 2);
+				(sleep == 2)<<" "<<carry_crown;
 		return os.str();
 	}
 	bool load(const ss_ &s){
@@ -371,9 +393,10 @@ struct Mob
 		else if(!(is>>boarded_t))
 			boarded_t = 0;
 		else {
-			int asleep = 0;
-			is>>asleep;
+			int asleep = 0, crowned = 0;
+			is>>asleep>>crowned;
 			sleep = asleep ? 2 : 0;
+			carry_crown = crowned != 0;
 		}
 		kind = (uint8_t)k;
 		return (k == BOAR || k == SKELETON || k == CAVE_SKELETON) && hp > 0;

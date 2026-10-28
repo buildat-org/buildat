@@ -62,6 +62,14 @@ module under it.
   anyone's, is picked up by walking near it, and after a minute is kept
   as a voxel, picked up the same way or dug. The held item is drawn in
   the hand; the bow as a mesh that bends with the draw.
+- The Bone Crown (three Deep Skulls, a diamond, two bone blocks): a right
+  click with it held puts it on or takes it off. Worn, it burns a coal of
+  the main inventory every 4 game hours and is a lantern's sphere round
+  its wearer, and lures at sunrise and sunset as a lantern does; out of
+  coal it does nothing. A bone skeleton within 24 fights its wearer
+  before anyone nearer, closes in and snatches it, and drops it where it
+  dies. The HUD shows it over the board's icon, dark when out of coal;
+  the others see it over the wearer's head.
 - An admin (accounts' admin, or the launcher's own client) has fly (K),
   fast (J) and noclip (H), and Admin... in the pause menu: each player's
   inventory, an item given or a stack taken, and the player made

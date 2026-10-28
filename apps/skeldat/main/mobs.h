@@ -629,6 +629,8 @@ struct Mobs
 		size_t peer = 0;
 		uint32_t mob = 0;
 		bool is_mob = false;
+		// [SKELDAT_MORE_FUN] A player with a burning crown
+		bool crown = false;
 		ss_ name;
 	};
 
@@ -752,6 +754,8 @@ struct Mobs
 			if(m.carry_coal > 0)
 				out.push_back(Stack("skeldat:coal", m.carry_coal));
 		}
+		if(m.carry_crown)
+			out.push_back(Stack("skeldat:crown"));
 		return out;
 	}
 
@@ -787,6 +791,8 @@ struct Mobs
 				drops.drop(s, m.x + world.rnd() - 0.5f, m.y + 0.5f, m.z + world.rnd() - 0.5f);
 		if(killer == players.end())
 			leave_lantern(m);
+		if(!ground)
+			leave_crown(m);
 		log_i(MODULE, "skeldat: the %s (%u) dies at %.1f,%.1f,%.1f, drops %s[%s]",
 				MOB_KIND[m.kind], key, m.x, m.y, m.z, ground ? "on the ground " : "",
 				cs(list));
@@ -825,9 +831,25 @@ struct Mobs
 	// [SKELDAT_CAVE_SKELETON] What a skeleton fights: the nearest of a
 	// living player and an active skeleton of the other kind (a bone
 	// skeleton's body, a cave skeleton), from the mob's x, y, z
+	// [SKELDAT_MORE_FUN] A bone skeleton's first: the nearest burning
+	// crown's wearer within CROWN_SIGHT, unless it carries a crown already
 	Target target_of(const Mob &m)
 	{
 		Target t;
+		if(m.kind == SKELETON && !m.carry_crown){
+			for(auto &pair : players){
+				const Player &p = pair.second;
+				const float e = std::sqrt((p.x - m.x) * (p.x - m.x) +
+						(p.y - m.y) * (p.y - m.y) + (p.z - m.z) * (p.z - m.z));
+				if(p.crown_lit && p.placed && p.hp > 0 && e < CROWN_SIGHT &&
+						e < t.d){
+					t.x = p.x, t.y = p.y, t.z = p.z, t.d = e;
+					t.peer = pair.first, t.name = p.name, t.crown = true;
+				}
+			}
+			if(t.crown)
+				return t;
+		}
 		float d;
 		size_t peer = 0;
 		if(const Player *p = host.nearest(m.x, m.y, m.z, d, &peer)){
@@ -1020,7 +1042,7 @@ struct Mobs
 				if(m.kind == SKELETON){
 					// The light form decides (step_light()); here the
 					// fight's sight and bow, and the body after it
-					if(p && d < 16){
+					if(p && d < (tg.crown ? CROWN_SIGHT : 16)){
 						// Its first sight of a player: a marker skull, one
 						// a game day ([SKELDAT_SKELETON_SIM])
 						// [SKELDAT_BOAT_FAULTS] None from a boat: where it
@@ -1340,6 +1362,18 @@ struct Mobs
 					it->second.carry_coal < 0 &&
 					furnaces.lantern_at_hand(it->second.x, it->second.y, it->second.z, at))
 				take_lantern(key, it->second, at);
+			// [SKELDAT_MORE_FUN] A burning crown within reach of its body
+			if(it != all.end() && it->second.kind == SKELETON &&
+					!it->second.carry_crown)
+				for(auto &pair : players){
+					Player &pl = pair.second;
+					const Mob &m = it->second;
+					if(pl.crown_lit && pl.hp > 0 && std::hypot(pl.x - m.bx,
+							pl.z - m.bz) < CROWN_REACH && std::fabs(pl.y - m.by) < 2){
+						take_crown(key, it->second, pair.first, pl);
+						break;
+					}
+				}
 		}
 		for(const Mark &k : marks){
 			world.set_node(k.p[0], k.p[1], k.p[2], world.marker);
@@ -2206,10 +2240,13 @@ struct Mobs
 						log_shot_try(kv.first, m, *p, nullptr, "no way");
 					continue;
 				}
-				if(!p || (d >= 3 && d <= 9))
+				// [SKELDAT_MORE_FUN] A crown's wearer closed in on, to
+				// snatch it
+				const float lo = p && p->crown ? 0 : 3, hi = p && p->crown ? 1 : 9;
+				if(!p || (d >= lo && d <= hi))
 					continue;
 				m.yaw = std::atan2(p->x - m.x, p->z - m.z) +
-						(d < 3 ? (float)M_PI : 0);
+						(d < lo ? (float)M_PI : 0);
 				const int x = (int)std::floor(m.x + std::sin(m.yaw) + 0.5f),
 						z = (int)std::floor(m.z + std::cos(m.yaw) + 0.5f);
 				const float y = next_y(m, x, z);
@@ -2576,6 +2613,7 @@ struct Mobs
 					if(store)
 						store->remove("mob/"+itos(it->first));
 					leave_lantern(it->second);
+					leave_crown(it->second);
 					it = all.erase(it);
 					died++;
 				}
@@ -2816,6 +2854,31 @@ struct Mobs
 		log_i(MODULE, "skeldat: a skeleton (%u) takes the lantern at %s, %d "
 				"coal in it", key, cs(pos_key(at.getX(), at.getY(), at.getZ())),
 				m.carry_coal);
+	}
+
+	// [SKELDAT_MORE_FUN] A skeleton snatches pl's crown: out of the main
+	// inventory, carried (step_crowns() puts it out a second later)
+	void take_crown(uint32_t key, Mob &m, size_t peer, Player &pl)
+	{
+		auto it = std::find_if(pl.main.begin(), pl.main.end(),
+				[](const Stack &st){ return st.name == "skeldat:crown"; });
+		if(it == pl.main.end())
+			return;
+		it->take(1);
+		m.carry_crown = true;
+		host.send_inventory(peer, pl);
+		host.sound("pickup", m.bx, m.by + 1.5f, m.bz);
+		log_i(MODULE, "skeldat: a skeleton (%u) snatches %s's crown", key,
+				cs(pl.name));
+	}
+	// Its crown on the ground where it died, with no one to take it
+	void leave_crown(Mob &m)
+	{
+		if(!m.carry_crown)
+			return;
+		drops.drop(Stack("skeldat:crown"), m.x, m.y + 0.5f, m.z);
+		m.carry_crown = false;
+		log_i(MODULE, "skeldat: the crown left at %.1f,%.1f,%.1f", m.x, m.y, m.z);
 	}
 
 	// A skeleton dead with no one to take what it had: its lantern left

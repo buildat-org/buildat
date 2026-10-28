@@ -172,13 +172,16 @@ buildat.sub_packet("skeldat:node_inv", function(data)
 end)
 
 buildat.sub_packet("skeldat:stats", function(data)
-	local hp, breath = data:match("^(%-?%d+) (%-?%d+)")
+	local hp, breath, crown = data:match("^(%-?%d+) (%-?%d+) ?(%d*)")
 	local was = game.stats.hp
 	game.stats.hp, game.stats.breath = tonumber(hp), tonumber(breath)
+	-- [SKELDAT_MORE_FUN] The crown: 0 not worn, 1 out of coal, 2 burning
+	game.stats.crown = tonumber(crown) or 0
 	if game.stats.hp < was and game.hurt_sound then
 		game.hurt_sound()
 	end
-	log:info("skeldat: hp " .. hp .. " breath " .. breath)
+	log:info("skeldat: hp " .. hp .. " breath " .. breath .. " crown " ..
+			game.stats.crown)
 	game.changed()
 end)
 
@@ -1242,6 +1245,11 @@ local function step_dig(dt)
 end
 
 local function on_place()
+	-- [SKELDAT_MORE_FUN] The crown held: put on or taken off
+	if wielded() == "skeldat:crown" then
+		game.send_luanti("use")
+		return
+	end
 	if not pointed then
 		-- Eating needs nothing pointed at
 		local d = game.items[wielded()]
@@ -1318,8 +1326,8 @@ local others = {}
 local play_splash -- [SKELDAT_BOARD_WATER], set with the roll below
 buildat.sub_packet("skeldat:players", function(data)
 	local seen = {}
-	for name, x, y, z, yw, skeleton, on_board, prone in
-			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
+	for name, x, y, z, yw, skeleton, on_board, prone, crown in
+			data:gmatch("(%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+) (%S+)\n") do
 		seen[name] = true
 		do
 			local o = others[name]
@@ -1331,6 +1339,15 @@ buildat.sub_packet("skeldat:players", function(data)
 				local model = body:CreateComponent("StaticModel")
 				model.model = magic.cache:GetResource("Model", "Models/Box.mdl")
 				o = {node = node}
+				-- [SKELDAT_MORE_FUN] A burning crown over the head
+				-- simplified: where a standing head is, lying flat too
+				o.crown = node:CreateChild("Crown")
+				o.crown.position = magic.Vector3(0, 1.85, 0)
+				o.crown.scale = magic.Vector3(0.45, 0.2, 0.45)
+				local cm = o.crown:CreateComponent("StaticModel")
+				cm.model = magic.cache:GetResource("Model", "Models/Box.mdl")
+				cm.material = mobs.material("main/crown.png")
+				o.crown.enabled = false
 				o.board, o.board_box, o.board_mat = board_box(node)
 				show_board(o.board, o.board_box, false)
 				others[name] = o
@@ -1349,6 +1366,11 @@ buildat.sub_packet("skeldat:players", function(data)
 						magic.Vector3(0.6, 1.75, 0.6)
 				log:info("skeldat: " .. name .. (o.prone and " lies flat" or
 						" stands"))
+			end
+			if o.crown.enabled ~= (crown == "1") then
+				o.crown.enabled = crown == "1"
+				log:info("skeldat: " .. name .. (o.crown.enabled and
+						" wears a burning crown" or " wears no burning crown"))
 			end
 			if o.board.enabled ~= (on_board == "1") then
 				show_board(o.board, o.board_box, on_board == "1")

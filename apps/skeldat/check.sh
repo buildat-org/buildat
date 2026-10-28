@@ -179,6 +179,18 @@ client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CHECK_PIDS+=($CLIENT)
 }
 placed='wait_log 300000 skeldat: placed at'
+toggle() # the admin page's toggle, from the game
+{
+	printf '%s\n' "keypress Escape" "wait_log 5000 pause: the menu shown" \
+		"delay 500" 'click Button "Admin..."' \
+		"wait_log 30000 pause: admin got players" "delay 500" \
+		'click Button "client1"' "wait_log 30000 pause: admin got inv client1" \
+		"delay 500" 'click Button "Invulnerable*"' \
+		"wait_log 30000 pause: admin got inv client1" "delay 500" \
+		"screenshot $t/invulnerable.png" 'click Button "Back"' "delay 500" 'click Button "Back"' \
+		"wait_log 5000 pause: the menu shown" "delay 500" "keypress Escape" \
+		"wait_log 5000 pause: the menu closed"
+}
 # The worlds a drive walks, shoots or builds in are flat
 # (BUILDAT_SKELDAT_TERRAIN=flat, [SKELDAT_OWN_MAPGEN]: one height, no tree
 # within 24 of the spawn, no cave open at the ground), so their spots
@@ -788,18 +800,6 @@ landed=$(grep -a "client1 lands at" "$log15" | sed 's/.*lands at \([0-9]*\).*/\1
 # it off, and the drowning hurts. Every damage goes through hurt(), the
 # drowning stands for the arrow.
 log16="$t/srv16.log"
-toggle() # the admin page's toggle, from the game
-{
-	printf '%s\n' "keypress Escape" "wait_log 5000 pause: the menu shown" \
-		"delay 500" 'click Button "Admin..."' \
-		"wait_log 30000 pause: admin got players" "delay 500" \
-		'click Button "client1"' "wait_log 30000 pause: admin got inv client1" \
-		"delay 500" 'click Button "Invulnerable*"' \
-		"wait_log 30000 pause: admin got inv client1" "delay 500" \
-		"screenshot $t/invulnerable.png" 'click Button "Back"' "delay 500" 'click Button "Back"' \
-		"wait_log 5000 pause: the menu shown" "delay 500" "keypress Escape" \
-		"wait_log 5000 pause: the menu closed"
-}
 { echo "$placed"; toggle; echo "delay 8000"; echo quit; } > "$t/inv1.cmds"
 { echo "$placed"; echo "delay 3000"; toggle; echo "delay 4000"; echo quit; } > "$t/inv2.cmds"
 # A guest's name goes by its connection: the rejoin, client1 again, on
@@ -3311,12 +3311,69 @@ grep -aq "skeldat: client1, new, starts with skeldat:bow skeldat:arrow$" "$log62
 	grep -aq "skeldat: client2, new, starts with skeldat:arrow$" "$log62" ||
 	fail "the start items: $(grep -a "starts with\|start items" "$log62" | sed 's/.*skeldat: //' | tr '\n' ';') ($log62)"
 echo "start items: client1 a bow and an arrow; an unknown item refused; the bow removed, client2 an arrow"
+# 59. The crown ([SKELDAT_MORE_FUN]). Run 1: flat ground at noon, the
+# bones full at x >= 0 (FILL=half), a section's expansion every 0.3 s, a
+# 60 s day (a coal 10 s), client1 on the bones with a crown and 2 coal
+# puts it on (a right click, held): it burns a coal and the next, and is
+# out; the sphere round it reported clear while it burns. Run 2: at
+# 0.05 of a 120 s day, the launcher's client invulnerable with a crown
+# and 4 coal, a skeleton 20 off (past a player's 16, inside a crown's
+# 24): it draws at the wearer, closes in and snatches the crown (the
+# wearer's HUD without it); burnt at sunrise, it leaves the crown on the
+# ground.
+log63="$t/srv63.log"
+BUILDAT_SKELDAT_WORLD=crown BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="8 0" \
+	BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_EXPAND=0.3 BUILDAT_SKELDAT_DAY=60 \
+	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_LANTERNS= \
+	BUILDAT_SKELDAT_TEST="give skeldat:crown 1 1; give skeldat:coal 2 1" \
+	start_server "$log63" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv63" -C "$t/srv.cache" -l 3 || fail "the server ($log63)"
+CHECK_PIDS+=($SERVER_PID)
+printf '%s\n' "$placed" "delay 1000" \
+	"mouse_down right" "delay 100" "mouse_up right" "delay 1000" \
+	"screenshot $t/crown_hud.png" "wait_log 40000 crown 1" quit > "$t/crown1.cmds"
+client crown1 "$t/crown1.cmds"
+wait $CLIENT || fail "the crown's drive ($t/crown1.log)"
+wait_for_log "$log63" "the crown at .* burning: .* mean 0.00, 0 bone blocks" 15
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "client1 puts on the crown" "$log63" &&
+	[ $(grep -ac "client1's crown burns a coal" "$log63") = 2 ] &&
+	grep -aq "client1's crown is out of coal" "$log63" ||
+	fail "the crown not put on, or not 2 coal burnt and out ($log63)"
+grep -a "the crown at .* burning" "$log63" | grep -aq "mean 0.00, 0 bone blocks" ||
+	fail "the crown's sphere not cleared: $(grep -a "the crown at" "$log63" | sed 's/.*burning: //' | tr '\n' ';') ($log63)"
+crown="burning: $(grep -a "the crown at .* burning" "$log63" | head -1 | sed 's/.*bones, mean \([0-9.]*\).*/mean \1/') to $(grep -a "the crown at .* burning" "$log63" | tail -1 | sed 's/.*bones, mean \([0-9.]*\).*/\1/')"
+log64="$t/srv64.log"
+{ echo "$placed"; toggle; printf '%s\n' "delay 500" "mouse_down right" "delay 100" \
+	"mouse_up right" "wait_log 40000 crown 0" \
+	"delay 500" "screenshot $t/crown_snatched.png" \
+	"wait_log 60000 a drop of skeldat:crown is here" quit; } > "$t/crown2.cmds"
+BUILDAT_SKELDAT_WORLD=snatch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
+	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.05 BUILDAT_SKELDAT_SPAWN="0 0" \
+	BUILDAT_SKELDAT_DAY=120 BUILDAT_SKELDAT_SKELETONS=0 \
+	BUILDAT_SKELDAT_TEST="give skeldat:crown 1 1; give skeldat:coal 4 1; skeleton 20 0 marked hp 4" \
+	start_server "$log64" "STATUS Listening" 300 auto \
+	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
+	-D "$t/srv64" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log64)"
+CHECK_PIDS+=($SERVER_PID)
+client crown2 "$t/crown2.cmds"
+wait $CLIENT || fail "the crown snatch's drive ($t/crown2.log)"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+grep -aq "a skeleton (1) draws at client1" "$log64" &&
+	grep -aq "a skeleton (1) snatches client1's crown" "$log64" &&
+	grep -aq "the crown left at" "$log64" ||
+	fail "the skeleton did not go for the crown, snatch it or leave it ($log64)"
+snatch=$(grep -a "skeldat: test: a skeleton\|draws at client1\|snatches\|crown left" "$log64" |
+	awk '{ split($3, a, ":"); t = a[2] * 60 + a[3]; if(!t0) t0 = t; sub(/.*skeldat: /, ""); printf "%.1f s %s; ", t - t0, $0 }' | head -c 400)
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"
 echo "out of the sun: $sun"
 echo "displaced: $pushed stones into water, the volume $dvol"
 echo "a torch put out at $out"
+echo "the crown: $crown; snatched: $snatch"
 echo "boats: $boat; a skull's call: $call; by age: $age; the landing's skull: $skull"
 echo "under water: $wet grown into the pond, its map $pond; a lake world with a bare bed ended"
 echo "boars in water: $swim; $left"
@@ -3330,5 +3387,5 @@ echo "a new world populated: $pop"
 echo "far skeletons: $far"
 echo "a respawn far away: the chunks within 2 drawn $respawn"
 echo "run 1: $(grep -ac "pulled back" "$t/srv1.log") pull backs; run 2: $mobs mobs back"
-echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats, bones off a lake's bed and none in its water, boars swimming and asleep in the shade"
+echo "PASS: skeldat's rules, the movement check, the chat's report and mute, the admin's menu and map, the bones zone, the world's end, the skeletons' count, sleep and wake, a marker skull, a night's walk and bone blocks, lanterns lit, luring and taken, a marker dug and placed, the dig's crack, the world sizes, crafting more, invulnerability, items on the ground, a far respawn's world, a new world's skeletons, the far skeletons, the world's edge, a skeleton's body after its light form, no sun beside a bone block, death in water and a pond kept out of, ways built of bone, the bow, the skateboard and its roll, free-running, a skull down a shaft, the bones' speed, the opening dialog and the starter items, the high scores, the re-run, the touch controls, the picker's worlds and pause, skipping time, bridges on the long walk, loot on the ground, the world at exit started again, the sounds heard, the making over its map, the hazards' water and gas, a clear shot, shelter from the sun and lava's burn, water pushed aside by a placed voxel, torches put out by water, a wooden board, boats, bones off a lake's bed and none in its water, boars swimming and asleep in the shade, the crown burning and snatched"
 # vim: set noet ts=4 sw=4:
