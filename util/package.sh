@@ -331,7 +331,8 @@ make_one() {
 	esac
 }
 
-# [PACKAGE_PREBUILT_WASM] Each builtin's and extension's wasm/ built into
+# [PACKAGE_PREBUILT_WASM] Each builtin's and extension's wasm/ (and
+# [SERVER_WASM] server .wasm, by cargo for Rust) built into
 # the stage's cache/rccpp_build/wasm/, which a packaged server reads as its
 # shared build: one without clang and wasm-ld serves these (the client's
 # fast path) instead of none. util/prebuild_wasm.py names each as the
@@ -346,8 +347,10 @@ prebuild_wasm() {
 	cc=${BUILDAT_WASM_CC:-$(command -v clang || echo "$em/clang")}
 	ld=${BUILDAT_WASM_LD:-$(command -v wasm-ld || ls /usr/lib/llvm-*/bin/wasm-ld 2>/dev/null | tail -1 || true)}
 	[ -n "$ld" ] || ld="$em/wasm-ld"
-	for d in "$stage"/builtin/*/wasm "$stage"/extensions/*/wasm; do
-		[ -d "$d" ] && mods="$mods ${d%/wasm}"
+	for d in "$stage"/builtin/* "$stage"/extensions/*; do
+		# A client's wasm/, or a server module's .wasm ([SERVER_WASM])
+		{ [ -d "$d/wasm" ] || grep -qs '"server_wasm"' "$d/meta.json"; } &&
+			mods="$mods $d"
 	done
 	[ -n "$mods" ] || { echo "prebuild wasm: no wasm/ in the stage"; return 1; }
 	echo "prebuild wasm: $cc, $ld"

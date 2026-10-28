@@ -68,4 +68,13 @@ RUN curl -sSL -o /tmp/curl.tar.xz "$CURL_URL" \
 RUN apt-get -o Acquire::Retries=5 update && apt-get install -y --no-install-recommends \
 	clang lld python3 \
 	&& rm -rf /var/lib/apt/lists/*
+# [SERVER_WASM] cargo and Rust's wasm32-unknown-unknown target, for the
+# Rust modules util/prebuild_wasm.py builds (a server module's .wasm, a
+# client's wasm/): rustup's minimal profile at a pinned toolchain, which
+# is what decides the .wasm; moving it is a deliberate commit
+ARG RUST_TOOLCHAIN=1.94.0
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
+	--profile minimal --default-toolchain "$RUST_TOOLCHAIN" \
+	--target wasm32-unknown-unknown
+ENV PATH=/root/.cargo/bin:$PATH
 WORKDIR /work

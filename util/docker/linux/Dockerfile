@@ -41,4 +41,13 @@ RUN git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-
 	&& /opt/emsdk/emsdk activate "$EMSDK_VERSION" \
 	&& rm -rf /opt/emsdk/downloads
 ENV EMSDK=/opt/emsdk
+# [SERVER_WASM] cargo and Rust's wasm32-unknown-unknown target, for the
+# Rust modules util/prebuild_wasm.py builds (a server module's .wasm, a
+# client's wasm/): rustup's minimal profile at a pinned toolchain, which
+# is what decides the .wasm; moving it is a deliberate commit
+ARG RUST_TOOLCHAIN=1.94.0
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path \
+	--profile minimal --default-toolchain "$RUST_TOOLCHAIN" \
+	--target wasm32-unknown-unknown
+ENV PATH=/root/.cargo/bin:$PATH
 WORKDIR /work
