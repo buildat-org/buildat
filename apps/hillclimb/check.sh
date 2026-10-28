@@ -95,7 +95,7 @@ fi
 g++ -std=c++11 -O1 -DHILL_TEST -I "$here/src" -x c++ "$app/main/hill.h" -o "$t/hill_test" \
 	2> "$t/hill_build.log" || fail "hill.h self test did not build: $(head -3 "$t/hill_build.log")"
 "$t/hill_test" "$t" || fail "hill.h self test"
-g++ -std=c++11 -O1 -DGROUND_TEST -x c++ "$app/main/ground.h" -o "$t/ground_test" \
+g++ -std=c++11 -O1 -DGROUND_TEST -I "$here/src" -x c++ "$app/main/ground.h" -o "$t/ground_test" \
 	2> "$t/ground_build.log" || fail "ground.h self test did not build: $(head -3 "$t/ground_build.log")"
 "$t/ground_test" || fail "ground.h self test"
 
