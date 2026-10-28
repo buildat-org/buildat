@@ -1,0 +1,12 @@
+# apps/sample_rust's endless: an init() that never returns, for the check
+# that the meter stops it and the server and its other modules go on
+[package]
+name = "sample_rust_endless"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+buildat_wasm_server = "0.1"

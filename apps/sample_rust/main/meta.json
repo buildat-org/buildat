@@ -1,0 +1,20 @@
+{
+	"engine_api": 2,
+	"kind": "check",
+	"web": true,
+	"disable_cpp": true,
+	"client_main": "wasm",
+	"server_wasm": {
+		"source": "server",
+		"imports": ["events", "packets", "scene", "voxels", "calls"]
+	},
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "main_context"},
+		{"module": "replicate"},
+		{"module": "voxelworld"},
+		{"module": "counter"}
+	]
+}

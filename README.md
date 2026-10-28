@@ -57,7 +57,8 @@ Starport listing takes it as its kind unless `starport.json` names one.
   eight), `sample_luanti_glue`, `sample_falling_blocks`,
   `sample_server_entities`, `sample_client_scene`, `sample_ui`,
   `sample_module_calls`, `sample_wasm` (a module's wasm/ called from
-  the client's Lua), `blip_check` (extensions/blip's sounds).
+  the client's Lua), `sample_rust` (a module in Rust on both sides, its
+  server half a .wasm), `blip_check` (extensions/blip's sounds).
 
 Further reading:
 

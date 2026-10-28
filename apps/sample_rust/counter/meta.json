@@ -1,0 +1,14 @@
+{
+	"engine_api": 2,
+	"kind": "check",
+	"web": true,
+	"disable_cpp": true,
+	"server_wasm": {
+		"source": "server",
+		"imports": ["storage"],
+		"callable": ["bump"]
+	},
+	"dependencies": [
+		{"module": "storage"}
+	]
+}

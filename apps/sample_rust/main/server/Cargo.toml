@@ -1,0 +1,12 @@
+# apps/sample_rust's server module (meta.json's "server_wasm")
+[package]
+name = "sample_rust_server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+buildat_wasm_server = "0.1"
+sample_rust_shared = { path = "../shared" }

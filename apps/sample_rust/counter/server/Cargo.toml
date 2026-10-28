@@ -1,0 +1,12 @@
+# apps/sample_rust's counter: a count kept in the module's storage, bumped
+# by main's buildat_call()
+[package]
+name = "sample_rust_counter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+buildat_wasm_server = "0.1"

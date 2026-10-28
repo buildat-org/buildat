@@ -1,0 +1,7 @@
+# What both halves of apps/sample_rust's main module know: the packets'
+# names and the bytes of the server's answer. wasm/ and server/ depend on
+# it by path; the server copies it beside them when it builds either.
+[package]
+name = "sample_rust_shared"
+version = "0.1.0"
+edition = "2021"
