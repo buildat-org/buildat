@@ -168,6 +168,21 @@ namespace interface
 				std::function<void(ss_ &&packet_data, bool droppable)> cb,
 				bool droppable = true);
 
+		// [FILE_TRANSFER_LATENCY] A payload's fragments made one at a time,
+		// as a sender's socket has room for them, rather than all at once:
+		// begin_fragments() names the sequence (a new type's definition
+		// goes through cb, as output() does) and fragment() frames its
+		// index'th piece. On the wire it is what output() writes.
+		struct FragmentSequence {
+			uint32_t id = 0;
+			PacketType type = 0;
+			size_t count = 0;
+		};
+		FragmentSequence begin_fragments(const ss_ &name, size_t size,
+				std::function<void(ss_ &&packet_data, bool droppable)> cb);
+		ss_ fragment(const FragmentSequence &seq, size_t index,
+				const ss_ &data);
+
 
 	private:
 		void send_new_types(

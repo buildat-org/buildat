@@ -103,6 +103,15 @@ namespace network
 		NewClient(const PeerInfo &info): info(info){}
 	};
 
+	// "network:bulk_room": what waits in the peer's bulk lane has fallen
+	// under Interface::BULK_LOW (send_bulk())
+	struct BulkRoom: public interface::Event::Private
+	{
+		PeerInfo::Id peer;
+
+		BulkRoom(PeerInfo::Id peer): peer(peer){}
+	};
+
 	struct OldClient: public interface::Event::Private
 	{
 		PeerInfo info;
@@ -349,6 +358,23 @@ namespace network
 		// [HEALTH_ADMIN] whether any account has the admin priv, as
 		// /health's "admin"; left out until accounts says
 		virtual void set_has_admin(bool admin) = 0;
+
+		// [FILE_TRANSFER_LATENCY] **The bulk lane**: a payload that goes
+		// behind everything else the peer is sent, made into fragments
+		// one at a time as the socket has room, so the game's packets
+		// wait a fragment for it and not the whole (client_file's file
+		// contents: a 28 MB file held every packet behind it for its
+		// download). In order with the other bulk sends only. data is
+		// shared, not copied: one file to many peers is one copy. Not in
+		// pending_bytes() and never dropped by the send policy; the
+		// sender paces it by bulk_bytes(), what of it is still waiting
+		// (SIZE_MAX for a peer that is gone),
+		// and network:bulk_room (BulkRoom), sent once the lane has fallen
+		// under BULK_LOW after a send_bulk() left it at that or over.
+		static const size_t BULK_LOW = 256 * 1024;
+		virtual void send_bulk(PeerInfo::Id recipient, const ss_ &name,
+				const sp_<const ss_> &data) = 0;
+		virtual size_t bulk_bytes(PeerInfo::Id peer) = 0;
 	};
 
 	inline bool access(interface::Server *server,

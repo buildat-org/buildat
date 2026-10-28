@@ -318,6 +318,15 @@ struct Module: public interface::Module, public network::Interface
 		return playing() ? sv_<PeerInfo::Id>{m_peer} : sv_<PeerInfo::Id>{};
 	}
 	size_t pending_bytes(PeerInfo::Id peer){ return 0; }
+	// One peer over postMessage, nothing queued in front of it: in order
+	// with the rest
+	void send_bulk(PeerInfo::Id recipient, const ss_ &name,
+			const sp_<const ss_> &data)
+	{
+		if(data)
+			send(recipient, name, *data);
+	}
+	size_t bulk_bytes(PeerInfo::Id peer){ return 0; }
 	void set_send_policy(SendPolicy policy, size_t max_queue_bytes,
 			int64_t grace_us){}
 	void declare(const ss_ &packet_name, Channel channel){}

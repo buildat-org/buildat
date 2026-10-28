@@ -11,6 +11,7 @@
 	#include <errno.h>
 	#include <fcntl.h>
 	#include <netinet/in.h>
+	#include <netinet/tcp.h> // TCP_NOTSENT_LOWAT
 	#include <netdb.h>
 	#include <arpa/inet.h>
 	#define closesocket close
@@ -409,16 +410,28 @@ struct CTCPSocket: public TCPSocket
 		int val = 1;
 		setsockopt(fd_client, SOL_SOCKET, SO_REUSEADDR, (const char*)&val,
 				sizeof(val));
-		// A small send buffer, so that what waits for a slow peer waits in
-		// the network module's queue, where a LatestOnly packet can go
-		// ahead of it ([NET_CHANNELS]) -- not in the kernel, where the
-		// autotuned 4 MB is minutes at a lossy link's rate and nothing
-		// passes it. simplified: 64 KB a round trip caps a peer at some
-		// 800 kB/s over 80 ms; a transport with its own window ([TRANSPORT])
-		// lifts this.
+		// Little unsent in the kernel, so that what waits for a slow peer
+		// waits in the network module's queue, where the game's packets go
+		// ahead of a download ([NET_CHANNELS], [FILE_TRANSFER_LATENCY]) --
+		// not in the kernel, where the autotuned 4 MB is minutes at a
+		// lossy link's rate and nothing passes it. TCP_NOTSENT_LOWAT bounds
+		// only what has not been sent: what is in flight is the kernel's
+		// to size, so a long round trip is not a cap. A 64 KB SO_SNDBUF did
+		// this before and capped a peer at its size a round trip, some
+		// 320-640 kB/s at 200 ms. 32 KB is 16 ms of a game packet's wait
+		// at 2 MB/s; the network thread waits on the room
+		// (SelectHandler's write_sockets), so it is no cap on a LAN.
+		// simplified: Windows has no TCP_NOTSENT_LOWAT and keeps the small
+		// buffer and its cap
+#ifdef TCP_NOTSENT_LOWAT
+		int lowat = 32 * 1024;
+		setsockopt(fd_client, IPPROTO_TCP, TCP_NOTSENT_LOWAT,
+				(const char*)&lowat, sizeof(lowat));
+#else
 		int sndbuf = 64 * 1024;
 		setsockopt(fd_client, SOL_SOCKET, SO_SNDBUF, (const char*)&sndbuf,
 				sizeof(sndbuf));
+#endif
 
 		m_fd = fd_client;
 		return true;

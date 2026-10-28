@@ -1164,6 +1164,7 @@ void CState::setup_packet_handlers()
 			cereal::PortableBinaryInputArchive ar(is);
 			ar(files);
 		}
+		sv_<interface::FileHash> again;
 		for(const interface::FileContent &entry : files){
 			const ss_ &file_name = entry.name;
 			const ss_ &file_hash = entry.hash;
@@ -1210,6 +1211,23 @@ void CState::setup_packet_handlers()
 			// Let Lua resource wrapper know that this happened so it can
 			// update the copy made for Urho3D's resource cache
 			m_app->file_updated_in_cache(file_name, file_hash, path);
+			// [FILE_TRANSFER_LATENCY] An announce of the file as it is now
+			// came ahead of it: file contents go behind the game's packets
+			// on a server since then, and an announce does not. Asked
+			// again, as the announce would have had it been the later.
+			auto h = m_file_hashes.find(file_name);
+			if(h != m_file_hashes.end() && h->second != file_hash){
+				m_waiting_files.insert(file_name);
+				again.push_back(interface::FileHash{file_name, h->second});
+			}
+		}
+		if(!again.empty()){
+			std::ostringstream os(std::ios::binary);
+			{
+				cereal::PortableBinaryOutputArchive ar(os);
+				ar(again);
+			}
+			send_packet("core:request_files", os.str());
 		}
 		if(m_tell_after_all_files_transferred_requested &&
 				m_waiting_files.empty()){

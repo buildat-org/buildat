@@ -638,7 +638,14 @@ older still queued (positions, HUD values) and goes ahead of the ordered
 queue -- except a peer's first packets of the name, which go ordered
 behind what was queued before them, so a payload cannot overtake its own
 definition or the modules that subscribe to it. A payload over 64 KB is
-fragmented on the wire and handed back whole. disconnect(peer) lets it go
+fragmented on the wire and handed back whole. send_bulk(peer, name,
+shared data) ([FILE_TRANSFER_LATENCY], client_file's file contents): a
+lane behind everything else, made into fragments one at a time as the
+socket drains, so the game's packets wait a fragment for it and not the
+whole; in order with other bulk only, never dropped, not in
+pending_bytes(); the sender paces it by bulk_bytes(peer) and
+"network:bulk_room" (BulkRoom: peer), sent once the lane falls under
+BULK_LOW after a send_bulk() left it at that or over. disconnect(peer) lets it go
 once its queue has gone (two seconds at most). The HTTP face on the same
 port: a request under /api/, or under a prefix the module claimed with
 claim_http_path(prefix) ([HEARTH_MVP]: Hearth's pages), comes as
@@ -877,7 +884,7 @@ builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, Region
 builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, NoiseQuery, ~NoiseQuery, point, map, Interface, noise_query, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
 builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, open_groups, group, decide, audit_log, appeal, appeals, decide_appeal, key_hash, report_status, moderator_command, access
-builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, set_has_admin, access, answer_request, serve_brand
+builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, BulkRoom, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, set_has_admin, send_bulk, bulk_bytes, access, answer_request, serve_brand
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, TrashInfo, trash_info, Interface, open, create, close, rename, trash, list_trash, remove_trashed, restore, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
@@ -903,8 +910,8 @@ interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispat
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
 interface/noise.h: lattice, ease, value3, value2, fbm2, fbm3, fbm2_abs, fbm3_abs, NoiseParams, noise2, noise3, fill2, fill3
-interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, windows_sandbox_off_by_env, die_with_parent_if_asked, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
-interface/packet_stream.h: InputBuffer, size, empty, begin, clear, append, PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, in_flight, output, send_new_types
+interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, aitta_kit_emsdk, windows_sandbox_off_by_env, die_with_parent_if_asked, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
+interface/packet_stream.h: InputBuffer, size, empty, begin, clear, append, PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, in_flight, output, FragmentSequence, begin_fragments, fragment, send_new_types
 interface/polyvox_cereal.h: save, load
 interface/polyvox_numeric.h: container_coord, container_coord16
 interface/polyvox_std.h: operator, dump, os

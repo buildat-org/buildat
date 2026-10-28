@@ -310,6 +310,21 @@ struct Peer
 	// PEER_SILENCE_US is dropped ([PEER_TIMEOUT])
 	int64_t last_recv_us = 0;
 
+	// [FILE_TRANSFER_LATENCY] The bulk lane (send_bulk()): payloads made
+	// into fragments one at a time, when nothing else is queued, so a
+	// download never stands between the game and its peer. Not in
+	// out_pending(), the game's queue: out_bulk_bytes is what of it has
+	// not been made into fragments yet.
+	struct Bulk {
+		sp_<const ss_> data;
+		interface::PacketStream::FragmentSequence seq;
+		size_t next = 0;
+	};
+	std::deque<Bulk> out_bulk;
+	size_t out_bulk_bytes = 0;
+	// Over BULK_LOW since a send_bulk(): network:bulk_room is owed
+	bool bulk_room_owed = false;
+
 	// A web client file being served: taken from the module's one copy a
 	// piece at a time as the socket drains, not copied whole per download
 	sp_<const ss_> file;
@@ -1998,11 +2013,33 @@ struct Module: public interface::Module, public network::Interface
 		}
 	}
 
+	// The bulk lane's next fragment into the queue, which is empty
+	void next_bulk(Peer &peer)
+	{
+		Peer::Bulk &b = peer.out_bulk.front();
+		const size_t at = b.next * interface::PacketStream::FRAGMENT_BYTES;
+		peer.out_bulk_bytes -= std::min(b.data->size() - std::min(at,
+				b.data->size()), interface::PacketStream::FRAGMENT_BYTES);
+		ss_ frag = peer.packet_stream.fragment(b.seq, b.next, *b.data);
+		peer.queue_raw(peer.kind == Peer::Kind::WebSocket ?
+				web::frame(2, frag) : std::move(frag));
+		if(++b.next >= b.seq.count)
+			peer.out_bulk.pop_front();
+		if(peer.bulk_room_owed && peer.out_bulk_bytes < BULK_LOW){
+			peer.bulk_room_owed = false;
+			m_server->emit_event("network:bulk_room", new BulkRoom(peer.id));
+		}
+	}
+
 	// What has not gone yet, as far as the socket will take it now. Not an
 	// error for nothing to go: the peer is not reading and the rest waits.
 	void flush_peer(Peer &peer)
 	{
 		for(;;){
+			if(peer.out_sent >= peer.out_buf.size() &&
+					peer.out_latest.empty() && peer.out_queue.empty() &&
+					!peer.out_bulk.empty())
+				next_bulk(peer);
 			peer.refill();
 			if(peer.out_sent >= peer.out_buf.size())
 				break;
@@ -2016,6 +2053,8 @@ struct Module: public interface::Module, public network::Interface
 				peer.ordered_first.clear();
 				peer.queued_latest.clear();
 				peer.out_queued_bytes = 0;
+				peer.out_bulk.clear();
+				peer.out_bulk_bytes = 0;
 				peer.file.reset();
 				return;
 			}
@@ -2076,7 +2115,8 @@ struct Module: public interface::Module, public network::Interface
 		for(auto &pair : m_peers){
 			const Peer &peer = pair.second;
 			// The web's peers also have clocks that flush_peers() keeps
-			if(peer.out_pending() > 0 || peer.closing || peer.held() ||
+			if(peer.out_pending() > 0 || !peer.out_bulk.empty() ||
+					peer.closing || peer.held() ||
 					peer.kind == Peer::Kind::Http)
 				return true;
 		}
@@ -2231,6 +2271,19 @@ struct Module: public interface::Module, public network::Interface
 		return result;
 	}
 
+	// The peers with something waiting for room in their socket
+	sv_<int> get_behind_sockets()
+	{
+		sv_<int> result;
+		for(auto &pair : m_peers){
+			const Peer &peer = pair.second;
+			if(peer.socket->fd() >= 0 && (peer.out_pending() > 0 ||
+					!peer.out_bulk.empty()))
+				result.push_back(peer.socket->fd());
+		}
+		return result;
+	}
+
 	// The pipes' peers ([PROCESS_SANDBOX] B 2): new ones taken, and what
 	// each has sent read. Whether any are there or coming, so the network
 	// thread knows to come round often.
@@ -2345,6 +2398,43 @@ struct Module: public interface::Module, public network::Interface
 	{
 		log_d(MODULE, "network::send()");
 		send_u(recipient, name, data);
+	}
+
+	// A payload of any size goes as fragments here, one of them for a
+	// small one, so the lane keeps its order without a second kind of
+	// entry: 11 bytes a payload
+	void send_bulk(PeerInfo::Id recipient, const ss_ &name,
+			const sp_<const ss_> &data)
+	{
+		auto it = m_peers.find(recipient);
+		if(it == m_peers.end() || !it->second.playing() || !data){
+			log_w(MODULE, "network::send_bulk(): Peer %zu doesn't exist",
+					recipient);
+			return;
+		}
+		Peer &peer = it->second;
+		if(peer.closing)
+			return;
+		peer.last_send_us = interface::os::time_us();
+		Peer::Bulk b;
+		b.data = data;
+		// A new name's definition goes ahead, in the game's queue
+		b.seq = peer.packet_stream.begin_fragments(name, data->size(),
+				[&](ss_ &&packet_data, bool droppable){
+			peer.queue_raw(peer.kind == Peer::Kind::WebSocket ?
+					web::frame(2, packet_data) : std::move(packet_data));
+		});
+		peer.out_bulk.push_back(std::move(b));
+		peer.out_bulk_bytes += data->size();
+		if(peer.out_bulk_bytes >= BULK_LOW)
+			peer.bulk_room_owed = true;
+		flush_peer(peer);
+	}
+
+	size_t bulk_bytes(PeerInfo::Id peer)
+	{
+		auto it = m_peers.find(peer);
+		return it == m_peers.end() ? SIZE_MAX : it->second.out_bulk_bytes;
 	}
 
 	std::set<ss_> m_latest_only;
@@ -2582,15 +2672,13 @@ void NetworkThread::run(interface::Thread *thread)
 
 	while(!thread->stop_requested()){
 		// A peer that is behind has bytes waiting for room in its socket,
-		// and nothing wakes this loop when that room appears -- the select
-		// is on readability only. So while anything is waiting it comes
-		// round often and pushes what fits.
-		//
-		// simplified: a poll rather than a select on writability, which is
-		// what SelectHandler would have to grow. It costs a wakeup every
-		// five milliseconds and only while a peer is actually behind.
+		// and that room ends the wait ([FILE_TRANSFER_LATENCY]: the kernel
+		// keeps little unsent, so a poll alone was a cap on a fast link).
+		// While anything is waiting it comes round every five milliseconds
+		// too, for the clocks flush_peers() keeps.
 		bool pending = false;
 		sv_<int> sockets;
+		sv_<int> writes;
 		// We can avoid implementing our own mutex locking in Module by using
 		// interface::Server::access_module() instead of directly accessing it.
 		network::access(m_module->m_server, [&](network::Interface *inetwork){
@@ -2603,10 +2691,12 @@ void NetworkThread::run(interface::Thread *thread)
 			// taken before it held their fds, and the select over it
 			// failed ([SELECT_BAD_FD])
 			sockets = m_module->get_sockets();
+			writes = m_module->get_behind_sockets();
 		});
 
 		sv_<int> active_sockets;
-		handler.check(pending ? 5000 : 500000, sockets, active_sockets);
+		handler.check(pending ? 5000 : 500000, sockets, active_sockets,
+				writes);
 
 		if(pending){
 			network::access(m_module->m_server,

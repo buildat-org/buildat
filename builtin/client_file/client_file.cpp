@@ -104,10 +104,28 @@ struct Module: public interface::Module, public client_file::Interface
 	interface::Server *m_server;
 	sm_<ss_, sp_<FileInfo>> m_files;
 	sp_<interface::FileWatch> m_watch;
-	// What one request's worth of bunches cost, for the log line that says
-	// whether compressing them was worth it
-	size_t m_bytes_sent = 0;
-	size_t m_bytes_raw = 0;
+	// [FILE_TRANSFER_LATENCY] **What each peer asked for and has not been
+	// sent**, in order, each name once and only names there are: a file
+	// is read when it is its turn, and a peer's bunches go down the
+	// network's bulk lane only while less than BULK_MARK of them waits
+	// there, so neither a 28 MB file nor a request naming one a thousand
+	// times is held in memory per peer -- the whole request used to be
+	// read and queued at once, and every game packet waited behind it.
+	// simplified: not kept over a reload of this module (on_unload); a
+	// client waits for what was not sent until it connects again
+	struct Wanted {
+		std::deque<interface::FileHash> files;
+		set_<ss_> names;
+		// For the log line that says whether compressing was worth it
+		size_t asked = 0;
+		size_t bytes_sent = 0;
+		size_t bytes_raw = 0;
+	};
+	sm_<network::PeerInfo::Id, Wanted> m_wanted;
+	static const size_t BULK_MARK = 1024 * 1024;
+	// A file sent alone, packed: the peers fetching it at once share one
+	// copy. By name and hash.
+	sm_<ss_, std::weak_ptr<const ss_>> m_packed;
 	up_<interface::Thread> m_thread;
 
 	Module(interface::Server *server):
@@ -138,6 +156,8 @@ struct Module: public interface::Module, public client_file::Interface
 				Event::t("network:packet_received/core:request_files"));
 		m_server->sub_event(this,
 				Event::t("network:packet_received/core:all_files_transferred"));
+		m_server->sub_event(this, Event::t("network:bulk_room"));
+		m_server->sub_event(this, Event::t("network:client_disconnected"));
 
 		// [WEB_LOCAL_SERVER]: a web server's files never change under it, so
 		// it has no watch to wait on
@@ -161,6 +181,9 @@ struct Module: public interface::Module, public client_file::Interface
 				on_request_files, network::Packet)
 		EVENT_TYPEN("network:packet_received/core:all_files_transferred",
 				on_all_files_transferred, network::Packet)
+		EVENT_TYPEN("network:bulk_room", on_bulk_room, network::BulkRoom)
+		EVENT_TYPEN("network:client_disconnected", on_client_disconnected,
+				network::OldClient)
 	}
 
 	void on_start()
@@ -335,25 +358,6 @@ struct Module: public interface::Module, public client_file::Interface
 		});
 	}
 
-	void send_bunch(network::PeerInfo::Id peer,
-			const sv_<interface::FileContent> &bunch)
-	{
-		if(bunch.empty())
-			return;
-		std::ostringstream os(std::ios::binary);
-		{
-			cereal::PortableBinaryOutputArchive ar(os);
-			ar(bunch);
-		}
-		const ss_ body = os.str();
-		const ss_ packet = pack_packet(body);
-		m_bytes_sent += packet.size();
-		m_bytes_raw += body.size();
-		network::access(m_server, [&](network::Interface *inetwork){
-			inetwork->send(peer, "core:file_contents", packet);
-		});
-	}
-
 	void on_request_files(const network::Packet &packet)
 	{
 		sv_<interface::FileHash> requested;
@@ -364,57 +368,144 @@ struct Module: public interface::Module, public client_file::Interface
 		}
 		log_v(MODULE, "%zu files requested by peer %zu", requested.size(),
 				packet.sender);
-
-		sv_<interface::FileContent> bunch;
-		size_t bunch_size = 0;
-		for(const interface::FileHash &f : requested){
-			const ss_ &file_name = f.name;
-			const ss_ &file_hash = f.hash;
-			auto it = m_files.find(file_name);
-			if(it == m_files.end()){
-				log_w(MODULE, "Requested file does not exist: \"%s\"",
-						cs(file_name));
+		Wanted &w = m_wanted[packet.sender];
+		size_t unknown = 0;
+		for(interface::FileHash &f : requested){
+			if(m_files.count(f.name) == 0){
+				if(unknown++ == 0)
+					log_w(MODULE, "Requested file does not exist: \"%s\"",
+							cs(f.name.substr(0, 100)));
 				continue;
 			}
-			const FileInfo &info = *it->second.get();
+			if(w.names.insert(f.name).second){
+				w.files.push_back(std::move(f));
+				w.asked++;
+			}
+		}
+		if(unknown > 1)
+			log_w(MODULE, "And %zu more requested by peer %zu do not exist",
+					unknown - 1, packet.sender);
+		pump(packet.sender);
+	}
+
+	void on_bulk_room(const network::BulkRoom &room)
+	{
+		pump(room.peer);
+	}
+
+	void on_client_disconnected(const network::OldClient &old)
+	{
+		m_wanted.erase(old.info.id);
+	}
+
+	// The peer's next bunches into the bulk lane, while it has room
+	void pump(network::PeerInfo::Id peer)
+	{
+		auto it = m_wanted.find(peer);
+		if(it == m_wanted.end())
+			return;
+		Wanted &w = it->second;
+		for(;;){
+			size_t waiting = BULK_MARK;
+			network::access(m_server, [&](network::Interface *inetwork){
+				waiting = inetwork->bulk_bytes(peer);
+			});
+			if(waiting >= BULK_MARK)
+				return;
+			sp_<const ss_> packet = next_bunch(w);
+			if(!packet)
+				break;
+			w.bytes_sent += packet->size();
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send_bulk(peer, "core:file_contents", packet);
+			});
+		}
+		log_v(MODULE, "%zu files to peer %zu: %zu bytes over the wire for "
+				"%zu of content", w.asked, peer, w.bytes_sent, w.bytes_raw);
+		m_wanted.erase(it);
+	}
+
+	// One bunch of what the peer waits for: files packed to
+	// FILE_BUNCH_SIZE, and a file of that size or over alone, its packet
+	// shared. Null when nothing is left.
+	sp_<const ss_> next_bunch(Wanted &w)
+	{
+		sv_<interface::FileContent> bunch;
+		size_t bunch_size = 0;
+		ss_ alone_key;
+		while(!w.files.empty() && bunch_size < FILE_BUNCH_SIZE){
+			const interface::FileHash &f = w.files.front();
+			auto fit = m_files.find(f.name);
+			if(fit == m_files.end()){
+				w.names.erase(f.name);
+				w.files.pop_front();
+				continue;
+			}
+			const FileInfo &info = *fit->second.get();
+			const ss_ key = info.name+"\n"+info.hash;
+			auto c = m_packed.find(key);
+			if(c != m_packed.end()){
+				sp_<const ss_> p = c->second.lock();
+				if(p && !bunch.empty())
+					break; // alone, next
+				if(p){
+					w.names.erase(f.name);
+					w.files.pop_front();
+					return p;
+				}
+				m_packed.erase(c);
+			}
 			// **A file changed since its announce is sent as it is now**,
 			// under its new hash, which the client takes: dropped, the
 			// client waited for it forever (2026-10-13: devtest's dynamic
 			// testnodes_generated_ck.png, asked for by a client that
 			// connected during the mods' load, replaced by the static one
 			// of the same name when the media were served)
-			if(info.hash != file_hash)
+			if(info.hash != f.hash)
 				log_v(MODULE, "Requested file changed since: \"%s\": "
-						"requested %s, sending %s", cs(file_name),
-						cs(interface::sha1::hex(file_hash)),
+						"requested %s, sending %s", cs(info.name),
+						cs(interface::sha1::hex(f.hash)),
 						cs(interface::sha1::hex(info.hash)));
 			ss_ content;
 			if(info.path.empty()){
 				content = info.content;
 			} else if(!read_whole_file(info.path, content)){
 				log_w(MODULE, "Cannot read \"%s\" from \"%s\"",
-						cs(file_name), cs(info.path));
+						cs(info.name), cs(info.path));
+				w.names.erase(f.name);
+				w.files.pop_front();
 				continue;
 			}
-			// The hash is not checked against what was just read. The client
-			// checks it anyway -- it has to, since a file can change between
-			// the announce and the request -- and hashing every file again on
-			// every request is what a large game would pay for it.
+			// A large one goes alone, read again on its turn
+			// simplified: a read twice, rather than its size asked first
+			if(content.size() >= FILE_BUNCH_SIZE && !bunch.empty())
+				break;
+			// The hash is not checked against what was just read. The
+			// client checks it anyway -- it has to, since a file can change
+			// between the announce and the request -- and hashing every
+			// file again on every request is what a large game would pay
+			// for it.
+			if(content.size() >= FILE_BUNCH_SIZE)
+				alone_key = key;
 			bunch_size += content.size();
 			bunch.push_back(interface::FileContent{info.name, info.hash,
-					content});
-			if(bunch_size >= FILE_BUNCH_SIZE){
-				send_bunch(packet.sender, bunch);
-				bunch.clear();
-				bunch_size = 0;
-			}
+					std::move(content)});
+			w.names.erase(f.name);
+			w.files.pop_front();
 		}
-		send_bunch(packet.sender, bunch);
-		log_v(MODULE, "%zu files to peer %zu: %zu bytes over the wire for "
-				"%zu of content", requested.size(), packet.sender,
-				m_bytes_sent, m_bytes_raw);
-		m_bytes_sent = 0;
-		m_bytes_raw = 0;
+		if(bunch.empty())
+			return nullptr;
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar(bunch);
+		}
+		const ss_ body = os.str();
+		w.bytes_raw += body.size();
+		sp_<const ss_> packet(new ss_(pack_packet(body)));
+		if(!alone_key.empty())
+			m_packed[alone_key] = packet;
+		return packet;
 	}
 
 	void on_all_files_transferred(const network::Packet &packet)

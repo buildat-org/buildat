@@ -2,6 +2,7 @@
 // Copyright 2014 Perttu Ahola <celeron55@gmail.com>
 #include "interface/packet_stream.h"
 #include "core/log.h"
+#include <algorithm>
 #include <c55/os.h> // get_timeofday_us()
 #define MODULE "__packet_stream"
 
@@ -260,24 +261,9 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 	log_d(MODULE, ">> %s", cs(name));
 
 	if(data.size() > FRAGMENT_BYTES && droppable && name != "core:fragment"){
-		const uint32_t id = m_next_fragment_id++;
-		const size_t count = (data.size() + FRAGMENT_BYTES - 1) / FRAGMENT_BYTES;
-		for(size_t i = 0; i < count; i++){
-			ss_ frag;
-			frag += (char)((id>>0) & 0xff);
-			frag += (char)((id>>8) & 0xff);
-			frag += (char)((id>>16) & 0xff);
-			frag += (char)((id>>24) & 0xff);
-			frag += (char)((i>>0) & 0xff);
-			frag += (char)((i>>8) & 0xff);
-			frag += (char)((count>>0) & 0xff);
-			frag += (char)((count>>8) & 0xff);
-			frag += (char)((type>>0) & 0xff);
-			frag += (char)((type>>8) & 0xff);
-			frag += (char)0; // flags
-			frag += data.substr(i * FRAGMENT_BYTES, FRAGMENT_BYTES);
-			output("core:fragment", frag, cb, true);
-		}
+		const FragmentSequence seq = begin_fragments(name, data.size(), cb);
+		for(size_t i = 0; i < seq.count; i++)
+			cb(fragment(seq, i, data), true);
 		return;
 	}
 
@@ -294,6 +280,41 @@ void PacketStream::output(const ss_ &name, const ss_ &data,
 	cb(os.str(), droppable);
 }
 
+PacketStream::FragmentSequence PacketStream::begin_fragments(const ss_ &name,
+		size_t size, std::function<void(ss_ &&packet_data, bool droppable)> cb)
+{
+	FragmentSequence seq;
+	seq.type = m_outgoing_types.get(name);
+	send_new_types(cb);
+	seq.id = m_next_fragment_id++;
+	// One for an empty payload: a count of none is not read
+	seq.count = std::max<size_t>(1, (size + FRAGMENT_BYTES - 1) /
+			FRAGMENT_BYTES);
+	return seq;
+}
+
+ss_ PacketStream::fragment(const FragmentSequence &seq, size_t i,
+		const ss_ &data)
+{
+	ss_ frag;
+	frag += (char)((seq.id>>0) & 0xff);
+	frag += (char)((seq.id>>8) & 0xff);
+	frag += (char)((seq.id>>16) & 0xff);
+	frag += (char)((seq.id>>24) & 0xff);
+	frag += (char)((i>>0) & 0xff);
+	frag += (char)((i>>8) & 0xff);
+	frag += (char)((seq.count>>0) & 0xff);
+	frag += (char)((seq.count>>8) & 0xff);
+	frag += (char)((seq.type>>0) & 0xff);
+	frag += (char)((seq.type>>8) & 0xff);
+	frag += (char)0; // flags
+	if(i * FRAGMENT_BYTES < data.size())
+		frag.append(data, i * FRAGMENT_BYTES, FRAGMENT_BYTES);
+	ss_ out;
+	output("core:fragment", frag, [&](ss_ &&d, bool){ out = std::move(d); },
+			true);
+	return out;
+}
 
 // One round trip through the pair, which is what is worth checking here: a
 // name never written before is defined on the wire ahead of the payload
@@ -449,6 +470,31 @@ static void self_check()
 				got3[0].second != big || got3[1].second != "s")
 			throw Exception("packet_stream self_check: bulk did not come "
 					"back whole");
+		// [FILE_TRANSFER_LATENCY] The same fragments made one at a time,
+		// a packet between two of them, and an empty payload as one
+		PacketStream w6, r6;
+		ss_ s6;
+		auto write6 = [&](const ss_ &d, bool){ s6 += d; };
+		const PacketStream::FragmentSequence q = w6.begin_fragments(
+				"test:big", big.size(), write6);
+		const PacketStream::FragmentSequence e = w6.begin_fragments(
+				"test:empty", 0, write6);
+		s6 += w6.fragment(q, 0, big);
+		w6.output("test:small", "s", write6);
+		s6 += w6.fragment(q, 1, big) + w6.fragment(q, 2, big) +
+				w6.fragment(e, 0, "");
+		sv_<std::pair<ss_, ss_>> got6;
+		InputBuffer b6;
+		b6.append(s6);
+		r6.input(b6, [&](const ss_ &name, const ss_ &data){
+			got6.push_back(std::make_pair(name, data));
+		});
+		if(q.count != 3 || e.count != 1 || got6.size() != 3 ||
+				got6[0].second != "s" || got6[1].first != "test:big" ||
+				got6[1].second != big || got6[2].first != "test:empty" ||
+				!got6[2].second.empty())
+			throw Exception("packet_stream self_check: fragments made one "
+					"at a time did not come back whole around a packet");
 		// [LOAD_IN_FLIGHT] Part of it read: the sequence, two fragments in;
 		// a whole packet part-read: its own name and bytes; all of it: none
 		PacketStream r4, w5, r5;

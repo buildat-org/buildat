@@ -56,8 +56,12 @@ namespace interface
 		}
 
 		// Returns false if there is some sort of error (no errors are fatal)
+		// write_sockets: ones whose room to write ends the wait too
+		// ([FILE_TRANSFER_LATENCY]: a peer behind is filled again the
+		// moment its socket drains, not up to a poll later); they are not
+		// in active_sockets for it
 		bool check(int timeout_us, const sv_<int> &sockets,
-				sv_<int> &active_sockets)
+				sv_<int> &active_sockets, const sv_<int> &write_sockets = {})
 		{
 			// What was closed and is open again, or is not asked about any
 			// more, is not set aside
@@ -91,8 +95,9 @@ namespace interface
 			tv.tv_sec = 0;
 			tv.tv_usec = timeout_us;
 
-			fd_set rfds;
+			fd_set rfds, wfds;
 			FD_ZERO(&rfds);
+			FD_ZERO(&wfds);
 			int fd_max = 0;
 			for(int fd : sockets){
 				if(fd < 0 || closed_fds.count(fd))
@@ -108,8 +113,19 @@ namespace interface
 				if(fd > fd_max)
 					fd_max = fd;
 			}
+			for(int fd : write_sockets){
+				if(fd < 0 || closed_fds.count(fd))
+					continue;
+#ifndef _WIN32
+				if(fd >= FD_SETSIZE)
+					continue;
+#endif
+				FD_SET(fd, &wfds);
+				if(fd > fd_max)
+					fd_max = fd;
+			}
 
-			int r = select(fd_max + 1, &rfds, NULL, NULL, &tv);
+			int r = select(fd_max + 1, &rfds, &wfds, NULL, &tv);
 			if(r == -1){
 				if(errno == EINTR){
 					// The process is probably quitting
