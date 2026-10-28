@@ -52,6 +52,19 @@ static interface::ModuleMeta load_module_meta(const json::Value &v)
 		interface::ModuleDependency dep = load_module_dependency(rev_deps_v.at(i));
 		r.reverse_dependencies.push_back(dep);
 	}
+	// [SERVER_WASM] the server checks what it names (wasm_module.cpp)
+	const json::Value &w = v.get("server_wasm");
+	if(w.is_object()){
+		r.server_wasm = w.get("source").as_string();
+		if(r.server_wasm.empty())
+			r.server_wasm = "?"; // refused by the server, said there
+		const json::Value &g = w.get("imports");
+		for(unsigned int i = 0; g.is_array() && i < g.size(); i++)
+			r.server_wasm_imports.push_back(g.at(i).as_string());
+		const json::Value &c = w.get("callable");
+		for(unsigned int i = 0; c.is_array() && i < c.size(); i++)
+			r.server_wasm_callable.push_back(c.at(i).as_string());
+	}
 	return r;
 }
 

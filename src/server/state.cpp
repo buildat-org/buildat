@@ -10,6 +10,9 @@
 #include "rccpp.h"
 #include "rccpp_util.h"
 #include "wasm_build.h"
+#if !defined(BUILDAT_STATIC_MODULES) && !defined(__EMSCRIPTEN__)
+#include "wasm_module.h"
+#endif
 #include "static_modules.h"
 #include "config.h"
 #include "interface/module.h"
@@ -1255,6 +1258,35 @@ struct CState: public State, public interface::Server
 		return m;
 	}
 
+	// [SERVER_WASM] The module's server .wasm built and read, or null and
+	// the log says why it is refused
+	interface::Module* load_wasm_module_u(const interface::ModuleInfo &info)
+	{
+#if defined(BUILDAT_STATIC_MODULES) || defined(__EMSCRIPTEN__)
+		// [WEB_LOCAL_SERVER]: not yet; the browser's own wasm will run it
+		log_e(MODULE, "%s: a server .wasm does not run in the browser's "
+				"server yet; the module is refused", cs(info.name));
+		return nullptr;
+#else
+		log_i(MODULE, "STATUS Loading %s (%zu of %zu)", cs(info.name),
+				m_module_load_order.size() + 1, m_module_count);
+		const ss_ wasm = build_module_wasm(g_server_config, info.name,
+				info.path, info.meta.server_wasm, true);
+		if(wasm.empty()){
+			log_e(MODULE, "%s: no server .wasm; the module is refused",
+					cs(info.name));
+			return nullptr;
+		}
+		ss_ why;
+		interface::Module *m = create_wasm_module(this, info, wasm,
+				g_server_config.get<ss_>("rccpp_build_path")+"/wasm2c", why);
+		if(!m)
+			log_e(MODULE, "%s: its .wasm is refused: %s", cs(info.name),
+					cs(why));
+		return m;
+#endif
+	}
+
 	// Can be used for loading hardcoded modules.
 	// There intentionally is no core:module_loaded event.
 	void load_module_direct_u(interface::Module *m, const ss_ &name)
@@ -1319,7 +1351,13 @@ struct CState: public State, public interface::Server
 					m_module_wasm[info.name] = wasm;
 			}
 
-			if(!info.meta.disable_cpp){
+			if(!info.meta.server_wasm.empty()){
+				// [SERVER_WASM] A .wasm, not C++: built from its source as a
+				// module's C++ is, and checked against its grants
+				m = load_wasm_module_u(info);
+				if(m == nullptr)
+					return false;
+			} else if(!info.meta.disable_cpp){
 				m = build_module_u(info);
 
 				if(m == nullptr){
@@ -1340,7 +1378,7 @@ struct CState: public State, public interface::Server
 			m_module_load_order.push_back(info.name);
 		}
 
-		if(!info.meta.disable_cpp){
+		if(m){
 			// Call init() and start thread
 			mc->init_and_start_thread();
 		}
@@ -1510,7 +1548,8 @@ struct CState: public State, public interface::Server
 			sv_<ss_> include_dirs = m_compiler->include_directories;
 			include_dirs.push_back(m_modules_path);
 			for(const interface::ModuleInfo &info : infos){
-				if(info.meta.disable_cpp || m_modules.count(info.name))
+				if(info.meta.disable_cpp || !info.meta.server_wasm.empty() ||
+						m_modules.count(info.name))
 					continue;
 				BuildJob job = plan_build_u(info, list_includes(
 						info.path+"/"+info.name+".cpp", include_dirs));

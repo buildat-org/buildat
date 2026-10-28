@@ -30,6 +30,16 @@ namespace interface
 		ss_ ldflags_windows;
 		sv_<ModuleDependency> dependencies;
 		sv_<ModuleDependency> reverse_dependencies;
+		// [SERVER_WASM] The module is a .wasm, not C++: built from this
+		// directory of it (a Rust crate, or C and C++) and run sandboxed
+		// (src/server/wasm_module.cpp). "" for a C++ module. meta.json:
+		//   "server_wasm": {"source": "server", "imports": ["packets"],
+		//       "callable": ["count"]}
+		ss_ server_wasm;
+		// The groups of interface/wasm_server_api.h's imports it is granted
+		sv_<ss_> server_wasm_imports;
+		// Its exports other wasm modules may call (buildat_call())
+		sv_<ss_> server_wasm_callable;
 	};
 
 	struct ModuleInfo

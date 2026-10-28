@@ -261,17 +261,42 @@ static bool run_logged(const ss_ &command, const ss_ &log_path,
 	return false;
 }
 
+// The module's other directories with a Cargo.toml than source (crates
+// the source's may use by path, "../shared"), by name, and their files
+// (target/ left out), each sorted
+static sv_<std::pair<ss_, sv_<ss_>>> sibling_crates(const ss_ &module_path,
+		const ss_ &source)
+{
+	sv_<std::pair<ss_, sv_<ss_>>> r;
+	for(const auto &n : interface::fs::list_directory(module_path)){
+		if(!n.is_directory || n.name == source || n.name[0] == '.' ||
+				!interface::fs::path_exists(module_path+"/"+n.name+"/Cargo.toml"))
+			continue;
+		sv_<ss_> files;
+		collect(module_path+"/"+n.name, "", files);
+		files.erase(std::remove_if(files.begin(), files.end(),
+				[](const ss_ &f){ return f.compare(0, 7, "target/") == 0; }),
+				files.end());
+		std::sort(files.begin(), files.end());
+		r.emplace_back(n.name, files);
+	}
+	std::sort(r.begin(), r.end());
+	return r;
+}
+
 // wasm/ as a Rust crate: copied out (cargo writes Cargo.lock beside
-// Cargo.toml) and built by cargo; the .wasm's path, or "" and why logged
+// Cargo.toml), with the module's other crates beside it as they are in the
+// module, and built by cargo; the .wasm's path, or "" and why logged
 static ss_ build_rust(const core::Config &config, const ss_ &module_name,
-		const ss_ &src_dir, const sv_<ss_> &files, const ss_ &crate_dir,
+		const ss_ &module_path, const ss_ &source, const sv_<ss_> &files,
 		const ss_ &out_dir, const ss_ &hash)
 {
+	const ss_ interface_path = config.get<ss_>("interface_path");
 	const ss_ cargo = config.get<ss_>("wasm_cargo");
 	if(cargo.empty()){
-		log_e(MODULE, "%s has wasm/ in Rust, and this server has no cargo to "
+		log_e(MODULE, "%s has %s/ in Rust, and this server has no cargo to "
 				"build it (tried %s). Install Rust (rustup) and its %s target, "
-				"or set BUILDAT_CARGO.", cs(module_name),
+				"or set BUILDAT_CARGO.", cs(module_name), cs(source),
 				cs(config.get<ss_>("wasm_cargo_tried")), RUST_TARGET);
 		return "";
 	}
@@ -308,19 +333,30 @@ static ss_ build_rust(const core::Config &config, const ss_ &module_name,
 					"not (rustup target add "+RUST_TARGET+")";
 		}
 	}
-	for(size_t i = 0; ok && i < files.size(); i++){
-		const ss_ to = tmp+"/src/"+files[i];
-		interface::fs::create_directories(interface::fs::strip_file_name(to));
-		ok = interface::fs::copy_file(src_dir+"/"+files[i], to);
-		if(!ok)
-			why = "copying "+files[i]+" failed";
+	sv_<std::pair<ss_, sv_<ss_>>> crates = sibling_crates(module_path, source);
+	crates.emplace_back(source, files);
+	for(size_t c = 0; ok && c < crates.size(); c++){
+		const ss_ &dir = crates[c].first;
+		for(size_t i = 0; ok && i < crates[c].second.size(); i++){
+			const ss_ &f = crates[c].second[i];
+			const ss_ to = tmp+"/src/"+dir+"/"+f;
+			interface::fs::create_directories(interface::fs::strip_file_name(to));
+			ok = interface::fs::copy_file(module_path+"/"+dir+"/"+f, to);
+			if(!ok)
+				why = "copying "+dir+"/"+f+" failed";
+		}
 	}
 	if(ok){
+		// The engine's crates patched in under their crates.io names: the
+		// client's API and the server's ([SERVER_WASM]); a crate uses one
 		const ss_ command = quote(cargo)+" build --offline --release --target "+
-				RUST_TARGET+" --manifest-path "+quote(tmp+"/src/Cargo.toml")+
+				RUST_TARGET+" --manifest-path "+quote(tmp+"/src/"+source+
+					"/Cargo.toml")+
 				" --target-dir "+quote(tmp+"/target")+
 				" --config "+quote("patch.crates-io.buildat_wasm.path=\""+
-					crate_dir+"\"")+
+					interface_path+"/rust/buildat_wasm\"")+
+				" --config "+quote("patch.crates-io.buildat_wasm_server.path=\""+
+					interface_path+"/rust/buildat_wasm_server\"")+
 				" --config "+quote("profile.release.panic=\"abort\"");
 		ok = run_logged(command, tmp+"/cargo.log", env);
 		if(!ok)
@@ -344,21 +380,45 @@ static ss_ build_rust(const core::Config &config, const ss_ &module_name,
 		ok = interface::fs::rename(built, out);
 	interface::fs::remove_all(tmp);
 	if(!ok){
-		log_e(MODULE, "%s: building wasm/ (Rust) failed: %s", cs(module_name),
-				cs(why));
+		log_e(MODULE, "%s: building %s/ (Rust) failed: %s", cs(module_name),
+				cs(source), cs(why));
 		return "";
 	}
 	const int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now() - t0).count();
-	log_i(MODULE, "%s: built wasm/ (Rust) in %i ms: %s (%zu bytes)",
-			cs(module_name), ms, cs(out), read_file(out).size());
+	log_i(MODULE, "%s: built %s/ (Rust) in %i ms: %s (%zu bytes)",
+			cs(module_name), cs(source), ms, cs(out), read_file(out).size());
 	return out;
 }
 
-ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
-		const ss_ &module_path)
+// A crate's files into the key: a name and its bytes per file
+static void key_files(std::ostringstream &key, const ss_ &dir,
+		const sv_<ss_> &files)
 {
-	const ss_ src_dir = module_path+"/wasm";
+	for(const ss_ &f : files){
+		const ss_ data = read_file(dir+"/"+f);
+		key<<f<<'\0'<<data.size()<<'\0'<<data;
+	}
+}
+
+ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
+		const ss_ &module_path, const ss_ &source, bool server)
+{
+	// A directory of the module's own, by its name
+	bool plain = !source.empty() && source[0] != '.';
+	for(char c : source)
+		plain = plain && (isalnum((unsigned char)c) || c == '_' || c == '-');
+	if(!plain){
+		log_e(MODULE, "%s: its .wasm's source \"%s\" is not a directory name "
+				"of the module's", cs(module_name), cs(source.substr(0, 64)));
+		return "";
+	}
+	const ss_ src_dir = module_path+"/"+source;
+	if(!interface::fs::path_exists(src_dir)){
+		log_e(MODULE, "%s: no %s/ to build its .wasm from", cs(module_name),
+				cs(source));
+		return "";
+	}
 	sv_<ss_> files;
 	collect(src_dir, "", files);
 	std::sort(files.begin(), files.end());
@@ -374,13 +434,14 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		if(ends_with(f, ".c") || ends_with(f, ".cc") || ends_with(f, ".cpp"))
 			sources.push_back(f);
 	if(sources.empty() && !rust){
-		log_e(MODULE, "%s: wasm/ has no .c, .cc, .cpp or Cargo.toml",
-				cs(module_name));
+		log_e(MODULE, "%s: %s/ has no .c, .cc, .cpp or Cargo.toml",
+				cs(module_name), cs(source));
 		return "";
 	}
 	const ss_ interface_path = config.get<ss_>("interface_path");
 	const ss_ include_dir = interface::fs::strip_file_name(interface_path);
 	const ss_ crate_dir = interface_path+"/rust/buildat_wasm";
+	const ss_ server_crate_dir = interface_path+"/rust/buildat_wasm_server";
 
 	// Keyed by what goes in: a name and its bytes per file, the header, the
 	// flags (and for Rust buildat_wasm's files). Not the tools' versions,
@@ -398,34 +459,53 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	// include them only (the others' keys, and their prebuilt .wasm, stay)
 	if(bindings)
 		key<<"bindings 1\n"<<read_file(interface_path+"/buildat_client.h");
+	// The engine's crates, and the module's other crates (a module with
+	// one crate keys as it always did)
+	auto engine_crate = [&](const ss_ &dir){
+		sv_<ss_> crate;
+		collect(dir, "", crate);
+		std::sort(crate.begin(), crate.end());
+		crate.erase(std::remove_if(crate.begin(), crate.end(),
+				[](const ss_ &f){ return f.compare(0, 7, "target/") == 0 ||
+						f == "Cargo.lock"; }), crate.end());
+		key_files(key, dir, crate);
+	};
 	if(rust){
 		key<<"rust 1\n"<<RUST_FLAGS<<"\n"<<RUST_TARGET<<"\n";
-		sv_<ss_> crate;
-		collect(crate_dir, "", crate);
-		std::sort(crate.begin(), crate.end());
-		for(const ss_ &f : crate){
-			if(f.compare(0, 7, "target/") == 0 || f == "Cargo.lock")
-				continue;
-			const ss_ data = read_file(crate_dir+"/"+f);
-			key<<f<<'\0'<<data.size()<<'\0'<<data;
+		engine_crate(crate_dir);
+		for(const auto &c : sibling_crates(module_path, source)){
+			key<<"crate "<<c.first<<"\n";
+			key_files(key, module_path+"/"+c.first, c.second);
 		}
+	}
+	// [SERVER_WASM] A server module's: its API, and its crate
+	if(server){
+		key<<"server 1\n"<<read_file(interface_path+"/wasm_server_api.h");
+		if(rust)
+			engine_crate(server_crate_dir);
 	}
 	const ss_ hash = interface::sha1::hex(interface::sha1::calculate(key.str()));
 
 	const ss_ out_dir = config.get<ss_>("rccpp_build_path")+"/wasm";
 	const ss_ out = out_dir+"/"+hash+".wasm";
 	if(interface::fs::path_exists(out)){
-		log_i(MODULE, "%s: wasm/ is built (cache hit): %s", cs(module_name),
-				cs(out));
+		log_i(MODULE, "%s: %s/ is built (cache hit): %s", cs(module_name),
+				cs(source), cs(out));
 		return out;
 	}
 	const ss_ prebuilt_dir = config.get<ss_>("rccpp_prebuilt_path");
 	if(!prebuilt_dir.empty() &&
 			interface::fs::path_exists(prebuilt_dir+"/wasm/"+hash+".wasm")){
-		log_i(MODULE, "%s: wasm/ is in the shared build", cs(module_name));
+		log_i(MODULE, "%s: %s/ is in the shared build", cs(module_name),
+				cs(source));
 		return prebuilt_dir+"/wasm/"+hash+".wasm";
 	}
 #ifdef BUILDAT_STATIC_MODULES
+	if(server){
+		log_e(MODULE, "%s: a server .wasm does not run in the browser's "
+				"server yet", cs(module_name));
+		return "";
+	}
 	// [WEB_LOCAL_SERVER]: no compiler in a browser. util/web_server.cmake
 	// builds each module's from the same sources as the server it packs,
 	// named by the module (rebuilt with them, so never stale)
@@ -438,15 +518,15 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	return "";
 #endif
 	if(rust)
-		return build_rust(config, module_name, src_dir, files, crate_dir,
+		return build_rust(config, module_name, module_path, source, files,
 				out_dir, hash);
 	const ss_ cc = config.get<ss_>("wasm_cc");
 	const ss_ ld = config.get<ss_>("wasm_ld");
 	if(cc.empty() || ld.empty()){
-		log_e(MODULE, "%s has wasm/, and this server has no clang and wasm "
+		log_e(MODULE, "%s has %s/, and this server has no clang and wasm "
 				"linker to build it (tried %s). Install clang and lld, or set "
 				"BUILDAT_WASM_CC and BUILDAT_WASM_LD.",
-				cs(module_name), cs(config.get<ss_>("wasm_tried")));
+				cs(module_name), cs(source), cs(config.get<ss_>("wasm_tried")));
 		return "";
 	}
 
@@ -481,14 +561,13 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 		ok = interface::fs::rename(tmp+"/out.wasm", out);
 	interface::fs::remove_all(tmp);
 	if(!ok){
-		log_e(MODULE, "%s: building wasm/ failed",
-				cs(module_name));
+		log_e(MODULE, "%s: building %s/ failed", cs(module_name), cs(source));
 		return "";
 	}
 	const int ms = (int)std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now() - t0).count();
-	log_i(MODULE, "%s: built wasm/ in %i ms: %s (%zu bytes)", cs(module_name),
-			ms, cs(out), read_file(out).size());
+	log_i(MODULE, "%s: built %s/ in %i ms: %s (%zu bytes)", cs(module_name),
+			cs(source), ms, cs(out), read_file(out).size());
 	return out;
 }
 

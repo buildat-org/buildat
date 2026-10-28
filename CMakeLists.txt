@@ -736,10 +736,42 @@ if(BUILD_SERVER)
 		src/server/confine_windows.cpp
 		src/server/wasm_build.cpp
 	)
+	# [SERVER_WASM] a module that is a .wasm, on the client's runtime; not in
+	# the browser's server ([WEB_LOCAL_SERVER]) yet
+	if(NOT EMSCRIPTEN)
+		list(APPEND SERVER_SRCS src/wasm/engine.cpp src/server/wasm_module.cpp)
+		list(APPEND SERVER_SRCS $<TARGET_OBJECTS:wasm_rt_files>)
+		if(TARGET wasm_rt)
+			list(APPEND SERVER_SRCS $<TARGET_OBJECTS:wasm_rt>)
+		endif()
+		set_source_files_properties(src/wasm/engine.cpp PROPERTIES
+				COMPILE_OPTIONS "-std=c++20")
+		# The builtins' interfaces (network/api.h) it reaches modules through
+		set_source_files_properties(src/server/wasm_module.cpp PROPERTIES
+				INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/builtin")
+	endif()
 	if(WIN32)
 		list(APPEND SERVER_SRCS ${BUILDAT_RC})
 	endif()
 	add_executable(${SERVER_EXE_NAME} ${SERVER_SRCS})
+	if(NOT EMSCRIPTEN)
+		target_link_libraries(${SERVER_EXE_NAME} wabt)
+		if(TARGET wamr)
+			target_link_libraries(${SERVER_EXE_NAME} wamr)
+		endif()
+		target_include_directories(${SERVER_EXE_NAME} PRIVATE
+			${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm2c)
+		if(TARGET wasm_rt)
+			# The modules it builds call the runtime in it (as the client's)
+			target_compile_definitions(${SERVER_EXE_NAME} PRIVATE
+				WASM_RT_SKIP_SIGNAL_RECOVERY=1 WASM_RT_STACK_DEPTH_COUNT=1)
+			target_link_options(${SERVER_EXE_NAME} PRIVATE
+				-Wl,--dynamic-list=${CMAKE_SOURCE_DIR}/3rdparty/wabt/wasm_rt.dynlist)
+		elseif(WIN32)
+			target_compile_definitions(${SERVER_EXE_NAME} PRIVATE
+				WASM_RT_MEMCHECK_BOUNDS_CHECK=1 WASM_RT_STACK_DEPTH_COUNT=1)
+		endif()
+	endif()
 	if(WIN32)
 		target_compile_definitions(${SERVER_EXE_NAME} PRIVATE
 			$<$<COMPILE_LANGUAGE:RC>:BUILDAT_SERVER_EXE>)

@@ -24,7 +24,14 @@ namespace server
 	// files: a wasm/ with a Cargo.toml is Rust, built by cargo), unless that file
 	// (or the prebuilt directory's) is there already. Returns the .wasm's
 	// path, or "" and logs why. The module's name is for the log only.
+	// [SERVER_WASM] source names another directory of the module (its
+	// server .wasm's, meta.json's "server_wasm"), built against
+	// wasm_server_api.h and the buildat_wasm_server crate when server is
+	// set. A Rust crate's path dependencies may be the module's other
+	// directories with a Cargo.toml (a crate both halves use): they are
+	// copied and hashed with it.
 	ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
-			const ss_ &module_path);
+			const ss_ &module_path, const ss_ &source = "wasm",
+			bool server = false);
 }
 // vim: set noet ts=4 sw=4:
