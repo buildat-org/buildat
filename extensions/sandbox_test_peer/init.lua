@@ -58,5 +58,18 @@ function M.safe.hook()
 	return buildat.eval("return buildat.read_extension_file('launch_attack.lua')")
 end
 
+-- [SAFE_UNSUB_PEER] The launch UI's global handlers, by the names it
+-- hands over and by the function itself: none is this extension's to
+-- unsubscribe. Returns how many went, and what its own unsubscribe of
+-- its own returned (1).
+function M.safe.unsubscribe(list)
+	local n = 0
+	for _, c in ipairs(list) do
+		n = n + magic.UnsubscribeFromEvent(c[1], c[2])
+	end
+	local own = magic.SubscribeToEvent("Update", function() end)
+	return n, magic.UnsubscribeFromEvent("Update", own)
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

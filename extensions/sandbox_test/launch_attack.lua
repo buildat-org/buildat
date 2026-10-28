@@ -158,10 +158,23 @@ function M.run()
 	log:info("launch sandbox: another extension's eval through a function " ..
 			"of its own: " .. ((ran and type(text) == "string") and
 				"RAN AS THE LAUNCH UI" or "refused"))
+	-- [SAFE_UNSUB_PEER] And none of its global handlers is the other
+	-- extension's to unsubscribe, by name or by the function; the
+	-- handler still runs after, and its own unsubscribe still drops it
+	local held_runs = 0
+	local function held_fn() held_runs = held_runs + 1 end
+	local held = magic.SubscribeToEvent("Update", held_fn)
+	local peer_removed, peer_own = peer.unsubscribe({{"Update", held},
+		{"Update", held_fn}})
 	local frames = 0
 	magic.SubscribeToEvent("Update", function()
 		frames = frames + 1
 		if frames == 3 then
+			log:info("launch sandbox: another extension's unsubscribes of " ..
+					"its handler: " .. peer_removed .. " removed, its own " ..
+					tostring(peer_own) .. "; the handler ran " .. held_runs ..
+					" times after; its own unsubscribe: " ..
+					magic.UnsubscribeFromEvent("Update", held))
 			local s, c = buildat.storage_read("peer_mark"),
 					buildat.cache_read("peer_mark")
 			log:info("launch sandbox: another extension's writes in the " ..

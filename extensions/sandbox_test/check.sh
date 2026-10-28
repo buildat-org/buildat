@@ -131,6 +131,14 @@ if ! grep -aq "launch sandbox: another extension's eval through a function of it
 	echo "FAIL: another extension's eval ran as the launch UI"
 	exit 1
 fi
+# [SAFE_UNSUB_PEER] Nor unsubscribes the launch UI's global handler, by
+# its name or by the function, which still runs after; each's own
+# unsubscribe still drops its own
+if ! grep -aq "launch sandbox: another extension's unsubscribes of its handler: 0 removed, its own 1; the handler ran [1-9][0-9]* times after; its own unsubscribe: 1$" "$out/cli.log"; then
+	echo "FAIL: another extension unsubscribed the launch UI's handler --" \
+			"$(grep -a "another extension's unsubscribes" "$out/cli.log" | head -1 | sed 's/.*sandbox: //')"
+	exit 1
+fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers and keeps none of its own past a pcall or a tail call; another extension gets its own storage, cache and files and not the launch UI's"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers and keeps none of its own past a pcall or a tail call; another extension gets its own storage, cache and files and not the launch UI's, nor unsubscribes its handlers"
 exit 0
