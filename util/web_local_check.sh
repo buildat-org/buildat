@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~75 s, ~2 min with demo_aggregate and skeldat (2026-10-27)
+# cost: ~95 s, ~2.5 min with demo_aggregate and skeldat (2026-10-28)
 # covers: util/web_drive.js client/launch_grid.lua src/server/web/pre.js builtin/world_menu/world_menu.cpp builtin/network/network_web.cpp src/client/pipe_stream.cpp src/client/web/index.html util/web_server.cmake
 # [WEB_LOCAL_SERVER]: hillclimb in the browser with its own server in a
 # worker of the page, and no buildat server: web/ served by a static
@@ -14,8 +14,10 @@
 # the buildat server's own serving of the same: the isolation headers
 # on the play page and /starport_signin, the local server's files and
 # buildat_mt.js, and not on the page with ?isolated=0; and a page with no game (apps/play's) given the apps for
-# its launch menu. demo_aggregate (walked a second, its position line moved) and skeldat (a world
-# made in its menu, walked 2 voxels) are driven as hillclimb when
+# its launch menu; an app whose meta.json needs more than the browser gives
+# (a fixture made here): the page's notice, and "Start anyway" starts it.
+# demo_aggregate (walked a second, its position line moved) and skeldat (a
+# world made in its menu, walked 2 voxels) are driven as hillclimb when
 # web/local/<app>/ is there. Needs web/ (util/build_web.sh) with
 # web/local/hillclimb/ (util/build_web_server.sh hillclimb).
 #   util/web_local_check.sh
@@ -221,4 +223,29 @@ isolated "/starport_signin" 200 || fail "/starport_signin is not isolated"
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates the play page unless ?isolated=0, and ?local's files"
+
+# [WEB_MESH_REST] An app whose meta.json "needs" more than the browser
+# gives (a fixture: apps/sample_ui with needs past any maximum the page
+# asks for): the page says so and starts nothing until "Start anyway"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+cp -r "$here/apps/sample_ui" "$t/needs_app"
+printf '{"engine_api": 2, "needs": {"memory_mb": 4096, "mesh_threads": 64}}\n' \
+	> "$t/needs_app/meta.json"
+start_server "$t/needs.log" "STATUS Listening" 120 auto bin/buildat_server \
+	-m "$t/needs_app" -D "$t/needs" -C "$t/s.cache" -W "$here/web" -l 3 ||
+	fail "the server for the needs fixture ($t/needs.log)"
+CHECK_PIDS+=($SERVER_PID)
+cat > "$t/needs.json" << 'JSON'
+[
+	["nav", "${URL}"],
+	["waitlog", "needs: lack of memory_mb, mesh_threads", 30],
+	["until", "/This game needs memory up to 4096 MB [\\s\\S]*Start anyway$/.test(document.getElementById('status').textContent) && !document.querySelector('script[src^=\"buildat\"]')", 5],
+	["click", 600, 375],
+	["waitlog", "sample_ui/init.lua loaded", 60]
+]
+JSON
+WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
+	bash "$here/util/web_drive.sh" chrome sample_ui \
+	"$t/needs.json" "$t/needs_drive" > "$t/needs_drive.log" 2>&1 ||
+	fail "the needs notice's drive ($t/needs_drive.log: $(tail -2 "$t/needs_drive.log" | tr '\n' ' '))"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates the play page unless ?isolated=0, and ?local's files; an app that needs more than the browser gives is said to and starts anyway"
