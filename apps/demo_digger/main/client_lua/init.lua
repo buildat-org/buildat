@@ -7,6 +7,7 @@ local dump = buildat.dump
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
+local ui_utils = require("buildat/extension/ui_utils")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 
@@ -105,7 +106,9 @@ do
 	pointed_voxel_visual_node.enabled = false
 end
 
-magic.input:SetMouseVisible(false)
+-- The cursor hidden and, on the web, the pointer lock asked for
+-- ([WEB_MOUSE_CAPTURE])
+ui_utils.mouse_look(true)
 
 -- Set up zone (global visual parameters)
 do
@@ -376,7 +379,8 @@ magic.ui:SetFocusElement(nil)
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
-	if key == magic.KEY_ESCAPE then
+	-- The browser's letting go of the pointer: "Click to continue" is up
+	if key == magic.KEY_ESCAPE and not ui_utils.mouse_look_escape() then
 		log:info("KEY_ESCAPE pressed")
 		buildat.leave()
 	end
@@ -406,6 +410,9 @@ local function find_pointed_voxel(camera_node)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
+	if ui_utils.mouse_look_paused() then
+		return -- The click is the continue
+	end
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
 	if button == magic.MOUSEB_RIGHT then
@@ -510,8 +517,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			player_node.position = magic.Vector3(-5, 80, 257)
 		end
 
-		local dmouse = magic.input:GetMouseMove()
-		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
+		local dmouse = {}
+		dmouse.x, dmouse.y = ui_utils.mouse_look_move()
 		camera_node:Pitch(dmouse.y * 0.1)
 		player_node:Yaw(dmouse.x * 0.1)
 		--[[log:info("y="..player_node:GetRotation():YawAngle())

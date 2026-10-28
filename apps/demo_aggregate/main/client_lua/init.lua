@@ -184,7 +184,9 @@ local BUILD_MATERIALS = {
 }
 local build_material = 1
 
-magic.input:SetMouseVisible(false)
+-- The cursor hidden and, on the web, the pointer lock asked for
+-- ([WEB_MOUSE_CAPTURE]); the B menu shows the cursor
+ui_utils.mouse_look(true)
 
 -- Set up zone (global visual parameters)
 do
@@ -824,7 +826,7 @@ local function end_placement()
 	if not placement then return end
 	placement.node.enabled = false
 	placement = nil
-	magic.input:GetMouseMove() -- Thrown away; see the Update handler
+	ui_utils.mouse_look_move() -- Thrown away; see the Update handler
 end
 
 local function start_placement(name)
@@ -848,7 +850,7 @@ local function start_placement(name)
 	placement.node.enabled = true
 	update_placement()
 	pointed_voxel_visual_node.enabled = false
-	magic.input:SetMouseVisible(false)
+	ui_utils.mouse_look(true)
 end
 
 -- The views: the same voxels meshed out of a registry whose materials wear a
@@ -993,7 +995,7 @@ local function close_structure_menu()
 	if structure_menu then
 		uistack.main:pop(structure_menu.root)
 		structure_menu = nil
-		magic.input:SetMouseVisible(false)
+		ui_utils.mouse_look(true)
 	end
 end
 
@@ -1049,11 +1051,15 @@ local function open_structure_menu()
 	end
 	menu:add("< back", close_structure_menu)
 	structure_menu = {root = root, menu = menu}
-	magic.input:SetMouseVisible(true)
+	ui_utils.mouse_look(false)
 end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- The browser's letting go of the pointer: "Click to continue" is up
+	if key == magic.KEY_ESCAPE and ui_utils.mouse_look_escape() then
+		return
+	end
 	-- While the menu is up it has the keyboard, and its own handler is what
 	-- closes it. Without this, escape would disconnect the client from
 	-- inside a menu, which is not what anyone means by escape.
@@ -1114,8 +1120,8 @@ local function find_pointed_voxel(camera_node)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
-	if structure_menu then
-		return -- The menu has the mouse
+	if structure_menu or ui_utils.mouse_look_paused() then
+		return -- The menu has the mouse, or the click is the continue
 	end
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
@@ -1268,8 +1274,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		-- Read whether or not it is used: the delta accumulates either
 		-- way, and a frame that skips it would hand the whole sweep across
 		-- a menu to the frame after it
-		local dmouse = magic.input:GetMouseMove()
-		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
+		local dmouse = {}
+		dmouse.x, dmouse.y = ui_utils.mouse_look_move()
 		if placement then
 			-- Screen right and screen away, under the fixed yaw: moving the
 			-- mouse right has to move the building right on screen, which

@@ -4,6 +4,7 @@
 local log = buildat.Logger("sample_falling_blocks")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
+local ui_utils = require("buildat/extension/ui_utils")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
 
@@ -162,7 +163,8 @@ end)
 
 local function set_free_look(enable)
 	free_look = enable
-	magic.input:SetMouseVisible(not free_look)
+	-- On the web the pointer lock too ([WEB_MOUSE_CAPTURE])
+	ui_utils.mouse_look(free_look)
 end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
@@ -171,6 +173,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		set_free_look(not free_look)
 	elseif key == magic.KEY_R then
 		buildat.send_packet("main:reset", "")
+	elseif key == magic.KEY_ESCAPE and ui_utils.mouse_look_escape() then
+		-- The browser's letting go of the pointer: "Click to continue" is up
 	elseif key == magic.KEY_ESCAPE then
 		if free_look then
 			set_free_look(false)
@@ -187,7 +191,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 		return
 	end
 
-	local dmouse = magic.input:GetMouseMove()
+	local dmouse = {}
+	dmouse.x, dmouse.y = ui_utils.mouse_look_move()
 	yaw = yaw + dmouse.x * MOUSE_SENSITIVITY
 	pitch = pitch + dmouse.y * MOUSE_SENSITIVITY
 	if pitch > 89 then pitch = 89 end

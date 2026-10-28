@@ -1812,6 +1812,148 @@ function M.safe.show_notice(text, copy, color)
 	end
 end
 
+-- **Mouse look** ([WEB_MOUSE_CAPTURE], user, 2026-10-28: demo_aggregate
+-- in Firefox could not look): natively a hidden cursor is all it takes;
+-- a browser turns a view only while it holds the pointer, which Urho3D
+-- asks for with MM_RELATIVE and the browser grants for a click or a key
+-- and lets go of on its own (Escape, a window switch). Then a "Click to
+-- continue" comes up over the game, as skeldat's and builtin/luanti's
+-- pause menus do ([SKELDAT_WEB_LOCK_LOST]): at once for a lock held and
+-- lost, in 0.5 s for one asked for and not given. Its click asks again.
+-- Per app session: the anchor goes with the app's UI when it is left.
+local look = {on = false, paused = false, was = false, t = 0,
+		lost_us = nil, anchor = nil, overlay = nil, sub = nil, on_pause = nil}
+local look_web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil and
+		buildat.get_env("BUILDAT_TOUCH") ~= "1"
+local function drop_overlay()
+	if look.overlay and not gone(look.overlay) then
+		look.overlay:Remove()
+	end
+	look.overlay = nil
+end
+local function look_resume()
+	look.paused, look.was, look.t, look.moved = false, true, 0, false
+	drop_overlay()
+	magic.input:SetMouseVisible(false, "mouse look continued")
+	log:info("mouse look: continued")
+end
+local function look_pause(why)
+	look.paused, look.was, look.t, look.moved = true, false, 0, false
+	look.lost_us = why == "lost" and buildat.get_time_us() or nil
+	log:info("mouse look: paused, the pointer lock " .. why)
+	magic.input:SetMouseVisible(true, "the pointer lock " .. why)
+	-- Absolute until the click, so a leave from here leaves no lock asked
+	magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+	if look.on_pause then
+		-- The app's own pause, which turns the look back on to continue
+		look.on, look.paused = false, false
+		local ok, err = pcall(look.on_pause, why)
+		if not ok then
+			log:error("mouse_look's on_pause: " .. tostring(err))
+		end
+		return
+	end
+	local t = magic.ui.root:CreateChild("Text")
+	t.defaultStyle = magic.cache:GetResource("XMLFile", "own:ui_utils/res/style.xml")
+	t:SetStyleAuto()
+	t:SetFontSize(32)
+	t:SetTextEffect(magic.TE_SHADOW)
+	t:SetAlignment(HA_CENTER, VA_CENTER)
+	t.priority = 1000
+	t.text = "Click to continue"
+	look.overlay = t
+end
+local function look_update(_, d)
+	if look.anchor and gone(look.anchor) then
+		-- The app was left, maybe with the lock held (a leave by the server)
+		if look.on then
+			magic.input:SetMouseMode(magic.MM_ABSOLUTE)
+		end
+		look.on, look.paused, look.anchor, look.overlay = false, false, nil, nil
+		return
+	end
+	if not look.on then
+		return
+	end
+	local held = magic.input:IsMouseLocked()
+	if look.paused then
+		if held then
+			look_resume()
+		end
+	elseif held then
+		look.was, look.t = true, 0
+	else
+		look.t = look.t + d:GetFloat("TimeStep")
+		if look.was or look.t > 0.5 then
+			look_pause(look.was and "lost" or "not given")
+		end
+	end
+end
+-- mouse_look(on[, on_pause]): the mouse turns the view (the cursor hidden;
+-- on the web the pointer lock asked for), or not (the cursor shown).
+-- on_pause(why), if given, is called instead of the "Click to continue"
+-- with the look turned off: the app's pause menu, whose continue is
+-- mouse_look(true, on_pause) again from its click
+function M.safe.mouse_look(on, on_pause)
+	on = on and true or false
+	if on_pause ~= nil and type(on_pause) ~= "function" then
+		error("mouse_look: on_pause is not a function", 2)
+	end
+	look.on_pause = on_pause
+	magic.input:SetMouseVisible(not on, on and "mouse look" or "mouse look off")
+	if not look_web then
+		return
+	end
+	if on and (not look.anchor or gone(look.anchor)) then
+		look.anchor = magic.ui.root:CreateChild("UIElement")
+		look.anchor:SetName("mouse_look_anchor")
+	end
+	if not look.sub then
+		look.sub = magic.SubscribeToEvent("Update", look_update)
+		magic.SubscribeToEvent("MouseButtonDown", function()
+			if look.on and look.paused then
+				magic.input:SetMouseMode(magic.MM_RELATIVE)
+			end
+		end)
+	end
+	drop_overlay()
+	look.on, look.paused, look.was, look.t, look.moved = on, false, false, 0, false
+	magic.input:SetMouseMode(on and magic.MM_RELATIVE or magic.MM_ABSOLUTE)
+end
+-- mouse_look_move() -> dx, dy: GetMouseMove()'s, nought while paused
+function M.safe.mouse_look_move()
+	local m = magic.input:GetMouseMove()
+	if look.paused then
+		return 0, 0
+	end
+	-- Once a look, for a check to wait for
+	if look_web and look.on and not look.moved and (m.x ~= 0 or m.y ~= 0) then
+		look.moved = true
+		log:info("mouse look: turning")
+	end
+	return m.x, m.y
+end
+-- mouse_look_paused() -> whether the "Click to continue" is up: a click
+-- then is its own and not the game's
+function M.safe.mouse_look_paused()
+	return look.paused
+end
+-- mouse_look_escape() -> whether this Escape was the browser's letting go
+-- of the pointer (Urho3D hands the game the Escape the browser kept): the
+-- game's Escape then does nothing, as the pause is up
+function M.safe.mouse_look_escape()
+	if look.on and not look.paused and look.was and
+			not magic.input:IsMouseLocked() then
+		look_pause("lost")
+	end
+	-- An app's own pause opened for it: ignored then too
+	if look.lost_us and buildat.get_time_us() - look.lost_us < 500000 then
+		look.lost_us = nil
+		return true
+	end
+	return false
+end
+
 -- **A way back to the menu** (user, 2026-10-06): a "Menu" button in the
 -- bottom right corner of parent, for a launch UI with no menu of its own
 -- to switch from (the console, the room). It switches to launch_menu;

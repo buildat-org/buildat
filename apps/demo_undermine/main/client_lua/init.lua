@@ -156,7 +156,9 @@ local BUILD_MATERIALS = {
 }
 local build_material = 1
 
-magic.input:SetMouseVisible(false)
+-- The cursor hidden and, on the web, the pointer lock asked for
+-- ([WEB_MOUSE_CAPTURE]); the B menu shows the cursor
+ui_utils.mouse_look(true)
 
 -- Set up zone (global visual parameters)
 do
@@ -596,7 +598,7 @@ local function close_structure_menu()
 	if structure_menu then
 		uistack.main:pop(structure_menu.root)
 		structure_menu = nil
-		magic.input:SetMouseVisible(false)
+		ui_utils.mouse_look(true)
 	end
 end
 
@@ -630,11 +632,15 @@ local function open_structure_menu()
 	end
 	menu:add("< back", close_structure_menu)
 	structure_menu = {root = root, menu = menu}
-	magic.input:SetMouseVisible(true)
+	ui_utils.mouse_look(false)
 end
 
 magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 	local key = event_data:GetInt("Key")
+	-- The browser's letting go of the pointer: "Click to continue" is up
+	if key == magic.KEY_ESCAPE and ui_utils.mouse_look_escape() then
+		return
+	end
 	-- While the menu is up it has the keyboard, and its own handler is what
 	-- closes it. Without this, escape would disconnect the client from
 	-- inside a menu, which is not what anyone means by escape.
@@ -687,8 +693,8 @@ local function find_pointed_voxel(camera_node)
 end
 
 magic.SubscribeToEvent("MouseButtonDown", function(event_type, event_data)
-	if structure_menu then
-		return -- The menu has the mouse
+	if structure_menu or ui_utils.mouse_look_paused() then
+		return -- The menu has the mouse, or the click is the continue
 	end
 	local button = event_data:GetInt("Button")
 	log:info("MouseButtonDown: "..button)
@@ -788,8 +794,8 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 			player_node.position = magic.Vector3(0, 500, 0)
 		end
 
-		local dmouse = magic.input:GetMouseMove()
-		--log:info("dmouse: ("..dmouse.x..", "..dmouse.y..")")
+		local dmouse = {}
+		dmouse.x, dmouse.y = ui_utils.mouse_look_move()
 		camera_node:Pitch(dmouse.y * 0.1)
 		player_node:Yaw(dmouse.x * 0.1)
 		--[[log:info("y="..player_node:GetRotation():YawAngle())

@@ -1598,6 +1598,29 @@ close_glyph(parent, window [, on_close])
 copy(text)
 - text on the OS clipboard, on the user's own key or click (the system's
   clipboard turned on, as SetClipboardText alone does not).
+
+Mouse look ([WEB_MOUSE_CAPTURE]). Natively a hidden cursor is enough. On
+the web the browser owns the pointer lock: it is asked for with
+input:SetMouseMode(MM_RELATIVE) (and let go with any other mode), granted
+only for a click or a key, and taken away by the browser itself (Escape,
+a window switch), after which Urho3D hands the game an Escape. A game
+that looks with the mouse then has to show something whose click asks for
+the lock again, and ignore that Escape. These do all of it; a game may
+also do it itself (skeldat, builtin/luanti):
+mouse_look(on[, on_pause])
+- on: the cursor hidden, on the web MM_RELATIVE; off: the cursor shown,
+  MM_ABSOLUTE. On the web a lock lost, or asked for and not given in
+  0.5 s, puts "Click to continue" over the game; its click asks again.
+  With on_pause(why) ("lost" or "not given") that is called instead, with
+  the look turned off: the game's own pause menu, whose continue calls
+  mouse_look(true, on_pause) from its click. No touchscreen lock.
+mouse_look_move() -> dx, dy
+- input:GetMouseMove(), 0, 0 while "Click to continue" is up.
+mouse_look_paused() -> bool
+- Whether "Click to continue" is up: a click then is not the game's.
+mouse_look_escape() -> bool
+- Asked on Escape: true when it is the one of a lock just lost, which the
+  game ignores.
 show_notification(text, duration_s)
 - A small non-modal notice in the top right corner, gone after duration_s
   (2 seconds by default)
@@ -3071,7 +3094,7 @@ extension.blip: pack, params, play, play_cached, preset, self_check, sound, stre
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----
 
 
