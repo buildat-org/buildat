@@ -3412,11 +3412,11 @@ CHECK_PIDS+=($SERVER_PID)
 client torchlight "$t/torchlight.cmds"
 wait $CLIENT || fail "the torchlight's drive ($t/torchlight.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "the skeleton (1) is in a torch's light" "$log66" &&
+grep -aq "the skeleton (1) is in a lamp light of" "$log66" &&
 	grep -aq "the skeleton (1) dies" "$log66" &&
-	! grep -aq "the skeleton (2) burns\|the skeleton (2) is in a torch" "$log66" ||
-	fail "the torchlight: $(grep -a "torch's light\|dies\|(2) burns" "$log66" | sed 's/.*skeldat: //' | tr '\n' ';') ($log66)"
-torchlight=$(grep -a "the skeleton (1) is in a torch's light" "$log66" | head -1 | sed 's/.*light, //')
+	! grep -aq "the skeleton (2) burns\|the skeleton (2) is in a lamp" "$log66" ||
+	fail "the torchlight: $(grep -a "lamp light\|dies\|(2) burns" "$log66" | sed 's/.*skeldat: //' | tr '\n' ';') ($log66)"
+torchlight=$(grep -a "the skeleton (1) is in a lamp light of" "$log66" | head -1 | sed 's/.*light of //')
 # The summary of a full run
 shotlight=$(grep -a "skeletons, [0-9]* full" "$t/srv52_sealed.log" | tail -1 | sed 's/.*skeldat: //')
 echo "a clear shot, sealed with 30: $shotlight"

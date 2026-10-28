@@ -250,6 +250,24 @@ static const int LANTERN_RADIUS = 8, LANTERN_RETRACT = 3,
 static const float LANTERN_HOURS = 4;
 // A burning lantern lures skeletons as LANTERN_LURE marker skulls do
 static const int LANTERN_LURE = 5;
+// [SKELDAT_MORE_FUN] **More fun: faster bones, more ways to hold them**
+// (user, 2026-10-27). Each knob a pick, measured free-running where it
+// can be (check.sh 25's way):
+// - The pace: bones.h's PACE 3, the rule's runs in an expansion at 1x. A
+//   128 world with no one in it ends in 11.4 days (seeds 2-5), not 27.2;
+//   the speed modes multiply it. The high scores' sets are of a rules
+//   version (scores.h's SCORE_RULES), the old ones not listed.
+// - The Bone Crown (the user's): a lantern worn, its coal from the
+//   wearer's inventory; the skeletons go for its wearer first and snatch
+//   it. CROWN_HOURS, CROWN_SIGHT and CROWN_REACH below.
+// - Fire arrows: a lantern's work at a distance, once, for a coal.
+//   FIRE_RADIUS below.
+// - Torchlight burns skeletons as daylight does: a ring of torches round
+//   a lantern or a camp, against the snatching and the night's blocks.
+//   TORCH_BURN below.
+// Left out: a bucket of water for moats (water holds no bones, and a
+// skeleton dies in it, but a bucket's water spreads thin and evaporates
+// under the hazards' rules: a moat would be dozens of buckets).
 // [SKELDAT_MORE_FUN] **The crown**, the lantern carried: worn and burning
 // it is a lantern's sphere round its wearer (LANTERN_RADIUS, the same
 // retract and decay) and lures as one at sunrise and sunset. Its coal

@@ -999,14 +999,20 @@ struct Mobs
 				// The sun burns a skeleton of either kind unless bones are
 				// round it, water kills it
 				// [SKELDAT_MORE_FUN] And a torch's light as the sun's: its
-				// feet's or head's voxel at TORCH_BURN lamp light or more
+				// feet's or head's voxel at TORCH_BURN lamp light or more;
+				// in lava not (the lava's own burn, in_lava())
 				auto burns = [&](float x, float y, float z){
 					int lamp = 0;
 					for(int dy = 0; dy < 2; dy++){
+						const int vx = (int)std::floor(x + 0.5f),
+								vy = (int)std::floor(y + 0.5f) + dy,
+								vz = (int)std::floor(z + 0.5f);
+						if(world.wid(w, vx, vy, vz) == world.id_of("skeldat:lava")){
+							lamp = 0;
+							break;
+						}
 						int sky = 0, l = 0;
-						world.light(w, (int)std::floor(x + 0.5f),
-								(int)std::floor(y + 0.5f) + dy,
-								(int)std::floor(z + 0.5f), sky, l);
+						world.light(w, vx, vy, vz, sky, l);
 						lamp = std::max(lamp, l);
 					}
 					if(here.sun >= 12 || lamp >= TORCH_BURN){
@@ -1017,7 +1023,7 @@ struct Mobs
 								burnt.push_back({key, 2});
 								if(here.sun < 12)
 									log_i(MODULE, "skeldat: the %s (%u) is in a "
-											"torch's light, %d", MOB_KIND[m.kind], key,
+											"lamp light of %d", MOB_KIND[m.kind], key,
 											lamp);
 							}
 						}
