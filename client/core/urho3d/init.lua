@@ -272,9 +272,7 @@ local object_callback_names = setmetatable({}, {__mode = "k"})
 -- ([SAFE_UNSUB_FOREIGN]): Urho3D keeps one handler per sender and event,
 -- so a subscription on an element replaces the one before it. The
 -- unsafe object -> {event_type = true} for each one the client's code
--- holds; Safe.SubscribeToEvent on one is refused, whoever asks (who
--- asks is read from the caller's frame, which a pcall or a tail call
--- hides).
+-- holds; a subscription on one is refused, whoever asks.
 local object_events_trusted = setmetatable({}, {__mode = "k"})
 local function mark_trusted_object_event(unsafe_object, event_type)
 	local t = object_events_trusted[unsafe_object]
@@ -286,8 +284,8 @@ local function mark_trusted_object_event(unsafe_object, event_type)
 end
 local next_sandbox_global_function_i = 1
 local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
--- Set around add_global_event_handler() by a subscription made from the
--- sandbox; see caller_in_sandbox()
+-- Set around add_global_event_handler() by a subscription made through
+-- the sandbox's table (subscribe())
 local from_sandbox = false
 -- **Which extension subscribed**, taken from its chunk name, so that
 -- leaving a game can drop the game's handlers without dropping the
@@ -425,14 +423,15 @@ function __buildat_apply_client_keys(names)
 end
 __buildat_apply_client_keys(__buildat_client_key_names())
 
-function Safe.SubscribeToEvent(x, y, z)
-	log:debug("Safe.SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
-	-- Whether the subscriber is sandboxed game code: its environment's
-	-- buildat says so ([MENU_CONTEXT] drops those handlers on leaving)
-	local caller_env = getfenv(2)
-	local subscriber_in_sandbox = type(caller_env) == "table" and
-			type(caller_env.buildat) == "table" and
-			caller_env.buildat.is_in_sandbox == true
+-- **Whose subscription it is comes from which table was called**
+-- ([SAFE_CALLER_FRAME]), not from the caller's frame: the client's code
+-- calls Safe's, the sandbox is handed its own (M.sandboxed, M.served
+-- below), whose subscriptions are always the sandbox's -- dropped on
+-- leaving ([MENU_CONTEXT]), a script's to unsubscribe, deaf to the keys
+-- of a secret field. A frame read was fooled by a pcall or a tail call.
+-- `caller_env` resolves a callback given by name, and nothing else.
+local function subscribe(in_sandbox, owner, caller_env, x, y, z)
+	log:debug("SubscribeToEvent("..dump(x)..", "..dump(y)..", "..dump(z)..")")
 	local object = x
 	local sub_event_type = y
 	local callback = z
@@ -455,11 +454,15 @@ function Safe.SubscribeToEvent(x, y, z)
 		error("Event type is not whitelisted: "..dump(sub_event_type))
 	end
 	if type(callback) == 'string' then
-		-- Allow supplying callback function name like Urho3D does by default
-		local caller_environment = getfenv(2)
-		callback = caller_environment[callback]
+		-- Allow supplying callback function name like Urho3D does by
+		-- default; from the sandbox, a name in the sandbox's environment
+		-- only (through a pcall the frame read is the client's)
+		local name = callback
+		callback = type(caller_env) == "table" and
+				not (in_sandbox and caller_env == _G) and
+				caller_env[name] or nil
 		if type(callback) ~= 'function' then
-			error("SubscribeToEvent(): '"..callback..
+			error("SubscribeToEvent(): '"..name..
 					"' is not a global function in current sandbox environment")
 		end
 	else
@@ -470,8 +473,10 @@ function Safe.SubscribeToEvent(x, y, z)
 	local global_callback_name = "__buildat_sandbox_callback_"..global_function_i
 	sandbox_callback_to_global_function_name[callback] = global_callback_name
 	-- A script's own function, as against the client's: what a sandbox
-	-- makes runs in a sandbox environment, never in this one
-	local callback_is_sandboxed = getfenv(callback) ~= _G
+	-- makes runs in a sandbox environment, never in this one. The
+	-- client's code subscribes a script's callback too (uistack's
+	-- SubscribeToStackEvent).
+	local callback_is_sandboxed = in_sandbox or getfenv(callback) ~= _G
 	-- The delivery is made once and run per event ([SANDBOX_CALLS]); the
 	-- event reaches it through these two, which it reads before it calls
 	-- the callback, so an event the callback causes cannot change them
@@ -593,17 +598,25 @@ function Safe.SubscribeToEvent(x, y, z)
 		end
 		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 		_G[global_callback_name] = nil
-		if not subscriber_in_sandbox then
+		if not in_sandbox then
 			mark_trusted_object_event(unsafe_object, sub_event_type)
 		end
 	else
-		from_sandbox = subscriber_in_sandbox
-		from_sandbox_owner = subscriber_in_sandbox and sandbox_owner() or nil
+		from_sandbox, from_sandbox_owner = in_sandbox, owner
 		add_global_event_handler(sub_event_type, global_callback_name, deliver)
 		from_sandbox, from_sandbox_owner = false, nil
 	end
 	log:debug("-> global_callback_name="..dump(global_callback_name))
 	return global_callback_name
+end
+-- The callback's name, if it was given one, is looked up in the caller's
+-- environment
+local function named(y, z)
+	return type(z == nil and y or z) == "string"
+end
+-- The client's own
+function Safe.SubscribeToEvent(x, y, z)
+	return subscribe(false, nil, named(y, z) and getfenv(2), x, y, z)
 end
 
 -- **What is subscribed by name unsubscribes by the same name.**
@@ -1175,6 +1188,23 @@ M.trust_code_text = trust_code_text
 M.drop_sandbox_handlers = drop_sandbox_handlers
 M.drop_handlers_of = drop_handlers_of
 M.safe = Safe
+-- **The sandbox's tables** ([SAFE_CALLER_FRAME]): Safe's, but a
+-- subscription is the sandbox's. An extension's carries the extension's
+-- name, read from its chunk (sandbox_owner(); the loader names those);
+-- a server's carries none, since a server names its own chunks, and
+-- one named like the launch UI was kept past leaving. sandbox.lua's
+-- require hands out these.
+M.sandboxed, M.served = {}, {}
+for k, v in pairs(Safe) do
+	M.sandboxed[k], M.served[k] = v, v
+end
+function M.sandboxed.SubscribeToEvent(x, y, z)
+	return subscribe(true, sandbox_owner(), named(y, z) and getfenv(2),
+			x, y, z)
+end
+function M.served.SubscribeToEvent(x, y, z)
+	return subscribe(true, nil, named(y, z) and getfenv(2), x, y, z)
+end
 M.unsafe = Unsafe
 
 return M

@@ -92,12 +92,6 @@ function M.UIStack(root)
 			error("self is not an instance of UIStack")
 		end
 
-		-- The caller's: on the web's Lua 5.1 the sandbox's method wrapper
-		-- (sandbox.lua, shown()) tail-calls this, so level 2 is a "tail
-		-- call" with no environment and the caller is one further out
-		local level = debug.getinfo(2, "S").what == "tail" and 3 or 2
-		local is_in_sandbox = getfenv(level).buildat.is_in_sandbox
-
 		if type(options) == "string" then options = {desc = options} end
 		options = options or {}
 		-- **An entry whose element has gone is dropped** ([LEAVE_POP]):

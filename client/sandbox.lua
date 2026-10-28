@@ -209,7 +209,9 @@ __buildat_sandbox_environment.require = function(name)
 		if type(unsafe) ~= 'table' or type(unsafe.safe) ~= 'table' then
 			error("require: \""..name.."\" didn't return safe interface")
 		end
-		return view(unsafe.safe)
+		-- One whose .safe the client's own code calls as well may hand
+		-- the sandbox a table of its own ([SAFE_CALLER_FRAME]: urho3d's)
+		return view(unsafe.sandboxed or unsafe.safe)
 	end
 	-- Allow loading the client-side parts of modules
 	local m = string.match(name, '^buildat/module/([a-zA-Z0-9_]+)$')
@@ -308,8 +310,15 @@ end
 -- Running code in sandbox
 --
 
+-- The environments made here, which are a script's ([SAFE_CALLER_FRAME]:
+-- buildat.eval runs code only in one of these). Trusted only.
+local sandbox_envs = setmetatable({}, {__mode = "k"})
+function __buildat_is_sandbox_env(env)
+	return sandbox_envs[env] == true
+end
 local function wrap_globals(base_sandbox)
 	local sandbox = {}
+	sandbox_envs[sandbox] = true
 	local sandbox_declared_globals = {}
 	-- Sandbox special functions
 	sandbox.sandbox = {}
@@ -552,7 +561,13 @@ do
 	local network_for_servers
 	served_globals.require = function(name)
 		local m = real_require(name)
-		if __buildat_extension_of(name) ~= "network" then
+		local ext = __buildat_extension_of(name)
+		-- And a server's own, where the extension has one (urho3d's)
+		local i = ext and __buildat_loaded_extension(ext)
+		if type(i) == "table" and type(i.served) == "table" then
+			return view(i.served)
+		end
+		if ext ~= "network" then
 			return m
 		end
 		if not network_for_servers then

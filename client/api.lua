@@ -1029,8 +1029,10 @@ local function from_served()
 end
 -- set_running_game({leave =, claim = {name =, address =}, game =}) or
 -- nil. leave is taken only from the client's own extensions, never from
--- a server's code; game is a Luanti game id.
-buildat.safe.set_running_game = function(t)
+-- a server's code; game is a Luanti game id. Which it is comes from
+-- which buildat was called, the served one's below ([SAFE_CALLER_FRAME]:
+-- the caller's frame was a pcall's)
+local function set_running_game(t, served)
 	if t == nil then
 		running_game = nil
 		return true
@@ -1042,9 +1044,9 @@ buildat.safe.set_running_game = function(t)
 			#t.game <= 64 and t.game or nil
 	local claim = type(t.claim) == "table" and {name = t.claim.name,
 			address = t.claim.address} or nil
-	local leave = type(t.leave) == "function" and not from_served() and
+	local leave = type(t.leave) == "function" and not served and
 			t.leave or nil
-	if from_served() then
+	if served then
 		-- A server's code names its game, and nothing else
 		running_game = running_game or {}
 		running_game.game = g
@@ -1052,6 +1054,12 @@ buildat.safe.set_running_game = function(t)
 		running_game = {leave = leave, claim = claim, game = g}
 	end
 	return true
+end
+buildat.safe.set_running_game = function(t)
+	return set_running_game(t, false)
+end
+__buildat_served_overrides.set_running_game = function(t)
+	return set_running_game(t, true)
 end
 -- A Luanti game by its id: its title from game.conf, and where it came
 -- from by the file its installer left beside it (vanilla's ContentDB
@@ -1309,6 +1317,13 @@ buildat.safe.eval = function(code, chunkname)
 	-- asked for is only what an error message says.
 	local info = debug.getinfo(2, "S")
 	local own = info and info.source or "=eval"
+	-- **And its environment a script's** ([SAFE_CALLER_FRAME]): through
+	-- a pcall, or any C function calling this, the frame read is the
+	-- client's own globals
+	local env = getfenv(2)
+	if not __buildat_is_sandbox_env(env) then
+		return false, "eval: called from outside a script's own code"
+	end
 	local f, err = loadstring(code, own)
 	local function shown(e)
 		if type(chunkname) ~= "string" or type(e) ~= "string" then
@@ -1323,7 +1338,7 @@ buildat.safe.eval = function(code, chunkname)
 	if not f then
 		return false, shown(err)
 	end
-	setfenv(f, getfenv(2))
+	setfenv(f, env)
 	local r = {pcall(f)}
 	local ok = table.remove(r, 1)
 	if not ok then
