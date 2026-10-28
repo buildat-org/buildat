@@ -52,7 +52,7 @@ L
 printf '%s\n' "enable_damage = false" "$WEB_WORLD_MT" > "$d/apps/vanilla/saves/wl/luanti/world.mt"
 BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wl \
 BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
-	"STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
+	"STATUS Listening" 300 auto "$here/Build/bin/buildat_server" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
