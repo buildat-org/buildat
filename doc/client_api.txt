@@ -66,7 +66,8 @@ buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform}
   mesh_threads: the threads the meshes are made on; 0 on a web page that
   is not cross-origin isolated, which meshes on the frame's own thread a
   slice a frame. isolated: the web page is cross-origin isolated (true
-  natively). touch: the pointer is a finger. platform: "linux",
+  natively; on the web by default, not with ?isolated=0, in another
+  site's frame or in a browser without it). touch: the pointer is a finger. platform: "linux",
   "windows", "macos", "android", "ios", "other", or on the web "web",
   "web_ios" or "web_android". builtin/voxelworld scales its defaults with
   it; an app's meta.json may state its least needs ("needs",

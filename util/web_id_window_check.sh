@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
-# cost: 120s (2026-10-04)
-# covers: apps/starport/main/main.cpp client/core/starport/init.lua builtin/starport_announce/** src/client/app.cpp
+# cost: 90s (2026-10-28)
+# covers: apps/starport/main/main.cpp apps/starport/main/id_page.h util/web_id_callback.json util/web_id_cancel.json client/core/starport/init.lua builtin/starport_announce/** src/client/app.cpp
 # [WEB_ID_TRUST] (a): a web client signs in with a Starport ID in the
 # Starport's own window. A Starport, Hearth listed on it with IDs on and
 # serving the web client, and an ID made by the API; headless Firefox
@@ -19,6 +19,16 @@
 # the reason shown, another name picked in the Starport's window; and
 # another such ID's "That's my account" with the account's password,
 # which joins as the account and links the ID ([ID_CLAIM_ACCOUNT]).
+# [WEB_ISOLATED_SIGNIN] The play page is cross-origin isolated by default,
+# so the Firefox drives above sign in by the callback: the window, with no
+# opener, goes on to Hearth's /starport_signin with a code, which the page
+# takes the token by. By the API: a code is taken once, only by a page of
+# its origin; /starport_signin's headers. Then both ways (the default
+# page and ?isolated=0, whose window answers its opener) in headless
+# Chrome and, where Playwright's is installed, WebKit; each also sends the
+# page a sign-in answer with a wrong state, and the right one again after
+# the join, both ignored; and the window's Cancel back on the isolated
+# page.
 # Needs web/ from util/build_web.sh.
 #   util/web_id_window_check.sh [steps.json [rename_steps.json [claim_steps.json]]]
 set -u
@@ -122,7 +132,32 @@ r = call("password", session=t, old="secret1", new="secret2",
         totp=code(sec, now + 1))
 assert r["ok"], r
 print("ok: sessions, logging out the others, and TOTP over a change")
+# [WEB_ISOLATED_SIGNIN] The handoff: a code, not the token, for the
+# window to send on; taken once, by a page of the token's origin only
+c = call("register", name="webcb", password="secret1",
+        birth_year=time.gmtime().tm_year - 40)["result"]["session"]
+assert call("token", session=c, listing=sys.argv[2], name="cbname")["ok"]
+r = call("token", session=c, listing=sys.argv[2], web=True, handoff=True)
+assert r["ok"] and "token" not in r["result"], r
+assert r["result"]["origin"] == own and len(r["result"]["code"]) == 32, r
+code = r["result"]["code"]
+r = call("redeem", code=code)
+assert not r["ok"] and "no such sign-in" in r["error"], r
+r = from_page("https://evil.example", "redeem", code=code)
+assert not r["ok"] and "no such sign-in" in r["error"], r
+r = from_page(own, "redeem", code=code)
+assert r["ok"] and r["result"]["name"] == "cbname" and \
+        r["result"]["token"].count(".") == 1, r
+r = from_page(own, "redeem", code=code)
+assert not r["ok"] and "no such sign-in" in r["error"], r
+print("ok: a handed-off token is taken once, by its origin's page only")
 PY
+curl -s -D - -o /dev/null "localhost:$AN/starport_signin" | tr -d '\r' > "$tmp/cbh"
+for h in "Cross-Origin-Opener-Policy: same-origin" \
+		"Cross-Origin-Embedder-Policy: require-corp" "X-Frame-Options: DENY" \
+		"Referrer-Policy: no-referrer" "Content-Security-Policy: default-src 'none'; script-src 'sha256-"; do
+	grep -qiF "$h" "$tmp/cbh" || fail "/starport_signin has no $h ($tmp/cbh)"
+done
 
 # The first admin, natively, so the web join is an ID's ordinary one
 setup=$(grep -ao "setup code [A-Z0-9]*" "$tmp/h.log" | tail -1 | cut -d' ' -f3)
@@ -132,6 +167,31 @@ BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=adminpass1 \
 	Build/bin/buildat -o launch_ui=launch_menu -D "$tmp/cl" -w 800x600 -l 3 -s 127.0.0.1:$AN \
 	-c @"$tmp/cmds.txt" > "$tmp/admin.log" 2>&1
 grep -v "command: \|wait_log" "$tmp/admin.log" | grep -q "Joined as admin" || fail "the admin's join ($tmp/admin.log)"
+
+# Both ways in Chrome and WebKit: the default page (isolated, the
+# callback) and ?isolated=0 (the opener)
+browsers="chrome"
+[ -d "${PLAYWRIGHT_NODE:-$HOME/.local/share/playwright-node}/node_modules/playwright" ] &&
+	browsers="$browsers webkit"
+for b in $browsers; do
+	for q in "" "?isolated=0"; do
+		d="$tmp/cb_${b}${q:+_opener}"
+		WEB_DRIVE_URL="http://127.0.0.1:$AN/index.html$q" "$here/util/web_drive.sh" "$b" \
+			hearth "$here/util/web_id_callback.json" "$d" > "$d.txt" 2>&1 ||
+			fail "$b, /index.html$q ($d.txt, $d)"
+		want=true
+		[ -n "$q" ] && want=false
+		grep -q "eval: \"isolated $want\"" "$d.txt" ||
+			fail "$b, /index.html$q: not isolated $want ($d.txt)"
+		echo "ok: $b, /index.html$q (isolated $want) signs in, the window closes itself; a wrong state and a replay are ignored"
+	done
+	# Cancel in the window: the isolated page is told, and shows its
+	# login again
+	WEB_DRIVE_URL="http://127.0.0.1:$AN/index.html" "$here/util/web_drive.sh" "$b" \
+		hearth "$here/util/web_id_cancel.json" "$tmp/cancel_$b" > "$tmp/cancel_$b.txt" 2>&1 ||
+		fail "$b, Cancel ($tmp/cancel_$b.txt, $tmp/cancel_$b)"
+	echo "ok: $b, Cancel in the window comes back to the isolated page"
+done
 
 # simplified: the drives wait for the login page, then go by time between
 # clicks: the Starport's window and its steps log nothing on the page
@@ -183,4 +243,4 @@ grep -aq "Joined as admin" "$tmp/drive3/page.log" ||
 	fail "\"That's my account\" did not join ($tmp/drive3/page.log)"
 grep -q "admin linked a Starport ID of 127.0.0.1" "$tmp/h.log" ||
 	fail "the ID not linked ($tmp/h.log)"
-echo "PASS: a web client signs in by the Starport's window, by another name where its own is taken, and by \"That's my account\" with the account's password"
+echo "PASS: a web client signs in by the Starport's window, by another name where its own is taken, and by \"That's my account\" with the account's password; by the callback where the page is isolated and by the opener where not, the window closing itself, in: $browsers"

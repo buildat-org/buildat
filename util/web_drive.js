@@ -39,9 +39,14 @@
 //                           (Chrome: a finger only)
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
+//   ["until", js, s]        the expression again every 200 ms until it is
+//                           true, at most s seconds (default 20); one that
+//                           throws (a page between loads) counts as false
 //   ["window", n]           the steps after go to the nth top-level window
-//                           (0 the first; one a page opened is 1), Firefox
-//                           only
+//                           (0 the first; one a page opened is 1), waited
+//                           for up to 20 s
+//   ["windows", n]          until there are n top-level windows (one a page
+//                           opened has closed itself), at most 20 s
 //   ["file", path]          the file the browser's picker gives the next
 //                           time the page opens it ([HEARTH_USABILITY]),
 //                           Chrome only
@@ -238,12 +243,31 @@ async function firefox() {
 			const r = await c.send("browsingContext.captureScreenshot", {context: ctx});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
 		},
-		window: async n => { ctx = await top(n); },
-		eval: async js => {
+		count: async () => (await c.send("browsingContext.getTree",
+				{maxDepth: 0})).contexts.length,
+		window: async n => {
+			const until = Date.now() + 20000;
+			for (;;) {
+				const t = (await c.send("browsingContext.getTree",
+						{maxDepth: 0})).contexts[n];
+				if (t) {
+					ctx = t.context;
+					return;
+				}
+				if (Date.now() > until)
+					throw new Error("no window " + n);
+				await new Promise(r => setTimeout(r, 200));
+			}
+		},
+		value: async js => {
 			const r = await c.send("script.evaluate", {expression: js,
 					target: {context: ctx}, awaitPromise: true});
-			console.log("eval:", JSON.stringify(r.result && r.result.value));
+			if (r.type === "exception")
+				throw new Error(r.exceptionDetails.text);
+			return r.result && r.result.value;
 		},
+		eval: js => ops.value(js).then(v => console.log("eval:", JSON.stringify(v)),
+				e => console.log("eval: threw", e.message)),
 	};
 	return {ops, end: async () => {
 		await c.send("session.end", {});
@@ -252,19 +276,31 @@ async function firefox() {
 }
 
 async function chrome() {
-	const list = await (await fetch(`http://127.0.0.1:${args.port}/json/list`)).json();
-	const page = list.find(t => t.type === "page");
-	const c = await connect(page.webSocketDebuggerUrl);
-	c.on(d => {
-		if (d.method === "Runtime.consoleAPICalled")
-			logLine(d.params.args.map(a => a.value !== undefined ? a.value :
-					a.description).join(" "));
-		else if (d.method === "Log.entryAdded")
-			logLine("[" + d.params.entry.source + "] " + d.params.entry.text);
-	});
-	await c.send("Runtime.enable");
-	await c.send("Log.enable");
-	await c.send("Page.enable");
+	const pages = async () => (await (await fetch(
+			`http://127.0.0.1:${args.port}/json/list`)).json())
+			.filter(t => t.type === "page");
+	const page = (await pages())[0];
+	// A connection to each window the steps went to, each one's console
+	// in the log
+	const conns = {};
+	const attach = async t => {
+		const x = await connect(t.webSocketDebuggerUrl);
+		x.on(d => {
+			if (d.method === "Runtime.consoleAPICalled")
+				logLine(d.params.args.map(a => a.value !== undefined ? a.value :
+						a.description).join(" "));
+			else if (d.method === "Log.entryAdded")
+				logLine("[" + d.params.entry.source + "] " + d.params.entry.text);
+			else if (d.method === "Page.loadEventFired" && loaded)
+				loaded();
+		});
+		await x.send("Runtime.enable");
+		await x.send("Log.enable");
+		await x.send("Page.enable");
+		return conns[t.id] = x;
+	};
+	let loaded = null;
+	let c = await attach(page);
 	// WEB_DRIVE_VIEWPORT as for Firefox, the screen that size too; TOUCH=1
 	// a phone's: touch events and (pointer: coarse)
 	const vp = (process.env.WEB_DRIVE_VIEWPORT || "1200x800")
@@ -320,12 +356,23 @@ async function chrome() {
 			await c.send("Input.dispatchKeyEvent", {type: "keyUp", key: MODKEYS[m][0],
 					code: MODKEYS[m][1], windowsVirtualKeyCode: MODKEYS[m][2], modifiers: 0});
 	};
-	let loaded = null;
-	c.on(d => {
-		if (d.method === "Page.loadEventFired" && loaded)
-			loaded();
-	});
 	const ops = {
+		count: async () => (await pages()).length,
+		// The first window, or the nth of the others in the browser's list
+		window: async n => {
+			const until = Date.now() + 20000;
+			for (;;) {
+				const t = n === 0 ? page :
+						(await pages()).filter(p => p.id !== page.id)[n - 1];
+				if (t) {
+					c = conns[t.id] || await attach(t);
+					return;
+				}
+				if (Date.now() > until)
+					throw new Error("no window " + n);
+				await new Promise(r => setTimeout(r, 200));
+			}
+		},
 		nav: async u => {
 			const done = new Promise(r => loaded = r);
 			await c.send("Page.navigate", {url: u});
@@ -434,11 +481,15 @@ async function chrome() {
 			const r = await c.send("Page.captureScreenshot", {format: "png"});
 			fs.writeFileSync(p, Buffer.from(r.data, "base64"));
 		},
-		eval: async js => {
+		value: async js => {
 			const r = await c.send("Runtime.evaluate", {expression: js,
 					awaitPromise: true, returnByValue: true});
-			console.log("eval:", JSON.stringify(r.result && r.result.value));
+			if (r.exceptionDetails)
+				throw new Error(r.exceptionDetails.text);
+			return r.result && r.result.value;
 		},
+		eval: js => ops.value(js).then(v => console.log("eval:", JSON.stringify(v)),
+				e => console.log("eval: threw", e.message)),
 	};
 	return {ops, end: async () => c.ws.close()};
 }
@@ -455,11 +506,15 @@ async function webkit() {
 	if (!vp)
 		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
 	const touch = process.env.TOUCH === "1";
-	const page = await browser.newPage({viewport: {width: +vp[1],
+	const context = await browser.newContext({viewport: {width: +vp[1],
 			height: +vp[2]}, deviceScaleFactor: +(vp[3] || 1), hasTouch: touch,
 			isMobile: touch});
-	page.on("console", m => logLine(m.text()));
-	page.on("pageerror", e => logLine("[pageerror] " + e.message));
+	// Each window's console in the log, a popup's too
+	context.on("page", p => {
+		p.on("console", m => logLine(m.text()));
+		p.on("pageerror", e => logLine("[pageerror] " + e.message));
+	});
+	let page = await context.newPage();
 	const name = k => KEYS[k] ? (k === "Space" ? " " : KEYS[k][1]) : k;
 	const ops = {
 		nav: u => page.goto(u, {waitUntil: "load"}),
@@ -482,9 +537,18 @@ async function webkit() {
 		wheel: (x, y, dy) => page.mouse.wheel(0, dy),
 		tap: (x, y) => page.touchscreen.tap(x, y),
 		shot: p => page.screenshot({path: p}),
-		eval: async js => {
-			const v = await page.evaluate(js);
-			console.log("eval:", JSON.stringify(v));
+		value: js => page.evaluate(js),
+		eval: js => ops.value(js).then(v => console.log("eval:", JSON.stringify(v)),
+				e => console.log("eval: threw", e.message)),
+		count: async () => context.pages().length,
+		window: async n => {
+			const until = Date.now() + 20000;
+			while (!context.pages()[n]) {
+				if (Date.now() > until)
+					throw new Error("no window " + n);
+				await new Promise(r => setTimeout(r, 200));
+			}
+			page = context.pages()[n];
 		},
 	};
 	return {ops, end: () => browser.close()};
@@ -555,6 +619,20 @@ async function webkit() {
 				}
 				if (over)
 					throw new Error(`${over} stretches over ${still} ms with nothing changed`);
+			} else if (op === "until") {
+				const until = Date.now() + (c || 20) * 1000;
+				while (!await b.ops.value(a).catch(() => false)) {
+					if (Date.now() > until)
+						throw new Error("never true: " + a);
+					await new Promise(r => setTimeout(r, 200));
+				}
+			} else if (op === "windows") {
+				const until = Date.now() + 20000;
+				while (await b.ops.count() !== a) {
+					if (Date.now() > until)
+						throw new Error((await b.ops.count()) + " windows, not " + a);
+					await new Promise(r => setTimeout(r, 200));
+				}
 			} else if (op === "nav") {
 				await b.ops.nav(full_rate(args[0]));
 			} else if (b.ops[op]) {

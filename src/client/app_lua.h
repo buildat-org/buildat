@@ -2657,38 +2657,111 @@
 		return 0;
 	}
 
-	// [WEB_ID_TRUST] web_authorize(url) -> whether a window opened (the
+	// [WEB_ID_TRUST] web_authorize(url[, again]) -> whether a window opened (the
 	// browser blocks one not right after a click): a Starport's /authorize
 	// page, which posts a token back to this page. web_authorized() -> the
 	// message as JSON once that page has sent it, from that page's origin
 	// only; nil until then. Trusted Lua's (the starport extension); nothing
 	// natively.
+	// [WEB_ISOLATED_SIGNIN] A cross-origin isolated page's window has no
+	// opener: it comes back by this origin's /starport_signin, which tells
+	// this page {state, code} or {state, error} by BroadcastChannel (or a
+	// storage event). Each attempt has a state of its own, a random one;
+	// only a message with the current one is taken, once, and the token
+	// then fetched from the Starport by the code. Either way an answer
+	// is taken only while an attempt waits, and ends it. again: the same
+	// attempt's window opened again (its Open pressed), the state kept --
+	// an isolated page cannot reach the window it opened before, and the
+	// user may go on in either
 	static int l_web_authorize(lua_State *L)
 	{
 #ifdef __EMSCRIPTEN__
 		const char *url = luaL_checkstring(L, 1);
+		const int again = lua_toboolean(L, 2);
 		int ok = EM_ASM_INT({
 			// The page's own origin, so a page with no game of its own
 			// (play.buildat.org, the Starport's web_clients) is told apart
 			// After a "?" of its own, or one put there: the plain /id page
 			// came as "/id&origin=", which the Starport has no call for
 			var url = UTF8ToString($0);
+			var state = $1 && Module['buildatAuthState'];
+			if(!state){
+				var b = new Uint8Array(16);
+				crypto.getRandomValues(b);
+				state = Array.prototype.map.call(b, function(x){
+					return (x + 256).toString(16).slice(1); }).join('');
+				Module['buildatAuthAttempt'] =
+						(Module['buildatAuthAttempt'] || 0) + 1;
+			}
 			url += (url.indexOf('?') < 0 ? '?' : '&') + 'origin=' +
-					encodeURIComponent(location.origin);
+					encodeURIComponent(location.origin) + '&state=' + state;
 			Module['buildatAuthMsg'] = null;
 			Module['buildatAuthOrigin'] = new URL(url).origin;
+			Module['buildatAuthState'] = state;
 			if(!Module['buildatAuthListen']){
 				Module['buildatAuthListen'] = true;
+				var answer = function(m){
+					Module['buildatAuthState'] = null;
+					Module['buildatAuthMsg'] = JSON.stringify(m);
+				};
 				window.addEventListener('message', function(e){
 					var d = e.data;
-					if(e.origin === Module['buildatAuthOrigin'] && d &&
+					if(Module['buildatAuthState'] &&
+							e.origin === Module['buildatAuthOrigin'] && d &&
 							typeof d.buildat_starport_token === 'string')
-						Module['buildatAuthMsg'] = JSON.stringify(d);
+						answer(d);
+				});
+				var callback = function(d){
+					if(!d || typeof d !== 'object' ||
+							d.buildat_starport_signin !== 1)
+						return;
+					if(!Module['buildatAuthState'] ||
+							d.state !== Module['buildatAuthState']){
+						console.log('Starport ID: a sign-in answer not of ' +
+								'this attempt, ignored');
+						return;
+					}
+					if(typeof d.code !== 'string'){
+						return answer({error: typeof d.error === 'string' ?
+								d.error : 'no code'});
+					}
+					// Taken: a second answer of this state is ignored
+					Module['buildatAuthState'] = null;
+					var sp = Module['buildatAuthOrigin'];
+					var attempt = Module['buildatAuthAttempt'];
+					fetch(sp + '/api/v1/id/redeem', {method: 'POST',
+							headers: {'Content-Type': 'text/plain'},
+							body: JSON.stringify({code: d.code})})
+					.then(function(r){ return r.json(); })
+					.then(function(v){
+						if(Module['buildatAuthAttempt'] !== attempt)
+							return; // another attempt began meanwhile
+						answer(v && v.ok && v.result &&
+								typeof v.result.token === 'string' ?
+								{buildat_starport_token: v.result.token,
+									name: v.result.name,
+									listing: v.result.listing} :
+								{error: v && v.error || 'refused'});
+					}).catch(function(e){
+						if(Module['buildatAuthAttempt'] === attempt)
+							answer({error: String(e)});
+					});
+				};
+				if(typeof BroadcastChannel === 'function'){
+					Module['buildatAuthChannel'] =
+							new BroadcastChannel('buildat_starport');
+					Module['buildatAuthChannel'].onmessage =
+							function(e){ callback(e.data); };
+				}
+				window.addEventListener('storage', function(e){
+					if(e.key !== 'buildat_starport_signin' || !e.newValue)
+						return;
+					try { callback(JSON.parse(e.newValue)); } catch(x){}
 				});
 			}
 			return window.open(url, 'buildat_starport',
 					'popup,width=480,height=680') ? 1 : 0;
-		}, url);
+		}, url, again);
 		lua_pushboolean(L, ok);
 #else
 		(void)L;

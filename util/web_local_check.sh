@@ -12,8 +12,8 @@
 # isolated page runs the client with threads (buildat_mt), and the same
 # drive runs in WebKit where Playwright's is installed. Then
 # the buildat server's own serving of the same: the isolation headers
-# with ?local and ?isolated=1, on the local server's files and
-# buildat_mt.js, and not on the page without them; and a page with no game (apps/play's) given the apps for
+# on the play page and /starport_signin, the local server's files and
+# buildat_mt.js, and not on the page with ?isolated=0; and a page with no game (apps/play's) given the apps for
 # its launch menu. demo_aggregate (walked a second, its position line moved) and skeldat (a world
 # made in its menu, walked 2 voxels) are driven as hillclimb when
 # web/local/<app>/ is there. Needs web/ (util/build_web.sh) with
@@ -210,14 +210,15 @@ isolated "/?local=hillclimb" 200 || fail "/?local=hillclimb is not isolated"
 isolated "/local/hillclimb/buildat_server.js" 200 ||
 	fail "the local server's script is not isolated"
 isolated "/local/hillclimb/buildat_server.wasm" 200 || fail "the wasm is not isolated"
-isolated "/" 200 && fail "/ is isolated: the Starport ID's popup loses its opener"
-# [WEB_MESH_OFF_THREAD] the play page where it asks, and the threaded
-# client's script, which its workers load
+# [WEB_ISOLATED_SIGNIN] the play page by default, unless it opts out,
+# and the threaded client's script, which its workers load
+isolated "/" 200 || fail "/ is not isolated"
 isolated "/?isolated=1" 200 || fail "/?isolated=1 is not isolated"
 isolated "/?isolated=0" 200 && fail "/?isolated=0 is isolated"
+isolated "/starport_signin" 200 || fail "/starport_signin is not isolated"
 [ ! -f "$here/web/buildat_mt.js" ] || isolated "/buildat_mt.js" 200 ||
 	fail "buildat_mt.js is not sent with the isolation headers"
 isolated "/local/nothere/buildat_server.js" 404
 isolated "/local/hillclimb/index.html" 404
 isolated "/local/../index.html" 404
-echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates ?local, ?isolated=1 and their files only"
+echo "PASS: hillclimb's own server in the page, the car past the first turn, its saves kept over a reload; demo_aggregate's and skeldat's if built; the buildat server offers the apps to a page with no game and isolates the play page unless ?isolated=0, and ?local's files"

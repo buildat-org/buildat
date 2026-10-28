@@ -151,12 +151,19 @@ That page and the local server's files are sent cross-origin isolated
 (Cross-Origin-Opener-Policy: same-origin, Cross-Origin-Embedder-Policy:
 require-corp), which the server's threads need; any other host of web/
 has to send the same. The play page is sent isolated as well, for the
-web client's mesh workers (buildat_mt), and the Starport ID's sign-in
-window, which has no opener there, ends on a page of the server's that
-tells the game's page; until the Starport's /authorize answers that way,
-the play page is isolated only where its address has ?isolated=1. The
-threaded client's script, buildat_mt.js, is sent with the same headers,
-which its workers need. A page the server serves with no game of its own (apps/play's) is
+web client's mesh workers (buildat_mt), unless its address has
+?isolated=0; a browser that cannot isolate a page, or the page in
+another site's frame, runs buildat.* and meshes on the page's thread.
+The threaded client's script, buildat_mt.js, is sent with the same
+headers, which its workers need. An isolated page's Starport ID window
+has no opener, so it ends on the server's /starport_signin (sent
+isolated, never in a frame, no referrer, its one script by hash): that
+page reads #code=..&state=.. (or #error=..), clears it from the address,
+passes it to the server's other pages by BroadcastChannel (a storage
+event where there is none) and closes. The page that opened the window
+takes it only with the state it made for that sign-in, once, and gets
+the token from the Starport by the code. An app's claimed paths do not
+take /starport_signin. A page the server serves with no game of its own (apps/play's) is
 given the apps that have web/local/<app>/, and its launch menu lists
 each under Apps, "In the browser", Play going to /?local=<app>.
 util/package.sh builds WEB_LOCAL_APPS (hillclimb, demo_aggregate,

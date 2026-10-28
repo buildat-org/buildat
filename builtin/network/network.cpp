@@ -17,6 +17,7 @@
 #include "interface/os.h"
 #include "interface/select_handler.h"
 #include "interface/sha1.h"
+#include "interface/sha256.h"
 #include "interface/compress.h"
 #include "interface/fs.h"
 #include <cereal/archives/portable_binary.hpp>
@@ -518,6 +519,62 @@ static std::pair<ss_, ss_> local_file(const ss_ &target)
 	if(it == types.end())
 		return {};
 	return {target.substr(1), it->second};
+}
+
+// [WEB_ISOLATED_SIGNIN] Where a Starport's /authorize window with no
+// opener (a cross-origin isolated page's popup has none) comes back with
+// #code=..&state=.. or #error=..&state=..: the hash cleared at once, then
+// handed to this origin's pages by BroadcastChannel (by a storage event
+// where there is none, the item removed right after), and the window
+// closed. The page whose sign-in it is matches the state and takes the
+// token from the Starport by the code (src/client/app_lua.h). Nothing in
+// the hash is shown or run; what does not look like a code, an error or a
+// state is dropped. Ahead of an app's claimed paths.
+static const char *SIGNIN_PATH = "/starport_signin";
+static const char *signin_script = R"JS("use strict";
+(function(){
+var h = new URLSearchParams(location.hash.slice(1));
+history.replaceState(null, "", location.pathname);
+var state = h.get("state") || "", code = h.get("code") || "";
+var error = h.get("error") || "";
+var m = {buildat_starport_signin: 1, state: state};
+if(/^[0-9a-f]{32}$/.test(code)) m.code = code;
+else m.error = /^[a-z_]{1,32}$/.test(error) ? error : "no code";
+var ok = /^[A-Za-z0-9_-]{16,128}$/.test(state);
+if(ok && typeof BroadcastChannel === "function"){
+	var c = new BroadcastChannel("buildat_starport");
+	c.postMessage(m);
+	c.close();
+} else if(ok){
+	try {
+		localStorage.setItem("buildat_starport_signin", JSON.stringify(m));
+		localStorage.removeItem("buildat_starport_signin");
+	} catch(e){}
+}
+document.getElementById("t").textContent = !ok ? "Nothing to sign in." :
+	(m.code ? "Signed in" : "Not signed in") + ": this window can be closed.";
+window.close();
+})();)JS";
+
+static ss_ signin_page()
+{
+	return ss_("<!doctype html><html><head><meta charset=\"utf-8\">"
+			"<title>Starport ID</title></head><body><p id=\"t\"></p><script>")+
+			signin_script+"</script></body></html>\n";
+}
+
+// Its headers: isolated as the play page (the window opened from it), never
+// in a frame, no referrer, and only its own script runs
+static ss_ signin_headers()
+{
+	return "Cross-Origin-Opener-Policy: same-origin\r\n"
+			"Cross-Origin-Embedder-Policy: require-corp\r\n"
+			"Cross-Origin-Resource-Policy: same-origin\r\n"
+			"Referrer-Policy: no-referrer\r\n"
+			"X-Frame-Options: DENY\r\n"
+			"Content-Security-Policy: default-src 'none'; script-src 'sha256-"+
+			base64(interface::sha256::calculate(signin_script))+
+			"'; img-src 'self'; frame-ancestors 'none'\r\n";
 }
 
 static ss_ lower(ss_ s)
@@ -1494,6 +1551,12 @@ struct Module: public interface::Module, public network::Interface
 					favicon.size()) + favicon);
 			return true;
 		}
+		if(target == web::SIGNIN_PATH){
+			const ss_ body = web::signin_page();
+			peer.queue_raw(web::response("200 OK", "text/html; charset=utf-8",
+					body.size(), web::signin_headers()) + body);
+			return true;
+		}
 		const std::pair<ss_, ss_> local = web::local_file(target);
 		struct stat local_st;
 		const std::pair<ss_, ss_> *wf_name = local.first.empty() ?
@@ -1528,20 +1591,17 @@ struct Module: public interface::Module, public network::Interface
 		}
 		// [WEB_LOCAL_SERVER] The page that runs a local server, and the
 		// server's files, cross-origin isolated: its threads share memory.
-		// Only that page: an isolated page's popup has no opener, and the
-		// Starport ID's sign-in is one.
 		// [WEB_MESH_OFF_THREAD] And the threaded client's script, which its
 		// workers load too: an isolated page's worker needs the header.
-		// The play page isolated for its threads where its address asks,
-		// ?isolated=1.
-		// simplified: asked for, not the default, until the Starport's
-		// /authorize can answer an isolated page (it posts to its opener,
-		// which an isolated page's popup has none of): then every page,
-		// the sign-in ending on a page of this server's that tells the
-		// game's by BroadcastChannel
+		// [WEB_ISOLATED_SIGNIN] The play page isolated by default, for its
+		// mesh threads; the Starport ID's window, which has no opener then,
+		// comes back by SIGNIN_PATH. ?isolated=0 opts out (the inline
+		// pool, the window answering its opener). A browser that cannot
+		// isolate, or the page in another site's frame, runs the client
+		// without threads anyway (index.html).
 		const bool isolated = !local.first.empty() ||
 				(index && (!query_value(query, "local").empty() ||
-				query_value(query, "isolated") == "1")) ||
+				query_value(query, "isolated") != "0")) ||
 				wf_name->first == "buildat_mt.js";
 		const ss_ cache = (wf->etag.empty() ? "" : "ETag: "+wf->etag+"\r\n")+
 				(isolated ? "Cross-Origin-Opener-Policy: same-origin\r\n"
@@ -2451,7 +2511,7 @@ struct Module: public interface::Module, public network::Interface
 	{
 		if(target == "/")
 			return m_claimed_paths.count("/") > 0;
-		if(web::web_file(target))
+		if(web::web_file(target) || target == web::SIGNIN_PATH)
 			return false;
 		for(const ss_ &p : m_claimed_paths)
 			if(p != "/" && target.compare(0, p.size(), p) == 0)

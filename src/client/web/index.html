@@ -182,8 +182,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// local/<app>/, run in a worker of this page (start_local below) and
 	// joined through it. A query and not a hash: the server sends this
 	// page cross-origin isolated for it (the worker's threads share
-	// memory), and only for it, as an isolated page's popup has no opener
-	// (the Starport ID's sign-in).
+	// memory) even where ?isolated=0 asks the play page not to be.
 	var local_app = /^[A-Za-z0-9_]{1,64}$/.exec(query.get('local') || '');
 	// [WEB_LOCAL_AITTA] ?local=<author>.<name>@<version>: a package from
 	// Aitta that the client installed (its signature checked) with the

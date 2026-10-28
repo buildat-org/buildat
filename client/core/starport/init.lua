@@ -2135,19 +2135,13 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 			"opens in a window of its own; your password goes there only.")
 	local st = add_text(w, "")
 	local rr = add_row(w)
+	local again = false -- [WEB_ISOLATED_SIGNIN] Open again: the same attempt
 	local function open()
-		-- [WEB_MESH_OFF_THREAD] An isolated page's window has no opener,
-		-- and /authorize answers its opener: it would wait forever
-		if __buildat_get_env("BUILDAT_ISOLATED") == "1" then
-			st.text = "This page runs with threads (cross-origin isolated), "..
-					"which the Starport's window cannot answer yet: open "..
-					"it without ?isolated=1 to sign in with the ID"
-			return
-		end
-		st.text = __buildat_web_authorize(url .. q) and
+		st.text = __buildat_web_authorize(url .. q, again) and
 				"Waiting for the Starport's window..." or
 				"The browser blocked the window: allow pop-ups for this "..
 				"page, then Open"
+		again = true
 	end
 	add_button(rr, "Open", open)
 	-- [ID_CLAIM_ACCOUNT]: the account by that name is the user's own
@@ -2172,8 +2166,15 @@ local function web_authorize(url, listing, address, cb, rename_reason)
 			end
 		end
 		local v = network.parse_json(m)
+		-- [WEB_ISOLATED_SIGNIN] Cancel in the window, or a code the
+		-- Starport did not take
+		if type(v) == "table" and v.error == "cancelled" then
+			return cb(nil, "cancelled")
+		end
 		if type(v) ~= "table" or type(v.buildat_starport_token) ~= "string" then
-			return cb(nil, "the Starport's window sent no token")
+			return cb(nil, type(v) == "table" and type(v.error) == "string" and
+					"the Starport: " .. v.error or
+					"the Starport's window sent no token")
 		end
 		cb(v.buildat_starport_token)
 	end
