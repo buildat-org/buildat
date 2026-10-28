@@ -53,6 +53,9 @@ struct BonesGrowth
 	// late or an expansion dropped alike.
 	int speed = 1, speed_low = 1;
 	size_t rule_runs = 0;
+	// The rule's runs in an expansion: the speed times bones::PACE
+	// ([SKELDAT_MORE_FUN]), and what scales with it here
+	int runs() const { return skeldat::bones::PACE * speed; }
 	double ticked_s = 0, dropped_n = 0;
 	int64_t keep_up_us = 0;
 	// Expansions a tick at most, a fraction carried to the next tick
@@ -246,9 +249,9 @@ struct BonesGrowth
 			}
 			const sv_<uint8_t> before = box.b;
 			expansions++;
-			for(int k = 0; k < speed; k++)
+			for(int k = 0; k < runs(); k++)
 				skeldat::bones::expand(box);
-			rule_runs += speed;
+			rule_runs += runs();
 			const uint32_t block = world.id_of("skeldat:bone_block");
 			sv_<pv::Vector3DInt32> decayed;
 			if(!guard.empty()){
@@ -258,14 +261,14 @@ struct BonesGrowth
 					const size_t i = box.at(x, y, z);
 					if(!guard[i] || air[i])
 						continue;
-					const int retract = LANTERN_RETRACT * speed;
+					const int retract = LANTERN_RETRACT * runs();
 					box.b[i] = before[i] > retract ? before[i] - retract : 0;
 					const pv::Vector3DInt32 p(lc.getX() + x, lc.getY() + y,
 							lc.getZ() + z);
 					if(world.format.id.get(vol.sample_at(p.getX(), p.getY(),
 							p.getZ())) == block &&
 							world.rnd() < 1 - std::pow(1 - 1.0 / LANTERN_DECAY_IN,
-							speed))
+							runs()))
 						decayed.push_back(p);
 				}
 			}
@@ -323,7 +326,7 @@ struct BonesGrowth
 		for(int x = 1; x < box.w - 1; x++){
 			const size_t i = box.at(x, y, z);
 			if(box.b[i] < MAX || box.air[i] ||
-					world.rand() % GROW_ONE_IN >= (uint32_t)speed ||
+					world.rand() % GROW_ONE_IN >= (uint32_t)runs() ||
 					(!guard.empty() && guard[box.at(x, y + 1, z)]))
 				continue;
 			const int32_t px = lc.getX() + x, py = lc.getY() + y,

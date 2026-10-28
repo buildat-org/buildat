@@ -13,9 +13,10 @@
 // - then every voxel of the section with FLOOD or more does the same
 //   flood to its six neighbours inside the section.
 // So a voxel seeded at 1 floods its neighbours on the 7th expansion after,
-// and the front moves a voxel per 7 expansions of its section. A section
-// expands on average every SECTION_PERIOD seconds: a voxel per 1050 s,
-// which is 0.875 of a day (1200 s).
+// and the front moves a voxel per 7 runs of the rule on its section. A
+// section expands on average every SECTION_PERIOD seconds, running the
+// rule PACE times at 1x ([SKELDAT_MORE_FUN]): a voxel per 350 s, which
+// is 0.29 of a day (1200 s).
 // Pure: no Buildat, no module; main.cpp hands it the voxels. Self test:
 //   g++ -std=c++11 -DSKELDAT_BONES_TEST -x c++ apps/skeldat/main/bones.h -o /tmp/skeldat_bones && /tmp/skeldat_bones
 //   (one line)
@@ -41,6 +42,15 @@ static const int NO_DROP = 3;
 static const float SEED_DANGER = 0.5f;
 // Seconds of game time between a section's expansions, on average
 static const double SECTION_PERIOD = 150;
+// [SKELDAT_MORE_FUN] The rule's runs in an expansion at 1x (the bones'
+// speed multiplies it): pick 3. A 128 world with no one in it, free-running
+// (2026-10-28, still water), is covered in 9.5, 14.2, 11.5, 10.5 days at
+// seeds 2-5 (mean 11.4), against 24.4, 26.5, 28.8, 29.0 at 1 (27.2): the
+// default world's end in about 4 hours of play, not 9. Not 3x: the
+// skeletons' night blocks and the sections' borders do not scale. Runs, not a
+// shorter SECTION_PERIOD: an expansion's cost is its read and write, the
+// rule's three passes are cheap ([SKELDAT_BONE_SPEED])
+static const int PACE = 3;
 // Bones grow off a voxel at MAX with air over it (user, 2026-10-15), or a
 // liquid or gas, which hold no bones ([SKELDAT_BONES_UNDERWATER]: a pile
 // rises from a lake's bed): the chance a section's expansion grows one
@@ -421,9 +431,9 @@ int main()
 		assert(!deep_hole(4, 0, trench));
 	}
 	printf("bones: self test passed; %d%% of a 700x700 area seeded, the "
-			"front a voxel per 7 expansions (%.0f s); piles on %.2f%% of "
+			"front a voxel per 7 runs (%.0f s at 1x); piles on %.2f%% of "
 			"the columns over 0.9, %.3f%% at 0.3-0.5\n", seeded / 100,
-			7 * SECTION_PERIOD, 100.0 * piles_high / columns_high,
+			7 * SECTION_PERIOD / PACE, 100.0 * piles_high / columns_high,
 			100.0 * piles_low / columns_low);
 	printf("bones: the front at 5x %.1f voxels, at 1x over five times the "
 			"expansions %.1f (eight schedules)\n", front_five / 8.0,

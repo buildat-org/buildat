@@ -6,6 +6,11 @@
 // Included by main.cpp inside namespace skeldat, after bones_growth.h
 #pragma once
 
+// [SKELDAT_MORE_FUN] The rules' version a score was made under: a set
+// of another (before bones::PACE, none) is not listed, its days not
+// comparable
+static const int SCORE_RULES = 2;
+
 struct Scores
 {
 	WorldView &world;
@@ -103,12 +108,14 @@ struct Scores
 		ss_ form = "legacy_valleys";
 		store->get("terrain", form);
 		const ss_ key = "set/"+seed+"/"+itos(size)+"/"+itos(growth.speed_low)+
-				(form == "legacy_valleys" ? ss_() : "/"+form);
+				(form == "legacy_valleys" ? ss_() : "/"+form)+
+				"/rules"+itos(SCORE_RULES);
 		json::Value set = read_set(st, key);
 		set.set("seed", json::Value(seed));
 		set.set("terrain", json::Value(form));
 		set.set("size", json::Value((int64_t)size));
 		set.set("speed", json::Value((int64_t)growth.speed_low));
+		set.set("rules", json::Value((int64_t)SCORE_RULES));
 		const ss_ rerun = "_rerun";
 		const bool is_rerun = world_name.size() > rerun.size() &&
 				world_name.compare(world_name.size() - rerun.size(),
@@ -163,7 +170,8 @@ struct Scores
 		for(const ss_ &key : st->list("set/")){
 			const json::Value set = read_set(st, key);
 			const json::Value &sc = set.get("scores");
-			if(!sc.is_array() || sc.size() == 0)
+			if(!sc.is_array() || sc.size() == 0 ||
+					json::jint(set, "rules") != SCORE_RULES)
 				continue;
 			json::Value v = json::object();
 			v.set("key", json::Value(key));

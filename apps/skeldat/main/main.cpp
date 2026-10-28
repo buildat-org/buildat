@@ -1121,9 +1121,10 @@ struct Module: public interface::Module, public PlayersHost,
 	// [SKELDAT_INTRO] The days left, "about": from the uncovered columns'
 	// rate over the last few game days (m_growth.bare_days), else the days a
 	// world of this size takes at 1x, over the speed, less those gone; 0
-	// once ended. The days measured free-running with no player
-	// (2026-10-17): 128 at seeds 2-5 17.5, 36.1, 39.2, 19.9; 256 at seeds 2
-	// and 3 24.5, 68.0; 512 and 1024 on that trend (x1.6 a doubling)
+	// once ended. The days measured free-running with no player at
+	// bones::PACE 3 ([SKELDAT_MORE_FUN], 2026-10-28, still water): 128 at
+	// seeds 2-5 9.5, 14.2, 11.5, 10.5 (11); 256 at seed 2 15.4, x1.6 the
+	// 128's as before; 512 and 1024 on that trend (x1.6 a doubling)
 	// simplified: the history is not saved, a restarted world starts it
 	// again from the constant
 	void send_intro(size_t peer)
@@ -1138,8 +1139,8 @@ struct Module: public interface::Module, public PlayersHost,
 			left = b.second * (b.first - a.first) / (a.second - b.second);
 		} else {
 			const int width = m_world.half * 2 * skeldat::bones::SECTION;
-			const double days = width <= 128 ? 28 : width <= 256 ? 46 :
-					width <= 512 ? 75 : 120;
+			const double days = width <= 128 ? 11 : width <= 256 ? 18 :
+					width <= 512 ? 29 : 47;
 			left = days / m_growth.speed - gone;
 		}
 		const int n = m_growth.ended ? 0 : std::max(1, (int)std::lround(left));

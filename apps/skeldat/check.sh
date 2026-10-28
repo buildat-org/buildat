@@ -1408,7 +1408,7 @@ grep -aq "a skeleton drops a skull into the hole at $1," "$log29" &&
 	fail "no skull dropped down the shaft at ${bottom:-none} to its bottom ($log29)"
 # 27. The bones' speed ([SKELDAT_BONE_SPEED]). A 128 world made at 5x,
 # free-running a game day after it is in: 1x's expansions (32), the
-# rule run 5 times in each. Then in real time at 5x: the launcher's
+# rule run 5 x bones.h's PACE (3) times in each. Then in real time at 5x: the launcher's
 # client (an admin) sends "speed 1", which is in the audit log and in
 # its chat. Started again with no admin, the world is at 1x, a player's
 # "speed 10" does nothing, and in 70 s nothing says it falls behind. A
@@ -1434,7 +1434,7 @@ done
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 day=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++; if(n == 1 || n == 121) print $9, $21 }' "$s")
 set -- $day
-[ $# = 4 ] && grep -aq "the bones at 5x" "$s" && [ $(($4 - $2)) = $((5 * ($3 - $1))) ] &&
+[ $# = 4 ] && grep -aq "the bones at 5x" "$s" && [ $(($4 - $2)) = $((15 * ($3 - $1))) ] &&
 	[ $(($3 - $1)) -ge 30 ] && [ $(($3 - $1)) -le 34 ] ||
 	fail "a day at 5x: expansions and rule runs $day ($s)"
 echo "the bones at 5x: a day's $(($3 - $1)) expansions, $(($4 - $2)) rule runs"
@@ -1462,7 +1462,7 @@ wait $CLIENT || fail "no can't-keep-up line in the chat ($t/speed3.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 echo "behind: $(grep -a "can't keep up" "$t/srv30_3.log" | head -1 | sed 's/.*skeldat: //')"
 # 28. The opening dialog ([SKELDAT_INTRO]): a new player in a new 128
-# world at 1x gets it, with the days measured for a 128 world (28,
+# world at 1x gets it, with the days measured for a 128 world (11,
 # less the minutes gone); joining again it does not come, and
 # the pause menu's How to play... shows it. The world's starter items
 # ([SKELDAT_STARTER_ITEMS]): 4 sticks and 4 bones resting within 6 of
@@ -1484,7 +1484,7 @@ client intro1 "$t/intro1.cmds"
 wait $CLIENT || fail "no opening dialog for a new player ($t/intro1.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 days=$(grep -a "skeldat : pause: how to play shown" "$t/intro1.log" | head -1 | sed 's/.*shown, \([0-9]*\) days/\1/')
-[ "$days" = 27 ] || [ "$days" = 28 ] || fail "the days at a 128 world's start: $days ($t/intro1.log)"
+[ "$days" = 10 ] || [ "$days" = 11 ] || fail "the days at a 128 world's start: $days ($t/intro1.log)"
 starter=$(grep -a "skeldat: spawn at\|skeldat: a drop of skeldat:\(stick\|bone\) at\|skeldat: the drop of skeldat:\(stick\|bone\) rests at" \
 	"$t/srv31_1.log" | sed 's/.*skeldat: //' | awk '
 	/^spawn at/ { sx = $3; sz = $5 }
@@ -1542,13 +1542,13 @@ played="p01 30000; p02 29000; p03 28000; p04 27000; p05 26000; p06 25000; p07 24
 BUILDAT_SKELDAT_PLAYED="$played" hs_w 1 w1 36000
 s1=$(hs_end 1)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-echo "$s1" | grep -q 'is 1\. of 1 in set/2/128/1/rivers ("w1")' &&
+echo "$s1" | grep -q 'is 1\. of 1 in set/2/128/1/rivers/rules2 ("w1")' &&
 	echo "$s1" | grep -q "players: p01 8.3 h, .*p10 5.8 h, p11 5.6 h$" ||
 	fail "w1's score, or its players: $s1 ($t/srv32_1.log)"
 hs_w 2 w2 12000
 s2=$(hs_end 2)
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-echo "$s2" | grep -q 'is 2\. of 2 in set/2/128/1/rivers ("w2"), best 30\.[01]' ||
+echo "$s2" | grep -q 'is 2\. of 2 in set/2/128/1/rivers/rules2 ("w2"), best 30\.[01]' ||
 	fail "w2 not second, or the set not named after it: $s2 ($t/srv32_2.log)"
 printf '%s\n' "$placed" "delay 1500" "keypress Escape" "wait_log 5000 pause: the menu shown" \
 	"delay 500" 'click Button "High scores..."' "wait_log 5000 pause: high scores shown" \
@@ -1556,14 +1556,14 @@ printf '%s\n' "$placed" "delay 1500" "keypress Escape" "wait_log 5000 pause: the
 	"delay 500" "screenshot $t/scores.png" quit > "$t/hs.cmds"
 hs_w 3 w2_rerun 6000
 s3=$(hs_end 3)
-echo "$s3" | grep -q 'is 3\. of 3 in set/2/128/1/rivers ("w2"), best 30\.[01]' ||
+echo "$s3" | grep -q 'is 3\. of 3 in set/2/128/1/rivers/rules2 ("w2"), best 30\.[01]' ||
 	fail "the re-run's score, or the name it left: $s3 ($t/srv32_3.log)"
 client hs "$t/hs.cmds"
 wait $CLIENT || fail "the high scores drive ($t/hs.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "Best for these parameters: 30.0 days; this one is number 3" "$t/hs.log" &&
 	grep -aq "pause: high scores shown, 1 sets" "$t/hs.log" &&
-	grep -aq "pause: scores of set/2/128/1/rivers shown, 3 scores" "$t/hs.log" ||
+	grep -aq "pause: scores of set/2/128/1/rivers/rules2 shown, 3 scores" "$t/hs.log" ||
 	fail "the end's place, or the high scores pages ($t/hs.log)"
 printf '%s\n' "wait_log 120000 world_menu: 1 presets" 'click Button "New world..."' \
 	"wait_log 5000 world_menu: the name screen shown" "delay 300" "text fromset" \
