@@ -7,6 +7,7 @@
 #error "interface/http.h is not in the web server's module API"
 #endif
 #include "core/types.h"
+#include <atomic>
 #include <functional>
 
 namespace interface
@@ -20,7 +21,10 @@ namespace interface
 	// and the body answered is "" -- for a caller that asks the user about
 	// every host it fetches from, which a redirect would step around
 	// ([SECURITY_RUN_1]). Without it up to 8 are followed.
-	ss_ http_get(const ss_ &url, ss_ *redirect = nullptr);
+	// cancel: when it turns true the request is given up within about a
+	// second, and it throws -- for a thread its module's stop joins
+	ss_ http_get(const ss_ &url, ss_ *redirect = nullptr,
+			const std::atomic<bool> *cancel = nullptr);
 	// The body of a POST of `body` as `content_type` ([STARPORT]: a server
 	// announcing itself, a client's report); throws as http_get does.
 	// ipv4: over IPv4 only, for an announce whose source address is what

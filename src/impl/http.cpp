@@ -146,7 +146,7 @@ static void perform(CURL *c, const ss_ &url, const char *errbuf,
 	}
 }
 
-ss_ http_get(const ss_ &url, ss_ *redirect)
+ss_ http_get(const ss_ &url, ss_ *redirect, const std::atomic<bool> *cancel)
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
@@ -154,6 +154,14 @@ ss_ http_get(const ss_ &url, ss_ *redirect)
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
+	// libcurl calls it at least once a second, connecting or waiting too
+	Progress p;
+	if(cancel){
+		p.f = [cancel](uint64_t, uint64_t){ return !cancel->load(); };
+		curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+		curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
+		curl_easy_setopt(c, CURLOPT_XFERINFODATA, &p);
+	}
 	perform(c, url, errbuf, redirect);
 	return redirect && !redirect->empty() ? ss_() : body;
 }

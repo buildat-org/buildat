@@ -9,7 +9,8 @@
 
 namespace interface
 {
-	ss_ http_get(const ss_ &url, ss_ *redirect)
+	ss_ http_get(const ss_ &url, ss_ *redirect,
+			const std::atomic<bool> *cancel)
 	{
 		throw Exception("HTTP is not available in the web client");
 	}

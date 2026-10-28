@@ -64,6 +64,7 @@
 #include <thread>
 #include <chrono>
 #include <set>
+#include <atomic>
 #include <condition_variable>
 
 using json::jstr;
@@ -430,7 +431,12 @@ struct Module: public interface::Module, public moderation::Host
 	std::deque<VerifyJob> m_vjobs;
 	std::deque<VerifyResult> m_vresults;
 	std::thread m_vthread;
-	bool m_vstop = false;
+	// Atomic as http_get reads it ([STARPORT_SHUTDOWN_WAL]): the stop joins
+	// this thread, and a check of a server that does not answer held it up
+	// to http_get's two minutes -- past the 30 s serve_latest_release.sh
+	// (or systemd) gives, whose SIGKILL left the saves' WAL and accounts'
+	// "running" behind
+	std::atomic<bool> m_vstop{false};
 
 	// Mail that failed to send, from mail()'s threads, which may outlive
 	// the module: turned into the admins' events on a tick
@@ -1199,10 +1205,15 @@ struct Module: public interface::Module, public moderation::Host
 			// restarted under util/serve_latest_release.sh shares its port
 			// with the stand-in page for a moment after it announces
 			for(int attempt = 0; attempt < 3; attempt++){
-				if(attempt > 0)
-					std::this_thread::sleep_for(std::chrono::seconds(3));
+				if(attempt > 0){
+					std::unique_lock<std::mutex> lock(m_vmutex);
+					if(m_vwake.wait_for(lock, std::chrono::seconds(3),
+							[this](){ return m_vstop.load(); }))
+						return;
+				}
 				try {
-					const ss_ text = interface::http_get(j.url);
+					const ss_ text = interface::http_get(j.url, nullptr,
+							&m_vstop);
 					const json::Value v = json::load_string(text.c_str());
 					res.ok = v.is_object() &&
 							same(jstr(v, "response"), j.expect);
@@ -1211,6 +1222,8 @@ struct Module: public interface::Module, public moderation::Host
 				} catch(std::exception &e){
 					res.why = e.what();
 				}
+				if(m_vstop)
+					return;
 				if(res.ok || res.why.find("error: 503") == ss_::npos)
 					break;
 			}
