@@ -12,13 +12,15 @@
 //
 // fuzz.sh compiles WABT and WAMR into this harness, instrumented, and
 // includes engine.cpp with BUILDAT_WASM_FUZZ, which leaves out its
-// instances and compiles. The imports allowed are the client's
-// (src/lua_bindings/wasm.cpp's set_client_imports()). A slow input (a
+// instances and compiles. Each input runs twice: under the client's
+// imports (src/lua_bindings/wasm.cpp's set_client_imports()) and under a
+// server module's ([SERVER_WASM], src/server/wasm_imports.h). A slow input (a
 // huge memory, a long loop under the budget) is a server denying its
 // client service and out of scope;
 // memory corruption in the checks, the meter, WABT or WAMR is a finding.
 #define BUILDAT_WASM_FUZZ 1
 #include "wasm/engine.cpp"
+#include "server/wasm_imports.h"
 
 using namespace wasm_engine;
 
@@ -47,6 +49,15 @@ static ImportSet client_imports()
 	return set;
 }
 
+// A server module's imports: wasm_server_api.h's, all granted
+static ImportSet server_imports()
+{
+	ImportSet set;
+	set.what = "wasm_server_api.h's";
+	for(const server::WasmImportDef &d : server::WASM_IMPORTS)
+		set.defs.push_back({d.name, d.name, d.params, d.result});
+	return set;
+}
 
 // A small budget: a run stops soon, the meter's trap is still reached
 static const int64_t FUZZ_BUDGET = 200000;
@@ -73,7 +84,7 @@ static bool wamr_init()
 	// Both sets' names, by the names they are renamed to (the bindings'
 	// g<k> are not called with numbers that matter: each traps)
 	static std::map<ss_, ss_> sigs;
-	for(const ImportSet &set : {client_imports()})
+	for(const ImportSet &set : {client_imports(), server_imports()})
 		for(const ImportDef &d : set.defs)
 			sigs[d.c_name] = "("+ss_(d.params, 'i')+")"+(d.result ? "i" : "");
 	static sv_<ss_> names;
@@ -155,7 +166,7 @@ static void one(const uint8_t *data, size_t size);
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-	static const ImportSet sets[] = {client_imports()};
+	static const ImportSet sets[] = {client_imports(), server_imports()};
 	for(const ImportSet &set : sets){
 		set_imports(set);
 		one(data, size);
