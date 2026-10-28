@@ -88,9 +88,14 @@ case "$browser" in
 		pids+=($!)
 		ready="WebDriver BiDi listening" ;;
 	chrome)
+		# --disable-default-apps ([WEB_FETCH_CANCEL]): a new profile
+		# fetches Chrome's default extensions from the Web Store and loads
+		# them ~3 s in, and a fetch the page starts as one loads is
+		# cancelled before it reaches the network (net::ERR_ABORTED)
 		setsid "${CHROME:-google-chrome}" --headless=new --mute-audio \
 				--remote-debugging-port="$bport" --user-data-dir="$out/profile" \
 				--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+				--disable-default-apps \
 				--window-size=1200,800 about:blank > "$out/browser.log" 2>&1 &
 		pids+=($!)
 		ready="DevTools listening" ;;
