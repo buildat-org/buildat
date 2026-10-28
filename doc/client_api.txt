@@ -368,7 +368,9 @@ is made once and played by any number of SoundSources, as a loaded one:
   sound:SetData(vector_buffer)                -- once; little-endian
   sound.looped = true                         -- if wanted
 The format goes first and the data once: a Sound's samples are not
-replaced under a source playing them. A Sound holds at most 8 MiB, and
+replaced under a source playing them. 8-bit samples are signed. The data
+may be a string too (0.7.90, [DOOM_APP]): a wasm module's samples in one
+call rather than one WriteShort each. A Sound holds at most 8 MiB, and
 the Sounds made from samples and alive at most 64 MiB together; over
 either SetData raises with the reason.
 
@@ -4044,7 +4046,7 @@ ParticleEffect.sorted=boolean  ->  void ParticleEffect::sorted(bool)
 ParticleEffect.updateInvisible:boolean  ->  bool ParticleEffect::updateInvisible()
 ParticleEffect.updateInvisible=boolean  ->  void ParticleEffect::updateInvisible(bool)
 Sound.new():Sound  ->  Sound Sound::new_()
-Sound:SetData(VectorBuffer):any  ->  Value Sound::SetData(VectorBuffer)
+Sound:SetData(VectorBuffer|string):any  ->  Value Sound::SetData(VectorBuffer|Str)
 Sound:SetFormat(number,boolean,boolean):any  ->  Value Sound::SetFormat(double, bool, bool)
 Sound.frequency:number  ->  double Sound::frequency()
 Sound.frequency=number  ->  void Sound::frequency(double)

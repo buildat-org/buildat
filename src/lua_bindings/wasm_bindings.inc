@@ -1035,7 +1035,7 @@ BUILDAT_BINDING("ParticleEffect.sorted=boolean", "set", "ParticleEffect", "sorte
 BUILDAT_BINDING("ParticleEffect.updateInvisible:boolean", "get", "ParticleEffect", "updateInvisible")
 BUILDAT_BINDING("ParticleEffect.updateInvisible=boolean", "set", "ParticleEffect", "updateInvisible")
 BUILDAT_BINDING("Sound.new():Sound", "static", "Sound", "new")
-BUILDAT_BINDING("Sound:SetData(VectorBuffer):any", "call", "Sound", "SetData")
+BUILDAT_BINDING("Sound:SetData(VectorBuffer|string):any", "call", "Sound", "SetData")
 BUILDAT_BINDING("Sound:SetFormat(number,boolean,boolean):any", "call", "Sound", "SetFormat")
 BUILDAT_BINDING("Sound.frequency:number", "get", "Sound", "frequency")
 BUILDAT_BINDING("Sound.frequency=number", "set", "Sound", "frequency")

@@ -3286,15 +3286,18 @@ function M.define(dst, util)
 						end
 						self:SetFormat(rate, sixteen_bit, stereo)
 					end),
-			-- The samples, as SetFormat() said, little-endian: a
-			-- VectorBuffer, since tolua cuts a string at its first zero
-			SetData = util.wrap_function({"Sound", "VectorBuffer"},
+			-- The samples, as SetFormat() said, little-endian (8-bit ones
+			-- signed): a VectorBuffer, or a string ([DOOM_APP]: a wasm
+			-- module's samples in one call), which goes in through C++
+			-- since tolua cuts a string at its first zero
+			SetData = util.wrap_function({"Sound", {"VectorBuffer", "string"}},
 					function(self, buffer)
 						if self.dataSize > 0 then
 							error("Sound:SetData(): a Sound is filled"..
 									" once; make a new one")
 						end
-						local n = buffer:GetSize()
+						local n = type(buffer) == "string" and #buffer or
+								buffer:GetSize()
 						if n == 0 or n > SOUND_MAX_BYTES then
 							error("Sound:SetData(): "..n.." bytes; a Sound"..
 									" holds 1.."..SOUND_MAX_BYTES)
@@ -3317,7 +3320,11 @@ function M.define(dst, util)
 						end
 						-- Copied: tolua knows no Deserializer in a
 						-- VectorBuffer, so LoadRaw() does not take it
-						self:SetData(buffer:GetData(), n)
+						if type(buffer) == "string" then
+							__buildat_sound_set_data(self, buffer)
+						else
+							self:SetData(buffer:GetData(), n)
+						end
 						sound_bytes[self] = n
 					end),
 		},

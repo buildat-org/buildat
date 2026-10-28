@@ -5697,7 +5697,7 @@ impl Sound {
 		let mut r = call(imports::buildat_c_Sound_static_new, &[]);
 		r.value().as_::<Sound>()
 	}
-	/// Sound:SetData(VectorBuffer):any
+	/// Sound:SetData(VectorBuffer|string):any
 	pub fn SetData(&self, a1: impl Put) -> Value {
 		let mut r = call(imports::buildat_c_Sound_SetData, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		r.value()
@@ -8632,7 +8632,7 @@ mod imports {
 		pub fn buildat_c_ParticleEffect_set_updateInvisible(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Sound.new():Sound"]
 		pub fn buildat_c_Sound_static_new(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
-		#[link_name = "Sound:SetData(VectorBuffer):any"]
+		#[link_name = "Sound:SetData(VectorBuffer|string):any"]
 		pub fn buildat_c_Sound_SetData(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Sound:SetFormat(number,boolean,boolean):any"]
 		pub fn buildat_c_Sound_SetFormat(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;

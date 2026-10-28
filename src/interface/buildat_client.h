@@ -994,7 +994,7 @@ BUILDAT_CLIENT_IMPORT("ParticleEffect.sorted=boolean", buildat_c_ParticleEffect_
 BUILDAT_CLIENT_IMPORT("ParticleEffect.updateInvisible:boolean", buildat_c_ParticleEffect_get_updateInvisible)
 BUILDAT_CLIENT_IMPORT("ParticleEffect.updateInvisible=boolean", buildat_c_ParticleEffect_set_updateInvisible)
 BUILDAT_CLIENT_IMPORT("Sound.new():Sound", buildat_c_Sound_static_new)
-BUILDAT_CLIENT_IMPORT("Sound:SetData(VectorBuffer):any", buildat_c_Sound_SetData)
+BUILDAT_CLIENT_IMPORT("Sound:SetData(VectorBuffer|string):any", buildat_c_Sound_SetData)
 BUILDAT_CLIENT_IMPORT("Sound:SetFormat(number,boolean,boolean):any", buildat_c_Sound_SetFormat)
 BUILDAT_CLIENT_IMPORT("Sound.frequency:number", buildat_c_Sound_get_frequency)
 BUILDAT_CLIENT_IMPORT("Sound.frequency=number", buildat_c_Sound_set_frequency)
@@ -4138,8 +4138,9 @@ public:
 	constexpr explicit Sound(unsigned int handle): Resource(handle) {}
 	// Sound.new():Sound
 	static ::buildat::Sound new_();
-	// Sound:SetData(VectorBuffer):any
+	// Sound:SetData(VectorBuffer|string):any
 	::buildat::Value SetData(const ::buildat::VectorBuffer & a1) const;
+	::buildat::Value SetData(::buildat::Str a1) const;
 	// Sound:SetFormat(number,boolean,boolean):any
 	::buildat::Value SetFormat(double a1, bool a2, bool a3) const;
 	// Sound.frequency:number
@@ -5676,6 +5677,7 @@ inline bool ParticleEffect::updateInvisible() const{ ::buildat::detail::Reply r 
 inline void ParticleEffect::updateInvisible(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_ParticleEffect_set_updateInvisible, *this, a1); (void)r; }
 inline ::buildat::Sound Sound::new_(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_static_new); return ::buildat::Sound(r.handle()); }
 inline ::buildat::Value Sound::SetData(const ::buildat::VectorBuffer & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_SetData, *this, a1); return r.value(); }
+inline ::buildat::Value Sound::SetData(::buildat::Str a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_SetData, *this, a1); return r.value(); }
 inline ::buildat::Value Sound::SetFormat(double a1, bool a2, bool a3) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_SetFormat, *this, a1, a2, a3); return r.value(); }
 inline double Sound::frequency() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_get_frequency, *this); return r.number(); }
 inline void Sound::frequency(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Sound_set_frequency, *this, a1); (void)r; }

@@ -12,6 +12,7 @@
 #include <vector>
 #include <Context.h>
 #include <Scene.h>
+#include <Sound.h>
 #include <Image.h>
 #include <MemoryBuffer.h>
 #include <Profiler.h>
@@ -267,6 +268,23 @@ static int l_image_set_data(lua_State *L)
 	return 0;
 }
 
+// sound_set_data(sound, data: string)
+// [DOOM_APP] A Sound's samples from a string: safe_classes.lua's
+// Sound:SetData(string), which checks the sizes first. A string is how a
+// module's wasm hands bytes over; the VectorBuffer it took before was one
+// binding call per sample.
+static int l_sound_set_data(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(sound, 1, Sound);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 2, &len);
+	if(!data || len == 0)
+		throw Exception("sound_set_data: data must be a string, not empty");
+	sound->SetData(data, (unsigned)len);
+	return 0;
+}
+
 // image_load_data(image, data: string[, max_side]) -> whether it was read
 // **A PNG or a JPEG from its bytes** ([HEARTH_ATTACHMENTS]): a picture a
 // server sends at run time, as Hearth's thumbnails, not a resource of the
@@ -452,6 +470,7 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(get_voxel_data);
 	DEF_BUILDAT_FUNC(image_set_data);
 	DEF_BUILDAT_FUNC(image_load_data);
+	DEF_BUILDAT_FUNC(sound_set_data);
 	DEF_BUILDAT_FUNC(hold_ref);
 	DEF_BUILDAT_FUNC(tree_depth);
 	DEF_BUILDAT_FUNC(tree_height);
