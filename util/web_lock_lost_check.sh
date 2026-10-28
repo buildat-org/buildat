@@ -58,7 +58,8 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 CHECK_PIDS+=($SERVER_PID)
 # A browser's page is never the launcher's own client: on its server it is
 # a LAN player, in by an account ([GUEST_NAME_REUSE]), the first one with
-# the setup code
+# the setup code (accounts may log it after the server's Listening)
+wait_for_log "$t/srv.log" "the setup code [A-Z0-9]+" 30
 code=$(grep -ao "the setup code [A-Z0-9]*" "$t/srv.log" | awk '{print $4}' | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv.log)"
 stub="(function(){ var held = null, refuse = false;
