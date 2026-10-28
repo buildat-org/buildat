@@ -106,15 +106,16 @@ y1=$(echo "$out" | grep '^at ' | tail -1 | awk '{print $2}')
 [ -n "$y0" ] && [ "$y1" -lt $((y0 - 30)) ] || fail "scroll: the drag did not scroll ($y0, then $y1)"
 echo "ok: in a scroll view 20 taps open and a tap outside closes, a tap and a click pick, a drag scrolls ($y0 to $y1) and opens nothing"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-# Outside a scroll view: Home's Settings, "Display and sound", the
+# Outside a scroll view: Home's Settings (at y 497 since Home's Browse
+# got "Get more" on the web, 9d7a5f7cf), "Display and sound", the
 # Antialiasing dropdown at (306, 326), outside it the title at (100, 217)
 # The waits after a line are the page's next frames, the menu laid out;
 # the last one only ends the list after the taps' trailing comma
 cat > "$t/plain.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "launch_menu: ", 60], ["wait", 2000],
- ["tap", 200, 478], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
+ ["waitlog", "launch_menu: ", 60], ["wait", 1000],
+ ["tap", 200, 497], ["waitlog", "launch_menu: settings, ", 10], ["wait", 500],
  ["tap", 180, 275], ["waitlog", "Engine settings shown", 10], ["wait", 500],
 $(taps 306 326 100 217)
  ["wait", 200]
