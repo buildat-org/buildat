@@ -188,7 +188,10 @@ drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLC
 drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
 # [HC_PUT_BACK_FURTHER] The same, steered right three times: off the
 # side, then up past the 10 m mark and off again, then off once more
-drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 9:W2 14:W2D 16:W2 22:W2D 24:W2 32:Q" &
+# ([HC_ENGINE_NOISE] the second half a second sooner: on seed 1's hill
+# since, steered at 14 s it went off 6 cm short of the 20 m mark, and
+# past it under the check's load)
+drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 9:W2 12.5:W2D 14.5:W2 21:W2D 23:W2 32:Q" &
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 2:SG 60:Q" &
 # [HC_SOFT_GROUND] Up a hill of 15 degrees and 20 m in second, the knobs at
 # their defaults and at the softest set; the finish names the key
@@ -543,13 +546,15 @@ rests = {m[0]: [float(v) for v in m[1:4]] + [int(m[4])] for m in re.findall(
 say = ["%s: y %.2f -> %.2f, %d voxels" % (k, loose[k][1], rests[k][1],
     rests[k][3]) for k in sorted(rests) if k in loose]
 # Rock 1 is the one K dropped on the slope's lower third: down the
-# slope, resting lower or gone off the bottom's end (its way is chaotic:
-# dropped at 10 s rather than 2 it went off the side, before
-# [HC_CIRCUIT] too); a stone at rest made voxels again
+# slope, resting lower or gone off the area 5 m or more below where it
+# came loose, the bottom's end or a side (its way is chaotic: dropped at
+# 10 s rather than 2 it went off the side, before [HC_CIRCUIT] too; on
+# [HC_ENGINE_NOISE]'s hill off the left side 17 m down); a stone at rest
+# made voxels again
 left = {m.group(1): (float(m.group(2)), float(m.group(3))) for m in re.finditer(
     r"rock (\d+) left the area at (\S+),(\S+) m", slog)}
 want(("1" in rests and rests["1"][1] < loose["1"][1] - 1) or
-    ("1" in left and left["1"][1] < 0),
+    ("1" in left and "1" in loose and left["1"][1] < loose["1"][2] - 5),
     "the stone dropped on the slope rolled down: %s; left %s" % (say, left))
 # The one G dropped on the parked drive's flat bottom pad, which cannot
 # roll off it: the stall's own came to rest only now and then, most off
