@@ -40,7 +40,13 @@ def make_kit(build, kit):
     k = {"builtins": re.findall(r'\{"([A-Za-z0-9_]+)", createModule_', table)}
     # The objects, the table's own left out (each build makes it again)
     k["objects"] = []
-    for i, o in enumerate(shlex.split(open(os.path.join(d, "objects1.rsp")).read())):
+    # The objects' file as link.txt names it: objects1.rsp, or objects1
+    # in an older CMake (packaging's 3.25)
+    rsp = [a[1:] for a in shlex.split(open(os.path.join(d, "link.txt")).read())
+            if a.startswith("@") and os.path.basename(a).startswith("objects")]
+    if len(rsp) != 1:
+        die("link.txt names %d objects files" % len(rsp))
+    for i, o in enumerate(shlex.split(open(os.path.join(build, rsp[0])).read())):
         if o.endswith("/web_server_modules.cpp.o"):
             k["objects"].append("@TABLE@")
             continue
