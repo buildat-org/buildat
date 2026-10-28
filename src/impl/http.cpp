@@ -61,6 +61,17 @@ static int on_progress(void *user, curl_off_t total, curl_off_t got,
 	return 0;
 }
 
+// libcurl calls it at least once a second, connecting or waiting too
+static void set_cancel(CURL *c, Progress &p, const std::atomic<bool> *cancel)
+{
+	if(!cancel)
+		return;
+	p.f = [cancel](uint64_t, uint64_t){ return !cancel->load(); };
+	curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
+	curl_easy_setopt(c, CURLOPT_XFERINFODATA, &p);
+}
+
 static void set_protocols(CURL *c, const char *list)
 {
 #if LIBCURL_VERSION_NUM >= 0x075500
@@ -154,20 +165,14 @@ ss_ http_get(const ss_ &url, ss_ *redirect, const std::atomic<bool> *cancel)
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, to_string);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
-	// libcurl calls it at least once a second, connecting or waiting too
 	Progress p;
-	if(cancel){
-		p.f = [cancel](uint64_t, uint64_t){ return !cancel->load(); };
-		curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
-		curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, on_progress);
-		curl_easy_setopt(c, CURLOPT_XFERINFODATA, &p);
-	}
+	set_cancel(c, p, cancel);
 	perform(c, url, errbuf, redirect);
 	return redirect && !redirect->empty() ? ss_() : body;
 }
 
 ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
-		ss_ *redirect, bool ipv4)
+		ss_ *redirect, bool ipv4, const std::atomic<bool> *cancel)
 {
 	char errbuf[CURL_ERROR_SIZE] = {0};
 	CURL *c = easy(url, errbuf);
@@ -182,6 +187,8 @@ ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
 	curl_easy_setopt(c, CURLOPT_TIMEOUT, STRING_TIMEOUT_S);
 	if(ipv4)
 		curl_easy_setopt(c, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+	Progress p;
+	set_cancel(c, p, cancel);
 	try {
 		perform(c, url, errbuf, redirect);
 	} catch(...){

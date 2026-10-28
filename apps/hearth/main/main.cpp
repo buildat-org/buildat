@@ -73,6 +73,7 @@
 #include <algorithm>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include <condition_variable>
 #include <random>
 #include <map>
@@ -609,7 +610,10 @@ struct Module: public interface::Module
 	struct ReleaseFound { ss_ aitta; json::Value rel; ss_ changelog; };
 	std::mutex m_rmutex;
 	std::condition_variable m_rwake;
-	bool m_rstop = false;
+	// Atomic as http_get reads it: the stop joins m_rthread, which a
+	// server that does not answer held up to two minutes
+	// ([STARPORT_SHUTDOWN_WAL])
+	std::atomic<bool> m_rstop{false};
 	bool m_rkick = true;          // poll now, not in a minute
 	json::Value m_rsources;       // the admin's "release_sources"
 	std::set<ss_> m_rknown;       // releases with a thread, or given up on
@@ -1066,7 +1070,8 @@ struct Module: public interface::Module
 			json::Value list;
 			try {
 				list = json::load_string(
-						interface::http_get(base+"/api/v1/list").c_str());
+						interface::http_get(base+"/api/v1/list", nullptr,
+						&m_rstop).c_str());
 			} catch(std::exception &e){
 				log_w(MODULE, "The servers of %s: %s", cs(base), e.what());
 				continue;
@@ -1112,10 +1117,12 @@ struct Module: public interface::Module
 		// rest the next minute
 		int asked = 0;
 		for(const ss_ &base : url_list(src.get("aittas"))){
+			if(stopping())
+				break;
 			json::Value list;
 			try {
-				list = json::load_string(
-						interface::http_get(base+"/api/v1/aitta/list").c_str());
+				list = json::load_string(interface::http_get(
+						base+"/api/v1/aitta/list", nullptr, &m_rstop).c_str());
 			} catch(std::exception &e){
 				log_w(MODULE, "Releases from %s: %s", cs(base), e.what());
 				continue;
@@ -1143,7 +1150,7 @@ struct Module: public interface::Module
 				try {
 					const json::Value one = json::load_string(
 							interface::http_get(base+"/api/v1/aitta/release?id="+
-							id).c_str());
+							id, nullptr, &m_rstop).c_str());
 					const json::Value &r = one.get("release");
 					if(!one.get("ok").is_true() || !r.is_object() ||
 							!addresses.count(norm_url(jstr(r, "home_hearth"))))

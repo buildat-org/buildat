@@ -16,7 +16,7 @@ namespace interface
 	}
 
 	ss_ http_post(const ss_ &url, const ss_ &body, const ss_ &content_type,
-			ss_ *redirect, bool ipv4)
+			ss_ *redirect, bool ipv4, const std::atomic<bool> *cancel)
 	{
 		throw Exception("HTTP is not available in the web client");
 	}

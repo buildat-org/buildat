@@ -139,7 +139,10 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, std::set<ss_>> m_blocked;
 	std::thread m_thread;
 	std::condition_variable m_wake;
-	bool m_stop = false;
+	// Atomic as http_post reads it: the stop joins m_thread, which an
+	// announce to a Starport that does not answer held up to two minutes
+	// ([STARPORT_SHUTDOWN_WAL])
+	std::atomic<bool> m_stop{false};
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -499,13 +502,15 @@ struct Module: public interface::Module, public Interface
 				c = m_config.deepcopy();
 			}
 			for(const ss_ &url : delist)
-				withdraw(url);
+				if(!m_stop)
+					withdraw(url);
 			// A change announced just after the last announce is refused as
 			// too soon; that one is tried again shortly, not in 5 minutes
 			bool soon = false;
 			if(is_on(c))
 				for(const ss_ &url : urls_of(c))
-					soon |= !announce(url, c);
+					if(!m_stop)
+						soon |= !announce(url, c);
 			std::unique_lock<std::mutex> lock(m_mutex);
 			const ss_ text = m_config_text;
 			const auto until = std::chrono::steady_clock::now() +
@@ -635,7 +640,8 @@ struct Module: public interface::Module, public Interface
 			m_blocked.erase(url);
 		}
 		try {
-			interface::http_post(url+"/api/v1/delist", body.stringify());
+			interface::http_post(url+"/api/v1/delist", body.stringify(),
+					"application/json", nullptr, false, &m_stop);
 			log_i(MODULE, "Withdrawn from %s", cs(url));
 		} catch(std::exception &e){
 			log_w(MODULE, "Withdrawing from %s: %s", cs(url), e.what());
@@ -740,7 +746,7 @@ struct Module: public interface::Module, public Interface
 			// IPv4 player cannot reach ([DUAL_STACK])
 			answer = interface::http_post(url+"/api/v1/announce",
 					body.stringify(), "application/json", nullptr,
-					!body.get("address").is_string());
+					!body.get("address").is_string(), &m_stop);
 		} catch(std::exception &e){
 			log_w(MODULE, "Announce to %s: %s", cs(url), e.what());
 			std::lock_guard<std::mutex> lock(m_mutex);

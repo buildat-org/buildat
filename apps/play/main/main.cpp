@@ -24,6 +24,7 @@
 #include "interface/event.h"
 #include "interface/http.h"
 #include "network/api.h"
+#include <atomic>
 #include <condition_variable>
 #include <cstdlib>
 #include <mutex>
@@ -63,7 +64,9 @@ struct Module: public interface::Module
 	std::set<ss_> m_allowed;
 	std::mutex m_mutex;
 	std::condition_variable m_wake;
-	bool m_stop = false;
+	// Atomic as http_get reads it: the stop joins m_fetcher, which a list
+	// that does not answer held up to two minutes ([STARPORT_SHUTDOWN_WAL])
+	std::atomic<bool> m_stop{false};
 	up_<std::set<ss_>> m_fetched; // the fetcher's, taken on a tick
 	std::thread m_fetcher;
 
@@ -137,7 +140,7 @@ struct Module: public interface::Module
 			up_<std::set<ss_>> got(new std::set<ss_>());
 			try {
 				const json::Value v = json::load_string(
-						interface::http_get(url).c_str());
+						interface::http_get(url, nullptr, &m_stop).c_str());
 				const json::Value &l = v.get("list");
 				for(unsigned i = 0; l.is_array() && i < l.size(); i++){
 					const json::Value &s = l.at(i);
@@ -156,7 +159,7 @@ struct Module: public interface::Module
 			if(got)
 				m_fetched = std::move(got);
 			if(m_wake.wait_for(lock, std::chrono::seconds(ok ? LIST_EVERY_S :
-					30), [this](){ return m_stop; }))
+					30), [this](){ return m_stop.load(); }))
 				return;
 		}
 	}
