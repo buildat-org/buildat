@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~35 s (2026-10-28)
+# cost: ~40 s (2026-10-28)
 # covers: apps/aitta/main/main.cpp src/server/confine.cpp src/server/web/pre.js src/client/web/index.html client/core/aitta/init.lua builtin/network/network.cpp
 # [WEB_LOCAL_AITTA]: a package whose server modules are .wasm, published
 # to a local (boxed) Aitta and played in the page.
@@ -17,6 +17,9 @@
 #   2c. A build script starting processes without end: stopped at the
 #      build's cap (512 tasks in its user namespace), the build failed,
 #      Aitta answering meanwhile, nothing left.
+#   2d. A build script making files without end (to 300000, past the
+#      build's 200000): ended by the build's PID 1, which measures the job
+#      directory each second (RLIMIT_FSIZE caps one file only).
 #   3. A package with a C++ module: listed, not in the page.
 #   4. A play server's page (headless Chrome) with that Aitta in its
 #      settings, at #run=tester/rusty: installed, its .wasm fetched and
@@ -256,6 +259,31 @@ left=$(pgrep -f "${tok}_" | tr '\n' ' ')
 curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$P/api/v1/aitta/list" |
 	grep -q 200 || fail "Aitta does not answer after the fork bomb"
 echo "ok: a build's processes stop at its cap; the build failed, Aitta answered, nothing left"
+
+# 2d. [WEB_LOCAL_AITTA_CPP] A build script filling its directory: ended
+mkdir -p "$t/fill/fill/server/src"
+cp "$t/linger/linger/meta.json" "$t/fill/fill/meta.json"
+sed 's/probe/fill/' "$t/probe/probe/server/Cargo.toml" > "$t/fill/fill/server/Cargo.toml"
+cat > "$t/fill/fill/server/build.rs" <<'EOF2'
+fn main() {
+	let dir = std::env::var("OUT_DIR").unwrap();
+	for i in 0..300000 {
+		if std::fs::write(format!("{}/{}", dir, i), b"").is_err() {
+			panic!("FILL stopped at {}", i);
+		}
+	}
+	panic!("FILL made all 300000");
+}
+EOF2
+sed 's/linger/fill/' "$t/linger/linger/server/src/lib.rs" > "$t/fill/fill/server/src/lib.rs"
+publish "$t/fill" fill
+wait_for_log "$t/srv.log" "web build of tester/fill/1.0.0: " 120 ||
+	fail "no web build of fill ($t/srv.log)"
+grep -aq "the build: its directory went past 3072 MiB or 200000 files; ended" "$t/srv.log" ||
+	fail "fill was not ended at its cap: $(grep -a -A20 "web build of tester/fill" "$t/srv.log" | tail -20)"
+grep -aq "web build of tester/fill/1.0.0: failed" "$t/srv.log" || fail "fill was built"
+grep -aq "FILL made all" "$t/srv.log" && fail "fill made all its files"
+echo "ok: a build filling its directory is ended at its cap"
 
 # 3.
 mkdir -p "$t/cpp"

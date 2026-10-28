@@ -423,6 +423,41 @@ static const rlim_t BUILD_FILE = (rlim_t)256 << 20;
 // used: a host seldom delegates one to Aitta's own cgroup, and this
 // count is already the build's alone
 static const rlim_t BUILD_NPROC = 512;
+// [WEB_LOCAL_AITTA_CPP] Its job directory: at most this many bytes
+// (blocks used) and files. RLIMIT_FSIZE caps a file, not how many there
+// are; the build's PID 1 measures the directory each second and ends the
+// build past either.
+static const uint64_t BUILD_DISK = (uint64_t)3 << 30;
+static const uint64_t BUILD_FILES = 200000;
+
+// The bytes (blocks) and entries under the directory fd, links not
+// followed; stops counting past the caps
+static void tree_use(int dir, uint64_t &bytes, uint64_t &files)
+{
+	DIR *d = fdopendir(dir);
+	if(!d){
+		close(dir);
+		return;
+	}
+	while(struct dirent *e = readdir(d)){
+		if(!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+			continue;
+		struct stat st;
+		if(fstatat(dirfd(d), e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+			continue;
+		files++;
+		bytes += (uint64_t)st.st_blocks * 512;
+		if(bytes > BUILD_DISK || files > BUILD_FILES)
+			break;
+		if(S_ISDIR(st.st_mode)){
+			const int sub = openat(dirfd(d), e->d_name, O_RDONLY |
+					O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+			if(sub >= 0)
+				tree_use(sub, bytes, files);
+		}
+	}
+	closedir(d);
+}
 
 int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 {
@@ -532,6 +567,35 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 	if(!why.empty()){
 		log_e("wasm", "the build is not made outside its box: %s", cs(why));
 		return 3;
+	}
+	// The build itself in a child; this one, the namespace's PID 1,
+	// measures the job directory each second and ends everything past its
+	// caps (by exiting)
+	fflush(stdout);
+	const pid_t work = fork();
+	if(work < 0)
+		return 2;
+	if(work > 0){
+		for(;;){
+			int status = 0;
+			const pid_t r = waitpid(work, &status, WNOHANG);
+			if(r == work)
+				return WIFEXITED(status) ? WEXITSTATUS(status) : 4;
+			if(r < 0 && errno != EINTR)
+				return 4;
+			uint64_t bytes = 0, files = 0;
+			const int d = open(job.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+			if(d >= 0)
+				tree_use(d, bytes, files);
+			if(bytes > BUILD_DISK || files > BUILD_FILES){
+				log_e("wasm", "the build: its directory went past %i MiB "
+						"or %i files; ended", (int)(BUILD_DISK >> 20),
+						(int)BUILD_FILES);
+				fflush(stdout);
+				_exit(5);
+			}
+			usleep(1000000);
+		}
 	}
 	// The release's modules: its directories with a meta.json, by a plain
 	// name; each server .wasm to out/<module>.server.wasm, each wasm/ to
