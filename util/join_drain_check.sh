@@ -8,8 +8,7 @@
 # client joins https://127.0.0.1 and the world's first 200 chunks are in
 # its scene within 15 s of "vanilla client ready" (12.5 s; 42 s with a
 # read of one TLS record an update, 2026-10-11). Its TLS log says how the
-# bytes came. netsim's --delay holds each 4 KB in turn, 200 KB/s at 20
-# ms, so the link is its rate alone.
+# bytes came. No --delay: the link is its rate alone.
 # Needs mineclone2 in the desk's games.
 #   util/join_drain_check.sh
 set -u
