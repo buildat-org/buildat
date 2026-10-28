@@ -444,4 +444,54 @@ do
 			ui_made .. " elements, " .. moves .. " deep moves refused")
 end
 
+-- [SAFE_UNSUB_FOREIGN]: the client's own handlers are not a script's
+-- to remove. Their names are no secret -- the [UI_UAF] guard's, the F9
+-- trust overlay's, a numbered one the client subscribed -- and an
+-- unsubscribe of each drops nothing, by name or through uistack's pop;
+-- the guard still marks a removed element's wrapper dead after them.
+-- The script's own subscription still goes.
+do
+	local function guard_holds()
+		local e = magic.ui.root:CreateChild("Text")
+		e:Remove()
+		local ok, err = pcall(function() return e:GetName() end)
+		return not ok and tostring(err):find("was removed", 1, true) ~= nil
+	end
+	assert(guard_holds(), "the UI guard is off before anything was tried")
+	-- uistack's pop unsubscribes its entry's list, which is not the
+	-- script's to write
+	local holder = magic.ui.root:CreateChild("UIElement")
+	local st = require("buildat/core/uistack").UIStack(holder)
+	local el = st:push({})
+	pcall(function()
+		table.insert(el.event_subscriptions, {event_name = "ElementRemoved",
+				cb_name = "__buildat_ui_dead"})
+	end)
+	st:pop(el)
+	holder:Remove()
+	assert(guard_holds(), "a pop unsubscribed the UI guard")
+	local foreign = {{"ElementRemoved", "__buildat_ui_dead"},
+		{"ElementAdded", "__buildat_ui_dead"},
+		{"Update", "__buildat_ui_parked"},
+		{"KeyDown", "__buildat_trust_f9"}}
+	-- The first three the client subscribes (urho3d's mouse capture),
+	-- before any script runs
+	for i, e in ipairs({"KeyDown", "MouseButtonDown", "InputFocus"}) do
+		foreign[#foreign + 1] = {e, "__buildat_sandbox_callback_" .. i}
+	end
+	local tried = 0
+	for _, c in ipairs(foreign) do
+		local n = magic.UnsubscribeFromEvent(c[1], c[2])
+		assert(n == 0, "a script unsubscribed the client's " .. c[1] ..
+				" handler " .. c[2] .. " (" .. tostring(n) .. ")")
+		tried = tried + 1
+	end
+	assert(guard_holds(), "the UI guard is off after the unsubscribes")
+	local own = magic.SubscribeToEvent("Update", function() end)
+	assert(magic.UnsubscribeFromEvent("Update", own) == 1,
+			"a script's own subscription did not go")
+	log:info("wrapped: " .. tried .. " of the client's handlers kept, " ..
+			"the UI guard holds, the script's own unsubscribed")
+end
+
 return true

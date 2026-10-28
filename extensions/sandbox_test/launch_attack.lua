@@ -170,6 +170,13 @@ function M.run()
 				end
 			end
 			log:info("launch sandbox: secret field writes refused: " .. refused)
+			-- [SAFE_UNSUB_FOREIGN] And its Return: Urho3D keeps one
+			-- handler per element and event, so a script's subscription
+			-- took the client's login over
+			local took = pcall(magic.SubscribeToEvent, e, "TextFinished",
+					function() end)
+			log:info("launch sandbox: the secret field's TextFinished " ..
+					(took and "TAKEN OVER" or "kept"))
 		end
 	end)
 	-- The one line a check reads

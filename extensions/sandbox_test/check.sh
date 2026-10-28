@@ -2,7 +2,7 @@
 # tier: quick
 # ci
 # cost: 3s (llvmpipe in a container, 2026-09-24; local/run_all/costs corrects it per machine)
-# covers: client/sandbox.lua client/api.lua client/core/urho3d/** src/lua_bindings/**
+# covers: client/sandbox.lua client/api.lua client/core/urho3d/** client/core/uistack/** src/lua_bindings/**
 # (client/api.lua is the sandbox's own surface -- every verb this check
 # tries to reach past, and the ones wrapped.lua exercises)
 # [LAUNCH_SANDBOX]: **the hostile launch UI**. The launch UI is a slot
@@ -100,6 +100,16 @@ if ! grep -aq "launch sandbox: secret field writes refused: 3" "$out/cli.log"; t
 			"$(grep -a "secret field" "$out/cli.log" | tr '\n' ' ')"
 	exit 1
 fi
+# [SAFE_UNSUB_FOREIGN] Its TextFinished stays the client's, and none of
+# the client's global handlers is the script's to unsubscribe
+if ! grep -aq "launch sandbox: the secret field's TextFinished kept" "$out/cli.log"; then
+	echo "FAIL: a script took over the Starport ID dialog's TextFinished"
+	exit 1
+fi
+if ! grep -aq "wrapped: .* of the client's handlers kept" "$out/cli.log"; then
+	echo "FAIL: the unsubscribe case did not run"
+	exit 1
+fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers"
 exit 0

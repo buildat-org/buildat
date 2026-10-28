@@ -374,6 +374,7 @@ static const char *const ATTEMPTS[] = {
 	"a Node's handle as a table",
 	"an environment variable not BUILDAT_-prefixed",
 	"a global event not on the whitelist",
+	"the client's own handlers unsubscribed",
 };
 static const int ATTEMPT_COUNT = sizeof ATTEMPTS / sizeof ATTEMPTS[0];
 static int g_got_through;
@@ -442,6 +443,18 @@ static void refuse()
 			v = Value();
 		break; }
 	case 13: SubscribeToEvent("NotAnEvent"); break;
+	case 14: {
+		// [SAFE_UNSUB_FOREIGN] The client's handlers by their known
+		// names: the UI guard's and the F9 overlay's. Each is kept, so
+		// an element removed under a held handle is read as removed
+		UnsubscribeFromEvent("ElementRemoved", "__buildat_ui_dead");
+		UnsubscribeFromEvent("ElementAdded", "__buildat_ui_dead");
+		UnsubscribeFromEvent("KeyDown", "__buildat_trust_f9");
+		UIElement held = ui().root().CreateChild("UIElement", "held").
+				as<UIElement>();
+		held.Remove();
+		held.GetName();
+		break; }
 	}
 	if(v.kind == Value::NIL || (v.kind == Value::BOOLEAN && !v.boolean)){
 		log("refusal: refused by its answer");

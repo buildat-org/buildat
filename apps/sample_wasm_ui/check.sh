@@ -99,7 +99,7 @@ client_lines()
 			"wasm main: the server answered echo: click 1" \
 			"wasm main: space: the colour is now 1" \
 			"wasm main: the server answered echo: key 1" \
-			"wasm main: refusals: tried 14, got through: 0" \
+			"wasm main: refusals: tried 15, got through: 0" \
 			"wasm main: values: 5 1 90 3 10" \
 			"wasm main: matrix4: 5 6 7 1" \
 			"wasm main: GetDrawables: the cube's node among " \
@@ -125,6 +125,8 @@ client_lines()
 			"trap: buildat.Node.position:Vector3: more than 32 values" \
 			"trap: buildat.magic.ui:UI: its results are 6 bytes, past the buffer's 1" \
 			"trap: buildat.buildat.table_get(table,any):any: not called on a table a call returned" \
+			"trap: buildat.UIElement:GetName():string: " \
+			"UIElement \"held\" was removed" \
 			"wasm unlisted: refused: imports \"buildat.Image:FlipHorizontal():boolean\", which is not one of" \
 			"wasm wrong_sig: refused: imports \"buildat.Node.position:Vector3\", which is not one of"; do
 		grep -aqF "$want" "$log" || fail "no \"$want\" in $log"
