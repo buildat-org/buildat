@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~32 s (2026-10-28)
+# cost: ~35 s (2026-10-28)
 # covers: apps/aitta/main/main.cpp src/server/confine.cpp src/server/web/pre.js src/client/web/index.html client/core/aitta/init.lua builtin/network/network.cpp
 # [WEB_LOCAL_AITTA]: a package whose server modules are .wasm, published
 # to a local (boxed) Aitta and played in the page.
@@ -14,6 +14,9 @@
 #      .wasm says.
 #   2b. A build script leaving a process in a session of its own and a
 #      double-forked one: both end with the build.
+#   2c. A build script starting processes without end: stopped at the
+#      build's cap (512 tasks in its user namespace), the build failed,
+#      Aitta answering meanwhile, nothing left.
 #   3. A package with a C++ module: listed, not in the page.
 #   4. A play server's page (headless Chrome) with that Aitta in its
 #      settings, at #run=tester/rusty: installed, its .wasm fetched and
@@ -213,6 +216,46 @@ grep -aq "web build of tester/linger/1.0.0: built" "$t/srv.log" ||
 left=$(pgrep -f "${tok}_" | tr '\n' ' ')
 [ -n "$left" ] && { CHECK_PIDS+=($left); fail "the build left processes: $left"; }
 echo "ok: what a build script started ended with the build"
+
+# 2c. [AITTA_BUILD_NPROC] A build script that starts processes without
+# end (it stops itself at 2000, well past the build's cap, so it cannot
+# hurt this machine): refused past the cap, the build fails, Aitta answers
+# meanwhile, and nothing of it is left
+mkdir -p "$t/forks/forks/server/src"
+cp "$t/linger/linger/meta.json" "$t/forks/forks/meta.json"
+sed 's/probe/forks/' "$t/probe/probe/server/Cargo.toml" > "$t/forks/forks/server/Cargo.toml"
+cat > "$t/forks/forks/server/build.rs" <<EOF
+use std::process::{Command, Stdio};
+fn main() {
+	let mut kids = Vec::new();
+	while kids.len() < 2000 {
+		match Command::new("sh").args(["-c", "sleep 600; :", "${tok}_bomb"])
+				.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+			Ok(c) => kids.push(c),
+			Err(e) => panic!("FORKS stopped at {}: {}", kids.len(), e),
+		}
+	}
+}
+EOF
+sed 's/linger/forks/' "$t/linger/linger/server/src/lib.rs" > "$t/forks/forks/server/src/lib.rs"
+publish "$t/forks" forks
+for i in $(seq 120); do
+	grep -aq "web build of tester/forks/1.0.0: " "$t/srv.log" && break
+	curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$P/api/v1/aitta/list" |
+		grep -q 200 || fail "Aitta did not answer during the fork bomb's build"
+	sleep 1
+done
+grep -aq "web build of tester/forks/1.0.0: built" "$t/srv.log" &&
+	fail "the fork bomb was built: its 2000 processes had no cap"
+grep -aq "web build of tester/forks/1.0.0: failed" "$t/srv.log" ||
+	fail "no web build of forks ($t/srv.log)"
+grep -aom1 "FORKS stopped at [0-9]*: .*" "$t/srv.log" ||
+	fail "forks failed, not at the cap: $(grep -a -A20 "web build of tester/forks" "$t/srv.log" | tail -20)"
+left=$(pgrep -f "${tok}_" | tr '\n' ' ')
+[ -n "$left" ] && { CHECK_PIDS+=($left); fail "the fork bomb left processes: $left"; }
+curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$P/api/v1/aitta/list" |
+	grep -q 200 || fail "Aitta does not answer after the fork bomb"
+echo "ok: a build's processes stop at its cap; the build failed, Aitta answered, nothing left"
 
 # 3.
 mkdir -p "$t/cpp"

@@ -415,6 +415,14 @@ static const unsigned BUILD_WALL_S = 300;
 static const rlim_t BUILD_CPU_S = 600;
 static const rlim_t BUILD_MEM = (rlim_t)4 << 30;
 static const rlim_t BUILD_FILE = (rlim_t)256 << 20;
+// [AITTA_BUILD_NPROC] Its processes and threads at once (RLIMIT_NPROC).
+// The kernel (5.14+) counts it per user namespace: only the build's own
+// tasks, not the rest of Aitta's uid, and the build cannot raise it.
+// simplified: an older kernel counts the uid's tasks across the host, so
+// there every build fails closed past this many. A pids cgroup is not
+// used: a host seldom delegates one to Aitta's own cgroup, and this
+// count is already the build's alone
+static const rlim_t BUILD_NPROC = 512;
 
 int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 {
@@ -440,8 +448,6 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 	// refused by AppArmor; BUILDAT_BUILD_NO_PIDNS=1 acts so), nothing is
 	// built: a subreaper could not end them either, the box refusing
 	// kill() of any process but Aitta itself.
-	// simplified: no process count limit (RLIMIT_NPROC counts all of the
-	// user's processes); a dedicated user for Aitta is the upgrade
 	const char *no_pidns = getenv("BUILDAT_BUILD_NO_PIDNS");
 	if(no_pidns || unshare(CLONE_NEWUSER | CLONE_NEWPID) != 0){
 		log_e("wasm", "the build is not made: no PID namespace for it (%s), "
@@ -464,7 +470,11 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 	alarm(BUILD_WALL_S);
 	const struct rlimit cpu = {BUILD_CPU_S, BUILD_CPU_S},
 			mem = {BUILD_MEM, BUILD_MEM}, file = {BUILD_FILE, BUILD_FILE},
-			core_size = {0, 0};
+			core_size = {0, 0}, nproc = {BUILD_NPROC, BUILD_NPROC};
+	if(setrlimit(RLIMIT_NPROC, &nproc) != 0)
+		return 2;
+	log_i("wasm", "the build's process cap: %i in its user namespace "
+			"(RLIMIT_NPROC)", (int)BUILD_NPROC);
 	setrlimit(RLIMIT_CPU, &cpu);
 	setrlimit(RLIMIT_AS, &mem);
 	setrlimit(RLIMIT_FSIZE, &file);
