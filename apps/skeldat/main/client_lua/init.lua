@@ -24,7 +24,20 @@ end
 local physics = load("main/player.lua")
 
 local scene = replicate.main_scene
+-- **Fitted to what the client got** ([WEB_MESH_REST]), as builtin/
+-- voxelworld's defaults are: the world within 160 took the web client to
+-- 735 MB, within 128 to 531 MB and within 96 to 443 MB (WebKit,
+-- 2026-10-28, a new world's spawn walked 30 s), so 128 where the memory is
+-- 768 MB or less and 96 where it is 512 MB or less.
+-- simplified: steps by hand from those measures, and no LOD (the far part
+-- is not drawn by skeldat's own shaders then)
+local resources = buildat.resources and buildat.resources() or {}
 local FAR_CLIP = 160
+if resources.memory_mb and resources.memory_mb <= 512 then
+	FAR_CLIP = 96
+elseif resources.memory_mb and resources.memory_mb <= 768 then
+	FAR_CLIP = 128
+end
 local POINT_RANGE = 4.5
 local POINT_STEP = 0.02
 -- The sky's render and its pbr light's rules, extensions/sky_render
@@ -568,9 +581,16 @@ local function watch_near(dt)
 		-- Chunk c holds the voxels c * size to (c + 1) * size - 1
 		local x0, y0, z0 = (c0.x + dx) * sz.x, (c0.y + dy) * sz.y,
 				(c0.z + dz) * sz.z
+		-- and within the mesh queue's reach (voxelworld.undrawn_around()'s
+		-- rule): at a view range of 96 a corner of the 5^3 is past it, never
+		-- meshed, and the placing never said it was drawn
+		local ex, ey, ez = x0 + sz.x / 2 - eye.x, y0 + sz.y / 2 - eye.y,
+				z0 + sz.z / 2 - eye.z
 		if y0 >= box.y0 and y0 + sz.y - 1 <= box.y1 and
 				x0 >= -box.half and x0 + sz.x <= box.half and
-				z0 >= -box.half and z0 + sz.z <= box.half then
+				z0 >= -box.half and z0 + sz.z <= box.half and
+				math.sqrt(ex * ex + ey * ey + ez * ez) <=
+						voxelworld.camera_far_clip * 1.2 then
 			total = total + 1
 			if not voxelworld.is_chunk_drawn(buildat.Vector3(c0.x + dx,
 					c0.y + dy, c0.z + dz)) then
