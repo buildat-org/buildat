@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~10 min (2026-10-27)
-# covers: apps/hillclimb/** src/lua_bindings/wasm.cpp src/server/wasm_build.cpp extensions/physical_sky/init.lua extensions/sky_render/**
+# covers: apps/hillclimb/** src/interface/noise.h src/lua_bindings/wasm.cpp src/server/wasm_build.cpp extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
 # same hill, the slope's angle, the pads flat and long enough, the track
@@ -92,7 +92,7 @@ J
 	exit 0
 fi
 
-g++ -std=c++11 -O1 -DHILL_TEST -x c++ "$app/main/hill.h" -o "$t/hill_test" \
+g++ -std=c++11 -O1 -DHILL_TEST -I "$here/src" -x c++ "$app/main/hill.h" -o "$t/hill_test" \
 	2> "$t/hill_build.log" || fail "hill.h self test did not build: $(head -3 "$t/hill_build.log")"
 "$t/hill_test" "$t" || fail "hill.h self test"
 g++ -std=c++11 -O1 -DGROUND_TEST -x c++ "$app/main/ground.h" -o "$t/ground_test" \
