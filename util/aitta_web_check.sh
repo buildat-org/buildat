@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~25 s (2026-10-28)
+# cost: ~32 s (2026-10-28)
 # covers: apps/aitta/main/main.cpp src/server/confine.cpp src/server/web/pre.js src/client/web/index.html client/core/aitta/init.lua builtin/network/network.cpp
 # [WEB_LOCAL_AITTA]: a package whose server modules are .wasm, published
 # to a local (boxed) Aitta and played in the page.
@@ -12,6 +12,8 @@
 #      Aitta's directory, and opens a TCP and a UDP socket (all of which
 #      Aitta's box lets Aitta do but the TCP): each refused, which its
 #      .wasm says.
+#   2b. A build script leaving a process in a session of its own and a
+#      double-forked one: both end with the build.
 #   3. A package with a C++ module: listed, not in the page.
 #   4. A play server's page (headless Chrome) with that Aitta in its
 #      settings, at #run=tester/rusty: installed, its .wasm fetched and
@@ -19,6 +21,8 @@
 #      server for packages (web/local/_aitta) on it, the client joins it,
 #      the cube drawn and a key answered by the server's .wasm on the
 #      browser's wasm.
+#   5. 2b again where the host gives the build no PID namespace
+#      (BUILDAT_BUILD_NO_PIDNS=1): Aitta's records copied to a second one.
 # Needs web/ (util/build_web.sh), web/local/_aitta
 # (util/build_web_server.sh "$PWD/src/server/web/_aitta"), cargo with the
 # wasm32-unknown-unknown target, and a display for the key's bind.
@@ -44,6 +48,7 @@ AITTA_ENV_SECRET=1 start_server "$t/srv.log" "setup code" 60 auto \
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
+aitta_pid=$SERVER_PID
 grep -aq "The server is sandboxed" "$t/srv.log" || fail "Aitta is not boxed"
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
@@ -172,6 +177,47 @@ echo "the build script: $said"
 [ -e "$t/srv/apps/aitta/written_by_build" ] && fail "the build wrote outside its box"
 echo "ok: a build script reads, writes and connects nowhere outside its box"
 
+# 2b. [AITTA_BUILD_LEFTOVERS] What a build script starts ends with the
+# build: a process in a session of its own and a double-forked one, both
+# sleeping, are gone once Aitta has the build's result
+tok=aitta_linger_${t##*.}
+mkdir -p "$t/linger/linger/server/src"
+echo '{"engine_api": 2, "disable_cpp": true, "server_wasm": {"source": "server", "imports": []}}' \
+	> "$t/linger/linger/meta.json"
+sed 's/probe/linger/' "$t/probe/probe/server/Cargo.toml" > "$t/linger/linger/server/Cargo.toml"
+cat > "$t/linger/linger/server/build.rs" <<EOF
+use std::process::{Command, Stdio};
+fn main() {
+	for args in [&["-f", "sh", "-c", "sleep 600; :", "${tok}_setsid"][..],
+			&["sh", "-c", "(sleep 600; :) &", "${tok}_fork"][..]] {
+		let mut c = if args[0] == "-f" { Command::new("setsid") } else { Command::new(args[0]) };
+		c.args(if args[0] == "-f" { args } else { &args[1..] });
+		c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+		assert!(c.status().unwrap().success());
+	}
+}
+EOF
+cat > "$t/linger/linger/server/src/lib.rs" <<'EOF'
+#![no_std]
+#[no_mangle]
+pub extern "C" fn linger() -> u32 { 1 }
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo) -> ! { loop {} }
+EOF
+# linger_left <name> <server log>: built, and nothing of it left
+linger_left(){
+	publish "$t/linger" $1
+	wait_for_log "$2" "web build of tester/$1/1.0.0: " 120 ||
+		fail "no web build of $1 ($2)"
+	grep -aq "web build of tester/$1/1.0.0: built" "$2" ||
+		fail "$1 was not built: $(grep -a -A20 "web build of tester/$1" "$2" | tail -20)"
+	left=$(pgrep -f "${tok}_" | tr '\n' ' ')
+	[ -n "$left" ] && { CHECK_PIDS+=($left); fail "$1's build left processes: $left"; }
+	return 0
+}
+linger_left linger "$t/srv.log"
+echo "ok: what a build script started ended with the build"
+
 # 3.
 mkdir -p "$t/cpp"
 cp -r "$here/apps/sample_module_calls/test1" "$t/cpp/"
@@ -187,6 +233,7 @@ BUILDAT_LUANTI_LIST=http://127.0.0.1:9 start_server "$t/play.log" "Listening at"
 	fail "the play server did not start"
 CHECK_PIDS+=($SERVER_PID)
 PP=$SERVER_PORT
+play_pid=$SERVER_PID
 curl -s "http://127.0.0.1:$PP/" | grep -q "var local_apps = \[.*_aitta" &&
 	fail "the page offers the engine's _aitta as an app"
 set_js="FS.writeFile('/buildat/user/starport.json', JSON.stringify({aittas: ['http://127.0.0.1:$P'], filters: {unreviewed: true}})); new Promise(r => Module.buildatSave(() => r('set')))"
@@ -221,4 +268,18 @@ for want in "server: .*Loading module main from /installed/tester/rusty/1.0.0/ma
 		"server: .*wasm main: key from peer 1: count 1"; do
 	grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 done
-echo "PASS: Aitta builds a release's .wasm at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ for it; the page installs the release and runs it with the engine's server for packages, the client joined and a key answered"
+# 5. 2b where the host gives a build no PID namespace: the same Aitta,
+# its records copied, the build ending its leftovers itself
+kill $aitta_pid $play_pid
+for p in $aitta_pid $play_pid; do
+	for i in $(seq 50); do kill -0 $p 2>/dev/null || break; sleep 0.2; done
+done
+cp -a "$t/srv" "$t/srv2"
+BUILDAT_BUILD_NO_PIDNS=1 start_server "$t/srv2.log" "Listening at" 60 auto \
+	bin/buildat_server -m ../apps/aitta -D "$t/srv2" -l 3 ||
+	fail "the second Aitta did not start"
+CHECK_PIDS+=($SERVER_PID)
+P=$SERVER_PORT
+linger_left linger2 "$t/srv2.log"
+echo "ok: without a PID namespace too"
+echo "PASS: Aitta builds a release's .wasm at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ for it, ends every process a build leaves; the page installs the release and runs it with the engine's server for packages, the client joined and a key answered"

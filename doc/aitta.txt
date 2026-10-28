@@ -71,7 +71,10 @@ or clang to wasm32), in a box of the build's own (Linux: Landlock and
 seccomp) that reads the system's programs and libraries, the toolchain
 and the engine's headers and crates, writes its own directory, opens no
 socket and gets no environment of Aitta's; 300 s, 600 s of CPU and 4 GiB
-a process, two compiles at once. A crate's dependencies are path ones
+a process, two compiles at once. Every process the build starts ends
+with it: the build runs in a PID namespace of its own, or where the host
+allows none, ends what is left with kill(-1) in its box (Landlock ABI 6;
+on an older kernel without user namespaces nothing is built). A crate's dependencies are path ones
 (no network). Built, the release says "web": true and names each .wasm
 in "web_wasm" ({"<module>.server.wasm" or "<module>.wasm": its sha256});
 a failed build leaves it out of the page, Aitta's log saying why. An

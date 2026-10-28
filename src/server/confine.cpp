@@ -40,7 +40,8 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	return "this platform has no box yet";
 }
-ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir,
+		bool kill_all)
 {
 	return "this platform has no box for a build";
 }
@@ -49,7 +50,8 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 #elif defined(_WIN32)
 // confine_windows.cpp; no box for a build there
 namespace server {
-ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir,
+		bool kill_all)
 {
 	return "this platform has no box for a build";
 }
@@ -62,6 +64,9 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 #include <linux/audit.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
+#include <sched.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -243,8 +248,12 @@ static int count_threads()
 // use, is refused, and truncate by path (see below). The rest is
 // Landlock's.
 // no_sockets ([WEB_LOCAL_AITTA], a publish's build): no socket of any
-// family, so nothing reaches a network, TCP or UDP or a name server
-static ss_ install_seccomp(bool no_sockets = false)
+// family, so nothing reaches a network, TCP or UDP or a name server.
+// kill_all: kill(-1) too, made only where Landlock scopes signals (ABI
+// 6): it reaches this process's own box and the boxes inside it, which a
+// build without a PID namespace ends its leftovers with
+// ([AITTA_BUILD_LEFTOVERS])
+static ss_ install_seccomp(bool no_sockets = false, bool kill_all = false)
 {
 #if defined(__x86_64__)
 	const uint32_t arch = AUDIT_ARCH_X86_64;
@@ -262,7 +271,8 @@ static ss_ install_seccomp(bool no_sockets = false)
 
 	// Written with named targets and the offsets worked out after: a
 	// hand-counted jump is how a filter goes to the wrong place
-	enum Label { NONE = -1, L_ENOSYS, L_PERM, L_SOCKET, L_PIDCHECK, NUM_LABELS };
+	enum Label { NONE = -1, L_ENOSYS, L_PERM, L_SOCKET, L_KILL, L_PIDCHECK,
+			NUM_LABELS };
 	struct Ins { struct sock_filter f; int jt, jf; };
 	std::vector<Ins> prog;
 	int at[NUM_LABELS];
@@ -294,7 +304,7 @@ static ss_ install_seccomp(bool no_sockets = false)
 	// truncate what they have open, which the write rules cover
 	jeq(__NR_truncate, L_PERM, NONE);
 	jeq(__NR_socket, L_SOCKET, NONE);
-	jeq(__NR_kill, L_PIDCHECK, NONE);
+	jeq(__NR_kill, L_KILL, NONE);
 	jeq(__NR_tgkill, L_PIDCHECK, NONE);
 	jeq(__NR_rt_sigqueueinfo, L_PIDCHECK, NONE);
 	jeq(__NR_rt_tgsigqueueinfo, L_PIDCHECK, NONE);
@@ -309,6 +319,14 @@ static ss_ install_seccomp(bool no_sockets = false)
 			NONE, NONE});
 	stmt(BPF_RET | BPF_K, deny_unix);
 	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+	// kill(-1, ...): the low word alone, as the kernel reads a pid_t
+	label(L_KILL);
+	if(kill_all){
+		stmt(BPF_LD | BPF_W | BPF_ABS, arg0_lo);
+		prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, 0xffffffff, 0, 1),
+				NONE, NONE});
+		stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
+	}
 	// The first argument is this pid, all 64 bits of it: not 0 (the
 	// group), not -1 (everyone), not another process
 	label(L_PIDCHECK);
@@ -343,7 +361,8 @@ static ss_ install_seccomp(bool no_sockets = false)
 	return "";
 }
 
-ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir,
+		bool kill_all)
 {
 	if(count_threads() != 1)
 		return "the build's box is made before any thread starts";
@@ -351,6 +370,9 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 			LANDLOCK_CREATE_RULESET_VERSION);
 	if(abi < 1)
 		return ss_("Landlock is not available (")+strerror(errno)+")";
+	if(kill_all && abi < 6)
+		return "no PID namespace, and Landlock ABI "+itos(abi)+" does not "
+				"scope signals: nothing would end what the build leaves";
 	RulesetAttr attr;
 	attr.handled_access_fs = FS_ABI1;
 	if(abi >= 2)
@@ -396,7 +418,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 		return "Landlock: "+why;
 	}
 	close(rs.fd);
-	const ss_ seccomp = install_seccomp(true);
+	const ss_ seccomp = install_seccomp(true, kill_all);
 	if(!seccomp.empty())
 		return seccomp;
 	for(const ss_ &r : rs.refused)
@@ -413,6 +435,14 @@ static const rlim_t BUILD_CPU_S = 600;
 static const rlim_t BUILD_MEM = (rlim_t)4 << 30;
 static const rlim_t BUILD_FILE = (rlim_t)256 << 20;
 
+// Every process in this one's box but itself, reaped (a subreaper's,
+// each), until none is left: a fork racing a pass is caught by the next
+static void kill_all_left()
+{
+	for(int i = 0; i < 100 && kill(-1, SIGKILL) == 0; i++)
+		while(waitpid(-1, nullptr, 0) > 0 || errno == EINTR){}
+}
+
 int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 {
 	// Nothing of Aitta's: an open file or socket it left without
@@ -428,10 +458,36 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 	if(!freopen((job+"/log").c_str(), "w", stdout))
 		return 2;
 	dup2(fileno(stdout), fileno(stderr));
-	// simplified: the wall clock ends this process alone (a boxed Aitta's
-	// seccomp lets nothing signal another process); what it started is
-	// held to the CPU limit, and a process it left sleeping stays, with no
-	// socket and only the job's directory, which Aitta removes
+	// [AITTA_BUILD_LEFTOVERS] Every process the build starts ends with it,
+	// one in a session of its own or double-forked as well (a boxed Aitta
+	// signals no other process, and it would not know them): the build
+	// runs as PID 1 of a namespace of its own, and when it exits the
+	// kernel kills the rest. Where the host allows no such namespace
+	// (BUILDAT_BUILD_NO_PIDNS=1 tries that way), this process is their
+	// subreaper and ends them with kill(-1), which Landlock's signal
+	// scope keeps to the build's own box.
+	// simplified: no process count limit (RLIMIT_NPROC counts all of the
+	// user's processes); a dedicated user for Aitta is the upgrade
+	const bool pidns = !getenv("BUILDAT_BUILD_NO_PIDNS") &&
+			unshare(CLONE_NEWUSER | CLONE_NEWPID) == 0;
+	if(pidns){
+		fflush(stdout);
+		const pid_t child = fork();
+		if(child < 0)
+			return 2;
+		if(child > 0){
+			// The build's exit status; its namespace is gone by then
+			int status = 0;
+			while(waitpid(child, &status, 0) < 0 && errno == EINTR){}
+			return WIFEXITED(status) ? WEXITSTATUS(status) : 4;
+		}
+		// A namespace's PID 1 ignores a signal it has no handler for
+		signal(SIGALRM, [](int){ _exit(4); });
+	} else if(prctl(PR_SET_CHILD_SUBREAPER, 1) != 0){
+		log_e("wasm", "the build: no PID namespace and no subreaper (%s)",
+				strerror(errno));
+		return 3;
+	}
 	alarm(BUILD_WALL_S);
 	const struct rlimit cpu = {BUILD_CPU_S, BUILD_CPU_S},
 			mem = {BUILD_MEM, BUILD_MEM}, file = {BUILD_FILE, BUILD_FILE},
@@ -489,11 +545,16 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 			cc.empty() ? "" : interface::fs::strip_file_name(
 				interface::fs::strip_file_name(cc)),
 			ld.empty() ? "" : interface::fs::strip_file_name(
-				interface::fs::strip_file_name(ld))}, job);
+				interface::fs::strip_file_name(ld))}, job, !pidns);
 	if(!why.empty()){
 		log_e("wasm", "the build is not made outside its box: %s", cs(why));
 		return 3;
 	}
+	log_i("wasm", "the build's processes end with it: %s", pidns ?
+			"a PID namespace" : "a subreaper and kill(-1) in its box");
+	// In the box now, where kill(-1) reaches the build's processes alone
+	if(!pidns)
+		signal(SIGALRM, [](int){ kill_all_left(); _exit(4); });
 	// The release's modules: its directories with a meta.json, by a plain
 	// name; each server .wasm to out/<module>.server.wasm, each wasm/ to
 	// out/<module>.wasm, the names the page's server looks for
@@ -525,6 +586,8 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path)
 			}
 		}
 	}
+	if(!pidns)
+		kill_all_left();
 	return ok ? 0 : 1;
 }
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
@@ -703,7 +766,7 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 		return "Landlock: "+why;
 	}
 	close(rs.fd);
-	const ss_ seccomp = install_seccomp();
+	const ss_ seccomp = install_seccomp(false, abi >= 6);
 	if(!seccomp.empty())
 		return seccomp;
 
