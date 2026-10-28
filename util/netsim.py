@@ -12,8 +12,12 @@
 #       --delay 80 --rate 2000 --loss 2 --seed 1
 #   util/netsim.py --check      # the self-check, no sockets
 #
-# It lies only about TCP's congestion window, which the cap stands in
-# for. Hundred-odd lines, asyncio, nothing else.
+# It lies only about TCP's congestion window, which the cap and --window
+# stand in for: at most --window KB are in the pipe each way, by default
+# the cap's worth over the delay and 64 KB of a bottleneck's queue
+# (4 MB without a cap) -- a window of megabytes over a slow cap is
+# seconds of queue, and a game packet behind a download waited them
+# ([FILE_TRANSFER_LATENCY]). Hundred-odd lines, asyncio, nothing else.
 import argparse, asyncio, os, random, socket, sys, time
 
 RTO_MS = 200
@@ -68,21 +72,61 @@ class Link:
         return hold
 
 
-async def pump(reader, writer, link, name, stats):
+async def pump(reader, writer, link, name, stats, window):
+    """One direction as a pipe: each chunk read is held until its time
+    and then written, while the chunks behind it are already on their
+    way. Reading and writing are two tasks, so a delay holds a chunk and
+    not the link: a pump that slept between a read and the next forwarded
+    4 KB a delay, 40 KB/s at 100 ms whatever the cap, and a file's
+    download read as latency-bound ([FILE_TRANSFER_LATENCY]). At most
+    `window` bytes are in the pipe; past it the reader waits, and TCP's
+    own flow control holds the sender, as a window would."""
+    pipe = asyncio.Queue()
+    room = asyncio.Condition()
+    in_pipe = [0]
+
+    async def read_side():
+        try:
+            while True:
+                async with room:
+                    await room.wait_for(lambda: in_pipe[0] < window)
+                data = await reader.read(CHUNK)
+                if not data:
+                    break
+                in_pipe[0] += len(data)
+                await pipe.put((time.monotonic() + link.wait_for(len(data)), data))
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+        await pipe.put((0, None))
+
+    async def write_side():
+        due_last = 0.0
+        try:
+            while True:
+                due, data = await pipe.get()
+                if data is None:
+                    break
+                # In order: a chunk never overtakes the one before it
+                due_last = max(due_last, due)
+                hold = due_last - time.monotonic()
+                if hold > 0:
+                    await asyncio.sleep(hold)
+                writer.write(data)
+                await writer.drain()
+                stats[name] += len(data)
+                async with room:
+                    in_pipe[0] -= len(data)
+                    room.notify_all()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
+    rt = asyncio.ensure_future(read_side())
     try:
-        while True:
-            data = await reader.read(CHUNK)
-            if not data:
-                break
-            hold = link.wait_for(len(data))
-            if hold > 0:
-                await asyncio.sleep(hold)
-            writer.write(data)
-            await writer.drain()
-            stats[name] += len(data)
-    except (ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
+        await write_side()
+    except asyncio.CancelledError:
         pass
     finally:
+        rt.cancel()
         try:
             writer.close()
         except Exception:
@@ -111,7 +155,10 @@ async def serve(args):
         down = Link(args.delay, args.rate, args.loss, rng)
         print("netsim: client connected, shaping delay %d ms, rate %d kbit/s, loss %.1f%%"
               % (args.delay, args.rate, args.loss), flush=True)
-        await asyncio.gather(pump(cr, sw, up, "up", stats), pump(sr, cw, down, "down", stats))
+        window = args.window * 1024 if args.window else \
+            int(up.rate * up.delay) + 64 * 1024 if up.rate else 4 << 20
+        await asyncio.gather(pump(cr, sw, up, "up", stats, window),
+                             pump(sr, cw, down, "down", stats, window))
         print("netsim: client gone; %d up, %d down, stalls %d up %d down"
               % (stats["up"], stats["down"], up.stalls, down.stalls), flush=True)
 
@@ -159,6 +206,9 @@ def main():
     ap.add_argument("--rate", type=float, default=0, help="kbit/s, each way; 0 is no cap")
     ap.add_argument("--loss", type=float, default=0, help="percent per kilobyte, as stalls")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--window", type=int, default=0,
+                    help="KB in the pipe each way at most, a TCP window's "
+                    "stand-in; 0: the cap over the delay and 64 KB, 4 MB uncapped")
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
     if args.check:
