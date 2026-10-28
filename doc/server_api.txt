@@ -92,7 +92,8 @@ meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 "dependencies": [{"module": "network"}, {"module": "x", "optional":
 true}], "reverse_dependencies": [...], "disable_cpp": false,
 "client_main": "init.lua", "client_extensions": ["voxel_light"],
-"kind": "app", "web": true}. An app's module must say
+"server_wasm": {"source": "server", "imports": ["events"], "callable":
+[]}, "kind": "app", "web": true}. An app's module must say
 engine_api, the engine API it is written for (interface::aitta::
 ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 {"engine_api": 2} is the minimum. A key the loader does not know
@@ -105,7 +106,8 @@ script in the module's client_lua/ that the engine runs once on each
 client, when its files first arrive (modules in load order); "wasm" names
 the engine's default instead (builtin/client_lua/client_lua/wasm_main.lua),
 which runs the module's .wasm and nothing else (interface/wasm_api.h).
-client_extensions names extensions (<share>/extensions/<name>) the
+server_wasm makes the module's server half a .wasm instead of C++
+(interface/wasm_server_api.h, below). client_extensions names extensions (<share>/extensions/<name>) the
 server serves for the module's client scripts, which run that copy
 (buildat.run_script_file("<name>/init.lua")) rather than the client's
 bundled one: client_file::serve_extension(). "web": true says the module
@@ -506,8 +508,10 @@ the server builds the module with that copy patched in). Its feature
 cargo build --release --offline for wasm32-unknown-unknown with a
 CARGO_HOME of its own, the C build's wasm features, the same maximum
 memory and panics aborting; so a module's crates are its own and path
-dependencies, not crates.io's. Cached by the hash of wasm/'s files (but
-target/) and buildat_wasm's. cargo is BUILDAT_CARGO, then PATH's, then
+dependencies, not crates.io's: the module's other top-level crates
+(each a directory with a Cargo.toml) are copied beside wasm/, so that
+"../shared" is a crate both halves of a module use. Cached by the hash
+of wasm/'s files (but target/), those crates' and buildat_wasm's. cargo is BUILDAT_CARGO, then PATH's, then
 $CARGO_HOME/bin's and ~/.cargo/bin's; without it, or without the
 wasm32-unknown-unknown target (rustup target add wasm32-unknown-unknown),
 the module is refused, the log saying which.
@@ -528,6 +532,48 @@ longer than BUILDAT_EVENT_MAX. A key is Urho3D's code (SDL's: a letter is
 its lowercase ASCII). A trap in frame() is logged and the next frame
 calls it again; a module the meter stops is called no more. An export's
 name may not begin with buildat_.
+
+interface/wasm_server_api.h -- a server module that is a .wasm, in any
+language that builds one ([SERVER_WASM]). meta.json's "server_wasm":
+{"source": "server", "imports": [groups], "callable": [exports]} says
+the module has no C++: the server builds <source>/ at its start as it
+builds a wasm/ (C and C++ with clang, a Cargo.toml with cargo; cached
+by the hash of the files, the header and for Rust the crate
+buildat_wasm_server, src/interface/rust/buildat_wasm_server) and runs
+it on the client's runtime (src/wasm/engine.cpp: checked and capped,
+metered, translated by wasm2c and compiled with the server's compiler
+in a child process, WAMR's interpreter while that runs), on the
+module's own thread as a C++ module runs. A server without the
+toolchain, or a .wasm that does not check, refuses the module by name,
+and the server does not start the app.
+  The .wasm reaches the server only through the header's imports. Those
+in a group are refused at load, by the import's name, unless
+"imports" grants the group: "events" (core:start, core:tick,
+network:client_connected and network:client_disconnected by name),
+"packets" (the module's own, "<module>:<name>", to and from a peer),
+"storage" (keys and values in a save of the module's own,
+"wasm_<module>", 64 MiB), "scene" (up to 4 scenes of its own, deleted
+when it stops, their nodes by handle, a scene shown to a peer through
+replicate), "voxels" (a voxel world of up to 64 sections in a scene of
+its own, voxel types it defines, voxels set and read in boxes) and
+"calls" (another wasm module's export that its "callable" names,
+bytes in and out). log, time_ms, event_take, drop and call_input/
+call_output are every module's. Each import checks its pointers
+against the module's memory and its handles against the module's own
+table; a check that fails traps the call.
+  The server calls init() once, events() after each event the module
+subscribed to is queued (it takes them with buildat_event_take(); no
+import calls into wasm), and a callable export for another module's
+buildat_call(), on the callee's thread while the caller waits. A module
+in the call's chain is not called again, and one chain runs at a time
+(a new one waits for it at most 100 ms, then is refused). The events
+are little-endian 32-bit words as the client's are: START, TICK (dtime,
+a float's bits), PEER_JOINED and PEER_LEFT (the peer), PACKET (the
+peer, the name's length, the name, the data). A trap is logged and the
+module goes on; a call past its budget (an import's work counts) stops
+the module and the server goes on. The web build does not run a server
+.wasm yet ([WEB_LOCAL_SERVER]): such a module leaves "web" out.
+apps/sample_rust is a module in Rust on both sides.
 
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,
@@ -863,6 +909,7 @@ interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result,
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
 interface/wasm_api.h: buildat_log, buildat_time_ms, buildat_voxels_size, buildat_voxels_read, buildat_geometry_set, buildat_texture_set, buildat_node_get, buildat_node_set, buildat_send_packet, buildat_event_take, buildat_drop, BUILDAT_EVENT_START, BUILDAT_EVENT_KEY_DOWN, BUILDAT_EVENT_KEY_UP, BUILDAT_EVENT_MOUSE_DOWN, BUILDAT_EVENT_MOUSE_UP, BUILDAT_EVENT_MOUSE_MOVE, BUILDAT_EVENT_WHEEL, BUILDAT_EVENT_PACKET, BUILDAT_EVENT_RESIZE, BUILDAT_EVENT_OBJECT, BUILDAT_EVENT_MAX
+interface/wasm_server_api.h: buildat_log, buildat_time_ms, buildat_event_take, buildat_drop, buildat_call_input, buildat_call_output, buildat_event_subscribe, buildat_packet_subscribe, buildat_packet_send, buildat_storage_get, buildat_storage_set, buildat_storage_remove, buildat_scene_create, buildat_scene_peer, buildat_node_create, buildat_node_get, buildat_node_set, buildat_node_remove, buildat_world_create, buildat_voxel_define, buildat_voxels_set, buildat_voxels_read, buildat_call, BUILDAT_SERVER_EVENT_START, BUILDAT_SERVER_EVENT_TICK, BUILDAT_SERVER_EVENT_PEER_JOINED, BUILDAT_SERVER_EVENT_PEER_LEFT, BUILDAT_SERVER_EVENT_PACKET
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write
 ---- end of the generated listing ----

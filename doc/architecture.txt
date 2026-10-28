@@ -139,6 +139,15 @@ Urho3D's UI -- so it suits a game that draws its own world, in C, C++ or
 Rust alone. A module that wants the UI writes its own Lua for it.
 apps/sample_wasm_only and apps/sample_wasm_only_rust are the examples.
 
+A module's server half may be a .wasm too ([SERVER_WASM], meta.json's
+"server_wasm"; doc/server_api.txt, interface/wasm_server_api.h): built
+from its sources at the server's start and run sandboxed on the same
+runtime as the client's, it reaches the server only through the imports
+meta.json grants it -- its packets, its storage, scenes and a voxel
+world of its own, and other wasm modules' callable exports. So a game
+can be one language on both sides, Rust or C, with a crate both halves
+share. apps/sample_rust is the example.
+
 Running a game in the browser
 -----------------------------
 Write the game as a normal server game, and put in wasm/ what is hot,

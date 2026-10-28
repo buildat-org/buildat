@@ -1,7 +1,6 @@
 {
 	"engine_api": 2,
 	"kind": "check",
-	"web": true,
 	"disable_cpp": true,
 	"client_main": "wasm",
 	"server_wasm": {
