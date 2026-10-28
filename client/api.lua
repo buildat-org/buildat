@@ -958,7 +958,7 @@ buildat.safe.discuss_this_server = function(claim)
 	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
-		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 		require("buildat/core/starport").join_with_id(t.hearth)
 	end)
 	return true
@@ -1008,7 +1008,7 @@ buildat.safe.offer_playtest = function(o)
 	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
-		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 		require("buildat/core/aitta").playtest(offer, function(app)
 			launch_grid.screens().start_local_app(app, "")
 		end)
@@ -1142,7 +1142,7 @@ function __buildat_discuss_from_overlay(hearth)
 	local magic = require("buildat/core/urho3d").safe
 	local sub
 	sub = magic.SubscribeToEvent("Update", function()
-		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 		require("buildat/core/starport").join_with_id(hearth_address)
 	end)
 	return true

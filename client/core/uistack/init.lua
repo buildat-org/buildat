@@ -14,9 +14,15 @@ log:info("extension/uistack/init.lua: Loading")
 magic_sandbox.safe.class "UIStackElement" (magic.UIElement)
 local UIStackElement = __buildat_sandbox_environment.UIStackElement
 UIStackElement.HasRecursiveFocus = {}
-UIStackElement.event_subscriptions = {}
 UIStackElement.SubscribeToStackEvent = {}
 assert(UIStackElement)
+-- An entry's SubscribeToStackEvent subscriptions, dropped by its pop:
+-- element -> {{event_name =, cb_name =}, ...}. Kept here and not on the
+-- element, which the script holds and writes ([SAFE_UNSUB_FOREIGN]): a
+-- name it put in the list was unsubscribed by this code, the client's
+-- own handlers included.
+local stack_subscriptions = setmetatable({}, {__mode = "k"})
+local unsubscribe = require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent
 
 local ui_stack_name_i = 1  -- For generating a unique name for each stack
 -- [TAP_BACK] The entries pushed with {tap_outside = false}: a world's own
@@ -181,7 +187,8 @@ function M.UIStack(root)
 		end
 
 		-- Subscribe to event until this stack level is popped out
-		element.event_subscriptions = {}
+		local subscriptions = {}
+		stack_subscriptions[element] = subscriptions
 		function element:SubscribeToStackEvent(event_name, callback)
 			local cb_name = magic.SubscribeToEvent(event_name,
 			function(event_type, event_data)
@@ -196,7 +203,7 @@ function M.UIStack(root)
 				end
 				callback(event_type, event_data)
 			end)
-			table.insert(element.event_subscriptions, {
+			table.insert(subscriptions, {
 				event_name = event_name,
 				cb_name = cb_name
 			})
@@ -266,9 +273,10 @@ function M.UIStack(root)
 		end
 		local top = table.remove(self.stack)
 		log:verbose("UIStack:pop(): "..dump(top:GetName()))
-		for _, sub in ipairs(top.event_subscriptions) do
-			magic.UnsubscribeFromEvent(sub.event_name, sub.cb_name)
+		for _, sub in ipairs(stack_subscriptions[top] or {}) do
+			unsubscribe(sub.event_name, sub.cb_name)
 		end
+		stack_subscriptions[top] = nil
 		--top:SetVisible(false)
 		--top:SetFocus(false)
 		self.root:RemoveChild(top)

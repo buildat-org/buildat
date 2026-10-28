@@ -268,6 +268,22 @@ local sandbox_callback_to_global_function_name = setmetatable({},
 local object_callbacks = {}
 -- The unsafe object -> {name = true}: which entries go with it
 local object_callback_names = setmetatable({}, {__mode = "k"})
+-- **An object's event the client's own code answers is not taken over**
+-- ([SAFE_UNSUB_FOREIGN]): Urho3D keeps one handler per sender and event,
+-- so a subscription on an element replaces the one before it. The
+-- unsafe object -> {event_type = true} for each one the client's code
+-- holds; Safe.SubscribeToEvent on one is refused, whoever asks (who
+-- asks is read from the caller's frame, which a pcall or a tail call
+-- hides).
+local object_events_trusted = setmetatable({}, {__mode = "k"})
+local function mark_trusted_object_event(unsafe_object, event_type)
+	local t = object_events_trusted[unsafe_object]
+	if not t then
+		t = {}
+		object_events_trusted[unsafe_object] = t
+	end
+	t[event_type] = true
+end
 local next_sandbox_global_function_i = 1
 local global_event_mux = {} -- event_type -> { {name=, fn=, sandbox=}, ... }
 -- Set around add_global_event_handler() by a subscription made from the
@@ -367,11 +383,15 @@ local function drop_handlers_of(owner)
 	return n
 end
 
-local function remove_global_event_handler(event_type, cb_name)
+-- Returns how many went. `sandbox_only`: only those a sandboxed
+-- script subscribed ([SAFE_UNSUB_FOREIGN])
+local function remove_global_event_handler(event_type, cb_name, sandbox_only)
 	if not global_event_mux[event_type] then
-		return
+		return 0
 	end
-	drop_entries(event_type, function(e) return e.name == cb_name end)
+	return drop_entries(event_type, function(e)
+		return e.name == cb_name and (e.sandbox or not sandbox_only)
+	end)
 end
 
 -- The keys the client keeps ([CLIENT_KEYS]); safe_classes' Input reads
@@ -424,6 +444,11 @@ function Safe.SubscribeToEvent(x, y, z)
 	if object then
 		if not getmetatable(object) or not getmetatable(object).unsafe then
 			error("SubscribeToEvent(): Object must be sandboxed")
+		end
+		local t = object_events_trusted[getmetatable(object).unsafe]
+		if t and t[sub_event_type] then
+			error("SubscribeToEvent(): the client's own code answers " ..
+					dump(sub_event_type) .. " of this object")
 		end
 	end
 	if not safe_event_def(sub_event_type) then
@@ -568,6 +593,9 @@ function Safe.SubscribeToEvent(x, y, z)
 		end
 		urho_SubscribeToEvent(unsafe_object, sub_event_type, global_callback_name)
 		_G[global_callback_name] = nil
+		if not subscriber_in_sandbox then
+			mark_trusted_object_event(unsafe_object, sub_event_type)
+		end
 	else
 		from_sandbox = subscriber_in_sandbox
 		from_sandbox_owner = subscriber_in_sandbox and sandbox_owner() or nil
@@ -585,18 +613,27 @@ end
 -- matched nothing and the handler went on firing over a screen it had
 -- already removed (2026-09-24: the console's Escape handler, after the
 -- console was closed).
-function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
-	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
+-- **What a script removes is what a script subscribed**
+-- ([SAFE_UNSUB_FOREIGN]): the names are no secret (the client's own
+-- "__buildat_ui_dead", "__buildat_trust_f9", a numbered
+-- "__buildat_sandbox_callback_N"), so this drops only the handlers a
+-- sandboxed script subscribed. The client's code unsubscribes its own
+-- through Unsafe.UnsubscribeFromEvent. Returns how many went.
+local function unsubscribe(sub_event_type, cb_name, caller_environment,
+		sandbox_only)
 	local cb = cb_name
 	if type(cb) == "string" then
-		local caller_environment = getfenv(2)
 		cb = type(caller_environment) == "table" and
 				caller_environment[cb_name] or nil
 	end
 	if type(cb) == "function" then
 		cb_name = sandbox_callback_to_global_function_name[cb] or cb_name
 	end
-	remove_global_event_handler(sub_event_type, cb_name)
+	return remove_global_event_handler(sub_event_type, cb_name, sandbox_only)
+end
+function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
+	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
+	return unsubscribe(sub_event_type, cb_name, getfenv(2), true)
 end
 
 -- A scene drawn into a texture instead of into the window, for a thumbnail:
@@ -748,11 +785,21 @@ function Unsafe.SubscribeToEvent(x, y, z)
 	end
 	if object then
 		urho_SubscribeToEvent(object, event_name, global_callback_name)
+		mark_trusted_object_event(object, event_name)
 	else
 		add_global_event_handler(event_name, global_callback_name,
 				_G[global_callback_name])
 	end
 	return global_callback_name
+end
+
+-- The client's own unsubscribe: any handler of the name (a subscription
+-- the client's code made through Safe.SubscribeToEvent included)
+function Unsafe.UnsubscribeFromEvent(sub_event_type, cb_name)
+	if type(cb_name) == "function" then
+		cb_name = unsafe_callback_to_global_function_name[cb_name] or cb_name
+	end
+	return unsubscribe(sub_event_type, cb_name, getfenv(2), false)
 end
 
 -- The mouse's capture, three ways ([FOCUS_LOG] 4). The game says what it

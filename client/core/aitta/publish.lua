@@ -453,7 +453,7 @@ page_publish = function(message)
 				st.info[url] = nil
 				local sub
 				sub = magic.SubscribeToEvent("Update", function()
-					magic.UnsubscribeFromEvent("Update", sub)
+					require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 					if #h.starport.logged_in_ids() > 0 then
 						h.starport.join_with_id(address)
 					else

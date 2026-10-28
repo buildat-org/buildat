@@ -255,7 +255,7 @@ local function guard_dialog(root, on_changed)
 	local sub = nil
 	local function stop()
 		if sub then
-			magic.UnsubscribeFromEvent("Update", sub)
+			require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 			sub = nil
 		end
 	end
@@ -847,7 +847,7 @@ local function open_socket(is_udp, host, port, cb)
 		if state == "pending" and os.time() - since < TCP_OPEN_WAIT_S then
 			return
 		end
-		magic.UnsubscribeFromEvent("Update", sub)
+		require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
 		if state == "open" then
 			done()
 		else
