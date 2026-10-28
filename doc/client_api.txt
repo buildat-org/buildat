@@ -306,8 +306,9 @@ buildat.horizon_merge(cys, heights, chunk) -> string
   where the module is not there.
 buildat.mesh_backlog() -> number
 - The meshes and other pool tasks added and not done yet. The web client
-  meshes on the frame's own thread a slice a frame, and voxelworld waits
-  while this is long rather than add meshes that would only wait.
+  meshes on workers where its page is cross-origin isolated, and else on
+  the frame's own thread a slice a frame; voxelworld waits while this is
+  long rather than add meshes that would only wait.
 buildat.set_mesh_bounce([r, g, b])
 - The light the unpacked mesher bakes into every face the sky does not
   reach, each channel 0...1, for meshes made after it, process-wide; no

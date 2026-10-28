@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstring>
 #include <mutex>
+#include <atomic>
 #define MODULE "atlas"
 
 namespace interface {
@@ -654,8 +655,30 @@ struct CAtlasRegistry: public AtlasRegistry
 		return &m_cache[atlas_id];
 	}
 
+	// **A thread asks the lock once a segment** ([WEB_MESH_OFF_THREAD]):
+	// this is asked for each face a mesher makes, from every worker at
+	// once, and in WebKit a lock four threads share is slow (a lock and
+	// unlock 40 times as long as one thread's). A segment is never
+	// removed nor moved (the deques), and its coordinates are set before
+	// it is handed out, so a pointer found once stays good: each thread
+	// keeps the last ones it found, by the registry's serial (not its
+	// address, which a new one can have again).
+	const uint64_t m_serial = []{
+		static std::atomic<uint64_t> next(1);
+		return next++;
+	}();
 	const AtlasSegmentCache* get_texture(const AtlasSegmentReference &ref)
 	{
+		struct Memo {
+			uint64_t serial = 0;
+			uint atlas_id = 0, segment_id = 0;
+			const AtlasSegmentCache *p = nullptr;
+		};
+		static thread_local Memo memo[64];
+		Memo &m = memo[(ref.atlas_id * 31 + ref.segment_id) & 63];
+		if(m.serial == m_serial && m.atlas_id == ref.atlas_id &&
+				m.segment_id == ref.segment_id)
+			return m.p;
 		std::lock_guard<std::mutex> lock(m_mutex);
 		const AtlasCache *cache = get_atlas_cache_unlocked(ref.atlas_id);
 		if(cache == nullptr)
@@ -665,6 +688,10 @@ struct CAtlasRegistry: public AtlasRegistry
 			return nullptr;
 		}
 		const AtlasSegmentCache &seg_cache = cache->segments[ref.segment_id];
+		m.serial = m_serial;
+		m.atlas_id = ref.atlas_id;
+		m.segment_id = ref.segment_id;
+		m.p = &seg_cache;
 		return &seg_cache;
 	}
 

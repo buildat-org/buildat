@@ -480,6 +480,10 @@ static const std::pair<ss_, ss_>* web_file(const ss_ &target)
 		{"/buildat.js", {"buildat.js", "application/javascript"}},
 		{"/buildat.wasm", {"buildat.wasm", "application/wasm"}},
 		{"/buildat.data", {"buildat.data", "application/octet-stream"}},
+		// [WEB_MESH_OFF_THREAD] the client with threads, for an isolated page
+		{"/buildat_mt.js", {"buildat_mt.js", "application/javascript"}},
+		{"/buildat_mt.wasm", {"buildat_mt.wasm", "application/wasm"}},
+		{"/buildat_mt.data", {"buildat_mt.data", "application/octet-stream"}},
 		// [FAVICON] in the list so an app claiming "/" does not take it;
 		// its default file lives beside the logo, not in the web client dir
 		{"/favicon.ico", {"favicon.png", "image/png"}},
@@ -949,7 +953,8 @@ struct Module: public interface::Module, public network::Interface
 		ss_ address = m_server->get_config().get<ss_>("network_address");
 		ss_ port = m_server->get_config().get<ss_>("network_port");
 		// Deflated before the first page load asks
-		for(const char *name : {"buildat.js", "buildat.wasm", "buildat.data"}){
+		for(const char *name : {"buildat.js", "buildat.wasm", "buildat.data",
+				"buildat_mt.js", "buildat_mt.wasm", "buildat_mt.data"}){
 			const ss_ path = web_client_path()+"/"+name;
 			struct stat st;
 			if(stat(path.c_str(), &st) == 0)
@@ -1525,8 +1530,11 @@ struct Module: public interface::Module, public network::Interface
 		// server's files, cross-origin isolated: its threads share memory.
 		// Only that page: an isolated page's popup has no opener, and the
 		// Starport ID's sign-in is one.
+		// [WEB_MESH_OFF_THREAD] And the threaded client's script, which its
+		// workers load too: an isolated page's worker needs the header
 		const bool isolated = !local.first.empty() ||
-				(index && !query_value(query, "local").empty());
+				(index && !query_value(query, "local").empty()) ||
+				wf_name->first == "buildat_mt.js";
 		const ss_ cache = (wf->etag.empty() ? "" : "ETag: "+wf->etag+"\r\n")+
 				(isolated ? "Cross-Origin-Opener-Policy: same-origin\r\n"
 				"Cross-Origin-Embedder-Policy: require-corp\r\n"

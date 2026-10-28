@@ -662,7 +662,8 @@ build_web() {
 	"$here/util/build_web.sh" -j "$jobs" > "$log" 2>&1 || {
 		echo "the web client did not build; its log's end:" >&2
 		tail -30 "$log" >&2; return 1; }
-	for f in index.html buildat.js buildat.wasm buildat.data; do
+	for f in index.html buildat.js buildat.wasm buildat.data buildat_mt.js \
+			buildat_mt.wasm buildat_mt.data; do
 		[ -s "$here/web/$f" ] || { echo "web client: no web/$f" >&2; return 1; }
 	done
 	# [WEB_LOCAL_SERVER] Each app in WEB_LOCAL_APPS gets its own server in

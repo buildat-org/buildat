@@ -74,7 +74,10 @@ static unsigned Tick()
 #ifdef _WIN32
     return (unsigned)timeGetTime();
 #elif __EMSCRIPTEN__
-    return (unsigned)emscripten_get_now();
+    // buildat [WEB_MESH_OFF_THREAD]: with pthreads emscripten_get_now() is
+    // the epoch's milliseconds, past what a cast to unsigned keeps (wasm
+    // saturates it, a clock that stands still): through 64 bits it wraps
+    return (unsigned)(long long)emscripten_get_now();
 #else
     struct timeval time;
     gettimeofday(&time, NULL);
@@ -94,7 +97,7 @@ static long long HiresTick()
     else
         return timeGetTime();
 #elif __EMSCRIPTEN__
-    return (unsigned)(emscripten_get_now()*1000.0);
+    return (long long)(emscripten_get_now()*1000.0);
 #else
     struct timeval time;
     gettimeofday(&time, NULL);

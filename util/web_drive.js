@@ -2,10 +2,11 @@
 // Drives a headless browser through steps, for checks of the web client
 // ([WEB_CLIENT]) in a real browser: Firefox over WebDriver BiDi, Chrome over
 // the DevTools protocol, with Node's own WebSocket (Node 22 or newer) and no
-// packages. util/web_drive.sh starts the server and the browser and runs
-// this; it can be run by hand against a browser already listening:
+// packages; WebKit through Playwright (webkit() below). util/web_drive.sh
+// starts the server and the browser and runs this; it can be run by hand
+// against a browser already listening:
 //
-//   node util/web_drive.js --browser firefox|chrome --port 9334 \
+//   node util/web_drive.js --browser firefox|chrome|webkit --port 9334 \
 //       --steps steps.json --log page.log [--var NAME=value ...]
 //
 // A steps file is a JSON list of steps, each a list:
@@ -442,11 +443,59 @@ async function chrome() {
 	return {ops, end: async () => c.ws.close()};
 }
 
+// WebKit, Safari's engine ([WEB_MESH_OFF_THREAD]: iOS has no other), over
+// Playwright, which starts it itself (headless, no window; --port unused):
+// NODE_PATH names Playwright's node_modules. The steps a desktop and a
+// phone share; the rest are not here.
+async function webkit() {
+	const {webkit} = require("playwright");
+	const browser = await webkit.launch();
+	const vp = (process.env.WEB_DRIVE_VIEWPORT || "1200x800")
+			.match(/^(\d+)x(\d+)(?:@([\d.]+))?$/);
+	if (!vp)
+		throw new Error("WEB_DRIVE_VIEWPORT is WxH or WxH@dpr");
+	const touch = process.env.TOUCH === "1";
+	const page = await browser.newPage({viewport: {width: +vp[1],
+			height: +vp[2]}, deviceScaleFactor: +(vp[3] || 1), hasTouch: touch,
+			isMobile: touch});
+	page.on("console", m => logLine(m.text()));
+	page.on("pageerror", e => logLine("[pageerror] " + e.message));
+	const name = k => KEYS[k] ? (k === "Space" ? " " : KEYS[k][1]) : k;
+	const ops = {
+		nav: u => page.goto(u, {waitUntil: "load"}),
+		type: t => page.keyboard.type(t),
+		key: k => page.keyboard.press(name(k)),
+		holdkey: async (k, ms) => {
+			await page.keyboard.down(name(k));
+			await new Promise(r => setTimeout(r, ms));
+			await page.keyboard.up(name(k));
+		},
+		selall: () => page.keyboard.press("Control+a"),
+		chord: ch => {
+			const [mods, k] = chordOf(ch);
+			return page.keyboard.press(mods.map(m => m === "Ctrl" ? "Control" :
+					m).concat(name(k)).join("+"));
+		},
+		click: (x, y, ms = 0, b = 0) => page.mouse.click(x, y, {delay: ms,
+				button: ["left", "middle", "right"][b]}),
+		mouse: (x, y) => page.mouse.move(x, y),
+		wheel: (x, y, dy) => page.mouse.wheel(0, dy),
+		tap: (x, y) => page.touchscreen.tap(x, y),
+		shot: p => page.screenshot({path: p}),
+		eval: async js => {
+			const v = await page.evaluate(js);
+			console.log("eval:", JSON.stringify(v));
+		},
+	};
+	return {ops, end: () => browser.close()};
+}
+
 (async () => {
 	const b = args.browser === "firefox" ? await firefox() :
-			args.browser === "chrome" ? await chrome() : null;
+			args.browser === "chrome" ? await chrome() :
+			args.browser === "webkit" ? await webkit() : null;
 	if (!b) {
-		console.error("web_drive.js: --browser is firefox or chrome");
+		console.error("web_drive.js: --browser is firefox, chrome or webkit");
 		process.exit(2);
 	}
 	let failed = null;

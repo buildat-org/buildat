@@ -139,7 +139,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		// Emscripten's data download, "Downloading data... (a/b)"
 		var m = /\((\d+)\/(\d+)\)/.exec(t);
 		if(m)
-			return coming('buildat.data', +m[1], +m[2]);
+			return coming(client + '.data', +m[1], +m[2]);
 		if(t === '' || /^Running/.test(t))
 			t = 'Starting the engine';
 		if(t !== shown)
@@ -452,6 +452,38 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		}
 		return 1;
 	}
+	// **Meshing off the page's thread** ([WEB_MESH_OFF_THREAD]): where the
+	// page is cross-origin isolated (SharedArrayBuffer), the client with
+	// threads (buildat_mt), its mesh pool on workers; else the one
+	// without, which meshes a slice a frame on this thread. The shared
+	// memory is made here, the largest maximum the browser grants: iOS
+	// refuses a large reservation, and a smaller maximum there beats no
+	// threads. The workers, a core left for this thread, at most 4 (the
+	// native client's). What was got goes to the client, which tells the
+	// apps (buildat.resources()).
+	var MB = 1048576;
+	var mt = (function(){
+		if(!window.crossOriginIsolated || typeof SharedArrayBuffer === 'undefined')
+			return null;
+		var maxima = [2048, 1536, 1024, 768, 512, 384, 256];
+		for(var i = 0; i < maxima.length; i++){
+			try {
+				// The initial size is the build's INITIAL_MEMORY, 256 MB
+				var mem = new WebAssembly.Memory({initial: 256 * MB / 65536,
+						maximum: maxima[i] * MB / 65536, shared: true});
+				if(!(mem.buffer instanceof SharedArrayBuffer))
+					return null;
+				var cores = navigator.hardwareConcurrency || 2;
+				return {memory: mem, memory_mb: maxima[i],
+						threads: Math.max(1, Math.min(4, cores - 1))};
+			} catch(e){
+				console.log('threads: no shared memory of ' + maxima[i] +
+						' MB (' + e + ')');
+			}
+		}
+		return null;
+	})();
+	var client = mt ? 'buildat_mt' : 'buildat';
 	window.Module = {
 		canvas: canvas,
 		arguments: args,
@@ -554,6 +586,12 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 				Module.ENV.BUILDAT_OPEN = open_;
 			if(run)
 				Module.ENV.BUILDAT_RUN = run;
+			// [WEB_MESH_OFF_THREAD] What the page got, for
+			// buildat.resources(); the memory's maximum is the build's
+			// where the page did not make it (2048 MB, not promised)
+			Module.ENV.BUILDAT_MESH_THREADS = String(mt ? mt.threads : 0);
+			Module.ENV.BUILDAT_MEMORY_MAX_MB = String(mt ? mt.memory_mb : 2048);
+			Module.ENV.BUILDAT_ISOLATED = window.crossOriginIsolated ? '1' : '0';
 			// [PLAY_PAGE] (c): the page with no game of its own is
 			// apps/play's, whose bridge carries luanti_client's datagrams
 			if(!server)
@@ -584,9 +622,9 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 		// buildat.wasm read as a stream, for stripe two; the size a
 		// compressed answer has is not the file's, so then none
 		instantiateWasm: function(imports, done){
-			fetch('buildat.wasm').then(function(r){
+			fetch(client + '.wasm').then(function(r){
 				if(!r.ok)
-					throw new Error('buildat.wasm: ' + r.status);
+					throw new Error(client + '.wasm: ' + r.status);
 				var size = r.headers.get('Content-Encoding') ? 0 :
 						+r.headers.get('Content-Length') || 0;
 				var reader = r.body.getReader(), parts = [], have = 0;
@@ -596,7 +634,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 							return new Blob(parts).arrayBuffer();
 						parts.push(c.value);
 						have += c.value.length;
-						coming('buildat.wasm', have, size);
+						coming(client + '.wasm', have, size);
 						return read();
 					});
 				}
@@ -1240,8 +1278,31 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	};
 	// A middle click is the game's, not the browser's paste or autoscroll
 	canvas.addEventListener('auxclick', function(e){ e.preventDefault(); });
+	if(mt){
+		Module.wasmMemory = mt.memory;
+		Module.buildatThreads = mt.threads;
+	}
+	// The client's script; a server whose web client has no threaded build
+	// gets the one without
+	(function load(){
+		var s = document.createElement('script');
+		s.src = client + '.js';
+		s.onerror = function(){
+			if(client === 'buildat')
+				return Module.onAbort('buildat.js did not load');
+			console.log('threads: no ' + client + '.js here; without threads');
+			mt = null;
+			client = 'buildat';
+			delete Module.wasmMemory;
+			delete Module.buildatThreads;
+			load();
+		};
+		document.body.appendChild(s);
+	})();
+	console.log('threads: ' + (mt ? mt.threads + ' mesh workers, memory ' +
+			'up to ' + mt.memory_mb + ' MB' : 'none (' + (window.crossOriginIsolated ?
+			'no shared memory' : 'not cross-origin isolated') + ')'));
 })();
 </script>
-<script src="buildat.js"></script>
 </body>
 </html>

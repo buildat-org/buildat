@@ -1702,10 +1702,20 @@ struct CApp: public App, public magic::Application
 				m_options.graphics.maximized ? 1 : 0,
 				m_options.graphics.fullscreen ? 1 : 0);
 
-#ifdef __EMSCRIPTEN__
-		// No threads in the web client ([WEB_CLIENT]): the pool runs its
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+		// No threads in this web client ([WEB_CLIENT]): the pool runs its
 		// tasks' threaded part in run_post() instead
 		m_thread_pool->start(0);
+#elif defined(__EMSCRIPTEN__)
+		// [WEB_MESH_OFF_THREAD] The threaded web client (buildat_mt): as
+		// many as the page made workers for (BUILDAT_MESH_THREADS, from
+		// navigator.hardwareConcurrency), the pool's tasks on them
+		{
+			const char *e = getenv("BUILDAT_MESH_THREADS");
+			const int n = e ? atoi(e) : 0;
+			m_thread_pool->start(n > 0 && n <= 16 ? n : 0);
+			log_i(MODULE, "mesh threads: %i", n > 0 && n <= 16 ? n : 0);
+		}
 #else
 		m_thread_pool->start(4); // TODO: Configurable
 #endif
@@ -1791,6 +1801,10 @@ struct CApp: public App, public magic::Application
 		}
 #ifdef __EMSCRIPTEN__
 		engineParameters_["HighDPI"] = true;
+		// [WEB_MESH_OFF_THREAD] The workers are the mesh pool's: the
+		// engine's work queue would take as many again, and its waits
+		// spin on the page's own thread
+		engineParameters_["WorkerThreads"] = false;
 #endif
 		engineParameters_["VSync"] = m_options.graphics.vsync;
 		engineParameters_["TripleBuffer"] = m_options.graphics.triple_buffer;

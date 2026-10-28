@@ -220,8 +220,9 @@ struct CThreadPool: public ThreadPool
 		m_threads.clear();
 	}
 
-	// With no workers (the web client, which has no threads: [WEB_CLIENT])
-	// the threaded part runs here, on the calling thread, a slice a frame:
+	// With no workers (the web client where its page is not cross-origin
+	// isolated: [WEB_CLIENT], [WEB_MESH_OFF_THREAD]) the threaded part runs
+	// here, on the calling thread, a slice a frame:
 	// a thread() call at a time, and a task not done when the slice is
 	// over goes on next frame ([WEB_MAIN_THREAD]; a chunk's mesh steps in
 	// 2 ms, and stops at the budget's end). simplified: a task whose single

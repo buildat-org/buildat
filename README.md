@@ -148,8 +148,11 @@ It is built separately, with
     $ ~/emsdk/emsdk install 3.1.60 && ~/emsdk/emsdk activate 3.1.60
     $ util/build_web.sh
 
-It builds in `Build-web/` and writes `web/`, which the server serves from by
-default; `buildat_server -W <dir>` serves another. Behind an https reverse
+It builds in `Build-web/` and `Build-web-mt/` and writes `web/`, which the
+server serves from by default; `buildat_server -W <dir>` serves another.
+`buildat_mt.*` is the client with threads, which meshes the world on
+workers: the page runs it where it is cross-origin isolated, and
+`buildat.*`, which meshes on the page's own thread, elsewhere. Behind an https reverse
 proxy the page connects over wss. Its address takes `?log=4` for a verbose
 log, `scale=` for the UI scale and `pref=<key>=<value>` (repeatable), and
 nothing else of the command line: a link is anybody's to write. The server accepts a WebSocket only from its

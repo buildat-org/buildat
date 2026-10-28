@@ -11,6 +11,7 @@ session.vim
 /Build
 # The web client build, and the web client it writes ([WEB_CLIENT])
 /Build-web
+/Build-web-mt
 # The web server build ([WEB_LOCAL_SERVER])
 /Build-webserver
 /web

@@ -210,11 +210,38 @@ up_<VoxelVolume> volume_from_8bit(int w, int h, int d,
 	return volume_p;
 }
 
+// **The definitions a mesher met, kept by the mesher** ([WEB_MESH_OFF_THREAD]):
+// the registry's lock-free read is an atomic load, which WebKit makes a
+// write to the entry's line, so workers reading the same few entries took
+// turns with them: hillclimb's chunk 110 ms on each of four workers, 25
+// on one; 10 on each of four with this.
+// A plain read of a copy here instead. Kept for one extraction: an entry
+// the registry has is not taken back while a chunk is meshed.
+struct DefMemo
+{
+	interface::VoxelRegistry *reg = nullptr;
+	struct Entry {
+		interface::VoxelTypeId id = 0;
+		const interface::CachedVoxelDefinition *def = nullptr;
+	} entries[64];
+	DefMemo(interface::VoxelRegistry *reg = nullptr): reg(reg){}
+	const interface::CachedVoxelDefinition* get(interface::VoxelTypeId id)
+	{
+		Entry &e = entries[id & 63];
+		if(e.def == nullptr || e.id != id){
+			e.def = reg->get_cached(id);
+			e.id = id;
+		}
+		return e.def;
+	}
+};
+
 template<typename VoxelType>
 		class IsQuadNeededByRegistry
 {
 	interface::VoxelRegistry *m_voxel_reg;
 	VoxelFmt m_fmt;
+	DefMemo m_defs;
 	bool m_liquids_as_cubes = false;
 	// NOTE: The voxel type id is used directly as PolyVox material value
 public:
@@ -226,7 +253,7 @@ public:
 	// child node as the near mesher's would match it
 	IsQuadNeededByRegistry(interface::VoxelRegistry *voxel_reg,
 			bool liquids_as_cubes = false):
-		m_voxel_reg(voxel_reg), m_fmt(voxel_reg),
+		m_voxel_reg(voxel_reg), m_fmt(voxel_reg), m_defs(voxel_reg),
 		m_liquids_as_cubes(liquids_as_cubes)
 	{}
 	// simplified: every liquid shares one edge material, so no face is
@@ -253,9 +280,9 @@ public:
 		if(m_voxel_reg == nullptr)
 			throw Exception("IsQuadNeededByRegistry not initialized");
 		const interface::CachedVoxelDefinition *back_def =
-				m_voxel_reg->get_cached(back);
+				m_defs.get(m_fmt.look_id(back));
 		const interface::CachedVoxelDefinition *front_def =
-				m_voxel_reg->get_cached(front);
+				m_defs.get(m_fmt.look_id(front));
 		if(!back_def)
 			throw Exception(ss_()+"Undefined voxel: back="+
 					itos(m_fmt.id_of(back)));
@@ -1356,6 +1383,7 @@ bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	const size_t first_face = st.face;
+	DefMemo defs(voxel_reg);
 	for(; st.face < pv_vertices.size() / 4; st.face++){
 		const size_t pv_face_i = st.face;
 		if(pv_face_i != first_face && pv_face_i % 64 == 0 &&
@@ -1365,7 +1393,7 @@ bool generate_voxel_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 		VoxelTypeId voxel_id0 = (VoxelTypeId)pv_vertices[pv_vertex_i0].material;
 		// We need to get this definition only once per face
 		const interface::CachedVoxelDefinition *voxel_def0 =
-				voxel_reg->get_cached(voxel_id0);
+				defs.get(voxel_id0);
 		if(voxel_def0 == nullptr)
 			throw Exception("Unknown voxel in generated geometry: "+
 					itos(voxel_id0));
@@ -2239,6 +2267,7 @@ bool generate_voxel_lod_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 
 	// Handle vertices face-by-face in order to copy indices at the same time
 	const size_t first_face = st.face;
+	DefMemo defs(voxel_reg);
 	for(; st.face < pv_vertices.size() / 4; st.face++){
 		const size_t pv_face_i = st.face;
 		if(pv_face_i != first_face && pv_face_i % 64 == 0 &&
@@ -2248,7 +2277,7 @@ bool generate_voxel_lod_geometry_step(VoxelGeometryJob &job, int64_t until_us,
 		VoxelTypeId voxel_id0 = (VoxelTypeId)pv_vertices[pv_vertex_i0].material;
 		// We need to get this definition only once per face
 		const interface::CachedVoxelDefinition *voxel_def0 =
-				voxel_reg->get_cached(voxel_id0);
+				defs.get(voxel_id0);
 		if(voxel_def0 == nullptr)
 			throw Exception("Unknown voxel in generated geometry: "+
 					itos(voxel_id0));

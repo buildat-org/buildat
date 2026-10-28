@@ -24,6 +24,10 @@ set(PORTABLE TRUE CACHE BOOL "Keep cache/ and user/ beside the program")
 # compiled ahead of time and linked into it, with pthreads, in a build
 # directory of its own (util/build_web_server.sh)
 set(BUILDAT_WEB_SERVER_APP "" CACHE STRING "Under emcc, build the server for this app instead of the client")
+# [WEB_MESH_OFF_THREAD] The web client with pthreads, its mesh tasks on
+# workers: buildat_mt.{js,wasm,data} beside the one without, which the page
+# runs where it is cross-origin isolated (util/build_web.sh builds both)
+set(BUILDAT_WEB_THREADS FALSE CACHE BOOL "Under emcc, the client with threads (buildat_mt)")
 if(EMSCRIPTEN)
 	set(BUILDAT_WEB TRUE)
 	if(BUILDAT_WEB_SERVER_APP)
@@ -33,6 +37,10 @@ if(EMSCRIPTEN)
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
 	else()
 		set(BUILD_SERVER FALSE CACHE BOOL "Build server" FORCE)
+		if(BUILDAT_WEB_THREADS)
+			set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -pthread")
+		endif()
 	endif()
 	# buildat throws, and Emscripten does not catch unless asked. Emscripten's
 	# clang also refuses one of luabind's templates GCC takes, and its libc
@@ -118,6 +126,8 @@ if(SANITIZE)
 elseif(BUILDAT_WEB_SERVER_APP)
 	# Threads: every object of a pthreads link is built with them
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-webserver")
+elseif(BUILDAT_WEB AND BUILDAT_WEB_THREADS)
+	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-web-mt")
 elseif(BUILDAT_WEB)
 	set(URHO3D_BUILD_DIR "${URHO3D_HOME}/Build-web")
 else()
@@ -218,6 +228,9 @@ if(URHO3D_HOME_ABS STREQUAL URHO3D_BUNDLED_HOME_ABS)
 		list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_THREADING=TRUE)
 	elseif(BUILDAT_WEB)
 		list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_GLES3=TRUE)
+		if(BUILDAT_WEB_THREADS)
+			list(APPEND URHO3D_BUNDLE_CMAKE_ARGS -DURHO3D_THREADING=TRUE)
+		endif()
 	endif()
 	# Under Urho3D's MinGW toolchain the outer configure has exported the
 	# cross compilers into this process's environment (the toolchain's
@@ -703,6 +716,21 @@ if(BUILD_CLIENT)
 		foreach(P ${WEB_PRELOAD})
 			list(APPEND WEB_LINK_FLAGS "SHELL:--preload-file ${P}")
 		endforeach()
+		if(BUILDAT_WEB_THREADS)
+			set_target_properties(${CLIENT_EXE_NAME} PROPERTIES
+				OUTPUT_NAME ${CLIENT_EXE_NAME}_mt)
+			list(APPEND WEB_LINK_FLAGS
+				-pthread
+				# The workers the pool's threads run on, made before main():
+				# as many as the page found cores for (index.html)
+				-sPTHREAD_POOL_SIZE=Module.buildatThreads
+				# A mesh task's stack is a native thread's in miniature
+				-sDEFAULT_PTHREAD_STACK_SIZE=2097152
+				# The page makes the shared memory itself, the largest
+				# maximum the browser grants under this (index.html)
+				-sMAXIMUM_MEMORY=2147483648
+			)
+		endif()
 		target_link_options(${CLIENT_EXE_NAME} PRIVATE ${WEB_LINK_FLAGS})
 		# An imported archive is no dependency of the link by itself
 		set_property(TARGET ${CLIENT_EXE_NAME} APPEND PROPERTY

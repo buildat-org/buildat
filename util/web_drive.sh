@@ -2,7 +2,7 @@
 # A game's web client in a headless browser, driven through a steps file
 # (util/web_drive.js says what a step is):
 #
-#   util/web_drive.sh <firefox|chrome> <game> <steps.json> [out dir]
+#   util/web_drive.sh <firefox|chrome|webkit> <game> <steps.json> [out dir]
 #   util/web_drive.sh firefox floorplanner apps/floorplanner/test/web_smoke.json
 #
 # Starts buildat_server with the game on a free port, a user directory of
@@ -15,7 +15,9 @@
 # it refused is a warning there and nothing on the screen (the plan view's
 # grid in Firefox, 2026-10-01).
 # Needs Node 22 or newer, and Firefox 129 or newer or Chrome; FIREFOX and
-# CHROME name the binaries (firefox, google-chrome).
+# CHROME name the binaries (firefox, google-chrome). WebKit is Playwright's
+# (PLAYWRIGHT_NODE, ~/.local/share/playwright-node by default, with
+# `npx playwright install webkit` done there).
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -92,13 +94,19 @@ case "$browser" in
 				--window-size=1200,800 about:blank > "$out/browser.log" 2>&1 &
 		pids+=($!)
 		ready="DevTools listening" ;;
-	*) echo "web_drive: the browser is firefox or chrome" >&2; exit 2 ;;
+	webkit)
+		# Started by web_drive.js itself, headless
+		export NODE_PATH=${PLAYWRIGHT_NODE:-$HOME/.local/share/playwright-node}/node_modules
+		export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
+		ready="" ;;
+	*) echo "web_drive: the browser is firefox, chrome or webkit" >&2; exit 2 ;;
 esac
 for i in $(seq 1 60); do
+	[ -n "$ready" ] || break
 	grep -q "$ready" "$out/browser.log" && break
 	sleep 0.5
 done
-grep -q "$ready" "$out/browser.log" ||
+[ -z "$ready" ] || grep -q "$ready" "$out/browser.log" ||
 	{ echo "web_drive: the browser did not start" >&2; tail -20 "$out/browser.log" >&2; exit 1; }
 
 node "$here/util/web_drive.js" --browser "$browser" --port "$bport" \
