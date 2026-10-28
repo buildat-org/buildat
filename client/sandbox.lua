@@ -310,15 +310,16 @@ end
 -- Running code in sandbox
 --
 
--- The environments made here, which are a script's ([SAFE_CALLER_FRAME]:
--- buildat.eval runs code only in one of these). Trusted only.
+-- The environments a script's chunk runs in ([SAFE_CALLER_FRAME]:
+-- buildat.eval runs code only in one of these). Trusted only. Not an
+-- event runner's, made per subscription (__buildat_sandboxed_runner),
+-- which kept this table growing.
 local sandbox_envs = setmetatable({}, {__mode = "k"})
 function __buildat_is_sandbox_env(env)
 	return sandbox_envs[env] == true
 end
 local function wrap_globals(base_sandbox)
 	local sandbox = {}
-	sandbox_envs[sandbox] = true
 	local sandbox_declared_globals = {}
 	-- Sandbox special functions
 	sandbox.sandbox = {}
@@ -356,6 +357,7 @@ end
 
 local function run_function_in_sandbox(untrusted_function, sandbox, own_globals)
 	sandbox = wrap_globals(sandbox)
+	sandbox_envs[sandbox] = true
 	for k, v in pairs(own_globals or {}) do
 		rawset(sandbox, k, v)
 	end
