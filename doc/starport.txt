@@ -28,7 +28,16 @@ run their own. The official one is https://starport.buildat.org.
   announce naming another server's address never verifies.
 - On the web the ID signs in on the Starport's own page, `/authorize`,
   in a window of its own; the token goes to the opener by postMessage,
-  only to the listing's own origin or one in `web_clients`. `/id` is
+  only to the listing's own origin or one in `web_clients`. A
+  cross-origin isolated page's window has no opener: given
+  `state=<16 to 128 of A-Z a-z 0-9 _ ->`, the window goes on after Allow
+  to `<that origin>/starport_signin#code=<code>&state=<state>` (Cancel:
+  `#error=cancelled&state=<state>`), the origin always the one the API
+  computed, never one from the address. The token stays on the Starport;
+  the page there takes it by POSTing `{"code"}` to `/api/v1/id/redeem`,
+  which answers only a page of that origin (its Origin header), once,
+  within a minute, with what the token call gives (`token`, `name`,
+  `listing`, `exp`). A site's window (below) has no such way. `/id` is
   the ID's page: its sessions and last 20 logins with "Log out everywhere
   else", TOTP, the e-mail, the password and the age, and making an ID.
   The age asks "18 or over?" first, the birth year only on a No, kept

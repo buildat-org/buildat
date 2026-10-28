@@ -417,6 +417,12 @@ struct Module: public interface::Module, public moderation::Host
 	// Rate limits, in memory only: by key, a count and when it started
 	// key -> count, window start, window length
 	network::RateTable m_rates;
+	// [WEB_ISOLATED_SIGNIN] Tokens waiting for the page they are for, by a
+	// code used once: the token never goes in an address (a browser's
+	// history keeps the hash). In memory: a restart loses a sign-in in
+	// progress, which is tried again
+	struct Handoff { json::Value out; ss_ origin; int64_t until; };
+	sm_<ss_, Handoff> m_handoffs;
 
 	// The verifier: a thread of its own, as it waits on other servers
 	std::mutex m_vmutex;
@@ -2300,10 +2306,11 @@ struct Module: public interface::Module, public moderation::Host
 		try {
 			// [WEB_ID_TRUST]: a page of another origin -- a web client a
 			// game server served, which could keep the password -- gets
-			// no ID call but authorize_info: an ID logs in on this
-			// Starport's own page. A native client sends no Origin.
+			// no ID call but authorize_info and redeem: an ID logs in on
+			// this Starport's own page. A native client sends no Origin.
 			const size_t sep = r.origin.find("://");
 			if(!r.origin.empty() && what != "authorize_info" &&
+					what != "redeem" &&
 					(sep == ss_::npos || r.origin.substr(sep + 3) != r.host))
 				throw Exception("a web page logs in to a Starport ID on "
 						"the Starport's own page");
@@ -2423,6 +2430,20 @@ struct Module: public interface::Module, public moderation::Host
 			json::Value out = json::object();
 			out.set("name", jstr(l, "name"));
 			out.set("origin", web_origin(l, b));
+			return out;
+		}
+		// [WEB_ISOLATED_SIGNIN] A token handed off by /authorize's window
+		// with no opener, to a page of the origin it was made for: once,
+		// within a minute. A code from another origin's page is refused
+		// and stays for the right one
+		if(what == "redeem"){
+			auto it = m_handoffs.find(jstr(b, "code"));
+			if(it == m_handoffs.end() || it->second.until < now_s() ||
+					it->second.origin != r.origin)
+				throw Exception("no such sign-in: it is taken once, within "
+						"a minute, by a page of the server it was for");
+			const json::Value out = it->second.out;
+			m_handoffs.erase(it);
 			return out;
 		}
 		if(what == "reset_request"){
@@ -2669,6 +2690,24 @@ struct Module: public interface::Module, public moderation::Host
 		out.set("exp", jint(p, "exp"));
 		if(!origin.empty())
 			out.set("origin", origin);
+		// [WEB_ISOLATED_SIGNIN] For a page whose window has no opener:
+		// the token kept here, and a code to take it by, which the window
+		// sends on in its address
+		if(b.get("handoff").is_true() && !site && !origin.empty()){
+			const int64_t t = now_s();
+			for(auto it = m_handoffs.begin(); it != m_handoffs.end();)
+				it = it->second.until < t ? m_handoffs.erase(it) : std::next(it);
+			if(!m_rates.ok("id_handoff", name, 20, 60) ||
+					m_handoffs.size() >= 1000)
+				throw Exception("too many sign-ins at once; try again in a "
+						"minute");
+			const ss_ code = random_hex(16);
+			m_handoffs[code] = Handoff{out, origin, t + 60};
+			json::Value h = json::object();
+			h.set("code", code);
+			h.set("origin", origin);
+			return h;
+		}
 		return out;
 	}
 

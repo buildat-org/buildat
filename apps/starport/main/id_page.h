@@ -10,6 +10,10 @@
 //     Allow, and the token goes to the window that opened this by
 //     postMessage -- only to the listed server's own web client, or a page
 //     of the setting web_clients ("origin"), which the API checks.
+//     [WEB_ISOLATED_SIGNIN] &state=<nonce>: a window with no opener (a
+//     cross-origin isolated page's) goes on to <that origin>/starport_signin
+//     #code=..&state=.. (or #error=cancelled&state=..), never to an address
+//     from the query; the page there takes the token by the code (redeem).
 //   /authorize?site=<id>  [STARPORT_SITE_LOGIN] the same for a website an
 //     operator registered: the token goes to the site's origin only.
 //   /id  the ID's settings, (b): its sessions and recent logins with "log
@@ -113,6 +117,16 @@ if(q.get("site")) want.site = q.get("site");
 // The server has an account of its own by this ID's name there: another
 const rename = q.get("rename") == "1";
 if(rename) want.rename = true;
+// [WEB_ISOLATED_SIGNIN] No opener, a server's page: the answer goes by the
+// callback page of the origin the API gives, the state as it came
+const state = q.get("state") || "";
+const callback = authorize && !window.opener && !want.site &&
+	/^[A-Za-z0-9_-]{16,128}$/.test(state);
+let callback_origin = "";
+function back(hash){
+	location.replace(callback_origin + "/starport_signin#" + hash +
+		"&state=" + state);
+}
 const $ = id => document.getElementById(id);
 let session = null, me = null, secret = "";
 try { session = localStorage.getItem("buildat_sp_session"); } catch(e){}
@@ -188,13 +202,15 @@ async function start(){
 		$("title").textContent = "Sign in with a Starport ID";
 		if(want.site)
 			$("fleetl").firstChild.textContent = "Your name on this site ";
-		if(!window.opener){
+		if(!window.opener && !callback){
 			$("what").textContent = want.site ? "Open this from the site's "
 				+ "page." : "Open this from a Buildat web client.";
 			return;
 		}
 		try {
 			const i = await call("authorize_info", want);
+			if(callback)
+				callback_origin = i.origin;
 			const b = document.createElement("b");
 			b.textContent = i.name || (i.site ? "a website" : "a server");
 			$("what").append(b, " at " + i.origin + " asks who you are. "
@@ -252,18 +268,23 @@ $("register").onsubmit = act(async () => {
 });
 $("allow").onsubmit = act(async () => {
 	const r = await call("token", Object.assign({session,
-		name: $("fleet").value}, want));
+		name: $("fleet").value, handoff: callback}, want));
 	if(r.need_name){
 		$("fleetl").classList.remove("hide");
 		if(!$("fleet").value) $("fleet").value = r.suggest;
 		$("fleet").focus();
 		return;
 	}
+	if(callback){
+		callback_origin = r.origin;
+		return back("code=" + r.code);
+	}
 	window.opener.postMessage({buildat_starport_token: r.token,
 		name: r.name, listing: r.listing, site: r.site}, r.origin);
 	window.close();
 });
-$("cancel").onclick = () => window.close();
+$("cancel").onclick = () => callback && callback_origin ?
+	back("error=cancelled") : window.close();
 for(const b of document.querySelectorAll(".logout"))
 	b.onclick = async () => {
 		try { await call("logout", {session}); } catch(e){}
