@@ -35,10 +35,17 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       a shipped app's name, or
                                       "<author>.<name>" of an installed
                                       package
-        "base_version": "1.2.0"       optional, with an <author>.<name>
+        "base_version": "1.2.0",      optional, with an <author>.<name>
                                       base: the lowest version taken;
                                       the newest installed of its major
                                       version is used
+        "needs": {"memory_mb": 1024, "mesh_threads": 2}
+                                      optional: what its web client needs
+                                      at least (buildat.resources(),
+                                      doc/client_api.txt); the play page
+                                      says so plainly when the browser
+                                      gives less, and offers to start
+                                      anyway
     }
 
 license_code and license_media are SPDX ids, or an expression of them

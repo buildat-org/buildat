@@ -109,7 +109,9 @@ local NODEDEF_ALPHAMODE_BLEND = 0
 -- and a block handed over then only waits ([WEB_MESH_SLICES])
 local MESH_BUDGET_US = 4000
 local MESH_PER_FRAME = 8
-local MESH_BACKLOG_MAX = 4
+-- Two for each thread making them ([WEB_MESH_OFF_THREAD])
+local MESH_BACKLOG_MAX = math.max(4, 2 * ((buildat.resources and
+		buildat.resources().mesh_threads) or 0))
 
 -- What the mesher is told each node id is. Only air is known without the node
 -- definitions, so everything else is the placeholder cube; CONTENT_IGNORE is

@@ -197,6 +197,9 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// which the buildat server writes in here on a page with no game: the
 	// launch menu offers each, going to ?local=<app>
 	var local_apps = [];
+	// [WEB_MESH_OFF_THREAD] The app's meta.json "needs", which the buildat
+	// server writes in here: {memory_mb, mesh_threads}
+	var needs = null;
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user',
 		'-w', window.innerWidth + 'x' + window.innerHeight];
@@ -1284,7 +1287,7 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	}
 	// The client's script; a server whose web client has no threaded build
 	// gets the one without
-	(function load(){
+	function start_client(){
 		var s = document.createElement('script');
 		s.src = client + '.js';
 		s.onerror = function(){
@@ -1295,10 +1298,39 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 			client = 'buildat';
 			delete Module.wasmMemory;
 			delete Module.buildatThreads;
-			load();
+			start_client();
 		};
 		document.body.appendChild(s);
-	})();
+	}
+	// An app that says it needs more than this browser gave is told so
+	// plainly, and the player may start it anyway
+	var got = {memory_mb: mt ? mt.memory_mb : 2048, mesh_threads: mt ? mt.threads : 0};
+	var lack = needs ? Object.keys(got).filter(function(k){
+		return needs[k] > got[k]; }) : [];
+	if(lack.length){
+		var says = {
+			memory_mb: 'memory up to ' + (needs.memory_mb || 0) + ' MB (this browser gave ' +
+				got.memory_mb + ' MB)',
+			mesh_threads: needs.mesh_threads + ' mesh threads (this browser gave ' +
+				got.mesh_threads + (window.crossOriginIsolated ? '' :
+				'; the page is not cross-origin isolated') + ')'};
+		load.style.display = 'none';
+		status.textContent = 'This game needs ' + lack.map(function(k){
+			return says[k]; }).join(' and ') + '. It may run slowly or not at all.\n\n';
+		var b = document.createElement('button');
+		b.textContent = 'Start anyway';
+		b.style.font = 'inherit';
+		b.style.padding = '8px 24px';
+		b.style.pointerEvents = 'auto';
+		b.onclick = function(){
+			status.textContent = '';
+			load.style.display = '';
+			start_client();
+		};
+		status.appendChild(b);
+		console.log('needs: lack of ' + lack.join(', '));
+	} else
+		start_client();
 	console.log('threads: ' + (mt ? mt.threads + ' mesh workers, memory ' +
 			'up to ' + mt.memory_mb + ' MB' : 'none (' + (window.crossOriginIsolated ?
 			'no shared memory' : 'not cross-origin isolated') + ')'));

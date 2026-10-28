@@ -2381,6 +2381,9 @@ buildat.safe.last_arrival = __buildat_last_arrival
 -- in_flight() -> nil, or {name, have, size}: the packet arriving and not
 -- yet whole ([LOAD_IN_FLIGHT])
 buildat.safe.in_flight = __buildat_in_flight
+-- resources() -> {memory_mb, mesh_threads, isolated, touch, platform}: what
+-- this client got to run in ([WEB_MESH_OFF_THREAD]; doc/client_api.txt)
+buildat.safe.resources = __buildat_resources
 -- The join's loading screen ([JOIN_STRIPES]): state.cpp says what the wait
 -- for the game's files is at, and ui_utils draws it. An error in it is
 -- the log's, not the client's end.

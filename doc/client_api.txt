@@ -57,6 +57,20 @@ buildat.in_flight() -> nil, or {name, have, size}
 - What is arriving and not yet whole ([LOAD_IN_FLIGHT]): a packet part-read
   (its name, "" for an unknown type; its bytes so far and its length), or
   a large payload whose fragments are coming (size then a little over).
+buildat.resources() -> {memory_mb, mesh_threads, isolated, touch, platform}
+- What this client got to run in ([WEB_MESH_OFF_THREAD]), for an app to
+  fit its view range, LOD and caches to rather than be ended by the
+  browser (iOS ends a tab that takes too much). memory_mb: the most memory
+  the client may grow to -- on the web the maximum the page was granted
+  (a phone's browser grants less), natively the machine's RAM.
+  mesh_threads: the threads the meshes are made on; 0 on a web page that
+  is not cross-origin isolated, which meshes on the frame's own thread a
+  slice a frame. isolated: the web page is cross-origin isolated (true
+  natively). touch: the pointer is a finger. platform: "linux",
+  "windows", "macos", "android", "ios", "other", or on the web "web",
+  "web_ios" or "web_android". builtin/voxelworld scales its defaults with
+  it; an app's meta.json may state its least needs ("needs",
+  doc/aitta.txt).
 
 buildat.sha1(data) -> 20 bytes
 buildat.sha256(data) -> 32 bytes

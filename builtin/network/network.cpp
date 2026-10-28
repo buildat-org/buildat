@@ -1589,11 +1589,12 @@ struct Module: public interface::Module, public network::Interface
 	{
 		const bool index = name == "index.html";
 		const ss_ apps = index && m_page_has_no_game ? local_apps() : "";
+		const ss_ needs = index && !m_page_has_no_game ? app_needs() : "";
 		struct stat st;
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
 				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
 				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title+
-				(m_page_has_no_game ? "\n"+apps : "")) >> 1)) : "")+
+				(m_page_has_no_game ? "\n"+apps : "\n"+needs)) >> 1)) : "")+
 				"\"" : "";
 		WebFile &wf = m_web_files[name];
 		if(!etag.empty() && wf.etag == etag)
@@ -1628,6 +1629,11 @@ struct Module: public interface::Module, public network::Interface
 		const size_t al = apps.empty() ? ss_::npos : body.find(APPS_LINE);
 		if(al != ss_::npos)
 			body.replace(al, APPS_LINE.size(), "var local_apps = ["+apps+"];");
+		// [WEB_MESH_OFF_THREAD] What the app says it needs
+		static const ss_ NEEDS_LINE = "var needs = null;";
+		const size_t nl = needs.empty() ? ss_::npos : body.find(NEEDS_LINE);
+		if(nl != ss_::npos)
+			body.replace(nl, NEEDS_LINE.size(), "var needs = "+needs+";");
 		wf.body.reset(new ss_(std::move(body)));
 		wf.deflated.reset(new Deflated());
 		wf.etag = etag;
@@ -1643,6 +1649,26 @@ struct Module: public interface::Module, public network::Interface
 			out->done = true;
 		});
 		return &wf;
+	}
+
+	// [WEB_MESH_OFF_THREAD] meta.json's "needs" as a JavaScript object,
+	// {memory_mb: 1024, mesh_threads: 2}; only the known keys, as whole
+	// numbers; "" for none. Read with the page, so an edit shows on reload
+	ss_ app_needs()
+	{
+		json::json_error_t e;
+		const json::Value m = json::load_file(
+				(m_server->get_modules_path()+"/meta.json").c_str(), &e);
+		const json::Value &n = m.get("needs");
+		ss_ r;
+		for(const char *k : {"memory_mb", "mesh_threads"}){
+			const json::Value &v = n.get(k);
+			if(v.is_integer() && v.as_integer() > 0 &&
+					v.as_integer() <= 1000000)
+				r += ss_(r.empty() ? "" : ", ")+k+": "+
+						itos((int64_t)v.as_integer());
+		}
+		return r.empty() ? "" : "{"+r+"}";
 	}
 
 	// [WEB_LOCAL_SERVER] The apps with a server for the page beside the web

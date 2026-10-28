@@ -149,6 +149,7 @@ EM_JS(void, web_dgram_close, (int id), {
 #include <c55/os.h>
 #include <Application.h>
 #include <Engine.h>
+#include <ProcessUtils.h>
 #include <LuaScript.h>
 #include <tolua++.h>
 #include <CoreEvents.h>
@@ -1645,6 +1646,8 @@ struct CApp: public App, public magic::Application
 	sm_<ss_, LanEntry> m_lan;
 
 	sp_<interface::thread_pool::ThreadPool> m_thread_pool;
+	// The pool's threads, for resources() ([WEB_MESH_OFF_THREAD])
+	int m_mesh_threads = 0;
 
 	CApp(magic::Context *context, const Options &options):
 		magic::Application(context),
@@ -1713,11 +1716,13 @@ struct CApp: public App, public magic::Application
 		{
 			const char *e = getenv("BUILDAT_MESH_THREADS");
 			const int n = e ? atoi(e) : 0;
-			m_thread_pool->start(n > 0 && n <= 16 ? n : 0);
-			log_i(MODULE, "mesh threads: %i", n > 0 && n <= 16 ? n : 0);
+			m_mesh_threads = n > 0 && n <= 16 ? n : 0;
+			m_thread_pool->start(m_mesh_threads);
+			log_i(MODULE, "mesh threads: %i", m_mesh_threads);
 		}
 #else
-		m_thread_pool->start(4); // TODO: Configurable
+		m_mesh_threads = 4;
+		m_thread_pool->start(m_mesh_threads); // TODO: Configurable
 #endif
 		{
 			const char *e = getenv("BUILDAT_FRAME_SPLIT");
@@ -2703,6 +2708,7 @@ struct CApp: public App, public magic::Application
 		DEF_BUILDAT_FUNC(received)
 		DEF_BUILDAT_FUNC(last_arrival)
 		DEF_BUILDAT_FUNC(in_flight)
+		DEF_BUILDAT_FUNC(resources)
 		DEF_BUILDAT_FUNC(logical_size)
 		DEF_BUILDAT_FUNC(get_preferred_render_scale)
 		DEF_BUILDAT_FUNC(viewport_generation)

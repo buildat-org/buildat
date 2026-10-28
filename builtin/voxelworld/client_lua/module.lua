@@ -23,6 +23,26 @@ M.physics_distance = 100
 -- server sends the smaller of this and what it keeps loaded, so asking for
 -- more than the game has is not an error. Set it before the world arrives.
 M.send_distance = 1000
+-- **The defaults fit what the client got** ([WEB_MESH_OFF_THREAD]): a
+-- browser that granted little memory (a phone's) is sent less world and
+-- draws the far part from downsampled chunks, and a page that meshes on
+-- its own thread (not cross-origin isolated) less world than it can never
+-- catch up with. A game that sets these sets its own; buildat.resources()
+-- is there for it to do the same.
+-- simplified: steps by hand; a measure of a chunk's memory (volume, mesh,
+-- collision) per distance is the upgrade
+local resources = buildat.resources and buildat.resources() or {}
+do
+	local r = resources
+	if r.memory_mb and r.memory_mb <= 512 then
+		M.send_distance, M.lod_distance = 192, 96
+	elseif r.memory_mb and r.memory_mb <= 1024 then
+		M.send_distance, M.lod_distance = 320, 160
+	end
+	if r.mesh_threads == 0 then
+		M.send_distance = math.min(M.send_distance, 256)
+	end
+end
 -- Whether the world may be sent yet ([TEXMOD_RACE]). It may by default;
 -- a game that composes textures before a chunk should mesh holds it back
 -- at load (voxelworld.hold_streaming()) and allows it once they are there
@@ -67,8 +87,11 @@ local MESH_BUDGET_CAP_US = 15000
 -- chunks queued at 14 a second and its 90 s ran out ([MISSING_CHUNK]'s
 -- "never drew", 2026-09-21). Five milliseconds a frame keeps 60 fps.
 local MESH_BUDGET_FLOOR_US = 5000
--- The meshes waiting in the pool past which no more are added
-local MESH_BACKLOG_MAX = 4
+-- The meshes waiting in the pool past which no more are added: two for
+-- each thread making them, as many as a pass of each and one waiting for
+-- it -- four on the web's own thread, as before ([WEB_MESH_OFF_THREAD]:
+-- four for four workers left them idle a frame in three)
+local MESH_BACKLOG_MAX = math.max(4, 2 * (resources.mesh_threads or 0))
 
 local LOD_THRESHOLD = 0.2
 -- How the update queue orders what it has: it sorts by distance divided by

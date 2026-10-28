@@ -1254,6 +1254,55 @@
 		return 1;
 	}
 
+	// [WEB_MESH_OFF_THREAD] resources() -> {memory_mb, mesh_threads,
+	// isolated, touch, platform}: what this client got to run in, for an
+	// app to fit its view range, LOD and caches to (doc/client_api.txt)
+	static int l_resources(lua_State *L)
+	{
+		lua_getfield(L, LUA_REGISTRYINDEX, "__buildat_app");
+		CApp *self = (CApp*)lua_touserdata(L, -1);
+		lua_pop(L, 1);
+		double memory_mb = 0;
+		bool isolated = true;
+		ss_ platform;
+#ifdef __EMSCRIPTEN__
+		// What the page got (index.html): the shared memory's maximum, or
+		// the build's where it made none
+		const char *m = getenv("BUILDAT_MEMORY_MAX_MB");
+		memory_mb = m ? atof(m) : 2048;
+		const char *iso = getenv("BUILDAT_ISOLATED");
+		isolated = iso && ss_(iso) == "1";
+		// iPadOS says it is a Mac, with touch
+		const int os = EM_ASM_INT({
+			var ua = navigator.userAgent || '';
+			if(/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) &&
+					navigator.maxTouchPoints > 1))
+				return 1;
+			return /Android/.test(ua) ? 2 : 0;
+		});
+		platform = os == 1 ? "web_ios" : os == 2 ? "web_android" : "web";
+#else
+		memory_mb = (double)(magic::GetTotalMemory() / (1024 * 1024));
+		const ss_ p = magic::GetPlatform().CString();
+		platform = p == "Windows" ? "windows" : p == "Linux" ? "linux" :
+				p == "Mac OS X" ? "macos" : p == "Android" ? "android" :
+				p == "iOS" ? "ios" : "other";
+#endif
+		const char *t = getenv("BUILDAT_TOUCH");
+		lua_newtable(L);
+		lua_pushnumber(L, memory_mb);
+		lua_setfield(L, -2, "memory_mb");
+		lua_pushinteger(L, self->m_mesh_threads);
+		lua_setfield(L, -2, "mesh_threads");
+		lua_pushboolean(L, isolated);
+		lua_setfield(L, -2, "isolated");
+		lua_pushboolean(L, t && ss_(t) == "1");
+		lua_setfield(L, -2, "touch");
+		lua_pushstring(L, platform.c_str());
+		lua_setfield(L, -2, "platform");
+		return 1;
+	}
+
 	static int l_display_density(lua_State *L)
 	{
 		double d = 1;
