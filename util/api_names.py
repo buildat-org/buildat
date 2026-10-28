@@ -110,7 +110,8 @@ def client_extensions():
     ext_dir = os.path.join(root, "extensions")
     for ext in sorted(os.listdir(ext_dir)):
         path = os.path.join(ext_dir, ext, "init.lua")
-        if not os.path.isfile(path):
+        # sandbox_test's extensions are the hunt's, not an API
+        if not os.path.isfile(path) or ext.startswith("sandbox_test"):
             continue
         text = read(path)
         for m in re.finditer(r"^\s*(?:function\s+)?M\.safe\.([A-Za-z_]\w*)\s*[=(]", text, re.M):
