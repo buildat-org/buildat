@@ -97,7 +97,8 @@ local function draw_stack(parent, str, x, y, s)
 	end
 	local t = resource_tex(game.item_texture(st.name))
 	if t then
-		image(parent, t, x, y, 16 * s, 16 * s)
+		local k = game.item_tint(st.name)
+		image(parent, t, x, y, 16 * s, 16 * s, k and magic.Color(k[1], k[2], k[3], 1))
 	else
 		text(parent, st.name:gsub("^skeldat:", ""):sub(1, 4), x, y, 5 * s)
 	end

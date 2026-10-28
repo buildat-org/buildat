@@ -368,13 +368,16 @@ return function(game, declare_keys)
 				.. "is a lantern you wear: it burns coal from your inventory. "
 				.. "Skeletons shoot its wearer first, and snatch it if they "
 				.. "reach you.",
-		"Skeletons burn in daylight away from the bones, and die in water. "
+		"Skeletons burn in daylight away from the bones, and near a torch "
+				.. "or a lantern; they die in water. "
 				.. "Killed, they drop bones and arrows.",
 		"Marker skulls: a skeleton that sees you leaves a red skull. At dawn "
 				.. "and dusk skeletons gather where the skulls are. Dig one and "
 				.. "place it to lure them where you want.",
 		"The bow (three sticks and three bones; arrows: a bone over a "
 				.. "stick): hold the left button to draw, release to shoot.",
+		"Fire arrows (a coal over an arrow) burn the bones away where they "
+				.. "land. The bow shoots the first arrow in your inventory.",
 		"Walking fast down a step you ride a skateboard: it turns where "
 				.. "you look; with forward held, left and right steer "
 				.. "(Camera steer, in the settings). Back brakes, jump "

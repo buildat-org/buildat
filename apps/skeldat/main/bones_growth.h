@@ -430,6 +430,58 @@ struct BonesGrowth
 		land[i] = l;
 	}
 
+	// [SKELDAT_MORE_FUN] A fire arrow's burst at (cx, cy, cz): every voxel
+	// within radius r loses its bones, and the piles there (bone blocks,
+	// skulls, a bone lying) go; the voxels changed, the piles burnt logged
+	void burn(int cx, int cy, int cz, int r)
+	{
+		const uint32_t piles[4] = {world.id_of("skeldat:bone_block"),
+				world.id_of("skeldat:skull"), world.id_of("skeldat:skulls"),
+				world.id_of("skeldat:bone_lying")};
+		size_t changed = 0, burnt = 0;
+		voxelworld::access(world.server, world.scene, [&](voxelworld::Instance *w){
+			const pv::Region box(pv::Vector3DInt32(cx - r, cy - r, cz - r),
+					pv::Vector3DInt32(cx + r, cy + r, cz + r));
+			interface::VoxelVolume vol = w->get_volume(box);
+			interface::VoxelVolume out(box, world.format.planes);
+			interface::VoxelSample gone;
+			world.format.id.set(gone.planes[0], ID_AIR);
+			std::set<std::pair<int, int>> columns;
+			for(int z = cz - r; z <= cz + r; z++)
+			for(int y = cy - r; y <= cy + r; y++)
+			for(int x = cx - r; x <= cx + r; x++){
+				const int dx = x - cx, dy = y - cy, dz = z - cz;
+				if(dx * dx + dy * dy + dz * dz > r * r ||
+						!world.reaches_world(x, y, z))
+					continue;
+				interface::VoxelSample v = vol.sample_at(x, y, z);
+				const uint32_t id = world.format.id.get(v);
+				if(std::find(piles, piles + 4, id) != piles + 4){
+					out.set_sample_at(x, y, z, gone);
+					columns.insert({x, z});
+					burnt++;
+				} else if(world.bones.get(v) > 0){
+					world.bones.set(v, 0);
+					out.set_sample_at(x, y, z, v);
+					changed++;
+				}
+			}
+			if(changed || burnt)
+				w->set_volume(out, false, burnt == 0);
+			for(const auto &c : columns)
+				world.rescan_column(w, c.first, c.second);
+		});
+		// The tops' count again, every section of the footprints it reached
+		const int S = skeldat::bones::SECTION;
+		for(int dz = -r; dz <= r; dz += r)
+		for(int dx = -r; dx <= r; dx += r)
+		for(int sy = world.y0; sy <= world.y1; sy++)
+			recount.insert(pos_key(WorldView::floor_div(cx + dx, S), sy,
+					WorldView::floor_div(cz + dz, S)));
+		log_i(MODULE, "skeldat: a fire at %d,%d,%d burns the bones of %zu "
+				"voxels and %zu piles", cx, cy, cz, changed, burnt);
+	}
+
 	static bool valid_speed(int s)
 	{
 		return s == 1 || s == 2 || s == 5 || s == 10;

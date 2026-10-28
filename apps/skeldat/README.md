@@ -70,6 +70,12 @@ module under it.
   before anyone nearer, closes in and snatches it, and drops it where it
   dies. The HUD shows it over the board's icon, dark when out of coal;
   the others see it over the wearer's head.
+- Fire arrows (a coal over an arrow): the bow shoots the first arrow of
+  the main inventory, and a fire arrow burns up where it sticks, the
+  bones of every voxel within 3 with it, bone blocks and skulls too.
+- Torchlight: a skeleton whose feet or head have a lamp light of 10 or
+  more (within 3 of a torch, 2 of a lantern) burns as in daylight, unless
+  bones are round it.
 - An admin (accounts' admin, or the launcher's own client) has fly (K),
   fast (J) and noclip (H), and Admin... in the pause menu: each player's
   inventory, an item given or a stack taken, and the player made

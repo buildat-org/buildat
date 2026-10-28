@@ -998,13 +998,28 @@ struct Mobs
 				};
 				// The sun burns a skeleton of either kind unless bones are
 				// round it, water kills it
+				// [SKELDAT_MORE_FUN] And a torch's light as the sun's: its
+				// feet's or head's voxel at TORCH_BURN lamp light or more
 				auto burns = [&](float x, float y, float z){
-					if(here.sun >= 12){
+					int lamp = 0;
+					for(int dy = 0; dy < 2; dy++){
+						int sky = 0, l = 0;
+						world.light(w, (int)std::floor(x + 0.5f),
+								(int)std::floor(y + 0.5f) + dy,
+								(int)std::floor(z + 0.5f), sky, l);
+						lamp = std::max(lamp, l);
+					}
+					if(here.sun >= 12 || lamp >= TORCH_BURN){
 						m.burn_t += dt;
 						if(m.burn_t >= 1){
 							m.burn_t = 0;
-							if(world.sun_safe(w, x, y, z) == 0)
+							if(world.sun_safe(w, x, y, z) == 0){
 								burnt.push_back({key, 2});
+								if(here.sun < 12)
+									log_i(MODULE, "skeldat: the %s (%u) is in a "
+											"torch's light, %d", MOB_KIND[m.kind], key,
+											lamp);
+							}
 						}
 					}
 					if(m.y < -1000)
@@ -2651,6 +2666,8 @@ struct Mobs
 		struct Hit { uint32_t key; int dmg; size_t peer; float x, z; bool head;
 			int by; };
 		sv_<Hit> hits;
+		struct Burn { int x, y, z; };
+		sv_<Burn> burns;
 		for(Arrow &a : arrows){
 			a.age += dt;
 			bool gone = !a.stuck && a.age > 8;
@@ -2738,6 +2755,14 @@ struct Mobs
 							a.fz = (int)std::floor(a.z + 0.5f);
 					log_i(MODULE, "skeldat: an arrow sticks at %.1f,%.1f,%.1f",
 							a.x, a.y, a.z);
+					// [SKELDAT_MORE_FUN] A fire arrow burns up, and the
+					// bones round the voxel it went into with it
+					if(a.fire){
+						burns.push_back({a.sx, a.sy, a.sz});
+						host.sound("arrow_land", a.x, a.y, a.z);
+						gone = true;
+						break;
+					}
 					if(a.by_player){
 						host.sound("arrow_land", a.x, a.y, a.z, a.peer);
 						host.sound_near(a.peer, "arrow_land", a.x, a.y, a.z);
@@ -2765,6 +2790,8 @@ struct Mobs
 			kept.push_back(a);
 		}
 		arrows.swap(kept);
+		for(const Burn &b : burns)
+			growth.burn(b.x, b.y, b.z, FIRE_RADIUS);
 		for(const Hit &h : hits){
 			if(!all.count(h.key))
 				continue;

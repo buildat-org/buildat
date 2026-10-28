@@ -173,8 +173,14 @@ return function(game, sounds)
 			quad(quads, r, 64, 64, {-w, 0, -l}, {-w, 0, l}, {w, 0, l}, {w, 0, -l})
 			local mat = material("main/arrow_entity.png")
 			build(node:CreateChild("look"), quads, mat)
+			-- [SKELDAT_MORE_FUN] A fire arrow glows, whatever the light
+			local fire = node:GetVar("skeldat_fire"):GetInt() == 1
 			mobs[node:GetID()] = {node = node, mat = mat, arrow = true,
-				light_t = 0}
+				light_t = 0, fire = fire}
+			if fire then
+				mat:SetShaderParameter("MatDiffColor", magic.Color(1.6, 0.75, 0.3, 1))
+				log:info("skeldat: a fire arrow flies")
+			end
 			-- [SKELDAT_BOW_AIM] The own arrow's first sight: how late and
 			-- how far from the eye it shot from
 			local r = game.bow_release
@@ -202,7 +208,7 @@ return function(game, sounds)
 			mat.cullMode = magic.CULL_NONE
 			build(node:CreateChild("look"), quads, mat)
 			mobs[node:GetID()] = {node = node, mat = mat, arrow = true,
-				light_t = 0}
+				light_t = 0, tint = game.item_tint(item)}
 			log:info("skeldat: a drop of " .. item .. " is here")
 			return
 		end
@@ -325,13 +331,16 @@ return function(game, sounds)
 					end
 				end
 			end
-			if m.light_t <= 0 then
+			if m.light_t <= 0 and not m.fire then
 				m.light_t = 0.25
 				local r, g, b = light_at(magic.Vector3(p.x, p.y + 0.5, p.z))
 				if r then
 					local t = m.kind and m.kind.tint
 					local c = t and magic.Color(r * t[1], g * t[2], b * t[3], 1) or
 							magic.Color(r, g, b, 1)
+					if m.tint then
+						c = magic.Color(r * m.tint[1], g * m.tint[2], b * m.tint[3], 1)
+					end
 					if m.red_t and m.red_t > 0 then
 						local k = (r + g + b) / 3
 						c = magic.Color(k * 1.5 + 0.3, k * 0.4, k * 0.4, 1)

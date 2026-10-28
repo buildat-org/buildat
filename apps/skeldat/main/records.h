@@ -174,6 +174,24 @@ static const float GRAVITY = 20.0f, ARROW_GRAVITY = 9.81f,
 static const float BOW_DRAW = 1, BOW_SPEED = 30, BOW_MIN = 0.1f,
 		BOW_DAMAGE = 0.3f, ARROW_REACH = 1.5f, ARROW_STUCK = 60;
 static const int BOW_USES = 250;
+// [SKELDAT_MORE_FUN] **The fire arrow** (a coal over an arrow, one): shot
+// as an arrow, it burns up where it sticks, and the bones go from every
+// voxel within FIRE_RADIUS of that voxel -- their field to 0, the piles
+// (a bone block, a skull, two, a bone lying) burnt away. The bones come
+// back from the edge as into a lantern's sphere gone out.
+// Pick FIRE_RADIUS 3: up to 29 column tops bare (13 from a shot into a
+// wall over the ground), a hole the front fills in about a game day at 1x
+// (3 voxels at bones.h's 350 s each); a coal's worth beside a lantern's
+// 4 game hours over a sphere of 8, for the ground a lantern cannot be
+// carried to (across water, up a cliff, past the skeletons)
+static const int FIRE_RADIUS = 3;
+// [SKELDAT_MORE_FUN] **Torchlight burns** a skeleton as daylight does (2
+// hp a second, not beside bones): its feet or head at TORCH_BURN lamp
+// light or more. Pick 10: within 3 of a torch (13), 2 of a lantern (12),
+// so a ring of torches round a camp or a lantern burns what comes in to
+// fight or take it, and one torch is no wall; the skeletons do not keep
+// out of it (they keep out of the sun only by day)
+static const int TORCH_BURN = 10;
 // Active (stepped) within ACTIVE_WITHIN of a player, dormant (saved, not
 // stepped) past DORMANT_PAST of every player
 static const float ACTIVE_WITHIN = 48, DORMANT_PAST = 64;
@@ -410,6 +428,8 @@ struct Arrow
 	uint32_t node_id = 0;
 	// A player's ([SKELDAT_BOW]): it hits mobs, not players
 	bool by_player = false;
+	// A fire arrow ([SKELDAT_MORE_FUN]), its node's var "skeldat_fire"
+	bool fire = false;
 	size_t peer = 0;
 	// A mob's: its kind, whose own kind and boars it does not hit
 	// ([SKELDAT_CAVE_SKELETON])

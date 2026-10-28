@@ -87,6 +87,11 @@ function game.item_texture(name)
 	local d = game.items[name]
 	return d and d.image or nil
 end
+-- Its tint, {r, g, b}, or nil
+function game.item_tint(name)
+	local d = game.items[name]
+	return d and d.tint
+end
 
 local function caps_of(s)
 	local caps = {}
@@ -107,9 +112,14 @@ buildat.sub_packet("skeldat:items", function(data)
 		if f[1] == "hand" then
 			game.hand = {caps = caps_of(f[2])}
 		elseif f[1] == "item" then
-			game.items[f[2]] = {name = f[2], desc = f[3], image = f[4],
+			-- [SKELDAT_MORE_FUN] "<image>#rrggbb": the picture tinted
+			local image, tint = (f[4] or ""):match("^([^#]*)#?(%x*)$")
+			game.items[f[2]] = {name = f[2], desc = f[3], image = image,
 				stack_max = tonumber(f[5]), caps = caps_of(f[6]),
-				eat = tonumber(f[7]) or 0}
+				eat = tonumber(f[7]) or 0, tint = #(tint or "") == 6 and
+				{tonumber(tint:sub(1, 2), 16) / 255,
+				tonumber(tint:sub(3, 4), 16) / 255,
+				tonumber(tint:sub(5, 6), 16) / 255} or nil}
 		elseif f[1] == "node" then
 			local groups = {}
 			for k, v in (f[3] or ""):gmatch("([^=;]+)=(%d+);") do
@@ -1195,7 +1205,8 @@ end
 local function has_arrow()
 	for i = 1, 36 do
 		local st = game.parse_stack(game.inv.main[i])
-		if st and st.name == "skeldat:arrow" then
+		if st and (st.name == "skeldat:arrow" or
+				st.name == "skeldat:fire_arrow") then
 			return true
 		end
 	end

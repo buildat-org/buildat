@@ -512,6 +512,9 @@ inline Game make_game()
 	item("diamond", "Diamond");
 	item("bone", "Bone");
 	item("arrow", "Arrow");
+	// [SKELDAT_MORE_FUN] A fire arrow: the arrow's picture, tinted (the
+	// client's "#rrggbb" after an image)
+	item("fire_arrow", "Fire Arrow").image = "main/arrow.png#ff7a30";
 	// [SKELDAT_BOW] A bow: no caps, so it digs as the hand would, which
 	// main.cpp refuses; worn by its shots
 	{
@@ -593,6 +596,7 @@ inline Game make_game()
 		const ss_ s = "skeldat:stick";
 		craft("skeldat:bow", 3, {"", s, b, s, "", b, "", s, b});
 		craft("skeldat:arrow 4", 1, {b, s});
+		craft("skeldat:fire_arrow", 1, {"skeldat:coal", "skeldat:arrow"});
 	}
 	g.cooking = {{"skeldat:iron_ore", "skeldat:iron_ingot", 4},
 			{"skeldat:meat_raw", "skeldat:meat_cooked", 3}};
@@ -655,6 +659,9 @@ inline int self_test()
 	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:arrow 4");
 	grid[1] = Stack(st); grid[4] = Stack("skeldat:bone");
 	assert(!g.craft(grid));
+	// [SKELDAT_MORE_FUN] A fire arrow: a coal over an arrow
+	grid[1] = Stack("skeldat:coal"); grid[4] = Stack("skeldat:arrow");
+	assert(g.craft(grid) && g.craft(grid)->output == "skeldat:fire_arrow");
 	assert(!g.node("skeldat:stuck_arrow")->walkable &&
 			!g.item("skeldat:stuck_arrow"));
 	// Stacks: add fills the same item first and spills into empty slots

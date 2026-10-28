@@ -560,8 +560,11 @@ struct Players: public luanti_session::Game, public MobsHost
 			float dz, const float *e = nullptr)
 	{
 		Stack &held = pl.main[pl.wield];
+		// [SKELDAT_MORE_FUN] The first arrow of the main inventory, a fire
+		// arrow or not: the player picks by where they keep them
 		auto arrow = std::find_if(pl.main.begin(), pl.main.end(),
-				[](const Stack &st){ return st.name == "skeldat:arrow"; });
+				[](const Stack &st){ return st.name == "skeldat:arrow" ||
+				st.name == "skeldat:fire_arrow"; });
 		if(how == "start"){
 			pl.draw_t = held.name == "skeldat:bow" && arrow != pl.main.end() ?
 					world.time : -1;
@@ -589,6 +592,7 @@ struct Players: public luanti_session::Game, public MobsHost
 			return;
 		}
 		dx /= l, dy /= l, dz /= l;
+		const bool fire = arrow->name == "skeldat:fire_arrow";
 		arrow->take(1);
 		held.wear += skeldat::WEAR_MAX / BOW_USES;
 		if(held.wear >= skeldat::WEAR_MAX)
@@ -604,17 +608,20 @@ struct Players: public luanti_session::Game, public MobsHost
 		a.vx = dx * speed, a.vy = dy * speed, a.vz = dz * speed;
 		a.by_player = true;
 		a.peer = peer;
+		a.fire = fire;
 		main_context::access(world.server, world.scene, [&](Urho3D::Scene *scene){
 			Urho3D::Node *n = scene->CreateChild("skeldat_arrow");
 			n->SetPosition(Urho3D::Vector3(a.x, a.y, a.z));
+			if(fire)
+				n->SetVar(Urho3D::StringHash("skeldat_fire"), Urho3D::Variant(1));
 			a.node_id = n->GetID();
 		});
 		mobs.arrows.push_back(a);
 		// [SKELDAT_BOW_SOUND_TUNE] The shooter plays its own at the release
 		sound("bow", a.x, a.y, a.z, peer);
-		log_i(MODULE, "skeldat: %s shoots an arrow at %.1f (drawn %.2f) from "
+		log_i(MODULE, "skeldat: %s shoots %s at %.1f (drawn %.2f) from "
 				"%.3f,%.3f,%.3f (the copy's %.2f off; the feet at %.2f)",
-				cs(pl.name), speed, draw, eye.x_, eye.y_, eye.z_, off, pl.y);
+				cs(pl.name), fire ? "a fire arrow" : "an arrow", speed, draw, eye.x_, eye.y_, eye.z_, off, pl.y);
 	}
 
 	// drops: false, what the death drops is burnt (lava): gone
