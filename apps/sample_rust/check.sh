@@ -11,7 +11,9 @@
 #
 # Natively: two runs, the count going on from the first in the second (the
 # storage survived the restart), the cube's place in a screenshot before
-# and after a key; then a module whose .wasm imports what its meta.json
+# and after a key; util/prebuild_wasm.py naming main's .wasm as the server
+# does, and touching main/server/ leaving the client .wasm's name as it was
+# while touching main/shared/ changes it; then a module whose .wasm imports what its meta.json
 # does not grant is refused, by name, and a server with no cargo refuses
 # the Rust modules, by name. With `web`: the same keys in the web client, headless
 # Chrome, against a native server.
@@ -20,8 +22,8 @@
 #   apps/sample_rust/check.sh web    # the web client
 #
 # tier: quick
-# cost: 20s (2026-10-28)
-# covers: src/server/wasm_module.cpp src/server/wasm_imports.h src/server/wasm_build.cpp src/server/state.cpp src/wasm/** src/interface/wasm_server_api.h src/interface/rust/** builtin/loader/loader.cpp
+# cost: 40s (2026-10-28)
+# covers: src/server/wasm_module.cpp src/server/wasm_imports.h src/server/wasm_build.cpp src/server/state.cpp src/wasm/** src/interface/wasm_server_api.h src/interface/rust/** builtin/loader/loader.cpp util/prebuild_wasm.py
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
@@ -147,6 +149,40 @@ grep -aq "counter: the count is $c1\$" "$t/srv2.log" ||
 	fail "counter did not start at $c1 after the restart ($t/srv2.log)"
 [ "$(count_after "$t/srv2.log")" = $((c1 + 1)) ] ||
 	fail "the count after the restart is not $((c1 + 1)) ($t/srv2.log)"
+
+# [SERVER_WASM_CLIENT_REHASH] A .wasm's name (its key's hash) in a server
+# log: main's wasm/ or server/
+wasm_name()
+{
+	grep -a "wasm    : main: \(built $2/ (Rust) in [0-9]* ms\|$2/ is built (cache hit)\): " "$1" |
+		sed 's|.*/\([0-9a-f]\{40\}\)\.wasm.*|\1|' | tail -1
+}
+w1=$(wasm_name "$t/srv1.log" wasm) s1=$(wasm_name "$t/srv1.log" server)
+[ -n "$w1" ] && [ -n "$s1" ] || fail "no wasm/ or server/ name in $t/srv1.log"
+# util/prebuild_wasm.py names them as the server does
+python3 -I "$here/util/prebuild_wasm.py" none none "$here/src/interface" "$t/pre" \
+		"$here/apps/sample_rust/main" > "$t/pre.log" 2>&1 || fail "prebuild_wasm.py failed ($t/pre.log)"
+[ -f "$t/pre/$w1.wasm" ] && [ -f "$t/pre/$s1.wasm" ] ||
+	fail "prebuild_wasm.py's names are not the server's $w1, $s1 ($t/pre.log)"
+# A copy of the app with one crate's source touched: server/ leaves the
+# client's .wasm as it was (no client fetches it again), shared/ does not
+touched()
+{
+	rm -rf "$t/app"
+	cp -r "$here/apps/sample_rust" "$t/app"
+	echo "// touched" >> "$t/app/main/$1/src/lib.rs"
+	start_server "$t/srv_$1.log" "Listening at" 180 auto bin/buildat_server \
+			-m "$t/app" -l 3 ||
+		{ kill -INT "$SERVER_PID" 2>/dev/null; echo "no server ($t/srv_$1.log)" >&2; return 1; }
+	kill -INT "$SERVER_PID" 2>/dev/null
+	wait "$SERVER_PID" 2>/dev/null
+	wasm_name "$t/srv_$1.log" wasm
+}
+w_server=$(touched server) w_shared=$(touched shared)
+echo "-- client .wasm: $w1, server/ touched $w_server, shared/ touched $w_shared"
+[ "$w_server" = "$w1" ] || fail "touching server/ changed the client's .wasm ($t/srv_server.log)"
+[ -n "$w_shared" ] && [ "$w_shared" != "$w1" ] ||
+	fail "touching shared/ did not change the client's .wasm ($t/srv_shared.log)"
 
 # A module importing what its meta.json does not grant: refused, by name,
 # and the server does not start the app

@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <set>
 #include <sstream>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #ifndef _WIN32
@@ -261,31 +263,70 @@ static bool run_logged(const ss_ &command, const ss_ &log_path,
 	return false;
 }
 
-// The module's other directories with a Cargo.toml than source (crates
-// the source's may use by path, "../shared"), by name, and their files
-// (target/ left out), each sorted
+// The "../<name>" path dependencies in a Cargo.toml's text: path, "=",
+// a quoted "../" and a name of [A-Za-z0-9_-], an optional "/" before the
+// closing quote. simplified: a scan, not a TOML parser; a comment naming
+// one only adds it (util/prebuild_wasm.py's regex is the same).
+static sv_<ss_> path_deps(const ss_ &toml)
+{
+	sv_<ss_> r;
+	for(size_t at = toml.find("path"); at != ss_::npos;
+			at = toml.find("path", at + 1)){
+		size_t i = at + 4;
+		while(i < toml.size() && isspace((unsigned char)toml[i])) i++;
+		if(i >= toml.size() || toml[i] != '=') continue;
+		i++;
+		while(i < toml.size() && isspace((unsigned char)toml[i])) i++;
+		if(i >= toml.size() || (toml[i] != '"' && toml[i] != '\'')) continue;
+		const char q = toml[i++];
+		if(toml.compare(i, 3, "../") != 0) continue;
+		i += 3;
+		const size_t b = i;
+		while(i < toml.size() && (isalnum((unsigned char)toml[i]) ||
+				toml[i] == '_' || toml[i] == '-')) i++;
+		const size_t e = i;
+		if(i < toml.size() && toml[i] == '/') i++;
+		if(e > b && i < toml.size() && toml[i] == q)
+			r.push_back(toml.substr(b, e - b));
+	}
+	return r;
+}
+
+// [SERVER_WASM_CLIENT_REHASH] The module's crates that source depends on
+// by path ("../shared"), transitively, by name, and their files (target/
+// left out), each sorted. Only these are keyed and copied, so an edit in
+// a crate the source does not use leaves its .wasm alone.
 static sv_<std::pair<ss_, sv_<ss_>>> sibling_crates(const ss_ &module_path,
 		const ss_ &source)
 {
+	std::set<ss_> seen = {source};
+	sv_<ss_> todo = {source};
 	sv_<std::pair<ss_, sv_<ss_>>> r;
-	for(const auto &n : interface::fs::list_directory(module_path)){
-		if(!n.is_directory || n.name == source || n.name[0] == '.' ||
-				!interface::fs::path_exists(module_path+"/"+n.name+"/Cargo.toml"))
-			continue;
-		sv_<ss_> files;
-		collect(module_path+"/"+n.name, "", files);
-		files.erase(std::remove_if(files.begin(), files.end(),
-				[](const ss_ &f){ return f.compare(0, 7, "target/") == 0; }),
-				files.end());
-		std::sort(files.begin(), files.end());
-		r.emplace_back(n.name, files);
+	while(!todo.empty()){
+		const ss_ crate = todo.back();
+		todo.pop_back();
+		for(const ss_ &n : path_deps(read_file(
+				module_path+"/"+crate+"/Cargo.toml"))){
+			if(seen.count(n) || !interface::fs::path_exists(
+					module_path+"/"+n+"/Cargo.toml"))
+				continue;
+			seen.insert(n);
+			todo.push_back(n);
+			sv_<ss_> files;
+			collect(module_path+"/"+n, "", files);
+			files.erase(std::remove_if(files.begin(), files.end(),
+					[](const ss_ &f){ return f.compare(0, 7, "target/") == 0; }),
+					files.end());
+			std::sort(files.begin(), files.end());
+			r.emplace_back(n, files);
+		}
 	}
 	std::sort(r.begin(), r.end());
 	return r;
 }
 
 // wasm/ as a Rust crate: copied out (cargo writes Cargo.lock beside
-// Cargo.toml), with the module's other crates beside it as they are in the
+// Cargo.toml), with the module's crates it depends on beside it as in the
 // module, and built by cargo; the .wasm's path, or "" and why logged
 static ss_ build_rust(const core::Config &config, const ss_ &module_name,
 		const ss_ &module_path, const ss_ &source, const sv_<ss_> &files,
@@ -459,8 +500,8 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	// include them only (the others' keys, and their prebuilt .wasm, stay)
 	if(bindings)
 		key<<"bindings 1\n"<<read_file(interface_path+"/buildat_client.h");
-	// The engine's crates, and the module's other crates (a module with
-	// one crate keys as it always did)
+	// The engine's crates, and the module's crates the source depends on
+	// (a crate with no path dependencies keys as it always did)
 	auto engine_crate = [&](const ss_ &dir){
 		sv_<ss_> crate;
 		collect(dir, "", crate);

@@ -14,7 +14,7 @@
 # A module dir is one with a wasm/ in it (builtin/voxelworld,
 # apps/hillclimb/main) or a "server_wasm" in its meta.json. A Rust crate
 # (Cargo.toml) is built by cargo as the server's build_rust() does, the
-# module's other crates beside it: BUILDAT_CARGO, else cargo in PATH, else
+# module's crates it depends on by path beside it: BUILDAT_CARGO, else cargo in PATH, else
 # ~/.cargo/bin/cargo. --by-name names each <module>.wasm instead, the name
 # the static web server looks for (util/web_server.cmake), and builds the
 # clients' wasm/ only.
@@ -64,14 +64,18 @@ def engine_crate(d):
     return keyed(d, [f for f in no_target(crate) if f != "Cargo.lock"])
 
 def sibling_crates(module, source):
-    # The module's other top-level crates, as the server's sibling_crates()
-    r = []
-    for n in os.listdir(module):
-        p = os.path.join(module, n)
-        if n == source or n.startswith(".") or not os.path.isdir(p) or \
-                not os.path.exists(os.path.join(p, "Cargo.toml")):
-            continue
-        r.append((n, sorted(no_target(collect(p)), key=lambda s: s.encode())))
+    # The crates source depends on by path ("../shared"), transitively, as
+    # the server's sibling_crates() and path_deps(): the same scan
+    seen, todo, r = {source}, [source], []
+    while todo:
+        toml = open(os.path.join(module, todo.pop(), "Cargo.toml"), "rb").read()
+        for m in re.finditer(rb"path\s*=\s*([\"'])\.\./([A-Za-z0-9_-]+)/?\1", toml):
+            n = m.group(2).decode()
+            if n in seen or not os.path.exists(os.path.join(module, n, "Cargo.toml")):
+                continue
+            seen.add(n)
+            todo.append(n)
+            r.append((n, sorted(no_target(collect(os.path.join(module, n))), key=lambda s: s.encode())))
     return sorted(r, key=lambda c: c[0].encode())
 
 def cargo_build(module, source, files, target):
