@@ -774,6 +774,22 @@ bundle_libs() {
 	done
 }
 
+# [AITTA_KIT_IN_RELEASE] The kit an Aitta links a release's C++ server
+# for the page from (util/aitta_cpp_build.py), which build_web's _aitta
+# made, as aitta_kit/: util/serve_latest_release.sh names it in
+# BUILDAT_AITTA_CPP_KIT. Its .js and .wasm are web/local/_aitta's, by a
+# hard link (stored once in the archive).
+add_aitta_kit() {
+	local stage="$1" kit="$here/Build-webserver/aitta_kit" f
+	cmp -s "$kit/ref/buildat_server.js" "$stage/web/local/_aitta/buildat_server.js" &&
+		cmp -s "$kit/ref/buildat_server.wasm" "$stage/web/local/_aitta/buildat_server.wasm" ||
+		{ echo "web archive: no aitta_kit of web/local/_aitta's build" >&2; return 1; }
+	cp -a "$kit" "$stage/aitta_kit"
+	for f in buildat_server.js buildat_server.wasm; do
+		ln -f "$stage/web/local/_aitta/$f" "$stage/aitta_kit/ref/$f"
+	done
+}
+
 # The web archives ([LINUX_SERVER]), out of another archive's stage:
 # "web" is the portable archive's with the libraries a bare box lacks,
 # and compiles the apps on the box with its c++; "web-precompiled" is
@@ -790,6 +806,7 @@ make_web_archive() {
 	done
 	if [ -n "$precompiled" ]; then
 		prebuild_apps "$stage" "$name" >&2 || return 1
+		add_aitta_kit "$stage" || return 1
 	else
 		bundle_libs "$stage" >&2
 	fi
