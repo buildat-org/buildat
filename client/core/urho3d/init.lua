@@ -374,13 +374,16 @@ local function drop_handlers_of(owner)
 end
 
 -- Returns how many went. `sandbox_only`: only those a sandboxed
--- script subscribed ([SAFE_UNSUB_FOREIGN])
-local function remove_global_event_handler(event_type, cb_name, sandbox_only)
+-- script subscribed ([SAFE_UNSUB_FOREIGN]); `owner`: only those
+-- subscribed through that owner's table ([SAFE_UNSUB_PEER])
+local function remove_global_event_handler(event_type, cb_name, sandbox_only,
+		owner)
 	if not global_event_mux[event_type] then
 		return 0
 	end
 	return drop_entries(event_type, function(e)
-		return e.name == cb_name and (e.sandbox or not sandbox_only)
+		return e.name == cb_name and (e.sandbox or not sandbox_only) and
+				(owner == nil or e.owner == owner)
 	end)
 end
 
@@ -625,7 +628,7 @@ end
 -- sandboxed script subscribed. The client's code unsubscribes its own
 -- through Unsafe.UnsubscribeFromEvent. Returns how many went.
 local function unsubscribe(sub_event_type, cb_name, caller_environment,
-		sandbox_only)
+		sandbox_only, owner)
 	local cb = cb_name
 	if type(cb) == "string" then
 		cb = type(caller_environment) == "table" and
@@ -634,7 +637,8 @@ local function unsubscribe(sub_event_type, cb_name, caller_environment,
 	if type(cb) == "function" then
 		cb_name = sandbox_callback_to_global_function_name[cb] or cb_name
 	end
-	return remove_global_event_handler(sub_event_type, cb_name, sandbox_only)
+	return remove_global_event_handler(sub_event_type, cb_name, sandbox_only,
+			owner)
 end
 function Safe.UnsubscribeFromEvent(sub_event_type, cb_name)
 	log:debug("Safe.UnsubscribeFromEvent("..dump(sub_event_type)..", "..dump(cb_name)..")")
@@ -1184,7 +1188,12 @@ M.safe = Safe
 -- subscription is the sandbox's. An extension's carries the extension's
 -- name, bound when its table is made (sandboxed_for(name), which
 -- sandbox.lua's per-extension require hands out; [EXT_CALLER_FRAME]);
--- a server's and one run as no extension carry none.
+-- a server's "=served" and one run as no extension "=none" (the eval
+-- tags), none of them an extension's name.
+-- **A script unsubscribes only its own** ([SAFE_UNSUB_PEER]): the
+-- numbered names are no secret, so another extension or a server's
+-- code could drop the launch UI's handlers by them; an unsubscribe
+-- through this table drops only what was subscribed through it.
 local function sandbox_table(owner)
 	local t = {}
 	for k, v in pairs(Safe) do
@@ -1193,9 +1202,15 @@ local function sandbox_table(owner)
 	t.SubscribeToEvent = function(x, y, z)
 		return subscribe(true, owner, named(y, z) and getfenv(2), x, y, z)
 	end
+	t.UnsubscribeFromEvent = function(sub_event_type, cb_name)
+		-- A name in the client's own _G (a pcall's frame) resolves nothing
+		local env = getfenv(2)
+		return unsubscribe(sub_event_type, cb_name, env ~= _G and env, true,
+				owner)
+	end
 	return t
 end
-M.sandboxed, M.served = sandbox_table(nil), sandbox_table(nil)
+M.sandboxed, M.served = sandbox_table("=none"), sandbox_table("=served")
 local sandboxed_of = {}
 function M.sandboxed_for(name)
 	sandboxed_of[name] = sandboxed_of[name] or sandbox_table(name)
