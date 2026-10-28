@@ -115,6 +115,16 @@ local ATTEMPTS = {
 		string.format = function() end
 		return true
 	end},
+	-- [SAFE_CALLER_FRAME]: a verb that read its caller's frame read the
+	-- client's own through a pcall
+	{"eval through a pcall", function()
+		local _, ok, v = pcall(buildat.eval, "return io")
+		return ok and v
+	end},
+	{"subscribe a client global by name through a pcall", function()
+		local ok, name = pcall(magic.SubscribeToEvent, "Update", "tostring")
+		return ok and name
+	end},
 }
 
 function M.run()

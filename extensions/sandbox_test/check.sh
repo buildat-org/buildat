@@ -106,10 +106,13 @@ if ! grep -aq "launch sandbox: the secret field's TextFinished kept" "$out/cli.l
 	echo "FAIL: a script took over the Starport ID dialog's TextFinished"
 	exit 1
 fi
-if ! grep -aq "wrapped: .* of the client's handlers kept" "$out/cli.log"; then
-	echo "FAIL: the unsubscribe case did not run"
+# [SAFE_CALLER_FRAME] and what it subscribes through a pcall or a tail
+# call is its own
+if ! grep -aq "wrapped: .* of the client's handlers kept.*through a pcall and a tail call too" "$out/cli.log"; then
+	echo "FAIL: the unsubscribe case did not run --" \
+			"$(grep -a "wrapped.lua\|is not the script's" "$out/cli.log" | tail -2 | tr '\n' ' ')"
 	exit 1
 fi
 # vim: set noet ts=4 sw=4:
-echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers"
+echo "PASS: a hostile launch UI reaches nothing past the verbs, and polls no key typed into the Starport ID dialog nor writes its password field or takes over its Return, and removes none of the client's handlers and keeps none of its own past a pcall or a tail call"
 exit 0

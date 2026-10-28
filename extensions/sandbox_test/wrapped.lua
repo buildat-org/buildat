@@ -490,8 +490,21 @@ do
 	local own = magic.SubscribeToEvent("Update", function() end)
 	assert(magic.UnsubscribeFromEvent("Update", own) == 1,
 			"a script's own subscription did not go")
+	-- [SAFE_CALLER_FRAME] And one made through a pcall or a tail call is
+	-- the script's too (one that read as the client's was not dropped
+	-- on leaving a server)
+	local _, by_pcall = pcall(magic.SubscribeToEvent, "Update",
+			function() end)
+	local _, by_tail = pcall(function()
+		return magic.SubscribeToEvent("Update", function() end)
+	end)
+	assert(magic.UnsubscribeFromEvent("Update", by_pcall) == 1,
+			"a subscription made through a pcall is not the script's")
+	assert(magic.UnsubscribeFromEvent("Update", by_tail) == 1,
+			"a subscription made through a tail call is not the script's")
 	log:info("wrapped: " .. tried .. " of the client's handlers kept, " ..
-			"the UI guard holds, the script's own unsubscribed")
+			"the UI guard holds, the script's own unsubscribed, " ..
+			"through a pcall and a tail call too")
 end
 
 return true
