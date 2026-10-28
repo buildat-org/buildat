@@ -8,7 +8,8 @@
 -- it. The write-behind buffer makes a round trip that never leaves the buffer
 -- prove nothing, which is why this is two functions and not one.
 --
--- Run once at the end of run_game(); see create_world() in luanti.cpp.
+-- Run once at the end of run_game() under BUILDAT_LUANTI_SELFCHECKS=1, as
+-- the checks set it (util/check_lib.sh); see start_check_map() in world.h.
 
 -- Everything here happens this high up, which is above what any mapgen
 -- builds and below the map's own limit: a world with terrain in it is a

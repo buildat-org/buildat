@@ -1034,7 +1034,7 @@ struct Importer
 	}
 };
 
-// The import's and the registry's self tests, run at start
+// The import's and the registry's self tests, run at start under BUILDAT_LUANTI_SELFCHECKS=1
 inline void check_params()
 {
 	// The LBM list a Luanti world carries, which decides what this

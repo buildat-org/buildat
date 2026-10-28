@@ -911,7 +911,7 @@ private:
 };
 
 // What check_surface() and the palette arithmetic hold to. builtin/luanti
-// runs it once at start.
+// runs it once at start under BUILDAT_LUANTI_SELFCHECKS=1.
 inline void check_registry()
 {
 	check_surface();

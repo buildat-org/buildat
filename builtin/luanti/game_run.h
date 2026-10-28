@@ -265,16 +265,23 @@
 		// the section it is in, and the migrate_node_meta() below is what an
 		// older save's one blob of it becomes.
 		m_players.load_players();
-		run_chunk_string("core.__check_players() "
-				"core.__check_inventory_move() "
-				"core.__check_bone_hand() "
-				"core.__check_craft_index()", "check_players");
-
-		check_shapes();
-		check_params();
-		check_registry();
-		luanti_mapblock::check_mapblock();
-		luanti_media::check_media_names();
+		// [LUANTI_SELFCHECKS_OFF] The module's self-checks, these and the
+		// map's round trip below, only when asked: the checks ask
+		// (util/check_lib.sh), a player's game starts without them
+		const char *sc = getenv("BUILDAT_LUANTI_SELFCHECKS");
+		const bool selfchecks = sc && ss_(sc) == "1";
+		if(selfchecks){
+			log_i(MODULE, "The self-checks run (BUILDAT_LUANTI_SELFCHECKS)");
+			run_chunk_string("core.__check_players() "
+					"core.__check_inventory_move() "
+					"core.__check_bone_hand() "
+					"core.__check_craft_index()", "check_players");
+			check_shapes();
+			check_params();
+			check_registry();
+			luanti_mapblock::check_mapblock();
+			luanti_media::check_media_names();
+		}
 
 		// The game's own media before the registry, because what a node's
 		// tiles can be depends on which files were actually shipped
@@ -306,7 +313,8 @@
 			m_world.update_load_points();
 		}
 
-		m_world.start_check_map();
+		if(selfchecks)
+			m_world.start_check_map();
 
 		// Last, so that it is the hour whatever the save or the imported
 		// world said

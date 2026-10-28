@@ -395,9 +395,10 @@ local function candidates(method, names)
 end
 
 -- The index says what the walk it replaced said: every registered recipe is
--- among the candidates for its own inputs. Checked at startup, because a key
--- built one way here and another way there is a recipe that quietly stops
--- working, and a game has thousands of them.
+-- among the candidates for its own inputs. Checked at a start under
+-- BUILDAT_LUANTI_SELFCHECKS=1 (the checks), because a key built one way here
+-- and another way there is a recipe that quietly stops working, and a game
+-- has thousands of them.
 function core.__check_craft_index()
 	local checked = 0
 	for i, recipe in ipairs(core.__crafts) do

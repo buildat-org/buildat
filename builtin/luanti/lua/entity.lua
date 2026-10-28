@@ -2281,7 +2281,7 @@ local function move_stack(from_inv, from_list, from_i, to_inv, to_list, to_i,
 end
 
 -- The round trip is the client's; what can be wrong here is the arithmetic,
--- which is checked at every start
+-- which is checked at a start under BUILDAT_LUANTI_SELFCHECKS=1
 function core.__check_inventory_move()
 	local inv = core.__new_inventory({type = "player", name = "__check"})
 	inv:set_size("main", 4)

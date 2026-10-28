@@ -21,6 +21,9 @@ mkdir -p "$BUILDAT_USER_PATH/shared/vanilla" "$BUILDAT_CACHE_PATH"
 # server running. Started under `timeout N`, the parent is timeout, which
 # lives on up to N seconds.
 export BUILDAT_DIE_WITH_PARENT=1
+# builtin/luanti's self-checks (the shapes, the registry, the map's round
+# trip) run only when asked ([LUANTI_SELFCHECKS_OFF]): every check asks
+export BUILDAT_LUANTI_SELFCHECKS=1
 # The ci mode ([CI_TIER] 3): under BUILDAT_CI a client draws unlit unless
 # the runner names a mode -- a third to a quarter of pbr's cost on
 # llvmpipe (the item's table). Without the variable nothing changes.
