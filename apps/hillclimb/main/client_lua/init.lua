@@ -28,7 +28,18 @@ end
 
 local scene = replicate.main_scene
 local U = 8 -- voxels to the metre
-local FAR_CLIP = 150 * U
+-- **Fitted to what the client got** ([WEB_MESH_REST]), as builtin/
+-- voxelworld's defaults are: where the memory is 512 MB or less, and where
+-- the page meshes on its own thread, the hill past 24 m is drawn from LOD
+-- chunks and the view ends at 100 m. The whole hill drawn took the web
+-- client to 369 MB, 307 so (WebKit, 2026-10-28); a page meshing a slice a
+-- frame drew 7 chunks a second, under half the hill in 40 s with W held,
+-- and 15 so, all of it in 36 s.
+-- simplified: one step from one measure, as voxelworld's
+local resources = buildat.resources and buildat.resources() or {}
+local small = (resources.memory_mb and resources.memory_mb <= 512) or
+		resources.mesh_threads == 0
+local FAR_CLIP = (small and 100 or 150) * U
 -- extensions/sky_render, and the day's schedule luanti_client's
 -- sky_model.lua, served by main.cpp ([SKY_RENDER_SHARED])
 local sky_model = load("luanti/sky_model.lua")
@@ -51,7 +62,7 @@ voxel_shading.use_technique_set({
 	sun_alpha = "luanti_client/res/LuantiVoxelSunAlpha.xml",
 	sun_masked = "luanti_client/res/LuantiVoxelSunMasked.xml",
 })
-voxelworld.lod_distance = 4000
+voxelworld.lod_distance = small and 24 * U or 4000
 -- No collision shapes for the chunks: nothing here collides with them (the
 -- car is the server's, and its prediction reads the volumes), and on the
 -- web their building was most of a frame ([WEB_MESH_SLICES])
