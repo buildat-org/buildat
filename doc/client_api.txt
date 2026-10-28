@@ -271,9 +271,12 @@ buildat.set_voxel_geometry(node, volume_data, voxel_reg, atlas_reg
   Vector3, is where the volume's inside (0, 0, 0) sits in the world, which a
   voxel of uv_scale > 1 takes its slice of the texture repeat from
   ([WORLD_UV]); a world's chunk passes it, a model standing on its own leaves
-  it out and every voxel gets the whole texture.
+  it out and every voxel gets the whole texture. The volume data is read on
+  the worker too ([WEB_MESH_REST]): data that does not read is logged and the
+  node left as it was. With no mesh threads (buildat.resources()) it is read
+  in the call, which raises on it.
 buildat.set_voxel_lod_geometry(lod, node, volume_data, ...)
-- The same at one voxel per lod^3
+- The same at one voxel per lod^3, lod 1 to 16
 buildat.clear_voxel_geometry(node)
 buildat.set_voxel_physics_boxes(node, volume_data, voxel_reg [, ...])
 buildat.clear_voxel_physics_boxes(node)

@@ -25,6 +25,7 @@ namespace magic = Urho3D;
 namespace pv = PolyVox;
 
 using interface::VoxelInstance;
+using interface::VoxelSample;
 using interface::VoxelVolume;
 using interface::VoxelRegistry;
 using interface::AtlasRegistry;
@@ -47,6 +48,19 @@ namespace lua_bindings {
 		if(tolua_isusertype(L, index, #type, 0, &tolua_err)) \
 			result_name = (type*)tolua_tousertype(L, index, 0); \
 	}
+
+// **With no workers** (a web page that is not cross-origin isolated) a
+// task's volume is read here, as it was before [WEB_MESH_REST]: the pool's
+// slice of a frame is all the meshing such a page gets, and the read in it
+// cost WebKit a third of its chunks a second (7.8 to 5.3, hillclimb)
+template<typename T>
+static void add_reading_task(interface::thread_pool::ThreadPool *pool,
+		up_<T> task)
+{
+	if(pool->get_num_threads() == 0)
+		task->read_now();
+	pool->add_task(std::move(task));
+}
 
 struct SetVoxelGeometryTask;
 static void add_8bit_task(Node *node, int w, int h, int d, const ss_ &data,
@@ -212,6 +226,72 @@ static void slice_check_count(const char *what, bool ok)
 				what, n_same, n_differ, ok ? "the same" : "DIFFERS");
 }
 
+// A task's volume out of its data, the task's own copy (nothing else
+// touches it), let go of once read. A format this does not know, which
+// deserialize_volume() answers with null, raises as bad data does.
+static up_<VoxelVolume> read_volume(ss_ &data)
+{
+	ss_ d;
+	d.swap(data);
+	up_<VoxelVolume> volume = interface::deserialize_volume(d);
+	if(!volume)
+		throw Exception("deserialize_volume(): a format this does not know");
+	return volume;
+}
+
+// [WEB_MESH_REST] A task's first round, which reads its volume on a
+// worker: read() there, done() in the first post() and again() after it.
+// Where there are no workers the caller reads it instead, read_now().
+struct ReadRound
+{
+	bool go_again = false;
+	// Data that does not read leaves the volume null and the node as it was
+	bool read(ss_ &data, up_<VoxelVolume> &volume)
+	{
+		try {
+			volume = read_volume(data);
+		} catch(std::exception &e){
+			log_w(MODULE, "A voxel volume not meshed: %s", e.what());
+		}
+		return (bool)volume;
+	}
+	bool done(const WeakPtr<Node> &node, const up_<VoxelVolume> &volume)
+	{
+		go_again = node && volume;
+		return true;
+	}
+	bool again()
+	{
+		const bool r = go_again;
+		go_again = false;
+		return r;
+	}
+};
+
+// Whether every voxel in the volume has its textures cached already, so
+// that a worker may mesh it with no preload on the main thread
+static bool textures_ready(VoxelVolume &volume, VoxelRegistry *voxel_reg)
+{
+	auto region = volume.getEnclosingRegion();
+	auto &lc = region.getLowerCorner();
+	auto &uc = region.getUpperCorner();
+	VoxelSample last;
+	bool have_last = false;
+	for(int z = lc.getZ(); z <= uc.getZ(); z++)
+	for(int y = lc.getY(); y <= uc.getY(); y++)
+	for(int x = lc.getX(); x <= uc.getX(); x++){
+		// A run of the same sample is one lookup, as the preload's
+		VoxelSample v = volume.sample_at(x, y, z);
+		if(have_last && memcmp(&v, &last, sizeof v) == 0)
+			continue;
+		if(!voxel_reg->textures_ready(v))
+			return false;
+		last = v;
+		have_last = true;
+	}
+	return true;
+}
+
 struct SetVoxelGeometryTask: public interface::thread_pool::Task
 {
 	WeakPtr<Node> node;
@@ -258,13 +338,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		use_skylight(use_skylight), material_cb(material_cb),
 		horizon(parse_horizon(horizon_data, "set_voxel_geometry()")),
 		uv_origin(std::move(uv_origin))
-	{
-		ScopeTimer timer("pre geometry");
-		// The deserialise is one shot and cheap beside what follows it;
-		// the textures are the part that used to take most of a second
-		// and they are pre()'s now, a slice at a time ([CLIENT_FRAME])
-		volume = interface::deserialize_volume(data);
-	}
+	{}
 	// set_8bit_voxel_geometry()'s block, made into a volume by the caller
 	SetVoxelGeometryTask(Node *node, up_<VoxelVolume> volume,
 			sp_<VoxelRegistry> voxel_reg, sp_<AtlasRegistry> atlas_reg,
@@ -275,6 +349,20 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		uv_origin(std::move(uv_origin))
 	{
 		split = false;
+		reading = false;
+	}
+	// **The volume is read on a worker** ([WEB_MESH_REST]): the first
+	// round's thread() deserialises the data the task holds and meshes it
+	// when every voxel in it has its textures already; else again() sends
+	// it round once more for them (pre(), which needs the voxels) and the
+	// mesh. The deserialise and the preload's lookups were the main
+	// thread's part of a chunk on the web, a millisecond or two each.
+	ReadRound reading_round;
+	bool reading = true;
+	void read_now()
+	{
+		volume = read_volume(data);
+		reading = false;
 	}
 	interface::mesh::PreloadCursor preload_cursor;
 	// Called repeatedly from the main thread until it returns true: the
@@ -283,6 +371,8 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// join's first chunks were paying for in one go.
 	bool pre()
 	{
+		if(reading)
+			return true;
 		return interface::mesh::preload_textures_sliced(
 				*volume, voxel_reg.get(), atlas_reg.get(), false,
 				interface::os::time_us() + 1500, preload_cursor);
@@ -298,6 +388,16 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	}
 	bool thread_until(int64_t until_us)
 	{
+		if(reading){
+			if(!reading_round.read(data, volume) ||
+					!textures_ready(*volume, voxel_reg.get()))
+				return true; // To post(), and round again for the textures
+			// Every voxel's textures there already, which is the usual
+			// case past a world's first chunks: meshed in this round,
+			// with no frame's wait and no preload on the main thread
+			reading = false;
+			return false;
+		}
 		if(meshed){
 			// A step of its own, the occluder: up to 2 ms on the web
 			interface::mesh::generate_occluder(occluder, *volume,
@@ -349,6 +449,10 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 	// Called repeatedly from main thread until returns true
 	bool post()
 	{
+		if(reading){
+			reading = false;
+			return reading_round.done(node, volume);
+		}
 		ScopeTimer timer("post geometry");
 		if(!node)
 			return true; // Dropped while this was in the queue
@@ -406,6 +510,7 @@ struct SetVoxelGeometryTask: public interface::thread_pool::Task
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
 	}
+	bool again(){ return reading_round.again(); }
 };
 
 struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
@@ -431,20 +536,25 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		voxel_reg(voxel_reg), atlas_reg(atlas_reg), use_skylight(use_skylight),
 		material_cb(material_cb),
 		horizon(parse_horizon(horizon_data, "set_voxel_lod_geometry()"))
+	{}
+	// The volume read and made coarse on a worker, as
+	// SetVoxelGeometryTask's ([WEB_MESH_REST]). simplified: always round
+	// again for the textures, as the registry has no lock-free answer for
+	// the LOD ones; one would mesh most far chunks in the first round
+	ReadRound reading_round;
+	bool reading = true;
+	void read_now()
 	{
-		ScopeTimer timer("pre lod geometry");
-		// NOTE: Do the pre-processing here so that the calling code can
-		//       meaasure how long its execution takes
-		// NOTE: Could be split in three calls
-		up_<VoxelVolume> volume_orig =
-				interface::deserialize_volume(data);
 		lod_volume = interface::mesh::generate_voxel_lod_volume(
-				lod, *volume_orig, voxel_reg.get());
+				lod, *read_volume(data), voxel_reg.get());
+		reading = false;
 	}
 	interface::mesh::PreloadCursor preload_cursor;
 	// The far chunks' textures, on the same terms as the near ones'
 	bool pre()
 	{
+		if(reading)
+			return true;
 		return interface::mesh::preload_textures_sliced(
 				*lod_volume, voxel_reg.get(), atlas_reg.get(), true,
 				interface::os::time_us() + 1500, preload_cursor);
@@ -458,6 +568,13 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	}
 	bool thread_until(int64_t until_us)
 	{
+		if(reading){
+			up_<VoxelVolume> volume_orig;
+			if(reading_round.read(data, volume_orig))
+				lod_volume = interface::mesh::generate_voxel_lod_volume(
+						lod, *volume_orig, voxel_reg.get());
+			return true;
+		}
 		if(!interface::mesh::generate_voxel_lod_geometry_step(job, until_us,
 				lod, temp_geoms, *lod_volume, voxel_reg.get(), atlas_reg.get(),
 				use_skylight, horizon.get()))
@@ -479,6 +596,10 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 	// Called repeatedly from main thread until returns true
 	bool post()
 	{
+		if(reading){
+			reading = false;
+			return reading_round.done(node, lod_volume);
+		}
 		ScopeTimer timer("post lod geometry");
 		if(!node)
 			return true; // Dropped while this was in the queue
@@ -496,6 +617,7 @@ struct SetVoxelLodGeometryTask: public interface::thread_pool::Task
 		cg->SetZoneMask(magic::DEFAULT_ZONEMASK);
 		return true;
 	}
+	bool again(){ return reading_round.again(); }
 };
 
 // Whether a node's collision shapes are already exactly these boxes.
@@ -540,12 +662,7 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 	SetPhysicsBoxesTask(Node *node, const ss_ &data,
 			sp_<VoxelRegistry> voxel_reg):
 		node(node), data(data), voxel_reg(voxel_reg)
-	{
-		// NOTE: Do the pre-processing here so that the calling code can
-		//       meaasure how long its execution takes
-		// NOTE: Could be split in two calls
-		volume = interface::deserialize_volume(data);
-	}
+	{}
 	bool urgent() const { return true; }
 	// Called repeatedly from main thread until returns true
 	bool pre()
@@ -559,8 +676,21 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 	{
 		return thread_until(interface::os::time_us() + 2000);
 	}
+	// The volume read here too, the first step ([WEB_MESH_REST]); one that
+	// would not read leaves the node as it was
+	bool read = false;
+	void read_now()
+	{
+		volume = read_volume(data);
+		read = true;
+	}
 	bool thread_until(int64_t until_us)
 	{
+		if(!read){
+			read = true;
+			ReadRound().read(data, volume);
+			return !volume;
+		}
 		return interface::mesh::generate_voxel_physics_boxes_step(job,
 				until_us, result_boxes, *volume, voxel_reg.get());
 	}
@@ -573,8 +703,8 @@ struct SetPhysicsBoxesTask: public interface::thread_pool::Task
 		post_step == 2 ? "post_physics 2" :
 		post_step == 3 ? "post physics 3" :
 		"post physics");
-		if(!node)
-			return true; // Dropped while this was in the queue
+		if(!node || !volume)
+			return true; // Dropped while this was in the queue, or no volume
 		Context *context = node->GetContext();
 		switch(post_step){
 		case 1: {
@@ -682,9 +812,7 @@ void set_voxel_geometry(const luabind::object &node_o,
 			node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
 			horizon_data, std::move(uv_origin)));
 
-	auto *thread_pool = buildat_app->get_thread_pool();
-
-	thread_pool->add_task(std::move(task));
+	add_reading_task(buildat_app->get_thread_pool(), std::move(task));
 }
 
 static void add_8bit_task(Node *node, int w, int h, int d, const ss_ &data,
@@ -717,9 +845,15 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 	log_d(MODULE, "set_voxel_lod_geometry(): node=%p", node);
 	log_d(MODULE, "set_voxel_lod_geometry(): buf=%p", buf);
 
+	// A volume's lod^3 voxels to one: 0 divided by zero, and a big one
+	// was a loop the size of its cube for every voxel
+	if(lod < 1 || lod > 16)
+		throw Exception("set_voxel_lod_geometry(): lod is 1 to 16, not "+
+				itos(lod));
+
 	ss_ data;
 	if(buf == nullptr)
-		data = lua_tocppstring(L, 2);
+		data = lua_tocppstring(L, 3);
 	else
 		data.assign((const char*)buf->GetData(), buf->GetSize());
 
@@ -731,9 +865,7 @@ void set_voxel_lod_geometry(int lod, const luabind::object &node_o,
 			lod, node, data, voxel_reg, atlas_reg, use_skylight, material_cb,
 			horizon_data));
 
-	auto *thread_pool = buildat_app->get_thread_pool();
-
-	thread_pool->add_task(std::move(task));
+	add_reading_task(buildat_app->get_thread_pool(), std::move(task));
 }
 
 void clear_voxel_geometry(const luabind::object &node_o)
@@ -781,9 +913,7 @@ void set_voxel_physics_boxes(const luabind::object &node_o,
 			node, data, voxel_reg
 			));
 
-	auto *thread_pool = buildat_app->get_thread_pool();
-
-	thread_pool->add_task(std::move(task));
+	add_reading_task(buildat_app->get_thread_pool(), std::move(task));
 }
 
 void clear_voxel_physics_boxes(const luabind::object &node_o)

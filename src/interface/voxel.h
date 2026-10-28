@@ -915,6 +915,12 @@ namespace interface
 		virtual const CachedVoxelDefinition* get_cached(const VoxelInstance &v,
 				AtlasRegistry *atlas_reg = nullptr, bool with_lod = false) = 0;
 
+		// Whether v's definition is cached with its textures (the near
+		// ones), without building anything or taking the lock: a worker's
+		// question before it meshes ([WEB_MESH_REST]). False is "ask
+		// get_cached() with the atlas on the main thread".
+		virtual bool textures_ready(const VoxelSample &v) = 0;
+
 		virtual bool is_dirty() = 0;
 		virtual void clear_dirty() = 0;
 

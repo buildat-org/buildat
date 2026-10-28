@@ -493,6 +493,11 @@ struct CVoxelRegistry: public VoxelRegistry
 				with_lod);
 	}
 
+	bool textures_ready(const VoxelSample &v)
+	{
+		return fast_cached_tex(m_look.id_of(v, m_format)) != nullptr;
+	}
+
 	bool is_dirty()
 	{
 		std::lock_guard<std::mutex> lock(m_mutex);

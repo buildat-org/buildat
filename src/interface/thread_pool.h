@@ -20,6 +20,11 @@ namespace interface
 			virtual bool thread_until(int64_t){ return thread(); }
 			// Called repeatedly from main thread until returns true
 			virtual bool post() = 0;
+			// Asked once post() is done: true sends the task round once
+			// more, its pre() from the next frame on ([WEB_MESH_REST]: a
+			// chunk's volume read on a worker, then its textures on this
+			// thread and its mesh on a worker)
+			virtual bool again(){ return false; }
 			// Ahead of the waiting ones rather than behind them: a chunk's
 			// collision behind four meshes run a slice a frame (the web)
 			// was seconds stale under the player
@@ -32,6 +37,8 @@ namespace interface
 			virtual ~ThreadPool(){}
 			virtual void add_task(up_<Task> task) = 0;
 			virtual void start(size_t num_threads) = 0;
+			// 0: the tasks' threaded part runs on the calling thread
+			virtual size_t get_num_threads() = 0;
 			virtual void request_stop() = 0;
 			virtual void join() = 0;
 			virtual void run_post() = 0;

@@ -188,6 +188,11 @@ struct CThreadPool: public ThreadPool
 		}
 	}
 
+	size_t get_num_threads()
+	{
+		return m_threads.size();
+	}
+
 	void request_stop()
 	{
 		interface::MutexScope ms(m_mutex);
@@ -333,6 +338,9 @@ struct CThreadPool: public ThreadPool
 				if(done)
 					break;
 			}
+			// Round again: to the queue that pre() is run from
+			if(done && task->again())
+				m_pre_queue.push_back(std::move(task));
 			// If still not done, push task to back to front of queue
 			if(!done){
 				interface::MutexScope ms(m_mutex);
