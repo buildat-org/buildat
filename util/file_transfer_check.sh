@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
 # cost: ~1 min (2026-10-29)
-# covers: builtin/client_file/client_file.cpp builtin/network/network.cpp builtin/network/api.h src/impl/packet_stream.cpp src/impl/tcpsocket.cpp src/interface/select_handler.h src/client/state.cpp apps/file_transfer_check
+# covers: builtin/client_file/client_file.cpp builtin/network/** src/impl/packet_stream.cpp src/impl/tcpsocket.cpp src/interface/select_handler.h src/client/state.cpp util/netsim.py apps/file_transfer_check/**
 # [FILE_TRANSFER_LATENCY]: a server's file through util/netsim.py at
 # 100 ms each way and 2 MB/s (16000 kbit/s) arrives in about its size over
 # the bandwidth and a few round trips, and the game's packets are not held
