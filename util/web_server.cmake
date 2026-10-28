@@ -287,6 +287,7 @@ set(WS_LINK_FLAGS
 	--profiling-funcs
 	"SHELL:--pre-js ${WS_APP_JS}"
 	"SHELL:--pre-js ${CMAKE_SOURCE_DIR}/src/server/web/pre.js"
+	"SHELL:--post-js ${CMAKE_SOURCE_DIR}/src/server/web/post.js"
 	"SHELL:--exclude-file *.swp"
 )
 set(WS_PACKED "${WS_APP_DIR}" ${WS_BASE_DIR})
@@ -320,4 +321,5 @@ endif()
 target_link_options(${SERVER_EXE_NAME} PRIVATE ${WS_LINK_FLAGS})
 set_property(TARGET ${SERVER_EXE_NAME} APPEND PROPERTY
 	LINK_DEPENDS "${URHO3D_LIBRARY_FILE}" "${CMAKE_SOURCE_DIR}/src/server/web/pre.js"
+	"${CMAKE_SOURCE_DIR}/src/server/web/post.js"
 	"${WS_APP_JS}")
