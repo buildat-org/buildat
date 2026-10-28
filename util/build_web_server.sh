@@ -5,6 +5,10 @@
 # web/local/<app>/, where the web client's ?local=<app> finds them. Needs
 # emsdk as util/build_web.sh does.
 # util/build_web_server.sh [app (hillclimb)] [make arguments]
+# [WEB_LOCAL_AITTA] The engine's server for Aitta's packages, which run in
+# the page with no build of their own (their modules are .wasm), is
+# src/server/web/_aitta, an app of the builtins that keep to the web API:
+# util/build_web_server.sh "$PWD/src/server/web/_aitta" into web/local/_aitta/
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP=${1:-hillclimb}

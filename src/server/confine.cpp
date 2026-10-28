@@ -1,6 +1,8 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 #include "server/confine.h"
+#include "server/config.h"
+#include "server/wasm_build.h"
 #include "core/config.h"
 #include "core/log.h"
 #include "interface/fs.h"
@@ -38,10 +40,20 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	return "this platform has no box yet";
 }
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+{
+	return "this platform has no box for a build";
+}
 }
 
 #elif defined(_WIN32)
-// confine_windows.cpp
+// confine_windows.cpp; no box for a build there
+namespace server {
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+{
+	return "this platform has no box for a build";
+}
+}
 #else
 
 #include <linux/landlock.h>
@@ -62,6 +74,9 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 #include <dirent.h>
 #include <fstream>
 #include <vector>
+#include <algorithm>
+#include <sys/resource.h>
+#include "interface/process.h"
 
 // What older headers lack: the build box is older than the kernels the
 // server runs on
@@ -227,7 +242,9 @@ static int count_threads()
 // it is: it signals nothing outside either. tkill, which glibc does not
 // use, is refused, and truncate by path (see below). The rest is
 // Landlock's.
-static ss_ install_seccomp()
+// no_sockets ([WEB_LOCAL_AITTA], a publish's build): no socket of any
+// family, so nothing reaches a network, TCP or UDP or a name server
+static ss_ install_seccomp(bool no_sockets = false)
 {
 #if defined(__x86_64__)
 	const uint32_t arch = AUDIT_ARCH_X86_64;
@@ -285,6 +302,8 @@ static ss_ install_seccomp()
 	stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW);
 	// socket(domain, ...): the low word of the first argument
 	label(L_SOCKET);
+	if(no_sockets)
+		stmt(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EACCES & SECCOMP_RET_DATA));
 	stmt(BPF_LD | BPF_W | BPF_ABS, arg0_lo);
 	prog.push_back({BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_UNIX, 0, 1),
 			NONE, NONE});
@@ -324,6 +343,190 @@ static ss_ install_seccomp()
 	return "";
 }
 
+ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
+{
+	if(count_threads() != 1)
+		return "the build's box is made before any thread starts";
+	const int abi = syscall(SYS_landlock_create_ruleset, nullptr, 0,
+			LANDLOCK_CREATE_RULESET_VERSION);
+	if(abi < 1)
+		return ss_("Landlock is not available (")+strerror(errno)+")";
+	RulesetAttr attr;
+	attr.handled_access_fs = FS_ABI1;
+	if(abi >= 2)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_REFER;
+	if(abi >= 3)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_TRUNCATE;
+	if(abi >= 5)
+		attr.handled_access_fs |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+	// No TCP port at all (and seccomp takes the sockets themselves)
+	attr.handled_access_net = abi >= 4 ? (LANDLOCK_ACCESS_NET_BIND_TCP |
+			LANDLOCK_ACCESS_NET_CONNECT_TCP) : 0;
+	attr.scoped = abi >= 6 ? (LANDLOCK_SCOPE_ABSTRACT_UNIX_SOCKET |
+			LANDLOCK_SCOPE_SIGNAL) : 0;
+	const size_t attr_size = abi >= 6 ? sizeof(RulesetAttr) :
+			abi >= 4 ? offsetof(RulesetAttr, scoped) :
+			offsetof(RulesetAttr, handled_access_net);
+	Ruleset rs;
+	rs.handled = attr.handled_access_fs;
+	rs.fd = syscall(SYS_landlock_create_ruleset, &attr, attr_size, 0);
+	if(rs.fd < 0)
+		return ss_("Landlock: ")+strerror(errno);
+	// What the build reads goes into a .wasm that Aitta publishes: the
+	// programs and libraries, the toolchain, the engine's headers and
+	// crates, and nothing of the user's -- not /etc (but the loader's
+	// cache), /proc, /home, /tmp or the server's own files
+	for(const char *p : {"/usr", "/lib", "/lib32", "/lib64", "/bin", "/sbin",
+			"/etc/ld.so.cache"})
+		rs.add(p, FS_READ);
+	for(const ss_ &d : read_dirs)
+		if(!d.empty())
+			rs.add(d, FS_READ);
+	for(const char *p : {"/dev/null", "/dev/zero", "/dev/random",
+			"/dev/urandom"})
+		rs.add(p, rs.handled);
+	rs.add(job_dir, rs.handled);
+	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
+		close(rs.fd);
+		return ss_("no_new_privs: ")+strerror(errno);
+	}
+	if(syscall(SYS_landlock_restrict_self, rs.fd, 0) != 0){
+		const ss_ why = strerror(errno);
+		close(rs.fd);
+		return "Landlock: "+why;
+	}
+	close(rs.fd);
+	const ss_ seccomp = install_seccomp(true);
+	if(!seccomp.empty())
+		return seccomp;
+	for(const ss_ &r : rs.refused)
+		log_w(MODULE, "No rule for %s", cs(r));
+	log_i(MODULE, "The build is sandboxed: Landlock ABI %i, %s writable, "
+			"no sockets", abi, cs(job_dir));
+	return "";
+}
+
+// [WEB_LOCAL_AITTA] A publish's build, each of its processes: the wall
+// clock (this one's), and the CPU, memory, file size and no core (all)
+static const unsigned BUILD_WALL_S = 300;
+static const rlim_t BUILD_CPU_S = 600;
+static const rlim_t BUILD_MEM = (rlim_t)4 << 30;
+static const rlim_t BUILD_FILE = (rlim_t)256 << 20;
+
+int build_wasm_job(const ss_ &job, const ss_ &interface_path)
+{
+	// Nothing of Aitta's: an open file or socket it left without
+	// close-on-exec (a descriptor goes past any box), its input, and its
+	// environment (cleared below, once the toolchain is found)
+	struct rlimit nofile = {1024, 1024};
+	getrlimit(RLIMIT_NOFILE, &nofile);
+	for(int fd = 3; fd < (int)std::min<rlim_t>(nofile.rlim_cur, 1 << 20); fd++)
+		close(fd);
+	if(!freopen("/dev/null", "r", stdin))
+		return 2;
+	// What it said, for Aitta's log; the parent reads out/ only
+	if(!freopen((job+"/log").c_str(), "w", stdout))
+		return 2;
+	dup2(fileno(stdout), fileno(stderr));
+	// simplified: the wall clock ends this process alone (a boxed Aitta's
+	// seccomp lets nothing signal another process); what it started is
+	// held to the CPU limit, and a process it left sleeping stays, with no
+	// socket and only the job's directory, which Aitta removes
+	alarm(BUILD_WALL_S);
+	const struct rlimit cpu = {BUILD_CPU_S, BUILD_CPU_S},
+			mem = {BUILD_MEM, BUILD_MEM}, file = {BUILD_FILE, BUILD_FILE},
+			core_size = {0, 0};
+	setrlimit(RLIMIT_CPU, &cpu);
+	setrlimit(RLIMIT_AS, &mem);
+	setrlimit(RLIMIT_FSIZE, &file);
+	setrlimit(RLIMIT_CORE, &core_size);
+	server::Config config;
+	if(!interface::fs::path_exists(interface_path+"/wasm_server_api.h")){
+		log_e("wasm", "the build: no wasm_server_api.h in %s",
+				cs(interface_path));
+		return 2;
+	}
+	config.set("interface_path", interface_path);
+	find_wasm_toolchain(config);
+	// Rust: the toolchain's own cargo and rustc, not rustup's proxies,
+	// which read the user's home (and may fetch a toolchain a crate's
+	// rust-toolchain.toml names)
+	ss_ rust_dir;
+	const ss_ cargo = config.get<ss_>("wasm_cargo");
+	if(!cargo.empty()){
+		interface::process::ExecOptions o;
+		o.output_path = job+"/sysroot";
+		const ss_ rustc = interface::fs::strip_file_name(cargo)+"/rustc";
+		if(rustc.find('\'') == ss_::npos && interface::process::shell_exec(
+				"'"+rustc+"' --print sysroot", o) == 0){
+			std::ifstream f(o.output_path);
+			std::getline(f, rust_dir);
+		}
+		if(rust_dir.empty() || access((rust_dir+"/bin/cargo").c_str(), X_OK) != 0){
+			log_w("wasm", "the build: no Rust toolchain behind %s", cs(cargo));
+			rust_dir = "";
+		}
+		config.set("wasm_cargo", rust_dir.empty() ? "" : rust_dir+"/bin/cargo");
+	}
+	interface::fs::create_directories(job+"/tmp");
+	interface::fs::create_directories(job+"/build/wasm");
+	interface::fs::create_directories(job+"/out");
+	// A build script reads the environment and may write it into the
+	// .wasm: only what the build needs
+	clearenv();
+	if(!rust_dir.empty())
+		setenv("RUSTC", (rust_dir+"/bin/rustc").c_str(), 1);
+	setenv("PATH", ((rust_dir.empty() ? "" : rust_dir+"/bin:")+
+			"/usr/bin:/bin").c_str(), 1);
+	setenv("TMPDIR", (job+"/tmp").c_str(), 1);
+	setenv("HOME", (job+"/tmp").c_str(), 1);
+	// Two compiles at once, each under the memory limit
+	setenv("CARGO_BUILD_JOBS", "2", 1);
+	config.set("rccpp_build_path", job+"/build");
+	config.set("rccpp_prebuilt_path", "");
+	const ss_ cc = config.get<ss_>("wasm_cc"), ld = config.get<ss_>("wasm_ld");
+	const ss_ why = confine_build({interface_path, rust_dir,
+			cc.empty() ? "" : interface::fs::strip_file_name(
+				interface::fs::strip_file_name(cc)),
+			ld.empty() ? "" : interface::fs::strip_file_name(
+				interface::fs::strip_file_name(ld))}, job);
+	if(!why.empty()){
+		log_e("wasm", "the build is not made outside its box: %s", cs(why));
+		return 3;
+	}
+	// The release's modules: its directories with a meta.json, by a plain
+	// name; each server .wasm to out/<module>.server.wasm, each wasm/ to
+	// out/<module>.wasm, the names the page's server looks for
+	bool ok = true;
+	const ss_ src = job+"/src";
+	for(const auto &n : interface::fs::list_directory(src)){
+		bool plain = n.is_directory && n.name.size() <= 64;
+		for(char c : n.name)
+			plain = plain && (isalnum((unsigned char)c) || c == '_');
+		if(!plain || !interface::fs::path_exists(src+"/"+n.name+"/meta.json"))
+			continue;
+		json::json_error_t e;
+		const json::Value m = json::load_file((src+"/"+n.name+"/meta.json").c_str(), &e);
+		const ss_ source = json::jstr(m.get("server_wasm"), "source");
+		sv_<std::pair<ss_, bool>> parts;
+		if(!source.empty())
+			parts.emplace_back(source, true);
+		if(interface::fs::path_exists(src+"/"+n.name+"/wasm"))
+			parts.emplace_back("wasm", false);
+		for(const auto &part : parts){
+			const ss_ built = build_module_wasm(config, n.name, src+"/"+n.name,
+					part.first, part.second);
+			const ss_ to = job+"/out/"+n.name+(part.second ? ".server" : "")+
+					".wasm";
+			if(built.empty() || !interface::fs::copy_file(built, to)){
+				log_e("wasm", "the build: %s's %s/ failed", cs(n.name),
+						cs(part.first));
+				ok = false;
+			}
+		}
+	}
+	return ok ? 0 : 1;
+}
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	// Landlock restricts the calling thread and what it starts; a thread

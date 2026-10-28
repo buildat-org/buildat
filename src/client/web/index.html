@@ -155,6 +155,8 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	setInterval(tick, 500);
 	set_status('Loading the client');
 	var https = location.protocol === 'https:';
+	// An installed package's id, its version not "." or ".."
+	var PACKAGE_ID = /^([a-z0-9_]{1,40})\.([A-Za-z0-9_]{1,64})@([0-9A-Za-z][0-9A-Za-z.+\-]{0,39})$/;
 	// The server that served this page; behind a reverse proxy the port is
 	// the page's, 443 or 80 when the address has none
 	var port = location.port || (https ? '443' : '80');
@@ -173,7 +175,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// memory), and only for it, as an isolated page's popup has no opener
 	// (the Starport ID's sign-in).
 	var local_app = /^[A-Za-z0-9_]{1,64}$/.exec(query.get('local') || '');
-	if(local_app)
+	// [WEB_LOCAL_AITTA] ?local=<author>.<name>@<version>: a package from
+	// Aitta that the client installed (its signature checked) with the
+	// .wasm its Aitta built, under .web/ in its directory; the engine's
+	// server for packages (local/_aitta/) runs it, the files sent to it
+	// once the client's storage is read (start_package below)
+	var local_pkg = PACKAGE_ID.exec(query.get('local') || '');
+	if(local_app || local_pkg)
 		server = 'pipe:page';
 	// The apps beside this page that have a server for it (local/<app>/),
 	// which the buildat server writes in here on a page with no game: the
@@ -472,10 +480,15 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 			FS.syncfs(true, function(err){
 				if(err)
 					console.warn('IndexedDB read: ' + err);
+				if(local_pkg)
+					start_package(local_pkg);
 				Module.removeRunDependency('idbfs');
 			});
-			var syncing = false, again = false;
-			function save(){
+			var syncing = false, again = false, after = [];
+			// done, when given: called once what was written is saved
+			function save(done){
+				if(typeof done === 'function')
+					after.push(done);
 				if(syncing){
 					again = true;
 					return;
@@ -487,9 +500,13 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 					if(err)
 						console.warn('IndexedDB write: ' + err);
 					if(again)
-						save();
+						return save();
+					var a = after;
+					after = [];
+					a.forEach(function(f){ f(); });
 				});
 			}
+			Module.buildatSave = save;
 			setInterval(save, 5000);
 			// **A game's storage written is saved at once** ([LOGIN_UNLOADED]):
 			// a login's TOTP wait and the name typed, for a tab the browser
@@ -532,9 +549,18 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 		buildatSyncFullscreen: sync_fullscreen,
 		buildatSetBackDepth: set_back_depth,
 		buildatLeavePage: leave_page,
+		// An app beside the page, or an installed package's id: the page
+		// goes once the client's files are saved, a package's among them
 		buildatGoLocal: function(app){
-			if(/^[A-Za-z0-9_]{1,64}$/.test(app))
-				location.href = '?local=' + app;
+			if(!/^[A-Za-z0-9_]{1,64}$/.test(app) && !PACKAGE_ID.test(app))
+				return;
+			var go = function(){
+				location.href = '?local=' + encodeURIComponent(app);
+			};
+			if(Module.buildatSave)
+				Module.buildatSave(go);
+			else
+				go();
 		},
 		buildatHideBarByDefault: function(){ return hide_by_default() ? 1 : 0; },
 		buildatInputAt: Date.now(),
@@ -669,7 +695,9 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	// (src/client/pipe_stream.cpp): what came in q, why it is gone in
 	// closed. Its storage is written out every 5 s and when the page is
 	// hidden, and the server is stopped when the page goes.
-	function start_local(app){
+	// package: {root, files, wasm} for the engine's server for packages
+	// (local/_aitta/), sent to it before its main() (src/server/web/pre.js)
+	function start_local(app, package_){
 		var p = Module.buildatPipe = {q: [], closed: null, gone: null};
 		var w = null;
 		p.open = function(){
@@ -691,7 +719,11 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 					'which the local server needs';
 			return;
 		}
-		w = new Worker('local/' + app + '/buildat_server.js');
+		w = new Worker('local/' + app + '/buildat_server.js' +
+				(package_ ? '?package=1' : ''));
+		if(package_)
+			w.postMessage({op: 'files', root: package_.root,
+					files: package_.files, wasm: package_.wasm});
 		w.onmessage = function(e){
 			var m = e.data;
 			if(m.d)
@@ -717,6 +749,43 @@ canvas { display: block; width: 100vw; height: 100vh; height: 100dvh;
 	}
 	if(local_app)
 		start_local(local_app[0]);
+	// [WEB_LOCAL_AITTA] The installed package's files, as the client's
+	// storage has them, to the worker at /installed/<author>/<name>/
+	// <version> (the server names its saves <author>.<name> by that), and
+	// its .web/ .wasm at /wasm/, where the server looks for them
+	function start_package(m){
+		var dir = '/buildat/user/installed/' + m[1] + '/' + m[2] + '/' + m[3];
+		var files = [], wasm = [];
+		function walk(rel){
+			FS.readdir(dir + rel).forEach(function(n){
+				var path = dir + rel + '/' + n, st;
+				if(n === '.' || n === '..')
+					return;
+				st = FS.lstat(path);
+				if(FS.isDir(st.mode))
+					walk(rel + '/' + n);
+				else if(FS.isFile(st.mode))
+					files.push([(rel + '/' + n).substring(1), FS.readFile(path)]);
+			});
+		}
+		try {
+			walk('');
+			FS.readdir(dir + '/.web').forEach(function(n){
+				if(/^[A-Za-z0-9_]{1,64}(\.server)?\.wasm$/.test(n))
+					wasm.push([n, FS.readFile(dir + '/.web/' + n)]);
+			});
+		} catch(e){
+			console.warn('local: ' + m[0] + ' is not installed here: ' + e);
+			Module.buildatPipe = {q: [], closed: m[0] + ' is not installed in ' +
+					'this browser', gone: m[0] + ' is not installed in this browser'};
+			return;
+		}
+		files = files.filter(function(f){ return f[0].indexOf('.web/') !== 0; });
+		console.log('local: ' + m[0] + ', ' + files.length + ' files, ' +
+				wasm.length + ' .wasm');
+		start_local('_aitta', {root: '/installed/' + m[1] + '/' + m[2] + '/' +
+				m[3], files: files, wasm: wasm});
+	}
 	// The focused text field's stand-in ([WEB_KEYS] steps 2 and 4): the
 	// browser's focus is on it while a LineEdit has the game's, holding the
 	// field's text and selection. An IME and a touchscreen's keyboard type

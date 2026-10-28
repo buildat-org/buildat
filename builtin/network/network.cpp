@@ -1631,14 +1631,16 @@ struct Module: public interface::Module, public network::Interface
 
 	// [WEB_LOCAL_SERVER] The apps with a server for the page beside the web
 	// client, as a JavaScript list's items: 'a', 'b'. Only names that
-	// local_file() would serve.
+	// local_file() would serve; not one beginning with "_", the engine's
+	// own (_aitta, the server for Aitta's packages, [WEB_LOCAL_AITTA])
 	ss_ local_apps()
 	{
 		sv_<ss_> names;
 		const ss_ dir = web_client_path()+"/local/";
 		for(const interface::fs::Node &n : interface::fs::list_directory(dir)){
 			const ss_ wasm = "/local/"+n.name+"/buildat_server.wasm";
-			if(n.is_directory && !web::local_file(wasm).first.empty() &&
+			if(n.is_directory && n.name[0] != '_' &&
+					!web::local_file(wasm).first.empty() &&
 					interface::fs::path_exists(dir+n.name+"/buildat_server.wasm"))
 				names.push_back(n.name);
 		}

@@ -59,6 +59,24 @@ LuaJIT's \x, \z and \u{ escapes: a "serverless" release that does not
 load is refused, another is listed with the problems as a warning
 (file:line each; the publishers print it).
 
+A release can run in the browser with its server in the page
+([WEB_LOCAL_AITTA]) when it is an app, not a variant, whose client Lua
+loads on the web, each of whose modules is a .wasm on the server side
+("server_wasm") or has no server side ("disable_cpp") -- no C++ -- and
+whose dependencies are its own modules or builtins that keep to the web
+API. Aitta builds such a release's .wasm itself after it is listed, one
+release at a time, from the release's source (a release carries no
+.wasm): `buildat_server --build-wasm`, as the server builds them (cargo
+or clang to wasm32), in a box of the build's own (Linux: Landlock and
+seccomp) that reads the system's programs and libraries, the toolchain
+and the engine's headers and crates, writes its own directory, opens no
+socket and gets no environment of Aitta's; 300 s, 600 s of CPU and 4 GiB
+a process, two compiles at once. A crate's dependencies are path ones
+(no network). Built, the release says "web": true and names each .wasm
+in "web_wasm" ({"<module>.server.wasm" or "<module>.wasm": its sha256});
+a failed build leaves it out of the page, Aitta's log saying why. An
+Aitta not on Linux builds none.
+
 A package of kind "extension" is a client extension: init.lua at its
 root, run in the client's sandbox like extensions/ (an app's client Lua
 requires it, or a launch_ui.txt beside it makes it a launch UI, always
@@ -214,6 +232,9 @@ when the launcher next fetches that Aitta's list.
                                               key}
     POST /api/v1/aitta/report_status          {key, receipts}: outcomes
     GET  /api/v1/aitta/archive/<sha256>.zip|.sig a listed release's files
+    GET  /api/v1/aitta/wasm/<sha256>.wasm     a .wasm built for a listed
+                                              release (its "web_wasm"),
+                                              with CORP cross-origin
     GET  /api/v1/aitta/media/<sha256>         a listed release's icon or
                                               screenshot, image/png or
                                               image/jpeg by its bytes, or a
@@ -235,8 +256,10 @@ release's "manifest"; a kind it does not know is listed as "other", which
 no client installs, and an audience it does not know as "adult".
 
 Every API answer has Access-Control-Allow-Origin: *, so a play page on
-another origin fetches the list and the archives. A serverless release
-says "runs in the browser" on the pages; with the setting "play_url"
+another origin fetches the list and the archives (and the .wasm, from a
+cross-origin isolated page). A serverless release, or one whose server
+runs in the page, says "runs in the browser" on the pages; with the
+setting "play_url"
 (e.g. "https://play.buildat.org"; "" by default, no link) its box on /,
 and its package page under the heading and first under Install, link
 "Play in the browser" to <play_url>/#run=<author>/<name>.
@@ -267,6 +290,20 @@ new version is on the grid at once. Where the
 Starport filters hide unreviewed content ("Apps from Aitta (unreviewed)",
 under the lock, or the managed file's filters.unreviewed), a package
 shows only its newest reviewed release, and one with none is not shown.
+
+On the web there is no server to install onto: the page lists the
+serverless releases and those whose server runs in the page, with Play.
+Play on one of the second kind installs it into the browser's storage
+(its .sig checked as above), fetches each .wasm its Aitta built and
+checks it against the list's sha256, keeps them under .web/ in the
+release's directory and goes to ?local=<author>.<name>@<version>. That
+page (cross-origin isolated) runs the engine's server for packages, the
+builtins that keep to the web API built for the browser (web/local/_aitta,
+util/build_web_server.sh), in a worker, hands it the installed files and
+the .wasm, and the client joins it as it joins an app's own ?local=
+server; the modules' .wasm run on the browser's own wasm, checked,
+granted and metered as on a native server. The saves are kept in the
+browser.
 
 Running an installed app
 ------------------------

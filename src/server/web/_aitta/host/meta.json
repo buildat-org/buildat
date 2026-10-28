@@ -1,0 +1,52 @@
+{
+	"engine_api": 2,
+	"disable_cpp": true,
+	"web": true,
+	"dependencies": [
+		{
+			"module": "network"
+		},
+		{
+			"module": "accounts"
+		},
+		{
+			"module": "starport_announce"
+		},
+		{
+			"module": "storage"
+		},
+		{
+			"module": "client_file"
+		},
+		{
+			"module": "client_lua"
+		},
+		{
+			"module": "client_data"
+		},
+		{
+			"module": "main_context"
+		},
+		{
+			"module": "replicate"
+		},
+		{
+			"module": "voxelworld"
+		},
+		{
+			"module": "worldgen"
+		},
+		{
+			"module": "voxel_shading"
+		},
+		{
+			"module": "moderation"
+		},
+		{
+			"module": "chat"
+		},
+		{
+			"module": "world_menu"
+		}
+	]
+}

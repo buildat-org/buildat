@@ -97,6 +97,13 @@ int main(int argc, char *argv[])
 
 	server::Config &config = g_server_config;
 
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+	// [WEB_LOCAL_AITTA] Aitta's build of a release's .wasm, in a box of
+	// its own, and nothing else
+	if(argc == 4 && ss_(argv[1]) == "--build-wasm")
+		return server::build_wasm_job(argv[2], argv[3]);
+#endif
+
 	std::string module_path;
 	bool port_given = false, proxies_given = false;
 

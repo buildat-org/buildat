@@ -672,7 +672,11 @@ build_web() {
 	: > "$log"
 	for a in $WEB_LOCAL_APPS; do
 		echo "web server: util/build_web_server.sh $a ($log)" >&2
-		"$here/util/build_web_server.sh" "$a" -j "$jobs" >> "$log" 2>&1 || {
+		# [WEB_LOCAL_AITTA] _aitta, the server for Aitta's packages, is
+		# the engine's own
+		local from=$a
+		[ "$a" = _aitta ] && from=$here/src/server/web/_aitta
+		"$here/util/build_web_server.sh" "$from" -j "$jobs" >> "$log" 2>&1 || {
 			echo "the web server of $a did not build; its log's end:" >&2
 			tail -30 "$log" >&2; return 1; }
 		for f in js wasm data; do
@@ -683,9 +687,10 @@ build_web() {
 }
 
 # The apps whose modules all build for the web ("web": true in their
-# meta.json; util/web_server.cmake refuses the others)
+# meta.json; util/web_server.cmake refuses the others), and _aitta, the
+# server that runs Aitta's packages in the page ([WEB_LOCAL_AITTA])
 # simplified: named here; an app newly marked is added by hand
-WEB_LOCAL_APPS="hillclimb demo_aggregate skeldat"
+WEB_LOCAL_APPS="hillclimb demo_aggregate skeldat _aitta"
 
 # The apps web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
 # one (user, 2026-09-29): the others ship as source, and on a box with no

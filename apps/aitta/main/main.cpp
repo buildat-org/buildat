@@ -22,6 +22,8 @@
 //   GET  release?id=author/name/version  one, with its changelog's text
 //                                   ([PACKAGE_SUBJECT]: what a Hearth
 //                                   posts as the release's thread)
+//   GET  wasm/<sha256>.wasm         a .wasm built for a listed release
+//                                   ([WEB_LOCAL_AITTA], its "web_wasm")
 //   GET  archive/<sha256>.zip|.sig  a release's two files; ?ticket= a
 //                                   reviewer's playtest's, once each, of
 //                                   a release not listed too
@@ -75,6 +77,12 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <deque>
+#ifdef __linux__
+	#include <fcntl.h>
+	#include <sys/stat.h>
+	#include <unistd.h>
+#endif
 
 using json::jstr;
 using interface::sha256::is_hex;
@@ -206,6 +214,13 @@ struct Module: public interface::Module, public moderation::Host
 	ss_ m_tmp;
 	sm_<ss_, Upload> m_uploads; // by sha256
 	network::RateTable m_hits;
+	// [WEB_LOCAL_AITTA] The releases whose .wasm wait to be built, by id,
+	// and the one building: its job's directory and its process
+	std::deque<ss_> m_web_queue;
+	ss_ m_web_id, m_web_job;
+	sv_<ss_> m_web_names; // what it is to build
+	interface::process::Handle m_web_proc;
+	int64_t m_web_started = 0;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -217,6 +232,7 @@ struct Module: public interface::Module, public moderation::Host
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:http_request"));
 		m_server->sub_event(this, Event::t("network:packet_received/ai:req"));
+		m_server->sub_event(this, Event::t("core:tick"));
 	}
 
 	void event(const Event::Type &type, const Event::Private *p)
@@ -224,6 +240,7 @@ struct Module: public interface::Module, public moderation::Host
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_TYPEN("network:http_request", on_http, network::HttpRequest)
 		EVENT_TYPEN("network:packet_received/ai:req", on_req, network::Packet)
+		EVENT_VOIDN("core:tick", web_tick)
 	}
 
 	storage::Store* store(const char *name){ return m_save->store(name); }
@@ -338,6 +355,10 @@ struct Module: public interface::Module, public moderation::Host
 			iface->claim_http_path("/brand/");
 		});
 		log_i(MODULE, "Aitta: %zu releases", releases_map().size());
+		// [WEB_LOCAL_AITTA] The builds a stop left undone
+		for(auto &p : releases_map())
+			if(jstr(p.second, "web_build") == "queued")
+				m_web_queue.push_back(p.first);
 	}
 
 	// -----------------------------------------------------------------------
@@ -407,6 +428,8 @@ struct Module: public interface::Module, public moderation::Host
 				return http_archive(r, call.substr(8));
 			if(call.compare(0, 6, "media/") == 0)
 				return http_media(r, call.substr(6));
+			if(call.compare(0, 5, "wasm/") == 0)
+				return http_wasm(r, call.substr(5));
 			if(r.method != "POST")
 				return refuse(r, "no such call");
 			if(call == "upload_begin")
@@ -655,7 +678,8 @@ struct Module: public interface::Module, public moderation::Host
 	}
 
 	// [AITTA_SERVERLESS] "Play in the browser" for a serverless release,
-	// with the setting play_url; [AITTA_HOSTING_LINK] "Host at <domain>"
+	// or one whose server runs in the page ([WEB_LOCAL_AITTA]), with the
+	// setting play_url; [AITTA_HOSTING_LINK] "Host at <domain>"
 	// for an app, with app_hosting_provider; "" for neither. self: this
 	// Aitta's address, as the package page's commands give it
 	ss_ outside_links(const json::Value &rel, const ss_ &self)
@@ -670,7 +694,8 @@ struct Module: public interface::Module, public moderation::Host
 		};
 		sv_<ss_> out;
 		const ss_ play = get("play_url");
-		if(!play.empty() && rel.get("serverless").is_true())
+		if(!play.empty() && (rel.get("serverless").is_true() ||
+				rel.get("web").is_true()))
 			out.push_back("<a href=\""+html(play)+"/#run="+html(pkg)+"\">"
 					"Play in the browser</a>");
 		const ss_ host = get("app_hosting_provider");
@@ -706,8 +731,8 @@ struct Module: public interface::Module, public moderation::Host
 				"<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
-				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ?
-				", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
+				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ||
+				rel.get("web").is_true() ? ", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
 				", "+date((int64_t)rel.get("time")
 				.as_number())+", "+(size < 1000 ? itos(size)+" bytes" : size < 1000000 ?
 				itos(size / 1000)+" kB" :
@@ -984,6 +1009,35 @@ struct Module: public interface::Module, public moderation::Host
 				read_file(m_archives+"/"+sha+ext));
 	}
 
+	// [WEB_LOCAL_AITTA] A .wasm this Aitta built for a listed release, by
+	// its sha256 (the release's "web_wasm"): for the page that runs the
+	// release's server, cross-origin isolated, so with CORP as well as CORS
+	void http_wasm(const network::HttpRequest &r, const ss_ &file)
+	{
+		const ss_ sha = file.substr(0, file.find('.'));
+		bool listed = false;
+		if(is_hex(sha, 64) && file == sha+".wasm")
+			for(auto &p : releases_map()){
+				const json::Value &w = p.second.get("web_wasm");
+				if(p.second.get("delisted").is_true() ||
+						p.second.get("hidden").is_true() || !w.is_object())
+					continue;
+				for(json::Iterator it(w); it.valid(); it.next())
+					listed = listed || (it.value().is_string() &&
+							it.value().as_string() == sha);
+			}
+		const ss_ data = listed ? read_file(m_archives+"/wasm/"+sha+".wasm") : "";
+		if(data.empty())
+			return respond(r, 404, "text/plain", "Not found\n");
+		network::access(m_server, [&](network::Interface *iface){
+			iface->http_respond(r.peer, 200, "application/wasm", data,
+					"Access-Control-Allow-Origin: *\r\n"
+					"Cross-Origin-Resource-Policy: cross-origin\r\n"
+					"X-Content-Type-Options: nosniff\r\n"
+					"Cache-Control: public, max-age=31536000, immutable\r\n");
+		});
+	}
+
 	// [PACKAGE_MEDIA] A listed release's icon or screenshot, by its
 	// sha256: the type its bytes are, never sniffed, cached for good (a
 	// hash's bytes do not change)
@@ -1095,6 +1149,202 @@ struct Module: public interface::Module, public moderation::Host
 		const json::Value &max = m_settings.get("max_size");
 		return (uint64_t)4 * (max.is_number() && max.as_number() > 0 ?
 				(uint64_t)max.as_number() : (uint64_t)50 * 1000 * 1000);
+	}
+
+	// [WEB_LOCAL_AITTA] Whether a release can run in the page, with a server
+	// of the engine's own builtins in the page and its modules' .wasm,
+	// which this Aitta builds: "" or why not. An app, not a variant, whose
+	// client Lua loads on the web; each module (a directory with a
+	// meta.json, by a plain name) a .wasm on the server ("server_wasm") or
+	// none ("disable_cpp"), never C++; each dependency one of its own or a
+	// builtin that keeps to the web API ("web": true, or a stand-in).
+	ss_ web_refusal(const ss_ &dir, const json::Value &m, const ss_ &lua51)
+	{
+		if(interface::aitta::kind_of(m) != "app")
+			return "not an app";
+		if(!jstr(m, "base").empty())
+			return "a variant of another app";
+		if(!lua51.empty())
+			return "its client Lua does not load on the web";
+		const ss_ builtin = m_server->get_config().get<ss_>("share_path")+
+				"/builtin/";
+		sv_<std::pair<ss_, json::Value>> mods;
+		for(const auto &n : interface::fs::list_directory(dir)){
+			if(!n.is_directory || !interface::fs::path_exists(dir+"/"+n.name+
+					"/meta.json"))
+				continue;
+			bool plain = n.name.size() <= 64;
+			for(char c : n.name)
+				plain = plain && (isalnum((unsigned char)c) || c == '_');
+			if(!plain)
+				return "a module's name is not [A-Za-z0-9_]";
+			json::json_error_t e;
+			mods.emplace_back(n.name, json::load_file((dir+"/"+n.name+
+					"/meta.json").c_str(), &e));
+		}
+		if(mods.empty())
+			return "no modules";
+		for(const auto &mod : mods){
+			const json::Value &mm = mod.second;
+			if(jstr(mm.get("server_wasm"), "source").empty() &&
+					!mm.get("disable_cpp").is_true())
+				return "the module "+mod.first+" is C++";
+			const json::Value &deps = mm.get("dependencies");
+			for(unsigned i = 0; deps.is_array() && i < deps.size(); i++){
+				const ss_ d = jstr(deps.at(i), "module");
+				bool own = false;
+				for(const auto &o : mods)
+					own = own || o.first == d;
+				json::json_error_t e;
+				const bool web = !d.empty() && d.find_first_of("./\\") ==
+						ss_::npos && (json::load_file((builtin+d+"/meta.json")
+						.c_str(), &e).get("web").is_true() ||
+						interface::fs::path_exists(builtin+d+"/"+d+"_web.cpp"));
+				if(!own && !web && !deps.at(i).get("optional").is_true())
+					return "the module "+mod.first+" needs "+d.substr(0, 64)+
+							", which the page's server does not have";
+			}
+		}
+		return "";
+	}
+
+	// [WEB_LOCAL_AITTA] One release's .wasm built at a time, by
+	// `buildat_server --build-wasm` (src/server/confine.h: in a box of
+	// its own, no network, its own directory only): started on a tick,
+	// read on a later one. Each .wasm kept by its sha256 under
+	// archives/wasm/ and named in the release's "web_wasm" as the page's
+	// server looks for it (<module>.server.wasm, <module>.wasm); "web" true
+	// once built. A build that fails leaves the release as it was, not in
+	// the page.
+	// simplified: no build waits past the child's own clock (300 s) and
+	// a margin; a stop forgets the one under way, queued again at start
+	void web_tick()
+	{
+		if(!m_web_id.empty()){
+			const bool over = now_s() - m_web_started > 330;
+			if(!interface::process::reap(m_web_proc) && !over)
+				return;
+			// Not killed: a boxed Aitta signals no other process, and its
+			// own clock has ended the child by then
+			if(over)
+				m_web_proc = interface::process::Handle();
+			web_done(over);
+		}
+		if(m_web_queue.empty())
+			return;
+		m_web_id = m_web_queue.front();
+		m_web_queue.pop_front();
+		const json::Value rel = load("releases", m_web_id);
+		const ss_ sha = jstr(rel, "sha256");
+		m_web_job = m_tmp+"/web_"+sha;
+		m_web_names.clear();
+		interface::fs::remove_all(m_web_job);
+		interface::fs::create_directories(m_web_job+"/src");
+		try {
+			interface::zip_extract(m_archives+"/"+sha+".zip", m_web_job+"/src",
+					unpacked_max());
+		} catch(std::exception &e){
+			log_w(MODULE, "web build of %s: %s", cs(m_web_id), e.what());
+			return web_done(false);
+		}
+		// What it is to build, read before the build can change the
+		// source: every server .wasm and wasm/ (web_refusal() took the
+		// names)
+		const ss_ src = m_web_job+"/src";
+		for(const auto &n : interface::fs::list_directory(src)){
+			if(!n.is_directory || !interface::fs::path_exists(
+					src+"/"+n.name+"/meta.json"))
+				continue;
+			json::json_error_t e;
+			const json::Value mm = json::load_file((src+"/"+n.name+
+					"/meta.json").c_str(), &e);
+			if(!jstr(mm.get("server_wasm"), "source").empty())
+				m_web_names.push_back(n.name+".server.wasm");
+			if(interface::fs::path_exists(src+"/"+n.name+"/wasm"))
+				m_web_names.push_back(n.name+".wasm");
+		}
+#ifdef __linux__
+		m_web_started = now_s();
+		m_web_proc = interface::process::start(
+				interface::os::get_sibling_exe_path("buildat_server"),
+				{"--build-wasm", m_web_job, m_server->get_config().get<ss_>(
+				"interface_path")});
+		if(!m_web_proc.valid())
+			web_done(false);
+#else
+		log_w(MODULE, "web build of %s: an Aitta on Linux builds .wasm, in "
+				"a box of the build's own", cs(m_web_id));
+		web_done(false);
+#endif
+	}
+
+	// A file the build left in the job's sub/, max bytes at most (the
+	// end of a longer one), read without following a link: the build
+	// could have put one in place of sub/ or of the file, to a file of
+	// Aitta's that would then be published. "" if not a regular file.
+	static ss_ read_built(const ss_ &job, const char *sub, const ss_ &name,
+			size_t max)
+	{
+		ss_ r;
+#ifdef __linux__
+		const int d = open(job.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+		const int s = d < 0 ? -1 : openat(d, sub, O_RDONLY | O_DIRECTORY |
+				O_NOFOLLOW | O_CLOEXEC);
+		const int f = s < 0 ? -1 : openat(s, name.c_str(), O_RDONLY |
+				O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+		struct stat st;
+		if(f >= 0 && fstat(f, &st) == 0 && S_ISREG(st.st_mode)){
+			if((size_t)st.st_size > max)
+				lseek(f, st.st_size - max, SEEK_SET);
+			char buf[65536];
+			ssize_t n;
+			while(r.size() < max && (n = read(f, buf, sizeof buf)) > 0)
+				r.append(buf, std::min((size_t)n, max - r.size()));
+		}
+		for(int fd : {f, s, d})
+			if(fd >= 0)
+				close(fd);
+#endif
+		return r;
+	}
+
+	void web_done(bool over)
+	{
+		json::Value rel = load("releases", m_web_id);
+		json::Value built = json::object();
+		bool ok = !over && rel.is_object() && !m_web_names.empty();
+		for(const ss_ &f : m_web_names){
+			// The engine refuses a .wasm past 8 MiB (wasm/engine.h)
+			const ss_ data = ok ? read_built(m_web_job, "out", f,
+					(8 << 20) + 1) : "";
+			const ss_ h = interface::sha256::hex(
+					interface::sha256::calculate(data));
+			interface::fs::create_directories(m_archives+"/wasm");
+			ok = ok && !data.empty() && data.size() <= (8 << 20) &&
+					write_file(m_archives+"/wasm/"+h+".wasm", data);
+			built.set(f.c_str(), h);
+		}
+		if(rel.is_object()){
+			rel.set("web_build", ok ? "built" : "failed");
+			if(ok){
+				rel.set("web_wasm", built);
+				rel.set("web", true);
+			}
+			put("releases", m_web_id, rel);
+		}
+		if(ok){
+			log_i(MODULE, "web build of %s: built", cs(m_web_id));
+		} else {
+			// The publisher's words: printable, the end of it
+			ss_ said = read_built(m_web_job, ".", "log", 2000);
+			for(char &c : said)
+				if(c != '\n' && (c < 32 || c > 126))
+					c = '?';
+			log_w(MODULE, "web build of %s: failed%s; its log's end:\n%s",
+					cs(m_web_id), over ? " (past its time)" : "", cs(said));
+		}
+		interface::fs::remove_all(m_web_job);
+		m_web_id.clear();
 	}
 
 	// [AITTA_LUA51] What of a release's client-side Lua (a client_lua
@@ -1218,6 +1468,8 @@ struct Module: public interface::Module, public moderation::Host
 		for(const char *k : {"icon", "screenshot"})
 			if(media_why.empty() && !jstr(m, k).empty())
 				media[k] = read_file(dir+"/"+jstr(m, k));
+		// [WEB_LOCAL_AITTA] Whether its server can run in the page
+		const ss_ web_why = m.is_object() ? web_refusal(dir, m, lua51) : "";
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -1293,7 +1545,13 @@ struct Module: public interface::Module, public moderation::Host
 			rel.set("audience_manifest", jstr(m, "audience"));
 			rel.set("audience", jstr(lock, "audience"));
 		}
+		if(web_why.empty())
+			rel.set("web_build", "queued");
 		put("releases", id, rel);
+		if(web_why.empty())
+			m_web_queue.push_back(id);
+		log_i(MODULE, "%s in the page: %s", cs(id), web_why.empty() ?
+				"its .wasm queued to be built" : cs("no, "+web_why));
 		if(!changelog.empty()){
 			json::Value c = json::object();
 			c.set("text", changelog);

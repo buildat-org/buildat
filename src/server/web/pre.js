@@ -45,6 +45,24 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		// A local game: the page's player is in at once (hillclimb)
 		'-u', 'launcher=1'];
 	Module.print = function(t){ postMessage({log: t}); };
+	// [WEB_LOCAL_AITTA] ?package=1 (local/_aitta/, the engine's server for
+	// Aitta's packages): the app is the one the page sends, {op: 'files',
+	// root, files: [[path under root, bytes], ...], wasm: [[name, bytes],
+	// ...]}, written before main() runs it from root, the .wasm into /wasm
+	var package_ = /[?&]package=1(&|$)/.test(self.location.search);
+	var sent = null, waiting = false;
+	var put_files = function(){
+		sent.files.forEach(function(f){
+			var p = sent.root + '/' + f[0];
+			FS.mkdirTree(p.substring(0, p.lastIndexOf('/')));
+			FS.writeFile(p, f[1]);
+		});
+		FS.mkdirTree('/wasm');
+		sent.wasm.forEach(function(f){ FS.writeFile('/wasm/' + f[0], f[1]); });
+		// The array main() is given: changed in place
+		var a = Module.arguments;
+		a[a.indexOf('-m') + 1] = sent.root;
+	};
 	Module.printErr = Module.print;
 	var syncing = false, again = false, after = [];
 	var save = function(done){
@@ -87,6 +105,12 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 				});
 			});
 		};
+		if(package_ && sent)
+			put_files();
+		else if(package_){
+			waiting = true;
+			addRunDependency('files');
+		}
 		FS.mkdir('/user');
 		FS.mount(FS.filesystems.IDBFS, {}, '/user');
 		addRunDependency('idbfs');
@@ -110,6 +134,14 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		Module._free(p);
 	};
 	self.addEventListener('message', function(e){
+		if(package_ && !sent && e.data && e.data.op === 'files'){
+			sent = e.data;
+			if(waiting){
+				put_files();
+				removeRunDependency('files');
+			}
+			return;
+		}
 		if(ready)
 			take(e.data);
 		else

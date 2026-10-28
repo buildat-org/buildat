@@ -214,9 +214,75 @@ local function newer_release(rel, old)
 	return (tonumber(rel.time) or 0) > (tonumber(old.time) or 0)
 end
 
+-- [WEB_LOCAL_AITTA] A release whose server runs in the page: its modules
+-- are .wasm, which its Aitta built at publish ("web_wasm", the names the
+-- page's server looks for and their sha256)
+local function in_page(rel)
+	return ON_WEB and rel.serverless ~= true and rel.web == true and
+			type(rel.web_wasm) == "table"
+end
+
+-- [WEB_LOCAL_AITTA] An installed release run in the page: its .wasm
+-- fetched from its Aitta, each checked against its sha256, kept under .web/
+-- in its directory, and the page goes to ?local=<author>.<name>@<version>,
+-- which runs the engine's server for packages on it (web/index.html)
+local function go_in_page(key, rel)
+	local ui = require("buildat/extension/ui_utils").safe
+	local a, n, v = key:match("^([%w_]+)/([%w_]+)$")
+	v = tostring(rel.version)
+	if not a or not v:match("^[%w][%w%.%+%-]*$") then
+		return
+	end
+	local id = a .. "." .. n .. "@" .. v
+	local dir = __buildat_get_path("user") .. "/installed/" .. a .. "/" ..
+			n .. "/" .. v .. "/.web"
+	__buildat_create_directories(dir)
+	local todo = {}
+	for name, sha in pairs(rel.web_wasm) do
+		if type(name) ~= "string" or type(sha) ~= "string" or
+				not (name:match("^[%w_]+%.wasm$") or
+				name:match("^[%w_]+%.server%.wasm$")) or
+				not sha:match("^%x+$") or #sha ~= 64 then
+			return ui.show_message_dialog("Could not start " .. key ..
+					": its Aitta's list names a .wasm wrongly")
+		end
+		todo[#todo + 1] = {name = name, sha = sha:lower()}
+	end
+	local left = #todo
+	local function next_one()
+		if left == 0 then
+			log:info("aitta: play " .. id .. " in the page")
+			return __buildat_web_go_local(id)
+		end
+		local w = todo[left]
+		left = left - 1
+		network.http_get(rel.aitta .. "/api/v1/aitta/wasm/" .. w.sha .. ".wasm",
+				function(body, err)
+			if not body or __buildat_hex(__buildat_sha256(body)) ~= w.sha then
+				return ui.show_message_dialog("Could not start " .. key ..
+						": " .. w.name .. " " .. (body and
+						"is not the one its Aitta listed" or tostring(err)))
+			end
+			local f = io.open(dir .. "/" .. w.name, "wb")
+			if not f then
+				return ui.show_message_dialog("Could not start " .. key ..
+						": " .. w.name .. " could not be written")
+			end
+			f:write(body)
+			f:close()
+			next_one()
+		end, {description = "Aitta (install)"})
+	end
+	next_one()
+end
+
 -- An installed release's client half started with no server, the pages
--- over the launcher taken down first
-local function play_installed(key, version)
+-- over the launcher taken down first; one whose server runs in the page
+-- (rel given), run there
+local function play_installed(key, version, rel)
+	if rel and in_page(rel) then
+		return go_in_page(key, rel)
+	end
 	local id = key:gsub("/", ".", 1) .. "@" .. tostring(version)
 	log:info("aitta: play " .. id .. " serverless")
 	if uistack.main.stack[1] then
@@ -362,7 +428,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				return say("Could not fetch: " .. why, WARN)
 			end
 			if dir and play then
-				return play_installed(k, rel.version)
+				return play_installed(k, rel.version, rel)
 			end
 			-- Read before the grid's refresh, which takes the page down
 			local q = search:GetText()
@@ -390,8 +456,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		log:info("aitta panel: " .. p.key .. " " .. tostring(rel.version))
 		ptext(p.key, nil, 18)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
-				"an extension" or "an app") .. (rel.serverless == true and
-				", runs in the browser" or "") .. ", by " ..
+				"an extension" or "an app") .. ((rel.serverless == true or
+				rel.web == true) and ", runs in the browser" or "") .. ", by " ..
 				tostring(rel.author) .. "; " .. (rel.review == "reviewed" and
 				"reviewed" or "unreviewed"), DIM)
 		ptext(tostring(rel.license_code) .. " / " ..
@@ -428,10 +494,10 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		local actions = add_row(panel)
 		-- [SERVERLESS_PLAY] Play: installed first where it is not; on the
 		-- web, with no server to install onto, only Play
-		if rel.serverless == true and not why_not then
+		if (rel.serverless == true or in_page(rel)) and not why_not then
 			add_button(actions, "Play", function()
 				if st == "Installed" then
-					play_installed(p.key, rel.version)
+					play_installed(p.key, rel.version, rel)
 				else
 					install(p, true)
 				end
@@ -559,7 +625,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			for _, rel in ipairs(lists[a] or {}) do
 				if type(rel) == "table" and (not only_reviewed or
 						rel.review == "reviewed") and
-						(rel.serverless == true or not ON_WEB) then
+						(rel.serverless == true or not ON_WEB or
+						in_page(rel)) then
 					-- The Aitta it came from, never the list's own word: a list
 					-- naming another address sent this client's fetches there
 					rel.aitta = a
@@ -668,9 +735,10 @@ function M.playtest(offer, start)
 end
 
 -- [SERVERLESS_PLAY] BUILDAT_RUN=<author>/<name>, a play page's #run=: the
--- newest serverless release of it on the Aittas in the settings,
--- installed if it is not (the signature checked) and played. With no
--- answer from them, an installed version of it is played.
+-- newest serverless release of it on the Aittas in the settings (or one
+-- whose server runs in the page, [WEB_LOCAL_AITTA]), installed if it is
+-- not (the signature checked) and played. With no answer from them, an
+-- installed version of it is played with no server.
 function M.run_serverless(key)
 	local ui = require("buildat/extension/ui_utils").safe
 	local e = effective()
@@ -682,7 +750,7 @@ function M.run_serverless(key)
 	local function decide()
 		local have = aitta_installed()[key]
 		if best and have and have[tostring(best.version)] then
-			return play_installed(key, best.version)
+			return play_installed(key, best.version, best)
 		end
 		if best then
 			fetch_install(best.aitta, best.sha256, {description = "Aitta (install)"},
@@ -690,7 +758,7 @@ function M.run_serverless(key)
 				if not dir then
 					return failed(tostring(why))
 				end
-				play_installed(key, best.version)
+				play_installed(key, best.version, best)
 			end)
 			return
 		end
@@ -698,15 +766,15 @@ function M.run_serverless(key)
 			return play_installed(key, version)
 		end
 		failed(#errors > 0 and table.concat(errors, "; ") or
-				"no Aitta in the settings lists it as playable with no server")
+				"no Aitta in the settings lists it as playable in the browser")
 	end
 	for _, a in ipairs(e.aittas) do
 		network.http_get(a .. "/api/v1/aitta/list", function(body, err)
 			local v = body and network.parse_json(body)
 			if type(v) == "table" and type(v.releases) == "table" then
 				for _, rel in ipairs(v.releases) do
-					if type(rel) == "table" and rel.serverless == true and
-							not cannot_run(rel) and
+					if type(rel) == "table" and (rel.serverless == true or
+							in_page(rel)) and not cannot_run(rel) and
 							tostring(rel.author) .. "/" ..
 							tostring(rel.name) == key and
 							(e.filters.unreviewed or rel.review == "reviewed")

@@ -126,8 +126,7 @@ buildat_wasm, the engine's crate for wasm_api.h
 wasm32-unknown-unknown, as it builds C (a server without cargo and the
 target refuses the module, saying which), and the clients cannot tell it
 from C. The server's native build of wasm/ is C and C++ only: Rust that
-both sides run is run by the server as a wasm module too, once server
-modules can be wasm.
+both sides run is run by the server as a wasm module too (below).
 
 A module with no Lua of its own: "client_main": "wasm" in its meta.json
 names the engine's default client main, which loads the module's .wasm,
@@ -168,6 +167,14 @@ choice, not a rewrite.
   hillclimb, demo_aggregate and skeldat ship so in the Linux archives;
   a page with no game (play.buildat.org's) offers them in its launch
   menu, at /?local=<app>.
+- A game from Aitta played in the browser with no host: its modules'
+  server halves .wasm ("server_wasm") and no C++. Aitta builds the .wasm
+  from the release's source at publish, in a box of the build's own;
+  the page runs one server the engine ships for every such package
+  (web/local/_aitta: the builtins that keep to the web API), hands it the
+  installed release and the .wasm, and each module runs on the browser's
+  own wasm as an instance of its own. No JS of the package's runs, and
+  the .wasm are not tied to the engine's version (doc/aitta.txt).
 - A small game whose rules all fit in wasm/ and Lua (a board game, an
   arcade game, a puzzle): a serverless release (aitta.txt), with no
   server at all. The page stays light, but the game has to be made that

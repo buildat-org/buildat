@@ -29,6 +29,23 @@ namespace server
 	ss_ confine(core::Config &config, const ss_ &module_path,
 			int *exit_code);
 
+	// [WEB_LOCAL_AITTA] The box of a publish's build of a release's
+	// .wasm (build_wasm_job() below): Linux only. Reads the
+	// system's programs and libraries and read_dirs, writes job_dir only;
+	// no socket, no TCP. Called once, with no thread started. "" or why
+	// not (then nothing is built).
+	ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir);
+
+	// [WEB_LOCAL_AITTA] Aitta's build of a release's .wasm at publish, the
+	// server started as `buildat_server --build-wasm <job> <interface
+	// path>` (Linux), the engine's headers and crates there: the
+	// release unpacked in <job>/src, each module's server .wasm built to
+	// <job>/out/<module>.server.wasm and its wasm/ to <module>.wasm, as
+	// wasm_build.h's build_module_wasm() builds them, in confine_build()'s
+	// box and under its limits; what it said in <job>/log. 0 when each was
+	// built; nothing is built outside the box.
+	int build_wasm_job(const ss_ &job, const ss_ &interface_path);
+
 	// [PROCESS_SANDBOX] B: a boxed child's start, a step at a time, flushed
 	// to the file its parent named in BUILDAT_BOXED_STEPS as well as to
 	// the log, so a hang names its step even where the log's pipe holds
