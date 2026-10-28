@@ -177,11 +177,12 @@ return function(module)
 		end
 	end)
 
-	-- The module's packets, by the names its packets() export lists
-	local function subscribe_packets()
-		local ok, p = pcall(m.call, m, "packets")
+	-- The names an optional export lists: a 0-terminated string of them,
+	-- separated by spaces, at most 4096 bytes
+	local function names_of(export)
+		local ok, p = pcall(m.call, m, export)
 		if not ok or not p or p == 0 then
-			return
+			return ""
 		end
 		local bytes = {}
 		for i = 0, 4095 do
@@ -191,7 +192,36 @@ return function(module)
 			end
 			bytes[#bytes + 1] = c
 		end
-		for name in table.concat(bytes):gmatch("%S+") do
+		return table.concat(bytes)
+	end
+
+	-- [DOOM_APP] The served files its files() export lists, each into its
+	-- memory where file_buffer(index, size) says (0: not wanted; size -1
+	-- for one not served, which the module may take as optional), before
+	-- START
+	local function load_files()
+		local i = 0
+		for name in names_of("files"):gmatch("%S+") do
+			local ok, data = pcall(buildat.get_file_content, name)
+			data = ok and data or nil
+			local ok2, p = pcall(m.call, m, "file_buffer", i, data and #data or -1)
+			if not ok2 then
+				log:error("the default client_main: file_buffer("..i..
+						"): "..tostring(p))
+			elseif data and p and p ~= 0 then
+				local ok3, err = pcall(m.write, m, p, data)
+				if not ok3 then
+					log:error("the default client_main: "..name..
+							" not written: "..tostring(err))
+				end
+			end
+			i = i + 1
+		end
+	end
+
+	-- The module's packets, by the names its packets() export lists
+	local function subscribe_packets()
+		for name in names_of("packets"):gmatch("%S+") do
 			if name:match("^[%w_]+$") and #name <= 64 then
 				buildat.sub_packet(module..":"..name, function(data)
 					-- BUILDAT_EVENT_MAX holds the largest
@@ -228,6 +258,10 @@ return function(module)
 			for _, nt in ipairs(handed) do
 				table.insert(start, m:handle(nt[1]))
 				table.insert(start, m:handle(nt[2]))
+			end
+			load_files()
+			if m:status() == "failed" then
+				return stop(select(2, m:status()))
 			end
 			subscribe_packets()
 			push(words(start))

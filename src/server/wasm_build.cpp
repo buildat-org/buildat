@@ -581,13 +581,18 @@ ss_ build_module_wasm(const core::Config &config, const ss_ &module_name,
 	interface::fs::create_directories(tmp);
 	ss_ objects;
 	bool ok = true;
+	// A module's own headers for <...> ([DOOM_APP]): wasm/include/, when
+	// there, before clang's, so that C written against a libc (no libc
+	// here) builds over a few headers the module brings
+	const ss_ own_include = interface::fs::path_exists(src_dir+"/include") ?
+			" -I"+quote(src_dir+"/include") : "";
 	for(size_t i = 0; ok && i < sources.size(); i++){
 		const ss_ &s = sources[i];
 		const bool cpp = !ends_with(s, ".c");
 		const ss_ obj = tmp+"/"+itos(i)+".o";
 		const ss_ command = quote(cc)+" "+WASM_CFLAGS+
 				(cpp ? " -std=c++17 -fno-exceptions -fno-rtti" : " -std=c11")+
-				" -I"+quote(include_dir)+" -c "+quote(src_dir+"/"+s)+
+				own_include+" -I"+quote(include_dir)+" -c "+quote(src_dir+"/"+s)+
 				" -o "+quote(obj);
 		ok = run_logged(command, tmp+"/compile.log");
 		objects += " "+quote(obj);

@@ -5,6 +5,8 @@
 // builds wasm/*.c, *.cc and *.cpp with clang --target=wasm32, no libc, and
 // serves the .wasm to clients, which run it as a sandboxed module of its own
 // and call its exports from Lua (buildat.wasm_load(), doc/client_api.txt).
+// wasm/include/, when there, is on the include path before clang's own
+// headers: a module that wants a libc's headers brings its own.
 //
 // The imports below, and interface/buildat_client.h's (the Lua sandbox's
 // classes, [CLIENT_WASM_BINDINGS]), are all a module can call, each
@@ -132,6 +134,12 @@ void buildat_drop(int handle);
 // - const char *packets(void), optional: the names of the packets it is
 //   sent, without "<module>:", separated by spaces, ending in a 0 byte
 //   (at most 4096 bytes); each comes to it as BUILDAT_EVENT_PACKET.
+// - const char *files(void), optional, as packets(): names of files the
+//   server serves (its client_data's) that the module wants in its memory,
+//   a game's data. Before START, for each in order, int file_buffer(int
+//   index, int size) is called with its size in bytes (-1 for one not
+//   served) and returns where they go (0: nowhere); they are written
+//   there before START.
 // (An export's name may not begin with "buildat_": those are the
 // engine's.) It also binds interface/buildat_client.h's calls -- the Lua
 // sandbox's classes, the UI's included, as wasm imports

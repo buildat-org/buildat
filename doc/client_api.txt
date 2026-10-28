@@ -909,7 +909,10 @@ buildat.safe.wasm_load(module) -> m, or nil and why
   <module>/<module>.wasm. A module whose meta.json says "client_main":
   "wasm" needs no Lua for it: the engine's default client main loads it,
   makes it a scene and calls its frame(dt) export with the input and its
-  packets queued as events (server_api.txt, interface/wasm_api.h). Each load is an instance of its own with its own
+  packets queued as events (server_api.txt, interface/wasm_api.h), and
+  writes the served files its files() export names into its memory
+  first. wasm/include/, when there, is on its include path: a module
+  that wants a libc's headers brings its own. Each load is an instance of its own with its own
   memory. Before anything runs it is validated and capped, on both clients
   alike: 8 MiB, 50000 functions, 1000 exports, a memory with a maximum of
   at most 1024 pages (64 MiB), wasm_api.h's and buildat_client.h's

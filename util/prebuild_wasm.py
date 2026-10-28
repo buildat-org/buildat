@@ -129,12 +129,15 @@ def build(module, source, server):
         cargo_build(module, source, files, target)
         print("%s: %s/: %s (%d bytes)" % (module, source, target, os.path.getsize(target)))
         return
+    # wasm/include/, when there, as the server's build_module_wasm has it
+    own = os.path.join(wasm_dir, "include")
+    own = ["-I" + own] if os.path.isdir(own) else []
     with tempfile.TemporaryDirectory() as tmp:
         objs = []
         for i, f in enumerate(s for s in files if s.endswith((".c", ".cc", ".cpp"))):
             lang = ["-std=c11"] if f.endswith(".c") else ["-std=c++17", "-fno-exceptions", "-fno-rtti"]
             objs.append(os.path.join(tmp, "%d.o" % i))
-            subprocess.run([cc] + cflags.split() + lang + ["-I" + os.path.dirname(os.path.abspath(interface)),
+            subprocess.run([cc] + cflags.split() + lang + own + ["-I" + os.path.dirname(os.path.abspath(interface)),
                 "-c", os.path.join(wasm_dir, f), "-o", objs[-1]], check=True)
         if not objs:
             sys.exit("%s: %s/ has no .c, .cc or .cpp" % (module, source))
