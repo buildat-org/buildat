@@ -285,9 +285,17 @@ local function go_in_page(key, rel)
 			return __buildat_web_go_local(id)
 		end
 		local w = todo[left]
-		left = left - 1
+		-- A fetch the browser cancels as it starts (Chrome, now and then:
+		-- net::ERR_ABORTED before any connection) is tried twice more
+		w.tries = (w.tries or 0) + 1
 		network.http_get(rel.aitta .. "/api/v1/aitta/wasm/" .. w.sha .. ".wasm",
 				function(body, err)
+			if not body and w.tries < 3 then
+				log:warning("aitta: " .. w.name .. ": " .. tostring(err) ..
+						"; again")
+				return next_one()
+			end
+			left = left - 1
 			if not body or __buildat_hex(__buildat_sha256(body)) ~= w.sha then
 				return ui.show_message_dialog("Could not start " .. key ..
 						": " .. w.name .. " " .. (body and
