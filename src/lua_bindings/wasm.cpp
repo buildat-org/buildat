@@ -25,6 +25,7 @@
 #include <luabind/luabind.hpp>
 #include <Node.h>
 #include <CustomGeometry.h>
+#include <Graphics.h>
 #include <Texture2D.h>
 #include <Image.h>
 #include "core/log.h"
@@ -496,6 +497,12 @@ struct Instance: public Engine
 				why = PAST;
 				return 0;
 			}
+			// A lost device (a client quitting, a context the system took)
+			// takes no texture's data: not the module's fault, and its
+			// next frame sets it again ([DOOM_APP]: a trap a frame at quit)
+			Graphics *graphics = tex->GetSubsystem<Graphics>();
+			if(graphics && graphics->IsDeviceLost())
+				return 0;
 			if(!tex->SetData(image, false)){
 				why = "the texture took no data";
 				return 0;
