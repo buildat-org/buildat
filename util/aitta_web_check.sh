@@ -23,8 +23,7 @@
 #   2e. [AITTA_BUILD_MEM] A build script whose processes each touch memory
 #      (16 x 96 MiB, past this Aitta's 1024 MiB for a build): ended by the
 #      build's PID 1, which measures its processes (no cgroup here), Aitta
-#      answering meanwhile, nothing left. Again under a systemd user scope
-#      with Delegate=yes where there is one: the build's cgroup's OOM.
+#      answering meanwhile, nothing left.
 #   3. A package with a C++ module with cxxflags: listed, not in the page.
 #   3b. [WEB_LOCAL_AITTA_CPP] A package with a C++ module: Aitta links its
 #      own server from the kit (Build-webserver/aitta_kit) in the build's
@@ -45,6 +44,13 @@
 #      (BUILDAT_BUILD_NO_PIDNS=1): not built, and nothing left. Aitta's
 #      records copied to a second one, which has no kit: the C++ package
 #      listed, not in the page.
+#   6. 2b and 2e on a third Aitta under a systemd user scope with
+#      Delegate=yes (where there is one): built in the build's cgroup, the
+#      memory probe ended by the cgroup's OOM.
+#   7. [AITTA_BUILD_QUEUE] On that Aitta, while a build runs, one author
+#      publishes four more (the fourth refused: three wait at most) and
+#      another one: the other author's is built next, round-robin, then
+#      the first's.
 # Needs web/ (util/build_web.sh), web/local/_aitta
 # (util/build_web_server.sh "$PWD/src/server/web/_aitta", which makes the
 # kit too), cargo with the wasm32-unknown-unknown target, a display for the
@@ -78,23 +84,34 @@ aitta_pid=$SERVER_PID
 grep -aq "The server is sandboxed" "$t/srv.log" || fail "Aitta is not boxed"
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
-printf 'wait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
+"$b" aitta keygen "$t/key2" > "$t/pub2" 2>/dev/null || fail "keygen"
+printf 'wait_log_any 30000 admin script: done\nwait_log_any 30000 "id":2,\nquit\n' > "$t/reqs.cmds"
 BUILDAT_AITTA_CREATE=1 BUILDAT_AITTA_NAME=admin BUILDAT_AITTA_PASSWORD=checkpass \
-	BUILDAT_AITTA_CODE=$code \
+	BUILDAT_AITTA_CODE=$code BUILDAT_AITTA_ADMIN="add other checkpass2" \
 	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"tester\",\"key\":\"$(cat "$t/pub")\"}
 {\"cmd\":\"set_settings\",\"settings\":{\"page_delay\":0}}" \
 	timeout 90 "$b" -o launch_ui=launch_menu -D "$t/cl" -w 800x600 -l 3 \
 	-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/reqs.cmds" > "$t/bind.log" 2>&1
 grep -aq 'ai: {"id":1,"ok":true' "$t/bind.log" || fail "the bind"
+# [AITTA_BUILD_QUEUE] A second author, for 2f
+printf 'wait_log_any 30000 "id":1,\nquit\n' > "$t/reqs2.cmds"
+BUILDAT_AITTA_NAME=other BUILDAT_AITTA_PASSWORD=checkpass2 \
+	BUILDAT_AITTA_REQS="{\"cmd\":\"bind\",\"author\":\"other\",\"key\":\"$(cat "$t/pub2")\"}" \
+	timeout 90 "$b" -o launch_ui=launch_menu -D "$t/cl2" -w 800x600 -l 3 \
+	-o sound_mute=1 -s 127.0.0.1:$P -c @"$t/reqs2.cmds" > "$t/bind2.log" 2>&1
+grep -aq 'ai: {"id":1,"ok":true' "$t/bind2.log" || fail "the second author's bind"
 
-# publish <dir> <name>: the manifest written, packed, published
-publish(){
-	printf '{"author": "tester", "name": "%s", "version": "1.0.0", "kind": "app",
+# publish <dir> <name> [author key]: the manifest written, packed, published
+pack(){
+	printf '{"author": "%s", "name": "%s", "version": "1.0.0", "kind": "app",
 		"engine_api": 2, "audience": "everyone", "license_code": "MIT",
-		"license_media": "CC0-1.0", "description": "a check"}\n' "$2" > "$1/meta.json"
-	zip=$("$b" aitta pack "$1" "$t/key" "$t/out" 2>/dev/null) || fail "pack $2"
+		"license_media": "CC0-1.0", "description": "a check"}\n' "${3:-tester}" "$2" > "$1/meta.json"
+	zip=$("$b" aitta pack "$1" "${4:-$t/key}" "$t/out" 2>/dev/null) || fail "pack $2"
 	"$b" aitta publish "$zip" 127.0.0.1:$P > "$t/pub_$2.out" 2>&1
-	grep -q "listed: tester/$2/1.0.0" "$t/pub_$2.out" || fail "publish $2: $(cat "$t/pub_$2.out")"
+}
+publish(){
+	pack "$@"
+	grep -q "listed: ${3:-tester}/$2/1.0.0" "$t/pub_$2.out" || fail "publish $2: $(cat "$t/pub_$2.out")"
 }
 # The list's release <name> as JSON
 release(){
@@ -594,14 +611,16 @@ echo "ok: without a kit a package with C++ is listed, not in the page"
 # build made in it, and the memory probe ended by the cgroup's OOM
 kill $SERVER_PID
 for i in $(seq 50); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 0.2; done
-if systemd-run --user --scope -q -p Delegate=yes true 2>/dev/null; then
-	cp -a "$t/srv" "$t/srv3"
-	BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv3.log" "Listening at" 60 auto \
-		systemd-run --user --scope -q -p Delegate=yes \
-		bin/buildat_server -m ../apps/aitta -D "$t/srv3" -l 3 ||
-		fail "the third Aitta did not start"
-	CHECK_PIDS+=($SERVER_PID)
-	P=$SERVER_PORT
+cp -a "$t/srv" "$t/srv3"
+scope=()
+systemd-run --user --scope -q -p Delegate=yes true 2>/dev/null &&
+	scope=(systemd-run --user --scope -q -p Delegate=yes)
+BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv3.log" "Listening at" 60 auto \
+	"${scope[@]}" bin/buildat_server -m ../apps/aitta -D "$t/srv3" -l 3 ||
+	fail "the third Aitta did not start"
+CHECK_PIDS+=($SERVER_PID)
+P=$SERVER_PORT
+if [ -n "${scope[*]}" ]; then
 	grep -aq "A build's cgroup: .*/build (memory.max 1024 MiB, pids.max 64)" "$t/srv3.log" ||
 		fail "no cgroup for a build under Delegate=yes ($t/srv3.log)"
 	publish "$t/linger" linger3
@@ -616,4 +635,49 @@ if systemd-run --user --scope -q -p Delegate=yes true 2>/dev/null; then
 else
 	echo "no systemd user scope with Delegate=yes here: step 6 not run"
 fi
-echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ without a kit; ends every process a build leaves and a build past its memory total (measured, or its cgroup under Delegate=yes); the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"
+# 7. [AITTA_BUILD_QUEUE] On the third Aitta (a fresh count of uploads:
+# Aitta takes 30 a minute from a network). The gate's build waits for a
+# file the check puts in its job directory (TMPDIR is <job>/tmp);
+# meanwhile tester queues q1..q4 (q4 refused) and other queues oq. Built
+# next: oq, then q1..q3
+mkdir -p "$t/gate/gate/server/src"
+cp "$t/linger/linger/meta.json" "$t/gate/gate/meta.json"
+sed 's/probe/gate/' "$t/probe/probe/server/Cargo.toml" > "$t/gate/gate/server/Cargo.toml"
+cat > "$t/gate/gate/server/build.rs" <<'EOF2'
+fn main() {
+	let go = format!("{}/../go", std::env::var("TMPDIR").unwrap());
+	for _ in 0..2400 {
+		if std::path::Path::new(&go).exists() { return; }
+		std::thread::sleep(std::time::Duration::from_millis(50));
+	}
+	panic!("GATE never opened");
+}
+EOF2
+sed 's/linger/gate/' "$t/linger/linger/server/src/lib.rs" > "$t/gate/gate/server/src/lib.rs"
+publish "$t/gate" gate
+gate_job="buildat_server --build-wasm [^ ]*/web_$(sha256sum < "$zip" | cut -d' ' -f1)"
+wait_for_log "$t/srv3.log" "$gate_job" 60 || fail "the gate's build did not start"
+job=$(grep -aom1 -e "$gate_job" "$t/srv3.log" | cut -d' ' -f3)
+for n in q1 q2 q3 q4 oq; do
+	mkdir -p "$t/$n"
+	cp -r "$t/linger/linger" "$t/$n/$n"
+	for f in Cargo.toml src/lib.rs; do
+		sed "s/linger/$n/" "$t/linger/linger/server/$f" > "$t/$n/$n/server/$f"
+	done
+	echo 'fn main() {}' > "$t/$n/$n/server/build.rs"
+done
+for n in q1 q2 q3; do publish "$t/$n" $n; done
+pack "$t/q4" q4
+grep -q "3 releases of tester wait to be built for the page here already" "$t/pub_q4.out" ||
+	fail "q4 was not refused: $(cat "$t/pub_q4.out")"
+publish "$t/oq" oq other "$t/key2"
+touch "$job/go"
+wait_for_log "$t/srv3.log" "web build of tester/q3/1.0.0: " 120 || fail "no web build of q3"
+order=$(grep -ao "web build of [a-z]*/[a-z0-9]*/1.0.0: [a-z]*" "$t/srv3.log" |
+	sed -n '/gate/,$p' | cut -d' ' -f4,5 | tr '\n' ' ')
+echo "built in order: $order"
+[ "$order" = "tester/gate/1.0.0: built other/oq/1.0.0: built tester/q1/1.0.0: built tester/q2/1.0.0: built tester/q3/1.0.0: built " ] ||
+	fail "not round-robin by author: $order"
+echo "ok: one author's builds wait three at most, and another's single build is next"
+
+echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ without a kit; ends every process a build leaves and a build past its memory total (measured, or its cgroup under Delegate=yes); builds taken round-robin by author, three waiting at most; the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"

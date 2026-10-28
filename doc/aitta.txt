@@ -72,8 +72,10 @@ loads on the web, each of whose modules is a .wasm on the server side
 ("server_wasm") or has no server side ("disable_cpp") -- or is C++ on an
 Aitta with a kit, below -- and whose dependencies are its own modules or
 builtins that keep to the web API. Aitta builds such a release's .wasm itself after it is listed, one
-release at a time, from the release's source (a release carries no
-.wasm): `buildat_server --build-wasm`, as the server builds them (cargo
+release at a time, taking the authors in turn (round-robin; an author's
+own in the order published), from the release's source (a release
+carries no .wasm); a publish while 3 of the author's releases wait to be
+built is refused: `buildat_server --build-wasm`, as the server builds them (cargo
 or clang to wasm32), in a box of the build's own (Linux: Landlock and
 seccomp) that reads the system's programs and libraries, the toolchain
 and the engine's headers and crates, writes its own directory, opens no

@@ -101,6 +101,11 @@ static const int UPLOADS_A_MINUTE = 30;
 // [SECURITY_RUN_5] A release's meta.json, kept whole in its record and
 // handed out by list and release: Starport keeps 4 KB of unknown keys
 static const size_t MANIFEST_MAX = 16 * 1024;
+// [AITTA_BUILD_QUEUE] An author's releases waiting to be built for the
+// page at once (builds are one at a time, up to 300 s each); a publish
+// past it is refused. simplified: by author, and an account binds one,
+// so many accounts get many times it
+static const int64_t WEB_WAITING_MAX = 3;
 
 // An author name: what a manifest's "author" may be
 static bool plain_name(const ss_ &s)
@@ -373,6 +378,10 @@ struct Module: public interface::Module, public moderation::Host
 	// [WEB_LOCAL_AITTA] The releases whose .wasm wait to be built, by id,
 	// and the one building: its job's directory and its process
 	std::deque<ss_> m_web_queue;
+	// [AITTA_BUILD_QUEUE] When each author's last build started (a count
+	// of builds): the next is the author's served longest ago
+	sm_<ss_, int64_t> m_web_served;
+	int64_t m_web_count = 0;
 	ss_ m_web_id, m_web_job;
 	sv_<ss_> m_web_names; // what it is to build
 	interface::process::Handle m_web_proc;
@@ -1429,8 +1438,16 @@ struct Module: public interface::Module, public moderation::Host
 		}
 		if(m_web_queue.empty())
 			return;
-		m_web_id = m_web_queue.front();
-		m_web_queue.pop_front();
+		// [AITTA_BUILD_QUEUE] Round-robin by author: each waits for at
+		// most one build of every other author's, however many those
+		// queued; an author's own in the order published
+		auto next = m_web_queue.begin();
+		for(auto it = m_web_queue.begin(); it != m_web_queue.end(); ++it)
+			if(m_web_served[author_of(*it)] < m_web_served[author_of(*next)])
+				next = it;
+		m_web_id = *next;
+		m_web_queue.erase(next);
+		m_web_served[author_of(m_web_id)] = ++m_web_count;
 		const json::Value rel = load("releases", m_web_id);
 		const ss_ sha = jstr(rel, "sha256");
 		m_web_job = m_tmp+"/web_"+sha;
@@ -1478,6 +1495,11 @@ struct Module: public interface::Module, public moderation::Host
 				"a box of the build's own", cs(m_web_id));
 		web_done(false);
 #endif
+	}
+
+	static ss_ author_of(const ss_ &release_id)
+	{
+		return release_id.substr(0, release_id.find('/'));
 	}
 
 	// A file the build left in the job's sub/, max bytes at most (the
@@ -1773,6 +1795,13 @@ struct Module: public interface::Module, public moderation::Host
 					"here: see your statements on Aitta's page");
 		if(!load("releases", id).is_undefined())
 			return drop(id+" is here already");
+		// [AITTA_BUILD_QUEUE] One author's builds waiting at once
+		if(web_why.empty() && std::count_if(m_web_queue.begin(),
+				m_web_queue.end(), [&](const ss_ &q){
+					return author_of(q) == u.author; }) >= WEB_WAITING_MAX)
+			return drop(itos(WEB_WAITING_MAX)+" releases of "+u.author+
+					" wait to be built for the page here already: publish "
+					"this once one of them is built");
 		if(!media_why.empty())
 			return drop("meta.json: "+media_why);
 		if(m.get("serverless").as_boolean() && !lua51.empty())
