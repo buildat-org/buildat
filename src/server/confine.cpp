@@ -77,6 +77,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 #include <dirent.h>
 #include <fstream>
 #include <vector>
+#include <map>
 #include <algorithm>
 #include <sys/resource.h>
 #include "interface/process.h"
@@ -410,19 +411,37 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 }
 
 // [WEB_LOCAL_AITTA] A publish's build, each of its processes: the wall
-// clock (this one's), and the CPU, memory, file size and no core (all)
+// clock (this one's), and the CPU, address space, file size and no core
+// (all). [AITTA_BUILD_MEM] 2 GiB: the most a process of the builds
+// measured reserved was node's (emcc), 1.2 GiB; rustc 0.4 GiB
 static const unsigned BUILD_WALL_S = 300;
 static const rlim_t BUILD_CPU_S = 600;
-static const rlim_t BUILD_MEM = (rlim_t)4 << 30;
+static const rlim_t BUILD_MEM = (rlim_t)2 << 30;
 static const rlim_t BUILD_FILE = (rlim_t)256 << 20;
 // [AITTA_BUILD_NPROC] Its processes and threads at once (RLIMIT_NPROC).
 // The kernel (5.14+) counts it per user namespace: only the build's own
 // tasks, not the rest of Aitta's uid, and the build cannot raise it.
+// [AITTA_BUILD_MEM] 64: the builds measured ran 21 at most (cargo and two
+// rustc; emcc with BINARYEN_CORES=2, below).
 // simplified: an older kernel counts the uid's tasks across the host, so
-// there every build fails closed past this many. A pids cgroup is not
-// used: a host seldom delegates one to Aitta's own cgroup, and this
-// count is already the build's alone
-static const rlim_t BUILD_NPROC = 512;
+// there every build fails closed past this many
+static const rlim_t BUILD_NPROC = 64;
+// [AITTA_BUILD_MEM] All of a build's processes together: at most this
+// much memory, BUILDAT_BUILD_MEMORY_MIB or 4 GiB (the builds measured
+// peaked at 0.5 GiB resident). A memory cgroup holds it where the server
+// has one delegated (make_build_cgroup()); else the build's PID 1
+// measures its processes every 0.1 s and ends the build past it.
+// simplified: the measuring lags: what the build's tasks touch in 0.1 s
+// (some GiB on a fast host) goes past the total before it ends, and
+// kernel memory (pipe buffers, page tables) is not counted; the hard
+// ceiling is BUILD_NPROC x BUILD_MEM (128 GiB). The upgrade is the cgroup:
+// run Aitta under a systemd unit with Delegate= (doc/aitta.txt)
+static uint64_t build_memory()
+{
+	const char *e = getenv("BUILDAT_BUILD_MEMORY_MIB");
+	const long long mib = e ? atoll(e) : 0;
+	return (uint64_t)(mib > 0 ? mib : 4096) << 20;
+}
 // [WEB_LOCAL_AITTA_CPP] Its job directory: at most this many bytes
 // (blocks used) and files. RLIMIT_FSIZE caps a file, not how many there
 // are; the build's PID 1 measures the directory each second and ends the
@@ -459,6 +478,50 @@ static void tree_use(int dir, uint64_t &bytes, uint64_t &files)
 	closedir(d);
 }
 
+// [AITTA_BUILD_MEM] The memory this process's descendants hold (every
+// process of its PID namespace, whose init it is): resident anonymous and
+// shared memory (a memfd's too), bytes. From the host's /proc: each
+// process's status, which no ptrace check guards (a process made
+// undumpable is counted too)
+static uint64_t ns_memory()
+{
+	char link[32] = {};
+	if(readlink("/proc/self", link, sizeof link - 1) <= 0)
+		return 0;
+	const long self = atol(link); // as the host's /proc numbers it
+	DIR *d = opendir("/proc");
+	if(!d)
+		return 0;
+	std::map<long, std::pair<long, uint64_t>> procs; // pid: parent, KiB
+	while(struct dirent *e = readdir(d)){
+		if(!isdigit((unsigned char)e->d_name[0]))
+			continue;
+		std::ifstream f(ss_("/proc/")+e->d_name+"/status");
+		ss_ line;
+		long parent = 0;
+		uint64_t kib = 0;
+		while(std::getline(f, line)){
+			if(line.compare(0, 5, "PPid:") == 0)
+				parent = atol(line.c_str() + 5);
+			else if(line.compare(0, 8, "RssAnon:") == 0 ||
+					line.compare(0, 9, "RssShmem:") == 0)
+				kib += strtoull(line.c_str() + line.find(':') + 1, nullptr, 10);
+		}
+		procs[atol(e->d_name)] = {parent, kib};
+	}
+	closedir(d);
+	uint64_t kib = 0;
+	for(const auto &p : procs){
+		long at = p.first;
+		for(int depth = 0; depth < 1000 && procs.count(at) && at != self;
+				depth++)
+			at = procs[at].first;
+		if(at == self)
+			kib += p.second.second;
+	}
+	return kib << 10;
+}
+
 int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 {
 	// Nothing of Aitta's: an open file or socket it left without
@@ -483,6 +546,25 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	// refused by AppArmor; BUILDAT_BUILD_NO_PIDNS=1 acts so), nothing is
 	// built: a subreaper could not end them either, the box refusing
 	// kill() of any process but Aitta itself.
+	// [AITTA_BUILD_MEM] The build's PID 1 moves into the build's cgroup
+	// where the server made one, and this one stays out to say why the
+	// build ended: an OOM kills the whole cgroup (memory.oom.group)
+	const char *cgroup = getenv("BUILDAT_BUILD_CGROUP");
+	const bool in_cgroup = cgroup != nullptr;
+	const uint64_t mem_total = build_memory();
+	log_i("wasm", "the build's memory: at most %i MiB, %s",
+			(int)(mem_total >> 20), in_cgroup ? cgroup :
+			"measured every 0.1 s (no cgroup)");
+	auto oom_kills = [&](){
+		std::ifstream f(ss_(cgroup)+"/memory.events");
+		ss_ k;
+		int64_t n = 0, kills = 0;
+		while(f >> k >> n)
+			if(k == "oom_kill")
+				kills = n;
+		return kills;
+	};
+	const int64_t kills_before = in_cgroup ? oom_kills() : 0;
 	const char *no_pidns = getenv("BUILDAT_BUILD_NO_PIDNS");
 	if(no_pidns || unshare(CLONE_NEWUSER | CLONE_NEWPID) != 0){
 		log_e("wasm", "the build is not made: no PID namespace for it (%s), "
@@ -498,7 +580,24 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 		// The build's exit status; its namespace is gone by then
 		int status = 0;
 		while(waitpid(child, &status, 0) < 0 && errno == EINTR){}
+		if(in_cgroup && oom_kills() != kills_before)
+			log_e("wasm", "the build: its processes went past %i MiB "
+					"(its cgroup's OOM); ended", (int)(mem_total >> 20));
 		return WIFEXITED(status) ? WEXITSTATUS(status) : 4;
+	}
+	if(in_cgroup){
+		// The user namespace's overflow uid is still the owner's kuid
+		const int fd = open((ss_(cgroup)+"/cgroup.procs").c_str(),
+				O_WRONLY | O_CLOEXEC);
+		const bool ok = fd >= 0 && write(fd, "0", 1) == 1;
+		const ss_ why = strerror(errno);
+		if(fd >= 0)
+			close(fd);
+		if(!ok){
+			log_e("wasm", "the build is not made: it cannot enter its "
+					"cgroup %s (%s)", cgroup, cs(why));
+			return 3;
+		}
 	}
 	// A namespace's PID 1 ignores a signal it has no handler for
 	signal(SIGALRM, [](int){ _exit(4); });
@@ -556,6 +655,11 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	setenv("HOME", (job+"/tmp").c_str(), 1);
 	// Two compiles at once, each under the memory limit
 	setenv("CARGO_BUILD_JOBS", "2", 1);
+	// [AITTA_BUILD_MEM] wasm-opt's threads as for two cores, not one a
+	// core of the host's (each a task of BUILD_NPROC); glibc's heaps two
+	// (a 64 MiB reservation a thread counts against BUILD_MEM)
+	setenv("BINARYEN_CORES", "2", 1);
+	setenv("MALLOC_ARENA_MAX", "2", 1);
 	config.set("rccpp_build_path", job+"/build");
 	config.set("rccpp_prebuilt_path", "");
 	const ss_ cc = config.get<ss_>("wasm_cc"), ld = config.get<ss_>("wasm_ld");
@@ -567,6 +671,50 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 		log_e("wasm", "the build: no kit with an emsdk at %s", cs(kit));
 		return 2;
 	}
+	// The build itself in a child, in its box; this one, the namespace's
+	// PID 1, outside that box (in Aitta's, which reads /proc), measures
+	// the job directory each second and, without a cgroup, the build's
+	// memory every 0.1 s, and ends everything past its caps (by exiting).
+	// The box's Landlock domain keeps the build from tracing this one.
+	fflush(stdout);
+	const pid_t work = fork();
+	if(work < 0)
+		return 2;
+	if(work > 0){
+		for(int tick = 0;; tick++){
+			int status = 0;
+			const pid_t r = waitpid(work, &status, WNOHANG);
+			if(r == work)
+				return WIFEXITED(status) ? WEXITSTATUS(status) : 4;
+			if(r < 0 && errno != EINTR)
+				return 4;
+			if(!in_cgroup){
+				const uint64_t used = ns_memory();
+				if(used > mem_total){
+					log_e("wasm", "the build: its processes went past %i MiB "
+							"(%i MiB); ended", (int)(mem_total >> 20),
+							(int)(used >> 20));
+					fflush(stdout);
+					_exit(6);
+				}
+			}
+			if(tick % 10 == 0){
+				uint64_t bytes = 0, files = 0;
+				const int d = open(job.c_str(), O_RDONLY | O_DIRECTORY |
+						O_CLOEXEC);
+				if(d >= 0)
+					tree_use(d, bytes, files);
+				if(bytes > BUILD_DISK || files > BUILD_FILES){
+					log_e("wasm", "the build: its directory went past %i MiB "
+							"or %i files; ended", (int)(BUILD_DISK >> 20),
+							(int)BUILD_FILES);
+					fflush(stdout);
+					_exit(5);
+				}
+			}
+			usleep(100000);
+		}
+	}
 	const ss_ why = confine_build({interface_path, rust_dir,
 			cc.empty() ? "" : interface::fs::strip_file_name(
 				interface::fs::strip_file_name(cc)),
@@ -575,35 +723,6 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	if(!why.empty()){
 		log_e("wasm", "the build is not made outside its box: %s", cs(why));
 		return 3;
-	}
-	// The build itself in a child; this one, the namespace's PID 1,
-	// measures the job directory each second and ends everything past its
-	// caps (by exiting)
-	fflush(stdout);
-	const pid_t work = fork();
-	if(work < 0)
-		return 2;
-	if(work > 0){
-		for(;;){
-			int status = 0;
-			const pid_t r = waitpid(work, &status, WNOHANG);
-			if(r == work)
-				return WIFEXITED(status) ? WEXITSTATUS(status) : 4;
-			if(r < 0 && errno != EINTR)
-				return 4;
-			uint64_t bytes = 0, files = 0;
-			const int d = open(job.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-			if(d >= 0)
-				tree_use(d, bytes, files);
-			if(bytes > BUILD_DISK || files > BUILD_FILES){
-				log_e("wasm", "the build: its directory went past %i MiB "
-						"or %i files; ended", (int)(BUILD_DISK >> 20),
-						(int)BUILD_FILES);
-				fflush(stdout);
-				_exit(5);
-			}
-			usleep(1000000);
-		}
 	}
 	// The release's modules: its directories with a meta.json, by a plain
 	// name; each server .wasm to out/<module>.server.wasm, each wasm/ to
@@ -647,6 +766,63 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	}
 	return ok ? 0 : 1;
 }
+// [AITTA_BUILD_MEM] A cgroup for --build-wasm's builds, where the
+// server's own is delegated to it (a systemd unit with Delegate=, see
+// doc/aitta.txt): writable, with the memory and pids controllers, and
+// this process alone in it (so a terminal's or a session's cgroup is left
+// as it is). This process moves to <cgroup>/server, and <cgroup>/build
+// gets memory.max (build_memory()), no swap, pids.max BUILD_NPROC and
+// memory.oom.group (one OOM kill ends the whole build). Its path, or ""
+// and why not
+static ss_ make_build_cgroup(ss_ &why)
+{
+	ss_ line;
+	{
+		std::ifstream f("/proc/self/cgroup");
+		std::getline(f, line);
+	}
+	if(line.compare(0, 3, "0::") != 0 || line.size() <= 4)
+		return why = "not in a cgroup v2 of its own", "";
+	const ss_ cg = "/sys/fs/cgroup"+line.substr(3);
+	auto read = [](const ss_ &path){
+		std::ifstream f(path);
+		std::string r((std::istreambuf_iterator<char>(f)),
+				std::istreambuf_iterator<char>());
+		return " "+r;
+	};
+	auto write = [](const ss_ &path, const ss_ &what){
+		const int fd = open(path.c_str(), O_WRONLY | O_CLOEXEC);
+		const bool ok = fd >= 0 && ::write(fd, what.data(), what.size()) ==
+				(ssize_t)what.size();
+		if(fd >= 0)
+			close(fd);
+		return ok;
+	};
+	const ss_ controllers = read(cg+"/cgroup.controllers");
+	if(controllers.find(" memory") == ss_::npos ||
+			controllers.find(" pids") == ss_::npos)
+		return why = "no memory and pids controllers in "+cg, "";
+	if(access((cg+"/cgroup.subtree_control").c_str(), W_OK) != 0 ||
+			access((cg+"/cgroup.procs").c_str(), W_OK) != 0)
+		return why = cg+" is not delegated to it", "";
+	if(read(cg+"/cgroup.procs") != " "+itos(getpid())+"\n")
+		return why = "other processes share "+cg, "";
+	const ss_ build = cg+"/build";
+	for(const ss_ &d : {cg+"/server", build})
+		if(mkdir(d.c_str(), 0755) != 0 && errno != EEXIST)
+			return why = d+": "+strerror(errno), "";
+	if(!write(cg+"/server/cgroup.procs", "0") ||
+			!write(cg+"/cgroup.subtree_control", "+memory +pids"))
+		return why = cg+": "+strerror(errno), "";
+	if(!write(build+"/memory.max", itos((int64_t)build_memory())) ||
+			!write(build+"/pids.max", itos((int64_t)BUILD_NPROC)) ||
+			!write(build+"/memory.oom.group", "1"))
+		return why = build+": "+strerror(errno), "";
+	// Not there without swap accounting: then nothing to swap anyway
+	write(build+"/memory.swap.max", "0");
+	return build;
+}
+
 ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 {
 	// Landlock restricts the calling thread and what it starts; a thread
@@ -655,6 +831,19 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	if(threads != 1)
 		return "the sandbox is made before any thread starts, and "+
 				itos(threads)+" are running";
+	// [AITTA_BUILD_MEM] Before the box, which reads /sys only; the build
+	// moves itself in through BUILDAT_BUILD_CGROUP and the rule below
+	ss_ no_cgroup;
+	const ss_ build_cgroup = make_build_cgroup(no_cgroup);
+	if(build_cgroup.empty()){
+		unsetenv("BUILDAT_BUILD_CGROUP");
+		log_v(MODULE, "No cgroup for a build: %s", cs(no_cgroup));
+	} else {
+		setenv("BUILDAT_BUILD_CGROUP", build_cgroup.c_str(), 1);
+		log_i(MODULE, "A build's cgroup: %s (memory.max %i MiB, pids.max "
+				"%i)", cs(build_cgroup), (int)(build_memory() >> 20),
+				(int)BUILD_NPROC);
+	}
 
 	const int abi = syscall(SYS_landlock_create_ruleset, nullptr, 0,
 			LANDLOCK_CREATE_RULESET_VERSION);
@@ -798,6 +987,8 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 			rs.add(base, FS_READ);
 	}
 	rs.add_around(prebuilt, {app_cache}, FS_READ);
+	if(!build_cgroup.empty())
+		rs.add(build_cgroup+"/cgroup.procs", LANDLOCK_ACCESS_FS_WRITE_FILE);
 	// [WEB_LOCAL_AITTA_CPP] An Aitta's kit for building C++ servers for
 	// the page, and the emsdk it names: what its build reads, which runs
 	// inside this box as well

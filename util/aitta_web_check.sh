@@ -15,11 +15,16 @@
 #   2b. A build script leaving a process in a session of its own and a
 #      double-forked one: both end with the build.
 #   2c. A build script starting processes without end: stopped at the
-#      build's cap (512 tasks in its user namespace), the build failed,
+#      build's cap (64 tasks in its user namespace), the build failed,
 #      Aitta answering meanwhile, nothing left.
 #   2d. A build script making files without end (to 300000, past the
 #      build's 200000): ended by the build's PID 1, which measures the job
 #      directory each second (RLIMIT_FSIZE caps one file only).
+#   2e. [AITTA_BUILD_MEM] A build script whose processes each touch memory
+#      (16 x 96 MiB, past this Aitta's 1024 MiB for a build): ended by the
+#      build's PID 1, which measures its processes (no cgroup here), Aitta
+#      answering meanwhile, nothing left. Again under a systemd user scope
+#      with Delegate=yes where there is one: the build's cgroup's OOM.
 #   3. A package with a C++ module with cxxflags: listed, not in the page.
 #   3b. [WEB_LOCAL_AITTA_CPP] A package with a C++ module: Aitta links its
 #      own server from the kit (Build-webserver/aitta_kit) in the build's
@@ -64,7 +69,7 @@ export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
 trap check_cleanup EXIT
 
 cd "$here/Build"
-AITTA_ENV_SECRET=1 BUILDAT_AITTA_CPP_KIT=$kit start_server "$t/srv.log" "setup code" 60 auto \
+AITTA_ENV_SECRET=1 BUILDAT_AITTA_CPP_KIT=$kit BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -299,6 +304,62 @@ grep -aq "web build of tester/fill/1.0.0: failed" "$t/srv.log" || fail "fill was
 grep -aq "FILL made all" "$t/srv.log" && fail "fill made all its files"
 echo "ok: a build filling its directory is ended at its cap"
 
+# 2e. [AITTA_BUILD_MEM] A build script whose processes touch memory, 4 MiB
+# every 20 ms each, 16 of them to 96 MiB: 1.5 GiB at most (the probe's own
+# stop, so a failed cap cannot hurt this machine), past the 1024 MiB this
+# Aitta gives a build. It holds it 10 s, then fails by itself.
+# mem_probe <name> <server log> <how it is ended>
+mem_probe(){
+	local avail
+	avail=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
+	[ "$avail" -ge 3072 ] || fail "only $avail MiB available: the memory step needs 3 GiB"
+	mkdir -p "$t/$1/$1/server/src"
+	cp "$t/linger/linger/meta.json" "$t/$1/$1/meta.json"
+	sed "s/probe/$1/" "$t/probe/probe/server/Cargo.toml" > "$t/$1/$1/server/Cargo.toml"
+	cat > "$t/$1/$1/server/build.rs" <<EOF2
+use std::process::{Command, Stdio};
+fn main() {
+	let me = std::env::args().next().unwrap();
+	if std::env::var("MEM_CHILD").is_ok() {
+		let mut held = Vec::new();
+		for _ in 0..24 {
+			held.push(vec![1u8; 4 << 20]);
+			std::thread::sleep(std::time::Duration::from_millis(20));
+		}
+		std::thread::sleep(std::time::Duration::from_secs(600));
+		return;
+	}
+	let mut kids = Vec::new();
+	for _ in 0..16 {
+		kids.push(Command::new(&me).env("MEM_CHILD", "1").arg("${tok}_mem")
+			.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+			.spawn().unwrap());
+	}
+	std::thread::sleep(std::time::Duration::from_secs(10));
+	panic!("MEM held 16 x 96 MiB for 10 s");
+}
+EOF2
+	sed "s/linger/$1/" "$t/linger/linger/server/src/lib.rs" > "$t/$1/$1/server/src/lib.rs"
+	publish "$t/$1" $1
+	for i in $(seq 120); do
+		grep -aq "web build of tester/$1/1.0.0: " "$2" && break
+		curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$P/api/v1/aitta/list" |
+			grep -q 200 || fail "Aitta did not answer during $1's build"
+		sleep 1
+	done
+	grep -aq "web build of tester/$1/1.0.0: failed" "$2" ||
+		fail "$1 was not ended: $(grep -a -A20 "web build of tester/$1" "$2" | tail -20)"
+	grep -aq "MEM held" "$2" && fail "$1 held 1.5 GiB: its memory had no cap"
+	grep -aom1 "the build: its processes went past 1024 MiB$3" "$2" ||
+		fail "$1 failed, not at its memory: $(grep -a -A20 "web build of tester/$1" "$2" | tail -20)"
+	left=$(pgrep -f "${tok}_mem" | tr '\n' ' ')
+	[ -n "$left" ] && { CHECK_PIDS+=($left); fail "$1 left processes: $left"; }
+	curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:$P/api/v1/aitta/list" |
+		grep -q 200 || fail "Aitta does not answer after $1"
+}
+mem_probe mem "$t/srv.log" " ([0-9]* MiB); ended"
+echo "ok: a build whose processes touch memory is ended at the build's total; Aitta answered, nothing left"
+
 # 3.
 mkdir -p "$t/cpp/main/client_lua"
 cat > "$t/cpp/main/main.cpp" <<'EOF2'
@@ -528,4 +589,31 @@ grep -aq "tester/cpp2/1.0.0 in the page: no, the module main is C++" "$t/srv2.lo
 	fail "the C++ package not refused for the page without a kit ($t/srv2.log)"
 release cpp2 | grep -q '"web"\|"web_cpp"' && fail "cpp2 has a web build without a kit"
 echo "ok: without a kit a package with C++ is listed, not in the page"
-echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ without a kit; ends every process a build leaves; the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"
+# 6. [AITTA_BUILD_MEM] 2e under a systemd user scope with Delegate=yes (as
+# under a unit with Delegate=): the build in a cgroup of its own, a
+# build made in it, and the memory probe ended by the cgroup's OOM
+kill $SERVER_PID
+for i in $(seq 50); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 0.2; done
+if systemd-run --user --scope -q -p Delegate=yes true 2>/dev/null; then
+	cp -a "$t/srv" "$t/srv3"
+	BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv3.log" "Listening at" 60 auto \
+		systemd-run --user --scope -q -p Delegate=yes \
+		bin/buildat_server -m ../apps/aitta -D "$t/srv3" -l 3 ||
+		fail "the third Aitta did not start"
+	CHECK_PIDS+=($SERVER_PID)
+	P=$SERVER_PORT
+	grep -aq "A build's cgroup: .*/build (memory.max 1024 MiB, pids.max 64)" "$t/srv3.log" ||
+		fail "no cgroup for a build under Delegate=yes ($t/srv3.log)"
+	publish "$t/linger" linger3
+	wait_for_log "$t/srv3.log" "web build of tester/linger3/1.0.0: " 120 ||
+		fail "no web build of linger3 ($t/srv3.log)"
+	grep -aq "web build of tester/linger3/1.0.0: built" "$t/srv3.log" ||
+		fail "linger3 was not built in the cgroup: $(grep -a -A20 "web build of tester/linger3" "$t/srv3.log" | tail -20)"
+	left=$(pgrep -f "${tok}_" | tr '\n' ' ')
+	[ -n "$left" ] && { CHECK_PIDS+=($left); fail "linger3 left processes: $left"; }
+	mem_probe mem3 "$t/srv3.log" " (its cgroup's OOM); ended"
+	echo "ok: under Delegate=yes a build runs in its own cgroup, and its memory is ended by the cgroup"
+else
+	echo "no systemd user scope with Delegate=yes here: step 6 not run"
+fi
+echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ without a kit; ends every process a build leaves and a build past its memory total (measured, or its cgroup under Delegate=yes); the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"

@@ -77,14 +77,39 @@ release at a time, from the release's source (a release carries no
 or clang to wasm32), in a box of the build's own (Linux: Landlock and
 seccomp) that reads the system's programs and libraries, the toolchain
 and the engine's headers and crates, writes its own directory, opens no
-socket and gets no environment of Aitta's; 300 s, 600 s of CPU and 4 GiB
-a process, 512 processes and threads at once (counted in the build's
-user namespace; a kernel before 5.14 counts the uid's across the host),
-two compiles at once, its directory at most 3 GiB and 200000 files
-(measured each second; past either the build ends). Every process the build starts ends
+socket and gets no environment of Aitta's; 300 s, 600 s of CPU and 2 GiB
+of address space a process, 64 processes and threads at once (counted in
+the build's user namespace; a kernel before 5.14 counts the uid's across
+the host), two compiles at once, its directory at most 3 GiB and 200000
+files (measured each second; past either the build ends), and all its
+processes together at most BUILDAT_BUILD_MEMORY_MIB of memory (4096 by
+default). Every process the build starts ends
 with it: the build runs in a PID namespace of its own (an unprivileged
 user namespace); where the host allows none, nothing is built. A crate's dependencies are path ones
-(no network). Built, the release says "web": true and names each .wasm
+(no network).
+
+The build's memory total is held by a cgroup of its own where Aitta's
+cgroup is delegated to it and Aitta is alone in it: Aitta then moves
+itself to <cgroup>/server and makes <cgroup>/build (memory.max the
+total, no swap, pids.max 64, one OOM ending the whole build). Elsewhere
+Aitta's log says "the build's memory: ... measured every 0.1 s": the
+build's own first process sums its processes' memory and ends the build
+past the total, which lags (what the build touches in 0.1 s goes past it)
+and does not count kernel memory. On the real host, run Aitta as a
+systemd service with delegation, which also caps Aitta and its builds
+together:
+
+    [Service]
+    ExecStart=/opt/buildat/bin/buildat_server -m /opt/buildat/apps/aitta -D /var/lib/aitta
+    Environment=BUILDAT_BUILD_MEMORY_MIB=4096
+    Delegate=memory pids
+    MemoryMax=8G
+    MemorySwapMax=0
+    TasksMax=1024
+
+ExecStart must start buildat_server itself (no shell around it): with
+another process in its cgroup Aitta makes no cgroup for the build. Aitta
+says "A build's cgroup: ..." at its start when it made one. Built, the release says "web": true and names each .wasm
 in "web_wasm" ({"<module>.server.wasm" or "<module>.wasm": its sha256});
 a failed build leaves it out of the page, Aitta's log saying why. An
 Aitta not on Linux builds none.
