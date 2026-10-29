@@ -89,7 +89,7 @@ join(){
 serve "$t/p1.log"
 wait_for_log "$t/p1.log" "setup code" 60 || fail "the public server ($t/p1.log)"
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/p1.log" | head -1 | cut -d' ' -f3)
-printf 'wait_log 30000 accounts: ntfy asked\nframes 3\nclick Button "Don'"'"'t add"\nsync 5000\nquit\n' > "$t/a0.cmds"
+printf 'wait_log 30000 accounts: ntfy asked\nframes 3\nclick Button "Don'"'"'t add"\nsync 20000\nquit\n' > "$t/a0.cmds"
 join admin 1 "$code" "$t/a0.log" "$t/a0.cmds"
 cat > "$t/u1.cmds" <<C
 wait_log 60000 join: held:

@@ -62,8 +62,9 @@ join(){
 # of a plain create)
 # The admin's ntfy question answered for good ([ADMIN_NOTIFY]): the
 # question drawn in the frames after its line, and the answer sent before
-# the quit (the server answers it with nothing)
-printf 'wait_log 30000 accounts: ntfy asked\nframes 3\nclick Button "Don'"'"'t add"\nsync 5000\nquit\n' > "$t/a0.cmds"
+# the quit (the server answers it with nothing; the sync waits behind the
+# world's first tick, 8 s under load)
+printf 'wait_log 30000 accounts: ntfy asked\nframes 3\nclick Button "Don'"'"'t add"\nsync 20000\nquit\n' > "$t/a0.cmds"
 join admin 1 "$code" "$t/a0.log" "$t/a0.cmds" || fail "the admin's account ($t/a0.log)"
 grep -aq "Joined as admin" "$t/a0.log" || fail "the admin's account ($t/a0.log)"
 
