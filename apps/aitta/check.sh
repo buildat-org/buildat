@@ -91,18 +91,20 @@ assert r["manifest"]["colour"] == "blue", r' ||
 # refuses a kind it does not know, so the archive is zipped and signed
 # here (the .sig as write_signed() makes it) and sent by publish, which
 # checks nothing: taken, listed as "other", the manifest passed on whole
-manifest tester 1.4.0 MIT ' "kind": "warp", "warp_speed": 9,'
-python3 - "$t/app" "$t/key" "$t/raw/tester-demo-1.4.0" <<'PY' || fail "the raw release"
+rawsign(){ # app key base [empty entries added]
+python3 - "$@" <<'PY'
 import hashlib, io, json, os, sys, zipfile
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
-app, keyfile, base = sys.argv[1:]
+app, keyfile, base = sys.argv[1:4]
 z = io.BytesIO()
 with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as f:
     for d, _, names in os.walk(app):
         for n in names:
             p = os.path.join(d, n)
             f.write(p, os.path.relpath(p, app))
+    for i in range(int(sys.argv[4]) if len(sys.argv) > 4 else 0):
+        f.writestr("pad/%d" % i, "", zipfile.ZIP_STORED)
 z = z.getvalue()
 k = ec.derive_private_key(int(open(keyfile).read().split()[1], 16), ec.SECP256R1())
 sha = hashlib.sha256(z).hexdigest()
@@ -115,6 +117,9 @@ open(base + ".zip", "wb").write(z)
 open(base + ".sig", "w").write(json.dumps({"format": "aitta-release-1",
         "sha256": sha, "key": pub, "signature": sig}) + "\n")
 PY
+}
+manifest tester 1.4.0 MIT ' "kind": "warp", "warp_speed": 9,'
+rawsign "$t/app" "$t/key" "$t/raw/tester-demo-1.4.0" || fail "the raw release"
 out=$("$b" aitta publish "$t/raw/tester-demo-1.4.0.zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "listed: tester/demo/1.4.0" || fail "publish 1.4.0 (kind warp): $out"
 curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json,sys
@@ -129,6 +134,35 @@ manifest tester 1.5.0 MIT " \"pad\": \"$(head -c 17000 /dev/zero | tr '\0' x)\",
 zip=$("$b" aitta pack "$t/app" "$t/key" "$t/out" 2>/dev/null) || fail "pack 1.5.0"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "more than 16 KiB" || fail "a 17 KB manifest: $out"
+
+# [AITTA_UPLOAD_FILES] An app of 25000 empty files is refused from the
+# archive's directory: nothing of it unpacked in Aitta's tmp
+manifest tester 1.8.0 MIT
+rawsign "$t/app" "$t/key" "$t/raw/tester-demo-1.8.0" 25000 || fail "the padded release"
+# By curl, each piece from a network of its own (127.0.<n>.1): its ~40
+# pieces would pass a network's uploads a minute
+psha=$(sha256sum "$t/raw/tester-demo-1.8.0.zip" | cut -d' ' -f1)
+u="http://127.0.0.1:$P/api/v1/aitta"
+post(){ # net body url
+	curl -s --interface 127.0.$1.1 -H 'Content-Type: application/octet-stream' \
+		--data-binary @"$2" "$u/$3"
+}
+post 1 "$t/raw/tester-demo-1.8.0.sig" \
+	"upload_begin?size=$(stat -c %s "$t/raw/tester-demo-1.8.0.zip")" > /dev/null
+mkdir "$t/pieces"
+split -b 60000 -a 3 -d "$t/raw/tester-demo-1.8.0.zip" "$t/pieces/"
+n=2; at=0
+for f in "$t/pieces/"*; do
+	post $n "$f" "upload_part?sha256=$psha&offset=$at" | grep -q '"ok":true' ||
+		fail "piece $n of the padded release"
+	n=$((n + 1)); at=$((at + $(stat -c %s "$f")))
+done
+: > "$t/empty"
+out=$(post $n "$t/empty" "upload_end?sha256=$psha")
+echo "$out" | grep -q "files; a release has 20000 at most" ||
+	fail "an app of 25000 files: $out"
+[ ! -e "$BUILDAT_CACHE_PATH/apps/aitta/tmp/$psha" ] ||
+	fail "the refused archive was unpacked into Aitta's tmp"
 
 # 3. A licence not taken; an author not the key's
 manifest tester 1.1.0 Proprietary
@@ -169,4 +203,4 @@ sys.exit(0 if any(r["version"] == "1.0.0" for r in json.load(sys.stdin)["release
 curl -s $(for i in $(seq 490); do echo "http://127.0.0.1:$P/api/v1/aitta/info"; done) |
 	grep -q "too many requests from your network" ||
 	fail "490 reads in a row were not limited"
-echo "PASS: bound, published, listed, installed; a newer key kept; an unbound key, a licence, another author refused; delisted; reads limited"
+echo "PASS: bound, published, listed, installed; a newer key kept; an unbound key, an app of 25000 files, a licence, another author refused; delisted; reads limited"

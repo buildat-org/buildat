@@ -101,6 +101,10 @@ static const int UPLOADS_A_MINUTE = 30;
 // [SECURITY_RUN_5] A release's meta.json, kept whole in its record and
 // handed out by list and release: Starport keeps 4 KB of unknown keys
 static const size_t MANIFEST_MAX = 16 * 1024;
+// [AITTA_UPLOAD_FILES] The entries an upload's archive may hold, of any
+// kind, counted from its directory before one is written: a world's cap,
+// far past any app here (skeldat's ~150)
+static const size_t FILES_MAX = interface::aitta::WORLD_FILES_MAX;
 // [AITTA_BUILD_QUEUE] An author's releases waiting to be built for the
 // page at once (builds are one at a time, up to 300 s each); a publish
 // past it is refused. simplified: by author, and an account binds one,
@@ -1407,6 +1411,19 @@ struct Module: public interface::Module, public moderation::Host
 				(uint64_t)max.as_number() : (uint64_t)50 * 1000 * 1000);
 	}
 
+	// An upload unpacked into dir: no more than FILES_MAX entries nor
+	// unpacked_max() bytes, both read from the archive's directory before
+	// anything is written. Throws why not.
+	void unpack_upload(const ss_ &zip, const ss_ &dir)
+	{
+		const size_t n = interface::zip_list(zip).size();
+		if(n > FILES_MAX)
+			throw Exception(itos((int64_t)n)+" files; a release has "+
+					itos((int64_t)FILES_MAX)+" at most");
+		interface::fs::create_directories(dir);
+		interface::zip_extract(zip, dir, unpacked_max());
+	}
+
 	// [WEB_LOCAL_AITTA] Whether a release can run in the page, with a server
 	// of the engine's own builtins in the page and its modules' .wasm,
 	// which this Aitta builds: "" or why not. An app, not a variant, whose
@@ -1511,10 +1528,8 @@ struct Module: public interface::Module, public moderation::Host
 		m_web_names.clear();
 		m_web_cpp = false;
 		interface::fs::remove_all(m_web_job);
-		interface::fs::create_directories(m_web_job+"/src");
 		try {
-			interface::zip_extract(m_archives+"/"+sha+".zip", m_web_job+"/src",
-					unpacked_max());
+			unpack_upload(m_archives+"/"+sha+".zip", m_web_job+"/src");
 		} catch(std::exception &e){
 			log_w(MODULE, "web build of %s: %s", cs(m_web_id), e.what());
 			return web_done(false);
@@ -1789,8 +1804,7 @@ struct Module: public interface::Module, public moderation::Host
 			return refuse(r, "cannot store the archive");
 		json::Value m;
 		try {
-			interface::fs::create_directories(dir);
-			interface::zip_extract(zip, dir, unpacked_max());
+			unpack_upload(zip, dir);
 			// The manifest is kept whole and handed out in every list: a
 			// manifest's size, not the archive's
 			const ss_ mt = read_file(dir+"/meta.json");
@@ -1798,12 +1812,6 @@ struct Module: public interface::Module, public moderation::Host
 				throw Exception("meta.json: more than "+
 						itos((int64_t)MANIFEST_MAX / 1024)+" KiB");
 			m = json::load_string(mt.c_str());
-			// [WORLD_PACKAGES] A world of no more files than a client takes
-			if(interface::aitta::kind_of(m) == "world" &&
-					interface::zip_list(zip).size() >
-					interface::aitta::WORLD_FILES_MAX)
-				throw Exception("a world of more than "+itos((int64_t)
-						interface::aitta::WORLD_FILES_MAX)+" files");
 		} catch(std::exception &e){
 			interface::fs::remove_all(dir);
 			interface::fs::remove_all(zip);
@@ -1976,8 +1984,7 @@ struct Module: public interface::Module, public moderation::Host
 		try {
 			if(!write_file(zip, u.data))
 				throw Exception("cannot store it");
-			interface::fs::create_directories(dir);
-			interface::zip_extract(zip, dir, unpacked_max());
+			unpack_upload(zip, dir);
 			p = json::load_string(read_file(dir+"/page.json").c_str());
 			// The names check_page() takes: none leaves the directory
 			const json::Value &sl = p.get("screenshots");
