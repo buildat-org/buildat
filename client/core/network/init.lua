@@ -938,6 +938,31 @@ local function http_start(url, cb, body)
 	end
 end
 
+-- **The built-in default hosts** ([LIVELY_MENU], user, 2026-10-29): the
+-- default Starport, Aitta and Hearth (client/core/starport sets them)
+-- count as accepted for the client's own fetches ("" asking) while it is
+-- on no server -- the launcher's Home, Apps from Aitta -- so a fresh user
+-- sees what is going on without a dialog. A host the managed file names
+-- or the user typed is asked about as before, and a server's code, which
+-- runs only while the client is on its server, gets nothing from this.
+local default_origins = {}
+function M.set_default_hosts(urls)
+	default_origins = {}
+	for _, u in ipairs(urls) do
+		local origin = tostring(u):match("^(https?://[^/?#]+)")
+		if origin then default_origins[origin] = true end
+	end
+end
+local function by_default(server, uri)
+	return server == "" and default_origins[uri] == true and
+			__buildat_server_address() == nil
+end
+-- Whether a url's host is a default one that counts as accepted now
+function M.is_default_host(url)
+	local origin = tostring(url):match("^(https?://[^/?#]+)")
+	return origin ~= nil and by_default("", origin)
+end
+
 -- The user's leave for the url's host, then the fetch: a GET, or with a
 -- body a POST of JSON
 local function gated_http(server, url, cb, options, body, hops)
@@ -968,6 +993,10 @@ local function gated_http(server, url, cb, options, body, hops)
 			return user_cb(nil, "a redirect to "..to.." is not followed")
 		end
 		gated_http(server, to, user_cb, options, nil, (hops or 0) + 1)
+	end
+	if by_default(server, uri) then
+		http_start(url, cb, body)
+		return
 	end
 	local entry = load_store()[key(server, uri)]
 	if entry and entry.accepted and

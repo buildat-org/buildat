@@ -38,6 +38,13 @@ export BUILDAT_LUANTI_SELFCHECKS=1
 [ -n "${BUILDAT_CI:-}" ] && export \
 	BUILDAT_SERVERLIST_URL="${BUILDAT_SERVERLIST_URL:-http://127.0.0.1:9}" \
 	BUILDAT_LUANTI_LIST="${BUILDAT_LUANTI_LIST:-http://127.0.0.1:9}"
+# The client's default Starport, Aitta and Hearth, which count as accepted
+# for its own fetches ([LIVELY_MENU]), and the servers' default Starport:
+# a closed loopback port unless a runner serves its own, so no check
+# reaches the public ones
+export BUILDAT_STARPORT_DEFAULT="${BUILDAT_STARPORT_DEFAULT:-https://127.0.0.1:9}" \
+	BUILDAT_AITTA_DEFAULT="${BUILDAT_AITTA_DEFAULT:-https://127.0.0.1:9}" \
+	BUILDAT_HEARTH_DEFAULT="${BUILDAT_HEARTH_DEFAULT:-https://127.0.0.1:9}"
 # The Luanti games and textures the checks play, from the desk's user path:
 # hard links, so nothing is copied and a boxed server (Landlock is by path)
 # can read them, which it could not through a symlink out of its user path.

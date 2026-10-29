@@ -18,6 +18,11 @@
 #      thread and its posts; a click on the thread opens it on the Hearth.
 #   5. A launcher whose settings name no Hearth ("hearth": "") and whose
 #      hosts are not accepted: no strip, and nothing asked.
+#   5b. A fresh launcher whose built-in defaults (BUILDAT_STARPORT_DEFAULT,
+#      _AITTA_, _HEARTH_DEFAULT) are the local ones: the whole strip with
+#      no host accepted and no dialog. With the Hearth and the Aitta named
+#      in its settings by another name (localhost), not a default: no
+#      strip, and Apps from Aitta asks about that Aitta.
 #   6. The web launcher (apps/play's page, headless Chrome) with the same
 #      settings: the same strip; the package's row opens Apps from Aitta
 #      with its thread; the announcement's row joins the Hearth at it.
@@ -167,6 +172,26 @@ run_client 60 "$t/none.log" timeout 60 bin/buildat \
 grep -aq "launch_menu: now:" "$t/none.log" && fail "a strip with nothing accepted"
 grep -aq "Asking the user about" "$t/none.log" && fail "a permission dialog on Home"
 grep -aq "hearth feed:" "$t/none.log" && fail "a feed fetched with no Hearth set"
+
+# 5b.
+printf '%s\n' "wait_log_any 30000 $now_line" quit > "$t/def.cmds"
+run_client 60 "$t/def.log" env BUILDAT_STARPORT_DEFAULT=$F BUILDAT_AITTA_DEFAULT=$F \
+	BUILDAT_HEARTH_DEFAULT=$H timeout 60 bin/buildat -o launch_ui=launch_menu \
+	-D "$t/cl_def" -C "$t/cl_def.cache" -w 1000x700 -l 3 -o sound_mute=1 \
+	-c @"$t/def.cmds" || fail "the strip from the defaults ($t/def.log)"
+grep -aq "Asking the user about" "$t/def.log" && fail "a dialog for a default host"
+mkdir -p "$t/cl_other"
+FL=${F/127.0.0.1/localhost}
+printf '{"starports": [], "aittas": ["%s"], "hearth": "%s"}\n' "$FL" \
+	"${H/127.0.0.1/localhost}" > "$t/cl_other/starport.json"
+printf '%s\n' 'wait_log_any 30000 rows in' 'text apps from aitta' \
+	'wait_log 10000 rows for "apps from aitta" in' 'keypress Return' \
+	"wait_log 10000 Asking the user about $FL" quit > "$t/other.cmds"
+run_client 60 "$t/other.log" env BUILDAT_STARPORT_DEFAULT=$F BUILDAT_AITTA_DEFAULT=$F \
+	BUILDAT_HEARTH_DEFAULT=$H timeout 60 bin/buildat -o launch_ui=launch_menu \
+	-D "$t/cl_other" -C "$t/cl_other.cache" -w 1000x700 -l 3 -o sound_mute=1 \
+	-c @"$t/other.cmds" || fail "a host not a default was not asked about ($t/other.log)"
+grep -aq "launch_menu: now:" "$t/other.log" && fail "a strip from hosts not accepted"
 
 # 6.
 if [ ! -s "$here/web/buildat.data" ]; then

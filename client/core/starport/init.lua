@@ -27,11 +27,22 @@ local rgb = require("buildat/extension/ui_utils").safe.rgb
 local group = dofile(__buildat_extension_path("starport") .. "/group.lua")
 local M = {safe = {}}
 
-local DEFAULT_STARPORT = "https://starport.buildat.org"
+-- The defaults, each overridden by an environment variable (a check's
+-- local ones), and accepted for the client's own fetches off a server
+-- ([LIVELY_MENU]: network.set_default_hosts)
+local function default(env, url)
+	local v = buildat.get_env(env)
+	return v and v:match("^https?://[%w%.%-%[%]:]+$") or url
+end
+local DEFAULT_STARPORT = default("BUILDAT_STARPORT_DEFAULT",
+		"https://starport.buildat.org")
 -- [AITTA_MVP]: the registry of apps this client browses
-local DEFAULT_AITTA = "https://aitta.buildat.org"
+local DEFAULT_AITTA = default("BUILDAT_AITTA_DEFAULT",
+		"https://aitta.buildat.org")
 -- [LIVELY_MENU]: the Hearth whose feed the launcher's "now" strip reads
-local DEFAULT_HEARTH = "https://hearth.buildat.org"
+local DEFAULT_HEARTH = default("BUILDAT_HEARTH_DEFAULT",
+		"https://hearth.buildat.org")
+network.set_default_hosts({DEFAULT_STARPORT, DEFAULT_AITTA, DEFAULT_HEARTH})
 local STATE_PATH = __buildat_get_path("user") .. "/starport.json"
 local EXPORT_PATH = __buildat_get_path("user") .. "/starport_keys.json"
 local STYLE = "own:ui_utils/res/style.xml"
@@ -463,6 +474,9 @@ end
 -- `fresh`: and not asked again at the next request (network's
 -- ACCEPTANCE_VALID_S, a week)
 local function accepted(url, fresh)
+	if network.is_default_host(url) then
+		return true
+	end
 	local origin = url:match("^(https?://[^/]+)")
 	for _, a in ipairs(network.known_addresses()) do
 		if a.uri == origin and a.accepted and (not fresh or
