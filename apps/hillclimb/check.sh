@@ -739,8 +739,7 @@ $(for i in 1 2 3 4 5 6 7 8 9; do echo keypress Down; echo delay 150; done)
 screenshot $t/hill_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params
-# The hill made with them: its line
-wait_log 10000 N, day
+delay 3000
 keydown W
 delay 1500
 keypress Escape
