@@ -28,8 +28,6 @@ end
 -- This instance has every accounts packet from here on: the join was
 -- main/join.lua's, before the world
 accounts.logged_in = true
--- The join's hello went to join.lua's copy; this one's My account reads it
-buildat.send_packet("accounts:get_hello", "")
 -- The chat console ([CHAT_CONSOLE]): Luanti's chat, what came before this
 -- script and all that comes after
 for _, line in ipairs(luanti.chat_lines or {}) do

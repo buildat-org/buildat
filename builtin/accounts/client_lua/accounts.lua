@@ -669,10 +669,16 @@ end)
 -- its menus and marks it logged in; a packet goes to whichever subscribed
 -- last, and when the server ran the game's script after the join's, that
 -- instance took the hello and drew no login page
+local hello_asked, hello_redraw = false, nil
 local function on_hello(data)
 	M.hello = cereal.binary_input(data, HELLO)
 	if draw_sidebar then
 		draw_sidebar()
+	end
+	if hello_redraw then
+		local redraw = hello_redraw
+		hello_redraw = nil
+		pcall(redraw)
 	end
 	log:info("hello: Starport IDs " ..
 			(M.hello.starport == 1 and "taken" or "not taken"))
@@ -751,6 +757,19 @@ local function on_hello(data)
 	else
 		show_login(nil)
 	end
+end
+
+-- **A game's instance asks for its own hello** ([SKELDAT_STARPORT_SETTINGS]):
+-- the one a game marked logged in takes the hello when its Server rows
+-- are first drawn, the join done by then. It had none: the Server
+-- window had no Starport entries, the settings no Open to LAN
+local function ask_hello()
+	if hello_asked or not M.logged_in then
+		return
+	end
+	hello_asked = true
+	buildat.sub_packet("accounts:hello", on_hello)
+	buildat.send_packet("accounts:get_hello", "")
 end
 
 local function on_login_result(data)
@@ -1180,6 +1199,10 @@ end
 -- LAN for the owner, and the Server window, which comes back to it
 buildat.add_game_settings_section("accounts", {title = "Server",
 		draw = function(w, ui)
+	ask_hello()
+	if not M.hello.version then
+		hello_redraw = ui.redraw
+	end
 	if M.hello and M.hello["local"] == 1 then
 		M.lan_row(w)
 	end
@@ -3056,11 +3079,13 @@ draw_sidebar = function()
 		return
 	end
 	sw.sidebar:RemoveAllChildren()
+	local labels = {}
 	for _, sec in ipairs(server_entries()) do
 		if sec.header then
 			page_text(sw.sidebar, sec.header, DIM)
 		end
 		for _, e in ipairs(sec.items) do
+			labels[#labels + 1] = e.label
 			local count = tonumber(e.count) or 0
 			side_button((e.key == sw.current and "> " or "") .. e.label ..
 					(count > 0 and " (" .. count .. ")" or ""),
@@ -3068,6 +3093,12 @@ draw_sidebar = function()
 				M.server_show(e.key)
 			end)
 		end
+	end
+	-- For a check: the scan does not see this window
+	labels = table.concat(labels, ", ")
+	if labels ~= sw.labels_logged then
+		sw.labels_logged = labels
+		log:info("server window: the sidebar " .. labels)
 	end
 	-- [SERVER_VERSION]: the server's Buildat and this client's, read-only
 	-- fields to copy into a ticket
@@ -3241,6 +3272,7 @@ function M.server_window(key, on_close, on_exit)
 		b:SetPosition(0, 0)
 		sw.backdrop = b
 	end
+	ask_hello()
 	if not M.users and not M.list_asked then
 		M.list_asked = true
 		M.admin("list")
@@ -3566,6 +3598,7 @@ end
 -- The join: the server's hello brings the dialog, or the scripted login
 function M.start(o)
 	opts = o or {}
+	hello_asked = true
 	buildat.sub_packet("accounts:hello", on_hello)
 	buildat.sub_packet("accounts:login_result", on_login_result)
 	buildat.send_packet("accounts:get_hello", "")
