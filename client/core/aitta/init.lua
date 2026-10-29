@@ -711,7 +711,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		network.http_get(rel.aitta .. "/api/v1/aitta/release?id=" .. id,
 				function(body)
 			local v = body and network.parse_json(body)
-			if selected == p and type(v) == "table" and
+			if selected == p and is_open(root) and type(v) == "table" and
 					type(v.changelog) == "string" and v.changelog ~= "" then
 				changelog:SetText("Changes:\n" .. v.changelog)
 				pview:fit()
@@ -880,7 +880,9 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 						"the answer was not a list" or err)
 			end
 			waiting = waiting - 1
-			if waiting == 0 then
+			-- The page closed or replaced while it fetched: its list is
+			-- gone
+			if waiting == 0 and is_open(root) then
 				show_all()
 			end
 		end, {description = "Aitta (app list)"})
