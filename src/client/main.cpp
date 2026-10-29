@@ -16,6 +16,8 @@
 #include <cstdio> // sscanf()
 #include <cstdlib> // srand()
 #include <fstream>
+#include <thread> // the Aitta publish's wait
+#include <chrono>
 #include <sstream>
 #include <signal.h>
 #include <malloc.h> // mallopt(), M_PERTURB
@@ -98,8 +100,8 @@ static int aitta_main(int argc, char *argv[])
 		}
 		if(!zip_path.empty()){
 			// The release to an Aitta: its .sig first, which says who
-			// signed what, then the archive in pieces under the server's
-			// 64 KiB POST limit
+			// signed what, then the archive in the pieces its upload_begin
+			// names; a refusal for the Aitta's rate waits and sends again
 			const ss_ sig_path =
 					interface::fs::strip_file_extension(zip_path)+".sig";
 			ss_ base = aitta;
@@ -122,16 +124,25 @@ static int aitta_main(int argc, char *argv[])
 			const ss_ sha = sigv.get("sha256").is_string() ?
 					sigv.get("sha256").as_string() : "";
 			auto call = [&](const ss_ &url, const ss_ &body, const char *type){
-				const ss_ out = interface::http_post(url, body, type);
-				const json::Value v = json::load_string(out.c_str(), &e);
+				ss_ out = interface::http_post(url, body, type);
+				json::Value v = json::load_string(out.c_str(), &e);
+				while(v.get("error").is_string() && v.get("error").as_string().find(
+						"too many requests") != ss_::npos){
+					printf("waiting for the Aitta's limit on uploads a minute\n");
+					std::this_thread::sleep_for(std::chrono::seconds(5));
+					out = interface::http_post(url, body, type);
+					v = json::load_string(out.c_str(), &e);
+				}
 				if(!v.get("ok").is_true())
 					throw Exception(v.get("error").is_string() ?
 							v.get("error").as_string() : "Aitta said: "+out);
 				return v;
 			};
-			call(base+"upload_begin?size="+itos((int64_t)zip.size()), sig,
-					"application/json");
-			const size_t piece = 60000;
+			const json::Value begun = call(base+"upload_begin?size="+
+					itos((int64_t)zip.size()), sig, "application/json");
+			const size_t piece = begun.get("piece").is_number() &&
+					begun.get("piece").as_number() > 0 ?
+					(size_t)begun.get("piece").as_number() : 60000;
 			for(size_t at = 0; at < zip.size(); at += piece)
 				call(base+"upload_part?sha256="+sha+"&offset="+itos((int64_t)at),
 						zip.substr(at, piece), "application/octet-stream");

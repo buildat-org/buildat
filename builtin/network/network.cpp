@@ -447,8 +447,9 @@ namespace web {
 // limit, and so does a native client older than [WEB_CLIENT], which never
 // speaks first.
 static const size_t MAX_REQUEST_BYTES = 8 * 1024;
-// An app's POST body ([STARPORT])
-static const size_t MAX_API_BODY = 64 * 1024;
+// An app's POST body ([STARPORT]); Aitta's upload pieces are 300000 bytes
+// at most (its PIECE)
+static const size_t MAX_API_BODY = 320 * 1024;
 // A request that does not arrive, or a response nobody reads
 static const int64_t HTTP_STALL_US = 10000000;
 static const size_t MAX_FRAME_BYTES = 16 * 1024 * 1024;

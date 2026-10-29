@@ -30,7 +30,9 @@
 //   POST upload_begin?size=N        body: the release's .sig. Its key must
 //                                   be bound to an author, and the
 //                                   signature good for the hash it names.
-//   POST upload_part?sha256=&offset=  body: the next bytes, 60000 at most
+//                                   Answers {ok, piece}: the bytes a part
+//                                   may carry (none: 60000, an older Aitta)
+//   POST upload_part?sha256=&offset=  body: the next bytes, piece at most
 //   POST upload_end?sha256=         the checks, and the listing
 //   POST report                     {release, reason, text, key}: a
 //                                   report, its receipt; or the package
@@ -98,6 +100,9 @@ static int64_t now_s(){ return interface::os::wall_us() / 1000000; }
 // simplified: per network; many networks get many times it
 static const int READS_A_MINUTE = 240;
 static const int UPLOADS_A_MINUTE = 30;
+// An upload's piece: under network's MAX_API_BODY. At the rate above, 9 MB
+// a minute; a client refused for the rate waits and sends it again
+static const int PIECE = 300000;
 // [SECURITY_RUN_5] A release's meta.json, kept whole in its record and
 // handed out by list and release: Starport keeps 4 KB of unknown keys
 static const size_t MANIFEST_MAX = 16 * 1024;
@@ -1385,7 +1390,10 @@ struct Module: public interface::Module, public moderation::Host
 		u.author = author;
 		u.size = (size_t)size;
 		u.started = now_s();
-		ok(r);
+		json::Value v = json::object();
+		v.set("ok", true);
+		v.set("piece", (int64_t)PIECE);
+		respond(r, v);
 	}
 
 	void http_upload_part(const network::HttpRequest &r)
@@ -1397,6 +1405,8 @@ struct Module: public interface::Module, public moderation::Host
 		if((size_t)atoll(r.param("offset").c_str()) != u.data.size())
 			return refuse(r, "the next piece is at offset "+
 					itos((int64_t)u.data.size()));
+		if(r.body.size() > (size_t)PIECE)
+			return refuse(r, "a piece is "+itos((int64_t)PIECE)+" bytes at most");
 		if(u.data.size() + r.body.size() > u.size)
 			return refuse(r, "more than the size given");
 		u.data += r.body;

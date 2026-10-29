@@ -47,7 +47,7 @@ local FIELDS = {
 	{"icon", "Icon (PNG)", "edit"},
 	{"screenshot", "Screenshot", "edit"},
 }
-local PIECE = 60000
+local PIECE = 60000 -- an Aitta that does not say its piece
 
 -- What the screen remembers between its pages and visits
 local st = {selected = nil, aitta = nil, info = {}, result = nil}
@@ -351,9 +351,23 @@ local function ask_info(url, pub, done)
 	end, {description = "Aitta (publishing)"})
 end
 
+-- After s seconds, f, on a frame
+local function after(s, f)
+	local t, sub = buildat.get_time_us() + s * 1000000
+	sub = magic.SubscribeToEvent("Update", function()
+		if buildat.get_time_us() >= t then
+			require("buildat/core/urho3d").unsafe.UnsubscribeFromEvent("Update", sub)
+			f()
+		end
+	end)
+end
+
 -- The release up: its .sig, which says who signed what, then the archive
--- in pieces under the server's 64 KiB POST limit (`aitta publish`'s)
-local function upload(url, zip_path, done)
+-- in the pieces upload_begin names (`aitta publish`'s). A refusal for the
+-- Aitta's uploads a minute waits 5 s and sends the same again: a big
+-- release takes the time the Aitta wants. progress(fraction, waiting) as
+-- it goes, when given.
+local function upload(url, zip_path, done, progress)
 	local function read(path)
 		local f = io.open(path, "rb")
 		if not f then
@@ -369,11 +383,20 @@ local function upload(url, zip_path, done)
 		return done(nil, "cannot read " .. zip_path)
 	end
 	local base = url .. "/api/v1/aitta/"
+	local sent, piece = 0, PIECE
 	local function call(what, body, next_step)
 		network.http_post(base .. what, body, function(got, err)
 			local v = got and network.parse_json(got)
 			if type(v) ~= "table" then
 				return done(nil, tostring(err or "the Aitta's answer was not JSON"))
+			end
+			if not v.ok and tostring(v.error):find("too many requests", 1, true) then
+				log:info("aitta publish: waiting for the Aitta's rate at " ..
+						sent .. " of " .. #zip .. " bytes")
+				if progress then
+					progress(sent / #zip, true)
+				end
+				return after(5, function() call(what, body, next_step) end)
 			end
 			if not v.ok then
 				return done(nil, tostring(v.error))
@@ -383,15 +406,22 @@ local function upload(url, zip_path, done)
 	end
 	local sha = tostring(sv.sha256)
 	local function part(at)
+		sent = at
+		if progress then
+			progress(at / #zip, false)
+		end
 		if at >= #zip then
 			return call("upload_end?sha256=" .. sha, "", function(v)
 				done(tostring(v.result), nil, v.warning and tostring(v.warning))
 			end)
 		end
 		call("upload_part?sha256=" .. sha .. "&offset=" .. at,
-				zip:sub(at + 1, at + PIECE), function() part(at + PIECE) end)
+				zip:sub(at + 1, at + piece), function() part(at + piece) end)
 	end
-	call("upload_begin?size=" .. #zip, sig, function() part(0) end)
+	call("upload_begin?size=" .. #zip, sig, function(v)
+		piece = tonumber(v.piece) or PIECE
+		part(0)
+	end)
 end
 
 -- **Page 2: the key, the Aitta, the publish**
@@ -548,6 +578,10 @@ page_publish = function(message)
 			end
 			uistack.main:pop(root)
 			page_publish()
+		end, function(f, waiting)
+			result.text = "Packed " .. zip .. "; uploading to " .. url .. ": " ..
+					math.floor(f * 100) .. " %" .. (waiting and
+					", waiting for the Aitta's limit on uploads a minute" or "")
 		end)
 	end, pub ~= nil, true)
 	if st.raise and not st.result_ok then
