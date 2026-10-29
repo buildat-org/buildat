@@ -31,6 +31,7 @@
 // little-endian, so a word is one load. A packet, a stored value and a
 // call's input and output are the module's own bytes.
 #include "server/wasm_module.h"
+#include "interface/wasm_box.h"
 #include "server/wasm_imports.h"
 #include "wasm/engine.h"
 #include "interface/module.h"
@@ -1133,6 +1134,101 @@ interface::Module* create_wasm_module(interface::Server *server,
 	if(!m->prepare(os.str(), why))
 		return nullptr;
 	return m.release();
+}
+
+// [KIT] A module's own .wasm: the every-module imports, call_input and
+// call_output being the box's input and output bytes
+struct BoxEngine: public Engine
+{
+	interface::WasmBox *box = nullptr;
+	uint32_t import_body(uint32_t which, const uint32_t *a, ss_ &why)
+	{
+		switch(which){
+		case WI_LOG: {
+			uint8_t buf[MAX_LOG];
+			const size_t n = std::min<size_t>(a[1], MAX_LOG);
+			if(!copy_in(a[0], n, buf)){
+				why = "past the module's memory";
+				return 0;
+			}
+			log_line(buf, n);
+			return 0;
+		}
+		case WI_TIME_MS:
+			return (uint32_t)std::chrono::duration_cast<
+					std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+					loaded).count();
+		case WI_CALL_INPUT:
+			// The whole input when it fits in cap, else nothing; its length
+			if(box->input.size() <= a[1] && !copy_out(a[0], box->input.data(),
+					box->input.size())){
+				why = "past the module's memory";
+				return 0;
+			}
+			return (uint32_t)box->input.size();
+		case WI_CALL_OUTPUT: {
+			if(box->output.size() + a[1] > MAX_CALL_BYTES){
+				why = "an output past "+itos(MAX_CALL_BYTES)+" bytes";
+				return 0;
+			}
+			const size_t at = box->output.size();
+			box->output.resize(at + a[1]);
+			if(!copy_in(a[0], a[1], &box->output[at])){
+				box->output.resize(at);
+				why = "past the module's memory";
+			}
+			return 0;
+		}
+		}
+		why = "not a box's";
+		return 0;
+	}
+};
+
+struct Box: public interface::WasmBox
+{
+	BoxEngine e;
+	ss_ call(const ss_ &name, uint32_t *result)
+	{
+		*result = 0;
+		const size_t i = e.find_export(name);
+		if(i == e.exports.size() || !e.exports[i].params.empty())
+			return "no export "+name+" taking nothing";
+		if(e.state != Engine::READY)
+			return "not running: "+e.error;
+		uint64_t r = 0;
+		const ss_ trap = e.call(i, nullptr, &r);
+		*result = (uint32_t)r;
+		return trap;
+	}
+	int64_t budget(){ return e.budget(); }
+	void set_call_budget(int64_t units){ e.call_budget = units; }
+	int64_t meter_left(){ return e.meter_left(); }
+	void poll(){ e.poll(); }
+	ss_ engine_name(){ return e.engine_name(); }
+};
+
+interface::WasmBox* create_wasm_box(const ss_ &name, const ss_ &bytes,
+		const ss_ &cache_root, ss_ &why)
+{
+	set_server_imports();
+	up_<Box> b(new Box());
+	b->e.box = b.get();
+	b->e.name = name;
+	b->e.cache_root = cache_root;
+	b->e.refuse_import = [](size_t which) -> ss_ {
+		return which == WI_LOG || which == WI_TIME_MS ||
+				which == WI_CALL_INPUT || which == WI_CALL_OUTPUT ? "" :
+				"not one a module's own .wasm has";
+	};
+	if(!b->e.prepare(bytes, why))
+		return nullptr;
+	b->e.start();
+	if(b->e.state == Engine::FAILED){
+		why = b->e.error;
+		return nullptr;
+	}
+	return b.release();
 }
 
 }

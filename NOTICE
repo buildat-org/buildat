@@ -67,6 +67,12 @@ WABT 1.0.42 -- 3rdparty/wabt (the binary reader and writer, the validator,
   It carries PicoSHA2, Copyright (c) 2017 okdshin. MIT.
   Full text: 3rdparty/wabt/third_party/picosha2/LICENSE
 
+Lua 5.1.5 -- builtin/kit/box/lua (a copy of Urho3D's, built into Kit's
+  server .wasm; its luaconf.h, ldo.c and lparser.c changed there, marked
+  [KIT])
+  Copyright (C) 1994-2012 Lua.org, PUC-Rio. MIT.
+  Full text: builtin/kit/box/lua/COPYRIGHT
+
 c55lib -- 3rdparty/c55lib
   Copyright 2014 Perttu Ahola <celeron55@gmail.com>. Apache-2.0, the same
   terms as Buildat; it lives under 3rdparty because it is maintained apart.
