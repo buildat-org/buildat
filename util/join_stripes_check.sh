@@ -15,7 +15,7 @@
 #   3. the floorplanner's join: the screen closes, nobody took it;
 #   4. the web page in Chrome over 2.5 MB/s, as a desktop (1200x800) and
 #      as a phone (400x800 at 2, a finger): the page's stripes count
-#      buildat.wasm and buildat.data in MB (the two at once, the one that
+#      buildat[_mt].wasm and .data in MB (the two at once, the one that
 #      moved last said), the line fits the width,
 #      and they are where the client's join screen has its (a pixel and
 #      a font's rendering apart), in the same colours.
@@ -108,9 +108,12 @@ PY
 # 4: the page over 20 Mbit/s, the server's own port behind it
 kill "$SERVER_PID"
 FAST=$(free_port)
-# --delay is the link's latency, not a wait; then a poll for its port
+# --delay is the link's latency, not a wait; then a poll for its port.
+# The join's screen closes at the login's page ([GUEST_NAME_REUSE]), a
+# quarter second after it opened with no latency: 150 ms each way keeps
+# it up for the shot taken at its line
 python3 "$here/util/netsim.py" --listen "$FAST" --to "127.0.0.1:$VPORT" \
-	--delay 0 --rate 20000 > "$t/netsim_fast.log" 2>&1 &
+	--delay 150 --rate 20000 > "$t/netsim_fast.log" 2>&1 &
 CHECK_PIDS+=($!)
 for _ in $(seq 25); do port_taken "$FAST" && break; sleep 0.2; done
 port_taken "$FAST" || fail "netsim did not listen ($t/netsim_fast.log)"
@@ -151,8 +154,9 @@ for name in ("desktop", "phone"):
              open("%s/%s.txt" % (t, name), errors="replace") if "eval: " in l]
     for e in evals:
         print("%s: %s" % (name, e))
-    named.update(n for e in evals for n in ("buildat.wasm", "buildat.data")
-            if n in e and " MB" in e)
+    # The client with threads (buildat_mt) where the page is isolated
+    named.update(m.group(1) for e in evals if " MB" in e
+            for m in [re.search(r"buildat(?:_mt)?\.(wasm|data) ", e)] if m)
     counts = [tuple(map(float, m.groups())) for m in
               (re.search(r"([\d.]+) of ([\d.]+) MB", e) for e in evals) if m]
     assert any(a < b for a, b in counts), "nothing counted up: %s" % counts
@@ -171,7 +175,7 @@ for name in ("desktop", "phone"):
     for (a0, b0), (a1, b1) in zip(page, eng):
         assert abs(a0 - a1) <= px and abs(b0 - b1) <= px, "the stripes moved"
 # The two come at once, and stripe two says the one that moved last
-assert named == {"buildat.wasm", "buildat.data"}, named
+assert named == {"wasm", "data"}, named
 print("ok: the page's stripes where the engine's are")
 PY
 echo "PASS: the join's wait on the client's stripes, taken over by vanilla, closed for the floorplanner; the page's in the same places"

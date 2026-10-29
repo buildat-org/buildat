@@ -104,14 +104,17 @@ check_build web
 # 400x800 CSS pixels, a stand-in keyboard of 400 over the bottom half; the
 # 2 s after the ready line the world drawn, the 500 ms after the keyboard
 # the page laid out under it
-cat > "$t/web.json" <<'J'
+# The page joins by the login (check_lib.sh)
+login=$(web_login_steps clplayer "$t/srv.log") || fail "$login"
+cat > "$t/web.json" <<J
 [
- ["nav", "${URL}?log=3"],
+ ["nav", "\${URL}?log=3"],
+$login
  ["waitlog", "chat: chat_line: ready", 120], ["wait", 2000],
  ["eval", "buildatKeyboard.test = 400"], ["wait", 500],
  ["key", "t"], ["waitlog", "chat: the line opened", 10],
  ["wait", 500],
- ["shot", "${OUT}/keyboard.png"]
+ ["shot", "\${OUT}/keyboard.png"]
 ]
 J
 TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \

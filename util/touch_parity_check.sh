@@ -287,9 +287,10 @@ if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buil
 	echo "PASS: native; the web skipped (no Chrome or web/)"
 	exit 0
 fi
-cat > "$t/web.json" <<'J'
-[
- ["nav", "${URL}"],
+server "$t/w" -W "$here/web"
+# The page joins by the login (check_lib.sh)
+login=$(web_login_steps tpplayer "$t/w.log") || fail "$login"
+{ printf '[\n ["nav", "${URL}"],\n%s\n' "$login"; cat; } > "$t/web.json" <<'J'
  ["waitlog", "touch_parity: ready", 120],
  ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
  ["wait", 2000],
@@ -314,7 +315,6 @@ cat > "$t/web.json" <<'J'
  ["shot", "${OUT}/web_end.png"]
 ]
 J
-server "$t/w" -W "$here/web"
 TOUCH=1 WEB_DRIVE_VIEWPORT=800x400@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
 	"$here/util/web_drive.sh" chrome vanilla "$t/web.json" "$t/drive" \
 	> "$t/drive.txt" 2>&1 || fail "the web drive ($(tail -2 "$t/drive.txt"))"

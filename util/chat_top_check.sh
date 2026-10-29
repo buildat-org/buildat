@@ -6,11 +6,11 @@
 # vanilla's world (the minimal game), the chat page logs where it is and
 # where its field row is, and ui_utils's keyboard_page line marks the
 # focused item:
-#   - natively by finger at 1000x500 (the touch controls' Chat) and by
-#     mouse at 600x800 (the pause menu's Chat...): the message field is
-#     focused and the window ends at or above the screen's middle;
+#   - natively on a touchscreen at 1000x500 and by mouse at 600x800 (the
+#     pause menu's Chat...): the message field is focused and the window
+#     ends at or above the screen's middle;
 #   - in Chrome as a phone (400x800, density 2, touch): the same by the
-#     touch Chat; the page turned to 800x400 makes it again at the new
+#     pause menu's keys; the page turned to 800x400 makes it again at the new
 #     size; a stand-in keyboard (buildatKeyboard.test) taller than half the
 #     screen puts the field row first with its text kept, and one of half
 #     or less puts it back last; [TOUCH_CHAT_KEYBOARD] the page's stand-in
@@ -64,12 +64,16 @@ client(){ # name, size, env..., then the sequence on stdin
 		-c @"$t/$n.cmds" > "$t/$n.log" 2>&1
 	grep -a "Command sequence failed" "$t/$n.log" && fail "$n: the drive ($t/$n.log)"
 }
-# The touch controls' Chat at (850, 94). The delay after the chat page's
-# line: the focus line keyboard_page logs in the frames after it
+# The chat page is the pause menu's Chat...: the touch controls' Chat is
+# the chat line since [LUANTI_TOUCH_CHAT]. The touch controls' Menu at
+# (645, 94). The delay after the chat page's line: the focus line
+# keyboard_page logs in the frames after it
 client touch 1000x500 BUILDAT_TOUCH=1 <<C
 wait_log 60000 chat: chat_top: ready
 delay 2000
-tap 850 94
+tap 645 94
+wait_log 5000 pause: the menu shown
+click Button "Chat..."
 wait_log 10000 chat page: y
 delay 500
 quit
@@ -91,15 +95,17 @@ if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buil
 	echo "PASS: native; the web skipped (no Chrome or web/)"
 	exit 0
 fi
-# 400x800 CSS pixels: the touch controls' Chat at (325, 47). The waits
-# are settles: the 2 s after the ready line the world drawn, the 500 ms
+# 400x800 CSS pixels; the page joins by the login (check_lib.sh), its
+# address bar shown (the login's key would take it fullscreen, where a
+# turn does not resize it); the pause menu's Chat... by the keys, Continue
+# focused first. The waits are settles: the 2 s after the ready line the world drawn, the 500 ms
 # after the typed "hello" the field drawn with it, the 500 ms after the
 # keyboard's line the page drawn above it
-cat > "$t/web.json" <<'J'
-[
- ["nav", "${URL}?log=4"],
+login=$(web_login_steps ctplayer "$t/srv.log") || fail "$login"
+{ printf '[\n ["nav", "${URL}?log=4&pref=web_address_bar=show"],\n%s\n' "$login"; cat; } > "$t/web.json" <<'J'
  ["waitlog", "chat: chat_top: ready", 120], ["wait", 2000],
- ["tap", 325, 47], ["waitlog", "chat page: y", 10],
+ ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 2],
+ ["key", "Down"], ["frames", 2], ["key", "Enter"], ["waitlog", "chat page: y", 10],
  ["type", "hello"], ["wait", 500],
  ["shot", "${OUT}/upright.png"],
  ["viewport", 800, 400], ["waitlog", "chat page: y", 10],

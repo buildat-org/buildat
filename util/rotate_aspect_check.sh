@@ -55,9 +55,14 @@ lay(){ echo "[\"eval\", \"var e = document.getElementById('lag') || document.hea
 # (its ScreenMode, the canvas at its new size); the half second after it
 # and the 2 s after the world's settle line are settles, the frames at the
 # new size drawn
+# The page joins by the login (check_lib.sh). Its address bar shown: the
+# login's last key is a gesture, which the world's start would take the
+# page fullscreen by, and a headless fullscreen page is not resized
+login=$(web_login_steps raplayer "$t/srv.log") || fail "$login"
 cat > "$t/steps.json" <<J
 [
- ["nav", "\${URL}"],
+ ["nav", "\${URL}?pref=web_address_bar=show"],
+$login
  ["waitlog", "chat: ra: ready", 120],
  ["waitlog", "settle: 0 to mesh, [0-9]+ chunks in scene, 0 undrawn within 2", 60], ["wait", 2000],
  $cv, ["shot", "\${OUT}/1.png"],

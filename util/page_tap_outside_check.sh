@@ -10,10 +10,11 @@
 # platform facing a wall with a marker in it, and logs the look as it
 # changes and what is placed and dug. Natively by finger (BUILDAT_TOUCH=1,
 # 1000x500) and in Chrome as a phone (skipped without it or web/): the
-# touch controls' Chat, a tap inside on its log keeps it, a tap outside
-# closes it with nothing placed and the view not turned, and a tap on the
-# marker then places. Natively by mouse: the pause menu's Chat..., a click
-# outside goes back to the menu and one more closes that.
+# pause menu's Chat... (the touch controls' Chat is the chat line since
+# [LUANTI_TOUCH_CHAT]), a tap inside on its log keeps it, a tap outside
+# goes back to the menu and one more closes that, with nothing placed and
+# the view not turned, and a tap on the marker then places. Natively by
+# mouse: the same by clicks.
 # simplified: My account is not driven (it needs a public server and a
 # login); it is an accounts page as the chat is.
 #   util/page_tap_outside_check.sh
@@ -118,8 +119,9 @@ after(){ # server log, client log
 		sed 's/page_tap: //'
 	presses "$2"
 }
-# 1000x500, UI scale 1: the touch controls' Chat at (850, 94), the chat's
-# log at (500, 100), outside it at (900, 300), the marker at (638, 267).
+# 1000x500, UI scale 1: the touch controls' Menu at (645, 94), the chat's
+# log at (500, 100), outside it and the menu at (900, 300), the marker at
+# (638, 267). The menu is back in the frames after the press off the chat.
 # The world drawn in the frames after its line; a tap inside the chat has
 # nothing to wait for but a second of no press off it; after the place,
 # a second and a half for whatever else the tap did to reach the server
@@ -128,12 +130,17 @@ client touch BUILDAT_TOUCH=1 <<C
 wait_log 60000 chat: page_tap: ready
 wait_log_any 60000 scene, 0 undrawn within 2
 delay 2000
-tap 850 94
+tap 645 94
+wait_log 5000 pause: the menu shown
+click Button "Chat..."
 wait_log 10000 chat page: y
 tap 500 100
 wait_log_absent 1000 pause: a press off
 tap 900 300
 wait_log 10000 pause: a press off the page
+delay 500
+tap 900 300
+wait_log 10000 pause: a press off the menu
 tap 638 267
 wait_log 10000 chat: page_tap: placed
 delay 1500
@@ -146,7 +153,7 @@ want(){ # name, server log, client log, wanted lines
 	got=$(after "$2" "$3" | tr '\n' ' ')
 	[ "$got" = "$4" ] || fail "$1: \"$got\", not \"$4\" ($2, $3)"
 }
-want touch "$t/n.log" "$t/touch.log" "placed floor:stone a press off the page "
+want touch "$t/n.log" "$t/touch.log" "placed floor:stone a press off the page a press off the menu "
 echo "ok: native by finger"
 # By mouse: Escape's pause menu, its Chat..., a click on the log, one off
 # the chat back to the menu and one off the menu
@@ -177,29 +184,32 @@ if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buil
 	exit 0
 fi
 # Chrome at 1000x500 CSS pixels and a density of 1; the web's UI is
-# smaller: Chat at (907, 59), outside the chat at (960, 300). The taps wait
+# smaller: outside the chat and the menu at (960, 300). The page joins by
+# the login (check_lib.sh) and opens the pause menu's Chat... by the
+# keys, Continue focused first. The taps wait
 # for the client's world as touch_parity_check.sh's do. The waits that
 # stay: settles of up to 2 s after a waitlog (the world drawn, the block
 # placed before the shot), and the second after the tap inside the chat,
 # the window in which nothing must happen (it must not close)
-cat > "$t/web.json" <<'J'
-[
- ["nav", "${URL}"],
+server "$t/w" -W "$here/web"
+login=$(web_login_steps ptplayer "$t/w.log") || fail "$login"
+{ printf '[\n ["nav", "${URL}"],\n%s\n' "$login"; cat; } > "$t/web.json" <<'J'
  ["waitlog", "page_tap: ready", 120],
  ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
  ["wait", 2000],
- ["tap", 907, 59], ["waitlog", "chat page: y", 10],
+ ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 2],
+ ["key", "Down"], ["frames", 2], ["key", "Enter"], ["waitlog", "chat page: y", 10],
  ["shot", "${OUT}/web_chat.png"],
  ["tap", 500, 100], ["wait", 1000],
- ["tap", 960, 300], ["waitlog", "pause: a press off the page", 10],
+ ["tap", 960, 300], ["waitlog", "pause: a press off the page", 10], ["wait", 500],
+ ["tap", 960, 300], ["waitlog", "pause: a press off the menu", 10],
  ["tap", 638, 267], ["waitlog", "page_tap: placed", 10], ["wait", 1500],
  ["shot", "${OUT}/web_end.png"]
 ]
 J
-server "$t/w" -W "$here/web"
 TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \
 	"$here/util/web_drive.sh" chrome vanilla "$t/web.json" "$t/drive" \
 	> "$t/drive.txt" 2>&1 || fail "the web drive ($(tail -2 "$t/drive.txt"))"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-want web "$t/w.log" "$t/drive/page.log" "placed floor:stone a press off the page "
+want web "$t/w.log" "$t/drive/page.log" "placed floor:stone a press off the page a press off the menu "
 echo "PASS: a tap or a click off a page over the world closes it and does nothing else, natively and in Chrome"

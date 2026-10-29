@@ -68,10 +68,11 @@ CHECK_PIDS+=($SERVER_PID)
 # still streaming to the page: 43 s once, not in 180 s the next time
 # (2026-10-13; dev waited up to 400 s). This fails until that backlog is
 # sped up (doc/plan, [CHECKS_EVENT_WAITS]'s "Found" note); 60 s, and a
-# turn's relayout 30 s, its frames slow while the world streams
-cat > "$t/steps.json" <<'J'
-[
- ["nav", "${URL}"],
+# turn's relayout 30 s, its frames slow while the world streams.
+# The page joins by the login (check_lib.sh), its address bar shown: the
+# login's key would take it fullscreen, where a turn does not resize it
+login=$(web_login_steps hdplayer "$t/srv.log") || fail "$login"
+{ printf '[\n ["nav", "${URL}?pref=web_address_bar=show"],\n%s\n' "$login"; cat; } > "$t/steps.json" <<'J'
  ["waitlog", "hotbar: 9 slots, .* of 2[0-9][0-9][0-9]", 240], ["wait", 2000],
  ["shot", "${OUT}/sideways9.png"],
  ["viewport", 393, 873],
@@ -98,14 +99,17 @@ rows "$L" > "$t/rows.txt"
 python3 - "$t/rows.txt" <<'PY' || fail "the hotbar ($t/rows.txt, $L)"
 import sys
 rows = [list(map(int, l.split())) for l in open(sys.argv[1]) if l.strip()]
-def last(n, wide):
+# The first row at a width, the one the drive waited for: a turn logs a
+# row at the old width with the new one's picture before its own
+# (2026-10-29: 32 slots, picture 63, of 1079, on the turn back)
+def first(n, wide):
     m = [r for r in rows if r[0] == n and (r[6] > 2000) == wide]
     assert m, "no row of %d slots %s" % (n, "sideways" if wide else "upright")
-    return m[-1]
-s9 = last(9, True)
+    return m[0]
+s9 = first(9, True)
 assert s9[1] == 132, "sideways 9: picture %d, not 132" % s9[1]
 for n, wide in ((9, False), (32, False), (32, True)):
-    r = last(n, wide)
+    r = first(n, wide)
     assert r[4] >= 0 and r[5] <= r[6], "%s: the picture off the screen" % r
     assert r[2] >= 0 and r[3] - r[2] >= 0.9 * r[6], \
         "%s: the row not 90 %% of the width" % r
