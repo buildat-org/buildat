@@ -118,7 +118,7 @@ return M
 LUA
 echo "A check's launch UI" > "$t/ext/launch_ui.txt"
 ext 1.0.0 ui widget
-"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q '"kind": "app", "extension" or "world"' ||
+"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q '"kind": "app", "extension", "world" or "remix"' ||
 	fail "a kind that is neither"
 for n in a__b _ab ab_; do
 	ext 1.0.0 "$n"
