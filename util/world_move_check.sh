@@ -18,10 +18,11 @@
 #      list of 2^31-1 slots in it left out.
 #   2. wt_2 started: the build is there, the player's item and position
 #      too, their privilege and password not ([IMPORT_KEEPS_INVENTORIES]).
-#   3. One transfer at a time: a client over a slow link (util/netsim.py)
-#      importing a 10 MB zip; a second client's export meanwhile refused;
-#      the first leaves mid-way, and the server's transfer folder is gone
-#      with no save made.
+#   3. One transfer at a time, on a public server with two admins (on the
+#      launcher's a second client is a LAN player with no world menu,
+#      [GUEST_NAME_REUSE]): one over a slow link (util/netsim.py) importing
+#      a 10 MB zip; the other's export meanwhile refused; the first leaves
+#      mid-way, and the server's transfer folder is gone with no save made.
 # The refusals name no folder of the server's ([SEC_RUN5_LEFTOVERS]).
 # simplified: native only; the web's download of the parts and its picked
 # file read in parts are not driven.
@@ -76,7 +77,7 @@ serve(){
 	local log=$1 kv rc; shift
 	for kv in "$@"; do export "$kv"; done
 	start_server "$log" "STATUS Listening" 60 auto "$here/Build/bin/buildat_server" \
-		-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3 \
+		-u "launcher=${LAUNCHER-1}" -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" -C "$t/c" -l 3 \
 		--max-disk-mb 300
 	rc=$?
 	CHECK_PIDS+=($SERVER_PID)
@@ -262,7 +263,9 @@ echo "ok: the build in wt_2, the player's item and position; no privilege or pas
 # 3
 head -c 10000000 /dev/urandom > "$t/blob"
 (cd "$t" && python3 -c 'import zipfile; z = zipfile.ZipFile("nu/exports/big.zip", "w"); z.write("blob", "big/blob")')
-serve "$t/3.log"
+# boss the first admin; boss's admin script makes boss2 another
+echo "name boss bosspass1" > "$d/first_admin"
+serve "$t/3.log" LAUNCHER=0
 LINK=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
 # A slow link; its --delay 0 is the link's latency, not a wait
 python3 "$here/util/netsim.py" --listen "$LINK" --to "127.0.0.1:$SERVER_PORT" \
@@ -273,13 +276,18 @@ for _ in $(seq 50); do port_taken "$LINK" && break; sleep 0.2; done
 port_taken "$LINK" || fail "netsim did not listen ($t/netsim.log)"
 # The 25 s after the import began: it still under way over the slow link
 # while the second client asks, and then left half done. The picker's
-# half second as in imp
-printf 'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "Import a world from a zip..."\nwait_log 5000 The file picker at\ndelay 500\nclick Button "big.zip"\nwait_log 30000 menu: import big.zip\ndelay 25000\nquit\n' > "$t/3a.cmds"
-client "$t/3a.log" "$t/3a.cmds" "$LINK" &
+# half second as in imp. An admin's first login asks about ntfy in a
+# window over the menu
+ntfy='wait_log_any 60000 accounts: ntfy asked\nwait_log_any 5000 server window: the page ntfy\ndelay 300\nclick Button "Don'"'"'t add"\ndelay 500\n'
+printf "wait_log_any 60000 admin script: done\n$ntfy"'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "Import a world from a zip..."\nwait_log 5000 The file picker at\ndelay 500\nclick Button "big.zip"\nwait_log 30000 menu: import big.zip\ndelay 25000\nquit\n' > "$t/3a.cmds"
+BUILDAT_JOIN_NAME=boss BUILDAT_JOIN_PASSWORD=bosspass1 \
+	BUILDAT_JOIN_ADMIN=$'add boss2 bosspass2\npriv boss2 admin' \
+	client "$t/3a.log" "$t/3a.cmds" "$LINK" &
 a=$!
 wait_for_log "$t/3.log" "Importing big.zip" 120 || fail "no import began ($t/3.log)"
-printf 'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "wt*"\nwait_log 10000 menu: the world wt\nclick Button "Export..."\nwait_log 30000 Another transfer\nquit\n' > "$t/3b.cmds"
-run_client 60 "$t/3b.log" timeout 120 "$here/Build/bin/buildat" -C "$t/nc2" \
+printf "$ntfy"'wait_log_any 60000 menu: 3 saves\ndelay 1000\nclick Button "wt*"\nwait_log 10000 menu: the world wt\nclick Button "Export..."\nwait_log 30000 Another transfer\nquit\n' > "$t/3b.cmds"
+BUILDAT_JOIN_NAME=boss2 BUILDAT_JOIN_PASSWORD=bosspass2 \
+	run_client 60 "$t/3b.log" timeout 120 "$here/Build/bin/buildat" -C "$t/nc2" \
 	-D "$t/nu2" -s 127.0.0.1:$SERVER_PORT -w 1100x900 -u 1 -l 3 -o sound_mute=1 -c @"$t/3b.cmds"
 grep -aq "menu: Another transfer is running: an import" "$t/3b.log" ||
 	fail "the second transfer was not refused ($t/3b.log)"
