@@ -8,15 +8,17 @@
 #
 # The commit goes by git push (to refs/heads/remote_check, the copy reset
 # to it); the builds (Build/bin and lib, web/, Build-webserver/, Urho3D's
-# lib) by tar over ssh; what is not committed does not go. REMOTE_DIR is
-# the copy, ~/buildat_remote by default.
+# lib) by tar over ssh; what is not committed does not go. CHROME and
+# FIREFOX name the browsers there (chromium-browser and firefox);
+# REMOTE_DIR is the copy, ~/buildat_remote by default.
 #
 # **The machine** (made once; the script only keeps it current):
 # - Xvfb and Mesa (software GL); Chromium (CHROME when its binary is not
 #   chromium-browser: Debian's is chromium); Firefox 129 or newer (FIREFOX:
 #   Debian's is firefox-esr); Node 22 or newer (web_drive.js's WebSocket;
 #   Debian 13 has 20); c++ (servers compile their modules at start); CMake
-#   3.x (CMake 4 refuses cmake_minimum_required(VERSION 3.2.3)); python3
+#   3.x (CMake 4 refuses cmake_minimum_required(VERSION 3.2.3) unless
+#   CMAKE_POLICY_VERSION_MINIMUM=3.5 is set); python3
 #   with PIL, numpy, websockets and cryptography; zip, unzip, ImageMagick;
 #   zstd; ~/emsdk at the release's version.
 # - glibc and libstdc++ at least this machine's: the binaries are copied,
@@ -24,9 +26,9 @@
 #   found"` there says what is missing (2026-10-29: GLIBC_2.38,
 #   GLIBCXX_3.4.32); a distro may name a library otherwise (Debian's
 #   leveldb is .so.1d: a libleveldb.so.1 link).
-# - The copy into REMOTE_DIR, by tar | zstd | ssh (about 5.5 GB, 15 min on
-#   a LAN): this tree without Build*, cache, local, tmp, .claude and
-#   user/screenshots; 3rdparty/Urho3D/Build without objects (module
+# - The copy into REMOTE_DIR, by tar | zstd | ssh (about 5.5 GB, 15 min
+#   from a home connection): this tree without Build*, cache, local, tmp,
+#   .claude and user/screenshots; 3rdparty/Urho3D/Build without objects (module
 #   compiles need its headers, which this script does not send);
 #   ~/projects/luanti without its worlds and .git (its games/ are what the
 #   Luanti checks use); ~/.local/share/playwright-node and
@@ -43,7 +45,7 @@
 # fail more on a slower or software-GL machine; run them here before
 # blaming the code. The machine's own RAM: check_lib's limits apply there
 # as here unless it has room to spare.
-set -eu
+set -eu -o pipefail
 [ $# -ge 2 ] || { sed -n '2,8p' "$0" | sed 's/^# *//' >&2; exit 2; }
 host=$1; shift
 dir=${REMOTE_DIR:-buildat_remote}
@@ -57,6 +59,7 @@ tar c --exclude=CMakeFiles --exclude='*.o' Build/bin Build/lib web \
 q=$(printf ' %q' "$@")
 exec ssh -o BatchMode=yes "$host" "cd $dir &&
 	export LD_LIBRARY_PATH=\$PWD/3rdparty/Urho3D/Build/lib
-	export CHROME=\${CHROME:-chromium-browser}
+	export CHROME=$(printf %q "${CHROME:-chromium-browser}")
+	export FIREFOX=$(printf %q "${FIREFOX:-firefox}")
 	export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
 	exec xvfb-run -a -s '-screen 0 1920x1080x24' $q"
