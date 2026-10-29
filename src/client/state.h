@@ -65,6 +65,14 @@ namespace client
 		// [WEB_LINK_BEHIND] what has been read from the server and not yet
 		// handled
 		virtual size_t get_backlog_bytes() = 0;
+		// [DRIVE_WAITS] What the connection still has to do on its own --
+		// files asked for, announced files being checked, scripts held
+		// for them, packets read and not handled, one partly read -- as
+		// "what N, ..."; empty when nothing
+		virtual ss_ get_pending() = 0;
+		// The number in the last network:sync the server answered; 0
+		// before one
+		virtual int64_t get_synced() = 0;
 	};
 
 	State* createState(sp_<app::App> app);

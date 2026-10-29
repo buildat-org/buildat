@@ -253,6 +253,7 @@ function __buildat_reset_sandbox()
 	end
 	__buildat_reset_modules()
 	__buildat_game_settings_reset()
+	__buildat_idle_sources_reset()
 	-- **These two never ran**: an extension is not in package.loaded --
 	-- the loader keeps its own table -- so both lookups read nil from
 	-- the day they were written (found 2026-09-23 by [LAUNCH_WORLD]).

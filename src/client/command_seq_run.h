@@ -342,6 +342,81 @@
 		return true;
 	}
 
+	// [DRIVE_WAITS] What the client still has to do of its own, for idle:
+	// "" when nothing. The mesh pool (the web's on this thread too), the
+	// connection's (client::State::get_pending()), fetches not taken, and
+	// whatever client Lua registered with buildat.idle_source()
+	ss_ drive_pending()
+	{
+		ss_ r;
+		auto add = [&](const ss_ &s){
+			if(!s.empty())
+				r += (r.empty() ? "" : ", ")+s;
+		};
+		if(size_t n = m_thread_pool->get_backlog())
+			add("pool tasks (meshes) "+itos((int)n));
+		if(m_state)
+			add(m_state->get_pending());
+#ifdef __EMSCRIPTEN__
+		int fetches = EM_ASM_INT({
+			return Object.keys(Module['buildatHttp'] || {}).length; });
+#else
+		int fetches = (int)m_http_jobs.size();
+#endif
+		if(fetches)
+			add("fetches "+itos(fetches));
+		lua_getfield(L, LUA_GLOBALSINDEX, "__buildat_idle_pending");
+		if(lua_isnil(L, -1)){
+			lua_pop(L, 1);
+		} else {
+			try {
+				error_logging_pcall(L, 0, 1);
+				add(lua_bindings::lua_tocppstring(L, -1));
+				lua_pop(L, 1);
+			} catch(std::exception &e){
+				add(ss_("idle sources failed: ")+e.what());
+			}
+		}
+		return r;
+	}
+
+	// A network:sync with the next number; the number, 0 with no server
+	int64_t sync_send()
+	{
+		if(!m_state)
+			return 0;
+		m_state->send_packet("network:sync", itos(++m_sync_sent));
+		return m_sync_sent;
+	}
+
+#ifdef __EMSCRIPTEN__
+	// [DRIVE_WAITS] util/web_drive.js's frames, idle and sync steps, which
+	// cannot run a command sequence ([SECURITY_RUN_1]): the frame count,
+	// and when Module.buildatDriveAsk says so (1 idle, 2 sync) the pending
+	// list in Module.buildatPending or a sync sent (Module.buildatSyncSent,
+	// -1 with no server; the answered one in Module.buildatSynced)
+	void web_drive_waits()
+	{
+		int ask = EM_ASM_INT({
+			Module.buildatFrames = $0;
+			var a = Module.buildatDriveAsk | 0;
+			Module.buildatDriveAsk = 0;
+			return a;
+		}, (double)m_frame_count);
+		if(ask & 1){
+			const ss_ p = drive_pending();
+			EM_ASM({ Module.buildatPending = UTF8ToString($0); }, p.c_str());
+		}
+		if(ask & 2){
+			const int64_t n = sync_send();
+			EM_ASM({ Module.buildatSyncSent = $0; }, n ? (double)n : -1.0);
+		}
+		if(m_state)
+			EM_ASM({ Module.buildatSynced = $0; },
+					(double)m_state->get_synced());
+	}
+#endif
+
 	bool command_seq_exec(const client::command_seq::Command &c)
 	{
 		using client::command_seq::Type;
@@ -432,6 +507,9 @@
 			}
 			break;
 		case Type::Quit:
+		case Type::Frames:
+		case Type::Idle:
+		case Type::Sync:
 		case Type::Delay:
 		case Type::Screenshot:
 		case Type::Look:
@@ -595,6 +673,57 @@
 							cs(c.s), cs(itos(c.n)));
 				}
 				m_wait_log_since = -1;
+				m_command_index++;
+				continue;
+			}
+			// [DRIVE_WAITS]
+			if(c.type == Type::Frames){
+				if(m_frames_end < 0)
+					m_frames_end = m_frame_count + c.n;
+				if(m_frame_count < m_frames_end)
+					return;
+				m_frames_end = -1;
+				m_command_index++;
+				continue;
+			}
+			if(c.type == Type::Idle || c.type == Type::Sync){
+				const bool idle = c.type == Type::Idle;
+				const char *name = idle ? "idle" : "sync";
+				if(m_drive_wait_until_us < 0){
+					m_drive_wait_until_us = now + c.n * 1000;
+					m_drive_wait_frame = m_frame_count;
+					m_wait_log_said_us = now;
+					if(!idle && !(m_sync_want = sync_send())){
+						m_drive_wait_until_us = -1;
+						command_seq_fail("sync: no server");
+						return;
+					}
+				}
+				// Idle from the next frame on: what the last command
+				// injected is read in the frame after it
+				ss_ left = idle ? (m_frame_count > m_drive_wait_frame ?
+						drive_pending() : ss_("the frame after the last "
+						"command")) : m_state->get_synced() >= m_sync_want ?
+						ss_() : ss_("no answer");
+				if(!left.empty() && now < m_drive_wait_until_us){
+					if(now >= m_wait_log_said_us + 10000000){
+						m_wait_log_said_us = now;
+						log_i(MODULE, "%s: still waiting: %s", name, cs(left));
+					}
+					return;
+				}
+				m_drive_wait_until_us = -1;
+				if(left.empty()){
+					log_i(MODULE, "%s: %s", name, idle ?
+							"nothing pending" : "answered");
+				} else if(!m_command_seq_stdin){
+					command_seq_fail(ss_(name)+": not in "+itos(c.n)+
+							" ms: "+left);
+					return;
+				} else {
+					log_w(MODULE, "%s: not in %s ms: %s; on", name,
+							cs(itos(c.n)), cs(left));
+				}
 				m_command_index++;
 				continue;
 			}

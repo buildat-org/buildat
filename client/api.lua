@@ -2464,6 +2464,32 @@ buildat.safe.last_arrival = __buildat_last_arrival
 -- in_flight() -> nil, or {name, have, size}: the packet arriving and not
 -- yet whole ([LOAD_IN_FLIGHT])
 buildat.safe.in_flight = __buildat_in_flight
+-- idle_source(name, fn): fn() -> how much of its own work this has queued
+-- (0 or nil: none). A drive's `idle` waits until every one says none, and
+-- names the ones that do not ([DRIVE_WAITS], doc/client_commands.txt). A
+-- second call with the name replaces the first.
+local idle_sources = {}
+function buildat.safe.idle_source(name, fn)
+	idle_sources[tostring(name)] = fn
+end
+buildat.idle_source = buildat.safe.idle_source
+-- A game left takes its sources with it (__buildat_reset_sandbox)
+function __buildat_idle_sources_reset()
+	idle_sources = {}
+end
+function __buildat_idle_pending()
+	local out = {}
+	for name, fn in pairs(idle_sources) do
+		local ok, n = pcall(fn)
+		if not ok then
+			out[#out + 1] = name .. " failed: " .. tostring(n)
+		elseif n and n ~= 0 then
+			out[#out + 1] = name .. " " .. tostring(n)
+		end
+	end
+	table.sort(out)
+	return table.concat(out, ", ")
+end
 -- resources() -> {memory_mb, mesh_threads, isolated, touch, platform}: what
 -- this client got to run in ([WEB_MESH_OFF_THREAD]; doc/client_api.txt)
 buildat.safe.resources = __buildat_resources

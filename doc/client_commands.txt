@@ -44,8 +44,9 @@ rather than ending the run.
 The writer has to stay open -- the sleep above is what keeps it so -- because
 closing the last writer of a fifo is end of input.
 
-delay is wall-clock milliseconds of app time continuing to run. Use it to wait
-for startup, network, or for a held key to have an effect. Input is queued as
+delay is wall-clock milliseconds of app time continuing to run. Use it for
+what is a length of time itself -- a held key, a walk; startup, a screen,
+the network and the meshes have wait_log, frames, sync and idle. Input is queued as
 SDL events at the start of the frame (before Urho3D Input::Update). Screenshots
 are taken after the current frame has been rendered (3D + UI), before buffer
 swap.
@@ -108,6 +109,47 @@ wait_log_any <ms> <text>
 wait_log_absent <ms> <text>
     The time passes with no line containing the text since the command, or
     the sequence fails: a thing that must not happen.
+
+frames <n>
+    n frames rendered: the frame after an input has read it, a UI laid out
+    and drawn after a click or a key. Where a delay of a second waited for
+    a screen to redraw, frames 2 or 3 is the wait.
+
+idle <ms>
+    Until the client has nothing of its own still to do, or the sequence
+    fails naming what was left. Looked at from the frame after the
+    command (what the last command injected is read in that one) on:
+    - the client's thread pool: meshes, collision shapes, the check of
+      announced files (natively on worker threads, on the web the same
+      tasks run a slice a frame on the page's thread);
+    - the connection: files asked for and not in, announced files being
+      checked, scripts held for them, packets read and not yet handled,
+      one partly read;
+    - fetches (buildat.http_get) not yet taken;
+    - what client Lua registered with buildat.idle_source(name, fn):
+      builtin/voxelworld's chunks to mesh (while the queue's front is in
+      reach) and chunks held back for a remesh, builtin/luanti's textures
+      to compose, extensions/luanti_client's objects to build.
+    The client relights nothing (the server does) and has no tweens or
+    background resource loads. What the server has yet to send is not the
+    client's: a sync first, then idle, is "everything the server had for
+    this is in and drawn".
+
+        idle 100: not in 100 ms: pool tasks (meshes) 12, voxelworld
+        chunks to mesh 40
+
+sync <ms>
+    A round trip through the server: a network:sync goes out, and the
+    server answers it once every one of its modules has handled what was
+    queued for it when the sync came. The connection is ordered both ways,
+    so on the answer what the client sent before it has been handled at
+    the server, and what the server sent in answer has arrived and been
+    handled here. A module's own later work (a thread of its own, a
+    generator) is not waited for. Fails with no server, or no answer in
+    the time.
+
+    util/web_drive.js has the three as steps (["frames", n], ["idle",
+    ms], ["sync", ms]): a web page runs no command sequence.
 
 expect_error <text>
     An error line containing the text is the drive's own doing, from this
@@ -280,25 +322,31 @@ quit
 
 Example
 -------
-Wait for the launch menu, screenshot it, click a point, wait, screenshot again:
+Wait for the launcher room, screenshot it, click a point, screenshot the
+screen it drew:
 
-    delay 2000
+    wait_log_any 60000 the room hums
     screenshot /tmp/buildat_menu.png
     mouse_pos 400 300
     mouse_click left
-    delay 1000
+    frames 3
     screenshot /tmp/buildat_after_click.png
 
-Take the same shot every run, whatever the camera was left pointing at:
+Take the same shot every run, whatever the camera was left pointing at,
+of the world drawn:
 
-    delay 3000
+    wait_log 60000 the server put the player at
     look 275 -15
+    idle 30000
     screenshot /tmp/buildat_view.png
 
-Hold W for half a second while connected to a local server:
+Hold W for half a second while connected to a local server, and shoot
+once the server has had the walk and the client the answer:
 
-    delay 3000
+    wait_log 60000 the server put the player at
     keydown W
     delay 500
     keyup W
+    sync 5000
+    idle 10000
     screenshot /tmp/buildat_moved.png

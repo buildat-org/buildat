@@ -1550,6 +1550,14 @@ struct CApp: public App, public magic::Application
 	// When the wait last said it was still waiting
 	int64_t m_wait_log_said_us = 0;
 	ss_ m_pending_screenshot;
+	// [DRIVE_WAITS] frames rendered; frames' end, idle's first frame and
+	// idle's or sync's end, -1 when not in one; the last network:sync sent
+	int64_t m_frame_count = 0;
+	int64_t m_frames_end = -1;
+	int64_t m_drive_wait_frame = -1;
+	int64_t m_drive_wait_until_us = -1;
+	int64_t m_sync_sent = 0;
+	int64_t m_sync_want = 0;
 	bool m_command_seq_active = false;
 	// The logical size a scripted client keeps whatever the window does
 	// ([SEQ_FIXED_SIZE]): the -w size. The world renders into a texture of
@@ -3053,6 +3061,7 @@ struct CApp: public App, public magic::Application
 		web_text_sync(GetSubsystem<magic::UI>());
 		web_fields_publish(GetSubsystem<magic::UI>());
 		web_idle_step();
+		web_drive_waits();
 		// [TAP_BACK] the browser's Back, each one Escape (index.html)
 		for(int n = EM_ASM_INT({ var n = Module.buildatBack | 0;
 				Module.buildatBack = 0; return n; }); n > 0; n--){
@@ -3120,6 +3129,7 @@ struct CApp: public App, public magic::Application
 				m_split.f_outside.push_back(now - m_split.end_render_t);
 			m_split.begin_t = now;
 		}
+		m_frame_count++;
 		command_seq_tick();
 	}
 

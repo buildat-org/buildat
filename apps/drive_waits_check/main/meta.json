@@ -1,0 +1,9 @@
+{
+	"engine_api": 2,
+	"kind": "check",
+	"client_main": "init.lua",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"}
+	]
+}

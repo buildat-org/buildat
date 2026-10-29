@@ -217,6 +217,12 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			c.type = Type::Delay;
 			if(!parse_i64(rest, &c.n) || c.n < 0)
 				return fail("delay <ms> (non-negative integer)");
+		} else if(cmd == "frames" || cmd == "idle" || cmd == "sync"){
+			c.type = cmd == "frames" ? Type::Frames :
+					cmd == "idle" ? Type::Idle : Type::Sync;
+			if(!parse_i64(rest, &c.n) || c.n < 0)
+				return fail(cmd+(cmd == "frames" ? " <n>" : " <ms>")+
+						" (non-negative integer)");
 		} else if(cmd == "wait_log"){
 			c.type = Type::WaitLog;
 			ss_ ms, text;
@@ -433,10 +439,13 @@ static void self_check()
 			"look 10 -20\n"
 			"look_dir 1 0 0\n"
 			"click Button \"No invites*\" 30 40\n"
+			"frames 3\n"
+			"idle 5000\n"
+			"sync 4000\n"
 			"quit\n";
 	if(!parse_body(sample, &cs, &err))
 		throw Exception(ss_()+"command_seq self_check parse: "+err);
-	if(cs.size() != 16)
+	if(cs.size() != 19)
 		throw Exception("command_seq self_check count "+itos(cs.size()));
 	if(cs[0].type != Type::Delay || cs[0].n != 100)
 		throw Exception("command_seq self_check delay");
@@ -468,6 +477,10 @@ static void self_check()
 	if(cs[14].type != Type::Click || cs[14].s != "Button" ||
 			cs[14].param != "No invites*" || cs[14].n != 1 || cs[14].y != 40)
 		throw Exception("command_seq self_check click");
+	if(cs[15].type != Type::Frames || cs[15].n != 3 ||
+			cs[16].type != Type::Idle || cs[16].n != 5000 ||
+			cs[17].type != Type::Sync || cs[17].n != 4000)
+		throw Exception("command_seq self_check frames/idle/sync");
 	if(!parse_body("nope 1\n", &cs, &err) && err.find("unknown command") != ss_::npos)
 		return;
 	throw Exception("command_seq self_check unknown command");
@@ -499,6 +512,12 @@ ss_ dump_command(const Command &c)
 	switch(c.type){
 	case Type::Delay:
 		return "delay "+itos(c.n);
+	case Type::Frames:
+		return "frames "+itos(c.n);
+	case Type::Idle:
+		return "idle "+itos(c.n);
+	case Type::Sync:
+		return "sync "+itos(c.n);
 	case Type::WaitLog:
 		return "wait_log "+itos(c.n)+" "+c.s;
 	case Type::WaitLogAny:

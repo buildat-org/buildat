@@ -789,6 +789,16 @@ struct CState: public State, public interface::Server
 	//       mutex for processing the module asynchronously (just lock mc->mutex)
 	interface::Mutex m_modules_mutex;
 
+	// [DRIVE_WAITS] emit_event_after_queued()'s: each module's count of
+	// events pushed at the call, and the event; looked at by
+	// handle_events()
+	struct AfterQueued {
+		sv_<std::pair<wp_<ModuleContainer>, uint64_t>> marks;
+		Event event;
+	};
+	sv_<AfterQueued> m_after_queued;
+	interface::Mutex m_after_queued_mutex;
+
 	sm_<ss_, ss_> m_tmp_data;
 	interface::Mutex m_tmp_data_mutex;
 
@@ -2050,8 +2060,56 @@ struct CState: public State, public interface::Server
 		emit_event(event, true);
 	}
 
+	void emit_event_after_queued(Event event)
+	{
+		AfterQueued a;
+		a.event = event;
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			for(auto &pair : m_modules){
+				const sp_<ModuleContainer> &mc = pair.second;
+				interface::MutexScope mq(mc->event_queue_mutex);
+				a.marks.emplace_back(mc, mc->events_pushed);
+			}
+		}
+		interface::MutexScope ms(m_after_queued_mutex);
+		m_after_queued.push_back(a);
+	}
+
+	// A module gone since counts as through
+	void emit_after_queued_ready()
+	{
+		sv_<Event> ready;
+		{
+			interface::MutexScope ms(m_after_queued_mutex);
+			for(auto it = m_after_queued.begin(); it != m_after_queued.end();){
+				bool through = true;
+				for(auto &mark : it->marks){
+					sp_<ModuleContainer> mc = mark.first.lock();
+					if(!mc)
+						continue;
+					std::lock_guard<std::mutex> lock(mc->events_done_mutex);
+					if(mc->events_done < mark.second){
+						through = false;
+						break;
+					}
+				}
+				if(through){
+					ready.push_back(it->event);
+					it = m_after_queued.erase(it);
+				} else {
+					++it;
+				}
+			}
+		}
+		for(Event &event : ready)
+			emit_event(event);
+	}
+
 	void handle_events()
 	{
+		emit_after_queued_ready();
+
 		// Get modified modules and push events to queue
 		{
 			interface::MutexScope ms(m_modules_mutex);

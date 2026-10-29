@@ -233,6 +233,20 @@ local modified_queued_us = {}
 local modified_drawn_us = {}
 local modified_held = {}
 local MODIFIED_COALESCE_US = 1000000
+-- [DRIVE_WAITS] What a drive's idle waits for here: chunks held back for
+-- a remesh, and the queue while its front is due (what is beyond the
+-- camera's reach stays queued for good)
+buildat.idle_source("voxelworld held chunks", function()
+	local n = 0
+	for _ in pairs(modified_held) do
+		n = n + 1
+	end
+	return n
+end)
+buildat.idle_source("voxelworld chunks to mesh", function()
+	local f = node_update_queue and node_update_queue:peek_next_f()
+	return f and f <= 1.0 and node_update_queue:get_length() or 0
+end)
 -- **And nothing the player is standing next to is ever held** (user,
 -- 2026-09-26: "delayed lighting updates feel awful to the user as
 -- response to the user's interactions; postponing them is a viable

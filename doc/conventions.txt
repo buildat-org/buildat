@@ -206,7 +206,10 @@ and says so; a committed baseline is [CHECK_BASELINE]'s and wants a commit
 hash the user has picked.
 
 A drive progresses on events, not on time (the user, 2026-10-13): wait_log
-and wait_log_any are what move a sequence on. delay is for two things only:
+and wait_log_any are what move a sequence on, and frames, idle and sync
+are the settles with a name ([DRIVE_WAITS]): a screen drawn after an input,
+the client's meshes and loads done, a round trip through the server.
+delay is for two things only:
 - what needs a length of time itself -- walking the player for a while, a
   double click, a timeout doing what it is for;
 - a settle of at most 2 s after a wait, where a more targeted log line would

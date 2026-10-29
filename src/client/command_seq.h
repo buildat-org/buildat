@@ -63,6 +63,17 @@ namespace command_seq
 		// (a trailing * is a prefix), the nearest the hint ([SEQ_CLICK]).
 		// s is the type, param the label, n 1 with a hint in x, y.
 		Click,
+		// frames <n>: n rendered frames ([DRIVE_WAITS])
+		Frames,
+		// idle <ms>: until the client has nothing of its own pending --
+		// the mesh pool, files asked for, packets read and not handled,
+		// fetches, what client Lua registered with buildat.idle_source --
+		// or the sequence fails naming what still was ([DRIVE_WAITS])
+		Idle,
+		// sync <ms>: a network:sync to the server and its answer back; the
+		// connection is ordered, so what went before it either way has
+		// been handled at both ends ([DRIVE_WAITS])
+		Sync,
 	};
 
 	struct Command

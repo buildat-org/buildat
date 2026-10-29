@@ -327,6 +327,12 @@ buildat.mesh_backlog() -> number
   meshes on workers where its page is cross-origin isolated, and else on
   the frame's own thread a slice a frame; voxelworld waits while this is
   long rather than add meshes that would only wait.
+buildat.idle_source(name, fn)
+- fn() -> how much of its own work this has queued, 0 or nil for none. A
+  drive's `idle` (doc/client_commands.txt) waits until every source says
+  none and names the ones that do not; a second call with the name
+  replaces the first, and leaving a game drops its sources. voxelworld's,
+  luanti's and luanti_client's queues are registered so ([DRIVE_WAITS]).
 buildat.set_mesh_bounce([r, g, b])
 - The light the unpacked mesher bakes into every face the sky does not
   reach, each channel 0...1, for meshes made after it, process-wide; no

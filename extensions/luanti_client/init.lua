@@ -1284,6 +1284,9 @@ local function show_client(host, port, name, password, mode, origin)
 		local object_head = 1
 		local object_queued = {}
 		local OBJECT_BUDGET_US = 3000
+		buildat.idle_source("luanti_client objects to build", function()
+			return #object_queue - object_head + 1
+		end)
 
 		local function queue_object(id)
 			if object_queued[id] then
