@@ -83,7 +83,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* buildat_stream_taken()
 	return g_taken.data();
 }
 
-// To the page: the worker's thread is told once until it has taken all
+// To the page: the worker's thread is told once until it has taken all.
+// The call proxied there only schedules the take ([WEBKIT_HC_SILENT]): a
+// proxied call also runs inside any wait of that thread's for a lock
+// (Emscripten's main thread works its queue while it waits), and run in
+// a wait inside buildat_stream_in() (a contended malloc while it holds
+// g_mutex), the take waited for g_mutex, held by its own thread, for good
 static void stream_out(const ss_ &data, bool close)
 {
 	std::lock_guard<std::mutex> lock(g_mutex);
@@ -93,8 +98,10 @@ static void stream_out(const ss_ &data, bool close)
 		return;
 	g_out_told = true;
 	MAIN_THREAD_ASYNC_EM_ASM({
-		if(Module['buildatStreamOut'])
-			Module['buildatStreamOut']();
+		setTimeout(function(){
+			if(Module['buildatStreamOut'])
+				Module['buildatStreamOut']();
+		});
 	});
 }
 
