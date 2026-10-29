@@ -242,8 +242,10 @@ struct Module: public interface::Module, public Interface
 
 	~Module()
 	{
-		if(m_hosted){
-			// The owner handlers hold pointers into this module
+		// The owner handlers hold pointers into this module. Nothing is
+		// saved here: the runtime row is written after each tick that
+		// changed it, and the app's save may be closed by now
+		if(m_hosted) try {
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 				for(auto &s : m_host.scenes){
 					voxelworld::Instance *w = ivw->get_instance(s.second);
@@ -251,7 +253,9 @@ struct Module: public interface::Module, public Interface
 						w->set_owner_handler("kit", nullptr);
 				}
 			});
-			save_runtime();
+		} catch(std::exception &e){
+			log_w(MODULE, "The voxel owners' handlers not taken back: %s",
+					e.what());
 		}
 	}
 
