@@ -152,7 +152,8 @@ Five header lines say the rest, and only the first is required:
                        broken (fails for a reason of its own, not the
                        code's: run alone or with run_all.sh broken while
                        it is fixed, and in no other tier; --changed picks
-                       from a tier, so it is left out there too)
+                       from the tiers up to TIER, so it is left out there
+                       too)
   # broken: <why>      with tier broken: the tier it goes back to and its
                        recorded failure, in a few words
   # cost: 24s          a seed; local/run_all/costs is measured per machine
@@ -169,7 +170,11 @@ Five header lines say the rest, and only the first is required:
 util/run_all.sh <tier> runs a tier, every script git knows with a
 "# tier:" line (a runner under apps/<a>/ covers apps/<a>/**); --changed
 [range] runs the cheapest runners that cover what git says changed, which
-is the regular check. util/check_contract.sh reads every runner for the
+is the regular check: from every tier up to TIER (full by default; quick <
+full < long), a changed runner itself, and for a file the web client runs
+too (client/, extensions/, src/client/, client_lua/, client_data/, the
+network module) the cheapest native runner and the cheapest web one -- a
+runner that uses util/web_drive. util/check_contract.sh reads every runner for the
 contract and names the ones whose exit status cannot say FAIL.
 A runner is never retried: a check run three times and taken at its best is
 how a real fault becomes a known flake.

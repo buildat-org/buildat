@@ -26,7 +26,12 @@
 # **--changed [range] is the regular check** ([SMOKE_PICK]): it takes
 # what git says changed and runs the cheapest runners that cover it,
 # which is one runner under a minute for most commits. The whole tier
-# is what a push runs.
+# is what a push runs. It picks from every tier up to TIER (full by
+# default; quick < full < long, broken never) ([RUN_ALL_PICK]); a changed
+# runner picks itself; a file the web client runs too (client/,
+# extensions/, src/client/, a client_lua/ or client_data/, the network
+# module, the page) gets the cheapest native runner and the cheapest web
+# one -- a web runner is one that uses util/web_drive.
 #
 #   util/run_all.sh --changed
 #   util/run_all.sh --changed origin/dev..HEAD --list
@@ -59,7 +64,7 @@ changed_range=""
 changed=""
 if [ "$tier" = "--changed" ]; then
 	changed=1
-	tier="${TIER:-quick}"
+	tier="${TIER:-full}"
 	changed_range="${2:-}"
 	[ "$changed_range" = "--list" ] && changed_range=""
 fi
@@ -103,6 +108,13 @@ for f in $(tiered); do
 	esac
 	if [ "$tier" = ci ]; then
 		[ "$t" != broken ] && grep -q '^# ci$' "$f" || continue
+	elif [ -n "$changed" ]; then
+		# Every tier up to the asked one ([RUN_ALL_PICK]): quick alone
+		# never saw a full check, so its own edit was "covered by nothing"
+		case "$tier:$t" in
+		"$tier:$tier"|full:quick|long:quick|long:full) ;;
+		*) continue;;
+		esac
 	else
 		[ "$t" = "$tier" ] || continue
 	fi
@@ -133,7 +145,10 @@ if [ -f "$costs" ]; then
 fi
 cost_of() {   # $1 path, $2 name
 	c=${last_cost[$2]:-}
-	[ -n "$c" ] || c=$(sed -n 's/^# cost: *\([0-9]*\).*/\1/p' "$1" | head -1)
+	# "~3 min (date)" as 180, "~20s" as 20
+	[ -n "$c" ] || c=$(sed -n 's/^# cost: *~\{0,1\}\([0-9][0-9]*\) *min.*/\1*60/p
+		s/^# cost: *~\{0,1\}\([0-9][0-9]*\).*/\1/p' "$1" | head -1)
+	[ -n "$c" ] && c=$((c))
 	echo "${c:-60}"
 }
 if [ -n "$changed" ]; then
@@ -150,11 +165,26 @@ if [ -n "$changed" ]; then
 	set -f
 	# Each runner's patterns ("**" as "*") and cost once, not per file
 	# ([REWORK_1019_PERF] build 9: 7.8 s for 27 files when per file)
-	declare -A pats cost
+	declare -A pats cost web
 	for name in $runners; do
 		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
 		pats[$name]=$(covers_of "$path" "$name" | sed 's/\*\*/*/g')
 		cost[$name]=$(cost_of "$path" "$name")
+		web[$name]=$(grep -q web_drive "$path" && echo 1)
+	done
+	# **A changed runner picks itself**, whatever its tier but broken, and
+	# is no other file's pick ([RUN_ALL_PICK]): a check edited beside the
+	# code proves what its author thought of, and the [LIVELY_MENU] merge's
+	# own check passed on the web regression its client Lua made, which
+	# aitta_web_check and serverless_check saw
+	declare -A self
+	for f in $files; do
+		[ -f "$root/$f" ] && grep -qE '^# tier: *(quick|full|long)' "$root/$f" || continue
+		name=$f
+		case "$f" in builtin/luanti/test/*) name=${f##*/};; esac
+		self[$f]=1; self[$name]=1
+		picked="$picked
+$name"
 	done
 	for f in $files; do
 		# **A document is not code and wants no runner** ([SMOKE_PICK]):
@@ -164,21 +194,39 @@ if [ -n "$changed" ]; then
 		case "$f" in
 		doc/*|*.md|LICENSE*|MIT.txt|CONTRIBUTING*) continue;;
 		esac
-		best=""; best_cost=999999
+		[ -n "${self[$f]:-}" ] && continue
+		# The cheapest native runner and the cheapest web one
+		bn=""; bn_cost=999999; bw=""; bw_cost=999999
 		for name in $runners; do
+			[ -n "${self[$name]:-}" ] && continue
 			for pat in ${pats[$name]}; do
 				# shellcheck disable=SC2254
 				case "$f" in
 				$pat)
 					c=${cost[$name]}
-					if [ "$c" -lt "$best_cost" ]; then best=$name; best_cost=$c; fi
-					;;
+					if [ -n "${web[$name]}" ]; then
+						[ "$c" -lt "$bw_cost" ] && { bw=$name; bw_cost=$c; }
+					else
+						[ "$c" -lt "$bn_cost" ] && { bn=$name; bn_cost=$c; }
+					fi
+					break;;
 				esac
 			done
 		done
-		if [ -n "$best" ]; then
-			echo "$picked" | grep -qx "$best" || picked="$picked
-$best"
+		# **A file both clients run gets both** ([RUN_ALL_PICK]): the
+		# [LIVELY_MENU] merge's client Lua got a native check and broke
+		# the web play. What the page's bundle packs (CMakeLists.txt's
+		# WEB_PRELOAD), the client's C++, what the server sends a client,
+		# and the network module that serves the page. Anything else, the
+		# cheaper of the two
+		case "$f" in
+		client/*|extensions/*|src/client/*|src/lua_bindings/*|*/client_lua/*|*/client_data/*|builtin/network/*|src/server/web/*) ;;
+		*) if [ "$bw_cost" -lt "$bn_cost" ]; then bn=""; else bw=""; fi;;
+		esac
+		if [ -n "$bn$bw" ]; then
+			picked="$picked
+$bn
+$bw"
 		else
 			uncovered="$uncovered $f"
 		fi
