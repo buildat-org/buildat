@@ -28,7 +28,7 @@
 #   3.x (CMake 4 refuses cmake_minimum_required(VERSION 3.2.3) unless
 #   CMAKE_POLICY_VERSION_MINIMUM=3.5 is set); python3
 #   with PIL, numpy, websockets and cryptography; zip, unzip, ImageMagick;
-#   zstd; luajit (the apps' Lua parse checks); ~/emsdk at the release's version;
+#   zstd; luajit (the apps' Lua parse checks); sqlite3; ~/emsdk at the release's version;
 #   xdotool and openbox for
 #   builtin/luanti/test/focus.sh (minimize, activate: a window manager in
 #   the run's Xvfb, started by this script when there is one).
