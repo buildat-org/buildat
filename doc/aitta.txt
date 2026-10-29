@@ -70,7 +70,7 @@ A release can run in the browser with its server in the page
 ([WEB_LOCAL_AITTA]) when it is an app, not a variant, whose client Lua
 loads on the web, each of whose modules is a .wasm on the server side
 ("server_wasm") or has no server side ("disable_cpp") -- or is C++ on an
-Aitta with a kit, below -- and whose dependencies are its own modules or
+Aitta with an SDK, below -- and whose dependencies are its own modules or
 builtins that keep to the web API. Aitta builds such a release's .wasm itself after it is listed, one
 release at a time, taking the authors in turn (round-robin; an author's
 own in the order published), from the release's source (a release
@@ -117,43 +117,44 @@ a failed build leaves it out of the page, Aitta's log saying why. An
 Aitta not on Linux builds none.
 
 C++ modules ([WEB_LOCAL_AITTA_CPP]) are built for the page only by an
-Aitta started with BUILDAT_AITTA_CPP_KIT naming a kit: the engine's
+Aitta started with BUILDAT_AITTA_CPP_SDK (BUILDAT_AITTA_CPP_KIT, its
+old name, is read too, with a warning) naming an SDK: the engine's
 server for packages (web/local/_aitta) as parts -- its objects,
 libraries, flags, headers and packed files, the .js and .wasm it made,
 and the emsdk version it was made with -- which util/build_web_server.sh
-"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_kit. A
-release's linux-x86_64-web-precompiled archive carries the kit of its own
-web/local/_aitta in aitta_kit/ ([AITTA_KIT_IN_RELEASE]), and
-util/serve_latest_release.sh starts each server with BUILDAT_AITTA_CPP_KIT
-naming the running version's kit, so the kit moves with each release.
-The kit builds with the emsdk at $EMSDK, else ~/emsdk, on the Aitta host,
-which must be the version it was made with: a release's kit needs emsdk
+"$PWD/src/server/web/_aitta" makes in Build-webserver/aitta_sdk. A
+release's linux-x86_64-web-precompiled archive carries the SDK of its own
+web/local/_aitta in aitta_sdk/ ([AITTA_KIT_IN_RELEASE]), and
+util/serve_latest_release.sh starts each server with BUILDAT_AITTA_CPP_SDK
+naming the running version's SDK, so the SDK moves with each release.
+The SDK builds with the emsdk at $EMSDK, else ~/emsdk, on the Aitta host,
+which must be the version it was made with: a release's SDK needs emsdk
 3.1.60 (util/docker/linux's EMSDK_VERSION), installed as
 
     git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
     cd ~/emsdk && ./emsdk install 3.1.60 && ./emsdk activate 3.1.60
 
-Another version links a .js that is not the kit's: Aitta says at its
-start "the kit at ... needs emsdk 3.1.60, and the emsdk at ... is ..."
+Another version links a .js that is not the SDK's: Aitta says at its
+start "the SDK at ... needs emsdk 3.1.60, and the emsdk at ... is ..."
 and refuses C++ for the page until it is fixed. The build reads the
 emsdk's cache and cannot write to it; an emsdk installed as above has
-what it reads. In the same build, in the same box, the kit's fixed script
+what it reads. In the same build, in the same box, the SDK's fixed script
 (util/aitta_cpp_build.py) compiles each C++ module (<name>_web.cpp or
-<name>.cpp, and its wasm/'s C and C++) with the kit's flags and none of
+<name>.cpp, and its wasm/'s C and C++) with the SDK's flags and none of
 the module's own -- a module with "cxxflags" is not for the page -- and
-links them with the kit's objects into a server of the release's own.
+links them with the SDK's objects into a server of the release's own.
 Aitta then checks the output, not the source: the .wasm (at most 32 MiB)
-imports nothing the kit's does not, each of the same type, and has no
-custom section the kit's has not; its .js is the kit's but for where the
+imports nothing the SDK's does not, each of the same type, and has no
+custom section the SDK's has not; its .js is the SDK's but for where the
 EM_ASM code is (moved by one amount, the release's own data before it).
 So EM_ASM, EM_JS, emscripten_run_script and any library function the
 engine does not use are refused, whatever macro wrote them. Built, the
 release says "web_cpp": true (not "web": a client before this would run
-it without its C++) and "web_server": {wasm (its sha256), js (the kit's
+it without its C++) and "web_server": {wasm (its sha256), js (the SDK's
 .js's sha256), shift}. The page never runs the release's .js: it runs
 the .wasm with its own web/local/_aitta/buildat_server.js, so the .wasm
 reaches what that .js's imports reach and no more; the check refuses
-early what could not run so. A kit of another engine version links every
+early what could not run so. An SDK of another engine version links every
 such release again at Aitta's start; until then the page of the new
 version runs none of them.
 
@@ -386,7 +387,7 @@ server; the modules' .wasm run on the browser's own wasm, checked,
 granted and metered as on a native server. The saves are kept in the
 browser. A release with C++ ("web_cpp") has its own server .wasm, kept as
 .web/server.engine.wasm with .web/server.json: the page runs it with
-local/_aitta's .js when that .js is the one its Aitta's kit had (by
+local/_aitta's .js when that .js is the one its Aitta's SDK had (by
 sha256; else "built for another version of this page's engine"), the
 EM_ASM addresses moved by the release's shift (src/server/web/post.js).
 Its saves are an IndexedDB database of their own (/user/apps/<author>.

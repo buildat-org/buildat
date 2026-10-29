@@ -9,8 +9,8 @@
 # the page with no build of their own (their modules are .wasm), is
 # src/server/web/_aitta, an app of the builtins that keep to the web API:
 # util/build_web_server.sh "$PWD/src/server/web/_aitta" into web/local/_aitta/
-# [WEB_LOCAL_AITTA_CPP] and its parts into Build-webserver/aitta_kit/, from
-# which an Aitta (BUILDAT_AITTA_CPP_KIT) links a release's C++ modules into
+# [WEB_LOCAL_AITTA_CPP] and its parts into Build-webserver/aitta_sdk/, from
+# which an Aitta (BUILDAT_AITTA_CPP_SDK) links a release's C++ modules into
 # a server of its own for the page (util/aitta_cpp_build.py)
 set -e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,6 +27,6 @@ out="$ROOT/web/local/$(basename "$APP")"
 mkdir -p "$out"
 cp bin/buildat_server.js bin/buildat_server.wasm bin/buildat_server.data "$out/"
 if [ "$(basename "$APP")" = _aitta ]; then
-	python3 -I "$ROOT/util/aitta_cpp_build.py" kit . aitta_kit
+	python3 -I "$ROOT/util/aitta_cpp_build.py" sdk . aitta_sdk
 fi
 ls -la "$out"

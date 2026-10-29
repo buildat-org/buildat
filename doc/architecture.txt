@@ -175,7 +175,7 @@ choice, not a rewrite.
   installed release and the .wasm, and each module runs on the browser's
   own wasm as an instance of its own. No JS of the package's runs, and
   the .wasm are not tied to the engine's version (doc/aitta.txt).
-- The same with C++ modules, on an Aitta with a kit: Aitta links the
+- The same with C++ modules, on an Aitta with an SDK: Aitta links the
   release's C++ into a copy of that server at publish, in the same box,
   and checks the output imports nothing the engine's does not and
   carries no JS; the page runs it with the engine's own .js. Tied to the

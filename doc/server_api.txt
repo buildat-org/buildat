@@ -910,7 +910,7 @@ interface/module.h: ModuleAskedToStop, Module, ~Module, init, event, sub, dispat
 interface/module_info.h: ModuleDependency, ModuleMeta, ModuleInfo
 interface/mutex.h: Mutex, lock, unlock, MutexScope
 interface/noise.h: lattice, ease, value3, value2, fbm2, fbm3, fbm2_abs, fbm3_abs, NoiseParams, noise2, noise3, fill2, fill3
-interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, aitta_kit_emsdk, windows_sandbox_off_by_env, die_with_parent_if_asked, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
+interface/os.h: time_us, wall_us, set_wall_offset_us, utc_tm, tm, sleep_us, unconfined_by_env, aitta_cpp_sdk, aitta_sdk_emsdk, windows_sandbox_off_by_env, die_with_parent_if_asked, get_current_exe_path, get_sibling_exe_path, memory_bytes, free_bytes
 interface/packet_stream.h: InputBuffer, size, empty, begin, clear, append, PacketType, UnknownPacketReceived, OutgoingPacketTypeRegistry, set, get, get_name, IncomingPacketTypeRegistry, get_type, PacketStream, Fragments, input, in_flight, output, FragmentSequence, begin_fragments, fragment, send_new_types
 interface/polyvox_cereal.h: save, load
 interface/polyvox_numeric.h: container_coord, container_coord16

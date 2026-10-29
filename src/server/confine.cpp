@@ -523,7 +523,7 @@ static uint64_t ns_memory()
 	return kib << 10;
 }
 
-int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
+int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &sdk)
 {
 	// Nothing of Aitta's: an open file or socket it left without
 	// close-on-exec (a descriptor goes past any box), its input, and its
@@ -645,9 +645,9 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	interface::fs::create_directories(job+"/tmp");
 	interface::fs::create_directories(job+"/build/wasm");
 	interface::fs::create_directories(job+"/out");
-	// [AITTA_KIT_IN_RELEASE] The kit's emsdk, found as Aitta found it
+	// [AITTA_KIT_IN_RELEASE] The SDK's emsdk, found as Aitta found it
 	// (the environment is Aitta's until cleared below)
-	const ss_ emsdk = kit.empty() ? "" : real(interface::os::aitta_kit_emsdk());
+	const ss_ emsdk = sdk.empty() ? "" : real(interface::os::aitta_sdk_emsdk());
 	// A build script reads the environment and may write it into the
 	// .wasm: only what the build needs
 	clearenv();
@@ -667,11 +667,11 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 	config.set("rccpp_build_path", job+"/build");
 	config.set("rccpp_prebuilt_path", "");
 	const ss_ cc = config.get<ss_>("wasm_cc"), ld = config.get<ss_>("wasm_ld");
-	// [WEB_LOCAL_AITTA_CPP] The kit and its emsdk (python3 is the
+	// [WEB_LOCAL_AITTA_CPP] The SDK and its emsdk (python3 is the
 	// system's, under /usr)
-	if(!kit.empty() && (kit.find('\'') != ss_::npos || job.find('\'') !=
+	if(!sdk.empty() && (sdk.find('\'') != ss_::npos || job.find('\'') !=
 			ss_::npos || emsdk.find('\'') != ss_::npos || emsdk.empty())){
-		log_e("wasm", "the build: no kit with an emsdk at %s", cs(kit));
+		log_e("wasm", "the build: no SDK with an emsdk at %s", cs(sdk));
 		return 2;
 	}
 	// The build itself in a child, in its box; this one, the namespace's
@@ -722,7 +722,7 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 			cc.empty() ? "" : interface::fs::strip_file_name(
 				interface::fs::strip_file_name(cc)),
 			ld.empty() ? "" : interface::fs::strip_file_name(
-				interface::fs::strip_file_name(ld)), kit, emsdk}, job);
+				interface::fs::strip_file_name(ld)), sdk, emsdk}, job);
 	if(!why.empty()){
 		log_e("wasm", "the build is not made outside its box: %s", cs(why));
 		return 3;
@@ -758,12 +758,12 @@ int build_wasm_job(const ss_ &job, const ss_ &interface_path, const ss_ &kit)
 			}
 		}
 	}
-	// [WEB_LOCAL_AITTA_CPP] The C++ modules, by the kit's fixed script:
-	// the system's python3, the environment above and the kit's emsdk
-	if(ok && !kit.empty()){
+	// [WEB_LOCAL_AITTA_CPP] The C++ modules, by the SDK's fixed script:
+	// the system's python3, the environment above and the SDK's emsdk
+	if(ok && !sdk.empty()){
 		fflush(stdout);
-		ok = interface::process::shell_exec("/usr/bin/python3 -I '"+kit+
-				"/build.py' build '"+kit+"' '"+job+"' '"+emsdk+"'") == 0;
+		ok = interface::process::shell_exec("/usr/bin/python3 -I '"+sdk+
+				"/build.py' build '"+sdk+"' '"+job+"' '"+emsdk+"'") == 0;
 		if(!ok)
 			log_e("wasm", "the build: the C++ server failed");
 	}
@@ -992,12 +992,12 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	rs.add_around(prebuilt, {app_cache}, FS_READ);
 	if(!build_cgroup.empty())
 		rs.add(build_cgroup+"/cgroup.procs", LANDLOCK_ACCESS_FS_WRITE_FILE);
-	// [WEB_LOCAL_AITTA_CPP] An Aitta's kit for building C++ servers for
+	// [WEB_LOCAL_AITTA_CPP] An Aitta's SDK for building C++ servers for
 	// the page, and the emsdk it names: what its build reads, which runs
 	// inside this box as well
-	if(const char *kit = getenv("BUILDAT_AITTA_CPP_KIT")){
-		rs.add_around(kit, holes, FS_READ);
-		const ss_ emsdk = interface::os::aitta_kit_emsdk();
+	if(const char *sdk = interface::os::aitta_cpp_sdk()){
+		rs.add_around(sdk, holes, FS_READ);
+		const ss_ emsdk = interface::os::aitta_sdk_emsdk();
 		if(!emsdk.empty())
 			rs.add_around(emsdk, holes, FS_READ);
 	}

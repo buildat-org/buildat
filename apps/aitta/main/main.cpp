@@ -253,7 +253,7 @@ static ss_ wasm_imports(const ss_ &w, std::set<ss_> &imports,
 	return cut ? "cut short" : "";
 }
 
-// [WEB_LOCAL_AITTA_CPP] A built server's .js against the kit's: the same
+// [WEB_LOCAL_AITTA_CPP] A built server's .js against the SDK's: the same
 // bytes but for the keys of ASM_CONSTS (the EM_ASM code, by its address),
 // each moved by one amount, the release's data before them. That amount in
 // shift, and "", or why not: then the release has JS of its own (EM_ASM,
@@ -264,7 +264,7 @@ static ss_ js_shift(const ss_ &rel, const ss_ &ref, int64_t &shift)
 	const size_t a = ref.find(start);
 	const size_t b = a == ss_::npos ? ss_::npos : ref.find(stop, a);
 	if(b == ss_::npos)
-		return "the kit's .js has no ASM_CONSTS";
+		return "the SDK's .js has no ASM_CONSTS";
 	bool have = false;
 	shift = 0;
 	size_t i = 0, j = 0;
@@ -386,10 +386,10 @@ struct Module: public interface::Module, public moderation::Host
 	sv_<ss_> m_web_names; // what it is to build
 	interface::process::Handle m_web_proc;
 	int64_t m_web_started = 0;
-	// [WEB_LOCAL_AITTA_CPP] The kit its C++ servers for the page are
-	// linked from (BUILDAT_AITTA_CPP_KIT, util/aitta_cpp_build.py), or
+	// [WEB_LOCAL_AITTA_CPP] The SDK its C++ servers for the page are
+	// linked from (BUILDAT_AITTA_CPP_SDK, util/aitta_cpp_build.py), or
 	// none; whether the one building has C++
-	ss_ m_cpp_kit;
+	ss_ m_cpp_sdk;
 	bool m_web_cpp = false;
 
 	Module(interface::Server *server):
@@ -525,41 +525,44 @@ struct Module: public interface::Module, public moderation::Host
 			iface->claim_http_path("/brand/");
 		});
 		log_i(MODULE, "Aitta: %zu releases", releases_map().size());
-		// [WEB_LOCAL_AITTA_CPP] A kit made by util/build_web_server.sh for
+		// [WEB_LOCAL_AITTA_CPP] An SDK made by util/build_web_server.sh for
 		// this engine, on this host
 		// [AITTA_KIT_IN_RELEASE] and with the emsdk version it was made
 		// with ($EMSDK, else ~/emsdk): another emscripten links a .js
-		// that is not the kit's, which each build would be refused for
-		if(const char *kit = getenv("BUILDAT_AITTA_CPP_KIT")){
-			const ss_ emsdk = interface::os::aitta_kit_emsdk();
+		// that is not the SDK's, which each build would be refused for
+		if(!getenv("BUILDAT_AITTA_CPP_SDK") && getenv("BUILDAT_AITTA_CPP_KIT"))
+			log_w(MODULE, "BUILDAT_AITTA_CPP_KIT is read for now; its name "
+					"is BUILDAT_AITTA_CPP_SDK");
+		if(const char *sdk = interface::os::aitta_cpp_sdk()){
+			const ss_ emsdk = interface::os::aitta_sdk_emsdk();
 			auto version = [](ss_ v){
 				const size_t a = v.find_first_not_of("\" \t\r\n");
 				const size_t b = v.find_last_not_of("\" \t\r\n");
 				return a == ss_::npos ? ss_() : v.substr(a, b - a + 1);
 			};
 			const ss_ need = version(jstr(json::load_string(read_file(
-					ss_(kit)+"/kit.json").c_str()), "emsdk"));
+					ss_(sdk)+"/sdk.json").c_str()), "emsdk"));
 			const ss_ have = version(read_file(
 					emsdk+"/upstream/emscripten/emscripten-version.txt"));
-			if(!interface::fs::path_exists(ss_(kit)+"/kit.json") ||
-					!interface::fs::path_exists(ss_(kit)+"/ref/buildat_server.js")){
-				log_w(MODULE, "BUILDAT_AITTA_CPP_KIT: no kit at %s", kit);
+			if(!interface::fs::path_exists(ss_(sdk)+"/sdk.json") ||
+					!interface::fs::path_exists(ss_(sdk)+"/ref/buildat_server.js")){
+				log_w(MODULE, "BUILDAT_AITTA_CPP_SDK: no SDK at %s", sdk);
 			} else if(need.empty() || need != have){
-				log_e(MODULE, "BUILDAT_AITTA_CPP_KIT: the kit at %s needs "
+				log_e(MODULE, "BUILDAT_AITTA_CPP_SDK: the SDK at %s needs "
 						"emsdk %s, and the emsdk at %s (EMSDK, else ~/emsdk) "
 						"is %s: C++ servers for the page are refused until "
-						"that emsdk is installed", kit, need.empty() ?
-						"(not recorded: make the kit again)" : cs(need),
+						"that emsdk is installed", sdk, need.empty() ?
+						"(not recorded: make the SDK again)" : cs(need),
 						cs(emsdk), have.empty() ? "not there" : cs(have));
 			} else {
-				m_cpp_kit = kit;
+				m_cpp_sdk = sdk;
 				log_i(MODULE, "C++ servers for the page: linked from %s, "
-						"with emsdk %s at %s", kit, cs(have), cs(emsdk));
-				// Each engine its own: a server linked from another kit is
+						"with emsdk %s at %s", sdk, cs(have), cs(emsdk));
+				// Each engine its own: a server linked from another SDK is
 				// linked again from this one
 				// simplified: the page of the engine before then runs none
 				const ss_ js = interface::sha256::hex(interface::sha256::calculate(
-						read_file(m_cpp_kit+"/ref/buildat_server.js")));
+						read_file(m_cpp_sdk+"/ref/buildat_server.js")));
 				sv_<ss_> again;
 				for(auto &p : releases_map()){
 					const ss_ had = jstr(p.second.get("web_server"), "js");
@@ -1378,7 +1381,7 @@ struct Module: public interface::Module, public moderation::Host
 	// meta.json, by a plain name) a .wasm on the server ("server_wasm") or
 	// none ("disable_cpp"), never C++; each dependency one of its own or a
 	// builtin that keeps to the web API ("web": true, or a stand-in).
-	// [WEB_LOCAL_AITTA_CPP] With a kit, a module may be C++ too, without
+	// [WEB_LOCAL_AITTA_CPP] With an SDK, a module may be C++ too, without
 	// flags of its own ("cxxflags"): Aitta links a server of the release's
 	// own for the page.
 	ss_ web_refusal(const ss_ &dir, const json::Value &m, const ss_ &lua51)
@@ -1411,7 +1414,7 @@ struct Module: public interface::Module, public moderation::Host
 			const json::Value &mm = mod.second;
 			if(jstr(mm.get("server_wasm"), "source").empty() &&
 					!mm.get("disable_cpp").is_true()){
-				if(m_cpp_kit.empty())
+				if(m_cpp_sdk.empty())
 					return "the module "+mod.first+" is C++";
 				if(!mm.get("cxxflags").is_undefined())
 					return "the module "+mod.first+" has cxxflags";
@@ -1506,7 +1509,7 @@ struct Module: public interface::Module, public moderation::Host
 		sv_<ss_> args = {"--build-wasm", m_web_job, m_server->get_config()
 				.get<ss_>("interface_path")};
 		if(m_web_cpp)
-			args.push_back(m_cpp_kit);
+			args.push_back(m_cpp_sdk);
 		m_web_proc = interface::process::start(
 				interface::os::get_sibling_exe_path("buildat_server"), args);
 		if(!m_web_proc.valid())
@@ -1554,13 +1557,13 @@ struct Module: public interface::Module, public moderation::Host
 	}
 
 	// [WEB_LOCAL_AITTA_CPP] The release's own server, as the build left it
-	// in bin/, against the kit's (ref/): a .wasm of at most 32 MiB whose
+	// in bin/, against the SDK's (ref/): a .wasm of at most 32 MiB whose
 	// imports and custom sections are all the engine's own, and a .js that
 	// is the engine's but for where the EM_ASM code is. The page never runs
 	// this .js: it runs the .wasm with its local/_aitta/buildat_server.js,
-	// which the kit's is, so what the .wasm can reach is that .js's imports
+	// which the SDK's is, so what the .wasm can reach is that .js's imports
 	// (the box's walls are the engine's own). Kept by its sha256; into
-	// out {wasm, js (the kit's .js's sha256, which the page compares with
+	// out {wasm, js (the SDK's .js's sha256, which the page compares with
 	// its own), shift}. "", or why not ("refused: ..." when one was built).
 	ss_ cpp_server_check(json::Value &out)
 	{
@@ -1571,12 +1574,12 @@ struct Module: public interface::Module, public moderation::Host
 			return "none was built";
 		if(w.size() > max)
 			return "refused: its .wasm is past 32 MiB";
-		const ss_ ref_js = read_file(m_cpp_kit+"/ref/buildat_server.js");
+		const ss_ ref_js = read_file(m_cpp_sdk+"/ref/buildat_server.js");
 		std::set<ss_> imports, customs, ref_imports, ref_customs;
-		ss_ why = wasm_imports(read_file(m_cpp_kit+"/ref/buildat_server.wasm"),
+		ss_ why = wasm_imports(read_file(m_cpp_sdk+"/ref/buildat_server.wasm"),
 				ref_imports, ref_customs);
 		if(!why.empty() || ref_js.empty())
-			return "the kit's own: "+(why.empty() ? ss_("no .js") : why);
+			return "the SDK's own: "+(why.empty() ? ss_("no .js") : why);
 		why = wasm_imports(w, imports, customs);
 		if(!why.empty())
 			return "refused: "+why;

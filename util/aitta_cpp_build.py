@@ -4,23 +4,23 @@
 # linked again with the release's C++ modules in it, by a fixed script, no
 # flag of the author's.
 #
-#   util/aitta_cpp_build.py kit <build dir> <kit dir>
+#   util/aitta_cpp_build.py sdk <build dir> <SDK dir>
 #     After util/build_web_server.sh built _aitta in <build dir>
 #     (Build-webserver): its objects, libraries, flags, headers, packed files
-#     and outputs copied into <kit dir>, which an Aitta names in
-#     BUILDAT_AITTA_CPP_KIT; kit/build.py is this script. kit.json's
+#     and outputs copied into <SDK dir>, which an Aitta names in
+#     BUILDAT_AITTA_CPP_SDK; <SDK dir>/build.py is this script. sdk.json's
 #     "emsdk" is the emsdk version it was built with ($EMSDK's), which the
 #     Aitta host's emsdk must be ([AITTA_KIT_IN_RELEASE]: a release ships
-#     the kit, util/package.sh). The emsdk's cache there must have what
+#     the SDK, util/package.sh). The emsdk's cache there must have what
 #     the link reads (the build cannot write there); an emsdk installed by
 #     `emsdk install` has it.
-#   python3 -I <kit>/build.py build <kit dir> <job dir> <emsdk>
+#   python3 -I <SDK>/build.py build <SDK dir> <job dir> <emsdk>
 #     In the build's box (src/server/confine.cpp, build_wasm_job()): the
 #     release in <job>/src; each C++ module compiled, the module table made
-#     and the server linked with the kit's flags into <job>/bin/
+#     and the server linked with the SDK's flags into <job>/bin/
 #     buildat_server.{js,wasm}. Aitta then checks them against
-#     <kit>/ref/ (apps/aitta/main/main.cpp, cpp_server_check()). <emsdk>
-#     is Aitta's ($EMSDK, else ~/emsdk), of the kit's version.
+#     <SDK>/ref/ (apps/aitta/main/main.cpp, cpp_server_check()). <emsdk>
+#     is Aitta's ($EMSDK, else ~/emsdk), of the SDK's version.
 import json, os, re, shlex, shutil, subprocess, sys
 
 PLAIN = re.compile(r"^[A-Za-z0-9_]{1,64}$")
@@ -30,16 +30,16 @@ def die(why):
     print("cpp build: " + why, flush=True)
     sys.exit(1)
 
-def make_kit(build, kit):
-    build, kit = os.path.abspath(build), os.path.abspath(kit)
+def make_sdk(build, sdk):
+    build, sdk = os.path.abspath(build), os.path.abspath(sdk)
     d = os.path.join(build, "CMakeFiles/buildat_server.dir")
     table = open(os.path.join(build, "web_server_modules.cpp")).read()
     if not table.split("\n")[0].endswith("/src/server/web/_aitta"):
         die(build + " is not a build of src/server/web/_aitta")
-    if os.path.exists(kit):
-        shutil.rmtree(kit)
+    if os.path.exists(sdk):
+        shutil.rmtree(sdk)
     for sub in ("obj", "lib", "inc", "share", "pre", "ref"):
-        os.makedirs(os.path.join(kit, sub))
+        os.makedirs(os.path.join(sdk, sub))
     k = {"builtins": re.findall(r'\{"([A-Za-z0-9_]+)", createModule_', table)}
     # The objects, the table's own left out (each build makes it again)
     k["objects"] = []
@@ -54,7 +54,7 @@ def make_kit(build, kit):
             k["objects"].append("@TABLE@")
             continue
         to = "obj/%03d_%s" % (i, os.path.basename(o))
-        shutil.copyfile(os.path.join(build, o), os.path.join(kit, to))
+        shutil.copyfile(os.path.join(build, o), os.path.join(sdk, to))
         k["objects"].append(to)
     k["libs"] = []
     for i, l in enumerate(shlex.split(open(os.path.join(d, "linkLibs.rsp")).read())):
@@ -62,7 +62,7 @@ def make_kit(build, kit):
             k["libs"].append(l)
             continue
         to = "lib/%02d_%s" % (i, os.path.basename(l))
-        shutil.copyfile(os.path.join(build, l), os.path.join(kit, to))
+        shutil.copyfile(os.path.join(build, l), os.path.join(sdk, to))
         k["libs"].append(to)
     # The headers of each include directory (one inside another already
     # copied is a path in that copy); the app's own directory is the
@@ -95,7 +95,7 @@ def make_kit(build, kit):
         for root, _, files in os.walk(p):
             for f in files:
                 if f.endswith(HEADERS):
-                    to = os.path.join(kit, dirs[p], os.path.relpath(root, p), f)
+                    to = os.path.join(sdk, dirs[p], os.path.relpath(root, p), f)
                     os.makedirs(os.path.dirname(to), exist_ok=True)
                     shutil.copyfile(os.path.join(root, f), to)
     k["includes"] = [dirs.get(f, f) for f in flags]
@@ -119,26 +119,26 @@ def make_kit(build, kit):
             i += 2
         elif f in ("--pre-js", "--post-js"):
             to = "pre/" + os.path.basename(link[i + 1])
-            shutil.copyfile(link[i + 1], os.path.join(kit, to))
+            shutil.copyfile(link[i + 1], os.path.join(sdk, to))
             k["link"] += [f, to]
             i += 2
         elif f == "--preload-file":
             src, dst = link[i + 1].rsplit("@", 1)
             to = "share/%02d" % len([x for x in k["link"] if x == "--preload-file"])
-            shutil.copytree(src, os.path.join(kit, to))
+            shutil.copytree(src, os.path.join(sdk, to))
             k["link"] += [f, to + "@" + dst]
             i += 2
         else:
             k["link"].append(f)
             i += 1
     for f in ("buildat_server.js", "buildat_server.wasm"):
-        shutil.copyfile(os.path.join(build, "bin", f), os.path.join(kit, "ref", f))
+        shutil.copyfile(os.path.join(build, "bin", f), os.path.join(sdk, "ref", f))
     k["emsdk"] = emsdk_version(os.environ.get("EMSDK", ""))
     if not k["emsdk"]:
         die("no emsdk in EMSDK (" + os.environ.get("EMSDK", "") + ")")
-    json.dump(k, open(os.path.join(kit, "kit.json"), "w"), indent=1)
-    shutil.copyfile(os.path.abspath(__file__), os.path.join(kit, "build.py"))
-    print("kit: " + kit)
+    json.dump(k, open(os.path.join(sdk, "sdk.json"), "w"), indent=1)
+    shutil.copyfile(os.path.abspath(__file__), os.path.join(sdk, "build.py"))
+    print("SDK: " + sdk)
 
 # An emsdk's emscripten version ("3.1.60"), or "" where there is none;
 # Aitta reads the same file (apps/aitta/main/main.cpp)
@@ -154,13 +154,13 @@ def run(args, cwd):
     if p.returncode != 0:
         die("%s failed (%d)" % (os.path.basename(args[0]), p.returncode))
 
-def build(kit, job, emsdk):
-    kit, job = os.path.abspath(kit), os.path.abspath(job)
-    k = json.load(open(os.path.join(kit, "kit.json")))
+def build(sdk, job, emsdk):
+    sdk, job = os.path.abspath(sdk), os.path.abspath(job)
+    k = json.load(open(os.path.join(sdk, "sdk.json")))
     emsdk = os.path.realpath(emsdk)
     # Another emscripten makes another .js, which Aitta would refuse
     if emsdk_version(emsdk) != k.get("emsdk"):
-        die("the kit needs emsdk %s, %s is %s" % (k.get("emsdk"), emsdk,
+        die("the SDK needs emsdk %s, %s is %s" % (k.get("emsdk"), emsdk,
             emsdk_version(emsdk) or "no emsdk"))
     em = os.path.join(emsdk, "upstream/emscripten")
     # The emsdk's cache read where it is, but its locks and the link's
@@ -182,7 +182,7 @@ def build(kit, job, emsdk):
     obj = os.path.join(job, "obj")
     os.makedirs(obj, exist_ok=True)
     os.makedirs(os.path.join(job, "bin"), exist_ok=True)
-    kp = lambda p: os.path.join(kit, p)
+    kp = lambda p: os.path.join(sdk, p)
     inc = [src if f == "@APP@" else kp(f) if f.startswith("inc/") else f
             for f in k["includes"]]
     # The release's C++ modules, as util/web_server.cmake takes a module's
@@ -243,9 +243,9 @@ def build(kit, job, emsdk):
             ["-o", "bin/buildat_server.js"] + libs, job)
     print("cpp build: %s linked" % ", ".join(mods), flush=True)
 
-if len(sys.argv) == 4 and sys.argv[1] == "kit":
-    make_kit(sys.argv[2], sys.argv[3])
+if len(sys.argv) == 4 and sys.argv[1] == "sdk":
+    make_sdk(sys.argv[2], sys.argv[3])
 elif len(sys.argv) == 5 and sys.argv[1] == "build":
     build(sys.argv[2], sys.argv[3], sys.argv[4])
 else:
-    sys.exit("usage: aitta_cpp_build.py kit <build dir> <kit dir> | build <kit dir> <job dir> <emsdk>")
+    sys.exit("usage: aitta_cpp_build.py sdk <build dir> <SDK dir> | build <SDK dir> <job dir> <emsdk>")

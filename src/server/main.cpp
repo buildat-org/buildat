@@ -99,7 +99,7 @@ int main(int argc, char *argv[])
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 	// [WEB_LOCAL_AITTA] Aitta's build of a release's .wasm, in a box of
-	// its own, and nothing else; [WEB_LOCAL_AITTA_CPP] with a kit, its C++
+	// its own, and nothing else; [WEB_LOCAL_AITTA_CPP] with an SDK, its C++
 	// server for the page as well
 	if((argc == 4 || argc == 5) && ss_(argv[1]) == "--build-wasm")
 		return server::build_wasm_job(argv[2], argv[3], argc == 5 ? argv[4] : "");

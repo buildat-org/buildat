@@ -26,8 +26,8 @@
 #      answering meanwhile, nothing left.
 #   3. A package with a C++ module with cxxflags: listed, not in the page.
 #   3b. [WEB_LOCAL_AITTA_CPP] A package with a C++ module: Aitta links its
-#      own server from the kit (Build-webserver/aitta_kit) in the build's
-#      box, checks it against the kit's and lists it ("web_server"), served
+#      own server from the SDK (Build-webserver/aitta_sdk) in the build's
+#      box, checks it against the SDK's and lists it ("web_server"), served
 #      with CORS and CORP. Refused: EM_ASM, EM_JS, emscripten_run_script,
 #      an import the engine has not (emscripten_vibrate), one it has under
 #      another type, and an #include of a file outside the package (which
@@ -42,7 +42,7 @@
 #      C++ answering the client's packet.
 #   5. 2b again where the host gives the build no PID namespace
 #      (BUILDAT_BUILD_NO_PIDNS=1): not built, and nothing left. Aitta's
-#      records copied to a second one, whose kit's emsdk is not the one
+#      records copied to a second one, whose SDK's emsdk is not the one
 #      it finds ([AITTA_KIT_IN_RELEASE]: EMSDK at a fake one): said at
 #      its start, and the C++ package
 #      listed, not in the page.
@@ -55,7 +55,7 @@
 #      the first's.
 # Needs web/ (util/build_web.sh), web/local/_aitta
 # (util/build_web_server.sh "$PWD/src/server/web/_aitta", which makes the
-# kit too), cargo with the wasm32-unknown-unknown target, a display for the
+# SDK too), cargo with the wasm32-unknown-unknown target, a display for the
 # key's bind, and Playwright's WebKit (util/web_drive.sh).
 #   util/aitta_web_check.sh
 set -u
@@ -64,11 +64,11 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
 [ -f "$here/web/local/_aitta/buildat_server.wasm" ] ||
 	skip "no web/local/_aitta (util/build_web_server.sh \"\$PWD/src/server/web/_aitta\")"
-# AITTA_WEB_CHECK_KIT: another kit than the tree's (one moved, as a
+# AITTA_WEB_CHECK_SDK: another SDK than the tree's (one moved, as a
 # release's archive places it)
-kit=${AITTA_WEB_CHECK_KIT:-$here/Build-webserver/aitta_kit}
-[ -f "$kit/kit.json" ] && cmp -s "$kit/ref/buildat_server.js" "$here/web/local/_aitta/buildat_server.js" ||
-	skip "no kit of web/local/_aitta's build (util/build_web_server.sh \"\$PWD/src/server/web/_aitta\")"
+sdk=${AITTA_WEB_CHECK_SDK:-$here/Build-webserver/aitta_sdk}
+[ -f "$sdk/sdk.json" ] && cmp -s "$sdk/ref/buildat_server.js" "$here/web/local/_aitta/buildat_server.js" ||
+	skip "no SDK of web/local/_aitta's build (util/build_web_server.sh \"\$PWD/src/server/web/_aitta\")"
 cargo=$(command -v cargo || echo "$HOME/.cargo/bin/cargo")
 [ -x "$cargo" ] || skip "no cargo"
 [ -d "$("$(dirname "$cargo")/rustc" --print target-libdir --target wasm32-unknown-unknown 2>/dev/null)" ] ||
@@ -79,15 +79,15 @@ export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
 trap check_cleanup EXIT
 
 cd "$here/Build"
-AITTA_ENV_SECRET=1 BUILDAT_AITTA_CPP_KIT=$kit BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv.log" "setup code" 60 auto \
+AITTA_ENV_SECRET=1 BUILDAT_AITTA_CPP_SDK=$sdk BUILDAT_BUILD_MEMORY_MIB=1024 start_server "$t/srv.log" "setup code" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv" -l 3 ||
 	fail "Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
 aitta_pid=$SERVER_PID
 grep -aq "The server is sandboxed" "$t/srv.log" || fail "Aitta is not boxed"
-grep -ao "C++ servers for the page: linked from $kit, with emsdk .*" "$t/srv.log" ||
-	fail "Aitta does not take the kit ($t/srv.log)"
+grep -ao "C++ servers for the page: linked from $sdk, with emsdk .*" "$t/srv.log" ||
+	fail "Aitta does not take the SDK ($t/srv.log)"
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
 "$b" aitta keygen "$t/key" > "$t/pub" 2>/dev/null || fail "keygen"
 "$b" aitta keygen "$t/key2" > "$t/pub2" 2>/dev/null || fail "keygen"
@@ -595,7 +595,7 @@ done
 cp -a "$t/srv" "$t/srv2"
 mkdir -p "$t/oldemsdk/upstream/emscripten"
 echo '"0.0.1"' > "$t/oldemsdk/upstream/emscripten/emscripten-version.txt"
-EMSDK=$t/oldemsdk BUILDAT_AITTA_CPP_KIT=$kit BUILDAT_BUILD_NO_PIDNS=1 start_server "$t/srv2.log" "Listening at" 60 auto \
+EMSDK=$t/oldemsdk BUILDAT_AITTA_CPP_SDK=$sdk BUILDAT_BUILD_NO_PIDNS=1 start_server "$t/srv2.log" "Listening at" 60 auto \
 	bin/buildat_server -m ../apps/aitta -D "$t/srv2" -l 3 ||
 	fail "the second Aitta did not start"
 CHECK_PIDS+=($SERVER_PID)
@@ -609,14 +609,14 @@ grep -aq "web build of tester/linger2/1.0.0: failed" "$t/srv2.log" &&
 left=$(pgrep -f "${tok}_" | tr '\n' ' ')
 [ -n "$left" ] && { CHECK_PIDS+=($left); fail "linger2 left processes: $left"; }
 echo "ok: without a PID namespace nothing is built"
-need=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["emsdk"])' "$kit/kit.json")
-grep -aq "BUILDAT_AITTA_CPP_KIT: the kit at $kit needs emsdk $need, and the emsdk at $t/oldemsdk (EMSDK, else ~/emsdk) is 0.0.1: C++ servers for the page are refused" "$t/srv2.log" ||
-	fail "the kit's emsdk not said to be another version ($t/srv2.log)"
+need=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["emsdk"])' "$sdk/sdk.json")
+grep -aq "BUILDAT_AITTA_CPP_SDK: the SDK at $sdk needs emsdk $need, and the emsdk at $t/oldemsdk (EMSDK, else ~/emsdk) is 0.0.1: C++ servers for the page are refused" "$t/srv2.log" ||
+	fail "the SDK's emsdk not said to be another version ($t/srv2.log)"
 publish "$t/cpp" cpp2
 grep -aq "tester/cpp2/1.0.0 in the page: no, the module main is C++" "$t/srv2.log" ||
-	fail "the C++ package not refused for the page with the kit's emsdk another ($t/srv2.log)"
-release cpp2 | grep -q '"web"\|"web_cpp"' && fail "cpp2 has a web build with the kit's emsdk another"
-echo "ok: with the kit's emsdk another version that is said at the start, and a package with C++ is listed, not in the page"
+	fail "the C++ package not refused for the page with the SDK's emsdk another ($t/srv2.log)"
+release cpp2 | grep -q '"web"\|"web_cpp"' && fail "cpp2 has a web build with the SDK's emsdk another"
+echo "ok: with the SDK's emsdk another version that is said at the start, and a package with C++ is listed, not in the page"
 # 6. [AITTA_BUILD_MEM] 2e under a systemd user scope with Delegate=yes (as
 # under a unit with Delegate=): the build in a cgroup of its own, a
 # build made in it, and the memory probe ended by the cgroup's OOM
@@ -691,4 +691,4 @@ echo "built in order: $order"
 	fail "not round-robin by author: $order"
 echo "ok: one author's builds wait three at most, and another's single build is next"
 
-echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ with the kit's emsdk another version; ends every process a build leaves and a build past its memory total (measured, or its cgroup under Delegate=yes); builds taken round-robin by author, three waiting at most; the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"
+echo "PASS: Aitta builds a release's .wasm and its C++ server at publish in a box that reaches nothing else, lists and serves them for the page, refuses C++ with flags, embedded JS or imports the engine has not, and C++ with the SDK's emsdk another version; ends every process a build leaves and a build past its memory total (measured, or its cgroup under Delegate=yes); builds taken round-robin by author, three waiting at most; the page installs the release and runs it with the engine's server for packages (its own .wasm for C++, Chrome and WebKit), the client joined and the server answered"
