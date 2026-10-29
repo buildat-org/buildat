@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~3 min (2026-10-18)
-# covers: client/api.lua src/client/app.cpp src/client/app_lua.h builtin/replicate/replicate.cpp
+# covers: client/api.lua src/client/app.cpp src/client/app_lua.h builtin/replicate/replicate.cpp apps/skeldat/main/main.cpp
 # [LOCAL_REJOIN]: a local game's client rejoins the launcher's own server
 # after a goodbye that says the server goes on. skeldat's worlds w1 and w2
 # (128, seed 2) made first; the launcher plays w1 from Home's row; the
@@ -39,7 +39,7 @@ wait_log 10000 world_menu: the list shown, 2 worlds
 delay 500'
 cat > "$t/cmds" <<C
 wait_log_any 20000 , first w1
-delay 1500
+frames 3
 click Text "w1"
 $placed
 delay 1500
