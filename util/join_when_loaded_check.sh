@@ -67,14 +67,23 @@ printf "wait_log 60000 load: the world is in\ndelay 60000\nquit\n" > "$t/a.cmds"
 client "$t/a.log" a "$SERVER_PORT" "$t/a.cmds" &
 a=$!
 wait_for_log "$t/srv.log" "jw: players \[." 60 || fail "A did not get in ($t/srv.log)"
+# B and C are not the launcher's own client: they join by the login
+# ([GUEST_NAME_REUSE]), B as the server's first account by its setup code
+code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
+[ -n "$code" ] || fail "no setup code ($t/srv.log)"
 printf "wait_log 300000 load: the world is in\ndelay 2000\nquit\n" > "$t/b.cmds"
-client "$t/b.log" b "$LINK" "$t/b.cmds" || fail "B's run ($t/b.log)"
+BUILDAT_JOIN_NAME=jwb BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_CODE=$code client "$t/b.log" b "$LINK" "$t/b.cmds" || fail "B's run ($t/b.log)"
 # 2
 printf "wait_log 120000 the server put the player at\nquit\n" > "$t/c.cmds"
-client "$t/c.log" c "$LINK" "$t/c.cmds" || fail "C's run ($t/c.log)"
-# simplified: 3 s for the server to have taken C's leave; it logs nothing
-# for one never joined
-sleep 3
+BUILDAT_JOIN_NAME=jwc BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
+	client "$t/c.log" c "$LINK" "$t/c.cmds" || fail "C's run ($t/c.log)"
+# C's leave: the network's line for its peer, the last one connected; a
+# leave of one never joined logs nothing further, so a settle for the
+# modules' handlers after it
+cid=$(grep -ao "Client [0-9]* from [^ ]* connected" "$t/srv.log" | tail -1 | cut -d' ' -f2)
+wait_for_log "$t/srv.log" "Client $cid from .*disconnected" 30 || fail "C's peer not gone ($t/srv.log)"
+sleep 0.5
 kill $a 2>/dev/null; wait $a 2>/dev/null
 grep -a "luanti:world_in\|put in\|jw: players\|Player .* \(joined\|left\)" "$t/srv.log" | sed 's/.*\(luanti *: \|ACTION\[[^]]*\]: \)//' | cut -c 1-120
 for c in b c; do grep -aq "the server put the player at" "$t/$c.log" || fail "$c not placed ($t/$c.log)"; done
