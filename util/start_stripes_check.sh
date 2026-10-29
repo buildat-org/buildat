@@ -42,7 +42,8 @@ echo "$pcts" | awk '{ for(i = 2; i <= NF; i++) if($i < $(i - 1)) exit 1;
 # The launcher on an empty cache: the stripes with a percentage, then
 # Escape
 printf '%s\n' "wait_log_any 600000 (compiling)" "delay 1500" \
-	"screenshot $t/start.png" "keypress Escape" "delay 3000" quit > "$t/c.cmds"
+	"screenshot $t/start.png" "keypress Escape" \
+	"wait_log 15000 Local server stopped" quit > "$t/c.cmds"
 BUILDAT_CACHE_PATH="$t/cache2" timeout 700 bin/buildat -o launch_ui=launch_menu \
 	-a app/vanilla/contentdb -w 1024x640 -l 3 -L "$t/client.log" \
 	-c @"$t/c.cmds" > /dev/null 2>&1 ||
