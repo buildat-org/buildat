@@ -530,6 +530,12 @@ struct Importer
 			interface::fs::remove_all(to);
 			return "its store does not read as a Buildat save";
 		}
+		// Someone else's save, or one from another machine: taken as a
+		// stranger's, as a world package is (its own mods stay: on a
+		// public server the admin was asked about them above)
+		take_strangers_save(m_server, name, to);
+		log_i(MODULE, "import: %s: its admin, privilege and cost settings, "
+				"forceloads and players left out", cs(name));
 		storage::access(m_server, [&](storage::Interface *i){ i->remeasure(); });
 		menu_message(m_server, peer, "Imported "+name+" (game "+gameid+")"+
 				(find_game(m_server, gameid).empty() ?

@@ -1,14 +1,15 @@
 #!/bin/bash
 # tier: full
 # cost: ~5 min (2026-10-11)
-# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua src/impl/zip.cpp src/client/app_lua.h client/api.lua client/core/network/init.lua
+# covers: apps/vanilla/main/main.cpp apps/vanilla/main/client_lua/menu.lua src/impl/zip.cpp src/client/app_lua.h client/api.lua client/core/network/init.lua apps/vanilla/main/importer.h apps/vanilla/main/game_settings.h
 # [WORLD_TRIM_MOVE] 3-5: a world out as a zip and in again, through the
 # launcher's world menu (the native client; its picker is the client's
 # own). Vanilla on the minimal game, the server at --max-disk-mb 300.
 #   0. A world, wt, with a player's build (a node a chat command placed).
 #   1. Export wt: a zip in the client's exports, which Python's zipfile
 #      reads whole, a symlink in the save left out ([SEC_RUN5_LEFTOVERS]). Import it: saved as wt_2, its store the same rows as
-#      wt's. Bad zips refused, nothing kept: a "../" entry, one whose
+#      wt's but the players row, and world.mt without wt's admin,
+#      privilege and cost settings ([VANILLA_IMPORT_PRIVS]). Bad zips refused, nothing kept: a "../" entry, one whose
 #      header says more than the room, one whose stored entry holds more
 #      than its header says, and a Luanti world of the leveldb backend
 #      (with the --migrate hint), a save with a trigger of its own. A
@@ -32,7 +33,8 @@ trap check_cleanup EXIT
 d=$t/s
 saves=$d/apps/vanilla/saves
 mkdir -p "$saves/wt/luanti" "$d/shared" "$t/nu/exports"
-echo "enable_damage = false" > "$saves/wt/luanti/world.mt"
+printf 'enable_damage = false\nname = mover\ndefault_privs = server, privs\nbasic_privs = server\nchunksize = 80\n' \
+	> "$saves/wt/luanti/world.mt"
 cat > "$d/shared/fixture.lua" <<'L'
 local M = {x = 3, y = 2, z = 0}
 core.register_on_joinplayer(function(player)
@@ -182,10 +184,17 @@ assert "wt/luanti/link.txt" not in names, "the symlink was read through"
 def rows(p):
     c = sqlite3.connect("file:%s?mode=ro" % p, uri=True)
     return list(c.iterdump())
+players = "INSERT INTO \"store\" VALUES('luanti','players',"
 a, b = rows(sys.argv[2]), rows(sys.argv[3])
 print("wt and wt_2: %d and %d rows of dump" % (len(a), len(b)))
-assert a == b, "the stores differ"
+assert [r for r in a if r.startswith(players)], "wt has no players row"
+assert not [r for r in b if r.startswith(players)], "wt_2 kept the players"
+assert [r for r in a if not r.startswith(players)] == b, "the stores differ"
 PY
+grep -qE '^(name|default_privs|basic_privs|chunksize) ' "$saves/wt_2/luanti/world.mt" &&
+	fail "wt_2's world.mt kept the admin, privileges or cost settings: $(cat "$saves/wt_2/luanti/world.mt")"
+grep -q '^enable_damage = false' "$saves/wt_2/luanti/world.mt" ||
+	fail "wt_2's world.mt lost its other settings: $(cat "$saves/wt_2/luanti/world.mt")"
 for want in "would leave" "room for" "is stored as" "luanti --migrate sqlite3" \
 		"trigger.*does not read as a Buildat save"; do
 	grep -a "menu: Importing .* failed:" "$t/1c.log" | grep -aq -- "$want" ||
@@ -201,7 +210,7 @@ echo "the saves: $got"
 [ "$got" = "_chat _server lw wt wt_2 " ] || fail "the saves: $got"
 [ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left: $(ls -R "$t/c/apps/vanilla/vanilla_transfer")"
 [ -n "$(find "$t" -name escape.txt)" ] && fail "the ../ entry landed"
-echo "ok: exported, imported as wt_2 alike; the bad zips refused with nothing kept; a Luanti world imported and started"
+echo "ok: exported, imported as wt_2 alike but its players, admin and privileges; the bad zips refused with nothing kept; a Luanti world imported and started"
 
 # 2
 serve "$t/2.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt_2 \

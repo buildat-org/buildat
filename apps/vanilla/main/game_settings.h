@@ -200,6 +200,58 @@ static const std::map<ss_, sv_<ss_>> &perf_presets()
 	return p;
 }
 
+// **A save someone else made, taken as this host's own**: a world package
+// on its first open (game_start.h's adopt_world_package) and a Buildat save
+// imported from a zip (importer.h). What in it would decide things for
+// this host goes:
+// - world.mt's settings that name an admin, hand out privileges or set a
+//   password, and those that set what the world costs this host to run
+//   (the server preset's, and Luanti's others of the kind) -- the host's
+//   own preset is put in when it next starts (apply_default_preset);
+// - its players and their privileges (the luanti store's players row,
+//   which holds the auth entries), so nobody claims a name's privileges;
+// - its forceloaded blocks, each of which would keep a section loaded.
+// The map, the world's other settings and the mods' files stay.
+// simplified: a list of the keys known to cost or to give; a game's own
+// setting is kept whatever it does
+static void take_strangers_save(interface::Server *server,
+		const ss_ &save_name, const ss_ &save_path)
+{
+	const ss_ mt = save_path+"/luanti/world.mt";
+	if(interface::fs::path_exists(mt)){
+		std::map<ss_, ss_> kept = read_world_mt(mt);
+		sv_<ss_> drop{"name", "default_privs", "basic_privs",
+				"default_password", "buildat_preset", "chunksize",
+				"active_block_range", "active_block_mgmt_interval",
+				"abm_interval", "max_objects_per_block",
+				"max_forceloaded_blocks", "liquid_update",
+				"dedicated_server_step", "server_map_save_interval",
+				"enable_rollback_recording", "profiler.load"};
+		for(const ss_ &k : perf_keys())
+			drop.push_back(k);
+		for(const ss_ &k : drop)
+			kept.erase(k);
+		for(auto it = kept.begin(); it != kept.end();)
+			it = it->first.compare(0, 7, "secure.") == 0 ? kept.erase(it) :
+					std::next(it);
+		// Written a key a line, so a multi-line value cannot hide one of
+		// them from this and show it to the Lua side's reader
+		ss_ text;
+		for(const auto &kv : kept)
+			text += kv.first+" = "+kv.second+"\n";
+		if(!interface::fs::write_file(mt, text))
+			log_w(MODULE, "vanilla: cannot write %s", cs(mt));
+	}
+	interface::fs::remove_all(save_path+"/luanti/force_loaded.txt");
+	storage::access(server, [&](storage::Interface *istorage){
+		storage::Save *save = istorage->open(save_name);
+		if(save){
+			save->store("luanti")->remove("players");
+			istorage->close(save);
+		}
+	});
+}
+
 // [SAVE_LIMIT] What the world gives up when the app is over the host's
 // limit, in world.mt beside the preset and not part of it
 static sv_<GameSetting> limit_settings()

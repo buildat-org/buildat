@@ -363,12 +363,9 @@ struct GameStart
 	}
 
 	// [WORLD_PACKAGES] **A world package's save, opened the first time**
-	// (the client's install wrote .world_package in it): what in it would
-	// give a stranger's choices power over this server goes -- its own
-	// mods (the install refuses them; here too, in case), the world.mt
-	// settings that name an admin or hand out privileges, and the players
-	// and their privileges (the auth entries), which are the publisher's.
-	// The map, the world's other settings and the mods' files stay.
+	// (the client's install wrote .world_package in it): its own mods go
+	// (the install refuses them; here too, in case), and it is taken as a
+	// stranger's save (take_strangers_save()).
 	void adopt_world_package(const ss_ &world_name, const ss_ &save_path)
 	{
 		const ss_ marker = save_path+"/.world_package";
@@ -377,33 +374,11 @@ struct GameStart
 		ss_ id;
 		std::getline(std::ifstream(marker), id);
 		interface::fs::remove_all(save_path+"/luanti/worldmods");
-		const ss_ mt = save_path+"/luanti/world.mt";
-		std::map<ss_, ss_> kept = read_world_mt(mt);
-		for(const char *k : {"name", "default_privs", "basic_privs"})
-			kept.erase(k);
-		// Read a line at a time and written a key a line, so a multi-line
-		// value cannot hide one of them from this and show it to the Lua
-		// side's reader. simplified: the settings that only cost time or
-		// memory (chunksize, the ranges) stay; the box and the disk limit
-		// bound them
-		if(interface::fs::path_exists(mt)){
-			ss_ text;
-			for(const auto &kv : kept)
-				text += kv.first+" = "+kv.second+"\n";
-			if(!interface::fs::write_file(mt, text))
-				log_w(MODULE, "world package: cannot write %s", cs(mt));
-		}
-		storage::access(m_server, [&](storage::Interface *istorage){
-			storage::Save *save = istorage->open(world_name);
-			if(save){
-				save->store("luanti")->remove("players");
-				istorage->close(save);
-			}
-		});
+		take_strangers_save(m_server, world_name, save_path);
 		interface::fs::remove_all(marker);
-		log_i(MODULE, "world package %s: its own mods, admin and privilege "
-				"settings and its players left out on its first open",
-				cs(id.substr(0, 200)));
+		log_i(MODULE, "world package %s: its own mods, admin, privilege and "
+				"cost settings, forceloads and players left out on its first "
+				"open", cs(id.substr(0, 200)));
 	}
 
 	// The world, told to whoever lists or shows it: the LAN, the
