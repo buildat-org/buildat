@@ -323,12 +323,16 @@
 			if(!mod)
 				throw Exception("only a "+level_name(LV_MODERATOR)+" sets a topic's category");
 			const ss_ category = jstr(q, "category");
-			if(category != "" && category != "servers")
-				throw Exception("a category is \"servers\" or none");
+			// [LIVELY_MENU] "announcements": its threads lead the feed
+			if(category != "" && category != "servers" &&
+					category != "announcements")
+				throw Exception("a category is \"servers\", "
+						"\"announcements\" or none");
 			Q u(m_db, "UPDATE topics SET category = ? WHERE id = ?");
 			u.b(category).b(jint(q, "topic")).step();
 			if(sqlite3_changes(m_db) == 0)
 				throw Exception("no such topic");
+			m_feed_at = -1;
 			return json::Value(true);
 		}
 		if(cmd == "topic_tracker"){
