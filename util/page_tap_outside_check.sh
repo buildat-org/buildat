@@ -195,7 +195,7 @@ server "$t/w" -W "$here/web"
 login=$(web_login_steps ptplayer "$t/w.log") || fail "$login"
 { printf '[\n ["nav", "${URL}"],\n%s\n' "$login"; cat; } > "$t/web.json" <<'J'
  ["waitlog", "page_tap: ready", 120],
- ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
+ ["waitlog_any", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
  ["wait", 2000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 2],
  ["key", "Down"], ["frames", 2], ["key", "Enter"], ["waitlog", "chat page: y", 10],

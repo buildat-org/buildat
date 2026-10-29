@@ -276,7 +276,8 @@ echo "ok: native: the hotbar, the place and dig at the finger, the stick ($half 
 # from x 371, the preview at (558, 99)
 # The taps wait for the client's world, not only the server's ready: its
 # first data can sit behind the map for over a minute, and the world is
-# meshed again when it comes (2026-10-11). The hold is a finger held 4 s,
+# meshed again when it comes (2026-10-11); its settle line may come before
+# the ready since the login (waitlog_any). The hold is a finger held 4 s,
 # long enough to dig twice; every other step waits for its line. The
 # other waits are settles after the line: the marker's chunk drawn after
 # the settle line, the inventory laid out after its tap, and the craft
@@ -292,7 +293,7 @@ server "$t/w" -W "$here/web"
 login=$(web_login_steps tpplayer "$t/w.log") || fail "$login"
 { printf '[\n ["nav", "${URL}"],\n%s\n' "$login"; cat; } > "$t/web.json" <<'J'
  ["waitlog", "touch_parity: ready", 120],
- ["waitlog", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
+ ["waitlog_any", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 180],
  ["wait", 2000],
  ["tap", 316, 368], ["waitlog", "\\| wield 3", 10],
  ["tap", 204, 368], ["waitlog", "\\| wield 1", 10], ["wait", 5000],
