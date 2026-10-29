@@ -2735,5 +2735,84 @@ function M.safe.join_screen(what, got, total)
 	load.join_next = 0
 end
 
+-- **A form of typed settings** ([APP_REMIX]; Kit's component inspector
+-- later): a schema of typed fields -> controls -> values. fields as an
+-- app's meta.json "settings" declares them (doc/aitta.txt), values name ->
+-- value. A row each: its label and the type's control -- number, text and
+-- color an edit checked as it is typed (check_setting), the reason under
+-- it; bool a Yes/No choice; choice its choices; texture, model and world a
+-- choice of files[type], the names the caller offers. on_change(name,
+-- value) on each right value. w: the caller's widgets, so that a trusted
+-- page keeps its own fields: {row(parent), label(parent, text, width),
+-- text(parent, text, color), warn (a Color), edit(parent, value,
+-- on_text(text)), dropdown(parent, choices, current, on_choose)}.
+-- simplified: no description shown and no colour swatch; a slider and a
+-- picker are the upgrade when the inspector wants them
+-- check_setting(field, text) -> the value, or nil and why: what a typed
+-- control's text is for its field, as the engine checks a value
+-- (check_setting_value in src/impl/aitta.cpp)
+function M.safe.check_setting(f, text)
+	text = tostring(text)
+	if f.type == "number" then
+		local x = tonumber(text)
+		if not x or x ~= x or x == math.huge or x == -math.huge then
+			return nil, "a number"
+		elseif f.integer == true and x ~= math.floor(x) then
+			return nil, "a whole number"
+		elseif tonumber(f.min) and x < tonumber(f.min) then
+			return nil, "at least " .. tostring(f.min)
+		elseif tonumber(f.max) and x > tonumber(f.max) then
+			return nil, "at most " .. tostring(f.max)
+		end
+		return x
+	elseif f.type == "color" then
+		if not text:match("^#%x%x%x%x%x%x$") then
+			return nil, "a colour as #rrggbb"
+		end
+		return text
+	end
+	local most = tonumber(f.max_length) or 100
+	if select(2, text:gsub("[^\128-\191]", "")) > most then
+		return nil, "at most " .. most .. " characters"
+	elseif text:find("[%c\127]") then
+		return nil, "a line of text"
+	end
+	return text
+end
+
+function M.safe.settings_form(parent, fields, values, on_change, w, files)
+	for _, f in ipairs(fields or {}) do
+		local name = tostring(f.name)
+		local r = w.row(parent)
+		w.label(r, tostring(f.label or name), 160)
+		local v = values[name]
+		if v == nil then
+			v = f.default
+		end
+		local why
+		local function choose(x)
+			on_change(name, x)
+		end
+		if f.type == "bool" then
+			w.dropdown(r, {{"Yes", "yes"}, {"No", "no"}}, v and "yes" or "no",
+					function(x) choose(x == "yes") end)
+		elseif f.type == "choice" then
+			w.dropdown(r, f.choices or {}, v, choose)
+		elseif f.type == "texture" or f.type == "model" or
+				f.type == "world" then
+			w.dropdown(r, (files or {})[f.type] or {v}, v, choose)
+		else
+			w.edit(r, tostring(v == nil and "" or v), function(text)
+				local x, bad = M.safe.check_setting(f, text)
+				why:SetText(bad and name .. ": " .. bad or " ")
+				if x ~= nil then
+					choose(x)
+				end
+			end)
+		end
+		why = w.text(parent, " ", w.warn)
+	end
+end
+
 return M
 -- vim: set noet ts=4 sw=4:

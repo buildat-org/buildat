@@ -202,7 +202,7 @@ local function cannot_run(rel)
 	elseif api > __buildat_aitta_dev("engine_api") then
 		return "needs a newer Buildat"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
-			rel.kind ~= "world" then
+			rel.kind ~= "world" and rel.kind ~= "remix" then
 		return "a kind of package this Buildat does not know"
 	end
 end
@@ -462,6 +462,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 
 	local packages = {}
 	local have = {}
+	local lists = {} -- each Aitta's releases, as its list said them
 	-- [LIVELY_MENU] Hearth's feed: each package's posts and newest threads
 	local feed = nil
 	local function state(p)
@@ -477,8 +478,62 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		end
 		return t
 	end
+	-- [APP_REMIX] A remix's base where it is a package that is not here:
+	-- the release to install first from the remix's Aitta (the newest of
+	-- base_version's major at or above it, as the loader takes one), nil
+	-- for none needed, or false and why not
+	local function base_release(rel)
+		local a, n = tostring(rel.base or ""):match("^([%w_]+)%.([%w_]+)$")
+		if rel.kind ~= "remix" or not a then
+			return nil
+		end
+		local least = tostring(rel.base_version or "")
+		local function fits(v)
+			v = tostring(v)
+			return least == "" or (v:match("^(%d+)%.") ==
+					least:match("^(%d+)%.") and
+					(starport.semver_cmp(v, least) or -1) >= 0)
+		end
+		for v in pairs(aitta_installed()[a .. "/" .. n] or {}) do
+			if fits(v) then
+				return nil
+			end
+		end
+		local best = nil
+		for _, r in ipairs(lists[rel.aitta] or {}) do
+			if type(r) == "table" and r.author == a and r.name == n and
+					(r.kind == nil or r.kind == "app") and fits(r.version) and
+					not cannot_run(r) and (not only_reviewed or
+					r.review == "reviewed") and
+					(not best or newer_release(r, best)) then
+				best = r
+			end
+		end
+		if not best then
+			return false, "its base " .. a .. "/" .. n .. (least ~= "" and
+					" " .. least or "") .. " is not on " .. tostring(rel.aitta)
+		end
+		return best
+	end
 	local function install(p, play)
 		local rel, k = p.rel, p.key
+		local base, why_not = base_release(rel)
+		if base == false then
+			return say("Not installed: " .. why_not, WARN)
+		elseif base then
+			local bk = base.author .. "/" .. base.name .. " " ..
+					tostring(base.version)
+			say("Fetching its base " .. bk .. "...")
+			return fetch_install(rel.aitta, base.sha256,
+					{description = "Aitta (install)"}, function(dir, why)
+				if not dir then
+					return say("Not installed: its base " .. bk .. ": " ..
+							tostring(why), WARN)
+				end
+				log:info("aitta: the base " .. bk .. " installed")
+				install(p, play)
+			end)
+		end
 		-- [WORLD_PACKAGES] A world: a new save of its app each time, played
 		local world = nil
 		if rel.kind == "world" then
@@ -542,7 +597,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
 				"an extension" or rel.kind == "world" and "a world for " ..
 				tostring(rel.app) .. (rel.app_version and " " ..
-				tostring(rel.app_version) or "") or "an app") ..
+				tostring(rel.app_version) or "") or rel.kind == "remix" and
+				"a version of " .. tostring(rel.base) or "an app") ..
 				((rel.serverless == true or
 				rel.web == true or rel.web_cpp == true) and
 				", runs in the browser" or "") .. ", by " ..
@@ -578,6 +634,17 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			ptext(wp and "Installs as a new save of " .. app .. " and plays " ..
 					"it: a save's data, no code." or "Cannot be installed: " ..
 					why .. ".", wp and DIM or WARN)
+		elseif rel.kind == "remix" then
+			local base, why = base_release(rel)
+			ptext("Settings and files of its own over " .. tostring(rel.base) ..
+					"'s, and no code: it runs " .. tostring(rel.base) ..
+					"'s, in the server's sandbox." .. (base and " Installs " ..
+					base.author .. "/" .. base.name .. " " ..
+					tostring(base.version) .. " from this Aitta too." or ""),
+					DIM)
+			if base == false then
+				ptext("Cannot be installed: " .. why .. ".", WARN)
+			end
 		elseif rel.kind ~= "extension" then
 			ptext("It runs in the server's sandbox: it cannot reach your " ..
 					"files, only its own saves.", DIM)
@@ -750,7 +817,7 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	-- Every Aitta's list, merged as Starports' are: a release shown once
 	-- by author/name, version and key, from the first Aitta listing it;
 	-- a package is its newest
-	local lists, errors, waiting = {}, {}, #e.aittas
+	local errors, waiting = {}, #e.aittas
 	local function show_all()
 		local newest, order = {}, {}
 		for _, a in ipairs(e.aittas) do

@@ -6,6 +6,8 @@
 #include "interface/compress.h"
 #include "interface/fs.h"
 #include "interface/os.h"
+#include "interface/server.h"
+#include "interface/server_config.h"
 #include "interface/sha256.h"
 #include "interface/zip.h"
 #include "core/log.h"
@@ -13,6 +15,7 @@
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <cstring>
 #include <fstream>
@@ -359,8 +362,34 @@ ss_ check_manifest(const json::Value &m, bool service)
 	};
 	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	if(!known("kind", {"app", "extension", "world"}))
-		return "\"kind\": \"app\", \"extension\" or \"world\"";
+	if(!known("kind", {"app", "extension", "world", "remix"}))
+		return "\"kind\": \"app\", \"extension\", \"world\" or \"remix\"";
+	// [APP_REMIX] The settings an app declares, and a remix's values of
+	// its base's (checked against them where the base is: remix_refusal)
+	if(!m.get("settings").is_undefined()){
+		const ss_ why = check_settings_schema(m.get("settings"));
+		if(!why.empty())
+			return "\"settings\": "+why;
+	}
+	if(kind_of(m) == "remix"){
+		if(!app_ref_ok(str("base")))
+			return "\"base\": a remix names the app it is made on, like "
+					"demo_board_game, or an installed package's "
+					"<author>.<name>";
+		const json::Value &v = m.get("setting_values");
+		if(!v.is_undefined() && (!v.is_object() || v.size() > SETTINGS_MAX))
+			return "\"setting_values\": an object of "+itos(SETTINGS_MAX)+
+					" values at most";
+		for(json::Iterator it(v); v.is_object() && it.valid(); it.next()){
+			const json::Value &x = it.value();
+			if(!plain_name(it.key(), false) || !(x.is_number() ||
+					x.is_boolean() || (x.is_string() &&
+					x.as_string().size() <= 4000)))
+				return "\"setting_values\": \""+it.key().substr(0, 40)+
+						"\" is not a setting's name with a number, true or "
+						"false or a text";
+		}
+	}
 	// [WORLD_PACKAGES] A world is a save of the app it names, made with
 	// the versions it names
 	if(kind_of(m) == "world"){
@@ -389,9 +418,10 @@ ss_ check_manifest(const json::Value &m, bool service)
 
 ss_ media_check(const ss_ &which, const ss_ &data, ss_ *type)
 {
-	const bool icon = which == "icon";
-	const size_t max_bytes = icon ? 64 * 1024 : 2 * 1000 * 1000;
-	const uint32_t max_side = icon ? 256 : 1920;
+	const bool icon = which == "icon", texture = which == "texture";
+	const size_t max_bytes = icon ? 64 * 1024 : texture ? 16 << 20 :
+			2 * 1000 * 1000;
+	const uint32_t max_side = icon ? 256 : texture ? 4096 : 1920;
 	const unsigned char *d = (const unsigned char*)data.data();
 	auto be = [&](size_t at, int n){
 		uint32_t v = 0;
@@ -412,7 +442,7 @@ ss_ media_check(const ss_ &which, const ss_ &data, ss_ *type)
 		size_t at = 2;
 		while(at + 4 <= data.size()){
 			if(d[at] != 0xff)
-				return "screenshot: not a JPEG the client can read";
+				return which+": not a JPEG the client can read";
 			const unsigned char m = d[at + 1];
 			if(m == 0xff){
 				at++;
@@ -427,7 +457,7 @@ ss_ media_check(const ss_ &which, const ss_ &data, ss_ *type)
 				if(at + 9 > data.size() || len < 8)
 					break;
 				if(d[at + 4] != 8)
-					return "screenshot: a JPEG of 8 bits a sample only";
+					return which+": a JPEG of 8 bits a sample only";
 				h = be(at + 5, 2);
 				w = be(at + 7, 2);
 				t = "image/jpeg";
@@ -435,16 +465,16 @@ ss_ media_check(const ss_ &which, const ss_ &data, ss_ *type)
 			}
 			if((m >= 0xc3 && m <= 0xcf && m != 0xc4 && m != 0xc8 &&
 					m != 0xcc) || m == 0xda || m == 0xd9)
-				return "screenshot: a baseline or progressive JPEG only "
+				return which+": a baseline or progressive JPEG only "
 						"(no lossless, no arithmetic coding)";
 			if(len < 2)
 				break;
 			at += 2 + len;
 		}
 		if(t.empty())
-			return "screenshot: not a JPEG the client can read";
+			return which+": not a JPEG the client can read";
 	} else {
-		return icon ? "icon: not a PNG" : "screenshot: not a PNG or a JPEG";
+		return icon ? "icon: not a PNG" : which+": not a PNG or a JPEG";
 	}
 	if(data.size() > max_bytes)
 		return which+": "+itos((int64_t)data.size() / 1000)+" kB, more than "+
@@ -549,7 +579,320 @@ ss_ kind_of(const json::Value &m)
 {
 	const json::Value &k = m.get("kind");
 	return k.is_string() && (k.as_string() == "extension" ||
-			k.as_string() == "world") ? k.as_string() : "app";
+			k.as_string() == "world" || k.as_string() == "remix") ?
+			k.as_string() : "app";
+}
+
+// [APP_REMIX] **An app's settings and a remix of it**
+static size_t utf8_chars(const ss_ &s);
+
+// A path's extension, lower case; "" for none
+static ss_ ext_of(const ss_ &p)
+{
+	const size_t dot = p.rfind('.');
+	if(dot == ss_::npos || p.find('/', dot) != ss_::npos)
+		return "";
+	ss_ e = p.substr(dot + 1);
+	for(char &c : e)
+		c = tolower((unsigned char)c);
+	return e;
+}
+// The extensions of a file type's value, " png jpg jpeg ", or "" for a
+// type that is no file
+static ss_ type_exts(const ss_ &type)
+{
+	return type == "texture" ? " png jpg jpeg " : type == "model" ? " mdl " :
+			type == "world" ? " json " : "";
+}
+// What a remix may carry in place of its base's file: those, and sounds
+static const char *const REPLACEABLE = " png jpg jpeg mdl json ogg wav ";
+static const uint64_t ASSET_MAX = 16 << 20;
+static bool has_ext(const ss_ &exts, const ss_ &p)
+{
+	const ss_ e = ext_of(p);
+	return !e.empty() && exts.find(" "+e+" ") != ss_::npos;
+}
+bool remix_replaceable(const ss_ &path)
+{
+	return has_ext(REPLACEABLE, path);
+}
+static double num(const json::Value &v)
+{
+	return v.is_integer() ? (double)v.as_integer() : v.as_real();
+}
+static ss_ gnum(double x)
+{
+	char b[32];
+	snprintf(b, sizeof b, "%g", x);
+	return b;
+}
+
+ss_ check_setting_value(const json::Value &f, const json::Value &v,
+		const set_<ss_> *files)
+{
+	const ss_ type = json::jstr(f, "type");
+	if(type == "number"){
+		if(!v.is_number() || !std::isfinite(num(v)))
+			return "a number";
+		const double x = num(v);
+		if(f.get("integer").is_true() && x != std::floor(x))
+			return "a whole number";
+		if(f.get("min").is_number() && x < num(f.get("min")))
+			return "at least "+gnum(num(f.get("min")));
+		if(f.get("max").is_number() && x > num(f.get("max")))
+			return "at most "+gnum(num(f.get("max")));
+		return "";
+	}
+	if(type == "bool")
+		return v.is_boolean() ? "" : "true or false";
+	if(!v.is_string())
+		return "a text";
+	const ss_ s = v.as_string();
+	if(type == "choice"){
+		const json::Value &c = f.get("choices");
+		for(unsigned i = 0; c.is_array() && i < c.size(); i++)
+			if(c.at(i).is_string() && c.at(i).as_string() == s)
+				return "";
+		return "one of its choices";
+	}
+	if(type == "color")
+		return s.size() == 7 && s[0] == '#' && s.find_first_not_of(
+				"0123456789abcdefABCDEF", 1) == ss_::npos ? "" :
+				"a colour as #rrggbb";
+	if(type == "text"){
+		const int64_t most = f.get("max_length").is_integer() ?
+				f.get("max_length").as_integer() : 100;
+		if((int64_t)utf8_chars(s) > most)
+			return "at most "+itos(most)+" characters";
+		for(unsigned char c : s)
+			if(c < 0x20 || c == 0x7f)
+				return "a line of text";
+		return "";
+	}
+	// A file of the app's, by the name its client reads it by
+	if(!archive_path_ok(s) || s.find('/') == ss_::npos ||
+			!has_ext(type_exts(type), s))
+		return "a file of the app, <module>/<path>, of"+
+				type_exts(type).substr(0, type_exts(type).size() - 1);
+	if(files && !files->count(s))
+		return s+" is not one of the app's files";
+	return "";
+}
+
+ss_ check_settings_schema(const json::Value &s)
+{
+	if(!s.is_array() || s.size() > SETTINGS_MAX)
+		return "a list of "+itos(SETTINGS_MAX)+" fields at most";
+	set_<ss_> names;
+	for(unsigned i = 0; i < s.size(); i++){
+		const json::Value &f = s.at(i);
+		const ss_ name = json::jstr(f, "name"), type = json::jstr(f, "type");
+		if(!f.is_object() || !plain_name(name, false))
+			return "each a field, {\"name\": 1 to 40 of a-z, 0-9 and _, "
+					"\"type\": ..., \"default\": ...}";
+		const ss_ at = name+": ";
+		if(!names.insert(name).second)
+			return at+"named twice";
+		for(const char *k : {"label", "description"})
+			if(!f.get(k).is_undefined() && (!f.get(k).is_string() ||
+					utf8_chars(f.get(k).as_string()) > 300))
+				return at+"\""+k+"\": a text of 300 characters at most";
+		if(type == "number"){
+			for(const char *k : {"min", "max"})
+				if(!f.get(k).is_undefined() && !(f.get(k).is_number() &&
+						std::isfinite(num(f.get(k)))))
+					return at+"\""+k+"\": a number";
+			if(!f.get("integer").is_undefined() &&
+					!f.get("integer").is_boolean())
+				return at+"\"integer\": true or false";
+			if(f.get("min").is_number() && f.get("max").is_number() &&
+					num(f.get("min")) > num(f.get("max")))
+				return at+"\"min\" is more than \"max\"";
+		} else if(type == "text"){
+			const json::Value &n = f.get("max_length");
+			if(!n.is_undefined() && !(n.is_integer() && n.as_integer() >= 1 &&
+					n.as_integer() <= 1000))
+				return at+"\"max_length\": 1 to 1000";
+		} else if(type == "choice"){
+			const json::Value &c = f.get("choices");
+			if(!c.is_array() || c.size() < 1 || c.size() > SETTINGS_MAX)
+				return at+"\"choices\": a list of 1 to "+itos(SETTINGS_MAX);
+			for(unsigned k = 0; k < c.size(); k++)
+				if(!c.at(k).is_string() || c.at(k).as_string().empty() ||
+						utf8_chars(c.at(k).as_string()) > 100)
+					return at+"\"choices\": texts of 1 to 100 characters";
+		} else if(type != "bool" && type != "color" &&
+				type_exts(type).empty()){
+			return at+"\"type\": number, bool, choice, color, text, "
+					"texture, model or world";
+		}
+		const ss_ why = check_setting_value(f, f.get("default"), nullptr);
+		if(!why.empty())
+			return at+"\"default\": "+why;
+	}
+	return "";
+}
+
+// Every file under dir, '/' separated, the names starting with '.' too
+static void walk_all(const ss_ &dir, const ss_ &prefix, sv_<ss_> &out)
+{
+	for(const fs::Node &n : fs::list_directory(dir)){
+		if(n.name.empty() || n.name == "." || n.name == "..")
+			continue;
+		if(n.is_directory)
+			walk_all(dir+"/"+n.name, prefix+n.name+"/", out);
+		else
+			out.push_back(prefix+n.name);
+	}
+}
+
+sm_<ss_, ss_> app_client_files(const ss_ &app_dir)
+{
+	sm_<ss_, ss_> out;
+	for(const fs::Node &m : fs::list_directory(app_dir)){
+		const ss_ cd = app_dir+"/"+m.name+"/client_data";
+		if(!m.is_directory || m.name[0] == '.' ||
+				!fs::path_exists(app_dir+"/"+m.name+"/meta.json"))
+			continue;
+		sv_<ss_> names;
+		walk_all(cd, "", names);
+		for(const ss_ &n : names)
+			out[m.name+"/"+n] = cd+"/"+n;
+	}
+	return out;
+}
+
+// A file a remix carries checked by its bytes: "" or why not
+static ss_ asset_refusal(const ss_ &path, const ss_ &ext)
+{
+	if(fs::file_size(path) > ASSET_MAX)
+		return "more than "+itos(ASSET_MAX >> 20)+" MiB";
+	const ss_ d = read_file(path);
+	if(ext == "png" || ext == "jpg" || ext == "jpeg"){
+		ss_ type;
+		const ss_ why = media_check("texture", d, &type);
+		if(!why.empty())
+			return why.substr(why.find(": ") + 2);
+		return (ext == "png") == (type == "image/png") ? "" :
+				"not a ."+ext+" by its bytes";
+	}
+	if(ext == "mdl")
+		return d.compare(0, 4, "UMDL") == 0 || d.compare(0, 4, "UMD2") == 0 ?
+				"" : "not a model (.mdl) by its bytes";
+	if(ext == "ogg")
+		return d.compare(0, 4, "OggS") == 0 ? "" : "not an Ogg file";
+	if(ext == "wav")
+		return d.size() >= 12 && d.compare(0, 4, "RIFF") == 0 &&
+				d.compare(8, 4, "WAVE") == 0 ? "" : "not a WAVE file";
+	json::json_error_t e;
+	return json::load_string(d.c_str(), &e).is_undefined() ? "not JSON" : "";
+}
+
+ss_ remix_refusal(const ss_ &dir, const json::Value &m, const ss_ &base_dir)
+{
+	if(kind_of(m) != "remix")
+		return "not a remix";
+	sm_<ss_, ss_> base_files;
+	json::Value schema;
+	if(!base_dir.empty()){
+		json::json_error_t e;
+		const json::Value bm = json::load_file((base_dir+"/meta.json").c_str(),
+				&e);
+		// simplified: on an app only; a remix of a variant would need the
+		// loader to take a base's base
+		if(!bm.get("base").is_undefined() || kind_of(bm) != "app")
+			return "its base "+json::jstr(m, "base")+" is a variant or a "
+					"remix; a remix is made on an app";
+		schema = bm.get("settings");
+		if(!schema.is_array() || !check_settings_schema(schema).empty())
+			return "its base "+json::jstr(m, "base")+" declares no settings";
+		base_files = app_client_files(base_dir);
+	}
+	// Data only: what the base's code runs (modules, client Lua, the
+	// launcher, shaders) is not among what it may carry
+	sv_<ss_> files;
+	walk_all(dir, "", files);
+	for(const ss_ &p : files){
+		if(p == "meta.json")
+			continue;
+		const size_t slash = p.find('/');
+		const ss_ ext = ext_of(p);
+		if(slash == ss_::npos){
+			if(archive_path_ok(p) && (ext == "png" || ext == "jpg" ||
+					ext == "jpeg" || ext == "md" || ext == "txt"))
+				continue;
+			return p+": at a remix's root only meta.json and its images and "
+					"texts (.png, .jpg, .md, .txt)";
+		}
+		const size_t second = p.find('/', slash + 1);
+		if(!archive_path_ok(p) || second == ss_::npos ||
+				p.compare(slash, second - slash + 1, "/client_data/") != 0 ||
+				!has_ext(REPLACEABLE, p))
+			return p+": a remix carries only files in place of its base's "
+					"<module>/client_data/<path>, textures, models, sounds "
+					"and worlds ("+ss_(REPLACEABLE).substr(1,
+					strlen(REPLACEABLE) - 2)+")";
+		if(!base_dir.empty() && !base_files.count(p.substr(0, slash)+"/"+
+				p.substr(second + 1)))
+			return p+": its base has no such file to replace";
+		const ss_ why = asset_refusal(dir+"/"+p, ext);
+		if(!why.empty())
+			return p+": "+why;
+	}
+	if(base_dir.empty())
+		return "";
+	set_<ss_> names;
+	for(const auto &f : base_files)
+		names.insert(f.first);
+	const json::Value &v = m.get("setting_values");
+	for(json::Iterator it(v); v.is_object() && it.valid(); it.next()){
+		const json::Value *field = nullptr;
+		for(unsigned i = 0; i < schema.size(); i++)
+			if(json::jstr(schema.at(i), "name") == it.key())
+				field = &schema.at(i);
+		if(!field)
+			return "\"setting_values\": "+it.key()+" is not a setting of "+
+					json::jstr(m, "base");
+		const ss_ why = check_setting_value(*field, it.value(), &names);
+		if(!why.empty())
+			return "\"setting_values\": "+it.key()+": "+why;
+	}
+	return "";
+}
+
+json::Value app_settings(const ss_ &app_dir, const ss_ &share_path,
+		const ss_ &user_path)
+{
+	json::json_error_t e;
+	const json::Value m = json::load_file((app_dir+"/meta.json").c_str(), &e);
+	json::Value schema = m.get("settings");
+	if(schema.is_undefined()){
+		ss_ why;
+		const ss_ base = find_base(m, app_dir, share_path, user_path, &why);
+		if(!base.empty())
+			schema = json::load_file((base+"/meta.json").c_str(), &e).get(
+					"settings");
+	}
+	json::Value out = json::object();
+	if(!check_settings_schema(schema).empty())
+		return out;
+	const json::Value &values = m.get("setting_values");
+	for(unsigned i = 0; i < schema.size(); i++){
+		const json::Value &f = schema.at(i);
+		const json::Value &v = values.is_object() ?
+				values.get(json::jstr(f, "name")) : json::Value();
+		out.set(json::jstr(f, "name"), !v.is_undefined() &&
+				check_setting_value(f, v, nullptr).empty() ? v :
+				f.get("default"));
+	}
+	return out;
+}
+
+json::Value app_settings(interface::Server *server)
+{
+	return app_settings(server->get_modules_path(),
+			server->get_config().get<ss_>("share_path"),
+			server->get_config().get<ss_>("user_path"));
 }
 
 // A zip of every file under dir, deflated, '/' separated; names that start
@@ -667,6 +1010,13 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
 		throw Exception(app_dir+"/meta.json: "+media);
+	// [APP_REMIX] What a remix carries, as an Aitta checks it (the
+	// client checks it against the base too)
+	if(kind_of(m) == "remix"){
+		const ss_ why = remix_refusal(app_dir, m, "");
+		if(!why.empty())
+			throw Exception(app_dir+": "+why);
+	}
 	return write_signed(zip_directory(app_dir, built), read_file(key_path),
 			SIG_FORMAT, out_dir+"/"+m.get("author").as_string()+"-"+
 			m.get("name").as_string()+"-"+m.get("version").as_string());
@@ -812,11 +1162,23 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		if(kind == "world")
 			throw Exception("a world is installed as a new save of its app, "
 					"from the client's Apps from Aitta");
+		// [APP_REMIX] A stranger's settings and files over an app that is
+		// here: data only, each checked against the base
+		if(kind == "remix"){
+			ss_ why;
+			const ss_ base = find_base(m, incoming, share_path, user_path,
+					&why);
+			if(base.empty())
+				throw Exception(why+"; install it first");
+			why = remix_refusal(incoming, m, base);
+			if(!why.empty())
+				throw Exception("a remix: "+why);
+		}
 		if(review){
 			// [AITTA_REVIEW] A playtest: apart from the installed ones,
 			// no key kept, and a second one of a version replaces the first.
 			// simplified: apps only; an extension is reviewed by its files
-			if(kind != "app")
+			if(kind != "app" && kind != "remix")
 				throw Exception("only an app is playtested; an extension "
 						"is reviewed by its files");
 			const ss_ app = installed+"/"+m.get("author").as_string()+"__"+
@@ -837,12 +1199,14 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		if(kind == "extension" && !fs::path_exists(incoming+"/init.lua"))
 			throw Exception("an extension with no init.lua at its root");
 		// An author/name stays the kind it was first installed as
-		for(const auto &n : fs::list_directory(app))
-			if(n.is_directory && kind_of(json::load_file(
-					(app+"/"+n.name+"/meta.json").c_str(), &e)) != kind)
+		for(const auto &n : fs::list_directory(app)){
+			const ss_ was = n.is_directory ? kind_of(json::load_file(
+					(app+"/"+n.name+"/meta.json").c_str(), &e)) : kind;
+			if(was != kind)
 				throw Exception(m.get("author").as_string()+"/"+
-						m.get("name").as_string()+" is installed as an"+
-						(kind == "app" ? " extension" : " app"));
+						m.get("name").as_string()+" is installed as "+
+						(was == "remix" ? "a " : "an ")+was);
+		}
 		// The first install's key is the app's: a later version signed by
 		// another is someone else's (trust on first install)
 		fs::create_directories(app);

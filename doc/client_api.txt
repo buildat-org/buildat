@@ -911,6 +911,12 @@ buildat.safe.is_scripted() -> bool
 - Whether this client is driven by a command sequence, which a launcher asks
   before taking the mouse: a check shares a desk with the person whose mouse
   it is.
+buildat.safe.app_settings() -> {name = value}
+- The settings the app declares in its meta.json ([APP_REMIX],
+  doc/aitta.txt's "Settings and remixes"): each field's default, or a
+  remix's value of it, as the server read them at its start ({} for an app
+  with none). The server's side reads the same with
+  interface::aitta::app_settings(m_server) (server_api.txt).
 buildat.safe.get_file_content(name) -> bytes or nil
 - The bytes of a file the server served ([BLOCKED_MODULE]). The sandbox
   already runs a served file as code, so reading one's bytes is no wider.
@@ -1672,6 +1678,20 @@ load_screen() -> screen
 join_screen(what, got, total)
 - The client's own: what = "files" (got of total), "starting", "done" or
   "left".
+settings_form(parent, fields, values, on_change, widgets[, files])
+- A form of typed settings ([APP_REMIX]; Kit's inspector later): fields
+  as an app's meta.json "settings" declares them, values name -> value.
+  A row each, its label and the type's control: number, text and color an
+  edit checked as it is typed (the reason under it), bool a Yes/No
+  choice, choice its choices, texture, model and world a choice of
+  files[type]. on_change(name, value) for each right value. widgets are
+  the caller's: {row(parent), label(parent, text, width), text(parent,
+  text, color), warn (a Color), edit(parent, value, on_text(text)),
+  dropdown(parent, choices, current, on_choose)}, so that a trusted page
+  keeps its own fields (client/core/aitta/publish.lua's remix page).
+check_setting(field, text) -> value, or nil and why
+- What a number, color or text control's text is for its field, as the
+  engine checks a value (interface::aitta::check_setting_value).
 bind_button_menu(root, items, on_other_key) -> nav
 - Up/down/enter and hover selection over existing buttons on a uistack root;
   items are {button, action}. Returns a handle with :add(button, action) and
@@ -3126,7 +3146,7 @@ extension.blip: pack, params, play, play_cached, preset, self_check, sound, stre
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
-extension.ui_utils: add_paged, bind_button_menu, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, rgb, scan_pixels, scan_ui, server_list, set_in_game, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, check_setting, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, rgb, scan_pixels, scan_ui, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----
 
 

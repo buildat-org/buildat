@@ -942,15 +942,17 @@ struct Module: public interface::Module, public moderation::Host
 
 	// [WORLD_PACKAGES] " for <app> <version>" after a world's kind, the app
 	// a link to its page where it is a package here
+	// [APP_REMIX] " of <base> <version>" after a remix's
 	static ss_ world_of(const json::Value &rel)
 	{
 		using interface::web_brand::html;
-		if(jstr(rel, "kind") != "world")
+		const bool remix = jstr(rel, "kind") == "remix";
+		if(jstr(rel, "kind") != "world" && !remix)
 			return "";
-		ss_ app = jstr(rel, "app");
+		ss_ app = jstr(rel, remix ? "base" : "app");
 		const size_t dot = app.find('.');
-		const ss_ v = jstr(rel, "app_version");
-		return " for "+(dot == ss_::npos ? html(app) : "<a href=\"/p/"+
+		const ss_ v = jstr(rel, remix ? "base_version" : "app_version");
+		return (remix ? " of " : " for ")+(dot == ss_::npos ? html(app) : "<a href=\"/p/"+
 				html(ss_(app).replace(dot, 1, "/"))+"\">"+html(app)+"</a>")+
 				(v.empty() ? "" : " "+html(v));
 	}
@@ -1838,6 +1840,11 @@ struct Module: public interface::Module, public moderation::Host
 				media[k] = read_file(dir+"/"+jstr(m, k));
 		// [WEB_LOCAL_AITTA] Whether its server can run in the page
 		const ss_ web_why = m.is_object() ? web_refusal(dir, m, lua51) : "";
+		// [APP_REMIX] A remix carries data only: its files by their paths
+		// and bytes (a client checks them against the base again)
+		const ss_ remix_why = m.is_object() &&
+				interface::aitta::kind_of(m) == "remix" ?
+				interface::aitta::remix_refusal(dir, m, "") : "";
 		interface::fs::remove_all(dir);
 		auto drop = [&](const ss_ &why){
 			interface::fs::remove_all(zip);
@@ -1849,6 +1856,8 @@ struct Module: public interface::Module, public moderation::Host
 		if(!changelog_there)
 			return drop("meta.json: \"changelog\": "+jstr(m, "changelog")+
 					" is not in the archive");
+		if(!remix_why.empty())
+			return drop("a remix: "+remix_why);
 		if(jstr(m, "author") != u.author)
 			return drop("the key is bound to the author \""+u.author+
 					"\", and the manifest says \""+jstr(m, "author")+"\"");
@@ -1898,10 +1907,16 @@ struct Module: public interface::Module, public moderation::Host
 		rel.set("serverless", m.get("serverless").as_boolean());
 		const ss_ kind = jstr(m, "kind");
 		rel.set("kind", kind.empty() || kind == "app" || kind == "extension" ||
-				kind == "world" ? interface::aitta::kind_of(m) : "other");
+				kind == "world" || kind == "remix" ?
+				interface::aitta::kind_of(m) : "other");
 		// [WORLD_PACKAGES] A world's app and the versions that made it
 		if(kind == "world")
 			for(const char *k : {"app", "app_version", "buildat_version"})
+				if(!jstr(m, k).empty())
+					rel.set(k, jstr(m, k));
+		// [APP_REMIX] A remix's base, which a client installs with it
+		if(kind == "remix")
+			for(const char *k : {"base", "base_version"})
 				if(!jstr(m, k).empty())
 					rel.set(k, jstr(m, k));
 		interface::fs::create_directories(m_archives+"/media");

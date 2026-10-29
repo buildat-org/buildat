@@ -19,8 +19,8 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "home_hearth": "https://forum.buildat.org",   optional: where
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
-        "kind": "app",                optional: "app", "extension" or
-                                      "world" (below)
+        "kind": "app",                optional: "app", "extension",
+                                      "world" or "remix" (below)
         "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
@@ -40,6 +40,9 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
                                       base: the lowest version taken;
                                       the newest installed of its major
                                       version is used
+        "settings": [...],            optional: the settings its code
+                                      reads, which a remix changes
+                                      (below)
         "needs": {"memory_mb": 1024, "mesh_threads": 2}
                                       optional: what its web client needs
                                       at least (buildat.resources(),
@@ -220,6 +223,74 @@ go, left out when the game first reads the players. Storage
 refuses a database with a trigger or a view, and a save's serialized Lua
 runs with no globals, an instruction budget and a memory cap (32 MiB and
 16 bytes a byte of it), as for an imported world.
+
+Settings and remixes [APP_REMIX]
+--------------------------------
+An app declares the settings its code reads in its meta.json (the root
+one; a tree app may have one with only this), a typed field each:
+
+    "settings": [
+        {"name": "board_size", "type": "number", "default": 10,
+         "min": 4, "max": 20, "integer": true, "label": "Board size"},
+        {"name": "title", "type": "text", "default": "demo_board_game",
+         "max_length": 40},
+        {"name": "player_color", "type": "color", "default": "#ffffff"},
+        {"name": "board_texture", "type": "texture",
+         "default": "main/green_texture.png"},
+        {"name": "camera", "type": "choice", "default": "corner",
+         "choices": ["corner", "above"]},
+        {"name": "shadows", "type": "bool", "default": true}
+    ]
+
+name is a-z, 0-9 and _; label and description are text for the form (300
+characters at most); 64 fields at most. The types: number (min, max,
+integer), bool, choice (choices, 1 to 64 texts), color ("#rrggbb"), text
+(max_length, 1 to 1000, 100 by default; one line) and texture, model and
+world: a file of the app by the name its client reads it by,
+"<module>/<path under client_data>", a .png, .jpg or .jpeg, a .mdl, a
+.json. The default is a value of its field. The code reads them with one
+call, interface::aitta::app_settings(m_server) on the server
+(server_api.txt) and buildat.app_settings() in the client's Lua
+(client_api.txt): name -> value. apps/demo_board_game is the first app
+with settings: the board's size (the server's), its title, the players'
+colour, the board's texture, the camera and the shadows.
+
+Such an app has a tile "<label>: make my own version" on the launch grid
+(a tree app, or an installed version): it makes a remix in
+<user>/dev_apps/<name>_mine and opens its page, the app's settings as a
+form (each field checked as it is typed), Save, Open folder and "Next:
+the package", the publish screen above. A remix is a package of kind
+"remix" on a base app:
+
+        "kind": "remix",
+        "base": "tester.boardy",       the app: a shipped app's name or an
+                                       installed package's <author>.<name>
+        "base_version": "1.0.0",       with an <author>.<name>: the lowest
+                                       taken, as a variant's
+        "setting_values": {"board_size": 6, "title": "My board"}
+
+and its own files in place of the base's of the same name:
+<module>/client_data/<path>, a texture (.png .jpg .jpeg), a model (.mdl),
+a sound (.ogg .wav) or a world (.json), put in its folder. It runs the
+base's code with its values over the defaults and its files over the
+base's (the loader's variant rule, [GAME_BASE]); it is a Dev tile to play
+before it is published, and an installed one is a tile of its name.
+
+A remix is a stranger's data, never code: pack, the Aitta and the install
+each refuse anything else in it -- at its root only meta.json and its
+images and texts (.png .jpg .md .txt); every other file a
+<module>/client_data/<path> of the extensions above, its bytes what its
+extension says (a PNG or a JPEG of 4096 px a side at most, a model's,
+Ogg's or WAVE's header, JSON that parses), 16 MiB at most. The install,
+which has the base, checks that each file replaces one the base has and
+each value is one of the base's settings and right for it (a number in
+its range, a choice of its choices, a file of the base's); a value the
+app reads that is not right for its field is its default. A base must be
+an app with settings, not a variant or a remix (simplified: the loader
+takes one base). Apps from Aitta's Install on a remix whose base is an
+<author>.<name> not installed installs the base first, the newest of
+base_version's major on the same Aitta; Aitta lists it as "remix of
+<base>". The remix's saves are its own (<user>/apps/<author>.<name>).
 
 engine_api is the engine API it is written for; the engine runs
 interface::aitta::ENGINE_API_MIN...ENGINE_API (src/interface/aitta.h,

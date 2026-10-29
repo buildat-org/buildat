@@ -819,6 +819,14 @@ buildat.safe.parse_json = function(text)
 	end
 	return __buildat_parse_json(text)
 end
+-- [APP_REMIX] app_settings() -> {name = value}: the settings the app
+-- declares in its meta.json, each its default or a remix's value
+-- (doc/aitta.txt), as the server read them; {} for an app with none
+buildat.safe.app_settings = function()
+	local v = __buildat_parse_json(__buildat_get_file_content(
+			"client_data/app_settings.json") or "{}")
+	return type(v) == "table" and v or {}
+end
 buildat.safe.connect_poll = __buildat_connect_server_poll
 -- **"Feedback..." on an installed app** ([PACKAGE_SUBJECT]): the grid
 -- (trusted) sets what the user is about to tell the app's home Hearth

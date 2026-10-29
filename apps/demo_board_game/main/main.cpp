@@ -4,6 +4,7 @@
 #include "client_file/api.h"
 #include "network/api.h"
 #include "core/log.h"
+#include "interface/aitta.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/vector.hpp>
@@ -88,6 +89,12 @@ struct Module: public interface::Module
 	void init()
 	{
 		log_v(MODULE, "demo_board_game init");
+		// [APP_REMIX] The board's size is a setting (meta.json), which a
+		// remix may change
+		const int64_t n = json::jint(interface::aitta::app_settings(m_server),
+				"board_size", 10);
+		m_playfield = Playfield(n, n);
+		log_i(MODULE, "demo_board_game: a board of %ix%i", (int)n, (int)n);
 		m_server->sub_event(this, Event::t("core:start"));
 		m_server->sub_event(this, Event::t("network:client_connected"));
 		m_server->sub_event(this, Event::t("network:client_disconnected"));
@@ -132,7 +139,8 @@ struct Module: public interface::Module
 
 	void create_new_player(int peer)
 	{
-		m_players[peer] = Player(peer, rand() % 10, rand() % 10);
+		m_players[peer] = Player(peer, rand() % m_playfield.w,
+				rand() % m_playfield.h);
 
 		for(auto &pair : m_players)
 			send_update(pair.second.peer);

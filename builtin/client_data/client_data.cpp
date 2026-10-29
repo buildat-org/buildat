@@ -5,6 +5,8 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/fs.h"
+#include "interface/aitta.h"
+#include <algorithm>
 #include "client_file/api.h"
 #include "network/api.h"
 #include <cereal/archives/binary.hpp>
@@ -53,8 +55,15 @@ struct Module: public interface::Module
 				network::NewClient)
 	}
 
+	// [APP_REMIX] The app's settings, each field's default with a remix's
+	// value over it, as a file the client's buildat.app_settings() reads
 	void on_start()
 	{
+		const ss_ json = interface::aitta::app_settings(m_server).stringify();
+		log_i(MODULE, "client_data: the app's settings: %s", cs(json));
+		client_file::access(m_server, [&](client_file::Interface *i){
+			i->add_file_content("client_data/app_settings.json", json);
+		});
 	}
 
 	// Files are published as <module>/<path under client_data>, which is the
@@ -80,6 +89,13 @@ struct Module: public interface::Module
 		ss_ client_data_path = module_path+"/client_data";
 		sv_<ss_> names;
 		collect_files(client_data_path, "", names);
+		// A variant's or a remix's <module>/client_data/<path> over its
+		// base's, one file at a time, as client_lua's ([APP_REMIX])
+		const ss_ own = m_server->get_modules_path()+"/"+module_name+
+				"/client_data";
+		sv_<ss_> own_names;
+		if(own != client_data_path)
+			collect_files(own, "", own_names);
 		// [CLIENT_WASM] The module's built wasm/, as <module>/<module>.wasm,
 		// which buildat.wasm_load(<module>) reads on the client
 		const ss_ wasm = m_server->get_module_wasm_path(module_name);
@@ -90,13 +106,21 @@ struct Module: public interface::Module
 				i->add_file_path(module_name+"/"+module_name+".wasm", wasm);
 			});
 		}
-		if(names.empty())
+		if(names.empty() && own_names.empty())
 			return;
 
 		log_i(MODULE, "client_data: %s: %s", cs(module_name), cs(dump(names)));
+		if(!own_names.empty())
+			log_i(MODULE, "client_data: %s: the variant's %s", cs(module_name),
+					cs(dump(own_names)));
+		for(const ss_ &name : own_names)
+			if(std::find(names.begin(), names.end(), name) == names.end())
+				names.push_back(name);
 
 		for(const ss_ &name : names){
-			const ss_ &file_path = client_data_path+"/"+name;
+			const bool mine = std::find(own_names.begin(), own_names.end(),
+					name) != own_names.end();
+			const ss_ &file_path = (mine ? own : client_data_path)+"/"+name;
 			const ss_ &public_file_name = module_name+"/"+name;
 			client_file::access(m_server, [&](client_file::Interface *i){
 				i->add_file_path(public_file_name, file_path);

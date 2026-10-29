@@ -119,18 +119,20 @@
 			if((e.kind == "extension" && e.client_name.empty()) ||
 					e.kind == "world")
 				continue;
+			// [APP_REMIX] A remix plays as its own app
+			const bool app = e.kind == "app" || e.kind == "remix";
 			const ss_ path = interface::fs::get_absolute_path(e.dir);
 			lua_newtable(L);
-			lua_pushstring(L, e.kind == "app" ? "dev" : "extension");
+			lua_pushstring(L, app ? "dev" : "extension");
 			lua_setfield(L, -2, "kind");
-			lua_pushstring(L, (e.kind == "app" ? e.name : e.client_name).c_str());
+			lua_pushstring(L, (app ? e.name : e.client_name).c_str());
 			lua_setfield(L, -2, "name");
 			lua_pushstring(L, path.c_str());
 			lua_setfield(L, -2, "path");
-			lua_pushboolean(L, e.kind == "app" && interface::fs::path_exists(
+			lua_pushboolean(L, app && interface::fs::path_exists(
 					path+"/launcher/init.lua"));
 			lua_setfield(L, -2, "launcher");
-			if(e.kind == "app")
+			if(app)
 				set_package_icon(L, path);
 			lua_rawseti(L, -2, i++);
 		}
@@ -469,6 +471,14 @@
 	//                           refreshed, its per player rows
 	//                           ("<store>/<key>") left out -> its name, or
 	//                           nil and why
+	//   "remix_new", app        [APP_REMIX] a remix of the app (a tree
+	//                           app or an installed <author>.<name>@<v>)
+	//                           in dev_apps -> its name, or nil and why
+	//   "remix_read", name      the remix's base, settings, files and what
+	//                           an install would refuse as JSON
+	//                           (remix_read()), or nil and why
+	//   "check", json, name     of a remix: its values and files against
+	//                           its base too
 	static bool plain_aitta_name(const ss_ &s)
 	{
 		if(s.empty() || s.size() > 40)
@@ -492,6 +502,113 @@
 		os<<f.rdbuf();
 		return os.str();
 	}
+	// The author whose key is the only one in <user>/aitta_keys, or ""
+	static ss_ only_author()
+	{
+		sv_<ss_> keys;
+		for(const auto &k : interface::fs::list_directory(
+				g_client_config.get<ss_>("user_path")+"/aitta_keys"))
+			if(k.name.size() > 4 && k.name.compare(k.name.size() - 4, 4,
+					".key") == 0)
+				keys.push_back(k.name.substr(0, k.name.size() - 4));
+		return keys.size() == 1 && plain_aitta_name(keys[0]) ? keys[0] : "";
+	}
+
+	// [APP_REMIX] "Make my own version": a remix of the app id names (a
+	// tree app, or an installed <author>.<name>@<version>) made in
+	// dev_apps with the base's settings at their defaults and none of its
+	// files replaced -> its name; throws why not
+	static ss_ remix_new(const ss_ &id)
+	{
+		const ss_ base = app_dir(id);
+		json::json_error_t err;
+		const json::Value bm = json::load_file((base+"/meta.json").c_str(),
+				&err);
+		if(base.empty() || id.compare(0, 4, "dev:") == 0 ||
+				id.compare(0, 7, "review:") == 0 ||
+				!interface::fs::path_exists(base+"/main/meta.json") ||
+				!bm.get("base").is_undefined() ||
+				interface::aitta::kind_of(bm) != "app" ||
+				!interface::aitta::check_settings_schema(
+				bm.get("settings")).empty())
+			throw Exception(id+" declares no settings to make a version of");
+		const size_t at = id.find('@'), dot = id.find('.');
+		const bool installed = at != ss_::npos;
+		const ss_ stem = (installed ? id.substr(dot + 1, at - dot - 1) :
+				id).substr(0, 30)+"_mine";
+		ss_ name = stem;
+		for(int i = 2; interface::fs::path_exists(dev_apps_path()+"/"+name);
+				i++){
+			if(i > 99)
+				throw Exception("no free name in "+dev_apps_path());
+			name = stem+"_"+itos(i);
+		}
+		json::Value m = json::object();
+		m.set("kind", "remix");
+		m.set("base", installed ? id.substr(0, at) : id);
+		if(installed)
+			m.set("base_version", id.substr(at + 1));
+		if(!only_author().empty())
+			m.set("author", only_author());
+		m.set("name", name);
+		m.set("version", "1.0.0");
+		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+		m.set("description", "My own version of "+(installed ?
+				id.substr(0, at) : id));
+		// simplified: the base's licences as a start; what the author adds
+		// may need another
+		for(const char *k : {"license_code", "license_media"})
+			if(bm.get(k).is_string())
+				m.set(k, bm.get(k));
+		m.set("setting_values", json::object());
+		interface::fs::create_directories(dev_apps_path()+"/"+name);
+		write_text(dev_apps_path()+"/"+name+"/meta.json", m.stringify()+"\n");
+		log_i(MODULE, "remix: %s made of %s", cs(name), cs(id));
+		return name;
+	}
+
+	// [APP_REMIX] A remix in dev_apps as its page shows it: {base, base_dir,
+	// schema (the base's settings), values (as the server reads them),
+	// files: {{name, mine}} the base's files a remix may replace, mine
+	// where the remix has its own, why: what an install would refuse, or
+	// ""}; throws why not
+	static ss_ remix_read(const ss_ &name)
+	{
+		const ss_ dir = dev_app_dir("dev:"+name);
+		json::json_error_t err;
+		const json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
+		if(dir.empty() || interface::aitta::kind_of(m) != "remix")
+			throw Exception(name+" is not a remix in "+dev_apps_path());
+		const ss_ share = g_client_config.get<ss_>("share_path"),
+				user = g_client_config.get<ss_>("user_path");
+		ss_ why;
+		const ss_ base = interface::aitta::find_base(m, dir, share, user, &why);
+		if(base.empty())
+			throw Exception(why);
+		json::Value out = json::object();
+		out.set("base", m.get("base"));
+		out.set("base_dir", interface::fs::get_absolute_path(base));
+		out.set("schema", json::load_file((base+"/meta.json").c_str(),
+				&err).get("settings"));
+		out.set("values", interface::aitta::app_settings(dir, share, user));
+		json::Value files = json::array();
+		for(const auto &f : interface::aitta::app_client_files(base)){
+			if(!interface::aitta::remix_replaceable(f.first))
+				continue;
+			const size_t slash = f.first.find('/');
+			json::Value x = json::object();
+			x.set("name", f.first);
+			x.set("mine", interface::fs::path_exists(dir+"/"+
+					f.first.substr(0, slash)+"/client_data/"+
+					f.first.substr(slash + 1)));
+			files.append(x);
+		}
+		out.set("files", files);
+		// What an install would say of it now, "" for nothing
+		out.set("why", interface::aitta::remix_refusal(dir, m, base));
+		return out.stringify();
+	}
+
 	// [WORLD_PACKAGES] A save's files copied into world, the code paths
 	// (relative to the save) and links left out, a database by SQLite's
 	// own copy (consistent while a server writes it) and its journals
@@ -619,15 +736,8 @@
 			m.set("name", name);
 			m.set("version", "1.0.0");
 			m.set("description", "");
-			// The author whose key is the only one here
-			sv_<ss_> keys;
-			for(const auto &k : interface::fs::list_directory(user+
-					"/aitta_keys"))
-				if(k.name.size() > 4 && k.name.compare(k.name.size() - 4, 4,
-						".key") == 0)
-					keys.push_back(k.name.substr(0, k.name.size() - 4));
-			if(keys.size() == 1 && plain_aitta_name(keys[0]))
-				m.set("author", keys[0]);
+			if(!only_author().empty())
+				m.set("author", only_author());
 		}
 		m.set("kind", "world");
 		m.set("app", app);
@@ -772,6 +882,14 @@
 						lua_bindings::lua_tocppstring(L, 3)) : "";
 				if(why.empty() && !dir.empty())
 					why = interface::aitta::check_media(m, dir);
+				// [APP_REMIX] A remix's values and files, against its base
+				if(why.empty() && !dir.empty() &&
+						interface::aitta::kind_of(m) == "remix"){
+					ss_ base = interface::aitta::find_base(m, dir,
+							g_client_config.get<ss_>("share_path"), user, &why);
+					if(!base.empty())
+						why = interface::aitta::remix_refusal(dir, m, base);
+				}
 				lua_pushstring(L, why.c_str());
 				return 1;
 			}
@@ -829,6 +947,17 @@
 				if(!plain_aitta_name(author) || !interface::fs::path_exists(key))
 					throw Exception("no key for the author \""+author+"\" in "+
 							keys);
+				// [APP_REMIX] A remix as the clients that install it check it
+				if(interface::aitta::kind_of(m) == "remix"){
+					ss_ why;
+					const ss_ base = interface::aitta::find_base(m, dir,
+							g_client_config.get<ss_>("share_path"), user, &why);
+					if(base.empty())
+						throw Exception(why);
+					why = interface::aitta::remix_refusal(dir, m, base);
+					if(!why.empty())
+						throw Exception(why);
+				}
 				lua_pushstring(L, interface::aitta::pack(dir, key,
 						user+"/aitta_releases",
 						app::serverless_wasms(dir)).c_str());
@@ -892,6 +1021,11 @@
 				}
 				lua_pushstring(L, world_package_new(arg, save, lists[0],
 						lists[1]).c_str());
+				return 1;
+			}
+			if(op == "remix_new" || op == "remix_read"){
+				lua_pushstring(L, (op == "remix_new" ? remix_new(arg) :
+						remix_read(arg)).c_str());
 				return 1;
 			}
 			if(op == "open"){
@@ -1123,7 +1257,7 @@
 			names.push_back(id);
 		// And an author's own ([AITTA_PUBLISH_UI])
 		for(const DevEntry &e : dev_entries())
-			if(e.kind == "app")
+			if(e.kind == "app" || e.kind == "remix")
 				names.push_back("dev:"+e.name);
 		lua_newtable(L);
 		int i = 1;

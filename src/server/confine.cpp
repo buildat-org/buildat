@@ -982,12 +982,17 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 	{
 		json::json_error_t e;
 		ss_ why;
-		const ss_ base = real(interface::aitta::find_base(json::load_file(
-				(module_path+"/meta.json").c_str(), &e), module_path,
+		const json::Value m = json::load_file((module_path+
+				"/meta.json").c_str(), &e);
+		const ss_ base = real(interface::aitta::find_base(m, module_path,
 				config.get<ss_>("share_path"), config.get<ss_>("user_path"),
 				&why));
+		// An installed base (<author>.<name>) with its other versions:
+		// the loader lists them to pick one, as find_base() did here
+		// ([APP_REMIX])
 		if(!base.empty())
-			rs.add(base, FS_READ);
+			rs.add(json::jstr(m, "base").find('.') == ss_::npos ? base :
+					interface::fs::strip_file_name(base), FS_READ);
 	}
 	rs.add_around(prebuilt, {app_cache}, FS_READ);
 	if(!build_cgroup.empty())

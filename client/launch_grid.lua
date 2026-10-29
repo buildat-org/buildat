@@ -405,6 +405,21 @@ function M.actions(log)
 						end}
 				end
 			end
+		elseif source.kind == "dev" or source.kind == "installed" or
+				source.kind == "review" then
+			-- [APP_REMIX] A remix carries no launcher, which is code: one
+			-- tile, its name
+			local f = io.open(source.path .. "/meta.json", "rb")
+			local m = f and __buildat_parse_json(f:read("*a"))
+			if f then f:close() end
+			if type(m) == "table" and m.kind == "remix" then
+				actions = {{id = "play", label = tostring(m.name),
+					description = "A version of " .. tostring(m.base),
+					run = function()
+						do_launch(log, from, {app = source.kind == "dev" and
+								"dev:" .. source.name or source.name})
+					end}}
+			end
 		end
 		-- **A save stays with the version that made it**, and moves to
 		-- another when the player says so: this tile is the saying
@@ -420,6 +435,31 @@ function M.actions(log)
 					do_launch(log, from, {app = source.name,
 						params = {aitta_move_saves = 1}})
 				end}
+		end
+		-- **"Make my own version"** ([APP_REMIX]) of an app that declares
+		-- settings in its meta.json: a remix of it in dev_apps, its page
+		-- opened (client/core/aitta/publish.lua)
+		if (source.kind == "app" or source.kind == "installed") and actions and
+				actions[1] then
+			local f = io.open(source.path .. "/meta.json", "rb")
+			local m = f and __buildat_parse_json(f:read("*a"))
+			if f then f:close() end
+			if type(m) == "table" and type(m.settings) == "table" and
+					m.settings[1] and m.base == nil and (m.kind == nil or
+					m.kind == "app") then
+				actions[#actions + 1] = {id = "remix",
+					label = tostring(actions[1].label) ..
+							": make my own version",
+					description = "A version of your own: its settings and " ..
+							"files, played here and published on an Aitta",
+					category = "action",
+					run = function()
+						local ok, aitta = pcall(require, "buildat/core/aitta")
+						if ok and type(aitta) == "table" then
+							aitta.make_remix(source.name)
+						end
+					end}
+			end
 		end
 		-- **A playtest** ([AITTA_REVIEW]): unreviewed, from its Aitta, and
 		-- there until removed

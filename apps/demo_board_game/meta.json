@@ -1,0 +1,18 @@
+{
+	"settings": [
+		{"name": "board_size", "type": "number", "default": 10, "min": 4,
+			"max": 20, "integer": true, "label": "Board size",
+			"description": "Squares on a side"},
+		{"name": "title", "type": "text", "default": "demo_board_game",
+			"max_length": 40, "label": "Title"},
+		{"name": "player_color", "type": "color", "default": "#ffffff",
+			"label": "Player colour",
+			"description": "Multiplied into the players' texture"},
+		{"name": "board_texture", "type": "texture",
+			"default": "main/green_texture.png", "label": "Board texture"},
+		{"name": "camera", "type": "choice", "default": "corner",
+			"choices": ["corner", "above"], "label": "Camera"},
+		{"name": "shadows", "type": "bool", "default": true,
+			"label": "Shadows"}
+	]
+}
