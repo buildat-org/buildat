@@ -187,7 +187,7 @@ interface/server.h -- interface::Server, the one object a module holds
   two templates emit_event(type) / emit_event(type, new PrivateT(...)):
   the private is owned by the event
 - emit_event_after_queued(Event): emitted once every module has handled
-  what was in its queue at the call (network's answer to a client's
+  the client packets in its queue at the call (network's answer to a client's
   network:sync, [DRIVE_WAITS])
 - tmp_store_data / tmp_restore_data: a named blob that survives a reload
 - add_file_path(name, path) / get_file_path(name): the file namespace the
@@ -708,7 +708,7 @@ silent for 60 s dropped (it sends network:keepalive to a game peer it has
 sent nothing for 5 s, and the client does the same), the local pipe taking
 no remote client, and a POST's Content-Length of nine digits at most.
 A client's network:sync is answered with the same (its first 20 bytes)
-once every module has handled what was queued before it came: a drive's
+once every module has handled the client packets queued before it came: a drive's
 `sync` (doc/client_commands.txt).
 
 builtin/client_file/api.h -- client_file::Interface: add_file_content(name,

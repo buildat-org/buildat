@@ -120,8 +120,9 @@ idle <ms>
     fails naming what was left. Looked at from the frame after the
     command (what the last command injected is read in that one) on:
     - the client's thread pool: meshes, collision shapes, the check of
-      announced files (natively on worker threads, on the web the same
-      tasks run a slice a frame on the page's thread);
+      announced files, those a worker holds included (natively on worker
+      threads, on the web the same tasks run a slice a frame on the
+      page's thread); not the ray casts made again every frame;
     - the connection: files asked for and not in, announced files being
       checked, scripts held for them, packets read and not yet handled,
       one partly read;
@@ -140,12 +141,13 @@ idle <ms>
 
 sync <ms>
     A round trip through the server: a network:sync goes out, and the
-    server answers it once every one of its modules has handled what was
-    queued for it when the sync came. The connection is ordered both ways,
+    server answers it once every one of its modules has handled the client
+    packets queued for it when the sync came (a module busy with a tick of
+    its own is not waited for, unless a packet is queued behind it). The connection is ordered both ways,
     so on the answer what the client sent before it has been handled at
     the server, and what the server sent in answer has arrived and been
     handled here. A module's own later work (a thread of its own, a
-    generator) is not waited for. Fails with no server, or no answer in
+    generator, an event it emits to another module) is not waited for. Fails with no server, or no answer in
     the time.
 
     util/web_drive.js has the three as steps (["frames", n], ["idle",

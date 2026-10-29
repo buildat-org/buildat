@@ -353,7 +353,7 @@
 			if(!s.empty())
 				r += (r.empty() ? "" : ", ")+s;
 		};
-		if(size_t n = m_thread_pool->get_backlog())
+		if(size_t n = m_thread_pool->get_unfinished())
 			add("pool tasks (meshes) "+itos((int)n));
 		if(m_state)
 			add(m_state->get_pending());

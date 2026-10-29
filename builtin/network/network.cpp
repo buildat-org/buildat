@@ -767,7 +767,7 @@ struct Module: public interface::Module, public network::Interface
 	}
 
 	// [DRIVE_WAITS] A client's network:sync answered with its number once
-	// every module has handled what was queued before it came
+	// every module has handled the client packets queued before it came
 	void on_sync_through(const Packet &packet)
 	{
 		send_u(packet.sender, "network:sync", packet.data);

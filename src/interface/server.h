@@ -97,8 +97,9 @@ namespace interface
 		}
 
 		// [DRIVE_WAITS] The event, emitted once every module has handled
-		// what was in its queue at the call: a client's network:sync is
-		// answered after whatever the client sent before it
+		// the client packets queued for it at the call (a tick or another
+		// event is not waited for): a client's network:sync is answered
+		// after whatever the client sent before it
 		virtual void emit_event_after_queued(Event event) = 0;
 
 		virtual void tmp_store_data(const ss_ &name, const ss_ &data) = 0;

@@ -31,6 +31,9 @@ struct CThreadPool: public ThreadPool
 	// to be sixteen, which is what a chunk's textures are worth against
 	// the second one of them used to take.
 	static const int64_t PRE_BUDGET_US = 3000;
+	// Taken off the input queue by a worker and not on the output queue
+	// yet, background() ones not counted ([DRIVE_WAITS])
+	size_t m_working = 0;
 	interface::Mutex m_mutex; // Protects each of the former variables
 	interface::Semaphore m_tasks_sem; // Counts input tasks
 
@@ -82,6 +85,8 @@ struct CThreadPool: public ThreadPool
 				}
 				current = std::move(thread->pool->m_input_queue.front());
 				thread->pool->m_input_queue.pop_front();
+				if(!current->background())
+					thread->pool->m_working++;
 			}
 			// Run the task's threaded part
 			try {
@@ -93,6 +98,8 @@ struct CThreadPool: public ThreadPool
 			// Push the task to pool's output queue
 			{
 				interface::MutexScope ms_pool(thread->pool->m_mutex);
+				if(!current->background())
+					thread->pool->m_working--;
 				thread->pool->m_output_queue.push_back(std::move(current));
 			}
 		}
@@ -238,6 +245,15 @@ struct CThreadPool: public ThreadPool
 		interface::MutexScope ms(m_mutex);
 		return m_pre_queue.size() + m_input_queue.size() +
 				m_output_queue.size();
+	}
+	size_t get_unfinished()
+	{
+		interface::MutexScope ms(m_mutex);
+		size_t n = m_working;
+		for(auto *q : {&m_pre_queue, &m_input_queue, &m_output_queue})
+			for(const up_<Task> &task : *q)
+				n += task->background() ? 0 : 1;
+		return n;
 	}
 	int64_t m_inline_us = 0, m_post_us = 0;
 	void take_times(int64_t *inline_us, int64_t *post_us)

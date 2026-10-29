@@ -217,6 +217,9 @@ struct ModuleContainer
 	// thread has handled or dropped: what emit_event_sync() waits on
 	uint64_t events_pushed = 0;
 	uint64_t events_done = 0;
+	// [DRIVE_WAITS] events_pushed as it was after the last client packet
+	// went in: emit_event_after_queued()'s mark
+	uint64_t packet_pushed = 0;
 	// Packets a handler could not read: the first few are logged, then one
 	// every ten seconds with how many went unsaid (the module's thread
 	// only)
@@ -363,7 +366,21 @@ struct ModuleContainer
 		}
 		event_queue.push_back(event);
 		events_pushed++;
+		if(is_packet_event(event.type))
+			packet_pushed = events_pushed;
 		event_queue_sem.post();
+	}
+	// network:packet_received/*, by the type's name once a type
+	static bool is_packet_event(Event::Type type){
+		static std::mutex mutex;
+		static sv_<char> known; // 0 not looked at, 1 no, 2 yes
+		std::lock_guard<std::mutex> lock(mutex);
+		if(type >= known.size())
+			known.resize(type + 1, 0);
+		if(known[type] == 0)
+			known[type] = interface::getGlobalEventRegistry()->name(type).
+					compare(0, 24, "network:packet_received/") == 0 ? 2 : 1;
+		return known[type] == 2;
 	}
 	void event_done(){
 		{
@@ -790,7 +807,7 @@ struct CState: public State, public interface::Server
 	interface::Mutex m_modules_mutex;
 
 	// [DRIVE_WAITS] emit_event_after_queued()'s: each module's count of
-	// events pushed at the call, and the event; looked at by
+	// events pushed up to its last client packet at the call, and the event; looked at by
 	// handle_events()
 	struct AfterQueued {
 		sv_<std::pair<wp_<ModuleContainer>, uint64_t>> marks;
@@ -2069,7 +2086,7 @@ struct CState: public State, public interface::Server
 			for(auto &pair : m_modules){
 				const sp_<ModuleContainer> &mc = pair.second;
 				interface::MutexScope mq(mc->event_queue_mutex);
-				a.marks.emplace_back(mc, mc->events_pushed);
+				a.marks.emplace_back(mc, mc->packet_pushed);
 			}
 		}
 		interface::MutexScope ms(m_after_queued_mutex);
