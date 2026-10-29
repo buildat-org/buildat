@@ -94,7 +94,10 @@ if [ -d "${PLAYWRIGHT_NODE:-$HOME/.local/share/playwright-node}/node_modules/pla
 	echo "WebKit: $(grep -a "threads: " "$t/webkit/page.log" | head -1)"
 fi
 
-# demo_aggregate's too, when it is built: in, on its feet and walking
+# demo_aggregate's too, when it is built: in, on its feet and walking.
+# Its position line comes every 10 s of the game's time, which a frame
+# capped at 0.1 s stretches: 21-24 s of the wall beside other checks
+# (2026-10-29), so the wait for the second is a minute
 if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
 	cat > "$t/aggregate.json" << 'JSON'
 [
@@ -105,7 +108,7 @@ if [ -f "$here/web/local/demo_aggregate/buildat_server.wasm" ]; then
 	["waitlog", "demo_dig: player at", 10],
 	["eval", "'demo_aggregate playable at ' + Math.round(performance.now()) + ' ms'"],
 	["holdkey", "w", 1000],
-	["waitlog", "demo_dig: player at", 15],
+	["waitlog", "demo_dig: player at", 60],
 	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15]
 ]
 JSON
