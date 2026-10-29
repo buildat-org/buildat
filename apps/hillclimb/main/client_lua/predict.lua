@@ -256,6 +256,8 @@ return function()
 			st.whole = st.whole + (r == 2 and 1 or 0)
 			if r == 2 and not held and total.driven and not put_back then
 				total.whole = total.whole + 1
+				log:info("hillclimb: a state taken whole while driven: for substep "
+						.. tostring(at) .. ", here " .. now)
 			end
 			return
 		end
