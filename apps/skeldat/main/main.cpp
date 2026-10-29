@@ -526,6 +526,10 @@ struct Module: public interface::Module, public PlayersHost,
 	void on_files_transmitted(const client_file::FilesTransmitted &event)
 	{
 		const size_t peer = event.recipient;
+		// [REJOIN_FAST_CLICK] A client back from a reload's goodbye before
+		// the reload: the new instance takes it (on_continue())
+		if(m_rerunning)
+			return;
 		// [SKELDAT_LOGIN] On a public server every join logs in first,
 		// whatever the world's state ([WORLD_MENU_ADMIN]: only an admin
 		// picks a world, the first made with the setup code); on_login()
@@ -539,7 +543,8 @@ struct Module: public interface::Module, public PlayersHost,
 			joined = joined || i->launched() || !i->name_of(peer).empty();
 		});
 		if(!joined){
-			m_joining.insert(peer);
+			if(!m_joining.insert(peer).second)
+				return;
 			network::send(m_server, peer, "core:run_script",
 					"buildat.run_script_file(\"main/join.lua\")");
 			return;
@@ -565,7 +570,7 @@ struct Module: public interface::Module, public PlayersHost,
 	// shows the list to an admin and the wait to the rest)
 	void on_login(const accounts::Login &login)
 	{
-		if(!m_joining.erase(login.peer))
+		if(!m_joining.erase(login.peer) || m_rerunning)
 			return;
 		if(m_world.ready)
 			m_players.show(login.peer);
@@ -1221,6 +1226,7 @@ struct Module: public interface::Module, public PlayersHost,
 
 	void on_unload()
 	{
+		m_rerunning = true; // A source edit's reload too (-R)
 		if(!m_world.scene)
 			return;
 		log_i(MODULE, "skeldat: the world \"%s\" closed for a reload, day "
@@ -1258,6 +1264,13 @@ struct Module: public interface::Module, public PlayersHost,
 	// the old world itself when it is the target), or the start's again
 	void on_continue()
 	{
+		// [REJOIN_FAST_CLICK] A client that rejoined during the reload had
+		// its files_transmitted in the old instance or in none: each one
+		// connected tells again when its files are in, to this one
+		network::access(m_server, [&](network::Interface *i){
+			for(network::PeerInfo::Id p : i->list_peers())
+				i->send(p, "core:tell_after_all_files_transferred", "");
+		});
 		// [SKELDAT_WORLD_ADMIN] "play\n<name>\n<seed>" or "close"
 		const ss_ sw = m_server->tmp_restore_data("skeldat:switch");
 		if(!sw.empty()){
