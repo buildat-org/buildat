@@ -11,6 +11,14 @@
 # lib) by tar over ssh; what is not committed does not go. CHROME and
 # FIREFOX name the browsers there (chromium-browser and firefox);
 # REMOTE_DIR is the copy, ~/buildat_remote by default.
+# **Slots** (REMOTE_SLOTS, 2 by default): REMOTE_DIR and its git worktrees
+# REMOTE_DIR_2...; a run takes the first free one (a flock there for the
+# run's length) and waits while all are busy. A slot is a worktree of the
+# first (`git worktree add --detach`) with 3rdparty/Urho3D's ignored files
+# (its builds, Assimp) copied in and the absolute symlinks repointed into
+# it: the sandboxed server reads nothing through a link out of its root.
+# A check with a fixed port (apps/aitta/check.sh) clashes with itself in
+# another slot.
 #
 # **The machine** (made once; the script only keeps it current):
 # - Xvfb and Mesa (software GL); Chromium (CHROME when its binary is not
@@ -48,16 +56,39 @@
 set -eu -o pipefail
 [ $# -ge 2 ] || { sed -n '2,8p' "$0" | sed 's/^# *//' >&2; exit 2; }
 host=$1; shift
-dir=${REMOTE_DIR:-buildat_remote}
+base=${REMOTE_DIR:-buildat_remote}
+slots=${REMOTE_SLOTS:-2}
 cd "$(dirname "$0")/.."
-git push -q -f "$host:$dir" HEAD:refs/heads/remote_check
-ssh -o BatchMode=yes "$host" "cd $dir && git reset -q --hard remote_check"
+# A slot, held for the whole run: a remote flock whose ssh stays open until
+# this script ends (its stdin closing lets the lock go, a dead ssh too)
+take_slot(){
+	coproc LOCK { ssh -o BatchMode=yes "$host" "
+		for i in \$(seq $slots); do
+			d=$base; [ \$i = 1 ] || d=${base}_\$i
+			[ -d ~/\$d ] || continue
+			exec 9> ~/\$d/.remote_check.lock
+			if flock -n 9; then echo \$i \$d; cat > /dev/null; exit; fi
+		done
+		echo busy"; }
+	read -r slot dir <&"${LOCK[0]}" || slot=busy
+}
+take_slot
+while [ "$slot" = busy ]; do
+	echo "remote_check: every slot on $host is busy; waiting" >&2
+	sleep 20
+	take_slot
+done
+echo "remote_check: $host:$dir" >&2
+# The commit into the slot's repository (the first slot's; the others
+# are its worktrees), a branch a slot
+git push -q -f "$host:$base" HEAD:refs/heads/remote_check_$slot
+ssh -o BatchMode=yes "$host" "cd $dir && git reset -q --hard remote_check_$slot"
 # About 390 MB of builds, 136 MB through zstd
 tar c --exclude=CMakeFiles --exclude='*.o' Build/bin Build/lib web \
 		Build-webserver 3rdparty/Urho3D/Build/lib | zstd -q -T0 -3 |
 	ssh -o BatchMode=yes "$host" "zstd -q -dc | tar x -C $dir"
 q=$(printf ' %q' "$@")
-exec ssh -o BatchMode=yes "$host" "cd $dir &&
+ssh -o BatchMode=yes "$host" "cd $dir &&
 	export LD_LIBRARY_PATH=\$PWD/3rdparty/Urho3D/Build/lib
 	export CHROME=$(printf %q "${CHROME:-chromium-browser}")
 	export FIREFOX=$(printf %q "${FIREFOX:-firefox}")
