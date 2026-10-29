@@ -331,17 +331,18 @@ ss_ check_manifest(const json::Value &m, bool service)
 	for(const char *k : {"icon", "screenshot"})
 		if(!str(k).empty() && !archive_path_ok(str(k)))
 			return ss_("\"")+k+"\": a path inside the archive, like icon.png";
-	// [LUANTI_APP_PACKAGES] A variant's base: a plain name or
-	// <author>.<name>, and a version to start from
-	if(!m.get("base").is_undefined()){
-		const ss_ b = str("base");
+	// An app named by a variant's base or a world's app: a plain name or
+	// <author>.<name>
+	auto app_ref_ok = [](const ss_ &b){
 		const size_t dot = b.find('.');
-		if(dot == ss_::npos ? !plain_name(b, false) :
-				!plain_name(b.substr(0, dot), false) ||
-				!plain_name(b.substr(dot + 1), false))
-			return "\"base\": an app's name, like vanilla, or an installed "
-					"package's <author>.<name>";
-	}
+		return dot == ss_::npos ? plain_name(b, false) :
+				plain_name(b.substr(0, dot), false) &&
+				plain_name(b.substr(dot + 1), false);
+	};
+	// [LUANTI_APP_PACKAGES] A variant's base, and a version to start from
+	if(!m.get("base").is_undefined() && !app_ref_ok(str("base")))
+		return "\"base\": an app's name, like vanilla, or an installed "
+				"package's <author>.<name>";
 	if(!m.get("base_version").is_undefined() &&
 			!semver_ok(str("base_version")))
 		return "\"base_version\": a SemVer 2.0 version, like 1.2.0";
@@ -358,8 +359,23 @@ ss_ check_manifest(const json::Value &m, bool service)
 	};
 	if(!known("audience", {"everyone", "teen", "adult"}))
 		return "\"audience\": \"everyone\", \"teen\" or \"adult\"";
-	if(!known("kind", {"app", "extension"}))
-		return "\"kind\": \"app\" or \"extension\"";
+	if(!known("kind", {"app", "extension", "world"}))
+		return "\"kind\": \"app\", \"extension\" or \"world\"";
+	// [WORLD_PACKAGES] A world is a save of the app it names, made with
+	// the versions it names
+	if(kind_of(m) == "world"){
+		if(!app_ref_ok(str("app")))
+			return "\"app\": the app the world is a save of, like vanilla, "
+					"or an installed package's <author>.<name>";
+		if(!m.get("app_version").is_undefined() &&
+				!semver_ok(str("app_version")))
+			return "\"app_version\": the app's version it was made with, "
+					"a SemVer 2.0 version";
+		if(!m.get("buildat_version").is_undefined() &&
+				!plain_name(str("buildat_version"), true))
+			return "\"buildat_version\": the Buildat it was made with, like "
+					"0.7.91";
+	}
 	// An extension's name in the client is "<author>__<name>", which has to
 	// split one way only
 	if(kind_of(m) == "extension")
@@ -532,7 +548,8 @@ ss_ find_base(const json::Value &m, const ss_ &app_dir,
 ss_ kind_of(const json::Value &m)
 {
 	const json::Value &k = m.get("kind");
-	return k.is_string() && k.as_string() == "extension" ? "extension" : "app";
+	return k.is_string() && (k.as_string() == "extension" ||
+			k.as_string() == "world") ? k.as_string() : "app";
 }
 
 // A zip of every file under dir, deflated, '/' separated; names that start
@@ -644,6 +661,9 @@ ss_ pack(const ss_ &app_dir, const ss_ &key_path, const ss_ &out_dir,
 				changelog.as_string()+" is not there");
 	if(kind_of(m) == "extension" && !fs::path_exists(app_dir+"/init.lua"))
 		throw Exception(app_dir+": an extension has init.lua at its root");
+	if(kind_of(m) == "world" && !fs::path_exists(app_dir+"/world/save.sqlite"))
+		throw Exception(app_dir+": a world has its save in world/, "
+				"save.sqlite at its root");
 	const ss_ media = check_media(m, app_dir);
 	if(!media.empty())
 		throw Exception(app_dir+"/meta.json: "+media);
@@ -740,8 +760,9 @@ ss_ pack_page(const ss_ &page_dir, const ss_ &package, const ss_ &key_path,
 			PAGE_FORMAT, out_dir+"/"+base+"-page");
 }
 
-ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
-		bool review, const ss_ &share_path)
+// A release's .sig read and checked against its archive: the .sig, or
+// throws why not
+static json::Value verified_sig(const ss_ &zip_path, const ss_ &sig_path)
 {
 	const ss_ zip = read_file(zip_path);
 	json::json_error_t e;
@@ -756,6 +777,18 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 		throw Exception("the archive is not the one the .sig is for");
 	if(!verify(sstr("key"), zip, sstr("signature")))
 		throw Exception("the signature does not match the archive");
+	return sig;
+}
+
+ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
+		bool review, const ss_ &share_path)
+{
+	const json::Value sig = verified_sig(zip_path, sig_path);
+	json::json_error_t e;
+	auto sstr = [&](const char *k) -> ss_ {
+		const json::Value &v = sig.get(k);
+		return v.is_string() ? v.as_string() : "";
+	};
 
 	// Unpacked beside where it goes, and moved into place once its
 	// manifest has been read: nothing half there under its own name
@@ -776,6 +809,9 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 				throw Exception(why+"; install it first");
 		}
 		const ss_ kind = kind_of(m);
+		if(kind == "world")
+			throw Exception("a world is installed as a new save of its app, "
+					"from the client's Apps from Aitta");
 		if(review){
 			// [AITTA_REVIEW] A playtest: apart from the installed ones,
 			// no key kept, and a second one of a version replaces the first.
@@ -834,6 +870,100 @@ ss_ install(const ss_ &zip_path, const ss_ &sig_path, const ss_ &user_path,
 				if(n.is_directory && app+"/"+n.name != dir)
 					fs::remove_all(app+"/"+n.name);
 		return dir;
+	} catch(...){
+		fs::remove_all(incoming);
+		throw;
+	}
+}
+
+// [WORLD_PACKAGES]
+ss_ install_world(const ss_ &zip_path, const ss_ &sig_path,
+		const ss_ &user_path, const ss_ &share_path, const ss_ &app,
+		const sv_<ss_> &code)
+{
+	const json::Value sig = verified_sig(zip_path, sig_path);
+	// What it says before anything is written: no more files than a save
+	// has, nor more than they say they come to
+	const sv_<ZipEntry> entries = zip_list(zip_path);
+	if(entries.size() > WORLD_FILES_MAX)
+		throw Exception(itos((int64_t)entries.size())+" files; a world has "+
+				itos(WORLD_FILES_MAX)+" at most");
+	const ss_ saves = user_path+"/apps/"+app+"/saves";
+	// Beside where it goes, so the save is a rename; a name starting with
+	// '.' is no save's
+	const ss_ incoming = saves+"/.incoming-"+
+			sha256::hex(bignum::random_bytes(8));
+	fs::create_directories(incoming);
+	try {
+		zip_extract(zip_path, incoming, WORLD_UNPACKED_MAX);
+		json::json_error_t e;
+		const json::Value m = json::load_file((incoming+"/meta.json").c_str(),
+				&e);
+		const ss_ why = check_manifest(m);
+		if(!why.empty())
+			throw Exception("meta.json: "+why);
+		auto str = [&](const char *k) -> ss_ {
+			const json::Value &v = m.get(k);
+			return v.is_string() ? v.as_string() : "";
+		};
+		if(kind_of(m) != "world")
+			throw Exception("not a world: an app or an extension is installed "
+					"as one");
+		if(str("app") != app)
+			throw Exception("a world of "+str("app")+", not of "+app);
+		// The app it is a save of, here: one that comes with Buildat, or an
+		// installed package -- of the version that made it, which another
+		// version does not open (storage's pin)
+		const size_t dot = app.find('.');
+		if(dot == ss_::npos){
+			if(!fs::path_exists(share_path+"/apps/"+app))
+				throw Exception("its app "+app+" is not here");
+		} else {
+			const ss_ dir = user_path+"/installed/"+app.substr(0, dot)+"/"+
+					app.substr(dot + 1);
+			const ss_ v = str("app_version");
+			if(!v.empty() && !fs::path_exists(dir+"/"+v+"/meta.json"))
+				throw Exception("it was made with "+app+" "+v+": install that "
+						"version first");
+			if(v.empty() && !fs::path_exists(dir))
+				throw Exception("its app "+app+" is not installed: install it "
+						"first");
+		}
+		const ss_ world = incoming+"/world";
+		if(!fs::path_exists(world+"/save.sqlite"))
+			throw Exception("no world/save.sqlite in it: not a save");
+		// A world is data: what its app runs as code is refused, as a
+		// stranger's code is not run for having come in a save
+		for(const ss_ &c : code)
+			if(fs::path_exists(world+"/"+c))
+				throw Exception("it carries "+c+", which "+app+" runs as "
+						"code; a world package is a save's data only");
+		// Its own name, or the next free one; never one storage refuses
+		// (Windows' devices, "trash") or the player's list leaves out (_)
+		ss_ base = str("name");
+		ss_ stem = base;
+		for(char &c : stem)
+			c = toupper((unsigned char)c);
+		if(base[0] == '_' || base == "trash" || stem == "CON" ||
+				stem == "PRN" || stem == "AUX" || stem == "NUL" ||
+				(stem.size() == 4 && (stem.compare(0, 3, "COM") == 0 ||
+				stem.compare(0, 3, "LPT") == 0)))
+			base = "world_"+base;
+		ss_ name = base;
+		for(int i = 2; fs::path_exists(saves+"/"+name); i++){
+			if(i > 99)
+				throw Exception("no free name for the save "+base);
+			name = base+"_"+itos(i);
+		}
+		if(!fs::rename(world, saves+"/"+name))
+			throw Exception("cannot move it into "+saves+"/"+name);
+		// For the app's first open of it: a stranger's save
+		// (doc/aitta.txt). Written here, after the archive's files, so
+		// no archive decides it
+		write_file(saves+"/"+name+"/.world_package", str("author")+"/"+
+				str("name")+"/"+str("version")+"\n");
+		fs::remove_all(incoming);
+		return name;
 	} catch(...){
 		fs::remove_all(incoming);
 		throw;

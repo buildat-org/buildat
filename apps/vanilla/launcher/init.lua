@@ -20,6 +20,10 @@ return function(ctx)
 	-- installed, or none, the grass block
 	ctx.save_variant = {store = "main", key = "gameid",
 		icon = "grass_block.png"}
+	-- **A save is a world to publish** ([WORLD_PACKAGES]): its directory
+	-- copies as files; the world's own mods are code, never in a world
+	-- package (main/game_start.h takes an installed one as a stranger's)
+	ctx.world_packages = {code = {"luanti/worldmods"}}
 	local out = {}
 	for i, g in ipairs(buildat.list_installed_games("vanilla")) do
 		local name = g.name

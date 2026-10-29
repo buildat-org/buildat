@@ -84,6 +84,16 @@ or publish the .zip and its .sig to an Aitta and install it from the
 client's "Apps from Aitta". A variant's package holds only the variant;
 vanilla is not in it.
 
+A world as a package
+--------------------
+A vanilla save is a world others can install ([WORLD_PACKAGES],
+doc/aitta.txt's "Worlds"): "Publish this world" on it in the launcher's
+Saves, and "Install and play" in Apps from Aitta. The package is the
+save's directory (save.sqlite and luanti/ with world.mt and the mods'
+files), not a Luanti world's map.sqlite: a Luanti world is imported into a
+save first. Its world mods are left out, and a package carrying them is
+refused.
+
 Licences
 --------
 license_code covers the app's code, the Luanti game's Lua included;

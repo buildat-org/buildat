@@ -115,7 +115,9 @@
 		// And an author's own ([AITTA_PUBLISH_UI]): an app with its
 		// launcher, run as dev:<name>; an extension as an installed one
 		for(const DevEntry &e : dev_entries()){
-			if(e.kind == "extension" && e.client_name.empty())
+			// A world ([WORLD_PACKAGES]) is published, not run
+			if((e.kind == "extension" && e.client_name.empty()) ||
+					e.kind == "world")
 				continue;
 			const ss_ path = interface::fs::get_absolute_path(e.dir);
 			lua_newtable(L);
@@ -449,6 +451,10 @@
 	//                           page packed and signed -> the .zip's
 	//                           path, or nil and why
 	//   "open", path            the system's file manager there
+	//   "world_new", app, save, {code paths}
+	//                           [WORLD_PACKAGES] the save copied into a
+	//                           world package in dev_apps, made or
+	//                           refreshed -> its name, or nil and why
 	static bool plain_aitta_name(const ss_ &s)
 	{
 		if(s.empty() || s.size() > 40)
@@ -472,6 +478,144 @@
 		os<<f.rdbuf();
 		return os.str();
 	}
+	// [WORLD_PACKAGES] A save's files copied into world, the code paths
+	// (relative to the save) and links left out, a database by SQLite's
+	// own copy (consistent while a server writes it) and its journals
+	// left out. The bytes copied; throws why not.
+	static int64_t copy_save_files(const ss_ &from, const ss_ &to,
+			const ss_ &rel, const sv_<ss_> &code)
+	{
+		int64_t bytes = 0;
+		interface::fs::create_directories(to);
+		for(const auto &n : interface::fs::list_directory(from)){
+			const ss_ r = rel+n.name, src = from+"/"+n.name, dst = to+"/"+n.name;
+			if(std::find(code.begin(), code.end(), r) != code.end()){
+				log_i(MODULE, "world package: %s left out: its app runs it "
+						"as code", cs(r));
+				continue;
+			}
+#ifndef _WIN32
+			struct stat st;
+			if(lstat(src.c_str(), &st) != 0 || S_ISLNK(st.st_mode))
+				continue;
+#endif
+			auto ends = [&](const char *e){
+				const size_t k = strlen(e);
+				return n.name.size() > k &&
+						n.name.compare(n.name.size() - k, k, e) == 0;
+			};
+			if(n.is_directory){
+				bytes += copy_save_files(src, dst, r+"/", code);
+			} else if(ends("-wal") || ends("-shm") || ends("-journal")){
+				continue;
+			} else if(ends(".sqlite")){
+				sqlite3 *h = nullptr;
+				sqlite3_stmt *st = nullptr;
+				int rc = sqlite3_open_v2(src.c_str(), &h, SQLITE_OPEN_READONLY,
+						nullptr);
+				if(rc == SQLITE_OK){
+					sqlite3_busy_timeout(h, 5000);
+					rc = sqlite3_prepare_v2(h, "VACUUM INTO ?", -1, &st, nullptr);
+				}
+				if(rc == SQLITE_OK){
+					sqlite3_bind_text(st, 1, dst.c_str(), -1, SQLITE_TRANSIENT);
+					rc = sqlite3_step(st) == SQLITE_DONE ? SQLITE_OK : SQLITE_ERROR;
+				}
+				const ss_ err = rc == SQLITE_OK ? "" : sqlite3_errmsg(h);
+				sqlite3_finalize(st);
+				sqlite3_close(h);
+				if(!err.empty())
+					throw Exception("cannot copy "+r+": "+err);
+				bytes += interface::fs::file_size(dst);
+			} else {
+				write_text(dst, read_text(src));
+				bytes += interface::fs::file_size(dst);
+			}
+		}
+		return bytes;
+	}
+
+	static ss_ world_package_new(const ss_ &app, const ss_ &save,
+			const sv_<ss_> &code)
+	{
+		const size_t dot = app.find('.');
+		if(!(dot == ss_::npos ? valid_app_name(app) :
+				plain_aitta_name(app.substr(0, dot)) &&
+				plain_aitta_name(app.substr(dot + 1))) ||
+				!valid_app_name(save) || save[0] == '_')
+			throw Exception("no save "+save+" of "+app);
+		const ss_ user = g_client_config.get<ss_>("user_path");
+		const ss_ from = user+"/apps/"+app+"/saves/"+save;
+		if(!interface::fs::path_exists(from+"/save.sqlite"))
+			throw Exception("no save "+save+" of "+app);
+		// Its package's name from the save's: a-z, 0-9 and _
+		ss_ name;
+		for(char c : save)
+			if(name.size() < 40)
+				name += isalnum((unsigned char)c) ?
+						(char)tolower((unsigned char)c) : '_';
+		const ss_ dir = dev_apps_path()+"/"+name;
+		json::json_error_t err;
+		json::Value m = json::load_file((dir+"/meta.json").c_str(), &err);
+		if(interface::fs::path_exists(dir)){
+			if(interface::aitta::kind_of(m) != "world")
+				throw Exception(dir+" is another package: rename the save "
+						"or that folder");
+			if(m.get("app").is_string() && m.get("app").as_string() != app)
+				throw Exception(dir+" is a world of "+m.get("app").as_string()+
+						": rename the save or that folder");
+		} else {
+			m = json::object();
+			m.set("name", name);
+			m.set("version", "1.0.0");
+			m.set("description", "");
+			// The author whose key is the only one here
+			sv_<ss_> keys;
+			for(const auto &k : interface::fs::list_directory(user+
+					"/aitta_keys"))
+				if(k.name.size() > 4 && k.name.compare(k.name.size() - 4, 4,
+						".key") == 0)
+					keys.push_back(k.name.substr(0, k.name.size() - 4));
+			if(keys.size() == 1 && plain_aitta_name(keys[0]))
+				m.set("author", keys[0]);
+		}
+		m.set("kind", "world");
+		m.set("app", app);
+		m.set("engine_api", (int64_t)interface::aitta::ENGINE_API);
+		m.set("buildat_version", BUILDAT_VERSION);
+		// The release of the app that made it, as storage pins it: "<version>
+		// <sha256>" in the save's _aitta store; none for one that comes
+		// with Buildat
+		{
+			sqlite3 *h = nullptr;
+			sqlite3_stmt *st = nullptr;
+			ss_ release;
+			if(sqlite3_open_v2((from+"/save.sqlite").c_str(), &h,
+					SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK &&
+					sqlite3_prepare_v2(h, "SELECT value FROM store WHERE "
+					"store = '_aitta' AND key = 'release'", -1, &st,
+					nullptr) == SQLITE_OK && sqlite3_step(st) == SQLITE_ROW){
+				const void *v = sqlite3_column_blob(st, 0);
+				release.assign(v ? (const char*)v : "",
+						sqlite3_column_bytes(st, 0));
+			}
+			sqlite3_finalize(st);
+			sqlite3_close(h);
+			release = release.substr(0, release.find(' '));
+			if(interface::aitta::semver_ok(release))
+				m.set("app_version", release);
+			else
+				m.del_key("app_version");
+		}
+		// The save as it is now, over the copy there was
+		interface::fs::remove_all(dir+"/world");
+		const int64_t bytes = copy_save_files(from, dir+"/world", "", code);
+		write_text(dir+"/meta.json", m.stringify()+"\n");
+		log_i(MODULE, "world package: %s of %s copied into %s, %lld kB",
+				cs(save), cs(app), cs(dir), (long long)(bytes / 1000));
+		return name;
+	}
+
 	static int l_aitta_dev(lua_State *L)
 	{
 		const ss_ op = lua_bindings::lua_tocppstring(L, 1);
@@ -677,6 +821,22 @@
 						name, key, user+"/aitta_releases").c_str());
 				return 1;
 			}
+			if(op == "world_new"){
+				const ss_ save = lua_isstring(L, 3) ?
+						lua_bindings::lua_tocppstring(L, 3) : "";
+				sv_<ss_> code;
+				for(int i = 1; lua_istable(L, 4); i++){
+					lua_rawgeti(L, 4, i);
+					if(!lua_isstring(L, -1)){
+						lua_pop(L, 1);
+						break;
+					}
+					code.push_back(lua_bindings::lua_tocppstring(L, -1));
+					lua_pop(L, 1);
+				}
+				lua_pushstring(L, world_package_new(arg, save, code).c_str());
+				return 1;
+			}
 			if(op == "open"){
 				if(!interface::process::open_with_system(arg))
 					throw Exception("cannot open "+arg);
@@ -798,6 +958,9 @@
 	// under <user>/review ([AITTA_REVIEW]). The Aitta, where given, in its
 	// .aitta_from: where its tile's Report... goes ([AITTA_REPORTS]).
 	// Trusted only: client/core/starport.
+	// [WORLD_PACKAGES] With world = {app =, code = {paths}} (the app's
+	// launcher's ctx.world_packages), a world release is put in as a new
+	// save of that app (interface::aitta::install_world): the save's name.
 	static int l_aitta_install(lua_State *L)
 	{
 		const ss_ zip = lua_bindings::lua_tocppstring(L, 1);
@@ -816,6 +979,35 @@
 				o<<f.second;
 				if(!o.good())
 					throw Exception("cannot write "+f.first);
+			}
+			if(lua_istable(L, 5)){
+				lua_getfield(L, 5, "app");
+				const ss_ app = lua_isstring(L, -1) ?
+						lua_bindings::lua_tocppstring(L, -1) : "";
+				lua_pop(L, 1);
+				const size_t dot = app.find('.');
+				if(!(dot == ss_::npos ? valid_app_name(app) : plain_aitta_name(
+						app.substr(0, dot)) && plain_aitta_name(app.substr(dot + 1))))
+					throw Exception("no such app: "+app);
+				sv_<ss_> code;
+				lua_getfield(L, 5, "code");
+				for(int i = 1; lua_istable(L, -1); i++){
+					lua_rawgeti(L, -1, i);
+					if(!lua_isstring(L, -1)){
+						lua_pop(L, 1);
+						break;
+					}
+					code.push_back(lua_bindings::lua_tocppstring(L, -1));
+					lua_pop(L, 1);
+				}
+				lua_pop(L, 1);
+				const ss_ save = interface::aitta::install_world(tmp+".zip",
+						tmp+".sig", g_client_config.get<ss_>("user_path"),
+						g_client_config.get<ss_>("share_path"), app, code);
+				interface::fs::remove_all(tmp+".zip");
+				interface::fs::remove_all(tmp+".sig");
+				lua_pushstring(L, save.c_str());
+				return 1;
 			}
 			const ss_ dir = interface::aitta::install(tmp+".zip", tmp+".sig",
 					g_client_config.get<ss_>("user_path"), review,

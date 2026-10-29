@@ -466,6 +466,15 @@ buildat.safe.launch_actions = function()
 	end
 	return out
 end
+-- [WORLD_PACKAGES] world_packages() -> {app = {code = {paths}}}: the apps
+-- that take worlds, from their launchers (client/launch_grid.lua).
+-- Trusted only: Apps from Aitta's install of a world
+buildat.world_packages = function()
+	if not launch_grid.world_packages then
+		buildat.safe.launch_actions()
+	end
+	return launch_grid.world_packages
+end
 -- save_actions(app) -> what the app's launcher does to one of its saves
 -- ([SAVE_CONTEXT_MENU]): {{key, label, description}}, for launch(key,
 -- save); none of them a tile

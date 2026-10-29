@@ -921,7 +921,7 @@ struct Module: public interface::Module, public moderation::Host
 					"Play in the browser</a>");
 		const ss_ host = get("app_hosting_provider");
 		const size_t at = host.find("://");
-		if(at != ss_::npos && jstr(rel, "kind") != "extension"){
+		if(at != ss_::npos && jstr(rel, "kind") == "app"){
 			const ss_ domain = host.substr(at + 3, host.find_first_of("/:?#",
 					at + 3) - (at + 3));
 			out.push_back("<a href=\""+html(host+(host.find('?') == ss_::npos ?
@@ -934,6 +934,21 @@ struct Module: public interface::Module, public moderation::Host
 		for(const ss_ &x : out)
 			o += (o.empty() ? "" : "<br>")+x;
 		return o;
+	}
+
+	// [WORLD_PACKAGES] " for <app> <version>" after a world's kind, the app
+	// a link to its page where it is a package here
+	static ss_ world_of(const json::Value &rel)
+	{
+		using interface::web_brand::html;
+		if(jstr(rel, "kind") != "world")
+			return "";
+		ss_ app = jstr(rel, "app");
+		const size_t dot = app.find('.');
+		const ss_ v = jstr(rel, "app_version");
+		return " for "+(dot == ss_::npos ? html(app) : "<a href=\"/p/"+
+				html(ss_(app).replace(dot, 1, "/"))+"\">"+html(app)+"</a>")+
+				(v.empty() ? "" : " "+html(v));
 	}
 
 	// links: outside_links()'s, under the files' links
@@ -952,7 +967,8 @@ struct Module: public interface::Module, public moderation::Host
 				"<a href=\"/p/"+html(pkg)+
 				"\">"+html(pkg)+"</a>" : html(pkg))+"</b> "+
 				html(jstr(rel, "version"))+" <span class=\"meta\">"+
-				html(jstr(rel, "kind"))+(rel.get("serverless").is_true() ||
+				html(jstr(rel, "kind"))+world_of(rel)+
+				(rel.get("serverless").is_true() ||
 				rel.get("web").is_true() || rel.get("web_cpp").is_true() ?
 				", runs in the browser" : "")+", for "+html(jstr(rel, "audience"))+
 				", "+date((int64_t)rel.get("time")
@@ -1105,13 +1121,17 @@ struct Module: public interface::Module, public moderation::Host
 					"is not one of the client's Aittas, add it in the "
 					"Starport settings (<b>Starport settings...</b> in the "
 					"launcher, then <b>Add Aitta</b>).</li><li>Search for "
-					"<code>"+html(name)+"</code> and pick <b>Install</b>; the "
+					"<code>"+html(name)+"</code> and pick <b>"+(jstr(*mine[0],
+					"kind") == "world" ? "Install and play" : "Install")+
+					"</b>; the "
 					"client checks the author's signature first.</li>"+
 					(jstr(*mine[0], "review") == "reviewed" ? "" :
 					"<li>The newest release is unreviewed: it shows only "
 					"with <b>Apps from Aitta (unreviewed): shown</b> in the "
-					"same settings.</li>")+"</ol></details>\n"
-					"<details><summary>On a dedicated server</summary>"
+					"same settings.</li>")+"</ol></details>\n";
+			// [WORLD_PACKAGES] A world is a client's save, installed there
+			if(jstr(*mine[0], "kind") != "world")
+				c += "<details><summary>On a dedicated server</summary>"
 					"<div class=\"box\"><span class=\"meta\">In the "
 					"directory of a Buildat release; the newest listed, or a "
 					"version</span><pre>"
@@ -1171,10 +1191,23 @@ struct Module: public interface::Module, public moderation::Host
 			if(pg.is_object())
 				head += "<div class=\"page\">"+page_text(jstr(pg,
 						"description"))+"</div>\n";
+			// [WORLD_PACKAGES] An app's worlds, each its newest, under it
+			ss_ worlds;
+			{
+				ss_ app = want;
+				app[app.find('/')] = '.';
+				std::set<ss_> had;
+				for(const json::Value &rel : rels)
+					if(jstr(rel, "kind") == "world" && jstr(rel, "app") == app &&
+							had.insert(pkg(rel)).second)
+						worlds += release_box(rel, true);
+			}
+			if(!worlds.empty())
+				worlds = "<h2>Worlds for it</h2>\n"+worlds;
 			return send(200, html_type, interface::web_brand::page(want+
 					" - Aitta", "Aitta", head+"<p class=\""
 					"meta\">Every listed release, the newest first.</p>\n"+
-					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+
+					(pl.empty() ? "" : "<p>"+pl+"</p>\n")+c+worlds+
 					f, MANAGE));
 		}
 		std::set<ss_> seen;
@@ -1765,6 +1798,12 @@ struct Module: public interface::Module, public moderation::Host
 				throw Exception("meta.json: more than "+
 						itos((int64_t)MANIFEST_MAX / 1024)+" KiB");
 			m = json::load_string(mt.c_str());
+			// [WORLD_PACKAGES] A world of no more files than a client takes
+			if(interface::aitta::kind_of(m) == "world" &&
+					interface::zip_list(zip).size() >
+					interface::aitta::WORLD_FILES_MAX)
+				throw Exception("a world of more than "+itos((int64_t)
+						interface::aitta::WORLD_FILES_MAX)+" files");
 		} catch(std::exception &e){
 			interface::fs::remove_all(dir);
 			interface::fs::remove_all(zip);
@@ -1850,8 +1889,13 @@ struct Module: public interface::Module, public moderation::Host
 		// [SERVERLESS_PLAY] Its client half runs with no server: Play
 		rel.set("serverless", m.get("serverless").as_boolean());
 		const ss_ kind = jstr(m, "kind");
-		rel.set("kind", kind.empty() || kind == "app" || kind == "extension" ?
-				interface::aitta::kind_of(m) : "other");
+		rel.set("kind", kind.empty() || kind == "app" || kind == "extension" ||
+				kind == "world" ? interface::aitta::kind_of(m) : "other");
+		// [WORLD_PACKAGES] A world's app and the versions that made it
+		if(kind == "world")
+			for(const char *k : {"app", "app_version", "buildat_version"})
+				if(!jstr(m, k).empty())
+					rel.set(k, jstr(m, k));
 		interface::fs::create_directories(m_archives+"/media");
 		for(const auto &x : media){
 			const ss_ h = interface::sha256::hex(

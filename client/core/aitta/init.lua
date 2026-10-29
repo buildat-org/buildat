@@ -54,7 +54,7 @@ end
 -- refusal (a playtest's ticket gone, an error page) is said as `refused`.
 -- done(dir) or done(nil, why, "fetch"|"install"). o: description (the
 -- network's leave), query ("?ticket=..."), review (installed apart),
--- refused.
+-- refused, world ({app, code}: a world as a new save of app, done(save)).
 local function fetch_install(aitta, sha256, o, done)
 	local base = aitta .. "/api/v1/aitta/archive/" .. tostring(sha256)
 	local options = {description = o.description}
@@ -67,7 +67,8 @@ local function fetch_install(aitta, sha256, o, done)
 			if not zip or zip:sub(1, 2) ~= "PK" then
 				return done(nil, zip and refused or tostring(e2), "fetch")
 			end
-			local dir, why = __buildat_aitta_install(zip, sig, aitta, o.review)
+			local dir, why = __buildat_aitta_install(zip, sig, aitta, o.review,
+					o.world)
 			done(dir, why, "install")
 		end, options)
 	end, options)
@@ -200,9 +201,23 @@ local function cannot_run(rel)
 		return "made for an older Buildat"
 	elseif api > __buildat_aitta_dev("engine_api") then
 		return "needs a newer Buildat"
-	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" then
+	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
+			rel.kind ~= "world" then
 		return "a kind of package this Buildat does not know"
 	end
+end
+
+-- [WORLD_PACKAGES] The app a world is a save of, as its manifest names it
+-- (the install checks it again), and whether that app here takes worlds:
+-- its launcher's {code}, or nil and why not
+local function world_app(rel)
+	local app = type(rel.app) == "string" and rel.app or ""
+	local wp = (buildat.world_packages() or {})[app]
+	if not wp then
+		return app, nil, app == "" and "it names no app" or app ..
+				" is not here, or does not take worlds"
+	end
+	return app, wp
 end
 
 -- By SemVer; by the time an Aitta listed it for a version that is not one
@@ -451,11 +466,37 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	end
 	local function install(p, play)
 		local rel, k = p.rel, p.key
+		-- [WORLD_PACKAGES] A world: a new save of its app each time, played
+		local world = nil
+		if rel.kind == "world" then
+			local app, wp, why = world_app(rel)
+			if not wp then
+				return say("Not installed: " .. why, WARN)
+			end
+			world = {app = app, code = wp.code}
+		end
 		say("Fetching " .. k .. "...")
-		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)"},
-				function(dir, why, stage)
+		fetch_install(rel.aitta, rel.sha256, {description = "Aitta (install)",
+				world = world}, function(dir, why, stage)
 			if stage == "fetch" then
 				return say("Could not fetch: " .. why, WARN)
+			end
+			if world then
+				if not dir then
+					return say("Not installed: " .. tostring(why), WARN)
+				end
+				log:info("aitta: " .. k .. " " .. tostring(rel.version) ..
+						" installed as the save " .. dir .. " of " .. world.app)
+				pcall(function() uistack.main:pop_to(uistack.main.stack[1]) end)
+				local menu = buildat.menu_extension()
+				if menu and type(menu.refresh) == "function" then
+					menu.refresh()
+				end
+				local ok, err = buildat.safe.launch_save(world.app, dir)
+				if not ok then
+					log:warning("aitta: play " .. dir .. ": " .. tostring(err))
+				end
+				return
 			end
 			if dir and play then
 				return play_installed(k, rel.version, rel)
@@ -486,7 +527,10 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		log:info("aitta panel: " .. p.key .. " " .. tostring(rel.version))
 		ptext(p.key, nil, 18)
 		ptext(tostring(rel.version) .. ", " .. (rel.kind == "extension" and
-				"an extension" or "an app") .. ((rel.serverless == true or
+				"an extension" or rel.kind == "world" and "a world for " ..
+				tostring(rel.app) .. (rel.app_version and " " ..
+				tostring(rel.app_version) or "") or "an app") ..
+				((rel.serverless == true or
 				rel.web == true or rel.web_cpp == true) and
 				", runs in the browser" or "") .. ", by " ..
 				tostring(rel.author) .. "; " .. (rel.review == "reviewed" and
@@ -516,7 +560,12 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 			reseal(img)
 			log:info("aitta panel: screenshot " .. shot)
 		end
-		if rel.kind ~= "extension" then
+		if rel.kind == "world" then
+			local app, wp, why = world_app(rel)
+			ptext(wp and "Installs as a new save of " .. app .. " and plays " ..
+					"it: a save's data, no code." or "Cannot be installed: " ..
+					why .. ".", wp and DIM or WARN)
+		elseif rel.kind ~= "extension" then
 			ptext("It runs in the server's sandbox: it cannot reach your " ..
 					"files, only its own saves.", DIM)
 		end
@@ -534,7 +583,10 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				end
 			end, true, true)
 		end
-		if not ON_WEB and not why_not then
+		if not ON_WEB and not why_not and rel.kind == "world" then
+			add_button(actions, "Install and play", function() install(p) end,
+					select(2, world_app(rel)) ~= nil, true)
+		elseif not ON_WEB and not why_not then
 			add_button(actions, st == "Installed" and "Installed" or
 					st == "Updates" and "Update" or "Install",
 					function() install(p) end, st ~= "Installed",
@@ -579,11 +631,20 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 				shown[#shown + 1] = p
 			end
 		end
+		-- [WORLD_PACKAGES] By name, a world under its app: after the app's
+		-- row where the app is listed, else where its name sorts
+		local function by_name(p)
+			if p.rel.kind == "world" then
+				return tostring(p.rel.app):gsub("%.", "/", 1):lower() ..
+						"\1" .. p.key:lower()
+			end
+			return p.key:lower()
+		end
 		table.sort(shown, function(a, b)
 			if by == "newest" then
 				return (tonumber(a.rel.time) or 0) > (tonumber(b.rel.time) or 0)
 			end
-			return a.key:lower() < b.key:lower()
+			return by_name(a) < by_name(b)
 		end)
 		local first
 		for _, p in ipairs(shown) do
@@ -599,6 +660,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 						end
 					end)},
 					tostring(p.rel.version) ..
+					(p.rel.kind == "world" and ", world for " ..
+					tostring(p.rel.app) or "") ..
 					(cannot_run(p.rel) and ", not for this Buildat" or
 					st == "Installed" and ", installed" or
 					st == "Updates" and ", update" or "") ..

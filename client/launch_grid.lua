@@ -310,11 +310,18 @@ M.for_save = {}
 -- id), whose picture the save shows; icon, the launcher's own file, is
 -- for a save whose value names none. Nil before the first scan.
 M.save_variants = nil
+-- [WORLD_PACKAGES] **The apps whose saves are worlds to publish**: app ->
+-- {code = {paths}}, from a launcher's `ctx.world_packages = {code =
+-- {...}}`: the app's saves copy as files, and code names the paths in a
+-- save that the app runs as code (a world package carries none). Each such
+-- app's saves have "Publish this world". Nil before the first scan.
+M.world_packages = nil
 
 function M.actions(log)
 	local out = {}
 	M.for_save = {}
 	M.save_variants = {}
+	M.world_packages = {}
 	local app_sizes = {}
 	for _, g in ipairs(buildat.list_apps() or {}) do
 		app_sizes[g.name] = tonumber(g.size)
@@ -346,6 +353,39 @@ function M.actions(log)
 					icon = type(v.icon) == "string" and
 							not v.icon:find("[/\\]") and
 							source.name.."/launcher/"..v.icon or nil}
+			end
+			-- An app that comes with Buildat by its name, an installed one
+			-- by <author>.<name>: where their saves are
+			local wp = ctx and ctx.world_packages
+			local app = source.kind == "app" and source.name or
+					source.kind == "installed" and source.name:match("^(.-)@")
+			if app and type(wp) == "table" and M.world_packages[app] == nil then
+				local code = {}
+				for _, c in ipairs(type(wp.code) == "table" and wp.code or {}) do
+					-- A path inside the save; one that is not is no opt-in,
+					-- since a world would then carry what it names
+					if type(c) ~= "string" or not c:match("^[%w_%-][%w_%-%./]*$") or
+							c:find("%.%.") or c:find("//") or c:sub(-1) == "/" then
+						log:warning("launcher "..from..": world_packages.code: "..
+								"a "..type(c).." that is not a path in a save")
+						code = nil
+						break
+					end
+					code[#code + 1] = c
+				end
+				M.world_packages[app] = code and {code = code} or false
+				if code then
+					M.for_save[#M.for_save + 1] = {app = app, id = "publish_world",
+						label = "Publish this world",
+						description = "Publish this save on an Aitta, for " ..
+								"others to install as a world of their own",
+						run = function(save)
+							local ok, aitta = pcall(require, "buildat/core/aitta")
+							if ok and type(aitta) == "table" then
+								aitta.publish_world(app, save, code)
+							end
+						end}
+				end
 			end
 		end
 		-- **A save stays with the version that made it**, and moves to

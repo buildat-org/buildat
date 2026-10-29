@@ -275,6 +275,16 @@ its id, and a launch UI shows the save with that tile's picture; icon, a
 file beside the launcher's, is for a save whose value names no tile.
 vanilla's says a save is its Luanti game's.
 
+And that its saves are worlds to publish ([WORLD_PACKAGES],
+doc/aitta.txt's "Worlds"):
+
+    ctx.world_packages = { code = { "luanti/worldmods" } }
+
+The app's save directory copies as files, and code names the paths in a
+save that the app runs as code, which a world package never carries. Each
+of its saves then has "Publish this world", and Apps from Aitta installs
+a world of it as a new save.
+
 `buildat -a kind/name/id` runs one action on boot, with the grid
 underneath it: app/<name>/<id> (game/ is read as app/), builtin/...,
 extension/..., dev/<name>/<id> for an app in <user>/dev_apps,

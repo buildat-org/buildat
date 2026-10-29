@@ -19,7 +19,8 @@ An app's meta.json, at the app directory's root (apps/<app>/meta.json):
         "home_hearth": "https://forum.buildat.org",   optional: where
                                       its feedback and news go
         "changelog": "CHANGELOG.md",  optional: a file in the archive
-        "kind": "app",                optional: "app" or "extension"
+        "kind": "app",                optional: "app", "extension" or
+                                      "world" (below)
         "audience": "everyone",       optional: "everyone", "teen" or
                                       "adult"; Aitta's page at / lists
                                       only "everyone" and "teen"
@@ -165,6 +166,51 @@ sandboxed). The client names it "<author>__<name>", so neither part may
 have "__" in it or start or end with _. It has no saves to pin, so an
 installed version replaces the one before it. An author/name stays the
 kind it was first installed as.
+
+Worlds [WORLD_PACKAGES]
+-----------------------
+A package of kind "world" is a save on top of a named app, as the app keeps
+its save directory, in world/ (save.sqlite at its root), with three more
+manifest fields:
+
+        "app": "vanilla",             the app it is a save of: a shipped
+                                      app's name or an installed
+                                      package's <author>.<name>
+        "app_version": "1.2.0",       the app's version that made it, for
+                                      an installed package's (its saves are
+                                      pinned to their release)
+        "buildat_version": "0.7.91"   the Buildat that made it
+
+An app opts in from its launcher (ctx.world_packages, doc/architecture.txt):
+its saves copy as files, and it names the paths in a save it runs as code
+(vanilla: luanti/worldmods). Such an app's saves in the launcher have
+"Publish this world": the save is copied into <user>/dev_apps/<name>/world
+(its databases by SQLite's own copy, so a running game does not tear it;
+journals, links and the code paths left out) with a meta.json made or
+kept, and the publish screen above opens on it -- the form, the key, Pack
+and publish. Publishing it again copies the save again. Everything in the
+save goes in: its map, its settings and its players' names and
+inventories.
+
+An Aitta lists a world under its app: its row says "world for <app>", and
+an app's package page lists the worlds for it. Its size caps are a
+package's; it may hold 20000 files at most. In the client, Apps from
+Aitta's "Install and play" on a world checks it as a release, then puts
+its world/ in as a new save of the app (<user>/apps/<app>/saves/<name>,
+the package's name or the next free one) and plays it. Refused: an app
+that is not here or takes no worlds, an installed app's version other than
+app_version, more than 20000 files or 1 GiB unpacked, no world/save.sqlite,
+and any of the app's code paths. A world is a new save each time it is
+installed; nothing of it is kept under installed/. Not on the web client.
+
+A world is a stranger's data, so the app treats it as such: the install
+leaves .world_package in the save, and the app's first open of it does
+what the app needs to and removes it. vanilla's takes out the world's own
+mods, world.mt's name (the admin), default_privs and basic_privs, and the
+save's players with their privileges, which are the publisher's; the map,
+the world's other settings and its mods' files stay. Storage refuses a
+database with a trigger or a view, and a save's serialized Lua runs with
+no globals and an instruction budget, as for an imported world.
 
 engine_api is the engine API it is written for; the engine runs
 interface::aitta::ENGINE_API_MIN...ENGINE_API (src/interface/aitta.h,

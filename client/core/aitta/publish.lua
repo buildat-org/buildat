@@ -182,7 +182,7 @@ page_package = function(message)
 	local names = {}
 	for _, e in ipairs(entries) do
 		names[#names + 1] = {e.name .. (e.kind == "extension" and
-				" (ext.)" or ""), e.name}
+				" (ext.)" or e.kind == "world" and " (world)" or ""), e.name}
 	end
 	if #names > 0 then
 		add_dropdown(pr, names, st.selected, function(name)
@@ -219,6 +219,15 @@ page_package = function(message)
 		return
 	end
 	local m = read_meta(entry.name)
+	-- [WORLD_PACKAGES] A world says what it is a save of
+	if entry.kind == "world" then
+		add_text(w, "A world for " .. tostring(m.app) .. (m.app_version and
+				" " .. tostring(m.app_version) or "") .. ", made with Buildat " ..
+				tostring(m.buildat_version) .. ". Everything in the save " ..
+				"goes in: the map, its settings, its players' names and " ..
+				"inventories. Publish this world again on the save to copy " ..
+				"it again.", DIM)
+	end
 	m.name = m.name or entry.name
 	m.version = m.version or "0.1.0"
 	m.audience = m.audience or "everyone"
@@ -596,6 +605,23 @@ end
 
 function M.safe.open_publish()
 	page_package()
+end
+
+-- [WORLD_PACKAGES] "Publish this world" on a save of an app that takes
+-- worlds (client/launch_grid.lua), code the paths it runs as code: the
+-- save copied into a world package in dev_apps, made or refreshed, and the
+-- screen opened on it. Trusted only.
+function M.publish_world(app, save, code)
+	local name, err = __buildat_aitta_dev("world_new", app, save, code or {})
+	log:info("aitta publish: world " .. tostring(save) .. " of " ..
+			tostring(app) .. ": " .. tostring(name or err))
+	if not name then
+		return require("buildat/extension/ui_utils").safe.show_message_dialog(
+				"Could not publish " .. tostring(save) .. ": " .. tostring(err))
+	end
+	st.selected, st.result = name, nil
+	page_package("The save " .. save .. " copied into " .. USER ..
+			"/dev_apps/" .. name .. "/world")
 end
 end
 -- vim: set noet ts=4 sw=4:

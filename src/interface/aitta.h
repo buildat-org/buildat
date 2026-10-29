@@ -90,9 +90,9 @@ namespace interface
 		// zip's path; throws why not
 		ss_ pack_page(const ss_ &page_dir, const ss_ &package,
 				const ss_ &key_path, const ss_ &out_dir);
-		// "app", or "extension" ([AITTA] step 3's second kind): a client
+		// "app", "extension" ([AITTA] step 3's second kind): a client
 		// extension, run in the client's sandbox under the name
-		// "<author>__<name>"
+		// "<author>__<name>", or "world" ([WORLD_PACKAGES], install_world())
 		ss_ kind_of(const json::Value &m);
 
 		// A SemVer 2.0 version, 40 characters at most
@@ -133,6 +133,23 @@ namespace interface
 		ss_ install(const ss_ &zip_path, const ss_ &sig_path,
 				const ss_ &user_path, bool review = false,
 				const ss_ &share_path = "");
+
+		// [WORLD_PACKAGES] A world: a save on top of a named app ("kind":
+		// "world", "app", "app_version", "buildat_version"), its save
+		// directory in world/ as the app keeps it. Checked as install()
+		// checks a release, then put in as a new save of app,
+		// <user>/apps/<app>/saves/<name>, named by the package or the
+		// next free name; .world_package in it says which release, for
+		// the app to take it as a stranger's on its first open. app: the
+		// app that takes worlds (its launcher's ctx.world_packages), which
+		// the manifest's must be; code: the paths in a save the app runs
+		// as code, refused. The save's name; throws why not.
+		static const size_t WORLD_FILES_MAX = 20000;
+		static const uint64_t WORLD_UNPACKED_MAX =
+				(uint64_t)1024 * 1024 * 1024;
+		ss_ install_world(const ss_ &zip_path, const ss_ &sig_path,
+				const ss_ &user_path, const ss_ &share_path, const ss_ &app,
+				const sv_<ss_> &code);
 	}
 }
 // vim: set noet ts=4 sw=4:
