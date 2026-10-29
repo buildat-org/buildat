@@ -65,6 +65,11 @@ struct Players
 	sm_<ss_, pv::Vector3DInt32> m_player_pos;
 	// What the last checkpoint wrote for them
 	ss_ m_players_written;
+	// [IMPORT_KEEPS_INVENTORIES] The row came with a save made elsewhere
+	// (vanilla's import set "players_auth_foreign"): its auth entries --
+	// privileges, passwords -- are not read, and the first write of the
+	// row, without them, clears the mark in the same checkpoint
+	bool m_auth_foreign = false;
 
 	// The players, in the save beside the node metadata and written the same
 	// way: what a player carries is item strings as well. lua/entity.lua says
@@ -96,6 +101,10 @@ struct Players
 			return; // A checkpoint with nobody moving
 		m_players_written = data;
 		store_set("players", data);
+		if(m_auth_foreign){
+			store_set("players_auth_foreign", "");
+			m_auth_foreign = false;
+		}
 		log_v(MODULE, "Players written to the save: %i", n);
 	}
 
@@ -106,15 +115,19 @@ struct Players
 		ss_ data;
 		if(!m_store->get("players", data))
 			return;
+		ss_ foreign;
+		m_auth_foreign = m_store->get("players_auth_foreign", foreign) &&
+				foreign == "1";
 		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
 		lua_getfield(L, -1, "__load_players");
 		lua_pushlstring(L, data.c_str(), data.size());
+		lua_pushboolean(L, m_auth_foreign);
 		// One this cannot read is kept as it is: the next checkpoint
 		// would otherwise drop every player not online
-		if(lua_pcall(L, 1, 1, 0) != 0 || lua_isnil(L, -1)){
+		if(lua_pcall(L, 2, 1, 0) != 0 || lua_isnil(L, -1)){
 			log_e(MODULE, "The save's players cannot be read (%s); they are "
 					"not written over", lua_isstring(L, -1) ?
 					lua_tostring(L, -1) : "a newer Buildat's, or broken");
@@ -125,6 +138,9 @@ struct Players
 		int n = (int)lua_tonumber(L, -1);
 		lua_settop(L, base);
 		m_had_players = (n != 0);
+		if(m_auth_foreign)
+			log_i(MODULE, "The save's players read without their privileges "
+					"and passwords: it was made elsewhere");
 		log_v(MODULE, "Players read from the save: %i", n);
 	}
 

@@ -214,7 +214,9 @@ the host (the server preset's, chunksize, active_block_range and the like:
 the host's own preset is put in), its force_loaded.txt, and the save's
 players with their privileges, which are the publisher's; the map, the
 world's other settings and its mods' files stay. A Buildat save imported
-from a zip is taken the same way (its own mods stay there). Storage
+from a zip is taken the same way, but its own mods stay and so do its
+players' inventories and positions: only their privileges and passwords
+go, left out when the game first reads the players. Storage
 refuses a database with a trigger or a view, and a save's serialized Lua
 runs with no globals, an instruction budget and a memory cap (32 MiB and
 16 bytes a byte of it), as for an imported world.

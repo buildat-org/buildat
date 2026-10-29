@@ -5,17 +5,19 @@
 # [WORLD_TRIM_MOVE] 3-5: a world out as a zip and in again, through the
 # launcher's world menu (the native client; its picker is the client's
 # own). Vanilla on the minimal game, the server at --max-disk-mb 300.
-#   0. A world, wt, with a player's build (a node a chat command placed).
+#   0. A world, wt, with a player's build (a node a chat command placed),
+#      an item in their inventory, a position, a privilege and a password.
 #   1. Export wt: a zip in the client's exports, which Python's zipfile
 #      reads whole, a symlink in the save left out ([SEC_RUN5_LEFTOVERS]). Import it: saved as wt_2, its store the same rows as
-#      wt's but the players row, and world.mt without wt's admin,
+#      wt's and its players row marked foreign, and world.mt without wt's admin,
 #      privilege and cost settings ([VANILLA_IMPORT_PRIVS]). Bad zips refused, nothing kept: a "../" entry, one whose
 #      header says more than the room, one whose stored entry holds more
 #      than its header says, and a Luanti world of the leveldb backend
 #      (with the --migrate hint), a save with a trigger of its own. A
 #      zipped Luanti world (sqlite3) imported and started, a player's
 #      list of 2^31-1 slots in it left out.
-#   2. wt_2 started: the build is there.
+#   2. wt_2 started: the build is there, the player's item and position
+#      too, their privilege and password not ([IMPORT_KEEPS_INVENTORIES]).
 #   3. One transfer at a time: a client over a slow link (util/netsim.py)
 #      importing a 10 MB zip; a second client's export meanwhile refused;
 #      the first leaves mid-way, and the server's transfer folder is gone
@@ -39,6 +41,8 @@ cat > "$d/shared/fixture.lua" <<'L'
 local M = {x = 3, y = 2, z = 0}
 core.register_on_joinplayer(function(player)
 	local name = player:get_player_name()
+	local pos = vector.round(player:get_pos())
+	core.log("action", string.format("wm: joined at %d,%d,%d", pos.x, pos.y, pos.z))
 	player:set_physics_override({gravity = 0, speed = 0})
 	core.after(2, function()
 		core.emerge_area(M, M, function(_, _, left)
@@ -46,12 +50,25 @@ core.register_on_joinplayer(function(player)
 		end)
 	end)
 end)
-core.register_chatcommand("mark", {func = function()
+core.register_chatcommand("mark", {func = function(name)
 	core.set_node(M, {name = "floor:marker"})
+	local p = core.get_player_by_name(name)
+	p:get_inventory():set_stack("main", 1, "floor:marker 7")
+	p:set_pos({x = 6, y = 9, z = -4})
+	core.set_player_password(name, "wmhash")
 	return true, "wm: marked"
 end})
-core.register_chatcommand("look", {func = function()
+core.register_chatcommand("look", {func = function(name)
 	core.log("action", "wm: at the mark " .. core.get_node(M).name)
+	local p = core.get_player_by_name(name)
+	local pos = vector.round(p:get_pos())
+	local e = core.get_auth_handler().get_auth(name) or {}
+	local privs = {}
+	for k in pairs(e.privileges or {}) do privs[#privs + 1] = k end
+	table.sort(privs)
+	core.log("action", string.format("wm: player at %d,%d,%d holding %s privs %s password %s",
+		pos.x, pos.y, pos.z, p:get_inventory():get_stack("main", 1):to_string(),
+		table.concat(privs, ","), tostring(e.password)))
 	return true, "wm: looked"
 end})
 L
@@ -85,6 +102,9 @@ serve "$t/0.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt \
 client "$t/0c.log" "$t/0.cmds"
 stop
 grep -aq "wm: at the mark floor:marker" "$t/0.log" || fail "no build in wt ($t/0.log)"
+# server: wt's default_privs
+grep -aq "wm: player at 6,9,-4 holding floor:marker 7 privs .*server.* password wmhash" "$t/0.log" ||
+	fail "wt's player not set up: $(grep -a "wm: player" "$t/0.log")"
 
 # 1: a link in wt, which the export does not read through
 ln -s /etc/hostname "$saves/wt/luanti/link.txt"
@@ -188,8 +208,9 @@ players = "INSERT INTO \"store\" VALUES('luanti','players',"
 a, b = rows(sys.argv[2]), rows(sys.argv[3])
 print("wt and wt_2: %d and %d rows of dump" % (len(a), len(b)))
 assert [r for r in a if r.startswith(players)], "wt has no players row"
-assert not [r for r in b if r.startswith(players)], "wt_2 kept the players"
-assert [r for r in a if not r.startswith(players)] == b, "the stores differ"
+foreign = [r for r in b if r.startswith("INSERT INTO \"store\" VALUES('luanti','players_auth_foreign',")]
+assert len(foreign) == 1, "wt_2's players row not marked foreign"
+assert a == [r for r in b if r not in foreign], "the stores differ"
 PY
 grep -qE '^(name|default_privs|basic_privs|chunksize) ' "$saves/wt_2/luanti/world.mt" &&
 	fail "wt_2's world.mt kept the admin, privileges or cost settings: $(cat "$saves/wt_2/luanti/world.mt")"
@@ -210,7 +231,7 @@ echo "the saves: $got"
 [ "$got" = "_chat _server lw wt wt_2 " ] || fail "the saves: $got"
 [ -e "$t/c/apps/vanilla/vanilla_transfer" ] && fail "the transfer folder was left: $(ls -R "$t/c/apps/vanilla/vanilla_transfer")"
 [ -n "$(find "$t" -name escape.txt)" ] && fail "the ../ entry landed"
-echo "ok: exported, imported as wt_2 alike but its players, admin and privileges; the bad zips refused with nothing kept; a Luanti world imported and started"
+echo "ok: exported, imported as wt_2 alike but its admin and privileges; the bad zips refused with nothing kept; a Luanti world imported and started"
 
 # 2
 serve "$t/2.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt_2 \
@@ -219,7 +240,24 @@ serve "$t/2.log" BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=wt_2 \
 client "$t/2c.log" "$t/2.cmds"
 stop
 grep -aq "wm: at the mark floor:marker" "$t/2.log" || fail "no build in wt_2 ($t/2.log)"
-echo "ok: the build in wt_2"
+# The import's: the item and the position kept (where the join put them,
+# before the client's own fall), the privilege and the password not
+grep -aq "wm: joined at 6,9,-4" "$t/2.log" ||
+	fail "wt_2's player not where they left: $(grep -a "wm: joined" "$t/2.log")"
+grep -a "wm: player" "$t/2.log" | grep -a "holding floor:marker 7 privs" |
+	grep -av "server" | grep -aqE "password (nil|)$" ||
+	fail "wt_2's player: $(grep -a "wm: player" "$t/2.log")"
+python3 - "$saves/wt_2/save.sqlite" <<'PY' || fail "wt_2's players row after a run"
+import sqlite3, sys
+c = sqlite3.connect("file:%s?mode=ro" % sys.argv[1], uri=True)
+rows = {k: bytes(v) if not isinstance(v, str) else v.encode() for k, v in
+        c.execute("SELECT key, value FROM store WHERE store = 'luanti'")}
+p = rows["players"]
+assert b"floor:marker 7" in p, "the item is not in the row"
+assert b"wmhash" not in p and b"server" not in p, "the auth came back: %r" % p[:300]
+assert rows.get("players_auth_foreign", b"") == b"", "the mark stayed"
+PY
+echo "ok: the build in wt_2, the player's item and position; no privilege or password"
 
 # 3
 head -c 10000000 /dev/urandom > "$t/blob"

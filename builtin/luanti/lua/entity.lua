@@ -1571,8 +1571,10 @@ function core.__save_players()
 end
 
 -- The number read, or nil for a row this cannot read (a newer Buildat's,
--- or broken), which luanti.cpp then never writes over
-function core.__load_players(data)
+-- or broken), which luanti.cpp then never writes over. foreign_auth: the
+-- row came with a save made elsewhere (players.h), and its auth entries --
+-- privileges, passwords -- are not taken
+function core.__load_players(data, foreign_auth)
 	local t = core.deserialize(data)
 	-- 0.6's had no v and is 1's shape
 	if type(t) ~= "table" or (t.v or 1) ~= 1 then
@@ -1583,8 +1585,10 @@ function core.__load_players(data)
 		saved_players[name] = saved
 		n = n + 1
 	end
-	for name, entry in pairs(t.auth or {}) do
-		core.__auth_entries[name] = entry
+	if not foreign_auth then
+		for name, entry in pairs(t.auth or {}) do
+			core.__auth_entries[name] = entry
+		end
 	end
 	return n
 end

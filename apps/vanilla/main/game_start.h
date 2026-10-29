@@ -374,7 +374,7 @@ struct GameStart
 		ss_ id;
 		std::getline(std::ifstream(marker), id);
 		interface::fs::remove_all(save_path+"/luanti/worldmods");
-		take_strangers_save(m_server, world_name, save_path);
+		take_strangers_save(m_server, world_name, save_path, false);
 		interface::fs::remove_all(marker);
 		log_i(MODULE, "world package %s: its own mods, admin, privilege and "
 				"cost settings, forceloads and players left out on its first "

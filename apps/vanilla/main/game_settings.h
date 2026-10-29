@@ -208,14 +208,21 @@ static const std::map<ss_, sv_<ss_>> &perf_presets()
 //   password, and those that set what the world costs this host to run
 //   (the server preset's, and Luanti's others of the kind) -- the host's
 //   own preset is put in when it next starts (apply_default_preset);
-// - its players and their privileges (the luanti store's players row,
-//   which holds the auth entries), so nobody claims a name's privileges;
+// - its players' privileges and passwords (the auth entries in the luanti
+//   store's players row), so nobody claims a name's privileges: with
+//   keep_players (an import, likely the host's own world moved) the
+//   players' inventories, positions and metadata stay and the row is
+//   marked "players_auth_foreign", which builtin/luanti's load_players()
+//   reads as "leave the auth entries out" -- parsed there, by the bounded
+//   core.deserialize the row is always read with; without it (a world
+//   package: a stranger's inventories would be tied to names here) the
+//   whole row goes;
 // - its forceloaded blocks, each of which would keep a section loaded.
 // The map, the world's other settings and the mods' files stay.
 // simplified: a list of the keys known to cost or to give; a game's own
 // setting is kept whatever it does
 static void take_strangers_save(interface::Server *server,
-		const ss_ &save_name, const ss_ &save_path)
+		const ss_ &save_name, const ss_ &save_path, bool keep_players)
 {
 	const ss_ mt = save_path+"/luanti/world.mt";
 	if(interface::fs::path_exists(mt)){
@@ -246,7 +253,11 @@ static void take_strangers_save(interface::Server *server,
 	storage::access(server, [&](storage::Interface *istorage){
 		storage::Save *save = istorage->open(save_name);
 		if(save){
-			save->store("luanti")->remove("players");
+			storage::Store *st = save->store("luanti");
+			if(keep_players)
+				st->set("players_auth_foreign", "1");
+			else
+				st->remove("players");
 			istorage->close(save);
 		}
 	});
