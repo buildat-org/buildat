@@ -5,6 +5,18 @@
 // SIGTERM and SIGINT stopping the server as the page does, by
 // Module._buildat_server_stop() (src/server/main.cpp)
 Module.preRun = Module.preRun || [];
+
+// [WEBKIT_HC_SILENT] In a page, Emscripten's threads tell each other of
+// work in their mailboxes by postMessage, not by Atomics.waitAsync: with
+// it, in WebKit, the server's worker sometimes sat idle with work in its
+// mailbox that no notify reached it for, and the threads waiting on the
+// calls proxied there (a log line, a file) with it -- the server silent,
+// one checkMailbox() from outside away from going on. Removed here,
+// before the runtime, in the server's worker and in every thread's, in
+// every browser: one path for all of them
+if(typeof process !== 'object' && typeof Atomics === 'object')
+	delete Atomics.waitAsync;
+
 Module.preRun.push(function(){
 	FS.mkdirTree('/urho/bin/CoreData');
 	FS.mkdirTree('/urho/bin/Data');
