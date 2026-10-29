@@ -312,10 +312,12 @@ grep -qi 'href="[^"]*script\|<script\|<img' "$t/page" &&
 	fail "the markup let through: $(grep -aio 'href="[^"]*script[^"]*"\|<script\|<img' "$t/page")"
 
 # 8. The reply field is multi-line: Enter breaks the line, Up moves a row
-# (the field's, not the buttons' -- ui_utils' keyboard page), Ctrl+Enter
+# (the field's, not the buttons' -- ui_utils' keyboard page) keeping its x
+# past the empty one ([HEARTH_PAGE_KEYS]'s goal column), Home goes to the
+# row's start, Ctrl+Enter
 # sends
 # (the field's keys a tick apart, as typed)
-CMDS='wait_log_any 20000 hearth: m1 text\ndelay 500\ntext one two\ndelay 100\nkeypress Return\ndelay 100\ntext three\ndelay 100\nkeypress Return\ndelay 100\nkeypress Return\ndelay 100\ntext four\ndelay 100\nkeypress Up\ndelay 100\nkeypress Up\ndelay 100\ntext X\ndelay 100\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\nwait_log_any 10000 Xthree\nquit\n' \
+CMDS='wait_log_any 20000 hearth: m1 text\ndelay 500\ntext one two\ndelay 100\nkeypress Return\ndelay 100\ntext three\ndelay 100\nkeypress Return\ndelay 100\nkeypress Return\ndelay 100\ntext four\ndelay 100\nkeypress Up\ndelay 100\nkeypress Up\ndelay 100\nkeypress Home\ndelay 100\ntext X\ndelay 100\nkeydown ctrl\ndelay 100\nkeypress Return\ndelay 100\nkeyup ctrl\nwait_log_any 10000 Xthree\nquit\n' \
 	client admin checkpass12 "$t/admin9.log" '' BUILDAT_HEARTH_OPEN=1
 get /t/1 > /dev/null
 grep -qPz '<p>one two<br>\nXthree</p>\n<p>four</p>' "$t/page" ||
