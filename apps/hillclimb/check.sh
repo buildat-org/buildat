@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~10 min (2026-10-27)
+# cost: ~14 min (2026-10-29)
 # covers: apps/hillclimb/** src/interface/noise.h src/lua_bindings/wasm.cpp src/server/wasm_build.cpp extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
@@ -31,6 +31,7 @@
 # harder than its friction. [CLIENT_WASM] step 5: the car predicted on
 # its client by the module's .wasm, a lap compiled, from the client's
 # cache, in the interpreter, and with no wasm (the server's state alone);
+# [HILLCLIMB_PREDICT_RED] then steered over stony ground, no snap back;
 # "web": the lap in the web client instead (headless Firefox).
 #   apps/hillclimb/check.sh
 #   apps/hillclimb/check.sh web
@@ -41,22 +42,32 @@ check_tmp hillclimb; t=$CHECK_TMP
 app="$here/apps/hillclimb"
 
 # [CLIENT_WASM] step 5, below: a lap's prediction lines in a client's log
+pred_counts() # <log>: its last line in $last, and in $counts the run's
+{               # corrections, those over 1 cm, states taken whole, seconds
+	last=$(grep -a "hillclim: hillclimb: prediction (" "$1" | tail -1 | sed 's/.*hillclimb: //')
+	counts=$(echo "$last" | sed -n 's/.*; \([0-9]*\) corrections, \([0-9]*\) over 1 cm, \([0-9]*\) taken whole while driven, in \([0-9]*\) s$/\1 \2 \3 \4/p')
+}
 pred_check() # <log> <engine at the self test, a regex>
 {
-	local log=$1 last n cm secs lat
+	local log=$1 last counts n cm secs lat
 	grep -aq "the car's step from the wasm ($2), self test \([0-9a-f]*\), the server's \1: the same" "$log" ||
 		fail "not the car's step from the wasm ($2) with the server's self test ($log: $(grep -a "car's step from" "$log" | head -1 | sed 's/.*hillclimb: //'))"
 	grep -aq "hillclimb: the run finished in" "$log" || fail "no finish ($log)"
 	# The run's count, from the last line: under one correction over 1 cm
-	# each 2 s (the lap had 0 to 4 in 30 s, 2026-10-27)
-	last=$(grep -a "hillclim: hillclimb: prediction (" "$log" | tail -1 | sed 's/.*hillclimb: //')
-	set -- $(echo "$last" | sed -n 's/.*; \([0-9]*\) corrections, \([0-9]*\) over 1 cm, in \([0-9]*\) s$/\1 \2 \3/p')
-	[ $# = 3 ] && [ $(($2 * 2)) -le "$3" ] || fail "the corrections: $last ($log)"
-	n=$1 cm=$2 secs=$3
+	# each 2 s (the lap had 0 to 4 in 30 s, 2026-10-27), and no state
+	# taken whole while driven ([HILLCLIMB_PREDICT_RED])
+	pred_counts "$log"
+	set -- $counts
+	[ $# = 4 ] && [ $(($2 * 2)) -le "$4" ] && [ "$3" = 0 ] || fail "the corrections: $last ($log)"
+	n=$1 cm=$2 secs=$4
 	lat=$(grep -a "a key to 1 cm of the car's motion" "$log" | head -1 |
 		sed 's/.*motion: \([0-9]*\) ms predicted, \([0-9]*\) ms by.*/\1 \2/')
+	# Not later than by the server's state, give or take a 30 Hz frame
+	# ([HILLCLIMB_PREDICT_RED]): on a local server the prediction leads it
+	# by the state's way here, 8-50 ms, and both are timed in frames (176
+	# against 173 failed under load)
 	set -- $lat
-	[ $# = 2 ] && [ "$1" -le "$2" ] || fail "W to motion: ${lat:-no line} ($log)"
+	[ $# = 2 ] && [ "$1" -le $(($2 + 33)) ] || fail "W to motion: ${lat:-no line} ($log)"
 	echo "  $n corrections, $cm over 1 cm, in $secs s; W to 1 cm: $1 ms predicted, $2 ms by the server's state"
 }
 
@@ -1029,6 +1040,29 @@ grep -aq "hillclimb: no prediction, the car as the server sends it: wasm modules
 	! grep -aq "hillclimb: prediction (" "$t/pred4.log" ||
 	fail "the lap with no wasm ($t/pred4.log)"
 echo "  no wasm: the lap driven by the server's state alone"
+kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
+# [HILLCLIMB_PREDICT_RED] Over stony ground: the game's soil (soft sand,
+# stones that come loose) on the straight hill with its rocks, W held and
+# A and D in turn, an input every half second as a player steers. No state
+# taken whole while driven (each was a snap back: 30 each 10 s before),
+# and under one correction over 1 cm each 5 s (12 to 21 each 10 s before;
+# 3 to 5 in 70 s after). Not counted: the corrections under 1 cm, 20 to 30
+# a second, mean 0.25 cm, the sand's give (the client's car rides the
+# voxels it has, not the server's sinking and digging eighths)
+mp_server stony_srv "$default_soil" -u launcher=1
+{
+	printf 'wait_log 120000 W starts the clock\nwait_log 15000 hillclimb: prediction (\nkeydown W\n'
+	for _ in $(seq 20); do
+		printf 'keydown A\ndelay 400\nkeyup A\ndelay 600\nkeydown D\ndelay 400\nkeyup D\ndelay 600\n'
+	done
+	printf 'keyup W\nwait_log 15000 hillclimb: prediction (\nquit\n'
+} > "$t/stony.cmds"
+PRED_CMDS=stony pred_run stony
+pred_counts "$t/stony.log"
+set -- $counts
+[ $# = 4 ] && [ $(($2 * 5)) -le "$4" ] && [ "$3" = 0 ] ||
+	fail "the corrections over stony ground: $last ($t/stony.log)"
+echo "  stony ground, steered: $1 corrections, $2 over 1 cm, $3 taken whole, in $4 s"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds, the car predicted from the wasm"
 # vim: set noet ts=4 sw=4:

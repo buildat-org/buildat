@@ -338,6 +338,11 @@ struct Module: public interface::Module
 		uint32_t seq = 0, seq_steps = 0, jumps = 0;
 		struct Pending { car::Input in; uint32_t seq; int at; };
 		std::deque<Pending> pending;
+		// [HILLCLIMB_PREDICT_RED] The client's substeps to the server's:
+		// each packet's arrival (server substeps) less the client's count
+		// as it sent it, for 2 s; the most of them (at most 100 ms over the
+		// least) is the offset an input is placed by
+		std::deque<std::pair<int64_t, int64_t>> offs;
 		// [HC_CIRCUIT] Its laps, and the round's clock at the last
 		hill::Hill::Lap lap;
 		// [HC_MISSED_TURN_MARK] The turn it went past without passing,
@@ -373,9 +378,11 @@ struct Module: public interface::Module
 	int m_step_ticks = 0;
 	static const int SUBSTEPS_HZ = 240;
 	// [CLIENT_WASM] step 5: when the last tick began, and the time not yet
-	// stepped (a tick steps whole substeps)
+	// stepped (a tick steps whole substeps); [HILLCLIMB_PREDICT_RED] the
+	// substeps stepped, the server's clock an input is placed on
 	uint64_t m_tick_us = 0;
 	float m_step_left = 0;
+	int64_t m_substeps = 0;
 	uint32_t m_selftest = 0;
 
 	Module(interface::Server *server):
@@ -1219,11 +1226,16 @@ struct Module: public interface::Module
 		// the car slows with the server rather than jumping. The part of a
 		// substep left over is the next tick's ([CLIENT_WASM] step 5: the
 		// car's time is the clock's, as its client's prediction's is; a
-		// rounding a tick ran up to 5% slow)
-		m_step_left = std::fmin(m_step_left + event.dtime, 0.25f);
+		// rounding a tick ran up to 5% slow). [HILLCLIMB_PREDICT_RED] The
+		// time since the last tick as measured, not the tick's nominal
+		// dtime: a tick handled late (behind another module's stall) placed
+		// the inputs that came in after it early by as much
+		const uint64_t now_us = interface::os::time_us();
+		m_step_left = std::fmin(m_step_left + (m_tick_us == 0 ? event.dtime :
+				(now_us - m_tick_us) / 1e6f), 0.25f);
 		int n = (int)(m_step_left / dt);
 		m_step_left -= n * dt;
-		m_tick_us = interface::os::time_us();
+		m_tick_us = now_us;
 		// A check's drive: a 30 Hz tick's substeps whatever the tick took,
 		// so the ground's once-a-tick work (stones resting, commits) falls
 		// at the same times under load, and a drive goes the same way
@@ -1252,6 +1264,7 @@ struct Module: public interface::Module
 		for(auto &kv : m_players)
 			for(Player::Pending &p : kv.second.pending)
 				p.at = std::max(0, p.at - n);
+		m_substeps += n;
 		if(m_ground_live)
 			step_round(n * dt);
 		m_step_us += interface::os::time_us() - t0;
@@ -2061,7 +2074,14 @@ struct Module: public interface::Module
 		// [CLIENT_WASM] step 5: taken at the substep of the coming tick
 		// that this time is into the one under way (the tick steps the time
 		// since the last), so it lasts as long here as on the client that
-		// predicted it; numbered by the client (its 8th number)
+		// predicted it; numbered by the client (its 8th number).
+		// [HILLCLIMB_PREDICT_RED] With the client's substep the input took
+		// effect at and its count as it sent it (the 9th and 10th), at
+		// that substep plus the offset (Player::offs) and one more: an
+		// arrival's delay (a tick or a stall in the way, a frame's work
+		// before the send, the network) no longer moves it, so the input
+		// before it lasts here as long as it did on the client; one later
+		// than the offset is taken late, as it comes
 		Player::Pending p;
 		p.in.accel = a != 0;
 		p.in.brake = b != 0;
@@ -2072,8 +2092,28 @@ struct Module: public interface::Module
 		p.in.gear = (car::Gear)g;
 		long long seq = 0;
 		p.seq = has_steer && (is >> seq) ? (uint32_t)seq : 0;
-		p.at = (int)((interface::os::time_us() - m_tick_us) * SUBSTEPS_HZ /
-				1000000);
+		p.at = (int)(((interface::os::time_us() - m_tick_us) / 1e6 +
+				m_step_left) * SUBSTEPS_HZ);
+		long long c0 = 0, cnow = 0;
+		if(p.seq != 0 && (is >> c0 >> cnow) && c0 >= 0 && cnow >= c0 &&
+				cnow < (1LL << 40)){
+			const int64_t at = m_substeps + p.at;
+			pl.offs.emplace_back(at, at - cnow);
+			while(pl.offs.front().first < at - 2 * SUBSTEPS_HZ ||
+					pl.offs.size() > 64)
+				pl.offs.pop_front();
+			int64_t lo = pl.offs.front().second, off = lo;
+			for(const auto &o : pl.offs){
+				lo = std::min(lo, o.second);
+				off = std::max(off, o.second);
+			}
+			// One held up by a stall here (the packets wait while the
+			// tick does) is late rather than every one after it 2 s late
+			off = std::min(off, lo + SUBSTEPS_HZ / 10);
+			const int64_t want = c0 + off + 1 - m_substeps;
+			if(want > p.at && want < p.at + SUBSTEPS_HZ)
+				p.at = (int)want;
+		}
 		// simplified: a flood of inputs is cut at a second's ticks of them
 		if(pl.pending.size() < 64)
 			pl.pending.push_back(p);

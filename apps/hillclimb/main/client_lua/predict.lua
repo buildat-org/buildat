@@ -10,9 +10,10 @@
 --   local predict = run_script_file("main/predict.lua")()
 -- predict.setup(data), predict.state(data): hillclimb:setup and :state;
 -- predict.hill(sx, sy, sz): the hill's size, voxels; predict.input(accel,
--- brake, steer, gear): the input's number, a new one when it changed
--- (sent with it, main.cpp on_input); predict.frame(dt): the
--- substeps of the frame, the chunks round the car handed to the module;
+-- brake, steer, gear): the input's number, a new one when it changed,
+-- the substep it took effect at and the substep now (sent with it,
+-- main.cpp on_input); predict.frame(): the substeps of the time since
+-- the last frame, the chunks round the car handed to the module;
 -- predict.pose(): the car as hillclimb:car's numbers 1 to 15, or nil
 -- before the first state; predict.server_moved(x, y, z): the server's
 -- position of the car, for the latency's line.
@@ -73,12 +74,16 @@ return function()
 	-- Counted over 10 s, and over the run: corrections, those over 1 cm
 	-- and their sizes (m), states within the bounds, the largest errors of
 	-- position, velocity (m/s) and rotation (rad), states taken whole
+	-- ([HILLCLIMB_PREDICT_RED] over the run those from the first W on, the
+	-- car not put back: each a snap; the join's are of states that waited
+	-- out the world's loading here)
 	local function fresh(t)
 		return {t = t, n = 0, cm = 0, sum = 0, max = 0, kept = 0, dv = 0,
 			da = 0, whole = 0, us = 0}
 	end
 	local st = fresh(0)
-	local total = {n = 0, cm = 0, states = 0, t0 = nil}
+	local total = {n = 0, cm = 0, whole = 0, states = 0, t0 = nil,
+		driven = false}
 	-- The latency's line: a key from standing to the car moving 1 cm,
 	-- predicted and by the server's state
 	local lat = nil
@@ -134,6 +139,7 @@ return function()
 				(held and 1 or 0)
 		if k ~= last then
 			last = k
+			total.driven = total.driven or accel == 1
 			seq = seq + 1
 			starts[seq] = now
 			starts[seq - 256] = nil
@@ -147,7 +153,7 @@ return function()
 					server = nil, pred = nil, done = false}
 			end
 		end
-		return seq
+		return seq, m and starts[seq], now
 	end
 
 	local function moved(p, x, y, z)
@@ -185,6 +191,29 @@ return function()
 		end end end
 	end
 
+	-- [HILLCLIMB_PREDICT_RED] The substeps due by the clock, not by the
+	-- frame's time step (the engine cuts a frame's to 100 ms: the time a
+	-- long frame lost put the server's states ahead of the history), and
+	-- stepped as a state comes in too, not only in the frame after it;
+	-- those the module stepped on to a state's substep come off the next
+	local frame_t = nil
+	local function advance()
+		local ft = buildat.get_time_us()
+		acc = math.min(acc + (frame_t and (ft - frame_t) / 1e6 or 0), 0.25)
+		frame_t = ft
+		local n = math.floor(acc * HZ)
+		if n > 0 then
+			acc = acc - n / HZ
+			now = m:call("hc_step", n)
+		end
+		-- The car's first centimetre at the time its substeps reach
+		if lat and not lat.pred and moved(lat.p, m:call("hc_out", 0),
+				m:call("hc_out", 1), m:call("hc_out", 2)) then
+			lat.pred = (ft - lat.t) / 1000
+		end
+		st.us = st.us + buildat.get_time_us() - ft
+	end
+
 	M.state = guarded(function(data)
 		if not (m and setup) then
 			return
@@ -195,18 +224,29 @@ return function()
 			return
 		end
 		s, steps, j = tonumber(s), tonumber(steps), tonumber(j)
+		if size then
+			advance()
+		end
 		local t0 = buildat.get_time_us()
 		m:write(m:call("hc_state_buf"), bytes(hex))
 		local at = starts[s] and starts[s] + steps
 		-- The car put back or reset, or no input of this client's to time
 		-- it by: taken as it is
-		local force = not synced or j ~= jumps or not at
+		local put_back = synced and j ~= jumps
+		local force = not synced or put_back or not at
 		jumps = j
 		if (h == "1") ~= held then
 			held = h == "1"
 			last = nil -- the input again, held or not
 		end
 		local r = m:call("hc_correct", at or 4294967295, force and 1 or 0)
+		-- Stepped on to the state's substep, a frame's time early: off the
+		-- next; taken whole from ahead, the count moved on with the server
+		local moved_on = m:call("hc_step", 0)
+		if r ~= 2 then
+			acc = acc - (moved_on - now) / HZ
+		end
+		now = moved_on
 		st.us = st.us + buildat.get_time_us() - t0
 		synced = true
 		total.states = total.states + 1
@@ -214,6 +254,9 @@ return function()
 		-- the ground may not be here yet: not counted
 		if r == 2 or held then
 			st.whole = st.whole + (r == 2 and 1 or 0)
+			if r == 2 and not held and total.driven and not put_back then
+				total.whole = total.whole + 1
+			end
 			return
 		end
 		local err = m:call("hc_out", 15)
@@ -230,7 +273,7 @@ return function()
 		end
 	end)
 
-	M.frame = guarded(function(dt)
+	M.frame = guarded(function()
 		if not (m and setup and size) then
 			return
 		end
@@ -239,9 +282,6 @@ return function()
 			log:info("hillclimb: the car's step from the wasm now " .. tostring(e))
 			engine = e
 		end
-		acc = math.min(acc + dt, 0.25)
-		local n = math.floor(acc * HZ)
-		acc = acc - n / HZ
 		local x, y, z = m:call("hc_out", 0), m:call("hc_out", 1),
 				m:call("hc_out", 2)
 		local t = buildat.get_time_us()
@@ -251,15 +291,7 @@ return function()
 			chunks_t, chunks_at = t, at
 			hand_chunks(x, y, z)
 		end
-		if n > 0 then
-			local t0 = buildat.get_time_us()
-			now = m:call("hc_step", n)
-			st.us = st.us + buildat.get_time_us() - t0
-		end
-		if lat and not lat.pred and moved(lat.p, m:call("hc_out", 0),
-				m:call("hc_out", 1), m:call("hc_out", 2)) then
-			lat.pred = (t - lat.t) / 1000
-		end
+		advance()
 		if lat and lat.pred and lat.server and not lat.done then
 			lat.done = true
 			log:info(string.format("hillclimb: a key to 1 cm of the car's motion: "
@@ -275,10 +307,11 @@ return function()
 						.. "%d states within the bounds; the largest errors %.2f cm, "
 						.. "%.1f cm/s, %.2f degrees; %d taken whole; the steps and "
 						.. "corrections %.1f ms a second; %d corrections, %d over 1 "
-						.. "cm, in %.0f s", tostring(engine), st.n, st.cm,
+						.. "cm, %d taken whole while driven, in %.0f s",
+						tostring(engine), st.n, st.cm,
 						st.n > 0 and st.sum / st.n * 100 or 0, st.kept, st.max * 100,
 						st.dv * 100, math.deg(st.da), st.whole, st.us / 10000,
-						total.n, total.cm, (t - total.t0) / 1e6))
+						total.n, total.cm, total.whole, (t - total.t0) / 1e6))
 			end
 			st = fresh(t)
 		end

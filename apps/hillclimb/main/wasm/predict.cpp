@@ -21,7 +21,9 @@
 //   air and the rest full (the server's fill is not sent), and no stone
 //   comes loose;
 // - when an input took effect: the server's tick applies it at the
-//   substep it came in at, here at the frame it was pressed in.
+//   substep it was sent from here plus the offset between the two counts
+//   ([HILLCLIMB_PREDICT_RED], main.cpp on_input), one that came in later
+//   than that at the substep it came in at.
 // The server compiles this file natively too (as every module's wasm/):
 // its hc_selftest() is the reference the client's is compared with.
 #include "interface/wasm_api.h"
@@ -429,13 +431,26 @@ BUILDAT_WASM_EXPORT uint32_t hc_step(int n)
 // whole, whose history is not the server's car).
 BUILDAT_WASM_EXPORT int hc_correct(uint32_t at, int force)
 {
+	// [HILLCLIMB_PREDICT_RED] A state for a substep this client has not
+	// stepped yet, by up to a frame's (its count lags the clock until the
+	// next frame): stepped on to it with the input it has, then compared
+	if(at > g_now && at - g_now <= 8 && at >= g_valid)
+		while(g_now < at)
+			step(effective());
 	if(at > g_now || g_now - at >= HIST || at < g_valid){
 		g_sim.set(g_server);
 		// Ahead of this client (its frames late): its count is moved on;
 		// 0xffffffff is "not known"
 		if(at > g_now && at != 0xffffffffu)
 			g_now = at;
-		g_valid = g_now;
+		// [HILLCLIMB_PREDICT_RED] The history from its substep on is to
+		// be compared (the next state's is corrected from it), not from
+		// now: a state a round trip behind is never past now, and took
+		// every next one whole too, the car snapped back each tick
+		if(at == 0xffffffffu)
+			g_valid = g_now;
+		else if(at > g_valid)
+			g_valid = at;
 		return 2;
 	}
 	if(!force){

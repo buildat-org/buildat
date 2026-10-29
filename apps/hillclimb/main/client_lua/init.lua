@@ -738,10 +738,12 @@ local pause = nil -- main/pause.lua's, made below
 -- button's reset, sent once
 local touch, touch_reset = nil, false
 local sent, sent_t, sent_seq = nil, 0, nil
--- "accel brake left right gear reset steer seq" (main.cpp on_input), sent
--- when it changes and twice a second besides; steer -100..100, the keys'
--- full lock or the touch stick's; seq the input's number, which the
--- prediction times it by ([CLIENT_WASM] step 5)
+-- "accel brake left right gear reset steer seq [c0 cnow]" (main.cpp
+-- on_input), sent when it changes and twice a second besides; steer
+-- -100..100, the keys' full lock or the touch stick's; seq the input's
+-- number, which the prediction times it by ([CLIENT_WASM] step 5), and
+-- with a prediction the substep it took effect at and the substep now
+-- ([HILLCLIMB_PREDICT_RED])
 local function send_input()
 	for g = 1, 4 do
 		if down("gear" .. g) then gear = g end
@@ -761,7 +763,7 @@ local function send_input()
 		brake = st.brake and 1 or brake
 		steer = math.floor(st.steer * 100 + 0.5)
 	end
-	local seq = predict.input(accel, brake, steer, gear)
+	local seq, c0, cnow = predict.input(accel, brake, steer, gear)
 	local msg = string.format("%d %d %d %d %d %d %d", accel, brake, left,
 			right, gear, touch_reset and 1 or b("reset"), steer)
 	touch_reset = false
@@ -772,7 +774,8 @@ local function send_input()
 				car_pos and car_pos.z / U or 0))
 	end
 	if msg ~= sent or seq ~= sent_seq or now - sent_t > 0.5 then
-		buildat.send_packet("hillclimb:input", msg .. " " .. seq)
+		buildat.send_packet("hillclimb:input", msg .. " " .. seq ..
+				(c0 and " " .. c0 .. " " .. cnow or ""))
 		sent, sent_t, sent_seq = msg, now, seq
 	end
 end
@@ -1348,7 +1351,7 @@ magic.SubscribeToEvent("Update", function(_, d)
 	update_sky()
 	light_outside(dt)
 	voxel_shading.update(dt)
-	predict.frame(dt)
+	predict.frame()
 	draw_cars()
 	-- [HC_PAUSE_MENU] Escape: the Tab menu closed if it is open, else the
 	-- pause menu opened or closed (not while the chat or the settings
