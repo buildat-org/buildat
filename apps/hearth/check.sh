@@ -489,6 +489,8 @@ import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
 c.executemany("INSERT INTO messages(thread, author, body, created) "
         "VALUES(1, 'admin', ?, 1)", [("x" * 19990 + " END%d" % i,) for i in range(1, 21)])
+# A file from before topics.mod_threads: the start adds it back (step 14)
+c.execute("ALTER TABLE topics DROP COLUMN mod_threads")
 c.commit()
 PY
 start_server "$t/srv2.log" "Hearth: " 120 $P \
@@ -672,5 +674,30 @@ grep -aq "admin result: Only the Host does that" "$t/dave12b.log" || fail "a Ste
 grep -aq "admin result: erin is a Guest" "$t/dave12b.log" || fail "a Steward took back a trust"
 echo "ok: a Steward's Accounts page"
 
+# 14. [HEARTH_DEVLOG]: a topic where only a moderator starts threads (its
+# column dropped before step 10's restart, an old file's): bob's thread
+# there refused, his reply in the admin's thread there accepted
+client admin checkpass12 "$t/admin14a.log" '{"cmd":"new_topic","name":"Devlog"}'
+DT=$(num "$t/admin14a.log" 1001)
+[ -n "$DT" ] || fail "the devlog topic: $(answer "$t/admin14a.log" 1001)"
+client admin checkpass12 "$t/admin14b.log" "{\"cmd\":\"topic_mod_threads\",\"topic\":$DT,\"on\":true}
+{\"cmd\":\"new_thread\",\"topic\":$DT,\"title\":\"Week 1\",\"body\":\"Entry one\"}"
+answer "$t/admin14b.log" 1001 | grep -q '"ok":true' ||
+	fail "the topic marked: $(answer "$t/admin14b.log" 1001)"
+DTH=$(num "$t/admin14b.log" 1002)
+[ -n "$DTH" ] || fail "the moderator's thread: $(answer "$t/admin14b.log" 1002)"
+client bob bobpass1234 "$t/bob14.log" "{\"cmd\":\"new_thread\",\"topic\":$DT,\"title\":\"Mine\",\"body\":\"x\"}
+{\"cmd\":\"reply\",\"thread\":$DTH,\"body\":\"Nice entry\"}
+{\"cmd\":\"topic\",\"topic\":$DT}
+{\"cmd\":\"topic_mod_threads\",\"topic\":$DT,\"on\":false}"
+answer "$t/bob14.log" 1001 | grep -q "only a Steward starts a thread in Devlog" ||
+	fail "bob's thread in the devlog: $(answer "$t/bob14.log" 1001)"
+answer "$t/bob14.log" 1002 | grep -q '"ok":true' ||
+	fail "bob's reply in the devlog: $(answer "$t/bob14.log" 1002)"
+[ "$(res "$t/bob14.log" 1003 'r["result"]["mod_threads"]')" = True ] ||
+	fail "the topic's mark: $(answer "$t/bob14.log" 1003 | head -c 300)"
+answer "$t/bob14.log" 1004 | grep -q "only a Steward" || fail "bob unmarked the topic"
+echo "ok: a topic where only a moderator starts threads, replies open; an old file's topics opened"
+
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a new account's one image a thread, vetted by a helper; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a new account's one image a thread, vetted by a helper; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; a topic only a moderator starts threads in; pages limited"

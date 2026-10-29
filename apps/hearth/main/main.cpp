@@ -399,6 +399,8 @@ static const char *const COLUMNS_ADDED[][3] = {
 	// [DISCUSS_SERVER]: what Hearth posts in by itself there: "servers",
 	// or ""
 	{"topics", "category", "TEXT NOT NULL DEFAULT ''"},
+	// [HEARTH_DEVLOG]: 1 when only a moderator starts its threads
+	{"topics", "mod_threads", "INTEGER NOT NULL DEFAULT 0"},
 	{"threads", "link", "TEXT NOT NULL DEFAULT ''"},
 	{"threads", "link_by", "TEXT NOT NULL DEFAULT ''"},
 	// [HEARTH_UI]: the last message read, for what is unread since
@@ -1372,7 +1374,7 @@ struct Module: public interface::Module
 		json::Value list = json::array();
 		const ss_ sql = ss_() + "SELECT t.id, t.parent, t.name, t.about, "
 				"(SELECT count(*) FROM threads WHERE topic = t.id AND hidden = 0), "
-				"t.tracker, t.category, "
+				"t.tracker, t.category, t.mod_threads, "
 				// The newest thread's last, a top topic's subtopics' with it
 				"(SELECT max(last) FROM threads WHERE hidden = 0 AND topic IN "
 				"(SELECT id FROM topics WHERE id = t.id OR parent = t.id)), " +
@@ -1392,9 +1394,10 @@ struct Module: public interface::Module
 			t.set("threads", q.i(4));
 			t.set("tracker", q.i(5) != 0);
 			t.set("category", q.s(6));
-			t.set("active", q.i(7));
+			t.set("mod_threads", q.i(7) != 0);
+			t.set("active", q.i(8));
 			if(!name.empty())
-				t.set("unread", q.i(8) != 0);
+				t.set("unread", q.i(9) != 0);
 			list.append(t);
 		}
 		return list;
@@ -1402,8 +1405,8 @@ struct Module: public interface::Module
 
 	json::Value topic(int64_t id)
 	{
-		Q q(m_db, "SELECT name, about, parent, tracker, category FROM topics "
-				"WHERE id = ?");
+		Q q(m_db, "SELECT name, about, parent, tracker, category, mod_threads "
+				"FROM topics WHERE id = ?");
 		q.b(id);
 		if(!q.step())
 			return json::Value();
@@ -1414,6 +1417,7 @@ struct Module: public interface::Module
 		t.set("parent", q.i(2));
 		t.set("tracker", q.i(3) != 0);
 		t.set("category", q.s(4));
+		t.set("mod_threads", q.i(5) != 0);
 		return t;
 	}
 

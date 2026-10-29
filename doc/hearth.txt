@@ -195,7 +195,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     new_topic              a moderator; name, about, parent (0, or a
                            top-level topic)
     edit_topic             a moderator: topic, name, about
-    new_thread             anyone; topic, title, body, subject, kind
+    new_thread             anyone (a moderator in a topic marked by
+                           topic_mod_threads); topic, title, body, subject, kind
                            ("", question, problem, idea, or patch in a
                            tracker topic), version; or server=true and
                            subject "server:<host>:<port>", in the topic
@@ -210,6 +211,10 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
     topic_tracker          a moderator: topic, on -- its threads are tickets
     topic_category         a moderator: topic, category ("servers",
                            "announcements" or "")
+    topic_mod_threads      a moderator: topic, on -- only a moderator
+                           starts its threads (a devlog), replies stay
+                           open to all; the topic's own mark, its
+                           subtopics have theirs ([HEARTH_DEVLOG])
     tracker_link           a ticket's starter or a moderator: thread, link
                            ("" takes it off); below
     tracker_domains        the list; a moderator: add, remove (domains)

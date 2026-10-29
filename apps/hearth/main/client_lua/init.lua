@@ -1072,9 +1072,13 @@ show_topic = function(id)
 		local state = topic_view[id] or {kind = "", order = "active"}
 		topic_view[id] = state
 		local bar = row(w)
-		button(bar, "New thread...", function()
-			go(function() show_compose({topic = id, tracker = t.tracker}) end)
-		end, true)
+		-- [HEARTH_DEVLOG] A moderator's threads only; replies open to all
+		if not t.mod_threads or me.moderator then
+			button(bar, "New thread...", function()
+				go(function() show_compose({topic = id, tracker = t.tracker})
+				end)
+			end, true)
+		end
 		-- What is listed and how, a row of its own under the buttons
 		local view = row(w)
 		-- The kinds, or a tracker's statuses, that are there
@@ -1134,6 +1138,14 @@ show_topic = function(id)
 					req("topic_category", {topic = id, category =
 							t.category == "announcements" and "" or
 							"announcements"}, redraw)
+				end)
+			end
+			-- [HEARTH_DEVLOG]; a Hearth older than that has no mark
+			if t.mod_threads ~= nil then
+				button(bar, t.mod_threads and "Anyone starts threads" or
+						"Moderators start threads", function()
+					req("topic_mod_threads", {topic = id,
+							on = not t.mod_threads}, redraw)
 				end)
 			end
 		end
@@ -1754,10 +1766,12 @@ show_compose = function(o)
 				names[t.id] = t.name
 			end
 			for _, t in ipairs(topics) do
-				choices[#choices + 1] = {t.id, (t.parent ~= 0 and
-						(names[t.parent] or "") .. " / " or "") .. t.name}
-				if t.id == o.topic then
-					at = #choices
+				if not t.mod_threads or me.moderator then
+					choices[#choices + 1] = {t.id, (t.parent ~= 0 and
+							(names[t.parent] or "") .. " / " or "") .. t.name}
+					if t.id == o.topic then
+						at = #choices
+					end
 				end
 			end
 			if #choices > 0 then

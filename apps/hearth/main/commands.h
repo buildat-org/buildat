@@ -335,6 +335,17 @@
 			m_feed_at = -1;
 			return json::Value(true);
 		}
+		// [HEARTH_DEVLOG] Only a moderator starts its threads (a devlog);
+		// its subtopics have their own mark
+		if(cmd == "topic_mod_threads"){
+			if(!mod)
+				throw Exception("only a "+level_name(LV_MODERATOR)+" sets who starts a topic's threads");
+			Q u(m_db, "UPDATE topics SET mod_threads = ? WHERE id = ?");
+			u.b((int64_t)q.get("on").is_true()).b(jint(q, "topic")).step();
+			if(sqlite3_changes(m_db) == 0)
+				throw Exception("no such topic");
+			return json::Value(true);
+		}
 		if(cmd == "topic_tracker"){
 			if(!mod)
 				throw Exception("only a "+level_name(LV_MODERATOR)+" marks a tracker");
@@ -737,6 +748,10 @@
 			const json::Value top = topic(topic_id);
 			if(!top.is_object())
 				throw Exception("no such topic");
+			if(top.get("mod_threads").is_true() && !mod)
+				throw Exception("only a "+level_name(LV_MODERATOR)+" starts "
+						"a thread in "+top.get("name").as_string()+"; a reply "
+						"in one is open to all");
 			if(!POSTED_KINDS.count(kind))
 				throw Exception("a thread is a discussion, a question, a "
 						"problem, an idea or a patch");
