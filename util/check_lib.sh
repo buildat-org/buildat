@@ -270,6 +270,44 @@ WEB_WORLD_MT='max_block_send_distance = 2
 max_block_generate_distance = 2
 active_object_send_range_blocks = 2
 liquid_loop_max = 10'
+# A web page's way into vanilla's launcher server: not the launcher's own
+# client, it joins by builtin/accounts' login ([GUEST_NAME_REUSE]). The
+# steps, for a steps file after its nav, that make an account and wait
+# for its join: with the server's log, its first admin by the setup code
+# there, else an ordinary account (an admin's pause menu has "Who may talk" over View range, 10 CSS
+# px). By the keyboard, as a tap would take a touch page fullscreen before
+# the world's first pick: from the name, Tab past the password and Join to
+# "Create a new account"; the make page's fields in Tab order and "Create
+# account" after them, the name typed over the one a page that joined
+# before puts in. The 1 s settles: a page that does not fit is
+# scaled down 500 ms after the last key (src/client/app.cpp's
+# update_ui_fit). The frames between keys and texts: keys sent at once
+# put the texts in the wrong fields in a run as a phone at 873x393
+# (2026-10-29). The last key is a gesture: a game that wants fullscreen
+# takes the page fullscreen with it as the world starts, and a headless
+# fullscreen page is not resized (?pref=web_address_bar=show keeps it).
+#   steps=$(web_login_steps <name> [server log]) || fail "$steps"
+web_login_steps(){
+	local code=""
+	if [ -n "${2:-}" ]; then
+		# accounts may log it after the server's Listening
+		wait_for_log "$2" "setup code [A-Z0-9]+" 30
+		code=$(grep -ao "setup code [A-Z0-9]*" "$2" | head -1 | cut -d' ' -f3)
+		[ -n "$code" ] || { echo "no setup code ($2)"; return 1; }
+	fi
+	cat <<J
+ ["waitlog", "accounts: the login page shown", 120], ["wait", 1000],
+ ["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+ ["selall"], ["frames", 2], ["type", "$1"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+ ["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+J
+	# The code's field is there while the server has no admin
+	[ -z "$code" ] ||
+		echo ' ["type", "'"$code"'"], ["frames", 2], ["key", "Tab"], ["frames", 2],'
+	echo ' ["key", "Enter"], ["waitlog", "Joined as '"$1"'", 30],'
+}
 fail(){ echo "FAIL: $*"; exit 1; }
 skip() { echo "SKIP: $*"; exit $SKIP; }
 

@@ -16,7 +16,11 @@
 //   ["waitlog", regex, s]   until a line of the page's console matches, one
 //                           after the last waitlog's, at most s seconds
 //                           (default 60); fails the run if none does
-//   ["type", text]          as typed, character by character
+//   ["waitlog_any", regex, s]
+//                           the same over every line so far, as the native
+//                           wait_log_any: one of two lines whose order
+//                           varies; the next waitlog starts where it did
+//   ["type", text]         as typed, character by character
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, PageUp, PageDown, Home,
 //                           End, or one character
@@ -632,13 +636,15 @@ async function drive_wait(b, op, a) {
 		try {
 			if (op === "wait") {
 				await new Promise(r => setTimeout(r, a));
-			} else if (op === "waitlog") {
+			} else if (op === "waitlog" || op === "waitlog_any") {
 				const re = new RegExp(a);
 				const until = Date.now() + (c || 60) * 1000;
+				const from = op === "waitlog" ? cursor : 0;
 				for (;;) {
-					const i = lines.findIndex((l, k) => k >= cursor && re.test(l));
+					const i = lines.findIndex((l, k) => k >= from && re.test(l));
 					if (i >= 0) {
-						cursor = i + 1;
+						if (op === "waitlog")
+							cursor = i + 1;
 						break;
 					}
 					if (Date.now() > until)

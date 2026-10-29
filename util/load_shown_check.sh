@@ -42,15 +42,25 @@ CHECK_PIDS+=($SERVER_PID)
 # would be the event (each save saying so would be one every 5 s).
 # The second page's own start before its watch: the first one's last
 # lines come in after the navigation
-cat > "$t/steps.json" <<'J'
+# Each page joins by the login (check_lib.sh), the first as the server's
+# admin, the second with an account of its own: watched up to the login
+# page, and from the login to the world
+login1=$(web_login_steps lsplayer "$t/srv.log") || fail "$login1"
+login2=$(web_login_steps lsplayer2)
+world='["watch", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 900, 15000]'
+cat > "$t/steps.json" <<J
 [
  ["cpu", 6],
- ["nav", "${URL}"],
- ["watch", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 900, 15000],
+ ["nav", "\${URL}"],
+ ["watch", "accounts: hello: ", 900, 15000],
+$login1
+ $world,
  ["wait", 10000],
- ["nav", "${URL}"],
- ["waitlog", "I __main  : buildat \\d", 120],
- ["watch", "settle: \\d+ to mesh, ([2-9]\\d\\d|\\d{4,}) chunks in scene", 900, 15000]
+ ["nav", "\${URL}"],
+ ["waitlog", "I __main  : buildat [0-9]", 120],
+ ["watch", "accounts: hello: ", 900, 15000],
+$login2
+ $world
 ]
 J
 TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_PORT/" \

@@ -37,15 +37,8 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
-# The page is not the launcher's own client, so it joins by the login
-# ([GUEST_NAME_REUSE]): an account made with the server's setup code, its
-# first admin. By the keyboard, as a tap would take the page fullscreen
-# (and unlock) before the first pick: from the name, Tab past the
-# password and Join to "Create a new account"; the make page's fields in
-# Tab order and "Create account" after them. The frames after the login
-# line and the press are the page drawn and focused.
-code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
-[ -n "$code" ] || fail "no setup code ($t/srv.log)"
+# The page joins by the login, the server's first admin (check_lib.sh)
+login=$(web_login_steps soplayer "$t/srv.log") || fail "$login"
 # The dropdown at (244, 466), below View range, an admin's menu with Who
 # may talk above (2026-10-29); its Auto, Landscape and Portrait at y 481,
 # 495 and 509. After a line, settles of up to 1 s: the popup
@@ -56,11 +49,7 @@ state='["eval", "Module.buildatOrientation + (document.fullscreenElement ? \" fu
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
- ["waitlog", "accounts: the login page shown", 120], ["frames", 5],
- ["key", "Tab"], ["key", "Tab"], ["key", "Tab"], ["key", "Enter"], ["frames", 5],
- ["type", "soplayer"], ["key", "Tab"], ["type", "sopass12"], ["key", "Tab"],
- ["type", "sopass12"], ["key", "Tab"], ["type", "$code"], ["key", "Tab"],
- ["key", "Enter"], ["waitlog", "Joined as soplayer", 30],
+$login
  ["waitlog", "chat: so: ready", 120], ["wait", 1000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 500],
  ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 495],
