@@ -40,11 +40,11 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hillclimb; t=$CHECK_TMP
 app="$here/apps/hillclimb"
-# None started while the machine has under 4 GB available and 300 MB for
+# None started while the machine has under 2 GB available and 300 MB for
 # each of the <n> about to start (user, 2026-10-29)
 mem_wait() # <n>
 {
-	while [ "$(free -m | awk '/^Mem:/ { print $7 }')" -lt $((4000 + 300 * $1)) ]; do
+	while [ "$(free -m | awk '/^Mem:/ { print $7 }')" -lt $((2000 + 300 * $1)) ]; do
 		sleep 1
 	done
 }
