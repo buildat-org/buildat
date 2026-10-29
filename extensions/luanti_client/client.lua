@@ -1139,6 +1139,10 @@ function M.new(socket, options, log)
 		self.position = {x = x / BS, y = y / BS, z = z / BS}
 		self.pitch = r:f32()
 		self.yaw = r:f32()
+		-- One line a move, as the builtin client's: what a drive waits on
+		log:info(string.format("the server put the player at %.1f, %.1f, " ..
+				"%.1f, yaw %.0f", self.position.x, self.position.y,
+				self.position.z, self.yaw))
 		-- Nothing is told where we are until now, and PLAYERPOS would move us
 		-- somewhere else if it went out before this
 		if self.state ~= "ready" then

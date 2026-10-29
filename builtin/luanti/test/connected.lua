@@ -58,6 +58,10 @@ core.register_on_joinplayer(function(player)
 		core.set_node({x = base.x - 3, y = base.y, z = base.z + 4},
 				{name = "mcl_fences:fence"})
 		player:set_pos({x = base.x - 6, y = base.y + 2.5, z = base.z})
+		-- Facing east, as the drive will look: the turn is the line the
+		-- client logs for the stage ("the server put the player at ...
+		-- looking 90"), told apart from the spawn's placing
+		player:set_look_horizontal(3 * math.pi / 2)
 		core.after(16, function()
 			player:set_pos({x = base.x - 2.5, y = base.y + 1.5, z = base.z - 4})
 		end)

@@ -30,17 +30,14 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE="$save" \
 	{ echo "FAIL: the server did not start"; exit 1; }
 srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
-# The second stage is the fixture's next set_pos, 16 s after the first,
-# which the client logs as the server putting the player; the 2 s and
-# 1.5 s after a look_dir are the models and the world drawn there.
-# simplified: the fixture's stage, six seconds after the join, is not
-# told apart on the client from the spawn's own placing; ten seconds after
-# the first placing is what waits for it and its platform to be drawn. A
-# line the client logs for the stage would be the event, but a chat line
-# shows in the pictures
+# The stage is the fixture's turn to the east after its set_pos, which
+# the client logs as the server putting the player there "looking 90";
+# either can come first, it or the world drawn around the spawn. The
+# second stage is the fixture's next set_pos, 16 s after the first; the 2
+# s and 1.5 s after a look_dir are the models and the world drawn there
 cat > "$out/cmds.txt" <<CMDS
-wait_log 120000 the server put the player at
-delay 10000
+wait_log_any 120000 scene, 0 undrawn within 2
+wait_log_any 60000 looking 90
 look_dir 1 -0.15 0
 # simplified: the models and the world in the new direction drawn; a
 # settle line after a turn (0 undrawn in view) would be the event

@@ -30,9 +30,10 @@ BUILDAT_LUANTI_GAME=mineclone2 BUILDAT_LUANTI_SAVE=rf start_server "$t/srv.log" 
 	-A 127.0.0.1 -m "$here/apps/vanilla" -D "$t/srv" -C "$t/srv.cache" -l 3 ||
 	fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
-# The delay: the player's join changes luanti's object_props file; quit
-# before it came, the second join asks for it
-printf "wait_log 300000 load: the world is in\ndelay 3000\nquit\n" > "$t/cmds"
+# The files the join asked for are all in before the world is: the
+# startup tables' second serve is 5 s of game steps after the server's
+# start, long before
+printf "wait_log 300000 load: the world is in\nquit\n" > "$t/cmds"
 for n in 1 2; do
 	run_client 60 "$t/$n.log" timeout 300 "$b" -C "$t/c" -D "$t/u" -w 800x450 -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$t/cmds"

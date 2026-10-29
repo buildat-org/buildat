@@ -42,17 +42,17 @@ printf 'name = mobmesh\n' > "$work/worldmods/mobmesh/mod.conf"
 start_luanti_server "$work" "$out/luanti.conf" "$out/luanti_srv.log" ||
 	fail "the Luanti server did not come up ($out/luanti_srv.log)"
 port=$LUANTI_PORT
-# mobmesh.lua puts the player twice: on the stage 6 s after the join, then
-# beside the zombie 16 s later. simplified: as mobmesh.sh, delays after
-# the first placing rather than a line for the stage
+# mobmesh.lua puts the player twice: on the stage 6 s after the join,
+# turned east (Luanti's yaw 270), then beside the zombie 16 s later; the
+# client logs each move
 cat > "$out/cmds.txt" <<CMDS
 wait_log 90000 voxel types have their own textures
 wait_log 60000 model mobs_mc_zombie.b3d
-delay 10000
+wait_log_any 30000 yaw 270
 look_dir 1 -0.15 0
 delay 2000
 screenshot $out/mobs.png
-delay 6000
+wait_log 30000 the server put the player at
 look_dir 2.5 0.2 1
 delay 1500
 screenshot $out/zombie_side.png
