@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~2 min (2026-10-29)
+# cost: ~2.5 min (2026-10-29)
 # covers: src/impl/aitta.cpp src/interface/aitta.h src/client/app_lua.h client/core/aitta/init.lua client/core/aitta/publish.lua client/launch_grid.lua client/api.lua apps/aitta/main/main.cpp apps/vanilla/main/game_start.h apps/vanilla/main/game_settings.h apps/vanilla/launcher/init.lua
 # [WORLD_PACKAGES]: a world published from one client and played on
 # another, through a local Aitta, native. The minimal game's save wp has a
@@ -19,7 +19,14 @@
 #      save wp of vanilla, played; the marker node is there in the world;
 #      the first open took out the admin, privilege and cost settings, the
 #      forceloads and the players ([WORLD_DATA_COST]), and the world mod
-#      never came.
+#      never came;
+#   4. an installed app's saves ([LAUNCH_SAVE_INSTALLED]): savy, a check
+#      app whose server opens the launch's save= and logs its marker, 1.0.0
+#      and 1.0.1 installed, its save mine made by 1.0.0: Saves' Continue
+#      starts 1.0.0, the release mine is pinned to, not the last installed;
+#      mine published from Saves as a world for tester.savy, and on the
+#      other user path, with both versions, "Install and play" opens it
+#      with 1.0.0 too.
 # simplified: the form's fields are the dev package's meta.json written
 # here, as a second publish of the same world finds it; the form itself is
 # util/aitta_publish_check.sh's, and its keys are that check's (Tab, Return:
@@ -243,4 +250,176 @@ row = sqlite3.connect(sys.argv[1]).execute(
 assert row is None or b"publisher" not in row[0], row
 PY
 echo "ok: a world mod refused; wp installed as a save of vanilla and played, its marker there, its admin, privileges, cost settings, forceloads and players gone"
-echo "PASS: a world published from Saves, listed under vanilla, installed and played on a fresh user path"
+
+# 4. An installed app's save, Continued, published and installed
+a=$t/savy
+mkdir -p "$a/main/client_lua" "$a/launcher"
+cat > "$a/main/meta.json" <<'J'
+{"engine_api": 2, "kind": "world", "client_main": "init.lua",
+ "dependencies": [{"module": "network"}, {"module": "client_lua"},
+  {"module": "client_data"}, {"module": "storage"}]}
+J
+echo 'buildat.Logger("savy"):info("savy: client joined")' > "$a/main/client_lua/init.lua"
+cat > "$a/launcher/init.lua" <<'L'
+return function(ctx)
+	ctx.world_packages = {code = {"code"}}
+	return {{id = "play", label = "savy", category = "game",
+		run = function() ctx.launch{app = "tester.savy"} end}}
+end
+L
+cat > "$a/main/main.cpp" <<'C'
+// The launch's save=, or s1, opened; its marker made once and logged
+#include "core/log.h"
+#include "interface/module.h"
+#include "interface/server.h"
+#include "interface/server_config.h"
+#include "interface/event.h"
+#include "storage/api.h"
+#define MODULE "main"
+using interface::Event;
+namespace savy {
+struct Module: public interface::Module
+{
+	interface::Server *m_server;
+	Module(interface::Server *server): interface::Module(MODULE),
+		m_server(server){}
+	void init(){ m_server->sub_event(this, Event::t("core:start")); }
+	void event(const Event::Type &type, const Event::Private *p)
+	{
+		EVENT_VOIDN("core:start", on_start)
+	}
+	void on_start()
+	{
+		ss_ name = interface::launch_param(m_server->get_config().
+				get<ss_>("untrusted_launch"), "save");
+		if(name.empty())
+			name = "s1";
+		storage::access(m_server, [&](storage::Interface *i){
+			storage::Save *s = i->open(name);
+			if(!s)
+				s = i->create(name);
+			if(!s){
+				log_w(MODULE, "savy: no save %s", cs(name));
+				return;
+			}
+			storage::Store *st = s->store("savy");
+			ss_ marker;
+			if(!st->get("marker", marker)){
+				marker = "made as "+name;
+				st->set("marker", marker);
+			}
+			log_i(MODULE, "savy: save %s, marker %s", cs(name), cs(marker));
+			i->close(s);
+		});
+	}
+};
+extern "C" {
+	BUILDAT_EXPORT void* createModule_main(interface::Server *server){
+		return (void*)(new Module(server));
+	}
+}
+}
+C
+for v in 1.0.0 1.0.1; do
+	printf '{"author": "tester", "name": "savy", "version": "%s", "engine_api": 2,
+ "license_code": "MIT", "license_media": "CC0-1.0", "description": "a check"}\n' \
+		$v > "$a/meta.json"
+	zip=$("$b" aitta pack "$a" "$t/u/aitta_keys/tester.key" "$t/out" 2>"$t/pack.err") ||
+		fail "pack savy $v: $(cat "$t/pack.err")"
+	out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+	echo "$out" | grep -q "listed: tester/savy/$v" || fail "publish savy $v: $out"
+done
+"$b" aitta install "$t/out/tester-savy-1.0.0.zip" "$t/u" > /dev/null || fail "install savy 1.0.0"
+start_server "$t/mine.log" "savy: save mine" 300 auto bin/buildat_server \
+	-u "$(printf 'launcher=1\nsave=mine')" -A 127.0.0.1 \
+	-m "$t/u/installed/tester/savy/1.0.0" -D "$t/u" -C "$t/c_mine" -l 3 ||
+	fail "savy's save mine ($t/mine.log)"
+kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
+# The app's modules as this server built them, one build a run; the
+# clients' caches have no other server's log
+for c in c_u c_u2; do
+	mkdir -p "$t/$c/apps"
+	cp -r "$t/c_mine/apps/tester.savy" "$t/$c/apps/"
+done
+"$b" aitta install "$t/out/tester-savy-1.0.1.zip" "$t/u" > /dev/null || fail "install savy 1.0.1"
+for v in 1.0.0 1.0.1; do
+	"$b" aitta install "$t/out/tester-savy-$v.zip" "$t/u2" > /dev/null ||
+		fail "install savy $v on u2"
+done
+mkdir -p "$t/u/dev_apps/mine"
+cat > "$t/u/dev_apps/mine/meta.json" <<'J'
+{"kind": "world", "app": "tester.savy", "app_version": "1.0.0",
+ "author": "tester", "name": "mine", "version": "1.0.0", "engine_api": 2,
+ "license_code": "MIT", "license_media": "CC0-1.0", "description": "A save of savy"}
+J
+# Continue, then Publish this world, each on mine's panel
+saves_cmds(){ # what to click on mine's panel
+	cat <<C
+wait_log_any 60000 rows in
+delay 1000
+click Button "Saves*"
+wait_log 5000 launch_menu: save,
+delay 300
+click Button "mine*"
+wait_log 5000 launch_menu: locked mine
+delay 300
+click Button "$1"
+C
+}
+{ saves_cmds Continue; printf 'wait_log 120000 savy: client joined\nquit\n'; } > "$t/cont.cmds"
+run_client 60 "$t/cont.log" timeout 240 "$b" -o launch_ui=launch_menu -D "$t/u" \
+	-C "$t/c_u" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/cont.cmds" ||
+	fail "the Continue drive ($t/cont.log)"
+for p in $(pgrep -f "[b]uildat_server .*-D $t/u "); do kill $p; done
+grep -aq "start: Starting tester.savy@1.0.0" "$t/cont.log" ||
+	fail "Continue did not start savy 1.0.0, mine's release ($t/cont.log)"
+cat "$t"/c_u/buildat_server*.log | grep -aq "savy: save mine, marker made as mine" ||
+	fail "Continue did not open mine ($t/c_u/buildat_server*.log)"
+echo "ok: Continue on an installed app's save started the release it is pinned to"
+{ saves_cmds "Publish this world"; cat <<C
+wait_log 10000 aitta publish: the package page, mine
+delay 500
+$(for _ in $(seq 16); do echo "keypress Tab"; done)
+keypress Return
+wait_log 20000 aitta publish: the key page, The key is bound
+delay 300
+keypress Tab
+keypress Tab
+keypress Return
+wait_log 20000 aitta publish: published tester/mine/1.0.0
+quit
+C
+} > "$t/pub2.cmds"
+run_client 60 "$t/pub2.log" timeout 240 "$b" -o launch_ui=launch_menu -D "$t/u" \
+	-C "$t/c_u" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/pub2.cmds" ||
+	fail "the publish drive of mine ($t/pub2.log)"
+curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json, sys
+r = [r for r in json.load(sys.stdin)["releases"] if r["name"] == "mine"][0]
+assert r["kind"] == "world" and r["app"] == "tester.savy", r' ||
+	fail "the list does not say mine is a world for tester.savy"
+cat > "$t/inst2.cmds" <<C
+wait_log_any 60000 rows in
+delay 500
+text apps from aitta
+wait_log 10000 rows for "apps from aitta" in
+keypress Return
+wait_log 20000 aitta page: 
+wait_log_any 5000 aitta panel:
+delay 500
+click Button "tester/mine"
+wait_log 5000 aitta panel: tester/mine 1.0.0
+delay 300
+click Button "Install and play"
+wait_log 120000 savy: client joined
+quit
+C
+run_client 120 "$t/inst2.log" timeout 300 "$b" -o launch_ui=launch_menu -D "$t/u2" \
+	-C "$t/c_u2" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/inst2.cmds" ||
+	fail "the install drive of mine ($t/inst2.log)"
+for p in $(pgrep -f "[b]uildat_server .*-D $t/u2"); do kill $p; done
+grep -aq "start: Starting tester.savy@1.0.0" "$t/inst2.log" ||
+	fail "Install and play did not start savy 1.0.0 ($t/inst2.log)"
+cat "$t"/c_u2/buildat_server*.log | grep -aq "savy: save mine, marker made as mine" ||
+	fail "Install and play did not open mine ($t/c_u2/buildat_server*.log)"
+echo "ok: an installed app's world published from Saves, installed and played with the release it was made with"
+echo "PASS: worlds published from Saves, listed under their app, installed and played on a fresh user path (vanilla and an installed app)"

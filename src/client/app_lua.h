@@ -334,19 +334,31 @@
 		return (int64_t)st.st_mtime * 1000000;
 	}
 
+	// Whose saves <user>/apps/<app>/saves are: a tree app's by its name,
+	// an installed one's by "<author>.<name>" (server::app_of()), of any
+	// version of it here ([LAUNCH_SAVE_INSTALLED])
+	static bool saves_app_name(const ss_ &app)
+	{
+		if(valid_app_name(app))
+			return true;
+		const ss_ dir = installed_app_dir(app+"@0");
+		return !dir.empty() && interface::fs::path_exists(
+				dir.substr(0, dir.size() - 2));
+	}
+
 	static int l_list_saves(lua_State *L)
 	{
 		ss_ only_game;
 		if(lua_gettop(L) >= 1 && !lua_isnil(L, 1)){
 			only_game = lua_bindings::lua_tocppstring(L, 1);
-			if(!valid_app_name(only_game))
+			if(!saves_app_name(only_game))
 				return luaL_error(L, "list_saves(): bad app name");
 		}
 		const ss_ games = g_client_config.get<ss_>("user_path")+"/apps";
 		struct Row { ss_ game, name; int64_t modified; };
 		sv_<Row> rows;
 		for(const auto &g : interface::fs::list_directory(games)){
-			if(!g.is_directory || !valid_app_name(g.name))
+			if(!g.is_directory || !saves_app_name(g.name))
 				continue;
 			if(only_game != "" && g.name != only_game)
 				continue;
@@ -396,7 +408,7 @@
 		const ss_ save = lua_bindings::lua_tocppstring(L, 2);
 		const ss_ store = lua_bindings::lua_tocppstring(L, 3);
 		const ss_ key = lua_bindings::lua_tocppstring(L, 4);
-		if(!valid_app_name(app) || !valid_app_name(save) || save[0] == '_')
+		if(!saves_app_name(app) || !valid_app_name(save) || save[0] == '_')
 			return 0;
 		const ss_ db = g_client_config.get<ss_>("user_path")+"/apps/"+app+
 				"/saves/"+save+"/save.sqlite";

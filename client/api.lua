@@ -1654,10 +1654,38 @@ end
 -- server's -u is a save that is on the disk and nothing a sandbox
 -- composed. From there it is the grid's own path for a game with
 -- params: the game starts and reads "save=<name>" as it would a packet.
+--
+-- [LAUNCH_SAVE_INSTALLED] An installed app's saves are "<author>.<name>"'s
+-- (one version's id, "<author>.<name>@<version>", is taken as its app's),
+-- and its server is one version of it: the release the save is pinned to
+-- (builtin/storage's _aitta release, which a world package carries from
+-- its publisher's save), or with none here the last one installed.
+-- simplified: the last by the list's order, not SemVer; that server
+-- refuses another release's save and says so, and "move saves here" moves
+-- it, so a wrong pick is a refusal and not a lost save
+local function save_launch_id(game, name)
+	if not game:find("%.") then
+		return game
+	end
+	local pin = __buildat_save_value(game, name, "_aitta", "release")
+	local want = type(pin) == "string" and pin:match("^(%S+) ")
+	local id = nil
+	for _, a in ipairs(__buildat_list_apps()) do
+		local at = a.name:find("@", 1, true)
+		if at and a.name:sub(1, at - 1) == game then
+			id = a.name
+			if a.name:sub(at + 1) == want then
+				break
+			end
+		end
+	end
+	return id
+end
 buildat.safe.launch_save = function(game, name)
 	if type(game) ~= "string" or type(name) ~= "string" then
 		return false, "launch_save(game, name): two strings"
 	end
+	game = game:gsub("@.*$", "")
 	local found = false
 	for _, sv in ipairs(__buildat_list_saves(game)) do
 		if sv.name == name then
@@ -1669,8 +1697,13 @@ buildat.safe.launch_save = function(game, name)
 		return false, "launch_save(" .. game .. ", " .. name ..
 				"): no such save"
 	end
+	local id = save_launch_id(game, name)
+	if not id then
+		return false, "launch_save(" .. game .. ", " .. name ..
+				"): its app is not installed"
+	end
 	launch_history_note("save/" .. game .. "/" .. name)
-	launch_grid.screens().start_local_app(game, "save=" .. name)
+	launch_grid.screens().start_local_app(id, "save=" .. name)
 	return true
 end
 -- [PAUSE_WORLDS_LOCAL] A served game may open another of its own saves
@@ -1680,6 +1713,8 @@ end
 local launch_own_save
 __buildat_served_overrides.launch_save = function(game, name)
 	local here = __buildat_local_game and __buildat_local_game()
+	-- An installed app's server is one version; its saves its app's
+	here = here and here:gsub("@.*$", "")
 	-- nil: the local server's own
 	game = game or here
 	if not here or game ~= here then
@@ -1691,6 +1726,7 @@ __buildat_served_overrides.launch_save = function(game, name)
 	return launch_own_save(game, name)
 end
 launch_own_save = function(game, name)
+	game = game:gsub("@.*$", "")
 	local found = false
 	for _, sv in ipairs(__buildat_list_saves(game)) do
 		found = found or sv.name == name

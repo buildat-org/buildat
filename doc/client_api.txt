@@ -706,6 +706,9 @@ buildat.safe.launch_save(app, name) -> true, or false and why
 - Open a save. The pair has to be one list_saves() answers, so what reaches
   the server's -u is a save that is on the disk. It goes in the launch history
   as "save/<app>/<name>".
+  An installed app's saves are "<author>.<name>"'s; its save is opened by
+  the version it is pinned to (storage's _aitta release), or with none here
+  by the last one installed.
   From a server's code ([PAUSE_WORLDS_LOCAL]): only for the app of the local
   server the client is connected to (app nil is that one), only right after
   the user's own key or click; the game is left first.
