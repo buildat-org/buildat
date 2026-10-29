@@ -144,6 +144,11 @@ struct Section
 	int64_t saved_bytes = 0;
 	int32_t visited_day = -1;
 	bool index_dirty = false;
+	// [KIT] Its voxel owners (Instance::set_owned()), and whether they
+	// changed since the save had them
+	std::map<pv::Vector3DInt32, voxelworld::Owned> owned;
+	bool owned_dirty = false;
+	bool owned_unreadable = false;
 
 	Section(): // Needed for containers
 		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
@@ -296,6 +301,8 @@ struct CInstance: public voxelworld::Instance
 	sp_<interface::VoxelRegistry> m_voxel_reg;
 
 	sv_<up_<CommitHook>> m_commit_hooks;
+	// [KIT] Per owner, for routed_set_voxel()
+	std::map<ss_, sp_<OwnerHandler>> m_owner_handlers;
 
 	// One node holds one chunk of voxels (eg. 24x24x24)
 	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);

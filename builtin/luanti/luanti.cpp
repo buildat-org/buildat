@@ -421,8 +421,7 @@ struct Module: public interface::Module, public luanti::Interface,
 
 	// [LUANTI_MODULAR] node_meta.h's
 	NodeMeta m_meta{m_server, m_scene, m_lua, m_lua_mutex, m_store,
-			m_section_size,
-			[this](const ss_ &key, const ss_ &value){ store_set(key, value); }};
+			m_section_size};
 	// [LUANTI_MODULAR] clock.h's and mapgen_params.h's, each with the
 	// other's
 	GameClock m_clock{m_lua, m_lua_mutex, m_store, m_mapgen,

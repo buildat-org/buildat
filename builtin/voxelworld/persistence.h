@@ -299,6 +299,9 @@
 			section.altered = false;
 			section.visited_day = today();
 		}
+		// [KIT] Its owners, whether its voxels were saved or not: an
+		// owner may have written them while it was away
+		load_owned(section);
 		// A section whose light went stale while it was away is flooded
 		// again from what is around it now
 		relight_if_stale(section);
@@ -383,6 +386,7 @@
 		save_stale_sections();
 		if(!m_store || !section.loaded)
 			return;
+		save_owned(section);
 		if(!section.modified){
 			// A day of a visit and nothing else: the row alone
 			if(section.index_dirty){
@@ -876,7 +880,8 @@
 				if(!m_store) // A section can refuse the save
 					continue;
 				if(!section_pair.second.modified &&
-						!section_pair.second.index_dirty)
+						!section_pair.second.index_dirty &&
+						!section_pair.second.owned_dirty)
 					continue;
 				save_section(section_pair.second);
 				n++;
@@ -937,6 +942,7 @@
 					m_store->remove(chunk_key(pv::Vector3DInt32(
 							lc.getX() + x, lc.getY() + y, lc.getZ() + z)));
 				m_store->remove(generated_key(p));
+				m_store->remove(owned_key(p));
 				if(m_stale_sections.erase(section_key(p)) > 0)
 					m_stale_dirty = true;
 				gone.push_back(p);
@@ -1003,6 +1009,223 @@
 		const int64_t end = interface::os::time_us();
 		log_v(MODULE, "save: %i ms: %s", (int)((end - t0) / 1000),
 				cs(save_times(end - t_commit)));
+	}
+
+	// [KIT] Voxel owners (api.h's set_owned()). A section's are one row
+	// beside its chunks: version 1, then per entry its position, owner and
+	// data. No row is no owners, which is every save from before them.
+	ss_ owned_key(const pv::Vector3DInt16 &section_p)
+	{
+		return m_world_name+"/owned/"+itos(section_p.getX())+","+
+				itos(section_p.getY())+","+itos(section_p.getZ());
+	}
+
+	static ss_ owned_row(const std::map<pv::Vector3DInt32, Owned> &owned)
+	{
+		std::ostringstream os(std::ios::binary);
+		{
+			cereal::PortableBinaryOutputArchive ar(os);
+			ar((uint8_t)1, (uint32_t)owned.size());
+			for(const auto &pair : owned)
+				ar((int32_t)pair.first.getX(), (int32_t)pair.first.getY(),
+						(int32_t)pair.first.getZ(), pair.second.owner,
+						pair.second.data);
+		}
+		return os.str();
+	}
+
+	// A row this build cannot read is kept unread rather than guessed at:
+	// false, and the section is not given owners it would write over it
+	bool parse_owned_row(const ss_ &row,
+			std::map<pv::Vector3DInt32, Owned> &out)
+	{
+		out.clear();
+		try {
+			std::istringstream is(row, std::ios::binary);
+			cereal::PortableBinaryInputArchive ar(is);
+			uint8_t version = 0;
+			uint32_t n = 0;
+			ar(version);
+			if(version != 1)
+				return false;
+			ar(n);
+			for(uint32_t i = 0; i < n; i++){
+				int32_t x = 0, y = 0, z = 0;
+				Owned o;
+				ar(x, y, z, o.owner, o.data);
+				out[pv::Vector3DInt32(x, y, z)] = o;
+			}
+		} catch(std::exception &e){
+			return false;
+		}
+		return true;
+	}
+
+	bool read_owned(const pv::Vector3DInt16 &section_p,
+			std::map<pv::Vector3DInt32, Owned> &out)
+	{
+		out.clear();
+		ss_ row;
+		if(!m_store || !m_store->get(owned_key(section_p), row) ||
+				row.empty())
+			return true;
+		if(parse_owned_row(row, out))
+			return true;
+		log_e(MODULE, "World \"%s\": section " PV3I_FORMAT "'s voxel owners "
+				"are in a row this build does not read; left as they are",
+				cs(m_world_name), PV3I_PARAMS(section_p));
+		return false;
+	}
+
+	void write_owned(const pv::Vector3DInt16 &section_p,
+			const std::map<pv::Vector3DInt32, Owned> &owned)
+	{
+		if(!m_store)
+			return;
+		if(owned.empty())
+			m_store->remove(owned_key(section_p));
+		else
+			m_store->set(owned_key(section_p), owned_row(owned));
+	}
+
+	// simplified: an unreadable row leaves the section without owners in
+	// memory and owned_unreadable keeps it from being written over; a
+	// newer build's format would want a version of its own here
+	void load_owned(Section &section)
+	{
+		section.owned_dirty = false;
+		section.owned_unreadable = !read_owned(section.section_p,
+				section.owned);
+	}
+
+	void save_owned(Section &section)
+	{
+		if(!section.owned_dirty || section.owned_unreadable)
+			return;
+		write_owned(section.section_p, section.owned);
+		section.owned_dirty = false;
+	}
+
+	Section* loaded_section_of(const pv::Vector3DInt32 &p)
+	{
+		Section *section = get_section(section_of_voxel(p));
+		return section && section->loaded ? section : nullptr;
+	}
+
+	bool get_owned(const pv::Vector3DInt32 &p, Owned &out)
+	{
+		Section *section = loaded_section_of(p);
+		if(!section)
+			return false;
+		auto it = section->owned.find(p);
+		if(it == section->owned.end())
+			return false;
+		out = it->second;
+		return true;
+	}
+
+	bool set_owned(const pv::Vector3DInt32 &p, const Owned &owned)
+	{
+		Section *section = loaded_section_of(p);
+		if(!section)
+			return false;
+		auto it = section->owned.find(p);
+		if(owned.owner.empty()){
+			if(it == section->owned.end())
+				return true;
+			section->owned.erase(it);
+		} else {
+			if(it != section->owned.end() &&
+					it->second.owner == owned.owner &&
+					it->second.data == owned.data)
+				return true;
+			section->owned[p] = owned;
+		}
+		section->owned_dirty = true;
+		return true;
+	}
+
+	OwnedList get_section_owned(const pv::Vector3DInt16 &section_p,
+			const ss_ &owner)
+	{
+		std::map<pv::Vector3DInt32, Owned> stored;
+		const std::map<pv::Vector3DInt32, Owned> *owned = &stored;
+		Section *section = get_section(section_p);
+		if(section && section->loaded)
+			owned = &section->owned;
+		else
+			read_owned(section_p, stored);
+		OwnedList out;
+		for(const auto &pair : *owned)
+			if(pair.second.owner == owner)
+				out.push_back(std::make_pair(pair.first, pair.second.data));
+		return out;
+	}
+
+	void set_section_owned(const pv::Vector3DInt16 &section_p,
+			const ss_ &owner, const OwnedList &entries)
+	{
+		std::map<pv::Vector3DInt32, Owned> stored;
+		std::map<pv::Vector3DInt32, Owned> *owned = &stored;
+		Section *section = get_section(section_p);
+		const bool loaded = section && section->loaded;
+		if(loaded)
+			owned = &section->owned;
+		else if(!m_store || !read_owned(section_p, stored))
+			return; // Nowhere to keep them, or a row not to write over
+		std::map<pv::Vector3DInt32, Owned> next;
+		for(const auto &pair : *owned)
+			if(pair.second.owner != owner)
+				next[pair.first] = pair.second;
+		for(const auto &e : entries){
+			if(section_of_voxel(e.first) != section_p){
+				log_w(MODULE, "set_section_owned(): " PV3I_FORMAT " is not "
+						"in section " PV3I_FORMAT, PV3I_PARAMS(e.first),
+						PV3I_PARAMS(section_p));
+				continue;
+			}
+			Owned o;
+			o.owner = owner;
+			o.data = e.second;
+			next[e.first] = o;
+		}
+		bool same = next.size() == owned->size();
+		for(auto a = next.begin(), b = owned->begin(); same && a != next.end();
+				++a, ++b)
+			same = a->first == b->first && a->second.owner == b->second.owner &&
+					a->second.data == b->second.data;
+		if(same)
+			return;
+		*owned = next;
+		if(loaded)
+			section->owned_dirty = true;
+		else
+			write_owned(section_p, stored);
+	}
+
+	void set_owner_handler(const ss_ &owner, sp_<OwnerHandler> handler)
+	{
+		if(handler)
+			m_owner_handlers[owner] = handler;
+		else
+			m_owner_handlers.erase(owner);
+	}
+
+	RoutedWrite routed_set_voxel(const pv::Vector3DInt32 &p,
+			const VoxelInstance &v, const ss_ &by)
+	{
+		Owned owned;
+		if(get_owned(p, owned)){
+			auto it = m_owner_handlers.find(owned.owner);
+			if(it == m_owner_handlers.end())
+				return REFUSED;
+			// Held here: the handler may set its own handler anew
+			sp_<OwnerHandler> handler = it->second;
+			handler->on_write(this, p, v, owned, by);
+			return ROUTED;
+		}
+		set_voxel(p, v, false);
+		return WRITTEN;
 	}
 
 	void set_voxel_direct(const pv::Vector3DInt32 &p,
