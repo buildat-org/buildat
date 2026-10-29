@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: quick
-# cost: ~75 s (2026-10-26)
-# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua util/web_drive.js
+# cost: ~120 s (2026-10-29)
+# covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua util/web_drive.js apps/hearth/main/client_lua/init.lua
 # [TEXT_KEYS], the text field's keys and clicks, by the ui scan's text,
 # cursor and selection after each step:
 #   1. Single-line, launch_menu's "Join a Buildat server" Address: Ctrl+A
@@ -13,6 +13,9 @@
 #      text selected, nothing sent); a triple-click selects the line; Home and
 #      Alt+Backspace at a line's start join it to the one above, past its
 #      trailing spaces.
+#   [HEARTH_PAGE_KEYS]: in 2, 120 lines; Page Down twice, Page Up, Shift+
+#      Page Down move by the rows the page shows of the field less two,
+#      native and in Chrome.
 #   [TEXT_UNDO]: in 1, "alpha beta" typed over the selection and "beta"
 #      pasted over "alpha"; Ctrl+Z twice, Ctrl+Y, Ctrl+Shift+Z, the text,
 #      cursor and selection each time. In 2, Ctrl+Z undoes the join.
@@ -84,8 +87,10 @@ want $L u5 $A 'text "beta beta" cursor 4 text "beta beta"'
 echo "ok: undo: Ctrl+Z twice back over a paste and a typing, Ctrl+Y and Ctrl+Shift+Z forward"
 
 # 2. Multi-line, Hearth's reply field
+# The web client served too, for [HEARTH_PAGE_KEYS] in Chrome below
+web=(); [ -f "$here/web/buildat.js" ] && web=(-W "$here/web")
 start_server "$t/srv.log" "setup code" 120 auto \
-	bin/buildat_server -m ../apps/hearth -D "$t/srv" -l 3 ||
+	bin/buildat_server -m ../apps/hearth -D "$t/srv" "${web[@]}" -l 3 ||
 	fail "Hearth did not start"
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | cut -d' ' -f3)
@@ -107,6 +112,13 @@ m='wait_log 20000 accounts: ntfy asked\nwait_log_any 10000 hearth: page Keys\nde
 m+="$(ctrl A)event scan m2\nmouse_pos 290 201\ndelay 300\nmouse_click left\nmouse_click left\nmouse_click left\ndelay 200\nevent scan m3\n"
 m+='keypress Home\nkeydown alt\nkeypress Backspace\nkeyup alt\ndelay 200\nevent scan m4\n'
 m+="$(ctrl Z)event scan m5\n"
+# [HEARTH_PAGE_KEYS]: 120 lines "L001".."L120", five characters each
+# with the break, so line n starts at 5(n-1); Page Down and Up from the top
+p="$(ctrl A)"
+for i in $(seq -w 1 120); do p+="text L$i\n"; [ $i = 120 ] || p+='keypress Return\n'; done
+m+="${p}delay 300\n$(ctrl Home)event scan p1\nkeypress PageDown\ndelay 200\nevent scan p2\n"
+m+='keypress PageDown\ndelay 200\nevent scan p3\nkeypress PageUp\ndelay 200\nevent scan p4\n'
+m+='keydown shift\nkeypress PageDown\nkeyup shift\ndelay 200\nevent scan p5\n'
 m+="screenshot $t/multi.png\nquit\n"
 hearth "$t/multi.log" "" "$m" BUILDAT_HEARTH_OPEN=1
 grep -aq "Lua runtime error" "$t/multi.log" && fail "a Lua error in the multi-line drive"
@@ -120,6 +132,48 @@ wantm m4 'text "one twothree four" cursor 7 selection 0+0'
 wantm m5 'text "one two  |three four" cursor 10 selection 0+0'
 curl -s "http://127.0.0.1:$SERVER_PORT/t/1" | grep -q "three" && fail "Ctrl+A in the reply field sent it"
 echo "ok: multi-line: Ctrl+A the field's, the triple-click a line, Alt+Backspace at a line's start joins it, Ctrl+Z parts them"
+# [HEARTH_PAGE_KEYS]: the page shows 27 of the field's rows at 800x600
+# (multi.png), so a page is 25: line 26, 51, back to 26, and selected to 51
+# The scan's text is 120 lines: its cursor and selection are on the last
+wantp(){
+	local got
+	got=$(awk -v l="scan $1: focus" 'index($0, l) { on = 1 } on && /" cursor / { sub(/.*" cursor/, "cursor"); print; exit }' "$t/multi.log")
+	[ "$got" = "$2" ] || fail "$1: '$got', not '$2'"
+}
+wantp p1 'cursor 0 selection 0+0'
+wantp p2 'cursor 125 selection 0+0'
+wantp p3 'cursor 250 selection 0+0'
+wantp p4 'cursor 125 selection 0+0'
+wantp p5 'cursor 250 selection 125+125'
+echo "ok: multi-line: Page Down and Up by the rows the page shows less two, Shift+Page Down selects"
+# And in Chrome at 800x600, its larger text 15 rows shown: a page is 13.
+# The stand-in's selection is the field's, synced each frame
+if [ ${#web[@]} -gt 0 ] && command -v google-chrome > /dev/null; then
+	ev(){ echo "[\"wait\", 300], [\"eval\", \"'$1 ' + document.getElementById('text').selectionStart + ' ' + document.getElementById('text').selectionEnd\"],"; }
+	{
+		echo '[["viewport", 800, 600], ["nav", "${URL}app#open=/t/1"],'
+		echo '["waitlog", "accounts: the login page shown", 120], ["wait", 500],'
+		echo '["type", "admin"], ["key", "Tab"], ["type", "checkpass12"], ["key", "Enter"],'
+		echo '["waitlog", "accounts: ntfy asked", 30], ["waitlog", "hearth: page Keys", 30],'
+		echo '["wait", 500], ["key", "Escape"], ["wait", 500], ["click", 490, 360], ["wait", 300], ["selall"],'
+		for i in $(seq -w 1 120); do echo "[\"type\", \"L$i\"],"; [ $i = 120 ] || echo '["key", "Enter"],'; done
+		echo '["wait", 500], ["chord", "Ctrl+Home"],'; ev p1
+		echo '["key", "PageDown"],'; ev p2
+		echo '["key", "PageDown"],'; ev p3
+		echo '["key", "PageUp"],'; ev p4
+		echo '["chord", "Shift+PageDown"],'; ev p5
+		echo '["shot", "${OUT}/pages.png"]]'
+	} > "$t/pages.json"
+	WEB_DRIVE_URL=http://127.0.0.1:$SERVER_PORT/ "$here/util/web_drive.sh" chrome hearth \
+		"$t/pages.json" "$t/web_pages" > "$t/web_pages.out" 2>&1 ||
+		fail "the Chrome page keys drive: $(tail -3 "$t/web_pages.out")"
+	got=$(grep -a "^eval: " "$t/web_pages.out" | tr '\n' '|')
+	[ "$got" = 'eval: "p1 0 0"|eval: "p2 65 65"|eval: "p3 130 130"|eval: "p4 65 65"|eval: "p5 65 130"|' ] ||
+		fail "Page Up and Down in Chrome: $got"
+	echo "ok: the web client in Chrome: Page Down and Up by the rows shown less two, Shift+Page Down selects"
+else
+	echo "skip: no web/ or no google-chrome for the page keys"
+fi
 
 # 3. The web page's word rule, its own function run by node
 if command -v node > /dev/null; then
@@ -153,4 +207,4 @@ for br in firefox google-chrome; do
 		echo "skip: no web/ or no $br for the web field"
 	fi
 done
-echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; the web client's Alt+Backspace and undo (see $t/*.png)"
+echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; Page Up and Down; the web client's Alt+Backspace and undo (see $t/*.png)"

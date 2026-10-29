@@ -18,7 +18,8 @@
 //                           (default 60); fails the run if none does
 //   ["type", text]          as typed, character by character
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
-//                           Up, Down, Left, Right, or one character
+//                           Up, Down, Left, Right, PageUp, PageDown, Home,
+//                           End, or one character
 //   ["holdkey", name, ms]   a key held down for ms: a car driven
 //   ["selall"]              Ctrl+A
 //   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
@@ -119,6 +120,8 @@ const KEYS = {
 	Backspace: ["", "Backspace", 8], Up: ["", "ArrowUp", 38],
 	Down: ["", "ArrowDown", 40], Left: ["", "ArrowLeft", 37],
 	Right: ["", "ArrowRight", 39],
+	PageUp: ["\uE00E", "PageUp", 33], PageDown: ["\uE00F", "PageDown", 34],
+	Home: ["\uE011", "Home", 36], End: ["\uE010", "End", 35],
 };
 // An unshifted punctuation mark's code and virtual key, a US keyboard's
 const PUNCT = {".": ["Period", 190], ",": ["Comma", 188], "-": ["Minus", 189],

@@ -410,6 +410,30 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             target = at.y_ < row ? 0 : GetCharIndexOnRow(IntVector2(at.x_, at.y_ - row));
         else if (key == KEY_DOWN)
             target = GetCharIndexOnRow(IntVector2(at.x_, at.y_ + row));
+        // buildat [HEARTH_PAGE_KEYS]: Page Up and Down move by the rows
+        // shown less two (one in a field of four or fewer), so that pressing
+        // again misses no line as the view follows the cursor. Shown is
+        // what its clipping parents and the screen leave of the field: one
+        // that grows with its text scrolls in its page (Hearth's)
+        else if (key == KEY_PAGEUP || key == KEY_PAGEDOWN)
+        {
+            int top = GetScreenPosition().y_ + clipBorder_.top_;
+            int bottom = GetScreenPosition().y_ + GetHeight() - clipBorder_.bottom_;
+            for (UIElement* p = GetParent(); p; p = p->GetParent())
+            {
+                if (!p->GetClipChildren() && p->GetParent())
+                    continue;
+                int y = p->GetScreenPosition().y_;
+                top = Max(top, y + p->GetClipBorder().top_);
+                bottom = Min(bottom, y + p->GetHeight() - p->GetClipBorder().bottom_);
+            }
+            int shown = (bottom - top) / Max(row, 1);
+            int page = Max(shown - (shown > 4 ? 2 : 1), 1) * row;
+            if (key == KEY_PAGEUP)
+                target = at.y_ < row ? 0 : GetCharIndexOnRow(IntVector2(at.x_, Max(at.y_ - page, 0)));
+            else
+                target = GetCharIndexOnRow(IntVector2(at.x_, at.y_ + page));
+        }
         else if (key == KEY_HOME && !(qualifiers & QUAL_CTRL))
             target = GetCharIndexOnRow(IntVector2(0, at.y_));
         else if (key == KEY_END && !(qualifiers & QUAL_CTRL))
