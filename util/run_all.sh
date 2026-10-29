@@ -43,6 +43,10 @@
 # paths a runner also proves -- the client's own sources, mostly -- and
 # only the runners that prove something outside their own tree carry one. A
 # central table of paths to runners would be a second place to forget.
+# **What a runner read is measured too** ([RUN_ALL_PICK] 2): a pass
+# records the tree's files its buildat processes opened in
+# local/run_all/touched/, and a file no runner says it covers goes to the
+# cheapest runner that read it.
 # **What a runner costs** is measured: every run appends its seconds to
 # local/run_all/costs, and a "# cost:" line seeds one that has never
 # run here. An unknown runner is assumed to cost a minute.
@@ -124,6 +128,16 @@ for f in $(tiered); do
 	runners="$runners $name"
 done
 costs="$out/costs"
+# **What a runner read, measured** ([RUN_ALL_PICK] 2): every source file
+# a buildat or buildat_server opened during the runner's last pass here,
+# one a line from the root, in touched/<its log's name> -- the client's
+# Lua and data, the modules' C++, headers and client_lua the server
+# compiles and sends. util/run_all_touched.c, preloaded into what the
+# runner starts, writes it. --changed takes a runner whose record has a
+# file as covering it, beside its covers: lines and where it lives: those
+# stay, since a browser's page, a compiler, node or the drive's own
+# files are not seen, and src/'s C++ is in the binaries.
+touched="$out/touched"
 # What a runner covers: where it lives, plus whatever its own header
 # adds. "**" is written for readability and is a plain glob here --
 # a shell case pattern's * crosses directories already.
@@ -165,8 +179,9 @@ if [ -n "$changed" ]; then
 	set -f
 	# Each runner's patterns ("**" as "*") and cost once, not per file
 	# ([REWORK_1019_PERF] build 9: 7.8 s for 27 files when per file)
-	declare -A pats cost web
+	declare -A pats cost web rec
 	for name in $runners; do
+		rec[$name]=$(echo "${name%.sh}" | tr / _)
 		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
 		pats[$name]=$(covers_of "$path" "$name" | sed 's/\*\*/*/g')
 		cost[$name]=$(cost_of "$path" "$name")
@@ -195,34 +210,52 @@ $name"
 		doc/*|*.md|LICENSE*|MIT.txt|CONTRIBUTING*) continue;;
 		esac
 		[ -n "${self[$f]:-}" ] && continue
-		# The cheapest native runner and the cheapest web one
-		bn=""; bn_cost=999999; bw=""; bw_cost=999999
-		for name in $runners; do
-			[ -n "${self[$name]:-}" ] && continue
-			for pat in ${pats[$name]}; do
-				# shellcheck disable=SC2254
-				case "$f" in
-				$pat)
-					c=${cost[$name]}
-					if [ -n "${web[$name]}" ]; then
-						[ "$c" -lt "$bw_cost" ] && { bw=$name; bw_cost=$c; }
-					else
-						[ "$c" -lt "$bn_cost" ] && { bn=$name; bn_cost=$c; }
-					fi
-					break;;
-				esac
-			done
-		done
+		# The runners whose last pass here read the file (their records'
+		# names, a space either side)
+		read_by=" $(grep -rlxF --exclude='*.new' -- "$f" "$touched" 2>/dev/null |
+			sed 's|.*/||' | tr '\n' ' ')"
 		# **A file both clients run gets both** ([RUN_ALL_PICK]): the
 		# [LIVELY_MENU] merge's client Lua got a native check and broke
 		# the web play. What the page's bundle packs (CMakeLists.txt's
 		# WEB_PRELOAD), the client's C++, what the server sends a client,
 		# and the network module that serves the page. Anything else, the
 		# cheaper of the two
+		both=""
 		case "$f" in
-		client/*|extensions/*|src/client/*|src/lua_bindings/*|*/client_lua/*|*/client_data/*|builtin/network/*|src/server/web/*) ;;
-		*) if [ "$bw_cost" -lt "$bn_cost" ]; then bn=""; else bw=""; fi;;
+		client/*|extensions/*|src/client/*|src/lua_bindings/*|*/client_lua/*|*/client_data/*|builtin/network/*|src/server/web/*) both=1;;
 		esac
+		# The cheapest native runner and the cheapest web one. **What a
+		# runner says it covers comes first**, what it only read second: a
+		# launcher check of seconds reads every client file and proves
+		# few, and would otherwise be every client file's pick; a record
+		# answers for a kind nothing says it covers
+		bn=""; bn_cost=999999; bw=""; bw_cost=999999
+		for by in said read; do
+			said_n=$bn said_w=$bw
+			for name in $runners; do
+				[ -n "${self[$name]:-}" ] && continue
+				m=""
+				if [ $by = read ]; then
+					case "$read_by" in *" ${rec[$name]} "*) m=1;; esac
+				else
+					for pat in ${pats[$name]}; do
+						# shellcheck disable=SC2254
+						case "$f" in $pat) m=1; break;; esac
+					done
+				fi
+				[ -n "$m" ] || continue
+				c=${cost[$name]}
+				if [ -n "${web[$name]}" ]; then
+					[ -z "$said_w" ] && [ "$c" -lt "$bw_cost" ] && { bw=$name; bw_cost=$c; }
+				else
+					[ -z "$said_n" ] && [ "$c" -lt "$bn_cost" ] && { bn=$name; bn_cost=$c; }
+				fi
+			done
+			[ -n "$bn$bw" ] && [ -z "$both" ] && break
+		done
+		if [ -z "$both" ]; then
+			if [ "$bw_cost" -lt "$bn_cost" ]; then bn=""; else bw=""; fi
+		fi
 		if [ -n "$bn$bw" ]; then
 			picked="$picked
 $bn
@@ -281,6 +314,26 @@ if [ -d "$check_dir" ]; then
 	echo "local/check: $before, $(du -sh "$check_dir" 2>/dev/null | cut -f1) after" \
 		"pruning what is over ${PRUNE_DAYS:-7} days old"
 fi
+# The preload, built when its source is newer; without a compiler,
+# nothing is recorded
+mkdir -p "$touched"
+touched_so="$out/touched.so"
+{ [ "$touched_so" -nt "$root/util/run_all_touched.c" ] ||
+	cc -shared -fPIC -O2 -o "$touched_so" "$root/util/run_all_touched.c" -ldl; } ||
+	touched_so=""
+# The paths opened, as files in the tree from its root; what the build,
+# the checks' user and cache and the web bundle hold is not source
+touched_norm() {   # $1 the paths written
+	local r p
+	r=$(realpath "$root")
+	sort -u "$1" | tr '\n' '\0' | xargs -0 -r realpath -m -- | sort -u |
+	while IFS= read -r p; do
+		case "$p" in
+		"$r"/Build*|"$r"/local/*|"$r"/user/*|"$r"/cache/*|"$r"/web/*|"$r"/.git/*) ;;
+		"$r"/*) [ -f "$p" ] && echo "${p#"$r"/}" ;;
+		esac
+	done
+}
 pass=0; fail=0; skip=0; flaky=0
 failed_names=""
 started=$(date +%s)
@@ -289,8 +342,15 @@ for name in $runners; do
 	log="$out/$(echo "${name%.sh}" | tr / _).log"
 	path="$luanti_test/$name"
 	[ -f "$path" ] || path="$root/$name"
+	tf="$touched/$(echo "${name%.sh}" | tr / _)"
+	rm -f "$tf.new"
 	t0=$(date +%s)
-	"$path" > "$log" 2>&1
+	if [ -n "$touched_so" ]; then
+		BUILDAT_TOUCHED="$tf.new" LD_PRELOAD="$touched_so${LD_PRELOAD:+:$LD_PRELOAD}" \
+			"$path" > "$log" 2>&1
+	else
+		"$path" > "$log" 2>&1
+	fi
 	rc=$?
 	t1=$(date +%s)
 	# **A runner's leavings are not the next runner's condition.** Every
@@ -333,6 +393,9 @@ for name in $runners; do
 	printf '%-6s %4ss  %s\n' "$state" "$((t1 - t0))" "${verdict:-(no verdict line)}"
 	# What it cost here, for the next --changed pick
 	echo "$name $((t1 - t0))" >> "$costs"
+	# And what it read, when it passed; a failed run may have stopped short
+	[ "$state" = pass ] && [ -f "$tf.new" ] && touched_norm "$tf.new" > "$tf"
+	rm -f "$tf.new"
 done
 echo "---"
 echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(date +%s) - started ))s"

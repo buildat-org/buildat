@@ -174,7 +174,10 @@ is the regular check: from every tier up to TIER (full by default; quick <
 full < long), a changed runner itself, and for a file the web client runs
 too (client/, extensions/, src/client/, client_lua/, client_data/, the
 network module) the cheapest native runner and the cheapest web one -- a
-runner that uses util/web_drive. util/check_contract.sh reads every runner for the
+runner that uses util/web_drive. A runner's pass under run_all records the
+tree's files its buildat processes opened (local/run_all/touched/, by
+util/run_all_touched.c preloaded); a file no covers: line or location
+claims goes to the cheapest runner that read it. util/check_contract.sh reads every runner for the
 contract and names the ones whose exit status cannot say FAIL.
 A runner is never retried: a check run three times and taken at its best is
 how a real fault becomes a known flake.
