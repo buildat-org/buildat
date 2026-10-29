@@ -8,6 +8,20 @@ local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
 log:info("demo_board_game/init.lua loaded")
 
+-- [APP_REMIX] Its settings (meta.json), each its default or a remix's value
+local settings = buildat.app_settings()
+log:info("settings: " .. dump(settings))
+local size = settings.board_size or 10
+local board_texture = settings.board_texture or "main/green_texture.png"
+local function color_of(hex)
+	local r, g, b = tostring(hex):match("^#(%x%x)(%x%x)(%x%x)$")
+	if not r then
+		return magic.Color(1, 1, 1)
+	end
+	return magic.Color(tonumber(r, 16) / 255, tonumber(g, 16) / 255,
+			tonumber(b, 16) / 255)
+end
+
 -- 3D things
 
 -- NOTE: Create global variable so that it doesn't get automatically deleted
@@ -16,18 +30,18 @@ scene:CreateComponent("Octree")
 
 -- Note that naming the scene nodes is optional
 local plane_node = scene:CreateChild("Plane")
-plane_node.scale = magic.Vector3(10.0, 1.0, 10.0)
+plane_node.scale = magic.Vector3(size, 1.0, size)
 local plane_object = plane_node:CreateComponent("StaticModel")
 plane_object.model = magic.cache:GetResource("Model", "Models/Plane.mdl")
 plane_object.material = magic.cache:GetResource("Material", "Materials/Stone.xml")
 plane_object.material:SetTexture(magic.TU_DIFFUSE,
-		magic.cache:GetResource("Texture2D", "main/green_texture.png"))
+		magic.cache:GetResource("Texture2D", board_texture))
 
 local light_node = scene:CreateChild("DirectionalLight")
 light_node.direction = magic.Vector3(-0.6, -1.0, 0.8) -- The direction vector does not need to be normalized
 local light = light_node:CreateComponent("Light")
 light.lightType = magic.LIGHT_DIRECTIONAL
-light.castShadows = true
+light.castShadows = settings.shadows ~= false
 light.shadowBias = magic.BiasParameters(0.00025, 0.5)
 light.shadowCascade = magic.CascadeParameters(10.0, 50.0, 200.0, 0.0, 0.8)
 light.brightness = 0.8
@@ -41,7 +55,11 @@ light.brightness = 0.2
 -- Add a camera so we can look at the scene
 local camera_node = scene:CreateChild("Camera")
 camera_node:CreateComponent("Camera")
-camera_node.position = magic.Vector3(7.0, 7.0, 7.0)
+if settings.camera == "above" then
+	camera_node.position = magic.Vector3(0, 1.2 * size, -0.25 * size)
+else
+	camera_node.position = magic.Vector3(0.7 * size, 0.7 * size, 0.7 * size)
+end
 --camera_node.rotation = Quaternion(0, 0, 0.0)
 camera_node:LookAt(magic.Vector3(0, 1, 0))
 -- And this thing so the camera is shown on the screen
@@ -50,7 +68,7 @@ magic.set_preferred_viewports({viewport})
 
 -- Add some text
 local title_text = magic.ui.root:CreateChild("Text")
-title_text:SetText("demo_board_game/init.lua")
+title_text:SetText(settings.title or "demo_board_game")
 title_text:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
 title_text.horizontalAlignment = magic.HA_CENTER
 title_text.verticalAlignment = magic.VA_CENTER
@@ -98,6 +116,7 @@ buildat.sub_packet("demo_board_game:update", function(data)
 	--log:info("values="..dump(values))
 
 	field = values.playfield
+	log:info("drawing a board of " .. field.w .. "x" .. field.h)
 
 	for y=1,field.h do
 		for x=1,field.w do
@@ -118,12 +137,13 @@ buildat.sub_packet("demo_board_game:update", function(data)
 					magic.cache:GetResource("Technique", "Techniques/Diff.xml"))
 
 					object.material:SetTexture(magic.TU_DIFFUSE,
-					magic.cache:GetResource("Texture2D", "main/green_texture.png"))
+					magic.cache:GetResource("Texture2D", board_texture))
 					object.castShadows = true
 
 					field_boxes[pos] = box
 				end
-				field_boxes[pos].position = magic.Vector3(x-6, v*0.25, y-6)
+				field_boxes[pos].position = magic.Vector3(x-1-field.w/2,
+						v*0.25, y-1-field.h/2)
 				field_boxes[pos].scale    = magic.Vector3(1.0, v*0.5, 1.0)
 			else
 				-- if v is 0, we have to remove the field box
@@ -173,6 +193,8 @@ buildat.sub_packet("demo_board_game:update", function(data)
 			-- And load the texture from a file:
 			object.material:SetTexture(magic.TU_DIFFUSE,
 			magic.cache:GetResource("Texture2D", "main/pink_texture.png"))
+			object.material:SetShaderParameter("MatDiffColor",
+					color_of(settings.player_color))
 			object.castShadows = true
 
 			player_boxes[player.peer] = box
@@ -183,7 +205,7 @@ buildat.sub_packet("demo_board_game:update", function(data)
 			v = field.tiles[(player.y)*field.w + (player.x) + 1]
 		end
 		player_boxes[player.peer].position = 
-			magic.Vector3(player.x-5, 0.45+v*0.5, player.y-5) or nil
+			magic.Vector3(player.x-field.w/2, 0.45+v*0.5, player.y-field.h/2) or nil
 	end
 	for _, old_player in ipairs(old_players) do
 		local was_removed = true

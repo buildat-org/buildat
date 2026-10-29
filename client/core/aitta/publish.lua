@@ -65,7 +65,14 @@ end
 -- this client's only where it says none
 local function write_meta(name, m)
 	m.engine_api = m.engine_api or __buildat_aitta_dev("engine_api")
+	-- [APP_REMIX] An empty table is written as [], and setting_values is
+	-- an object: none is left out
+	local values = m.setting_values
+	if type(values) == "table" and next(values) == nil then
+		m.setting_values = nil
+	end
 	local text = assert(network.write_json(m, true))
+	m.setting_values = values
 	local ok, err = buildat.write_file_atomic(USER .. "/dev_apps/" .. name ..
 			"/meta.json", text .. "\n")
 	if not ok then
@@ -121,7 +128,7 @@ local function refresh_menu()
 	end
 end
 
-local page_package, page_publish, page_page
+local page_package, page_publish, page_page, page_remix
 
 -- "New app..." and "New extension...": the name, then the folder
 local function ask_new(kind, back)
@@ -182,7 +189,8 @@ page_package = function(message)
 	local names = {}
 	for _, e in ipairs(entries) do
 		names[#names + 1] = {e.name .. (e.kind == "extension" and
-				" (ext.)" or e.kind == "world" and " (world)" or ""), e.name}
+				" (ext.)" or e.kind == "world" and " (world)" or
+				e.kind == "remix" and " (my version)" or ""), e.name}
 	end
 	if #names > 0 then
 		add_dropdown(pr, names, st.selected, function(name)
@@ -219,6 +227,16 @@ page_package = function(message)
 		return
 	end
 	local m = read_meta(entry.name)
+	-- [APP_REMIX] A remix says what it is made on, its settings a page back
+	if entry.kind == "remix" then
+		add_text(w, "My own version of " .. tostring(m.base) .. ": its " ..
+				"settings and files over " .. tostring(m.base) .. "'s, which " ..
+				"runs it.", DIM)
+		add_button(add_row(w), "Settings and files...", function()
+			uistack.main:pop(root)
+			page_remix()
+		end)
+	end
 	-- [WORLD_PACKAGES] A world says what it is a save of
 	if entry.kind == "world" then
 		add_text(w, "A world for " .. tostring(m.app) .. (m.app_version and
@@ -601,6 +619,112 @@ page_page = function(message)
 	end, nil, true)
 	log:info("aitta publish: the page of " .. pkg ..
 			(message and ", " .. message or ""))
+end
+
+-- **A remix's page** ([APP_REMIX]): its base's settings as a form over its
+-- values (ui_utils' settings_form), and its base's files it may replace,
+-- those it has marked. Save writes setting_values and says what an
+-- install would refuse; the Dev tile plays it as saved.
+page_remix = function(message)
+	local name = st.selected
+	local text, err = __buildat_aitta_dev("remix_read", name)
+	local r = text and network.parse_json(text)
+	local root, w = open_window("aitta remix", 780)
+	add_text(w, "My own version: " .. tostring(name))
+	if message then
+		add_text(w, message, OK)
+	end
+	if type(r) ~= "table" then
+		add_text(w, "It cannot be read: " .. tostring(err), WARN)
+		log:info("aitta remix: " .. tostring(name) .. ": " .. tostring(err))
+		return
+	end
+	local base = tostring(r.base)
+	add_text(w, "Its settings and files over " .. base .. "'s; " .. base ..
+			"'s code runs it. It is on the grid as a Dev tile, to play as " ..
+			"it is saved.", DIM)
+	local m = read_meta(name)
+	if type(m.setting_values) ~= "table" then
+		m.setting_values = {}
+	end
+	local files = {texture = {}, model = {}, world = {}}
+	local type_of = {png = "texture", jpg = "texture", jpeg = "texture",
+		mdl = "model", json = "world"}
+	local mine = {}
+	for _, f in ipairs(type(r.files) == "table" and r.files or {}) do
+		local t = type_of[(tostring(f.name):match("%.(%w+)$") or ""):lower()]
+		if t then
+			table.insert(files[t], f.name)
+		end
+		if f.mine then
+			mine[#mine + 1] = f.name
+		end
+	end
+	local widgets = {row = add_row, label = add_label, text = add_text,
+		warn = WARN, dropdown = add_dropdown,
+		edit = function(parent, value, on_text)
+			local e = add_edit(parent, value)
+			magic.SubscribeToEvent(e, "TextChanged", function()
+				on_text(e:GetText())
+			end)
+			return e
+		end}
+	require("buildat/extension/ui_utils").safe.settings_form(w, r.schema,
+			r.values or {}, function(k, v)
+		m.setting_values[k] = v
+		log:info("aitta remix: " .. k .. " = " .. tostring(v))
+	end, widgets, files)
+	add_text(w, "Files of your own: a file in " .. USER .. "/dev_apps/" ..
+			name .. "/<module>/client_data/ is used in place of " .. base ..
+			"'s of the same name (" .. #(r.files or {}) .. " it has: " ..
+			"textures, models, sounds and worlds). " .. (#mine > 0 and
+			"Yours: " .. table.concat(mine, ", ") or "None of yours yet."),
+			DIM)
+	local result = add_text(w, r.why ~= "" and "Not yet: " ..
+			tostring(r.why) or "", WARN)
+	local br = add_row(w)
+	local function save()
+		local ok, werr = write_meta(name, m)
+		local again = ok and network.parse_json(__buildat_aitta_dev(
+				"remix_read", name) or "")
+		local why = not ok and tostring(werr) or type(again) ~= "table" and
+				"it cannot be read" or tostring(again.why)
+		result.text = why == "" and "Saved" or "Not yet: " .. why
+		result.color = why == "" and OK or WARN
+		log:info("aitta remix: saved " .. name .. ": " .. (why == "" and
+				"ok" or why))
+		return why == ""
+	end
+	add_button(br, "Save", save)
+	add_button(br, "Open folder", function()
+		__buildat_aitta_dev("open", USER .. "/dev_apps/" .. name)
+	end)
+	add_button(br, "Next: the package", function()
+		if save() then
+			uistack.main:pop(root)
+			page_package()
+		end
+	end, nil, true)
+	log:info("aitta remix: the page of " .. name .. " (" .. base .. "), " ..
+			#mine .. " files of its own")
+end
+
+-- [APP_REMIX] "Make my own version" of an app that declares settings
+-- (client/launch_grid.lua), id its tree name or installed
+-- <author>.<name>@<version>: a remix made in dev_apps and its page
+-- opened. Trusted only.
+function M.make_remix(id)
+	local name, err = __buildat_aitta_dev("remix_new", id)
+	log:info("aitta remix: of " .. tostring(id) .. ": " ..
+			tostring(name or err))
+	if not name then
+		return require("buildat/extension/ui_utils").safe.show_message_dialog(
+				"Could not make a version of " .. tostring(id) .. ": " ..
+				tostring(err))
+	end
+	st.selected, st.result = name, nil
+	refresh_menu()
+	page_remix("Made " .. USER .. "/dev_apps/" .. name)
 end
 
 function M.safe.open_publish()

@@ -323,7 +323,16 @@ P-256 through Mbed TLS, deterministic), check_manifest, pack(app_dir,
 key_path, out_dir) -> the release .zip beside its .sig, install(zip, sig,
 user_path) -> <user>/installed/<author>/<name>/<version>/ after the hash,
 signature, manifest and ENGINE_API are checked; a later version under
-another key than the first install's is refused.
+another key than the first install's is refused. **An app's settings**
+([APP_REMIX], doc/aitta.txt's "Settings and remixes"):
+app_settings(m_server) -> a json::Value object, name -> value, each field
+the app's meta.json "settings" declares at its default or a remix's value
+over it -- the one call a module reads them by, as
+json::jint(interface::aitta::app_settings(m_server), "board_size", 10)
+(apps/demo_board_game); app_settings(app_dir, share_path, user_path) the
+same for a directory. check_settings_schema, check_setting_value,
+app_client_files, remix_refusal and remix_replaceable are what pack, an
+install and an Aitta check a remix with.
 interface/markup.h -- markup::to_html(md): what a user wrote, as HTML for
 a page ([HEARTH_MVP]), through the bundled md4c (3rdparty/md4c): CommonMark
 with GitHub's tables, strikethrough, task lists and autolinks, and
@@ -892,7 +901,7 @@ builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, Sect
 builtin/world_menu/api.h: PeerId, Field, Config, Preset, Play, Close, Interface, configure, show, set_running, progress, set_presets, show_running, is_picker, select, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
 interface/address.h: split_host_port, join_host_port, Url, parse_url
-interface/aitta.h: engine_api_refusal, keygen, public_of, sign, verify, verify_hash, module_meta_refusal, check_manifest, media_check, check_media, check_page, pack_page, kind_of, semver_ok, find_base, package_files, pack, install
+interface/aitta.h: engine_api_refusal, keygen, public_of, sign, verify, verify_hash, module_meta_refusal, check_manifest, media_check, check_media, check_page, pack_page, kind_of, semver_ok, find_base, package_files, pack, install, check_settings_schema, check_setting_value, app_client_files, remix_refusal, remix_replaceable, app_settings, install_world
 interface/atlas.h: AtlasSegmentReference, AtlasSegmentDefinition, AtlasSegmentCache, AtlasDefinition, AtlasCache, AtlasRegistry, ~AtlasRegistry, add_segment, find_or_add_segment, get_atlas_cache, get_texture, set_surface_maps, describe_segments, update, createAtlasRegistry
 interface/atlas_cereal.h: serialize, r
 interface/bignum.h: add, mul, mod, sub_mod, mul_mod, mod_exp, random_bytes

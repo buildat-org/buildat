@@ -299,6 +299,10 @@ player, which a published world leaves out. Each
 of its saves then has "Publish this world", and Apps from Aitta installs
 a world of it as a new save.
 
+An app whose meta.json declares settings ([APP_REMIX], doc/aitta.txt's
+"Settings and remixes") has a tile "<label>: make my own version" beside
+its own, and a remix, which carries no launcher, a tile of its name.
+
 `buildat -a kind/name/id` runs one action on boot, with the grid
 underneath it: app/<name>/<id> (game/ is read as app/), builtin/...,
 extension/..., dev/<name>/<id> for an app in <user>/dev_apps,

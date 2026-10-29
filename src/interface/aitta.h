@@ -6,6 +6,7 @@
 
 namespace interface
 {
+	struct Server;
 	// [AITTA_MVP]: an app as a signed package. A release is two files:
 	// <author>-<name>-<version>.zip, the app's directory with its manifest
 	// (meta.json at its root), and the same name with .sig, which carries
@@ -144,6 +145,46 @@ namespace interface
 		// app that takes worlds (its launcher's ctx.world_packages), which
 		// the manifest's must be; code: the paths in a save the app runs
 		// as code, refused. The save's name; throws why not.
+		// **An app's settings** ([APP_REMIX], doc/aitta.txt's "Settings
+		// and remixes"): its manifest's "settings", a list of typed fields
+		// {name, type, default, label, description, and the type's own:
+		// number min, max, integer; text max_length; choice choices}, the
+		// types number, bool, choice, color ("#rrggbb"), text, texture,
+		// model and world (a file of the app by the name its client
+		// reads it by, "<module>/<path under client_data>": .png .jpg
+		// .jpeg, .mdl, .json). "" or why not.
+		static const unsigned SETTINGS_MAX = 64;
+		ss_ check_settings_schema(const json::Value &settings);
+		// A value for a field of such a list: "" or why not. files: the
+		// app's file names (app_client_files()) that a file type's value
+		// must be one of; null takes any of the type's shape
+		ss_ check_setting_value(const json::Value &field, const json::Value &v,
+				const set_<ss_> *files);
+		// What an app's modules serve from their client_data:
+		// "<module>/<path>" -> the file
+		sm_<ss_, ss_> app_client_files(const ss_ &app_dir);
+		// A remix ("kind": "remix"): a package on a base app, its
+		// "setting_values" and files of its own in place of the base's of
+		// the same name (<module>/client_data/<path>: textures, models,
+		// sounds, worlds) -- data, never code. dir checked: "" or why not.
+		// base_dir "" checks what needs no base (an Aitta's publish);
+		// given, each file replaces one of the base's and each value is
+		// one of the base's settings and right for it.
+		ss_ remix_refusal(const ss_ &dir, const json::Value &m,
+				const ss_ &base_dir);
+		// Whether a remix may carry a file of this name (by its extension)
+		bool remix_replaceable(const ss_ &path);
+		// **The one call an app's code reads its settings by**: name ->
+		// value, each field's default with a remix's value over it. The
+		// fields are the app's own "settings", or its base's for a remix
+		// or a variant that declares none. A value that is not right for
+		// its field is left at the default.
+		json::Value app_settings(const ss_ &app_dir, const ss_ &share_path,
+				const ss_ &user_path);
+		// The same for the app a server runs: interface::aitta::
+		// app_settings(m_server).get("board_size")
+		json::Value app_settings(interface::Server *server);
+
 		static const size_t WORLD_FILES_MAX = 20000;
 		static const uint64_t WORLD_UNPACKED_MAX =
 				(uint64_t)1024 * 1024 * 1024;
