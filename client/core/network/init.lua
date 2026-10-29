@@ -304,7 +304,19 @@ end
 -- what the caller is asking for is what the caller knows -- editable,
 -- and the accept or the decline is still the user's. An entry's own
 -- description wins: that is what the user left there.
+-- One dialog a server and address: a second asker while it is up waits
+-- for the same answer. Two of them, the lower one answered took the one
+-- over it down with it (close_dialog), which its guard read as a change
+-- and declined -- stored -- or, gone, failed on its field (play.buildat.org,
+-- 2026-10-29).
+local asking = {}
 local function ask_user(server, uri, entry, on_answer, suggested)
+	local k = key(server, uri)
+	if asking[k] then
+		table.insert(asking[k], on_answer)
+		return
+	end
+	asking[k] = {on_answer}
 	local answer
 	-- [AITTA_NET_DESC] So that the next caller without one is found
 	if (suggested or "") == "" then
@@ -360,13 +372,32 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 	edit:SetText((entry and entry.description ~= "" and entry.description) or
 			suggested or "")
 
+	local answered = false
 	local guard = guard_dialog(root, function()
+		-- Taken off the screen by something else (a screen drawn again
+		-- under it): the question is still the user's, so it is asked
+		-- again, not answered for them
+		local m, up = getmetatable(root), false
+		for _, e in ipairs(uistack.main.stack) do
+			up = up or e == root
+		end
+		if not up or not m or m.dead then
+			log:warning("The permission dialog for "..uri.." was taken "..
+					"down while it was up; asked again")
+			answered = true
+			dialogs_up = dialogs_up - 1
+			local waiting = asking[k]
+			asking[k] = nil
+			for _, f in ipairs(waiting) do
+				ask_user(server, uri, entry, f, suggested)
+			end
+			return
+		end
 		log:warning("The permission dialog for "..uri.." was changed "..
 				"while it was up; declined")
 		answer(false)
 	end)
 
-	local answered = false
 	function answer(accepted)
 		if answered then
 			return
@@ -381,7 +412,11 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		guard.stop()
 		local description = edit:GetText()
 		close_dialog(root)
-		on_answer(accepted, description)
+		local waiting = asking[k]
+		asking[k] = nil
+		for _, f in ipairs(waiting) do
+			f(accepted, description)
+		end
 		-- What a check waits for
 		log:info("The user " .. (accepted and "accepted " or "declined ") .. uri)
 	end

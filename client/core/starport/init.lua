@@ -579,8 +579,9 @@ end
 -- fetch(cb[, ask]): cb(rows, info) once every Starport has answered or
 -- failed; rows the merged list the filters let through, info {hidden = n,
 -- unasked = n, errors = {"url: why", ...}}. Without `ask`, a Starport
--- whose host the user has not accepted yet is left out rather than put
--- in front of them as a permission dialog (as extensions/serverlist does)
+-- whose host the user has not accepted in the last week (else the request
+-- would ask again) is left out rather than put in front of them as a
+-- permission dialog (as extensions/serverlist does)
 function M.safe.fetch(cb, ask, extra)
 	local e = effective()
 	-- The settings' Starports, and any the caller adds (a report asks the
@@ -598,7 +599,7 @@ function M.safe.fetch(cb, ask, extra)
 	end
 	local urls, unasked = {}, 0
 	for _, url in ipairs(starports) do
-		if ask or accepted(url) then
+		if ask or accepted(url, true) then
 			urls[#urls + 1] = url
 		else
 			unasked = unasked + 1
@@ -617,7 +618,7 @@ function M.safe.fetch(cb, ask, extra)
 	end
 	-- One not asked yet shows what it said last time
 	for _, url in ipairs(starports) do
-		if not (ask or accepted(url)) then
+		if not (ask or accepted(url, true)) then
 			use_kept(url)
 		end
 	end
@@ -1368,7 +1369,7 @@ function M.safe.hearth_feed(cb, ask)
 		error("hearth_feed(cb: function[, ask])")
 	end
 	local url = effective().hearth
-	if not url or not (ask or accepted(url)) then
+	if not url or not (ask or accepted(url, true)) then
 		return cb(nil)
 	end
 	if feed and feed.url == url then

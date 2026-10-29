@@ -1055,7 +1055,7 @@ function M.safe.recent_releases(cb)
 		end
 	end
 	for _, a in ipairs(e.aittas) do
-		if starport.accepted(a) then
+		if starport.accepted(a, true) then
 			waiting = waiting + 1
 			network.http_get(a .. "/api/v1/aitta/list", function(body)
 				local v = body and network.parse_json(body)
