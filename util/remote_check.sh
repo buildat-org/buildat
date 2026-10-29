@@ -28,7 +28,9 @@
 #   3.x (CMake 4 refuses cmake_minimum_required(VERSION 3.2.3) unless
 #   CMAKE_POLICY_VERSION_MINIMUM=3.5 is set); python3
 #   with PIL, numpy, websockets and cryptography; zip, unzip, ImageMagick;
-#   zstd; ~/emsdk at the release's version.
+#   zstd; ~/emsdk at the release's version; xdotool and openbox for
+#   builtin/luanti/test/focus.sh (minimize, activate: a window manager in
+#   the run's Xvfb, started by this script when there is one).
 # - glibc and libstdc++ at least this machine's: the binaries are copied,
 #   not built there. `ldd Build/bin/* ~/projects/luanti/bin/* | grep "not
 #   found"` there says what is missing (2026-10-29: GLIBC_2.38,
@@ -93,4 +95,9 @@ ssh -o BatchMode=yes "$host" "cd $dir &&
 	export CHROME=$(printf %q "${CHROME:-chromium-browser}")
 	export FIREFOX=$(printf %q "${FIREFOX:-firefox}")
 	export BUILDAT_STARPORT_DEFAULT=https://127.0.0.1:9
-	exec xvfb-run -a -s '-screen 0 1920x1080x24' $q"
+	exec xvfb-run -a -s '-screen 0 1920x1080x24' bash -c '
+		if command -v openbox > /dev/null; then
+			openbox > /dev/null 2>&1 & sleep 1
+			export BUILDAT_FOCUS_X11=1  # a display of this run alone
+		fi
+		exec \"\$@\"' _ $q"
