@@ -3003,10 +3003,15 @@ local function hold_down(o, x, y, z)
 	-- the body is not falling
 	local under = {x = feet.x, y = math.floor(y - 0.2 + 0.5), z = feet.z}
 	local falling = o.pos and y < o.pos.y - 0.01
-	if not privs.fly and not node_holds(under) and not node_holds(feet) and
-			not falling then
+	-- A mod's gravity override is the mod's to give: with none a player
+	-- floats, and with less one stays up longer after a jump
+	-- ([LAN_LOGIN_GRAVITY]: a fixture's gravity 0 was held down)
+	-- simplified: the 2 s scale by 1/gravity; a jump override is not counted
+	local gravity = o.physics and o.physics.gravity or 1
+	if not privs.fly and gravity > 0 and not node_holds(under) and
+			not node_holds(feet) and not falling then
 		o.airborne = (o.airborne or 0) + 1
-		if o.airborne > 10 and o.good_pos then
+		if o.airborne > 10 / math.min(gravity, 1) and o.good_pos then
 			return true
 		end
 	else
