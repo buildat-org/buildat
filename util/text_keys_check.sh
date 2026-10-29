@@ -58,6 +58,10 @@ s+="keypress Home\nkeydown shift\n$(ctrl Right)keyup shift\n$(ctrl V)event scan 
 s+="$(ctrl Z)event scan u2\n$(ctrl Z)event scan u3\n$(ctrl Y)event scan u4\n"
 s+="keydown shift\n$(ctrl Z)keyup shift\nevent scan u5\nquit\n"
 printf "$s" > "$t/single.cmds"
+# A Starport not asked about yet, never fetched: the "Public servers" line
+# is one line high, as the field's x,y above take it (the default one, a
+# closed port in a check, is fetched unasked and its error adds a line)
+mkdir -p "$t/cl" && echo '{"starports": ["http://127.0.0.1:9"]}' > "$t/cl/starport.json"
 timeout 60 bin/buildat -m launch_menu -D "$t/cl" -w 1280x720 -l 3 \
 	-o sound_mute=1 -c @"$t/single.cmds" > "$t/single.log" 2>&1
 grep -aq "Command sequence complete" "$t/single.log" || fail "the single-line drive"
