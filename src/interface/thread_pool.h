@@ -30,6 +30,10 @@ namespace interface
 			// was seconds stale under the player
 			// ([AGGREGATE_CHROME_NO_PHYSICS])
 			virtual bool urgent() const { return false; }
+			// Made again and again for as long as something runs (a ray
+			// cast a frame), not work that ends: a drive's idle does not
+			// wait for it ([DRIVE_WAITS])
+			virtual bool background() const { return false; }
 		};
 
 		struct ThreadPool
@@ -46,6 +50,9 @@ namespace interface
 			// holds aside: for a caller that should wait rather than add
 			// more than the pool keeps up with ([WEB_MAIN_THREAD])
 			virtual size_t get_backlog() = 0;
+			// [DRIVE_WAITS] Tasks not through post() yet, the ones a worker
+			// holds included, background() ones not: a drive's idle
+			virtual size_t get_unfinished() = 0;
 			// Microseconds since the last call: the threaded part run
 			// inline (no workers: the web client) and post()
 			// ([WEB_MAIN_THREAD]'s frame split)

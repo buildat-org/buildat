@@ -747,6 +747,7 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, Event::t("core:continue"));
 		m_server->sub_event(this, Event::t("core:tick"));
 		m_server->sub_event(this, Event::t("core:shutdown"));
+		m_server->sub_event(this, Event::t("network:sync_through"));
 
 		// Don't start thread in constructor because in there this module is not
 		// guaranteed to be available by server->access_module()
@@ -762,6 +763,14 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_VOIDN("core:continue", on_continue)
 		EVENT_VOIDN("core:tick", on_tick)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
+		EVENT_TYPEN("network:sync_through", on_sync_through, Packet)
+	}
+
+	// [DRIVE_WAITS] A client's network:sync answered with its number once
+	// every module has handled the client packets queued before it came
+	void on_sync_through(const Packet &packet)
+	{
+		send_u(packet.sender, "network:sync", packet.data);
 	}
 
 	// **A goodbye** ([SERVE_UPDATE_SMOOTH] 4): every game peer is told why
@@ -1918,6 +1927,12 @@ struct Module: public interface::Module, public network::Interface
 						throw interface::UnknownPacketReceived(
 								name+" before a hello");
 					take_hello(peer, data);
+					return;
+				}
+				if(name == "network:sync"){
+					m_server->emit_event_after_queued(Event(
+							"network:sync_through", new Packet(peer.id, name,
+							data.substr(0, 20))));
 					return;
 				}
 				if(name == "network:backlog"){

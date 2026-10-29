@@ -217,6 +217,9 @@ struct ModuleContainer
 	// thread has handled or dropped: what emit_event_sync() waits on
 	uint64_t events_pushed = 0;
 	uint64_t events_done = 0;
+	// [DRIVE_WAITS] events_pushed as it was after the last client packet
+	// went in: emit_event_after_queued()'s mark
+	uint64_t packet_pushed = 0;
 	// Packets a handler could not read: the first few are logged, then one
 	// every ten seconds with how many went unsaid (the module's thread
 	// only)
@@ -363,7 +366,21 @@ struct ModuleContainer
 		}
 		event_queue.push_back(event);
 		events_pushed++;
+		if(is_packet_event(event.type))
+			packet_pushed = events_pushed;
 		event_queue_sem.post();
+	}
+	// network:packet_received/*, by the type's name once a type
+	static bool is_packet_event(Event::Type type){
+		static std::mutex mutex;
+		static sv_<char> known; // 0 not looked at, 1 no, 2 yes
+		std::lock_guard<std::mutex> lock(mutex);
+		if(type >= known.size())
+			known.resize(type + 1, 0);
+		if(known[type] == 0)
+			known[type] = interface::getGlobalEventRegistry()->name(type).
+					compare(0, 24, "network:packet_received/") == 0 ? 2 : 1;
+		return known[type] == 2;
 	}
 	void event_done(){
 		{
@@ -788,6 +805,16 @@ struct CState: public State, public interface::Server
 	// NOTE: You can make a copy of an sp_<ModuleContainer> and unlock this
 	//       mutex for processing the module asynchronously (just lock mc->mutex)
 	interface::Mutex m_modules_mutex;
+
+	// [DRIVE_WAITS] emit_event_after_queued()'s: each module's count of
+	// events pushed up to its last client packet at the call, and the event; looked at by
+	// handle_events()
+	struct AfterQueued {
+		sv_<std::pair<wp_<ModuleContainer>, uint64_t>> marks;
+		Event event;
+	};
+	sv_<AfterQueued> m_after_queued;
+	interface::Mutex m_after_queued_mutex;
 
 	sm_<ss_, ss_> m_tmp_data;
 	interface::Mutex m_tmp_data_mutex;
@@ -2050,8 +2077,56 @@ struct CState: public State, public interface::Server
 		emit_event(event, true);
 	}
 
+	void emit_event_after_queued(Event event)
+	{
+		AfterQueued a;
+		a.event = event;
+		{
+			interface::MutexScope ms(m_modules_mutex);
+			for(auto &pair : m_modules){
+				const sp_<ModuleContainer> &mc = pair.second;
+				interface::MutexScope mq(mc->event_queue_mutex);
+				a.marks.emplace_back(mc, mc->packet_pushed);
+			}
+		}
+		interface::MutexScope ms(m_after_queued_mutex);
+		m_after_queued.push_back(a);
+	}
+
+	// A module gone since counts as through
+	void emit_after_queued_ready()
+	{
+		sv_<Event> ready;
+		{
+			interface::MutexScope ms(m_after_queued_mutex);
+			for(auto it = m_after_queued.begin(); it != m_after_queued.end();){
+				bool through = true;
+				for(auto &mark : it->marks){
+					sp_<ModuleContainer> mc = mark.first.lock();
+					if(!mc)
+						continue;
+					std::lock_guard<std::mutex> lock(mc->events_done_mutex);
+					if(mc->events_done < mark.second){
+						through = false;
+						break;
+					}
+				}
+				if(through){
+					ready.push_back(it->event);
+					it = m_after_queued.erase(it);
+				} else {
+					++it;
+				}
+			}
+		}
+		for(Event &event : ready)
+			emit_event(event);
+	}
+
 	void handle_events()
 	{
+		emit_after_queued_ready();
+
 		// Get modified modules and push events to queue
 		{
 			interface::MutexScope ms(m_modules_mutex);

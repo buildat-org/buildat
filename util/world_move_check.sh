@@ -187,7 +187,7 @@ serve "$t/1.log"
 	imp lw.zip "menu: done; the world is up"
 	# a settle after that line: the started world's first frames before
 	# the quit
-	echo "delay 1500"; echo quit
+	echo "frames 3"; echo quit
 } > "$t/1.cmds"
 client "$t/1c.log" "$t/1.cmds"
 stop

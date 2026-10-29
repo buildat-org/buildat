@@ -191,6 +191,8 @@ struct CState: public State
 	// [SERVE_UPDATE_SMOOTH] 4: the server's network:goodbye, said in place
 	// of the connection's end: "1" when it restarts, then why
 	ss_ m_goodbye;
+	// [DRIVE_WAITS] the last network:sync answer's number
+	int64_t m_synced = 0;
 	// [COMPAT_BREAK_07] 8a: the server's core:hello, its first packet
 	bool m_hello_seen = false;
 	// **A connection that died without closing** (user, 2026-09-30: the
@@ -707,6 +709,26 @@ struct CState: public State
 		return backlog_bytes();
 	}
 
+	ss_ get_pending()
+	{
+		ss_ r;
+		auto add = [&](const char *what, size_t n){
+			if(n)
+				r += ss_(r.empty() ? "" : ", ")+what+" "+itos((int)n);
+		};
+		add("files asked for", m_waiting_files.size());
+		add("announced files being checked", m_announce_checking ? 1 : 0);
+		add("scripts held for files", m_held_scripts.size());
+		add("packets read and not handled", m_parsed.size() + m_deferred.size());
+		add("bytes of a packet arriving", m_socket_buffer.size());
+		return r;
+	}
+
+	int64_t get_synced()
+	{
+		return m_synced;
+	}
+
 	bool get_in_flight(ss_ *name, size_t *have, size_t *size)
 	{
 		return m_packet_stream.in_flight(m_socket_buffer, name, have, size);
@@ -897,9 +919,11 @@ struct CState: public State
 			return;
 		}
 		auto dispatch = [&](std::pair<ss_, ss_> &p){
+			// A sync's answer is behind what it followed, held ones too
 			if(!m_held_scripts.empty() &&
 					p.first.compare(0, 5, "core:") != 0 &&
-					p.first.compare(0, 8, "network:") != 0){
+					(p.first.compare(0, 8, "network:") != 0 ||
+					(p.first == "network:sync" && !m_deferred.empty()))){
 				m_deferred.push_back(std::move(p));
 				return;
 			}
@@ -1017,6 +1041,14 @@ void CState::setup_packet_handlers()
 {
 	m_packet_handlers["network:keepalive"] =
 			[](const ss_ &packet_name, const ss_ &data){};
+
+	// [DRIVE_WAITS] the server's answer to a drive's network:sync: what
+	// either end sent before it has been handled
+	m_packet_handlers["network:sync"] =
+			[this](const ss_ &packet_name, const ss_ &data)
+	{
+		m_synced = atoll(data.substr(0, 20).c_str());
+	};
 
 	m_packet_handlers["network:goodbye"] =
 			[this](const ss_ &packet_name, const ss_ &data)

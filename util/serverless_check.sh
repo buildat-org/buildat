@@ -116,11 +116,11 @@ unzip -l "$zip" | grep -q " cube/cube.wasm$" || fail "the release carries no cub
 echo "{\"aittas\": [\"http://127.0.0.1:$P\"], \"filters\": {\"unreviewed\": true}}" > "$t/managed.json"
 rm -rf "$t/u/dev_apps"
 # The network's question about the Aitta's address, said yes to. It is
-# asked before the drive starts; the delay, the dialog's guard taking no key
-# in its first frames
+# asked before the drive starts; the frames, the dialog's guard taking no
+# key in its first three (client/core/network guard_dialog)
 cat > "$t/aitta.cmds" <<C
 wait_log_any 20000 Asking the user about http://127.0.0.1:$P
-delay 1500
+frames 5
 keypress Return
 wait_log 20000 sl: texture
 wait_log 30000 wasm cube: drew a cube

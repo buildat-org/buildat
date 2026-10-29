@@ -84,7 +84,7 @@ a=$(hear 29582 5)
 kill $s; wait $s 2>/dev/null; s=
 
 # 3
-printf 'wait_log_any 30000 LAN list full\ndelay 1500\nscreenshot %s/flood.png\nquit\n' \
+printf 'wait_log_any 30000 LAN list full\nframes 3\nscreenshot %s/flood.png\nquit\n' \
 	"$t" > "$t/seq"
 timeout 60 bin/buildat -o launch_ui=launch_menu -D "$t/u" -w 1280x720 -u 1 -l 3 -o sound_mute=1 \
 	-o lan_discovery=1 -a extension/launch_menu/connect -c @"$t/seq" > "$t/c.log" 2>&1 &

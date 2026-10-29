@@ -144,6 +144,7 @@ struct Module: public interface::Module, public network::Interface
 		m_server->sub_event(this, interface::Event::t("core:start"));
 		m_server->sub_event(this, interface::Event::t("core:tick"));
 		m_server->sub_event(this, interface::Event::t("core:shutdown"));
+		m_server->sub_event(this, interface::Event::t("network:sync_through"));
 	}
 
 	void event(const interface::Event::Type &type,
@@ -152,6 +153,13 @@ struct Module: public interface::Module, public network::Interface
 		EVENT_VOIDN("core:start", on_start)
 		EVENT_VOIDN("core:tick", on_tick)
 		EVENT_VOIDN("core:shutdown", on_shutdown)
+		EVENT_TYPEN("network:sync_through", on_sync_through, Packet)
+	}
+
+	// [DRIVE_WAITS] as network.cpp's
+	void on_sync_through(const Packet &packet)
+	{
+		send(packet.sender, "network:sync", packet.data);
 	}
 
 	// The page's stream is taken from the start on, when every module
@@ -228,6 +236,12 @@ struct Module: public interface::Module, public network::Interface
 						throw interface::UnknownPacketReceived(
 								name+" before a hello");
 					refused = !take_hello(data);
+					return;
+				}
+				if(name == "network:sync"){
+					m_server->emit_event_after_queued(interface::Event(
+							"network:sync_through", new Packet(m_peer, name,
+							data.substr(0, 20))));
 					return;
 				}
 				const interface::Event::Type t =

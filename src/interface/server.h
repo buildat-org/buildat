@@ -96,6 +96,12 @@ namespace interface
 			emit_event(std::move(Event(type, up_<Event::Private>(p))));
 		}
 
+		// [DRIVE_WAITS] The event, emitted once every module has handled
+		// the client packets queued for it at the call (a tick or another
+		// event is not waited for): a client's network:sync is answered
+		// after whatever the client sent before it
+		virtual void emit_event_after_queued(Event event) = 0;
+
 		virtual void tmp_store_data(const ss_ &name, const ss_ &data) = 0;
 		virtual ss_ tmp_restore_data(const ss_ &name) = 0;
 

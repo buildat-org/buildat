@@ -625,6 +625,7 @@ struct CastVoxelRaysTask: public interface::thread_pool::Task
 	bool pre(){ return true; }
 	bool thread(){ march_rays(*job); return true; }
 	bool post(){ job->done = true; return true; }
+	bool background() const { return true; }
 };
 
 // Starts a job and hands back a handle to ask about later. Takes what

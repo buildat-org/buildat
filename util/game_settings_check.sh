@@ -126,7 +126,7 @@ delay 1000
 text p1
 keypress Return
 wait_log 20000 Entered the plan p1
-delay 2000
+frames 3
 keypress Escape
 wait_log 5000 Pause menu shown
 click Button "Client settings..."

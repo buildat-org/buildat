@@ -35,7 +35,7 @@ lines(){ grep -a "$1: .*; the view at" "$2" | sed 's/.*: \([^:]*; the view at.*\
 	# Each change waited for by the page's own line; the delays left are
 	# the screen settling after a wait, and the wheel's and the Downs'
 	# scrolling done in the frames after them
-	echo "wait_log_any 30000 rows in"; echo "delay 1500"
+	echo "wait_log_any 30000 rows in"; echo "frames 3"
 	echo 'click Button "Settings"'; echo "wait_log 5000 launch_menu: settings Settings"
 	echo "delay 300"
 	echo 'click Button "Keys"'; echo "wait_log 5000 launch_menu: keys,"
@@ -85,7 +85,7 @@ wait_log 5000 = L; the view at
 screenshot $t/luanti_settings_keys.png
 keypress Escape
 wait_log 5000 Game keys closed
-delay 1500
+frames 3
 screenshot $t/luanti_settings.png
 quit
 C

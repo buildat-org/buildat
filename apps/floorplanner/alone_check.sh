@@ -22,7 +22,7 @@ check_tmp fp_alone; t=$CHECK_TMP
 trap check_cleanup EXIT
 cat > "$t/cmds" <<C
 wait_log 60000 Entered the plan
-delay 1500
+frames 3
 click Button "Start editing"
 delay 1000
 event fp_room 0 0 4000 3000
@@ -36,7 +36,8 @@ delay 300
 event fp_wall 0 3000 0 0
 delay 1000
 event fp_volume 1000 1000 4 2 3 150
-delay 2000
+wait_log 5000 fp_volume:
+sync 5000
 event fp_cells
 event fp_yaw 90
 delay 1000
@@ -54,7 +55,7 @@ delay 300
 mouse_down left
 delay 100
 mouse_up left
-delay 1500
+sync 5000
 event fp_cells
 event fp_voxel_mode dig
 mouse_pos 552 500
@@ -62,7 +63,7 @@ delay 300
 mouse_down left
 delay 100
 mouse_up left
-delay 1500
+sync 5000
 event fp_cells
 keydown D
 delay 300
@@ -83,7 +84,7 @@ mouse_wheel -10
 delay 500
 event fp_cells
 event fp_alone off
-delay 2000
+idle 10000
 event fp_cells
 screenshot $t/back.png
 quit

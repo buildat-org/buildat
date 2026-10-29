@@ -193,7 +193,7 @@ wait_for_log "$t/sw.log" "storage : max_disk_mb" 30
 grep -aEq "storage : max_disk_mb $limit: [0-9]+ MB written \(saves [0-9]+ MB, games and shared [0-9]+ MB, cache [0-9]+ MB\)" "$t/sw.log" ||
 	fail "the start line: $(grep -a "max_disk_mb" "$t/sw.log" | head -1)"
 # The world list's Disk line: main:disk's limit is the option's MB
-printf 'wait_log 30000 menu: disk\ndelay 1500\nscreenshot %s\nquit\n' "$t/worlds.png" > "$t/w.cmds"
+printf 'wait_log 30000 menu: disk\nframes 3\nscreenshot %s\nquit\n' "$t/worlds.png" > "$t/w.cmds"
 timeout 90 bin/buildat -C "$t/cc" -D "$t/uc" -s 127.0.0.1:"$SERVER_PORT" \
 	-w 640x400 -u 1 -l 3 -o sound_mute=1 -c @"$t/w.cmds" > "$t/worlds.log" 2>&1 ||
 	fail "the world list's drive ($t/worlds.log)"

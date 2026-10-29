@@ -50,7 +50,7 @@ mkdir -p "$t/pl/exports"
 cp "$here/apps/floorplanner/test/large_plan.fpplan" "$t/pl/exports/"
 cat > "$t/imp.cmds" <<C
 wait_log 60000 Plans:
-delay 1500
+frames 3
 click Button "Import a plan..."
 delay 500
 click Button "Choose a file..."

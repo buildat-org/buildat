@@ -99,14 +99,14 @@ grep -aq "Joined as reader" "$t/j1.log" ||
 echo "ok: the first join by the dialog's ID button, the server marked"
 
 # 2. By itself
-join "$t/u" "$t/j2.log" 'wait_log 30000 Joined as\ndelay 2000\nscreenshot '"$t"'/j2.png\nquit\n'
+join "$t/u" "$t/j2.log" 'wait_log 30000 Joined as\nframes 3\nscreenshot '"$t"'/j2.png\nquit\n'
 by_itself "$t/j2.log" && grep -aq "Joined as reader" "$t/j2.log" ||
 	fail "the second join did not sign in by itself: $(grep -a 'Joined\|refused\|Signing' "$t/j2.log" | head -2)"
 echo "ok: the second join signed in with the ID by itself"
 
 # 3. Log out from the Server window; the next join asks. Log out leaves
 # the server, so that drive's own end is not asked for
-join "$t/u" "$t/j3.log" 'wait_log 30000 Joined as\ndelay 2000\nclick Button "Server"\nwait_log 5000 server window: the page\ndelay 500\nclick Button "Log out"\nwait_log_any 10000 the ID is not used on\ndelay 500\nquit\n'
+join "$t/u" "$t/j3.log" 'wait_log 30000 Joined as\nframes 3\nclick Button "Server"\nwait_log 5000 server window: the page\ndelay 500\nclick Button "Log out"\nwait_log_any 10000 the ID is not used on\ndelay 500\nquit\n'
 [ "$(marked)" = False ] || fail "log out kept the mark: $(grep -a 'not used\|Log out' "$t/j3.log" | head -2)"
 join "$t/u" "$t/j4.log" "wait_log_any 30000 accounts: the login page shown\ndelay 500\nscreenshot $t/j4.png\nkeypress Return\nwait_log 20000 Joined as\ndelay 500\nquit\n"
 by_itself "$t/j4.log" && fail "after log out the join signed in by itself"
@@ -119,7 +119,7 @@ join "$t/u" "$t/j5.log" 'wait_log 30000 Joined as\ndelay 1000\nquit\n' \
 	BUILDAT_HEARTH_NAME=admin BUILDAT_HEARTH_PASSWORD=checkpass12
 grep -aq "Joined as admin" "$t/j5.log" || fail "the password login: $(grep -a 'Joined\|refused' "$t/j5.log" | head -2)"
 [ "$(marked)" = False ] || fail "a password login kept the mark"
-join "$t/u" "$t/j6.log" "wait_log_any 30000 accounts: the login page shown\ndelay 2000\nscreenshot $t/j6.png\nquit\n" ||
+join "$t/u" "$t/j6.log" "wait_log_any 30000 accounts: the login page shown\nframes 3\nscreenshot $t/j6.png\nquit\n" ||
 	fail "the drive ($t/j6.log)"
 by_itself "$t/j6.log" && fail "after a password login the join signed in by itself"
 grep -aq "Joined as" "$t/j6.log" && fail "the join after a password login joined: $(grep -a 'Joined' "$t/j6.log")"

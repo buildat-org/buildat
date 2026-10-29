@@ -356,6 +356,9 @@ end
 -- 34 of them in one call were stopped by the watchdog at 30 s with the
 -- module half loaded. The world waits for the last of them as it did.
 local texmod_queue = {}
+buildat.idle_source("luanti textures to compose", function()
+	return #texmod_queue
+end)
 local texmod_counts = nil
 -- In the call: what every game here has, so their textures are there before
 -- the rest of the module runs, as they always were; a frame's after it

@@ -47,7 +47,7 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/s.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 || fail "the server ($t/s.log)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "wait_log_any 120000 lf: ready" "delay 2000" \
+printf '%s\n' "wait_log_any 120000 lf: ready" "idle 10000" \
 	"screenshot $t/shot.png" "quit" > "$t/cmds"
 run_client 60 "$t/c.log" timeout 240 "$here/Build/bin/buildat" \
 	-C "$t/cc" -D "$t/cu" -s 127.0.0.1:$SERVER_PORT -w 640x400 -u 1 -l 3 \

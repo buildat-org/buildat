@@ -186,6 +186,9 @@ interface/server.h -- interface::Server, the one object a module holds
 - sub_event(module, type) (use sub() instead), emit_event(Event) and the
   two templates emit_event(type) / emit_event(type, new PrivateT(...)):
   the private is owned by the event
+- emit_event_after_queued(Event): emitted once every module has handled
+  the client packets in its queue at the call (network's answer to a client's
+  network:sync, [DRIVE_WAITS])
 - tmp_store_data / tmp_restore_data: a named blob that survives a reload
 - add_file_path(name, path) / get_file_path(name): the file namespace the
   client mirrors (builtin/client_file serves it); "" when not found
@@ -704,6 +707,9 @@ can watch, a peer's socket not read while 100 of its packets wait, a peer
 silent for 60 s dropped (it sends network:keepalive to a game peer it has
 sent nothing for 5 s, and the client does the same), the local pipe taking
 no remote client, and a POST's Content-Length of nine digits at most.
+A client's network:sync is answered with the same (its first 20 bytes)
+once every module has handled the client packets queued before it came: a drive's
+`sync` (doc/client_commands.txt).
 
 builtin/client_file/api.h -- client_file::Interface: add_file_content(name,
 content) and add_file_path(name, path) put a file in the namespace the
@@ -929,7 +935,7 @@ interface/protocol.h: protocol_features, Hello, own, serialize, r, hello_data, o
 interface/record.h: RecordError, end, left, buf, byte, header, length
 interface/select_handler.h: SelectHandler, fd_open, bad_fd_error, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
-interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, get_module_wasm_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
+interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, get_module_wasm_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, emit_event_after_queued, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
 interface/server_config.h: ServerConfig, launch_param, launch_param_self_check
 interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex, unhex, is_hex, hmac

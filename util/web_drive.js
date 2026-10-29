@@ -40,6 +40,11 @@
 //                           (Chrome: a finger only)
 //   ["shot", path]          a PNG of the page
 //   ["eval", js]            print what the expression gives
+//   ["frames", n]           n frames the client rendered
+//   ["idle", ms]            until the client has nothing pending, or fails
+//                           naming what was ([DRIVE_WAITS]: the commands of
+//                           doc/client_commands.txt, which a page cannot run)
+//   ["sync", ms]            a round trip through the server
 //   ["until", js, s]        the expression again every 200 ms until it is
 //                           true, at most s seconds (default 20); one that
 //                           throws (a page between loads) counts as false
@@ -557,6 +562,60 @@ async function webkit() {
 	return {ops, end: () => browser.close()};
 }
 
+// [DRIVE_WAITS] The client fills Module.buildatFrames each frame, and
+// on Module.buildatDriveAsk (1 idle, 2 sync) Module.buildatPending ("" for
+// nothing) or Module.buildatSyncSent (-1: no server), whose answer is in
+// Module.buildatSynced (app.cpp's web_drive_waits())
+async function drive_wait(b, op, a) {
+	const v = js => b.ops.value(js).catch(() => null);
+	const poll = () => new Promise(r => setTimeout(r, 50));
+	const until = Date.now() + (op === "frames" ? 60000 : a);
+	const over = what => {
+		if (Date.now() > until)
+			throw new Error(what);
+	};
+	if (op === "frames") {
+		const end = (await v("Module.buildatFrames | 0")) + a;
+		while ((await v("Module.buildatFrames | 0")) < end) {
+			over("not " + a + " frames in 60 s");
+			await poll();
+		}
+	} else if (op === "sync") {
+		const want = (await v("Module.buildatDriveAsk |= 2, " +
+				"Module.buildatSyncSent | 0")) + 1;
+		for (;;) {
+			const [sent, got] = await v("[Module.buildatSyncSent | 0, " +
+					"Module.buildatSynced | 0]") || [0, 0];
+			if (sent < 0)
+				throw new Error("no server");
+			if (sent >= want && got >= want)
+				break;
+			over("no answer in " + a + " ms");
+			await poll();
+		}
+	} else {
+		let left = "no answer from the page";
+		for (;;) {
+			// Asked from the next frame on, as the native command does
+			const f = (await v("Module.buildatFrames | 0")) + 1;
+			while ((await v("Module.buildatFrames | 0")) < f) {
+				over("no frame from the page in " + a + " ms");
+				await poll();
+			}
+			await v("Module.buildatPending = null, Module.buildatDriveAsk |= 1");
+			let p = null;
+			while ((p = await v("Module.buildatPending")) === null &&
+					Date.now() <= until)
+				await poll();
+			if (p === "")
+				break;
+			left = p === null ? left : p;
+			over("not in " + a + " ms: " + left);
+		}
+	}
+	console.log(op + ": done");
+}
+
 (async () => {
 	const b = args.browser === "firefox" ? await firefox() :
 			args.browser === "chrome" ? await chrome() :
@@ -622,6 +681,8 @@ async function webkit() {
 				}
 				if (over)
 					throw new Error(`${over} stretches over ${still} ms with nothing changed`);
+			} else if (op === "frames" || op === "idle" || op === "sync") {
+				await drive_wait(b, op, a);
 			} else if (op === "until") {
 				const until = Date.now() + (c || 20) * 1000;
 				while (!await b.ops.value(a).catch(() => false)) {

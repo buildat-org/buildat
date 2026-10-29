@@ -17,7 +17,7 @@ check_tmp fp_outside; t=$CHECK_TMP
 trap check_cleanup EXIT
 cat > "$t/cmds" <<C
 wait_log 60000 Entered the plan
-delay 1500
+frames 3
 keypress Escape
 wait_log 5000 Pause menu shown
 delay 500

@@ -97,16 +97,16 @@ grep -aq "redfield drawn" "$t/plain.log" || fail "redfield not run unscripted ($
 grep -a "what is left after leave_to_menu" "$t/plain.log" | grep -q "; 0 viewports" ||
 	fail "viewports left unscripted: $(grep -a "what is left after" "$t/plain.log")"
 # The 2 s after the leave: the grid used to come up over the last frame
-# and stay; the other delays are the frames after a line
+# and stay; the frames are the screen drawn after a line
 for scale in 1 0.5; do
 	cat > "$t/$scale.cmds" <<C
 wait_log_any 20000 rows in
-delay 1500
+frames 3
 text redfield
 wait_log 5000 for "redfield"
 keypress Return
 wait_log 30000 redfield drawn
-delay 2000
+frames 3
 screenshot $t/in_$scale.png
 keypress Escape
 wait_log 10000 what is left after leave_to_menu
@@ -135,7 +135,7 @@ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 echo "enable_damage = false" >> "$d/apps/vanilla/saves/lv/luanti/world.mt"
 cat > "$t/v.cmds" <<C
 wait_log_any 20000 , first lv
-delay 1500
+frames 3
 click Text "lv"
 wait_log 60000 load: the world is in
 delay 1500
