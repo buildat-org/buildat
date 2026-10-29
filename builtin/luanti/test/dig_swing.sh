@@ -117,11 +117,9 @@ run_ext(){
 		fail "the Luanti server ($out/ext.srv.log)"
 	{
 		echo "wait_log 120000 chat: dig_swing: the stage is laid"
-		echo "wait_log_any 60000 loading: the world is in"
-		# simplified: that line is the player's own chunk; nothing logs the
-		# ones around drawn, so a fixed wait for them. Upgrade: a line like
-		# vanilla's "0 undrawn within 2"
-		echo "delay 4000"
+		# The stage's blocks round the player drawn: the client says so each
+		# time they come to be, the first after the world is in
+		echo "wait_log 60000 loading: drawn within 2 blocks round the player"
 		holds
 	} > "$out/cmds.txt"
 	BUILDAT_LUANTI_ADDRESS="127.0.0.1:$port" BUILDAT_LUANTI_NAME=ds \

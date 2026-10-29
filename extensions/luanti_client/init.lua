@@ -579,6 +579,11 @@ local function show_client(host, port, name, password, mode, origin)
 		-- not the ones round it), or 60 s after the first block came, as
 		-- vanilla's loading screen
 		local world_wait = false
+		-- Then the blocks within two of the player's drawn, said each time
+		-- they come to be (after a move, a change of the map): a drive's
+		-- wait for the world round the player, as vanilla's "0 undrawn
+		-- within 2". Looked at four times a second
+		local around_on, around_drawn, around_at_us = false, false, 0
 		local first_block_us = nil
 		local WORLD_WAIT_S = 60
 
@@ -3124,6 +3129,7 @@ local function show_client(host, port, name, password, mode, origin)
 						(buildat.get_time_us() - first_block_us) / 1000000 or 0
 				if drawn or waited >= WORLD_WAIT_S then
 					world_wait = false
+					around_on = true
 					log:info("loading: the world is in, "..(drawn and
 							"drawn round the player" or
 							string.format("%.0f s after the first block", waited)))
@@ -3139,6 +3145,14 @@ local function show_client(host, port, name, password, mode, origin)
 					loading_panel.width = magic.ui.root.width
 					loading_panel.height = magic.ui.root.height
 				end
+			elseif around_on and client.state == "ready" and
+					buildat.get_time_us() - around_at_us > 250000 then
+				around_at_us = buildat.get_time_us()
+				local drawn = view:drawn_around(avatar.x, avatar.y, avatar.z, 2)
+				if drawn and not around_drawn then
+					log:info("loading: drawn within 2 blocks round the player")
+				end
+				around_drawn = drawn
 			end
 			if loading and loading_panel then
 				local what = "waiting for the game's definitions"
