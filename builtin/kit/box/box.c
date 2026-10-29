@@ -1,0 +1,409 @@
+/* http://www.apache.org/licenses/LICENSE-2.0
+** Copyright 2026 Perttu Ahola <celeron55@gmail.com>
+**
+** [KIT] The Kit box: Lua 5.1 (lua/, a copy whose luaconf.h throws by a
+** trap) in a server .wasm, which builtin/kit runs in src/wasm/engine.cpp's
+** sandbox and meter. Component code runs here and nowhere else.
+**
+** One export, box_call(): the host's request is taken with call_input,
+** the answer given with call_output, "O" and JSON, or "E" and an error.
+**   "D<name>\0<source>"  a component type: its file run in an environment
+**                        of its own; answers its declaration (the file's
+**                        table, functions as the names in "handlers")
+**   "R<lua literal>"     a handler run: {type, handler, id, pos, params,
+**                        state, args, nargs}; answers its effects,
+**                        {set = {{key, value}...}, emit = {{output,
+**                        value}...}, voxel = name}
+** A Lua error traps the call (no setjmp in this wasm). The host then calls
+** box_recover(), which unwinds the Lua state as a longjmp to box_call's
+** protected call would have, and answers "E" and the message; 0 from it
+** (a trap that was not a Lua error: the meter, memory) means the state is
+** not to be trusted, and the host starts a new box.
+** simplified: one protected level. A pcall inside Lua could not catch (its
+** C frames are gone with the trap), so components get no pcall, xpcall or
+** coroutines; a loadstring's syntax error ends the whole call. */
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include "lua/lua.h"
+#include "lua/lauxlib.h"
+#include "lua/lualib.h"
+#include "lua/lstate.h"
+#include "lua/ldo.h"
+#include "lua/lfunc.h"
+#include "interface/wasm_server_api.h"
+
+static lua_State *L;
+static int g_pending; /* a Lua error's status, thrown and not recovered */
+static struct {
+	ptrdiff_t top, ci, errfunc;
+	unsigned short nCcalls;
+	lu_byte allowhook;
+} g_entry;
+static void *g_stack_top;
+
+static void *get_sp(void)
+{
+	void *p;
+	__asm__ volatile(".globaltype __stack_pointer, i32\n\t"
+			"global.get __stack_pointer\n\tlocal.set %0" : "=r"(p));
+	return p;
+}
+static void set_sp(void *p)
+{
+	__asm__ volatile(".globaltype __stack_pointer, i32\n\t"
+			"local.get %0\n\tglobal.set __stack_pointer" :: "r"(p));
+}
+
+/* The C stack is the linker's 64 KiB below the top: an error past 48 of
+** them, while there is room left to raise it */
+int box_stack_low(void)
+{
+	return g_stack_top && (char*)get_sp() < (char*)g_stack_top - (48 << 10);
+}
+
+void box_throw(struct lua_State *l, int status)
+{
+	(void)l;
+	g_pending = status;
+	__builtin_trap();
+}
+
+static void out(char kind, const char *s, size_t n)
+{
+	char *b = (char*)malloc(n + 1);
+	if(!b){
+		buildat_call_output("Eout of memory", 14);
+		return;
+	}
+	b[0] = kind;
+	memcpy(b + 1, s, n);
+	buildat_call_output(b, (unsigned)(n + 1));
+	free(b);
+}
+
+static int l_log(lua_State *l)
+{
+	size_t n;
+	const char *s = luaL_checklstring(l, 1, &n);
+	buildat_log(s, (unsigned)n);
+	return 0;
+}
+
+static int l_floor(lua_State *l)
+{
+	lua_pushnumber(l, floor(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_ceil(lua_State *l)
+{
+	lua_pushnumber(l, ceil(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_sqrt(lua_State *l)
+{
+	lua_pushnumber(l, sqrt(luaL_checknumber(l, 1)));
+	return 1;
+}
+static int l_fmod(lua_State *l)
+{
+	lua_pushnumber(l, fmod(luaL_checknumber(l, 1), luaL_checknumber(l, 2)));
+	return 1;
+}
+/* xorshift64*, one sequence for the box. simplified: not seeded per
+** instance, and a box restart starts it over */
+static unsigned long long g_rand = 0x9e3779b97f4a7c15ull;
+static int l_random(lua_State *l)
+{
+	g_rand ^= g_rand >> 12;
+	g_rand ^= g_rand << 25;
+	g_rand ^= g_rand >> 27;
+	const double r = (double)((g_rand * 2685821657736338717ull) >> 11) *
+			(1.0 / 9007199254740992.0);
+	switch(lua_gettop(l)){
+	case 0:
+		lua_pushnumber(l, r);
+		return 1;
+	case 1: {
+		const int u = luaL_checkint(l, 1);
+		luaL_argcheck(l, 1 <= u, 1, "interval is empty");
+		lua_pushnumber(l, floor(r * u) + 1);
+		return 1; }
+	default: {
+		const int lo = luaL_checkint(l, 1), up = luaL_checkint(l, 2);
+		luaL_argcheck(l, lo <= up, 2, "interval is empty");
+		lua_pushnumber(l, floor(r * (up - lo + 1)) + lo);
+		return 1; }
+	}
+}
+
+static const luaL_Reg MATH[] = {
+	{"floor", l_floor}, {"ceil", l_ceil}, {"sqrt", l_sqrt}, {"fmod", l_fmod},
+	{"random", l_random}, {NULL, NULL}
+};
+
+/* The runtime's own Lua: the components' environments, the requests and
+** the JSON of the answers */
+static const char PRELUDE[] =
+"local types = {}\n"
+"local NULL = {}\n"
+"local log = box_log\n"
+"local smeta = getmetatable('')\n"
+"smeta.__metatable = false\n"
+"local math_lib = box_math\n"
+"math_lib.huge = 1/0\n"
+"math_lib.pi = 3.14159265358979323846\n"
+"function math_lib.abs(x) x = tonumber(x) or error('number expected', 2) if x < 0 then return -x end return x end\n"
+"function math_lib.min(a, ...) for i = 1, select('#', ...) do local b = select(i, ...) if b < a then a = b end end return a end\n"
+"function math_lib.max(a, ...) for i = 1, select('#', ...) do local b = select(i, ...) if b > a then a = b end end return a end\n"
+"local function copy(t) local r = {} for k, v in pairs(t) do r[k] = v end return r end\n"
+"local base = {assert = assert, error = error, ipairs = ipairs, next = next,\n"
+"	pairs = pairs, select = select, tonumber = tonumber, tostring = tostring,\n"
+"	type = type, unpack = unpack, rawequal = rawequal, rawget = rawget,\n"
+"	rawset = rawset, setmetatable = setmetatable, getmetatable = getmetatable}\n"
+"local function line(...)\n"
+"	local t = {}\n"
+"	for i = 1, select('#', ...) do t[i] = tostring((select(i, ...))) end\n"
+"	return table.concat(t, ' ')\n"
+"end\n"
+"local function new_env(name)\n"
+"	local e = copy(base)\n"
+"	e.string = copy(string)\n"
+"	e.table = copy(table)\n"
+"	e.math = copy(math_lib)\n"
+"	e.print = function(...) log(name .. ': ' .. line(...)) end\n"
+"	return e\n"
+"end\n"
+"local function esc(c)\n"
+"	if c == '\"' then return '\\\\\"' end\n"
+"	if c == '\\\\' then return '\\\\\\\\' end\n"
+"	return string.format('\\\\u%04x', c:byte())\n"
+"end\n"
+"local function enc(v, out, depth)\n"
+"	if depth > 32 then error('a value nested past 32 levels', 0) end\n"
+"	local t = type(v)\n"
+"	if v == nil or v == NULL then out[#out + 1] = 'null'\n"
+"	elseif t == 'boolean' then out[#out + 1] = tostring(v)\n"
+"	elseif t == 'number' then\n"
+"		if v ~= v or v == 1/0 or v == -1/0 then out[#out + 1] = 'null'\n"
+"		else out[#out + 1] = string.format('%.17g', v) end\n"
+"	elseif t == 'string' then out[#out + 1] = '\"' .. v:gsub('[%c\"\\\\]', esc) .. '\"'\n"
+"	elseif t == 'table' then\n"
+"		local n = #v\n"
+"		local array = next(v) == nil or n > 0\n"
+"		if array then for k in pairs(v) do\n"
+"			if type(k) ~= 'number' or k < 1 or k > n or k % 1 ~= 0 then array = false break end end end\n"
+"		if array then\n"
+"			out[#out + 1] = '['\n"
+"			for i = 1, n do if i > 1 then out[#out + 1] = ',' end enc(v[i], out, depth + 1) end\n"
+"			out[#out + 1] = ']'\n"
+"		else\n"
+"			out[#out + 1] = '{'\n"
+"			local first = true\n"
+"			for k, x in pairs(v) do\n"
+"				if type(x) ~= 'function' then\n"
+"					if not first then out[#out + 1] = ',' end\n"
+"					first = false\n"
+"					enc(tostring(k), out, depth + 1)\n"
+"					out[#out + 1] = ':'\n"
+"					enc(x, out, depth + 1)\n"
+"				end\n"
+"			end\n"
+"			out[#out + 1] = '}'\n"
+"		end\n"
+"	else out[#out + 1] = 'null' end\n"
+"end\n"
+"local function json(v) local out = {} enc(v, out, 0) return table.concat(out) end\n"
+"local function define(name, src)\n"
+"	if src:byte(1) == 27 then error(name .. ': a precompiled chunk is refused', 0) end\n"
+"	local f = assert(loadstring(src, '=' .. name))\n"
+"	setfenv(f, new_env(name))\n"
+"	local def = f()\n"
+"	if type(def) ~= 'table' then error(name .. ': the file returns no table', 0) end\n"
+"	types[name] = def\n"
+"	local decl, handlers = {}, {}\n"
+"	for k, v in pairs(def) do\n"
+"		if type(v) == 'function' then handlers[#handlers + 1] = k else decl[k] = v end\n"
+"	end\n"
+"	decl.handlers = handlers\n"
+"	return json(decl)\n"
+"end\n"
+"local function run(req)\n"
+"	local def = types[req.type]\n"
+"	if not def then error('no component type ' .. tostring(req.type), 0) end\n"
+"	local h = def[req.handler]\n"
+"	if type(h) ~= 'function' then return '{}' end\n"
+"	local state, sets, emits, fx = req.state or {}, {}, {}, {}\n"
+"	local c = {id = req.id, pos = req.pos, params = req.params or {}}\n"
+"	c.state = setmetatable({}, {__index = state, __newindex = function(_, k, v)\n"
+"		state[k] = v\n"
+"		sets[#sets + 1] = {k, v == nil and NULL or v}\n"
+"	end})\n"
+"	function c:emit(output, value) emits[#emits + 1] = {tostring(output), value == nil and NULL or value} end\n"
+"	function c:set_voxel(name) fx.voxel = tostring(name) end\n"
+"	function c:log(...) log(req.type .. ' ' .. tostring(req.id) .. ': ' .. line(...)) end\n"
+"	h(c, unpack(req.args or {}, 1, req.nargs or 0))\n"
+"	fx.set = sets\n"
+"	fx.emit = emits\n"
+"	return json(fx)\n"
+"end\n"
+"function box_request(s)\n"
+"	local op = s:sub(1, 1)\n"
+"	if op == 'D' then\n"
+"		local z = s:find('\\0', 2, true)\n"
+"		if not z then error('a define with no name', 0) end\n"
+"		return define(s:sub(2, z - 1), s:sub(z + 1))\n"
+"	elseif op == 'R' then\n"
+"		local f = assert(loadstring(s:sub(2), '=request'))\n"
+"		setfenv(f, {})\n"
+"		return run(f())\n"
+"	end\n"
+"	error('an unknown request', 0)\n"
+"end\n";
+
+static void *l_alloc(void *ud, void *ptr, size_t osize, size_t nsize)
+{
+	(void)ud;
+	(void)osize;
+	if(nsize == 0){
+		free(ptr);
+		return NULL;
+	}
+	return realloc(ptr, nsize);
+}
+
+/* In the protected call: the state's first making, then the request */
+static int f_request(lua_State *l)
+{
+	const char *in = (const char*)lua_touserdata(l, 1);
+	const size_t n = *(const size_t*)lua_touserdata(l, 2);
+	lua_getglobal(l, "box_request");
+	lua_pushlstring(l, in, n);
+	lua_call(l, 1, 1);
+	return 1;
+}
+
+static int f_open(lua_State *l)
+{
+	lua_pushcfunction(l, luaopen_base);
+	lua_call(l, 0, 0);
+	lua_pushcfunction(l, luaopen_string);
+	lua_call(l, 0, 0);
+	lua_pushcfunction(l, luaopen_table);
+	lua_call(l, 0, 0);
+	lua_pushcfunction(l, l_log);
+	lua_setglobal(l, "box_log");
+	lua_newtable(l);
+	luaL_register(l, NULL, MATH);
+	lua_setglobal(l, "box_math");
+	if(luaL_loadbuffer(l, PRELUDE, sizeof(PRELUDE) - 1, "=kit") != 0)
+		lua_error(l);
+	lua_call(l, 0, 0);
+	return 0;
+}
+
+/* The protected call's entry, what box_recover() puts back */
+static void enter(void)
+{
+	g_entry.top = savestack(L, L->top);
+	g_entry.ci = saveci(L, L->ci);
+	g_entry.errfunc = L->errfunc;
+	g_entry.nCcalls = L->nCcalls;
+	g_entry.allowhook = L->allowhook;
+	g_pending = 0;
+}
+
+__attribute__((noinline)) static int call_inner(void)
+{
+	if(!L){
+		L = lua_newstate(l_alloc, NULL);
+		if(!L){
+			out('E', "out of memory", 13);
+			return 1;
+		}
+		enter();
+		if(lua_cpcall(L, f_open, NULL) != 0){
+			out('E', "the prelude failed", 18);
+			return 1;
+		}
+	}
+	const int n = buildat_call_input(NULL, 0);
+	if(n < 0){
+		out('E', "no input", 8);
+		return 1;
+	}
+	char *in = (char*)malloc((size_t)n + 1);
+	if(!in){
+		out('E', "out of memory", 13);
+		return 1;
+	}
+	buildat_call_input(in, (unsigned)n);
+	size_t len = (size_t)n;
+	lua_settop(L, 0);
+	lua_pushcfunction(L, f_request);
+	lua_pushlightuserdata(L, in);
+	lua_pushlightuserdata(L, &len);
+	enter();
+	g_entry.top = savestack(L, L->top - 3);
+	/* simplified: the input buffer leaks when the call traps (its pointer
+	** was in the lost frame); a request is small */
+	const int status = lua_pcall(L, 2, 1, 0);
+	free(in);
+	size_t rn = 0;
+	const char *r = lua_tolstring(L, -1, &rn);
+	if(status != 0 || !r)
+		out('E', r ? r : "?", r ? rn : 1);
+	else
+		out('O', r, rn);
+	lua_settop(L, 0);
+	return status != 0;
+}
+
+/* After a trap: 1 and "E" with the message when it was a Lua error, the
+** state unwound to box_call's protected call; 0 when it was not */
+__attribute__((noinline)) static int recover_inner(void)
+{
+	if(!L || !g_pending)
+		return 0;
+	const int status = g_pending;
+	g_pending = 0;
+	L->errorJmp = NULL;
+	StkId oldtop = restorestack(L, g_entry.top);
+	luaF_close(L, oldtop);
+	luaD_seterrorobj(L, status, oldtop);
+	L->nCcalls = g_entry.nCcalls;
+	L->ci = restoreci(L, g_entry.ci);
+	L->base = L->ci->base;
+	L->savedpc = L->ci->savedpc;
+	L->allowhook = g_entry.allowhook;
+	if(L->size_ci > LUAI_MAXCALLS){
+		const int inuse = (int)(L->ci - L->base_ci);
+		if(inuse + 1 < LUAI_MAXCALLS)
+			luaD_reallocCI(L, LUAI_MAXCALLS);
+	}
+	L->errfunc = g_entry.errfunc;
+	size_t rn = 0;
+	const char *r = lua_tolstring(L, -1, &rn);
+	out('E', r ? r : "?", r ? rn : 1);
+	lua_settop(L, 0);
+	return 1;
+}
+
+/* The exports keep no frame of their own: the stack pointer a trap left
+** deep is put back to the top here, before anything uses it */
+BUILDAT_SERVER_EXPORT int box_call(void)
+{
+	if(!g_stack_top)
+		g_stack_top = get_sp();
+	else
+		set_sp(g_stack_top);
+	return call_inner();
+}
+
+BUILDAT_SERVER_EXPORT int box_recover(void)
+{
+	if(!g_stack_top)
+		return 0;
+	set_sp(g_stack_top);
+	return recover_inner();
+}
