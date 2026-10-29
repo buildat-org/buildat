@@ -681,7 +681,7 @@ client admin checkpass12 "$t/admin14a.log" '{"cmd":"new_topic","name":"Devlog"}'
 DT=$(num "$t/admin14a.log" 1001)
 [ -n "$DT" ] || fail "the devlog topic: $(answer "$t/admin14a.log" 1001)"
 client admin checkpass12 "$t/admin14b.log" "{\"cmd\":\"topic_mod_threads\",\"topic\":$DT,\"on\":true}
-{\"cmd\":\"new_thread\",\"topic\":$DT,\"title\":\"Week 1\",\"body\":\"Entry one\"}"
+{\"cmd\":\"new_thread\",\"topic\":$DT,\"title\":\"Week 1\",\"body\":\"Entry <b>one</b>\"}"
 answer "$t/admin14b.log" 1001 | grep -q '"ok":true' ||
 	fail "the topic marked: $(answer "$t/admin14b.log" 1001)"
 DTH=$(num "$t/admin14b.log" 1002)
@@ -698,6 +698,26 @@ answer "$t/bob14.log" 1002 | grep -q '"ok":true' ||
 	fail "the topic's mark: $(answer "$t/bob14.log" 1003 | head -c 300)"
 answer "$t/bob14.log" 1004 | grep -q "only a Steward" || fail "bob unmarked the topic"
 echo "ok: a topic where only a moderator starts threads, replies open; an old file's topics opened"
+# Its Atom feed: linked from the topic's page, parsed as XML, the thread
+# in it with its first message as the page escapes it
+[ "$(get /topic/$DT)" = 200 ] &&
+	grep -q "<link rel=\"alternate\" type=\"application/atom+xml\" href=\"/topic/$DT/atom\">" "$t/page" ||
+	fail "the topic's page links no feed"
+[ "$(get /topic/$DT/atom)" = 200 ] || fail "no feed for the topic"
+python3 - "$t/page" "$DTH" <<'PY' || fail "the feed: $(head -c 600 "$t/page")"
+import sys, xml.etree.ElementTree as ET
+A = "{http://www.w3.org/2005/Atom}"
+f = ET.parse(sys.argv[1]).getroot()
+assert f.tag == A + "feed", f.tag
+e = f.findall(A + "entry")
+assert len(e) == 1, len(e)
+assert e[0].find(A + "title").text == "Week 1"
+assert e[0].find(A + "link").get("href").endswith("/t/" + sys.argv[2])
+c = e[0].find(A + "content")
+assert c.get("type") == "html" and "Entry &lt;b&gt;one" in c.text, c.text
+PY
+[ "$(get /topic/999999/atom)" = 404 ] || fail "a feed for no topic"
+echo "ok: a topic's Atom feed"
 
 [ $n429 -gt 0 ] || fail "no page limit per address"
-echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a new account's one image a thread, vetted by a helper; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; a topic only a moderator starts threads in; pages limited"
+echo "PASS: posted, replied, edited, refused; answered, mentioned, notified; a chat line live; read as HTML with the markup escaped; CommonMark with no unsafe link; a multi-line reply; found by search; a new account limited; reported, hidden with a statement, appealed, restored; files crushed, served and swept, thumbnails drawn and listed; a new account's one image a thread, vetted by a helper; a patch ticket by a new account applied with git am; a long thread read in parts; read positions, following, an account page, a topic edited; a held link approved by a helper, reports weighed by network, a Steward's Accounts page; a topic only a moderator starts threads in, its Atom feed; pages limited"

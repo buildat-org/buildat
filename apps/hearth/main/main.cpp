@@ -13,6 +13,7 @@
 //   /m/<id>          one message, with the way to its thread
 //   /search?q=...    FTS5 over the titles and the messages
 //   /f/<id>          an uploaded file ([FORUM] step 5), kept by its use
+//   /topic/<id>/atom  its threads as an Atom feed ([HEARTH_DEVLOG])
 //   /p/<author>/<name>  a package's place: the threads about it
 //   /brand/<file>    the pages' font and logo ([HTML_BRAND])
 //   /api/v1/discussed   one recent message as JSON, open to any site
@@ -1853,7 +1854,10 @@ struct Module: public interface::Module
 				app += "#open="+html(path);
 		return "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
 				"<meta name=\"viewport\" content=\"width=device-width, "
-				"initial-scale=1\"><title>"+html(title)+"</title><style>"+
+				"initial-scale=1\"><title>"+html(title)+"</title>"+
+				(path_id(path, "/topic/") >= 0 ? "<link rel=\"alternate\" "
+				"type=\"application/atom+xml\" href=\""+html(path)+
+				"/atom\">" : "")+"<style>"+
 				interface::web_brand::css+".blob{color:#26d9ff}"
 				// The message a link pointed at
 				".box:target{border:2px solid #8c33f2;background:#2b2638}"
@@ -2085,6 +2089,16 @@ struct Module: public interface::Module
 				// guesses ([SEC_RUN4_LEFTOVERS])
 				return respond(r, 200, data, type,
 						"X-Content-Type-Options: nosniff\r\n");
+		}
+		// [HEARTH_DEVLOG] /topic/<id>/atom
+		const size_t sl = r.path.rfind('/');
+		if(r.method == "GET" && sl != ss_::npos &&
+				r.path.compare(sl, ss_::npos, "/atom") == 0){
+			const ss_ xml = atom(path_id(r.path.substr(0, sl), "/topic/"),
+					r.host);
+			if(!xml.empty())
+				return respond(r, 200, xml, "application/atom+xml; "
+						"charset=utf-8", "Cache-Control: max-age=300\r\n");
 		}
 		ss_ title, body;
 		if(r.method == "GET")
@@ -2727,6 +2741,67 @@ struct Module: public interface::Module
 		json::Value out = m_feed;
 		out.set("url", base_url(host));
 		return out;
+	}
+
+	// [HEARTH_DEVLOG] A topic's Atom feed: its 20 newest threads, each its
+	// first message as the thread's page renders it; visible threads by an
+	// account that is not banned, as /topic/<id> lists them. "" for no
+	// such topic.
+	// simplified: built on each request, under the pages' rate; a kept
+	// copy as feed()'s when readers poll it hard
+	ss_ atom(int64_t id, const ss_ &host)
+	{
+		const json::Value top = topic(id);
+		if(!top.is_object())
+			return "";
+		std::set<ss_> banned;
+		accounts::access(m_server, [&](accounts::Interface *a){
+			for(const ss_ &b : a->ban_list())
+				banned.insert(b.substr(0, b.find('|')));
+		});
+		auto when = [](int64_t t){
+			const struct tm tmv = interface::os::utc_tm(t);
+			char buf[32];
+			strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+			return ss_(buf);
+		};
+		const ss_ base = base_url(host), self = base+"/topic/"+itos(id);
+		ss_ entries;
+		int64_t updated = 0;
+		int n = 0;
+		Q q(m_db, "SELECT t.id, t.title, t.author, m.body, m.created, "
+				"m.edited FROM threads t JOIN messages m ON m.id = (SELECT "
+				"min(id) FROM messages WHERE thread = t.id) WHERE t.topic = ? "
+				"AND t.hidden = 0 AND m.hidden = 0 ORDER BY t.created DESC, "
+				"t.id DESC LIMIT 100");
+		q.b(id);
+		while(q.step() && n < 20){
+			if(banned.count(q.s(2)))
+				continue;
+			n++;
+			const ss_ url = base+"/t/"+itos(q.i(0)), body = q.s(3);
+			const int64_t up = std::max(q.i(4), q.i(5));
+			updated = std::max(updated, up);
+			json::Value m = json::object();
+			m.set("body", body);
+			m.set("files", files_of(body));
+			const ss_ content = unshown_images(interface::markup::to_html(
+					body), m.get("files"))+patches_html(m)+files_html(m);
+			entries += "<entry><id>"+html(url)+"</id><title>"+
+					html(q.s(1))+"</title><link href=\""+html(url)+"\"/>"
+					"<author><name>"+html(q.s(2))+"</name></author>"
+					"<published>"+when(q.i(4))+"</published><updated>"+
+					when(up)+"</updated><content type=\"html\">"+
+					html(content)+"</content></entry>\n";
+		}
+		// Relative links in a message (/f/, /t/) against the forum
+		return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+				"<feed xmlns=\"http://www.w3.org/2005/Atom\" xml:base=\""+
+				html(base)+"/\">\n<id>"+html(self)+"</id><title>"+
+				html(jstr(top, "name"))+" - Hearth</title><link rel=\"self\" "
+				"href=\""+html(self)+"/atom\"/><link href=\""+html(self)+
+				"\"/><updated>"+when(updated)+"</updated>\n"+entries+
+				"</feed>\n";
 	}
 
 	// The links' base: the admin's "public_url", else the request's Host

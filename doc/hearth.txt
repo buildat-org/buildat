@@ -62,6 +62,12 @@ Claimed from builtin/network (claim_http_path); /app (also /play and
                      20 threads
     /topic/<id>      a topic's threads, answered ones first, then by the
                      latest message, 200 at most
+    /topic/<id>/atom its Atom feed ([HEARTH_DEVLOG]), linked from the
+                     topic's page: its 20 newest threads, newest first,
+                     each its first message as HTML as the thread's
+                     page renders it; visible threads by an account
+                     that is not banned; the links' base as
+                     /api/v1/discussed's; Cache-Control max-age=300
     /t/<id>          a thread: the question, the reply that answered it,
                      then the rest in order; every message at #m<id>;
                      in parts of 256 kB of bodies, ?after=<id> the next
