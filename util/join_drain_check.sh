@@ -48,12 +48,14 @@ for _ in $(seq 50); do
 done
 grep -aq "netsim: listening" "$t/netsim.log" && grep -aq "tls_proxy: up" "$t/proxy.log" ||
 	fail "the proxy or the link did not come up ($t/proxy.log, $t/netsim.log)"
-# The delay is the 15 s the world has to be in the scene
+# The 15 s is a ceiling: the shell ends the client at the first line with
+# 200 chunks in the scene
 {
 	echo "wait_log 120000 vanilla client ready"
 	echo "wait_log 60000 load: the world is in"; echo "delay 15000"
 	echo quit
 } > "$t/cmds"
+world_re="settle: [0-9]+ to mesh, ([2-9][0-9]{2}|[0-9]{4,}) chunks in scene"
 # A WebSocket peer is never the launcher's own client: it joins by the
 # login ([GUEST_NAME_REUSE]), as the server's first account by its setup code
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
@@ -61,12 +63,19 @@ code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
 BUILDAT_JOIN_NAME=drainer BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
 	BUILDAT_JOIN_CODE=$code BUILDAT_CA_FILE=$t/cert.pem run_client 60 "$t/client.log" timeout 240 \
 	"$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" -s "https://127.0.0.1:$LINK" \
-	-w 800x450 -l 4 -o sound_mute=1 -c @"$t/cmds" ||
+	-w 800x450 -l 4 -o sound_mute=1 -c @"$t/cmds" &
+cl=$!
+until grep -qaE "$world_re" "$t/client.log" 2>/dev/null; do
+	kill -0 $cl 2>/dev/null || break
+	sleep 0.2
+done
+grep -qaE "$world_re" "$t/client.log" && pkill -P $cl -f "[b]in/buildat " 2>/dev/null
+wait $cl
+grep -aq "Command sequence failed\|run_client:" "$t/client.log" &&
 	fail "the client ($t/client.log): $(grep -aE "Command sequence failed|run_client:" "$t/client.log" | tail -1)"
 grep -a "TLS: [0-9]* bytes" "$t/client.log" | sed 's/.*TLS: /TLS: /' | head -3
 ready=$(grep -a "vanilla client ready" "$t/client.log" | head -1 | awk '{print $3}')
-world=$(grep -aE "settle: [0-9]+ to mesh, ([2-9][0-9]{2}|[0-9]{4,}) chunks in scene" \
-	"$t/client.log" | head -1 | awk '{print $3}')
+world=$(grep -aE "$world_re" "$t/client.log" | head -1 | awk '{print $3}')
 [ -n "$ready" ] && [ -n "$world" ] || fail "no ready ($ready) or no world ($world) ($t/client.log)"
 secs=$(python3 -c "import sys
 def s(x): h, m, r = x.split(':'); return int(h) * 3600 + int(m) * 60 + float(r)

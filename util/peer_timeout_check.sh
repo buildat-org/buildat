@@ -48,8 +48,8 @@ print("%.0f" % (time.time() - t0))
 PY
 )
 [ "$raw" -ge 58 ] && [ "$raw" -le 66 ] || fail "the raw peer went after ${raw} s, not 60"
-# simplified: 2 s for the select after the drop to have run; nothing logs it
-sleep 2
+# The drop said; the next peer's accept is the select after it
+wait_for_log "$t/srv.log" "nothing in 60 s; dropping it" 10 || fail "the drop not said ($t/srv.log)"
 n0=$(grep -c "connected" "$t/srv.log")
 # A peer with no hello logs nothing until it goes: its "disconnected" is
 # the line, so it closes at once (the 0.5 s: its byte read before the close)

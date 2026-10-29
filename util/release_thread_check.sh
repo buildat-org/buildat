@@ -195,9 +195,9 @@ for _ in $(seq 300); do
 	sleep 0.2
 done
 grep -q "STATUS Listening" "$t/hearth2.log" || fail "Hearth did not start again ($(tail -3 "$t/hearth2.log"))"
-# simplified: 5 s for the restarted Hearth to read the Aitta and not make a
-# thread, as there is no line for "read, nothing new"
-sleep 5
+# The restarted Hearth's first read of the Aitta, posted
+wait_for_log "$t/hearth2.log" "the release sources read" 30 ||
+	fail "the restarted Hearth did not read the Aitta ($(tail -3 "$t/hearth2.log"))"
 grep -q "is the thread" "$t/hearth2.log" && fail "a second thread after the restart"
 n=$(curl -s "http://127.0.0.1:$H/t/6" | grep -c "demo 1\.")
 [ "$n" = 0 ] || fail "a second thread after the restart (/t/6)"

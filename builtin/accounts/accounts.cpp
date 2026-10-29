@@ -542,6 +542,7 @@ struct Module: public interface::Module, public Interface
 	storage::Store *m_store = nullptr;
 	AccessSettings m_access;
 	ss_ m_setup_code;
+	bool m_admin_said = false;    // "has an admin" said: once, or as a code goes
 	// Whether a readable admin was looked for once: the log says how a
 	// locked-out operator gets back in
 	bool m_checked_locked_out = false;
@@ -1572,6 +1573,9 @@ struct Module: public interface::Module, public Interface
 			}
 		}
 		if(admin){
+			if(!m_setup_code.empty() || !m_admin_said)
+				log_i(MODULE, "The server has an admin: not offered to be claimed");
+			m_admin_said = true;
 			m_setup_code.clear();
 			ss_ kept;
 			if(m_store->get("access/setup_code", kept))

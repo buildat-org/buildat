@@ -622,6 +622,8 @@ struct Module: public interface::Module
 	bool m_rkick = true;          // poll now, not in a minute
 	json::Value m_rsources;       // the admin's "release_sources"
 	std::set<ss_> m_rknown;       // releases with a thread, or given up on
+	int m_rpolls = 0;             // the poller's rounds, under m_rmutex
+	int m_rpolls_said = 0;        // the module thread's, logged
 	sv_<ReleaseFound> m_rfound;
 	std::thread m_rthread;
 	// [HEARTH_VISITOR_FLOW]: the Starports this server announces to (from
@@ -1059,6 +1061,7 @@ struct Module: public interface::Module
 			std::lock_guard<std::mutex> lock(m_rmutex);
 			for(ReleaseFound &f : found)
 				m_rfound.push_back(f);
+			m_rpolls++;
 			m_rpackages = packages;
 			m_slist = servers;
 		}
@@ -1204,9 +1207,18 @@ struct Module: public interface::Module
 			}
 		}
 		sv_<ReleaseFound> found;
+		int polls = 0;
 		{
 			std::lock_guard<std::mutex> lock(m_rmutex);
 			found.swap(m_rfound);
+			polls = m_rpolls;
+		}
+		// One line a poll, once its releases are posted: what a check
+		// waits on to see that a poll made no thread
+		if(polls != m_rpolls_said){
+			m_rpolls_said = polls;
+			log_i(MODULE, "Hearth: the release sources read, %zu new",
+					found.size());
 		}
 		if(found.empty() || !m_db)
 			return;
