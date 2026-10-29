@@ -158,19 +158,22 @@ pids+=($!)
 until_log "$t/c1.log" "floorpla: Entered the plan p1" 60 $! || fail "the native client did not join ($t/c1.log)"
 
 # The web client: logged in as the same account, kept, in a plan w1 it
-# makes. The waits are settles after the line: the login screen drawn
-# after the hello, the picker's field focused, and the screen drawn
-# before each shot
+# makes. The login by keys, not pixels ([SERVE_UPDATE_JOIN_CLICK]: the
+# dialog's rows moved and a fixed click hit their edges): the name has
+# the focus, Shift+Tab is "Keep me logged in" (the Starport's "ids" are
+# off: no Starport ID button between), Space presses it, and Enter in the
+# password joins. The waits are settles after the line: the login screen
+# drawn, the picker's field focused, and the screen drawn before each shot
 cat > "$t/w.json" <<J
 [
 	["nav", "\${URL}"],
 	["waitlog", "run_script_file\\\\(accounts/accounts.lua\\\\)", 120],
-	["waitlog", "hello: Starport IDs", 30],
-	["wait", 1000],
-	["click", 600, 289],
-	["click", 600, 364],
+	["waitlog", "accounts: the login page shown", 30],
+	["wait", 500],
+	["chord", "Shift+Tab"], ["key", "Space"], ["key", "Tab"],
 	["type", "adm"], ["key", "Tab"], ["type", "adminpass12"],
-	["click", 600, 543],
+	["shot", "\${OUT}/web_login.png"],
+	["key", "Enter"],
 	["waitlog", "Joined as adm", 30],
 	["waitlog", "Plan picker:", 30],
 	["wait", 500],
