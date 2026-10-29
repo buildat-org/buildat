@@ -64,6 +64,11 @@ struct ChunkBuffer
 	pv::Vector3DInt32 chunk_p; // For logging
 	up_<VoxelVolume> volume;
 	bool dirty = false; // If false, buffer has only been read from so far
+	// [HC_GROUND_SPEED] Dirty past its padding: a commit that changed only
+	// the padding (dirty_neighbour_padding) leaves the collision boxes as
+	// they are, since they are made of the chunk's own voxels. A generated
+	// section's neighbours rebuilt theirs five times over for nothing.
+	bool interior_dirty = false;
 	int64_t last_accessed_us = 0;
 
 	ChunkBuffer(){}
@@ -122,6 +127,12 @@ struct Section
 	// says no until the merge lands, and a save does not mark it generated
 	// -- a section saved in between came back as terrain nobody made.
 	bool awaiting = false;
+	// [HC_GROUND_SPEED] A neighbour's write changed the padding of a chunk
+	// here while awaiting: its refill waits for the generator's merge, which
+	// rewrites the chunks anyway (write_volume). Each section generated
+	// committed the chunks of every awaiting neighbour, a hill's five times
+	// over.
+	bool padding_stale = false;
 	// Something has changed since this section was read from the save, or it
 	// was never in one. A section is written only when this is set, which is
 	// what keeps saving a world nobody is digging in free.
@@ -1908,6 +1919,7 @@ struct CInstance: public voxelworld::Instance
 				m_total_buffers_dirty--;
 			buf.volume.reset();
 			buf.dirty = false;
+			buf.interior_dirty = false;
 		}
 
 		m_sections_with_loaded_buffers.erase(
@@ -2209,6 +2221,7 @@ struct CInstance: public voxelworld::Instance
 
 	void mark_buffer_dirty(ChunkBuffer &buf)
 	{
+		buf.interior_dirty = true;
 		if(!buf.dirty){
 			buf.dirty = true;
 			m_total_buffers_dirty++;
@@ -2280,8 +2293,10 @@ struct CInstance: public voxelworld::Instance
 		return buf->volume->sample_at(voxel_p);
 	}
 
-	void mark_buffer_dirty(Section *section, ChunkBuffer &buf)
+	void mark_buffer_dirty(Section *section, ChunkBuffer &buf,
+			bool interior = true)
 	{
+		buf.interior_dirty = buf.interior_dirty || interior;
 		if(!buf.dirty){
 			buf.dirty = true;
 			m_total_buffers_dirty++;
@@ -2351,6 +2366,11 @@ struct CInstance: public voxelworld::Instance
 				continue;
 			const pv::Vector3DInt32 np(chunk_p.getX() + dx,
 					chunk_p.getY() + dy, chunk_p.getZ() + dz);
+			Section *ns = get_section_of_chunk(np);
+			if(ns && ns->awaiting){
+				ns->padding_stale = true;
+				continue;
+			}
 			ChunkBuffer *nbp = load_buffer(np);
 			if(nbp == nullptr || nbp->dirty)
 				continue;
@@ -2376,7 +2396,7 @@ struct CInstance: public voxelworld::Instance
 						y - off.getY(), z - off.getZ()).data !=
 						peek_voxel(pv::Vector3DInt32(x, y, z)).data;
 			if(differs)
-				mark_buffer_dirty(get_section_of_chunk(np), nb);
+				mark_buffer_dirty(get_section_of_chunk(np), nb, false);
 		}
 	}
 
@@ -2943,6 +2963,16 @@ struct CInstance: public voxelworld::Instance
 				s->arrived = true;
 				s->awaiting = false;
 				s->generated = true;
+				// The padding a neighbour changed meanwhile, of the chunks
+				// this did not write
+				if(s->padding_stale){
+					s->padding_stale = false;
+					for(size_t i = 0; i < s->num_chunks; i++){
+						ChunkBuffer *b = load_buffer(s->get_chunk_p(i));
+						if(b && !b->dirty)
+							mark_buffer_dirty(s, *b, false);
+					}
+				}
 			}
 		}
 		// The voxels that block light beside a changed one, and the changed
@@ -3101,10 +3131,12 @@ struct CInstance: public voxelworld::Instance
 		m_commit_scene_us += interface::os::time_us() - t_before_scene;
 
 		// Mark node for collision box update
-		mark_node_for_physics_update(node_id);
+		if(chunk_buffer.interior_dirty)
+			mark_node_for_physics_update(node_id);
 
 		// Reset dirty flag
 		chunk_buffer.dirty = false;
+		chunk_buffer.interior_dirty = false;
 		m_total_buffers_dirty--;
 
 		// Telling replicate and the clients about it is the same work for
