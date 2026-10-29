@@ -940,11 +940,13 @@ end
 
 -- **The built-in default hosts** ([LIVELY_MENU], user, 2026-10-29): the
 -- default Starport, Aitta and Hearth (client/core/starport sets them)
--- count as accepted for the client's own fetches ("" asking) while it is
--- on no server -- the launcher's Home, Apps from Aitta -- so a fresh user
--- sees what is going on without a dialog. A host the managed file names
--- or the user typed is asked about as before, and a server's code, which
--- runs only while the client is on its server, gets nothing from this.
+-- count as accepted for the client's own fetches -- M.http_get and
+-- M.http_post, the trusted side's, never M.safe's -- while it is on no
+-- server (the launcher's Home, Apps from Aitta), so a fresh user sees what
+-- is going on without a dialog. A host the managed file names or the user
+-- typed is asked about as before. Sandboxed code gets nothing from this:
+-- off a server with no storage of its own it asks as "" too, so the asker
+-- does not say who is trusted; the entry point does.
 local default_origins = {}
 function M.set_default_hosts(urls)
 	default_origins = {}
@@ -953,19 +955,19 @@ function M.set_default_hosts(urls)
 		if origin then default_origins[origin] = true end
 	end
 end
-local function by_default(server, uri)
-	return server == "" and default_origins[uri] == true and
+local function by_default(trusted, uri)
+	return trusted == true and default_origins[uri] == true and
 			__buildat_server_address() == nil
 end
 -- Whether a url's host is a default one that counts as accepted now
 function M.is_default_host(url)
 	local origin = tostring(url):match("^(https?://[^/?#]+)")
-	return origin ~= nil and by_default("", origin)
+	return origin ~= nil and by_default(true, origin)
 end
 
 -- The user's leave for the url's host, then the fetch: a GET, or with a
 -- body a POST of JSON
-local function gated_http(server, url, cb, options, body, hops)
+local function gated_http(server, url, cb, options, body, hops, trusted)
 	-- The authority is what libcurl connects to, so it is what the user is
 	-- asked about, port included: a host and a port and nothing else. A
 	-- `user@` part or a backslash was read as one host here and another
@@ -992,9 +994,10 @@ local function gated_http(server, url, cb, options, body, hops)
 		if not to:match("^https?://") then
 			return user_cb(nil, "a redirect to "..to.." is not followed")
 		end
-		gated_http(server, to, user_cb, options, nil, (hops or 0) + 1)
+		gated_http(server, to, user_cb, options, nil, (hops or 0) + 1,
+				trusted)
 	end
-	if by_default(server, uri) then
+	if by_default(trusted, uri) then
 		http_start(url, cb, body)
 		return
 	end
@@ -1016,33 +1019,33 @@ local function gated_http(server, url, cb, options, body, hops)
 	end, type(options) == "table" and options.description or nil)
 end
 
-local function http_get(server, url, cb, options)
+local function http_get(server, url, cb, options, trusted)
 	if type(url) ~= "string" or type(cb) ~= "function" then
 		error("network: http_get(url: string, cb: function)")
 	end
-	gated_http(server, url, cb, options)
+	gated_http(server, url, cb, options, nil, nil, trusted)
 end
 function M.safe.http_get(url, cb, options)
 	http_get(asking_server(), url, cb, options)
 end
 function M.http_get(url, cb, options)
-	http_get("", url, cb, options)
+	http_get("", url, cb, options, true)
 end
 
 -- http_post(url, body, cb[, options]): http_get's, a POST of the JSON
 -- `body` ([STARPORT]: a report)
-local function http_post(server, url, body, cb, options)
+local function http_post(server, url, body, cb, options, trusted)
 	if type(url) ~= "string" or type(body) ~= "string" or
 			type(cb) ~= "function" then
 		error("network: http_post(url: string, body: string, cb: function)")
 	end
-	gated_http(server, url, cb, options, body)
+	gated_http(server, url, cb, options, body, nil, trusted)
 end
 function M.safe.http_post(url, body, cb, options)
 	http_post(asking_server(), url, body, cb, options)
 end
 function M.http_post(url, body, cb, options)
-	http_post("", url, body, cb, options)
+	http_post("", url, body, cb, options, true)
 end
 
 -- The addresses this client has used, for a list to pick from: the

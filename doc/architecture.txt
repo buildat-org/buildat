@@ -216,9 +216,10 @@ Hearth's announcements and 3 most active threads (its /api/v1/feed,
 doc/hearth.txt), each opened by a click; it is not there when none is.
 Home asks nothing: it reads from the hosts the user has accepted and
 from the built-in defaults -- the default Starport, Aitta and Hearth
-count as accepted for the client's own fetches while it is on no server,
-so a fresh client shows the strip; a host the managed file names or the
-user typed is asked about as before (client/core/network
+count as accepted for the client's own fetches (the trusted side's
+http_get and http_post, never a sandboxed one's) while it is on no
+server, so a fresh client shows the strip; a host the managed file names
+or the user typed is asked about as before (client/core/network
 set_default_hosts). Its screens.lua is where every launch UI's app starts
 end: the local app list, connecting, and the screens a local server starts
 behind, run in the sandbox by client/launch_grid.lua. Leaving an app

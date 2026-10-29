@@ -20,7 +20,8 @@
 #      hosts are not accepted: no strip, and nothing asked.
 #   5b. A fresh launcher whose built-in defaults (BUILDAT_STARPORT_DEFAULT,
 #      _AITTA_, _HEARTH_DEFAULT) are the local ones: the whole strip with
-#      no host accepted and no dialog. With the Hearth and the Aitta named
+#      no host accepted and no dialog; the developer console's sandboxed
+#      http_get of that same default host is asked about. With the Hearth and the Aitta named
 #      in its settings by another name (localhost), not a default: no
 #      strip, and Apps from Aitta asks about that Aitta.
 #   6. The web launcher (apps/play's page, headless Chrome) with the same
@@ -174,12 +175,20 @@ grep -aq "Asking the user about" "$t/none.log" && fail "a permission dialog on H
 grep -aq "hearth feed:" "$t/none.log" && fail "a feed fetched with no Hearth set"
 
 # 5b.
-printf '%s\n' "wait_log_any 30000 $now_line" quit > "$t/def.cmds"
+# Then a sandboxed fetch of the same default host, from the launcher's
+# console (on no server, no storage of its own): asked about
+printf '%s\n' "wait_log_any 30000 $now_line" 'mouse_pos 2 2' 'delay 300' \
+	'text developer c' 'wait_log 5000 rows for "developer c"' 'keypress Return' \
+	'wait_log 10000 lines of the API document' \
+	"text require[[buildat/core/network]].http_get([[$F/probe]], function() end)" \
+	'keypress Return' "wait_log 10000 Asking the user about $F" quit > "$t/def.cmds"
 run_client 60 "$t/def.log" env BUILDAT_STARPORT_DEFAULT=$F BUILDAT_AITTA_DEFAULT=$F \
 	BUILDAT_HEARTH_DEFAULT=$H timeout 60 bin/buildat -o launch_ui=launch_menu \
 	-D "$t/cl_def" -C "$t/cl_def.cache" -w 1000x700 -l 3 -o sound_mute=1 \
 	-c @"$t/def.cmds" || fail "the strip from the defaults ($t/def.log)"
-grep -aq "Asking the user about" "$t/def.log" && fail "a dialog for a default host"
+asks=$(grep -a "Asking the user about" "$t/def.log" | grep -v " __app   : ")
+[ "$(echo "$asks" | grep -c .)" = 1 ] && echo "$asks" | grep -q "about $F for \"\"" ||
+	fail "the client's own fetches asked, or the console's did not: $asks"
 mkdir -p "$t/cl_other"
 FL=${F/127.0.0.1/localhost}
 printf '{"starports": [], "aittas": ["%s"], "hearth": "%s"}\n' "$FL" \
