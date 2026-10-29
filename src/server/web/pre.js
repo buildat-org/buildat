@@ -157,6 +157,33 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 		});
 		setInterval(save, 5000);
 	});
+	// [WEB_NESTED_WORKER_HANG] The server's threads are the page's own
+	// workers: Firefox's new Worker() in a worker sometimes never returns,
+	// and the thread, and all that waits on it, with it. A thread's worker
+	// here is a MessagePort, whose other end the page gives the worker it
+	// makes ({thread: port, id}; {thread_end: id} terminates it). The
+	// thread's side is below.
+	// simplified: replaces Emscripten 3.1.60's PThread.allocateUnusedWorker,
+	// whose callers use only postMessage, onmessage, onerror (the page's
+	// worker's errors are the page's here) and terminate; on an upgrade
+	// check that is still so, or drop this if the hang is gone
+	Module.preRun.push(function(){
+		if(typeof PThread !== 'object' ||
+				typeof PThread.allocateUnusedWorker !== 'function' ||
+				!Array.isArray(PThread.unusedWorkers))
+			return abort('src/server/web/pre.js: not Emscripten 3.1.60\'s ' +
+					'PThread, the page cannot make the server\'s threads');
+		var next_thread = 0;
+		PThread.allocateUnusedWorker = function(){
+			var c = new MessageChannel(), id = ++next_thread;
+			postMessage({thread: c.port2, id: id}, [c.port2]);
+			c.port1.terminate = function(){
+				c.port1.close();
+				postMessage({thread_end: id});
+			};
+			PThread.unusedWorkers.push(c.port1);
+		};
+	});
 	var ready = false, held = [];
 	var take = function(m){
 		if(m.op === 'stop')
@@ -211,4 +238,22 @@ if(ENVIRONMENT_IS_WORKER && !ENVIRONMENT_IS_PTHREAD &&
 	Module.onAbort = function(what){
 		postMessage({exit: 'aborted: ' + what});
 	};
+}
+
+// [WEB_NESTED_WORKER_HANG] A thread's worker made by the page (above): its
+// first message is the port to the server's worker, by which its messages
+// go and come from there on, the ones coming given to Emscripten's handler
+// as the worker's own
+if(ENVIRONMENT_IS_PTHREAD && typeof process !== 'object'){
+	var thread_port = null;
+	self.addEventListener('message', function(e){
+		if(thread_port || !(e.data && e.data.buildat_port))
+			return;
+		e.stopImmediatePropagation();
+		thread_port = e.data.buildat_port;
+		thread_port.onmessage = function(e){
+			self.dispatchEvent(new MessageEvent('message', {data: e.data}));
+		};
+	});
+	self.postMessage = function(m, t){ thread_port.postMessage(m, t); };
 }

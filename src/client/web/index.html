@@ -781,9 +781,27 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 					'which the local server needs';
 			return;
 		}
-		w = new Worker('local/' + app + '/buildat_server.js?name=' +
+		var url = 'local/' + app + '/buildat_server.js?name=' +
 				encodeURIComponent(name) + (package_ ? '&package=1' : '') +
-				(package_ && package_.server ? '&server=' + package_.shift : ''));
+				(package_ && package_.server ? '&server=' + package_.shift : '');
+		w = new Worker(url);
+		// [WEB_NESTED_WORKER_HANG] The server's threads, made here, each
+		// given the port the server sent for it (src/server/web/pre.js)
+		var threads = {};
+		var thread = function(m){
+			var t = threads[m.id] = new Worker(url, {name: 'em-pthread'});
+			t.postMessage({buildat_port: m.thread}, [m.thread]);
+			t.onerror = function(e){
+				console.log('server: a thread failed: ' + e.message);
+				p.gone = p.closed = 'a thread of the local server failed: ' +
+						e.message;
+			};
+		};
+		var end_threads = function(){
+			for(var id in threads)
+				threads[id].terminate();
+			threads = {};
+		};
 		if(package_)
 			w.postMessage({op: 'files', root: package_.root,
 					files: package_.files, wasm: package_.wasm,
@@ -796,8 +814,16 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 				console.log('server: ' + m.log);
 			else if(m.closed)
 				p.closed = 'the local server closed the connection';
-			else if(m.exit !== undefined)
+			else if(m.thread)
+				thread(m);
+			else if(m.thread_end){
+				if(threads[m.thread_end])
+					threads[m.thread_end].terminate();
+				delete threads[m.thread_end];
+			} else if(m.exit !== undefined){
+				end_threads();
 				p.gone = p.closed = 'the local server stopped (' + m.exit + ')';
+			}
 		};
 		w.onerror = function(e){
 			p.gone = p.closed = 'the local server did not start: ' +
