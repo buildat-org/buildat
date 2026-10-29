@@ -54,7 +54,12 @@ grep -aq "netsim: listening" "$t/netsim.log" && grep -aq "tls_proxy: up" "$t/pro
 	echo "wait_log 60000 load: the world is in"; echo "delay 15000"
 	echo quit
 } > "$t/cmds"
-BUILDAT_CA_FILE=$t/cert.pem run_client 60 "$t/client.log" timeout 240 \
+# A WebSocket peer is never the launcher's own client: it joins by the
+# login ([GUEST_NAME_REUSE]), as the server's first account by its setup code
+code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
+[ -n "$code" ] || fail "no setup code ($t/srv.log)"
+BUILDAT_JOIN_NAME=drainer BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1 \
+	BUILDAT_JOIN_CODE=$code BUILDAT_CA_FILE=$t/cert.pem run_client 60 "$t/client.log" timeout 240 \
 	"$here/Build/bin/buildat" -C "$t/nc" -D "$t/nu" -s "https://127.0.0.1:$LINK" \
 	-w 800x450 -l 4 -o sound_mute=1 -c @"$t/cmds" ||
 	fail "the client ($t/client.log): $(grep -aE "Command sequence failed|run_client:" "$t/client.log" | tail -1)"
