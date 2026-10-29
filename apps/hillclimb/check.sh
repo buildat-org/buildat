@@ -633,7 +633,8 @@ cat > "$t/mp2.cmds" <<C
 wait_log 120000 car drawn as a ghost
 wait_log 120000 hillclimb: observing
 wait_log 120000 hillclimb: the round's results
-delay 8000
+# The hill made anew 5 s after the results: its line
+wait_log 30000 N, day
 quit
 C
 mp_client mp1 "$t/mp1.cmds"; c1=$CLIENT
@@ -738,7 +739,8 @@ $(for i in 1 2 3 4 5 6 7 8 9; do echo keypress Down; echo delay 150; done)
 screenshot $t/hill_menu.png
 keypress Return
 wait_log 5000 hillclimb: the hill menu sends params
-delay 3000
+# The hill made with them: its line
+wait_log 10000 N, day
 keydown W
 delay 1500
 keypress Escape

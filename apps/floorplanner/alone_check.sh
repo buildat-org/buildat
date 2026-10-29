@@ -46,7 +46,7 @@ delay 1000
 screenshot $t/plan.png
 event fp_cells
 event fp_alone on
-delay 3000
+wait_log 10000 voxel alone: size lines
 event fp_cells
 screenshot $t/alone.png
 mouse_pos 550 500
