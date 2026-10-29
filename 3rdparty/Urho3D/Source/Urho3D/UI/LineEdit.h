@@ -200,6 +200,9 @@ protected:
     /// buildat [TEXT_UNDO]: the last edit's kind (-1 none) and time (SDL ticks).
     int lastEditKind_;
     unsigned lastEditTime_;
+    /// buildat [HEARTH_PAGE_KEYS]: the x on its wrapped row that a run of Up, Down, Page Up and Page Down keeps to, and the cursor position the last of them left (M_MAX_UNSIGNED none: the next starts a run).
+    int goalX_;
+    unsigned goalAt_;
 
 private:
     /// Handle being focused.

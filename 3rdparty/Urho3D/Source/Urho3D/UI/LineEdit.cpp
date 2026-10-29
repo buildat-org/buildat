@@ -56,7 +56,9 @@ LineEdit::LineEdit(Context* context) :
     cursorMovable_(true),
     textSelectable_(true),
     textCopyable_(true),
-    multiLine_(false)
+    multiLine_(false),
+    goalX_(0),
+    goalAt_(M_MAX_UNSIGNED)
 {
     clipChildren_ = true;
     SetEnabled(true);
@@ -247,12 +249,14 @@ void LineEdit::SelectRange(unsigned start, unsigned end)
     text_->SetSelection(start, end - start);
     dragBeginCursor_ = start;
     cursorPosition_ = end;
+    goalAt_ = M_MAX_UNSIGNED;
     UpdateCursor();
 }
 
 void LineEdit::OnClickBegin(const IntVector2& position, const IntVector2& screenPosition, int button, int buttons, int qualifiers,
     Cursor* cursor)
 {
+    goalAt_ = M_MAX_UNSIGNED;
     // buildat [TEXT_KEYS]: a third click within the double-click time selects
     // the whole text, or the line in a multi-line edit
     if (button == MOUSEB_LEFT && textSelectable_ && lastDoubleClick_ &&
@@ -398,6 +402,12 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
     bool cursorMoved = false;
     // buildat [TEXT_KEYS]: Home and End are the ends; Ctrl with an arrow a word
     bool ends = false;
+    // buildat [HEARTH_PAGE_KEYS]: a key other than a vertical move or a
+    // modifier ends a run of them; the next starts from the cursor's x
+    bool vertical = key == KEY_UP || key == KEY_DOWN || key == KEY_PAGEUP || key == KEY_PAGEDOWN;
+    if (!vertical && key != KEY_LSHIFT && key != KEY_RSHIFT && key != KEY_LCTRL && key != KEY_RCTRL &&
+        key != KEY_LALT && key != KEY_RALT && key != KEY_LGUI && key != KEY_RGUI)
+        goalAt_ = M_MAX_UNSIGNED;
 
     // buildat [HEARTH_MVP]: a multi-line edit moves by rows, and Enter is a
     // line break; Ctrl+Enter is what finishes it
@@ -406,6 +416,15 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
         IntVector2 at = VectorRoundToInt(text_->GetCharPosition(cursorPosition_));
         int row = text_->GetRowHeight();
         unsigned target = M_MAX_UNSIGNED;
+        // buildat [HEARTH_PAGE_KEYS]: a vertical move goes to the run's x,
+        // so it neither drifts nor stays capped by a short or empty row;
+        // rows are the wrapped ones, a paragraph's as much as a line's
+        if (vertical)
+        {
+            if (goalAt_ != cursorPosition_)
+                goalX_ = at.x_;
+            at.x_ = goalX_;
+        }
         if (key == KEY_UP)
             target = at.y_ < row ? 0 : GetCharIndexOnRow(IntVector2(at.x_, at.y_ - row));
         else if (key == KEY_DOWN)
@@ -460,6 +479,8 @@ void LineEdit::OnKey(int key, int buttons, int qualifiers)
             else
                 text_->ClearSelection();
             cursorPosition_ = target;
+            if (vertical)
+                goalAt_ = target;
             UpdateCursor();
             return;
         }
@@ -816,6 +837,7 @@ void LineEdit::SetCursorPosition(unsigned position)
     if (position != cursorPosition_)
     {
         cursorPosition_ = position;
+        goalAt_ = M_MAX_UNSIGNED;
         UpdateCursor();
     }
 }
@@ -891,6 +913,7 @@ void LineEdit::SetMultiLine(bool enable)
 
 void LineEdit::UpdateText()
 {
+    goalAt_ = M_MAX_UNSIGNED;
     unsigned utf8Length = line_.LengthUTF8();
 
     if (!echoCharacter_)
@@ -1038,6 +1061,7 @@ unsigned LineEdit::GetCharIndexOnRow(const IntVector2& textPosition)
 
 void LineEdit::HandleFocused(StringHash /*eventType*/, VariantMap& eventData)
 {
+    goalAt_ = M_MAX_UNSIGNED;
     if (eventData[Focused::P_BYKEY].GetBool())
     {
         cursorPosition_ = line_.LengthUTF8();

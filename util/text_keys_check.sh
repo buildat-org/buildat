@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: quick
-# cost: ~120 s (2026-10-29)
+# cost: ~150 s (2026-10-29)
 # covers: 3rdparty/Urho3D/Source/Urho3D/UI/LineEdit.cpp src/client/web/index.html client/core/uistack/init.lua util/web_drive.js apps/hearth/main/client_lua/init.lua
 # [TEXT_KEYS], the text field's keys and clicks, by the ui scan's text,
 # cursor and selection after each step:
@@ -14,8 +14,10 @@
 #      Alt+Backspace at a line's start join it to the one above, past its
 #      trailing spaces.
 #   [HEARTH_PAGE_KEYS]: in 2, 120 lines; Page Down twice, Page Up, Shift+
-#      Page Down move by the rows the page shows of the field less two,
-#      native and in Chrome.
+#      Page Down move by the rows the page shows of the field less two;
+#      Up and Down keep their column past a short and an empty line until
+#      another key, and a wrapped paragraph moves by its rows; native and
+#      in Chrome.
 #   [TEXT_UNDO]: in 1, "alpha beta" typed over the selection and "beta"
 #      pasted over "alpha"; Ctrl+Z twice, Ctrl+Y, Ctrl+Shift+Z, the text,
 #      cursor and selection each time. In 2, Ctrl+Z undoes the join.
@@ -119,7 +121,20 @@ for i in $(seq -w 1 120); do p+="text L$i\n"; [ $i = 120 ] || p+='keypress Retur
 m+="${p}delay 300\n$(ctrl Home)event scan p1\nkeypress PageDown\ndelay 200\nevent scan p2\n"
 m+='keypress PageDown\ndelay 200\nevent scan p3\nkeypress PageUp\ndelay 200\nevent scan p4\n'
 m+='keydown shift\nkeypress PageDown\nkeyup shift\ndelay 200\nevent scan p5\n'
-m+="screenshot $t/multi.png\nquit\n"
+m+="screenshot $t/pages.png\n"
+# The goal column: lines A (24 letters, 0-24), B "ab" (25-27), an empty one
+# (28), D as A (29-53) and a paragraph of 60 words wrapping over
+# rows (54-293). Down from A's end passes B and the empty line and lands
+# at D's end; Up comes back the same; Left ends the run. The paragraph's
+# Up moves by its wrapped rows.
+P=$(seq -f 'w%02g' -s ' ' 1 60)
+m+="$(ctrl A)text abcdefghijklmnopqrstuvwx\nkeypress Return\ntext ab\nkeypress Return\nkeypress Return\n"
+m+="text abcdefghijklmnopqrstuvwx\nkeypress Return\ntext $P\ndelay 300\n$(ctrl Home)keypress End\ndelay 200\nevent scan g0\n"
+for g in 1:Down 2:Down 3:Down 4:Up 5:Up 6:Up 7:Down 8:Left 9:Down 10:Down; do
+	m+="keypress ${g#*:}\ndelay 200\nevent scan g${g%:*}\n"
+done
+m+="$(ctrl End)event scan g11\nkeypress Up\ndelay 200\nevent scan g12\nkeypress Up\ndelay 200\nevent scan g13\n"
+m+="screenshot $t/goal.png\nquit\n"
 hearth "$t/multi.log" "" "$m" BUILDAT_HEARTH_OPEN=1
 grep -aq "Lua runtime error" "$t/multi.log" && fail "a Lua error in the multi-line drive"
 # The text's line break is a line break in the log too
@@ -133,7 +148,7 @@ wantm m5 'text "one two  |three four" cursor 10 selection 0+0'
 curl -s "http://127.0.0.1:$SERVER_PORT/t/1" | grep -q "three" && fail "Ctrl+A in the reply field sent it"
 echo "ok: multi-line: Ctrl+A the field's, the triple-click a line, Alt+Backspace at a line's start joins it, Ctrl+Z parts them"
 # [HEARTH_PAGE_KEYS]: the page shows 27 of the field's rows at 800x600
-# (multi.png), so a page is 25: line 26, 51, back to 26, and selected to 51
+# (pages.png), so a page is 25: line 26, 51, back to 26, and selected to 51
 # The scan's text is 120 lines: its cursor and selection are on the last
 wantp(){
 	local got
@@ -146,6 +161,12 @@ wantp p3 'cursor 250 selection 0+0'
 wantp p4 'cursor 125 selection 0+0'
 wantp p5 'cursor 250 selection 125+125'
 echo "ok: multi-line: Page Down and Up by the rows the page shows less two, Shift+Page Down selects"
+# The paragraph's five rows at 800x600 (goal.png): Up from its end goes
+# after "w46" and then to "w33"
+for g in 0:24 1:27 2:28 3:53 4:28 5:27 6:24 7:27 8:26 9:28 10:30 11:293 12:237 13:182; do
+	wantp g${g%:*} "cursor ${g#*:} selection 0+0"
+done
+echo "ok: multi-line: Up and Down keep the column past a short and an empty line, Left ends it, a paragraph by its wrapped rows"
 # And in Chrome at 800x600, its larger text 15 rows shown: a page is 13.
 # The stand-in's selection is the field's, synced each frame
 if [ ${#web[@]} -gt 0 ] && command -v google-chrome > /dev/null; then
@@ -162,15 +183,31 @@ if [ ${#web[@]} -gt 0 ] && command -v google-chrome > /dev/null; then
 		echo '["key", "PageDown"],'; ev p3
 		echo '["key", "PageUp"],'; ev p4
 		echo '["chord", "Shift+PageDown"],'; ev p5
-		echo '["shot", "${OUT}/pages.png"]]'
+		echo '["shot", "${OUT}/pages.png"], ["selall"],'
+		# The goal column's lines and paragraph, as natively; the paragraph
+		# five rows of 12 or 13 words (goal.png): after "w48", "w36"
+		echo '["type", "abcdefghijklmnopqrstuvwx"], ["key", "Enter"], ["type", "ab"], ["key", "Enter"], ["key", "Enter"],'
+		echo "[\"type\", \"abcdefghijklmnopqrstuvwx\"], [\"key\", \"Enter\"], [\"type\", \"$P\"],"
+		echo '["wait", 500], ["chord", "Ctrl+Home"], ["key", "End"],'; ev g0
+		for g in 1:Down 2:Down 3:Down 4:Up 5:Up 6:Up 7:Down 8:Left 9:Down 10:Down; do
+			echo "[\"key\", \"${g#*:}\"],"; ev g${g%:*}
+		done
+		echo '["chord", "Ctrl+End"],'; ev g11
+		echo '["key", "Up"],'; ev g12
+		echo '["key", "Up"],'; ev g13
+		echo '["shot", "${OUT}/goal.png"]]'
 	} > "$t/pages.json"
 	WEB_DRIVE_URL=http://127.0.0.1:$SERVER_PORT/ "$here/util/web_drive.sh" chrome hearth \
 		"$t/pages.json" "$t/web_pages" > "$t/web_pages.out" 2>&1 ||
 		fail "the Chrome page keys drive: $(tail -3 "$t/web_pages.out")"
-	got=$(grep -a "^eval: " "$t/web_pages.out" | tr '\n' '|')
+	got=$(grep -a '^eval: "p' "$t/web_pages.out" | tr '\n' '|')
 	[ "$got" = 'eval: "p1 0 0"|eval: "p2 65 65"|eval: "p3 130 130"|eval: "p4 65 65"|eval: "p5 65 130"|' ] ||
 		fail "Page Up and Down in Chrome: $got"
 	echo "ok: the web client in Chrome: Page Down and Up by the rows shown less two, Shift+Page Down selects"
+	got=$(grep -a '^eval: "g' "$t/web_pages.out" | sed 's/^eval: "\(g[0-9]*\) \([0-9]*\) \2"$/\1:\2/' | tr '\n' ' ')
+	[ "$got" = 'g0:24 g1:27 g2:28 g3:53 g4:28 g5:27 g6:24 g7:27 g8:26 g9:28 g10:30 g11:293 g12:245 g13:197 ' ] ||
+		fail "the goal column in Chrome: $got"
+	echo "ok: the web client in Chrome: Up and Down keep the column, Left ends it, a paragraph by its wrapped rows"
 else
 	echo "skip: no web/ or no google-chrome for the page keys"
 fi
@@ -207,4 +244,4 @@ for br in firefox google-chrome; do
 		echo "skip: no web/ or no $br for the web field"
 	fi
 done
-echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; Page Up and Down; the web client's Alt+Backspace and undo (see $t/*.png)"
+echo "PASS: undo and redo; Ctrl+A, the word moves and deletes and the clicks, single- and multi-line; Page Up and Down and the column Up and Down keep; the web client's Alt+Backspace and undo (see $t/*.png)"
