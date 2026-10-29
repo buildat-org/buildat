@@ -16,6 +16,9 @@
 #      Lua error is logged and the box goes on.
 #   4. A restart: the counter's count, the door's state and the runaway's
 #      disablement are the save's runtime row, apart from its authored row.
+# The first run is the box in WAMR's interpreter alone; the second waits
+# for the compiled module (wasm2c's), and has a Lua error and a second
+# runaway there.
 #
 #   util/kit_runtime_check.sh
 set -u
@@ -30,11 +33,19 @@ rm -rf "$save"
 cd "$here/Build"
 
 # One server and one client: the client's commands in $t/<n>.cmds
-run() # <n>
+run() # <n> [env...]
 {
-	start_server "$t/srv$1.log" "Listening at" 300 auto bin/buildat_server \
-		-m ../apps/sample_kit -l 3 || fail "the server did not come up ($t/srv$1.log)"
+	local n=$1
+	shift
+	start_server "$t/srv$n.log" "Listening at" 300 auto env "$@" \
+		bin/buildat_server -m ../apps/sample_kit -l 3 ||
+		fail "the server did not come up ($t/srv$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
+	if [ $# = 0 ]; then
+		wait_for_log "$t/srv$n.log" "wasm kit: (moved to the compiled module|compiled module from the cache|ready \\(compiled\\))" 300 ||
+			fail "the box was not compiled ($t/srv$n.log)"
+	fi
+	set -- "$n"
 	run_client 60 "$t/cli$1.log" timeout 120 bin/buildat -C "$t/client_cache" \
 		-s localhost:$SERVER_PORT -w 320x240 -l 3 -c @"$t/$1.cmds" ||
 		fail "client $1 failed ($t/cli$1.log, $t/srv$1.log)"
@@ -75,8 +86,10 @@ keypress b
 wait_log 60000 replicated: entity 4 open = false
 quit
 EOF
-run 1
+run 1 BUILDAT_CHECK_WASM_INTERPRETER=1
 s=$t/srv1.log
+grep -aq "wasm kit: ready (interpreter): no C compiler" "$s" ||
+	fail "run 1 is not the interpreter's ($s)"
 want "$s" "sample_kit: at start the counter is 0, the door open false" \
 	"Entity 3 used by p" "button 3: pressed by player:p" \
 	"door 4: opened by player:p" "counter 5: count 1 by player:p" \
@@ -111,12 +124,23 @@ cat > "$t/2.cmds" <<'EOF'
 wait_log 60000 replicated: entity 4 open = false
 keypress b
 wait_log 30000 replicated: entity 4 open = true
+keypress e
+frames 2
+keypress h
+frames 2
+keypress b
+wait_log 60000 replicated: entity 4 open = false
 quit
 EOF
 run 2
 s=$t/srv2.log
 want "$s" "sample_kit: at start the counter is 2, the door open false" \
-	"Entity 7's runaway stays disabled" "counter 5: count 3 by player:p"
+	"Entity 7's runaway stays disabled" "counter 5: count 3 by player:p" \
+	"Entity 10's faulty, on_use: faulty:8: attempt to index local 't' (a nil value)" \
+	"Entity 11's runaway disabled: on_use ran past its budget" \
+	"counter 5: count 4 by player:p"
+[ "$(grep -ac "A new box after" "$s")" = 1 ] ||
+	fail "run 2: not one new box, for the runaway alone ($s)"
 grep -aq "the composition's first start" "$s" && fail "the composition was read again ($s)"
 echo "PASS: Kit's runtime: wiring, client actions and their refusals, replication, a routed voxel write, the budget and a loop cut, state over a restart"
 # vim: set noet ts=4 sw=4:

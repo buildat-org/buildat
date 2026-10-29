@@ -7,6 +7,7 @@
 --   r: use the runaway (7)       c: use the counter (5, not usable)
 --   d: dig at the door           s: packets that try to fire signals
 --   e: use the faulty one (10, an error in its Lua)
+--   h: use the second runaway (11)
 local log = buildat.Logger("sample_kit")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
@@ -25,6 +26,7 @@ local KEYS = {
 	[magic.KEY_R] = function() buildat.send_packet("kit:use", "7") end,
 	[magic.KEY_C] = function() buildat.send_packet("kit:use", "5") end,
 	[magic.KEY_E] = function() buildat.send_packet("kit:use", "10") end,
+	[magic.KEY_H] = function() buildat.send_packet("kit:use", "11") end,
 	[magic.KEY_D] = function() buildat.send_packet("main:dig", "") end,
 	[magic.KEY_S] = function()
 		-- There is no packet that fires a signal: these go nowhere
