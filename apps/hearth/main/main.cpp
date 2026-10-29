@@ -17,6 +17,8 @@
 //   /brand/<file>    the pages' font and logo ([HTML_BRAND])
 //   /api/v1/discussed   one recent message as JSON, open to any site
 //                    ([HEARTH_DISCUSSED_API]); see discussed()
+//   /api/v1/feed     the recent threads as JSON, for a launcher
+//                    ([LIVELY_MENU]); see feed()
 // **To take part**: the buildat client, joined by builtin/accounts (a local
 // account or a Starport ID, as the admin set up its logins). "hr:req"
 // carries a JSON {id, cmd, ...} and "hr:res" the answer {id, ok, result |
@@ -529,7 +531,7 @@ static bool is_patch(const ss_ &name, const ss_ &data)
 	return false;
 }
 static const char *CLAIMED[] = {"/topic/", "/t/", "/m/", "/search", "/f/",
-		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/v1/discussed"};
+		"/robots.txt", "/p/", "/brand/", "/u/", "/unseen", "/api/v1/discussed", "/api/v1/feed"};
 
 // Trust ([HEARTH_MVP] step 6, [TRUST_LADDER]): accounts' levels, spaced so
 // one added later goes between two; compared with >=, never ==. Saved as
@@ -600,6 +602,9 @@ struct Module: public interface::Module
 	json::Value m_discussed;
 	int64_t m_discussed_at = -1;
 	ss_ m_discussed_path;
+	// /api/v1/feed's, and when it was made
+	json::Value m_feed;
+	int64_t m_feed_at = -1;
 	// When the files were last held to their budget (sweep_files)
 	int64_t m_files_swept = 0;
 	// What a request changed, sent once it is committed
@@ -2015,6 +2020,17 @@ struct Module: public interface::Module
 			});
 			return;
 		}
+		if(r.path == "/api/v1/feed"){
+			if(r.method != "GET")
+				return respond(r, 405, "{}", "application/json");
+			const ss_ body = feed(r.host).stringify();
+			network::access(m_server, [&](network::Interface *iface){
+				iface->http_respond(r.peer, 200, "application/json", body,
+						"Access-Control-Allow-Origin: *\r\n"
+						"Cache-Control: max-age=60\r\n");
+			});
+			return;
+		}
 		// **The launcher's mark** ([FORUM] 4): a POST of {name, token}, the
 		// client's kept login for this Hearth, answers {unseen} without a
 		// join
@@ -2589,13 +2605,7 @@ struct Module: public interface::Module
 		}
 		if(!m_discussed.get("message").is_object())
 			return json::object();
-		ss_ base = jstr(setting("public_url"), "url");
-		if(base.empty()){
-			const bool local = host.compare(0, 9, "127.0.0.1") == 0 ||
-					host.compare(0, 9, "localhost") == 0 ||
-					host.compare(0, 5, "[::1]") == 0;
-			base = (local ? "http://" : "https://")+host;
-		}
+		const ss_ base = base_url(host);
 		json::Value out = m_discussed;
 		json::Value m = out.get("message");
 		json::Value t = m.get("thread"), p = m.get("topic");
@@ -2608,6 +2618,113 @@ struct Module: public interface::Module
 		m.set("topic", p);
 		out.set("message", m);
 		return out;
+	}
+
+	// [LIVELY_MENU] GET /api/v1/feed, for a launcher's "now" strip and an
+	// app's page: {url, announcements, active, packages}. A thread is {id,
+	// title, posts, last}, read at url + "/t/" + id. announcements: up to 3
+	// of the threads in the topics of category "announcements" written in
+	// within 30 days, the latest first; active: up to 5 others with the most
+	// messages in the last 7 days; packages: "author/name" -> {posts, last,
+	// threads (its 3 latest)}, the 300 packages written about last. Visible
+	// threads only, started by a member that is not banned (or a release's,
+	// by its Aitta); posts counts the visible messages. Kept a minute.
+	json::Value feed(const ss_ &host)
+	{
+		const int64_t now = now_s();
+		if(m_feed_at < 0 || now - m_feed_at >= 60 || now < m_feed_at){
+			m_feed_at = now;
+			std::set<ss_> banned;
+			accounts::access(m_server, [&](accounts::Interface *a){
+				for(const ss_ &b : a->ban_list())
+					banned.insert(b.substr(0, b.find('|')));
+			});
+			std::map<ss_, bool> member;
+			auto shown = [&](const ss_ &who, const ss_ &kind){
+				if(!member.count(who))
+					member[who] = !banned.count(who) && level(who) >= LV_MEMBER;
+				return member[who] || kind == "release";
+			};
+			auto row = [](Q &q){
+				json::Value t = json::object();
+				t.set("id", q.i(0));
+				t.set("title", q.s(1));
+				t.set("posts", q.i(2));
+				t.set("last", q.i(3));
+				return t;
+			};
+#define FEED_COLUMNS "t.id, t.title, (SELECT count(*) FROM messages m " \
+		"WHERE m.thread = t.id AND m.hidden = 0), t.last, t.author, t.kind"
+			json::Value ann = json::array(), active = json::array();
+			Q a(m_db, "SELECT " FEED_COLUMNS " FROM threads t WHERE "
+					"t.hidden = 0 AND t.last > ? AND t.topic IN (SELECT id "
+					"FROM topics WHERE category = 'announcements' OR parent "
+					"IN (SELECT id FROM topics WHERE category = "
+					"'announcements')) ORDER BY t.last DESC LIMIT 20");
+			a.b(now - 30 * 86400);
+			std::set<int64_t> seen;
+			while(a.step() && ann.size() < 3)
+				if(shown(a.s(4), a.s(5))){
+					ann.append(row(a));
+					seen.insert(a.i(0));
+				}
+			Q b(m_db, "SELECT " FEED_COLUMNS " FROM threads t WHERE "
+					"t.hidden = 0 AND t.last > ?1 ORDER BY (SELECT count(*) "
+					"FROM messages m WHERE m.thread = t.id AND m.hidden = 0 "
+					"AND m.created > ?1) DESC, t.last DESC LIMIT 50");
+			b.b(now - 7 * 86400);
+			while(b.step() && active.size() < 5)
+				if(!seen.count(b.i(0)) && shown(b.s(4), b.s(5)))
+					active.append(row(b));
+			// Every key's together, as /p/ shows them
+			json::Value pkgs = json::object();
+			int n = 0;
+			Q c(m_db, "SELECT " FEED_COLUMNS ", t.subject FROM threads t "
+					"WHERE t.hidden = 0 AND instr(t.subject, ' ') > 1 "
+					"ORDER BY t.last DESC LIMIT 5000");
+			while(c.step()){
+				const ss_ s = c.s(6), pkg = s.substr(0, s.find(' '));
+				if(!is_package(pkg) || !shown(c.s(4), c.s(5)))
+					continue;
+				json::Value p = pkgs.get(pkg);
+				if(!p.is_object()){
+					if(n++ >= 300)
+						continue;
+					p = json::object();
+					p.set("posts", 0);
+					p.set("last", c.i(3));
+					p.set("threads", json::array());
+				}
+				p.set("posts", jint(p, "posts") + c.i(2));
+				json::Value l = p.get("threads");
+				if(l.size() < 3)
+					l.append(row(c));
+				p.set("threads", l);
+				pkgs.set(pkg, p);
+			}
+#undef FEED_COLUMNS
+			m_feed = json::object();
+			m_feed.set("announcements", ann);
+			m_feed.set("active", active);
+			m_feed.set("packages", pkgs);
+		}
+		json::Value out = m_feed;
+		out.set("url", base_url(host));
+		return out;
+	}
+
+	// The links' base: the admin's "public_url", else the request's Host
+	// over https (http for a loopback Host)
+	ss_ base_url(const ss_ &host)
+	{
+		ss_ base = jstr(setting("public_url"), "url");
+		if(base.empty()){
+			const bool local = host.compare(0, 9, "127.0.0.1") == 0 ||
+					host.compare(0, 9, "localhost") == 0 ||
+					host.compare(0, 5, "[::1]") == 0;
+			base = (local ? "http://" : "https://")+host;
+		}
+		return base;
 	}
 
 	// `who`: an address, "@" and an account, or "page " and an address
@@ -2705,8 +2822,10 @@ struct Module: public interface::Module
 	// and the search index
 	void set_hidden(int64_t message_id, int hidden, const ss_ &reason)
 	{
-		// /api/v1/discussed's pick may be this message ([SECURITY_RUN_4])
+		// /api/v1/discussed's pick may be this message ([SECURITY_RUN_4]),
+		// and the feed's threads
 		m_discussed_at = -1;
+		m_feed_at = -1;
 		Q m(m_db, "SELECT m.thread, m.body, t.title, (SELECT min(id) FROM "
 				"messages WHERE thread = m.thread) FROM messages m JOIN threads t "
 				"ON t.id = m.thread WHERE m.id = ?");

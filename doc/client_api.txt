@@ -602,6 +602,13 @@ buildat.feedback() -> {subject, package, version, engine, platform, place}
 - The Hearth's side of set_feedback(), once; place is true for "Discuss"
   (open the package's threads, not the composer). A server's or a game's
   is discussed()'s, and this answers nil for it.
+buildat.open_hearth_thread(id) -> true, or false and why
+- [LIVELY_MENU] The launcher's "now" strip and the Aitta page: joins the
+  Hearth in the Starport settings ("hearth") and opens its thread id
+  there. Refused to a server's code.
+buildat.hearth_open() -> "/t/<id>" or nil
+- The Hearth's side of open_hearth_thread(), once, in BUILDAT_OPEN's
+  shape: nil on any other server.
 buildat.offer_playtest{release = "author/name/version", ticket, sha256}
     -> true, or false and why
 - [AITTA_REVIEW]: an Aitta's review page hands the launcher a playtest
@@ -1544,7 +1551,8 @@ safe interface:
 fetch(cb [, ask]) -> cb(rows, info)
 - The merged list of the Starports in the settings, through the filters;
   info {hidden, unasked, errors}. Without ask, a Starport whose host the
-  user has not accepted is left out rather than asked about.
+  user has not accepted is left out rather than asked about; the built-in
+  default Starport counts as accepted while the client is on no server.
 group(servers [, fleet_id]) -> fleet, pool and server rows
 direct_connect_allowed() -> bool, whether a typed address may be joined
 id_token_here(cb [, rename_reason]) -> cb(token) or cb(nil, why)
@@ -1558,6 +1566,16 @@ id_used_here() -> bool
 forget_id_here()
 - Drops that mark: a logout, or a login that was not an ID's.
 open_settings([on_closed]), open_report(address), open_report_here()
+hearth_feed(cb [, ask]) -> cb(feed) or cb(nil)
+- [LIVELY_MENU] Hearth's /api/v1/feed (doc/hearth.txt) from the Hearth in
+  the settings: "hearth" in starport.json (https://hearth.buildat.org by
+  default; the managed file's over it; "" for none). Fetched once a run;
+  without ask, not when the user has not accepted its host and it is not
+  the built-in default (which counts as accepted off a server). {url,
+  announcements, active, packages = {["author/name"] = {posts, last,
+  threads}}}, a thread {id, title, posts, last}: titles plain text, their
+  control characters spaces, cut at 120 bytes; at most 3 announcements, 5
+  active, 300 packages of 3 threads. A copy each call.
 
 aitta
 -----
@@ -1571,6 +1589,11 @@ open_aitta(), aitta_shown() -> bool
   show unreviewed releases; under the lock it lists reviewed ones only.
 open_publish()
 - The publish screen ([AITTA_PUBLISH_UI]); not on the web.
+recent_releases(cb) -> cb({{key, version, time}, ...})
+- [LIVELY_MENU] Each package's newest release the client runs and the
+  filters let through, newest first, from the Aittas in the settings
+  whose host the user has accepted or that are the built-in default
+  (none is asked), fetched once a run.
 
 ui_utils
 --------

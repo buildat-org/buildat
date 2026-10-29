@@ -209,7 +209,18 @@ is provided on the command line, which is what running `buildat` with no
 arguments does. By default it is extensions/launch_menu, which runs in the
 sandbox: a Continue list and a search over the apps, saves and servers, which
 lists a local app, a remote server, and whatever the tree's launcher files
-offer. Its screens.lua is where every launch UI's app starts
+offer. Above Continue, natively and on the web, a "Now" strip
+([LIVELY_MENU]) shows what is going on: up to 3 servers with players
+(Starport), 3 packages an Aitta listed in the last 14 days, and the
+Hearth's announcements and 3 most active threads (its /api/v1/feed,
+doc/hearth.txt), each opened by a click; it is not there when none is.
+Home asks nothing: it reads from the hosts the user has accepted and
+from the built-in defaults -- the default Starport, Aitta and Hearth
+count as accepted for the client's own fetches (the trusted side's
+http_get and http_post, never a sandboxed one's) while it is on no
+server, so a fresh client shows the strip; a host the managed file names
+or the user typed is asked about as before (client/core/network
+set_default_hosts). Its screens.lua is where every launch UI's app starts
 end: the local app list, connecting, and the screens a local server starts
 behind, run in the sandbox by client/launch_grid.lua. Leaving an app
 (leave(), leave_to_menu()) goes back to the launch UI in the same process;
@@ -382,6 +393,12 @@ The supported ones, kept from version to version as an option is:
 - BUILDAT_CONNECT_PORTS, BUILDAT_LAN_ANNOUNCE: the server's
   --connect-ports and --lan-announce.
 - BUILDAT_STARPORT_MANAGED: the managed starport.json's path.
+- BUILDAT_STARPORT_DEFAULT, BUILDAT_AITTA_DEFAULT, BUILDAT_HEARTH_DEFAULT:
+  the client's built-in default Starport, Aitta and Hearth, over
+  https://starport.buildat.org, https://aitta.buildat.org and
+  https://hearth.buildat.org (a check's local ones; util/check_lib.sh sets
+  all three to a closed port). The first is also a server's default
+  Starport ([STARPORT_DEFAULT_URL]).
 - BUILDAT_LUANTI_*: builtin/luanti's own (luanti_module.txt).
 
 Buildat sets BUILDAT_OWNER_TOKEN, BUILDAT_RUN, BUILDAT_OPEN,

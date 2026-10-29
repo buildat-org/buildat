@@ -124,6 +124,22 @@ with {"cmd":"public_url","url":"https://forum.example.org"} ("" to
 clear), or else the request's Host over https (http for 127.0.0.1 and
 localhost).
 
+/api/v1/feed is for a launcher's "now" strip and an app's page
+([LIVELY_MENU]; the client reads it from the Hearth in its Starport
+settings): JSON {url, announcements, active, packages}, a thread {id,
+title, posts, last}, read at url + "/t/" + id. announcements are up to 3
+threads of the topics of category "announcements" (topic_category, by a
+moderator; their subtopics too) written in within 30 days, the latest
+first; active up to 5 others with the most messages of the last 7 days;
+packages "author/name" -> {posts, last, threads: its 3 latest}, the 300
+packages written about last (every key's together, as /p/). Only visible
+threads started by a member that is not banned, or a release's thread;
+posts counts the visible messages; a title is plain text. Kept a
+minute, a hide or a category's change drops it; CORS and the pages' rate
+as /api/v1/discussed, the same base url. A launcher's click on a thread
+joins the Hearth and opens it, as BUILDAT_OPEN does (the client's
+hearth_open()).
+
 Taking part: the client
 -----------------------
 The client ([HEARTH_UI]) is a sidebar of topics beside a page, one
@@ -192,7 +208,8 @@ Each action is a packet "hr:req", JSON {id, cmd, ...}, answered by
                            fixed, wontfix) or a patch's (open, applied,
                            wontfix), fixed_in a version
     topic_tracker          a moderator: topic, on -- its threads are tickets
-    topic_category         a moderator: topic, category ("servers" or "")
+    topic_category         a moderator: topic, category ("servers",
+                           "announcements" or "")
     tracker_link           a ticket's starter or a moderator: thread, link
                            ("" takes it off); below
     tracker_domains        the list; a moderator: add, remove (domains)

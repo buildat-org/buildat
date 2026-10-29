@@ -383,6 +383,17 @@ local function aitta_media(rel, which, got)
 	return nil
 end
 
+-- [LIVELY_MENU] "today", "3 days ago": a release's age on its row
+local function days_ago(t)
+	local d = math.floor((os.time() - (tonumber(t) or 0)) / 86400)
+	return d < 1 and "today" or d == 1 and "1 day ago" or d .. " days ago"
+end
+-- A text cut to n bytes on a character's edge
+local function cut(s, n)
+	return #s <= n and s or s:sub(1, n - 3):gsub("[\192-\255][\128-\191]*$",
+			"") .. "..."
+end
+
 local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	filter = filter or "All"
 	by = by or "name"
@@ -451,6 +462,8 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 
 	local packages = {}
 	local have = {}
+	-- [LIVELY_MENU] Hearth's feed: each package's posts and newest threads
+	local feed = nil
 	local function state(p)
 		local mine = have[p.key]
 		return not mine and "Not installed" or
@@ -592,10 +605,12 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					function() install(p) end, st ~= "Installed",
 					rel.serverless ~= true)
 		end
-		-- Without its own, the Hearth its Aitta's Starport recommends
+		-- Without its own, the Hearth its Aitta's Starport recommends, or
+		-- the one in the settings ([LIVELY_MENU])
 		if not (type(rel.home_hearth) == "string" and
 				rel.home_hearth:match("^https?://")) then
-			rel.home_hearth = starport.safe.fallback_hearth(rel.aitta)
+			rel.home_hearth = starport.safe.fallback_hearth(rel.aitta) or
+					starport.hearth_url()
 		end
 		if on_discuss and rel.home_hearth then
 			add_button(actions, "Discuss", function()
@@ -606,6 +621,23 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 		add_button(actions, "Report...", function()
 			aitta_report(rel.aitta, p.key .. "/" .. tostring(rel.version))
 		end)
+		-- [LIVELY_MENU] Its newest threads on the feed's Hearth, each
+		-- opened there.
+		-- simplified: the Hearth in the settings, not the package's home
+		-- Hearth when that is another; Discuss goes to the home
+		local talk = feed and feed.packages[p.key]
+		if talk then
+			ptext("On " .. feed.url:gsub("^https?://", "") .. ": " ..
+					talk.posts .. " posts", DIM)
+			for _, t in ipairs(talk.threads) do
+				log:info("aitta panel: thread " .. t.id .. " " .. t.title)
+				add_button(panel, cut(t.title, math.floor(panel_w / 9)),
+						function()
+					uistack.main:pop(root)
+					buildat.safe.open_hearth_thread(t.id)
+				end)
+			end
+		end
 		pview:fit()
 		reseal(panel)
 		local id = p.key .. "/" .. tostring(rel.version)
@@ -662,6 +694,12 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 					tostring(p.rel.version) ..
 					(p.rel.kind == "world" and ", world for " ..
 					tostring(p.rel.app) or "") ..
+					-- [LIVELY_MENU] Its activity: the release's age, and
+					-- its posts on the feed's Hearth
+					((narrow or not tonumber(p.rel.time)) and "" or
+					", " .. days_ago(p.rel.time)) ..
+					(feed and feed.packages[p.key] and ", " ..
+					feed.packages[p.key].posts .. " posts" or "") ..
 					(cannot_run(p.rel) and ", not for this Buildat" or
 					st == "Installed" and ", installed" or
 					st == "Updates" and ", update" or "") ..
@@ -783,6 +821,15 @@ local function aitta_page(message, query, on_discuss, filter, by, chosen)
 	if waiting == 0 then
 		say("No Aittas in the Starport settings")
 	end
+	starport.safe.hearth_feed(function(f)
+		feed = f
+		if f and is_open(root) and #packages > 0 then
+			show_rows()
+			if selected then
+				fill(selected)
+			end
+		end
+	end)
 end
 
 -- **A reviewer's playtest** ([AITTA_REVIEW]), offered by an Aitta's review
@@ -892,6 +939,76 @@ function M.run_serverless(key)
 	end
 end
 
+-- [LIVELY_MENU] **The newest packages**, for the launcher's "now" strip:
+-- each Aitta in the settings whose host the user has accepted (Home
+-- opens no permission dialog), its list fetched once a run; a package's
+-- newest release this client runs and the filters let through.
+-- recent_releases(cb): cb({{key = "author/name", version, time}, ...}),
+-- the newest first, once every Aitta answered or failed.
+local recent, recent_waiting = nil, nil
+function M.safe.recent_releases(cb)
+	if type(cb) ~= "function" then
+		error("recent_releases(cb: function)")
+	end
+	local function give(list)
+		local out = {}
+		for i, r in ipairs(list) do
+			out[i] = {key = r.key, version = r.version, time = r.time}
+		end
+		cb(out)
+	end
+	if recent then
+		return give(recent)
+	end
+	if recent_waiting then
+		recent_waiting[#recent_waiting + 1] = give
+		return
+	end
+	recent_waiting = {give}
+	local e = effective()
+	local newest, waiting = {}, 1
+	local function done()
+		waiting = waiting - 1
+		if waiting > 0 then
+			return
+		end
+		recent = {}
+		for k, rel in pairs(newest) do
+			recent[#recent + 1] = {key = k, version = tostring(rel.version):sub(1, 40),
+				time = tonumber(rel.time) or 0}
+		end
+		table.sort(recent, function(a, b) return a.time > b.time end)
+		log:info("aitta: " .. #recent .. " packages for the launcher")
+		local w = recent_waiting
+		recent_waiting = nil
+		for _, f in ipairs(w) do
+			f(recent)
+		end
+	end
+	for _, a in ipairs(e.aittas) do
+		if starport.accepted(a) then
+			waiting = waiting + 1
+			network.http_get(a .. "/api/v1/aitta/list", function(body)
+				local v = body and network.parse_json(body)
+				for _, rel in ipairs(type(v) == "table" and
+						type(v.releases) == "table" and v.releases or {}) do
+					local k = type(rel) == "table" and tostring(rel.author) ..
+							"/" .. tostring(rel.name)
+					if k and k:match("^[%w_]+/[%w_]+$") and #k <= 81 and
+							(e.filters.unreviewed or rel.review == "reviewed") and
+							(rel.serverless == true or not ON_WEB or
+							in_page(rel)) and not cannot_run(rel) and
+							(not newest[k] or newer_release(rel, newest[k])) then
+						newest[k] = rel
+					end
+				end
+				done()
+			end, {description = "Aitta (app list)"})
+		end
+	end
+	done()
+end
+
 function M.safe.open_aitta(on_discuss)
 	aitta_page(nil, nil, type(on_discuss) == "function" and on_discuss or nil)
 end
@@ -917,5 +1034,6 @@ function M.safe.open_publish() open_publish() end
 M.open_publish = M.safe.open_publish
 M.open_aitta = M.safe.open_aitta
 M.aitta_shown = M.safe.aitta_shown
+M.recent_releases = M.safe.recent_releases
 return M
 -- vim: set noet ts=4 sw=4:

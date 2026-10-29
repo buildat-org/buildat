@@ -220,6 +220,10 @@ end
 local unseen = {}
 local unseen_asked = nil
 local starport_fetched = false
+-- [LIVELY_MENU] The "now" strip's sources, fetched once a run: news.feed
+-- Hearth's (client/core/starport hearth_feed), news.releases Aitta's
+-- newest packages (client/core/aitta recent_releases)
+local news = {fetched = false}
 -- Set when an app, save or server is run from here: a game's own way
 -- out (luanti_client's leave) pops its screens without leave_app, so
 -- Home comes back on top as drawn before it, and is drawn again then
@@ -394,9 +398,10 @@ local function gather()
 	starport = starport and (starport.kept_rows and starport or
 			starport.safe)
 	local rows = starport and starport.kept_rows() or {}
-	local listed_name = {}
+	local listed_name, players = {}, {}
 	for _, row in ipairs(rows) do
 		listed_name[tostring(row.address)] = tostring(row.name)
+		players[tostring(row.address)] = tonumber(row.players)
 	end
 	local net = require("buildat/core/network")
 	net = net.known_addresses and net or net.safe
@@ -417,11 +422,12 @@ local function gather()
 			add({label = a.name ~= "" and a.name or
 					listed_name[address] or address,
 				kind = "server", unseen = unseen[address],
-				network = "Buildat",
+				network = "Buildat", players = players[address],
 				badge = unseen[address] and "Buildat, " .. unseen[address] ..
 						" new" or "Buildat",
-				description = address .. (a.description ~= "" and
-						"   " .. a.description or ""),
+				description = address .. (players[address] and "   " ..
+						players[address] .. " playing" or "") ..
+						(a.description ~= "" and "   " .. a.description or ""),
 				last = a.last_attempt > 0 and a.last_attempt or nil,
 				run = function() api.join_server(address) end})
 		end
@@ -434,6 +440,7 @@ local function gather()
 			add({label = tostring(row.name), kind = "server",
 				badge = "Buildat, Starport",
 				network = "Buildat", listed_by = "Starport",
+				players = players[address],
 				description = address .. "   " ..
 						tostring(row.players or 0) .. " playing",
 				run = function() api.join_server(address) end})
@@ -600,6 +607,64 @@ local function save_menus(root, items)
 	end)
 end
 
+-- [LIVELY_MENU] **The "now" strip** on Home: what is going on, from what
+-- is already fetched -- the servers with players (Starport's), the
+-- packages an Aitta listed in the last 14 days, the Hearth's
+-- announcements and most active threads, at most 3 of each but the
+-- announcements. Empty when none is: an empty strip reads deader than
+-- none. A title is the feed's plain text, cut to fit the row.
+local NOW_DAYS = 14
+local function now_rows()
+	local out, t = {}, os.time()
+	local function cut(s, n)
+		return #s <= n and s or s:sub(1, n - 3):gsub(
+				"[\192-\255][\128-\191]*$", "") .. "..."
+	end
+	local servers, aitta_run = {}, nil
+	for _, e in ipairs(entries) do
+		if e.kind == "server" and (e.players or 0) > 0 then
+			servers[#servers + 1] = e
+		end
+		if e.id == "extension/launch_menu/aitta" then aitta_run = e.run end
+	end
+	table.sort(servers, function(a, b) return a.players > b.players end)
+	for i = 1, math.min(3, #servers) do
+		local e = servers[i]
+		out[#out + 1] = {label = e.label, kind = "now", glyph = "🌐",
+			badge = e.players .. " playing", description = e.badge,
+			run = e.run}
+	end
+	local n = 0
+	for _, r in ipairs(news.releases or {}) do
+		if n < 3 and aitta_run and t - r.time < NOW_DAYS * 86400 then
+			n = n + 1
+			out[#out + 1] = {label = cut(r.key .. " " .. r.version, 50),
+				kind = "now", glyph = "■", badge = "updated " .. ago(r.time, t),
+				description = "New on Aitta: " .. r.key .. " " .. r.version,
+				run = aitta_run}
+		end
+	end
+	local feed = news.feed
+	local host = feed and feed.url:gsub("^https?://", "")
+	local function thread(th, badge)
+		out[#out + 1] = {label = cut(th.title, 50), kind = "now", glyph = "●",
+			badge = badge, description = th.title .. "   on " .. host ..
+					", written in " .. ago(th.last, t),
+			run = function()
+				stale = true
+				local ok, why = api.open_hearth_thread(th.id)
+				if not ok then log:warning(tostring(why)) end
+			end}
+	end
+	for _, th in ipairs(feed and feed.announcements or {}) do
+		thread(th, "News")
+	end
+	for i, th in ipairs(feed and feed.active or {}) do
+		if i <= 3 then thread(th, th.posts .. " posts") end
+	end
+	return out
+end
+
 local function home(query)
 	local t0 = api.get_time_us()
 	local width = math.min(magic.ui.root.width - 40, 760)
@@ -619,7 +684,19 @@ local function home(query)
 				run()
 			end}
 	end
+	news.query = query
 	if #query < SEARCH_MIN then
+		local strip = now_rows()
+		if #strip > 0 then
+			view:header("Now")
+			local said = {}
+			for _, e in ipairs(strip) do
+				row(e, nil, e.run)
+				said[#said + 1] = e.label .. " (" .. e.badge .. ")"
+			end
+			-- What a check waits for
+			log:info("launch_menu: now: " .. table.concat(said, "; "))
+		end
 		local cont = recent(entries, CONTINUE_MAX)
 		if #cont > 0 then
 			view:header("Continue")
@@ -1132,6 +1209,36 @@ function M.boot(launch_action)
 						top:GetName():find(": launch_menu$") then
 					M.refresh()
 				end
+			end)
+		end
+	end
+	-- [LIVELY_MENU] The strip's Hearth feed and Aitta's newest, once a
+	-- run, from hosts already accepted; Home drawn again when either
+	-- brought something and Home is shown with nothing typed (a search
+	-- under way keeps its rows)
+	if not news.fetched then
+		news.fetched = true
+		local function again()
+			local top = uistack.main:top()
+			if top and top:GetName():find(": launch_menu$") and
+					news.query == "" and #now_rows() > 0 then
+				M.refresh()
+			end
+		end
+		local sp = require("buildat/core/starport")
+		sp = sp and (sp.hearth_feed and sp or sp.safe)
+		if sp and sp.hearth_feed then
+			sp.hearth_feed(function(f)
+				news.feed = f
+				if f then again() end
+			end)
+		end
+		local aitta = require("buildat/core/aitta")
+		aitta = aitta and (aitta.recent_releases and aitta or aitta.safe)
+		if aitta and aitta.recent_releases then
+			aitta.recent_releases(function(list)
+				news.releases = list
+				if #list > 0 then again() end
 			end)
 		end
 	end
