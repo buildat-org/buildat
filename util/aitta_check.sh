@@ -118,7 +118,7 @@ return M
 LUA
 echo "A check's launch UI" > "$t/ext/launch_ui.txt"
 ext 1.0.0 ui widget
-"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q '"kind": "app" or' ||
+"$b" aitta pack "$t/ext" "$t/key" "$t/out" 2>&1 | grep -q '"kind": "app", "extension" or "world"' ||
 	fail "a kind that is neither"
 for n in a__b _ab ab_; do
 	ext 1.0.0 "$n"
@@ -148,5 +148,25 @@ if [ "${AITTA_CHECK_CLIENT:-1}" = 1 ]; then
 		fail "the installed launch UI did not boot in the sandbox: $(grep -a "EXTBOOT\|tester__ui" "$t/cli.log" | tail -2)"
 fi
 
+# [WORLD_PACKAGES] A world names its app and has its save in world/; it
+# is installed by the client as a save, never by this command
+mkdir -p "$t/world/world"
+world(){ # app
+	printf '{"author": "tester", "name": "wp", "version": "1.0.0",
+		"kind": "world", "app": "%s", "engine_api": 2,
+		"license_code": "MIT", "license_media": "CC0-1.0"}\n' "$1" > "$t/world/meta.json"
+}
+world ../x
+"$b" aitta pack "$t/world" "$t/key" "$t/out" 2>&1 | grep -q '"app": the app' ||
+	fail "a world whose app is a path"
+world vanilla
+"$b" aitta pack "$t/world" "$t/key" "$t/out" 2>&1 | grep -q 'save.sqlite at its root' ||
+	fail "a world with no save"
+echo x > "$t/world/world/save.sqlite"
+zip=$("$b" aitta pack "$t/world" "$t/key" "$t/out") || fail "pack a world"
+"$b" aitta install "$zip" "$t/user" 2>&1 | grep -q "installed as a new save" ||
+	fail "a world installed as an app"
+[ ! -e "$t/user/installed/tester/wp" ] || fail "a world left something in installed/"
+
 [ -z "$(ls -A "$t/user/installed" | grep incoming)" ] || fail "an .incoming directory was left"
-echo "PASS: packed, signed and installed; tampering, another key, a newer and an older engine API, a version not SemVer and a path name refused; an extension installed over its old version and booted sandboxed"
+echo "PASS: packed, signed and installed; tampering, another key, a newer and an older engine API, a version not SemVer and a path name refused; an extension installed over its old version and booted sandboxed; a world packed and refused as an app"
