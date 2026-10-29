@@ -1127,6 +1127,14 @@ show_topic = function(id)
 					req("topic_category", {topic = id, category =
 							t.category == "servers" and "" or "servers"}, redraw)
 				end)
+				-- [LIVELY_MENU] Its threads on every launcher's Home
+				button(bar, t.category == "announcements" and
+						"Not announcements" or "Announcements",
+						function()
+					req("topic_category", {topic = id, category =
+							t.category == "announcements" and "" or
+							"announcements"}, redraw)
+				end)
 			end
 		end
 		local shown = {}
