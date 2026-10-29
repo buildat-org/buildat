@@ -22,6 +22,7 @@ local open_window, add_text, add_label, add_row, add_button, add_edit,
 		h.add_button, h.add_edit, h.add_dropdown
 local WARN, DIM = h.WARN, h.DIM
 local OK = magic.Color(0.5, 0.9, 0.5)
+local BUSY = magic.Color(0.3, 0.9, 1.0) -- cyan, so the upload is noticed
 local log = buildat.Logger("extension/aitta")
 local USER = __buildat_get_path("user")
 local KEYS = USER .. "/aitta_keys"
@@ -528,7 +529,7 @@ page_publish = function(message)
 			return
 		end
 		result.text = "Packed " .. zip .. "; uploading to " .. url .. "..."
-		result.color = DIM
+		result.color = BUSY
 		upload(url, zip, function(id, why, warning)
 			log:info("aitta publish: " .. (id and "published " .. id or
 					"not published: " .. tostring(why)))
