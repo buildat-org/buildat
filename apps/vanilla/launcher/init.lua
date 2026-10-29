@@ -22,8 +22,11 @@ return function(ctx)
 		icon = "grass_block.png"}
 	-- **A save is a world to publish** ([WORLD_PACKAGES]): its directory
 	-- copies as files; the world's own mods are code, never in a world
-	-- package (main/game_start.h takes an installed one as a stranger's)
-	ctx.world_packages = {code = {"luanti/worldmods"}}
+	-- package (main/game_start.h takes an installed one as a stranger's);
+	-- the players row (each player's inventory, and the auth entries with
+	-- their privileges and password hashes) is per player, never published
+	ctx.world_packages = {code = {"luanti/worldmods"},
+		player_rows = {"luanti/players"}}
 	local out = {}
 	for i, g in ipairs(buildat.list_installed_games("vanilla")) do
 		local name = g.name

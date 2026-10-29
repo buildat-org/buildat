@@ -311,9 +311,12 @@ M.for_save = {}
 -- for a save whose value names none. Nil before the first scan.
 M.save_variants = nil
 -- [WORLD_PACKAGES] **The apps whose saves are worlds to publish**: app ->
--- {code = {paths}}, from a launcher's `ctx.world_packages = {code =
--- {...}}`: the app's saves copy as files, and code names the paths in a
--- save that the app runs as code (a world package carries none). Each such
+-- {code = {paths}, player_rows = {rows}}, from a launcher's
+-- `ctx.world_packages = {code = {...}, player_rows = {...}}`: the app's
+-- saves copy as files, code names the paths in a save that the app runs as
+-- code (a world package carries none), and player_rows the rows of its
+-- save.sqlite that are per player, "<store>/<key>" (left out of a
+-- published world: its players' privileges and what they carry). Each such
 -- app's saves have "Publish this world". Nil before the first scan.
 M.world_packages = nil
 
@@ -373,7 +376,22 @@ function M.actions(log)
 					end
 					code[#code + 1] = c
 				end
-				M.world_packages[app] = code and {code = code} or false
+				-- The save's rows that are per player, "<store>/<key>" in
+				-- save.sqlite: left out of what is published
+				local rows = code and {}
+				for _, r in ipairs(code and type(wp.player_rows) == "table" and
+						wp.player_rows or {}) do
+					if type(r) ~= "string" or not r:match("^[%w_]+/[^%c]+$") then
+						log:warning("launcher "..from..": world_packages."..
+								"player_rows: a "..type(r).." that is not "..
+								"<store>/<key>")
+						code, rows = nil, nil
+						break
+					end
+					rows[#rows + 1] = r
+				end
+				M.world_packages[app] = code and {code = code,
+						player_rows = rows} or false
 				if code then
 					M.for_save[#M.for_save + 1] = {app = app, id = "publish_world",
 						label = "Publish this world",
@@ -382,7 +400,7 @@ function M.actions(log)
 						run = function(save)
 							local ok, aitta = pcall(require, "buildat/core/aitta")
 							if ok and type(aitta) == "table" then
-								aitta.publish_world(app, save, code)
+								aitta.publish_world(app, save, code, rows)
 							end
 						end}
 				end

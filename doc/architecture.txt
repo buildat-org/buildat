@@ -278,10 +278,13 @@ vanilla's says a save is its Luanti game's.
 And that its saves are worlds to publish ([WORLD_PACKAGES],
 doc/aitta.txt's "Worlds"):
 
-    ctx.world_packages = { code = { "luanti/worldmods" } }
+    ctx.world_packages = { code = { "luanti/worldmods" },
+        player_rows = { "luanti/players" } }
 
-The app's save directory copies as files, and code names the paths in a
-save that the app runs as code, which a world package never carries. Each
+The app's save directory copies as files, code names the paths in a save
+that the app runs as code, which a world package never carries, and
+player_rows the rows of its save.sqlite ("<store>/<key>") that are per
+player, which a published world leaves out. Each
 of its saves then has "Publish this world", and Apps from Aitta installs
 a world of it as a new save.
 

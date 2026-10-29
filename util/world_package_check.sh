@@ -1,20 +1,25 @@
 #!/bin/bash
 # tier: full
 # cost: ~2 min (2026-10-29)
-# covers: src/impl/aitta.cpp src/interface/aitta.h src/client/app_lua.h client/core/aitta/init.lua client/core/aitta/publish.lua client/launch_grid.lua client/api.lua apps/aitta/main/main.cpp apps/vanilla/main/game_start.h apps/vanilla/launcher/init.lua
+# covers: src/impl/aitta.cpp src/interface/aitta.h src/client/app_lua.h client/core/aitta/init.lua client/core/aitta/publish.lua client/launch_grid.lua client/api.lua apps/aitta/main/main.cpp apps/vanilla/main/game_start.h apps/vanilla/main/game_settings.h apps/vanilla/launcher/init.lua
 # [WORLD_PACKAGES]: a world published from one client and played on
 # another, through a local Aitta, native. The minimal game's save wp has a
 # marker node the fixture placed, a world mod, world.mt naming an admin and
 # default privileges, and a player with the server privilege (the players
 # row written in here, as a crafted save would have it):
 #   1. Saves, wp's "Publish this world": copied into dev_apps/wp, its world
-#      mod left out; Next, Pack and publish: listed as a world for vanilla;
+#      mod and its players row left out ([WORLD_PUBLISH_PLAYERS]); Next,
+#      Pack and publish: listed as a world for vanilla;
 #   2. a world package carrying a world mod (packed and published by the
-#      command line) is refused by the client's install;
+#      command line) is refused by the client's install; wp 1.0.1, packed
+#      by the command line from the save as it is -- its players row, and
+#      world.mt with settings that cost the host (chunksize, the preset's,
+#      secure.*) and a force_loaded.txt -- is published over it;
 #   3. on a fresh user path, Apps from Aitta's wp "Install and play": a new
 #      save wp of vanilla, played; the marker node is there in the world;
-#      the first open took out the admin and privilege settings and the
-#      players, and the world mod never came.
+#      the first open took out the admin, privilege and cost settings, the
+#      forceloads and the players ([WORLD_DATA_COST]), and the world mod
+#      never came.
 # simplified: the form's fields are the dev package's meta.json written
 # here, as a second publish of the same world finds it; the form itself is
 # util/aitta_publish_check.sh's, and its keys are that check's (Tab, Return:
@@ -123,15 +128,26 @@ run_client 60 "$t/pub.log" timeout 240 "$b" -o launch_ui=launch_menu -D "$t/u" \
 	-C "$t/c_u" -w 1000x700 -l 3 -o sound_mute=1 -c @"$t/pub.cmds" ||
 	fail "the publish drive ($t/pub.log)"
 grep -aq "Listed tester/wp/1.0.0" "$t/aitta.log" || fail "wp not listed ($t/aitta.log)"
-python3 - "$t/u/aitta_releases/tester-wp-1.0.0.zip" <<'PY' || fail "the release's files"
-import json, sys, zipfile
+python3 - "$t/u/aitta_releases/tester-wp-1.0.0.zip" "$t/rel.sqlite" <<'PY' || fail "the release's files"
+import json, os, sqlite3, sys, zipfile
 z = zipfile.ZipFile(sys.argv[1])
 names = z.namelist()
 assert "world/save.sqlite" in names and "world/luanti/world.mt" in names, names
 assert not [n for n in names if "worldmods" in n], names
 m = json.loads(z.read("meta.json"))
 assert m["kind"] == "world" and m["app"] == "vanilla" and m["buildat_version"], m
-print("ok: the release has the save, not its world mod:", len(names), "files")
+db = z.read("world/save.sqlite")
+assert b"privileges" not in db and b"publisher" not in db, "a player in save.sqlite"
+p = sys.argv[2]
+open(p, "wb").write(db)
+c = sqlite3.connect(p)
+assert c.execute("SELECT count(*) FROM store WHERE store = 'luanti' AND "
+        "key = 'players'").fetchone()[0] == 0, "the players row"
+assert c.execute("SELECT count(*) FROM store WHERE store = 'main' AND "
+        "key = 'gameid'").fetchone()[0] == 1, "the save's other rows"
+c.close()
+os.remove(p)
+print("ok: the release has the save, not its world mod or players:", len(names), "files")
 PY
 curl -s "http://127.0.0.1:$P/api/v1/aitta/list" | python3 -c 'import json, sys
 r = [r for r in json.load(sys.stdin)["releases"] if r["name"] == "wp"][0]
@@ -152,6 +168,18 @@ echo '{"kind": "world", "app": "vanilla", "author": "tester", "name": "evilworld
 zip=$("$b" aitta pack "$e" "$t/u/aitta_keys/tester.key" "$t/out" 2>"$t/pack.err") || fail "pack: $(cat "$t/pack.err")"
 out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
 echo "$out" | grep -q "listed: tester/evilworld/1.0.0" || fail "publish evilworld: $out"
+# wp 1.0.1: the save as it is, players and all, and settings that cost
+r=$t/raw
+mkdir -p "$r/world/luanti"
+cp "$s/save.sqlite" "$r/world/"
+cp "$s/luanti/world.mt" "$r/world/luanti/"
+printf 'chunksize = 80\nliquid_loop_max = 99999999\nbuildat_preset = Custom\nsecure.http_mods = wpmod\nbasic_privs = server\n' \
+	>> "$r/world/luanti/world.mt"
+echo 'return {}' > "$r/world/luanti/force_loaded.txt"
+sed 's/"1.0.0"/"1.0.1"/' "$t/u/dev_apps/wp/meta.json" > "$r/meta.json"
+zip=$("$b" aitta pack "$r" "$t/u/aitta_keys/tester.key" "$t/out" 2>"$t/pack.err") || fail "pack 1.0.1: $(cat "$t/pack.err")"
+out=$("$b" aitta publish "$zip" 127.0.0.1:$P 2>&1)
+echo "$out" | grep -q "listed: tester/wp/1.0.1" || fail "publish wp 1.0.1: $out"
 
 # 3. Installed and played elsewhere; evilworld refused first
 cat > "$t/u2/shared/fixture.lua" <<'L'
@@ -177,7 +205,7 @@ click Button "Install and play"
 wait_log 20000 aitta status: Not installed
 delay 300
 click Button "tester/wp"
-wait_log 5000 aitta panel: tester/wp 1.0.0
+wait_log 5000 aitta panel: tester/wp 1.0.1
 delay 300
 click Button "Install and play"
 wait_log 120000 chat: wp: the node is
@@ -198,8 +226,13 @@ grep -aq "chat: wp: the node is floor:marker" "$t/inst.log" ||
 w=$t/u2/apps/vanilla/saves/wp
 [ -f "$w/save.sqlite" ] && [ ! -e "$w/.world_package" ] ||
 	fail "wp is not a save that was opened ($w)"
-grep -qE '^(name|default_privs) ' "$w/luanti/world.mt" &&
-	fail "world.mt kept the admin or privileges: $(cat "$w/luanti/world.mt")"
+grep -qE '^(name|default_privs|basic_privs|chunksize|secure\.[a-z_]*) ' "$w/luanti/world.mt" &&
+	fail "world.mt kept the admin, privileges or cost settings: $(cat "$w/luanti/world.mt")"
+grep -q '^liquid_loop_max = 99999999' "$w/luanti/world.mt" &&
+	fail "world.mt kept the world's liquid_loop_max"
+grep -q '^buildat_preset = Custom' "$w/luanti/world.mt" &&
+	fail "world.mt kept the world's preset"
+[ ! -e "$w/luanti/force_loaded.txt" ] || fail "the forceloads were kept"
 grep -q '^enable_damage = false' "$w/luanti/world.mt" ||
 	fail "world.mt lost its other settings: $(cat "$w/luanti/world.mt")"
 [ ! -e "$w/luanti/worldmods" ] || fail "wp has world mods"
@@ -209,5 +242,5 @@ row = sqlite3.connect(sys.argv[1]).execute(
         "SELECT value FROM store WHERE store = 'luanti' AND key = 'players'").fetchone()
 assert row is None or b"publisher" not in row[0], row
 PY
-echo "ok: a world mod refused; wp installed as a save of vanilla and played, its marker there, its admin, privileges and players gone"
+echo "ok: a world mod refused; wp installed as a save of vanilla and played, its marker there, its admin, privileges, cost settings, forceloads and players gone"
 echo "PASS: a world published from Saves, listed under vanilla, installed and played on a fresh user path"

@@ -224,9 +224,9 @@ page_package = function(message)
 		add_text(w, "A world for " .. tostring(m.app) .. (m.app_version and
 				" " .. tostring(m.app_version) or "") .. ", made with Buildat " ..
 				tostring(m.buildat_version) .. ". Everything in the save " ..
-				"goes in: the map, its settings, its players' names and " ..
-				"inventories. Publish this world again on the save to copy " ..
-				"it again.", DIM)
+				"goes in but its players: the map and its settings, not who " ..
+				"played it, their privileges or what they carry. Publish " ..
+				"this world again on the save to copy it again.", DIM)
 	end
 	m.name = m.name or entry.name
 	m.version = m.version or "0.1.0"
@@ -608,11 +608,13 @@ function M.safe.open_publish()
 end
 
 -- [WORLD_PACKAGES] "Publish this world" on a save of an app that takes
--- worlds (client/launch_grid.lua), code the paths it runs as code: the
--- save copied into a world package in dev_apps, made or refreshed, and the
--- screen opened on it. Trusted only.
-function M.publish_world(app, save, code)
-	local name, err = __buildat_aitta_dev("world_new", app, save, code or {})
+-- worlds (client/launch_grid.lua), code the paths it runs as code and rows
+-- its per player rows: the save copied into a world package in dev_apps,
+-- made or refreshed, those left out, and the screen opened on it. Trusted
+-- only.
+function M.publish_world(app, save, code, rows)
+	local name, err = __buildat_aitta_dev("world_new", app, save, code or {},
+			rows or {})
 	log:info("aitta publish: world " .. tostring(save) .. " of " ..
 			tostring(app) .. ": " .. tostring(name or err))
 	if not name then

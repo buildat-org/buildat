@@ -451,10 +451,12 @@
 	//                           page packed and signed -> the .zip's
 	//                           path, or nil and why
 	//   "open", path            the system's file manager there
-	//   "world_new", app, save, {code paths}
+	//   "world_new", app, save, {code paths}, {player rows}
 	//                           [WORLD_PACKAGES] the save copied into a
 	//                           world package in dev_apps, made or
-	//                           refreshed -> its name, or nil and why
+	//                           refreshed, its per player rows
+	//                           ("<store>/<key>") left out -> its name, or
+	//                           nil and why
 	static bool plain_aitta_name(const ss_ &s)
 	{
 		if(s.empty() || s.size() > 40)
@@ -535,8 +537,44 @@
 		return bytes;
 	}
 
+	// The rows ("<store>/<key>") taken out of the copy of a save.sqlite,
+	// and the file rewritten so that nothing of them stays in its free
+	// pages; throws why not
+	static void drop_save_rows(const ss_ &path, const sv_<ss_> &rows)
+	{
+		sqlite3 *h = nullptr;
+		ss_ err;
+		if(sqlite3_open_v2(path.c_str(), &h, SQLITE_OPEN_READWRITE,
+				nullptr) != SQLITE_OK)
+			err = sqlite3_errmsg(h);
+		for(size_t i = 0; err.empty() && i < rows.size(); i++){
+			const size_t slash = rows[i].find('/');
+			if(slash == ss_::npos)
+				continue;
+			sqlite3_stmt *st = nullptr;
+			if(sqlite3_prepare_v2(h, "DELETE FROM store WHERE store = ? AND "
+					"key = ?", -1, &st, nullptr) == SQLITE_OK){
+				sqlite3_bind_text(st, 1, rows[i].substr(0, slash).c_str(), -1,
+						SQLITE_TRANSIENT);
+				sqlite3_bind_text(st, 2, rows[i].substr(slash + 1).c_str(), -1,
+						SQLITE_TRANSIENT);
+				if(sqlite3_step(st) != SQLITE_DONE)
+					err = sqlite3_errmsg(h);
+			} else {
+				err = sqlite3_errmsg(h);
+			}
+			sqlite3_finalize(st);
+		}
+		if(err.empty() && sqlite3_exec(h, "VACUUM", nullptr, nullptr,
+				nullptr) != SQLITE_OK)
+			err = sqlite3_errmsg(h);
+		sqlite3_close(h);
+		if(!err.empty())
+			throw Exception("cannot leave the players out of "+path+": "+err);
+	}
+
 	static ss_ world_package_new(const ss_ &app, const ss_ &save,
-			const sv_<ss_> &code)
+			const sv_<ss_> &code, const sv_<ss_> &player_rows)
 	{
 		const size_t dot = app.find('.');
 		if(!(dot == ss_::npos ? valid_app_name(app) :
@@ -609,7 +647,11 @@
 		}
 		// The save as it is now, over the copy there was
 		interface::fs::remove_all(dir+"/world");
-		const int64_t bytes = copy_save_files(from, dir+"/world", "", code);
+		int64_t bytes = copy_save_files(from, dir+"/world", "", code);
+		// What is per player stays with the save ([WORLD_PUBLISH_PLAYERS])
+		bytes -= interface::fs::file_size(dir+"/world/save.sqlite");
+		drop_save_rows(dir+"/world/save.sqlite", player_rows);
+		bytes += interface::fs::file_size(dir+"/world/save.sqlite");
 		write_text(dir+"/meta.json", m.stringify()+"\n");
 		log_i(MODULE, "world package: %s of %s copied into %s, %lld kB",
 				cs(save), cs(app), cs(dir), (long long)(bytes / 1000));
@@ -824,17 +866,20 @@
 			if(op == "world_new"){
 				const ss_ save = lua_isstring(L, 3) ?
 						lua_bindings::lua_tocppstring(L, 3) : "";
-				sv_<ss_> code;
-				for(int i = 1; lua_istable(L, 4); i++){
-					lua_rawgeti(L, 4, i);
-					if(!lua_isstring(L, -1)){
+				sv_<ss_> lists[2];
+				for(int a = 0; a < 2; a++){
+					for(int i = 1; lua_istable(L, 4 + a); i++){
+						lua_rawgeti(L, 4 + a, i);
+						if(!lua_isstring(L, -1)){
+							lua_pop(L, 1);
+							break;
+						}
+						lists[a].push_back(lua_bindings::lua_tocppstring(L, -1));
 						lua_pop(L, 1);
-						break;
 					}
-					code.push_back(lua_bindings::lua_tocppstring(L, -1));
-					lua_pop(L, 1);
 				}
-				lua_pushstring(L, world_package_new(arg, save, code).c_str());
+				lua_pushstring(L, world_package_new(arg, save, lists[0],
+						lists[1]).c_str());
 				return 1;
 			}
 			if(op == "open"){
