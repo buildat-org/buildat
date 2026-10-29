@@ -30,6 +30,8 @@ local M = {safe = {}}
 local DEFAULT_STARPORT = "https://starport.buildat.org"
 -- [AITTA_MVP]: the registry of apps this client browses
 local DEFAULT_AITTA = "https://aitta.buildat.org"
+-- [LIVELY_MENU]: the Hearth whose feed the launcher's "now" strip reads
+local DEFAULT_HEARTH = "https://hearth.buildat.org"
 local STATE_PATH = __buildat_get_path("user") .. "/starport.json"
 local EXPORT_PATH = __buildat_get_path("user") .. "/starport_keys.json"
 local STYLE = "own:ui_utils/res/style.xml"
@@ -241,7 +243,12 @@ local function effective()
 		end
 	end
 	local m_aittas = type(m.aittas) == "table" and m.aittas or nil
+	-- [LIVELY_MENU] The Hearth whose feed the launcher reads: "hearth",
+	-- the managed file's over the user's, "" for none
+	local hearth = type(m.hearth) == "string" and m.hearth or
+			type(s.hearth) == "string" and s.hearth or DEFAULT_HEARTH
 	return {
+		hearth = hearth:gsub("/+$", ""):match("^https?://[%w%.%-%[%]:]+$"),
 		starports = starports,
 		filters = filters,
 		direct_connect = (m.direct_connect == nil) and s.direct_connect or
@@ -1249,6 +1256,104 @@ function M.safe.fallback_hearth(aitta)
 			end
 		end
 	end
+end
+
+-- **Hearth's feed** ([LIVELY_MENU]): the recent threads of the Hearth in
+-- the settings (effective().hearth), its /api/v1/feed fetched once a run
+-- and kept. Untrusted text: a title is plain text here, its control
+-- characters spaces, cut at FEED_TITLE_MAX bytes; numbers are checked,
+-- lists capped. hearth_feed(cb[, ask]): cb({url, announcements, active,
+-- packages = {["author/name"] = {posts, last, threads}}}), each thread
+-- {id, title, posts, last}, or cb(nil) with no Hearth or no answer.
+-- Without `ask`, a Hearth whose host the user has not accepted is not
+-- asked (as fetch's Starports), so Home never opens the permission
+-- dialog by itself. A copy each call: the caller may be sandboxed.
+local FEED_TITLE_MAX = 120
+local FEED_PACKAGES_MAX = 300
+local feed, feed_waiting = nil, nil
+local function feed_count(v)
+	v = tonumber(v)
+	return v and v >= 0 and v < 2^53 and math.floor(v) or 0
+end
+local function feed_threads(l, n)
+	local out = {}
+	for _, t in ipairs(type(l) == "table" and l or {}) do
+		if #out >= n then
+			break
+		end
+		local id = type(t) == "table" and feed_count(t.id) or 0
+		local title = type(t) == "table" and type(t.title) == "string" and
+				t.title:gsub("%c", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
+		if id > 0 and title and title ~= "" then
+			if #title > FEED_TITLE_MAX then
+				title = title:sub(1, FEED_TITLE_MAX):gsub(
+						"[\192-\255][\128-\191]*$", "") .. "..."
+			end
+			out[#out + 1] = {id = id, title = title, posts = feed_count(t.posts),
+				last = feed_count(t.last)}
+		end
+	end
+	return out
+end
+local function copy(v)
+	if type(v) ~= "table" then
+		return v
+	end
+	local out = {}
+	for k, x in pairs(v) do
+		out[k] = copy(x)
+	end
+	return out
+end
+function M.hearth_url()
+	return effective().hearth
+end
+function M.safe.hearth_feed(cb, ask)
+	if type(cb) ~= "function" then
+		error("hearth_feed(cb: function[, ask])")
+	end
+	local url = effective().hearth
+	if not url or not (ask or accepted(url)) then
+		return cb(nil)
+	end
+	if feed and feed.url == url then
+		return cb(copy(feed))
+	end
+	if feed_waiting then
+		feed_waiting[#feed_waiting + 1] = cb
+		return
+	end
+	feed_waiting = {cb}
+	network.http_get(url .. "/api/v1/feed", function(body, err)
+		local v = body and #body <= 4194304 and network.parse_json(body)
+		local f = {url = url, announcements = {}, active = {}, packages = {}}
+		if type(v) == "table" then
+			f.announcements = feed_threads(v.announcements, 3)
+			f.active = feed_threads(v.active, 5)
+			local n = 0
+			for k, p in pairs(type(v.packages) == "table" and v.packages or {}) do
+				if n < FEED_PACKAGES_MAX and type(k) == "string" and #k <= 81 and
+						k:match("^[%w_%-]+/[%w_%-]+$") and type(p) == "table" then
+					n = n + 1
+					f.packages[k] = {posts = feed_count(p.posts),
+						last = feed_count(p.last),
+						threads = feed_threads(p.threads, 3)}
+				end
+			end
+			log:info("hearth feed: " .. #f.announcements .. " announcements, " ..
+					#f.active .. " active, " .. n .. " packages from " .. url)
+		else
+			log:warning("hearth feed: " .. url .. ": " .. tostring(body and
+					"not a feed" or err))
+		end
+		-- An answer or not, once a run
+		feed = f
+		local w = feed_waiting
+		feed_waiting = nil
+		for _, c in ipairs(w) do
+			c(copy(f))
+		end
+	end, {description = "Hearth (news)"})
 end
 
 -- `hides`: the set says what is hidden, and [x] is still what is shown, as
@@ -2701,6 +2806,9 @@ M.dialog = {open_window = open_window, is_open = is_open, reseal = reseal,
 	add_button = add_button, add_edit = add_edit, add_dropdown = add_dropdown,
 	WARN = WARN, DIM = DIM}
 M.effective = effective
+-- Whether the user has accepted a url's host ([LIVELY_MENU]: Aitta's
+-- list for Home, asked of no one else)
+M.accepted = accepted
 -- An Aitta's report key, where the settings send keys
 function M.report_key(url)
 	return load_state().send_key and key_for(url) or nil

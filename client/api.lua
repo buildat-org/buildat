@@ -662,6 +662,7 @@ __buildat_served_overrides = {
 	launch = refused("launch"),
 	launch_save = refused("launch_save"),
 	join_server = refused("join_server"),
+	open_hearth_thread = refused("open_hearth_thread"),
 	show_engine_settings = refused("show_engine_settings"),
 	show_key_settings = refused("show_key_settings"),
 	log_path = function() return nil end,
@@ -825,13 +826,42 @@ buildat.safe.feedback = function()
 	local f = feedback
 	-- A server's or a game's is discussed()'s: a Hearth from before it
 	-- read this one as a package's and could not draw it
-	if f and (f.server or f.game or f.bind) then
+	if f and (f.server or f.game or f.bind or f.open) then
 		return nil
 	end
 	feedback = nil
 	return f and {subject = f.subject, package = f.package,
 			version = f.version, engine = f.engine, platform = f.platform,
 			place = f.place == true}
+end
+
+-- **A thread from the launcher's "now" strip** ([LIVELY_MENU]): the
+-- Hearth whose feed it came from (the Starport settings' "hearth")
+-- joined, and the thread opened there, as BUILDAT_OPEN's "/t/<id>" is.
+-- Only a number crosses from the caller; the address is this side's.
+-- open_hearth_thread(id) -> true, or false and why
+buildat.safe.open_hearth_thread = function(id)
+	id = tonumber(id)
+	local starport = require("buildat/core/starport")
+	local address = launch_grid.hearth_address(starport.hearth_url() or "")
+	if not (id and id >= 1 and id < 2^53 and id == math.floor(id)) then
+		return false, "open_hearth_thread(id): a thread's number"
+	elseif not address then
+		return false, "no Hearth in the settings"
+	end
+	feedback = {address = address, open = string.format("/t/%d", id)}
+	log:info("hearth: open " .. feedback.open .. " on " .. address)
+	starport.join_with_id(address)
+	return true
+end
+-- hearth_open() -> "/t/<id>" or nil, once: the Hearth's side of it
+buildat.safe.hearth_open = function()
+	local f = feedback
+	if not (f and f.open) then
+		return nil
+	end
+	feedback = nil
+	return f.open
 end
 
 -- **"Discuss (leave server)"** ([DISCUSS_SERVER]): the server being

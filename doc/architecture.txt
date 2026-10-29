@@ -209,7 +209,13 @@ is provided on the command line, which is what running `buildat` with no
 arguments does. By default it is extensions/launch_menu, which runs in the
 sandbox: a Continue list and a search over the apps, saves and servers, which
 lists a local app, a remote server, and whatever the tree's launcher files
-offer. Its screens.lua is where every launch UI's app starts
+offer. Above Continue, natively and on the web, a "Now" strip
+([LIVELY_MENU]) shows what is going on: up to 3 servers with players
+(Starport), 3 packages an Aitta listed in the last 14 days, and the
+Hearth's announcements and 3 most active threads (its /api/v1/feed,
+doc/hearth.txt), each opened by a click; it is not there when none is,
+and it reads only from the hosts the user has already accepted, so Home
+asks nothing. Its screens.lua is where every launch UI's app starts
 end: the local app list, connecting, and the screens a local server starts
 behind, run in the sandbox by client/launch_grid.lua. Leaving an app
 (leave(), leave_to_menu()) goes back to the launch UI in the same process;

@@ -364,7 +364,12 @@ search filters as it is typed, the dropdown by state (All, Installed,
 Updates, Not installed), Ctrl+S sorts by name or newest. The selected
 package's panel has its version, kind, author, review state, licences,
 size, description and changelog, and Install, or Update where another
-version of it is installed, Discuss and Report...; Enter or a second
+version of it is installed, Discuss and Report..., and its newest three
+threads on the Hearth in the Starport settings with their posts
+([LIVELY_MENU]; a click opens one there); a row says its release's age
+and those posts. Discuss goes to the package's home Hearth, or without
+one the Hearth a Starport recommends, or the one in the settings. Enter
+or a second
 click on its row installs. Escape closes the page. The client fetches
 the release and its .sig and checks them itself before installing; the
 new version is on the grid at once. Where the

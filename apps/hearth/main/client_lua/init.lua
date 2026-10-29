@@ -2545,7 +2545,10 @@ accounts.on_joined = function()
 			-- client opened by that page's "in the browser". Its page over
 			-- home, where Back goes and a place not there is said; the
 			-- shape checked again here
-			local web = buildat.get_env("BUILDAT_OPEN") or ""
+			-- Or the launcher's "now" strip's thread ([LIVELY_MENU]), in
+			-- the same shape; a client from before it has no hearth_open
+			local web = buildat.get_env("BUILDAT_OPEN") or
+					(buildat.hearth_open and buildat.hearth_open()) or ""
 			local wk, wid = web:match("^/(%l+)/([%w_.%-/]+)$")
 			local n = tonumber(wid and wid:match("^%d+$") or "")
 			local web_page = wk and ({
