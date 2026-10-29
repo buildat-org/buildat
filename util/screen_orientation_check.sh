@@ -37,8 +37,18 @@ BUILDAT_LUANTI_LUA="$d/shared/fixture.lua" start_server "$t/srv.log" \
 	-u launcher=1 -A 127.0.0.1 -m "$here/apps/vanilla" -D "$d" \
 	-C "$d.cache" -l 3 -W "$here/web" || fail "the server"
 CHECK_PIDS+=($SERVER_PID)
-# CSS pixels: the dropdown at (244, 456), below View range (2026-10-14);
-# its Auto, Landscape and Portrait at y 471, 485 and 499. After a line, settles of up to 1 s: the popup
+# The page is not the launcher's own client, so it joins by the login
+# ([GUEST_NAME_REUSE]): an account made with the server's setup code, its
+# first admin. By the keyboard, as a tap would take the page fullscreen
+# (and unlock) before the first pick: from the name, Tab past the
+# password and Join to "Create a new account"; the make page's fields in
+# Tab order and "Create account" after them. The frames after the login
+# line and the press are the page drawn and focused.
+code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | head -1 | cut -d' ' -f3)
+[ -n "$code" ] || fail "no setup code ($t/srv.log)"
+# The dropdown at (244, 466), below View range, an admin's menu with Who
+# may talk above (2026-10-29); its Auto, Landscape and Portrait at y 481,
+# 495 and 509. After a line, settles of up to 1 s: the popup
 # placed in the frames after it says it is open; after a pick, the page's
 # fullscreen, which the pick asks for and the browser enters a moment later
 # (the menu's line and the start's "so: ready" the same: the frames after)
@@ -46,15 +56,20 @@ state='["eval", "Module.buildatOrientation + (document.fullscreenElement ? \" fu
 cat > "$t/steps.json" <<J
 [
  ["nav", "\${URL}"],
+ ["waitlog", "accounts: the login page shown", 120], ["frames", 5],
+ ["key", "Tab"], ["key", "Tab"], ["key", "Tab"], ["key", "Enter"], ["frames", 5],
+ ["type", "soplayer"], ["key", "Tab"], ["type", "sopass12"], ["key", "Tab"],
+ ["type", "sopass12"], ["key", "Tab"], ["type", "$code"], ["key", "Tab"],
+ ["key", "Enter"], ["waitlog", "Joined as soplayer", 30],
  ["waitlog", "chat: so: ready", 120], ["wait", 1000],
  ["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["wait", 500],
- ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 485],
+ ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 495],
  ["waitlog", "pause: screen orientation landscape", 10], ["wait", 1000],
  $state,
- ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 499],
+ ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 509],
  ["waitlog", "pause: screen orientation portrait", 10], ["wait", 1000],
  $state,
- ["tap", 244, 456], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 471],
+ ["tap", 244, 466], ["waitlog", "dropdown_[0-9]+ open", 10], ["wait", 300], ["tap", 232, 481],
  ["waitlog", "pause: screen orientation auto", 10], ["wait", 1000],
  $state
 ]
@@ -65,7 +80,10 @@ TOUCH=1 WEB_DRIVE_VIEWPORT=400x800@2 WEB_DRIVE_URL="http://127.0.0.1:$SERVER_POR
 got=$(grep -ao '^eval: "[a-z]* [a-z]*"' "$t/drive.txt" | sed 's/eval: "//; s/"//' | tr '\n' ',')
 [ "$got" = "landscape fullscreen,portrait fullscreen,auto windowed," ] ||
 	fail "the states \"$got\" ($t/drive.txt)"
-calls=$(grep -ao "orientation: \(lock [a-z]*\|unlock\)" "$t/drive/page.log" |
+# From the menu on: the world's start takes the page fullscreen (and so
+# unlocks) when an input of the login's is still the page's activation
+calls=$(sed -n '/pause: the menu shown/,$p' "$t/drive/page.log" |
+	grep -ao "orientation: \(lock [a-z]*\|unlock\)" |
 	sed 's/orientation: //' | uniq | tr '\n' ',')
 [ "$calls" = "lock landscape,lock portrait,unlock," ] ||
 	fail "the page's calls \"$calls\" ($t/drive/page.log)"
