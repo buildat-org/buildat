@@ -190,7 +190,11 @@ grep -q 'id="m3"' "$t/page" && grep -q "bob was here" "$t/page" || fail "bob's r
 for p in /t/99 /t/x /topic/ /m/; do
 	[ "$(get $p)" = 404 ] || fail "$p is not a 404"
 done
-grep -q "Hearth" <(curl -s "$U/index.html") && fail "/index.html is Hearth's"
+# The web client's page (its name field), not Hearth's (its brand link):
+# the page's own comments may name Hearth
+curl -s "$U/index.html" >"$t/page"
+grep -q 'id="name_in"' "$t/page" && ! grep -q 'Hearth</a>' "$t/page" ||
+	fail "/index.html is not the web client's"
 # [HTML_BRAND]: the font and the logo from the page's own origin
 [ "$(get /brand/overpass.ttf)" = 200 ] && [ "$(get /brand/logo.png)" = 200 ] ||
 	fail "the brand's files"
