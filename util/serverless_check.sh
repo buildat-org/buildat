@@ -140,12 +140,11 @@ BUILDAT_LUANTI_LIST=http://127.0.0.1:9 BUILDAT_STARPORT_DEFAULT=https://127.0.0.
 	fail "the play server did not start"
 CHECK_PIDS+=($SERVER_PID)
 PP=$SERVER_PORT
-set_js="FS.writeFile('/buildat/user/starport.json', JSON.stringify({aittas: ['http://127.0.0.1:$P'], filters: {unreviewed: true}})); FS.syncfs(false, function(){}); 'set'"
+set_js="FS.writeFile('/buildat/user/starport.json', JSON.stringify({aittas: ['http://127.0.0.1:$P'], filters: {unreviewed: true}})); new Promise(r => Module.buildatSave(() => r('set')))"
 cat > "$t/steps.json" <<J
 [["nav", "http://127.0.0.1:$PP/"],
  ["waitlog", "launch_menu", 90],
  ["eval", "$set_js"],
- ["wait", 1000],
  ["nav", "http://127.0.0.1:$PP/?again#run=tester/sl"],
  ["waitlog", "Asking the user about", 90],
  ["wait", 1000],

@@ -1656,6 +1656,29 @@ struct Module: public interface::Module, public network::Interface
 		return true;
 	}
 
+	// [WEB_PLAY_AFTER_MERGE] The page's default Starport, Aitta and Hearth:
+	// this server's BUILDAT_*_DEFAULT, as a native client takes them (a
+	// check's closed port), so a page's client fetches no built-in host
+	// the server's operator replaced. A JS object, "" with none set; a
+	// value of other characters than an origin's is left out
+	static ss_ default_hosts()
+	{
+		ss_ r;
+		for(const char *k : {"STARPORT", "AITTA", "HEARTH"}){
+			const char *v = getenv(("BUILDAT_"+ss_(k)+"_DEFAULT").c_str());
+			const ss_ s = v ? v : "";
+			const bool scheme = s.rfind("http://", 0) == 0 ||
+					s.rfind("https://", 0) == 0;
+			const size_t host = s.find("://") + 3;
+			if(!scheme || s.size() <= host || s.find_first_not_of(
+					"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+					"0123456789.-[]:", host) != ss_::npos)
+				continue;
+			r += (r.empty() ? "{" : ", ")+ss_(k)+": '"+s+"'";
+		}
+		return r.empty() ? r : r+"}";
+	}
+
 	// A web client file, read again when its ETag changes, and its deflated
 	// copy started on a thread of its own; null if it cannot be read.
 	// title: index.html's ([PAGE_TITLE]), "" for the others
@@ -1665,11 +1688,13 @@ struct Module: public interface::Module, public network::Interface
 		const bool index = name == "index.html";
 		const ss_ apps = index && m_page_has_no_game ? local_apps() : "";
 		const ss_ needs = index && !m_page_has_no_game ? app_needs() : "";
+		const ss_ hosts = index ? default_hosts() : "";
 		struct stat st;
 		const ss_ etag = stat(path.c_str(), &st) == 0 ? "\""+
 				itos((int64_t)st.st_mtime)+"-"+itos((int64_t)st.st_size)+
 				(index ? "-"+itos((int64_t)(std::hash<ss_>()(title+
-				(m_page_has_no_game ? "\n"+apps : "\n"+needs)) >> 1)) : "")+
+				(m_page_has_no_game ? "\n"+apps : "\n"+needs)+"\n"+hosts) >> 1)) :
+				"")+
 				"\"" : "";
 		WebFile &wf = m_web_files[name];
 		if(!etag.empty() && wf.etag == etag)
@@ -1709,6 +1734,11 @@ struct Module: public interface::Module, public network::Interface
 		const size_t nl = needs.empty() ? ss_::npos : body.find(NEEDS_LINE);
 		if(nl != ss_::npos)
 			body.replace(nl, NEEDS_LINE.size(), "var needs = "+needs+";");
+		static const ss_ HOSTS_LINE = "var default_hosts = null;";
+		const size_t hl = hosts.empty() ? ss_::npos : body.find(HOSTS_LINE);
+		if(hl != ss_::npos)
+			body.replace(hl, HOSTS_LINE.size(),
+					"var default_hosts = "+hosts+";");
 		wf.body.reset(new ss_(std::move(body)));
 		wf.deflated.reset(new Deflated());
 		wf.etag = etag;

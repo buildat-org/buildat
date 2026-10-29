@@ -199,6 +199,10 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 	// [WEB_MESH_OFF_THREAD] The app's meta.json "needs", which the buildat
 	// server writes in here: {memory_mb, mesh_threads}
 	var needs = null;
+	// [WEB_PLAY_AFTER_MERGE] The default Starport, Aitta and Hearth the
+	// buildat server writes in here from its BUILDAT_*_DEFAULT:
+	// {STARPORT, AITTA, HEARTH}
+	var default_hosts = null;
 	var args = ['-P', '/buildat', '-U', '/urho', '-C', '/buildat/cache',
 		'-D', '/buildat/user',
 		'-w', window.innerWidth + 'x' + window.innerHeight];
@@ -588,6 +592,8 @@ games<br><input id="name_in" maxlength="20" spellcheck="false"><button>Play</but
 				Module.ENV.BUILDAT_OPEN = open_;
 			if(run)
 				Module.ENV.BUILDAT_RUN = run;
+			for(var k in default_hosts || {})
+				Module.ENV['BUILDAT_' + k + '_DEFAULT'] = default_hosts[k];
 			// [WEB_MESH_OFF_THREAD] What the page got, for
 			// buildat.resources(); the memory's maximum is the build's
 			// where the page did not make it (2048 MB, not promised)
