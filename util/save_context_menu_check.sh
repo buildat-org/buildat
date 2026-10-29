@@ -29,7 +29,7 @@ wait_for_log "$t/mk.log" "The world is up" 60 || fail "alpha not up ($t/mk.log)"
 kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null
 
 saves="wait_log_any 20000 , first alpha
-delay 1500
+frames 3
 event scan 1 home
 click Button \"Saves*\"
 wait_log 5000 launch_menu: save,
@@ -95,7 +95,7 @@ print("ok: the menu by right click and by finger; World options... opened alpha'
 PY
 # 4.
 home="wait_log_any 20000 , first alpha
-delay 1500"
+frames 3"
 right="delay 300
 mouse_click right"
 options="wait_log 5000 launch_menu: the actions of alpha

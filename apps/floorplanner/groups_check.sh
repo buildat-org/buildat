@@ -138,11 +138,11 @@ grep -a "Plan refused: Your plans use" "$tmp/d3.log" ||
 
 # [SEQ_CLICK]: a click on a button under an open dropdown's list fails and
 # names what covers it (the menu's Mode list over "Plan settings...")
-# The delays after the two lines are settles (the plan's and the menu's
+# The waits after the two lines are settles (the plan's and the menu's
 # layout). simplified: the 800 ms is for the Mode list to open after the
 # click, which logs nothing; a line where the dropdown opens would do.
 # The click is refused on purpose, which fails the drive (MAY_FAIL).
-printf 'wait_log 30000 Entered the plan\ndelay 1500\nkeypress Escape\nwait_log 5000 Pause menu shown\ndelay 500\nmouse_pos 320 145\nmouse_click left\ndelay 800\nclick Button "Plan settings..."\nquit\n' > "$tmp/cd4"
+printf 'wait_log 30000 Entered the plan\nframes 3\nkeypress Escape\nwait_log 5000 Pause menu shown\ndelay 500\nmouse_pos 320 145\nmouse_click left\ndelay 800\nclick Button "Plan settings..."\nquit\n' > "$tmp/cd4"
 MAY_FAIL=1 CMDS="$tmp/cd4" client d d4.log "" BUILDAT_FP_PLAN=pd
 grep -aq 'Button "Plan settings..." at .*: covered by Text "" "dropdown_[0-9]*: Viewing"' "$tmp/d4.log" ||
 	fail "a covered click not refused ($tmp/d4.log)"

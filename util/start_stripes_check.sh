@@ -41,7 +41,7 @@ echo "$pcts" | awk '{ for(i = 2; i <= NF; i++) if($i < $(i - 1)) exit 1;
 	fail "the percentages fell, or did not end at 100: $pcts ($t/srv2.log)"
 # The launcher on an empty cache: the stripes with a percentage, then
 # Escape
-printf '%s\n' "wait_log_any 600000 (compiling)" "delay 1500" \
+printf '%s\n' "wait_log_any 600000 (compiling)" "frames 3" \
 	"screenshot $t/start.png" "keypress Escape" \
 	"wait_log 15000 Local server stopped" quit > "$t/c.cmds"
 BUILDAT_CACHE_PATH="$t/cache2" timeout 700 bin/buildat -o launch_ui=launch_menu \

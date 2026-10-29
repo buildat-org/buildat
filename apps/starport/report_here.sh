@@ -111,7 +111,7 @@ keypress down
 keypress down
 keypress return
 wait_log 20000 report here: connected to
-delay 1500
+frames 3
 screenshot $tmp/report.png
 quit
 C

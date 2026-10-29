@@ -55,11 +55,11 @@ wait_log 30000 accounts: ntfy asked
 delay 500
 click Button "Later"
 wait_log 30000 aitta: row
-delay 1500
+idle 10000
 screenshot $t/listed.png
 click Button "Delist"
 wait_log 10000 aitta: row tester/$name/1.0.0: delisted
-delay 1500
+idle 10000
 screenshot $t/delisted.png
 quit
 C

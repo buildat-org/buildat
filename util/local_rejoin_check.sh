@@ -39,7 +39,7 @@ wait_log 10000 world_menu: the list shown, 2 worlds
 delay 500'
 cat > "$t/cmds" <<C
 wait_log_any 20000 , first w1
-delay 1500
+frames 3
 click Text "w1"
 $placed
 delay 1500

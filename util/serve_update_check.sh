@@ -145,7 +145,7 @@ delay 1000
 screenshot $t/reconnecting.png
 wait_log 300000 reconnect: joined
 wait_log 30000 Entered the plan p1
-delay 2000
+idle 15000
 screenshot $t/back.png
 quit
 C

@@ -44,7 +44,7 @@ json(){ python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[sys.arg
 
 # 1.
 {
-	printf 'wait_log_any 20000 , first vs\ndelay 1500\nclick Text "vs"\n'
+	printf 'wait_log_any 20000 , first vs\nframes 3\nclick Text "vs"\n'
 	printf 'wait_log 60000 load: the world is in\ndelay 1500\n'
 	mode shadows; mode unlit; echo quit
 } > "$t/1.cmds"

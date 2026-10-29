@@ -30,7 +30,7 @@ grep -q "creative_mode = true" "$mt" && fail "alpha creative from the start"
 # The Creative mode click relabels Play in its own frame, a scan 300 ms on
 cat > "$t/cmds" <<C
 wait_log_any 20000 , first alpha
-delay 1500
+frames 3
 click Text "alpha"
 wait_log 120000 the server put the player at
 wait_log_any 60000 load: the world is in

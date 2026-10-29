@@ -40,7 +40,7 @@ start_server "$t/s1.log" "STATUS Listening" 120 auto "$here/Build/bin/buildat_se
 CHECK_PIDS+=($SERVER_PID)
 cat > "$t/1.cmds" <<C
 wait_log 30000 menu: 2 saves
-delay 1500
+frames 3
 event scan
 screenshot $t/none.png
 click Button "alpha*"
@@ -73,7 +73,7 @@ PY
 # 2. Home's first row (bravo, at 1100x800 from a scan), then the pause menu
 cat > "$t/2.cmds" <<C
 wait_log_any 20000 , first bravo
-delay 1500
+frames 3
 event scan
 click Text "bravo"
 wait_log 120000 the server put the player at
@@ -105,7 +105,7 @@ keypress Escape
 wait_log 5000 pause: the menu shown
 click Button "Worlds..."
 wait_log 10000 menu: 2 saves
-delay 1500
+frames 3
 click LineEdit "*"
 # the click's frames: the field takes the focus in the frames after it
 delay 300

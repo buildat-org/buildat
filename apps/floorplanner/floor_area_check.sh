@@ -21,30 +21,35 @@ check_tmp fp_area; t=$CHECK_TMP
 trap check_cleanup EXIT
 cat > "$t/cmds" <<C
 wait_log 60000 Entered the plan
-delay 1500
+frames 3
 click Button "Start editing"
 delay 1000
 event fp_room 0 0 4000 3000
-delay 1500
+sync 5000
+frames 3
 click Button "Ground floor"
 wait_log 3000 Layouts menu shown
 delay 500
 click Button "Building: Ground floor (12.00 m2)"
 delay 1000
 event fp_room 5000 0 7000 2000
-delay 1500
+sync 5000
+frames 3
 click Button "Building: Ground floor (16.00 m2)"
 delay 500
 event fp_wall 2000 500 2000 2500
-delay 1500
+sync 5000
+frames 3
 click Button "Building: Ground floor (15.80 m2)"
 delay 500
 event fp_wall 6000 500 6000 1500 1700
-delay 1500
+sync 5000
+frames 3
 click Button "Building: Ground floor (15.80 m2)"
 delay 500
 event fp_wall 6500 500 6500 1500 1500
-delay 1500
+sync 5000
+frames 3
 click Button "Building: Ground floor (15.70 m2)"
 delay 500
 quit

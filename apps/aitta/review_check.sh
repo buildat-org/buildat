@@ -122,7 +122,7 @@ delay 1000
 screenshot $t/review.png
 click Button "Playtest"
 wait_log 10000 playtest: offered tester/pt/1.0.1
-delay 2000
+frames 3
 screenshot $t/dialog.png
 click Button "Playtest"
 wait_log 10000 Asking the user about $A
@@ -159,7 +159,7 @@ text apps from aitta
 wait_log 5000 apps from aitta"
 keypress Return
 wait_log 15000 aitta page: tester/pt
-delay 1500
+idle 10000
 screenshot $t/aitta.png
 quit
 C
@@ -185,7 +185,7 @@ wait_log 10000 Asking the user about $A
 delay 1000
 click Button "Accept"
 wait_log 15000 aitta page: tester/pt
-delay 1500
+idle 10000
 screenshot $t/locked.png
 quit
 C

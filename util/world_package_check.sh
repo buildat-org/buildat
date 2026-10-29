@@ -113,7 +113,7 @@ cat > "$t/u/dev_apps/wp/meta.json" <<'J'
 J
 cat > "$t/pub.cmds" <<C
 wait_log_any 60000 rows in
-delay 1500
+frames 3
 click Button "Saves*"
 wait_log 5000 launch_menu: save,
 delay 500
