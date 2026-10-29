@@ -273,11 +273,13 @@ function core.deserialize(str, safe)
 	setfenv(func, env)
 	-- buildat: the budget (see above). A serialized table is straight-line
 	-- code of about its own length, so a hundred instructions a byte is
-	-- far past any honest one.
+	-- far past any honest one. Its memory likewise: what it builds is a
+	-- few times its text, and 32 MiB more than that is room to spare.
 	local budget = 100000 + 100 * #str
+	local bytes = 32 * 1048576 + 16 * #str
 	local success, value_or_err
 	if __luanti_bounded_pcall then
-		success, value_or_err = __luanti_bounded_pcall(func, budget)
+		success, value_or_err = __luanti_bounded_pcall(func, budget, bytes)
 	else
 		success, value_or_err = pcall(func)
 	end

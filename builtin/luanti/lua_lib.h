@@ -91,28 +91,61 @@ static void lua_step_watchdog(lua_State *L)
 	}
 }
 
-// __luanti_bounded_pcall(f, budget) -> ok, result: f run interpreted --
-// LuaJIT's compiled loops do not reach a count hook -- with an error after
-// `budget` instructions, and the hook that was on (the watchdog, the
-// profiler) put back as it was. Lua's own debug.sethook cannot do the last
-// part: a C hook comes back from debug.gethook as a string. What
-// core.deserialize runs saved data through ([SECURITY_RUN_1]).
+// __luanti_bounded_pcall(f, budget[, bytes]) -> ok, result: f run
+// interpreted -- LuaJIT's compiled loops do not reach a count hook -- with
+// an error after `budget` instructions, and the hook that was on (the
+// watchdog, the profiler) put back as it was. Lua's own debug.sethook
+// cannot do the last part: a C hook comes back from debug.gethook as a
+// string. What core.deserialize runs saved data through ([SECURITY_RUN_1]).
+// With bytes, an allocation that would take what f holds past that many
+// bytes fails as "not enough memory": one instruction can ask for a
+// gigabyte (("x"):rep(2^30), or a string doubled by .. thirty times).
 static void bounded_hook(lua_State *L, lua_Debug *ar)
 {
 	luaL_error(L, "the data runs too long");
+}
+
+struct BoundedAlloc {
+	lua_Alloc f;
+	void *ud;
+	int64_t held; // bytes allocated during the call, less those freed
+	int64_t cap;
+};
+
+static void *bounded_alloc(void *ud, void *p, size_t osize, size_t nsize)
+{
+	BoundedAlloc *a = (BoundedAlloc*)ud;
+	const int64_t grow = (int64_t)nsize - (int64_t)(p ? osize : 0);
+	if(grow > 0 && a->held + grow > a->cap)
+		return nullptr;
+	void *r = a->f(a->ud, p, osize, nsize);
+	if(r != nullptr || nsize == 0)
+		a->held += grow;
+	return r;
 }
 
 static int l_bounded_pcall(lua_State *L)
 {
 	luaL_checktype(L, 1, LUA_TFUNCTION);
 	const int budget = luaL_checkint(L, 2);
+	const lua_Number bytes = luaL_optnumber(L, 3, 0);
 	lua_Hook old = lua_gethook(L);
 	const int old_mask = lua_gethookmask(L);
 	const int old_count = lua_gethookcount(L);
+	BoundedAlloc a;
+	a.f = lua_getallocf(L, &a.ud);
+	a.held = 0;
+	a.cap = (int64_t)bytes;
 	luaJIT_setmode(L, 1, LUAJIT_MODE_ALLFUNC | LUAJIT_MODE_OFF);
 	lua_sethook(L, bounded_hook, LUA_MASKCOUNT, budget > 0 ? budget : 1);
+	if(bytes > 0)
+		lua_setallocf(L, bounded_alloc, &a);
 	lua_pushvalue(L, 1);
 	const int r = lua_pcall(L, 0, 1, 0);
+	// What was allocated through the wrapper is freed by the same
+	// allocator underneath it, so it can go back at once
+	if(bytes > 0)
+		lua_setallocf(L, a.f, a.ud);
 	lua_sethook(L, old, old_mask, old_count);
 	lua_pushboolean(L, r == 0);
 	lua_insert(L, -2);
