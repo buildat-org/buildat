@@ -40,6 +40,14 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hillclimb; t=$CHECK_TMP
 app="$here/apps/hillclimb"
+# None started while the machine has under 4 GB available and 300 MB for
+# each of the <n> about to start (user, 2026-10-29)
+mem_wait() # <n>
+{
+	while [ "$(free -m | awk '/^Mem:/ { print $7 }')" -lt $((4000 + 300 * $1)) ]; do
+		sleep 1
+	done
+}
 
 # [CLIENT_WASM] step 5, below: a lap's prediction lines in a client's log
 pred_counts() # <log>: its last line in $last, and in $counts the run's
@@ -75,6 +83,7 @@ pred_check() # <log> <engine at the self test, a regex>
 # headless Firefox (util/web_drive.sh), the module the browser's instance
 if [ "${1:-}" = web ]; then
 	check_build web
+	mem_wait 2
 	start_server "$t/web_srv.log" "Listening at" 300 auto env \
 		BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_STEEP=22 \
 		BUILDAT_HILLCLIMB_FEATURES=0 BUILDAT_HILLCLIMB_STEEP_VAR=0 \
@@ -170,39 +179,51 @@ drive()
 	done
 	return 1
 }
+# At most 3 drives' servers at once (user, 2026-10-29: eight at once, ~2 GB,
+# beside other checks, crashed a browser tab)
+limit() { while [ "$(jobs -rp | wc -l)" -ge 3 ]; do wait -n; done; mem_wait 1; }
+mem_wait 1
 drive warm BUILDAT_HILLCLIMB_DRIVE="0:Q" || fail "the first server ($t/warm.log)"
 # On the flat past the hill's start, facing away: each gear's top speed,
 # then the brake
+limit
 drive flat BUILDAT_HILLCLIMB_START="5 -30 180" \
 	BUILDAT_HILLCLIMB_DRIVE="0:4 3:W1 9:W2 15:W3 21:W4 27:S4 31:Q" &
 # The time trial: 22 degrees climbed in second, the gear a car starts in
 # ([HC_DEFAULTS]: no gear key before it), kept on the top by being put
 # back as it goes off the end ([HC_OPEN_EDGES]); again in fourth,
 # faster; then a hill of 15 degrees and 30 m
+limit
 drive climb BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 31:S2 \
 33:B 34:W4 50:S4 52:4H15/30 54:W4 66:Q" &
 # 40 degrees with 2 t aboard in first: past the sand's grip, it stalls,
 # its wheels spinning in place dig in and loosen stones that roll
+limit
 drive stall BUILDAT_HILLCLIMB_STEEP=40 BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 	BUILDAT_HILLCLIMB_DRIVE="0:1 1:W1 2:KW1 26:S1 34:Q" &
 # [HC_PITS_ROCKS] Seed 6 at 29 degrees has a rock at x 5.26 z 9.74 m,
 # 0.74 m in radius, and nothing else below it near these lines
 # ("hill_test 6 29 50"): from the bottom pad in second with the left
 # wheels on its line, and on a line 3 m to its left
+limit
 drive rock BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLCLIMB_STEEP=29 \
 	BUILDAT_HILLCLIMB_START="6.21 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
+limit
 drive beside BUILDAT_HILLCLIMB_FEATURES=1 BUILDAT_HILLCLIMB_SEED=6 BUILDAT_HILLCLIMB_STEEP=29 \
 	BUILDAT_HILLCLIMB_START="2.1 3 0" BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 14:Q" &
 # [HC_OPEN_EDGES] Up the slope in second, steered right from 7 s: off the
 # side, put back; a minute parked on the bottom pad, a stone thrown off
 # the left edge at 1 s and one dropped on the pad at 2 s
+limit
 drive side BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 16:Q" &
 # [HC_PUT_BACK_FURTHER] The same, steered right three times: off the
 # side, then up past the 10 m mark and off again, then off once more
 # ([HC_ENGINE_NOISE] the second half a second sooner: on seed 1's hill
 # since, steered at 14 s it went off 6 cm short of the 20 m mark, and
 # past it under the check's load)
+limit
 drive series BUILDAT_HILLCLIMB_DRIVE="0:S2 2:W2 7:W2D 9:W2 12.5:W2D 14.5:W2 21:W2D 23:W2 32:Q" &
+limit
 drive parked BUILDAT_HILLCLIMB_DRIVE="0:S 1:SJ 2:SG 60:Q" &
 # [HC_SOFT_GROUND] Up a hill of 15 degrees and 20 m in second, the knobs at
 # their defaults and at the softest set; the finish names the key
@@ -214,11 +235,14 @@ soft="BUILDAT_HILLCLIMB_BEARING=20 BUILDAT_HILLCLIMB_DIG=8
 # shellcheck disable=SC2086
 # [HC_SAND_VOLUME] V before and after: the sand's volume kept, no lone
 # full voxel on the pad behind the start
+limit
 drive kick $default_soil BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:SV 1:SE 7:W2 21:V 22:Q" &
+limit
 drive firm BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
 # shellcheck disable=SC2086
+limit
 drive soft $soft BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W2 17:Q" &
 # [HC_CIRCUIT] A flat circuit 24 m wide and 30 long, no switchbacks: two
@@ -228,27 +252,33 @@ circuit="BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5
 	BUILDAT_HILLCLIMB_WIDTH=24 BUILDAT_HILLCLIMB_LENGTH=30
 	BUILDAT_HILLCLIMB_SWITCHBACKS=0 BUILDAT_HILLCLIMB_INTERVAL=60"
 # shellcheck disable=SC2086 # the assignments, split
+limit
 drive circuit $circuit BUILDAT_HILLCLIMB_CARS=2 BUILDAT_HILLCLIMB_DRIVE="0:P 64:Q" &
 # shellcheck disable=SC2086
+limit
 drive cut $circuit BUILDAT_HILLCLIMB_DRIVE="0:W2 2:W2A 5:W2 10:S 14:Q" &
 # [HC_RESET_KEEP_GROUND] On the default soil, a lap by P, then Backspace
 # (Z) mid-lap: the car at the start, the lap and the ruts kept
 # shellcheck disable=SC2086
+limit
 drive keep $circuit $default_soil BUILDAT_HILLCLIMB_INTERVAL=120 \
 	BUILDAT_HILLCLIMB_DRIVE="0:P 52:PZ 53:P 56:Q" &
 # [HC_BACKTRACK] Past turn 1, then backed round it into the lane before
 # (O: where it is), then driven on to a lap; a round long enough for it
 # shellcheck disable=SC2086
+limit
 drive back $circuit BUILDAT_HILLCLIMB_INTERVAL=120 \
 	BUILDAT_HILLCLIMB_DRIVE="0:P 7:S 8:SR 9:RWA 13:RW 17:RWO 19:S 20:P 72:Q" &
 # [HC_LAP_TURNS] A 40 m circuit of switchbacks, the car started in turn
 # 1's lane past it and driven up. [HC_MISSED_TURN_MARK] Turn 1 marked at
 # once, the car not put back until it is past turn 2
+limit
 drive fence BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5 \
 	BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30 \
 	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6 \
 	BUILDAT_HILLCLIMB_START="36.9 7 0" BUILDAT_HILLCLIMB_DRIVE="0:W2 8:Q" &
 # ... and from there back down into turn 1: the mark cleared
+limit
 drive fixed BUILDAT_HILLCLIMB_MODE=circuit BUILDAT_HILLCLIMB_STEEP=5 \
 	BUILDAT_HILLCLIMB_WIDTH=40 BUILDAT_HILLCLIMB_LENGTH=30 \
 	BUILDAT_HILLCLIMB_SWITCHBACKS=100 BUILDAT_HILLCLIMB_LANE=6 \
@@ -333,23 +363,28 @@ echo "  the circuit: turns $turns then a lap; the round: $res; a cut put back; a
 # [HC_POWER] 2 t aboard in fourth at 25, 31 and 37 degrees, from the
 # bottom pad: each climbs or spins its wheels, none stalls
 for a in 25 31 37; do
+	limit
 	drive over$a BUILDAT_HILLCLIMB_STEEP=$a BUILDAT_HILLCLIMB_PAYLOAD=2000 \
 		BUILDAT_HILLCLIMB_DRIVE="0:4 1:W4 22:Q" &
 done
 # [HC_MULTIPLAYER] The runs ended before a run, in its entry: on a hill of
 # 15 degrees and 20 m, a run reset (unfinished), one finished, one more
+limit
 drive counts BUILDAT_HILLCLIMB_STEEP=15 BUILDAT_HILLCLIMB_LENGTH=20 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 3:B 4:W 25:B 26:W 50:Q" &
 # [HC_STEEP_NOISE] A varied hill, 18 degrees by 4, climbed in second.
 # Not the default 27: a hard climb by its design (user, 2026-10-20), and
 # a run of fixed keys missed its finish there now and then
+limit
 drive varied BUILDAT_HILLCLIMB_STEEP=18 BUILDAT_HILLCLIMB_STEEP_VAR=4 \
 	BUILDAT_HILLCLIMB_DRIVE="0:S 2:W 70:Q" &
 # 8 cars on one hill, the same keys: the step's cost
+limit
 drive cars8 BUILDAT_HILLCLIMB_CARS=8 BUILDAT_HILLCLIMB_DRIVE="0:S 1:W 12:Q" &
 # [HC_SCORES] A save with eleven v4 times (seed 7) of the hill of 15
 # degrees and 20 m; on it a run finished on seed 1 and the round of 30 s
 # over; then L, the High scores page's answers
+limit
 (
 	drive scores0 BUILDAT_HILLCLIMB_DRIVE="0:Q"
 	mkdir -p "$t/scores"; cp -a "$t/scores0/u" "$t/scores/u"
@@ -600,6 +635,7 @@ PY
 mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 {
 	local name=$1 vars="BUILDAT_HILLCLIMB_MODE=straight $firm_soil $2"; shift 2
+	mem_wait 1
 	mkdir -p "$t/$name"; cp -a "$t/warm/c" "$t/$name/c"
 	# shellcheck disable=SC2086 # the assignments, split
 	start_server "$t/$name.log" "STATUS Listening" 300 auto env $vars \
@@ -609,6 +645,7 @@ mp_server() # <name> "<VAR=value ...>" [server args]: in the background
 }
 mp_client() # <name> <cmds>, in the background: its PID in $CLIENT
 {
+	mem_wait 1
 	timeout 300 bin/buildat -C "$t/c_$1" -D "$t/u_$1" -w 800x500 -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$2" > "$t/$1.log" 2>&1 &
 	CLIENT=$!
