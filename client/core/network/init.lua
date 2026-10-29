@@ -213,6 +213,14 @@ end
 -- An element named PICKER_LIST is a list_view's list, which its scrolling
 -- moves: its position is not compared, what it holds is.
 local PICKER_LIST = "buildat_picker_list"
+
+-- [DIALOG_OFFER_DECLINES] How many permission dialogs and file pickers are
+-- up: a window pushed over one changes it, which declines it, so the
+-- launcher's own offers (client/core/starport) wait while one is
+local dialogs_up = 0
+function M.dialog_up()
+	return dialogs_up > 0
+end
 local function guard_dialog(root, on_changed)
 	local function picture()
 		local m = getmetatable(root)
@@ -303,6 +311,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 		log:warning("no description from the caller for "..uri)
 	end
 	local root = uistack.main:push({desc="network permission dialog"})
+	dialogs_up = dialogs_up + 1
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "own:ui_utils/res/style.xml")
 	-- Over whatever a server draws (a join window is at 100): the user has
@@ -363,6 +372,7 @@ local function ask_user(server, uri, entry, on_answer, suggested)
 			return
 		end
 		answered = true
+		dialogs_up = dialogs_up - 1
 		if accepted and not guard.intact() then
 			log:warning("The permission dialog for "..uri.." was changed "..
 					"while it was up; taken as declined")
@@ -421,6 +431,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 	-- The checks wait for this line
 	log:info("The file picker at " .. dir)
 	local root = uistack.main:push({desc="file picker"})
+	dialogs_up = dialogs_up + 1
 	root.defaultStyle = magic.cache:GetResource(
 			"XMLFile", "own:ui_utils/res/style.xml")
 	root.priority = 1000
@@ -442,6 +453,7 @@ function M.pick_export(accept, cb, dir, back, parts)
 			return
 		end
 		finished = true
+		dialogs_up = dialogs_up - 1
 		if (name or to) and not guard.intact() then
 			log:warning("The file picker was changed while it was up; "..
 					"nothing picked")

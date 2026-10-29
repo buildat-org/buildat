@@ -162,12 +162,12 @@ local function managed_path()
 end
 
 local state = nil
+-- What the file held as this client last read or wrote it, normalized:
+-- what save_state tells this client's changes from another writer's by
+local saved = nil
 
-local function load_state()
-	if state then
-		return state
-	end
-	state = read_json(STATE_PATH) or {}
+-- The defaults into a state read from the file
+local function normalize(state)
 	state.starports = type(state.starports) == "table" and state.starports or
 			{DEFAULT_STARPORT}
 	state.filters = type(state.filters) == "table" and state.filters or
@@ -210,8 +210,46 @@ local function load_state()
 	return state
 end
 
+local function copy(v)
+	return network.parse_json(network.write_json(v))
+end
+
+local function load_state()
+	if state then
+		return state
+	end
+	state = normalize(read_json(STATE_PATH) or {})
+	saved = copy(state)
+	return state
+end
+
+-- **Another writer's change kept** ([DIALOG_OFFER_DECLINES]): a second tab
+-- on the web or a drive may write the file while this client runs. A key
+-- this client has not changed since it last read or wrote the file takes
+-- the file's value; one it changed is its own. In place: callers hold the
+-- state table. simplified: by top-level key, so both writers changing one
+-- key (two Starports' recommends) leave this client's; per-entry merging
+-- is the upgrade if that is ever seen
 local function save_state()
+	local disk = read_json(STATE_PATH)
+	if disk then
+		disk = normalize(disk)
+		local keys = {}
+		for _, t in ipairs({state, saved, disk}) do
+			for k in pairs(t) do
+				keys[k] = true
+			end
+		end
+		local json = network.write_json
+		for k in pairs(keys) do
+			if json(state[k]) == json(saved[k]) and
+					json(disk[k]) ~= json(saved[k]) then
+				state[k] = disk[k]
+			end
+		end
+	end
 	write_json_file(STATE_PATH, state)
+	saved = copy(state)
 end
 
 -- The managed file's word over the user's, read again after a second: an
@@ -973,7 +1011,9 @@ local refreshed = false
 local id_refresh
 function M.offer_aittas()
 	local s, e = load_state(), effective()
-	if offer_root or s.pin ~= "" or e.managed.aittas or
+	-- Not over a permission dialog, which a window over it declines
+	-- ([DIALOG_OFFER_DECLINES]): asked again in half a second
+	if offer_root or network.dialog_up() or s.pin ~= "" or e.managed.aittas or
 			(__buildat_is_scripted() and
 			buildat.get_env("BUILDAT_STARPORT_OFFER") ~= "1") then
 		return
@@ -1119,7 +1159,8 @@ local version_root = nil
 local version_shown = nil
 function M.offer_version()
 	local s = load_state()
-	if not newer or version_root or version_shown == newer.version or
+	if not newer or version_root or network.dialog_up() or
+			version_shown == newer.version or
 			s.version_not_now == newer.version or GetPlatform() == "Web" or
 			(__buildat_is_scripted() and
 			buildat.get_env("BUILDAT_STARPORT_OFFER") ~= "1") then
