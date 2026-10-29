@@ -79,12 +79,8 @@ struct Module: public interface::Module, public replicate::Interface
 			for(auto &pair: m_peers){
 				PeerState &ps = pair.second;
 				magic::Scene *scene = nullptr;
-				if(ps.scene_ref != nullptr){
+				if(ps.scene_ref != nullptr)
 					scene = imc->find_scene(ps.scene_ref);
-					if(!scene)
-						log_w(MODULE, "~Module(): Scene %p not found",
-								ps.scene_ref);
-				}
 				if(scene){
 					scene->CleanupConnection(
 							(magic::Connection*)&ps.scene_state);
@@ -132,14 +128,22 @@ struct Module: public interface::Module, public replicate::Interface
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			for(auto &pair: m_peers){
 				PeerState &ps = pair.second;
-				if(ps.scene_ref != e.scene)
-					continue;
-				ps.scene_state.Clear();
-				ps.scene_ref = nullptr;
-				log_v(MODULE, "peer %i: its scene %p deleted", ps.peer_id,
-						e.scene);
+				if(ps.scene_ref == e.scene)
+					forget_scene(ps);
 			}
 		});
+	}
+
+	// [REJOIN_FAST_CLICK] The peer's scene is deleted. A reference is never
+	// reused, so a scene not found is a deleted one; this thread can see that
+	// before the scene_deleted event (a tick or a disconnect queued ahead of
+	// it while busy), which is no fault. Call in main_context.
+	void forget_scene(PeerState &ps)
+	{
+		log_v(MODULE, "peer %i: its scene %p deleted", ps.peer_id,
+				ps.scene_ref);
+		ps.scene_state.Clear();
+		ps.scene_ref = nullptr;
 	}
 
 	void on_start()
@@ -172,11 +176,8 @@ struct Module: public interface::Module, public replicate::Interface
 		if(ps.scene_ref){
 			main_context::access(m_server, [&](main_context::Interface *imc){
 				magic::Scene *scene = imc->find_scene(ps.scene_ref);
-				if(!scene){
-					log_w(MODULE, "on_client_disconnected(): Scene %p not found",
-							ps.scene_ref);
-					return;
-				}
+				if(!scene)
+					return; // Deleted; see forget_scene()
 				// NOTE: We use pointers to SceneReplicationStates as Connection
 				//       pointers in other replication states in order to
 				//       scene->CleanupConnection() without an actual Connection
@@ -230,8 +231,7 @@ struct Module: public interface::Module, public replicate::Interface
 					continue;
 				magic::Scene *scene = imc->find_scene(ps.scene_ref);
 				if(!scene){
-					log_w(MODULE, "sync_changes(): Scene %p not found",
-							ps.scene_ref);
+					forget_scene(ps);
 					continue;
 				}
 				// Backpressure ([NET_CHANNELS]): a peer with this much
@@ -787,8 +787,7 @@ struct Module: public interface::Module, public replicate::Interface
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			magic::Scene *scene = imc->find_scene(scene_ref);
 			if(!scene){
-				log_w(MODULE, "refresh_peer_nodes(): Scene %p not found",
-						scene_ref);
+				forget_scene(ps);
 				return;
 			}
 			magic::PODVector<Node*> children;
@@ -811,8 +810,7 @@ struct Module: public interface::Module, public replicate::Interface
 					continue;
 				magic::Scene *scene = imc->find_scene(ps.scene_ref);
 				if(!scene){
-					log_w(MODULE, "sync_node_immdiate(): Scene %p not found",
-							ps.scene_ref);
+					forget_scene(ps);
 					continue;
 				}
 				Node *n = scene->GetNode(node_id);
