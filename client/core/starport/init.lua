@@ -41,7 +41,7 @@ local DEFAULT_AITTA = default("BUILDAT_AITTA_DEFAULT",
 		"https://aitta.buildat.org")
 -- [LIVELY_MENU]: the Hearth whose feed the launcher's "now" strip reads
 local DEFAULT_HEARTH = default("BUILDAT_HEARTH_DEFAULT",
-		"https://hearth.buildat.org")
+		"https://forum.buildat.org")
 network.set_default_hosts({DEFAULT_STARPORT, DEFAULT_AITTA, DEFAULT_HEARTH})
 local STATE_PATH = __buildat_get_path("user") .. "/starport.json"
 local EXPORT_PATH = __buildat_get_path("user") .. "/starport_keys.json"

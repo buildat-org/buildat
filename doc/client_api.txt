@@ -1577,7 +1577,7 @@ forget_id_here()
 open_settings([on_closed]), open_report(address), open_report_here()
 hearth_feed(cb [, ask]) -> cb(feed) or cb(nil)
 - [LIVELY_MENU] Hearth's /api/v1/feed (doc/hearth.txt) from the Hearth in
-  the settings: "hearth" in starport.json (https://hearth.buildat.org by
+  the settings: "hearth" in starport.json (https://forum.buildat.org by
   default; the managed file's over it; "" for none). Fetched once a run;
   without ask, not when the user has not accepted its host and it is not
   the built-in default (which counts as accepted off a server). {url,

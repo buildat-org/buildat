@@ -400,7 +400,7 @@ The supported ones, kept from version to version as an option is:
 - BUILDAT_STARPORT_DEFAULT, BUILDAT_AITTA_DEFAULT, BUILDAT_HEARTH_DEFAULT:
   the client's built-in default Starport, Aitta and Hearth, over
   https://starport.buildat.org, https://aitta.buildat.org and
-  https://hearth.buildat.org (a check's local ones; util/check_lib.sh sets
+  https://forum.buildat.org (a check's local ones; util/check_lib.sh sets
   all three to a closed port). The first is also a server's default
   Starport ([STARPORT_DEFAULT_URL]). A server's own are its web page's
   client's (index.html's default_hosts).
