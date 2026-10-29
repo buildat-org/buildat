@@ -117,7 +117,9 @@ namespace main
 static uint32_t id_of(hill::Voxel v)
 {
 	uint32_t word = (uint32_t)v + 1;
-	const auto &sky = interface::VoxelFormat::blocks().light_sky;
+	// [HC_GROUND_SPEED] Once: blocks() builds a format, a malloc a voxel
+	static const interface::VoxelField sky =
+			interface::VoxelFormat::blocks().light_sky;
 	sky.set(word, sky.mask());
 	return word;
 }

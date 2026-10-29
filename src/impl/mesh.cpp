@@ -2500,12 +2500,36 @@ void generate_voxel_physics_boxes(
 			volume_orig, voxel_reg);
 }
 
+// [HC_GROUND_SPEED] The solidity as a plain array: pv::RawVolume's
+// accessors are calls into the core library that check the region on every
+// voxel, and they were most of a chunk's boxes (hillclimb's ground waited
+// on them)
+struct PhysicsSolidity
+{
+	sv_<uint8_t> v;
+	int lx = 0, ly = 0, lz = 0, w = 0, h = 0;
+	PhysicsSolidity(const pv::Region &r):
+		lx(r.getLowerCorner().getX()), ly(r.getLowerCorner().getY()),
+		lz(r.getLowerCorner().getZ()), w(r.getWidthInVoxels()),
+		h(r.getHeightInVoxels())
+	{
+		v.resize((size_t)w * h * r.getDepthInVoxels());
+	}
+	size_t at(int x, int y, int z) const
+	{
+		return (size_t)(x - lx) + (size_t)(y - ly) * w +
+				(size_t)(z - lz) * w * h;
+	}
+	uint8_t getVoxelAt(int x, int y, int z) const { return v[at(x, y, z)]; }
+	void setVoxelAt(int x, int y, int z, uint8_t b) { v[at(x, y, z)] = b; }
+};
+
 struct PhysicsBoxesJob::State
 {
 	int stage = 0; // the solidity, the boxes, done
 	int z = 0; // the next layer of the solidity
 	int z0 = 0, sx = 0, sy = 0; // where the search for a box goes on
-	up_<pv::RawVolume<uint8_t>> volume;
+	up_<PhysicsSolidity> volume;
 };
 PhysicsBoxesJob::PhysicsBoxesJob(){}
 PhysicsBoxesJob::~PhysicsBoxesJob(){}
@@ -2530,12 +2554,17 @@ bool generate_voxel_physics_boxes_step(PhysicsBoxesJob &job, int64_t until_us,
 		job.s->z0 = lc.getZ();
 		job.s->sx = lc.getX();
 		job.s->sy = lc.getY();
-		job.s->volume.reset(new pv::RawVolume<uint8_t>(region));
+		job.s->volume.reset(new PhysicsSolidity(region));
 	}
 	PhysicsBoxesJob::State &st = *job.s;
 	if(st.stage == 2)
 		return true;
-	pv::RawVolume<uint8_t> &volume = *st.volume;
+	PhysicsSolidity &volume = *st.volume;
+	// The last sample's solidity: a chunk is runs of one voxel, and the
+	// registry's lookup is a virtual call
+	VoxelSample last_sample;
+	uint8_t last_v = 0;
+	bool have_last = false;
 
 	// Create a new volume which only holds the solidity of the voxels,
 	// a z layer a step.
@@ -2564,6 +2593,11 @@ bool generate_voxel_physics_boxes_step(PhysicsBoxesJob &job, int64_t until_us,
 					continue;
 				}
 				VoxelSample v_orig = volume_orig.sample_at(x, y, z);
+				if(have_last && memcmp(&v_orig, &last_sample,
+						sizeof v_orig) == 0){
+					volume.setVoxelAt(x, y, z, last_v);
+					continue;
+				}
 				const interface::CachedVoxelDefinition *def =
 						voxel_reg->get_cached(v_orig);
 				if(!def){
@@ -2572,6 +2606,9 @@ bool generate_voxel_physics_boxes_step(PhysicsBoxesJob &job, int64_t until_us,
 				}
 				uint8_t v = (def && def->physically_solid);
 				volume.setVoxelAt(x, y, z, v);
+				last_sample = v_orig;
+				last_v = v;
+				have_last = true;
 			}
 		}
 		if(interface::os::time_us() >= until_us)

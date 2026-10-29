@@ -421,6 +421,7 @@
 			return;
 		flood_set(v, level);
 		buf->volume->setVoxelAt(light_local_p(p, chunk_p), v);
+		buf->interior_dirty = true;
 		if(!buf->dirty){
 			buf->dirty = true;
 			m_total_buffers_dirty++;
