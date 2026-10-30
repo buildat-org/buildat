@@ -131,6 +131,14 @@ not visible at all. The check images move by 465 to 868 RMSE between 0.04 and
 0.25 where two runs of the same code differ by 0 to 29, so this is a change the
 check sees easily.
 
+Those facets are too few and too big to sparkle, though, and the sparkle on the
+rock round the cave mouth in benchmark 3 is what this scene had at first: every
+texel of the rock a spot, a sixteenth of a voxel across and each turned its own
+way, so that some of them catch the sky out of the mouth. So rock also has
+spots at 1.0, which the shader reads as all of the surface all of the time, held
+still rather than fading in and out the way a fraction does. check.sh counts
+that speckle in view 3. One section only: eight keep the look they had.
+
 bumpiness is the other half of how busy a surface looks, and the one that is
 easy to mistake for gloss. It breaks the light up across the texture, diffuse
 as much as specular, so a surface with a high one reads as grainy whether or
