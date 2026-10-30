@@ -49,9 +49,26 @@ namespace storage
 //                               position parameter gives (64 cells at most)
 //   zone = "<param>"         -- the box of cells, the same way, that
 //                               on_enter/on_leave watch
-//   look = {shape = "box"|"sphere", size = n, color = "#rrggbb",
-//           text = "<shared state key>"}  -- drawn where it is on every
-//                               client, the state over it
+//   look = {shape = "box"|"sphere", size = n (half its side) or {x, y, z}
+//           (its sides), color = "#rrggbb", text = "<shared state key>",
+//           extent = "<position param>", depth = n, solid = true,
+//           state = "<shared state key>", when = {color, solid, scale =
+//           {x, y, z}, swing = true}}  -- drawn where it is on every
+//                               client, in both modes (Stopped: the
+//                               start's state), the state `text` over
+//                               it. extent: a box over those cells from
+//                               its own up and on (as zone), its z side
+//                               `depth` in its first cells' middle when
+//                               given. solid: a collision shape on the
+//                               clients (client-side, as the voxels').
+//                               while the state `state` is true, `when`
+//                               over it: scale its sides (its bottom
+//                               kept), swing it a quarter round its -x
+//                               edge (a door). kit/door, gate, button,
+//                               lever and key_door are such objects
+//                               ([KIT] stage 4c; before, voxels they
+//                               owned: a save's are migrated, the cells
+//                               they owned cleared)
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
 //   on_timer(c), on_enter(c, by), on_leave(c, by), on_join(c, by)
@@ -76,7 +93,13 @@ namespace storage
 // whose first instance (by entity id) is the provider for every player of
 // the app, its c its own (its state written as by its own runs). A second
 // is refused, logged. After a run that called them, the player's list is
-// sent to their client.
+// sent to their client. A provider whose call runs past the caller's
+// budget is disabled itself (logged), not the caller, and Kit's own counts
+// are the inventory from then on.
+//
+// Voxel writes (c:set_voxel, owns_voxel) are game changes, unless the type
+// has `builds = true`: then a build of the player who set the run off
+// (Edit and play's origins, below).
 //
 // Grants (dig and place for players, beside the app's edit rights):
 //   grants = "<param>"     -- a box of cells (as zone), where the
@@ -161,8 +184,30 @@ namespace storage
 // Stop puts those sections back (one not loaded when its section loads)
 // and each instance's state to its start; "Save as start" makes the play
 // state the start (the copies dropped, the row "start" the states now). A
-// fresh save starts Stopped; one from before stage 4c Running, its start
-// its types' defaults.
+// server starts Running: a fresh save (an empty composition Running is the
+// same as Stopped), and one from before stage 4c, its start its types'
+// defaults; a restart resumes what the save says. Stopped only by a
+// builder's Stop (or the app's set_running).
+//
+// Origins: a cell play writes is a build or a game change. Builds are what
+// players make: their own dig or place (the app says so, player_wrote())
+// and the voxel writes of a type with `builds = true` set off by a player;
+// game changes are the rest (a component's writes, the app's own). A
+// builder's write with the tools on is a live edit, kept. Each cell's
+// last origin is its mark ("marks:<scene>:x,y,z", beside its section's
+// copy); a build whose cell has another voxel at Stop was changed by the
+// game after it, and is the game's. Stop puts the edits back in over the
+// copies and discards the builds, and only then tells each builder (and
+// each player whose builds they were) who built how many cells, the
+// packet "kit:discarded" {"counts": {name: n}, "you", "can_keep"}. The
+// builds stay to keep until the next Play (the row "discarded";
+// "kit:edit_state"'s "discarded" {name: n}): {"op": "keep"} puts them all
+// into the start, each cell its voxel at Stop, {"op": "keep", "names":
+// [...]} those players'. "Always keep builds" (kit/player_state's
+// keep_builds, "kit:edit_state"'s "always_keep"; {"op": "always_keep",
+// "on": bool} sets it, placing a kit/player_state when there is none)
+// keeps builds as they are made: Stop discards only game changes, and
+// tells no one.
 //
 // The round's start, for each player there at Play and each that comes
 // in the round (once a round): their inventory reset (Kit's counts: none,
@@ -276,6 +321,13 @@ namespace kit
 		// plays or stops as a builder would, by "app" (or another name)
 		virtual bool running() = 0;
 		virtual void set_running(bool running, const ss_ &by) = 0;
+		// A voxel the app wrote for a placed peer in their scene, their own
+		// dig or place ([KIT] stage 4c's origins): a build by default, a
+		// game change with build false (a mining game's digs), a live edit
+		// while their tools are on. Called after the write; nothing while
+		// Stopped
+		virtual void player_wrote(size_t peer, int x, int y, int z,
+				bool build = true) = 0;
 	};
 
 	inline bool access(interface::Server *server,

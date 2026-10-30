@@ -108,6 +108,9 @@ struct Type
 	// says what players keep between plays (between_plays), it goes on the
 	// app root (root)
 	bool spawn = false, between_plays = false, root = false;
+	// Its voxel writes are builds by the player who set the run off, not
+	// game changes (builds = true)
+	bool builds = false;
 	int64_t version = 1;
 	// The position parameters that are its zone's, its owned volume's and
 	// its grants' extent ("" for none)
@@ -129,6 +132,9 @@ struct Write
 	main_context::SceneReference scene = nullptr;
 	pv::Vector3DInt32 p;
 	ss_ voxel, by;
+	// Its origin while Running ([KIT] stage 4c): 'g' a game change, 'b' a
+	// build by the player in `by`, 'k' kept as it is made (by `by`)
+	char origin = 'g';
 };
 
 struct Peer
@@ -149,6 +155,27 @@ struct Peer
 static const char *COLORS[] = {"#ff5a4a", "#4aa0ff", "#50d050", "#ffb030",
 	"#c060ff", "#30d0d0", "#ff70c0", "#c0c040"};
 static const int NUM_COLORS = sizeof COLORS / sizeof COLORS[0];
+
+// [KIT] stage 4c: a cell play changed and who: a build ('b', kept only if a
+// builder keeps it at Stop) or kept as it is made ('k': a live edit, or a
+// build with "Always keep builds"), and the voxel it was given. A cell the
+// game changed has none; one whose voxel is another at Stop was changed
+// by the game after (the last writer's)
+struct Mark
+{
+	char kind = 'b';
+	ss_ by;
+	uint32_t id = 0;
+};
+
+// A build Stop discarded: its cell and final voxel, until the next Play
+struct Discarded
+{
+	ss_ scene;
+	int p[3] = {0, 0, 0};
+	uint32_t id = 0;
+	ss_ by;
+};
 
 // One edit: the entities it changed as they were before (null: not there),
 // in the order an undo puts them back
@@ -351,6 +378,25 @@ struct Module: public interface::Module, public Interface
 	// Copies from voxelworld's thread (Watch)
 	std::mutex m_copies_mutex;
 	std::deque<std::pair<ss_, ss_>> m_copies;
+	// The origins of the round's changed cells ("<scene>:x,y,z" a section,
+	// its cells; saved as "marks:<scene>:x,y,z" beside its copy), the
+	// sections changed since the last save, and the builds the last Stop
+	// discarded (the row "discarded")
+	std::map<ss_, std::map<std::tuple<int, int, int>, Mark>> m_marks;
+	std::set<ss_> m_marks_dirty;
+	sv_<Discarded> m_discarded;
+	// Writes into the start (a migrated door's voxels cleared), tried each
+	// tick until their section is loaded
+	std::deque<Write> m_start_writes;
+	// Migrated objects: their entity, cells that were owned and the voxel
+	// that clears them ([KIT] stage 4c, the starter objects)
+	struct Migrated
+	{
+		uint64_t id;
+		sv_<pv::Vector3DInt32> cells;
+		ss_ air;
+	};
+	sv_<Migrated> m_migrated_objects;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -423,11 +469,16 @@ struct Module: public interface::Module, public Interface
 
 	// One request: true and the answer, or false and the error.
 	// *runaway: the meter stopped it (the box is a new one after that)
+	// *in_provider: the meter stopped it in a call into the replacing
+	// inventory provider (the box's last mark "P")
 	bool box_call(const ss_ &request, ss_ &answer, ss_ &error,
-			bool *runaway = nullptr, int64_t *spent = nullptr)
+			bool *runaway = nullptr, int64_t *spent = nullptr,
+			bool *in_provider = nullptr)
 	{
 		if(runaway)
 			*runaway = false;
+		if(in_provider)
+			*in_provider = false;
 		if(!m_box){
 			error = "no box";
 			return false;
@@ -453,6 +504,8 @@ struct Module: public interface::Module, public Interface
 		ss_ out = m_box->output;
 		if(!trap.empty()){
 			const bool past = m_box->meter_left() < 0;
+			if(in_provider)
+				*in_provider = past && !out.empty() && out.back() == 'P';
 			bool recovered = false;
 			if(!past){
 				m_box->input.clear();
@@ -480,6 +533,9 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 		}
+		// The marks of calls into the inventory provider, ahead of it
+		const size_t marks = out.find_first_not_of("Pp");
+		out = marks == ss_::npos ? ss_() : out.substr(marks);
 		if(out.empty() || (out[0] != 'O' && out[0] != 'E')){
 			error = "no answer";
 			return false;
@@ -585,6 +641,7 @@ struct Module: public interface::Module, public Interface
 		t.spawn = t.decl.get("spawn").is_true();
 		t.between_plays = t.decl.get("between_plays").is_true();
 		t.root = t.decl.get("root").is_true();
+		t.builds = t.decl.get("builds").is_true();
 		for(const char *h : {"inventory_count", "inventory_add",
 				"inventory_take", "inventory_list"})
 			if(t.inventory && !t.handlers.count(h)){
@@ -621,6 +678,13 @@ struct Module: public interface::Module, public Interface
 				return false;
 			}
 			*k.second = pn;
+		}
+		// A look's extent is a position parameter's too
+		const ss_ lx = jstr(t.decl.get("look"), "extent");
+		if(!lx.empty() && jstr(t.decl.get("params").get(lx), "type") !=
+				"position"){
+			why = name+": its look's extent names no position parameter";
+			return false;
 		}
 		if(!t.volume.empty() && !t.owns_voxel){
 			why = name+": a volume is the voxels it owns (owns_voxel)";
@@ -758,6 +822,56 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// [KIT] stage 4c: Kit's door, key door, gate, button and lever were the
+	// voxels they owned (version 1); they are objects now, their look and
+	// collision on the clients. An instance of before has its voxels'
+	// parameters dropped and its type's version, and the cells it owned are
+	// cleared once the tree is read (their owner entries, and their voxel
+	// made its "open" one, air by default). True if it was one
+	bool migrate_object(const Entity &e, Instance &in, const json::Value &pj)
+	{
+		static const char *OLD[] = {"closed", "open", "up", "down",
+				"off_voxel", "on_voxel"};
+		const ss_ &t = in.type;
+		const bool sized = t == "kit/door" || t == "kit/key_door" ||
+				t == "kit/gate";
+		if(!sized && t != "kit/button" && t != "kit/lever")
+			return false;
+		bool old = in.version < 2;
+		for(const char *k : OLD)
+			old = old || !pj.get(k).is_undefined();
+		if(!old)
+			return false;
+		Migrated m;
+		m.id = e.id;
+		m.air = jstr(pj, "open").empty() ? "air" : jstr(pj, "open");
+		if(e.has_pos){
+			int n[3] = {1, 1, 1};
+			if(sized){
+				json::Value size = pj.get("size");
+				if(!pos_ok(size)){
+					size = json::array();
+					for(int k : {t == "kit/gate" ? 3 : 1, t == "kit/gate" ? 3 : 2, 1})
+						size.append((int64_t)k);
+				}
+				extent(size, n);
+			}
+			if(n[0] * n[1] * n[2] > MAX_VOLUME)
+				n[0] = n[1] = n[2] = 1;
+			const pv::Vector3DInt32 o = voxel_p(e);
+			for(int x = 0; x < n[0]; x++)
+				for(int y = 0; y < n[1]; y++)
+					for(int z = 0; z < n[2]; z++)
+						m.cells.push_back(o + pv::Vector3DInt32(x, y, z));
+		}
+		in.version = m_types[t].version;
+		m_migrated_objects.push_back(m);
+		log_i(MODULE, "Entity %s's %s is an object now: its voxels' parameters "
+				"dropped, its %zu owned cells to be cleared to %s", cs(itos(e.id)),
+				cs(t), m.cells.size(), cs(m.air));
+		return true;
+	}
+
 	// An entity as the authored row has it (the parent and the links not
 	// checked against the tree here)
 	bool entity_from_json(const json::Value &j, Entity &e, ss_ &why)
@@ -804,6 +918,9 @@ struct Module: public interface::Module, public Interface
 			const json::Value &ver = cj.get("version");
 			in.version = ver.is_number() && ver.as_number() >= 1 &&
 					ver.as_number() <= 1e9 ? (int64_t)ver.as_number() : t.version;
+			const json::Value &pj = cj.get("params");
+			// A starter door, gate, button or lever of before is an object
+			const bool object = migrate_object(e, in, pj);
 			if(in.version != t.version)
 				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
 						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
@@ -814,9 +931,10 @@ struct Module: public interface::Module, public Interface
 			if(decl.is_object())
 				for(json::Iterator it(decl); it; ++it)
 					in.params.set(it.key(), (*it).get("default"));
-			const json::Value &pj = cj.get("params");
 			if(pj.is_object())
 				for(json::Iterator it(pj); it; ++it){
+					if(object && !decl.get(it.key()).is_object())
+						continue;
 					if(!decl.get(it.key()).is_object()){
 						why = "entity "+itos(e.id)+": "+in.type+
 								" has no parameter "+it.key();
@@ -1065,8 +1183,11 @@ struct Module: public interface::Module, public Interface
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
 					m_migrated);
-		if(first || m_migrated)
+		if(first || m_migrated || !m_migrated_objects.empty())
 			m_store->set("authored", authored_json().stringify());
+		if(!m_migrated_objects.empty())
+			m_runtime_dirty = true;
+		clear_migrated();
 		// The palette: every type of Kit's and of the app's that loads
 		for(const ss_ &author : {ss_("kit"), m_author}){
 			const ss_ dir = author_path(author);
@@ -1092,8 +1213,10 @@ struct Module: public interface::Module, public Interface
 
 		// The session ([KIT] stage 4c): Stopped or Running. A save from
 		// before has no row; it ran its components, so it is Running, its
-		// start its types' defaults. A fresh save is Stopped
-		ss_ runtime, session, start;
+		// start its types' defaults. A fresh save is Running too: an empty
+		// composition Running is the same as Stopped, and a builder's Stop
+		// is what stops a server
+		ss_ runtime, session, start, discarded;
 		const bool had_runtime = m_store->get("runtime", runtime);
 		if(m_store->get("session", session)){
 			const json::Value sj = json::load_string(session.c_str());
@@ -1109,10 +1232,10 @@ struct Module: public interface::Module, public Interface
 			if(sj.get("aside").is_object())
 				m_session.aside = sj.get("aside").deepcopy();
 		} else {
-			m_session.running = had_runtime;
+			m_session.running = true;
 			log_i(MODULE, "%s", had_runtime ? "A save from before Play and "
 					"Stop: Running, its start its types' defaults" :
-					"A fresh save: Stopped");
+					"A fresh save: Running");
 			save_session();
 		}
 		if(m_store->get("start", start)){
@@ -1123,6 +1246,9 @@ struct Module: public interface::Module, public Interface
 		for(const ss_ &k : m_store->list("start:"))
 			if(!m_session.restore.count(k))
 				m_session.copied.insert(k);
+		load_marks();
+		if(m_store->get("discarded", discarded))
+			discarded_from(json::load_string(discarded.c_str()));
 		// Runtime: Running, the save's over each type's defaults; Stopped,
 		// the start
 		const json::Value rt = had_runtime ?
@@ -1185,15 +1311,88 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// The cells migrated objects owned: their owner entries emptied (by
+	// own_voxels(), which empties the sections it owned in) and their voxels
+	// cleared, written into the start
+	void clear_migrated()
+	{
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(const Migrated &m : m_migrated_objects){
+				auto it = m_entities.find(m.id);
+				main_context::SceneReference sc = it == m_entities.end() ?
+						nullptr : scene_of(it->second);
+				voxelworld::Instance *w = sc ? ivw->get_instance(sc) : nullptr;
+				if(!w)
+					continue;
+				const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+				for(const pv::Vector3DInt32 &p : m.cells){
+					m_owned_sections[sc].insert(std::make_tuple(
+							div_floor(p.getX(), ss.getX()),
+							div_floor(p.getY(), ss.getY()),
+							div_floor(p.getZ(), ss.getZ())));
+					Write wr;
+					wr.scene = sc;
+					wr.p = p;
+					wr.voxel = m.air;
+					wr.by = "kit";
+					m_start_writes.push_back(wr);
+				}
+			}
+		});
+		m_migrated_objects.clear();
+	}
+
+	static int div_floor(int32_t a, int b)
+	{
+		return (int)std::floor((double)a / b);
+	}
+
+	// A look as the clients get it: the type's, its extent (a position
+	// parameter: the cells from its own up and on) made a size (its sides,
+	// the z side its depth when it has one) and an offset of its middle
+	// from the entity's position
+	json::Value look_of(const Instance &in, const json::Value &decl)
+	{
+		json::Value l = decl.deepcopy();
+		const ss_ ext = jstr(decl, "extent");
+		if(ext.empty())
+			return l;
+		int n[3];
+		extent(in.params.get(ext), n);
+		const json::Value &d = decl.get("depth");
+		const bool depth = d.is_number() && d.as_number() > 0 &&
+				d.as_number() <= MAX_EXTENT;
+		json::Value size = json::array(), off = json::array();
+		size.append((double)n[0]);
+		size.append((double)n[1]);
+		size.append(depth ? d.as_number() : (double)n[2]);
+		off.append((n[0] - 1) / 2.0);
+		off.append((n[1] - 1) / 2.0);
+		off.append(depth ? 0.0 : (n[2] - 1) / 2.0);
+		l.set("size", size);
+		l.set("offset", off);
+		l.del_key("extent");
+		l.del_key("depth");
+		return l;
+	}
+
+	// What its types show every client: the first look and hud
+	json::Value show_of(const Entity &e)
+	{
+		json::Value show = json::object();
+		for(const Instance &in : e.comps){
+			const json::Value &d = m_types[in.type].decl;
+			if(show.get("look").is_undefined() && !d.get("look").is_undefined())
+				show.set("look", look_of(in, d.get("look")));
+			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
+				show.set("hud", d.get("hud"));
+		}
+		return show;
+	}
+
 	void make_node(Entity &e)
 	{
-		// What its types show every client: the first look and hud
-		json::Value show = json::object();
-		for(const Instance &in : e.comps)
-			for(const char *k : {"look", "hud"})
-				if(show.get(k).is_undefined() &&
-						!m_types[in.type].decl.get(k).is_undefined())
-					show.set(k, m_types[in.type].decl.get(k));
+		const json::Value show = show_of(e);
 		main_context::SceneReference ref = scene_of(e);
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
@@ -1368,11 +1567,21 @@ struct Module: public interface::Module, public Interface
 				!m_types[type].handlers.count(r.handler))
 			return 0;
 		ss_ answer, error;
-		bool runaway = false;
+		bool runaway = false, in_provider = false;
 		int64_t spent = 0;
 		const ss_ request = request_of(e, e.comps[r.comp], r);
-		if(!box_call(request, answer, error, &runaway, &spent)){
-			if(runaway){
+		if(!box_call(request, answer, error, &runaway, &spent, &in_provider)){
+			Instance *pv_ = provider();
+			if(runaway && in_provider && pv_){
+				// The replacing provider ran past it: it is disabled, not
+				// the caller, and Kit's own counts are the inventory now
+				pv_->disabled = "its inventory ran past its budget in entity "+
+						itos(r.entity)+"'s "+r.handler;
+				m_runtime_dirty = true;
+				log_w(MODULE, "Entity %s's %s disabled: %s; the players' "
+						"inventory is Kit's own counts now",
+						cs(itos(m_provider)), cs(pv_->type), cs(pv_->disabled));
+			} else if(runaway){
 				Instance &in = m_entities[r.entity].comps[r.comp];
 				in.disabled = r.handler+" ran past its budget";
 				m_runtime_dirty = true;
@@ -1447,6 +1656,9 @@ struct Module: public interface::Module, public Interface
 					w.p = p;
 					w.voxel = voxel.as_string();
 					w.by = r.by;
+					// A game change, or a build of the player who set it
+					// off (the type's builds)
+					w.origin = t.builds && !player_of(r.by).empty() ? 'b' : 'g';
 					if(!set_voxel(w))
 						m_pending_voxels.push_back(w);
 				}
@@ -1667,6 +1879,8 @@ struct Module: public interface::Module, public Interface
 			uint32_t word = 0;
 			reg->get_format().id.set(word, def->id);
 			world->set_voxel(w.p, interface::VoxelInstance(word));
+			mark(world, w.scene, w.p, w.origin, w.origin == 'b' ?
+					player_of(w.by) : w.by);
 			log_v(MODULE, "Voxel (%i,%i,%i) set to %s by %s", w.p.getX(),
 					w.p.getY(), w.p.getZ(), cs(w.voxel), cs(w.by));
 		});
@@ -1766,6 +1980,16 @@ struct Module: public interface::Module, public Interface
 			return;
 		m_box->poll();
 		flush_copies();
+		// Writes into the start, made as their sections load: Running,
+		// kept past the round's Stop
+		for(size_t n = m_start_writes.size(); n > 0; n--){
+			Write w = m_start_writes.front();
+			m_start_writes.pop_front();
+			w.origin = 'k';
+			if(!set_voxel(w))
+				m_start_writes.push_back(w);
+		}
+		save_marks();
 		if(!m_session.running){
 			// Stopped: components do not run. A write routed to one is
 			// made by no one
@@ -1837,6 +2061,7 @@ struct Module: public interface::Module, public Interface
 		// changed it; a write per interval is the upgrade if a busy world
 		// makes it a cost
 		save_runtime();
+		save_marks();
 	}
 
 	// ---- Clients act
@@ -2024,6 +2249,395 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(login.peer);
 		if(pi != m_peers.end() && !pi->second.editing)
 			send_state(login.peer);
+	}
+
+	// ---- Origins ([KIT] stage 4c): a round's builds, game changes and live
+	// edits. A cell's mark is beside its section's copy; Stop reads them
+
+	ss_ scene_name(main_context::SceneReference ref)
+	{
+		for(auto &s : m_host.scenes)
+			if(s.second == ref)
+				return s.first;
+		return "";
+	}
+
+	// A voxel's id, where its section is loaded
+	static bool voxel_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
+			uint32_t &id)
+	{
+		if(!loaded(w, p))
+			return false;
+		id = (uint32_t)w->get_voxel_reg()->get_format().id.get(
+				w->get_voxel(p, true).data);
+		return true;
+	}
+
+	static void set_id(voxelworld::Instance *w, const pv::Vector3DInt32 &p,
+			uint32_t id)
+	{
+		uint32_t word = 0;
+		w->get_voxel_reg()->get_format().id.set(word, id);
+		w->set_voxel(p, interface::VoxelInstance(word));
+	}
+
+	// "<scene>:x,y,z", the section of a cell
+	static ss_ section_key(const ss_ &scene, voxelworld::Instance *w,
+			const pv::Vector3DInt32 &p)
+	{
+		const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+		return scene+":"+itos(div_floor(p.getX(), ss.getX()))+","+
+				itos(div_floor(p.getY(), ss.getY()))+","+
+				itos(div_floor(p.getZ(), ss.getZ()));
+	}
+
+	// "Always keep builds": keep_builds of the first between_plays instance
+	// (kit/player_state)
+	bool always_keep()
+	{
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				if(m_types[in.type].between_plays)
+					return in.params.get("keep_builds").is_true();
+		return false;
+	}
+
+	// A cell the round wrote to, as written: origin 'g' a game change (a
+	// build's mark there goes: the game wrote last), 'b' a build by `who`
+	// (kept as made with "Always keep builds"), 'k' kept as made. Running
+	// only: Stopped, every write is the start's
+	void mark(voxelworld::Instance *w, main_context::SceneReference ref,
+			const pv::Vector3DInt32 &p, char origin, const ss_ &who)
+	{
+		if(!m_session.running)
+			return;
+		const ss_ scene = scene_name(ref);
+		if(scene.empty())
+			return;
+		const ss_ key = section_key(scene, w, p);
+		const auto c = std::make_tuple(p.getX(), p.getY(), p.getZ());
+		if(origin == 'g' || who.empty()){
+			auto it = m_marks.find(key);
+			if(it != m_marks.end() && it->second.erase(c))
+				m_marks_dirty.insert(key);
+			return;
+		}
+		Mark m;
+		if(!voxel_id(w, p, m.id))
+			return;
+		m.kind = origin == 'k' || always_keep() ? 'k' : 'b';
+		m.by = who;
+		m_marks[key][c] = m;
+		m_marks_dirty.insert(key);
+	}
+
+	// The app's write for a player, their own dig or place: a build, or a
+	// game change (build false), or with their tools on a live edit
+	void player_wrote(size_t peer, int x, int y, int z, bool build)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || !m_session.running || pi == m_peers.end())
+			return;
+		auto si = m_host.scenes.find(pi->second.scene);
+		if(si == m_host.scenes.end())
+			return;
+		const char origin = pi->second.editing ? 'k' : build ? 'b' : 'g';
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(si->second);
+			if(w)
+				mark(w, si->second, pv::Vector3DInt32(x, y, z), origin,
+						pi->second.name);
+		});
+		log_v(MODULE, "(%i,%i,%i) by %s: %s", x, y, z, cs(pi->second.name),
+				origin == 'k' ? "an edit" : origin == 'b' ? "a build" :
+				"a game change");
+	}
+
+	void save_marks()
+	{
+		if(m_marks_dirty.empty() || !m_store)
+			return;
+		m_store->batch([&](){
+			for(const ss_ &key : m_marks_dirty){
+				auto it = m_marks.find(key);
+				if(it == m_marks.end() || it->second.empty()){
+					m_store->remove("marks:"+key);
+					if(it != m_marks.end())
+						m_marks.erase(it);
+					continue;
+				}
+				json::Value j = json::object();
+				for(auto &c : it->second){
+					json::Value a = json::array();
+					a.append(ss_(1, c.second.kind));
+					a.append(c.second.by);
+					a.append((int64_t)c.second.id);
+					j.set(itos(std::get<0>(c.first))+","+
+							itos(std::get<1>(c.first))+","+
+							itos(std::get<2>(c.first)), a);
+				}
+				m_store->set("marks:"+key, j.stringify());
+			}
+		});
+		m_marks_dirty.clear();
+	}
+
+	void load_marks()
+	{
+		for(const ss_ &k : m_store->list("marks:")){
+			ss_ v;
+			if(!m_store->get(k, v))
+				continue;
+			const json::Value j = json::load_string(v.c_str());
+			if(!j.is_object())
+				continue;
+			auto &cells = m_marks[k.substr(6)];
+			for(json::Iterator it(j); it; ++it){
+				int x = 0, y = 0, z = 0;
+				if(sscanf(it.key().c_str(), "%d,%d,%d", &x, &y, &z) != 3 ||
+						!(*it).at(1u).is_string() || !(*it).at(2u).is_number())
+					continue;
+				Mark m;
+				m.kind = jstr_at((*it), 0) == "k" ? 'k' : 'b';
+				m.by = (*it).at(1u).as_string();
+				m.id = (uint32_t)(*it).at(2u).as_number();
+				cells[std::make_tuple(x, y, z)] = m;
+			}
+		}
+	}
+
+	static ss_ jstr_at(const json::Value &a, unsigned i)
+	{
+		return a.at(i).is_string() ? a.at(i).as_string() : ss_();
+	}
+
+	// Each builder's discarded builds, {name: cells}
+	json::Value discarded_counts()
+	{
+		return discarded_counts(m_discarded);
+	}
+
+	static json::Value discarded_counts(const sv_<Discarded> &l)
+	{
+		json::Value n = json::object();
+		for(const Discarded &d : l)
+			n.set(d.by, n.get(d.by).is_number() ?
+					(int64_t)n.get(d.by).as_number() + 1 : (int64_t)1);
+		return n;
+	}
+
+	static ss_ counts_text(const json::Value &n)
+	{
+		ss_ s;
+		for(json::Iterator it(n); it; ++it)
+			s += (s.empty() ? "" : ", ")+it.key()+" "+(*it).stringify();
+		return s;
+	}
+
+	void save_discarded()
+	{
+		if(m_discarded.empty()){
+			m_store->remove("discarded");
+			return;
+		}
+		json::Value a = json::array();
+		for(const Discarded &d : m_discarded){
+			json::Value j = json::object(), p = json::array();
+			for(int k = 0; k < 3; k++)
+				p.append((int64_t)d.p[k]);
+			j.set("scene", d.scene);
+			j.set("p", p);
+			j.set("id", (int64_t)d.id);
+			j.set("by", d.by);
+			a.append(j);
+		}
+		m_store->set("discarded", a.stringify());
+	}
+
+	void discarded_from(const json::Value &a)
+	{
+		for(unsigned i = 0; i < a.size(); i++){
+			const json::Value &j = a.at(i);
+			Discarded d;
+			d.scene = jstr(j, "scene");
+			d.by = jstr(j, "by");
+			d.id = (uint32_t)json::jint(j, "id", 0);
+			if(!pos_ok(j.get("p")) || d.by.empty())
+				continue;
+			for(unsigned k = 0; k < 3; k++)
+				d.p[k] = (int)j.get("p").at(k).as_number();
+			m_discarded.push_back(d);
+		}
+	}
+
+	// Cells put into the world as they were at Stop: how many could be
+	// (a section not loaded is loaded for them, as a copy is)
+	size_t put_cells(const sv_<Discarded> &cells)
+	{
+		size_t n = 0;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(const Discarded &d : cells){
+				auto si = m_host.scenes.find(d.scene);
+				voxelworld::Instance *w = si == m_host.scenes.end() ? nullptr :
+						ivw->get_instance(si->second);
+				const pv::Vector3DInt32 p(d.p[0], d.p[1], d.p[2]);
+				if(!w)
+					continue;
+				if(!loaded(w, p)){
+					const pv::Vector3DInt16 ss = w->get_section_size_voxels();
+					w->load_section_no_generate(pv::Vector3DInt16(
+							div_floor(p.getX(), ss.getX()),
+							div_floor(p.getY(), ss.getY()),
+							div_floor(p.getZ(), ss.getZ())));
+				}
+				if(!loaded(w, p))
+					continue;
+				set_id(w, p, d.id);
+				n++;
+			}
+		});
+		return n;
+	}
+
+	// At Stop, before the copies are put back: each marked cell whose voxel
+	// is still what its mark gave (else the game wrote it last), into
+	// `kept` (kept as made) or m_discarded (builds). The marks go
+	// simplified: a marked cell in a section unloaded by now is dropped
+	void sort_marks(sv_<Discarded> &kept)
+	{
+		m_discarded.clear();
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(auto &sec : m_marks){
+				const ss_ scene = sec.first.substr(0, sec.first.rfind(':'));
+				auto si = m_host.scenes.find(scene);
+				voxelworld::Instance *w = si == m_host.scenes.end() ? nullptr :
+						ivw->get_instance(si->second);
+				for(auto &c : sec.second){
+					Discarded d;
+					d.scene = scene;
+					d.p[0] = std::get<0>(c.first);
+					d.p[1] = std::get<1>(c.first);
+					d.p[2] = std::get<2>(c.first);
+					d.by = c.second.by;
+					if(!w || !voxel_id(w, pv::Vector3DInt32(d.p[0], d.p[1],
+							d.p[2]), d.id) || d.id != c.second.id)
+						continue;
+					(c.second.kind == 'k' ? kept : m_discarded).push_back(d);
+				}
+			}
+		});
+		drop_marks();
+	}
+
+	void drop_marks()
+	{
+		for(auto &sec : m_marks)
+			m_marks_dirty.insert(sec.first);
+		m_marks.clear();
+		save_marks();
+	}
+
+	// The Stop notice: to each builder, and each player whose builds were
+	// discarded, who built how many cells ("you" the one it is sent to)
+	void send_discarded()
+	{
+		const json::Value counts = discarded_counts();
+		// The rights first: accounts is not reached from inside network
+		sv_<std::pair<size_t, ss_>> out;
+		for(auto &p : m_peers){
+			const bool can = can_edit(p.first);
+			if(!can && !counts.get(p.second.name).is_number())
+				continue;
+			json::Value j = json::object();
+			j.set("counts", counts);
+			j.set("you", p.second.name);
+			j.set("can_keep", can);
+			out.push_back(std::make_pair(p.first, j.stringify()));
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &o : out)
+				inetwork->send(o.first, "kit:discarded", o.second);
+		});
+	}
+
+	// {"op": "keep", "names": [name...]}: Stopped, the builds the last Stop
+	// discarded put into the start (all, or those players'), each cell its
+	// voxel at Stop. Until the next Play
+	void keep(const Peer &p, const json::Value &j,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		if(m_session.running)
+			return refuse("the server is Running: Stop discards and keeps");
+		if(m_discarded.empty())
+			return refuse("no builds discarded since the last Play");
+		const json::Value &names = j.get("names");
+		std::set<ss_> chosen;
+		for(unsigned i = 0; i < names.size(); i++)
+			if(names.at(i).is_string())
+				chosen.insert(names.at(i).as_string());
+		sv_<Discarded> put, rest;
+		for(const Discarded &d : m_discarded)
+			(!names.is_array() || chosen.count(d.by) ? put : rest).push_back(d);
+		if(put.empty())
+			return refuse("no builds of those players discarded");
+		const size_t n = put_cells(put);
+		m_discarded.swap(rest);
+		save_discarded();
+		log_i(MODULE, "%s keeps the builds of %s: %zu cells put into the start "
+				"(%zu discarded left)", cs(p.name), cs(counts_text(
+				discarded_counts(put))), n, m_discarded.size());
+		for(auto &o : m_peers)
+			send_state(o.first);
+	}
+
+	// {"op": "always_keep", "on": bool}: "Always keep builds", the
+	// parameter keep_builds of the game-wide kit/player_state (the first
+	// between_plays instance; one placed on the app root for it). An edit
+	void set_always_keep(Peer &p, const json::Value &j,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		const bool on = j.get("on").is_true();
+		sv_<std::pair<uint64_t, json::Value>> change;
+		for(auto &e : m_entities){
+			for(size_t i = 0; i < e.second.comps.size() && change.empty(); i++){
+				const Instance &in = e.second.comps[i];
+				if(!m_types[in.type].between_plays)
+					continue;
+				if(!m_types[in.type].decl.get("params").get("keep_builds").
+						is_object())
+					return refuse(in.type+" has no keep_builds");
+				Entity copy = e.second;
+				copy.comps[i].params.set("keep_builds", on);
+				change.push_back(std::make_pair(e.first, entity_json(copy)));
+			}
+			if(!change.empty())
+				break;
+		}
+		if(change.empty()){
+			if(!on)
+				return refuse("builds are not always kept");
+			const ss_ type = "kit/player_state";
+			if(!m_palette.count(type))
+				return refuse("no "+type+" in the palette");
+			if(m_entities.size() >= MAX_ENTITIES)
+				return refuse("the composition has "+itos(MAX_ENTITIES)+
+						" entities");
+			const uint64_t id = m_next_id++;
+			json::Value e = json::object(), comp = json::object(),
+					comps = json::array(), params = json::object();
+			e.set("id", (int64_t)id);
+			e.set("parent", (int64_t)1);
+			e.set("name", type+" "+itos(id));
+			params.set("keep_builds", true);
+			comp.set("type", type);
+			comp.set("params", params);
+			comps.append(comp);
+			e.set("components", comps);
+			change.push_back(std::make_pair(id, e));
+		}
+		commit(change, &m_undo[p.name]);
+		log_i(MODULE, "An edit by %s: builds %s", cs(p.name), on ?
+				"always kept" : "kept only by a builder's choice");
 	}
 
 	// ---- Edit and play ([KIT] stage 4c): the server Stopped or Running
@@ -2281,6 +2895,13 @@ struct Module: public interface::Module, public Interface
 		m_session.running = true;
 		m_session.by = by;
 		m_session.round.clear();
+		// The last Stop's discarded builds are no longer to keep
+		if(!m_discarded.empty())
+			log_i(MODULE, "The builds of %s discarded for good",
+					cs(counts_text(discarded_counts())));
+		m_discarded.clear();
+		save_discarded();
+		drop_marks();
 		{
 			std::lock_guard<std::mutex> lock(m_copies_mutex);
 			m_copies.clear();
@@ -2321,6 +2942,10 @@ struct Module: public interface::Module, public Interface
 			return;
 		watch(false);
 		flush_copies();
+		// The round's marked cells as they are now: the kept ones go back
+		// in over the copies, the builds are discarded with them
+		sv_<Discarded> kept;
+		sort_marks(kept);
 		m_session.running = false;
 		m_session.by = by;
 		sv_<ss_> done;
@@ -2330,6 +2955,8 @@ struct Module: public interface::Module, public Interface
 			else
 				m_session.restore.insert(k);
 		}
+		const size_t kept_n = put_cells(kept);
+		save_discarded();
 		m_store->batch([&](){
 			for(const ss_ &k : done)
 				m_store->remove(k);
@@ -2365,7 +2992,13 @@ struct Module: public interface::Module, public Interface
 				m_session.restore.size(), keep_inventory ? "put aside" :
 				"dropped", cs(digest(authored_json())), cs(digest(m_start)),
 				cs(digest(runtime_json())));
+		log_i(MODULE, "Stop by %s: %zu kept cells (edits, builds always "
+				"kept) put back in, %zu builds discarded%s%s", cs(by), kept_n,
+				m_discarded.size(), m_discarded.empty() ? "" : ": ",
+				cs(counts_text(discarded_counts())));
 		session_changed(false, by);
+		if(!m_discarded.empty())
+			send_discarded();
 	}
 
 	// Save as start: the play state is the start from now on. The copies
@@ -2382,6 +3015,8 @@ struct Module: public interface::Module, public Interface
 				m_store->remove(k);
 		});
 		m_session.copied.clear();
+		// The marks with them: the round's cells are the start's now
+		drop_marks();
 		watch(true);
 		m_start = runtime_json();
 		m_start.del_key("items");
@@ -2523,6 +3158,10 @@ struct Module: public interface::Module, public Interface
 		j.set("can_edit", can_edit(peer));
 		j.set("running", m_session.running);
 		j.set("by", m_session.by);
+		// The builds the last Stop discarded, until the next Play, and
+		// whether builds are always kept
+		j.set("discarded", discarded_counts());
+		j.set("always_keep", always_keep());
 		if(editing){
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
@@ -2635,6 +3274,12 @@ struct Module: public interface::Module, public Interface
 				save_as_start(p.name);
 			return;
 		}
+		// The builds Stop discarded: a builder's, the tools on or not (the
+		// Stop notice offers it)
+		if(op == "keep")
+			return keep(p, j, refuse);
+		if(op == "always_keep")
+			return set_always_keep(p, j, refuse);
 		if(!p.editing)
 			return refuse("not in edit mode");
 		if(op == "focus")
@@ -3027,8 +3672,12 @@ struct Module: public interface::Module, public Interface
 		} else if(e.node){
 			main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
 				magic::Node *nd = scene->GetNode(e.node);
-				if(nd)
+				if(nd){
 					nd->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+					// A parameter its look is drawn from may have changed
+					nd->SetVar(magic::StringHash("kit_show"), magic::Variant(
+							show_of(e).stringify().c_str()));
+				}
 			});
 		}
 	}

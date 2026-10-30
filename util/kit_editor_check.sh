@@ -25,8 +25,11 @@
 #      state is thrown away (the new button's presses 0, the door closed,
 #      its voxel stone again), the edits stay (the start); a use is
 #      refused while Stopped, and kitbob's edit then changes the start.
-#      The admin plays: a round from the start, the door opened again,
-#      the button pressed once.
+#      The origins: the admin's dig of the pillar in play (a build) is
+#      discarded with the Stop notice to both builders (the door's own
+#      voxel write, a game change, not offered), and kept from the notice
+#      a moment later. The admin plays: a round from the start, the door
+#      opened again, the button pressed once.
 #   4. A restart: the authored row has what was edited, the server is
 #      still Running, and kitbob, alone, is still a builder.
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
@@ -225,6 +228,8 @@ click Button "Play mode"
 wait_log 10000 kit editor: edit mode off
 keypress u
 wait_log 10000 replicated: entity 17 presses = 3
+keypress p
+frames 3
 click Button "Edit"
 wait_log 10000 kit editor: state: 18 entities, 5 to undo
 wait_log 60000 kit editor: people: kitbob player
@@ -241,8 +246,12 @@ click Button "Stop"
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_any 10000 replicated: entity 17 presses = 0
 wait_log_any 30000 kit editor: state: 20 entities
+wait_log_any 10000 kit: builds discarded: Your builds while playing were discarded.
 frames 3
 screenshot @T@/stopped.png
+delay 1000
+click Button "Keep them" 1000 100
+frames 3
 click Button "Play"
 wait_log 10000 kit editor: the server is Running (by kitboss)
 wait_log 30000 replicated: entity 4 open = true
@@ -274,6 +283,7 @@ wait_log 10000 kit editor: selected 3
 keypress b
 wait_log 10000 replicated: entity 4 open = true
 wait_log 60000 kit editor: the server is Stopped (by kitboss)
+wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitboss 1).
 click Button "sample_kit/marker"
 wait_log 10000 kit editor: state: 20 entities
 keypress b
@@ -335,6 +345,13 @@ want "$s" "kitbob is in edit mode" "kitbob selects entity 3" \
 	"An edit by kitbob: placed sample_kit/marker 21 at [0,1,0]" \
 	"sample_kit/button 17: pressed by player:kitboss times 1"
 want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"
+# The origins: kitboss's dig of the pillar in play a build, discarded at
+# Stop with the notice; the door's voxel kitbob's use opened the door's own
+# write (a game change), not offered; kept from the notice a moment later,
+# the pillar dug in the start (the next round's start)
+want "$s" "sample_kit: a dig at the pillar: written" \
+	"Stop by kitboss: 0 kept cells (edits, builds always kept) put back in, 1 builds discarded: kitboss 1" \
+	"kitboss keeps the builds of kitboss 1: 1 cells put into the start (0 discarded left)"
 # The door's voxel: air in the round; none at Stop, as at the start (the
 # app's floor alone: the door set its voxel first in the first round);
 # stone as the next round starts (sample_kit's look once a tick may miss

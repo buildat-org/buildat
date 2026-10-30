@@ -1,39 +1,31 @@
--- A button: a player presses it (uses it), it signals "pressed" and stays
--- down for `hold` seconds, then "released". Its cell shows which
+-- A button: a thin plate a player presses (uses); it signals "pressed"
+-- and stays down for `hold` seconds, then "released". Drawn pushed in
+-- while down
 return {
-	version = 1,
+	version = 2,
 	usable = true,
-	owns_voxel = true,
 	params = {
-		up = {type = "voxel", default = ""}, -- "": the app fills it, or you
-		down = {type = "voxel", default = ""},
 		hold = {type = "number", default = 1, min = 0.1, max = 60},
 	},
+	look = {shape = "box", size = {0.4, 0.4, 0.15}, color = "#d03030",
+		state = "down", when = {scale = {1, 1, 0.4}, color = "#702020"}},
 	state = {
 		down = {default = false, shared = true},
 		presses = {default = 0, shared = true},
 	},
 	outputs = {"pressed", "released"},
-	on_start = function(c)
-		c:set_voxel(c.params.up)
-	end,
 	on_use = function(c, by)
 		if c.state.down then
 			return
 		end
 		c.state.down = true
 		c.state.presses = c.state.presses + 1
-		c:set_voxel(c.params.down)
 		c:log("pressed by", by, "times", c.state.presses)
 		c:emit("pressed")
 		c:after(c.params.hold)
 	end,
 	on_timer = function(c)
 		c.state.down = false
-		c:set_voxel(c.params.up)
 		c:emit("released")
-	end,
-	on_voxel = function(c, voxel, by)
-		c:log("kept its cell from", by)
 	end,
 }

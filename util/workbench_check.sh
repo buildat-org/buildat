@@ -6,8 +6,10 @@
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
 # seconds are the game's):
-#   1. The admin (kitboss, by the setup code) builds a contraption in
-#      Kit's editor, by its packets, the server Stopped ([KIT] stage 4c):
+#   1. The admin (kitboss, by the setup code) stops the server (a fresh
+#      save is Running, [KIT] stage 4c) and builds a contraption in Kit's
+#      editor, by its packets, Stopped (the door, the gate and the button
+#      objects, drawn from the start's state: shut, solid):
 #      a spawner, a button, a gate, a lever, a timer, a door, a
 #      teleporter, a trigger zone, a scoreboard, a counter, an NPC, an
 #      item giver, a key door (taking the key), a dig zone and "Player
@@ -19,8 +21,8 @@
 #      makes the NPC speak), and presses Play.
 #   2. The admin plays it: looks at the button and presses E (the gate
 #      opens, the timer ticks three times, the lever flips, the door
-#      follows, the button comes up again), digs at the button (routed to
-#      it, kept) and places a stone on the floor, talks to the NPC, takes
+#      follows, the button comes up again), digs the floor past the
+#      button (an object, no voxel) and places a stone, talks to the NPC, takes
 #      a key from the item giver (once), and uses the teleporter, which
 #      puts them in the zone: scored, counted.
 #   3. A second player (kitbob) joins mid-round and is put on the spawner, is
@@ -38,6 +40,14 @@
 #      gives it back and the spawner places the admin. A cell dug before
 #      "Save as start" stays dug past a Stop, one dug after is put back.
 #      "keep inventory" off, the next Play resets the inventory.
+#      The origins: the first Stop discards kitbob's dig and the admin's
+#      builds, the notice naming both; kitbob's kept by choice, the
+#      admin's a moment later; the second Stop's discarded build is gone
+#      with the next Play (a keep after the next Stop refused).
+#   5. A door placed in the round stops the admin's walk while shut and
+#      lets it through into a zone behind it when open (their client's
+#      physics on the door's collision shape); with "Always keep builds"
+#      the admin's dig is kept at Stop, and no notice.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # after the restart, and after the Stop.
 #
@@ -50,7 +60,8 @@ if [ "${1:-}" = web ]; then
 	# Workbench in the web client (web/), in headless Chrome at 1200x800:
 	# the admin logs in (the setup code), points at the floor ahead in
 	# edit mode, places an NPC there, lifts it a cell, leaves edit mode
-	# and talks to it with E once Kit's top bar's Play starts a round
+	# and talks to it with E: the server Running from the start, the NPC
+	# placed live
 	check_tmp workbench_web; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
 [
@@ -73,7 +84,6 @@ if [ "${1:-}" = web ]; then
 	["click", 600, 600], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "${OUT}/edit.png"],
-	["click", 656, 20, 100], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
 	["key", "F6"], ["waitlog", "kit editor: edit mode off", 10],
 	["key", "e"], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
 	["frames", 5], ["shot", "${OUT}/play.png"]
@@ -140,6 +150,8 @@ click Button "Don't add"
 wait_log_any 60000 player physics enabled
 keypress F6
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Stopped (by kitboss)
 EOF
 	# 3 spawner, 4 button, 5 gate, 6 lever, 7 timer, 8 door, 9 teleporter,
 	# 10 trigger zone, 11 scoreboard, 12 counter, 13 npc, 14 item giver,
@@ -165,7 +177,11 @@ EOF
 		set -- $l
 		edit "{\"op\": \"link\", \"id\": $1, \"comp\": 0, \"output\": \"$2\", \"to\": $3, \"input\": \"$4\"}"
 	done
+	# The objects drawn from the start's state, Stopped: shut, solid
 	cat <<'EOF'
+wait_log_any 10000 kit: entity 8 drawn 1x2x0.2 at 0,0.5,0, solid
+wait_log_any 10000 kit: entity 5 drawn 3x3x0.3 at 1,1,0, solid
+wait_log_any 10000 kit: entity 4 drawn 0.4x0.4x0.15 at 0,0,0
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 5
@@ -238,7 +254,8 @@ stop
 s=$t/srv1.log
 grep -a " kit \| main " "$s" | grep -v "A . call" | sed 's/^.*\(kit\|main\) *: /  /' |
 	grep -a "Entity\|teleport\|gives\|workbench: [a-z]\|joined\|refused" | cut -c1-140
-want "$s" "A fresh save: Stopped" "kitboss is in edit mode" \
+want "$s" "A fresh save: Running" "kitboss is in edit mode" \
+	"Stop by kitboss: 0 kept cells (edits, builds always kept) put back in, 0 builds discarded" \
 	"An edit by kitboss: placed kit/spawner 3 at [0,1,-4]" \
 	"An edit by kitboss: placed kit/item_giver 14 at [-2,1,-3]" \
 	"An edit by kitboss: placed kit/player_state 17 on the app root" \
@@ -256,7 +273,6 @@ want "$s" "kit/button 4: pressed by player:kitboss times 1" \
 	"kit/timer 7: stopped: its repeats done after 3 ticks" \
 	"kit/lever 6: flipped on by player:kitboss" "kit/lever 6: flipped off by player:kitboss" \
 	"kit/door 8: opened by player:kitboss" "kit/door 8: shut by player:kitboss" \
-	"kit/button 4: kept its cell from player:kitboss" \
 	"workbench: kitboss placed stone" \
 	"kit/npc 13: says to player:kitboss \"Welcome!\"" \
 	"kit/item_giver 14: gives player:kitboss 1 key" \
@@ -268,8 +284,10 @@ want "$s" "kit/button 4: pressed by player:kitboss times 1" \
 	"kit/scoreboard 11: Score: kitboss 1" "kit/counter 12: count 1 by player:kitboss"
 [ "$(grep -ac "kit/lever 6: flipped" "$s")" = 3 ] || fail "the lever did not flip three times ($s)"
 [ "$(grep -ac "kit/gate 5: opened" "$s")" = 1 ] || fail "the gate opened other than once ($s)"
-grep -aq "kit/button 4: kept" "$s" && grep -aq "workbench: kitboss dug .* routed to its owner" "$s" ||
-	fail "the dig at the button was not routed to it ($s)"
+# The button an object now: the dig past it is the floor's, a build
+grep -aq "workbench: kitboss dug .*: written" "$s" ||
+	fail "the admin's dig past the button was not written ($s)"
+grep -aq "routed to its owner" "$s" && fail "a write was routed: the starter objects own no voxels ($s)"
 echo "ok: the admin plays it: the button opens the gate and starts the timer, which flips the lever, which moves the door; the NPC, the item giver, the teleporter into the zone"
 want "$s" "kitbob goes through the round's start: inventory reset" \
 	"kit/spawner 3: spawns player:kitbob" \
@@ -325,6 +343,7 @@ frames 3
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_any 10000 kit: items: none
+wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitbob 1, you
 frames 5
 look_dir 0.6 -0.25 1
 frames 10
@@ -332,6 +351,11 @@ screenshot @T@/stopped.png
 look_dir 0 -1 -0.5
 mouse_click left
 frames 3
+event kit_edit {"op": "keep", "names": ["kitbob"]}
+frames 5
+delay 1500
+event kit_edit {"op": "keep", "names": ["kitboss"]}
+frames 5
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 10
@@ -362,6 +386,49 @@ wait_log 10000 kit editor: state: 16 entities, 3 to undo
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 10
+event kit_edit {"op": "place", "type": "kit/teleporter", "pos": [2, 1, -2]}
+wait_log 10000 kit editor: state: 17 entities, 4 to undo
+event kit_edit {"op": "set", "id": 18, "comp": 0, "param": "to", "value": [-10, 1, -1]}
+wait_log 10000 kit editor: state: 17 entities, 5 to undo
+event kit_edit {"op": "place", "type": "kit/door", "pos": [-10, 1, -4]}
+wait_log 10000 kit editor: state: 18 entities, 6 to undo
+event kit_edit {"op": "place", "type": "kit/trigger_zone", "pos": [-11, 1, -12]}
+wait_log 10000 kit editor: state: 19 entities, 7 to undo
+event kit_edit {"op": "set", "id": 20, "comp": 0, "param": "size", "value": [3, 2, 6]}
+wait_log 10000 kit editor: state: 19 entities, 8 to undo
+keypress F6
+wait_log 10000 kit editor: edit mode off
+wait_log_any 10000 kit: entity 19 drawn 1x2x0.2 at 0,0.5,0, solid
+event kit_use 18
+wait_log 10000 the server put the player at (-10, 1.4, -1)
+frames 20
+look_dir 0 0 -1
+keydown W
+delay 1500
+keyup W
+frames 20
+event kit_use 19
+wait_log 10000 kit: entity 19 drawn 0.2x2x1 at -0.4,0.5,0.4
+look_dir 0 0 -1
+keydown W
+delay 1500
+keyup W
+frames 20
+sync 5000
+keypress F6
+wait_log 10000 kit editor: state: 19 entities, 8 to undo
+event kit_edit {"op": "always_keep", "on": true}
+wait_log 10000 kit editor: state: 19 entities, 9 to undo
+keypress F6
+wait_log 10000 kit editor: edit mode off
+look_dir 0 -1 -0.6
+mouse_click left
+frames 3
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log_absent 1500 kit: builds discarded
+event kit_edit {"op": "keep"}
+wait_log 10000 kit editor: refused: keep: no builds discarded since the last Play
 sync 5000
 quit
 EOF
@@ -394,9 +461,25 @@ grep -aq "the composition's first start" "$s2" && fail "the composition was read
 # Play after the Stop: the spawner placed the admin (keep position off)
 awk '/Play by kitboss/ { p = 1 } p && /spawner teleports kitboss/ { f = 1 } END { exit !f }' "$s2" ||
 	fail "the spawner did not place the admin at Play ($s2)"
-db="$save/save.sqlite"
-sqlite3 "$db" "SELECT key FROM store WHERE store = 'kit' AND key LIKE 'start:%'" | grep -q . ||
-	fail "no copies of the round's sections in the save ($db)"
+want "$s2" "sections copied out"
+# The origins over the restart: the first Stop discarded kitbob's dig in
+# the dig zone and the admin's builds of round one (the restart kept their
+# marks), told the admin; kitbob's chosen, the admin's kept a moment
+# later; at the second Stop the dig after Save as start discarded, then
+# gone with the next Play
+want "$s2" "builds discarded: kitbob 1, kitboss " \
+	"kitboss keeps the builds of kitbob 1: 1 cells put into the start" \
+	"kitboss keeps the builds of kitboss " \
+	"1 builds discarded: kitboss 1" "The builds of kitboss 1 discarded for good" \
+	"An edit (keep) by peer"
+want "$t/again.log" "kit: builds discarded: Your builds while playing were discarded."
+# The door placed in the round: shut, it stopped the admin's walk short of
+# the zone behind it; open, the walk went through into the zone
+awk '/kit\/door 19: opened by player:kitboss/ { o = NR } /kit\/trigger_zone 20: player:kitboss entered/ { if(!o) bad = 1; e = NR } END { exit !(o && e > o && !bad) }' "$s2" ||
+	fail "the shut door did not stop the walk, or the open one did not let it through ($s2)"
+grep -a "kit: entity 19 drawn\|the server put the player at (-10" "$t/again.log" | sed 's/^.*: kit/  kit/' | cut -c1-120
+# Always keep builds: the admin's dig kept at Stop, no notice
+want "$s2" "Stop by kitboss: 1 kept cells (edits, builds always kept) put back in, 0 builds discarded"
 # What the admin's client was told of their items as the state changed:
 # none at each Stop, the key kept at the next Play, none at the last
 python3 -I - "$t/again.log" <<'EOF' || fail "the items over Stop and Play ($t/again.log)"

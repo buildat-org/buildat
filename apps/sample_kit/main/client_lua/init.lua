@@ -6,6 +6,7 @@
 --   b: use the button (3)        f: use the far button (6, out of range)
 --   r: use the runaway (7)       c: use the counter (5, not usable)
 --   d: dig at the door           s: packets that try to fire signals
+--   p: dig the pillar (a build: Stop discards it)
 --   e: use the faulty one (10, an error in its Lua)
 --   h: use the second runaway (11)
 --   u: use the entity last selected in Kit's editor (F6 or "Edit")
@@ -67,6 +68,7 @@ local KEYS = {
 	[magic.KEY_E] = function() buildat.send_packet("kit:use", "10") end,
 	[magic.KEY_H] = function() buildat.send_packet("kit:use", "11") end,
 	[magic.KEY_D] = function() buildat.send_packet("main:dig", "") end,
+	[magic.KEY_P] = function() buildat.send_packet("main:dig", "pillar") end,
 	-- Every kind of edit, as packets, whatever edit mode says: a player
 	-- without edit rights is refused each
 	[magic.KEY_X] = function()
