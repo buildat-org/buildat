@@ -44,7 +44,8 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 if [ "${1:-}" = web ]; then
 	# The admin's flow in the web client (web/), in headless Chrome at
 	# 1200x800: log in ("l", the setup code), point at the stone, place a
-	# button and a door on the floor, the door's closed to glass, the link,
+	# button and a door on the floor (a palette button arms it, a click
+	# places, a right click stops), the door's closed to glass, the link,
 	# the door used twice, Stop and Play (Kit's top bar)
 	check_tmp kit_editor_web; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'EOF'
@@ -64,28 +65,29 @@ if [ "${1:-}" = web ]; then
 	["click", 891, 217], ["frames", 3],
 	["key", "F6"], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
 	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
-	["click", 723, 400], ["waitlog", "kit editor: cursor at 3,1,1", 10],
-	["click", 283, 339], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
-	["click", 700, 310], ["waitlog", "kit editor: cursor at 3,1,3", 10],
-	["click", 108, 367], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
-	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
-	["click", 1060, 195], ["frames", 2], ["key", "End"],
+	["click", 108, 335], ["waitlog", "kit editor: placing sample_kit/button", 10],
+	["click", 723, 400], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
+	["click", 108, 363], ["waitlog", "kit editor: placing sample_kit/door", 10],
+	["click", 700, 310], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
+	["click", 700, 310, 100, 2], ["waitlog", "kit editor: placing nothing", 10],
+	["click", 706, 223], ["waitlog", "kit editor: selected 18", 10],
+	["click", 1060, 212], ["frames", 2], ["key", "End"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"],
 	["type", "glass"], ["waitlog", "kit editor: 18/1 closed = glass", 10],
-	["click", 929, 332], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
+	["click", 929, 349], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
 	["click", 723, 414], ["waitlog", "kit editor: selected 17", 10],
-	["click", 929, 192], ["waitlog", "kit editor: linking from 17 pressed", 10],
-	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
-	["click", 929, 424], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
+	["click", 929, 209], ["waitlog", "kit editor: linking from 17 pressed", 10],
+	["click", 706, 223], ["waitlog", "kit editor: selected 18", 10],
+	["click", 929, 441], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
 	["click", 723, 414], ["waitlog", "kit editor: selected 17", 10],
 	["frames", 3], ["shot", "${OUT}/linked.png"],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = true", 10],
 	["waitlog_any", "kit editor: signal 17.pressed -> 18.toggle", 10],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = false", 10],
-	["click", 658, 20, 100], ["waitlog_any", "kit editor: the server is Stopped .by webboss", 10],
+	["click", 655, 27, 100], ["waitlog_any", "kit editor: the server is Stopped .by webboss", 10],
 	["frames", 3], ["shot", "${OUT}/stopped.png"],
-	["click", 656, 20, 100], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
+	["click", 516, 27, 100], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
 	["key", "b"], ["waitlog", "replicated: entity 4 open = true", 10],
 	["frames", 10], ["shot", "${OUT}/play.png"]
 ]
@@ -140,9 +142,11 @@ export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
 
 # The admin. At 1024x700 the pixel (921, 213) is the top of the stone at
 # (6, 1, 2), the cell above it (6, 2, 2); (620, 350) is the top of the
-# floor's (3, 0, 1), (600, 271) of its (3, 0, 3) (the door placed there
-# then the voxel the click meets), and (512, 570) is the ground's (2, 1,
-# -2), off the floor; a click on an entity's cell selects it
+# floor's (3, 0, 1), (600, 271) of its (3, 0, 3) (the door placed there),
+# (605, 195) the top of the door's stone at (3, 1, 3) (600, 271 is
+# behind the button's cell then), and (512, 570) is the ground's (2, 1,
+# -2), off the floor; a click on an entity's cell selects it. A palette
+# button arms placing, a click places, a right click stops
 cat > "$t/boss.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 10000 admin script: done
@@ -162,18 +166,24 @@ mouse_pos 620 350
 mouse_click left
 wait_log 5000 kit editor: cursor at 3,1,1
 click Button "sample_kit/button"
+wait_log 5000 kit editor: placing sample_kit/button
+mouse_pos 620 350
+frames 3
+screenshot @T@/placing.png
+mouse_click left
 wait_log 10000 kit editor: state: 16 entities, 1 to undo
+click Button "sample_kit/door"
+wait_log 5000 kit editor: placing sample_kit/door
 mouse_pos 600 271
 mouse_click left
-wait_log 5000 kit editor: cursor at 3,1,3
-click Button "sample_kit/door"
 wait_log 10000 kit editor: state: 17 entities, 2 to undo
+click Button "sample_kit/marker"
+wait_log 5000 kit editor: placing sample_kit/marker
 mouse_pos 512 570
 mouse_click left
-wait_log 5000 kit editor: cursor at 2,1,-2
-click Button "sample_kit/marker"
 wait_log 10000 kit editor: state: 18 entities, 3 to undo
-mouse_pos 512 570
+mouse_click right
+wait_log 5000 kit editor: placing nothing
 mouse_click left
 wait_log 5000 kit editor: selected 19
 keypress Right
@@ -182,7 +192,7 @@ keypress Delete
 wait_log 10000 kit editor: state: 17 entities, 5 to undo
 click Button "Undo"
 wait_log 10000 kit editor: state: 18 entities, 4 to undo
-mouse_pos 600 271
+mouse_pos 605 195
 mouse_click left
 wait_log 5000 kit editor: selected 18
 click LineEdit "stone"
@@ -203,7 +213,7 @@ mouse_click left
 wait_log 5000 kit editor: selected 17
 click Button "Link pressed"
 wait_log 5000 kit editor: linking from 17 pressed
-mouse_pos 600 271
+mouse_pos 605 195
 mouse_click left
 wait_log 5000 kit editor: selected 18
 click Button "To toggle"
@@ -277,7 +287,7 @@ keypress g
 wait_log 10000 kit editor: refused: builder: only the server's admin makes builders
 click Button "Edit"
 wait_log 10000 kit editor: state: 18 entities
-click Button "sample_kit/marker"
+event kit_edit {"op": "place", "type": "sample_kit/marker", "pos": [0, 1, 0]}
 wait_log 10000 kit editor: state: 19 entities
 keypress Tab
 wait_log 10000 kit editor: selected 3
@@ -285,13 +295,14 @@ keypress b
 wait_log 10000 replicated: entity 4 open = true
 wait_log 60000 kit editor: the server is Stopped (by kitboss)
 wait_log_any 10000 kit: builds discarded: Builds while playing were discarded (kitboss 1).
-click Button "sample_kit/marker"
+event kit_edit {"op": "place", "type": "sample_kit/marker", "pos": [0, 1, 0]}
 wait_log 10000 kit editor: state: 20 entities
 keypress b
 wait_log 60000 kit editor: the server is Running (by kitboss)
 keypress b
 wait_log 10000 replicated: entity 4 open = true
-click Button "Play mode"
+# (F6: the refusal's notification may still cover the bar's right end)
+keypress F6
 wait_log 10000 kit editor: edit mode off
 quit
 EOF
