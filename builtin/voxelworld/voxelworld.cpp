@@ -149,6 +149,8 @@ struct Section
 	std::map<pv::Vector3DInt32, voxelworld::Owned> owned;
 	bool owned_dirty = false;
 	bool owned_unreadable = false;
+	// [KIT] stage 4c: the section watch's generation it was told of in
+	uint32_t watch_gen = 0;
 
 	Section(): // Needed for containers
 		chunk_size(0, 0, 0) // This is used to detect uninitialized instance
@@ -303,6 +305,9 @@ struct CInstance: public voxelworld::Instance
 	sv_<up_<CommitHook>> m_commit_hooks;
 	// [KIT] Per owner, for routed_set_voxel()
 	std::map<ss_, sp_<OwnerHandler>> m_owner_handlers;
+	// [KIT] stage 4c: the section watch and its generation
+	sp_<SectionWatch> m_section_watch;
+	uint32_t m_watch_gen = 1;
 
 	// One node holds one chunk of voxels (eg. 24x24x24)
 	pv::Vector3DInt16 m_chunk_size_voxels = pv::Vector3DInt16(32, 32, 32);
@@ -2262,6 +2267,7 @@ struct CInstance: public voxelworld::Instance
 			const interface::VoxelSample &v, bool disable_warnings)
 	{
 		pv::Vector3DInt32 voxel_p;
+		watch_voxel(p);
 		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
 				"set_sample");
 		if(buf == nullptr)
@@ -2500,6 +2506,7 @@ struct CInstance: public voxelworld::Instance
 				PV3I_PARAMS(p), v.data);*/
 		pv::Vector3DInt32 voxel_p, chunk_p;
 		Section *section = nullptr;
+		watch_voxel(p);
 		ChunkBuffer *bufp = buffer_for(p, &voxel_p, disable_warnings,
 				"set_voxel", &section, &chunk_p);
 		if(bufp == nullptr)
@@ -2688,6 +2695,15 @@ struct CInstance: public voxelworld::Instance
 		pv::Vector3DInt32 chunk_uc = container_coord(ruc, m_chunk_size_voxels);
 
 		size_t num_written = 0;
+		// [KIT] stage 4c: the sections an overwrite reaches, told of first
+		// (the copy reads them before any chunk here is written)
+		if(overwrite && m_section_watch)
+			for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++)
+			for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++)
+			for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++)
+				watch_voxel(pv::Vector3DInt32(cx * m_chunk_size_voxels.getX(),
+						cy * m_chunk_size_voxels.getY(),
+						cz * m_chunk_size_voxels.getZ()));
 		for(int cz = chunk_lc.getZ(); cz <= chunk_uc.getZ(); cz++){
 		for(int cy = chunk_lc.getY(); cy <= chunk_uc.getY(); cy++){
 		for(int cx = chunk_lc.getX(); cx <= chunk_uc.getX(); cx++){

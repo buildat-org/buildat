@@ -1211,6 +1211,84 @@
 			m_owner_handlers.erase(owner);
 	}
 
+	// [KIT] stage 4c: the section watch (api.h). A section is told of once a
+	// watch generation: a new watch is a new generation
+	void set_section_watch(sp_<SectionWatch> watch)
+	{
+		m_section_watch = watch;
+		m_watch_gen++;
+	}
+
+	// Before a write to the section a voxel is in, or to section_p
+	void watch_voxel(const pv::Vector3DInt32 &p)
+	{
+		if(!m_section_watch)
+			return;
+		const pv::Vector3DInt32 chunk_p = container_coord(p, m_chunk_size_voxels);
+		if(!chunk_section_fits(chunk_p))
+			return;
+		watch_section(container_coord16(chunk_p, m_section_size_chunks));
+	}
+
+	void watch_section(const pv::Vector3DInt16 &section_p)
+	{
+		if(!m_section_watch)
+			return;
+		Section *section = get_section(section_p);
+		if(section == nullptr || !section->loaded ||
+				section->watch_gen == m_watch_gen)
+			return;
+		section->watch_gen = m_watch_gen;
+		// Held here: the watch may be replaced from inside
+		sp_<SectionWatch> watch = m_section_watch;
+		watch->before_write(this, section_p,
+				get_volume(get_section_region_voxels(section_p)));
+	}
+
+	bool put_section(const pv::Vector3DInt16 &section_p,
+			const VoxelVolume &volume)
+	{
+		Section *section = get_section(section_p);
+		if(section == nullptr || !section->loaded)
+			return false;
+		watch_section(section_p);
+		const pv::Region sr = get_section_region_voxels(section_p);
+		const pv::Region vr = volume.getEnclosingRegion();
+		for(size_t i = 0; i < section->num_chunks; i++){
+			const pv::Vector3DInt32 chunk_p = section->get_chunk_p(i);
+			ChunkBuffer *buf = load_buffer(chunk_p);
+			if(buf == nullptr)
+				continue;
+			buf->volume->add_planes(volume.planes());
+			const size_t planes = std::min(buf->volume->planes().size(),
+					volume.planes().size());
+			const pv::Region cr = get_chunk_region_voxels(chunk_p);
+			const pv::Vector3DInt32 lc = cr.getLowerCorner();
+			const pv::Vector3DInt32 uc = cr.getUpperCorner();
+			for(int z = lc.getZ(); z <= uc.getZ(); z++)
+			for(int y = lc.getY(); y <= uc.getY(); y++)
+			for(int x = lc.getX(); x <= uc.getX(); x++){
+				if(!vr.containsPoint(pv::Vector3DInt32(x, y, z)) ||
+						!sr.containsPoint(pv::Vector3DInt32(x, y, z)))
+					continue;
+				for(size_t pi = 0; pi < std::max<size_t>(planes, 1); pi++)
+					buf->volume->set_plane_at((uint8_t)pi, x - lc.getX(),
+							y - lc.getY(), z - lc.getZ(),
+							volume.plane_at((uint8_t)pi, x, y, z));
+			}
+			mark_buffer_dirty(section, *buf);
+			dirty_neighbour_padding(chunk_p, lc, uc);
+		}
+		// The light round it: what the neighbours lit across its faces
+		for(size_t f = 0; f < NUM_LIGHT_FIELDS; f++)
+			if(m_light_maintained[f]){
+				relight_region_later(sr);
+				break;
+			}
+		maintain_maximum_buffer_limit();
+		return true;
+	}
+
 	RoutedWrite routed_set_voxel(const pv::Vector3DInt32 &p,
 			const VoxelInstance &v, const ss_ &by)
 	{
