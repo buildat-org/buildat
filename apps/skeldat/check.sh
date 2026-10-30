@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~24 min (2026-10-19)
+# cost: ~30 min (2026-10-30)
 # covers: apps/skeldat/** extensions/luanti_client/res/touch.lua builtin/chat/** src/interface/voxel_path.h src/impl/voxel_path.cpp
 # [SKELDAT]: skeldat's rules by their own tests (game.h, bones.h,
 # move_check.h, and the engine pathfinder's with its time a search), then
@@ -172,6 +172,9 @@ server() # <log> [args]: the world "w" at seed 2, noon, 256 x 64 x 256
 }
 client() # <name> <cmds>, in the background: its PID in $CLIENT
 {
+	# Emptied now, not as the client starts: a wait on its log right after
+	# would read a run before's
+	: > "$t/$1.log"
 	timeout 480 "$b" -C "$t/c_$1" -D "$t/u_$1" -w "${CLIENT_SIZE:-800x500}" -l 3 \
 		-o sound_mute=1 -s "127.0.0.1:$SERVER_PORT" -c @"$2" \
 		> "$t/$1.log" 2>&1 &
@@ -179,6 +182,49 @@ client() # <name> <cmds>, in the background: its PID in $CLIENT
 	CHECK_PIDS+=($CLIENT)
 }
 placed='wait_log 300000 skeldat: placed at'
+# [SKELDAT_CHECK_WAITS] The game's clock ([CHECK_TIME_SCALE], check_lib):
+# a section that waits on the game's time runs its server at --sim-rate 1
+# and speeds it up once what is timed on the wall clock is done (the
+# world's making, the join, held keys and buttons, the asserts that read
+# the log's times): to CHECK_RATE with a client, by the drive's
+# "$(fast <user path>)", and CHECK_RATE_HEADLESS without (game_rate). A
+# drive's long last delay is then a limit: the check waits for the line
+# it reads after it (wait_for_log with the user path), or the game's
+# seconds it held the world for (game_wait), and ends the client there
+fast() # <user path>: a drive's lines speeding its server up
+{
+	printf '%s\n' "game_clock $1" "game_rate $CHECK_RATE"
+}
+sped() # <client log>: until its drive has sped its server up (1: it ended first)
+{
+	local i
+	for i in $(seq 1500); do
+		grep -aq "command: game_rate" "$1" && return 0
+		kill -0 $CLIENT 2>/dev/null || return 1
+		sleep 0.2
+	done
+	return 1
+}
+ends_at() # <log> <regex>: until the line, or the client's own end (1)
+{
+	while ! grep -qaE "$2" "$1"; do
+		kill -0 $CLIENT 2>/dev/null || return 1
+		sleep 0.2
+	done
+}
+game_wait() # <user path> <s>: the game's seconds gone by (wait_for_log's on no line)
+{
+	wait_for_log /dev/null . "$2" "$1" || :
+}
+ended() # <client log>: the client ended by SIGTERM; 1 if its drive failed
+{
+	# To the client under client()'s timeout: one to timeout is sent on to
+	# its group as well, and a second SIGTERM kills the client outright
+	pkill -TERM -P $CLIENT 2>/dev/null
+	wait $CLIENT 2>/dev/null
+	! grep -aq "Command sequence failed" "$1" &&
+		grep -aq "command: quit\|SIGTERM; shutting down" "$1"
+}
 toggle() # the admin page's toggle, from the game
 {
 	printf '%s\n' "keypress Escape" "wait_log 5000 pause: the menu shown" \
@@ -538,9 +584,10 @@ grep -aq 'the world "end" ended after' "$log3" ||
 	fail "the end not kept in the save ($log3)"
 # The world again, headless, with 2000 light skeletons more: their step
 # time, two reports after the world is in
-BUILDAT_SKELDAT_SKELETONS=2000 server "$t/srv7.log"
+BUILDAT_SKELDAT_SKELETONS=2000 server "$t/srv7.log" --sim-rate 1
 wait_for_log "$t/srv7.log" "2000 skeletons added" 300 ||
 	fail "the 2000 skeletons not added ($t/srv7.log)"
+game_rate "$t/srv" "$CHECK_RATE_HEADLESS"
 for i in $(seq 60); do
 	[ "$(sed -n '/skeletons added/,$p' "$t/srv7.log" |
 		grep -ac "skeletons, [0-9]* full")" -ge 2 ] && break
@@ -557,9 +604,10 @@ BUILDAT_SKELDAT_WORLD=night BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0"
 	BUILDAT_SKELDAT_MARKERS="0 0 3" BUILDAT_SKELDAT_LIGHT_STEP=0.02 \
 	start_server "$log10" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv10" -C "$t/srv.cache" -l 3 || fail "the server ($log10)"
+	-D "$t/srv10" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log10)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$log10" ": sunset: " 60 || fail "no sunset ($log10)"
+wait_for_log "$log10" "the world is in" 60 && game_rate "$t/srv10" "$CHECK_RATE_HEADLESS"
+wait_for_log "$log10" ": sunset: " 60 "$t/srv10" || fail "no sunset ($log10)"
 for i in $(seq 120); do
 	sed -n '/: sunset: /,$p' "$log10" | grep -aq ": sunrise: " && break
 	sleep 0.5
@@ -610,11 +658,12 @@ BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" B
 	BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TIME=0.8 start_server "$log5" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv5" -C "$t/srv.cache" -l 3 || fail "the server ($log5)"
+	-D "$t/srv5" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log5)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$log5" "skeldat: 1[0-9] skeletons, the target" 60 ||
+wait_for_log "$log5" "the world is in" 60 && game_rate "$t/srv5" "$CHECK_RATE_HEADLESS"
+wait_for_log "$log5" "skeldat: 1[0-9] skeletons, the target" 60 "$t/srv5" ||
 	fail "the clean world's count did not grow ($log5)"
-sleep 6
+game_wait "$t/srv5" 6
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 clean=$(grep -a "skeletons, the target" "$log5" | tail -1 | sed 's/.*skeldat: //')
 grep -a "skeletons, the target" "$log5" | awk '$8 > $12 + 0 { bad = 1 } END { exit !bad }' &&
@@ -627,11 +676,12 @@ BUILDAT_SKELDAT_WORLD=sim BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" B
 	BUILDAT_SKELDAT_SKELETONS=200 BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_DAY=240 \
 	start_server "$log6" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv6" -C "$t/srv.cache" -l 3 || fail "the server ($log6)"
+	-D "$t/srv6" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log6)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 12000" quit > "$t/sim.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv6")" "delay 12000" quit > "$t/sim.cmds"
 client sim "$t/sim.cmds"
-wait $CLIENT || fail "the drive among the skeletons ($t/sim.log)"
+sped "$t/sim.log" && game_wait "$t/srv6" 12
+ended "$t/sim.log" || fail "the drive among the skeletons ($t/sim.log)"
 n=$(grep -ac "skeletons, [0-9]* full" "$log6")
 for i in $(seq 60); do
 	[ "$(grep -ac "skeletons, [0-9]* full" "$log6")" -gt "$n" ] && break
@@ -657,9 +707,10 @@ BUILDAT_SKELDAT_WORLD=lantern BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 
 	BUILDAT_SKELDAT_LANTERNS="-12 0 9; 12 0 1 1" BUILDAT_SKELDAT_SKELETONS=0 \
 	start_server "$log11" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv11" -C "$t/srv.cache" -l 3 || fail "the server ($log11)"
+	-D "$t/srv11" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log11)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$log11" "lantern at 12,[0-9]*,0 out: .* mean ([5-9]|1[0-5])\." 180 ||
+wait_for_log "$log11" "the world is in" 180 && game_rate "$t/srv11" "$CHECK_RATE_HEADLESS"
+wait_for_log "$log11" "lantern at 12,[0-9]*,0 out: .* mean ([5-9]|1[0-5])\." 180 "$t/srv11" ||
 	fail "the lantern in the bones: not out, or no bones back ($log11)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -a "lantern at -12,[0-9]*,0 burning" "$log11" | grep -qv " 0 with bones" &&
@@ -686,9 +737,10 @@ BUILDAT_SKELDAT_WORLD=lure BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" 
 	BUILDAT_SKELDAT_LIGHT_STEP=0.02 BUILDAT_SKELDAT_LANTERNS="20 20 9" \
 	start_server "$log12" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv12" -C "$t/srv.cache" -l 3 || fail "the server ($log12)"
+	-D "$t/srv12" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log12)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$log12" "takes the lantern at 20," 90 ||
+wait_for_log "$log12" "the world is in" 90 && game_rate "$t/srv12" "$CHECK_RATE_HEADLESS"
+wait_for_log "$log12" "takes the lantern at 20," 90 "$t/srv12" ||
 	fail "no skeleton took the lantern ($log12)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
@@ -819,21 +871,26 @@ landed=$(grep -a "client1 lands at" "$log15" | sed 's/.*lands at \([0-9]*\).*/\1
 # it off, and the drowning hurts. Every damage goes through hurt(), the
 # drowning stands for the arrow.
 log16="$t/srv16.log"
-{ echo "$placed"; toggle; echo "delay 8000"; echo quit; } > "$t/inv1.cmds"
-{ echo "$placed"; echo "delay 3000"; toggle; echo "delay 4000"; echo quit; } > "$t/inv2.cmds"
+{ echo "$placed"; toggle; fast "$t/srv16"; echo "delay 8000"; echo quit; } > "$t/inv1.cmds"
+{ echo "$placed"; echo "delay 3000"; toggle; fast "$t/srv16"; echo "delay 4000"; echo quit; } > "$t/inv2.cmds"
 # A guest's name goes by its connection: the rejoin, client1 again, on
 # the server started again, in the shared setup's water
 for n in 1 2; do
+	rm -f "$t/srv16/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=inv BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "$water")" \
 		start_server "$t/srv16_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv16" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		-D "$t/srv16" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 ||
 		fail "the server ($t/srv16_$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
 	client inv$n "$t/inv$n.cmds"
-	wait $CLIENT || fail "the invulnerable drive ($t/inv$n.log)"
+	# The drowning the run is for: unhurt, then hurt
+	sped "$t/inv$n.log" && wait_for_log "$t/srv16_$n.log" \
+		"client1 drowns, $([ $n = 1 ] && echo invulnerable || echo "[0-9]* hp left")" \
+		$([ $n = 1 ] && echo 8 || echo 12) "$t/srv16"
+	ended "$t/inv$n.log" || fail "the invulnerable drive ($t/inv$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv16_$n.log" >> "$log16"
 done
@@ -876,7 +933,15 @@ for n in 1 2; do
 		fail "the server ($t/srv17_$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
 	client drops "$t/drops$n.cmds"
-	wait $CLIENT || fail "the drops' drive $n ($t/drops.log)"
+	if [ $n = 1 ]; then
+		# [SKELDAT_CHECK_WAITS] At the wall's pace: the hold's digs are
+		# two, the third had the drops out of the respawn's reach, and
+		# --sim-rate's quicker server made it three
+		ends_at "$t/srv17_1.log" "the drop of skeldat:stone at .* is gone"
+		ended "$t/drops.log"
+	else
+		wait $CLIENT
+	fi || fail "the drops' drive $n ($t/drops.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv17_$n.log" >> "$log17"
 done
@@ -1078,11 +1143,12 @@ BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BU
 	BUILDAT_SKELDAT_TEST="skeleton 0 6 marked; marker 1 6 skeldat:bone_block; skeleton 0 -20 marked" \
 	start_server "$log23" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv23" -C "$t/srv.cache" -l 3 || fail "the server ($log23)"
+	-D "$t/srv23" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log23)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 10000" quit > "$t/sun.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv23")" "delay 10000" quit > "$t/sun.cmds"
 client sun "$t/sun.cmds"
-wait $CLIENT || fail "the sun's drive ($t/sun.log)"
+sped "$t/sun.log" && game_wait "$t/srv23" 10
+ended "$t/sun.log" || fail "the sun's drive ($t/sun.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 safe=$(grep -a "test: a skeleton (" "$log23" | sed -n 1p | sed 's/.*(\([0-9]*\)).*/\1/')
 open=$(grep -a "test: a skeleton (" "$log23" | sed -n 2p | sed 's/.*(\([0-9]*\)).*/\1/')
@@ -1104,11 +1170,12 @@ BUILDAT_SKELDAT_WORLD=water BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 
 	BUILDAT_SKELDAT_TEST="${pond}${pool}skeleton 0 12 marked; skeleton 0 -6 marked" \
 	start_server "$log24" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv24" -C "$t/srv.cache" -l 3 || fail "the server ($log24)"
+	-D "$t/srv24" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log24)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 20000" quit > "$t/water.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv24")" "delay 20000" quit > "$t/water.cmds"
 client water "$t/water.cmds"
-wait $CLIENT || fail "the water's drive ($t/water.log)"
+sped "$t/water.log" && game_wait "$t/srv24" 20
+ended "$t/water.log" || fail "the water's drive ($t/water.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 across=$(grep -a "test: a skeleton (" "$log24" | sed -n 1p | sed 's/.*(\([0-9]*\)).*/\1/')
 pool=$(grep -a "test: a skeleton (" "$log24" | sed -n 2p | sed 's/.*(\([0-9]*\)).*/\1/')
@@ -1135,11 +1202,12 @@ BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WA
 	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 10 -11 marked seed 10 -17 1; place 100 0" \
 	start_server "$log25" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv25" -C "$t/srv.cache" -l 3 || fail "the server ($log25)"
+	-D "$t/srv25" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log25)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 60000" quit > "$t/ways.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv25")" "delay 60000" quit > "$t/ways.cmds"
 client ways "$t/ways.cmds"
-wait $CLIENT || fail "the ways' drive ($t/ways.log)"
+sped "$t/ways.log" && game_wait "$t/srv25" 60
+ended "$t/ways.log" || fail "the ways' drive ($t/ways.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 keys=$(grep -a "test: a skeleton (" "$log25" | sed 's/.*(\([0-9]*\)).*/\1/' | tr '\n' ' ')
 set -- $keys
@@ -1163,6 +1231,10 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 # one is a stuck-arrow voxel; the server started again, the player put on
 # it picks it up. Frames of the hand at rest, half and full drawn. The
 # draws', shots' and landings' sounds ([SKELDAT_BOW_SOUNDS]).
+# [SKELDAT_CHECK_WAITS] A draw's strength is the game's time it was held
+# for, which --sim-rate's 1x shortens while a new world relights: the
+# client in once the world is relit, the minute after the shots on the
+# game's clock, to the stuck arrow's line
 log26="$t/srv26.log"
 shot()
 {
@@ -1175,19 +1247,27 @@ shot()
 	shot 1200; shot 1200
 	echo "look 0 -60"; shot 2500
 	echo "look 90 0"; shot 1200; shot 1200; shot 1200; shot 1200; shot 1200
-	echo "delay 66000"; echo quit; } > "$t/bow1.cmds"
+	fast "$t/srv26"; echo "delay 66000"; echo quit; } > "$t/bow1.cmds"
 printf '%s\n' "$placed" "delay 3000" quit > "$t/bow2.cmds"
 for n in 1 2; do
+	rm -f "$t/srv26/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=bow BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:bow 1 1; give skeldat:arrow 6 1; skeleton 0 6 marked" || echo "place ${kept:-0 0}")" \
 		start_server "$t/srv26_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv26" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		-D "$t/srv26" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 ||
 		fail "the server ($t/srv26_$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
+	[ $n = 1 ] && { wait_for_log "$t/srv26_1.log" "skeldat: the world relit" 300 ||
+		fail "the world not relit ($t/srv26_1.log)"; }
 	client bow$n "$t/bow$n.cmds"
-	wait $CLIENT || fail "the bow's drive $n ($t/bow$n.log)"
+	if [ $n = 1 ]; then
+		sped "$t/bow1.log" && wait_for_log "$t/srv26_1.log" "a stuck arrow kept at" 66 "$t/srv26"
+		ended "$t/bow1.log"
+	else
+		wait $CLIENT
+	fi || fail "the bow's drive $n ($t/bow$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv26_$n.log" >> "$log26"
 	[ $n = 1 ] && kept=$(grep -a "a stuck arrow kept at" "$t/srv26_1.log" | head -1 |
@@ -1409,16 +1489,16 @@ lines=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { 
 # falls to the shaft's bottom and is a skull voxel there.
 log29="$t/srv29.log"
 shaft=$(for d in $(seq 10 -1 1); do printf 'marker 3 0 air -%d; ' $d; done)
-{ echo "$placed"; toggle; echo "delay 90000"; echo quit; } > "$t/hole.cmds"
+{ echo "$placed"; toggle; fast "$t/srv29"; echo "delay 90000"; echo quit; } > "$t/hole.cmds"
 BUILDAT_SKELDAT_WORLD=hole BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 	BUILDAT_SKELDAT_TEST="${shaft}skeleton 1 0 marked" \
 	start_server "$log29" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv29" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log29)"
+	-D "$t/srv29" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 || fail "the server ($log29)"
 CHECK_PIDS+=($SERVER_PID)
 client hole "$t/hole.cmds"
-wait_for_log "$log29" "a dropped skull is a voxel" 300
+sped "$t/hole.log" && wait_for_log "$log29" "a dropped skull is a voxel" 300 "$t/srv29"
 kill $CLIENT $SERVER_PID 2>/dev/null; wait $CLIENT $SERVER_PID 2>/dev/null
 bottom=$(grep -a "test: air at" "$log29" | head -1 | sed 's/.*air at \([-0-9]*\),\([-0-9]*\),\([-0-9]*\).*/\1 \2 \3/')
 set -- $bottom
@@ -1437,6 +1517,7 @@ speed_server() # <run> <world> [args]: a 128 world
 {
 	local n=$1 world=$2
 	shift 2
+	rm -f "$t/srv30/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=$world BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 0 0" \
 		start_server "$t/srv30_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
@@ -1465,17 +1546,20 @@ wait $CLIENT || fail "the admin's speed drive ($t/speed1.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "the bones at 5x" "$t/srv30_1.log" && grep -aq "client1 sets : bone speed 1x" "$t/srv30_1.log" ||
 	fail "the admin's speed 1 not set and audited ($t/srv30_1.log)"
-printf '%s\n' "$placed" "delay 2000" "event skeldat_admin speed 10" "delay 70000" quit > "$t/speed2.cmds"
-speed_server 2 speedw
+printf '%s\n' "$placed" "delay 2000" "event skeldat_admin speed 10" "$(fast "$t/srv30")" \
+	"delay 70000" quit > "$t/speed2.cmds"
+speed_server 2 speedw --sim-rate 1
 client speed2 "$t/speed2.cmds"
-wait $CLIENT || fail "the player's speed drive ($t/speed2.log)"
+sped "$t/speed2.log" && game_wait "$t/srv30" 70
+ended "$t/speed2.log" || fail "the player's speed drive ($t/speed2.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "the bones at 1x (the lowest 1x)" "$t/srv30_2.log" && ! grep -aq "bone speed 10x" "$t/srv30_2.log" &&
 	! grep -aq "can't keep up" "$t/srv30_2.log" ||
 	fail "the speed not kept, a player's speed taken, or a 1x world behind ($t/srv30_2.log)"
-printf '%s\n' "$placed" "wait_log 90000 chat: *** The server can't keep up with 10x bones" \
+printf '%s\n' "$placed" "$(fast "$t/srv30")" \
+	"wait_log 90000 chat: *** The server can't keep up with 10x bones" \
 	"delay 500" quit > "$t/speed3.cmds"
-BUILDAT_SKELDAT_SPEED=10 BUILDAT_SKELDAT_EXPAND=1 BUILDAT_SKELDAT_BUDGET=0.01 speed_server 3 behind
+BUILDAT_SKELDAT_SPEED=10 BUILDAT_SKELDAT_EXPAND=1 BUILDAT_SKELDAT_BUDGET=0.01 speed_server 3 behind --sim-rate 1
 client speed3 "$t/speed3.cmds"
 wait $CLIENT || fail "no can't-keep-up line in the chat ($t/speed3.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -2189,11 +2273,12 @@ BUILDAT_SKELDAT_WORLD=seen BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WA
 	BUILDAT_SKELDAT_TEST="${seen}skeleton 16 0 marked goal -40 30; skeleton 20 -42 marked goal -40 -42; place 100 0" \
 	start_server "$log41" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv41" -C "$t/srv.cache" -l 3 || fail "the server ($log41)"
+	-D "$t/srv41" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log41)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 60000" quit > "$t/seen.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv41")" "delay 60000" quit > "$t/seen.cmds"
 client seen "$t/seen.cmds"
-wait $CLIENT || fail "the bridges' drive ($t/seen.log)"
+sped "$t/seen.log" && game_wait "$t/srv41" 60
+ended "$t/seen.log" || fail "the bridges' drive ($t/seen.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 set -- $(grep -a "test: a skeleton (" "$log41" | sed 's/.*(\([0-9]*\)).*/\1/')
 river=$(grep -a "skeleton ($1) builds" "$log41" | sed 's/.* at //')
@@ -2420,13 +2505,13 @@ BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_TERRAIN=f
 	BUILDAT_SKELDAT_TEST="$water" \
 	start_server "$log46" "STATUS Listening" 300 auto \
 	env -u BUILDAT_SKELDAT_START_ITEMS "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv46" -C "$t/srv.cache" -l 3 || fail "the server ($log46)"
+	-D "$t/srv46" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log46)"
 CHECK_PIDS+=($SERVER_PID)
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$log46" | head -1)
 [ -n "$code" ] || fail "no setup code ($log46)"
 printf '%s\n' "wait_log_any 60000 accounts: ntfy asked" \
 	"wait_log_any 5000 server window: the page ntfy" "delay 300" \
-	"click Button \"Don't add\"" \
+	"click Button \"Don't add\"" "$(fast "$t/srv46")" \
 	"wait_log_any 120000 pause: the death screen shown" "delay 2000" \
 	quit > "$t/dead1.cmds"
 printf '%s\n' "wait_log_any 120000 pause: the death screen shown" \
@@ -2487,11 +2572,12 @@ BUILDAT_SKELDAT_WORLD=boars BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 
 	BUILDAT_SKELDAT_TEST="marker 6 0 skeldat:stone -1; boar 6 0; boar -6 0; boar_spots 200" \
 	start_server "$log48" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv48" -C "$t/srv.cache" -l 3 || fail "the server ($log48)"
+	-D "$t/srv48" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log48)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 28000" quit > "$t/boars.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv48")" "delay 28000" quit > "$t/boars.cmds"
 client boars "$t/boars.cmds"
-wait $CLIENT || fail "the boars' drive ($t/boars.log)"
+sped "$t/boars.log" && game_wait "$t/srv48" 28
+ended "$t/boars.log" || fail "the boars' drive ($t/boars.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 stone=$(grep -a "test: a boar (" "$log48" | head -1 | sed 's/.*boar (\([0-9]*\)).*/\1/')
 grass=$(grep -a "test: a boar (" "$log48" | sed -n 2p | sed 's/.*boar (\([0-9]*\)).*/\1/')
@@ -2515,18 +2601,20 @@ echo "boars: the one on stone died off the grass; spawn searches $spots"
 # to the bones), not counted
 log49="$t/srv49.log"
 for n in 1 2; do
+	rm -f "$t/srv49/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=cave BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "cave_skeleton 0 -8; skeleton 0 30 marked; cave_skeleton 10 30; cave_spots 200" || echo "place 0 0")" \
 		start_server "$t/srv49_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv49" -C "$t/srv.cache" -l 3 -u launcher=1 ||
+		-D "$t/srv49" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 ||
 		fail "the server ($t/srv49_$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
-	{ echo "$placed"; toggle; echo "delay $([ $n = 1 ] && echo 60000 || echo 10000)"
+	{ echo "$placed"; toggle; fast "$t/srv49"; echo "delay $([ $n = 1 ] && echo 60000 || echo 10000)"
 		echo quit; } > "$t/cave$n.cmds"
 	client cave$n "$t/cave$n.cmds"
-	wait $CLIENT || fail "the cave skeletons' drive $n ($t/cave$n.log)"
+	sped "$t/cave$n.log" && game_wait "$t/srv49" $([ $n = 1 ] && echo 60 || echo 10)
+	ended "$t/cave$n.log" || fail "the cave skeletons' drive $n ($t/cave$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv49_$n.log" >> "$log49"
 done
@@ -2554,17 +2642,19 @@ echo "cave skeletons: the fight: $(grep -aE "the (cave_)?skeleton \([0-9]*\) die
 # again on the saved world reads the active set back and steps it.
 log50="$t/srv50.log"
 for n in 1 2; do
+	rm -f "$t/srv50/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=hazards BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TERRAIN=plains \
 		BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
 		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:stone 5; pocket lava -2 -2 5 3 5; pocket poison -9 -1 3 3 3; boar -8 0; pocket water 10 0 2 4 2" || echo "place 0 0")" \
 		start_server "$t/srv50_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv50" -C "$t/srv.cache" -l 3 ||
+		-D "$t/srv50" -C "$t/srv.cache" -l 3 --sim-rate 1 ||
 		fail "the server ($t/srv50_$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
-	printf '%s\n' "$placed" "delay $([ $n = 1 ] && echo 22000 || echo 12000)" quit > "$t/hazards$n.cmds"
+	printf '%s\n' "$placed" "$(fast "$t/srv50")" "delay $([ $n = 1 ] && echo 22000 || echo 12000)" quit > "$t/hazards$n.cmds"
 	client hazards$n "$t/hazards$n.cmds"
-	wait $CLIENT || fail "the hazards' drive $n ($t/hazards$n.log)"
+	sped "$t/hazards$n.log" && game_wait "$t/srv50" $([ $n = 1 ] && echo 22 || echo 12)
+	ended "$t/hazards$n.log" || fail "the hazards' drive $n ($t/hazards$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	cat "$t/srv50_$n.log" >> "$log50"
 done
@@ -2604,11 +2694,12 @@ echo "$first; ${back} active read back"
 # simplified: 2 minutes where the plan has 10, the margins to match
 forms=""
 for form in rivers sea plains lake; do
+	rm -f "$t/srv51/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=$form BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1 0" \
 		BUILDAT_SKELDAT_TERRAIN=$form BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 \
 		start_server "$t/srv51_$form.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv51" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv51_$form.log)"
+		-D "$t/srv51" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($t/srv51_$form.log)"
 	CHECK_PIDS+=($SERVER_PID)
 	wait_for_log "$t/srv51_$form.log" "the world is in" 120 ||
 		fail "the $form world not made ($t/srv51_$form.log)"
@@ -2617,7 +2708,8 @@ for form in rivers sea plains lake; do
 		client sea "$t/sea.cmds"
 		wait $CLIENT || fail "the sea's drive ($t/sea.log)"
 	fi
-	sleep 120
+	game_rate "$t/srv51" "$CHECK_RATE_HEADLESS"
+	game_wait "$t/srv51" 120
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 	f="$t/srv51_$form.log"
 	grep -aq "skeldat: the heightmap ($form) made" "$f" &&
@@ -2662,11 +2754,12 @@ for n in 1 2; do
 		BUILDAT_SKELDAT_TEST="marker 0 4 skeldat:lava_spring 0; $walls" \
 		start_server "$t/srv51_lava$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv51_lava$n" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv51_lava$n.log)"
+		-D "$t/srv51_lava$n" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($t/srv51_lava$n.log)"
 	CHECK_PIDS+=($SERVER_PID)
-	printf '%s\n' "$placed" "delay 60000" quit > "$t/lava$n.cmds"
+	printf '%s\n' "$placed" "$(fast "$t/srv51_lava$n")" "delay 60000" quit > "$t/lava$n.cmds"
 	client lava$n "$t/lava$n.cmds"
-	wait $CLIENT || fail "the lava spring's drive $n ($t/lava$n.log)"
+	sped "$t/lava$n.log" && game_wait "$t/srv51_lava$n" 60
+	ended "$t/lava$n.log" || fail "the lava spring's drive $n ($t/lava$n.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 done
 # [SKELDAT_COASTS] Onto an island: the sea at 128 (seed 2), spawned on an
@@ -2723,7 +2816,13 @@ for run in open sealed; do
 	CHECK_PIDS+=($SERVER_PID)
 	printf '%s\n' "$placed" "delay 25000" quit > "$t/shot_$run.cmds"
 	client shot_$run "$t/shot_$run.cmds"
-	wait $CLIENT || fail "the clear shot's drive ($t/shot_$run.log)"
+	if [ $run = open ]; then
+		wait_for_log "$t/shot_$run.log" "skeldat: placed at" 300 &&
+			wait_for_log "$t/srv52_$run.log" "a skeleton shoots at client1" 25
+		ended "$t/shot_$run.log"
+	else
+		wait $CLIENT
+	fi || fail "the clear shot's drive ($t/shot_$run.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 done
 python3 -I - "$t/srv52_open.log" "$t/srv52_sealed.log" <<'PY' || fail "the clear shot ($t/srv52_open.log, $t/srv52_sealed.log)"
@@ -2813,17 +2912,28 @@ box=$(for d in "-1 -1" "0 -1" "1 -1" "-1 0" "1 0" "-1 1" "0 1" "1 1"; do
 test="$box$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
 test="${test}marker 0 0 skeldat:stone 2; "
 test="${test}skeleton 36 -6; skeleton -25 0 marked; skeleton 0 31; cave_skeleton 34 32; skeleton -12 -20; skeleton 20 -20"
+# [SKELDAT_CHECK_WAITS] The lava's burns are read by the log's times, and
+# --sim-rate's 1x falls behind the wall's while a new world relights (1.0
+# to 1.4 s apart measured, 1.1 without it): the client in once the world
+# is relit, the rest on the game's clock once the one in lava is dead
 log53="$t/srv53.log"
 BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.17 BUILDAT_SKELDAT_SPAWN="0 0" \
 	BUILDAT_SKELDAT_DAY=600 BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$test" \
 	start_server "$log53" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv53" -C "$t/srv.cache" -l 3 || fail "the server ($log53)"
+	-D "$t/srv53" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log53)"
 CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log53" "skeldat: the world relit" 300 || fail "the world not relit ($log53)"
 printf '%s\n' "$placed" "delay 100000" quit > "$t/sun.cmds"
 client sun "$t/sun.cmds"
-wait $CLIENT || fail "the sun's drive ($t/sun.log)"
+wait_for_log "$log53" "client1 is in the world" 300
+inlava=$(grep -a "skeldat: test: a skeleton (" "$log53" |
+	sed 's/.*(\([0-9]*\)) at \([-0-9.]*\),[-0-9.]*,\([-0-9.]*\).*/\1 \2 \3/' |
+	awk '$2 > -13 && $2 < -11 && $3 > -21 && $3 < -19 { print $1 }')
+[ -n "$inlava" ] && wait_for_log "$log53" "the skeleton \($inlava\) dies" 300 &&
+	game_rate "$t/srv53" "$CHECK_RATE" && game_wait "$t/srv53" 95
+ended "$t/sun.log" || fail "the sun's drive ($t/sun.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 sun=$(python3 -I - "$log53" <<'PY'
 import sys, re
@@ -2875,11 +2985,12 @@ BUILDAT_SKELDAT_WORLD=displace BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="1 -1
 	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="pocket water 10 0 2 4 2; $stones" \
 	start_server "$log54" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv54" -C "$t/srv.cache" -l 3 || fail "the server ($log54)"
+	-D "$t/srv54" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log54)"
 CHECK_PIDS+=($SERVER_PID)
-printf '%s\n' "$placed" "delay 22000" quit > "$t/displace.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv54")" "delay 22000" quit > "$t/displace.cmds"
 client displace "$t/displace.cmds"
-wait $CLIENT || fail "the displacing drive ($t/displace.log)"
+sped "$t/displace.log" && game_wait "$t/srv54" 22
+ended "$t/displace.log" || fail "the displacing drive ($t/displace.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 pushed=$(grep -ac "skeldat: hazards: 8 of water displaced from" "$log54")
 dvol=$(grep -a "skeldat: hazards: .* water volume" "$log54" | sed 's/.*water volume //' | tr '\n' ' ')
@@ -2900,12 +3011,13 @@ BUILDAT_SKELDAT_WORLD=torch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 
 	BUILDAT_SKELDAT_TEST="give skeldat:torch 2 1; marker 3 0 skeldat:torch; pocket water 4 0 2 2 2; pocket water 0 0 1 2 1" \
 	start_server "$log55" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv55" -C "$t/srv.cache" -l 3 || fail "the server ($log55)"
+	-D "$t/srv55" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log55)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "delay 2000" "look 0 -89" "delay 500" "mouse_down right" \
-	"delay 100" "mouse_up right" "delay 21000" quit > "$t/torch.cmds"
+	"delay 100" "mouse_up right" "$(fast "$t/srv55")" "delay 21000" quit > "$t/torch.cmds"
 client torch "$t/torch.cmds"
-wait $CLIENT || fail "the torch's drive ($t/torch.log)"
+sped "$t/torch.log" && game_wait "$t/srv55" 21
+ended "$t/torch.log" || fail "the torch's drive ($t/torch.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 out=$(grep -a "water puts out a torch at" "$log55" | head -1 | sed 's/.*at (\(.*\))/\1/')
 [ -n "$out" ] && grep -aq "a drop of skeldat:torch" "$log55" &&
@@ -2972,12 +3084,13 @@ BUILDAT_SKELDAT_WORLD=trees BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 
 	BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$tr53" \
 	start_server "$log57" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv57" -C "$t/srv.cache" -l 3 || fail "the server ($log57)"
+	-D "$t/srv57" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log57)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "delay 2000" "look 0 0" "delay 500" "mouse_down left" \
-	"delay 1500" "mouse_up left" "delay 85000" quit > "$t/trees.cmds"
+	"delay 1500" "mouse_up left" "$(fast "$t/srv57")" "delay 85000" quit > "$t/trees.cmds"
 client trees "$t/trees.cmds"
-wait $CLIENT || fail "the trees' drive ($t/trees.log)"
+sped "$t/trees.log" && game_wait "$t/srv57" 85
+ended "$t/trees.log" || fail "the trees' drive ($t/trees.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 python3 -I - "$log57" <<'PY' || fail "apple trees, decay or saplings ($log57)"
 import sys, re
@@ -3016,17 +3129,19 @@ bt54="level -1 44 3 3 skeldat:bone_block -1; level -35 10 71 34 skeldat:water_so
 bt54="$bt54; level -35 47 71 34 skeldat:water_source -1; level -35 44 34 3 skeldat:water_source -1"
 bt54="$bt54; level 2 44 34 3 skeldat:water_source -1; skeleton 0 45"
 boats() { # log, client name, delay ms[, the test's fixtures]
+	rm -f "$t/srv58/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=${W54:-boats} BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=${T54:-0.2} \
 		BUILDAT_SKELDAT_DAY=${D54:-60} \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="${4-}" \
 		start_server "$1" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv58" -C "$t/srv.cache" -l 3 || fail "the server ($1)"
+		-D "$t/srv58" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($1)"
 	CHECK_PIDS+=($SERVER_PID)
-	printf '%s\n' "$placed" "delay $3" quit > "$t/$2.cmds"
+	printf '%s\n' "$placed" "$(fast "$t/srv58")" "delay $3" quit > "$t/$2.cmds"
 	client $2 "$t/$2.cmds"
-	wait $CLIENT || fail "the boats' drive $2 ($t/$2.log)"
+	sped "$t/$2.log" && game_wait "$t/srv58" $(($3 / 1000))
+	ended "$t/$2.log" || fail "the boats' drive $2 ($t/$2.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 }
 boats "$log58" boats1 160000 "$bt54"
@@ -3149,19 +3264,21 @@ lb="level 4 -8 16 16 skeldat:stone -9"
 for dy in -8 -7 -6 -5 -4 -3 -2 -1; do lb="$lb; level 4 -8 16 16 skeldat:water_source $dy"; done
 lake55() { # log; the caller's env with it
 	local log=$1
+	rm -f "$t/srv59/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=lakebed BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_DAY=600 \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_SPEED=10 \
 		BUILDAT_SKELDAT_EXPAND=0.3 \
 		start_server "$log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv59" -C "$t/srv.cache" -l 3 || fail "the server ($log)"
+		-D "$t/srv59" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log)"
 	CHECK_PIDS+=($SERVER_PID)
 }
 BUILDAT_SKELDAT_FILL=half BUILDAT_SKELDAT_TEST="$lb" lake55 "$t/srv55.log"
-printf '%s\n' "$placed" "delay 40000" quit > "$t/lakebed.cmds"
+printf '%s\n' "$placed" "$(fast "$t/srv59")" "delay 40000" quit > "$t/lakebed.cmds"
 client lakebed "$t/lakebed.cmds"
-wait $CLIENT || fail "the lake bed's drive ($t/lakebed.log)"
+sped "$t/lakebed.log" && game_wait "$t/srv59" 40
+ended "$t/lakebed.log" || fail "the lake bed's drive ($t/lakebed.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 wet=$(grep -a "skeldat: bones: " "$t/srv55.log" | tail -1 | sed 's/.*; \([0-9]*\) grown into a liquid.*/\1/')
 [ "${wet:-0}" -ge 5 ] || fail "bones grown into the pond off its bed: ${wet:-none} ($t/srv55.log)"
@@ -3184,14 +3301,16 @@ assert not bad, "the pond's columns not clean water: %d, %s" % (len(bad), bad[:4
 print("%dx%d at %d,%d all clean water" % (w, d, x0, z0))
 PY
 ) || fail "the lake bed's map ($t/srv55_map.log)"
+rm -f "$t/srv59/sim_clock" # the rate a sped up run left there
 BUILDAT_SKELDAT_WORLD=lakeend BUILDAT_SKELDAT_TERRAIN=lake BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_FILL=surface BUILDAT_SKELDAT_SPEED=2 \
 	BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_WATER_REPORT=1 BUILDAT_SKELDAT_EXPAND=0.3 \
 	start_server "$t/srv55_end.log" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv59" -C "$t/srv.cache" -l 3 || fail "the server ($t/srv55_end.log)"
+	-D "$t/srv59" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($t/srv55_end.log)"
 CHECK_PIDS+=($SERVER_PID)
-wait_for_log "$t/srv55_end.log" "every column's top has bones: the world ends after" 90 ||
+wait_for_log "$t/srv55_end.log" "the world is in" 90 && game_rate "$t/srv59" "$CHECK_RATE_HEADLESS"
+wait_for_log "$t/srv55_end.log" "every column's top has bones: the world ends after" 90 "$t/srv59" ||
 	fail "the lake world with a bare bed did not end ($t/srv55_end.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "skeldat: water: [1-9][0-9]* voxels" "$t/srv55_end.log" || fail "the lake world had no water ($t/srv55_end.log)"
@@ -3209,17 +3328,19 @@ for dy in -4 -3 -2 -1; do sw="$sw; level 8 -2 5 5 skeldat:water_source $dy"; don
 sw="$sw; level -2 10 5 5 skeldat:stone 2; level -1 11 3 3 skeldat:water_source -1"
 sw="$sw; boar 6 4; boar 10 0; boar 0 12"
 swim56() { # log, client name, delay ms, fixtures
+	rm -f "$t/srv60/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=$2 BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_TIME=${T56:-0.62} \
 		BUILDAT_SKELDAT_DAY=${D56:-120} BUILDAT_SKELDAT_STILL_WATER=1 \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$4" \
 		start_server "$1" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv60" -C "$t/srv.cache" -l 3 || fail "the server ($1)"
+		-D "$t/srv60" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($1)"
 	CHECK_PIDS+=($SERVER_PID)
-	printf '%s\n' "$placed" "delay $3" quit > "$t/$2.cmds"
+	printf '%s\n' "$placed" "$(fast "$t/srv60")" "delay $3" quit > "$t/$2.cmds"
 	client $2 "$t/$2.cmds"
-	wait $CLIENT || fail "the boars' drive $2 ($t/$2.log)"
+	sped "$t/$2.log" && game_wait "$t/srv60" $(($3 / 1000))
+	ended "$t/$2.log" || fail "the boars' drive $2 ($t/$2.log)"
 }
 swim56 "$t/srv60.log" swim 85000 "$sw"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
@@ -3245,9 +3366,9 @@ deep="level 6 -5 11 11 skeldat:stone -5"
 for dy in -4 -3 -2 -1; do deep="$deep; level 6 -5 11 11 skeldat:water_source $dy"; done
 deep="$deep; level -12 -2 5 5 skeldat:water_source -1; boar 11 0; boar -10 0"
 T56=0.3 D56=2400 swim56 "$t/srv60_deep.log" swim_deep 3000 "$deep"
-wait_for_log "$t/srv60_deep.log" "left in deep water" 20 ||
+wait_for_log "$t/srv60_deep.log" "left in deep water" 20 "$t/srv60" ||
 	fail "the boar over deep water not gone with no player near ($t/srv60_deep.log)"
-sleep 2
+game_wait "$t/srv60" 2
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 left=$(python3 -I - "$t/srv60_deep.log" <<'PY'
 import sys, re
@@ -3272,18 +3393,20 @@ for x in -2 -1 0 1 2; do for z in 6 7 8 9 10; do
 for x in -1 0 1; do for z in 7 8 9; do tree="$tree; set $x 4 $z skeldat:leaves"; done; done
 sleep57() { # log, client name, delay ms[, fixtures]; T57 the time, for a new world
 	[ -n "${T57:-}" ] && export BUILDAT_SKELDAT_TIME=$T57
+	rm -f "$t/srv61/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=boarsleep BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="1 -1 0" BUILDAT_SKELDAT_DAY=240 \
 		BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="${4-}" \
 		start_server "$1" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-		-D "$t/srv61" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($1)"
+		-D "$t/srv61" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 || fail "the server ($1)"
 	unset BUILDAT_SKELDAT_TIME
 	CHECK_PIDS+=($SERVER_PID)
-	printf '%s\n' "$placed" "event skeldat_admin invulnerable client1 on" "delay $3" quit \
-		> "$t/$2.cmds"
+	printf '%s\n' "$placed" "event skeldat_admin invulnerable client1 on" "$(fast "$t/srv61")" \
+		"delay $3" quit > "$t/$2.cmds"
 	client $2 "$t/$2.cmds"
-	wait $CLIENT || fail "the boar's drive $2 ($t/$2.log)"
+	sped "$t/$2.log" && game_wait "$t/srv61" $(($3 / 1000))
+	ended "$t/$2.log" || fail "the boar's drive $2 ($t/$2.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 }
 T57=0.68 sleep57 "$t/srv61.log" sleep1 50000 "$tree"
@@ -3364,14 +3487,14 @@ BUILDAT_SKELDAT_WORLD=crown BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 
 	BUILDAT_SKELDAT_TEST="give skeldat:crown 1 1; give skeldat:coal 2 1" \
 	start_server "$log63" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv63" -C "$t/srv.cache" -l 3 || fail "the server ($log63)"
+	-D "$t/srv63" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log63)"
 CHECK_PIDS+=($SERVER_PID)
 printf '%s\n' "$placed" "delay 1000" \
 	"mouse_down right" "delay 100" "mouse_up right" "delay 1000" \
-	"screenshot $t/crown_hud.png" "wait_log 40000 crown 1" quit > "$t/crown1.cmds"
+	"screenshot $t/crown_hud.png" "$(fast "$t/srv63")" "wait_log 40000 crown 1" quit > "$t/crown1.cmds"
 client crown1 "$t/crown1.cmds"
 wait $CLIENT || fail "the crown's drive ($t/crown1.log)"
-wait_for_log "$log63" "the crown at .* burning: .* mean 0.00, 0 bone blocks" 15
+wait_for_log "$log63" "the crown at .* burning: .* mean 0.00, 0 bone blocks" 15 "$t/srv63"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 grep -aq "client1 puts on the crown" "$log63" &&
 	[ $(grep -ac "client1's crown burns a coal" "$log63") = 2 ] &&
@@ -3382,7 +3505,7 @@ grep -a "the crown at .* burning" "$log63" | grep -aq "mean 0.00, 0 bone blocks"
 crown="burning: $(grep -a "the crown at .* burning" "$log63" | head -1 | sed 's/.*bones, mean \([0-9.]*\).*/mean \1/') to $(grep -a "the crown at .* burning" "$log63" | tail -1 | sed 's/.*bones, mean \([0-9.]*\).*/\1/')"
 log64="$t/srv64.log"
 { echo "$placed"; toggle; printf '%s\n' "delay 500" "mouse_down right" "delay 100" \
-	"mouse_up right" "wait_log 40000 crown 0" \
+	"mouse_up right" "$(fast "$t/srv64")" "wait_log 40000 crown 0" \
 	"delay 500" "screenshot $t/crown_snatched.png" \
 	"wait_log 60000 a drop of skeldat:crown is here" quit; } > "$t/crown2.cmds"
 BUILDAT_SKELDAT_WORLD=snatch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
@@ -3391,7 +3514,7 @@ BUILDAT_SKELDAT_WORLD=snatch BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2
 	BUILDAT_SKELDAT_TEST="give skeldat:crown 1 1; give skeldat:coal 4 1; skeleton 20 0 marked hp 4" \
 	start_server "$log64" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
-	-D "$t/srv64" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log64)"
+	-D "$t/srv64" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 || fail "the server ($log64)"
 CHECK_PIDS+=($SERVER_PID)
 client crown2 "$t/crown2.cmds"
 wait $CLIENT || fail "the crown snatch's drive ($t/crown2.log)"
