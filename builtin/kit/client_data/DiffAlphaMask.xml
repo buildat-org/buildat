@@ -1,0 +1,13 @@
+<!-- [KIT] stage 4f: Urho3D's Diff.xml cut out by the texture's alpha (under
+     a half discarded, in the shadow too): Kit's leaves and plants, the
+     faces the voxel mesher puts on a chunk's "masked" child. -->
+<technique vs="LitSolid" ps="LitSolid" psdefines="DIFFMAP ALPHAMASK">
+    <pass name="base" />
+    <pass name="litbase" psdefines="AMBIENT" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="prepass" psdefines="PREPASS" />
+    <pass name="material" psdefines="MATERIAL" depthtest="equal" depthwrite="false" />
+    <pass name="deferred" psdefines="DEFERRED" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" psdefines="ALPHAMASK" />
+</technique>

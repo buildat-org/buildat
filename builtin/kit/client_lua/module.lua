@@ -53,6 +53,16 @@ M.DIG = magic.Color(1, 0.3, 0.2)
 M.PLACE = magic.Color(0.2, 1, 0.3)
 M.USE = magic.Color(1.0, 0.55, 0.1)
 
+-- [KIT] stage 4f: one material, one look: a World's heightmap draws its
+-- ground textures as the voxels draw theirs, a 16 px texture a metre (a
+-- cell) and nearest filtered, not a texture 4 m across smoothed (a texel
+-- 25 cm, magnified and blurry close up)
+do
+	local heightmap = require("buildat/module/heightmap")
+	heightmap.detail_metres = 1
+	heightmap.filter = magic.FILTER_NEAREST
+end
+
 local WARN = magic.Color(1.0, 0.55, 0.45)
 local DIM = magic.Color(0.7, 0.7, 0.7)
 local STYLE = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")

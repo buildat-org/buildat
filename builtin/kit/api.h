@@ -236,6 +236,22 @@ namespace interface
 //   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
 //       what the builder has selected and where their cursor is, which
 //       the other builders see (no edit, no undo)
+//   {"op": "terrain", "tool": t, "x", "y", "z" (the point on the ground),
+//    "size": 1..12 (cells), "strength": 1..5, "biome": b (the World's by
+//    default), "level": y, "x1", "z1", "stroke": n}  -- ([KIT] stage 4f)
+//       a dab of a brush on the World's surface (voxels or a heightmap):
+//       raise, lower, smooth, flatten (toward level), paint (biome b's
+//       ground), decorate (b's scatter; in a cave its floor's and wall's),
+//       fill (the rectangle x, z to x1, z1 up to level, with b's ground or
+//       "water"; voxels only), or column (nothing changed: the column at
+//       the point said, for a check). Every dab carrying the same stroke
+//       is one undo. On voxels a column's layers follow its biome (by
+//       its top cell): the top role over filler (its depth) over stone,
+//       the riverbed under sea level, water over it up to sea level; only
+//       ground, air, water and plants are written. On a heightmap a
+//       sample's layer is stone where steep, the riverbed under the sea,
+//       else its biome's top, and decorations are voxel objects. Answered
+//       with "kit:terrain" {tool, stroke, undo, what}
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").

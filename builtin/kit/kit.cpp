@@ -23,6 +23,7 @@
 #include "interface/sha256.h"
 #include "interface/os.h"
 #include "kit/world.h"
+#include "voxel_objects/api.h"
 #include <Scene.h>
 #include <Node.h>
 #include <array>
@@ -72,6 +73,13 @@ static const size_t MAX_MADE = 1024;
 static const size_t MAX_PREFAB = 64;
 static const size_t LOG_LINES = 50;
 static const size_t MAX_FLOWS = 64;
+// [KIT] stage 4f: a brush's radius at most, a fill's side and depth at most;
+// on a heightmap a dab's step a strength (metres) and the slope (rise a
+// metre) its ground turns stone over (builtin/heightmap's generation's)
+static const int MAX_BRUSH = 12;
+static const int MAX_FILL = 64;
+static const double HM_STEP = 0.25;
+static const float HM_ROCK_SLOPE = 0.35f;
 // on_remove runs inside the run that removed: so deep at most
 static const int MAX_REMOVE_DEPTH = 4;
 
@@ -240,6 +248,24 @@ struct Removed
 struct Change
 {
 	sv_<std::pair<uint64_t, json::Value>> before;
+	// [KIT] stage 4f: a terrain stroke (its id, -1: none), all its dabs one
+	// change: the World's cells as they were before its first write to
+	// each, a heightmap's samples likewise, and the decorations it put on
+	// a heightmap (their ids in Kit's list)
+	int64_t stroke = -1;
+	std::map<std::tuple<int, int, int>, uint32_t> cells;
+	std::map<std::pair<int, int>, std::pair<float, heightmap::Weights>>
+			samples;
+	sv_<uint64_t> decor;
+};
+
+// [KIT] stage 4f: a decoration on a heightmap surface: a voxel object of
+// its structure's model, turned about y (degrees)
+struct Decor
+{
+	ss_ structure;
+	float x = 0, y = 0, z = 0, yaw = 0;
+	unsigned node = 0;
 };
 
 struct Module;
@@ -590,6 +616,15 @@ struct Module: public interface::Module, public Interface
 	// Guests' dropped entities' names by their `by`, for this run
 	// simplified: kept for the run (a name each guest that came)
 	sm_<ss_, ss_> m_gone_guests;
+	// [KIT] stage 4f: the World's generator version as the save pinned it
+	// (1: a stage 4e save, kept so until the World changes; 0: none)
+	int64_t m_saved_version = 0;
+	// The decorations on a heightmap surface (row "decor"), by id, and the
+	// voxel objects' models made, by structure
+	std::map<uint64_t, Decor> m_decor;
+	uint64_t m_next_decor = 1;
+	bool m_decor_dirty = false;
+	std::set<ss_> m_decor_models;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -1759,6 +1794,30 @@ struct Module: public interface::Module, public Interface
 				def.edge_material_id = 10;
 				def.translucent = true;
 				def.transmits_light = true;
+			} else if(m.kind == "plant"){
+				// [KIT] stage 4f: Luanti's plantlike, two quads a cell
+				// across crossed on its diagonals, both sides drawn, cut out
+				// by the texture's alpha; walked through
+				def.face_draw_type = interface::FaceDrawType::NEVER;
+				def.edge_material_id = interface::EDGEMATERIALID_EMPTY;
+				def.alpha_masked = true;
+				def.transmits_light = true;
+				def.shape_double_sided = true;
+				const float r = 0.5f * 0.70710678f;
+				for(int i = 0; i < 2; i++){
+					const float az = i ? r : -r;
+					const float pts[4][3] = {{-r, -0.5f, az}, {r, -0.5f, -az},
+						{r, 0.5f, -az}, {-r, 0.5f, az}};
+					const float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+					interface::VoxelQuad q;
+					for(int k = 0; k < 4; k++){
+						for(int c = 0; c < 3; c++)
+							q.p[k][c] = pts[k][c];
+						q.uv[k][0] = uv[k][0];
+						q.uv[k][1] = uv[k][1];
+					}
+					def.shape.push_back(q);
+				}
 			} else {
 				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
 				def.physically_solid = true;
@@ -1837,17 +1896,29 @@ struct Module: public interface::Module, public Interface
 		ss_ row;
 		if(m_store->get("world", row)){
 			const json::Value r = json::load_string(row.c_str());
-			m_world_applied = r.get("params");
+			m_world_applied = r.get("params").deepcopy();
+			// Parameters newer than the save ([KIT] stage 4f's caves and
+			// decorations) at their defaults: not a change of the World (a
+			// version 1 save makes neither)
+			const json::Value pd = m_types.count("kit/world") ?
+					m_types["kit/world"].decl.get("params") : json::Value();
+			if(m_world_applied.is_object() && pd.is_object())
+				for(json::Iterator it(pd); it; ++it)
+					if(m_world_applied.get(it.key()).is_undefined())
+						m_world_applied.set(it.key(), (*it).get("default"));
 			world::Params was;
 			was.from(m_world_applied);
 			const int64_t v = json::jint(r, "version", 0);
-			if(!was.finite() && !was.heightmap() &&
+			// Version 1 is kept: no caves or decorations ([KIT] stage 4f)
+			m_saved_version = v;
+			if(!was.finite() && !was.heightmap() && v != 1 &&
 					v != world::generator_version(was.generator)){
 				why = "the save's infinite world is the "+was.generator+
 						" generator's version "+itos(v)+", this build's is "+
 						itos(world::generator_version(was.generator));
 				return false;
 			}
+			was.version = v == 1 ? 1 : world::VERSION;
 			m_wp = was;
 		}
 		ss_ awhy;
@@ -1932,6 +2003,11 @@ struct Module: public interface::Module, public Interface
 			return true;
 		}
 		m_world_pending.clear();
+		const bool again = had && params.stringify() !=
+				m_world_applied.stringify();
+		// A stage 4e save's version kept until the World changes
+		p.version = first && !again && m_saved_version == 1 ? 1 :
+				world::VERSION;
 		world::Ids ids;
 		ids.filler_depth = b.filler_depth;
 		sv_<int> layers;
@@ -1949,12 +2025,10 @@ struct Module: public interface::Module, public Interface
 			ids.air = id("air");
 			if(p.generator == "empty")
 				return;
-			ids.top = id(m_materials.resolve(b, "top"));
-			ids.filler = id(m_materials.resolve(b, "filler"));
-			ids.stone = id(m_materials.resolve(b, "stone"));
-			ids.riverbed = id(m_materials.resolve(b, "riverbed"));
-			const ss_ water = m_materials.resolve(b, "water");
-			ids.water = water.empty() ? ids.air : id(water);
+			// The roles, the decorations' structures ([KIT] stage 4f)
+			world::resolve_biome(m_materials, b, id, ids.structs, ids);
+			if(!ids.water)
+				ids.water = ids.air;
 		});
 		if(!why.empty())
 			return false;
@@ -1984,11 +2058,31 @@ struct Module: public interface::Module, public Interface
 			lo = hi = p.level - 1;
 		uint32_t hash = world::hash_ints(tops);
 		if(!p.heightmap())
-			find_spawn(*h);
-		const bool again = had && params.stringify() != m_world_applied.stringify();
+			find_spawn(*h, ids);
+		// The decorations over the same ground: how many, their hash
+		size_t dn = 0;
+		uint32_t dh = 0;
+		if(p.with_decorations() && !p.heightmap())
+			world::scatter_hash(p, ids, tops, fx, fz, fw, fd, dn, dh);
+		// And its caves, sampled every fourth column each way: a check sees
+		// that they are there and the same by the seed
+		ss_ caves;
+		if(p.with_caves() && !p.heightmap()){
+			size_t n = 0, of = 0;
+			for(int z = 0; z < fd; z += 4)
+				for(int x = 0; x < fw; x += 4){
+					const int t = tops[(size_t)z * fw + x];
+					for(int y = t - world::CAVE_DEEP; y <= t - world::CAVE_TOP;
+							y++, of++)
+						n += world::cave_at(p.seed, fx + x, y, fz + z, t);
+				}
+			caves = " ("+itos(n)+" of "+itos(of)+" sampled cells)";
+		}
 		if(p.heightmap()){
-			if(!apply_heightmap(p, *h, layers, again, hash, why))
+			if(!apply_heightmap(p, *h, layers, ids, again, hash, why))
 				return false;
+			dn = m_decor.size();
+			dh = decor_hash();
 			set_world_generator(p, ids, nullptr, lo, hi);
 		} else {
 			set_world_generator(p, ids, std::move(h), lo, hi);
@@ -2001,16 +2095,20 @@ struct Module: public interface::Module, public Interface
 		m_world_applied = params.deepcopy();
 		json::Value row = json::object();
 		row.set("params", m_world_applied);
-		row.set("version", (int64_t)world::generator_version(p.generator));
+		row.set("version", (int64_t)(world::generator_version(p.generator) ?
+				p.version : 0));
 		m_store->set("world", row.stringify());
 		world_load_points();
 		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
-				"to %i, heights hash %08x%s", by.empty() ? "" : cs(" by "+by),
+				"to %i, heights hash %08x%s; version %i%s%s, decorations %zu "
+				"(hash %08x)", by.empty() ? "" : cs(" by "+by),
 				cs(p.generator), cs(p.size == "finite" ? itos(p.width)+"x"+
 				itos(p.depth) : ss_("infinite")), p.seed, cs(p.biome),
 				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
 				cs("border "+p.border), lo, hi, hash,
-				first ? (again ? ", the save's was another" : "") : "");
+				first ? (again ? ", the save's was another" : "") : "",
+				p.version, p.with_caves() && !p.heightmap() ? ", caves" : "",
+				cs(caves), dn, dh);
 		if(first && !p.heightmap())
 			voxelworld::access(m_server, m_world_scene,
 					[&](voxelworld::Instance *w){
@@ -2112,8 +2210,10 @@ struct Module: public interface::Module, public Interface
 	// generated from the same heights unless the save had it as applied;
 	// its grass, rock and sand the biome's top, stone and riverbed layers
 	bool apply_heightmap(const world::Params &p, world::Heights &h,
-			const sv_<int> &layers, bool again, uint32_t &hash, ss_ &why)
+			const sv_<int> &layers, const world::Ids &ids, bool again,
+			uint32_t &hash, ss_ &why)
 	{
+		bool generated = false;
 		heightmap::Size size;
 		size.chunks_x = (p.width + 63) / 64;
 		size.chunks_z = (p.depth + 63) / 64;
@@ -2129,6 +2229,7 @@ struct Module: public interface::Module, public Interface
 				loaded = map->set_save(m_host.save, "world");
 			}
 			if(!loaded || again){
+				generated = true;
 				heightmap::GenerateParams gp;
 				gp.seed = p.seed;
 				// A voxel column's top cell is centred on its whole number
@@ -2148,7 +2249,879 @@ struct Module: public interface::Module, public Interface
 			}
 			hash = map->content_hash();
 		});
+		decor_start(p, ids, generated);
 		return why.empty();
+	}
+
+	// ---- [KIT] stage 4f: decorations on a heightmap surface, as voxel
+	// objects ([VOXEL_OBJECTS]): a model a structure (its voxels Kit's),
+	// an object a decoration, the list saved in the row "decor"
+
+	// The scene's voxel objects, made at the first need
+	voxel_objects::Instance* decor_instance()
+	{
+		voxel_objects::Instance *vo = nullptr;
+		voxel_objects::access(m_server, [&](voxel_objects::Interface *iv){
+			vo = iv->get_instance(m_world_scene);
+			if(!vo)
+				vo = iv->create_instance(m_world_scene);
+		});
+		return vo;
+	}
+
+	// A structure's model, made once from the material set's voxels
+	bool decor_model(const ss_ &name)
+	{
+		if(m_decor_models.count(name))
+			return true;
+		auto si = m_materials.structures.find(name);
+		if(si == m_materials.structures.end())
+			return false;
+		const world::Structure &st = si->second;
+		sv_<interface::VoxelTypeId> ids;
+		voxelworld::access(m_server, m_world_scene, [&](voxelworld::Instance *w){
+			for(const ss_ &c : st.cells){
+				interface::VoxelName n;
+				n.block_name = c;
+				const interface::VoxelDefinition *d = c.empty() ? nullptr :
+						w->get_voxel_reg()->get(n);
+				ids.push_back(d ? d->id : 0);
+			}
+		});
+		voxel_objects::access(m_server, m_world_scene,
+				[&](voxel_objects::Instance *vo){
+			voxel_objects::Model *m = vo->get_model("kit_"+name);
+			if(!m)
+				m = vo->create_model("kit_"+name, st.sx, st.sy, st.sz);
+			for(int y = 0; y < st.sy; y++)
+			for(int z = 0; z < st.sz; z++)
+			for(int x = 0; x < st.sx; x++)
+				m->set_voxel(x, y, z, ids[((size_t)y * st.sz + z) * st.sx + x]);
+		});
+		m_decor_models.insert(name);
+		return true;
+	}
+
+	// A decoration's object: its structure's origin cell on (x, y, z),
+	// turned by yaw about it
+	void decor_object(Decor &d)
+	{
+		if(!decor_model(d.structure))
+			return;
+		const world::Structure &st = m_materials.structures[d.structure];
+		const magic::Quaternion q(0, d.yaw, 0);
+		const magic::Vector3 pos = magic::Vector3(d.x, d.y, d.z) -
+				q * magic::Vector3(st.ox + 0.5f, (float)st.oy, st.oz + 0.5f);
+		voxel_objects::access(m_server, m_world_scene,
+				[&](voxel_objects::Instance *vo){
+			if(d.node)
+				vo->remove_object(d.node);
+			d.node = vo->create_object("kit_"+d.structure, pos, q);
+		});
+	}
+
+	// Where a decoration stands on the map: a little into the ground, so
+	// a slope shows no gap under it
+	float decor_y(heightmap::Instance *map, float x, float z)
+	{
+		return map->height_at(x, z) - 0.35f;
+	}
+
+	uint64_t add_decor(const ss_ &structure, float x, float y, float z,
+			float yaw)
+	{
+		Decor d;
+		d.structure = structure;
+		d.x = x, d.y = y, d.z = z, d.yaw = yaw;
+		const uint64_t id = m_next_decor++;
+		decor_object(d);
+		m_decor[id] = d;
+		m_decor_dirty = true;
+		return id;
+	}
+
+	void remove_decor(uint64_t id)
+	{
+		auto it = m_decor.find(id);
+		if(it == m_decor.end())
+			return;
+		if(it->second.node)
+			voxel_objects::access(m_server, m_world_scene,
+					[&](voxel_objects::Instance *vo){
+				vo->remove_object(it->second.node);
+			});
+		m_decor.erase(it);
+		m_decor_dirty = true;
+	}
+
+	void save_decor()
+	{
+		if(!m_decor_dirty)
+			return;
+		m_decor_dirty = false;
+		json::Value a = json::array();
+		for(auto &d : m_decor){
+			json::Value r = json::array();
+			r.append(d.second.structure);
+			for(float v : {d.second.x, d.second.y, d.second.z, d.second.yaw})
+				r.append((double)v);
+			a.append(r);
+		}
+		m_store->set("decor", a.stringify());
+	}
+
+	// FNV-1a over the decorations, in their order: their structures' names
+	// and their places in sixteenths
+	uint32_t decor_hash()
+	{
+		uint32_t h = 2166136261u;
+		auto add = [&](uint8_t b){ h ^= b; h *= 16777619u; };
+		for(auto &d : m_decor){
+			for(char c : d.second.structure)
+				add((uint8_t)c);
+			for(float v : {d.second.x, d.second.y, d.second.z, d.second.yaw}){
+				const int32_t i = (int32_t)std::floor(v * 16 + 0.5f);
+				for(int k = 0; k < 4; k++)
+					add((uint8_t)(i >> (k * 8)));
+			}
+		}
+		return h;
+	}
+
+	// The decoration a heightmap's sample (x, z) carries by the biome's
+	// scatter (a structure more than a cell, on dry ground not too steep):
+	// "" none
+	ss_ decor_pick(heightmap::Instance *map, const world::BiomeIds &b,
+			const sv_<world::StructIds> &structs, uint32_t seed, int x, int z,
+			double mult, float &yaw)
+	{
+		const float h = map->get_height(x, z);
+		float steep = 0;
+		for(int k = 0; k < 4; k++){
+			const int nx = x + (k == 0) - (k == 1), nz = z + (k == 2) - (k == 3);
+			if(nx >= 0 && nz >= 0 && nx < map->samples_x() &&
+					nz < map->samples_z())
+				steep = std::max(steep, std::fabs(map->get_height(nx, nz) - h));
+		}
+		int turns = 0;
+		const int k = world::pick_surface(b, seed, x, z, (int)std::floor(h),
+				m_wp.sea_level, mult, turns);
+		if(k < 0 || b.decors[k].on != 't' || steep > 0.8f)
+			return "";
+		const world::StructIds &s = structs[b.decors[k].s];
+		if(s.sx * s.sy * s.sz <= 1)
+			return "";
+		// Any angle: an object turns freely
+		yaw = (float)(world::hash_at(seed, x, 1, z, 99) % 360);
+		return s.name;
+	}
+
+	// The decorations at a start: generated with a generated map (the
+	// biome's scatter over its samples), else the save's
+	void decor_start(const world::Params &p, const world::Ids &ids,
+			bool generated)
+	{
+		for(auto &d : m_decor)
+			if(d.second.node)
+				voxel_objects::access(m_server, m_world_scene,
+						[&](voxel_objects::Instance *vo){
+					vo->remove_object(d.second.node);
+				});
+		m_decor.clear();
+		ss_ row;
+		const bool saved = !generated && m_store->get("decor", row);
+		if(!saved && !p.with_decorations()){
+			m_decor_dirty = true;
+			save_decor();
+			return;
+		}
+		if(!decor_instance())
+			return;
+		struct New { ss_ s; float x, y, z, yaw; };
+		sv_<New> made;
+		if(saved){
+			const json::Value a = json::load_string(row.c_str());
+			for(unsigned i = 0; a.is_array() && i < a.size(); i++){
+				const json::Value &r = a.at(i);
+				if(r.is_array() && r.size() == 5 && r.at(0).is_string() &&
+						m_materials.structures.count(r.at(0).as_string()))
+					made.push_back({r.at(0).as_string(),
+						(float)r.at(1).as_number(), (float)r.at(2).as_number(),
+						(float)r.at(3).as_number(), (float)r.at(4).as_number()});
+			}
+		} else {
+			heightmap::access(m_server, m_world_scene,
+					[&](heightmap::Instance *map){
+				for(int z = 0; z < map->samples_z(); z++)
+				for(int x = 0; x < map->samples_x(); x++){
+					// Not on the spawn (world_spawn: the middle)
+					if(std::abs(x - map->samples_x() / 2) <= 3 &&
+							std::abs(z - map->samples_z() / 2) <= 3)
+						continue;
+					float yaw = 0;
+					const ss_ s = decor_pick(map, ids, ids.structs, p.seed, x, z,
+							1, yaw);
+					if(!s.empty())
+						made.push_back({s, (float)x, decor_y(map, (float)x,
+								(float)z), (float)z, yaw});
+				}
+			});
+		}
+		for(const New &n : made)
+			add_decor(n.s, n.x, n.y, n.z, n.yaw);
+		m_decor_dirty = true;
+		save_decor();
+		log_i(MODULE, "World: %zu decorations on the heightmap (%s)",
+				m_decor.size(), saved ? "the save's" : "generated");
+	}
+
+	// The decorations over a rectangle of samples back on the ground
+	void reseat_decor(int x0, int z0, int x1, int z1)
+	{
+		sv_<uint64_t> moved;
+		heightmap::access(m_server, m_world_scene, [&](heightmap::Instance *map){
+			for(auto &d : m_decor){
+				if(d.second.x < x0 - 0.5f || d.second.x > x1 + 0.5f ||
+						d.second.z < z0 - 0.5f || d.second.z > z1 + 0.5f)
+					continue;
+				const float y = decor_y(map, d.second.x, d.second.z);
+				if(std::fabs(y - d.second.y) < 0.01f)
+					continue;
+				d.second.y = y;
+				moved.push_back(d.first);
+			}
+		});
+		for(uint64_t id : moved)
+			decor_object(m_decor[id]);
+		if(!moved.empty())
+			m_decor_dirty = true;
+	}
+
+	// ---- [KIT] stage 4f: the terrain brushes (api.h's "terrain" op)
+
+	// Kit's material set as the brushes see a world's voxels: every biome's
+	// roles and decorations as ids, the kinds of cells
+	bool make_brush(voxelworld::Instance *w, world::Brush &br, ss_ &why)
+	{
+		interface::VoxelRegistry *reg = w->get_voxel_reg();
+		auto id = [&](const ss_ &name) -> interface::VoxelTypeId {
+			interface::VoxelName n;
+			n.block_name = name;
+			const interface::VoxelDefinition *d = reg->get(n);
+			if(!d && why.empty())
+				why = "voxel "+name+" is not registered";
+			return d ? d->id : 0;
+		};
+		br.p = m_wp;
+		br.air = id("air");
+		for(auto &b : m_materials.biomes){
+			world::BiomeIds bi;
+			world::resolve_biome(m_materials, b.second, id, br.structs, bi);
+			br.biomes.push_back(std::make_pair(b.first, bi));
+			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.stone,
+					bi.riverbed, bi.cave_floor, bi.cave_wall})
+				if(v)
+					br.ground.insert(v);
+			for(interface::VoxelTypeId v : {bi.top, bi.filler, bi.riverbed})
+				if(v)
+					br.surface.insert(v);
+			if(bi.water){
+				br.water.insert(bi.water);
+				br.soft.insert(bi.water);
+			}
+			if(b.first == m_wp.biome)
+				br.world = bi;
+		}
+		br.soft.insert(br.air);
+		for(auto &v : m_materials.voxels)
+			if(v.second.kind == "plant")
+				br.soft.insert(id(v.first));
+		return why.empty();
+	}
+
+	// A column's cells from over its top down, as runs: "kit/grass 3,
+	// kit/dirt 0..2, kit/stone -4..-1" (what a check reads)
+	ss_ describe_column(voxelworld::Instance *w, world::Brush &br, int x,
+			int z, int hi, int lo)
+	{
+		ss_ out, run;
+		int from = 0, to = 0;
+		auto flush = [&](){
+			if(run.empty())
+				return;
+			out += (out.empty() ? "" : ", ")+run+" "+(from == to ? itos(from) :
+					itos(to)+".."+itos(from));
+		};
+		for(int y = hi; y >= lo; y--){
+			interface::VoxelTypeId v = 0;
+			ss_ name = "?";
+			if(br.get(x, y, z, v)){
+				const interface::VoxelDefinition *d = w->get_voxel_reg()->get(v);
+				name = d ? d->name.block_name : "?";
+			}
+			if(name == run){
+				to = y;
+				continue;
+			}
+			flush();
+			run = name, from = to = y;
+		}
+		flush();
+		return out;
+	}
+
+	// One dab of a stroke (or a fill, or a look at a column). Everything
+	// in it is checked here; the client is trusted with nothing
+	void terrain(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		if(!m_world_scene)
+			return refuse("the app has no World");
+		const ss_ tool = jstr(j, "tool");
+		static const std::set<ss_> TOOLS = {"raise", "lower", "smooth",
+			"flatten", "paint", "fill", "decorate", "column"};
+		if(!TOOLS.count(tool))
+			return refuse("tool: raise, lower, smooth, flatten, paint, fill, "
+					"decorate or column");
+		auto num = [&](const char *k, double lo, double hi, double def,
+				double &out) -> bool {
+			const json::Value &v = j.get(k);
+			if(v.is_undefined()){
+				out = def;
+				return true;
+			}
+			if(!v.is_number() || !std::isfinite(v.as_number()) ||
+					v.as_number() < lo || v.as_number() > hi){
+				refuse(ss_(k)+": a number "+ftos(lo)+" to "+ftos(hi));
+				return false;
+			}
+			out = v.as_number();
+			return true;
+		};
+		double x, y, z, x1, z1, size, strength, level, stroke;
+		if(!num("x", -MAX_COORD, MAX_COORD, NAN, x) ||
+				!num("y", -MAX_COORD, MAX_COORD, NAN, y) ||
+				!num("z", -MAX_COORD, MAX_COORD, NAN, z) ||
+				!num("x1", -MAX_COORD, MAX_COORD, 0, x1) ||
+				!num("z1", -MAX_COORD, MAX_COORD, 0, z1) ||
+				!num("size", 1, MAX_BRUSH, 3, size) ||
+				!num("strength", 1, 5, 2, strength) ||
+				!num("level", -MAX_COORD, MAX_COORD, 0, level) ||
+				!num("stroke", 0, 9e15, -1, stroke))
+			return;
+		if(std::isnan(x) || std::isnan(y) || std::isnan(z))
+			return refuse("x, y, z: the point");
+		if(stroke >= 0 && stroke != std::floor(stroke))
+			return refuse("stroke: a whole number");
+		if(tool == "fill" && (std::fabs(x1 - x) >= MAX_FILL ||
+				std::fabs(z1 - z) >= MAX_FILL))
+			return refuse("fill: "+itos(MAX_FILL)+" cells a side at most");
+		ss_ biome = jstr(j, "biome");
+		if(biome.empty())
+			biome = m_wp.biome;
+		if(!m_materials.biomes.count(biome) && !(tool == "fill" &&
+				biome == "water"))
+			return refuse("biome: one of the material set's"+ss_(tool ==
+					"fill" ? ", or water" : ""));
+		// The editor's undo: a stroke's dabs one change
+		Change *c = nullptr;
+		if(tool != "column"){
+			std::deque<Change> &u = m_undo[p.name];
+			if(stroke < 0 || u.empty() || u.back().stroke != (int64_t)stroke){
+				Change nc;
+				nc.stroke = stroke < 0 ? -2 : (int64_t)stroke;
+				u.push_back(nc);
+				while(u.size() > UNDO_MAX)
+					u.pop_front();
+			}
+			c = &u.back();
+		}
+		const int r = (int)std::floor(size + 0.5);
+		const double s = std::floor(strength + 0.5);
+		ss_ what, why;
+		if(m_wp.heightmap())
+			what = terrain_heightmap(p, tool, x, y, z, x1, z1, r, s, level,
+					biome, c, why);
+		else
+			what = terrain_voxels(p, tool, x, y, z, x1, z1, r, s, level, biome,
+					c, why);
+		if(!why.empty())
+			return refuse(why);
+		save_decor();
+		const size_t undo = m_undo[p.name].size();
+		log_i(MODULE, "Terrain by %s: %s%s", cs(p.name), cs(what),
+				c ? cs(", stroke "+itos((int64_t)stroke)+" ("+itos(undo)+
+				" to undo)") : "");
+		json::Value a = json::object();
+		a.set("tool", tool);
+		a.set("stroke", stroke);
+		a.set("undo", (int64_t)undo);
+		a.set("what", what);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:terrain", a.stringify());
+		});
+	}
+
+	ss_ terrain_voxels(Peer &p, const ss_ &tool, double fx, double fy,
+			double fz, double fx1, double fz1, int r, double s, double level,
+			const ss_ &biome, Change *c, ss_ &why)
+	{
+		const int cx = (int)std::floor(fx + 0.5), cy = (int)std::floor(fy + 0.5),
+				cz = (int)std::floor(fz + 0.5);
+		const int L = (int)std::floor(level + 0.5);
+		ss_ what;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			world::Brush br;
+			if(!make_brush(w, br, why))
+				return;
+			br.get = [&](int x, int y, int z, interface::VoxelTypeId &v){
+				uint32_t id = 0;
+				if(!voxel_id(w, pv::Vector3DInt32(x, y, z), id))
+					return false;
+				v = id;
+				return true;
+			};
+			br.set = [&](int x, int y, int z, interface::VoxelTypeId v){
+				const pv::Vector3DInt32 q(x, y, z);
+				uint32_t old = 0;
+				if(!voxel_id(w, q, old))
+					return;
+				if(c)
+					c->cells.emplace(std::make_tuple(x, y, z), old);
+				set_id(w, q, v);
+				mark(w, m_world_scene, q, 'k', p.name);
+			};
+			const world::BiomeIds *sel = &br.world;
+			for(auto &b : br.biomes)
+				if(b.first == biome)
+					sel = &b.second;
+			// The columns in the dab's circle, their tops near the point
+			const int hi = cy + r + 6, lo = cy - r - 24;
+			size_t columns = 0;
+			std::map<std::pair<int, int>, int> tops;
+			auto top = [&](int x, int z, int &t) -> bool {
+				auto it = tops.find(std::make_pair(x, z));
+				if(it != tops.end()){
+					t = it->second;
+					return it->second != INT_MIN;
+				}
+				const bool ok = br.top_of(x, z, hi, lo, t);
+				tops[std::make_pair(x, z)] = ok ? t : INT_MIN;
+				return ok;
+			};
+			auto circle = [&](std::function<void(int, int, double)> f){
+				for(int dz = -r; dz <= r; dz++)
+				for(int dx = -r; dx <= r; dx++){
+					const double d = std::sqrt((double)(dx * dx + dz * dz));
+					if(d <= r + 0.01)
+						f(cx + dx, cz + dz, d);
+				}
+			};
+			if(tool == "raise" || tool == "lower"){
+				const int sign = tool == "raise" ? 1 : -1;
+				circle([&](int x, int z, double d){
+					int t;
+					if(!top(x, z, t))
+						return;
+					const double f = 1 - (d / (r + 1)) * (d / (r + 1));
+					const int a = std::max(1, (int)std::floor(s * f + 0.5));
+					br.set_column(x, z, t, t + sign * a, br.biome_of(x, z, t));
+					columns++;
+				});
+			} else if(tool == "smooth"){
+				const double k = std::min(1.0, 0.3 + 0.2 * s);
+				std::map<std::pair<int, int>, int> next;
+				circle([&](int x, int z, double){
+					int t;
+					if(!top(x, z, t))
+						return;
+					double sum = 0;
+					int n = 0;
+					for(int dz = -2; dz <= 2; dz++)
+					for(int dx = -2; dx <= 2; dx++){
+						int u;
+						if(top(x + dx, z + dz, u))
+							sum += u, n++;
+					}
+					next[std::make_pair(x, z)] = t + (int)std::floor(
+							(sum / n - t) * k + 0.5);
+				});
+				for(auto &q : next){
+					const int t = tops[q.first];
+					if(q.second != t)
+						br.set_column(q.first.first, q.first.second, t, q.second,
+								br.biome_of(q.first.first, q.first.second, t));
+					columns++;
+				}
+			} else if(tool == "flatten"){
+				const int step = std::max(1, (int)s);
+				circle([&](int x, int z, double){
+					int t;
+					if(!top(x, z, t))
+						return;
+					const int t2 = t + std::max(-step, std::min(step, L - t));
+					if(t2 != t)
+						br.set_column(x, z, t, t2, br.biome_of(x, z, t));
+					columns++;
+				});
+			} else if(tool == "paint"){
+				circle([&](int x, int z, double){
+					int t;
+					if(!top(x, z, t))
+						return;
+					br.set_column(x, z, t, t, *sel);
+					columns++;
+				});
+			} else if(tool == "decorate"){
+				// In a cave (ground over the point): its floor's and wall's
+				// decorations round the point; else the surface's
+				bool roofed = false;
+				for(int y = cy + 2; y <= cy + 32 && !roofed; y++)
+					roofed = br.is_ground(cx, y, cz);
+				const double mult = 2 * s;
+				const uint32_t seed = m_wp.seed ^ world::BRUSH_SALT;
+				if(roofed){
+					for(int dy = -r; dy <= r; dy++)
+					for(int dz = -r; dz <= r; dz++)
+					for(int dx = -r; dx <= r; dx++){
+						if(dx * dx + dy * dy + dz * dz > r * r)
+							continue;
+						const int x = cx + dx, y = cy + dy, z = cz + dz;
+						interface::VoxelTypeId v = 0, up = 0;
+						if(!br.get(x, y, z, v) || !br.ground.count(v) ||
+								!br.get(x, y + 1, z, up))
+							continue;
+						if(up == br.air){
+							const interface::VoxelTypeId put = world::pick_cave(
+									*sel, br.structs, seed, x, y + 1, z, 'c', mult);
+							if(put)
+								br.put(x, y + 1, z, put);
+							continue;
+						}
+						bool open = false;
+						for(int k = 0; k < 5 && !open; k++){
+							interface::VoxelTypeId nv = 0;
+							open = br.get(x + (k == 0) - (k == 1), y - (k == 4),
+									z + (k == 2) - (k == 3), nv) && nv == br.air;
+						}
+						if(open){
+							const interface::VoxelTypeId put = world::pick_cave(
+									*sel, br.structs, seed, x, y, z, 'v', mult);
+							if(put)
+								br.put(x, y, z, put);
+						}
+					}
+					what = "decorate (a cave)";
+				} else {
+					circle([&](int x, int z, double){
+						int t, turns = 0;
+						if(!top(x, z, t))
+							return;
+						columns++;
+						const int k = world::pick_surface(*sel, seed, x, z, t,
+								m_wp.sea_level, mult, turns);
+						if(k >= 0)
+							br.place(br.structs[sel->decors[k].s], turns, x, t + 1,
+									z, sel->decors[k].on == 'w');
+					});
+				}
+			} else if(tool == "fill"){
+				const int x0 = std::min(cx, (int)std::floor(fx1 + 0.5)),
+						x1 = std::max(cx, (int)std::floor(fx1 + 0.5)),
+						z0 = std::min(cz, (int)std::floor(fz1 + 0.5)),
+						z1 = std::max(cz, (int)std::floor(fz1 + 0.5));
+				interface::VoxelTypeId water = br.world.water;
+				for(auto &b : br.biomes)
+					if(!water)
+						water = b.second.water;
+				if(biome == "water" && !water){
+					why = "no biome of the material set has water";
+					return;
+				}
+				for(int z = z0; z <= z1; z++)
+				for(int x = x0; x <= x1; x++){
+					int t;
+					if(!br.top_of(x, z, L + 8, L - MAX_FILL, t) || t >= L)
+						continue;
+					columns++;
+					if(biome != "water"){
+						br.set_column(x, z, t, L, *sel);
+						continue;
+					}
+					for(int y = t + 1; y <= L; y++){
+						interface::VoxelTypeId v = 0;
+						if(br.get(x, y, z, v) && br.soft.count(v) &&
+								!br.water.count(v))
+							br.put(x, y, z, water);
+					}
+				}
+				what = "fill "+biome+" ("+itos(x0)+","+itos(z0)+") to ("+
+						itos(x1)+","+itos(z1)+") up to "+itos(L)+": "+
+						itos(columns)+" columns, "+itos(br.written)+" cells";
+			}
+			int t;
+			const bool has = br.top_of(cx, cz, hi, lo, t);
+			if(what.empty() || tool == "decorate")
+				what = (what.empty() ? tool : what)+" at ("+itos(cx)+","+
+						itos(cy)+","+itos(cz)+") size "+itos(r)+" strength "+
+						itos((int)s)+": "+itos(columns)+" columns, "+
+						itos(br.written)+" cells";
+			what += "; column ("+itos(cx)+","+itos(cz)+"): "+(has ?
+					describe_column(w, br, cx, cz, t + 2, t - 6) : ss_("none"));
+		});
+		return what;
+	}
+
+	// The heightmap's layer each biome role's voxel is (-1: none)
+	int layer_of(const world::Biome &b, const char *role)
+	{
+		auto m = m_materials.voxels.find(m_materials.resolve(b, role));
+		return m == m_materials.voxels.end() ? -1 : m->second.layer;
+	}
+
+	ss_ terrain_heightmap(Peer &p, const ss_ &tool, double fx, double fy,
+			double fz, double fx1, double fz1, int r, double s, double level,
+			const ss_ &biome, Change *c, ss_ &why)
+	{
+		(void)p;
+		(void)fy;
+		if(tool == "fill" && biome == "water"){
+			why = "no water on a heightmap yet";
+			return "";
+		}
+		const int cx = (int)std::floor(fx + 0.5), cz = (int)std::floor(fz + 0.5);
+		const world::Biome &sel = m_materials.biomes[biome];
+		ss_ what;
+		size_t samples = 0, added = 0;
+		int bx0 = cx - r - 1, bz0 = cz - r - 1, bx1 = cx + r + 1,
+				bz1 = cz + r + 1;
+		sv_<std::pair<ss_, std::array<float, 4>>> decorate;
+		world::BiomeIds bi;
+		sv_<world::StructIds> structs;
+		if(tool == "decorate")
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				world::resolve_biome(m_materials, sel,
+						[&](const ss_ &name) -> interface::VoxelTypeId {
+					interface::VoxelName n;
+					n.block_name = name;
+					const interface::VoxelDefinition *d =
+							w->get_voxel_reg()->get(n);
+					return d ? d->id : 0;
+				}, structs, bi);
+			});
+		heightmap::access(m_server, m_world_scene, [&](heightmap::Instance *map){
+			const int sx = map->samples_x(), sz = map->samples_z();
+			auto in = [&](int x, int z){
+				return x >= 0 && z >= 0 && x < sx && z < sz;
+			};
+			auto keep = [&](int x, int z){
+				if(c)
+					c->samples.emplace(std::make_pair(x, z), std::make_pair(
+							map->get_height(x, z), map->get_weights(x, z)));
+			};
+			auto one_hot = [](int layer){
+				heightmap::Weights w{};
+				if(layer >= 0 && layer < heightmap::MAX_MATERIALS)
+					w[layer] = 255;
+				return w;
+			};
+			// The biome a sample is by its strongest layer (a biome whose
+			// top is it), else the World's
+			auto biome_of = [&](int x, int z) -> const world::Biome& {
+				const heightmap::Weights w = map->get_weights(x, z);
+				int best = 0;
+				for(int k = 1; k < heightmap::MAX_MATERIALS; k++)
+					if(w[k] > w[best])
+						best = k;
+				for(auto &b : m_materials.biomes)
+					if(layer_of(b.second, "top") == best)
+						return b.second;
+				return m_materials.biomes[m_wp.biome];
+			};
+			// A sample's layer as its ground is: stone where steep, the
+			// riverbed under the sea, else its biome's top
+			auto relayer = [&](int x, int z, const world::Biome &b){
+				const float h = map->get_height(x, z);
+				float steep = 0;
+				for(int k = 0; k < 4; k++){
+					const int nx = x + (k == 0) - (k == 1),
+							nz = z + (k == 2) - (k == 3);
+					if(in(nx, nz))
+						steep = std::max(steep, std::fabs(map->get_height(nx, nz) -
+								h));
+				}
+				const int layer = steep > HM_ROCK_SLOPE ? layer_of(b, "stone") :
+						h < m_wp.sea_level + 0.5f ? layer_of(b, "riverbed") :
+						layer_of(b, "top");
+				const heightmap::Weights w = one_hot(layer);
+				if(w != map->get_weights(x, z))
+					map->set_weights(x, z, w);
+			};
+			std::map<std::pair<int, int>, float> next;
+			auto circle = [&](std::function<void(int, int, double)> f){
+				for(int dz = -r; dz <= r; dz++)
+				for(int dx = -r; dx <= r; dx++){
+					const double d = std::sqrt((double)(dx * dx + dz * dz));
+					if(d <= r + 0.01 && in(cx + dx, cz + dz))
+						f(cx + dx, cz + dz, d);
+				}
+			};
+			const float step = (float)(HM_STEP * s);
+			if(tool == "raise" || tool == "lower"){
+				circle([&](int x, int z, double d){
+					const double f = 1 - (d / (r + 1)) * (d / (r + 1));
+					next[std::make_pair(x, z)] = map->get_height(x, z) +
+							(tool == "raise" ? 1 : -1) * step * (float)f;
+				});
+			} else if(tool == "smooth"){
+				const float k = (float)std::min(1.0, 0.25 * s);
+				circle([&](int x, int z, double){
+					float sum = 0;
+					int n = 0;
+					for(int dz = -1; dz <= 1; dz++)
+					for(int dx = -1; dx <= 1; dx++)
+						if(in(x + dx, z + dz))
+							sum += map->get_height(x + dx, z + dz), n++;
+					const float h = map->get_height(x, z);
+					next[std::make_pair(x, z)] = h + (sum / n - h) * k;
+				});
+			} else if(tool == "flatten"){
+				circle([&](int x, int z, double){
+					const float h = map->get_height(x, z);
+					next[std::make_pair(x, z)] = h + std::max(-step,
+							std::min(step, (float)level - h));
+				});
+			} else if(tool == "fill"){
+				const int x0 = std::max(0, std::min(cx, (int)std::floor(fx1 + 0.5))),
+						x1 = std::min(sx - 1, std::max(cx, (int)std::floor(fx1 + 0.5))),
+						z0 = std::max(0, std::min(cz, (int)std::floor(fz1 + 0.5))),
+						z1 = std::min(sz - 1, std::max(cz, (int)std::floor(fz1 + 0.5)));
+				for(int z = z0; z <= z1; z++)
+					for(int x = x0; x <= x1; x++)
+						if(map->get_height(x, z) < level)
+							next[std::make_pair(x, z)] = (float)level;
+				bx0 = x0 - 1, bz0 = z0 - 1, bx1 = x1 + 1, bz1 = z1 + 1;
+				what = "fill "+biome+" ("+itos(x0)+","+itos(z0)+") to ("+
+						itos(x1)+","+itos(z1)+") up to "+ftos(level);
+			} else if(tool == "paint"){
+				circle([&](int x, int z, double){
+					keep(x, z);
+					relayer(x, z, sel);
+					samples++;
+				});
+			} else if(tool == "decorate"){
+				circle([&](int x, int z, double){
+					samples++;
+					float yaw = 0;
+					const ss_ st = decor_pick(map, bi, structs, m_wp.seed ^
+							world::BRUSH_SALT, x, z, 2 * s, yaw);
+					if(st.empty())
+						return;
+					for(auto &d : m_decor)
+						if(std::fabs(d.second.x - x) < 1.5f &&
+								std::fabs(d.second.z - z) < 1.5f)
+							return;
+					decorate.push_back(std::make_pair(st, std::array<float, 4>{{
+							(float)x, decor_y(map, (float)x, (float)z), (float)z,
+							yaw}}));
+				});
+			}
+			// The heights, then the layers round them
+			for(auto &q : next){
+				keep(q.first.first, q.first.second);
+				map->set_height(q.first.first, q.first.second, q.second);
+				samples++;
+			}
+			std::set<std::pair<int, int>> around;
+			for(auto &q : next)
+				for(int dz = -1; dz <= 1; dz++)
+				for(int dx = -1; dx <= 1; dx++)
+					if(in(q.first.first + dx, q.first.second + dz))
+						around.insert(std::make_pair(q.first.first + dx,
+								q.first.second + dz));
+			for(auto &q : around){
+				keep(q.first, q.second);
+				relayer(q.first, q.second, tool == "fill" ? sel :
+						biome_of(q.first, q.second));
+			}
+			if(what.empty())
+				what = tool+" at ("+itos(cx)+","+itos(cz)+") size "+itos(r)+
+						" strength "+itos((int)s);
+			if(in(cx, cz)){
+				const heightmap::Weights w = map->get_weights(cx, cz);
+				int best = 0;
+				for(int k = 1; k < heightmap::MAX_MATERIALS; k++)
+					if(w[k] > w[best])
+						best = k;
+				what += " on the heightmap: "+itos(samples)+" samples; ("+
+						itos(cx)+","+itos(cz)+") at "+ftos(map->get_height(cx,
+						cz))+" layer "+itos(best);
+			}
+			what += ", map hash "+itos(map->content_hash());
+		});
+		for(auto &d : decorate){
+			const uint64_t id = add_decor(d.first, d.second[0], d.second[1],
+					d.second[2], d.second[3]);
+			if(c)
+				c->decor.push_back(id);
+			added++;
+		}
+		if(tool == "decorate")
+			what += ", "+itos(added)+" decorations ("+itos(m_decor.size())+
+					" in all, hash "+itos(decor_hash())+")";
+		if(tool != "paint" && tool != "decorate" && tool != "column")
+			reseat_decor(bx0, bz0, bx1, bz1);
+		return what;
+	}
+
+	// An editor's undo of a terrain stroke: its cells, samples and
+	// decorations as they were
+	void undo_terrain(const Change &c, const Peer &p)
+	{
+		size_t cells = 0;
+		if(!c.cells.empty())
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				for(auto &q : c.cells){
+					const pv::Vector3DInt32 v(std::get<0>(q.first),
+							std::get<1>(q.first), std::get<2>(q.first));
+					if(!loaded(w, v))
+						continue;
+					set_id(w, v, q.second);
+					mark(w, m_world_scene, v, 'k', p.name);
+					cells++;
+				}
+			});
+		int x0 = INT_MAX, z0 = INT_MAX, x1 = INT_MIN, z1 = INT_MIN;
+		if(!c.samples.empty())
+			heightmap::access(m_server, m_world_scene,
+					[&](heightmap::Instance *map){
+				for(auto &q : c.samples){
+					map->set_height(q.first.first, q.first.second, q.second.first);
+					map->set_weights(q.first.first, q.first.second,
+							q.second.second);
+					x0 = std::min(x0, q.first.first);
+					x1 = std::max(x1, q.first.first);
+					z0 = std::min(z0, q.first.second);
+					z1 = std::max(z1, q.first.second);
+				}
+			});
+		for(uint64_t id : c.decor)
+			remove_decor(id);
+		if(!c.samples.empty())
+			reseat_decor(x0, z0, x1, z1);
+		save_decor();
+		ss_ hash;
+		if(m_wp.heightmap())
+			heightmap::access(m_server, m_world_scene,
+					[&](heightmap::Instance *map){
+				hash = ", map hash "+itos(map->content_hash());
+			});
+		log_i(MODULE, "An undo by %s: a terrain stroke, %zu cells, %zu samples "
+				"and %zu decorations put back%s", cs(p.name), cells,
+				c.samples.size(), c.decor.size(), cs(hash));
 	}
 
 	// Where voxelworld keeps the World loaded: a finite map's sections
@@ -2167,7 +3140,8 @@ struct Module: public interface::Module, public Interface
 			const int m = p.border == "water" ? world::SEA_BORDER :
 					p.border == "wall" ? 1 : 0;
 			const int ylo = std::min(m_world_min, p.border == "water" ?
-					p.sea_level - world::SEA_BED : INT_MAX) - 8;
+					p.sea_level - world::SEA_BED : INT_MAX) -
+					(p.with_caves() ? world::CAVE_DEEP : 8);
 			const int yhi = std::max(m_world_max + (p.border == "wall" ? 4 : 0),
 					p.sea_level);
 			for(int sx = sec(p.x0() - m); sx <= sec(p.x0() + p.width - 1 + m); sx++)
@@ -2263,7 +3237,7 @@ struct Module: public interface::Module, public Interface
 
 	// The spawn: the dry column nearest the middle (of the map, or the
 	// origin's 128 x 128), on the water at the middle if there is none
-	void find_spawn(world::Heights &h)
+	void find_spawn(world::Heights &h, const world::Ids &ids)
 	{
 		const world::Params &p = h.p;
 		m_world_spawn = {{0, p.generator == "empty" ? p.level : 1, 0}};
@@ -2273,13 +3247,40 @@ struct Module: public interface::Module, public Interface
 		const int d = p.finite() ? std::min(p.depth, 128) : 128;
 		sv_<int> tops;
 		h.tops(-w / 2, -d / 2, w, d, tops);
+		// [KIT] stage 4f: a column a decoration of more than a cell stands
+		// over (a tree's trunk or leaves) is not one
+		auto blocked = [&](int x, int z){
+			if(!p.with_decorations())
+				return false;
+			const int R = ids.reach;
+			bool hit = false;
+			for(int az = z - R; az <= z + R && !hit; az++)
+			for(int ax = x - R; ax <= x + R && !hit; ax++){
+				if(ax < 0 || az < 0 || ax >= w || az >= d)
+					continue;
+				int turns = 0;
+				const int k = world::pick_surface(ids, p.seed, ax - w / 2,
+						az - d / 2, tops[(size_t)az * w + ax], p.sea_level, 1,
+						turns);
+				if(k < 0)
+					continue;
+				const world::StructIds &s = ids.structs[ids.decors[k].s];
+				if(s.sx * s.sy * s.sz <= 1)
+					continue;
+				s.each(turns, [&](int dx, int, int dz, interface::VoxelTypeId){
+					hit = hit || (ax + dx == x && az + dz == z);
+				});
+			}
+			return hit;
+		};
 		int64_t best = -1;
 		for(int z = 0; z < d; z++)
 			for(int x = 0; x < w; x++){
 				const int t = tops[(size_t)z * w + x];
 				const int64_t dx = x - w / 2, dz = z - d / 2,
 						d2 = dx * dx + dz * dz;
-				if(t < p.sea_level || (best >= 0 && d2 >= best))
+				if(t < p.sea_level || (best >= 0 && d2 >= best) ||
+						blocked(x, z))
 					continue;
 				best = d2;
 				m_world_spawn = {{(int)dx, t + 1, (int)dz}};
@@ -5826,6 +6827,16 @@ struct Module: public interface::Module, public Interface
 			for(const ss_ &n : m_prefab_palette)
 				pfs.append(n);
 			j.set("prefabs", pfs);
+			// [KIT] stage 4f: what the terrain brushes choose from
+			if(m_world_scene){
+				json::Value t = json::object(), bs = json::array();
+				for(auto &b : m_materials.biomes)
+					bs.append(b.first);
+				t.set("biomes", bs);
+				t.set("biome", m_wp.biome);
+				t.set("surface", ss_(m_wp.heightmap() ? "heightmap" : "voxels"));
+				j.set("terrain", t);
+			}
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
 			// The admin's: who is here with an account, to make builders
 			bool admin = false;
@@ -5917,6 +6928,8 @@ struct Module: public interface::Module, public Interface
 			return refuse("not in edit mode");
 		if(op == "focus")
 			return focus(peer, j, refuse);
+		if(op == "terrain")
+			return terrain(p, peer, j, refuse);
 		if(op == "restart"){
 			Entity *e = nullptr;
 			ss_ why;
@@ -5957,6 +6970,11 @@ struct Module: public interface::Module, public Interface
 				return refuse("nothing of "+p.name+"'s to undo");
 			const Change c = u.back();
 			u.pop_back();
+			if(c.stroke != -1){
+				undo_terrain(c, p);
+				send_state(peer);
+				return;
+			}
 			commit(c.before, nullptr);
 			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
 					"to undo)", cs(p.name), c.before.size(), u.size());

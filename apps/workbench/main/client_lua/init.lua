@@ -121,22 +121,25 @@ do
 end
 voxelworld.set_camera(camera_node)
 
--- Kit's water (translucent voxels, a chunk's child "alpha") alpha blended
--- simplified: leaves (alpha masked, "masked") keep the plain technique,
--- drawn whole; a cut-out technique is the upgrade
-voxelworld.sub_material_update(function(node)
-	local alpha = node:GetChild("alpha")
-	local cg = alpha and alpha:GetComponent("CustomGeometry")
-	if not cg then
-		return
+-- Kit's water (translucent voxels, a chunk's child "alpha") alpha blended;
+-- ([KIT] stage 4f) its leaves and plants (alpha masked, "masked") cut out;
+-- a heightmap's decorations (voxel objects) drawn as the voxels are
+local function voxel_look(node)
+	for child, technique in pairs({[""] = "Techniques/Diff.xml",
+			alpha = "Techniques/DiffAlpha.xml",
+			masked = "kit/DiffAlphaMask.xml"}) do
+		local n = child == "" and node or node:GetChild(child)
+		local cg = n and n:GetComponent("CustomGeometry")
+		local i = 0
+		while cg and cg:GetMaterial(i) do
+			cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource(
+					"Technique", technique))
+			i = i + 1
+		end
 	end
-	local i = 0
-	while cg:GetMaterial(i) do
-		cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/DiffAlpha.xml"))
-		i = i + 1
-	end
-end)
+end
+voxelworld.sub_material_update(voxel_look)
+require("buildat/module/voxel_objects").set_material_cb(voxel_look)
 
 local touches_ground = false
 local physics_on = false

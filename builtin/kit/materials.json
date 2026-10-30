@@ -2,7 +2,7 @@
 	"format": "kit_materials",
 	"author": "kit",
 	"name": "default",
-	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels.",
+	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's and VoxeLibre's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels. Stage 4f: plants, structures, decorations.",
 	"voxels": {
 		"kit/stone": {"texture": "kit/stone.png", "heightmap": 1},
 		"kit/cobble": {"texture": "kit/cobble.png"},
@@ -15,18 +15,71 @@
 		"kit/log": {"top": "kit/tree_top.png", "side": "kit/tree.png",
 			"bottom": "kit/tree_top.png"},
 		"kit/leaves": {"texture": "kit/leaves.png", "kind": "leaves"},
-		"kit/planks": {"texture": "kit/wood.png"}
+		"kit/planks": {"texture": "kit/wood.png"},
+		"kit/mossy_cobble": {"texture": "kit/mossy_cobble.png"},
+		"kit/tall_grass": {"texture": "kit/tall_grass.png", "kind": "plant"},
+		"kit/dandelion": {"texture": "kit/dandelion.png", "kind": "plant"},
+		"kit/poppy": {"texture": "kit/poppy.png", "kind": "plant"},
+		"kit/mushroom_red": {"texture": "kit/mushroom_red.png", "kind": "plant"},
+		"kit/mushroom_brown": {"texture": "kit/mushroom_brown.png",
+			"kind": "plant"}
 	},
 	"fallbacks": {
 		"top": "filler", "filler": "stone", "riverbed": "filler",
 		"cave_floor": "stone", "cave_wall": "stone"
 	},
+	"structures": {
+		"tree": {"voxels": {"L": "kit/log", "#": "kit/leaves"},
+			"origin": [2, 0, 2], "layers": [
+				[".....", ".....", "..L..", ".....", "....."],
+				[".....", ".....", "..L..", ".....", "....."],
+				[".....", ".....", "..L..", ".....", "....."],
+				[".###.", "#####", "##L##", "#####", ".###."],
+				[".###.", "#####", "##L##", "#####", ".###."],
+				[".....", ".###.", ".###.", ".###.", "....."],
+				[".....", "..#..", ".###.", "..#..", "....."]]},
+		"bush": {"voxels": {"L": "kit/log", "#": "kit/leaves"},
+			"origin": [1, 0, 1], "layers": [
+				["...", ".L.", "..."],
+				["###", "#L#", "###"],
+				[".#.", "###", ".#."]]},
+		"log_mushrooms": {"voxels": {"L": "kit/log", "r": "kit/mushroom_red",
+				"b": "kit/mushroom_brown"},
+			"origin": [1, 0, 0], "layers": [
+				["LLLL"],
+				[".r.b"]]},
+		"boulder": {"voxels": {"c": "kit/cobble", "m": "kit/mossy_cobble"},
+			"origin": [1, 0, 1], "layers": [
+				[".c.", "cmc", ".c."],
+				["...", ".m.", "..."]]},
+		"tall_grass": {"voxel": "kit/tall_grass"},
+		"dandelion": {"voxel": "kit/dandelion"},
+		"poppy": {"voxel": "kit/poppy"},
+		"mushroom_red": {"voxel": "kit/mushroom_red"},
+		"mushroom_brown": {"voxel": "kit/mushroom_brown"},
+		"moss": {"voxel": "kit/mossy_cobble"}
+	},
 	"biomes": {
 		"grassland": {"top": "kit/grass", "filler": "kit/dirt",
 			"filler_depth": 3, "stone": "kit/stone", "water": "kit/water",
-			"riverbed": "kit/sand", "cave_floor": "kit/gravel"},
+			"riverbed": "kit/sand", "cave_floor": "kit/gravel",
+			"decorations": [
+				{"structure": "tree", "on": "top", "density": 0.006},
+				{"structure": "bush", "on": "top", "density": 0.004},
+				{"structure": "log_mushrooms", "on": "top", "density": 0.0015},
+				{"structure": "dandelion", "on": "top", "density": 0.01},
+				{"structure": "poppy", "on": "top", "density": 0.008},
+				{"structure": "tall_grass", "on": "top", "density": 0.1},
+				{"structure": "boulder", "on": "water", "density": 0.01},
+				{"structure": "mushroom_red", "on": "cave", "density": 0.015},
+				{"structure": "mushroom_brown", "on": "cave", "density": 0.025},
+				{"structure": "moss", "on": "cave_wall", "density": 0.05}]},
 		"desert": {"top": "kit/sand", "filler": "kit/sand", "filler_depth": 4,
-			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/sand"},
+			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/sand",
+			"decorations": [
+				{"structure": "boulder", "on": "top", "density": 0.003},
+				{"structure": "boulder", "on": "water", "density": 0.01},
+				{"structure": "mushroom_brown", "on": "cave", "density": 0.01}]},
 		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"}
 	}
 }

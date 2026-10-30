@@ -18,6 +18,10 @@
 --                              map of more materials than listed repeats
 --                              the last
 --   M.detail_metres            how many metres a ground texture spans
+--   M.filter                   the ground textures' filter mode
+--                              (magic.FILTER_*; nil: Urho3D's default),
+--                              before building: FILTER_NEAREST for pixel
+--                              art as voxels draw it
 --
 -- [HEIGHTMAP_REST] An edit is a rectangle: written into the height image
 -- and the weight images where it is (image_set_region), the Terrain given
@@ -166,6 +170,9 @@ local function create()
 		material:SetTexture(p - 1, weight_texs[p])
 	end
 	local layers = magic.Texture2DArray:new()
+	if M.filter then
+		layers.filterMode = M.filter
+	end
 	layers:SetLayers(info.materials)
 	for i = 1, info.materials do
 		local name = M.textures[math.min(i, #M.textures)]
