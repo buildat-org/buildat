@@ -2169,7 +2169,10 @@ struct Mobs
 			m.light_t = std::min(m.light_t - dt, step);
 			if(m.light_t > 0)
 				continue;
-			m.light_t += step;
+			// A long tick's time (the test's fixtures, 1.6 s on the check
+			// box) not caught up beyond the one step: back to back steps
+			// ran the light form 4 columns in 0.27 s, past its body's lag
+			m.light_t = std::max(m.light_t + step, 0.0f);
 			light_steps++;
 			const int mx = (int)std::floor(m.x + 0.5f),
 					mz = (int)std::floor(m.z + 0.5f);
