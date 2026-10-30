@@ -2985,6 +2985,20 @@ function buildat.safe.set_line_geometry(safe_node, verts)
 	return __buildat_set_line_geometry(getmetatable(safe_node).unsafe, verts)
 end
 
+-- share_geometry(src, dst): dst draws src's CustomGeometry with a
+-- StaticModel of the same geometries and materials, and its "alpha" and
+-- "masked" children's on its own children of those names ([VOXEL_OBJECTS]);
+-- see src/lua_bindings/mesh.cpp
+function buildat.safe.share_geometry(safe_src, safe_dst)
+	for _, n in ipairs({safe_src, safe_dst}) do
+		if not getmetatable(n) or getmetatable(n).type_name ~= "Node" then
+			error("share_geometry: not a sandboxed Node instance")
+		end
+	end
+	__buildat_share_geometry(getmetatable(safe_src).unsafe,
+			getmetatable(safe_dst).unsafe)
+end
+
 -- set_cell_geometry(node, cells, size, r, g, b, a, v): a volume of cubic
 -- cells as the node's CustomGeometry, v the texture coordinate's second
 -- half on every vertex (0 unless given); see src/lua_bindings/mesh.cpp

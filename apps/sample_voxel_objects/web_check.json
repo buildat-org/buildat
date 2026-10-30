@@ -1,0 +1,11 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "shared to 100 objects", 120],
+	["wait", 2500],
+	["shot", "${OUT}/houses.png"],
+	["waitlog", "draw calls; 3 models", 30],
+	["key", "e"],
+	["waitlog", "model house rev 2 chunk", 30],
+	["wait", 2500],
+	["shot", "${OUT}/edited.png"]
+]

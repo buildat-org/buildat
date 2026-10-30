@@ -393,6 +393,15 @@ module's own packets, and draws one Terrain (LOD per patch, splatted from
 RGBA weight textures over a texture array). Lighter than voxels for a
 world of gentle slopes, a driving game's; nothing under the surface.
 
+builtin/voxel_objects puts voxels on either ground as objects
+([VOXEL_OBJECTS]): a model is a small voxel grid of the scene's
+voxelworld registry, saved through builtin/storage, sent by the module's
+own packets a 32^3 chunk at a time; an object is a replicated node with
+any rotation showing it, a static Bullet body of the model's boxes on the
+server. The client meshes each chunk once (voxelworld's mesher and atlas,
+the corners' occlusion baked, no world light inside) and every copy draws
+that mesh, instanced.
+
 The 2014 design notes this section used to carry are in git history.
 
 Environment variables
