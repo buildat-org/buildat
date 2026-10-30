@@ -35,7 +35,7 @@
 #
 #   util/run_all.sh --changed
 #   util/run_all.sh --changed origin/dev..HEAD --list
-#   REMOTE=<host> util/run_all.sh --changed   # the dear ones there too
+#   REMOTE=<host> util/run_all.sh --changed   # browsers, dear ones there
 #
 # **What a runner covers is where it lives**, so most of them say
 # nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
@@ -339,21 +339,21 @@ touched_norm() {   # $1 the paths written
 	done
 }
 # **REMOTE=<host>: the dear runners on another machine at once** (user,
-# 2026-10-30: the wall clock). A runner costing REMOTE_MIN (300) s or
-# more here that drives no browser (a web run is slow on a software-GL
-# box) goes to util/remote_check.sh's slots, half to each, while the
-# rest runs here; their lines and counts join this run's. They run the
-# committed HEAD, as remote_check does. simplified: the split is by this
-# machine's costs, not balanced; a host-sensitive one (remote_check.sh's
-# header) is cheap and stays here by cost.
+# 2026-10-30: the wall clock, and no browser runs here: they max out
+# this machine's CPU). A runner that drives a browser, or costs
+# REMOTE_MIN (300) s or more here, goes to util/remote_check.sh's
+# slots, half to each, while the rest runs here; their lines and counts
+# join this run's. They run the committed HEAD, as remote_check does.
+# simplified: the split is by this machine's costs, not balanced; a
+# timing limit that fails on a slower machine is [CHECK_TIMING_LIMITS]'s.
 remote_logs=""; remote_pids=""
 if [ -n "${REMOTE:-}" ]; then
 	near=""; far=(""  "")
 	k=0
 	for name in $runners; do
 		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
-		if [ "$(cost_of "$path" "$name")" -ge "${REMOTE_MIN:-300}" ] &&
-				! grep -q web_drive "$path"; then
+		if grep -q web_drive "$path" ||
+				[ "$(cost_of "$path" "$name")" -ge "${REMOTE_MIN:-300}" ]; then
 			far[$k]="${far[$k]} $name"; k=$((1 - k))
 		else
 			near="$near $name"
