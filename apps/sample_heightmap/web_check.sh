@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~60s (2026-10-30)
-# covers: builtin/heightmap/client_lua/module.lua
+# covers: builtin/heightmap/client_lua/** builtin/heightmap/client_data/**
 # [HEIGHTMAP_TERRAIN] on the web client: apps/sample_heightmap in headless
 # Firefox (util/web_drive.sh, the web client from web/) builds the
 # 1024x1024 terrain, a crater dug with C reaches the page's terrain, and

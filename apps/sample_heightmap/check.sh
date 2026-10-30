@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~70s (2026-10-30)
-# covers: builtin/heightmap/heightmap.cpp builtin/heightmap/api.h builtin/heightmap/client_lua/module.lua builtin/heightmap/meta.json
+# covers: builtin/heightmap/**
 # [HEIGHTMAP_TERRAIN]: builtin/heightmap through apps/sample_heightmap, a
 # 1024x1024 map at a metre:
 #   1. a fresh save generates seed 1234; the ball dropped on the pad comes
