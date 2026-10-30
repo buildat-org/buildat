@@ -602,6 +602,7 @@ BUILDAT_CLIENT_IMPORT("UIElement:GetTypeName():string", buildat_c_UIElement_GetT
 BUILDAT_CLIENT_IMPORT("UIElement:HasFocus():boolean", buildat_c_UIElement_HasFocus)
 BUILDAT_CLIENT_IMPORT("UIElement:HasRecursiveFocus():any", buildat_c_UIElement_HasRecursiveFocus)
 BUILDAT_CLIENT_IMPORT("UIElement:IsCaretOnLastRow():boolean", buildat_c_UIElement_IsCaretOnLastRow)
+BUILDAT_CLIENT_IMPORT("UIElement:IsDrawnOver(UIElement):any", buildat_c_UIElement_IsDrawnOver)
 BUILDAT_CLIENT_IMPORT("UIElement:IsMultiLine():any", buildat_c_UIElement_IsMultiLine)
 BUILDAT_CLIENT_IMPORT("UIElement:Remove()", buildat_c_UIElement_Remove)
 BUILDAT_CLIENT_IMPORT("UIElement:RemoveAllChildren():any", buildat_c_UIElement_RemoveAllChildren)
@@ -3187,6 +3188,8 @@ public:
 	::buildat::Value HasRecursiveFocus() const;
 	// UIElement:IsCaretOnLastRow():boolean
 	bool IsCaretOnLastRow() const;
+	// UIElement:IsDrawnOver(UIElement):any
+	::buildat::Value IsDrawnOver(const ::buildat::UIElement & a1) const;
 	// UIElement:IsMultiLine():any
 	::buildat::Value IsMultiLine() const;
 	// UIElement:Remove()
@@ -5275,6 +5278,7 @@ inline ::buildat::Str UIElement::GetTypeName() const{ ::buildat::detail::Reply r
 inline bool UIElement::HasFocus() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_HasFocus, *this); return r.boolean(); }
 inline ::buildat::Value UIElement::HasRecursiveFocus() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_HasRecursiveFocus, *this); return r.value(); }
 inline bool UIElement::IsCaretOnLastRow() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_IsCaretOnLastRow, *this); return r.boolean(); }
+inline ::buildat::Value UIElement::IsDrawnOver(const ::buildat::UIElement & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_IsDrawnOver, *this, a1); return r.value(); }
 inline ::buildat::Value UIElement::IsMultiLine() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_IsMultiLine, *this); return r.value(); }
 inline void UIElement::Remove() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_Remove, *this); (void)r; }
 inline ::buildat::Value UIElement::RemoveAllChildren() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_RemoveAllChildren, *this); return r.value(); }

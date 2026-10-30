@@ -9,6 +9,9 @@
 #      taller than the view, Page Up from its end to its top: each press
 #      moves the view by the step, and the focus stays on the long
 #      message while it is in sight, not jumped over to the one above.
+#      Before both, the Server window the admin's login question opened
+#      before Hearth's frame: Down, Up and Page Down are that window's,
+#      not the frame's under it ([KEYPAGE_NEWEST_WRONG]).
 #   2. The launch console's API text: Page Down twice, Page Up.
 #   3. luanti_client on official Luanti's devtest: 30 chat lines, the
 #      chat line open, Page Up twice and Page Down page back over them 6
@@ -64,7 +67,7 @@ hearth(){ # log requests commands [env...]
 		BUILDAT_HEARTH_PASSWORD=checkpass12 BUILDAT_HEARTH_CREATE=1 \
 		BUILDAT_HEARTH_CODE=$code BUILDAT_HEARTH_REQS="$reqs" "$@" \
 		timeout 90 bin/buildat -o launch_ui=launch_menu \
-		-D "$t/cl" -w 800x600 -l 3 -o sound_mute=1 \
+		-D "$t/cl" -w 800x600 -l 4 -o sound_mute=1 \
 		-s 127.0.0.1:$SERVER_PORT -c @"$t/hearth.cmds"
 }
 # The first message 60 paragraphs long, then three short replies
@@ -76,10 +79,15 @@ hearth "$t/setup.log" '{"cmd":"new_topic","name":"Keys"}
 {"cmd":"reply","thread":1,"body":"short three"}' 'wait_log_any 30000 "id":1005,"ok":\nquit\n'
 grep -aq '"id":1005,.*"ok":true' "$t/setup.log" ||
 	fail "the thread: $(grep -a '"ok":false' "$t/setup.log" | head -2)"
-# The setup code's admin is asked for a ntfy topic first: that window
-# closed, the thread from its last message up; then the Server window over
-# Hearth by its Server button, its Health page
-m='wait_log 20000 accounts: ntfy asked\nwait_log_any 5000 server window: the page ntfy\ndelay 300\n'
+# The setup code's admin is asked for a ntfy topic first, the Server
+# window over Hearth's frame built after it: Down, Up and Page Down are
+# the window's ([KEYPAGE_NEWEST_WRONG]). That window closed, the thread
+# from its last message up; then the Server window over Hearth by its
+# Server button, its Health page
+m='wait_log 20000 accounts: ntfy asked\nwait_log_any 5000 server window: the page ntfy\n'
+m+='wait_log_any 10000 hearth: page Long\ndelay 500\n'
+for k in Down Down Up Right PageDown; do m+="keypress $k\ndelay 200\n"; done
+m+="screenshot $t/ntfy.png\n"
 m+='keypress Escape\nwait_log 5000 server window: closed\n'
 m+='wait_log_any 10000 hearth: page Long\ndelay 1000\nclick Text "short three"\ndelay 300\n'
 for i in 1 2 3 4 5 6 7; do m+="keypress PageUp\ndelay 300\nscreenshot $t/thread$i.png\n"; done
@@ -92,6 +100,21 @@ hearth "$t/hearth.log" "" "$m" BUILDAT_HEARTH_OPEN=1 ||
 	fail "the Hearth drive ($t/hearth.log): $(grep -a "Command sequence failed\|run_client:" "$t/hearth.log" | tail -1)"
 grep -aq "Lua runtime error" "$t/hearth.log" && fail "a Lua error in the Hearth drive ($t/hearth.log)"
 sed -n '/the page health/,$p' "$t/hearth.log" > "$t/health.log"
+# The early Server window's keys: the first Down to its sidebar, then
+# Down and Up between its entries (Hearth's are Home, Search...); Right to
+# its page, Page Down that page's view
+sed -n "/I hearth .*: hearth: page Long/,/I accounts: server window: closed/p" "$t/hearth.log" > "$t/early.log"
+python3 - "$t/early.log" <<'PY' || fail "the early Server window's keys ($t/early.log)"
+import re, sys
+log = open(sys.argv[1], errors="replace").read()
+to = re.findall(r"keyboard: to (.*)", log)
+pk = re.findall(r"page key: .*", log)
+print("  early Server window: " + " | ".join(to) + "; " + "; ".join(pk))
+sw = {"Account", "> Pushes (ntfy)", "Accounts", "Starports", "Listing",
+		"ID logins", "Statistics", "Health", "Add now", "Later", "Don't add"}
+assert len(to) == 2 and to[0] != to[1] and set(to) <= sw, "Down and Up: %s" % to
+assert len(pk) == 1, "Page Down: %s" % pk
+PY
 sed -n '/server window: closed/,/the page account/p' "$t/hearth.log" > "$t/thread.log"
 hv=$(grep -aom1 "page key: .*, view [0-9]*" "$t/health.log" | sed 's/.*view //')
 [ -n "$hv" ] || fail "no page key in the Health page ($t/hearth.log)"

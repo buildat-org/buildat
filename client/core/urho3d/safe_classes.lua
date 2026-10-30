@@ -2186,6 +2186,42 @@ function M.define(dst, util)
 					end
 					return false
 				end),
+			-- Whether it is drawn over `other`, by their top-level elements:
+			-- the modal root's over the root's, then the higher priority,
+			-- then the later child (what the UI drew last). nil when both
+			-- are in one top-level element. Which keyboard page has the
+			-- keys ([KEYPAGE_NEWEST_WRONG]; keyboard_page() in
+			-- extensions/ui_utils); no parent handed out
+			IsDrawnOver = util.wrap_function({"__safe"},
+					{"UIElement", "UIElement"},
+				function(self, other)
+					local function top(e)
+						for _ = 1, 64 do
+							local p = e:GetParent()
+							if p == nil or p:GetParent() == nil then
+								return e, p
+							end
+							e = p
+						end
+					end
+					local a, ar = top(self)
+					local b, br = top(other)
+					if a == nil or b == nil or a == b then
+						return nil
+					end
+					if ar ~= br then
+						return ar ~= nil and ar == ui:GetRootModalElement()
+					end
+					if a:GetPriority() ~= b:GetPriority() then
+						return a:GetPriority() > b:GetPriority()
+					end
+					for i = ar:GetNumChildren() - 1, 0, -1 do
+						local c = ar:GetChild(i)
+						if c == a then return true end
+						if c == b then return false end
+					end
+					return nil
+				end),
 			GetName = util.self_function("GetName", {"string"}, {"UIElement"}),
 			-- Which kind of element this is -- "Button", "LineEdit" --
 			-- which is how the one with the focus is told apart from the
