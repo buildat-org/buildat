@@ -15,7 +15,7 @@
 # made here):
 #   0. Another server's store as 0.6 wrote it (no "format", records with
 #      no header, the save not stamped): migrated once (format 3), the
-#      save stamped (user_version 1, its version row); its account logs
+#      save stamped (user_version 2, its version row); its account logs
 #      in with its password. A store of format 2 (a 0.7 development
 #      build's, a record's fields behind a u64 length and a byte order
 #      flag) reframed once (format 3); its account logs in.
@@ -97,7 +97,7 @@ grep -aqF "Joined as old" "$t/o06.log" || fail "0.6's account did not log in ($t
 stop
 db "assert get('format') == b'3', get('format')
 assert get('auth/old')[1:3] == b'\x01\x00', get('auth/old')
-assert c.execute('PRAGMA user_version').fetchone()[0] == 1
+assert c.execute('PRAGMA user_version').fetchone()[0] == 2
 assert c.execute(\"SELECT value FROM store WHERE store = '__save' AND key = 'version'\").fetchone()" ||
 	fail "0.6's store not migrated and stamped"
 srv 07

@@ -1870,6 +1870,14 @@ users_page = function(back)
 			button(r, has.admin and "Admin: yes" or "Admin: no", function()
 				M.admin("priv", user.name, "admin", not has.admin)
 			end)
+			-- [KIT] Kit's edit rights, which an admin has anyway; a row of
+			-- its own, the first is full on a narrow window
+			if not has.admin then
+				button(row(it), has.builder and "Builder: yes" or "Builder: no",
+						function()
+					M.admin("priv", user.name, "builder", not has.builder)
+				end)
+			end
 		end
 		if user.here == 1 and (admin or below) then
 			button(r, "Kick", function() M.admin("kick", user.name) end)

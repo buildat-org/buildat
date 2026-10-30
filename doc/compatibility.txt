@@ -146,15 +146,20 @@ different sub on two servers that are not one fleet.
 Saves and settings
 ------------------
 - save.sqlite is stamped with its format: PRAGMA user_version, 1 since
-  0.7, and the version that last opened it in the "__save" store's
-  "version" row. A save of a newer format is refused before anything is
-  written ("The save ... was written by a newer Buildat (save format N;
-  this one, X, reads 1)"). Only save.sqlite is stamped, not the user
+  0.7 and 2 since 0.7.98, and the version that last opened it in the
+  "__save" store's "version" row. An older stamp is raised when the save
+  opens. A save of a newer format is refused before anything is written
+  ("The save ... was written by a newer Buildat (save format N; this one,
+  X, reads 2)"), so a build before 0.7.98 refuses a save this one opened. Only save.sqlite is stamped, not the user
   directory.
 - The user directory as 0.7 lays it out: a launch extension's storage is
   user/extensions/<extension>/; the pidfile and the web client's URL
   file are key=value lines.
 - The accounts store is format "2".
+- A Luanti world's node metadata is voxelworld's voxel owners
+  ("<world>/owned/<x,y,z>" rows, [KIT]) since 0.7.98; the luanti store's
+  "node_meta" and "node_meta/<x,y,z>" rows are moved there on the first
+  start. A build before 0.7.98 refuses the save (its format 2).
 - Buildat's demos (apps/demo_*, apps/sample_*) keep no saves over
   versions or over a rename: a demo's world may not open in another
   version, nothing reads a demo's older save, and a renamed demo starts

@@ -348,8 +348,9 @@ prebuild_wasm() {
 	ld=${BUILDAT_WASM_LD:-$(command -v wasm-ld || ls /usr/lib/llvm-*/bin/wasm-ld 2>/dev/null | tail -1 || true)}
 	[ -n "$ld" ] || ld="$em/wasm-ld"
 	for d in "$stage"/builtin/* "$stage"/extensions/*; do
-		# A client's wasm/, or a server module's .wasm ([SERVER_WASM])
-		{ [ -d "$d/wasm" ] || grep -qs '"server_wasm"' "$d/meta.json"; } &&
+		# A client's wasm/, a server module's .wasm ([SERVER_WASM]) or a
+		# module's own box ([KIT])
+		{ [ -d "$d/wasm" ] || grep -qs '"server_wasm"\|"wasm_box"' "$d/meta.json"; } &&
 			mods="$mods $d"
 	done
 	[ -n "$mods" ] || { echo "prebuild wasm: no wasm/ in the stage"; return 1; }
