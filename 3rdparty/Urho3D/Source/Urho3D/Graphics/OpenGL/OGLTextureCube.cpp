@@ -500,7 +500,10 @@ bool TextureCube::Create()
     }
 
     levels_ = CheckMaxLevels(width_, height_, requestedLevels_);
-#ifndef GL_ES_VERSION_2_0
+    // buildat [WEB_ATLAS_MIP_LEVELS]: GLES3/WebGL 2 has the max level too;
+    // without it a texture of fewer levels than its size allows samples
+    // the levels glGenerateMipmap made past them
+#if !defined(GL_ES_VERSION_2_0) || defined(GL_ES_VERSION_3_0)
     glTexParameteri(target_, GL_TEXTURE_BASE_LEVEL, 0);
     glTexParameteri(target_, GL_TEXTURE_MAX_LEVEL, levels_ - 1);
 #endif
