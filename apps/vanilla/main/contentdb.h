@@ -74,8 +74,17 @@ struct ContentDB
 					if(!interface::fs::path_exists(zip_path))
 						interface::http_download(q, zip_path);
 				} else {
-					const ss_ rel = interface::http_get(ss_(CONTENTDB)+
-							"/api/packages/"+q+"/releases/");
+					// A mirror that serves only what Luanti's own client
+					// asks has no releases list; its for-client page names
+					// the newest release's zip too
+					ss_ rel;
+					try {
+						rel = interface::http_get(ss_(CONTENTDB)+
+								"/api/packages/"+q+"/releases/");
+					} catch(std::exception &){
+						rel = interface::http_get(ss_(CONTENTDB)+
+								"/api/packages/"+q+"/for-client/");
+					}
 					const ss_ url = newest_release_url(rel);
 					if(url.empty())
 						throw Exception("no release to download");
@@ -227,17 +236,20 @@ struct ContentDB
 				}
 			}
 		}
-		// The releases list is newest first; "url" is the zip, absolute
-		// or site-relative
+		// The releases list is newest first, the for-client page one
+		// object; "url" is the zip, absolute or site-relative
 		static ss_ newest_release_url(const ss_ &json)
 		{
 			const sajson::document doc =
 					sajson::parse(sajson::dynamic_allocation(),
 					sajson::string(json.c_str(), json.size()));
-			if(!doc.is_valid() || doc.get_root().get_type() != sajson::TYPE_ARRAY ||
-					doc.get_root().get_length() == 0)
+			if(!doc.is_valid())
 				return "";
-			sajson::value r = doc.get_root().get_array_element(0);
+			const sajson::value root = doc.get_root();
+			const bool list = root.get_type() == sajson::TYPE_ARRAY;
+			if(list && root.get_length() == 0)
+				return "";
+			sajson::value r = list ? root.get_array_element(0) : root;
 			if(r.get_type() != sajson::TYPE_OBJECT)
 				return "";
 			for(size_t i = 0; i < r.get_length(); i++){
