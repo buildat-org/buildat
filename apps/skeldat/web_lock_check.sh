@@ -63,7 +63,7 @@ cat > "$t/steps.json" <<J
  ["eval", "document.exitPointerLock()"], ["waitlog", "pause: the menu shown", 10],
  ["wait", 1000], $lock,
  ["shot", "\${OUT}/paused.png"],
- ["click", 600, 256], ["waitlog", "pause: the menu closed", 10],
+ ["click", 600, 277], ["waitlog", "pause: the menu closed", 10],
  ["waitlog", "mouse mode 1 ", 10], ["wait", 1500], $lock,
  ["key", "e"], ["waitlog", "inventory: .* opened", 10], ["wait", 1000],
  ["key", "e"], ["waitlog", "inventory: closed", 10], ["wait", 1500], $lock,

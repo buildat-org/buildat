@@ -3523,6 +3523,12 @@ function M.chat_page(back, draft, again)
 	if not tall then
 		field_row()
 	end
+	if M.chat_people then
+		button(w, "People...", function()
+			local text = e:GetText()
+			M.chat_people_page(function() M.chat_page(back, text) end)
+		end)
+	end
 	button(w, "Back", go_back)
 	-- The log takes what the rest leaves of half the screen (8 above it)
 	chat_list:SetFixedHeight(math.max(40, 40 + math.floor(rh / 2) - 8 - w.height))
@@ -3554,6 +3560,24 @@ function M.chat_page(back, draft, again)
 			M.chat_page(back, e:GetText(), true)
 		end
 	end)
+end
+
+-- **The chat's people** ([CHAT_PEOPLE_BUTTON]): the console's People...
+-- page, filled by chat_people(w), which builtin/chat's attach() sets (nil
+-- in an app without it: no button); its Back is the console again, the
+-- line being typed kept
+M.chat_people = nil
+function M.chat_people_page(back)
+	local w = open_page("chat_people", "Chat: people", back)
+	M.chat_people(w)
+	button(w, "Back", go_back)
+	log:info("chat: the people shown")
+end
+-- Drawn again if it is up, for the chat's news
+function M.chat_people_redraw()
+	if page_kind == "chat_people" then
+		M.chat_people_page(page_back)
+	end
 end
 
 -- [ACCOUNT_BUTTON]: a way into the account page the app does not have to
