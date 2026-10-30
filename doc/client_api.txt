@@ -296,6 +296,14 @@ buildat.set_quad_geometry(node, quads) -> {tile, ...}
   node's CustomGeometry, one geometry per distinct tile in ascending tile
   order (the answer says which tile each geometry is), both windings of
   every quad; a posed model is one build per frame ([OBJECT_MESH])
+buildat.share_geometry(src, dst)
+- dst draws src's CustomGeometry through a StaticModel of the same vertex
+  buffer and materials, and src's "alpha" and "masked" children's on
+  children of dst of those names ([VOXEL_OBJECTS]): a mesh made once and
+  drawn by many nodes, Urho3D instancing the copies (one batch a geometry,
+  the Model's own index buffer). The Model is kept while src's geometry is
+  what it was; after src is meshed again, share it again. src with no
+  geometry takes dst's StaticModel away. builtin/voxel_objects' copies.
 buildat.set_8bit_voxel_geometry(node, w, h, d, buffer, voxel_reg, atlas_reg,
   ox, oy, oz[, done_cb])
 - The old fixed-format path, kept for the small games: one byte a voxel

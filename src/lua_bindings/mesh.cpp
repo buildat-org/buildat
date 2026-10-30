@@ -19,6 +19,12 @@
 #include <algorithm>
 #include <CollisionShape.h>
 #include <RigidBody.h>
+#include <Model.h>
+#include <StaticModel.h>
+#include <Geometry.h>
+#include <IndexBuffer.h>
+#include <VertexBuffer.h>
+#include <map>
 #define MODULE "lua_bindings"
 
 namespace magic = Urho3D;
@@ -1219,6 +1225,129 @@ luabind::object set_quad_geometry(const luabind::object &node_o,
 	return out;
 }
 
+// [VOXEL_OBJECTS] One node's CustomGeometry drawn by another node's
+// StaticModel, as a Model over the source's own vertex buffer: what a voxel
+// object's copies share, a mesh once and on the GPU once. The Model's
+// geometries carry an index buffer of their own (the vertices in order),
+// which is what Urho3D instances by: every copy draws in one batch a
+// geometry (and one a shadow split) where it would be a batch each.
+// One Model a source, kept while the source's ranges, buffer and bounds
+// are what it was made of: a source meshed again (CustomGeometry::Commit
+// refills the same buffer) gets a new one at its next share.
+struct SharedModel
+{
+	WeakPtr<CustomGeometry> cg;
+	SharedPtr<Model> model;
+	VertexBuffer *vb = nullptr;
+	sv_<std::pair<unsigned, unsigned>> ranges;
+	BoundingBox box;
+};
+static std::map<CustomGeometry*, SharedModel> g_shared_models;
+
+static Model* shared_model(CustomGeometry *cg)
+{
+	const unsigned n = cg->GetNumGeometries();
+	sv_<std::pair<unsigned, unsigned>> ranges;
+	VertexBuffer *vb = nullptr;
+	unsigned total = 0;
+	for(unsigned i = 0; i < n; i++){
+		Geometry *g = cg->GetLodGeometry(i, 0);
+		ranges.push_back({g->GetVertexStart(), g->GetVertexCount()});
+		vb = g->GetVertexBuffer(0);
+		total = std::max(total, g->GetVertexStart() + g->GetVertexCount());
+	}
+	auto it = g_shared_models.find(cg);
+	if(it != g_shared_models.end() && it->second.cg == cg &&
+			it->second.vb == vb && it->second.ranges == ranges &&
+			it->second.box == cg->GetBoundingBox())
+		return it->second.model;
+	// The ones whose source is gone, while here
+	for(auto i = g_shared_models.begin(); i != g_shared_models.end();){
+		if(!i->second.cg)
+			i = g_shared_models.erase(i);
+		else
+			++i;
+	}
+	Context *context = cg->GetContext();
+	SharedPtr<IndexBuffer> ib(new IndexBuffer(context));
+	const bool large = total > 65535;
+	ib->SetShadowed(true);
+	ib->SetSize(total, large);
+	if(large){
+		sv_<uint32_t> idx(total);
+		for(unsigned i = 0; i < total; i++)
+			idx[i] = i;
+		ib->SetData(idx.data());
+	} else {
+		sv_<uint16_t> idx(total);
+		for(unsigned i = 0; i < total; i++)
+			idx[i] = (uint16_t)i;
+		ib->SetData(idx.data());
+	}
+	SharedPtr<Model> model(new Model(context));
+	model->SetNumGeometries(n);
+	for(unsigned i = 0; i < n; i++){
+		SharedPtr<Geometry> g(new Geometry(context));
+		g->SetVertexBuffer(0, vb);
+		g->SetIndexBuffer(ib);
+		g->SetDrawRange(TRIANGLE_LIST, ranges[i].first, ranges[i].second,
+				ranges[i].first, ranges[i].second);
+		model->SetNumGeometryLodLevels(i, 1);
+		model->SetGeometry(i, 0, g);
+	}
+	model->SetBoundingBox(cg->GetBoundingBox());
+	SharedModel &e = g_shared_models[cg];
+	e.cg = cg;
+	e.model = model;
+	e.vb = vb;
+	e.ranges = ranges;
+	e.box = cg->GetBoundingBox();
+	return model;
+}
+
+static void share_one_geometry(Node *src, Node *dst)
+{
+	CustomGeometry *cg = src->GetComponent<CustomGeometry>();
+	const unsigned n = cg ? cg->GetNumGeometries() : 0;
+	StaticModel *sm = dst->GetComponent<StaticModel>();
+	if(n == 0){
+		if(sm)
+			dst->RemoveComponent(sm);
+		return;
+	}
+	Model *model = shared_model(cg);
+	if(!sm)
+		sm = dst->CreateComponent<StaticModel>(LOCAL);
+	if(sm->GetModel() != model)
+		sm->SetModel(model);
+	for(unsigned i = 0; i < n; i++)
+		sm->SetMaterial(i, cg->GetMaterial(i));
+	sm->SetCastShadows(cg->GetCastShadows());
+}
+
+// share_geometry(src, dst): dst draws src's CustomGeometry, and its
+// "alpha" and "masked" children's on children of the same names (the
+// mesher's translucent and cut-out faces), as above
+void share_geometry(const luabind::object &src_o, const luabind::object &dst_o)
+{
+	lua_State *L = src_o.interpreter();
+	GET_TOLUA_STUFF(src, 1, Node);
+	GET_TOLUA_STUFF(dst, 2, Node);
+	share_one_geometry(src, dst);
+	for(const char *name : {"alpha", "masked"}){
+		Node *s = src->GetChild(name);
+		Node *d = dst->GetChild(name);
+		if(!s){
+			if(d)
+				d->Remove();
+			continue;
+		}
+		if(!d)
+			d = dst->CreateChild(name, LOCAL);
+		share_one_geometry(s, d);
+	}
+}
+
 // set_mesh_bounce(r, g, b): the unpacked mesher's bounce colour; see
 // interface/mesh.h set_bounce_color()
 void set_mesh_bounce(float r, float g, float b)
@@ -1243,6 +1372,7 @@ void init_mesh(lua_State *L)
 			LUABIND_FUNC(set_image_data),
 			LUABIND_FUNC(horizon_merge),
 			LUABIND_FUNC(mesh_backlog),
+			LUABIND_FUNC(share_geometry),
 			LUABIND_FUNC(set_mesh_bounce),
 			LUABIND_FUNC(set_mesh_alpha_nibbles),
 			LUABIND_FUNC(set_8bit_voxel_geometry),

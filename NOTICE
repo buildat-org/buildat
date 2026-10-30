@@ -147,6 +147,11 @@ builtin/heightmap/client_data/*.png
   Creative Commons Attribution-ShareAlike 4.0 International.
   Details: builtin/heightmap/README.txt
 
+apps/sample_voxel_objects/main/client_data/*.png
+  Pixel Perfection by XSSheep, as copied into VoxeLibre (apps/skeldat's).
+  Creative Commons Attribution-ShareAlike 4.0 International.
+  Details: apps/sample_voxel_objects/README.txt
+
 
 Modified copies
 ---------------------------------------------------------------------------

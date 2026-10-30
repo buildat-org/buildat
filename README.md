@@ -56,6 +56,7 @@ Starport listing takes it as its kind unless `starport.json` names one.
   sandbox must contain), `sample_lighting_scene` (in one section or
   eight), `sample_luanti_glue`, `sample_falling_blocks`,
   `sample_heightmap` (a ball on builtin/heightmap's hills),
+  `sample_voxel_objects` (builtin/voxel_objects' houses on those hills),
   `sample_server_entities`, `sample_client_scene`, `sample_ui`,
   `sample_module_calls`, `sample_wasm` (a module's wasm/ called from
   the client's Lua), `sample_rust` (a module in Rust on both sides, its

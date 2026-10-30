@@ -1,0 +1,13 @@
+<!-- [VOXEL_OBJECTS] A voxel object's solid faces: DiffVCol's passes with
+     VoxelObject.glsl beside this file (the mesher's vertex colour as the
+     ambient's share and bounce). -->
+<technique vs="voxel_objects/VoxelObject" ps="voxel_objects/VoxelObject" vsdefines="VERTEXCOLOR" psdefines="DIFFMAP VERTEXCOLOR">
+    <pass name="base" />
+    <pass name="litbase" psdefines="AMBIENT" />
+    <pass name="light" depthtest="equal" depthwrite="false" blend="add" />
+    <pass name="prepass" psdefines="PREPASS" />
+    <pass name="material" psdefines="MATERIAL" depthtest="equal" depthwrite="false" />
+    <pass name="deferred" psdefines="DEFERRED" />
+    <pass name="depth" vs="Depth" ps="Depth" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>
