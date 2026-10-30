@@ -92,9 +92,20 @@ case "$browser" in
 		# fetches Chrome's default extensions from the Web Store and loads
 		# them ~3 s in, and a fetch the page starts as one loads is
 		# cancelled before it reaches the network (net::ERR_ABORTED)
+		# **The GPU where Mesa has one** (user, 2026-10-30: SwiftShader's
+		# WebGL maxed the CPU): ANGLE on Mesa's EGL, pinned to Mesa so an
+		# Nvidia offload never wakes; SwiftShader without a render node,
+		# under BUILDAT_CI, or with BUILDAT_WEB_GL=swiftshader
+		gl="--use-angle=swiftshader --enable-unsafe-swiftshader"
+		mesa=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+		if [ "${BUILDAT_WEB_GL:-}" != swiftshader ] && [ -z "${BUILDAT_CI:-}" ] &&
+				[ -e /dev/dri/renderD128 ] && [ -f "$mesa" ]; then
+			gl="--use-angle=gl-egl"
+		fi
+		__EGL_VENDOR_LIBRARY_FILENAMES=$mesa \
 		setsid "${CHROME:-google-chrome}" --headless=new --mute-audio \
 				--remote-debugging-port="$bport" --user-data-dir="$out/profile" \
-				--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader \
+				--use-gl=angle $gl \
 				--disable-default-apps \
 				--window-size=1200,800 about:blank > "$out/browser.log" 2>&1 &
 		pids+=($!)
