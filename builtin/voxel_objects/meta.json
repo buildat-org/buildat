@@ -1,0 +1,12 @@
+{
+	"web": true,
+	"dependencies": [
+		{"module": "network"},
+		{"module": "storage"},
+		{"module": "main_context"},
+		{"module": "replicate"},
+		{"module": "voxelworld"},
+		{"module": "client_lua"},
+		{"module": "client_data"}
+	]
+}

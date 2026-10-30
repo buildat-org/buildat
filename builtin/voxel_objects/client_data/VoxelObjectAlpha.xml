@@ -1,0 +1,7 @@
+<!-- [VOXEL_OBJECTS] A voxel object's translucent faces (glass, water):
+     DiffAlpha's passes with VoxelObject.glsl. -->
+<technique vs="voxel_objects/VoxelObject" ps="voxel_objects/VoxelObject" vsdefines="VERTEXCOLOR" psdefines="DIFFMAP VERTEXCOLOR">
+    <pass name="alpha" depthwrite="false" blend="alpha" />
+    <pass name="litalpha" depthwrite="false" blend="addalpha" />
+    <pass name="shadow" vs="Shadow" ps="Shadow" />
+</technique>

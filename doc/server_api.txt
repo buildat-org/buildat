@@ -875,6 +875,30 @@ commit takes it. apps/sample_heightmap is the example; api.h has the data
 format (2: heights, then RGBA weight planes; one for a saved chunk and a
 sent rectangle).
 
+builtin/voxel_objects/api.h -- voxel_objects::Interface: voxel grids as
+objects, one instance per scene ([VOXEL_OBJECTS]; static: they stand where
+put). create_instance(scene) needs the scene's voxelworld instance: a
+model's voxels are ids of its registry (an app with no voxel world makes
+one that loads nothing, set_load_points({}), for the registry). An
+Instance: set_save(save, name) before the models; create_model(name, sx,
+sy, sz) (1 to 1024 a side, 16 M voxels at most; read from the save when it
+has the model at that size, loaded() true; else empty) and get_model; a
+Model: get_voxel / set_voxel(x, y, z, id) in its own frame (voxel (x, y,
+z) fills [x, x+1]..., id 0 empty), content_hash(), rev(). create_object(
+model, position, rotation) -> a replicated node "voxel_object" (var
+"voxel_model") at the model's (0, 0, 0) corner, any rotation, with a static
+RigidBody of the model's boxes (voxelworld's box merger, a set a model,
+every object's the same); remove_object(id), num_objects(). commit() (also
+each tick): the chunks written saved (a palette of voxel names a chunk:
+ids are the run's), sent (a chunk and its neighbours' padding, voxelworld's
+volume format) and their boxes given to every object of the model. The
+client meshes a model's chunks (32^3) once each with voxelworld's
+registries and draws every object's copy through buildat.share_geometry
+(instanced; the look VoxelObject.xml: Urho3D's lights, the mesher's corner
+occlusion as the ambient's share; set_material_cb for another, e.g.
+voxel_shading.apply_to_node). apps/sample_voxel_objects is the example;
+api.h has the data format.
+
 builtin/luanti_mapgen/api.h -- luanti_mapgen::Interface: Luanti's mapgens
 in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), noise_query() -> NoiseQuery (point, map: Luanti's own noise, what a mod's PerlinNoise gets), take_gennotify()
 and take_maps() -> the GennotifyEvents and maps a generation produced, per
@@ -936,6 +960,7 @@ builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, T
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, TrashInfo, trash_info, Interface, open, create, close, rename, trash, list_trash, remove_trashed, restore, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
+builtin/voxel_objects/api.h: SceneReference, Model, name, size_x, size_y, size_z, loaded, get_voxel, set_voxel, content_hash, rev, Instance, set_save, create_model, get_model, create_object, remove_object, num_objects, commit, Interface, create_instance, delete_instance, get_instance, access
 builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access, v
 builtin/world_menu/api.h: PeerId, Field, Config, Preset, Play, Close, Interface, configure, show, set_running, progress, set_presets, show_running, is_picker, select, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
