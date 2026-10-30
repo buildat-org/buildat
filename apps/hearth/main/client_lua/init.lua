@@ -172,8 +172,11 @@ end
 -- The server's HTML of a message as text to read: a link with its address
 -- after it, a spoiler and a task's box said, the entities back. A picture
 -- the server draws (its own /f/<id>, linked or not) is left out, being
--- drawn under the text ([HEARTH_LINES_CODE])
-local function html_text(h)
+-- drawn apart ([HEARTH_LINES_CODE], html_parts). [HEARTH_POST_STYLE]: bold
+-- is between "\1" and "\2", which styled() draws and html_text() drops (a
+-- message cannot hold a control character).
+local function html_marked(h)
+	h = h:gsub("<strong>", "\1"):gsub("</strong>", "\2")
 	h = h:gsub('<a href="[^"]*"[^>]*><img [^>]*></a>', ""):gsub("<img [^>]*>", "")
 	h = h:gsub('<a class="ref" href="[^"]*">(.-)</a>', "%1")
 	h = h:gsub('<a href="([^"]*)"[^>]*>(.-)</a>', function(u, t)
@@ -188,33 +191,78 @@ local function html_text(h)
 	h = entities(h:gsub("<[^>]*>", ""))
 	return (h:gsub("\n\n\n+", "\n\n"):gsub("^%s+", ""):gsub("%s+$", ""))
 end
+local function html_text(h)
+	return (html_marked(h):gsub("[\1\2]", ""))
+end
 assert(html_text('<p><strong>b</strong> <a href="https://x/?a=1&amp;b">x</a> ' ..
 		'<a class="ref" href="/t/1">#1</a></p>\n<ul>\n<li>i</li>\n</ul>\n') ==
 		"b x (https://x/?a=1&b) #1\n\n  - i")
 
 -- [HEARTH_LINES_CODE] The HTML as the client's view draws it: the text
--- parts, and each <pre> block apart as {code = its text}
+-- parts (html_marked's), and each <pre> block apart as {code = its text}.
+-- [HEARTH_POST_STYLE]: and each picture the server draws where the text
+-- has it, as {image = its file's id, align = "right", "center" or nil},
+-- the link round it gone with it.
 local function html_parts(h)
 	local parts, at = {}, 1
 	while true do
 		local s, e, code = h:find("<pre><code[^>]*>(.-)</code></pre>", at)
-		local t = html_text(h:sub(at, (s or #h + 1) - 1))
+		local is, ie, img = h:find('(<img src="/f/[^>]*>)', at)
+		if is and (not s or is < s) then
+			-- The link round it: right before it, and closed right after
+			local a = h:sub(at, is - 1):match('()<a href="[^"]*"[^>]*>$')
+			if a and h:sub(ie + 1, ie + 4) == "</a>" then
+				is, ie = at + a - 1, ie + 4
+			end
+			s, e, code = is, ie, nil
+		end
+		local t = html_marked(h:sub(at, (s or #h + 1) - 1))
 		if t ~= "" then
 			parts[#parts + 1] = {text = t}
 		end
 		if not s then
 			return parts
 		end
-		parts[#parts + 1] = {code = entities(code):gsub("\n$", "")}
+		if code then
+			parts[#parts + 1] = {code = entities(code):gsub("\n$", "")}
+		else
+			parts[#parts + 1] = {image = tonumber(img:match('src="/f/(%d+)')),
+					align = img:match(' class="(%a+)"')}
+		end
 		at = e + 1
 	end
 end
 do
-	local p = html_parts('<p>a<br>\nb</p>\n<p><a href="/f/1/a.png">' ..
-			'<img src="/f/1/thumb" alt="a" loading="lazy"></a></p>\n' ..
-			'<pre><code class="language-sh">x &lt; 1\n  y\n</code></pre>\n<p>c</p>\n')
-	assert(#p == 3 and p[1].text == "a\nb" and p[2].code == "x < 1\n  y" and
-			p[3].text == "c")
+	local p = html_parts('<p>a <strong>b</strong><br>\nb</p>\n<p><a href="/f/1/a.png">' ..
+			'<img src="/f/1/thumb" alt="a" class="right" loading="lazy"></a></p>\n' ..
+			'<pre><code class="language-sh">x &lt; 1\n  y\n</code></pre>\n<p>c' ..
+			'<img src="/f/2" alt="" loading="lazy"></p>\n')
+	assert(#p == 5 and p[1].text == "a \1b\2\nb" and p[2].image == 1 and
+			p[2].align == "right" and p[3].code == "x < 1\n  y" and
+			p[4].text == "c" and p[5].image == 2 and not p[5].align)
+end
+
+-- [HEARTH_POST_STYLE] A text of html_marked()'s, its bold drawn bold.
+-- AddBoldRange counts characters; a client older than it draws it plain.
+local function styled(parent, s, color, width)
+	local plain, bold, n, from = {}, {}, 0, nil
+	for piece, mark in s:gmatch("([^\1\2]*)([\1\2]?)") do
+		plain[#plain + 1] = piece
+		n = n + #piece:gsub("[\128-\191]", "")
+		if mark == "\1" and not from then
+			from = n
+		elseif mark == "\2" and from then
+			bold[#bold + 1], from = {from, n - from}, nil
+		end
+	end
+	if from then
+		bold[#bold + 1] = {from, n - from}
+	end
+	local t = text(parent, table.concat(plain), color, width)
+	for _, r in ipairs(bold) do
+		pcall(function() t:AddBoldRange(r[1], r[2]) end)
+	end
+	return t
 end
 
 -- The page area's size
@@ -623,15 +671,25 @@ end
 -- simplified: kept for the session in memory: a server's client Lua may
 -- not write the client's cache (api.lua, cache_path), so a new run asks
 -- again. The server keeps the thumbnail made, so that is a read
+-- [HEARTH_POST_STYLE] `o`: max, the widest it is drawn; centre; shown(w,
+-- h), called with its size once it has one, before the fit
 local thumbs, thumbs_waiting = {}, {}
-local function thumb_picture(parent, id, v)
+local function thumb_picture(parent, id, v, o)
+	o = o or {}
 	local b = parent:CreateChild("BorderImage")
 	b:SetFixedSize(0, 0)
+	if o.centre then
+		b:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+	end
 	local function show(tex)
 		pcall(function()
-			local s = math.min(1, (W - 40) / tex.width)
+			local s = math.min(1, (o.max or W - 40) / tex.width)
+			local w, h = math.floor(tex.width * s), math.floor(tex.height * s)
 			b.texture = tex
-			b:SetFixedSize(math.floor(tex.width * s), math.floor(tex.height * s))
+			b:SetFixedSize(w, h)
+			if o.shown then
+				o.shown(w, h)
+			end
 			v:fit()
 		end)
 	end
@@ -725,11 +783,61 @@ local function add_box(v, name, head, body, head_color, on_click)
 	local h = text(b, head, head_color or DIM, W - 32)
 	h:SetName(name or "")
 	if type(body) == "table" then
-		for _, p in ipairs(body) do
+		local i = 1
+		while body[i] do
+			local p = body[i]
+			i = i + 1
 			if p.code then
 				code_block(b, p.code)
+			elseif p.image and p.align == "right" then
+				-- [HEARTH_POST_STYLE] At the top right, the paragraphs of
+				-- the text parts after it beside it, narrowed until they
+				-- pass its height; the rest under it
+				-- simplified: by paragraph, so the one crossing the
+				-- picture's bottom stays narrow
+				local paras = {}
+				while body[i] and body[i].text do
+					for s in (body[i].text .. "\n\n"):gmatch("(.-)\n\n") do
+						paras[#paras + 1] = s
+					end
+					i = i + 1
+				end
+				local top = b:CreateChild("UIElement")
+				top:SetLayout(magic.LM_HORIZONTAL, 8, magic.IntRect(0, 0, 0, 0))
+				local left = top:CreateChild("UIElement")
+				left:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(0, 0, 0, 0))
+				left:SetFixedWidth(W - 32)
+				local under = b:CreateChild("UIElement")
+				under:SetLayout(magic.LM_VERTICAL, 0, magic.IntRect(0, 0, 0, 0))
+				local function lay(iw, ih)
+					left:RemoveAllChildren()
+					under:RemoveAllChildren()
+					local lw = W - 32 - (iw > 0 and iw + 8 or 0)
+					left:SetFixedWidth(lw)
+					local used, n = 0, 0
+					-- The blank line between paragraphs, as one text has it,
+					-- leads each but the first
+					while n < #paras and (iw == 0 or used < ih) do
+						n = n + 1
+						used = used + styled(left, (n > 1 and "\n" or "") ..
+								paras[n], nil, lw).height
+					end
+					if n < #paras then
+						styled(under, "\n" .. table.concat(paras, "\n\n", n + 1),
+								nil, W - 32)
+					end
+					if scripted and iw > 0 then
+						log:info("hearth: " .. (name or "") .. " beside image " ..
+								p.image .. ": " .. n .. " of " .. #paras)
+					end
+				end
+				lay(0, 0)
+				thumb_picture(top, p.image, v, {max = math.floor((W - 32) * 0.4),
+						shown = lay})
+			elseif p.image then
+				thumb_picture(b, p.image, v, {centre = true})
 			else
-				text(b, p.text, nil, W - 32)
+				styled(b, p.text, nil, W - 32)
 			end
 		end
 	elseif body and body ~= "" then
@@ -1267,7 +1375,18 @@ show_thread = function(id, at, missing)
 			local head = (is_answer and "This answered it -- " or "") .. m.author ..
 					" · " .. ago(m.created) .. (m.edited ~= 0 and " · edited" or "")
 			-- [HEARTH_LINES_CODE] the page's own markup, as the web shows it
-			local body = html_parts(m.html or "")
+			-- [HEARTH_POST_STYLE] its pictures where it has them; a file
+			-- gone or not shown to this viewer ([HEARTH_NEW_IMAGES]) only
+			-- the entry under it says
+			local body, shown = {}, {}
+			for _, f in ipairs(m.files or {}) do
+				shown[f.id] = f.shown ~= false
+			end
+			for _, p in ipairs(html_parts(m.html or "")) do
+				if not p.image or shown[p.image] then
+					body[#body + 1] = p
+				end
+			end
 			if m.hidden then
 				table.insert(body, 1, {text = m.hidden_text or "Hidden: " ..
 						m.hidden_reason})
@@ -1279,22 +1398,19 @@ show_thread = function(id, at, missing)
 			local holder, box, head_text = add_box(v, "m" .. m.id, head, body,
 					is_answer and MAIN or nil)
 			if scripted then
+				-- Bold as **, as it was written
 				for _, p in ipairs(body) do
 					log:info("hearth: m" .. m.id .. (p.code and " code: " .. p.code or
-							" text: " .. p.text):gsub("\n", "|"))
+							p.image and " image: " .. p.image ..
+							(p.align and " " .. p.align or "") or " text: " ..
+							p.text:gsub("[\1\2]", "**")):gsub("\n", "|"))
 				end
 			end
-			-- [HEARTH_ATTACHMENTS]: the images the text draws, in its order,
-			-- then its files, an image the text does not draw with its
-			-- thumbnail
+			-- [HEARTH_ATTACHMENTS]: the files under the images the text
+			-- draws, an image the text does not draw with its thumbnail
 			-- [HEARTH_NEW_IMAGES]: a new account's image not shown yet
 			-- is only its entry, but to a helper, who says whether everyone
 			-- sees it
-			for _, f in ipairs(m.files or {}) do
-				if f.drawn and f.shown ~= false then
-					thumb_picture(box, f.id, v)
-				end
-			end
 			for _, f in ipairs(m.files or {}) do
 				if f.image and not f.drawn and f.shown ~= false then
 					thumb_picture(box, f.id, v)

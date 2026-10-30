@@ -2373,6 +2373,12 @@ function M.define(dst, util)
 					{"Text"}),
 			SetSelectionColor = util.self_function("SetSelectionColor", {},
 					{"Text", "Color"}),
+			-- Characters start .. start + length - 1 drawn bold (full white,
+			-- each glyph twice); SetText clears them ([HEARTH_POST_STYLE]).
+			-- simplified: a range per call, kept until SetText (no clear of
+			-- its own); a range past the text draws nothing
+			AddBoldRange = util.self_function("AddBoldRange", {},
+					{"Text", "number", "number"}),
 			-- The background under the mouse: a dropdown's entries
 			SetHoverColor = util.self_function("SetHoverColor", {},
 					{"Text", "Color"}),

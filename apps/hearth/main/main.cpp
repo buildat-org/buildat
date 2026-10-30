@@ -1859,6 +1859,12 @@ struct Module: public interface::Module
 				"type=\"application/atom+xml\" href=\""+html(path)+
 				"/atom\">" : "")+"<style>"+
 				interface::web_brand::css+".blob{color:#26d9ff}"
+				// [HEARTH_POST_STYLE] An image's {.right} floats it, its
+				// {.center} centres it; a narrow page floats nothing
+				".box img.right{float:right;max-width:40%;margin:0 0 .5em 1em}"
+				".box img.center{display:block;margin:.5em auto}"
+				"@media(max-width:32em){.box img.right{float:none;"
+				"display:block;max-width:100%;margin:.5em auto}}"
 				// The message a link pointed at
 				".box:target{border:2px solid #8c33f2;background:#2b2638}"
 				"</style></head><body><header>"

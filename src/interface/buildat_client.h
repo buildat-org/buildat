@@ -666,6 +666,7 @@ BUILDAT_CLIENT_IMPORT("UIElement.visible:boolean", buildat_c_UIElement_get_visib
 BUILDAT_CLIENT_IMPORT("UIElement.visible=boolean", buildat_c_UIElement_set_visible)
 BUILDAT_CLIENT_IMPORT("UIElement.width:number", buildat_c_UIElement_get_width)
 BUILDAT_CLIENT_IMPORT("UIElement.width=number", buildat_c_UIElement_set_width)
+BUILDAT_CLIENT_IMPORT("Text:AddBoldRange(number,number)", buildat_c_Text_AddBoldRange)
 BUILDAT_CLIENT_IMPORT("Text:ClearSelection()", buildat_c_Text_ClearSelection)
 BUILDAT_CLIENT_IMPORT("Text:SetColor(Color)", buildat_c_Text_SetColor)
 BUILDAT_CLIENT_IMPORT("Text:SetFontSize(number)", buildat_c_Text_SetFontSize)
@@ -3324,6 +3325,8 @@ class Text: public UIElement
 public:
 	constexpr Text() {}
 	constexpr explicit Text(unsigned int handle): UIElement(handle) {}
+	// Text:AddBoldRange(number,number)
+	void AddBoldRange(double a1, double a2) const;
 	// Text:ClearSelection()
 	void ClearSelection() const;
 	// Text:SetColor(Color)
@@ -5340,6 +5343,7 @@ inline bool UIElement::visible() const{ ::buildat::detail::Reply r = ::buildat::
 inline void UIElement::visible(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_set_visible, *this, a1); (void)r; }
 inline double UIElement::width() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_get_width, *this); return r.number(); }
 inline void UIElement::width(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_UIElement_set_width, *this, a1); (void)r; }
+inline void Text::AddBoldRange(double a1, double a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text_AddBoldRange, *this, a1, a2); (void)r; }
 inline void Text::ClearSelection() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text_ClearSelection, *this); (void)r; }
 inline void Text::SetColor(const ::buildat::Color & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text_SetColor, *this, a1); (void)r; }
 inline void Text::SetFontSize(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Text_SetFontSize, *this, a1); (void)r; }

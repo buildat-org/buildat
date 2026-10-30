@@ -3807,6 +3807,11 @@ impl Deref for Text { type Target = UIElement; fn deref(&self) -> &UIElement { u
 impl Text {
 	/// The same object as another class of the list's
 	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// Text:AddBoldRange(number,number)
+	pub fn AddBoldRange(&self, a1: impl Put, a2: impl Put) {
+		let mut r = call(imports::buildat_c_Text_AddBoldRange, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put, &a2 as &dyn Put]);
+		drop(r)
+	}
 	/// Text:ClearSelection()
 	pub fn ClearSelection(&self) {
 		let mut r = call(imports::buildat_c_Text_ClearSelection, &[&H(self.handle()) as &dyn Put]);
@@ -7976,6 +7981,8 @@ mod imports {
 		pub fn buildat_c_UIElement_get_width(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement.width=number"]
 		pub fn buildat_c_UIElement_set_width(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Text:AddBoldRange(number,number)"]
+		pub fn buildat_c_Text_AddBoldRange(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text:ClearSelection()"]
 		pub fn buildat_c_Text_ClearSelection(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Text:SetColor(Color)"]
