@@ -10,6 +10,7 @@
 		{"module": "storage"},
 		{"module": "voxelworld"},
 		{"module": "worldgen"},
-		{"module": "heightmap"}
+		{"module": "heightmap"},
+		{"module": "voxel_objects"}
 	]
 }

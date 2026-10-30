@@ -159,8 +159,8 @@ apps/sample_voxel_objects/main/client_data/*.png
   Details: apps/sample_voxel_objects/README.txt
 
 builtin/kit/client_data/*.png
-  Pixel Perfection by XSSheep, as copied into VoxeLibre; grass, leaves and
-  water tinted.
+  Pixel Perfection by XSSheep, as copied into VoxeLibre; grass, leaves,
+  tall grass and water tinted.
   Creative Commons Attribution-ShareAlike 4.0 International.
   Details: builtin/kit/README.txt
 

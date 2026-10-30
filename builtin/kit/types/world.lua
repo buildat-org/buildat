@@ -16,12 +16,19 @@
 --   surface    voxels, or heightmap (builtin/heightmap; finite only, its
 --              map from the origin, a side a multiple of 64; applied at
 --              the next start)
+--   caves      ([KIT] stage 4f) tunnels and caverns under the ground (not
+--              under a heightmap), their floors and walls the biome's
+--              cave roles
+--   decorations  the biome's decorations scattered by the seed: trees,
+--              bushes, flowers, grass, a log with mushrooms, boulders under
+--              water, mushrooms and moss in caves (on a heightmap: those
+--              bigger than a cell, as voxel objects)
 -- Changing them while editing generates again every section nobody
 -- edited; edited ones stay, a warning names the seams.
 -- Voxel objects ([VOXEL_OBJECTS]) on a heightmap are their own entities
 -- once they exist, not a World parameter.
 return {
-	version = 1,
+	version = 2,
 	root = true,
 	world = true,
 	params = {
@@ -41,5 +48,7 @@ return {
 			choices = {"void", "wall", "water"}},
 		surface = {type = "string", default = "voxels",
 			choices = {"voxels", "heightmap"}},
+		caves = {type = "bool", default = false},
+		decorations = {type = "bool", default = true},
 	},
 }

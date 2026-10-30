@@ -542,7 +542,20 @@ end
 
 M.over_ui = over_ui
 
-local refresh, people, show_log, rebuild_bar, set_view
+local refresh, people, show_log, rebuild_bar, set_view, terrain_panel
+
+-- [KIT] stage 4f: the terrain tool's state: the brush, its size (cells)
+-- and strength, the biome (nil: the World's), the stroke being drawn
+-- (its id, the last dab and when, a fill's corner, the level)
+local T = {brush = "raise", size = 3, strength = 2, biome = nil,
+	stroke = nil}
+local BRUSHES = {"raise", "lower", "smooth", "flatten", "paint", "fill",
+	"decorate"}
+local BRUSH_NAMES = {raise = "Raise", lower = "Lower", smooth = "Smooth",
+	flatten = "Flatten", paint = "Paint", fill = "Fill", decorate = "Decorate"}
+local MAX_BRUSH = 12
+M.T = T
+local brush_at, stroke_begin, stroke_move, stroke_end, draw_brush
 
 -- The bar: Edit and Play/Stop in play (an app's own menu can have them:
 -- bar = false); in the tools floorplanner's toolbar -- Menu, the views,
@@ -673,6 +686,23 @@ end
 -- clicks on the view), a drag puts one where it is let go
 local palette_buttons = {}
 local palette
+
+-- [KIT] stage 4f: the palette's title and the terrain tool's, each with a
+-- button to the other (T), as tall as the title: the buttons under it stay
+-- where they were
+local function panel_title(w, s, other)
+	local r = row(w)
+	local t = text(r, s, DIM)
+	t.minWidth = t.width + 8
+	if not (E.state and E.state.terrain) then
+		return
+	end
+	local b = button(r, other .. (S.touch and "" or " (T)"), function()
+		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
+	end)
+	b.minHeight, b.maxHeight = t.height, t.height
+end
+
 palette = function()
 	drop("palette")
 	palette_buttons = {}
@@ -682,7 +712,10 @@ palette = function()
 	local y = W.bar and W.bar.height + 12 or 40
 	local w = window(magic.HA_LEFT, magic.VA_TOP, 8, y)
 	W.palette = w
-	text(w, "Palette", DIM)
+	if S.tool == "terrain" then
+		return terrain_panel(w)
+	end
+	panel_title(w, "Palette", "Terrain")
 	local items = {}
 	for _, t in ipairs(E.state.palette or {}) do
 		items[#items + 1] = {label = t, type = t}
@@ -1657,6 +1690,10 @@ end
 -- The right button let go where it was pressed: placing stops; on an
 -- entity its menu, on nothing the selection goes ([FP]'s)
 local function right_click(rc)
+	if S.tool then
+		M.set_tool(nil)
+		return
+	end
 	if S.placing then
 		S.placing = nil
 		log:info("kit editor: placing nothing")
@@ -1685,6 +1722,14 @@ function M.escape()
 		show_ports("in", nil)
 		E.link, E.status = nil, ""
 		log:info("kit editor: the drag given up")
+		return true
+	end
+	if T.down then
+		stroke_end(S.mx, S.my)
+		return true
+	end
+	if S.tool then
+		M.set_tool(nil)
 		return true
 	end
 	if S.placing then
@@ -1745,6 +1790,231 @@ function M.drop_crosshair()
 	return true
 end
 
+-- ---- [KIT] stage 4f: the terrain tool. T (or Terrain on the palette's
+-- title) puts its brushes in the palette's place: Raise, Lower, Smooth, Flatten (to the
+-- stroke's first point), Paint (the biome's ground), Fill (a rectangle
+-- dragged, up to its first corner's level, with the biome's ground or
+-- water) and Decorate (the biome's scatter; in a cave its floor's and
+-- wall's), their size and strength ([ and ], with Shift the strength) and
+-- the biome. A left drag on the ground is a stroke (one undo), its dabs
+-- as it moves and while it stays; a touchscreen's finger the same. The
+-- brush is a circle on the ground in what it does' colour; a right click
+-- or Escape puts the tool away (floorplanner's Object tool)
+local heightmap = require("buildat/module/heightmap")
+
+function M.set_tool(tool)
+	if S.tool == tool then
+		return
+	end
+	S.tool = tool
+	T.down, T.fill = false, nil
+	S.placing = nil
+	log:info("kit editor: tool " .. tostring(tool or "select"))
+	refresh()
+end
+
+function M.brush_size(d)
+	T.size = math.max(1, math.min(MAX_BRUSH, T.size + d))
+	log:info("kit editor: brush size " .. T.size)
+	palette()
+end
+
+function M.brush_strength(d)
+	T.strength = math.max(1, math.min(5, T.strength + d))
+	log:info("kit editor: brush strength " .. T.strength)
+	palette()
+end
+
+-- What a brush does, in its colour: adding green, taking away red, the
+-- rest the hover's
+local function brush_color()
+	return T.brush == "lower" and M.DIG or (T.brush == "smooth" or
+			T.brush == "flatten") and M.HOVER or M.PLACE
+end
+
+local BRUSH_TEXT = {raise = "raise the ground", lower = "lower the ground",
+	smooth = "smooth the ground", flatten = "flatten to the stroke's start",
+	paint = "paint the biome's ground", decorate = "decorate (the biome's)",
+	fill = "drag: fill a rectangle up to here"}
+
+terrain_panel = function(w)
+	panel_title(w, "Terrain", "Palette")
+	local r
+	for i, b in ipairs(BRUSHES) do
+		if i % 2 == 1 then
+			r = row(w)
+		end
+		button(r, BRUSH_NAMES[b], function()
+			T.brush = b
+			log:info("kit editor: brush " .. b)
+			palette()
+		end, T.brush == b)
+	end
+	for _, k in ipairs({{"Size", T.size, M.brush_size},
+			{"Strength", T.strength, M.brush_strength}}) do
+		local sr = row(w)
+		label(sr, k[1] .. " " .. k[2], 80)
+		button(sr, "-", function() k[3](-1) end)
+		button(sr, "+", function() k[3](1) end)
+	end
+	local tr = E.state and E.state.terrain or {}
+	local choices = {}
+	for _, b in ipairs(tr.biomes or {}) do
+		choices[#choices + 1] = {b, b}
+	end
+	if T.brush == "fill" then
+		choices[#choices + 1] = {"water", "water"}
+	end
+	text(w, "Biome", DIM)
+	ui_utils.dropdown(w, choices, T.biome or tr.biome, function(v)
+		T.biome = v
+		log:info("kit editor: brush biome " .. tostring(v))
+	end, {height = 24})
+	text(w, tr.surface == "heightmap" and "On the heightmap" or
+			"On the voxels", DIM)
+end
+
+-- The ground the pointer is on: {x, y, z}, a voxel's cell (its top cell)
+-- or a heightmap's point; nil off the ground
+brush_at = function(mx, my)
+	local o, v = M.screen_ray(mx, my)
+	if O.solid then
+		local hit, _, t = M.voxel_ray({o.x, o.y, o.z}, {v.x, v.y, v.z},
+				O.solid, MAX_RAY)
+		if hit and heightmap.terrain then
+			local p = o + v * t
+			local h = heightmap.height_at(p.x, p.z)
+			if h then
+				return {x = p.x, y = h, z = p.z}
+			end
+		end
+		if hit then
+			return {x = hit[1], y = hit[2], z = hit[3]}
+		end
+	end
+	local g = ground_at(o, v)
+	return g and {x = g[1], y = g[2] - 1, z = g[3]} or nil
+end
+
+-- The ground's surface at a column near y0 (a voxel's top face), for the
+-- brush's circle
+local function surface_y(x, z, y0)
+	if heightmap.terrain then
+		local h = heightmap.height_at(x, z)
+		return h and h + 0.05 or y0
+	end
+	if not O.solid then
+		return O.ground_y - 0.45
+	end
+	local cx, cz = round(x), round(z)
+	local top = round(y0) + T.size + 3
+	local above = O.solid(cx, top + 1, cz)
+	for y = top, top - T.size - 12, -1 do
+		local s = O.solid(cx, y, cz)
+		if s and not above then
+			return y + 0.55
+		end
+		above = s
+	end
+	return round(y0) + 0.55
+end
+
+local function dab(pt)
+	send({op = "terrain", tool = T.brush, x = pt.x, y = pt.y, z = pt.z,
+		size = T.size, strength = T.strength, stroke = T.stroke,
+		biome = T.biome, level = T.level})
+	T.last = {x = pt.x, z = pt.z, t = buildat.get_time_us()}
+	T.dabs = T.dabs + 1
+end
+
+stroke_begin = function(mx, my)
+	local pt = brush_at(mx, my)
+	if not pt then
+		return false
+	end
+	-- An id of its own: every dab of it one undo
+	T.stroke = math.floor(buildat.get_time_us()) % 1000000000000
+	T.down, T.level, T.dabs = true, pt.y, 0
+	log:info(string.format("kit editor: a %s stroke at %g, %g, %g", T.brush,
+			pt.x, pt.y, pt.z))
+	if T.brush == "fill" then
+		T.fill = pt
+		return true
+	end
+	dab(pt)
+	return true
+end
+
+-- Each frame while it is down: a dab where it moved half the brush, or
+-- where it stays a while
+stroke_move = function(mx, my)
+	if not T.down or T.brush == "fill" then
+		return
+	end
+	local pt = brush_at(mx, my)
+	if not pt or not T.last then
+		return
+	end
+	local now = buildat.get_time_us()
+	local d = math.sqrt((pt.x - T.last.x) ^ 2 + (pt.z - T.last.z) ^ 2)
+	if (d >= math.max(1, T.size * 0.5) and now - T.last.t > 50000) or
+			now - T.last.t > 150000 then
+		dab(pt)
+	end
+end
+
+stroke_end = function(mx, my)
+	if not T.down then
+		return
+	end
+	T.down = false
+	if T.brush == "fill" and T.fill then
+		local pt = brush_at(mx, my) or T.fill
+		send({op = "terrain", tool = "fill", x = T.fill.x, y = T.fill.y,
+			z = T.fill.z, x1 = pt.x, z1 = pt.z, level = T.level,
+			biome = T.biome, stroke = T.stroke})
+		log:info(string.format("kit editor: fill %g, %g to %g, %g", T.fill.x,
+				T.fill.z, pt.x, pt.z))
+	else
+		log:info("kit editor: the stroke ended, " .. T.dabs .. " dabs")
+	end
+	T.fill = nil
+end
+
+-- The brush on the ground: its circle (a fill's rectangle) where it is
+draw_brush = function(dbg, mx, my)
+	if S.tool ~= "terrain" or (over_ui(mx, my) and not T.down) then
+		return
+	end
+	local col = brush_color()
+	local pt = brush_at(mx, my)
+	if T.brush == "fill" and T.fill then
+		pt = pt or T.fill
+		local y = T.level + (heightmap.terrain and 0.05 or 0.55)
+		local x0, x1 = math.min(T.fill.x, pt.x) - 0.5, math.max(T.fill.x, pt.x) + 0.5
+		local z0, z1 = math.min(T.fill.z, pt.z) - 0.5, math.max(T.fill.z, pt.z) + 0.5
+		dbg:AddBoundingBox(magic.BoundingBox(magic.Vector3(x0, y - 0.02, z0),
+				magic.Vector3(x1, y + 0.02, z1)), col, false)
+		return
+	end
+	if not pt then
+		return
+	end
+	local r = T.size + 0.5
+	local prev = nil
+	for i = 0, 40 do
+		local a = i / 40 * 2 * math.pi
+		local x, z = pt.x + r * math.cos(a), pt.z + r * math.sin(a)
+		local p = magic.Vector3(x, surface_y(x, z, pt.y), z)
+		if prev then
+			dbg:AddLine(prev, p, col, false)
+		end
+		prev = p
+	end
+	dbg:AddCross(magic.Vector3(pt.x, surface_y(pt.x, pt.z, pt.y), pt.z), 0.6,
+			col, false)
+end
+
 -- ---- Input: the mouse ([FP]'s mouse_down, mouse_up, mouse_move)
 local function mouse_down(button_)
 	if not E.editing or S.touch then
@@ -1775,6 +2045,10 @@ local function mouse_down(button_)
 		S.swallow_up = button_
 		log:info("kit editor: into the crosshair")
 		changed()
+		return
+	end
+	if S.tool == "terrain" and button_ == magic.MOUSEB_LEFT then
+		stroke_begin(mx, my)
 		return
 	end
 	if button_ == magic.MOUSEB_RIGHT then
@@ -1810,6 +2084,10 @@ local function mouse_up(button_)
 	end
 	if S.swallow_up == button_ then
 		S.swallow_up = nil
+		return
+	end
+	if button_ == magic.MOUSEB_LEFT and T.down then
+		stroke_end(S.mx, S.my)
 		return
 	end
 	if button_ == magic.MOUSEB_LEFT and S.palette_press then
@@ -1992,12 +2270,22 @@ local function touch_begin(id, x, y)
 	end
 	S.mx, S.my = x, y
 	if fingers_n() == 2 then
-		-- Whatever the first began is dropped
+		-- Whatever the first began is dropped (a stroke ends where it is)
+		if T.down then
+			T.fill = nil
+			stroke_end(x, y)
+		end
 		S.press, S.drag, S.panning, S.pan3d = nil, nil, false, nil
 		clear_preview()
 		local p = S.view == "3d" and camera_pivot(x, y) or nil
 		S.gesture = {pivot = p, dist = p and (p - cam3d_node.position):Length()
 			or 5}
+		return
+	end
+	-- [KIT] stage 4f: a finger on the ground paints the terrain tool's
+	-- stroke
+	if S.tool == "terrain" and S.view ~= "walk" then
+		S.fingers[id].stroke = stroke_begin(x, y)
 		return
 	end
 	if S.view ~= "walk" then
@@ -2022,6 +2310,10 @@ local function touch_move(id, x, y, dx, dy)
 			S.drag = {kind = "palette", item = pp.item}
 			log:info("kit editor: dragging " .. pp.item.label .. " from the palette")
 		end
+		return
+	end
+	if f.stroke then
+		S.mx, S.my = x, y
 		return
 	end
 	if S.view == "walk" then
@@ -2112,6 +2404,11 @@ local function touch_end(id, x, y)
 		-- An untouched one: its button's own tap arms it
 		return
 	end
+	if f.stroke then
+		S.mx, S.my = x, y
+		stroke_end(x, y)
+		return
+	end
 	if f.ui or f.held then
 		return
 	end
@@ -2148,7 +2445,8 @@ local function long_press_tick()
 		only.id = fid
 	end
 	if n == 1 and not only.ui and not only.item and not only.moved and
-			not only.held and buildat.get_time_us() - only.t0 > LONG_PRESS_US then
+			not only.held and not only.stroke and
+			buildat.get_time_us() - only.t0 > LONG_PRESS_US then
 		only.held = true
 		S.press, S.drag = nil, nil
 		right_click({mx = only.x, my = only.y})
@@ -2220,6 +2518,16 @@ local function key_down(key, ctrl, shift)
 		M.delete_selected()
 	elseif ctrl then
 		return
+	elseif key == magic.KEY_T and E.state and E.state.terrain then
+		M.set_tool(S.tool ~= "terrain" and "terrain" or nil)
+	elseif S.tool == "terrain" and (key == 91 or key == 93) then
+		-- [ and ] (SDL's keycodes: Urho3D's Lua has no names for them)
+		local d = key == 91 and -1 or 1
+		if shift then
+			M.brush_strength(d)
+		else
+			M.brush_size(d)
+		end
 	elseif key == magic.KEY_G then
 		M.next_grid()
 	elseif key == magic.KEY_H then
@@ -2368,8 +2676,27 @@ local function compute_guide()
 		end
 		return g
 	end
+	if T.down then
+		g.left = T.brush == "fill" and "let go: fill the rectangle up to " ..
+				string.format("%g", T.level) or "let go: end the stroke (" ..
+				T.dabs .. " dabs, one undo)"
+		return g
+	end
 	if over_ui(mx, my) then
 		return nil
+	end
+	if S.tool == "terrain" then
+		ghost(nil)
+		local right = S.view == "2d" and "drag: into 3D, orbiting" or
+				S.view == "3d" and "drag: orbit" or "drag: turn"
+		if brush_at(mx, my) then
+			g.left = BRUSH_TEXT[T.brush] .. (T.brush == "fill" and "" or
+					string.format(" (size %d, strength %d%s); drag: a stroke",
+					T.size, T.strength, T.biome and ", " .. T.biome or ""))
+		end
+		g.right = "put the terrain tool away; " .. right
+		g.note = not S.touch and "[ ]: size, Shift [ ]: strength, Esc: away" or nil
+		return g
 	end
 	if S.placing then
 		local c = place_cell(mx, my)
@@ -2597,6 +2924,14 @@ local function draw()
 		end
 	end
 	draw_box_rect()
+	if not (E.menu and E.menu.held()) then
+		local mx, my = S.mx, S.my
+		if M.looking() then
+			local w, h = screen_size()
+			mx, my = w / 2, h / 2
+		end
+		draw_brush(dbg, mx, my)
+	end
 end
 
 -- The other builders' names over what they have selected
@@ -2687,6 +3022,7 @@ function M.editor(options)
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""
 			S.drag, S.press, S.placing, S.crosshair = nil, nil, nil, false
+			T.down, T.fill = false, nil
 			drop("ctx")
 			drop("dialog")
 			if not E.editing then
@@ -2772,6 +3108,14 @@ function M.editor(options)
 				tostring(l.lines[#l.lines]))
 		show_log()
 	end)
+	-- [KIT] stage 4f: a terrain dab's answer
+	buildat.sub_packet("kit:terrain", function(data)
+		local a = network.parse_json(data)
+		if type(a) == "table" then
+			log:info("kit editor: terrain: " .. tostring(a.what) .. " (" ..
+					tostring(a.undo) .. " to undo)")
+		end
+	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
@@ -2840,6 +3184,9 @@ function M.editor(options)
 			move_camera(dt)
 			place_cameras()
 			long_press_tick()
+			if T.down then
+				stroke_move(S.mx, S.my)
+			end
 		end
 		hover.begin()
 		-- The frames' bars: vanilla's, and in the plan about 3 pixels

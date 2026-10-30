@@ -92,7 +92,8 @@ if [ "${1:-}" = web ]; then
 	# closes it); Escape and the menu's Edit (at 1200x800 its rows are 41
 	# px apart from Continue at y 298: Edit or Play mode 339, Stop or Play
 	# 380); a link begun, Escape cancels it, the next Escape the menu;
-	# Stop and Play there, and Play mode
+	# Stop and Play there, and Play mode; ([KIT] stage 4f) a raise stroke
+	# dragged in the plan by mouse (T), and Ctrl+Z its undo
 	check_tmp workbench_web; t=$CHECK_TMP
 	stub="(function(){ var held = null, refuse = false;
  Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
@@ -147,7 +148,12 @@ if [ "${1:-}" = web ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
 	["click", 247, 335], ["waitlog", "kit editor: placing .kit/button_door", 10],
-	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10]
+	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10],
+	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
+	["drag", 450, 620, 650, 620], ["waitlog", "kit editor: terrain: raise", 10],
+	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
+	["shot", "\${OUT}/terrain.png"],
+	["chord", "Ctrl+z"], ["sync", 5000]
 ]
 J
 	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
@@ -157,13 +163,15 @@ J
 	# [KIT] stage 4d: Restart this, the NPC's client part, a prefab placed
 	# from the palette
 	for w in "webboss restarts entity 3's kit/npc from the start" \
-			"placed prefab kit/button_door as 4...5"; do
+			"placed prefab kit/button_door as 4...5" \
+			"Terrain by webboss: raise at" \
+			"An undo by webboss: a terrain stroke"; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
 	# The first Escape in the tools took the link, not the menu
 	awk '/kit editor: linking from 3/ { l = 1 } l && /pause: the menu shown/ { exit !c } l && /link cancelled/ { c = 1 } END { exit !c }' "$t/out/page.log" ||
 		fail "Escape did not cancel the link before opening the menu ($t/out/page.log)"
-	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it"
+	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it; a terrain stroke by mouse and its undo"
 	exit 0
 fi
 if [ "${1:-}" = web_touch ]; then
@@ -172,7 +180,8 @@ if [ "${1:-}" = web_touch ]; then
 	# and Edit; in the plan (F1) the palette (folded on a narrow screen,
 	# its toggle tapped) dragged from by finger, a tap selects, a drag
 	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
-	# pinch; Play mode, and in play a tap uses the button, a tap digs and
+	# pinch; ([KIT] stage 4f) a finger dragged with the terrain tool (T)
+	# paints a raise stroke, undone; Play mode, and in play a tap uses the button, a tap digs and
 	# a finger held places
 	check_tmp workbench_web_touch; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'J'
@@ -208,6 +217,12 @@ if [ "${1:-}" = web_touch ]; then
 	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
 	["waitlog", "kit editor: two fingers let go: the plan", 10],
 	["frames", 5], ["shot", "${OUT}/pinched.png"],
+	["key", "t"], ["waitlog", "kit editor: tool terrain", 10], ["frames", 3],
+	["drag", 250, 300, 400, 300, "touch"],
+	["waitlog", "kit editor: terrain: raise", 10],
+	["waitlog", "kit editor: the stroke ended", 10], ["frames", 5],
+	["shot", "${OUT}/painted.png"],
+	["chord", "Ctrl+z"], ["sync", 5000], ["key", "t"], ["frames", 3],
 	["tap", 62, 29], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["tap", 500, 174], ["waitlog", "kit editor: edit mode off", 10],
 	["frames", 10], ["shot", "${OUT}/play.png"],
@@ -224,10 +239,12 @@ J
 			"An edit by webboss: moved 3 to [1,1,3]" \
 			"kit/button 3: pressed by webboss" \
 			"workbench: webboss dug (1,0,3): written" \
-			"workbench: webboss placed kit/stone (1,0,3): written"; do
+			"workbench: webboss placed kit/stone (1,0,3): written" \
+			"Terrain by webboss: raise at" \
+			"An undo by webboss: a terrain stroke"; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
-	echo "PASS: Workbench in the web client by finger: Kit's editor's palette drag, tap, drag, held menu and pinch; in play a tap uses and digs, a finger held places"
+	echo "PASS: Workbench in the web client by finger: Kit's editor's palette drag, tap, drag, held menu and pinch, a terrain stroke painted and undone; in play a tap uses and digs, a finger held places"
 	exit 0
 fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
