@@ -367,6 +367,19 @@
 		return 0;
 	}
 
+	// __luanti_take_in_meta(x, y, z): the section of a position whose
+	// metadata is reached taken in first ([LUANTI_META_FAR_WRITE])
+	static int l_take_in_meta(lua_State *L)
+	{
+		Module *self = module_of(L);
+		// No world yet (the self-checks before it): nothing to take in
+		if(self->m_section_size.getX() > 0)
+			self->m_meta.load_section_meta(self->m_meta.section_of(
+					pv::Vector3DInt32(luaL_checkinteger(L, 1),
+					luaL_checkinteger(L, 2), luaL_checkinteger(L, 3))));
+		return 0;
+	}
+
 	// flush_node_writes(): what a light query calls before it reads,
 	// since the flood a buffered lamp makes is only in the world once the
 	// buffer has landed; see read_node()
@@ -1423,6 +1436,7 @@
 		set_global_cfunction("__luanti_step_peak", l_step_peak);
 		set_global_cfunction("__luanti_flush_node_writes",
 				l_flush_node_writes);
+		set_global_cfunction("__luanti_take_in_meta", l_take_in_meta);
 		set_global_cfunction("__luanti_loaded_at", l_loaded_at);
 		set_global_cfunction("__luanti_section_state", l_section_state);
 	}

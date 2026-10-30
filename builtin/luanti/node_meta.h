@@ -43,9 +43,10 @@ struct NodeMeta
 	// through.
 	static constexpr const char *OWNER = "luanti";
 	// The sections whose metadata the Lua half has taken in (their
-	// section_loaded heard), the only ones a checkpoint writes: one loaded
-	// and not heard of yet has its metadata in voxelworld alone, and
-	// writing the Lua half's nothing over it would lose it
+	// section_loaded heard, or a position in them reached; see take_in()),
+	// the only ones a checkpoint writes: one not taken in has its metadata
+	// in voxelworld alone, and writing the Lua half's nothing over it
+	// would lose it. Under m_lua_mutex.
 	std::set<pv::Vector3DInt16> m_taken_in;
 
 	NodeMeta(interface::Server *&server, main_context::SceneReference &scene,
@@ -148,6 +149,7 @@ struct NodeMeta
 	// is the section leaving).
 	void copy_loaded_meta()
 	{
+		interface::MutexScope ms(m_lua_mutex);
 		if(!m_lua || !m_scene || m_section_size.getX() <= 0 ||
 				m_taken_in.empty())
 			return;
@@ -167,6 +169,7 @@ struct NodeMeta
 	// metadata with the block the same way.
 	void save_section_meta(const pv::Vector3DInt16 &section_p)
 	{
+		interface::MutexScope ms(m_lua_mutex);
 		if(!m_lua || m_section_size.getX() <= 0)
 			return;
 		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
@@ -178,10 +181,8 @@ struct NodeMeta
 		if(!call_flat("__take_node_meta", {x0, y0, z0, x0 + sx - 1,
 				y0 + sy - 1, z0 + sz - 1}, nullptr, entries))
 			return;
-		// One the Lua half never took in: what it holds of it is not all
-		// of it, and would be written over what the save has.
-		// simplified: such a write (a mod's, while the section was away)
-		// is dropped; merging per position would keep it
+		// One the Lua half never took in has nothing in it: every path to
+		// a position's metadata takes its section in first
 		if(!m_taken_in.erase(section_p))
 			return;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
@@ -192,18 +193,25 @@ struct NodeMeta
 				(int)section_p.getZ());
 	}
 
+	// [LUANTI_META_FAR_WRITE] A section's saved metadata into the Lua half,
+	// once: on its section_loaded, or earlier when a position in it is
+	// reached (core.get_meta(), set_node()'s clearing; core.__take_in_meta)
+	// while it is unloaded or not heard of yet, so that what the Lua half
+	// holds of a section is all of it. One taken in already is left alone:
+	// what the Lua half has is newer than the save. Lua mutex, then
+	// voxelworld, the order a Lua call into voxelworld has.
 	void load_section_meta(const pv::Vector3DInt16 &section_p)
 	{
-		if(!m_lua || !m_scene)
+		interface::MutexScope ms(m_lua_mutex);
+		if(!m_lua || !m_scene || m_section_size.getX() <= 0 ||
+				!m_taken_in.insert(section_p).second)
 			return;
-		m_taken_in.insert(section_p);
 		voxelworld::OwnedList entries;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *world){
 			entries = world->get_section_owned(section_p, OWNER);
 		});
 		if(entries.empty())
 			return;
-		interface::MutexScope ms(m_lua_mutex);
 		lua_State *L = m_lua;
 		int base = lua_gettop(L);
 		lua_getglobal(L, "core");
@@ -228,11 +236,22 @@ struct NodeMeta
 	}
 
 	// [SAVE_LIMIT] Trimmed sections: voxelworld's forget_sections() took
-	// their metadata with their other voxel owners
+	// their metadata with their other voxel owners; one the Lua half took
+	// in without it loading lets go of it too, or it would come back
 	void forget(const sv_<pv::Vector3DInt16> &sections)
 	{
-		for(const pv::Vector3DInt16 &p : sections)
-			m_taken_in.erase(p);
+		interface::MutexScope ms(m_lua_mutex);
+		const int32_t sx = m_section_size.getX(), sy = m_section_size.getY(),
+				sz = m_section_size.getZ();
+		for(const pv::Vector3DInt16 &p : sections){
+			if(!m_taken_in.erase(p) || !m_lua)
+				continue;
+			voxelworld::OwnedList dropped;
+			call_flat("__take_node_meta", {p.getX() * sx, p.getY() * sy,
+					p.getZ() * sz, (p.getX() + 1) * sx - 1,
+					(p.getY() + 1) * sy - 1, (p.getZ() + 1) * sz - 1},
+					nullptr, dropped);
+		}
 	}
 
 	// Everything the Lua half holds, grouped by the section each position
