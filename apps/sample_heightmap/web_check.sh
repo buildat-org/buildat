@@ -22,13 +22,16 @@ grep -a "heightmap: terrain built\|heightmap: terrain updated\|the crater\|frame
 	sed 's/^.*sample_heightmap: //;s/^.*heightmap: /heightmap: /'
 grep -aq "heightmap: terrain built: 1024x1024 samples, 5 materials" "$t/page.log" ||
 	fail "no terrain of five materials ($t/page.log)"
-edit=$(grep -aoP "heightmap: terrain updated: \K[0-9]+ regions, [0-9]+ bytes, [0-9.]+ ms" "$t/page.log" | tail -1)
+# The crater's rectangles can reach the page over two frames (1 + 3
+# regions, 50 + 256 bytes): every update after the build summed
+edit=$(grep -aoP "heightmap: terrain updated: \K[0-9]+ regions, [0-9]+ bytes, [0-9.]+ ms" "$t/page.log" |
+	awk '{r += $1; b += $3; m += $5} END {if (NR) print r " regions, " b " bytes, " m " ms"}')
 regions=$(echo "$edit" | awk '{print $1}')
 bytes=$(echo "$edit" | awk '{print $3}')
 [ "$regions" = 4 ] && [ "${bytes:-99999}" -lt "${EDIT_BYTES:-2000}" ] ||
 	fail "the crater's edit: \"$edit\", not 4 regions under ${EDIT_BYTES:-2000} bytes ($t/page.log)"
 # The ground's colours, as check.sh counts them: dirt (brown) and gravel
-# (light grey) pixels
+# (grey) pixels
 read hills_dirt hills_grey crater_dirt crater_grey < <(python3 - "$t/hills.png" "$t/crater.png" <<'PY'
 import sys
 from PIL import Image
@@ -36,7 +39,7 @@ out = []
 for p in sys.argv[1:]:
 	dirt = grey = 0
 	for r, g, b in Image.open(p).convert("RGB").getdata():
-		if r > 1.3 * g and g > 1.2 * b and r > 50:
+		if r > 1.15 * g and 1.1 * b < g < 1.25 * b and r > 50:
 			dirt += 1
 		if abs(r - g) < 12 and abs(g - b) < 12 and r > 120:
 			grey += 1
