@@ -24,17 +24,22 @@ trap 'kill "$cli" 2>/dev/null; kill -INT "$srv" 2>/dev/null;
 echo '{"render_mode": "pbr", "keys": {"forward": "U"}}' > "$settings"
 rm -rf $BUILDAT_USER_PATH/apps/vanilla/saves/buildat_test_keys
 srv=""; cli=""
-BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_keys \
+# Seed 2 spawns at 0,0 ([KEYS_SPAWN_RED]): with a random seed the spawn
+# can land hundreds of nodes out, and the loading screen, which holds the
+# keys, waits for the player's own section to be generated -- 30 s and
+# more there on a debug build, 2 s at the origin
+BUILDAT_LUANTI_SEED=2 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_keys \
 	start_server "$tmp/srv.log" "Mods loaded" 120 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
 	{ echo "FAIL: the server did not start"; exit 1; }
 port=$SERVER_PORT
 srv=$SERVER_PID
-# The second after the world is up is the player landing (the spawn's
-# fall eats a key held during it); U is held for 3 s; the 500 ms after
-# are the player coming to a stop
+# Keys walk once the loading screen is gone ("the world is in"; the
+# chunks drawn round the player do not end it). The second after is the
+# player landing (the spawn's fall eats a key held during it); U is held
+# for 3 s; the 500 ms after are the player coming to a stop
 { echo "wait_log 60000 the server put the player"
-	echo "wait_log 60000 scene, 0 undrawn within 2"; echo "delay 1000"
+	echo "wait_log 60000 load: the world is in"; echo "delay 1000"
 	echo "event scan before"; echo "keydown U"; echo "delay 3000"
 	echo "keyup U"; echo "delay 500"; echo "event scan after"; echo "quit"; } > "$tmp/cmds.txt"
 timeout 150 bin/buildat -s "localhost:$port" -w 640x360 -l 3 -c @"$tmp/cmds.txt" \
