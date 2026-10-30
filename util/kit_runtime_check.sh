@@ -17,7 +17,11 @@
 #   4. A restart: the counter's count, the door's state and the runaway's
 #      disablement are the save's runtime row, apart from its authored row;
 #      the rows made as a save from before types had authors (bare names)
-#      are read as sample_kit's types and written back <author>/<name>.
+#      are read as sample_kit's types and written back <author>/<name>;
+#      ([KIT] stage 4c) a kit/door of voxels it owned (the first slice's)
+#      is made an object, its voxels' parameters dropped. A fresh save is
+#      Running. The pouch's loop (an item giver giving "spin") disables
+#      the pouch, not the giver, and Kit's own counts take over.
 #   6. ([KIT] stage 4b) Types by author: sample_kit/door and kit/door in
 #      one palette and save; sample_kit's pouch provides the players'
 #      inventory (a second pouch refused): kit/item_giver fills it to its
@@ -184,7 +188,7 @@ echo "ok: the wiring, the refusals, the budget, the loop, the routed write"
 # giver fills it to its capacity of one, the key door refuses a player
 # without the key and opens taking it
 want "$s" "Component type sample_kit/door version 1" \
-	"Component type kit/door version 1" \
+	"Component type kit/door version 2" \
 	"The players' inventory: entity 13's sample_kit/pouch" \
 	"Entity 14's sample_kit/pouch would provide the players' inventory, which entity 13's sample_kit/pouch does: refused" \
 	"kit/key_door 16: locked to player:p" \
@@ -198,20 +202,36 @@ grep -a "The palette: " "$s" | grep -q " kit/door .* sample_kit/door" ||
 echo "ok: two authors' doors, the pouch in place of Kit's counts (a second refused), the item giver and the key door on it"
 
 # The save's rows of Kit's: the authored and runtime ones, the session
-# ([KIT] stage 4c: sample_kit played once its floor was laid in the start)
-# and the copy of the section play wrote to
+# ([KIT] stage 4c: a fresh save Running; the floor a generator's, the
+# start) and the copy of the section play wrote to
 db=$(ls "$save"/*.sqlite 2>/dev/null | head -1)
 [ -n "$db" ] || fail "no database in $save"
 rows=$(sqlite3 "$db" "SELECT key FROM store WHERE store = 'kit' ORDER BY key" | tr '\n' ' ')
 [ "$rows" = "authored runtime session start:world:0,0,0 " ] || fail "kit's rows are \"$rows\""
-want "$s" "A fresh save: Stopped" "Play by app: a round from the start" \
-	"1 sections copied out (1 this round)"
+want "$s" "A fresh save: Running" "1 sections copied out (1 this round)"
+grep -aq "Play by" "$s" && fail "a fresh save was played, not Running from the start ($s)"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" |
 	grep -q '"presses"' && fail "runtime state in the authored row"
 # The rows as a save from before types had authors has them: sample_kit's
 # types bare names, read back as sample_kit's (the runtime row's too), and
 # no session (from before Play and Stop: it runs on, its start its types'
-# defaults)
+# defaults); and ([KIT] stage 4c) the first slice's kit/door 12 a door of
+# voxels it owned (version 1, its voxels' parameters), and the item giver
+# giving "spin", which sample_kit's pouch never returns from
+python3 -I - "$db" <<'PY' || fail "could not make the rows of before ($db)"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+a = json.loads(db.execute("SELECT value FROM store WHERE store = 'kit' AND key = 'authored'").fetchone()[0])
+for e in a["entities"]:
+	for c in e["components"]:
+		if e["id"] == 12:
+			c["version"] = 1
+			c["params"].update({"closed": "glass", "open": "air"})
+		if e["id"] == 15:
+			c["params"]["item"] = "spin"
+db.execute("UPDATE store SET value = ? WHERE store = 'kit' AND key = 'authored'", (json.dumps(a),))
+db.commit()
+PY
 sqlite3 "$db" "UPDATE store SET value = replace(value, 'sample_kit/', '') WHERE store = 'kit';
 	DELETE FROM store WHERE store = 'kit' AND key NOT IN ('authored', 'runtime')"
 
@@ -223,6 +243,10 @@ keypress e
 frames 2
 keypress h
 frames 2
+event kit_use 15
+frames 2
+event kit_use 15
+wait_log 10000 kit: items: spin x1
 keypress b
 wait_log 60000 replicated: entity 4 open = false
 quit
@@ -234,8 +258,15 @@ want "$s" "sample_kit: at start the counter is 2, the door open false" \
 	"Entity 10's sample_kit/faulty, on_use: sample_kit/faulty:8: attempt to index local 't' (a nil value)" \
 	"Entity 11's sample_kit/runaway disabled: on_use ran past its budget" \
 	"sample_kit/counter 5: count 4 by player:p"
-[ "$(grep -ac "A new box after" "$s")" = 1 ] ||
-	fail "run 2: not one new box, for the runaway alone ($s)"
+# The pouch's spin: the pouch disabled, not the item giver, and Kit's own
+# counts take the second use
+want "$s" "Entity 13's sample_kit/pouch disabled: its inventory ran past its budget in entity 15's on_use; the players' inventory is Kit's own counts now" \
+	'has {"spin":1}'
+grep -aq "Entity 15's kit/item_giver disabled" "$s" && fail "the item giver was disabled for its provider's loop ($s)"
+[ "$(grep -ac "sample_kit/pouch disabled" "$s")" = 1 ] || fail "the pouch's disablement not logged once ($s)"
+[ "$(grep -ac "A new box after" "$s")" = 2 ] ||
+	fail "run 2: not two new boxes, for the runaway and the pouch ($s)"
+want "$s" "Entity 12's kit/door is an object now: its voxels' parameters dropped, its 2 owned cells to be cleared to air"
 grep -aq "the composition's first start" "$s" && fail "the composition was read again ($s)"
 want "$s" "11 bare type names made <author>/<name>" \
 	"A save from before Play and Stop: Running, its start its types' defaults"
@@ -247,7 +278,10 @@ a, r = json.loads(rows["authored"]), json.loads(rows["runtime"])
 types = [c["type"] for e in a["entities"] for c in e["components"]]
 assert all("/" in t for t in types), types
 assert "kit/door" in types and types.count("sample_kit/door") == 1, types
-assert all(c["version"] == 1 for e in a["entities"] for c in e["components"])
+objects = ("kit/door", "kit/key_door", "kit/gate", "kit/button", "kit/lever")
+assert all(c["version"] == (2 if c["type"] in objects else 1) for e in a["entities"] for c in e["components"]), a
+door = [e for e in a["entities"] if e["id"] == 12][0]["components"][0]
+assert "closed" not in door["params"] and "open" not in door["params"], door
 assert all("/" in c["type"] for k, v in r.items() if k != "items" for c in v), r
 print("  rows: %d instances, every type <author>/<name> with its version" % len(types))
 PY

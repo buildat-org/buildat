@@ -1,6 +1,8 @@
 -- A pouch: the players' inventory in place of Kit's counts (inventory =
 -- true), each player's holding `capacity` items at most, all kinds
--- together. Kit asks the first pouch; a second is refused
+-- together. Kit asks the first pouch; a second is refused. Adding a
+-- "spin" never returns: Kit disables the pouch, not who asked, and its own
+-- counts take over
 local function total(mine)
 	local n = 0
 	for _, k in pairs(mine) do
@@ -19,6 +21,9 @@ return {
 		return (c.state.held[player] or {})[item] or 0
 	end,
 	inventory_add = function(c, player, item, n, ext)
+		if item == "spin" then
+			while true do end
+		end
 		local held = c.state.held
 		local mine = held[player] or {}
 		if total(mine) + n > c.params.capacity then

@@ -14,9 +14,9 @@
 // drives it. A player is "p<peer>", or their account's name once logged in
 // (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
 // and the builders edit with Kit's editor (util/kit_editor_check.sh).
-// The floor is laid once a save, in Kit's start (the server Stopped, [KIT]
-// stage 4c), and then sample_kit plays: its components run from then on
-// until a builder stops them.
+// The floor is laid once a save, merged as a generator's voxels (the
+// start, not play's: the server starts Running, [KIT] stage 4c); a
+// client's "p" key digs the pillar, the player's own write (a build).
 #include "core/log.h"
 #include "accounts/api.h"
 #include "client_file/api.h"
@@ -97,8 +97,6 @@ struct Module: public interface::Module
 		});
 		kit::Host h;
 		h.types_path = m_server->get_module_path(MODULE)+"/kit";
-		h.defaults = R"({"kit/door": {"closed": "glass"},
-				"kit/key_door": {"closed": "glass"}})";
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;
@@ -120,35 +118,29 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &)
 	{
 		ss_ name = m_door_voxel;
-		bool laid = false;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			if(!w->is_section_loaded(pv::Vector3DInt16(0, 0, 0)))
 				return;
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
 			// Something for Kit's editor to point at: a stone floor under
-			// x, z 0...15 and a stone at PILLAR
+			// x, z 0...15 and a stone at PILLAR, a generator's (the start)
 			if(!m_floor){
 				m_floor = true;
 				interface::VoxelName stone;
 				stone.block_name = "stone";
 				const interface::VoxelInstance v(reg->get(stone)->id);
+				interface::VoxelVolume f(pv::Region(0, 0, 0, 15, 1, 15));
 				for(int x = 0; x < 16; x++)
 					for(int z = 0; z < 16; z++)
-						w->set_voxel(pv::Vector3DInt32(x, 0, z), v);
-				w->set_voxel(PILLAR, v);
+						f.setVoxelAt(x, 0, z, v);
+				f.setVoxelAt(PILLAR, v);
+				w->merge_volume(f, false);
 				m_save->store("main")->set("floor", "1");
-				laid = true;
 			}
 			const interface::VoxelDefinition *def = reg->get(
 					reg->get_format().id.get(w->get_voxel(DOOR).data));
 			name = def ? def->name.block_name : "?";
 		});
-		// The start is the floor: play
-		if(laid)
-			kit::access(m_server, [&](kit::Interface *k){
-				if(!k->running())
-					k->set_running(true, "app");
-			});
 		if(name != m_door_voxel){
 			m_door_voxel = name;
 			log_i(MODULE, "sample_kit: the door's voxel is %s", cs(name));
@@ -181,19 +173,28 @@ struct Module: public interface::Module
 				cs(login.name));
 	}
 
-	// A player digging at the door: not the game's own write, so routed
+	// A player digging at the door (or "pillar": the pillar): not the
+	// game's own write, so routed; one made is the player's build
 	void on_dig(const network::Packet &packet)
 	{
+		const bool pillar = packet.data == "pillar";
+		const pv::Vector3DInt32 p = pillar ? PILLAR : DOOR;
+		bool written = false;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			interface::VoxelName air;
 			air.block_name = "air";
-			const auto r = w->routed_set_voxel(DOOR, interface::VoxelInstance(
+			const auto r = w->routed_set_voxel(p, interface::VoxelInstance(
 					w->get_voxel_reg()->get(air)->id),
 					"player:p"+itos(packet.sender));
-			log_i(MODULE, "sample_kit: a dig at the door: %s",
-					r == voxelworld::Instance::ROUTED ? "routed to its owner" :
-					r == voxelworld::Instance::WRITTEN ? "written" : "refused");
+			written = r == voxelworld::Instance::WRITTEN;
+			log_i(MODULE, "sample_kit: a dig at the %s: %s", pillar ? "pillar" :
+					"door", r == voxelworld::Instance::ROUTED ?
+					"routed to its owner" : written ? "written" : "refused");
 		});
+		if(written)
+			kit::access(m_server, [&](kit::Interface *k){
+				k->player_wrote(packet.sender, p.getX(), p.getY(), p.getZ());
+			});
 	}
 };
 

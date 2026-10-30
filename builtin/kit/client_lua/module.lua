@@ -31,6 +31,8 @@
 --     their cursor a cross; game-wide entities (on the app root) listed to
 --     select; "Save as start" and an instance's "Restart this" while the
 --     server is Running
+--   - (the origins) the builds the last Stop discarded, until the next
+--     Play: "Keep them", or "Choose..." a player's; "Always keep builds"
 -- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
 -- are on; F6) and the server's state ("Play" while Stopped, "Stop" while
 -- Running). kit.editor{bar = false} leaves it out for an app's own menu:
@@ -50,7 +52,7 @@ local M = {}
 local E = {editing = false, running = false, by = "", can_edit = false,
 	state = nil, sel = nil, link = nil, cursor = nil, pending = {}, status = "",
 	windows = {}, builders = {}, seen = {}, labels = {}, label_text = {},
-	listeners = {}}
+	listeners = {}, discarded = {}, always_keep = false, choose = false}
 local O = nil -- the app's options
 
 local WARN = magic.Color(1.0, 0.55, 0.45)
@@ -431,6 +433,39 @@ people = function()
 			end)
 		end
 	end
+	-- The builds the last Stop discarded, to keep until the next Play: all,
+	-- or by player ("Choose...")
+	local names = {}
+	for name in pairs(E.discarded) do
+		names[#names + 1] = name
+	end
+	table.sort(names)
+	if #names > 0 and not E.running then
+		local list = {}
+		for _, name in ipairs(names) do
+			list[#list + 1] = name .. " " .. tostring(E.discarded[name])
+		end
+		local dr = row(b)
+		label(dr, "Builds discarded at Stop: " .. table.concat(list, ", "))
+		button(dr, "Keep them", function()
+			send({op = "keep"})
+		end)
+		button(dr, E.choose and "Done" or "Choose...", function()
+			E.choose = not E.choose
+			people()
+		end)
+		for _, name in ipairs(E.choose and names or {}) do
+			local cr = row(b)
+			label(cr, name .. ": " .. tostring(E.discarded[name]) .. " cells", 140)
+			button(cr, "Keep " .. name .. "'s", function()
+				send({op = "keep", names = {name}})
+			end)
+		end
+	end
+	button(b, "Always keep builds: " .. (E.always_keep and "yes" or "no"),
+			function()
+		send({op = "always_keep", on = not E.always_keep})
+	end)
 	-- The builders with the tools on, each in their colour
 	for _, bd in ipairs(E.builders) do
 		text(b, "Builder: " .. tostring(bd.name) .. (bd.you and " (you)" or
@@ -793,6 +828,11 @@ function M.editor(options)
 				E.builders = {}
 			end
 		end
+		E.discarded = type(s.discarded) == "table" and s.discarded or {}
+		E.always_keep = s.always_keep == true
+		if not next(E.discarded) then
+			E.choose = false
+		end
 		if E.running ~= (s.running == true) or E.by ~= tostring(s.by or "") then
 			E.running, E.by = s.running == true, tostring(s.by or "")
 			log:info("kit editor: the server is " .. (E.running and "Running" or
@@ -883,13 +923,19 @@ end
 -- ---- Play: what every client sees of Kit, edit rights or not
 -- A positional entity's node ("kit:<id>") carries its shared state (the
 -- var "kit:<key>", JSON) and what its types show (the var "kit_show",
--- {look, hud}): a type's `look = {shape = "box"|"sphere", size = n,
--- color = "#rrggbb", text = key}` is drawn where the entity is, its state
--- `text` over it; a type's `hud = key` puts that state on the screen.
+-- {look, hud}): a type's look (builtin/kit/api.h) is drawn where the
+-- entity is, in both modes, from its state: a box (size: its sides,
+-- offset: its middle from the entity's position, as the server made them
+-- of its extent) or a sphere, its `when` over it while the state `state`
+-- is true, a collision shape (a static body in the scene's physics) while
+-- solid, its state `text` over it; a type's `hud = key` puts that state on
+-- the screen.
 -- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray
--- (its cell or its look), kit.use(id) uses it: the server checks range
--- and whether it is usable. The player's inventory (c:add, c:take...) is
--- a line on the screen.
+-- (its look's box, or near its cell), kit.use(id) uses it: the server
+-- checks range and whether it is usable. The player's inventory (c:add,
+-- c:take...) is a line on the screen. The Stop notice: "Your builds while
+-- playing were discarded." (who built how many when others did too), and
+-- for a builder "Keep them" (the tools' panel has it until the next Play).
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
 -- sends an edit as the editor would, "event kit_use <id>" a use.
 local replicate = require("buildat/extension/replicate")
@@ -912,6 +958,14 @@ local function shown(v)
 	return tostring(v)
 end
 
+local function drop_look(n)
+	if n.look then
+		n.look:Remove()
+	end
+	n.look, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil, nil,
+			nil, nil, nil, nil
+end
+
 replicate.sub_sync_node_added({}, function(node)
 	local id = tonumber(node:GetName():match("^kit:(%d+)$"))
 	if id then
@@ -921,59 +975,144 @@ end)
 replicate.sub_sync_node_removed(function(node, node_id)
 	for id, n in pairs(P.nodes) do
 		if n.node:GetID() == node_id then
-			if n.look then
-				n.look:Remove()
-			end
+			drop_look(n)
 			P.nodes[id] = nil
 		end
 	end
 end)
 
-local function build_look(n, look)
-	local scene = replicate.main_scene
-	n.look = scene:CreateChild("kit_look")
-	local s = tonumber(look.size) or 0.4
-	local shape = look.shape == "sphere" and "Sphere" or "Box"
-	local body = n.look:CreateChild("Body")
-	body.scale = magic.Vector3(s * 2, s * 2, s * 2)
-	local m = body:CreateComponent("StaticModel")
-	m.model = magic.cache:GetResource("Model", "Models/" .. shape .. ".mdl")
-	local c = color(look.color, magic.Color(0.8, 0.8, 0.8))
-	local mat = magic.Material:new()
-	mat:SetTechnique(0, magic.cache:GetResource("Technique",
-			"Techniques/NoTexture.xml"))
-	mat:SetShaderParameter("MatDiffColor", c)
-	mat:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
-	m.material = mat
-	n.mat = mat
-	m.castShadows = true
-	if look.text then
-		local l = n.look:CreateChild("Text")
-		l.position = magic.Vector3(0, s + 0.45, 0)
-		local t = l:CreateComponent("Text3D")
-		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 16)
-		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		t.faceCameraMode = magic.FC_ROTATE_XYZ
-		t.fixedScreenSize = true
-		t.textEffect = magic.TE_STROKE
-		t.effectColor = magic.Color(0, 0, 0, 0.8)
-		n.text = t
+-- A look's box as it is drawn now (on: its state is true): its sides, its
+-- middle from the entity, whether it is solid and its colour
+local function look_box(look, on)
+	local size, off = {}, {0, 0, 0}
+	if type(look.size) == "table" then
+		for i = 1, 3 do
+			size[i] = tonumber(look.size[i]) or 1
+		end
+	else
+		local s = (tonumber(look.size) or 0.4) * 2
+		size = {s, s, s}
 	end
+	if type(look.offset) == "table" then
+		for i = 1, 3 do
+			off[i] = tonumber(look.offset[i]) or 0
+		end
+	end
+	local w = on and type(look.when) == "table" and look.when or {}
+	local solid = look.solid == true
+	if w.solid ~= nil then
+		solid = w.solid == true
+	end
+	if type(w.scale) == "table" then
+		for i = 1, 3 do
+			local was = size[i]
+			size[i] = size[i] * (tonumber(w.scale[i]) or 1)
+			-- Its bottom kept
+			if i == 2 then
+				off[2] = off[2] - (was - size[2]) / 2
+			end
+		end
+	end
+	if w.swing then
+		-- A quarter turn round its -x edge, towards +z
+		local hinge, front = off[1] - size[1] / 2, off[3] - size[3] / 2
+		size[1], size[3] = size[3], size[1]
+		off[1], off[3] = hinge + size[1] / 2, front + size[3] / 2
+	end
+	return {size = size, off = off, solid = solid, color = w.color or look.color}
+end
+
+local function v3(t)
+	return magic.Vector3(t[1], t[2], t[3])
+end
+
+-- The look drawn as its state has it: built the first time, changed as the
+-- state changes
+local function draw_look(id, n, look)
+	local on = false
+	if look.state then
+		on = parse(n.node:GetVar("kit:" .. tostring(look.state))) == true
+	end
+	if n.look and n.on == on then
+		return
+	end
+	n.on = on
+	local b = look_box(look, on)
+	n.box = b
+	if not n.look then
+		local scene = replicate.main_scene
+		n.look = scene:CreateChild("kit_look")
+		n.body = n.look:CreateChild("Body")
+		local m = n.body:CreateComponent("StaticModel")
+		m.model = magic.cache:GetResource("Model", "Models/" ..
+				(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
+		n.mat = magic.Material:new()
+		n.mat:SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/NoTexture.xml"))
+		n.mat:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
+		m.material = n.mat
+		m.castShadows = true
+		if look.text then
+			local l = n.look:CreateChild("Text")
+			local t = l:CreateComponent("Text3D")
+			t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 16)
+			t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+			t.faceCameraMode = magic.FC_ROTATE_XYZ
+			t.fixedScreenSize = true
+			t.textEffect = magic.TE_STROKE
+			t.effectColor = magic.Color(0, 0, 0, 0.8)
+			n.text = t
+			n.text_node = l
+		end
+		n.at = nil
+	end
+	n.body.scale = v3(b.size)
+	n.body.position = v3(b.off)
+	n.mat:SetShaderParameter("MatDiffColor", color(b.color,
+			magic.Color(0.8, 0.8, 0.8)))
+	if n.text_node then
+		n.text_node.position = magic.Vector3(b.off[1], b.off[2] + b.size[2] / 2 +
+				0.45, b.off[3])
+	end
+	-- Solid: a static body (no mass) the players' bodies meet
+	if n.solid then
+		n.solid:Remove()
+		n.solid = nil
+	end
+	if b.solid then
+		n.solid = n.look:CreateChild("Solid")
+		n.solid.position = v3(b.off)
+		n.solid:CreateComponent("RigidBody")
+		n.solid:CreateComponent("CollisionShape"):SetBox(v3(b.size))
+	end
+	log:info(string.format("kit: entity %d drawn %gx%gx%g at %g,%g,%g%s", id,
+			b.size[1], b.size[2], b.size[3], b.off[1], b.off[2], b.off[3],
+			b.solid and ", solid" or ""))
 end
 
 local hud = nil
 local function update_play()
 	local lines = {}
 	for id, n in pairs(P.nodes) do
-		if not n.show then
-			n.show = parse(n.node:GetVar("kit_show"))
-			if type(n.show) == "table" and type(n.show.look) == "table" then
-				build_look(n, n.show.look)
-			end
+		-- What it shows: again as an edit changes it
+		local raw = n.node:GetVar("kit_show")
+		raw = raw:IsEmpty() and "" or raw:GetString()
+		if raw ~= n.show_raw then
+			n.show_raw = raw
+			n.show = network.parse_json(raw)
+			drop_look(n)
+			n.last_text = nil
 		end
 		local show = type(n.show) == "table" and n.show or {}
+		if type(show.look) == "table" then
+			draw_look(id, n, show.look)
+		end
 		if n.look then
-			n.look.position = n.node.position
+			local p = n.node.position
+			if not n.at or (n.at - p):Length() > 1e-4 then
+				n.at = magic.Vector3(p.x, p.y, p.z)
+				n.look.position = n.at
+			end
 		end
 		if n.text then
 			local v = shown(parse(n.node:GetVar("kit:" .. tostring(show.look.text))))
@@ -1010,6 +1149,11 @@ local function update_play()
 		hud:SetText(text)
 		log:info("kit: the screen says \"" .. text:gsub("\n", " | ") .. "\"")
 	end
+	-- The Stop notice goes by itself
+	if P.notice and buildat.get_time_us() > P.notice_until then
+		P.notice:Remove()
+		P.notice = nil
+	end
 end
 magic.SubscribeToEvent("Update", update_play)
 
@@ -1024,21 +1168,101 @@ buildat.sub_packet("kit:items", function(data)
 	log:info("kit: items: " .. (#t > 0 and table.concat(t, ", ") or "none"))
 end)
 
+-- The Stop notice: the round's builds were discarded, who built them when
+-- others did; a builder may keep them (here, or the tools' panel until the
+-- next Play). Not a dialog: it takes no focus and goes by itself
+local NOTICE_S = 15
+buildat.sub_packet("kit:discarded", function(data)
+	local d = network.parse_json(data)
+	if type(d) ~= "table" or type(d.counts) ~= "table" then
+		return
+	end
+	local list, others = {}, false
+	for name, k in pairs(d.counts) do
+		list[#list + 1] = (name == d.you and "you" or tostring(name)) .. " " ..
+				tostring(k)
+		others = others or name ~= d.you
+	end
+	table.sort(list)
+	local s = others and "Builds while playing were discarded (" ..
+			table.concat(list, ", ") .. ")." or
+			"Your builds while playing were discarded."
+	log:info("kit: builds discarded: " .. s)
+	if P.notice then
+		P.notice:Remove()
+	end
+	local w = magic.ui.root:CreateChild("Window")
+	if not magic.ui.root.defaultStyle then
+		magic.ui.root.defaultStyle = STYLE
+	end
+	w:SetStyleAuto()
+	w:SetLayout(magic.LM_HORIZONTAL, 6, magic.IntRect(8, 6, 8, 6))
+	w:SetFocusMode(magic.FM_NOTFOCUSABLE)
+	text(w, s)
+	if d.can_keep == true then
+		button(w, "Keep them", function()
+			send({op = "keep"})
+			if P.notice then
+				P.notice:Remove()
+				P.notice = nil
+			end
+		end)
+	end
+	w:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+	w:SetPosition(-10, 90)
+	P.notice, P.notice_until = w, buildat.get_time_us() + NOTICE_S * 1000000
+end)
+
+-- The ray meets a look's box at t (nil: it does not)
+local function ray_box(origin, dir, c, half)
+	local t0, t1 = 0, math.huge
+	local o = {origin.x, origin.y, origin.z}
+	local d = {dir.x, dir.y, dir.z}
+	for i = 1, 3 do
+		local lo, hi = c[i] - half[i], c[i] + half[i]
+		if math.abs(d[i]) < 1e-9 then
+			if o[i] < lo or o[i] > hi then
+				return nil
+			end
+		else
+			local a, b = (lo - o[i]) / d[i], (hi - o[i]) / d[i]
+			if a > b then
+				a, b = b, a
+			end
+			t0, t1 = math.max(t0, a), math.min(t1, b)
+			if t0 > t1 then
+				return nil
+			end
+		end
+	end
+	return t0
+end
+
 function M.pointed(origin, dir, reach)
 	local best, bd = nil, nil
 	for id, n in pairs(P.nodes) do
 		local p = n.node.position
-		local s = n.show and type(n.show.look) == "table" and
-				tonumber(n.show.look.size) or 0
-		local wx, wy, wz = p.x - origin.x, p.y - origin.y, p.z - origin.z
-		local t = wx * dir.x + wy * dir.y + wz * dir.z
-		if t > 0 and t <= reach + 0.5 then
-			local dx, dy, dz = wx - dir.x * t, wy - dir.y * t, wz - dir.z * t
-			local d = math.sqrt(dx * dx + dy * dy + dz * dz)
-			-- A cell's corner is 0.87 from its middle; a face's middle 0.5
-			if d <= math.max(0.75, s) and (not bd or t < bd) then
-				best, bd = id, t
+		local t
+		if n.box then
+			-- Its look as drawn, a little larger (a thin button: as thick
+			-- as most of a cell)
+			local c, half = {}, {}
+			for i, k in ipairs({"x", "y", "z"}) do
+				c[i] = p[k] + n.box.off[i]
+				half[i] = math.max(n.box.size[i] / 2, 0.3) + 0.05
 			end
+			t = ray_box(origin, dir, c, half)
+		else
+			local wx, wy, wz = p.x - origin.x, p.y - origin.y, p.z - origin.z
+			local tt = wx * dir.x + wy * dir.y + wz * dir.z
+			local dx, dy, dz = wx - dir.x * tt, wy - dir.y * tt, wz - dir.z * tt
+			-- A cell's corner is 0.87 from its middle; a face's middle 0.5
+			if tt > 0 and math.sqrt(dx * dx + dy * dy + dz * dz) <= 0.75 then
+				t = tt
+			end
+		end
+		if t and t <= reach + 0.5 and (not bd or t < bd) then
+			best, bd = id, t
 		end
 	end
 	return best

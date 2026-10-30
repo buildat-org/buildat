@@ -11,9 +11,11 @@
 // have them also dig and place voxels in play (a write routed to an owner
 // when a component owns the voxel), and so does anyone where a component
 // grants it (Kit's can_dig/can_place: a dig zone); everyone else plays
-// what was built. The server starts Stopped (Kit's, [KIT] stage 4c): the
-// floor is laid in the start, and a builder's Play starts a round, Stop
-// puts the start back. One save, "world": the voxels, Kit's rows.
+// what was built. A player's dig or place is a build (Kit's
+// player_wrote), which a builder's Stop discards unless kept. The server
+// starts Running (Kit's, [KIT] stage 4c): the floor is laid as a
+// generator's (merged, not play's), and a builder's Stop puts the start
+// back, Play starts a round. One save, "world": the voxels, Kit's rows.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -48,8 +50,9 @@ static const int WORLD_MIN = -64, WORLD_MAX = 63;
 // are in, their body's centre this far over it when they stand (the
 // client's capsule is 1.7 tall); a put is a little over that
 static const double FEET_CELL = 0.35, PUT_OVER = 0.05;
-// The voxels: what a builder places (the first PLACEABLE) and what the
-// starter set's components show their state with
+// The voxels: what a builder places (the first PLACEABLE), and those the
+// starter set's components showed their state with before they were
+// objects ([KIT] stage 4c; kept registered for the saves that have them)
 struct VoxelDef { const char *name; bool solid; };
 static const VoxelDef VOXELS[] = {
 	{"air", false}, {"stone", true}, {"glass", true}, {"wood", true},
@@ -58,14 +61,6 @@ static const VoxelDef VOXELS[] = {
 	{"lever_on", true}, {"door", true}, {"gate", true},
 };
 static const size_t PLACEABLE = 6; // air is not placed, it is a dig
-// Kit's types' voxels, Workbench's
-static const char DEFAULTS[] = R"({
-	"kit/button": {"up": "button", "down": "button_pressed"},
-	"kit/door": {"closed": "door"},
-	"kit/key_door": {"closed": "door"},
-	"kit/gate": {"closed": "gate"},
-	"kit/lever": {"off_voxel": "lever_off", "on_voxel": "lever_on"}
-})";
 
 struct Module: public interface::Module
 {
@@ -140,7 +135,6 @@ struct Module: public interface::Module
 		ss_ v;
 		m_floor = m_save->store("main")->get("floor", v);
 		kit::Host h;
-		h.defaults = DEFAULTS;
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;
@@ -150,7 +144,8 @@ struct Module: public interface::Module
 			m_server->shutdown(1, "workbench: Kit is not hosted");
 	}
 
-	// The floor, once in the save's life: what was dug out of it stays dug
+	// The floor, once in the save's life: what was dug out of it stays dug.
+	// Merged as a generator's voxels, so it is the start, not play's
 	void on_tick(const interface::TickEvent &)
 	{
 		if(m_floor)
@@ -163,9 +158,12 @@ struct Module: public interface::Module
 			interface::VoxelName stone;
 			stone.block_name = "stone";
 			const interface::VoxelInstance s(w->get_voxel_reg()->get(stone)->id);
+			interface::VoxelVolume v(pv::Region(-FLOOR_HALF, 0, -FLOOR_HALF,
+					FLOOR_HALF - 1, 0, FLOOR_HALF - 1));
 			for(int x = -FLOOR_HALF; x < FLOOR_HALF; x++)
 				for(int z = -FLOOR_HALF; z < FLOOR_HALF; z++)
-					w->set_voxel(pv::Vector3DInt32(x, 0, z), s);
+					v.setVoxelAt(x, 0, z, s);
+			w->merge_volume(v, false);
 			m_floor = true;
 		});
 		if(m_floor){
@@ -310,18 +308,24 @@ struct Module: public interface::Module
 					c[2]);
 			return;
 		}
+		bool written = false;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			interface::VoxelName n;
 			n.block_name = voxel;
 			const auto r = w->routed_set_voxel(pv::Vector3DInt32(c[0], c[1],
 					c[2]), interface::VoxelInstance(w->get_voxel_reg()->
 					get(n)->id), "player:"+m_names[peer]);
+			written = r == voxelworld::Instance::WRITTEN;
 			log_i(MODULE, "workbench: %s %s (%i,%i,%i): %s", cs(m_names[peer]),
 					voxel == "air" ? "dug" : cs("placed "+voxel), c[0], c[1],
 					c[2], r == voxelworld::Instance::ROUTED ? "routed to its "
-					"owner" : r == voxelworld::Instance::WRITTEN ? "written" :
-					"refused");
+					"owner" : written ? "written" : "refused");
 		});
+		// The player's own: a build
+		if(written)
+			kit::access(m_server, [&](kit::Interface *k){
+				k->player_wrote(peer, c[0], c[1], c[2]);
+			});
 	}
 };
 

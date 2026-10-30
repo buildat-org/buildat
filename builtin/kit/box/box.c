@@ -19,7 +19,9 @@
 **                        name, after = seconds (-1: none), teleport =
 **                        {x, y, z}, items = {item = n} (the player's list
 **                        after inventory calls), inv_set = {{key,
-**                        value}...} (the provider's state)}
+**                        value}...} (the provider's state)}; a call into
+**                        the provider (inv) is marked by "P" before it and
+**                        "p" after it, ahead of the answer
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
 ** box_recover(), which unwinds the Lua state as a longjmp to box_call's
 ** protected call would have, and answers "E" and the message; 0 from it
@@ -96,6 +98,17 @@ static int l_log(lua_State *l)
 	return 0;
 }
 
+/* A mark in the answer: "P" as a call into the replacing inventory
+** provider starts, "p" as it ends. A call the meter stops leaves the last
+** one, so the host knows whose run it was ([KIT] stage 4c) */
+static int l_mark(lua_State *l)
+{
+	size_t n;
+	const char *s = luaL_checklstring(l, 1, &n);
+	buildat_call_output(s, (unsigned)n);
+	return 0;
+}
+
 static int l_floor(lua_State *l)
 {
 	lua_pushnumber(l, floor(luaL_checknumber(l, 1)));
@@ -154,6 +167,7 @@ static const char PRELUDE[] =
 "local types = {}\n"
 "local NULL = {}\n"
 "local log = box_log\n"
+"local mark = box_mark\n"
 "local smeta = getmetatable('')\n"
 "smeta.__metatable = false\n"
 "local math_lib = box_math\n"
@@ -264,6 +278,13 @@ static const char PRELUDE[] =
 "			state = proxy(req.inv.state or {}, fx.inv_set)}\n"
 "		function p:log(...) log(req.inv.type .. ' ' .. tostring(req.inv.id) .. ': ' .. line(...)) end\n"
 "	else p = {items = req.items or {}} end\n"
+"	local function call(h, ...)\n"
+"		if not req.inv then return def[h](p, ...) end\n"
+"		mark('P')\n"
+"		local r = def[h](p, ...)\n"
+"		mark('p')\n"
+"		return r\n"
+"	end\n"
 "	local function args(item, n, ext)\n"
 "		if type(item) ~= 'string' or #item > 64 or not item:match('^[%w_]+$') then\n"
 "			error('an item is letters, digits and _', 4) end\n"
@@ -276,18 +297,18 @@ static const char PRELUDE[] =
 "	function inv.count(item, ext)\n"
 "		ext = args(item, 1, ext)\n"
 "		if not player then return 0 end\n"
-"		return tonumber(def.inventory_count(p, player, item, ext)) or 0\n"
+"		return tonumber(call('inventory_count', player, item, ext)) or 0\n"
 "	end\n"
 "	function inv.change(h, item, n, ext)\n"
 "		ext = args(item, n or 1, ext)\n"
 "		if not player then return false end\n"
 "		touched = true\n"
-"		return def[h](p, player, item, n or 1, ext) == true\n"
+"		return call(h, player, item, n or 1, ext) == true\n"
 "	end\n"
 "	function inv.list(ext)\n"
 "		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 3) end\n"
 "		if not player then return {} end\n"
-"		local l = def.inventory_list(p, player, ext or {})\n"
+"		local l = call('inventory_list', player, ext or {})\n"
 "		return type(l) == 'table' and copy(l) or {}\n"
 "	end\n"
 "	function inv.finish() if touched then fx.items = inv.list() end end\n"
@@ -368,6 +389,8 @@ static int f_open(lua_State *l)
 	lua_call(l, 0, 0);
 	lua_pushcfunction(l, l_log);
 	lua_setglobal(l, "box_log");
+	lua_pushcfunction(l, l_mark);
+	lua_setglobal(l, "box_mark");
 	lua_newtable(l);
 	luaL_register(l, NULL, MATH);
 	lua_setglobal(l, "box_math");
