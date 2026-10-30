@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
+# cost: ~20 s, ~1 min with a cold module cache (2026-10-30)
 # covers: apps/workbench/** builtin/kit/**
 # [KIT] stage 4, Workbench and its starter set, on scripted clients, the
 # server's game clock at CHECK_RATE (the timer's seconds are the game's):
