@@ -48,6 +48,9 @@ struct WorldView
 	// The function and line of set_node()'s caller, while on_set runs
 	const char *set_by = "";
 	int set_by_line = 0;
+	// [SKELDAT_BONE_WATER_DROWN] Set around a set_node whose voxel takes a
+	// liquid's place outright, pushing none of it aside
+	bool replace_liquid = false;
 	// The random numbers every part draws from
 	std::mt19937 rand{std::random_device{}()};
 	// The server's clock, seconds; the world's own, seconds of game time
