@@ -451,6 +451,7 @@ set(BUILDAT_CORE_SRCS
 	src/impl/aitta.cpp
 	src/impl/http.cpp
 	src/impl/thread_pool.cpp
+	src/impl/game_clock.cpp
 	src/impl/thread.cpp
 	src/impl/magic_event_handler.cpp
 )

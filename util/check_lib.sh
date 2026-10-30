@@ -353,12 +353,52 @@ check_cleanup()
 	if [ -n "${KEEP_TMP:-}" ]; then echo "kept $CHECK_TMP"; else rm -rf "$CHECK_TMP"; fi
 }
 
+# **The game's clock** ([CHECK_TIME_SCALE]): a server run with
+# --sim-rate <n> ticks 1/30 s of game time each, n times as often as the
+# wall clock's (0: as fast as they go), and writes its game seconds to
+# <user path>/game_clock. A ceiling, never assumed reached: on a slower
+# machine the game is the same, only slower, so a wait on the game's
+# time is given in its seconds (wait_for_log's fourth argument, a drive's
+# game_clock command), the wall clock only a hang's net. CHECK_RATE is the
+# rate with a client attached, short of the CPU's (the fans);
+# CHECK_RATE_HEADLESS a server's alone.
+#   game_seconds <user path>          the seconds, empty before the first
+#   game_rate <user path> <n>         the rate from now on (the offset kept)
+CHECK_RATE=${CHECK_RATE:-12}
+CHECK_RATE_HEADLESS=${CHECK_RATE_HEADLESS:-0}
+game_seconds()
+{
+	cat "$1/game_clock" 2>/dev/null
+}
+game_rate()
+{
+	local off
+	off=$(awk '{ print $1; exit }' "$1/sim_clock" 2>/dev/null)
+	echo "${off:-0} $2" > "$1/sim_clock"
+}
+
 # What a check waits on, rather than a fixed sleep: until <file> has a
-# line matching <regex> (grep -E), up to <seconds>; 1 if it never did
+# line matching <regex> (grep -E), up to <seconds>; 1 if it never did.
+# With a server's user path, the seconds are its game's (game_clock
+# above), and the wait ends early only when that clock has not moved for
+# 60 s of the wall's
 #   wait_for_log "$t/srv.log" "Listening at" 60 || fail "no server"
+#   wait_for_log "$t/srv.log" "round over" 30 "$t/u" || fail "no round"
 wait_for_log()
 {
-	local i
+	local i g g0= last= still=0
+	if [ -n "${4:-}" ]; then
+		while ! grep -qaE "$2" "$1" 2>/dev/null; do
+			g=$(game_seconds "$4")
+			[ -n "$g0" ] || g0=$g
+			if [ "$g" = "$last" ]; then still=$((still + 1)); else last=$g still=0; fi
+			[ -n "$g" ] && [ $((g - g0)) -ge "$3" ] && break
+			[ $still -ge 300 ] && break
+			sleep 0.2
+		done
+		grep -qaE "$2" "$1" 2>/dev/null
+		return
+	fi
 	for i in $(seq $(($3 * 5))); do
 		grep -qaE "$2" "$1" 2>/dev/null && return 0
 		sleep 0.2

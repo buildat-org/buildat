@@ -110,6 +110,20 @@ wait_log_absent <ms> <text>
     The time passes with no line containing the text since the command, or
     the sequence fails: a thing that must not happen.
 
+game_clock <dir>
+    The server is a buildat_server run with --sim-rate whose user path
+    (-D) is <dir>: from here on the wait_log commands' <ms> are the game's
+    milliseconds on its <dir>/game_clock (whole seconds, so a limit is up
+    to a second longer), and the wall clock ends a wait early only when
+    that clock has not moved for 60 s. A check's waits then hold on a
+    slower machine, where the game runs slower than its rate.
+
+game_rate <n>
+    That server's rate from now on: written into <dir>/sim_clock with its
+    offset kept (the server reads it within 10 ms). 1 around inputs timed
+    on the wall clock -- held keys, a mouse down and up, the client's
+    prediction compared -- and the ceiling while the drive only waits.
+
 frames <n>
     n frames rendered: the frame after an input has read it, a UI laid out
     and drawn after a click or a key. Where a delay of a second waited for

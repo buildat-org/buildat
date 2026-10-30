@@ -237,6 +237,17 @@ static bool parse_body(const ss_ &text, sv_<Command> *out, ss_ *error)
 			if(!parse_i64(ms, &c.n) || c.n < 0 || text.empty())
 				return fail("wait_log_absent <ms> <text>");
 			c.s = text;
+		} else if(cmd == "game_clock"){
+			c.type = Type::GameClock;
+			c.s = rest;
+			if(c.s.empty())
+				return fail("game_clock <the server's user path>");
+		} else if(cmd == "game_rate"){
+			c.type = Type::GameRate;
+			double r = 0;
+			if(!parse_f64(rest, &r) || r < 0 || r > 1000)
+				return fail("game_rate <rate, 0 to 1000>");
+			c.s = rest;
 		} else if(cmd == "expect_error"){
 			c.type = Type::ExpectError;
 			c.s = rest;
@@ -526,6 +537,10 @@ ss_ dump_command(const Command &c)
 		return "wait_log_absent "+itos(c.n)+" "+c.s;
 	case Type::ExpectError:
 		return "expect_error "+c.s;
+	case Type::GameClock:
+		return "game_clock "+c.s;
+	case Type::GameRate:
+		return "game_rate "+c.s;
 	case Type::Screenshot:
 		return "screenshot "+c.s;
 	case Type::Event:

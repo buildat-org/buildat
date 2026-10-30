@@ -49,6 +49,39 @@
 		}
 	}
 
+	// [CHECK_TIME_SCALE] game_clock's server: its game_clock file in ms,
+	// -1 unread; the wait's first reading, the last and when it moved
+	ss_ m_game_clock_dir;
+	int64_t m_wait_game_from = -1, m_wait_game_seen = -1;
+	int64_t m_wait_game_moved_us = 0;
+	int64_t game_clock_ms()
+	{
+		FILE *f = fopen((m_game_clock_dir+"/game_clock").c_str(), "r");
+		if(!f)
+			return -1;
+		long long s = -1;
+		if(fscanf(f, "%lld", &s) != 1)
+			s = -1;
+		fclose(f);
+		return s < 0 ? -1 : s * 1000;
+	}
+	// game_rate: the sim_clock file's rate, its offset kept
+	bool write_game_rate(const ss_ &rate)
+	{
+		const ss_ path = m_game_clock_dir+"/sim_clock";
+		long long offset = 0;
+		if(FILE *f = fopen(path.c_str(), "r")){
+			if(fscanf(f, "%lld", &offset) != 1)
+				offset = 0;
+			fclose(f);
+		}
+		FILE *f = fopen(path.c_str(), "w");
+		if(!f)
+			return false;
+		fprintf(f, "%lld %s\n", offset, cs(rate));
+		return fclose(f) == 0;
+	}
+
 	void command_seq_fail(const ss_ &err)
 	{
 		log_e(MODULE, "Command sequence failed: %s", cs(err));
@@ -621,6 +654,20 @@
 				m_command_index++;
 				continue;
 			}
+			if(c.type == Type::GameClock){
+				m_game_clock_dir = c.s;
+				m_command_index++;
+				continue;
+			}
+			if(c.type == Type::GameRate){
+				if(m_game_clock_dir.empty() || !write_game_rate(c.s)){
+					command_seq_fail("game_rate: no game_clock before it, or "
+							"its sim_clock not written");
+					return;
+				}
+				m_command_index++;
+				continue;
+			}
 			if(c.type == Type::WaitLog || c.type == Type::WaitLogAny ||
 					c.type == Type::WaitLogAbsent){
 				if(m_wait_log_since < 0){
@@ -630,6 +677,24 @@
 							log_line_count();
 					m_wait_log_until_us = now + c.n * 1000;
 					log_watch(c.s.c_str());
+					m_wait_game_from = m_wait_game_seen = -1;
+					m_wait_game_moved_us = now;
+				}
+				// [CHECK_TIME_SCALE] On a game_clock: the limit in the
+				// game's time, the wall's only a stopped clock
+				bool within = now < m_wait_log_until_us;
+				int64_t left_ms = (m_wait_log_until_us - now) / 1000;
+				if(!m_game_clock_dir.empty()){
+					const int64_t g = game_clock_ms();
+					if(g != m_wait_game_seen){
+						m_wait_game_seen = g;
+						m_wait_game_moved_us = now;
+					}
+					if(m_wait_game_from < 0)
+						m_wait_game_from = g;
+					left_ms = g < 0 ? c.n : c.n - (g - m_wait_game_from);
+					within = left_ms > 0 &&
+							now - m_wait_game_moved_us < 60000000;
 				}
 				if(log_watch_seen() ||
 						log_lines_since_contain(m_wait_log_since, c.s.c_str())){
@@ -640,7 +705,7 @@
 						return;
 					}
 					log_i(MODULE, "wait_log: \"%s\" seen", cs(c.s));
-				} else if(now < m_wait_log_until_us){
+				} else if(within){
 					// **A wait says it is waiting**, every ten seconds:
 					// a run that has stopped saying anything is how a
 					// harness tells a stuck client from a patient one,
@@ -653,9 +718,10 @@
 					// says what it waits for.
 					if(now >= m_wait_log_said_us + 10000000){
 						m_wait_log_said_us = now;
-						log_i(MODULE, "wait_log: still waiting, %s s left",
-								cs(itos((int)((m_wait_log_until_us - now) /
-								1000000))));
+						log_i(MODULE, "wait_log: still waiting, %s s left%s",
+								cs(itos((int)(left_ms / 1000))),
+								m_game_clock_dir.empty() ? "" :
+								" of the game's");
 					}
 					return;
 				} else if(c.type == Type::WaitLogAbsent){
@@ -666,7 +732,9 @@
 					// going on had every later wait sit out its timeout
 					m_wait_log_since = -1;
 					command_seq_fail("wait_log: \""+c.s+"\" not seen in "+
-							itos(c.n)+" ms");
+							itos(c.n)+" ms"+(m_game_clock_dir.empty() ? "" :
+							left_ms > 0 ? " (the game's clock stopped for 60 s)" :
+							" of the game's"));
 					return;
 				} else {
 					log_w(MODULE, "wait_log: \"%s\" not seen in %s ms; on",

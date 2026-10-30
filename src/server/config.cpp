@@ -95,6 +95,8 @@ Config::Config()
 	// [SIM_CLOCK]: --sim-clock, never a setting
 	set_default("sim_clock", false);
 	set_default("free_run", false);
+	// [CHECK_TIME_SCALE]: --sim-rate's, "" for none
+	set_default("sim_rate", "");
 }
 
 bool Config::check_paths()

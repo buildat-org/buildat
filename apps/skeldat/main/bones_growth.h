@@ -50,7 +50,10 @@ struct BonesGrowth
 	// runs so far. Over each minute of real time, the game seconds ticked
 	// and the expansions the budget a tick dropped (BUILDAT_SKELDAT_BUDGET
 	// for a check), against the minute's: the server behind, by a tick
-	// late or an expansion dropped alike.
+	// late or an expansion dropped alike. [CHECK_TIME_SCALE] The minute
+	// is the game's clock's: time_us() on a server at its 30 Hz, the ticks'
+	// own under --sim-rate, where a late tick runs late and only a dropped
+	// expansion is behind.
 	int speed = 1, speed_low = 1;
 	size_t rule_runs = 0;
 	// The rule's runs in an expansion: the speed times bones::PACE
@@ -95,7 +98,7 @@ struct BonesGrowth
 		}
 		if(skipping)
 			return;
-		const int64_t now = interface::os::time_us();
+		const int64_t now = interface::os::game_us();
 		if(keep_up_us == 0)
 			keep_up_us = now;
 		if(now - keep_up_us < 60000000)

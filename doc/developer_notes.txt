@@ -45,6 +45,21 @@ compares against it. A server's Starport announcer announces at once after
 a jump. The option is only on the command line. util/sim_clock_check.sh
 runs a Starport, a Hearth and an Aitta through 183 days and 5 years.
 
+`buildat_server --sim-rate N` ([CHECK_TIME_SCALE]) runs the game faster:
+each tick is still 1/30 s of game time, N times as often (0: as fast as
+the modules take them), and a late tick runs late rather than being
+dropped, so the game is the same on a slower machine, only slower. The
+rate is a ceiling. It implies --sim-clock: a second number in sim_clock
+is the rate from then on (`echo "0 1" > sim_clock`). What the game does
+over time reads interface::os::game_us(), the ticks' clock under the
+option and time_us() without it; the game's seconds go to
+<user_path>/game_clock. A check waits on them: check_lib's
+wait_for_log with the user path as a fourth argument, and a drive's
+game_clock and game_rate commands (doc/client_commands.txt). A client
+whose prediction runs on the wall clock is told the rate
+(os::game_rate(); hillclimb's "hillclimb:rate"). util/sim_rate_check.sh
+checks it.
+
 Sanitizers and fuzzing
 ----------------------
 cmake -DSANITIZE=address in a build directory of its own (Build/asan)
