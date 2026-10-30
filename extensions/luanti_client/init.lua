@@ -871,6 +871,10 @@ local function show_client(host, port, name, password, mode, origin)
 
 		-- What has been said, newest last, and the line being typed
 		local CHAT_LINES = 8
+		-- [SCROLL_PAGE_KEYS] Page Up and Down in the chat line page back
+		-- over the CHAT_KEEP newest, chat_back lines back from the newest
+		local CHAT_KEEP = 200
+		local chat_back = 0
 		local chat = {}
 		local chat_input = nil
 		-- The key that opens chat arrives as text as well, and the line edit
@@ -1449,8 +1453,10 @@ local function show_client(host, port, name, password, mode, origin)
 			return s
 		end
 		local function show_chat_lines()
-			if not declutter then
-				chat_text.text = table.concat(chat, "\n")
+			if not declutter or chat_back > 0 then
+				local last = #chat - chat_back
+				chat_text.text = table.concat(chat, "\n",
+						math.max(1, last - CHAT_LINES + 1), last)
 				return
 			end
 			local shown = {}
@@ -1470,10 +1476,24 @@ local function show_client(host, port, name, password, mode, origin)
 
 		local function add_chat(line)
 			chat[#chat + 1] = line
-			while #chat > CHAT_LINES do
+			while #chat > CHAT_KEEP do
 				table.remove(chat, 1)
 			end
+			-- Paged back, the lines read stay put
+			if chat_back > 0 then
+				chat_back = math.min(chat_back + 1, #chat - CHAT_LINES)
+			end
 			show_chat_lines()
+		end
+		local function page_chat(d)
+			local step = (ui_utils.safe or ui_utils).page_step(CHAT_LINES)
+			chat_back = math.max(0, math.min(#chat - CHAT_LINES,
+					chat_back - d * step))
+			show_chat_lines()
+			local last = #chat - chat_back
+			log:info("chat: page " .. d .. ", lines " ..
+					math.max(1, last - CHAT_LINES + 1) .. " to " .. last ..
+					" of " .. #chat)
 		end
 
 		client.on_chat = function(text, sender)
@@ -3189,12 +3209,15 @@ local function show_client(host, port, name, password, mode, origin)
 			end,
 			on_close = function()
 				chat_input = nil
+				chat_back = 0
+				show_chat_lines()
 				if not form_on() then
 					mouse_look(true, "the chat closed")
 				end
 			end,
 			declutter = {get = function() return declutter end,
 				set = set_declutter},
+			page = page_chat,
 		})
 		local close_chat, chat_click = chat_line.close, chat_line.click
 		open_chat = chat_line.open
@@ -3426,6 +3449,12 @@ local function show_client(host, port, name, password, mode, origin)
 				-- TextFinished and escape as the plain subscription made in
 				-- open_chat; a stack handler does not fire at all once the
 				-- line edit has the focus.
+				return
+			end
+			-- A form's scroll containers take Page Up and Down
+			if form_on() and (key == magic.KEY_PAGEUP or
+					key == magic.KEY_PAGEDOWN) then
+				session:key(key)
 				return
 			end
 			-- Luanti's own keys for these, out of BINDINGS at the top of
