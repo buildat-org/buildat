@@ -28,9 +28,51 @@
 #      spawner and sees the scoreboard and the key.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # and after the restart.
+#
+#   util/workbench_check.sh
+#   util/workbench_check.sh web    the admin's part in headless Chrome
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
+if [ "${1:-}" = web ]; then
+	# Workbench in the web client (web/), in headless Chrome at 1200x800:
+	# the admin logs in (the setup code), points at the floor ahead in
+	# edit mode, places an NPC there, lifts it a cell, leaves edit mode
+	# and talks to it with E
+	check_tmp workbench_web; t=$CHECK_TMP
+	cat > "$t/steps.json" <<'J'
+[
+	["nav", "${URL}"],
+	["waitlog", "player physics enabled", 120],
+	["key", "l"],
+	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20],
+	["frames", 3], ["click", 891, 217], ["frames", 3],
+	["click", 600, 600], ["waitlog", "kit editor: cursor at 0,1,5", 10],
+	["click", 194, 332], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["click", 600, 600], ["waitlog", "kit editor: selected 3", 10],
+	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
+	["frames", 3], ["shot", "${OUT}/edit.png"],
+	["key", "F6"], ["waitlog", "kit editor: edit mode off", 10],
+	["key", "e"], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
+	["frames", 5], ["shot", "${OUT}/play.png"]
+]
+J
+	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
+		fail "the web drive ($t/out)"
+	grep -aq "npc 3: says to player:webboss" "$t/out/server.log" ||
+		fail "the NPC said nothing to webboss ($t/out/server.log)"
+	echo "PASS: Workbench in the web client: the admin places an NPC in Kit's editor and talks to it"
+	exit 0
+fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
