@@ -24,7 +24,8 @@
 //   ["key", name]           Tab, Enter, Escape, Space, Backspace, F1..F12,
 //                           Up, Down, Left, Right, PageUp, PageDown, Home,
 //                           End, or one character
-//   ["holdkey", name, ms]   a key held down for ms: a car driven
+//   ["holdkey", name, ms]   a key held down for ms: a car driven; name a
+//                           list (["w", "Space"]) for keys held together
 //   ["selall"]              Ctrl+A
 //   ["chord", "Ctrl+Shift+z"] a key with Ctrl, Alt and Shift held
 //   ["click", x, y]         left button, in CSS pixels
@@ -109,6 +110,12 @@ if (!args.browser || !args.port || !args.steps) {
 			"--steps file [--log file] [--var NAME=value ...]");
 	process.exit(2);
 }
+// A browser gone mid-run (killed, crashed) never answers what was sent to
+// it, and Node exits 0 with that await left pending: a drive that stopped
+// at a step read as passed
+process.exitCode = 1;
+process.on("beforeExit", () =>
+		console.error("web_drive.js: the browser stopped answering"));
 const fill = v => typeof v === "string" ?
 		v.replace(/\$\{(\w+)\}/g, (_, k) => k in args.vars ? args.vars[k] : "") : v;
 const steps = JSON.parse(fs.readFileSync(args.steps, "utf8")).map(s => s.map(fill));
@@ -208,9 +215,10 @@ async function firefox() {
 		type: t => keys([...t].flatMap(press)),
 		key: k => keys(press(KEYS[k] ? KEYS[k][0] : k)),
 		holdkey: (k, ms) => {
-			const v = KEYS[k] ? KEYS[k][0] : k;
-			return keys([{type: "keyDown", value: v},
-					{type: "pause", duration: ms}, {type: "keyUp", value: v}]);
+			const v = [].concat(k).map(x => KEYS[x] ? KEYS[x][0] : x);
+			return keys([...v.map(x => ({type: "keyDown", value: x})),
+					{type: "pause", duration: ms},
+					...v.map(x => ({type: "keyUp", value: x}))]);
 		},
 		chord: ch => {
 			const [mods, k] = chordOf(ch);
@@ -395,7 +403,7 @@ async function chrome() {
 				await key(ch);
 		},
 		key: k => key(k),
-		holdkey: (k, ms) => key(k, [], ms),
+		holdkey: (k, ms) => Promise.all([].concat(k).map(x => key(x, [], ms))),
 		selall: () => key("a", ["Ctrl"]),
 		chord: ch => {
 			const [mods, k] = chordOf(ch);
@@ -533,9 +541,11 @@ async function webkit() {
 		type: t => page.keyboard.type(t),
 		key: k => page.keyboard.press(name(k)),
 		holdkey: async (k, ms) => {
-			await page.keyboard.down(name(k));
+			for (const x of [].concat(k))
+				await page.keyboard.down(name(x));
 			await new Promise(r => setTimeout(r, ms));
-			await page.keyboard.up(name(k));
+			for (const x of [].concat(k))
+				await page.keyboard.up(name(x));
 		},
 		selall: () => page.keyboard.press("Control+a"),
 		chord: ch => {
