@@ -3237,10 +3237,13 @@ bt54a="$bt54a; skeleton 10 40 boat 5 10 28.6; skeleton 0 12 boat 0.5 0 9"
 W54=boatage T54=0.85 D54=600 boats "$t/srv58_age.log" boats_age 30000 "$bt54a"
 # [SKELDAT_BOAT_LAND_SKULL] Its skull keeps the sun off: B's boat alone,
 # a 600 s day from 0.15, so it lands before the dawn (0.19, 23 s in) on
-# a bare shore, a skull beside it; into the day (0.30), it does not burn
+# a bare shore, a skull beside it; into the day (0.30), it does not burn.
+# A marker skull in its footprint (0, 0) on the far shore keeps it there at
+# the sunrise (with none anywhere it picks one of 9 at random, and once
+# set out west on a bridge whose first block's water drowned it)
 bt54s="level -30 10 61 31 $W -1; level -30 42 61 29 $W -1; level -30 41 20 1 $W -1"
 bt54s="$bt54s; level -8 41 8 1 $W -1; level 2 41 28 1 $W -1; bones 0 41 3"
-bt54s="$bt54s; skeleton 0 40 boat 3 0 28.6"
+bt54s="$bt54s; marker 40 5; skeleton 0 40 boat 3 0 28.6"
 W54=boatskull T54=0.15 D54=600 boats "$t/srv58_skull.log" boats_skull 90000 "$bt54s"
 skull=$(python3 -I - "$t/srv58_skull.log" <<'PY'
 import sys, re
