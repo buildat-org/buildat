@@ -36,15 +36,16 @@ serve(){
 	CHECK_PIDS+=($SERVER_PID)
 }
 stop(){ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; }
-# The ground's colours in a screenshot: dirt (brown) and gravel (light grey)
-# pixels, "dirt grey"
+# The ground's colours in a screenshot: dirt (brown, skeldat's: lit, r/g
+# 1.1-1.3 and g/b 1.05-1.2; sand's g/b is 1.35) and gravel (grey) pixels,
+# "dirt grey"
 ground(){
 	python3 - "$1" <<'PY'
 import sys
 from PIL import Image
 dirt = grey = 0
 for r, g, b in Image.open(sys.argv[1]).convert("RGB").getdata():
-	if r > 1.3 * g and g > 1.2 * b and r > 50:
+	if r > 1.15 * g and 1.1 * b < g < 1.25 * b and r > 50:
 		dirt += 1
 	if abs(r - g) < 12 and abs(g - b) < 12 and r > 120:
 		grey += 1
