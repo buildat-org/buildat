@@ -299,6 +299,9 @@ namespace voxelworld
 		// A world that never calls this loads its whole region at the start
 		// and keeps it, which is what every game did before this existed.
 		virtual void set_load_points(const sv_<LoadPoint> &points) = 0;
+		// What set_load_points() was given last; worldgen generates what
+		// is nearest a player's point first
+		virtual sv_<LoadPoint> get_load_points() = 0;
 
 		// Every section that is loaded right now, in no particular order.
 		// What asks is a sweep -- an ABM, a fill, an importer clipping what
