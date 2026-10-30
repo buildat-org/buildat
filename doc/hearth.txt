@@ -104,8 +104,10 @@ autolinks, and ||spoilers|| (interface::markup::to_html, md4c); a single
 newline breaks the line (<br>, as GitHub's comments do): raw HTML is
 text, a link or an image to anything but http, https, mailto or a
 relative path is its text alone, an image is a link to it and never
-loaded but for the Hearth's own /f/<id> (an <img>, lazily loaded), and
-every link is rel="nofollow ugc". "#1234" links to thread 1234, "@name"
+loaded but for the Hearth's own /f/<id> (an <img>, lazily loaded;
+"{.right}" right after it floats it right, beside the paragraphs after
+it, and "{.center}" centres it, [HEARTH_POST_STYLE]), and every link is
+rel="nofollow ugc". "#1234" links to thread 1234, "@name"
 to /u/name. An uploaded image's thumbnail (320x240 at most) goes at the
 message's end linked to the image, and a message's files are listed
 under it. A message shows its thanks count. A search's words are each
@@ -168,8 +170,10 @@ notifications, and for an admin the moderation queue and a new topic
 subtopics are one level deep). The client draws a message from the
 server's HTML of it (a thread's "html"; [HEARTH_LINES_CODE]): its text
 with a link's address after it, a fenced block in the mono font on a
-darker ground (a line past the width cut with "..."), a picture of the
-Hearth's own under the text rather than its Markdown. A message's field
+darker ground (a line past the width cut with "..."), bold brighter and
+drawn twice, a picture of the Hearth's own where the text has it rather
+than its Markdown: centred, or with {.right} at the right with the
+paragraphs after it beside it, narrowed until they pass its height. A message's field
 is multi-line: Enter breaks the line, Ctrl+Enter sends; Bold, List, Link,
 Image and "Code block" put their Markdown in at the cursor, and Preview
 shows the message as the HTML face will. A member thanks a message

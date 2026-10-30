@@ -322,7 +322,17 @@ void Text::SetText(const String& text)
 
     DecodeToUnicode();
     ValidateSelection();
+    boldRanges_.Clear();
     UpdateText();
+}
+
+void Text::AddBoldRange(unsigned start, unsigned length)
+{
+    if (!length)
+        return;
+    boldRanges_.Push(start);
+    boldRanges_.Push(length);
+    charLocationsDirty_ = true;
 }
 
 void Text::SetTextAlignment(HorizontalAlignment align)
@@ -745,7 +755,13 @@ void Text::UpdateCharLocations()
             {
                 // Store glyph's location for rendering. Verify that glyph page is valid
                 if (glyph->page_ < pageGlyphLocations_.Size())
-                    pageGlyphLocations_[glyph->page_].Push(GlyphLocation(x, y, glyph));
+                {
+                    bool bold = false;
+                    for (unsigned r = 0; r + 1 < boldRanges_.Size() && !bold; r += 2)
+                        bold = printToText_[i] >= boldRanges_[r] &&
+                            printToText_[i] - boldRanges_[r] < boldRanges_[r + 1];
+                    pageGlyphLocations_[glyph->page_].Push(GlyphLocation(x, y, glyph, bold));
+                }
                 x += glyph->advanceX_;
                 if (i < printText_.Size() - 1)
                     x += face->GetKerning(c, printText_[i + 1]);
@@ -829,8 +845,15 @@ void Text::ConstructBatch(UIBatch& pageBatch, const PODVector<GlyphLocation>& pa
     {
         const GlyphLocation& glyphLocation = pageGlyphLocation[i];
         const FontGlyph& glyph = *glyphLocation.glyph_;
-        pageBatch.AddQuad(dx + glyphLocation.x_ + glyph.offsetX_, dy + glyphLocation.y_ + glyph.offsetY_, glyph.width_,
-            glyph.height_, glyph.x_, glyph.y_, glyph.texWidth_, glyph.texHeight_);
+        // A bold glyph: full white, unless it is an effect's pass, and drawn again 1 unit to the right
+        // simplified: 1 UI unit, wider than a pixel at a UI scale over 1; a bold face of the font is the upgrade
+        if (glyphLocation.bold_ && !color)
+            pageBatch.SetColor(Color::WHITE);
+        for (int pass = 0; pass < (glyphLocation.bold_ ? 2 : 1); ++pass)
+            pageBatch.AddQuad(dx + pass + glyphLocation.x_ + glyph.offsetX_, dy + glyphLocation.y_ + glyph.offsetY_, glyph.width_,
+                glyph.height_, glyph.x_, glyph.y_, glyph.texWidth_, glyph.texHeight_);
+        if (glyphLocation.bold_ && !color)
+            pageBatch.SetDefaultColor();
     }
 
     if (depthBias != 0.0f)

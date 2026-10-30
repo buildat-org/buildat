@@ -54,10 +54,11 @@ struct CharLocation
 struct GlyphLocation
 {
     /// Construct.
-    GlyphLocation(float x, float y, const FontGlyph* glyph) :
+    GlyphLocation(float x, float y, const FontGlyph* glyph, bool bold = false) :
         x_(x),
         y_(y),
-        glyph_(glyph)
+        glyph_(glyph),
+        bold_(bold)
     {
     }
 
@@ -67,6 +68,8 @@ struct GlyphLocation
     float y_;
     /// Glyph.
     const FontGlyph* glyph_;
+    /// Drawn bold (Text::AddBoldRange).
+    bool bold_;
 };
 
 /// %Text %UI element.
@@ -113,6 +116,8 @@ public:
     void SetSelection(unsigned start, unsigned length = M_MAX_UNSIGNED);
     /// Clear selection.
     void ClearSelection();
+    /// Draw characters start .. start + length - 1 bold: brighter (full white) and each glyph twice, 1 unit apart. Cleared by SetText.
+    void AddBoldRange(unsigned start, unsigned length);
     /// Set selection background color. Color with 0 alpha (default) disables.
     void SetSelectionColor(const Color& color);
     /// Set hover background color. Color with 0 alpha (default) disables.
@@ -243,6 +248,8 @@ protected:
     unsigned selectionStart_;
     /// Selection length.
     unsigned selectionLength_;
+    /// Bold ranges, start and length in characters, a pair each.
+    PODVector<unsigned> boldRanges_;
     /// Selection background color.
     Color selectionColor_;
     /// Hover background color.

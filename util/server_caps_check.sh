@@ -3,8 +3,8 @@
 # cost: ~2 min (2026-10-10)
 # covers: builtin/accounts/accounts.cpp builtin/voxelworld/voxelworld.cpp src/server/main.cpp
 # [SERVER_CAPS]:
-#   1. vanilla on the minimal game, a client: the save over 1 MB at
-#      shutdown, the range asked for over 40.
+#   1. vanilla on the minimal game, 4 sections generated out, a client:
+#      the save over 1 MB at shutdown, the range asked for over 40.
 #   2. Again with --max-view-range 40 --max-world-mb 1: the
 #      client is sent 40 voxels; generation stops, said once.
 #   3. An Aitta with --max-players 1: a second account is refused, the
@@ -36,16 +36,24 @@ stop(){ kill "$SERVER_PID"; wait "$SERVER_PID" 2>/dev/null; }
 
 # 1.
 mkdir -p "$t/d/apps/vanilla/saves/w/luanti"
-echo "enable_damage = false" > "$t/d/apps/vanilla/saves/w/luanti/world.mt"
+# The minimal game is singlenode (626ad1876): a floor in air, about 2 kB a
+# section, so Luanti's default 2 sections generated out (231 sections) is
+# half a megabyte. 4 out is about twice the 1 MB step 2 needs
+printf 'enable_damage = false\nmax_block_send_distance = 16\nmax_block_generate_distance = 16\n' \
+	> "$t/d/apps/vanilla/saves/w/luanti/world.mt"
 start_server "$t/d1.log" "Listening at" 120 auto \
 	env BUILDAT_LUANTI_GAME=minimal BUILDAT_LUANTI_SAVE=w \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla -D "$t/d" -l 4 || fail "vanilla did not start"
 CHECK_PIDS+=($SERVER_PID)
 P=$SERVER_PORT
-# simplified: the save passes 1 MB with what the server generates around
-# the player in the 20 s; nothing says when it has. A line where
-# voxelworld's save passes a size would be the event
-client a 'wait_log 60000 the server put the player\ndelay 20000\nquit\n'
+# Held until the save on disk (the WAL not counted) has passed 1 MB;
+# checkpoints and unloads write it
+bgclient a 'wait_log 60000 the server put the player\ndelay 100000\nquit\n'
+for i in $(seq 500); do
+	[ "$(du -sb --exclude='*-wal' "$t/d/apps" | cut -f1)" -gt 1000000 ] && break
+	sleep 0.2
+done
+kill $CL 2>/dev/null; wait $CL 2>/dev/null
 stop
 size=$(du -sb "$t/d/apps" | cut -f1)
 [ "$size" -gt 1000000 ] || fail "the save is only $size bytes"
@@ -67,7 +75,7 @@ wait_for_log "$t/d2.log" "wants 40 voxels of world" 60 &&
 	fail "the range or the world cap not said ($t/d2.log)"
 # The window in which the cap must not be said again
 sleep 2
-kill $CL; wait $CL 2>/dev/null
+kill $CL 2>/dev/null; wait $CL 2>/dev/null
 stop
 grep -aq "wants 40 voxels of world" "$t/d2.log" &&
 	! grep -a "wants [0-9]* voxels of world" "$t/d2.log" | grep -vq "wants \(0\|40\) voxels" ||

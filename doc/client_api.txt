@@ -3090,7 +3090,7 @@ magic.TU_NORMAL:
 magic.TU_NORMALBUFFER: 
 magic.TU_SPECULAR: 
 magic.Technique: 
-magic.Text: ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, selectionLength, selectionStart, text
+magic.Text: AddBoldRange, ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, selectionLength, selectionStart, text
 magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: SetNumLevels, filterMode, height, width
 magic.Texture2D: GetRenderSurface, SetData, SetSize, new
@@ -3771,6 +3771,7 @@ UIElement.visible:boolean  ->  bool UIElement::visible()
 UIElement.visible=boolean  ->  void UIElement::visible(bool)
 UIElement.width:number  ->  double UIElement::width()
 UIElement.width=number  ->  void UIElement::width(double)
+Text:AddBoldRange(number,number)  ->  void Text::AddBoldRange(double, double)
 Text:ClearSelection()  ->  void Text::ClearSelection()
 Text:SetColor(Color)  ->  void Text::SetColor(Color)
 Text:SetFontSize(number)  ->  void Text::SetFontSize(double)

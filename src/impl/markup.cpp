@@ -42,6 +42,9 @@ struct Out {
 	// the alt text gathered; spans in the alt text are left out
 	int img = 0;
 	ss_ img_src, alt;
+	// [HEARTH_POST_STYLE] Where the last drawn image's class would go, while
+	// nothing but its link's close has come after it; npos otherwise
+	size_t img_class_at = ss_::npos;
 };
 
 // The Hearth's own file, "/f/<id>" or "/f/<id>/<name>": drawn, as loading
@@ -88,6 +91,7 @@ static void open_link(Out *o, const MD_ATTRIBUTE &href,
 static int enter_block(MD_BLOCKTYPE t, void *d, void *u)
 {
 	Out *o = (Out*)u;
+	o->img_class_at = ss_::npos;
 	switch(t){
 	case MD_BLOCK_QUOTE: o->r += "<blockquote>\n"; break;
 	case MD_BLOCK_UL: o->r += "<ul>\n"; break;
@@ -134,6 +138,7 @@ static int enter_block(MD_BLOCKTYPE t, void *d, void *u)
 static int leave_block(MD_BLOCKTYPE t, void *d, void *u)
 {
 	Out *o = (Out*)u;
+	o->img_class_at = ss_::npos;
 	switch(t){
 	case MD_BLOCK_QUOTE: o->r += "</blockquote>\n"; break;
 	case MD_BLOCK_UL: o->r += "</ul>\n"; break;
@@ -162,6 +167,7 @@ static int enter_span(MD_SPANTYPE t, void *d, void *u)
 		o->img += t == MD_SPAN_IMG;
 		return 0;
 	}
+	o->img_class_at = ss_::npos;
 	switch(t){
 	case MD_SPAN_EM: o->r += "<em>"; break;
 	case MD_SPAN_STRONG: o->r += "<strong>"; break;
@@ -202,10 +208,15 @@ static int leave_span(MD_SPANTYPE t, void *d, void *u)
 			escape(o->r, o->img_src.c_str(), o->img_src.size());
 			o->r += "\" alt=\"";
 			escape(o->r, o->alt.c_str(), o->alt.size());
-			o->r += "\" loading=\"lazy\">";
+			o->r += "\"";
+			o->img_class_at = o->r.size();
+			o->r += " loading=\"lazy\">";
 		}
 		return 0;
 	}
+	// A link's close right after its image keeps the image's class open
+	if(t != MD_SPAN_A)
+		o->img_class_at = ss_::npos;
 	switch(t){
 	case MD_SPAN_EM: o->r += "</em>"; break;
 	case MD_SPAN_STRONG: o->r += "</strong>"; break;
@@ -268,6 +279,27 @@ static void refs(Out *o, const char *s, size_t n)
 	escape(o->r, s + done, n - done);
 }
 
+// [HEARTH_POST_STYLE] "{.right}" or "{.center}" right after a drawn image
+// (or the link round it) is its class, and not text
+static bool image_class(Out *o, const MD_CHAR *&s, MD_SIZE &n)
+{
+	const size_t at = o->img_class_at;
+	o->img_class_at = ss_::npos;
+	if(at == ss_::npos)
+		return false;
+	for(const char *c : {"right", "center"}){
+		const ss_ suffix = ss_("{.")+c+"}";
+		if(n < suffix.size() || suffix.compare(0, ss_::npos, s,
+				suffix.size()) != 0)
+			continue;
+		o->r.insert(at, ss_(" class=\"")+c+"\"");
+		s += suffix.size();
+		n -= (MD_SIZE)suffix.size();
+		return true;
+	}
+	return false;
+}
+
 static int text(MD_TEXTTYPE t, const MD_CHAR *s, MD_SIZE n, void *u)
 {
 	Out *o = (Out*)u;
@@ -275,6 +307,9 @@ static int text(MD_TEXTTYPE t, const MD_CHAR *s, MD_SIZE n, void *u)
 		o->alt.append(s, n);
 		return 0;
 	}
+	if(t == MD_TEXT_NORMAL && image_class(o, s, n) && n == 0)
+		return 0;
+	o->img_class_at = ss_::npos;
 	switch(t){
 	case MD_TEXT_NULLCHAR: o->r += "\xEF\xBF\xBD"; break;
 	case MD_TEXT_BR: o->r += "<br>\n"; break;

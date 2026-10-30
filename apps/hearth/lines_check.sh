@@ -8,7 +8,8 @@
 # image and a fenced block.
 #   1. The web page: a newline is <br>, the block one <pre><code>.
 #   2. The client's view ("hearth: m<id>" lines of a scripted client): the
-#      lines broken, no image's Markdown, the outside image as its alt and
+#      lines broken, no image's Markdown, the own image apart where the text
+#      has it ([HEARTH_POST_STYLE]), the outside image as its alt and
 #      address, the block apart as code without its fences; a screenshot.
 #   3. The reply field's "Code block": its fences round what is typed next.
 #
@@ -68,9 +69,11 @@ V='wait_log_any 20000 hearth: m1 text: after\ndelay 500\n'
 client "$t/view.log" "" "${V}screenshot $t/view.png\nquit\n" \
 	BUILDAT_HEARTH_OPEN=1
 grep -a "hearth: m1 " "$t/view.log" | grep -av "command: \|wait_log" | sed 's/.*hearth: m1 //' > "$t/parts"
-want='text: one|two||[image: far] (https://img.example/p.png)
+want="text: one|two
+image: $id
+text: [image: far] (https://img.example/p.png)
 code: make -j8 2>&1 | tail|  x < 1
-text: after'
+text: after"
 [ "$(cat "$t/parts")" = "$want" ] ||
 	fail "the client's parts: $(cat "$t/parts")"
 grep -aq "Lua runtime error" "$t/view.log" && fail "a Lua error in the view"
