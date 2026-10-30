@@ -202,6 +202,8 @@ if [ -n "$changed" ]; then
 		name=$f
 		case "$f" in builtin/luanti/test/*) name=${f##*/};; esac
 		self[$f]=1; self[$name]=1
+		selfs="${selfs:-} $name"
+		pats[$name]=$(covers_of "$root/$f" "$name" | sed 's/\*\*/*/g')
 		picked="$picked
 $name"
 	done
@@ -259,6 +261,16 @@ $name"
 		done
 		if [ -z "$both" ]; then
 			if [ "$bw_cost" -lt "$bn_cost" ]; then bn=""; else bw=""; fi
+		fi
+		# **A file only a changed runner covers is covered** by its self
+		# pick ([RUN_ALL_COVERED_BY_NOTHING]), not listed as uncovered
+		if [ -z "$bn$bw" ]; then
+			for name in ${selfs:-}; do
+				for pat in ${pats[$name]}; do
+					# shellcheck disable=SC2254
+					case "$f" in $pat) bn=$name; break 2;; esac
+				done
+			done
 		fi
 		if [ -n "$bn$bw" ]; then
 			picked="$picked

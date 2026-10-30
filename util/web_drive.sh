@@ -64,7 +64,17 @@ if [ -z "$url" ]; then
 	done
 	grep -q "Listening at" "$out/server.log" ||
 		{ echo "web_drive: the server did not start" >&2; tail -20 "$out/server.log" >&2; exit 1; }
+	# The setup code may be logged after "Listening at"
+	# ([WEB_DRIVE_SETUP_CODE_RACE]): waited for when the steps use it
+	if grep -q 'SETUP_CODE' "$steps"; then
+		for i in $(seq 1 60); do
+			grep -aq "setup code [A-Z0-9]" "$out/server.log" && break
+			sleep 0.5
+		done
+	fi
 	code=$(grep -ao "setup code [A-Z0-9]*" "$out/server.log" | awk '{print $3}' | head -1)
+	[ -n "$code" ] || ! grep -q 'SETUP_CODE' "$steps" ||
+		{ echo "web_drive: the server logged no setup code" >&2; tail -20 "$out/server.log" >&2; exit 1; }
 	url="http://127.0.0.1:$port/"
 else
 	cd "$here"
