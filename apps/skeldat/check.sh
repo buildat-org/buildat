@@ -3164,8 +3164,9 @@ boats() { # log, client name, delay ms[, the test's fixtures[, a client log line
 }
 # Run 1 ends as the client sees the boat move: run 2 reads the boat back,
 # and a run 1 held on to its time limit could see it land (a world slow to
-# make shifts the days against the limit)
-boats "$log58" boats1 160000 "$bt54" "stands on its moving boat"
+# make shifts the days against the limit); the limit a hang's, as the
+# check box's slow client saw the boat later than 160 s
+boats "$log58" boats1 300000 "$bt54" "stands on its moving boat"
 # [SKELDAT_SKULL_CALL] A strip of bones 3 x 21 into the pond, a green skull
 # at its far end and a skeleton 14 short of it; a 600 s day from 0.6617: the
 # call an hour before sunset 28 s in, about 7 s after the fixtures, the
