@@ -176,6 +176,14 @@ namespace accounts
 		// message text in it: a topic is readable by whoever knows it.
 		virtual void notify(int min_level, const ss_ &text,
 				const ss_ &link = "") = 0;
+		// [KIT] An account's privilege other than admin, kept with the
+		// account: "builder" (Kit's edit rights) is the one there is. The
+		// admin grants and takes it (the Accounts page, or Kit's editor).
+		// set_priv: "" when done, else why not; with `by`, only an admin
+		// sets it.
+		virtual bool has_priv(const ss_ &name, const ss_ &priv) = 0;
+		virtual ss_ set_priv(const ss_ &name, const ss_ &priv, bool on,
+				const ss_ &by = "") = 0;
 	};
 
 	inline bool access(interface::Server *server,

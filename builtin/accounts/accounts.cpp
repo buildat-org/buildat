@@ -923,6 +923,39 @@ struct Module: public interface::Module, public Interface
 		return m_store->get("level/"+name, v) ? atoi(v.c_str()) : LV_NEW;
 	}
 
+	bool has_priv(const ss_ &name, const ss_ &priv)
+	{
+		Account account;
+		return !name.empty() && get_account(name, account) &&
+				account.has(priv);
+	}
+
+	ss_ set_priv(const ss_ &name, const ss_ &priv, bool on, const ss_ &by)
+	{
+		Account account;
+		if(priv != "builder")
+			return "No privilege \""+priv.substr(0, 32)+"\" to set here";
+		if(!by.empty() && !is_admin(by))
+			return "Only the "+level_name(LV_ADMIN)+" grants "+priv;
+		if(name.empty() || !get_account(name, account))
+			return "No account "+name.substr(0, 64);
+		if(account.has(priv) == on)
+			return "";
+		sv_<ss_> privs;
+		for(const ss_ &p : account.privs)
+			if(p != priv)
+				privs.push_back(p);
+		if(on)
+			privs.push_back(priv);
+		account.privs = privs;
+		set_account(name, account);
+		log_i(MODULE, "%s %s %s %s", by.empty() ? "The server" : cs(by),
+				on ? "granted" : "took", cs(priv), cs(name));
+		privs_changed(name);
+		send_users_to_staff();
+		return "";
+	}
+
 	ss_ set_level(const ss_ &name, int lv, const ss_ &by)
 	{
 		if(!exists(name))
@@ -2230,9 +2263,14 @@ struct Module: public interface::Module, public Interface
 	{
 		AdminRequest r;
 		auto pit = m_peers.find(packet.sender);
-		if(!m_store || pit == m_peers.end() ||
-				level(pit->second.name) < LV_MODERATOR || !unpack(packet.data, r))
+		if(!m_store || pit == m_peers.end() || !unpack(packet.data, r))
 			return;
+		if(level(pit->second.name) < LV_MODERATOR){
+			log_i(MODULE, "An admin request (%s) by %s refused: not staff",
+					cs(r.cmd.substr(0, 16)), pit->second.name.empty() ?
+					"a peer not joined" : cs(pit->second.name));
+			return;
+		}
 		const ss_ by = pit->second.name;
 		// [TRUST_LADDER] A moderator's: the Accounts page but for what
 		// changes an account's login or the server
@@ -2258,6 +2296,11 @@ struct Module: public interface::Module, public Interface
 		const sv_<PeerId> targets = exists ? find_peers(r.name) : sv_<PeerId>();
 		if(r.cmd == "list"){
 			return send_users(packet.sender);
+		} else if(r.cmd == "priv" && r.arg == "builder"){
+			// [KIT] Kit's edit rights
+			const ss_ why = set_priv(r.name, r.arg, r.on, by);
+			result(!why.empty() ? why : r.name+(r.on ? " is a builder" :
+					" is no longer a builder"));
 		} else if(r.cmd == "priv"){
 			if(!exists || r.arg != "admin")
 				return result("No such account or privilege");

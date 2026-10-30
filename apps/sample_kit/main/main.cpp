@@ -5,11 +5,14 @@
 // (kit/*.lua) composed in composition.json: a button that opens and closes
 // a door (which owns its voxel), a counter of the door's moves, a button
 // out of reach, a component that never returns, and two relays that are a
-// loop. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
+// loop, on a stone floor (y 0) with a stone at (6, 1, 2) for the editor
+// to point at. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
 // key is a dig at the door, a write routed to the door. util/kit_runtime_check.sh
-// drives it. The first player to join is the owner, who edits with Kit's
-// editor (util/kit_editor_check.sh).
+// drives it. A player is "p<peer>", or their account's name once logged in
+// (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
+// and the builders edit with Kit's editor (util/kit_editor_check.sh).
 #include "core/log.h"
+#include "accounts/api.h"
 #include "client_file/api.h"
 #include "kit/api.h"
 #include "main_context/api.h"
@@ -26,9 +29,11 @@
 namespace sample_kit {
 
 namespace pv = PolyVox;
+namespace magic = Urho3D;
 using interface::Event;
 
 static const pv::Vector3DInt32 DOOR(4, 1, 0);
+static const pv::Vector3DInt32 PILLAR(6, 1, 2);
 
 struct Module: public interface::Module
 {
@@ -36,10 +41,7 @@ struct Module: public interface::Module
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
 	ss_ m_door_voxel;
-	// The owner: the first player to join this run, who has edit rights.
-	// simplified: no builder grant and no owner kept over a restart;
-	// accounts' admin, or a grant the owner makes, is the upgrade
-	ss_ m_owner;
+	bool m_floor = false;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -51,6 +53,7 @@ struct Module: public interface::Module
 		sub(m_server, "core:tick", &Module::on_tick);
 		sub(m_server, "client_file:files_transmitted", &Module::on_files);
 		sub(m_server, "network:packet_received/main:dig", &Module::on_dig);
+		sub(m_server, "accounts:login", &Module::on_login);
 	}
 
 	void on_start()
@@ -70,10 +73,18 @@ struct Module: public interface::Module
 			interface::VoxelFormat f;
 			f.id = interface::VoxelField{0, 0, 16};
 			reg->set_format(f);
-			for(const char *name : {"air", "stone", "glass"}){
+			for(const ss_ name : {"air", "stone", "glass"}){
 				interface::VoxelDefinition def;
 				def.name.block_name = name;
-				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+				def.fully_empty = name == "air";
+				if(name != "air"){
+					def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+					for(auto &seg : def.textures){
+						seg.resource_name = "main/"+name+".png";
+						seg.total_segments = magic::IntVector2(1, 1);
+						seg.select_segment = magic::IntVector2(0, 0);
+					}
+				}
 				reg->add_voxel(def);
 			}
 			world->set_save(m_save, "main");
@@ -103,6 +114,18 @@ struct Module: public interface::Module
 			if(!w->is_section_loaded(pv::Vector3DInt16(0, 0, 0)))
 				return;
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			// Something for Kit's editor to point at: a stone floor under
+			// x, z 0...15 and a stone at PILLAR
+			if(!m_floor){
+				m_floor = true;
+				interface::VoxelName stone;
+				stone.block_name = "stone";
+				const interface::VoxelInstance v(reg->get(stone)->id);
+				for(int x = 0; x < 16; x++)
+					for(int z = 0; z < 16; z++)
+						w->set_voxel(pv::Vector3DInt32(x, 0, z), v);
+				w->set_voxel(PILLAR, v);
+			}
 			const interface::VoxelDefinition *def = reg->get(
 					reg->get_format().id.get(w->get_voxel(DOOR).data));
 			name = def ? def->name.block_name : "?";
@@ -117,13 +140,26 @@ struct Module: public interface::Module
 	{
 		const size_t peer = event.recipient;
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
+		ss_ name;
+		// None in the web client's own server (builtin/accounts is native)
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *a){
+				name = a->name_of(peer);
+			});
 		kit::access(m_server, [&](kit::Interface *k){
-			k->set_peer(peer, "p"+itos(peer), "world", 0, 1, 0);
-			if(m_owner.empty()){
-				m_owner = "p"+itos(peer);
-				k->set_editor(m_owner, true);
-			}
+			k->set_peer(peer, name.empty() ? "p"+itos(peer) : name, "world",
+					0, 1, 0);
 		});
+	}
+
+	// Kit's edit rights follow the account: the admin's, a builder's
+	void on_login(const accounts::Login &login)
+	{
+		kit::access(m_server, [&](kit::Interface *k){
+			k->set_peer(login.peer, login.name, "world", 0, 1, 0);
+		});
+		log_i(MODULE, "sample_kit: peer %zu is %s", (size_t)login.peer,
+				cs(login.name));
 	}
 
 	// A player digging at the door: not the game's own write, so routed

@@ -5,12 +5,18 @@
 -- [KIT] stage 3, Kit's editor on the client (builtin/kit/api.h says what
 -- the server takes). An app hosting Kit turns it on with
 --   local kit = require("buildat/module/kit")
---   kit.editor{scene = scene, camera = camera_node, ground_y = 1}
+--   kit.editor{scene = scene, camera = camera_node, ground_y = 1,
+--       solid = function(x, y, z) return <a voxel there> end}
+-- An entity's cell is the voxel at its position (centred on it, as
+-- voxelworld's are). solid (optional) is the app's voxels, which a click
+-- points at; ground_y the cells' y where no voxel is met.
 -- An "Edit" button (and F6) asks the server for edit mode; with edit
--- rights the server answers with the palette and the authored tree:
---   - a click on the view selects the entity there, or puts the cursor on
---     the ground (y = ground_y) where "Place <type>" puts a new one; Tab
---     selects the next entity
+-- rights (the server's admin, a builder) the server answers with the
+-- palette and the authored tree:
+--   - a click on the view selects the entity there (or the one owning the
+--     voxel there), or puts the cursor in front of the voxel's face, or on
+--     the ground, where "Place <type>" puts a new one; Tab selects the
+--     next entity
 --   - the arrows move the selected one on the ground, Page Up and Down up
 --     and down; Delete deletes it; Ctrl+Z undoes this editor's last edit
 --   - the inspector: the selected entity's instances, their parameters in
@@ -18,17 +24,20 @@
 --     another entity's "To <input>" links them
 --   - every entity drawn as a box, the selected one yellow, links as lines,
 --     and a type's gizmo (a sphere or a box), in edit mode only
+--   - the admin's: who is here, each "Builder: yes/no" to grant or take
+--     edit rights
+--   - "Play": a test, the runtime from the authored row; "Stop test" (the
+--     Edit button, F6) puts it back and returns to edit mode
 -- kit.selected(): the id last selected, kept after edit mode.
--- simplified: placed on a ground plane, a nudge by keys and no drag, the
--- windows rebuilt whole on each state; picking against the voxels, a drag
--- and a gizmo per handle are the upgrades
+-- simplified: a nudge by keys and no drag, the windows rebuilt whole on
+-- each state; a drag and a gizmo per handle are the upgrades
 local magic = require("buildat/extension/urho3d")
 local ui_utils = require("buildat/extension/ui_utils")
 local network = require("buildat/extension/network")
 local log = buildat.Logger("kit")
 
 local M = {}
-local E = {editing = false, state = nil, sel = nil, link = nil,
+local E = {editing = false, playing = false, state = nil, sel = nil, link = nil,
 	cursor = nil, pending = {}, status = "", windows = {}}
 local O = nil -- the app's options
 
@@ -67,9 +76,13 @@ local function type_of(t)
 	return E.state and E.state.types and E.state.types[t] or {}
 end
 
+-- An entity's cell is the voxel at its position, centred on it
 local function center(e)
-	return magic.Vector3(e.pos[1] + 0.5, e.pos[2] + 0.5, e.pos[3] + 0.5)
+	return magic.Vector3(e.pos[1], e.pos[2], e.pos[3])
 end
+
+-- How far a click looks for a voxel, in cells
+local MAX_RAY = 128
 
 local function color(hex, fallback)
 	local r, g, b = tostring(hex):match("^#(%x%x)(%x%x)(%x%x)$")
@@ -293,6 +306,23 @@ rebuild = function()
 		send({op = "undo"})
 	end)
 	label(r, "(" .. tostring(E.state.undo or 0) .. ")")
+	button(r, "Play", function()
+		send({op = "play"})
+	end)
+	if E.state.testing then
+		text(w, "A test of " .. tostring(E.state.testing) ..
+				"'s runs: edits wait", WARN)
+	end
+	-- The admin's: who here may edit
+	for _, p in ipairs(E.state.admin and E.state.people or {}) do
+		local pr = row(w)
+		label(pr, p.name .. (p.admin and ": admin" or ""), 100)
+		if not p.admin then
+			button(pr, p.builder and "Builder: yes" or "Builder: no", function()
+				send({op = "builder", name = p.name, on = not p.builder})
+			end)
+		end
+	end
 	if E.link then
 		button(w, "Cancel link", function()
 			E.link = nil
@@ -333,8 +363,9 @@ local function select(id)
 	rebuild()
 end
 
--- The ground cell (y = ground_y) under a point of the screen (fractions)
-local function ground_at(fx, fy)
+-- The camera's ray through a point of the screen (fractions): its origin
+-- and direction, {x, y, z} each
+local function ray_at(fx, fy)
 	local cam = O.camera:GetComponent("Camera")
 	local d = O.camera.worldDirection
 	local rx, ry, rz = d.z, 0, -d.x
@@ -350,27 +381,77 @@ local function ground_at(fx, fy)
 	local vx, vy, vz = d.x + rx * a + ux * b, d.y + ry * a + uy * b,
 			d.z + rz * a + uz * b
 	local o = O.camera.worldPosition
-	local t = math.abs(vy) > 1e-6 and (O.ground_y - o.y) / vy or -1
+	return {o.x, o.y, o.z}, {vx, vy, vz}
+end
+
+-- Cells are voxels, centred on whole numbers as voxelworld's are
+local function round(x)
+	return math.floor(x + 0.5)
+end
+
+-- The ground cell (y = ground_y, standing on the plane half a cell below)
+-- the ray meets
+local function ground_at(o, v)
+	local t = math.abs(v[2]) > 1e-6 and (O.ground_y - 0.5 - o[2]) / v[2] or -1
 	if t <= 0 then
 		return nil
 	end
-	return {math.floor(o.x + vx * t), O.ground_y, math.floor(o.z + vz * t)}
+	return {round(o[1] + v[1] * t), O.ground_y, round(o[3] + v[3] * t)}
+end
+
+-- The first cell along the ray that solid() says is a voxel, and the cell
+-- before it (the face's side; nil when the ray starts in it), at most
+-- `max` cells on: a walk from cell to cell (Amanatides and Woo)
+local function voxel_ray(o, v, solid, max)
+	local c, step, tmax, tdelta = {}, {}, {}, {}
+	for k = 1, 3 do
+		local p = o[k] + 0.5
+		c[k] = math.floor(p)
+		if v[k] > 1e-9 then
+			step[k], tmax[k], tdelta[k] = 1, (c[k] + 1 - p) / v[k], 1 / v[k]
+		elseif v[k] < -1e-9 then
+			step[k], tmax[k], tdelta[k] = -1, (p - c[k]) / -v[k], -1 / v[k]
+		else
+			step[k], tmax[k], tdelta[k] = 0, math.huge, math.huge
+		end
+	end
+	local prev = nil
+	for _ = 1, max do
+		if solid(c[1], c[2], c[3]) then
+			return {c[1], c[2], c[3]}, prev
+		end
+		prev = {c[1], c[2], c[3]}
+		local k = 1
+		if tmax[2] < tmax[k] then k = 2 end
+		if tmax[3] < tmax[k] then k = 3 end
+		c[k] = c[k] + step[k]
+		tmax[k] = tmax[k] + tdelta[k]
+	end
 end
 
 -- A click on the view: the entity drawn there (its box's centre near, or
--- its cell the ground's under the pointer), else the cursor on the ground
+-- its cell the pointed one), else the cursor: in front of the voxel the
+-- pointer is on (where the app gave solid()), else on the ground
 local function click_view(mx, my)
 	local cam = O.camera:GetComponent("Camera")
 	local sc = magic.ui.scale
 	local fx = mx / sc / magic.ui.root.width
 	local fy = my / sc / magic.ui.root.height
-	local g = ground_at(fx, fy)
+	local o, v = ray_at(fx, fy)
+	local hit, front
+	if O.solid then
+		hit, front = voxel_ray(o, v, O.solid, MAX_RAY)
+	end
+	local g = front or (not hit and ground_at(o, v)) or nil
+	local function at(e, c)
+		return c and e.pos[1] == c[1] and e.pos[2] == c[2] and e.pos[3] == c[3]
+	end
 	local best, bd = nil, 0.03 * 0.03
 	for _, e in ipairs(entities()) do
 		if e.pos then
 			local p = cam:WorldToScreenPoint(center(e))
 			local d = (p.x - fx) * (p.x - fx) + (p.y - fy) * (p.y - fy)
-			if g and e.pos[1] == g[1] and e.pos[2] == g[2] and e.pos[3] == g[3] then
+			if at(e, g) or at(e, hit) then
 				d = 0
 			end
 			if d < bd then
@@ -397,8 +478,8 @@ local function draw()
 		if e.pos then
 			local x, y, z = e.pos[1], e.pos[2], e.pos[3]
 			dbg:AddBoundingBox(magic.BoundingBox(
-					magic.Vector3(x + 0.1, y + 0.1, z + 0.1),
-					magic.Vector3(x + 0.9, y + 0.9, z + 0.9)),
+					magic.Vector3(x - 0.4, y - 0.4, z - 0.4),
+					magic.Vector3(x + 0.4, y + 0.4, z + 0.4)),
 					e.id == E.sel and magic.Color(1, 0.9, 0.2) or
 					magic.Color(0.8, 0.8, 0.8), false)
 			for _, c in ipairs(e.components or {}) do
@@ -430,8 +511,8 @@ local function draw()
 		end
 	end
 	if E.cursor then
-		dbg:AddCross(magic.Vector3(E.cursor[1] + 0.5, E.cursor[2],
-				E.cursor[3] + 0.5), 0.8, magic.Color(1, 0.4, 1), false)
+		dbg:AddCross(magic.Vector3(E.cursor[1], E.cursor[2] - 0.5,
+				E.cursor[3]), 0.8, magic.Color(1, 0.4, 1), false)
 	end
 end
 
@@ -473,7 +554,11 @@ function M.editor(options)
 	O.debug = O.scene:GetComponent("DebugRenderer") or
 			O.scene:CreateComponent("DebugRenderer")
 	local toggle = function()
-		send({op = "mode", on = not E.editing})
+		if E.playing then
+			send({op = "stop"})
+		else
+			send({op = "mode", on = not E.editing})
+		end
 	end
 	local w = magic.ui.root:CreateChild("Window")
 	if not magic.ui.root.defaultStyle then
@@ -481,8 +566,9 @@ function M.editor(options)
 	end
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(4, 4, 4, 4))
-	w:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
-	w:SetPosition(-10, 4)
+	-- The middle: an app's corners have its own (accounts' Server button)
+	w:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+	w:SetPosition(0, 4)
 	local edit_button = button(w, "Edit", toggle)
 	local edit_text = edit_button:GetChild(0)
 
@@ -493,12 +579,32 @@ function M.editor(options)
 		end
 		local was = E.editing
 		E.editing = s.editing == true
+		if E.can_edit ~= (s.can_edit == true) then
+			E.can_edit = s.can_edit == true
+			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
+			if E.can_edit and not E.editing then
+				ui_utils.show_notification("You may edit here: Edit, or F6", 4)
+			end
+		end
+		for _, p in ipairs(s.people or {}) do
+			log:info("kit editor: people: " .. tostring(p.name) ..
+					(p.admin and " admin" or p.builder and " builder" or " player"))
+		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""
 		end
-		edit_text:SetText(E.editing and "Leave edit mode" or "Edit")
+		if s.testing and not s.playing then
+			log:info("kit editor: a test of " .. tostring(s.testing) .. "'s runs")
+		end
+		if E.playing ~= (s.playing == true) then
+			E.playing = s.playing == true
+			log:info("kit editor: " .. (E.playing and "playing a test" or
+					"the test is over"))
+		end
+		edit_text:SetText(E.playing and "Stop test" or
+				E.editing and "Leave edit mode" or "Edit")
 		edit_button.minWidth = edit_text.width + 16
 		if E.editing then
 			local n = #entities()

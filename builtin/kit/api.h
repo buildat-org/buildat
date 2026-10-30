@@ -56,9 +56,13 @@ namespace storage
 // box takes over: the server and the other instances go on. A signal
 // passed along more than MAX_HOPS links is cut, the loop named.
 //
-// **The editor** (stage 3): a player the app gave edit rights (set_editor)
-// switches edit mode on and edits the authored tree, live for everyone on
-// the server: the packet "kit:edit", a JSON object of an op:
+// **The editor** (stage 3): a player with edit rights switches edit mode
+// on and edits the authored tree, live for everyone on the server. Edit
+// rights by default are builtin/accounts': the server's admin (and the
+// launcher's own user), and each account the admin made a builder (the
+// account's privilege "builder", kept in the accounts, so for every app
+// on the server); set_editor() overrides them for a name. The packet
+// "kit:edit", a JSON object of an op:
 //   {"op": "mode", "on": true|false}
 //   {"op": "place", "type": t, "pos": [x, y, z]}  -- a new entity in the
 //       editor's scene with an instance of t (the palette: every
@@ -68,12 +72,25 @@ namespace storage
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
 //    "input": in}
 //   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them
+//   {"op": "builder", "name": account, "on": bool}  -- the admin's only:
+//       makes an account a builder, or no longer
+//   {"op": "play"}, {"op": "stop"}  -- a test: the runtime starts again
+//       from the authored row (defaults, on_start, nothing disabled) and
+//       the editor plays; "stop" (or the tester leaving) puts back the
+//       runtime and the owned voxels as they were and the editor is in
+//       edit mode again. One runtime: everyone on the server plays the
+//       test meanwhile, and edits wait for its end. A test's runtime is
+//       never saved.
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
-// outputs, gizmo, usable}}, "authored": the row, "undo": n}. A type's
+// outputs, gizmo, usable}}, "authored": the row, "undo": n, "admin",
+// and the admin's "people": [{name, admin, builder}] here}, and always
+// "can_edit", and "testing" (whose test runs) and "playing" (this one's).
+// A player is sent it too as the admin grants or takes their rights, and
+// a tester as their test starts. A type's
 // `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn
 // in edit mode only. The client half is builtin/kit/client_lua/module.lua.
 namespace kit
@@ -116,9 +133,9 @@ namespace kit
 		// A component's runtime state value as JSON, "" when there is none
 		virtual ss_ get_state(uint64_t entity, size_t component,
 				const ss_ &key) = 0;
-		// Edit rights ([KIT] stage 3): the app gives them to its owner and
-		// the players it makes builders, by the name set_peer() gives, and
-		// takes them back (an editor in edit mode leaves it)
+		// Edit rights ([KIT] stage 3) by the name set_peer() gives, over
+		// the accounts' default (above): given or taken (an editor in edit
+		// mode leaves it), for this run
 		virtual void set_editor(const ss_ &player, bool can) = 0;
 	};
 
