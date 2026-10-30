@@ -282,10 +282,11 @@ namespace voxelworld
 		// not there; over a streamed world that walk is the cost.
 		virtual sv_<pv::Vector3DInt16> get_loaded_sections() = 0;
 
-		// How many sections one streaming pass may load, generate or unload;
-		// two by default. A game whose generator runs behind turns this down
-		// to nothing while its queue is long and back up when it drains --
-		// only the game can see that queue. Nothing else should touch it.
+		// How many sections one streaming pass may load or generate; two by
+		// default. A game whose generator runs behind turns this down to
+		// nothing while its queue is long and back up when it drains -- only
+		// the game can see that queue. Nothing else should touch it.
+		// Unloading has a budget of its own, and none at nothing.
 		virtual void set_stream_budget(size_t sections_per_pass) = 0;
 
 		virtual void unload_section(const pv::Vector3DInt16 &section_p) = 0;

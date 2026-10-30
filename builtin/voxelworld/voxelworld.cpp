@@ -782,12 +782,18 @@ struct CInstance: public voxelworld::Instance
 		size_t budget = m_stream_budget;
 		for(const voxelworld::LoadPoint &lp : m_load_points){
 			if(budget == 0)
-				return;
+				break;
 			stream_around(lp, budget);
 		}
-		if(budget == 0)
-			return;
-		unload_distant_sections(budget);
+		// Unloading has a budget of its own ([SAVE_LIMIT_WATER_RED]): on
+		// what loading left, and with a mapchunk's completion and a mod's
+		// writes loading sections outside the budget, a walk loaded more
+		// than was unloaded -- 440 sections where 40 were wanted, the same
+		// ones never reached, and a loaded section is one trim_to() cannot
+		// take. An unload is a millisecond or less: sixteen a pass.
+		size_t unload_budget = 16;
+		if(m_stream_budget > 0)
+			unload_distant_sections(unload_budget);
 	}
 
 	// The sections of a box around c, ring by ring outward, so that the
@@ -933,6 +939,12 @@ struct CInstance: public voxelworld::Instance
 				if(!section.loaded)
 					continue;
 				if(is_wanted_loaded(section.section_p))
+					continue;
+				// Not while its generation is on the way: one unloaded then
+				// came back ungenerated and was generated again, over what
+				// a mapchunk's on_generated had made of the first one
+				// ([SAVE_LIMIT_WATER_RED])
+				if(section.awaiting)
 					continue;
 				drop.push_back(section.section_p);
 				if(drop.size() >= budget)
