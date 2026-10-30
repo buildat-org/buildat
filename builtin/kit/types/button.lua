@@ -5,8 +5,8 @@ return {
 	usable = true,
 	owns_voxel = true,
 	params = {
-		up = {type = "voxel", default = "button"},
-		down = {type = "voxel", default = "button_pressed"},
+		up = {type = "voxel", default = ""}, -- "": the app fills it, or you
+		down = {type = "voxel", default = ""},
 		hold = {type = "number", default = 1, min = 0.1, max = 60},
 	},
 	state = {

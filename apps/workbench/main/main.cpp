@@ -4,12 +4,14 @@
 // [KIT] Workbench: the blank app that only hosts Kit and its editor. A
 // flat stone floor (FLOOR_HALF each way from the origin, y 0) in a world of
 // 2x2 sections, the players walking on it (their client's physics, as
-// demo_digger's), the components of kit/ (Kit's starter set) to place,
-// set and link in Kit's editor, and the voxels to build with. Edit rights
-// are Kit's: the server's admin (the launcher's own user) and the builders
-// the admin makes. Those who have them also dig and place voxels in play
-// (a write routed to an owner when a component owns the voxel); everyone
-// else plays what was built. One save, "world": the voxels, Kit's rows.
+// demo_digger's), Kit's own components (its starter set, author "kit",
+// their voxels filled by DEFAULTS) to place, set and link in Kit's editor,
+// and the voxels to build with. Edit rights are Kit's: the server's admin
+// (the launcher's own user) and the builders the admin makes. Those who
+// have them also dig and place voxels in play (a write routed to an owner
+// when a component owns the voxel), and so does anyone where a component
+// grants it (Kit's can_dig/can_place: a dig zone); everyone else plays
+// what was built. One save, "world": the voxels, Kit's rows.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -54,6 +56,14 @@ static const VoxelDef VOXELS[] = {
 	{"lever_on", true}, {"door", true}, {"gate", true},
 };
 static const size_t PLACEABLE = 6; // air is not placed, it is a dig
+// Kit's types' voxels, Workbench's
+static const char DEFAULTS[] = R"({
+	"kit/button": {"up": "button", "down": "button_pressed"},
+	"kit/door": {"closed": "door"},
+	"kit/key_door": {"closed": "door"},
+	"kit/gate": {"closed": "gate"},
+	"kit/lever": {"off_voxel": "lever_off", "on_voxel": "lever_on"}
+})";
 
 struct Module: public interface::Module
 {
@@ -127,7 +137,7 @@ struct Module: public interface::Module
 		ss_ v;
 		m_floor = m_save->store("main")->get("floor", v);
 		kit::Host h;
-		h.types_path = m_server->get_module_path(MODULE)+"/kit";
+		h.defaults = DEFAULTS;
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;
@@ -272,11 +282,14 @@ struct Module: public interface::Module
 		}
 		bool can = false;
 		kit::access(m_server, [&](kit::Interface *k){
-			can = k->can_edit(peer);
+			can = k->can_edit(peer) || (voxel == "air" ?
+					k->can_dig(peer, c[0], c[1], c[2]) :
+					k->can_place(peer, c[0], c[1], c[2]));
 		});
 		if(!can){
-			log_i(MODULE, "workbench: a build by %s refused: no edit rights",
-					cs(m_names[peer]));
+			log_i(MODULE, "workbench: a build by %s refused: no edit rights "
+					"and no grant at (%i,%i,%i)", cs(m_names[peer]), c[0], c[1],
+					c[2]);
 			return;
 		}
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){

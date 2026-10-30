@@ -5,7 +5,8 @@
 -- physics, copied), Kit's editor, and the voxels to build with.
 --   W A S D, Space: walk, jump; the mouse looks
 --   E, or the right button on a component: use it
---   (with edit rights) the left button digs, the right one places;
+--   (with edit rights, or where a component grants it) the left button
+--   digs, the right one places;
 --   1...5 the voxel placed (stone, glass, wood, brick, grass)
 --   F6 or "Edit": Kit's editor; there the pointer is free for its clicks,
 --   and the right button held looks round

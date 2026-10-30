@@ -56,33 +56,33 @@ if [ "${1:-}" = web ]; then
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", 891, 217], ["frames", 3],
-	["click", 600, 20], ["waitlog", "kit editor: state: 10 entities, 0 to undo", 20],
+	["click", 600, 20], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
 	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
 	["click", 723, 400], ["waitlog", "kit editor: cursor at 3,1,1", 10],
-	["click", 194, 164], ["waitlog", "kit editor: state: 11 entities, 1 to undo", 10],
+	["click", 470, 311], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
 	["click", 700, 310], ["waitlog", "kit editor: cursor at 3,1,3", 10],
-	["click", 194, 220], ["waitlog", "kit editor: state: 12 entities, 2 to undo", 10],
-	["click", 700, 310], ["waitlog", "kit editor: selected 13", 10],
+	["click", 297, 339], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
+	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
 	["click", 1083, 167], ["frames", 2], ["key", "End"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"],
-	["type", "glass"], ["waitlog", "kit editor: 13/1 closed = glass", 10],
-	["click", 980, 304], ["waitlog", "kit editor: state: 12 entities, 3 to undo", 10],
-	["click", 723, 400], ["waitlog", "kit editor: selected 12", 10],
-	["click", 1097, 164], ["waitlog", "kit editor: linking from 12 pressed", 10],
-	["click", 700, 310], ["waitlog", "kit editor: selected 13", 10],
-	["click", 980, 395], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
-	["click", 723, 400], ["waitlog", "kit editor: selected 12", 10],
+	["type", "glass"], ["waitlog", "kit editor: 18/1 closed = glass", 10],
+	["click", 980, 304], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
+	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
+	["click", 1097, 164], ["waitlog", "kit editor: linking from 17 pressed", 10],
+	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
+	["click", 980, 395], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
+	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
 	["frames", 3], ["shot", "${OUT}/linked.png"],
 	["click", 600, 20], ["waitlog", "kit editor: edit mode off", 10],
-	["key", "u"], ["waitlog", "replicated: entity 13 open = true", 10],
-	["key", "u"], ["waitlog", "replicated: entity 13 open = false", 10],
-	["click", 600, 20], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
-	["click", 334, 363], ["waitlog", "replicated: entity 12 presses = 0", 10],
+	["key", "u"], ["waitlog", "replicated: entity 18 open = true", 10],
+	["key", "u"], ["waitlog", "replicated: entity 18 open = false", 10],
+	["click", 600, 20], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
+	["click", 502, 425], ["waitlog", "replicated: entity 17 presses = 0", 10],
 	["waitlog_any", "kit editor: playing a test", 10],
 	["key", "b"], ["waitlog", "replicated: entity 4 open = true", 10],
 	["frames", 3], ["shot", "${OUT}/test.png"],
-	["click", 600, 20], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
+	["click", 600, 20], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
 	["waitlog_any", "kit editor: the test is over", 10],
 	["frames", 10], ["shot", "${OUT}/after_test.png"]
 ]
@@ -147,7 +147,7 @@ click Button "Don't add"
 frames 3
 wait_log_any 60000 replicated: entity 4 open = false
 click Button "Edit"
-wait_log 10000 kit editor: state: 10 entities, 0 to undo
+wait_log 10000 kit editor: state: 15 entities, 0 to undo
 mouse_pos 921 213
 mouse_click left
 wait_log 5000 kit editor: cursor at 6,2,2
@@ -156,30 +156,30 @@ screenshot @T@/pillar.png
 mouse_pos 620 350
 mouse_click left
 wait_log 5000 kit editor: cursor at 3,1,1
-click Button "Place button"
-wait_log 10000 kit editor: state: 11 entities, 1 to undo
+click Button "sample_kit/button"
+wait_log 10000 kit editor: state: 16 entities, 1 to undo
 mouse_pos 600 271
 mouse_click left
 wait_log 5000 kit editor: cursor at 3,1,3
-click Button "Place door"
-wait_log 10000 kit editor: state: 12 entities, 2 to undo
+click Button "sample_kit/door"
+wait_log 10000 kit editor: state: 17 entities, 2 to undo
 mouse_pos 512 570
 mouse_click left
 wait_log 5000 kit editor: cursor at 2,1,-2
-click Button "Place marker"
-wait_log 10000 kit editor: state: 13 entities, 3 to undo
+click Button "sample_kit/marker"
+wait_log 10000 kit editor: state: 18 entities, 3 to undo
 mouse_pos 512 570
 mouse_click left
-wait_log 5000 kit editor: selected 14
+wait_log 5000 kit editor: selected 19
 keypress Right
-wait_log 10000 kit editor: state: 13 entities, 4 to undo
+wait_log 10000 kit editor: state: 18 entities, 4 to undo
 keypress Delete
-wait_log 10000 kit editor: state: 12 entities, 5 to undo
+wait_log 10000 kit editor: state: 17 entities, 5 to undo
 click Button "Undo"
-wait_log 10000 kit editor: state: 13 entities, 4 to undo
+wait_log 10000 kit editor: state: 18 entities, 4 to undo
 mouse_pos 600 271
 mouse_click left
-wait_log 5000 kit editor: selected 13
+wait_log 5000 kit editor: selected 18
 click LineEdit "stone"
 keypress End
 keypress Backspace
@@ -188,24 +188,24 @@ keypress Backspace
 keypress Backspace
 keypress Backspace
 text glass
-wait_log 5000 kit editor: 13/1 closed = glass
+wait_log 5000 kit editor: 18/1 closed = glass
 click Button "Apply"
-wait_log 10000 kit editor: state: 13 entities, 5 to undo
+wait_log 10000 kit editor: state: 18 entities, 5 to undo
 frames 3
 screenshot @T@/inspector.png
 mouse_pos 620 350
 mouse_click left
-wait_log 5000 kit editor: selected 12
+wait_log 5000 kit editor: selected 17
 click Button "Link pressed"
-wait_log 5000 kit editor: linking from 12 pressed
+wait_log 5000 kit editor: linking from 17 pressed
 mouse_pos 600 271
 mouse_click left
-wait_log 5000 kit editor: selected 13
+wait_log 5000 kit editor: selected 18
 click Button "To toggle"
-wait_log 10000 kit editor: state: 13 entities, 6 to undo
+wait_log 10000 kit editor: state: 18 entities, 6 to undo
 mouse_pos 620 350
 mouse_click left
-wait_log 5000 kit editor: selected 12
+wait_log 5000 kit editor: selected 17
 frames 3
 screenshot @T@/link.png
 click Button "Leave edit mode"
@@ -213,35 +213,35 @@ wait_log 10000 kit editor: edit mode off
 frames 3
 screenshot @T@/play.png
 keypress u
-wait_log 10000 replicated: entity 13 open = true
+wait_log 10000 replicated: entity 18 open = true
 keypress u
-wait_log 10000 replicated: entity 13 open = false
+wait_log 10000 replicated: entity 18 open = false
 click Button "Edit"
-wait_log 10000 kit editor: state: 13 entities, 6 to undo
+wait_log 10000 kit editor: state: 18 entities, 6 to undo
 click Button "Undo"
-wait_log 10000 kit editor: state: 13 entities, 5 to undo
+wait_log 10000 kit editor: state: 18 entities, 5 to undo
 click Button "Leave edit mode"
 wait_log 10000 kit editor: edit mode off
 keypress u
-wait_log 10000 replicated: entity 12 presses = 3
+wait_log 10000 replicated: entity 17 presses = 3
 click Button "Edit"
-wait_log 10000 kit editor: state: 13 entities, 5 to undo
+wait_log 10000 kit editor: state: 18 entities, 5 to undo
 wait_log 60000 kit editor: people: kitbob player
 wait_log 60000 replicated: entity 4 open = true
 wait_log 10000 replicated: entity 4 open = false
 click Button "Builder: no"
 wait_log 10000 kit editor: people: kitbob builder
-wait_log 60000 kit editor: state: 14 entities
+wait_log 60000 kit editor: state: 19 entities
 frames 3
 screenshot @T@/builders.png
 click Button "Play"
-wait_log 10000 replicated: entity 12 presses = 0
+wait_log 10000 replicated: entity 17 presses = 0
 wait_log_any 10000 kit editor: playing a test
 wait_log 30000 replicated: entity 4 open = true
 frames 3
 screenshot @T@/test.png
 click Button "Stop test"
-wait_log 10000 kit editor: state: 14 entities
+wait_log 10000 kit editor: state: 19 entities
 frames 10
 screenshot @T@/after_test.png
 quit
@@ -260,11 +260,11 @@ wait_log_any 60000 kit editor: edit rights: yes
 keypress g
 wait_log 10000 kit editor: refused: builder: only the server's admin makes builders
 click Button "Edit"
-wait_log 10000 kit editor: state: 13 entities
-click Button "Place marker"
-wait_log 10000 kit editor: state: 14 entities
+wait_log 10000 kit editor: state: 18 entities
+click Button "sample_kit/marker"
+wait_log 10000 kit editor: state: 19 entities
 wait_log 60000 kit editor: a test of kitboss's runs
-click Button "Place marker"
+click Button "sample_kit/marker"
 wait_log 10000 kit editor: refused: place: a test of kitboss's runs
 frames 3
 screenshot @T@/bob_test.png
@@ -281,7 +281,7 @@ code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv1.log" | head -1)
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
 	BUILDAT_JOIN_ADMIN="setting open_registration on" client boss &
 boss=$!
-wait_for_log "$t/boss.log" "replicated: entity 12 presses = 3" 180 ||
+wait_for_log "$t/boss.log" "replicated: entity 17 presses = 3" 180 ||
 	fail "the admin's edits did not get as far as play ($t/boss.log)"
 # kitbob's own builder grant by the accounts' admin request: refused
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_ADMIN="priv kitbob builder" client bob
@@ -289,19 +289,19 @@ wait $boss || fail "the admin's client ($t/boss.log)"
 stop
 s=$t/srv1.log
 grep -a " kit \| main \| accounts" "$s" | grep -v "A . call" | sed 's/^.*\(kit\|main\|accounts\) *: /  /' |
-	grep -a "edit\|undo\|button 12\|door 13\|refused\|builder\|test" | cut -c1-140
+	grep -a "edit\|undo\|button 17\|door 18\|refused\|builder\|test" | cut -c1-140
 want "$s" "kitboss is in edit mode" \
-	"An edit by kitboss: placed button 12 at [3,1,1]" \
-	"An edit by kitboss: placed door 13 at [3,1,3]" \
-	"An edit by kitboss: placed marker 14 at [2,1,-2]" "An edit by kitboss: moved 14 to [3,1,-2]" \
-	"An edit by kitboss: deleted 14" "An undo by kitboss: 1 entities put back" \
-	"An edit by kitboss: set 13's door closed to \"glass\"" \
-	"An edit by kitboss: linked 12.pressed -> 13.toggle" "kitboss left edit mode" \
-	"button 12: pressed by player:kitboss times 1" \
-	"door 13: opened by player:kitboss to air" \
-	"door 13: closed by player:kitboss to glass" \
-	"button 12: pressed by player:kitboss times 3"
-[ "$(grep -ac "door 13: opened" "$s")" = 1 ] ||
+	"An edit by kitboss: placed sample_kit/button 17 at [3,1,1]" \
+	"An edit by kitboss: placed sample_kit/door 18 at [3,1,3]" \
+	"An edit by kitboss: placed sample_kit/marker 19 at [2,1,-2]" "An edit by kitboss: moved 19 to [3,1,-2]" \
+	"An edit by kitboss: deleted 19" "An undo by kitboss: 1 entities put back" \
+	"An edit by kitboss: set 18's sample_kit/door closed to \"glass\"" \
+	"An edit by kitboss: linked 17.pressed -> 18.toggle" "kitboss left edit mode" \
+	"sample_kit/button 17: pressed by player:kitboss times 1" \
+	"sample_kit/door 18: opened by player:kitboss to air" \
+	"sample_kit/door 18: closed by player:kitboss to glass" \
+	"sample_kit/button 17: pressed by player:kitboss times 3"
+[ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 1 ] ||
 	fail "the door moved after the undo took the link away ($s)"
 echo "ok: the admin edits: edit mode, place, move, delete, the inspector, the link, undo; the edit works in play"
 for op in mode place move delete set link unlink undo builder; do
@@ -311,15 +311,15 @@ done
 want "$s" "An admin request (priv) by kitbob refused: not staff" \
 	"kitboss granted builder kitbob" "kitboss made builder kitbob" \
 	"refused: only the server's admin makes builders" \
-	"An edit by kitbob: placed marker 15 at [0,1,0]"
+	"An edit by kitbob: placed sample_kit/marker 20 at [0,1,0]"
 grep -aE "An edit \(\?\) by peer [0-9]+ refused: not a JSON object" "$s" >/dev/null ||
 	fail "kitbob's packet that is no JSON was not refused ($s)"
 echo "ok: a player without edit rights is refused each kind of edit and the grant; the admin makes them a builder, who edits and grants nothing"
 
 # The test: the runtime from the authored row, everyone's; at its end the
 # rows it started from, by the digests Kit logs
-want "$s" "A test by kitboss starts" "button 3: pressed by player:kitbob times 1" \
-	"door 4: opened by player:kitbob to air" "sample_kit: the door's voxel is air" \
+want "$s" "A test by kitboss starts" "sample_kit/button 3: pressed by player:kitbob times 1" \
+	"sample_kit/door 4: opened by player:kitbob to air" "sample_kit: the door's voxel is air" \
 	"The test by kitboss ended (its tester stopped it)" \
 	"An edit (place) by peer" "refused: a test of kitboss's runs; edits wait"
 [ "$(grep -a "the door's voxel is" "$s" | tail -1 | grep -o '[a-z]*$')" = stone ] ||
@@ -343,13 +343,13 @@ print("  test start", start.groups(), "end", end.groups(), "rows", digest)
 assert start.groups() == end.groups() == tuple(digest), "the rows differ"
 a = json.loads(rows[0])
 e = {x["id"]: x for x in a["entities"]}
-assert e[13]["components"][0]["params"]["closed"] == "glass", e[13]
-assert e[12]["components"][0]["links"] == [], e[12]
-assert e[14]["components"][0]["type"] == "marker", e[14]
-assert e[15]["components"][0]["type"] == "marker", e[15]
-assert a["next_id"] == 16, a["next_id"]
+assert e[18]["components"][0]["params"]["closed"] == "glass", e[18]
+assert e[17]["components"][0]["links"] == [], e[17]
+assert e[19]["components"][0]["type"] == "sample_kit/marker", e[19]
+assert e[20]["components"][0]["type"] == "sample_kit/marker", e[20]
+assert a["next_id"] == 21, a["next_id"]
 r = json.loads(rows[1])
-assert r["12"][0]["state"]["presses"] == 3, r["12"]
+assert r["17"][0]["state"]["presses"] == 3, r["17"]
 assert r["4"][0]["state"]["open"] is False, r["4"]
 assert r["7"][0].get("disabled") is None, r["7"]
 # What the admin's client saw from the test's start: the fresh runtime,
@@ -357,24 +357,24 @@ assert r["7"][0].get("disabled") is None, r["7"]
 lines = open(client, errors="replace").read().split("\n")
 at = next(i for i, l in enumerate(lines) if "people: kitbob builder" in l)
 seen = [m.group(1, 2) for l in lines[at:] if " __app " not in l
-		for m in [re.search(r"replicated: entity (4 open|12 presses) = (\S+)", l)] if m]
+		for m in [re.search(r"replicated: entity (4 open|17 presses) = (\S+)", l)] if m]
 print("  replicated from the test on:", seen)
-assert ("12 presses", "0") in seen and ("4 open", "true") in seen, seen
+assert ("17 presses", "0") in seen and ("4 open", "true") in seen, seen
 last = dict(seen)
-assert last == {"12 presses": "3", "4 open": "false"}, last
+assert last == {"17 presses": "3", "4 open": "false"}, last
 EOF
 echo "ok: a test runs the runtime from the authored row, everyone's, edits wait; its end puts back the runtime and the voxels exactly"
 
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 click Button "Edit"
-wait_log 10000 kit editor: state: 14 entities, 0 to undo
+wait_log 10000 kit editor: state: 19 entities, 0 to undo
 quit
 EOF
 server 2
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client again
 stop
-want "$t/srv2.log" "Hosted: 15 entities" "kitbob is in edit mode"
+want "$t/srv2.log" "Hosted: 20 entities" "kitbob is in edit mode"
 grep -aq "the composition's first start" "$t/srv2.log" && fail "the composition was read again ($t/srv2.log)"
 echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, a test on a throwaway runtime, the authored row over a restart"
 # vim: set noet ts=4 sw=4:

@@ -20,14 +20,25 @@ namespace storage
 // under it (the app's main_context scenes, by name), positional entities
 // ("objects") in a scene, and entities with no position under the root.
 // An entity carries component instances: a component type is a Lua file
-// of the app's (<types_path>/<type>.lua) run in Kit's box, a Lua 5.1 in a
-// server .wasm (box/box.c, sandboxed and metered by src/wasm/engine.cpp);
-// an instance has the type's parameters' values and links from its
-// outputs to other entities' inputs.
+// run in Kit's box, a Lua 5.1 in a server .wasm (box/box.c, sandboxed and
+// metered by src/wasm/engine.cpp); an instance has the type's parameters'
+// values and links from its outputs to other entities' inputs.
+//
+// A type is named "<author>/<name>" ([KIT] stage 4b): everyone makes their
+// own door. Kit's own generic types are builtin/kit/types/<name>.lua,
+// author "kit", in every hosting app; the app's are <types_path>/<name>.lua
+// under its author (Host::author, the app's id until publishing binds an
+// author to a key). An instance records its type and the type's version
+// (the file's `version`). A save from before, its types bare names, is
+// read as the app's type of that name if it has one, else Kit's, and
+// written back so.
 //
 // A component type's file returns a table:
+//   version  = n             -- a whole number from 1 (1 if left out)
 //   params   = {name = {type = "voxel"|"number"|"string"|"bool"|"entity"|
-//                "position", default = v}, ...}   -- authored, per instance
+//                "position", default = v}, ...}   -- authored, per instance;
+//              a voxel "" is none (a generic type's, which the app's
+//              Host::defaults or the composer fills)
 //   state    = {name = {default = v, shared = true}, ...} -- runtime; a
 //              shared one is replicated to the clients
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
@@ -48,10 +59,29 @@ namespace storage
 // c:emit(output, value), c:set_voxel(name) (each cell it owns),
 // c:after(seconds) (on_timer then, on the game's clock; one an instance,
 // c:after() takes it back), c:teleport({x, y, z}) (the player who set the
-// run off, the app moving them on kit:move_player), c:give(item, n) (to that
-// player, Kit's own count of their items, which their client shows),
-// c:log(...). A component reaches its own entity and its links, and the
-// player who set it off, nothing else. `by` is who caused it,
+// run off, the app moving them on kit:move_player), c:log(...). A component
+// reaches its own entity and its links, and the player who set it off,
+// nothing else.
+//
+// That player's inventory: c:count(item, ext) (how many), c:add(item, n,
+// ext) (c:give the same), c:take(item, n, ext) (all n or none: true if
+// taken), c:list(ext) ({item = n}), c:has(item, n, ext) (count >= n); n is
+// 1 if left out, an item letters, digits and _, ext a free-form table the
+// provider may read (nil: {}). Kit's own counts are the provider, kept in
+// the runtime row; one component may replace them: a type with
+//   inventory = true, inventory_count(c, player, item, ext),
+//   inventory_add(c, player, item, n, ext) (true if added),
+//   inventory_take(c, player, item, n, ext) (true if taken, all or none),
+//   inventory_list(c, player, ext) ({item = n})
+// whose first instance (by entity id) is the provider for every player of
+// the app, its c its own (its state written as by its own runs). A second
+// is refused, logged. After a run that called them, the player's list is
+// sent to their client.
+//
+// Grants (dig and place for players, beside the app's edit rights):
+//   grants = "<param>"     -- a box of cells (as zone), where the
+//                             instance's state dig/place, when true, lets
+//                             players dig/place: Interface::can_dig/place `by` is who caused it,
 // "player:<name>" or "app", carried along the links it sets off and kept
 // with a timer. on_start(c) runs once, when an instance first has runtime
 // state; on_join(c, by) as the app places a player in its scene the first
@@ -85,7 +115,7 @@ namespace storage
 //   {"op": "mode", "on": true|false}
 //   {"op": "place", "type": t, "pos": [x, y, z]}  -- a new entity in the
 //       editor's scene with an instance of t (the palette: every
-//       <types_path>/*.lua that loads), its id the next
+//       type of Kit's and of the app's that loads), its id the next
 //   {"op": "move", "id": n, "pos": [x, y, z]}    {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
@@ -116,8 +146,15 @@ namespace kit
 {
 	struct Host
 	{
-		// The app's component types, <types_path>/<type>.lua
+		// The app's component types, <types_path>/<name>.lua ("": none of
+		// its own), named <author>/<name>
 		ss_ types_path;
+		// The app's types' author, letters, digits and _; "" is the app's
+		// id (any other character of it a _)
+		ss_ author;
+		// The app's defaults for types' parameters, over the types' own
+		// (JSON): {"kit/door": {"closed": "door"}, ...}
+		ss_ defaults;
 		// The composition used when the save has none yet (JSON):
 		//   {"entities": [{"id": 2, "name": "world", "kind": "scene"},
 		//     {"id": 3, "parent": 2, "name": "door", "pos": [4, 1, 0],
@@ -174,6 +211,11 @@ namespace kit
 		// Whether a placed peer has edit rights here (the accounts' or the
 		// app's word): an app's own building tools ask it
 		virtual bool can_edit(size_t peer) = 0;
+		// Whether a component grants a placed peer digging (placing) the
+		// voxel at x, y, z of their scene (a type's `grants`). Edit rights
+		// are not in it: an app asks it beside can_edit
+		virtual bool can_dig(size_t peer, int x, int y, int z) = 0;
+		virtual bool can_place(size_t peer, int x, int y, int z) = 0;
 	};
 
 	inline bool access(interface::Server *server,

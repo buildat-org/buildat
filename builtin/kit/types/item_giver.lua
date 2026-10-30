@@ -1,7 +1,6 @@
 -- An item giver: a player who uses it gets `count` of `item` (once each
--- with `once`), kept by Kit as theirs and shown on their screen.
--- simplified: Kit's items are a count a name; nothing yet takes or uses
--- them (a key that opens a door needs a way to ask what a player has)
+-- with `once`), into their inventory (Kit's counts, or the component that
+-- replaces them, which may refuse: a full bag), shown on their screen
 return {
 	version = 1,
 	usable = true,
@@ -14,16 +13,20 @@ return {
 	-- Who has had theirs: a table, so written back whole (Kit sees only
 	-- c.state.x = ..., not a change inside a table it holds)
 	state = {given = {default = {}}},
-	outputs = {"given"},
+	outputs = {"given", "refused"},
 	on_use = function(c, by)
 		local given = c.state.given
 		if c.params.once and given[by] then
 			c:log(by, "has had theirs")
 			return
 		end
+		if not c:add(c.params.item, c.params.count) then
+			c:log(by, "could not take", c.params.count, c.params.item)
+			c:emit("refused")
+			return
+		end
 		given[by] = true
 		c.state.given = given
-		c:give(c.params.item, c.params.count)
 		c:log("gives", by, c.params.count, c.params.item)
 		c:emit("given")
 	end,

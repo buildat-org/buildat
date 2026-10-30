@@ -53,7 +53,7 @@ static const size_t MAX_TYPE_SOURCE = 256 << 10;
 // a volume has at most
 static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
-// The most of an item a player has (c:give)
+// The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
 static const size_t MAX_EDIT_PACKET = 4096;
@@ -73,7 +73,8 @@ struct Link
 
 struct Instance
 {
-	ss_ type;
+	ss_ type; // "<author>/<name>"
+	int64_t version = 1; // authored: the type's version it was made with
 	json::Value params = json::object(); // authored
 	sv_<Link> links; // authored
 	json::Value state = json::object(); // runtime
@@ -101,9 +102,12 @@ struct Type
 	json::Value decl;
 	std::set<ss_> inputs, outputs, handlers, shared;
 	bool usable = false, owns_voxel = false;
-	// The position parameters that are its zone's and its owned volume's
-	// extent ("" for none)
-	ss_ zone, volume;
+	// It provides the players' inventory (inventory = true)
+	bool inventory = false;
+	int64_t version = 1;
+	// The position parameters that are its zone's, its owned volume's and
+	// its grants' extent ("" for none)
+	ss_ zone, volume, grants;
 };
 
 struct Run
@@ -270,13 +274,25 @@ struct Module: public interface::Module, public Interface
 	// Voxels an instance set whose section was not loaded: tried each tick
 	std::deque<Write> m_pending_voxels;
 	// The editor: edit rights the app gave or took (set_editor) over the
-	// accounts' default, the types an editor places (every file in
-	// types_path that loads), each editor's undo, and the sections Kit owns
+	// accounts' default, the types an editor places (each of Kit's
+	// and the app's that loads), each editor's undo, and the sections Kit owns
 	// positions in, each scene's
 	std::map<ss_, bool> m_rights;
-	// Runtime: each player's items, by name ({item: n}), given by c:give
+	// Runtime: each player's items, by name ({item: n}), Kit's own inventory
 	json::Value m_items = json::object();
+	// The replacing inventory provider (an entity's id and its instance; 0:
+	// none, Kit's counts above), and those refused as a second
+	uint64_t m_provider = 0;
+	size_t m_provider_comp = 0;
+	std::set<ss_> m_inv_refused;
+	// Types are "<author>/<name>": Kit's own in builtin/kit/types/ (author
+	// "kit"), the app's in Host::types_path under its author
+	ss_ m_kit_types, m_author;
+	// The app's defaults for parameters, {type: {param: value}}
+	json::Value m_defaults = json::object();
 	std::set<ss_> m_palette;
+	// Bare type names made <author>/<name> as the composition was read
+	size_t m_migrated = 0;
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
 			std::set<std::tuple<int, int, int>>> m_owned_sections;
@@ -443,16 +459,48 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// The directory an author's types are in: "" for an author not here
+	// simplified: Kit's and the app's; other authors' come with stage 5's
+	// packages
+	ss_ author_path(const ss_ &author)
+	{
+		if(author == "kit")
+			return m_kit_types;
+		if(author == m_author)
+			return m_host.types_path;
+		return "";
+	}
+
+	// A bare type name (a save from before types had authors) as the
+	// type it was: the app's own if it has one of the name, else Kit's
+	ss_ full_type(const ss_ &type)
+	{
+		if(type.find('/') != ss_::npos || !name_ok(type))
+			return type;
+		if(!m_host.types_path.empty() &&
+				interface::fs::path_exists(m_host.types_path+"/"+type+".lua"))
+			return m_author+"/"+type;
+		return "kit/"+type;
+	}
+
 	bool load_type(const ss_ &name, ss_ &why)
 	{
 		if(m_types.count(name))
 			return true;
-		if(!name_ok(name)){
-			why = "a type's name is letters, digits and _: \""+
+		const size_t slash = name.find('/');
+		const ss_ author = slash == ss_::npos ? "" : name.substr(0, slash);
+		const ss_ short_name = slash == ss_::npos ? name : name.substr(slash + 1);
+		if(!name_ok(author) || !name_ok(short_name)){
+			why = "a type is <author>/<name>, each letters, digits and _: \""+
 					name.substr(0, 64)+"\"";
 			return false;
 		}
-		const ss_ path = m_host.types_path+"/"+name+".lua";
+		const ss_ dir = author_path(author);
+		if(dir.empty()){
+			why = "no component type "+name+" (no types of "+author+" here)";
+			return false;
+		}
+		const ss_ path = dir+"/"+short_name+".lua";
 		const ss_ src = read_file(path);
 		if(src.empty() || src.size() > MAX_TYPE_SOURCE){
 			why = "no component type "+name+" ("+path+")";
@@ -480,9 +528,43 @@ struct Module: public interface::Module, public Interface
 					t.shared.insert(it.key());
 		t.usable = t.decl.get("usable").is_true();
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
-		// zone and volume name position parameters of the type's own
+		const json::Value &ver = t.decl.get("version");
+		if(!ver.is_undefined() && (!ver.is_number() ||
+				ver.as_number() != std::floor(ver.as_number()) ||
+				ver.as_number() < 1 || ver.as_number() > 1e9)){
+			why = name+": its version is a whole number from 1";
+			return false;
+		}
+		t.version = ver.is_number() ? (int64_t)ver.as_number() : 1;
+		t.inventory = t.decl.get("inventory").is_true();
+		for(const char *h : {"inventory_count", "inventory_add",
+				"inventory_take", "inventory_list"})
+			if(t.inventory && !t.handlers.count(h)){
+				why = name+": an inventory provider has "+h;
+				return false;
+			}
+		// The app's defaults for its parameters, over the type's own
+		json::Value params = t.decl.get("params").deepcopy();
+		const json::Value &defs = m_defaults.get(name);
+		if(defs.is_object() && params.is_object())
+			for(json::Iterator it(defs); it; ++it){
+				const ss_ bad = !params.get(it.key()).is_object() ?
+						"not a parameter of it" :
+						check_param(params.get(it.key()), *it);
+				if(!bad.empty()){
+					log_w(MODULE, "The app's default for %s's %s left out: %s",
+							cs(name), cs(it.key()), cs(bad));
+					continue;
+				}
+				json::Value p = params.get(it.key());
+				p.set("default", *it);
+				params.set(it.key(), p);
+				t.decl.set("params", params);
+			}
+		// zone, volume and grants name position parameters of the type's own
 		for(auto k : {std::make_pair("zone", &t.zone),
-				std::make_pair("volume", &t.volume)}){
+				std::make_pair("volume", &t.volume),
+				std::make_pair("grants", &t.grants)}){
 			const ss_ pn = jstr(t.decl, k.first);
 			if(pn.empty())
 				continue;
@@ -497,10 +579,11 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		m_types[name] = t;
-		log_i(MODULE, "Component type %s: inputs %zu, outputs %zu, %s%s",
-				cs(name), t.inputs.size(), t.outputs.size(),
-				t.usable ? "usable" : "not usable",
-				t.owns_voxel ? ", owns its voxel" : "");
+		log_i(MODULE, "Component type %s version %lli: inputs %zu, outputs "
+				"%zu, %s%s%s", cs(name), (long long)t.version, t.inputs.size(),
+				t.outputs.size(), t.usable ? "usable" : "not usable",
+				t.owns_voxel ? ", owns its voxel" : "",
+				t.inventory ? ", an inventory provider" : "");
 		return true;
 	}
 
@@ -594,8 +677,8 @@ struct Module: public interface::Module, public Interface
 			return "";
 		}
 		if(t == "voxel"){
-			if(!v.is_string() || v.as_string().empty() ||
-					v.as_string().size() > 64)
+			// "": none (a type's own default the app or the composer fills)
+			if(!v.is_string() || v.as_string().size() > 64)
 				return "a voxel's name";
 			for(char c : v.as_string())
 				if(!isalnum((unsigned char)c) && c != '_' && c != ':')
@@ -657,10 +740,26 @@ struct Module: public interface::Module, public Interface
 		for(unsigned k = 0; k < cs_.size(); k++){
 			const json::Value &cj = cs_.at(k);
 			Instance in;
-			in.type = jstr(cj, "type");
+			in.type = full_type(jstr(cj, "type"));
+			if(in.type != jstr(cj, "type")){
+				log_i(MODULE, "Entity %s's type %s is %s now", cs(itos(e.id)),
+						cs(jstr(cj, "type")), cs(in.type));
+				m_migrated++;
+			}
 			if(!load_type(in.type, why))
 				return false;
 			const Type &t = m_types[in.type];
+			// The version it was made with; the type's own for a new one
+			// simplified: one version of a type is on disk, and an
+			// instance of another runs on it. An explicit upgrade (and a
+			// parameter migration hook) comes with stage 5's packages
+			const json::Value &ver = cj.get("version");
+			in.version = ver.is_number() && ver.as_number() >= 1 &&
+					ver.as_number() <= 1e9 ? (int64_t)ver.as_number() : t.version;
+			if(in.version != t.version)
+				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
+						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
+						(long long)in.version, (long long)t.version);
 			// The parameters the type declares, its defaults under the
 			// instance's
 			const json::Value &decl = t.decl.get("params");
@@ -719,6 +818,7 @@ struct Module: public interface::Module, public Interface
 		for(const Instance &in : e.comps){
 			json::Value cj = json::object();
 			cj.set("type", in.type);
+			cj.set("version", in.version);
 			cj.set("params", in.params);
 			json::Value ls = json::array();
 			for(const Link &l : in.links){
@@ -868,6 +968,27 @@ struct Module: public interface::Module, public Interface
 			return false;
 		}
 		m_store = host.save->store("kit");
+		m_kit_types = m_server->get_module_path(MODULE)+"/types";
+		m_author = host.author;
+		if(m_author.empty()){
+			// The app's id, as an author's name has it
+			m_author = m_server->get_app_id().substr(0, 64);
+			for(char &c : m_author)
+				if(!isalnum((unsigned char)c))
+					c = '_';
+		}
+		if(!name_ok(m_author) || m_author == "kit"){
+			why = "the app's author is letters, digits and _, not kit: \""+
+					m_author.substr(0, 64)+"\"";
+			return false;
+		}
+		if(!host.defaults.empty()){
+			m_defaults = json::load_string(host.defaults.c_str());
+			if(!m_defaults.is_object()){
+				why = "the parameters' defaults are not a JSON object";
+				return false;
+			}
+		}
 		if(!start_box(why)){
 			why = "no box: "+why;
 			return false;
@@ -894,19 +1015,33 @@ struct Module: public interface::Module, public Interface
 		}
 		if(!load_composition(c, why))
 			return false;
-		if(first)
+		if(m_migrated)
+			log_i(MODULE, "%zu bare type names made <author>/<name>",
+					m_migrated);
+		if(first || m_migrated)
 			m_store->set("authored", authored_json().stringify());
-		// The palette: every type of the app's that loads
-		for(const auto &n : interface::fs::list_directory(host.types_path)){
-			const size_t dot = n.name.rfind(".lua");
-			if(n.is_directory || dot == ss_::npos || dot + 4 != n.name.size())
+		// The palette: every type of Kit's and of the app's that loads
+		for(const ss_ &author : {ss_("kit"), m_author}){
+			const ss_ dir = author_path(author);
+			if(dir.empty())
 				continue;
-			ss_ twhy;
-			if(load_type(n.name.substr(0, dot), twhy))
-				m_palette.insert(n.name.substr(0, dot));
-			else
-				log_w(MODULE, "Not in the palette: %s", cs(twhy));
+			for(const auto &n : interface::fs::list_directory(dir)){
+				const size_t dot = n.name.rfind(".lua");
+				if(n.is_directory || dot == ss_::npos ||
+						dot + 4 != n.name.size())
+					continue;
+				const ss_ type = author+"/"+n.name.substr(0, dot);
+				ss_ twhy;
+				if(load_type(type, twhy))
+					m_palette.insert(type);
+				else
+					log_w(MODULE, "Not in the palette: %s", cs(twhy));
+			}
 		}
+		ss_ names;
+		for(const ss_ &t : m_palette)
+			names += (names.empty() ? "" : " ")+t;
+		log_i(MODULE, "The palette: %s", cs(names));
 
 		// Runtime: the save's, over each type's defaults
 		ss_ runtime;
@@ -924,7 +1059,7 @@ struct Module: public interface::Module, public Interface
 					for(json::Iterator it(sd); it; ++it)
 						in.state.set(it.key(), (*it).get("default"));
 				const json::Value &s = saved.at((unsigned)i);
-				if(jstr(s, "type") == in.type){
+				if(full_type(jstr(s, "type")) == in.type){
 					runtime_from(in, s);
 					if(!in.disabled.empty())
 						log_w(MODULE, "Entity %s's %s stays disabled: %s",
@@ -947,6 +1082,9 @@ struct Module: public interface::Module, public Interface
 			if(p.second.has_pos)
 				make_node(p.second);
 		own_voxels();
+		pick_provider();
+		if(m_migrated)
+			m_runtime_dirty = true;
 		m_hosted = true;
 		size_t n = 0;
 		for(auto &p : m_entities)
@@ -1094,8 +1232,38 @@ struct Module: public interface::Module, public Interface
 		lua_lit(in.state, o);
 		o += ",args=";
 		lua_lit(r.args, o);
-		o += ",nargs="+itos(r.args.size())+"}";
+		o += ",nargs="+itos(r.args.size());
+		// The player who set it off, and their inventory's provider: Kit's
+		// counts of theirs, or the replacing instance (itself, or its
+		// type, params and state)
+		const ss_ who = player_of(r.by);
+		if(!who.empty()){
+			o += ",player=";
+			lua_lit(json::Value(who), o);
+			const Instance *pv_ = provider();
+			if(!pv_){
+				o += ",items=";
+				lua_lit(m_items.get(who).is_object() ? m_items.get(who) :
+						json::object(), o);
+			} else if(pv_ == &in){
+				o += ",inv_self=true";
+			} else {
+				o += ",inv={type=";
+				lua_lit(json::Value(pv_->type), o);
+				o += ",id="+itos(m_provider)+",params=";
+				lua_lit(pv_->params, o);
+				o += ",state=";
+				lua_lit(pv_->state, o);
+				o += "}";
+			}
+		}
+		o += "}";
 		return o;
+	}
+
+	static ss_ player_of(const ss_ &by)
+	{
+		return by.compare(0, 7, "player:") == 0 ? by.substr(7) : "";
 	}
 
 	// One run; what it spent of the meter
@@ -1161,8 +1329,24 @@ struct Module: public interface::Module, public Interface
 				deliver(l.to, l.input, emits.at(i).at(1u), r.by, r.hops + 1);
 			}
 		}
+		// The provider's state, changed by the inventory calls of this run
+		Instance *pv_ = provider();
+		const json::Value &inv_set = fx.get("inv_set");
+		if(pv_ && pv_ != &in && inv_set.size()){
+			Entity &pe = m_entities[m_provider];
+			for(unsigned i = 0; i < inv_set.size(); i++){
+				const json::Value &kv = inv_set.at(i);
+				if(!kv.at(0u).is_string())
+					continue;
+				const ss_ k = kv.at(0u).as_string();
+				pv_->state.set(k, kv.at(1u));
+				m_runtime_dirty = true;
+				if(m_types[pv_->type].shared.count(k))
+					replicate_state(pe, m_provider_comp, k);
+			}
+		}
 		const json::Value &voxel = fx.get("voxel");
-		if(voxel.is_string()){
+		if(voxel.is_string() && !voxel.as_string().empty()){
 			if(!t.owns_voxel || !e.has_pos){
 				log_w(MODULE, "Entity %s's %s sets a voxel it does not own",
 						cs(itos(e.id)), cs(type));
@@ -1187,13 +1371,13 @@ struct Module: public interface::Module, public Interface
 			in.due_by = r.by;
 			m_runtime_dirty = true;
 		}
-		const ss_ who = r.by.compare(0, 7, "player:") == 0 ? r.by.substr(7) : "";
+		const ss_ who = player_of(r.by);
 		const json::Value &tp = fx.get("teleport");
 		if(tp.is_array())
 			teleport(e, type, who, tp);
-		const json::Value &give = fx.get("give");
-		for(unsigned i = 0; i < give.size(); i++)
-			give_item(e, type, who, give.at(i));
+		const json::Value &items = fx.get("items");
+		if(!who.empty() && !items.is_undefined())
+			got_items(e, type, who, items);
 		return spent;
 	}
 
@@ -1230,46 +1414,133 @@ struct Module: public interface::Module, public Interface
 		m_server->emit_event("kit:move_player", new MovePlayer(peer, x, y, z));
 	}
 
-	// c:give(item, n): the player who set the run off gets n of the item
-	// (a negative n takes; none below 0), kept in the runtime row
-	void give_item(const Entity &e, const ss_ &type, const ss_ &who,
-			const json::Value &g)
+	// ---- The players' inventory: count, add, take and list (api.h), Kit's
+	// own counts (m_items) unless one component replaces them
+
+	// The provider: the first instance (by entity id) whose type has
+	// inventory = true; another is refused, logged once
+	void pick_provider()
 	{
-		const ss_ item = g.at(0u).is_string() ? g.at(0u).as_string() : "";
-		const double n = g.at(1u).is_number() ? g.at(1u).as_number() : 0;
-		if(who.empty() || !name_ok(item) || n != std::floor(n) ||
-				std::fabs(n) > MAX_ITEMS){
-			log_w(MODULE, "Entity %s's %s: a give refused: %s", cs(itos(e.id)),
-					cs(type), who.empty() ? "no player set it off" :
-					"an item is letters, digits and _, a count whole");
-			return;
-		}
-		json::Value mine = m_items.get(who).is_object() ? m_items.get(who) :
-				json::object();
-		const json::Value &had = mine.get(item);
-		const int64_t now = std::max<int64_t>(0, std::min<int64_t>(MAX_ITEMS,
-				(had.is_number() ? (int64_t)had.as_number() : 0) + (int64_t)n));
-		if(now)
-			mine.set(item, now);
-		else
-			mine.del_key(item);
-		m_items.set(who, mine);
-		m_runtime_dirty = true;
-		log_i(MODULE, "Entity %s's %s gives %s %s %s: %s",
-				cs(itos(e.id)), cs(type), cs(who), cs(itos((int64_t)n)),
-				cs(item), cs(mine.stringify()));
-		send_items(who);
+		const uint64_t was = m_provider;
+		const size_t was_comp = m_provider_comp;
+		m_provider = 0;
+		m_provider_comp = 0;
+		for(auto &p : m_entities)
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				const Instance &in = p.second.comps[i];
+				if(!m_types[in.type].inventory)
+					continue;
+				if(!m_provider){
+					m_provider = p.first;
+					m_provider_comp = i;
+					continue;
+				}
+				const ss_ k = itos(p.first)+"/"+itos(i)+"/"+in.type;
+				if(m_inv_refused.insert(k).second)
+					log_w(MODULE, "Entity %s's %s would provide the players' "
+							"inventory, which entity %s's %s does: refused (one "
+							"replacing provider at a time)", cs(itos(p.first)),
+							cs(in.type), cs(itos(m_provider)), cs(m_entities[
+							m_provider].comps[m_provider_comp].type));
+			}
+		if(m_provider != was || m_provider_comp != was_comp)
+			log_i(MODULE, "The players' inventory: %s", m_provider ?
+					cs("entity "+itos(m_provider)+"'s "+m_entities[m_provider].
+					comps[m_provider_comp].type) : "Kit's own counts");
 	}
 
-	void send_items(const ss_ &who)
+	// The provider's instance, running (not disabled), or null
+	Instance* provider()
 	{
-		const json::Value &mine = m_items.get(who);
+		auto it = m_entities.find(m_provider);
+		if(it == m_entities.end() || m_provider_comp >= it->second.comps.size())
+			return nullptr;
+		Instance &in = it->second.comps[m_provider_comp];
+		return in.disabled.empty() ? &in : nullptr;
+	}
+
+	// A run's inventory calls done: the player's items as the provider
+	// lists them now, kept (Kit's own counts) and sent to their client
+	void got_items(const Entity &e, const ss_ &type, const ss_ &who,
+			const json::Value &items)
+	{
+		json::Value mine = json::object();
+		if(items.is_object())
+			for(json::Iterator it(items); it; ++it){
+				const double n = (*it).is_number() ? (*it).as_number() : 0;
+				if(name_ok(it.key()) && n >= 1 && n <= MAX_ITEMS &&
+						n == std::floor(n))
+					mine.set(it.key(), (int64_t)n);
+			}
+		if(!provider()){
+			if(mine.size())
+				m_items.set(who, mine);
+			else
+				m_items.del_key(who);
+			m_runtime_dirty = true;
+		}
+		log_i(MODULE, "Entity %s's %s: %s has %s", cs(itos(e.id)), cs(type),
+				cs(who), cs(mine.stringify()));
+		send_items(who, mine);
+	}
+
+	// simplified: under a replacing provider a client is sent its list
+	// only after a run that touched it, not as it joins
+	void send_items(const ss_ &who, json::Value mine = json::Value())
+	{
+		if(mine.is_undefined())
+			mine = m_items.get(who);
 		const ss_ data = mine.is_object() ? mine.stringify() : "{}";
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers)
 				if(p.second.name == who)
 					inetwork->send(p.first, "kit:items", data);
 		});
+	}
+
+	// ---- Grants (api.h's can_dig, can_place)
+
+	// Whether an instance in the peer's scene grants them key ("dig" or
+	// "place") at the cell: its type's `grants` box holds the cell and its
+	// state's key is true
+	bool granted(size_t peer, const char *key, int x, int y, int z)
+	{
+		auto pi = m_peers.find(peer);
+		if(!m_hosted || pi == m_peers.end())
+			return false;
+		for(auto &p : m_entities){
+			const Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			for(const Instance &in : e.comps){
+				const Type &t = m_types[in.type];
+				if(t.grants.empty() || !in.disabled.empty() ||
+						!in.state.get(key).is_true())
+					continue;
+				ss_ scene;
+				scene_of(e, &scene);
+				if(scene != pi->second.scene)
+					continue;
+				int n[3];
+				extent(in.params.get(t.grants), n);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				if(x >= o.getX() && x < o.getX() + n[0] && y >= o.getY() &&
+						y < o.getY() + n[1] && z >= o.getZ() &&
+						z < o.getZ() + n[2])
+					return true;
+			}
+		}
+		return false;
+	}
+
+	bool can_dig(size_t peer, int x, int y, int z)
+	{
+		return granted(peer, "dig", x, y, z);
+	}
+
+	bool can_place(size_t peer, int x, int y, int z)
+	{
+		return granted(peer, "place", x, y, z);
 	}
 
 	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
@@ -1827,7 +2098,8 @@ struct Module: public interface::Module, public Interface
 				const json::Value &d = m_types[t].decl;
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable", "zone", "volume"})
+						"usable", "zone", "volume", "grants", "version",
+						"inventory"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -1839,7 +2111,7 @@ struct Module: public interface::Module, public Interface
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume"})
+							"zone", "volume", "grants", "version", "inventory"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);
@@ -2190,6 +2462,7 @@ struct Module: public interface::Module, public Interface
 		}
 		m_runtime_dirty = true;
 		own_voxels();
+		pick_provider();
 		m_store->set("authored", authored_json().stringify());
 		for(auto &p : m_peers)
 			if(p.second.editing)

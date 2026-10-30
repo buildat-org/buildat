@@ -6,7 +6,10 @@
 // a door (which owns its voxel), a counter of the door's moves, a button
 // out of reach, a component that never returns, and two relays that are a
 // loop, on a stone floor (y 0) with a stone at (6, 1, 2) for the editor
-// to point at. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
+// to point at; and of Kit's own types beside them ([KIT] stage 4b): its
+// door (two authors' "door"), an item giver and a key door, on the
+// players' inventory that sample_kit's pouch provides (a second pouch
+// refused). Players stand at (0, 1, 0) of the scene "world"; a client's "d"
 // key is a dig at the door, a write routed to the door. util/kit_runtime_check.sh
 // drives it. A player is "p<peer>", or their account's name once logged in
 // (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
@@ -91,6 +94,8 @@ struct Module: public interface::Module
 		});
 		kit::Host h;
 		h.types_path = m_server->get_module_path(MODULE)+"/kit";
+		h.defaults = R"({"kit/door": {"closed": "glass"},
+				"kit/key_door": {"closed": "glass"}})";
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;

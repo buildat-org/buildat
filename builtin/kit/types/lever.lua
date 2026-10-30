@@ -16,8 +16,8 @@ return {
 	usable = true,
 	owns_voxel = true,
 	params = {
-		off_voxel = {type = "voxel", default = "lever_off"},
-		on_voxel = {type = "voxel", default = "lever_on"},
+		off_voxel = {type = "voxel", default = ""}, -- "": the app fills it, or you
+		on_voxel = {type = "voxel", default = ""},
 	},
 	state = {on = {default = false, shared = true}},
 	inputs = {"toggle", "on", "off"},
