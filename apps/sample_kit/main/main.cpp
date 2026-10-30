@@ -5,7 +5,8 @@
 // (kit/*.lua) composed in composition.json: a button that opens and closes
 // a door (which owns its voxel), a counter of the door's moves, a button
 // out of reach, a component that never returns, and two relays that are a
-// loop. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
+// loop, on a stone floor (y 0) with a stone at (6, 1, 2) for the editor
+// to point at. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
 // key is a dig at the door, a write routed to the door. util/kit_runtime_check.sh
 // drives it. A player is "p<peer>", or their account's name once logged in
 // (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
@@ -28,9 +29,11 @@
 namespace sample_kit {
 
 namespace pv = PolyVox;
+namespace magic = Urho3D;
 using interface::Event;
 
 static const pv::Vector3DInt32 DOOR(4, 1, 0);
+static const pv::Vector3DInt32 PILLAR(6, 1, 2);
 
 struct Module: public interface::Module
 {
@@ -38,6 +41,7 @@ struct Module: public interface::Module
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
 	ss_ m_door_voxel;
+	bool m_floor = false;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -69,10 +73,18 @@ struct Module: public interface::Module
 			interface::VoxelFormat f;
 			f.id = interface::VoxelField{0, 0, 16};
 			reg->set_format(f);
-			for(const char *name : {"air", "stone", "glass"}){
+			for(const ss_ name : {"air", "stone", "glass"}){
 				interface::VoxelDefinition def;
 				def.name.block_name = name;
-				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+				def.fully_empty = name == "air";
+				if(name != "air"){
+					def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+					for(auto &seg : def.textures){
+						seg.resource_name = "main/"+name+".png";
+						seg.total_segments = magic::IntVector2(1, 1);
+						seg.select_segment = magic::IntVector2(0, 0);
+					}
+				}
 				reg->add_voxel(def);
 			}
 			world->set_save(m_save, "main");
@@ -102,6 +114,18 @@ struct Module: public interface::Module
 			if(!w->is_section_loaded(pv::Vector3DInt16(0, 0, 0)))
 				return;
 			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			// Something for Kit's editor to point at: a stone floor under
+			// x, z 0...15 and a stone at PILLAR
+			if(!m_floor){
+				m_floor = true;
+				interface::VoxelName stone;
+				stone.block_name = "stone";
+				const interface::VoxelInstance v(reg->get(stone)->id);
+				for(int x = 0; x < 16; x++)
+					for(int z = 0; z < 16; z++)
+						w->set_voxel(pv::Vector3DInt32(x, 0, z), v);
+				w->set_voxel(PILLAR, v);
+			}
 			const interface::VoxelDefinition *def = reg->get(
 					reg->get_format().id.get(w->get_voxel(DOOR).data));
 			name = def ? def->name.block_name : "?";

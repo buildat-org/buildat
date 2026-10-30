@@ -39,8 +39,25 @@ end
 if buildat.get_env("BUILDAT_JOIN_NAME") then
 	log_in()
 end
+-- The world's voxels, which the editor points at, in a plain light
+local voxelworld = require("buildat/module/voxelworld")
+voxelworld.set_camera(camera_node)
+do
+	local zone = scene:CreateChild("Zone"):CreateComponent("Zone")
+	zone.boundingBox = magic.BoundingBox(-1000, 1000)
+	zone.ambientColor = magic.Color(0.5, 0.5, 0.55)
+	zone.fogColor = magic.Color(0.25, 0.3, 0.4)
+	local sun = scene:CreateChild("Sun")
+	sun.direction = magic.Vector3(-0.5, -1.0, 0.7)
+	local light = sun:CreateComponent("Light")
+	light.lightType = magic.LIGHT_DIRECTIONAL
+end
 local kit = require("buildat/module/kit")
-kit.editor{scene = scene, camera = camera_node, ground_y = 1}
+kit.editor{scene = scene, camera = camera_node, ground_y = 1,
+	solid = function(x, y, z)
+		-- 0: not there, 1: air
+		return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
+	end}
 
 local KEYS = {
 	[magic.KEY_B] = function() buildat.send_packet("kit:use", "3") end,

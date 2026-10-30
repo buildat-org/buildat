@@ -37,8 +37,9 @@ set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
 if [ "${1:-}" = web ]; then
 	# The admin's flow in the web client (web/), in headless Chrome at
-	# 1200x800: log in ("l", the setup code), place a button and a door,
-	# the door's closed to glass, the link, the door used twice, a test
+	# 1200x800: log in ("l", the setup code), point at the stone, place a
+	# button and a door on the floor, the door's closed to glass, the link,
+	# the door used twice, a test
 	check_tmp kit_editor_web; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'EOF'
 [
@@ -56,21 +57,22 @@ if [ "${1:-}" = web ]; then
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", 891, 217], ["frames", 3],
 	["click", 600, 20], ["waitlog", "kit editor: state: 10 entities, 0 to undo", 20],
-	["click", 500, 600], ["waitlog", "kit editor: cursor at 1,1,-3", 10],
+	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
+	["click", 723, 400], ["waitlog", "kit editor: cursor at 3,1,1", 10],
 	["click", 194, 164], ["waitlog", "kit editor: state: 11 entities, 1 to undo", 10],
-	["click", 700, 600], ["waitlog", "kit editor: cursor at 2,1,-3", 10],
+	["click", 700, 310], ["waitlog", "kit editor: cursor at 3,1,3", 10],
 	["click", 194, 220], ["waitlog", "kit editor: state: 12 entities, 2 to undo", 10],
-	["click", 700, 600], ["waitlog", "kit editor: selected 13", 10],
+	["click", 700, 310], ["waitlog", "kit editor: selected 13", 10],
 	["click", 1083, 167], ["frames", 2], ["key", "End"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"],
 	["type", "glass"], ["waitlog", "kit editor: 13/1 closed = glass", 10],
 	["click", 980, 304], ["waitlog", "kit editor: state: 12 entities, 3 to undo", 10],
-	["click", 500, 600], ["waitlog", "kit editor: selected 12", 10],
+	["click", 723, 400], ["waitlog", "kit editor: selected 12", 10],
 	["click", 1097, 164], ["waitlog", "kit editor: linking from 12 pressed", 10],
-	["click", 700, 600], ["waitlog", "kit editor: selected 13", 10],
+	["click", 700, 310], ["waitlog", "kit editor: selected 13", 10],
 	["click", 980, 395], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
-	["click", 500, 600], ["waitlog", "kit editor: selected 12", 10],
+	["click", 723, 400], ["waitlog", "kit editor: selected 12", 10],
 	["frames", 3], ["shot", "${OUT}/linked.png"],
 	["click", 600, 20], ["waitlog", "kit editor: edit mode off", 10],
 	["key", "u"], ["waitlog", "replicated: entity 13 open = true", 10],
@@ -131,9 +133,11 @@ want() # <log> <text>...
 }
 export BUILDAT_JOIN_PASSWORD=checkpass12 BUILDAT_JOIN_CREATE=1
 
-# The admin. At 1024x700 the pixel (400, 500) is the ground cell
-# (1, 1, -2) and (600, 500) is (2, 1, -2); a click on an entity's cell
-# selects it
+# The admin. At 1024x700 the pixel (921, 213) is the top of the stone at
+# (6, 1, 2), the cell above it (6, 2, 2); (620, 350) is the top of the
+# floor's (3, 0, 1), (600, 271) of its (3, 0, 3) (the door placed there
+# then the voxel the click meets), and (512, 570) is the ground's (2, 1,
+# -2), off the floor; a click on an entity's cell selects it
 cat > "$t/boss.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitboss
 wait_log_any 10000 admin script: done
@@ -144,22 +148,27 @@ frames 3
 wait_log_any 60000 replicated: entity 4 open = false
 click Button "Edit"
 wait_log 10000 kit editor: state: 10 entities, 0 to undo
-mouse_pos 400 500
+mouse_pos 921 213
 mouse_click left
-wait_log 5000 kit editor: cursor at 1,1,-2
+wait_log 5000 kit editor: cursor at 6,2,2
+frames 3
+screenshot @T@/pillar.png
+mouse_pos 620 350
+mouse_click left
+wait_log 5000 kit editor: cursor at 3,1,1
 click Button "Place button"
 wait_log 10000 kit editor: state: 11 entities, 1 to undo
-mouse_pos 600 500
+mouse_pos 600 271
 mouse_click left
-wait_log 5000 kit editor: cursor at 2,1,-2
+wait_log 5000 kit editor: cursor at 3,1,3
 click Button "Place door"
 wait_log 10000 kit editor: state: 12 entities, 2 to undo
-mouse_pos 500 640
+mouse_pos 512 570
 mouse_click left
-wait_log 5000 kit editor: cursor at
+wait_log 5000 kit editor: cursor at 2,1,-2
 click Button "Place marker"
 wait_log 10000 kit editor: state: 13 entities, 3 to undo
-mouse_pos 500 640
+mouse_pos 512 570
 mouse_click left
 wait_log 5000 kit editor: selected 14
 keypress Right
@@ -168,7 +177,7 @@ keypress Delete
 wait_log 10000 kit editor: state: 12 entities, 5 to undo
 click Button "Undo"
 wait_log 10000 kit editor: state: 13 entities, 4 to undo
-mouse_pos 600 500
+mouse_pos 600 271
 mouse_click left
 wait_log 5000 kit editor: selected 13
 click LineEdit "stone"
@@ -184,17 +193,17 @@ click Button "Apply"
 wait_log 10000 kit editor: state: 13 entities, 5 to undo
 frames 3
 screenshot @T@/inspector.png
-mouse_pos 400 500
+mouse_pos 620 350
 mouse_click left
 wait_log 5000 kit editor: selected 12
 click Button "Link pressed"
 wait_log 5000 kit editor: linking from 12 pressed
-mouse_pos 600 500
+mouse_pos 600 271
 mouse_click left
 wait_log 5000 kit editor: selected 13
 click Button "To toggle"
 wait_log 10000 kit editor: state: 13 entities, 6 to undo
-mouse_pos 400 500
+mouse_pos 620 350
 mouse_click left
 wait_log 5000 kit editor: selected 12
 frames 3
@@ -266,6 +275,7 @@ wait_log 10000 kit editor: edit mode off
 quit
 EOF
 server 1
+wait_for_log "$t/srv1.log" "setup code [A-Z0-9]+" 30
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv1.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv1.log)"
 BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
@@ -281,9 +291,9 @@ s=$t/srv1.log
 grep -a " kit \| main \| accounts" "$s" | grep -v "A . call" | sed 's/^.*\(kit\|main\|accounts\) *: /  /' |
 	grep -a "edit\|undo\|button 12\|door 13\|refused\|builder\|test" | cut -c1-140
 want "$s" "kitboss is in edit mode" \
-	"An edit by kitboss: placed button 12 at [1,1,-2]" \
-	"An edit by kitboss: placed door 13 at [2,1,-2]" \
-	"An edit by kitboss: placed marker 14 at" "An edit by kitboss: moved 14 to" \
+	"An edit by kitboss: placed button 12 at [3,1,1]" \
+	"An edit by kitboss: placed door 13 at [3,1,3]" \
+	"An edit by kitboss: placed marker 14 at [2,1,-2]" "An edit by kitboss: moved 14 to [3,1,-2]" \
 	"An edit by kitboss: deleted 14" "An undo by kitboss: 1 entities put back" \
 	"An edit by kitboss: set 13's door closed to \"glass\"" \
 	"An edit by kitboss: linked 12.pressed -> 13.toggle" "kitboss left edit mode" \
