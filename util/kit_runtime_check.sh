@@ -289,6 +289,7 @@ grep -aq "Entity 15's kit/item_giver disabled" "$s" && fail "the item giver was 
 [ "$(grep -ac "sample_kit/pouch disabled" "$s")" = 1 ] || fail "the pouch's disablement not logged once ($s)"
 [ "$(grep -ac "A new box after" "$s")" = 2 ] ||
 	fail "run 2: not two new boxes, for the runaway and the pouch ($s)"
+want "$s" "Guest p1's entity 1000000 dropped"
 want "$s" "Entity 12's kit/door is an object now: its voxels' parameters dropped, its 2 owned cells to be cleared to air"
 grep -aq "the composition's first start" "$s" && fail "the composition was read again ($s)"
 want "$s" "11 bare type names made <author>/<name>" \
@@ -311,11 +312,9 @@ assert all("/" in c["type"] for k, v in r.items() if k.isdigit() for c in v), r
 made = {m["entity"]["id"]: m for m in r["made"]}
 assert sorted(made) == [19, 20] and all(m["origin"] == "g" for m in made.values()), r["made"]
 assert made[20]["entity"]["components"][0]["links"][0]["to"] == 19, made[20]
-# The 4c row's items were put on p1's entity's kit/inventory (and then
-# reset by the round's start: no session, a round no one has joined)
-p1 = r["players"]["p1"]["id"]
-inv = [c["state"]["items"] for c in r[str(p1)] if c["type"] == "kit/inventory"]
-assert inv == [{"spin": 1}] and "items" not in r, (inv, r.get("items"))
+# The 4c row's items went onto p1's entity's kit/inventory (the log says
+# so); p1 is a guest, its entity dropped when it left ([KIT] stage 4e)
+assert "p1" not in r.get("players", {}) and "items" not in r, (r.get("players"), r.get("items"))
 print("  rows: %d instances, every type <author>/<name> with its version" % len(types))
 PY
 echo "ok: state over a restart, a save of bare type names migrated, the compiled box"

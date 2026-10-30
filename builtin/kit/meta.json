@@ -3,10 +3,13 @@
 	"wasm_box": "box",
 	"dependencies": [
 		{"module": "client_lua"},
+		{"module": "client_data"},
 		{"module": "main_context"},
 		{"module": "network"},
 		{"module": "replicate"},
 		{"module": "storage"},
-		{"module": "voxelworld"}
+		{"module": "voxelworld"},
+		{"module": "worldgen"},
+		{"module": "heightmap"}
 	]
 }

@@ -13,8 +13,11 @@
 		{"module": "replicate"},
 		{"module": "storage"},
 		{"module": "voxelworld"},
+		{"module": "worldgen"},
+		{"module": "heightmap"},
 		{"module": "kit"},
 		{"module": "accounts", "optional": true},
-		{"module": "chat", "optional": true}
+		{"module": "chat", "optional": true},
+		{"module": "luanti_mapgen", "optional": true}
 	]
 }

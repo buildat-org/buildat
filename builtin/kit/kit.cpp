@@ -22,8 +22,10 @@
 #include "interface/voxel.h"
 #include "interface/sha256.h"
 #include "interface/os.h"
+#include "kit/world.h"
 #include <Scene.h>
 #include <Node.h>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <deque>
@@ -140,6 +142,8 @@ struct Type
 	// says what players keep between plays (between_plays), it goes on the
 	// app root (root)
 	bool spawn = false, between_plays = false, root = false;
+	// [KIT] stage 4e: it is the World (kit/world; the first on the root)
+	bool world = false;
 	ss_ spawn_param;
 	// Its voxel writes are builds by the player who set the run off, not
 	// game changes (builds = true)
@@ -183,6 +187,9 @@ struct Peer
 	json::Value cursor = json::null();
 	// Their player entity ([KIT] stage 4d; 0 before they have a name)
 	uint64_t player = 0;
+	// [KIT] 4d's answer: no account (a guest, p1...): their entity goes
+	// when they leave or log in
+	bool guest = false;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -560,6 +567,26 @@ struct Module: public interface::Module, public Interface
 	// Ids of entities being made together (a composition, a prefab's
 	// copy), which an entity parameter may name before they are there
 	std::set<uint64_t> m_pending_ids;
+	// [KIT] stage 4e: the World (world.h) in Host::world_scene: the
+	// material set, the parameters applied (the row "world") and parsed,
+	// the finite map's lowest and highest ground, the section each player
+	// is in (an infinite world loads round them), and the sections
+	// generated (logged as worldgen's queue empties)
+	main_context::SceneReference m_world_scene = nullptr;
+	world::MaterialSet m_materials;
+	json::Value m_world_applied;
+	world::Params m_wp;
+	int m_world_min = 0, m_world_max = 0;
+	int m_section_size = 32;
+	sm_<size_t, std::array<int32_t, 3>> m_world_peers;
+	// Where players appear on a voxel World: the cell their feet go in
+	std::array<int, 3> m_world_spawn = {{0, 1, 0}};
+	size_t m_world_generated = 0, m_world_logged = 0;
+	// A change that applies at the next start, warned of once
+	ss_ m_world_pending;
+	// Guests' dropped entities' names by their `by`, for this run
+	// simplified: kept for the run (a name each guest that came)
+	sm_<ss_, ss_> m_gone_guests;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -605,6 +632,8 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
+		sub(m_server, "worldgen:section_generated", &Module::on_generated);
+		sub(m_server, "worldgen:queue_modified", &Module::on_gen_queue);
 	}
 
 	void* get_interface()
@@ -837,6 +866,7 @@ struct Module: public interface::Module, public Interface
 		}
 		t.between_plays = t.decl.get("between_plays").is_true();
 		t.root = t.decl.get("root").is_true();
+		t.world = t.decl.get("world").is_true();
 		t.builds = t.decl.get("builds").is_true();
 		for(const char *h : {"inventory_count", "inventory_add",
 				"inventory_take", "inventory_list"})
@@ -1005,8 +1035,9 @@ struct Module: public interface::Module, public Interface
 			if(!v.is_string() || v.as_string().size() > 64)
 				return "a voxel's name";
 			for(char c : v.as_string())
-				if(!isalnum((unsigned char)c) && c != '_' && c != ':')
-					return "a voxel's name (letters, digits, _ and :)";
+				if(!isalnum((unsigned char)c) && c != '_' && c != ':' &&
+						c != '/')
+					return "a voxel's name (letters, digits, _, : and /)";
 			return "";
 		}
 		if(t == "entity"){
@@ -1523,6 +1554,9 @@ struct Module: public interface::Module, public Interface
 			if(m_types[t].player){
 				m_player_types.push_back(t);
 				m_palette.erase(t);
+			} else if(m_types[t].world && m_host.world_scene.empty()){
+				// [KIT] stage 4e: no World where the app has none
+				m_palette.erase(t);
 			}
 		ss_ names;
 		for(const ss_ &t : m_palette)
@@ -1533,6 +1567,8 @@ struct Module: public interface::Module, public Interface
 			names += (names.empty() ? "" : " ")+t;
 		log_i(MODULE, "On each player: %s", cs(names));
 		load_prefab_palette();
+		if(!host_world(why))
+			return false;
 
 		// The session ([KIT] stage 4c): Stopped or Running. A save from
 		// before has no row; it ran its components, so it is Running, its
@@ -1664,6 +1700,584 @@ struct Module: public interface::Module, public Interface
 				first ? " (the composition's first start)" : "",
 				m_players.size(), m_entities.size() - es - m_players.size());
 		return true;
+	}
+
+	// ---- The World ([KIT] stage 4e; world.h)
+
+	// Kit's own material set's voxels, for an app that builds with them
+	void register_voxels(interface::VoxelRegistry *reg)
+	{
+		world::MaterialSet set;
+		ss_ why;
+		if(!set.parse(json::load_string(read_file(m_server->get_module_path(
+				MODULE)+"/materials.json").c_str()), why)){
+			log_e(MODULE, "Kit's materials.json: %s", cs(why));
+			return;
+		}
+		for(auto &v : set.voxels){
+			interface::VoxelName n;
+			n.block_name = v.first;
+			if(reg->get(n))
+				continue;
+			const world::Material &m = v.second;
+			interface::VoxelDefinition def;
+			def.name = n;
+			// The faces: +y, -y, then the sides
+			for(int f = 0; f < 6; f++){
+				auto &seg = def.textures[f];
+				seg.resource_name = f == 0 ? m.top : f == 1 ? m.bottom : m.side;
+				seg.total_segments = magic::IntVector2(1, 1);
+				seg.select_segment = magic::IntVector2(0, 0);
+			}
+			if(m.kind == "water"){
+				// Passive: no flow (user, 2026-10-30)
+				def.edge_material_id = 10;
+				def.translucent = true;
+				def.transmits_light = true;
+			} else {
+				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+				def.physically_solid = true;
+				def.alpha_masked = m.kind == "leaves";
+			}
+			reg->add_voxel(def);
+		}
+	}
+
+	// The World's parameters: the first World on the root's, over its
+	// type's defaults (the app's among them); none: the defaults
+	json::Value world_params()
+	{
+		json::Value out = json::object();
+		ss_ type;
+		const Instance *in = nullptr;
+		for(auto &p : m_entities){
+			if(p.second.parent != 1 || p.second.has_pos || in)
+				continue;
+			for(const Instance &i : p.second.comps)
+				if(m_types.count(i.type) && m_types[i.type].world){
+					in = &i;
+					break;
+				}
+		}
+		type = in ? in->type : ss_("kit/world");
+		if(!m_types.count(type))
+			return out;
+		const json::Value &pd = m_types[type].decl.get("params");
+		if(pd.is_object())
+			for(json::Iterator it(pd); it; ++it){
+				const json::Value &v = in ? in->params.get(it.key()) :
+						json::Value();
+				out.set(it.key(), v.is_undefined() ? (*it).get("default") : v);
+			}
+		return out;
+	}
+
+	// A builder is told: the World's refusals, seams and what waits for
+	// the next start
+	void warn(const ss_ &text)
+	{
+		log_w(MODULE, "World: %s", cs(text));
+		sv_<size_t> to;
+		for(auto &p : m_peers)
+			if(can_edit(p.first))
+				to.push_back(p.first);
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(size_t peer : to)
+				inetwork->send(peer, "kit:warning", "World: "+text);
+		});
+	}
+
+	bool host_world(ss_ &why)
+	{
+		if(m_host.world_scene.empty())
+			return true;
+		auto si = m_host.scenes.find(m_host.world_scene);
+		if(si == m_host.scenes.end()){
+			why = "the World's scene "+m_host.world_scene+" is none of the app's";
+			return false;
+		}
+		m_world_scene = si->second;
+		const ss_ ms = m_host.materials.empty() ? read_file(
+				m_server->get_module_path(MODULE)+"/materials.json") :
+				m_host.materials;
+		ss_ mwhy;
+		if(!m_materials.parse(json::load_string(ms.c_str()), mwhy)){
+			why = "the material set: "+mwhy;
+			return false;
+		}
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			m_section_size = w->get_section_size_voxels().getX();
+		});
+		ss_ row;
+		if(m_store->get("world", row)){
+			const json::Value r = json::load_string(row.c_str());
+			m_world_applied = r.get("params");
+			world::Params was;
+			was.from(m_world_applied);
+			const int64_t v = json::jint(r, "version", 0);
+			if(!was.finite() && !was.heightmap() &&
+					v != world::generator_version(was.generator)){
+				why = "the save's infinite world is the "+was.generator+
+						" generator's version "+itos(v)+", this build's is "+
+						itos(world::generator_version(was.generator));
+				return false;
+			}
+			m_wp = was;
+		}
+		ss_ awhy;
+		if(!apply_world(world_params(), "", true, awhy)){
+			// The save's own World again, else nothing generated
+			warn("not applied: "+awhy);
+			if(m_world_applied.is_object() &&
+					!apply_world(m_world_applied, "", true, awhy)){
+				why = "the World: "+awhy;
+				return false;
+			}
+		}
+		return true;
+	}
+
+	// The World's parameters changed (an edit, an undo): applied
+	void world_check(const ss_ &by)
+	{
+		if(!m_world_scene)
+			return;
+		const json::Value p = world_params();
+		if(p.stringify() == m_world_applied.stringify())
+			return;
+		ss_ why;
+		if(!apply_world(p, by, false, why))
+			warn("not applied: "+why);
+	}
+
+	bool apply_world(const json::Value &params, const ss_ &by, bool first,
+			ss_ &why)
+	{
+		world::Params p;
+		p.from(params);
+		auto bi = m_materials.biomes.find(p.biome);
+		if(bi == m_materials.biomes.end()){
+			why = "no biome \""+p.biome+"\" in the material set "+
+					m_materials.name;
+			return false;
+		}
+		const world::Biome &b = bi->second;
+		// The roles the generator needs, each a voxel by its biome
+		sv_<ss_> need;
+		if(p.generator != "empty")
+			need = {"top", "filler", "stone", "riverbed"};
+		if(p.generator == "noise" || p.generator == "valleys" ||
+				p.border == "water" || (p.generator == "flat" &&
+				p.sea_level > p.level))
+			need.push_back("water");
+		if(p.border == "wall")
+			need.push_back("stone");
+		for(const ss_ &r : need)
+			if(m_materials.resolve(b, r).empty()){
+				why = "the "+p.generator+" generator needs the role "+r+
+						", which biome "+p.biome+" has none of";
+				return false;
+			}
+		if(p.heightmap() && !p.finite()){
+			why = "a heightmap surface is finite only";
+			return false;
+		}
+		if(!p.heightmap() && p.finite() && (p.width > world::MAX_FINITE_VOXELS
+				|| p.depth > world::MAX_FINITE_VOXELS)){
+			why = "a finite voxel map is "+itos(world::MAX_FINITE_VOXELS)+
+					" cells a side at most";
+			return false;
+		}
+		if(p.generator == "valleys" && !m_server->has_module("luanti_mapgen")){
+			why = "the valleys generator needs builtin/luanti_mapgen, which "
+					"this server has not";
+			return false;
+		}
+		// What applies at the next start: the surface, a heightmap's size
+		const bool had = m_world_applied.is_object();
+		if(!first && had && (p.heightmap() != m_wp.heightmap() ||
+				(p.heightmap() && (p.width != m_wp.width ||
+				p.depth != m_wp.depth)))){
+			const ss_ w = "the surface and a heightmap's size apply at the "
+					"next start";
+			if(m_world_pending != w)
+				warn(w);
+			m_world_pending = w;
+			return true;
+		}
+		m_world_pending.clear();
+		world::Ids ids;
+		ids.filler_depth = b.filler_depth;
+		sv_<int> layers;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			auto id = [&](const ss_ &name) -> interface::VoxelTypeId {
+				interface::VoxelName n;
+				n.block_name = name;
+				const interface::VoxelDefinition *d = reg->get(n);
+				if(!d && why.empty())
+					why = "voxel "+name+" is not registered";
+				return d ? d->id : 0;
+			};
+			ids.air = id("air");
+			if(p.generator == "empty")
+				return;
+			ids.top = id(m_materials.resolve(b, "top"));
+			ids.filler = id(m_materials.resolve(b, "filler"));
+			ids.stone = id(m_materials.resolve(b, "stone"));
+			ids.riverbed = id(m_materials.resolve(b, "riverbed"));
+			const ss_ water = m_materials.resolve(b, "water");
+			ids.water = water.empty() ? ids.air : id(water);
+		});
+		if(!why.empty())
+			return false;
+		if(p.heightmap())
+			for(const char *r : {"top", "stone", "riverbed"}){
+				const ss_ v = m_materials.resolve(b, r);
+				auto m = m_materials.voxels.find(v);
+				if(m == m_materials.voxels.end() || m->second.layer < 0){
+					why = v+" ("+r+") has no heightmap layer";
+					return false;
+				}
+				layers.push_back(m->second.layer);
+			}
+		up_<world::Heights> h(new world::Heights());
+		h->p = p;
+		valleys_query(*h);
+		// The map's ground (finite), or the origin's (infinite): its
+		// lowest and highest, and its hash, which a check compares
+		const int fx = p.finite() ? p.x0() : -32, fz = p.finite() ? p.z0() : -32;
+		const int fw = p.finite() ? p.width : 64, fd = p.finite() ? p.depth : 64;
+		sv_<int> tops;
+		h->tops(fx, fz, fw, fd, tops);
+		int lo = INT_MAX, hi = INT_MIN;
+		for(int t : tops)
+			lo = std::min(lo, t), hi = std::max(hi, t);
+		if(p.generator == "empty")
+			lo = hi = p.level - 1;
+		uint32_t hash = world::hash_ints(tops);
+		if(!p.heightmap())
+			find_spawn(*h);
+		const bool again = had && params.stringify() != m_world_applied.stringify();
+		if(p.heightmap()){
+			if(!apply_heightmap(p, *h, layers, again, hash, why))
+				return false;
+			set_world_generator(p, ids, nullptr, lo, hi);
+		} else {
+			set_world_generator(p, ids, std::move(h), lo, hi);
+			if(again)
+				regenerate(by);
+		}
+		m_wp = p;
+		m_world_min = lo;
+		m_world_max = hi;
+		m_world_applied = params.deepcopy();
+		json::Value row = json::object();
+		row.set("params", m_world_applied);
+		row.set("version", (int64_t)world::generator_version(p.generator));
+		m_store->set("world", row.stringify());
+		world_load_points();
+		log_i(MODULE, "World%s: %s %s, seed %u, biome %s, %s, %s; ground %i "
+				"to %i, heights hash %08x%s", by.empty() ? "" : cs(" by "+by),
+				cs(p.generator), cs(p.size == "finite" ? itos(p.width)+"x"+
+				itos(p.depth) : ss_("infinite")), p.seed, cs(p.biome),
+				cs(p.heightmap() ? ss_("a heightmap") : "voxels"),
+				cs("border "+p.border), lo, hi, hash,
+				first ? (again ? ", the save's was another" : "") : "");
+		if(first && !p.heightmap())
+			voxelworld::access(m_server, m_world_scene,
+					[&](voxelworld::Instance *w){
+				size_t n = 0, edited = 0;
+				for(const auto &s : w->section_stats())
+					n++, edited += s.altered;
+				log_i(MODULE, "World: the save holds %zu sections (%zu "
+						"edited)", n, edited);
+			});
+		return true;
+	}
+
+	// The voxels' generator, and voxelworld told what to keep: a section
+	// any write but the generator's changed is edited; an infinite world
+	// saves only those
+	void set_world_generator(const world::Params &p, const world::Ids &ids,
+			up_<world::Heights> h, int lo, int hi)
+	{
+		world::Generator *g = new world::Generator();
+		g->p = p;
+		g->ids = ids;
+		if(!h){
+			// A heightmap's scene: no voxels
+			h.reset(new world::Heights());
+			h->p = p;
+			h->p.generator = "empty";
+		}
+		g->h = std::move(h);
+		g->max_top = hi;
+		worldgen::access(m_server, [&](worldgen::Interface *i){
+			if(!i->get_instance(m_world_scene))
+				i->create_instance(m_world_scene);
+			worldgen::Instance *wi = i->get_instance(m_world_scene);
+			wi->set_generator(g);
+			wi->enable();
+		});
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			w->set_writes_alter(true);
+			w->set_save_unaltered(p.finite());
+		});
+	}
+
+	// Every section nobody edited generated again (unloaded and forgotten:
+	// the load points bring them back); the edited ones stay, and those
+	// beside a regenerated one are the seams
+	void regenerate(const ss_ &by)
+	{
+		size_t again = 0;
+		std::set<std::tuple<int, int, int>> edited, redo;
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			// The edited ones into the save, so its index says them all
+			w->save();
+			sv_<pv::Vector3DInt16> forget;
+			for(const auto &s : w->section_stats()){
+				const auto k = std::make_tuple(s.p.getX(), s.p.getY(), s.p.getZ());
+				if(s.altered)
+					edited.insert(k);
+				else
+					forget.push_back(s.p);
+			}
+			for(const pv::Vector3DInt16 &s : w->get_loaded_sections()){
+				const auto k = std::make_tuple(s.getX(), s.getY(), s.getZ());
+				if(edited.count(k))
+					continue;
+				w->unload_section(s);
+				forget.push_back(s);
+			}
+			for(const pv::Vector3DInt16 &s : forget)
+				redo.insert(std::make_tuple(s.getX(), s.getY(), s.getZ()));
+			w->forget_sections(forget);
+			again = redo.size();
+		});
+		ss_ seams;
+		size_t n = 0;
+		for(const auto &e : edited){
+			bool beside = false;
+			for(int dx = -1; dx <= 1 && !beside; dx++)
+			for(int dy = -1; dy <= 1 && !beside; dy++)
+			for(int dz = -1; dz <= 1 && !beside; dz++)
+				beside = redo.count(std::make_tuple(std::get<0>(e) + dx,
+						std::get<1>(e) + dy, std::get<2>(e) + dz)) > 0;
+			if(!beside)
+				continue;
+			if(n++ < 8)
+				seams += ss_(seams.empty() ? "" : " ")+"("+
+						itos(std::get<0>(e))+","+itos(std::get<1>(e))+","+
+						itos(std::get<2>(e))+")";
+		}
+		log_i(MODULE, "World%s: %zu sections generated again, %zu edited kept",
+				by.empty() ? "" : cs(" by "+by), again, edited.size());
+		if(n)
+			warn(itos(n)+" edited sections kept, seams where they meet the "
+					"new ground: "+seams+(n > 8 ? " ..." : ""));
+	}
+
+	// A heightmap surface: builtin/heightmap's map in the World's scene,
+	// generated from the same heights unless the save had it as applied;
+	// its grass, rock and sand the biome's top, stone and riverbed layers
+	bool apply_heightmap(const world::Params &p, world::Heights &h,
+			const sv_<int> &layers, bool again, uint32_t &hash, ss_ &why)
+	{
+		heightmap::Size size;
+		size.chunks_x = (p.width + 63) / 64;
+		size.chunks_z = (p.depth + 63) / 64;
+		size.chunk_size = 64;
+		size.cell_size = 1;
+		size.base_y = -100;
+		size.materials = 5;
+		heightmap::access(m_server, [&](heightmap::Interface *ih){
+			heightmap::Instance *map = ih->get_instance(m_world_scene);
+			bool loaded = false;
+			if(!map){
+				map = ih->create_instance(m_world_scene, size);
+				loaded = map->set_save(m_host.save, "world");
+			}
+			if(!loaded || again){
+				heightmap::GenerateParams gp;
+				gp.seed = p.seed;
+				// A voxel column's top cell is centred on its whole number
+				gp.height_fn = [&](float x, float z){ return h.at(x, z) + 0.5f; };
+				gp.sand_below = p.sea_level + 1.0f;
+				map->generate(gp);
+				if(layers != sv_<int>{0, 1, 2})
+					for(int z = 0; z < map->samples_z(); z++)
+					for(int x = 0; x < map->samples_x(); x++){
+						const heightmap::Weights w = map->get_weights(x, z);
+						heightmap::Weights o{};
+						for(int k = 0; k < 3; k++)
+							o[layers[k]] = (uint8_t)std::min(255,
+									o[layers[k]] + w[k]);
+						map->set_weights(x, z, o);
+					}
+			}
+			hash = map->content_hash();
+		});
+		return why.empty();
+	}
+
+	// Where voxelworld keeps the World loaded: a finite map's sections
+	// pinned, its whole; an infinite one round each player and the spawn;
+	// a heightmap's scene none
+	void world_load_points()
+	{
+		if(!m_world_scene)
+			return;
+		sv_<voxelworld::LoadPoint> pts;
+		const int S = m_section_size;
+		auto sec = [&](int v){ return v >= 0 ? v / S : -((-v + S - 1) / S); };
+		const world::Params &p = m_wp;
+		if(p.heightmap()){
+		} else if(p.finite()){
+			const int m = p.border == "water" ? world::SEA_BORDER :
+					p.border == "wall" ? 1 : 0;
+			const int ylo = std::min(m_world_min, p.border == "water" ?
+					p.sea_level - world::SEA_BED : INT_MAX) - 8;
+			const int yhi = std::max(m_world_max + (p.border == "wall" ? 4 : 0),
+					p.sea_level);
+			for(int sx = sec(p.x0() - m); sx <= sec(p.x0() + p.width - 1 + m); sx++)
+			for(int sz = sec(p.z0() - m); sz <= sec(p.z0() + p.depth - 1 + m); sz++)
+			for(int sy = std::max(sec(ylo), (int)WORLD_SECTION_Y0);
+					sy <= std::min(sec(yhi), (int)WORLD_SECTION_Y1); sy++)
+				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+						sx * S + S / 2, sy * S + S / 2, sz * S + S / 2), 0, 0, 0, 0));
+		} else {
+			double x = 0, y = 0, z = 0;
+			world_spawn(x, y, z);
+			pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(0, (int)y, 0),
+					1, 1, 1, 1));
+			for(auto &wp : m_world_peers)
+				pts.push_back(voxelworld::LoadPoint(pv::Vector3DInt32(
+						wp.second[0], wp.second[1], wp.second[2]), world::LOAD_XZ,
+						world::LOAD_Y, world::GEN_XZ, world::LOAD_Y, wp.first));
+		}
+		voxelworld::access(m_server, m_world_scene,
+				[&](voxelworld::Instance *w){
+			w->set_load_points(pts);
+		});
+		log_v(MODULE, "World: %zu load points", pts.size());
+	}
+
+	// An infinite World loads round a player as they go (the section
+	// they are in changed)
+	void world_peer(size_t peer, const ss_ &scene, double x, double y,
+			double z)
+	{
+		if(!m_world_scene || m_wp.finite() || scene != m_host.world_scene)
+			return;
+		const std::array<int32_t, 3> c = {{(int32_t)std::floor(x),
+				(int32_t)std::floor(y), (int32_t)std::floor(z)}};
+		auto it = m_world_peers.find(peer);
+		const int S = m_section_size;
+		if(it != m_world_peers.end()){
+			bool same = true;
+			for(int k = 0; k < 3; k++)
+				same = same && std::floor(it->second[k] / (double)S) ==
+						std::floor(c[k] / (double)S);
+			if(same)
+				return;
+		}
+		m_world_peers[peer] = c;
+		world_load_points();
+	}
+
+	void world_spawn(double &x, double &y, double &z)
+	{
+		x = 0.5;
+		y = 1;
+		z = 0.5;
+		if(!m_world_scene)
+			return;
+		const world::Params &p = m_wp;
+		if(p.heightmap()){
+			heightmap::access(m_server, [&](heightmap::Interface *ih){
+				heightmap::Instance *map = ih->get_instance(m_world_scene);
+				if(!map)
+					return;
+				x = map->samples_x() / 2 + 0.5;
+				z = map->samples_z() / 2 + 0.5;
+				y = map->height_at((float)x, (float)z) + 0.5;
+			});
+			return;
+		}
+		x = m_world_spawn[0] + 0.5;
+		y = m_world_spawn[1];
+		z = m_world_spawn[2] + 0.5;
+	}
+
+	// The valleys' surface for these heights (luanti_mapgen's; its
+	// rivers' size 0: the valleys stay, no channel is cut)
+	void valleys_query(world::Heights &h)
+	{
+		if(h.p.generator != "valleys")
+			return;
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *i){
+			luanti_mapgen::Params lp;
+			lp.mgname = "valleys";
+			lp.seed = h.p.seed;
+			lp.water_level = h.p.sea_level;
+			lp.settings["mgvalleys_river_size"] = "0";
+			// The ids every Luanti game has and the mapgen's aliases; no
+			// node is placed
+			lp.content_ids = {{"ignore", 0}, {"unknown", 1}, {"air", 2},
+				{"mapgen_stone", 3}, {"mapgen_water_source", 4},
+				{"mapgen_river_water_source", 5}};
+			h.valleys.reset(i->create_surface_query(lp));
+		});
+	}
+
+	// The spawn: the dry column nearest the middle (of the map, or the
+	// origin's 128 x 128), on the water at the middle if there is none
+	void find_spawn(world::Heights &h)
+	{
+		const world::Params &p = h.p;
+		m_world_spawn = {{0, p.generator == "empty" ? p.level : 1, 0}};
+		if(p.generator == "empty")
+			return;
+		const int w = p.finite() ? std::min(p.width, 128) : 128;
+		const int d = p.finite() ? std::min(p.depth, 128) : 128;
+		sv_<int> tops;
+		h.tops(-w / 2, -d / 2, w, d, tops);
+		int64_t best = -1;
+		for(int z = 0; z < d; z++)
+			for(int x = 0; x < w; x++){
+				const int t = tops[(size_t)z * w + x];
+				const int64_t dx = x - w / 2, dz = z - d / 2,
+						d2 = dx * dx + dz * dz;
+				if(t < p.sea_level || (best >= 0 && d2 >= best))
+					continue;
+				best = d2;
+				m_world_spawn = {{(int)dx, t + 1, (int)dz}};
+			}
+		if(best < 0)
+			m_world_spawn = {{0, std::max(tops[(size_t)(d / 2) * w + w / 2],
+					p.sea_level) + 1, 0}};
+	}
+
+	void on_generated(const worldgen::SectionGenerated &e)
+	{
+		if(e.scene == m_world_scene && m_world_scene)
+			m_world_generated++;
+	}
+
+	void on_gen_queue(const worldgen::QueueModifiedEvent &e)
+	{
+		if(e.scene != m_world_scene || !m_world_scene || e.queue_size ||
+				m_world_generated == m_world_logged)
+			return;
+		m_world_logged = m_world_generated;
+		log_i(MODULE, "World: %zu sections generated since the start",
+				m_world_generated);
 	}
 
 	// ---- Players as entities ([KIT] stage 4d)
@@ -1805,6 +2419,11 @@ struct Module: public interface::Module, public Interface
 		const uint64_t id = player_id(by);
 		if(id)
 			return m_entities[id].name;
+		// A guest's dropped entity still has its name (their zone's
+		// on_leave runs after)
+		auto g = m_gone_guests.find(by);
+		if(g != m_gone_guests.end())
+			return g->second;
 		return by.compare(0, 7, "player:") == 0 ? by.substr(7) : "";
 	}
 
@@ -3530,14 +4149,12 @@ struct Module: public interface::Module, public Interface
 	// Zones: a type's `zone` (a position parameter, its extent in cells
 	// from the entity's own up and on) and who stands in it, the players
 	// as the app placed them (the cell their position rounds to):
-	// on_enter(c, by) and on_leave(c, by) as that changes. A player who is
-	// away (left, or not back yet after a restart) stays as they were
+	// on_enter(c, by) and on_leave(c, by) as that changes. Leaving the
+	// server is leaving the zone, and joining inside one enters it (4d's
+	// answer, user 2026-10-30: a scoring zone guards re-entry itself); so
+	// is a restart: those not back yet leave
 	void check_zones()
 	{
-		std::set<ss_> here;
-		for(auto &pp : m_peers)
-			if(pp.second.player)
-				here.insert(itos(pp.second.player));
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			if(!e.has_pos)
@@ -3567,9 +4184,6 @@ struct Module: public interface::Module, public Interface
 					if(inside)
 						now.insert(itos(peer.player));
 				}
-				for(const ss_ &id : in.inside)
-					if(!here.count(id))
-						now.insert(id);
 				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
 					r.entity = e.id;
@@ -3769,9 +4383,17 @@ struct Module: public interface::Module, public Interface
 				m_peers[old.info.id].editing;
 		const uint64_t player = m_peers.count(old.info.id) ?
 				m_peers[old.info.id].player : 0;
+		const bool guest = m_peers.count(old.info.id) &&
+				m_peers[old.info.id].guest;
+		const ss_ name = m_peers.count(old.info.id) ?
+				m_peers[old.info.id].name : "";
 		m_peers.erase(old.info.id);
 		if(player)
 			unplace_player(player);
+		if(guest)
+			drop_guest(name);
+		if(m_world_peers.erase(old.info.id))
+			world_load_points();
 		for(auto &p : m_peers)
 			if(p.second.editing)
 				send_state(p.first);
@@ -3794,11 +4416,20 @@ struct Module: public interface::Module, public Interface
 				if(o.second.editing && o.first != peer)
 					send_state(o.first);
 		}
+		const bool renamed = p.name != name;
+		const ss_ old_name = p.name;
+		const bool was_guest = p.guest;
 		p.name = name;
 		p.scene = scene;
 		p.pos[0] = x;
 		p.pos[1] = y;
 		p.pos[2] = z;
+		// A guest: no account (where builtin/accounts is; without it
+		// nobody is one)
+		if(renamed)
+			p.guest = m_server->has_module("accounts") &&
+					account_of(peer).empty();
+		world_peer(peer, scene, x, y, z);
 		if(!m_hosted)
 			return;
 		// Their entity follows them ([KIT] stage 4d)
@@ -3806,9 +4437,34 @@ struct Module: public interface::Module, public Interface
 		p.player = name.empty() ? 0 : ensure_player(name);
 		if(was && was != p.player)
 			unplace_player(was);
+		if(renamed && was_guest)
+			drop_guest(old_name);
 		place_player(p);
 		if(join)
 			joined(peer);
+	}
+
+	// [KIT] 4d's answer (user, 2026-10-30): a guest's player entity is
+	// dropped when they leave or log in, not kept in the runtime row
+	void drop_guest(const ss_ &name)
+	{
+		auto it = m_players.find(name);
+		if(name.empty() || it == m_players.end())
+			return;
+		const uint64_t id = it->second;
+		for(auto &p : m_peers)
+			if(p.second.player == id)
+				return;
+		auto e = m_entities.find(id);
+		if(e != m_entities.end()){
+			remove_node(e->second);
+			m_entities.erase(e);
+		}
+		m_players.erase(it);
+		m_aside.del_key(name);
+		m_gone_guests["player:"+itos(id)] = name;
+		m_runtime_dirty = true;
+		log_i(MODULE, "Guest %s's entity %s dropped", cs(name), cs(itos(id)));
 	}
 
 	void input(uint64_t entity, const ss_ &input, const ss_ &value)
@@ -5114,12 +5770,14 @@ struct Module: public interface::Module, public Interface
 			commit(c.before, nullptr);
 			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
 					"to undo)", cs(p.name), c.before.size(), u.size());
+			world_check(p.name);
 			return;
 		}
 		if(!build_change(op, j, p, change, what, why))
 			return refuse(why);
 		commit(change, &m_undo[p.name]);
 		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
+		world_check(p.name);
 	}
 
 	// An id in a client's packet: a whole number of an entity that is there

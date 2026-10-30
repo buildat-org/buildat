@@ -2267,11 +2267,13 @@ struct CInstance: public voxelworld::Instance
 			const interface::VoxelSample &v, bool disable_warnings)
 	{
 		pv::Vector3DInt32 voxel_p;
+		Section *section = nullptr;
 		watch_voxel(p);
 		ChunkBuffer *buf = buffer_for(p, &voxel_p, disable_warnings,
-				"set_sample");
+				"set_sample", &section);
 		if(buf == nullptr)
 			return;
+		note_cause(section);
 		// A chunk written before the world had these planes, or one that
 		// has never had anything but the first written into it, takes them
 		// on here. The size test is what keeps this off the hot path.
@@ -2726,7 +2728,7 @@ struct CInstance: public voxelworld::Instance
 					load_section(new_section);
 				section = &new_section;
 			}
-			note_cause(section);
+			note_cause(section, !overwrite);
 			ChunkBuffer &buf = section->get_buffer(chunk_p, m_server,
 					&m_total_buffers_loaded);
 			if(!buf.volume){

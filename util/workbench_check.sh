@@ -353,7 +353,7 @@ want "$s" "kit/button 4: pressed by kitboss times 1" \
 	"kit/timer 7: stopped: its repeats done after 3 ticks" \
 	"kit/lever 6: flipped on by kitboss" "kit/lever 6: flipped off by kitboss" \
 	"kit/door 8: opened by kitboss" "kit/door 8: shut by kitboss" \
-	"workbench: kitboss placed stone" \
+	"workbench: kitboss placed kit/stone" \
 	"kit/npc 13: says to kitboss \"Welcome!\"" \
 	"kit/item_giver 14: gives kitboss 1 key" \
 	"kit/item_giver 14: kitboss has had theirs" \
@@ -391,6 +391,9 @@ grep -a "kitbob left; \|workbench: kitbob left" "$s" | head -1 | grep -q "zone" 
 	fail "kitbob did not walk out of the zone before leaving the server ($s)"
 grep -aq "workbench: kitbob dug (0,0,-5): written" "$s" ||
 	fail "kitbob did not dig in the dig zone ($s)"
+# [KIT] 4d's answer: leaving the server left the zone (the admin quit in it)
+awk '/workbench: kitboss left/ { q = 1 } q && /kit\/trigger_zone 10: kitboss left; / { f = 1 } END { exit !f }' "$s" ||
+	fail "the admin's leaving the server did not leave the zone ($s)"
 echo "ok: a second player is put on the spawner, may not build but digs in the dig zone, opens the key door with a key from the item giver, which it takes, is teleported into the zone (scored, counted, the NPC speaks) and walks out"
 
 db="$save/save.sqlite"
@@ -547,6 +550,13 @@ wait_log_any 10000 kit: entity 26 drawn 2x1x1.5 at 0,0,0, solid, a wedge
 event kit_edit {"op": "play"}
 wait_log 10000 kit editor: the server is Running (by kitboss)
 wait_log_any 10000 the server put the player at (0, 1.4, -4)
+keypress F6
+wait_log 10000 kit editor: edit mode off
+look_dir -1.5 -0.6 -1.5
+frames 10
+screenshot @T@/wedge.png
+keypress F6
+wait_log 10000 kit editor: state:
 event kit_edit {"op": "focus", "sel": 3}
 event kit_use 25
 wait_log 10000 kit editor: signal 25.pressed -> 3.spawn
@@ -690,14 +700,17 @@ assert st(6)["on"] is True and st(8)["open"] is True, (st(6), st(8))
 assert st(5)["open"] is True and st(12)["count"] == 2, (st(5), st(12))
 assert st(7)["ticks"] == 3 and st(7)["running"] is False, st(7)
 # [KIT] stage 4d: the items and the scores on the players' entities, and
-# the zone's members saved (kitboss away in it, kitbob walked out)
+# the zone's members saved: none (kitboss left the server in it, which
+# leaves it; kitbob walked out). No guest's entity kept (p1...: dropped
+# as they logged in)
 pid = lambda n: r["players"][n]["id"]
+assert not [n for n in r["players"] if n[:1] == "p" and n[1:].isdigit()], r["players"]
 pl = lambda n: {k: v for c in r[str(pid(n))] for k, v in c["state"].items()}
 assert pl("kitboss")["items"] == {"key": 1}, pl("kitboss")
 assert not pl("kitbob")["items"], pl("kitbob")  # an empty table: [] or {}
 assert pl("kitboss")["score"] == 1 and pl("kitbob")["score"] == 1, (pl("kitboss"), pl("kitbob"))
 assert pid("kitboss") >= 1000000, r["players"]
-assert r["10"][0].get("inside") == [str(pid("kitboss"))], r["10"]
+assert not r["10"][0].get("inside"), r["10"]
 assert st(15)["open"] is True and st(16)["dig"] is True, (st(15), st(16))
 print("  rows: 15 instances, 8 links, the scores, the lever on, the doors and the gate open, the key")
 EOF

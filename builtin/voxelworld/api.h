@@ -263,6 +263,16 @@ namespace voxelworld
 		// simplified: what the action sets going (a fire spreading) is the
 		// world's own once the call returns.
 		virtual void set_cause(const ss_ &player_name) = 0;
+		// [KIT] stage 4e: every write but a generator's merge_volume()
+		// alters its section, a cause or not (Kit's World: a section
+		// nobody wrote is generated again as the World's parameters
+		// change). Off by default
+		virtual void set_writes_alter(bool on) = 0;
+		// False: a section not altered is not written at all (Kit's
+		// infinite World: only generated, it is generated again when it
+		// comes back; the generator is pinned beside the save). True by
+		// default
+		virtual void set_save_unaltered(bool on) = 0;
 		// Every saved section's index row, loaded ones as they are now
 		virtual sv_<SectionStat> section_stats() = 0;
 		// Their chunks and rows deleted in one batch, a loaded one skipped;

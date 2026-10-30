@@ -310,10 +310,25 @@ namespace luanti_mapgen
 				float *out) = 0;
 	};
 
+	// [KIT] stage 4e: surface_map() below as an object the caller owns and
+	// asks from any thread (worldgen's: a generator holds one), its noise
+	// functions const. Deleted by the caller before this module unloads,
+	// as a generator is.
+	struct SurfaceQuery
+	{
+		virtual ~SurfaceQuery() {}
+		virtual bool surface_map(float x0, float z0, float step, int w,
+				int h, float *out) = 0;
+	};
+
 	struct Interface
 	{
 		// The noise above
 		virtual NoiseQuery* noise_query() = 0;
+
+		// A SurfaceQuery of its own for these parameters (valleys only:
+		// nullptr for another mapgen)
+		virtual SurfaceQuery* create_surface_query(const Params &params) = 0;
 
 		// A generator for these parameters. It belongs to whoever is given
 		// it -- worldgen deletes the one it is handed -- and it holds a
