@@ -232,6 +232,7 @@ end)
 buildat.sub_packet("skeldat:time", function(data)
 	local day, rate = data:match("^(%S+) (%S+)")
 	game.day, game.day_rate = tonumber(day), tonumber(rate)
+	game.day_ahead = 0
 end)
 
 -- A game's window over the world (ui.lua's, pause.lua's): while one is up
@@ -668,7 +669,13 @@ local function hue_of_hour(t, lit)
 end
 local CLOUD = {r = 0.9, g = 0.92, b = 0.95}
 local function update_sky(dt)
-	game.day = (game.day + dt * game.day_rate) % 1
+	-- [SKELDAT_DAY_CLOCK_SKEW] On between the server's times (each game
+	-- second) by the wall clock, a second past the last at most: a server
+	-- slower than the wall (a check box's world made at --sim-rate 1)
+	-- left a client's day running ahead of it by minutes
+	local step = math.max(0, math.min(dt, 1 - (game.day_ahead or 0)))
+	game.day_ahead = (game.day_ahead or 0) + step
+	game.day = (game.day + step * game.day_rate) % 1
 	local daylight = game.day * 24000
 	local tilt = sky_model.orbit_tilt(nil, nil)
 	-- The shadow's direction held a step at a time (a map rasterised from

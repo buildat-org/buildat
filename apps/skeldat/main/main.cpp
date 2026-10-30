@@ -1535,6 +1535,10 @@ struct Module: public interface::Module, public PlayersHost,
 			if(m_admin.skip_left <= 0)
 				m_players.check_moves();
 			update_skeletons();
+			// [SKELDAT_DAY_CLOCK_SKEW] The day each game second: a client
+			// runs it on in between for a second at most
+			for(auto &pair : m_players.all)
+				m_players.send_time(pair.first);
 		}
 		m_save_t += event.dtime;
 		if(m_save_t >= 10){
