@@ -21,6 +21,7 @@
 #include "interface/event.h"
 #include "interface/voxel.h"
 #include "interface/sha256.h"
+#include "interface/os.h"
 #include <Scene.h>
 #include <Node.h>
 #include <chrono>
@@ -48,6 +49,12 @@ static const size_t MAX_QUEUE = 4096;
 static const int64_t SLICE_DIV = 20;
 static const int64_t TICK_SLICES = 4;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
+// A zone's or an owned volume's extent in cells, each way, and the cells
+// a volume has at most
+static const int MAX_EXTENT = 64;
+static const int MAX_VOLUME = 64;
+// The most of an item a player has (c:give)
+static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
 static const size_t MAX_EDIT_PACKET = 4096;
 static const size_t MAX_STRING = 256;
@@ -71,6 +78,12 @@ struct Instance
 	sv_<Link> links; // authored
 	json::Value state = json::object(); // runtime
 	ss_ disabled; // runtime: why, "" while it runs
+	// runtime: its timer (c:after), when on the game's clock (-1: none),
+	// and who set off the run that set it
+	int64_t due_us = -1;
+	ss_ due_by;
+	// runtime, not saved: the players in its zone, by name
+	std::set<ss_> inside;
 };
 
 struct Entity
@@ -88,6 +101,9 @@ struct Type
 	json::Value decl;
 	std::set<ss_> inputs, outputs, handlers, shared;
 	bool usable = false, owns_voxel = false;
+	// The position parameters that are its zone's and its owned volume's
+	// extent ("" for none)
+	ss_ zone, volume;
 };
 
 struct Run
@@ -258,6 +274,8 @@ struct Module: public interface::Module, public Interface
 	// types_path that loads), each editor's undo, and the sections Kit owns
 	// positions in, each scene's
 	std::map<ss_, bool> m_rights;
+	// Runtime: each player's items, by name ({item: n}), given by c:give
+	json::Value m_items = json::object();
 	std::set<ss_> m_palette;
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
@@ -462,6 +480,22 @@ struct Module: public interface::Module, public Interface
 					t.shared.insert(it.key());
 		t.usable = t.decl.get("usable").is_true();
 		t.owns_voxel = t.decl.get("owns_voxel").is_true();
+		// zone and volume name position parameters of the type's own
+		for(auto k : {std::make_pair("zone", &t.zone),
+				std::make_pair("volume", &t.volume)}){
+			const ss_ pn = jstr(t.decl, k.first);
+			if(pn.empty())
+				continue;
+			if(jstr(t.decl.get("params").get(pn), "type") != "position"){
+				why = name+": its "+k.first+" names no position parameter";
+				return false;
+			}
+			*k.second = pn;
+		}
+		if(!t.volume.empty() && !t.owns_voxel){
+			why = name+": a volume is the voxels it owns (owns_voxel)";
+			return false;
+		}
 		m_types[name] = t;
 		log_i(MODULE, "Component type %s: inputs %zu, outputs %zu, %s%s",
 				cs(name), t.inputs.size(), t.outputs.size(),
@@ -494,6 +528,43 @@ struct Module: public interface::Module, public Interface
 	{
 		return pv::Vector3DInt32((int32_t)std::floor(e.pos[0]),
 				(int32_t)std::floor(e.pos[1]), (int32_t)std::floor(e.pos[2]));
+	}
+
+	// An extent parameter's cells each way: whole numbers, 1...MAX_EXTENT
+	static void extent(const json::Value &v, int out[3])
+	{
+		for(unsigned k = 0; k < 3; k++){
+			const double d = v.at(k).is_number() ? v.at(k).as_number() : 1;
+			out[k] = (int)std::max(1.0, std::min((double)MAX_EXTENT,
+					std::floor(d)));
+		}
+	}
+
+	// The cells an entity owns: its own, or its owning instance's volume
+	// (from its cell up and on, the volume's extent; simplified: one past
+	// MAX_VOLUME cells is its own cell alone)
+	sv_<pv::Vector3DInt32> owned_cells(const Entity &e)
+	{
+		sv_<pv::Vector3DInt32> out;
+		if(!e.has_pos)
+			return out;
+		const pv::Vector3DInt32 o = voxel_p(e);
+		for(const Instance &in : e.comps){
+			const Type &t = m_types[in.type];
+			if(!t.owns_voxel)
+				continue;
+			int n[3] = {1, 1, 1};
+			if(!t.volume.empty())
+				extent(in.params.get(t.volume), n);
+			if(n[0] * n[1] * n[2] > MAX_VOLUME)
+				n[0] = n[1] = n[2] = 1;
+			for(int x = 0; x < n[0]; x++)
+				for(int y = 0; y < n[1]; y++)
+					for(int z = 0; z < n[2]; z++)
+						out.push_back(o + pv::Vector3DInt32(x, y, z));
+			break;
+		}
+		return out;
 	}
 
 	// A parameter's value as its declaration types it: "" when it is one,
@@ -721,10 +792,12 @@ struct Module: public interface::Module, public Interface
 		return c;
 	}
 
-	// {"<id>": [{"type", "state", "disabled"}, ...]}
+	// {"<id>": [{"type", "state", "disabled", "timer": s, "timer_by"}, ...],
+	//  "items": {player: {item: n}}}
 	json::Value runtime_json()
 	{
 		json::Value r = json::object();
+		const int64_t now = interface::os::game_us();
 		for(auto &p : m_entities){
 			if(p.second.comps.empty())
 				continue;
@@ -735,11 +808,31 @@ struct Module: public interface::Module, public Interface
 				j.set("state", in.state);
 				if(!in.disabled.empty())
 					j.set("disabled", in.disabled);
+				if(in.due_us >= 0){
+					j.set("timer", std::max<int64_t>(0, in.due_us - now) / 1e6);
+					j.set("timer_by", in.due_by);
+				}
 				a.append(j);
 			}
 			r.set(itos(p.first), a);
 		}
+		r.set("items", m_items.deepcopy());
 		return r;
+	}
+
+	// An instance's runtime from a runtime row's entry for it
+	static void runtime_from(Instance &in, const json::Value &s)
+	{
+		const json::Value &st = s.get("state");
+		if(st.is_object())
+			for(json::Iterator it(st); it; ++it)
+				in.state.set(it.key(), *it);
+		in.disabled = jstr(s, "disabled");
+		const json::Value &t = s.get("timer");
+		in.due_us = t.is_number() && t.as_number() >= 0 ?
+				interface::os::game_us() + (int64_t)(t.as_number() * 1e6) : -1;
+		in.due_by = jstr(s, "timer_by");
+		in.inside.clear();
 	}
 
 	void save_runtime()
@@ -819,6 +912,8 @@ struct Module: public interface::Module, public Interface
 		ss_ runtime;
 		const json::Value rt = m_store->get("runtime", runtime) ?
 				json::load_string(runtime.c_str()) : json::object();
+		if(rt.get("items").is_object())
+			m_items = rt.get("items");
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			const json::Value &saved = rt.get(itos(e.id));
@@ -830,11 +925,7 @@ struct Module: public interface::Module, public Interface
 						in.state.set(it.key(), (*it).get("default"));
 				const json::Value &s = saved.at((unsigned)i);
 				if(jstr(s, "type") == in.type){
-					const json::Value &st = s.get("state");
-					if(st.is_object())
-						for(json::Iterator it(st); it; ++it)
-							in.state.set(it.key(), *it);
-					in.disabled = jstr(s, "disabled");
+					runtime_from(in, s);
 					if(!in.disabled.empty())
 						log_w(MODULE, "Entity %s's %s stays disabled: %s",
 								cs(itos(e.id)), cs(in.type), cs(in.disabled));
@@ -868,11 +959,20 @@ struct Module: public interface::Module, public Interface
 
 	void make_node(Entity &e)
 	{
+		// What its types show every client: the first look and hud
+		json::Value show = json::object();
+		for(const Instance &in : e.comps)
+			for(const char *k : {"look", "hud"})
+				if(show.get(k).is_undefined() &&
+						!m_types[in.type].decl.get(k).is_undefined())
+					show.set(k, m_types[in.type].decl.get(k));
 		main_context::SceneReference ref = scene_of(e);
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
 			n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
 			n->SetVar(magic::StringHash("kit_id"), magic::Variant((int)e.id));
+			n->SetVar(magic::StringHash("kit_show"),
+					magic::Variant(show.stringify().c_str()));
 			e.node = n->GetID();
 		});
 		for(size_t i = 0; i < e.comps.size(); i++)
@@ -912,18 +1012,15 @@ struct Module: public interface::Module, public Interface
 					const Entity &e = p.second;
 					if(!e.has_pos || scene_of(e) != s.second)
 						continue;
-					bool owns = false;
-					for(const Instance &in : e.comps)
-						owns = owns || m_types[in.type].owns_voxel;
-					if(!owns)
-						continue;
-					const pv::Vector3DInt32 v = voxel_p(e);
-					auto div = [](int32_t a, int b){
-						return (int)std::floor((double)a / b);
-					};
-					by[std::make_tuple(div(v.getX(), ss.getX()),
-							div(v.getY(), ss.getY()), div(v.getZ(), ss.getZ()))].
-							push_back(std::make_pair(v, itos(e.id)));
+					for(const pv::Vector3DInt32 &v : owned_cells(e)){
+						auto div = [](int32_t a, int b){
+							return (int)std::floor((double)a / b);
+						};
+						by[std::make_tuple(div(v.getX(), ss.getX()),
+								div(v.getY(), ss.getY()), div(v.getZ(),
+								ss.getZ()))].push_back(std::make_pair(v,
+								itos(e.id)));
+					}
 				}
 				// And emptied where an entity owned and owns no more
 				for(const auto &k : m_owned_sections[s.second])
@@ -1070,16 +1167,109 @@ struct Module: public interface::Module, public Interface
 				log_w(MODULE, "Entity %s's %s sets a voxel it does not own",
 						cs(itos(e.id)), cs(type));
 			} else {
-				Write w;
-				w.scene = scene_of(e);
-				w.p = voxel_p(e);
-				w.voxel = voxel.as_string();
-				w.by = r.by;
-				if(!set_voxel(w))
-					m_pending_voxels.push_back(w);
+				for(const pv::Vector3DInt32 &p : owned_cells(e)){
+					Write w;
+					w.scene = scene_of(e);
+					w.p = p;
+					w.voxel = voxel.as_string();
+					w.by = r.by;
+					if(!set_voxel(w))
+						m_pending_voxels.push_back(w);
+				}
 			}
 		}
+		const json::Value &after = fx.get("after");
+		if(after.is_number()){
+			// simplified: one timer an instance; a new c:after replaces it
+			const double s = after.as_number();
+			in.due_us = s >= 0 && s < 1e7 ? interface::os::game_us() +
+					(int64_t)(s * 1e6) : -1;
+			in.due_by = r.by;
+			m_runtime_dirty = true;
+		}
+		const ss_ who = r.by.compare(0, 7, "player:") == 0 ? r.by.substr(7) : "";
+		const json::Value &tp = fx.get("teleport");
+		if(tp.is_array())
+			teleport(e, type, who, tp);
+		const json::Value &give = fx.get("give");
+		for(unsigned i = 0; i < give.size(); i++)
+			give_item(e, type, who, give.at(i));
 		return spent;
+	}
+
+	// The peer a player's name is, in a scene (0: none)
+	size_t peer_of(const ss_ &name, const ss_ &scene)
+	{
+		for(auto &p : m_peers)
+			if(p.second.name == name && p.second.scene == scene)
+				return p.first;
+		return 0;
+	}
+
+	// c:teleport(pos): the player who set the run off, in the entity's
+	// scene, moved by the app. A component moves no one else
+	void teleport(const Entity &e, const ss_ &type, const ss_ &who,
+			const json::Value &pos)
+	{
+		ss_ scene;
+		scene_of(e, &scene);
+		const size_t peer = who.empty() ? 0 : peer_of(who, scene);
+		const char *why = !m_host.moves_players ? "the app moves no players" :
+				who.empty() ? "no player set it off" :
+				!peer ? "the player is not in its scene" :
+				!pos_ok(pos) ? "not a position" : nullptr;
+		if(why){
+			log_w(MODULE, "Entity %s's %s: a teleport refused: %s",
+					cs(itos(e.id)), cs(type), why);
+			return;
+		}
+		const double x = pos.at(0u).as_number(), y = pos.at(1u).as_number(),
+				z = pos.at(2u).as_number();
+		log_i(MODULE, "Entity %s's %s teleports %s to (%g, %g, %g)",
+				cs(itos(e.id)), cs(type), cs(who), x, y, z);
+		m_server->emit_event("kit:move_player", new MovePlayer(peer, x, y, z));
+	}
+
+	// c:give(item, n): the player who set the run off gets n of the item
+	// (a negative n takes; none below 0), kept in the runtime row
+	void give_item(const Entity &e, const ss_ &type, const ss_ &who,
+			const json::Value &g)
+	{
+		const ss_ item = g.at(0u).is_string() ? g.at(0u).as_string() : "";
+		const double n = g.at(1u).is_number() ? g.at(1u).as_number() : 0;
+		if(who.empty() || !name_ok(item) || n != std::floor(n) ||
+				std::fabs(n) > MAX_ITEMS){
+			log_w(MODULE, "Entity %s's %s: a give refused: %s", cs(itos(e.id)),
+					cs(type), who.empty() ? "no player set it off" :
+					"an item is letters, digits and _, a count whole");
+			return;
+		}
+		json::Value mine = m_items.get(who).is_object() ? m_items.get(who) :
+				json::object();
+		const json::Value &had = mine.get(item);
+		const int64_t now = std::max<int64_t>(0, std::min<int64_t>(MAX_ITEMS,
+				(had.is_number() ? (int64_t)had.as_number() : 0) + (int64_t)n));
+		if(now)
+			mine.set(item, now);
+		else
+			mine.del_key(item);
+		m_items.set(who, mine);
+		m_runtime_dirty = true;
+		log_i(MODULE, "Entity %s's %s gives %s %s %s: %s",
+				cs(itos(e.id)), cs(type), cs(who), cs(itos((int64_t)n)),
+				cs(item), cs(mine.stringify()));
+		send_items(who);
+	}
+
+	void send_items(const ss_ &who)
+	{
+		const json::Value &mine = m_items.get(who);
+		const ss_ data = mine.is_object() ? mine.stringify() : "{}";
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &p : m_peers)
+				if(p.second.name == who)
+					inetwork->send(p.first, "kit:items", data);
+		});
 	}
 
 	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
@@ -1121,6 +1311,104 @@ struct Module: public interface::Module, public Interface
 		return done;
 	}
 
+	// Timers due on the game's clock: on_timer(c), as by whoever set it off
+	void run_timers()
+	{
+		const int64_t now = interface::os::game_us();
+		for(auto &p : m_entities)
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				Instance &in = p.second.comps[i];
+				if(in.due_us < 0 || now < in.due_us)
+					continue;
+				in.due_us = -1;
+				m_runtime_dirty = true;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_timer";
+				r.by = in.due_by.empty() ? "app" : in.due_by;
+				queue_run(r);
+			}
+	}
+
+	// Zones: a type's `zone` (a position parameter, its extent in cells
+	// from the entity's own up and on) and who stands in it, the players
+	// as the app placed them (the cell their position rounds to):
+	// on_enter(c, by) and on_leave(c, by) as that changes
+	void check_zones()
+	{
+		for(auto &p : m_entities){
+			Entity &e = p.second;
+			if(!e.has_pos)
+				continue;
+			for(size_t i = 0; i < e.comps.size(); i++){
+				Instance &in = e.comps[i];
+				const Type &t = m_types[in.type];
+				if(t.zone.empty() || !in.disabled.empty())
+					continue;
+				ss_ scene;
+				scene_of(e, &scene);
+				int n[3];
+				extent(in.params.get(t.zone), n);
+				const pv::Vector3DInt32 o = voxel_p(e);
+				std::set<ss_> now;
+				for(auto &pp : m_peers){
+					const Peer &peer = pp.second;
+					if(peer.scene != scene || peer.name.empty())
+						continue;
+					bool inside = true;
+					for(int k = 0; k < 3; k++){
+						const double c = std::floor(peer.pos[k] + 0.5) -
+								(k == 0 ? o.getX() : k == 1 ? o.getY() : o.getZ());
+						inside = inside && c >= 0 && c < n[k];
+					}
+					if(inside)
+						now.insert(peer.name);
+				}
+				auto fire = [&](const char *handler, const ss_ &name){
+					Run r;
+					r.entity = e.id;
+					r.comp = i;
+					r.handler = handler;
+					r.by = "player:"+name;
+					r.args.append(r.by);
+					queue_run(r);
+				};
+				for(const ss_ &name : now)
+					if(!in.inside.count(name))
+						fire("on_enter", name);
+				for(const ss_ &name : in.inside)
+					if(!now.count(name))
+						fire("on_leave", name);
+				in.inside.swap(now);
+			}
+		}
+	}
+
+	// A player placed for the first time (or as another name): on_join(c,
+	// by) of each instance in their scene that has it, and their items
+	void joined(const ss_ &name, const ss_ &scene)
+	{
+		log_i(MODULE, "%s joined %s", cs(name), cs(scene));
+		for(auto &p : m_entities){
+			ss_ es;
+			if(!scene_of(p.second, &es) || es != scene)
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				if(!m_types[p.second.comps[i].type].handlers.count("on_join"))
+					continue;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_join";
+				r.by = "player:"+name;
+				r.args.append(r.by);
+				queue_run(r);
+			}
+		}
+		send_items(name);
+	}
+
 	void on_tick(const interface::TickEvent &event)
 	{
 		if(!m_hosted || !m_box)
@@ -1142,7 +1430,10 @@ struct Module: public interface::Module, public Interface
 			bool owned = false;
 			for(auto &p : m_entities){
 				Entity &e = p.second;
-				if(!e.has_pos || voxel_p(e) != w.p || scene_of(e) != w.scene)
+				if(!e.has_pos || scene_of(e) != w.scene)
+					continue;
+				const auto cells = owned_cells(e);
+				if(std::find(cells.begin(), cells.end(), w.p) == cells.end())
 					continue;
 				for(size_t i = 0; i < e.comps.size(); i++){
 					if(!m_types[e.comps[i].type].owns_voxel)
@@ -1162,6 +1453,8 @@ struct Module: public interface::Module, public Interface
 				log_w(MODULE, "A write routed to (%i,%i,%i), which no entity "
 						"owns now", w.p.getX(), w.p.getY(), w.p.getZ());
 		}
+		run_timers();
+		check_zones();
 		// The queue, in order, within the tick's budget
 		const int64_t budget = m_box ? m_box->budget() / SLICE_DIV *
 				TICK_SLICES : 0;
@@ -1245,6 +1538,7 @@ struct Module: public interface::Module, public Interface
 			double x, double y, double z)
 	{
 		Peer &p = m_peers[peer];
+		const bool join = p.name != name || p.scene != scene;
 		if(p.name != name){
 			p.editing = false;
 			// The admins' list of who is here
@@ -1257,6 +1551,8 @@ struct Module: public interface::Module, public Interface
 		p.pos[0] = x;
 		p.pos[1] = y;
 		p.pos[2] = z;
+		if(join && m_hosted)
+			joined(name, scene);
 	}
 
 	void input(uint64_t entity, const ss_ &input, const ss_ &value)
@@ -1371,24 +1667,23 @@ struct Module: public interface::Module, public Interface
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			for(auto &pe : m_entities){
 				const Entity &e = pe.second;
-				bool owns = false;
-				for(const Instance &in : e.comps)
-					owns = owns || m_types[in.type].owns_voxel;
-				Write w;
-				w.scene = owns && e.has_pos ? scene_of(e) : nullptr;
-				voxelworld::Instance *world = w.scene ?
-						ivw->get_instance(w.scene) : nullptr;
-				w.p = voxel_p(e);
-				if(!world || !loaded(world, w.p))
-					continue;
-				interface::VoxelRegistry *reg = world->get_voxel_reg();
-				const interface::VoxelDefinition *def = reg->get(
-						reg->get_format().id.get(world->get_voxel(w.p).data));
-				if(!def)
-					continue;
-				w.voxel = def->name.block_name;
-				w.by = "app";
-				out.push_back(w);
+				for(const pv::Vector3DInt32 &p : owned_cells(e)){
+					Write w;
+					w.scene = scene_of(e);
+					voxelworld::Instance *world = w.scene ?
+							ivw->get_instance(w.scene) : nullptr;
+					w.p = p;
+					if(!world || !loaded(world, w.p))
+						continue;
+					interface::VoxelRegistry *reg = world->get_voxel_reg();
+					const interface::VoxelDefinition *def = reg->get(
+							reg->get_format().id.get(world->get_voxel(w.p).data));
+					if(!def)
+						continue;
+					w.voxel = def->name.block_name;
+					w.by = "app";
+					out.push_back(w);
+				}
 			}
 		});
 		return out;
@@ -1432,6 +1727,8 @@ struct Module: public interface::Module, public Interface
 					for(json::Iterator it(sd); it; ++it)
 						in.state.set(it.key(), (*it).get("default"));
 				in.disabled.clear();
+				in.due_us = -1;
+				in.inside.clear();
 				for(const ss_ &k : t.shared)
 					replicate_state(e, i, k);
 				Run r;
@@ -1441,6 +1738,10 @@ struct Module: public interface::Module, public Interface
 				queue_run(r);
 			}
 		}
+		// The players' items are runtime too: none in a test
+		m_items = json::object();
+		for(auto &o : m_peers)
+			send_items(o.second.name);
 		p.editing = false;
 		log_i(MODULE, "A test by %s starts: authored %s, runtime %s",
 				cs(p.name), cs(digest(authored_json())),
@@ -1461,10 +1762,8 @@ struct Module: public interface::Module, public Interface
 			const json::Value &saved = t.runtime.get(itos(e.id));
 			for(size_t i = 0; i < e.comps.size(); i++){
 				Instance &in = e.comps[i];
-				const json::Value &s = saved.at((unsigned)i);
-				in.state = s.get("state").is_object() ? s.get("state") :
-						json::object();
-				in.disabled = jstr(s, "disabled");
+				in.state = json::object();
+				runtime_from(in, saved.at((unsigned)i));
 				for(const ss_ &k : m_types[in.type].shared)
 					replicate_state(e, i, k);
 			}
@@ -1472,6 +1771,10 @@ struct Module: public interface::Module, public Interface
 		for(const Write &w : t.voxels)
 			if(!set_voxel(w))
 				m_pending_voxels.push_back(w);
+		m_items = t.runtime.get("items").is_object() ?
+				t.runtime.get("items").deepcopy() : json::object();
+		for(auto &p : m_peers)
+			send_items(p.second.name);
 		m_runtime_dirty = true;
 		save_runtime();
 		auto pi = m_peers.find(t.peer);
@@ -1524,7 +1827,7 @@ struct Module: public interface::Module, public Interface
 				const json::Value &d = m_types[t].decl;
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable"})
+						"usable", "zone", "volume"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -1535,7 +1838,8 @@ struct Module: public interface::Module, public Interface
 			for(auto &t : m_types)
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
-					for(const char *k : {"params", "inputs", "outputs", "gizmo"})
+					for(const char *k : {"params", "inputs", "outputs", "gizmo",
+							"zone", "volume"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);
