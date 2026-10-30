@@ -21,6 +21,7 @@
 #include <stdlib.h> // getenv()
 #include <iostream>
 #include <iomanip>
+#include <sstream>
 
 namespace interface {
 
@@ -298,11 +299,19 @@ struct CTCPSocket: public TCPSocket
 	// ([DUAL_STACK]); "any4" and "any6" are the one family
 	bool bind_fd(const ss_ &address, const ss_ &port)
 	{
-		if(address == "any")
-			return bind_fd_as("any6", port, true) || bind_fd_as("any4", port);
+		if(address == "any"){
+			// The any6 try says why only when any4 fails too: a host
+			// without IPv6 is not an error
+			std::ostringstream why6;
+			if(bind_fd_as("any6", port, true, why6) || bind_fd_as("any4", port))
+				return true;
+			std::cerr<<why6.str();
+			return false;
+		}
 		return bind_fd_as(address, port);
 	}
-	bool bind_fd_as(const ss_ &address, const ss_ &port, bool dual = false)
+	bool bind_fd_as(const ss_ &address, const ss_ &port, bool dual = false,
+			std::ostream &why = std::cerr)
 	{
 		close_fd();
 
@@ -328,11 +337,11 @@ struct CTCPSocket: public TCPSocket
 		const char *port_c = (port == "any" ? NULL : port.c_str());
 		int err = getaddrinfo(address_c, port_c, &hints, &res0);
 		if(err){
-			std::cerr<<"getaddrinfo: "<<gai_strerror(err)<<std::endl;
+			why<<"getaddrinfo: "<<gai_strerror(err)<<std::endl;
 			return false;
 		}
 		if(res0 == NULL){
-			std::cerr<<"getaddrinfo: No results"<<std::endl;
+			why<<"getaddrinfo: No results"<<std::endl;
 			return false;
 		}
 
@@ -366,7 +375,7 @@ struct CTCPSocket: public TCPSocket
 						sizeof(val));
 			}
 			if(bind(try_fd, res->ai_addr, res->ai_addrlen) == -1){
-				std::cerr<<"bind(): "<<strerror(errno)<<std::endl;
+				why<<"bind(): "<<strerror(errno)<<std::endl;
 				closesocket(try_fd);
 				continue;
 			}
@@ -376,7 +385,7 @@ struct CTCPSocket: public TCPSocket
 		freeaddrinfo(res0);
 
 		if(fd == -1){
-			std::cerr<<"Failed to create and bind socket"<<std::endl;
+			why<<"Failed to create and bind socket"<<std::endl;
 			return false;
 		}
 
@@ -384,7 +393,7 @@ struct CTCPSocket: public TCPSocket
 		// Set this so that forked child processes don't prevent re-opening the
 		// same port after crash
 		if(fcntl(fd, F_SETFD, FD_CLOEXEC) != 0){
-			std::cerr<<"Failed to set socket FD_CLOEXEC"<<std::endl;
+			why<<"Failed to set socket FD_CLOEXEC"<<std::endl;
 			return false;
 		}
 #endif

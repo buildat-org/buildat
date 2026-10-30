@@ -163,6 +163,8 @@ check_build()
 #   VAR=x start_server ...  sets VAR for the server, as for any command
 port_taken()
 {
+	# Without ss every port would read as free and never listened on
+	command -v ss > /dev/null || fail "port_taken needs ss (iproute2)"
 	ss -Hltnu "( sport = :$1 )" 2>/dev/null | grep -q .
 }
 # **The official Luanti server** ([LUANTI_SERVER_START]): the tree in
