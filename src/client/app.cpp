@@ -520,6 +520,9 @@ bool parse_preference_options(const ss_ &s, Options *opt, ss_ *error)
 			in_range = (v >= 0.5 && v <= 3.0);
 			opt->ui_size = (float)v;
 			opt->ui_size_auto = false;
+		} else if(key == "page_size"){
+			in_range = (v >= 1 && v <= 100 && v == (int)v);
+			opt->page_size = (int)v;
 		} else if(key == "log_level"){
 			in_range = (v >= 0 && v <= 6);
 			opt->log_level = (int)v;
@@ -592,6 +595,11 @@ static void check_parse_preference_options()
 		throw Exception("parse_preference_options: took an out-of-range value");
 	if(app::parse_preference_options("multisampling=3", &o, &err))
 		throw Exception("parse_preference_options: took a bad sample count");
+	if(app::parse_preference_options("page_size=0", &o, &err) ||
+			app::parse_preference_options("page_size=2.5", &o, &err) ||
+			!app::parse_preference_options("page_size=3", &o, &err) ||
+			o.page_size != 3)
+		throw Exception("parse_preference_options: page_size");
 	if(app::parse_preference_options("web_idle_fps=7", &o, &err) ||
 			!app::parse_preference_options("web_idle_fps=10", &o, &err) ||
 			o.graphics.web_idle_fps != 10)
@@ -781,6 +789,7 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 	const json::Value &jdu = o.get("default_username");
 	const json::Value &jll = o.get("log_level");
 	const json::Value &jsl = o.get("server_log_level");
+	const json::Value &jps = o.get("page_size");
 	// Through the same parser as -o, so that the range checks are written
 	// once and a hand-edited file is refused the same way a flag is
 	ss_ items;
@@ -788,6 +797,8 @@ static bool load_preferences(int desk_w, int desk_h, app::Options *opt)
 		items += ss_()+(items.empty()?"":",")+"log_level="+itos(jll.as_integer());
 	if(jsl.is_integer())
 		items += ss_()+(items.empty()?"":",")+"server_log_level="+itos(jsl.as_integer());
+	if(jps.is_integer())
+		items += ss_()+(items.empty()?"":",")+"page_size="+itos(jps.as_integer());
 	if(jrs.is_number())
 		items += ss_()+(items.empty()?"":",")+"render_scale="+ftos(jrs.as_number());
 	else if(jrs.is_string() && jrs.as_string() == "auto")
@@ -927,6 +938,7 @@ static void save_preferences(const app::Options &opt)
 	o.set("server_log_level", opt.server_log_level);
 	o.set("launch_ui", opt.launch_ui);
 	o.set("default_username", opt.default_username);
+	o.set("page_size", opt.page_size);
 	if(!opt.fov.empty()){
 		json::Value f = json::object();
 		for(auto &kv : opt.fov)

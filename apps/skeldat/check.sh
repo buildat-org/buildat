@@ -215,20 +215,29 @@ for d in "1 0" "-1 0" "0 1" "0 -1"; do
 done
 water="$water$(for y in 0 1 2 3; do echo " marker 0 0 skeldat:water_source 0;"; done)"
 
-# 1. Two players. client1's pause menu, after its chat page, closed by a
-# click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin first
+# 1. Two players. client1's console's People... page reports client2 and
+# its Back is the console again ([CHAT_PEOPLE_BUTTON]); the pause menu
+# closed by a click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin
+# first
 cat > "$t/a1.cmds" <<EOF
 $placed
 wait_log 60000 chat: <client2> hello from client2
-keypress Escape
-wait_log 5000 pause: the menu shown
+keypress T
+wait_log 5000 pause: the chat shown
 delay 500
-click Button "Who's in the chat..."
-wait_log 5000 chat: the menu shown
+click Button "People..."
+wait_log 5000 chat: the people shown
 delay 1000
+screenshot $t/people.png
 click Button "Report client2"
 delay 1000
-click Button "Close"
+click Button "Back"
+wait_log 5000 chat page: y
+delay 500
+screenshot $t/people_back.png
+click Button "Back"
+wait_log 5000 pause: the chat closed
+keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 mouse_pos 338 250
@@ -366,12 +375,13 @@ cat > "$t/a2.cmds" <<EOF
 $placed
 wait_log_any 5000 skeldat: role admin
 delay 2000
-keypress Escape
-wait_log 5000 pause: the menu shown
+keypress T
+wait_log 5000 pause: the chat shown
 delay 500
-click Button "Who's in the chat..."
-wait_log 5000 chat: the menu shown
+click Button "People..."
+wait_log 5000 chat: the people shown
 delay 5000
+screenshot $t/people_mod.png
 click Button "Mute client2"
 delay 1500
 click DropDownList "▼"
@@ -379,7 +389,12 @@ delay 500
 keypress Down
 keypress Return
 delay 1500
-click Button "Close"
+click Button "Back"
+wait_log 5000 chat page: y
+delay 500
+click Button "Back"
+wait_log 5000 pause: the chat closed
+keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 click Button "Admin..."
@@ -680,11 +695,15 @@ grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
 	fail "the lantern did not lure as five markers ($log12)"
 # 9. With a player at noon: a skeleton beside a lantern takes it, burns
 # and leaves it where it died, its bones dropped; the player digs a
-# marker skull and places it again
+# marker skull and places it again. The skeleton and the lantern 20 off,
+# past SHELTER_RANGE (16) of the skull's sun shelter ([SKELDAT_SUN_IN_BONES]:
+# at 4 off it found the shelter by the skull or not by the order of the
+# test's spawns, and sheltered it never died), and its hp 4: dead in two
+# burns, before it walks into range ([SKELDAT_LANTERN_RED])
 log13="$t/srv13.log"
 BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
-	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1 marked; marker 0 1" \
+	BUILDAT_SKELDAT_LANTERNS="20 0 2" BUILDAT_SKELDAT_TEST="skeleton 20 1 marked hp 4; marker 0 1" \
 	start_server "$log13" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
@@ -698,7 +717,7 @@ wait $CLIENT || fail "the drive by the lantern ($t/take.log)"
 wait_for_log "$log13" "the lantern left at" 30 ||
 	fail "the lantern not left where the skeleton died ($log13)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "a skeleton (1) takes the lantern at 4," "$log13" ||
+grep -aq "a skeleton (1) takes the lantern at 20," "$log13" ||
 	fail "the skeleton beside the lantern did not take it ($log13)"
 grep -aq "the skeleton (1) dies at .*, drops \[skeldat:bone" "$log13" ||
 	fail "the dead skeleton dropped no bones ($log13)"

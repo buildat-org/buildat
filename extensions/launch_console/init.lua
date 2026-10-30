@@ -504,6 +504,21 @@ local function open(opts)
 			end
 			return
 		end
+		-- **Page Up and Down scroll the API text** from either field
+		-- ([SCROLL_PAGE_KEYS]), by its rows shown less two
+		local u = ui_utils.safe or ui_utils
+		local pd = u.page_dir(key)
+		if pd then
+			local v = view.viewPosition
+			local step = u.page_step(view.scrollPanel.height, row_h)
+			view.viewPosition = magic.IntVector2(v.x,
+					math.max(0, v.y + pd * step))
+			log:info("console: page " .. pd .. ", line " ..
+					math.floor(view.viewPosition.y / row_h) + 1 ..
+					" at the top, " .. math.floor(view.scrollPanel.height /
+					row_h) .. " shown")
+			return
+		end
 		if e and (key == magic.KEY_UP or key == magic.KEY_DOWN) then
 			step(who, e, key == magic.KEY_UP and -1 or 1)
 			return

@@ -587,13 +587,48 @@ function M.new(env)
 		return true
 	end
 
-	-- Escape closes it, which is the player closing it
+	-- Escape closes it, which is the player closing it. Page Up and Down
+	-- scroll the scroll_container under the cursor, else the first, by its
+	-- height less a line or two ([SCROLL_PAGE_KEYS])
+	local u = require("buildat/extension/ui_utils")
+	u = u.safe or u
 	function self:key(key)
 		if self.form and key == magic.KEY_ESCAPE then
 			self:close(true)
 			return true
 		end
-		return false
+		local d = u.page_dir(key)
+		local drawn = self.form and self.form.drawn
+		if not d or not drawn then
+			return false
+		end
+		local c = (drawn.scrolls or {})[1]
+		if mouse_at then
+			local lx, ly = local_xy(mouse_at[1], mouse_at[2])
+			for _, s in ipairs(drawn.scrolls or {}) do
+				if lx >= s.x and lx < s.x + s.w and ly >= s.y and
+						ly < s.y + s.h then
+					c = s
+				end
+			end
+		end
+		if not c or not c.bar or (c.per or 0) <= 0 then
+			return false
+		end
+		local max = 1000
+		for _, b in ipairs(drawn.bars or {}) do
+			if b.name == c.bar then
+				max = b.max
+			end
+		end
+		-- simplified: a line is the form's 13-point label's row
+		local px = u.page_step(c.vertical and c.h or c.w, 16)
+		local v = self.form.state.scroll[c.bar] or 0
+		local to = math.max(0, math.min(max, v + d * math.floor(px / c.per)))
+		log:info(string.format("form: page %d, %s %d -> %d (view %d px, %.2f px a unit)",
+				d, c.bar, v, to, c.vertical and c.h or c.w, c.per))
+		scroll_to(c.bar, to)
+		return true
 	end
 
 	local function update_tooltip(dtime)

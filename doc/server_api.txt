@@ -93,7 +93,7 @@ meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 true}], "reverse_dependencies": [...], "disable_cpp": false,
 "client_main": "init.lua", "client_extensions": ["voxel_light"],
 "server_wasm": {"source": "server", "imports": ["events"], "callable":
-[]}, "kind": "app", "web": true}. An app's module must say
+[]}, "wasm_box": "box", "kind": "app", "web": true}. An app's module must say
 engine_api, the engine API it is written for (interface::aitta::
 ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 {"engine_api": 2} is the minimum. A key the loader does not know
@@ -107,7 +107,10 @@ client, when its files first arrive (modules in load order); "wasm" names
 the engine's default instead (builtin/client_lua/client_lua/wasm_main.lua),
 which runs the module's .wasm and nothing else (interface/wasm_api.h).
 server_wasm makes the module's server half a .wasm instead of C++
-(interface/wasm_server_api.h, below). client_extensions names extensions (<share>/extensions/<name>) the
+(interface/wasm_server_api.h, below). wasm_box names the directory the
+module's C++ runs as its own .wasm (Server::create_wasm_box(), below), so
+that the builds made beforehand (the web server's, an archive's cache)
+make it too. client_extensions names extensions (<share>/extensions/<name>) the
 server serves for the module's client scripts, which run that copy
 (buildat.run_script_file("<name>/init.lua")) rather than the client's
 bundled one: client_file::serve_extension(). "web": true says the module
@@ -124,7 +127,7 @@ are in Emscripten's file system, the app's directories packed into it
 (a variant's base's too, a plain-named base beside it). A module's
 wasm/, C or Rust, "disable_cpp" or not, is built for its clients by
 util/prebuild_wasm.py with the server's flags and packed at /wasm as
-<module>.wasm, and a server_wasm as <module>.server.wasm.
+<module>.wasm, and a server_wasm or a wasm_box as <module>.server.wasm.
 Three builtins have stand-ins there (<name>_web.cpp beside the module's
 own), so an app that depends on them builds unchanged: network has one
 peer, the page's own client, over postMessage (only the page that made
@@ -617,7 +620,9 @@ from then on less than the engine's budget() (in its units, which the
 interpreter and the compiled module count differently), and
 meter_left() says what the last call left, below 0 past it. A trap
 leaves the module's memory as it was; what that means is the caller's.
-builtin/kit's Lua box is the one there is.
+builtin/kit's Lua box is the one there is. meta.json's "wasm_box" names
+the directory for util/web_server.cmake and util/prebuild_wasm.py, which
+build it beforehand for the web server and an archive's cache.
 
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,

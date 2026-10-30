@@ -643,6 +643,7 @@ BUILDAT_BINDING("UIElement:GetTypeName():string", "call", "UIElement", "GetTypeN
 BUILDAT_BINDING("UIElement:HasFocus():boolean", "call", "UIElement", "HasFocus")
 BUILDAT_BINDING("UIElement:HasRecursiveFocus():any", "call", "UIElement", "HasRecursiveFocus")
 BUILDAT_BINDING("UIElement:IsCaretOnLastRow():boolean", "call", "UIElement", "IsCaretOnLastRow")
+BUILDAT_BINDING("UIElement:IsDrawnOver(UIElement):any", "call", "UIElement", "IsDrawnOver")
 BUILDAT_BINDING("UIElement:IsMultiLine():any", "call", "UIElement", "IsMultiLine")
 BUILDAT_BINDING("UIElement:Remove()", "call", "UIElement", "Remove")
 BUILDAT_BINDING("UIElement:RemoveAllChildren():any", "call", "UIElement", "RemoveAllChildren")

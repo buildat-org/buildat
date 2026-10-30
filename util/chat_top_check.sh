@@ -8,7 +8,9 @@
 # focused item:
 #   - natively on a touchscreen at 1000x500 and by mouse at 600x800 (the
 #     pause menu's Chat...): the message field is focused and the window
-#     ends at or above the screen's middle;
+#     ends at or above the screen's middle; by mouse, its People...
+#     ([CHAT_PEOPLE_BUTTON]) opens builtin/chat's page, whose Back is the
+#     console again;
 #   - in Chrome as a phone (400x800, density 2, touch): the same by the
 #     pause menu's keys; the page turned to 800x400 makes it again at the new
 #     size; a stand-in keyboard (buildatKeyboard.test) taller than half the
@@ -53,7 +55,7 @@ top_half(){ # name, log
 	read -r y0 y1 h row <<< "$p"
 	[ -n "$p" ] && [ "$y1" -le $((h / 2)) ] && [ "$row" = last ] ||
 		fail "$1: the page at \"$p\" ($2)"
-	grep -aqE "keyboard_page: (.*\|)?\*LineEdit\|Send\|Back" "$2" ||
+	grep -aqE "keyboard_page: (.*\|)?\*LineEdit\|Send\|(People\.\.\.\|)?Back" "$2" ||
 		fail "$1: the field not focused: $(grep -a keyboard_page: "$2" | tail -1) ($2)"
 }
 client(){ # name, size, env..., then the sequence on stdin
@@ -87,9 +89,21 @@ wait_log 5000 pause: the menu shown
 click Button "Chat..."
 wait_log 10000 chat page: y
 delay 500
+click Button "People..."
+wait_log 5000 chat: the people shown
+delay 500
+screenshot $t/people.png
+click Button "Back"
+wait_log 5000 chat page: y
+delay 500
+screenshot $t/console.png
 quit
 C
 top_half mouse "$t/mouse.log"
+# [CHAT_PEOPLE_BUTTON] The console's People... in vanilla too, its Back
+# the console again
+awk '/chat: the people shown/ { p = 1 } p && /chat page: y/ { ok = 1 } END { exit !ok }' \
+	"$t/mouse.log" || fail "mouse: People... not back to the console ($t/mouse.log)"
 echo "ok: natively by finger at 1000x500 and by mouse at 600x800"
 if ! command -v "${CHROME:-google-chrome}" > /dev/null || [ ! -f "$here/web/buildat.wasm" ]; then
 	echo "PASS: native; the web skipped (no Chrome or web/)"

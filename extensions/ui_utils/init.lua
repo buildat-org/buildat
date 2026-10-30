@@ -125,8 +125,8 @@ local function scroller(e, t)
 			end}
 	end
 	local view = t == "UIElement" and list_views[e:GetName()]
-	return view and {content = view.list,
-		top = function() return -view.list.position.y end,
+	return view and {content = view.list, view = view,
+		top = function() return 0 - view.list.position.y end,
 		height = function() return view.viewport.height end,
 		set_top = function(y) view:scroll(y + view.list.position.y) end}
 end
@@ -149,6 +149,30 @@ local function show_in(sc, e)
 		sc.set_top(y)
 	end
 end
+
+-- **Page Up and Page Down in what is read** ([SCROLL_PAGE_KEYS]): -1, 1
+-- or nil for the key, and the step for a view `shown` high in lines (or
+-- pixels) `line` high: the lines shown less two, one at four or fewer, so
+-- that no line is missed on presses one after another. A multi-line
+-- LineEdit's own rule ([HEARTH_PAGE_KEYS], LineEdit.cpp).
+-- Hearth's thread, the Server window's pages, the chat console's log
+-- (keyboard_page), the launch console's API text, luanti_client's chat
+-- and its forms' scroll containers.
+function M.safe.page_dir(key)
+	return key == magic.KEY_PAGEUP and -1 or key == magic.KEY_PAGEDOWN and 1 or nil
+end
+function M.safe.page_step(shown, line)
+	line = math.max(1, line or 1)
+	local rows = math.floor(shown / line)
+	return math.max(rows - (rows > 4 and 2 or 1), 1) * line
+end
+assert(M.safe.page_step(8) == 6 and M.safe.page_step(4) == 3 and
+		M.safe.page_step(1) == 1 and M.safe.page_step(0) == 1 and
+		M.safe.page_step(400, 20) == 360 and M.safe.page_step(410, 20) == 360)
+-- A UI text line, for the pixel views
+-- simplified: the style's 14-point font's row; a view's own font is the
+-- upgrade where one draws larger text
+local LINE = 20
 
 -- The page's buttons and fields, in the order they are drawn. scs, when
 -- given, gets the view each one scrolls in (scs[i] for out[i]; the same
@@ -212,8 +236,41 @@ end
 -- Button.selected draws the focus, with pressedOffset; native hover would
 -- draw a second item, so hoverOffset moves onto pressedOffset, and hover
 -- moves the focus instead, unless a field is being typed in.
--- PageUp and PageDown move this many items ([MENU_FAST_SCROLL])
-local PAGE = 10
+-- PageUp and PageDown move this many items ([MENU_FAST_SCROLL]) at
+-- most: the user's page_size ([LIST_PAGE_SIZE]), 10 by default
+local function page_size()
+	return buildat.get_preference("page_size") or 10
+end
+
+-- **A page is no more than is in sight** ([LIST_PAGE_SIZE], user
+-- 2026-10-29): the items (rows of `columns`) a Page key moves in the
+-- menu on root, page_size at most, and at most as many as the view the
+-- focus scrolls in (else the first item's) shows whole, so that every
+-- item passed is seen. Outside a view that scrolls, page_size. Also how
+-- many were in sight, for the log. Walked down from root: the sandbox
+-- hands out no parents.
+local function page_jump(root, columns)
+	local n = page_size()
+	local out, scs = {}, {}
+	page_items(root, out, scs)
+	local at = 1
+	for i, e in ipairs(out) do
+		if e:HasFocus() then
+			at = i
+		end
+	end
+	local sc = scs[at]
+	if not sc then
+		return n, nil
+	end
+	local seen = 0
+	for i, e in ipairs(out) do
+		if scs[i] == sc and in_view(sc, e) then
+			seen = seen + 1
+		end
+	end
+	return math.min(n, math.max(1, math.floor(seen / columns))), seen
+end
 
 -- A dropdown's popup was up at the last Update (M.safe.dropdown)
 local drop_open = false
@@ -458,11 +515,16 @@ local function button_menu_nav(root, options)
 			select_i(selected - columns)
 		elseif key == KEY_DOWN then
 			select_i(selected + columns)
-		elseif key == magic.KEY_PAGEUP or key == magic.KEY_PAGEDOWN then
-			-- [MENU_FAST_SCROLL]: ten items, ten rows in a grid, clamped
-			local d = (key == magic.KEY_PAGEUP and -PAGE or PAGE) * columns
-			select_i(math.max(1, math.min(#items,
-					math.max(selected, 1) + d)))
+		elseif #items > 0 and M.safe.page_dir(key) then
+			-- [MENU_FAST_SCROLL]: page_jump's rows in a grid, clamped
+			local from = math.max(selected, 1)
+			local n, seen = page_jump(root, columns)
+			local to = math.max(1, math.min(#items, from +
+					M.safe.page_dir(key) * n * columns))
+			select_i(to)
+			log:info("page key: menu " .. from .. " -> " .. to .. " of " ..
+					#items .. ", " .. tostring(seen) .. " in sight, at most " ..
+					page_size())
 		end
 	end)
 
@@ -544,8 +606,8 @@ local closed_now = nil
 -- dropdown live over the page drawn in its place
 local picked = nil
 
--- The pages that took the keys, newest last: only the newest one still
--- shown answers, so a page over another does not share its keys
+-- The pages that took the keys, newest last: only the one on top answers,
+-- so a page over another does not share its keys
 local keyboard_pages = {}
 
 -- The page's own window still there: not removed, and not another one at
@@ -558,13 +620,26 @@ local function page_gone(page)
 	return not ok or name ~= page.name
 end
 
-local function newest_page()
+-- **The shown page drawn on top** ([KEYPAGE_NEWEST_WRONG]), not the
+-- newest: the Server window the admin's login question opened (102) is
+-- over Hearth's frame (100) built after it. Pages in one window (a
+-- page in place of the settings) go by the newest.
+local function top_page()
+	local best = nil
 	for i = #keyboard_pages, 1, -1 do
-		if not page_gone(keyboard_pages[i]) and shown(keyboard_pages[i].win) then
-			return keyboard_pages[i]
+		local p = keyboard_pages[i]
+		if not page_gone(p) and shown(p.win) then
+			-- An element without IsDrawnOver (an unwrapped one) goes by
+			-- the newest
+			local ok, over = pcall(function()
+				return best and p.win:IsDrawnOver(best.win)
+			end)
+			if not best or ok and over == true then
+				best = p
+			end
 		end
 	end
-	return nil
+	return best
 end
 
 -- The page's items read again from its window: nothing of it is held
@@ -599,21 +674,132 @@ local function label_of(e)
 	return t and t.text or e:GetTypeName()
 end
 
+-- The first view under e with nothing to focus in it: a log read beside a
+-- field (the chat console's)
+local function read_view(e)
+	if not shown(e) then
+		return nil
+	end
+	local sc = scroller(e, e:GetTypeName())
+	if sc and #page_items(e, {}) == 0 then
+		return sc
+	end
+	for i = 0, e:GetNumChildren() - 1 do
+		local c = e:GetChild(i)
+		local r = c and read_view(c)
+		if r then
+			return r
+		end
+	end
+	return nil
+end
+
+-- **Page Up and Down scroll the view** ([SCROLL_PAGE_KEYS]): the one the
+-- focus is in (with nothing focused, the items' one), else the page's
+-- view with nothing to focus, by page_step.
+-- The focus stays while it is still in sight, a message taller than the
+-- view not jumped over (Hearth's thread); else it goes to the item
+-- nearest where it went, the first in sight going down, the last going
+-- up. At the view's end, to its first item or its last: the keys stay in
+-- the view. False with no such view.
+local function page_scroll(page, d)
+	local at = 0
+	for i, e in ipairs(page.items) do
+		if shown(e) and e:HasFocus() then
+			at = i
+		end
+	end
+	-- Nothing focused: the view the page's items are in
+	local sc = page.scs[at]
+	for i = 1, at == 0 and #page.items or 0 do
+		sc = sc or page.scs[i]
+	end
+	sc = sc or read_view(page.win)
+	if not sc then
+		return false
+	end
+	local top, h = sc.top(), sc.height()
+	-- And past no more than page_size of the view's rows of items
+	-- ([LIST_PAGE_SIZE]): the view's text between them is read by the step
+	local step = M.safe.page_step(h, LINE)
+	local ys = {}
+	for i, e in ipairs(page.items) do
+		if page.scs[i] == sc and shown(e) then
+			ys[#ys + 1] = y_in(sc, e)
+		end
+	end
+	table.sort(ys)
+	local rows = {}
+	for _, y in ipairs(ys) do
+		if y ~= rows[#rows] then
+			rows[#rows + 1] = y
+		end
+	end
+	local r = 1
+	while rows[r] and rows[r] < top do
+		r = r + 1
+	end
+	local to = rows[r + d * page_size()]
+	if to and to ~= top then
+		step = math.min(step, math.abs(to - top))
+	end
+	sc.set_top(top + d * step)
+	local now = sc.top()
+	local moved = now ~= top
+	if moved then
+		page.follow = false
+		if sc.view then
+			sc.view.page_scrolled = true
+		end
+	end
+	local function seen(e)
+		local y = y_in(sc, e)
+		return not moved or y < now + h and y + e.height > now
+	end
+	local pick = nil
+	if not (moved and page.scs[at] and seen(page.items[at])) then
+		for i, e in ipairs(page.items) do
+			-- Moved, the nearest in sight; at the end, the end's own
+			if page.scs[i] == sc and shown(e) and seen(e) and
+					((d < 0) == moved or not pick) then
+				pick = e
+			end
+		end
+	end
+	if pick then
+		pick:SetFocus(true)
+	end
+	-- What a check reads: the focus by its label's name (Hearth's message
+	-- heads are m<id>)
+	local f = pick or page.items[at]
+	local t = f and f:GetTypeName() == "Button" and button_text(f)
+	log:info("page key: " .. top .. " -> " .. now .. " of " ..
+			sc.content.height .. ", view " .. h .. ", focus " ..
+			(t and t:GetName() ~= "" and t:GetName() or
+			f and label_of(f) or "none"))
+	return true
+end
+
 local function arrange(page)
 	rewalk(page)
-	local first, inside = nil, false
+	local first, inside = nil, nil
 	for _, e in ipairs(page.items) do
 		if e:HasFocus() then
-			inside = true
+			inside = e
 		end
 		local t = e:GetTypeName()
 		if t == "Button" or t == "DropDownList" then
 			first = first or e
 		end
 	end
+	-- A page under another (Hearth's frame under the Server window) takes
+	-- it once it is on top with nothing focused: Enter would press a
+	-- button not seen
+	if top_page() ~= page then
+		page.refocus = inside or first
 	-- The first button has the focus to start with, unless the page gave
 	-- it to one of its own (a password page's first field)
-	if first and not inside then
+	elseif first and not inside then
 		first:SetFocus(true)
 	end
 end
@@ -656,6 +842,15 @@ function M.safe.keyboard_page(win)
 		elseif shown(win) and (dirty or stale(page)) then
 			dirty = false
 			rewalk(page)
+		end
+		-- The page over it gone: its focus put back (a field the Escape
+		-- that closed the other one defocused), else its first button
+		local r = page.refocus
+		if r and shown(win) and top_page() == page then
+			page.refocus = nil
+			if magic.ui.focusElement == nil and not gone(r) then
+				r:SetFocus(true)
+			end
 		end
 		-- **The view follows the focus** a key moved (Tab, PageDown) into
 		-- an item not wholly in it; the wheel and the mouse are as they are
@@ -735,45 +930,61 @@ function M.safe.keyboard_page(win)
 			return
 		end
 		-- A dropdown's popup has the keys
-		if newest_page() ~= page or not arranged or drop_open then
+		if top_page() ~= page or not arranged or drop_open then
 			return
 		end
 		-- So has a dialog over the page, an item of its own focused (the
 		-- file picker over Hearth, [HEARTH_USABILITY]: Down went to the
 		-- sidebar under it, Enter opened a topic). Not a plain element:
 		-- uistack focuses the one under a dialog it pops.
+		-- **A page under this one** holding the focus is not a dialog: the
+		-- keys are this one's, as with nothing focused (Hearth's reply
+		-- field under the Server window, [KEYPAGE_NEWEST_WRONG])
 		local f = magic.ui.focusElement
+		local under = false
 		if f and not win:HasRecursiveFocus() then
+			for _, p in ipairs(keyboard_pages) do
+				if p ~= page and not page_gone(p) and
+						p.win:HasRecursiveFocus() then
+					under = true
+				end
+			end
 			local t = f:GetTypeName()
-			if t == "Button" or t == "LineEdit" or t == "DropDownList" then
+			if not under and (t == "Button" or t == "LineEdit" or
+					t == "DropDownList") then
 				return
 			end
 		end
 		dirty = true
 		page.follow = true
 		rewalk(page)
+		local key = event_data:GetInt("Key")
+		local focus = not under and magic.ui.focusElement or nil
+		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
+		-- A multi-line field's rows are its up and down ([HEARTH_MVP]),
+		-- and its pages but from its first row up or its last down
+		local ra = page.rows_at
+		local pd = M.safe.page_dir(key)
+		local up = key == KEY_UP or pd == -1
+		local down = key == KEY_DOWN or pd == 1
+		local rows = typing and focus:IsMultiLine() and not (ra and
+				ra[1]:HasFocus() and (up and ra[2] or down and ra[3]))
+		if pd and not rows and page_scroll(page, pd) then
+			return
+		end
 		if #page.items == 0 then
 			return
 		end
-		local key = event_data:GetInt("Key")
-		local focus = magic.ui.focusElement
-		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
-		-- A multi-line field's rows are its up and down ([HEARTH_MVP])
-		local ra = page.rows_at
-		local rows = typing and focus:IsMultiLine() and not (ra and
-				ra[1]:HasFocus() and (key == KEY_UP and ra[2] or
-				key == KEY_DOWN and ra[3]))
-		if not typing and (key == magic.KEY_PAGEUP or
-				key == magic.KEY_PAGEDOWN) then
+		if not typing and pd then
 			local at = 0
 			for i, e in ipairs(page.items) do
 				if shown(e) and e:HasFocus() then
 					at = i
 				end
 			end
-			local d = key == magic.KEY_PAGEUP and -PAGE or PAGE
+			-- Not in a view that scrolls (page_scroll's): page_size
 			page.items[math.max(1, math.min(#page.items,
-					math.max(at, 1) + d))]:SetFocus(true)
+					math.max(at, 1) + pd * page_size()))]:SetFocus(true)
 			return
 		end
 		-- **Two columns** (keyboard_columns): Up and Down stay in the one
@@ -1184,7 +1395,10 @@ function M.safe.list_view(parent, width, height, options)
 				-- The focused element itself: a row may be a group of
 				-- them taller than the view
 				local f = magic.ui.focusElement
-				if f and list:HasRecursiveFocus() then
+				-- A page key's scroll stays where the key put it
+				if view.page_scrolled then
+					view.page_scrolled = false
+				elseif f and list:HasRecursiveFocus() then
 					view:show(f)
 				end
 			end)

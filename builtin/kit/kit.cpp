@@ -278,6 +278,7 @@ struct Module: public interface::Module, public Interface
 		// The new box is made before the old one goes: a compile of the
 		// .wasm under way is then the new one's to wait on, not killed (and
 		// waited for) with the old
+		// "box", meta.json's "wasm_box"
 		up_<interface::WasmBox> b(m_server->create_wasm_box(MODULE, "box",
 				why));
 		m_box = std::move(b);

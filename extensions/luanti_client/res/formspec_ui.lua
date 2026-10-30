@@ -1454,6 +1454,11 @@ function M.new(magic, buildat, log, ctx)
 				local factor = tonumber(e.fields[5]) or 0.1
 				if x and w then
 					local el = window:CreateChild("UIElement")
+					-- In the form's order like every other element: at the
+					-- default 0 it sorted under the form's translucent
+					-- background, which dimmed all in it
+					-- ([FORMSPEC_SCROLL_DIM])
+					el.priority = next_priority()
 					el:SetPosition(math.floor(x), math.floor(y))
 					el.size = magic.IntVector2(math.floor(w), math.floor(h))
 					el.clipChildren = true
@@ -1462,8 +1467,10 @@ function M.new(magic, buildat, log, ctx)
 					local moved = v * factor * layout.scale[vertical and 2 or 1]
 					-- The value is in the bar's own units and the factor is
 					-- formspec units per one of them
+					-- per: pixels a bar unit moves it, for Page Up and Down
 					scroll_boxes[e.scroll_id] = {element = el, x = x, y = y,
 							w = w, h = h, bar = bar, vertical = vertical,
+							per = factor * layout.scale[vertical and 2 or 1],
 							dx = vertical and 0 or -moved,
 							dy = vertical and -moved or 0}
 					scrolls[#scrolls + 1] = scroll_boxes[e.scroll_id]

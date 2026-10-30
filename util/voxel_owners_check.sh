@@ -15,7 +15,8 @@
 #      loads and lets go, read back after that section's unload and reload
 #      and after a restart; the restart's save has older saves' rows of it
 #      put back in (the one blob, and the blob per section), which come
-#      out of the migration onto the voxel owners.
+#      out of the migration onto the voxel owners; the save, stamped
+#      format 1 as a build before the owners left it, is stamped 2.
 #
 #   util/voxel_owners_check.sh
 set -u
@@ -337,6 +338,8 @@ sqlite3 "$db" "INSERT OR REPLACE INTO store (store, key, value) VALUES
 	('luanti', 'node_meta', CAST('return {[\"3,1,3\"] = {fields = {kept = \"old\"}, inventory = {main = {\"floor:glass 3\"}}}}' AS BLOB)),
 	('luanti', 'node_meta/-2,0,0', CAST('return {[\"-70,1,3\"] = {fields = {kept = \"oldsec\"}, inventory = {main = {\"floor:glass 3\"}}}}' AS BLOB));" ||
 	fail "could not write the old rows into $db"
+sqlite3 "$db" "PRAGMA user_version = 1; UPDATE store SET value = '0.7.0' WHERE store = '__save' AND key = 'version';" ||
+	fail "could not stamp $db as format 1"
 vrun read
 grep -aq "Moving 2 node metadata out of 2 rows" "$t/v_read.log" ||
 	fail "no migration logged ($t/v_read.log)"
@@ -344,5 +347,9 @@ grep -aq "owners_check: restarted: near near/floor:glass 3, far far/floor:glass 
 	fail "lost over the restart ($t/v_read.log)"
 [ -z "$(sqlite3 "$db" "SELECT key FROM store WHERE store = 'luanti' AND key LIKE 'node_meta%'")" ] ||
 	fail "the old rows are still there"
-echo "PASS: owners kept over unload, reload and restart; routed writes to the handler, written or refused; vanilla's metadata over an unload and a restart, older saves' rows migrated"
+[ "$(sqlite3 "$db" "PRAGMA user_version")" = 2 ] ||
+	fail "the migrated save is not stamped format 2"
+[ "$(sqlite3 "$db" "SELECT value FROM store WHERE store = '__save' AND key = 'version'")" != 0.7.0 ] ||
+	fail "the migrated save's version row is not this build's"
+echo "PASS: owners kept over unload, reload and restart; routed writes to the handler, written or refused; vanilla's metadata over an unload and a restart, older saves' rows migrated and the save stamped format 2"
 # vim: set noet ts=4 sw=4:

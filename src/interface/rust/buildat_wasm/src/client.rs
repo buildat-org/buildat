@@ -3477,6 +3477,11 @@ impl UIElement {
 		let mut r = call(imports::buildat_c_UIElement_IsCaretOnLastRow, &[&H(self.handle()) as &dyn Put]);
 		r.value().boolean()
 	}
+	/// UIElement:IsDrawnOver(UIElement):any
+	pub fn IsDrawnOver(&self, a1: impl Put) -> Value {
+		let mut r = call(imports::buildat_c_UIElement_IsDrawnOver, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value()
+	}
 	/// UIElement:IsMultiLine():any
 	pub fn IsMultiLine(&self) -> Value {
 		let mut r = call(imports::buildat_c_UIElement_IsMultiLine, &[&H(self.handle()) as &dyn Put]);
@@ -7853,6 +7858,8 @@ mod imports {
 		pub fn buildat_c_UIElement_HasRecursiveFocus(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:IsCaretOnLastRow():boolean"]
 		pub fn buildat_c_UIElement_IsCaretOnLastRow(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "UIElement:IsDrawnOver(UIElement):any"]
+		pub fn buildat_c_UIElement_IsDrawnOver(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:IsMultiLine():any"]
 		pub fn buildat_c_UIElement_IsMultiLine(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "UIElement:Remove()"]

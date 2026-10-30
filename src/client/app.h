@@ -123,6 +123,11 @@ namespace app
 		// user types it once and not once per game. Luanti's rule for a
 		// name: 1 to 20 letters, digits, _ and -.
 		ss_ default_username = "User";
+		// **The most a Page Up or Page Down moves** in a menu, a list or a
+		// keyboard page ([LIST_PAGE_SIZE], user 2026-10-29: "people will
+		// definitely have different preferences"): items, 1 to 100; never
+		// more than are in sight either (ui_utils)
+		int page_size = 10;
 		// **A field of view per app** ([FOV_SETTING]): "fov.<app>", the
 		// degrees of the app's most common camera, 30 to 140; an app
 		// unset here has its own default (buildat.declare_fov)

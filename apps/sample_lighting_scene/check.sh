@@ -131,6 +131,27 @@ if grep -a "no cave data" "$out/cli.log"; then
 	echo "FAIL: a benchmark view was shot before its cave data"
 	exit 1
 fi
+# **The speckle on the rock round the mouth, counted** ([CAVE_SPECULAR]):
+# view 3 lost it twice without the RMSE noticing -- rock stopped being
+# spotted (2026-09-08), and the cave's skylight never reached the client
+# so nothing in it reflected the sky (2026-09-22). Pixels brighter than
+# their 5x5 median by 20 levels, on the wall under the lit ledge: 807
+# with the speckle, 150-180 without either (the ledge's own edges),
+# 2026-10-30. A view that is not 1600x900 is the RMSE's to fail. Before
+# --accept too, so a reference without it is not taken.
+if ! python3 - "$run/3_inside_cave.png" <<'PYS'
+import sys
+from PIL import Image, ImageFilter, ImageChops
+im = Image.open(sys.argv[1]).convert("L").crop((420, 450, 800, 720))
+h = ImageChops.subtract(im, im.filter(ImageFilter.MedianFilter(5))).histogram()
+n = sum(h[20:])
+print("3_inside_cave.png speckle: %d pixels (at least 400)" % n)
+raise SystemExit(0 if n >= 400 else 1)
+PYS
+then
+	echo "FAIL: the rock round the cave mouth has no speckle in view 3"
+	exit 1
+fi
 
 if [ -n "$accept" ]; then
 	# **Twice, so the reference carries this machine's noise**: the

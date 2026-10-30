@@ -46,6 +46,8 @@ local chat = require("buildat/module/chat")
 chat.listeners[#chat.listeners + 1] = function(line)
 	accounts.chat_add(line)
 end
+-- [CHAT_PEOPLE_BUTTON] Its People... in the console
+chat.people(accounts)
 
 -- What the server said in main:account
 local account = {public = false, admin = false, world = "", is_local = false}

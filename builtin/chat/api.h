@@ -12,10 +12,10 @@
 // - a moderator mutes a player below them, and unmutes;
 // - a player reports another, the chat's last lines with it, into
 //   builtin/moderation's queue, which the moderators decide from the
-//   chat's menu: mute, or dismiss.
+//   chat console's People... page: mute, or dismiss.
 // Its state is in the server's save "_chat". The client half is
 // client_lua/module.lua (require("buildat/module/chat")), which hooks
-// builtin/accounts' chat console and has the menu.
+// builtin/accounts' chat console and fills its People... page.
 //
 // Packets, client to server: chat:say (text), chat:get, chat:set_min
 // (everyone|member|helper), chat:mute and chat:unmute (name), chat:report

@@ -12,8 +12,8 @@
 #   util/prebuild_wasm.py <clang> <wasm-ld> <interface dir> <out dir> <module dir>...
 #
 # A module dir is one with a wasm/ in it (builtin/voxelworld,
-# apps/hillclimb/main) or a "server_wasm" in its meta.json. A Rust crate
-# (Cargo.toml) is built by cargo as the server's build_rust() does, the
+# apps/hillclimb/main) or a "server_wasm" or "wasm_box" (builtin/kit) in
+# its meta.json. A Rust crate (Cargo.toml) is built by cargo as the server's build_rust() does, the
 # module's crates it depends on by path beside it: BUILDAT_CARGO, else cargo in PATH, else
 # ~/.cargo/bin/cargo. --by-name names each <module>.wasm (wasm/) and
 # <module>.server.wasm instead, the names the static web server looks for
@@ -151,9 +151,12 @@ for module in sys.argv[5:]:
         build(module, "wasm", False)
         built = True
     meta = os.path.join(module, "meta.json")
-    source = os.path.exists(meta) and (json.load(open(meta)).get("server_wasm") or {}).get("source")
+    m = json.load(open(meta)) if os.path.exists(meta) else {}
+    # [KIT] or the box it runs for itself (Server::create_wasm_box()), built
+    # as a server .wasm is
+    source = (m.get("server_wasm") or {}).get("source") or m.get("wasm_box")
     if source:
         build(module, source, True)
         built = True
     if not built:
-        sys.exit("%s: no wasm/ and no server_wasm" % module)
+        sys.exit("%s: no wasm/, server_wasm or wasm_box" % module)

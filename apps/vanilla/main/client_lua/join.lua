@@ -62,8 +62,9 @@ accounts.chat_send = function(text)
 			cereal.binary_output({text}, {"array", "string"}))
 end
 -- [VANILLA_CHAT_MIN] builtin/chat's packets from the join on (who may
--- talk; the pause menu reads its state)
-require("buildat/module/chat")
+-- talk; the pause menu reads its state), its People... in the console
+-- ([CHAT_PEOPLE_BUTTON])
+require("buildat/module/chat").people(accounts)
 buildat.sub_packet("main:chat_line", function(data)
 	local line = cereal.binary_input(data, {"array", "string"})[1] or ""
 	log:info("join: chat: " .. line)

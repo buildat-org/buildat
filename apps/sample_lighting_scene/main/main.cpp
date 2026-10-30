@@ -711,8 +711,12 @@ struct Module: public interface::Module
 			// static_spots: eight sections' were never raised with one's,
 			// and their look is kept as it is
 			const float rock_spots = multi() ? 0.04f : 0.25f;
+			// Rock is a spot all over ([CAVE_SPECULAR]): the sparkle on the
+			// walls round the mouth in benchmark 3, which the static spots
+			// do not make
+			const float rock_speckle = multi() ? 0.0f : 1.0f;
 			add_voxel(reg, "rock", "main/rock.png", true, false,
-					0.95f, 0.15f, 0.5f, 0.0f, 0.0f, rock_spots); // id 2
+					0.95f, 0.15f, 0.5f, 0.0f, rock_speckle, rock_spots); // id 2
 			add_voxel(reg, "dirt", "main/dirt.png", true, false,
 					0.98f, 0.15f, 0.6f, 0.0f, 0.0f, rock_spots); // id 3
 			add_voxel(reg, "grass", "main/grass.png", true, false,
