@@ -83,8 +83,11 @@ return function()
 			da = 0, whole = 0, us = 0}
 	end
 	local st = fresh(0)
+	-- [CHECK_TIMING_LIMITS] long: the driven frames over 100 ms, a slow
+	-- machine's (the check box's software GL): a state arrives late after
+	-- one, and the checks allow a state taken whole for each
 	local total = {n = 0, cm = 0, whole = 0, states = 0, t0 = nil,
-		driven = false}
+		driven = false, long = 0}
 	-- The latency's line: a key from standing to the car moving 1 cm,
 	-- predicted and by the server's state
 	local lat = nil
@@ -304,6 +307,10 @@ return function()
 			chunks_t, chunks_at = t, at
 			hand_chunks(x, y, z)
 		end
+		if total.frame_t and total.driven and t - total.frame_t > 100000 then
+			total.long = total.long + 1
+		end
+		total.frame_t = t
 		advance()
 		if lat and lat.pred and lat.server and not lat.done then
 			lat.done = true
@@ -320,11 +327,13 @@ return function()
 						.. "%d states within the bounds; the largest errors %.2f cm, "
 						.. "%.1f cm/s, %.2f degrees; %d taken whole; the steps and "
 						.. "corrections %.1f ms a second; %d corrections, %d over 1 "
-						.. "cm, %d taken whole while driven, in %.0f s",
+						.. "cm, %d taken whole while driven, %d frames over 100 ms, "
+						.. "in %.0f s",
 						tostring(engine), st.n, st.cm,
 						st.n > 0 and st.sum / st.n * 100 or 0, st.kept, st.max * 100,
 						st.dv * 100, math.deg(st.da), st.whole, st.us / 10000,
-						total.n, total.cm, total.whole, (t - total.t0) / 1e6))
+						total.n, total.cm, total.whole, total.long,
+						(t - total.t0) / 1e6))
 			end
 			st = fresh(t)
 		end

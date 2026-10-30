@@ -165,7 +165,8 @@ sent=$(ms "$t/admin3.log" '"id":1001,"ok":true')
 got=$(ms "$t/watch.log" 'hr: .*a live line')
 [ -n "$sent" ] && [ -n "$got" ] || fail "the live line did not reach bob ($sent, $got)"
 echo "a chat line reached the other client in $((got - sent)) ms"
-[ $((got - sent)) -lt 2000 ] || fail "the line took over two seconds"
+slow_limit line_ms 2000 # the machine's (check_lib: a performance)
+awk -v d=$((got - sent)) -v l="$line_ms" 'BEGIN { exit !(d < l) }' || fail "the line took over $line_ms ms"
 
 # 5. The HTML face
 get(){ curl -s -o "$t/page" -w '%{http_code}' "$U$1"; }

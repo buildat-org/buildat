@@ -102,6 +102,7 @@ BUILDAT_SKELENTI_WORLD= start_server "$t/srv3.log" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/demo_skelenti" \
 	-D "$t/srv" -C "$t/srv.cache" -l 3 || fail "the public start ($t/srv3.log)"
 CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$t/srv3.log" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv3.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/srv3.log)"
 printf '%s\n' "wait_log 30000 accounts: ntfy asked" "wait_log_any 5000 server window: the page ntfy" \

@@ -40,6 +40,7 @@ set -u
 here=$(cd "$(dirname "$0")/../.." && pwd)
 check_tmp hillclimb; t=$CHECK_TMP
 app="$here/apps/hillclimb"
+check_slow # the prediction's limits (pred_check), measured before any load here
 # None started while the machine has under 2 GB available and 300 MB for
 # each of the <n> about to start (user, 2026-10-29)
 mem_wait() # <n>
@@ -51,9 +52,18 @@ mem_wait() # <n>
 
 # [CLIENT_WASM] step 5, below: a lap's prediction lines in a client's log
 pred_counts() # <log>: its last line in $last, and in $counts the run's
-{               # corrections, those over 1 cm, states taken whole, seconds
+{               # corrections, those over 1 cm, states taken whole, frames over 100 ms, seconds
 	last=$(grep -a "hillclim: hillclimb: prediction (" "$1" | tail -1 | sed 's/.*hillclimb: //')
-	counts=$(echo "$last" | sed -n 's/.*; \([0-9]*\) corrections, \([0-9]*\) over 1 cm, \([0-9]*\) taken whole while driven, in \([0-9]*\) s$/\1 \2 \3 \4/p')
+	counts=$(echo "$last" | sed -n 's/.*; \([0-9]*\) corrections, \([0-9]*\) over 1 cm, \([0-9]*\) taken whole while driven, \([0-9]*\) frames over 100 ms, in \([0-9]*\) s$/\1 \2 \3 \4 \5/p')
+}
+# [CHECK_TIMING_LIMITS] The rates allow one more for each driven frame
+# over 100 ms (predict.lua's count): a state arrives late after a long
+# frame, and a slow client's are many (pred3 on the check box: 74 states
+# taken whole in 40 s at 3-4 fps); on this machine there are none or few
+pred_ok() # <corrections over 1 cm> <taken whole> <long frames> <s> <one over 1 cm each n s>
+{
+	awk -v cm="$1" -v whole="$2" -v long="$3" -v s="$4" -v n="$5" \
+		'BEGIN { exit !(cm <= s / n + long && whole <= s / 20 + long) }'
 }
 pred_check() # <log> <engine at the self test, a regex>
 {
@@ -66,18 +76,21 @@ pred_check() # <log> <engine at the self test, a regex>
 	# taken whole while driven (a snap back: 30 each 10 s before
 	# [HILLCLIMB_PREDICT_RED]) at most each 20 s: one came under load, a
 	# frame of the client's stalled past the half second of history
+	# (pred_ok: and one each a frame over 100 ms)
 	pred_counts "$log"
 	set -- $counts
-	[ $# = 4 ] && [ $(($2 * 2)) -le "$4" ] && [ $(($3 * 20)) -le "$4" ] || fail "the corrections: $last ($log)"
-	n=$1 cm=$2 secs=$4
+	[ $# = 5 ] && pred_ok "$2" "$3" "$4" "$5" 2 || fail "the corrections: $last ($log)"
+	n=$1 cm=$2 secs=$5
 	lat=$(grep -a "a key to 1 cm of the car's motion" "$log" | head -1 |
 		sed 's/.*motion: \([0-9]*\) ms predicted, \([0-9]*\) ms by.*/\1 \2/')
 	# Not later than by the server's state, give or take a 30 Hz frame
 	# ([HILLCLIMB_PREDICT_RED]): on a local server the prediction leads it
 	# by the state's way here, 8-50 ms, and both are timed in frames (176
-	# against 173 failed under load)
+	# against 173 failed under load); the frame the machine's (check_lib's
+	# CHECK_SLOW, measured at the check's start)
 	set -- $lat
-	[ $# = 2 ] && [ "$1" -le $(($2 + 33)) ] || fail "W to motion: ${lat:-no line} ($log)"
+	[ $# = 2 ] && awk -v p="$1" -v s="$2" -v f="$CHECK_SLOW" 'BEGIN { exit !(p <= s + 33 * f) }' ||
+		fail "W to motion: ${lat:-no line} (CHECK_SLOW $CHECK_SLOW; $log)"
 	echo "  $n corrections, $cm over 1 cm, in $secs s; W to 1 cm: $1 ms predicted, $2 ms by the server's state"
 }
 
@@ -1068,9 +1081,17 @@ pred_run() # <name> [env...]: a lap, the client's cache c_pred's
 		> "$t/$name.log" 2>&1 || fail "the lap ($t/$name.log)"
 }
 pred_run pred1
-grep -aq "hillclimb: the car's step from the wasm now compiled" "$t/pred1.log" ||
-	fail "the module not moved to the compiled one ($t/pred1.log)"
-pred_check "$t/pred1.log" "interpreter, compiling"
+# [CHECK_TIMING_LIMITS] The check box's compiler (1.3 s) can be done
+# before the car's self test: then the module was moved before it
+if grep -aq "the car's step from the wasm (compiled), self test" "$t/pred1.log"; then
+	grep -aq "wasm main: moved to the compiled module" "$t/pred1.log" ||
+		fail "the module not moved to the compiled one ($t/pred1.log)"
+	pred_check "$t/pred1.log" "compiled"
+else
+	grep -aq "hillclimb: the car's step from the wasm now compiled" "$t/pred1.log" ||
+		fail "the module not moved to the compiled one ($t/pred1.log)"
+	pred_check "$t/pred1.log" "interpreter, compiling"
+fi
 pred_run pred2
 grep -aq "wasm main: compiled module from the cache" "$t/pred2.log" ||
 	fail "the client's cache not hit ($t/pred2.log)"
@@ -1107,9 +1128,9 @@ mp_server stony_srv "$default_soil" -u launcher=1
 PRED_CMDS=stony pred_run stony
 pred_counts "$t/stony.log"
 set -- $counts
-[ $# = 4 ] && [ $(($2 * 5)) -le "$4" ] && [ $(($3 * 20)) -le "$4" ] ||
+[ $# = 5 ] && pred_ok "$2" "$3" "$4" "$5" 5 ||
 	fail "the corrections over stony ground: $last ($t/stony.log)"
-echo "  stony ground, steered: $1 corrections, $2 over 1 cm, $3 taken whole, in $4 s"
+echo "  stony ground, steered: $1 corrections, $2 over 1 cm, $3 taken whole, $4 frames over 100 ms, in $5 s"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 echo "PASS: the hill, the car, the time trial and the ground that gives, cars each and rounds, the car predicted from the wasm"
 # vim: set noet ts=4 sw=4:

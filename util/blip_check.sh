@@ -19,6 +19,10 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 check_tmp blip; t=$CHECK_TMP
+# The web's budget (below) is a performance: the machine's (check_lib),
+# measured before anything here loads it
+slow_limit made_ms 4
+slow_limit mix_ms 20
 (cd "$here" && luajit extensions/blip/test/gen_test.lua) || fail "gen_test.lua"
 lines(){ grep -a "blip check:" "$1" | grep -av 'wait_log\|command' | sed 's/.*blip check: //'; }
 printf 'wait_log_any 150000 blip check: done\nquit\n' > "$t/c.cmds"
@@ -105,12 +109,12 @@ J
 	fail "the web drive ($t/web.log)"
 echo "web:"; lines "$t/web/page.log"
 grep -aq "blip check: self-check ok" "$t/web/page.log" || fail "the web self-check"
-python3 - "$t/web/page.log" <<'PY' || fail "the web is over the budget"
+python3 - "$t/web/page.log" "$made_ms" "$mix_ms" <<'PY' || fail "the web is over the budget ($made_ms ms, $mix_ms ms)"
 import re, sys
 log = open(sys.argv[1], errors="replace").read()
 slowest = float(re.search(r"made in ([\d.]+) ms", log).group(1))
 mix8 = float(re.search(r"8 voices, ([\d.]+) ms", log).group(1))
-assert slowest < 4 and mix8 < 20, (slowest, mix8)
+assert slowest < float(sys.argv[2]) and mix8 < float(sys.argv[3]), (slowest, mix8)
 PY
 echo "PASS: blip's hashes the same natively and on the web, the web in its budget"
 # vim: set noet ts=4 sw=4:

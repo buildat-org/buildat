@@ -51,10 +51,11 @@
 #   ~/projects/buildat -> REMOTE_DIR covers them all. Where that path is
 #   taken (another copy of the tree there), repoint the links instead: the
 #   sandboxed server reads nothing through a link out of its root.
-# **Host-sensitive checks**: timing limits (web_join_check), short-lived
-# screenshots (particle_draw_check) and server-start timeouts (lan_check)
-# fail more on a slower or software-GL machine; run them here before
-# blaming the code. The machine's own RAM: check_lib's limits apply there
+# **Host-sensitive checks**: a limit on a performance is scaled by
+# check_lib's CHECK_SLOW, a step's counted in frames or game time
+# ([CHECK_TIMING_LIMITS]); what is left (short-lived screenshots,
+# particle_draw_check; server starts on a fresh compile) fails more on a
+# slower or software-GL machine: run it here before blaming the code. The machine's own RAM: check_lib's limits apply there
 # as here unless it has room to spare.
 set -eu -o pipefail
 [ $# -ge 2 ] || { sed -n '2,8p' "$0" | sed 's/^# *//' >&2; exit 2; }

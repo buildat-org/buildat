@@ -28,7 +28,7 @@ set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
-limit=${LIMIT_MS:-200}
+slow_limit limit ${LIMIT_MS:-200} # the machine's (check_lib: a performance)
 check_tmp heightmap; t=$CHECK_TMP
 serve(){
 	start_server "$1" "STATUS Listening" 300 auto "$here/Build/bin/buildat_server" \

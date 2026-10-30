@@ -28,6 +28,7 @@ cd "$here/Build"
 start_server "$t/srv.log" "STATUS Listening" 90 auto bin/buildat_server -m ../apps/floorplanner \
 	-D "$t/srv" -l 3 || fail "the server ($t/srv.log)"
 CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$t/srv.log" "setup code" 30 # may come after Listening
 code=$(grep -ao "setup code [A-Z0-9]*" "$t/srv.log" | tail -1 | awk '{print $3}')
 for i in $(seq 50); do
 	np=$((29700 + RANDOM % 300))

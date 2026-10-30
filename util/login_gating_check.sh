@@ -54,6 +54,7 @@ start(){
 		bin/buildat_server -m "../apps/$app" -D "$t/$d" -l 3 "$@" ||
 		fail "server did not listen"
 	srv=$SERVER_PID
+	wait_for_log "$t/$d.log" "setup code" 30 # may come after Listening
 	code=$(nolog "$t/$d.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 }
 

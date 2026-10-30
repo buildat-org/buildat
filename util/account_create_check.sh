@@ -38,6 +38,7 @@ start_server "$t/srv.log" "STATUS Listening" 90 "$port" \
 	bin/buildat_server -m ../apps/vanilla -D "$t/srv" -l 3 ||
 	fail "server did not listen"
 srv=$SERVER_PID
+wait_for_log "$t/srv.log" "setup code" 30 # may come after Listening
 code=$(nolog "$t/srv.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 [ -n "$code" ] || fail "no setup code in the server log"
 

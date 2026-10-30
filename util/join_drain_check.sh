@@ -81,6 +81,7 @@ secs=$(python3 -c "import sys
 def s(x): h, m, r = x.split(':'); return int(h) * 3600 + int(m) * 60 + float(r)
 print('%.1f' % (s('$world') - s('$ready')))")
 echo "the world $secs s after the ready"
-python3 -c "import sys; sys.exit(0 if $secs < 15 else 1)" ||
-	fail "the world came $secs s after the ready ($t/client.log)"
+slow_limit drain_s 15 # the machine's (check_lib: a performance)
+python3 -c "import sys; sys.exit(0 if $secs < $drain_s else 1)" ||
+	fail "the world came $secs s after the ready, not under $drain_s ($t/client.log)"
 echo "PASS: over TLS at 8 MB/s the world was in the scene $secs s after the ready"

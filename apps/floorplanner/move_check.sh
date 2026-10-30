@@ -69,12 +69,14 @@ BUILDAT_FP_NAME=owner timeout 300 "$here/Build/bin/buildat" \
 	-C "$t/c" -D "$t/u" -a app/floorplanner/play -c @"$t/cmds" > "$t/f.log" 2>&1 ||
 	fail "the drive ($t/f.log: $(grep -a "Command sequence failed" "$t/f.log" | tail -1))"
 grep -a "fp move: " "$t/f.log" | sed 's/.*fp move: //'
-python3 -I - "$t/f.log" <<'PY' || fail "the moves ($t/f.log)"
+check_slow # the 100 ms and 1.5 s below the machine's (check_lib: a performance)
+python3 -I - "$t/f.log" "$CHECK_SLOW" <<'PY' || fail "the moves (CHECK_SLOW $CHECK_SLOW; $t/f.log)"
 import sys, re
 def ts(l):
     m = re.search(r" (\d\d):(\d\d):(\d\d)\.(\d\d\d) ", l)
     return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000
 lines = open(sys.argv[1], errors="replace").read().split("\n")
+slow = float(sys.argv[2])
 keys, drags = {}, {}
 for l in lines:
     m = re.search(r"fp move: (\w+) (\w+) key ([\d.]+) ms", l)
@@ -85,10 +87,10 @@ for l in lines:
         drags[(m.group(1), m.group(2))] = float(m.group(3))
 for what in ("furniture", "door", "node"):
     k = sorted(keys.get(what, []))
-    assert len(k) >= 5 and k[len(k) // 2] < 100, (what, k)
+    assert len(k) >= 5 and k[len(k) // 2] < 100 * slow, (what, k)
 for what in ("furniture", "door"):
     for view in ("2d", "3d"):
-        assert drags.get((what, view), 1e9) < 100, (what, view, drags)
+        assert drags.get((what, view), 1e9) < 100 * slow, (what, view, drags)
 w = [re.search(r"fp_where: (\d+) (-?\d+) (-?\d+) (-?\d+) grid (\d+)", l).groups()
         for l in lines if "fp_where: " in l]
 assert len(w) == 3, w
@@ -103,7 +105,7 @@ ups = [ts(l) for l in lines if "command: mouse_up left" in l and ts(l) > three]
 assert len(downs) == 3 and len(ups) == 3, (downs, ups)
 for d, u in zip(downs, ups):
     assert not any(d + 0.1 < t < u for t in lit), ("lighting during a 3D drag", d, u, lit)
-    assert any(u < t < u + 1.5 for t in lit), ("no lighting after a 3D drag", u, lit)
+    assert any(u < t < u + 1.5 * slow for t in lit), ("no lighting after a 3D drag", u, lit)
 print("two steps %d -> %d mm, a refused move put back" % (a[2], b[2]))
 PY
 echo "PASS: a move in the large plan under 100 ms, shown at once, put back when refused"

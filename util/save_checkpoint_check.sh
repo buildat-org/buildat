@@ -4,8 +4,9 @@
 # covers: builtin/luanti/luanti.cpp builtin/voxelworld/voxelworld.cpp builtin/storage/storage.cpp
 # [SAVE_CHECKPOINT]: vanilla on the minimal game with a client on. A
 # fixture stands the player on the game's floor, places a node beside
-# them with a metadata field and puts an item in their inventory; 7 s
-# later, the player still on, the server is killed with SIGKILL. Started
+# them with a metadata field and puts an item in their inventory; at the
+# next checkpoint (5.3 s of game time), the player still on, the server
+# is killed with SIGKILL. Started
 # again on the save, the node, its field and the item are there.
 #
 #   util/save_checkpoint_check.sh
@@ -53,11 +54,19 @@ run(){ # <log> <fixture>: the server and a client; the client's PID in CLIENT
 run a place.lua
 wait_for_log "$t/a.log" "checkpoint_check: placed at" 60 || fail "nothing placed ($t/a.log)"
 pos=$(grep -a "checkpoint_check: placed at" "$t/a.log" | sed 's/.*placed at //')
-sleep 7 # what is checked: a kill this long after the change keeps it
+# What is checked: a kill after the next checkpoint keeps the change. The
+# checkpoint is every 5.3 s of the server's game time, which a slow
+# machine stretches past a wall clock's 7 s ([CHECK_TIMING_LIMITS]): its
+# line waited for (30 s a hang's net), the kill at once after it
+s=$SECONDS
+until awk '/checkpoint_check: placed at/ { p = 1 } p && /checkpoint: / { f = 1 }
+		END { exit !f }' "$t/a.log"; do
+	[ $((SECONDS - s)) -lt 30 ] || fail "no checkpoint logged after the place in 30 s ($t/a.log)"
+	sleep 0.2
+done
 kill -0 "$CLIENT" 2>/dev/null || fail "the client left before the kill ($t/a_client.log)"
 kill -9 "$SERVER_PID"; kill "$CLIENT"; wait "$SERVER_PID" "$CLIENT" 2>/dev/null
-grep -aq "checkpoint: " "$t/a.log" || fail "no checkpoint logged ($t/a.log)"
-echo "ok: placed at $pos, killed 7 s later with the player on"
+echo "ok: placed at $pos, killed $((SECONDS - s)) s later, after a checkpoint, with the player on"
 
 cat > "$t/u/shared/look.lua" <<L
 core.register_on_joinplayer(function(player)
