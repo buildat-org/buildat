@@ -26,10 +26,19 @@
 --     and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
 --     edit rights
---   - "Play": a test, the runtime from the authored row; "Stop test" (the
---     Edit button, F6) puts it back and returns to edit mode
+--   - ([KIT] stage 4c) the builders with the tools on, each in a colour:
+--     another's selection outlined in theirs with their name over it,
+--     their cursor a cross; game-wide entities (on the app root) listed to
+--     select; "Save as start" and an instance's "Restart this" while the
+--     server is Running
+-- Kit's top bar, for a builder: the tools ("Edit", "Play mode" while they
+-- are on; F6) and the server's state ("Play" while Stopped, "Stop" while
+-- Running). kit.editor{bar = false} leaves it out for an app's own menu:
+-- kit.can_edit(), kit.editing(), kit.running() (and kit.by(), who), and
+-- kit.set_tools(on), kit.toggle_tools(), kit.play(), kit.stop(),
+-- kit.save_as_start() do what the bar does; kit.on_change(fn) calls fn()
+-- as any of the states changes.
 -- kit.selected(): the id last selected, kept after edit mode.
--- kit.editing(): whether edit mode is on.
 -- simplified: a nudge by keys and no drag, the windows rebuilt whole on
 -- each state; a drag and a gizmo per handle are the upgrades
 local magic = require("buildat/extension/urho3d")
@@ -38,8 +47,10 @@ local network = require("buildat/extension/network")
 local log = buildat.Logger("kit")
 
 local M = {}
-local E = {editing = false, playing = false, state = nil, sel = nil, link = nil,
-	cursor = nil, pending = {}, status = "", windows = {}}
+local E = {editing = false, running = false, by = "", can_edit = false,
+	state = nil, sel = nil, link = nil, cursor = nil, pending = {}, status = "",
+	windows = {}, builders = {}, seen = {}, labels = {}, label_text = {},
+	listeners = {}}
 local O = nil -- the app's options
 
 local WARN = magic.Color(1.0, 0.55, 0.45)
@@ -56,10 +67,58 @@ function M.editing()
 	return E.editing
 end
 
+-- Whether this player has edit rights, and the server's state
+function M.can_edit()
+	return E.can_edit
+end
+
+function M.running()
+	return E.running
+end
+
+function M.by()
+	return E.by
+end
+
+function M.on_change(fn)
+	E.listeners[#E.listeners + 1] = fn
+end
+
+local function changed()
+	for _, fn in ipairs(E.listeners) do
+		fn()
+	end
+end
+
 local function send(t)
 	local text = network.write_json(t)
 	log:info("kit editor: sent " .. tostring(text))
 	buildat.send_packet("kit:edit", text)
+end
+
+function M.set_tools(on)
+	send({op = "mode", on = on == true})
+end
+
+function M.toggle_tools()
+	M.set_tools(not E.editing)
+end
+
+function M.play()
+	send({op = "play"})
+end
+
+function M.stop()
+	send({op = "stop"})
+end
+
+function M.save_as_start()
+	send({op = "save_start"})
+end
+
+-- What this builder has selected and their cursor, for the others
+local function focus()
+	send({op = "focus", sel = E.sel or 0, cursor = E.cursor})
 end
 
 local function entities()
@@ -102,15 +161,16 @@ end
 
 -- ---- The windows
 
-local function window(halign, x)
+local function window(halign, x, bottom)
 	local w = magic.ui.root:CreateChild("Window")
 	if not magic.ui.root.defaultStyle then
 		magic.ui.root.defaultStyle = STYLE
 	end
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_VERTICAL, 4, magic.IntRect(6, 6, 6, 6))
-	w:SetAlignment(halign, magic.VA_TOP)
-	w:SetPosition(x, 40)
+	-- bottom: over an app's own lines at the bottom (Workbench's help)
+	w:SetAlignment(halign, bottom and magic.VA_BOTTOM or magic.VA_TOP)
+	w:SetPosition(x, bottom and -50 or 40)
 	w.opacity = 0.92
 	E.windows[#E.windows + 1] = w
 	return w
@@ -193,7 +253,7 @@ local function field(name, d, values)
 	return f
 end
 
-local rebuild
+local rebuild, people
 
 local function inspector(w, e)
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
@@ -204,6 +264,11 @@ local function inspector(w, e)
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
+		if E.running then
+			button(w, "Restart this", function()
+				send({op = "restart", id = e.id, comp = ci - 1})
+			end)
+		end
 		local names, decl = {}, t.params or {}
 		for k in pairs(decl) do
 			names[#names + 1] = k
@@ -291,6 +356,7 @@ rebuild = function()
 	end
 	E.windows = {}
 	if not E.editing then
+		people()
 		return
 	end
 	local w = window(magic.HA_LEFT, 10)
@@ -319,22 +385,8 @@ rebuild = function()
 		send({op = "undo"})
 	end)
 	label(r, "(" .. tostring(E.state.undo or 0) .. ")")
-	button(r, "Play", function()
-		send({op = "play"})
-	end)
-	if E.state.testing then
-		text(w, "A test of " .. tostring(E.state.testing) ..
-				"'s runs: edits wait", WARN)
-	end
-	-- The admin's: who here may edit
-	for _, p in ipairs(E.state.admin and E.state.people or {}) do
-		local pr = row(w)
-		label(pr, p.name .. (p.admin and ": admin" or ""), 100)
-		if not p.admin then
-			button(pr, p.builder and "Builder: yes" or "Builder: no", function()
-				send({op = "builder", name = p.name, on = not p.builder})
-			end)
-		end
+	if E.running then
+		button(r, "Save as start", M.save_as_start)
 	end
 	if E.link then
 		button(w, "Cancel link", function()
@@ -346,9 +398,54 @@ rebuild = function()
 	if E.status ~= "" then
 		text(w, E.status, WARN)
 	end
+	people()
 	local e = E.sel and find(E.sel)
 	if e then
 		inspector(window(magic.HA_RIGHT, -10), e)
+	end
+end
+
+-- Below, out of the view's way: the server's state, game-wide entities,
+-- who edits and who may. Rebuilt alone as the builders move (the
+-- inspector being typed in is left as it is)
+people = function()
+	if E.people then
+		E.people:Remove()
+		E.people = nil
+	end
+	if not E.editing then
+		return
+	end
+	local b = window(magic.HA_LEFT, 10, true)
+	table.remove(E.windows)
+	E.people = b
+	text(b, E.running and "Running: edits change the start and the round" or
+			"Stopped: edits change the start", DIM)
+	-- Game-wide entities (on the app root, no position), to select
+	for _, e in ipairs(entities()) do
+		if not e.pos and e.kind ~= "scene" then
+			local gr = row(b)
+			label(gr, "Game-wide: " .. e.id .. " " .. tostring(e.name))
+			button(gr, e.id == E.sel and "Selected" or "Select", function()
+				M.select(e.id)
+			end)
+		end
+	end
+	-- The builders with the tools on, each in their colour
+	for _, bd in ipairs(E.builders) do
+		text(b, "Builder: " .. tostring(bd.name) .. (bd.you and " (you)" or
+				"") .. ((tonumber(bd.sel) or 0) > 0 and ", on " .. bd.sel or ""),
+				color(bd.color, DIM))
+	end
+	-- The admin's: who here may edit
+	for _, p in ipairs(E.state.admin and E.state.people or {}) do
+		local pr = row(b)
+		label(pr, p.name .. (p.admin and ": admin" or ""), 100)
+		if not p.admin then
+			button(pr, p.builder and "Builder: yes" or "Builder: no", function()
+				send({op = "builder", name = p.name, on = not p.builder})
+			end)
+		end
 	end
 end
 
@@ -365,7 +462,7 @@ local function over_windows(x, y)
 			return true
 		end
 	end
-	return false
+	return E.people ~= nil and inside(E.people, x, y)
 end
 
 local function select(id)
@@ -373,8 +470,10 @@ local function select(id)
 	local e = id and find(id)
 	log:info("kit editor: selected " .. tostring(id) .. " (" ..
 			tostring(e and e.name) .. ")")
+	focus()
 	rebuild()
 end
+M.select = select
 
 -- The camera's ray through a point of the screen (fractions): its origin
 -- and direction, {x, y, z} each
@@ -479,6 +578,7 @@ local function click_view(mx, my)
 	elseif g then
 		E.cursor = g
 		log:info("kit editor: cursor at " .. table.concat(g, ","))
+		focus()
 	end
 end
 
@@ -576,6 +676,58 @@ local function key_down(key, ctrl)
 	end
 end
 
+-- The other builders' names over what they have selected
+local function label_of(name, col)
+	local l = E.labels[name]
+	if not l then
+		l = O.scene:CreateChild("kit_builder_label")
+		local t = l:CreateComponent("Text3D")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 14)
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		t.faceCameraMode = magic.FC_ROTATE_XYZ
+		t.fixedScreenSize = true
+		t.textEffect = magic.TE_STROKE
+		t.effectColor = magic.Color(0, 0, 0, 0.8)
+		E.labels[name] = l
+	end
+	if E.label_text[name] ~= name then
+		local t = l:GetComponent("Text3D")
+		t:SetColor(col)
+		t.text = name
+		E.label_text[name] = name
+	end
+	return l
+end
+
+local function draw_builders(dbg)
+	local shown = {}
+	for _, b in ipairs(E.editing and E.builders or {}) do
+		if not b.you then
+			local c = color(b.color, magic.Color(1, 1, 1))
+			local e = (tonumber(b.sel) or 0) > 0 and find(b.sel)
+			if e and e.pos then
+				local x, y, z = e.pos[1], e.pos[2], e.pos[3]
+				dbg:AddBoundingBox(magic.BoundingBox(
+						magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
+						magic.Vector3(x + 0.5, y + 0.5, z + 0.5)), c, false)
+				local l = label_of(tostring(b.name), c)
+				l.position = magic.Vector3(x, y + 0.9, z)
+				shown[tostring(b.name)] = true
+			end
+			if type(b.cursor) == "table" then
+				dbg:AddCross(magic.Vector3(b.cursor[1], b.cursor[2] - 0.5,
+						b.cursor[3]), 0.8, c, false)
+			end
+		end
+	end
+	for name, l in pairs(E.labels) do
+		if not shown[name] and E.label_text[name] ~= "" then
+			l:GetComponent("Text3D").text = ""
+			E.label_text[name] = ""
+		end
+	end
+end
+
 function M.editor(options)
 	O = options
 	O.ground_y = O.ground_y or 0
@@ -583,24 +735,37 @@ function M.editor(options)
 	-- view draws the first
 	O.debug = O.scene:GetComponent("DebugRenderer") or
 			O.scene:CreateComponent("DebugRenderer")
-	local toggle = function()
-		if E.playing then
-			send({op = "stop"})
-		else
-			send({op = "mode", on = not E.editing})
+	-- Kit's top bar: the tools and the server's state, a builder's; an
+	-- app with a menu of its own leaves it out (bar = false)
+	local w, tools_button, server_button
+	local function bar()
+		if not w then
+			return
 		end
+		w.visible = E.can_edit
+		local function set(b, s)
+			b:GetChild(0):SetText(s)
+			b.minWidth = b:GetChild(0).width + 16
+		end
+		set(tools_button, E.editing and "Play mode" or "Edit")
+		set(server_button, E.running and "Stop" or "Play")
 	end
-	local w = magic.ui.root:CreateChild("Window")
-	if not magic.ui.root.defaultStyle then
-		magic.ui.root.defaultStyle = STYLE
+	if O.bar ~= false then
+		w = magic.ui.root:CreateChild("Window")
+		if not magic.ui.root.defaultStyle then
+			magic.ui.root.defaultStyle = STYLE
+		end
+		w:SetStyleAuto()
+		w:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(4, 4, 4, 4))
+		-- The middle: an app's corners have its own (accounts' Server button)
+		w:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+		w:SetPosition(0, 4)
+		tools_button = button(w, "Edit", M.toggle_tools)
+		server_button = button(w, "Play", function()
+			if E.running then M.stop() else M.play() end
+		end)
+		bar()
 	end
-	w:SetStyleAuto()
-	w:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(4, 4, 4, 4))
-	-- The middle: an app's corners have its own (accounts' Server button)
-	w:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
-	w:SetPosition(0, 4)
-	local edit_button = button(w, "Edit", toggle)
-	local edit_text = edit_button:GetChild(0)
 
 	buildat.sub_packet("kit:edit_state", function(data)
 		local s = network.parse_json(data)
@@ -624,18 +789,16 @@ function M.editor(options)
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""
+			if not E.editing then
+				E.builders = {}
+			end
 		end
-		if s.testing and not s.playing then
-			log:info("kit editor: a test of " .. tostring(s.testing) .. "'s runs")
+		if E.running ~= (s.running == true) or E.by ~= tostring(s.by or "") then
+			E.running, E.by = s.running == true, tostring(s.by or "")
+			log:info("kit editor: the server is " .. (E.running and "Running" or
+					"Stopped") .. " (by " .. E.by .. ")")
 		end
-		if E.playing ~= (s.playing == true) then
-			E.playing = s.playing == true
-			log:info("kit editor: " .. (E.playing and "playing a test" or
-					"the test is over"))
-		end
-		edit_text:SetText(E.playing and "Stop test" or
-				E.editing and "Leave edit mode" or "Edit")
-		edit_button.minWidth = edit_text.width + 16
+		bar()
 		if E.editing then
 			local n = #entities()
 			log:info("kit editor: state: " .. n .. " entities, " ..
@@ -658,6 +821,23 @@ function M.editor(options)
 			E.sel = nil
 		end
 		rebuild()
+		changed()
+	end)
+	buildat.sub_packet("kit:builders", function(data)
+		local a = network.parse_json(data)
+		E.builders = type(a) == "table" and a or {}
+		for _, b in ipairs(E.builders) do
+			local name = tostring(b.name)
+			local was = E.seen[name] or {}
+			local cur = type(b.cursor) == "table" and table.concat(b.cursor, ",") or
+					"none"
+			if not b.you and (was.sel ~= b.sel or was.cursor ~= cur) then
+				log:info("kit editor: builder " .. name .. " (" .. tostring(b.color) ..
+						") selects " .. tostring(b.sel) .. ", cursor " .. cur)
+			end
+			E.seen[name] = {sel = b.sel, cursor = cur}
+		end
+		people()
 	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)
@@ -675,7 +855,7 @@ function M.editor(options)
 			return
 		end
 		if key == magic.KEY_F6 then
-			return toggle()
+			return M.toggle_tools()
 		end
 		if E.editing then
 			local q = data:GetInt("Qualifiers")
@@ -688,13 +868,16 @@ function M.editor(options)
 		end
 		local m = magic.input:GetMousePosition()
 		local sc = magic.ui.scale
-		if over_windows(m.x / sc, m.y / sc) or inside(w, m.x / sc, m.y / sc) or
-				ui_utils.dropdown_open() then
+		if over_windows(m.x / sc, m.y / sc) or (w and inside(w, m.x / sc,
+				m.y / sc)) or ui_utils.dropdown_open() then
 			return
 		end
 		click_view(m.x, m.y)
 	end)
-	magic.SubscribeToEvent("Update", draw)
+	magic.SubscribeToEvent("Update", function()
+		draw()
+		draw_builders(O.debug)
+	end)
 end
 
 -- ---- Play: what every client sees of Kit, edit rights or not

@@ -104,6 +104,10 @@ struct Type
 	bool usable = false, owns_voxel = false;
 	// It provides the players' inventory (inventory = true)
 	bool inventory = false;
+	// [KIT] stage 4c: it places players at the round's start (spawn), it
+	// says what players keep between plays (between_plays), it goes on the
+	// app root (root)
+	bool spawn = false, between_plays = false, root = false;
 	int64_t version = 1;
 	// The position parameters that are its zone's, its owned volume's and
 	// its grants' extent ("" for none)
@@ -132,7 +136,19 @@ struct Peer
 	ss_ name, scene;
 	double pos[3] = {0, 0, 0};
 	bool editing = false;
+	// The tools' colour (an index of COLORS, -1 while they are off), the
+	// selected entity (0: none) and the cursor (null: none), which the
+	// other builders see
+	int color = -1;
+	uint64_t sel = 0;
+	json::Value cursor = json::null();
 };
+
+// A builder's colour while their tools are on: the first one no other
+// builder has
+static const char *COLORS[] = {"#ff5a4a", "#4aa0ff", "#50d050", "#ffb030",
+	"#c060ff", "#30d0d0", "#ff70c0", "#c0c040"};
+static const int NUM_COLORS = sizeof COLORS / sizeof COLORS[0];
 
 // One edit: the entities it changed as they were before (null: not there),
 // in the order an undo puts them back
@@ -165,6 +181,25 @@ struct Owner: public voxelworld::OwnerHandler
 		std::lock_guard<std::mutex> lock(*mutex);
 		if(queue->size() < MAX_QUEUE)
 			queue->push_back(w);
+	}
+};
+
+// [KIT] stage 4c: voxelworld's side of the copy-on-write start. A section's
+// voxels before the round first writes to it, queued for Kit's thread (it
+// comes on voxelworld's, under its lock) as the store's key and the copy
+struct Watch: public voxelworld::SectionWatch
+{
+	ss_ scene;
+	std::mutex *mutex;
+	std::deque<std::pair<ss_, ss_>> *queue;
+	void before_write(voxelworld::Instance *world,
+			const pv::Vector3DInt16 &sp, const interface::VoxelVolume &before)
+	{
+		const ss_ key = "start:"+scene+":"+itos(sp.getX())+","+
+				itos(sp.getY())+","+itos(sp.getZ());
+		ss_ copy = interface::serialize_volume_compressed(before);
+		std::lock_guard<std::mutex> lock(*mutex);
+		queue->push_back(std::make_pair(key, std::move(copy)));
 	}
 };
 
@@ -296,19 +331,26 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
 			std::set<std::tuple<int, int, int>>> m_owned_sections;
-	// Play from edit mode: a test's throwaway runtime, and what it put
-	// aside to bring back at its end (the runtime row as it was, the runs
-	// and voxel writes waiting, the owned voxels)
-	struct Test
+	// [KIT] stage 4c: the server Stopped or Running, one session (stage 7
+	// adds more). The save's row "session" is it, "start" each instance's
+	// state at the start ({"<id>": [{type, state, timer, timer_by}]}; none:
+	// its type's defaults), and "start:<scene>:x,y,z" the voxel copies
+	struct Session
 	{
-		bool on = false;
-		size_t peer = 0;
-		ss_ name;
-		json::Value runtime;
-		std::deque<Run> queue;
-		std::deque<Write> pending;
-		sv_<Write> voxels;
-	} m_test;
+		bool running = false;
+		ss_ by; // who started the round
+		// The players who went through this round's start
+		std::set<ss_> round;
+		// Inventories put aside while Stopped ("keep inventory")
+		json::Value aside = json::object();
+		// The sections copied out this round, and copies that wait for
+		// their section to load to be put back (a Stop's), as store keys
+		std::set<ss_> copied, restore;
+	} m_session;
+	json::Value m_start = json::object();
+	// Copies from voxelworld's thread (Watch)
+	std::mutex m_copies_mutex;
+	std::deque<std::pair<ss_, ss_>> m_copies;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -324,8 +366,10 @@ struct Module: public interface::Module, public Interface
 			voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 				for(auto &s : m_host.scenes){
 					voxelworld::Instance *w = ivw->get_instance(s.second);
-					if(w)
+					if(w){
 						w->set_owner_handler("kit", nullptr);
+						w->set_section_watch(nullptr);
+					}
 				}
 			});
 		} catch(std::exception &e){
@@ -341,6 +385,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:edit", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:privs", &Module::on_privs);
+		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
 	}
 
 	void* get_interface()
@@ -537,6 +582,9 @@ struct Module: public interface::Module, public Interface
 		}
 		t.version = ver.is_number() ? (int64_t)ver.as_number() : 1;
 		t.inventory = t.decl.get("inventory").is_true();
+		t.spawn = t.decl.get("spawn").is_true();
+		t.between_plays = t.decl.get("between_plays").is_true();
+		t.root = t.decl.get("root").is_true();
 		for(const char *h : {"inventory_count", "inventory_add",
 				"inventory_take", "inventory_list"})
 			if(t.inventory && !t.handlers.count(h)){
@@ -937,8 +985,7 @@ struct Module: public interface::Module, public Interface
 
 	void save_runtime()
 	{
-		// A test's runtime is never saved: the row keeps the one before it
-		if(!m_store || !m_runtime_dirty || m_test.on)
+		if(!m_store || !m_runtime_dirty)
 			return;
 		m_store->set("runtime", runtime_json().stringify());
 		m_runtime_dirty = false;
@@ -1043,17 +1090,54 @@ struct Module: public interface::Module, public Interface
 			names += (names.empty() ? "" : " ")+t;
 		log_i(MODULE, "The palette: %s", cs(names));
 
-		// Runtime: the save's, over each type's defaults
-		ss_ runtime;
-		const json::Value rt = m_store->get("runtime", runtime) ?
+		// The session ([KIT] stage 4c): Stopped or Running. A save from
+		// before has no row; it ran its components, so it is Running, its
+		// start its types' defaults. A fresh save is Stopped
+		ss_ runtime, session, start;
+		const bool had_runtime = m_store->get("runtime", runtime);
+		if(m_store->get("session", session)){
+			const json::Value sj = json::load_string(session.c_str());
+			m_session.running = sj.get("running").is_true();
+			m_session.by = jstr(sj, "by");
+			for(const char *k : {"round", "restore"}){
+				const json::Value &a = sj.get(k);
+				for(unsigned i = 0; i < a.size(); i++)
+					if(a.at(i).is_string())
+						(ss_(k) == "round" ? m_session.round :
+								m_session.restore).insert(a.at(i).as_string());
+			}
+			if(sj.get("aside").is_object())
+				m_session.aside = sj.get("aside").deepcopy();
+		} else {
+			m_session.running = had_runtime;
+			log_i(MODULE, "%s", had_runtime ? "A save from before Play and "
+					"Stop: Running, its start its types' defaults" :
+					"A fresh save: Stopped");
+			save_session();
+		}
+		if(m_store->get("start", start)){
+			m_start = json::load_string(start.c_str());
+			if(!m_start.is_object())
+				m_start = json::object();
+		}
+		for(const ss_ &k : m_store->list("start:"))
+			if(!m_session.restore.count(k))
+				m_session.copied.insert(k);
+		// Runtime: Running, the save's over each type's defaults; Stopped,
+		// the start
+		const json::Value rt = had_runtime ?
 				json::load_string(runtime.c_str()) : json::object();
-		if(rt.get("items").is_object())
+		if(m_session.running && rt.get("items").is_object())
 			m_items = rt.get("items");
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			const json::Value &saved = rt.get(itos(e.id));
 			for(size_t i = 0; i < e.comps.size(); i++){
 				Instance &in = e.comps[i];
+				if(!m_session.running){
+					to_start(e, i);
+					continue;
+				}
 				const json::Value &sd = m_types[in.type].decl.get("state");
 				if(sd.is_object())
 					for(json::Iterator it(sd); it; ++it)
@@ -1085,6 +1169,12 @@ struct Module: public interface::Module, public Interface
 		pick_provider();
 		if(m_migrated)
 			m_runtime_dirty = true;
+		if(m_session.running)
+			watch(true);
+		log_i(MODULE, "The server is %s (by %s): %zu sections copied out, %zu "
+				"to put back", m_session.running ? "Running" : "Stopped",
+				m_session.by.empty() ? "no one" : cs(m_session.by),
+				m_session.copied.size(), m_session.restore.size());
 		m_hosted = true;
 		size_t n = 0;
 		for(auto &p : m_entities)
@@ -1506,7 +1596,8 @@ struct Module: public interface::Module, public Interface
 	bool granted(size_t peer, const char *key, int x, int y, int z)
 	{
 		auto pi = m_peers.find(peer);
-		if(!m_hosted || pi == m_peers.end())
+		// Stopped, the world is the start: only a builder changes it
+		if(!m_hosted || pi == m_peers.end() || !m_session.running)
 			return false;
 		for(auto &p : m_entities){
 			const Entity &e = p.second;
@@ -1656,28 +1747,17 @@ struct Module: public interface::Module, public Interface
 		}
 	}
 
-	// A player placed for the first time (or as another name): on_join(c,
-	// by) of each instance in their scene that has it, and their items
-	void joined(const ss_ &name, const ss_ &scene)
+	// A player placed for the first time (or as another name): Running,
+	// through the round's start (round_join); and their items
+	void joined(size_t peer)
 	{
-		log_i(MODULE, "%s joined %s", cs(name), cs(scene));
-		for(auto &p : m_entities){
-			ss_ es;
-			if(!scene_of(p.second, &es) || es != scene)
-				continue;
-			for(size_t i = 0; i < p.second.comps.size(); i++){
-				if(!m_types[p.second.comps[i].type].handlers.count("on_join"))
-					continue;
-				Run r;
-				r.entity = p.first;
-				r.comp = i;
-				r.handler = "on_join";
-				r.by = "player:"+name;
-				r.args.append(r.by);
-				queue_run(r);
-			}
-		}
-		send_items(name);
+		const Peer &p = m_peers[peer];
+		log_i(MODULE, "%s joined %s", cs(p.name), cs(p.scene));
+		if(m_session.running)
+			round_join(peer, false);
+		else
+			send_items(p.name);
+		send_state(peer);
 	}
 
 	void on_tick(const interface::TickEvent &event)
@@ -1685,6 +1765,22 @@ struct Module: public interface::Module, public Interface
 		if(!m_hosted || !m_box)
 			return;
 		m_box->poll();
+		flush_copies();
+		if(!m_session.running){
+			// Stopped: components do not run. A write routed to one is
+			// made by no one
+			std::deque<Write> writes;
+			{
+				std::lock_guard<std::mutex> lock(m_writes_mutex);
+				writes.swap(m_writes);
+			}
+			for(const Write &w : writes)
+				log_i(MODULE, "A write routed to (%i,%i,%i) by %s: the server "
+						"is Stopped, its component does not run", w.p.getX(),
+						w.p.getY(), w.p.getZ(), cs(w.by));
+			save_runtime();
+			return;
+		}
 		for(size_t n = m_pending_voxels.size(); n > 0; n--){
 			Write w = m_pending_voxels.front();
 			m_pending_voxels.pop_front();
@@ -1757,6 +1853,8 @@ struct Module: public interface::Module, public Interface
 		};
 		if(!m_hosted)
 			return refuse("Kit is not hosted");
+		if(!m_session.running)
+			return refuse("the server is Stopped");
 		if(data.empty() || !end || *end)
 			return refuse("not an entity's id");
 		auto pi = m_peers.find(peer);
@@ -1797,12 +1895,14 @@ struct Module: public interface::Module, public Interface
 
 	void on_left(const network::OldClient &old)
 	{
-		if(m_test.on && m_test.peer == old.info.id)
-			stop_test("its tester left");
+		const bool was_editing = m_peers.count(old.info.id) &&
+				m_peers[old.info.id].editing;
 		m_peers.erase(old.info.id);
 		for(auto &p : m_peers)
 			if(p.second.editing)
 				send_state(p.first);
+		if(was_editing)
+			send_builders();
 	}
 
 	void set_peer(size_t peer, const ss_ &name, const ss_ &scene,
@@ -1811,7 +1911,10 @@ struct Module: public interface::Module, public Interface
 		Peer &p = m_peers[peer];
 		const bool join = p.name != name || p.scene != scene;
 		if(p.name != name){
-			p.editing = false;
+			const bool was = p.editing;
+			tools(p, peer, false);
+			if(was)
+				send_builders();
 			// The admins' list of who is here
 			for(auto &o : m_peers)
 				if(o.second.editing && o.first != peer)
@@ -1823,7 +1926,7 @@ struct Module: public interface::Module, public Interface
 		p.pos[1] = y;
 		p.pos[2] = z;
 		if(join && m_hosted)
-			joined(name, scene);
+			joined(peer);
 	}
 
 	void input(uint64_t entity, const ss_ &input, const ss_ &value)
@@ -1898,18 +2001,20 @@ struct Module: public interface::Module, public Interface
 	// of who is a builder are sent again
 	void recheck_rights()
 	{
-		if(m_test.on && !can_edit(m_test.peer))
-			stop_test("its tester has no edit rights now");
+		bool left = false;
 		for(auto &p : m_peers){
 			if(!p.second.editing)
 				continue;
 			if(!can_edit(p.first)){
-				p.second.editing = false;
+				tools(p.second, p.first, false);
+				left = true;
 				log_i(MODULE, "%s left edit mode: no edit rights now",
 						cs(p.second.name));
 			}
 			send_state(p.first);
 		}
+		if(left)
+			send_builders();
 	}
 
 	// The player is told, so a new builder's client says it may edit now
@@ -1921,7 +2026,7 @@ struct Module: public interface::Module, public Interface
 			send_state(login.peer);
 	}
 
-	// ---- Play from edit mode: a test
+	// ---- Edit and play ([KIT] stage 4c): the server Stopped or Running
 
 	static ss_ digest(const json::Value &v)
 	{
@@ -1929,132 +2034,460 @@ struct Module: public interface::Module, public Interface
 				v.stringify())).substr(0, 16);
 	}
 
-	// The voxels the entities own, as the world has them now
-	// simplified: those in loaded sections; one not loaded at a test's
-	// start is not put back at its end
-	sv_<Write> owned_voxels()
+	void save_session()
 	{
-		sv_<Write> out;
+		json::Value j = json::object();
+		j.set("running", m_session.running);
+		j.set("by", m_session.by);
+		json::Value round = json::array(), restore = json::array();
+		for(const ss_ &n : m_session.round)
+			round.append(n);
+		for(const ss_ &k : m_session.restore)
+			restore.append(k);
+		j.set("round", round);
+		j.set("restore", restore);
+		j.set("aside", m_session.aside);
+		m_store->set("session", j.stringify());
+	}
+
+	// voxelworld's section watch on, each scene's (a new round of copies:
+	// every section copied again at its next write), or off
+	void watch(bool on)
+	{
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
-			for(auto &pe : m_entities){
-				const Entity &e = pe.second;
-				for(const pv::Vector3DInt32 &p : owned_cells(e)){
-					Write w;
-					w.scene = scene_of(e);
-					voxelworld::Instance *world = w.scene ?
-							ivw->get_instance(w.scene) : nullptr;
-					w.p = p;
-					if(!world || !loaded(world, w.p))
-						continue;
-					interface::VoxelRegistry *reg = world->get_voxel_reg();
-					const interface::VoxelDefinition *def = reg->get(
-							reg->get_format().id.get(world->get_voxel(w.p).data));
-					if(!def)
-						continue;
-					w.voxel = def->name.block_name;
-					w.by = "app";
-					out.push_back(w);
+			for(auto &s : m_host.scenes){
+				voxelworld::Instance *w = ivw->get_instance(s.second);
+				if(!w)
+					continue;
+				sp_<Watch> wt;
+				if(on){
+					wt = std::make_shared<Watch>();
+					wt->scene = s.first;
+					wt->mutex = &m_copies_mutex;
+					wt->queue = &m_copies;
 				}
+				w->set_section_watch(wt);
 			}
 		});
-		return out;
 	}
 
-	void send_editors(size_t also)
+	// The copies voxelworld made, kept in the store: a section's first
+	// this round (one copied before a restart is not copied again)
+	// simplified: a copy waits for Kit's next tick to reach the store, and
+	// voxelworld's checkpoint could write the changed section first; a
+	// crash between them loses that section's start
+	void flush_copies()
+	{
+		std::deque<std::pair<ss_, ss_>> copies;
+		{
+			std::lock_guard<std::mutex> lock(m_copies_mutex);
+			copies.swap(m_copies);
+		}
+		if(copies.empty() || !m_session.running)
+			return;
+		size_t n = 0;
+		m_store->batch([&](){
+			for(auto &c : copies)
+				if(m_session.copied.insert(c.first).second){
+					m_store->set(c.first, c.second);
+					n++;
+				}
+		});
+		if(n)
+			log_i(MODULE, "%zu sections copied out (%zu this round)", n,
+					m_session.copied.size());
+	}
+
+	// A copy's key, "start:<scene>:x,y,z", as its scene and section
+	bool parse_copy(const ss_ &key, main_context::SceneReference &scene,
+			pv::Vector3DInt16 &sp)
+	{
+		const size_t c = key.rfind(':');
+		if(key.compare(0, 6, "start:") != 0 || c == ss_::npos || c < 6)
+			return false;
+		auto it = m_host.scenes.find(key.substr(6, c - 6));
+		int x = 0, y = 0, z = 0;
+		if(it == m_host.scenes.end() ||
+				sscanf(key.c_str() + c + 1, "%d,%d,%d", &x, &y, &z) != 3)
+			return false;
+		scene = it->second;
+		sp = pv::Vector3DInt16(x, y, z);
+		return true;
+	}
+
+	// A copy put back into its section, loaded for it if it is not: false
+	// when it cannot be (outside a streaming world's range; it waits for
+	// its load). One that does not read is dropped
+	// simplified: the copy holds this run's voxel ids; an app that
+	// registers its voxels in another order after a restart mid-round
+	// gets other voxels back. The names' table with the copy is the upgrade
+	bool put_back(const ss_ &key)
+	{
+		main_context::SceneReference scene = nullptr;
+		pv::Vector3DInt16 sp;
+		ss_ data;
+		if(!parse_copy(key, scene, sp) || !m_store->get(key, data)){
+			log_w(MODULE, "The voxel copy %s is none of this app's: dropped",
+					cs(key));
+			return true;
+		}
+		up_<interface::VoxelVolume> v = interface::deserialize_volume(data);
+		if(!v){
+			log_w(MODULE, "The voxel copy %s does not read: dropped", cs(key));
+			return true;
+		}
+		bool done = false;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			voxelworld::Instance *w = ivw->get_instance(scene);
+			if(!w){
+				done = true;
+				return;
+			}
+			if(!w->is_section_loaded(sp))
+				w->load_section_no_generate(sp);
+			done = w->put_section(sp, *v);
+		});
+		return done;
+	}
+
+	// A section that a Stop's copy waits for has loaded
+	void on_section_loaded(const voxelworld::SectionLoaded &ev)
+	{
+		if(!m_hosted || m_session.restore.empty())
+			return;
+		for(auto &s : m_host.scenes){
+			if(s.second != ev.scene)
+				continue;
+			const ss_ key = "start:"+s.first+":"+itos(ev.section_p.getX())+
+					","+itos(ev.section_p.getY())+","+
+					itos(ev.section_p.getZ());
+			if(!m_session.restore.count(key) || !put_back(key))
+				return;
+			m_session.restore.erase(key);
+			// Running, it is this round's copy of the start
+			if(m_session.running)
+				m_session.copied.insert(key);
+			else
+				m_store->remove(key);
+			save_session();
+			log_i(MODULE, "The voxel copy %s put back as its section loaded",
+					cs(key));
+		}
+	}
+
+	// An instance's state at the start: the row "start"'s, over its
+	// type's defaults; nothing disabled
+	void to_start(Entity &e, size_t i)
+	{
+		Instance &in = e.comps[i];
+		in.state = json::object();
+		const json::Value &sd = m_types[in.type].decl.get("state");
+		if(sd.is_object())
+			for(json::Iterator it(sd); it; ++it)
+				in.state.set(it.key(), (*it).get("default"));
+		in.due_us = -1;
+		in.due_by.clear();
+		in.inside.clear();
+		const json::Value &s = m_start.get(itos(e.id)).at((unsigned)i);
+		if(full_type(jstr(s, "type")) == in.type)
+			runtime_from(in, s);
+		in.disabled.clear();
+		for(const ss_ &k : m_types[in.type].shared)
+			replicate_state(e, i, k);
+	}
+
+	// What players keep between plays: the first instance (by entity id)
+	// of a between_plays type, its keep_inventory and keep_position
+	void between_plays(bool &keep_inventory, bool &keep_position)
+	{
+		keep_inventory = keep_position = false;
+		for(auto &p : m_entities)
+			for(const Instance &in : p.second.comps)
+				if(m_types[in.type].between_plays){
+					keep_inventory = in.params.get("keep_inventory").is_true();
+					keep_position = in.params.get("keep_position").is_true();
+					return;
+				}
+	}
+
+	// A player through the round's start, once a round: their inventory
+	// reset (or what they had, kept); then, as each time the app places
+	// them, on_join in their scene, a spawn type's placing them. At Play,
+	// keep_position leaves them where they are, and no spawn type in their
+	// scene is the app's default spawn
+	void round_join(size_t peer, bool at_play)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || pi->second.name.empty())
+			return;
+		const ss_ name = pi->second.name, scene = pi->second.scene;
+		bool keep_inventory = false, keep_position = false;
+		between_plays(keep_inventory, keep_position);
+		if(m_session.round.insert(name).second){
+			const json::Value kept = m_session.aside.get(name);
+			if(keep_inventory && kept.is_object() && kept.size())
+				m_items.set(name, kept);
+			else
+				m_items.del_key(name);
+			m_session.aside.del_key(name);
+			m_runtime_dirty = true;
+			save_session();
+			log_i(MODULE, "%s goes through the round's start: inventory %s",
+					cs(name), keep_inventory ? "kept" : "reset");
+		}
+		bool placed = false;
+		for(auto &p : m_entities){
+			ss_ es;
+			if(!scene_of(p.second, &es) || es != scene)
+				continue;
+			for(size_t i = 0; i < p.second.comps.size(); i++){
+				const Type &t = m_types[p.second.comps[i].type];
+				if(!t.handlers.count("on_join") ||
+						(t.spawn && at_play && keep_position))
+					continue;
+				placed = placed || t.spawn;
+				Run r;
+				r.entity = p.first;
+				r.comp = i;
+				r.handler = "on_join";
+				r.by = "player:"+name;
+				r.args.append(r.by);
+				queue_run(r);
+			}
+		}
+		if(at_play && !keep_position && !placed){
+			log_i(MODULE, "%s to the app's default spawn", cs(name));
+			m_server->emit_event("kit:spawn_player", new SpawnPlayer(peer));
+		}
+		send_items(name);
+	}
+
+	// Each player is told the server's state, and the app
+	void session_changed(bool saved, const ss_ &by)
 	{
 		for(auto &p : m_peers)
-			if(p.second.editing || p.first == also)
-				send_state(p.first);
+			send_state(p.first);
+		m_server->emit_event("kit:session", new SessionChanged(
+				m_session.running, saved, by));
 	}
 
-	// The editor's test: the runtime starts again from the authored row
-	// (each instance's state its type's defaults, on_start run, none
-	// disabled), live for everyone on the server -- the one runtime Kit
-	// has, which the other players see and use too -- and edits wait.
-	// Its end puts back the runtime and the owned voxels as they were.
-	// simplified: only Kit's own runtime and voxels come back; what the
-	// app or a player changed in the world meanwhile stays. A copy of the
-	// world on a server of its own is the upgrade ([KIT] stage 3, later)
-	void start_test(size_t peer)
+	// Play: a round from the start. Each instance's state from the start
+	// and its on_start, voxels copied out as play writes to them, every
+	// player there through the round's start
+	void play(const ss_ &by)
 	{
-		Peer &p = m_peers[peer];
-		save_runtime();
-		m_test = Test();
-		m_test.runtime = runtime_json();
-		m_test.on = true;
-		m_test.peer = peer;
-		m_test.name = p.name;
-		m_test.queue.swap(m_queue);
-		m_test.pending.swap(m_pending_voxels);
-		m_test.voxels = owned_voxels();
-		for(auto &pe : m_entities){
-			Entity &e = pe.second;
-			for(size_t i = 0; i < e.comps.size(); i++){
-				Instance &in = e.comps[i];
-				const Type &t = m_types[in.type];
-				in.state = json::object();
-				const json::Value &sd = t.decl.get("state");
-				if(sd.is_object())
-					for(json::Iterator it(sd); it; ++it)
-						in.state.set(it.key(), (*it).get("default"));
-				in.disabled.clear();
-				in.due_us = -1;
-				in.inside.clear();
-				for(const ss_ &k : t.shared)
-					replicate_state(e, i, k);
+		if(m_session.running)
+			return;
+		m_session.running = true;
+		m_session.by = by;
+		m_session.round.clear();
+		{
+			std::lock_guard<std::mutex> lock(m_copies_mutex);
+			m_copies.clear();
+		}
+		watch(true);
+		m_queue.clear();
+		m_items = json::object();
+		for(auto &pe : m_entities)
+			for(size_t i = 0; i < pe.second.comps.size(); i++){
+				to_start(pe.second, i);
 				Run r;
-				r.entity = e.id;
+				r.entity = pe.first;
 				r.comp = i;
 				r.handler = "on_start";
 				queue_run(r);
 			}
-		}
-		// The players' items are runtime too: none in a test
-		m_items = json::object();
-		for(auto &o : m_peers)
-			send_items(o.second.name);
-		p.editing = false;
-		log_i(MODULE, "A test by %s starts: authored %s, runtime %s",
-				cs(p.name), cs(digest(authored_json())),
-				cs(digest(m_test.runtime)));
-		send_editors(peer);
+		m_runtime_dirty = true;
+		log_i(MODULE, "Play by %s: a round from the start (authored %s, "
+				"start %s)", cs(by), cs(digest(authored_json())),
+				cs(digest(m_start)));
+		// Each player told first, then through the round's start
+		session_changed(false, by);
+		sv_<size_t> peers;
+		for(auto &p : m_peers)
+			peers.push_back(p.first);
+		for(size_t peer : peers)
+			round_join(peer, true);
+		save_session();
+		save_runtime();
 	}
 
-	void stop_test(const ss_ &why)
+	// Stop: play state thrown away. The sections play wrote to put back as
+	// they were at Play, each instance's state its start; the players'
+	// inventories dropped, or put aside to give back at Play
+	void stop(const ss_ &by)
 	{
-		if(!m_test.on)
+		if(!m_session.running)
 			return;
-		Test t;
-		std::swap(t, m_test);
-		m_queue = std::move(t.queue);
-		m_pending_voxels = std::move(t.pending);
-		for(auto &pe : m_entities){
-			Entity &e = pe.second;
-			const json::Value &saved = t.runtime.get(itos(e.id));
-			for(size_t i = 0; i < e.comps.size(); i++){
-				Instance &in = e.comps[i];
-				in.state = json::object();
-				runtime_from(in, saved.at((unsigned)i));
-				for(const ss_ &k : m_types[in.type].shared)
-					replicate_state(e, i, k);
-			}
+		watch(false);
+		flush_copies();
+		m_session.running = false;
+		m_session.by = by;
+		sv_<ss_> done;
+		for(const ss_ &k : m_session.copied){
+			if(put_back(k))
+				done.push_back(k);
+			else
+				m_session.restore.insert(k);
 		}
-		for(const Write &w : t.voxels)
-			if(!set_voxel(w))
-				m_pending_voxels.push_back(w);
-		m_items = t.runtime.get("items").is_object() ?
-				t.runtime.get("items").deepcopy() : json::object();
+		m_store->batch([&](){
+			for(const ss_ &k : done)
+				m_store->remove(k);
+		});
+		m_session.copied.clear();
+		m_queue.clear();
+		m_pending_voxels.clear();
+		{
+			std::lock_guard<std::mutex> lock(m_writes_mutex);
+			m_writes.clear();
+		}
+		for(auto &pe : m_entities)
+			for(size_t i = 0; i < pe.second.comps.size(); i++)
+				to_start(pe.second, i);
+		bool keep_inventory = false, keep_position = false;
+		between_plays(keep_inventory, keep_position);
+		if(keep_inventory){
+			for(json::Iterator it(m_items); it; ++it)
+				m_session.aside.set(it.key(), *it);
+		} else {
+			m_session.aside = json::object();
+		}
+		m_items = json::object();
 		for(auto &p : m_peers)
 			send_items(p.second.name);
+		m_session.round.clear();
 		m_runtime_dirty = true;
 		save_runtime();
-		auto pi = m_peers.find(t.peer);
-		if(pi != m_peers.end() && can_edit(t.peer))
-			pi->second.editing = true;
-		log_i(MODULE, "The test by %s ended (%s): authored %s, runtime %s",
-				cs(t.name), cs(why), cs(digest(authored_json())),
+		save_session();
+		log_i(MODULE, "Stop by %s: %zu sections put back (%zu wait for their "
+				"load), each instance at its start, inventories %s (authored "
+				"%s, start %s, runtime %s)", cs(by), done.size(),
+				m_session.restore.size(), keep_inventory ? "put aside" :
+				"dropped", cs(digest(authored_json())), cs(digest(m_start)),
 				cs(digest(runtime_json())));
-		send_editors(t.peer);
+		session_changed(false, by);
+	}
+
+	// Save as start: the play state is the start from now on. The copies
+	// go (the sections as they stand are the start), each instance's state
+	// now its start; the round goes on
+	void save_as_start(const ss_ &by)
+	{
+		if(!m_session.running)
+			return;
+		flush_copies();
+		const size_t n = m_session.copied.size();
+		m_store->batch([&](){
+			for(const ss_ &k : m_session.copied)
+				m_store->remove(k);
+		});
+		m_session.copied.clear();
+		watch(true);
+		m_start = runtime_json();
+		m_start.del_key("items");
+		m_store->set("start", m_start.stringify());
+		save_session();
+		log_i(MODULE, "Saved as the start by %s: %zu sections' copies dropped, "
+				"the start's state %s", cs(by), n, cs(digest(m_start)));
+		session_changed(true, by);
+	}
+
+	bool running()
+	{
+		return m_session.running;
+	}
+
+	void set_running(bool running, const ss_ &by)
+	{
+		if(!m_hosted)
+			return;
+		if(running)
+			play(by.empty() ? "app" : by);
+		else
+			stop(by.empty() ? "app" : by);
+	}
+
+	// The builders with the tools on: their colours, selections and
+	// cursors, to each of them ("you" the one it is sent to)
+	void send_builders()
+	{
+		network::access(m_server, [&](network::Interface *inetwork){
+			for(auto &to : m_peers){
+				if(!to.second.editing)
+					continue;
+				json::Value a = json::array();
+				for(auto &p : m_peers){
+					if(!p.second.editing)
+						continue;
+					json::Value b = json::object();
+					b.set("name", p.second.name);
+					b.set("color", COLORS[std::max(0, p.second.color) %
+							NUM_COLORS]);
+					b.set("sel", (int64_t)p.second.sel);
+					b.set("cursor", p.second.cursor);
+					b.set("you", p.first == to.first);
+					a.append(b);
+				}
+				inetwork->send(to.first, "kit:builders", a.stringify());
+			}
+		});
+	}
+
+	// A colour no other builder with the tools on has
+	int free_color(size_t peer)
+	{
+		for(int c = 0; c < NUM_COLORS; c++){
+			bool used = false;
+			for(auto &p : m_peers)
+				used = used || (p.first != peer && p.second.editing &&
+						p.second.color == c);
+			if(!used)
+				return c;
+		}
+		return (int)(peer % NUM_COLORS);
+	}
+
+	// A builder's tools on or off: nothing of their play resets
+	void tools(Peer &p, size_t peer, bool on)
+	{
+		p.editing = on;
+		p.color = on ? (p.color >= 0 ? p.color : free_color(peer)) : -1;
+		if(!on){
+			p.sel = 0;
+			p.cursor = json::null();
+		}
+	}
+
+	// {"op": "focus", "sel": n, "cursor": [x, y, z]}: what the builder
+	// has selected and their cursor
+	void focus(size_t peer, const json::Value &j,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		Peer &p = m_peers[peer];
+		const json::Value &sel = j.get("sel"), &c = j.get("cursor");
+		uint64_t id = 0;
+		if(sel.is_number() && sel.as_number() == std::floor(sel.as_number()) &&
+				sel.as_number() >= 0 && sel.as_number() <= 9e15)
+			id = (uint64_t)sel.as_number();
+		else if(!sel.is_undefined() && !sel.is_null())
+			return refuse("sel: an entity's id, or 0");
+		if(id && !m_entities.count(id))
+			return refuse("sel: no entity "+itos(id));
+		json::Value cursor = json::null();
+		if(!c.is_undefined() && !c.is_null()){
+			if(!pos_ok(c))
+				return refuse("cursor: three numbers within "+
+						itos((int)MAX_COORD));
+			cursor = json::array();
+			for(unsigned k = 0; k < 3; k++)
+				cursor.append(std::floor(c.at(k).as_number()));
+		}
+		if(id != p.sel)
+			log_i(MODULE, "%s selects %s", cs(p.name),
+					id ? cs("entity "+itos(id)) : "nothing");
+		p.sel = id;
+		p.cursor = cursor;
+		send_builders();
 	}
 
 	// {"op": "builder", "name": n, "on": bool}: the admin grants or takes
@@ -2088,10 +2521,8 @@ struct Module: public interface::Module, public Interface
 		const bool editing = pi != m_peers.end() && pi->second.editing;
 		j.set("editing", editing);
 		j.set("can_edit", can_edit(peer));
-		if(m_test.on){
-			j.set("testing", m_test.name);
-			j.set("playing", m_test.peer == peer);
-		}
+		j.set("running", m_session.running);
+		j.set("by", m_session.by);
 		if(editing){
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
@@ -2099,7 +2530,7 @@ struct Module: public interface::Module, public Interface
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "version",
-						"inventory"})
+						"inventory", "root"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -2111,7 +2542,8 @@ struct Module: public interface::Module, public Interface
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume", "grants", "version", "inventory"})
+							"zone", "volume", "grants", "version", "inventory",
+							"root"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);
@@ -2182,24 +2614,52 @@ struct Module: public interface::Module, public Interface
 		if(op == "builder")
 			return grant(peer, j, refuse);
 		if(op == "mode"){
-			p.editing = j.get("on").is_true();
+			tools(p, peer, j.get("on").is_true());
 			log_i(MODULE, "%s %s edit mode", cs(p.name),
 					p.editing ? "is in" : "left");
 			send_state(peer);
+			send_builders();
 			return;
 		}
-		if(op == "stop"){
-			if(!m_test.on || m_test.peer != peer)
-				return refuse("no test of yours runs");
-			return stop_test("its tester stopped it");
+		// The server's state: a builder's, the tools on or not
+		if(op == "play" || op == "stop" || op == "save_start"){
+			if(op == "play" && m_session.running)
+				return refuse("the server is Running");
+			if(op != "play" && !m_session.running)
+				return refuse("the server is Stopped");
+			if(op == "play")
+				play(p.name);
+			else if(op == "stop")
+				stop(p.name);
+			else
+				save_as_start(p.name);
+			return;
 		}
 		if(!p.editing)
 			return refuse("not in edit mode");
-		if(m_test.on)
-			return refuse("a test of "+m_test.name+"'s runs; edits wait for "
-					"its end");
-		if(op == "play")
-			return start_test(peer);
+		if(op == "focus")
+			return focus(peer, j, refuse);
+		if(op == "restart"){
+			Entity *e = nullptr;
+			ss_ why;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return refuse(why);
+			if(!m_session.running)
+				return refuse("the server is Stopped: it is at its start");
+			const size_t ci = in - &e->comps[0];
+			to_start(*e, ci);
+			Run r;
+			r.entity = e->id;
+			r.comp = ci;
+			r.handler = "on_start";
+			queue_run(r);
+			m_runtime_dirty = true;
+			pick_provider();
+			log_i(MODULE, "%s restarts entity %s's %s from the start",
+					cs(p.name), cs(itos(e->id)), cs(in->type));
+			return;
+		}
 		sv_<std::pair<uint64_t, json::Value>> change;
 		ss_ why, what;
 		if(op == "undo"){
@@ -2271,31 +2731,35 @@ struct Module: public interface::Module, public Interface
 				why = "the composition has "+itos(MAX_ENTITIES)+" entities";
 				return false;
 			}
-			// In the scene the app placed the editor in
+			// In the scene the app placed the editor in, or a game-wide
+			// type (root) on the app root, no position
+			const bool root = m_types[type].root;
 			uint64_t scene = 0;
 			for(auto &e : m_entities)
 				if(e.second.kind == "scene" && e.second.name == p.scene)
 					scene = e.first;
-			if(!scene){
+			if(!scene && !root){
 				why = "the editor is in no scene of the composition's";
 				return false;
 			}
 			const uint64_t id = m_next_id++;
 			json::Value e = json::object();
 			e.set("id", (int64_t)id);
-			e.set("parent", (int64_t)scene);
+			e.set("parent", (int64_t)(root ? 1 : scene));
 			e.set("name", type+" "+itos(id));
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(std::floor(j.get("pos").at(k).as_number()));
-			e.set("pos", pos);
+			if(!root)
+				e.set("pos", pos);
 			json::Value comp = json::object();
 			comp.set("type", type);
 			json::Value comps = json::array();
 			comps.append(comp);
 			e.set("components", comps);
 			change.push_back(std::make_pair(id, e));
-			what = "placed "+type+" "+itos(id)+" at "+pos.stringify();
+			what = "placed "+type+" "+itos(id)+(root ? ss_(" on the app root") :
+					" at "+pos.stringify());
 			return true;
 		}
 		if(op == "move"){
@@ -2505,6 +2969,7 @@ struct Module: public interface::Module, public Interface
 					[&](const Link &l){ return !m_entities.count(l.to); }),
 					in.links.end());
 		const bool had = it != m_entities.end();
+		sv_<size_t> fresh;
 		for(size_t i = 0; i < n.comps.size(); i++){
 			Instance &in = n.comps[i];
 			if(had && i < it->second.comps.size() &&
@@ -2512,6 +2977,8 @@ struct Module: public interface::Module, public Interface
 				// The same instance: its runtime state goes on
 				in.state = it->second.comps[i].state;
 				in.disabled = it->second.comps[i].disabled;
+				in.due_us = it->second.comps[i].due_us;
+				in.due_by = it->second.comps[i].due_by;
 				continue;
 			}
 			// simplified: a new instance (an undone delete's too) starts
@@ -2521,11 +2988,7 @@ struct Module: public interface::Module, public Interface
 			if(sd.is_object())
 				for(json::Iterator si(sd); si; ++si)
 					in.state.set(si.key(), (*si).get("default"));
-			Run r;
-			r.entity = id;
-			r.comp = i;
-			r.handler = "on_start";
-			queue_run(r);
+			fresh.push_back(i);
 		}
 		if(had){
 			n.node = it->second.node;
@@ -2536,6 +2999,29 @@ struct Module: public interface::Module, public Interface
 		}
 		m_entities[id] = n;
 		Entity &e = m_entities[id];
+		// Running, live: a new instance starts at once, and joins those in
+		// its scene. Stopped, it is at its start
+		ss_ scene;
+		scene_of(e, &scene);
+		for(size_t i : m_session.running ? fresh : sv_<size_t>()){
+			Run r;
+			r.entity = id;
+			r.comp = i;
+			r.handler = "on_start";
+			queue_run(r);
+			if(!m_types[e.comps[i].type].handlers.count("on_join") ||
+					scene.empty())
+				continue;
+			for(auto &p : m_peers){
+				if(p.second.scene != scene || p.second.name.empty())
+					continue;
+				r.handler = "on_join";
+				r.by = "player:"+p.second.name;
+				r.args = json::array();
+				r.args.append(r.by);
+				queue_run(r);
+			}
+		}
 		if(e.has_pos && !e.node){
 			make_node(e);
 		} else if(e.node){

@@ -83,10 +83,12 @@ namespace storage
 //                             instance's state dig/place, when true, lets
 //                             players dig/place: Interface::can_dig/place `by` is who caused it,
 // "player:<name>" or "app", carried along the links it sets off and kept
-// with a timer. on_start(c) runs once, when an instance first has runtime
-// state; on_join(c, by) as the app places a player in its scene the first
-// time (set_peer), or as another name; on_enter/on_leave as a player's
-// position (the cell it rounds to) comes into or leaves its zone.
+// with a timer. Handlers run only while the server is Running (below).
+// on_start(c) as a round starts from the start (Play, an instance placed
+// or restarted in the round); on_join(c, by) as a player goes through the
+// round's start and each time the app places them in its scene anew
+// (set_peer: the first time, or as another name); on_enter/on_leave as a
+// player's position (the cell it rounds to) comes into or leaves its zone.
 //
 // Clients act, components react: a client's packet "kit:use" (an entity's
 // id) reaches the entity's usable components if the app placed the peer
@@ -123,25 +125,58 @@ namespace storage
 //   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them
 //   {"op": "builder", "name": account, "on": bool}  -- the admin's only:
 //       makes an account a builder, or no longer
-//   {"op": "play"}, {"op": "stop"}  -- a test: the runtime starts again
-//       from the authored row (defaults, on_start, nothing disabled) and
-//       the editor plays; "stop" (or the tester leaving) puts back the
-//       runtime and the owned voxels as they were and the editor is in
-//       edit mode again. One runtime: everyone on the server plays the
-//       test meanwhile, and edits wait for its end. A test's runtime is
-//       never saved.
+//   {"op": "play"}, {"op": "stop"}, {"op": "save_start"}  -- the server's
+//       state, below (a builder's, the tools on or not)
+//   {"op": "restart", "id": n, "comp": i}  -- Running: the instance's
+//       state from the start again, and its on_start
+//   {"op": "focus", "sel": n (0: none), "cursor": [x, y, z] or null}  --
+//       what the builder has selected and where their cursor is, which
+//       the other builders see (no edit, no undo)
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
 // An editor is sent "kit:edit_state" after each edit, anyone's:
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
-// outputs, gizmo, usable}}, "authored": the row, "undo": n, "admin",
+// outputs, gizmo, usable, root}}, "authored": the row, "undo": n, "admin",
 // and the admin's "people": [{name, admin, builder}] here}, and always
-// "can_edit", and "testing" (whose test runs) and "playing" (this one's).
-// A player is sent it too as the admin grants or takes their rights, and
-// a tester as their test starts. A type's
+// "can_edit", "running" and "by" (who started the round). Everyone is
+// sent it as the server's state changes, and a player as the admin grants
+// or takes their rights. The builders with the tools on are sent
+// "kit:builders" as any of them turns them on or off, selects or moves
+// their cursor: [{"name", "color": "#rrggbb", "sel", "cursor"}]. A type's
 // `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn
 // in edit mode only. The client half is builtin/kit/client_lua/module.lua.
+//
+// **Edit and play** ([KIT] stage 4c): the server is Stopped or Running,
+// server-wide, one session (stage 7 makes more of them). Stopped: the
+// world is the start -- each instance's state its start (the save's row
+// "start", or its type's defaults), the voxels as they stand -- components
+// do not run, a client's use is refused, a grant grants nothing, and
+// edits and a builder's voxel writes change the start. Play starts a round
+// from the start: each instance's state from the start, its on_start, and
+// every player through the round's start (below). Everything play does is
+// play state: a section of voxels is copied out the first time anything
+// writes to it (voxelworld's section watch), the copy kept in the store
+// ("start:<scene>:x,y,z") so a restart mid-round still knows the start.
+// Stop puts those sections back (one not loaded when its section loads)
+// and each instance's state to its start; "Save as start" makes the play
+// state the start (the copies dropped, the row "start" the states now). A
+// fresh save starts Stopped; one from before stage 4c Running, its start
+// its types' defaults.
+//
+// The round's start, for each player there at Play and each that comes
+// in the round (once a round): their inventory reset (Kit's counts: none,
+// or with "keep inventory" what they had at the last Stop, put aside
+// meanwhile), and on_join of each instance in their scene -- a type with
+// `spawn = true` places them (kit/spawner); at Play, with none in their
+// scene, the app's default (kit:spawn_player). A type with
+// `between_plays = true` (kit/player_state, one, on the app root: a type
+// with `root = true` is placed there) gives the round's start its
+// parameters keep_inventory and keep_position (at Play the players stay
+// where they are). Live editing: while Running an edit changes the start
+// and the round at once -- a placed component's on_start and on_join for
+// those in its scene, a parameter changed with the state kept, a move, a
+// delete, an undo.
 namespace kit
 {
 	struct Host
@@ -187,6 +222,27 @@ namespace kit
 			peer(peer), x(x), y(y), z(z){}
 	};
 
+	// kit:spawn_player: a round starts (Play) and nothing in the player's
+	// scene places them: the app puts them at its default spawn (and says
+	// so by set_peer)
+	struct SpawnPlayer: public interface::Event::Private
+	{
+		size_t peer = 0;
+		SpawnPlayer(size_t peer): peer(peer){}
+	};
+
+	// kit:session: the server is Running or Stopped now (Play, Stop, Save
+	// as start: saved true), by whom: an app that keeps state of its own
+	// beside Kit's resets it here
+	struct SessionChanged: public interface::Event::Private
+	{
+		bool running = false;
+		bool saved = false;
+		ss_ by;
+		SessionChanged(bool running, bool saved, const ss_ &by):
+			running(running), saved(saved), by(by){}
+	};
+
 	struct Interface
 	{
 		// The one call: Kit runs the app's composition from here on. False
@@ -216,6 +272,10 @@ namespace kit
 		// are not in it: an app asks it beside can_edit
 		virtual bool can_dig(size_t peer, int x, int y, int z) = 0;
 		virtual bool can_place(size_t peer, int x, int y, int z) = 0;
+		// The server's state ([KIT] stage 4c): Running or Stopped. The app
+		// plays or stops as a builder would, by "app" (or another name)
+		virtual bool running() = 0;
+		virtual void set_running(bool running, const ss_ &by) = 0;
 	};
 
 	inline bool access(interface::Server *server,

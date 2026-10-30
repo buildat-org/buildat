@@ -9,7 +9,8 @@
 --   digs, the right one places;
 --   1...5 the voxel placed (stone, glass, wood, brick, grass)
 --   F6 or "Edit": Kit's editor; there the pointer is free for its clicks,
---   and the right button held looks round
+--   and the right button held looks round. "Play" and "Stop" beside it
+--   (a builder's): the server Running or Stopped ([KIT] stage 4c)
 --   L: log in (builtin/accounts' dialog); Escape: leave
 local log = buildat.Logger("workbench")
 local cereal = require("buildat/extension/cereal")

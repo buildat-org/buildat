@@ -11,7 +11,9 @@
 // have them also dig and place voxels in play (a write routed to an owner
 // when a component owns the voxel), and so does anyone where a component
 // grants it (Kit's can_dig/can_place: a dig zone); everyone else plays
-// what was built. One save, "world": the voxels, Kit's rows.
+// what was built. The server starts Stopped (Kit's, [KIT] stage 4c): the
+// floor is laid in the start, and a builder's Play starts a round, Stop
+// puts the start back. One save, "world": the voxels, Kit's rows.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -94,6 +96,7 @@ struct Module: public interface::Module
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:login", &Module::on_login);
 		sub(m_server, "kit:move_player", &Module::on_move);
+		sub(m_server, "kit:spawn_player", &Module::on_spawn);
 	}
 
 	void on_start()
@@ -216,9 +219,24 @@ struct Module: public interface::Module
 				name = a->name_of(peer);
 			});
 		m_names[peer] = name.empty() ? "p"+itos(peer) : name;
-		// The middle of the floor, unless a spawner puts them elsewhere
+		spawn(peer);
+	}
+
+	// The middle of the floor, unless a spawner puts them elsewhere
+	void spawn(size_t peer)
+	{
 		send_spawn(peer, 0.5, 1 + FEET_CELL + PUT_OVER, 0.5);
 		place(peer, 0.5, 1, 0.5);
+	}
+
+	// A round starts and no spawner places the player: the default
+	void on_spawn(const kit::SpawnPlayer &s)
+	{
+		if(!m_names.count(s.peer))
+			return;
+		log_i(MODULE, "workbench: %s to the middle of the floor",
+				cs(m_names[s.peer]));
+		spawn(s.peer);
 	}
 
 	// Kit's edit rights follow the account: the admin's, a builder's
