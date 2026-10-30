@@ -237,6 +237,19 @@ toggle() # the admin page's toggle, from the game
 		"wait_log 5000 pause: the menu shown" "delay 500" "keypress Escape" \
 		"wait_log 5000 pause: the menu closed"
 }
+shot() # <ms> [screenshot]: the bow drawn that long and let go (23 and 43)
+{
+	printf '%s\n' "mouse_down left" "delay $1" ${2:+"screenshot $2"} \
+		"mouse_up left" "delay 1500"
+}
+walls() # "<x> <z>"...: a test's stone 2 high on those columns; a skeleton
+{ # walled in stays (its light form steps 1 up at most)
+	local c
+	for c in "$@"; do printf 'marker %s skeldat:stone 0; marker %s skeldat:stone 0; ' "$c" "$c"; done
+}
+# A skeleton at (0, 6) kept to the bow's line (23, 43): walled at x -1
+# and 1 from z 3 to 7 and behind (free, it stepped a column aside once)
+lane=$(walls "0 7" "-1 3" "1 3" "-1 4" "1 4" "-1 5" "1 5" "-1 6" "1 6" "-1 7" "1 7")
 # The worlds a drive walks, shoots or builds in are flat
 # (BUILDAT_SKELDAT_TERRAIN=flat, [SKELDAT_OWN_MAPGEN]: one height, no tree
 # within 24 of the spawn, no cave open at the ground), so their spots
@@ -1222,9 +1235,9 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 	! grep -aq "skeleton ($4) builds" "$log25" ||
 	fail "a block built where a walking way is ($log25)"
 # 23. The bow ([SKELDAT_BOW]): the launcher's client, invulnerable, a
-# bow and 6 arrows, a skeleton 6 ahead at midnight. A full draw (1.2 s)
-# shoots at the bow's speed, a half (0.5 s) at half, a tap nothing; two
-# more full ones and the skeleton is dead. Held looking down the bow digs
+# bow and 6 arrows, a skeleton 6 ahead at midnight in its lane. A full
+# draw (1.2 s) shoots at the bow's speed, a half (0.5 s) at half, a tap
+# nothing; two more full ones and the skeleton is dead. Held looking down the bow digs
 # nothing: the arrow shot into the ground at its feet is picked up. Five
 # presses far off: two or more shots, then with none left (the
 # skeleton's misses picked up too) a press draws nothing. Left 60 s, a far
@@ -1236,11 +1249,6 @@ grep -aq "skeleton ($4) finds a way to .*, 0 bone blocks" "$log25" &&
 # client in once the world is relit, the minute after the shots on the
 # game's clock, to the stuck arrow's line
 log26="$t/srv26.log"
-shot()
-{
-	printf '%s\n' "mouse_down left" "delay $1" ${2:+"screenshot $2"} \
-		"mouse_up left" "delay 1500"
-}
 { echo "$placed"; toggle; echo "look 0 -5"; echo "delay 1000"
 	echo "screenshot $t/bow_rest.png"
 	shot 1200 "$t/bow_full.png"; shot 450 "$t/bow_half.png"; shot 10
@@ -1253,7 +1261,7 @@ for n in 1 2; do
 	rm -f "$t/srv26/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=bow BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 		BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
-		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:bow 1 1; give skeldat:arrow 6 1; skeleton 0 6 marked" || echo "place ${kept:-0 0}")" \
+		BUILDAT_SKELDAT_TEST="$([ $n = 1 ] && echo "give skeldat:bow 1 1; give skeldat:arrow 6 1; ${lane}skeleton 0 6 marked" || echo "place ${kept:-0 0}")" \
 		start_server "$t/srv26_$n.log" "STATUS Listening" 300 auto \
 		"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 		-D "$t/srv26" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 ||
@@ -1484,15 +1492,17 @@ lines=$(awk '/the world is in/ { on = 1 } on && /skeldat: bones:/ { n++ } END { 
 	grep -aq "free-run is for a headless check" "$t/srv28_lan.log" ||
 	fail "--free-run with --lan-announce started ($t/srv28_lan.log)"
 # 26. A deep hole ([SKELDAT_SURFACE_END]): at midnight, a shaft 10 deep
-# dug 3 from the launcher's client (invulnerable) and a skeleton 1 off
-# its edge. Within a minute the skeleton drops a skull into it, which
-# falls to the shaft's bottom and is a skull voxel there.
+# dug 5 from the launcher's client (invulnerable) and a skeleton 2 off
+# its edge, penned in by stone 2 high (free, it stood off to a column 3
+# from the shaft about half the runs, past the 2 a drop is made from).
+# Within a minute the skeleton drops a skull into it, which falls to the
+# shaft's bottom and is a skull voxel there.
 log29="$t/srv29.log"
-shaft=$(for d in $(seq 10 -1 1); do printf 'marker 3 0 air -%d; ' $d; done)
+shaft=$(for d in $(seq 10 -1 1); do printf 'marker 5 0 air -%d; ' $d; done; walls "2 -1" "2 0" "2 1" "3 -1" "3 1" "4 -1" "4 0" "4 1")
 { echo "$placed"; toggle; fast "$t/srv29"; echo "delay 90000"; echo quit; } > "$t/hole.cmds"
 BUILDAT_SKELDAT_WORLD=hole BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_SKELETONS=0 \
-	BUILDAT_SKELDAT_TEST="${shaft}skeleton 1 0 marked" \
+	BUILDAT_SKELDAT_TEST="${shaft}skeleton 3 0 marked" \
 	start_server "$log29" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv29" -C "$t/srv.cache" -l 3 -u launcher=1 --sim-rate 1 || fail "the server ($log29)"
@@ -2539,13 +2549,13 @@ grep -aq "skeldat: bob dies at" "$log46" &&
 	fail "bob's start items: $(grep -a "starts with" "$log46" | sed 's/.*skeldat: //' | tr '\n' ';') ($log46)"
 echo "back dead: the death screen on the rejoin, Respawn placed bob; given a bow and an arrow once"
 # 43. A headshot ([SKELDAT_HEADSHOT]): section 23's skeleton 6 ahead at
-# midnight, the launcher's client invulnerable; one full draw aimed 12
-# degrees up, at its head (1.5 to 2 over its feet), kills it. A body's
-# hit leaves it alive: section 23's first shot.
+# midnight in its lane, the launcher's client invulnerable; one full draw
+# aimed 12 degrees up, at its head (1.5 to 2 over its feet), kills it. A
+# body's hit leaves it alive: section 23's first shot.
 log47="$t/srv47.log"
 BUILDAT_SKELDAT_WORLD=headshot BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=2400 \
-	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 1 1; skeleton 0 6 marked" \
+	BUILDAT_SKELDAT_TEST="give skeldat:bow 1 1; give skeldat:arrow 1 1; ${lane}skeleton 0 6 marked" \
 	start_server "$log47" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv47" -C "$t/srv.cache" -l 3 -u launcher=1 || fail "the server ($log47)"
@@ -2793,7 +2803,9 @@ echo "$l1" | awk '{ exit !(NF >= 4 && $NF > $2 + 4) }' &&
 	fail "the lava spring: on the ground $l1, walled in $l2 ($t/srv51_lava1.log, $t/srv51_lava2.log)"
 # 48. A clear shot ([SKELDAT_CLEAR_SHOT]): a player at midnight in a box
 # of stone 3 high round it and over it, the box open at +x (1 0), a
-# skeleton 4 x and -5 z off, its straight shot through the wall. No shot
+# skeleton 5 x and -4 z off, its straight shot through the wall (at 4 -5,
+# a column's step before its first try left it no spot in 3 of the 8
+# columns round it: mobs.h's shot_spot() rings, within 4). No shot
 # while blocked; "has no clear shot ... to (...)", then a shot within 15 s
 # of it. The box sealed and 30 skeletons round it: no shot, each one's
 # "no spot" tries 3 s apart at least; the light step's time logged.
@@ -2806,7 +2818,7 @@ box() {
 ring=$(for i in $(seq 0 29); do awk -v i=$i 'BEGIN { a = i * 6.2832 / 30; r = 5 + i % 4
 	printf "skeleton %d %d; ", r * sin(a), r * cos(a) }'; done)
 for run in open sealed; do
-	if [ $run = open ]; then test="$(box "")skeleton 4 -5"; else test="$(box "1 0")$ring"; fi
+	if [ $run = open ]; then test="$(box "")skeleton 5 -4"; else test="$(box "1 0")$ring"; fi
 	BUILDAT_SKELDAT_WORLD=shot_$run BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0 BUILDAT_SKELDAT_SPAWN="0 0" \
 		BUILDAT_SKELDAT_DAY=2400 BUILDAT_SKELDAT_SKELETONS=0 BUILDAT_SKELDAT_TEST="$test" \
@@ -3128,7 +3140,7 @@ log58="$t/srv58.log"
 bt54="level -1 44 3 3 skeldat:bone_block -1; level -35 10 71 34 skeldat:water_source -1"
 bt54="$bt54; level -35 47 71 34 skeldat:water_source -1; level -35 44 34 3 skeldat:water_source -1"
 bt54="$bt54; level 2 44 34 3 skeldat:water_source -1; skeleton 0 45"
-boats() { # log, client name, delay ms[, the test's fixtures]
+boats() { # log, client name, delay ms[, the test's fixtures[, a client log line ending it sooner]]
 	rm -f "$t/srv58/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=${W54:-boats} BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=${T54:-0.2} \
@@ -3140,11 +3152,18 @@ boats() { # log, client name, delay ms[, the test's fixtures]
 	CHECK_PIDS+=($SERVER_PID)
 	printf '%s\n' "$placed" "$(fast "$t/srv58")" "delay $3" quit > "$t/$2.cmds"
 	client $2 "$t/$2.cmds"
-	sped "$t/$2.log" && game_wait "$t/srv58" $(($3 / 1000))
+	if [ -n "${5:-}" ]; then
+		sped "$t/$2.log" && wait_for_log "$t/$2.log" "$5" $(($3 / 1000)) "$t/srv58"
+	else
+		sped "$t/$2.log" && game_wait "$t/srv58" $(($3 / 1000))
+	fi
 	ended "$t/$2.log" || fail "the boats' drive $2 ($t/$2.log)"
 	kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
 }
-boats "$log58" boats1 160000 "$bt54"
+# Run 1 ends as the client sees the boat move: run 2 reads the boat back,
+# and a run 1 held on to its time limit could see it land (a world slow to
+# make shifts the days against the limit)
+boats "$log58" boats1 160000 "$bt54" "stands on its moving boat"
 # [SKELDAT_SKULL_CALL] A strip of bones 3 x 21 into the pond, a green skull
 # at its far end and a skeleton 14 short of it; a 600 s day from 0.6617: the
 # call an hour before sunset 28 s in, about 7 s after the fixtures, the
