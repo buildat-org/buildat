@@ -849,23 +849,31 @@ SectionGenerated.
 
 builtin/heightmap/api.h -- heightmap::Interface: a finite heightmap
 surface, one per scene ([HEIGHTMAP_TERRAIN]): create_instance(scene, Size
-{chunks_x, chunks_z, chunk_size (a multiple of 64), cell_size, base_y}) /
-get_instance / delete_instance. An Instance: samples_x / samples_z,
-get_height / set_height (metres, kept in centimetres over base_y, 0 to
-655.35 m) and get_weights / set_weights (Weights: three material bytes a
-sample, splatted by the client's TerrainBlend: 0 grass, 1 rock, 2 sand
-with the module's own textures), height_at(world x, z) as the triangles
-have it, generate(GenerateParams: seed, interface::noise NoiseParams for
-the height, sand_below, rock_slope), set_save(save, name) (true when a
-map of that size was read; then nothing is generated), commit() (also
-each tick: the server's Terrain and Bullet heightfield rebuilt, the
-written chunks saved and sent), content_hash(), and add_chunk_hook
-(ChunkHook::before_write(map, cx, cz, old data): once a chunk per commit,
-before its first write -- where a copy-on-write snapshot keeps its copy).
-A peer that joins the scene gets the module's client half and the whole
-map; the client builds one Terrain (LOD per 64-sample patch). Not inside
-main_context::access: commit takes it. apps/sample_heightmap is the
-example; api.h has the chunk format.
+{chunks_x, chunks_z, chunk_size (a multiple of 64), cell_size, base_y,
+materials (1 to MAX_MATERIALS, 16; 3 unless set)}) / get_instance /
+delete_instance. An Instance: samples_x / samples_z, get_height /
+set_height (metres, kept in centimetres over base_y, 0 to 655.35 m) and
+get_weights / set_weights (Weights: a byte a material, room for 16, the
+ones past the map's materials 0 and ignored; the client splats them over
+its ground textures, by default 0 grass, 1 rock, 2 sand, 3 dirt, 4
+gravel), height_at(world x, z) as the triangles have it,
+generate(GenerateParams: seed, interface::noise NoiseParams for the
+height or height_fn(world x, z) for another generator's surface,
+sand_below, rock_slope; writes materials 0 to 2), set_save(save, name)
+(true when a map of that size, material count and format was read; then
+nothing is generated), commit() (also each tick: the written samples
+copied into the Bullet heightfield, which reads the map's own float array
+-- no Terrain on the server, ~11 MB for 1 km^2 at a metre and 5
+materials; the rectangle written in each chunk sent, the chunk saved),
+content_hash(), and add_chunk_hook (ChunkHook::before_write(map, cx, cz,
+old data): once a chunk per commit, before its first write -- where a
+copy-on-write snapshot keeps its copy). A peer that joins the scene gets
+the module's client half and the whole map; the client builds one
+Terrain (LOD per 64-sample patch) and writes an edit's rectangle alone
+into its images and weight textures. Not inside main_context::access:
+commit takes it. apps/sample_heightmap is the example; api.h has the data
+format (2: heights, then RGBA weight planes; one for a saved chunk and a
+sent rectangle).
 
 builtin/luanti_mapgen/api.h -- luanti_mapgen::Interface: Luanti's mapgens
 in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), noise_query() -> NoiseQuery (point, map: Luanti's own noise, what a mod's PerlinNoise gets), take_gennotify()

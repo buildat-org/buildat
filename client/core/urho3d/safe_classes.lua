@@ -1329,6 +1329,28 @@ function M.define(dst, util)
 		},
 	})
 
+	-- **Layers of one size and format in one texture** ([HEIGHTMAP_REST]):
+	-- builtin/heightmap's ground textures, any number of them in one of a
+	-- material's eight units. SetLayers(n) first, then SetData(layer,
+	-- image) for each, layer 0 first: it sizes the array, and a later
+	-- layer of another size or format is refused. GL3 and WebGL 2.
+	util.wc("Texture2DArray", {
+		inherited_from_by_wrapper = dst.Texture,
+		class = {
+			new = function()
+				return util.wrap_instance("Texture2DArray",
+						Texture2DArray:new())
+			end,
+		},
+		instance = {
+			SetLayers = util.self_function("SetLayers", {},
+					{"Texture2DArray", "number"}),
+			SetData = util.self_function("SetData", {"boolean"},
+					{"Texture2DArray", "number", "Image",
+					{"boolean", "__nil"}}),
+		},
+	})
+
 	-- Declared here rather than next to Drawable: its ramp property needs
 	-- Texture, and these are wrapped in the order they are written in
 	util.wc("Light", {

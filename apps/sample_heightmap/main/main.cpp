@@ -6,6 +6,10 @@
 // from the save after; a flat sand pad in the middle that the ball is
 // dropped on. WASD pushes the ball, C digs a crater under it. The physics
 // is the server's (Bullet's heightfield); the client draws what it is told.
+// [HEIGHTMAP_REST] Five materials: the generator's grass, rock and sand, a
+// crater's dirt (3) and the pad's gravel (4). The server's memory for the
+// map is logged (Linux: the resident set before and after; what other
+// modules do meanwhile counts in it too, as network deflating web/).
 #include "core/log.h"
 #include "client_file/api.h"
 #include "heightmap/api.h"
@@ -21,6 +25,8 @@
 #include <RigidBody.h>
 #include <CollisionShape.h>
 #include <cmath>
+#include <cstdio>
+#include <unistd.h>
 #define MODULE "main"
 
 using interface::Event;
@@ -35,6 +41,29 @@ static const float BALL_RADIUS = 1.0f;
 static const float PUSH = 40.0f;
 static const int CRATER_RADIUS = 4;
 static const float CRATER_DEPTH = 2.0f;
+static const int MATERIALS = 5;
+static const int DIRT = 3, GRAVEL = 4;
+
+// The process's resident set in MB, -1 where /proc does not say
+static float rss_mb()
+{
+	long pages = -1, resident = -1;
+	FILE *f = fopen("/proc/self/statm", "r");
+	if(!f)
+		return -1;
+	if(fscanf(f, "%ld %ld", &pages, &resident) != 2)
+		resident = -1;
+	fclose(f);
+	return resident < 0 ? -1 :
+			resident * (sysconf(_SC_PAGESIZE) / 1024) / 1024.0f;
+}
+
+static heightmap::Weights only(int material)
+{
+	heightmap::Weights w{};
+	w[material] = 255;
+	return w;
+}
 
 // The chunks written, as a snapshot would see them: once a chunk a commit
 struct CountWrites: public heightmap::ChunkHook
@@ -99,9 +128,11 @@ struct Module: public interface::Module
 				m_save = i->create("main");
 		});
 		float pad_y = 0;
+		const float rss0 = rss_mb();
 		heightmap::access(m_server, [&](heightmap::Interface *ih){
-			heightmap::Instance *map = ih->create_instance(m_scene,
-					heightmap::Size());
+			heightmap::Size size;
+			size.materials = MATERIALS;
+			heightmap::Instance *map = ih->create_instance(m_scene, size);
 			map->add_chunk_hook(up_<heightmap::ChunkHook>(
 					new CountWrites(&m_chunks_written)));
 			if(!map->set_save(m_save, "main")){
@@ -111,7 +142,11 @@ struct Module: public interface::Module
 				make_pad(map);
 			}
 			pad_y = map->height_at(pad_x(map), pad_z(map));
+			// The heightfield made now, to measure it
+			map->commit();
 		});
+		log_i(MODULE, "sample_heightmap: the server's memory: %.1f MB before"
+				" the map, %.1f MB with it", rss0, rss_mb());
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			Scene *scene = imc->check_scene(m_scene);
 			Node *n = scene->CreateChild("ball");
@@ -144,7 +179,7 @@ struct Module: public interface::Module
 		return map->samples_z() / 2 * map->get_size().cell_size;
 	}
 
-	// Flat sand where the ball starts, at the middle's height
+	// Flat gravel where the ball starts, at the middle's height
 	void make_pad(heightmap::Instance *map)
 	{
 		const int cx = map->samples_x() / 2, cz = map->samples_z() / 2;
@@ -152,7 +187,7 @@ struct Module: public interface::Module
 		for(int z = cz - PAD_HALF; z <= cz + PAD_HALF; z++)
 			for(int x = cx - PAD_HALF; x <= cx + PAD_HALF; x++){
 				map->set_height(x, z, h);
-				map->set_weights(x, z, heightmap::Weights{{0, 0, 255}});
+				map->set_weights(x, z, only(GRAVEL));
 			}
 	}
 
@@ -216,8 +251,8 @@ struct Module: public interface::Module
 		m_keys = packet.data.empty() ? 0 : (uint8_t)packet.data[0] & 15;
 	}
 
-	// A bowl under the ball, CRATER_DEPTH at the middle; the clients get
-	// the chunks it touched and the ball falls in
+	// A bowl of dirt under the ball, CRATER_DEPTH at the middle; the clients
+	// get the rectangles it wrote and the ball falls in
 	void on_crater(const network::Packet &packet)
 	{
 		Vector3 p;
@@ -242,7 +277,7 @@ struct Module: public interface::Module
 					continue;
 				map->set_height(x, z, map->get_height(x, z) -
 						CRATER_DEPTH * (1 - d * d));
-				map->set_weights(x, z, heightmap::Weights{{0, 255, 0}});
+				map->set_weights(x, z, only(DIRT));
 			}
 			// Now rather than at the module's tick: the ball is woken
 			// below, onto the new heightfield

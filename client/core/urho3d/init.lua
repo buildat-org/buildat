@@ -664,6 +664,24 @@ Safe.image_set_data = wrap_function({"Image", "number", "number", "number",
 	__buildat_image_set_data(image, w, h, components, data)
 end)
 
+-- **A rectangle of an image** ([HEIGHTMAP_REST]): w * h of the image's
+-- components each, row by row, written at (x, y); flip_y writes the rows
+-- from the bottom up. The image keeps its size; a rectangle outside it
+-- raises.
+Safe.image_set_region = wrap_function({"Image", "number", "number",
+		"number", "number", "string", {"boolean", "__nil"}},
+		function(image, x, y, w, h, data, flip_y)
+	__buildat_image_set_region(image, x, y, w, h, data, flip_y or false)
+end)
+
+-- **A rectangle of an RGBA image into an RGBA texture of its size**
+-- ([HEIGHTMAP_REST]), and the texture's smaller levels made again: an edit
+-- uploads what it changed, not the whole texture
+Safe.texture_set_region = wrap_function({"Texture2D", "Image", "number",
+		"number", "number", "number"}, function(texture, image, x, y, w, h)
+	__buildat_texture_set_region(texture, image, x, y, w, h)
+end)
+
 -- **A PNG or JPEG from its bytes** ([HEARTH_ATTACHMENTS]), as a server
 -- sends a picture at run time: false for anything else, over max_side
 -- pixels a side (1024 unless said, 4096 at most) or over max_side squared

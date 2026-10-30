@@ -384,12 +384,13 @@ builtin/voxel_shading. Chunk data crosses the network as a node attribute,
 compressed, replicated by builtin/replicate.
 
 builtin/heightmap is the other ground: a finite 2D grid of heights and
-three material weights a sample, in chunks, its cell its own (a metre by
-default) ([HEIGHTMAP_TERRAIN]). The server holds it, saves it through
-builtin/storage and keeps a Magic Terrain with a Bullet heightfield for
-the scene's physics; a client gets the whole map at join and the written
-chunks after, by the module's own packets, and draws one Terrain (LOD
-per patch, splatted from a weight texture). Lighter than voxels for a
+up to 16 material weights a sample, in chunks, its cell its own (a metre
+by default) ([HEIGHTMAP_TERRAIN], [HEIGHTMAP_REST]). The server holds it,
+saves it through builtin/storage and keeps a Bullet heightfield over its
+own float array for the scene's physics (no Terrain); a client gets the
+whole map at join and the rectangle each edit wrote after, by the
+module's own packets, and draws one Terrain (LOD per patch, splatted from
+RGBA weight textures over a texture array). Lighter than voxels for a
 world of gentle slopes, a driving game's; nothing under the surface.
 
 The 2014 design notes this section used to carry are in git history.

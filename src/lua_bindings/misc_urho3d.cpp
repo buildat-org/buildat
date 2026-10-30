@@ -268,6 +268,85 @@ static int l_image_set_data(lua_State *L)
 	return 0;
 }
 
+// image_set_region(image, x, y, w, h, data: string[, flip_y])
+// **A rectangle of an image the script made** ([HEIGHTMAP_REST]): the
+// bytes are w * h of the image's components each, row by row, written at
+// (x, y) -- from the bottom row up with flip_y, as a heightmap's rows are
+// the image's turned over. builtin/heightmap writes an edit's rectangle
+// with it instead of building a 1025x1025 image again in Lua.
+static int l_image_set_region(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(image, 1, Image);
+	const int x = lua_tointeger(L, 2), y = lua_tointeger(L, 3);
+	const int w = lua_tointeger(L, 4), h = lua_tointeger(L, 5);
+	size_t len = 0;
+	const char *data = lua_tolstring(L, 6, &len);
+	const bool flip = lua_toboolean(L, 7);
+	if(!data)
+		throw Exception("image_set_region: data must be a string");
+	if(image->IsCompressed() || image->GetDepth() != 1 || !image->GetData())
+		throw Exception("image_set_region: not a plain 2D image");
+	const int comps = image->GetComponents();
+	if(w < 1 || h < 1 || x < 0 || y < 0 || x + w > image->GetWidth() ||
+			y + h > image->GetHeight())
+		throw Exception("image_set_region: the rectangle is not inside the"
+				" image");
+	if(len != (size_t)w * h * comps)
+		throw Exception("image_set_region: the string is not w * h * "
+				"components bytes");
+	unsigned char *d = image->GetData();
+	const size_t row = (size_t)image->GetWidth() * comps;
+	for(int r = 0; r < h; r++){
+		const int dy = flip ? y + h - 1 - r : y + r;
+		memcpy(d + dy * row + (size_t)x * comps, data + (size_t)r * w * comps,
+				(size_t)w * comps);
+	}
+	return 0;
+}
+
+// texture_set_region(texture, image, x, y, w, h)
+// [HEIGHTMAP_REST] A rectangle of an image into a texture of its size, and
+// the texture's smaller levels made again: what changed of a weight map
+// goes to the GPU, not the whole of it. Four components (RGBA), the format
+// Texture2D:SetData(image) made from a 4-component image.
+// A device reset loses what was written this way (Urho3D keeps no copy):
+// the caller keeps the image and gives it whole again on ScreenMode.
+static int l_texture_set_region(lua_State *L)
+{
+	tolua_Error tolua_err;
+	GET_TOLUA_STUFF(texture, 1, Texture2D);
+	GET_TOLUA_STUFF(image, 2, Image);
+	const int x = lua_tointeger(L, 3), y = lua_tointeger(L, 4);
+	const int w = lua_tointeger(L, 5), h = lua_tointeger(L, 6);
+	if(image->IsCompressed() || image->GetDepth() != 1 || !image->GetData() ||
+			image->GetComponents() != 4 || texture->GetComponents() != 4)
+		throw Exception("texture_set_region: an RGBA image and texture");
+	if(image->GetWidth() != texture->GetWidth() ||
+			image->GetHeight() != texture->GetHeight())
+		throw Exception("texture_set_region: the image is not the texture's"
+				" size");
+	if(w < 1 || h < 1 || x < 0 || y < 0 || x + w > image->GetWidth() ||
+			y + h > image->GetHeight())
+		throw Exception("texture_set_region: the rectangle is not inside"
+				" the image");
+	std::vector<unsigned char> buf((size_t)w * h * 4);
+	const size_t row = (size_t)image->GetWidth() * 4;
+	for(int r = 0; r < h; r++)
+		memcpy(&buf[(size_t)r * w * 4], image->GetData() + (y + r) * row +
+				(size_t)x * 4, (size_t)w * 4);
+	if(!texture->SetData(0, x, y, w, h, buf.data()))
+		throw Exception("texture_set_region: SetData failed");
+	// glGenerateMipmap works on the bound texture, and SetData unbinds it
+	Graphics *graphics = texture->GetSubsystem<Graphics>();
+	if(texture->GetLevels() > 1 && graphics){
+		graphics->SetTextureForUpdate(texture);
+		texture->RegenerateLevels();
+		graphics->SetTexture(0, nullptr);
+	}
+	return 0;
+}
+
 // sound_set_data(sound, data: string)
 // [DOOM_APP] A Sound's samples from a string: safe_classes.lua's
 // Sound:SetData(string), which checks the sizes first. A string is how a
@@ -469,6 +548,8 @@ void init_misc_urho3d(lua_State *L)
 	DEF_BUILDAT_FUNC(set_voxel_data);
 	DEF_BUILDAT_FUNC(get_voxel_data);
 	DEF_BUILDAT_FUNC(image_set_data);
+	DEF_BUILDAT_FUNC(image_set_region);
+	DEF_BUILDAT_FUNC(texture_set_region);
 	DEF_BUILDAT_FUNC(image_load_data);
 	DEF_BUILDAT_FUNC(sound_set_data);
 	DEF_BUILDAT_FUNC(hold_ref);
