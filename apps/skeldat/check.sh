@@ -2750,22 +2750,34 @@ print("open: the shot %.1f s after the try; sealed: %d skeletons trying, %d trie
       (shots[0] - to[0], len(tries), sum(len(v) for v in tries.values()), gap))
 PY
 # 49. Out of the sun ([SKELDAT_SUN_SHELTER]): at 0.17 of a 600 s day
-# (the dawn's search from 0.19, 11 s on, when the rooms' light is in;
-# sunrise at 0.23, 36 s on), flat ground. Two rooms of stone, 3 x 3 inside,
-# walls 3 high, a door 2 high, a roof, whose back rows the sky lights 11
-# at most; every skeleton 20 or more from the player, so none fights. A
-# skeleton 12 from the first room's door: "finds shelter", and no burn
-# after sunrise; one 25 off in the open: "finds no shelter", and it
-# burns; one in the second room's back row: none of its steps out of it
-# by day (the report's steps kept out of the sun), no burn; a cave
-# skeleton in the open: no shelter line. A skeleton in lava (walled in)
-# burns in lava 4 hp a second (two burns a second apart at least: a test
-# marker over a voxel not loaded yet floats, and the lava can run out), no
-# "is in water"; one in water dies at once. The fixtures clear of seed
-# 2's trees (tree_at; (29,3) and (-23,-22) the nearest), whose sections
-# can be made after a marker went up and put a crown through a room. The
-# sheltering one far enough that its walk before the search (12 s) brings
-# it into no shade (8 from the door it was once found never exposed).
+# (the dawn's search from 0.19, 12 s on, again every 5 s; sunrise at
+# 0.23, 36 s on), flat ground. Two rooms of stone, 3 x 3 inside, walls 3
+# high, a door 2 high, a roof, whose back rows the sky lights 11 at most;
+# every skeleton 20 or more from the player, who stands boxed in stone
+# (a skeleton has no clear shot at it). A skeleton 4 off the first
+# room's back (+x) wall: "finds shelter", and no burn after sunrise; one
+# 25 off in the open, its marker skull placed today ("marked"): "finds
+# no shelter", and it burns; one in the second room's back row: none of
+# its steps out of it by day (the report's steps kept out of the sun), no
+# burn; a cave skeleton in the open, 34 or more from every bone skeleton:
+# no shelter line. A skeleton in lava (walled in) burns in lava 4 hp a
+# second (two burns a second apart at least: a test marker over a voxel
+# not loaded yet floats, and the lava can run out), no "is in water"; one
+# in water dies at once. The fixtures clear of seed 2's trees (tree_at;
+# (29,3) and (-23,-22) the nearest, (32,25) the cave skeleton's), whose
+# sections can be made after a marker went up and put a crown through a
+# room.
+# [SKELDAT_SHELTER_FIGHT] A test skeleton wanders from the start, a step
+# a second; mobs of the two kinds fight within 16 and a skeleton fights a
+# player within 16. Seen failing: the sheltering one 12 from the door
+# (16,-14) walked out of SHELTER_RANGE, drawn by the cave skeleton then
+# at (0,-25), or on its own while the room's light was not in yet (it
+# was 8 from the door once and walked into the shade before the search);
+# the one in the open walked within 16 of the player and placed a marker
+# skull beside itself, which kept the sun off it, or shot the player
+# dead, and with no player near no skeleton has a body to burn. Behind
+# the room, the sheltering one has a walk of 17 round to the door and of
+# 11 out of range.
 # room <x> <z> <door side x|z>: the inside x-1..x+1, z-1..z+1, its door on
 # the -x or -z wall's middle
 room() {
@@ -2795,8 +2807,12 @@ lava=$(for dz in -2 -1 0 1 2; do for dx in -2 -1 0 1 2; do
 		$((-12 + dx)) $((-20 + dz)) $((-12 + dx)) $((-20 + dz)); done; done
 	for d in "-1 -1" "0 -1" "1 -1" "-1 0" "0 0" "1 0" "-1 1" "0 1" "1 1"; do
 	set -- $d; printf 'marker %d %d skeldat:lava; ' $((-12 + $1)) $((-20 + $2)); done)
-test="$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
-test="${test}skeleton 16 -14; skeleton -25 0; skeleton 0 31; cave_skeleton 0 -25; skeleton -12 -20; skeleton 20 -20"
+# The player in a stone column 3 high, roofed, which no arrow passes
+box=$(for d in "-1 -1" "0 -1" "1 -1" "-1 0" "1 0" "-1 1" "0 1" "1 1"; do
+	for k in 1 2 3; do printf 'marker %s skeldat:stone 0; ' "$d"; done; done)
+test="$box$(room 30 -6 x)$(room 0 30 z)${lava}marker 20 -20 skeldat:water_source; "
+test="${test}marker 0 0 skeldat:stone 2; "
+test="${test}skeleton 36 -6; skeleton -25 0 marked; skeleton 0 31; cave_skeleton 34 32; skeleton -12 -20; skeleton 20 -20"
 log53="$t/srv53.log"
 BUILDAT_SKELDAT_WORLD=sun BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 	BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=0.17 BUILDAT_SKELDAT_SPAWN="0 0" \
@@ -2822,7 +2838,7 @@ def has(pat, k):
 def count(pat, k):
     return sum(1 for l in lines if re.search(pat % k, l))
 shel, none, inside, cave, lava, water = (keys.get(p) for p in
-        [(16, -14), (-25, 0), (0, 31), (0, -25), (-12, -20), (20, -20)])
+        [(36, -6), (-25, 0), (0, 31), (34, 32), (-12, -20), (20, -20)])
 assert all([shel, none, inside, cave, lava, water]), keys
 assert has(r"a skeleton \(%s\) finds shelter at", shel), "no shelter found"
 assert not has(r"the skeleton \(%s\) burns$", shel), "the sheltered one burnt"
