@@ -7,7 +7,7 @@ local function set(c, open, by)
 		return
 	end
 	c.state.open = open
-	c:log(open and "opened" or "shut", "by", by)
+	c:log(open and "opened" or "shut", "by", c:name(by))
 	c:emit(open and "opened" or "closed")
 	if open and c.params.close_after > 0 then
 		c:after(c.params.close_after)
@@ -24,8 +24,8 @@ return {
 	look = {shape = "box", extent = "size", depth = 0.2, color = "#8a5a30",
 		solid = true, state = "open", when = {swing = true, solid = false}},
 	state = {open = {default = false, shared = true}},
-	inputs = {"open", "close", "toggle"},
-	outputs = {"opened", "closed"},
+	inputs = {open = "none", close = "none", toggle = "none"},
+	outputs = {opened = "none", closed = "none"},
 	on_use = function(c, by)
 		set(c, not c.state.open, by)
 	end,

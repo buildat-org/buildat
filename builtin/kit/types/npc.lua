@@ -14,7 +14,7 @@ local function say(c, by)
 	local at = c.state.at % #lines + 1
 	c.state.at = at
 	c.state.line = c.params.name .. ": " .. lines[at]
-	c:log("says to", by, "\"" .. lines[at] .. "\"")
+	c:log("says to", c:name(by), "\"" .. lines[at] .. "\"")
 	c:emit("said", at)
 end
 
@@ -31,8 +31,8 @@ return {
 		at = {default = 0},
 		line = {default = "", shared = true},
 	},
-	inputs = {"say"},
-	outputs = {"said"},
+	inputs = {say = "none"},
+	outputs = {said = "number"},
 	on_start = function(c)
 		c.state.line = c.params.name
 	end,

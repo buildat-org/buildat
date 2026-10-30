@@ -51,6 +51,15 @@
 #      lets it through into a zone behind it when open (their client's
 #      physics on the door's collision shape); with "Always keep builds"
 #      the admin's dig is kept at Stop, and no notice.
+#   6. ([KIT] stage 4d) A link of mismatched signal types refused;
+#      kit/button_door placed, saved as the admin's prefab, a copy of it
+#      placed and following its next version but for what was set on the
+#      copy; the spawner set to copy it when a button signals (the link
+#      line lit, the spawner's log in the editor), at most max, a live
+#      edit (on_params), "Restart this" taking the copy back (on_remove),
+#      the copies gone at Stop; a wedge kit/part; kit/door's client part
+#      swinging a door on use. The players' items and scores are on their
+#      entities, the zone's members in the runtime row.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
 # after the restart, and after the Stop.
 #
@@ -66,7 +75,10 @@ if [ "${1:-}" = web ]; then
 	# spawn; the camera lands a few hundredths off (0.5, 0.5), and 600,600
 	# ran along x 0.5 and met the floor at z 4.5, both between cells),
 	# places an NPC there, lifts it a cell, leaves edit mode and talks to
-	# it with E: the server Running from the start, the NPC placed live. The pause menu ([KIT] 4c, extensions/pause_menu): up at
+	# it with E: the server Running from the start, the NPC placed live
+	# ([KIT] stage 4d: restarted by the inspector's "Restart this", its
+	# dialog drawn by kit/npc's client part; then kit/button_door placed
+	# from the palette). The pause menu ([KIT] 4c, extensions/pause_menu): up at
 	# once for the pointer lock headless Chrome does not give (then
 	# skeldat's web_lock_check stand-in in the page, a click off the menu
 	# closes it); Escape and the menu's Edit (at 1200x800 its rows are 41
@@ -112,6 +124,7 @@ if [ "${1:-}" = web ]; then
 	["click", 545, 578], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
+	["click", 977, 163], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
 	["click", 977, 360], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
@@ -121,13 +134,24 @@ if [ "${1:-}" = web ]; then
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
 	["key", "e"], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
-	["frames", 5], ["shot", "\${OUT}/play.png"]
+	["waitlog_any", "kit: entity 3's client part: dialog: Bob: Hello!", 10],
+	["frames", 5], ["shot", "\${OUT}/play.png"],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
+	["click", 300, 600], ["waitlog", "kit editor: cursor at", 10],
+	["click", 332, 339], ["waitlog", "kit editor: state: 4 entities", 10]
 ]
 J
 	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
-	grep -aq "kit/npc 3: says to player:webboss" "$t/out/server.log" ||
+	grep -aq "kit/npc 3: says to webboss" "$t/out/server.log" ||
 		fail "the NPC said nothing to webboss ($t/out/server.log)"
+	# [KIT] stage 4d: Restart this, the NPC's client part, a prefab placed
+	# from the palette
+	for w in "webboss restarts entity 3's kit/npc from the start" \
+			"placed prefab kit/button_door as 4...5"; do
+		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
+	done
 	# The first Escape in the tools took the link, not the menu
 	awk '/kit editor: linking from 3/ { l = 1 } l && /pause: the menu shown/ { exit !c } l && /link cancelled/ { c = 1 } END { exit !c }' "$t/out/page.log" ||
 		fail "Escape did not cancel the link before opening the menu ($t/out/page.log)"
@@ -263,7 +287,7 @@ frames 5
 screenshot @T@/play.png
 event kit_use 9
 wait_log 10000 the server put the player at (8, 1.4, -8)
-wait_log 10000 kit: the screen says "Score: kitboss 1 |
+wait_log_any 10000 kit: the screen says "Score: kitboss 1 |
 wait_log 60000 kit: the screen says "Score: kitbob 1, kitboss 1 |
 wait_log_any 30000 kit: entity 13 shows "Ada: Two came through."
 look_dir -1 -0.4 1
@@ -323,21 +347,21 @@ want "$s" "A fresh save: Running" "kitboss is in edit mode" \
 grep -a "spawner teleports kitboss\|kitboss to the app's default spawn" "$s" &&
 	fail "Play moved the admin, with keep position on ($s)"
 echo "ok: the admin builds the contraption in Kit's editor, Stopped, and plays it"
-want "$s" "kit/button 4: pressed by player:kitboss times 1" \
-	"kit/gate 5: opened by player:kitboss" \
-	"kit/timer 7: started by player:kitboss" "kit/timer 7: tick 3" \
+want "$s" "kit/button 4: pressed by kitboss times 1" \
+	"kit/gate 5: opened by kitboss" \
+	"kit/timer 7: started by kitboss" "kit/timer 7: tick 3" \
 	"kit/timer 7: stopped: its repeats done after 3 ticks" \
-	"kit/lever 6: flipped on by player:kitboss" "kit/lever 6: flipped off by player:kitboss" \
-	"kit/door 8: opened by player:kitboss" "kit/door 8: shut by player:kitboss" \
+	"kit/lever 6: flipped on by kitboss" "kit/lever 6: flipped off by kitboss" \
+	"kit/door 8: opened by kitboss" "kit/door 8: shut by kitboss" \
 	"workbench: kitboss placed stone" \
-	"kit/npc 13: says to player:kitboss \"Welcome!\"" \
-	"kit/item_giver 14: gives player:kitboss 1 key" \
-	"kit/item_giver 14: player:kitboss has had theirs" \
+	"kit/npc 13: says to kitboss \"Welcome!\"" \
+	"kit/item_giver 14: gives kitboss 1 key" \
+	"kit/item_giver 14: kitboss has had theirs" \
 	"Entity 14's kit/item_giver: kitboss has {\"key\":1}" \
-	"kit/teleporter 9: used by player:kitboss to 8 1 -8" \
+	"kit/teleporter 9: used by kitboss to 8 1 -8" \
 	"Entity 9's kit/teleporter teleports kitboss to (8, 1, -8)" \
-	"kit/trigger_zone 10: player:kitboss entered; 1 inside" \
-	"kit/scoreboard 11: Score: kitboss 1" "kit/counter 12: count 1 by player:kitboss"
+	"kit/trigger_zone 10: kitboss entered; 1 inside" \
+	"kit/scoreboard 11: Score: kitboss 1" "kit/counter 12: count 1 by kitboss"
 [ "$(grep -ac "kit/lever 6: flipped" "$s")" = 3 ] || fail "the lever did not flip three times ($s)"
 [ "$(grep -ac "kit/gate 5: opened" "$s")" = 1 ] || fail "the gate opened other than once ($s)"
 # The button an object now: the dig past it is the floor's, a build
@@ -346,24 +370,24 @@ grep -aq "workbench: kitboss dug .*: written" "$s" ||
 grep -aq "routed to its owner" "$s" && fail "a write was routed: the starter objects own no voxels ($s)"
 echo "ok: the admin plays it: the button opens the gate and starts the timer, which flips the lever, which moves the door; the NPC, the item giver, the teleporter into the zone"
 want "$s" "kitbob goes through the round's start: inventory reset" \
-	"kit/spawner 3: spawns player:kitbob" \
+	"kit/spawner 3: spawns kitbob" \
 	"Entity 3's kit/spawner teleports kitbob to (0, 1, -4)" \
 	"workbench: a build by kitbob refused: no edit rights and no grant at (0,0,-3)" \
 	"kit/dig_zone 16: grants dig by its start" \
-	"kit/key_door 15: locked to player:kitbob who has no key" \
-	"kit/item_giver 14: gives player:kitbob 1 key" \
-	"kit/key_door 15: opened by player:kitbob taking their key" \
+	"kit/key_door 15: locked to kitbob who has no key" \
+	"kit/item_giver 14: gives kitbob 1 key" \
+	"kit/key_door 15: opened by kitbob taking their key" \
 	"Entity 15's kit/key_door: kitbob has {}" \
-	"kit/trigger_zone 10: player:kitbob entered; 2 inside" \
+	"kit/trigger_zone 10: kitbob entered; 2 inside" \
 	"kit/scoreboard 11: Score: kitbob 1, kitboss 1" \
-	"kit/counter 12: count 2 by player:kitbob" "kit/counter 12: reached 2" \
-	"kit/npc 13: says to player:kitbob \"Two came through.\"" \
-	"kit/trigger_zone 10: player:kitbob left; "
-[ "$(grep -ac "kit/trigger_zone 10: player:kitbob entered" "$s")" = 1 ] ||
+	"kit/counter 12: count 2 by kitbob" "kit/counter 12: reached 2" \
+	"kit/npc 13: says to kitbob \"Two came through.\"" \
+	"kit/trigger_zone 10: kitbob left; "
+[ "$(grep -ac "kit/trigger_zone 10: kitbob entered" "$s")" = 1 ] ||
 	fail "kitbob entered the zone other than once ($s)"
-[ "$(grep -ac "kit/trigger_zone 10: player:kitboss entered" "$s")" = 1 ] ||
+[ "$(grep -ac "kit/trigger_zone 10: kitboss entered" "$s")" = 1 ] ||
 	fail "kitboss entered the zone other than once ($s)"
-grep -a "player:kitbob left; \|workbench: kitbob left" "$s" | head -1 | grep -q "zone" ||
+grep -a "kitbob left; \|workbench: kitbob left" "$s" | head -1 | grep -q "zone" ||
 	fail "kitbob did not walk out of the zone before leaving the server ($s)"
 grep -aq "workbench: kitbob dug (0,0,-5): written" "$s" ||
 	fail "kitbob did not dig in the dig zone ($s)"
@@ -482,6 +506,66 @@ wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_absent 1500 kit: builds discarded
 event kit_edit {"op": "keep"}
 wait_log 10000 kit editor: refused: keep: no builds discarded since the last Play
+keypress F6
+wait_log 10000 kit editor: state: 19 entities
+event kit_edit {"op": "link", "id": 4, "comp": 0, "output": "pressed", "to": 12, "input": "add"}
+wait_log 10000 kit editor: refused: link: pressed sends a none, add takes a number
+event kit_edit {"op": "place", "prefab": "kit/button_door", "pos": [1, 1, -2]}
+wait_log 10000 kit editor: state: 21 entities
+event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "close_after", "value": 7}
+wait_log 10000 kit editor: state: 21 entities
+event kit_edit {"op": "save_prefab", "ids": [21, 22], "name": "door2"}
+wait_log 10000 kit editor: state: 21 entities
+event kit_edit {"op": "place", "prefab": "kitboss/door2", "pos": [5, 1, 3]}
+wait_log 10000 kit editor: state: 23 entities
+event kit_edit {"op": "set", "id": 23, "comp": 0, "param": "close_after", "value": 4}
+wait_log 10000 kit editor: state: 23 entities
+event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "close_after", "value": 9}
+wait_log 10000 kit editor: state: 23 entities
+event kit_edit {"op": "set", "id": 21, "comp": 0, "param": "hold", "value": 2}
+wait_log 10000 kit editor: refused: set: kit/door has no parameter "hold"
+event kit_edit {"op": "set", "id": 22, "comp": 0, "param": "hold", "value": 2}
+wait_log 10000 kit editor: state: 23 entities
+event kit_edit {"op": "save_prefab", "ids": [21, 22], "name": "door2"}
+wait_log 10000 kit editor: state: 23 entities
+event kit_edit {"op": "place", "type": "kit/button", "pos": [-1, 1, -3]}
+wait_log 10000 kit editor: state: 24 entities
+event kit_edit {"op": "set", "id": 25, "comp": 0, "param": "hold", "value": 0.1}
+wait_log 10000 kit editor: state: 24 entities
+event kit_edit {"op": "link", "id": 25, "comp": 0, "output": "pressed", "to": 3, "input": "spawn"}
+wait_log 10000 kit editor: state: 24 entities
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "prefab", "value": "kitboss/door2"}
+wait_log 10000 kit editor: state: 24 entities
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "max", "value": 1}
+wait_log 10000 kit editor: state: 24 entities
+event kit_edit {"op": "place", "type": "kit/part", "pos": [-2, 1, -6]}
+wait_log 10000 kit editor: state: 25 entities
+event kit_edit {"op": "set", "id": 26, "comp": 0, "param": "shape", "value": "wedge"}
+wait_log 10000 kit editor: state: 25 entities
+event kit_edit {"op": "set", "id": 26, "comp": 0, "param": "size", "value": [2, 1, 1.5]}
+wait_log_any 10000 kit: entity 26 drawn 2x1x1.5 at 0,0,0, solid, a wedge
+event kit_edit {"op": "play"}
+wait_log 10000 kit editor: the server is Running (by kitboss)
+wait_log_any 10000 the server put the player at (0, 1.4, -4)
+event kit_edit {"op": "focus", "sel": 3}
+event kit_use 25
+wait_log 10000 kit editor: signal 25.pressed -> 3.spawn
+wait_log_any 10000 kit: entity 28 drawn
+wait_log_any 10000 kit editor: log of 3:
+delay 400
+event kit_use 25
+wait_log 10000 kit editor: log of 3:
+event kit_edit {"op": "set", "id": 3, "comp": 0, "param": "max", "value": 2}
+wait_log 10000 kit editor: log of 3:
+event kit_edit {"op": "restart", "id": 3, "comp": 0}
+wait_log 10000 kit editor: log of 3:
+event kit_use 21
+wait_log 10000 kit: entity 21's client part: swung to -90
+sync 5000
+event kit_use 25
+wait_log_any 10000 kit: entity 30 drawn
+event kit_edit {"op": "stop"}
+wait_log 10000 kit editor: the server is Stopped (by kitboss)
 sync 5000
 quit
 EOF
@@ -528,7 +612,7 @@ want "$s2" "builds discarded: kitbob 1, kitboss " \
 want "$t/again.log" "kit: builds discarded: Your builds while playing were discarded."
 # The door placed in the round: shut, it stopped the admin's walk short of
 # the zone behind it; open, the walk went through into the zone
-awk '/kit\/door 19: opened by player:kitboss/ { o = NR } /kit\/trigger_zone 20: player:kitboss entered/ { if(!o) bad = 1; e = NR } END { exit !(o && e > o && !bad) }' "$s2" ||
+awk '/kit\/door 19: opened by kitboss/ { o = NR } /kit\/trigger_zone 20: kitboss entered/ { if(!o) bad = 1; e = NR } END { exit !(o && e > o && !bad) }' "$s2" ||
 	fail "the shut door did not stop the walk, or the open one did not let it through ($s2)"
 grep -a "kit: entity 19 drawn\|the server put the player at (-10" "$t/again.log" | sed 's/^.*: kit/  kit/' | cut -c1-120
 # Always keep builds: the admin's dig kept at Stop, no notice
@@ -550,6 +634,43 @@ want = ["Stopped", "items none", "Running", "items key x1", "Stopped",
 it = iter(seen)
 assert all(w in it for w in want), seen
 EOF
+# 6. ([KIT] stage 4d) A typed link refused; prefabs placed, saved, and a
+# copy following the next version (but for what was set on it); the
+# spawner's copies by a button's signal (its line lit, its log in the
+# editor), at most max, taken back by "Restart this" (on_remove) after
+# a live edit (on_params), gone at Stop; a wedge part; the door's client
+# part swinging it on use
+want "$s2" "placed prefab kit/button_door as 21...22" \
+	"saved prefab kitboss/door2 version 1 of 2 entities (0 entities of other copies follow it)" \
+	"placed prefab kitboss/door2 as 23...24" \
+	"saved prefab kitboss/door2 version 2 of 2 entities (2 entities of other copies follow it)" \
+	"kit/spawner 3: made 27 for kitboss" "kit/spawner 3: has 1 copies: no more" \
+	"kit/spawner 3: parameters changed: max" "kit/spawner 3: took away 1 copies" \
+	"kit/spawner 3: made 29 for kitboss" "The round's entities: 2 made gone, 0 removed back"
+want "$t/boss.log" "client part: your score 1" \
+	"kit: entity 13's client part: dialog: Ada: Welcome!"
+want "$t/again.log" "kit editor: signal 25.pressed -> 3.spawn" \
+	"kit editor: log of 3: " "kit: entity 21's client part: swung to -90"
+sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" > "$t/authored2.json"
+sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'runtime'" > "$t/runtime2.json"
+sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'prefab:kitboss/door2'" > "$t/prefab2.json"
+python3 -I - "$t/authored2.json" "$t/runtime2.json" "$t/prefab2.json" <<'EOF' || fail "the rows of stage 4d ($t)"
+import json, sys
+a, r, pf = (json.loads(open(f).read()) for f in sys.argv[1:4])
+e = {x["id"]: x for x in a["entities"]}
+p = lambda i: e[i]["components"][0]["params"]
+assert pf["author"] == "kitboss" and pf["name"] == "door2" and pf["version"] == 2, pf
+assert [m["components"][0]["type"] for m in pf["entities"]] == ["kit/door", "kit/button"], pf
+assert e[23]["prefab"]["of"] == "kitboss/door2" and e[23]["prefab"]["version"] == 2, e[23]
+assert p(21)["close_after"] == 9 and p(23)["close_after"] == 4, (p(21), p(23))
+assert p(24)["hold"] == 2, p(24)
+assert e[24]["components"][0]["links"] == [{"output": "pressed", "to": 23, "input": "open"}], e[24]
+assert p(26)["shape"] == "wedge" and p(26)["size"] == [2, 1, 1.5], p(26)
+assert not any(i in e for i in (27, 28, 29, 30)), sorted(e)
+assert not r.get("made"), r.get("made")
+print("  rows: the prefab's version 2, its copies, the part; nothing made left after Stop")
+EOF
+echo "ok: a typed link refused, prefabs placed and saved (a copy follows), the spawner's copies by a signal, Restart this, a wedge part, the door's client part"
 echo "ok: a restart mid-round, then Stop puts back what the round dug before it; inventory put aside and given back at Play, reset without keep; the spawner places at Play; Save as start keeps what was dug before it"
 python3 -I - "$t/authored.json" "$t/runtime.json" <<'EOF' || fail "the rows ($t)"
 import json, sys
@@ -568,7 +689,15 @@ assert st(11)["text"] == "Score: kitbob 1, kitboss 1", st(11)
 assert st(6)["on"] is True and st(8)["open"] is True, (st(6), st(8))
 assert st(5)["open"] is True and st(12)["count"] == 2, (st(5), st(12))
 assert st(7)["ticks"] == 3 and st(7)["running"] is False, st(7)
-assert r["items"] == {"kitboss": {"key": 1}}, r["items"]
+# [KIT] stage 4d: the items and the scores on the players' entities, and
+# the zone's members saved (kitboss away in it, kitbob walked out)
+pid = lambda n: r["players"][n]["id"]
+pl = lambda n: {k: v for c in r[str(pid(n))] for k, v in c["state"].items()}
+assert pl("kitboss")["items"] == {"key": 1}, pl("kitboss")
+assert not pl("kitbob")["items"], pl("kitbob")  # an empty table: [] or {}
+assert pl("kitboss")["score"] == 1 and pl("kitbob")["score"] == 1, (pl("kitboss"), pl("kitbob"))
+assert pid("kitboss") >= 1000000, r["players"]
+assert r["10"][0].get("inside") == [str(pid("kitboss"))], r["10"]
 assert st(15)["open"] is True and st(16)["dig"] is True, (st(15), st(16))
 print("  rows: 15 instances, 8 links, the scores, the lever on, the doors and the gate open, the key")
 EOF

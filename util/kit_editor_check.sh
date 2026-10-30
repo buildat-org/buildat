@@ -65,22 +65,23 @@ if [ "${1:-}" = web ]; then
 	["key", "F6"], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
 	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
 	["click", 723, 400], ["waitlog", "kit editor: cursor at 3,1,1", 10],
-	["click", 108, 339], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
+	["click", 283, 339], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
 	["click", 700, 310], ["waitlog", "kit editor: cursor at 3,1,3", 10],
-	["click", 480, 339], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
+	["click", 108, 367], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
 	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
 	["click", 1060, 195], ["frames", 2], ["key", "End"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"],
 	["type", "glass"], ["waitlog", "kit editor: 18/1 closed = glass", 10],
 	["click", 929, 332], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
-	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
+	["click", 723, 414], ["waitlog", "kit editor: selected 17", 10],
 	["click", 929, 192], ["waitlog", "kit editor: linking from 17 pressed", 10],
 	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
 	["click", 929, 424], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
-	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
+	["click", 723, 414], ["waitlog", "kit editor: selected 17", 10],
 	["frames", 3], ["shot", "${OUT}/linked.png"],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = true", 10],
+	["waitlog_any", "kit editor: signal 17.pressed -> 18.toggle", 10],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = false", 10],
 	["click", 658, 20, 100], ["waitlog_any", "kit editor: the server is Stopped .by webboss", 10],
 	["frames", 3], ["shot", "${OUT}/stopped.png"],
@@ -91,9 +92,9 @@ if [ "${1:-}" = web ]; then
 EOF
 	"$here/util/web_drive.sh" chrome sample_kit "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
-	for w in "sample_kit/door 18: opened by player:webboss to air" \
+	for w in "sample_kit/door 18: opened by webboss to air" \
 			"Stop by webboss: " "Play by webboss: a round from the start" \
-			"sample_kit/door 4: opened by player:webboss"; do
+			"sample_kit/door 4: opened by webboss"; do
 		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
 	done
 	echo "PASS: Kit's editor in the web client: the admin logs in, places, sets a parameter, links, uses, stops and plays"
@@ -317,14 +318,14 @@ want "$s" "kitboss is in edit mode" \
 	"An edit by kitboss: deleted 19" "An undo by kitboss: 1 entities put back" \
 	"An edit by kitboss: set 18's sample_kit/door closed to \"glass\"" \
 	"An edit by kitboss: linked 17.pressed -> 18.toggle" "kitboss left edit mode" \
-	"sample_kit/button 17: pressed by player:kitboss times 1" \
-	"sample_kit/door 18: opened by player:kitboss to air" \
-	"sample_kit/door 18: closed by player:kitboss to glass" \
-	"sample_kit/button 17: pressed by player:kitboss times 3"
+	"sample_kit/button 17: pressed by kitboss times 1" \
+	"sample_kit/door 18: opened by kitboss to air" \
+	"sample_kit/door 18: closed by kitboss to glass" \
+	"sample_kit/button 17: pressed by kitboss times 3"
 [ "$(grep -ac "sample_kit/door 18: opened" "$s")" = 1 ] ||
 	fail "the door moved after the undo took the link away ($s)"
 echo "ok: the admin edits: edit mode, place, move, delete, the inspector, the link, undo; the edit works in play"
-for op in mode place move delete set link unlink undo builder; do
+for op in mode place move delete set link unlink undo builder restart save_prefab; do
 	grep -aqE "An edit \($op\) by peer [0-9]+ refused: no edit rights here" "$s" ||
 		fail "kitbob's $op was not refused ($s)"
 done
@@ -339,11 +340,11 @@ echo "ok: a player without edit rights is refused each kind of edit and the gran
 # Two builders, Stop and Play: the selection seen, the round thrown away
 # and the start kept, a round from the start again
 want "$s" "kitbob is in edit mode" "kitbob selects entity 3" \
-	"sample_kit/door 4: opened by player:kitbob to air" \
+	"sample_kit/door 4: opened by kitbob to air" \
 	"Stop by kitboss: " "Play by kitboss: a round from the start" \
 	"refused: the server is Stopped" \
 	"An edit by kitbob: placed sample_kit/marker 21 at [0,1,0]" \
-	"sample_kit/button 17: pressed by player:kitboss times 1"
+	"sample_kit/button 17: pressed by kitboss times 1"
 want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"
 # The origins: kitboss's dig of the pillar in play a build, discarded at
 # Stop with the notice; the door's voxel kitbob's use opened the door's own
@@ -351,7 +352,7 @@ want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"
 # the pillar dug in the start (the next round's start)
 want "$s" "sample_kit: a dig at the pillar: written" \
 	"Stop by kitboss: 0 kept cells (edits, builds always kept) put back in, 1 builds discarded: kitboss 1" \
-	"kitboss keeps the builds of kitboss 1: 1 cells put into the start (0 discarded left)"
+	"kitboss keeps the builds of kitboss 1: 1 cells put into the start, 0 entities made, 0 removed (0 discarded left)"
 # The door's voxel: air in the round; none at Stop, as at the start (the
 # app's floor alone: the door set its voxel first in the first round);
 # stone as the next round starts (sample_kit's look once a tick may miss

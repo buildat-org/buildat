@@ -1,0 +1,13 @@
+{
+	"format": "kit_prefab",
+	"author": "kit",
+	"name": "button_door",
+	"version": 1,
+	"entities": [
+		{"id": 1, "name": "door", "pos": [0, 0, 0],
+			"components": [{"type": "kit/door", "params": {"close_after": 3}}]},
+		{"id": 2, "name": "button", "pos": [-1, 0, -1],
+			"components": [{"type": "kit/button", "links": [
+				{"output": "pressed", "to": 1, "input": "open"}]}]}
+	]
+}

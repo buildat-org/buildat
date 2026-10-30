@@ -13,13 +13,21 @@
 **   "R<lua literal>"     a handler run: {type, handler, id, pos, params,
 **                        state, args, nargs, player, and the player's
 **                        inventory: items (Kit's counts), inv = {type,
-**                        id, params, state} (the replacing provider) or
-**                        inv_self}; answers its effects, {set = {{key,
-**                        value}...}, emit = {{output, value}...}, voxel =
-**                        name, after = seconds (-1: none), teleport =
-**                        {x, y, z}, items = {item = n} (the player's list
-**                        after inventory calls), inv_set = {{key,
-**                        value}...} (the provider's state)}; a call into
+**                        id, params, state} (the replacing provider, or the
+**                        player entity's own kit/inventory) or inv_self;
+**                        [KIT] stage 4d: player_id (the player entity),
+**                        names {by = name}, made {id...}, players (a type's
+**                        `players`), next_id and sizes {"prefab:<name>" |
+**                        "entity:<id>" = entities a copy makes}}; answers
+**                        its effects, {set = {{key, value}...} (a table
+**                        changed in place too), emit = {{output,
+**                        value}...}, voxel = name, after = seconds (-1:
+**                        none), teleport = {x, y, z}, items = {item = n}
+**                        (the player's list after inventory calls),
+**                        inv_set = {{key, value}...} (the provider's
+**                        state), spawn = {{ref, pos|null, id}...}, remove
+**                        = {id...}, send = {{id, input, value}...}, log =
+**                        {line...}}; a call into
 **                        the provider (inv) is marked by "P" before it and
 **                        "p" after it, ahead of the answer
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
@@ -254,6 +262,18 @@ static const char PRELUDE[] =
 "		sets[#sets + 1] = {k, v == nil and NULL or v}\n"
 "	end})\n"
 "end\n"
+"-- A table in the state changed in place (c.state.t[k] = v) is a set too:\n"
+"-- each table's JSON before the run, compared after it\n"
+"local function in_place(state, sets)\n"
+"	local was = {}\n"
+"	for k, v in pairs(state) do if type(v) == 'table' then was[k] = json(v) end end\n"
+"	return function()\n"
+"		for k, s in pairs(was) do\n"
+"			local v = rawget(state, k)\n"
+"			if type(v) == 'table' and json(v) ~= s then sets[#sets + 1] = {k, v} end\n"
+"		end\n"
+"	end\n"
+"end\n"
 "local MAX_ITEMS = 1000000\n"
 "local KIT_INV = {\n"
 "	inventory_count = function(p, player, item) return p.items[item] or 0 end,\n"
@@ -268,14 +288,16 @@ static const char PRELUDE[] =
 "	inventory_list = function(p, player) return copy(p.items) end,\n"
 "}\n"
 "local function inventory(req, fx, c)\n"
-"	local player, def, p, touched = req.player, KIT_INV, nil, false\n"
+"	local player, def, p, touched, inv_done = req.player, KIT_INV, nil, false, nil\n"
 "	if req.inv_self then def, p = types[req.type], c\n"
 "	elseif req.inv then\n"
 "		def = types[req.inv.type]\n"
 "		if not def then error('no inventory provider ' .. tostring(req.inv.type), 0) end\n"
 "		fx.inv_set = {}\n"
+"		local st = req.inv.state or {}\n"
 "		p = {id = req.inv.id, params = req.inv.params or {},\n"
-"			state = proxy(req.inv.state or {}, fx.inv_set)}\n"
+"			state = proxy(st, fx.inv_set)}\n"
+"		inv_done = in_place(st, fx.inv_set)\n"
 "		function p:log(...) log(req.inv.type .. ' ' .. tostring(req.inv.id) .. ': ' .. line(...)) end\n"
 "	else p = {items = req.items or {}} end\n"
 "	local function call(h, ...)\n"
@@ -311,7 +333,10 @@ static const char PRELUDE[] =
 "		local l = call('inventory_list', player, ext or {})\n"
 "		return type(l) == 'table' and copy(l) or {}\n"
 "	end\n"
-"	function inv.finish() if touched then fx.items = inv.list() end end\n"
+"	function inv.finish()\n"
+"		if touched then fx.items = inv.list() end\n"
+"		if inv_done then inv_done() end\n"
+"	end\n"
 "	return inv\n"
 "end\n"
 "local function run(req)\n"
@@ -320,9 +345,42 @@ static const char PRELUDE[] =
 "	local h = def[req.handler]\n"
 "	if type(h) ~= 'function' then return '{}' end\n"
 "	local state, sets, emits, fx = req.state or {}, {}, {}, {}\n"
-"	local c = {id = req.id, pos = req.pos, params = req.params or {}}\n"
+"	local c = {id = req.id, pos = req.pos, params = req.params or {},\n"
+"		player = req.player_id, made = req.made or {}, players = req.players}\n"
 "	c.state = proxy(state, sets)\n"
+"	local state_done = in_place(state, sets)\n"
 "	local inv = inventory(req, fx, c)\n"
+"	local names = req.names or {}\n"
+"	function c:name(by) by = tostring(by) return names[by] or by end\n"
+"	-- Entities: copies made, removed, signalled; the host checks each\n"
+"	-- against what the component reaches\n"
+"	local spawns, removes, sends, lines = {}, {}, {}, {}\n"
+"	local next_id, sizes = req.next_id or 0, req.sizes or {}\n"
+"	function c:spawn(t)\n"
+"		if type(t) ~= 'table' then error('spawn: {prefab = name} or {entity = id}', 2) end\n"
+"		local ref = t.prefab ~= nil and 'prefab:' .. tostring(t.prefab) or\n"
+"			t.entity ~= nil and 'entity:' .. tostring(t.entity) or nil\n"
+"		local n = ref and sizes[ref]\n"
+"		if not n then error('spawn: ' .. tostring(ref) .. ' is none it reaches', 2) end\n"
+"		if #spawns >= 16 then error('spawn: 16 a run at most', 2) end\n"
+"		local pos = NULL\n"
+"		if t.pos ~= nil then\n"
+"			if type(t.pos) ~= 'table' then error('spawn: pos is {x, y, z}', 2) end\n"
+"			pos = {tonumber(t.pos[1]) or 0, tonumber(t.pos[2]) or 0, tonumber(t.pos[3]) or 0}\n"
+"		end\n"
+"		local id = next_id\n"
+"		next_id = next_id + n\n"
+"		spawns[#spawns + 1] = {ref, pos, id}\n"
+"		return id\n"
+"	end\n"
+"	function c:remove(id)\n"
+"		if #removes >= 64 then error('remove: 64 a run at most', 2) end\n"
+"		removes[#removes + 1] = tonumber(id) or req.id\n"
+"	end\n"
+"	function c:send(id, input, value)\n"
+"		if #sends >= 64 then error('send: 64 a run at most', 2) end\n"
+"		sends[#sends + 1] = {tonumber(id) or 0, tostring(input), value == nil and NULL or value}\n"
+"	end\n"
 "	function c:count(item, ext) return inv.count(item, ext) end\n"
 "	function c:has(item, n, ext) return inv.count(item, ext) >= (tonumber(n) or 1) end\n"
 "	function c:add(item, n, ext) return inv.change('inventory_add', item, n, ext) end\n"
@@ -336,11 +394,21 @@ static const char PRELUDE[] =
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
 "		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
 "	end\n"
-"	function c:log(...) log(req.type .. ' ' .. tostring(req.id) .. ': ' .. line(...)) end\n"
+"	-- A line in the server's log at once, and the entity's own in the answer\n"
+"	function c:log(...)\n"
+"		local s = line(...)\n"
+"		log(req.type .. ' ' .. tostring(req.id) .. ': ' .. s)\n"
+"		if #lines < 20 then lines[#lines + 1] = s:sub(1, 200) end\n"
+"	end\n"
 "	h(c, unpack(req.args or {}, 1, req.nargs or 0))\n"
 "	inv.finish()\n"
+"	state_done()\n"
 "	fx.set = sets\n"
 "	fx.emit = emits\n"
+"	if #spawns > 0 then fx.spawn = spawns end\n"
+"	if #removes > 0 then fx.remove = removes end\n"
+"	if #sends > 0 then fx.send = sends end\n"
+"	if #lines > 0 then fx.log = lines end\n"
 "	return json(fx)\n"
 "end\n"
 "function box_request(s)\n"

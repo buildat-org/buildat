@@ -54,7 +54,8 @@ local M = {}
 local E = {editing = false, running = false, by = "", can_edit = false,
 	state = nil, sel = nil, link = nil, cursor = nil, pending = {}, status = "",
 	windows = {}, builders = {}, seen = {}, labels = {}, label_text = {},
-	listeners = {}, discarded = {}, always_keep = false, choose = false}
+	listeners = {}, discarded = {}, always_keep = false, choose = false,
+	group = {}, prefab_name = "", logs = {}, flows = {}}
 local O = nil -- the app's options
 
 local WARN = magic.Color(1.0, 0.55, 0.45)
@@ -134,10 +135,21 @@ local function entities()
 	return r
 end
 
+-- [KIT] stage 4d: the round's own entities (made in play) and the players,
+-- shown and selected, not edited
+local function made()
+	return E.state and E.state.made or {}
+end
+
 local function find(id)
 	for _, e in ipairs(entities()) do
 		if e.id == id then
 			return e
+		end
+	end
+	for _, e in ipairs(made()) do
+		if e.id == id then
+			return e, true
 		end
 	end
 end
@@ -176,6 +188,8 @@ local function window(halign, x, bottom)
 	w:SetAlignment(halign, bottom and magic.VA_BOTTOM or magic.VA_TOP)
 	w:SetPosition(x, bottom and -50 or 40)
 	w.opacity = 0.92
+	-- Under the menus (the pause menu over a wide inspector)
+	w.priority = -1
 	E.windows[#E.windows + 1] = w
 	return w
 end
@@ -239,7 +253,19 @@ local function field(name, d, values)
 	local f = {name = name, label = name, default = d.default,
 		min = d.min, max = d.max}
 	local t = d.type
-	if t == "number" or t == "bool" then
+	if type(d.choices) == "table" then
+		f.type = "choice"
+		f.choices = {}
+		for _, c in ipairs(d.choices) do
+			f.choices[#f.choices + 1] = {tostring(c), c}
+		end
+	elseif t == "prefab" then
+		f.type = "choice"
+		f.choices = {{"none", ""}}
+		for _, p in ipairs(E.state.prefabs or {}) do
+			f.choices[#f.choices + 1] = {p, p}
+		end
+	elseif t == "number" or t == "bool" then
 		f.type = t
 	elseif t == "entity" then
 		f.type = "choice"
@@ -257,12 +283,33 @@ local function field(name, d, values)
 	return f
 end
 
-local rebuild, people
+local rebuild, people, show_log
 
-local function inspector(w, e)
+-- A signal's value's type as a label says it ("" for any)
+local function typed(t, kind, name)
+	local ty = t[kind .. "_types"] and t[kind .. "_types"][name]
+	return (ty and ty ~= "any") and " (" .. ty .. ")" or ""
+end
+
+-- [KIT] stage 4d: an entity of the round's own (made in play) or a
+-- player's, shown and not edited
+local function inspect_made(w, e)
+	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	text(w, e.kind == "player" and "A player" or ("Made in play" ..
+			(e.made == "b" and " by " .. tostring(e.made_by) or "") ..
+			", by entity " .. tostring(e.maker) .. ": gone at Stop"), DIM)
+	for _, c in ipairs(e.components or {}) do
+		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
+	end
+end
+
+local function inspector(w, e, is_made)
+	if is_made then
+		return inspect_made(w, e)
+	end
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
 	if e.pos then
-		text(w, string.format("at %d, %d, %d", e.pos[1], e.pos[2], e.pos[3]),
+		text(w, string.format("at %g, %g, %g", e.pos[1], e.pos[2], e.pos[3]),
 				DIM)
 	end
 	for ci, c in ipairs(e.components or {}) do
@@ -325,7 +372,7 @@ local function inspector(w, e)
 			button(r, "Link " .. o, function()
 				E.link = {id = e.id, comp = ci - 1, output = o}
 				E.status = "Linking " .. e.id .. "'s " .. o ..
-						": select the entity to link to"
+						typed(t, "outputs", o) .. ": select the entity to link to"
 				log:info("kit editor: linking from " .. e.id .. " " .. o)
 				rebuild()
 			end)
@@ -352,6 +399,15 @@ local function inspector(w, e)
 			text(w, "It has no inputs", WARN)
 		end
 	end
+	-- [KIT] stage 4d: a prefab's copy, and the group a prefab is made of
+	if type(e.prefab) == "table" then
+		text(w, "Prefab " .. tostring(e.prefab.of) .. " " ..
+				tostring(e.prefab.version), DIM)
+	end
+	button(w, E.group[e.id] and "In the group" or "Add to group", function()
+		E.group[e.id] = not E.group[e.id] or nil
+		rebuild()
+	end)
 end
 
 rebuild = function()
@@ -361,6 +417,7 @@ rebuild = function()
 	E.windows = {}
 	if not E.editing then
 		people()
+		show_log()
 		return
 	end
 	local w = window(magic.HA_LEFT, 10)
@@ -377,6 +434,17 @@ rebuild = function()
 		button(pr, t, function()
 			local c = E.cursor or {0, O.ground_y, 0}
 			send({op = "place", type = t, pos = c})
+		end)
+	end
+	-- And the prefabs ([KIT] stage 4d), after the types
+	local n = #(E.state.palette or {})
+	for i, p in ipairs(E.state.prefabs or {}) do
+		if (n + i) % 3 == 1 then
+			pr = row(w)
+		end
+		button(pr, "[" .. p .. "]", function()
+			local c = E.cursor or {0, O.ground_y, 0}
+			send({op = "place", prefab = p, pos = c})
 		end)
 	end
 	local r = row(w)
@@ -402,10 +470,60 @@ rebuild = function()
 	if E.status ~= "" then
 		text(w, E.status, WARN)
 	end
+	-- The group a prefab is saved of: "Add to group" in the inspector
+	local ids = {}
+	for id in pairs(E.group) do
+		if find(id) then
+			ids[#ids + 1] = id
+		else
+			E.group[id] = nil
+		end
+	end
+	table.sort(ids)
+	if #ids > 0 then
+		local gr = row(w)
+		label(gr, "Group: " .. table.concat(ids, " "))
+		button(gr, "Clear", function()
+			E.group = {}
+			rebuild()
+		end)
+		local sr = row(w)
+		label(sr, "Prefab name:")
+		edit(sr, E.prefab_name, function(s)
+			E.prefab_name = s
+		end)
+		button(sr, "Save prefab", function()
+			send({op = "save_prefab", ids = ids, name = E.prefab_name})
+		end)
+	end
 	people()
-	local e = E.sel and find(E.sel)
+	local e, is_made = nil, false
+	if E.sel then
+		e, is_made = find(E.sel)
+	end
 	if e then
-		inspector(window(magic.HA_RIGHT, -10), e)
+		inspector(window(magic.HA_RIGHT, -10), e, is_made)
+	end
+	show_log()
+end
+
+-- The selected entity's log ([KIT] stage 4d): its c:log lines and Kit's
+-- about it, its last ones, below on the right. Rebuilt alone as it grows
+show_log = function()
+	if E.logwin then
+		E.logwin:Remove()
+		E.logwin = nil
+	end
+	local lines = E.editing and E.sel and E.logs[E.sel] or {}
+	if #lines == 0 then
+		return
+	end
+	local lw = window(magic.HA_RIGHT, -10, true)
+	table.remove(E.windows)
+	E.logwin = lw
+	text(lw, "Log of " .. E.sel .. ":", DIM)
+	for i = math.max(1, #lines - 7), #lines do
+		text(lw, tostring(lines[i]))
 	end
 end
 
@@ -527,7 +645,8 @@ local function over_windows(x, y)
 			return true
 		end
 	end
-	return E.people ~= nil and inside(E.people, x, y)
+	return (E.people ~= nil and inside(E.people, x, y)) or
+			(E.logwin ~= nil and inside(E.logwin, x, y))
 end
 
 local function select(id)
@@ -624,7 +743,13 @@ local function click_view(mx, my)
 		return c and e.pos[1] == c[1] and e.pos[2] == c[2] and e.pos[3] == c[3]
 	end
 	local best, bd = nil, 0.03 * 0.03
-	for _, e in ipairs(entities()) do
+	local all = entities()
+	for _, e in ipairs(made()) do
+		if e.kind ~= "player" then
+			all[#all + 1] = e
+		end
+	end
+	for _, e in ipairs(all) do
 		if e.pos then
 			local p = cam:WorldToScreenPoint(center(e))
 			local d = (p.x - fx) * (p.x - fx) + (p.y - fy) * (p.y - fy)
@@ -652,6 +777,18 @@ local function draw()
 		return
 	end
 	local dbg = O.debug
+	local now = buildat.get_time_us()
+	-- The round's own entities, orange (players are drawn by the app)
+	for _, e in ipairs(made()) do
+		if e.pos and e.kind ~= "player" then
+			local x, y, z = e.pos[1], e.pos[2], e.pos[3]
+			dbg:AddBoundingBox(magic.BoundingBox(
+					magic.Vector3(x - 0.35, y - 0.35, z - 0.35),
+					magic.Vector3(x + 0.35, y + 0.35, z + 0.35)),
+					e.id == E.sel and magic.Color(1, 0.9, 0.2) or
+					magic.Color(1, 0.55, 0.1), false)
+		end
+	end
 	for _, e in ipairs(entities()) do
 		if e.pos then
 			local x, y, z = e.pos[1], e.pos[2], e.pos[3]
@@ -696,10 +833,14 @@ local function draw()
 					local to = find(l.to)
 					if to and to.pos then
 						local a, b = center(e), center(to)
-						dbg:AddLine(a, b, magic.Color(0.2, 1, 0.4), false)
+						-- Lit while a signal passes ([KIT] stage 4d)
+						local lit = (E.flows[e.id .. ">" .. l.to] or 0) > now
+						local col = lit and magic.Color(1, 1, 0.3) or
+								magic.Color(0.2, 1, 0.4)
+						dbg:AddLine(a, b, col, false)
 						dbg:AddCross(magic.Vector3(a.x + (b.x - a.x) * 0.85,
 								a.y + (b.y - a.y) * 0.85, a.z + (b.z - a.z) * 0.85),
-								0.3, magic.Color(0.2, 1, 0.4), false)
+								lit and 0.6 or 0.3, col, false)
 					end
 				end
 			end
@@ -711,7 +852,7 @@ local function draw()
 	end
 end
 
-local function key_down(key, ctrl)
+local function key_down(key, ctrl, shift)
 	local e = E.sel and find(E.sel)
 	if key == magic.KEY_TAB then
 		local list, at = {}, 0
@@ -734,9 +875,11 @@ local function key_down(key, ctrl)
 		local d = ({[magic.KEY_LEFT] = {-1, 0, 0}, [magic.KEY_RIGHT] = {1, 0, 0},
 			[magic.KEY_UP] = {0, 0, 1}, [magic.KEY_DOWN] = {0, 0, -1},
 			[magic.KEY_PAGEUP] = {0, 1, 0}, [magic.KEY_PAGEDOWN] = {0, -1, 0}})[key]
+		-- Shift: a quarter of a cell, off the voxels' grid ([KIT] 4d)
+		local k = shift and 0.25 or 1
 		if d then
-			send({op = "move", id = e.id, pos = {e.pos[1] + d[1],
-				e.pos[2] + d[2], e.pos[3] + d[3]}})
+			send({op = "move", id = e.id, pos = {e.pos[1] + d[1] * k,
+				e.pos[2] + d[2] * k, e.pos[3] + d[3] * k}})
 		end
 	end
 end
@@ -909,6 +1052,28 @@ function M.editor(options)
 		end
 		people()
 	end)
+	-- [KIT] stage 4d: signals passing along links light their lines, and
+	-- the selected entity's log
+	buildat.sub_packet("kit:flow", function(data)
+		local a = network.parse_json(data)
+		local till = buildat.get_time_us() + 600000
+		for _, f in ipairs(type(a) == "table" and a or {}) do
+			E.flows[tostring(f[1]) .. ">" .. tostring(f[3])] = till
+			log:info("kit editor: signal " .. tostring(f[1]) .. "." ..
+					tostring(f[2]) .. " -> " .. tostring(f[3]) .. "." ..
+					tostring(f[4]))
+		end
+	end)
+	buildat.sub_packet("kit:log", function(data)
+		local l = network.parse_json(data)
+		if type(l) ~= "table" or type(l.lines) ~= "table" then
+			return
+		end
+		E.logs[tonumber(l.id) or 0] = l.lines
+		log:info("kit editor: log of " .. tostring(l.id) .. ": " ..
+				tostring(l.lines[#l.lines]))
+		show_log()
+	end)
 	buildat.sub_packet("kit:edit_refused", function(data)
 		E.status = "Refused: " .. tostring(data)
 		log:info("kit editor: refused: " .. tostring(data))
@@ -929,7 +1094,7 @@ function M.editor(options)
 		end
 		if E.editing then
 			local q = data:GetInt("Qualifiers")
-			key_down(key, q == magic.QUAL_CTRL)
+			key_down(key, q == magic.QUAL_CTRL, q == magic.QUAL_SHIFT)
 		end
 	end)
 	magic.SubscribeToEvent("MouseButtonDown", function(_, data)
@@ -953,13 +1118,28 @@ end
 -- ---- Play: what every client sees of Kit, edit rights or not
 -- A positional entity's node ("kit:<id>") carries its shared state (the
 -- var "kit:<key>", JSON) and what its types show (the var "kit_show",
--- {look, hud}): a type's look (builtin/kit/api.h) is drawn where the
--- entity is, in both modes, from its state: a box (size: its sides,
--- offset: its middle from the entity's position, as the server made them
--- of its extent) or a sphere, its `when` over it while the state `state`
--- is true, a collision shape (a static body in the scene's physics) while
+-- {look, hud, client, shared, player}): a type's look (builtin/kit/api.h)
+-- is drawn where the entity is, in both modes, from its state: a box
+-- (size: its sides, offset: its middle from the entity's position, as the
+-- server made them of its extent), a sphere or ([KIT] stage 4d) a wedge,
+-- turned by its rotation, its material's, its `when` over it while the
+-- state `state` is true (a swing a quarter turn round a hinge at its -x
+-- edge), a collision shape (a static body in the scene's physics) while
 -- solid, its state `text` over it; a type's `hud = key` puts that state on
 -- the screen.
+-- **A type's client part** ([KIT] stage 4d): <name>.client.lua beside the
+-- type, sent at join, run as the client's own Lua is (this module's
+-- sandbox); it returns a table of handlers, each given `e`, the entity as
+-- this client has it:
+--   on_add(e), on_state(e, key) (a shared state changed: e.state[key]),
+--   on_update(e, dt) (each frame), on_use(e) (this player used it, before
+--   the server hears of it), on_remove(e)
+--   e.id, e.node (its replicated node), e.look, e.hinge, e.body (its look's
+--   nodes: the body turns with the hinge), e.state (the server's), e.mine
+--   (this player's own entity), e:shown(key) (the state as drawn),
+--   e:near(d) (this player's entity within d of it),
+--   e:predict(key, value, seconds) (drawn so at once, until the server's
+--   value changes or the seconds, 1, pass), e:log(text)
 -- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray
 -- (its look's box, or near its cell), kit.use(id) uses it: the server
 -- checks range and whether it is usable. The player's inventory (c:add,
@@ -969,7 +1149,7 @@ end
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
 -- sends an edit as the editor would, "event kit_use <id>" a use.
 local replicate = require("buildat/extension/replicate")
-local P = {nodes = {}, items = ""}
+local P = {nodes = {}, items = "", parts = {}, you = 0}
 
 local function parse(v)
 	if v:IsEmpty() then
@@ -988,12 +1168,54 @@ local function shown(v)
 	return tostring(v)
 end
 
+-- A state as it is drawn: the server's, or this client's prediction until
+-- the server's value changes from what it was then, or its time is up
+local function value(n, key)
+	key = tostring(key)
+	local server = parse(n.node:GetVar("kit:" .. key))
+	local p = n.predicted and n.predicted[key]
+	if p then
+		if buildat.get_time_us() < p.till and shown(server) == p.was then
+			return p.value
+		end
+		n.predicted[key] = nil
+	end
+	return server
+end
+
 local function drop_look(n)
 	if n.look then
 		n.look:Remove()
 	end
-	n.look, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil, nil,
-			nil, nil, nil, nil
+	n.look, n.hinge, n.body, n.mat, n.text, n.solid, n.box, n.on = nil, nil,
+			nil, nil, nil, nil, nil, nil
+end
+
+-- A client part's handler, protected: one that fails is left off for
+-- that entity, logged
+local function call(n, part, fn, ...)
+	local f = part[fn]
+	if type(f) ~= "function" or (n.failed and n.failed[part]) then
+		return
+	end
+	local ok, err = pcall(f, n.e, ...)
+	if not ok then
+		n.failed = n.failed or {}
+		n.failed[part] = true
+		log:warning("kit: entity " .. tostring(n.e.id) .. "'s client part " ..
+				fn .. ": " .. tostring(err))
+	end
+end
+
+local function parts_of(n)
+	local r = {}
+	local show = type(n.show) == "table" and n.show or {}
+	for _, t in ipairs(type(show.client) == "table" and show.client or {}) do
+		if P.parts[t] then
+			r[#r + 1] = P.parts[t]
+		end
+	end
+	return r
 end
 
 replicate.sub_sync_node_added({}, function(node)
@@ -1005,6 +1227,11 @@ end)
 replicate.sub_sync_node_removed(function(node, node_id)
 	for id, n in pairs(P.nodes) do
 		if n.node:GetID() == node_id then
+			if n.added then
+				for _, part in ipairs(parts_of(n)) do
+					call(n, part, "on_remove")
+				end
+			end
 			drop_look(n)
 			P.nodes[id] = nil
 		end
@@ -1012,12 +1239,13 @@ replicate.sub_sync_node_removed(function(node, node_id)
 end)
 
 -- A look's box as it is drawn now (on: its state is true): its sides, its
--- middle from the entity, whether it is solid and its colour
+-- middle from the entity, whether it is solid and its colour. A swing's
+-- the box it is turned to (a quarter round its -x edge, towards +z)
 local function look_box(look, on)
 	local size, off = {}, {0, 0, 0}
 	if type(look.size) == "table" then
 		for i = 1, 3 do
-			size[i] = tonumber(look.size[i]) or 1
+			size[i] = math.max(0.02, math.min(64, tonumber(look.size[i]) or 1))
 		end
 	else
 		local s = (tonumber(look.size) or 0.4) * 2
@@ -1044,7 +1272,6 @@ local function look_box(look, on)
 		end
 	end
 	if w.swing then
-		-- A quarter turn round its -x edge, towards +z
 		local hinge, front = off[1] - size[1] / 2, off[3] - size[3] / 2
 		size[1], size[3] = size[3], size[1]
 		off[1], off[3] = hinge + size[1] / 2, front + size[3] / 2
@@ -1056,12 +1283,52 @@ local function v3(t)
 	return magic.Vector3(t[1], t[2], t[3])
 end
 
+-- A unit wedge (-0.5...0.5), its slope rising along +z to the full height
+-- at its back
+local function wedge(node)
+	local cg = node:CreateComponent("CustomGeometry")
+	cg:SetNumGeometries(1)
+	cg:BeginGeometry(0, magic.TRIANGLE_LIST)
+	local a, b = -0.5, 0.5
+	local function tri(p1, p2, p3, nrm)
+		for _, p in ipairs({p1, p2, p3}) do
+			cg:DefineVertex(magic.Vector3(p[1], p[2], p[3]))
+			cg:DefineNormal(nrm)
+			cg:DefineTexCoord(magic.Vector2(0, 0))
+		end
+	end
+	local slope = magic.Vector3(0, 1, -1):Normalized()
+	-- The slope, the bottom, the back, the two sides
+	tri({a, a, a}, {a, b, b}, {b, b, b}, slope)
+	tri({a, a, a}, {b, b, b}, {b, a, a}, slope)
+	tri({a, a, a}, {b, a, a}, {b, a, b}, magic.Vector3(0, -1, 0))
+	tri({a, a, a}, {b, a, b}, {a, a, b}, magic.Vector3(0, -1, 0))
+	tri({a, a, b}, {b, a, b}, {b, b, b}, magic.Vector3(0, 0, 1))
+	tri({a, a, b}, {b, b, b}, {a, b, b}, magic.Vector3(0, 0, 1))
+	tri({a, a, a}, {a, a, b}, {a, b, b}, magic.Vector3(-1, 0, 0))
+	tri({b, a, a}, {b, b, b}, {b, a, b}, magic.Vector3(1, 0, 0))
+	cg:Commit()
+	return cg
+end
+
+-- A look's material ([KIT] stage 4d): plain, metal, glass or glow
+local TECHNIQUES = {glass = "Techniques/NoTextureAlpha.xml",
+	glow = "Techniques/NoTextureUnlit.xml"}
+local function material(name)
+	local m = magic.Material:new()
+	m:SetTechnique(0, magic.cache:GetResource("Technique",
+			TECHNIQUES[name] or "Techniques/NoTexture.xml"))
+	m:SetShaderParameter("MatSpecColor", name == "metal" and
+			magic.Color(0.6, 0.6, 0.6, 30) or magic.Color(0.05, 0.05, 0.05))
+	return m
+end
+
 -- The look drawn as its state has it: built the first time, changed as the
 -- state changes
 local function draw_look(id, n, look)
 	local on = false
 	if look.state then
-		on = parse(n.node:GetVar("kit:" .. tostring(look.state))) == true
+		on = value(n, look.state) == true
 	end
 	if n.look and n.on == on then
 		return
@@ -1072,16 +1339,18 @@ local function draw_look(id, n, look)
 	if not n.look then
 		local scene = replicate.main_scene
 		n.look = scene:CreateChild("kit_look")
-		n.body = n.look:CreateChild("Body")
-		local m = n.body:CreateComponent("StaticModel")
-		m.model = magic.cache:GetResource("Model", "Models/" ..
-				(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
-		n.mat = magic.Material:new()
-		n.mat:SetTechnique(0, magic.cache:GetResource("Technique",
-				"Techniques/NoTexture.xml"))
-		n.mat:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
-		m.material = n.mat
-		m.castShadows = true
+		n.hinge = n.look:CreateChild("Hinge")
+		n.body = n.hinge:CreateChild("Body")
+		n.mat = material(look.material)
+		if look.shape == "wedge" then
+			wedge(n.body):SetMaterial(0, n.mat)
+		else
+			local m = n.body:CreateComponent("StaticModel")
+			m.model = magic.cache:GetResource("Model", "Models/" ..
+					(look.shape == "sphere" and "Sphere" or "Box") .. ".mdl")
+			m.material = n.mat
+			m.castShadows = true
+		end
 		if look.text then
 			local l = n.look:CreateChild("Text")
 			local t = l:CreateComponent("Text3D")
@@ -1094,34 +1363,98 @@ local function draw_look(id, n, look)
 			n.text = t
 			n.text_node = l
 		end
+		local r = type(look.rotation) == "table" and look.rotation or {}
+		n.look.rotation = magic.Quaternion(tonumber(r[1]) or 0,
+				tonumber(r[2]) or 0, tonumber(r[3]) or 0)
 		n.at = nil
 	end
-	n.body.scale = v3(b.size)
-	n.body.position = v3(b.off)
-	n.mat:SetShaderParameter("MatDiffColor", color(b.color,
-			magic.Color(0.8, 0.8, 0.8)))
+	-- A swing turns the body round its hinge: the middle of its thickness
+	-- at its -x end, so the turned box is look_box's
+	if type(look.when) == "table" and look.when.swing then
+		local c = look_box(look, false)
+		local px = c.off[1] - c.size[1] / 2 + c.size[3] / 2
+		n.hinge.position = magic.Vector3(px, 0, c.off[3])
+		n.hinge.rotation = magic.Quaternion(0, on and -90 or 0, 0)
+		n.body.position = magic.Vector3(c.off[1] - px, c.off[2], 0)
+		n.body.scale = v3(c.size)
+	else
+		n.body.position = v3(b.off)
+		n.body.scale = v3(b.size)
+	end
+	local col = color(b.color, magic.Color(0.8, 0.8, 0.8))
+	if look.material == "glass" then
+		col = magic.Color(col.r, col.g, col.b, 0.4)
+	end
+	n.mat:SetShaderParameter("MatDiffColor", col)
 	if n.text_node then
 		n.text_node.position = magic.Vector3(b.off[1], b.off[2] + b.size[2] / 2 +
 				0.45, b.off[3])
 	end
-	-- Solid: a static body (no mass) the players' bodies meet
+	-- Solid: a static body (no mass) the players' bodies meet; a wedge's
+	-- its slope and its back, thin
 	if n.solid then
 		n.solid:Remove()
 		n.solid = nil
 	end
 	if b.solid then
 		n.solid = n.look:CreateChild("Solid")
-		n.solid.position = v3(b.off)
-		n.solid:CreateComponent("RigidBody")
-		n.solid:CreateComponent("CollisionShape"):SetBox(v3(b.size))
+		local function box(pos, size, rot)
+			local s = n.solid:CreateChild("Box")
+			s.position = pos
+			if rot then
+				s.rotation = rot
+			end
+			s:CreateComponent("RigidBody")
+			s:CreateComponent("CollisionShape"):SetBox(size)
+		end
+		if look.shape == "wedge" then
+			local sy, sz = b.size[2], b.size[3]
+			box(v3(b.off), magic.Vector3(b.size[1], 0.1,
+					math.sqrt(sy * sy + sz * sz)), magic.Quaternion(
+					-math.deg(math.atan2(sy, sz)), 0, 0))
+			box(magic.Vector3(b.off[1], b.off[2], b.off[3] + sz / 2 - 0.05),
+					magic.Vector3(b.size[1], sy, 0.1))
+		else
+			box(v3(b.off), v3(b.size))
+		end
 	end
 	log:info(string.format("kit: entity %d drawn %gx%gx%g at %g,%g,%g%s", id,
 			b.size[1], b.size[2], b.size[3], b.off[1], b.off[2], b.off[3],
-			b.solid and ", solid" or ""))
+			b.solid and ", solid" or "") ..
+			(look.shape == "wedge" and ", a wedge" or ""))
+end
+
+-- The entity as its client parts have it
+local function entity_view(id, n)
+	local e = {id = id, node = n.node, state = {}}
+	function e:shown(key)
+		return value(n, key)
+	end
+	function e:predict(key, v, seconds)
+		key = tostring(key)
+		n.predicted = n.predicted or {}
+		n.predicted[key] = {value = v, was = shown(parse(n.node:GetVar("kit:" ..
+				key))), till = buildat.get_time_us() + (tonumber(seconds) or 1) *
+				1000000}
+		n.on = nil
+		log:info("kit: entity " .. id .. " predicted " .. key .. " = " ..
+				shown(v))
+	end
+	function e:log(text)
+		log:info("kit: entity " .. id .. "'s client part: " .. tostring(text))
+	end
+	-- Whether this player's own entity is within d of it
+	function e:near(d)
+		local me = P.nodes[P.you]
+		return me ~= nil and (me.node.position - n.node.position):Length() <=
+				(tonumber(d) or 0)
+	end
+	return e
 end
 
 local hud = nil
-local function update_play()
+local function update_play(_, data)
+	local dt = data:GetFloat("TimeStep")
 	local lines = {}
 	for id, n in pairs(P.nodes) do
 		-- What it shows: again as an edit changes it
@@ -1158,6 +1491,35 @@ local function update_play()
 				lines[#lines + 1] = {id, v}
 			end
 		end
+		-- Its client parts
+		local parts = parts_of(n)
+		if #parts > 0 then
+			n.e = n.e or entity_view(id, n)
+			local e = n.e
+			e.look, e.hinge, e.body, e.mine = n.look, n.hinge, n.body,
+					id == P.you
+			if not n.added then
+				n.added, n.vals = true, {}
+				for _, part in ipairs(parts) do
+					call(n, part, "on_add")
+				end
+			end
+			for _, k in ipairs(type(show.shared) == "table" and show.shared or
+					{}) do
+				local v = n.node:GetVar("kit:" .. tostring(k))
+				v = v:IsEmpty() and "" or v:GetString()
+				if v ~= n.vals[k] then
+					n.vals[k] = v
+					e.state[k] = network.parse_json(v)
+					for _, part in ipairs(parts) do
+						call(n, part, "on_state", k)
+					end
+				end
+			end
+			for _, part in ipairs(parts) do
+				call(n, part, "on_update", dt)
+			end
+		end
 	end
 	table.sort(lines, function(a, b) return a[1] < b[1] end)
 	local t = {}
@@ -1186,6 +1548,30 @@ local function update_play()
 	end
 end
 magic.SubscribeToEvent("Update", update_play)
+
+-- The types' client parts, run as this module's own Lua is ([KIT] 4d)
+buildat.sub_packet("kit:client_parts", function(data)
+	local parts = network.parse_json(data)
+	for t, src in pairs(type(parts) == "table" and parts or {}) do
+		if type(src) == "string" and not P.parts[t] then
+			local ok, part = buildat.eval(src, tostring(t) .. ".client")
+			if ok and type(part) == "table" then
+				P.parts[t] = part
+				log:info("kit: the client part of " .. tostring(t))
+			else
+				log:warning("kit: the client part of " .. tostring(t) ..
+						" does not load: " .. tostring(part))
+			end
+		end
+	end
+end)
+
+-- This player's own entity
+buildat.sub_packet("kit:you", function(data)
+	local y = network.parse_json(data)
+	P.you = type(y) == "table" and tonumber(y.id) or 0
+	log:info("kit: this player is entity " .. tostring(P.you))
+end)
 
 buildat.sub_packet("kit:items", function(data)
 	local items = network.parse_json(data)
@@ -1273,7 +1659,9 @@ function M.pointed(origin, dir, reach)
 	for id, n in pairs(P.nodes) do
 		local p = n.node.position
 		local t
-		if n.box then
+		if type(n.show) == "table" and n.show.player then
+			-- a player's entity: the app draws the player
+		elseif n.box then
 			-- Its look as drawn, a little larger (a thin button: as thick
 			-- as most of a cell)
 			local c, half = {}, {}
@@ -1300,6 +1688,13 @@ end
 
 function M.use(id)
 	log:info("kit: use " .. tostring(id))
+	-- Its client parts first: what this player sees at once
+	local n = P.nodes[tonumber(id) or -1]
+	if n and n.e then
+		for _, part in ipairs(parts_of(n)) do
+			call(n, part, "on_use")
+		end
+	end
 	buildat.send_packet("kit:use", tostring(id))
 end
 

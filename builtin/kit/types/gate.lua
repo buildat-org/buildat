@@ -11,15 +11,15 @@ return {
 		solid = true, state = "open",
 		when = {scale = {1, 0.08, 1}, solid = false}},
 	state = {open = {default = false, shared = true}},
-	inputs = {"open", "close", "toggle"},
-	outputs = {"opened", "closed"},
+	inputs = {open = "none", close = "none", toggle = "none"},
+	outputs = {opened = "none", closed = "none"},
 	on_input = function(c, input, value, by)
 		local open = input == "open" or (input == "toggle" and not c.state.open)
 		if open == c.state.open then
 			return
 		end
 		c.state.open = open
-		c:log(open and "opened" or "shut", "by", by)
+		c:log(open and "opened" or "shut", "by", c:name(by))
 		c:emit(open and "opened" or "closed")
 	end,
 }

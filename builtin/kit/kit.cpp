@@ -63,6 +63,15 @@ static const size_t MAX_ENTITIES = 4096;
 static const size_t MAX_LINKS = 64;
 // An editor's undo goes back this many edits
 static const size_t UNDO_MAX = 50;
+// [KIT] stage 4d: the entities play makes at most (copies), a prefab's
+// members, the lines an entity's log keeps, the signals a tick shows the
+// builders flowing
+static const size_t MAX_MADE = 1024;
+static const size_t MAX_PREFAB = 64;
+static const size_t LOG_LINES = 50;
+static const size_t MAX_FLOWS = 64;
+// on_remove runs inside the run that removed: so deep at most
+static const int MAX_REMOVE_DEPTH = 4;
 
 struct Link
 {
@@ -83,24 +92,47 @@ struct Instance
 	// and who set off the run that set it
 	int64_t due_us = -1;
 	ss_ due_by;
-	// runtime, not saved: the players in its zone, by name
+	// runtime: the players in its zone, by their entity's id ([KIT] stage
+	// 4d: saved, so a restart does not enter them again)
 	std::set<ss_> inside;
+	// authored: a prefab copy's parameters set on this copy, kept as the
+	// prefab changes ([KIT] stage 4d)
+	std::set<ss_> overrides;
 };
 
 struct Entity
 {
 	uint64_t id = 0, parent = 0;
-	ss_ name, kind; // "app", "scene" or "" (an entity)
+	// "app", "scene", "player" (runtime, [KIT] stage 4d) or "" (an entity)
+	ss_ name, kind;
 	bool has_pos = false;
 	double pos[3] = {0, 0, 0};
 	sv_<Instance> comps;
 	uint32_t node = 0; // a positional one's node in its scene
+	// authored: a prefab copy's member, {"of", "version", "member" (its id
+	// in the prefab), "copy" (the copy's first entity)}; undefined if none
+	json::Value prefab;
+	// runtime ([KIT] stage 4d): made in play (0: authored), 'g' a game
+	// change or 'b' a build by made_by (a player's name), and the instance
+	// that made it
+	char made = 0;
+	ss_ made_by;
+	uint64_t maker = 0;
+	size_t maker_comp = 0;
 };
 
 struct Type
 {
 	json::Value decl;
 	std::set<ss_> inputs, outputs, handlers, shared;
+	// [KIT] stage 4d: each signal's value's type ("any" where the file
+	// gives none; "none": no value)
+	sm_<ss_, ss_> in_types, out_types;
+	// It reads every player entity (players = true); it is on each player
+	// entity, not placed (player = true)
+	bool players = false, player = false;
+	// Its client part, <name>.client.lua beside it ("" none)
+	ss_ client;
 	bool usable = false, owns_voxel = false;
 	// It provides the players' inventory (inventory = true)
 	bool inventory = false;
@@ -108,6 +140,7 @@ struct Type
 	// says what players keep between plays (between_plays), it goes on the
 	// app root (root)
 	bool spawn = false, between_plays = false, root = false;
+	ss_ spawn_param;
 	// Its voxel writes are builds by the player who set the run off, not
 	// game changes (builds = true)
 	bool builds = false;
@@ -148,6 +181,8 @@ struct Peer
 	int color = -1;
 	uint64_t sel = 0;
 	json::Value cursor = json::null();
+	// Their player entity ([KIT] stage 4d; 0 before they have a name)
+	uint64_t player = 0;
 };
 
 // A builder's colour while their tools are on: the first one no other
@@ -168,12 +203,25 @@ struct Mark
 	uint32_t id = 0;
 };
 
-// A build Stop discarded: its cell and final voxel, until the next Play
+// A build Stop discarded: its cell and final voxel, until the next Play;
+// or ([KIT] stage 4d) an entity a player made (`entity` its row) or removed
+// (`removed`, `entity` the authored one)
 struct Discarded
 {
 	ss_ scene;
 	int p[3] = {0, 0, 0};
 	uint32_t id = 0;
+	ss_ by;
+	json::Value entity;
+	bool removed = false;
+};
+
+// [KIT] stage 4d: an authored entity play removed, back at Stop: a game
+// change, or a build ('b') of a player's
+struct Removed
+{
+	Entity e;
+	char origin = 'g';
 	ss_ by;
 };
 
@@ -315,6 +363,93 @@ static bool name_ok(const ss_ &s)
 	return true;
 }
 
+// [KIT] stage 4d, typed signals: a value's type, as a signal declares it
+static const char *SIGNAL_TYPES[] = {"any", "none", "number", "bool",
+	"string", "entity", "position"};
+
+// A type's inputs or outputs as its file gives them, {"a", b = "number"}
+// (an array, or an object whose number keys are names of type "any"):
+// the names, each one's type; the declaration's key made the array of the
+// names and "<key>_types" an object of their types
+static bool signals(json::Value &decl, const char *key, std::set<ss_> &names,
+		sm_<ss_, ss_> &types, ss_ &why)
+{
+	const json::Value &v = decl.get(key);
+	json::Value list = json::array(), typed = json::object();
+	auto add = [&](const ss_ &name, const ss_ &type) -> bool {
+		if(!name_ok(name)){
+			why = ss_(key)+": a name is letters, digits and _: \""+
+					name.substr(0, 64)+"\"";
+			return false;
+		}
+		if(std::find_if(std::begin(SIGNAL_TYPES), std::end(SIGNAL_TYPES),
+				[&](const char *t){ return type == t; }) ==
+				std::end(SIGNAL_TYPES)){
+			why = ss_(key)+": "+name+"'s type is one of any, none, number, "
+					"bool, string, entity, position (not \""+type.substr(0, 32)+"\")";
+			return false;
+		}
+		names.insert(name);
+		types[name] = type;
+		list.append(name);
+		typed.set(name, type);
+		return true;
+	};
+	if(v.is_array()){
+		for(unsigned i = 0; i < v.size(); i++)
+			if(v.at(i).is_string() && !add(v.at(i).as_string(), "any"))
+				return false;
+	} else if(v.is_object()){
+		for(json::Iterator it(v); it; ++it){
+			const bool index = !it.key().empty() && std::all_of(
+					it.key().begin(), it.key().end(), ::isdigit);
+			if(index && (*it).is_string()){
+				if(!add((*it).as_string(), "any"))
+					return false;
+			} else if(!add(it.key(), (*it).is_string() ? (*it).as_string() :
+					json::jstr(*it, "type"))){
+				return false;
+			}
+		}
+	} else if(!v.is_undefined()){
+		why = ss_(key)+" is a list of names";
+		return false;
+	}
+	decl.set(key, list);
+	decl.set(ss_(key)+"_types", typed);
+	return true;
+}
+
+// Whether a value is of a signal's type
+static bool signal_ok(const ss_ &type, const json::Value &v)
+{
+	if(type == "number")
+		return v.is_number() && std::isfinite(v.as_number());
+	if(type == "bool")
+		return v.is_boolean();
+	if(type == "string")
+		return v.is_string();
+	if(type == "entity")
+		return v.is_number() && v.as_number() >= 0 &&
+				v.as_number() == std::floor(v.as_number());
+	if(type == "position"){
+		if(!v.is_array() || v.size() != 3)
+			return false;
+		for(unsigned k = 0; k < 3; k++)
+			if(!v.at(k).is_number())
+				return false;
+		return true;
+	}
+	return true; // any, none
+}
+
+// Whether an output's values go to an input: either takes any, or the
+// input takes none, or they are the same
+static bool signals_meet(const ss_ &out, const ss_ &in)
+{
+	return out == "any" || in == "any" || in == "none" || out == in;
+}
+
 struct Module: public interface::Module, public Interface
 {
 	interface::Server *m_server;
@@ -327,6 +462,11 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, Type> m_types;
 	std::map<uint64_t, Entity> m_entities;
 	uint64_t m_next_id = 2;
+	// Players' entities have their own range, so a join does not move the
+	// ids authoring gives out next
+	// simplified: authored ids are not kept below it (a million entities)
+	static const uint64_t FIRST_PLAYER = 1000000;
+	uint64_t m_next_player = FIRST_PLAYER;
 	std::deque<Run> m_queue;
 	sm_<size_t, Peer> m_peers;
 	bool m_runtime_dirty = false;
@@ -340,10 +480,8 @@ struct Module: public interface::Module, public Interface
 	// and the app's that loads), each editor's undo, and the sections Kit owns
 	// positions in, each scene's
 	std::map<ss_, bool> m_rights;
-	// Runtime: each player's items, by name ({item: n}), Kit's own inventory
-	json::Value m_items = json::object();
 	// The replacing inventory provider (an entity's id and its instance; 0:
-	// none, Kit's counts above), and those refused as a second
+	// none: each player entity's own), and those refused as a second
 	uint64_t m_provider = 0;
 	size_t m_provider_comp = 0;
 	std::set<ss_> m_inv_refused;
@@ -355,6 +493,8 @@ struct Module: public interface::Module, public Interface
 	std::set<ss_> m_palette;
 	// Bare type names made <author>/<name> as the composition was read
 	size_t m_migrated = 0;
+	// Instances of Kit's own types made their file's version
+	size_t m_upgraded = 0;
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
 			std::set<std::tuple<int, int, int>>> m_owned_sections;
@@ -368,8 +508,6 @@ struct Module: public interface::Module, public Interface
 		ss_ by; // who started the round
 		// The players who went through this round's start
 		std::set<ss_> round;
-		// Inventories put aside while Stopped ("keep inventory")
-		json::Value aside = json::object();
 		// The sections copied out this round, and copies that wait for
 		// their section to load to be put back (a Stop's), as store keys
 		std::set<ss_> copied, restore;
@@ -397,6 +535,31 @@ struct Module: public interface::Module, public Interface
 		ss_ air;
 	};
 	sv_<Migrated> m_migrated_objects;
+	// [KIT] stage 4d: authored entities play removed, back at Stop
+	std::map<uint64_t, Removed> m_removed;
+	// The players' entities by name (kept: a player's id is stable), and
+	// what each keeps between plays ("keep inventory": their items)
+	std::map<ss_, uint64_t> m_players;
+	json::Value m_aside = json::object();
+	// The types each player entity carries (`player = true`), Kit's own
+	// inventory and score among them
+	sv_<ss_> m_player_types;
+	// Prefabs by "<author>/<name>", as read, and those placeable
+	sm_<ss_, json::Value> m_prefabs;
+	std::set<ss_> m_prefab_palette;
+	// Those that did not load (logged once), and those loading now (a
+	// prefab naming itself is none)
+	std::set<ss_> m_bad_prefabs, m_prefab_loading;
+	// Signals passed along links this tick, for the builders' link lines
+	json::Value m_flows = json::array();
+	// Each entity's log (its c:log lines and Kit's about it), not saved,
+	// and those with new lines this tick
+	std::map<uint64_t, std::deque<ss_>> m_logs;
+	std::set<uint64_t> m_log_dirty;
+	int m_remove_depth = 0;
+	// Ids of entities being made together (a composition, a prefab's
+	// copy), which an entity parameter may name before they are there
+	std::set<uint64_t> m_pending_ids;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -629,9 +792,22 @@ struct Module: public interface::Module, public Interface
 				if(a.at(i).is_string())
 					out.insert(a.at(i).as_string());
 		};
-		names("inputs", t.inputs);
-		names("outputs", t.outputs);
+		if(!signals(t.decl, "inputs", t.inputs, t.in_types, why) ||
+				!signals(t.decl, "outputs", t.outputs, t.out_types, why)){
+			why = name+": "+why;
+			return false;
+		}
 		names("handlers", t.handlers);
+		t.players = t.decl.get("players").is_true();
+		t.player = t.decl.get("player").is_true();
+		// Its client part, beside it
+		const ss_ client = read_file(dir+"/"+short_name+".client.lua");
+		if(client.size() > MAX_TYPE_SOURCE / 4){
+			why = name+": its client part is past "+itos(MAX_TYPE_SOURCE / 4)+
+					" bytes";
+			return false;
+		}
+		t.client = client;
 		const json::Value &st = t.decl.get("state");
 		if(st.is_object())
 			for(json::Iterator it(st); it; ++it)
@@ -648,7 +824,17 @@ struct Module: public interface::Module, public Interface
 		}
 		t.version = ver.is_number() ? (int64_t)ver.as_number() : 1;
 		t.inventory = t.decl.get("inventory").is_true();
-		t.spawn = t.decl.get("spawn").is_true();
+		// spawn = true, or ([KIT] stage 4d) the bool parameter whose value
+		// says whether the instance places players
+		t.spawn = t.decl.get("spawn").is_true() ||
+				t.decl.get("spawn").is_string();
+		if(t.decl.get("spawn").is_string()){
+			t.spawn_param = t.decl.get("spawn").as_string();
+			if(jstr(t.decl.get("params").get(t.spawn_param), "type") != "bool"){
+				why = name+": its spawn names no bool parameter";
+				return false;
+			}
+		}
 		t.between_plays = t.decl.get("between_plays").is_true();
 		t.root = t.decl.get("root").is_true();
 		t.builds = t.decl.get("builds").is_true();
@@ -778,6 +964,22 @@ struct Module: public interface::Module, public Interface
 	ss_ check_param(const json::Value &decl, const json::Value &v)
 	{
 		const ss_ t = jstr(decl, "type");
+		// A parameter of a few choices ([KIT] stage 4d): one of them
+		const json::Value &ch = decl.get("choices");
+		if(ch.is_array()){
+			for(unsigned i = 0; i < ch.size(); i++)
+				if(ch.at(i).stringify() == v.stringify())
+					return "";
+			return "one of "+ch.stringify().substr(0, 200);
+		}
+		if(t == "prefab"){
+			// "": none
+			if(!v.is_string() || v.as_string().size() > 130)
+				return "a prefab's name";
+			if(!v.as_string().empty() && !prefab(v.as_string()))
+				return "a prefab there is (no \""+v.as_string()+"\")";
+			return "";
+		}
 		if(t == "number"){
 			if(!v.is_number() || !std::isfinite(v.as_number()))
 				return "a number";
@@ -812,13 +1014,21 @@ struct Module: public interface::Module, public Interface
 			if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
 					v.as_number() < 0 || v.as_number() > 9e15 ||
 					(v.as_number() != 0 &&
-					!m_entities.count((uint64_t)v.as_number())))
+					!m_entities.count((uint64_t)v.as_number()) &&
+					!m_pending_ids.count((uint64_t)v.as_number())))
 				return "an entity's id";
 			return "";
 		}
 		if(t == "position")
 			return pos_ok(v) ? "" : "a position, three numbers";
 		return "a type of parameter Kit has (\""+t.substr(0, 32)+"\" is none)";
+	}
+
+	// An editor's coordinate: on a 1/16 cell's grid ([KIT] stage 4d: off
+	// the voxels' own, kit/part's)
+	static double grid(double v)
+	{
+		return std::round(v * 16) / 16;
 	}
 
 	static bool pos_ok(const json::Value &p)
@@ -894,10 +1104,13 @@ struct Module: public interface::Module, public Interface
 			why = "an entity's id is 2 or more: "+j.stringify().substr(0, 200);
 			return false;
 		}
-		if(e.kind != "" && e.kind != "scene"){
+		if(e.kind != "" && e.kind != "scene" && e.kind != "player"){
 			why = "entity "+itos(e.id)+": no kind \""+e.kind+"\"";
 			return false;
 		}
+		const json::Value &pf = j.get("prefab");
+		if(pf.is_object() && !jstr(pf, "of").empty())
+			e.prefab = pf.deepcopy();
 		const json::Value &p = j.get("pos");
 		if(!p.is_undefined()){
 			if(!pos_ok(p)){
@@ -931,6 +1144,16 @@ struct Module: public interface::Module, public Interface
 			const json::Value &pj = cj.get("params");
 			// A starter door, gate, button or lever of before is an object
 			const bool object = migrate_object(e, in, pj);
+			// Kit's own types keep their older versions' parameters: an
+			// instance of one is upgraded to the file's ([KIT] stage 4d)
+			if(!object && in.version < t.version &&
+					in.type.compare(0, 4, "kit/") == 0){
+				log_i(MODULE, "Entity %s's %s upgraded from version %lli to "
+						"%lli", cs(itos(e.id)), cs(in.type), (long long)in.version,
+						(long long)t.version);
+				in.version = t.version;
+				m_upgraded++;
+			}
 			if(in.version != t.version)
 				log_w(MODULE, "Entity %s's %s is of version %lli, its file "
 						"%lli: run on the file's", cs(itos(e.id)), cs(in.type),
@@ -958,6 +1181,11 @@ struct Module: public interface::Module, public Interface
 					}
 					in.params.set(it.key(), *it);
 				}
+			const json::Value &ov = cj.get("overrides");
+			for(unsigned m = 0; m < ov.size(); m++)
+				if(ov.at(m).is_string() && decl.get(ov.at(m).as_string()).
+						is_object())
+					in.overrides.insert(ov.at(m).as_string());
 			const json::Value &ls = cj.get("links");
 			for(unsigned m = 0; m < ls.size(); m++){
 				Link l;
@@ -984,6 +1212,8 @@ struct Module: public interface::Module, public Interface
 		j.set("name", e.name);
 		if(!e.kind.empty())
 			j.set("kind", e.kind);
+		if(!e.prefab.is_undefined())
+			j.set("prefab", e.prefab);
 		if(e.has_pos){
 			json::Value pos = json::array();
 			for(int k = 0; k < 3; k++)
@@ -996,6 +1226,12 @@ struct Module: public interface::Module, public Interface
 			cj.set("type", in.type);
 			cj.set("version", in.version);
 			cj.set("params", in.params);
+			if(!in.overrides.empty()){
+				json::Value ov = json::array();
+				for(const ss_ &o : in.overrides)
+					ov.append(o);
+				cj.set("overrides", ov);
+			}
 			json::Value ls = json::array();
 			for(const Link &l : in.links){
 				json::Value lj = json::object();
@@ -1019,16 +1255,23 @@ struct Module: public interface::Module, public Interface
 		root.name = "app";
 		m_entities[1] = root;
 		const json::Value &es = c.get("entities");
+		m_pending_ids.clear();
+		for(unsigned i = 0; i < es.size(); i++)
+			m_pending_ids.insert((uint64_t)json::jint(es.at(i), "id", 0));
 		for(unsigned i = 0; i < es.size(); i++){
 			Entity e;
-			if(!entity_from_json(es.at(i), e, why))
-				return false;
-			if(m_entities.count(e.id)){
+			const bool ok = entity_from_json(es.at(i), e, why);
+			if(ok && e.kind == "player")
+				why = "entity "+itos(e.id)+": a player is no authored entity";
+			else if(ok && m_entities.count(e.id))
 				why = "entity "+itos(e.id)+" twice";
+			if(!ok || e.kind == "player" || m_entities.count(e.id)){
+				m_pending_ids.clear();
 				return false;
 			}
 			m_entities[e.id] = e;
 		}
+		m_pending_ids.clear();
 		m_next_id = std::max<uint64_t>((uint64_t)json::jint(c, "next_id", 2), 2);
 		for(auto &p : m_entities){
 			Entity &e = p.second;
@@ -1056,26 +1299,42 @@ struct Module: public interface::Module, public Interface
 		return true;
 	}
 
+	// Whether an entity is the composition's: not made in play, no player
+	static bool authored(const Entity &e)
+	{
+		return !e.made && e.kind != "player";
+	}
+
+	// The composition: the authored entities, those play removed too
 	json::Value authored_json()
 	{
+		std::map<uint64_t, const Entity*> all;
+		for(auto &p : m_entities)
+			if(p.first != 1 && authored(p.second))
+				all[p.first] = &p.second;
+		for(auto &r : m_removed)
+			all[r.first] = &r.second.e;
 		json::Value c = json::object();
 		json::Value es = json::array();
-		for(auto &p : m_entities)
-			if(p.first != 1)
-				es.append(entity_json(p.second));
+		for(auto &p : all)
+			es.append(entity_json(*p.second));
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
 		return c;
 	}
 
-	// {"<id>": [{"type", "state", "disabled", "timer": s, "timer_by"}, ...],
-	//  "items": {player: {item: n}}}
-	json::Value runtime_json()
+	// {"<id>": [{"type", "state", "disabled", "timer": s, "timer_by",
+	//  "inside": [id...]}, ...]}, and ([KIT] stage 4d) unless it is for the
+	// start, the round's entities: "made": [{"entity", "origin", "by",
+	// "maker": [id, comp]}], "removed": [{"entity", "origin", "by"}], the
+	// players {name: {"id", "aside"}} and "next_id"
+	json::Value runtime_json(bool for_start = false)
 	{
 		json::Value r = json::object();
 		const int64_t now = interface::os::game_us();
+		json::Value made = json::array();
 		for(auto &p : m_entities){
-			if(p.second.comps.empty())
+			if(p.second.comps.empty() || (for_start && !authored(p.second)))
 				continue;
 			json::Value a = json::array();
 			for(const Instance &in : p.second.comps){
@@ -1088,11 +1347,48 @@ struct Module: public interface::Module, public Interface
 					j.set("timer", std::max<int64_t>(0, in.due_us - now) / 1e6);
 					j.set("timer_by", in.due_by);
 				}
+				if(!in.inside.empty() && !for_start){
+					json::Value ins = json::array();
+					for(const ss_ &x : in.inside)
+						ins.append(x);
+					j.set("inside", ins);
+				}
 				a.append(j);
 			}
 			r.set(itos(p.first), a);
+			if(p.second.made){
+				json::Value m = json::object(), mk = json::array();
+				m.set("entity", entity_json(p.second));
+				m.set("origin", ss_(1, p.second.made));
+				m.set("by", p.second.made_by);
+				mk.append((int64_t)p.second.maker);
+				mk.append((int64_t)p.second.maker_comp);
+				m.set("maker", mk);
+				made.append(m);
+			}
 		}
-		r.set("items", m_items.deepcopy());
+		if(for_start)
+			return r;
+		json::Value removed = json::array();
+		for(auto &rm : m_removed){
+			json::Value m = json::object();
+			m.set("entity", entity_json(rm.second.e));
+			m.set("origin", ss_(1, rm.second.origin));
+			m.set("by", rm.second.by);
+			removed.append(m);
+		}
+		json::Value players = json::object();
+		for(auto &p : m_players){
+			json::Value j = json::object();
+			j.set("id", (int64_t)p.second);
+			if(m_aside.get(p.first).is_object())
+				j.set("aside", m_aside.get(p.first));
+			players.set(p.first, j);
+		}
+		r.set("made", made);
+		r.set("removed", removed);
+		r.set("players", players);
+		r.set("next_id", (int64_t)m_next_id);
 		return r;
 	}
 
@@ -1109,6 +1405,10 @@ struct Module: public interface::Module, public Interface
 				interface::os::game_us() + (int64_t)(t.as_number() * 1e6) : -1;
 		in.due_by = jstr(s, "timer_by");
 		in.inside.clear();
+		const json::Value &ins = s.get("inside");
+		for(unsigned i = 0; i < ins.size(); i++)
+			if(ins.at(i).is_string())
+				in.inside.insert(ins.at(i).as_string());
 	}
 
 	void save_runtime()
@@ -1193,7 +1493,7 @@ struct Module: public interface::Module, public Interface
 		if(m_migrated)
 			log_i(MODULE, "%zu bare type names made <author>/<name>",
 					m_migrated);
-		if(first || m_migrated || !m_migrated_objects.empty())
+		if(first || m_migrated || m_upgraded || !m_migrated_objects.empty())
 			m_store->set("authored", authored_json().stringify());
 		if(!m_migrated_objects.empty())
 			m_runtime_dirty = true;
@@ -1205,8 +1505,10 @@ struct Module: public interface::Module, public Interface
 				continue;
 			for(const auto &n : interface::fs::list_directory(dir)){
 				const size_t dot = n.name.rfind(".lua");
+				// <name>.client.lua is a type's client part
 				if(n.is_directory || dot == ss_::npos ||
-						dot + 4 != n.name.size())
+						dot + 4 != n.name.size() ||
+						n.name.find('.') != dot)
 					continue;
 				const ss_ type = author+"/"+n.name.substr(0, dot);
 				ss_ twhy;
@@ -1216,10 +1518,21 @@ struct Module: public interface::Module, public Interface
 					log_w(MODULE, "Not in the palette: %s", cs(twhy));
 			}
 		}
+		// The types on each player entity ([KIT] stage 4d) are not placed
+		for(const ss_ &t : sv_<ss_>(m_palette.begin(), m_palette.end()))
+			if(m_types[t].player){
+				m_player_types.push_back(t);
+				m_palette.erase(t);
+			}
 		ss_ names;
 		for(const ss_ &t : m_palette)
 			names += (names.empty() ? "" : " ")+t;
 		log_i(MODULE, "The palette: %s", cs(names));
+		names.clear();
+		for(const ss_ &t : m_player_types)
+			names += (names.empty() ? "" : " ")+t;
+		log_i(MODULE, "On each player: %s", cs(names));
+		load_prefab_palette();
 
 		// The session ([KIT] stage 4c): Stopped or Running. A save from
 		// before has no row; it ran its components, so it is Running, its
@@ -1228,8 +1541,11 @@ struct Module: public interface::Module, public Interface
 		// is what stops a server
 		ss_ runtime, session, start, discarded;
 		const bool had_runtime = m_store->get("runtime", runtime);
+		json::Value old_aside;
 		if(m_store->get("session", session)){
 			const json::Value sj = json::load_string(session.c_str());
+			// Before [KIT] stage 4d the players' kept items were here
+			old_aside = sj.get("aside");
 			m_session.running = sj.get("running").is_true();
 			m_session.by = jstr(sj, "by");
 			for(const char *k : {"round", "restore"}){
@@ -1239,8 +1555,6 @@ struct Module: public interface::Module, public Interface
 						(ss_(k) == "round" ? m_session.round :
 								m_session.restore).insert(a.at(i).as_string());
 			}
-			if(sj.get("aside").is_object())
-				m_session.aside = sj.get("aside").deepcopy();
 		} else {
 			m_session.running = true;
 			log_i(MODULE, "%s", had_runtime ? "A save from before Play and "
@@ -1261,10 +1575,19 @@ struct Module: public interface::Module, public Interface
 			discarded_from(json::load_string(discarded.c_str()));
 		// Runtime: Running, the save's over each type's defaults; Stopped,
 		// the start
-		const json::Value rt = had_runtime ?
+		json::Value rt = had_runtime ?
 				json::load_string(runtime.c_str()) : json::object();
-		if(m_session.running && rt.get("items").is_object())
-			m_items = rt.get("items");
+		if(!rt.is_object())
+			rt = json::object();
+		// The players' entities ([KIT] stage 4d), and the round's own:
+		// entities play made and removed
+		load_players(rt, old_aside);
+		if(m_session.running)
+			load_round(rt);
+		const json::Value &nid = rt.get("next_id");
+		if(nid.is_number() && nid.as_number() > m_next_id &&
+				nid.as_number() < 9e15)
+			m_next_id = (uint64_t)nid.as_number();
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			const json::Value &saved = rt.get(itos(e.id));
@@ -1281,9 +1604,14 @@ struct Module: public interface::Module, public Interface
 				const json::Value &s = saved.at((unsigned)i);
 				if(full_type(jstr(s, "type")) == in.type){
 					runtime_from(in, s);
+					// Before [KIT] stage 4d a timer's player was a name
+					if(!player_id(in.due_by) && !player_of(in.due_by).empty())
+						in.due_by = by_of(player_of(in.due_by));
 					if(!in.disabled.empty())
 						log_w(MODULE, "Entity %s's %s stays disabled: %s",
 								cs(itos(e.id)), cs(in.type), cs(in.disabled));
+				} else if(e.kind == "player"){
+					// A player's type new to them: its defaults
 				} else {
 					// New: its start
 					Run r;
@@ -1295,6 +1623,19 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		// Before [KIT] stage 4d Kit's counts were the runtime row's "items",
+		// {name: {item: n}}: each player's own inventory now
+		const json::Value &items = rt.get("items");
+		if(m_session.running && items.is_object())
+			for(json::Iterator it(items); it; ++it){
+				Instance *in = own_inventory(ensure_player(it.key()));
+				if(in && (*it).is_object()){
+					in->state.set("items", (*it).deepcopy());
+					log_i(MODULE, "%s's items %s are their own inventory's now",
+							cs(it.key()), cs((*it).stringify()));
+				}
+				m_runtime_dirty = true;
+			}
 
 		// The nodes that carry the positional entities' shared state, and
 		// the voxels they own
@@ -1312,13 +1653,248 @@ struct Module: public interface::Module, public Interface
 				m_session.by.empty() ? "no one" : cs(m_session.by),
 				m_session.copied.size(), m_session.restore.size());
 		m_hosted = true;
-		size_t n = 0;
+		size_t n = 0, es = 0;
 		for(auto &p : m_entities)
-			n += p.second.comps.size();
-		log_i(MODULE, "Hosted: %zu entities, %zu instances, %zu types%s",
-				m_entities.size(), n, m_types.size(),
-				first ? " (the composition's first start)" : "");
+			if(Module::authored(p.second)){
+				es++;
+				n += p.second.comps.size();
+			}
+		log_i(MODULE, "Hosted: %zu entities, %zu instances, %zu types%s; %zu "
+				"players, %zu entities made in the round", es, n, m_types.size(),
+				first ? " (the composition's first start)" : "",
+				m_players.size(), m_entities.size() - es - m_players.size());
 		return true;
+	}
+
+	// ---- Players as entities ([KIT] stage 4d)
+
+	// An instance as new: its type's parameters and state at their defaults
+	void fresh(Instance &in)
+	{
+		const json::Value &decl = m_types[in.type].decl;
+		in.version = m_types[in.type].version;
+		const json::Value &pd = decl.get("params");
+		if(pd.is_object())
+			for(json::Iterator it(pd); it; ++it)
+				in.params.set(it.key(), (*it).get("default"));
+		const json::Value &sd = decl.get("state");
+		if(sd.is_object())
+			for(json::Iterator it(sd); it; ++it)
+				in.state.set(it.key(), (*it).get("default"));
+	}
+
+	// A player's entity, made the first time they are seen: kind "player",
+	// under the root until the app places them, each player type's
+	// instance on it. Its id is theirs from then on (`by` is
+	// "player:<id>"), kept in the runtime row
+	uint64_t ensure_player(const ss_ &name)
+	{
+		auto it = m_players.find(name);
+		if(it != m_players.end() && m_entities.count(it->second))
+			return it->second;
+		Entity e;
+		e.id = it != m_players.end() ? it->second : m_next_player++;
+		e.parent = 1;
+		e.kind = "player";
+		e.name = name;
+		for(const ss_ &t : m_player_types){
+			Instance in;
+			in.type = t;
+			fresh(in);
+			e.comps.push_back(in);
+		}
+		m_entities[e.id] = e;
+		m_players[name] = e.id;
+		m_runtime_dirty = true;
+		if(m_hosted)
+			log_i(MODULE, "%s is entity %s", cs(name), cs(itos(e.id)));
+		return e.id;
+	}
+
+	// The players' entities from the runtime row; from before [KIT] stage
+	// 4d, the session's "aside" (each player's items kept between plays)
+	void load_players(const json::Value &rt, const json::Value &old_aside)
+	{
+		const json::Value &pl = rt.get("players");
+		if(pl.is_object())
+			for(json::Iterator it(pl); it; ++it){
+				const uint64_t id = (uint64_t)json::jint(*it, "id", 0);
+				if(id < 2 || id > 9e15 || m_entities.count(id) ||
+						it.key().empty()){
+					log_w(MODULE, "Player %s's entity %s is not one: dropped",
+							cs(it.key()), cs(itos(id)));
+					continue;
+				}
+				m_players[it.key()] = id;
+				ensure_player(it.key());
+				m_next_player = std::max(m_next_player, id + 1);
+				if((*it).get("aside").is_object())
+					m_aside.set(it.key(), (*it).get("aside").deepcopy());
+			}
+		if(old_aside.is_object())
+			for(json::Iterator it(old_aside); it; ++it){
+				ensure_player(it.key());
+				m_aside.set(it.key(), (*it).deepcopy());
+			}
+	}
+
+	// The round's entities from the runtime row (Running): those play
+	// made, and the authored ones it removed
+	void load_round(const json::Value &rt)
+	{
+		const json::Value &made = rt.get("made");
+		for(unsigned i = 0; i < made.size(); i++)
+			m_pending_ids.insert((uint64_t)json::jint(made.at(i).get("entity"),
+					"id", 0));
+		for(unsigned i = 0; i < made.size(); i++){
+			const json::Value &m = made.at(i);
+			Entity e;
+			ss_ why;
+			if(!entity_from_json(m.get("entity"), e, why) || e.kind != "" ||
+					m_entities.count(e.id) || !m_entities.count(e.parent)){
+				log_w(MODULE, "An entity the round made is dropped: %s",
+						why.empty() ? cs(m.get("entity").stringify().substr(0,
+						100)) : cs(why));
+				continue;
+			}
+			e.made = jstr(m, "origin") == "b" ? 'b' : 'g';
+			e.made_by = jstr(m, "by");
+			e.maker = (uint64_t)std::max(0.0, m.get("maker").at(0u).is_number() ?
+					m.get("maker").at(0u).as_number() : 0.0);
+			e.maker_comp = (size_t)std::max(0.0, m.get("maker").at(1u).
+					is_number() ? m.get("maker").at(1u).as_number() : 0.0);
+			m_next_id = std::max(m_next_id, e.id + 1);
+			m_entities[e.id] = e;
+		}
+		m_pending_ids.clear();
+		const json::Value &removed = rt.get("removed");
+		for(unsigned i = 0; i < removed.size(); i++){
+			const json::Value &r = removed.at(i);
+			auto it = m_entities.find((uint64_t)json::jint(r.get("entity"),
+					"id", 0));
+			if(it == m_entities.end() || !authored(it->second) ||
+					!it->second.kind.empty())
+				continue;
+			Removed rm;
+			rm.e = it->second;
+			rm.origin = jstr(r, "origin") == "b" ? 'b' : 'g';
+			rm.by = jstr(r, "by");
+			m_removed[it->first] = rm;
+			m_entities.erase(it);
+		}
+		if(made.size() || removed.size())
+			log_i(MODULE, "The round's entities: %u made, %zu removed",
+					made.size(), m_removed.size());
+	}
+
+	// The player entity `by` is ("player:<id>"), or 0
+	uint64_t player_id(const ss_ &by)
+	{
+		if(by.compare(0, 7, "player:") != 0 || by.size() == 7 ||
+				by.find_first_not_of("0123456789", 7) != ss_::npos)
+			return 0;
+		auto it = m_entities.find(strtoull(by.c_str() + 7, nullptr, 10));
+		return it != m_entities.end() && it->second.kind == "player" ?
+				it->first : 0;
+	}
+
+	// The player's name `by` is: their entity's; "player:<name>" from
+	// before [KIT] stage 4d its name; "" for no player
+	ss_ player_of(const ss_ &by)
+	{
+		const uint64_t id = player_id(by);
+		if(id)
+			return m_entities[id].name;
+		return by.compare(0, 7, "player:") == 0 ? by.substr(7) : "";
+	}
+
+	// A player's `by`: "player:<their entity's id>"
+	ss_ by_of(const ss_ &name)
+	{
+		return "player:"+itos(ensure_player(name));
+	}
+
+	// A `by` as the app gives it ("player:<name>", as a routed voxel write
+	// carries it) as Kit's: "player:<id>"
+	ss_ norm_by(const ss_ &by)
+	{
+		if(player_id(by) || by.compare(0, 7, "player:") != 0 || by.size() == 7)
+			return by;
+		return by_of(by.substr(7));
+	}
+
+	// `by` as a log says it: "player:7 (kitboss)"
+	ss_ by_text(const ss_ &by)
+	{
+		const uint64_t id = player_id(by);
+		return id ? by+" ("+m_entities[id].name+")" : by;
+	}
+
+	// A player entity's own inventory: its type with the inventory's
+	// handlers (Kit's kit/inventory)
+	Instance* own_inventory(uint64_t player)
+	{
+		auto it = m_entities.find(player);
+		if(it == m_entities.end())
+			return nullptr;
+		for(Instance &in : it->second.comps)
+			if(m_types[in.type].handlers.count("inventory_list"))
+				return &in;
+		return nullptr;
+	}
+
+	// The scene entity of a scene's name (0: none)
+	uint64_t scene_entity(const ss_ &scene)
+	{
+		for(auto &e : m_entities)
+			if(e.second.kind == "scene" && e.second.name == scene)
+				return e.first;
+		return 0;
+	}
+
+	// A placed player's entity where the app puts them: in their scene,
+	// its node there carrying its shared state (a score)
+	void place_player(Peer &p)
+	{
+		if(p.name.empty())
+			return;
+		const uint64_t id = ensure_player(p.name);
+		Entity &e = m_entities[id];
+		const uint64_t scene = scene_entity(p.scene);
+		if(!scene)
+			return;
+		if(e.parent != scene || !e.has_pos){
+			remove_node(e);
+			e.node = 0;
+			e.parent = scene;
+			e.has_pos = true;
+		}
+		for(int k = 0; k < 3; k++)
+			e.pos[k] = p.pos[k];
+		if(!e.node){
+			make_node(e);
+			return;
+		}
+		main_context::access(m_server, scene_of(e), [&](magic::Scene *sc){
+			magic::Node *n = sc->GetNode(e.node);
+			if(n)
+				n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+		});
+	}
+
+	// A player gone (or by another name): their entity stays, unplaced
+	void unplace_player(uint64_t id)
+	{
+		auto it = m_entities.find(id);
+		if(it == m_entities.end() || it->second.kind != "player")
+			return;
+		for(auto &p : m_peers)
+			if(p.second.player == id)
+				return;
+		remove_node(it->second);
+		it->second.node = 0;
+		it->second.has_pos = false;
+		it->second.parent = 1;
 	}
 
 	// The cells migrated objects owned: their owner entries emptied (by
@@ -1364,6 +1940,29 @@ struct Module: public interface::Module, public Interface
 	json::Value look_of(const Instance &in, const json::Value &decl)
 	{
 		json::Value l = decl.deepcopy();
+		// [KIT] stage 4d: "param:<name>" anywhere in it (its `when` too) is
+		// that parameter's value (kit/part's size, colour, rotation...)
+		std::function<void(json::Value&, int)> params =
+				[&](json::Value &o, int depth){
+			if(!o.is_object() || depth > 2)
+				return;
+			sv_<std::pair<ss_, json::Value>> set;
+			for(json::Iterator it(o); it; ++it){
+				if((*it).is_object()){
+					json::Value sub = *it;
+					params(sub, depth + 1);
+				} else if((*it).is_string() &&
+						(*it).as_string().compare(0, 6, "param:") == 0){
+					const json::Value &v = in.params.get((*it).as_string().
+							substr(6));
+					set.push_back(std::make_pair(it.key(), v.is_undefined() ?
+							json::null() : v));
+				}
+			}
+			for(auto &s : set)
+				o.set(s.first, s.second);
+		};
+		params(l, 0);
 		const ss_ ext = jstr(decl, "extent");
 		if(ext.empty())
 			return l;
@@ -1389,14 +1988,30 @@ struct Module: public interface::Module, public Interface
 	// What its types show every client: the first look and hud
 	json::Value show_of(const Entity &e)
 	{
-		json::Value show = json::object();
+		json::Value show = json::object(), parts = json::array();
+		std::set<ss_> shared;
 		for(const Instance &in : e.comps){
 			const json::Value &d = m_types[in.type].decl;
 			if(show.get("look").is_undefined() && !d.get("look").is_undefined())
 				show.set("look", look_of(in, d.get("look")));
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
+			// The types whose client part runs for it ([KIT] stage 4d), and
+			// the state they see
+			if(!m_types[in.type].client.empty())
+				parts.append(in.type);
+			for(const ss_ &k : m_types[in.type].shared)
+				shared.insert(k);
 		}
+		if(parts.size()){
+			json::Value keys = json::array();
+			for(const ss_ &k : shared)
+				keys.append(k);
+			show.set("client", parts);
+			show.set("shared", keys);
+		}
+		if(e.kind == "player")
+			show.set("player", true);
 		return show;
 	}
 
@@ -1486,23 +2101,45 @@ struct Module: public interface::Module, public Interface
 		m_queue.push_back(r);
 	}
 
-	// An input to an entity: each of its instances that has it
+	// An input to an entity: each of its instances that has it, the value
+	// as the input declares it ([KIT] stage 4d). from and output: the
+	// link's other end, the builders shown it passing
 	void deliver(uint64_t to, const ss_ &input, const json::Value &value,
-			const ss_ &by, int hops)
+			const ss_ &by, int hops, uint64_t from = 0, const ss_ &output = "")
 	{
 		auto it = m_entities.find(to);
 		if(it == m_entities.end())
 			return;
+		bool flowed = false;
 		for(size_t i = 0; i < it->second.comps.size(); i++){
 			const Instance &in = it->second.comps[i];
-			if(!m_types[in.type].inputs.count(input))
+			const Type &t = m_types[in.type];
+			if(!t.inputs.count(input))
 				continue;
+			const ss_ &type = t.in_types.at(input);
+			if(!signal_ok(type, value)){
+				log_w(MODULE, "Entity %s's %s: its input %s takes a %s, not %s",
+						cs(itos(to)), cs(in.type), cs(input), cs(type),
+						cs(value.stringify().substr(0, 64)));
+				add_log(to, "input "+input+" takes a "+type+", not "+
+						value.stringify().substr(0, 64));
+				continue;
+			}
+			if(from && !flowed && m_flows.size() < MAX_FLOWS){
+				json::Value f = json::array();
+				f.append((int64_t)from);
+				f.append(output);
+				f.append((int64_t)to);
+				f.append(input);
+				m_flows.append(f);
+				flowed = true;
+			}
 			Run r;
 			r.entity = to;
 			r.comp = i;
 			r.handler = "on_input";
 			r.args.append(input);
-			r.args.append(value);
+			r.args.append(type == "none" ? json::null() : value);
 			r.args.append(by);
 			r.by = by;
 			r.hops = hops;
@@ -1532,37 +2169,69 @@ struct Module: public interface::Module, public Interface
 		o += ",args=";
 		lua_lit(r.args, o);
 		o += ",nargs="+itos(r.args.size());
-		// The player who set it off, and their inventory's provider: Kit's
-		// counts of theirs, or the replacing instance (itself, or its
-		// type, params and state)
-		const ss_ who = player_of(r.by);
-		if(!who.empty()){
-			o += ",player=";
-			lua_lit(json::Value(who), o);
-			const Instance *pv_ = provider();
+		// The player who set it off (their entity, their name), and their
+		// inventory's provider: the replacing instance, or their entity's
+		// own kit/inventory (itself, or its type, id, params and state)
+		const uint64_t pid = player_id(r.by);
+		json::Value names = json::object();
+		if(pid){
+			names.set(r.by, m_entities[pid].name);
+			o += ",player_id="+itos(pid)+",player=";
+			lua_lit(json::Value(r.by), o);
+			uint64_t inv_id = 0;
+			size_t inv_comp = 0;
+			const Instance *pv_ = provider_for(pid, inv_id, inv_comp);
 			if(!pv_){
-				o += ",items=";
-				lua_lit(m_items.get(who).is_object() ? m_items.get(who) :
-						json::object(), o);
+				o += ",items={}";
 			} else if(pv_ == &in){
 				o += ",inv_self=true";
 			} else {
 				o += ",inv={type=";
 				lua_lit(json::Value(pv_->type), o);
-				o += ",id="+itos(m_provider)+",params=";
+				o += ",id="+itos(inv_id)+",params=";
 				lua_lit(pv_->params, o);
 				o += ",state=";
 				lua_lit(pv_->state, o);
 				o += "}";
 			}
 		}
+		// [KIT] stage 4d: the copies it made, every player for a type that
+		// reads them, the next ids and what each copy it may make makes
+		const size_t ci = &in - &e.comps[0];
+		o += ",made={";
+		for(auto &p : m_entities)
+			if(made_head(p.second, e.id, ci))
+				o += itos(p.first)+",";
 		o += "}";
+		if(m_types[in.type].players){
+			json::Value players = json::array();
+			for(auto &pl : m_players){
+				auto it = m_entities.find(pl.second);
+				if(it == m_entities.end())
+					continue;
+				json::Value j = json::object(), st = json::object();
+				j.set("id", (int64_t)pl.second);
+				j.set("name", pl.first);
+				j.set("here", it->second.has_pos);
+				for(const Instance &pi : it->second.comps)
+					st.set(pi.type, pi.state);
+				j.set("state", st);
+				players.append(j);
+				names.set("player:"+itos(pl.second), pl.first);
+			}
+			o += ",players=";
+			lua_lit(players, o);
+		}
+		o += ",names=";
+		lua_lit(names, o);
+		o += ",next_id="+itos(m_next_id)+",sizes={";
+		for(const auto &s : copy_sizes(e, ci)){
+			o += '[';
+			lua_lit(json::Value(s.first), o);
+			o += "]="+itos(s.second)+",";
+		}
+		o += "}}";
 		return o;
-	}
-
-	static ss_ player_of(const ss_ &by)
-	{
-		return by.compare(0, 7, "player:") == 0 ? by.substr(7) : "";
 	}
 
 	// One run; what it spent of the meter
@@ -1580,32 +2249,44 @@ struct Module: public interface::Module, public Interface
 		bool runaway = false, in_provider = false;
 		int64_t spent = 0;
 		const ss_ request = request_of(e, e.comps[r.comp], r);
+		const uint64_t pid = player_id(r.by);
+		uint64_t inv_id = 0;
+		size_t inv_comp = 0;
 		if(!box_call(request, answer, error, &runaway, &spent, &in_provider)){
-			Instance *pv_ = provider();
+			Instance *pv_ = provider_for(pid, inv_id, inv_comp);
 			if(runaway && in_provider && pv_){
-				// The replacing provider ran past it: it is disabled, not
-				// the caller, and Kit's own counts are the inventory now
+				// The inventory's provider ran past it: it is disabled, not
+				// the caller; a replacing one's players have their own
+				// inventories from then on
 				pv_->disabled = "its inventory ran past its budget in entity "+
 						itos(r.entity)+"'s "+r.handler;
 				m_runtime_dirty = true;
 				log_w(MODULE, "Entity %s's %s disabled: %s; the players' "
-						"inventory is Kit's own counts now",
-						cs(itos(m_provider)), cs(pv_->type), cs(pv_->disabled));
+						"inventory is %s now", cs(itos(inv_id)), cs(pv_->type),
+						cs(pv_->disabled), inv_id == pid ? "none" :
+						"their entities' own");
+				add_log(inv_id, "disabled: "+pv_->disabled);
 			} else if(runaway){
 				Instance &in = m_entities[r.entity].comps[r.comp];
 				in.disabled = r.handler+" ran past its budget";
 				m_runtime_dirty = true;
 				log_w(MODULE, "Entity %s's %s disabled: %s", cs(itos(r.entity)),
 						cs(type), cs(in.disabled));
+				add_log(r.entity, "disabled: "+in.disabled);
 			} else {
 				log_w(MODULE, "Entity %s's %s, %s: %s", cs(itos(r.entity)),
 						cs(type), cs(r.handler), cs(error));
+				add_log(r.entity, r.handler+": "+error);
 			}
 			return spent;
 		}
 		const json::Value fx = json::load_string(answer.c_str());
 		Instance &in = e.comps[r.comp];
 		const Type &t = m_types[type];
+		const json::Value &lines = fx.get("log");
+		for(unsigned i = 0; i < lines.size(); i++)
+			if(lines.at(i).is_string())
+				add_log(e.id, lines.at(i).as_string());
 		const json::Value &sets = fx.get("set");
 		for(unsigned i = 0; i < sets.size(); i++){
 			const json::Value &kv = sets.at(i);
@@ -1624,8 +2305,22 @@ struct Module: public interface::Module, public Interface
 			if(!t.outputs.count(output)){
 				log_w(MODULE, "Entity %s's %s emits %s, which it does not "
 						"declare", cs(itos(e.id)), cs(type), cs(output));
+				add_log(e.id, "emits "+output+", which it does not declare");
 				continue;
 			}
+			// [KIT] stage 4d: the value as the output declares it
+			const ss_ &ot = t.out_types.at(output);
+			json::Value value = emits.at(i).at(1u);
+			if(!signal_ok(ot, value)){
+				log_w(MODULE, "Entity %s's %s emits %s %s, which is no %s: "
+						"not sent", cs(itos(e.id)), cs(type), cs(output),
+						cs(value.stringify().substr(0, 64)), cs(ot));
+				add_log(e.id, "emits "+output+" "+value.stringify().substr(0,
+						64)+", which is no "+ot+": not sent");
+				continue;
+			}
+			if(ot == "none")
+				value = json::null();
 			for(const Link &l : in.links){
 				if(l.output != output)
 					continue;
@@ -1633,16 +2328,18 @@ struct Module: public interface::Module, public Interface
 					log_w(MODULE, "A signal loop cut: entity %s's %s -> entity "
 							"%s's %s, past %i links", cs(itos(e.id)), cs(output),
 							cs(itos(l.to)), cs(l.input), MAX_HOPS);
+					add_log(e.id, "a signal loop cut at "+output+" -> "+
+							itos(l.to)+"."+l.input);
 					continue;
 				}
-				deliver(l.to, l.input, emits.at(i).at(1u), r.by, r.hops + 1);
+				deliver(l.to, l.input, value, r.by, r.hops + 1, e.id, output);
 			}
 		}
 		// The provider's state, changed by the inventory calls of this run
-		Instance *pv_ = provider();
+		Instance *pv_ = provider_for(pid, inv_id, inv_comp);
 		const json::Value &inv_set = fx.get("inv_set");
 		if(pv_ && pv_ != &in && inv_set.size()){
-			Entity &pe = m_entities[m_provider];
+			Entity &pe = m_entities[inv_id];
 			for(unsigned i = 0; i < inv_set.size(); i++){
 				const json::Value &kv = inv_set.at(i);
 				if(!kv.at(0u).is_string())
@@ -1651,7 +2348,7 @@ struct Module: public interface::Module, public Interface
 				pv_->state.set(k, kv.at(1u));
 				m_runtime_dirty = true;
 				if(m_types[pv_->type].shared.count(k))
-					replicate_state(pe, m_provider_comp, k);
+					replicate_state(pe, inv_comp, k);
 			}
 		}
 		const json::Value &voxel = fx.get("voxel");
@@ -1668,7 +2365,7 @@ struct Module: public interface::Module, public Interface
 					w.by = r.by;
 					// A game change, or a build of the player who set it
 					// off (the type's builds)
-					w.origin = t.builds && !player_of(r.by).empty() ? 'b' : 'g';
+					w.origin = t.builds && pid ? 'b' : 'g';
 					if(!set_voxel(w))
 						m_pending_voxels.push_back(w);
 				}
@@ -1690,9 +2387,902 @@ struct Module: public interface::Module, public Interface
 		const json::Value &items = fx.get("items");
 		if(!who.empty() && !items.is_undefined())
 			got_items(e, type, who, items);
+		// [KIT] stage 4d: entities: copies made, signals sent, removals
+		// (last: the instance itself may go)
+		const uint64_t self = e.id;
+		const size_t comp = r.comp;
+		const json::Value &spawns = fx.get("spawn");
+		for(unsigned i = 0; i < spawns.size(); i++)
+			spawn(self, comp, r.by, spawns.at(i));
+		const json::Value &sends = fx.get("send");
+		if(sends.size()){
+			const std::set<uint64_t> rch = reach(m_entities[self], comp, r.by);
+			for(unsigned i = 0; i < sends.size(); i++){
+				const json::Value &s = sends.at(i);
+				const uint64_t to = s.at(0u).is_number() ?
+						(uint64_t)std::max(0.0, s.at(0u).as_number()) : 0;
+				const ss_ input = jstr_at(s, 1);
+				if(!rch.count(to) || r.hops + 1 > MAX_HOPS){
+					add_log(self, "send "+input+" to "+itos(to)+" refused: "+
+							(rch.count(to) ? "past "+itos(MAX_HOPS)+" links" :
+							"not one it reaches"));
+					continue;
+				}
+				deliver(to, input, s.at(2u), r.by, r.hops + 1, self, "send");
+			}
+		}
+		const json::Value &removes = fx.get("remove");
+		for(unsigned i = 0; i < removes.size(); i++)
+			if(removes.at(i).is_number())
+				remove_entity(self, comp, r.by,
+						(uint64_t)std::max(0.0, removes.at(i).as_number()));
+		if(spawns.size() || removes.size()){
+			own_voxels();
+			pick_provider();
+		}
 		return spent;
 	}
 
+	// ---- Entities made and removed in play ([KIT] stage 4d)
+
+	// The entities an instance reaches: its own, its links' ends, those its
+	// entity parameters name, the copies it made, the player who set the
+	// run off, and every player for a type that reads them (`players`)
+	std::set<uint64_t> reach(const Entity &e, size_t comp, const ss_ &by)
+	{
+		std::set<uint64_t> r;
+		r.insert(e.id);
+		if(comp >= e.comps.size())
+			return r;
+		const Instance &in = e.comps[comp];
+		for(const Link &l : in.links)
+			r.insert(l.to);
+		const json::Value &decl = m_types[in.type].decl.get("params");
+		if(decl.is_object())
+			for(json::Iterator it(decl); it; ++it){
+				const json::Value &v = in.params.get(it.key());
+				if(jstr(*it, "type") == "entity" && v.is_number() &&
+						v.as_number() >= 2)
+					r.insert((uint64_t)v.as_number());
+			}
+		for(auto &p : m_entities)
+			if(p.second.made && p.second.maker == e.id &&
+					p.second.maker_comp == comp)
+				r.insert(p.first);
+		const uint64_t pid = player_id(by);
+		if(pid)
+			r.insert(pid);
+		if(m_types[in.type].players)
+			for(auto &p : m_players)
+				r.insert(p.second);
+		return r;
+	}
+
+	// An entity and every entity under it, parents first; empty past
+	// MAX_PREFAB of them
+	// A copy an instance made, by its first entity: not under another of
+	// its copies' entities, nor a prefab copy's later member
+	bool made_head(const Entity &x, uint64_t maker, size_t comp)
+	{
+		if(!x.made || x.maker != maker || x.maker_comp != comp)
+			return false;
+		auto par = m_entities.find(x.parent);
+		if(par != m_entities.end() && par->second.made &&
+				par->second.maker == maker && par->second.maker_comp == comp)
+			return false;
+		const int64_t copy = json::jint(x.prefab, "copy", 0);
+		return !copy || copy == (int64_t)x.id;
+	}
+
+	sv_<uint64_t> group_of(uint64_t id, size_t max = MAX_PREFAB)
+	{
+		sv_<uint64_t> g;
+		if(!m_entities.count(id))
+			return g;
+		g.push_back(id);
+		for(size_t i = 0; i < g.size(); i++){
+			for(auto &p : m_entities)
+				if(p.second.parent == g[i] && p.first != g[i])
+					g.push_back(p.first);
+			if(g.size() > max)
+				return sv_<uint64_t>();
+		}
+		return g;
+	}
+
+	// What an instance may copy (c:spawn): a prefab its parameters name
+	// ("prefab:<name>"), and an entity it reaches that is no scene, app or
+	// player ("entity:<id>"), each with how many entities a copy makes
+	std::map<ss_, size_t> copy_sizes(const Entity &e, size_t comp)
+	{
+		std::map<ss_, size_t> out;
+		if(comp >= e.comps.size())
+			return out;
+		const Instance &in = e.comps[comp];
+		const json::Value &decl = m_types[in.type].decl.get("params");
+		if(decl.is_object())
+			for(json::Iterator it(decl); it; ++it){
+				if(jstr(*it, "type") != "prefab")
+					continue;
+				const ss_ n = jstr(in.params, it.key().c_str());
+				const json::Value *pf = n.empty() ? nullptr : prefab(n);
+				if(pf)
+					out["prefab:"+n] = pf->get("entities").size();
+			}
+		for(uint64_t id : reach(e, comp, "")){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || !it->second.kind.empty())
+				continue;
+			const size_t n = group_of(id).size();
+			if(n)
+				out["entity:"+itos(id)] = n;
+		}
+		return out;
+	}
+
+	size_t made_count()
+	{
+		size_t n = 0;
+		for(auto &p : m_entities)
+			n += p.second.made ? 1 : 0;
+		return n;
+	}
+
+	// c:spawn {ref, pos, id}: a copy of a prefab or of an entity the
+	// instance reaches (it and what is under it), in its scene at pos (its
+	// own position if none), ids from id. Play state: a game change, or a
+	// build of the player who set the run off for a type with `builds`
+	// ("Always keep builds": the start's at once). Each instance's
+	// on_start runs
+	void spawn(uint64_t maker, size_t comp, const ss_ &by, const json::Value &s)
+	{
+		Entity &e = m_entities[maker];
+		const ss_ ref = jstr_at(s, 0);
+		auto refuse = [&](const ss_ &why){
+			log_w(MODULE, "Entity %s: a copy of %s refused: %s",
+					cs(itos(maker)), cs(ref.substr(0, 140)), cs(why));
+			add_log(maker, "a copy of "+ref.substr(0, 140)+" refused: "+why);
+		};
+		if(comp >= e.comps.size())
+			return;
+		const auto sizes = copy_sizes(e, comp);
+		auto si = sizes.find(ref);
+		if(si == sizes.end())
+			return refuse("not one it reaches");
+		if(made_count() + si->second > MAX_MADE ||
+				m_entities.size() + si->second > MAX_ENTITIES)
+			return refuse("the round has made "+itos(MAX_MADE)+" entities");
+		json::Value pf;
+		ss_ name;
+		double base[3] = {0, 0, 0};
+		if(ref.compare(0, 7, "prefab:") == 0){
+			name = ref.substr(7);
+			pf = prefab(name)->deepcopy();
+		} else {
+			const sv_<uint64_t> g = group_of(strtoull(ref.c_str() + 7,
+					nullptr, 10));
+			const Entity &src = m_entities[g[0]];
+			if(src.has_pos)
+				for(int k = 0; k < 3; k++)
+					base[k] = src.pos[k];
+			pf = group_prefab(g, base);
+		}
+		const json::Value &pos = s.at(1u);
+		if(pos_ok(pos)){
+			for(unsigned k = 0; k < 3; k++)
+				base[k] = pos.at(k).as_number();
+		} else if(e.has_pos){
+			for(int k = 0; k < 3; k++)
+				base[k] = e.pos[k];
+		} else {
+			return refuse("no position: its own, or pos");
+		}
+		ss_ scene;
+		scene_of(e, &scene);
+		const uint64_t sc = scene_entity(scene);
+		if(!sc)
+			return refuse("it is in no scene");
+		const uint64_t first = s.at(2u).is_number() ?
+				(uint64_t)std::max(0.0, s.at(2u).as_number()) : 0;
+		if(first < m_next_id)
+			return refuse("its ids are taken");
+		sv_<json::Value> rows;
+		instantiate(pf, name, sc, base, first, rows);
+		m_next_id = first + rows.size();
+		const Type &t = m_types[e.comps[comp].type];
+		const uint64_t pid = player_id(by);
+		const char origin = t.builds && pid ? 'b' : 'g';
+		const bool keep = origin == 'b' && always_keep();
+		for(const json::Value &row : rows)
+			m_pending_ids.insert((uint64_t)json::jint(row, "id", 0));
+		sv_<uint64_t> made;
+		for(const json::Value &row : rows){
+			Entity n;
+			ss_ why;
+			if(!entity_from_json(row, n, why) || m_entities.count(n.id) ||
+					(!m_entities.count(n.parent) &&
+					!m_pending_ids.count(n.parent))){
+				refuse("a member does not load: "+why);
+				continue;
+			}
+			if(!keep){
+				n.made = origin;
+				n.made_by = origin == 'b' ? m_entities[pid].name : "";
+				n.maker = maker;
+				n.maker_comp = comp;
+			}
+			m_entities[n.id] = n;
+			made.push_back(n.id);
+		}
+		m_pending_ids.clear();
+		for(uint64_t id : made){
+			Entity &n = m_entities[id];
+			// Its state its types' defaults, as a new entity's
+			for(Instance &in : n.comps){
+				const json::Value &sd = m_types[in.type].decl.get("state");
+				in.state = json::object();
+				if(sd.is_object())
+					for(json::Iterator it(sd); it; ++it)
+						in.state.set(it.key(), (*it).get("default"));
+			}
+			if(n.has_pos)
+				make_node(n);
+			for(size_t i = 0; i < n.comps.size(); i++){
+				Run r;
+				r.entity = id;
+				r.comp = i;
+				r.handler = "on_start";
+				r.by = by;
+				queue_run(r);
+			}
+		}
+		if(keep)
+			m_store->set("authored", authored_json().stringify());
+		m_runtime_dirty = true;
+		ss_ ids;
+		for(uint64_t id : made)
+			ids += (ids.empty() ? "" : ",")+itos(id);
+		log_i(MODULE, "Entity %s made a copy of %s: %s (%s)", cs(itos(maker)),
+				cs(ref), cs(ids), keep ? "a build, kept as made" :
+				origin == 'b' ? cs("a build of "+m_entities[pid].name) :
+				"a game change");
+		add_log(maker, "made a copy of "+ref+": "+ids);
+		if(!made.empty())
+			for(auto &p : m_peers)
+				if(p.second.editing)
+					send_state(p.first);
+	}
+
+	// An entity's handler run at once (on_remove, before it goes), each of
+	// its instances that has it
+	void run_now(uint64_t id, const char *handler, const ss_ &by)
+	{
+		for(size_t i = 0; ; i++){
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || i >= it->second.comps.size())
+				return;
+			if(!m_types[it->second.comps[i].type].handlers.count(handler))
+				continue;
+			Run r;
+			r.entity = id;
+			r.comp = i;
+			r.handler = handler;
+			r.by = by;
+			run(r);
+		}
+	}
+
+	// c:remove: an entity the instance reaches, with what is under it, out
+	// of the round, each one's on_remove first. One made in play is gone;
+	// an authored one comes back at Stop (a game change, or a build of the
+	// player who set it off for a type with `builds`, which "Keep them"
+	// takes out of the start)
+	void remove_entity(uint64_t maker, size_t comp, const ss_ &by, uint64_t id)
+	{
+		auto mi = m_entities.find(maker);
+		const char *why = mi == m_entities.end() ? "its remover is gone" :
+				!m_entities.count(id) ? "it is not there" :
+				!m_entities[id].kind.empty() ? "a scene, app or player" :
+				!reach(mi->second, comp, by).count(id) ? "not one it reaches" :
+				nullptr;
+		if(why){
+			log_w(MODULE, "Entity %s: a removal of %s refused: %s",
+					cs(itos(maker)), cs(itos(id)), why);
+			if(mi != m_entities.end())
+				add_log(maker, "remove "+itos(id)+" refused: "+why);
+			return;
+		}
+		const uint64_t pid = player_id(by);
+		const char origin = m_types[mi->second.comps[comp].type].builds &&
+				pid ? 'b' : 'g';
+		sv_<uint64_t> g = group_of(id, MAX_ENTITIES);
+		// A prefab copy made in play goes whole, by its first member
+		const Entity &target = m_entities[id];
+		if(target.made && json::jint(target.prefab, "copy", 0) == (int64_t)id){
+			sv_<uint64_t> others;
+			for(auto &p : m_entities)
+				if(p.first != id && p.second.made &&
+						json::jint(p.second.prefab, "copy", 0) == (int64_t)id)
+					others.push_back(p.first);
+			for(uint64_t o : others)
+				for(uint64_t x : group_of(o, MAX_ENTITIES))
+					if(std::find(g.begin(), g.end(), x) == g.end())
+						g.push_back(x);
+		}
+		if(m_remove_depth < MAX_REMOVE_DEPTH){
+			m_remove_depth++;
+			for(uint64_t x : g)
+				run_now(x, "on_remove", by);
+			m_remove_depth--;
+		}
+		size_t n = 0;
+		bool authored_gone = false;
+		for(auto x = g.rbegin(); x != g.rend(); ++x){
+			auto it = m_entities.find(*x);
+			if(it == m_entities.end())
+				continue;
+			remove_node(it->second);
+			it->second.node = 0;
+			if(!it->second.made){
+				if(origin == 'b' && always_keep()){
+					// A build kept as made: out of the start too
+					authored_gone = true;
+				} else {
+					Removed rm;
+					rm.e = it->second;
+					rm.origin = origin;
+					rm.by = origin == 'b' ? m_entities[pid].name : "";
+					m_removed[*x] = rm;
+				}
+			}
+			m_entities.erase(it);
+			n++;
+		}
+		if(authored_gone)
+			m_store->set("authored", authored_json().stringify());
+		m_runtime_dirty = true;
+		log_i(MODULE, "Entity %s removed %s (%zu entities, %s)",
+				cs(itos(maker)), cs(itos(id)), n, origin == 'b' ?
+				cs("a build of "+player_of(by)) : "a game change");
+		if(m_entities.count(maker))
+			add_log(maker, "removed "+itos(id));
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
+	}
+
+	// ---- Prefabs ([KIT] stage 4d): api.h says what one is
+
+	// A prefab by its name: the save's row (a builder's) over the file;
+	// null when there is none or it does not read (logged once)
+	const json::Value* prefab(const ss_ &name)
+	{
+		auto it = m_prefabs.find(name);
+		if(it != m_prefabs.end())
+			return &it->second;
+		const size_t slash = name.find('/');
+		if(slash == ss_::npos || !name_ok(name.substr(0, slash)) ||
+				!name_ok(name.substr(slash + 1)) || m_bad_prefabs.count(name) ||
+				m_prefab_loading.count(name))
+			return nullptr;
+		ss_ src;
+		if(!m_store || !m_store->get("prefab:"+name, src)){
+			const ss_ dir = author_path(name.substr(0, slash));
+			if(!dir.empty())
+				src = read_file(dir+"/"+name.substr(slash + 1)+".prefab.json");
+		}
+		if(src.empty() || src.size() > MAX_TYPE_SOURCE)
+			return nullptr;
+		const json::Value j = json::load_string(src.c_str());
+		ss_ why;
+		m_prefab_loading.insert(name);
+		const bool ok = check_prefab(j, why);
+		m_prefab_loading.erase(name);
+		if(!ok){
+			log_w(MODULE, "Prefab %s does not load: %s", cs(name), cs(why));
+			m_bad_prefabs.insert(name);
+			return nullptr;
+		}
+		m_prefabs[name] = j;
+		return &m_prefabs[name];
+	}
+
+	// A prefab's file as Kit takes it: its members, their parents earlier
+	// members, their types, parameters and links as an authored entity's
+	bool check_prefab(const json::Value &j, ss_ &why)
+	{
+		if(!j.is_object() || jstr(j, "format") != "kit_prefab"){
+			why = "not a JSON object of \"format\": \"kit_prefab\"";
+			return false;
+		}
+		const json::Value &v = j.get("version");
+		if(!v.is_undefined() && (!v.is_number() || v.as_number() < 1 ||
+				v.as_number() > 1e9 || v.as_number() != std::floor(
+				v.as_number()))){
+			why = "its version is a whole number from 1";
+			return false;
+		}
+		const json::Value &es = j.get("entities");
+		if(!es.is_array() || es.size() < 1 || es.size() > MAX_PREFAB){
+			why = "1 to "+itos(MAX_PREFAB)+" entities";
+			return false;
+		}
+		std::set<int64_t> ids;
+		for(unsigned i = 0; i < es.size(); i++){
+			const json::Value &e = es.at(i);
+			const int64_t id = json::jint(e, "id", 0);
+			const int64_t parent = json::jint(e, "parent", 0);
+			if(id < 1 || id > (int64_t)MAX_PREFAB || ids.count(id)){
+				why = "a member's id is 1..."+itos(MAX_PREFAB)+", once";
+				return false;
+			}
+			if(parent && !ids.count(parent)){
+				why = "member "+itos(id)+"'s parent is no earlier member";
+				return false;
+			}
+			if(!jstr(e, "kind").empty() || (!e.get("pos").is_undefined() &&
+					!pos_ok(e.get("pos")))){
+				why = "member "+itos(id)+" is no plain entity with a position";
+				return false;
+			}
+			ids.insert(id);
+		}
+		for(unsigned i = 0; i < es.size(); i++){
+			const json::Value &e = es.at(i);
+			const ss_ who = "member "+itos(json::jint(e, "id", 0));
+			const json::Value &cs_ = e.get("components");
+			if(!cs_.is_array() || cs_.size() > 16){
+				why = who+": a list of at most 16 components";
+				return false;
+			}
+			for(unsigned k = 0; k < cs_.size(); k++){
+				const json::Value &c = cs_.at(k);
+				const ss_ type = full_type(jstr(c, "type"));
+				if(!load_type(type, why)){
+					why = who+": "+why;
+					return false;
+				}
+				if(m_types[type].player){
+					why = who+": "+type+" is a player's";
+					return false;
+				}
+				const json::Value &decl = m_types[type].decl.get("params");
+				const json::Value &ps = c.get("params");
+				if(ps.is_object())
+					for(json::Iterator it(ps); it; ++it){
+						const json::Value &d = decl.get(it.key());
+						ss_ bad;
+						if(!d.is_object())
+							bad = "not a parameter of it";
+						else if(jstr(d, "type") == "entity")
+							bad = (*it).is_number() && ((*it).as_number() == 0 ||
+									ids.count((int64_t)(*it).as_number())) ? "" :
+									"a member's id or 0";
+						else
+							bad = check_param(d, *it);
+						if(!bad.empty()){
+							why = who+": "+type+"'s "+it.key()+" is "+bad;
+							return false;
+						}
+					}
+				const json::Value &ls = c.get("links");
+				for(unsigned m = 0; m < ls.size(); m++){
+					const json::Value &l = ls.at(m);
+					if(!m_types[type].outputs.count(jstr(l, "output")) ||
+							!ids.count(json::jint(l, "to", 0)) ||
+							!name_ok(jstr(l, "input"))){
+						why = who+": a link from an output of "+type+" to a "
+								"member's input";
+						return false;
+					}
+				}
+			}
+		}
+		return true;
+	}
+
+	// The placeable prefabs: Kit's and the app's files, the builders' rows
+	void load_prefab_palette()
+	{
+		std::set<ss_> names;
+		for(const ss_ &author : {ss_("kit"), m_author}){
+			const ss_ dir = author_path(author);
+			if(dir.empty())
+				continue;
+			for(const auto &n : interface::fs::list_directory(dir)){
+				const size_t dot = n.name.rfind(".prefab.json");
+				if(!n.is_directory && dot != ss_::npos && dot + 12 ==
+						n.name.size())
+					names.insert(author+"/"+n.name.substr(0, dot));
+			}
+		}
+		for(const ss_ &k : m_store->list("prefab:"))
+			names.insert(k.substr(7));
+		ss_ list;
+		for(const ss_ &n : names)
+			if(prefab(n)){
+				m_prefab_palette.insert(n);
+				list += (list.empty() ? "" : " ")+n;
+			}
+		log_i(MODULE, "Prefabs: %s", list.empty() ? "none" : cs(list));
+	}
+
+	// Entities as a prefab: members 1... in the order given (a parent
+	// before its children), positions from `base`, links and entity
+	// parameters among them made the members', others left out
+	json::Value group_prefab(const sv_<uint64_t> &ids, const double base[3])
+	{
+		std::map<uint64_t, int64_t> local;
+		for(size_t i = 0; i < ids.size(); i++)
+			local[ids[i]] = (int64_t)i + 1;
+		auto member = [&](uint64_t id) -> int64_t {
+			auto it = local.find(id);
+			return it == local.end() ? 0 : it->second;
+		};
+		json::Value es = json::array();
+		for(uint64_t id : ids){
+			const Entity &src = m_entities[id];
+			json::Value j = json::object();
+			j.set("id", member(id));
+			j.set("parent", member(src.parent));
+			j.set("name", src.name);
+			if(src.has_pos){
+				json::Value pos = json::array();
+				for(int k = 0; k < 3; k++)
+					pos.append(src.pos[k] - base[k]);
+				j.set("pos", pos);
+			}
+			json::Value comps = json::array();
+			for(const Instance &in : src.comps){
+				json::Value cj = json::object(), ls = json::array();
+				cj.set("type", in.type);
+				cj.set("version", in.version);
+				json::Value params = in.params.deepcopy();
+				const json::Value &decl = m_types[in.type].decl.get("params");
+				if(decl.is_object())
+					for(json::Iterator it(decl); it; ++it)
+						if(jstr(*it, "type") == "entity"){
+							const json::Value &v = in.params.get(it.key());
+							params.set(it.key(), member(v.is_number() &&
+									v.as_number() > 0 ? (uint64_t)v.as_number() :
+									0));
+						}
+				cj.set("params", params);
+				for(const Link &l : in.links){
+					if(!member(l.to))
+						continue;
+					json::Value lj = json::object();
+					lj.set("output", l.output);
+					lj.set("to", member(l.to));
+					lj.set("input", l.input);
+					ls.append(lj);
+				}
+				cj.set("links", ls);
+				comps.append(cj);
+			}
+			j.set("components", comps);
+			es.append(j);
+		}
+		json::Value pf = json::object();
+		pf.set("format", "kit_prefab");
+		pf.set("version", (int64_t)1);
+		pf.set("entities", es);
+		return pf;
+	}
+
+	// A prefab's copy as entities' rows, ids from `first` in its order,
+	// under `scene` (or their parent among them), positions from `base`,
+	// links and entity parameters to the new ids. name: the prefab's (each
+	// member remembers it), "" for an entity's copy
+	void instantiate(const json::Value &pf, const ss_ &name, uint64_t scene,
+			const double base[3], uint64_t first, sv_<json::Value> &out)
+	{
+		const json::Value &es = pf.get("entities");
+		std::map<int64_t, uint64_t> ids;
+		for(unsigned i = 0; i < es.size(); i++)
+			ids[json::jint(es.at(i), "id", 0)] = first + i;
+		auto map = [&](const json::Value &v) -> int64_t {
+			const int64_t l = v.is_number() ? (int64_t)v.as_number() : 0;
+			auto it = ids.find(l);
+			return it == ids.end() ? 0 : (int64_t)it->second;
+		};
+		for(unsigned i = 0; i < es.size(); i++){
+			const json::Value &m = es.at(i);
+			const int64_t lid = json::jint(m, "id", 0);
+			json::Value e = json::object();
+			e.set("id", (int64_t)ids[lid]);
+			const int64_t parent = map(m.get("parent"));
+			e.set("parent", parent ? parent : (int64_t)scene);
+			e.set("name", jstr(m, "name"));
+			if(pos_ok(m.get("pos"))){
+				json::Value pos = json::array();
+				for(unsigned k = 0; k < 3; k++)
+					pos.append(grid(base[k] + m.get("pos").at(k).as_number()));
+				e.set("pos", pos);
+			}
+			json::Value comps = json::array();
+			const json::Value &cs_ = m.get("components");
+			for(unsigned k = 0; k < cs_.size(); k++){
+				const json::Value &c = cs_.at(k);
+				const ss_ type = full_type(jstr(c, "type"));
+				json::Value cj = json::object(), ls = json::array();
+				cj.set("type", type);
+				if(c.get("version").is_number())
+					cj.set("version", c.get("version"));
+				json::Value params = c.get("params").is_object() ?
+						c.get("params").deepcopy() : json::object();
+				const json::Value &decl = m_types[type].decl.get("params");
+				if(decl.is_object())
+					for(json::Iterator it(decl); it; ++it)
+						if(jstr(*it, "type") == "entity" &&
+								!params.get(it.key()).is_undefined())
+							params.set(it.key(), map(params.get(it.key())));
+				cj.set("params", params);
+				const json::Value &links = c.get("links");
+				for(unsigned l = 0; l < links.size(); l++){
+					const int64_t to = map(links.at(l).get("to"));
+					if(!to)
+						continue;
+					json::Value lj = json::object();
+					lj.set("output", jstr(links.at(l), "output"));
+					lj.set("to", to);
+					lj.set("input", jstr(links.at(l), "input"));
+					ls.append(lj);
+				}
+				cj.set("links", ls);
+				comps.append(cj);
+			}
+			e.set("components", comps);
+			if(!name.empty()){
+				json::Value pi = json::object();
+				pi.set("of", name);
+				pi.set("version", json::jint(pf, "version", 1));
+				pi.set("member", lid);
+				pi.set("copy", (int64_t)first);
+				e.set("prefab", pi);
+			}
+			out.push_back(e);
+		}
+	}
+
+	// {"op": "place", "prefab": name, "pos": [x, y, z]}: a copy of the
+	// prefab in the editor's scene, its members' ids the next ones
+	bool place_prefab(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		const ss_ name = jstr(j, "prefab");
+		const json::Value *pf = prefab(name);
+		if(!pf){
+			why = "no prefab \""+name.substr(0, 130)+"\"";
+			return false;
+		}
+		if(!pos_ok(j.get("pos"))){
+			why = "pos: three numbers within "+itos((int)MAX_COORD);
+			return false;
+		}
+		const uint64_t scene = scene_entity(p.scene);
+		if(!scene){
+			why = "the editor is in no scene of the composition's";
+			return false;
+		}
+		const size_t n = pf->get("entities").size();
+		if(m_entities.size() + n > MAX_ENTITIES){
+			why = "the composition has "+itos(MAX_ENTITIES)+" entities";
+			return false;
+		}
+		double base[3];
+		for(unsigned k = 0; k < 3; k++)
+			base[k] = grid(j.get("pos").at(k).as_number());
+		sv_<json::Value> rows;
+		instantiate(*pf, name, scene, base, m_next_id, rows);
+		for(const json::Value &row : rows)
+			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
+					row));
+		what = "placed prefab "+name+" as "+itos(m_next_id)+"..."+
+				itos(m_next_id + rows.size() - 1);
+		m_next_id += rows.size();
+		return true;
+	}
+
+	// How deep an entity is under the root
+	int depth(uint64_t id)
+	{
+		int d = 0;
+		for(auto it = m_entities.find(id); it != m_entities.end() && d < 64 &&
+				it->second.parent && it->first != 1; d++)
+			it = m_entities.find(it->second.parent);
+		return d;
+	}
+
+	// A prefab copy's member (its id in the prefab) as an entity, or 0
+	uint64_t copy_member(int64_t copy, int64_t member)
+	{
+		for(auto &e : m_entities)
+			if(json::jint(e.second.prefab, "copy", 0) == copy &&
+					json::jint(e.second.prefab, "member", 0) == member)
+				return e.first;
+		return 0;
+	}
+
+	// {"op": "save_prefab", "ids": [n...], "name": n}: those entities a
+	// prefab "<the builder's name>/<n>" (a new version of it if it is
+	// there), in the save, placeable from then on; they are a copy of it,
+	// and every other copy follows it: each member's parameters the
+	// prefab's, but those set on that copy (its overrides)
+	// simplified: a copy follows the parameters; members and links added
+	// or gone are not, nor a prefab of files (Kit's, the app's)
+	bool save_prefab(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		const ss_ short_name = jstr(j, "name");
+		if(!name_ok(short_name)){
+			why = "name: letters, digits and _";
+			return false;
+		}
+		ss_ author = p.name.substr(0, 64);
+		for(char &c : author)
+			if(!isalnum((unsigned char)c))
+				c = '_';
+		if(author.empty() || author == "kit"){
+			why = "a builder's prefabs are under their name, and it is \""+
+					author+"\"";
+			return false;
+		}
+		const ss_ name = author+"/"+short_name;
+		const json::Value &ids = j.get("ids");
+		if(!ids.is_array() || ids.size() < 1 || ids.size() > MAX_PREFAB){
+			why = "ids: 1 to "+itos(MAX_PREFAB)+" entities";
+			return false;
+		}
+		sv_<uint64_t> group;
+		for(unsigned i = 0; i < ids.size(); i++){
+			json::Value a = json::object();
+			a.set("id", ids.at(i));
+			Entity *e = entity_arg(a, "id", why);
+			if(!e)
+				return false;
+			if(!e->kind.empty()){
+				why = "entity "+itos(e->id)+" is a "+e->kind;
+				return false;
+			}
+			if(std::find(group.begin(), group.end(), e->id) == group.end())
+				group.push_back(e->id);
+		}
+		std::sort(group.begin(), group.end(), [&](uint64_t a, uint64_t b){
+			const int da = depth(a), db = depth(b);
+			return da != db ? da < db : a < b;
+		});
+		double base[3] = {0, 0, 0};
+		const Entity &first = m_entities[group[0]];
+		if(first.has_pos)
+			for(int k = 0; k < 3; k++)
+				base[k] = first.pos[k];
+		json::Value pf = group_prefab(group, base);
+		m_bad_prefabs.erase(name);
+		const json::Value *old = prefab(name);
+		const int64_t version = old ? json::jint(*old, "version", 1) + 1 : 1;
+		pf.set("author", author);
+		pf.set("name", short_name);
+		pf.set("version", version);
+		if(!check_prefab(pf, why))
+			return false;
+		m_store->set("prefab:"+name, pf.stringify());
+		m_prefabs[name] = pf;
+		m_prefab_palette.insert(name);
+		std::set<uint64_t> in_group(group.begin(), group.end());
+		for(size_t i = 0; i < group.size(); i++){
+			Entity copy = m_entities[group[i]];
+			json::Value pi = json::object();
+			pi.set("of", name);
+			pi.set("version", version);
+			pi.set("member", (int64_t)i + 1);
+			pi.set("copy", (int64_t)group[0]);
+			copy.prefab = pi;
+			for(Instance &in : copy.comps)
+				in.overrides.clear();
+			change.push_back(std::make_pair(copy.id, entity_json(copy)));
+		}
+		size_t updated = 0;
+		const json::Value &members = pf.get("entities");
+		for(auto &e : m_entities){
+			if(in_group.count(e.first) || !authored(e.second) ||
+					jstr(e.second.prefab, "of") != name)
+				continue;
+			const int64_t lid = json::jint(e.second.prefab, "member", 0);
+			const int64_t copy_id = json::jint(e.second.prefab, "copy", 0);
+			json::Value m;
+			for(unsigned i = 0; i < members.size(); i++)
+				if(json::jint(members.at(i), "id", 0) == lid)
+					m = members.at(i);
+			if(m.is_undefined())
+				continue;
+			Entity copy = e.second;
+			const json::Value &mc = m.get("components");
+			for(size_t c = 0; c < copy.comps.size() && c < mc.size(); c++){
+				Instance &in = copy.comps[c];
+				if(full_type(jstr(mc.at((unsigned)c), "type")) != in.type)
+					continue;
+				const json::Value &np = mc.at((unsigned)c).get("params");
+				const json::Value &decl = m_types[in.type].decl.get("params");
+				if(np.is_object())
+					for(json::Iterator it(np); it; ++it){
+						if(in.overrides.count(it.key()))
+							continue;
+						json::Value v = *it;
+						if(jstr(decl.get(it.key()), "type") == "entity")
+							v = json::Value((int64_t)copy_member(copy_id,
+									v.is_number() ? (int64_t)v.as_number() : 0));
+						in.params.set(it.key(), v);
+					}
+			}
+			copy.prefab = e.second.prefab.deepcopy();
+			copy.prefab.set("version", version);
+			change.push_back(std::make_pair(copy.id, entity_json(copy)));
+			updated++;
+		}
+		what = "saved prefab "+name+" version "+itos(version)+" of "+
+				itos(group.size())+" entities ("+itos(updated)+" entities of "
+				"other copies follow it)";
+		return true;
+	}
+	// ---- Debugging for novices ([KIT] stage 4d): each entity's log
+
+	void add_log(uint64_t id, const ss_ &line)
+	{
+		if(!id)
+			return;
+		// The game clock's minutes and seconds
+		char t[32];
+		const double sec = std::fmod(interface::os::game_us() / 1e6, 3600);
+		snprintf(t, sizeof t, "%02d:%04.1f ", (int)(sec / 60),
+				std::fmod(sec, 60));
+		std::deque<ss_> &l = m_logs[id];
+		l.push_back(t+line.substr(0, 200));
+		while(l.size() > LOG_LINES)
+			l.pop_front();
+		m_log_dirty.insert(id);
+	}
+
+	// The log of the entity a builder has selected, to them: whole as they
+	// select it, then as it grows
+	void send_log(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end() || !pi->second.editing || !pi->second.sel)
+			return;
+		json::Value j = json::object(), lines = json::array();
+		j.set("id", (int64_t)pi->second.sel);
+		for(const ss_ &l : m_logs[pi->second.sel])
+			lines.append(l);
+		j.set("lines", lines);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:log", j.stringify());
+		});
+	}
+
+	// At a tick's end: the builders are sent the signals that passed along
+	// links (their lines light up), and their selection's new log lines
+	void send_debug()
+	{
+		sv_<size_t> editors;
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				editors.push_back(p.first);
+		if(!editors.empty() && m_flows.size()){
+			const ss_ data = m_flows.stringify();
+			network::access(m_server, [&](network::Interface *inetwork){
+				for(size_t peer : editors)
+					inetwork->send(peer, "kit:flow", data);
+			});
+		}
+		m_flows = json::array();
+		for(size_t peer : editors)
+			if(m_log_dirty.count(m_peers[peer].sel))
+				send_log(peer);
+		m_log_dirty.clear();
+	}
 	// The peer a player's name is, in a scene (0: none)
 	size_t peer_of(const ss_ &name, const ss_ &scene)
 	{
@@ -1729,15 +3319,17 @@ struct Module: public interface::Module, public Interface
 	// ---- The players' inventory: count, add, take and list (api.h), Kit's
 	// own counts (m_items) unless one component replaces them
 
-	// The provider: the first instance (by entity id) whose type has
-	// inventory = true; another is refused, logged once
+	// The replacing provider: the first authored instance (by entity id)
+	// whose type has inventory = true; another is refused, logged once
 	void pick_provider()
 	{
 		const uint64_t was = m_provider;
 		const size_t was_comp = m_provider_comp;
 		m_provider = 0;
 		m_provider_comp = 0;
-		for(auto &p : m_entities)
+		for(auto &p : m_entities){
+			if(!authored(p.second))
+				continue;
 			for(size_t i = 0; i < p.second.comps.size(); i++){
 				const Instance &in = p.second.comps[i];
 				if(!m_types[in.type].inventory)
@@ -1755,13 +3347,14 @@ struct Module: public interface::Module, public Interface
 							cs(in.type), cs(itos(m_provider)), cs(m_entities[
 							m_provider].comps[m_provider_comp].type));
 			}
+		}
 		if(m_provider != was || m_provider_comp != was_comp)
 			log_i(MODULE, "The players' inventory: %s", m_provider ?
 					cs("entity "+itos(m_provider)+"'s "+m_entities[m_provider].
-					comps[m_provider_comp].type) : "Kit's own counts");
+					comps[m_provider_comp].type) : "each player entity's own");
 	}
 
-	// The provider's instance, running (not disabled), or null
+	// The replacing provider's instance, running (not disabled), or null
 	Instance* provider()
 	{
 		auto it = m_entities.find(m_provider);
@@ -1771,8 +3364,27 @@ struct Module: public interface::Module, public Interface
 		return in.disabled.empty() ? &in : nullptr;
 	}
 
+	// A player's inventory ([KIT] stage 4d): the replacing provider, else
+	// their entity's own (Kit's kit/inventory), running; null for neither.
+	// id and comp: whose
+	Instance* provider_for(uint64_t player, uint64_t &id, size_t &comp)
+	{
+		Instance *pv = provider();
+		if(pv){
+			id = m_provider;
+			comp = m_provider_comp;
+			return pv;
+		}
+		Instance *own = player ? own_inventory(player) : nullptr;
+		if(!own || !own->disabled.empty())
+			return nullptr;
+		id = player;
+		comp = own - &m_entities[player].comps[0];
+		return own;
+	}
+
 	// A run's inventory calls done: the player's items as the provider
-	// lists them now, kept (Kit's own counts) and sent to their client
+	// lists them now, sent to their client
 	void got_items(const Entity &e, const ss_ &type, const ss_ &who,
 			const json::Value &items)
 	{
@@ -1784,24 +3396,23 @@ struct Module: public interface::Module, public Interface
 						n == std::floor(n))
 					mine.set(it.key(), (int64_t)n);
 			}
-		if(!provider()){
-			if(mine.size())
-				m_items.set(who, mine);
-			else
-				m_items.del_key(who);
-			m_runtime_dirty = true;
-		}
 		log_i(MODULE, "Entity %s's %s: %s has %s", cs(itos(e.id)), cs(type),
 				cs(who), cs(mine.stringify()));
 		send_items(who, mine);
 	}
 
+	// A player's items to their client: as given, or their entity's own
+	// inventory's ("items" of Kit's kit/inventory)
 	// simplified: under a replacing provider a client is sent its list
 	// only after a run that touched it, not as it joins
 	void send_items(const ss_ &who, json::Value mine = json::Value())
 	{
-		if(mine.is_undefined())
-			mine = m_items.get(who);
+		if(mine.is_undefined()){
+			auto it = m_players.find(who);
+			const Instance *own = it == m_players.end() ? nullptr :
+					own_inventory(it->second);
+			mine = own ? own->state.get("items") : json::object();
+		}
 		const ss_ data = mine.is_object() ? mine.stringify() : "{}";
 		network::access(m_server, [&](network::Interface *inetwork){
 			for(auto &p : m_peers)
@@ -1809,7 +3420,6 @@ struct Module: public interface::Module, public Interface
 					inetwork->send(p.first, "kit:items", data);
 		});
 	}
-
 	// ---- Grants (api.h's can_dig, can_place)
 
 	// Whether an instance in the peer's scene grants them key ("dig" or
@@ -1920,9 +3530,14 @@ struct Module: public interface::Module, public Interface
 	// Zones: a type's `zone` (a position parameter, its extent in cells
 	// from the entity's own up and on) and who stands in it, the players
 	// as the app placed them (the cell their position rounds to):
-	// on_enter(c, by) and on_leave(c, by) as that changes
+	// on_enter(c, by) and on_leave(c, by) as that changes. A player who is
+	// away (left, or not back yet after a restart) stays as they were
 	void check_zones()
 	{
+		std::set<ss_> here;
+		for(auto &pp : m_peers)
+			if(pp.second.player)
+				here.insert(itos(pp.second.player));
 		for(auto &p : m_entities){
 			Entity &e = p.second;
 			if(!e.has_pos)
@@ -1937,10 +3552,11 @@ struct Module: public interface::Module, public Interface
 				int n[3];
 				extent(in.params.get(t.zone), n);
 				const pv::Vector3DInt32 o = voxel_p(e);
+				// Who is in it, by their entity's id
 				std::set<ss_> now;
 				for(auto &pp : m_peers){
 					const Peer &peer = pp.second;
-					if(peer.scene != scene || peer.name.empty())
+					if(peer.scene != scene || !peer.player)
 						continue;
 					bool inside = true;
 					for(int k = 0; k < 3; k++){
@@ -1949,24 +3565,30 @@ struct Module: public interface::Module, public Interface
 						inside = inside && c >= 0 && c < n[k];
 					}
 					if(inside)
-						now.insert(peer.name);
+						now.insert(itos(peer.player));
 				}
-				auto fire = [&](const char *handler, const ss_ &name){
+				for(const ss_ &id : in.inside)
+					if(!here.count(id))
+						now.insert(id);
+				auto fire = [&](const char *handler, const ss_ &id){
 					Run r;
 					r.entity = e.id;
 					r.comp = i;
 					r.handler = handler;
-					r.by = "player:"+name;
+					r.by = "player:"+id;
 					r.args.append(r.by);
 					queue_run(r);
 				};
-				for(const ss_ &name : now)
-					if(!in.inside.count(name))
-						fire("on_enter", name);
-				for(const ss_ &name : in.inside)
-					if(!now.count(name))
-						fire("on_leave", name);
+				if(now == in.inside)
+					continue;
+				for(const ss_ &id : now)
+					if(!in.inside.count(id))
+						fire("on_enter", id);
+				for(const ss_ &id : in.inside)
+					if(!now.count(id))
+						fire("on_leave", id);
 				in.inside.swap(now);
+				m_runtime_dirty = true;
 			}
 		}
 	}
@@ -1976,7 +3598,18 @@ struct Module: public interface::Module, public Interface
 	void joined(size_t peer)
 	{
 		const Peer &p = m_peers[peer];
-		log_i(MODULE, "%s joined %s", cs(p.name), cs(p.scene));
+		log_i(MODULE, "%s joined %s as entity %s", cs(p.name), cs(p.scene),
+				cs(itos(p.player)));
+		// Their entity, and the client parts of the types ([KIT] stage 4d)
+		json::Value you = json::object(), parts = json::object();
+		you.set("id", (int64_t)p.player);
+		for(auto &t : m_types)
+			if(!t.second.client.empty())
+				parts.set(t.first, t.second.client);
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:client_parts", parts.stringify());
+			inetwork->send(peer, "kit:you", you.stringify());
+		});
 		if(m_session.running)
 			round_join(peer, false);
 		else
@@ -2013,6 +3646,7 @@ struct Module: public interface::Module, public Interface
 						"is Stopped, its component does not run", w.p.getX(),
 						w.p.getY(), w.p.getZ(), cs(w.by));
 			save_runtime();
+			send_debug();
 			return;
 		}
 		for(size_t n = m_pending_voxels.size(); n > 0; n--){
@@ -2045,8 +3679,8 @@ struct Module: public interface::Module, public Interface
 					r.comp = i;
 					r.handler = "on_voxel";
 					r.args.append(w.voxel);
-					r.args.append(w.by);
-					r.by = w.by;
+					r.by = norm_by(w.by);
+					r.args.append(r.by);
 					queue_run(r);
 				}
 			}
@@ -2072,6 +3706,7 @@ struct Module: public interface::Module, public Interface
 		// makes it a cost
 		save_runtime();
 		save_marks();
+		send_debug();
 	}
 
 	// ---- Clients act
@@ -2118,7 +3753,7 @@ struct Module: public interface::Module, public Interface
 			r.entity = id;
 			r.comp = i;
 			r.handler = "on_use";
-			r.by = "player:"+pi->second.name;
+			r.by = by_of(pi->second.name);
 			r.args.append(r.by);
 			queue_run(r);
 		}
@@ -2132,7 +3767,11 @@ struct Module: public interface::Module, public Interface
 	{
 		const bool was_editing = m_peers.count(old.info.id) &&
 				m_peers[old.info.id].editing;
+		const uint64_t player = m_peers.count(old.info.id) ?
+				m_peers[old.info.id].player : 0;
 		m_peers.erase(old.info.id);
+		if(player)
+			unplace_player(player);
 		for(auto &p : m_peers)
 			if(p.second.editing)
 				send_state(p.first);
@@ -2160,7 +3799,15 @@ struct Module: public interface::Module, public Interface
 		p.pos[0] = x;
 		p.pos[1] = y;
 		p.pos[2] = z;
-		if(join && m_hosted)
+		if(!m_hosted)
+			return;
+		// Their entity follows them ([KIT] stage 4d)
+		const uint64_t was = p.player;
+		p.player = name.empty() ? 0 : ensure_player(name);
+		if(was && was != p.player)
+			unplace_player(was);
+		place_player(p);
+		if(join)
 			joined(peer);
 	}
 
@@ -2453,12 +4100,18 @@ struct Module: public interface::Module, public Interface
 		json::Value a = json::array();
 		for(const Discarded &d : m_discarded){
 			json::Value j = json::object(), p = json::array();
+			j.set("by", d.by);
+			if(!d.entity.is_undefined()){
+				j.set("entity", d.entity);
+				j.set("removed", d.removed);
+				a.append(j);
+				continue;
+			}
 			for(int k = 0; k < 3; k++)
 				p.append((int64_t)d.p[k]);
 			j.set("scene", d.scene);
 			j.set("p", p);
 			j.set("id", (int64_t)d.id);
-			j.set("by", d.by);
 			a.append(j);
 		}
 		m_store->set("discarded", a.stringify());
@@ -2472,6 +4125,12 @@ struct Module: public interface::Module, public Interface
 			d.scene = jstr(j, "scene");
 			d.by = jstr(j, "by");
 			d.id = (uint32_t)json::jint(j, "id", 0);
+			if(j.get("entity").is_object() && !d.by.empty()){
+				d.entity = j.get("entity").deepcopy();
+				d.removed = j.get("removed").is_true();
+				m_discarded.push_back(d);
+				continue;
+			}
 			if(!pos_ok(j.get("p")) || d.by.empty())
 				continue;
 			for(unsigned k = 0; k < 3; k++)
@@ -2487,6 +4146,8 @@ struct Module: public interface::Module, public Interface
 		size_t n = 0;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
 			for(const Discarded &d : cells){
+				if(!d.entity.is_undefined())
+					continue;
 				auto si = m_host.scenes.find(d.scene);
 				voxelworld::Instance *w = si == m_host.scenes.end() ? nullptr :
 						ivw->get_instance(si->second);
@@ -2591,11 +4252,31 @@ struct Module: public interface::Module, public Interface
 		if(put.empty())
 			return refuse("no builds of those players discarded");
 		const size_t n = put_cells(put);
+		// [KIT] stage 4d: entities made put into the start, those removed
+		// taken out of it
+		sv_<std::pair<uint64_t, json::Value>> change;
+		size_t made = 0, removed = 0;
+		for(const Discarded &d : put){
+			if(d.entity.is_undefined())
+				continue;
+			const uint64_t id = (uint64_t)json::jint(d.entity, "id", 0);
+			auto it = m_entities.find(id);
+			if(d.removed && it != m_entities.end() && authored(it->second)){
+				delete_change(id, change);
+				removed++;
+			} else if(!d.removed && it == m_entities.end()){
+				change.push_back(std::make_pair(id, d.entity));
+				made++;
+			}
+		}
+		if(!change.empty())
+			commit(change, nullptr);
 		m_discarded.swap(rest);
 		save_discarded();
-		log_i(MODULE, "%s keeps the builds of %s: %zu cells put into the start "
-				"(%zu discarded left)", cs(p.name), cs(counts_text(
-				discarded_counts(put))), n, m_discarded.size());
+		log_i(MODULE, "%s keeps the builds of %s: %zu cells put into the start, "
+				"%zu entities made, %zu removed (%zu discarded left)", cs(p.name),
+				cs(counts_text(discarded_counts(put))), n, made, removed,
+				m_discarded.size());
 		for(auto &o : m_peers)
 			send_state(o.first);
 	}
@@ -2670,7 +4351,6 @@ struct Module: public interface::Module, public Interface
 			restore.append(k);
 		j.set("round", round);
 		j.set("restore", restore);
-		j.set("aside", m_session.aside);
 		m_store->set("session", j.stringify());
 	}
 
@@ -2834,26 +4514,30 @@ struct Module: public interface::Module, public Interface
 				}
 	}
 
-	// A player through the round's start, once a round: their inventory
-	// reset (or what they had, kept); then, as each time the app places
-	// them, on_join in their scene, a spawn type's placing them. At Play,
-	// keep_position leaves them where they are, and no spawn type in their
-	// scene is the app's default spawn
+	// A player through the round's start, once a round: their entity at its
+	// start (each player type's defaults: no items, no score), the items
+	// they had at the last Stop with "keep inventory"; then, as each time
+	// the app places them, on_join in their scene, a spawn type's placing
+	// them. At Play, keep_position leaves them where they are, and no spawn
+	// type in their scene is the app's default spawn
 	void round_join(size_t peer, bool at_play)
 	{
 		auto pi = m_peers.find(peer);
 		if(pi == m_peers.end() || pi->second.name.empty())
 			return;
 		const ss_ name = pi->second.name, scene = pi->second.scene;
+		const uint64_t pid = ensure_player(name);
 		bool keep_inventory = false, keep_position = false;
 		between_plays(keep_inventory, keep_position);
 		if(m_session.round.insert(name).second){
-			const json::Value kept = m_session.aside.get(name);
-			if(keep_inventory && kept.is_object() && kept.size())
-				m_items.set(name, kept);
-			else
-				m_items.del_key(name);
-			m_session.aside.del_key(name);
+			Entity &pe = m_entities[pid];
+			for(size_t i = 0; i < pe.comps.size(); i++)
+				to_start(pe, i);
+			Instance *own = own_inventory(pid);
+			const json::Value kept = m_aside.get(name);
+			if(own && keep_inventory && kept.is_object() && kept.size())
+				own->state.set("items", kept.deepcopy());
+			m_aside.del_key(name);
 			m_runtime_dirty = true;
 			save_session();
 			log_i(MODULE, "%s goes through the round's start: inventory %s",
@@ -2866,15 +4550,17 @@ struct Module: public interface::Module, public Interface
 				continue;
 			for(size_t i = 0; i < p.second.comps.size(); i++){
 				const Type &t = m_types[p.second.comps[i].type];
+				const bool places = t.spawn && (t.spawn_param.empty() ||
+						p.second.comps[i].params.get(t.spawn_param).is_true());
 				if(!t.handlers.count("on_join") ||
-						(t.spawn && at_play && keep_position))
+						(places && at_play && keep_position))
 					continue;
-				placed = placed || t.spawn;
+				placed = placed || places;
 				Run r;
 				r.entity = p.first;
 				r.comp = i;
 				r.handler = "on_join";
-				r.by = "player:"+name;
+				r.by = "player:"+itos(pid);
 				r.args.append(r.by);
 				queue_run(r);
 			}
@@ -2918,7 +4604,6 @@ struct Module: public interface::Module, public Interface
 		}
 		watch(true);
 		m_queue.clear();
-		m_items = json::object();
 		for(auto &pe : m_entities)
 			for(size_t i = 0; i < pe.second.comps.size(); i++){
 				to_start(pe.second, i);
@@ -2943,9 +4628,51 @@ struct Module: public interface::Module, public Interface
 		save_runtime();
 	}
 
+	// [KIT] stage 4d, the round's entities at Stop: those play made go,
+	// the authored ones it removed come back. A player's builds among them
+	// (a type with `builds`) are discarded, to keep until the next Play
+	// (after sort_marks(), which starts the list)
+	void end_round_entities()
+	{
+		sv_<uint64_t> made;
+		for(auto &p : m_entities)
+			if(p.second.made)
+				made.push_back(p.first);
+		for(uint64_t id : made){
+			Entity &e = m_entities[id];
+			if(e.made == 'b' && !e.made_by.empty()){
+				Discarded d;
+				d.by = e.made_by;
+				d.entity = entity_json(e);
+				m_discarded.push_back(d);
+			}
+			remove_node(e);
+			m_entities.erase(id);
+		}
+		for(auto &r : m_removed){
+			if(r.second.origin == 'b' && !r.second.by.empty()){
+				Discarded d;
+				d.by = r.second.by;
+				d.entity = entity_json(r.second.e);
+				d.removed = true;
+				m_discarded.push_back(d);
+			}
+			Entity &e = m_entities[r.first];
+			e = r.second.e;
+			e.node = 0;
+			if(e.has_pos)
+				make_node(e);
+		}
+		if(!made.empty() || !m_removed.empty())
+			log_i(MODULE, "The round's entities: %zu made gone, %zu removed "
+					"back", made.size(), m_removed.size());
+		m_removed.clear();
+	}
+
 	// Stop: play state thrown away. The sections play wrote to put back as
-	// they were at Play, each instance's state its start; the players'
-	// inventories dropped, or put aside to give back at Play
+	// they were at Play, the entities it made gone and those it removed
+	// back, each instance's state its start; the players' inventories
+	// dropped, or put aside to give back at Play
 	void stop(const ss_ &by)
 	{
 		if(!m_session.running)
@@ -2956,6 +4683,7 @@ struct Module: public interface::Module, public Interface
 		// in over the copies, the builds are discarded with them
 		sv_<Discarded> kept;
 		sort_marks(kept);
+		end_round_entities();
 		m_session.running = false;
 		m_session.by = by;
 		sv_<ss_> done;
@@ -2978,42 +4706,51 @@ struct Module: public interface::Module, public Interface
 			std::lock_guard<std::mutex> lock(m_writes_mutex);
 			m_writes.clear();
 		}
+		// What the players had, put aside with "keep inventory"
+		bool keep_inventory = false, keep_position = false;
+		between_plays(keep_inventory, keep_position);
+		m_aside = json::object();
+		for(auto &p : m_players){
+			const Instance *own = keep_inventory ? own_inventory(p.second) :
+					nullptr;
+			if(own && own->state.get("items").is_object() &&
+					own->state.get("items").size())
+				m_aside.set(p.first, own->state.get("items").deepcopy());
+		}
 		for(auto &pe : m_entities)
 			for(size_t i = 0; i < pe.second.comps.size(); i++)
 				to_start(pe.second, i);
-		bool keep_inventory = false, keep_position = false;
-		between_plays(keep_inventory, keep_position);
-		if(keep_inventory){
-			for(json::Iterator it(m_items); it; ++it)
-				m_session.aside.set(it.key(), *it);
-		} else {
-			m_session.aside = json::object();
-		}
-		m_items = json::object();
 		for(auto &p : m_peers)
 			send_items(p.second.name);
 		m_session.round.clear();
 		m_runtime_dirty = true;
 		save_runtime();
 		save_session();
+		m_store->set("authored", authored_json().stringify());
 		log_i(MODULE, "Stop by %s: %zu sections put back (%zu wait for their "
 				"load), each instance at its start, inventories %s (authored "
 				"%s, start %s, runtime %s)", cs(by), done.size(),
 				m_session.restore.size(), keep_inventory ? "put aside" :
 				"dropped", cs(digest(authored_json())), cs(digest(m_start)),
-				cs(digest(runtime_json())));
+				cs(digest(runtime_json(true))));
 		log_i(MODULE, "Stop by %s: %zu kept cells (edits, builds always "
 				"kept) put back in, %zu builds discarded%s%s", cs(by), kept_n,
 				m_discarded.size(), m_discarded.empty() ? "" : ": ",
 				cs(counts_text(discarded_counts())));
+		own_voxels();
+		pick_provider();
 		session_changed(false, by);
 		if(!m_discarded.empty())
 			send_discarded();
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
 	}
 
 	// Save as start: the play state is the start from now on. The copies
-	// go (the sections as they stand are the start), each instance's state
-	// now its start; the round goes on
+	// go (the sections as they stand are the start), the entities play
+	// made are authored and those it removed gone ([KIT] stage 4d), each
+	// instance's state now its start; the round goes on
 	void save_as_start(const ss_ &by)
 	{
 		if(!m_session.running)
@@ -3028,15 +4765,31 @@ struct Module: public interface::Module, public Interface
 		// The marks with them: the round's cells are the start's now
 		drop_marks();
 		watch(true);
-		m_start = runtime_json();
-		m_start.del_key("items");
+		size_t made = 0;
+		for(auto &p : m_entities)
+			if(p.second.made){
+				p.second.made = 0;
+				p.second.made_by.clear();
+				p.second.maker = 0;
+				p.second.maker_comp = 0;
+				made++;
+			}
+		const size_t removed = m_removed.size();
+		m_removed.clear();
+		m_store->set("authored", authored_json().stringify());
+		m_start = runtime_json(true);
 		m_store->set("start", m_start.stringify());
+		m_runtime_dirty = true;
 		save_session();
 		log_i(MODULE, "Saved as the start by %s: %zu sections' copies dropped, "
-				"the start's state %s", cs(by), n, cs(digest(m_start)));
+				"%zu entities made authored, %zu removed gone, the start's "
+				"state %s", cs(by), n, made, removed, cs(digest(m_start)));
+		pick_provider();
 		session_changed(true, by);
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
 	}
-
 	bool running()
 	{
 		return m_session.running;
@@ -3127,12 +4880,16 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < 3; k++)
 				cursor.append(std::floor(c.at(k).as_number()));
 		}
-		if(id != p.sel)
+		const bool other = id != p.sel;
+		if(other)
 			log_i(MODULE, "%s selects %s", cs(p.name),
 					id ? cs("entity "+itos(id)) : "nothing");
 		p.sel = id;
 		p.cursor = cursor;
 		send_builders();
+		// Its log, in the inspector ([KIT] stage 4d)
+		if(other)
+			send_log(peer);
 	}
 
 	// {"op": "builder", "name": n, "on": bool}: the admin grants or takes
@@ -3179,7 +4936,8 @@ struct Module: public interface::Module, public Interface
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
 						"usable", "zone", "volume", "grants", "version",
-						"inventory", "root"})
+						"inventory", "root", "inputs_types", "outputs_types",
+						"player"})
 					if(!d.get(k).is_undefined())
 						o.set(k, d.get(k));
 				pal.set(t, o);
@@ -3192,7 +4950,7 @@ struct Module: public interface::Module, public Interface
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
 							"zone", "volume", "grants", "version", "inventory",
-							"root"})
+							"root", "inputs_types", "outputs_types", "player"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
 					types.set(t.first, o);
@@ -3203,6 +4961,25 @@ struct Module: public interface::Module, public Interface
 			j.set("palette", names);
 			j.set("types", types);
 			j.set("authored", authored_json());
+			// [KIT] stage 4d: the round's own entities (made in play) and
+			// the players here, shown and selected, not edited; the prefabs
+			json::Value made = json::array(), pfs = json::array();
+			for(auto &e : m_entities){
+				if(authored(e.second) || (e.second.kind == "player" &&
+						!e.second.has_pos))
+					continue;
+				json::Value mj = entity_json(e.second);
+				if(e.second.made){
+					mj.set("made", ss_(1, e.second.made));
+					mj.set("made_by", e.second.made_by);
+					mj.set("maker", (int64_t)e.second.maker);
+				}
+				made.append(mj);
+			}
+			j.set("made", made);
+			for(const ss_ &n : m_prefab_palette)
+				pfs.append(n);
+			j.set("prefabs", pfs);
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
 			// The admin's: who is here with an account, to make builders
 			bool admin = false;
@@ -3303,16 +5080,27 @@ struct Module: public interface::Module, public Interface
 			if(!m_session.running)
 				return refuse("the server is Stopped: it is at its start");
 			const size_t ci = in - &e->comps[0];
-			to_start(*e, ci);
+			const uint64_t id = e->id;
+			const ss_ type = in->type;
+			// Its on_remove first ([KIT] stage 4d): what it made in the
+			// round, it may take back
 			Run r;
-			r.entity = e->id;
+			r.entity = id;
 			r.comp = ci;
+			r.handler = "on_remove";
+			r.by = by_of(p.name);
+			run(r);
+			auto it = m_entities.find(id);
+			if(it == m_entities.end() || ci >= it->second.comps.size())
+				return;
+			to_start(it->second, ci);
 			r.handler = "on_start";
 			queue_run(r);
 			m_runtime_dirty = true;
 			pick_provider();
 			log_i(MODULE, "%s restarts entity %s's %s from the start",
-					cs(p.name), cs(itos(e->id)), cs(in->type));
+					cs(p.name), cs(itos(id)), cs(type));
+			add_log(id, "restarted by "+p.name);
 			return;
 		}
 		sv_<std::pair<uint64_t, json::Value>> change;
@@ -3345,7 +5133,15 @@ struct Module: public interface::Module, public Interface
 		}
 		auto it = m_entities.find((uint64_t)v.as_number());
 		if(it == m_entities.end()){
-			why = ss_(key)+": no entity "+v.stringify();
+			why = ss_(key)+": no entity "+v.stringify()+(m_removed.count(
+					(uint64_t)v.as_number()) ? " in the round (play removed "
+					"it; it is back at Stop)" : "");
+			return nullptr;
+		}
+		// Edits are the composition's ([KIT] stage 4d)
+		if(!authored(it->second)){
+			why = ss_(key)+": entity "+v.stringify()+" is "+(it->second.made ?
+					"made in play" : "a player's")+", not the composition's";
 			return nullptr;
 		}
 		return &it->second;
@@ -3367,11 +5163,40 @@ struct Module: public interface::Module, public Interface
 		return &e->comps[(size_t)v.as_number()];
 	}
 
+	// An entity's delete as a change: it gone, and the links to it from the
+	// other authored entities
+	void delete_change(uint64_t id,
+			sv_<std::pair<uint64_t, json::Value>> &change)
+	{
+		change.push_back(std::make_pair(id, json::null()));
+		for(auto &o : m_entities){
+			if(o.first == id || !authored(o.second))
+				continue;
+			bool links = false;
+			for(const Instance &in : o.second.comps)
+				for(const Link &l : in.links)
+					links = links || l.to == id;
+			if(!links)
+				continue;
+			Entity copy = o.second;
+			for(Instance &in : copy.comps)
+				in.links.erase(std::remove_if(in.links.begin(),
+						in.links.end(), [&](const Link &l){
+					return l.to == id;
+				}), in.links.end());
+			change.push_back(std::make_pair(o.first, entity_json(copy)));
+		}
+	}
+
 	// What an editor's op changes: each entity after it (null: gone).
 	// Everything in it is checked here; the client is trusted with nothing
 	bool build_change(const ss_ &op, const json::Value &j, const Peer &p,
 			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
 	{
+		if(op == "place" && !j.get("prefab").is_undefined())
+			return place_prefab(j, p, change, what, why);
+		if(op == "save_prefab")
+			return save_prefab(j, p, change, what, why);
 		if(op == "place"){
 			const ss_ type = jstr(j, "type");
 			if(!m_palette.count(type)){
@@ -3404,7 +5229,7 @@ struct Module: public interface::Module, public Interface
 			e.set("name", type+" "+itos(id));
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
-				pos.append(std::floor(j.get("pos").at(k).as_number()));
+				pos.append(grid(j.get("pos").at(k).as_number()));
 			if(!root)
 				e.set("pos", pos);
 			json::Value comp = json::object();
@@ -3432,7 +5257,7 @@ struct Module: public interface::Module, public Interface
 			json::Value after = entity_json(*e);
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
-				pos.append(std::floor(j.get("pos").at(k).as_number()));
+				pos.append(grid(j.get("pos").at(k).as_number()));
 			after.set("pos", pos);
 			change.push_back(std::make_pair(e->id, after));
 			what = "moved "+itos(e->id)+" to "+pos.stringify();
@@ -3451,25 +5276,7 @@ struct Module: public interface::Module, public Interface
 					why = "entity "+itos(e->id)+" has entities under it";
 					return false;
 				}
-			change.push_back(std::make_pair(e->id, json::null()));
-			// And the links to it, from the others
-			for(auto &o : m_entities){
-				if(o.first == e->id)
-					continue;
-				bool links = false;
-				for(const Instance &in : o.second.comps)
-					for(const Link &l : in.links)
-						links = links || l.to == e->id;
-				if(!links)
-					continue;
-				Entity copy = o.second;
-				for(Instance &in : copy.comps)
-					in.links.erase(std::remove_if(in.links.begin(),
-							in.links.end(), [&](const Link &l){
-						return l.to == e->id;
-					}), in.links.end());
-				change.push_back(std::make_pair(o.first, entity_json(copy)));
-			}
+			delete_change(e->id, change);
 			what = "deleted "+itos(e->id)+(change.size() > 1 ? " and "+
 					itos(change.size() - 1)+" links' ends" : "");
 			return true;
@@ -3494,6 +5301,10 @@ struct Module: public interface::Module, public Interface
 			const size_t ci = in - &e->comps[0];
 			Entity copy = *e;
 			copy.comps[ci].params.set(param, j.get("value"));
+			// A prefab copy's own value from now on, kept as the prefab
+			// changes
+			if(!copy.prefab.is_undefined())
+				copy.comps[ci].overrides.insert(param);
 			change.push_back(std::make_pair(e->id, entity_json(copy)));
 			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
 					j.get("value").stringify();
@@ -3516,11 +5327,22 @@ struct Module: public interface::Module, public Interface
 				return false;
 			l.to = to->id;
 			bool has_input = false;
+			ss_ in_type;
 			for(const Instance &ti : to->comps)
-				has_input = has_input || m_types[ti.type].inputs.count(l.input);
+				if(m_types[ti.type].inputs.count(l.input) && !has_input){
+					has_input = true;
+					in_type = m_types[ti.type].in_types.at(l.input);
+				}
 			if(!has_input){
 				why = "entity "+itos(to->id)+" has no input \""+
 						l.input.substr(0, 64)+"\"";
+				return false;
+			}
+			// Typed signals ([KIT] stage 4d): the output's values the input's
+			const ss_ &out_type = m_types[in->type].out_types.at(l.output);
+			if(op == "link" && !signals_meet(out_type, in_type)){
+				why = l.output+" sends a "+out_type+", "+l.input+" takes a "+
+						in_type;
 				return false;
 			}
 			auto same = [&](const Link &o){
@@ -3560,11 +5382,19 @@ struct Module: public interface::Module, public Interface
 
 	// The entities as the change has them, live: their nodes, runtime state
 	// and owned voxels follow, the authored row is saved, and each editor
-	// is sent the tree. undo: the editor's, which gets what puts it back
+	// is sent the tree. undo: the editor's, which gets what puts it back.
+	// Running, a deleted entity's on_remove runs first ([KIT] stage 4d)
 	void commit(const sv_<std::pair<uint64_t, json::Value>> &change,
 			std::deque<Change> *undo)
 	{
 		Change back;
+		for(const auto &c : change)
+			if(!c.second.is_null())
+				m_pending_ids.insert(c.first);
+		for(const auto &c : change)
+			if(c.second.is_null() && m_session.running &&
+					m_entities.count(c.first))
+				run_now(c.first, "on_remove", "app");
 		for(const auto &c : change){
 			if(undo){
 				auto it = m_entities.find(c.first);
@@ -3574,6 +5404,7 @@ struct Module: public interface::Module, public Interface
 			}
 			apply(c.first, c.second);
 		}
+		m_pending_ids.clear();
 		if(undo){
 			undo->push_back(back);
 			while(undo->size() > UNDO_MAX)
@@ -3621,19 +5452,31 @@ struct Module: public interface::Module, public Interface
 		// someone else's) are left out
 		for(Instance &in : n.comps)
 			in.links.erase(std::remove_if(in.links.begin(), in.links.end(),
-					[&](const Link &l){ return !m_entities.count(l.to); }),
-					in.links.end());
+					[&](const Link &l){
+				return !m_entities.count(l.to) && !m_pending_ids.count(l.to);
+			}), in.links.end());
 		const bool had = it != m_entities.end();
 		sv_<size_t> fresh;
+		// Running, an instance whose parameters changed is told which, and
+		// what each was ([KIT] stage 4d)
+		sv_<std::pair<size_t, json::Value>> changed;
 		for(size_t i = 0; i < n.comps.size(); i++){
 			Instance &in = n.comps[i];
 			if(had && i < it->second.comps.size() &&
 					it->second.comps[i].type == in.type){
 				// The same instance: its runtime state goes on
-				in.state = it->second.comps[i].state;
-				in.disabled = it->second.comps[i].disabled;
-				in.due_us = it->second.comps[i].due_us;
-				in.due_by = it->second.comps[i].due_by;
+				const Instance &was = it->second.comps[i];
+				in.state = was.state;
+				in.disabled = was.disabled;
+				in.due_us = was.due_us;
+				in.due_by = was.due_by;
+				in.inside = was.inside;
+				json::Value old = json::object();
+				for(json::Iterator pi(in.params); pi; ++pi)
+					if((*pi).stringify() != was.params.get(pi.key()).stringify())
+						old.set(pi.key(), was.params.get(pi.key()));
+				if(old.size())
+					changed.push_back(std::make_pair(i, old));
 				continue;
 			}
 			// simplified: a new instance (an undone delete's too) starts
@@ -3668,14 +5511,24 @@ struct Module: public interface::Module, public Interface
 					scene.empty())
 				continue;
 			for(auto &p : m_peers){
-				if(p.second.scene != scene || p.second.name.empty())
+				if(p.second.scene != scene || !p.second.player)
 					continue;
 				r.handler = "on_join";
-				r.by = "player:"+p.second.name;
+				r.by = "player:"+itos(p.second.player);
 				r.args = json::array();
 				r.args.append(r.by);
 				queue_run(r);
 			}
+		}
+		for(auto &c : changed){
+			if(!m_session.running)
+				break;
+			Run r;
+			r.entity = id;
+			r.comp = c.first;
+			r.handler = "on_params";
+			r.args.append(c.second);
+			queue_run(r);
 		}
 		if(e.has_pos && !e.node){
 			make_node(e);

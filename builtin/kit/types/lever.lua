@@ -6,7 +6,7 @@ local function flip(c, on, by)
 		return
 	end
 	c.state.on = on
-	c:log("flipped", on and "on" or "off", "by", by)
+	c:log("flipped", on and "on" or "off", "by", c:name(by))
 	c:emit(on and "on" or "off")
 end
 
@@ -16,8 +16,8 @@ return {
 	look = {shape = "box", size = {0.2, 0.6, 0.2}, color = "#a0a0a0",
 		state = "on", when = {color = "#40c040"}},
 	state = {on = {default = false, shared = true}},
-	inputs = {"toggle", "on", "off"},
-	outputs = {"on", "off"},
+	inputs = {toggle = "none", on = "none", off = "none"},
+	outputs = {on = "none", off = "none"},
 	on_use = function(c, by)
 		flip(c, not c.state.on, by)
 	end,

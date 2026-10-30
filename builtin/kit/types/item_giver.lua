@@ -10,24 +10,23 @@ return {
 		count = {type = "number", default = 1, min = 1, max = 1000},
 		once = {type = "bool", default = true},
 	},
-	-- Who has had theirs: a table, so written back whole (Kit sees only
-	-- c.state.x = ..., not a change inside a table it holds)
+	-- Who has had theirs, by their stable `by`: a table changed in place
+	-- ([KIT] stage 4d: Kit sees that too)
 	state = {given = {default = {}}},
-	outputs = {"given", "refused"},
+	outputs = {given = "none", refused = "none"},
 	on_use = function(c, by)
 		local given = c.state.given
 		if c.params.once and given[by] then
-			c:log(by, "has had theirs")
+			c:log(c:name(by), "has had theirs")
 			return
 		end
 		if not c:add(c.params.item, c.params.count) then
-			c:log(by, "could not take", c.params.count, c.params.item)
+			c:log(c:name(by), "could not take", c.params.count, c.params.item)
 			c:emit("refused")
 			return
 		end
 		given[by] = true
-		c.state.given = given
-		c:log("gives", by, c.params.count, c.params.item)
+		c:log("gives", c:name(by), c.params.count, c.params.item)
 		c:emit("given")
 	end,
 }

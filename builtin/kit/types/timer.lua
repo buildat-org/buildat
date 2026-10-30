@@ -19,8 +19,8 @@ return {
 		running = {default = false, shared = true},
 		ticks = {default = 0, shared = true},
 	},
-	inputs = {"start", "stop"},
-	outputs = {"tick", "done"},
+	inputs = {start = "none", stop = "none"},
+	outputs = {tick = "number", done = "none"},
 	on_start = function(c)
 		if c.params.autostart then
 			c.state.running = true
@@ -30,7 +30,7 @@ return {
 	on_input = function(c, input, value, by)
 		if input == "stop" then
 			if c.state.running then
-				stop(c, "by " .. by)
+				stop(c, "by " .. c:name(by))
 			end
 			return
 		end
@@ -38,7 +38,7 @@ return {
 		c.state.running = true
 		c.state.ticks = 0
 		c:after(c.params.interval)
-		c:log("started by", by, "every", c.params.interval, "s")
+		c:log("started by", c:name(by), "every", c.params.interval, "s")
 	end,
 	on_timer = function(c)
 		if not c.state.running then

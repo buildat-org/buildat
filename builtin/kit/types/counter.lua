@@ -6,8 +6,8 @@ return {
 	look = {shape = "box", size = 0.25, color = "#e0c040", text = "count"},
 	params = {target = {type = "number", default = 0, min = 0, max = 1000000}},
 	state = {count = {default = 0, shared = true}},
-	inputs = {"count", "add", "reset"},
-	outputs = {"reached", "changed"},
+	inputs = {count = "none", add = "number", reset = "none"},
+	outputs = {reached = "number", changed = "number"},
 	on_input = function(c, input, value, by)
 		local was = c.state.count
 		if input == "reset" then
@@ -17,7 +17,7 @@ return {
 		else
 			c.state.count = was + 1
 		end
-		c:log("count", c.state.count, "by", by)
+		c:log("count", c.state.count, "by", c:name(by))
 		c:emit("changed", c.state.count)
 		local t = c.params.target
 		if t > 0 and was < t and c.state.count >= t then

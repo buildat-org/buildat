@@ -7,7 +7,7 @@ local function shut(c, by)
 		return
 	end
 	c.state.open = false
-	c:log("shut by", by)
+	c:log("shut by", c:name(by))
 	c:emit("closed")
 end
 
@@ -22,14 +22,14 @@ return {
 	look = {shape = "box", extent = "size", depth = 0.2, color = "#c8a040",
 		solid = true, state = "open", when = {swing = true, solid = false}},
 	state = {open = {default = false, shared = true}},
-	inputs = {"close"},
-	outputs = {"opened", "closed", "refused"},
+	inputs = {close = "none"},
+	outputs = {opened = "none", closed = "none", refused = "none"},
 	on_use = function(c, by)
 		if c.state.open then
 			return shut(c, by)
 		end
 		if not c:has(c.params.key) then
-			c:log("locked to", by, "who has no", c.params.key)
+			c:log("locked to", c:name(by), "who has no", c.params.key)
 			c:emit("refused")
 			return
 		end
@@ -37,7 +37,7 @@ return {
 			return
 		end
 		c.state.open = true
-		c:log("opened by", by, c.params.take and "taking their" or
+		c:log("opened by", c:name(by), c.params.take and "taking their" or
 				"with their", c.params.key)
 		c:emit("opened")
 	end,

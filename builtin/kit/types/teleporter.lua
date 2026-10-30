@@ -1,7 +1,7 @@
 -- A teleporter: a pad that moves the player who steps on it (or uses it,
 -- or sets off its "teleport") to the cell `to`
 local function go(c, by, how)
-	c:log(how, by, "to", c.params.to[1], c.params.to[2], c.params.to[3])
+	c:log(how, c:name(by), "to", c.params.to[1], c.params.to[2], c.params.to[3])
 	c:teleport(c.params.to)
 	c:emit("teleported")
 end
@@ -15,8 +15,8 @@ return {
 		to = {type = "position", default = {0, 1, 0}},
 		pad = {type = "position", default = {1, 1, 1}},
 	},
-	inputs = {"teleport"},
-	outputs = {"teleported"},
+	inputs = {teleport = "none"},
+	outputs = {teleported = "none"},
 	on_enter = function(c, by)
 		go(c, by, "stepped on by")
 	end,
