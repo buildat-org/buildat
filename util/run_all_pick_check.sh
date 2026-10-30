@@ -14,7 +14,9 @@ set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
 git -C "$here" cat-file -e 667081416 2>/dev/null || skip "no git history"
-pick(){ "$here/util/run_all.sh" --changed "$1^..$1" --list | grep -E '\.sh$'; }
+# The caller's ONLY and REMOTE would filter these picks (run_all_verdict_check
+# does the same)
+pick(){ env -u ONLY -u REMOTE "$here/util/run_all.sh" --changed "$1^..$1" --list | grep -E '\.sh$'; }
 # 1.
 p=$(pick 667081416)
 echo "$p" | grep -qxE 'util/(serverless|aitta_web)_check\.sh' ||
