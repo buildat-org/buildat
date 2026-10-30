@@ -426,6 +426,14 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 			"/dev/urandom"})
 		rs.add(p, rs.handled);
 	rs.add(job_dir, rs.handled);
+	// The build runs a release's own code (build.rs, proc macros) with
+	// every capability of its user namespace (unshare above), and of the
+	// host's as well when run as root
+	const ss_ caps = drop_capabilities();
+	if(!caps.empty()){
+		close(rs.fd);
+		return caps;
+	}
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
 		close(rs.fd);
 		return ss_("no_new_privs: ")+strerror(errno);
