@@ -705,10 +705,12 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 		}
 		// The mapgen's own noises the world sets, read the way Luanti's
 		// world.mt would be
-		if(!params.noises.empty()){
+		if(!params.noises.empty() || !params.settings.empty()){
 			Settings settings;
 			for(const auto &pair : params.noises)
 				read_noise_params(pair.second, settings.noises[pair.first]);
+			settings.values.insert(params.settings.begin(),
+					params.settings.end());
 			m_params->readParams(&settings);
 		}
 
@@ -920,6 +922,53 @@ struct VendoredGenerator: public worldgen::GeneratorInterface,
 				level <= -MAX_MAP_GENERATION_LIMIT)
 			return false;
 		level_out = level;
+		return true;
+	}
+
+	// [HEIGHTMAP_REST] The ground's level over a grid of columns, out of
+	// the valleys mapgen's own noise and generating nothing: what its
+	// generateTerrain() calls the approximate height of the terrain, and
+	// the river bed where there is one. Continuous, not whole nodes.
+	// simplified: the 3D inter-valley fill is left out -- its cliffs and
+	// overhangs are lost, which a heightmap cannot hold anyway; sampled
+	// near the surface it made needles of the ridges (its density is not
+	// a height). Valleys only; another mapgen's is its own terrain function
+	// written out the same way.
+	bool surface_map(float x0, float z0, float step, int w, int h,
+			float *out)
+	{
+		const MapgenValleysParams *p =
+				dynamic_cast<const MapgenValleysParams*>(m_params);
+		if(!p)
+			return false;
+		const s32 seed = (s32)m_params->seed;
+		const float river_size_factor = p->river_size / 100.0f;
+		const float river_depth_bed = p->river_depth + 1.0f;
+		for(int iz = 0; iz < h; iz++)
+		for(int ix = 0; ix < w; ix++){
+			const float x = x0 + ix * step, z = z0 + iz * step;
+			const float n_rivers = NoiseFractal2D(&p->np_rivers, x, z, seed);
+			const float n_terrain_height = NoiseFractal2D(
+					&p->np_terrain_height, x, z, seed);
+			const float n_valley = NoiseFractal2D(&p->np_valley_depth, x, z,
+					seed);
+			const float n_valley_profile = NoiseFractal2D(
+					&p->np_valley_profile, x, z, seed);
+			const float valley_d = n_valley * n_valley;
+			const float base = n_terrain_height + valley_d;
+			const float river = std::fabs(n_rivers) - river_size_factor;
+			const float tv = std::fmax(river / n_valley_profile, 0.0f);
+			const float valley_h = valley_d * (1.0f - std::exp(-tv * tv));
+			float surface_y = base + valley_h;
+			if(river < 0.0f){
+				const float tr = river / river_size_factor + 1.0f;
+				const float depth = river_depth_bed *
+						std::sqrt(std::fmax(0.0f, 1.0f - tr * tr));
+				surface_y = std::fmin(std::fmax(base - depth,
+						(float)(m_params->water_level - 3)), surface_y);
+			}
+			out[(size_t)iz * w + ix] = surface_y;
+		}
 		return true;
 	}
 
@@ -1242,6 +1291,8 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 		for(const auto &pair : params.noises)
 			key += "/"+pair.first+"="+ftos(pair.second.offset)+","+
 					ftos(pair.second.scale)+","+itos(pair.second.seed);
+		for(const auto &pair : params.settings)
+			key += "/"+pair.first+"="+pair.second;
 		if(m_query == nullptr || key != m_query_key){
 			delete m_query;
 			// The biomes are kept, because which biome is where is one of
@@ -1261,6 +1312,12 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	bool spawn_level(const Params &params, int x, int z, int &level_out)
 	{
 		return query_generator(params)->spawn_level(x, z, level_out);
+	}
+
+	bool surface_map(const Params &params, float x0, float z0, float step,
+			int w, int h, float *out)
+	{
+		return query_generator(params)->surface_map(x0, z0, step, w, h, out);
 	}
 
 	bool biome_at(const Params &params, int x, int y, int z,

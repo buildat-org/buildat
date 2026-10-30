@@ -849,23 +849,31 @@ SectionGenerated.
 
 builtin/heightmap/api.h -- heightmap::Interface: a finite heightmap
 surface, one per scene ([HEIGHTMAP_TERRAIN]): create_instance(scene, Size
-{chunks_x, chunks_z, chunk_size (a multiple of 64), cell_size, base_y}) /
-get_instance / delete_instance. An Instance: samples_x / samples_z,
-get_height / set_height (metres, kept in centimetres over base_y, 0 to
-655.35 m) and get_weights / set_weights (Weights: three material bytes a
-sample, splatted by the client's TerrainBlend: 0 grass, 1 rock, 2 sand
-with the module's own textures), height_at(world x, z) as the triangles
-have it, generate(GenerateParams: seed, interface::noise NoiseParams for
-the height, sand_below, rock_slope), set_save(save, name) (true when a
-map of that size was read; then nothing is generated), commit() (also
-each tick: the server's Terrain and Bullet heightfield rebuilt, the
-written chunks saved and sent), content_hash(), and add_chunk_hook
-(ChunkHook::before_write(map, cx, cz, old data): once a chunk per commit,
-before its first write -- where a copy-on-write snapshot keeps its copy).
-A peer that joins the scene gets the module's client half and the whole
-map; the client builds one Terrain (LOD per 64-sample patch). Not inside
-main_context::access: commit takes it. apps/sample_heightmap is the
-example; api.h has the chunk format.
+{chunks_x, chunks_z, chunk_size (a multiple of 64), cell_size, base_y,
+materials (1 to MAX_MATERIALS, 16; 3 unless set)}) / get_instance /
+delete_instance. An Instance: samples_x / samples_z, get_height /
+set_height (metres, kept in centimetres over base_y, 0 to 655.35 m) and
+get_weights / set_weights (Weights: a byte a material, room for 16, the
+ones past the map's materials 0 and ignored; the client splats them over
+its ground textures, by default 0 grass, 1 rock, 2 sand, 3 dirt, 4
+gravel), height_at(world x, z) as the triangles have it,
+generate(GenerateParams: seed, interface::noise NoiseParams for the
+height or height_fn(world x, z) for another generator's surface,
+sand_below, rock_slope; writes materials 0 to 2), set_save(save, name)
+(true when a map of that size, material count and format was read; then
+nothing is generated), commit() (also each tick: the written samples
+copied into the Bullet heightfield, which reads the map's own float array
+-- no Terrain on the server, ~11 MB for 1 km^2 at a metre and 5
+materials; the rectangle written in each chunk sent, the chunk saved),
+content_hash(), and add_chunk_hook (ChunkHook::before_write(map, cx, cz,
+old data): once a chunk per commit, before its first write -- where a
+copy-on-write snapshot keeps its copy). A peer that joins the scene gets
+the module's client half and the whole map; the client builds one
+Terrain (LOD per 64-sample patch) and writes an edit's rectangle alone
+into its images and weight textures. Not inside main_context::access:
+commit takes it. apps/sample_heightmap is the example; api.h has the data
+format (2: heights, then RGBA weight planes; one for a saved chunk and a
+sent rectangle).
 
 builtin/luanti_mapgen/api.h -- luanti_mapgen::Interface: Luanti's mapgens
 in C++. create_generator(Params) -> a worldgen generator, spawn_level(), biome_query(...) -> BiomeQuery (biome_at), noise_query() -> NoiseQuery (point, map: Luanti's own noise, what a mod's PerlinNoise gets), take_gennotify()
@@ -875,7 +883,11 @@ chunk_index(node), chunk_blockseed() (the seed on_generated is given). The
 world is generated a chunk at a time and the sections cut out of it, so
 the game's on_generated runs once per chunk, as in Luanti. The definitions
 the mods register: NodeProps, Biome, NoiseParams, Ore, Schematic,
-Decoration, LTree.
+Decoration, LTree; Params::settings the mapgen's other settings as
+world.mt strings ("mgvalleys_river_size" = "0"). surface_map(params, x0,
+z0, step, w, h, out) the ground's approximate height over a grid out of
+the noise alone (valleys so far; its 3D fill's cliffs and overhangs left
+out): what builtin/heightmap's height_fn samples ([HEIGHTMAP_REST]).
 
 builtin/luanti/api.h -- luanti::Interface: an unmodified Luanti game
 inside the server. Before the game: load_lua(chunk, name) hands the app's
@@ -917,7 +929,7 @@ builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_fi
 builtin/heightmap/api.h: SceneReference, Weights, Size, GenerateParams, ChunkHook, ~ChunkHook, before_write, Instance, get_size, samples_x, samples_z, get_height, set_height, get_weights, set_weights, height_at, generate, set_save, add_chunk_hook, commit, content_hash, Interface, create_instance, delete_instance, get_instance, access
 builtin/loader/api.h: Interface, activate, get_module_info, access
 builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, set_chat_gate, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_json, set_server_physics, set_generated_sounds, access
-builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, NoiseQuery, ~NoiseQuery, point, map, Interface, noise_query, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
+builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, NoiseQuery, ~NoiseQuery, point, map, Interface, noise_query, create_generator, spawn_level, surface_map, biome_query, take_gennotify, take_maps, access
 builtin/main_context/api.h: SceneReference, SceneDeleted, Interface, get_context, find_scene, check_scene, create_scene, delete_scene, sub_magic_event, access
 builtin/moderation/api.h: Host, save, name, subject, members, severity, thresholds, held, bucket, auto_act, uphold, undo_auto, reverse, decided, event, notify, Interface, add_report, open_group, audit, statement, queue, open_groups, group, decide, audit_log, appeal, appeals, decide_appeal, key_hash, report_status, moderator_command, access
 builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, Type, NewClient, BulkRoom, OldClient, HttpRequest, param, query_value, RateTable, Rate, ok, query_value_self_check, Interface, send, list_peers, pending_bytes, set_send_policy, declare, disconnect, http_respond, listen_on, claim_http_path, claim_ws_path, set_page_has_no_game, ws_send, ws_close, set_favicon, set_page_title, lan_announce, set_ws_origins, health_json, set_has_admin, send_bulk, bulk_bytes, access, answer_request, serve_brand

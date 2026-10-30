@@ -395,6 +395,9 @@ BUILDAT_CLIENT_IMPORT("Texture2D.new():Texture2D", buildat_c_Texture2D_static_ne
 BUILDAT_CLIENT_IMPORT("Texture2D:GetRenderSurface():any", buildat_c_Texture2D_GetRenderSurface)
 BUILDAT_CLIENT_IMPORT("Texture2D:SetData(Image,boolean?):boolean", buildat_c_Texture2D_SetData)
 BUILDAT_CLIENT_IMPORT("Texture2D:SetSize(number,number,number,number?):boolean", buildat_c_Texture2D_SetSize)
+BUILDAT_CLIENT_IMPORT("Texture2DArray.new():Texture2DArray", buildat_c_Texture2DArray_static_new)
+BUILDAT_CLIENT_IMPORT("Texture2DArray:SetData(number,Image,boolean?):boolean", buildat_c_Texture2DArray_SetData)
+BUILDAT_CLIENT_IMPORT("Texture2DArray:SetLayers(number)", buildat_c_Texture2DArray_SetLayers)
 BUILDAT_CLIENT_IMPORT("Light.brightness:number", buildat_c_Light_get_brightness)
 BUILDAT_CLIENT_IMPORT("Light.brightness=number", buildat_c_Light_set_brightness)
 BUILDAT_CLIENT_IMPORT("Light.color:Color", buildat_c_Light_get_color)
@@ -1188,6 +1191,8 @@ BUILDAT_CLIENT_IMPORT("buildat.get_preference(string):any", buildat_c_verb_get_p
 BUILDAT_CLIENT_IMPORT("magic.UnsubscribeFromEvent(string,string)", buildat_c_verb_UnsubscribeFromEvent)
 BUILDAT_CLIENT_IMPORT("magic.render_scene_to_texture(Scene,Node,number,number):Texture2D", buildat_c_verb_render_scene_to_texture)
 BUILDAT_CLIENT_IMPORT("magic.image_set_data(Image,number,number,number,string)", buildat_c_verb_image_set_data)
+BUILDAT_CLIENT_IMPORT("magic.image_set_region(Image,number,number,number,number,string,boolean?)", buildat_c_verb_image_set_region)
+BUILDAT_CLIENT_IMPORT("magic.texture_set_region(Texture2D,Image,number,number,number,number)", buildat_c_verb_texture_set_region)
 BUILDAT_CLIENT_IMPORT("magic.image_load_data(Image,string,number?):any", buildat_c_verb_image_load_data)
 BUILDAT_CLIENT_IMPORT("magic.viewport_generation():number", buildat_c_verb_viewport_generation)
 BUILDAT_CLIENT_IMPORT("magic.fov_for(number):number", buildat_c_verb_fov_for)
@@ -1678,6 +1683,7 @@ class Model;
 class Material;
 class Texture;
 class Texture2D;
+class Texture2DArray;
 class Light;
 class Zone;
 class Font;
@@ -2616,6 +2622,19 @@ public:
 	// Texture2D:SetSize(number,number,number,number?):boolean
 	bool SetSize(double a1, double a2, double a3) const;
 	bool SetSize(double a1, double a2, double a3, double a4) const;
+};
+class Texture2DArray: public Texture
+{
+public:
+	constexpr Texture2DArray() {}
+	constexpr explicit Texture2DArray(unsigned int handle): Texture(handle) {}
+	// Texture2DArray.new():Texture2DArray
+	static ::buildat::Texture2DArray new_();
+	// Texture2DArray:SetData(number,Image,boolean?):boolean
+	bool SetData(double a1, const ::buildat::Image & a2) const;
+	bool SetData(double a1, const ::buildat::Image & a2, bool a3) const;
+	// Texture2DArray:SetLayers(number)
+	void SetLayers(double a1) const;
 };
 class Light: public Drawable
 {
@@ -4693,6 +4712,11 @@ void UnsubscribeFromEvent(::buildat::Str a1, ::buildat::Str a2);
 ::buildat::Texture2D render_scene_to_texture(const ::buildat::Scene & a1, const ::buildat::Node & a2, double a3, double a4);
 // magic.image_set_data(Image,number,number,number,string)
 void image_set_data(const ::buildat::Image & a1, double a2, double a3, double a4, ::buildat::Str a5);
+// magic.image_set_region(Image,number,number,number,number,string,boolean?)
+void image_set_region(const ::buildat::Image & a1, double a2, double a3, double a4, double a5, ::buildat::Str a6);
+void image_set_region(const ::buildat::Image & a1, double a2, double a3, double a4, double a5, ::buildat::Str a6, bool a7);
+// magic.texture_set_region(Texture2D,Image,number,number,number,number)
+void texture_set_region(const ::buildat::Texture2D & a1, const ::buildat::Image & a2, double a3, double a4, double a5, double a6);
 // magic.image_load_data(Image,string,number?):any
 ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2);
 ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2, double a3);
@@ -5101,6 +5125,10 @@ inline bool Texture2D::SetData(const ::buildat::Image & a1) const{ ::buildat::de
 inline bool Texture2D::SetData(const ::buildat::Image & a1, bool a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2D_SetData, *this, a1, a2); return r.boolean(); }
 inline bool Texture2D::SetSize(double a1, double a2, double a3) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2D_SetSize, *this, a1, a2, a3); return r.boolean(); }
 inline bool Texture2D::SetSize(double a1, double a2, double a3, double a4) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2D_SetSize, *this, a1, a2, a3, a4); return r.boolean(); }
+inline ::buildat::Texture2DArray Texture2DArray::new_(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2DArray_static_new); return ::buildat::Texture2DArray(r.handle()); }
+inline bool Texture2DArray::SetData(double a1, const ::buildat::Image & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2DArray_SetData, *this, a1, a2); return r.boolean(); }
+inline bool Texture2DArray::SetData(double a1, const ::buildat::Image & a2, bool a3) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2DArray_SetData, *this, a1, a2, a3); return r.boolean(); }
+inline void Texture2DArray::SetLayers(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Texture2DArray_SetLayers, *this, a1); (void)r; }
 inline double Light::brightness() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Light_get_brightness, *this); return r.number(); }
 inline void Light::brightness(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Light_set_brightness, *this, a1); (void)r; }
 inline ::buildat::Color Light::color() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Light_get_color, *this); ::buildat::Color v{}; r.get(v); return v; }
@@ -5949,6 +5977,9 @@ inline ::buildat::Value get_preference(::buildat::Str a1){ ::buildat::detail::Re
 inline void UnsubscribeFromEvent(::buildat::Str a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_UnsubscribeFromEvent, a1, a2); (void)r; }
 inline ::buildat::Texture2D render_scene_to_texture(const ::buildat::Scene & a1, const ::buildat::Node & a2, double a3, double a4){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_render_scene_to_texture, a1, a2, a3, a4); return ::buildat::Texture2D(r.handle()); }
 inline void image_set_data(const ::buildat::Image & a1, double a2, double a3, double a4, ::buildat::Str a5){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_set_data, a1, a2, a3, a4, a5); (void)r; }
+inline void image_set_region(const ::buildat::Image & a1, double a2, double a3, double a4, double a5, ::buildat::Str a6){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_set_region, a1, a2, a3, a4, a5, a6); (void)r; }
+inline void image_set_region(const ::buildat::Image & a1, double a2, double a3, double a4, double a5, ::buildat::Str a6, bool a7){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_set_region, a1, a2, a3, a4, a5, a6, a7); (void)r; }
+inline void texture_set_region(const ::buildat::Texture2D & a1, const ::buildat::Image & a2, double a3, double a4, double a5, double a6){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_texture_set_region, a1, a2, a3, a4, a5, a6); (void)r; }
 inline ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_load_data, a1, a2); return r.value(); }
 inline ::buildat::Value image_load_data(const ::buildat::Image & a1, ::buildat::Str a2, double a3){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_image_load_data, a1, a2, a3); return r.value(); }
 inline double viewport_generation(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_verb_viewport_generation); return r.number(); }
