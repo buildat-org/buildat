@@ -4,7 +4,8 @@
 # cost: ~40 s, ~1 min with a cold module cache (2026-10-30)
 # covers: builtin/kit/** apps/sample_kit/** builtin/accounts/**
 # [KIT] stage 3, Kit's editor, on apps/sample_kit and scripted clients
-# logged in through builtin/accounts:
+# logged in through builtin/accounts. sample_kit plays once its floor is
+# laid ([KIT] stage 4c), so the edits are live: the start and the round.
 #   1. The admin (kitboss, by the setup code) switches edit mode on,
 #      places a button and a door, a marker (moved, deleted, the delete
 #      undone), sets the door's "closed" to glass in the inspector and
@@ -18,17 +19,19 @@
 #      are told, place a marker, and are refused a grant (only the admin
 #      grants). (kitbob's refusals done, they open and close the door with
 #      its button: the admin's drive waits for that before the grant.)
-#   3. The admin plays a test: the runtime starts again from the authored
-#      row (the new button's presses 0); kitbob, in edit mode, is refused
-#      an edit while it runs, and opens the door in the test (its voxel
-#      air). The test's end puts back the runtime (presses 3, the door
-#      closed, its voxel stone): the authored and runtime rows are the
-#      ones the test started from, by their digests.
-#   4. A restart: the authored row has what was edited, and kitbob, alone,
-#      is still a builder.
+#   3. ([KIT] stage 4c) Two builders: kitbob, in edit mode, selects an
+#      entity, which the admin's editor shows in kitbob's colour (its log
+#      line), and opens the door. The admin stops the server: the round's
+#      state is thrown away (the new button's presses 0, the door closed,
+#      its voxel stone again), the edits stay (the start); a use is
+#      refused while Stopped, and kitbob's edit then changes the start.
+#      The admin plays: a round from the start, the door opened again,
+#      the button pressed once.
+#   4. A restart: the authored row has what was edited, the server is
+#      still Running, and kitbob, alone, is still a builder.
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
-# line, the marker's gizmo, play with none of them, the admin's builders,
-# a test, and kitbob's edit mode while it runs.
+# line, the marker's gizmo, play with none of them, the admin's builders
+# (kitbob's selection in their colour), and the Stopped server.
 #
 #   util/kit_editor_check.sh
 #   util/kit_editor_check.sh web    the admin's part in headless Chrome
@@ -39,7 +42,7 @@ if [ "${1:-}" = web ]; then
 	# The admin's flow in the web client (web/), in headless Chrome at
 	# 1200x800: log in ("l", the setup code), point at the stone, place a
 	# button and a door on the floor, the door's closed to glass, the link,
-	# the door used twice, a test
+	# the door used twice, Stop and Play (Kit's top bar)
 	check_tmp kit_editor_web; t=$CHECK_TMP
 	cat > "$t/steps.json" <<'EOF'
 [
@@ -56,43 +59,41 @@ if [ "${1:-}" = web ]; then
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
 	["click", 891, 217], ["frames", 3],
-	["click", 600, 20], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
+	["key", "F6"], ["waitlog", "kit editor: state: 15 entities, 0 to undo", 20],
 	["click", 1067, 243], ["waitlog", "kit editor: cursor at 6,2,2", 10],
 	["click", 723, 400], ["waitlog", "kit editor: cursor at 3,1,1", 10],
-	["click", 470, 311], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
+	["click", 108, 339], ["waitlog", "kit editor: state: 16 entities, 1 to undo", 10],
 	["click", 700, 310], ["waitlog", "kit editor: cursor at 3,1,3", 10],
-	["click", 297, 339], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
+	["click", 480, 339], ["waitlog", "kit editor: state: 17 entities, 2 to undo", 10],
 	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
-	["click", 1083, 167], ["frames", 2], ["key", "End"],
+	["click", 1060, 195], ["frames", 2], ["key", "End"],
 	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
 	["key", "Backspace"], ["key", "Backspace"],
 	["type", "glass"], ["waitlog", "kit editor: 18/1 closed = glass", 10],
-	["click", 980, 304], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
+	["click", 929, 332], ["waitlog", "kit editor: state: 17 entities, 3 to undo", 10],
 	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
-	["click", 1097, 164], ["waitlog", "kit editor: linking from 17 pressed", 10],
+	["click", 929, 192], ["waitlog", "kit editor: linking from 17 pressed", 10],
 	["click", 700, 310], ["waitlog", "kit editor: selected 18", 10],
-	["click", 980, 395], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
+	["click", 929, 424], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
 	["click", 723, 400], ["waitlog", "kit editor: selected 17", 10],
 	["frames", 3], ["shot", "${OUT}/linked.png"],
-	["click", 600, 20], ["waitlog", "kit editor: edit mode off", 10],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = true", 10],
 	["key", "u"], ["waitlog", "replicated: entity 18 open = false", 10],
-	["click", 600, 20], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
-	["click", 502, 425], ["waitlog", "replicated: entity 17 presses = 0", 10],
-	["waitlog_any", "kit editor: playing a test", 10],
+	["click", 658, 20, 100], ["waitlog_any", "kit editor: the server is Stopped .by webboss", 10],
+	["frames", 3], ["shot", "${OUT}/stopped.png"],
+	["click", 656, 20, 100], ["waitlog_any", "kit editor: the server is Running .by webboss", 10],
 	["key", "b"], ["waitlog", "replicated: entity 4 open = true", 10],
-	["frames", 3], ["shot", "${OUT}/test.png"],
-	["click", 600, 20], ["waitlog", "kit editor: state: 17 entities, 4 to undo", 10],
-	["waitlog_any", "kit editor: the test is over", 10],
-	["frames", 10], ["shot", "${OUT}/after_test.png"]
+	["frames", 10], ["shot", "${OUT}/play.png"]
 ]
 EOF
 	"$here/util/web_drive.sh" chrome sample_kit "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
-	grep -a "A test by webboss starts\|The test by webboss ended" "$t/out/server.log" |
-		sed 's/.*: authored/authored/' | sort -u | wc -l | grep -qx 1 ||
-		fail "the rows after the test are not the ones before ($t/out/server.log)"
-	echo "PASS: Kit's editor in the web client: the admin logs in, places, sets a parameter, links, uses, plays a test"
+	for w in "sample_kit/door 18: opened by player:webboss to air" \
+			"Stop by webboss: " "Play by webboss: a round from the start" \
+			"sample_kit/door 4: opened by player:webboss"; do
+		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
+	done
+	echo "PASS: Kit's editor in the web client: the admin logs in, places, sets a parameter, links, uses, stops and plays"
 	exit 0
 fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
@@ -208,7 +209,7 @@ mouse_click left
 wait_log 5000 kit editor: selected 17
 frames 3
 screenshot @T@/link.png
-click Button "Leave edit mode"
+click Button "Play mode"
 wait_log 10000 kit editor: edit mode off
 frames 3
 screenshot @T@/play.png
@@ -220,7 +221,7 @@ click Button "Edit"
 wait_log 10000 kit editor: state: 18 entities, 6 to undo
 click Button "Undo"
 wait_log 10000 kit editor: state: 18 entities, 5 to undo
-click Button "Leave edit mode"
+click Button "Play mode"
 wait_log 10000 kit editor: edit mode off
 keypress u
 wait_log 10000 replicated: entity 17 presses = 3
@@ -232,23 +233,28 @@ wait_log 10000 replicated: entity 4 open = false
 click Button "Builder: no"
 wait_log 10000 kit editor: people: kitbob builder
 wait_log 60000 kit editor: state: 19 entities
-frames 3
-screenshot @T@/builders.png
-click Button "Play"
-wait_log 10000 replicated: entity 17 presses = 0
-wait_log_any 10000 kit editor: playing a test
+wait_log 30000 kit editor: builder kitbob (#4aa0ff) selects 3
 wait_log 30000 replicated: entity 4 open = true
 frames 3
-screenshot @T@/test.png
-click Button "Stop test"
-wait_log 10000 kit editor: state: 19 entities
-frames 10
-screenshot @T@/after_test.png
+screenshot @T@/builders.png
+click Button "Stop"
+wait_log 10000 kit editor: the server is Stopped (by kitboss)
+wait_log_any 10000 replicated: entity 17 presses = 0
+wait_log_any 30000 kit editor: state: 20 entities
+frames 3
+screenshot @T@/stopped.png
+click Button "Play"
+wait_log 10000 kit editor: the server is Running (by kitboss)
+wait_log 30000 replicated: entity 4 open = true
+click Button "Play mode"
+wait_log 10000 kit editor: edit mode off
+keypress u
+wait_log 10000 replicated: entity 17 presses = 1
 quit
 EOF
 cat > "$t/bob.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
-click Button "Edit"
+keypress F6
 wait_log 10000 kit editor: refused: mode: no edit rights here
 keypress x
 wait_log 10000 kit editor: refused: ?: not a JSON object
@@ -263,14 +269,18 @@ click Button "Edit"
 wait_log 10000 kit editor: state: 18 entities
 click Button "sample_kit/marker"
 wait_log 10000 kit editor: state: 19 entities
-wait_log 60000 kit editor: a test of kitboss's runs
-click Button "sample_kit/marker"
-wait_log 10000 kit editor: refused: place: a test of kitboss's runs
-frames 3
-screenshot @T@/bob_test.png
+keypress Tab
+wait_log 10000 kit editor: selected 3
 keypress b
 wait_log 10000 replicated: entity 4 open = true
-click Button "Leave edit mode"
+wait_log 60000 kit editor: the server is Stopped (by kitboss)
+click Button "sample_kit/marker"
+wait_log 10000 kit editor: state: 20 entities
+keypress b
+wait_log 60000 kit editor: the server is Running (by kitboss)
+keypress b
+wait_log 10000 replicated: entity 4 open = true
+click Button "Play mode"
 wait_log 10000 kit editor: edit mode off
 quit
 EOF
@@ -316,65 +326,68 @@ grep -aE "An edit \(\?\) by peer [0-9]+ refused: not a JSON object" "$s" >/dev/n
 	fail "kitbob's packet that is no JSON was not refused ($s)"
 echo "ok: a player without edit rights is refused each kind of edit and the grant; the admin makes them a builder, who edits and grants nothing"
 
-# The test: the runtime from the authored row, everyone's; at its end the
-# rows it started from, by the digests Kit logs
-want "$s" "A test by kitboss starts" "sample_kit/button 3: pressed by player:kitbob times 1" \
-	"sample_kit/door 4: opened by player:kitbob to air" "sample_kit: the door's voxel is air" \
-	"The test by kitboss ended (its tester stopped it)" \
-	"An edit (place) by peer" "refused: a test of kitboss's runs; edits wait"
-[ "$(grep -a "the door's voxel is" "$s" | tail -1 | grep -o '[a-z]*$')" = stone ] ||
-	fail "the door's voxel is not stone again after the test ($s)"
+# Two builders, Stop and Play: the selection seen, the round thrown away
+# and the start kept, a round from the start again
+want "$s" "kitbob is in edit mode" "kitbob selects entity 3" \
+	"sample_kit/door 4: opened by player:kitbob to air" \
+	"Stop by kitboss: " "Play by kitboss: a round from the start" \
+	"refused: the server is Stopped" \
+	"An edit by kitbob: placed sample_kit/marker 21 at [0,1,0]" \
+	"sample_kit/button 17: pressed by player:kitboss times 1"
+want "$t/boss.log" "kit editor: builder kitbob (#4aa0ff) selects 3, cursor none"
+# The door's voxel: air in the round; none at Stop, as at the start (the
+# app's floor alone: the door set its voxel first in the first round);
+# stone as the next round starts (sample_kit's look once a tick may miss
+# it), air as kitbob opens it again
+v=$(grep -a "the door's voxel is" "$s" | sed 's/.*the door.s voxel is /v:/' |
+	tr '\n' ' ')
+echo "  the door's voxel: $v"
+echo "$v" | grep -qE "v:air v: (v:stone )?v:air $" ||
+	fail "the door's voxel was not put back at Stop and opened again in the next round ($s)"
 db="$save/save.sqlite"
 [ -f "$db" ] || fail "no database $db"
-for k in authored runtime; do
+for k in authored runtime session; do
 	sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = '$k'" > "$t/$k.json"
 done
-python3 -I - "$s" "$t/authored.json" "$t/runtime.json" "$t/boss.log" <<'EOF' || fail "the rows or the replicated state after the test ($t)"
-import hashlib, json, re, sys
-log, aj, rj, client = sys.argv[1:5]
-start = re.search(r"A test by kitboss starts: authored (\w+), runtime (\w+)",
-		open(log, errors="replace").read())
-end = re.search(r"The test by kitboss ended \(.*\): authored (\w+), runtime (\w+)",
-		open(log, errors="replace").read())
-assert start and end, "no test's start or end"
-rows = [open(p).read().rstrip("\n") for p in (aj, rj)]
-digest = [hashlib.sha256(r.encode()).hexdigest()[:16] for r in rows]
-print("  test start", start.groups(), "end", end.groups(), "rows", digest)
-assert start.groups() == end.groups() == tuple(digest), "the rows differ"
-a = json.loads(rows[0])
+python3 -I - "$t/authored.json" "$t/runtime.json" "$t/session.json" "$t/boss.log" <<'EOF' || fail "the rows or the replicated state after Stop and Play ($t)"
+import json, re, sys
+aj, rj, sj, client = sys.argv[1:5]
+a, r, s = [json.loads(open(p).read()) for p in (aj, rj, sj)]
 e = {x["id"]: x for x in a["entities"]}
 assert e[18]["components"][0]["params"]["closed"] == "glass", e[18]
 assert e[17]["components"][0]["links"] == [], e[17]
-assert e[19]["components"][0]["type"] == "sample_kit/marker", e[19]
-assert e[20]["components"][0]["type"] == "sample_kit/marker", e[20]
-assert a["next_id"] == 21, a["next_id"]
-r = json.loads(rows[1])
-assert r["17"][0]["state"]["presses"] == 3, r["17"]
-assert r["4"][0]["state"]["open"] is False, r["4"]
+for i in (19, 20, 21):
+	assert e[i]["components"][0]["type"] == "sample_kit/marker", e[i]
+assert a["next_id"] == 22, a["next_id"]
+assert r["17"][0]["state"]["presses"] == 1, r["17"]
+assert r["4"][0]["state"]["open"] is True, r["4"]
 assert r["7"][0].get("disabled") is None, r["7"]
-# What the admin's client saw from the test's start: the fresh runtime,
-# the door open, then the runtime as it was
+assert s["running"] is True and s["by"] == "kitboss", s
+# What the admin's client saw from the grant on: the round's, then the
+# start's at Stop, then the next round's
 lines = open(client, errors="replace").read().split("\n")
 at = next(i for i, l in enumerate(lines) if "people: kitbob builder" in l)
 seen = [m.group(1, 2) for l in lines[at:] if " __app " not in l
 		for m in [re.search(r"replicated: entity (4 open|17 presses) = (\S+)", l)] if m]
-print("  replicated from the test on:", seen)
-assert ("17 presses", "0") in seen and ("4 open", "true") in seen, seen
-last = dict(seen)
-assert last == {"17 presses": "3", "4 open": "false"}, last
+print("  replicated from the grant on:", seen)
+assert seen == [("4 open", "true"), ("17 presses", "0"), ("4 open", "false"),
+		("4 open", "true"), ("17 presses", "1")] or seen == [("4 open", "true"),
+		("4 open", "false"), ("17 presses", "0"), ("4 open", "true"),
+		("17 presses", "1")], seen
 EOF
-echo "ok: a test runs the runtime from the authored row, everyone's, edits wait; its end puts back the runtime and the voxels exactly"
+echo "ok: two builders, one's selection in the other's editor; Stop throws the round away and keeps the edits, a use refused and an edit to the start while Stopped; Play starts a round from the start"
 
 cat > "$t/again.cmds" <<'EOF'
 wait_log_any 60000 Joined as kitbob
 click Button "Edit"
-wait_log 10000 kit editor: state: 19 entities, 0 to undo
+wait_log 10000 kit editor: state: 20 entities, 0 to undo
 quit
 EOF
 server 2
 BUILDAT_JOIN_NAME=kitbob BUILDAT_JOIN_CREATE= client again
 stop
-want "$t/srv2.log" "Hosted: 20 entities" "kitbob is in edit mode"
+want "$t/srv2.log" "Hosted: 21 entities" "kitbob is in edit mode" \
+	"The server is Running (by kitboss): "
 grep -aq "the composition's first start" "$t/srv2.log" && fail "the composition was read again ($t/srv2.log)"
-echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, a test on a throwaway runtime, the authored row over a restart"
+echo "PASS: Kit's editor: the admin's edit rights and builders kept in the accounts, edit mode, place, move, delete, the inspector, links, undo, each edit and grant refused without rights, live edits while Running, two builders' selections, Stop and Play, the authored row and the server's state over a restart"
 # vim: set noet ts=4 sw=4:

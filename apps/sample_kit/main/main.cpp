@@ -14,6 +14,9 @@
 // drives it. A player is "p<peer>", or their account's name once logged in
 // (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
 // and the builders edit with Kit's editor (util/kit_editor_check.sh).
+// The floor is laid once a save, in Kit's start (the server Stopped, [KIT]
+// stage 4c), and then sample_kit plays: its components run from then on
+// until a builder stops them.
 #include "core/log.h"
 #include "accounts/api.h"
 #include "client_file/api.h"
@@ -104,6 +107,8 @@ struct Module: public interface::Module
 			m_server->shutdown(1, "sample_kit: Kit is not hosted");
 			return;
 		}
+		ss_ v;
+		m_floor = m_save->store("main")->get("floor", v);
 		kit::access(m_server, [&](kit::Interface *k){
 			log_i(MODULE, "sample_kit: at start the counter is %s, the door "
 					"open %s", cs(k->get_state(5, 0, "count")),
@@ -115,6 +120,7 @@ struct Module: public interface::Module
 	void on_tick(const interface::TickEvent &)
 	{
 		ss_ name = m_door_voxel;
+		bool laid = false;
 		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
 			if(!w->is_section_loaded(pv::Vector3DInt16(0, 0, 0)))
 				return;
@@ -130,11 +136,19 @@ struct Module: public interface::Module
 					for(int z = 0; z < 16; z++)
 						w->set_voxel(pv::Vector3DInt32(x, 0, z), v);
 				w->set_voxel(PILLAR, v);
+				m_save->store("main")->set("floor", "1");
+				laid = true;
 			}
 			const interface::VoxelDefinition *def = reg->get(
 					reg->get_format().id.get(w->get_voxel(DOOR).data));
 			name = def ? def->name.block_name : "?";
 		});
+		// The start is the floor: play
+		if(laid)
+			kit::access(m_server, [&](kit::Interface *k){
+				if(!k->running())
+					k->set_running(true, "app");
+			});
 		if(name != m_door_voxel){
 			m_door_voxel = name;
 			log_i(MODULE, "sample_kit: the door's voxel is %s", cs(name));

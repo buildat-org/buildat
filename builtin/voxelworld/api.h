@@ -179,6 +179,20 @@ namespace voxelworld
 				const ss_ &by) = 0;
 	};
 
+	// [KIT] stage 4c, the copy-on-write start: told of a section before the
+	// first write to it since the watch was set (set_section_watch()), with
+	// its voxels as they were. A write is set_voxel(), set_sample() (and a
+	// routed write made), set_volume() and put_section(); not a generator's
+	// merge_volume(). Called with voxelworld held, on its thread: the watch
+	// keeps the copy and calls nothing back.
+	struct SectionWatch
+	{
+		virtual ~SectionWatch(){}
+		virtual void before_write(Instance *world,
+				const pv::Vector3DInt16 &section_p,
+				const VoxelVolume &before) = 0;
+	};
+
 	struct CommitHook
 	{
 		virtual ~CommitHook(){}
@@ -377,6 +391,16 @@ namespace voxelworld
 		enum RoutedWrite { WRITTEN, ROUTED, REFUSED };
 		virtual RoutedWrite routed_set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v, const ss_ &by) = 0;
+		// [KIT] stage 4c: the watch, replacing one before (nullptr: none).
+		// Each call starts over: every section is told of again at its next
+		// write.
+		virtual void set_section_watch(sp_<SectionWatch> watch) = 0;
+		// A loaded section's voxels put back exactly as a copy has them
+		// (its region the section's, as the watch got it): every voxel,
+		// undefined ones too, the light with them. False if the section is
+		// not loaded.
+		virtual bool put_section(const pv::Vector3DInt16 &section_p,
+				const VoxelVolume &volume) = 0;
 
 		// The voxels of a region, in one read rather than one per voxel:
 		// what asks for this is a sweep, and a section is a quarter of a

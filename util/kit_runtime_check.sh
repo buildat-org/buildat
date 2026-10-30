@@ -197,16 +197,23 @@ grep -a "The palette: " "$s" | grep -q " kit/door .* sample_kit/door" ||
 	fail "the second pouch was not refused once ($s)"
 echo "ok: two authors' doors, the pouch in place of Kit's counts (a second refused), the item giver and the key door on it"
 
-# The save's two rows of Kit's
+# The save's rows of Kit's: the authored and runtime ones, the session
+# ([KIT] stage 4c: sample_kit played once its floor was laid in the start)
+# and the copy of the section play wrote to
 db=$(ls "$save"/*.sqlite 2>/dev/null | head -1)
 [ -n "$db" ] || fail "no database in $save"
 rows=$(sqlite3 "$db" "SELECT key FROM store WHERE store = 'kit' ORDER BY key" | tr '\n' ' ')
-[ "$rows" = "authored runtime " ] || fail "kit's rows are \"$rows\""
+[ "$rows" = "authored runtime session start:world:0,0,0 " ] || fail "kit's rows are \"$rows\""
+want "$s" "A fresh save: Stopped" "Play by app: a round from the start" \
+	"1 sections copied out (1 this round)"
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" |
 	grep -q '"presses"' && fail "runtime state in the authored row"
 # The rows as a save from before types had authors has them: sample_kit's
-# types bare names, read back as sample_kit's (the runtime row's too)
-sqlite3 "$db" "UPDATE store SET value = replace(value, 'sample_kit/', '') WHERE store = 'kit'"
+# types bare names, read back as sample_kit's (the runtime row's too), and
+# no session (from before Play and Stop: it runs on, its start its types'
+# defaults)
+sqlite3 "$db" "UPDATE store SET value = replace(value, 'sample_kit/', '') WHERE store = 'kit';
+	DELETE FROM store WHERE store = 'kit' AND key NOT IN ('authored', 'runtime')"
 
 cat > "$t/2.cmds" <<'EOF'
 wait_log 60000 replicated: entity 4 open = false
@@ -230,7 +237,8 @@ want "$s" "sample_kit: at start the counter is 2, the door open false" \
 [ "$(grep -ac "A new box after" "$s")" = 1 ] ||
 	fail "run 2: not one new box, for the runaway alone ($s)"
 grep -aq "the composition's first start" "$s" && fail "the composition was read again ($s)"
-want "$s" "11 bare type names made <author>/<name>"
+want "$s" "11 bare type names made <author>/<name>" \
+	"A save from before Play and Stop: Running, its start its types' defaults"
 python3 -I - "$db" <<'PY' || fail "the rows after the migration ($db)"
 import json, sqlite3, sys
 db = sqlite3.connect(sys.argv[1])
