@@ -74,6 +74,15 @@ namespace command_seq
 		// connection is ordered, so what went before it either way has
 		// been handled at both ends ([DRIVE_WAITS])
 		Sync,
+		// game_clock <dir>: a server run with --sim-rate whose user path
+		// is <dir> ([CHECK_TIME_SCALE]); from here on the wait_log
+		// commands' limits are the game's milliseconds on its game_clock
+		// file, and fail sooner only if that clock stops for 60 s
+		GameClock,
+		// game_rate <n>: that server's rate from now on, written into its
+		// sim_clock file (the offset kept): 1 around inputs timed on the
+		// wall clock, faster while the drive only waits
+		GameRate,
 	};
 
 	struct Command

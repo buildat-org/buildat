@@ -16,7 +16,8 @@
 -- the last frame, the chunks round the car handed to the module;
 -- predict.pose(): the car as hillclimb:car's numbers 1 to 15, or nil
 -- before the first state; predict.server_moved(x, y, z): the server's
--- position of the car, for the latency's line.
+-- position of the car, for the latency's line; predict.rate(data):
+-- hillclimb:rate, the game's rate against the wall clock.
 local voxelworld = require("buildat/module/voxelworld")
 local log = buildat.Logger("hillclimb")
 
@@ -197,9 +198,19 @@ return function()
 	-- stepped as a state comes in too, not only in the frame after it;
 	-- those the module stepped on to a state's substep come off the next
 	local frame_t = nil
+	-- [CHECK_TIME_SCALE] The game's rate against the wall clock: a
+	-- check's server under --sim-rate (hillclimb:rate); 0, as fast as it
+	-- goes, cannot be followed and is stepped as 1
+	local rate = 1
+	function M.rate(data)
+		local r = tonumber(data)
+		rate = (r and r > 0) and r or 1
+		log:info("hillclimb: the game's rate " .. tostring(r))
+	end
 	local function advance()
 		local ft = buildat.get_time_us()
-		acc = math.min(acc + (frame_t and (ft - frame_t) / 1e6 or 0), 0.25)
+		acc = math.min(acc + (frame_t and (ft - frame_t) / 1e6 * rate or 0),
+				0.25 * rate)
 		frame_t = ft
 		local n = math.floor(acc * HZ)
 		if n > 0 then

@@ -21,6 +21,17 @@ namespace interface
 		// limits per hour or day; time_us() for timeouts and budgets
 		int64_t wall_us();
 		void set_wall_offset_us(int64_t offset_us);
+		// [CHECK_TIME_SCALE] The game's clock, for what the game does over
+		// time: time_us() but on a server run with --sim-rate (or
+		// --free-run), where it is the ticks' 1/30 s each, run at the
+		// rate between them and never past the next. Wall clock things
+		// (timeouts, budgets, logs) stay on time_us()
+		int64_t game_us();
+		// Its rate against the wall clock: 1, or --sim-rate's (a ceiling,
+		// not always reached); 0 for as fast as the ticks go
+		double game_rate();
+		// The server's main loop, at each tick
+		void set_game_tick(int64_t game_us, int64_t tick_us, double rate);
 		// Seconds since the epoch as a UTC calendar
 		inline struct tm utc_tm(int64_t t)
 		{
