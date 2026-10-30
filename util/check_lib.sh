@@ -321,6 +321,11 @@ _needs=$(grep -m1 '^# needs:' "$0" 2>/dev/null)
 # A temp directory of the check's own in $CHECK_TMP, removed at its exit
 # with the pids in CHECK_PIDS stopped first; KEEP_TMP=1 keeps it and says
 # where. A check with a trap of its own calls check_cleanup from it.
+# **A failed check keeps its logs** (user, 2026-10-30): its *.log and
+# screenshots copied to local/check/failed/<dir>, not the worlds and
+# caches (kept /tmp dirs filled the quota once); run_all prunes them by
+# age. simplified: "failed" is the exit status the trap sees, so a check
+# whose own trap runs commands before check_cleanup keeps nothing
 #   check_tmp starport; CHECK_PIDS+=($SERVER_PID)
 CHECK_PIDS=()
 check_tmp()
@@ -330,7 +335,7 @@ check_tmp()
 }
 check_cleanup()
 {
-	local p i killed=("${CHECK_PIDS[@]}")
+	local status=$? p i killed=("${CHECK_PIDS[@]}")
 	for p in "${CHECK_PIDS[@]}"; do kill "$p" 2>/dev/null; done
 	# A local server a failed drive's client started and did not stop
 	# (2026-10-13: one outlived world_mods_check and made the next checks
@@ -350,6 +355,13 @@ check_cleanup()
 		kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null
 	done
 	[ -n "${CHECK_TMP:-}" ] || return 0
+	if [ "$status" != 0 ] && [ -z "${KEEP_TMP:-}" ]; then
+		local kept="$_check_root/local/check/failed/$(basename "$CHECK_TMP")"
+		mkdir -p "$kept" && (cd "$CHECK_TMP" && find . -type f \
+				\( -name '*.log' -o -name '*.png' -o -name '*.cmds' \) \
+				-size -20M -exec cp --parents {} "$kept" \;)
+		echo "logs kept in $kept"
+	fi
 	if [ -n "${KEEP_TMP:-}" ]; then echo "kept $CHECK_TMP"; else rm -rf "$CHECK_TMP"; fi
 }
 
