@@ -43,8 +43,10 @@ static const char *SCHEMA =
 		"store TEXT NOT NULL, key TEXT NOT NULL, value BLOB,"
 		" PRIMARY KEY(store, key))";
 
-// PRAGMA user_version; raised when a save's layout changes
-static const int SAVE_FORMAT = 1;
+// PRAGMA user_version; raised when a save's layout changes. 1 since 0.7;
+// 2 since 0.7.98, Luanti's node metadata on voxelworld's voxel owners
+// ([KIT]), which a build reading 1 would not see
+static const int SAVE_FORMAT = 2;
 
 struct CSave;
 
@@ -128,7 +130,7 @@ struct CSave: public Save
 		// the same save was opened.
 		sqlite3_busy_timeout(m_db, 5000);
 		// **The save's format** ([COMPAT_BREAK_07] 8h): PRAGMA user_version,
-		// 1 since 0.7; a newer one is refused before anything is written,
+		// SAVE_FORMAT; a newer one is refused before anything is written,
 		// and the version that last opened it is a row of "__save"
 		int format = 0;
 		{
