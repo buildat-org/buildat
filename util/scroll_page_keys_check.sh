@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~3 min (2026-10-30)
+# cost: ~2.5 min (2026-10-30)
 # covers: extensions/ui_utils/init.lua extensions/launch_console/init.lua extensions/luanti_client/init.lua extensions/luanti_client/res/chat_line.lua extensions/luanti_client/res/form_session.lua extensions/luanti_client/res/formspec_ui.lua apps/hearth/main/client_lua/init.lua
 # [SCROLL_PAGE_KEYS]: Page Up and Down scroll what is read by the rows
 # shown less two (ui_utils' page_step: one at four rows or fewer):
@@ -224,4 +224,37 @@ print("ok: luanti_client's form: " + " ".join("%s->%s" % (a, b) for _, a, b, _, 
 		", view %s px; the server got %s" % (f[0][3], ", ".join(sent)))
 PY
 fi
-echo "PASS: Page Up and Down by the rows shown less two in Hearth's thread, the Server window's Health page, the launch console's API text$( [ -d "$G" ] && echo ", luanti_client's chat and a form's scroll_container") (see $t/*.png)"
+
+# 4. 1's thread in Chrome, from its top down: Right to the page's first
+# item (Back), then Page Down through the long message
+if [ ${#web[@]} -gt 0 ] && command -v google-chrome > /dev/null; then
+	{
+		echo '[["viewport", 800, 600], ["nav", "${URL}app#open=/t/1"],'
+		echo '["waitlog", "accounts: the login page shown", 120], ["wait", 500],'
+		echo '["type", "admin"], ["key", "Tab"], ["type", "checkpass12"], ["key", "Enter"],'
+		echo '["waitlog_any", "accounts: ntfy asked", 30], ["waitlog_any", "hearth: page Long", 30],'
+		echo '["waitlog_any", "server window: the page ntfy", 30], ["wait", 500],'
+		echo '["key", "Escape"], ["waitlog", "server window: closed", 10], ["wait", 500],'
+		echo '["key", "Right"], ["wait", 500],'
+		for i in 1 2 3 4; do echo "[\"key\", \"PageDown\"], [\"wait\", 400], [\"shot\", \"\${OUT}/web$i.png\"],"; done
+		echo '["wait", 100]]'
+	} > "$t/web.json"
+	WEB_DRIVE_URL=http://127.0.0.1:$SERVER_PORT/ "$here/util/web_drive.sh" chrome hearth \
+		"$t/web.json" "$t/web" > "$t/web.out" 2>&1 ||
+		fail "the Chrome drive: $(tail -3 "$t/web.out")"
+	wv=$(grep -aom1 "page key: .*, view [0-9]*" "$t/web/page.log" | sed 's/.*view //')
+	[ -n "$wv" ] || fail "no page key in Chrome ($t/web/page.log)"
+	got=$(steps "$t/web/page.log" $(step20 $wv) "Chrome's thread") || fail "$got"
+	python3 - "$t/web/page.log" <<'PY' || fail "the thread's focus in Chrome ($t/web/page.log)"
+import re, sys
+f = re.findall(r"page key: (\d+) -> (\d+) of \d+, view \d+, focus (\S+)",
+		open(sys.argv[1], errors="replace").read())
+print("  focus: " + " ".join("%s@%s" % (x[2], x[1]) for x in f))
+assert len(f) == 4 and all(int(b) > int(a) for a, b, _ in f), "not four moves down"
+assert [x[2] for x in f[:3]] == ["m1"] * 3, "the long message not kept"
+PY
+	echo "ok: Chrome, view $wv: $got"
+else
+	echo "skip: no web/ or no google-chrome for the web leg"
+fi
+echo "PASS: Page Up and Down by the rows shown less two in Hearth's thread (native and Chrome), the Server window's Health page, the launch console's API text$( [ -d "$G" ] && echo ", luanti_client's chat and a form's scroll_container") (see $t/*.png)"
