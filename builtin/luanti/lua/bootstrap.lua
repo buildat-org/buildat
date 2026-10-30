@@ -1740,6 +1740,10 @@ end
 -- voxel owners, an entry per position (node_meta.h, [KIT]).
 
 local node_meta = {}
+-- [LUANTI_META_FAR_WRITE] The section of a position taken in, its saved
+-- metadata loaded, before anything reads or writes the position's: a
+-- position with no entry may be in a section the module has not taken in
+local __take_in_meta = __luanti_take_in_meta
 
 -- core.fix_light(pos1, pos2) -> true: the light in the box worked out again
 -- now, ahead of the tick's own relight queue (which a flooding ocean keeps
@@ -2071,6 +2075,10 @@ function core.get_meta(pos)
 	local x, y, z = to_pos(pos)
 	local key = pos_key(x, y, z)
 	local meta = node_meta[key]
+	if meta == nil then
+		__take_in_meta(x, y, z)
+		meta = node_meta[key]
+	end
 	if meta == nil then
 		meta = core.__new_metadata({})
 		-- A node's metadata carries an inventory and an item stack's does
@@ -2415,8 +2423,9 @@ function core.set_node(pos, node)
 	end
 	__set_node(x, y, z, id, param1, param2)
 	-- "Any existing metadata is deleted", which is what separates set_node
-	-- from swap_node; see core.get_meta(). The timer goes with it: it was
-	-- the old node's.
+	-- from swap_node; see core.get_meta(), and the saved one too. The timer
+	-- goes with it: it was the old node's.
+	__take_in_meta(x, y, z)
 	node_meta[pos_key(x, y, z)] = nil
 	node_timers[pos_key(x, y, z)] = nil
 	local newdef = core.registered_nodes[core.get_name_from_content_id(id)]
@@ -2824,6 +2833,7 @@ function core.bulk_set_node(positions, node)
 		end
 		local x, y, z = to_pos(pos)
 		__set_node(x, y, z, id, param1, param2)
+		__take_in_meta(x, y, z)
 		node_meta[pos_key(x, y, z)] = nil
 		node_timers[pos_key(x, y, z)] = nil
 		if newdef and newdef.on_construct then

@@ -15,7 +15,9 @@
 #      loads and lets go, read back after that section's unload and reload
 #      and after a restart; the restart's save has older saves' rows of it
 #      put back in (the one blob, and the blob per section), which come
-#      out of the migration onto the voxel owners; the save, stamped
+#      out of the migration onto the voxel owners; a field written to far
+#      while it is away again and a chest in a section never loaded (far2)
+#      are there after the restart ([LUANTI_META_FAR_WRITE]); the save, stamped
 #      format 1 as a build before the owners left it, is stamped 2.
 #
 #   util/voxel_owners_check.sh
@@ -246,6 +248,9 @@ cat > "$t/u/shared/common.lua" <<'L'
 near = {x = 2, y = 1, z = 2}
 far = {x = 1000, y = 1, z = 2}
 far_block = {x = 62, y = 0, z = 0}
+-- [LUANTI_META_FAR_WRITE] In a section nothing loads before the restart
+far2 = {x = 2000, y = 1, z = 2}
+far2_block = {x = 125, y = 0, z = 0}
 function say(s) core.log("action", "owners_check: " .. s) end
 function meta_of(p)
 	local m = core.get_meta(p)
@@ -290,7 +295,17 @@ start({{x = 0, y = 0, z = 0}, far_block}, function()
 			poll(function()
 				if not loaded(far) then return false end
 				say("reloaded: far " .. meta_of(far))
-				core.request_shutdown("owners_check")
+				-- [LUANTI_META_FAR_WRITE] Writes while far is away again
+				-- and to far2, never loaded: kept, along with what far had
+				core.__forceload_free_block_raw(far_block)
+				poll(function()
+					if loaded(far) then return false end
+					core.get_meta(far):set_string("late", "yes")
+					put(far2, "far2")
+					say("written while away")
+					core.request_shutdown("owners_check")
+					return true
+				end)
 				return true
 			end)
 		end)
@@ -301,11 +316,15 @@ end)
 L
 cat "$t/u/shared/common.lua" - > "$t/u/shared/read.lua" <<'L'
 local old_sec = {x = -70, y = 1, z = 3}
-start({{x = 0, y = 0, z = 0}, far_block, {x = -5, y = 0, z = 0}}, function()
-	if not loaded(near) or not loaded(far) or not loaded(old_sec) then
+start({{x = 0, y = 0, z = 0}, far_block, {x = -5, y = 0, z = 0}, far2_block},
+		function()
+	if not loaded(near) or not loaded(far) or not loaded(old_sec) or
+			not loaded(far2) then
 		return false
 	end
 	say("restarted: near " .. meta_of(near) .. ", far " .. meta_of(far) ..
+			" late " .. core.get_meta(far):get_string("late") ..
+			", far2 " .. meta_of(far2) ..
 			", old_blob " .. meta_of({x = 3, y = 1, z = 3}) ..
 			", old_section " .. meta_of(old_sec))
 	core.request_shutdown("owners_check")
@@ -320,7 +339,7 @@ vrun() # <write|read>: vanilla on the save with that fixture, to its stop
 		bin/buildat_server -A 127.0.0.1 -m ../apps/vanilla -D "$t/u" \
 		-C "$t/c" -l 4 || fail "vanilla did not start ($t/v_$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
-	wait_for_log "$t/v_$1.log" "owners_check: (restarted|reloaded)" 120
+	wait_for_log "$t/v_$1.log" "owners_check: (restarted|written while away)" 120
 	for _i in $(seq 150); do kill -0 $SERVER_PID 2>/dev/null || break; sleep 0.2; done
 	grep -a "owners_check: " "$t/v_$1.log" | sed 's/.*owners_check: /  /'
 	kill -0 $SERVER_PID 2>/dev/null && fail "vanilla did not stop ($t/v_$1.log)"
@@ -343,7 +362,7 @@ sqlite3 "$db" "PRAGMA user_version = 1; UPDATE store SET value = '0.7.0' WHERE s
 vrun read
 grep -aq "Moving 2 node metadata out of 2 rows" "$t/v_read.log" ||
 	fail "no migration logged ($t/v_read.log)"
-grep -aq "owners_check: restarted: near near/floor:glass 3, far far/floor:glass 3, old_blob old/floor:glass 3, old_section oldsec/floor:glass 3" "$t/v_read.log" ||
+grep -aq "owners_check: restarted: near near/floor:glass 3, far far/floor:glass 3 late yes, far2 far2/floor:glass 3, old_blob old/floor:glass 3, old_section oldsec/floor:glass 3" "$t/v_read.log" ||
 	fail "lost over the restart ($t/v_read.log)"
 [ -z "$(sqlite3 "$db" "SELECT key FROM store WHERE store = 'luanti' AND key LIKE 'node_meta%'")" ] ||
 	fail "the old rows are still there"
@@ -351,5 +370,5 @@ grep -aq "owners_check: restarted: near near/floor:glass 3, far far/floor:glass 
 	fail "the migrated save is not stamped format 2"
 [ "$(sqlite3 "$db" "SELECT value FROM store WHERE store = '__save' AND key = 'version'")" != 0.7.0 ] ||
 	fail "the migrated save's version row is not this build's"
-echo "PASS: owners kept over unload, reload and restart; routed writes to the handler, written or refused; vanilla's metadata over an unload and a restart, older saves' rows migrated and the save stamped format 2"
+echo "PASS: owners kept over unload, reload and restart; routed writes to the handler, written or refused; vanilla's metadata over an unload and a restart and written to sections away, older saves' rows migrated and the save stamped format 2"
 # vim: set noet ts=4 sw=4:
