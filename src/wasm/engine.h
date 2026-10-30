@@ -122,6 +122,10 @@ namespace wasm_engine
 		ss_ call(size_t index, const uint64_t *args, uint64_t *result);
 		// The last call (or the start function) ran out of its budget
 		bool past_budget();
+		// [KIT] A call's budget smaller than the engine's, in its units
+		// (budget()'s); 0 for the engine's. What the last call left of it
+		int64_t call_budget = 0;
+		int64_t meter_left();
 		// A call's budget on the engine running the module
 		int64_t budget();
 		// "compiled", "interpreter, compiling", "interpreter" or "browser"

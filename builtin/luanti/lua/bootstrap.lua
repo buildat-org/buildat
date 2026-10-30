@@ -1736,10 +1736,8 @@ end
 -- one on every dig of a node whose definition has an after_dig_node, so this
 -- is what makes those callbacks work at all.
 --
--- simplified: in memory, so it is gone when the server stops. Putting it in
--- the save is step 5c of doc/plan/world_persistence_plan.md -- "with M4, not
--- before it" -- and until then a chest remembers what is in it for as long
--- as the server runs and no longer. Worth knowing before building on it.
+-- In memory for the sections the module has taken in; saved as voxelworld's
+-- voxel owners, an entry per position (node_meta.h, [KIT]).
 
 local node_meta = {}
 
@@ -2141,11 +2139,12 @@ end
 -- An inventory is stacks and a stack is an object, so what goes in is what
 -- ItemStack() takes back.
 --
--- A blob per section, written when voxelworld unloads that section and read
--- when it loads it again, which is how Luanti keeps a block's metadata with
--- the block. What is in memory is what the loaded sections hold.
---
--- See step 5c of doc/plan/world_persistence_plan.md.
+-- [KIT] A string per position (core.serialize() of fields and lists), an
+-- entry of voxelworld's voxel owners, which keeps it with its section: the
+-- module hands them over at a checkpoint and when the section unloads, and
+-- back when it loads, which is how Luanti keeps a block's metadata with the
+-- block. What is in memory is what the loaded sections hold. Between here
+-- and the module they go as flat lists: x, y, z, data, x, y, z, data, ...
 
 -- One metadata object as the save holds it, or nil for one that holds
 -- nothing: an inventory is stacks and a stack is an object, so what goes in
@@ -2217,15 +2216,16 @@ end
 -- the place to keep one is here.
 function core.__take_node_meta(x0, y0, z0, x1, y1, z1)
 	local out = {}
-	local n = 0
 	for key, meta in pairs(node_meta) do
 		local p = meta.pos
 		if p and p.x >= x0 and p.x <= x1 and p.y >= y0 and p.y <= y1 and
 				p.z >= z0 and p.z <= z1 then
 			local saved = save_one_meta(meta)
 			if saved then
-				out[key] = saved
-				n = n + 1
+				out[#out + 1] = p.x
+				out[#out + 1] = p.y
+				out[#out + 1] = p.z
+				out[#out + 1] = core.serialize(saved)
 			end
 			node_meta[key] = nil
 			-- The timers in it stop with it, the way Luanti's do; a
@@ -2234,41 +2234,44 @@ function core.__take_node_meta(x0, y0, z0, x1, y1, z1)
 			core.__drop_node_timer(key)
 		end
 	end
-	if n == 0 then
-		return "", 0
-	end
-	return core.serialize(out), n
+	return out
 end
 
--- The same, grouped by the section each position is in: what the one-blob
--- save is turned into, once, the first time a world made by an older build
--- is opened. The key is the section, as "x,y,z".
-function core.__regroup_node_meta(section_size)
+-- Every position that has anything, left in memory: a checkpoint's, and
+-- the importer's
+function core.__dump_node_meta()
 	local out = {}
-	local n = 0
-	for key, meta in pairs(node_meta) do
+	for _, meta in pairs(node_meta) do
 		local saved = save_one_meta(meta)
 		local p = meta.pos
 		if saved and p then
-			local sx = math.floor(p.x / section_size)
-			local sy = math.floor(p.y / section_size)
-			local sz = math.floor(p.z / section_size)
-			local sk = sx .. "," .. sy .. "," .. sz
-			local group = out[sk]
-			if group == nil then
-				group = {}
-				out[sk] = group
-			end
-			group[key] = saved
-			n = n + 1
+			out[#out + 1] = p.x
+			out[#out + 1] = p.y
+			out[#out + 1] = p.z
+			out[#out + 1] = core.serialize(saved)
 		end
 	end
-	local flat = {}
-	for sk, group in pairs(out) do
-		flat[#flat + 1] = sk
-		flat[#flat + 1] = core.serialize(group)
+	return out
+end
+
+-- An older save's blob ({["x,y,z"] = saved, ...}, the whole world's or a
+-- section's) as a flat list, for the module's migration
+function core.__split_node_meta(data)
+	local t = core.deserialize(data, true)
+	local out = {}
+	if type(t) ~= "table" then
+		return out
 	end
-	return flat, n
+	for key, saved in pairs(t) do
+		local x, y, z = string.match(key, "^(-?%d+),(-?%d+),(-?%d+)$")
+		if x and type(saved) == "table" then
+			out[#out + 1] = tonumber(x)
+			out[#out + 1] = tonumber(y)
+			out[#out + 1] = tonumber(z)
+			out[#out + 1] = core.serialize(saved)
+		end
+	end
+	return out
 end
 
 -- What both the save and the importer put back: fields as strings and
@@ -2287,18 +2290,13 @@ function core.__set_node_meta(pos, fields, lists)
 	end
 end
 
-function core.__load_node_meta(data)
-	local t = core.deserialize(data)
-	if type(t) ~= "table" then
-		return 0
-	end
+function core.__load_node_meta(flat)
 	local n = 0
-	for key, saved in pairs(t) do
-		local x, y, z = string.match(key, "^(-?%d+),(-?%d+),(-?%d+)$")
-		if x then
-			core.__set_node_meta(
-					{x = tonumber(x), y = tonumber(y), z = tonumber(z)},
-					saved.fields, saved.inventory)
+	for i = 1, #flat - 3, 4 do
+		local saved = core.deserialize(flat[i + 3], true)
+		if type(saved) == "table" then
+			core.__set_node_meta({x = flat[i], y = flat[i + 1],
+					z = flat[i + 2]}, saved.fields, saved.inventory)
 			n = n + 1
 		end
 	end

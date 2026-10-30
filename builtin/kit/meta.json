@@ -1,0 +1,9 @@
+{
+	"dependencies": [
+		{"module": "main_context"},
+		{"module": "network"},
+		{"module": "replicate"},
+		{"module": "storage"},
+		{"module": "voxelworld"}
+	]
+}

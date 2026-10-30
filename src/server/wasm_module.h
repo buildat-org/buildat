@@ -5,6 +5,7 @@
 
 namespace interface {
 	struct Module;
+	struct WasmBox;
 	struct Server;
 	struct ModuleInfo;
 }
@@ -18,6 +19,12 @@ namespace server
 	// refused; nothing of it has run then.
 	interface::Module* create_wasm_module(interface::Server *server,
 			const interface::ModuleInfo &info, const ss_ &wasm_path,
+			const ss_ &cache_root, ss_ &why);
+
+	// [KIT] A .wasm a module runs for itself (interface/wasm_box.h): the
+	// bytes checked and metered, granted only the every-module imports.
+	// Null with why when it is refused.
+	interface::WasmBox* create_wasm_box(const ss_ &name, const ss_ &bytes,
 			const ss_ &cache_root, ss_ &why);
 }
 // vim: set noet ts=4 sw=4:

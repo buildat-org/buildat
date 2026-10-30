@@ -1783,6 +1783,22 @@ struct CState: public State, public interface::Server
 		return it == m_module_wasm.end() ? ss_() : it->second;
 	}
 
+	interface::WasmBox* create_wasm_box(const ss_ &module_name,
+			const ss_ &source, ss_ &why)
+	{
+		const ss_ wasm = build_module_wasm(g_server_config, module_name,
+				get_module_path(module_name), source, true);
+		if(wasm.empty()){
+			why = "its "+source+"/ did not build to a .wasm";
+			return nullptr;
+		}
+		std::ifstream f(wasm, std::ios::binary);
+		std::ostringstream os(std::ios::binary);
+		os<<f.rdbuf();
+		return server::create_wasm_box(module_name, os.str(),
+				g_server_config.get<ss_>("rccpp_build_path")+"/wasm2c", why);
+	}
+
 	ss_ get_module_path(const ss_ &module_name)
 	{
 		interface::MutexScope ms(m_modules_mutex);

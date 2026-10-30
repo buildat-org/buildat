@@ -155,6 +155,10 @@ Saves and settings
   user/extensions/<extension>/; the pidfile and the web client's URL
   file are key=value lines.
 - The accounts store is format "2".
+- A Luanti world's node metadata is voxelworld's voxel owners
+  ("<world>/owned/<x,y,z>" rows, [KIT]) since 0.7.98; the luanti store's
+  "node_meta" and "node_meta/<x,y,z>" rows are moved there on the first
+  start. A build before 0.7.98 reads none of it.
 - Buildat's demos (apps/demo_*, apps/sample_*) keep no saves over
   versions or over a rename: a demo's world may not open in another
   version, nothing reads a demo's older save, and a renamed demo starts

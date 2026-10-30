@@ -22,6 +22,7 @@ namespace interface
 
 	struct ModuleInfo;
 	struct Module;
+	struct WasmBox;
 	typedef server::Config ServerConfig;
 
 	namespace thread_pool {
@@ -119,6 +120,12 @@ namespace interface
 
 		virtual void access_thread_pool(std::function<void(
 				interface::thread_pool::ThreadPool*pool)> cb) = 0;
+
+		// [KIT] The module's directory `source` built and run as a .wasm of
+		// its own (interface/wasm_box.h), the caller's to delete; null with
+		// why when it does not build or is refused
+		virtual WasmBox* create_wasm_box(const ss_ &module_name,
+				const ss_ &source, ss_ &why) = 0;
 	};
 }
 // vim: set noet ts=4 sw=4:
