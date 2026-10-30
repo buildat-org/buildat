@@ -109,6 +109,9 @@ struct Entity
 	ss_ name, kind;
 	bool has_pos = false;
 	double pos[3] = {0, 0, 0};
+	// [KIT] stage 4e2: its turn round y, degrees 0...360 (its node's, its
+	// look turning with it)
+	double yaw = 0;
 	sv_<Instance> comps;
 	uint32_t node = 0; // a positional one's node in its scene
 	// authored: a prefab copy's member, {"of", "version", "member" (its id
@@ -905,6 +908,12 @@ struct Module: public interface::Module, public Interface
 			}
 			*k.second = pn;
 		}
+		// A grant's state is shown on the clients ([KIT] stage 4e2: where a
+		// player may dig or place)
+		if(!t.grants.empty()){
+			t.shared.insert("dig");
+			t.shared.insert("place");
+		}
 		// A look's extent is a position parameter's too
 		const ss_ lx = jstr(t.decl.get("look"), "extent");
 		if(!lx.empty() && jstr(t.decl.get("params").get(lx), "type") !=
@@ -1062,6 +1071,18 @@ struct Module: public interface::Module, public Interface
 		return std::round(v * 16) / 16;
 	}
 
+	// A turn as kept: 0...360, on a 1/16 degree's grid
+	static double norm_yaw(double a)
+	{
+		if(!std::isfinite(a))
+			return 0;
+		a = std::fmod(a, 360.0);
+		if(a < 0)
+			a += 360;
+		a = std::round(a * 16) / 16;
+		return a >= 360 ? 0 : a;
+	}
+
 	static bool pos_ok(const json::Value &p)
 	{
 		if(!p.is_array() || p.size() != 3)
@@ -1152,6 +1173,8 @@ struct Module: public interface::Module, public Interface
 			for(unsigned k = 0; k < 3; k++)
 				e.pos[k] = p.at(k).as_number();
 		}
+		if(j.get("yaw").is_number())
+			e.yaw = norm_yaw(j.get("yaw").as_number());
 		const json::Value &cs_ = j.get("components");
 		for(unsigned k = 0; k < cs_.size(); k++){
 			const json::Value &cj = cs_.at(k);
@@ -1250,6 +1273,8 @@ struct Module: public interface::Module, public Interface
 			for(int k = 0; k < 3; k++)
 				pos.append(e.pos[k]);
 			j.set("pos", pos);
+			if(e.yaw != 0)
+				j.set("yaw", e.yaw);
 		}
 		json::Value comps = json::array();
 		for(const Instance &in : e.comps){
@@ -2615,6 +2640,20 @@ struct Module: public interface::Module, public Interface
 				show.set("look", look_of(in, d.get("look")));
 			if(show.get("hud").is_undefined() && !d.get("hud").is_undefined())
 				show.set("hud", d.get("hud"));
+			// [KIT] stage 4e2: what a click would do, shown on it: it is
+			// used (a client's use reaches it), it grants digging or placing
+			// in its box (its state's dig and place, shared)
+			const Type &ty = m_types[in.type];
+			if(ty.usable && ty.handlers.count("on_use"))
+				show.set("usable", true);
+			if(!ty.grants.empty() && show.get("grants").is_undefined()){
+				int n[3];
+				extent(in.params.get(ty.grants), n);
+				json::Value g = json::array();
+				for(int k = 0; k < 3; k++)
+					g.append(n[k]);
+				show.set("grants", g);
+			}
 			// The types whose client part runs for it ([KIT] stage 4d), and
 			// the state they see
 			if(!m_types[in.type].client.empty())
@@ -2641,6 +2680,7 @@ struct Module: public interface::Module, public Interface
 		main_context::access(m_server, ref, [&](magic::Scene *scene){
 			magic::Node *n = scene->CreateChild(("kit:"+itos(e.id)).c_str());
 			n->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+			n->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
 			n->SetVar(magic::StringHash("kit_id"), magic::Variant((int)e.id));
 			n->SetVar(magic::StringHash("kit_show"),
 					magic::Variant(show.stringify().c_str()));
@@ -3550,6 +3590,8 @@ struct Module: public interface::Module, public Interface
 				for(int k = 0; k < 3; k++)
 					pos.append(src.pos[k] - base[k]);
 				j.set("pos", pos);
+				if(src.yaw != 0)
+					j.set("yaw", src.yaw);
 			}
 			json::Value comps = json::array();
 			for(const Instance &in : src.comps){
@@ -3618,6 +3660,10 @@ struct Module: public interface::Module, public Interface
 				for(unsigned k = 0; k < 3; k++)
 					pos.append(grid(base[k] + m.get("pos").at(k).as_number()));
 				e.set("pos", pos);
+				// simplified: each member keeps its own turn; the copy is
+				// not turned as a whole
+				if(m.get("yaw").is_number())
+					e.set("yaw", norm_yaw(m.get("yaw").as_number()));
 			}
 			json::Value comps = json::array();
 			const json::Value &cs_ = m.get("components");
@@ -3699,6 +3745,148 @@ struct Module: public interface::Module, public Interface
 			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
 					row));
 		what = "placed prefab "+name+" as "+itos(m_next_id)+"..."+
+				itos(m_next_id + rows.size() - 1);
+		m_next_id += rows.size();
+		return true;
+	}
+
+	// The positional authored entities of `ids` (1 to MAX_PREFAB, none
+	// twice), or false with why
+	bool group_arg(const json::Value &j, sv_<uint64_t> &group, ss_ &why)
+	{
+		const json::Value &ids = j.get("ids");
+		if(!ids.is_array() || ids.size() < 1 || ids.size() > MAX_PREFAB){
+			why = "ids: 1 to "+itos(MAX_PREFAB)+" entities";
+			return false;
+		}
+		for(unsigned i = 0; i < ids.size(); i++){
+			json::Value a = json::object();
+			a.set("id", ids.at(i));
+			Entity *e = entity_arg(a, "id", why);
+			if(!e)
+				return false;
+			if(!e->has_pos || !e->kind.empty()){
+				why = "entity "+itos(e->id)+" has no position to move";
+				return false;
+			}
+			if(std::find(group.begin(), group.end(), e->id) == group.end())
+				group.push_back(e->id);
+		}
+		return true;
+	}
+
+	// [KIT] stage 4e2: {"op": "move", "ids": [n...], "by": [dx, dy, dz],
+	// "turn": degrees}: entities moved together, one edit (an editor's drag
+	// of its selection), turned round y about their middle (the mean of
+	// their positions) and each by as much
+	bool move_group(const json::Value &j,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		sv_<uint64_t> group;
+		if(!group_arg(j, group, why))
+			return false;
+		const json::Value &by = j.get("by");
+		if(!by.is_undefined() && !pos_ok(by)){
+			why = "by: three numbers within "+itos((int)MAX_COORD);
+			return false;
+		}
+		const json::Value &turn = j.get("turn");
+		if(!turn.is_undefined() && (!turn.is_number() ||
+				!std::isfinite(turn.as_number()))){
+			why = "turn: a number of degrees";
+			return false;
+		}
+		double d[3] = {0, 0, 0}, mid[3] = {0, 0, 0};
+		for(unsigned k = 0; by.is_array() && k < 3; k++)
+			d[k] = by.at(k).as_number();
+		for(uint64_t id : group)
+			for(int k = 0; k < 3; k++)
+				mid[k] += m_entities[id].pos[k] / group.size();
+		const double a = turn.is_number() ? turn.as_number() : 0;
+		// Urho3D's turn round y: +z towards +x
+		const double r = a * 3.14159265358979323846 / 180, c = std::cos(r), sn = std::sin(r);
+		for(uint64_t id : group){
+			const Entity &e = m_entities[id];
+			const double rx = e.pos[0] - mid[0], rz = e.pos[2] - mid[2];
+			double np[3] = {mid[0] + rx * c + rz * sn + d[0], e.pos[1] + d[1],
+					mid[2] - rx * sn + rz * c + d[2]};
+			json::Value after = entity_json(e), pos = json::array();
+			for(int k = 0; k < 3; k++){
+				if(std::fabs(np[k]) > MAX_COORD){
+					why = "entity "+itos(id)+" would go past "+
+							itos((int)MAX_COORD);
+					return false;
+				}
+				pos.append(grid(np[k]));
+			}
+			after.set("pos", pos);
+			if(a != 0)
+				after.set("yaw", norm_yaw(e.yaw + a));
+			change.push_back(std::make_pair(id, after));
+		}
+		ss_ list;
+		for(uint64_t id : group)
+			list += (list.empty() ? "" : " ")+itos(id);
+		json::Value bv = json::array();
+		for(int k = 0; k < 3; k++)
+			bv.append(d[k]);
+		what = "moved "+list+" by "+bv.stringify()+(a != 0 ? ", turned "+
+				json::Value(a).stringify() : ss_());
+		return true;
+	}
+
+	// [KIT] stage 4e2: {"op": "duplicate", "ids": [n...], "by": [dx, dy,
+	// dz]}: a copy of the entities that far off, their links and entity
+	// parameters among them made the copies' (a prefab copy's copy is a
+	// plain one)
+	bool duplicate(const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what,
+			ss_ &why)
+	{
+		sv_<uint64_t> group;
+		if(!group_arg(j, group, why))
+			return false;
+		for(uint64_t id : group)
+			for(auto &o : m_entities)
+				if(o.second.parent == id){
+					why = "entity "+itos(id)+" has entities under it";
+					return false;
+				}
+		const json::Value &by = j.get("by");
+		if(!pos_ok(by)){
+			why = "by: three numbers within "+itos((int)MAX_COORD);
+			return false;
+		}
+		if(m_entities.size() + group.size() > MAX_ENTITIES){
+			why = "the composition has "+itos(MAX_ENTITIES)+" entities";
+			return false;
+		}
+		const uint64_t scene = scene_entity(p.scene);
+		if(!scene){
+			why = "the editor is in no scene of the composition's";
+			return false;
+		}
+		std::sort(group.begin(), group.end());
+		const Entity &first = m_entities[group[0]];
+		double base[3];
+		for(int k = 0; k < 3; k++)
+			base[k] = first.pos[k];
+		const json::Value pf = group_prefab(group, base);
+		for(int k = 0; k < 3; k++)
+			base[k] += by.at(k).as_number();
+		sv_<json::Value> rows;
+		instantiate(pf, "", scene, base, m_next_id, rows);
+		for(json::Value &row : rows){
+			// Named as a placed one is
+			const json::Value &cs_ = row.get("components");
+			if(cs_.size())
+				row.set("name", jstr(cs_.at(0), "type")+" "+
+						itos(json::jint(row, "id", 0)));
+			change.push_back(std::make_pair((uint64_t)json::jint(row, "id", 0),
+					row));
+		}
+		what = "duplicated "+itos(group.size())+" as "+itos(m_next_id)+"..."+
 				itos(m_next_id + rows.size() - 1);
 		m_next_id += rows.size();
 		return true;
@@ -5902,6 +6090,8 @@ struct Module: public interface::Module, public Interface
 					" at "+pos.stringify());
 			return true;
 		}
+		if(op == "move" && !j.get("ids").is_undefined())
+			return move_group(j, change, what, why);
 		if(op == "move"){
 			Entity *e = entity_arg(j, "id", why);
 			if(!e)
@@ -5914,15 +6104,27 @@ struct Module: public interface::Module, public Interface
 				why = "pos: three numbers within "+itos((int)MAX_COORD);
 				return false;
 			}
+			const json::Value &yaw = j.get("yaw");
+			if(!yaw.is_undefined() && (!yaw.is_number() ||
+					!std::isfinite(yaw.as_number()))){
+				why = "yaw: a number of degrees";
+				return false;
+			}
 			json::Value after = entity_json(*e);
 			json::Value pos = json::array();
 			for(unsigned k = 0; k < 3; k++)
 				pos.append(grid(j.get("pos").at(k).as_number()));
 			after.set("pos", pos);
+			if(yaw.is_number())
+				after.set("yaw", norm_yaw(yaw.as_number()));
 			change.push_back(std::make_pair(e->id, after));
-			what = "moved "+itos(e->id)+" to "+pos.stringify();
+			what = "moved "+itos(e->id)+" to "+pos.stringify()+
+					(yaw.is_number() ? ", turned to "+
+					json::Value(norm_yaw(yaw.as_number())).stringify() : ss_());
 			return true;
 		}
+		if(op == "duplicate")
+			return duplicate(j, p, change, what, why);
 		if(op == "delete"){
 			Entity *e = entity_arg(j, "id", why);
 			if(!e)
@@ -6197,6 +6399,7 @@ struct Module: public interface::Module, public Interface
 				magic::Node *nd = scene->GetNode(e.node);
 				if(nd){
 					nd->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+					nd->SetRotation(magic::Quaternion(0, (float)e.yaw, 0));
 					// A parameter its look is drawn from may have changed
 					nd->SetVar(magic::StringHash("kit_show"), magic::Variant(
 							show_of(e).stringify().c_str()));

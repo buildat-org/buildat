@@ -46,7 +46,9 @@ namespace interface
 //   state    = {name = {default = v, shared = true}, ...} -- runtime; a
 //              shared one is replicated to the clients
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
-//   usable   = true          -- a client may "use" it (in range)
+//   usable   = true          -- a client may "use" it (in range); with an
+//                               on_use, the clients point it out as
+//                               used by a click ([KIT] stage 4e2)
 //   owns_voxel = true        -- it owns its position's voxel
 //   volume = "<param>"       -- with owns_voxel: it owns the box of cells
 //                               from its own up and on, the extent a
@@ -168,9 +170,12 @@ namespace interface
 // Grants (dig and place for players, beside the app's edit rights):
 //   grants = "<param>"     -- a box of cells (as zone), where the
 //                             instance's state dig/place, when true, lets
-//                             players dig/place: Interface::can_dig/place `by` is who caused it,
-// "player:<name>" or "app", carried along the links it sets off and kept
-// with a timer. Handlers run only while the server is Running (below).
+//                             players dig/place: Interface::can_dig/place;
+//                             dig and place are shared, so the clients
+//                             show where a click digs ([KIT] stage 4e2).
+// `by` is who caused it, "player:<name>" or "app", carried along the links
+// it sets off and kept with a timer. Handlers run only while the server
+// is Running (below).
 // on_start(c) as a round starts from the start (Play, an instance placed
 // or restarted in the round); on_join(c, by) as a player goes through the
 // round's start and each time the app places them in its scene anew
@@ -210,7 +215,14 @@ namespace interface
 //   {"op": "save_prefab", "ids": [n...], "name": n}  -- those entities a
 //       prefab of the builder's, they a copy of it; other copies follow
 //       its parameters but their overrides
-//   {"op": "move", "id": n, "pos": [x, y, z]}    {"op": "delete", "id": n}
+//   {"op": "move", "id": n, "pos": [x, y, z], "yaw": degrees}  -- yaw
+//       optional ([KIT] stage 4e2: an entity's turn round y, 0...360, its
+//       look turned with it; zones and grants stay boxes of cells)
+//   {"op": "move", "ids": [n...], "by": [dx, dy, dz], "turn": degrees}
+//       -- entities moved together, one edit, turned about their middle
+//   {"op": "duplicate", "ids": [n...], "by": [dx, dy, dz]}  -- a copy of
+//       them that far off, their links among them the copies'
+//   {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
 //    "input": in}

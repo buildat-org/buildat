@@ -4,18 +4,25 @@
 -- [KIT] Workbench's client: a player walking on the floor (demo_digger's
 -- physics, copied), Kit's editor, and the voxels to build with.
 --   W A S D, Space: walk, jump; the mouse looks
---   E, or the right button on a component: use it
---   (with edit rights, or where a component grants it) the left button
---   digs, the right one places;
+--   ([KIT] stage 4e2) what a click would do is shown on what the
+--   crosshair is on (Kit's play_target: floorplanner's colours): the left
+--   button uses an object with a click action, else digs (with edit
+--   rights, or where a component grants it); the right one places
 --   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
 --   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
---   F6 or the menu's "Edit": Kit's editor; there the pointer is free for
---   its clicks, and the right button held looks round. The menu's "Play"
---   and "Stop" (a builder's): the server Running or Stopped ([KIT] 4c)
+--   F6 or the menu's "Edit": Kit's editor, floorplanner's (its 2D, 3D and
+--   walking views: here the walk); walking in it, the pointer is free and
+--   the right button held looks round, a click goes up into the crosshair
+--   (Escape back down). The menu's "Play" and "Stop" (a builder's): the
+--   server Running or Stopped ([KIT] 4c)
 --   L: log in (builtin/accounts' dialog)
 --   Escape: the pause menu (extensions/pause_menu: Continue, Kit's Edit
---   and Play/Stop, Chat, Settings, Leave); in the tools a pending link
---   is cancelled first
+--   and Play/Stop, Chat, Settings, Leave); in the tools Kit's first (a
+--   pending link, a drag, the crosshair)
+-- A touchscreen (BUILDAT_TOUCH=1, floorplanner's walking: [FP_TOUCH] 3):
+-- a finger put down at the lower left is a stick that walks, a drag
+-- elsewhere turns the view, a tap is the left click at the finger and a
+-- finger held still the right click; Jump and Menu at the lower right
 local log = buildat.Logger("workbench")
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
@@ -43,6 +50,7 @@ local heightmap = require("buildat/module/heightmap")
 
 local scene = replicate.main_scene
 local material = 1
+local TOUCH = buildat.get_env("BUILDAT_TOUCH") == "1"
 
 -- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
 -- names one; the launcher's own user is the admin without one. Its
@@ -221,24 +229,6 @@ for _, s in ipairs({{15, 1}, {1, 15}}) do
 	crosshair[#crosshair + 1] = bar
 end
 
--- The voxel the view points at, and the cell in front of it (demo_digger's
--- walk along the ray)
-local function pointed()
-	local p0 = buildat.Vector3(camera_node.worldPosition)
-	local dir = buildat.Vector3(camera_node.worldDirection)
-	local last = nil
-	for i = 1, REACH * 10 do
-		local p = (p0 + dir * i * 0.1):Round()
-		if p ~= last then
-			local v = voxelworld.get_static_voxel(p)
-			if v.id ~= 1 and v.id ~= 0 then
-				return p, last
-			end
-			last = p
-		end
-	end
-end
-
 local function build(p, voxel)
 	if not p then
 		return
@@ -247,34 +237,68 @@ local function build(p, voxel)
 			p.z .. '], "voxel": "' .. voxel .. '"}')
 end
 
--- What the view points at in play: a component near the ray (Kit's), used
-local function use_pointed()
-	local id = kit.pointed(camera_node.worldPosition,
-			camera_node.worldDirection, REACH)
-	if id then
-		kit.use(id)
-		return true
+-- The voxels a click digs and places on (the heightmap's surface none)
+local function voxel_at(x, y, z)
+	-- 0: not there, 1: air
+	return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
+end
+
+-- What a click would do in play ([KIT] stage 4e2, Kit's play_target): at
+-- the crosshair, or a touchscreen's finger (x, y: its pixels)
+local function target(x, y)
+	local o, d = camera_node.worldPosition, camera_node.worldDirection
+	if x then
+		o, d = kit.screen_ray(x, y, camera_node,
+				camera_node:GetComponent("Camera"))
 	end
-	return false
+	return kit.play_target(o, d, REACH, voxel_at)
+end
+
+-- For a drive: "event workbench_build {"p": [x, y, z], "voxel": "air"}"
+-- sends a build the pointing would not (the server's refusal)
+magic.SubscribeToEvent("command_seq:workbench_build", function(_, data)
+	buildat.send_packet("main:build", data:GetString("Param"))
+end)
+
+local function act(t, left)
+	local a = t and (left and t.left or not left and t.right)
+	if not a then
+		return
+	end
+	if a.kind == "use" then
+		kit.use(a.id)
+	elseif a.kind == "dig" then
+		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]), "air")
+	elseif a.kind == "place" then
+		build(magic.Vector3(a.cell[1], a.cell[2], a.cell[3]),
+				MATERIALS[material])
+	end
 end
 
 -- Kit's items in the pause menu in place of its top bar
 kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
+	mouse_look = true, set_camera = voxelworld.set_camera,
 	solid = function(x, y, z)
 		local h = heightmap.height_at(x, z)
 		if h and y < h then
 			return true
 		end
-		-- 0: not there, 1: air
-		return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
+		return voxel_at(x, y, z)
 	end}
 
--- The mouse turns the view in play; the menu and the tools free it. On the
--- web a lost pointer lock opens the menu, whose click takes it back
-local editing = false
+-- The mouse turns the view in play and in the editor's crosshair; the
+-- menu, the tools at the pointer and a touchscreen free it. On the web a
+-- lost pointer lock opens the menu (the editor's crosshair goes down to
+-- the pointer instead), whose click takes it back
+local editing, looking = false, false
 local menu
 local function capture(on)
-	ui_utils.mouse_look(on and not editing, function() menu.open() end)
+	ui_utils.mouse_look(on and not TOUCH and (not editing or looking),
+			function()
+		if not kit.drop_crosshair() then
+			menu.open()
+		end
+	end)
 end
 menu = pause_menu.new{capture = capture, accounts = accounts}
 kit.add_menu_items(menu)
@@ -295,8 +319,6 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		return
 	elseif key == magic.KEY_L then
 		log_in()
-	elseif key == magic.KEY_E and not editing then
-		use_pointed()
 	elseif key >= magic.KEY_1 and key <= magic.KEY_9 then
 		material = key - magic.KEY_1 + 1
 	elseif key == magic.KEY_0 then
@@ -305,31 +327,166 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 end)
 
 magic.SubscribeToEvent("MouseButtonDown", function(_, data)
-	if editing or menu.held() or ui_utils.mouse_look_paused() then
+	if editing or TOUCH or menu.held() or ui_utils.mouse_look_paused() or
+			ui_utils.clicks_wanted() then
 		return
 	end
 	local button = data:GetInt("Button")
-	local p, front = pointed()
-	if button == magic.MOUSEB_LEFT then
-		build(p, "air")
-	elseif button == magic.MOUSEB_RIGHT and not use_pointed() then
-		build(front, MATERIALS[material])
-	end
+	act(target(), button == magic.MOUSEB_LEFT)
 end)
+
+-- ---- A touchscreen ([FP_TOUCH] 3, floorplanner's walking): a stick at
+-- the lower left, a drag elsewhere turns, a tap is the left click at the
+-- finger and a finger held still the right one; Jump and Menu
+local fingers, stick = {}, nil
+local touch_jump = false
+local touch_bar = nil
+local function screen()
+	local sc = magic.ui.scale
+	return magic.ui.root.width * sc, magic.ui.root.height * sc
+end
+local function on_ui(x, y)
+	local sc = magic.ui.scale
+	local b = touch_bar
+	if b and b.visible then
+		local p, s = b.screenPosition, b.size
+		if x / sc >= p.x and y / sc >= p.y and x / sc < p.x + s.x and
+				y / sc < p.y + s.y then
+			return true
+		end
+	end
+	return menu.held() or ui_utils.clicks_wanted() or
+			(editing and kit.over_ui(x, y))
+end
+if TOUCH then
+	touch_bar = magic.ui.root:CreateChild("Window")
+	touch_bar.defaultStyle = magic.cache:GetResource("XMLFile",
+			"ui_utils/res/style.xml")
+	touch_bar:SetStyleAuto()
+	touch_bar:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(6, 6, 6, 6))
+	touch_bar:SetAlignment(magic.HA_RIGHT, magic.VA_BOTTOM)
+	touch_bar:SetPosition(-8, -8)
+	touch_bar.opacity = 0.92
+	for _, b in ipairs({{"Jump", function() touch_jump = true end},
+			{"Menu", function() menu.open() end}}) do
+		local btn = touch_bar:CreateChild("Button")
+		btn:SetStyleAuto()
+		btn.minHeight = 24
+		local t = btn:CreateChild("Text")
+		t:SetStyleAuto()
+		t:SetText(b[1])
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		btn.minWidth = t.width + 16
+		magic.SubscribeToEvent(btn, "Released", b[2])
+	end
+	magic.SubscribeToEvent("TouchBegin", function(_, data)
+		local id, x, y = data:GetInt("TouchID"), data:GetInt("X"),
+				data:GetInt("Y")
+		local f = {x = x, y = y, x0 = x, y0 = y, t0 = buildat.get_time_us(),
+			ui = on_ui(x, y)}
+		fingers[id] = f
+		if f.ui or (editing and kit.view() ~= "walk") then
+			f.ui = true
+			return
+		end
+		local w, h = screen()
+		if not stick and x < w * 0.45 and y > h * 0.55 then
+			f.stick = true
+			stick = {f = 0, r = 0}
+		end
+	end)
+	magic.SubscribeToEvent("TouchMove", function(_, data)
+		local f = fingers[data:GetInt("TouchID")]
+		if not f or f.ui then
+			return
+		end
+		local x, y = data:GetInt("X"), data:GetInt("Y")
+		f.x, f.y = x, y
+		if math.abs(x - f.x0) + math.abs(y - f.y0) > 8 * magic.ui.scale then
+			f.moved = true
+		end
+		local w, h = screen()
+		if f.stick then
+			-- A tenth of the screen's short side is full speed
+			local r = math.min(w, h) * 0.1
+			stick.r = math.max(-1, math.min(1, (x - f.x0) / r))
+			stick.f = math.max(-1, math.min(1, -(y - f.y0) / r))
+			return
+		end
+		-- The mouse sensitivity's, at half of 0.2 (floorplanner's)
+		yaw_node:Yaw(data:GetInt("DX") * 0.1)
+		camera_node:Pitch(data:GetInt("DY") * 0.1)
+		local pitch = camera_node.rotation:PitchAngle()
+		if pitch > 89 or pitch < -89 then
+			camera_node:Pitch(-data:GetInt("DY") * 0.1)
+		end
+	end)
+	magic.SubscribeToEvent("TouchEnd", function(_, data)
+		local id = data:GetInt("TouchID")
+		local f = fingers[id]
+		fingers[id] = nil
+		if not f then
+			return
+		end
+		if f.stick then
+			stick = nil
+		end
+		-- A tap: the left click at the finger, in play (Kit's editor takes
+		-- its own)
+		if not f.ui and not f.stick and not f.moved and not f.held and
+				not editing and buildat.get_time_us() - f.t0 < 500000 then
+			act(target(f.x, f.y), true)
+		end
+	end)
+end
+
+-- What a click would do, shown on what is pointed at (play; the editor
+-- shows its own); a touchscreen's at the finger down, held still the right
+-- click's
+local function show_pointed()
+	if editing or menu.held() or ui_utils.mouse_look_paused() then
+		kit.show_target(nil)
+		return
+	end
+	if not TOUCH then
+		kit.show_target(target())
+		return
+	end
+	local f = nil
+	for _, g in pairs(fingers) do
+		if not g.ui and not g.stick and not g.moved then
+			f = g
+		end
+	end
+	local t = f and target(f.x, f.y) or nil
+	kit.show_target(t)
+	if f and not f.held and buildat.get_time_us() - f.t0 > 500000 then
+		f.held = true
+		act(t, false)
+	end
+end
 
 local pos_frames = 0
 magic.SubscribeToEvent("Update", function(_, data)
 	local dt = data:GetFloat("TimeStep")
-	-- Edit mode frees the pointer for the editor's clicks
-	if kit.editing() ~= editing then
-		editing = kit.editing()
+	-- Edit mode frees the pointer for the editor's clicks, but in its
+	-- crosshair
+	if kit.editing() ~= editing or kit.looking() ~= looking then
+		editing, looking = kit.editing(), kit.looking()
 		if not menu.held() then
 			capture(true)
 		end
-		for _, bar in ipairs(crosshair) do
-			bar.visible = not editing
-		end
 	end
+	-- Walking: in play and the editor's walking view; the crosshair where
+	-- the mouse looks
+	local walking = not editing or kit.view() == "walk"
+	for _, bar in ipairs(crosshair) do
+		bar.visible = not TOUCH and (not editing or looking)
+	end
+	if touch_bar then
+		touch_bar.visible = not editing
+	end
+	show_pointed()
 	pos_frames = pos_frames + 1
 	if pos_frames >= 15 or put then
 		pos_frames = 0
@@ -360,9 +517,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 	end
 	local mx, my = ui_utils.mouse_look_move()
-	if menu.held() then
+	if menu.held() or not walking or TOUCH then
 		mx, my = 0, 0
-	elseif editing then
+	elseif editing and not looking then
 		local m = magic.input:GetMouseMove()
 		if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
 			mx, my = m.x, m.y
@@ -383,13 +540,17 @@ magic.SubscribeToEvent("Update", function(_, data)
 	if magic.input:GetKeyDown(magic.KEY_S) then fwd = fwd - 1 end
 	if magic.input:GetKeyDown(magic.KEY_D) then side = side - 1 end
 	if magic.input:GetKeyDown(magic.KEY_A) then side = side + 1 end
-	if menu.held() then
+	if stick then
+		fwd, side = fwd + stick.f, side - stick.r
+	end
+	if menu.held() or not walking then
 		fwd, side = 0, 0
 	end
 	if fwd ~= 0 or side ~= 0 then
 		local u = yaw_node.worldDirection
 		local v = u:CrossProduct(magic.Vector3(0, 1, 0))
-		want = (u * fwd + v * side):Normalized() * MOVE_SPEED
+		want = (u * fwd + v * side) * (MOVE_SPEED /
+				math.max(1, math.sqrt(fwd * fwd + side * side)))
 	end
 	if physics_on then
 		local cur = body.linearVelocity
@@ -403,9 +564,10 @@ magic.SubscribeToEvent("Update", function(_, data)
 			bv.x, bv.z = want.x, want.z
 			body.linearVelocity = bv
 		end
-		if (magic.input:GetKeyDown(magic.KEY_SPACE) or
-				magic.input:GetKeyPress(magic.KEY_SPACE)) and touches_ground and
-				not menu.held() and
+		local jump = touch_jump or (walking and
+				(magic.input:GetKeyDown(magic.KEY_SPACE) or
+				magic.input:GetKeyPress(magic.KEY_SPACE)))
+		if jump and touches_ground and not menu.held() and
 				math.abs(body.linearVelocity.y) < JUMP_SPEED then
 			local bv = body.linearVelocity
 			bv.y = JUMP_SPEED
@@ -413,13 +575,14 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 	end
 	local p = player_node:GetWorldPosition()
+	status_text.visible = not editing
 	status_text:SetText(string.format("(%d, %d, %d)  in hand: %s",
 			math.floor(p.x + 0.5), math.floor(p.y - 0.4 + 0.5),
 			math.floor(p.z + 0.5), MATERIALS[material]))
-	help_text:SetText(editing and
-			"Editing: click to select or place, right button held looks; " ..
-			"F6 leaves  Esc: menu" or
-			"WASD Space: walk, jump  E: use  left: dig  right: place/use  " ..
+	touch_jump = false
+	help_text:SetText(editing and "" or TOUCH and
+			"Stick: walk  drag: look  tap: use/dig  hold: place" or
+			"WASD Space: walk, jump  left: use or dig  right: place  " ..
 			"0-9: voxel  F6: edit  L: log in  Esc: menu")
 end)
 

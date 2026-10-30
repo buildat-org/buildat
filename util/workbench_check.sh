@@ -1,7 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
-# cost: ~20 s, ~1 min with a cold module cache (2026-10-30)
+# cost: ~1 min, ~2 min with a cold module cache (2026-10-30)
 # covers: apps/workbench/** builtin/kit/** extensions/pause_menu/**
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
@@ -22,14 +22,17 @@
 #      lever three times, the lever opens and shuts the door, the zone
 #      scores the players who walk in and counts them, the counter at two
 #      makes the NPC speak), and presses Play.
-#   2. The admin plays it: looks at the button and presses E (the gate
+#   2. The admin plays it: looks at the button, shown as used (E does
+#      nothing, [KIT] stage 4e2), and clicks it (the gate
 #      opens, the timer ticks three times, the lever flips, the door
 #      follows, the button comes up again), digs the floor past the
-#      button (an object, no voxel) and places a stone, talks to the NPC, takes
+#      button (an object, no voxel) and places a stone, each shown first
+#      (the dig's frame, the placement's face), talks to the NPC, takes
 #      a key from the item giver (once), and uses the teleporter, which
 #      puts them in the zone: scored, counted.
-#   3. A second player (kitbob) joins mid-round and is put on the spawner, is
-#      refused a dig (no edit rights) but digs in the dig zone, is refused
+#   3. A second player (kitbob) joins mid-round and is put on the spawner,
+#      is shown nothing to click on the floor (no edit rights), is refused
+#      a dig sent anyway, but digs in the dig zone, is refused
 #      by the key door, takes a key from the item giver and opens the door
 #      with it (the key taken), takes the teleporter into the zone
 #      (scored, counted: the counter reaches two and the NPC speaks), and
@@ -60,11 +63,16 @@
 #      the copies gone at Stop; a wedge kit/part; kit/door's client part
 #      swinging a door on use. The players' items and scores are on their
 #      entities, the zone's members in the runtime row.
+#   7. ([KIT] stage 4e2) Kit's editor as floorplanner's, by mouse and by
+#      finger: below.
 # KEEP_TMP=1 keeps the screenshots: the contraption in edit mode, in play,
-# after the restart, and after the Stop.
+# after the restart, and after the Stop; what is pointed at in play; part
+# 7's views, drags and menus.
 #
 #   util/workbench_check.sh
 #   util/workbench_check.sh web    the admin's part in headless Chrome
+#   util/workbench_check.sh web_touch   Kit's editor and play by finger
+#                                  there (TOUCH=1)
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -118,14 +126,13 @@ if [ "${1:-}" = web ]; then
 	["click", 891, 217], ["waitlog", "server window: closed", 10], ["frames", 3],
 	["shot", "\${OUT}/menu.png"],
 	["click", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
-	["frames", 3],
-	["click", 545, 578], ["waitlog", "kit editor: cursor at 0,1,5", 10],
-	["click", 372, 254], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
-	["click", 545, 578], ["waitlog", "kit editor: selected 3", 10],
+	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 3],
+	["drag", 93, 223, 616, 250], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
-	["click", 977, 163], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
-	["click", 977, 360], ["waitlog", "kit editor: linking from 3 said", 10],
+	["click", 977, 181], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
+	["click", 977, 377], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
@@ -133,13 +140,14 @@ if [ "${1:-}" = web ]; then
 	["click", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
-	["key", "e"], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
+	["frames", 3], ["shot", "\${OUT}/npc.png"],
+	["click", 600, 400], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
 	["waitlog_any", "kit: entity 3's client part: dialog: Bob: Hello!", 10],
 	["frames", 5], ["shot", "\${OUT}/play.png"],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 339], ["waitlog", "kit editor: state: 2 entities", 10],
-	["click", 300, 600], ["waitlog", "kit editor: cursor at", 10],
-	["click", 332, 339], ["waitlog", "kit editor: state: 4 entities", 10]
+	["click", 247, 335], ["waitlog", "kit editor: placing .kit/button_door", 10],
+	["click", 800, 550], ["waitlog", "kit editor: state: 4 entities", 10]
 ]
 J
 	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
@@ -158,6 +166,70 @@ J
 	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it"
 	exit 0
 fi
+if [ "${1:-}" = web_touch ]; then
+	# ([KIT] stage 4e2) Workbench in the web client as a phone (TOUCH=1,
+	# 1000x500, headless Chrome): the admin logs in, the touch bar's Menu
+	# and Edit; in the plan (F1) the palette (folded on a narrow screen,
+	# its toggle tapped) dragged from by finger, a tap selects, a drag
+	# moves it 3 cells, a finger held is its menu (Duplicate), two fingers
+	# pinch; Play mode, and in play a tap uses the button, a tap digs and
+	# a finger held places
+	check_tmp workbench_web_touch; t=$CHECK_TMP
+	cat > "$t/steps.json" <<'J'
+[
+	["nav", "${URL}"],
+	["waitlog", "player physics enabled", 120], ["frames", 10],
+	["key", "l"],
+	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["waitlog_any", "kit editor: edit rights: yes", 10], ["frames", 10],
+	["tap", 784, 185], ["frames", 3],
+	["tap", 955, 476], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["tap", 500, 174], ["waitlog", "kit editor: state: 1 entities", 20],
+	["key", "F1"], ["waitlog", "kit editor: the view is 2D", 10], ["frames", 5],
+	["shot", "${OUT}/plan.png"],
+	["tap", 458, 64], ["frames", 5],
+	["drag", 114, 162, 572, 198, "touch"],
+	["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["tap", 458, 64], ["frames", 3],
+	["tap", 572, 198], ["waitlog", "kit editor: selected 3", 10], ["frames", 3],
+	["drag", 572, 198, 510, 198, "touch"],
+	["waitlog", "kit editor: moved 1 by -3, 0", 10], ["frames", 5],
+	["hold", 510, 198, 800], ["waitlog", "kit editor: the menu of 3", 10],
+	["frames", 3], ["shot", "${OUT}/menu.png"],
+	["tap", 605, 300], ["waitlog", "kit editor: state: 3 entities", 10],
+	["fingers", 450, 250, 550, 250, 350, 250, 650, 250],
+	["waitlog", "kit editor: two fingers let go: the plan", 10],
+	["frames", 5], ["shot", "${OUT}/pinched.png"],
+	["tap", 62, 29], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["tap", 500, 174], ["waitlog", "kit editor: edit mode off", 10],
+	["frames", 10], ["shot", "${OUT}/play.png"],
+	["hold", 566, 389, 300], ["waitlog", "kit: use 3", 10],
+	["hold", 620, 440, 300], ["waitlog_any", "kit: points at dig", 10], ["sync", 5000],
+	["hold", 620, 440, 900], ["sync", 5000],
+	["frames", 5], ["shot", "${OUT}/placed.png"]
+]
+J
+	TOUCH=1 WEB_DRIVE_VIEWPORT=1000x500@1 \
+		"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
+		fail "the web drive ($t/out)"
+	for w in "An edit by webboss: placed kit/button 3 at [4,1,3]" \
+			"An edit by webboss: moved 3 to [1,1,3]" \
+			"kit/button 3: pressed by webboss" \
+			"workbench: webboss dug (1,0,3): written" \
+			"workbench: webboss placed kit/stone (1,0,3): written"; do
+		grep -aqF "$w" "$t/out/server.log" || fail "no \"$w\" in $t/out/server.log"
+	done
+	echo "PASS: Workbench in the web client by finger: Kit's editor's palette drag, tap, drag, held menu and pinch; in play a tap uses and digs, a finger held places"
+	exit 0
+fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
@@ -165,10 +237,10 @@ check_tmp workbench; t=$CHECK_TMP
 save="$t/user/apps/workbench/saves/world"
 cd "$here/Build"
 
-server() # <n>
+server() # <n> [user dir]
 {
 	start_server "$t/srv$1.log" "Listening at" 300 auto \
-		bin/buildat_server -m ../apps/workbench -D "$t/user" -l 3 \
+		bin/buildat_server -m ../apps/workbench -D "${2:-$t/user}" -l 3 \
 		--sim-rate "$CHECK_RATE" ||
 		fail "the server did not come up ($t/srv$1.log)"
 	CHECK_PIDS+=($SERVER_PID)
@@ -219,7 +291,7 @@ click Button "Edit"
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
 keypress Escape
 wait_log 10000 pause: the menu shown
-click Button "Stop"
+click Button "Stop" 512 350
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 EOF
 	# 3 spawner, 4 button, 5 gate, 6 lever, 7 timer, 8 door, 9 teleporter,
@@ -260,24 +332,34 @@ wait_log 10000 kit editor: link cancelled
 wait_log_absent 500 pause: the menu shown
 keypress Escape
 wait_log 10000 pause: the menu shown
-click Button "Play"
+click Button "Play" 512 350
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 5
 screenshot @T@/edit.png
 keypress Escape
 wait_log 10000 pause: the menu shown
-click Button "Play mode"
+click Button "Play mode" 512 350
 wait_log 10000 kit editor: edit mode off
 look_dir 1.5 -1.1 1.5
+wait_log_any 5000 kit: points at use 4
+frames 3
+screenshot @T@/point_use.png
 keypress e
+wait_log_absent 500 kit: use 4
+mouse_click left
 wait_log 10000 kit: use 4
 wait_log 10000 kit: entity 7 shows "3"
-mouse_click left
-frames 3
 look_dir 0.4 -1 0
+wait_log_any 5000 kit: points at dig 1,0,1, place 1,1,1
+frames 3
+screenshot @T@/point_dig.png
+mouse_click left
+wait_log 5000 kit: points at dig 2,0,1, place 1,0,1
 mouse_click right
+wait_log 5000 kit: points at dig 1,0,1, place 1,1,1
 look_dir 1.5 -1.1 -3.5
-keypress e
+wait_log_any 5000 kit: points at use 13
+mouse_click left
 wait_log 10000 kit: entity 13 shows "Ada: Welcome!"
 event kit_use 14
 wait_log 10000 kit: items: key x1
@@ -301,8 +383,12 @@ wait_log_any 60000 Joined as kitbob
 wait_log_any 60000 the server put the player at (0, 1.4, -4)
 wait_log_any 60000 player physics enabled
 look_dir 0 -1 0.5
-mouse_click left
+wait_log_any 5000 kit: points at nothing
+frames 3
+screenshot @T@/point_none.png
+event workbench_build {"p": [0, 0, -3], "voxel": "air"}
 look_dir 0 -1 -0.5
+wait_log_any 5000 kit: points at dig 0,0,-5
 mouse_click left
 event kit_use 15
 frames 2
@@ -714,5 +800,288 @@ assert not r["10"][0].get("inside"), r["10"]
 assert st(15)["open"] is True and st(16)["dig"] is True, (st(15), st(16))
 print("  rows: 15 instances, 8 links, the scores, the lever on, the doors and the gate open, the key")
 EOF
+# 7. ([KIT] stage 4e2) Kit's editor as floorplanner's, on fresh saves at
+# 1024x700. With the mouse: the plan (F1), a palette item dragged onto it
+# (its ghost), a click selects, a drag moves it by whole cells, the knob
+# turns it by the angle step, an armed palette item placed by a click
+# (Escape: no longer), a link dragged from an out port onto an in port, a
+# box selects two, a right click's menu duplicates them; 3D (F2), where
+# a right drag orbits and opens no menu, and walking (F3), where a click
+# goes into the crosshair and Escape comes out of it before the menu.
+# By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
+# held places, a tap uses the button; in the plan the palette (folded on
+# a narrow screen) dragged from, a tap selects, a drag moves, a drag from
+# the out port links (onto the door: its inputs shown, onto toggle), a
+# finger held is the menu, two fingers pinch the plan
+cat > "$t/ed.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state: 1 entities
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+frames 3
+mouse_pos 60 71
+mouse_down left
+frames 2
+mouse_pos 300 200
+frames 2
+mouse_pos 556 306
+frames 3
+screenshot @T@/palette_drag.png
+mouse_up left
+wait_log_any 10000 kit editor: state: 2 entities
+wait_log_any 5000 kit: entity 3 drawn
+frames 5
+mouse_pos 556 306
+frames 3
+mouse_click left
+wait_log 5000 kit editor: selected 3
+frames 5
+screenshot @T@/selected.png
+mouse_down left
+frames 2
+mouse_pos 580 306
+frames 2
+mouse_pos 614 306
+frames 2
+screenshot @T@/dragging.png
+mouse_up left
+wait_log_any 10000 kit editor: state: 2 entities, 2 to undo
+frames 5
+screenshot @T@/moved.png
+mouse_pos 614 271
+frames 3
+mouse_down left
+frames 2
+mouse_pos 630 290
+frames 2
+mouse_pos 660 306
+frames 2
+screenshot @T@/turning.png
+mouse_up left
+wait_log_any 10000 kit editor: state: 2 entities, 3 to undo
+frames 20
+screenshot @T@/turned.png
+click Button "kit/door"
+wait_log 5000 kit editor: placing kit/door
+mouse_pos 439 306
+frames 3
+screenshot @T@/placing.png
+mouse_click left
+wait_log_any 10000 kit editor: state: 3 entities
+keypress Escape
+wait_log 5000 kit editor: placing nothing
+frames 3
+mouse_pos 614 306
+mouse_click left
+wait_log 5000 kit editor: selected 3
+frames 3
+screenshot @T@/ports.png
+mouse_pos 663 297
+frames 2
+mouse_down left
+frames 2
+mouse_pos 600 300
+frames 2
+mouse_pos 520 306
+frames 2
+mouse_pos 439 306
+wait_log 5000 kit editor: in ports of 4
+frames 3
+mouse_pos 394 322
+frames 3
+screenshot @T@/linking.png
+mouse_up left
+frames 3
+wait_log_any 5000 kit editor: state: 3 entities, 5 to undo
+frames 3
+screenshot @T@/linked.png
+mouse_pos 380 380
+mouse_down left
+frames 2
+mouse_pos 500 330
+frames 2
+mouse_pos 700 250
+frames 2
+screenshot @T@/boxing.png
+mouse_up left
+wait_log 5000 kit editor: a box selected 2
+frames 3
+screenshot @T@/boxed.png
+mouse_pos 439 306
+mouse_click right
+wait_log 5000 kit editor: the menu of 4
+frames 3
+screenshot @T@/menu.png
+click Button "Duplicate"
+wait_log_any 5000 kit editor: state: 5 entities
+frames 3
+screenshot @T@/duplicated.png
+keypress F2
+wait_log 5000 kit editor: the view is 3D
+mouse_pos 600 400
+frames 5
+screenshot @T@/view_3d.png
+mouse_down right
+frames 2
+mouse_pos 650 400
+frames 2
+mouse_pos 700 400
+frames 2
+mouse_up right
+wait_log_absent 300 kit editor: the menu of
+keypress F3
+wait_log 5000 kit editor: the view is Walk
+frames 5
+screenshot @T@/view_walk.png
+mouse_click left
+wait_log 5000 kit editor: into the crosshair
+frames 5
+screenshot @T@/view_crosshair.png
+keypress Escape
+wait_log 5000 kit editor: out of the crosshair
+wait_log_absent 300 pause: the menu shown
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+quit
+EOF
+cat > "$t/touch.cmds" <<'EOF'
+wait_log_any 60000 Joined as kitboss
+wait_log_any 30000 server window: the page ntfy
+frames 3
+click Button "Don't add"
+wait_log_any 60000 player physics enabled
+wait_log_any 10000 kit editor: edit rights: yes
+keypress F6
+wait_log 10000 kit editor: state: 1 entities
+event kit_edit {"op": "place", "type": "kit/button", "pos": [1, 1, 3]}
+wait_log_any 10000 kit: entity 3 drawn
+keypress F6
+wait_log 10000 kit editor: edit mode off
+frames 5
+finger_down 1 700 615
+wait_log 5000 kit: points at dig 2,0,3, place 2,1,3
+frames 3
+screenshot @T@/t_dig.png
+finger_up 1
+wait_log 5000 kit: points at nothing
+finger_down 1 700 615
+wait_log 5000 kit: points at dig 2,0,4, place 2,0,3
+wait_log 3000 kit: points at dig 2,0,3, place 2,1,3
+finger_up 1
+wait_log 5000 kit: points at nothing
+finger_down 1 605 545
+wait_log 5000 kit: points at use 3
+frames 3
+screenshot @T@/t_use.png
+finger_up 1
+wait_log 5000 kit: use 3
+tap 955 663
+wait_log 5000 pause: the menu shown
+frames 3
+click Button "Edit"
+wait_log 10000 kit editor: state: 2 entities
+event kit_edit {"op": "place", "type": "kit/door", "pos": [9, 1, 5]}
+wait_log 10000 kit editor: state: 3 entities
+keypress F1
+wait_log 5000 kit editor: the view is 2D
+frames 3
+tap 653 77
+frames 5
+finger_down 1 138 195
+frames 2
+finger_move 1 300 250
+frames 2
+finger_move 1 600 300
+frames 2
+finger_move 1 700 300
+frames 3
+screenshot @T@/t_ghost.png
+finger_up 1
+wait_log 10000 kit editor: state: 4 entities
+wait_log_any 5000 kit: entity 5 drawn
+tap 653 77
+frames 5
+tap 700 300
+wait_log 5000 kit editor: selected 5
+frames 3
+finger_down 1 700 300
+frames 2
+finger_move 1 730 300
+frames 2
+finger_move 1 790 300
+frames 3
+screenshot @T@/t_moving.png
+finger_up 1
+wait_log 10000 kit editor: moved 1 by 3, 0
+frames 5
+screenshot @T@/t_ports.png
+finger_down 1 903 285
+frames 2
+finger_move 1 850 260
+frames 2
+finger_move 1 760 222
+wait_log 5000 kit editor: in ports of 4
+frames 3
+finger_move 1 700 240
+frames 2
+finger_move 1 656 256
+frames 3
+screenshot @T@/t_linking.png
+finger_up 1
+wait_log 5000 kit editor: link dropped on 4 toggle
+wait_log_any 10000 kit editor: state: 4 entities, 5 to undo
+finger_down 1 790 305
+wait_log 3000 kit editor: the menu of 5
+finger_up 1
+frames 3
+screenshot @T@/t_menu.png
+click Button "Duplicate"
+wait_log 5000 kit editor: state: 5 entities
+finger_down 1 600 400
+finger_down 2 800 400
+frames 2
+finger_move 1 550 400
+finger_move 2 850 400
+frames 2
+finger_move 1 500 400
+finger_move 2 900 400
+frames 2
+finger_up 1
+finger_up 2
+wait_log 5000 kit editor: two fingers let go: the plan 12.0 across
+frames 3
+screenshot @T@/t_pinched.png
+quit
+EOF
+for r in ed touch; do
+	n=$([ $r = ed ] && echo 3 || echo 4)
+	server $n "$t/user$n"
+	wait_for_log "$t/srv$n.log" "setup code [A-Z0-9]+" 30
+	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/srv$n.log" | head -1)
+	[ -n "$code" ] || fail "no setup code ($t/srv$n.log)"
+	if [ $r = touch ]; then export BUILDAT_TOUCH=1; fi
+	BUILDAT_JOIN_NAME=kitboss BUILDAT_JOIN_CODE=$code \
+		BUILDAT_JOIN_ADMIN="setting open_registration on" client $r
+	unset BUILDAT_TOUCH
+	stop
+done
+want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
+	"An edit by kitboss: moved 3 to [4,1,2]" \
+	"An edit by kitboss: placed kit/door 4 at [-2,1,2]" \
+	"An edit by kitboss: linked 3.pressed -> 4.toggle"
+want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
+want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
+	"An edit by kitboss: linked 5.pressed -> 4.toggle"
+grep -aq "workbench: kitboss dug (2,0,3): written" "$t/srv4.log" ||
+	fail "the tap did not dig ($t/srv4.log)"
+grep -aq "workbench: kitboss placed kit/stone (2,0,3): written" "$t/srv4.log" ||
+	fail "the finger held did not place ($t/srv4.log)"
+echo "ok: Kit's editor by mouse (the plan: a palette drag, select, a snapped move, a turn, an armed place, a link dragged, a box, the menu; 3D and walking) and by finger (tap, hold, drags, a link, the menu, a pinch)"
 echo "PASS: Workbench: the admin builds a contraption of Kit's starter set in its editor, Stopped, and plays it, a second player joins the round, may build only in the dig zone and uses a key; a restart mid-round keeps the rows, Stop puts the start back, Play gives a kept inventory back and places players, Save as start keeps the round's voxels"
 # vim: set noet ts=4 sw=4:
