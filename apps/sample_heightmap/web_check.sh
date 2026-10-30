@@ -13,7 +13,7 @@
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
-limit=${LIMIT_MS:-200}
+slow_limit limit ${LIMIT_MS:-200} # the machine's (check_lib: a performance)
 check_tmp heightmap_web; t=$CHECK_TMP
 bash "$here/util/web_drive.sh" firefox sample_heightmap \
 	"$here/apps/sample_heightmap/web_check.json" "$t" > "$t/drive.log" 2>&1 ||

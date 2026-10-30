@@ -1291,10 +1291,25 @@ speeds=$(grep -a "client1 shoots an arrow at" "$s1" | sed 's/.* at \([0-9.]*\) .
 echo "the bow: speeds $speeds"
 set -- $speeds
 draws=$(grep -ac "client1 draws the bow" "$s1")
-[ $# -ge 7 ] && [ $draws = $(($# + 1)) ] && [ $draws -lt 11 ] &&
-	awk -v f="$1" -v h="$2" 'BEGIN { exit !(f >= 29 && h >= 12 && h <= 18) }' &&
-	[ $(grep -ac "client1 lets the bow go undrawn" "$s1") = 1 ] ||
-	fail "the bow's draws: $speeds ($s1)"
+undrawn=$(grep -ac "client1 lets the bow go undrawn" "$s1")
+# [CHECK_TIMING_LIMITS] Each draw the server timed is the hold the client
+# timed (its "released at", 0.04 apart on the check box), and goes undrawn
+# exactly when that is under BOW_MIN (0.1): the drive's 1200, 450 and 10 ms
+# are wall time, which a slow client stretches by its frames (a 4 fps one
+# held the tap 0.27 and the half, a screenshot inside it, 0.81). Here the
+# half is a part draw and the tap a tap
+python3 -I - "$t/bow1.log" "$s1" <<'PY' || fail "the bow's draws: $speeds, $undrawn undrawn ($s1, $t/bow1.log)"
+import re, sys
+held = [float(x) for x in re.findall(r"skeldat: the bow released at ([\d.]+)", open(sys.argv[1], errors="replace").read())]
+srv = [float(a or b) for a, b in re.findall(r"client1 (?:shoots an arrow at [\d.]+ \(drawn ([\d.]+)\)|lets the bow go undrawn \(([\d.]+)\))", open(sys.argv[2], errors="replace").read())]
+assert len(held) == len(srv) and len(held) >= 7, (held, srv)
+for h, s in zip(held, srv):
+    assert abs(h - s) <= 0.15 and ((s < 0.1) == (h < 0.1) or abs(h - 0.1) < 0.05), (h, s)
+assert held[0] == 1 and 0.4 <= held[1] < 0.95 and held[2] < 0.5, held[:3]
+print("the bow: held %s, the server's %s" % (held, srv))
+PY
+[ $# -ge 7 ] && [ $draws = $(($# + undrawn)) ] && [ $draws -lt 11 ] ||
+	fail "the bow's draws: $speeds, $undrawn undrawn ($s1)"
 grep -aq "the skeleton (1) dies" "$s1" && grep -aq "an arrow from client1 hits the skeleton (1)" "$s1" ||
 	fail "no arrow killed the skeleton ($s1)"
 ! grep -aq "client1 digs" "$s1" || fail "the bow dug ($s1)"
@@ -2522,6 +2537,7 @@ BUILDAT_SKELDAT_GUEST_JOIN= BUILDAT_SKELDAT_WORLD=dead BUILDAT_SKELDAT_TERRAIN=f
 	env -u BUILDAT_SKELDAT_START_ITEMS "$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv46" -C "$t/srv.cache" -l 3 --sim-rate 1 || fail "the server ($log46)"
 CHECK_PIDS+=($SERVER_PID)
+wait_for_log "$log46" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$log46" | head -1)
 [ -n "$code" ] || fail "no setup code ($log46)"
 printf '%s\n' "wait_log_any 60000 accounts: ntfy asked" \
@@ -3109,13 +3125,14 @@ client trees "$t/trees.cmds"
 sped "$t/trees.log" && game_wait "$t/srv57" 85
 ended "$t/trees.log" || fail "the trees' drive ($t/trees.log)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-python3 -I - "$log57" <<'PY' || fail "apple trees, decay or saplings ($log57)"
+slow_limit decay_ms 5 # the machine's (check_lib: a performance)
+python3 -I - "$log57" "$decay_ms" <<'PY' || fail "apple trees, decay or saplings ($log57)"
 import sys, re
 log = open(sys.argv[1], errors="replace").read()
 gone = sum(int(m) for m in re.findall(r"leaf decay: \d+ queued, (\d+) gone", log))
 assert gone == 7, ("gone", gone)
 ms = [float(m) for m in re.findall(r"leaf decay: .*?([\d.]+) ms a second", log)]
-assert ms and max(ms) < 5, ms
+assert ms and max(ms) < float(sys.argv[2]), (ms, sys.argv[2])
 assert "a drop of skeldat:apple at" in log, "no apple dropped by decay"
 assert re.search(r"client1 digs skeldat:apple_fruit at", log), "the apple not dug"
 nights = re.findall(r"(\d+) saplings grew at midnight \((\d+) trees\); (\d+) apples again, "
@@ -3145,7 +3162,7 @@ log58="$t/srv58.log"
 bt54="level -1 44 3 3 skeldat:bone_block -1; level -35 10 71 34 skeldat:water_source -1"
 bt54="$bt54; level -35 47 71 34 skeldat:water_source -1; level -35 44 34 3 skeldat:water_source -1"
 bt54="$bt54; level 2 44 34 3 skeldat:water_source -1; skeleton 0 45"
-boats() { # log, client name, delay ms[, the test's fixtures[, a client log line ending it sooner]]
+boats() { # log, client name, delay ms[, the test's fixtures[, a client log line ending it sooner[, a server line slowing to 1x]]]
 	rm -f "$t/srv58/sim_clock" # the rate a sped up run left there
 	BUILDAT_SKELDAT_WORLD=${W54:-boats} BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 \
 		BUILDAT_SKELDAT_SIZE="2 -1 0" BUILDAT_SKELDAT_TIME=${T54:-0.2} \
@@ -3157,7 +3174,10 @@ boats() { # log, client name, delay ms[, the test's fixtures[, a client log line
 	CHECK_PIDS+=($SERVER_PID)
 	printf '%s\n' "$placed" "$(fast "$t/srv58")" "delay $3" quit > "$t/$2.cmds"
 	client $2 "$t/$2.cmds"
-	if [ -n "${5:-}" ]; then
+	if [ -n "${6:-}" ]; then
+		sped "$t/$2.log" && wait_for_log "$1" "$6" $(($3 / 1000)) "$t/srv58" &&
+			game_rate "$t/srv58" 1 && wait_for_log "$t/$2.log" "$5" 60 "$t/srv58"
+	elif [ -n "${5:-}" ]; then
 		sped "$t/$2.log" && wait_for_log "$t/$2.log" "$5" $(($3 / 1000)) "$t/srv58"
 	else
 		sped "$t/$2.log" && game_wait "$t/srv58" $(($3 / 1000))
@@ -3168,8 +3188,11 @@ boats() { # log, client name, delay ms[, the test's fixtures[, a client log line
 # Run 1 ends as the client sees the boat move: run 2 reads the boat back,
 # and a run 1 held on to its time limit could see it land (a world slow to
 # make shifts the days against the limit); the limit a hang's, as the
-# check box's slow client saw the boat later than 160 s
-boats "$log58" boats1 300000 "$bt54" "stands on its moving boat"
+# check box's slow client saw the boat later than 160 s. [CHECK_TIMING_LIMITS]
+# At the boarding the game goes to 1x for the client's sight of it: at
+# 12x the check box's client (3 fps beside 59 far skeletons) drew no boat
+# before it landed
+boats "$log58" boats1 300000 "$bt54" "stands on its moving boat" "takes to a boat"
 # [SKELDAT_SKULL_CALL] A strip of bones 3 x 21 into the pond, a green skull
 # at its far end and a skeleton 14 short of it; a 600 s day from 0.6617: the
 # call an hour before sunset 28 s in, about 7 s after the fixtures, the
@@ -3211,8 +3234,11 @@ k = re.search(r"skeldat: test: a skeleton \((\d+)\) at", a).group(1)
 assert re.search(r"a skeleton \(%s\) places a green skull at" % k, a), "no green skull"
 m = re.search(r"a skeleton \(%s\) takes to a boat at (-?\d+),(-?\d+), aim ([-\d.]+)" % k, a)
 assert m, "the island's skeleton took no boat"
+# The aim run 1 ended on: the boarding's, or a later sunset's when a slow
+# client saw the boat move after it ([CHECK_TIMING_LIMITS], the check box)
+aim = ([m.group(3)] + re.findall(r"a skeleton \(%s\) on a boat aims ([-\d.]+)" % k, a[m.end():]))[-1]
 r = re.search(r"a skeleton \(%s\) on a boat at -?\d+,-?\d+, aim ([-\d.]+)" % k, b)
-assert r and r.group(1) == m.group(3), ("the boat not read back", m.group(3), r and r.group(1))
+assert r and r.group(1) == aim, ("the boat not read back", aim, r and r.group(1))
 assert re.search(r"a skeleton \(%s\) on a boat aims" % k, b), "no new aim at the sunset"
 l = re.search(r"a skeleton \(%s\) lands at \((-?\d+) (-?\d+)\)" % k, b)
 assert l, "no landing"

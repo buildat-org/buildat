@@ -30,7 +30,7 @@ python3 - "$port" "$token" "$out/srv.log" > "$out/client.log" 2>&1 <<'PY'
 import socket, struct, subprocess, sys, time
 port, token, srv = int(sys.argv[1]), sys.argv[2].encode(), sys.argv[3]
 # Until the server's log has <text> <n> times, up to <secs>
-def until(text, n, secs=10):
+def until(text, n, secs=30):  # a margin ([CHECK_TIMING_LIMITS])
     t0 = time.time()
     while time.time() - t0 < secs:
         if open(srv, "rb").read().decode("utf-8", "replace").count(text) >= n:
@@ -74,9 +74,9 @@ b = peer(b"0" * 32, "wrong owner token")        # a wrong one
 until("Open to LAN refused", 2)
 print("without the owner's token:", listening())
 c = peer(token, "is this server's owner")
-# Listening at the LAN address too: polled until it is, up to 10 s
+# Listening at the LAN address too: polled until it is, up to 30 s
 t0 = time.time()
-while time.time() - t0 < 10 and \
+while time.time() - t0 < 30 and \
         not [x for x in listening().split() if not x.startswith("127.0.0.1:")]:
     time.sleep(0.2)
 print("with it:", listening())

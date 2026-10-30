@@ -210,7 +210,8 @@ client "$t/2.log" -s "127.0.0.1:$LINK" -c @"$t/2.cmds"
 kill -CONT $linkpid 2>/dev/null
 grep -a "vanilla : load: \|loading picture" "$t/2.log" "$t/srv.log" | sed 's/.*: load: /load: /;s/.*I main *: //' | sed -n '1,4p;$p'
 python3 "$t/stripes.py" "$t/last.png" || fail "the stripes ($t/last.png)"
-python3 - "$t" "$G/menu" <<'PY' || fail "the loading screen ($t/2.log)"
+slow_limit screen_s 20 # the machine's (check_lib: a performance)
+python3 - "$t" "$G/menu" "$screen_s" <<'PY' || fail "the loading screen ($t/2.log)"
 import re, sys
 import numpy as np
 from PIL import Image
@@ -263,7 +264,7 @@ assert reg, "no voxel registry"
 shown = [secs(l) for l in log if "vanilla : load: the picture" in l]
 took = secs(log[end]) - max(reg[0], shown[0])
 print("the screen ended %.1f s after the voxel registry and the picture came" % took)
-assert took < 20, "the screen stood %.1f s after the registry and the picture" % took
+assert took < float(sys.argv[3]), "the screen stood %.1f s after the registry and the picture" % took
 # [LOADING_STRIPES] A line every 0.5 s
 ts = [secs(l) for l in log if "vanilla : load: last " in l]
 gaps = sorted(b - a for a, b in zip(ts, ts[1:]))

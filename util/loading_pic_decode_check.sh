@@ -46,7 +46,8 @@ join 1
 line=$(grep -a "vanilla : load: the picture background.png" "$t/1.log" | sed 's/.*load: //')
 echo "$line"
 ms=$(echo "$line" | grep -oP "1920x1080 in \K[0-9]+(?= ms)") || fail "no picture shown ($t/1.log)"
-[ "$ms" -lt 200 ] || fail "the picture took $ms ms"
+slow_limit pic_ms 200 # the machine's (check_lib: a performance)
+awk -v m="$ms" -v l="$pic_ms" 'BEGIN { exit !(m < l) }' || fail "the picture took $ms ms, not under $pic_ms"
 # Anywhere in the run's files; the glyphs are drawn on a slow join only
 other=$(find "$t" -path "*vanilla_loading/*" ! -name "glyph_*")
 [ -z "$other" ] || fail "files besides the glyphs: $other"

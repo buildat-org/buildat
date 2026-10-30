@@ -54,6 +54,7 @@ start(){
 		bin/buildat_server -m "../apps/$app" -D "$t/$d" -l 3 "$@" ||
 		fail "server did not listen"
 	srv=$SERVER_PID
+	wait_for_log "$t/$d.log" "setup code" 30 # may come after Listening
 	code=$(nolog "$t/$d.log" | grep -oP 'setup code \K[A-Z0-9]+' | head -1)
 }
 
@@ -196,6 +197,7 @@ c=$(rejoin k1old "Login refused")
 echo "$c" | grep -qF 'Login refused: The saved login has ended: log in again' ||
 	fail "a kept login outlived Log out
 $(echo "$c" | grep -iE 'login|joined|refused' | tail -5)"
+sleep 1 # the ended kept login counts as a failure: the address waits 1 s
 c=$(BUILDAT_JOIN_ADMIN="password erin otherpass123" join k2 erin rightpass123 0 "" \
 	"admin script: done")
 nolog "$srv_log" | grep -q "reset the password of erin" || fail "the reset

@@ -96,7 +96,10 @@ wait "$cli" ||
 	fail "the drive ($tmp/cli.log): $(grep -ao 'Command sequence failed.*' "$tmp/cli.log" | head -1)"
 ys=$(grep -a "fly: y=" "$tmp/srv.log" | sed 's/.*y=//' | tr '\n' ' ')
 first=$(grep -a "fly: y=" "$tmp/srv.log" | sed -n '1s/.*y=//p')
-flying=$(grep -a "fly: y=" "$tmp/srv.log" | sed -n '12s/.*y=//p')
+# The highest before the revoke, not the 12th second's: a slow join's
+# climb comes later ([CHECK_TIMING_LIMITS])
+flying=$(awk '/fly: revoking fly/ { exit } /fly: y=/ { sub(/.*y=/, ""); if(m == "" || $0 + 0 > m) m = $0 + 0 }
+	END { print m }' "$tmp/srv.log")
 last=$(grep -a "fly: y=" "$tmp/srv.log" | tail -1 | sed 's/.*y=//')
 note=$(grep -a "Fly mode enabled (note: no 'fly' privilege)" "$tmp/cli.log" |
 	grep -vc wait_log)
