@@ -11,11 +11,15 @@
 **                        of its own; answers its declaration (the file's
 **                        table, functions as the names in "handlers")
 **   "R<lua literal>"     a handler run: {type, handler, id, pos, params,
-**                        state, args, nargs}; answers its effects,
-**                        {set = {{key, value}...}, emit = {{output,
-**                        value}...}, voxel = name, after = seconds (-1:
-**                        none), teleport = {x, y, z}, give = {{item,
-**                        n}...}}
+**                        state, args, nargs, player, and the player's
+**                        inventory: items (Kit's counts), inv = {type,
+**                        id, params, state} (the replacing provider) or
+**                        inv_self}; answers its effects, {set = {{key,
+**                        value}...}, emit = {{output, value}...}, voxel =
+**                        name, after = seconds (-1: none), teleport =
+**                        {x, y, z}, items = {item = n} (the player's list
+**                        after inventory calls), inv_set = {{key,
+**                        value}...} (the provider's state)}
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
 ** box_recover(), which unwinds the Lua state as a longjmp to box_call's
 ** protected call would have, and answers "E" and the message; 0 from it
@@ -230,6 +234,65 @@ static const char PRELUDE[] =
 "	decl.handlers = handlers\n"
 "	return json(decl)\n"
 "end\n"
+"local function proxy(state, sets)\n"
+"	return setmetatable({}, {__index = state, __newindex = function(_, k, v)\n"
+"		state[k] = v\n"
+"		sets[#sets + 1] = {k, v == nil and NULL or v}\n"
+"	end})\n"
+"end\n"
+"local MAX_ITEMS = 1000000\n"
+"local KIT_INV = {\n"
+"	inventory_count = function(p, player, item) return p.items[item] or 0 end,\n"
+"	inventory_add = function(p, player, item, n)\n"
+"		p.items[item] = math_lib.min(MAX_ITEMS, (p.items[item] or 0) + n) return true end,\n"
+"	inventory_take = function(p, player, item, n)\n"
+"		local had = p.items[item] or 0\n"
+"		if had < n then return false end\n"
+"		p.items[item] = had > n and had - n or nil\n"
+"		return true\n"
+"	end,\n"
+"	inventory_list = function(p, player) return copy(p.items) end,\n"
+"}\n"
+"local function inventory(req, fx, c)\n"
+"	local player, def, p, touched = req.player, KIT_INV, nil, false\n"
+"	if req.inv_self then def, p = types[req.type], c\n"
+"	elseif req.inv then\n"
+"		def = types[req.inv.type]\n"
+"		if not def then error('no inventory provider ' .. tostring(req.inv.type), 0) end\n"
+"		fx.inv_set = {}\n"
+"		p = {id = req.inv.id, params = req.inv.params or {},\n"
+"			state = proxy(req.inv.state or {}, fx.inv_set)}\n"
+"		function p:log(...) log(req.inv.type .. ' ' .. tostring(req.inv.id) .. ': ' .. line(...)) end\n"
+"	else p = {items = req.items or {}} end\n"
+"	local function args(item, n, ext)\n"
+"		if type(item) ~= 'string' or #item > 64 or not item:match('^[%w_]+$') then\n"
+"			error('an item is letters, digits and _', 4) end\n"
+"		if type(n) ~= 'number' or n < 1 or n > MAX_ITEMS or n % 1 ~= 0 then\n"
+"			error('a count is a whole number from 1', 4) end\n"
+"		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 4) end\n"
+"		return ext or {}\n"
+"	end\n"
+"	local inv = {}\n"
+"	function inv.count(item, ext)\n"
+"		ext = args(item, 1, ext)\n"
+"		if not player then return 0 end\n"
+"		return tonumber(def.inventory_count(p, player, item, ext)) or 0\n"
+"	end\n"
+"	function inv.change(h, item, n, ext)\n"
+"		ext = args(item, n or 1, ext)\n"
+"		if not player then return false end\n"
+"		touched = true\n"
+"		return def[h](p, player, item, n or 1, ext) == true\n"
+"	end\n"
+"	function inv.list(ext)\n"
+"		if ext ~= nil and type(ext) ~= 'table' then error('ext is a table', 3) end\n"
+"		if not player then return {} end\n"
+"		local l = def.inventory_list(p, player, ext or {})\n"
+"		return type(l) == 'table' and copy(l) or {}\n"
+"	end\n"
+"	function inv.finish() if touched then fx.items = inv.list() end end\n"
+"	return inv\n"
+"end\n"
 "local function run(req)\n"
 "	local def = types[req.type]\n"
 "	if not def then error('no component type ' .. tostring(req.type), 0) end\n"
@@ -237,10 +300,14 @@ static const char PRELUDE[] =
 "	if type(h) ~= 'function' then return '{}' end\n"
 "	local state, sets, emits, fx = req.state or {}, {}, {}, {}\n"
 "	local c = {id = req.id, pos = req.pos, params = req.params or {}}\n"
-"	c.state = setmetatable({}, {__index = state, __newindex = function(_, k, v)\n"
-"		state[k] = v\n"
-"		sets[#sets + 1] = {k, v == nil and NULL or v}\n"
-"	end})\n"
+"	c.state = proxy(state, sets)\n"
+"	local inv = inventory(req, fx, c)\n"
+"	function c:count(item, ext) return inv.count(item, ext) end\n"
+"	function c:has(item, n, ext) return inv.count(item, ext) >= (tonumber(n) or 1) end\n"
+"	function c:add(item, n, ext) return inv.change('inventory_add', item, n, ext) end\n"
+"	c.give = c.add\n"
+"	function c:take(item, n, ext) return inv.change('inventory_take', item, n, ext) end\n"
+"	function c:list(ext) return inv.list(ext) end\n"
 "	function c:emit(output, value) emits[#emits + 1] = {tostring(output), value == nil and NULL or value} end\n"
 "	function c:set_voxel(name) fx.voxel = tostring(name) end\n"
 "	function c:after(seconds) fx.after = tonumber(seconds) or -1 end\n"
@@ -248,12 +315,9 @@ static const char PRELUDE[] =
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
 "		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
 "	end\n"
-"	function c:give(item, n)\n"
-"		fx.give = fx.give or {}\n"
-"		fx.give[#fx.give + 1] = {tostring(item), tonumber(n) or 1}\n"
-"	end\n"
 "	function c:log(...) log(req.type .. ' ' .. tostring(req.id) .. ': ' .. line(...)) end\n"
 "	h(c, unpack(req.args or {}, 1, req.nargs or 0))\n"
+"	inv.finish()\n"
 "	fx.set = sets\n"
 "	fx.emit = emits\n"
 "	return json(fx)\n"

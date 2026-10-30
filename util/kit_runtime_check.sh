@@ -15,7 +15,14 @@
 #      button and the door go on; the relays' loop is cut and named; a
 #      Lua error is logged and the box goes on.
 #   4. A restart: the counter's count, the door's state and the runaway's
-#      disablement are the save's runtime row, apart from its authored row.
+#      disablement are the save's runtime row, apart from its authored row;
+#      the rows made as a save from before types had authors (bare names)
+#      are read as sample_kit's types and written back <author>/<name>.
+#   6. ([KIT] stage 4b) Types by author: sample_kit/door and kit/door in
+#      one palette and save; sample_kit's pouch provides the players'
+#      inventory (a second pouch refused): kit/item_giver fills it to its
+#      capacity, kit/key_door refuses one without the key and opens
+#      taking it.
 # The first run is the box in WAMR's interpreter alone; the second waits
 # for the compiled module (wasm2c's), and has a Lua error and a second
 # runaway there.
@@ -53,7 +60,7 @@ if [ "${1:-}" = local ]; then
 	["key", "b"],
 	["waitlog", "replicated: entity 4 open = true", 30],
 	["key", "r"],
-	["waitlog", "server: .*Entity 7's runaway disabled", 30],
+	["waitlog", "server: .*Entity 7's sample_kit/runaway disabled", 30],
 	["key", "b"],
 	["waitlog", "replicated: entity 4 open = false", 30]
 ]
@@ -68,10 +75,10 @@ EOF
 	grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
 	for want in "server: .*kit: box/ is built with this server" \
 			"server: .*sample_kit: at start the counter is 0, the door open false" \
-			"server: .*button 3: pressed by player:p" \
-			"server: .*door 4: opened by player:p" \
-			"server: .*Entity 7's runaway disabled: on_use ran past its budget" \
-			"server: .*door 4: closed by player:p"; do
+			"server: .*sample_kit/button 3: pressed by player:p" \
+			"server: .*sample_kit/door 4: opened by player:p" \
+			"server: .*Entity 7's sample_kit/runaway disabled: on_use ran past its budget" \
+			"server: .*sample_kit/door 4: closed by player:p"; do
 		grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 	done
 	echo "PASS: sample_kit with its server in the page: the box built with the server, the wiring and the meter on the browser's wasm"
@@ -135,6 +142,14 @@ keypress r
 frames 2
 keypress d
 frames 2
+event kit_use 16
+frames 2
+event kit_use 15
+wait_log 10000 kit: items: key x1
+event kit_use 15
+frames 2
+event kit_use 16
+frames 2
 keypress b
 wait_log 60000 replicated: entity 4 open = false
 quit
@@ -144,18 +159,18 @@ s=$t/srv1.log
 grep -aq "wasm kit: ready (interpreter): no C compiler" "$s" ||
 	fail "run 1 is not the interpreter's ($s)"
 want "$s" "sample_kit: at start the counter is 0, the door open false" \
-	"Entity 3 used by p" "button 3: pressed by player:p" \
-	"door 4: opened by player:p" "counter 5: count 1 by player:p" \
-	"door 4: closed by player:p" "counter 5: count 2 by player:p" \
+	"Entity 3 used by p" "sample_kit/button 3: pressed by player:p" \
+	"sample_kit/door 4: opened by player:p" "sample_kit/counter 5: count 1 by player:p" \
+	"sample_kit/door 4: closed by player:p" "sample_kit/counter 5: count 2 by player:p" \
 	"A use of entity 6 by peer" "refused: out of range" \
 	"A use of entity 5 by peer" "refused: no such object" \
-	"Entity 7's runaway disabled: on_use ran past its budget" \
+	"Entity 7's sample_kit/runaway disabled: on_use ran past its budget" \
 	"A signal loop cut: entity" \
-	"Entity 10's faulty, on_use: faulty:8: attempt to index local 't' (a nil value)" \
+	"Entity 10's sample_kit/faulty, on_use: sample_kit/faulty:8: attempt to index local 't' (a nil value)" \
 	"sample_kit: a dig at the door: routed to its owner" \
-	"door 4: kept its voxel from player:p" \
+	"sample_kit/door 4: kept its voxel from player:p" \
 	"sample_kit: the door's voxel is air"
-grep -aq "counter 5: count 3" "$s" && fail "the counter counted a signal a client sent ($s)"
+grep -aq "sample_kit/counter 5: count 3" "$s" && fail "the counter counted a signal a client sent ($s)"
 # The Lua error is recovered in the box; only the runaway needs a new one
 [ "$(grep -ac "A new box after" "$s")" = 1 ] ||
 	fail "not one new box, for the runaway alone ($s)"
@@ -164,6 +179,23 @@ echo
 [ "$(grep -a "sample_kit: the door's voxel is" "$s" | tail -1 | sed 's/.* is //')" = stone ] ||
 	fail "the door's voxel is not stone at the end ($s)"
 echo "ok: the wiring, the refusals, the budget, the loop, the routed write"
+# 6. Types by author: sample_kit's door and Kit's side by side; the
+# inventory sample_kit's pouch provides (a second refused): the item
+# giver fills it to its capacity of one, the key door refuses a player
+# without the key and opens taking it
+want "$s" "Component type sample_kit/door version 1" \
+	"Component type kit/door version 1" \
+	"The players' inventory: entity 13's sample_kit/pouch" \
+	"Entity 14's sample_kit/pouch would provide the players' inventory, which entity 13's sample_kit/pouch does: refused" \
+	"kit/key_door 16: locked to player:p" \
+	"kit/item_giver 15: gives player:p" "holds 1" \
+	"has no room for 1 key" "could not take 1 key" \
+	"kit/key_door 16: opened by player:p" "gave up 1 key and holds 0"
+grep -a "The palette: " "$s" | grep -q " kit/door .* sample_kit/door" ||
+	fail "kit/door and sample_kit/door are not both in the palette ($s)"
+[ "$(grep -ac "sample_kit/pouch would provide" "$s")" = 1 ] ||
+	fail "the second pouch was not refused once ($s)"
+echo "ok: two authors' doors, the pouch in place of Kit's counts (a second refused), the item giver and the key door on it"
 
 # The save's two rows of Kit's
 db=$(ls "$save"/*.sqlite 2>/dev/null | head -1)
@@ -172,6 +204,9 @@ rows=$(sqlite3 "$db" "SELECT key FROM store WHERE store = 'kit' ORDER BY key" | 
 [ "$rows" = "authored runtime " ] || fail "kit's rows are \"$rows\""
 sqlite3 "$db" "SELECT value FROM store WHERE store = 'kit' AND key = 'authored'" |
 	grep -q '"presses"' && fail "runtime state in the authored row"
+# The rows as a save from before types had authors has them: sample_kit's
+# types bare names, read back as sample_kit's (the runtime row's too)
+sqlite3 "$db" "UPDATE store SET value = replace(value, 'sample_kit/', '') WHERE store = 'kit'"
 
 cat > "$t/2.cmds" <<'EOF'
 wait_log 60000 replicated: entity 4 open = false
@@ -188,14 +223,27 @@ EOF
 run 2
 s=$t/srv2.log
 want "$s" "sample_kit: at start the counter is 2, the door open false" \
-	"Entity 7's runaway stays disabled" "counter 5: count 3 by player:p" \
-	"Entity 10's faulty, on_use: faulty:8: attempt to index local 't' (a nil value)" \
-	"Entity 11's runaway disabled: on_use ran past its budget" \
-	"counter 5: count 4 by player:p"
+	"Entity 7's sample_kit/runaway stays disabled" "sample_kit/counter 5: count 3 by player:p" \
+	"Entity 10's sample_kit/faulty, on_use: sample_kit/faulty:8: attempt to index local 't' (a nil value)" \
+	"Entity 11's sample_kit/runaway disabled: on_use ran past its budget" \
+	"sample_kit/counter 5: count 4 by player:p"
 [ "$(grep -ac "A new box after" "$s")" = 1 ] ||
 	fail "run 2: not one new box, for the runaway alone ($s)"
 grep -aq "the composition's first start" "$s" && fail "the composition was read again ($s)"
-echo "ok: state over a restart, the compiled box"
+want "$s" "11 bare type names made <author>/<name>"
+python3 -I - "$db" <<'PY' || fail "the rows after the migration ($db)"
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+rows = dict(db.execute("SELECT key, value FROM store WHERE store = 'kit'"))
+a, r = json.loads(rows["authored"]), json.loads(rows["runtime"])
+types = [c["type"] for e in a["entities"] for c in e["components"]]
+assert all("/" in t for t in types), types
+assert "kit/door" in types and types.count("sample_kit/door") == 1, types
+assert all(c["version"] == 1 for e in a["entities"] for c in e["components"])
+assert all("/" in c["type"] for k, v in r.items() if k != "items" for c in v), r
+print("  rows: %d instances, every type <author>/<name> with its version" % len(types))
+PY
+echo "ok: state over a restart, a save of bare type names migrated, the compiled box"
 
 # 5. The box as an archive carries it: util/prebuild_wasm.py names it as
 # the server did, and in rccpp_build/wasm/ (an archive's cache/; what a

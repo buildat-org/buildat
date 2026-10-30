@@ -7,7 +7,7 @@ return {
 	volume = "size",
 	params = {
 		size = {type = "position", default = {3, 3, 1}},
-		closed = {type = "voxel", default = "gate"},
+		closed = {type = "voxel", default = ""}, -- "": the app fills it, or you
 		open = {type = "voxel", default = "air"},
 	},
 	state = {open = {default = false, shared = true}},

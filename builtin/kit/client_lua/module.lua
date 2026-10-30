@@ -297,8 +297,14 @@ rebuild = function()
 	text(w, "Edit mode", magic.Color(1.0, 0.85, 0.3))
 	text(w, "Click: select, or the cursor. Tab: next.", DIM)
 	text(w, "Arrows, PgUp/PgDn: move. Del. Ctrl+Z.", DIM)
-	for _, t in ipairs(E.state.palette or {}) do
-		button(w, "Place " .. t, function()
+	-- The palette, <author>/<name>, three a row
+	text(w, "Place:", DIM)
+	local pr
+	for i, t in ipairs(E.state.palette or {}) do
+		if i % 3 == 1 then
+			pr = row(w)
+		end
+		button(pr, t, function()
 			local c = E.cursor or {0, O.ground_y, 0}
 			send({op = "place", type = t, pos = c})
 		end)
@@ -699,8 +705,8 @@ end
 -- `text` over it; a type's `hud = key` puts that state on the screen.
 -- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray
 -- (its cell or its look), kit.use(id) uses it: the server checks range
--- and whether it is usable. The player's own items (c:give) are a line on
--- the screen.
+-- and whether it is usable. The player's inventory (c:add, c:take...) is
+-- a line on the screen.
 -- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
 -- sends an edit as the editor would, "event kit_use <id>" a use.
 local replicate = require("buildat/extension/replicate")

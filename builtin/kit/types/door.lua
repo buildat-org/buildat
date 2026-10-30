@@ -21,7 +21,7 @@ return {
 	volume = "size",
 	params = {
 		size = {type = "position", default = {1, 2, 1}},
-		closed = {type = "voxel", default = "door"},
+		closed = {type = "voxel", default = ""}, -- "": the app fills it, or you
 		open = {type = "voxel", default = "air"},
 		close_after = {type = "number", default = 0, min = 0, max = 3600},
 	},
