@@ -37,6 +37,11 @@ Source changes vs 1.7.1:
   and an index draw-range check (start + count > size) could wrap. The
   types are refused past their enum, the range check is done without the
   sum (security review, 2026-10-04)
+- Graphics/OpenGL/OGLTexture2D.cpp, OGLTextureCube.cpp: GL_TEXTURE_MAX_LEVEL
+  set on GLES3 (WebGL 2) too, not only desktop GL: a texture of fewer
+  levels than its size allows (voxelworld's atlas) sampled the levels
+  glGenerateMipmap made past them, far voxels fringed in a colour from
+  uninitialized memory ([WEB_ATLAS_MIP_LEVELS], 2026-10-30)
 
 Buildat cmake configures this tree as a sub-build of the Urho root:
   URHO3D_LIB_TYPE=SHARED URHO3D_LUA=TRUE URHO3D_SAFE_LUA=TRUE
