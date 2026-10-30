@@ -118,6 +118,14 @@ local PREFERENCES = {
 			return percent(v)
 		end,
 	},
+	-- The most items a Page Up or Down moves ([LIST_PAGE_SIZE]); never
+	-- more than are in sight either
+	{
+		name = "page_size",
+		label = "Page Up/Down moves at most",
+		values = {3, 5, 10, 15, 20, 30, 50, 100},
+		show = function(v) return v .. " items" end,
+	},
 	-- The web page's address bar while playing ([WEB_ADDRESS_BAR]); the
 	-- web client's only, and no row natively
 	{
@@ -671,7 +679,7 @@ end
 local GAME_ROWS = {
 	{"Sound", {"sound_volume_db", "sound_mute"}},
 	{"Video", {"render_scale", "max_fps", "vsync", "multisampling",
-		"ui_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
+		"ui_size", "page_size", "web_address_bar", "screen_orientation", "web_idle_fps"}},
 }
 local game = nil
 

@@ -236,8 +236,41 @@ end
 -- Button.selected draws the focus, with pressedOffset; native hover would
 -- draw a second item, so hoverOffset moves onto pressedOffset, and hover
 -- moves the focus instead, unless a field is being typed in.
--- PageUp and PageDown move this many items ([MENU_FAST_SCROLL])
-local PAGE = 10
+-- PageUp and PageDown move this many items ([MENU_FAST_SCROLL]) at
+-- most: the user's page_size ([LIST_PAGE_SIZE]), 10 by default
+local function page_size()
+	return buildat.get_preference("page_size") or 10
+end
+
+-- **A page is no more than is in sight** ([LIST_PAGE_SIZE], user
+-- 2026-10-29): the items (rows of `columns`) a Page key moves in the
+-- menu on root, page_size at most, and at most as many as the view the
+-- focus scrolls in (else the first item's) shows whole, so that every
+-- item passed is seen. Outside a view that scrolls, page_size. Also how
+-- many were in sight, for the log. Walked down from root: the sandbox
+-- hands out no parents.
+local function page_jump(root, columns)
+	local n = page_size()
+	local out, scs = {}, {}
+	page_items(root, out, scs)
+	local at = 1
+	for i, e in ipairs(out) do
+		if e:HasFocus() then
+			at = i
+		end
+	end
+	local sc = scs[at]
+	if not sc then
+		return n, nil
+	end
+	local seen = 0
+	for i, e in ipairs(out) do
+		if scs[i] == sc and in_view(sc, e) then
+			seen = seen + 1
+		end
+	end
+	return math.min(n, math.max(1, math.floor(seen / columns))), seen
+end
 
 -- A dropdown's popup was up at the last Update (M.safe.dropdown)
 local drop_open = false
@@ -482,11 +515,16 @@ local function button_menu_nav(root, options)
 			select_i(selected - columns)
 		elseif key == KEY_DOWN then
 			select_i(selected + columns)
-		elseif key == magic.KEY_PAGEUP or key == magic.KEY_PAGEDOWN then
-			-- [MENU_FAST_SCROLL]: ten items, ten rows in a grid, clamped
-			local d = (key == magic.KEY_PAGEUP and -PAGE or PAGE) * columns
-			select_i(math.max(1, math.min(#items,
-					math.max(selected, 1) + d)))
+		elseif #items > 0 and M.safe.page_dir(key) then
+			-- [MENU_FAST_SCROLL]: page_jump's rows in a grid, clamped
+			local from = math.max(selected, 1)
+			local n, seen = page_jump(root, columns)
+			local to = math.max(1, math.min(#items, from +
+					M.safe.page_dir(key) * n * columns))
+			select_i(to)
+			log:info("page key: menu " .. from .. " -> " .. to .. " of " ..
+					#items .. ", " .. tostring(seen) .. " in sight, at most " ..
+					page_size())
 		end
 	end)
 
@@ -681,7 +719,31 @@ local function page_scroll(page, d)
 		return false
 	end
 	local top, h = sc.top(), sc.height()
-	sc.set_top(top + d * M.safe.page_step(h, LINE))
+	-- And past no more than page_size of the view's rows of items
+	-- ([LIST_PAGE_SIZE]): the view's text between them is read by the step
+	local step = M.safe.page_step(h, LINE)
+	local ys = {}
+	for i, e in ipairs(page.items) do
+		if page.scs[i] == sc and shown(e) then
+			ys[#ys + 1] = y_in(sc, e)
+		end
+	end
+	table.sort(ys)
+	local rows = {}
+	for _, y in ipairs(ys) do
+		if y ~= rows[#rows] then
+			rows[#rows + 1] = y
+		end
+	end
+	local r = 1
+	while rows[r] and rows[r] < top do
+		r = r + 1
+	end
+	local to = rows[r + d * page_size()]
+	if to and to ~= top then
+		step = math.min(step, math.abs(to - top))
+	end
+	sc.set_top(top + d * step)
 	local now = sc.top()
 	local moved = now ~= top
 	if moved then
@@ -920,9 +982,9 @@ function M.safe.keyboard_page(win)
 					at = i
 				end
 			end
-			local d = key == magic.KEY_PAGEUP and -PAGE or PAGE
+			-- Not in a view that scrolls (page_scroll's): page_size
 			page.items[math.max(1, math.min(#page.items,
-					math.max(at, 1) + d))]:SetFocus(true)
+					math.max(at, 1) + pd * page_size()))]:SetFocus(true)
 			return
 		end
 		-- **Two columns** (keyboard_columns): Up and Down stay in the one

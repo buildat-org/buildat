@@ -190,8 +190,8 @@ Engine settings
 What the user sets once and every app honours: `render_scale` (3D viewports
 drawn at a fraction of the window size, with the UI left at native
 resolution), `vsync`, `max_fps`, `multisampling`, `sound_volume`,
-`sound_mute`, and `default_username`, the name an app offers when it asks for
-one. They live in `user/settings.json` beside the remembered
+`sound_mute`, `page_size` (the most items a Page Up or Down moves), and
+`default_username`, the name an app offers when it asks for one. They live in `user/settings.json` beside the remembered
 window size; the launch menu's Settings, "Display and sound", edits them, or set
 them for one run with `-o`, which is not written back:
 

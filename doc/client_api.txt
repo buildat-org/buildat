@@ -1325,6 +1325,9 @@ overridden for one run by -o (see README.md).
                     wins over it
     default_username the name an app offers when it asks for one, "User"
                     by default: 1 to 20 letters, digits, _ and -
+    page_size       the most items a Page Up or Page Down moves in a menu,
+                    a list or a keyboard page, 1 to 100, 10 by default;
+                    never more than are in sight either
 
 render_scale is cooperative: it reaches an app's viewports only through
 set_preferred_viewports(), because a viewport belongs to the app that made

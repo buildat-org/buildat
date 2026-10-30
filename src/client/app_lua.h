@@ -1729,7 +1729,7 @@
 		static const char *names[] = {"render_scale", "vsync", "max_fps",
 				"multisampling", "sound_volume_db", "sound_mute", "ui_size", "lan_discovery",
 				"launch_ui",
-				"default_username",
+				"default_username", "page_size",
 #ifdef __EMSCRIPTEN__
 				// Only where it does something
 				"web_idle_fps",
@@ -1834,6 +1834,8 @@
 			lua_pushstring(L, o.launch_ui.c_str());
 		else if(name == "default_username")
 			lua_pushstring(L, o.default_username.c_str());
+		else if(name == "page_size")
+			lua_pushinteger(L, o.page_size);
 		else if(name == "log_level")
 			lua_pushinteger(L, o.log_level);
 		else if(name == "server_log_level")
