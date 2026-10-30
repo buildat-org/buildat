@@ -61,7 +61,7 @@ if [ "${1:-}" = web ]; then
 	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20],
 	["frames", 3], ["click", 891, 217], ["frames", 3],
 	["click", 600, 600], ["waitlog", "kit editor: cursor at 0,1,5", 10],
-	["click", 194, 332], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
+	["click", 372, 254], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["click", 600, 600], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "${OUT}/edit.png"],

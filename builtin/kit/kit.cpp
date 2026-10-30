@@ -969,7 +969,14 @@ struct Module: public interface::Module, public Interface
 		}
 		m_store = host.save->store("kit");
 		m_kit_types = m_server->get_module_path(MODULE)+"/types";
-		m_author = host.author.empty() ? m_server->get_app_id() : host.author;
+		m_author = host.author;
+		if(m_author.empty()){
+			// The app's id, as an author's name has it
+			m_author = m_server->get_app_id().substr(0, 64);
+			for(char &c : m_author)
+				if(!isalnum((unsigned char)c))
+					c = '_';
+		}
 		if(!name_ok(m_author) || m_author == "kit"){
 			why = "the app's author is letters, digits and _, not kit: \""+
 					m_author.substr(0, 64)+"\"";

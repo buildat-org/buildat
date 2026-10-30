@@ -149,7 +149,8 @@ namespace kit
 		// The app's component types, <types_path>/<name>.lua ("": none of
 		// its own), named <author>/<name>
 		ss_ types_path;
-		// The app's types' author; "" is the app's id
+		// The app's types' author, letters, digits and _; "" is the app's
+		// id (any other character of it a _)
 		ss_ author;
 		// The app's defaults for types' parameters, over the types' own
 		// (JSON): {"kit/door": {"closed": "door"}, ...}
