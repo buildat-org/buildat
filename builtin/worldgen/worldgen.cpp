@@ -100,17 +100,36 @@ struct CInstance: public worldgen::Instance
 	//       than a tick, the ticks accumulate and result in nothing getting
 	//       queued but instead sectors get queued in the event queue.
 
-	// Take one section off the queue. Called with the module held; the
-	// generation itself is done outside it.
-	bool take_next_section(pv::Vector3DInt16 *section_p_out,
+	// Take one section off the queue: the one nearest a player's section,
+	// the oldest with no player ([FAR_SPAWN_SLOW_JOIN]: a far spawn's
+	// sections waited 20 s behind the origin's). Called with the module
+	// held; the generation itself is done outside it.
+	// simplified: a scan of the whole queue per section; it is hundreds
+	// long and a section takes a hundred milliseconds or more to generate
+	bool take_next_section(const sv_<pv::Vector3DInt16> &players,
+			pv::Vector3DInt16 *section_p_out,
 			GeneratorInterface **generator_out, uint64_t *epoch_out)
 	{
 		if(!m_enabled || m_queued_sections.empty())
 			return false;
-		*section_p_out = m_queued_sections.front();
+		size_t best = 0;
+		int64_t best_d = INT64_MAX;
+		for(size_t i = 0; i < m_queued_sections.size() && !players.empty(); i++){
+			const pv::Vector3DInt16 &s = m_queued_sections[i];
+			for(const pv::Vector3DInt16 &p : players){
+				int64_t dx = s.getX() - p.getX(), dy = s.getY() - p.getY(),
+						dz = s.getZ() - p.getZ();
+				int64_t d = dx*dx + dy*dy + dz*dz;
+				if(d < best_d){
+					best_d = d;
+					best = i;
+				}
+			}
+		}
+		*section_p_out = m_queued_sections[best];
 		*generator_out = m_generator.get();
 		*epoch_out = m_epoch;
-		m_queued_sections.pop_front();
+		m_queued_sections.erase(m_queued_sections.begin() + best);
 		return true;
 	}
 
@@ -359,6 +378,40 @@ void GenerateThread::run(interface::Thread *thread)
 		if(thread->stop_requested())
 			break;
 
+		// The sections the players are in, per scene, for the queue's
+		// order; asked of voxelworld with this module not held
+		sv_<SceneReference> scenes;
+		worldgen::access(m_module->m_server,
+				[&](worldgen::Interface *iworldgen)
+		{
+			for(auto &pair: m_module->m_instances)
+				scenes.push_back(pair.first);
+		});
+		std::map<SceneReference, sv_<pv::Vector3DInt16>> players;
+		for(SceneReference scene : scenes){
+			try {
+				voxelworld::access(m_module->m_server, scene,
+						[&](voxelworld::Instance *world)
+				{
+					pv::Vector3DInt16 ss = world->get_section_size_voxels();
+					auto floor_div = [](int32_t a, int32_t b){
+						return (int16_t)(a >= 0 ? a / b : -((-a + b - 1) / b));
+					};
+					for(const voxelworld::LoadPoint &lp :
+							world->get_load_points()){
+						if(lp.peer == 0)
+							continue;
+						players[scene].push_back(pv::Vector3DInt16(
+								floor_div(lp.p.getX(), ss.getX()),
+								floor_div(lp.p.getY(), ss.getY()),
+								floor_div(lp.p.getZ(), ss.getZ())));
+					}
+				});
+			} catch(NullptrCatch &e){
+				// No world for it (yet, or any more): the queue's order
+			}
+		}
+
 		// Take one section for each instance. We can avoid implementing our
 		// own mutex locking in Module by using
 		// interface::Server::access_module() instead of directly accessing it.
@@ -378,7 +431,8 @@ void GenerateThread::run(interface::Thread *thread)
 				GenerateTask task;
 				task.scene_ref = instance->m_scene_ref;
 				task.instance = instance.get();
-				if(instance->take_next_section(&task.section_p,
+				if(instance->take_next_section(players[pair.first],
+						&task.section_p,
 						&task.generator, &task.epoch))
 					tasks.push_back(task);
 			}

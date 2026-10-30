@@ -60,7 +60,10 @@ core.register_on_joinplayer(function(player)
 	end)
 end)
 LUA
-BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_fly \
+# Seed 2 spawns at 0,0 ([FLY_SH_SPAWN]), as keys.sh: the loading screen
+# holds the keys until the player's section is generated, which a far
+# spawn makes slow
+BUILDAT_LUANTI_SEED=2 BUILDAT_LUANTI_GAME=devtest BUILDAT_LUANTI_SAVE=buildat_test_fly \
 	BUILDAT_LUANTI_LUA="$out/fixture.lua" \
 	start_server "$tmp/srv.log" "Mods loaded" 60 auto \
 	bin/buildat_server -u launcher=1 -m ../apps/vanilla ||
@@ -73,7 +76,10 @@ srv=$SERVER_PID
 # again without it; then until the fixture says the player came down.
 # Space is held two seconds: the climb is the hold's length.
 { echo "wait_log 60000 the server put the player"
-	echo "wait_log 60000 scene, 0 undrawn within 2"
+	echo "wait_log 60000 load: the world is in"
+	# The fixture's privileges can come after the world: a K before them
+	# is fly without the privilege
+	echo "wait_log 10000 privileges: fast, fly, interact, noclip, shout"
 	echo "keypress K"; echo "wait_log 5000 Fly mode enabled"
 	# Noclip too: the world is new each run, and a spawn under leaves
 	# stopped the climb (2026-10-13: up 0.3, then down 1.3 after the revoke)
