@@ -1565,6 +1565,8 @@ struct CApp: public App, public magic::Application
 	// [DRIVE_WAITS] frames rendered; frames' end, idle's first frame and
 	// idle's or sync's end, -1 when not in one; the last network:sync sent
 	int64_t m_frame_count = 0;
+	// [KIT_DIG_STOP_ORDER] the frame the sequence last injected input in
+	int64_t m_input_frame = -1;
 	int64_t m_frames_end = -1;
 	int64_t m_drive_wait_frame = -1;
 	int64_t m_drive_wait_until_us = -1;

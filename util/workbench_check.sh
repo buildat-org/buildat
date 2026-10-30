@@ -62,9 +62,11 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 if [ "${1:-}" = web ]; then
 	# Workbench in the web client (web/), in headless Chrome at 1200x800:
 	# the admin logs in (the setup code), points at the floor ahead in
-	# edit mode, places an NPC there, lifts it a cell, leaves edit mode
-	# and talks to it with E: the server Running from the start, the NPC
-	# placed live. The pause menu ([KIT] 4c, extensions/pause_menu): up at
+	# edit mode (545,578: the middle of cell (0,0,5)'s top seen from the
+	# spawn; the camera lands a few hundredths off (0.5, 0.5), and 600,600
+	# ran along x 0.5 and met the floor at z 4.5, both between cells),
+	# places an NPC there, lifts it a cell, leaves edit mode and talks to
+	# it with E: the server Running from the start, the NPC placed live. The pause menu ([KIT] 4c, extensions/pause_menu): up at
 	# once for the pointer lock headless Chrome does not give (then
 	# skeldat's web_lock_check stand-in in the page, a click off the menu
 	# closes it); Escape and the menu's Edit (at 1200x800 its rows are 41
@@ -105,9 +107,9 @@ if [ "${1:-}" = web ]; then
 	["shot", "\${OUT}/menu.png"],
 	["click", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
 	["frames", 3],
-	["click", 600, 600], ["waitlog", "kit editor: cursor at 0,1,5", 10],
+	["click", 545, 578], ["waitlog", "kit editor: cursor at 0,1,5", 10],
 	["click", 372, 254], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
-	["click", 600, 600], ["waitlog", "kit editor: selected 3", 10],
+	["click", 545, 578], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
 	["click", 977, 360], ["waitlog", "kit editor: linking from 3 said", 10],
@@ -393,7 +395,6 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.5
 mouse_click left
-sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_any 10000 kit: items: none
@@ -424,7 +425,6 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
 mouse_click left
-sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 frames 5
@@ -477,7 +477,6 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
 mouse_click left
-sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_absent 1500 kit: builds discarded
