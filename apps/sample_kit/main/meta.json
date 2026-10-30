@@ -12,6 +12,7 @@
 		{"module": "replicate"},
 		{"module": "storage"},
 		{"module": "voxelworld"},
-		{"module": "kit"}
+		{"module": "kit"},
+		{"module": "accounts", "optional": true}
 	]
 }

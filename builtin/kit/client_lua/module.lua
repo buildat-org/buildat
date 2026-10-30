@@ -7,7 +7,8 @@
 --   local kit = require("buildat/module/kit")
 --   kit.editor{scene = scene, camera = camera_node, ground_y = 1}
 -- An "Edit" button (and F6) asks the server for edit mode; with edit
--- rights the server answers with the palette and the authored tree:
+-- rights (the server's admin, a builder) the server answers with the
+-- palette and the authored tree:
 --   - a click on the view selects the entity there, or puts the cursor on
 --     the ground (y = ground_y) where "Place <type>" puts a new one; Tab
 --     selects the next entity
@@ -18,6 +19,8 @@
 --     another entity's "To <input>" links them
 --   - every entity drawn as a box, the selected one yellow, links as lines,
 --     and a type's gizmo (a sphere or a box), in edit mode only
+--   - the admin's: who is here, each "Builder: yes/no" to grant or take
+--     edit rights
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: placed on a ground plane, a nudge by keys and no drag, the
 -- windows rebuilt whole on each state; picking against the voxels, a drag
@@ -293,6 +296,16 @@ rebuild = function()
 		send({op = "undo"})
 	end)
 	label(r, "(" .. tostring(E.state.undo or 0) .. ")")
+	-- The admin's: who here may edit
+	for _, p in ipairs(E.state.admin and E.state.people or {}) do
+		local pr = row(w)
+		label(pr, p.name .. (p.admin and ": admin" or ""), 100)
+		if not p.admin then
+			button(pr, p.builder and "Builder: yes" or "Builder: no", function()
+				send({op = "builder", name = p.name, on = not p.builder})
+			end)
+		end
+	end
 	if E.link then
 		button(w, "Cancel link", function()
 			E.link = nil
@@ -481,8 +494,9 @@ function M.editor(options)
 	end
 	w:SetStyleAuto()
 	w:SetLayout(magic.LM_HORIZONTAL, 4, magic.IntRect(4, 4, 4, 4))
-	w:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
-	w:SetPosition(-10, 4)
+	-- The middle: an app's corners have its own (accounts' Server button)
+	w:SetAlignment(magic.HA_CENTER, magic.VA_TOP)
+	w:SetPosition(0, 4)
 	local edit_button = button(w, "Edit", toggle)
 	local edit_text = edit_button:GetChild(0)
 
@@ -493,6 +507,17 @@ function M.editor(options)
 		end
 		local was = E.editing
 		E.editing = s.editing == true
+		if E.can_edit ~= (s.can_edit == true) then
+			E.can_edit = s.can_edit == true
+			log:info("kit editor: edit rights: " .. (E.can_edit and "yes" or "no"))
+			if E.can_edit and not E.editing then
+				ui_utils.show_notification("You may edit here: Edit, or F6", 4)
+			end
+		end
+		for _, p in ipairs(s.people or {}) do
+			log:info("kit editor: people: " .. tostring(p.name) ..
+					(p.admin and " admin" or p.builder and " builder" or " player"))
+		end
 		E.state = E.editing and s or nil
 		if was ~= E.editing then
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))

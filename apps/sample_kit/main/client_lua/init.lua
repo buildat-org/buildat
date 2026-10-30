@@ -10,6 +10,7 @@
 --   h: use the second runaway (11)
 --   u: use the entity last selected in Kit's editor (F6 or "Edit")
 --   x: a packet of each kind of edit (refused without edit rights)
+--   g: a grant of edit rights (refused but to the server's admin)
 local log = buildat.Logger("sample_kit")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
@@ -21,7 +22,15 @@ camera_node.position = magic.Vector3(2, 4, -6)
 camera_node:LookAt(magic.Vector3(2, 1, 0))
 magic.set_preferred_viewports({magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))})
--- Kit's editor ([KIT] stage 3): the owner (the first to join) edits
+-- Kit's editor ([KIT] stage 3): the server's admin and its builders edit.
+-- A login by builtin/accounts where BUILDAT_JOIN_NAME asks for one
+-- simplified: no login dialog; a check app's players log in by the
+-- environment or play as "p<peer>"
+if buildat.get_env("BUILDAT_JOIN_NAME") then
+	local _, err, accounts = buildat.run_script_file("accounts/accounts.lua")
+	assert(type(accounts) == "table", "accounts.lua: " .. tostring(err))
+	accounts.start({title = "sample_kit"})
+end
 local kit = require("buildat/module/kit")
 kit.editor{scene = scene, camera = camera_node, ground_y = 1}
 
@@ -45,10 +54,16 @@ local KEYS = {
 			'{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 5, "input": "count"}',
 			'{"op": "unlink", "id": 3, "comp": 0, "output": "pressed", "to": 4, "input": "toggle"}',
 			'{"op": "undo"}',
+			'{"op": "builder", "name": "kitbob", "on": true}',
 			'not json'}) do
 			buildat.send_packet("kit:edit", e)
 		end
 		log:info("sent the edit packets")
+	end,
+	-- A grant of edit rights, which only the server's admin makes
+	[magic.KEY_G] = function()
+		buildat.send_packet("kit:edit",
+				'{"op": "builder", "name": "kitboss", "on": false}')
 	end,
 	-- The entity last selected in the editor
 	[magic.KEY_U] = function()

@@ -7,9 +7,11 @@
 // out of reach, a component that never returns, and two relays that are a
 // loop. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
 // key is a dig at the door, a write routed to the door. util/kit_runtime_check.sh
-// drives it. The first player to join is the owner, who edits with Kit's
-// editor (util/kit_editor_check.sh).
+// drives it. A player is "p<peer>", or their account's name once logged in
+// (the client logs in when BUILDAT_JOIN_NAME is set); the server's admin
+// and the builders edit with Kit's editor (util/kit_editor_check.sh).
 #include "core/log.h"
+#include "accounts/api.h"
 #include "client_file/api.h"
 #include "kit/api.h"
 #include "main_context/api.h"
@@ -36,10 +38,6 @@ struct Module: public interface::Module
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
 	ss_ m_door_voxel;
-	// The owner: the first player to join this run, who has edit rights.
-	// simplified: no builder grant and no owner kept over a restart;
-	// accounts' admin, or a grant the owner makes, is the upgrade
-	ss_ m_owner;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -51,6 +49,7 @@ struct Module: public interface::Module
 		sub(m_server, "core:tick", &Module::on_tick);
 		sub(m_server, "client_file:files_transmitted", &Module::on_files);
 		sub(m_server, "network:packet_received/main:dig", &Module::on_dig);
+		sub(m_server, "accounts:login", &Module::on_login);
 	}
 
 	void on_start()
@@ -117,13 +116,26 @@ struct Module: public interface::Module
 	{
 		const size_t peer = event.recipient;
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
+		ss_ name;
+		// None in the web client's own server (builtin/accounts is native)
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *a){
+				name = a->name_of(peer);
+			});
 		kit::access(m_server, [&](kit::Interface *k){
-			k->set_peer(peer, "p"+itos(peer), "world", 0, 1, 0);
-			if(m_owner.empty()){
-				m_owner = "p"+itos(peer);
-				k->set_editor(m_owner, true);
-			}
+			k->set_peer(peer, name.empty() ? "p"+itos(peer) : name, "world",
+					0, 1, 0);
 		});
+	}
+
+	// Kit's edit rights follow the account: the admin's, a builder's
+	void on_login(const accounts::Login &login)
+	{
+		kit::access(m_server, [&](kit::Interface *k){
+			k->set_peer(login.peer, login.name, "world", 0, 1, 0);
+		});
+		log_i(MODULE, "sample_kit: peer %zu is %s", (size_t)login.peer,
+				cs(login.name));
 	}
 
 	// A player digging at the door: not the game's own write, so routed

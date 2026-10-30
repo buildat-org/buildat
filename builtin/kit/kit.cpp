@@ -7,6 +7,7 @@
 // the save's two rows, the nodes that carry shared state to the clients,
 // and the voxels the instances own.
 #include "kit/api.h"
+#include "accounts/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
 #include "storage/api.h"
@@ -251,10 +252,11 @@ struct Module: public interface::Module, public Interface
 	std::deque<Write> m_writes;
 	// Voxels an instance set whose section was not loaded: tried each tick
 	std::deque<Write> m_pending_voxels;
-	// The editor: the players the app gave edit rights, the types an editor
-	// places (every file in types_path that loads), each editor's undo,
-	// and the sections Kit owns positions in, each scene's
-	std::set<ss_> m_editors;
+	// The editor: edit rights the app gave or took (set_editor) over the
+	// accounts' default, the types an editor places (every file in
+	// types_path that loads), each editor's undo, and the sections Kit owns
+	// positions in, each scene's
+	std::map<ss_, bool> m_rights;
 	std::set<ss_> m_palette;
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
@@ -290,6 +292,7 @@ struct Module: public interface::Module, public Interface
 		sub(m_server, "network:packet_received/kit:use", &Module::on_use);
 		sub(m_server, "network:packet_received/kit:edit", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
+		sub(m_server, "accounts:privs", &Module::on_privs);
 	}
 
 	void* get_interface()
@@ -1212,14 +1215,22 @@ struct Module: public interface::Module, public Interface
 	void on_left(const network::OldClient &old)
 	{
 		m_peers.erase(old.info.id);
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
 	}
 
 	void set_peer(size_t peer, const ss_ &name, const ss_ &scene,
 			double x, double y, double z)
 	{
 		Peer &p = m_peers[peer];
-		if(p.name != name)
+		if(p.name != name){
 			p.editing = false;
+			// The admins' list of who is here
+			for(auto &o : m_peers)
+				if(o.second.editing && o.first != peer)
+					send_state(o.first);
+		}
 		p.name = name;
 		p.scene = scene;
 		p.pos[0] = x;
@@ -1246,17 +1257,100 @@ struct Module: public interface::Module, public Interface
 
 	void set_editor(const ss_ &player, bool can)
 	{
-		if(can){
-			m_editors.insert(player);
-		} else {
-			m_editors.erase(player);
-			for(auto &p : m_peers)
-				if(p.second.name == player && p.second.editing){
-					p.second.editing = false;
-					send_state(p.first);
-				}
+		m_rights[player] = can;
+		log_i(MODULE, "%s %s edit rights (the app's)", cs(player),
+				can ? "has" : "has no");
+		recheck_rights();
+	}
+
+	// The accounts' name of a peer and whether it is the server's admin
+	// (the launcher's own user is): "" and false without builtin/accounts
+	ss_ account_of(size_t peer, bool *admin = nullptr)
+	{
+		ss_ name;
+		bool a = false;
+		if(m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				name = i->name_of(peer);
+				a = i->is_local(peer) || (!name.empty() && i->is_admin(name));
+			});
+		if(admin)
+			*admin = a;
+		return name;
+	}
+
+	bool is_builder(const ss_ &account)
+	{
+		bool b = false;
+		if(!account.empty() && m_server->has_module("accounts"))
+			accounts::access(m_server, [&](accounts::Interface *i){
+				b = i->has_priv(account, "builder");
+			});
+		return b;
+	}
+
+	// Edit rights: the app's word for the name it gave the player, else
+	// builtin/accounts': the admin, and the accounts the admin made
+	// builders. By the peer's account, not the app's name for it: a name
+	// the app makes up may be someone's account
+	bool can_edit(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return false;
+		auto o = m_rights.find(pi->second.name);
+		if(o != m_rights.end())
+			return o->second;
+		bool admin = false;
+		const ss_ name = account_of(peer, &admin);
+		return admin || is_builder(name);
+	}
+
+	// An editor who lost the rights leaves edit mode; the admins' lists
+	// of who is a builder are sent again
+	void recheck_rights()
+	{
+		for(auto &p : m_peers){
+			if(!p.second.editing)
+				continue;
+			if(!can_edit(p.first)){
+				p.second.editing = false;
+				log_i(MODULE, "%s left edit mode: no edit rights now",
+						cs(p.second.name));
+			}
+			send_state(p.first);
 		}
-		log_i(MODULE, "%s %s edit rights", cs(player), can ? "has" : "has no");
+	}
+
+	// The player is told, so a new builder's client says it may edit now
+	void on_privs(const accounts::Login &login)
+	{
+		recheck_rights();
+		auto pi = m_peers.find(login.peer);
+		if(pi != m_peers.end() && !pi->second.editing)
+			send_state(login.peer);
+	}
+
+	// {"op": "builder", "name": n, "on": bool}: the admin grants or takes
+	// an account's edit rights, kept in builtin/accounts
+	void grant(size_t peer, const json::Value &j,
+			const std::function<void(const ss_&)> &refuse)
+	{
+		bool admin = false;
+		const ss_ by = account_of(peer, &admin);
+		if(!admin)
+			return refuse("only the server's admin makes builders");
+		const ss_ name = jstr(j, "name").substr(0, 64);
+		const bool on = j.get("on").is_true();
+		// The launcher's own user may have no account: Kit checked it
+		ss_ why;
+		accounts::access(m_server, [&](accounts::Interface *i){
+			why = i->set_priv(name, "builder", on, by);
+		});
+		if(!why.empty())
+			return refuse(why);
+		log_i(MODULE, "%s %s builder %s", by.empty() ? "The local user" :
+				cs(by), on ? "made" : "took", cs(name));
 	}
 
 	// What an editor's client shows: the palette and the authored tree, or
@@ -1267,6 +1361,7 @@ struct Module: public interface::Module, public Interface
 		json::Value j = json::object();
 		const bool editing = pi != m_peers.end() && pi->second.editing;
 		j.set("editing", editing);
+		j.set("can_edit", can_edit(peer));
 		if(editing){
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
@@ -1296,6 +1391,25 @@ struct Module: public interface::Module, public Interface
 			j.set("types", types);
 			j.set("authored", authored_json());
 			j.set("undo", (int64_t)m_undo[pi->second.name].size());
+			// The admin's: who is here with an account, to make builders
+			bool admin = false;
+			account_of(peer, &admin);
+			j.set("admin", admin);
+			if(admin){
+				json::Value people = json::array();
+				for(auto &o : m_peers){
+					bool o_admin = false;
+					const ss_ n = account_of(o.first, &o_admin);
+					if(o.first == peer || n.empty())
+						continue;
+					json::Value r = json::object();
+					r.set("name", n);
+					r.set("admin", o_admin);
+					r.set("builder", is_builder(n));
+					people.append(r);
+				}
+				j.set("people", people);
+			}
 		}
 		network::access(m_server, [&](network::Interface *inetwork){
 			inetwork->send(peer, "kit:edit_state", j.stringify());
@@ -1326,13 +1440,15 @@ struct Module: public interface::Module, public Interface
 			return refuse("the app has not placed the player");
 		Peer &p = pi->second;
 		// Rights each packet: a revoked editor's next edit is refused
-		if(!m_editors.count(p.name)){
+		if(!can_edit(peer)){
 			if(p.editing){
 				p.editing = false;
 				send_state(peer);
 			}
 			return refuse("no edit rights here");
 		}
+		if(op == "builder")
+			return grant(peer, j, refuse);
 		if(op == "mode"){
 			p.editing = j.get("on").is_true();
 			log_i(MODULE, "%s %s edit mode", cs(p.name),
