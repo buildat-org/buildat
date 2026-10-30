@@ -3,7 +3,8 @@
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
 -- [HEIGHTMAP_TERRAIN] The ball and the camera behind it; the ground is
--- builtin/heightmap's. WASD pushes the ball, C digs a crater under it.
+-- builtin/heightmap's. WASD pushes the ball, C digs a crater under it, O
+-- looks over the whole map from above a corner and back.
 -- Every 2 s the log says the frame time, triangles and draw calls.
 local log = buildat.Logger("sample_heightmap")
 local magic = require("buildat/extension/urho3d")
@@ -45,6 +46,7 @@ do
 end
 
 local ball = nil
+local overview = false
 replicate.sub_sync_node_added({}, function(node)
 	if node:GetName() ~= "ball" then
 		return
@@ -77,6 +79,8 @@ magic.SubscribeToEvent("KeyDown", function(event_type, event_data)
 		send_keys(KEY_BITS[key], true)
 	elseif key == magic.KEY_C then
 		buildat.send_packet("main:crater", "")
+	elseif key == magic.KEY_O then
+		overview = not overview
 	elseif key == magic.KEY_ESCAPE then
 		buildat.leave()
 	end
@@ -98,9 +102,16 @@ end)
 local frames, frame_s, worst_s, stat_s = 0, 0, 0, 0
 magic.SubscribeToEvent("Update", function(event_type, event_data)
 	local dt = event_data:GetFloat("TimeStep")
-	if ball then
+	if overview then
+		camera_node.position = magic.Vector3(0, 300, 0)
+		camera_node:LookAt(magic.Vector3(400, 0, 400))
+	elseif ball then
 		local p = ball.position
-		camera_node.position = magic.Vector3(p.x - 14, p.y + 9, p.z - 14)
+		-- Over the ground where the camera is: a hill behind the ball
+		-- would have it look out from inside the hill
+		local y = math.max(p.y + 9,
+				(heightmap.height_at(p.x - 14, p.z - 14) or p.y) + 3)
+		camera_node.position = magic.Vector3(p.x - 14, y, p.z - 14)
 		camera_node:LookAt(magic.Vector3(p.x, p.y, p.z))
 	end
 	if crater and heightmap.terrain then
@@ -127,5 +138,6 @@ magic.SubscribeToEvent("Update", function(event_type, event_data)
 	end
 end)
 
-log:info("sample_heightmap client ready; WASD pushes the ball, C digs")
+log:info("sample_heightmap client ready; WASD pushes the ball, C digs,"..
+		" O looks over the map")
 -- vim: set noet ts=4 sw=4:

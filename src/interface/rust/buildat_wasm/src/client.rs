@@ -2205,6 +2205,31 @@ impl Texture2D {
 }
 #[repr(transparent)]
 #[derive(Debug)]
+pub struct Texture2DArray(pub Object);
+impl Handled for Texture2DArray { fn handle(&self) -> u32 { self.0.handle() } }
+impl FromValue for Texture2DArray { fn from_value(v: Value) -> Texture2DArray { match v { Value::Object(o) => Texture2DArray(o), _ => Texture2DArray(Object(0)) } } }
+impl Deref for Texture2DArray { type Target = Texture; fn deref(&self) -> &Texture { unsafe { &*(self as *const Texture2DArray as *const Texture) } } }
+impl Texture2DArray {
+	/// The same object as another class of the list's
+	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// Texture2DArray.new():Texture2DArray
+	pub fn new() -> Texture2DArray {
+		let mut r = call(imports::buildat_c_Texture2DArray_static_new, &[]);
+		r.value().as_::<Texture2DArray>()
+	}
+	/// Texture2DArray:SetData(number,Image,boolean?):boolean
+	pub fn SetData(&self, a1: impl Put, a2: impl Put, a3: impl Put) -> bool {
+		let mut r = call(imports::buildat_c_Texture2DArray_SetData, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put, &a2 as &dyn Put, &a3 as &dyn Put]);
+		r.value().boolean()
+	}
+	/// Texture2DArray:SetLayers(number)
+	pub fn SetLayers(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Texture2DArray_SetLayers, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+}
+#[repr(transparent)]
+#[derive(Debug)]
 pub struct Light(pub Object);
 impl Handled for Light { fn handle(&self) -> u32 { self.0.handle() } }
 impl FromValue for Light { fn from_value(v: Value) -> Light { match v { Value::Object(o) => Light(o), _ => Light(Object(0)) } } }
@@ -6830,6 +6855,16 @@ pub fn image_set_data(a1: impl Put, a2: impl Put, a3: impl Put, a4: impl Put, a5
 	let mut r = call(imports::buildat_c_verb_image_set_data, &[&a1 as &dyn Put, &a2 as &dyn Put, &a3 as &dyn Put, &a4 as &dyn Put, &a5 as &dyn Put]);
 	drop(r)
 }
+/// magic.image_set_region(Image,number,number,number,number,string,boolean?)
+pub fn image_set_region(a1: impl Put, a2: impl Put, a3: impl Put, a4: impl Put, a5: impl Put, a6: impl Put, a7: impl Put) {
+	let mut r = call(imports::buildat_c_verb_image_set_region, &[&a1 as &dyn Put, &a2 as &dyn Put, &a3 as &dyn Put, &a4 as &dyn Put, &a5 as &dyn Put, &a6 as &dyn Put, &a7 as &dyn Put]);
+	drop(r)
+}
+/// magic.texture_set_region(Texture2D,Image,number,number,number,number)
+pub fn texture_set_region(a1: impl Put, a2: impl Put, a3: impl Put, a4: impl Put, a5: impl Put, a6: impl Put) {
+	let mut r = call(imports::buildat_c_verb_texture_set_region, &[&a1 as &dyn Put, &a2 as &dyn Put, &a3 as &dyn Put, &a4 as &dyn Put, &a5 as &dyn Put, &a6 as &dyn Put]);
+	drop(r)
+}
 /// magic.image_load_data(Image,string,number?):any
 pub fn image_load_data(a1: impl Put, a2: impl Put, a3: impl Put) -> Value {
 	let mut r = call(imports::buildat_c_verb_image_load_data, &[&a1 as &dyn Put, &a2 as &dyn Put, &a3 as &dyn Put]);
@@ -7549,6 +7584,12 @@ mod imports {
 		pub fn buildat_c_Texture2D_SetData(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Texture2D:SetSize(number,number,number,number?):boolean"]
 		pub fn buildat_c_Texture2D_SetSize(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Texture2DArray.new():Texture2DArray"]
+		pub fn buildat_c_Texture2DArray_static_new(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Texture2DArray:SetData(number,Image,boolean?):boolean"]
+		pub fn buildat_c_Texture2DArray_SetData(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Texture2DArray:SetLayers(number)"]
+		pub fn buildat_c_Texture2DArray_SetLayers(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Light.brightness:number"]
 		pub fn buildat_c_Light_get_brightness(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Light.brightness=number"]
@@ -9135,6 +9176,10 @@ mod imports {
 		pub fn buildat_c_verb_render_scene_to_texture(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "magic.image_set_data(Image,number,number,number,string)"]
 		pub fn buildat_c_verb_image_set_data(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "magic.image_set_region(Image,number,number,number,number,string,boolean?)"]
+		pub fn buildat_c_verb_image_set_region(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "magic.texture_set_region(Texture2D,Image,number,number,number,number)"]
+		pub fn buildat_c_verb_texture_set_region(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "magic.image_load_data(Image,string,number?):any"]
 		pub fn buildat_c_verb_image_load_data(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "magic.viewport_generation():number"]

@@ -9,6 +9,7 @@
 		{"module": "main_context"},
 		{"module": "replicate"},
 		{"module": "storage"},
-		{"module": "heightmap"}
+		{"module": "heightmap"},
+		{"module": "luanti_mapgen"}
 	]
 }

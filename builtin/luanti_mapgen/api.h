@@ -142,6 +142,9 @@ namespace luanti_mapgen
 		// ("mgvalleys_np_terrain_height"), over the mapgen's defaults: what
 		// a world.mt's lines would set ([SKELDAT_BOUNDED_WORLD])
 		sm_<ss_, NoiseParams> noises;
+		// A mapgen's other settings by Luanti's names, as world.mt's lines
+		// are written: "mgvalleys_river_size" = "0" ([HEIGHTMAP_REST])
+		sm_<ss_, ss_> settings;
 
 		// An ore as the game registered it: the node names are already the
 		// ids they mean, and the biome names are still names, because which
@@ -328,6 +331,18 @@ namespace luanti_mapgen
 		// of a few thousand points costs a few thousand noise samples.
 		virtual bool spawn_level(const Params &params, int x, int z,
 				int &level_out) = 0;
+
+		// [HEIGHTMAP_REST] The ground's level over a w x h grid of columns
+		// from (x0, z0), a column every step nodes, into out (x fastest,
+		// then z), out of the mapgen's own noise and generating nothing:
+		// its terrain's approximate height, continuous, the 3D noise's
+		// cliffs and overhangs left out -- what a heightmap samples
+		// (builtin/heightmap's height_fn).
+		// Rivers' beds are in it unless the settings turn them off
+		// (mgvalleys_river_size 0). False for a mapgen it does not know:
+		// valleys only so far.
+		virtual bool surface_map(const Params &params, float x0, float z0,
+				float step, int w, int h, float *out) = 0;
 
 		// Which biome is at a point, and the heat and the humidity the
 		// mapgen's noise says are there: what core.get_biome_data() answers

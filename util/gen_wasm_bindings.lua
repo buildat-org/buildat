@@ -146,6 +146,8 @@ local MAGIC_VERBS = {
 	{"UnsubscribeFromEvent", {S, S}, {}},
 	{"render_scene_to_texture", {"Scene", "Node", N, N}, {"Texture2D"}},
 	{"image_set_data", {"Image", N, N, N, S}, {}},
+	{"image_set_region", {"Image", N, N, N, N, S, {B, "__nil"}}, {}},
+	{"texture_set_region", {"Texture2D", "Image", N, N, N, N}, {}},
 	{"image_load_data", {"Image", S, OPT_N}, {A}},
 	{"viewport_generation", {}, {N}},
 	{"fov_for", {N}, {N}},

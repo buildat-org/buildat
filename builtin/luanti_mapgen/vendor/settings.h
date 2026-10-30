@@ -2,9 +2,9 @@
 //
 // Luanti's settings, as much as a mapgen reads: it asks for its own noise
 // parameters and flags, and what answers is the world's noises
-// (luanti_mapgen::Params::noises) and nothing else -- the C++ defaults in
-// the mapgen's own constructor are the rest. The other overrides are a
-// later refinement; see "Mapgen stage 3" in doc/plan/luanti_module_plan.md.
+// (luanti_mapgen::Params::noises) and its other settings as world.mt's
+// strings (Params::settings, [HEIGHTMAP_REST]: the NoEx getters) -- the
+// C++ defaults in the mapgen's own constructor are the rest.
 #ifndef LUANTI_SHIM_SETTINGS_H
 #define LUANTI_SHIM_SETTINGS_H
 #include "irrlichttypes_bloated.h"
@@ -28,15 +28,44 @@ public:
 		return true;
 	}
 	void setNoiseParams(const std::string &name, const NoiseParams &np){}
+	// The world's other settings, by name (luanti_mapgen::Params::settings)
+	std::map<std::string, std::string> values;
+	// A number of the setting's, false when there is none or it is no
+	// number
+	template<typename T>
+	bool number(const std::string &name, T &val) const {
+		auto it = values.find(name);
+		if(it == values.end())
+			return false;
+		try {
+			val = (T)std::stod(it->second);
+		} catch(std::exception &e){
+			return false;
+		}
+		return true;
+	}
 
 	std::string get(const std::string &name) const {
 		throw SettingNotFoundException("Setting ["+name+"] not found.");
 	}
 	bool getNoEx(const std::string &name, std::string &val) const {
-		return false;
+		auto it = values.find(name);
+		if(it == values.end())
+			return false;
+		val = it->second;
+		return true;
 	}
+	// The flags named over the ones val has, as Luanti's own reads them
 	bool getFlagStrNoEx(const std::string &name, u32 &val,
-			const FlagDesc *flagdesc) const { return false; }
+			const FlagDesc *flagdesc) const {
+		auto it = values.find(name);
+		if(it == values.end() || !flagdesc)
+			return false;
+		u32 mask = 0;
+		const u32 flags = readFlagString(it->second, flagdesc, &mask);
+		val = (val & ~mask) | flags;
+		return true;
+	}
 	s16 getS16(const std::string &name) const {
 		throw SettingNotFoundException("Setting ["+name+"] not found.");
 	}
@@ -55,15 +84,28 @@ public:
 	bool getBool(const std::string &name) const {
 		throw SettingNotFoundException("Setting ["+name+"] not found.");
 	}
-	bool getS16NoEx(const std::string &name, s16 &val) const { return false; }
-	bool getU16NoEx(const std::string &name, u16 &val) const { return false; }
-	bool getS32NoEx(const std::string &name, s32 &val) const { return false; }
-	bool getFloatNoEx(const std::string &name, float &val) const {
-		return false;
+	bool getS16NoEx(const std::string &name, s16 &val) const {
+		return number(name, val);
 	}
-	bool getU64NoEx(const std::string &name, u64 &val) const { return false; }
+	bool getU16NoEx(const std::string &name, u16 &val) const {
+		return number(name, val);
+	}
+	bool getS32NoEx(const std::string &name, s32 &val) const {
+		return number(name, val);
+	}
+	bool getFloatNoEx(const std::string &name, float &val) const {
+		return number(name, val);
+	}
+	bool getU64NoEx(const std::string &name, u64 &val) const {
+		return number(name, val);
+	}
 	bool getBoolNoEx(const std::string &name, bool &val) const {
-		return false;
+		auto it = values.find(name);
+		if(it == values.end())
+			return false;
+		val = it->second == "true" || it->second == "yes" ||
+				it->second == "1";
+		return true;
 	}
 	bool exists(const std::string &name) const { return false; }
 
