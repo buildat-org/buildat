@@ -23,13 +23,20 @@ start_server "$out/srv.log" "setup code" 60 29881 \
 port=$SERVER_PORT; srv=$SERVER_PID
 trap 'kill -INT "$srv" 2>/dev/null' EXIT
 code=$(grep -ao "setup code [A-Z0-9]*" "$out/srv.log" | tail -1 | awk '{print $3}')
-# Up from the picker's name field wraps to its last button, Menu...; in
+# The setup code's admin is asked for a ntfy topic first, in the Server
+# window over the picker, which has the keys ([KEYPAGE_NEWEST_WRONG]):
+# Escape closes it. Up from the picker's name field wraps to its last
+# button, Menu...; in
 # the menu Down twice to My account..., which is the Server window: Right
 # into the page, Down to Two-step login... Each arrow waits for ui_utils's
 # "keyboard: to" line (-l 4), each Enter for the page it opens; the half
 # seconds are a page's focus put in the frames after its line.
 cat > "$out/cmds.txt" <<CMDS
+wait_log_any 60000 server window: the page ntfy
 wait_log_any 60000 Plan picker: 
+delay 500
+keypress escape
+wait_log 5000 server window: closed
 delay 500
 keypress up
 wait_log 5000 keyboard: to Menu...

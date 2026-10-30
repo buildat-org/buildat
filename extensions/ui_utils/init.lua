@@ -720,21 +720,24 @@ end
 
 local function arrange(page)
 	rewalk(page)
-	local first, inside = nil, false
+	local first, inside = nil, nil
 	for _, e in ipairs(page.items) do
 		if e:HasFocus() then
-			inside = true
+			inside = e
 		end
 		local t = e:GetTypeName()
 		if t == "Button" or t == "DropDownList" then
 			first = first or e
 		end
 	end
+	-- A page under another (Hearth's frame under the Server window) takes
+	-- it once it is on top with nothing focused: Enter would press a
+	-- button not seen
+	if top_page() ~= page then
+		page.refocus = inside or first
 	-- The first button has the focus to start with, unless the page gave
-	-- it to one of its own (a password page's first field), or the page is
-	-- under another (Hearth's frame under the Server window): Enter would
-	-- press a button not seen
-	if first and not inside and top_page() == page then
+	-- it to one of its own (a password page's first field)
+	elseif first and not inside then
 		first:SetFocus(true)
 	end
 end
@@ -777,6 +780,15 @@ function M.safe.keyboard_page(win)
 		elseif shown(win) and (dirty or stale(page)) then
 			dirty = false
 			rewalk(page)
+		end
+		-- The page over it gone: its focus put back (a field the Escape
+		-- that closed the other one defocused), else its first button
+		local r = page.refocus
+		if r and shown(win) and top_page() == page then
+			page.refocus = nil
+			if magic.ui.focusElement == nil and not gone(r) then
+				r:SetFocus(true)
+			end
 		end
 		-- **The view follows the focus** a key moved (Tab, PageDown) into
 		-- an item not wholly in it; the wheel and the mouse are as they are
