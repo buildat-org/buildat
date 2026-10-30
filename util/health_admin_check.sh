@@ -27,6 +27,7 @@ admin(){ curl -s -m 5 "http://127.0.0.1:$SERVER_PORT/health" |
 serve "$t/1.log"
 got=$(admin); echo "no admin: $got"
 [ "$got" = False ] || fail "\"admin\" is $got with no admin"
+wait_for_log "$t/1.log" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/1.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/1.log)"
 

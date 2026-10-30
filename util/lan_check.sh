@@ -72,7 +72,7 @@ start(){
 
 # 1
 start 29581 --lan-announce "LAN check"
-a=$(hear 29581 5)
+a=$(hear 29581 10) # announced every 2 s; 10 a margin for a slow start ([CHECK_TIMING_LIMITS])
 echo "$a" | grep -q '"name":"LAN check"' || fail "no announcement heard: '$a'"
 echo "$a" | grep -q '"app":"demo_digger"' || fail "the app is missing: $a"
 kill $s; wait $s 2>/dev/null; s=

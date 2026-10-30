@@ -40,6 +40,7 @@ page=$(curl -s -m 20 -o "$t/index" -w "%{time_total}" $u/index.html)
 wait $c
 [ "$(stat -c %s "$t/data")" -gt 1000000 ] || fail "the data did not come"
 grep -q "<title>" "$t/index" || fail "the page did not come"
-awk "BEGIN{exit !($page < 0.3)}" ||
-	fail "the page took $page s beside the first data download"
+slow_limit page_s 0.3 # the machine's (check_lib: a performance)
+awk "BEGIN{exit !($page < $page_s)}" ||
+	fail "the page took $page s beside the first data download, not under $page_s"
 echo "PASS: the page in $page s beside the first data download"

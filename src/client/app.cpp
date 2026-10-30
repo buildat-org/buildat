@@ -2607,6 +2607,16 @@ struct CApp: public App, public magic::Application
 		// guards read this flag (user, 2026-09-23: "I can't use my
 		// mouse during your tests").
 		m_command_seq_active = g_client_config.get<bool>("command_seq_enabled");
+		// **A scripted client's time keeps the wall clock's**
+		// ([CHECK_TIMING_LIMITS]): Urho3D cuts a frame's time step to 1/10 s,
+		// so a client drawing 4 fps (software GL on the check box) ran its
+		// game at 0.4x, and a drive's held keys and delays, which are wall
+		// time, and the server's clock disagreed (skeldat's fast flight
+		// never "too far"). Cut at 1/2 s instead; above 10 fps nothing
+		// changes. simplified: scripted runs only; a person's client keeps
+		// Urho3D's 10, a game's own call on how a slow machine plays
+		if(m_command_seq_active)
+			GetSubsystem<magic::Engine>()->SetMinFps(2);
 		// The mouse as a finger under BUILDAT_TOUCH=1, for a person trying
 		// the touch UI by hand; a scripted run keeps its mouse and has
 		// finger_* for touches ([HEARTH_USABILITY]). Not on the web: its

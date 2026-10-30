@@ -176,6 +176,7 @@ BUILDAT_SKELDAT_WORLD= start_server "$t/pub.srv.log" "STATUS Listening" 300 \
 	-D "$pub/srv" -C "$pub/srv.cache" -l 3 || fail "the server ($t/pub.srv.log)"
 CHECK_PIDS+=($SERVER_PID)
 pub_pid=$SERVER_PID
+wait_for_log "$t/pub.srv.log" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/pub.srv.log" | head -1)
 [ -n "$code" ] || fail "no setup code ($t/pub.srv.log)"
 # pub_client <name> <log> <cmds> [code]

@@ -1108,7 +1108,9 @@ function M.room_bounce(tx, h, tz, light)
 		v[(row * W8 + 7) * 4 + 3] = (M.row_owner[row] or 0) / 255
 	end
 	buildat.set_image_data(image, v)
-	assert(texture:SetData(image), "room table texture")
+	-- False when the device is lost: a probe's last frame after quit
+	-- ([CHECK_TIMING_LIMITS]); a later bounce sets it again
+	if not texture:SetData(image) then return end
 	texture.filterMode = magic.FILTER_NEAREST
 	for _, m in ipairs({lit_material, glass_material}) do
 		m:SetTexture(magic.TU_SPECULAR, texture)

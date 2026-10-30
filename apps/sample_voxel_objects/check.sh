@@ -24,7 +24,7 @@ set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
 here=$(cd "$(dirname "$0")/../.." && pwd)
 [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || skip "no display"
-limit=${LIMIT_MS:-200}
+slow_limit limit ${LIMIT_MS:-200} # the machine's (check_lib: a performance)
 draws_max=${DRAWS_MAX:-200}
 check_tmp voxel_objects; t=$CHECK_TMP
 serve(){

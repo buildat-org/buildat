@@ -27,6 +27,9 @@ admin_sees()
 		fail "$app: the server ($t/$app.srv.log)"
 	CHECK_PIDS+=($SERVER_PID)
 	local code
+	# accounts may log it after the server's Listening (check_lib's
+	# web_login_steps)
+	wait_for_log "$t/$app.srv.log" "setup code [A-Z0-9]+" 30
 	code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/$app.srv.log" | head -1)
 	[ -n "$code" ] || fail "$app: no setup code ($t/$app.srv.log)"
 	# The setup code's admin is asked for a ntfy topic first

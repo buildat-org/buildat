@@ -391,6 +391,47 @@ game_rate()
 	echo "${off:-0} $2" > "$1/sim_clock"
 }
 
+# **The machine's speed** ([CHECK_TIMING_LIMITS]): a limit on what is a
+# performance (a handler's ms, a generation's seconds, a budget) is given
+# for this desk and scaled by CHECK_SLOW, how much longer a fixed workload
+# takes now than on the desk: four copies of a loop at once (a 4 vCPU box
+# and a machine loaded by other runs both read slower), never under 1,
+# so a limit keeps its teeth here. Measured once a check, at its first
+# slow_limit (not in a $(...), which would lose it), and passed on to
+# what it runs; a CHECK_SLOW given is kept.
+# A step's limit is in frames, ticks or the game's time instead, and a
+# margin a margin: neither is scaled. The loop's table fits a core's
+# cache: one of 4 MB read the check box's vCPUs as one core (9x the
+# desk), where its ground generation is 1.4x. The desk (16 threads) read
+# 0.09 s; the 4 vCPU check box 0.12-0.15 s
+#   slow_limit limit 10       # $limit 10 here; 25 on a machine 2.5x slower
+CHECK_SLOW_DESK_S=0.09
+check_slow()
+{
+	[ -n "${CHECK_SLOW:-}" ] && return
+	local bin="$_check_root/local/check/speed_2" s e p ps=()
+	if [ ! -x "$bin" ]; then
+		printf '%s\n' '#include <stdio.h>' '#include <stdint.h>' \
+			'static uint32_t a[1 << 14];' 'int main(void){ uint32_t x = 1;' \
+			'for(long i = 0; i < 100000000; i++){ x = x * 1664525u + 1013904223u; a[x >> 18] += x; }' \
+			'printf("%u\n", a[12345]); return 0; }' |
+			cc -O2 -x c - -o "$bin.$$" && mv "$bin.$$" "$bin" ||
+			{ export CHECK_SLOW=1; echo "check_slow: no cc; CHECK_SLOW=1" >&2; return; }
+	fi
+	s=$(date +%s%N)
+	for p in 1 2 3 4; do "$bin" > /dev/null & ps+=($!); done
+	wait "${ps[@]}"
+	e=$(date +%s%N)
+	export CHECK_SLOW=$(awk -v t=$(((e - s) / 1000000)) -v d=$CHECK_SLOW_DESK_S \
+		'BEGIN { f = t / 1000 / d; printf "%.2f", f < 1 ? 1 : f }')
+	echo "check_slow: $CHECK_SLOW ($(((e - s) / 1000000)) ms)" >&2
+}
+slow_limit() # <variable> <limit>: the variable set to the limit times CHECK_SLOW
+{
+	check_slow
+	printf -v "$1" '%s' "$(awk -v l="$2" -v f="$CHECK_SLOW" 'BEGIN { printf "%g", l * f }')"
+}
+
 # What a check waits on, rather than a fixed sleep: until <file> has a
 # line matching <regex> (grep -E), up to <seconds>; 1 if it never did.
 # With a server's user path, the seconds are its game's (game_clock

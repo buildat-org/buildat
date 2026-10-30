@@ -15,6 +15,10 @@
 # ways by hand, 2026-10-20, with init.lua's load moved to the fences packet.
 set -u
 here=$(cd "$(dirname "$0")/.." && pwd)
+. "$here/util/check_lib.sh"
+# The ground update's 5 ms below is the machine's (a performance),
+# measured before the browser loads it
+slow_limit limit 5
 out=$(mktemp -d "${TMPDIR:-/tmp}/web_join.XXXXXX")
 log=$out/drive.log
 bash "$here/util/web_drive.sh" firefox hillclimb \
@@ -22,9 +26,10 @@ bash "$here/util/web_drive.sh" firefox hillclimb \
 	{ echo "FAIL: the drive ($log; $(grep -a "accounts" "$out/page.log" |
 			tail -3 | tr '\n' ' '))"; exit 1; }
 # [HC_WEB_CHOPPY] Driven 10 s on the soft sand, digging: no ground update
-# took the main thread 5 ms ("slow packet"; 7-13 ms each when the
-# chunk's heights were read in the update)
-slow=$(grep -ac "slow packet: voxelworld:node_volume_updated" "$out/page.log")
-[ "$slow" = 0 ] || { echo "FAIL: $slow ground updates over 5 ms ($out/page.log)"; exit 1; }
+# took the main thread 5 ms ("slow packet", logged from 5 ms; 7-13 ms
+# each when the chunk's heights were read in the update)
+slow=$(grep -a "slow packet: voxelworld:node_volume_updated took" "$out/page.log" |
+	sed 's/.* took \([0-9]*\) ms.*/\1/' | awk -v l="$limit" '$1 >= l' | wc -l)
+[ "$slow" = 0 ] || { echo "FAIL: $slow ground updates of $limit ms or more ($out/page.log)"; exit 1; }
 rm -rf "$out"
-echo "PASS: a web join to hillclimb shows the login page, and the car after it; driven 10 s, no ground update over 5 ms"
+echo "PASS: a web join to hillclimb shows the login page, and the car after it; driven 10 s, no ground update of $limit ms or more"

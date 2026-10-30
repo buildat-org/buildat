@@ -51,6 +51,7 @@ owner(){
 owner v1
 # The LAN's: an owner token no client here has
 BUILDAT_OWNER_TOKEN=notthisclients serve "$t/v2.log" -u launcher=1
+wait_for_log "$t/v2.log" "setup code" 30 # may come after Listening
 code=$(grep -aoP 'setup code \K[A-Z0-9]+' "$t/v2.log" | head -1)
 drive lan_a "wait_log 60000 accounts: the login page shown" ||
 	bad="$bad; no login page for a LAN client ($t/lan_a.log)"

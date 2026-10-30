@@ -14,7 +14,9 @@
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
-limit=${LIMIT:-10}
+# The 10 s the machine's (check_lib's slow_limit: a performance; 14.8 s
+# on the 4 vCPU box with 5 runners beside it)
+slow_limit limit ${LIMIT:-10}
 check_tmp hc_ground; t=$CHECK_TMP
 start_server "$t/s.log" "STATUS Listening" 300 auto "$here/Build/bin/buildat_server" \
 	-m "$here/apps/hillclimb" -D "$t/s" -l 3 ||
