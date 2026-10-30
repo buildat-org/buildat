@@ -29,9 +29,70 @@
 # KEEP_TMP=1 keeps the screenshots: edit mode with the inspector, a link
 # line, the marker's gizmo, play with none of them, the admin's builders,
 # a test, and kitbob's edit mode while it runs.
+#
+#   util/kit_editor_check.sh
+#   util/kit_editor_check.sh web    the admin's part in headless Chrome
 set -u
 . "$(dirname "$0")/check_lib.sh"
 here=$(cd "$(dirname "$0")/.." && pwd)
+if [ "${1:-}" = web ]; then
+	# The admin's flow in the web client (web/), in headless Chrome at
+	# 1200x800: log in ("l", the setup code), place a button and a door,
+	# the door's closed to glass, the link, the door used twice, a test
+	check_tmp kit_editor_web; t=$CHECK_TMP
+	cat > "$t/steps.json" <<'EOF'
+[
+	["nav", "${URL}"],
+	["waitlog", "replicated: entity 4 open = false", 120],
+	["key", "l"],
+	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
+	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Tab"], ["frames", 2], ["key", "Enter"], ["wait", 1000],
+	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
+	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
+	["click", 891, 217], ["frames", 3],
+	["click", 600, 20], ["waitlog", "kit editor: state: 10 entities, 0 to undo", 20],
+	["click", 500, 600], ["waitlog", "kit editor: cursor at 1,1,-3", 10],
+	["click", 194, 164], ["waitlog", "kit editor: state: 11 entities, 1 to undo", 10],
+	["click", 700, 600], ["waitlog", "kit editor: cursor at 2,1,-3", 10],
+	["click", 194, 220], ["waitlog", "kit editor: state: 12 entities, 2 to undo", 10],
+	["click", 700, 600], ["waitlog", "kit editor: selected 13", 10],
+	["click", 1083, 167], ["frames", 2], ["key", "End"],
+	["key", "Backspace"], ["key", "Backspace"], ["key", "Backspace"],
+	["key", "Backspace"], ["key", "Backspace"],
+	["type", "glass"], ["waitlog", "kit editor: 13/1 closed = glass", 10],
+	["click", 980, 304], ["waitlog", "kit editor: state: 12 entities, 3 to undo", 10],
+	["click", 500, 600], ["waitlog", "kit editor: selected 12", 10],
+	["click", 1097, 164], ["waitlog", "kit editor: linking from 12 pressed", 10],
+	["click", 700, 600], ["waitlog", "kit editor: selected 13", 10],
+	["click", 980, 395], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
+	["click", 500, 600], ["waitlog", "kit editor: selected 12", 10],
+	["frames", 3], ["shot", "${OUT}/linked.png"],
+	["click", 600, 20], ["waitlog", "kit editor: edit mode off", 10],
+	["key", "u"], ["waitlog", "replicated: entity 13 open = true", 10],
+	["key", "u"], ["waitlog", "replicated: entity 13 open = false", 10],
+	["click", 600, 20], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
+	["click", 334, 363], ["waitlog", "replicated: entity 12 presses = 0", 10],
+	["waitlog_any", "kit editor: playing a test", 10],
+	["key", "b"], ["waitlog", "replicated: entity 4 open = true", 10],
+	["frames", 3], ["shot", "${OUT}/test.png"],
+	["click", 600, 20], ["waitlog", "kit editor: state: 12 entities, 4 to undo", 10],
+	["waitlog_any", "kit editor: the test is over", 10],
+	["frames", 10], ["shot", "${OUT}/after_test.png"]
+]
+EOF
+	"$here/util/web_drive.sh" chrome sample_kit "$t/steps.json" "$t/out" ||
+		fail "the web drive ($t/out)"
+	grep -a "A test by webboss starts\|The test by webboss ended" "$t/out/server.log" |
+		sed 's/.*: authored/authored/' | sort -u | wc -l | grep -qx 1 ||
+		fail "the rows after the test are not the ones before ($t/out/server.log)"
+	echo "PASS: Kit's editor in the web client: the admin logs in, places, sets a parameter, links, uses, plays a test"
+	exit 0
+fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
 	skip "a buildat server or client is already running"
 fi
