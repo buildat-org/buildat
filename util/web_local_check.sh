@@ -135,6 +135,10 @@ fi
 # player in it walking 2 voxels. 1200x800 places the buttons; the pointer
 # lock is apps/skeldat/web_spawn_check.sh's stand-in, so Enter closes the
 # how-to-play (its only button; a click's place moved as the dialog grew).
+# The walk jumps, and goes back when ahead is a wall: the world's seed is
+# new each run, and 3 placings of 16 had a step within 2 ahead, which
+# W alone stops at (autojump is the touch controls'), one of them 2
+# voxels high [WEB_SKELDAT_WALK].
 if [ -f "$here/web/local/skeldat/buildat_server.wasm" ]; then
 	cat > "$t/skeldat.json" << 'JSON'
 [
@@ -147,7 +151,8 @@ if [ -f "$here/web/local/skeldat/buildat_server.wasm" ]; then
 	["waitlog", "pause: how to play shown", 240],
 	["eval", "'skeldat playable at ' + Math.round(performance.now()) + ' ms'"],
 	["wait", 1000], ["key", "Enter"], ["waitlog", "pause: the menu closed", 10],
-	["holdkey", "w", 3000], ["waitlog", "skeldat: walked 2 from the placing", 10],
+	["holdkey", ["w", "Space"], 1500], ["holdkey", ["s", "Space"], 1500],
+	["waitlog", "skeldat: walked 2 from the placing", 10],
 	["waitlog", "server: .*network: [0-9.]+ ticks/s", 15],
 	["eval", "new Promise(r => { const q = indexedDB.open('/user'); q.onerror = () => r('no IndexedDB'); q.onsuccess = () => { const g = q.result.transaction('FILE_DATA').objectStore('FILE_DATA').getAll(); g.onsuccess = () => r('skeldat kept ' + Math.round(g.result.reduce((n, e) => n + (e.contents ? e.contents.length : 0), 0) / 1024) + ' kB'); }; })"]
 ]
