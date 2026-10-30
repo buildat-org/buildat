@@ -88,6 +88,17 @@ if not before:
          ", ".join("%r" % e[5] for e in els or [])[:300])
 if len(before) < 12:
     fail("only %d rows drawn" % len(before))
+# [FORMSPEC_SCROLL_DIM]: a label in the container is as white as one
+# outside it, not under the form's translucent background. Official
+# Luanti draws it white; under the background its brightest pixel was
+# 45
+from PIL import Image
+r1 = [e for e in els if e[5] == "row 1"][0]
+img = Image.open(sys.argv[1].replace("cli.log", "before.png")).convert("L")
+peak = max(img.crop((r1[1], r1[2], r1[1] + r1[3], r1[2] + r1[4])).getdata())
+print("row 1's brightest pixel: %d" % peak)
+if peak < 200:
+    fail("row 1 is dim: its brightest pixel is %d" % peak)
 bar = None
 for e in els:
     if e[0] == "BorderImage" and e[3] < 40 and e[4] > 100:

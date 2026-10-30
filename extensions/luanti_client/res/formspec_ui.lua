@@ -1454,6 +1454,11 @@ function M.new(magic, buildat, log, ctx)
 				local factor = tonumber(e.fields[5]) or 0.1
 				if x and w then
 					local el = window:CreateChild("UIElement")
+					-- In the form's order like every other element: at the
+					-- default 0 it sorted under the form's translucent
+					-- background, which dimmed all in it
+					-- ([FORMSPEC_SCROLL_DIM])
+					el.priority = next_priority()
 					el:SetPosition(math.floor(x), math.floor(y))
 					el.size = magic.IntVector2(math.floor(w), math.floor(h))
 					el.clipChildren = true
