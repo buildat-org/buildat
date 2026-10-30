@@ -387,6 +387,13 @@
 		if(!m_store || !section.loaded)
 			return;
 		save_owned(section);
+		// [KIT] stage 4e: an infinite world's generated section is
+		// generated again, not kept
+		if(!m_save_unaltered && !section.altered){
+			section.modified = false;
+			section.index_dirty = false;
+			return;
+		}
 		if(!section.modified){
 			// A day of a visit and nothing else: the row alone
 			if(section.index_dirty){
@@ -979,11 +986,18 @@
 	{
 		m_cause = player_name;
 	}
+	// [KIT] stage 4e: every write but a generator's merge alters, and an
+	// unaltered section is not written (see api.h)
+	bool m_writes_alter = false, m_save_unaltered = true;
+	void set_writes_alter(bool on){ m_writes_alter = on; }
+	void set_save_unaltered(bool on){ m_save_unaltered = on; }
 	// A write while a player's action is handled. Into a section still
 	// being generated too: what a player put there is kept either way.
-	void note_cause(Section *section)
+	// merge: a generator's (only a player's action alters by it)
+	void note_cause(Section *section, bool merge = false)
 	{
-		if(!m_cause.empty() && !section->altered){
+		const bool alters = !m_cause.empty() || (m_writes_alter && !merge);
+		if(alters && !section->altered){
 			section->altered = true;
 			section->index_dirty = true;
 		}

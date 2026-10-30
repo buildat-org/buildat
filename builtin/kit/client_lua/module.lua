@@ -1584,6 +1584,13 @@ buildat.sub_packet("kit:items", function(data)
 	log:info("kit: items: " .. (#t > 0 and table.concat(t, ", ") or "none"))
 end)
 
+-- [KIT] stage 4e: the World's word to builders (a refusal, the seams of a
+-- regeneration, what applies at the next start)
+buildat.sub_packet("kit:warning", function(data)
+	log:info("kit: warning: " .. tostring(data))
+	ui_utils.show_notification(tostring(data), 8)
+end)
+
 -- The Stop notice: the round's builds were discarded, who built them when
 -- others did; a builder may keep them (here, or the tools' panel until the
 -- next Play). Not a dialog: it takes no focus and goes by itself

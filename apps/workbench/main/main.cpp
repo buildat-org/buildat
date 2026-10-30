@@ -1,21 +1,24 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 // Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 //
-// [KIT] Workbench: the blank app that only hosts Kit and its editor. A
-// flat stone floor (FLOOR_HALF each way from the origin, y 0) in a world of
-// 2x2 sections, the players walking on it (their client's physics, as
-// demo_digger's), Kit's own components (its starter set, author "kit",
-// their voxels filled by DEFAULTS) to place, set and link in Kit's editor,
-// and the voxels to build with. Edit rights are Kit's: the server's admin
+// [KIT] Workbench: the blank app that only hosts Kit and its editor. The
+// world is Kit's World ([KIT] stage 4e, kit/world on the app root): by
+// default a flat stone floor 64x64 round the origin, its top at y 0
+// (Kit's material set, biome "rock"), the players walking on it (their
+// client's physics, as demo_digger's); its generator, size and surface
+// the World's parameters in the editor. Kit's own components (its starter
+// set, author "kit") to place, set and link in Kit's editor, and Kit's
+// voxels (kit/stone...) and Workbench's own (glass, brick) to build with.
+// Edit rights are Kit's: the server's admin
 // (the launcher's own user) and the builders the admin makes. Those who
 // have them also dig and place voxels in play (a write routed to an owner
 // when a component owns the voxel), and so does anyone where a component
 // grants it (Kit's can_dig/can_place: a dig zone); everyone else plays
 // what was built. A player's dig or place is a build (Kit's
 // player_wrote), which a builder's Stop discards unless kept. The server
-// starts Running (Kit's, [KIT] stage 4c): the floor is laid as a
-// generator's (merged, not play's), and a builder's Stop puts the start
-// back, Play starts a round. One save, "world": the voxels, Kit's rows.
+// starts Running (Kit's, [KIT] stage 4c): the World is generated (merged,
+// not play's), and a builder's Stop puts the start back, Play starts a
+// round. One save, "world": the voxels, Kit's rows, a heightmap's map.
 #include "core/log.h"
 #include "core/json.h"
 #include "accounts/api.h"
@@ -32,6 +35,7 @@
 #include "interface/voxel.h"
 #include <cereal/archives/portable_binary.hpp>
 #include <array>
+#include <map>
 #include <cmath>
 #include <sstream>
 #define MODULE "main"
@@ -42,32 +46,39 @@ namespace pv = PolyVox;
 namespace magic = Urho3D;
 using interface::Event;
 
-// The floor's cells run -FLOOR_HALF...FLOOR_HALF-1 in x and z; the world
-// is the four sections round the origin (64 voxels each way)
-static const int FLOOR_HALF = 32;
-static const int WORLD_MIN = -64, WORLD_MAX = 63;
+// The cells a build may be at: Kit's World region (an infinite World
+// reaches that far; voxelworld refuses a write where nothing is loaded)
+static const int WORLD_XZ = kit::WORLD_SECTIONS_XZ * kit::WORLD_SECTION;
+static const int WORLD_Y0 = kit::WORLD_SECTION_Y0 * kit::WORLD_SECTION,
+		WORLD_Y1 = (kit::WORLD_SECTION_Y1 + 1) * kit::WORLD_SECTION - 1;
 // A player's position as Kit takes it: the middle of the cell their feet
 // are in, their body's centre this far over it when they stand (the
 // client's capsule is 1.7 tall); a put is a little over that
 static const double FEET_CELL = 0.35, PUT_OVER = 0.05;
-// The voxels: what a builder places (the first PLACEABLE), and those the
-// starter set's components showed their state with before they were
-// objects ([KIT] stage 4c; kept registered for the saves that have them)
-struct VoxelDef { const char *name; bool solid; };
-static const VoxelDef VOXELS[] = {
-	{"air", false}, {"stone", true}, {"glass", true}, {"wood", true},
-	{"brick", true}, {"grass", true},
-	{"button", true}, {"button_pressed", true}, {"lever_off", true},
-	{"lever_on", true}, {"door", true}, {"gate", true},
-};
-static const size_t PLACEABLE = 6; // air is not placed, it is a dig
+// Workbench's own voxels (its textures), and those the starter set's
+// components showed their state with before they were objects ([KIT]
+// stage 4c; kept registered for the saves that have them). Kit's material
+// set's are Kit's (register_voxels)
+static const char *OWN_VOXELS[] = {"glass", "brick", "button",
+	"button_pressed", "lever_off", "lever_on", "door", "gate"};
+// A save from before [KIT] stage 4e names its voxels bare
+static const std::map<ss_, ss_> ALIASES = {{"stone", "kit/stone"},
+	{"grass", "kit/grass"}, {"wood", "kit/planks"},
+	{"glass", "workbench/glass"}, {"brick", "workbench/brick"},
+	{"button", "workbench/button"},
+	{"button_pressed", "workbench/button_pressed"},
+	{"lever_off", "workbench/lever_off"}, {"lever_on", "workbench/lever_on"},
+	{"door", "workbench/door"}, {"gate", "workbench/gate"}};
+// What a builder places (the client's keys); "air" is a dig
+static const char *PLACEABLE[] = {"air", "kit/stone", "workbench/glass",
+	"kit/planks", "workbench/brick", "kit/grass", "kit/dirt", "kit/sand",
+	"kit/log", "kit/leaves", "kit/water", "kit/gravel", "kit/cobble"};
 
 struct Module: public interface::Module
 {
 	interface::Server *m_server;
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
-	bool m_floor = false;
 	sm_<size_t, ss_> m_names; // peer -> the name Kit knows them by
 	// peer -> how many times the server has put them: a position the
 	// client sent before it heard of the last is not taken (a teleport
@@ -83,7 +94,6 @@ struct Module: public interface::Module
 	void init()
 	{
 		sub(m_server, "core:start", &Module::on_start);
-		sub(m_server, "core:tick", &Module::on_tick);
 		sub(m_server, "client_file:files_transmitted", &Module::on_files);
 		sub(m_server, "network:packet_received/main:player_pos",
 				&Module::on_player_pos);
@@ -108,69 +118,57 @@ struct Module: public interface::Module
 			m_server->shutdown(1, "workbench: no save");
 			return;
 		}
+		// Kit's World's region, loaded only where Kit's load points say
+		const int XZ = kit::WORLD_SECTIONS_XZ;
 		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
-			ivw->create_instance(m_scene, pv::Region(-1, 0, -1, 0, 0, 0));
-			voxelworld::Instance *world = ivw->get_instance(m_scene);
-			interface::VoxelRegistry *reg = world->get_voxel_reg();
+			ivw->create_instance(m_scene, pv::Region(-XZ, kit::WORLD_SECTION_Y0,
+					-XZ, XZ - 1, kit::WORLD_SECTION_Y1, XZ - 1));
+		});
+		interface::VoxelRegistry *reg = nullptr;
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			w->set_load_points({});
+			reg = w->get_voxel_reg();
 			interface::VoxelFormat f;
 			f.id = interface::VoxelField{0, 0, 16};
 			reg->set_format(f);
-			for(const VoxelDef &v : VOXELS){
+			interface::VoxelDefinition air;
+			air.name.block_name = "air";
+			air.fully_empty = true;
+			reg->add_voxel(air);
+			for(const char *v : OWN_VOXELS){
 				interface::VoxelDefinition def;
-				def.name.block_name = v.name;
-				def.fully_empty = !v.solid;
-				def.physically_solid = v.solid;
-				if(v.solid){
-					def.edge_material_id = interface::EDGEMATERIALID_GROUND;
-					for(auto &seg : def.textures){
-						seg.resource_name = ss_("main/")+v.name+".png";
-						seg.total_segments = magic::IntVector2(1, 1);
-						seg.select_segment = magic::IntVector2(0, 0);
-					}
+				def.name.block_name = ss_("workbench/")+v;
+				def.physically_solid = true;
+				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
+				for(auto &seg : def.textures){
+					seg.resource_name = ss_("main/")+v+".png";
+					seg.total_segments = magic::IntVector2(1, 1);
+					seg.select_segment = magic::IntVector2(0, 0);
 				}
 				reg->add_voxel(def);
 			}
-			world->set_save(m_save, "main");
 		});
-		ss_ v;
-		m_floor = m_save->store("main")->get("floor", v);
+		// Kit's voxels (its material set's); the registry is the world's
+		// and takes them from any thread
+		kit::access(m_server, [&](kit::Interface *k){
+			k->register_voxels(reg);
+		});
+		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
+			w->set_name_aliases(ALIASES);
+			w->set_save(m_save, "main");
+		});
 		kit::Host h;
 		h.composition_path = m_server->get_module_path(MODULE)+
 				"/composition.json";
 		h.save = m_save;
 		h.scenes["world"] = m_scene;
 		h.moves_players = true;
+		// The World: Workbench's floor, stone, unless the composer says
+		// otherwise
+		h.world_scene = "world";
+		h.defaults = "{\"kit/world\": {\"biome\": \"rock\"}}";
 		if(!kit::host(m_server, h))
 			m_server->shutdown(1, "workbench: Kit is not hosted");
-	}
-
-	// The floor, once in the save's life: what was dug out of it stays dug.
-	// Merged as a generator's voxels, so it is the start, not play's
-	void on_tick(const interface::TickEvent &)
-	{
-		if(m_floor)
-			return;
-		voxelworld::access(m_server, m_scene, [&](voxelworld::Instance *w){
-			for(int x = -1; x <= 0; x++)
-				for(int z = -1; z <= 0; z++)
-					if(!w->is_section_loaded(pv::Vector3DInt16(x, 0, z)))
-						return;
-			interface::VoxelName stone;
-			stone.block_name = "stone";
-			const interface::VoxelInstance s(w->get_voxel_reg()->get(stone)->id);
-			interface::VoxelVolume v(pv::Region(-FLOOR_HALF, 0, -FLOOR_HALF,
-					FLOOR_HALF - 1, 0, FLOOR_HALF - 1));
-			for(int x = -FLOOR_HALF; x < FLOOR_HALF; x++)
-				for(int z = -FLOOR_HALF; z < FLOOR_HALF; z++)
-					v.setVoxelAt(x, 0, z, s);
-			w->merge_volume(v, false);
-			m_floor = true;
-		});
-		if(m_floor){
-			m_save->store("main")->set("floor", "1");
-			log_i(MODULE, "workbench: the floor laid, %ix%i",
-					FLOOR_HALF * 2, FLOOR_HALF * 2);
-		}
 	}
 
 	// main:spawn: the player put at x, y, z (their body's centre), and
@@ -220,11 +218,15 @@ struct Module: public interface::Module
 		spawn(peer);
 	}
 
-	// The middle of the floor, unless a spawner puts them elsewhere
+	// The middle of the World, unless a spawner puts them elsewhere
 	void spawn(size_t peer)
 	{
-		send_spawn(peer, 0.5, 1 + FEET_CELL + PUT_OVER, 0.5);
-		place(peer, 0.5, 1, 0.5);
+		double x = 0.5, y = 1, z = 0.5;
+		kit::access(m_server, [&](kit::Interface *k){
+			k->world_spawn(x, y, z);
+		});
+		send_spawn(peer, x, y + FEET_CELL + PUT_OVER, z);
+		place(peer, x, y, z);
 	}
 
 	// A round starts and no spawner places the player: the default
@@ -283,14 +285,15 @@ struct Module: public interface::Module
 		bool ok = p.is_array() && p.size() == 3;
 		int c[3] = {0, 0, 0};
 		for(unsigned k = 0; ok && k < 3; k++){
-			ok = p.at(k).is_number() && p.at(k).as_number() >= WORLD_MIN &&
-					p.at(k).as_number() <= WORLD_MAX;
+			const double lo = k == 1 ? WORLD_Y0 : -WORLD_XZ,
+					hi = k == 1 ? WORLD_Y1 : WORLD_XZ - 1;
+			ok = p.at(k).is_number() && p.at(k).as_number() >= lo &&
+					p.at(k).as_number() <= hi;
 			c[k] = ok ? (int)std::floor(p.at(k).as_number()) : 0;
 		}
-		ok = ok && c[1] >= 0;
 		bool placeable = false;
-		for(size_t i = 0; i < PLACEABLE; i++)
-			placeable = placeable || voxel == VOXELS[i].name;
+		for(const char *v : PLACEABLE)
+			placeable = placeable || voxel == v;
 		if(!ok || !placeable){
 			log_i(MODULE, "workbench: a build by peer %zu refused: not a "
 					"cell of the world and a voxel to build with", peer);

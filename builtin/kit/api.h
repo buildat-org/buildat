@@ -14,6 +14,10 @@ namespace storage
 {
 	struct Save;
 }
+namespace interface
+{
+	struct VoxelRegistry;
+}
 
 // **Kit** ([KIT], doc/plan's kit_plan.md): components any app can host.
 // The app's world is a tree of entities: the app the root (id 1), scenes
@@ -288,8 +292,38 @@ namespace storage
 // and the round at once -- a placed component's on_start and on_join for
 // those in its scene, a parameter changed with the state kept, a move, a
 // delete, an undo.
+//
+// Players ([KIT] 4d's answers): a guest's entity (no account, where
+// builtin/accounts is) is dropped when they leave or log in; leaving the
+// server leaves a zone (on_leave), and joining inside one enters it.
+//
+// **The World** ([KIT] stage 4e; world.h says how it is made): one
+// game-wide kit/world on the app root, its parameters the choices -- the
+// generator (empty, flat, noise, valleys), the seed, the biome, the size
+// (finite width x depth round the origin, baked; or infinite, only edited
+// sections saved, the generator's version pinned in the row "world"), a
+// finite map's border (void, wall, water) and the surface (voxels or
+// builtin/heightmap's map). An app that has one names its scene
+// (Host::world_scene) and creates its voxelworld instance with the region
+// WORLD_SECTIONS_XZ / WORLD_SECTION_Y0..Y1 and nothing loaded (Kit sets
+// the load points), and its voxels (register_voxels(): Kit's own
+// material set, materials.json) before the save. Generators work against
+// roles (stone, top, filler, water, riverbed, dust, cave_floor,
+// cave_wall) that a material set's biomes bind to voxels, never voxel
+// names; a role missing is refused, named. An edit of the World's
+// parameters generates again every section nobody wrote; a builder is
+// sent "kit:warning" (text) for the seams, a refusal, and what applies
+// at the next start. Voxel objects ([VOXEL_OBJECTS]) on a heightmap are
+// their own entities once they exist, not the World's.
 namespace kit
 {
+	// The World's voxelworld region, in sections (voxelworld's, WORLD_SECTION
+	// voxels a side): what an infinite world may reach, -16384...16383
+	// each way, -128...255 up
+	static const int WORLD_SECTION = 64;
+	static const int WORLD_SECTIONS_XZ = 256;
+	static const int WORLD_SECTION_Y0 = -2, WORLD_SECTION_Y1 = 3;
+
 	struct Host
 	{
 		// The app's component types, <types_path>/<name>.lua ("": none of
@@ -320,6 +354,12 @@ namespace kit
 		// the event "kit:move_player" (MovePlayer). False: a teleport is
 		// refused
 		bool moves_players = false;
+		// [KIT] stage 4e: the scene (a name in `scenes`) the World makes,
+		// "" for none (kit/world not in the palette)
+		ss_ world_scene;
+		// The material set (JSON, world.h's format) binding the roles to
+		// the app's voxels; "": Kit's own (materials.json)
+		ss_ materials;
 	};
 
 	// kit:move_player: a component moves a player (c:teleport); the app
@@ -394,6 +434,12 @@ namespace kit
 		// Stopped
 		virtual void player_wrote(size_t peer, int x, int y, int z,
 				bool build = true) = 0;
+		// [KIT] stage 4e: Kit's material set's voxels (kit/stone...)
+		// registered, the ones not there yet: before set_save()
+		virtual void register_voxels(interface::VoxelRegistry *reg) = 0;
+		// Where a player stands at the World's middle: x, z, and y the
+		// cell their feet are in (a heightmap's: its surface + 0.5)
+		virtual void world_spawn(double &x, double &y, double &z) = 0;
 	};
 
 	inline bool access(interface::Server *server,

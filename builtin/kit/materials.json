@@ -1,0 +1,32 @@
+{
+	"format": "kit_materials",
+	"author": "kit",
+	"name": "default",
+	"comment": "[KIT] stage 4e: Kit's own material set, Workbench's (builtin/kit/world.h says the format). The textures are skeldat's (client_data/, README.txt); heightmap is the layer of builtin/heightmap's ground textures with the same pixels.",
+	"voxels": {
+		"kit/stone": {"texture": "kit/stone.png", "heightmap": 1},
+		"kit/cobble": {"texture": "kit/cobble.png"},
+		"kit/dirt": {"texture": "kit/dirt.png", "heightmap": 3},
+		"kit/grass": {"top": "kit/grass_top.png", "side": "kit/grass_side.png",
+			"bottom": "kit/dirt.png", "heightmap": 0},
+		"kit/sand": {"texture": "kit/sand.png", "heightmap": 2},
+		"kit/gravel": {"texture": "kit/gravel.png", "heightmap": 4},
+		"kit/water": {"texture": "kit/water.png", "kind": "water"},
+		"kit/log": {"top": "kit/tree_top.png", "side": "kit/tree.png",
+			"bottom": "kit/tree_top.png"},
+		"kit/leaves": {"texture": "kit/leaves.png", "kind": "leaves"},
+		"kit/planks": {"texture": "kit/wood.png"}
+	},
+	"fallbacks": {
+		"top": "filler", "filler": "stone", "riverbed": "filler",
+		"cave_floor": "stone", "cave_wall": "stone"
+	},
+	"biomes": {
+		"grassland": {"top": "kit/grass", "filler": "kit/dirt",
+			"filler_depth": 3, "stone": "kit/stone", "water": "kit/water",
+			"riverbed": "kit/sand", "cave_floor": "kit/gravel"},
+		"desert": {"top": "kit/sand", "filler": "kit/sand", "filler_depth": 4,
+			"stone": "kit/stone", "water": "kit/water", "riverbed": "kit/sand"},
+		"rock": {"stone": "kit/stone", "riverbed": "kit/gravel"}
+	}
+}

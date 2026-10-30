@@ -7,7 +7,8 @@
 --   E, or the right button on a component: use it
 --   (with edit rights, or where a component grants it) the left button
 --   digs, the right one places;
---   1...5 the voxel placed (stone, glass, wood, brick, grass)
+--   1...9, 0 the voxel placed (Kit's stone, Workbench's glass, Kit's
+--   planks, Workbench's brick, Kit's grass, dirt, sand, log, leaves, water)
 --   F6 or the menu's "Edit": Kit's editor; there the pointer is free for
 --   its clicks, and the right button held looks round. The menu's "Play"
 --   and "Stop" (a builder's): the server Running or Stopped ([KIT] 4c)
@@ -33,7 +34,12 @@ local MOVE_SPEED = 6
 local JUMP_SPEED = 7
 local PLAYER_ACCELERATION = 40
 local REACH = 6
-local MATERIALS = {"stone", "glass", "wood", "brick", "grass"}
+local MATERIALS = {"kit/stone", "workbench/glass", "kit/planks",
+	"workbench/brick", "kit/grass", "kit/dirt", "kit/sand", "kit/log",
+	"kit/leaves", "kit/water"}
+-- [KIT] stage 4e: a World on a heightmap surface (builtin/heightmap's
+-- client, loaded by Kit's dependency)
+local heightmap = require("buildat/module/heightmap")
 
 local scene = replicate.main_scene
 local material = 1
@@ -107,6 +113,23 @@ do
 end
 voxelworld.set_camera(camera_node)
 
+-- Kit's water (translucent voxels, a chunk's child "alpha") alpha blended
+-- simplified: leaves (alpha masked, "masked") keep the plain technique,
+-- drawn whole; a cut-out technique is the upgrade
+voxelworld.sub_material_update(function(node)
+	local alpha = node:GetChild("alpha")
+	local cg = alpha and alpha:GetComponent("CustomGeometry")
+	if not cg then
+		return
+	end
+	local i = 0
+	while cg:GetMaterial(i) do
+		cg:GetMaterial(i):SetTechnique(0, magic.cache:GetResource("Technique",
+				"Techniques/DiffAlpha.xml"))
+		i = i + 1
+	end
+end)
+
 local touches_ground = false
 local physics_on = false
 local spawned = false
@@ -114,6 +137,9 @@ local spawned = false
 -- Physics once there is a floor with its collision under the feet: the
 -- volume arrives before Bullet's boxes
 local function floor_ready()
+	if heightmap.terrain then
+		return true
+	end
 	local p = player_node:GetWorldPosition()
 	local floor = magic.Vector3(p.x, p.y - PLAYER_HEIGHT / 2 - 0.25, p.z)
 	if voxelworld.get_static_voxel(floor).id < 2 then
@@ -139,6 +165,8 @@ body.mass = 0
 -- nothing is sent
 local moves = 0
 local put, put_frames = nil, 0
+-- Where the server put the player last: a fall out of the world ends there
+local spawn_at = magic.Vector3(0.5, 3, 0.5)
 local function send_pos()
 	local p = player_node:GetWorldPosition()
 	if put then
@@ -165,6 +193,7 @@ buildat.sub_packet("main:spawn", function(data)
 	log:info("the server put the player at (" .. v.x .. ", " .. v.y .. ", " ..
 			v.z .. ")")
 	put, put_frames = magic.Vector3(v.x, v.y, v.z), 0
+	spawn_at = put
 	player_node.position = put
 	body.linearVelocity = magic.Vector3(0, 0, 0)
 	spawned = true
@@ -232,6 +261,10 @@ end
 -- Kit's items in the pause menu in place of its top bar
 kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 	solid = function(x, y, z)
+		local h = heightmap.height_at(x, z)
+		if h and y < h then
+			return true
+		end
 		-- 0: not there, 1: air
 		return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
 	end}
@@ -264,8 +297,10 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 		log_in()
 	elseif key == magic.KEY_E and not editing then
 		use_pointed()
-	elseif key >= magic.KEY_1 and key < magic.KEY_1 + #MATERIALS then
+	elseif key >= magic.KEY_1 and key <= magic.KEY_9 then
 		material = key - magic.KEY_1 + 1
+	elseif key == magic.KEY_0 then
+		material = 10
 	end
 end)
 
@@ -301,8 +336,28 @@ magic.SubscribeToEvent("Update", function(_, data)
 		send_pos()
 	end
 	physics()
-	if player_node.position.y < -20 then
-		player_node.position = magic.Vector3(0.5, 3, 0.5)
+	-- Below the World's region: back where the server put them
+	if player_node.position.y < -140 then
+		player_node.position = spawn_at
+		body.linearVelocity = magic.Vector3(0, 0, 0)
+	end
+	-- A heightmap surface has no collision on the client: the feet are
+	-- kept on it
+	-- simplified: a floor under the capsule's middle, no slope or wall;
+	-- a heightfield shape on the client (CollisionShape::SetTerrain) is
+	-- the upgrade
+	if physics_on and heightmap.terrain then
+		local p = player_node.position
+		local h = heightmap.height_at(p.x, p.z)
+		if h and p.y - PLAYER_HEIGHT / 2 < h then
+			player_node.position = magic.Vector3(p.x, h + PLAYER_HEIGHT / 2, p.z)
+			local bv = body.linearVelocity
+			if bv.y < 0 then
+				bv.y = 0
+				body.linearVelocity = bv
+			end
+			touches_ground = true
+		end
 	end
 	local mx, my = ui_utils.mouse_look_move()
 	if menu.held() then
@@ -365,7 +420,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 			"Editing: click to select or place, right button held looks; " ..
 			"F6 leaves  Esc: menu" or
 			"WASD Space: walk, jump  E: use  left: dig  right: place/use  " ..
-			"1-5: voxel  F6: edit  L: log in  Esc: menu")
+			"0-9: voxel  F6: edit  L: log in  Esc: menu")
 end)
 
 -- PhysicsCollision is only sent on a Bullet step: the grounded flag is the

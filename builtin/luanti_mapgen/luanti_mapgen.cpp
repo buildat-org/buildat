@@ -304,7 +304,7 @@ typedef SectionStore<SectionMaps> MapsStore;
 // node ids by name, the seed and the parameters. Nothing here touches a
 // module -- this runs in worldgen's thread.
 struct VendoredGenerator: public worldgen::GeneratorInterface,
-		public luanti_mapgen::BiomeQuery
+		public luanti_mapgen::BiomeQuery, public luanti_mapgen::SurfaceQuery
 {
 	// Luanti's mapgens write a chunk plus one mapblock around it, which is
 	// where a tree at the edge or a cave's mouth lands
@@ -1330,6 +1330,16 @@ struct Module: public interface::Module, public luanti_mapgen::Interface
 	BiomeQuery* biome_query(const Params &params)
 	{
 		return query_generator(params);
+	}
+
+	SurfaceQuery* create_surface_query(const Params &params)
+	{
+		if(params.mgname != "valleys")
+			return nullptr;
+		Params bare = params;
+		bare.ores.clear();
+		bare.decorations.clear();
+		return new VendoredGenerator(bare, bare.section_size);
 	}
 
 	CNoiseQuery m_noise_query;
