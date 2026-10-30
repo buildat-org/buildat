@@ -2773,7 +2773,7 @@ magic.Rect: max, min
 magic.RenderPath: Append, Clone, GetCommand, GetNumCommands, Load, SetEnabled, SetShaderParameter, ToggleEnabled
 magic.RenderPathCommand: RemoveShaderParameter, SetShaderParameter, SetTextureName, enabled, pass, type
 magic.RenderSurface: QueueUpdate, SetViewport, updateMode
-magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, occluderSizeThreshold, shadowMapSize, shadowQuality
+magic.Renderer: DrawDebugGeometry, GetViewport, HDRRendering, SetViewport, drawShadows, maxOccluderTriangles, numBatches, numPrimitives, occluderSizeThreshold, shadowMapSize, shadowQuality
 magic.Resource: name
 magic.ResourceCache: AddManualResource, Exists, GetResource
 magic.RibbonTrail: emitting, endColor, endScale, lifetime, material, sorted, startColor, startScale, trailType, vertexDistance, width
@@ -3093,6 +3093,7 @@ magic.TU_NORMAL:
 magic.TU_NORMALBUFFER: 
 magic.TU_SPECULAR: 
 magic.Technique: 
+magic.Terrain: GetHeight, SetCastShadows, SetHeightMap, SetOccluder, SetSpacing, drawDistance, lodBias, material, maxLodLevels, patchSize, smoothing
 magic.Text: AddBoldRange, ClearSelection, SetColor, SetFontSize, SetHoverColor, SetSelection, SetSelectionColor, SetTextAlignment, SetTextEffect, SetWordwrap, effectColor, selectionLength, selectionStart, text
 magic.Text3D: SetAlignment, SetColor, SetFont, effectColor, effectStrokeThickness, faceCameraMode, fixedScreenSize, fontSize, material, opacity, text, textEffect, width, wordwrap
 magic.Texture: SetNumLevels, filterMode, height, width
@@ -3101,7 +3102,7 @@ magic.TextureCube: GetRenderSurface, SetData, SetSize, new
 magic.Time: GetElapsedTime, frameNumber, timeStep
 magic.ToolTip: delay
 magic.UI: GetScale, SetClipboardText, SetFocusElement, SetUseSystemClipboard, focusElement, root, scale
-magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
+magic.UIElement: CreateChild, GetCaret, GetChild, GetName, GetNumChildren, GetText, GetTypeName, HasFocus, HasRecursiveFocus, IsCaretOnLastRow, IsDrawnOver, IsMultiLine, Remove, RemoveAllChildren, RemoveChild, SetAlignment, SetFixedHeight, SetFixedSize, SetFixedWidth, SetFocus, SetFocusMode, SetFont, SetLayout, SetName, SetPosition, SetStyle, SetStyleAuto, SetText, SetVar, SetVisible, WheelTakenAt, ar, br, bringToFront, clipChildren, color, defaultStyle, enabled, fixedHeight, fixedSize, fixedWidth, height, horizontalAlignment, maxHeight, maxWidth, minHeight, minSize, minWidth, opacity, position, priority, screenPosition, selected, size, t, verticalAlignment, visible, width
 magic.UnsubscribeFromEvent: 
 magic.VAR_BOOL: 
 magic.VAR_BUFFER: 
@@ -3155,7 +3156,7 @@ extension.blip: pack, params, play, play_cached, preset, self_check, sound, stre
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
 extension.serverlist: refresh, servers
-extension.ui_utils: add_paged, bind_button_menu, check_setting, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, rgb, scan_pixels, scan_ui, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
+extension.ui_utils: add_paged, bind_button_menu, check_setting, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----
 
 

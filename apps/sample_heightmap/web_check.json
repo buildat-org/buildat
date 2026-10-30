@@ -1,0 +1,10 @@
+[
+	["nav", "${URL}"],
+	["waitlog", "heightmap: terrain built", 120],
+	["wait", 2500],
+	["shot", "${OUT}/hills.png"],
+	["key", "c"],
+	["waitlog", "the crater reached this client", 30],
+	["wait", 4500],
+	["shot", "${OUT}/crater.png"]
+]

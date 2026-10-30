@@ -1,0 +1,14 @@
+{
+	"engine_api": 2,
+	"kind": "check",
+	"client_main": "init.lua",
+	"dependencies": [
+		{"module": "network"},
+		{"module": "client_lua"},
+		{"module": "client_data"},
+		{"module": "main_context"},
+		{"module": "replicate"},
+		{"module": "storage"},
+		{"module": "heightmap"}
+	]
+}
