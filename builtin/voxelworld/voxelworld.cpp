@@ -997,10 +997,16 @@ struct CInstance: public voxelworld::Instance
 		// A flood the commit's budget left is carried on here when no game
 		// does it by relight_stale() (luanti does, every step): a world
 		// generated in one piece stayed dark below the sky's seeds, its
-		// flood pending for good ([VOXEL_LIGHTING_CAVE])
+		// flood pending for good ([VOXEL_LIGHTING_CAVE]). **Committed when
+		// it is done**: the light lands in the buffers, and only a commit
+		// takes it to the scene and the clients -- without one, a world
+		// nobody edits drew its first commit's light for good, which was
+		// sample_lighting_scene's whole cave dark and every shaded face
+		// without its sky ([CAVE_SPECULAR])
 		if(m_relight_pending &&
-				tick_t0 - m_relight_stale_us > RELIGHT_IDLE_US)
-			relight_continue(tick_t0 + TICK_RELIGHT_BUDGET_US);
+				tick_t0 - m_relight_stale_us > RELIGHT_IDLE_US &&
+				relight_continue(tick_t0 + TICK_RELIGHT_BUDGET_US))
+			commit();
 
 		if(m_initial_sections_pending){
 			// A world that streams says where it wants sections; the region
