@@ -316,7 +316,8 @@ if [ -n "$list_only" ]; then
 fi
 # **What the runners leave is pruned by age** ([REWORK_1019_FIXES] build
 # 2): the scripted client's cache and the vanilla saves the runners make
-# in local/check grew to 12 GB. Files, and save directories, untouched
+# in local/check grew to 12 GB, and the failed checks' logs
+# (check_lib's local/check/failed). Files, and directories, untouched
 # for PRUNE_DAYS (7); links are not followed. Its size said before and
 # after.
 check_dir="$root/local/check"
@@ -326,6 +327,8 @@ if [ -d "$check_dir" ]; then
 		-delete 2>/dev/null
 	find "$check_dir/cache/scripted" -mindepth 1 -type d -empty -delete 2>/dev/null
 	find "$check_dir/user/apps/vanilla/saves" -mindepth 1 -maxdepth 1 -type d \
+		-mtime +"${PRUNE_DAYS:-7}" -exec rm -rf {} + 2>/dev/null
+	find "$check_dir/failed" -mindepth 1 -maxdepth 1 -type d \
 		-mtime +"${PRUNE_DAYS:-7}" -exec rm -rf {} + 2>/dev/null
 	echo "local/check: $before, $(du -sh "$check_dir" 2>/dev/null | cut -f1) after" \
 		"pruning what is over ${PRUNE_DAYS:-7} days old"
