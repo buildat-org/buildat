@@ -5,7 +5,7 @@
 -- The pause menu, Escape's: Continue, Chat, Settings and Leave; and the
 -- death screen, up while the hit points are none, whose Respawn asks the
 -- server for one. The chat is builtin/chat's, its console builtin/accounts'
--- (game.chat(), the chat key's) and its menu (mute, report) the chat's.
+-- (game.chat(), the chat key's), its People... (mute, report) the chat's.
 -- An admin has Admin...: the players, each one's inventory to give an
 -- item to or take a stack from, invulnerability on and off, and the audit
 -- log of them.
@@ -324,19 +324,6 @@ return function(game, declare_keys)
 		admin_page()
 	end
 
-	local function chat_menu()
-		uistack.main:pop(root)
-		root = nil
-		chat.open(function(close_chat, window)
-			if close_chat then
-				game.hold(close_chat, window)
-			else
-				unhold()
-				pending = open
-			end
-		end)
-	end
-
 	-- The client's settings window ([GAME_SETTINGS]): sound, video, the
 	-- game's keys and the client's. The world stays held while it is up;
 	-- its own Escape and Close shut it
@@ -494,7 +481,6 @@ return function(game, declare_keys)
 			end)
 		end
 		menu:add("Chat...", function() console(true) end)
-		menu:add("Who's in the chat...", chat_menu)
 		-- [SKELDAT_PAUSE_ACCOUNT] accounts' own page, Log out on it; its
 		-- Back to this menu
 		local me = accounts.who()

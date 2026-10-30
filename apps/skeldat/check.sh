@@ -215,20 +215,29 @@ for d in "1 0" "-1 0" "0 1" "0 -1"; do
 done
 water="$water$(for y in 0 1 2 3; do echo " marker 0 0 skeldat:water_source 0;"; done)"
 
-# 1. Two players. client1's pause menu, after its chat page, closed by a
-# click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin first
+# 1. Two players. client1's console's People... page reports client2 and
+# its Back is the console again ([CHAT_PEOPLE_BUTTON]); the pause menu
+# closed by a click off it ([SKELDAT_PAUSE_CLOSE]), a click on its margin
+# first
 cat > "$t/a1.cmds" <<EOF
 $placed
 wait_log 60000 chat: <client2> hello from client2
-keypress Escape
-wait_log 5000 pause: the menu shown
+keypress T
+wait_log 5000 pause: the chat shown
 delay 500
-click Button "Who's in the chat..."
-wait_log 5000 chat: the menu shown
+click Button "People..."
+wait_log 5000 chat: the people shown
 delay 1000
+screenshot $t/people.png
 click Button "Report client2"
 delay 1000
-click Button "Close"
+click Button "Back"
+wait_log 5000 chat page: y
+delay 500
+screenshot $t/people_back.png
+click Button "Back"
+wait_log 5000 pause: the chat closed
+keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 mouse_pos 338 250
@@ -366,12 +375,13 @@ cat > "$t/a2.cmds" <<EOF
 $placed
 wait_log_any 5000 skeldat: role admin
 delay 2000
-keypress Escape
-wait_log 5000 pause: the menu shown
+keypress T
+wait_log 5000 pause: the chat shown
 delay 500
-click Button "Who's in the chat..."
-wait_log 5000 chat: the menu shown
+click Button "People..."
+wait_log 5000 chat: the people shown
 delay 5000
+screenshot $t/people_mod.png
 click Button "Mute client2"
 delay 1500
 click DropDownList "▼"
@@ -379,7 +389,12 @@ delay 500
 keypress Down
 keypress Return
 delay 1500
-click Button "Close"
+click Button "Back"
+wait_log 5000 chat page: y
+delay 500
+click Button "Back"
+wait_log 5000 pause: the chat closed
+keypress Escape
 wait_log 5000 pause: the menu shown
 delay 500
 click Button "Admin..."
