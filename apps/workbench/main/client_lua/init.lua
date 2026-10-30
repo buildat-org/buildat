@@ -91,7 +91,12 @@ body.gravityOverride = magic.Vector3(0, -15.0, 0)
 body.collisionEventMode = magic.COLLISION_ALWAYS
 player_shape:SetCapsule(PLAYER_WIDTH, PLAYER_HEIGHT)
 
-local camera_node = player_node:CreateChild("Camera")
+-- The yaw on a node of its own: the body's node is the physics', which a
+-- step between frames sets back to the body's rotation of the last step,
+-- undoing a turn of the mouse ([WORKBENCH_CHECK_FLAKY]: a scripted look
+-- read 180 degrees as 120 and the dig went a cell off)
+local yaw_node = player_node:CreateChild("Yaw")
+local camera_node = yaw_node:CreateChild("Camera")
 camera_node.position = magic.Vector3(0, 0.411 * PLAYER_HEIGHT, 0)
 do
 	local camera = camera_node:CreateComponent("Camera")
@@ -315,7 +320,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 	if pitch > 89 or pitch < -89 then
 		camera_node:Pitch(-my * 0.1)
 	end
-	player_node:Yaw(mx * 0.1)
+	yaw_node:Yaw(mx * 0.1)
 
 	local want = magic.Vector3(0, 0, 0)
 	local fwd, side = 0, 0
@@ -327,7 +332,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		fwd, side = 0, 0
 	end
 	if fwd ~= 0 or side ~= 0 then
-		local u = player_node.direction
+		local u = yaw_node.worldDirection
 		local v = u:CrossProduct(magic.Vector3(0, 1, 0))
 		want = (u * fwd + v * side):Normalized() * MOVE_SPEED
 	end

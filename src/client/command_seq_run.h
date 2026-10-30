@@ -532,7 +532,13 @@
 		case Type::Event:
 			{
 				// Sent now, in the sequence's own frame; the receiver
-				// answers in the log, which is what a test reads
+				// answers in the log, which is what a test reads. Not in
+				// the frame input went in: the game reads that in the
+				// frame after, and a click's dig went out after the
+				// packet of an event later in the sequence
+				// ([KIT_DIG_STOP_ORDER])
+				if(m_input_frame == m_frame_count)
+					return false;
 				magic::VariantMap data;
 				data["Param"] = magic::String(c.param.c_str());
 				SendEvent(magic::StringHash(
@@ -554,6 +560,8 @@
 		}
 		if(!ok)
 			command_seq_fail(err);
+		else if(c.type != Type::Event)
+			m_input_frame = m_frame_count;
 		return ok;
 	}
 
@@ -757,6 +765,11 @@
 			if(c.type == Type::Idle || c.type == Type::Sync){
 				const bool idle = c.type == Type::Idle;
 				const char *name = idle ? "idle" : "sync";
+				// A sync from the frame the game read the input before it
+				// in: its packets go out before the sync's
+				if(!idle && m_drive_wait_until_us < 0 &&
+						m_input_frame == m_frame_count)
+					return;
 				if(m_drive_wait_until_us < 0){
 					m_drive_wait_until_us = now + c.n * 1000;
 					m_drive_wait_frame = m_frame_count;

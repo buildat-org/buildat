@@ -427,8 +427,18 @@ struct Module: public interface::Module, public Interface
 	void init()
 	{
 		sub(m_server, "core:tick", &Module::on_tick);
-		sub(m_server, "network:packet_received/kit:use", &Module::on_use);
-		sub(m_server, "network:packet_received/kit:edit", &Module::on_edit);
+		// [KIT_DIG_STOP_ORDER] A client's kit packets are handled once
+		// every module has handled what the client sent before them: a dig
+		// (the app's packet, its module's thread) sent just before a Stop
+		// is a build the Stop sees. Both kinds, so they keep their order
+		for(const ss_ kind : {"use", "edit"})
+			sub<network::Packet>(m_server, "network:packet_received/kit:"+kind,
+					[this, kind](const network::Packet &p){
+				m_server->emit_event_after_queued(interface::Event(
+						"kit:"+kind+"_through", new network::Packet(p)));
+			});
+		sub(m_server, "kit:use_through", &Module::on_use);
+		sub(m_server, "kit:edit_through", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 		sub(m_server, "accounts:privs", &Module::on_privs);
 		sub(m_server, "voxelworld:section_loaded", &Module::on_section_loaded);
