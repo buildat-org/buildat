@@ -695,11 +695,15 @@ grep -aq "the one with the most markers (5, at 0 0)" "$log12" ||
 	fail "the lantern did not lure as five markers ($log12)"
 # 9. With a player at noon: a skeleton beside a lantern takes it, burns
 # and leaves it where it died, its bones dropped; the player digs a
-# marker skull and places it again
+# marker skull and places it again. The skeleton and the lantern 20 off,
+# past SHELTER_RANGE (16) of the skull's sun shelter ([SKELDAT_SUN_IN_BONES]:
+# at 4 off it found the shelter by the skull or not by the order of the
+# test's spawns, and sheltered it never died), and its hp 4: dead in two
+# burns, before it walks into range ([SKELDAT_LANTERN_RED])
 log13="$t/srv13.log"
 BUILDAT_SKELDAT_WORLD=take BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.5 BUILDAT_SKELDAT_SPAWN="0 0" \
-	BUILDAT_SKELDAT_LANTERNS="4 0 2" BUILDAT_SKELDAT_TEST="skeleton 4 1 marked; marker 0 1" \
+	BUILDAT_SKELDAT_LANTERNS="20 0 2" BUILDAT_SKELDAT_TEST="skeleton 20 1 marked hp 4; marker 0 1" \
 	start_server "$log13" "STATUS Listening" 300 auto \
 	"$here/Build/bin/buildat_server" -m "$here/apps/skeldat" \
 	-D "$t/srv13" -C "$t/srv.cache" -l 3 || fail "the server ($log13)"
@@ -713,7 +717,7 @@ wait $CLIENT || fail "the drive by the lantern ($t/take.log)"
 wait_for_log "$log13" "the lantern left at" 30 ||
 	fail "the lantern not left where the skeleton died ($log13)"
 kill $SERVER_PID; wait $SERVER_PID 2>/dev/null
-grep -aq "a skeleton (1) takes the lantern at 4," "$log13" ||
+grep -aq "a skeleton (1) takes the lantern at 20," "$log13" ||
 	fail "the skeleton beside the lantern did not take it ($log13)"
 grep -aq "the skeleton (1) dies at .*, drops \[skeldat:bone" "$log13" ||
 	fail "the dead skeleton dropped no bones ($log13)"
