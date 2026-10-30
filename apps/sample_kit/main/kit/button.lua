@@ -6,7 +6,7 @@ return {
 	state = {presses = {default = 0, shared = true}},
 	on_use = function(c, by)
 		c.state.presses = c.state.presses + 1
-		c:log("pressed by", by, "times", c.state.presses)
+		c:log("pressed by", c:name(by), "times", c.state.presses)
 		c:emit("pressed")
 	end,
 }

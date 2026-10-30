@@ -71,21 +71,81 @@ namespace storage
 //                               they owned cleared)
 //   hud = "<shared state key>"  -- that state on every client's screen
 //   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
-//   on_timer(c), on_enter(c, by), on_leave(c, by), on_join(c, by)
-// c: c.id, c.pos, c.params (read), c.state (read and written),
-// c:emit(output, value), c:set_voxel(name) (each cell it owns),
+//   on_timer(c), on_enter(c, by), on_leave(c, by), on_join(c, by),
+//   on_params(c, changed) (a live edit changed its parameters: {name = the
+//   value before}), on_remove(c) (it is about to go: deleted while Running,
+//   removed by c:remove, or "Restart this" before its on_start)
+// c: c.id, c.pos, c.params (read), c.state (read and written; a table in
+// it changed in place is written too), c:emit(output, value),
+// c:set_voxel(name) (each cell it owns),
 // c:after(seconds) (on_timer then, on the game's clock; one an instance,
 // c:after() takes it back), c:teleport({x, y, z}) (the player who set the
-// run off, the app moving them on kit:move_player), c:log(...). A component
-// reaches its own entity and its links, and the player who set it off,
-// nothing else.
+// run off, the app moving them on kit:move_player), c:log(...) (the
+// server's log and the entity's own, which the inspector shows). A
+// component reaches its own entity and its links, the entities its entity
+// parameters name and the copies it made, and the player who set it off
+// (every player with `players = true`), nothing else.
+//
+// [KIT] stage 4d:
+//   Typed signals: inputs = {"a", b = "number"} (a name alone is "any"):
+//   any, none (no value), number, bool, string, entity, position. A link
+//   joins an output to an input that takes its values; an emitted or
+//   delivered value not of its type is logged and not sent.
+//   `by` is "player:<id>", the player's entity (a login keeps it), or
+//   "app"; c:name(by) the player's name, c.player their entity's id.
+//   Players are entities: each player has one in their scene (kind
+//   "player", made the first time they come, its id theirs from then on,
+//   1000000 and up),
+//   carrying each type with `player = true` -- Kit's kit/inventory (the
+//   default inventory provider) and kit/score -- not placed, not edited;
+//   their state is play state (the round's start resets it), kept in the
+//   runtime row (its "players": {name: {id, aside}}). A type with
+//   `players = true` reads every player: c.players = {{id, name, here,
+//   state = {type = state}}}.
+//   Entities made in play: c:spawn{prefab = name | entity = id, pos =
+//   {x, y, z}} (a copy of a prefab its prefab parameters name, or of an
+//   entity it reaches with what is under it, in its scene at pos or its
+//   own position; returns the copy's first id; on_start runs on each),
+//   c:remove(id) (an entity it reaches and what is under it; nil itself:
+//   on_remove first), c:send(id, input, value) (an input to an entity it
+//   reaches), c.made (its copies there now, each by its first id, which
+//   c:remove takes the whole copy by). They are play state: what
+//   play made is gone at Stop and what it removed back; a type with
+//   `builds = true` set off by a player makes builds (Stop's notice, Keep
+//   them, Always keep builds), others game changes. Save as start makes
+//   them the start's. MAX_MADE at once.
+//   Prefabs: a group of entities saved to place again, "<author>/<name>"
+//   as types are, in a file of its own (stage 5 publishes it):
+//     {"format": "kit_prefab", "author", "name", "version": n,
+//      "entities": [{"id": 1..., "parent": 0 (the scene) or an earlier
+//      member's id, "name", "pos" (from where a copy is placed),
+//      "components": [{"type", "version", "params", "links": [{"output",
+//      "to": a member's id, "input"}]}]}]}
+//   an entity parameter in it a member's id (0: none). Kit's and the
+//   app's are <types dir>/<name>.prefab.json; a builder's ({"op":
+//   "save_prefab"}, author their name) the save's row
+//   "prefab:<author>/<name>", over a file. A copy's members have new ids,
+//   their links and entity parameters among them made the copy's, and
+//   remember the prefab ({"prefab": {"of", "version", "member", "copy"}});
+//   a parameter set on a copy is its override. A parameter type "prefab"
+//   names one; a parameter's `choices` = {...} are the values it takes.
+//   Client parts: <name>.client.lua beside a type, sent to every client at
+//   join and run there as the client's own Lua is (client_lua/module.lua
+//   says what it gets).
+//   Looks: shape "wedge", rotation {x, y, z} (degrees), material (plain,
+//   metal, glass, glow), and "param:<name>" anywhere in a look is that
+//   parameter's value (kit/part).
+//   Debugging: the builders with the tools on are sent each tick's signals
+//   along links ("kit:flow" [[from, output, to, input]...], their lines
+//   lit) and their selection's log ("kit:log" {"id", "lines"}).
 //
 // That player's inventory: c:count(item, ext) (how many), c:add(item, n,
 // ext) (c:give the same), c:take(item, n, ext) (all n or none: true if
 // taken), c:list(ext) ({item = n}), c:has(item, n, ext) (count >= n); n is
 // 1 if left out, an item letters, digits and _, ext a free-form table the
-// provider may read (nil: {}). Kit's own counts are the provider, kept in
-// the runtime row; one component may replace them: a type with
+// provider may read (nil: {}). The provider is the player entity's own
+// kit/inventory ([KIT] stage 4d; Kit's counts before); one component may
+// replace it for every player: a type with
 //   inventory = true, inventory_count(c, player, item, ext),
 //   inventory_add(c, player, item, n, ext) (true if added),
 //   inventory_take(c, player, item, n, ext) (true if taken, all or none),
@@ -94,8 +154,8 @@ namespace storage
 // the app, its c its own (its state written as by its own runs). A second
 // is refused, logged. After a run that called them, the player's list is
 // sent to their client. A provider whose call runs past the caller's
-// budget is disabled itself (logged), not the caller, and Kit's own counts
-// are the inventory from then on.
+// budget is disabled itself (logged), not the caller, and the players'
+// own kit/inventory is the inventory from then on.
 //
 // Voxel writes (c:set_voxel, owns_voxel) are game changes, unless the type
 // has `builds = true`: then a build of the player who set the run off
@@ -140,7 +200,12 @@ namespace storage
 //   {"op": "mode", "on": true|false}
 //   {"op": "place", "type": t, "pos": [x, y, z]}  -- a new entity in the
 //       editor's scene with an instance of t (the palette: every
-//       type of Kit's and of the app's that loads), its id the next
+//       type of Kit's and of the app's that loads), its id the next; a
+//       position on a 1/16 cell's grid
+//   {"op": "place", "prefab": name, "pos": [x, y, z]}  -- a prefab's copy
+//   {"op": "save_prefab", "ids": [n...], "name": n}  -- those entities a
+//       prefab of the builder's, they a copy of it; other copies follow
+//       its parameters but their overrides
 //   {"op": "move", "id": n, "pos": [x, y, z]}    {"op": "delete", "id": n}
 //   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
 //   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
@@ -210,10 +275,11 @@ namespace storage
 // tells no one.
 //
 // The round's start, for each player there at Play and each that comes
-// in the round (once a round): their inventory reset (Kit's counts: none,
-// or with "keep inventory" what they had at the last Stop, put aside
-// meanwhile), and on_join of each instance in their scene -- a type with
-// `spawn = true` places them (kit/spawner); at Play, with none in their
+// in the round (once a round): their entity at its start (no items, no
+// score; with "keep inventory" the items they had at the last Stop, put
+// aside meanwhile), and on_join of each instance in their scene -- a type
+// with `spawn = true` places them (kit/spawner; `spawn = "<bool
+// parameter>"` while that is true); at Play, with none in their
 // scene, the app's default (kit:spawn_player). A type with
 // `between_plays = true` (kit/player_state, one, on the app root: a type
 // with `root = true` is placed there) gives the round's start its

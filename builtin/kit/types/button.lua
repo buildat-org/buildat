@@ -13,14 +13,14 @@ return {
 		down = {default = false, shared = true},
 		presses = {default = 0, shared = true},
 	},
-	outputs = {"pressed", "released"},
+	outputs = {pressed = "none", released = "none"},
 	on_use = function(c, by)
 		if c.state.down then
 			return
 		end
 		c.state.down = true
 		c.state.presses = c.state.presses + 1
-		c:log("pressed by", by, "times", c.state.presses)
+		c:log("pressed by", c:name(by), "times", c.state.presses)
 		c:emit("pressed")
 		c:after(c.params.hold)
 	end,

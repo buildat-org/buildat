@@ -16,11 +16,11 @@ return {
 		c.state.open = not c.state.open
 		local voxel = c.state.open and c.params.open or c.params.closed
 		c:set_voxel(voxel)
-		c:log(c.state.open and "opened" or "closed", "by", by, "to", voxel)
+		c:log(c.state.open and "opened" or "closed", "by", c:name(by), "to", voxel)
 		c:emit(c.state.open and "opened" or "closed")
 	end,
 	-- Someone else's write to the door's voxel: the door keeps it
 	on_voxel = function(c, voxel, by)
-		c:log("kept its voxel from", by, "who wrote", voxel)
+		c:log("kept its voxel from", c:name(by), "who wrote", voxel)
 	end,
 }

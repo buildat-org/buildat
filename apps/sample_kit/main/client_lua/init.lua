@@ -81,6 +81,9 @@ local KEYS = {
 			'{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 5, "input": "count"}',
 			'{"op": "unlink", "id": 3, "comp": 0, "output": "pressed", "to": 4, "input": "toggle"}',
 			'{"op": "undo"}',
+			'{"op": "restart", "id": 3, "comp": 0}',
+			'{"op": "save_prefab", "ids": [3, 4], "name": "pair"}',
+			'{"op": "place", "prefab": "kit/button_door", "pos": [0, 1, -1]}',
 			'{"op": "builder", "name": "kitbob", "on": true}',
 			'not json'}) do
 			buildat.send_packet("kit:edit", e)

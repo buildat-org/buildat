@@ -27,6 +27,10 @@
 #      inventory (a second pouch refused): kit/item_giver fills it to its
 #      capacity, kit/key_door refuses one without the key and opens
 #      taking it.
+#   7. ([KIT] stage 4d) A spawner added to the save makes a copy of the
+#      kit/button_door prefab when a button signals it: the copy's button
+#      opens the copy's door (its link remapped), and the copy, play state,
+#      is in the runtime row and back after the next restart.
 # The first run is the box in WAMR's interpreter alone; the second waits
 # for the compiled module (wasm2c's), and has a Lua error and a second
 # runaway there.
@@ -79,10 +83,10 @@ EOF
 	grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
 	for want in "server: .*kit: box/ is built with this server" \
 			"server: .*sample_kit: at start the counter is 0, the door open false" \
-			"server: .*sample_kit/button 3: pressed by player:p" \
-			"server: .*sample_kit/door 4: opened by player:p" \
+			"server: .*sample_kit/button 3: pressed by p" \
+			"server: .*sample_kit/door 4: opened by p" \
 			"server: .*Entity 7's sample_kit/runaway disabled: on_use ran past its budget" \
-			"server: .*sample_kit/door 4: closed by player:p"; do
+			"server: .*sample_kit/door 4: closed by p"; do
 		grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 	done
 	echo "PASS: sample_kit with its server in the page: the box built with the server, the wiring and the meter on the browser's wasm"
@@ -163,16 +167,16 @@ s=$t/srv1.log
 grep -aq "wasm kit: ready (interpreter): no C compiler" "$s" ||
 	fail "run 1 is not the interpreter's ($s)"
 want "$s" "sample_kit: at start the counter is 0, the door open false" \
-	"Entity 3 used by p" "sample_kit/button 3: pressed by player:p" \
-	"sample_kit/door 4: opened by player:p" "sample_kit/counter 5: count 1 by player:p" \
-	"sample_kit/door 4: closed by player:p" "sample_kit/counter 5: count 2 by player:p" \
+	"Entity 3 used by p" "sample_kit/button 3: pressed by p" \
+	"sample_kit/door 4: opened by p" "sample_kit/counter 5: count 1 by p" \
+	"sample_kit/door 4: closed by p" "sample_kit/counter 5: count 2 by p" \
 	"A use of entity 6 by peer" "refused: out of range" \
 	"A use of entity 5 by peer" "refused: no such object" \
 	"Entity 7's sample_kit/runaway disabled: on_use ran past its budget" \
 	"A signal loop cut: entity" \
 	"Entity 10's sample_kit/faulty, on_use: sample_kit/faulty:8: attempt to index local 't' (a nil value)" \
 	"sample_kit: a dig at the door: routed to its owner" \
-	"sample_kit/door 4: kept its voxel from player:p" \
+	"sample_kit/door 4: kept its voxel from p" \
 	"sample_kit: the door's voxel is air"
 grep -aq "sample_kit/counter 5: count 3" "$s" && fail "the counter counted a signal a client sent ($s)"
 # The Lua error is recovered in the box; only the runaway needs a new one
@@ -191,10 +195,10 @@ want "$s" "Component type sample_kit/door version 1" \
 	"Component type kit/door version 2" \
 	"The players' inventory: entity 13's sample_kit/pouch" \
 	"Entity 14's sample_kit/pouch would provide the players' inventory, which entity 13's sample_kit/pouch does: refused" \
-	"kit/key_door 16: locked to player:p" \
-	"kit/item_giver 15: gives player:p" "holds 1" \
+	"kit/key_door 16: locked to p" \
+	"kit/item_giver 15: gives p" "holds 1" \
 	"has no room for 1 key" "could not take 1 key" \
-	"kit/key_door 16: opened by player:p" "gave up 1 key and holds 0"
+	"kit/key_door 16: opened by p" "gave up 1 key and holds 0"
 grep -a "The palette: " "$s" | grep -q " kit/door .* sample_kit/door" ||
 	fail "kit/door and sample_kit/door are not both in the palette ($s)"
 [ "$(grep -ac "sample_kit/pouch would provide" "$s")" = 1 ] ||
@@ -229,7 +233,22 @@ for e in a["entities"]:
 			c["params"].update({"closed": "glass", "open": "air"})
 		if e["id"] == 15:
 			c["params"]["item"] = "spin"
+# [KIT] stage 4d: a spawner of kit/button_door's copies, set off by a button
+a["entities"] += [
+	{"id": 17, "parent": 2, "name": "copier", "pos": [-1, 1, 1],
+		"components": [{"type": "kit/spawner", "version": 2, "params": {
+			"players": False, "prefab": "kit/button_door", "max": 2}}]},
+	{"id": 18, "parent": 2, "name": "copy button", "pos": [-1, 1, -1],
+		"components": [{"type": "kit/button", "version": 2,
+			"params": {"hold": 0.1},
+			"links": [{"output": "pressed", "to": 17, "input": "spawn"}]}]}]
 db.execute("UPDATE store SET value = ? WHERE store = 'kit' AND key = 'authored'", (json.dumps(a),))
+# A runtime row from before [KIT] stage 4d: no players' entities, Kit's
+# counts the row's "items"
+r = json.loads(db.execute("SELECT value FROM store WHERE store = 'kit' AND key = 'runtime'").fetchone()[0])
+r = {k: v for k, v in r.items() if k not in ("players", "made", "removed", "next_id")}
+r["items"] = {"p1": {"gem": 2}}
+db.execute("UPDATE store SET value = ? WHERE store = 'kit' AND key = 'runtime'", (json.dumps(r),))
 db.commit()
 PY
 sqlite3 "$db" "UPDATE store SET value = replace(value, 'sample_kit/', '') WHERE store = 'kit';
@@ -243,10 +262,14 @@ keypress e
 frames 2
 keypress h
 frames 2
+event kit_use 18
+wait_log 10000 replicated: entity 18 presses = 1
+event kit_use 20
+wait_log 10000 replicated: entity 19 open = true
 event kit_use 15
 frames 2
 event kit_use 15
-wait_log 10000 kit: items: spin x1
+wait_log 10000 spin x1
 keypress b
 wait_log 60000 replicated: entity 4 open = false
 quit
@@ -254,14 +277,14 @@ EOF
 run 2
 s=$t/srv2.log
 want "$s" "sample_kit: at start the counter is 2, the door open false" \
-	"Entity 7's sample_kit/runaway stays disabled" "sample_kit/counter 5: count 3 by player:p" \
+	"Entity 7's sample_kit/runaway stays disabled" "sample_kit/counter 5: count 3 by p" \
 	"Entity 10's sample_kit/faulty, on_use: sample_kit/faulty:8: attempt to index local 't' (a nil value)" \
 	"Entity 11's sample_kit/runaway disabled: on_use ran past its budget" \
-	"sample_kit/counter 5: count 4 by player:p"
+	"sample_kit/counter 5: count 4 by p"
 # The pouch's spin: the pouch disabled, not the item giver, and Kit's own
 # counts take the second use
-want "$s" "Entity 13's sample_kit/pouch disabled: its inventory ran past its budget in entity 15's on_use; the players' inventory is Kit's own counts now" \
-	'has {"spin":1}'
+want "$s" "Entity 13's sample_kit/pouch disabled: its inventory ran past its budget in entity 15's on_use; the players' inventory is their entities' own now" \
+	'"spin":1' "p1's items {\"gem\":2} are their own inventory's now"
 grep -aq "Entity 15's kit/item_giver disabled" "$s" && fail "the item giver was disabled for its provider's loop ($s)"
 [ "$(grep -ac "sample_kit/pouch disabled" "$s")" = 1 ] || fail "the pouch's disablement not logged once ($s)"
 [ "$(grep -ac "A new box after" "$s")" = 2 ] ||
@@ -278,11 +301,21 @@ a, r = json.loads(rows["authored"]), json.loads(rows["runtime"])
 types = [c["type"] for e in a["entities"] for c in e["components"]]
 assert all("/" in t for t in types), types
 assert "kit/door" in types and types.count("sample_kit/door") == 1, types
-objects = ("kit/door", "kit/key_door", "kit/gate", "kit/button", "kit/lever")
+objects = ("kit/door", "kit/key_door", "kit/gate", "kit/button", "kit/lever", "kit/spawner")
 assert all(c["version"] == (2 if c["type"] in objects else 1) for e in a["entities"] for c in e["components"]), a
 door = [e for e in a["entities"] if e["id"] == 12][0]["components"][0]
 assert "closed" not in door["params"] and "open" not in door["params"], door
-assert all("/" in c["type"] for k, v in r.items() if k != "items" for c in v), r
+assert all("/" in c["type"] for k, v in r.items() if k.isdigit() for c in v), r
+# [KIT] stage 4d: the spawner's copy of the prefab, made in the round:
+# the door and the button, linked to its own door
+made = {m["entity"]["id"]: m for m in r["made"]}
+assert sorted(made) == [19, 20] and all(m["origin"] == "g" for m in made.values()), r["made"]
+assert made[20]["entity"]["components"][0]["links"][0]["to"] == 19, made[20]
+# The 4c row's items were put on p1's entity's kit/inventory (and then
+# reset by the round's start: no session, a round no one has joined)
+p1 = r["players"]["p1"]["id"]
+inv = [c["state"]["items"] for c in r[str(p1)] if c["type"] == "kit/inventory"]
+assert inv == [{"spin": 1}] and "items" not in r, (inv, r.get("items"))
 print("  rows: %d instances, every type <author>/<name> with its version" % len(types))
 PY
 echo "ok: state over a restart, a save of bare type names migrated, the compiled box"
@@ -315,6 +348,6 @@ wait "$SERVER_PID" 2>/dev/null
 mv "$t/own.wasm" "$own"
 grep -a "No wasm toolchain\|kit: box/\|sample_kit: at start" "$t/srv3.log" | sed "s/^.* [IEW] /  /" | cut -c 1-140
 want "$t/srv3.log" "No wasm toolchain" "kit: box/ is in the shared build" \
-	"sample_kit: at start the counter is 4"
+	"sample_kit: at start the counter is 4" "2 entities made in the round"
 echo "PASS: Kit's runtime: wiring, client actions and their refusals, replication, a routed voxel write, the budget and a loop cut, state over a restart; the box prebuilt as an archive carries it"
 # vim: set noet ts=4 sw=4:

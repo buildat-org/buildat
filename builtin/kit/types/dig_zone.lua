@@ -8,7 +8,7 @@ local function set(c, on, by)
 	what[#what + 1] = c.state.dig and "dig" or nil
 	what[#what + 1] = c.state.place and "place" or nil
 	c:log("grants", #what > 0 and table.concat(what, " and ") or "nothing",
-			"by", by)
+			"by", c:name(by))
 end
 
 return {
@@ -24,7 +24,7 @@ return {
 		place = {default = false},
 	},
 	gizmo = {shape = "box", size = 0.2, color = "#c08040"},
-	inputs = {"on", "off"},
+	inputs = {on = "none", off = "none"},
 	on_start = function(c)
 		set(c, true, "its start")
 	end,
