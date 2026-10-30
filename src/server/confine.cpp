@@ -63,6 +63,7 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 #include <linux/audit.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#include <linux/capability.h>
 #include <sys/wait.h>
 #include <sched.h>
 #include <signal.h>
@@ -237,6 +238,40 @@ static int count_threads()
 	return n;
 }
 
+// **No capabilities in the box** ([ROOT_CAPS]): a server run as root -- a
+// container's or a VM's only user -- kept them all, and CAP_SYS_PTRACE
+// lets a Landlocked process read another's /proc/<pid>/environ and mem,
+// which Landlock's ptrace scoping refuses only to a process without it
+// (apps/box_test's "read the parent's environment" got through). The
+// bounding set first, which takes CAP_SETPCAP, so that nothing this
+// starts gets them back; then the ambient, permitted, effective and
+// inheritable sets. A user's server has none and this does nothing.
+static ss_ drop_capabilities()
+{
+	struct __user_cap_header_struct h = {_LINUX_CAPABILITY_VERSION_3, 0};
+	struct __user_cap_data_struct d[_LINUX_CAPABILITY_U32S_3];
+	memset(d, 0, sizeof d);
+	if(syscall(SYS_capget, &h, d) != 0)
+		return ss_("capget: ")+strerror(errno);
+	bool any = false;
+	for(const auto &x : d)
+		any = any || x.effective || x.permitted || x.inheritable;
+	if(!any)
+		return "";
+	if(d[CAP_TO_INDEX(CAP_SETPCAP)].effective & CAP_TO_MASK(CAP_SETPCAP)){
+		// PR_CAPBSET_READ is EINVAL past the kernel's last capability
+		for(int c = 0; prctl(PR_CAPBSET_READ, c, 0, 0, 0) >= 0; c++)
+			if(prctl(PR_CAPBSET_DROP, c, 0, 0, 0) != 0)
+				return "dropping capability "+itos(c)+": "+strerror(errno);
+	}
+	prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0);
+	memset(d, 0, sizeof d);
+	if(syscall(SYS_capset, &h, d) != 0)
+		return ss_("capset: ")+strerror(errno);
+	log_i(MODULE, "Capabilities dropped (uid %i)", (int)getuid());
+	return "";
+}
+
 // seccomp: no unix socket -- Landlock does not govern a named socket's
 // connect(), and D-Bus, X11 and docker.sock are all one -- and no io_uring,
 // which goes around both. And no signal to anything but this process
@@ -391,6 +426,14 @@ ss_ confine_build(const sv_<ss_> &read_dirs, const ss_ &job_dir)
 			"/dev/urandom"})
 		rs.add(p, rs.handled);
 	rs.add(job_dir, rs.handled);
+	// The build runs a release's own code (build.rs, proc macros) with
+	// every capability of its user namespace (unshare above), and of the
+	// host's as well when run as root
+	const ss_ caps = drop_capabilities();
+	if(!caps.empty()){
+		close(rs.fd);
+		return caps;
+	}
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
 		close(rs.fd);
 		return ss_("no_new_privs: ")+strerror(errno);
@@ -1021,6 +1064,11 @@ ss_ confine(core::Config &config, const ss_ &module_path, int *exit_code)
 				net_rule(LANDLOCK_ACCESS_NET_CONNECT_TCP, p);
 	}
 
+	const ss_ caps = drop_capabilities();
+	if(!caps.empty()){
+		close(rs.fd);
+		return caps;
+	}
 	if(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0){
 		close(rs.fd);
 		return ss_("no_new_privs: ")+strerror(errno);
