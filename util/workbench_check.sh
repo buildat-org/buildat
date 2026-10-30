@@ -132,8 +132,8 @@ if [ "${1:-}" = web ]; then
 	["frames", 3], ["click", 616, 250], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
 	["frames", 3], ["shot", "\${OUT}/edit.png"],
-	["click", 977, 181], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
-	["click", 977, 377], ["waitlog", "kit editor: linking from 3 said", 10],
+	["click", 977, 209], ["waitlog", "kit editor: log of 3: .*restarted by webboss", 10],
+	["click", 977, 405], ["waitlog", "kit editor: linking from 3 said", 10],
 	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
 	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
 	["click", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
@@ -824,7 +824,9 @@ EOF
 # (Escape: no longer), a link dragged from an out port onto an in port, a
 # box selects two, a right click's menu duplicates them; 3D (F2), where
 # a right drag orbits and opens no menu, and walking (F3), where a click
-# goes into the crosshair and Escape comes out of it before the menu.
+# goes into the crosshair and Escape comes out of it before the menu;
+# the inspector's x typed in and Move, a kit/world placed (game-wide), selected
+# from the list and deleted by the inspector's Delete, and the undo.
 # By finger (BUILDAT_TOUCH=1, finger_*): in play a tap digs, a finger
 # held places, a tap uses the button; in the plan the palette (folded on
 # a narrow screen) dragged from, a tap selects, a drag moves, a drag from
@@ -965,6 +967,33 @@ wait_log 5000 kit editor: out of the crosshair
 wait_log_absent 300 pause: the menu shown
 keypress F1
 wait_log 5000 kit editor: the view is 2D
+mouse_pos 614 306
+mouse_click left
+wait_log 5000 kit editor: selected 3
+frames 3
+click LineEdit "4"
+keypress End
+keypress Backspace
+text 6
+frames 2
+screenshot @T@/inspector_pos.png
+click Button "Move"
+wait_log 5000 kit editor: moved 1 by 2, 0, 0 from the inspector
+wait_log_any 5000 kit editor: state: 5 entities, 7 to undo
+click Button "kit/world"
+wait_log 5000 kit editor: placing kit/world
+mouse_pos 300 450
+mouse_click left
+wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
+frames 3
+click Button "Select*"
+wait_log 5000 (kit/world
+frames 3
+screenshot @T@/inspector_world.png
+click Button "Delete"
+wait_log_any 5000 kit editor: state: 5 entities, 9 to undo
+click Button "Undo"
+wait_log_any 5000 kit editor: state: 6 entities, 8 to undo
 quit
 EOF
 cat > "$t/touch.cmds" <<'EOF'
@@ -1091,7 +1120,11 @@ done
 want "$t/srv3.log" "An edit by kitboss: placed kit/button 3 at [2,1,2]" \
 	"An edit by kitboss: moved 3 to [4,1,2]" \
 	"An edit by kitboss: placed kit/door 4 at [-2,1,2]" \
-	"An edit by kitboss: linked 3.pressed -> 4.toggle"
+	"An edit by kitboss: linked 3.pressed -> 4.toggle" \
+	"An edit by kitboss: moved 3 to [6,1,2]" \
+	"An edit by kitboss: placed kit/world 7 on the app root" \
+	"An edit by kitboss: deleted 7" \
+	"An undo by kitboss: 1 entities put back"
 want "$t/ed.log" "kit editor: turned 1 by 90" "kit editor: a box selected 2, 2 in the selection"
 want "$t/srv4.log" "kit/button 3: pressed by kitboss" \
 	"An edit by kitboss: linked 5.pressed -> 4.toggle"

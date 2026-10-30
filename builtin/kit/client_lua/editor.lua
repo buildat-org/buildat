@@ -54,7 +54,9 @@
 --     Duplicate, Make prefab..., Restart this (Running) -- for the
 --     selection if it is in it; on nothing it lets go of the selection
 --   - the inspector (right): the selected entity's instances, their
---     parameters in ui_utils' settings_form, "Apply" sends them
+--     parameters in ui_utils' settings_form, "Apply" sends them; its x, y
+--     and z typed in and "Move" (the selection by as much), "Delete"
+--     (the selection, a game-wide entity too)
 --   - every entity drawn as a box, the selected ones yellow, links as
 --     lines, and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
@@ -836,11 +838,40 @@ local function inspector(w, e, is_made)
 		text(w, n .. " selected", DIM)
 	end
 	text(w, "Entity " .. e.id .. ": " .. tostring(e.name))
+	-- Its position typed in (fine tuning, and where keys are not at hand:
+	-- a touchscreen), Move one edit; with several selected they move by
+	-- what this one moves
 	if e.pos then
-		text(w, string.format("at %g, %g, %g", e.pos[1], e.pos[2], e.pos[3]) ..
-				((e.yaw or 0) ~= 0 and string.format(", turned %g", e.yaw) or ""),
-				DIM)
+		local r, at = row(w), {e.pos[1], e.pos[2], e.pos[3]}
+		for i, axis in ipairs({"x", "y", "z"}) do
+			-- One letter's room: the row's layout has already widened it
+			label(r, axis):SetFixedWidth(12)
+			local f = edit(r, string.format("%g", at[i]), function(s)
+				at[i] = tonumber(s)
+			end)
+			f.minWidth = 56
+		end
+		button(r, "Move", function()
+			if not (at[1] and at[2] and at[3]) then
+				E.status = "Move: three numbers"
+				return people()
+			end
+			local by = {at[1] - e.pos[1], at[2] - e.pos[2], at[3] - e.pos[3]}
+			if n > 1 then
+				send({op = "move", ids = sel_ids(), by = by})
+			else
+				send({op = "move", id = e.id, pos = at})
+			end
+			log:info(string.format("kit editor: moved %d by %g, %g, %g from "
+					.. "the inspector", n, by[1], by[2], by[3]))
+		end)
+		if (e.yaw or 0) ~= 0 then
+			text(w, string.format("turned %g", e.yaw), DIM)
+		end
 	end
+	button(w, "Delete", function()
+		M.delete_selected()
+	end)
 	for ci, c in ipairs(e.components or {}) do
 		local t = type_of(c.type)
 		text(w, c.type, magic.Color(1.0, 0.85, 0.3))
