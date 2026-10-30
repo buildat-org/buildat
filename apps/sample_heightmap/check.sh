@@ -1,7 +1,7 @@
 #!/bin/bash
 # tier: full
 # cost: ~70s (2026-10-30)
-# covers: builtin/heightmap/**
+# covers: builtin/heightmap/** builtin/luanti_mapgen/**
 # [HEIGHTMAP_TERRAIN], [HEIGHTMAP_REST]: builtin/heightmap through
 # apps/sample_heightmap, a 1024x1024 map at a metre, five materials:
 #   1. a fresh save generates seed 1234; the ball dropped on the pad comes
@@ -19,7 +19,10 @@
 #      crater wrote once each;
 #   3. the server started again on the save loads the map with the hash
 #      it saved after the crater;
-#   4. a second fresh save generates the same hash as the first.
+#   4. a second fresh save generates the same hash as the first;
+#   5. with BUILDAT_HEIGHTMAP_SURFACE=valleys the map is Luanti's valleys
+#      sampled (luanti_mapgen::surface_map, its rivers off), over 80 m of
+#      relief; O's view over it is valleys.png, to look at.
 #   apps/sample_heightmap/check.sh
 set -u
 . "$(dirname "$0")/../../util/check_lib.sh"
@@ -114,5 +117,22 @@ wait_for_log "$t/s3.log" "heightmap: generated" 30 || fail "no generation ($t/s3
 gen2=$(grep -aoP "heightmap: generated 1024x1024 seed 1234 in [0-9]+ ms, hash \K[0-9a-f]+" "$t/s3.log")
 [ "$gen2" = "$gen" ] || fail "seed 1234 generated $gen, then $gen2"
 stop
-echo "PASS: seed 1234 generated $gen twice; the ball rests $over over the ground; the map holds $held MB; five materials drawn; a crater reached the client in $edit; frames $frame ms on average; saved and loaded $saved"
+
+# 5
+export BUILDAT_HEIGHTMAP_SURFACE=valleys
+serve "$t/s5.log" "$t/u5"
+unset BUILDAT_HEIGHTMAP_SURFACE
+wait_for_log "$t/s5.log" "the ball rests" 60 || fail "no rest on the valleys ($t/s5.log)"
+relief=$(grep -aoP "the valleys surface sampled in [0-9]+ ms: \K[-0-9.]+ to [-0-9.]+" "$t/s5.log")
+echo "the valleys surface: $relief m"
+echo "$relief" | awk '{exit !($3 - $1 > 80)}' ||
+	fail "the valleys surface is \"$relief\" m, not 80 m of relief ($t/s5.log)"
+printf '%s\n' "wait_log 60000 heightmap: terrain built" "keypress O" "delay 2000" \
+	"screenshot $t/valleys.png" "quit" > "$t/v.cmds"
+run_client 60 "$t/v.log" timeout 180 "$here/Build/bin/buildat" \
+	-s "127.0.0.1:$SERVER_PORT" -D "$t/cu" -w 1280x720 -l 3 \
+	-o sound_mute=1 -c @"$t/v.cmds"
+[ -s "$t/valleys.png" ] || fail "no view of the valleys ($t/v.log)"
+stop
+echo "PASS: seed 1234 generated $gen twice; the ball rests $over over the ground; the map holds $held MB; five materials drawn; a crater reached the client in $edit; frames $frame ms on average; saved and loaded $saved; the valleys $relief m"
 # vim: set noet ts=4 sw=4:

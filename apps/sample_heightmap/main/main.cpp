@@ -10,21 +10,27 @@
 // crater's dirt (3) and the pad's gravel (4). The server's memory for the
 // map is logged (Linux: the resident set before and after; what other
 // modules do meanwhile counts in it too, as network deflating web/).
+// BUILDAT_HEIGHTMAP_SURFACE=valleys makes the hills Luanti's valleys mapgen
+// sampled (luanti_mapgen::surface_map), its rivers off.
 #include "core/log.h"
 #include "client_file/api.h"
 #include "heightmap/api.h"
+#include "luanti_mapgen/api.h"
 #include "main_context/api.h"
 #include "network/api.h"
 #include "replicate/api.h"
 #include "storage/api.h"
 #include "interface/module.h"
+#include "interface/os.h"
 #include "interface/server.h"
 #include "interface/event.h"
 #include <Scene.h>
 #include <Node.h>
 #include <RigidBody.h>
 #include <CollisionShape.h>
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <unistd.h>
 #define MODULE "main"
@@ -128,16 +134,34 @@ struct Module: public interface::Module
 				m_save = i->create("main");
 		});
 		float pad_y = 0;
+		heightmap::Size size;
+		size.materials = MATERIALS;
+		// BUILDAT_HEIGHTMAP_SURFACE=valleys: Luanti's valleys sampled, its
+		// rivers off, the map from 128 m under its water
+		const char *surface = getenv("BUILDAT_HEIGHTMAP_SURFACE");
+		sv_<float> valleys;
+		if(surface && ss_(surface) == "valleys"){
+			size.base_y = -128;
+			valleys = sample_valleys(size);
+		}
 		const float rss0 = rss_mb();
 		heightmap::access(m_server, [&](heightmap::Interface *ih){
-			heightmap::Size size;
-			size.materials = MATERIALS;
 			heightmap::Instance *map = ih->create_instance(m_scene, size);
 			map->add_chunk_hook(up_<heightmap::ChunkHook>(
 					new CountWrites(&m_chunks_written)));
 			if(!map->set_save(m_save, "main")){
 				heightmap::GenerateParams params;
 				params.seed = SEED;
+				if(!valleys.empty()){
+					const int sx = map->samples_x();
+					const float cell = size.cell_size;
+					params.height_fn = [&](float x, float z){
+						return valleys[(size_t)std::round(z / cell) * sx +
+								(size_t)std::round(x / cell)];
+					};
+					// Beaches: Luanti's water is at 1
+					params.sand_below = 2.0f;
+				}
 				map->generate(params);
 				make_pad(map);
 			}
@@ -168,6 +192,36 @@ struct Module: public interface::Module
 		main_context::access(m_server, [&](main_context::Interface *imc){
 			imc->delete_scene(m_scene);
 		});
+	}
+
+	// The valleys mapgen's ground over the map's samples, out of its noise
+	// (luanti_mapgen::surface_map), seed SEED, mgvalleys_river_size 0: the
+	// valleys stay and no river bed is cut
+	sv_<float> sample_valleys(const heightmap::Size &size)
+	{
+		const int sx = size.chunks_x * size.chunk_size;
+		const int sz = size.chunks_z * size.chunk_size;
+		sv_<float> h((size_t)sx * sz);
+		bool ok = false;
+		const int64_t t0 = interface::os::time_us();
+		luanti_mapgen::access(m_server, [&](luanti_mapgen::Interface *i){
+			luanti_mapgen::Params p;
+			p.mgname = "valleys";
+			p.seed = SEED;
+			p.settings["mgvalleys_river_size"] = "0";
+			// The ids every Luanti game has; no node is placed
+			p.content_ids = {{"ignore", 0}, {"unknown", 1}, {"air", 2}};
+			ok = i->surface_map(p, 0, 0, size.cell_size, sx, sz, h.data());
+		});
+		if(!ok)
+			throw Exception("sample_heightmap: no valleys surface");
+		float lo = h[0], hi = h[0];
+		for(float v : h)
+			lo = std::min(lo, v), hi = std::max(hi, v);
+		log_i(MODULE, "sample_heightmap: the valleys surface sampled in %.0f"
+				" ms: %.1f to %.1f m", (interface::os::time_us() - t0) /
+				1000.0, lo, hi);
+		return h;
 	}
 
 	float pad_x(heightmap::Instance *map)
