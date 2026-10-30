@@ -2472,8 +2472,15 @@ struct Mobs
 			const uint32_t id = world.id_at(b.x, b.y, b.z);
 			const skeldat::NodeDef *def = world.node_of(id);
 			if(id == ID_AIR || (def && def->shape == skeldat::LIQUID)){
+				// [SKELDAT_BONE_WATER_DROWN] Into water it takes the water's
+				// place, none pushed aside: the voxel pushed went onto the
+				// new block, the way's next step, so the skeleton built a
+				// stair into it and its film reached the skeleton (in
+				// water: dead)
+				world.replace_liquid = true;
 				world.set_node(b.x, b.y, b.z, world.id_of("skeldat:bone_block"), 0,
 						skeldat::bones::MAX);
+				world.replace_liquid = false;
 				night_blocks++;
 				m.built = true;
 				if(m.seeding && m.quota > 0)

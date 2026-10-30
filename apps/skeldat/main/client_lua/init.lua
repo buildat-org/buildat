@@ -11,6 +11,7 @@
 -- packet here.
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
+local ui_utils = require("buildat/extension/ui_utils")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
@@ -231,6 +232,7 @@ end)
 buildat.sub_packet("skeldat:time", function(data)
 	local day, rate = data:match("^(%S+) (%S+)")
 	game.day, game.day_rate = tonumber(day), tonumber(rate)
+	game.day_ahead = 0
 end)
 
 -- A game's window over the world (ui.lua's, pause.lua's): while one is up
@@ -667,7 +669,13 @@ local function hue_of_hour(t, lit)
 end
 local CLOUD = {r = 0.9, g = 0.92, b = 0.95}
 local function update_sky(dt)
-	game.day = (game.day + dt * game.day_rate) % 1
+	-- [SKELDAT_DAY_CLOCK_SKEW] On between the server's times (each game
+	-- second) by the wall clock, a second past the last at most: a server
+	-- slower than the wall (a check box's world made at --sim-rate 1)
+	-- left a client's day running ahead of it by minutes
+	local step = math.max(0, math.min(dt, 1 - (game.day_ahead or 0)))
+	game.day_ahead = (game.day_ahead or 0) + step
+	game.day = (game.day + step * game.day_rate) % 1
 	local daylight = game.day * 24000
 	local tilt = sky_model.orbit_tilt(nil, nil)
 	-- The shadow's direction held a step at a time (a map rasterised from
@@ -2323,6 +2331,16 @@ function game.lock_move(m, dt)
 	if not m then
 		lock.was, lock.t = false, 0
 		return
+	end
+	-- [WEB_LOCKED_CLICKS_ACCOUNTS] A window that wants clicks (accounts'
+	-- Server window) has the pointer: no turn, no pause; the world's again
+	-- after it
+	if ui_utils.clicks_wanted() then
+		lock.was, lock.t, lock.yielded = false, 0, true
+		return {x = 0, y = 0}
+	elseif lock.yielded then
+		lock.yielded = false
+		set_mouse_in_world(true)
 	end
 	if not web then
 		return m

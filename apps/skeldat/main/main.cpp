@@ -1535,6 +1535,10 @@ struct Module: public interface::Module, public PlayersHost,
 			if(m_admin.skip_left <= 0)
 				m_players.check_moves();
 			update_skeletons();
+			// [SKELDAT_DAY_CLOCK_SKEW] The day each game second: a client
+			// runs it on in between for a second at most
+			for(auto &pair : m_players.all)
+				m_players.send_time(pair.first);
 		}
 		m_save_t += event.dtime;
 		if(m_save_t >= 10){
@@ -1713,7 +1717,7 @@ struct Module: public interface::Module, public PlayersHost,
 				uint32_t id, uint32_t old_param){
 			if(m_hz_w || old == id)
 				return;
-			if(m_hz_ids[5] && id != ID_AIR){
+			if(m_hz_ids[5] && id != ID_AIR && !m_world.replace_liquid){
 				const Cell was = cell_of(old, old_param, 0),
 						now = cell_of(id, 0, 0);
 				if((liquid(was.kind) || gas(was.kind)) && now.kind != was.kind)
