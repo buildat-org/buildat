@@ -23,6 +23,7 @@ class Text : public UIElement
     void SetWordwrap(bool enable);
     void SetSelection(unsigned start, unsigned length = M_MAX_UNSIGNED);
     void ClearSelection();
+    void AddBoldRange(unsigned start, unsigned length);
     void SetSelectionColor(const Color& color);
     void SetHoverColor(const Color& color);
     void SetTextEffect(TextEffect textEffect);

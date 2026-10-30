@@ -527,3 +527,12 @@ read-only bufferLengthMs and fragmentLengthMs: the device buffer SDL gave
 and a mixing fragment, 0 with no mode; the mode's log line names the
 buffer. skeldat's board sound sizes its stream by them. The members are
 appended at the classes' ends.
+
+Bold ranges in a Text ([HEARTH_POST_STYLE])
+-------------------------------------------
+UI/Text.{cpp,h}, LuaScript/pkgs/UI/Text.pkg
+
+Text::AddBoldRange(start, length), in characters: the glyphs of a range
+are drawn in full white and twice, 1 UI unit apart (the effect passes,
+shadow or stroke, are doubled in their own colour). SetText clears them.
+GlyphLocation carries the flag. Hearth draws a message's <strong> with it.
