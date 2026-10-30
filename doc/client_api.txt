@@ -3173,6 +3173,7 @@ magic constants: ADDRESS_BORDER, ADDRESS_CLAMP, ADDRESS_MIRROR, ADDRESS_WRAP, AN
 extension.blip: pack, params, play, play_cached, preset, self_check, sound, stream, wav
 extension.cereal: binary_input, binary_output
 extension.launch_console: show
+extension.pause_menu: new
 extension.serverlist: refresh, servers
 extension.ui_utils: add_paged, bind_button_menu, check_setting, close_dropdowns, close_glyph, copy, db_text, dropdown, dropdown_open, dropdown_set, format_bytes, join_screen, keyboard_columns, keyboard_page, list_view, load_screen, menu_button, mouse_look, mouse_look_escape, mouse_look_move, mouse_look_paused, page_dir, page_step, rgb, scan_pixels, scan_ui, server_list, set_in_game, settings_form, show_confirm_dialog, show_dead_server, show_message_dialog, show_notice, show_notification, vertical_menu
 ---- end of the generated listing ----
