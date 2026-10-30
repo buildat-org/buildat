@@ -108,6 +108,16 @@ Install dependencies
 The server also needs a C++ compiler at run time, not just at build time: it
 compiles app modules as it loads them. It looks for `c++` in PATH.
 
+The checks (`util/run_all.sh`) also want `ss`, for the ports they wait
+on, and LuaJIT, for the Lua ones:
+
+	$ sudo apt-get install iproute2 luajit
+	$ sudo dnf install iproute luajit
+
+They are tuned on the Debug build below. `util/checks_in_docker.sh`
+builds Release, with `BUILDAT_CI=1`, where a timing is a reading and not
+a verdict.
+
 Build
 -------
 
