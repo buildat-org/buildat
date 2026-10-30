@@ -568,8 +568,8 @@ local closed_now = nil
 -- dropdown live over the page drawn in its place
 local picked = nil
 
--- The pages that took the keys, newest last: only the newest one still
--- shown answers, so a page over another does not share its keys
+-- The pages that took the keys, newest last: only the one on top answers,
+-- so a page over another does not share its keys
 local keyboard_pages = {}
 
 -- The page's own window still there: not removed, and not another one at
@@ -582,13 +582,26 @@ local function page_gone(page)
 	return not ok or name ~= page.name
 end
 
-local function newest_page()
+-- **The shown page drawn on top** ([KEYPAGE_NEWEST_WRONG]), not the
+-- newest: the Server window the admin's login question opened (102) is
+-- over Hearth's frame (100) built after it. Pages in one window (a
+-- page in place of the settings) go by the newest.
+local function top_page()
+	local best = nil
 	for i = #keyboard_pages, 1, -1 do
-		if not page_gone(keyboard_pages[i]) and shown(keyboard_pages[i].win) then
-			return keyboard_pages[i]
+		local p = keyboard_pages[i]
+		if not page_gone(p) and shown(p.win) then
+			-- An element without IsDrawnOver (an unwrapped one) goes by
+			-- the newest
+			local ok, over = pcall(function()
+				return best and p.win:IsDrawnOver(best.win)
+			end)
+			if not best or ok and over == true then
+				best = p
+			end
 		end
 	end
-	return nil
+	return best
 end
 
 -- The page's items read again from its window: nothing of it is held
@@ -718,8 +731,10 @@ local function arrange(page)
 		end
 	end
 	-- The first button has the focus to start with, unless the page gave
-	-- it to one of its own (a password page's first field)
-	if first and not inside then
+	-- it to one of its own (a password page's first field), or the page is
+	-- under another (Hearth's frame under the Server window): Enter would
+	-- press a button not seen
+	if first and not inside and top_page() == page then
 		first:SetFocus(true)
 	end
 end
@@ -841,17 +856,28 @@ function M.safe.keyboard_page(win)
 			return
 		end
 		-- A dropdown's popup has the keys
-		if newest_page() ~= page or not arranged or drop_open then
+		if top_page() ~= page or not arranged or drop_open then
 			return
 		end
 		-- So has a dialog over the page, an item of its own focused (the
 		-- file picker over Hearth, [HEARTH_USABILITY]: Down went to the
 		-- sidebar under it, Enter opened a topic). Not a plain element:
 		-- uistack focuses the one under a dialog it pops.
+		-- **A page under this one** holding the focus is not a dialog: the
+		-- keys are this one's, as with nothing focused (Hearth's reply
+		-- field under the Server window, [KEYPAGE_NEWEST_WRONG])
 		local f = magic.ui.focusElement
+		local under = false
 		if f and not win:HasRecursiveFocus() then
+			for _, p in ipairs(keyboard_pages) do
+				if p ~= page and not page_gone(p) and
+						p.win:HasRecursiveFocus() then
+					under = true
+				end
+			end
 			local t = f:GetTypeName()
-			if t == "Button" or t == "LineEdit" or t == "DropDownList" then
+			if not under and (t == "Button" or t == "LineEdit" or
+					t == "DropDownList") then
 				return
 			end
 		end
@@ -859,7 +885,7 @@ function M.safe.keyboard_page(win)
 		page.follow = true
 		rewalk(page)
 		local key = event_data:GetInt("Key")
-		local focus = magic.ui.focusElement
+		local focus = not under and magic.ui.focusElement or nil
 		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
 		-- A multi-line field's rows are its up and down ([HEARTH_MVP]),
 		-- and its pages but from its first row up or its last down
