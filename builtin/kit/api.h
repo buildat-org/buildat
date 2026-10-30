@@ -33,12 +33,30 @@ namespace storage
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
 //   usable   = true          -- a client may "use" it (in range)
 //   owns_voxel = true        -- it owns its position's voxel
-//   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by)
+//   volume = "<param>"       -- with owns_voxel: it owns the box of cells
+//                               from its own up and on, the extent a
+//                               position parameter gives (64 cells at most)
+//   zone = "<param>"         -- the box of cells, the same way, that
+//                               on_enter/on_leave watch
+//   look = {shape = "box"|"sphere", size = n, color = "#rrggbb",
+//           text = "<shared state key>"}  -- drawn where it is on every
+//                               client, the state over it
+//   hud = "<shared state key>"  -- that state on every client's screen
+//   on_input(c, input, value, by), on_use(c, by), on_voxel(c, voxel, by),
+//   on_timer(c), on_enter(c, by), on_leave(c, by), on_join(c, by)
 // c: c.id, c.pos, c.params (read), c.state (read and written),
-// c:emit(output, value), c:set_voxel(name), c:log(...). A component
-// reaches its own entity and its links, nothing else. `by` is who caused
-// it, "player:<name>" or "app", carried along the links it sets off.
-// on_start(c) runs once, when an instance first has runtime state.
+// c:emit(output, value), c:set_voxel(name) (each cell it owns),
+// c:after(seconds) (on_timer then, on the game's clock; one an instance,
+// c:after() takes it back), c:teleport({x, y, z}) (the player who set the
+// run off, the app moving them on kit:move_player), c:give(item, n) (to that
+// player, Kit's own count of their items, which their client shows),
+// c:log(...). A component reaches its own entity and its links, and the
+// player who set it off, nothing else. `by` is who caused it,
+// "player:<name>" or "app", carried along the links it sets off and kept
+// with a timer. on_start(c) runs once, when an instance first has runtime
+// state; on_join(c, by) as the app places a player in its scene the first
+// time (set_peer), or as another name; on_enter/on_leave as a player's
+// position (the cell it rounds to) comes into or leaves its zone.
 //
 // Clients act, components react: a client's packet "kit:use" (an entity's
 // id) reaches the entity's usable components if the app placed the peer
@@ -48,7 +66,8 @@ namespace storage
 // Authored and runtime state are kept apart, each its own row of the
 // save's store "kit": "authored" (the composition: entities, instances,
 // parameters, links; the composition file the first time) and "runtime"
-// (each instance's state, and the disabled ones).
+// (each instance's state and timer, the disabled ones, the players'
+// items).
 //
 // Budgets: each handler run has a slice of the box's meter, and a tick a
 // few slices; the queue waits for the next tick past that. A run past its
@@ -114,6 +133,21 @@ namespace kit
 		sm_<ss_, main_context::SceneReference> scenes;
 		// How far from an entity a player may use it
 		double use_range = 6;
+		// Whether the app moves players for a component (c:teleport), on
+		// the event "kit:move_player" (MovePlayer). False: a teleport is
+		// refused
+		bool moves_players = false;
+	};
+
+	// kit:move_player: a component moves a player (c:teleport); the app
+	// puts the peer's feet in the cell at x, y, z of the player's scene,
+	// and says so by set_peer (Kit's zones and ranges go by that)
+	struct MovePlayer: public interface::Event::Private
+	{
+		size_t peer = 0;
+		double x = 0, y = 0, z = 0;
+		MovePlayer(size_t peer, double x, double y, double z):
+			peer(peer), x(x), y(y), z(z){}
 	};
 
 	struct Interface
@@ -137,6 +171,9 @@ namespace kit
 		// the accounts' default (above): given or taken (an editor in edit
 		// mode leaves it), for this run
 		virtual void set_editor(const ss_ &player, bool can) = 0;
+		// Whether a placed peer has edit rights here (the accounts' or the
+		// app's word): an app's own building tools ask it
+		virtual bool can_edit(size_t peer) = 0;
 	};
 
 	inline bool access(interface::Server *server,

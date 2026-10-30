@@ -1,0 +1,6 @@
+{
+	"entities": [
+		{"id": 2, "name": "world", "kind": "scene"}
+	],
+	"next_id": 3
+}

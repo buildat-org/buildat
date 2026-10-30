@@ -29,6 +29,7 @@
 --   - "Play": a test, the runtime from the authored row; "Stop test" (the
 --     Edit button, F6) puts it back and returns to edit mode
 -- kit.selected(): the id last selected, kept after edit mode.
+-- kit.editing(): whether edit mode is on.
 -- simplified: a nudge by keys and no drag, the windows rebuilt whole on
 -- each state; a drag and a gizmo per handle are the upgrades
 local magic = require("buildat/extension/urho3d")
@@ -47,6 +48,12 @@ local STYLE = magic.cache:GetResource("XMLFile", "ui_utils/res/style.xml")
 
 function M.selected()
 	return E.sel
+end
+
+-- Whether this player is in edit mode now: an app with a mouse look lets
+-- the pointer go for the editor's clicks
+function M.editing()
+	return E.editing
 end
 
 local function send(t)
@@ -497,6 +504,23 @@ local function draw()
 						dbg:AddSphere(magic.Sphere(center(e), s), col, false)
 					end
 				end
+				-- A zone's and an owned volume's extent, from its cell on
+				local t = type_of(c.type)
+				for _, k in ipairs({"zone", "volume"}) do
+					local n = t[k] and c.params and c.params[t[k]]
+					if type(n) == "table" then
+						local ext = {}
+						for i = 1, 3 do
+							ext[i] = math.max(1, math.floor(tonumber(n[i]) or 1))
+						end
+						dbg:AddBoundingBox(magic.BoundingBox(
+								magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
+								magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
+								z + ext[3] - 0.5)), k == "zone" and
+								magic.Color(0.3, 0.75, 1) or magic.Color(1, 0.6, 0.2),
+								false)
+					end
+				end
 				for _, l in ipairs(c.links or {}) do
 					local to = find(l.to)
 					if to and to.pos then
@@ -666,6 +690,184 @@ function M.editor(options)
 	end)
 	magic.SubscribeToEvent("Update", draw)
 end
+
+-- ---- Play: what every client sees of Kit, edit rights or not
+-- A positional entity's node ("kit:<id>") carries its shared state (the
+-- var "kit:<key>", JSON) and what its types show (the var "kit_show",
+-- {look, hud}): a type's `look = {shape = "box"|"sphere", size = n,
+-- color = "#rrggbb", text = key}` is drawn where the entity is, its state
+-- `text` over it; a type's `hud = key` puts that state on the screen.
+-- kit.pointed(origin, dir, reach) -> the id of the entity nearest the ray
+-- (its cell or its look), kit.use(id) uses it: the server checks range
+-- and whether it is usable. The player's own items (c:give) are a line on
+-- the screen.
+-- For a drive (doc/client_commands.txt's event): "event kit_edit <json>"
+-- sends an edit as the editor would, "event kit_use <id>" a use.
+local replicate = require("buildat/extension/replicate")
+local P = {nodes = {}, items = ""}
+
+local function parse(v)
+	if v:IsEmpty() then
+		return nil
+	end
+	return network.parse_json(v:GetString())
+end
+
+local function shown(v)
+	if v == nil then
+		return ""
+	end
+	if type(v) == "table" then
+		return network.write_json(v)
+	end
+	return tostring(v)
+end
+
+replicate.sub_sync_node_added({}, function(node)
+	local id = tonumber(node:GetName():match("^kit:(%d+)$"))
+	if id then
+		P.nodes[id] = {node = node}
+	end
+end)
+replicate.sub_sync_node_removed(function(node, node_id)
+	for id, n in pairs(P.nodes) do
+		if n.node:GetID() == node_id then
+			if n.look then
+				n.look:Remove()
+			end
+			P.nodes[id] = nil
+		end
+	end
+end)
+
+local function build_look(n, look)
+	local scene = replicate.main_scene
+	n.look = scene:CreateChild("kit_look")
+	local s = tonumber(look.size) or 0.4
+	local shape = look.shape == "sphere" and "Sphere" or "Box"
+	local body = n.look:CreateChild("Body")
+	body.scale = magic.Vector3(s * 2, s * 2, s * 2)
+	local m = body:CreateComponent("StaticModel")
+	m.model = magic.cache:GetResource("Model", "Models/" .. shape .. ".mdl")
+	local c = color(look.color, magic.Color(0.8, 0.8, 0.8))
+	local mat = magic.Material:new()
+	mat:SetTechnique(0, magic.cache:GetResource("Technique",
+			"Techniques/NoTexture.xml"))
+	mat:SetShaderParameter("MatDiffColor", c)
+	mat:SetShaderParameter("MatSpecColor", magic.Color(0.05, 0.05, 0.05))
+	m.material = mat
+	n.mat = mat
+	m.castShadows = true
+	if look.text then
+		local l = n.look:CreateChild("Text")
+		l.position = magic.Vector3(0, s + 0.45, 0)
+		local t = l:CreateComponent("Text3D")
+		t:SetFont(magic.cache:GetResource("Font", buildat.font_sans), 16)
+		t:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
+		t.faceCameraMode = magic.FC_ROTATE_XYZ
+		t.fixedScreenSize = true
+		t.textEffect = magic.TE_STROKE
+		t.effectColor = magic.Color(0, 0, 0, 0.8)
+		n.text = t
+	end
+end
+
+local hud = nil
+local function update_play()
+	local lines = {}
+	for id, n in pairs(P.nodes) do
+		if not n.show then
+			n.show = parse(n.node:GetVar("kit_show"))
+			if type(n.show) == "table" and type(n.show.look) == "table" then
+				build_look(n, n.show.look)
+			end
+		end
+		local show = type(n.show) == "table" and n.show or {}
+		if n.look then
+			n.look.position = n.node.position
+		end
+		if n.text then
+			local v = shown(parse(n.node:GetVar("kit:" .. tostring(show.look.text))))
+			if v ~= n.last_text then
+				n.last_text = v
+				n.text.text = v
+				log:info("kit: entity " .. id .. " shows \"" .. v .. "\"")
+			end
+		end
+		if type(show.hud) == "string" then
+			local v = shown(parse(n.node:GetVar("kit:" .. show.hud)))
+			if v ~= "" then
+				lines[#lines + 1] = {id, v}
+			end
+		end
+	end
+	table.sort(lines, function(a, b) return a[1] < b[1] end)
+	local t = {}
+	for _, l in ipairs(lines) do
+		t[#t + 1] = l[2]
+	end
+	if P.items ~= "" then
+		t[#t + 1] = P.items
+	end
+	local text = table.concat(t, "\n")
+	if text ~= P.hud_text then
+		P.hud_text = text
+		if not hud then
+			hud = magic.ui.root:CreateChild("Text")
+			hud:SetFont(magic.cache:GetResource("Font", buildat.font_mono), 15)
+			hud:SetAlignment(magic.HA_RIGHT, magic.VA_TOP)
+			hud:SetPosition(-12, 50)
+		end
+		hud:SetText(text)
+		log:info("kit: the screen says \"" .. text:gsub("\n", " | ") .. "\"")
+	end
+end
+magic.SubscribeToEvent("Update", update_play)
+
+buildat.sub_packet("kit:items", function(data)
+	local items = network.parse_json(data)
+	local t = {}
+	for k, v in pairs(type(items) == "table" and items or {}) do
+		t[#t + 1] = tostring(k) .. " x" .. tostring(v)
+	end
+	table.sort(t)
+	P.items = #t > 0 and "Items: " .. table.concat(t, ", ") or ""
+	log:info("kit: items: " .. (#t > 0 and table.concat(t, ", ") or "none"))
+end)
+
+function M.pointed(origin, dir, reach)
+	local best, bd = nil, nil
+	for id, n in pairs(P.nodes) do
+		local p = n.node.position
+		local s = n.show and type(n.show.look) == "table" and
+				tonumber(n.show.look.size) or 0
+		local wx, wy, wz = p.x - origin.x, p.y - origin.y, p.z - origin.z
+		local t = wx * dir.x + wy * dir.y + wz * dir.z
+		if t > 0 and t <= reach + 0.5 then
+			local dx, dy, dz = wx - dir.x * t, wy - dir.y * t, wz - dir.z * t
+			local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+			-- A cell's corner is 0.87 from its middle; a face's middle 0.5
+			if d <= math.max(0.75, s) and (not bd or t < bd) then
+				best, bd = id, t
+			end
+		end
+	end
+	return best
+end
+
+function M.use(id)
+	log:info("kit: use " .. tostring(id))
+	buildat.send_packet("kit:use", tostring(id))
+end
+
+magic.SubscribeToEvent("command_seq:kit_edit", function(_, data)
+	local text = data:GetString("Param")
+	log:info("kit editor: sent " .. text)
+	buildat.send_packet("kit:edit", text)
+end)
+magic.SubscribeToEvent("command_seq:kit_use", function(_, data)
+	M.use(data:GetString("Param"))
+end)
 
 return M
 -- vim: set noet ts=4 sw=4:

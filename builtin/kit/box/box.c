@@ -13,7 +13,9 @@
 **   "R<lua literal>"     a handler run: {type, handler, id, pos, params,
 **                        state, args, nargs}; answers its effects,
 **                        {set = {{key, value}...}, emit = {{output,
-**                        value}...}, voxel = name}
+**                        value}...}, voxel = name, after = seconds (-1:
+**                        none), teleport = {x, y, z}, give = {{item,
+**                        n}...}}
 ** A Lua error traps the call (no setjmp in this wasm). The host then calls
 ** box_recover(), which unwinds the Lua state as a longjmp to box_call's
 ** protected call would have, and answers "E" and the message; 0 from it
@@ -241,6 +243,15 @@ static const char PRELUDE[] =
 "	end})\n"
 "	function c:emit(output, value) emits[#emits + 1] = {tostring(output), value == nil and NULL or value} end\n"
 "	function c:set_voxel(name) fx.voxel = tostring(name) end\n"
+"	function c:after(seconds) fx.after = tonumber(seconds) or -1 end\n"
+"	function c:teleport(pos)\n"
+"		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
+"		fx.teleport = {tonumber(pos[1]) or 0, tonumber(pos[2]) or 0, tonumber(pos[3]) or 0}\n"
+"	end\n"
+"	function c:give(item, n)\n"
+"		fx.give = fx.give or {}\n"
+"		fx.give[#fx.give + 1] = {tostring(item), tonumber(n) or 1}\n"
+"	end\n"
 "	function c:log(...) log(req.type .. ' ' .. tostring(req.id) .. ': ' .. line(...)) end\n"
 "	h(c, unpack(req.args or {}, 1, req.nargs or 0))\n"
 "	fx.set = sets\n"
