@@ -2,6 +2,7 @@
 	"engine_api": 2,
 	"kind": "app",
 	"client_main": "init.lua",
+	"client_extensions": ["pause_menu"],
 	"web": true,
 	"dependencies": [
 		{"module": "network"},
@@ -13,6 +14,7 @@
 		{"module": "storage"},
 		{"module": "voxelworld"},
 		{"module": "kit"},
-		{"module": "accounts", "optional": true}
+		{"module": "accounts", "optional": true},
+		{"module": "chat", "optional": true}
 	]
 }

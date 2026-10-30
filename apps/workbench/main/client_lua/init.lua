@@ -8,10 +8,13 @@
 --   (with edit rights, or where a component grants it) the left button
 --   digs, the right one places;
 --   1...5 the voxel placed (stone, glass, wood, brick, grass)
---   F6 or "Edit": Kit's editor; there the pointer is free for its clicks,
---   and the right button held looks round. "Play" and "Stop" beside it
---   (a builder's): the server Running or Stopped ([KIT] stage 4c)
---   L: log in (builtin/accounts' dialog); Escape: leave
+--   F6 or the menu's "Edit": Kit's editor; there the pointer is free for
+--   its clicks, and the right button held looks round. The menu's "Play"
+--   and "Stop" (a builder's): the server Running or Stopped ([KIT] 4c)
+--   L: log in (builtin/accounts' dialog)
+--   Escape: the pause menu (extensions/pause_menu: Continue, Kit's Edit
+--   and Play/Stop, Chat, Settings, Leave); in the tools a pending link
+--   is cancelled first
 local log = buildat.Logger("workbench")
 local cereal = require("buildat/extension/cereal")
 local magic = require("buildat/extension/urho3d")
@@ -19,6 +22,9 @@ local replicate = require("buildat/extension/replicate")
 local ui_utils = require("buildat/extension/ui_utils")
 local voxelworld = require("buildat/module/voxelworld")
 local kit = require("buildat/module/kit")
+-- The server's copy (meta.json's client_extensions), whatever the client's
+local _, pm_err, pause_menu = buildat.run_script_file("pause_menu/init.lua")
+assert(type(pause_menu) == "table", "pause_menu: " .. tostring(pm_err))
 
 local PLAYER_HEIGHT = 1.7
 local PLAYER_WIDTH = 0.9
@@ -33,15 +39,24 @@ local scene = replicate.main_scene
 local material = 1
 
 -- A login by builtin/accounts: "l", or at once where BUILDAT_JOIN_NAME
--- names one; the launcher's own user is the admin without one
+-- names one; the launcher's own user is the admin without one. Its
+-- console is builtin/chat's, the menu's Chat
+local accounts = nil
+do
+	local _, err, acc = buildat.run_script_file("accounts/accounts.lua")
+	if type(acc) == "table" then
+		accounts = acc
+		require("buildat/module/chat").attach(accounts)
+	else
+		log:warning("workbench: no accounts.lua: " .. tostring(err))
+	end
+end
 local logging_in = false
 local function log_in()
-	if logging_in then
+	if logging_in or not accounts then
 		return
 	end
 	logging_in = true
-	local _, err, accounts = buildat.run_script_file("accounts/accounts.lua")
-	assert(type(accounts) == "table", "accounts.lua: " .. tostring(err))
 	accounts.start({title = "Workbench"})
 end
 if buildat.get_env("BUILDAT_JOIN_NAME") then
@@ -209,14 +224,23 @@ local function use_pointed()
 	return false
 end
 
-kit.editor{scene = scene, camera = camera_node, ground_y = 1,
+-- Kit's items in the pause menu in place of its top bar
+kit.editor{scene = scene, camera = camera_node, ground_y = 1, bar = false,
 	solid = function(x, y, z)
 		-- 0: not there, 1: air
 		return voxelworld.get_static_voxel(magic.Vector3(x, y, z)).id > 1
 	end}
 
+-- The mouse turns the view in play; the menu and the tools free it. On the
+-- web a lost pointer lock opens the menu, whose click takes it back
 local editing = false
-ui_utils.mouse_look(true)
+local menu
+local function capture(on)
+	ui_utils.mouse_look(on and not editing, function() menu.open() end)
+end
+menu = pause_menu.new{capture = capture, accounts = accounts}
+kit.add_menu_items(menu)
+capture(true)
 magic.ui:SetFocusElement(nil)
 
 magic.SubscribeToEvent("KeyDown", function(_, data)
@@ -227,8 +251,10 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 	end
 	if key == magic.KEY_ESCAPE then
 		if not ui_utils.mouse_look_escape() then
-			buildat.leave()
+			menu.escape()
 		end
+	elseif menu.held() then
+		return
 	elseif key == magic.KEY_L then
 		log_in()
 	elseif key == magic.KEY_E and not editing then
@@ -239,7 +265,7 @@ magic.SubscribeToEvent("KeyDown", function(_, data)
 end)
 
 magic.SubscribeToEvent("MouseButtonDown", function(_, data)
-	if editing or ui_utils.mouse_look_paused() then
+	if editing or menu.held() or ui_utils.mouse_look_paused() then
 		return
 	end
 	local button = data:GetInt("Button")
@@ -257,7 +283,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 	-- Edit mode frees the pointer for the editor's clicks
 	if kit.editing() ~= editing then
 		editing = kit.editing()
-		ui_utils.mouse_look(not editing)
+		if not menu.held() then
+			capture(true)
+		end
 		for _, bar in ipairs(crosshair) do
 			bar.visible = not editing
 		end
@@ -272,7 +300,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 		player_node.position = magic.Vector3(0.5, 3, 0.5)
 	end
 	local mx, my = ui_utils.mouse_look_move()
-	if editing then
+	if menu.held() then
+		mx, my = 0, 0
+	elseif editing then
 		local m = magic.input:GetMouseMove()
 		if magic.input:GetMouseButtonDown(magic.MOUSEB_RIGHT) then
 			mx, my = m.x, m.y
@@ -293,6 +323,9 @@ magic.SubscribeToEvent("Update", function(_, data)
 	if magic.input:GetKeyDown(magic.KEY_S) then fwd = fwd - 1 end
 	if magic.input:GetKeyDown(magic.KEY_D) then side = side - 1 end
 	if magic.input:GetKeyDown(magic.KEY_A) then side = side + 1 end
+	if menu.held() then
+		fwd, side = 0, 0
+	end
 	if fwd ~= 0 or side ~= 0 then
 		local u = player_node.direction
 		local v = u:CrossProduct(magic.Vector3(0, 1, 0))
@@ -312,6 +345,7 @@ magic.SubscribeToEvent("Update", function(_, data)
 		end
 		if (magic.input:GetKeyDown(magic.KEY_SPACE) or
 				magic.input:GetKeyPress(magic.KEY_SPACE)) and touches_ground and
+				not menu.held() and
 				math.abs(body.linearVelocity.y) < JUMP_SPEED then
 			local bv = body.linearVelocity
 			bv.y = JUMP_SPEED
@@ -323,9 +357,10 @@ magic.SubscribeToEvent("Update", function(_, data)
 			math.floor(p.x + 0.5), math.floor(p.y - 0.4 + 0.5),
 			math.floor(p.z + 0.5), MATERIALS[material]))
 	help_text:SetText(editing and
-			"Editing: click to select or place, right button held looks; F6 leaves" or
+			"Editing: click to select or place, right button held looks; " ..
+			"F6 leaves  Esc: menu" or
 			"WASD Space: walk, jump  E: use  left: dig  right: place/use  " ..
-			"1-5: voxel  F6: edit  L: log in")
+			"1-5: voxel  F6: edit  L: log in  Esc: menu")
 end)
 
 -- PhysicsCollision is only sent on a Bullet step: the grounded flag is the

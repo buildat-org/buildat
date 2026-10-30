@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 # tier: full
 # cost: ~20 s, ~1 min with a cold module cache (2026-10-30)
-# covers: apps/workbench/** builtin/kit/**
+# covers: apps/workbench/** builtin/kit/** extensions/pause_menu/**
 # [KIT] stages 4 and 4b, Workbench and Kit's starter set (kit/*), on
 # scripted clients, the server's game clock at CHECK_RATE (the timer's
 # seconds are the game's):
-#   1. The admin (kitboss, by the setup code) stops the server (a fresh
-#      save is Running, [KIT] stage 4c) and builds a contraption in Kit's
+#   1. The admin (kitboss, by the setup code) gets to the tools and stops
+#      the server by the pause menu's Edit and Stop (Escape;
+#      extensions/pause_menu; a fresh save is Running, [KIT] stage 4c),
+#      and Escape in the tools cancels a pending link before it opens the
+#      menu again (its Play, then Play mode); builds a contraption in Kit's
 #      editor, by its packets, Stopped (the door, the gate and the button
 #      objects, drawn from the start's state: shut, solid):
 #      a spawner, a button, a gate, a lever, a timer, a door, a
@@ -61,12 +64,31 @@ if [ "${1:-}" = web ]; then
 	# the admin logs in (the setup code), points at the floor ahead in
 	# edit mode, places an NPC there, lifts it a cell, leaves edit mode
 	# and talks to it with E: the server Running from the start, the NPC
-	# placed live
+	# placed live. The pause menu ([KIT] 4c, extensions/pause_menu): up at
+	# once for the pointer lock headless Chrome does not give (then
+	# skeldat's web_lock_check stand-in in the page, a click off the menu
+	# closes it); Escape and the menu's Edit (at 1200x800 its rows are 41
+	# px apart from Continue at y 298: Edit or Play mode 339, Stop or Play
+	# 380); a link begun, Escape cancels it, the next Escape the menu;
+	# Stop and Play there, and Play mode
 	check_tmp workbench_web; t=$CHECK_TMP
-	cat > "$t/steps.json" <<'J'
+	stub="(function(){ var held = null, refuse = false;
+ Object.defineProperty(document, 'pointerLockElement', {configurable: true, get: function(){ return held; }});
+ function set(e){ held = e; document.dispatchEvent(new Event('pointerlockchange')); }
+ document.addEventListener('keydown', function(e){ if(e.key === 'Escape') refuse = true; }, true);
+ document.addEventListener('mousedown', function(){ refuse = false; }, true);
+ HTMLCanvasElement.prototype.requestPointerLock = function(){
+  if(refuse){ document.dispatchEvent(new Event('pointerlockerror')); return Promise.reject(new Error('refused')); }
+  if(held !== this) set(this); return Promise.resolve(); };
+ document.exitPointerLock = function(){ if(held) set(null); };
+ return 'stub'; })()"
+	cat > "$t/steps.json" <<J
 [
-	["nav", "${URL}"],
+	["nav", "\${URL}"],
 	["waitlog", "player physics enabled", 120],
+	["waitlog_any", "pause: the menu shown", 10],
+	["eval", "$(echo "$stub" | tr "\n" " ")"],
+	["click", 100, 700], ["waitlog", "pause: the menu closed", 10], ["wait", 1000],
 	["key", "l"],
 	["waitlog", "accounts: the login page shown", 60], ["wait", 1000],
 	["key", "Tab"], ["frames", 2], ["key", "Tab"], ["frames", 2],
@@ -74,26 +96,40 @@ if [ "${1:-}" = web ]; then
 	["selall"], ["frames", 2], ["type", "webboss"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["type", "checkpass12"], ["frames", 2], ["key", "Tab"], ["frames", 2],
-	["type", "${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
+	["type", "\${SETUP_CODE}"], ["frames", 2], ["key", "Tab"], ["frames", 2],
 	["key", "Enter"], ["waitlog", "Joined as webboss", 30],
 	["waitlog_any", "server window: the page ntfy", 30], ["frames", 3],
-	["key", "F6"], ["waitlog", "kit editor: state: 1 entities", 20],
-	["frames", 3], ["click", 891, 217], ["frames", 3],
+	["waitlog_any", "kit editor: edit rights: yes", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 891, 217], ["waitlog", "server window: closed", 10], ["frames", 3],
+	["shot", "\${OUT}/menu.png"],
+	["click", 600, 339], ["waitlog", "kit editor: state: 1 entities", 20],
+	["frames", 3],
 	["click", 600, 600], ["waitlog", "kit editor: cursor at 0,1,5", 10],
 	["click", 372, 254], ["waitlog", "kit editor: state: 2 entities, 1 to undo", 10],
 	["click", 600, 600], ["waitlog", "kit editor: selected 3", 10],
 	["key", "PageUp"], ["waitlog", "kit editor: state: 2 entities, 2 to undo", 10],
-	["frames", 3], ["shot", "${OUT}/edit.png"],
-	["key", "F6"], ["waitlog", "kit editor: edit mode off", 10],
+	["frames", 3], ["shot", "\${OUT}/edit.png"],
+	["click", 977, 360], ["waitlog", "kit editor: linking from 3 said", 10],
+	["key", "Escape"], ["waitlog", "kit editor: link cancelled", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 600, 380], ["waitlog", "kit editor: the server is Stopped .by webboss.", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 600, 380], ["waitlog", "kit editor: the server is Running .by webboss.", 10],
+	["key", "Escape"], ["waitlog", "pause: the menu shown", 10], ["frames", 3],
+	["click", 600, 339], ["waitlog", "kit editor: edit mode off", 10],
 	["key", "e"], ["waitlog", "kit: entity 3 shows .Bob: Hello!.", 10],
-	["frames", 5], ["shot", "${OUT}/play.png"]
+	["frames", 5], ["shot", "\${OUT}/play.png"]
 ]
 J
 	"$here/util/web_drive.sh" chrome workbench "$t/steps.json" "$t/out" ||
 		fail "the web drive ($t/out)"
 	grep -aq "kit/npc 3: says to player:webboss" "$t/out/server.log" ||
 		fail "the NPC said nothing to webboss ($t/out/server.log)"
-	echo "PASS: Workbench in the web client: the admin places an NPC in Kit's editor and talks to it"
+	# The first Escape in the tools took the link, not the menu
+	awk '/kit editor: linking from 3/ { l = 1 } l && /pause: the menu shown/ { exit !c } l && /link cancelled/ { c = 1 } END { exit !c }' "$t/out/page.log" ||
+		fail "Escape did not cancel the link before opening the menu ($t/out/page.log)"
+	echo "PASS: Workbench in the web client: the pause menu's Edit, Stop, Play and Play mode, Escape cancelling a link first; the admin places an NPC in Kit's editor and talks to it"
 	exit 0
 fi
 if check_pgrep buildat_server >/dev/null || check_pgrep buildat >/dev/null; then
@@ -148,9 +184,16 @@ wait_log_any 30000 server window: the page ntfy
 frames 3
 click Button "Don't add"
 wait_log_any 60000 player physics enabled
-keypress F6
+wait_log_any 10000 kit editor: edit rights: yes
+keypress Escape
+wait_log 10000 pause: the menu shown
+frames 3
+screenshot @T@/menu.png
+click Button "Edit"
 wait_log 10000 kit editor: state: 1 entities, 0 to undo
-event kit_edit {"op": "stop"}
+keypress Escape
+wait_log 10000 pause: the menu shown
+click Button "Stop"
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 EOF
 	# 3 spawner, 4 button, 5 gate, 6 lever, 7 timer, 8 door, 9 teleporter,
@@ -182,11 +225,22 @@ EOF
 wait_log_any 10000 kit: entity 8 drawn 1x2x0.2 at 0,0.5,0, solid
 wait_log_any 10000 kit: entity 5 drawn 3x3x0.3 at 1,1,0, solid
 wait_log_any 10000 kit: entity 4 drawn 0.4x0.4x0.15 at 0,0,0
-event kit_edit {"op": "play"}
+keypress Tab
+wait_log 10000 kit editor: selected 3
+click Button "Link spawned"
+wait_log 10000 kit editor: linking from 3 spawned
+keypress Escape
+wait_log 10000 kit editor: link cancelled
+wait_log_absent 500 pause: the menu shown
+keypress Escape
+wait_log 10000 pause: the menu shown
+click Button "Play"
 wait_log 10000 kit editor: the server is Running (by kitboss)
 frames 5
 screenshot @T@/edit.png
-keypress F6
+keypress Escape
+wait_log 10000 pause: the menu shown
+click Button "Play mode"
 wait_log 10000 kit editor: edit mode off
 look_dir 1.5 -1.1 1.5
 keypress e
@@ -339,7 +393,7 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.5
 mouse_click left
-frames 3
+sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_any 10000 kit: items: none
@@ -370,7 +424,7 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0.5 -1 0
 mouse_click left
-frames 3
+sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 frames 5
@@ -423,7 +477,7 @@ keypress F6
 wait_log 10000 kit editor: edit mode off
 look_dir 0 -1 -0.6
 mouse_click left
-frames 3
+sync 5000
 event kit_edit {"op": "stop"}
 wait_log 10000 kit editor: the server is Stopped (by kitboss)
 wait_log_absent 1500 kit: builds discarded

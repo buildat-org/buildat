@@ -39,7 +39,9 @@
 -- kit.can_edit(), kit.editing(), kit.running() (and kit.by(), who), and
 -- kit.set_tools(on), kit.toggle_tools(), kit.play(), kit.stop(),
 -- kit.save_as_start() do what the bar does; kit.on_change(fn) calls fn()
--- as any of the states changes.
+-- as any of the states changes. kit.add_menu_items(menu) puts Edit and
+-- Play/Stop in extensions/pause_menu's menu, kit.cancel_link() is the
+-- tools' Escape.
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: a nudge by keys and no drag, the windows rebuilt whole on
 -- each state; a drag and a gizmo per handle are the upgrades
@@ -405,6 +407,34 @@ rebuild = function()
 	if e then
 		inspector(window(magic.HA_RIGHT, -10), e)
 	end
+end
+
+-- A pending link cancelled: true if there was one (the tools' Escape
+-- takes it before the app's pause menu)
+function M.cancel_link()
+	if not E.link then
+		return false
+	end
+	E.link, E.status = nil, ""
+	log:info("kit editor: link cancelled")
+	rebuild()
+	return true
+end
+
+-- Kit's items in an app's pause menu (extensions/pause_menu), a builder's:
+-- Edit ("Play mode" while the tools are on) and Play or Stop; and the
+-- tools' Escape cancelling a pending link first
+function M.add_menu_items(menu)
+	menu.add(function()
+		return E.can_edit and (E.editing and "Play mode" or "Edit") or nil
+	end, M.toggle_tools, {order = 10})
+	menu.add(function()
+		return E.can_edit and (E.running and "Stop" or "Play") or nil
+	end, function()
+		if E.running then M.stop() else M.play() end
+	end, {order = 11})
+	menu.on_escape(M.cancel_link)
+	M.on_change(menu.refresh)
 end
 
 -- Below, out of the view's way: the server's state, game-wide entities,
