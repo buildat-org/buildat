@@ -1,0 +1,11 @@
+{
+	"web": true,
+	"dependencies": [
+		{"module": "network"},
+		{"module": "storage"},
+		{"module": "main_context"},
+		{"module": "replicate"},
+		{"module": "client_lua"},
+		{"module": "client_data"}
+	]
+}

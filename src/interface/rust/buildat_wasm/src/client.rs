@@ -3307,6 +3307,16 @@ impl Renderer {
 		let mut r = call(imports::buildat_c_Renderer_set_maxOccluderTriangles, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		drop(r)
 	}
+	/// Renderer.numBatches:number
+	pub fn numBatches(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Renderer_get_numBatches, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Renderer.numPrimitives:number
+	pub fn numPrimitives(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Renderer_get_numPrimitives, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
 	/// Renderer.occluderSizeThreshold:number
 	pub fn occluderSizeThreshold(&self) -> f64 {
 		let mut r = call(imports::buildat_c_Renderer_get_occluderSizeThreshold, &[&H(self.handle()) as &dyn Put]);
@@ -5340,6 +5350,101 @@ impl Image {
 	/// Image.width=number
 	pub fn set_width(&self, a1: impl Put) {
 		let mut r = call(imports::buildat_c_Image_set_width, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+}
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct Terrain(pub Object);
+impl Handled for Terrain { fn handle(&self) -> u32 { self.0.handle() } }
+impl FromValue for Terrain { fn from_value(v: Value) -> Terrain { match v { Value::Object(o) => Terrain(o), _ => Terrain(Object(0)) } } }
+impl Deref for Terrain { type Target = Component; fn deref(&self) -> &Component { unsafe { &*(self as *const Terrain as *const Component) } } }
+impl Terrain {
+	/// The same object as another class of the list's
+	pub fn as_<T: FromValue>(self) -> T { T::from_value(Value::Object(self.0)) }
+	/// Terrain:GetHeight(Vector3):number
+	pub fn GetHeight(&self, a1: impl Put) -> f64 {
+		let mut r = call(imports::buildat_c_Terrain_GetHeight, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value().number()
+	}
+	/// Terrain:SetCastShadows(boolean)
+	pub fn SetCastShadows(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_SetCastShadows, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain:SetHeightMap(Image):boolean
+	pub fn SetHeightMap(&self, a1: impl Put) -> bool {
+		let mut r = call(imports::buildat_c_Terrain_SetHeightMap, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		r.value().boolean()
+	}
+	/// Terrain:SetOccluder(boolean)
+	pub fn SetOccluder(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_SetOccluder, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain:SetSpacing(Vector3)
+	pub fn SetSpacing(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_SetSpacing, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.drawDistance:number
+	pub fn drawDistance(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Terrain_get_drawDistance, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Terrain.drawDistance=number
+	pub fn set_drawDistance(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_drawDistance, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.lodBias:number
+	pub fn lodBias(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Terrain_get_lodBias, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Terrain.lodBias=number
+	pub fn set_lodBias(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_lodBias, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.material:Material
+	pub fn material(&self) -> Material {
+		let mut r = call(imports::buildat_c_Terrain_get_material, &[&H(self.handle()) as &dyn Put]);
+		r.value().as_::<Material>()
+	}
+	/// Terrain.material=Material
+	pub fn set_material(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_material, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.maxLodLevels:number
+	pub fn maxLodLevels(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Terrain_get_maxLodLevels, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Terrain.maxLodLevels=number
+	pub fn set_maxLodLevels(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_maxLodLevels, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.patchSize:number
+	pub fn patchSize(&self) -> f64 {
+		let mut r = call(imports::buildat_c_Terrain_get_patchSize, &[&H(self.handle()) as &dyn Put]);
+		r.value().number()
+	}
+	/// Terrain.patchSize=number
+	pub fn set_patchSize(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_patchSize, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
+		drop(r)
+	}
+	/// Terrain.smoothing:boolean
+	pub fn smoothing(&self) -> bool {
+		let mut r = call(imports::buildat_c_Terrain_get_smoothing, &[&H(self.handle()) as &dyn Put]);
+		r.value().boolean()
+	}
+	/// Terrain.smoothing=boolean
+	pub fn set_smoothing(&self, a1: impl Put) {
+		let mut r = call(imports::buildat_c_Terrain_set_smoothing, &[&H(self.handle()) as &dyn Put, &a1 as &dyn Put]);
 		drop(r)
 	}
 }
@@ -7806,6 +7911,10 @@ mod imports {
 		pub fn buildat_c_Renderer_get_maxOccluderTriangles(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Renderer.maxOccluderTriangles=number"]
 		pub fn buildat_c_Renderer_set_maxOccluderTriangles(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Renderer.numBatches:number"]
+		pub fn buildat_c_Renderer_get_numBatches(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Renderer.numPrimitives:number"]
+		pub fn buildat_c_Renderer_get_numPrimitives(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Renderer.occluderSizeThreshold:number"]
 		pub fn buildat_c_Renderer_get_occluderSizeThreshold(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Renderer.occluderSizeThreshold=number"]
@@ -8516,6 +8625,40 @@ mod imports {
 		pub fn buildat_c_Image_get_width(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "Image.width=number"]
 		pub fn buildat_c_Image_set_width(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain:GetHeight(Vector3):number"]
+		pub fn buildat_c_Terrain_GetHeight(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain:SetCastShadows(boolean)"]
+		pub fn buildat_c_Terrain_SetCastShadows(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain:SetHeightMap(Image):boolean"]
+		pub fn buildat_c_Terrain_SetHeightMap(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain:SetOccluder(boolean)"]
+		pub fn buildat_c_Terrain_SetOccluder(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain:SetSpacing(Vector3)"]
+		pub fn buildat_c_Terrain_SetSpacing(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.drawDistance:number"]
+		pub fn buildat_c_Terrain_get_drawDistance(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.drawDistance=number"]
+		pub fn buildat_c_Terrain_set_drawDistance(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.lodBias:number"]
+		pub fn buildat_c_Terrain_get_lodBias(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.lodBias=number"]
+		pub fn buildat_c_Terrain_set_lodBias(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.material:Material"]
+		pub fn buildat_c_Terrain_get_material(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.material=Material"]
+		pub fn buildat_c_Terrain_set_material(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.maxLodLevels:number"]
+		pub fn buildat_c_Terrain_get_maxLodLevels(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.maxLodLevels=number"]
+		pub fn buildat_c_Terrain_set_maxLodLevels(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.patchSize:number"]
+		pub fn buildat_c_Terrain_get_patchSize(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.patchSize=number"]
+		pub fn buildat_c_Terrain_set_patchSize(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.smoothing:boolean"]
+		pub fn buildat_c_Terrain_get_smoothing(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
+		#[link_name = "Terrain.smoothing=boolean"]
+		pub fn buildat_c_Terrain_set_smoothing(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "TextureCube.new():TextureCube"]
 		pub fn buildat_c_TextureCube_static_new(args: *const u8, len: u32, ret: *mut u8, cap: u32) -> i32;
 		#[link_name = "TextureCube:GetRenderSurface(number):any"]

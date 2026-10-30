@@ -1982,6 +1982,10 @@ function M.define(dst, util)
 			-- 5000 is spent on the first few ([CLIENT_FRAME]).
 			maxOccluderTriangles = util.simple_property("number"),
 			occluderSizeThreshold = util.simple_property("number"),
+			-- What the last frame drew: triangles and draw calls
+			-- ([HEIGHTMAP_TERRAIN]'s measurements)
+			numPrimitives = util.read_only_property("number"),
+			numBatches = util.read_only_property("number"),
 		},
 	})
 
@@ -3175,6 +3179,40 @@ function M.define(dst, util)
 			height = util.simple_property("number"),
 			components = util.simple_property("number"),
 			compressed = util.simple_property("boolean"),
+		},
+	})
+
+	-- **A heightmap drawn in patches with LOD** ([HEIGHTMAP_TERRAIN]):
+	-- builtin/heightmap's client half builds one from an Image it fills
+	-- from the server's chunks. Memory and the GPU only: the height map is
+	-- an Image the script made, the material one it holds. The spacing by
+	-- its setter: a `const Vector3&` property's write is lost
+	-- (urho3d-tolua-const-ref-property). No neighbours (one terrain).
+	util.wc("Terrain", {
+		inherited_from_by_wrapper = dst.Component,
+		instance = {
+			SetSpacing = util.self_function("SetSpacing", {},
+					{"Terrain", "Vector3"}),
+			-- Rebuilds the patches whose heights changed; the same size
+			-- and spacing keep the rest
+			SetHeightMap = util.self_function("SetHeightMap", {"boolean"},
+					{"Terrain", "Image"}),
+			SetCastShadows = util.self_function("SetCastShadows", {},
+					{"Terrain", "boolean"}),
+			SetOccluder = util.self_function("SetOccluder", {},
+					{"Terrain", "boolean"}),
+			-- The surface's height at a world point, as its triangles have it
+			GetHeight = util.self_function("GetHeight", {"number"},
+					{"Terrain", "Vector3"}),
+		},
+		properties = {
+			-- Samples a patch side, a power of two 4..128, before the map
+			patchSize = util.simple_property("number"),
+			maxLodLevels = util.simple_property("number"),
+			lodBias = util.simple_property("number"),
+			smoothing = util.simple_property("boolean"),
+			drawDistance = util.simple_property("number"),
+			material = util.simple_property(dst.Material),
 		},
 	})
 

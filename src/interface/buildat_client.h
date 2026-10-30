@@ -576,6 +576,8 @@ BUILDAT_CLIENT_IMPORT("Renderer.drawShadows:boolean", buildat_c_Renderer_get_dra
 BUILDAT_CLIENT_IMPORT("Renderer.drawShadows=boolean", buildat_c_Renderer_set_drawShadows)
 BUILDAT_CLIENT_IMPORT("Renderer.maxOccluderTriangles:number", buildat_c_Renderer_get_maxOccluderTriangles)
 BUILDAT_CLIENT_IMPORT("Renderer.maxOccluderTriangles=number", buildat_c_Renderer_set_maxOccluderTriangles)
+BUILDAT_CLIENT_IMPORT("Renderer.numBatches:number", buildat_c_Renderer_get_numBatches)
+BUILDAT_CLIENT_IMPORT("Renderer.numPrimitives:number", buildat_c_Renderer_get_numPrimitives)
 BUILDAT_CLIENT_IMPORT("Renderer.occluderSizeThreshold:number", buildat_c_Renderer_get_occluderSizeThreshold)
 BUILDAT_CLIENT_IMPORT("Renderer.occluderSizeThreshold=number", buildat_c_Renderer_set_occluderSizeThreshold)
 BUILDAT_CLIENT_IMPORT("Renderer.shadowMapSize:number", buildat_c_Renderer_get_shadowMapSize)
@@ -931,6 +933,23 @@ BUILDAT_CLIENT_IMPORT("Image.height:number", buildat_c_Image_get_height)
 BUILDAT_CLIENT_IMPORT("Image.height=number", buildat_c_Image_set_height)
 BUILDAT_CLIENT_IMPORT("Image.width:number", buildat_c_Image_get_width)
 BUILDAT_CLIENT_IMPORT("Image.width=number", buildat_c_Image_set_width)
+BUILDAT_CLIENT_IMPORT("Terrain:GetHeight(Vector3):number", buildat_c_Terrain_GetHeight)
+BUILDAT_CLIENT_IMPORT("Terrain:SetCastShadows(boolean)", buildat_c_Terrain_SetCastShadows)
+BUILDAT_CLIENT_IMPORT("Terrain:SetHeightMap(Image):boolean", buildat_c_Terrain_SetHeightMap)
+BUILDAT_CLIENT_IMPORT("Terrain:SetOccluder(boolean)", buildat_c_Terrain_SetOccluder)
+BUILDAT_CLIENT_IMPORT("Terrain:SetSpacing(Vector3)", buildat_c_Terrain_SetSpacing)
+BUILDAT_CLIENT_IMPORT("Terrain.drawDistance:number", buildat_c_Terrain_get_drawDistance)
+BUILDAT_CLIENT_IMPORT("Terrain.drawDistance=number", buildat_c_Terrain_set_drawDistance)
+BUILDAT_CLIENT_IMPORT("Terrain.lodBias:number", buildat_c_Terrain_get_lodBias)
+BUILDAT_CLIENT_IMPORT("Terrain.lodBias=number", buildat_c_Terrain_set_lodBias)
+BUILDAT_CLIENT_IMPORT("Terrain.material:Material", buildat_c_Terrain_get_material)
+BUILDAT_CLIENT_IMPORT("Terrain.material=Material", buildat_c_Terrain_set_material)
+BUILDAT_CLIENT_IMPORT("Terrain.maxLodLevels:number", buildat_c_Terrain_get_maxLodLevels)
+BUILDAT_CLIENT_IMPORT("Terrain.maxLodLevels=number", buildat_c_Terrain_set_maxLodLevels)
+BUILDAT_CLIENT_IMPORT("Terrain.patchSize:number", buildat_c_Terrain_get_patchSize)
+BUILDAT_CLIENT_IMPORT("Terrain.patchSize=number", buildat_c_Terrain_set_patchSize)
+BUILDAT_CLIENT_IMPORT("Terrain.smoothing:boolean", buildat_c_Terrain_get_smoothing)
+BUILDAT_CLIENT_IMPORT("Terrain.smoothing=boolean", buildat_c_Terrain_set_smoothing)
 BUILDAT_CLIENT_IMPORT("TextureCube.new():TextureCube", buildat_c_TextureCube_static_new)
 BUILDAT_CLIENT_IMPORT("TextureCube:GetRenderSurface(number):any", buildat_c_TextureCube_GetRenderSurface)
 BUILDAT_CLIENT_IMPORT("TextureCube:SetData(number,Image):boolean", buildat_c_TextureCube_SetData)
@@ -1705,6 +1724,7 @@ class UI;
 class Input;
 class PhysicsWorld;
 class Image;
+class Terrain;
 class TextureCube;
 class ParticleEffect;
 class Animation;
@@ -3110,6 +3130,10 @@ public:
 	double maxOccluderTriangles() const;
 	// Renderer.maxOccluderTriangles=number
 	void maxOccluderTriangles(double a1) const;
+	// Renderer.numBatches:number
+	double numBatches() const;
+	// Renderer.numPrimitives:number
+	double numPrimitives() const;
 	// Renderer.occluderSizeThreshold:number
 	double occluderSizeThreshold() const;
 	// Renderer.occluderSizeThreshold=number
@@ -3990,6 +4014,46 @@ public:
 	double width() const;
 	// Image.width=number
 	void width(double a1) const;
+};
+class Terrain: public Component
+{
+public:
+	constexpr Terrain() {}
+	constexpr explicit Terrain(unsigned int handle): Component(handle) {}
+	// Terrain:GetHeight(Vector3):number
+	double GetHeight(const ::buildat::Vector3 & a1) const;
+	// Terrain:SetCastShadows(boolean)
+	void SetCastShadows(bool a1) const;
+	// Terrain:SetHeightMap(Image):boolean
+	bool SetHeightMap(const ::buildat::Image & a1) const;
+	// Terrain:SetOccluder(boolean)
+	void SetOccluder(bool a1) const;
+	// Terrain:SetSpacing(Vector3)
+	void SetSpacing(const ::buildat::Vector3 & a1) const;
+	// Terrain.drawDistance:number
+	double drawDistance() const;
+	// Terrain.drawDistance=number
+	void drawDistance(double a1) const;
+	// Terrain.lodBias:number
+	double lodBias() const;
+	// Terrain.lodBias=number
+	void lodBias(double a1) const;
+	// Terrain.material:Material
+	::buildat::Material material() const;
+	// Terrain.material=Material
+	void material(const ::buildat::Material & a1) const;
+	// Terrain.maxLodLevels:number
+	double maxLodLevels() const;
+	// Terrain.maxLodLevels=number
+	void maxLodLevels(double a1) const;
+	// Terrain.patchSize:number
+	double patchSize() const;
+	// Terrain.patchSize=number
+	void patchSize(double a1) const;
+	// Terrain.smoothing:boolean
+	bool smoothing() const;
+	// Terrain.smoothing=boolean
+	void smoothing(bool a1) const;
 };
 class TextureCube: public Texture
 {
@@ -5250,6 +5314,8 @@ inline bool Renderer::drawShadows() const{ ::buildat::detail::Reply r = ::builda
 inline void Renderer::drawShadows(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_set_drawShadows, *this, a1); (void)r; }
 inline double Renderer::maxOccluderTriangles() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_get_maxOccluderTriangles, *this); return r.number(); }
 inline void Renderer::maxOccluderTriangles(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_set_maxOccluderTriangles, *this, a1); (void)r; }
+inline double Renderer::numBatches() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_get_numBatches, *this); return r.number(); }
+inline double Renderer::numPrimitives() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_get_numPrimitives, *this); return r.number(); }
 inline double Renderer::occluderSizeThreshold() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_get_occluderSizeThreshold, *this); return r.number(); }
 inline void Renderer::occluderSizeThreshold(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_set_occluderSizeThreshold, *this, a1); (void)r; }
 inline double Renderer::shadowMapSize() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Renderer_get_shadowMapSize, *this); return r.number(); }
@@ -5619,6 +5685,23 @@ inline double Image::height() const{ ::buildat::detail::Reply r = ::buildat::det
 inline void Image::height(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Image_set_height, *this, a1); (void)r; }
 inline double Image::width() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Image_get_width, *this); return r.number(); }
 inline void Image::width(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Image_set_width, *this, a1); (void)r; }
+inline double Terrain::GetHeight(const ::buildat::Vector3 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_GetHeight, *this, a1); return r.number(); }
+inline void Terrain::SetCastShadows(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_SetCastShadows, *this, a1); (void)r; }
+inline bool Terrain::SetHeightMap(const ::buildat::Image & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_SetHeightMap, *this, a1); return r.boolean(); }
+inline void Terrain::SetOccluder(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_SetOccluder, *this, a1); (void)r; }
+inline void Terrain::SetSpacing(const ::buildat::Vector3 & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_SetSpacing, *this, a1); (void)r; }
+inline double Terrain::drawDistance() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_drawDistance, *this); return r.number(); }
+inline void Terrain::drawDistance(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_drawDistance, *this, a1); (void)r; }
+inline double Terrain::lodBias() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_lodBias, *this); return r.number(); }
+inline void Terrain::lodBias(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_lodBias, *this, a1); (void)r; }
+inline ::buildat::Material Terrain::material() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_material, *this); return ::buildat::Material(r.handle()); }
+inline void Terrain::material(const ::buildat::Material & a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_material, *this, a1); (void)r; }
+inline double Terrain::maxLodLevels() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_maxLodLevels, *this); return r.number(); }
+inline void Terrain::maxLodLevels(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_maxLodLevels, *this, a1); (void)r; }
+inline double Terrain::patchSize() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_patchSize, *this); return r.number(); }
+inline void Terrain::patchSize(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_patchSize, *this, a1); (void)r; }
+inline bool Terrain::smoothing() const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_get_smoothing, *this); return r.boolean(); }
+inline void Terrain::smoothing(bool a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_Terrain_set_smoothing, *this, a1); (void)r; }
 inline ::buildat::TextureCube TextureCube::new_(){ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_TextureCube_static_new); return ::buildat::TextureCube(r.handle()); }
 inline ::buildat::Value TextureCube::GetRenderSurface(double a1) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_TextureCube_GetRenderSurface, *this, a1); return r.value(); }
 inline bool TextureCube::SetData(double a1, const ::buildat::Image & a2) const{ ::buildat::detail::Reply r = ::buildat::detail::call(buildat_c_TextureCube_SetData, *this, a1, a2); return r.boolean(); }
