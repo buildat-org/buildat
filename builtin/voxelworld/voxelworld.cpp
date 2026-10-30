@@ -1862,6 +1862,11 @@ struct CInstance: public voxelworld::Instance
 			load_section(section);
 	}
 
+	sv_<voxelworld::LoadPoint> get_load_points()
+	{
+		return m_load_points;
+	}
+
 	void set_load_points(const sv_<voxelworld::LoadPoint> &points)
 	{
 		m_load_points = points;
