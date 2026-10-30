@@ -4463,7 +4463,9 @@ struct Module: public interface::Module, public Interface
 		m_players.erase(it);
 		m_aside.del_key(name);
 		m_gone_guests["player:"+itos(id)] = name;
+		// Written now: a shutdown can come before the next tick's save
 		m_runtime_dirty = true;
+		save_runtime();
 		log_i(MODULE, "Guest %s's entity %s dropped", cs(name), cs(itos(id)));
 	}
 
