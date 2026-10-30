@@ -35,6 +35,7 @@
 #
 #   util/run_all.sh --changed
 #   util/run_all.sh --changed origin/dev..HEAD --list
+#   REMOTE=<host> util/run_all.sh --changed   # the dear ones there too
 #
 # **What a runner covers is where it lives**, so most of them say
 # nothing: a check under extensions/<x>/ covers extensions/<x>/**, one
@@ -74,8 +75,8 @@ if [ "$tier" = "--changed" ]; then
 fi
 for a in "$@"; do [ "$a" = "--list" ] && list_only=1; done
 case "$tier" in
-quick|full|long|broken|ci) ;;
-*) echo "run_all: no tier \"$tier\": quick, full, long, broken or ci" >&2
+quick|full|long|broken|ci|any) ;;
+*) echo "run_all: no tier \"$tier\": quick, full, long, broken, ci or any" >&2
 	exit 2;;
 esac
 out="$root/local/run_all"
@@ -119,6 +120,9 @@ for f in $(tiered); do
 		"$tier:$tier"|full:quick|long:quick|long:full) ;;
 		*) continue;;
 		esac
+	elif [ "$tier" = any ]; then
+		# Any tier but broken: what ONLY names (REMOTE's runs below)
+		[ "$t" != broken ] || continue
 	else
 		[ "$t" = "$tier" ] || continue
 	fi
@@ -334,6 +338,38 @@ touched_norm() {   # $1 the paths written
 		esac
 	done
 }
+# **REMOTE=<host>: the dear runners on another machine at once** (user,
+# 2026-10-30: the wall clock). A runner costing REMOTE_MIN (300) s or
+# more here that drives no browser (a web run is slow on a software-GL
+# box) goes to util/remote_check.sh's slots, half to each, while the
+# rest runs here; their lines and counts join this run's. They run the
+# committed HEAD, as remote_check does. simplified: the split is by this
+# machine's costs, not balanced; a host-sensitive one (remote_check.sh's
+# header) is cheap and stays here by cost.
+remote_logs=""; remote_pids=""
+if [ -n "${REMOTE:-}" ]; then
+	near=""; far=(""  "")
+	k=0
+	for name in $runners; do
+		path="$luanti_test/$name"; [ -f "$path" ] || path="$root/$name"
+		if [ "$(cost_of "$path" "$name")" -ge "${REMOTE_MIN:-300}" ] &&
+				! grep -q web_drive "$path"; then
+			far[$k]="${far[$k]} $name"; k=$((1 - k))
+		else
+			near="$near $name"
+		fi
+	done
+	for k in 0 1; do
+		[ -n "${far[$k]}" ] || continue
+		re="^($(echo ${far[$k]} | sed 's/\./\\./g; s/ /|/g'))\$"
+		echo "on $REMOTE:${far[$k]}"
+		"$root/util/remote_check.sh" "$REMOTE" env ONLY="$re" \
+			util/run_all.sh any > "$out/remote_$k.log" 2>&1 &
+		remote_pids="$remote_pids $!"; remote_logs="$remote_logs $out/remote_$k.log"
+		sleep 2   # the two take their slots in turn
+	done
+	runners=$near
+fi
 pass=0; fail=0; skip=0; flaky=0
 failed_names=""
 started=$(date +%s)
@@ -396,6 +432,22 @@ for name in $runners; do
 	# And what it read, when it passed; a failed run may have stopped short
 	[ "$state" = pass ] && [ -f "$tf.new" ] && touched_norm "$tf.new" > "$tf"
 	rm -f "$tf.new"
+done
+for p in $remote_pids; do wait "$p"; done
+for l in $remote_logs; do
+	# Its runner lines, and its counts into these; no count line is a
+	# remote run that broke, a failure
+	grep -aE '^[^ ]+ +(pass|FAIL|skip|flaky) ' "$l" | sed 's/$/  (remote)/'
+	n=$(grep -aE '^[0-9]+ passed, ' "$l" | tail -1)
+	if [ -z "$n" ]; then
+		fail=$((fail + 1)); failed_names="$failed_names $l"
+		echo "remote run broke: $(tail -1 "$l")"
+		continue
+	fi
+	set -- $n
+	pass=$((pass + $1)); fail=$((fail + $3)); skip=$((skip + $5)); flaky=$((flaky + $7))
+	f=$(sed -n 's/^failed://p' "$l" | tail -1)
+	failed_names="$failed_names$f"
 done
 echo "---"
 echo "$pass passed, $fail failed, $skip skipped, $flaky known-flaky, in $(( $(date +%s) - started ))s"
