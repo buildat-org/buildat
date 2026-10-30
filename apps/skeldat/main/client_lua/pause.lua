@@ -2,7 +2,8 @@
 -- http://www.apache.org/licenses/LICENSE-2.0
 -- Copyright 2026 Perttu Ahola <celeron55@gmail.com>
 --
--- The pause menu, Escape's: Continue, Chat, Settings and Leave; and the
+-- The pause menu, Escape's: extensions/pause_menu's ([KIT] 4c: Continue,
+-- Chat, Settings and Leave) with skeldat's items among them; and the
 -- death screen, up while the hit points are none, whose Respawn asks the
 -- server for one. The chat is builtin/chat's, its console builtin/accounts'
 -- (game.chat(), the chat key's), its People... (mute, report) the chat's.
@@ -27,40 +28,63 @@ end
 -- The join was the boot's; this instance has the packets from here on
 accounts.logged_in = true
 chat.attach(accounts)
+-- The server's copy (meta.json's client_extensions)
+local _, pm_err, pause_menu = buildat.run_script_file("pause_menu/init.lua")
+if type(pause_menu) ~= "table" then
+	error("skeldat: could not load pause_menu: " .. tostring(pm_err))
+end
 
 return function(game, declare_keys)
+	-- skeldat's own pages over the world (how to play, the scores, the
+	-- admin's), the menu's being extensions/pause_menu's
 	local root = nil
 	local dead = false
-	-- What runs next frame: the menu again after the settings window,
-	-- which would otherwise reopen in the Escape that closed the window
-	local pending = nil
-	magic.SubscribeToEvent("Update", function()
-		if pending then
-			local fn = pending
-			pending = nil
-			fn()
-		end
-	end)
 
-	local open
+	local pmenu
 	-- [SKELDAT_DEATH_PAUSE] The death screen, {root, window}, under the
 	-- menu and its pages in a root of its own; while it is up the hold
 	-- goes back to it, its Escape the menu over it
 	local death = nil
 	local function unhold()
 		if death then
-			game.hold(function() open() end, death.window, true)
+			game.hold(function() pmenu.open() end, death.window, true)
 		else
 			game.hold(nil)
 		end
 	end
+	pmenu = pause_menu.new{
+		hold = function(close, window, on)
+			if close then
+				game.hold(close, window, nil, on)
+			else
+				unhold()
+			end
+		end,
+		on_open = function()
+			game.send("pause", "auto on")
+		end,
+		-- [SKELDAT_WORLD_ADMIN] A single player's pause ends with the
+		-- menu (the server says whether it is one)
+		on_close = function()
+			game.send("pause", "auto off")
+			if death then
+				log:info("pause: back to the death screen")
+			end
+		end,
+		accounts = accounts,
+		-- [SKELDAT_TOUCH] and the touch controls' own (init.lua's)
+		settings = function() return game.settings_sections end,
+		-- The keys read again after the settings window
+		on_settings_closed = declare_keys,
+	}
+	local open = pmenu.open
 
+	-- The menu, or a page of skeldat's, closed: the world again
 	local function close()
+		pmenu.close()
 		if not root then
 			return
 		end
-		-- [SKELDAT_WORLD_ADMIN] A single player's pause ends with the
-		-- menu (the server says whether it is one)
 		game.send("pause", "auto off")
 		uistack.main:pop(root)
 		root = nil
@@ -73,29 +97,8 @@ return function(game, declare_keys)
 		end
 	end
 
-	-- The chat console over the world; Escape and its Back come back here
-	-- when it was opened from the menu, to the world when by the key
-	local function console(from_menu)
-		if root then
-			uistack.main:pop(root)
-			root = nil
-		end
-		local function back()
-			accounts.close_page()
-			unhold()
-			magic.ui:SetFocusElement(nil)
-			log:info("pause: the chat closed")
-			if from_menu then
-				pending = open
-			end
-		end
-		game.hold(back)
-		accounts.chat_page(back)
-		log:info("pause: the chat shown")
-	end
-	function game.chat()
-		console(false)
-	end
+	-- The chat console over the world by the key, its back the world
+	game.chat = pmenu.chat
 
 	-- The admin's menu: the server's answers redraw the page they are for
 	local admin = {page = nil, players = {}, name = nil, main = {},
@@ -264,7 +267,7 @@ return function(game, declare_keys)
 				uistack.main:pop(root)
 				root = nil
 				unhold()
-				pending = open
+				pmenu.back()
 			end
 		end
 		menu:add("Back", back, true)
@@ -322,23 +325,6 @@ return function(game, declare_keys)
 		admin.page = "players"
 		admin_send("players")
 		admin_page()
-	end
-
-	-- The client's settings window ([GAME_SETTINGS]): sound, video, the
-	-- game's keys and the client's. The world stays held while it is up;
-	-- its own Escape and Close shut it
-	local function settings()
-		uistack.main:pop(root)
-		root = nil
-		magic.ui:SetFocusElement(nil)
-		game.hold(function() end)
-		log:info("pause: settings shown")
-		-- [SKELDAT_TOUCH] and the touch controls' own (init.lua's)
-		buildat.show_game_settings{sections = game.settings_sections,
-				on_close = function()
-			declare_keys()
-			pending = open
-		end}
 	end
 
 	-- [SKELDAT_INTRO] The premise and the ways to fight back: the
@@ -442,7 +428,7 @@ return function(game, declare_keys)
 			end
 			scores_page("High scores", rows, function()
 				close()
-				pending = open
+				pmenu.back()
 			end)
 			log:info("pause: high scores shown, " .. #j.sets .. " sets")
 		elseif j.set then
@@ -464,100 +450,78 @@ return function(game, declare_keys)
 		end
 	end)
 
-	function open()
-		if root then
-			return
-		end
-		root = uistack.main:push({desc = "pause"})
-		local menu = ui_utils.vertical_menu(root, {min_width = 260})
-		menu.window:SetAlignment(magic.HA_CENTER, magic.VA_CENTER)
-		menu:add("Continue", close, true)
-		-- [SKELDAT_RERUN] The ended world again, as <name>_rerun
-		if game.ended then
-			menu:add("Play again", function()
-				log:info("pause: play again")
-				game.send("rerun", "")
-				close()
-			end)
-		end
-		menu:add("Chat...", function() console(true) end)
-		-- [SKELDAT_PAUSE_ACCOUNT] accounts' own page, Log out on it; its
-		-- Back to this menu
+	-- skeldat's items in the shared menu, in its order of before: Continue,
+	-- Play again, Chat, My account, Admin, Worlds, Pause world, Skip,
+	-- Settings, How to play, High scores, Leave
+	-- [SKELDAT_RERUN] The ended world again, as <name>_rerun
+	pmenu.add(function() return game.ended and "Play again" or nil end,
+			function()
+		log:info("pause: play again")
+		game.send("rerun", "")
+		close()
+	end, {order = 10, keep = true})
+	-- [SKELDAT_PAUSE_ACCOUNT] accounts' own page, Log out on it; its Back
+	-- to this menu
+	pmenu.add(function()
 		local me = accounts.who()
-		menu:add("My account" .. (me and me ~= "" and " (" .. me .. ")" or "")
-				.. "...", function()
-			uistack.main:pop(root)
-			root = nil
-			game.hold(function() end)
-			log:info("pause: my account shown")
-			accounts.account_page(function()
-				unhold()
-				pending = open
-			end)
+		return "My account" .. (me and me ~= "" and " (" .. me .. ")" or "") ..
+				"..."
+	end, function()
+		game.hold(function() end)
+		log:info("pause: my account shown")
+		accounts.account_page(function()
+			unhold()
+			pmenu.back()
 		end)
-		if game.admin then
-			menu:add("Admin...", open_admin)
+	end, {order = 30, page = true})
+	pmenu.add(function() return game.admin and "Admin..." or nil end,
+			open_admin, {order = 31, page = true})
+	-- [SKELDAT_WORLD_ADMIN] The picker's: the world menu over the running
+	-- world (world_menu's client, its close back to the game), and the pause
+	pmenu.add(function() return game.picker and "Worlds..." or nil end,
+			function()
+		local world_menu = require("buildat/module/world_menu")
+		world_menu.on_close = function()
+			world_menu.on_close = nil
+			unhold()
+			log:info("pause: the worlds closed")
 		end
-		-- [SKELDAT_WORLD_ADMIN] The picker's: the world menu over the
-		-- running world (world_menu's client, its close back to the game),
-		-- and the pause
-		if game.picker then
-			menu:add("Worlds...", function()
-				close()
-				local world_menu = require("buildat/module/world_menu")
-				world_menu.on_close = function()
-					world_menu.on_close = nil
-					unhold()
-					log:info("pause: the worlds closed")
-				end
-				game.hold(function() end)
-				game.send("worlds", "")
-				log:info("pause: worlds asked")
-			end)
-			-- The picker's own pause, not this menu's
-			local held = game.paused and not game.paused_auto and
-					not game.skipping
-			menu:add(held and "Resume world" or "Pause world", function()
-				game.send("pause", held and "off" or "on")
-				close()
-			end)
-			-- [SKELDAT_SKIP_TIME] To the next sunset by day, sunrise by
-			-- night, or Stop; [SKELDAT_SKIP_DAWN] the night's to 05:00
-			-- (0.25 - 1/24), and the day's from there
-			if game.skipping then
-				menu:add("Stop skipping", function()
-					game.send("skip", "stop")
-					close()
-				end)
-			elseif not game.ended and not held then
-				local d = game.day or 0.5
-				local day = d >= 0.25 - 1 / 24 and d < 0.75
-				menu:add(day and "Skip to sunset" or "Skip to sunrise", function()
-					game.send("skip", "on")
-					close()
-				end)
-			end
-		end
-		menu:add("Settings...", settings)
-		menu:add("How to play...", function() game.send("intro", "") end)
-		menu:add("High scores...", function() game.send("scores", "list") end)
-		menu:add("Leave the game", function() buildat.leave() end)
-		-- [SKELDAT_PAUSE_CLOSE] A click off the menu is Continue, in the
-		-- click's own event (the gesture a browser grants a pointer lock
-		-- from); on the web Escape keeps it (init.lua: no_escape)
-		game.hold(close, menu.window, nil, {no_escape = true,
-				click = function(x, y)
-			local rp, sp = magic.ui.root.position, menu.window.screenPosition
-			x, y = x + rp.x - sp.x, y + rp.y - sp.y
-			if x < 0 or y < 0 or x >= menu.window.width or
-					y >= menu.window.height then
-				log:info("pause: a click off the menu")
-				close()
-			end
-		end})
-		game.send("pause", "auto on")
-		log:info("pause: the menu shown")
+		game.hold(function() end)
+		game.send("worlds", "")
+		log:info("pause: worlds asked")
+	end, {order = 40})
+	-- The picker's own pause, not this menu's
+	local function world_held()
+		return game.paused and not game.paused_auto and not game.skipping
 	end
+	pmenu.add(function()
+		return game.picker and (world_held() and "Resume world" or
+				"Pause world") or nil
+	end, function()
+		game.send("pause", world_held() and "off" or "on")
+		close()
+	end, {order = 41, keep = true})
+	-- [SKELDAT_SKIP_TIME] To the next sunset by day, sunrise by night, or
+	-- Stop; [SKELDAT_SKIP_DAWN] the night's to 05:00 (0.25 - 1/24), and the
+	-- day's from there
+	pmenu.add(function()
+		if not game.picker then
+			return nil
+		elseif game.skipping then
+			return "Stop skipping"
+		elseif not game.ended and not world_held() then
+			local d = game.day or 0.5
+			local day = d >= 0.25 - 1 / 24 and d < 0.75
+			return day and "Skip to sunset" or "Skip to sunrise"
+		end
+	end, function()
+		game.send("skip", game.skipping and "stop" or "on")
+		close()
+	end, {order = 42, keep = true})
+	pmenu.add("How to play...", function() game.send("intro", "") end,
+			{order = 85, keep = true})
+	pmenu.add("High scores...", function() game.send("scores", "list") end,
+			{order = 86, keep = true})
 
 	local function show_death()
 		close()
@@ -584,7 +548,7 @@ return function(game, declare_keys)
 			uistack.main:pop(death.root)
 			death = nil
 		end
-		if root then
+		if root or pmenu.held() then
 			close()
 		else
 			game.hold(nil)

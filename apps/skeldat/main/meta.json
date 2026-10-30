@@ -2,7 +2,7 @@
 	"web": true,
 	"engine_api": 2,
 	"kind": "world",
-	"client_extensions": ["physical_sky", "sky_render"],
+	"client_extensions": ["physical_sky", "sky_render", "pause_menu"],
 	"dependencies": [
 		{"module": "network"},
 		{"module": "client_lua"},
