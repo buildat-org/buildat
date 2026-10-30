@@ -1233,18 +1233,20 @@ luabind::object set_quad_geometry(const luabind::object &node_o,
 // geometry (and one a shadow split) where it would be a batch each.
 // One Model a source, kept while the source's ranges, buffer and bounds
 // are what it was made of: a source meshed again (CustomGeometry::Commit
-// refills the same buffer) gets a new one at its next share.
+// refills the same buffer) gets a new one at its next share. The map holds
+// the Model weakly, its StaticModels hold it: a static's destructor runs
+// after the Context's, and a Model freed there crashed the client at exit.
 struct SharedModel
 {
 	WeakPtr<CustomGeometry> cg;
-	SharedPtr<Model> model;
+	WeakPtr<Model> model;
 	VertexBuffer *vb = nullptr;
 	sv_<std::pair<unsigned, unsigned>> ranges;
 	BoundingBox box;
 };
 static std::map<CustomGeometry*, SharedModel> g_shared_models;
 
-static Model* shared_model(CustomGeometry *cg)
+static SharedPtr<Model> shared_model(CustomGeometry *cg)
 {
 	const unsigned n = cg->GetNumGeometries();
 	sv_<std::pair<unsigned, unsigned>> ranges;
@@ -1257,13 +1259,13 @@ static Model* shared_model(CustomGeometry *cg)
 		total = std::max(total, g->GetVertexStart() + g->GetVertexCount());
 	}
 	auto it = g_shared_models.find(cg);
-	if(it != g_shared_models.end() && it->second.cg == cg &&
+	if(it != g_shared_models.end() && it->second.cg == cg && it->second.model &&
 			it->second.vb == vb && it->second.ranges == ranges &&
 			it->second.box == cg->GetBoundingBox())
-		return it->second.model;
-	// The ones whose source is gone, while here
+		return SharedPtr<Model>(it->second.model);
+	// The ones whose source or Model is gone, while here
 	for(auto i = g_shared_models.begin(); i != g_shared_models.end();){
-		if(!i->second.cg)
+		if(!i->second.cg || !i->second.model)
 			i = g_shared_models.erase(i);
 		else
 			++i;
@@ -1315,10 +1317,10 @@ static void share_one_geometry(Node *src, Node *dst)
 			dst->RemoveComponent(sm);
 		return;
 	}
-	Model *model = shared_model(cg);
+	SharedPtr<Model> model = shared_model(cg);
 	if(!sm)
 		sm = dst->CreateComponent<StaticModel>(LOCAL);
-	if(sm->GetModel() != model)
+	if(sm->GetModel() != model.Get())
 		sm->SetModel(model);
 	for(unsigned i = 0; i < n; i++)
 		sm->SetMaterial(i, cg->GetMaterial(i));
