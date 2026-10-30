@@ -8,6 +8,8 @@
 --   d: dig at the door           s: packets that try to fire signals
 --   e: use the faulty one (10, an error in its Lua)
 --   h: use the second runaway (11)
+--   u: use the entity last selected in Kit's editor (F6 or "Edit")
+--   x: a packet of each kind of edit (refused without edit rights)
 local log = buildat.Logger("sample_kit")
 local magic = require("buildat/extension/urho3d")
 local replicate = require("buildat/extension/replicate")
@@ -19,6 +21,9 @@ camera_node.position = magic.Vector3(2, 4, -6)
 camera_node:LookAt(magic.Vector3(2, 1, 0))
 magic.set_preferred_viewports({magic.Viewport:new(scene,
 		camera_node:GetComponent("Camera"))})
+-- Kit's editor ([KIT] stage 3): the owner (the first to join) edits
+local kit = require("buildat/module/kit")
+kit.editor{scene = scene, camera = camera_node, ground_y = 1}
 
 local KEYS = {
 	[magic.KEY_B] = function() buildat.send_packet("kit:use", "3") end,
@@ -28,6 +33,27 @@ local KEYS = {
 	[magic.KEY_E] = function() buildat.send_packet("kit:use", "10") end,
 	[magic.KEY_H] = function() buildat.send_packet("kit:use", "11") end,
 	[magic.KEY_D] = function() buildat.send_packet("main:dig", "") end,
+	-- Every kind of edit, as packets, whatever edit mode says: a player
+	-- without edit rights is refused each
+	[magic.KEY_X] = function()
+		for _, e in ipairs({
+			'{"op": "mode", "on": true}',
+			'{"op": "place", "type": "button", "pos": [0, 1, -1]}',
+			'{"op": "move", "id": 3, "pos": [0, 1, -1]}',
+			'{"op": "delete", "id": 3}',
+			'{"op": "set", "id": 4, "comp": 0, "param": "closed", "value": "air"}',
+			'{"op": "link", "id": 3, "comp": 0, "output": "pressed", "to": 5, "input": "count"}',
+			'{"op": "unlink", "id": 3, "comp": 0, "output": "pressed", "to": 4, "input": "toggle"}',
+			'{"op": "undo"}',
+			'not json'}) do
+			buildat.send_packet("kit:edit", e)
+		end
+		log:info("sent the edit packets")
+	end,
+	-- The entity last selected in the editor
+	[magic.KEY_U] = function()
+		buildat.send_packet("kit:use", tostring(kit.selected()))
+	end,
 	[magic.KEY_S] = function()
 		-- There is no packet that fires a signal: these go nowhere
 		buildat.send_packet("kit:signal", '{"to": 5, "input": "count"}')
