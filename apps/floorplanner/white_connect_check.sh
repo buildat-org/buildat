@@ -37,6 +37,7 @@ done
 python3 "$here/util/netsim.py" --listen $np --to localhost:$SERVER_PORT --delay 80 --rate 2000 \
 	> "$t/netsim.log" 2>&1 &
 CHECK_PIDS+=($!)
+wait_for_log "$t/netsim.log" "netsim: listening" 10 || fail "netsim ($t/netsim.log)"
 # client <name> <password> <dir> <cmds> <log> [env...]
 client() {
 	local name=$1 pw=$2 dir=$3 cmds=$4 log=$5; shift 5
