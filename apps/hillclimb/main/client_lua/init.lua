@@ -48,6 +48,7 @@ local sky_light = load("sky_render/init.lua")
 local predict = load("main/predict.lua")()
 buildat.sub_packet("hillclimb:setup", predict.setup)
 buildat.sub_packet("hillclimb:state", predict.state)
+buildat.sub_packet("hillclimb:rate", predict.rate)
 local PHYS = sky_light.PHYS
 
 voxelworld.use_skylight = true

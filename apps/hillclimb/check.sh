@@ -1,6 +1,6 @@
 #!/bin/bash
 # tier: full
-# cost: ~14 min (2026-10-29)
+# cost: ~7 min (2026-10-30)
 # covers: apps/hillclimb/** src/interface/noise.h src/lua_bindings/wasm.cpp src/server/wasm_build.cpp extensions/physical_sky/init.lua extensions/sky_render/**
 # hillclimb ([HILLCLIMB], doc/plan/hillclimb_plan.md's Check), no
 # pixels. The generator's own self test (main/hill.h: the same seed the
@@ -161,6 +161,8 @@ drive()
 	# The car's own drives on a hill with no pits or rocks (the rock's
 	# below sets them on again), its steepness even ([HC_STEEP_NOISE]:
 	# the varied one's below sets its variance)
+	# [CHECK_TIME_SCALE] On the game's clock, as fast as it goes: a drive
+	# steps a 30 Hz tick's substeps whatever the tick took
 	# The modules compiled once (warm, below), each drive a copy
 	[ -d "$t/warm/c" ] && [ "$name" != warm ] && mkdir -p "$t/$name" &&
 		cp -a "$t/warm/c" "$t/$name/c"
@@ -173,7 +175,7 @@ drive()
 			# shellcheck disable=SC2086 # the assignments, split
 			env BUILDAT_HILLCLIMB_MODE=straight BUILDAT_HILLCLIMB_FEATURES=0 \
 				BUILDAT_HILLCLIMB_STEEP_VAR=0 $firm_soil "$@" timeout 150 bin/buildat_server -m "$app" -D "$t/$name/u" \
-				-C "$t/$name/c" -P $port -l 3 > "$t/$name.log" 2>&1
+				-C "$t/$name/c" -P $port -l 3 --sim-rate "$CHECK_RATE_HEADLESS" > "$t/$name.log" 2>&1
 			local rc=$?
 			grep -aq "Failed to bind socket" "$t/$name.log" || return $rc
 		fi
@@ -667,11 +669,16 @@ once() # <client log> <hill lines>
 	done
 	[ -z "$p" ] || fail "a join's packets:$p ($1)"
 }
+# [CHECK_TIME_SCALE] At CHECK_RATE: once both are in (a join's waits are
+# the wall's), the drives' waits are in the game's time, the round's and
+# the hill made anew
 mp_server mp "BUILDAT_HILLCLIMB_INTERVAL=20 BUILDAT_HILLCLIMB_FEATURES=0
-	BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1
+	BUILDAT_HILLCLIMB_STEEP=22 BUILDAT_HILLCLIMB_STEEP_VAR=0" -u launcher=1 \
+	--sim-rate "$CHECK_RATE"
 cat > "$t/mp1.cmds" <<C
 wait_log 120000 hillclimb: this client's car is
 wait_log 120000 car drawn as a ghost
+game_clock $t/mp/u
 delay 2000
 keydown W
 wait_log 120000 hillclimb: the round's results
@@ -681,6 +688,7 @@ quit
 C
 cat > "$t/mp2.cmds" <<C
 wait_log 120000 car drawn as a ghost
+game_clock $t/mp/u
 wait_log 120000 hillclimb: observing
 wait_log 120000 hillclimb: the round's results
 # The hill made anew 5 s after the results: its line

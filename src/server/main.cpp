@@ -154,6 +154,21 @@ int main(int argc, char *argv[])
 			// to <user_path>/sim_clock; only from this command line
 			config.set("sim_clock", true);
 			take = 1;
+		} else if(ss_(argv[i]) == "--sim-rate" && i + 1 < argc){
+			// [CHECK_TIME_SCALE]: the ticks N times as often as the wall
+			// clock's 30 a second, 0 as fast as they go; changed at run
+			// time by the sim_clock file's second number; only from this
+			// command line
+			const ss_ v = argv[i + 1];
+			char *end = nullptr;
+			const double d = strtod(v.c_str(), &end);
+			if(v.empty() || *end || !(d >= 0) || d > 1000){
+				std::cerr<<"--sim-rate takes a rate, 0 to 1000"<<std::endl;
+				return 1;
+			}
+			config.set("sim_rate", v);
+			config.set("sim_clock", true);
+			take = 2;
 		} else if(ss_(argv[i]) == "--free-run"){
 			// [SERVER_FREE_RUN]: ticks back to back, for a headless check
 			// that measures the game; only from this command line
@@ -255,6 +270,11 @@ int main(int argc, char *argv[])
 			"  --sim-clock          Run the calendar ahead by the seconds\n"
 			"                       in user_path/sim_clock, read every tick\n"
 			"                       (for checks)\n"
+			"  --sim-rate N         Each tick 1/30 s of game time, N times as\n"
+			"                       often as the wall clock's (0: as fast as\n"
+			"                       the modules go), never dropped when late;\n"
+			"                       --sim-clock, its file's second number the\n"
+			"                       rate from then on (for checks)\n"
 			"  --free-run           Tick as fast as the modules go, not with\n"
 			"                       the clock; headless (for checks): no\n"
 			"                       client is let in, and with --lan-announce,\n"
@@ -494,6 +514,25 @@ int main(int argc, char *argv[])
 		setvbuf(sim_clock, nullptr, _IONBF, 0);
 		log_w(MODULE, "--sim-clock: the calendar is what %s says", cs(path));
 	}
+	// [CHECK_TIME_SCALE]: the game's clock, ticks of 1/30 s, paced at a rate
+	// of the wall clock's (a ceiling: a late tick runs late, none dropped);
+	// its seconds since the start written to <user_path>/game_clock each
+	// game second, for a check's waits
+	const ss_ sim_rate_s = config.get<ss_>("sim_rate");
+	double sim_rate = sim_rate_s.empty() ? 1 : atof(sim_rate_s.c_str());
+	FILE *game_clock = nullptr;
+	if(!sim_rate_s.empty()){
+		const ss_ path = config.get<ss_>("user_path")+"/game_clock";
+		game_clock = fopen(path.c_str(), "w");
+		if(!game_clock){
+			log_e(MODULE, "--sim-rate: cannot open %s", cs(path));
+			return 1;
+		}
+		setvbuf(game_clock, nullptr, _IONBF, 0);
+		log_w(MODULE, "--sim-rate: the game's clock at %gx the wall "
+				"clock's (0: as fast as it goes), its seconds in %s", sim_rate,
+				cs(path));
+	}
 
 	// [COMPILE_SLOTS] Opened where /tmp still is, before the box
 	server::open_compile_slots();
@@ -555,6 +594,14 @@ int main(int argc, char *argv[])
 		uint64_t next_tick_us = get_timeofday_us();
 		uint64_t t_per_tick = 1000000 / 30; // Same as physics FPS
 		long long sim_offset_s = 0;
+		const bool rated = !sim_rate_s.empty();
+		const int64_t start_game_us = interface::os::time_us();
+		int64_t game_us = start_game_us;
+		long long game_s_written = -1;
+		uint64_t next_sim_read_us = 0;
+		if(rated || free_run)
+			interface::os::set_game_tick(game_us, t_per_tick,
+					free_run ? 0 : sim_rate);
 		uint64_t free_ticks = 0;
 		const uint64_t free_start_us = next_tick_us;
 		// **Save now** ([USER_DIR_COPY]): <user>/apps/<app>/save_now, looked
@@ -589,14 +636,21 @@ int main(int argc, char *argv[])
 			if(delay_us < 0)
 				delay_us = 0;
 
-			if(!free_run)
+			const bool unpaced = free_run || (rated && sim_rate == 0);
+			if(!unpaced)
 				usleep(delay_us);
 
 			state->handle_events();
 
-			if(free_run || current_us >= next_tick_us){
-				next_tick_us += t_per_tick;
-				if(free_run){
+			if(unpaced || current_us >= next_tick_us){
+				next_tick_us += rated && sim_rate > 0 ?
+						(uint64_t)(t_per_tick / sim_rate) : t_per_tick;
+				if(rated){
+					// Late: on from now with the game's time kept, a tenth
+					// of a second's ticks caught up at most
+					if(next_tick_us + 100 * 1000 < current_us)
+						next_tick_us = current_us;
+				} else if(free_run){
 					// The pace, every simulated ten minutes
 					if(++free_ticks % (30 * 600) == 0){
 						const double wall = (current_us - free_start_us) / 1e6;
@@ -610,20 +664,46 @@ int main(int argc, char *argv[])
 				}
 				// [SIM_CLOCK]: a jump is seen by the tick after it, once:
 				// whatever runs on the calendar compares against it
+				// [CHECK_TIME_SCALE]: and the rate, its second number (none:
+				// as it was); read each 10 ms of the wall clock's at most,
+				// as fast as the ticks may go
 				long long v = 0;
-				if(sim_clock){
+				if(sim_clock && current_us >= next_sim_read_us){
+					next_sim_read_us = current_us + 10000;
 					rewind(sim_clock);
-					if(fscanf(sim_clock, "%lld", &v) == 1 && v != sim_offset_s){
+					double r = 0;
+					const int got = fscanf(sim_clock, "%lld %lf", &v, &r);
+					if(got >= 1 && v != sim_offset_s){
 						sim_offset_s = v;
 						interface::os::set_wall_offset_us(v * 1000000);
 						log_i(MODULE, "sim clock: %llds ahead", v);
 					}
+					if(got == 2 && rated && r >= 0 && r <= 1000 &&
+							r != sim_rate){
+						sim_rate = r;
+						next_tick_us = current_us;
+						log_i(MODULE, "sim rate: %gx", r);
+					}
+				}
+				if(rated || free_run){
+					game_us += t_per_tick;
+					interface::os::set_game_tick(game_us, t_per_tick,
+							free_run ? 0 : sim_rate);
+					const long long gs = (game_us - start_game_us) / 1000000;
+					if(game_clock && gs != game_s_written){
+						// In place: a number that only grows needs no
+						// truncation
+						game_s_written = gs;
+						rewind(game_clock);
+						fprintf(game_clock, "%lld\n", gs);
+					}
 				}
 				interface::Event event("core:tick",
 						new interface::TickEvent(t_per_tick / 1e6));
-				// Free-running, the next tick waits for every module to
-				// have taken this one, or the queue would only grow
-				if(free_run)
+				// Free-running or on the game's clock, the next tick waits
+				// for every module to have taken this one: the queue would
+				// only grow, and a late tick is to run late
+				if(free_run || rated)
 					state->emit_event_synchronously(std::move(event));
 				else
 					state->emit_event(std::move(event));

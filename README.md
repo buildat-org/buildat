@@ -59,7 +59,8 @@ Starport listing takes it as its kind unless `starport.json` names one.
   `sample_module_calls`, `sample_kit` (an app hosting Kit, components
   composed in Lua), `sample_wasm` (a module's wasm/ called from
   the client's Lua), `sample_rust` (a module in Rust on both sides, its
-  server half a .wasm), `blip_check` (extensions/blip's sounds).
+  server half a .wasm), `blip_check` (extensions/blip's sounds), `sim_rate_check`
+  (the server's --sim-rate).
 
 Further reading:
 

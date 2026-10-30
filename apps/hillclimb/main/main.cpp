@@ -384,6 +384,8 @@ struct Module: public interface::Module
 	// substeps stepped, the server's clock an input is placed on
 	uint64_t m_tick_us = 0;
 	float m_step_left = 0;
+	// [CHECK_TIME_SCALE] The game's rate the clients were last told
+	double m_rate_sent = 1;
 	int64_t m_substeps = 0;
 	uint32_t m_selftest = 0;
 
@@ -1231,8 +1233,11 @@ struct Module: public interface::Module
 		// rounding a tick ran up to 5% slow). [HILLCLIMB_PREDICT_RED] The
 		// time since the last tick as measured, not the tick's nominal
 		// dtime: a tick handled late (behind another module's stall) placed
-		// the inputs that came in after it early by as much
-		const uint64_t now_us = interface::os::time_us();
+		// the inputs that came in after it early by as much.
+		// [CHECK_TIME_SCALE] Measured on the game's clock (the wall's but
+		// under --sim-rate), the clients told its rate
+		const uint64_t now_us = interface::os::game_us();
+		send_rate();
 		m_step_left = std::fmin(m_step_left + (m_tick_us == 0 ? event.dtime :
 				(now_us - m_tick_us) / 1e6f), 0.25f);
 		int n = (int)(m_step_left / dt);
@@ -2058,6 +2063,24 @@ struct Module: public interface::Module
 		snprintf(buf, sizeof buf, "%08x", m_selftest);
 		network::send(m_server, pl.peer, "hillclimb:setup", ss_(buf)+" "+
 				hex(&s, sizeof s));
+		if(m_rate_sent != 1)
+			network::send(m_server, pl.peer, "hillclimb:rate",
+					ftos((float)m_rate_sent));
+	}
+
+	// [CHECK_TIME_SCALE] The game's rate against the wall clock (a check's
+	// --sim-rate), to every client when it changes: the prediction steps
+	// the car by it
+	void send_rate()
+	{
+		const double r = interface::os::game_rate();
+		if(r == m_rate_sent)
+			return;
+		m_rate_sent = r;
+		for(auto &kv : m_players)
+			if(kv.second.peer != 0 && kv.second.peer < BOT_PEER)
+				network::send(m_server, kv.second.peer, "hillclimb:rate",
+						ftos((float)r));
 	}
 
 	// "accel brake left right gear reset [steer]", each a number, to the
@@ -2094,7 +2117,7 @@ struct Module: public interface::Module
 		p.in.gear = (car::Gear)g;
 		long long seq = 0;
 		p.seq = has_steer && (is >> seq) ? (uint32_t)seq : 0;
-		p.at = (int)(((interface::os::time_us() - m_tick_us) / 1e6 +
+		p.at = (int)(((interface::os::game_us() - m_tick_us) / 1e6 +
 				m_step_left) * SUBSTEPS_HZ);
 		long long c0 = 0, cnow = 0;
 		if(p.seq != 0 && (is >> c0 >> cnow) && c0 >= 0 && cnow >= c0 &&
