@@ -85,7 +85,9 @@ return function()
 	local st = fresh(0)
 	-- [CHECK_TIMING_LIMITS] long: the driven frames over 100 ms, a slow
 	-- machine's (the check box's software GL): a state arrives late after
-	-- one, and the checks allow a state taken whole for each
+	-- one, and the checks allow a state taken whole for each. A state taken
+	-- whole in a long frame or the one after is not counted at all: on the
+	-- box nearly every frame is one (stony: 575 in 61 s at 4 fps)
 	local total = {n = 0, cm = 0, whole = 0, states = 0, t0 = nil,
 		driven = false, long = 0}
 	-- The latency's line: a key from standing to the car moving 1 cm,
@@ -269,9 +271,12 @@ return function()
 		if r == 2 or held then
 			st.whole = st.whole + (r == 2 and 1 or 0)
 			if r == 2 and not held and total.driven and not put_back then
-				total.whole = total.whole + 1
+				local slow = total.last_long or (total.frame_t and
+						buildat.get_time_us() - total.frame_t > 100000)
+				total.whole = total.whole + (slow and 0 or 1)
 				log:info("hillclimb: a state taken whole while driven: for substep "
-						.. tostring(at) .. ", here " .. now)
+						.. tostring(at) .. ", here " .. now
+						.. (slow and " (a long frame's)" or ""))
 			end
 			return
 		end
@@ -307,7 +312,8 @@ return function()
 			chunks_t, chunks_at = t, at
 			hand_chunks(x, y, z)
 		end
-		if total.frame_t and total.driven and t - total.frame_t > 100000 then
+		total.last_long = total.frame_t and t - total.frame_t > 100000
+		if total.last_long and total.driven then
 			total.long = total.long + 1
 		end
 		total.frame_t = t
