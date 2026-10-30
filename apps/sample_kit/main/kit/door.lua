@@ -14,8 +14,9 @@ return {
 	end,
 	on_input = function(c, input, value, by)
 		c.state.open = not c.state.open
-		c:set_voxel(c.state.open and c.params.open or c.params.closed)
-		c:log(c.state.open and "opened" or "closed", "by", by)
+		local voxel = c.state.open and c.params.open or c.params.closed
+		c:set_voxel(voxel)
+		c:log(c.state.open and "opened" or "closed", "by", by, "to", voxel)
 		c:emit(c.state.open and "opened" or "closed")
 	end,
 	-- Someone else's write to the door's voxel: the door keeps it

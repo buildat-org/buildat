@@ -26,6 +26,7 @@
 #include <deque>
 #include <fstream>
 #include <mutex>
+#include <algorithm>
 #include <set>
 #include <sstream>
 #define MODULE "kit"
@@ -45,6 +46,14 @@ static const size_t MAX_QUEUE = 4096;
 static const int64_t SLICE_DIV = 20;
 static const int64_t TICK_SLICES = 4;
 static const size_t MAX_TYPE_SOURCE = 256 << 10;
+// What an editor's packet may be and do
+static const size_t MAX_EDIT_PACKET = 4096;
+static const size_t MAX_STRING = 256;
+static const double MAX_COORD = 30000;
+static const size_t MAX_ENTITIES = 4096;
+static const size_t MAX_LINKS = 64;
+// An editor's undo goes back this many edits
+static const size_t UNDO_MAX = 50;
 
 struct Link
 {
@@ -100,6 +109,14 @@ struct Peer
 {
 	ss_ name, scene;
 	double pos[3] = {0, 0, 0};
+	bool editing = false;
+};
+
+// One edit: the entities it changed as they were before (null: not there),
+// in the order an undo puts them back
+struct Change
+{
+	sv_<std::pair<uint64_t, json::Value>> before;
 };
 
 struct Module;
@@ -234,6 +251,14 @@ struct Module: public interface::Module, public Interface
 	std::deque<Write> m_writes;
 	// Voxels an instance set whose section was not loaded: tried each tick
 	std::deque<Write> m_pending_voxels;
+	// The editor: the players the app gave edit rights, the types an editor
+	// places (every file in types_path that loads), each editor's undo,
+	// and the sections Kit owns positions in, each scene's
+	std::set<ss_> m_editors;
+	std::set<ss_> m_palette;
+	sm_<ss_, std::deque<Change>> m_undo;
+	std::map<main_context::SceneReference,
+			std::set<std::tuple<int, int, int>>> m_owned_sections;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -263,6 +288,7 @@ struct Module: public interface::Module, public Interface
 	{
 		sub(m_server, "core:tick", &Module::on_tick);
 		sub(m_server, "network:packet_received/kit:use", &Module::on_use);
+		sub(m_server, "network:packet_received/kit:edit", &Module::on_edit);
 		sub(m_server, "network:client_disconnected", &Module::on_left);
 	}
 
@@ -453,6 +479,174 @@ struct Module: public interface::Module, public Interface
 				(int32_t)std::floor(e.pos[1]), (int32_t)std::floor(e.pos[2]));
 	}
 
+	// A parameter's value as its declaration types it: "" when it is one,
+	// else what it should be. The composition's, the save's and an
+	// editor's values all pass here
+	ss_ check_param(const json::Value &decl, const json::Value &v)
+	{
+		const ss_ t = jstr(decl, "type");
+		if(t == "number"){
+			if(!v.is_number() || !std::isfinite(v.as_number()))
+				return "a number";
+			const json::Value &lo = decl.get("min"), &hi = decl.get("max");
+			if(lo.is_number() && v.as_number() < lo.as_number())
+				return "at least "+lo.stringify();
+			if(hi.is_number() && v.as_number() > hi.as_number())
+				return "at most "+hi.stringify();
+			return "";
+		}
+		if(t == "bool")
+			return v.is_boolean() ? "" : "true or false";
+		if(t == "string"){
+			if(!v.is_string() || v.as_string().size() > MAX_STRING)
+				return "a string of at most "+itos(MAX_STRING)+" bytes";
+			for(unsigned char c : v.as_string())
+				if(c < 32 || c == 127)
+					return "a line of text";
+			return "";
+		}
+		if(t == "voxel"){
+			if(!v.is_string() || v.as_string().empty() ||
+					v.as_string().size() > 64)
+				return "a voxel's name";
+			for(char c : v.as_string())
+				if(!isalnum((unsigned char)c) && c != '_' && c != ':')
+					return "a voxel's name (letters, digits, _ and :)";
+			return "";
+		}
+		if(t == "entity"){
+			// 0: none
+			if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
+					v.as_number() < 0 || v.as_number() > 9e15 ||
+					(v.as_number() != 0 &&
+					!m_entities.count((uint64_t)v.as_number())))
+				return "an entity's id";
+			return "";
+		}
+		if(t == "position")
+			return pos_ok(v) ? "" : "a position, three numbers";
+		return "a type of parameter Kit has (\""+t.substr(0, 32)+"\" is none)";
+	}
+
+	static bool pos_ok(const json::Value &p)
+	{
+		if(!p.is_array() || p.size() != 3)
+			return false;
+		for(unsigned k = 0; k < 3; k++)
+			if(!p.at(k).is_number() || !std::isfinite(p.at(k).as_number()) ||
+					std::fabs(p.at(k).as_number()) > MAX_COORD)
+				return false;
+		return true;
+	}
+
+	// An entity as the authored row has it (the parent and the links not
+	// checked against the tree here)
+	bool entity_from_json(const json::Value &j, Entity &e, ss_ &why)
+	{
+		e.id = (uint64_t)json::jint(j, "id", 0);
+		e.parent = (uint64_t)json::jint(j, "parent", 1);
+		e.name = jstr(j, "name");
+		e.kind = jstr(j, "kind");
+		if(e.id < 2){
+			why = "an entity's id is 2 or more: "+j.stringify().substr(0, 200);
+			return false;
+		}
+		if(e.kind != "" && e.kind != "scene"){
+			why = "entity "+itos(e.id)+": no kind \""+e.kind+"\"";
+			return false;
+		}
+		const json::Value &p = j.get("pos");
+		if(!p.is_undefined()){
+			if(!pos_ok(p)){
+				why = "entity "+itos(e.id)+": a position is three numbers";
+				return false;
+			}
+			e.has_pos = true;
+			for(unsigned k = 0; k < 3; k++)
+				e.pos[k] = p.at(k).as_number();
+		}
+		const json::Value &cs_ = j.get("components");
+		for(unsigned k = 0; k < cs_.size(); k++){
+			const json::Value &cj = cs_.at(k);
+			Instance in;
+			in.type = jstr(cj, "type");
+			if(!load_type(in.type, why))
+				return false;
+			const Type &t = m_types[in.type];
+			// The parameters the type declares, its defaults under the
+			// instance's
+			const json::Value &decl = t.decl.get("params");
+			if(decl.is_object())
+				for(json::Iterator it(decl); it; ++it)
+					in.params.set(it.key(), (*it).get("default"));
+			const json::Value &pj = cj.get("params");
+			if(pj.is_object())
+				for(json::Iterator it(pj); it; ++it){
+					if(!decl.get(it.key()).is_object()){
+						why = "entity "+itos(e.id)+": "+in.type+
+								" has no parameter "+it.key();
+						return false;
+					}
+					const ss_ bad = check_param(decl.get(it.key()), *it);
+					if(!bad.empty()){
+						why = "entity "+itos(e.id)+": "+in.type+"'s "+
+								it.key()+" is "+bad;
+						return false;
+					}
+					in.params.set(it.key(), *it);
+				}
+			const json::Value &ls = cj.get("links");
+			for(unsigned m = 0; m < ls.size(); m++){
+				Link l;
+				l.output = jstr(ls.at(m), "output");
+				l.to = (uint64_t)json::jint(ls.at(m), "to", 0);
+				l.input = jstr(ls.at(m), "input");
+				if(!t.outputs.count(l.output)){
+					why = "entity "+itos(e.id)+": "+in.type+
+							" has no output "+l.output;
+					return false;
+				}
+				in.links.push_back(l);
+			}
+			e.comps.push_back(in);
+		}
+		return true;
+	}
+
+	json::Value entity_json(const Entity &e)
+	{
+		json::Value j = json::object();
+		j.set("id", (int64_t)e.id);
+		j.set("parent", (int64_t)e.parent);
+		j.set("name", e.name);
+		if(!e.kind.empty())
+			j.set("kind", e.kind);
+		if(e.has_pos){
+			json::Value pos = json::array();
+			for(int k = 0; k < 3; k++)
+				pos.append(e.pos[k]);
+			j.set("pos", pos);
+		}
+		json::Value comps = json::array();
+		for(const Instance &in : e.comps){
+			json::Value cj = json::object();
+			cj.set("type", in.type);
+			cj.set("params", in.params);
+			json::Value ls = json::array();
+			for(const Link &l : in.links){
+				json::Value lj = json::object();
+				lj.set("output", l.output);
+				lj.set("to", (int64_t)l.to);
+				lj.set("input", l.input);
+				ls.append(lj);
+			}
+			cj.set("links", ls);
+			comps.append(cj);
+		}
+		j.set("components", comps);
+		return j;
+	}
+
 	bool load_composition(const json::Value &c, ss_ &why)
 	{
 		Entity root;
@@ -462,65 +656,12 @@ struct Module: public interface::Module, public Interface
 		m_entities[1] = root;
 		const json::Value &es = c.get("entities");
 		for(unsigned i = 0; i < es.size(); i++){
-			const json::Value &j = es.at(i);
 			Entity e;
-			e.id = (uint64_t)json::jint(j, "id", 0);
-			e.parent = (uint64_t)json::jint(j, "parent", 1);
-			e.name = jstr(j, "name");
-			e.kind = jstr(j, "kind");
-			if(e.id < 2 || m_entities.count(e.id)){
-				why = "an entity's id is 2 or more and its own: "+
-						j.stringify();
+			if(!entity_from_json(es.at(i), e, why))
 				return false;
-			}
-			if(e.kind != "" && e.kind != "scene"){
-				why = "entity "+itos(e.id)+": no kind \""+e.kind+"\"";
+			if(m_entities.count(e.id)){
+				why = "entity "+itos(e.id)+" twice";
 				return false;
-			}
-			const json::Value &p = j.get("pos");
-			if(p.size() == 3){
-				e.has_pos = true;
-				for(int k = 0; k < 3; k++)
-					e.pos[k] = p.at(k).as_number();
-			}
-			const json::Value &cs_ = j.get("components");
-			for(unsigned k = 0; k < cs_.size(); k++){
-				const json::Value &cj = cs_.at(k);
-				Instance in;
-				in.type = jstr(cj, "type");
-				if(!load_type(in.type, why))
-					return false;
-				const Type &t = m_types[in.type];
-				// The parameters the type declares, its defaults under the
-				// instance's
-				const json::Value &decl = t.decl.get("params");
-				if(decl.is_object())
-					for(json::Iterator it(decl); it; ++it)
-						in.params.set(it.key(), (*it).get("default"));
-				const json::Value &pj = cj.get("params");
-				if(pj.is_object())
-					for(json::Iterator it(pj); it; ++it){
-						if(!decl.get(it.key()).is_object()){
-							why = "entity "+itos(e.id)+": "+in.type+
-									" has no parameter "+it.key();
-							return false;
-						}
-						in.params.set(it.key(), *it);
-					}
-				const json::Value &ls = cj.get("links");
-				for(unsigned m = 0; m < ls.size(); m++){
-					Link l;
-					l.output = jstr(ls.at(m), "output");
-					l.to = (uint64_t)json::jint(ls.at(m), "to", 0);
-					l.input = jstr(ls.at(m), "input");
-					if(!t.outputs.count(l.output)){
-						why = "entity "+itos(e.id)+": "+in.type+
-								" has no output "+l.output;
-						return false;
-					}
-					in.links.push_back(l);
-				}
-				e.comps.push_back(in);
 			}
 			m_entities[e.id] = e;
 		}
@@ -555,41 +696,9 @@ struct Module: public interface::Module, public Interface
 	{
 		json::Value c = json::object();
 		json::Value es = json::array();
-		for(auto &p : m_entities){
-			const Entity &e = p.second;
-			if(e.id == 1)
-				continue;
-			json::Value j = json::object();
-			j.set("id", (int64_t)e.id);
-			j.set("parent", (int64_t)e.parent);
-			j.set("name", e.name);
-			if(!e.kind.empty())
-				j.set("kind", e.kind);
-			if(e.has_pos){
-				json::Value pos = json::array();
-				for(int k = 0; k < 3; k++)
-					pos.append(e.pos[k]);
-				j.set("pos", pos);
-			}
-			json::Value comps = json::array();
-			for(const Instance &in : e.comps){
-				json::Value cj = json::object();
-				cj.set("type", in.type);
-				cj.set("params", in.params);
-				json::Value ls = json::array();
-				for(const Link &l : in.links){
-					json::Value lj = json::object();
-					lj.set("output", l.output);
-					lj.set("to", (int64_t)l.to);
-					lj.set("input", l.input);
-					ls.append(lj);
-				}
-				cj.set("links", ls);
-				comps.append(cj);
-			}
-			j.set("components", comps);
-			es.append(j);
-		}
+		for(auto &p : m_entities)
+			if(p.first != 1)
+				es.append(entity_json(p.second));
 		c.set("entities", es);
 		c.set("next_id", (int64_t)m_next_id);
 		return c;
@@ -676,6 +785,17 @@ struct Module: public interface::Module, public Interface
 			return false;
 		if(first)
 			m_store->set("authored", authored_json().stringify());
+		// The palette: every type of the app's that loads
+		for(const auto &n : interface::fs::list_directory(host.types_path)){
+			const size_t dot = n.name.rfind(".lua");
+			if(n.is_directory || dot == ss_::npos || dot + 4 != n.name.size())
+				continue;
+			ss_ twhy;
+			if(load_type(n.name.substr(0, dot), twhy))
+				m_palette.insert(n.name.substr(0, dot));
+			else
+				log_w(MODULE, "Not in the palette: %s", cs(twhy));
+		}
 
 		// Runtime: the save's, over each type's defaults
 		ss_ runtime;
@@ -787,10 +907,17 @@ struct Module: public interface::Module, public Interface
 							div(v.getY(), ss.getY()), div(v.getZ(), ss.getZ()))].
 							push_back(std::make_pair(v, itos(e.id)));
 				}
-				for(auto &b : by)
+				// And emptied where an entity owned and owns no more
+				for(const auto &k : m_owned_sections[s.second])
+					by[k];
+				m_owned_sections[s.second].clear();
+				for(auto &b : by){
 					w->set_section_owned(pv::Vector3DInt16(
 							std::get<0>(b.first), std::get<1>(b.first),
 							std::get<2>(b.first)), "kit", b.second);
+					if(!b.second.empty())
+						m_owned_sections[s.second].insert(b.first);
+				}
 			}
 		});
 	}
@@ -1091,6 +1218,8 @@ struct Module: public interface::Module, public Interface
 			double x, double y, double z)
 	{
 		Peer &p = m_peers[peer];
+		if(p.name != name)
+			p.editing = false;
 		p.name = name;
 		p.scene = scene;
 		p.pos[0] = x;
@@ -1111,6 +1240,452 @@ struct Module: public interface::Module, public Interface
 			return "";
 		const json::Value &v = it->second.comps[component].state.get(key);
 		return v.is_undefined() ? "" : v.stringify();
+	}
+
+	// ---- The editor (api.h: edit mode, the packet kit:edit)
+
+	void set_editor(const ss_ &player, bool can)
+	{
+		if(can){
+			m_editors.insert(player);
+		} else {
+			m_editors.erase(player);
+			for(auto &p : m_peers)
+				if(p.second.name == player && p.second.editing){
+					p.second.editing = false;
+					send_state(p.first);
+				}
+		}
+		log_i(MODULE, "%s %s edit rights", cs(player), can ? "has" : "has no");
+	}
+
+	// What an editor's client shows: the palette and the authored tree, or
+	// that it is not editing
+	void send_state(size_t peer)
+	{
+		auto pi = m_peers.find(peer);
+		json::Value j = json::object();
+		const bool editing = pi != m_peers.end() && pi->second.editing;
+		j.set("editing", editing);
+		if(editing){
+			json::Value pal = json::object();
+			for(const ss_ &t : m_palette){
+				const json::Value &d = m_types[t].decl;
+				json::Value o = json::object();
+				for(const char *k : {"params", "inputs", "outputs", "gizmo",
+						"usable"})
+					if(!d.get(k).is_undefined())
+						o.set(k, d.get(k));
+				pal.set(t, o);
+			}
+			// The composition's types that are not in the palette, too:
+			// the inspector needs every instance's parameters and signals
+			json::Value types = pal;
+			for(auto &t : m_types)
+				if(!m_palette.count(t.first)){
+					json::Value o = json::object();
+					for(const char *k : {"params", "inputs", "outputs", "gizmo"})
+						if(!t.second.decl.get(k).is_undefined())
+							o.set(k, t.second.decl.get(k));
+					types.set(t.first, o);
+				}
+			json::Value names = json::array();
+			for(const ss_ &t : m_palette)
+				names.append(t);
+			j.set("palette", names);
+			j.set("types", types);
+			j.set("authored", authored_json());
+			j.set("undo", (int64_t)m_undo[pi->second.name].size());
+		}
+		network::access(m_server, [&](network::Interface *inetwork){
+			inetwork->send(peer, "kit:edit_state", j.stringify());
+		});
+	}
+
+	void on_edit(const network::Packet &packet)
+	{
+		const size_t peer = packet.sender;
+		const json::Value j = packet.data.size() <= MAX_EDIT_PACKET ?
+				json::load_string(packet.data.c_str()) : json::null();
+		const ss_ op = j.is_object() ? jstr(j, "op").substr(0, 16) : "";
+		auto refuse = [&](const ss_ &why){
+			log_i(MODULE, "An edit (%s) by peer %zu refused: %s",
+					op.empty() ? "?" : cs(op), peer, cs(why));
+			network::access(m_server, [&](network::Interface *inetwork){
+				inetwork->send(peer, "kit:edit_refused", (op.empty() ? "?" :
+						op)+": "+why);
+			});
+		};
+		if(!m_hosted)
+			return refuse("Kit is not hosted");
+		if(!j.is_object())
+			return refuse("not a JSON object of at most "+
+					itos(MAX_EDIT_PACKET)+" bytes");
+		auto pi = m_peers.find(peer);
+		if(pi == m_peers.end())
+			return refuse("the app has not placed the player");
+		Peer &p = pi->second;
+		// Rights each packet: a revoked editor's next edit is refused
+		if(!m_editors.count(p.name)){
+			if(p.editing){
+				p.editing = false;
+				send_state(peer);
+			}
+			return refuse("no edit rights here");
+		}
+		if(op == "mode"){
+			p.editing = j.get("on").is_true();
+			log_i(MODULE, "%s %s edit mode", cs(p.name),
+					p.editing ? "is in" : "left");
+			send_state(peer);
+			return;
+		}
+		if(!p.editing)
+			return refuse("not in edit mode");
+		sv_<std::pair<uint64_t, json::Value>> change;
+		ss_ why, what;
+		if(op == "undo"){
+			std::deque<Change> &u = m_undo[p.name];
+			if(u.empty())
+				return refuse("nothing of "+p.name+"'s to undo");
+			const Change c = u.back();
+			u.pop_back();
+			commit(c.before, nullptr);
+			log_i(MODULE, "An undo by %s: %zu entities put back (%zu more "
+					"to undo)", cs(p.name), c.before.size(), u.size());
+			return;
+		}
+		if(!build_change(op, j, p, change, what, why))
+			return refuse(why);
+		commit(change, &m_undo[p.name]);
+		log_i(MODULE, "An edit by %s: %s", cs(p.name), cs(what));
+	}
+
+	// An id in a client's packet: a whole number of an entity that is there
+	Entity* entity_arg(const json::Value &j, const char *key, ss_ &why)
+	{
+		const json::Value &v = j.get(key);
+		if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
+				v.as_number() < 2 || v.as_number() > 9e15){
+			why = ss_(key)+": an entity's id";
+			return nullptr;
+		}
+		auto it = m_entities.find((uint64_t)v.as_number());
+		if(it == m_entities.end()){
+			why = ss_(key)+": no entity "+v.stringify();
+			return nullptr;
+		}
+		return &it->second;
+	}
+
+	// An instance of an entity in a client's packet: "id" and "comp"
+	Instance* instance_arg(const json::Value &j, Entity *&e, ss_ &why)
+	{
+		e = entity_arg(j, "id", why);
+		if(!e)
+			return nullptr;
+		const json::Value &v = j.get("comp");
+		if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
+				v.as_number() < 0 || v.as_number() >= e->comps.size()){
+			why = "comp: entity "+itos(e->id)+" has "+itos(e->comps.size())+
+					" components";
+			return nullptr;
+		}
+		return &e->comps[(size_t)v.as_number()];
+	}
+
+	// What an editor's op changes: each entity after it (null: gone).
+	// Everything in it is checked here; the client is trusted with nothing
+	bool build_change(const ss_ &op, const json::Value &j, const Peer &p,
+			sv_<std::pair<uint64_t, json::Value>> &change, ss_ &what, ss_ &why)
+	{
+		if(op == "place"){
+			const ss_ type = jstr(j, "type");
+			if(!m_palette.count(type)){
+				why = "no type \""+type.substr(0, 64)+"\" in the palette";
+				return false;
+			}
+			if(!pos_ok(j.get("pos"))){
+				why = "pos: three numbers within "+itos((int)MAX_COORD);
+				return false;
+			}
+			if(m_entities.size() >= MAX_ENTITIES){
+				why = "the composition has "+itos(MAX_ENTITIES)+" entities";
+				return false;
+			}
+			// In the scene the app placed the editor in
+			uint64_t scene = 0;
+			for(auto &e : m_entities)
+				if(e.second.kind == "scene" && e.second.name == p.scene)
+					scene = e.first;
+			if(!scene){
+				why = "the editor is in no scene of the composition's";
+				return false;
+			}
+			const uint64_t id = m_next_id++;
+			json::Value e = json::object();
+			e.set("id", (int64_t)id);
+			e.set("parent", (int64_t)scene);
+			e.set("name", type+" "+itos(id));
+			json::Value pos = json::array();
+			for(unsigned k = 0; k < 3; k++)
+				pos.append(std::floor(j.get("pos").at(k).as_number()));
+			e.set("pos", pos);
+			json::Value comp = json::object();
+			comp.set("type", type);
+			json::Value comps = json::array();
+			comps.append(comp);
+			e.set("components", comps);
+			change.push_back(std::make_pair(id, e));
+			what = "placed "+type+" "+itos(id)+" at "+pos.stringify();
+			return true;
+		}
+		if(op == "move"){
+			Entity *e = entity_arg(j, "id", why);
+			if(!e)
+				return false;
+			if(!e->has_pos || !e->kind.empty()){
+				why = "entity "+itos(e->id)+" has no position to move";
+				return false;
+			}
+			if(!pos_ok(j.get("pos"))){
+				why = "pos: three numbers within "+itos((int)MAX_COORD);
+				return false;
+			}
+			json::Value after = entity_json(*e);
+			json::Value pos = json::array();
+			for(unsigned k = 0; k < 3; k++)
+				pos.append(std::floor(j.get("pos").at(k).as_number()));
+			after.set("pos", pos);
+			change.push_back(std::make_pair(e->id, after));
+			what = "moved "+itos(e->id)+" to "+pos.stringify();
+			return true;
+		}
+		if(op == "delete"){
+			Entity *e = entity_arg(j, "id", why);
+			if(!e)
+				return false;
+			if(!e->kind.empty()){
+				why = "entity "+itos(e->id)+" is a "+e->kind;
+				return false;
+			}
+			for(auto &o : m_entities)
+				if(o.second.parent == e->id){
+					why = "entity "+itos(e->id)+" has entities under it";
+					return false;
+				}
+			change.push_back(std::make_pair(e->id, json::null()));
+			// And the links to it, from the others
+			for(auto &o : m_entities){
+				if(o.first == e->id)
+					continue;
+				bool links = false;
+				for(const Instance &in : o.second.comps)
+					for(const Link &l : in.links)
+						links = links || l.to == e->id;
+				if(!links)
+					continue;
+				Entity copy = o.second;
+				for(Instance &in : copy.comps)
+					in.links.erase(std::remove_if(in.links.begin(),
+							in.links.end(), [&](const Link &l){
+						return l.to == e->id;
+					}), in.links.end());
+				change.push_back(std::make_pair(o.first, entity_json(copy)));
+			}
+			what = "deleted "+itos(e->id)+(change.size() > 1 ? " and "+
+					itos(change.size() - 1)+" links' ends" : "");
+			return true;
+		}
+		if(op == "set"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			const ss_ param = jstr(j, "param");
+			const json::Value &decl = m_types[in->type].decl.get("params").
+					get(param);
+			if(param.empty() || !decl.is_object()){
+				why = in->type+" has no parameter \""+param.substr(0, 64)+"\"";
+				return false;
+			}
+			const ss_ bad = check_param(decl, j.get("value"));
+			if(!bad.empty()){
+				why = in->type+"'s "+param+" is "+bad;
+				return false;
+			}
+			const size_t ci = in - &e->comps[0];
+			Entity copy = *e;
+			copy.comps[ci].params.set(param, j.get("value"));
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = "set "+itos(e->id)+"'s "+in->type+" "+param+" to "+
+					j.get("value").stringify();
+			return true;
+		}
+		if(op == "link" || op == "unlink"){
+			Entity *e = nullptr;
+			Instance *in = instance_arg(j, e, why);
+			if(!in)
+				return false;
+			Link l;
+			l.output = jstr(j, "output");
+			l.input = jstr(j, "input");
+			if(!m_types[in->type].outputs.count(l.output)){
+				why = in->type+" has no output \""+l.output.substr(0, 64)+"\"";
+				return false;
+			}
+			Entity *to = entity_arg(j, "to", why);
+			if(!to)
+				return false;
+			l.to = to->id;
+			bool has_input = false;
+			for(const Instance &ti : to->comps)
+				has_input = has_input || m_types[ti.type].inputs.count(l.input);
+			if(!has_input){
+				why = "entity "+itos(to->id)+" has no input \""+
+						l.input.substr(0, 64)+"\"";
+				return false;
+			}
+			auto same = [&](const Link &o){
+				return o.output == l.output && o.to == l.to && o.input == l.input;
+			};
+			const bool there = std::any_of(in->links.begin(), in->links.end(),
+					same);
+			const size_t ci = in - &e->comps[0];
+			Entity copy = *e;
+			sv_<Link> &links = copy.comps[ci].links;
+			if(op == "link"){
+				if(there){
+					why = "that link is there";
+					return false;
+				}
+				if(links.size() >= MAX_LINKS){
+					why = "an instance has "+itos(MAX_LINKS)+" links at most";
+					return false;
+				}
+				links.push_back(l);
+			} else {
+				if(!there){
+					why = "no such link";
+					return false;
+				}
+				links.erase(std::remove_if(links.begin(), links.end(), same),
+						links.end());
+			}
+			change.push_back(std::make_pair(e->id, entity_json(copy)));
+			what = op+"ed "+itos(e->id)+"."+l.output+" -> "+itos(l.to)+"."+
+					l.input;
+			return true;
+		}
+		why = "no op \""+op+"\"";
+		return false;
+	}
+
+	// The entities as the change has them, live: their nodes, runtime state
+	// and owned voxels follow, the authored row is saved, and each editor
+	// is sent the tree. undo: the editor's, which gets what puts it back
+	void commit(const sv_<std::pair<uint64_t, json::Value>> &change,
+			std::deque<Change> *undo)
+	{
+		Change back;
+		for(const auto &c : change){
+			if(undo){
+				auto it = m_entities.find(c.first);
+				back.before.push_back(std::make_pair(c.first,
+						it == m_entities.end() ? json::null() :
+						entity_json(it->second)));
+			}
+			apply(c.first, c.second);
+		}
+		if(undo){
+			undo->push_back(back);
+			while(undo->size() > UNDO_MAX)
+				undo->pop_front();
+		}
+		m_runtime_dirty = true;
+		own_voxels();
+		m_store->set("authored", authored_json().stringify());
+		for(auto &p : m_peers)
+			if(p.second.editing)
+				send_state(p.first);
+	}
+
+	void remove_node(const Entity &e)
+	{
+		if(!e.node)
+			return;
+		main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
+			magic::Node *n = scene->GetNode(e.node);
+			if(n)
+				n->Remove();
+		});
+	}
+
+	void apply(uint64_t id, const json::Value &after)
+	{
+		auto it = m_entities.find(id);
+		if(after.is_null()){
+			if(it != m_entities.end()){
+				remove_node(it->second);
+				m_entities.erase(it);
+			}
+			return;
+		}
+		Entity n;
+		ss_ why;
+		if(!entity_from_json(after, n, why) || n.id != id ||
+				!m_entities.count(n.parent) || (n.has_pos && !scene_of(n))){
+			log_w(MODULE, "An edit of entity %s not made: %s", cs(itos(id)),
+					why.empty() ? "no parent or scene" : cs(why));
+			return;
+		}
+		// Links to what is no longer there (an undo past a delete of
+		// someone else's) are left out
+		for(Instance &in : n.comps)
+			in.links.erase(std::remove_if(in.links.begin(), in.links.end(),
+					[&](const Link &l){ return !m_entities.count(l.to); }),
+					in.links.end());
+		const bool had = it != m_entities.end();
+		for(size_t i = 0; i < n.comps.size(); i++){
+			Instance &in = n.comps[i];
+			if(had && i < it->second.comps.size() &&
+					it->second.comps[i].type == in.type){
+				// The same instance: its runtime state goes on
+				in.state = it->second.comps[i].state;
+				in.disabled = it->second.comps[i].disabled;
+				continue;
+			}
+			// simplified: a new instance (an undone delete's too) starts
+			// with its type's defaults; the runtime state of a deleted one
+			// is not kept for an undo
+			const json::Value &sd = m_types[in.type].decl.get("state");
+			if(sd.is_object())
+				for(json::Iterator si(sd); si; ++si)
+					in.state.set(si.key(), (*si).get("default"));
+			Run r;
+			r.entity = id;
+			r.comp = i;
+			r.handler = "on_start";
+			queue_run(r);
+		}
+		if(had){
+			n.node = it->second.node;
+			if(n.node && (!n.has_pos || scene_of(n) != scene_of(it->second))){
+				remove_node(it->second);
+				n.node = 0;
+			}
+		}
+		m_entities[id] = n;
+		Entity &e = m_entities[id];
+		if(e.has_pos && !e.node){
+			make_node(e);
+		} else if(e.node){
+			main_context::access(m_server, scene_of(e), [&](magic::Scene *scene){
+				magic::Node *nd = scene->GetNode(e.node);
+				if(nd)
+					nd->SetPosition(magic::Vector3(e.pos[0], e.pos[1], e.pos[2]));
+			});
+		}
 	}
 };
 

@@ -2,6 +2,7 @@
 	"web": true,
 	"wasm_box": "box",
 	"dependencies": [
+		{"module": "client_lua"},
 		{"module": "main_context"},
 		{"module": "network"},
 		{"module": "replicate"},

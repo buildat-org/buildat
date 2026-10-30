@@ -55,6 +55,27 @@ namespace storage
 // slice disables its instance (logged, saved with the runtime), and a new
 // box takes over: the server and the other instances go on. A signal
 // passed along more than MAX_HOPS links is cut, the loop named.
+//
+// **The editor** (stage 3): a player the app gave edit rights (set_editor)
+// switches edit mode on and edits the authored tree, live for everyone on
+// the server: the packet "kit:edit", a JSON object of an op:
+//   {"op": "mode", "on": true|false}
+//   {"op": "place", "type": t, "pos": [x, y, z]}  -- a new entity in the
+//       editor's scene with an instance of t (the palette: every
+//       <types_path>/*.lua that loads), its id the next
+//   {"op": "move", "id": n, "pos": [x, y, z]}    {"op": "delete", "id": n}
+//   {"op": "set", "id": n, "comp": i, "param": p, "value": v}
+//   {"op": "link"|"unlink", "id": n, "comp": i, "output": o, "to": m,
+//    "input": in}
+//   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them
+// Each is checked on the server, the rights first, then the ids, types,
+// parameter values (as the type declares them) and signal names; a
+// refusal is logged and answered with "kit:edit_refused" ("<op>: why").
+// An editor is sent "kit:edit_state" after each edit, anyone's:
+// {"editing", "palette": [type...], "types": {type: {params, inputs,
+// outputs, gizmo, usable}}, "authored": the row, "undo": n}. A type's
+// `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn
+// in edit mode only. The client half is builtin/kit/client_lua/module.lua.
 namespace kit
 {
 	struct Host
@@ -95,6 +116,10 @@ namespace kit
 		// A component's runtime state value as JSON, "" when there is none
 		virtual ss_ get_state(uint64_t entity, size_t component,
 				const ss_ &key) = 0;
+		// Edit rights ([KIT] stage 3): the app gives them to its owner and
+		// the players it makes builders, by the name set_peer() gives, and
+		// takes them back (an editor in edit mode leaves it)
+		virtual void set_editor(const ss_ &player, bool can) = 0;
 	};
 
 	inline bool access(interface::Server *server,

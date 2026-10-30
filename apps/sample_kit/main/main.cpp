@@ -7,7 +7,8 @@
 // out of reach, a component that never returns, and two relays that are a
 // loop. Players stand at (0, 1, 0) of the scene "world"; a client's "d"
 // key is a dig at the door, a write routed to the door. util/kit_runtime_check.sh
-// drives it.
+// drives it. The first player to join is the owner, who edits with Kit's
+// editor (util/kit_editor_check.sh).
 #include "core/log.h"
 #include "client_file/api.h"
 #include "kit/api.h"
@@ -35,6 +36,10 @@ struct Module: public interface::Module
 	main_context::SceneReference m_scene = nullptr;
 	storage::Save *m_save = nullptr;
 	ss_ m_door_voxel;
+	// The owner: the first player to join this run, who has edit rights.
+	// simplified: no builder grant and no owner kept over a restart;
+	// accounts' admin, or a grant the owner makes, is the upgrade
+	ss_ m_owner;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE), m_server(server)
@@ -65,7 +70,7 @@ struct Module: public interface::Module
 			interface::VoxelFormat f;
 			f.id = interface::VoxelField{0, 0, 16};
 			reg->set_format(f);
-			for(const char *name : {"air", "stone"}){
+			for(const char *name : {"air", "stone", "glass"}){
 				interface::VoxelDefinition def;
 				def.name.block_name = name;
 				def.edge_material_id = interface::EDGEMATERIALID_GROUND;
@@ -114,6 +119,10 @@ struct Module: public interface::Module
 		replicate::assign_scene_to_peer(m_server, m_scene, peer);
 		kit::access(m_server, [&](kit::Interface *k){
 			k->set_peer(peer, "p"+itos(peer), "world", 0, 1, 0);
+			if(m_owner.empty()){
+				m_owner = "p"+itos(peer);
+				k->set_editor(m_owner, true);
+			}
 		});
 	}
 
