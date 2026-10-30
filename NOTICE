@@ -142,6 +142,11 @@ apps/demo_skelenti/main/game/mods/skelenti/textures
   Creative Commons Attribution-ShareAlike 4.0 International.
   File by file: apps/demo_skelenti/README.md
 
+builtin/heightmap/client_data/*.png
+  Pixel Perfection by XSSheep, as copied into VoxeLibre; the grass tinted.
+  Creative Commons Attribution-ShareAlike 4.0 International.
+  Details: builtin/heightmap/README.txt
+
 
 Modified copies
 ---------------------------------------------------------------------------
