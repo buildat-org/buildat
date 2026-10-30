@@ -2037,6 +2037,27 @@ end
 -- Per app session: the anchor goes with the app's UI when it is left.
 local look = {on = false, paused = false, was = false, t = 0,
 		lost_us = nil, anchor = nil, overlay = nil, sub = nil, on_pause = nil}
+-- [WEB_LOCKED_CLICKS_ACCOUNTS] **Windows that want clicks**: while one is
+-- up the pointer is the screen's (builtin/accounts' Server window frees
+-- it); a game's mouse look neither turns nor pauses for the lock let go,
+-- and takes the pointer back once the last one is gone.
+--   ui_utils.wants_clicks(window)   while the window is there
+--   ui_utils.clicks_wanted() -> whether one is up
+local click_windows = {}
+function M.safe.wants_clicks(window)
+	click_windows[#click_windows + 1] = window
+end
+function M.safe.clicks_wanted()
+	for i = #click_windows, 1, -1 do
+		local ok, shown = pcall(function() return click_windows[i].visible end)
+		if not ok then
+			table.remove(click_windows, i)
+		elseif shown then
+			return true
+		end
+	end
+	return false
+end
 local look_web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil and
 		buildat.get_env("BUILDAT_TOUCH") ~= "1"
 local function drop_overlay()
@@ -2089,6 +2110,19 @@ local function look_update(_, d)
 	if not look.on then
 		return
 	end
+	-- A window that wants clicks has the pointer: no pause for the lock it
+	-- let go; after it, the lock asked for again (the rule below if the
+	-- browser does not give it)
+	if M.safe.clicks_wanted() then
+		look.yielded, look.was, look.t = true, false, 0
+		return
+	elseif look.yielded then
+		look.yielded = false
+		if not look.paused then
+			magic.input:SetMouseVisible(false, "mouse look after a window")
+			magic.input:SetMouseMode(magic.MM_RELATIVE)
+		end
+	end
 	local held = magic.input:IsMouseLocked()
 	if look.paused then
 		if held then
@@ -2125,7 +2159,7 @@ function M.safe.mouse_look(on, on_pause)
 	if not look.sub then
 		look.sub = magic.SubscribeToEvent("Update", look_update)
 		magic.SubscribeToEvent("MouseButtonDown", function()
-			if look.on and look.paused then
+			if look.on and look.paused and not M.safe.clicks_wanted() then
 				magic.input:SetMouseMode(magic.MM_RELATIVE)
 			end
 		end)
@@ -2137,7 +2171,7 @@ end
 -- mouse_look_move() -> dx, dy: GetMouseMove()'s, nought while paused
 function M.safe.mouse_look_move()
 	local m = magic.input:GetMouseMove()
-	if look.paused then
+	if look.paused or M.safe.clicks_wanted() then
 		return 0, 0
 	end
 	-- Once a look, for a check to wait for

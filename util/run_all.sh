@@ -300,6 +300,10 @@ $name"
 		echo "nothing the runners cover changed; the named chain instead"
 	fi
 	[ -n "$uncovered" ] && echo "covered by nothing:$uncovered"
+	# **ONLY limits the picks too** ([RUN_ALL_ONLY_REMOTE]): a changed
+	# runner picks itself from outside the filtered list, and went to
+	# REMOTE under an ONLY that did not name it
+	[ -n "${ONLY:-}" ] && picked=$(echo "$picked" | grep -E "$ONLY")
 	runners=$picked
 	total=0
 	for name in $runners; do

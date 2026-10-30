@@ -26,7 +26,7 @@ r a_skip 'echo "SKIP: no display"; exit 0'
 r b_syntax 'if then fi'
 r c_silent 'exit 0'
 r d_pass 'echo "PASS: fine"'
-(cd "$t" && bash util/run_all.sh quick) > "$t/out.txt" 2>&1
+(cd "$t" && env -u ONLY -u REMOTE bash util/run_all.sh quick) > "$t/out.txt" 2>&1
 sum=$(grep -a "passed, " "$t/out.txt")
 echo "$sum"
 for want in "a_skip_check.sh:skip" "b_syntax_check.sh:FAIL" "c_silent_check.sh:FAIL" \

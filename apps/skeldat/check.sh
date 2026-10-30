@@ -1205,13 +1205,16 @@ grep -aq "a skeleton shoots at client1" "$log24" &&
 # night's block is across a pond 6 wide build one bridge of 6 blocks and
 # then walk across; one lured to a lantern on a platform 5 up builds a
 # stair and takes it; one whose block is behind a wall it can walk round
-# builds nothing (at x 10, the own terrain's trees clear of it)
+# builds nothing (at x 10, the own terrain's trees clear of it).
+# [SKELDAT_BONE_WATER_DROWN] The pond's water flows: a block built into it
+# pushes none aside (when it did, the voxel pushed onto the new block made
+# a stair of the bridge, and a skeleton with its body drowned in it)
 log25="$t/srv25.log"
 ways=$(for z in $(seq -7 7); do for x in 3 4 5 6 7 8; do
 	printf 'marker %d %d skeldat:water_source -1; ' $x $z; done; done
 for z in -1 0 1; do for x in -9 -8 -7; do printf 'marker %d %d skeldat:stone 4; ' $x $z; done; done
 for x in 7 8 9 10 11 12 13; do for y in 0 1 2; do printf 'marker %d -14 skeldat:stone %d; ' $x $y; done; done)
-BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_STILL_WATER=1 BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
+BUILDAT_SKELDAT_WORLD=ways BUILDAT_SKELDAT_TERRAIN=flat BUILDAT_SKELDAT_SEED=2 BUILDAT_SKELDAT_SIZE="2 -1 0" \
 	BUILDAT_SKELDAT_TIME=0.8 BUILDAT_SKELDAT_SPAWN="0 0" BUILDAT_SKELDAT_DAY=600 \
 	BUILDAT_SKELDAT_LIGHT_STEP=0.2 \
 	BUILDAT_SKELDAT_TEST="${ways}lantern -8 0 3; skeleton 1 0 marked seed 11 0 4; skeleton -4 1 marked seed 11 0 4; skeleton -3 0 marked lure; skeleton 10 -11 marked seed 10 -17 1; place 100 0" \
