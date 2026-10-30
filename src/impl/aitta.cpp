@@ -274,7 +274,7 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 		"client_main", "client_extensions", "disable_cpp", "dependencies",
 		"reverse_dependencies", "cxxflags", "ldflags", "cxxflags_windows",
 		"ldflags_windows", "cxxflags_linux", "ldflags_linux", "web",
-		"server_wasm"};
+		"server_wasm", "wasm_box"};
 	for(json::Iterator it(v); it.valid(); it.next()){
 		const ss_ key = it.key();
 		bool ok = false;
@@ -288,6 +288,11 @@ ss_ module_meta_refusal(const json::Value &v, bool builtin)
 	// server's build (util/web_server.cmake), not here
 	if(!v.get("web").is_undefined() && !v.get("web").is_boolean())
 		return "meta.json: \"web\" is true or false";
+	// [KIT] The directory its Server::create_wasm_box() builds, named for
+	// the builds that make it beforehand (util/web_server.cmake,
+	// util/prebuild_wasm.py)
+	if(!v.get("wasm_box").is_undefined() && !v.get("wasm_box").is_string())
+		return "meta.json: \"wasm_box\" is a directory's name";
 	const json::Value &api = v.get("engine_api");
 	if(builtin && api.is_undefined())
 		return "";
