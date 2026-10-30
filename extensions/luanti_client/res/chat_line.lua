@@ -18,7 +18,8 @@
 --   line = <this file>(o)
 -- o: touch() (whether on a touchscreen, asked at each opening),
 -- send(text) for a line not empty, on_open() and on_close() after each,
--- declutter (a touchscreen's: {get = function() -> on, set = function(on)})
+-- declutter (a touchscreen's: {get = function() -> on, set = function(on)}),
+-- page(d), Page Up (-1) or Down (1) while it is up ([SCROLL_PAGE_KEYS])
 -- line: open(), close(), is_open(), text() (nil when closed), click(x, y)
 -- in UI pixels: whether a box was hit, its action done
 local magic = require("buildat/core/urho3d")
@@ -152,8 +153,12 @@ return function(o)
 				math.floor((oy + by + bh / 2) * sc + 0.5)))
 		input_cb = magic.SubscribeToEvent(input, "TextFinished", send)
 		key_cb = magic.SubscribeToEvent("KeyDown", function(_, event_data)
-			if event_data:GetInt("Key") == magic.KEY_ESCAPE then
+			local key = event_data:GetInt("Key")
+			if key == magic.KEY_ESCAPE then
 				L.close()
+			elseif o.page and (key == magic.KEY_PAGEUP or
+					key == magic.KEY_PAGEDOWN) then
+				o.page(key == magic.KEY_PAGEUP and -1 or 1)
 			end
 		end)
 		o.on_open()

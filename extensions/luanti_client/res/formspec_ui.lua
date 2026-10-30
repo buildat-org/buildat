@@ -1462,8 +1462,10 @@ function M.new(magic, buildat, log, ctx)
 					local moved = v * factor * layout.scale[vertical and 2 or 1]
 					-- The value is in the bar's own units and the factor is
 					-- formspec units per one of them
+					-- per: pixels a bar unit moves it, for Page Up and Down
 					scroll_boxes[e.scroll_id] = {element = el, x = x, y = y,
 							w = w, h = h, bar = bar, vertical = vertical,
+							per = factor * layout.scale[vertical and 2 or 1],
 							dx = vertical and 0 or -moved,
 							dy = vertical and -moved or 0}
 					scrolls[#scrolls + 1] = scroll_boxes[e.scroll_id]

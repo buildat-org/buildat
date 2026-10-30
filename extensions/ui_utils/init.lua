@@ -125,8 +125,8 @@ local function scroller(e, t)
 			end}
 	end
 	local view = t == "UIElement" and list_views[e:GetName()]
-	return view and {content = view.list,
-		top = function() return -view.list.position.y end,
+	return view and {content = view.list, view = view,
+		top = function() return 0 - view.list.position.y end,
 		height = function() return view.viewport.height end,
 		set_top = function(y) view:scroll(y + view.list.position.y) end}
 end
@@ -149,6 +149,30 @@ local function show_in(sc, e)
 		sc.set_top(y)
 	end
 end
+
+-- **Page Up and Page Down in what is read** ([SCROLL_PAGE_KEYS]): -1, 1
+-- or nil for the key, and the step for a view `shown` high in lines (or
+-- pixels) `line` high: the lines shown less two, one at four or fewer, so
+-- that no line is missed on presses one after another. A multi-line
+-- LineEdit's own rule ([HEARTH_PAGE_KEYS], LineEdit.cpp).
+-- Hearth's thread, the Server window's pages, the chat console's log
+-- (keyboard_page), the launch console's API text, luanti_client's chat
+-- and its forms' scroll containers.
+function M.safe.page_dir(key)
+	return key == magic.KEY_PAGEUP and -1 or key == magic.KEY_PAGEDOWN and 1 or nil
+end
+function M.safe.page_step(shown, line)
+	line = math.max(1, line or 1)
+	local rows = math.floor(shown / line)
+	return math.max(rows - (rows > 4 and 2 or 1), 1) * line
+end
+assert(M.safe.page_step(8) == 6 and M.safe.page_step(4) == 3 and
+		M.safe.page_step(1) == 1 and M.safe.page_step(0) == 1 and
+		M.safe.page_step(400, 20) == 360 and M.safe.page_step(410, 20) == 360)
+-- A UI text line, for the pixel views
+-- simplified: the style's 14-point font's row; a view's own font is the
+-- upgrade where one draws larger text
+local LINE = 20
 
 -- The page's buttons and fields, in the order they are drawn. scs, when
 -- given, gets the view each one scrolls in (scs[i] for out[i]; the same
@@ -599,6 +623,88 @@ local function label_of(e)
 	return t and t.text or e:GetTypeName()
 end
 
+-- The first view under e with nothing to focus in it: a log read beside a
+-- field (the chat console's)
+local function read_view(e)
+	if not shown(e) then
+		return nil
+	end
+	local sc = scroller(e, e:GetTypeName())
+	if sc and #page_items(e, {}) == 0 then
+		return sc
+	end
+	for i = 0, e:GetNumChildren() - 1 do
+		local c = e:GetChild(i)
+		local r = c and read_view(c)
+		if r then
+			return r
+		end
+	end
+	return nil
+end
+
+-- **Page Up and Down scroll the view** ([SCROLL_PAGE_KEYS]): the one the
+-- focus is in (with nothing focused, the items' one), else the page's
+-- view with nothing to focus, by page_step.
+-- The focus stays while it is still in sight, a message taller than the
+-- view not jumped over (Hearth's thread); else it goes to the item
+-- nearest where it went, the first in sight going down, the last going
+-- up. At the view's end, to its first item or its last: the keys stay in
+-- the view. False with no such view.
+local function page_scroll(page, d)
+	local at = 0
+	for i, e in ipairs(page.items) do
+		if shown(e) and e:HasFocus() then
+			at = i
+		end
+	end
+	-- Nothing focused: the view the page's items are in
+	local sc = page.scs[at]
+	for i = 1, at == 0 and #page.items or 0 do
+		sc = sc or page.scs[i]
+	end
+	sc = sc or read_view(page.win)
+	if not sc then
+		return false
+	end
+	local top, h = sc.top(), sc.height()
+	sc.set_top(top + d * M.safe.page_step(h, LINE))
+	local now = sc.top()
+	local moved = now ~= top
+	if moved then
+		page.follow = false
+		if sc.view then
+			sc.view.page_scrolled = true
+		end
+	end
+	local function seen(e)
+		local y = y_in(sc, e)
+		return not moved or y < now + h and y + e.height > now
+	end
+	local pick = nil
+	if not (moved and page.scs[at] and seen(page.items[at])) then
+		for i, e in ipairs(page.items) do
+			-- Moved, the nearest in sight; at the end, the end's own
+			if page.scs[i] == sc and shown(e) and seen(e) and
+					((d < 0) == moved or not pick) then
+				pick = e
+			end
+		end
+	end
+	if pick then
+		pick:SetFocus(true)
+	end
+	-- What a check reads: the focus by its label's name (Hearth's message
+	-- heads are m<id>)
+	local f = pick or page.items[at]
+	local t = f and f:GetTypeName() == "Button" and button_text(f)
+	log:info("page key: " .. top .. " -> " .. now .. " of " ..
+			sc.content.height .. ", view " .. h .. ", focus " ..
+			(t and t:GetName() ~= "" and t:GetName() or
+			f and label_of(f) or "none"))
+	return true
+end
+
 local function arrange(page)
 	rewalk(page)
 	local first, inside = nil, false
@@ -752,19 +858,24 @@ function M.safe.keyboard_page(win)
 		dirty = true
 		page.follow = true
 		rewalk(page)
-		if #page.items == 0 then
-			return
-		end
 		local key = event_data:GetInt("Key")
 		local focus = magic.ui.focusElement
 		local typing = focus ~= nil and focus:GetTypeName() == "LineEdit"
-		-- A multi-line field's rows are its up and down ([HEARTH_MVP])
+		-- A multi-line field's rows are its up and down ([HEARTH_MVP]),
+		-- and its pages but from its first row up or its last down
 		local ra = page.rows_at
+		local pd = M.safe.page_dir(key)
+		local up = key == KEY_UP or pd == -1
+		local down = key == KEY_DOWN or pd == 1
 		local rows = typing and focus:IsMultiLine() and not (ra and
-				ra[1]:HasFocus() and (key == KEY_UP and ra[2] or
-				key == KEY_DOWN and ra[3]))
-		if not typing and (key == magic.KEY_PAGEUP or
-				key == magic.KEY_PAGEDOWN) then
+				ra[1]:HasFocus() and (up and ra[2] or down and ra[3]))
+		if pd and not rows and page_scroll(page, pd) then
+			return
+		end
+		if #page.items == 0 then
+			return
+		end
+		if not typing and pd then
 			local at = 0
 			for i, e in ipairs(page.items) do
 				if shown(e) and e:HasFocus() then
@@ -1184,7 +1295,10 @@ function M.safe.list_view(parent, width, height, options)
 				-- The focused element itself: a row may be a group of
 				-- them taller than the view
 				local f = magic.ui.focusElement
-				if f and list:HasRecursiveFocus() then
+				-- A page key's scroll stays where the key put it
+				if view.page_scrolled then
+					view.page_scrolled = false
+				elseif f and list:HasRecursiveFocus() then
 					view:show(f)
 				end
 			end)
