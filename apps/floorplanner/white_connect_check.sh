@@ -96,7 +96,10 @@ def mean(p):
     return sum(ImageStat.Stat(Image.open(p).convert("RGB")).mean) / 3
 rows = []
 for i in range(1, n + 1):
-    log = open("%s/c%d.log" % (t, i), errors="replace").read()
+    # Up to the drive's quit: past it the check box's slow client once ran
+    # a tick on a lost device ("Texture creation while device is lost",
+    # rebuild.lua's room table texture), the shutdown's, not the connect's
+    log = open("%s/c%d.log" % (t, i), errors="replace").read().split("command: quit")[0]
     assert "The view of large_plan put back: 3d" in log, ("not back in 3D", i)
     rows.append((mean("%s/c%d_a.png" % (t, i)), mean("%s/c%d_b.png" % (t, i)),
             "Could not find resource generated/" in log or "Runtime error" in log))
