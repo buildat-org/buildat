@@ -80,6 +80,13 @@ while(WS_TODO)
 	if(NOT CPP_OFF AND NOT SW)
 		list(APPEND WS_CPP_NAMES "${N}")
 	endif()
+	# [KIT] A box of its own (Server::create_wasm_box()), built as a
+	# server .wasm is, beside its C++
+	# simplified: one server .wasm a module, server_wasm's or the box's
+	string(JSON BOX ERROR_VARIABLE E GET "${J}" wasm_box)
+	if(NOT E AND BOX AND NOT SW)
+		set(SW "${BOX}")
+	endif()
 	if(SW)
 		list(APPEND WS_SW_NAMES "${N}")
 		set(WS_SW_${N} "${SW}")

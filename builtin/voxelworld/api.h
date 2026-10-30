@@ -155,6 +155,30 @@ namespace voxelworld
 
 	struct Instance;
 
+	// [KIT] A voxel's owner: whose it is and what the owner keeps there,
+	// bytes of its own -- a door's state, a chest's contents. Sparse, per
+	// section, saved, loaded and unloaded with the section (see
+	// Instance::set_owned()).
+	struct Owned
+	{
+		ss_ owner;
+		ss_ data;
+	};
+	typedef sv_<std::pair<pv::Vector3DInt32, ss_>> OwnedList;
+
+	// [KIT] The owner's side of a routed write (Instance::routed_set_voxel):
+	// a write that is not the game's own -- a player's, a component's -- to
+	// a position the owner holds comes here instead of being made. by: whose
+	// doing it is. Called with voxelworld held, on its thread; the handler
+	// may write through world.
+	struct OwnerHandler
+	{
+		virtual ~OwnerHandler(){}
+		virtual void on_write(Instance *world, const pv::Vector3DInt32 &p,
+				const VoxelInstance &v, const Owned &owned,
+				const ss_ &by) = 0;
+	};
+
 	struct CommitHook
 	{
 		virtual ~CommitHook(){}
@@ -320,6 +344,36 @@ namespace voxelworld
 		virtual void set_voxel(const pv::Vector3DInt32 &p,
 				const VoxelInstance &v,
 				bool disable_warnings = false) = 0;
+
+		// [KIT] Voxel owners. A position is owned while it has an entry;
+		// the entry is the section's, saved with it (a row of its own beside
+		// the chunks, written when it changed), loaded with it and gone from
+		// memory when it unloads; forget_sections() takes it too. Nothing
+		// here clears an entry when the voxel changes: that is the owner's.
+		//
+		// One position, in a loaded section: false if it is not loaded (set)
+		// or not owned (get). An empty owner clears the entry.
+		virtual bool get_owned(const pv::Vector3DInt32 &p, Owned &out) = 0;
+		virtual bool set_owned(const pv::Vector3DInt32 &p,
+				const Owned &owned) = 0;
+		// One owner's entries in a section, loaded or not: an unloaded one's
+		// are read from the save, and set replaces them there at once (what
+		// an owner that hears of an unload after it writes). The other
+		// owners' entries are left as they are.
+		virtual OwnedList get_section_owned(const pv::Vector3DInt16 &section_p,
+				const ss_ &owner) = 0;
+		virtual void set_section_owned(const pv::Vector3DInt16 &section_p,
+				const ss_ &owner, const OwnedList &entries) = 0;
+		// The owner's handler, replacing one before; nullptr removes it
+		virtual void set_owner_handler(const ss_ &owner,
+				sp_<OwnerHandler> handler) = 0;
+		// A write that is not the game's own: to an owned position it goes
+		// to the owner's handler (ROUTED), or nowhere if the owner has none
+		// (REFUSED); anywhere else it is set_voxel() (WRITTEN). set_voxel()
+		// itself stays the game's trusted direct write.
+		enum RoutedWrite { WRITTEN, ROUTED, REFUSED };
+		virtual RoutedWrite routed_set_voxel(const pv::Vector3DInt32 &p,
+				const VoxelInstance &v, const ss_ &by) = 0;
 
 		// The voxels of a region, in one read rather than one per voxel:
 		// what asks for this is a sweep, and a section is a quarter of a

@@ -1872,7 +1872,8 @@ struct Engine::Impl
 	int trapping(int what, uint32_t f, const uint64_t *a, uint64_t *r)
 	{
 		if(what != 0)
-			*c_meter = BUDGET;
+			*c_meter = e.call_budget > 0 && e.call_budget < BUDGET ?
+					e.call_budget : BUDGET;
 		g_in_wasm = 1;
 		const int code = try_fn(mem, what, f, a, r);
 		g_in_wasm = 0;
@@ -1997,7 +1998,8 @@ struct Engine::Impl
 	// ~0 for the start function; the meter at the budget before.
 	ss_ interp_call(uint32_t f, const uint64_t *a, uint64_t *r)
 	{
-		*i_meter = INTERP_BUDGET;
+		*i_meter = e.call_budget > 0 && e.call_budget < INTERP_BUDGET ?
+				e.call_budget : INTERP_BUDGET;
 		wasm_val_t args[MAX_PARAMS], res[1];
 		memset(args, 0, sizeof args);
 		memset(res, 0, sizeof res);
@@ -2643,7 +2645,8 @@ ss_ Engine::call(size_t index, const uint64_t *args, uint64_t *result)
 		case 'F': memcpy(&plain[k], &args[k], 8); break;
 		}
 	}
-	impl->meter_set(BUDGET);
+	impl->meter_set(call_budget > 0 && call_budget < BUDGET ? call_budget :
+			BUDGET);
 	bw_global(impl->web_id, STACK, 1, 0);
 	double r = 0;
 	if(bw_call(impl->web_id, sig.name.c_str(), plain, sig.params.c_str(),
@@ -2669,6 +2672,11 @@ ss_ Engine::call(size_t index, const uint64_t *args, uint64_t *result)
 bool Engine::past_budget()
 {
 	return impl->meter_get() < 0;
+}
+
+int64_t Engine::meter_left()
+{
+	return impl->meter_get();
 }
 
 int64_t Engine::budget()

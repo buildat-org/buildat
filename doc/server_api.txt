@@ -93,7 +93,7 @@ meta.json: {"engine_api": 2, "cxxflags": "", "ldflags": "",
 true}], "reverse_dependencies": [...], "disable_cpp": false,
 "client_main": "init.lua", "client_extensions": ["voxel_light"],
 "server_wasm": {"source": "server", "imports": ["events"], "callable":
-[]}, "kind": "app", "web": true}. An app's module must say
+[]}, "wasm_box": "box", "kind": "app", "web": true}. An app's module must say
 engine_api, the engine API it is written for (interface::aitta::
 ENGINE_API_MIN...ENGINE_API; 0.7 runs 2); the rest may be left out, and
 {"engine_api": 2} is the minimum. A key the loader does not know
@@ -107,7 +107,10 @@ client, when its files first arrive (modules in load order); "wasm" names
 the engine's default instead (builtin/client_lua/client_lua/wasm_main.lua),
 which runs the module's .wasm and nothing else (interface/wasm_api.h).
 server_wasm makes the module's server half a .wasm instead of C++
-(interface/wasm_server_api.h, below). client_extensions names extensions (<share>/extensions/<name>) the
+(interface/wasm_server_api.h, below). wasm_box names the directory the
+module's C++ runs as its own .wasm (Server::create_wasm_box(), below), so
+that the builds made beforehand (the web server's, an archive's cache)
+make it too. client_extensions names extensions (<share>/extensions/<name>) the
 server serves for the module's client scripts, which run that copy
 (buildat.run_script_file("<name>/init.lua")) rather than the client's
 bundled one: client_file::serve_extension(). "web": true says the module
@@ -124,7 +127,7 @@ are in Emscripten's file system, the app's directories packed into it
 (a variant's base's too, a plain-named base beside it). A module's
 wasm/, C or Rust, "disable_cpp" or not, is built for its clients by
 util/prebuild_wasm.py with the server's flags and packed at /wasm as
-<module>.wasm, and a server_wasm as <module>.server.wasm.
+<module>.wasm, and a server_wasm or a wasm_box as <module>.server.wasm.
 Three builtins have stand-ins there (<name>_web.cpp beside the module's
 own), so an app that depends on them builds unchanged: network has one
 peer, the page's own client, over postMessage (only the page that made
@@ -606,6 +609,21 @@ meter, each module an instance of its own beside the server's wasm; the
 needs no "web": true. apps/sample_rust is a module in Rust on both
 sides.
 
+interface/wasm_box.h -- [KIT] a .wasm a C++ module runs for itself:
+Server::create_wasm_box(module, source) builds the module's directory
+`source` as a server .wasm is built (C against wasm_server_api.h, cached
+by hash) and runs it in the same sandbox and meter on the caller's
+thread. It is granted the every-module imports only, call_input and
+call_output being the box's `input` and `output` bytes. call(export)
+calls an export that takes nothing; set_call_budget() gives the calls
+from then on less than the engine's budget() (in its units, which the
+interpreter and the compiled module count differently), and
+meter_left() says what the last call left, below 0 past it. A trap
+leaves the module's memory as it was; what that means is the caller's.
+builtin/kit's Lua box is the one there is. meta.json's "wasm_box" names
+the directory for util/web_server.cmake and util/prebuild_wasm.py, which
+build it beforehand for the web server and an archive's cache.
+
 interface/mesh.h -- the mesher, in the client's process but declared here:
 generate_voxel_geometry(result, volume, voxel_reg, atlas_reg,
 use_skylight, translucent_result, masked_result, horizon) makes
@@ -883,6 +901,24 @@ server half and its client half (builtin/luanti/client_lua) is the
 module's own and not part of this interface; the client half's loop is
 luanti.run_client(app), described in doc/luanti_module.txt.
 
+builtin/kit/api.h -- kit::Interface ([KIT], stage 2): Kit's runtime, which
+any app hosts by one call, kit::host(server, Host) in its core:start:
+the component types' directory (<type>.lua each), the composition it
+starts from (JSON: entities, their components' parameters and links), the
+save it keeps "authored" and "runtime" in (store "kit"), the app's scenes
+by name. Component code is Lua 5.1 in a server .wasm of Kit's own
+(builtin/kit/box/, interface/wasm_box.h: the wasm sandbox and meter); a
+handler's run has a slice of the meter and a
+tick a few, and one past its slice disables its instance and a new box
+takes over. set_peer(peer, name, scene, x, y, z) places a player, whose
+client may then use (packet "kit:use") a usable entity in range; input()
+sends an entity an input from the app's own code; get_state() reads a
+component's runtime value. A positional entity is a node "kit:<id>" in
+its scene, its components' shared state in the vars "kit:<key>" (JSON);
+an instance that owns its voxel owns it in voxelworld (owner "kit"), and
+a write routed there reaches its on_voxel on Kit's thread.
+apps/sample_kit and util/kit_runtime_check.sh are the example and check.
+
 
 Every name, generated
 =====================
@@ -894,6 +930,7 @@ up here as a diff.
 builtin/accounts/api.h: PeerId, Login, level_name, Interface, name_of, find_peer, find_peers, set_multiple_logins, set_guests, address_of, is_admin, exists, check_kept, account_names, is_local, launched, set_lan_name, kick, ban, unban, ban_list, create_account, check_password, set_password, delete_account, totp_on, check_totp, totp_begin, totp_confirm, totp_off, totp_uri, reported_bans, registration_open, linked_count, can_mail, mail, level, set_level, report_storage, storage_budget, notify, access
 builtin/chat/api.h: Interface, join, leave, say, set_default_min, may_talk, access
 builtin/client_file/api.h: FilesTransmitted, Interface, add_file_content, add_file_path, add_file_paths, get_server_icon, access, serve_extension
+builtin/kit/api.h: SceneReference, Host, Interface, host, set_peer, input, get_state, access
 builtin/loader/api.h: Interface, activate, get_module_info, access
 builtin/luanti/api.h: SceneReference, read_conf, f, GameLoaded, AppEvent, RegionMap, ~RegionMap, get, set, to_world, Interface, set_region_map, set_progress_handler, run_game, Paths, set_paths, import_world_settings, load_lua, import_world, add_player, place_player, set_admin, chat_send, remove_player, set_player_pos, player_fell, dig_node, punch_node, place_node, use_wielded, join_player, player_in_world, set_chat_limit, set_chat_gate, drop_wielded, punch_object, set_wield_index, chat_message, get_scene, call_json, set_server_physics, set_generated_sounds, access
 builtin/luanti_mapgen/api.h: chunk_index, chunk_blockseed, Params, NodeProps, Biome, NoiseParams, Ore, Schematic, Decoration, LTree, GennotifyEvent, SectionMaps, BiomeQuery, ~BiomeQuery, biome_at, NoiseQuery, ~NoiseQuery, point, map, Interface, noise_query, create_generator, spawn_level, biome_query, take_gennotify, take_maps, access
@@ -903,7 +940,7 @@ builtin/network/api.h: PeerId, address_bin, address_key, PeerInfo, Id, Packet, T
 builtin/replicate/api.h: SceneReference, PeerId, PeerJoinedScene, PeerLeftScene, Interface, assign_scene_to_peer, find_peers_on_scene, find_peers_that_know_node, set_node_filter, set_node_priority, refresh_peer_nodes, sync_node_immediate, access
 builtin/starport_announce/api.h: IdLogin, Interface, accepts_ids, ids_mode, starports, set_game, set_ids_mode, is_blocked, announce_soon, verify_id_token, access
 builtin/storage/api.h: Store, ~Store, get, set, remove, list, batch, Save, ~Save, store, path, bytes, compact, copy_to, Usage, total, OverLimit, SaveInfo, TrashInfo, trash_info, Interface, open, create, close, rename, trash, list_trash, remove_trashed, restore, valid_name, usage, used_bytes, limit_bytes, room_bytes, remeasure, access, pack, os, ar, unpack, is
-builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access, v
+builtin/voxelworld/api.h: SceneReference, GenerationRequest, SectionLoaded, SectionUnloaded, SectionsForgotten, SectionStat, NodeVolumeUpdated, LoadPoint, Owned, OwnedList, OwnerHandler, ~OwnerHandler, on_write, CommitHook, ~CommitHook, in_thread, in_scene, Instance, get_voxel_reg, set_migration, set_save, set_name_aliases, save, set_cause, section_stats, forget_sections, trim_to, add_commit_hook, get_section_size_voxels, get_section_region_voxels, get_chunk_size_voxels, get_chunk_region_voxels, load_or_generate_section, load_section_no_generate, set_load_points, get_loaded_sections, set_stream_budget, unload_section, is_section_loaded, is_section_generated, set_section_generated, set_voxel, get_owned, set_owned, get_section_owned, set_section_owned, set_owner_handler, routed_set_voxel, get_volume, set_volume, merge_volume, set_light_maintained, set_skylight_enabled, relight_region, relight_region_later, relight_stale, set_light_deferred, commit, get_voxel, set_sample, get_sample, Interface, create_instance, delete_instance, get_instance, access, v
 builtin/world_menu/api.h: PeerId, Field, Config, Preset, Play, Close, Interface, configure, show, set_running, progress, set_presets, show_running, is_picker, select, access
 builtin/worldgen/api.h: SceneReference, QueueModifiedEvent, SectionGenerated, GeneratorInterface, ~GeneratorInterface, get_padding_voxels, generate, Instance, set_generator, enable, get_num_sections_queued, Interface, create_instance, delete_instance, get_instance, access
 interface/address.h: split_host_port, join_host_port, Url, parse_url
@@ -935,13 +972,13 @@ interface/protocol.h: protocol_features, Hello, own, serialize, r, hello_data, o
 interface/record.h: RecordError, end, left, buf, byte, header, length
 interface/select_handler.h: SelectHandler, fd_open, bad_fd_error, check, timeval
 interface/semaphore.h: Semaphore, wait, wait_us, timespec, post
-interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, get_module_wasm_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, emit_event_after_queued, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool
+interface/server.h: ServerConfig, TickEvent, ModuleModifiedEvent, ModuleLoadedEvent, ModuleUnloadedEvent, Server, ~Server, shutdown, load_module, set_module_count, compile_modules, unload_module, reload_module, get_modules_path, get_builtin_modules_path, get_module_path, get_module_wasm_path, has_module, get_loaded_modules, access_module, access_module_optional, sub_event, emit_event, emit_event_after_queued, tmp_store_data, tmp_restore_data, add_file_path, get_file_path, get_config, get_app_id, access_thread_pool, create_wasm_box
 interface/server_config.h: ServerConfig, launch_param, launch_param_self_check
 interface/sha1.h: calculate, hex
 interface/sha256.h: calculate, hex, unhex, is_hex, hmac
 interface/tcpsocket.h: TCPSocket, ~TCPSocket, fd, good, release_fd, close_fd, listen_fd, connect_fd, bind_fd, accept_fd, send_fd, set_nonblocking, send_some, wait_data, get_local_address, get_remote_address, createTCPSocket, probe_connect, set_nonblocking_fd, connect_wait, local_lan_address, lan_socket, lan_send, lan_recv, lan_close
 interface/thread.h: ThreadedThing, ~ThreadedThing, run, on_crash, Thread, ~Thread, set_name, start, is_running, request_stop, stop_requested, join, get_name, ref_backtraces, set_caller_thread, get_caller_thread, get_current_thread, createThread, ThreadLocalKey, set, get
-interface/thread_pool.h: Task, ~Task, pre, thread, thread_until, post, again, urgent, ThreadPool, ~ThreadPool, add_task, start, get_num_threads, request_stop, join, run_post, get_backlog, take_times, createThreadPool
+interface/thread_pool.h: Task, ~Task, pre, thread, thread_until, post, again, urgent, background, ThreadPool, ~ThreadPool, add_task, start, get_num_threads, request_stop, join, run_post, get_backlog, get_unfinished, take_times, createThreadPool
 interface/urho3d_cereal.h: save, load
 interface/voxel.h: VoxelTypeId, VoxelName, dump, EdgeMaterialId, VoxelQuad, VoxelVariant, VoxelDefinition, CachedVoxelDefinition, variant, VoxelPlane, VoxelSample, VoxelField, bound, mask, get, set, VoxelFormat, plane_bits, plane_count, plane_of_name, Role, roles, blocks, many_ids, painted, surfaces, luanti, buildat_legacy_06, preset, id_of, light_pair, surface_modifiers, validate, voxel_format_self_test, VoxelRegistry, ~VoxelRegistry, clear, get_all, get_count, num_voxels, get_format, set_format, add_plane, get_look_selector, set_look_selector, add_voxel, add_voxels, get_cached, textures_ready, is_dirty, clear_dirty, serialize, deserialize, createVoxelRegistry, VoxelInstance, legacy06_id, legacy06_skylight, legacy06_set_skylight, legacy06_lamplight, legacy06_set_lamplight
 interface/voxel_cereal.h: serialize, r, save, load
@@ -950,6 +987,7 @@ interface/voxel_path.h: P, Field, resize, inside, index, at, set, Rules, Result,
 interface/voxel_selector.h: VoxelRuleClause, holds, VoxelRule, VoxelSelector, id_of, validate, voxel_selector_self_test
 interface/voxel_volume.h: VoxelVolume, VoxelType, Sampler, setPosition, movePositiveX, getVoxel, setVoxel, getEnclosingRegion, getWidth, getHeight, getDepth, voxel_count, planes, getVoxelAt, setVoxelAt, add_planes, fill, plane_at, set_plane_at, sample_at, set_sample_at, copy_run_from, read_words, plane_bytes, plane_bytes_for_write, set_plane_bytes, plane_is_materialised, contains, index_of, VoxelSampleView, voxel_volume_self_test, serialize_volume_simple, serialize_volume_compressed, deserialize_volume, migrate_volume, VoxelMigration, ~VoxelMigration, begin, migrate, remap_volume_ids, deserialize_volume_int32, deserialize_volume_8bit
 interface/wasm_api.h: buildat_log, buildat_time_ms, buildat_voxels_size, buildat_voxels_read, buildat_geometry_set, buildat_texture_set, buildat_node_get, buildat_node_set, buildat_send_packet, buildat_event_take, buildat_drop, BUILDAT_EVENT_START, BUILDAT_EVENT_KEY_DOWN, BUILDAT_EVENT_KEY_UP, BUILDAT_EVENT_MOUSE_DOWN, BUILDAT_EVENT_MOUSE_UP, BUILDAT_EVENT_MOUSE_MOVE, BUILDAT_EVENT_WHEEL, BUILDAT_EVENT_PACKET, BUILDAT_EVENT_RESIZE, BUILDAT_EVENT_OBJECT, BUILDAT_EVENT_MAX
+interface/wasm_box.h: WasmBox, ~WasmBox, call, budget, set_call_budget, meter_left, poll, engine_name
 interface/wasm_server_api.h: buildat_log, buildat_time_ms, buildat_event_take, buildat_drop, buildat_call_input, buildat_call_output, buildat_event_subscribe, buildat_packet_subscribe, buildat_packet_send, buildat_storage_get, buildat_storage_set, buildat_storage_remove, buildat_scene_create, buildat_scene_peer, buildat_node_create, buildat_node_get, buildat_node_set, buildat_node_remove, buildat_world_create, buildat_voxel_define, buildat_voxels_set, buildat_voxels_read, buildat_call, BUILDAT_SERVER_EVENT_START, BUILDAT_SERVER_EVENT_TICK, BUILDAT_SERVER_EVENT_PEER_JOINED, BUILDAT_SERVER_EVENT_PEER_LEFT, BUILDAT_SERVER_EVENT_PACKET
 interface/web_brand.h: html, cut, page, file, f
 interface/zip.h: ZipEntry, zip_list, zip_extract, zip_write

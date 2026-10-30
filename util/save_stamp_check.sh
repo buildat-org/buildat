@@ -4,10 +4,11 @@
 # cost: ~15 s (2026-10-12)
 # covers: builtin/storage/storage.cpp
 # [COMPAT_BREAK_07] 8h: a save is stamped with its format (PRAGMA
-# user_version 1) and the version that last opened it; one stamped newer is
+# user_version 2) and the version that last opened it; one stamped newer is
 # refused with the reason, and left as it was. A 0.6 save (the store table
 # and its rows, user_version 0) opens through the storage module with its
-# rows as they were, and is stamped 1 with the version row.
+# rows as they were, and is stamped 2 with the version row. (A 0.7 save,
+# format 1, raised to 2: util/voxel_owners_check.sh.)
 #   util/save_stamp_check.sh
 set -u
 . "$(dirname "$0")/check_lib.sh"
@@ -72,18 +73,18 @@ db=$(find "$t/user" -name save.sqlite | head -1)
 python3 - "$db" <<'PY' || fail "the stamp"
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
-assert c.execute("PRAGMA user_version").fetchone()[0] == 1
+assert c.execute("PRAGMA user_version").fetchone()[0] == 2
 v = c.execute("SELECT value FROM store WHERE store='__save' AND key='version'").fetchone()
 assert v and v[0], v
-c.execute("PRAGMA user_version=2")
+c.execute("PRAGMA user_version=3")
 c.commit()
 PY
-echo "ok: stamped format 1 and the version"
+echo "ok: stamped format 2 and the version"
 run newer.log
-grep -aq "was written by a newer Buildat (save format 2" "$t/newer.log" ||
+grep -aq "was written by a newer Buildat (save format 3" "$t/newer.log" ||
 	fail "a newer save was not refused with the reason ($t/newer.log)"
 grep -aq "stamp_check: opened" "$t/newer.log" && fail "a newer save was opened"
-[ "$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("PRAGMA user_version").fetchone()[0])' "$db")" = 2 ] ||
+[ "$(python3 -c 'import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute("PRAGMA user_version").fetchone()[0])' "$db")" = 3 ] ||
 	fail "the newer save was written over"
 
 # A 0.6 save beside it: the same table, rows, no stamp
@@ -105,9 +106,9 @@ rows=$(grep -ao "stamp_check: row .*" "$t/old.log" | sed 's/stamp_check: row //'
 python3 - "$old" <<'PY' || fail "the 0.6 save was not stamped"
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
-assert c.execute("PRAGMA user_version").fetchone()[0] == 1
+assert c.execute("PRAGMA user_version").fetchone()[0] == 2
 v = c.execute("SELECT value FROM store WHERE store='__save' AND key='version'").fetchone()
 assert v and v[0], v
 PY
-echo "ok: a 0.6 save opened with its rows, stamped 1 and the version"
+echo "ok: a 0.6 save opened with its rows, stamped 2 and the version"
 echo "PASS: a save stamped with its format and version; one stamped newer refused with the reason and left as it was; a 0.6 save opened as it was and stamped"
