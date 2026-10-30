@@ -20,6 +20,7 @@
 #include "interface/server.h"
 #include "interface/event.h"
 #include "interface/voxel.h"
+#include "interface/sha256.h"
 #include <Scene.h>
 #include <Node.h>
 #include <chrono>
@@ -261,6 +262,19 @@ struct Module: public interface::Module, public Interface
 	sm_<ss_, std::deque<Change>> m_undo;
 	std::map<main_context::SceneReference,
 			std::set<std::tuple<int, int, int>>> m_owned_sections;
+	// Play from edit mode: a test's throwaway runtime, and what it put
+	// aside to bring back at its end (the runtime row as it was, the runs
+	// and voxel writes waiting, the owned voxels)
+	struct Test
+	{
+		bool on = false;
+		size_t peer = 0;
+		ss_ name;
+		json::Value runtime;
+		std::deque<Run> queue;
+		std::deque<Write> pending;
+		sv_<Write> voxels;
+	} m_test;
 
 	Module(interface::Server *server):
 		interface::Module(MODULE),
@@ -730,7 +744,8 @@ struct Module: public interface::Module, public Interface
 
 	void save_runtime()
 	{
-		if(!m_store || !m_runtime_dirty)
+		// A test's runtime is never saved: the row keeps the one before it
+		if(!m_store || !m_runtime_dirty || m_test.on)
 			return;
 		m_store->set("runtime", runtime_json().stringify());
 		m_runtime_dirty = false;
@@ -1067,6 +1082,16 @@ struct Module: public interface::Module, public Interface
 		return spent;
 	}
 
+	static bool loaded(voxelworld::Instance *world, const pv::Vector3DInt32 &p)
+	{
+		const pv::Vector3DInt16 ss = world->get_section_size_voxels();
+		auto div = [](int32_t a, int b){
+			return (int16_t)std::floor((double)a / b);
+		};
+		return world->is_section_loaded(pv::Vector3DInt16(div(p.getX(),
+				ss.getX()), div(p.getY(), ss.getY()), div(p.getZ(), ss.getZ())));
+	}
+
 	// A voxel an instance sets: false if its section is not loaded yet
 	bool set_voxel(const Write &w)
 	{
@@ -1075,13 +1100,7 @@ struct Module: public interface::Module, public Interface
 			voxelworld::Instance *world = ivw->get_instance(w.scene);
 			if(!world)
 				return;
-			const pv::Vector3DInt16 ss = world->get_section_size_voxels();
-			auto div = [](int32_t a, int b){
-				return (int16_t)std::floor((double)a / b);
-			};
-			const pv::Vector3DInt16 sp(div(w.p.getX(), ss.getX()),
-					div(w.p.getY(), ss.getY()), div(w.p.getZ(), ss.getZ()));
-			if(!world->is_section_loaded(sp)){
+			if(!loaded(world, w.p)){
 				done = false;
 				return;
 			}
@@ -1214,6 +1233,8 @@ struct Module: public interface::Module, public Interface
 
 	void on_left(const network::OldClient &old)
 	{
+		if(m_test.on && m_test.peer == old.info.id)
+			stop_test("its tester left");
 		m_peers.erase(old.info.id);
 		for(auto &p : m_peers)
 			if(p.second.editing)
@@ -1310,6 +1331,8 @@ struct Module: public interface::Module, public Interface
 	// of who is a builder are sent again
 	void recheck_rights()
 	{
+		if(m_test.on && !can_edit(m_test.peer))
+			stop_test("its tester has no edit rights now");
 		for(auto &p : m_peers){
 			if(!p.second.editing)
 				continue;
@@ -1329,6 +1352,135 @@ struct Module: public interface::Module, public Interface
 		auto pi = m_peers.find(login.peer);
 		if(pi != m_peers.end() && !pi->second.editing)
 			send_state(login.peer);
+	}
+
+	// ---- Play from edit mode: a test
+
+	static ss_ digest(const json::Value &v)
+	{
+		return interface::sha256::hex(interface::sha256::calculate(
+				v.stringify())).substr(0, 16);
+	}
+
+	// The voxels the entities own, as the world has them now
+	// simplified: those in loaded sections; one not loaded at a test's
+	// start is not put back at its end
+	sv_<Write> owned_voxels()
+	{
+		sv_<Write> out;
+		voxelworld::access(m_server, [&](voxelworld::Interface *ivw){
+			for(auto &pe : m_entities){
+				const Entity &e = pe.second;
+				bool owns = false;
+				for(const Instance &in : e.comps)
+					owns = owns || m_types[in.type].owns_voxel;
+				Write w;
+				w.scene = owns && e.has_pos ? scene_of(e) : nullptr;
+				voxelworld::Instance *world = w.scene ?
+						ivw->get_instance(w.scene) : nullptr;
+				w.p = voxel_p(e);
+				if(!world || !loaded(world, w.p))
+					continue;
+				interface::VoxelRegistry *reg = world->get_voxel_reg();
+				const interface::VoxelDefinition *def = reg->get(
+						reg->get_format().id.get(world->get_voxel(w.p).data));
+				if(!def)
+					continue;
+				w.voxel = def->name.block_name;
+				w.by = "app";
+				out.push_back(w);
+			}
+		});
+		return out;
+	}
+
+	void send_editors(size_t also)
+	{
+		for(auto &p : m_peers)
+			if(p.second.editing || p.first == also)
+				send_state(p.first);
+	}
+
+	// The editor's test: the runtime starts again from the authored row
+	// (each instance's state its type's defaults, on_start run, none
+	// disabled), live for everyone on the server -- the one runtime Kit
+	// has, which the other players see and use too -- and edits wait.
+	// Its end puts back the runtime and the owned voxels as they were.
+	// simplified: only Kit's own runtime and voxels come back; what the
+	// app or a player changed in the world meanwhile stays. A copy of the
+	// world on a server of its own is the upgrade ([KIT] stage 3, later)
+	void start_test(size_t peer)
+	{
+		Peer &p = m_peers[peer];
+		save_runtime();
+		m_test = Test();
+		m_test.runtime = runtime_json();
+		m_test.on = true;
+		m_test.peer = peer;
+		m_test.name = p.name;
+		m_test.queue.swap(m_queue);
+		m_test.pending.swap(m_pending_voxels);
+		m_test.voxels = owned_voxels();
+		for(auto &pe : m_entities){
+			Entity &e = pe.second;
+			for(size_t i = 0; i < e.comps.size(); i++){
+				Instance &in = e.comps[i];
+				const Type &t = m_types[in.type];
+				in.state = json::object();
+				const json::Value &sd = t.decl.get("state");
+				if(sd.is_object())
+					for(json::Iterator it(sd); it; ++it)
+						in.state.set(it.key(), (*it).get("default"));
+				in.disabled.clear();
+				for(const ss_ &k : t.shared)
+					replicate_state(e, i, k);
+				Run r;
+				r.entity = e.id;
+				r.comp = i;
+				r.handler = "on_start";
+				queue_run(r);
+			}
+		}
+		p.editing = false;
+		log_i(MODULE, "A test by %s starts: authored %s, runtime %s",
+				cs(p.name), cs(digest(authored_json())),
+				cs(digest(m_test.runtime)));
+		send_editors(peer);
+	}
+
+	void stop_test(const ss_ &why)
+	{
+		if(!m_test.on)
+			return;
+		Test t;
+		std::swap(t, m_test);
+		m_queue = std::move(t.queue);
+		m_pending_voxels = std::move(t.pending);
+		for(auto &pe : m_entities){
+			Entity &e = pe.second;
+			const json::Value &saved = t.runtime.get(itos(e.id));
+			for(size_t i = 0; i < e.comps.size(); i++){
+				Instance &in = e.comps[i];
+				const json::Value &s = saved.at((unsigned)i);
+				in.state = s.get("state").is_object() ? s.get("state") :
+						json::object();
+				in.disabled = jstr(s, "disabled");
+				for(const ss_ &k : m_types[in.type].shared)
+					replicate_state(e, i, k);
+			}
+		}
+		for(const Write &w : t.voxels)
+			if(!set_voxel(w))
+				m_pending_voxels.push_back(w);
+		m_runtime_dirty = true;
+		save_runtime();
+		auto pi = m_peers.find(t.peer);
+		if(pi != m_peers.end() && can_edit(t.peer))
+			pi->second.editing = true;
+		log_i(MODULE, "The test by %s ended (%s): authored %s, runtime %s",
+				cs(t.name), cs(why), cs(digest(authored_json())),
+				cs(digest(runtime_json())));
+		send_editors(t.peer);
 	}
 
 	// {"op": "builder", "name": n, "on": bool}: the admin grants or takes
@@ -1362,6 +1514,10 @@ struct Module: public interface::Module, public Interface
 		const bool editing = pi != m_peers.end() && pi->second.editing;
 		j.set("editing", editing);
 		j.set("can_edit", can_edit(peer));
+		if(m_test.on){
+			j.set("testing", m_test.name);
+			j.set("playing", m_test.peer == peer);
+		}
 		if(editing){
 			json::Value pal = json::object();
 			for(const ss_ &t : m_palette){
@@ -1456,8 +1612,18 @@ struct Module: public interface::Module, public Interface
 			send_state(peer);
 			return;
 		}
+		if(op == "stop"){
+			if(!m_test.on || m_test.peer != peer)
+				return refuse("no test of yours runs");
+			return stop_test("its tester stopped it");
+		}
 		if(!p.editing)
 			return refuse("not in edit mode");
+		if(m_test.on)
+			return refuse("a test of "+m_test.name+"'s runs; edits wait for "
+					"its end");
+		if(op == "play")
+			return start_test(peer);
 		sv_<std::pair<uint64_t, json::Value>> change;
 		ss_ why, what;
 		if(op == "undo"){

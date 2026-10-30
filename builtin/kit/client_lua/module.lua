@@ -21,6 +21,8 @@
 --     and a type's gizmo (a sphere or a box), in edit mode only
 --   - the admin's: who is here, each "Builder: yes/no" to grant or take
 --     edit rights
+--   - "Play": a test, the runtime from the authored row; "Stop test" (the
+--     Edit button, F6) puts it back and returns to edit mode
 -- kit.selected(): the id last selected, kept after edit mode.
 -- simplified: placed on a ground plane, a nudge by keys and no drag, the
 -- windows rebuilt whole on each state; picking against the voxels, a drag
@@ -31,7 +33,7 @@ local network = require("buildat/extension/network")
 local log = buildat.Logger("kit")
 
 local M = {}
-local E = {editing = false, state = nil, sel = nil, link = nil,
+local E = {editing = false, playing = false, state = nil, sel = nil, link = nil,
 	cursor = nil, pending = {}, status = "", windows = {}}
 local O = nil -- the app's options
 
@@ -296,6 +298,13 @@ rebuild = function()
 		send({op = "undo"})
 	end)
 	label(r, "(" .. tostring(E.state.undo or 0) .. ")")
+	button(r, "Play", function()
+		send({op = "play"})
+	end)
+	if E.state.testing then
+		text(w, "A test of " .. tostring(E.state.testing) ..
+				"'s runs: edits wait", WARN)
+	end
 	-- The admin's: who here may edit
 	for _, p in ipairs(E.state.admin and E.state.people or {}) do
 		local pr = row(w)
@@ -486,7 +495,11 @@ function M.editor(options)
 	O.debug = O.scene:GetComponent("DebugRenderer") or
 			O.scene:CreateComponent("DebugRenderer")
 	local toggle = function()
-		send({op = "mode", on = not E.editing})
+		if E.playing then
+			send({op = "stop"})
+		else
+			send({op = "mode", on = not E.editing})
+		end
 	end
 	local w = magic.ui.root:CreateChild("Window")
 	if not magic.ui.root.defaultStyle then
@@ -523,7 +536,16 @@ function M.editor(options)
 			log:info("kit editor: edit mode " .. (E.editing and "on" or "off"))
 			E.link, E.status = nil, ""
 		end
-		edit_text:SetText(E.editing and "Leave edit mode" or "Edit")
+		if s.testing and not s.playing then
+			log:info("kit editor: a test of " .. tostring(s.testing) .. "'s runs")
+		end
+		if E.playing ~= (s.playing == true) then
+			E.playing = s.playing == true
+			log:info("kit editor: " .. (E.playing and "playing a test" or
+					"the test is over"))
+		end
+		edit_text:SetText(E.playing and "Stop test" or
+				E.editing and "Leave edit mode" or "Edit")
 		edit_button.minWidth = edit_text.width + 16
 		if E.editing then
 			local n = #entities()

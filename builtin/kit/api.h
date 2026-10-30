@@ -74,6 +74,13 @@ namespace storage
 //   {"op": "undo"}  -- the editor's own last edit, UNDO_MAX of them
 //   {"op": "builder", "name": account, "on": bool}  -- the admin's only:
 //       makes an account a builder, or no longer
+//   {"op": "play"}, {"op": "stop"}  -- a test: the runtime starts again
+//       from the authored row (defaults, on_start, nothing disabled) and
+//       the editor plays; "stop" (or the tester leaving) puts back the
+//       runtime and the owned voxels as they were and the editor is in
+//       edit mode again. One runtime: everyone on the server plays the
+//       test meanwhile, and edits wait for its end. A test's runtime is
+//       never saved.
 // Each is checked on the server, the rights first, then the ids, types,
 // parameter values (as the type declares them) and signal names; a
 // refusal is logged and answered with "kit:edit_refused" ("<op>: why").
@@ -81,8 +88,9 @@ namespace storage
 // {"editing", "palette": [type...], "types": {type: {params, inputs,
 // outputs, gizmo, usable}}, "authored": the row, "undo": n, "admin",
 // and the admin's "people": [{name, admin, builder}] here}, and always
-// "can_edit". A player is sent it too as the admin grants or takes their
-// rights. A type's
+// "can_edit", and "testing" (whose test runs) and "playing" (this one's).
+// A player is sent it too as the admin grants or takes their rights, and
+// a tester as their test starts. A type's
 // `gizmo = {shape = "box"|"sphere", size = n, color = "#rrggbb"}` is drawn
 // in edit mode only. The client half is builtin/kit/client_lua/module.lua.
 namespace kit
