@@ -135,6 +135,7 @@ local ban_page
 -- The Server window ([SERVER_ADMIN_PAGE]), below; its state and the
 -- functions the pages above it call
 local sw = {}
+local web = buildat.get_env("BUILDAT_PAGE_HTTPS") ~= nil
 local draw_sidebar, server_element, server_close, sidebar_need, server_entries
 local health_page, health_capture
 -- The Starport panel open: "starports", "listing" or "ids"
@@ -3250,12 +3251,39 @@ end
 -- with the users list; one asked for before it is shown when it comes
 -- on_exit: for an app whose own UI this is, what its × does (it does not
 -- close the window), M.ask_exit where there is a launcher
+-- [WEB_LOCKED_CLICKS_ACCOUNTS] **A window that wants clicks frees the
+-- pointer**, as a game's pause menu does, for as long as it is up: the
+-- ntfy question comes after a login, over a game whose mouse look is on
+-- or turned on under it, and on the web a click with the pointer lock
+-- held hit no button (the window closed as by a click off it). The cursor
+-- shown, and on the web the lock let go; the window is one of
+-- ui_utils.wants_clicks', so a game's mouse look (ui_utils', skeldat's)
+-- neither turns nor pauses meanwhile and takes the pointer back after;
+-- natively the cursor is hidden again as the window closes
+local free_sub
+local function free_pointer()
+	local input = magic.input
+	if sw.frame and (not input.mouseVisible or web and input:IsMouseLocked()) then
+		sw.hid_cursor = sw.hid_cursor or not input.mouseVisible
+		input:SetMouseVisible(true, "the Server window")
+		if web then
+			input:SetMouseMode(magic.MM_ABSOLUTE)
+		end
+	end
+end
+
 function M.server_window(key, on_close, on_exit)
 	-- Before the frame: its sidebar has Close
 	sw.on_close = on_close
 	sw.on_exit = on_exit
 	if not sw.frame then
 		build_frame()
+		local wants = (ui_utils.safe or ui_utils).wants_clicks
+		wants(sw.frame)
+		free_pointer()
+		if not free_sub then
+			free_sub = magic.SubscribeToEvent("Update", free_pointer)
+		end
 	end
 	-- **Black behind a window a game opened** (user, 2026-10-07), 25 UI
 	-- pixels round it: told apart from the game's UI under it
@@ -3296,6 +3324,9 @@ server_close = function(silent)
 	end
 	if sw.backdrop then
 		sw.backdrop:Remove()
+	end
+	if sw.hid_cursor and not web then
+		magic.input:SetMouseVisible(false, "the Server window closed")
 	end
 	sw = {}
 	M.frame = nil

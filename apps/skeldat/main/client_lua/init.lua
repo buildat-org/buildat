@@ -11,6 +11,7 @@
 -- packet here.
 local magic = require("buildat/extension/urho3d")
 local cereal = require("buildat/extension/cereal")
+local ui_utils = require("buildat/extension/ui_utils")
 local replicate = require("buildat/extension/replicate")
 local voxelworld = require("buildat/module/voxelworld")
 local voxel_shading = require("buildat/module/voxel_shading")
@@ -2323,6 +2324,16 @@ function game.lock_move(m, dt)
 	if not m then
 		lock.was, lock.t = false, 0
 		return
+	end
+	-- [WEB_LOCKED_CLICKS_ACCOUNTS] A window that wants clicks (accounts'
+	-- Server window) has the pointer: no turn, no pause; the world's again
+	-- after it
+	if ui_utils.clicks_wanted() then
+		lock.was, lock.t, lock.yielded = false, 0, true
+		return {x = 0, y = 0}
+	elseif lock.yielded then
+		lock.yielded = false
+		set_mouse_in_world(true)
 	end
 	if not web then
 		return m
