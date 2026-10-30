@@ -419,6 +419,13 @@ void VS()
         // that showed on plain rock and grass.
         if (openFraction <= 0.0)
             return 0.0;
+        // All of it, all the time: a window as long as the cycle has no
+        // edge to fade at, so the whole surface is a spot and holds still --
+        // a speckle of facets a sixteenth of a voxel across, each turned its
+        // own way. The top of the map's 8 bit range rather than 1.0, which
+        // a filtered read need not hand back exactly.
+        if (openFraction >= 254.5 / 255.0)
+            return 1.0;
         vec3 cell = floor(worldPos * TRANSMISSION_CELLS);
         float rate = TRANSMISSION_RATE * (0.6 + TransmissionHash(cell + 19.0));
         // A slow ramp along the wind direction, which turns what would be an
