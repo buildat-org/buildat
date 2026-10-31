@@ -55,8 +55,10 @@
 --   - **The voxels tool** (V, or Voxels by the palette's title; an app
 --     with solid): a left click places the voxel in hand on the face
 --     pointed at, Shift+left digs the voxel pointed at, each one undo;
---     walking at the crosshair within play's reach (reach, 6 cells by
---     default), the other views at the pointer
+--     walking as play ([KIT_PLAYTEST_TWEAKS]): the left button digs, the
+--     right one places (a touchscreen: a tap digs, a finger held places),
+--     at the crosshair within play's reach (reach, 6 cells by default),
+--     Escape out of the crosshair first; the other views at the pointer
 --   - **Links dragged**: the selected entity's outputs are ports beside
 --     it; one dragged onto another entity's input (its ports show as the
 --     drag is over it) links them, onto the entity a link to its one
@@ -2142,7 +2144,8 @@ function M.escape()
 		stroke_end(S.mx, S.my)
 		return true
 	end
-	if S.tool then
+	-- In the crosshair Escape leaves it first, the voxels tool kept
+	if S.tool and not M.looking() then
 		M.set_tool(nil)
 		return true
 	end
@@ -2480,12 +2483,13 @@ end
 -- title): on while a voxel is in hand (the palette's Voxel list; "none"
 -- puts it away, as do V and Escape). A left click places it on the face
 -- pointed at, Shift+left digs the voxel pointed at, each one edit (one
--- undo) through Kit's routed writes ("set_voxel"); walking at the
--- crosshair within play's reach (O.reach, 6 cells past the body), the
--- other views at the pointer. The right button stays the view's and the
--- entity menu's.
--- simplified: a click is one cell, and a touchscreen's tap selects as
--- before; a left drag filling a box (Shift: clearing one), one op and
+-- undo) through Kit's routed writes ("set_voxel"); walking, as play, the
+-- left button digs and the right one places (a tap and a finger held), at
+-- the crosshair within play's reach (O.reach, 6 cells past the body); the
+-- other views at the pointer, where the right button stays the view's and
+-- the entity menu's.
+-- simplified: a click is one cell, and in 2D and 3D a touchscreen's tap
+-- selects as before; a left drag filling a box (Shift: clearing one), one op and
 -- one undo, is the upgrade
 local function voxel_target(mx, my)
 	if not O.solid then
@@ -2556,7 +2560,8 @@ local function mouse_down(button_)
 		return
 	end
 	if S.tool == "voxels" and button_ == magic.MOUSEB_LEFT then
-		voxel_click(mx, my, key_held(magic.KEY_LSHIFT) or
+		-- Walking, the left button digs as in play
+		voxel_click(mx, my, S.view == "walk" or key_held(magic.KEY_LSHIFT) or
 				key_held(magic.KEY_RSHIFT))
 		return
 	end
@@ -2617,7 +2622,11 @@ local function mouse_up(button_)
 		S.right_click = nil
 		local orbited = S.orbit
 		S.orbit = nil
-		if rc and rc.moved < RIGHT_CLICK_PX then
+		if rc and rc.moved < RIGHT_CLICK_PX and S.tool == "voxels" and
+				S.view == "walk" then
+			-- Walking, the right button places as in play
+			voxel_click(rc.mx, rc.my, false)
+		elseif rc and rc.moved < RIGHT_CLICK_PX then
 			if M.looking() then
 				-- The menu wants the pointer
 				S.crosshair = false
@@ -2934,6 +2943,10 @@ local function touch_end(id, x, y)
 	S.mx, S.my = x, y
 	if S.drag then
 		end_drag()
+	elseif not f.moved and not S.touch_cam and S.tool == "voxels" and
+			S.view == "walk" then
+		-- Walking with the voxels tool, as play's: a tap digs
+		voxel_click(x, y, true)
 	elseif not f.moved and not S.touch_cam then
 		-- A tap: the left click at the finger
 		S.press = S.press or {mx = x, my = y}
@@ -2958,7 +2971,12 @@ local function long_press_tick()
 			buildat.get_time_us() - only.t0 > LONG_PRESS_US then
 		only.held = true
 		S.press, S.drag = nil, nil
-		right_click({mx = only.x, my = only.y})
+		if S.tool == "voxels" and S.view == "walk" then
+			-- Walking with the voxels tool, as play's: held, it places
+			voxel_click(only.x, only.y, false)
+		else
+			right_click({mx = only.x, my = only.y})
+		end
 	end
 end
 
@@ -3207,6 +3225,24 @@ local function compute_guide()
 		end
 		g.right = "put the terrain tool away; " .. right
 		g.note = not S.touch and "[ ]: size, Shift [ ]: strength, Esc: away" or nil
+		return g
+	end
+	if S.tool == "voxels" and S.view == "walk" then
+		-- [KIT_PLAYTEST_TWEAKS] walking as in play: left digs, right places
+		ghost(nil)
+		local t = voxel_target(mx, my)
+		if t then
+			hover.box(v3(t.cell), magic.Vector3(0.5, 0.5, 0.5), nil, M.DIG)
+			if t.front then
+				hover.face(t.cell, {t.front[1] - t.cell[1], t.front[2] -
+						t.cell[2], t.front[3] - t.cell[3]}, M.PLACE)
+			end
+			g.left = "dig " .. table.concat(t.cell, ",")
+			g.right = t.front and "place " .. tostring(S.voxel) .. " at " ..
+					table.concat(t.front, ",") or nil
+		end
+		g.note = not S.touch and "V: put the voxels away" ..
+				(M.looking() and ", Esc: out of the crosshair" or "") or nil
 		return g
 	end
 	if S.tool == "voxels" then

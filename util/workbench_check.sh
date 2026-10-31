@@ -909,8 +909,9 @@ EOF
 # the inspector's x typed in and Move, a kit/world placed (game-wide), selected
 # from the list and deleted by the inspector's Delete, and the undo.
 # ([KIT_EDIT_VOXELS]) The voxels tool (V): a voxel placed by a click at the
-# pointer in 3D, and walking at the crosshair one placed, dug (Shift) and
-# the dig undone (Ctrl+Z), each one undo.
+# pointer in 3D, and walking at the crosshair as in play
+# ([KIT_PLAYTEST_TWEAKS]) one placed (right), dug (left) and the dig undone
+# (Ctrl+Z), each one undo; Escape out of the crosshair, then the tool away.
 # ([KIT_SELECT_BURIED]) A dig zone under the ground: the hover and a click
 # in the plan go through the ground to it; with "Hide positioned entities"
 # off the list has it, its Select selects it; a link ("Link pressed") to it
@@ -1103,22 +1104,21 @@ mouse_click left
 wait_log 5000 kit editor: into the crosshair
 look_dir 0 -1 0.6
 frames 5
-mouse_click left
+wait_log_any 5000 kit editor: guide: Left: dig
+mouse_click right
 wait_log 5000 kit editor: state: 6 entities, 10 to undo
-keydown shift
 frames 3
 screenshot @T@/voxel_dig.png
 mouse_click left
 wait_log 5000 kit editor: state: 6 entities, 11 to undo
-keyup shift
 keydown ctrl
 keypress z
 keyup ctrl
 wait_log 5000 kit editor: state: 6 entities, 10 to undo
 keypress Escape
-wait_log 5000 kit editor: tool select
-keypress Escape
 wait_log 5000 kit editor: out of the crosshair
+keypress Escape
+wait_log 5000 kit editor: tool select
 keypress F1
 wait_log 5000 kit editor: the view is 2D
 event kit_edit {"op": "place", "type": "kit/dig_zone", "pos": [2, -1, -2]}
