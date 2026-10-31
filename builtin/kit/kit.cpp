@@ -66,6 +66,11 @@ static const int MAX_EXTENT = 64;
 static const int MAX_VOLUME = 64;
 // The cells a grants type's c:set_voxel sets at most (its box)
 static const int MAX_SET_CELLS = 4096;
+// [KIT_VOXEL_STATES] A voxel_box's extent each way, a pattern parameter's
+// bytes and the voxel names in it at most
+static const int MAX_VOXEL_BOX = 16;
+static const size_t MAX_PATTERN = 32768;
+static const size_t MAX_PATTERN_NAMES = 256;
 // The most of an item a player has (Kit's own counts, c:add)
 static const int64_t MAX_ITEMS = 1000000;
 // What an editor's packet may be and do
@@ -182,7 +187,125 @@ struct Type
 	// The position parameters that are its zone's, its owned volume's and
 	// its grants' extent ("" for none)
 	ss_ zone, volume, grants;
+	// [KIT_VOXEL_STATES] The position parameter that is the box its
+	// c:set_voxels writes in ("" none), and whether its runs read that
+	// box's voxels (reads_voxels = true)
+	ss_ voxel_box;
+	bool reads_voxels = false;
 };
+
+// [KIT_VOXEL_STATES] A voxel pattern (a "voxels" parameter): a box's
+// size, its voxel names and each cell's index in them, in box order (x
+// fastest, then z, then y). Its text: "<sx> <sy> <sz>;<name> ...;<run>
+// ..." with a run "<i>" or "<i>*<n>" (i from 0); "" is no pattern
+struct Pattern
+{
+	int n[3] = {0, 0, 0};
+	sv_<ss_> names;
+	sv_<uint16_t> cells;
+};
+
+static bool voxel_name_ok(const ss_ &v)
+{
+	if(v.empty() || v.size() > 64)
+		return false;
+	for(char c : v)
+		if(!isalnum((unsigned char)c) && c != '_' && c != ':' && c != '/')
+			return false;
+	return true;
+}
+
+// The pattern in `text`, or false and why
+static bool parse_pattern(const ss_ &text, Pattern &out, ss_ &why)
+{
+	out = Pattern();
+	if(text.size() > MAX_PATTERN){
+		why = "a pattern of at most "+itos(MAX_PATTERN)+" bytes";
+		return false;
+	}
+	const size_t a = text.find(';'), b = a == ss_::npos ? a :
+			text.find(';', a + 1);
+	if(b == ss_::npos){
+		why = "a pattern: \"<sx> <sy> <sz>;<names>;<runs>\"";
+		return false;
+	}
+	{
+		std::istringstream is(text.substr(0, a));
+		size_t total = 1;
+		for(int k = 0; k < 3; k++){
+			if(!(is >> out.n[k]) || out.n[k] < 1 || out.n[k] > MAX_VOXEL_BOX){
+				why = "a pattern's size: three whole numbers 1..."+
+						itos(MAX_VOXEL_BOX);
+				return false;
+			}
+			total *= out.n[k];
+		}
+		out.cells.reserve(total);
+	}
+	{
+		std::istringstream is(text.substr(a + 1, b - a - 1));
+		ss_ v;
+		while(is >> v){
+			if(!voxel_name_ok(v) || out.names.size() >= MAX_PATTERN_NAMES){
+				why = "a pattern's names: at most "+itos(MAX_PATTERN_NAMES)+
+						" voxel names";
+				return false;
+			}
+			out.names.push_back(v);
+		}
+	}
+	const size_t total = (size_t)out.n[0] * out.n[1] * out.n[2];
+	std::istringstream is(text.substr(b + 1));
+	ss_ run;
+	while(is >> run){
+		const size_t star = run.find('*');
+		char *end = nullptr;
+		const long i = strtol(run.c_str(), &end, 10);
+		long n = 1;
+		if(star != ss_::npos)
+			n = strtol(run.c_str() + star + 1, nullptr, 10);
+		if(end == run.c_str() || (star == ss_::npos ? *end != 0 :
+				end != run.c_str() + star) || i < 0 ||
+				(size_t)i >= out.names.size() || n < 1 ||
+				out.cells.size() + n > total){
+			why = "a pattern's runs: \"<i>\" or \"<i>*<n>\", its cells "+
+					itos(total);
+			return false;
+		}
+		out.cells.insert(out.cells.end(), n, (uint16_t)i);
+	}
+	if(out.cells.size() != total){
+		why = "a pattern of "+itos(total)+" cells has "+
+				itos(out.cells.size());
+		return false;
+	}
+	return true;
+}
+
+// A box's voxels (names in box order) as a pattern's text
+static ss_ encode_pattern(const int n[3], const sv_<ss_> &cells)
+{
+	sv_<ss_> names;
+	sm_<ss_, size_t> index;
+	ss_ runs;
+	for(size_t i = 0; i < cells.size();){
+		auto it = index.find(cells[i]);
+		if(it == index.end()){
+			it = index.insert(std::make_pair(cells[i], names.size())).first;
+			names.push_back(cells[i]);
+		}
+		size_t j = i + 1;
+		while(j < cells.size() && cells[j] == cells[i])
+			j++;
+		runs += (runs.empty() ? "" : " ")+itos(it->second)+
+				(j - i > 1 ? "*"+itos(j - i) : "");
+		i = j;
+	}
+	ss_ o = itos(n[0])+" "+itos(n[1])+" "+itos(n[2])+";";
+	for(size_t i = 0; i < names.size(); i++)
+		o += (i ? " " : "")+names[i];
+	return o+";"+runs;
+}
 
 struct Run
 {
@@ -1011,7 +1134,8 @@ struct Module: public interface::Module, public Interface
 		// zone, volume and grants name position parameters of the type's own
 		for(auto k : {std::make_pair("zone", &t.zone),
 				std::make_pair("volume", &t.volume),
-				std::make_pair("grants", &t.grants)}){
+				std::make_pair("grants", &t.grants),
+				std::make_pair("voxel_box", &t.voxel_box)}){
 			const ss_ pn = jstr(t.decl, k.first);
 			if(pn.empty())
 				continue;
@@ -1032,6 +1156,11 @@ struct Module: public interface::Module, public Interface
 		if(!lx.empty() && jstr(t.decl.get("params").get(lx), "type") !=
 				"position"){
 			why = name+": its look's extent names no position parameter";
+			return false;
+		}
+		t.reads_voxels = t.decl.get("reads_voxels").is_true();
+		if(t.reads_voxels && t.voxel_box.empty()){
+			why = name+": reads_voxels reads its voxel_box, and it has none";
 			return false;
 		}
 		if(!t.volume.empty() && !t.owns_voxel){
@@ -1081,6 +1210,58 @@ struct Module: public interface::Module, public Interface
 			out[k] = (int)std::max(1.0, std::min((double)MAX_EXTENT,
 					std::floor(d)));
 		}
+	}
+
+	// [KIT_VOXEL_STATES] An instance's voxel_box: its first cell and its
+	// extent; false if its type has none, the entity no place, or a side
+	// is past MAX_VOXEL_BOX (why)
+	bool voxel_box(const Entity &e, const Instance &in, pv::Vector3DInt32 &o,
+			int n[3], ss_ *why = nullptr)
+	{
+		const Type &t = m_types[in.type];
+		if(t.voxel_box.empty() || !e.has_pos){
+			if(why)
+				*why = in.type+" has no voxel box";
+			return false;
+		}
+		extent(in.params.get(t.voxel_box), n);
+		for(int k = 0; k < 3; k++)
+			if(n[k] > MAX_VOXEL_BOX){
+				if(why)
+					*why = "its box is past "+itos(MAX_VOXEL_BOX)+
+							" cells a side";
+				return false;
+			}
+		o = voxel_p(e);
+		return true;
+	}
+
+	// The box's voxels' names in box order (x fastest, then z, then y),
+	// "" where its section is not loaded, "air" where never written
+	sv_<ss_> read_box(const Entity &e, const pv::Vector3DInt32 &o,
+			const int n[3])
+	{
+		sv_<ss_> out((size_t)n[0] * n[1] * n[2]);
+		voxelworld::access(m_server, scene_of(e), [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			size_t i = 0;
+			for(int y = 0; y < n[1]; y++)
+				for(int z = 0; z < n[2]; z++)
+					for(int x = 0; x < n[0]; x++, i++){
+						uint32_t id = 0;
+						if(!voxel_id(w, o + pv::Vector3DInt32(x, y, z), id))
+							continue;
+						// 0: a cell never written (no generator's), air
+						if(id == 0){
+							out[i] = "air";
+							continue;
+						}
+						const interface::VoxelDefinition *d = reg->get(id);
+						if(d)
+							out[i] = d->name.block_name;
+					}
+		});
+		return out;
 	}
 
 	// The cells an entity owns: its own, or its owning instance's volume
@@ -1160,6 +1341,17 @@ struct Module: public interface::Module, public Interface
 				if(!isalnum((unsigned char)c) && c != '_' && c != ':' &&
 						c != '/')
 					return "a voxel's name (letters, digits, _, : and /)";
+			return "";
+		}
+		if(t == "voxels"){
+			// [KIT_VOXEL_STATES] a pattern ("": none); not an inspector
+			// field (Capture and Fill set it)
+			if(!v.is_string())
+				return "a voxel pattern";
+			Pattern pt;
+			ss_ why;
+			if(!v.as_string().empty() && !parse_pattern(v.as_string(), pt, why))
+				return why;
 			return "";
 		}
 		if(t == "entity"){
@@ -4237,6 +4429,129 @@ struct Module: public interface::Module, public Interface
 		send_state(peer);
 	}
 
+	// [KIT_VOXEL_STATES] An editor's {"op": "pattern", "id", "comp",
+	// "param" (a "voxels" parameter), "action": "capture" | "fill" |
+	// "show", "voxel" (fill's)}: the box's voxels recorded in it, it made
+	// one voxel throughout, or it written into the box. Each an edit,
+	// undone as others
+	void pattern_op(Peer &p, size_t peer, const json::Value &j,
+			std::function<void(const ss_&)> refuse)
+	{
+		Entity *e = nullptr;
+		ss_ why;
+		Instance *in = instance_arg(j, e, why);
+		if(!in)
+			return refuse(why);
+		const ss_ param = jstr(j, "param"), action = jstr(j, "action");
+		if(jstr(m_types[in->type].decl.get("params").get(param), "type") !=
+				"voxels")
+			return refuse(in->type+" has no voxel pattern \""+
+					param.substr(0, 64)+"\"");
+		pv::Vector3DInt32 o;
+		int n[3];
+		if(!voxel_box(*e, *in, o, n, &why))
+			return refuse(why);
+		const size_t total = (size_t)n[0] * n[1] * n[2];
+		const ss_ who = itos(e->id)+"'s "+in->type+" "+param;
+		if(action == "capture" || action == "fill"){
+			sv_<ss_> cells;
+			if(action == "capture"){
+				cells = read_box(*e, o, n);
+				for(const ss_ &c : cells)
+					if(c.empty())
+						return refuse("a cell of the box is not loaded");
+			} else {
+				const ss_ v = jstr(j, "voxel");
+				bool known = false;
+				voxelworld::access(m_server, scene_of(*e),
+						[&](voxelworld::Instance *w){
+					interface::VoxelName vn;
+					vn.block_name = v;
+					known = voxel_name_ok(v) && w->get_voxel_reg()->get(vn);
+				});
+				if(!known)
+					return refuse("voxel: a registered voxel's name");
+				cells.assign(total, v);
+			}
+			const ss_ text = encode_pattern(n, cells);
+			Pattern check;
+			if(!parse_pattern(text, check, why))
+				return refuse("the box's voxels as a pattern: "+why);
+			json::Value set = json::object();
+			set.set("id", (int64_t)e->id);
+			set.set("comp", (int64_t)(in - &e->comps[0]));
+			set.set("param", param);
+			set.set("value", text);
+			sv_<std::pair<uint64_t, json::Value>> change;
+			ss_ what;
+			if(!build_change("set", set, p, change, what, why))
+				return refuse(why);
+			commit(change, &m_undo[p.name]);
+			log_i(MODULE, "An edit by %s: %s %s, %zu cells in %zu voxels "
+					"(%zu bytes)", cs(p.name), action == "capture" ?
+					"captured" : "filled", cs(who), total, check.names.size(),
+					text.size());
+			world_check(p.name);
+			return;
+		}
+		if(action != "show")
+			return refuse("action: capture, fill or show");
+		const ss_ text = jstr(in->params, param.c_str());
+		Pattern pt;
+		if(text.empty())
+			return refuse(who+" is empty");
+		if(!parse_pattern(text, pt, why))
+			return refuse(who+": "+why);
+		if(pt.n[0] != n[0] || pt.n[1] != n[1] || pt.n[2] != n[2])
+			return refuse(who+" is of a box "+itos(pt.n[0])+"x"+
+					itos(pt.n[1])+"x"+itos(pt.n[2])+", the box "+itos(n[0])+
+					"x"+itos(n[1])+"x"+itos(n[2]));
+		Change nc;
+		nc.stroke = -2;
+		nc.scene = scene_of(*e);
+		voxelworld::access(m_server, nc.scene, [&](voxelworld::Instance *w){
+			interface::VoxelRegistry *reg = w->get_voxel_reg();
+			sv_<uint32_t> ids;
+			for(const ss_ &nm : pt.names){
+				interface::VoxelName vn;
+				vn.block_name = nm;
+				const interface::VoxelDefinition *d = reg->get(vn);
+				if(!d){
+					why = "no voxel "+nm;
+					return;
+				}
+				ids.push_back(d->id);
+			}
+			size_t i = 0;
+			for(int y = 0; y < n[1]; y++)
+				for(int z = 0; z < n[2]; z++)
+					for(int x = 0; x < n[0]; x++, i++){
+						const pv::Vector3DInt32 q = o + pv::Vector3DInt32(x, y, z);
+						uint32_t old = 0;
+						if(!voxel_id(w, q, old)){
+							why = "a cell of the box is not loaded";
+							continue;
+						}
+						if(old == ids[pt.cells[i]])
+							continue;
+						nc.cells[std::make_tuple(q.getX(), q.getY(),
+								q.getZ())] = old;
+						set_id(w, q, ids[pt.cells[i]]);
+						mark(w, nc.scene, q, 'k', p.name);
+					}
+		});
+		if(!nc.cells.empty()){
+			std::deque<Change> &u = m_undo[p.name];
+			u.push_back(nc);
+			while(u.size() > UNDO_MAX)
+				u.pop_front();
+		}
+		log_i(MODULE, "An edit by %s: showed %s, %zu cells written%s",
+				cs(p.name), cs(who), nc.cells.size(),
+				why.empty() ? "" : cs(" ("+why+")"));
+		send_state(peer);
+	}
+
 	// Where voxelworld keeps the World loaded: a finite map's sections
 	// pinned, its whole; an infinite one round each player and the spawn;
 	// a heightmap's scene none
@@ -5015,6 +5330,37 @@ struct Module: public interface::Module, public Interface
 			o += ",players=";
 			lua_lit(players, o);
 		}
+		// [KIT_VOXEL_STATES] its voxel box's size, and with reads_voxels
+		// its voxels: their names and each cell's index in them (from 1; 0:
+		// not loaded)
+		{
+			pv::Vector3DInt32 bo;
+			int bn[3];
+			if(voxel_box(e, in, bo, bn)){
+				o += ",box={"+itos(bn[0])+","+itos(bn[1])+","+itos(bn[2])+"}";
+				if(m_types[in.type].reads_voxels){
+					const sv_<ss_> cells = read_box(e, bo, bn);
+					sm_<ss_, size_t> index;
+					ss_ ids;
+					o += ",voxels={names={";
+					for(const ss_ &c : cells){
+						if(c.empty()){
+							ids += "0,";
+							continue;
+						}
+						auto it = index.find(c);
+						if(it == index.end()){
+							it = index.insert(std::make_pair(c,
+									index.size() + 1)).first;
+							lua_lit(json::Value(c), o);
+							o += ",";
+						}
+						ids += itos(it->second)+",";
+					}
+					o += "},ids={"+ids+"}}";
+				}
+			}
+		}
 		o += ",names=";
 		lua_lit(names, o);
 		o += ",next_id="+itos(m_next_id)+",sizes={";
@@ -5181,6 +5527,9 @@ struct Module: public interface::Module, public Interface
 				}
 			}
 		}
+		const json::Value &vx = fx.get("voxels");
+		if(vx.is_array() && vx.size())
+			set_voxels(e, in, vx, r.by, t.builds && pid ? 'b' : 'g');
 		const json::Value &after = fx.get("after");
 		if(after.is_number()){
 			// simplified: one timer an instance; a new c:after replaces it
@@ -6507,6 +6856,73 @@ struct Module: public interface::Module, public Interface
 		};
 		return world->is_section_loaded(pv::Vector3DInt16(div(p.getX(),
 				ss.getX()), div(p.getY(), ss.getY()), div(p.getZ(), ss.getZ())));
+	}
+
+	// [KIT_VOXEL_STATES] c:set_voxels(cells): {{x, y, z, name}...} in the
+	// instance's voxel box (x, y, z from its first cell), MAX_SET_CELLS at
+	// most, each a registered voxel's name; all written or, one refused,
+	// none (logged)
+	void set_voxels(const Entity &e, const Instance &in, const json::Value &vx,
+			const ss_ &by, char origin)
+	{
+		pv::Vector3DInt32 o;
+		int n[3];
+		ss_ why;
+		sv_<Write> ws;
+		if(!voxel_box(e, in, o, n, &why)){
+		} else if(vx.size() > (unsigned)MAX_SET_CELLS){
+			why = itos(vx.size())+" cells, past "+itos(MAX_SET_CELLS);
+		} else {
+			std::set<ss_> names;
+			for(unsigned i = 0; i < vx.size() && why.empty(); i++){
+				const json::Value &c = vx.at(i);
+				int q[3];
+				for(unsigned k = 0; k < 3 && why.empty(); k++){
+					const json::Value &v = c.at(k);
+					if(!v.is_number() || v.as_number() != std::floor(v.as_number()) ||
+							v.as_number() < 0 || v.as_number() >= n[k])
+						why = "cell "+itos(i + 1)+" is not in its box";
+					else
+						q[k] = (int)v.as_number();
+				}
+				const ss_ name = jstr_at(c, 3);
+				if(why.empty() && !voxel_name_ok(name))
+					why = "cell "+itos(i + 1)+": a voxel's name";
+				if(!why.empty())
+					break;
+				names.insert(name);
+				Write w;
+				w.scene = scene_of(e);
+				w.p = o + pv::Vector3DInt32(q[0], q[1], q[2]);
+				w.voxel = name;
+				w.by = by;
+				w.origin = origin;
+				ws.push_back(w);
+			}
+			if(why.empty())
+				voxelworld::access(m_server, scene_of(e),
+						[&](voxelworld::Instance *w){
+					for(const ss_ &nm : names){
+						interface::VoxelName vn;
+						vn.block_name = nm;
+						if(!w->get_voxel_reg()->get(vn)){
+							why = "no voxel "+nm;
+							return;
+						}
+					}
+				});
+		}
+		if(!why.empty()){
+			log_w(MODULE, "Entity %s's %s: set_voxels refused: %s",
+					cs(itos(e.id)), cs(in.type), cs(why));
+			add_log(e.id, "set_voxels refused: "+why);
+			return;
+		}
+		for(const Write &w : ws)
+			if(!set_voxel(w))
+				m_pending_voxels.push_back(w);
+		log_i(MODULE, "Entity %s's %s set %zu cells", cs(itos(e.id)),
+				cs(in.type), ws.size());
 	}
 
 	// A voxel an instance sets: false if its section is not loaded yet
@@ -8737,7 +9153,7 @@ struct Module: public interface::Module, public Interface
 				const json::Value &d = m_types[t].decl;
 				json::Value o = json::object();
 				for(const char *k : {"params", "inputs", "outputs", "gizmo",
-						"usable", "zone", "volume", "grants", "version",
+						"usable", "zone", "volume", "grants", "voxel_box", "version",
 						"inventory", "root", "inputs_types", "outputs_types",
 						"player"})
 					if(!d.get(k).is_undefined())
@@ -8751,7 +9167,7 @@ struct Module: public interface::Module, public Interface
 				if(!m_palette.count(t.first)){
 					json::Value o = json::object();
 					for(const char *k : {"params", "inputs", "outputs", "gizmo",
-							"zone", "volume", "grants", "version", "inventory",
+							"zone", "volume", "grants", "voxel_box", "version", "inventory",
 							"root", "inputs_types", "outputs_types", "player"})
 						if(!t.second.decl.get(k).is_undefined())
 							o.set(k, t.second.decl.get(k));
@@ -8903,6 +9319,8 @@ struct Module: public interface::Module, public Interface
 			return make_voxel(p, j, refuse);
 		if(op == "set_voxel")
 			return edit_voxel(p, peer, j, refuse);
+		if(op == "pattern")
+			return pattern_op(p, peer, j, refuse);
 		if(op == "export")
 			return export_package(peer, p, refuse);
 		if(op == "restart"){
