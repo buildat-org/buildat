@@ -692,7 +692,7 @@ build_web() {
 # meta.json; util/web_server.cmake refuses the others), and _aitta, the
 # server that runs Aitta's packages in the page ([WEB_LOCAL_AITTA])
 # simplified: named here; an app newly marked is added by hand
-WEB_LOCAL_APPS="hillclimb demo_aggregate skeldat _aitta"
+WEB_LOCAL_APPS="hillclimb demo_aggregate skeldat sample_kit _aitta"
 
 # The apps web-precompiled carries compiled ([LINUX_SERVER]), chosen one by
 # one (user, 2026-09-29): the others ship as source, and on a box with no

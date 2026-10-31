@@ -93,8 +93,13 @@ namespace interface
 				const ss_ &key_path, const ss_ &out_dir);
 		// "app", "extension" ([AITTA] step 3's second kind): a client
 		// extension, run in the client's sandbox under the name
-		// "<author>__<name>", or "world" ([WORLD_PACKAGES], install_world())
+		// "<author>__<name>", "world" ([WORLD_PACKAGES], install_world()),
+		// "remix" or "kit" ([KIT] stage 5: component types, prefabs and
+		// voxel types, installed into a server's composition by Kit)
 		ss_ kind_of(const json::Value &m);
+
+		// a < b in SemVer's order (simplified as aitta.cpp says)
+		bool version_less(const ss_ &a, const ss_ &b);
 
 		// A SemVer 2.0 version, 40 characters at most
 		bool semver_ok(const ss_ &v);

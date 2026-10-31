@@ -201,6 +201,10 @@ local function cannot_run(rel)
 		return "made for an older Buildat"
 	elseif api > __buildat_aitta_dev("engine_api") then
 		return "needs a newer Buildat"
+	elseif type(rel.manifest) == "table" and rel.manifest.kind == "kit" then
+		-- [KIT] stage 5: Aitta lists it as "other"; Kit's palette has it
+		return "a Kit package: installed from Kit's palette, in an app's " ..
+				"edit mode"
 	elseif rel.kind and rel.kind ~= "app" and rel.kind ~= "extension" and
 			rel.kind ~= "world" and rel.kind ~= "remix" then
 		return "a kind of package this Buildat does not know"
@@ -1088,6 +1092,185 @@ function M.safe.aitta_shown()
 	return effective().filters.unreviewed == true
 end
 
+-- [KIT] stage 5 **Kit's packages** (builtin/kit/api.h), for its palette's
+-- New tab: kit_packages(cb) gives cb({{key = "author/name", version,
+-- description, license_code, license_media, dependencies, time}, ...}),
+-- each package's newest release the filters let through, the newest
+-- first, once every Aitta in the settings answered or failed.
+-- simplified: a fetch each call, the last list kept for kit_fetch
+local kit_list = {}
+function M.safe.kit_packages(cb)
+	if type(cb) ~= "function" then
+		error("kit_packages(cb: function)")
+	end
+	local e = effective()
+	local newest, waiting = {}, 1
+	local function done()
+		waiting = waiting - 1
+		if waiting > 0 then
+			return
+		end
+		kit_list = newest
+		local out = {}
+		for k, r in pairs(newest) do
+			local deps = {}
+			for _, d in ipairs(type(r.rel.manifest.dependencies) == "table" and
+					r.rel.manifest.dependencies or {}) do
+				if type(d) == "table" then
+					deps[#deps + 1] = {kit = tostring(d.kit), version =
+							tostring(d.version)}
+				end
+			end
+			out[#out + 1] = {key = k, version = tostring(r.rel.version),
+				description = tostring(r.rel.description or ""):sub(1, 300),
+				license_code = tostring(r.rel.license_code or ""),
+				license_media = tostring(r.rel.license_media or ""),
+				dependencies = deps, time = tonumber(r.rel.time) or 0}
+		end
+		table.sort(out, function(a, b) return a.time > b.time end)
+		log:info("aitta: " .. #out .. " Kit packages")
+		cb(out)
+	end
+	for _, a in ipairs(e.aittas) do
+		waiting = waiting + 1
+		network.http_get(a .. "/api/v1/aitta/list", function(body)
+			local v = body and network.parse_json(body)
+			for _, rel in ipairs(type(v) == "table" and
+					type(v.releases) == "table" and v.releases or {}) do
+				local k = type(rel) == "table" and tostring(rel.author) ..
+						"/" .. tostring(rel.name)
+				local api = k and tonumber(rel.engine_api) or 0
+				if k and k:match("^[%w_]+/[%w_]+$") and #k <= 81 and
+						type(rel.manifest) == "table" and
+						rel.manifest.kind == "kit" and rel.delisted ~= true and
+						type(rel.sha256) == "string" and
+						rel.sha256:match("^%x+$") and
+						(e.filters.unreviewed or rel.review == "reviewed") and
+						api >= __buildat_aitta_dev("engine_api_min") and
+						api <= __buildat_aitta_dev("engine_api") and
+						(not newest[k] or newer_release(rel, newest[k].rel)) then
+					newest[k] = {rel = rel, aitta = a}
+				end
+			end
+			done()
+		end, {description = "Aitta (Kit packages)"})
+	end
+	done()
+end
+
+-- kit_fetch(key, cb): the package of the last kit_packages() list and the
+-- newest listed release of each dependency it needs (at its version or
+-- newer), each's signature and archive: cb({{key, version, data =
+-- <.sig> .. "\0" .. <.zip>}, ...}), the dependencies first, which is what
+-- Kit's "kit:package" takes; or cb(nil, why). The server checks each
+-- signature and archive again
+function M.safe.kit_fetch(key, cb)
+	if type(key) ~= "string" or type(cb) ~= "function" then
+		error("kit_fetch(key: string, cb: function)")
+	end
+	local order, seen = {}, {}
+	local function want(k, min)
+		local r = kit_list[k]
+		if not r then
+			return k .. " is on no Aitta in the settings"
+		end
+		local c = min and starport.semver_cmp(r.rel.version, min)
+		if c and c < 0 then
+			return k .. " " .. tostring(min) .. " or newer is on no Aitta"
+		end
+		if seen[k] then
+			return
+		end
+		seen[k] = true
+		if #order >= 16 then
+			return "more than 16 packages to fetch"
+		end
+		for _, d in ipairs(type(r.rel.manifest.dependencies) == "table" and
+				r.rel.manifest.dependencies or {}) do
+			local why = type(d) == "table" and want(tostring(d.kit),
+					tostring(d.version))
+			if why then
+				return why
+			end
+		end
+		order[#order + 1] = k
+	end
+	local why = want(key)
+	if why then
+		return cb(nil, why)
+	end
+	local out, i = {}, 0
+	local function next_one()
+		i = i + 1
+		local k = order[i]
+		if not k then
+			return cb(out)
+		end
+		local r = kit_list[k]
+		local base = r.aitta .. "/api/v1/aitta/archive/" .. r.rel.sha256
+		local o = {description = "Aitta (a Kit package)"}
+		network.http_get(base .. ".sig", function(sig, e1)
+			if not sig or not sig:match("^%s*{") then
+				return cb(nil, k .. ": " .. tostring(sig and "the Aitta refused it" or e1))
+			end
+			network.http_get(base .. ".zip", function(zip, e2)
+				if not zip or zip:sub(1, 2) ~= "PK" then
+					return cb(nil, k .. ": " .. tostring(zip and "the Aitta refused it" or e2))
+				end
+				out[#out + 1] = {key = k, version = tostring(r.rel.version),
+					data = sig .. "\0" .. zip}
+				next_one()
+			end, o)
+		end, o)
+	end
+	next_one()
+end
+
+-- kit_favourites(): the names a user starred in Kit's palette, sorted;
+-- kit_favourite(name, on) stars one or takes the star off. In
+-- <user>/kit_favourites.json
+-- simplified: this client's; not carried between devices
+local FAVOURITES = __buildat_get_path("user") .. "/kit_favourites.json"
+local function read_favourites()
+	local f = io.open(FAVOURITES, "rb")
+	local v = f and network.parse_json(f:read("*a"))
+	if f then
+		f:close()
+	end
+	return type(v) == "table" and v or {}
+end
+function M.safe.kit_favourites()
+	local out = {}
+	for _, n in ipairs(read_favourites()) do
+		if type(n) == "string" then
+			out[#out + 1] = n
+		end
+	end
+	table.sort(out)
+	return out
+end
+function M.safe.kit_favourite(name, on)
+	if type(name) ~= "string" or not name:match("^%[?[%w_]+/[%w_]+%]?$") then
+		error("kit_favourite(name: \"<author>/<name>\", on: boolean)")
+	end
+	local list, have = {}, false
+	for _, n in ipairs(M.safe.kit_favourites()) do
+		if n == name then
+			have = true
+		end
+		if n ~= name or on then
+			list[#list + 1] = n
+		end
+	end
+	if on and not have then
+		list[#list + 1] = name
+	end
+	if #list > 200 then
+		error("kit_favourite: 200 at most")
+	end
+	buildat.write_file_atomic(FAVOURITES, assert(network.write_json(list)))
+end
+
 -- [AITTA_PUBLISH_UI]: the publish screen
 dofile(__buildat_extension_path("aitta") .. "/publish.lua")({M = M,
 	starport = starport, network = network, magic = magic, uistack = uistack,
@@ -1100,6 +1283,18 @@ dofile(__buildat_extension_path("aitta") .. "/publish.lua")({M = M,
 -- it calls
 local open_publish = M.safe.open_publish
 function M.safe.open_publish() open_publish() end
+-- [KIT] stage 5 kit_publish{name, author, files = {path = text}, hex =
+-- {path = hex}, dependencies = {{kit, version}}}: Kit's export of a
+-- builder's prefabs and voxel types as a Kit package in
+-- <user>/dev_apps/<name>, once the user says yes, and the publish screen
+-- opened on it (publish.lua's publish_kit checks the paths). Native only
+local publish_kit = M.publish_kit
+function M.safe.kit_publish(t)
+	if type(t) ~= "table" then
+		error("kit_publish({name, author, files, hex, dependencies})")
+	end
+	publish_kit(t)
+end
 M.open_publish = M.safe.open_publish
 M.open_aitta = M.safe.open_aitta
 M.aitta_shown = M.safe.aitta_shown

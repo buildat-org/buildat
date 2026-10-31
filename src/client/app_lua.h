@@ -115,9 +115,10 @@
 		// And an author's own ([AITTA_PUBLISH_UI]): an app with its
 		// launcher, run as dev:<name>; an extension as an installed one
 		for(const DevEntry &e : dev_entries()){
-			// A world ([WORLD_PACKAGES]) is published, not run
+			// A world ([WORLD_PACKAGES]) and a Kit package ([KIT] stage 5)
+			// are published, not run
 			if((e.kind == "extension" && e.client_name.empty()) ||
-					e.kind == "world")
+					e.kind == "world" || e.kind == "kit")
 				continue;
 			// [APP_REMIX] A remix plays as its own app
 			const bool app = e.kind == "app" || e.kind == "remix";

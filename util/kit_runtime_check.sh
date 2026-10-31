@@ -83,10 +83,10 @@ EOF
 	grep -q "isolated true" "$t/drive.log" || fail "the page was not cross-origin isolated"
 	for want in "server: .*kit: box/ is built with this server" \
 			"server: .*sample_kit: at start the counter is 0, the door open false" \
-			"server: .*sample_kit/button 3: pressed by p" \
-			"server: .*sample_kit/door 4: opened by p" \
+			"server: .*sample_kit/button 3: pressed by tester" \
+			"server: .*sample_kit/door 4: opened by tester" \
 			"server: .*Entity 7's sample_kit/runaway disabled: on_use ran past its budget" \
-			"server: .*sample_kit/door 4: closed by p"; do
+			"server: .*sample_kit/door 4: closed by tester"; do
 		grep -aq "$want" "$page" || fail "no \"$want\" in $page"
 	done
 	echo "PASS: sample_kit with its server in the page: the box built with the server, the wiring and the meter on the browser's wasm"
