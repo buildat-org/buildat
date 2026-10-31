@@ -2556,6 +2556,16 @@ struct CApp: public App, public magic::Application
 		SDL_StopTextInput();
 #endif
 
+#ifndef __EMSCRIPTEN__
+		// The GL renderer ([FP_MOVE_BOX_FRAMES]): a check's limits on drawn
+		// frames tell software GL (llvmpipe) by it (check_lib's soft_gl)
+		typedef const unsigned char *(*GetString)(unsigned int);
+		if(GetString gs = (GetString)SDL_GL_GetProcAddress("glGetString")){
+			const unsigned char *r = gs(0x1F01); // GL_RENDERER
+			log_i(MODULE, "GL renderer: %s", r ? (const char*)r : "?");
+		}
+#endif
+
 		GetSubsystem<magic::Engine>()->SetMaxFps(m_options.graphics.max_fps);
 		apply_sound_preferences();
 

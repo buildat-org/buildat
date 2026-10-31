@@ -465,6 +465,15 @@ slow_limit() # <variable> <limit>: the variable set to the limit times CHECK_SLO
 	check_slow
 	printf -v "$1" '%s' "$(awk -v l="$2" -v f="$CHECK_SLOW" 'BEGIN { printf "%g", l * f }')"
 }
+# **Drawn frames** ([FP_MOVE_BOX_FRAMES]): a limit on a frame's time with
+# its drawing in it is the GPU's as well, which CHECK_SLOW does not see. A
+# client drawing with software GL (the check box's Xvfb: llvmpipe) logs it
+# in its "GL renderer:" line; true then.
+#   soft_gl "$t/client.log" && limit=...
+soft_gl() # <client log>
+{
+	grep -aqiE "GL renderer: .*(llvmpipe|softpipe|swrast|swiftshader|software)" "$1"
+}
 
 # What a check waits on, rather than a fixed sleep: until <file> has a
 # line matching <regex> (grep -E), up to <seconds>; 1 if it never did.
