@@ -42,9 +42,15 @@ namespace interface
 // A component type's file returns a table:
 //   version  = n             -- a whole number from 1 (1 if left out)
 //   params   = {name = {type = "voxel"|"number"|"string"|"bool"|"entity"|
-//                "position", default = v}, ...}   -- authored, per instance;
-//              a voxel "" is none (a generic type's, which the app's
-//              Host::defaults or the composer fills)
+//                "position"|"voxels", default = v}, ...}   -- authored,
+//              per instance; a voxel "" is none (a generic type's, which
+//              the app's Host::defaults or the composer fills). "voxels"
+//              ([KIT_VOXEL_STATES]): a pattern of the voxel_box's cells,
+//              "" (none) or "<sx> <sy> <sz>;<name> <name>...;<run> ..."
+//              -- a palette of names, then each run "i" (one cell of the
+//              palette's i, from 0) or "i*n" (n cells), in the box's order
+//              (c:voxels'), 4096 cells, 256 names and 32 KiB at most. The
+//              editor hides it from the fields: its op "pattern" sets it
 //   state    = {name = {default = v, shared = true}, ...} -- runtime; a
 //              shared one is replicated to the clients
 //   inputs   = {"name", ...}; outputs = {"name", ...}  -- signals, discrete
@@ -57,6 +63,14 @@ namespace interface
 //                               position parameter gives (64 cells at most)
 //   zone = "<param>"         -- the box of cells, the same way, that
 //                               on_enter/on_leave watch
+//   voxel_box = "<param>"    -- ([KIT_VOXEL_STATES]) the box of cells, the
+//                               same way (16 a side at most), that
+//                               c:set_voxels writes and the editor's
+//                               patterns capture; outlined in the editor;
+//                               c.box = {sx, sy, sz} its size
+//   reads_voxels = true      -- with voxel_box: c:voxels() the box's cells'
+//                               names (x fastest, then z, then y: index
+//                               1 + x + sx*(z + sz*y); "" where not loaded)
 //   look = {shape = "box"|"sphere", size = n (half its side) or {x, y, z}
 //           (its sides), color = "#rrggbb", text = "<shared state key>",
 //           extent = "<position param>", depth = n, solid = true,
@@ -95,6 +109,11 @@ namespace interface
 // it changed in place is written too), c:emit(output, value),
 // c:set_voxel(name) (each cell it owns; a `grants` type that owns none:
 // each cell of its grants box, 4096 at most),
+// c:set_voxels({{x, y, z, name}, ...}) ([KIT_VOXEL_STATES]; a voxel_box
+// type: x, y, z from the box's first cell, 0 to its size - 1; 4096 a run;
+// all refused, logged, if one is outside the box or its name is not a
+// registered voxel; a cell whose section is not loaded is written when
+// it is),
 // c:after(seconds) (on_timer then, on the game's clock; one an instance,
 // c:after() takes it back), c:teleport({x, y, z}) (the player who set the
 // run off, the app moving them on kit:move_player), c:log(...) (the
@@ -227,9 +246,21 @@ namespace interface
 // budget is disabled itself (logged), not the caller, and the players'
 // own kit/inventory is the inventory from then on.
 //
-// Voxel writes (c:set_voxel, owns_voxel) are game changes, unless the type
+// Voxel writes (c:set_voxel, c:set_voxels, owns_voxel) are game changes, unless the type
 // has `builds = true`: then a build of the player who set the run off
 // (Edit and play's origins, below).
+//
+// [KIT_VOXEL_STATES] kit/voxel_replace and kit/voxel_states write a box
+// of voxels (their `size`, 16 a side at most), inputs on/off/toggle, the
+// shared state "on" (`start_on` at the start, which they write then),
+// the output "changed" (the new on). voxel_replace: on, every `find` cell
+// becomes `replace` (either may be air), the cells it changed kept (the
+// round's, not shared); off, of those only the ones still `replace` go
+// back (one that was `replace` before, or one dug in between, stays). A
+// repeated on or off changes nothing. voxel_states: its patterns a and b
+// ("voxels"), on writing b and off a, only the cells that differ; an
+// empty one writes nothing. Their writes are game changes (End puts the
+// start back).
 //
 // Grants (dig and place for players, beside the app's edit rights):
 //   grants = "<param>"     -- a box of cells (as zone), where the
@@ -320,6 +351,12 @@ namespace interface
 //       the cell in the builder's scene set to voxel n ("air": a dig),
 //       routed as a player's write (an owned cell goes to its owner's
 //       on_voxel), one undo, answered with "kit:edit_state"
+//   {"op": "pattern", "id", "comp", "param", "action": "capture"|"show"|
+//    "fill", "voxel": n}  -- ([KIT_VOXEL_STATES]) a "voxels" parameter
+//       of the instance: capture (the voxel_box's cells as they are now;
+//       "" where not loaded) or fill (all of them voxel n) sets it as
+//       "set" does (one undo); show writes the pattern into the world (an
+//       edit, one undo; refused if empty or of another box size)
 //   {"op": "voxel", "name": n, "texture": t, "kind": "solid"|"leaves"|
 //    "plant"|"water", "solid", "transparent", "light": 0..15,
 //    "friction": 0..10, "surface": tag}  -- ([KIT] stage 4g) the

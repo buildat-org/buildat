@@ -1237,8 +1237,15 @@ local function inspector(w, e, is_made)
 		for k, v in pairs(E.pending[key] or {}) do
 			values[k] = v
 		end
+		local patterns = {}
 		for _, k in ipairs(names) do
-			fields[#fields + 1] = field(k, decl[k], values)
+			-- [KIT_VOXEL_STATES] A pattern of voxels is no text to type:
+			-- its buttons below
+			if decl[k].type == "voxels" then
+				patterns[#patterns + 1] = k
+			else
+				fields[#fields + 1] = field(k, decl[k], values)
+			end
 		end
 		if #fields > 0 then
 			ui_utils.settings_form(w, fields, values, function(k, v)
@@ -1263,6 +1270,35 @@ local function inspector(w, e, is_made)
 				E.pending[key] = nil
 				refresh()
 			end)
+		end
+		-- [KIT_VOXEL_STATES] Each pattern: Capture (the box as it is now),
+		-- Show (written into the world, an edit undone as one) and Fill (all
+		-- of the box one voxel: the one picked here, the one in hand first)
+		if #patterns > 0 then
+			E.fill = E.fill or {}
+			local names = {{"air", "air"}}
+			for _, n in ipairs(voxel_names()) do
+				names[#names + 1] = n
+			end
+			E.fill[key] = E.fill[key] or S.voxel or "air"
+			ui_utils.dropdown(row(w), names, E.fill[key], function(name)
+				E.fill[key] = name
+				log:info("kit editor: " .. key .. " fill with " .. name)
+			end, {label = "Fill with", fill = true})
+		end
+		for _, k in ipairs(patterns) do
+			local r, v = row(w), values[k]
+			local cells = type(v) == "string" and v:match("^(%d+ %d+ %d+);")
+			label(r, k:upper() .. (cells and "" or " (empty)"))
+			for _, a in ipairs({{"Capture", "capture"}, {"Show", "show"},
+					{"Fill", "fill"}}) do
+				button(r, a[1] .. " " .. k:upper(), function()
+					send({op = "pattern", id = e.id, comp = ci - 1, param = k,
+						action = a[2], voxel = a[2] == "fill" and E.fill[key] or
+						nil})
+					log:info("kit editor: " .. a[2] .. " " .. e.id .. " " .. k)
+				end)
+			end
 		end
 		for _, l in ipairs(c.links or {}) do
 			local r = row(w)
@@ -3563,7 +3599,7 @@ local function draw()
 				end
 				-- A zone's and an owned volume's extent, from its cell on
 				local t = type_of(c.type)
-				for _, k in ipairs({"zone", "volume", "grants"}) do
+				for _, k in ipairs({"zone", "volume", "grants", "voxel_box"}) do
 					local n = t[k] and c.params and c.params[t[k]]
 					if type(n) == "table" then
 						local ext = {}
@@ -3574,7 +3610,8 @@ local function draw()
 								magic.Vector3(x - 0.5, y - 0.5, z - 0.5),
 								magic.Vector3(x + ext[1] - 0.5, y + ext[2] - 0.5,
 								z + ext[3] - 0.5)), k == "zone" and
-								magic.Color(0.3, 0.75, 1) or magic.Color(1, 0.6, 0.2),
+								magic.Color(0.3, 0.75, 1) or k == "voxel_box" and
+								magic.Color(0.63, 0.38, 0.88) or magic.Color(1, 0.6, 0.2),
 								false)
 					end
 				end

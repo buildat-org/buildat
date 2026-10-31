@@ -18,10 +18,14 @@
 **                        [KIT] stage 4d: player_id (the player entity),
 **                        names {by = name}, made {id...}, players (a type's
 **                        `players`), next_id and sizes {"prefab:<name>" |
-**                        "entity:<id>" = entities a copy makes}}; answers
+**                        "entity:<id>" = entities a copy makes};
+**                        [KIT_VOXEL_STATES] box {sx, sy, sz} (its
+**                        voxel_box) and voxels {names, ids} (reads_voxels:
+**                        each cell's name's index, 0 not loaded)}; answers
 **                        its effects, {set = {{key, value}...} (a table
 **                        changed in place too), emit = {{output,
-**                        value}...}, voxel = name, after = seconds (-1:
+**                        value}...}, voxel = name, voxels = {{x, y, z,
+**                        name}...} (c:set_voxels), after = seconds (-1:
 **                        none), teleport = {x, y, z}, items = {item = n}
 **                        (the player's list after inventory calls),
 **                        inv_set = {{key, value}...} (the provider's
@@ -394,6 +398,31 @@ static const char PRELUDE[] =
 "	function c:list(ext) return inv.list(ext) end\n"
 "	function c:emit(output, value) emits[#emits + 1] = {tostring(output), value == nil and NULL or value} end\n"
 "	function c:set_voxel(name) fx.voxel = tostring(name) end\n"
+"	-- [KIT_VOXEL_STATES] Its voxel box: its size, its voxels (reads_voxels)\n"
+"	-- in box order, and cells written in it\n"
+"	c.box = req.box\n"
+"	local cells_read\n"
+"	function c:voxels()\n"
+"		local v = req.voxels\n"
+"		if not v then error('voxels: its type reads no voxel box (reads_voxels)', 2) end\n"
+"		if not cells_read then\n"
+"			cells_read = {}\n"
+"			for i, id in ipairs(v.ids) do cells_read[i] = v.names[id] or '' end\n"
+"		end\n"
+"		local out = {}\n"
+"		for i = 1, #cells_read do out[i] = cells_read[i] end\n"
+"		return out\n"
+"	end\n"
+"	function c:set_voxels(cells)\n"
+"		if type(cells) ~= 'table' then error('set_voxels: {{x, y, z, name}...}', 2) end\n"
+"		local out = fx.voxels or {}\n"
+"		for _, q in ipairs(cells) do\n"
+"			if type(q) ~= 'table' then error('set_voxels: {{x, y, z, name}...}', 2) end\n"
+"			if #out >= 4096 then error('set_voxels: 4096 cells a run at most', 2) end\n"
+"			out[#out + 1] = {tonumber(q[1]) or -1, tonumber(q[2]) or -1, tonumber(q[3]) or -1, tostring(q[4])}\n"
+"		end\n"
+"		fx.voxels = out\n"
+"	end\n"
 "	function c:after(seconds) fx.after = tonumber(seconds) or -1 end\n"
 "	function c:teleport(pos)\n"
 "		if type(pos) ~= 'table' then error('teleport: a position, {x, y, z}', 2) end\n"
