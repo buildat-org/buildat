@@ -1522,7 +1522,7 @@ look_dir -1 -1 -1.5
 frames 30
 mouse_click right
 wait_log 5000 kit editor: place
-frames 10
+wait_log 5000 kit editor: guide: Left: dig
 mouse_click left
 wait_log 5000 kit editor: dig at
 look_dir 1 -1 0
