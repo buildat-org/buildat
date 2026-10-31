@@ -169,8 +169,7 @@ seen "Open to LAN: listening at" "$t/f.log" "Open to LAN from the settings"
 
 # 3
 cat > "$t/v.cmds" <<C
-wait_log 60000 the server put the player at
-wait_log 60000 scene, 0 undrawn within 2
+wait_log 120000 load: the world is in
 keypress Escape
 wait_log 5000 pause: the menu shown
 click Button "Settings..."

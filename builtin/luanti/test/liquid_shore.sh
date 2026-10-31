@@ -41,6 +41,8 @@ shoot() { # <tag>
 		# And the client's own world drawn before the shot, not only the
 		# server's light settled
 		echo "wait_log_any 60000 scene, 0 undrawn within 2"
+		# and the look goes to the world once it is in
+		echo "wait_log_any 60000 load: the world is in"
 		echo "delay 2000"
 		# Straight down: the flowing row under the eye, the pool just
 		# beyond it, both flat-on and both near; the frames after the

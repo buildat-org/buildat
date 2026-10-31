@@ -43,15 +43,15 @@ save="buildat_test_fuzz_$SEED"
 # close the inventory. awk's rand() is seeded, so the file is the seed's.
 # A screenshot every thirty seconds of walk, and the mouse is never moved
 # in absolute terms -- look sets the aim, which is all the fixture reads.
-# The world loading around the player is waited for ([START_WAIT]): the
-# placement, then the settle line, START_WAIT the ceiling (60 s). The
+# The world loading around the player is waited for ([START_WAIT]):
+# "load: the world is in", which is when the keys go to the world, START_WAIT
+# the ceiling (60 s; [LUANTI_LOADED_WAITS]). The
 # delays are the walk's own: how long a key or a button is held, the
 # inventory open, and the pause after a step, all from the seed.
 START_WAIT="${START_WAIT:-60}"
 awk -v seed="$SEED" -v secs="$((MINUTES * 60))" -v out="$out" -v wait="$((START_WAIT * 1000))" 'BEGIN {
 	srand(seed)
-	print "wait_log " wait " the server put the player"
-	print "wait_log " wait " scene, 0 undrawn within 2"
+	print "wait_log " wait " load: the world is in"
 	print "delay 2000"
 	t = 0; shot = 0; yaw = 0
 	while (t < secs) {

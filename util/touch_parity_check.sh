@@ -192,7 +192,9 @@ click="wait_log 10000 form: a left click"
 	# The client's world round the player too: the loading screen ends at
 	# the player's own chunk ([LOAD_OWN_CHUNK]), the marker's may come
 	# after, drawn in the frames after the line
-	echo "wait_log_any 60000 scene, 0 undrawn within 2"; echo "delay 2000"
+	echo "wait_log_any 60000 scene, 0 undrawn within 2"
+	# and the taps go to the world once it is in
+	echo "wait_log_any 60000 load: the world is in"; echo "delay 2000"
 	echo "tap 417 467"; echo "wait_log 10000 | wield 3"
 	echo "tap 305 467"; echo "wait_log 10000 | wield 1"
 	# simplified: the marker's chunk comes after the settle line (a tap at

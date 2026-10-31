@@ -46,8 +46,7 @@ s=$SERVER_PID
 # The scans right after a turn and 1.5 s on, and while walking, are the
 # timing looked at; the second after c is the model drawn in third person
 {
-	echo "wait_log 120000 the server put the player"
-	echo "wait_log 120000 scene, 0 undrawn within 2"
+	echo "wait_log 240000 load: the world is in"
 	echo "wait_log_any 30000 chat: zz_give: the stone in hand"
 	echo "delay 1000"; echo "keypress c"; echo "delay 1000"
 	# A timing test: a scan 30 ms after the turn and one 1.5 s on
